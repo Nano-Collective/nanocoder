@@ -37,7 +37,7 @@ export function SettingsReasoningTracesPanel({
 				value: 'toggle',
 				description: enabled
 					? 'Full reasoning traces are displayed by default'
-					: 'Reasoning traces are collapsed by default (Ctrl+G to toggle)',
+					: 'Reasoning traces are collapsed by default (Ctrl+N to toggle)',
 			},
 		],
 		[enabled],

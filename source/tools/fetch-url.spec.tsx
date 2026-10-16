@@ -192,11 +192,102 @@ test.serial(
 				],
 			);
 			t.true(requests.every(request => request.init.redirect === 'manual'));
+			// The walk only needs a status and a Location, so every hop is a
+			// HEAD. The final URL is visited twice - once to learn it does not
+			// redirect, once by the converter - but only the second transfers a
+			// body. A GET walk moved the whole page twice per call.
+			t.deepEqual(
+				requests.map(request => request.init.method ?? 'GET'),
+				['HEAD', 'HEAD', 'HEAD', 'GET'],
+			);
 		} finally {
 			globalThis.fetch = originalFetch;
 		}
 	},
 );
+
+test.serial(
+	'handler falls back to GET for a server that refuses HEAD',
+	async t => {
+		if (!fetchUrlTool) {
+			t.pass('Skipping test - fetch-url module not available');
+			return;
+		}
+
+		const originalFetch = globalThis.fetch;
+		const requests: Array<{url: string; method: string}> = [];
+		globalThis.fetch = async (input, init) => {
+			const method = (init?.method as string | undefined) ?? 'GET';
+			requests.push({url: String(input), method});
+
+			// A server that answers HEAD with 405 must not break the tool: the
+			// redirect walk retries the hop as a GET and discards the body.
+			if (method === 'HEAD') {
+				return new Response(null, {status: 405, statusText: 'Not Allowed'});
+			}
+			return new Response('<html><body><h1>Only GET</h1></body></html>', {
+				status: 200,
+				headers: {'content-type': 'text/html'},
+			});
+		};
+
+		try {
+			const result = await fetchUrlTool.tool.execute!(
+				{url: 'https://public.example.test/no-head'},
+				{toolCallId: 'test', messages: []},
+			);
+			t.regex(result, /Only GET/);
+			t.deepEqual(
+				requests.map(request => request.method),
+				['HEAD', 'GET', 'GET'],
+			);
+		} finally {
+			globalThis.fetch = originalFetch;
+		}
+	},
+);
+
+test.serial('handler follows a redirect reported only on HEAD', async t => {
+	if (!fetchUrlTool) {
+		t.pass('Skipping test - fetch-url module not available');
+		return;
+	}
+
+	const originalFetch = globalThis.fetch;
+	const requests: Array<{url: string; method: string}> = [];
+	globalThis.fetch = async (input, init) => {
+		const url = String(input);
+		const method = (init?.method as string | undefined) ?? 'GET';
+		requests.push({url, method});
+
+		if (url === 'https://public.example.test/start') {
+			// A redirect must still be caught when it is a HEAD that sees it,
+			// and its destination must still be validated before it is visited.
+			return new Response(null, {
+				status: 301,
+				headers: {location: 'http://169.254.169.254/latest/meta-data/'},
+			});
+		}
+		throw new Error(`Unexpected request to ${url}`);
+	};
+
+	try {
+		await t.throwsAsync(
+			async () => {
+				await fetchUrlTool.tool.execute!(
+					{url: 'https://public.example.test/start'},
+					{toolCallId: 'test', messages: []},
+				);
+			},
+			{message: /internal\/private network/},
+		);
+		t.deepEqual(requests, [
+			{url: 'https://public.example.test/start', method: 'HEAD'},
+		]);
+	} finally {
+		globalThis.fetch = originalFetch;
+	}
+});
 
 test('validator accepts valid HTTP URLs', async t => {
 	if (!fetchUrlTool) {

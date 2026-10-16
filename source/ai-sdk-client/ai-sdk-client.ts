@@ -1,5 +1,6 @@
 import type {LanguageModel} from 'ai';
 import {Agent} from 'undici';
+import {getPrivacyPreference} from '@/config/preferences';
 import {
 	TIMEOUT_SOCKET_DEFAULT_MS,
 	TIMEOUT_SOCKET_LOCAL_DEFAULT_MS,
@@ -34,6 +35,14 @@ export class AISDKClient implements LLMClient {
 	private undiciAgent: Agent;
 	private cachedContextSize: number;
 	private maxRetries: number;
+	// Placeholder map for callers that do not supply their own. The TUI hands
+	// in its session map; --plain, ACP, subagents and helper calls (titles,
+	// compaction) do not, and used to go out unscrubbed even with scrubbing on.
+	// Kept per client so a placeholder in one reply still rehydrates when the
+	// model echoes it back on a later turn.
+	private readonly privacySessionMapRef: {current: Record<string, string>} = {
+		current: {},
+	};
 
 	constructor(providerConfig: AIProviderConfig) {
 		const logger = getLogger();
@@ -193,8 +202,11 @@ export class AISDKClient implements LLMClient {
 			signal,
 			maxRetries: this.maxRetries,
 			modeOverrides,
-			privacySessionMapRef: modeOverrides?.privacySessionMapRef,
-			privacyEnabled: modeOverrides?.privacyEnabled,
+			// Prompt scrubbing is a user preference, so it applies to every
+			// surface, not only the one that remembered to pass it through.
+			privacySessionMapRef:
+				modeOverrides?.privacySessionMapRef ?? this.privacySessionMapRef,
+			privacyEnabled: modeOverrides?.privacyEnabled ?? getPrivacyPreference(),
 			onPrivacyEvent: callbacks.onPrivacyEvent,
 		});
 	}

@@ -1,5 +1,53 @@
 import test from 'ava';
-import {areLinesSimilar, computeInlineDiff} from './inline-diff.js';
+import {
+	areLinesSimilar,
+	collapseUnchangedLines,
+	computeInlineDiff,
+	computeLineDiff,
+} from './inline-diff.js';
+
+// ============================================================================
+// collapseUnchangedLines Tests
+// ============================================================================
+
+const numberedLines = (count: number, change?: {at: number; text: string}) =>
+	Array.from({length: count}, (_, i) =>
+		change && i + 1 === change.at ? change.text : `line ${i + 1}`,
+	).join('\n');
+
+test('collapseUnchangedLines: keeps three lines of context around a change', t => {
+	const entries = computeLineDiff(
+		numberedLines(100),
+		numberedLines(100, {at: 80, text: 'CHANGED'}),
+	);
+	const collapsed = collapseUnchangedLines(entries);
+
+	t.deepEqual(collapsed[0], {type: 'gap', count: 76});
+	t.deepEqual(
+		collapsed.slice(1, 4).map(e => e.type !== 'gap' && e.text),
+		['line 77', 'line 78', 'line 79'],
+	);
+	t.true(collapsed.some(e => e.type === 'added' && e.text === 'CHANGED'));
+	t.true(collapsed.some(e => e.type === 'removed' && e.text === 'line 80'));
+	t.deepEqual(collapsed[collapsed.length - 1], {type: 'gap', count: 17});
+});
+
+test('collapseUnchangedLines: leaves a short unchanged run between changes intact', t => {
+	const oldText = numberedLines(10);
+	const newText = numberedLines(10)
+		.replace('line 2\n', 'two\n')
+		.replace('line 7\n', 'seven\n');
+	const collapsed = collapseUnchangedLines(computeLineDiff(oldText, newText));
+
+	t.false(collapsed.some(e => e.type === 'gap'));
+});
+
+test('collapseUnchangedLines: returns only a gap when nothing changed', t => {
+	const text = numberedLines(10);
+	t.deepEqual(collapseUnchangedLines(computeLineDiff(text, text)), [
+		{type: 'gap', count: 10},
+	]);
+});
 
 // ============================================================================
 // computeInlineDiff Tests
@@ -162,4 +210,98 @@ test('areLinesSimilar: handles long lines', t => {
 	const longLine2 = 'const result = someFunction(arg1, arg2, arg3, arg4, arg6);';
 
 	t.true(areLinesSimilar(longLine1, longLine2));
+});
+
+// ============================================================================
+// computeLineDiff Tests
+// ============================================================================
+
+test('computeLineDiff: identical inputs produce only unchanged entries with matching line numbers', t => {
+	const entries = computeLineDiff('alpha\nbeta\ngamma\n', 'alpha\nbeta\ngamma\n');
+
+	t.is(entries.length, 3);
+	t.true(entries.every(entry => entry.type === 'unchanged'));
+	t.deepEqual(
+		entries.map(e => ({text: e.text, oldLine: e.oldLine, newLine: e.newLine})),
+		[
+			{text: 'alpha', oldLine: 1, newLine: 1},
+			{text: 'beta', oldLine: 2, newLine: 2},
+			{text: 'gamma', oldLine: 3, newLine: 3},
+		],
+	);
+});
+
+test('computeLineDiff: pure insertion increments newLine only and keeps oldLine at zero', t => {
+	const entries = computeLineDiff('', 'first\nsecond\nthird\n');
+
+	t.is(entries.length, 3);
+	t.true(entries.every(entry => entry.type === 'added'));
+	t.deepEqual(
+		entries.map(e => ({text: e.text, newLine: e.newLine})),
+		[
+			{text: 'first', newLine: 1},
+			{text: 'second', newLine: 2},
+			{text: 'third', newLine: 3},
+		],
+	);
+	for (const entry of entries) {
+		t.false('oldLine' in entry);
+	}
+});
+
+test('computeLineDiff: pure deletion increments oldLine only and keeps newLine at zero', t => {
+	const entries = computeLineDiff('first\nsecond\nthird\n', '');
+
+	t.is(entries.length, 3);
+	t.true(entries.every(entry => entry.type === 'removed'));
+	t.deepEqual(
+		entries.map(e => ({text: e.text, oldLine: e.oldLine})),
+		[
+			{text: 'first', oldLine: 1},
+			{text: 'second', oldLine: 2},
+			{text: 'third', oldLine: 3},
+		],
+	);
+	for (const entry of entries) {
+		t.false('newLine' in entry);
+	}
+});
+
+test('computeLineDiff: trailing newline is stripped so an unchanged file with no trailing newline matches one with a trailing newline', t => {
+	const withTrailing = computeLineDiff('a\nb\nc\n', 'a\nb\nc\n');
+	const withoutTrailing = computeLineDiff('a\nb\nc', 'a\nb\nc');
+
+	t.is(withTrailing.length, 3);
+	t.is(withoutTrailing.length, 3);
+	t.true(withTrailing.every(entry => entry.type === 'unchanged'));
+	t.true(withoutTrailing.every(entry => entry.type === 'unchanged'));
+});
+
+test('computeLineDiff: both inputs empty returns an empty array', t => {
+	t.deepEqual(computeLineDiff('', ''), []);
+});
+
+test('computeLineDiff: line numbers stay monotonic across mixed unchanged / added / removed runs', t => {
+	const entries = computeLineDiff(
+		'one\ntwo\nthree\n',
+		'one\nTWO\nthree\nfour\n',
+	);
+
+	const unchanged = entries.filter(e => e.type === 'unchanged');
+	const removed = entries.filter(e => e.type === 'removed');
+	const added = entries.filter(e => e.type === 'added');
+
+	t.is(removed.length, 1);
+	t.is(added.length, 2);
+	t.is(unchanged.length, 2);
+
+	const removedLine = removed[0].oldLine;
+	const addedFirstLine = added[0].newLine;
+	t.true(removedLine === addedFirstLine, 'a removed/added pair should share a line slot');
+
+	let lastUnchangedNew = 0;
+	for (const entry of unchanged) {
+		t.true(entry.newLine > lastUnchangedNew);
+		lastUnchangedNew = entry.newLine;
+	}
 });

@@ -1,4 +1,4 @@
-import React, {useEffect} from 'react';
+import React, {useEffect, useRef} from 'react';
 import {ConfigurationError, createLLMClient} from '@/client-factory';
 import {commandRegistry} from '@/commands';
 // Built-in commands are registered via a lazy registry so their modules
@@ -29,6 +29,7 @@ import {
 	setToolManagerGetter,
 	setToolRegistryGetter,
 } from '@/message-handler';
+import {loadPlugins} from '@/plugins/host';
 import {
 	beginSessionStartHooks,
 	runLifecycleHooks,
@@ -91,6 +92,14 @@ interface UseAppInitializationProps {
 	 * resolve under `nanocoder run`.
 	 */
 	nonInteractiveMode?: boolean;
+	/**
+	 * Directory-trust gate. Nothing in the mount effect may run until the user
+	 * has accepted the trust disclaimer (or `--trust-directory` bypassed it):
+	 * initialization reads project-level config, resolves the provider (which
+	 * can attach a live OAuth credential to a config-supplied baseURL) and
+	 * spawns stdio MCP servers, all of which an untrusted directory controls.
+	 */
+	isTrusted: boolean;
 }
 
 export function useAppInitialization({
@@ -117,6 +126,7 @@ export function useAppInitialization({
 	cliModel,
 	nonInteractiveMode = false,
 	developmentModeRef,
+	isTrusted,
 }: UseAppInitializationProps) {
 	// Initialize LLM client and model
 	const initializeClient = async (
@@ -239,9 +249,29 @@ export function useAppInitialization({
 					setMcpServersStatus([...mcpStatus]);
 				}
 			};
+			const onHealthChange = (change: {
+				serverName: string;
+				status: 'connected' | 'unhealthy';
+				error?: string;
+			}) => {
+				const statusIndex = mcpStatus.findIndex(
+					s => s.name === change.serverName,
+				);
+				if (statusIndex === -1) return;
+				mcpStatus[statusIndex] = {
+					name: change.serverName,
+					status: change.status === 'connected' ? 'connected' : 'unhealthy',
+					errorMessage: change.error,
+				};
+				setMcpServersStatus([...mcpStatus]);
+			};
 
 			try {
-				await toolManager.initializeMCP(config.mcpServers, onProgress);
+				await toolManager.initializeMCP(
+					config.mcpServers,
+					onProgress,
+					onHealthChange,
+				);
 			} catch (error) {
 				// Mark all pending servers as failed
 				mcpStatus.forEach((status, index) => {
@@ -570,8 +600,18 @@ export function useAppInitialization({
 		}
 	};
 
-	// biome-ignore lint/correctness/useExhaustiveDependencies: Initialization effect should only run once on mount
+	// Guards the trust-gated effect below so it initializes exactly once, even
+	// though it now re-runs when `isTrusted` flips from false to true.
+	const hasInitializedRef = useRef(false);
+
+	// biome-ignore lint/correctness/useExhaustiveDependencies: Initialization effect should only run once, on the first render where the directory is trusted
 	useEffect(() => {
+		// The trust disclaimer is a JSX early return in App.tsx, which does not
+		// stop hooks from running — so the gate has to live inside the effect.
+		// Until the directory is trusted, read nothing from it and spawn nothing.
+		if (!isTrusted || hasInitializedRef.current) return;
+		hasInitializedRef.current = true;
+
 		const initializeApp = async () => {
 			setClient(null);
 			setCurrentModel('');
@@ -648,6 +688,10 @@ export function useAppInitialization({
 			// so nothing gates on MCP/LSP/update-check completing. Show
 			// the prompt immediately after the LLM client + subagents are
 			// ready. Everything else connects in the background.
+			// Wait so the first prompt sees plugins. Trust is not revoked
+			// during a session; if it ever is, this load has to be undone
+			// or the plugins stay active after the revoke.
+			await loadPlugins(true);
 			setMcpInitialized(true);
 			setStartChat(true);
 
@@ -666,7 +710,7 @@ export function useAppInitialization({
 		};
 
 		void initializeApp();
-	}, []);
+	}, [isTrusted]);
 
 	return {
 		initializeClient,

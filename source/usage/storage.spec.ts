@@ -38,8 +38,11 @@ test.before(() => {
 test.beforeEach(() => {
 	// Create a fresh test directory for each test
 	const testDir = createTestDir();
-	// Override XDG_DATA_HOME to point to test directory
+	// Override XDG_DATA_HOME to point to test directory. NANOCODER_DATA_DIR
+	// (set suite-wide in the AVA config) wins over XDG_DATA_HOME, so drop it
+	// or the migration target would not be this test's directory.
 	process.env.XDG_DATA_HOME = testDir;
+	delete process.env.NANOCODER_DATA_DIR;
 	// Clear any existing data
 	clearUsageData();
 });

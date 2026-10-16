@@ -37,7 +37,7 @@ Memory creation is always manual and explicit. Nothing is ever saved automatical
 
 ## Categories
 
-Memories are grouped into: `architecture`, `bugFix`, `refactor`, `todo`, `codingStyle`, or `project` (the default, for anything that doesn't match a more specific category). `/remember` infers a category automatically from the content unless you pass `--category`.
+Memories are grouped into: `architecture`, `bugFix`, `refactor`, `todo`, `codingStyle`, or `project` (the default, for anything that doesn't match a more specific category). `/remember` infers a category automatically from the content unless you pass `--category`. `--category` is not checked against this list: any other name is saved as given, and its words still count as category matches during recall.
 
 ## Recall
 
@@ -46,6 +46,16 @@ When you send a message, Nanocoder ranks saved memories by relevance to that mes
 A memory is kept when it covers at least 10% of the query's keywords, and either the category matched, at least two keywords overlapped, or a single overlapping keyword is at least half the query. That last rule is why `auth` and `fix auth` both recall a Clerk/auth memory, while a one-word hit in a long prompt still does not. Memories that do not fit the remaining token budget are skipped so a later, shorter memory can still be injected.
 
 Retrieval is keyword-based, not a true embeddings/vector search. The "semantic" in the name refers to the kind of facts stored (durable project knowledge), not the matching technique.
+
+### Staleness warnings
+
+Inside a git repository, saving a memory also records the current commit, the branch, and a content hash of every tracked file the memory mentions (for example `src/auth.ts`, or a bare `auth.ts` when exactly one tracked file has that name). When the memory is recalled, those files are hashed again. If any has been edited since, uncommitted edits included, or deleted, the memory is injected with a warning in front of it:
+
+```
+- [WARNING: recorded at 8c21a3f, src/auth.ts has changed since. Verify before trusting.] src/auth.ts refreshes the token before retrying.
+```
+
+The warning counts against the same token budget as the memories. New commits that don't touch a memory's files don't trigger it. Memories saved outside a git repository, before the first commit, or before this check existed are recalled without warnings.
 
 ### Where recall is active
 
@@ -57,7 +67,7 @@ Recall runs on:
 - subagent runs (the `agent` tool)
 - daemon-triggered skill runs (they use the same subagent executor)
 
-The TUI, plain shell, and ACP print `Recalling N project memories...` when memories are injected. Subagent and daemon runs inject the same block silently, since there is no chat UI to attach that notice to.
+The TUI and plain shell print `Recalling N project memories...` when memories are injected. ACP writes the recall to the Nanocoder log only, so nothing appears in the editor. Subagent and daemon runs inject the same block silently, since there is no chat UI to attach that notice to.
 
 ### Tuning the budget
 
@@ -98,10 +108,10 @@ Memories are stored per-repository in a local JSON file under the Nanocoder data
 | Platform | Path |
 |---|---|
 | macOS | `~/Library/Application Support/nanocoder/memory/` |
-| Linux | `~/.local/share/nanocoder/memory/` (or `$XDG_DATA_HOME/nanocoder/memory/`) |
+| Linux | `~/.local/share/nanocoder/memory/` |
 | Windows | `%APPDATA%\nanocoder\memory\` |
 
-Setting `NANOCODER_DATA_DIR` overrides all of these.
+If `XDG_DATA_HOME` is set, `$XDG_DATA_HOME/nanocoder/memory/` is used instead, on every platform. Setting `NANOCODER_DATA_DIR` overrides all of these.
 
 The filename is a hash of the repository's `git remote origin.url`, or of its absolute path for non-git directories. This means:
 

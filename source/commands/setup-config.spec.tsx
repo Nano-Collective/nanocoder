@@ -18,6 +18,7 @@ const MockProviders = ({children}: {children: React.ReactNode}) => {
 	const mockTitleShape = {
 		currentTitleShape: 'pill' as const,
 		setCurrentTitleShape: () => {},
+		commitTitleShape: () => {},
 	};
 
 	return (

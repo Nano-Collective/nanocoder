@@ -1378,3 +1378,231 @@ test.serial('invalid project sandbox does not fall through to global true', asyn
 		}
 	}
 });
+
+test.serial('autoCommit defaults to off and reads true from project config', async t => {
+	const originalCwd = process.cwd();
+	const originalEnv = process.env.NANOCODER_CONFIG_DIR;
+	const offDir = join(sandboxConfigTestDir, 'auto-commit-default');
+	const onDir = join(sandboxConfigTestDir, 'auto-commit-on');
+	mkdirSync(offDir, {recursive: true});
+	mkdirSync(onDir, {recursive: true});
+	try {
+		writeFileSync(
+			join(onDir, 'agents.config.json'),
+			JSON.stringify({nanocoder: {autoCommit: true}}),
+			'utf-8',
+		);
+		const {reloadAppConfig: reload, getAppConfig} = await import('./index.js');
+
+		process.chdir(offDir);
+		process.env.NANOCODER_CONFIG_DIR = join(offDir, 'no-global');
+		reload();
+		t.false(getAppConfig().autoCommit);
+
+		process.chdir(onDir);
+		process.env.NANOCODER_CONFIG_DIR = join(onDir, 'no-global');
+		reload();
+		t.true(getAppConfig().autoCommit);
+	} finally {
+		process.chdir(originalCwd);
+		if (originalEnv !== undefined) {
+			process.env.NANOCODER_CONFIG_DIR = originalEnv;
+		} else {
+			delete process.env.NANOCODER_CONFIG_DIR;
+		}
+	}
+});
+
+test.serial('non-boolean autoCommit is treated as off', async t => {
+	const originalCwd = process.cwd();
+	const originalEnv = process.env.NANOCODER_CONFIG_DIR;
+	const projectDir = join(sandboxConfigTestDir, 'auto-commit-bad');
+	mkdirSync(projectDir, {recursive: true});
+	try {
+		writeFileSync(
+			join(projectDir, 'agents.config.json'),
+			JSON.stringify({nanocoder: {autoCommit: 'yes'}}),
+			'utf-8',
+		);
+		process.chdir(projectDir);
+		process.env.NANOCODER_CONFIG_DIR = join(projectDir, 'no-global');
+		const {reloadAppConfig: reload, getAppConfig} = await import('./index.js');
+		reload();
+		t.false(getAppConfig().autoCommit);
+	} finally {
+		process.chdir(originalCwd);
+		if (originalEnv !== undefined) {
+			process.env.NANOCODER_CONFIG_DIR = originalEnv;
+		} else {
+			delete process.env.NANOCODER_CONFIG_DIR;
+		}
+	}
+});
+
+// ============================================================================
+// lspServers
+// ============================================================================
+
+test.serial('lspServers loads user-defined servers and drops invalid ones', async t => {
+	const originalCwd = process.cwd();
+	const originalEnv = process.env.NANOCODER_CONFIG_DIR;
+	const dir = join(testDir, 'lsp-servers');
+	mkdirSync(dir, {recursive: true});
+	writeFileSync(
+		join(dir, 'agents.config.json'),
+		JSON.stringify({
+			nanocoder: {
+				lspServers: [
+					{
+						name: 'custom-ts',
+						command: 'my-ts-server',
+						args: ['--stdio'],
+						languages: ['ts', 'tsx'],
+					},
+					{name: 'missing-command', languages: ['py']},
+				],
+			},
+		}),
+		'utf-8',
+	);
+
+	try {
+		process.chdir(dir);
+		process.env.NANOCODER_CONFIG_DIR = join(dir, 'nonexistent-global');
+		const {reloadAppConfig: reload, getAppConfig} = await import('./index.js');
+		reload();
+		t.deepEqual(getAppConfig().lspServers, [
+			{
+				name: 'custom-ts',
+				command: 'my-ts-server',
+				args: ['--stdio'],
+				languages: ['ts', 'tsx'],
+				env: undefined,
+			},
+		]);
+	} finally {
+		process.chdir(originalCwd);
+		if (originalEnv !== undefined) {
+			process.env.NANOCODER_CONFIG_DIR = originalEnv;
+		} else {
+			delete process.env.NANOCODER_CONFIG_DIR;
+		}
+		reloadAppConfig();
+	}
+});
+
+// ============================================================================
+// verify / ciWatch (Phase 4): project-level trust level + poll cadence
+// override the preferences-backed ciWatch values.
+// ============================================================================
+
+const verifyTestDir = join(tmpdir(), `nanocoder-verify-test-${Date.now()}`);
+
+async function withVerifyConfig(
+	subdir: string,
+	configBody: unknown,
+	preferencesBody: unknown,
+	assertion: (appConfig: AppConfig) => void,
+): Promise<void> {
+	const originalCwd = process.cwd();
+	const originalConfigDir = process.env.NANOCODER_CONFIG_DIR;
+	const testSubdir = join(verifyTestDir, subdir);
+	const globalConfigDir = join(testSubdir, 'global-config');
+	mkdirSync(testSubdir, {recursive: true});
+	mkdirSync(globalConfigDir, {recursive: true});
+
+	try {
+		writeFileSync(
+			join(testSubdir, 'agents.config.json'),
+			JSON.stringify(configBody),
+			'utf-8',
+		);
+		// getClosestConfigFile skips the cwd check entirely once
+		// NANOCODER_CONFIG_DIR is set, so the preferences fixture must live
+		// there — unlike agents.config.json's loadHierarchicalConfig, which
+		// always tries cwd first regardless of this env var.
+		writeFileSync(
+			join(globalConfigDir, 'nanocoder-preferences.json'),
+			JSON.stringify(preferencesBody),
+			'utf-8',
+		);
+		process.chdir(testSubdir);
+		process.env.NANOCODER_CONFIG_DIR = globalConfigDir;
+
+		const {resetPreferencesCache} = await import('./preferences.js');
+		resetPreferencesCache();
+		const {reloadAppConfig: reload, getAppConfig} = await import('./index.js');
+		reload();
+		assertion(getAppConfig());
+	} finally {
+		clearAppConfig();
+		process.chdir(originalCwd);
+		if (originalConfigDir !== undefined) {
+			process.env.NANOCODER_CONFIG_DIR = originalConfigDir;
+		} else {
+			delete process.env.NANOCODER_CONFIG_DIR;
+		}
+		const {resetPreferencesCache} = await import('./preferences.js');
+		resetPreferencesCache();
+	}
+}
+
+test.serial(
+	'loadAppConfig reads nanocoder.verify.trustLevel/pollIntervalMs from agents.config.json',
+	async t => {
+		await withVerifyConfig(
+			'verify-basic',
+			{nanocoder: {verify: {trustLevel: 'auto-fix', pollIntervalMs: 5000}}},
+			{},
+			appConfig => {
+				t.is(appConfig.verify?.trustLevel, 'auto-fix');
+				t.is(appConfig.verify?.pollIntervalMs, 5000);
+			},
+		);
+	},
+);
+
+test.serial(
+	'loadAppConfig ignores an invalid nanocoder.verify.trustLevel value',
+	async t => {
+		await withVerifyConfig(
+			'verify-invalid-trust',
+			{nanocoder: {verify: {trustLevel: 'yolo'}}},
+			{},
+			appConfig => {
+				t.is(appConfig.verify?.trustLevel, undefined);
+			},
+		);
+	},
+);
+
+test.serial(
+	"ciWatch.enabled always comes from preferences, even when agents.config.json sets verify",
+	async t => {
+		await withVerifyConfig(
+			'ciwatch-enabled-from-preferences',
+			{nanocoder: {verify: {trustLevel: 'full-commit'}}},
+			{ciWatch: {enabled: true}},
+			appConfig => {
+				t.true(appConfig.ciWatch?.enabled);
+			},
+		);
+	},
+);
+
+test.serial(
+	"ciWatch's pollIntervalMs prefers the project-level verify override over preferences",
+	async t => {
+		await withVerifyConfig(
+			'ciwatch-poll-override',
+			{nanocoder: {verify: {pollIntervalMs: 5000}}},
+			{ciWatch: {enabled: true, pollIntervalMs: 60000, maxPollIntervalMs: 600000}},
+			appConfig => {
+				t.is(appConfig.ciWatch?.pollIntervalMs, 5000);
+				// maxPollIntervalMs has no project override in this fixture, so
+				// the preferences value still comes through.
+				t.is(appConfig.ciWatch?.maxPollIntervalMs, 600000);
+			},
+		);
+	},
+);

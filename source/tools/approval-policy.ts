@@ -8,8 +8,8 @@ import {parseToolArguments} from '@/utils/tool-args-parser';
 export interface ApprovalContext {
 	mode: DevelopmentMode;
 	/**
-	 * Tool names the caller has pre-authorized (e.g. the non-interactive
-	 * `alwaysAllow` list). Membership short-circuits to "no approval".
+	 * Tool names the caller has pre-authorized (the top-level
+	 * `nanocoder.alwaysAllow` list). Membership short-circuits to "no approval".
 	 */
 	alwaysAllow?: readonly string[];
 }
@@ -52,7 +52,7 @@ export async function resolveToolApproval(
 	rawArguments: unknown,
 	ctx: ApprovalContext,
 ): Promise<boolean> {
-	// Caller pre-authorization (non-interactive alwaysAllow) wins first.
+	// Caller pre-authorization (the alwaysAllow list) wins first.
 	if (ctx.alwaysAllow?.includes(toolName)) {
 		return false;
 	}

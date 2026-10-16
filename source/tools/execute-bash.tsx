@@ -7,8 +7,14 @@ import {TRUNCATION_OUTPUT_LIMIT} from '@/constants';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {type BashExecutionState, bashExecutor} from '@/services/bash-executor';
-import type {NanocoderToolExport} from '@/types/core';
+import {getSafeSessionCwd} from '@/services/session-cwd';
+import {
+	buildFailureCapsule,
+	type RerunCommand,
+} from '@/tools/bash-failure-capsule';
+import type {NanocoderToolExport, StructuredToolOutput} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
+import {splitCommandForDisplay} from '@/utils/shell-command-display';
 import {truncateToolResult} from '@/utils/truncate-tool-result';
 
 /**
@@ -29,9 +35,16 @@ export function executeBashCommand(
 }
 
 /**
- * Format bash execution result for LLM context
+ * Whether a run failed: the command could not be spawned at all, or it exited
+ * non-zero. The formatted output carries no `Error: ` prefix for a non-zero
+ * exit - it is ordinary stdout/stderr - so this is what callers set
+ * `ToolResult.isError` from, rather than sniffing the content.
  */
-export function formatBashResultForLLM(result: BashExecutionState): string {
+export function bashRunFailed(result: BashExecutionState): boolean {
+	return result.error !== null || (result.exitCode ?? 0) !== 0;
+}
+
+function composeBashResult(result: BashExecutionState): string {
 	let fullOutput = '';
 	const exitCodeInfo =
 		result.exitCode !== null ? `EXIT_CODE: ${result.exitCode}\n` : '';
@@ -46,11 +59,46 @@ export function formatBashResultForLLM(result: BashExecutionState): string {
 	if (result.error) {
 		fullOutput = `Error: ${result.error}\n${fullOutput}`;
 	}
+	return fullOutput;
+}
 
+/**
+ * Format bash execution result for LLM context
+ */
+export function formatBashResultForLLM(result: BashExecutionState): string {
 	// Limit the context for LLM to prevent overwhelming the model. Keeps both
 	// head and tail, since build/test tooling puts the actionable part (error
 	// list, failure summary, exit status) at the end.
-	return truncateToolResult(fullOutput, TRUNCATION_OUTPUT_LIMIT);
+	return truncateToolResult(composeBashResult(result), TRUNCATION_OUTPUT_LIMIT);
+}
+
+/**
+ * What the model gets for a finished run. A failed run whose output is too
+ * long to pass whole - so the head-and-tail cut would drop the failure detail
+ * in the middle - becomes a failure capsule when its runner's format is
+ * recognised. Everything else is `formatBashResultForLLM`.
+ *
+ * `rerun` lets the capsule confirm the failure with the narrowed command;
+ * without it the output is only distilled.
+ */
+export async function distillBashResultForLLM(
+	result: BashExecutionState,
+	options: {rerun?: RerunCommand} = {},
+): Promise<string> {
+	const composed = composeBashResult(result);
+	if (
+		result.error === null &&
+		bashRunFailed(result) &&
+		composed.length > TRUNCATION_OUTPUT_LIMIT
+	) {
+		const capsule = await buildFailureCapsule(result, {
+			cwd: getSafeSessionCwd(),
+			originalLength: composed.length,
+			rerun: options.rerun,
+		});
+		if (capsule) return capsule;
+	}
+	return truncateToolResult(composed, TRUNCATION_OUTPUT_LIMIT);
 }
 
 /**
@@ -58,26 +106,47 @@ export function formatBashResultForLLM(result: BashExecutionState): string {
  * Note: For streaming tools, the tool handler will use executeBashCommand directly
  * and this function serves as a fallback/compatibility layer
  */
+interface ExecuteBashArgs {
+	command: string;
+	description?: string;
+}
+
 const executeExecuteBash = async (
 	args: {command: string},
 	options?: {abortSignal?: AbortSignal},
-): Promise<string> => {
+): Promise<StructuredToolOutput> => {
 	const {promise} = bashExecutor.execute(args.command, {
 		signal: options?.abortSignal,
 	});
 	const result = await promise;
-	return formatBashResultForLLM(result);
+	// The model still gets plain text; isError carries the exit status to
+	// processToolUse, which is how --json and ACP learn the command failed.
+	return {
+		llmContent: await distillBashResultForLLM(result, {
+			rerun: command =>
+				options?.abortSignal?.aborted
+					? Promise.resolve(null)
+					: bashExecutor.execute(command, {signal: options?.abortSignal})
+							.promise,
+		}),
+		isError: bashRunFailed(result),
+	};
 };
 
 const executeBashCoreTool = tool({
 	description:
 		'Execute a bash command in the working directory. Returns stdout, stderr, and exit code. Commands time out after 2 minutes by default. Use for: running builds, tests, installing packages, git operations not covered by git tools, or any shell command.',
-	inputSchema: jsonSchema<{command: string}>({
+	inputSchema: jsonSchema<ExecuteBashArgs>({
 		type: 'object',
 		properties: {
 			command: {
 				type: 'string',
 				description: 'The bash command to execute.',
+			},
+			description: {
+				type: 'string',
+				description:
+					'Optional brief summary of the intent or purpose of this command.',
 			},
 		},
 		required: ['command'],
@@ -92,8 +161,10 @@ const executeBashCoreTool = tool({
  */
 function ExecuteBashFormatterComponent({
 	command,
+	description,
 }: {
 	command: string;
+	description?: string;
 }): React.ReactElement {
 	const boxWidth = useTerminalWidth();
 	const {colors} = useTheme();
@@ -101,11 +172,19 @@ function ExecuteBashFormatterComponent({
 	return (
 		<Box flexDirection="column" marginBottom={1} width={boxWidth}>
 			<Text color={colors.tool}>⚒ execute_bash</Text>
+			{description && (
+				<Box flexDirection="column">
+					<Text color={colors.secondary}>Description:</Text>
+					<Text color={colors.text}> {description}</Text>
+				</Box>
+			)}
 			<Box flexDirection="column">
 				<Text color={colors.secondary}>Command:</Text>
-				<Text wrap="wrap" color={colors.primary}>
-					{command}
-				</Text>
+				{splitCommandForDisplay(command).map((segment, i) => (
+					<Text key={i} wrap="wrap" color={colors.primary}>
+						{segment}
+					</Text>
+				))}
 			</Box>
 		</Box>
 	);
@@ -115,8 +194,13 @@ function ExecuteBashFormatterComponent({
  * Regular formatter - called for tool confirmation preview
  * Shows the command that will be executed
  */
-const executeBashFormatter = (args: {command: string}): React.ReactElement => {
-	return <ExecuteBashFormatterComponent command={args.command} />;
+const executeBashFormatter = (args: ExecuteBashArgs): React.ReactElement => {
+	return (
+		<ExecuteBashFormatterComponent
+			command={args.command}
+			description={args.description}
+		/>
+	);
 };
 
 /**
@@ -148,7 +232,9 @@ const executeBashValidator = (args: {
 		/rm\s+-rf\s+\/(?!\w)/i, // rm -rf / (but allow /path)
 		/mkfs/i, // Format filesystem
 		/dd\s+if=/i, // Direct disk write
-		/:(){:|:&};:/i, // Fork bomb
+		// Fork bomb: a function that pipes itself into itself in the background,
+		// then is called, e.g. `:(){ :|:& };:` (any name, any spacing).
+		/([^\s(){};|&]+)\s*\(\)\s*\{\s*\1\s*\|\s*\1\s*&\s*\}\s*;\s*\1/,
 		/>\s*\/dev\/sd[a-z]/i, // Writing to raw disk devices
 		/chmod\s+-R\s+000/i, // Remove all permissions recursively
 	];

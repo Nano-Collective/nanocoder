@@ -292,9 +292,9 @@ test('Exit code mapping: tool-approval-required reason uses exit code 1', t => {
 	t.is(getExitCodeForReason(reason), 1);
 });
 
-test('Exit code mapping: timeout reason uses exit code 0', t => {
+test('Exit code mapping: timeout reason uses exit code 1', t => {
 	const reason: NonInteractiveExitReason = 'timeout';
-	t.is(getExitCodeForReason(reason), 0);
+	t.is(getExitCodeForReason(reason), 1);
 });
 
 test('Signal handling: SIGINT is a valid NodeJS signal', t => {

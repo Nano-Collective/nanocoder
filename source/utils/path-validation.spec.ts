@@ -6,7 +6,7 @@ import {
 	writeFileSync,
 } from 'node:fs';
 import {tmpdir} from 'node:os';
-import {join} from 'node:path';
+import {join, parse as parsePath} from 'node:path';
 import test from 'ava';
 import {
 	isPathInside,
@@ -319,6 +319,16 @@ test('isPathInside: resolves ../ traversal before comparing', t => {
 	t.true(isPathInside('/proj/src/../lib', '/proj'));
 });
 
+test('isPathInside: filesystem root contains descendants without a doubled separator', t => {
+	// POSIX `/` and Windows `C:\` both already end with a separator. Appending
+	// path.sep would produce `//` or `C:\\`, which no real path starts with.
+	const root = parsePath(process.cwd()).root;
+	const child = join(root, 'home', 'user', 'project');
+	t.true(isPathInside(root, root));
+	t.true(isPathInside(child, root));
+	t.true(isValidFilePath(child, root));
+});
+
 test('isPathInside: is lexical, so an escaping symlink still passes', t => {
 	// The whole reason isRealPathInside exists — see the next test.
 	const root = mkdtempSync(join(tmpdir(), 'pathval-lex-'));
@@ -365,4 +375,55 @@ test('isRealPathInside: fails closed when a path cannot be resolved', t => {
 	// path: callers use it as a boundary, so unresolvable means deny.
 	t.false(isRealPathInside(join(root, 'nope'), root));
 	t.false(isRealPathInside(root, join(root, 'nope')));
+});
+
+test.serial('resolveFilePath: accepts the other spelling of a symlinked project root', t => {
+	const base = mkdtempSync(join(tmpdir(), 'pathval-alias-'));
+	try {
+		const real = join(base, 'real');
+		const alias = join(base, 'alias');
+		mkdirSync(join(real, 'src'), {recursive: true});
+		writeFileSync(join(real, 'src', 'app.ts'), '');
+		symlinkSync(real, alias, 'junction');
+
+		// Project opened through the symlink, model passes the real path.
+		t.true(isValidFilePath(join(real, 'src', 'app.ts'), alias));
+		t.is(
+			resolveFilePath(join(real, 'src', 'app.ts'), alias),
+			join(real, 'src', 'app.ts'),
+		);
+		// Project opened at the real path, model passes the symlink path.
+		t.true(isValidFilePath(join(alias, 'src', 'app.ts'), real));
+		t.is(
+			resolveFilePath(join(alias, 'src', 'app.ts'), real),
+			join(alias, 'src', 'app.ts'),
+		);
+		// A file that does not exist yet, e.g. for write_file.
+		t.is(
+			resolveFilePath(join(real, 'src', 'new.ts'), alias),
+			join(real, 'src', 'new.ts'),
+		);
+	} finally {
+		rmSync(base, {recursive: true, force: true});
+	}
+});
+
+test.serial('resolveFilePath: a symlinked root still rejects paths really outside it', t => {
+	const base = mkdtempSync(join(tmpdir(), 'pathval-alias-'));
+	try {
+		const real = join(base, 'real');
+		const alias = join(base, 'alias');
+		mkdirSync(real);
+		mkdirSync(join(base, 'outside'));
+		symlinkSync(real, alias, 'junction');
+
+		t.false(isValidFilePath(join(base, 'outside', 'x.ts'), alias));
+		// A root that doesn't exist keeps its own path, it doesn't become `/`.
+		t.false(isValidFilePath(join(base, 'outside', 'x.ts'), join(base, 'gone')));
+		t.throws(() => resolveFilePath(join(base, 'outside', 'x.ts'), alias), {
+			message: /Invalid file path/,
+		});
+	} finally {
+		rmSync(base, {recursive: true, force: true});
+	}
 });

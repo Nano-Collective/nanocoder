@@ -88,6 +88,7 @@ test('Doctor renders all diagnostic sections in one report', async t => {
 	t.regex(output!, /LSP/);
 	t.regex(output!, /MCP/);
 	t.regex(output!, /Hooks/);
+	t.regex(output!, /Formatters/);
 	t.regex(output!, /Daemon/);
 });
 
@@ -128,6 +129,36 @@ test('Doctor reports when no lifecycle hooks are configured', async t => {
 	t.regex(lastFrame()!, /No lifecycle hooks configured/);
 });
 
+test('Doctor lists configured formatters', async t => {
+	const report = await collectDoctorReport(createDependencies());
+
+	const withFormatters = {
+		...report,
+		formatters: {
+			status: 'ok' as const,
+			data: [
+				{label: 'biome', match: ['**/*.ts', '**/*.tsx']},
+				{label: 'gofmt -w "$FILE"', match: ['**/*.go']},
+			],
+		},
+	};
+
+	const {lastFrame} = renderWithTheme(<Doctor report={withFormatters} />);
+	const output = lastFrame()!;
+
+	t.regex(output, /biome • \*\*\/\*\.ts, \*\*\/\*\.tsx/);
+	t.regex(output, /gofmt -w "\$FILE" • \*\*\/\*\.go/);
+});
+
+test('Doctor reports when no formatters are configured', async t => {
+	const report = await collectDoctorReport(createDependencies());
+
+	t.is(report.formatters.status, 'ok');
+
+	const {lastFrame} = renderWithTheme(<Doctor report={report} />);
+	t.regex(lastFrame()!, /No formatters configured/);
+});
+
 test('Doctor reports providers without leaking api keys', async t => {
 	const report = await collectDoctorReport(createDependencies());
 
@@ -163,6 +194,33 @@ test('Doctor reports LSP MCP and daemon details', async t => {
 	t.regex(output, /pid 1234/);
 	t.regex(output, /\/tmp\/nanocoder\.sock/);
 	t.regex(output, /uptime 1h/);
+});
+
+test('Doctor reports MCP resource and prompt counts', async t => {
+	const report = await collectDoctorReport(
+		createDependencies({
+			getToolManager: () =>
+				({
+					getConnectedServers: () => ['docs-server'],
+					getServerTools: () => [
+						{name: 'search_docs', description: 'Search docs'},
+					],
+					getServerInfo: () => ({
+						name: 'docs-server',
+						transport: 'stdio',
+						connected: true,
+						resourceCount: 2,
+						promptCount: 5,
+					}),
+				}) as never,
+		}),
+	);
+
+	const {lastFrame} = renderWithTheme(<Doctor report={report} />);
+	const output = lastFrame()!;
+
+	t.regex(output, /2 resources/);
+	t.regex(output, /5 prompts/);
 });
 
 test('Doctor handles no LSP MCP or daemon data', async t => {

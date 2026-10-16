@@ -18,13 +18,13 @@ There are three ways to attach an image:
 | Drag and drop | Drag an image file into the terminal |
 | File path | Type or paste a path to an image file |
 
-For drag-and-drop and typed paths, the path can be **quoted, unquoted, or backslash-escaped**. macOS terminals drop a dragged screenshot in as an unquoted path with escaped spaces (e.g. `Screenshot\ 2026-06-21\ at\ 10.04.32.png`) — that form is recognised without you needing to add quotes. The image reference is stripped from your message text before it's sent, so the model receives the picture rather than a file path.
+For drag-and-drop and typed paths, the path can be **quoted, unquoted, or backslash-escaped**. macOS terminals drop a dragged screenshot in as an unquoted path with escaped spaces (e.g. `Screenshot\ 2026-06-21\ at\ 10.04.32.png`) - that form is recognised without you needing to add quotes. Paths are resolved when you submit the message: each image path in your text is replaced with an `[Image #N]` placeholder and the image itself is attached, so the model receives the picture rather than a file path.
 
 Remote `http(s)://` URLs that end in an image extension are left as plain text — they are not fetched or treated as local files.
 
 ## Managing Attachments
 
-Pending attachments are listed just above the input box:
+Clipboard images (Ctrl+V) are listed as pending attachments just above the input box:
 
 ```
 [image #1: Screenshot 2026-06-21.png] [image #2: clipboard] · ctrl-x remove last
@@ -32,6 +32,7 @@ Pending attachments are listed just above the input box:
 
 - **Ctrl+X** removes the most recently added attachment.
 - Attachments are cleared once the message is submitted.
+- Dragged or typed image paths are not pending attachments. They stay in your text until you submit, so remove one by deleting the path; Ctrl+X does not affect them.
 
 ## Supported Formats
 

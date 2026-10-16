@@ -7,9 +7,12 @@ import {
 } from '@/artifacts/artifact-manager';
 import {getAppConfig} from '@/config/index';
 import {
+	ensureDirectoryTrust,
 	loadPreferences,
 	resolveProjectContextPreferences,
 	savePreferences,
+	type TrustRecheck,
+	untrustedReason,
 } from '@/config/preferences';
 import {resolveTune} from '@/config/tune';
 import {
@@ -27,6 +30,7 @@ import {
 	writeLine,
 	writeStatus,
 } from '@/plain/writer';
+import {loadPlugins} from '@/plugins/host';
 import {
 	beginSessionStartHooks,
 	runLifecycleHooks,
@@ -35,6 +39,7 @@ import {
 } from '@/services/lifecycle-hooks';
 import {getTuneToolMode} from '@/types/config';
 import type {DevelopmentMode, Message} from '@/types/core';
+import {applyTuneCompaction} from '@/utils/auto-compact';
 import {formatError} from '@/utils/error-formatter';
 import {buildSystemPrompt, setLastBuiltPrompt} from '@/utils/prompt-builder';
 import {getShutdownManager} from '@/utils/shutdown';
@@ -83,6 +88,23 @@ const defaultDeps: RunPlainShellDeps = {
 };
 
 /**
+ * The two bypasses last different lengths of time - the flag covers one run,
+ * the variable saves the directory to `trustedDirectories` - so the message
+ * names which is which. Shared by the text and `--json` outputs.
+ */
+function untrustedDirectoryMessage(
+	cwd: string,
+	recheck?: TrustRecheck | null,
+): string {
+	return (
+		`Directory ${cwd} ${untrustedReason(recheck)}` +
+		`. Pass --trust-directory to bypass the ` +
+		`disclaimer for this run only, or set NANOCODER_TRUST_DIRECTORY=1 to ` +
+		`trust this directory permanently.`
+	);
+}
+
+/**
  * Headless equivalent of `nanocoder run "..."`. Skips Ink entirely:
  * the LLM, tool, MCP, and subagent stacks all initialize without React,
  * and the conversation loop streams to stdout via plain process.stdout.
@@ -109,24 +131,33 @@ export async function runPlainShell(
 
 	const isJson = outputFormat === 'json';
 
-	if (!ensureDirectoryTrust(trustDirectory, deps)) {
+	const trust = ensureDirectoryTrust(process.cwd(), trustDirectory, {
+		loadPreferences: deps.loadPreferences,
+		savePreferences: deps.savePreferences,
+	});
+	if (trust.persisted) {
+		writeStatus(
+			`Marked ${path.resolve(process.cwd())} as trusted (NANOCODER_TRUST_DIRECTORY=1).`,
+		);
+	}
+	if (!trust.trusted) {
+		const message = untrustedDirectoryMessage(
+			path.resolve(process.cwd()),
+			trust.recheck,
+		);
 		if (isJson) {
-			const cwd = path.resolve(process.cwd());
 			emitJsonReport({
 				kind: 'error',
 				exitCode: 1,
 				finalText: '',
 				reasoning: null,
 				toolCalls: [],
+				steps: 0,
 				filesChanged: [],
-				message: `Directory ${cwd} is not trusted. Pass --trust-directory or set NANOCODER_TRUST_DIRECTORY=1 to bypass the disclaimer for this run.`,
+				message,
 			});
 		} else {
-			const cwd = path.resolve(process.cwd());
-			writeError(
-				`Directory ${cwd} is not trusted. Pass --trust-directory or set ` +
-					`NANOCODER_TRUST_DIRECTORY=1 to bypass the disclaimer for this run.`,
-			);
+			writeError(message);
 		}
 		await deps.getShutdownManager().gracefulShutdown(1);
 		return;
@@ -144,6 +175,7 @@ export async function runPlainShell(
 				finalText: '',
 				reasoning: null,
 				toolCalls: [],
+				steps: 0,
 				filesChanged: [],
 				message: formattedErr,
 			});
@@ -159,7 +191,12 @@ export async function runPlainShell(
 	// Traditional status writes go to stderr via plain/writer, leaving stdout clean
 	writeBoot(provider, model, developmentMode);
 
-	const tune = resolveTune(getAppConfig(), undefined, deps.loadPreferences());
+	const tune = resolveTune(
+		getAppConfig(),
+		client.getProviderConfig(),
+		deps.loadPreferences(),
+	);
+	applyTuneCompaction(tune);
 	const tuneToolMode = getTuneToolMode(tune);
 	const toolsDisabled =
 		tuneToolMode !== 'native' || isToolCallingDisabled(provider, model);
@@ -216,6 +253,7 @@ export async function runPlainShell(
 		},
 	});
 
+	await loadPlugins(true);
 	await beginSessionStartHooks();
 
 	const promptGate = await runLifecycleHooks('user-prompt-submit', {prompt});
@@ -228,6 +266,7 @@ export async function runPlainShell(
 				finalText: '',
 				reasoning: null,
 				toolCalls: [],
+				steps: 0,
 				filesChanged: [],
 				message,
 			});
@@ -314,7 +353,12 @@ export async function runPlainShell(
 		// Must match the registered names in source/tools/file-ops/. Any name
 		// listed here that isn't a real tool silently drops its edits from
 		// `filesChanged`.
-		const mutatingTools = ['write_file', 'string_replace', 'diff_edit'];
+		const mutatingTools = [
+			'write_file',
+			'string_replace',
+			'diff_edit',
+			'lsp_format_document',
+		];
 		const filesChangedSet = new Set<string>();
 
 		const formattedToolCalls = (outcome.toolCalls || []).map(tc => {
@@ -340,6 +384,7 @@ export async function runPlainShell(
 			finalText: sanitizeOutput(outcome.finalText || ''),
 			reasoning: outcome.reasoning ? sanitizeOutput(outcome.reasoning) : null,
 			toolCalls: formattedToolCalls,
+			steps: outcome.steps,
 			filesChanged: Array.from(filesChangedSet),
 			...(outcome.usage && {
 				usage: outcome.usage,
@@ -382,29 +427,6 @@ function isToolCallingDisabled(provider: string, model: string): boolean {
 	const providerConfig = config.providers?.find(p => p.name === provider);
 	if (!providerConfig) return false;
 	return providerConfig.disableToolModels?.includes(model) ?? false;
-}
-
-function ensureDirectoryTrust(
-	trustDirectoryFlag: boolean,
-	deps: RunPlainShellDeps,
-): boolean {
-	if (trustDirectoryFlag) return true;
-	const cwd = path.resolve(process.cwd());
-	const preferences = deps.loadPreferences();
-	const trusted = (preferences.trustedDirectories ?? []).some(
-		dir => path.resolve(dir) === cwd,
-	);
-	if (trusted) return true;
-
-	if (process.env.NANOCODER_TRUST_DIRECTORY === '1') {
-		const updated = preferences.trustedDirectories ?? [];
-		updated.push(cwd);
-		deps.savePreferences({...preferences, trustedDirectories: updated});
-		writeStatus(`Marked ${cwd} as trusted (NANOCODER_TRUST_DIRECTORY=1).`);
-		return true;
-	}
-
-	return false;
 }
 
 /**

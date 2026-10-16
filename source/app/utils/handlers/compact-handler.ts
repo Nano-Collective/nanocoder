@@ -1,29 +1,108 @@
 import React from 'react';
 import {InfoMessage, SuccessMessage} from '@/components/message-box';
+import {getAppConfig} from '@/config/index';
 import {DELAY_COMMAND_COMPLETE_MS} from '@/constants';
+import {getModelContextLimit, getSessionContextLimit} from '@/models/index';
 import {runLifecycleHooks} from '@/services/lifecycle-hooks';
 import {generateKey} from '@/session/key-generator';
 import {createTokenizer} from '@/tokenization/index';
-import type {CompressionMode, CompressionStrategy} from '@/types/config';
+import type {
+	AIProviderConfig,
+	CompressionMode,
+	CompressionStrategy,
+} from '@/types/config';
 import type {Message, MessageSubmissionOptions} from '@/types/index';
 import {
+	resolveAutoCompactSettings,
 	setAutoCompactEnabled,
 	setAutoCompactStrategy,
 	setAutoCompactThreshold,
 } from '@/utils/auto-compact';
 import {compressionBackup} from '@/utils/compression-backup';
 import {formatError} from '@/utils/error-formatter';
+import {
+	formatInlineToken,
+	isRecognizedOverrideKey,
+	parseInlineOverrides,
+} from '@/utils/inline-overrides';
 import {summariseWithLLM} from '@/utils/llm-summariser';
-import {compressMessages} from '@/utils/message-compression';
+import {
+	COMPRESSION_CONSTANTS,
+	compressMessages,
+	isThresholdInRange,
+} from '@/utils/message-compression';
 import {errorMsg, infoMsg, successMsg} from '@/utils/message-factory';
 import {getLastBuiltPrompt} from '@/utils/prompt-builder';
+import {bumpReadContentGeneration} from '@/utils/read-tracker';
+
+/**
+ * Evaluate a once-scoped threshold gate against current usage. Returns the
+ * usage percentage, or null when it cannot be evaluated (unknown tokenizer,
+ * unresolvable limit) so the caller fails open to normal compaction.
+ *
+ * The token sum mirrors the compaction's own `originalTokenCount`
+ * (system message included); the limit prefers the session override —
+ * which already carries a `?context-max` once-value when one was given,
+ * so the two overrides compose.
+ */
+async function checkOnceThresholdGate(
+	deps: {
+		provider: string;
+		model: string;
+		providerConfig?: AIProviderConfig | null;
+	},
+	messages: Message[],
+): Promise<{usagePct: number} | null> {
+	try {
+		const tokenizer = createTokenizer(deps.provider, deps.model);
+		try {
+			const systemMessage: Message = {
+				role: 'system',
+				content: getLastBuiltPrompt(),
+			};
+			let totalTokens = 0;
+			for (const msg of [systemMessage, ...messages]) {
+				totalTokens += tokenizer.countTokens(msg);
+			}
+			let limit = getSessionContextLimit();
+			if (limit === null) {
+				try {
+					limit =
+						(await getModelContextLimit(deps.model, {
+							providerConfig: deps.providerConfig ?? undefined,
+						})) ?? null;
+				} catch {
+					return null;
+				}
+			}
+			if (limit === null || limit <= 0) {
+				return null;
+			}
+			return {usagePct: (totalTokens / limit) * 100};
+		} finally {
+			if (tokenizer.free) {
+				tokenizer.free();
+			}
+		}
+	} catch {
+		return null;
+	}
+}
 
 /**
  * Handles /compact command. Returns true if handled.
+ *
+ * `onceThreshold` carries the explicit once-scoped `?threshold=` value for
+ * this invocation (see `getOnceThreshold`). Unlike the session-override
+ * store — which cannot tell a once-override apart from a persisted
+ * `/compact --threshold` setting — it is only set when the user typed the
+ * override on this command, so the default unconditional behaviour stays
+ * untouched for plain `/compact`.
  */
 export async function handleCompactCommand(
 	commandParts: string[],
 	options: MessageSubmissionOptions,
+	onceThreshold?: number,
 ): Promise<boolean> {
 	const {
 		onAddToChatQueue,
@@ -33,6 +112,7 @@ export async function handleCompactCommand(
 		provider,
 		model,
 		client,
+		providerConfig,
 		setIsToolExecuting,
 	} = options;
 
@@ -40,10 +120,23 @@ export async function handleCompactCommand(
 		return false;
 	}
 
-	const args = commandParts.slice(1);
-	let mode: CompressionMode = 'default';
+	// Defensive: the dispatcher already consumes recognised `?key=value`
+	// tokens, but direct callers (and tests) may pass them through. Consume
+	// recognised overrides here as well; preserve anything else verbatim so
+	// it stays visible in args instead of being silently swallowed.
+	const {args: positional, overrides} = parseInlineOverrides(
+		commandParts.slice(1),
+	);
+	const args = [
+		...positional,
+		...overrides
+			.filter(o => !isRecognizedOverrideKey(o.key))
+			.map(formatInlineToken),
+	];
+	// Explicit flags win; otherwise fall back to the same settings auto-compact
+	// uses (session overrides, tune, then `autoCompact` config).
+	let mode: CompressionMode | null = null;
 	let preview = false;
-	// Strategy: explicit flag wins; otherwise prefer LLM when a client is available.
 	let strategy: CompressionStrategy | null = null;
 
 	for (let i = 0; i < args.length; i++) {
@@ -60,6 +153,7 @@ export async function handleCompactCommand(
 			const restored = compressionBackup.restore();
 			if (restored) {
 				setMessages(restored);
+				bumpReadContentGeneration();
 				onAddToChatQueue(
 					successMsg(
 						`Restored ${restored.length} messages from backup.`,
@@ -118,14 +212,10 @@ export async function handleCompactCommand(
 			return true;
 		} else if (arg === '--threshold' && i + 1 < args.length) {
 			const thresholdValue = Number.parseFloat(args[i + 1]);
-			if (
-				Number.isNaN(thresholdValue) ||
-				thresholdValue < 50 ||
-				thresholdValue > 95
-			) {
+			if (Number.isNaN(thresholdValue) || !isThresholdInRange(thresholdValue)) {
 				onAddToChatQueue(
 					errorMsg(
-						'Threshold must be a number between 50 and 95.',
+						`Threshold must be a number between ${COMPRESSION_CONSTANTS.MIN_THRESHOLD_PERCENT} and ${COMPRESSION_CONSTANTS.MAX_THRESHOLD_PERCENT}.`,
 						'compact-threshold-error',
 					),
 				);
@@ -151,6 +241,33 @@ export async function handleCompactCommand(
 			return true;
 		}
 
+		// Once-scoped threshold gate (`/compact ?threshold=80`): skip the
+		// manual compaction when current usage sits below the threshold,
+		// mirroring the automatic path's gate in `performAutoCompact`. This
+		// is what makes the override observable for the `/compact` run
+		// itself. Best-effort — anything unresolvable fails open to the
+		// normal unconditional compaction below.
+		if (onceThreshold !== undefined) {
+			const gate = await checkOnceThresholdGate(
+				{
+					provider,
+					model,
+					providerConfig: providerConfig ?? client?.getProviderConfig(),
+				},
+				messages,
+			);
+			if (gate && gate.usagePct < onceThreshold) {
+				onAddToChatQueue(
+					infoMsg(
+						`Context at ${Math.round(gate.usagePct)}% — below the once-threshold of ${onceThreshold}% for this command; skipping compaction.`,
+						'compact-once-threshold-skip',
+					),
+				);
+				setTimeout(() => onCommandComplete?.(), DELAY_COMMAND_COMPLETE_MS);
+				return true;
+			}
+		}
+
 		// Same observe-only pre-compact hook the automatic path fires, so a
 		// manual /compact isn't a blind spot for anything archiving context.
 		await runLifecycleHooks('pre-compact', {messageCount: messages.length});
@@ -160,9 +277,18 @@ export async function handleCompactCommand(
 		const systemMessage: Message = {role: 'system', content: systemPrompt};
 		const allMessages = [systemMessage, ...messages];
 
-		// Resolve strategy: explicit flag > LLM default when a client is available > mechanical.
+		// Resolve strategy and mode: explicit flag > session override > tune >
+		// config. An 'llm' strategy without a client runs mechanically.
+		const autoCompactConfig = getAppConfig().autoCompact;
+		const resolved = resolveAutoCompactSettings({
+			enabled: autoCompactConfig?.enabled ?? true,
+			threshold: autoCompactConfig?.threshold ?? 0,
+			mode: autoCompactConfig?.mode ?? 'default',
+			strategy: autoCompactConfig?.strategy,
+		});
 		const effectiveStrategy: CompressionStrategy =
-			strategy ?? (client ? 'llm' : 'mechanical');
+			strategy ?? (client ? resolved.strategy : 'mechanical');
+		const effectiveMode: CompressionMode = mode ?? resolved.mode;
 
 		const originalTokenCount = allMessages.reduce(
 			(sum, msg) => sum + tokenizer.countTokens(msg),
@@ -226,6 +352,7 @@ export async function handleCompactCommand(
 			} else {
 				compressionBackup.storeBackup(messages);
 				setMessages(llmResult);
+				bumpReadContentGeneration();
 				onAddToChatQueue(successMsg(summaryMessage, 'compact-success'));
 			}
 			setTimeout(() => onCommandComplete?.(), DELAY_COMMAND_COMPLETE_MS);
@@ -233,7 +360,9 @@ export async function handleCompactCommand(
 		}
 
 		// Mechanical path (also covers LLM failure / no client)
-		const result = compressMessages(allMessages, tokenizer, {mode});
+		const result = compressMessages(allMessages, tokenizer, {
+			mode: effectiveMode,
+		});
 
 		if (tokenizer.free) {
 			tokenizer.free();
@@ -256,6 +385,7 @@ export async function handleCompactCommand(
 				msg => msg.role !== 'system',
 			);
 			setMessages(compressedUserMessages);
+			bumpReadContentGeneration();
 
 			const message = `Context Compacted: ${result.originalTokenCount.toLocaleString()} tokens → ${result.compressedTokenCount.toLocaleString()} tokens (${Math.round(result.reductionPercentage)}% reduction)\n\nPreserved: ${stats}`;
 			onAddToChatQueue(

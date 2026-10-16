@@ -30,6 +30,11 @@ const SHELL_IDS = [
 	'add-image-btn',
 	'add-menu-btn',
 	'add-menu-dropdown',
+	'artifact-bar',
+	'artifact-close',
+	'artifact-content',
+	'artifact-links',
+	'artifact-toggle',
 	'attach-btn',
 	'chat-input',
 	'chat-view',
@@ -61,6 +66,7 @@ const SHELL_IDS = [
 	'provider-dropdown',
 	'provider-trigger',
 	'provider-trigger-label',
+	'queue-hint',
 	'send-stop-btn',
 	'timeline-confirm',
 	'timeline-hint',
@@ -84,6 +90,14 @@ function matchesSelector(element: StubElement, selector: string): boolean {
 		const name = selector.slice(1);
 		return element.classList.contains(name);
 	}
+	// [data-message-id="msg-1"] — used to attach the Queued badge.
+	if (selector.startsWith('[') && selector.endsWith(']')) {
+		const body = selector.slice(1, -1);
+		const match = /^([^=]+)=["']([^"']*)["']$/.exec(body);
+		if (!match) return false;
+		const [, attr, value] = match;
+		return element.getAttribute(attr) === value;
+	}
 	return String(element.tagName ?? '').toLowerCase() === selector.toLowerCase();
 }
 
@@ -104,6 +118,7 @@ export function createElement(tagName: string): StubElement {
 	const listeners = new Map<string, ((event: StubElement) => void)[]>();
 	let html = '';
 	let text = '';
+	const dataset: Record<string, string> = {};
 
 	const element: StubElement = {
 		tagName,
@@ -113,8 +128,11 @@ export function createElement(tagName: string): StubElement {
 		disabled: false,
 		files: null,
 		style: {},
-		dataset: {},
+		dataset,
 		children: [] as StubElement[],
+		get childElementCount() {
+			return element.children.length;
+		},
 		parentElement: null as StubElement | null,
 		classList: {
 			add: (...names: string[]) => names.forEach(name => classes.add(name)),
@@ -136,6 +154,17 @@ export function createElement(tagName: string): StubElement {
 			child.parentElement = element;
 			if (!element.children.includes(child)) element.children.push(child);
 			return child;
+		},
+		insertBefore(newChild: StubElement, refChild: StubElement | null) {
+			newChild.parentElement = element;
+			if (!refChild) {
+				element.children.push(newChild);
+				return newChild;
+			}
+			const index = element.children.indexOf(refChild);
+			if (index === -1) element.children.push(newChild);
+			else element.children.splice(index, 0, newChild);
+			return newChild;
 		},
 		removeChild(child: StubElement) {
 			element.children = element.children.filter(
@@ -166,10 +195,22 @@ export function createElement(tagName: string): StubElement {
 				(listeners.get(type) ?? []).filter(candidate => candidate !== fn),
 			);
 		},
+		dispatchEvent: (event: {type: string} & Record<string, unknown>) => {
+			for (const fn of listeners.get(event.type) ?? []) {
+				fn.call(element, event);
+			}
+		},
 		focus: () => {},
 		click: (event: StubElement = {stopPropagation() {}}) => {
 			if (element.disabled) return;
-			for (const fn of listeners.get('click') ?? []) fn(event);
+			element.dispatchEvent({
+				type: 'click',
+				target: element,
+				currentTarget: element,
+				preventDefault() {},
+				stopPropagation() {},
+				...event,
+			});
 		},
 		/** Drive any registered listener, not just click. */
 		dispatch: (type: string, event: StubElement = {}) => {
@@ -180,6 +221,22 @@ export function createElement(tagName: string): StubElement {
 		scrollLeft: 0,
 		scrollWidth: 0,
 	};
+
+	Object.defineProperty(element, 'lastElementChild', {
+		get: () => element.children[element.children.length - 1] ?? null,
+	});
+
+	// Mirror HTMLElement.dataset: dataset.messageId writes data-message-id.
+	const datasetProxy = new Proxy(dataset, {
+		set(target, prop, value) {
+			if (typeof prop !== 'string') return false;
+			target[prop] = String(value);
+			const attr = `data-${prop.replaceAll(/[A-Z]/g, c => `-${c.toLowerCase()}`)}`;
+			attributes.set(attr, String(value));
+			return true;
+		},
+	});
+	element.dataset = datasetProxy;
 
 	Object.defineProperty(element, 'className', {
 		get: () => [...classes].join(' '),
@@ -202,7 +259,17 @@ export function createElement(tagName: string): StubElement {
 		},
 	});
 	Object.defineProperty(element, 'textContent', {
-		get: () => text,
+		get: () => {
+			if (text) return text;
+			if (element.children.length > 0) {
+				return element.children.map((c: StubElement) => c.textContent).join('');
+			}
+			if (html) {
+				// Strip all HTML tags, including unclosed ones to satisfy CodeQL
+				return html.replace(/<[\s\S]*?(?:>|$)/g, '');
+			}
+			return '';
+		},
 		set: (value: string) => {
 			text = String(value);
 		},
@@ -251,6 +318,7 @@ export function createPanel(options: {marked?: boolean} = {}) {
 	// never renders a chip looks the same here as it does on load.
 	const hiddenOnLoad = new Set([
 		'add-menu-dropdown',
+		'artifact-bar',
 		'composer-settings',
 		'context-chips',
 		'context-chips-clear',
@@ -340,6 +408,9 @@ export function createPanel(options: {marked?: boolean} = {}) {
 		copied,
 		/** Any shell element by id, for panels rendered outside the transcript. */
 		byId(id: string): StubElement | null {
+			return findById(root, id);
+		},
+		el(id: string): StubElement | null {
 			return findById(root, id);
 		},
 		dispatchDocument(type: string, event: StubElement = {}) {

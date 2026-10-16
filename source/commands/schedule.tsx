@@ -59,8 +59,8 @@ function ScheduleView({entries}: {entries: CronEntry[]}) {
 			>
 				<Text color={colors.secondary}>
 					No cron subscriptions declared. Add a `schedule.cron` entry to a
-					command's frontmatter or a bundle's `skill.yaml` and run `nanocoder
-					daemon start` to make it fire.
+					command's or agent's frontmatter, or a bundle's `skill.yaml`, and run
+					`nanocoder daemon start` to make it fire.
 				</Text>
 			</TitledBoxWithPreferences>
 		);

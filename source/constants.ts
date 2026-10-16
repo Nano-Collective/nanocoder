@@ -19,6 +19,28 @@ export const TIMEOUT_UPDATE_CHECK_MS = 10_000;
 export const TIMEOUT_SOCKET_DEFAULT_MS = 120_000;
 export const TIMEOUT_SOCKET_LOCAL_DEFAULT_MS = 600_000; // 10 minutes for local models (Ollama, etc.)
 export const TIMEOUT_LSP_DIAGNOSTICS_MS = 5000;
+// gh run view --log/--log-failed can be slow and the log itself huge; bound
+// the fetch so a hung request doesn't hang the tool call indefinitely.
+export const TIMEOUT_GH_LOG_MS = 60_000;
+// Bound for quick `gh pr view`/`gh pr diff --name-only` metadata calls (used
+// by `nanocoder verify`, a headless/unattended command) — shorter than
+// TIMEOUT_GH_LOG_MS since these return small JSON/text payloads and should
+// never legitimately take long; a hang here (auth prompt, network stall)
+// should fail fast rather than block an unattended caller indefinitely.
+export const TIMEOUT_GH_METADATA_MS = 30_000;
+// Bound for `git push` (daemon auto-fix/full-commit): a network op that
+// should never legitimately hang for an unattended background caller.
+export const TIMEOUT_GIT_PUSH_MS = 60_000;
+// `semgrep scan --config auto` can fetch/update its rule registry on first
+// run, which is slower than a typical local scan.
+export const TIMEOUT_SEMGREP_MS = 120_000;
+// Ceiling for the daemon's auto-fix/full-commit one-shot fix subprocess
+// (investigate + edit files + run tests/build + commit). Generous since it
+// covers a full LLM-driven edit-and-verify loop, but bounded because
+// BackpressureDispatcher's per-subscription in-flight cap would otherwise
+// let one runaway attempt block all future ci.job.failed triggers for the
+// builtin CI investigator.
+export const TIMEOUT_CI_FIX_RUNNER_MS = 900_000; // 15 minutes
 // Ceiling on the pricing lookup for the per-response usage footer: past
 // this the message renders with token counts only rather than holding the
 // streaming-to-static swap hostage to a cold models.dev fetch.
@@ -37,6 +59,13 @@ export const MAX_FILE_READ_RETRIES = 3;
 
 // === SESSION NAMES ===
 export const MAX_SESSION_NAME_LENGTH = 100;
+
+/**
+ * Opening of the synthetic `role: 'user'` turn that carries `!bash` output to
+ * the model. It is protocol, not a request, so title derivation skips it -
+ * shared with the builder so the two cannot drift.
+ */
+export const BASH_OUTPUT_PREFIX = 'Bash command output:';
 
 // === LIMITS ===
 export const MAX_CHECKPOINT_FILES = 50;
@@ -88,7 +117,8 @@ export const TIPS = [
 	'Press Ctrl+J to add a new line without sending your prompt.',
 	'Press Shift+Tab to cycle between development modes.',
 	'Press Ctrl+O to toggle compact tool output.',
-	'Press Ctrl+G to toggle expanded reasoning traces.',
+	'Run /expand to see one tool result in full.',
+	'Press Ctrl+N to toggle expanded reasoning traces.',
 	'Press Ctrl+R to reverse search prompt history.',
 	'Use @ followed by a file path to add that file to context.',
 	'Use /explorer to browse project files and add them to context.',
@@ -124,6 +154,8 @@ export const TRUNCATION_OUTPUT_LIMIT = 2000;
 // reads and search results remain useful while unbounded tools stay bounded.
 export const MAX_TOOL_RESULT_CHARS = 20_000;
 export const TRUNCATION_DESCRIPTION_LENGTH = 100;
+// Rows of tool output shown in the transcript; `/expand <n>` prints the rest.
+export const TOOL_OUTPUT_DISPLAY_LINES = 20;
 
 // === DELAYS ===
 export const DELAY_COMMAND_COMPLETE_MS = 100;
@@ -131,7 +163,6 @@ export const DELAY_COMMAND_COMPLETE_MS = 100;
 // === BASH EXECUTION ===
 export const INTERVAL_BASH_PROGRESS_MS = 500;
 export const BASH_OUTPUT_PREVIEW_LENGTH = 150;
-export const BASH_OUTPUT_DISPLAY_LINES = 20;
 export const TIMEOUT_BASH_DEFAULT_MS = 120_000;
 export const BASH_MAX_OUTPUT_BYTES = 5 * 1024 * 1024;
 
@@ -183,6 +214,14 @@ export const MAX_MALFORMED_RETRIES = 2;
 // or allow another window; non-interactive and headless runs, which have nobody
 // to ask, stop with an actionable error.
 export const MAX_REPEATED_TOOL_CALLS = 3;
+// Default for `nanocoder.retries.maxTruncatedTurns` (see
+// source/config/index.ts): how many consecutive content-only turns cut off at
+// the provider's output-token limit we'll ask the model to continue through
+// before giving up. A truncated turn carries no tool calls, so without this the
+// headless loop reads it as "the model finished talking" and returns success
+// with whatever fragment arrived — the failure mode that silently produced no
+// output at all in runs whose entire deliverable was a tool call.
+export const MAX_TRUNCATED_TURNS = 2;
 
 // === MCP ===
 export const TIMEOUT_MCP_DEFAULT_MS = 30_000;

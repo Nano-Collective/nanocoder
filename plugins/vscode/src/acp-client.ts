@@ -1,8 +1,8 @@
 import * as vscode from 'vscode';
 import {ClientSideConnection} from '@agentclientprotocol/sdk';
 import {AcpStateManager, ACPStatus} from './acp-state';
-import type {TimelineCheckpoint} from './webview-protocol';
 import {PromptAttempt} from './prompt-attempt';
+import { resolveExtensionCwd } from './workspace-utils';
 
 // We expect at least the version of the CLI where ACP was introduced
 const MINIMUM_CLI_VERSION = '0.4.0';
@@ -21,6 +21,15 @@ export class NanocoderAcpClient {
 	private outputChannel: vscode.OutputChannel;
 	private stateManager: AcpStateManager;
 	private _sessionId?: string;
+	/** In-flight {@link getOrCreateSession} promise; coalesces overlapping callers. */
+	private _pendingSession: Promise<string | undefined> | null = null;
+	/**
+	 * Bumped whenever the session is cleared or replaced other than by creation
+	 * (New Chat, a reconnect, a resume). A creation that started under an older
+	 * value belongs to a conversation the user has left, so its result is
+	 * dropped instead of being written back over the new state.
+	 */
+	private _sessionGeneration = 0;
 	public onSessionUpdate?: (update: unknown) => void;
 	public onPermissionRequested?: (toolCallId: string, toolCall: unknown, options?: any[]) => void;
 	/** Fires with the tool call ids whose approval cards should be dismissed. */
@@ -28,6 +37,8 @@ export class NanocoderAcpClient {
 	public onStateSync?: (state: StateSyncPayload) => void;
 	public onSessionArtifacts?: (meta: unknown) => void;
 	public onConnectionReady?: () => void;
+	/** Fires when a background title update is received. */
+	public onSessionTitleChanged?: () => void;
 
 	public currentMode?: string;
 	public availableModes: string[] = [];
@@ -35,6 +46,17 @@ export class NanocoderAcpClient {
 	public availableModels: string[] = [];
 	public currentProvider?: string;
 	public availableProviders: string[] = [];
+
+	/**
+	 * True only after `initialize()` has succeeded on the current connection.
+	 * `connection` is set earlier, when stdio is wired — using that as a ready
+	 * signal lets `newSession` race the handshake and fail silently.
+	 */
+	private _handshakeComplete = false;
+
+	get isHandshakeComplete(): boolean {
+		return this._handshakeComplete && this.connection != null;
+	}
 
 	private pendingPermissions = new Map<string, (response: unknown) => void>();
 	private activePrompt?: PromptAttempt;
@@ -84,10 +106,29 @@ export class NanocoderAcpClient {
 		return this.pendingPermissions.size > 0;
 	}
 
+	hasActivePrompt(): boolean {
+		return this.activePrompt !== undefined;
+	}
+
 	setConnection(connection: ClientSideConnection): void {
 		this.connection = connection;
 		this._sessionId = undefined; // Clear any stale session to force re-creation
+		this._abandonPendingSession();
 		this._clearPendingPermissions();
+		this._handshakeComplete = false;
+	}
+
+	/** Drop any in-flight session creation; see {@link _sessionGeneration}. */
+	private _abandonPendingSession(): void {
+		this._sessionGeneration++;
+		this._pendingSession = null;
+	}
+
+	/** Handle custom notifications from the agent. */
+	async handleExtNotification(method: string, _params: unknown): Promise<void> {
+		if (method === '_nanocoder/sessionTitleChanged') {
+			this.onSessionTitleChanged?.();
+		}
 	}
 
 	async handlePermissionRequest(params: any): Promise<unknown> {
@@ -163,6 +204,7 @@ export class NanocoderAcpClient {
 			}
 
 			// Complete handshake
+			this._handshakeComplete = true;
 			this.stateManager.setStatus(ACPStatus.Connected);
 			if (this.onConnectionReady) {
 				this.onConnectionReady();
@@ -180,23 +222,60 @@ export class NanocoderAcpClient {
 			return this._sessionId;
 		}
 		if (!this.connection) return undefined;
+		// Coalesce overlapping callers. Without this, a click on "Send" racing
+		// the auto-init from `onConnectionReady` would each call newSession()
+		// against the shared connection; the second writer overwrites the
+		// first `_sessionId` and the first session is orphaned with its mode
+		// and configOptions already read into local state.
+		const generation = this._sessionGeneration;
+		let pending = this._pendingSession;
+		if (!pending) {
+			pending = this._createSession(cwd, generation);
+			this._pendingSession = pending;
+		}
+		let sessionId: string | undefined;
+		try {
+			sessionId = await pending;
+		} finally {
+			if (this._pendingSession === pending) {
+				this._pendingSession = null;
+			}
+		}
+		// New Chat, a resume or a reconnect happened while this was in flight,
+		// so the caller wants the current conversation's session. After a
+		// reconnect the new process creates its own once the handshake is done.
+		if (generation !== this._sessionGeneration) {
+			return this.isHandshakeComplete ? this.getOrCreateSession(cwd) : undefined;
+		}
+		return sessionId;
+	}
 
+	private async _createSession(
+		cwd: string,
+		generation: number,
+	): Promise<string | undefined> {
 		try {
 			// Get VS Code settings for initial preferences
 			const config = vscode.workspace.getConfiguration('nanocoder');
 			const initialMode = config.get<string>('mode') || 'auto-accept';
 			const initialModel = config.get<string>('model');
 
-			const result = await this.connection.newSession({ cwd, mcpServers: [] });
+			const result = await this.connection!.newSession({ cwd, mcpServers: [] });
+			if (generation !== this._sessionGeneration) {
+				this.outputChannel.appendLine(
+					`Discarded session ${result.sessionId}: the conversation changed while it was being created.`,
+				);
+				return undefined;
+			}
 			this._sessionId = result.sessionId;
 			this.onSessionArtifacts?.(result._meta);
-			
+
 			// Parse modes and configOptions
 			if (result.modes) {
 				this.currentMode = result.modes.currentModeId;
 				this.availableModes = result.modes.availableModes.map((m: any) => m.id);
 			}
-			
+
 			if (result.configOptions) {
 				this._parseConfigOptions(result.configOptions);
 			}
@@ -219,7 +298,7 @@ export class NanocoderAcpClient {
 	}
 
 	notifyStateSync() {
-		if (this.onStateSync && (this.currentMode || this.currentModel || this.currentProvider)) {
+		if (this.onStateSync) {
 			this.onStateSync({
 				mode: this.currentMode,
 				availableModes: this.availableModes,
@@ -302,6 +381,8 @@ export class NanocoderAcpClient {
 		// Abandoning the conversation abandons its approval prompts too.
 		this._clearPendingPermissions();
 		this._sessionId = undefined;
+		// ...and a session still being created for it.
+		this._abandonPendingSession();
 		this.onSessionArtifacts?.(undefined);
 	}
 	/**
@@ -430,10 +511,11 @@ export class NanocoderAcpClient {
 	async resumeSession(sessionId: string): Promise<void> {
 		if (!this.connection) return;
 		try {
-			this._sessionId = sessionId;
-			const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
-			const cwd = workspaceFolder?.uri.fsPath || process.cwd();
+			const cwd = resolveExtensionCwd();
 			const result = await this.connection.resumeSession({sessionId, cwd});
+			// A session still being created must not land on top of this one.
+			this._abandonPendingSession();
+			this._sessionId = sessionId;
 			if (result.modes) {
 				this.currentMode = result.modes.currentModeId;
 				this.availableModes = result.modes.availableModes.map((mode: any) => mode.id);
@@ -449,40 +531,21 @@ export class NanocoderAcpClient {
 		}
 	}
 
-	async listTimeline(): Promise<TimelineCheckpoint[]> {
-		if (!this.connection || !this._sessionId) return [];
-		try {
-			const result = await this.connection.extMethod('timeline/list', {
-				sessionId: this._sessionId,
-			});
-			const entries = (result as {entries?: unknown}).entries;
-			return Array.isArray(entries) ? entries : [];
-		} catch (error) {
-			this.outputChannel.appendLine(`listTimeline failed: ${error}`);
-			return [];
-		}
-	}
-
 	/**
-	 * Throws on every failure path, including "not connected": the caller
-	 * tears down and rebuilds the chat view on success, so it has to be able
-	 * to tell a real revert from a no-op.
+	 * Erases the retried turn from session history before resending the prompt,
+	 * preventing duplicate user bubbles and stale assistant responses in history.
 	 */
-	async revertTimeline(checkpointId: string): Promise<void> {
+	async retryTurn(promptText?: string): Promise<void> {
 		if (!this.connection || !this._sessionId) {
-			const message = 'Not connected to a nanocoder session';
-			vscode.window.showErrorMessage(`Failed to revert timeline: ${message}`);
-			throw new Error(message);
+			return;
 		}
 		try {
-			await this.connection.extMethod('timeline/revert', {
+			await this.connection.extMethod('retryTurn', {
 				sessionId: this._sessionId,
-				checkpointId,
+				promptText,
 			});
 		} catch (error) {
-			this.outputChannel.appendLine(`revertTimeline failed: ${error}`);
-			vscode.window.showErrorMessage(`Failed to revert timeline: ${error}`);
-			throw error;
+			this.outputChannel.appendLine(`retryTurn warning: ${error}`);
 		}
 	}
 

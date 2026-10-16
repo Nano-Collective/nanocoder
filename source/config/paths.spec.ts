@@ -10,6 +10,10 @@ console.log(`\npaths.spec.ts`);
 
 const ORIGINAL_PLATFORM = process.platform;
 const ORIGINAL_ENV = {...process.env};
+// The AVA config points NANOCODER_DATA_DIR at a scratch dir so the suite never
+// writes into a developer's real sessions and stats. These tests assert the
+// platform defaults underneath that override, so start from it unset.
+delete ORIGINAL_ENV.NANOCODER_DATA_DIR;
 
 function setPlatform(platform: NodeJS.Platform) {
 	Object.defineProperty(process, 'platform', {

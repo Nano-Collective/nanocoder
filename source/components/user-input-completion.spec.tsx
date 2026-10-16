@@ -5,7 +5,9 @@ import stripAnsi from 'strip-ansi';
 import {themes} from '../config/themes';
 import {ThemeContext} from '../hooks/useTheme';
 import {UIStateProvider} from '../hooks/useUIState';
+import {setToolManagerGetter} from '../message-handler';
 import {promptHistory} from '../prompt-history';
+import type {ToolManager} from '../tools/tool-manager';
 import UserInput from './user-input';
 
 console.log('\nuser-input-completion.spec.tsx');
@@ -104,6 +106,61 @@ test('a command recalled from history does not auto-open the menu until typed', 
 		stripAnsi(lastFrame() ?? ''),
 		/zzalpha/,
 		'typing into the recalled command surfaces suggestions again',
+	);
+
+	unmount();
+});
+
+// Regression (reviewer feedback on #1172): an MCP resource shares the file
+// `@`-mention completion list, and the list's displayPath ("name (server)",
+// for on-screen disambiguation only) was being passed as the resourceName
+// argument instead of the bare resource name. That stamped the server
+// annotation twice: once from displayPath, once from the assembled prompt
+// header ("=== MCP Resource: x (from server) ==="). Selecting the resource
+// must produce a plain `[@<name>]` chip.
+test('selecting an MCP resource mention does not double-stamp the server name', async t => {
+	const fakeResource = {
+		uri: 'file:///docs/api.md',
+		name: 'api-docs',
+		serverName: 'docs-server',
+	};
+	const fakeMCPClient = {
+		getAllResources: () => [fakeResource],
+		readResource: async () => [
+			{uri: fakeResource.uri, mimeType: 'text/markdown', text: 'hello'},
+		],
+	};
+	setToolManagerGetter(
+		() =>
+			({
+				getMCPClient: () => fakeMCPClient,
+			}) as unknown as ToolManager,
+	);
+	t.teardown(() => setToolManagerGetter(() => null));
+
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput forceFocus={true} />
+		</TestWrapper>,
+	);
+
+	stdin.write('@api-docs');
+	await waitForFrame(lastFrame, /api-docs \(docs-server\)/); // completion list shows the disambiguated form
+	// The per-keystroke autocomplete effect has no in-flight cancellation, so a
+	// stale fetch for an earlier partial mention (e.g. "api-do") can still
+	// resolve after the final one and briefly overwrite the completion list.
+	// Give those stragglers time to settle before selecting, matching this
+	// file's existing pattern for other timing-sensitive interactions.
+	await wait(300);
+	stdin.write(TAB);
+	await waitForFrame(lastFrame, /\[@api-docs\]/);
+
+	const frame = stripAnsi(lastFrame() ?? '');
+	t.regex(frame, /\[@api-docs\]/);
+	t.notRegex(
+		frame,
+		/\[@api-docs \(docs-server\)\]/,
+		'the placeholder chip must not carry the server name a second time',
 	);
 
 	unmount();

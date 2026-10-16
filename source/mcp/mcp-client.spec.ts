@@ -1,5 +1,6 @@
 import test from 'ava';
 import {resolveToolApproval} from '../tools/approval-policy';
+import {ToolValidationError} from '../utils/tool-validation';
 import {MCPClient} from './mcp-client';
 
 // ============================================================================
@@ -64,12 +65,39 @@ const mockTransportFactory = {
 
 console.log(`\nmcp-client.spec.ts`);
 
-// Skip integration tests in CI. These tests hit real third-party MCP servers
-// (mcp.deepwiki.com, remote.mcpservers.org, mcp.context7.com) — running them in
-// CI would couple our pipeline to those services' uptime. Run them locally to
-// verify HTTP transport against live servers.
-const isCI = process.env.CI === 'true' || process.env.CI === '1';
-const testOrSkip = isCI ? test.skip : test;
+// Live integration tests are opt-in because they depend on third-party MCP
+// servers and network availability. Run them with RUN_LIVE_MCP_TESTS=true.
+const runLiveMcpTests =
+	process.env.RUN_LIVE_MCP_TESTS === 'true' ||
+	process.env.RUN_LIVE_MCP_TESTS === '1';
+const liveTest = (
+	title: string,
+	impl: (t: any) => Promise<void> | void,
+) => {
+	if (!runLiveMcpTests) {
+		test.skip(title, impl as any);
+		return;
+	}
+
+	test.serial(title, async t => {
+		let lastErr: any;
+		for (let i = 0; i < 3; i++) {
+			const result = await (t as any).try(impl);
+			if (result.passed) {
+				result.commit();
+				return;
+			}
+
+			result.discard();
+			lastErr = result.errors[0] || new Error('Unknown test failure');
+			// These are remote integration tests, so retry transient failures.
+			if (i < 2) {
+				await new Promise(resolve => setTimeout(resolve, 2000 * (i + 1)));
+			}
+		}
+		throw lastErr;
+	});
+};
 
 // ============================================================================
 // Tests for MCPClient - Transport Support
@@ -137,6 +165,19 @@ test('MCPClient: getConnectedServers returns array', t => {
 	const client = new MCPClient();
 	const connectedServers = client.getConnectedServers();
 	t.true(Array.isArray(connectedServers));
+});
+
+test('MCPClient: unhealthy servers are excluded from connected servers', t => {
+	const client = new MCPClient();
+	const healthy = 'healthy-server';
+	const unhealthy = 'unhealthy-server';
+	(client as any).clients.set(healthy, {});
+	(client as any).clients.set(unhealthy, {});
+	(client as any).health.set(healthy, 'connected');
+	(client as any).health.set(unhealthy, 'unhealthy');
+
+	t.deepEqual(client.getConnectedServers(), [healthy]);
+	t.deepEqual(client.getServerNames(), [healthy, unhealthy]);
 });
 
 test('MCPClient: isServerConnected returns false for non-existent servers', t => {
@@ -438,6 +479,46 @@ test('MCPClient.getToolEntries: includes handler that calls callTool', async t =
 	t.is(typeof entries[0].handler, 'function');
 });
 
+test('gets entry handler that passes valid args through but stops wrong-typed args at execution', async t => {
+	const client = new MCPClient();
+
+	(client as any).serverTools.set('typed-server', [
+		{
+			name: 'typed_tool',
+			description: 'Typed tool',
+			inputSchema: {
+				type: 'object',
+				properties: {path: {type: 'string'}},
+			},
+			serverName: 'typed-server',
+		},
+	]);
+
+	let callsToServer = 0;
+	// The handler closure resolves `this.callTool` at call time, so a shadowing
+	// own property is enough to prove whether the wrapper lets the call through.
+	client.callTool = (async () => {
+		callsToServer++;
+		return 'server result';
+	}) as never;
+
+	const entry = client.getToolEntries()[0];
+	t.truthy(entry);
+
+	// Same lenient schema check the approval prompt renders: an object where a
+	// string is expected is rejected before the server is ever asked.
+	await t.throwsAsync(
+		() => entry.handler({path: {nested: true}}),
+		{instanceOf: ToolValidationError, message: /wrong type/},
+	);
+	t.is(callsToServer, 0, 'wrong-typed args must not reach the server');
+
+	// Scalar-typed args pass through to the server unchanged.
+	const result = await entry.handler({path: 'ok'});
+	t.is(result, 'server result');
+	t.is(callsToServer, 1, 'well-typed args must reach the server');
+});
+
 // ============================================================================
 // Tests for callTool error handling
 // ============================================================================
@@ -668,7 +749,7 @@ test('MCPClient.getServerInfo: returns undefined when only tools exist', t => {
 // These tests use real remote MCP servers via HTTP transport
 // They test the actual connection, tool listing, and tool execution flow
 
-testOrSkip('MCPClient.connectToServer: connects to remote HTTP MCP server', async t => {
+liveTest('MCPClient.connectToServer: connects to remote HTTP MCP server', async t => {
 	const client = new MCPClient();
 
 	// Use DeepWiki public MCP server (no auth required)
@@ -703,7 +784,7 @@ testOrSkip('MCPClient.connectToServer: connects to remote HTTP MCP server', asyn
 	t.is(client.getServerTools('test-deepwiki').length, 0);
 });
 
-testOrSkip('MCPClient.connectToServer: connects to context7 HTTP server and executes a tool', async t => {
+liveTest('MCPClient.connectToServer: connects to context7 HTTP server and executes a tool', async t => {
 	// Pair with the DeepWiki test above so a single host going dark doesn't
 	// nuke all HTTP-transport integration coverage. context7 was picked after
 	// remote.mcpservers.org disappeared at DNS level around mid-May 2026.
@@ -739,7 +820,7 @@ testOrSkip('MCPClient.connectToServer: connects to context7 HTTP server and exec
 	t.false(client.isServerConnected('test-context7'));
 });
 
-testOrSkip('MCPClient.connectToServers: connects to multiple HTTP servers', async t => {
+liveTest('MCPClient.connectToServers: connects to multiple HTTP servers', async t => {
 	const client = new MCPClient();
 
 	const servers = [
@@ -775,7 +856,7 @@ testOrSkip('MCPClient.connectToServers: connects to multiple HTTP servers', asyn
 	await client.disconnect();
 });
 
-testOrSkip('MCPClient.getAllTools: builds tools registry from connected HTTP server', async t => {
+liveTest('MCPClient.getAllTools: builds tools registry from connected HTTP server', async t => {
 	const client = new MCPClient();
 
 	const server = {
@@ -806,7 +887,7 @@ testOrSkip('MCPClient.getAllTools: builds tools registry from connected HTTP ser
 	await client.disconnect();
 });
 
-testOrSkip('MCPClient.getNativeToolsRegistry: creates registry from connected HTTP server', async t => {
+liveTest('MCPClient.getNativeToolsRegistry: creates registry from connected HTTP server', async t => {
 	const client = new MCPClient();
 
 	const server = {
@@ -837,7 +918,7 @@ testOrSkip('MCPClient.getNativeToolsRegistry: creates registry from connected HT
 	await client.disconnect();
 });
 
-testOrSkip('MCPClient.callTool: executes tool on connected HTTP server', async t => {
+liveTest('MCPClient.callTool: executes tool on connected HTTP server', async t => {
 	const client = new MCPClient();
 
 	const server = {
@@ -868,7 +949,7 @@ testOrSkip('MCPClient.callTool: executes tool on connected HTTP server', async t
 	await client.disconnect();
 });
 
-testOrSkip('MCPClient.getToolMapping: returns mapping from connected HTTP server', async t => {
+liveTest('MCPClient.getToolMapping: returns mapping from connected HTTP server', async t => {
 	const client = new MCPClient();
 
 	const server = {
@@ -900,7 +981,7 @@ testOrSkip('MCPClient.getToolMapping: returns mapping from connected HTTP server
 	await client.disconnect();
 });
 
-testOrSkip('MCPClient.getToolEntries: returns entries from connected HTTP server', async t => {
+liveTest('MCPClient.getToolEntries: returns entries from connected HTTP server', async t => {
 	const client = new MCPClient();
 
 	const server = {
@@ -930,7 +1011,7 @@ testOrSkip('MCPClient.getToolEntries: returns entries from connected HTTP server
 // Error Handling Tests with Real Servers
 // ============================================================================
 
-testOrSkip('MCPClient.connectToServer: handles invalid URL gracefully', async t => {
+test('MCPClient.connectToServer: handles invalid URL gracefully', async t => {
 	const client = new MCPClient();
 
 	const server = {
@@ -943,7 +1024,7 @@ testOrSkip('MCPClient.connectToServer: handles invalid URL gracefully', async t 
 	await t.throwsAsync(async () => await client.connectToServer(server));
 });
 
-testOrSkip('MCPClient.connectToServer: validates websocket URL protocol', async t => {
+test('MCPClient.connectToServer: validates websocket URL protocol', async t => {
 	const client = new MCPClient();
 
 	const server = {
@@ -1280,6 +1361,9 @@ test('MCPClient.connectToServer: registers the server once tool discovery succee
 				],
 			};
 		},
+		getServerCapabilities() {
+			return undefined;
+		},
 		async close() {},
 	};
 
@@ -1290,6 +1374,436 @@ test('MCPClient.connectToServer: registers the server once tool discovery succee
 	t.true(client.isServerConnected('seam-server'));
 	t.is(client.getServerTools('seam-server').length, 1);
 	t.is(client.getServerInfo('seam-server')?.connected, true);
+});
+
+test('MCPClient.connectToServer: passes the configured timeout to connect and tools/list', async t => {
+	const seen: unknown[] = [];
+	const timedClient = {
+		async connect(_transport: unknown, options: unknown) {
+			seen.push(options);
+		},
+		async listTools(_params: unknown, options: unknown) {
+			seen.push(options);
+			return {tools: []};
+		},
+		getServerCapabilities() {
+			return undefined;
+		},
+		async close() {},
+	};
+
+	const client = new SeamMCPClient(timedClient);
+	await client.connectToServer({...httpServer, timeout: 1234});
+
+	t.deepEqual(seen, [{timeout: 1234}, {timeout: 1234}]);
+});
+
+test('MCPClient health check marks a server unhealthy and removes its tools', async t => {
+	let pingCalls = 0;
+	const transport: {onclose?: () => void; onerror?: (error: Error) => void} = {};
+	const client = new SeamMCPClient({
+		async ping() {
+			pingCalls++;
+			throw new Error('server stopped responding');
+		},
+	});
+	const serverName = 'health-server';
+	(client as any).clients.set(serverName, {close: async () => {}});
+	(client as any).serverConfigs.set(serverName, {
+		name: serverName,
+		transport: 'http',
+		url: 'http://localhost:1/mcp',
+	});
+	(client as any).serverTools.set(serverName, [
+		{name: 'health_tool', serverName},
+	]);
+	(client as any).health.set(serverName, 'connected');
+	(client as any).startHealthChecks(
+		serverName,
+		(client as any).injected,
+		transport,
+		10,
+	);
+
+	await new Promise<void>(resolve => {
+		const deadline = Date.now() + 1000;
+		const waitForPing = () => {
+			if (pingCalls > 0 || Date.now() >= deadline) {
+				resolve();
+				return;
+			}
+			setTimeout(waitForPing, 5);
+		};
+		waitForPing();
+	});
+
+	t.true(pingCalls > 0);
+	t.false(client.isServerConnected(serverName));
+	t.deepEqual(client.getServerTools(serverName), []);
+	t.is(client.getServerInfo(serverName)?.health, 'unhealthy');
+	clearTimeout((client as any).healthTimers.get(serverName));
+});
+
+test('MCPClient health check retries unhealthy server and restores its tools when ping succeeds', async t => {
+	let pingCalls = 0;
+	const transport: {onclose?: () => void; onerror?: (error: Error) => void} = {};
+	const client = new SeamMCPClient({
+		async ping() {
+			pingCalls++;
+			if (pingCalls === 1) {
+				throw new Error('temporary network hiccup');
+			}
+			return {};
+		},
+		async listTools() {
+			return {
+				tools: [
+					{
+						name: 'restored_tool',
+						description: 'restored tool description',
+						inputSchema: {type: 'object'},
+					},
+				],
+			};
+		},
+		getServerCapabilities() {
+			return {tools: {}};
+		},
+	});
+	const serverName = 'recovering-server';
+	(client as any).clients.set(serverName, (client as any).injected);
+	(client as any).serverConfigs.set(serverName, {
+		name: serverName,
+		transport: 'http',
+		url: 'http://localhost:1/mcp',
+	});
+	(client as any).serverTools.set(serverName, [
+		{name: 'restored_tool', serverName},
+	]);
+	(client as any).health.set(serverName, 'connected');
+	(client as any).startHealthChecks(
+		serverName,
+		(client as any).injected,
+		transport,
+		10,
+	);
+
+	// Wait for first ping to fail and second ping to recover
+	await new Promise<void>(resolve => {
+		const deadline = Date.now() + 1000;
+		const waitForPings = () => {
+			if (pingCalls >= 2 || Date.now() >= deadline) {
+				resolve();
+				return;
+			}
+			setTimeout(waitForPings, 5);
+		};
+		waitForPings();
+	});
+
+	t.true(pingCalls >= 2);
+	t.true(client.isServerConnected(serverName));
+	t.is(client.getServerInfo(serverName)?.health, 'connected');
+	const tools = client.getServerTools(serverName);
+	t.is(tools.length, 1);
+	t.is(tools[0].name, 'restored_tool');
+	clearTimeout((client as any).healthTimers.get(serverName));
+});
+
+test('MCPClient health check treats JSON-RPC MethodNotFound as alive and recovers tools', async t => {
+	let pingCalls = 0;
+	const transport: {onclose?: () => void; onerror?: (error: Error) => void} = {};
+	const client = new SeamMCPClient({
+		async ping() {
+			pingCalls++;
+			const error = new Error('Method not found');
+			(error as any).code = -32601;
+			throw error;
+		},
+		async listTools() {
+			return {
+				tools: [
+					{
+						name: 'alive_tool',
+						description: 'alive tool description',
+						inputSchema: {type: 'object'},
+					},
+				],
+			};
+		},
+		getServerCapabilities() {
+			return {tools: {}};
+		},
+	});
+	const serverName = 'method-not-found-server';
+	(client as any).clients.set(serverName, (client as any).injected);
+	(client as any).serverConfigs.set(serverName, {
+		name: serverName,
+		transport: 'stdio',
+	});
+	(client as any).serverTools.set(serverName, []);
+	(client as any).health.set(serverName, 'unhealthy');
+	(client as any).startHealthChecks(
+		serverName,
+		(client as any).injected,
+		transport,
+		10,
+	);
+
+	await new Promise<void>(resolve => {
+		const deadline = Date.now() + 1000;
+		const waitForPing = () => {
+			if (pingCalls > 0 || Date.now() >= deadline) {
+				resolve();
+				return;
+			}
+			setTimeout(waitForPing, 5);
+		};
+		waitForPing();
+	});
+
+	t.true(pingCalls > 0);
+	t.true(client.isServerConnected(serverName));
+	t.is(client.getServerInfo(serverName)?.health, 'connected');
+	const tools = client.getServerTools(serverName);
+	t.is(tools.length, 1);
+	t.is(tools[0].name, 'alive_tool');
+	clearTimeout((client as any).healthTimers.get(serverName));
+});
+
+test('MCPClient health check applies exponential backoff on consecutive failures and resets on recovery', async t => {
+	let pingCalls = 0;
+	let pingShouldFail = true;
+
+	const client = new SeamMCPClient({
+		async ping() {
+			pingCalls++;
+			if (pingShouldFail) {
+				throw new Error('connection refused');
+			}
+			return {};
+		},
+		async listTools() {
+			return {
+				tools: [
+					{
+						name: 'backoff_tool',
+						description: 'backoff tool desc',
+						inputSchema: {type: 'object'},
+					},
+				],
+			};
+		},
+		getServerCapabilities() {
+			return {tools: {}};
+		},
+	});
+
+	const serverName = 'backoff-server';
+	(client as any).clients.set(serverName, (client as any).injected);
+	(client as any).serverConfigs.set(serverName, {
+		name: serverName,
+		transport: 'http',
+		url: 'http://localhost:1/mcp',
+	});
+	(client as any).serverTools.set(serverName, [
+		{name: 'backoff_tool', serverName},
+	]);
+	(client as any).health.set(serverName, 'connected');
+
+	const transport: {onclose?: () => void; onerror?: (error: Error) => void} = {};
+	(client as any).startHealthChecks(
+		serverName,
+		(client as any).injected,
+		transport,
+		10,
+	);
+
+	// First failure happens at initial 10ms timer
+	await new Promise<void>(resolve => {
+		const check = () => {
+			if ((client as any).healthFailureCounts.get(serverName) === 1) {
+				resolve();
+				return;
+			}
+			setTimeout(check, 5);
+		};
+		check();
+	});
+
+	t.is(client.getServerInfo(serverName)?.health, 'unhealthy');
+	t.is((client as any).healthFailureCounts.get(serverName), 1);
+
+	// Wait for second failure -> failure count = 2
+	await new Promise<void>(resolve => {
+		const check = () => {
+			if ((client as any).healthFailureCounts.get(serverName) >= 2) {
+				resolve();
+				return;
+			}
+			setTimeout(check, 5);
+		};
+		check();
+	});
+	t.is((client as any).healthFailureCounts.get(serverName), 2);
+
+	// Now allow ping to succeed -> should recover and reset failure count
+	pingShouldFail = false;
+	await new Promise<void>(resolve => {
+		const check = () => {
+			if (client.getServerInfo(serverName)?.health === 'connected') {
+				resolve();
+				return;
+			}
+			setTimeout(check, 5);
+		};
+		check();
+	});
+
+	t.is(client.getServerInfo(serverName)?.health, 'connected');
+	t.is((client as any).healthFailureCounts.get(serverName), undefined);
+	t.is(client.getServerTools(serverName).length, 1);
+	clearTimeout((client as any).healthTimers.get(serverName));
+});
+
+test('MCPClient transport close marks a server unhealthy immediately', t => {
+	let previousCloseCalls = 0;
+	const transport: {onclose?: () => void; onerror?: (error: Error) => void} = {
+		onclose: () => {
+			previousCloseCalls++;
+		},
+	};
+	const client = new SeamMCPClient({ping: async () => {}});
+	const serverName = 'closed-server';
+	(client as any).clients.set(serverName, {close: async () => {}});
+	(client as any).serverConfigs.set(serverName, {
+		name: serverName,
+		transport: 'stdio',
+	});
+	(client as any).serverTools.set(serverName, [
+		{name: 'closed_tool', serverName},
+	]);
+	(client as any).health.set(serverName, 'connected');
+	(client as any).startHealthChecks(
+		serverName,
+		(client as any).injected,
+		transport,
+		60_000,
+	);
+
+	transport.onclose?.();
+
+	t.is(previousCloseCalls, 1);
+	t.false(client.isServerConnected(serverName));
+	t.is(client.getServerInfo(serverName)?.health, 'unhealthy');
+	t.deepEqual(client.getServerTools(serverName), []);
+	clearTimeout((client as any).healthTimers.get(serverName));
+});
+
+for (const pingFails of [false, true]) {
+	test(`MCPClient transport error ${pingFails ? 'removes tools after a failed ping' : 'preserves tools when the server responds'}`, async t => {
+		let transport: any;
+		let previousErrorCalls = 0;
+		let pingCalls = 0;
+		let pingOptions: unknown;
+		let finishPing!: () => void;
+		const pendingPing = new Promise<void>(resolve => {
+			finishPing = resolve;
+		});
+		const sdkClient = {
+			async connect(value: any) {
+				transport = value;
+				transport.onerror = () => {
+					previousErrorCalls++;
+				};
+			},
+			async listTools() {
+				return {tools: [{name: 'live_tool', inputSchema: {type: 'object'}}]};
+			},
+			getServerCapabilities: () => undefined,
+			async ping(options: unknown) {
+				pingCalls++;
+				pingOptions = options;
+				await pendingPing;
+				if (pingFails) throw new Error('ping failed');
+			},
+			async close() {},
+		};
+		const client = new SeamMCPClient(sdkClient);
+		try {
+			await client.connectToServer({...httpServer, healthCheckInterval: 0});
+			t.is((client as any).healthTimers.size, 0);
+			transport.onerror(new Error('recoverable SSE interruption'));
+			transport.onerror(new Error('another transport error'));
+			await Promise.resolve();
+			t.is(previousErrorCalls, 2);
+			t.is(pingCalls, 1, 'overlapping errors share one liveness check');
+			t.deepEqual(pingOptions, {timeout: 10_000});
+			t.true(client.isServerConnected(httpServer.name));
+			t.is(client.getServerTools(httpServer.name).length, 1);
+			finishPing();
+			await new Promise(resolve => setImmediate(resolve));
+			t.is(client.isServerConnected(httpServer.name), !pingFails);
+			t.is(client.getServerTools(httpServer.name).length, pingFails ? 0 : 1);
+		} finally {
+			finishPing();
+			await client.disconnect();
+		}
+	});
+}
+
+test('MCPClient does not emit unhealthy after disconnecting with a pending ping', async t => {
+	let transport: any;
+	let rejectPing!: (error: Error) => void;
+	const pendingPing = new Promise<void>((_resolve, reject) => {
+		rejectPing = reject;
+	});
+	const client = new SeamMCPClient({
+		async connect(value: any) {
+			transport = value;
+		},
+		async listTools() {
+			return {tools: []};
+		},
+		getServerCapabilities: () => undefined,
+		ping: () => pendingPing,
+		async close() {
+			transport.onclose?.();
+		},
+	});
+	const changes: unknown[] = [];
+	client.onHealthChange(change => changes.push(change));
+	await client.connectToServer({...httpServer, healthCheckInterval: 0});
+	transport.onerror(new Error('temporary error'));
+	await Promise.resolve();
+	await client.disconnect();
+	rejectPing(new Error('connection closed'));
+	await new Promise(resolve => setImmediate(resolve));
+	t.deepEqual(changes, []);
+	t.deepEqual(client.getServerNames(), []);
+	t.is((client as any).health.size, 0);
+});
+
+test('MCPClient rejects calls to an unhealthy server clearly', async t => {
+	const client = new SeamMCPClient({});
+	const serverName = 'unhealthy-server';
+	(client as any).clients.set(serverName, {});
+	(client as any).serverConfigs.set(serverName, {
+		name: serverName,
+		transport: 'http',
+	});
+	(client as any).health.set(serverName, 'unhealthy');
+	(client as any).healthErrors.set(serverName, 'connection refused');
+
+	await t.throwsAsync(() => client.callTool(`mcp_${serverName}_tool`, {}), {
+		message: /MCP server is unhealthy: unhealthy-server: connection refused/,
+	});
+	await t.throwsAsync(() => client.readResource(serverName, 'test://resource'), {
+		message: /MCP server is unhealthy: unhealthy-server: connection refused/,
+	});
+	await t.throwsAsync(() => client.getPrompt(serverName, 'test-prompt'), {
+		message: /MCP server is unhealthy: unhealthy-server: connection refused/,
+	});
 });
 
 // ============================================================================
@@ -1337,6 +1851,9 @@ test('MCPClient.connectToServer: carries annotations.readOnlyHint onto discovere
 					},
 				],
 			};
+		},
+		getServerCapabilities() {
+			return undefined;
 		},
 		async close() {},
 	};
@@ -1423,6 +1940,9 @@ test('MCPClient.getToolMapping: is cached and invalidated on connect/disconnect'
 				],
 			};
 		},
+		getServerCapabilities() {
+			return undefined;
+		},
 		async close() {},
 	};
 
@@ -1454,6 +1974,9 @@ test('MCPClient.getToolMapping: a mapping taken before connect is not left stale
 				],
 			};
 		},
+		getServerCapabilities() {
+			return undefined;
+		},
 		async close() {},
 	};
 
@@ -1473,4 +1996,390 @@ test('MCPClient.getToolMapping: a mapping taken before connect is not left stale
 		afterConnect.has('late_tool'),
 		'tools discovered after the first call must still be mapped',
 	);
+});
+
+// ============================================================================
+// Tests for MCP Resources Support
+// ============================================================================
+
+test('MCPClient.getAllResources: returns empty array when no servers connected', t => {
+	const client = new MCPClient();
+	const resources = client.getAllResources();
+
+	t.true(Array.isArray(resources));
+	t.is(resources.length, 0);
+});
+
+test('MCPClient.getAllResources: returns resources from connected servers', t => {
+	const client = new MCPClient();
+
+	// Simulate connected server with resources
+	(client as any).serverResources.set('test-server', [
+		{
+			uri: 'file:///test/resource1.txt',
+			name: 'resource1',
+			description: 'Test resource 1',
+			mimeType: 'text/plain',
+			serverName: 'test-server',
+		},
+		{
+			uri: 'file:///test/resource2.json',
+			name: 'resource2',
+			description: 'Test resource 2',
+			mimeType: 'application/json',
+			serverName: 'test-server',
+		},
+	]);
+
+	const resources = client.getAllResources();
+
+	t.is(resources.length, 2);
+	t.is(resources[0].name, 'resource1');
+	t.is(resources[0].uri, 'file:///test/resource1.txt');
+	t.is(resources[1].name, 'resource2');
+});
+
+test('MCPClient.getServerResources: returns empty array for non-existent server', t => {
+	const client = new MCPClient();
+	const resources = client.getServerResources('non-existent');
+
+	t.true(Array.isArray(resources));
+	t.is(resources.length, 0);
+});
+
+test('MCPClient.getServerResources: returns resources for specific server', t => {
+	const client = new MCPClient();
+
+	const testResources = [
+		{
+			uri: 'file:///test/resource.txt',
+			name: 'resource',
+			description: 'Test resource',
+			mimeType: 'text/plain',
+			serverName: 'test-server',
+		},
+	];
+
+	(client as any).serverResources.set('test-server', testResources);
+
+	const resources = client.getServerResources('test-server');
+
+	t.is(resources.length, 1);
+	t.deepEqual(resources, testResources);
+});
+
+test('MCPClient.readResource: throws error when server is not connected', async t => {
+	const client = new MCPClient();
+
+	await t.throwsAsync(
+		async () => await client.readResource('non-existent', 'file:///x'),
+		{message: /No MCP client connected for server/},
+	);
+});
+
+test('MCPClient.readResource: discriminates text vs. blob content (neither carries a type field)', async t => {
+	const injected = {
+		async connect() {},
+		async listTools() {
+			return {tools: []};
+		},
+		getServerCapabilities() {
+			return {resources: {}};
+		},
+		async listResources() {
+			return {
+				resources: [
+					{uri: 'file:///a.txt', name: 'a', mimeType: 'text/plain'},
+				],
+			};
+		},
+		async readResource({uri}: {uri: string}) {
+			return {
+				contents: [
+					{uri: 'file:///a.txt', mimeType: 'text/plain', text: 'hello'},
+					{uri: 'file:///b.png', mimeType: 'image/png', blob: 'YmFzZTY0'},
+				],
+			};
+		},
+		async close() {},
+	};
+
+	const client = new SeamMCPClient(injected);
+	await client.connectToServer(httpServer);
+
+	const contents = await client.readResource('seam-server', 'file:///a.txt');
+
+	t.is(contents.length, 2);
+	t.is(contents[0].text, 'hello');
+	t.is(contents[0].blob, undefined);
+	t.is(contents[1].blob, 'YmFzZTY0');
+	t.is(contents[1].text, undefined);
+});
+
+test('MCPClient.connectToServer: does not call listResources when the server does not declare the resources capability', async t => {
+	let listResourcesCalled = false;
+	const injected = {
+		async connect() {},
+		async listTools() {
+			return {tools: []};
+		},
+		getServerCapabilities() {
+			return {prompts: {}};
+		},
+		async listResources() {
+			listResourcesCalled = true;
+			return {resources: []};
+		},
+		async close() {},
+	};
+
+	const client = new SeamMCPClient(injected);
+	await client.connectToServer(httpServer);
+
+	t.false(
+		listResourcesCalled,
+		'listResources must not be called when capabilities.resources is absent',
+	);
+	t.is(client.getServerResources('seam-server').length, 0);
+});
+
+test('MCPClient.getServerInfo: includes resource count', t => {
+	const client = new MCPClient();
+
+	const testConfig = {
+		name: 'test-server',
+		transport: 'stdio' as const,
+		command: 'node',
+		args: ['server.js'],
+	};
+
+	const mockClient = {};
+
+	(client as any).clients.set('test-server', mockClient);
+	(client as any).serverConfigs.set('test-server', testConfig);
+	(client as any).serverTools.set('test-server', []);
+	(client as any).serverResources.set('test-server', [
+		{
+			uri: 'file:///resource1.txt',
+			name: 'resource1',
+			serverName: 'test-server',
+		},
+		{
+			uri: 'file:///resource2.txt',
+			name: 'resource2',
+			serverName: 'test-server',
+		},
+	]);
+	(client as any).serverPrompts.set('test-server', []);
+
+	const serverInfo = client.getServerInfo('test-server');
+
+	t.truthy(serverInfo);
+	t.is(serverInfo?.resourceCount, 2);
+});
+
+// ============================================================================
+// Tests for MCP Prompts Support
+// ============================================================================
+
+test('MCPClient.getAllPrompts: returns empty array when no servers connected', t => {
+	const client = new MCPClient();
+	const prompts = client.getAllPrompts();
+
+	t.true(Array.isArray(prompts));
+	t.is(prompts.length, 0);
+});
+
+test('MCPClient.getAllPrompts: returns prompts from connected servers', t => {
+	const client = new MCPClient();
+
+	// Simulate connected server with prompts
+	(client as any).serverPrompts.set('test-server', [
+		{
+			name: 'prompt1',
+			description: 'Test prompt 1',
+			arguments: [
+				{name: 'query', description: 'Query parameter', required: true},
+			],
+			serverName: 'test-server',
+		},
+		{
+			name: 'prompt2',
+			description: 'Test prompt 2',
+			serverName: 'test-server',
+		},
+	]);
+
+	const prompts = client.getAllPrompts();
+
+	t.is(prompts.length, 2);
+	t.is(prompts[0].name, 'prompt1');
+	t.is(prompts[0].description, 'Test prompt 1');
+	t.is(prompts[1].name, 'prompt2');
+});
+
+test('MCPClient.getServerPrompts: returns empty array for non-existent server', t => {
+	const client = new MCPClient();
+	const prompts = client.getServerPrompts('non-existent');
+
+	t.true(Array.isArray(prompts));
+	t.is(prompts.length, 0);
+});
+
+test('MCPClient.getServerPrompts: returns prompts for specific server', t => {
+	const client = new MCPClient();
+
+	const testPrompts = [
+		{
+			name: 'test-prompt',
+			description: 'Test prompt',
+			arguments: [],
+			serverName: 'test-server',
+		},
+	];
+
+	(client as any).serverPrompts.set('test-server', testPrompts);
+
+	const prompts = client.getServerPrompts('test-server');
+
+	t.is(prompts.length, 1);
+	t.deepEqual(prompts, testPrompts);
+});
+
+test('MCPClient.getPrompt: throws error when server is not connected', async t => {
+	const client = new MCPClient();
+
+	await t.throwsAsync(
+		async () => await client.getPrompt('non-existent', 'prompt', {}),
+		{message: /No MCP client connected for server/},
+	);
+});
+
+test('MCPClient.getPrompt: fetches and normalizes a prompt from its own server', async t => {
+	const injected = {
+		async connect() {},
+		async listTools() {
+			return {tools: []};
+		},
+		getServerCapabilities() {
+			return {prompts: {}};
+		},
+		async listPrompts() {
+			return {
+				prompts: [
+					{
+						name: 'greet',
+						description: 'Greets someone',
+						arguments: [{name: 'who', required: true}],
+					},
+				],
+			};
+		},
+		async getPrompt({
+			name,
+			arguments: args,
+		}: {
+			name: string;
+			arguments?: Record<string, string>;
+		}) {
+			return {
+				description: 'A greeting',
+				messages: [
+					{role: 'user', content: {type: 'text', text: `hi ${args?.who}`}},
+				],
+			};
+		},
+		async close() {},
+	};
+
+	const client = new SeamMCPClient(injected);
+	await client.connectToServer(httpServer);
+
+	const result = await client.getPrompt('seam-server', 'greet', {
+		who: 'world',
+	});
+
+	t.is(result.description, 'A greeting');
+	t.is(result.messages.length, 1);
+	t.is(result.messages[0].content.text, 'hi world');
+});
+
+test('MCPClient.connectToServer: does not call listPrompts when the server does not declare the prompts capability', async t => {
+	let listPromptsCalled = false;
+	const injected = {
+		async connect() {},
+		async listTools() {
+			return {tools: []};
+		},
+		getServerCapabilities() {
+			return {resources: {}};
+		},
+		async listPrompts() {
+			listPromptsCalled = true;
+			return {prompts: []};
+		},
+		async close() {},
+	};
+
+	const client = new SeamMCPClient(injected);
+	await client.connectToServer(httpServer);
+
+	t.false(
+		listPromptsCalled,
+		'listPrompts must not be called when capabilities.prompts is absent',
+	);
+	t.is(client.getServerPrompts('seam-server').length, 0);
+});
+
+test('MCPClient.getServerInfo: includes prompt count', t => {
+	const client = new MCPClient();
+
+	const testConfig = {
+		name: 'test-server',
+		transport: 'stdio' as const,
+		command: 'node',
+		args: ['server.js'],
+	};
+
+	const mockClient = {};
+
+	(client as any).clients.set('test-server', mockClient);
+	(client as any).serverConfigs.set('test-server', testConfig);
+	(client as any).serverTools.set('test-server', []);
+	(client as any).serverResources.set('test-server', []);
+	(client as any).serverPrompts.set('test-server', [
+		{name: 'prompt1', serverName: 'test-server'},
+		{name: 'prompt2', serverName: 'test-server'},
+		{name: 'prompt3', serverName: 'test-server'},
+	]);
+
+	const serverInfo = client.getServerInfo('test-server');
+
+	t.truthy(serverInfo);
+	t.is(serverInfo?.promptCount, 3);
+});
+
+// ============================================================================
+// Tests for disconnect with resources and prompts
+// ============================================================================
+
+test('MCPClient.disconnect: clears resources and prompts', async t => {
+	const client = new MCPClient();
+
+	// Add some mock state including resources and prompts
+	(client as any).clients.set('mock', {});
+	(client as any).transports.set('mock', {});
+	(client as any).serverTools.set('mock', []);
+	(client as any).serverResources.set('mock', [{uri: 'test', name: 'test', serverName: 'mock'}]);
+	(client as any).serverPrompts.set('mock', [{name: 'test', serverName: 'mock'}]);
+	(client as any).serverConfigs.set('mock', {});
+	(client as any).isConnected = true;
+
+	await client.disconnect();
+
+	// State should be cleared
+	t.is(client.getServerResources('mock').length, 0);
+	t.is(client.getServerPrompts('mock').length, 0);
+	t.is(client.getAllResources().length, 0);
+	t.is(client.getAllPrompts().length, 0);
 });

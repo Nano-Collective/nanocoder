@@ -1,6 +1,7 @@
 import type {TitleShape} from '@/components/ui/styled-title';
 import type {DevelopmentMode} from '@/types/core';
 import type {NanocoderShape, ThemePreset} from '@/types/ui';
+import type {TrustLevel} from '@/verify/trust';
 
 // Supported AI SDK provider packages
 export type SdkProvider =
@@ -17,6 +18,10 @@ export interface AIProviderConfig {
 	models: string[];
 	contextWindow?: number;
 	contextWindows?: Record<string, number>;
+	// Cap on tokens the model may generate in one response. Applies to every
+	// model in this entry; split the entry if they differ. See the note on
+	// ProviderConfig.maxOutputTokens for why this is worth setting.
+	maxOutputTokens?: number;
 	requestTimeout?: number;
 	socketTimeout?: number;
 	maxRetries?: number; // Maximum number of retries for failed requests (default: 2)
@@ -45,6 +50,8 @@ export interface AIProviderConfig {
 		apiKey?: string;
 		caCertPath?: string;
 		headers?: Record<string, string>;
+		// Request streaming usage from OpenAI-compatible providers (defaults to true)
+		includeUsage?: boolean;
 		[key: string]: unknown;
 	};
 }
@@ -58,10 +65,23 @@ export interface ProviderConfig {
 	models: string[];
 	contextWindow?: number;
 	contextWindows?: Record<string, number>;
+	// Cap on tokens the model may generate in one response, applied to every
+	// model in this entry (split the entry if they differ).
+	//
+	// Worth setting explicitly on any provider the AI SDK does not recognise.
+	// @ai-sdk/anthropic, for instance, derives the ceiling from the model id
+	// and falls back to 4096 for anything that is not a known Claude model —
+	// so an Anthropic-compatible endpoint serving some other model is capped
+	// at 4096 unless this says otherwise, and long replies are silently
+	// truncated mid-sentence.
+	maxOutputTokens?: number;
 	requestTimeout?: number;
 	socketTimeout?: number;
 	maxRetries?: number; // Maximum number of retries for failed requests (default: 2)
+	// Sent as the OpenAI-Organization header.
 	organizationId?: string;
+	// Legacy: older Custom Provider wizard runs wrote this, but it was never
+	// read. Use requestTimeout instead.
 	timeout?: number;
 	connectionPool?: {
 		idleTimeout?: number;
@@ -71,11 +91,15 @@ export interface ProviderConfig {
 	disableTools?: boolean; // Disable tools for entire provider
 	disableToolModels?: string[]; // List of model names to disable tools for
 	headers?: Record<string, string>;
+	// Whether to request streaming usage from OpenAI-compatible endpoints (defaults to true)
+	includeUsage?: boolean;
 	// SDK provider package to use (default: 'openai-compatible')
 	sdkProvider?: SdkProvider;
 	// OpenRouter-specific request body fields. Only applied when the provider
 	// is OpenRouter (name match, case-insensitive).
 	openrouter?: OpenRouterParameters;
+	// Tune defaults applied while this provider is active.
+	tune?: Partial<TuneConfig>;
 	[key: string]: unknown; // Allow additional provider-specific config
 }
 
@@ -123,6 +147,14 @@ export interface RetryLimitsConfig {
 	// plus (interactive only) native responses that emit tool-call text
 	// instead of native tool calls. Not used by subagent runs.
 	maxMalformedRetries: number;
+	// Consecutive content-only turns that the provider cut off at its
+	// output-token limit (finishReason `length`) before the loop stops asking
+	// the model to continue. Such a turn is a fragment, not an answer, but it
+	// carries no tool calls — so without this cap the --plain loop treats it as
+	// a finished turn and returns the fragment as a successful result.
+	// 0 restores that behaviour (accept the first truncated turn as final).
+	// Applies to the --plain/headless runtime.
+	maxTruncatedTurns: number;
 }
 
 // Custom system prompt configuration
@@ -151,13 +183,51 @@ export interface NotificationsConfig {
 		questionPrompt?: boolean;
 		generationComplete?: boolean;
 		triggeredRunComplete?: boolean;
+		ciFailureDetected?: boolean;
+		ciInvestigationComplete?: boolean;
 	};
 	customMessages?: {
 		toolConfirmation?: {title: string; message: string};
 		questionPrompt?: {title: string; message: string};
 		generationComplete?: {title: string; message: string};
 		triggeredRunComplete?: {title: string; message: string};
+		ciFailureDetected?: {title: string; message: string};
+		ciInvestigationComplete?: {title: string; message: string};
 	};
+}
+
+/**
+ * Background CI-watch configuration. Governs whether the per-project daemon
+ * polls GitHub Actions for check-run failures on the currently checked-out
+ * branch and automatically runs the `verify-ci-investigator` subagent when
+ * one is found. Opt-in (`enabled` defaults to false) since this is a new
+ * always-on-network, GitHub-API-rate-limit-consuming background feature,
+ * unlike file-watching/cron which have no such external cost.
+ */
+export interface CiWatchConfig {
+	enabled: boolean;
+	/** Base poll interval in ms. Defaults to 30_000. */
+	pollIntervalMs?: number;
+	/** Backoff cap in ms for consecutive `gh` errors. Defaults to 300_000. */
+	maxPollIntervalMs?: number;
+}
+
+/**
+ * Project-level (`agents.config.json`) verify/CI-watch policy — trust level
+ * and poll cadence. Unlike `CiWatchConfig.enabled` (a personal, per-machine
+ * opt-in to background GitHub polling, kept in preferences), trust level
+ * and cadence are security/policy decisions appropriate to commit and
+ * review with the rest of the project, so they live here instead. When
+ * set, `pollIntervalMs`/`maxPollIntervalMs` here override the
+ * preferences-backed `CiWatchConfig` values of the same name — see
+ * `loadCiWatchConfig` in `source/config/index.ts`.
+ */
+export interface VerifyConfig {
+	/** Trust level for daemon-triggered CI investigation/auto-fix. Undefined
+	 * defers to the `--trust` CLI flag, then 'comment-only'. */
+	trustLevel?: TrustLevel;
+	pollIntervalMs?: number;
+	maxPollIntervalMs?: number;
 }
 
 /**
@@ -180,7 +250,7 @@ export type HookEvent = (typeof HOOK_EVENTS)[number];
 
 /**
  * A single lifecycle hook: one shell command, optionally scoped to a set of
- * tools (tool events only) and with its own timeout.
+ * tools and/or the file they acted on (tool events only), with its own timeout.
  */
 export interface HookDefinition {
 	/** Shell command to run. Receives hook context via NANOCODER_* env vars. */
@@ -190,6 +260,17 @@ export interface HookDefinition {
 	 * Ignored by non-tool events.
 	 */
 	matchTools?: string[];
+	/**
+	 * Globs the acted-on file must match for this hook to run, so a formatter
+	 * or linter can be bound to a language without shell dispatch inside the
+	 * command. Omitted means "every file". Same dialect as skill subscriptions
+	 * (`**`, `*`, `?`, `{a,b}`) — e.g. `["**\/*.{ts,tsx}"]`.
+	 *
+	 * Unlike `matchTools`, this excludes tools with no file to match: a hook
+	 * scoped to `**\/*.ts` is asking about files, so it must not fire for
+	 * `execute_bash`. Ignored by non-tool events, which have no file either.
+	 */
+	matchPaths?: string[];
 	/**
 	 * Milliseconds before the hook is killed. Defaults to 30s, except
 	 * `session-end`, which defaults to 2s so it fits inside the shutdown budget.
@@ -202,6 +283,32 @@ export interface HookDefinition {
 
 /** Lifecycle hooks keyed by event. Every event is optional. */
 export type HooksConfig = Partial<Record<HookEvent, HookDefinition[]>>;
+
+/**
+ * A code formatter run on every file the agent writes whose path matches
+ * `match`, after the edit succeeds and before the `post-tool-use` hooks.
+ */
+export interface FormatterConfig {
+	/**
+	 * Globs the written file must match, relative to the project root. Same
+	 * dialect as `matchPaths` on hooks — e.g. `["**\/*.{ts,tsx}"]`.
+	 */
+	match: string | string[];
+	/**
+	 * Shell command to run from the project root. The written file's absolute
+	 * path is in `$FILE` (also `$NANOCODER_FILE`) — quote it: `"$FILE"`.
+	 */
+	command: string;
+	/** Milliseconds before the formatter is killed. Defaults to 30s. */
+	timeout?: number;
+	/** Optional label used in messages instead of the command. */
+	name?: string;
+}
+
+/** Runtime form: single globs from disk are normalized to arrays. */
+export interface FormatterDefinition extends Omit<FormatterConfig, 'match'> {
+	match: string[];
+}
 
 // Note: temperature is intentionally excluded from this interface.
 // It cannot be applied during a mode switch without proper integration into
@@ -262,8 +369,6 @@ export interface DiskNanocoderConfig {
 		/** Maximum LLM turns before the loop forces a final, tool-free answer. */
 		maxTurns?: number;
 	};
-	/** Model Context Protocol server configurations. */
-	mcpServers?: MCPServerConfig[];
 	/** LSP server configurations (optional — auto-discovery enabled by default). */
 	lspServers?: {
 		name: string;
@@ -285,6 +390,11 @@ export interface DiskNanocoderConfig {
 	 * `mcpServers` above.
 	 */
 	hooks?: HooksConfig;
+	/**
+	 * Code formatters run on files the agent writes (write_file,
+	 * string_replace, diff_edit), before the `post-tool-use` hooks fire.
+	 */
+	formatters?: FormatterConfig[];
 	/** Nanocoder-specific tool configurations. */
 	nanocoderTools?: {
 		webSearch?: {
@@ -300,6 +410,8 @@ export interface DiskNanocoderConfig {
 	retries?: Partial<RetryLimitsConfig>;
 	/** Confine execute_bash / !cmd with an OS jail. Off by default. */
 	sandbox?: boolean;
+	/** Commit each successful agent file edit (only that file) with a generated Conventional Commit message. Off by default. */
+	autoCommit?: boolean;
 }
 
 /**
@@ -355,6 +467,10 @@ export interface AppConfig {
 	// `mcpServers`, gated by the same directory-trust prompt.
 	hooks?: HooksConfig;
 
+	// Formatters run on files the agent writes, before post-tool-use hooks.
+	// Same code-execution weight and trust gating as `hooks`.
+	formatters?: FormatterDefinition[];
+
 	// Nanocoder-specific tool configurations
 	nanocoderTools?: {
 		webSearch?: {
@@ -371,6 +487,12 @@ export interface AppConfig {
 	// Desktop notification configuration
 	notifications?: NotificationsConfig;
 
+	// Background CI-watch configuration (daemon-side)
+	ciWatch?: CiWatchConfig;
+
+	// Project-level verify/CI-watch policy: trust level, poll cadence overrides
+	verify?: VerifyConfig;
+
 	// Model mode defaults (global)
 	tune?: Partial<TuneConfig>;
 
@@ -382,6 +504,16 @@ export interface AppConfig {
 		maxMessages?: number;
 		retentionDays?: number;
 		directory?: string;
+		/** Generate a title once per session. ACP clients only. Default true. */
+		smartTitles?: boolean;
+		/** Title generation model. Defaults to the session's. */
+		titleModel?: string;
+		/**
+		 * Title generation provider. Defaults to the session's; a different one is
+		 * sent the opening user turns and tool summaries, which include file paths
+		 * and bash command strings.
+		 */
+		titleProvider?: string;
 	};
 
 	// Headless / non-interactive conversation limits (--plain and ACP loops)
@@ -392,6 +524,9 @@ export interface AppConfig {
 
 	// Confine execute_bash / !cmd with an OS jail (macOS sandbox-exec, Linux bwrap).
 	sandbox?: boolean;
+
+	// Commit each successful agent file edit, one commit per edited file.
+	autoCommit?: boolean;
 
 	// Agent-loop retry limits (interactive conversation loop)
 	retries?: RetryLimitsConfig;
@@ -407,12 +542,19 @@ export interface MCPServerConfig {
 	url?: string;
 	headers?: Record<string, string>;
 	timeout?: number;
+	/** Period between MCP ping health checks, in milliseconds. */
+	healthCheckInterval?: number;
 	alwaysAllow?: string[];
 	description?: string;
 	tags?: string[];
 	enabled?: boolean;
 	// Optional source information for display purposes
 	source?: 'project' | 'global' | 'env';
+	// Pre-substitution credentials for validateMCPConfigSecurity. Env-var
+	// references are expanded before runtime use, so the scanner must read
+	// these raw copies or every $API_KEY looks hardcoded.
+	rawEnv?: Record<string, string>;
+	rawHeaders?: Record<string, string>;
 }
 
 // Tune configuration for runtime model tuning via /tune command.
@@ -572,6 +714,19 @@ export const TUNE_DEFAULTS: TuneConfig = {
 	aggressiveCompact: false,
 };
 
+export interface VoiceConfig {
+	enabled: boolean;
+	activationMode: 'push-to-talk' | 'hands-free';
+	voiceName?: string;
+	sttBackend: 'local' | 'cloud';
+	ttsBackend: 'local' | 'cloud';
+}
+
+export interface TrustedDirectoryRecord {
+	path: string;
+	fingerprint: string;
+}
+
 export interface UserPreferences {
 	lastProvider?: string;
 	lastModel?: string;
@@ -586,11 +741,17 @@ export interface UserPreferences {
 	 * palette of its own. An unknown name falls back to `selectedTheme`.
 	 */
 	syntaxTheme?: ThemePreset;
-	trustedDirectories?: string[];
+	/**
+	 * Directories the user has trusted. A string is an older entry that
+	 * recorded only the path. A record also stores the fingerprint of what
+	 * that folder will run (see `describeProjectTrust`).
+	 */
+	trustedDirectories?: Array<string | TrustedDirectoryRecord>;
 	titleShape?: TitleShape;
 	nanocoderShape?: NanocoderShape;
 	tune?: TuneConfig;
 	notifications?: NotificationsConfig;
+	ciWatch?: CiWatchConfig;
 	/**
 	 * Namespaced settings (sessions, paste) read from nanocoder-preferences.json
 	 * by the loaders. Kept under `nanocoder` to match the on-disk shape the
@@ -604,11 +765,16 @@ export interface UserPreferences {
 			maxMessages?: number;
 			retentionDays?: number;
 			directory?: string;
+			smartTitles?: boolean;
+			titleModel?: string;
+			titleProvider?: string;
 		};
 		paste?: PasteConfig;
 	};
 	reasoningExpanded?: boolean;
 	compactToolDisplay?: boolean;
+	/** Show output on agent `execute_bash` cards, even in compact display. Default false. */
+	showAgentBashOutput?: boolean;
 	/**
 	 * Show the per-response usage footer under each assistant message
 	 * (provider-reported tokens + estimated cost). Defaults to true. When
@@ -632,10 +798,27 @@ export interface UserPreferences {
 	 */
 	alternateScreen?: boolean;
 	/**
+	 * Absolute project-root paths for which the one-time `--trust
+	 * full-commit` security warning has already been shown and confirmed.
+	 * Mirrors `trustedDirectories`'s shape/semantics: a list of
+	 * already-confirmed targets, not a single global flag, since a user may
+	 * run the daemon against several projects with different trust postures.
+	 */
+	fullCommitConfirmedProjects?: string[];
+	/**
+	 * Mouse reporting in alternate screen mode. true (default): the mouse wheel
+	 * scrolls the chat viewport, and text selection needs Shift+drag (Option+drag
+	 * in iTerm2). false: the terminal does not capture the mouse, so native text
+	 * selection (double-click, drag) works directly and the wheel does nothing.
+	 * Also switchable per-run with --mouse / --no-mouse flags.
+	 */
+	mouseReporting?: boolean;
+	/**
 	 * "Boring" output mode. false (default): playful touches stay, e.g. the
 	 * "Worked for a plucky 12s." completion note. true: progress text is
 	 * strictly functional and the system prompt gains a section telling the
 	 * model to be terse — no filler, no preamble, no celebratory wrap-ups.
 	 */
 	professionalTone?: boolean;
+	voice?: VoiceConfig;
 }

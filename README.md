@@ -5,7 +5,7 @@
 
 An open coding agent for your terminal, built by a community collective rather than a company. Bring your own model, keep your code on your machine, and owe nothing to anyone.
 
-Built by the [Nano Collective](https://nanocollective.org), a community collective building AI tooling not for profit, but for the community. Nanocoder runs agentic coding on the model of your choice: local models via Ollama, or any OpenAI-compatible API such as OpenRouter, Anthropic, and Google. You decide which provider runs your code and where your data goes. No closed-source features and no paid tiers gating the useful parts: **privacy-respecting**, **local-first**, and **open for all**.
+Built by the [Nano Collective](https://nanocollective.org), a community collective building AI tooling not for profit, but for the community. Nanocoder runs agentic coding on the model of your choice: local models via Ollama, or any OpenAI-compatible API such as OpenRouter, Requesty, Anthropic, and Google. You decide which provider runs your code and where your data goes. No closed-source features and no paid tiers gating the useful parts: **privacy-respecting**, **local-first**, and **open for all**.
 
 [![Typing SVG](https://readme-typing-svg.herokuapp.com?font=&size=33&letterSpacing=large&pause=1000&color=8373F7&center=true&vCenter=true&width=1000&lines=Nanocoder;your+private+%2C+local+first+AI+coding+assistant)](https://git.io/typing-svg)
 
@@ -44,22 +44,33 @@ nanocoder --provider ollama --model llama3.1
 # Flags can appear before or after 'run' command
 nanocoder run --provider openrouter "refactor database module"
 
-# Boot directly into a development mode (normal, auto-accept, yolo, plan)
+# Boot directly into a development mode (normal, auto-accept, yolo, plan, architect)
 nanocoder --mode yolo
 nanocoder --mode plan run "audit the auth module"
 
-# Fullscreen mode with in-app scrolling instead of the inline default
-nanocoder --alt-screen
+# Inline mode (native terminal scrollback) instead of the fullscreen default
+nanocoder --no-alt-screen
+
+# Review a branch or PR for bugs, security issues, and style violations
+nanocoder review main
+nanocoder review 42
+
+# Open a PR in an isolated worktree for an interactive coding session
+nanocoder worktree 42
 ```
+
+> **Note:** `nanocoder review` is diff-only v1 and requires an interactive terminal (TTY). It cannot be used with pipes or redirection and its output cannot currently be captured to a file — see [#1287](https://github.com/Nano-Collective/nanocoder/issues/1287).
+
+`nanocoder worktree <PR-number>` requires Git, an authenticated `gh` CLI, and an interactive terminal. It creates a sibling directory named `<repository>-pr-<number>`, checks out the PR head on a local `nanocoder/pr-<number>` branch, and starts Nanocoder there. The original working tree is left alone. Both the worktree and branch remain after Nanocoder exits; remove them with `git worktree remove <path>` and `git branch -d nanocoder/pr-<number>` when finished. An existing directory or branch is never reused or overwritten.
 
 ### Screen Modes
 
 Nanocoder supports two rendering modes, mirroring what Claude Code and Codex ship:
 
-- **Inline (default)** — renders on the main screen; finished messages print once into the terminal's native scrollback, so your terminal's scrollbar, mouse wheel, and search work as usual. The transcript stays in the terminal after you exit.
-- **Fullscreen** (`--alt-screen` flag, or `"alternateScreen": true` in preferences) — a fixed-height layout on the alternate screen buffer with in-app scrolling: mouse wheel and PgUp/PgDn, with a scroll indicator and automatic snap-back to bottom on new output. Mouse reporting takes click-drag selection away from the terminal, so **Ctrl+P** toggles selection mode to hand it back while you copy. `--no-alt-screen` forces inline mode even if the preference is set.
+- **Fullscreen (default)** — a fixed-height layout on the alternate screen buffer with in-app scrolling: PgUp/PgDn, with a scroll indicator and automatic snap-back to bottom on new output. Mouse reporting can be toggled with `--mouse` / `--no-mouse` or in preferences.
+- **Inline** (`--no-alt-screen` flag, or `"alternateScreen": false` in preferences) — renders on the main screen; finished messages print once into the terminal's native scrollback, so your terminal's scrollbar, mouse wheel, and search work as usual. The transcript stays in the terminal after you exit.
 
-In both modes, `/clear` fully resets the terminal to a fresh welcome banner, and exiting (Ctrl+C or `/exit`) erases the input UI cleanly, leaving the transcript and a farewell instead of a dead input box.
+In both modes, `/clear` fully resets the terminal to a fresh welcome banner, and exiting (Ctrl+C or `/exit`) erases the input UI cleanly instead of leaving a dead input box. Inline mode leaves the transcript in your scrollback; fullscreen mode restores the terminal to what it showed before Nanocoder started, so the transcript is not kept on screen (use `/resume` or `/export` to get it back).
 
 ## Documentation
 
@@ -81,21 +92,6 @@ It is also bigger than one tool. The collective is assembling an open ecosystem 
 ## Sponsors
 
 Nanocoder is built not for profit, but for the community, and that work is funded by sponsors. [Become one](https://nanocollective.org/sponsor).
-
-### [Atlas Cloud](https://www.atlascloud.ai/console/coding-plan)
-
-<p>
-  <a href="https://www.atlascloud.ai/console/coding-plan" title="Atlas Cloud">
-    <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="https://nanocollective.org/sponsors/atlas-cloud-white.png">
-      <img alt="Atlas Cloud" height="40" src="https://nanocollective.org/sponsors/atlas-cloud-black.png">
-    </picture>
-  </a>
-</p>
-
-> Atlas Cloud is a full-modal AI inference platform that gives developers a single AI API to access video generation, image generation, and LLM APIs. Instead of managing multiple vendor integrations, you connect once and get unified access to 300+ curated models across all modalities.
-
-Check out [Atlas Cloud's new coding plan promotion](https://www.atlascloud.ai/console/coding-plan) for more budget-friendly API access.
 
 ## Community
 

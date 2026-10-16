@@ -3,6 +3,7 @@ import {
 	getVisualLineSegments,
 	moveCursorToVisualLine,
 } from '../utils/text-wrapping';
+import * as textInputModule from './text-input';
 
 /**
  * Tests for readline keybind logic in the custom TextInput component.
@@ -100,6 +101,16 @@ function backspace(state: TextInputState): TextInputState {
 	return {
 		value: value.slice(0, cursorOffset - 1) + value.slice(cursorOffset),
 		cursorOffset: cursorOffset - 1,
+	};
+}
+
+// Simulate Delete (forward delete: removes character AFTER cursor)
+function forwardDelete(state: TextInputState): TextInputState {
+	const {value, cursorOffset} = state;
+	if (cursorOffset >= value.length) return state;
+	return {
+		value: value.slice(0, cursorOffset) + value.slice(cursorOffset + 1),
+		cursorOffset: cursorOffset, // cursor stays in place
 	};
 }
 
@@ -276,6 +287,44 @@ test('backspace deletes character before cursor', (t) => {
 test('backspace at start does nothing', (t) => {
 	const result = backspace({value: 'hello', cursorOffset: 0});
 	t.is(result.value, 'hello');
+	t.is(result.cursorOffset, 0);
+});
+
+// --- Delete (forward delete) ---
+
+test('Delete removes character after cursor', (t) => {
+	const result = forwardDelete({value: 'hello', cursorOffset: 2});
+	t.is(result.value, 'helo');
+	t.is(result.cursorOffset, 2);
+});
+
+test('Delete at end does nothing', (t) => {
+	const result = forwardDelete({value: 'hello', cursorOffset: 5});
+	t.is(result.value, 'hello');
+	t.is(result.cursorOffset, 5);
+});
+
+test('Delete from start removes first character', (t) => {
+	const result = forwardDelete({value: 'hello', cursorOffset: 0});
+	t.is(result.value, 'ello');
+	t.is(result.cursorOffset, 0);
+});
+
+test('Delete on single character leaves empty string', (t) => {
+	const result = forwardDelete({value: 'a', cursorOffset: 0});
+	t.is(result.value, '');
+	t.is(result.cursorOffset, 0);
+});
+
+test('Delete does not move cursor when removing character', (t) => {
+	const result = forwardDelete({value: 'abcde', cursorOffset: 3});
+	t.is(result.value, 'abce');
+	t.is(result.cursorOffset, 3);
+});
+
+test('Delete on empty string does nothing', (t) => {
+	const result = forwardDelete({value: '', cursorOffset: 0});
+	t.is(result.value, '');
 	t.is(result.cursorOffset, 0);
 });
 
@@ -528,3 +577,26 @@ test('handleEnter=true calls onSubmit when onEnter not provided', (t) => {
 });
 
 
+
+// The value effect can run after a newer keystroke was already emitted (fast
+// typing). Replays the sequence captured from a live repro of "/tune" typed
+// as "/etun": the late echo of "/" must not be read as an external change.
+test('classifyIncomingValue treats a late echo of our own edit as stale', t => {
+	const {classifyIncomingValue} = textInputModule;
+	let pending = ['/', '/t'];
+
+	let r = classifyIncomingValue('/', pending, '/t');
+	t.is(r.kind, 'stale-echo');
+	pending = r.pending;
+	t.deepEqual(pending, ['/t']);
+
+	r = classifyIncomingValue('/t', pending, '/t');
+	t.is(r.kind, 'echo');
+	t.deepEqual(r.pending, []);
+
+	t.is(classifyIncomingValue('/t', [], '/t').kind, 'unchanged');
+	// Undo/redo or a draft restore: a value we never emitted.
+	const ext = classifyIncomingValue('restored', ['/tu'], '/tu');
+	t.is(ext.kind, 'external');
+	t.deepEqual(ext.pending, []);
+});

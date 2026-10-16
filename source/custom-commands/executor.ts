@@ -1,3 +1,4 @@
+import {parseCustomCommandArgs} from '@/custom-commands/args';
 import {
 	parseCommandParameterSpec,
 	substituteTemplateVariables,
@@ -5,11 +6,31 @@ import {
 import type {CustomCommand} from '@/types/index';
 import {expandSections} from '@/utils/template-sections';
 
+/**
+ * Render declared parameters in conventional usage notation: `<name>` for
+ * an expected argument, `[name=default]` for one with a fallback. Returns
+ * an empty string when there are no parameters.
+ */
+export function formatParameterUsage(parameters?: string[]): string {
+	if (!parameters || parameters.length === 0) return '';
+	return parameters
+		.map(spec => {
+			const {name, defaultValue} = parseCommandParameterSpec(spec);
+			return defaultValue ? `[${name}=${defaultValue}]` : `<${name}>`;
+		})
+		.join(' ');
+}
+
 export class CustomCommandExecutor {
 	/**
-	 * Execute a custom command with given arguments
+	 * Execute a custom command with given arguments.
+	 *
+	 * `args` are the shell-style parsed tokens that fill declared parameters
+	 * positionally. `rawArgs` is the text exactly as typed after the command
+	 * name; `{{args}}` uses it when given, because re-joining the tokens strips
+	 * quotes and eats apostrophes ("don't" parses as an opening quote).
 	 */
-	execute(command: CustomCommand, args: string[]): string {
+	execute(command: CustomCommand, args: string[], rawArgs?: string): string {
 		// Build template variables from parameters and arguments
 		const variables: Record<string, string> = {};
 
@@ -25,7 +46,7 @@ export class CustomCommandExecutor {
 		}
 
 		// Also provide all args as a single variable
-		variables['args'] = args.join(' ');
+		variables['args'] = rawArgs ?? args.join(' ');
 
 		// Add some default context variables
 		variables['cwd'] = process.cwd();
@@ -61,18 +82,8 @@ export class CustomCommandExecutor {
 	formatHelp(command: CustomCommand): string {
 		const parts: string[] = [`/${command.fullName}`];
 
-		if (command.metadata.parameters && command.metadata.parameters.length > 0) {
-			parts.push(
-				command.metadata.parameters
-					.map((spec: string) => {
-						const {name, defaultValue} = parseCommandParameterSpec(spec);
-						// Conventional usage notation: <name> expected, [name=default]
-						// optional with a fallback.
-						return defaultValue ? `[${name}=${defaultValue}]` : `<${name}>`;
-					})
-					.join(' '),
-			);
-		}
+		const usage = formatParameterUsage(command.metadata.parameters);
+		if (usage) parts.push(usage);
 
 		if (command.metadata.description) {
 			parts.push(`- ${command.metadata.description}`);
@@ -87,4 +98,20 @@ export class CustomCommandExecutor {
 
 		return parts.join(' ');
 	}
+}
+
+/**
+ * Fill a custom command from the line the user typed, slash included.
+ * `{{args}}` keeps the text after the name. Named parameters get the
+ * shell-parsed tokens.
+ */
+export function expandCustomCommandPrompt(
+	command: CustomCommand,
+	invocation: string,
+	executor: CustomCommandExecutor,
+): string {
+	const trimmed = invocation.trim();
+	const commandName = trimmed.slice(1).split(/\s+/)[0] ?? '';
+	const rawArgs = trimmed.slice(commandName.length + 2).trim();
+	return executor.execute(command, parseCustomCommandArgs(rawArgs), rawArgs);
 }

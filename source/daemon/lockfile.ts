@@ -17,6 +17,7 @@ import {existsSync, mkdirSync} from 'node:fs';
 import {readFile, rename, unlink, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {dirname, join, posix} from 'node:path';
+import {ensureNanocoderGitignore} from '@/utils/ensure-nanocoder-gitignore';
 
 export interface DaemonLock {
 	pid: number;
@@ -118,9 +119,13 @@ export async function readLockfile(
 }
 
 export async function writeLockfile(lock: DaemonLock): Promise<void> {
+	await ensureNanocoderGitignore(lock.projectRoot);
+
 	const path = getLockfilePath(lock.projectRoot);
 	mkdirSync(dirname(path), {recursive: true});
+
 	const tmp = `${path}.${randomBytes(8).toString('hex')}.tmp`;
+
 	await writeFile(tmp, JSON.stringify(lock, null, 2), 'utf-8');
 	await rename(tmp, path);
 }

@@ -1,8 +1,9 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import test from "ava";
+import test, { type ExecutionContext } from "ava";
 import { clearAppConfig, reloadAppConfig } from "@/config/index";
+import { describeProjectTrust } from "@/config/project-trust";
 import {
 	clearPendingHookContext,
 	resetSessionStartHooks,
@@ -20,7 +21,9 @@ import type { RunPlainShellDeps } from "./shell.js";
 // Suppress ANSI so any incidental stderr writes stay readable if inspected.
 process.env.NO_COLOR = "1";
 
-const FAKE_CLIENT = {} as LLMClient;
+const FAKE_CLIENT = {
+	getProviderConfig: () => ({name: "test", type: "openai", models: [], config: {}}),
+} as unknown as LLMClient;
 const FAKE_TOOL_MANAGER = {
 	getAvailableToolNames: () => [],
 	getFilteredTools: () => ({}),
@@ -139,6 +142,7 @@ test.serial("plain shell creates a session for artifact tools", async (t) => {
 						kind: "success",
 						finalText: "done",
 						reasoning: null,
+						steps: 1,
 						toolCalls: [],
 					};
 				},
@@ -172,6 +176,7 @@ test.serial("plain shell marks and cleans its ephemeral artifact session", async
 						kind: "success",
 						finalText: "done",
 						reasoning: null,
+						steps: 1,
 						toolCalls: [],
 					};
 				},
@@ -257,6 +262,7 @@ test.serial(
 						finalText: "all done",
 						reasoning: null,
 						toolCalls: [],
+						steps: 3,
 					}),
 					getShutdownManager: makeFakeShutdownManager(shutdown),
 				}),
@@ -270,6 +276,7 @@ test.serial(
 		t.is(report.exitCode, 0);
 		t.is(report.finalText, "all done");
 		t.deepEqual(report.toolCalls, []);
+		t.is(report.steps, 3);
 		t.deepEqual(report.filesChanged, []);
 		t.is(report.usage, undefined);
 		t.is(shutdown.code, 0);
@@ -293,6 +300,7 @@ test.serial(
 						kind: "success",
 						finalText: "all done",
 						reasoning: null,
+						steps: 1,
 						toolCalls: [],
 						usage: {
 							inputTokens: 500,
@@ -337,6 +345,7 @@ test.serial(
 						message: "model exploded",
 						finalText: "",
 						reasoning: null,
+						steps: 1,
 						toolCalls: [],
 					}),
 					getShutdownManager: makeFakeShutdownManager(shutdown),
@@ -372,6 +381,7 @@ test.serial(
 						toolNames: ["risky_tool"],
 						finalText: "",
 						reasoning: null,
+						steps: 1,
 						toolCalls: [],
 					}),
 					getShutdownManager: makeFakeShutdownManager(shutdown),
@@ -406,6 +416,7 @@ test.serial(
 						kind: "success",
 						finalText: "edited",
 						reasoning: null,
+						steps: 1,
 						toolCalls: [
 							{
 								name: "write_file",
@@ -470,6 +481,36 @@ test.serial(
 	},
 );
 
+/**
+ * The two bypasses last different lengths of time: the flag covers one run,
+ * the variable saves the directory as trusted (see the persistence test
+ * below). The message has to say so, or a CI job exporting the variable
+ * "for this run" trusts every checkout it touches.
+ */
+function assertTrustBypassWording(
+	t: ExecutionContext,
+	message: string,
+): void {
+	t.true(
+		message.includes("--trust-directory to bypass the disclaimer for this run only"),
+		message,
+	);
+	t.true(
+		message.includes(
+			"NANOCODER_TRUST_DIRECTORY=1 to trust this directory permanently",
+		),
+		message,
+	);
+	// "for this run" belongs to the flag alone: it appears once, before the
+	// variable is mentioned, however the sentences around it are split.
+	const perRun = [...message.matchAll(/for this run/gi)];
+	t.is(perRun.length, 1, message);
+	t.true(
+		(perRun[0]?.index ?? -1) < message.indexOf("NANOCODER_TRUST_DIRECTORY=1"),
+		message,
+	);
+}
+
 test.serial(
 	"untrusted directory short-circuits with exit code 1 and no initializePlain call",
 	async (t) => {
@@ -500,6 +541,8 @@ test.serial(
 		t.is(report.kind, "error");
 		t.is(report.exitCode, 1);
 		t.regex(report.message, /not trusted/i);
+		assertTrustBypassWording(t, report.message);
+		t.is(report.steps, 0);
 		t.is(shutdown.code, 1);
 		t.false(
 			initCalled,
@@ -521,12 +564,21 @@ test.serial(
 				trustDirectory: false,
 				outputFormat: "json",
 				deps: baseDeps({
-					loadPreferences: () => ({ trustedDirectories: [cwd] }) as never,
+					loadPreferences: () =>
+						({
+							trustedDirectories: [
+								{
+									path: cwd,
+									fingerprint: describeProjectTrust(cwd).fingerprint,
+								},
+							],
+						}) as never,
 					initializePlain: makeFakeInitializePlain(),
 					runPlainConversation: makeFakeRunPlainConversation({
 						kind: "success",
 						finalText: "trusted via preferences",
 						reasoning: null,
+						steps: 1,
 						toolCalls: [],
 					}),
 					getShutdownManager: makeFakeShutdownManager(shutdown),
@@ -547,7 +599,11 @@ test.serial(
 	async (t) => {
 		const shutdown: CapturedShutdown = { code: null };
 		const stdout = capturingStdout();
-		let savedWith: { trustedDirectories?: string[] } | null = null;
+		let savedWith: {
+			trustedDirectories?: Array<
+				string | {path: string; fingerprint: string}
+			>;
+		} | null = null;
 		process.env.NANOCODER_TRUST_DIRECTORY = "1";
 		try {
 			await runPlainShell({
@@ -558,13 +614,18 @@ test.serial(
 				deps: baseDeps({
 					loadPreferences: () => ({ trustedDirectories: [] }) as never,
 					savePreferences: (prefs) => {
-						savedWith = prefs as { trustedDirectories?: string[] };
+						savedWith = prefs as {
+							trustedDirectories?: Array<
+								string | {path: string; fingerprint: string}
+							>;
+						};
 					},
 					initializePlain: makeFakeInitializePlain(),
 					runPlainConversation: makeFakeRunPlainConversation({
 						kind: "success",
 						finalText: "trusted via env var",
 						reasoning: null,
+						steps: 1,
 						toolCalls: [],
 					}),
 					getShutdownManager: makeFakeShutdownManager(shutdown),
@@ -579,11 +640,12 @@ test.serial(
 		t.is(report.kind, "success");
 		t.is(shutdown.code, 0);
 		t.truthy(savedWith);
-		t.true(
-			(savedWith?.trustedDirectories ?? []).some(
-				(dir) => dir === process.cwd(),
-			),
-		);
+		t.deepEqual(savedWith?.trustedDirectories, [
+			{
+				path: process.cwd(),
+				fingerprint: describeProjectTrust(process.cwd()).fingerprint,
+			},
+		]);
 	},
 );
 
@@ -644,6 +706,7 @@ test.serial(
 						kind: "success",
 						finalText: "all done",
 						reasoning: null,
+						steps: 1,
 						toolCalls: [],
 					}),
 					getShutdownManager: makeFakeShutdownManager(shutdown),
@@ -684,6 +747,7 @@ test.serial(
 						kind: "success",
 						finalText: "all done",
 						reasoning: null,
+						steps: 1,
 						toolCalls: [],
 					}),
 					getShutdownManager: makeFakeShutdownManager(shutdown),
@@ -726,6 +790,7 @@ test.serial(
 						kind: "success",
 						finalText: "all done",
 						reasoning: null,
+						steps: 1,
 						toolCalls: [],
 					}),
 					getShutdownManager: makeFakeShutdownManager(shutdown),
@@ -764,6 +829,7 @@ test.serial(
 						message: "model exploded",
 						finalText: "",
 						reasoning: null,
+						steps: 1,
 						toolCalls: [],
 					}),
 					getShutdownManager: makeFakeShutdownManager(shutdown),
@@ -798,6 +864,7 @@ test.serial(
 						toolNames: ["risky_tool"],
 						finalText: "",
 						reasoning: null,
+						steps: 1,
 						toolCalls: [],
 					}),
 					getShutdownManager: makeFakeShutdownManager(shutdown),
@@ -842,6 +909,7 @@ test.serial(
 		}
 
 		t.regex(stderr.get(), /not trusted/i);
+		assertTrustBypassWording(t, stderr.get());
 		t.is(shutdown.code, 1);
 		t.false(initCalled);
 	},
@@ -931,6 +999,7 @@ test.serial(
 							kind: "success",
 							finalText: "done",
 							reasoning: null,
+							steps: 1,
 							toolCalls: [],
 						};
 					},
@@ -998,6 +1067,7 @@ test.serial(
 							kind: "success",
 							finalText: "done",
 							reasoning: null,
+							steps: 1,
 							toolCalls: [],
 						};
 					},
@@ -1042,6 +1112,7 @@ test.serial("plain shell registers a session-end hook handler", async (t) => {
 					kind: "success",
 					finalText: "done",
 					reasoning: null,
+					steps: 1,
 					toolCalls: [],
 				}),
 				getShutdownManager: () =>

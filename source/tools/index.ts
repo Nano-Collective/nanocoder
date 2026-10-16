@@ -1,5 +1,6 @@
 import {agentTool} from '@/tools/agent-tool';
 import {askQuestionTool} from '@/tools/ask-question';
+import {browserTool} from '@/tools/browser';
 import {executeBashTool} from '@/tools/execute-bash';
 import {fetchUrlTool} from '@/tools/fetch-url';
 import {getFileOpTools} from '@/tools/file-ops';
@@ -9,6 +10,7 @@ import {writeFileTool} from '@/tools/file-ops/write-file';
 import {findFilesTool} from '@/tools/find-files';
 import {getGitTools} from '@/tools/git';
 import {listDirectoryTool} from '@/tools/list-directory';
+import {formatDocumentTool} from '@/tools/lsp-format-document';
 import {getDiagnosticsTool} from '@/tools/lsp-get-diagnostics';
 import {readFileTool} from '@/tools/read-file';
 import {searchFileContentsTool} from '@/tools/search-file-contents';
@@ -28,9 +30,11 @@ const staticTools: NanocoderToolExport[] = [
 	executeBashTool,
 	webSearchTool,
 	fetchUrlTool,
+	browserTool,
 	findFilesTool,
 	searchFileContentsTool,
 	getDiagnosticsTool,
+	formatDocumentTool,
 	listDirectoryTool,
 	agentTool,
 	// Interaction tools

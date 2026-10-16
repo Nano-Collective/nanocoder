@@ -23,7 +23,13 @@ export class PromptHistory {
 		try {
 			const content = await fs.readFile(this.historyFile, 'utf8');
 
-			if (content.startsWith(JSON_FORMAT_MARKER)) {
+			if (content.trim() === '{}') {
+				// getClosestConfigFile seeds a missing file with an empty JSON
+				// object. It is not history; reading it through the legacy
+				// line-per-entry path below made "{}" every new user's oldest
+				// Up-arrow entry.
+				this.history = [];
+			} else if (content.startsWith(JSON_FORMAT_MARKER)) {
 				// New JSON format with InputState objects
 				const jsonContent = content.slice(JSON_FORMAT_MARKER.length);
 				this.history = JSON.parse(jsonContent) as InputState[];
@@ -156,17 +162,6 @@ export class PromptHistory {
 
 	resetIndex(): void {
 		this.currentIndex = -1;
-	}
-
-	async clearHistory(): Promise<void> {
-		this.history = [];
-		this.currentIndex = -1;
-		try {
-			await fs.writeFile(this.historyFile, '', 'utf8');
-		} catch (error) {
-			const errorMessage = formatError(error);
-			logError(`Failed to clear prompt history: ${errorMessage}`);
-		}
 	}
 
 	getHistory(): InputState[] {

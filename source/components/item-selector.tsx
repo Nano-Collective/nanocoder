@@ -8,6 +8,8 @@ import {useTheme} from '@/hooks/useTheme';
 export interface ItemSelectorOption<TValue extends string = string> {
 	label: string;
 	value: TValue;
+	/** Text the filter matches against, when it should differ from `label`. */
+	searchText?: string;
 }
 
 interface ItemSelectorProps<TValue extends string = string> {

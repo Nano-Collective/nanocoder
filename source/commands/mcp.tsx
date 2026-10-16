@@ -1,5 +1,5 @@
 import {Box, Text} from 'ink';
-import React from 'react';
+import React, {useEffect, useState} from 'react';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
@@ -27,9 +27,16 @@ interface MCPProps {
 }
 
 export function MCP({toolManager}: MCPProps) {
+	const [, refresh] = useState(0);
+	useEffect(() => {
+		if (!toolManager?.onMCPHealthChange) return;
+		return toolManager.onMCPHealthChange(() => refresh(value => value + 1));
+	}, [toolManager]);
 	const boxWidth = useTerminalWidth();
 	const {colors} = useTheme();
-	const connectedServers = toolManager?.getConnectedServers() || [];
+	const connectedServers =
+		(toolManager?.getServerNames?.() ?? toolManager?.getConnectedServers()) ||
+		[];
 
 	return (
 		<TitledBoxWithPreferences
@@ -83,12 +90,21 @@ export function MCP({toolManager}: MCPProps) {
 				<>
 					<Box marginBottom={1}>
 						<Text color={colors.primary}>
-							Connected MCP Servers ({connectedServers.length}):
+							{connectedServers.every(
+								serverName => toolManager?.getServerInfo(serverName)?.connected,
+							)
+								? 'Connected MCP Servers'
+								: 'MCP Servers'}{' '}
+							({connectedServers.length}):
 						</Text>
 					</Box>
 
 					{connectedServers.map((serverName, index) => {
 						const serverTools = toolManager?.getServerTools(serverName) || [];
+						const mcpClient = toolManager?.getMCPClient?.();
+						const serverResources =
+							mcpClient?.getServerResources(serverName) || [];
+						const serverPrompts = mcpClient?.getServerPrompts(serverName) || [];
 						const serverInfo = toolManager?.getServerInfo(serverName);
 						const transportIcon = getTransportIcon(
 							serverInfo?.transport || 'stdio',
@@ -103,8 +119,13 @@ export function MCP({toolManager}: MCPProps) {
 										<Text color={colors.secondary}>
 											({serverInfo?.transport?.toUpperCase() || 'STDIO'})
 										</Text>{' '}
-										• {serverTools.length} tool
+										{serverInfo?.connected ? '• healthy' : '• unhealthy'} •{' '}
+										{serverTools.length} tool
 										{serverTools.length !== 1 ? 's' : ''}
+										{serverResources.length > 0 &&
+											`, ${serverResources.length} resource${serverResources.length !== 1 ? 's' : ''}`}
+										{serverPrompts.length > 0 &&
+											`, ${serverPrompts.length} prompt${serverPrompts.length !== 1 ? 's' : ''}`}
 									</Text>
 
 									{serverInfo?.url && (
@@ -115,11 +136,11 @@ export function MCP({toolManager}: MCPProps) {
 										<Text color={colors.success}>{serverInfo.description}</Text>
 									)}
 
-									{/* {serverInfo?.tags && serverInfo.tags.length > 0 && (
+									{!!serverInfo?.tags?.length && (
 										<Text color={colors.secondary}>
 											Tags: {serverInfo.tags.map(tag => `#${tag}`).join(' ')}
 										</Text>
-									)} */}
+									)}
 									{!!serverInfo?.autoApprovedCommands?.length && (
 										<Text color={colors.secondary}>
 											Auto-approved tools:{' '}
@@ -131,6 +152,19 @@ export function MCP({toolManager}: MCPProps) {
 											Tools:{' '}
 											{serverTools
 												.map((t: {name: string}) => t.name)
+												.join(', ')}
+										</Text>
+									)}
+									{serverResources.length > 0 && (
+										<Text color={colors.tool}>
+											Resources: {serverResources.map(r => r.name).join(', ')}
+										</Text>
+									)}
+									{serverPrompts.length > 0 && (
+										<Text color={colors.tool}>
+											Prompts:{' '}
+											{serverPrompts
+												.map(p => `/mcp:${serverName}:${p.name}`)
 												.join(', ')}
 										</Text>
 									)}

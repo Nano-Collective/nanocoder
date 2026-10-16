@@ -64,8 +64,15 @@ export const lazyCommands: LazyCommand[] = [
 	},
 	{
 		name: 'copy',
-		description: 'Copy the last assistant response to the clipboard',
+		description:
+			'Copy the last assistant response to the clipboard (/copy [code] for the last code block)',
 		load: () => import('@/commands/copy').then(m => m.copyCommand),
+	},
+	{
+		name: 'expand',
+		description:
+			'Show one tool result in full (/expand <n>); run without a number to list recent results',
+		load: () => import('@/commands/expand').then(m => m.expandCommand),
 	},
 	{
 		name: 'commit',
@@ -73,6 +80,14 @@ export const lazyCommands: LazyCommand[] = [
 			'Generate a conventional commit message from staged changes (--copy)',
 		progressLabel: 'Generating commit message',
 		load: () => import('@/commands/commit').then(m => m.commitCommand),
+	},
+	{
+		name: 'review',
+		description:
+			'Review a branch or PR diff for bugs, security issues, and style violations',
+		progressLabel: 'Reviewing code',
+		echoInvocation: true,
+		load: () => import('@/commands/review').then(m => m.reviewCommand),
 	},
 	{
 		name: 'doctor',
@@ -119,7 +134,7 @@ export const lazyCommands: LazyCommand[] = [
 	},
 	{
 		name: 'export',
-		description: 'Export the chat history to a markdown file',
+		description: 'Export the chat history to a markdown or JSON file',
 		load: () => import('@/commands/export').then(m => m.exportCommand),
 	},
 	{
@@ -251,5 +266,10 @@ export const lazyCommands: LazyCommand[] = [
 		description:
 			'Inspect what the prompt scrubber will remove from your prompts',
 		load: () => import('@/commands/privacy').then(m => m.privacyCommand),
+	},
+	{
+		name: 'voice',
+		description: 'Toggle voice mode and configure voice settings',
+		load: () => import('@/commands/voice').then(m => m.voiceCommand),
 	},
 ];

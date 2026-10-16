@@ -1,11 +1,6 @@
 {
 	"$schema": "https://unpkg.com/knip@5/schema.json",
-	"ignoreDependencies": [
-		"pino-pretty",
-		"pino-roll",
-		"sonic-boom",
-		"lint-staged"
-	],
+	"ignoreDependencies": ["lint-staged"],
 	"ignoreBinaries": [
 		"vsce",
 		"semgrep",
@@ -23,7 +18,8 @@
 		"scripts/fetch-models.js",
 		".husky/**",
 		".github/**",
-		"benchmarks/count-loader.mjs"
+		"benchmarks/count-loader.mjs",
+		"benchmarks/agent/fixtures/**"
 	],
 	"ignoreExportsUsedInFile": {
 		"interface": true,

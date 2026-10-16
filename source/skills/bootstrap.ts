@@ -112,11 +112,9 @@ export async function bootSkillPipeline(
 		...synthesizeToolSkills(opts.toolManager),
 	];
 
-	// Cross-kind flat-skill name collisions: a command "foo" and a tool "foo"
-	// would both surface in `/skills` under the same name. Detect, report,
-	// and drop the later one. The underlying registries (commands, tools,
-	// agents) are unaffected - those still allow same-name across kinds and
-	// the original member is reachable via `/foo` or the tool invocation.
+	// Same-kind, same-name duplicates would register the same member's
+	// triggers twice. Detect, report, and drop the later one. Different
+	// kinds sharing a name (command "review" + agent "review") are kept.
 	const {kept: flatSkills, collisions: flatNameCollisions} =
 		dedupeFlatSkills(rawFlatSkills);
 
@@ -173,11 +171,11 @@ export async function bootSkillPipeline(
 }
 
 /**
- * Drop cross-kind name collisions among flat-form skills. Two synthesized
- * skills sharing a `name` would both surface in `/skills` under the same
- * heading - we keep the first occurrence (commands win over agents over
- * tools, matching the synthesizer order) and emit a `SkillCollision` for
- * each duplicate so it lands in the daemon log / chat queue.
+ * Drop duplicate flat-form skills. Skills are keyed by kind and name, so a
+ * command `review` and an agent `review` both survive (they are different
+ * members, shown side by side in `/skills`). Only a true duplicate - same
+ * kind, same name - is dropped, with a `SkillCollision` so it lands in the
+ * daemon log / chat queue instead of vanishing along with its triggers.
  */
 function dedupeFlatSkills(skills: Skill[]): {
 	kept: Skill[];
@@ -187,17 +185,18 @@ function dedupeFlatSkills(skills: Skill[]): {
 	const kept: Skill[] = [];
 	const collisions: SkillCollision[] = [];
 	for (const skill of skills) {
-		const first = seen.get(skill.name);
+		const key = `${kindOf(skill)}:${skill.name}`;
+		const first = seen.get(key);
 		if (first) {
 			collisions.push({
 				skill: skill.name,
 				kind: kindOf(skill),
 				name: skill.name,
-				message: `Flat skill "${skill.name}" (${kindOf(skill)}) collides with already-loaded "${first.name}" (${kindOf(first)}). Keeping the first; the new entry is dropped from /skills.`,
+				message: `Flat skill "${skill.name}" (${kindOf(skill)}) at ${skill.source.rootPath} duplicates the one at ${first.source.rootPath}. Keeping the first; the duplicate and its subscriptions are dropped.`,
 			});
 			continue;
 		}
-		seen.set(skill.name, skill);
+		seen.set(key, skill);
 		kept.push(skill);
 	}
 	return {kept, collisions};

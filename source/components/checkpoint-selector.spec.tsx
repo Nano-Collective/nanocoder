@@ -21,6 +21,34 @@ const createMockCheckpoint = (
 	sizeBytes: 1024,
 });
 
+test('CheckpointSelector windows a long checkpoint list', t => {
+	// An unbounded list ran well past the terminal; the session list already
+	// caps its window, and checkpoints now use the same component.
+	const checkpoints = Array.from({length: 25}, (_, i) =>
+		createMockCheckpoint(`cp-${String(i).padStart(2, '0')}`),
+	);
+
+	const {lastFrame, unmount} = renderWithTheme(
+		<CheckpointSelector
+			checkpoints={checkpoints}
+			onSelect={() => {}}
+			onCancel={() => {}}
+			currentMessageCount={0}
+		/>,
+	);
+
+	const output = lastFrame() || '';
+	const rendered = output.match(/cp-\d{2}/g) ?? [];
+	t.true(rendered.length > 0, 'the window must show checkpoints');
+	t.true(
+		rendered.length <= 10,
+		`expected at most 10 rows, saw ${rendered.length}`,
+	);
+	t.true(output.includes('cp-00'), 'the window starts at the highlighted row');
+	t.false(output.includes('cp-24'), 'rows past the window must not render');
+	unmount();
+});
+
 test('CheckpointSelector renders empty state when no checkpoints', t => {
 	const {lastFrame} = renderWithTheme(
 		<CheckpointSelector

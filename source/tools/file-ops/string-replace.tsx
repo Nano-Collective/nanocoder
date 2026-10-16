@@ -6,11 +6,16 @@ import {getColors} from '@/config/index';
 import {getSafeSessionCwd} from '@/services/session-cwd';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
+import {EditRecoveryError} from '@/utils/edit-recovery';
 import {formatError} from '@/utils/error-formatter';
 import {getCachedFileContent, invalidateCache} from '@/utils/file-cache';
 import {replaceFirstLiteral} from '@/utils/literal-replace';
-import {validatePath} from '@/utils/path-validators';
-import {hasSeenFile, markFileSeen} from '@/utils/read-tracker';
+import {validateEditableFormat, validatePath} from '@/utils/path-validators';
+import {
+	forgetReadContent,
+	hasSeenFile,
+	markFileSeen,
+} from '@/utils/read-tracker';
 import {createFileToolApproval} from '@/utils/tool-approval';
 import {
 	closeDiffInVSCode,
@@ -24,6 +29,7 @@ interface StringReplaceArgs {
 	path: string;
 	old_str: string;
 	new_str: string;
+	description?: string;
 }
 
 const STRING_REPLACE_CONTEXT_LINES = 20;
@@ -71,6 +77,11 @@ const executeStringReplace = async (
 		);
 	}
 
+	const formatResult = validateEditableFormat(path);
+	if (!formatResult.valid) {
+		throw new Error(formatResult.error);
+	}
+
 	const absPath = resolve(getSafeSessionCwd(), path);
 	const cached = await getCachedFileContent(absPath);
 	const fileContent = cached.content;
@@ -78,8 +89,11 @@ const executeStringReplace = async (
 	const occurrences = fileContent.split(old_str).length - 1;
 
 	if (occurrences === 0) {
-		throw new Error(
+		throw new EditRecoveryError(
 			`Content not found in file. The file may have changed since you last read it.\n`,
+			path,
+			fileContent,
+			old_str,
 		);
 	}
 
@@ -95,6 +109,7 @@ const executeStringReplace = async (
 	// The model now knows the file's current contents, so a follow-up edit is
 	// not blind.
 	markFileSeen(absPath);
+	forgetReadContent(absPath);
 
 	const oldStrLines = old_str.split('\n');
 	const newStrLines = new_str.split('\n');
@@ -119,7 +134,7 @@ const executeStringReplace = async (
 
 const stringReplaceCoreTool = tool({
 	description:
-		'Replace exact string content in a file. IMPORTANT: Provide exact content including whitespace and surrounding context. For unique matching, include 2-3 lines before/after the change. Break large changes into multiple small replacements. Successful edits return a bounded context window around the changed range, not the entire file.',
+		'Replace exact string content in a file. IMPORTANT: Provide exact content including whitespace and surrounding context. For unique matching, include 2-3 lines before/after the change. Break large changes into multiple small replacements. Successful edits return a bounded context window around the changed range, not the entire file. Missing matches return recovery evidence: verify candidate ranges and retry with actualText copied exactly; if text is omitted, read the indicated range first.',
 	inputSchema: jsonSchema<StringReplaceArgs>({
 		type: 'object',
 		properties: {
@@ -136,6 +151,11 @@ const stringReplaceCoreTool = tool({
 				type: 'string',
 				description:
 					'The replacement string. Can be empty to delete content. Must preserve proper indentation and formatting.',
+			},
+			description: {
+				type: 'string',
+				description:
+					'Optional brief summary of the intent or purpose of this replacement.',
 			},
 		},
 		required: ['path', 'old_str', 'new_str'],
@@ -198,6 +218,9 @@ const stringReplaceValidator = async (
 	const pathResult = validatePath(path);
 	if (!pathResult.valid) return pathResult;
 
+	const formatResult = validateEditableFormat(path);
+	if (!formatResult.valid) return formatResult;
+
 	const absPath = resolve(getSafeSessionCwd(), path);
 	try {
 		await access(absPath, constants.F_OK);
@@ -243,7 +266,12 @@ const stringReplaceValidator = async (
 		if (occurrences === 0) {
 			return {
 				valid: false,
-				error: `Content not found in file. The file may have changed since you last read it. Suggestion: Read the file again to see current contents.`,
+				error: new EditRecoveryError(
+					'Content not found in file. The file may have changed since you last read it.',
+					path,
+					fileContent,
+					old_str,
+				).message,
 			};
 		}
 

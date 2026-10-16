@@ -287,11 +287,23 @@ export default memo(function Status({
 							{mcpConnected < mcpTotal && (
 								<Box flexDirection="column" marginLeft={2}>
 									{mcpStatus
-										.filter(s => s.status === 'failed')
+										.filter(
+											s => s.status === 'failed' || s.status === 'unhealthy',
+										)
 										.map(server => (
-											<Text key={server.name} color={colors.error}>
+											<Text
+												key={server.name}
+												color={
+													server.status === 'unhealthy'
+														? colors.warning
+														: colors.error
+												}
+											>
 												• {server.name}:{' '}
-												{server.errorMessage || 'Connection failed'}
+												{server.errorMessage ||
+													(server.status === 'unhealthy'
+														? 'Health check failed'
+														: 'Connection failed')}
 											</Text>
 										))}
 								</Box>

@@ -5,8 +5,14 @@ import type {
 	ToolCallLocation,
 	ToolKind,
 } from '@agentclientprotocol/sdk';
+import {getSafeSessionCwd} from '@/services/session-cwd';
 import type {ToolCall} from '@/types/core';
 import {replaceFirstLiteral} from '@/utils/literal-replace';
+
+// A bash `cd` moves the session cwd and leaves process.cwd() at the launch dir.
+function resolveToolPath(path: string): string {
+	return resolve(getSafeSessionCwd(), path);
+}
 
 export interface AcpToolCallMeta {
 	title: string;
@@ -23,6 +29,7 @@ const TOOL_KINDS: Record<string, ToolKind> = {
 	read_file: 'read',
 	list_directory: 'read',
 	lsp_get_diagnostics: 'read',
+	lsp_format_document: 'edit',
 	search_file_contents: 'search',
 	find_files: 'search',
 	string_replace: 'edit',
@@ -88,7 +95,9 @@ export async function buildToolCallMeta(
 	}
 
 	const path = extractPath(args);
-	const locations: ToolCallLocation[] = path ? [{path: resolve(path)}] : [];
+	const locations: ToolCallLocation[] = path
+		? [{path: resolveToolPath(path)}]
+		: [];
 	const content: ToolCallContent[] = [];
 	let title = name;
 
@@ -136,10 +145,10 @@ function buildFileOpMeta(args: Record<string, unknown>): AcpToolCallMeta {
 	// mkdir reports nothing at all: clients treat `locations` as things to open,
 	// and the directory it creates is not one of them.
 	if (path && operation !== 'copy' && operation !== 'mkdir') {
-		locations.push({path: resolve(path)});
+		locations.push({path: resolveToolPath(path)});
 	}
 	if (destination && (operation === 'move' || operation === 'copy')) {
-		locations.push({path: resolve(destination)});
+		locations.push({path: resolveToolPath(destination)});
 	}
 
 	const target = [path, destination].filter(Boolean).join(' → ');
@@ -195,7 +204,7 @@ async function buildStringReplaceDiff(
 		return undefined;
 	}
 
-	const absPath = resolve(path);
+	const absPath = resolveToolPath(path);
 	let current: string;
 	try {
 		current = await readFile(absPath, 'utf8');
@@ -228,7 +237,7 @@ async function buildWriteFileDiff(
 		typeof args.content === 'string'
 			? args.content
 			: String(args.content ?? '');
-	const absPath = resolve(path);
+	const absPath = resolveToolPath(path);
 
 	let oldText: string | null = null;
 	try {

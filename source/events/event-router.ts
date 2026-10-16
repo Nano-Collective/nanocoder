@@ -95,6 +95,14 @@ export function matchesFilter(sub: Subscription, event: Event): boolean {
 		return filter.cron === event.payload.cron;
 	}
 
+	if (event.kind === 'ci.job.failed' && sub.kind === 'ci.job.failed') {
+		const filter = sub.filter;
+		if (!filter?.branches || filter.branches.length === 0) return true;
+		return filter.branches.some(pattern =>
+			matchGlob(pattern, event.payload.branch),
+		);
+	}
+
 	return false;
 }
 
