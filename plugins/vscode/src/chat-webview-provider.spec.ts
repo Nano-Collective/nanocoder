@@ -209,3 +209,44 @@ test.serial('mention search covers the workspace folder when nanocoder.cwd is un
 		resetMentionStubs();
 	}
 });
+
+test('ChatWebviewProvider - resumeSession failure retains existing transcript and does not post clear or sessionLoaded', async (t) => {
+	const {provider, acpClient, getPostedMessages, resetPostedMessages} = makeStubs();
+	(acpClient as any).resumeSession = async () => false;
+
+	resetPostedMessages();
+	const result = await provider.resumeSession('session-fail');
+
+	t.false(result);
+	const messages = getPostedMessages();
+	t.false(messages.some(m => m.type === 'clear'), 'must not clear the webview on failed resume');
+	t.false(messages.some(m => m.type === 'sessionLoaded'), 'must not send sessionLoaded on failed resume');
+});
+
+test('ChatWebviewProvider - resumeSession success buffers updates and posts clear then updates then sessionLoaded', async (t) => {
+	const {provider, acpClient, getPostedMessages, resetPostedMessages} = makeStubs();
+	(acpClient as any).resumeSession = async () => {
+		(acpClient as any).onSessionUpdate?.({
+			sessionUpdate: 'agent_message_chunk',
+			content: {text: 'replayed turn'},
+		});
+		return true;
+	};
+
+	resetPostedMessages();
+	const result = await provider.resumeSession('session-success');
+
+	t.true(result);
+	const messages = getPostedMessages();
+	const types = messages.map(m => m.type);
+	const clearIdx = types.indexOf('clear');
+	const updateIdx = types.indexOf('acpUpdate');
+	const loadedIdx = types.indexOf('sessionLoaded');
+
+	t.true(clearIdx !== -1, 'clear must be sent on success');
+	t.true(updateIdx !== -1, 'buffered acpUpdate must be sent on success');
+	t.true(loadedIdx !== -1, 'sessionLoaded must be sent on success');
+	t.true(clearIdx < updateIdx, 'clear must precede buffered updates');
+	t.true(updateIdx < loadedIdx, 'buffered updates must precede sessionLoaded');
+});
+

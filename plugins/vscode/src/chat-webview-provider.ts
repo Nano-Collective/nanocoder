@@ -52,6 +52,9 @@ export class ChatWebviewProvider
 	private readonly _queue = new PromptQueue();
 
 	private readonly _settingsManager: SettingsManager;
+	private _isResumingSession = false;
+	private _resumedSessionUpdates: any[] = [];
+	private _resumedArtifactsMeta: unknown = undefined;
 
 	constructor(
 		private readonly _extensionUri: vscode.Uri,
@@ -62,6 +65,10 @@ export class ChatWebviewProvider
 		this._settingsManager = new SettingsManager(this._outputChannel);
 		// Listen for session updates from ACP
 		this._acpClient.onSessionUpdate = (update: any) => {
+			if (this._isResumingSession) {
+				this._resumedSessionUpdates.push(update);
+				return;
+			}
 			this._planReview.observeSessionUpdate(update);
 			if (this._artifacts.observeSessionUpdate(update)) {
 				this.postArtifacts();
@@ -69,11 +76,15 @@ export class ChatWebviewProvider
 			this.handleDiffs(update);
 			this.postMessage({
 				type: 'acpUpdate',
-				update
+				update,
 			});
 		};
 
 		this._acpClient.onSessionArtifacts = (meta: unknown) => {
+			if (this._isResumingSession) {
+				this._resumedArtifactsMeta = meta;
+				return;
+			}
 			this._artifacts.replaceFromMeta(meta);
 			this.postArtifacts();
 		};
@@ -360,15 +371,7 @@ export class ChatWebviewProvider
 						this._broadcastSessions();
 						break;
 					case 'resumeSession':
-						this._outputChannel.appendLine(`[Webview] User resumed session: ${message.sessionId}`);
-						this._planReview.reset();
-						this._artifacts.reset();
-						this.postArtifacts();
-						this._discardQueuedPrompts('resume session');
-						this.postMessage({type: 'clear', isLoading: true});
-						this._acpClient.resumeSession(message.sessionId).finally(() => {
-							this.postMessage({type: 'sessionLoaded'});
-						});
+						await this.resumeSession(message.sessionId);
 						break;
 					case 'deleteSession':
 						this._outputChannel.appendLine(`[Webview] User deleted session: ${message.sessionId}`);
@@ -533,6 +536,55 @@ export class ChatWebviewProvider
 				status: 'error',
 				message: `Failed to initialize session: ${error}`,
 			});
+		}
+	}
+
+	public async resumeSession(sessionId: string): Promise<boolean> {
+		if (this._isResumingSession) {
+			this._outputChannel.appendLine('[Webview] Resume already in progress, ignoring request.');
+			return false;
+		}
+
+		this._outputChannel.appendLine(`[Webview] User resumed session: ${sessionId}`);
+		this._isResumingSession = true;
+		this._resumedSessionUpdates = [];
+		this._resumedArtifactsMeta = undefined;
+
+		try {
+			const success = await this._acpClient.resumeSession(sessionId);
+			if (success) {
+				this._planReview.reset();
+				this._artifacts.reset();
+				if (this._resumedArtifactsMeta !== undefined) {
+					this._artifacts.replaceFromMeta(this._resumedArtifactsMeta);
+				}
+				this.postArtifacts();
+				this._discardQueuedPrompts('resume session');
+				this.postMessage({type: 'clear', isLoading: true});
+
+				for (const update of this._resumedSessionUpdates) {
+					this._planReview.observeSessionUpdate(update);
+					if (this._artifacts.observeSessionUpdate(update)) {
+						this.postArtifacts();
+					}
+					this.handleDiffs(update);
+					this.postMessage({
+						type: 'acpUpdate',
+						update,
+					});
+				}
+				this.postMessage({type: 'sessionLoaded'});
+				return true;
+			} else {
+				this._outputChannel.appendLine(
+					`[Webview] Resume failed for session ${sessionId}; preserving current transcript.`,
+				);
+				return false;
+			}
+		} finally {
+			this._isResumingSession = false;
+			this._resumedSessionUpdates = [];
+			this._resumedArtifactsMeta = undefined;
 		}
 	}
 
