@@ -174,6 +174,7 @@ interface ProcessAssistantResponseParams {
 	onPrivacyEvent?: (scrubbedDelta: number) => void;
 	onToolExecuted?: (toolName: string) => void;
 	onFinalAssistantText?: (content: string) => void;
+	restrictedScope?: string | string[];
 	// Number of consecutive empty assistant turns that have already been
 	// nudged in this loop. The empty-response branch increments and
 	// recurses; every other recursion site resets to 0.
@@ -1060,7 +1061,11 @@ export const processAssistantResponse = async (
 					...displayOptions,
 					setLiveComponent,
 					signal: controller.signal,
-					executionContext: {sessionId, workingDirectory},
+					executionContext: {
+						sessionId,
+						workingDirectory,
+						context: {restrictedScope: params.restrictedScope},
+					},
 					beforeExecute: async toolCall => {
 						if (toolCall.function.name === '__xml_validation_error__')
 							return true;
@@ -1153,6 +1158,7 @@ export const processAssistantResponse = async (
 					abortSignal: controller.signal,
 					sessionId,
 					workingDirectory,
+					context: {restrictedScope: params.restrictedScope},
 				});
 
 			for (let i = 0; i < confirmTools.length; i++) {
@@ -1230,7 +1236,10 @@ export const processAssistantResponse = async (
 				autoDiagnosticsMessage = await buildAutoDiagnosticsMessage(
 					validToolCalls,
 					turnResults,
-					processToolUse,
+					tc =>
+						processToolUse(tc, {
+							context: {restrictedScope: params.restrictedScope},
+						}),
 				);
 			}
 			const builder = new MessageBuilder(updatedMessages);

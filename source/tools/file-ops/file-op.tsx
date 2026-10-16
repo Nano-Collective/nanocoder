@@ -116,6 +116,7 @@ const fileOpFormatter = makeSimpleToolFormatter<FileOpArgs>(
 
 const fileOpValidator = async (
 	args: FileOpArgs,
+	context?: import('@/types/core').ToolContext,
 ): Promise<{valid: true} | {valid: false; error: string}> => {
 	if (!args.operation) {
 		return {valid: false, error: '⚒ operation is required'};
@@ -126,12 +127,14 @@ const fileOpValidator = async (
 
 	// Directory creation: only path validation, parents are created.
 	if (args.operation === 'mkdir') {
-		return validatePath(args.path);
+		return validatePath(args.path, {restrictedScope: context?.restrictedScope});
 	}
 
 	// delete: path must exist and be a file.
 	if (args.operation === 'delete') {
-		const pathResult = validatePath(args.path);
+		const pathResult = validatePath(args.path, {
+			restrictedScope: context?.restrictedScope,
+		});
 		if (!pathResult.valid) return pathResult;
 
 		const absPath = resolve(getSafeSessionCwd(), args.path);
@@ -152,7 +155,9 @@ const fileOpValidator = async (
 		};
 	}
 
-	const pairResult = validatePathPair(args.path, args.destination);
+	const pairResult = validatePathPair(args.path, args.destination, {
+		restrictedScope: context?.restrictedScope,
+	});
 	if (!pairResult.valid) return pairResult;
 
 	const srcAbsPath = resolve(getSafeSessionCwd(), args.path);

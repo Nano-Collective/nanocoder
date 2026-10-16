@@ -282,6 +282,9 @@ Options:
                       or a session uuid). With no id, opens the session picker at
                       startup. Mutually exclusive with --continue. Interactive mode only.
   run                 Run in non-interactive mode
+  swarm               Run a goal using a swarm of parallel agents
+                      Options: --workers <1-10>, --swarm-mode <review|apply|yolo>,
+                      --restricted-scope <path>
 
 Examples:
   nanocoder init --preset nextjs
@@ -291,6 +294,7 @@ Examples:
   nanocoder --provider ollama --model llama3.1 --context-max 128k
   nanocoder --mode yolo run "refactor database module"
   nanocoder --mode plan
+  nanocoder swarm --workers 4 --swarm-mode review "refactor auth"
   nanocoder --trust-directory run "analyze src/app.ts"
   nanocoder --plain run "summarize README.md"
   nanocoder --plain --json run "summarize README.md" | jq .finalText
@@ -542,6 +546,138 @@ async function main(): Promise<void> {
 		}
 	}
 
+	// --restricted-scope <paths> after `run`: comma-separated path allowlist.
+	// The flag (and its value) is stripped from the prompt by parseRunPrompt.
+	let runRestrictedScope: string[] | undefined;
+	if (isRunCommand) {
+		const afterRun = args.slice(runCommandIndex + 1);
+		for (let i = 0; i < afterRun.length; i++) {
+			const arg = afterRun[i];
+			let raw: string | undefined;
+			if (arg === '--restricted-scope') raw = afterRun[i + 1];
+			else if (arg.startsWith('--restricted-scope='))
+				raw = arg.slice('--restricted-scope='.length);
+			if (raw === undefined) continue;
+			runRestrictedScope = raw
+				.split(',')
+				.map(v => v.trim())
+				.filter(Boolean);
+			break;
+		}
+	}
+
+	// Check for swarm command
+	let swarmConfig: import('@/app/types').SwarmConfig | undefined;
+	const swarmCommandIndex = args[0] === 'swarm' ? 0 : -1;
+	if (swarmCommandIndex !== -1) {
+		const afterSwarmArgs = args.slice(swarmCommandIndex + 1);
+		const promptArgs: string[] = [];
+		let workers = 4;
+		let swarmMode: 'review' | 'apply' | 'yolo' = 'review';
+		let restrictedScope: string | undefined;
+
+		for (let i = 0; i < afterSwarmArgs.length; i++) {
+			const arg = afterSwarmArgs[i];
+			// Skip known global flags so they don't end up in the prompt
+			if (
+				arg === '--vscode' ||
+				arg === '--json' ||
+				arg === '--trust-directory' ||
+				arg === '--plain' ||
+				arg === '--no-plain' ||
+				arg === '--telemetry' ||
+				arg === '--no-alt-screen' ||
+				arg === '--alt-screen' ||
+				arg === '--mouse' ||
+				arg === '--no-mouse' ||
+				arg.startsWith('--mode=') ||
+				arg.startsWith('--output-format=')
+			) {
+				continue;
+			}
+			if (
+				arg === '--vscode-port' ||
+				arg === '--provider' ||
+				arg === '--model' ||
+				arg === '--context-max' ||
+				arg === '--mode' ||
+				arg === '--output-format'
+			) {
+				i++; // skip flag and value
+				continue;
+			}
+
+			// Parse swarm specific flags
+			if (arg === '--workers' && afterSwarmArgs[i + 1]) {
+				const parsed = parseInt(afterSwarmArgs[i + 1], 10);
+				if (isNaN(parsed) || parsed < 1 || parsed > 10) {
+					console.error(
+						`Invalid --workers value: "${afterSwarmArgs[i + 1]}". Must be an integer between 1 and 10.`,
+					);
+					process.exit(1);
+				}
+				workers = parsed;
+				i++;
+				continue;
+			} else if (arg.startsWith('--workers=')) {
+				const val = arg.slice('--workers='.length);
+				const parsed = parseInt(val, 10);
+				if (isNaN(parsed) || parsed < 1 || parsed > 10) {
+					console.error(
+						`Invalid --workers value: "${val}". Must be an integer between 1 and 10.`,
+					);
+					process.exit(1);
+				}
+				workers = parsed;
+				continue;
+			}
+
+			if (arg === '--swarm-mode' && afterSwarmArgs[i + 1]) {
+				const val = afterSwarmArgs[i + 1];
+				if (val !== 'review' && val !== 'apply' && val !== 'yolo') {
+					console.error(
+						`Invalid --swarm-mode value: "${val}". Must be 'review', 'apply', or 'yolo'.`,
+					);
+					process.exit(1);
+				}
+				swarmMode = val as 'review' | 'apply' | 'yolo';
+				i++;
+				continue;
+			} else if (arg.startsWith('--swarm-mode=')) {
+				const val = arg.slice('--swarm-mode='.length);
+				if (val !== 'review' && val !== 'apply' && val !== 'yolo') {
+					console.error(
+						`Invalid --swarm-mode value: "${val}". Must be 'review', 'apply', or 'yolo'.`,
+					);
+					process.exit(1);
+				}
+				swarmMode = val as 'review' | 'apply' | 'yolo';
+				continue;
+			}
+
+			if (arg === '--restricted-scope' && afterSwarmArgs[i + 1]) {
+				restrictedScope = afterSwarmArgs[i + 1];
+				i++;
+				continue;
+			} else if (arg.startsWith('--restricted-scope=')) {
+				restrictedScope = arg.slice('--restricted-scope='.length);
+				continue;
+			}
+
+			// If it's not a known flag, it's part of the prompt
+			promptArgs.push(arg);
+		}
+
+		swarmConfig = {
+			prompt: promptArgs.join(' '),
+			workers,
+			swarmMode,
+			restrictedScope,
+			provider: cliProvider,
+			model: cliModel,
+		};
+	}
+
 	let nonInteractiveMode = isRunCommand;
 
 	// Check for `nanocoder review <target>` — syntactic sugar for
@@ -633,6 +769,7 @@ async function main(): Promise<void> {
 	// unless --no-plain forces the Ink path.
 	const plainRequested = args.includes('--plain');
 	const noPlainRequested = args.includes('--no-plain');
+	const telemetryRequested = args.includes('--telemetry');
 	if (plainRequested && noPlainRequested) {
 		console.error('Cannot pass both --plain and --no-plain.');
 		process.exit(1);
@@ -769,6 +906,8 @@ async function main(): Promise<void> {
 			cliModel,
 			trustDirectory,
 			outputFormat,
+			restrictedScope: runRestrictedScope,
+			telemetry: telemetryRequested,
 		});
 	} else {
 		// Interactive TUI — load Ink + App only now.
@@ -989,6 +1128,8 @@ async function main(): Promise<void> {
 				altScreenActive={useAltScreen}
 				initialSession={initialSession}
 				openSessionSelectorOnStart={openSessionSelectorOnStart}
+				swarmConfig={swarmConfig}
+				restrictedScope={runRestrictedScope}
 			/>,
 			{
 				// Ctrl+C is handled inside App (routed through the shutdown

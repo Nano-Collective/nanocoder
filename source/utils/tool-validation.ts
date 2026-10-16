@@ -90,7 +90,7 @@ export function withValidation(
 			}
 		}
 		if (validator) {
-			const result = await validator(args);
+			const result = await validator(args, options?.context);
 			if (!result.valid) {
 				throw new ToolValidationError(result.error, result.details);
 			}

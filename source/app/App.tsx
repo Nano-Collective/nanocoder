@@ -17,6 +17,7 @@ import SecurityDisclaimer from '@/components/security-disclaimer';
 import StreamingMessage from '@/components/streaming-message';
 import StreamingReasoning from '@/components/streaming-reasoning';
 import {SubagentView} from '@/components/subagent-view';
+import {SwarmDashboard} from '@/components/swarm/swarm-dashboard';
 import type {TitleShape} from '@/components/ui/styled-title';
 import {
 	shouldPromptExtensionInstall,
@@ -72,6 +73,8 @@ export default function App({
 	altScreenActive = false,
 	initialSession,
 	openSessionSelectorOnStart = false,
+	swarmConfig,
+	restrictedScope,
 }: AppProps) {
 	// Resolve the initial development mode with this precedence:
 	// 1. --mode CLI flag (highest priority)
@@ -335,6 +338,7 @@ export default function App({
 		onSetLiveTaskList: appState.setLiveTaskList,
 		setLiveComponent: appState.setLiveComponent,
 		setLastApiUsage: appState.setLastApiUsage,
+		restrictedScope: restrictedScope ?? swarmConfig?.restrictedScope,
 		onApiCallComplete: record => {
 			appState.setApiCallHistory(prev => [...prev, record]);
 			// Lifetime /stats: tokens + estimated cost (never blocks UI).
@@ -512,6 +516,7 @@ export default function App({
 		currentProviderConfig: appState.currentProviderConfig,
 		currentModel: appState.currentModel,
 		currentTheme: appState.currentTheme,
+		restrictedScope: restrictedScope ?? swarmConfig?.restrictedScope,
 		developmentMode: appState.developmentMode,
 		tune: appState.tune,
 		lastApiUsage: appState.lastApiUsage,
@@ -787,6 +792,17 @@ export default function App({
 				)}
 			</>
 		) : null);
+
+	// Swarm mock dashboard render tree
+	if (swarmConfig) {
+		return (
+			<ThemeContext.Provider value={themeContextValue}>
+				<TitleShapeContext.Provider value={titleShapeContextValue}>
+					<SwarmDashboard config={swarmConfig} client={appState.client} />
+				</TitleShapeContext.Provider>
+			</ThemeContext.Provider>
+		);
+	}
 
 	// Non-interactive render tree — minimal transcript + one status line,
 	// no interactive affordances.
