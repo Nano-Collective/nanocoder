@@ -195,6 +195,18 @@ export class SubagentExecutor {
 	 * @param agentId - Optional unique ID for concurrent progress tracking.
 	 *                  When provided, progress is written to the agent-specific
 	 *                  slot in the progress map instead of the global singleton.
+	 * @param toolOverride - Optional runtime narrowing of the subagent's
+	 *                  `tools`/`disallowedTools`, applied on top of whatever
+	 *                  the loaded config (frontmatter) declares. Lets a
+	 *                  caller enforce a trust-level allowlist (see
+	 *                  `source/verify/trust.ts`) without needing a second,
+	 *                  hand-maintained tool list in the subagent's own file.
+	 *                  `alwaysAllow` additionally skips the approval prompt
+	 *                  for the named tools (see `resolveToolApproval`'s
+	 *                  `ctx.alwaysAllow`) — for tools whose `approval` policy
+	 *                  isn't mode-aware and would otherwise be silently
+	 *                  auto-denied in headless mode (no approval-queue
+	 *                  handler is ever registered there).
 	 */
 	async execute(
 		task: SubagentTask,
@@ -202,6 +214,11 @@ export class SubagentExecutor {
 		depth = 0,
 		agentId?: string,
 		executionContext?: Omit<ToolExecutionContext, 'abortSignal'>,
+		toolOverride?: {
+			tools?: string[];
+			disallowedTools?: string[];
+			alwaysAllow?: string[];
+		},
 	): Promise<SubagentResult> {
 		const startTime = Date.now();
 
@@ -217,9 +234,9 @@ export class SubagentExecutor {
 
 		try {
 			const loader = getSubagentLoader(this.projectRoot);
-			const config = await loader.getSubagent(task.subagent_type);
+			const loadedConfig = await loader.getSubagent(task.subagent_type);
 
-			if (!config) {
+			if (!loadedConfig) {
 				return {
 					subagentName: task.subagent_type,
 					output: '',
@@ -228,6 +245,15 @@ export class SubagentExecutor {
 					executionTimeMs: Date.now() - startTime,
 				};
 			}
+
+			const config: SubagentConfigWithSource = toolOverride
+				? {
+						...loadedConfig,
+						tools: toolOverride.tools ?? loadedConfig.tools,
+						disallowedTools:
+							toolOverride.disallowedTools ?? loadedConfig.disallowedTools,
+					}
+				: loadedConfig;
 
 			const context = this.createSubagentContext(config, task);
 			const filteredTools = this.filterTools(config);
@@ -283,6 +309,7 @@ export class SubagentExecutor {
 							agentId,
 							executionContext,
 							recordUsage,
+							toolOverride?.alwaysAllow,
 						),
 				);
 
@@ -529,6 +556,7 @@ export class SubagentExecutor {
 		agentId?: string,
 		executionContext?: Omit<ToolExecutionContext, 'abortSignal'>,
 		onApiCallComplete?: SubagentApiCallHandler,
+		alwaysAllow?: string[],
 	): Promise<string> {
 		let iterations = 0;
 		let totalToolCalls = 0;
@@ -775,6 +803,7 @@ export class SubagentExecutor {
 							config,
 							signal,
 							executionContext,
+							alwaysAllow,
 						),
 				);
 
@@ -808,11 +837,15 @@ export class SubagentExecutor {
 	private async needsApprovalForTool(
 		toolName: string,
 		rawArguments: unknown,
+		alwaysAllow?: string[],
 	): Promise<boolean> {
 		const toolEntry = this.toolManager.getToolEntry(toolName);
 		return resolveToolApproval(toolName, toolEntry, rawArguments, {
 			mode: this.currentMode(),
-			alwaysAllow: getAppConfig().alwaysAllow ?? [],
+			alwaysAllow: [
+				...(getAppConfig().alwaysAllow ?? []),
+				...(alwaysAllow ?? []),
+			],
 		});
 	}
 
@@ -826,6 +859,7 @@ export class SubagentExecutor {
 		config: SubagentConfigWithSource,
 		signal?: AbortSignal,
 		executionContext?: Omit<ToolExecutionContext, 'abortSignal'>,
+		alwaysAllow?: string[],
 	): Promise<{content: string; images?: Message['images']}> {
 		if (signal?.aborted) {
 			return {content: 'Error: Execution was cancelled'};
@@ -878,6 +912,7 @@ export class SubagentExecutor {
 		const needsApproval = await this.needsApprovalForTool(
 			toolName,
 			rawArguments,
+			alwaysAllow,
 		);
 		if (needsApproval) {
 			const vote = await consultPluginPermission(toolName, parsedArgs);

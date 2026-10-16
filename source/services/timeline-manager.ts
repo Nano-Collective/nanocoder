@@ -15,6 +15,7 @@ import type {
 	TimelineScanResult,
 } from '@/types/timeline';
 import {atomicWriteFile} from '@/utils/atomic-write';
+import {ensureNanocoderGitignore} from '@/utils/ensure-nanocoder-gitignore';
 import {formatError} from '@/utils/error-formatter';
 import {logWarning} from '@/utils/message-queue';
 import {FileSnapshotService} from './file-snapshot';
@@ -490,6 +491,7 @@ export class TimelineManager {
 	}
 
 	private async ensureDir(): Promise<void> {
+		await ensureNanocoderGitignore(this.workspaceRoot);
 		await this.pruneStaleSessions();
 
 		// Try to acquire the session lock before any writes land. The

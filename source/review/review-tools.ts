@@ -16,9 +16,9 @@ export interface ReviewFoundationTools {
 }
 
 export const defaultReviewFoundationTools: ReviewFoundationTools = {
-	execGit,
-	execGitBuffer,
-	execGh,
+	execGit: (args, signal, env) => execGit(args, undefined, {signal, env}),
+	execGitBuffer: (args, signal) => execGitBuffer(args, undefined, {signal}),
+	execGh: (args, signal) => execGh(args, undefined, {signal}),
 	githubRepositoryUrl: repository => `https://github.com/${repository}.git`,
 };
 

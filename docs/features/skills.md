@@ -178,6 +178,10 @@ Event kinds:
 - `schedule.cron` - filter: `cron`, a standard 5-field expression (or
   6-field with seconds). An invalid expression is rejected when the
   file loads instead of reaching the daemon.
+- `ci.job.failed` - filter: `branches`, glob-matched against the failing
+  run's branch; omitted matches every branch. Only ever fires when the
+  daemon's CI watch is active - see
+  [CI Watch Configuration](../configuration/preferences.md#ci-watch-configuration).
 
 A malformed `subscribe:` block on a single-file command, agent or tool
 is logged and dropped: the member still loads, just without triggers.
