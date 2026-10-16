@@ -61,6 +61,11 @@ function escapeRegExp(text: string): string {
 /** The command as a whole word run: `pnpm test` matches `pnpm test -- x`, not `pnpm test:all`. */
 function commandPattern(command: string): RegExp {
 	const words = command.trim().split(/\s+/).map(escapeRegExp).join('\\s+');
+	// `command` is the user's own `nanocoder.verify.required` entry, not
+	// attacker input. Every word goes through escapeRegExp and is joined by a
+	// fixed `\s+`; the rest is fixed lookarounds with no nested quantifiers, so
+	// ReDoS is not reachable.
+	// nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp
 	return new RegExp(`(?<![\\w-])${words}(?![\\w:./-])`);
 }
 
@@ -96,6 +101,9 @@ function detectRequired(root: string): RequiredEvidence[] {
 	return AUTO_SCRIPTS.filter(name => typeof scripts[name] === 'string').map(
 		name => ({
 			label: name === 'test' ? `${manager} test` : `${manager} run ${name}`,
+			// `name` is one of the fixed AUTO_SCRIPTS entries (test, typecheck,
+			// lint), never user input, so the pattern is effectively a constant.
+			// nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp
 			matches: new RegExp(
 				`(?<![\\w-])(?:npm|pnpm|yarn|bun)\\s+(?:run\\s+)?${name}(?![\\w:./-])`,
 			),
