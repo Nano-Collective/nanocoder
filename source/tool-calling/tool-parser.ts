@@ -140,7 +140,10 @@ function tryParseJSONToolCall(raw: string): ToolCall | null {
  * blocks and bare `{"name":..., "arguments":...}` objects. Its calls are only
  * used when the XML and function-tag parsers found none.
  */
-function parseJSONToolCalls(content: string): {
+function parseJSONToolCalls(
+	content: string,
+	skipRanges: Array<[number, number]> = [],
+): {
 	toolCalls: ToolCall[];
 	cleanedContent: string;
 	ranges: Array<[number, number]>;
@@ -174,6 +177,11 @@ function parseJSONToolCalls(content: string): {
 	while ((inlineMatch = inlinePattern.exec(content)) !== null) {
 		const start = inlineMatch.index;
 		if (matchedRanges.some(([s, e]) => start >= s && start < e)) continue;
+		const skipped = skipRanges.find(([s, e]) => start >= s && start < e);
+		if (skipped) {
+			inlinePattern.lastIndex = skipped[1];
+			continue;
+		}
 		const end = findJSONObjectEnd(content, start, scan);
 		if (scan.exhausted) break;
 		if (end === null) continue;
@@ -343,7 +351,15 @@ export function parseToolCalls(content: unknown): ParseResult {
 	const strippedContent = stripThinkTags(contentStr);
 
 	const fnTagResult = parseFunctionTagToolCalls(strippedContent);
-	const jsonResult = parseJSONToolCalls(strippedContent);
+	let jsonResult = parseJSONToolCalls(strippedContent);
+	if (jsonResult.exhausted) {
+		// JSON text inside an XML call's arguments is that call's content, so
+		// it shouldn't use up the budget.
+		jsonResult = parseJSONToolCalls(
+			strippedContent,
+			XMLToolCallParser.findToolCallRanges(strippedContent),
+		);
+	}
 	// Unscanned JSON calls can't be masked, so XML quoted in their arguments
 	// would run as calls of its own.
 	if (jsonResult.exhausted) {

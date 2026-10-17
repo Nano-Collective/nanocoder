@@ -241,6 +241,24 @@ test('parseToolCalls: rejects a reply that runs out of JSON scan budget', t => {
 	t.true(elapsed < 500, `Parsing ${content.length} chars took ${elapsed}ms`);
 });
 
+test('parseToolCalls: cut-off JSON calls inside an XML call argument stay content', t => {
+	// ~16 KB: enough to run out of JSON scan budget if these are scanned.
+	const fileContent = Array(200).fill(CUT_OFF_CALL).join(' ');
+	const content = `<write_file><path>notes.md</path><content>${fileContent}</content></write_file>`;
+
+	const result = parseToolCalls(content);
+
+	t.true(result.success);
+	if (result.success) {
+		t.is(result.toolCalls.length, 1);
+		t.is(result.toolCalls[0].function.name, 'write_file');
+		t.deepEqual(result.toolCalls[0].function.arguments, {
+			path: 'notes.md',
+			content: fileContent,
+		});
+	}
+});
+
 test('parseToolCalls: unclosed tags before a code fence do not stall parsing', t => {
 	// ~630 KB: scanning these tags for a call around the fence takes about 1 s.
 	const tags = `<item>${'x'.repeat(57)}`.repeat(10000);
