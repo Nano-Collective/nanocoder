@@ -1,3 +1,4 @@
+import {lstat} from 'node:fs/promises';
 import path from 'node:path';
 import {Box, Text} from 'ink';
 import React from 'react';
@@ -18,6 +19,7 @@ import {jsonSchema, tool} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
 import {searchProjectContents} from '@/utils/file-search';
 import {isPathInside, isValidFilePath} from '@/utils/path-validation';
+import {recordVisibilityReceipt} from '@/utils/read-tracker';
 import {calculateTokens} from '@/utils/token-calculator';
 
 const MAX_CONTEXT_LINES = 10;
@@ -83,6 +85,53 @@ const executeSearchFileContents = async (
 
 		if (matches.length === 0) {
 			return `No matches found for "${args.query}"`;
+		}
+
+		// Record visibility receipts for lines shown in search results
+		// Group matches by file to batch the receipt recording
+		const matchesByFile = new Map<string, number[]>();
+		for (const match of matches) {
+			const absPath = path.resolve(root, match.file);
+			if (!matchesByFile.has(absPath)) {
+				matchesByFile.set(absPath, []);
+			}
+			// Record the match line and context lines if present
+			const fileLines = matchesByFile.get(absPath);
+			if (!fileLines) continue;
+			const startLine = Math.max(1, match.line - contextLines);
+			const endLine = match.line + contextLines;
+			for (let i = startLine; i <= endLine; i++) {
+				if (!fileLines.includes(i)) {
+					fileLines.push(i);
+				}
+			}
+		}
+
+		// Record visibility receipts for each file's shown lines
+		for (const [absPath, lines] of matchesByFile) {
+			try {
+				const stats = await lstat(absPath);
+				// Record each range of consecutive lines
+				lines.sort((a, b) => a - b);
+				let rangeStart = lines[0];
+				let rangeEnd = lines[0];
+
+				for (let i = 1; i < lines.length; i++) {
+					if (lines[i] === rangeEnd + 1) {
+						// Consecutive line, extend range
+						rangeEnd = lines[i];
+					} else {
+						// Gap found, record current range and start new one
+						recordVisibilityReceipt(absPath, stats, rangeStart, rangeEnd);
+						rangeStart = lines[i];
+						rangeEnd = lines[i];
+					}
+				}
+				// Record the last range
+				recordVisibilityReceipt(absPath, stats, rangeStart, rangeEnd);
+			} catch {
+				// If we can't stat the file, skip recording (file may have been deleted)
+			}
 		}
 
 		// Format results grep-style. Without context every match is a single

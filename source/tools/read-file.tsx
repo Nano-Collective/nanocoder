@@ -21,6 +21,7 @@ import {isValidFilePath, resolveFilePath} from '@/utils/path-validation';
 import {
 	markFileSeen,
 	matchReadContent,
+	recordVisibilityReceipt,
 	rememberReadContent,
 } from '@/utils/read-tracker';
 import {calculateTokens} from '@/utils/token-calculator';
@@ -129,6 +130,7 @@ const executeReadFile = async (args: {
 			// An empty file has been seen in full; allow edits/overwrites against it.
 			markFileSeen(absPath);
 			rememberReadContent(absPath, stats, 0, args.start_line, args.end_line);
+			recordVisibilityReceipt(absPath, stats, undefined, undefined);
 			return EMPTY_CONTENT_MARKER;
 		}
 
@@ -157,6 +159,8 @@ const executeReadFile = async (args: {
 				args.start_line,
 				args.end_line,
 			);
+			// Record visibility receipt for the preview lines shown
+			recordVisibilityReceipt(absPath, stats, 1, previewEndLine);
 
 			return `${preview}\n\n[Truncated at line ${previewEndLine} of ${totalLines}. Use read_file with start_line: ${previewEndLine + 1} and end_line to continue.]`;
 		}
@@ -180,6 +184,8 @@ const executeReadFile = async (args: {
 			args.start_line,
 			args.end_line,
 		);
+		// Record visibility receipt for the actual lines returned
+		recordVisibilityReceipt(absPath, stats, startLine, endLine);
 
 		// Return content without line numbers for clean content-based editing
 		return linesToReturn.join('\n');
