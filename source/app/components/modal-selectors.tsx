@@ -1,5 +1,4 @@
-import React from 'react';
-import {ModelDatabaseDisplay} from '@/commands/model-database';
+import React, {Suspense} from 'react';
 import CheckpointSelector from '@/components/checkpoint-selector';
 import ModelSelector from '@/components/model-selector';
 import SessionSelector from '@/components/session-selector';
@@ -9,6 +8,19 @@ import {ProviderWizard} from '@/wizards/provider-wizard';
 import type {SettingsTabId} from './settings-constants';
 import {SettingsSelector} from './settings-tabs';
 import {TuneSelector} from './tune-selector';
+
+/**
+ * `@/commands/model-database` must stay out of the startup module graph: it
+ * pulls the model fetcher and, transitively, the clipboard chain into every
+ * session even though the modal is only reachable from the `/model-database`
+ * command. Load it on first render instead — `React.lazy` caches the module,
+ * so reopening the modal afterwards is synchronous. See #1775.
+ */
+const ModelDatabaseDisplay = React.lazy(() =>
+	import('@/commands/model-database').then(mod => ({
+		default: mod.ModelDatabaseDisplay,
+	})),
+);
 
 export interface ModalSelectorsProps {
 	onLaunchTune?: () => void;
@@ -126,11 +138,13 @@ export function ModalSelectors({
 
 	if (activeMode === 'modelDatabase') {
 		return (
-			<ModelDatabaseDisplay
-				onCancel={onModelDatabaseCancel}
-				currentProvider={currentProvider}
-				onModelSelect={onModelSelect}
-			/>
+			<Suspense fallback={null}>
+				<ModelDatabaseDisplay
+					onCancel={onModelDatabaseCancel}
+					currentProvider={currentProvider}
+					onModelSelect={onModelSelect}
+				/>
+			</Suspense>
 		);
 	}
 
