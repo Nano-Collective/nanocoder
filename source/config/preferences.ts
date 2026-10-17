@@ -1,3 +1,4 @@
+import {statSync} from 'node:fs';
 import path from 'node:path';
 import {existsSync, mkdirSync, readFileSync} from 'fs';
 import type {TitleShape} from '@/components/ui/styled-title';
@@ -30,6 +31,23 @@ let PREFERENCES_PATH: string | null = null;
 let CACHED_CONFIG_DIR: string | undefined = undefined;
 let cachedVoicePreference: import('@/types/config').VoiceConfig | undefined;
 
+type PreferencesCache = {
+	path: string;
+	version: number;
+	mtimeMs: number;
+	globalMtimeMs: number | null;
+	data: UserPreferences;
+};
+
+let preferencesCache: PreferencesCache | null = null;
+
+function getFileMtime(filePath: string): number | null {
+	try {
+		return statSync(filePath).mtimeMs;
+	} catch {
+		return null;
+	}
+}
 function getPreferencesPath(): string {
 	// Re-compute path if NANOCODER_CONFIG_DIR has changed (important for tests)
 	const currentConfigDir = process.env.NANOCODER_CONFIG_DIR;
@@ -46,6 +64,7 @@ export function resetPreferencesCache(): void {
 	PREFERENCES_PATH = null;
 	CACHED_CONFIG_DIR = undefined;
 	cachedVoicePreference = undefined;
+	preferencesCache = null;
 }
 
 // Trust is only ever read from, and written to, the global preferences file.
@@ -139,22 +158,57 @@ export function saveGlobalOnlyPreferences(
 export function loadPreferences(): UserPreferences {
 	try {
 		const preferencesPath = getPreferencesPath();
+		const version = getPreferencesVersion();
+
+		const mtimeMs = getFileMtime(preferencesPath);
+
+		const isProject = isProjectPreferencesPath(preferencesPath);
+		const globalMtimeMs = isProject
+			? getFileMtime(getGlobalPreferencesPath())
+			: null;
+
+		if (
+			preferencesCache &&
+			preferencesCache.path === preferencesPath &&
+			preferencesCache.version === version &&
+			preferencesCache.mtimeMs === mtimeMs &&
+			preferencesCache.globalMtimeMs === globalMtimeMs
+		) {
+			return structuredClone(preferencesCache.data);
+		}
+
 		const data = JSON.parse(
 			readFileSync(preferencesPath, 'utf-8'),
 		) as UserPreferences;
-		if (isProjectPreferencesPath(preferencesPath)) {
+
+		if (isProject) {
 			const globalPrefs = readGlobalOnlyPreferences();
 			const mutable = data as Record<string, unknown>;
+
 			for (const key of GLOBAL_ONLY_KEYS) {
 				const value = globalPrefs?.[key];
-				if (value === undefined) delete mutable[key];
-				else mutable[key] = value;
+
+				if (value === undefined) {
+					delete mutable[key];
+				} else {
+					mutable[key] = value;
+				}
 			}
 		}
+
+		preferencesCache = {
+			path: preferencesPath,
+			version,
+			mtimeMs: mtimeMs ?? -1,
+			globalMtimeMs,
+			data: structuredClone(data),
+		};
+
 		return data;
 	} catch (error) {
 		log.error(`Failed to load preferences: ${String(error)}`);
 	}
+
 	return {};
 }
 
@@ -231,6 +285,7 @@ export function savePreferences(preferences: UserPreferences): boolean {
 	}
 
 	preferencesVersion++;
+	preferencesCache = null;
 	cachedVoicePreference = preferences.voice;
 	for (const listener of preferencesListeners) {
 		listener();
