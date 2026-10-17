@@ -1,8 +1,8 @@
-import {existsSync, mkdirSync, readFileSync, rmSync, writeFileSync} from 'fs';
+import {existsSync, mkdirSync, readFileSync, rmSync, writeFileSync,statSync,utimesSync} from 'fs';
 import {tmpdir} from 'os';
 import {join} from 'path';
 import test from 'ava';
-import {clearAppConfig, confDirMap, getClosestConfigFile, reloadAppConfig} from './index';
+import {clearAppConfig, confDirMap, getClosestConfigFile, loadDefaultMode, reloadAppConfig} from './index';
 import {resolveTune} from './tune';
 
 type AppConfig = ReturnType<typeof import('./index.js').getAppConfig>;
@@ -1606,3 +1606,58 @@ test.serial(
 		);
 	},
 );
+
+
+test.serial('reloadAppConfig invalidates cached agents config', t => {
+	const dir = join(
+		tmpdir(),
+		`nanocoder-config-cache-${Date.now()}`,
+	);
+	const configFile = join(dir, 'agents.config.json');
+
+	const originalCwd = process.cwd();
+	const originalConfigDir = process.env.NANOCODER_CONFIG_DIR;
+
+	try {
+		mkdirSync(dir, {recursive: true});
+
+		writeFileSync(
+			configFile,
+			JSON.stringify({nanocoder: {defaultMode: 'plan'}}),
+		);
+
+		process.chdir(dir);
+		process.env.NANOCODER_CONFIG_DIR = join(dir, 'global');
+
+		clearAppConfig();
+
+		t.is(loadDefaultMode(), 'plan');
+		t.is(loadDefaultMode(), 'plan');
+
+		// Preserve the original file timestamp and size.
+		const before = statSync(configFile);
+
+		writeFileSync(
+			configFile,
+			JSON.stringify({nanocoder: {defaultMode: 'yolo'}}),
+		);
+
+		utimesSync(configFile, before.atime, before.mtime);
+
+		// Explicit reload must discard cached JSON.
+		reloadAppConfig();
+
+		t.is(loadDefaultMode(), 'yolo');
+	} finally {
+		process.chdir(originalCwd);
+
+		if (originalConfigDir === undefined) {
+			delete process.env.NANOCODER_CONFIG_DIR;
+		} else {
+			process.env.NANOCODER_CONFIG_DIR = originalConfigDir;
+		}
+
+		clearAppConfig();
+		rmSync(dir, {recursive: true, force: true});
+	}
+});
