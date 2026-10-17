@@ -4,9 +4,14 @@ import {
 	bumpReadContentGeneration,
 	clearReadTracker,
 	forgetReadContent,
+	forgetVisibilityReceipt,
+	getLineNumbersForText,
 	hasSeenFile,
+	hasVisibleLines,
+	invalidateAllVisibilityReceipts,
 	markFileSeen,
 	matchReadContent,
+	recordVisibilityReceipt,
 	rememberReadContent,
 	runWithReadContentScope,
 	clearReadContentScope,
@@ -109,4 +114,230 @@ test.serial('clearReadContentScope drops only that scope', t => {
 	runWithReadContentScope('agent-1', () => {
 		t.is(matchReadContent('/tmp/sub.txt', stats), undefined);
 	});
+});
+
+// ============================================================================
+// Visibility Receipt Tests (Issue #1573)
+// ============================================================================
+
+test.serial('recordVisibilityReceipt records full file when no range given', t => {
+	const stats = {mtimeMs: 100, size: 500};
+	recordVisibilityReceipt('/tmp/full.txt', stats, undefined, undefined);
+
+	const check = hasVisibleLines('/tmp/full.txt', stats, [1, 10, 50, 100]);
+	t.true(check.visible);
+});
+
+test.serial('recordVisibilityReceipt records specific line range', t => {
+	const stats = {mtimeMs: 100, size: 500};
+	recordVisibilityReceipt('/tmp/range.txt', stats, 10, 20);
+
+	const check = hasVisibleLines('/tmp/range.txt', stats, [15]);
+	t.true(check.visible);
+});
+
+test.serial('hasVisibleLines blocks edit to unseen lines', t => {
+	const stats = {mtimeMs: 100, size: 500};
+	recordVisibilityReceipt('/tmp/partial.txt', stats, 10, 20);
+
+	const check = hasVisibleLines('/tmp/partial.txt', stats, [25]);
+	t.false(check.visible);
+	t.regex(check.error!, /Line 25.*has not been read/);
+});
+
+test.serial('hasVisibleLines blocks edit when no receipt exists', t => {
+	const stats = {mtimeMs: 100, size: 500};
+
+	const check = hasVisibleLines('/tmp/never-read.txt', stats, [1]);
+	t.false(check.visible);
+	t.regex(check.error!, /have not read/);
+});
+
+test.serial('hasVisibleLines blocks edit after file changed externally', t => {
+	const oldStats = {mtimeMs: 100, size: 500};
+	const newStats = {mtimeMs: 200, size: 500};
+	recordVisibilityReceipt('/tmp/changed.txt', oldStats, 1, 10);
+
+	const check = hasVisibleLines('/tmp/changed.txt', newStats, [5]);
+	t.false(check.visible);
+	t.regex(check.error!, /modified externally/);
+});
+
+test.serial('hasVisibleLines blocks edit after context compaction', t => {
+	const stats = {mtimeMs: 100, size: 500};
+	recordVisibilityReceipt('/tmp/compact.txt', stats, 1, 10);
+
+	bumpReadContentGeneration();
+
+	const check = hasVisibleLines('/tmp/compact.txt', stats, [5]);
+	t.false(check.visible);
+	t.regex(check.error!, /invalidated by context compaction/);
+});
+
+test.serial('recordVisibilityReceipt merges multiple ranges', t => {
+	const stats = {mtimeMs: 100, size: 500};
+	recordVisibilityReceipt('/tmp/multi.txt', stats, 1, 10);
+	recordVisibilityReceipt('/tmp/multi.txt', stats, 20, 30);
+
+	const check1 = hasVisibleLines('/tmp/multi.txt', stats, [5]);
+	t.true(check1.visible);
+
+	const check2 = hasVisibleLines('/tmp/multi.txt', stats, [25]);
+	t.true(check2.visible);
+
+	const check3 = hasVisibleLines('/tmp/multi.txt', stats, [15]);
+	t.false(check3.visible);
+});
+
+test.serial('recordVisibilityReceipt replaces receipt on file change', t => {
+	const oldStats = {mtimeMs: 100, size: 500};
+	const newStats = {mtimeMs: 200, size: 600};
+
+	recordVisibilityReceipt('/tmp/replaced.txt', oldStats, 1, 10);
+	recordVisibilityReceipt('/tmp/replaced.txt', newStats, 50, 60);
+
+	// Old range should no longer be visible (file changed)
+	const check1 = hasVisibleLines('/tmp/replaced.txt', newStats, [5]);
+	t.false(check1.visible);
+
+	// New range should be visible
+	const check2 = hasVisibleLines('/tmp/replaced.txt', newStats, [55]);
+	t.true(check2.visible);
+});
+
+test.serial('forgetVisibilityReceipt clears receipts for a file', t => {
+	const stats = {mtimeMs: 100, size: 500};
+	recordVisibilityReceipt('/tmp/forget.txt', stats, 1, 10);
+
+	forgetVisibilityReceipt('/tmp/forget.txt');
+
+	const check = hasVisibleLines('/tmp/forget.txt', stats, [5]);
+	t.false(check.visible);
+});
+
+test.serial('invalidateAllVisibilityReceipts clears all receipts', t => {
+	const stats = {mtimeMs: 100, size: 500};
+	recordVisibilityReceipt('/tmp/file1.txt', stats, 1, 10);
+	recordVisibilityReceipt('/tmp/file2.txt', stats, 1, 10);
+
+	invalidateAllVisibilityReceipts();
+
+	const check1 = hasVisibleLines('/tmp/file1.txt', stats, [5]);
+	t.false(check1.visible);
+
+	const check2 = hasVisibleLines('/tmp/file2.txt', stats, [5]);
+	t.false(check2.visible);
+});
+
+test.serial('getLineNumbersForText finds single-line match', t => {
+	const content = 'line1\nline2\nline3\n';
+	const lines = getLineNumbersForText(content, 'line2');
+
+	t.deepEqual(lines, [2]);
+});
+
+test.serial('getLineNumbersForText finds multi-line match', t => {
+	const content = 'line1\nline2\nline3\nline4\n';
+	const lines = getLineNumbersForText(content, 'line2\nline3');
+
+	t.deepEqual(lines, [2, 3]);
+});
+
+test.serial('getLineNumbersForText returns empty for no match', t => {
+	const content = 'line1\nline2\nline3\n';
+	const lines = getLineNumbersForText(content, 'notfound');
+
+	t.deepEqual(lines, []);
+});
+
+test.serial('visibility receipts respect scope boundaries', t => {
+	const stats = {mtimeMs: 100, size: 500};
+
+	recordVisibilityReceipt('/tmp/scoped.txt', stats, 1, 10);
+
+	runWithReadContentScope('subagent', () => {
+		// Subagent should not see parent's receipts
+		const check = hasVisibleLines('/tmp/scoped.txt', stats, [5]);
+		t.false(check.visible);
+
+		// Record in subagent scope
+		recordVisibilityReceipt('/tmp/scoped.txt', stats, 20, 30);
+		const subCheck = hasVisibleLines('/tmp/scoped.txt', stats, [25]);
+		t.true(subCheck.visible);
+	});
+
+	// Back in main scope, original receipt should still work
+	const mainCheck = hasVisibleLines('/tmp/scoped.txt', stats, [5]);
+	t.true(mainCheck.visible);
+
+	// But subagent's receipt should not leak
+	const noLeakCheck = hasVisibleLines('/tmp/scoped.txt', stats, [25]);
+	t.false(noLeakCheck.visible);
+});
+
+test.serial('clearReadTracker clears visibility receipts', t => {
+	const stats = {mtimeMs: 100, size: 500};
+	recordVisibilityReceipt('/tmp/clear-test.txt', stats, 1, 10);
+
+	clearReadTracker();
+
+	const check = hasVisibleLines('/tmp/clear-test.txt', stats, [5]);
+	t.false(check.visible);
+});
+
+test.serial('hasVisibleLines allows edit when all target lines are visible', t => {
+	const stats = {mtimeMs: 100, size: 500};
+	recordVisibilityReceipt('/tmp/multi-line.txt', stats, 1, 10);
+	recordVisibilityReceipt('/tmp/multi-line.txt', stats, 20, 30);
+
+	// All lines within visible ranges
+	const check = hasVisibleLines('/tmp/multi-line.txt', stats, [5, 6, 7]);
+	t.true(check.visible);
+});
+
+test.serial('hasVisibleLines blocks edit when any target line is invisible', t => {
+	const stats = {mtimeMs: 100, size: 500};
+	recordVisibilityReceipt('/tmp/partial-vis.txt', stats, 1, 10);
+
+	// Mix of visible and invisible lines
+	const check = hasVisibleLines('/tmp/partial-vis.txt', stats, [5, 15]);
+	t.false(check.visible);
+	t.regex(check.error!, /Line 15.*has not been read/);
+});
+
+test.serial('visibility receipts survive generation bump (use invalidateAllVisibilityReceipts)', t => {
+	const stats = {mtimeMs: 100, size: 500};
+	recordVisibilityReceipt('/tmp/survive.txt', stats, 1, 10);
+
+	// Generation bump should invalidate via invalidateAllVisibilityReceipts
+	// but receipts themselves check generation internally
+	bumpReadContentGeneration();
+
+	const check = hasVisibleLines('/tmp/survive.txt', stats, [5]);
+	t.false(check.visible);
+	t.regex(check.error!, /invalidated by context compaction/);
+});
+
+// ============================================================================
+// CRLF Line Counting Tests
+// ============================================================================
+
+test.serial('getLineNumbersForText normalizes CRLF to LF', t => {
+	const contentWithCRLF = 'line1\r\nline2\r\nline3\r\n';
+	const searchWithCRLF = 'line2';
+
+	const lines = getLineNumbersForText(contentWithCRLF, searchWithCRLF);
+
+	// Should find line 2 correctly despite CRLF
+	t.deepEqual(lines, [2]);
+});
+
+test.serial('getLineNumbersForText handles mixed line endings', t => {
+	const contentMixed = 'line1\nline2\r\nline3\nline4\r\n';
+	const search = 'line3';
+
+	const lines = getLineNumbersForText(contentMixed, search);
+
+	// Should find line 3 correctly
+	t.deepEqual(lines, [3]);
 });
