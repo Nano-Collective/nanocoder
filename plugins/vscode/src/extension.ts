@@ -20,6 +20,7 @@ import {
 	sendCodeLensPrompt,
 } from './code-lens-provider';
 import { resolveExtensionCwd } from './workspace-utils';
+import {TerminalErrorInterceptor} from './terminal-error-interceptor';
 
 const DEFAULT_PORT = 51820;
 const ACTIVE_EDITOR_DEBOUNCE_MS = 150;
@@ -34,6 +35,7 @@ let acpStatusBar: AcpStatusBarController;
 let outputChannel: vscode.OutputChannel;
 let activeEditorDebounce: NodeJS.Timeout | null = null;
 let lastActiveEditorPayload: string | null = null;
+let terminalErrorInterceptor: TerminalErrorInterceptor;
 
 export function activate(context: vscode.ExtensionContext) {
 	outputChannel = vscode.window.createOutputChannel('Nanocoder');
@@ -73,6 +75,20 @@ export function activate(context: vscode.ExtensionContext) {
 			webviewOptions: {retainContextWhenHidden: true},
 		})
 	);
+
+	// Initialize Terminal Error Interceptor
+	terminalErrorInterceptor = new TerminalErrorInterceptor(
+		outputChannel,
+		(errorContext: string) => {
+			// Send error context to AI for fixing
+			const prompt = `I encountered a terminal error. Please analyze and help me fix it:\n\n\`\`\`\n${errorContext}\n\`\`\``;
+			chatProvider.sendPrompt(prompt);
+			
+			// Focus on the chat panel
+			vscode.commands.executeCommand('nanocoder.chatView.focus');
+		}
+	);
+	context.subscriptions.push(terminalErrorInterceptor);
 
 	// Register Title Bar Actions
 	context.subscriptions.push(
@@ -141,6 +157,41 @@ export function activate(context: vscode.ExtensionContext) {
 		}),
 		vscode.commands.registerCommand('nanocoder.copyLastCodeBlock', () => {
 			chatProvider.requestCopyLastCodeBlock();
+		}),
+		vscode.commands.registerCommand('nanocoder.fixTerminalError', async () => {
+			// Manually trigger fix with AI for the active terminal
+			const activeTerminal = vscode.window.activeTerminal;
+			if (!activeTerminal) {
+				vscode.window.showWarningMessage('No active terminal found.');
+				return;
+			}
+			
+			// Try to get the last error context from the interceptor
+			const lastErrorContext = terminalErrorInterceptor.getLastErrorContext(activeTerminal);
+			
+			let errorText: string | undefined;
+			
+			if (lastErrorContext && lastErrorContext.length > 0) {
+				// Show the captured error and allow editing
+				errorText = await vscode.window.showInputBox({
+					prompt: 'Captured terminal error (edit if needed or paste a different error)',
+					value: lastErrorContext.join('\n'),
+					ignoreFocusOut: true,
+				});
+			} else {
+				// No captured error, prompt for manual input
+				errorText = await vscode.window.showInputBox({
+					prompt: 'Paste the terminal error or describe the issue',
+					placeHolder: 'Error: ENOENT: no such file or directory...',
+					ignoreFocusOut: true,
+				});
+			}
+			
+			if (errorText) {
+				const prompt = `I encountered a terminal error. Please analyze and help me fix it:\n\n\`\`\`\n${errorText}\n\`\`\``;
+				chatProvider.sendPrompt(prompt);
+				vscode.commands.executeCommand('nanocoder.chatView.focus');
+			}
 		}),
 	);
 

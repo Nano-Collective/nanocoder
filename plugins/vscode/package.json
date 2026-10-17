@@ -117,6 +117,12 @@
 				"command": "nanocoder.generateTests",
 				"title": "Generate Tests",
 				"category": "Nanocoder"
+			},
+			{
+				"command": "nanocoder.fixTerminalError",
+				"title": "Fix Terminal Error with AI",
+				"category": "Nanocoder",
+				"icon": "$(debug-console)"
 			}
 		],
 		"keybindings": [
