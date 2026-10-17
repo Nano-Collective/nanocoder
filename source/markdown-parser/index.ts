@@ -1,6 +1,6 @@
 import chalk from 'chalk';
-import {highlight} from 'cli-highlight';
 import {getSyntaxTheme} from '@/config/themes';
+import {highlight} from '@/utils/highlighter';
 import type {Colors} from '../types/markdown-parser.js';
 import {decodeHtmlEntities} from './html-entities.js';
 import {parseMarkdownTable} from './table-parser.js';
