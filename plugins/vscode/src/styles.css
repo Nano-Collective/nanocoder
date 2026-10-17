@@ -160,6 +160,108 @@ select option {
 	padding: 0;
 	font-size: 0.85em;
 }
+
+/* ── Syntax highlighting (highlight.js tokens) ─────────
+ * VS Code does not expose editor token colours to webviews, so use a
+ * Dark+/Light+ style palette picked by the theme-kind class VS Code
+ * puts on <body>.
+ */
+.markdown-body {
+	--hl-keyword: #569cd6;
+	--hl-string: #ce9178;
+	--hl-number: #b5cea8;
+	--hl-comment: #6a9955;
+	--hl-function: #dcdcaa;
+	--hl-type: #4ec9b0;
+	--hl-variable: #9cdcfe;
+	--hl-regexp: #d16969;
+}
+body.vscode-light .markdown-body,
+body.vscode-high-contrast-light .markdown-body {
+	--hl-keyword: #0000ff;
+	--hl-string: #a31515;
+	--hl-number: #098658;
+	--hl-comment: #008000;
+	--hl-function: #795e26;
+	--hl-type: #267f99;
+	--hl-variable: #001080;
+	--hl-regexp: #811f3f;
+}
+.markdown-body .hljs-keyword,
+.markdown-body .hljs-selector-tag,
+.markdown-body .hljs-literal,
+.markdown-body .hljs-doctag,
+.markdown-body .hljs-tag,
+.markdown-body .hljs-name,
+.markdown-body .hljs-meta {
+	color: var(--hl-keyword);
+}
+.markdown-body .hljs-string,
+.markdown-body .hljs-meta .hljs-string,
+.markdown-body .hljs-template-variable,
+.markdown-body .hljs-deletion {
+	color: var(--hl-string);
+}
+.markdown-body .hljs-number,
+.markdown-body .hljs-symbol,
+.markdown-body .hljs-bullet,
+.markdown-body .hljs-addition {
+	color: var(--hl-number);
+}
+.markdown-body .hljs-comment,
+.markdown-body .hljs-quote {
+	color: var(--hl-comment);
+	font-style: italic;
+}
+.markdown-body .hljs-title,
+.markdown-body .hljs-section {
+	color: var(--hl-function);
+}
+.markdown-body .hljs-built_in,
+.markdown-body .hljs-type,
+.markdown-body .hljs-class .hljs-title {
+	color: var(--hl-type);
+}
+.markdown-body .hljs-variable,
+.markdown-body .hljs-attr,
+.markdown-body .hljs-attribute,
+.markdown-body .hljs-params,
+.markdown-body .hljs-selector-id,
+.markdown-body .hljs-selector-class,
+.markdown-body .hljs-selector-attr {
+	color: var(--hl-variable);
+}
+.markdown-body .hljs-regexp {
+	color: var(--hl-regexp);
+}
+.markdown-body .hljs-emphasis {
+	font-style: italic;
+}
+.markdown-body .hljs-strong {
+	font-weight: 700;
+}
+
+/* ── Streaming cursor ──────────────────────────────────
+ * chat-panel.js puts `streaming-cursor` on the assistant text block that is
+ * still receiving chunks; the cursor trails its last element and stops with
+ * the turn.
+ */
+.streaming-cursor > :last-child::after {
+	content: "▌";
+	margin-left: 1px;
+	color: var(--vscode-descriptionForeground, currentColor);
+	animation: streaming-cursor-blink 1s step-end infinite;
+}
+@keyframes streaming-cursor-blink {
+	50% {
+		opacity: 0;
+	}
+}
+@media (prefers-reduced-motion: reduce) {
+	.streaming-cursor > :last-child::after {
+		animation: none;
+	}
+}
 .markdown-body h1,
 .markdown-body h2,
 .markdown-body h3,
