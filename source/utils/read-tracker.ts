@@ -48,8 +48,6 @@ type VisibilityReceipt = {
 	generation: number;
 	/** Line ranges the agent has actually seen. Empty array means full file. */
 	visibleRanges: LineRange[];
-	/** Hash of content when it was read, for detecting external changes */
-	contentHash?: string;
 };
 
 const DEFAULT_READ_SCOPE = 'main';
@@ -164,17 +162,6 @@ export function clearReadTracker(): void {
  * unseen code. This is the enforcement layer for issue #1573.
  */
 
-/** Simple hash function for content verification (currently unused but reserved for future use) */
-function _simpleHash(content: string): string {
-	let hash = 0;
-	for (let i = 0; i < content.length; i++) {
-		const char = content.charCodeAt(i);
-		hash = (hash << 5) - hash + char;
-		hash = hash & hash; // Convert to 32bit integer
-	}
-	return hash.toString(36);
-}
-
 /**
  * Record a visibility receipt: the agent has read specific lines of a file.
  *
@@ -182,14 +169,12 @@ function _simpleHash(content: string): string {
  * @param stats - File stats (mtime, size) for staleness detection
  * @param startLine - First line read (1-indexed), undefined means full file
  * @param endLine - Last line read (1-indexed), undefined means full file
- * @param contentHash - Optional hash of content for external change detection
  */
 export function recordVisibilityReceipt(
 	absPath: string,
 	stats: {mtimeMs: number; size: number},
 	startLine?: number,
 	endLine?: number,
-	contentHash?: string,
 ): void {
 	const scope = getReadContentScope();
 	const path = resolve(absPath);
@@ -202,7 +187,6 @@ export function recordVisibilityReceipt(
 			size: stats.size,
 			generation: scope.generation,
 			visibleRanges: [], // Empty array signals full file visibility
-			contentHash,
 		});
 		return;
 	}
@@ -217,7 +201,6 @@ export function recordVisibilityReceipt(
 			size: stats.size,
 			generation: scope.generation,
 			visibleRanges: [newRange],
-			contentHash,
 		});
 		return;
 	}
@@ -229,16 +212,12 @@ export function recordVisibilityReceipt(
 			size: stats.size,
 			generation: scope.generation,
 			visibleRanges: [newRange],
-			contentHash,
 		});
 		return;
 	}
 
 	// Merge ranges - add new range to existing
 	existing.visibleRanges.push(newRange);
-	if (contentHash) {
-		existing.contentHash = contentHash;
-	}
 }
 
 /**
@@ -312,6 +291,7 @@ export function hasVisibleLines(
 /**
  * Get line numbers from content string.
  * Used to extract which lines would be affected by an edit.
+ * Normalizes CRLF to LF before counting to ensure consistent line numbering.
  *
  * @param fileContent - Full file content
  * @param searchText - Text to find in the file
@@ -321,17 +301,21 @@ export function getLineNumbersForText(
 	fileContent: string,
 	searchText: string,
 ): number[] {
-	const searchLines = searchText.split('\n');
+	// Normalize line endings to LF for consistent line counting
+	const normalizedContent = fileContent.replace(/\r\n/g, '\n');
+	const normalizedSearch = searchText.replace(/\r\n/g, '\n');
+
+	const searchLines = normalizedSearch.split('\n');
 	const targetLines: number[] = [];
 
 	// Find the starting position
-	const index = fileContent.indexOf(searchText);
+	const index = normalizedContent.indexOf(normalizedSearch);
 	if (index === -1) {
 		return [];
 	}
 
 	// Count lines before the match
-	const beforeMatch = fileContent.slice(0, index);
+	const beforeMatch = normalizedContent.slice(0, index);
 	const startLine = beforeMatch.split('\n').length;
 
 	// Add all lines covered by the search text

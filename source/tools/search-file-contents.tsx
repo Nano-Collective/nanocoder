@@ -91,7 +91,9 @@ const executeSearchFileContents = async (
 		// Group matches by file to batch the receipt recording
 		const matchesByFile = new Map<string, number[]>();
 		for (const match of matches) {
-			const absPath = path.resolve(root, match.file);
+			// Resolve relative to searchRoot (where the search actually ran),
+			// not project root, so the key matches what edit tools will use
+			const absPath = path.resolve(searchRoot, match.file);
 			if (!matchesByFile.has(absPath)) {
 				matchesByFile.set(absPath, []);
 			}

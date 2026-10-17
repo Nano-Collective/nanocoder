@@ -13,7 +13,6 @@ import {replaceFirstLiteral} from '@/utils/literal-replace';
 import {validateEditableFormat, validatePath} from '@/utils/path-validators';
 import {
 	forgetReadContent,
-	forgetVisibilityReceipt,
 	getLineNumbersForText,
 	hasSeenFile,
 	hasVisibleLines,
@@ -114,8 +113,10 @@ const executeStringReplace = async (
 	// not blind.
 	markFileSeen(absPath);
 	forgetReadContent(absPath);
-	// After edit, clear old visibility receipts and record the new edited range
-	forgetVisibilityReceipt(absPath);
+	// Record visibility for the new edited range. Don't clear other receipts —
+	// mtime/size tracking in hasVisibleLines already detects external changes,
+	// and clearing here would incorrectly invalidate other legitimately-read
+	// ranges in the same file.
 	try {
 		const stats = await lstat(absPath);
 		const matchIndex = fileContent.indexOf(old_str);
@@ -226,7 +227,7 @@ const stringReplaceFormatter = async (
 	return formatStringReplacePreview(args, result, colors);
 };
 
-const stringReplaceValidator = async (
+export const stringReplaceValidator = async (
 	args: StringReplaceArgs,
 ): Promise<{valid: true} | {valid: false; error: string}> => {
 	const {path, old_str} = args;

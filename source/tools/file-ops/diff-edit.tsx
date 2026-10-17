@@ -1,5 +1,5 @@
 import {constants} from 'node:fs';
-import {access, writeFile} from 'node:fs/promises';
+import {access, lstat, writeFile} from 'node:fs/promises';
 import {resolve} from 'node:path';
 import {Box, Text} from 'ink';
 import React from 'react';
@@ -15,8 +15,11 @@ import {replaceFirstLiteral} from '@/utils/literal-replace';
 import {validateEditableFormat, validatePath} from '@/utils/path-validators';
 import {
 	forgetReadContent,
+	getLineNumbersForText,
 	hasSeenFile,
+	hasVisibleLines,
 	markFileSeen,
+	recordVisibilityReceipt,
 } from '@/utils/read-tracker';
 import {createFileToolApproval} from '@/utils/tool-approval';
 import {
@@ -281,6 +284,22 @@ const executeDiffEdit = async (args: DiffEditArgs): Promise<string> => {
 	invalidateCache(absPath);
 	markFileSeen(absPath);
 	forgetReadContent(absPath);
+	// Record visibility receipts for the edited ranges. Unlike string_replace,
+	// don't clear old receipts — diff_edit already validated all SEARCH blocks
+	// are visible, so any other read receipts remain valid.
+	try {
+		const stats = await lstat(absPath);
+		for (const block of blocks) {
+			const blockLines = getLineNumbersForText(newContent, block.replace);
+			if (blockLines.length > 0) {
+				const startLine = blockLines[0];
+				const endLine = blockLines[blockLines.length - 1];
+				recordVisibilityReceipt(absPath, stats, startLine, endLine);
+			}
+		}
+	} catch {
+		// If stat fails, fall back to file-level tracking only
+	}
 
 	const blockLabel = blocks.length === 1 ? 'block' : 'blocks';
 	return capDiffEditResult(
@@ -480,6 +499,31 @@ const diffEditValidator = async (
 	try {
 		const cached = await getCachedFileContent(absPath);
 		validateBlocks(cached.content, blocks, args.path);
+
+		// Line-level visibility check: ensure the agent has actually read the lines
+		// in each SEARCH block. This prevents blind edits where the model hallucinates
+		// SEARCH content it never saw.
+		const allTargetLines: number[] = [];
+		for (const block of blocks) {
+			const blockLines = getLineNumbersForText(cached.content, block.search);
+			allTargetLines.push(...blockLines);
+		}
+
+		if (allTargetLines.length > 0) {
+			try {
+				const stats = await lstat(absPath);
+				const visibilityCheck = hasVisibleLines(absPath, stats, allTargetLines);
+				if (!visibilityCheck.visible) {
+					return {
+						valid: false,
+						error:
+							visibilityCheck.error ?? 'Lines in SEARCH blocks not visible',
+					};
+				}
+			} catch {
+				// If we can't stat the file, fall back to file-level check (already passed)
+			}
+		}
 	} catch (error) {
 		return {
 			valid: false,

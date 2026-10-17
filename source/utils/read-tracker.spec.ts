@@ -317,3 +317,27 @@ test.serial('visibility receipts survive generation bump (use invalidateAllVisib
 	t.false(check.visible);
 	t.regex(check.error!, /invalidated by context compaction/);
 });
+
+// ============================================================================
+// CRLF Line Counting Tests
+// ============================================================================
+
+test.serial('getLineNumbersForText normalizes CRLF to LF', t => {
+	const contentWithCRLF = 'line1\r\nline2\r\nline3\r\n';
+	const searchWithCRLF = 'line2';
+
+	const lines = getLineNumbersForText(contentWithCRLF, searchWithCRLF);
+
+	// Should find line 2 correctly despite CRLF
+	t.deepEqual(lines, [2]);
+});
+
+test.serial('getLineNumbersForText handles mixed line endings', t => {
+	const contentMixed = 'line1\nline2\r\nline3\nline4\r\n';
+	const search = 'line3';
+
+	const lines = getLineNumbersForText(contentMixed, search);
+
+	// Should find line 3 correctly
+	t.deepEqual(lines, [3]);
+});
