@@ -409,9 +409,10 @@ export async function runPlainShell(
 			return;
 		case TOOL_APPROVAL_REQUIRED_KIND:
 			writeError(
-				`${TOOL_APPROVAL_REQUIRED_PREFIX}${outcome.toolNames.join(', ')}. ` +
-					`Re-run with --mode auto-accept or --mode yolo, or add the tools to ` +
-					`agents.config.json "alwaysAllow".`,
+				formatToolApprovalRequired(
+					outcome.toolNames,
+					outcome.autoAcceptWouldRun,
+				),
 			);
 			await shutdown(2, deps);
 			return;
@@ -420,6 +421,28 @@ export async function runPlainShell(
 			await shutdown(1, deps);
 			return;
 	}
+}
+
+/**
+ * Only suggests what would change the result. Auto-accept still asks before
+ * bash and irreversible file ops, so it is offered only when it would have run
+ * every blocked call. `alwaysAllow` is read only from inside the `nanocoder`
+ * object, so the hint spells out that shape.
+ */
+function formatToolApprovalRequired(
+	toolNames: string[],
+	autoAcceptWouldRun: boolean,
+): string {
+	const uniqueNames = [...new Set(toolNames)];
+	const modes = autoAcceptWouldRun
+		? '--mode auto-accept or --mode yolo'
+		: '--mode yolo';
+	const quotedNames = uniqueNames.map(name => JSON.stringify(name)).join(', ');
+	return (
+		`${TOOL_APPROVAL_REQUIRED_PREFIX}${uniqueNames.join(', ')}. ` +
+		`Re-run with ${modes}, or allow ${uniqueNames.length === 1 ? 'it' : 'them'} ` +
+		`in agents.config.json: {"nanocoder": {"alwaysAllow": [${quotedNames}]}}`
+	);
 }
 
 function isToolCallingDisabled(provider: string, model: string): boolean {

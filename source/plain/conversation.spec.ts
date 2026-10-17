@@ -15,9 +15,11 @@ import {
 import type { ToolManager } from "@/tools/tool-manager";
 import type {
 	AISDKCoreTool,
+	DevelopmentMode,
 	LLMChatResponse,
 	LLMClient,
 	Message,
+	ToolApprovalPolicy,
 	ToolCall,
 	ToolEntry,
 	ToolHandler,
@@ -60,7 +62,7 @@ function makeFakeClient(options: FakeClientOptions): LLMClient {
 
 interface FakeToolManagerOptions {
 	knownTools?: Set<string>;
-	needsApprovalByName?: Record<string, boolean>;
+	needsApprovalByName?: Record<string, ToolApprovalPolicy>;
 }
 
 function makeFakeToolManager(opts: FakeToolManagerOptions = {}): ToolManager {
@@ -267,6 +269,73 @@ test("returns tool-approval-required when a tool needs approval and mode is not 
 	t.is(outcome.steps, 1);
 	if (outcome.kind === TOOL_APPROVAL_REQUIRED_KIND) {
 		t.deepEqual(outcome.toolNames, ["risky_tool"]);
+		t.false(outcome.autoAcceptWouldRun);
+	}
+});
+
+// Mirrors the real policies: file edits are waived in auto-accept, bash is not.
+const waivedInAutoAccept: ToolApprovalPolicy = (_args, mode) =>
+	mode !== "auto-accept";
+const neverWaived: ToolApprovalPolicy = () => true;
+
+async function runBlockedTurn(
+	developmentMode: DevelopmentMode,
+	toolNames: string[],
+) {
+	const toolCalls: ToolCall[] = toolNames.map((name, index) => ({
+		id: `call-${index}`,
+		function: { name, arguments: {} },
+	}));
+	const client = makeFakeClient({
+		responses: [
+			{
+				choices: [
+					{
+						message: {
+							role: "assistant",
+							content: "",
+							tool_calls: toolCalls,
+						},
+					},
+				],
+			},
+		],
+	});
+	const toolManager = makeFakeToolManager({
+		knownTools: new Set(["edit_tool", "bash_tool"]),
+		needsApprovalByName: {
+			edit_tool: waivedInAutoAccept,
+			bash_tool: neverWaived,
+		},
+	});
+
+	return runPlainConversation({
+		client,
+		toolManager,
+		systemMessage: SYSTEM,
+		initialMessages: [USER],
+		developmentMode,
+		nonInteractiveAlwaysAllow: [],
+		abortSignal: new AbortController().signal,
+	});
+}
+
+test("autoAcceptWouldRun is true when auto-accept would run every blocked call", async (t) => {
+	const outcome = await runBlockedTurn("normal", ["edit_tool"]);
+
+	t.is(outcome.kind, TOOL_APPROVAL_REQUIRED_KIND);
+	if (outcome.kind === TOOL_APPROVAL_REQUIRED_KIND) {
+		t.true(outcome.autoAcceptWouldRun);
+	}
+});
+
+test("autoAcceptWouldRun is false when auto-accept would still ask for a call", async (t) => {
+	const outcome = await runBlockedTurn("normal", ["edit_tool", "bash_tool"]);
+
+	t.is(outcome.kind, TOOL_APPROVAL_REQUIRED_KIND);
+	if (outcome.kind === TOOL_APPROVAL_REQUIRED_KIND) {
+		t.deepEqual(outcome.toolNames, ["edit_tool", "bash_tool"]);
+		t.false(outcome.autoAcceptWouldRun);
 	}
 });
 
