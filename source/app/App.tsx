@@ -24,7 +24,12 @@ import {
 } from '@/components/vscode-extension-prompt';
 import WelcomeMessage from '@/components/welcome-message';
 import {getAppConfig, loadDefaultMode} from '@/config/index';
-import {getPrivacyPreference, updateSelectedTheme} from '@/config/preferences';
+import {
+	getPreferencesVersion,
+	getPrivacyPreference,
+	subscribeToPreferences,
+	updateSelectedTheme,
+} from '@/config/preferences';
 import {getThemeColors} from '@/config/themes';
 import {PrivacyContext} from '@/context/privacy-context';
 import {useChatHandler} from '@/hooks/chat-handler';
@@ -91,6 +96,15 @@ export default function App({
 
 	// Use extracted hooks
 	const appState = useAppState(initialDevelopmentMode);
+	const preferencesVersion = React.useSyncExternalStore(
+		subscribeToPreferences,
+		getPreferencesVersion,
+	);
+
+	const privacyEnabled = React.useMemo(() => {
+		void preferencesVersion;
+		return getPrivacyPreference();
+	}, [preferencesVersion]);
 	const userMessageQueue = useUserMessageQueue();
 	const {exit} = useApp();
 	const {isTrusted, handleConfirmTrust, isTrustLoading, isTrustedError} =
@@ -347,7 +361,7 @@ export default function App({
 		tune: appState.tune,
 		subagentsReady: appState.subagentsReady,
 		privacySessionMapRef: appState.privacySessionMapRef,
-		privacyEnabled: getPrivacyPreference(),
+		privacyEnabled,
 		ensureCurrentSessionId: appState.ensureCurrentSessionId,
 	});
 
@@ -814,7 +828,7 @@ export default function App({
 			<TitleShapeContext.Provider value={titleShapeContextValue}>
 				<PrivacyContext.Provider
 					value={{
-						privacyEnabled: getPrivacyPreference(),
+						privacyEnabled,
 						privacySessionMapRef: appState.privacySessionMapRef,
 					}}
 				>

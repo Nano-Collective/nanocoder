@@ -49,7 +49,7 @@ export function useAppState(
 	initialDevelopmentMode: DevelopmentMode = 'normal',
 ) {
 	// Initialize theme and title shape from preferences
-	const preferences = loadPreferences();
+	const [preferences] = useState(() => loadPreferences());
 	const initialTheme = preferences.selectedTheme || defaultTheme;
 	const initialTitleShape = preferences.titleShape || 'pill';
 
