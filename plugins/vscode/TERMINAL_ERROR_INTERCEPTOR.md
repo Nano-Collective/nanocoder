@@ -86,9 +86,11 @@ The interceptor intelligently extracts error context by:
 
 ### Compatibility
 
-- **VS Code 1.93+**: Full automatic detection via `onDidWriteTerminalData`
-- **VS Code 1.125+**: Manual trigger via command palette
-- Falls back gracefully on older versions
+- **VS Code 1.125+**: Required minimum version (set in `engines.vscode`)
+- **VS Code 1.93+**: Full automatic detection via `onDidWriteTerminalData` API
+- **VS Code 1.125-1.92**: Manual trigger only via command palette
+
+The extension gracefully detects API availability and falls back to manual mode on older versions within the supported range.
 
 ## Configuration
 

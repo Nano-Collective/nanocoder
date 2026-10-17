@@ -211,6 +211,16 @@ export const __test = {
 	): Promise<Uri[]> => [],
 	/** Messages surfaced through `window.show*Message`, newest last. */
 	shownMessages: [] as {kind: 'info' | 'warning' | 'error'; message: string}[],
+	/** Active terminals for testing. */
+	terminals: [] as any[],
+	/** Listener for onDidOpenTerminal events. */
+	onDidOpenTerminalListener: undefined as ((terminal: any) => void) | undefined,
+	/** Listener for onDidCloseTerminal events. */
+	onDidCloseTerminalListener: undefined as ((terminal: any) => void) | undefined,
+	/** Listener for onDidWriteTerminalData events. */
+	onDidWriteTerminalDataListener: undefined as
+		| ((event: {terminal: any; data: string}) => void)
+		| undefined,
 
 	reset(): void {
 		__test.findFiles = async () => [];
@@ -223,6 +233,10 @@ export const __test = {
 		__test.asRelativePath = target =>
 			typeof target === 'string' ? target : target.fsPath;
 		__test.shownMessages = [];
+		__test.terminals = [];
+		__test.onDidOpenTerminalListener = undefined;
+		__test.onDidCloseTerminalListener = undefined;
+		__test.onDidWriteTerminalDataListener = undefined;
 	},
 };
 
@@ -254,6 +268,7 @@ export const commands = {
 
 export const window = {
 	activeTextEditor: undefined as unknown,
+	terminals: __test.terminals,
 	showInformationMessage: async (message: string) => {
 		__test.shownMessages.push({kind: 'info', message});
 		return undefined;
@@ -286,6 +301,14 @@ export const window = {
 	registerWebviewViewProvider: () => noopDisposable,
 	onDidChangeActiveTextEditor: () => noopDisposable,
 	onDidChangeTextEditorSelection: () => noopDisposable,
+	onDidOpenTerminal: (listener: (terminal: any) => void) => {
+		__test.onDidOpenTerminalListener = listener;
+		return noopDisposable;
+	},
+	onDidCloseTerminal: (listener: (terminal: any) => void) => {
+		__test.onDidCloseTerminalListener = listener;
+		return noopDisposable;
+	},
 };
 
 export const languages = {

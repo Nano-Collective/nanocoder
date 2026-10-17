@@ -166,12 +166,26 @@ export function activate(context: vscode.ExtensionContext) {
 				return;
 			}
 			
-			// Prompt user to paste or describe the error
-			const errorText = await vscode.window.showInputBox({
-				prompt: 'Paste the terminal error or describe the issue',
-				placeHolder: 'Error: ENOENT: no such file or directory...',
-				ignoreFocusOut: true,
-			});
+			// Try to get the last error context from the interceptor
+			const lastErrorContext = terminalErrorInterceptor.getLastErrorContext(activeTerminal);
+			
+			let errorText: string | undefined;
+			
+			if (lastErrorContext && lastErrorContext.length > 0) {
+				// Show the captured error and allow editing
+				errorText = await vscode.window.showInputBox({
+					prompt: 'Captured terminal error (edit if needed or paste a different error)',
+					value: lastErrorContext.join('\n'),
+					ignoreFocusOut: true,
+				});
+			} else {
+				// No captured error, prompt for manual input
+				errorText = await vscode.window.showInputBox({
+					prompt: 'Paste the terminal error or describe the issue',
+					placeHolder: 'Error: ENOENT: no such file or directory...',
+					ignoreFocusOut: true,
+				});
+			}
 			
 			if (errorText) {
 				const prompt = `I encountered a terminal error. Please analyze and help me fix it:\n\n\`\`\`\n${errorText}\n\`\`\``;

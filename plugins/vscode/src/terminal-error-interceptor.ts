@@ -6,7 +6,7 @@ interface ErrorPattern {
 }
 
 // Common error patterns across different tools and languages
-const ERROR_PATTERNS: ErrorPattern[] = [
+export const ERROR_PATTERNS: ErrorPattern[] = [
 	// TypeScript/JavaScript errors
 	{regex: /error TS\d+:/i, description: 'TypeScript compilation error'},
 	{regex: /SyntaxError:/i, description: 'JavaScript syntax error'},
@@ -39,6 +39,7 @@ interface TerminalOutput {
 	outputBuffer: string[];
 	hasError: boolean;
 	lastErrorContext: string[];
+	resetTimer?: NodeJS.Timeout;
 }
 
 export class TerminalErrorInterceptor implements vscode.Disposable {
@@ -128,9 +129,14 @@ export class TerminalErrorInterceptor implements vscode.Disposable {
 		}
 
 		// Reset error flag after some time (to allow for repeated detections)
+		// Clear any existing timer first to avoid overlapping resets
 		if (hasError) {
-			setTimeout(() => {
+			if (terminalOutput.resetTimer) {
+				clearTimeout(terminalOutput.resetTimer);
+			}
+			terminalOutput.resetTimer = setTimeout(() => {
 				terminalOutput.hasError = false;
+				terminalOutput.resetTimer = undefined;
 			}, 2000);
 		}
 	}
@@ -193,7 +199,24 @@ export class TerminalErrorInterceptor implements vscode.Disposable {
 			});
 	}
 
+	/**
+	 * Get the last error context from a specific terminal, if any.
+	 * Used by the manual fix command to access captured errors.
+	 */
+	public getLastErrorContext(terminal: vscode.Terminal): string[] | undefined {
+		const terminalOutput = this.terminalOutputs.get(terminal);
+		return terminalOutput?.lastErrorContext.length
+			? terminalOutput.lastErrorContext
+			: undefined;
+	}
+
 	public dispose(): void {
+		// Clear all pending timers
+		for (const terminalOutput of this.terminalOutputs.values()) {
+			if (terminalOutput.resetTimer) {
+				clearTimeout(terminalOutput.resetTimer);
+			}
+		}
 		this.disposables.forEach(d => d.dispose());
 		this.terminalOutputs.clear();
 	}
