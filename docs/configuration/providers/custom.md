@@ -40,3 +40,19 @@ Select "Custom Provider" in the `/settings providers` wizard to add one interact
 3. API key (optional)
 4. Model names
 5. Request timeout (optional, saved as `requestTimeout`; leave blank to keep the default)
+
+## Example: Tsubasa
+
+[Tsubasa](https://tsubasa.sh) provides OpenAI-compatible API access. To configure it as a custom provider:
+
+```json
+{
+	"name": "Tsubasa",
+	"baseUrl": "https://api.tsubasa.sh/v1",
+	"apiKey": "your-tsubasa-api-key",
+	"models": ["tsubasa-pro", "tsubasa-fast"],
+	"disableTools": true
+}
+```
+
+Both `tsubasa-pro` and `tsubasa-fast` support a 32,768-token context window with an 8,192-token output limit. Tool calling is currently unsupported, so `disableTools: true` is required.
