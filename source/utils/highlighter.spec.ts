@@ -1,19 +1,19 @@
+import {createRequire} from 'node:module';
 import test from 'ava';
 import stripAnsi from 'strip-ansi';
-import {
-	_isHighlighterLoaded,
-	_resetHighlighter,
-	highlight,
-} from './highlighter.js';
+import {highlight} from './highlighter.js';
+
+const req = createRequire(import.meta.url);
+const isCliHighlightLoaded = () =>
+	Boolean(req.cache?.[req.resolve('cli-highlight')]);
 
 test.serial('highlight loads cli-highlight lazily on first use', t => {
-	_resetHighlighter();
-	t.false(_isHighlighterLoaded());
+	t.false(isCliHighlightLoaded());
 
 	const code = 'const hello = "world";';
 	const result = highlight(code, {language: 'javascript'});
 
-	t.true(_isHighlighterLoaded());
+	t.true(isCliHighlightLoaded());
 	t.is(stripAnsi(result), code);
 	t.is(typeof result, 'string');
 });
