@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import fs from 'fs/promises';
 import {getClosestConfigFile} from '@/config/index';
 import {MAX_PROMPT_HISTORY_SIZE} from '@/constants';
@@ -7,6 +8,19 @@ import type {InputState} from './types/hooks';
 
 const ENTRY_SEPARATOR = '\n---ENTRY_SEPARATOR---\n';
 const JSON_FORMAT_MARKER = '---JSON_FORMAT---';
+
+function isEnoent(error: unknown): boolean {
+	return error instanceof Error && 'code' in error && error.code === 'ENOENT';
+}
+
+async function pathExists(filePath: string): Promise<boolean> {
+	try {
+		await fs.access(filePath);
+		return true;
+	} catch {
+		return false;
+	}
+}
 
 export class PromptHistory {
 	private history: InputState[] = [];
@@ -32,7 +46,11 @@ export class PromptHistory {
 			} else if (content.startsWith(JSON_FORMAT_MARKER)) {
 				// New JSON format with InputState objects
 				const jsonContent = content.slice(JSON_FORMAT_MARKER.length);
-				this.history = JSON.parse(jsonContent) as InputState[];
+				const parsed: unknown = JSON.parse(jsonContent);
+				if (!Array.isArray(parsed)) {
+					throw new Error('Prompt history file does not contain an array');
+				}
+				this.history = parsed as InputState[];
 			} else if (content.includes(ENTRY_SEPARATOR)) {
 				// LEGACY_MIGRATION_REMOVE_AFTER: 1.27.0
 				// Old format using ENTRY_SEPARATOR. Migrate to InputState on read.
@@ -50,11 +68,61 @@ export class PromptHistory {
 				this.history = this.migrateStringArrayToInputState(stringEntries);
 			}
 			this.currentIndex = -1;
-		} catch {
-			// File doesn't exist yet, start with empty history
+		} catch (error) {
 			this.history = [];
 			this.currentIndex = -1;
+
+			if (isEnoent(error)) {
+				// File doesn't exist yet, start with empty history
+				return;
+			}
+
+			// The file exists but could not be read or parsed - a truncated
+			// JSON payload left behind by a crash mid-save is the common case.
+			// Moving it aside preserves the old entries for recovery and stops
+			// the next save from overwriting them with the empty history.
+			await this.quarantineCorruptFile(error);
 		}
+	}
+
+	/**
+	 * Move an unreadable history file out of the way so the next save starts
+	 * fresh instead of destroying it. Best effort: if the rename fails the
+	 * file is left untouched, and the atomic write in saveHistory means a
+	 * later save renames a complete temp file into place rather than
+	 * truncating the existing one.
+	 */
+	private async quarantineCorruptFile(error: unknown): Promise<void> {
+		const backupPath = await this.nextAvailableBackupPath();
+		logError(
+			`Prompt history file is unreadable, backing it up to ${backupPath}: ${formatError(error)}`,
+		);
+		try {
+			await fs.rename(this.historyFile, backupPath);
+		} catch (renameError) {
+			logError(
+				`Failed to back up corrupt prompt history: ${formatError(renameError)}`,
+			);
+		}
+	}
+
+	/**
+	 * A plain `.corrupt` name as long as it is free, otherwise a timestamped
+	 * one. A second corruption must not overwrite the first backup, or the
+	 * entries it held would be lost after all.
+	 */
+	private async nextAvailableBackupPath(): Promise<string> {
+		const base = `${this.historyFile}.corrupt`;
+		if (!(await pathExists(base))) return base;
+
+		const stamp = new Date().toISOString().replace(/[:.]/gu, '-');
+		let candidate = `${base}-${stamp}`;
+		let counter = 1;
+		while (await pathExists(candidate)) {
+			candidate = `${base}-${stamp}-${counter}`;
+			counter++;
+		}
+		return candidate;
 	}
 
 	private migrateStringArrayToInputState(
@@ -71,11 +139,22 @@ export class PromptHistory {
 		this.savePromise = this.savePromise.then(async () => {
 			try {
 				const jsonContent = JSON.stringify(this.history, null, 2);
-				await fs.writeFile(
-					this.historyFile,
-					JSON_FORMAT_MARKER + jsonContent,
-					'utf8',
-				);
+				// Write to a temp file and rename into place. writeFile alone
+				// truncates in place, so a crash mid-save used to leave a file
+				// starting with the marker followed by broken JSON, which the
+				// next load discarded.
+				const temporaryPath = `${this.historyFile}.${crypto.randomUUID()}.tmp`;
+				try {
+					await fs.writeFile(
+						temporaryPath,
+						JSON_FORMAT_MARKER + jsonContent,
+						'utf8',
+					);
+					await fs.rename(temporaryPath, this.historyFile);
+				} catch (writeError) {
+					await fs.unlink(temporaryPath).catch(() => {});
+					throw writeError;
+				}
 			} catch (error) {
 				// Silently fail to avoid disrupting the user experience
 				const errorMessage = formatError(error);
