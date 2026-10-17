@@ -22,6 +22,7 @@ import type {
 	ToolEntry,
 	ToolHandler,
 } from "@/types/core";
+import "@/tools/file-ops/write-file";
 import { runPlainConversation } from "./conversation.js";
 
 // Suppress ANSI in test output so tokens streamed to stdout stay readable.
@@ -2220,3 +2221,154 @@ test.serial(
 		t.is(calls.length, 1);
 	},
 );
+
+// ---------------------------------------------------------------------------
+// nanocoder.verify: a run that edited files cannot end without evidence
+// ---------------------------------------------------------------------------
+
+const toolTurn = (id: string, name: string, args: Record<string, unknown>) => ({
+	choices: [
+		{
+			message: {
+				role: "assistant",
+				content: "",
+				tool_calls: [{ id, function: { name, arguments: args } }] as ToolCall[],
+			},
+		},
+	],
+});
+const textTurn = (content: string) => ({
+	choices: [{ message: { role: "assistant", content } }],
+});
+
+/**
+ * Plays the scripted turns, records the last message the model saw on each
+ * call, and answers execute_bash with the given exit code.
+ */
+async function runVerified(
+	script: Array<Record<string, unknown>>,
+	bashExitCode: number,
+	required: string[] | undefined,
+) {
+	const seen: string[] = [];
+	let call = 0;
+	const client = {
+		...makeFakeClient({ responses: [] }),
+		chat: async (
+			messages: Message[],
+			_tools: unknown,
+			callbacks: { onToken?: (token: string) => void },
+		): Promise<LLMChatResponse> => {
+			seen.push(messages.at(-1)?.content ?? "");
+			const turn = script[call++] as unknown as LLMChatResponse | undefined;
+			if (!turn) throw new Error("script ran out");
+			const text = turn.choices[0]?.message.content;
+			if (text) callbacks.onToken?.(text);
+			return turn;
+		},
+	} as unknown as LLMClient;
+	setToolRegistryGetter(() => ({
+		write_file: (async () => "File written") as ToolHandler,
+		execute_bash: (async () =>
+			`EXIT_CODE: ${bashExitCode}\noutput`) as ToolHandler,
+	}));
+
+	const previous = getAppConfig().verify;
+	getAppConfig().verify = required ? { required } : undefined;
+	try {
+		const outcome = await runPlainConversation({
+			client,
+			toolManager: makeFakeToolManager({
+				knownTools: new Set(["write_file", "execute_bash"]),
+			}),
+			systemMessage: SYSTEM,
+			initialMessages: [USER],
+			developmentMode: "yolo",
+			nonInteractiveAlwaysAllow: [],
+			abortSignal: new AbortController().signal,
+		});
+		return { outcome, seen, calls: call };
+	} finally {
+		getAppConfig().verify = previous;
+	}
+}
+
+test.serial("verify: a headless run is sent back until the required command passes", async (t) => {
+	const { outcome, seen, calls } = await runVerified(
+		[
+			toolTurn("w", "write_file", { path: "a.ts", content: "x" }),
+			textTurn("Fixed it."),
+			toolTurn("b", "execute_bash", { command: "pnpm test" }),
+			textTurn("Confirmed."),
+		],
+		0,
+		["pnpm test"],
+	);
+
+	t.is(calls, 4);
+	t.true(seen[2]?.includes("`pnpm test` (not run)"), "the model is told what to run");
+	t.is(outcome.kind, "success");
+	if (outcome.kind === "success") {
+		t.is(outcome.finalText, "Fixed it.\n\nVerification: ✓ pnpm test (exit 0)");
+	}
+});
+
+test.serial("verify: a failing run is not evidence, and the model may finish after two reminders", async (t) => {
+	const { outcome, seen, calls } = await runVerified(
+		[
+			toolTurn("w", "write_file", { path: "a.ts", content: "x" }),
+			textTurn("Done."),
+			toolTurn("b", "execute_bash", { command: "pnpm test" }),
+			textTurn("Still done."),
+			textTurn("Really done."),
+		],
+		1,
+		["pnpm test"],
+	);
+
+	t.is(calls, 5);
+	t.true(seen[4]?.includes("last run exited 1"));
+	t.is(outcome.kind, "success");
+	if (outcome.kind === "success") {
+		t.is(outcome.finalText, "Done.\n\nVerification: ✗ pnpm test (last run exited 1)");
+	}
+});
+
+test.serial("verify: an edit after a passing run makes the evidence stale", async (t) => {
+	const { seen, calls } = await runVerified(
+		[
+			toolTurn("w1", "write_file", { path: "a.ts", content: "x" }),
+			toolTurn("b", "execute_bash", { command: "pnpm test" }),
+			toolTurn("w2", "write_file", { path: "a.ts", content: "y" }),
+			textTurn("Done."),
+			toolTurn("b2", "execute_bash", { command: "pnpm test" }),
+			textTurn("Confirmed."),
+		],
+		0,
+		["pnpm test"],
+	);
+
+	t.is(calls, 6);
+	t.true(seen[4]?.includes("not run since your last edit"));
+});
+
+test.serial("verify: nothing changes when it is not configured", async (t) => {
+	const { outcome, calls } = await runVerified(
+		[toolTurn("w", "write_file", { path: "a.ts", content: "x" }), textTurn("Done.")],
+		0,
+		undefined,
+	);
+
+	t.is(calls, 2);
+	t.is(outcome.kind, "success");
+	if (outcome.kind === "success") t.is(outcome.finalText, "Done.");
+});
+
+test.serial("verify: a run that edited nothing is not held up", async (t) => {
+	const { outcome, calls } = await runVerified([textTurn("Just an answer.")], 0, [
+		"pnpm test",
+	]);
+
+	t.is(calls, 1);
+	if (outcome.kind === "success") t.is(outcome.finalText, "Just an answer.");
+});

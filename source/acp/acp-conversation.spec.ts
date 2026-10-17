@@ -14,6 +14,7 @@ import test from 'ava';
 import type {AgentSideConnection} from '@agentclientprotocol/sdk';
 import {AcpSession} from '@/acp/acp-session';
 import {runAcpConversation} from '@/acp/acp-conversation';
+import {getAppConfig} from '@/config/index';
 import {
 	getSessionCwd,
 	resetSessionCwd,
@@ -2798,4 +2799,84 @@ test.serial('runAcpConversation - concurrent sessions keep their own working dir
 
 	t.true(firstResults[0].includes('FIRST marker'), firstResults[0]);
 	t.true(secondResults[0].includes('SECOND marker'), secondResults[0]);
+});
+
+// Serial: it swaps the process-wide tool registry and config.
+test.serial('runAcpConversation - nanocoder.verify sends the model back and reports the evidence', async t => {
+	const {conn, updates} = createMockConn();
+	const session = createMockSession(conn, {devMode: 'yolo'});
+	const toolManager = {
+		...createMockToolManager(),
+		getAvailableToolNames: () => ['write_file', 'execute_bash'],
+		hasTool: () => true,
+		getToolEntry: () => ({approval: false}),
+	};
+	setToolRegistryGetter(() => ({
+		write_file: async () => 'File written',
+		execute_bash: async () => 'EXIT_CODE: 0\nok',
+	}));
+
+	const previous = getAppConfig().verify;
+	getAppConfig().verify = {required: ['pnpm test']};
+	let callCount = 0;
+	let reminder = '';
+	const client = {
+		chat: async (messages: any[]) => {
+			callCount++;
+			if (callCount === 1) {
+				return {
+					choices: [
+						{
+							message: {
+								content: '',
+								tool_calls: [
+									createMockToolCall('write_file', {path: 'a.ts', content: 'x'}),
+								],
+							},
+						},
+					],
+				};
+			}
+			if (callCount === 2) {
+				return {choices: [{message: {content: 'Done.'}}]};
+			}
+			if (callCount === 3) {
+				reminder = messages.at(-1)?.content ?? '';
+				return {
+					choices: [
+						{
+							message: {
+								content: '',
+								tool_calls: [
+									createMockToolCall('execute_bash', {command: 'pnpm test'}),
+								],
+							},
+						},
+					],
+				};
+			}
+			return {choices: [{message: {content: 'Confirmed.'}}]};
+		},
+	} as unknown as LLMClient;
+
+	try {
+		const result = await runAcpConversation({
+			session,
+			client,
+			toolManager: toolManager as any,
+			conn,
+			nonInteractiveAlwaysAllow: [],
+		});
+		t.is(result.stopReason, 'end_turn');
+	} finally {
+		getAppConfig().verify = previous;
+	}
+
+	t.is(callCount, 4);
+	t.true(reminder.includes('`pnpm test` (not run)'));
+	const texts = updates
+		.map(update => update.update)
+		.filter(update => update.sessionUpdate === 'agent_message_chunk')
+		.map(update => update.content.text as string);
+	t.true(texts.some(text => text.includes('Verification: ✓ pnpm test (exit 0)')));
 });

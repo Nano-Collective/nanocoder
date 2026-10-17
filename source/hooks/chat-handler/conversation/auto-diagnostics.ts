@@ -1,3 +1,4 @@
+import {isEvidenceRejectionMessage} from '@/services/completion-ledger';
 import type {Message, ToolCall, ToolResult} from '@/types/core';
 
 const DIAGNOSTICS_TOOL_NAME = 'lsp_get_diagnostics';
@@ -64,8 +65,9 @@ export function collectEditedPaths(
 
 /**
  * Whether the latest turn — everything after the last prompt the user actually
- * sent, looking past the synthetic auto-diagnostics prompt — made a successful
- * edit. Stored tool messages carry the fields `collectEditedPaths` reads.
+ * sent, looking past the synthetic auto-diagnostics and verification prompts —
+ * made a successful edit. Stored tool messages carry the fields
+ * `collectEditedPaths` reads.
  */
 export function lastTurnEditedFiles(messages: Message[]): boolean {
 	let start = messages.length;
@@ -73,7 +75,8 @@ export function lastTurnEditedFiles(messages: Message[]): boolean {
 		start > 0 &&
 		!(
 			messages[start - 1].role === 'user' &&
-			!isAutoDiagnosticsMessage(messages[start - 1])
+			!isAutoDiagnosticsMessage(messages[start - 1]) &&
+			!isEvidenceRejectionMessage(messages[start - 1])
 		)
 	) {
 		start--;

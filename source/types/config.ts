@@ -157,6 +157,14 @@ export interface RetryLimitsConfig {
 	maxTruncatedTurns: number;
 }
 
+// Completion evidence: commands the agent must have run, with exit code 0,
+// after its last file edit before a turn can end. Off unless `required` is set.
+export interface VerifyConfig {
+	// Commands that must exit 0 after the last edit, or "auto" to detect the
+	// `test`, `typecheck` and `lint` scripts in package.json.
+	required?: string[] | 'auto';
+}
+
 // Custom system prompt configuration
 export interface SystemPromptConfig {
 	// "replace" overrides the entire built-in prompt; "append" adds to the end.
@@ -408,6 +416,12 @@ export interface DiskNanocoderConfig {
 	 * can set any combination (e.g. just `maxRepeatedToolCalls`).
 	 */
 	retries?: Partial<RetryLimitsConfig>;
+	/**
+	 * Completion evidence. Set `required` to commands (e.g. `["pnpm test"]`) or
+	 * `"auto"`, and a turn that edited files is not accepted as finished until
+	 * each command has exited 0 since the last edit. Off by default.
+	 */
+	verify?: VerifyConfig;
 	/** Confine execute_bash / !cmd with an OS jail. Off by default. */
 	sandbox?: boolean;
 	/** Commit each successful agent file edit (only that file) with a generated Conventional Commit message. Off by default. */
@@ -530,6 +544,9 @@ export interface AppConfig {
 
 	// Agent-loop retry limits (interactive conversation loop)
 	retries?: RetryLimitsConfig;
+
+	// Completion evidence required before a turn that edited files can end
+	verify?: VerifyConfig;
 }
 
 // MCP Server configuration with source tracking
