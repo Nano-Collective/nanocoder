@@ -826,7 +826,7 @@ test.serial(
 			// Should NOT return empty marker (content.length === 1, not 0)
 			// File splits into 2 lines ['', ''] and joining returns '\n'
 			t.not(result, EMPTY_CONTENT_MARKER);
-			t.is(result, '\n');
+			t.is(result.replace(/\n\n\[@span:[a-z0-9]+\]$/, ''), '\n');
 		} finally {
 			rmSync(testDir, {recursive: true, force: true});
 		}
@@ -1288,7 +1288,7 @@ test.serial('read_file range request is never stubbed as a full-file read', asyn
 			{path: filePath, start_line: 2, end_line: 2},
 			{toolCallId: 'test', messages: []},
 		);
-		t.is(ranged, 'two');
+		t.is(ranged.replace(/\n\n\[@span:[a-z0-9]+\]$/, ''), 'two');
 	} finally {
 		rmSync(testDir, {recursive: true, force: true});
 	}
