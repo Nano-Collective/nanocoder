@@ -28,66 +28,127 @@ export function getNextRunTime(expression: string): Date | null {
 
 /**
  * Formats a cron expression into a human-readable description.
+ *
+ * Accepts both the traditional five-field form (minute hour day month weekday)
+ * and croner's extended form with a leading seconds field.
  */
 export function formatCronHuman(expression: string): string {
 	const parts = expression.trim().split(/\s+/);
-	if (parts.length < 5) return expression;
+	if (parts.length < 5 || parts.length > 6) return expression;
 
-	const [minute, hour, dayOfMonth, month, dayOfWeek] = parts;
+	// A leading seconds field shifts every following field by one.
+	const offset = parts.length === 6 ? 1 : 0;
+	const [minute, hour, dayOfMonth, month, dayOfWeek] = [
+		parts[offset],
+		parts[offset + 1],
+		parts[offset + 2],
+		parts[offset + 3],
+		parts[offset + 4],
+	];
+
+	const dayMatch = isWildcard(dayOfMonth);
+	const monthMatch = isWildcard(month);
+	const weekdayMatch = isWildcard(dayOfWeek);
+	const time = `${hour}:${minute?.padStart(2, '0')}`;
 
 	// Common patterns
 	if (
-		minute === '*' &&
-		hour === '*' &&
-		dayOfMonth === '*' &&
-		month === '*' &&
-		dayOfWeek === '*'
+		isWildcard(minute) &&
+		isWildcard(hour) &&
+		dayMatch &&
+		monthMatch &&
+		weekdayMatch
 	) {
 		return 'every minute';
 	}
 
+	const minuteStep = stepValue(minute);
 	if (
+		minuteStep !== null &&
+		isWildcard(hour) &&
+		dayMatch &&
+		monthMatch &&
+		weekdayMatch
+	) {
+		return `every ${minuteStep} minutes`;
+	}
+
+	const hourStep = stepValue(hour);
+	if (
+		minuteStep === null &&
+		hourStep !== null &&
+		dayMatch &&
+		monthMatch &&
+		weekdayMatch
+	) {
+		return minute === '*'
+			? `every ${hourStep} hours`
+			: `every ${hourStep} hours at minute ${minute}`;
+	}
+
+	if (
+		!hasStep(minute) &&
+		isWildcard(hour) &&
 		minute !== '*' &&
-		hour === '*' &&
-		dayOfMonth === '*' &&
-		month === '*' &&
-		dayOfWeek === '*'
+		dayMatch &&
+		monthMatch &&
+		weekdayMatch
 	) {
 		return `every hour at minute ${minute}`;
 	}
 
 	if (
+		!hasStep(minute) &&
+		!hasStep(hour) &&
 		minute !== '*' &&
 		hour !== '*' &&
-		dayOfMonth === '*' &&
-		month === '*' &&
-		dayOfWeek === '*'
+		dayMatch &&
+		monthMatch &&
+		weekdayMatch
 	) {
-		return `daily at ${hour}:${minute?.padStart(2, '0')}`;
+		return `daily at ${time}`;
 	}
 
 	if (
+		!hasStep(minute) &&
+		!hasStep(hour) &&
 		minute !== '*' &&
 		hour !== '*' &&
-		dayOfMonth === '*' &&
-		month === '*' &&
-		dayOfWeek !== '*'
+		dayMatch &&
+		monthMatch &&
+		!weekdayMatch
 	) {
 		const days = formatDayOfWeek(dayOfWeek);
-		return `${days} at ${hour}:${minute?.padStart(2, '0')}`;
+		return `${days} at ${time}`;
 	}
 
 	if (
+		!hasStep(minute) &&
+		!hasStep(hour) &&
 		minute !== '*' &&
 		hour !== '*' &&
-		dayOfMonth !== '*' &&
-		month === '*' &&
-		dayOfWeek === '*'
+		!dayMatch &&
+		monthMatch &&
+		weekdayMatch
 	) {
-		return `monthly on day ${dayOfMonth} at ${hour}:${minute?.padStart(2, '0')}`;
+		return `monthly on day ${dayOfMonth} at ${time}`;
 	}
 
 	return expression;
+}
+
+function isWildcard(field: string | undefined): boolean {
+	return field === undefined || field === '*';
+}
+
+function hasStep(field: string | undefined): boolean {
+	return field !== undefined && field.includes('/');
+}
+
+function stepValue(field: string | undefined): number | null {
+	if (field === undefined) return null;
+	const match = /^\*\/(\d+)$/.exec(field);
+	return match ? Number(match[1]) : null;
 }
 
 const DAY_NAMES: Record<string, string> = {

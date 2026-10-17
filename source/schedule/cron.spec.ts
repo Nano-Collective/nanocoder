@@ -60,6 +60,29 @@ test('getNextRunTime returns null for invalid expressions', t => {
 // formatCronHuman Tests
 // ============================================================================
 
+
+test('formatCronHuman formats step minutes as every N minutes', t => {
+	t.is(formatCronHuman('*/15 * * * *'), 'every 15 minutes');
+	t.is(formatCronHuman('*/30 * * * *'), 'every 30 minutes');
+	t.is(formatCronHuman('*/2 * * * *'), 'every 2 minutes');
+});
+
+test('formatCronHuman formats step hours as every N hours', t => {
+	t.is(formatCronHuman('0 */2 * * *'), 'every 2 hours at minute 0');
+	t.is(formatCronHuman('30 */3 * * *'), 'every 3 hours at minute 30');
+});
+
+test('formatCronHuman reads a 6-field expression with seconds', t => {
+	t.is(formatCronHuman('0 0 9 * * *'), 'daily at 9:00');
+	t.is(formatCronHuman('0 */5 * * * *'), 'every 5 minutes');
+	t.is(formatCronHuman('30 0 9 * * *'), 'daily at 9:00');
+});
+
+test('formatCronHuman returns raw expression for 7-field expressions with a year', t => {
+	// A trailing year field is not described: return the input unchanged
+	t.is(formatCronHuman('0 0 9 * * * 2025'), '0 0 9 * * * 2025');
+});
+
 test('formatCronHuman formats every minute', t => {
 	t.is(formatCronHuman('* * * * *'), 'every minute');
 });
