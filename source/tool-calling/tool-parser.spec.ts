@@ -181,6 +181,66 @@ test('parseToolCalls: many unterminated JSON openers do not stall parsing', t =>
 	}
 });
 
+const CUT_OFF_CALL =
+	'{"name":"write_file","arguments":{"path":"a.ts","content":"console.log(\\"hi\\");';
+
+test('parseToolCalls: cut-off JSON calls on their own lines stop at the newline', t => {
+	// ~400 KB: rescanning to the end from every call takes about 2 s, and
+	// the scan budget would run out before the last call.
+	const valid = {name: 'read_file', arguments: {path: 'b.ts'}};
+	for (const cutOff of [CUT_OFF_CALL, `${CUT_OFF_CALL}\\`]) {
+		const content = `${Array(5000).fill(cutOff).join('\n')}\n${JSON.stringify(valid)}`;
+
+		const started = Date.now();
+		const result = parseToolCalls(content);
+		const elapsed = Date.now() - started;
+
+		t.true(result.success, cutOff);
+		if (result.success) {
+			t.is(result.toolCalls.length, 1, cutOff);
+			t.is(result.toolCalls[0].function.name, 'read_file', cutOff);
+			t.deepEqual(
+				result.toolCalls[0].function.arguments,
+				valid.arguments,
+				cutOff,
+			);
+		}
+		t.true(elapsed < 500, `Parsing ${content.length} chars took ${elapsed}ms`);
+	}
+});
+
+test('parseToolCalls: XML in a JSON call after a few cut-off calls stays an argument', t => {
+	const args = {path: 'examples.md', content: EMBEDDED_XML};
+	const content = `${Array(20).fill(CUT_OFF_CALL).join(' ')} ${JSON.stringify({name: 'write_file', arguments: args})}`;
+
+	const result = parseToolCalls(content);
+
+	t.true(result.success);
+	if (result.success) {
+		t.is(result.toolCalls.length, 1);
+		t.is(result.toolCalls[0].function.name, 'write_file');
+		t.deepEqual(result.toolCalls[0].function.arguments, args);
+	}
+});
+
+test('parseToolCalls: rejects a reply that runs out of JSON scan budget', t => {
+	// ~400 KB with no newline to stop at: without a budget each call is
+	// rescanned to the end, about 2 s. The XML in the last call's arguments
+	// must not run once the scan gives up.
+	const args = {path: 'examples.md', content: EMBEDDED_XML};
+	const content = `${Array(5000).fill(CUT_OFF_CALL).join(' ')} ${JSON.stringify({name: 'write_file', arguments: args})}`;
+
+	const started = Date.now();
+	const result = parseToolCalls(content);
+	const elapsed = Date.now() - started;
+
+	t.false(result.success);
+	if (!result.success) {
+		t.regex(result.error, /incomplete JSON tool calls/);
+	}
+	t.true(elapsed < 500, `Parsing ${content.length} chars took ${elapsed}ms`);
+});
+
 test('parseToolCalls: unclosed tags before a code fence do not stall parsing', t => {
 	// ~630 KB: scanning these tags for a call around the fence takes about 1 s.
 	const tags = `<item>${'x'.repeat(57)}`.repeat(10000);
