@@ -1,7 +1,10 @@
-import {existsSync, mkdirSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
+import {existsSync, mkdirSync, readFileSync, rmSync, writeFileSync,mkdtempSync,utimesSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
+import * as path from 'node:path';
 import test from 'ava';
+import fs from 'node:fs'
+import {syncBuiltinESMExports} from 'node:module';
 import {describeProjectTrust} from '@/config/project-trust';
 import {
 	DEFAULT_MEMORY_LIMIT,
@@ -11,6 +14,7 @@ import {
 	MIN_MEMORY_LIMIT,
 	MIN_TOKEN_BUDGET,
 } from '@/memory/project-context';
+import {getClosestConfigFile} from '@/config/index';
 import {
 	ensureDirectoryTrust,
 	grantDirectoryTrust,
@@ -2670,3 +2674,281 @@ test.serial(
 		}
 	},
 );
+
+
+test.serial('loadPreferences returns cached data when file is unchanged', t => {
+	const dir = mkdtempSync(path.join(tmpdir(), 'nanocoder-cache-'));
+	const previousDir = process.env.NANOCODER_CONFIG_DIR;
+
+	try {
+		process.env.NANOCODER_CONFIG_DIR = dir;
+		const file = path.join(dir, 'nanocoder-preferences.json');
+
+		writeFileSync(file, JSON.stringify({selectedTheme: 'dark'}));
+		resetPreferencesCache();
+
+		const first = loadPreferences();
+		const second = loadPreferences();
+
+		t.deepEqual(first, second);
+		t.not(first, second);
+
+		// Mutation must not affect cached data.
+		first.selectedTheme = 'light';
+
+		t.is(loadPreferences().selectedTheme, 'dark');
+	} finally {
+		if (previousDir === undefined) {
+			delete process.env.NANOCODER_CONFIG_DIR;
+		} else {
+			process.env.NANOCODER_CONFIG_DIR = previousDir;
+		}
+		resetPreferencesCache();
+		rmSync(dir, {recursive: true, force: true});
+	}
+});
+
+test.serial('savePreferences invalidates the cache', t => {
+	const dir = mkdtempSync(path.join(tmpdir(), 'nanocoder-cache-'));
+	const previousDir = process.env.NANOCODER_CONFIG_DIR;
+
+	try {
+		process.env.NANOCODER_CONFIG_DIR = dir;
+		const file = path.join(dir, 'nanocoder-preferences.json');
+
+		writeFileSync(file, JSON.stringify({reasoningExpanded: false}));
+		resetPreferencesCache();
+
+		t.false(loadPreferences().reasoningExpanded);
+
+		const saved = savePreferences({reasoningExpanded: true});
+		t.true(saved);
+
+		t.true(loadPreferences().reasoningExpanded);
+	} finally {
+		if (previousDir === undefined) {
+			delete process.env.NANOCODER_CONFIG_DIR;
+		} else {
+			process.env.NANOCODER_CONFIG_DIR = previousDir;
+		}
+		resetPreferencesCache();
+		rmSync(dir, {recursive: true, force: true});
+	}
+});
+
+test.serial('loadPreferences detects external file modifications', t => {
+	const dir = mkdtempSync(path.join(tmpdir(), 'nanocoder-cache-'));
+	const previousDir = process.env.NANOCODER_CONFIG_DIR;
+
+	try {
+		process.env.NANOCODER_CONFIG_DIR = dir;
+		const file = path.join(dir, 'nanocoder-preferences.json');
+
+		writeFileSync(file, JSON.stringify({reasoningExpanded: false}));
+		resetPreferencesCache();
+
+		t.false(loadPreferences().reasoningExpanded);
+
+		const oldMtime = new Date(Date.now() - 60_000);
+		const newMtime = new Date(Date.now() + 60_000);
+
+		utimesSync(file, oldMtime, oldMtime);
+		writeFileSync(file, JSON.stringify({reasoningExpanded: true}));
+		utimesSync(file, newMtime, newMtime);
+
+		t.true(loadPreferences().reasoningExpanded);
+	} finally {
+		if (previousDir === undefined) {
+			delete process.env.NANOCODER_CONFIG_DIR;
+		} else {
+			process.env.NANOCODER_CONFIG_DIR = previousDir;
+		}
+		resetPreferencesCache();
+		rmSync(dir, {recursive: true, force: true});
+	}
+});
+
+test.serial('loadPreferences respects config directory changes', t => {
+	const firstDir = mkdtempSync(path.join(tmpdir(), 'nanocoder-first-'));
+	const secondDir = mkdtempSync(path.join(tmpdir(), 'nanocoder-second-'));
+	const previousDir = process.env.NANOCODER_CONFIG_DIR;
+
+	try {
+		writeFileSync(
+			path.join(firstDir, 'nanocoder-preferences.json'),
+			JSON.stringify({reasoningExpanded: false}),
+		);
+
+		writeFileSync(
+			path.join(secondDir, 'nanocoder-preferences.json'),
+			JSON.stringify({reasoningExpanded: true}),
+		);
+
+		process.env.NANOCODER_CONFIG_DIR = firstDir;
+		resetPreferencesCache();
+
+		t.false(loadPreferences().reasoningExpanded);
+
+		process.env.NANOCODER_CONFIG_DIR = secondDir;
+
+		t.true(loadPreferences().reasoningExpanded);
+	} finally {
+		if (previousDir === undefined) {
+			delete process.env.NANOCODER_CONFIG_DIR;
+		} else {
+			process.env.NANOCODER_CONFIG_DIR = previousDir;
+		}
+		resetPreferencesCache();
+		rmSync(firstDir, {recursive: true, force: true});
+		rmSync(secondDir, {recursive: true, force: true});
+	}
+});
+
+
+test.serial('loadPreferences avoids repeated filesystem reads', t => {
+	const dir = mkdtempSync(path.join(tmpdir(), 'nanocoder-reads-'));
+	const previousDir = process.env.NANOCODER_CONFIG_DIR;
+	const preferencesFile = path.join(dir, 'nanocoder-preferences.json');
+
+	const originalReadFileSync = fs.readFileSync;
+	let reads = 0;
+
+	try {
+		writeFileSync(
+			preferencesFile,
+			JSON.stringify({reasoningExpanded: false}),
+		);
+
+		process.env.NANOCODER_CONFIG_DIR = dir;
+		resetPreferencesCache();
+
+		fs.readFileSync = ((
+			file: Parameters<typeof fs.readFileSync>[0],
+			...args: unknown[]
+		) => {
+			if (
+				typeof file === 'string' &&
+				path.resolve(file) === path.resolve(preferencesFile)
+			) {
+				reads++;
+			}
+
+			return Reflect.apply(originalReadFileSync, fs, [file, ...args]);
+		}) as typeof fs.readFileSync;
+
+		syncBuiltinESMExports();
+
+		// First call should read from disk.
+		loadPreferences();
+		t.is(reads, 1);
+
+		// Subsequent calls should use the cache.
+		for (let i = 0; i < 10; i++) {
+			loadPreferences();
+		}
+		t.is(reads, 1);
+
+		// A successful save must invalidate the cache.
+		t.true(savePreferences({reasoningExpanded: true}));
+
+		loadPreferences();
+		t.is(reads, 2);
+
+		// Cache should be reused again.
+		for (let i = 0; i < 10; i++) {
+			loadPreferences();
+		}
+		t.is(reads, 2);
+	} finally {
+		fs.readFileSync = originalReadFileSync;
+		syncBuiltinESMExports();
+
+		if (previousDir === undefined) {
+			delete process.env.NANOCODER_CONFIG_DIR;
+		} else {
+			process.env.NANOCODER_CONFIG_DIR = previousDir;
+		}
+
+		resetPreferencesCache();
+		rmSync(dir, {recursive: true, force: true});
+	}
+});
+
+
+test.serial('loadPreferences refreshes global-only settings after external edits', t => {
+	const root = mkdtempSync(path.join(tmpdir(), 'nanocoder-global-cache-'));
+	const projectDir = path.join(root, 'project');
+	const globalDir = path.join(root, 'global');
+
+	const originalCwd = process.cwd();
+	const originalConfigDir = process.env.NANOCODER_CONFIG_DIR;
+
+	try {
+		mkdirSync(projectDir, {recursive: true});
+		mkdirSync(globalDir, {recursive: true});
+
+		const projectFile = path.join(
+			projectDir,
+			'nanocoder-preferences.json',
+		);
+		const globalFile = path.join(
+			globalDir,
+			'nanocoder-preferences.json',
+		);
+
+		writeFileSync(
+			projectFile,
+			JSON.stringify({reasoningExpanded: true}),
+		);
+
+		writeFileSync(
+			globalFile,
+			JSON.stringify({trustedDirectories: ['/project-a']}),
+		);
+
+		process.chdir(projectDir);
+		process.env.NANOCODER_CONFIG_DIR = globalDir;
+
+		resetPreferencesCache();
+
+		// Verify which preferences file Nanocoder resolves.
+		const resolvedPath = getClosestConfigFile(
+			'nanocoder-preferences.json',
+		);
+
+		t.log('Resolved preferences path:', resolvedPath);
+
+		const first = loadPreferences();
+
+		t.deepEqual(first.trustedDirectories, ['/project-a']);
+
+		// Only assert the project preference if the project file was selected.
+		if (path.resolve(resolvedPath) === path.resolve(projectFile)) {
+			t.true(first.reasoningExpanded);
+		}
+
+		// Simulate an external edit to global preferences.
+		writeFileSync(
+			globalFile,
+			JSON.stringify({trustedDirectories: ['/project-b']}),
+		);
+
+		const changedTime = new Date(Date.now() + 60_000);
+		utimesSync(globalFile, changedTime, changedTime);
+
+		const second = loadPreferences();
+
+		t.deepEqual(second.trustedDirectories, ['/project-b']);
+	} finally {
+		process.chdir(originalCwd);
+
+		if (originalConfigDir === undefined) {
+			delete process.env.NANOCODER_CONFIG_DIR;
+		} else {
+			process.env.NANOCODER_CONFIG_DIR = originalConfigDir;
+		}
+
+		resetPreferencesCache();
+		rmSync(root, {recursive: true, force: true});
+	}
+});
