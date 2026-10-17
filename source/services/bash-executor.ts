@@ -18,8 +18,8 @@ import {
 	INTERVAL_BASH_PROGRESS_MS,
 	TIMEOUT_BASH_DEFAULT_MS,
 } from '@/constants';
-import {shellArgs} from '@/custom-tools/handler';
 import {signalProcessTree} from '@/utils/process-tree';
+import {shellArgs} from '@/utils/shell-args';
 import {
 	makeStreamCollector,
 	STDERR_TRUNCATION_NOTICE,
