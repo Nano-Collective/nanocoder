@@ -37,24 +37,43 @@ type ParseResult =
 const JSON_FENCE_REGEX = /```(?:json)?\s*\n?([\s\S]*?)\n?```/gi;
 const JSON_OBJECT_START_REGEX = /\{\s*"(?:name|arguments)"\s*:/g;
 
-// Braces inside JSON strings must not end the enclosing tool call. Each scan
-// also records in `ends` where every nested object it passes ends (null if it
-// never closes), so many unclosed openers cost one scan instead of one each.
+// Total characters the inline scans of one reply may read. Scans that fall
+// out of step with the quotes of cut-off calls can't be cached and would each
+// read to the end of the reply.
+const JSON_SCAN_BUDGET_BASE = 1_000_000;
+const JSON_SCAN_BUDGET_PER_CHAR = 4;
+
+type JSONScanState = {
+	// Where each object a scan has passed ends (null if it never closes), so
+	// many unclosed openers cost one scan instead of one each.
+	ends: Map<number, number | null>;
+	budget: number;
+	exhausted: boolean;
+};
+
+// Braces inside JSON strings must not end the enclosing tool call.
 function findJSONObjectEnd(
 	content: string,
 	start: number,
-	ends: Map<number, number | null>,
+	state: JSONScanState,
 ): number | null {
-	const known = ends.get(start);
+	const known = state.ends.get(start);
 	if (known !== undefined) return known;
 
+	const limit = Math.min(content.length, start + state.budget);
 	const openers: number[] = [];
 	let inString = false;
 	let escaped = false;
+	let index = start;
 
-	for (let index = start; index < content.length; index++) {
+	for (; index < limit; index++) {
 		const char = content[index];
 		if (inString) {
+			if (char === '\n' || char === '\r') {
+				// JSON strings can't hold a raw line break, even escaped, so no
+				// open object here can parse.
+				break;
+			}
 			if (escaped) {
 				escaped = false;
 			} else if (char === '\\') {
@@ -71,12 +90,20 @@ function findJSONObjectEnd(
 			openers.push(index);
 		} else if (char === '}') {
 			const opener = openers.pop();
-			if (opener !== undefined) ends.set(opener, index + 1);
-			if (openers.length === 0) return index + 1;
+			if (opener !== undefined) state.ends.set(opener, index + 1);
+			if (openers.length === 0) {
+				state.budget -= index + 1 - start;
+				return index + 1;
+			}
 		}
 	}
 
-	for (const opener of openers) ends.set(opener, null);
+	state.budget -= index - start;
+	if (index === limit && limit < content.length) {
+		state.exhausted = true;
+		return null;
+	}
+	for (const opener of openers) state.ends.set(opener, null);
 	return null;
 }
 
@@ -113,10 +140,15 @@ function tryParseJSONToolCall(raw: string): ToolCall | null {
  * blocks and bare `{"name":..., "arguments":...}` objects. Its calls are only
  * used when the XML and function-tag parsers found none.
  */
-function parseJSONToolCalls(content: string): {
+function parseJSONToolCalls(
+	content: string,
+	skipRanges: Array<[number, number]> = [],
+): {
 	toolCalls: ToolCall[];
 	cleanedContent: string;
 	ranges: Array<[number, number]>;
+	// The scan budget ran out, so calls later in the reply may be missed.
+	exhausted: boolean;
 } {
 	const toolCalls: ToolCall[] = [];
 	const matchedRanges: Array<[number, number]> = [];
@@ -135,13 +167,23 @@ function parseJSONToolCalls(content: string): {
 		}
 	}
 
-	const ends = new Map<number, number | null>();
+	const scan: JSONScanState = {
+		ends: new Map(),
+		budget: JSON_SCAN_BUDGET_BASE + content.length * JSON_SCAN_BUDGET_PER_CHAR,
+		exhausted: false,
+	};
 	let inlineMatch: RegExpExecArray | null;
 	const inlinePattern = new RegExp(JSON_OBJECT_START_REGEX);
 	while ((inlineMatch = inlinePattern.exec(content)) !== null) {
 		const start = inlineMatch.index;
 		if (matchedRanges.some(([s, e]) => start >= s && start < e)) continue;
-		const end = findJSONObjectEnd(content, start, ends);
+		const skipped = skipRanges.find(([s, e]) => start >= s && start < e);
+		if (skipped) {
+			inlinePattern.lastIndex = skipped[1];
+			continue;
+		}
+		const end = findJSONObjectEnd(content, start, scan);
+		if (scan.exhausted) break;
 		if (end === null) continue;
 		const call = tryParseJSONToolCall(content.slice(start, end));
 		if (call) {
@@ -154,13 +196,19 @@ function parseJSONToolCalls(content: string): {
 	}
 
 	if (toolCalls.length === 0) {
-		return {toolCalls, cleanedContent: content, ranges: matchedRanges};
+		return {
+			toolCalls,
+			cleanedContent: content,
+			ranges: matchedRanges,
+			exhausted: scan.exhausted,
+		};
 	}
 
 	return {
 		toolCalls,
 		cleanedContent: removeRanges(content, matchedRanges),
 		ranges: matchedRanges,
+		exhausted: scan.exhausted,
 	};
 }
 
@@ -303,7 +351,25 @@ export function parseToolCalls(content: unknown): ParseResult {
 	const strippedContent = stripThinkTags(contentStr);
 
 	const fnTagResult = parseFunctionTagToolCalls(strippedContent);
-	const jsonResult = parseJSONToolCalls(strippedContent);
+	let jsonResult = parseJSONToolCalls(strippedContent);
+	if (jsonResult.exhausted) {
+		// JSON text inside an XML call's arguments is that call's content, so
+		// it shouldn't use up the budget.
+		jsonResult = parseJSONToolCalls(
+			strippedContent,
+			XMLToolCallParser.findToolCallRanges(strippedContent),
+		);
+	}
+	// Unscanned JSON calls can't be masked, so XML quoted in their arguments
+	// would run as calls of its own.
+	if (jsonResult.exhausted) {
+		return {
+			success: false,
+			error:
+				'Too many incomplete JSON tool calls to parse. Send only complete tool calls.',
+			examples: FORMAT_GUIDANCE_MESSAGE,
+		};
+	}
 	const xmlContent = maskEmbeddedCalls(strippedContent, [
 		...fnTagResult.ranges,
 		...jsonResult.ranges,
