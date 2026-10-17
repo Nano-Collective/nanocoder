@@ -1,6 +1,13 @@
-import {existsSync, mkdirSync, rmSync, writeFileSync, readFileSync} from 'fs';
+import {
+	existsSync,
+	mkdirSync,
+	readdirSync,
+	rmSync,
+	writeFileSync,
+	readFileSync,
+} from 'fs';
 import {tmpdir} from 'os';
-import {join} from 'path';
+import {basename, join} from 'path';
 import test from 'ava';
 import {PromptHistory} from './prompt-history.js';
 import type {InputState} from './types/hooks';
@@ -747,4 +754,110 @@ test('loadHistory treats the {} seed file as empty history', async t => {
 	const history = new PromptHistory(tempFile);
 	await history.loadHistory();
 	t.deepEqual(history.getHistory(), []);
+});
+
+test('loadHistory backs up a truncated history file instead of wiping it', async t => {
+	// A crash mid-save used to leave the marker followed by broken JSON. The
+	// next load treated that parse failure like a missing file, and the next
+	// save overwrote the old entries with an empty history.
+	const tempFile = join(
+		testDir,
+		`history-truncated-${Date.now()}-${Math.random()}.json`,
+	);
+	const truncated = `${JSON_FORMAT_MARKER}[{"displayValue":"keep me","placeholderContent":{}}`;
+	writeFileSync(tempFile, truncated, 'utf8');
+
+	const history = new PromptHistory(tempFile);
+	await history.loadHistory();
+
+	// The parse failed, so in-memory history starts empty...
+	t.deepEqual(history.getHistory(), []);
+
+	// ...but the bad file is preserved, byte for byte, as a backup.
+	const backup = `${tempFile}.corrupt`;
+	t.true(existsSync(backup), 'corrupt file should be backed up');
+	t.is(
+		readFileSync(backup, 'utf8'),
+		truncated,
+		'backup should keep the original bytes',
+	);
+
+	// The next prompt writes a fresh file and leaves the backup alone.
+	history.addPrompt('new prompt');
+	await history.saveHistory();
+
+	t.true(existsSync(tempFile), 'a fresh history file should exist');
+	t.is(
+		readFileSync(backup, 'utf8'),
+		truncated,
+		'backup should be untouched by the new save',
+	);
+
+	const reloaded = new PromptHistory(tempFile);
+	await reloaded.loadHistory();
+	t.deepEqual(reloaded.getHistoryStrings(), ['new prompt']);
+});
+
+test('loadHistory backs up a history file whose JSON is not an array', async t => {
+	const tempFile = join(
+		testDir,
+		`history-nonarray-${Date.now()}-${Math.random()}.json`,
+	);
+	const bad = `${JSON_FORMAT_MARKER}{"not":"an array"}`;
+	writeFileSync(tempFile, bad, 'utf8');
+
+	const history = new PromptHistory(tempFile);
+	await history.loadHistory();
+
+	t.deepEqual(history.getHistory(), []);
+	t.is(
+		readFileSync(`${tempFile}.corrupt`, 'utf8'),
+		bad,
+		'non-array payload should be quarantined',
+	);
+});
+
+test('a second corruption backs up alongside the first instead of overwriting it', async t => {
+	const tempFile = join(
+		testDir,
+		`history-twice-${Date.now()}-${Math.random()}.json`,
+	);
+	const first = `${JSON_FORMAT_MARKER}[{"displayValue":"first"}`;
+	const second = `${JSON_FORMAT_MARKER}[{"displayValue":"second"}`;
+
+	writeFileSync(tempFile, first, 'utf8');
+	await new PromptHistory(tempFile).loadHistory();
+
+	// The corrupt file reappears (another crash) at the same path.
+	writeFileSync(tempFile, second, 'utf8');
+	await new PromptHistory(tempFile).loadHistory();
+
+	const backups = readdirSync(testDir).filter(name =>
+		name.startsWith(`${basename(tempFile)}.corrupt`),
+	);
+	t.is(backups.length, 2, 'both corrupt files should be kept');
+	t.deepEqual(
+		backups
+			.map(name => readFileSync(join(testDir, name), 'utf8'))
+			.sort(),
+		[first, second].sort(),
+		'each backup should keep its own bytes',
+	);
+});
+
+test('saveHistory writes atomically and leaves no temporary files', async t => {
+	const tempFile = join(
+		testDir,
+		`history-atomic-${Date.now()}-${Math.random()}.json`,
+	);
+	const history = new PromptHistory(tempFile);
+
+	history.addPrompt('atomic write');
+	await history.saveHistory();
+
+	const prefix = `${basename(tempFile)}.`;
+	const leftovers = readdirSync(testDir).filter(
+		name => name.startsWith(prefix) && name.endsWith('.tmp'),
+	);
+	t.deepEqual(leftovers, [], 'no .tmp files should remain after save');
 });
