@@ -8,7 +8,7 @@ import type {NanocoderPlugin, PluginHooks} from '@/sdk/plugin';
 import type {HookContext, HookOutcome} from '@/services/lifecycle-hooks';
 import {getProjectRoot} from '@/services/session-cwd';
 import type {HookEvent} from '@/types/config';
-import {logError} from '@/utils/message-queue';
+import {logError, logWarning} from '@/utils/message-queue';
 
 type PluginEvent = keyof PluginHooks;
 
@@ -38,8 +38,15 @@ interface PluginState {
 	loading: Promise<void> | null;
 }
 
+export interface LoadedPluginDiagnostic {
+	name: string;
+	file: string;
+	hooks: string[];
+}
+
 let defaultState: PluginState = {plugins: [], loading: null};
 const projectStates = new Map<string, PluginState>();
+const pluginFiles = new WeakMap<NanocoderPlugin, string>();
 const pluginScope = new AsyncLocalStorage<PluginState>();
 
 function currentState(): PluginState {
@@ -87,6 +94,14 @@ export async function withTrustedProjectPlugins<T>(
 	return pluginScope.run(state, run);
 }
 
+export function getLoadedPlugins(): LoadedPluginDiagnostic[] {
+	return currentState().plugins.map(plugin => ({
+		name: plugin.name,
+		file: pluginFiles.get(plugin) ?? '',
+		hooks: Object.keys(plugin.hooks ?? {}),
+	}));
+}
+
 export function resetPluginsForTests({
 	loadTimeoutMs = PLUGIN_HOOK_TIMEOUT_MS,
 } = {}): void {
@@ -117,7 +132,7 @@ async function importPlugins(root: string, state: PluginState): Promise<void> {
 	try {
 		const entries = await readdir(dir, {withFileTypes: true});
 		files = entries
-			.filter(entry => entry.isFile() && entry.name.endsWith('.mjs'))
+			.filter(entry => entry.isFile() && !entry.name.startsWith('.'))
 			.map(entry => entry.name)
 			.sort();
 	} catch (error) {
@@ -128,6 +143,10 @@ async function importPlugins(root: string, state: PluginState): Promise<void> {
 	}
 
 	for (const file of files) {
+		if (!file.endsWith('.mjs')) {
+			logWarning(`Plugin ${file} ignored: plugins must use the .mjs extension`);
+			continue;
+		}
 		let mod: unknown;
 		try {
 			mod = await importWithin(
@@ -159,6 +178,7 @@ async function importPlugins(root: string, state: PluginState): Promise<void> {
 			continue;
 		}
 		state.plugins.push(plugin);
+		pluginFiles.set(plugin, file);
 	}
 }
 

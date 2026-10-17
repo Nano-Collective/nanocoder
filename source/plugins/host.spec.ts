@@ -16,6 +16,7 @@ import type {ToolCall} from '@/types/core';
 import {setGlobalMessageQueue} from '@/utils/message-queue';
 import {
 	consultPluginPermission,
+	getLoadedPlugins,
 	loadPlugins,
 	loadTrustedProjectPlugins,
 	resetPluginsForTests,
@@ -306,13 +307,47 @@ test.serial(
 	},
 );
 
-test.serial('a .js file is left unloaded', async t => {
-	withPlugins({'guard.js': BLOCK_BASH});
+test.serial('loaded plugin diagnostics include the source file and hooks', async t => {
+	withPlugins({
+		'guard.mjs': BLOCK_BASH,
+		'empty.mjs': `export default {apiVersion: 1, name: 'empty'};`,
+	});
 
 	await loadPlugins(true);
+
+	t.deepEqual(getLoadedPlugins(), [
+		{name: 'empty', file: 'empty.mjs', hooks: []},
+		{
+			name: 'guard',
+			file: 'guard.mjs',
+			hooks: ['tool.execute.before'],
+		},
+	]);
+});
+
+test.serial('unsupported plugin files warn and dotfiles or directories are ignored', async t => {
+	const root = withPlugins({
+		'legacy.js': BLOCK_BASH,
+		'.hidden.js': BLOCK_BASH,
+		'.hidden.mjs': BLOCK_BASH,
+	});
+	mkdirSync(join(root, '.nanocoder', 'plugins', 'folder.js'));
+	const warnings: string[] = [];
+	setGlobalMessageQueue(component => {
+		warnings.push((component as {props: {message: string}}).props.message);
+	});
+
+	try {
+		await loadPlugins(true);
+	} finally {
+		setGlobalMessageQueue(() => {});
+	}
 	const gate = await runPreToolUseGate(bashCall('ls'), {command: 'ls'});
 
 	t.deepEqual(gate, {blocked: false, output: '', failures: []});
+	t.deepEqual(warnings, [
+		'Plugin legacy.js ignored: plugins must use the .mjs extension',
+	]);
 });
 
 test.serial('concurrent workspace scopes isolate plugins and exclude untrusted projects', async t => {
