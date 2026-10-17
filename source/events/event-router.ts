@@ -103,6 +103,12 @@ export function matchesFilter(sub: Subscription, event: Event): boolean {
 		);
 	}
 
+	if (event.kind === 'file.ai-comment' && sub.kind === 'file.ai-comment') {
+		const filter = sub.filter;
+		if (!filter?.paths || filter.paths.length === 0) return true;
+		return filter.paths.some(pattern => matchGlob(pattern, event.payload.file));
+	}
+
 	return false;
 }
 
