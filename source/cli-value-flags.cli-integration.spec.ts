@@ -8,7 +8,6 @@ const runtimeModules = {
 	'@/models/index': `export function setSessionContextLimit(value) {
 		globalThis.cliTestContextLimit = value;
 	}`,
-	'@/app': 'export default function App() {}',
 	'@/utils/perf-buffer': 'export function installPerfBufferGuard() {}',
 	// Every export cli.tsx pulls from this module must be stubbed here: the
 	// loader short-circuits the whole specifier, so a missing name surfaces as
@@ -16,8 +15,8 @@ const runtimeModules = {
 	'@/config/preferences': `export function loadPreferences() { return {}; }
 		export function getAlternateScreen() { return false; }
 		export function getMouseReporting() { return false; }`,
-	ink: `export function render(element) {
-		console.log(JSON.stringify({...element.props, contextLimit: globalThis.cliTestContextLimit}));
+	'@/app/render-tui': `export function renderTui(props) {
+		console.log(JSON.stringify({...props, contextLimit: globalThis.cliTestContextLimit}));
 		process.exit(0);
 	}`,
 };
