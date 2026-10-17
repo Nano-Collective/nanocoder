@@ -417,7 +417,7 @@ const writeFileFormatter = async (
 	return <WriteFileFormatter args={args} previousContent={previousContent} />;
 };
 
-export const writeFileValidator = async (args: {
+const writeFileValidator = async (args: {
 	path: string;
 	content: unknown;
 }): Promise<{valid: true} | {valid: false; error: string}> => {

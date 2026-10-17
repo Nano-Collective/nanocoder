@@ -227,7 +227,7 @@ const stringReplaceFormatter = async (
 	return formatStringReplacePreview(args, result, colors);
 };
 
-export const stringReplaceValidator = async (
+const stringReplaceValidator = async (
 	args: StringReplaceArgs,
 ): Promise<{valid: true} | {valid: false; error: string}> => {
 	const {path, old_str} = args;
