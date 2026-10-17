@@ -1,9 +1,25 @@
+import {
+	chmodSync,
+	mkdtempSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 import test from 'ava';
 import {render} from 'ink-testing-library';
 import React from 'react';
 import {themes} from '../config/themes';
 import {ThemeContext} from '../hooks/useTheme';
-import {bashRunFailed, executeBashTool} from './execute-bash';
+import {resetSessionCwd, setSessionCwd} from '../services/session-cwd';
+import {
+	bashRunFailed,
+	distillBashResultForLLM,
+	executeBashCommand,
+	executeBashTool,
+	formatBashResultForLLM,
+} from './execute-bash';
 
 // ============================================================================
 // Test Helpers
@@ -438,3 +454,126 @@ for (const command of ['echo a:{:b', 'ls | grep x &', 'f(){ echo hi; }; f']) {
 		t.true(result.valid);
 	});
 }
+
+// ============================================================================
+// Tests for execute_bash Tool Handler - Failure Capsules
+// ============================================================================
+
+const JEST_FAILURE = `FAIL jest/auth.test.js
+  ● refreshSession › retries once on 401
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: 2
+    Received: 1
+
+      at Object.toBe (jest/auth.test.js:7:35)
+`;
+
+/**
+ * A stand-in `jest` in a temp dir: run normally it prints a long log with the
+ * failure in the middle and exits 1; run with `-t` it prints just the failure.
+ * Every call appends its arguments to calls.log.
+ */
+function createFakeJestProject(): string {
+	const dir = mkdtempSync(join(tmpdir(), 'nanocoder-capsule-e2e-'));
+	const passLines = Array.from(
+		{length: 60},
+		(_, index) => `PASS jest/math-${index}.test.js`,
+	).join('\n');
+	writeFileSync(
+		join(dir, 'jest'),
+		`#!/bin/sh
+echo "$*" >> calls.log
+for arg in "$@"; do
+	if [ "$arg" = "-t" ]; then
+		cat >&2 <<'EOF'
+${JEST_FAILURE}
+Tests:       1 failed, 60 skipped, 61 total
+EOF
+		exit 1
+	fi
+done
+cat >&2 <<'EOF'
+${passLines}
+${JEST_FAILURE}
+${passLines}
+
+Tests:       1 failed, 120 passed, 121 total
+EOF
+exit 1
+`,
+	);
+	chmodSync(join(dir, 'jest'), 0o755);
+	return dir;
+}
+
+test.serial(
+	'execute_bash turns a long failing test run into a capsule and confirms it with a narrow re-run',
+	async t => {
+		const dir = createFakeJestProject();
+		setSessionCwd(dir);
+		try {
+			const result = await executeBashTool.tool.execute!(
+				{command: './jest jest/'},
+				{toolCallId: 'test', messages: []},
+			);
+
+			t.true(result.isError);
+			t.true(result.llmContent.startsWith('EXIT_CODE: 1\nFAILURE CAPSULE (jest): 1 failing.'));
+			t.true(
+				result.llmContent.includes(
+					"Reproduce: ./jest jest/ jest/auth.test.js -t 'refreshSession retries once on 401'",
+				),
+			);
+			t.true(
+				result.llmContent.includes('Re-ran it on its own: still fails (exit 1).'),
+			);
+			t.true(result.llmContent.includes('Received: 1'));
+			t.false(result.llmContent.includes('PASS jest/math-'));
+			t.deepEqual(
+				readFileSync(join(dir, 'calls.log'), 'utf8').trim().split('\n'),
+				['jest/', 'jest/ jest/auth.test.js -t refreshSession retries once on 401'],
+			);
+		} finally {
+			resetSessionCwd();
+			rmSync(dir, {recursive: true, force: true});
+		}
+	},
+);
+
+test.serial(
+	'execute_bash failure capsule keeps the assertion the head-and-tail cut used to drop',
+	async t => {
+		const dir = createFakeJestProject();
+		setSessionCwd(dir);
+		try {
+			const {promise} = executeBashCommand('./jest jest/');
+			const state = await promise;
+
+			t.false(formatBashResultForLLM(state).includes('Received: 1'));
+			t.true((await distillBashResultForLLM(state)).includes('Received: 1'));
+		} finally {
+			resetSessionCwd();
+			rmSync(dir, {recursive: true, force: true});
+		}
+	},
+);
+
+test('execute_bash keeps the head-and-tail cut for long failures it does not recognise', async t => {
+	const result = await runBash(
+		'seq 1 100 | while read i; do echo "build step $i produced a long line of output"; done; exit 2',
+	);
+
+	t.true(result.includes('[Output truncated'));
+	t.false(result.includes('FAILURE CAPSULE'));
+});
+
+test('execute_bash leaves short failing output untouched', async t => {
+	const result = await runBash(
+		`printf '%s\\n' 'FAIL jest/a.test.js' '  ● a › b' '' '    Expected: 1' >&2; exit 1`,
+	);
+
+	t.false(result.includes('FAILURE CAPSULE'));
+	t.true(result.includes('Expected: 1'));
+});

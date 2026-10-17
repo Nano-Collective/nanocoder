@@ -1,4 +1,8 @@
+import {readdirSync, readFileSync} from 'node:fs';
+import {join} from 'node:path';
+import {fileURLToPath} from 'node:url';
 import test from 'ava';
+import chalk from 'chalk';
 import {render} from 'ink-testing-library';
 import React, {useState} from 'react';
 import TextInput from './text-input';
@@ -352,6 +356,93 @@ test('component Ctrl+A moves to start when showCursor is true (positive control)
 	unmount();
 });
 
+// --- Astral characters (an emoji is a surrogate pair: two UTF-16 units) ---
+//
+// Cursor offsets count UTF-16 units. The render loop used to count code points
+// instead, and the edit keys stepped one unit at a time, so an emoji in the
+// value desynced the caret and let Backspace/Delete split the pair.
+
+const LEFT = '\u001b[D';
+const RIGHT = '\u001b[C';
+const DOWN = '\u001b[B';
+const HOME = '\u001b[H';
+const END = '\u001b[F';
+const DELETE = '\u001b[3~';
+const BACKSPACE = '\u007f';
+const CTRL_B = '\u0002';
+const CTRL_F = '\u0006';
+
+test('component Left moves the caret one visible character at a time across an emoji', async t => {
+	// The caret is an inverse-video run, which chalk drops at level 0 (no TTY),
+	// so pin the level for this render.
+	const originalLevel = chalk.level;
+	chalk.level = 1;
+	t.teardown(() => {
+		chalk.level = originalLevel;
+	});
+
+	const valueRef: ValueRef = {current: ''};
+	const {stdin, lastFrame, unmount} = render(
+		<ControlledTextInput valueRef={valueRef} initialValue="😀abc" />,
+	);
+	t.teardown(unmount);
+
+	const frames = [
+		`😀ab${chalk.inverse('c')}`,
+		`😀a${chalk.inverse('b')}c`,
+		`😀${chalk.inverse('a')}bc`,
+		`${chalk.inverse('😀')}abc`,
+	];
+	for (const [index, expected] of frames.entries()) {
+		await press(stdin, LEFT);
+		// Poll: a fixed sleep can read the frame before Ink has flushed it.
+		const start = Date.now();
+		while (
+			!(lastFrame() ?? '').includes(expected) &&
+			Date.now() - start < 2000
+		) {
+			await new Promise(resolve => setTimeout(resolve, 20));
+		}
+		const frame = lastFrame() ?? '';
+		t.true(
+			frame.includes(expected),
+			`after Left #${index + 1}: ${JSON.stringify(frame)}`,
+		);
+	}
+});
+
+const emojiEdits: Array<
+	[name: string, initial: string, keys: string[], expected: string]
+> = [
+	['Backspace removes a whole emoji', 'a😀b', [END, LEFT, BACKSPACE], 'ab'],
+	['Delete removes a whole emoji', 'a😀b', [HOME, RIGHT, DELETE], 'ab'],
+	['Left steps over a whole emoji', '😀', [LEFT, 'X'], 'X😀'],
+	['Right steps over a whole emoji', '😀', [HOME, RIGHT, 'X'], '😀X'],
+	['Ctrl+B steps over a whole emoji', '😀', [CTRL_B, 'X'], 'X😀'],
+	['Ctrl+F steps over a whole emoji', '😀', [HOME, CTRL_F, 'X'], '😀X'],
+	[
+		'Down lands beside an emoji, not inside it',
+		'abc\n😀x',
+		[HOME, RIGHT, DOWN, 'X'],
+		'abc\nX😀x',
+	],
+];
+
+for (const [name, initial, keys, expected] of emojiEdits) {
+	test(`component ${name}`, async t => {
+		const valueRef: ValueRef = {current: initial};
+		const {stdin, unmount} = render(
+			<ControlledTextInput valueRef={valueRef} initialValue={initial} />,
+		);
+		t.teardown(unmount);
+
+		for (const key of keys) {
+			await press(stdin, key);
+		}
+
+		t.is(valueRef.current, expected);
+	});
+}
 
 // --- Ctrl+A/E/U/K stay scoped to the current line in multi-line input ---
 //
@@ -361,7 +452,6 @@ test('component Ctrl+A moves to start when showCursor is true (positive control)
 // deleted every line before it.
 
 const MULTILINE = 'alpha\nbravo\ncharlie';
-const LEFT = '\u001b[D';
 
 // Moves the cursor from end-of-buffer to index 9: inside "bravo", between
 // the second and third character ("bra|vo").
@@ -427,4 +517,17 @@ test('component Ctrl+E in multi-line input moves to the end of the current line'
 	await waitForValue(valueRef, v => v === 'alpha\nbravoX\ncharlie');
 	t.is(valueRef.current, 'alpha\nbravoX\ncharlie');
 	unmount();
+});
+
+// --- Stock Ink (#1505) ---
+// `key.raw` only exists through a pnpm patch to Ink. pnpm patches apply inside
+// this repo alone, so every test here passes with the patch while an npm
+// install (plain Ink) loses it and Backspace turns into forward Delete. Read
+// the sequence through useRawInput instead; this fails if `key.raw` creeps back.
+test('source never reads key.raw, which stock Ink does not provide', t => {
+	const sourceDir = fileURLToPath(new URL('..', import.meta.url));
+	const offenders = readdirSync(sourceDir, {recursive: true, encoding: 'utf8'})
+		.filter(file => /\.tsx?$/.test(file) && !/\.spec\.tsx?$/.test(file))
+		.filter(file => /\bkey\.raw\b/.test(readFileSync(join(sourceDir, file), 'utf8')));
+	t.deepEqual(offenders, []);
 });

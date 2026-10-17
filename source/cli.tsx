@@ -86,7 +86,20 @@ if (args[0] === 'daemon') {
 	const {runDaemonCli} = await import('@/daemon/cli');
 	const result = await runDaemonCli(sub as DaemonSub, {
 		projectRoot: process.cwd(),
+		args: args.slice(2),
 		trustDirectory: args.includes('--trust-directory'),
+	});
+	if (result.output) console.log(result.output);
+	process.exit(result.exitCode);
+}
+
+// Handle `nanocoder verify --pr <n> [--post-review]` — fast path. Headless
+// PR review; pulls in the full LLM/tool/subagent stack (unlike `daemon`
+// above) but never Ink.
+if (args[0] === 'verify') {
+	const {runVerifyCli} = await import('@/verify/cli');
+	const result = await runVerifyCli(args.slice(1), {
+		projectRoot: process.cwd(),
 	});
 	if (result.output) console.log(result.output);
 	process.exit(result.exitCode);
@@ -205,10 +218,20 @@ Commands:
   copilot login [provider-name]   Log in to GitHub Copilot (device flow). Saves credentials for the "GitHub Copilot" provider.
   codex login [provider-name]     Log in to ChatGPT/Codex (device flow). Saves credentials for the "ChatGPT" provider.
   review <branch|pr-number>       Review a branch or PR diff for bugs, security issues, and style violations.
+  worktree <PR-number>            Start an interactive session in a new worktree for a GitHub PR.
   daemon <subcommand>             Manage the per-project skill daemon.
                                   Subcommands: start, stop, status, logs, install, uninstall.
+                                  start [--trust <comment-only|auto-fix|full-commit>]
+                                  Trust level for daemon-triggered CI investigation/auto-fix;
+                                  defaults to agents.config.json's verify.trustLevel, then
+                                  comment-only. full-commit prompts a one-time confirmation.
                                   start refuses to run in an untrusted directory; pass
                                   --trust-directory to bypass the check for this run only.
+  verify --pr <n> [--post-review] [--provider <name>] [--model <name>]
+                                  Headless, read-only PR review: runs the verify-pr-review
+                                  subagent plus a semgrep pass. Prints the review to stdout
+                                  by default; posts it as a PR comment with --post-review.
+                                  --provider/--model select the LLM (see Options below).
   skills add <target>             Install a skill bundle from a git repository.
                                   <target> is an index name, owner/repo, a git URL, or a local path.
                                   Flags: --ref, --subdir, --global, --force, --yes, --index.
@@ -274,13 +297,23 @@ Examples:
   nanocoder review main
   nanocoder review feature/auth
   nanocoder review 42
+  nanocoder worktree 42
   nanocoder --continue
   nanocoder --resume last
   nanocoder --resume
+  nanocoder verify --pr 861
+  nanocoder verify --pr 861 --post-review
   nanocoder storage
   nanocoder storage --format json | jq .sections
   `);
 	process.exit(0);
+}
+
+const {validateCliArgs} = await import('./cli-args.js');
+const cliArgsError = validateCliArgs(args);
+if (cliArgsError) {
+	console.error(cliArgsError);
+	process.exit(1);
 }
 
 // Validate output format value to prevent injection
@@ -292,6 +325,19 @@ async function main(): Promise<void> {
 	// Parse args and dispatch non-TUI branches BEFORE importing ink or @/app.
 	// Those packages pull ~thousand+ modules; --acp / --plain / auth must stay
 	// on the lightweight path. Ink + App load only in the final TUI branch.
+	if (args[0] === 'worktree') {
+		const {createPrWorktree, parseWorktreePrNumber} = await import(
+			'./commands/gh-pr-worktree'
+		);
+		const prNumber = parseWorktreePrNumber(args.slice(1));
+		if (!process.stdin.isTTY || !process.stdout.isTTY) {
+			throw new Error(
+				'`nanocoder worktree` requires an interactive terminal (TTY).',
+			);
+		}
+		const worktreePath = await createPrWorktree(prNumber);
+		console.log(`Starting Nanocoder in ${worktreePath}`);
+	}
 
 	const vscodeMode = args.includes('--vscode');
 

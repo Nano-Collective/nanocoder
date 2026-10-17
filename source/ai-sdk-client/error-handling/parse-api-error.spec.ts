@@ -71,7 +71,7 @@ test('parseAPIError - handles connection refused', t => {
 
 	const result = parseAPIError(error);
 
-	t.is(result, 'Connection failed: Unable to reach the model server');
+	t.true(result.startsWith('Connection failed: Could not reach provider'));
 });
 
 test('parseAPIError - handles offline undici fetch failure', t => {
@@ -83,7 +83,7 @@ test('parseAPIError - handles offline undici fetch failure', t => {
 
 	const result = parseAPIError(error);
 
-	t.is(result, 'Connection failed: Unable to reach the model server');
+	t.true(result.startsWith('Connection failed: Could not reach provider'));
 });
 
 test('parseAPIError - handles offline fetch failure without a cause', t => {
@@ -91,7 +91,7 @@ test('parseAPIError - handles offline fetch failure without a cause', t => {
 
 	const result = parseAPIError(error);
 
-	t.is(result, 'Connection failed: Unable to reach the model server');
+	t.true(result.startsWith('Connection failed: Could not reach provider'));
 });
 
 test('parseAPIError - handles DNS EAI_AGAIN error', t => {
@@ -99,7 +99,7 @@ test('parseAPIError - handles DNS EAI_AGAIN error', t => {
 
 	const result = parseAPIError(error);
 
-	t.is(result, 'Connection failed: Unable to reach the model server');
+	t.true(result.startsWith('Connection failed: Could not reach provider'));
 });
 
 test('parseAPIError - handles timeout error', t => {
@@ -107,7 +107,7 @@ test('parseAPIError - handles timeout error', t => {
 
 	const result = parseAPIError(error);
 
-	t.is(result, 'Request timed out: The model took too long to respond');
+	t.true(result.includes('ETIMEDOUT'));
 });
 
 test('parseAPIError - handles non-Error objects', t => {

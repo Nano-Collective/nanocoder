@@ -1,6 +1,5 @@
 import * as vscode from 'vscode';
 import * as cp from 'child_process';
-import * as os from 'os';
 import * as path from 'path';
 import {existsSync} from 'node:fs';
 import {ClientSideConnection, ndJsonStream} from '@agentclientprotocol/sdk';
@@ -8,6 +7,7 @@ import {AcpStateManager, ACPStatus} from './acp-state';
 import {NanocoderAcpClient} from './acp-client';
 import {findCliPath, nodeExistsAlongside, promptInstallCli, resolveSpawnEnv} from './cli-discovery';
 import {planCliSpawn} from './cli-path-discovery';
+import {resolveExtensionCwd} from './workspace-utils';
 
 export class AcpProcessManager {
 	private childProcess: cp.ChildProcess | null = null;
@@ -110,7 +110,7 @@ export class AcpProcessManager {
 		}
 		
 		// Fallbacks: configured cwd -> workspace folder -> user homedir -> process cwd
-		const cwdSetting = config.get<string>('cwd') || vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || os.homedir() || process.cwd();
+		const cwdSetting = resolveExtensionCwd();
 		// On Windows the discovered path is usually an npm/pnpm shim, which
 		// cannot be spawned directly - see planCliSpawn.
 		const plan = planCliSpawn(cliPath, ['--acp']);

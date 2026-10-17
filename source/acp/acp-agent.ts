@@ -37,7 +37,8 @@ import {
 	negotiateProtocolVersion,
 } from '@/acp/acp-capabilities';
 import {acpContentToUserMessage} from '@/acp/acp-content';
-import {runAcpConversation} from '@/acp/acp-conversation';
+import {clearAcpReadStubs, runAcpConversation} from '@/acp/acp-conversation';
+import {acpCustomCommandText} from '@/acp/acp-custom-command';
 import {AcpSession} from '@/acp/acp-session';
 import {resolveTruncationPoint} from '@/acp/acp-timeline';
 import type {AcpInitContext} from '@/acp/acp-types';
@@ -54,6 +55,7 @@ import {
 import {resolveTune} from '@/config/tune';
 import {appendRelevantProjectContextWithCount} from '@/memory/project-context';
 import {setAutoCommitClient} from '@/services/auto-commit';
+import {runInSessionCwdScope} from '@/services/session-cwd';
 import {TimelineManager} from '@/services/timeline-manager';
 import {maybeGenerateTitle} from '@/session/maybe-generate-title';
 import {sessionManager} from '@/session/session-manager';
@@ -169,6 +171,7 @@ export class AcpAgent implements Agent {
 			await sessionManager.initialize();
 			const persisted = await sessionManager.loadSession(params.sessionId);
 			session = this.registerSession(params.sessionId, params.cwd);
+			clearAcpReadStubs(params.sessionId);
 			if (persisted) {
 				session.messages = persisted.messages;
 			}
@@ -216,7 +219,12 @@ export class AcpAgent implements Agent {
 		const turnStart = Date.now();
 
 		try {
-			const {text: userText, images} = await acpContentToUserMessage(
+			const {
+				text: userText,
+				typedText,
+				sections,
+				images,
+			} = await acpContentToUserMessage(
 				params.prompt,
 				{
 					conn: this.conn,
@@ -244,9 +252,11 @@ export class AcpAgent implements Agent {
 						this.initContext.customCommandLoader?.getCommand(commandName);
 
 					if (command) {
-						// Custom user-defined command  expand its instructions into the prompt
-						const commandInstruction = `### ${command.fullName}\n\n${command.content}`;
-						contextualUserText = `${contextualUserText}\n\n## Included Command Instructions\n\n${commandInstruction}\n\nPlease follow these instructions for the user's request above.`;
+						contextualUserText = acpCustomCommandText(
+							typedText,
+							command,
+							sections,
+						);
 					} else {
 						// Check for built-in commands that have special ACP handling
 						const sendBuiltinReply = (msg: string) => {
@@ -272,6 +282,7 @@ export class AcpAgent implements Agent {
 						if (commandName === 'clear') {
 							// Clear the conversation history and action timeline
 							session.messages = [];
+							clearAcpReadStubs(params.sessionId);
 							await session.timeline.clear();
 							const msg = 'Conversation cleared.';
 							this.conn.sessionUpdate({
@@ -615,6 +626,7 @@ export class AcpAgent implements Agent {
 		await sessionManager.deleteSession(params.sessionId);
 		// Evict from in-memory map if present
 		this.sessions.delete(params.sessionId);
+		clearAcpReadStubs(params.sessionId);
 		logger.info(`ACP deleteSession: ${params.sessionId}`);
 		return {};
 	}
@@ -635,6 +647,7 @@ export class AcpAgent implements Agent {
 			persisted.workingDirectory,
 		);
 		session.messages = persisted.messages;
+		clearAcpReadStubs(params.sessionId);
 		logger.info(
 			`ACP resumeSession: ${params.sessionId} messages=${persisted.messages.length}`,
 		);
@@ -707,6 +720,7 @@ export class AcpAgent implements Agent {
 				0,
 				resolveTruncationPoint(session.messages, result.revertedTo),
 			);
+			clearAcpReadStubs(sessionId);
 			// Harness chrome, not model output: it tells the user what the revert
 			// did. The model learns about the revert from the truncated history
 			// itself, so this must never come back as its own past turn.
@@ -762,6 +776,7 @@ export class AcpAgent implements Agent {
 			}
 			if (targetUserIdx >= 0) {
 				session.messages = session.messages.slice(0, targetUserIdx);
+				clearAcpReadStubs(sessionId);
 				await this.saveAcpSessionToDisk(session);
 				await session.timeline.truncateAfter(targetUserIdx);
 			}
@@ -1006,13 +1021,17 @@ export class AcpAgent implements Agent {
 			undefined,
 			model,
 		);
-		const basePrompt = buildSystemPrompt(
-			session.developmentMode,
-			tune,
-			availableNames,
-			toolsDisabled,
-			getAppConfig().systemPrompt,
-			model,
+		// Inside the session's scope, so the working directory the prompt reports
+		// and the AGENTS.md it appends come from the session's `cwd`.
+		const basePrompt = runInSessionCwdScope(session.cwdScope, () =>
+			buildSystemPrompt(
+				session.developmentMode,
+				tune,
+				availableNames,
+				toolsDisabled,
+				getAppConfig().systemPrompt,
+				model,
+			),
 		);
 		const toolsForPrompt = toolsDisabled
 			? toolManager.getFilteredTools(availableNames)

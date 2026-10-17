@@ -1061,6 +1061,40 @@ export const processAssistantResponse = async (
 					setLiveComponent,
 					signal: controller.signal,
 					executionContext: {sessionId, workingDirectory},
+					beforeExecute: async toolCall => {
+						if (toolCall.function.name === '__xml_validation_error__')
+							return true;
+						const needsApproval = await resolveToolApproval(
+							toolCall.function.name,
+							toolManager?.getToolEntry(toolCall.function.name),
+							toolCall.function.arguments,
+							{
+								mode: developmentModeRef?.current ?? developmentMode,
+								alwaysAllow: getAppConfig().alwaysAllow ?? [],
+							},
+						);
+						if (!needsApproval) return true;
+						const vote = await consultPluginPermission(
+							toolCall.function.name,
+							parseToolArguments<Record<string, unknown>>(
+								toolCall.function.arguments,
+							),
+						);
+						if (vote.decision === 'deny') {
+							refuseToolCall(toolCall, vote.reason);
+							turnResults.push(
+								blockedResults[blockedResults.length - 1],
+								...createCancellationResults(
+									autoTools.slice(autoTools.indexOf(toolCall) + 1),
+								),
+							);
+							return false;
+						}
+						confirmTools.unshift(
+							...autoTools.slice(autoTools.indexOf(toolCall)),
+						);
+						return false;
+					},
 				},
 			);
 			turnResults.push(...directResults);

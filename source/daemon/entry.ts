@@ -14,6 +14,7 @@
 import {createLLMClient} from '@/client-factory';
 import {getAppConfig} from '@/config/index';
 import {validateProjectConfigSecurity} from '@/config/validation';
+import {runCiAutoFixFlow} from '@/daemon/ci-fix-orchestrator';
 import {CheckpointManager} from '@/services/checkpoint-manager';
 import type {Checkpointer} from '@/skills/dispatcher';
 import {
@@ -26,7 +27,36 @@ import type {DevelopmentMode} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
 import {setNotificationsConfig} from '@/utils/notifications';
 import {getShutdownManager} from '@/utils/shutdown';
+import {
+	getAllowedToolNames,
+	getHeadlessAutoApproveToolNames,
+	isTrustLevel,
+} from '@/verify/trust';
 import {startDaemon} from './daemon';
+
+// The daemon's own `verify-ci-investigator` subagent must be pinned to a
+// trust-level tool allowlist at execution time rather than trusting its
+// frontmatter `tools:` list alone — see `source/verify/trust.ts`. Mirrors
+// the same `toolOverride` use `verify/cli.ts` makes for `verify-pr-review`:
+// name-level only, so it doesn't stop `git_pr`'s comment/review/create
+// argument shapes on its own. What actually blocks those calls at
+// `comment-only` is that this `buildExecutor` never registers a
+// tool-approval-queue handler, so any `git_pr` call requiring confirmation
+// is auto-denied by `signalToolApproval()`'s default — a property of
+// headless mode, not of this list. `resolveToolApproval`'s first check
+// (`ctx.alwaysAllow`) would also bypass approval; at `auto-fix`/
+// `full-commit` it's deliberately populated with `git_commit` (see
+// `getHeadlessAutoApproveToolNames`) but never `git_pr` — GitHub-mutating
+// calls stay harness-mediated (`ci-fix-orchestrator.ts`'s push/PR step)
+// even at the most-trusted level.
+const trustLevel = isTrustLevel(process.env.NANOCODER_CI_TRUST_LEVEL)
+	? process.env.NANOCODER_CI_TRUST_LEVEL
+	: 'comment-only';
+
+const ciInvestigatorOverride = {
+	tools: getAllowedToolNames(trustLevel),
+	alwaysAllow: getHeadlessAutoApproveToolNames(trustLevel),
+};
 
 async function main(): Promise<void> {
 	const projectRoot = process.env.NANOCODER_PROJECT_ROOT || process.cwd();
@@ -75,8 +105,25 @@ async function main(): Promise<void> {
 			recordSubagentApiCallForStats,
 		);
 		return {
-			execute: (task: SubagentTask): Promise<SubagentResult> =>
-				executor.execute(task),
+			execute: (
+				task: SubagentTask,
+				signal?: AbortSignal,
+			): Promise<SubagentResult> => {
+				if (task.subagent_type !== 'verify-ci-investigator') {
+					return executor.execute(task, signal);
+				}
+				if (trustLevel !== 'comment-only') {
+					return runCiAutoFixFlow(task, trustLevel, projectRoot, {}, signal);
+				}
+				return executor.execute(
+					task,
+					signal,
+					0,
+					undefined,
+					undefined,
+					ciInvestigatorOverride,
+				);
+			},
 		};
 	};
 
@@ -107,6 +154,7 @@ async function main(): Promise<void> {
 		projectRoot,
 		buildExecutor,
 		checkpointer,
+		ciWatch: getAppConfig().ciWatch,
 		// Shared with buildExecutor: the skill pipeline fills this registry,
 		// and triggered runs have to see what it registered.
 		toolManager,

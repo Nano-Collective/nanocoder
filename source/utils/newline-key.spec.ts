@@ -49,7 +49,7 @@ test('Ctrl+J reported as a modified letter inserts a newline', t => {
 test('Shift+Enter in the kitty CSI-u encoding inserts a newline', t => {
 	// ESC [13;2u -> name 'return', shift true.
 	t.true(
-		isNewlineKey('\r', keyFor({return: true, shift: true, raw: `${ESC}[13;2u`})),
+		isNewlineKey('\r', keyFor({return: true, shift: true}), `${ESC}[13;2u`),
 	);
 });
 
@@ -63,11 +63,11 @@ test('Shift+Enter in xterm modifyOtherKeys form inserts a newline', t => {
 	// ESC [27;2;13~ from xterm.js, i.e. the VS Code integrated terminal. Ink
 	// cannot parse it at all — `name` comes back empty and the ESC-stripped
 	// sequence arrives as literal input text — so `raw` is the only handle on it.
-	t.true(isNewlineKey('[27;2;13~', keyFor({raw: `${ESC}[27;2;13~`})));
+	t.true(isNewlineKey('[27;2;13~', keyFor({}), `${ESC}[27;2;13~`));
 });
 
 test('Alt+Enter in xterm modifyOtherKeys form inserts a newline', t => {
-	t.true(isNewlineKey('[27;3;13~', keyFor({raw: `${ESC}[27;3;13~`})));
+	t.true(isNewlineKey('[27;3;13~', keyFor({}), `${ESC}[27;3;13~`));
 });
 
 // --- not a newline ---
@@ -89,14 +89,15 @@ test('other ctrl combinations are not newline keys', t => {
 
 test('Ctrl+Enter in xterm modifyOtherKeys form is not a newline key', t => {
 	// Modifier 5 is Ctrl; only Shift (2) and Alt (3) mean "newline" here.
-	t.false(isNewlineKey('[27;5;13~', keyFor({raw: `${ESC}[27;5;13~`})));
+	t.false(isNewlineKey('[27;5;13~', keyFor({}), `${ESC}[27;5;13~`));
 });
 
 test('forward Delete is not mistaken for Enter-with-modifier', t => {
-	t.false(isNewlineKey('', keyFor({delete: true, raw: `${ESC}[3~`})));
+	t.false(isNewlineKey('', keyFor({delete: true}), `${ESC}[3~`));
 });
 
 test('a missing raw sequence does not throw', t => {
-	// Ink leaves `raw` undefined for both '\r' and ESC CR.
-	t.false(isNewlineKey('\r', keyFor({return: true, raw: undefined})));
+	// Ink emits no raw sequence for some keys, and the hook's ref starts empty.
+	t.false(isNewlineKey('\r', keyFor({return: true})));
+	t.false(isNewlineKey('\r', keyFor({return: true}), undefined));
 });

@@ -66,6 +66,7 @@ nanocoder -h
 | `init [--preset <type>] [-f\|--force] [--lean]` | | Initialize the current project. Bundled presets: `react`, `nextjs`, and `rust`. `--force` regenerates an existing `AGENTS.md`; `--lean` skips `CLAUDE.md` when merging existing project guidance |
 | `run` | | Run in non-interactive mode |
 | `review` | | Review a branch or PR diff for bugs, security, and style violations |
+| `worktree <PR-number>` | | Start an interactive session in a new Git worktree at a PR's head |
 | `daemon <start\|stop\|status\|logs\|install\|uninstall>` | | Manage the per-project [skill daemon](../features/skills.md#the-daemon). `start` refuses an untrusted directory unless `--trust-directory` is passed |
 | `skills add <target>` | | Install a skill bundle from an index name, `owner/repo`, a git URL or a local path. Flags: `--ref`, `--subdir`, `--global`, `--force`, `--yes`, `--index` |
 | `config <list\|show [key]\|diff>` | | Inspect the resolved configuration and where each value came from. Add `--json` for machine output |
@@ -205,13 +206,23 @@ This fetches the diff against the default branch and runs an architect-level rev
 
 **Note:** `nanocoder review` requires an interactive terminal (TTY). It cannot be used with pipes or redirection (e.g. `nanocoder review main > review.md` will error) and its output cannot currently be captured to a file (also tracked in [#1287](https://github.com/Nano-Collective/nanocoder/issues/1287)).
 
+### Work on a pull request
+
+```bash
+nanocoder worktree 42
+```
+
+This starts an interactive Nanocoder session at PR #42's head in a new Git worktree. Git and an authenticated GitHub CLI (`gh auth login`) are required. When `origin` is your fork and `upstream` is the project repository, Nanocoder looks up and fetches the PR from `upstream`; this also works for PRs submitted from contributor forks. The worktree is a sibling of the repository, named `<repository>-pr-42`, with local branch `nanocoder/pr-42`. The launching repository's branch, index, and files are left alone.
+
+An existing directory or local branch causes an error; Nanocoder never overwrites or reuses it. The worktree and branch remain after the session ends, so you can return to your changes. When finished, remove them from the original repository with `git worktree remove <path>` and `git branch -d nanocoder/pr-42`. If setup fails, Nanocoder removes only the directory and branch it created for that attempt.
+
 **Non-interactive mode behavior:**
 
 - Automatically executes the given prompt
 - Defaults to auto-accept (tools execute without confirmation); override with `--mode` (e.g. `--mode yolo` or `--mode plan`)
-- In CI, non-TTY environments, or with `--plain` / `--json`, renders through the lightweight plain shell - no welcome banner, no boxed user echo, no "ctrl+r to expand" hints. A single boot line shows the provider, model and mode, assistant text prints as plain markdown, and a single spinner status line shows progress below the transcript. In an interactive terminal without `--plain`, `run` uses the regular Ink UI with the welcome banner hidden.
+- In CI, non-TTY environments, or with `--plain` / `--json`, renders through the lightweight plain shell - no welcome banner, no boxed user echo, no "ctrl+n to expand" hints. A single boot line shows the provider, model and mode, assistant text prints as plain markdown, and a single spinner status line shows progress below the transcript. In an interactive terminal without `--plain`, `run` uses the regular Ink UI with the welcome banner hidden.
 - Tools render chronologically as they run (e.g. `⚒ Read 1 file`) and appear in stdout before the assistant's next response
-- If a tool requires approval that auto-accept won't grant (e.g. bash in `--mode auto-accept`, or any approval-gated tool in `--mode normal`), nanocoder prints `Tool approval required for: ...` and exits with status code `1` (`2` under `--plain`, including JSON output)
+- If a tool requires approval that auto-accept won't grant (e.g. bash or a `file_op` delete in `--mode auto-accept`, or any approval-gated tool in `--mode normal`), nanocoder prints `Tool approval required for: ...` and exits with status code `1` (`2` under `--plain`, including JSON output)
 - Exits with status code `1` when the run fails: a provider or connection error, a retry limit being hit (e.g. malformed tool calls the model cannot self-correct), or the run timing out
 - Exits with status code `1` with a usage message if `run` is given no prompt (or an empty `--prompt-file`)
 - Exits automatically when the task is complete

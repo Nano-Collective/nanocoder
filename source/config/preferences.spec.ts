@@ -2,6 +2,7 @@ import {existsSync, mkdirSync, readFileSync, rmSync, writeFileSync} from 'node:f
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
+import {describeProjectTrust} from '@/config/project-trust';
 import {
 	DEFAULT_MEMORY_LIMIT,
 	DEFAULT_TOKEN_BUDGET,
@@ -12,6 +13,7 @@ import {
 } from '@/memory/project-context';
 import {
 	ensureDirectoryTrust,
+	grantDirectoryTrust,
 	getCompactToolDisplay,
 	getLastUsedModel,
 	getNanocoderShape,
@@ -44,6 +46,7 @@ import {
 	updateMouseReporting,
 	updateShowAgentBashOutput,
 	updateShowUsageFooter,
+	trustRecheck,
 } from './preferences';
 import {updatePreferencesNestedValue} from '@/config/config-writer';
 import type {UserPreferences} from '@/types/index';
@@ -2106,14 +2109,62 @@ test('isDirectoryTrusted returns false when trustedDirectories is empty', t => {
 	t.false(isDirectoryTrusted('/some/project', {}));
 });
 
-test('isDirectoryTrusted matches an exact entry', t => {
+test('isDirectoryTrusted matches a record with the current fingerprint', t => {
 	const dir = process.cwd();
-	t.true(isDirectoryTrusted(dir, {trustedDirectories: [dir]}));
+	const fingerprint = describeProjectTrust(dir).fingerprint;
+	t.true(
+		isDirectoryTrusted(dir, {
+			trustedDirectories: [{path: dir, fingerprint}],
+		}),
+	);
+	t.true(
+		isDirectoryTrusted(dir, {
+			trustedDirectories: [{path: '.', fingerprint}],
+		}),
+	);
 });
 
-test('isDirectoryTrusted resolves relative entries before comparing', t => {
+test('isDirectoryTrusted ignores a path that has no fingerprint', t => {
 	const dir = process.cwd();
-	t.true(isDirectoryTrusted(dir, {trustedDirectories: ['.']}));
+	t.false(isDirectoryTrusted(dir, {trustedDirectories: [dir]}));
+});
+
+test('isDirectoryTrusted ignores a stale fingerprint', t => {
+	const dir = process.cwd();
+	t.false(
+		isDirectoryTrusted(dir, {
+			trustedDirectories: [{path: dir, fingerprint: 'stale'}],
+		}),
+	);
+});
+
+test('isDirectoryTrusted is false after a plugin is added', t => {
+	const root = join(tmpdir(), `trust-plugin-${Date.now()}`);
+	mkdirSync(join(root, '.nanocoder', 'plugins'), {recursive: true});
+	try {
+		const before = describeProjectTrust(root).fingerprint;
+		writeFileSync(
+			join(root, '.nanocoder', 'plugins', 'pulled.mjs'),
+			'export default {name:"pulled"}\n',
+		);
+		t.false(
+			isDirectoryTrusted(root, {
+				trustedDirectories: [{path: root, fingerprint: before}],
+			}),
+		);
+		t.true(
+			isDirectoryTrusted(root, {
+				trustedDirectories: [
+					{
+						path: root,
+						fingerprint: describeProjectTrust(root).fingerprint,
+					},
+				],
+			}),
+		);
+	} finally {
+		rmSync(root, {recursive: true, force: true});
+	}
 });
 
 test('isDirectoryTrusted does not match an unrelated directory', t => {
@@ -2140,7 +2191,11 @@ test('ensureDirectoryTrust trusts an already-recorded directory without persisti
 	const dir = process.cwd();
 	let saveCalled = false;
 	const result = ensureDirectoryTrust(dir, false, {
-		loadPreferences: () => ({trustedDirectories: [dir]}),
+		loadPreferences: () => ({
+			trustedDirectories: [
+				{path: dir, fingerprint: describeProjectTrust(dir).fingerprint},
+			],
+		}),
 		savePreferences: () => {
 			saveCalled = true;
 		},
@@ -2159,9 +2214,52 @@ test.serial(
 				t.fail('should not persist when refusing');
 			},
 		});
-		t.deepEqual(result, {trusted: false, persisted: false});
+		t.deepEqual(result, {trusted: false, persisted: false, recheck: null});
 	},
 );
+
+test.serial(
+	'ensureDirectoryTrust flags a trusted directory whose fingerprint changed',
+	t => {
+		delete process.env.NANOCODER_TRUST_DIRECTORY;
+		const dir = process.cwd();
+		const result = ensureDirectoryTrust(dir, false, {
+			loadPreferences: () => ({
+				trustedDirectories: [{path: dir, fingerprint: 'old'}],
+			}),
+			savePreferences: () => {
+				t.fail('should not persist when refusing');
+			},
+		});
+		t.deepEqual(result, {trusted: false, persisted: false, recheck: 'changed'});
+	},
+);
+
+test.serial(
+	'ensureDirectoryTrust says a path-only entry needs re-approval after the upgrade',
+	t => {
+		delete process.env.NANOCODER_TRUST_DIRECTORY;
+		const dir = process.cwd();
+		const result = ensureDirectoryTrust(dir, false, {
+			loadPreferences: () => ({trustedDirectories: [dir]}),
+			savePreferences: () => {
+				t.fail('should not persist when refusing');
+			},
+		});
+		t.deepEqual(result, {trusted: false, persisted: false, recheck: 'upgrade'});
+	},
+);
+
+test('trust checks skip malformed entries instead of throwing', t => {
+	const dir = process.cwd();
+	const preferences = {
+		trustedDirectories: [null, {}, {path: 5}, 7],
+	} as unknown as UserPreferences;
+	t.false(isDirectoryTrusted(dir, preferences));
+	t.is(trustRecheck(dir, preferences), null);
+	const granted = grantDirectoryTrust(preferences, dir);
+	t.true(isDirectoryTrusted(dir, granted));
+});
 
 test.serial(
 	'ensureDirectoryTrust with NANOCODER_TRUST_DIRECTORY=1 trusts and persists a new entry',
@@ -2178,7 +2276,12 @@ test.serial(
 			});
 			t.true(result.trusted);
 			t.true(result.persisted);
-			t.deepEqual(savedPreferences?.trustedDirectories, [target]);
+			t.deepEqual(savedPreferences?.trustedDirectories, [
+				{
+					path: target,
+					fingerprint: describeProjectTrust(target).fingerprint,
+				},
+			]);
 		} finally {
 			delete process.env.NANOCODER_TRUST_DIRECTORY;
 		}
@@ -2193,13 +2296,44 @@ test.serial(
 			const dir = process.cwd();
 			let saveCalled = false;
 			const result = ensureDirectoryTrust(dir, false, {
-				loadPreferences: () => ({trustedDirectories: [dir]}),
+				loadPreferences: () => ({
+					trustedDirectories: [
+						{
+							path: dir,
+							fingerprint: describeProjectTrust(dir).fingerprint,
+						},
+					],
+				}),
 				savePreferences: () => {
 					saveCalled = true;
 				},
 			});
 			t.deepEqual(result, {trusted: true, persisted: false});
 			t.false(saveCalled);
+		} finally {
+			delete process.env.NANOCODER_TRUST_DIRECTORY;
+		}
+	},
+);
+
+test.serial(
+	'ensureDirectoryTrust with NANOCODER_TRUST_DIRECTORY=1 replaces a path-only entry',
+	t => {
+		process.env.NANOCODER_TRUST_DIRECTORY = '1';
+		let savedPreferences: UserPreferences | null = null;
+		try {
+			const dir = process.cwd();
+			const result = ensureDirectoryTrust(dir, false, {
+				loadPreferences: () => ({trustedDirectories: [dir]}),
+				savePreferences: prefs => {
+					savedPreferences = prefs;
+				},
+			});
+			t.true(result.trusted);
+			t.true(result.persisted);
+			t.deepEqual(savedPreferences?.trustedDirectories, [
+				{path: dir, fingerprint: describeProjectTrust(dir).fingerprint},
+			]);
 		} finally {
 			delete process.env.NANOCODER_TRUST_DIRECTORY;
 		}
@@ -2304,6 +2438,56 @@ test.serial(
 			t.is(project.trustedDirectories, undefined);
 			t.is(project.lastProvider, 'ollama');
 			t.deepEqual(global.trustedDirectories, ['/newly/trusted']);
+			t.is(global.lastModel, 'kept');
+		});
+	},
+);
+
+test.serial(
+	'loadPreferences ignores fullCommitConfirmedProjects and ciWatch from a project-level preferences file',
+	t => {
+		withProjectPreferences(
+			{
+				fullCommitConfirmedProjects: ['/evil'],
+				ciWatch: {enabled: true},
+			},
+			null,
+			() => {
+				const prefs = loadPreferences();
+				t.is(prefs.fullCommitConfirmedProjects, undefined);
+				t.is(prefs.ciWatch, undefined);
+			},
+		);
+	},
+);
+
+test.serial(
+	'loadPreferences takes fullCommitConfirmedProjects and ciWatch from the global file',
+	t => {
+		withProjectPreferences(
+			{fullCommitConfirmedProjects: ['/evil'], ciWatch: {enabled: false}},
+			{fullCommitConfirmedProjects: ['/mine'], ciWatch: {enabled: true}},
+			() => {
+				const prefs = loadPreferences();
+				t.deepEqual(prefs.fullCommitConfirmedProjects, ['/mine']);
+				t.true(prefs.ciWatch?.enabled);
+			},
+		);
+	},
+);
+
+test.serial(
+	'savePreferences writes fullCommitConfirmedProjects to the global file, never the project file',
+	t => {
+		withProjectPreferences({}, {lastModel: 'kept'}, ({projectFile, globalFile}) => {
+			const prefs = loadPreferences();
+			prefs.fullCommitConfirmedProjects = ['/confirmed'];
+			savePreferences(prefs);
+
+			const project = JSON.parse(readFileSync(projectFile, 'utf-8'));
+			const global = JSON.parse(readFileSync(globalFile, 'utf-8'));
+			t.is(project.fullCommitConfirmedProjects, undefined);
+			t.deepEqual(global.fullCommitConfirmedProjects, ['/confirmed']);
 			t.is(global.lastModel, 'kept');
 		});
 	},

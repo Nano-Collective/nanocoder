@@ -356,6 +356,84 @@ test.serial('executes tool calls and returns final response', async t => {
 	t.is(result.output, 'Found the file with 100 lines');
 });
 
+test.serial('toolOverride replaces the effective tool list beyond what frontmatter declares', async t => {
+	// 'explore's frontmatter tools list does not include write_file, so
+	// without an override this call would be filtered out before reaching
+	// the model. toolOverride.tools should replace the effective list.
+	const writeHandler = async (args: unknown) => {
+		const parsed = args as {path: string};
+		return `Wrote ${parsed.path}`;
+	};
+
+	const toolManager = createMockToolManager({
+		write_file: {handler: writeHandler, readOnly: false},
+	});
+
+	const client = createMockClient([
+		{
+			content: '',
+			tool_calls: [{
+				id: 'tc1',
+				function: {name: 'write_file', arguments: '{"path": "out.txt"}'},
+			}],
+		},
+		{content: 'Wrote the file'},
+	]);
+
+	const executor = new SubagentExecutor(toolManager, client);
+
+	const result = await executor.execute(
+		{subagent_type: 'explore', description: 'Write a file'},
+		undefined,
+		0,
+		undefined,
+		undefined,
+		{tools: ['write_file']},
+	);
+
+	t.true(result.success);
+	t.is(result.output, 'Wrote the file');
+});
+
+test.serial('keeps screenshot images on a subagent tool message', async t => {
+	const toolManager = createMockToolManager({
+		read_file: {
+			handler: async () => ({
+				llmContent: 'Screenshot of http://localhost:3000/',
+				images: [{data: 'abc', mediaType: 'image/jpeg'}],
+			}),
+			readOnly: true,
+		},
+	});
+	const toolResults: Message[] = [];
+	const client = createMockClient(
+		[
+			{
+				content: '',
+				tool_calls: [{
+					id: 'tc-shot',
+					function: {name: 'read_file', arguments: '{}'},
+				}],
+			},
+			{content: 'The button is misaligned.'},
+		],
+		messages => {
+			const toolMessage = messages.find(message => message.role === 'tool');
+			if (toolMessage) toolResults.push(toolMessage);
+		},
+	);
+
+	const executor = new SubagentExecutor(toolManager, client);
+	const result = await executor.execute({
+		subagent_type: 'explore',
+		description: 'Look at the page',
+	});
+
+	t.true(result.success);
+	t.is(toolResults[0]?.content, 'Screenshot of http://localhost:3000/');
+	t.deepEqual(toolResults[0]?.images, [{data: 'abc', mediaType: 'image/jpeg'}]);
+});
+
 test.serial('stringifies structured tool output without llmContent', async t => {
 	const toolManager = createMockToolManager({
 		read_file: {
@@ -1224,6 +1302,86 @@ test('mode resolver overrides the static parentMode and is read live', async t =
 	// Flip the live source (simulating a mid-run switch) -> next check honors it.
 	mode = 'normal';
 	t.true(await needsApproval('execute_bash'));
+});
+
+// ============================================================================
+// Phase 4: toolOverride.alwaysAllow bypasses approval for otherwise
+// mode-blind, unconditionally-approval-required tools (e.g. git_commit's
+// `approval: true`, which would otherwise be silently auto-denied in
+// headless mode since no approval-queue handler is ever registered there).
+// ============================================================================
+
+test.serial('needsApprovalForTool: alwaysAllow bypasses an unconditional approval:true policy', async t => {
+	const toolManager = createMockToolManager({
+		git_commit: {handler: async () => 'committed', readOnly: false, needsApproval: true},
+	});
+	const client = createMockClient([]);
+	const executor = new SubagentExecutor(toolManager, client, process.cwd(), 'headless');
+
+	const needsApproval = (alwaysAllow?: string[]) =>
+		(executor as unknown as {
+			needsApprovalForTool: (
+				n: string,
+				a: unknown,
+				alwaysAllow?: string[],
+			) => Promise<boolean>;
+		}).needsApprovalForTool('git_commit', {}, alwaysAllow);
+
+	t.true(
+		await needsApproval(undefined),
+		'without alwaysAllow, git_commit still requires approval even in headless mode',
+	);
+	t.false(
+		await needsApproval(['git_commit']),
+		'alwaysAllow including git_commit bypasses its approval:true policy',
+	);
+	t.true(
+		await needsApproval(['some_other_tool']),
+		'alwaysAllow not including git_commit does not bypass it',
+	);
+});
+
+test.serial('execute(): toolOverride.alwaysAllow lets an approval-required tool run without signalToolApproval', async t => {
+	const commitHandler = async () => 'committed';
+	const toolManager = createMockToolManager({
+		git_commit: {handler: commitHandler, readOnly: false, needsApproval: true},
+	});
+
+	let approvalRequested = false;
+	setGlobalToolApprovalHandler(async () => {
+		approvalRequested = true;
+		return true;
+	});
+
+	const client = createMockClient([
+		{
+			content: '',
+			tool_calls: [
+				{id: 'tc1', function: {name: 'git_commit', arguments: '{"message":"fix"}'}},
+			],
+		},
+		{content: 'Committed the fix'},
+	]);
+
+	const executor = new SubagentExecutor(toolManager, client, process.cwd(), 'headless');
+
+	const result = await executor.execute(
+		{subagent_type: 'explore', description: 'Commit a fix'},
+		undefined,
+		0,
+		undefined,
+		{tools: ['git_commit'], alwaysAllow: ['git_commit']},
+	);
+
+	t.true(result.success);
+	t.is(result.output, 'Committed the fix');
+	t.false(
+		approvalRequested,
+		'signalToolApproval should never be reached when alwaysAllow covers the tool',
+	);
+
+	// Restore auto-approve handler for other tests
+	setGlobalToolApprovalHandler(async () => true);
 });
 
 test('without a resolver, approval falls back to the static parentMode', async t => {

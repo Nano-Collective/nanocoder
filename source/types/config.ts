@@ -1,6 +1,7 @@
 import type {TitleShape} from '@/components/ui/styled-title';
 import type {DevelopmentMode} from '@/types/core';
 import type {NanocoderShape, ThemePreset} from '@/types/ui';
+import type {TrustLevel} from '@/verify/trust';
 
 // Supported AI SDK provider packages
 export type SdkProvider =
@@ -49,6 +50,8 @@ export interface AIProviderConfig {
 		apiKey?: string;
 		caCertPath?: string;
 		headers?: Record<string, string>;
+		// Request streaming usage from OpenAI-compatible providers (defaults to true)
+		includeUsage?: boolean;
 		[key: string]: unknown;
 	};
 }
@@ -88,6 +91,8 @@ export interface ProviderConfig {
 	disableTools?: boolean; // Disable tools for entire provider
 	disableToolModels?: string[]; // List of model names to disable tools for
 	headers?: Record<string, string>;
+	// Whether to request streaming usage from OpenAI-compatible endpoints (defaults to true)
+	includeUsage?: boolean;
 	// SDK provider package to use (default: 'openai-compatible')
 	sdkProvider?: SdkProvider;
 	// OpenRouter-specific request body fields. Only applied when the provider
@@ -178,13 +183,51 @@ export interface NotificationsConfig {
 		questionPrompt?: boolean;
 		generationComplete?: boolean;
 		triggeredRunComplete?: boolean;
+		ciFailureDetected?: boolean;
+		ciInvestigationComplete?: boolean;
 	};
 	customMessages?: {
 		toolConfirmation?: {title: string; message: string};
 		questionPrompt?: {title: string; message: string};
 		generationComplete?: {title: string; message: string};
 		triggeredRunComplete?: {title: string; message: string};
+		ciFailureDetected?: {title: string; message: string};
+		ciInvestigationComplete?: {title: string; message: string};
 	};
+}
+
+/**
+ * Background CI-watch configuration. Governs whether the per-project daemon
+ * polls GitHub Actions for check-run failures on the currently checked-out
+ * branch and automatically runs the `verify-ci-investigator` subagent when
+ * one is found. Opt-in (`enabled` defaults to false) since this is a new
+ * always-on-network, GitHub-API-rate-limit-consuming background feature,
+ * unlike file-watching/cron which have no such external cost.
+ */
+export interface CiWatchConfig {
+	enabled: boolean;
+	/** Base poll interval in ms. Defaults to 30_000. */
+	pollIntervalMs?: number;
+	/** Backoff cap in ms for consecutive `gh` errors. Defaults to 300_000. */
+	maxPollIntervalMs?: number;
+}
+
+/**
+ * Project-level (`agents.config.json`) verify/CI-watch policy — trust level
+ * and poll cadence. Unlike `CiWatchConfig.enabled` (a personal, per-machine
+ * opt-in to background GitHub polling, kept in preferences), trust level
+ * and cadence are security/policy decisions appropriate to commit and
+ * review with the rest of the project, so they live here instead. When
+ * set, `pollIntervalMs`/`maxPollIntervalMs` here override the
+ * preferences-backed `CiWatchConfig` values of the same name — see
+ * `loadCiWatchConfig` in `source/config/index.ts`.
+ */
+export interface VerifyConfig {
+	/** Trust level for daemon-triggered CI investigation/auto-fix. Undefined
+	 * defers to the `--trust` CLI flag, then 'comment-only'. */
+	trustLevel?: TrustLevel;
+	pollIntervalMs?: number;
+	maxPollIntervalMs?: number;
 }
 
 /**
@@ -444,6 +487,12 @@ export interface AppConfig {
 	// Desktop notification configuration
 	notifications?: NotificationsConfig;
 
+	// Background CI-watch configuration (daemon-side)
+	ciWatch?: CiWatchConfig;
+
+	// Project-level verify/CI-watch policy: trust level, poll cadence overrides
+	verify?: VerifyConfig;
+
 	// Model mode defaults (global)
 	tune?: Partial<TuneConfig>;
 
@@ -673,6 +722,11 @@ export interface VoiceConfig {
 	ttsBackend: 'local' | 'cloud';
 }
 
+export interface TrustedDirectoryRecord {
+	path: string;
+	fingerprint: string;
+}
+
 export interface UserPreferences {
 	lastProvider?: string;
 	lastModel?: string;
@@ -687,11 +741,17 @@ export interface UserPreferences {
 	 * palette of its own. An unknown name falls back to `selectedTheme`.
 	 */
 	syntaxTheme?: ThemePreset;
-	trustedDirectories?: string[];
+	/**
+	 * Directories the user has trusted. A string is an older entry that
+	 * recorded only the path. A record also stores the fingerprint of what
+	 * that folder will run (see `describeProjectTrust`).
+	 */
+	trustedDirectories?: Array<string | TrustedDirectoryRecord>;
 	titleShape?: TitleShape;
 	nanocoderShape?: NanocoderShape;
 	tune?: TuneConfig;
 	notifications?: NotificationsConfig;
+	ciWatch?: CiWatchConfig;
 	/**
 	 * Namespaced settings (sessions, paste) read from nanocoder-preferences.json
 	 * by the loaders. Kept under `nanocoder` to match the on-disk shape the
@@ -737,6 +797,14 @@ export interface UserPreferences {
 	 * content. Also switchable per-run with the --no-alt-screen flag.
 	 */
 	alternateScreen?: boolean;
+	/**
+	 * Absolute project-root paths for which the one-time `--trust
+	 * full-commit` security warning has already been shown and confirmed.
+	 * Mirrors `trustedDirectories`'s shape/semantics: a list of
+	 * already-confirmed targets, not a single global flag, since a user may
+	 * run the daemon against several projects with different trust postures.
+	 */
+	fullCommitConfirmedProjects?: string[];
 	/**
 	 * Mouse reporting in alternate screen mode. true (default): the mouse wheel
 	 * scrolls the chat viewport, and text selection needs Shift+drag (Option+drag

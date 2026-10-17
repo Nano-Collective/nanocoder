@@ -3,6 +3,7 @@ import {existsSync, mkdirSync, readFileSync} from 'fs';
 import type {TitleShape} from '@/components/ui/styled-title';
 import {getClosestConfigFile} from '@/config/index';
 import {getConfigPath} from '@/config/paths';
+import {describeProjectTrust} from '@/config/project-trust';
 import {
 	DEFAULT_MEMORY_LIMIT,
 	DEFAULT_TOKEN_BUDGET,
@@ -12,7 +13,11 @@ import {
 	MIN_TOKEN_BUDGET,
 	type ProjectContextOptions,
 } from '@/memory/project-context';
-import type {TuneConfig} from '@/types/config';
+import type {
+	CiWatchConfig,
+	NotificationsConfig,
+	TuneConfig,
+} from '@/types/config';
 import type {UserPreferences} from '@/types/index';
 import type {NanocoderShape, ThemePreset} from '@/types/ui';
 import {atomicWriteFileSync} from '@/utils/atomic-write';
@@ -54,29 +59,40 @@ function isProjectPreferencesPath(preferencesPath: string): boolean {
 	);
 }
 
-function readGlobalTrustedDirectories(): string[] | undefined {
+// Keys that are personal, security-sensitive decisions. They live only in the
+// global file: a committed project file must not be able to pre-confirm the
+// `--trust full-commit` warning or switch on background CI polling.
+const GLOBAL_ONLY_KEYS = [
+	'trustedDirectories',
+	'fullCommitConfirmedProjects',
+	'ciWatch',
+] as const satisfies ReadonlyArray<keyof UserPreferences>;
+
+function readGlobalOnlyPreferences(): Partial<UserPreferences> | undefined {
 	const globalPath = getGlobalPreferencesPath();
 	if (!existsSync(globalPath)) return undefined;
 	try {
-		const data = JSON.parse(
-			readFileSync(globalPath, 'utf-8'),
-		) as UserPreferences;
-		return data.trustedDirectories;
+		return JSON.parse(readFileSync(globalPath, 'utf-8')) as UserPreferences;
 	} catch (error) {
 		logError(`Failed to load global preferences: ${String(error)}`);
 		return undefined;
 	}
 }
 
-function writeGlobalTrustedDirectories(trustedDirectories: string[]): void {
+function writeGlobalOnlyPreferences(values: Partial<UserPreferences>): void {
 	const globalPath = getGlobalPreferencesPath();
-	let data: UserPreferences = {};
+	let data: Record<string, unknown> = {};
 	if (existsSync(globalPath)) {
-		data = JSON.parse(readFileSync(globalPath, 'utf-8')) as UserPreferences;
+		data = JSON.parse(readFileSync(globalPath, 'utf-8')) as Record<
+			string,
+			unknown
+		>;
 	}
-	data.trustedDirectories = trustedDirectories;
 	mkdirSync(path.dirname(globalPath), {recursive: true});
-	atomicWriteFileSync(globalPath, JSON.stringify(data, null, 2));
+	atomicWriteFileSync(
+		globalPath,
+		JSON.stringify({...data, ...values}, null, 2),
+	);
 }
 
 export function loadPreferences(): UserPreferences {
@@ -86,11 +102,12 @@ export function loadPreferences(): UserPreferences {
 			readFileSync(preferencesPath, 'utf-8'),
 		) as UserPreferences;
 		if (isProjectPreferencesPath(preferencesPath)) {
-			const trustedDirectories = readGlobalTrustedDirectories();
-			if (trustedDirectories === undefined) {
-				delete data.trustedDirectories;
-			} else {
-				data.trustedDirectories = trustedDirectories;
+			const globalPrefs = readGlobalOnlyPreferences();
+			const mutable = data as Record<string, unknown>;
+			for (const key of GLOBAL_ONLY_KEYS) {
+				const value = globalPrefs?.[key];
+				if (value === undefined) delete mutable[key];
+				else mutable[key] = value;
 			}
 		}
 		return data;
@@ -144,10 +161,16 @@ export function savePreferences(preferences: UserPreferences): void {
 	try {
 		const preferencesPath = getPreferencesPath();
 		if (isProjectPreferencesPath(preferencesPath)) {
-			const {trustedDirectories, ...rest} = preferences;
+			const rest: Record<string, unknown> = {...preferences};
+			const globalValues: Record<string, unknown> = {};
+			for (const key of GLOBAL_ONLY_KEYS) {
+				delete rest[key];
+				if (preferences[key] !== undefined)
+					globalValues[key] = preferences[key];
+			}
 			atomicWriteFileSync(preferencesPath, JSON.stringify(rest, null, 2));
-			if (trustedDirectories !== undefined) {
-				writeGlobalTrustedDirectories(trustedDirectories);
+			if (Object.keys(globalValues).length > 0) {
+				writeGlobalOnlyPreferences(globalValues as Partial<UserPreferences>);
 			}
 		} else {
 			atomicWriteFileSync(
@@ -167,10 +190,20 @@ export function savePreferences(preferences: UserPreferences): void {
 	}
 }
 
+/** The path a trust entry names, or null for a hand-edited entry with none. */
+function trustPath(entry: unknown): string | null {
+	if (typeof entry === 'string') return entry;
+	if (entry && typeof entry === 'object') {
+		const entryPath = (entry as {path?: unknown}).path;
+		if (typeof entryPath === 'string') return entryPath;
+	}
+	return null;
+}
+
 /**
- * True if `directory` (or an equivalent absolute path) is recorded in
- * `preferences.trustedDirectories`. Shared by every trust-gated entry point
- * — the interactive TUI's `useDirectoryTrust`, `--plain`'s `runPlainShell`,
+ * True if `directory` is recorded with a fingerprint that still matches
+ * what the folder will run. Shared by every trust-gated entry point —
+ * the interactive TUI's `useDirectoryTrust`, `--plain`'s `runPlainShell`,
  * and the daemon boot path — so the resolution rule can't drift between them.
  */
 export function isDirectoryTrusted(
@@ -178,15 +211,74 @@ export function isDirectoryTrusted(
 	preferences: UserPreferences,
 ): boolean {
 	const resolved = path.resolve(directory); // nosemgrep
-	return (preferences.trustedDirectories ?? []).some(
-		dir => path.resolve(dir) === resolved, // nosemgrep
+	const fingerprint = describeProjectTrust(resolved).fingerprint;
+	return (preferences.trustedDirectories ?? []).some(entry => {
+		const entryPath = trustPath(entry);
+		return (
+			typeof entry === 'object' &&
+			entryPath !== null &&
+			path.resolve(entryPath) === resolved && // nosemgrep
+			entry.fingerprint === fingerprint
+		);
+	});
+}
+
+/**
+ * Why a folder with a trust entry is asked again: its fingerprint changed,
+ * or the entry is a bare path saved before fingerprints existed.
+ */
+export type TrustRecheck = 'changed' | 'upgrade';
+
+/** Null when `directory` has no trust entry at all. */
+export function trustRecheck(
+	directory: string,
+	preferences: UserPreferences,
+): TrustRecheck | null {
+	const resolved = path.resolve(directory); // nosemgrep
+	let recheck: TrustRecheck | null = null;
+	for (const entry of preferences.trustedDirectories ?? []) {
+		const entryPath = trustPath(entry);
+		if (entryPath === null || path.resolve(entryPath) !== resolved) continue; // nosemgrep
+		if (typeof entry !== 'string') return 'changed';
+		recheck = 'upgrade';
+	}
+	return recheck;
+}
+
+/** Shared wording for "Directory X ..." and "This folder ...". */
+export function untrustedReason(recheck: TrustRecheck | null | undefined) {
+	if (recheck === 'changed') return 'changed since you trusted it';
+	if (recheck === 'upgrade') return 'needs re-approval after the upgrade';
+	return 'is not trusted';
+}
+
+/**
+ * Record this folder, including a fingerprint of what it will run. The
+ * prompt passes the fingerprint it showed, so a file that lands while it
+ * is open is asked about on the next start instead of trusted unseen.
+ */
+export function grantDirectoryTrust(
+	preferences: UserPreferences,
+	directory: string,
+	fingerprint = describeProjectTrust(directory).fingerprint,
+): UserPreferences {
+	const resolved = path.resolve(directory); // nosemgrep
+	const trustedDirectories = (preferences.trustedDirectories ?? []).filter(
+		entry => {
+			const entryPath = trustPath(entry);
+			return entryPath === null || path.resolve(entryPath) !== resolved; // nosemgrep
+		},
 	);
+	trustedDirectories.push({path: resolved, fingerprint});
+	return {...preferences, trustedDirectories};
 }
 
 export interface DirectoryTrustResult {
 	trusted: boolean;
 	/** True if this call persisted a new trust entry (env-var bypass only). */
 	persisted: boolean;
+	/** Set when refusing a folder that has a trust entry. */
+	recheck?: TrustRecheck | null;
 }
 
 export interface DirectoryTrustDeps {
@@ -200,11 +292,11 @@ export interface DirectoryTrustDeps {
  *
  * `bypass` is the caller's own one-shot override (each entry point's own
  * `--trust-directory` flag); it never persists, matching the interactive
- * disclaimer's per-run nature. Absent that, a directory already recorded in
- * `trustedDirectories` (from a prior interactive run, or a previous
- * `NANOCODER_TRUST_DIRECTORY=1` run) is trusted as-is. A first-time
- * `NANOCODER_TRUST_DIRECTORY=1` run persists the directory so later runs
- * don't need the env var again.
+ * disclaimer's per-run nature. A directory is trusted only when its saved
+ * fingerprint still matches what the folder will run (see
+ * `describeProjectTrust`). A path with no fingerprint, or an old
+ * fingerprint, is not trusted, and `recheck` says which so the caller can
+ * word it. `NANOCODER_TRUST_DIRECTORY=1` records the current fingerprint.
  */
 export function ensureDirectoryTrust(
 	directory: string,
@@ -219,15 +311,15 @@ export function ensureDirectoryTrust(
 	}
 
 	if (process.env.NANOCODER_TRUST_DIRECTORY === '1') {
-		const resolved = path.resolve(directory); // nosemgrep
-		deps.savePreferences({
-			...preferences,
-			trustedDirectories: [...(preferences.trustedDirectories ?? []), resolved],
-		});
+		deps.savePreferences(grantDirectoryTrust(preferences, directory));
 		return {trusted: true, persisted: true};
 	}
 
-	return {trusted: false, persisted: false};
+	return {
+		trusted: false,
+		persisted: false,
+		recheck: trustRecheck(directory, preferences),
+	};
 }
 
 export function updateLastUsed(provider: string, model: string): void {
@@ -286,9 +378,7 @@ export function saveTune(config: TuneConfig): void {
 /**
  * Get the notifications config from the preferences file.
  */
-export function getNotificationsPreference():
-	| import('@/types/config').NotificationsConfig
-	| undefined {
+export function getNotificationsPreference(): NotificationsConfig | undefined {
 	const preferences = loadPreferences();
 	return preferences.notifications;
 }
@@ -297,11 +387,21 @@ export function getNotificationsPreference():
  * Save the notifications config to the preferences file.
  */
 export function updateNotificationsPreference(
-	config: import('@/types/config').NotificationsConfig,
+	config: NotificationsConfig,
 ): void {
 	const preferences = loadPreferences();
 	preferences.notifications = config;
 	savePreferences(preferences);
+}
+
+/**
+ * Get the CI-watch config from the preferences file. Set by hand-editing
+ * the preferences file for now — no `/settings` UI wizard yet (that's a
+ * natural follow-up once the feature has seen real-world use).
+ */
+export function getCiWatchPreference(): CiWatchConfig | undefined {
+	const preferences = loadPreferences();
+	return preferences.ciWatch;
 }
 
 /**

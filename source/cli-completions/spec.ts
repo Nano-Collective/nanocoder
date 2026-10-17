@@ -46,6 +46,10 @@ export const COMPLETION_SUBCOMMANDS: readonly CompletionSubcommand[] = [
 		description: 'Run in non-interactive mode',
 	},
 	{
+		name: 'worktree',
+		description: 'Start in a new worktree for a GitHub PR',
+	},
+	{
 		name: 'storage',
 		description: 'Inspect storage (read-only; --format json for scripts)',
 	},
