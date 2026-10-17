@@ -268,8 +268,13 @@ const GIT_TIMEOUT_MS = 60_000;
  */
 const GIT_ENV = {...process.env, GIT_TERMINAL_PROMPT: '0'};
 
+interface ExecOptions {
+	signal?: AbortSignal;
+	env?: Record<string, string>;
+}
+
 /**
- * Spawn a command, collect stdout, and resolve with the trimmed output.
+ * Spawn a command, collect stdout bytes, and resolve without decoding chunks.
  * Rejects with stderr (or an exit-code message) on non-zero exit. `label` is
  * the human-readable command name used in error messages (e.g. 'Git', 'gh').
  *
@@ -278,23 +283,27 @@ const GIT_ENV = {...process.env, GIT_TERMINAL_PROMPT: '0'};
  * (ssh passphrases and gpg pinentry read the tty directly).
  *
  * `timeoutMs` overrides the default bound for slower calls (e.g. push).
+ * `options.signal` cancels the command and `options.env` adds variables such
+ * as GIT_INDEX_FILE on top of the default Git environment.
  */
-function execProcess(
+function execProcessRaw(
 	command: string,
 	args: string[],
 	label: string,
 	timeoutMs?: number,
-): Promise<string> {
+	{signal, env}: ExecOptions = {},
+): Promise<Buffer> {
 	return new Promise((resolve, reject) => {
 		// The project root, not the live process cwd: inside an ACP session it is
 		// the session's own directory (see services/session-cwd).
 		const proc = spawn(command, args, {
 			cwd: getProjectRoot(),
 			stdio: ['ignore', 'pipe', 'pipe'],
-			env: GIT_ENV,
+			env: env ? {...GIT_ENV, ...env} : GIT_ENV,
+			signal,
 		});
-		let stdout = '';
-		let stderr = '';
+		const stdout: Buffer[] = [];
+		const stderr: Buffer[] = [];
 		let settled = false;
 
 		// Settle here rather than on `close`: a helper the child spawned (ssh,
@@ -319,42 +328,67 @@ function execProcess(
 			finish();
 		};
 
-		proc.stdout.on('data', (data: Buffer) => {
-			stdout += data.toString();
-		});
+		proc.stdout.on('data', (data: Buffer) => stdout.push(data));
 
-		proc.stderr.on('data', (data: Buffer) => {
-			stderr += data.toString();
-		});
+		proc.stderr.on('data', (data: Buffer) => stderr.push(data));
 
 		proc.on('close', (code: number | null) => {
 			settle(() => {
 				if (code === 0) {
-					resolve(stdout.trimEnd());
+					resolve(Buffer.concat(stdout));
 				} else {
+					const stderrText = Buffer.concat(stderr).toString();
 					const errorMessage =
-						stderr.trim() || `${label} command failed with exit code ${code}`;
+						stderrText.trim() ||
+						`${label} command failed with exit code ${code}`;
 					reject(new Error(errorMessage));
 				}
 			});
 		});
 
 		proc.on('error', error => {
-			settle(() =>
-				reject(new Error(`Failed to execute ${command}: ${error.message}`)),
-			);
+			settle(() => {
+				if (signal?.aborted) {
+					reject(new Error(`${label} command cancelled`));
+					return;
+				}
+				reject(new Error(`Failed to execute ${command}: ${error.message}`));
+			});
 		});
 	});
 }
 
+function execProcess(
+	command: string,
+	args: string[],
+	label: string,
+	timeoutMs?: number,
+	options?: ExecOptions,
+): Promise<string> {
+	return execProcessRaw(command, args, label, timeoutMs, options).then(output =>
+		output.toString().trimEnd(),
+	);
+}
+
 /**
- * Execute a git command and return the output
+ * Execute a git command and return the output. Pass `timeoutMs` for slower
+ * calls (e.g. push) and `options` to cancel or add environment variables.
  */
 export async function execGit(
 	args: string[],
 	timeoutMs?: number,
+	options?: ExecOptions,
 ): Promise<string> {
-	return execProcess('git', args, 'Git', timeoutMs);
+	return execProcess('git', args, 'Git', timeoutMs, options);
+}
+
+/** Execute git and preserve stdout bytes exactly for target file snapshots. */
+export async function execGitBuffer(
+	args: string[],
+	timeoutMs?: number,
+	options?: ExecOptions,
+): Promise<Buffer> {
+	return execProcessRaw('git', args, 'Git', timeoutMs, options);
 }
 
 /**
@@ -364,8 +398,9 @@ export async function execGit(
 export async function execGh(
 	args: string[],
 	timeoutMs?: number,
+	options?: ExecOptions,
 ): Promise<string> {
-	return execProcess('gh', args, 'gh', timeoutMs);
+	return execProcess('gh', args, 'gh', timeoutMs, options);
 }
 
 // ============================================================================
