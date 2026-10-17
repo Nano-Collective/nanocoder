@@ -250,6 +250,17 @@ async function start(opts: DaemonCliOptions): Promise<DaemonCliResult> {
 			`Marked ${resolve(opts.projectRoot)} as trusted (NANOCODER_TRUST_DIRECTORY=1).`,
 		);
 	}
+	if (trust.persistFailed) {
+		// The run proceeds (the env var does grant trust), but the write that
+		// was supposed to make it stick did not land: the next boot will refuse
+		// this directory again. Say so here — `savePreferences` only reaches a
+		// log file, and silence would make the next refusal look arbitrary.
+		console.warn(
+			`Could not save trust for ${resolve(opts.projectRoot)} (NANOCODER_TRUST_DIRECTORY=1): ` +
+				`the next \`nanocoder daemon start\` will refuse this directory again. ` +
+				`Check that the preferences directory is writable.`,
+		);
+	}
 	if (!trust.trusted) {
 		return {
 			exitCode: 1,

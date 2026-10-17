@@ -157,7 +157,13 @@ function cachedPreference<T>(read: (prefs: UserPreferences) => T): () => T {
 	};
 }
 
-export function savePreferences(preferences: UserPreferences): void {
+/**
+ * Writes the preferences file. Returns `false` when the write failed — the
+ * error is logged here rather than thrown, so callers that must know whether
+ * the value actually reached disk (the trust gate, whose message claims a
+ * persisted entry) have a signal to branch on.
+ */
+export function savePreferences(preferences: UserPreferences): boolean {
 	try {
 		const preferencesPath = getPreferencesPath();
 		if (isProjectPreferencesPath(preferencesPath)) {
@@ -180,7 +186,7 @@ export function savePreferences(preferences: UserPreferences): void {
 		}
 	} catch (error) {
 		logError(`Failed to save preferences: ${String(error)}`);
-		return;
+		return false;
 	}
 
 	preferencesVersion++;
@@ -188,6 +194,7 @@ export function savePreferences(preferences: UserPreferences): void {
 	for (const listener of preferencesListeners) {
 		listener();
 	}
+	return true;
 }
 
 /** The path a trust entry names, or null for a hand-edited entry with none. */
@@ -275,15 +282,28 @@ export function grantDirectoryTrust(
 
 export interface DirectoryTrustResult {
 	trusted: boolean;
-	/** True if this call persisted a new trust entry (env-var bypass only). */
+	/**
+	 * True if this call persisted a new trust entry (env-var bypass only).
+	 * Stays false when the write failed, so callers never announce a trust
+	 * the next boot would not see.
+	 */
 	persisted: boolean;
+	/**
+	 * True when the env-var bypass granted trust for this run but the write
+	 * did not land. `persisted === false` alone cannot say this: the one-shot
+	 * `bypass` argument and an already-recorded directory both leave it false
+	 * without anything having gone wrong. Callers warn on this flag so a
+	 * failed write is not silent.
+	 */
+	persistFailed?: boolean;
 	/** Set when refusing a folder that has a trust entry. */
 	recheck?: TrustRecheck | null;
 }
 
 export interface DirectoryTrustDeps {
 	loadPreferences: typeof loadPreferences;
-	savePreferences: typeof savePreferences;
+	/** Savers may report failure (`false`); anything else counts as written. */
+	savePreferences: (preferences: UserPreferences) => boolean | void;
 }
 
 /**
@@ -311,8 +331,17 @@ export function ensureDirectoryTrust(
 	}
 
 	if (process.env.NANOCODER_TRUST_DIRECTORY === '1') {
-		deps.savePreferences(grantDirectoryTrust(preferences, directory));
-		return {trusted: true, persisted: true};
+		// `savePreferences` swallows write errors and reports them as `false`.
+		// Propagate that instead of unconditionally claiming a persisted trust:
+		// the callers print "Marked ... as trusted" on `persisted`, and on a
+		// failed write the daemon's own gate would then refuse a directory the
+		// user was just told was trusted. Savers that report nothing (test
+		// doubles, older injections) keep the previous behaviour.
+		const saved = deps.savePreferences(
+			grantDirectoryTrust(preferences, directory),
+		);
+		const persisted = saved !== false;
+		return {trusted: true, persisted, persistFailed: !persisted};
 	}
 
 	return {
