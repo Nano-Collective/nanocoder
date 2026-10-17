@@ -1,4 +1,5 @@
 import {AsyncLocalStorage} from 'node:async_hooks';
+import {statSync} from 'node:fs';
 import {resolve} from 'node:path';
 
 /**
@@ -78,6 +79,16 @@ function readContentKey(
 /** Record that a file's contents have been seen this session (read or written). */
 export function markFileSeen(absPath: string): void {
 	seenFiles.add(resolve(absPath));
+}
+
+/**
+ * Test helper: mark a file as both seen and fully visible.
+ * Use this in tests that need to edit files after marking them seen.
+ */
+export function markFileSeenAndVisible(absPath: string): void {
+	const normalized = resolve(absPath);
+	seenFiles.add(normalized);
+	recordVisibilityReceipt(normalized);
 }
 
 /** Whether a file's contents have been seen this session. */
@@ -166,19 +177,30 @@ export function clearReadTracker(): void {
  * Record a visibility receipt: the agent has read specific lines of a file.
  *
  * @param absPath - Absolute path to the file
- * @param stats - File stats (mtime, size) for staleness detection
+ * @param stats - File stats (mtime, size) for staleness detection. If undefined, will be fetched synchronously.
  * @param startLine - First line read (1-indexed), undefined means full file
  * @param endLine - Last line read (1-indexed), undefined means full file
  */
 export function recordVisibilityReceipt(
 	absPath: string,
-	stats: {mtimeMs: number; size: number},
+	stats?: {mtimeMs: number; size: number},
 	startLine?: number,
 	endLine?: number,
 ): void {
 	const scope = getReadContentScope();
 	const path = resolve(absPath);
 	const existing = scope.visibilityReceipts.get(path);
+
+	// Fetch stats if not provided (for test helpers like markFileSeen)
+	if (!stats) {
+		try {
+			const fileStats = statSync(path);
+			stats = {mtimeMs: fileStats.mtimeMs, size: fileStats.size};
+		} catch {
+			// If file doesn't exist or can't be stat'd, skip recording visibility
+			return;
+		}
+	}
 
 	// Full file read (no start/end specified)
 	if (startLine === undefined || endLine === undefined) {
