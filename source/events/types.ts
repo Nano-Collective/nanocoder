@@ -12,11 +12,23 @@
 
 import type {FileChangeEventKind, SkillMemberRef} from '@/types/skills';
 
-export type EventKind = 'file.changed' | 'schedule.cron' | 'ci.job.failed';
+export type EventKind =
+	| 'file.changed'
+	| 'file.ai-comment'
+	| 'schedule.cron'
+	| 'ci.job.failed';
 
 export interface FileChangedPayload {
 	file: string;
 	eventKind: FileChangeEventKind;
+}
+
+export interface FileAiCommentPayload {
+	file: string;
+	comment: string;
+	marker: 'AI!' | 'AI?' | 'AI';
+	line: number;
+	context: string;
 }
 
 export interface ScheduleCronPayload {
@@ -43,6 +55,11 @@ export interface FileChangedEvent extends EventBase {
 	payload: FileChangedPayload;
 }
 
+export interface FileAiCommentEvent extends EventBase {
+	kind: 'file.ai-comment';
+	payload: FileAiCommentPayload;
+}
+
 export interface ScheduleCronEvent extends EventBase {
 	kind: 'schedule.cron';
 	payload: ScheduleCronPayload;
@@ -53,7 +70,11 @@ export interface CiJobFailedEvent extends EventBase {
 	payload: CiJobFailedPayload;
 }
 
-export type Event = FileChangedEvent | ScheduleCronEvent | CiJobFailedEvent;
+export type Event =
+	| FileChangedEvent
+	| FileAiCommentEvent
+	| ScheduleCronEvent
+	| CiJobFailedEvent;
 
 /**
  * Convenience alias for code that wants to talk about a specific kind's
@@ -61,15 +82,21 @@ export type Event = FileChangedEvent | ScheduleCronEvent | CiJobFailedEvent;
  */
 export type EventPayload<K extends EventKind> = K extends 'file.changed'
 	? FileChangedPayload
-	: K extends 'schedule.cron'
-		? ScheduleCronPayload
-		: K extends 'ci.job.failed'
-			? CiJobFailedPayload
-			: never;
+	: K extends 'file.ai-comment'
+		? FileAiCommentPayload
+		: K extends 'schedule.cron'
+			? ScheduleCronPayload
+			: K extends 'ci.job.failed'
+				? CiJobFailedPayload
+				: never;
 
 export interface FileChangedFilter {
 	paths?: string[];
 	eventKinds?: FileChangeEventKind[];
+}
+
+export interface FileAiCommentFilter {
+	paths?: string[];
 }
 
 export interface ScheduleCronFilter {
@@ -100,6 +127,11 @@ export interface FileChangedSubscription extends SubscriptionBase {
 	filter?: FileChangedFilter;
 }
 
+export interface FileAiCommentSubscription extends SubscriptionBase {
+	kind: 'file.ai-comment';
+	filter?: FileAiCommentFilter;
+}
+
 export interface ScheduleCronSubscription extends SubscriptionBase {
 	kind: 'schedule.cron';
 	filter?: ScheduleCronFilter;
@@ -112,6 +144,7 @@ export interface CiJobFailedSubscription extends SubscriptionBase {
 
 export type Subscription =
 	| FileChangedSubscription
+	| FileAiCommentSubscription
 	| ScheduleCronSubscription
 	| CiJobFailedSubscription;
 

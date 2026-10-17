@@ -226,3 +226,174 @@ test.serial('closes the underlying watcher if initialization fails', async t => 
     t.is(err?.message, 'Simulated startup failure');
     t.true(closeCalled, 'watcher.close() must be called on startup error');
 });
+
+test.serial('detectAiComments emits file.ai-comment for new AI! markers', async t => {
+	const dir = await mkdtemp(join(tmpdir(), 'fw-ai-spec-'));
+	const {router, events} = captureRouter();
+	router.subscribe({
+		id: 'ai-sub',
+		kind: 'file.ai-comment',
+		target: {kind: 'agent', name: 'fixer'},
+		source: 'frontmatter',
+		ownerSkill: 'auto-fix',
+	});
+	const source = new FileWatcherSource(router, {
+		root: dir,
+		usePolling: true,
+		pollingInterval: 50,
+		detectAiComments: true,
+	});
+	await source.start();
+	await new Promise(r => setTimeout(r, 200));
+
+	try {
+		const file = join(dir, 'code.ts');
+		await writeFile(
+			file,
+			'function foo() {\n  // TODO: fix null check missing AI!\n  return null;\n}',
+		);
+
+		await waitFor(() =>
+			events.some(
+				e =>
+					e.kind === 'file.ai-comment' &&
+					e.payload.marker === 'AI!' &&
+					e.payload.comment.includes('fix null check missing'),
+			),
+		);
+
+		const aiEvents = events.filter(e => e.kind === 'file.ai-comment');
+		t.is(aiEvents.length, 1);
+		const evt = aiEvents[0];
+		if (evt?.kind === 'file.ai-comment') {
+			t.is(evt.payload.marker, 'AI!');
+			t.is(evt.payload.line, 2);
+			t.is(evt.payload.file, 'code.ts');
+			t.true(evt.payload.comment.includes('fix null check missing'));
+			t.true(evt.payload.context.includes('TODO'));
+		}
+	} finally {
+		await source.stop();
+		await rm(dir, {recursive: true, force: true});
+	}
+});
+
+test.serial('detectAiComments supports AI?, AI markers', async t => {
+	const dir = await mkdtemp(join(tmpdir(), 'fw-ai-markers-'));
+	const {router, events} = captureRouter();
+	router.subscribe({
+		id: 'ai-sub',
+		kind: 'file.ai-comment',
+		target: {kind: 'agent', name: 'fixer'},
+		source: 'frontmatter',
+		ownerSkill: 'auto-fix',
+	});
+	const source = new FileWatcherSource(router, {
+		root: dir,
+		usePolling: true,
+		pollingInterval: 50,
+		detectAiComments: true,
+	});
+	await source.start();
+	await new Promise(r => setTimeout(r, 200));
+
+	try {
+		const file = join(dir, 'test.py');
+		await writeFile(
+			file,
+			'# Should this be async? AI?\ndef sync_func():\n  pass\n# Refactor this AI\nold_code()',
+		);
+
+		await waitFor(() =>
+			events.filter(e => e.kind === 'file.ai-comment').length >= 2,
+		);
+
+		const aiEvents = events.filter(e => e.kind === 'file.ai-comment');
+		t.true(aiEvents.length >= 2);
+
+		const markers = aiEvents
+			.filter((e): e is typeof e & {kind: 'file.ai-comment'} => e.kind === 'file.ai-comment')
+			.map(e => e.payload.marker);
+		t.true(markers.includes('AI?'));
+		t.true(markers.includes('AI'));
+	} finally {
+		await source.stop();
+		await rm(dir, {recursive: true, force: true});
+	}
+});
+
+test.serial('detectAiComments only emits for new markers, not existing ones', async t => {
+	const dir = await mkdtemp(join(tmpdir(), 'fw-ai-dedupe-'));
+	const {router, events} = captureRouter();
+	router.subscribe({
+		id: 'ai-sub',
+		kind: 'file.ai-comment',
+		target: {kind: 'agent', name: 'fixer'},
+		source: 'frontmatter',
+		ownerSkill: 'auto-fix',
+	});
+	const source = new FileWatcherSource(router, {
+		root: dir,
+		usePolling: true,
+		pollingInterval: 50,
+		detectAiComments: true,
+	});
+	await source.start();
+	await new Promise(r => setTimeout(r, 200));
+
+	try {
+		const file = join(dir, 'stable.js');
+		// Initial write with marker
+		await writeFile(file, '// existing issue AI!\nlet x = 1;');
+
+		await waitFor(() =>
+			events.some(e => e.kind === 'file.ai-comment'),
+		);
+
+		const initialCount = events.filter(e => e.kind === 'file.ai-comment').length;
+
+		// Modify file without changing the marker
+		await writeFile(file, '// existing issue AI!\nlet x = 2;');
+		await new Promise(r => setTimeout(r, 300));
+
+		// Should not emit duplicate event for same marker
+		const finalCount = events.filter(e => e.kind === 'file.ai-comment').length;
+		t.is(finalCount, initialCount, 'Should not re-emit for unchanged markers');
+	} finally {
+		await source.stop();
+		await rm(dir, {recursive: true, force: true});
+	}
+});
+
+test.serial('detectAiComments disabled by default', async t => {
+	const dir = await mkdtemp(join(tmpdir(), 'fw-no-ai-'));
+	const {router, events} = captureRouter();
+	router.subscribe({
+		id: 'ai-sub',
+		kind: 'file.ai-comment',
+		target: {kind: 'agent', name: 'fixer'},
+		source: 'frontmatter',
+		ownerSkill: 'auto-fix',
+	});
+	const source = new FileWatcherSource(router, {
+		root: dir,
+		usePolling: true,
+		pollingInterval: 50,
+		// detectAiComments NOT set (defaults to false)
+	});
+	await source.start();
+	await new Promise(r => setTimeout(r, 200));
+
+	try {
+		const file = join(dir, 'ignored.ts');
+		await writeFile(file, '// TODO: fix this AI!\ncode();');
+
+		await new Promise(r => setTimeout(r, 300));
+
+		const aiEvents = events.filter(e => e.kind === 'file.ai-comment');
+		t.is(aiEvents.length, 0, 'Should not emit AI comment events when disabled');
+	} finally {
+		await source.stop();
+		await rm(dir, {recursive: true, force: true});
+	}
+});
