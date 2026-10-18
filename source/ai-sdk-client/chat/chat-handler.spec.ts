@@ -725,7 +725,10 @@ function streamingModel(parts: Record<string, unknown>[]): LanguageModel {
 	} as unknown as LanguageModel;
 }
 
-async function streamRouting(parts: Record<string, unknown>[]): Promise<{
+async function streamRouting(
+	parts: Record<string, unknown>[],
+	onFrame?: () => void,
+): Promise<{
 	text: string[];
 	reasoning: string[];
 	content: string;
@@ -745,7 +748,10 @@ async function streamRouting(parts: Record<string, unknown>[]): Promise<{
 		messages: [{role: 'user', content: 'test'}],
 		tools: {},
 		callbacks: {
-			onToken: token => text.push(token),
+			onToken: token => {
+				onFrame?.();
+				text.push(token);
+			},
 			onReasoningToken: token => reasoning.push(token),
 		},
 		maxRetries: 0,
@@ -757,6 +763,50 @@ async function streamRouting(parts: Record<string, unknown>[]): Promise<{
 		finalReasoning: result.choices[0]?.message.reasoning,
 	};
 }
+
+test('a backlog of stream chunks does not hold the event loop', async t => {
+	// Every part is queued before reading starts, the way a fast server or a
+	// busy moment leaves chunks buffered: nothing in the loop has to wait.
+	const deltas = Array.from({length: 30_000}, () => ({
+		type: 'text-delta',
+		id: '0',
+		delta: 'tok ',
+	}));
+	// Timer ticks show when the event loop was free. Holds are measured from
+	// the first token on: before that the AI SDK is still piping the backlog
+	// through its own streams, which this loop cannot interrupt.
+	const ticks: number[] = [];
+	const ticker = setInterval(() => ticks.push(performance.now()), 1);
+	let firstTokenAt: number | undefined;
+	let routed: Awaited<ReturnType<typeof streamRouting>>;
+	try {
+		routed = await streamRouting(
+			[{type: 'text-start', id: '0'}, ...deltas, {type: 'text-end', id: '0'}],
+			() => {
+				firstTokenAt ??= performance.now();
+			},
+		);
+	} finally {
+		clearInterval(ticker);
+	}
+	const doneAt = performance.now();
+
+	t.is(routed.content.length, deltas.length * 'tok '.length);
+	t.is(routed.text.join(''), routed.content);
+	t.truthy(firstTokenAt);
+	const points = [
+		firstTokenAt as number,
+		...ticks.filter(tick => tick > (firstTokenAt as number)),
+		doneAt,
+	];
+	const longestHold = Math.max(
+		...points.slice(1).map((point, i) => point - (points[i] as number)),
+	);
+	t.true(
+		longestHold < 100,
+		`the stream loop held the event loop for ${longestHold.toFixed(0)} ms`,
+	);
+});
 
 test('streams reasoning and text to their own callbacks', async t => {
 	const routed = await streamRouting([
