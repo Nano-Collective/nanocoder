@@ -2,4 +2,4 @@
 "@nanocollective/nanocoder": patch
 ---
 
-Removed unnecessary TypeScript declaration files from the published CLI package to reduce package contents.
+Installs ship less — TypeScript declaration files are no longer included in the published package.
