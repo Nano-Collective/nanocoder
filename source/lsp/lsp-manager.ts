@@ -5,8 +5,8 @@
 
 import {EventEmitter} from 'node:events';
 import {readFile} from 'fs/promises';
-import {extname} from 'path';
-import {fileURLToPath} from 'url';
+import {extname, resolve} from 'path';
+import {fileURLToPath, pathToFileURL} from 'url';
 import {formatError} from '@/utils/error-formatter';
 import {logError, logInfo} from '@/utils/message-queue';
 import {getShutdownManager} from '@/utils/shutdown';
@@ -69,7 +69,7 @@ export class LSPManager extends EventEmitter {
 
 	constructor(config: LSPManagerConfig = {}) {
 		super();
-		this.rootUri = config.rootUri || `file://${process.cwd()}`;
+		this.rootUri = config.rootUri || pathToFileURL(process.cwd()).href;
 	}
 
 	/**
@@ -307,7 +307,7 @@ export class LSPManager extends EventEmitter {
 	 */
 	private fileToUri(filePath: string): string {
 		if (filePath.startsWith('file://')) return filePath;
-		return `file://${filePath}`;
+		return pathToFileURL(resolve(filePath)).href;
 	}
 
 	/**
