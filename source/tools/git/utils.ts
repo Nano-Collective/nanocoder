@@ -5,9 +5,9 @@
  * status parsing, and availability checks.
  */
 
-import {execSync, spawn} from 'node:child_process';
+import {spawn} from 'node:child_process';
 import {existsSync, readFileSync} from 'node:fs';
-import {isAbsolute, join} from 'node:path';
+import {delimiter, isAbsolute, join} from 'node:path';
 import {getProjectRoot} from '@/services/session-cwd';
 import {getLogger} from '@/utils/logging';
 
@@ -52,42 +52,73 @@ export interface CommitInfo {
 
 // ============================================================================
 // Availability Checks (Synchronous - for conditional tool registration)
+//
+// These must never spawn child processes: they run while the tool registry
+// is built, and blocking on `git`/`gh` before the first rendered frame used
+// to cost ~200ms of startup (#1819). Availability is resolved by scanning
+// PATH / the .git directory on the filesystem instead.
 // ============================================================================
 
 /**
- * Check if git is available on the system (synchronous)
+ * Memoized PATH lookup per binary name. PATH is fixed for the life of a
+ * process, so each name costs one scan rather than one scan per call.
+ */
+const binaryOnPathCache = new Map<string, boolean>();
+
+/**
+ * Check whether an executable resolves on PATH without spawning a shell.
+ * Mirrors shell resolution: every PATH entry is checked against the bare
+ * name plus each PATHEXT extension on Windows (`.exe`, `.cmd`, ...).
+ */
+function isBinaryOnPath(name: string): boolean {
+	const cached = binaryOnPathCache.get(name);
+	if (cached !== undefined) return cached;
+
+	const pathEntries = (process.env.PATH ?? '').split(delimiter).filter(Boolean);
+	const extensions =
+		process.platform === 'win32'
+			? (process.env.PATHEXT ?? '.COM;.EXE;.BAT;.CMD')
+					.split(';')
+					.filter(Boolean)
+			: [''];
+
+	let found = false;
+	for (const dir of pathEntries) {
+		for (const ext of extensions) {
+			if (existsSync(join(dir, name + ext))) {
+				found = true;
+				break;
+			}
+		}
+		if (found) break;
+	}
+
+	binaryOnPathCache.set(name, found);
+	return found;
+}
+
+/**
+ * Check if git is available on the system (synchronous, spawn-free)
  */
 export function isGitAvailable(): boolean {
-	try {
-		execSync('git --version', {stdio: 'ignore'});
-		return true;
-	} catch {
-		return false;
-	}
+	return isBinaryOnPath('git');
 }
 
 /**
- * Check if the current directory is inside a git repository (synchronous)
+ * Check if the current directory is inside a git repository (synchronous,
+ * spawn-free). Walks up from `process.cwd()` looking for `.git`, the same
+ * filesystem signal the boot summary uses — also true inside worktrees,
+ * where `.git` is a `gitdir:` file rather than a directory.
  */
 export function isInsideGitRepo(): boolean {
-	try {
-		execSync('git rev-parse --is-inside-work-tree', {stdio: 'ignore'});
-		return true;
-	} catch {
-		return false;
-	}
+	return findGitDirSync() !== null;
 }
 
 /**
- * Check if gh CLI is available on the system (synchronous)
+ * Check if gh CLI is available on the system (synchronous, spawn-free)
  */
 export function isGhAvailable(): boolean {
-	try {
-		execSync('gh --version', {stdio: 'ignore'});
-		return true;
-	} catch {
-		return false;
-	}
+	return isBinaryOnPath('gh');
 }
 
 // ============================================================================

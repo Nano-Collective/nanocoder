@@ -6,7 +6,7 @@ import {CustomToolLoader} from '@/custom-tools/loader';
 // inside `initializeMCP()` so sessions without MCP servers never pay the
 // cost of the @modelcontextprotocol/sdk import graph.
 import type {MCPClient} from '@/mcp/mcp-client';
-import {allToolExports} from '@/tools/index';
+import {getAllToolExports} from '@/tools/index';
 import {getToolsForProfile, resolveToolProfile} from '@/tools/tool-profiles';
 import {ToolRegistry} from '@/tools/tool-registry';
 import type {TuneConfig} from '@/types/config';
@@ -139,7 +139,7 @@ export class ToolManager {
 	>();
 
 	constructor() {
-		this.registry = ToolRegistry.fromToolExports(allToolExports);
+		this.registry = ToolRegistry.fromToolExports(getAllToolExports());
 
 		// Remove web_search if no Brave Search API key is configured
 		if (!getBraveSearchApiKey()) {
