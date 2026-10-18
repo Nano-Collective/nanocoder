@@ -245,6 +245,7 @@ export async function handleChat(
 				providerConfig,
 				systemContent,
 				modeOverrides?.modelParameters,
+				aiTools,
 			);
 
 			// Resolved out here, not inside the `modelParameters` spread below,
