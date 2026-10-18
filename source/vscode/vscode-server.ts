@@ -4,7 +4,7 @@
 
 import {readFile} from 'node:fs/promises';
 import {randomUUID} from 'crypto';
-import {WebSocket, WebSocketServer} from 'ws';
+import type {WebSocket, WebSocketServer} from 'ws';
 import {BoundedMap} from '@/utils/bounded-map';
 import {formatError} from '@/utils/error-formatter';
 import {getLogger} from '@/utils/logging';
@@ -32,6 +32,28 @@ import {
 	ServerMessage,
 	StatusMessage,
 } from './protocol';
+
+type WsModule = typeof import('ws');
+
+let wsModule: WsModule | null = null;
+let wsModulePromise: Promise<WsModule> | null = null;
+
+/**
+ * Load the `ws` package on first use instead of at module import time.
+ *
+ * This module sits in the startup import graph of every boot path (App,
+ * the tool registry, the file explorer), but the WebSocket server only
+ * ever runs under `--vscode`. Keeping the `ws` import lazy is what keeps
+ * it — and its transitive dependencies — out of the startup module graph
+ * (#1821).
+ */
+function loadWs(): Promise<WsModule> {
+	wsModulePromise ??= import('ws').then(module => {
+		wsModule = module;
+		return module;
+	});
+	return wsModulePromise;
+}
 
 export interface ActiveEditorState {
 	filePath?: string;
@@ -234,9 +256,20 @@ export class VSCodeServer {
 	 * to bind an ephemeral port and let the kernel pick the actual number.
 	 */
 	private async tryStartOnPort(port: number): Promise<boolean> {
+		let wsPackage: WsModule;
+		try {
+			wsPackage = await loadWs();
+		} catch (error) {
+			getLogger().error(
+				{error: formatError(error)},
+				'Failed to load the ws package',
+			);
+			return false;
+		}
+
 		return new Promise(resolve => {
 			try {
-				const wss = new WebSocketServer({
+				const wss = new wsPackage.WebSocketServer({
 					port,
 					host: '127.0.0.1', // Only accept local connections
 					verifyClient: (info: {
@@ -660,8 +693,12 @@ export class VSCodeServer {
 
 	private broadcast(message: ServerMessage): void {
 		const data = JSON.stringify(message);
+		// `wsModule` is always set once a client connection exists (clients
+		// only arrive after start() loaded the package), so the guard is
+		// purely defensive.
+		const openState = wsModule?.WebSocket.OPEN;
 		for (const client of this.clients) {
-			if (client.readyState === WebSocket.OPEN) {
+			if (openState !== undefined && client.readyState === openState) {
 				client.send(data);
 			}
 		}
