@@ -23,6 +23,9 @@ export interface DaemonLock {
 	socketPath: string;
 	startedAt: number;
 	projectRoot: string;
+	/** Present while the daemon is still booting and has not replaced the
+	 * marker with its real lockfile (which carries a bound socket). */
+	starting?: boolean;
 }
 
 export function getLockfilePath(projectRoot: string): string {

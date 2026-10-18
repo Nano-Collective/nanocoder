@@ -273,6 +273,57 @@ test.serial('start reports a daemon that is still booting without failing', asyn
 	}
 });
 
+test.serial('a concurrent start during boot does not spawn a second daemon', async t => {
+	t.timeout(7_000);
+	const root = await tempProject();
+	try {
+		await withIsolatedPreferences(async () => {
+			savePreferences({
+				trustedDirectories: [{path: root, fingerprint: describeProjectTrust(root).fingerprint}],
+			});
+			// First start: the "daemon" is booting, so it never finishes and
+			// only the starting marker (written by start itself, since the
+			// stub's pid is this test process, which isProcessAlive finds
+			// alive) exists afterwards.
+			let launches = 0;
+			const result = await runDaemonCli('start', {
+				projectRoot: root,
+				launchDaemon: () => {
+					launches++;
+					// No socket yet: the stub deliberately writes nothing.
+					return {pid: process.pid} as unknown as ChildProcess;
+				},
+			});
+			t.is(result.exitCode, 0);
+			t.regex(result.output, /still starting/i);
+			t.is(launches, 1);
+
+			// Second start while the daemon is still booting: it must see the
+			// starting marker and report, not launch a competing process.
+			const concurrent = await runDaemonCli('start', {
+				projectRoot: root,
+				launchDaemon: () => {
+					launches++;
+					return {pid: undefined} as unknown as ChildProcess;
+				},
+			});
+			t.is(concurrent.exitCode, 0);
+			t.regex(concurrent.output, /Daemon is starting \(pid/);
+			t.is(launches, 1);
+
+			// status reports the booting state instead of pretending a run is up.
+			const status = await runDaemonCli('status', {projectRoot: root});
+			t.is(status.exitCode, 0);
+			t.regex(status.output, /Starting\. pid .* is still booting/);
+		});
+	} finally {
+		// The marker carries this test runner's pid; drop it so no later test
+		// mistakes the suite process for a running daemon.
+		await rm(join(root, '.nanocoder', 'daemon.json'), {force: true});
+		await rm(root, {recursive: true, force: true});
+	}
+});
+
 test.serial(
 	'start --trust-directory bypasses the check without persisting trust',
 	async t => {
