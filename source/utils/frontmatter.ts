@@ -1,4 +1,22 @@
-import {parse as parseYaml} from 'yaml';
+import {createRequire} from 'node:module';
+
+// The yaml module graph is ~72 modules (issue #1822), and only frontmatter
+// parsing needs it. `splitFrontmatter` never does, so `parseYamlObject`
+// resolves the module through require on first use instead of paying for it
+// on every startup. The parse call stays synchronous, matching the existing
+// callers (custom commands/tools, skills, subagents, project trust).
+type YamlParse = (input: string, options?: Record<string, unknown>) => unknown;
+let yamlParse: YamlParse | null = null;
+
+function getYamlParse(): YamlParse {
+	if (!yamlParse) {
+		const mod = createRequire(import.meta.url)('yaml') as unknown as {
+			parse: YamlParse;
+		};
+		yamlParse = mod.parse;
+	}
+	return yamlParse;
+}
 
 /**
  * Result of splitting a markdown file into YAML frontmatter and body.
@@ -53,7 +71,7 @@ export function parseYamlObject(
 	if (!frontmatter.trim()) return {};
 	let parsed: unknown;
 	try {
-		parsed = parseYaml(frontmatter);
+		parsed = getYamlParse()(frontmatter);
 	} catch {
 		return null;
 	}
