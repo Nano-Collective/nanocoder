@@ -464,6 +464,71 @@ test('compressMessages detects success in tool results', t => {
 	t.true(toolMsg?.content?.includes('success') ?? false);
 });
 
+// ==================== Success pattern anchoring (#1633) ====================
+
+test('compressMessages default mode does not claim success for a log that also reports failures (#1633)', t => {
+	const tokenizer = createMockTokenizer();
+	const messages: Message[] = [
+		createToolMessage(
+			'read_file',
+			'Build completed successfully\nfailures: 3',
+		),
+		createUserMessage('Recent'),
+	];
+
+	const result = compressMessages(messages, tokenizer, {
+		mode: 'default',
+		keepRecentMessages: 1,
+	});
+
+	const content = result.compressedMessages[0]?.content ?? '';
+	// The body must not be reduced to a blanket success claim
+	t.false(content.includes('Result: success'));
+	// Both the success mention and the failure count must survive
+	t.true(content.includes('Build completed successfully'));
+	t.true(content.includes('failures: 3'));
+});
+
+test('compressMessages default mode still collapses a clean whole-body success', t => {
+	const tokenizer = createMockTokenizer();
+	const messages: Message[] = [
+		createToolMessage('execute_bash', 'completed successfully'),
+		createToolMessage('execute_bash', 'No errors.\n'),
+		createUserMessage('Recent'),
+	];
+
+	const result = compressMessages(messages, tokenizer, {
+		mode: 'default',
+		keepRecentMessages: 1,
+	});
+
+	t.is(
+		result.compressedMessages[0]?.content,
+		'Tool: execute_bash\nResult: success',
+	);
+	t.is(
+		result.compressedMessages[1]?.content,
+		'Tool: execute_bash\nResult: success',
+	);
+});
+
+test('compressMessages default mode keeps a key line instead of claiming success for a passing log', t => {
+	const tokenizer = createMockTokenizer();
+	const messages: Message[] = [
+		createToolMessage('execute_bash', '3 packages audited\ncompleted successfully'),
+		createUserMessage('Recent'),
+	];
+
+	const result = compressMessages(messages, tokenizer, {
+		mode: 'default',
+		keepRecentMessages: 1,
+	});
+
+	const content = result.compressedMessages[0]?.content ?? '';
+	t.false(content.includes('Result: success'));
+	t.true(content.includes('3 packages audited'));
+});
+
 // ==================== keepRecentMessages option ====================
 
 test('compressMessages respects custom keepRecentMessages value', t => {
