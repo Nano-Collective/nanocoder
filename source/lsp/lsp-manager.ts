@@ -5,7 +5,7 @@
 
 import {EventEmitter} from 'node:events';
 import {readFile} from 'fs/promises';
-import {extname, resolve} from 'path';
+import {extname} from 'path';
 import {fileURLToPath, pathToFileURL} from 'url';
 import {formatError} from '@/utils/error-formatter';
 import {logError, logInfo} from '@/utils/message-queue';
@@ -307,7 +307,7 @@ export class LSPManager extends EventEmitter {
 	 */
 	private fileToUri(filePath: string): string {
 		if (filePath.startsWith('file://')) return filePath;
-		return pathToFileURL(resolve(filePath)).href;
+		return pathToFileURL(filePath).href;
 	}
 
 	/**
