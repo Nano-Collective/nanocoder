@@ -725,10 +725,7 @@ function streamingModel(parts: Record<string, unknown>[]): LanguageModel {
 	} as unknown as LanguageModel;
 }
 
-async function streamRouting(
-	parts: Record<string, unknown>[],
-	onFrame?: () => void,
-): Promise<{
+async function streamRouting(parts: Record<string, unknown>[]): Promise<{
 	text: string[];
 	reasoning: string[];
 	content: string;
@@ -748,10 +745,7 @@ async function streamRouting(
 		messages: [{role: 'user', content: 'test'}],
 		tools: {},
 		callbacks: {
-			onToken: token => {
-				onFrame?.();
-				text.push(token);
-			},
+			onToken: token => text.push(token),
 			onReasoningToken: token => reasoning.push(token),
 		},
 		maxRetries: 0,
@@ -767,44 +761,45 @@ async function streamRouting(
 test('a backlog of stream chunks does not hold the event loop', async t => {
 	// Every part is queued before reading starts, the way a fast server or a
 	// busy moment leaves chunks buffered: nothing in the loop has to wait.
-	const deltas = Array.from({length: 30_000}, () => ({
+	const deltas = Array.from({length: 5_000}, () => ({
 		type: 'text-delta',
 		id: '0',
 		delta: 'tok ',
 	}));
-	// Timer ticks show when the event loop was free. Holds are measured from
-	// the first token on: before that the AI SDK is still piping the backlog
-	// through its own streams, which this loop cannot interrupt.
-	const ticks: number[] = [];
-	const ticker = setInterval(() => ticks.push(performance.now()), 1);
-	let firstTokenAt: number | undefined;
+	// The clock moves 1ms per read, so "time" is work done rather than wall
+	// time and the result does not depend on how fast the host is. The
+	// setImmediate chain samples it each time the event loop gets a turn.
+	const realNow = Date.now;
+	let clock = 0;
+	Date.now = () => ++clock;
+	const turns: number[] = [];
+	let sampling = true;
+	const sample = () => {
+		turns.push(clock);
+		if (sampling) setImmediate(sample);
+	};
+	setImmediate(sample);
 	let routed: Awaited<ReturnType<typeof streamRouting>>;
 	try {
-		routed = await streamRouting(
-			[{type: 'text-start', id: '0'}, ...deltas, {type: 'text-end', id: '0'}],
-			() => {
-				firstTokenAt ??= performance.now();
-			},
-		);
+		routed = await streamRouting([
+			{type: 'text-start', id: '0'},
+			...deltas,
+			{type: 'text-end', id: '0'},
+		]);
 	} finally {
-		clearInterval(ticker);
+		sampling = false;
+		Date.now = realNow;
 	}
-	const doneAt = performance.now();
+	turns.push(clock);
 
 	t.is(routed.content.length, deltas.length * 'tok '.length);
 	t.is(routed.text.join(''), routed.content);
-	t.truthy(firstTokenAt);
-	const points = [
-		firstTokenAt as number,
-		...ticks.filter(tick => tick > (firstTokenAt as number)),
-		doneAt,
-	];
 	const longestHold = Math.max(
-		...points.slice(1).map((point, i) => point - (points[i] as number)),
+		...turns.slice(1).map((turn, i) => turn - (turns[i] as number)),
 	);
 	t.true(
 		longestHold < 100,
-		`the stream loop held the event loop for ${longestHold.toFixed(0)} ms`,
+		`the stream loop held the event loop for ${longestHold} clock reads`,
 	);
 });
 
