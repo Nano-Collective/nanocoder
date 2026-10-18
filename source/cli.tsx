@@ -227,10 +227,12 @@ Commands:
                                   comment-only. full-commit prompts a one-time confirmation.
                                   start refuses to run in an untrusted directory; pass
                                   --trust-directory to bypass the check for this run only.
-  verify --pr <n> [--post-review] [--provider <name>] [--model <name>]
+  verify --pr <n> [--post-review] [--trust-directory] [--provider <name>] [--model <name>]
                                   Headless, read-only PR review: runs the verify-pr-review
                                   subagent plus a semgrep pass. Prints the review to stdout
                                   by default; posts it as a PR comment with --post-review.
+                                  Refuses an untrusted directory; pass --trust-directory
+                                  to bypass the check for this run only.
                                   --provider/--model select the LLM (see Options below).
   skills add <target>             Install a skill bundle from a git repository.
                                   <target> is an index name, owner/repo, a git URL, or a local path.

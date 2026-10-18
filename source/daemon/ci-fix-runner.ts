@@ -130,6 +130,7 @@ async function main(): Promise<void> {
 			{
 				tools: getAllowedToolNames(input.trustLevel),
 				alwaysAllow: getHeadlessAutoApproveToolNames(input.trustLevel),
+				trustLevel: input.trustLevel,
 			},
 		);
 
