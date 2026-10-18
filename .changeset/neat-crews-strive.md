@@ -1,6 +1,5 @@
-
 ---
 "@nanocollective/nanocoder": patch
 ---
 
-Added a configurable TUI frame rate preference for slower terminals and resource-constrained CPUs. Thanks to [@DarshanCodes09](https://github.com/DarshanCodes09). Closes #1825.
+Adds the `nanocoder.ui.maxFps` preference (integer 1–60, default 30) to cap Ink’s TUI rendering rate on slow terminals and resource-constrained CPUs.
