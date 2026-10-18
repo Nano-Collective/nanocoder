@@ -461,6 +461,49 @@ export function updatePasteThreshold(threshold: number): void {
 	savePreferences(preferences);
 }
 
+/** Ink's default rendering frame rate when maxFps is not configured. */
+export const DEFAULT_MAX_FPS = 30;
+/** Minimum allowable frame rate limit for Ink's maxFps (1 frame per second). */
+export const MIN_MAX_FPS = 1;
+/** Maximum allowable frame rate limit for Ink's maxFps (60 frames per second). */
+export const MAX_MAX_FPS = 60;
+
+/**
+ * Validate Ink's maxFps preference.
+ * Must be an integer between MIN_MAX_FPS (1) and MAX_MAX_FPS (60) inclusive.
+ */
+export function isValidMaxFps(value: unknown): value is number {
+	return (
+		typeof value === 'number' &&
+		Number.isInteger(value) &&
+		value >= MIN_MAX_FPS &&
+		value <= MAX_MAX_FPS
+	);
+}
+
+/**
+ * Get the configured maxFps preference if valid, or undefined if unset or invalid.
+ * Reads the namespaced `nanocoder.ui.maxFps` preference.
+ */
+export function getUiMaxFps(
+	preferences = loadPreferences(),
+): number | undefined {
+	const value = preferences.nanocoder?.ui?.maxFps;
+	if (isValidMaxFps(value)) {
+		return value;
+	}
+	return undefined;
+}
+
+/**
+ * Get the effective maximum TUI frame rate for Ink rendering.
+ * Returns the validated integer from preferences (1-60), or preserves
+ * the default of 30 FPS when not configured or when an invalid value is rejected.
+ */
+export function getMaxFps(preferences = loadPreferences()): number {
+	return getUiMaxFps(preferences) ?? DEFAULT_MAX_FPS;
+}
+
 /**
  * Get the reasoning expanded preference from preferences or environment
  */

@@ -81,6 +81,28 @@ You can change this via `/settings` → **Input** → **Paste Threshold**, or by
 }
 ```
 
+### TUI Frame Rate (maxFps)
+
+For slower terminals (such as remote SSH sessions, Windows Terminal over remote connections, or tmux) and resource-constrained CPUs, you can configure Ink's maximum TUI rendering frame rate with the `nanocoder.ui.maxFps` setting:
+
+| Option | Type | Default | Accepted Range | Description |
+|--------|------|---------|----------------|-------------|
+| `nanocoder.ui.maxFps` | number (integer) | `30` | `1` – `60` | Maximum frames per second for Ink terminal UI updates. Lowering this value (e.g., to 10 or 15) reduces CPU load and terminal redraw overhead on low-power devices. |
+
+When omitted or set to an invalid value (such as non-integers, numbers below 1, or numbers above 60), Nanocoder safely rejects the invalid value and preserves Ink's default behavior of 30 FPS.
+
+You can configure this by editing your preferences file (`nanocoder-preferences.json`):
+
+```json
+{
+  "nanocoder": {
+    "ui": {
+      "maxFps": 15
+    }
+  }
+}
+```
+
 ### Reasoning Traces
 
 Expanding reasoning traces can also be configured in the preferences file with the `reasoningExpanded` field:

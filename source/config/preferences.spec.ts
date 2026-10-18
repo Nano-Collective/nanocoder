@@ -47,6 +47,12 @@ import {
 	updateShowAgentBashOutput,
 	updateShowUsageFooter,
 	trustRecheck,
+	DEFAULT_MAX_FPS,
+	MIN_MAX_FPS,
+	MAX_MAX_FPS,
+	isValidMaxFps,
+	getUiMaxFps,
+	getMaxFps,
 } from './preferences';
 import {updatePreferencesNestedValue} from '@/config/config-writer';
 import type {UserPreferences} from '@/types/index';
@@ -2490,5 +2496,177 @@ test.serial(
 			t.deepEqual(global.fullCommitConfirmedProjects, ['/confirmed']);
 			t.is(global.lastModel, 'kept');
 		});
+	},
+);
+
+// ============================================================================
+// maxFps (TUI Frame Rate Limit) Tests
+// ============================================================================
+
+test('maxFps constants have expected values', t => {
+	t.is(DEFAULT_MAX_FPS, 30);
+	t.is(MIN_MAX_FPS, 1);
+	t.is(MAX_MAX_FPS, 60);
+});
+
+test('isValidMaxFps accepts valid integers between 1 and 60', t => {
+	t.true(isValidMaxFps(1));
+	t.true(isValidMaxFps(15));
+	t.true(isValidMaxFps(30));
+	t.true(isValidMaxFps(45));
+	t.true(isValidMaxFps(60));
+});
+
+test('isValidMaxFps rejects out-of-range numbers', t => {
+	t.false(isValidMaxFps(0));
+	t.false(isValidMaxFps(-1));
+	t.false(isValidMaxFps(-30));
+	t.false(isValidMaxFps(61));
+	t.false(isValidMaxFps(100));
+});
+
+test('isValidMaxFps rejects non-integer numbers', t => {
+	t.false(isValidMaxFps(0.5));
+	t.false(isValidMaxFps(15.5));
+	t.false(isValidMaxFps(30.1));
+	t.false(isValidMaxFps(59.9));
+	t.false(isValidMaxFps(NaN));
+	t.false(isValidMaxFps(Number.POSITIVE_INFINITY));
+	t.false(isValidMaxFps(Number.NEGATIVE_INFINITY));
+});
+
+test('isValidMaxFps rejects non-number types', t => {
+	t.false(isValidMaxFps('30'));
+	t.false(isValidMaxFps(''));
+	t.false(isValidMaxFps(null));
+	t.false(isValidMaxFps(undefined));
+	t.false(isValidMaxFps(true));
+	t.false(isValidMaxFps(false));
+	t.false(isValidMaxFps({}));
+	t.false(isValidMaxFps([]));
+});
+
+test.serial(
+	'getMaxFps returns DEFAULT_MAX_FPS (30) when preference is not configured',
+	t => {
+		const preferencesPath = getTestPreferencesPath();
+		writeFileSync(
+			preferencesPath,
+			JSON.stringify({lastProvider: 'test'}),
+			'utf-8',
+		);
+
+		try {
+			t.is(getMaxFps(), 30);
+			t.is(getUiMaxFps(), undefined);
+		} finally {
+			if (existsSync(preferencesPath)) {
+				rmSync(preferencesPath, {force: true});
+			}
+		}
+	},
+);
+
+test.serial(
+	'getMaxFps returns DEFAULT_MAX_FPS (30) when file does not exist',
+	t => {
+		const preferencesPath = getTestPreferencesPath();
+		if (existsSync(preferencesPath)) {
+			rmSync(preferencesPath, {force: true});
+		}
+
+		t.is(getMaxFps(), 30);
+		t.is(getUiMaxFps(), undefined);
+	},
+);
+
+test.serial(
+	'getMaxFps returns valid configured value from nanocoder.ui.maxFps',
+	t => {
+		const preferencesPath = getTestPreferencesPath();
+		const prefs: UserPreferences = {
+			nanocoder: {
+				ui: {
+					maxFps: 15,
+				},
+			},
+		};
+		writeFileSync(preferencesPath, JSON.stringify(prefs, null, 2), 'utf-8');
+
+		try {
+			t.is(getMaxFps(), 15);
+			t.is(getUiMaxFps(), 15);
+		} finally {
+			if (existsSync(preferencesPath)) {
+				rmSync(preferencesPath, {force: true});
+			}
+		}
+	},
+);
+
+test.serial(
+	'getMaxFps rejects invalid values and falls back to default 30',
+	t => {
+		const preferencesPath = getTestPreferencesPath();
+		const invalidCases = [0, -5, 61, 100, 15.5, '15', null, true, {}];
+
+		try {
+			for (const invalid of invalidCases) {
+				writeFileSync(
+					preferencesPath,
+					JSON.stringify({nanocoder: {ui: {maxFps: invalid}}}, null, 2),
+					'utf-8',
+				);
+				t.is(
+					getMaxFps(),
+					30,
+					`Expected default 30 for invalid value: ${JSON.stringify(invalid)}`,
+				);
+				t.is(
+					getUiMaxFps(),
+					undefined,
+					`Expected undefined for invalid value: ${JSON.stringify(invalid)}`,
+				);
+			}
+		} finally {
+			if (existsSync(preferencesPath)) {
+				rmSync(preferencesPath, {force: true});
+			}
+		}
+	},
+);
+
+test.serial(
+	'updatePreferencesNestedValue writes ui.maxFps properly and preserves existing preferences',
+	t => {
+		const preferencesPath = getTestPreferencesPath();
+		const initialPrefs: UserPreferences = {
+			lastProvider: 'test-provider',
+			nanocoder: {
+				paste: {singleLineThreshold: 500},
+			},
+		};
+		writeFileSync(
+			preferencesPath,
+			JSON.stringify(initialPrefs, null, 2),
+			'utf-8',
+		);
+
+		try {
+			updatePreferencesNestedValue('ui', 'maxFps', 24);
+
+			const data = JSON.parse(
+				readFileSync(preferencesPath, 'utf-8'),
+			) as UserPreferences;
+			t.is(data.nanocoder?.ui?.maxFps, 24);
+			t.is(data.lastProvider, 'test-provider');
+			t.is(data.nanocoder?.paste?.singleLineThreshold, 500);
+			t.is(getMaxFps(), 24);
+			t.is(getUiMaxFps(), 24);
+		} finally {
+			if (existsSync(preferencesPath)) {
+				rmSync(preferencesPath, {force: true});
+			}
+		}
 	},
 );

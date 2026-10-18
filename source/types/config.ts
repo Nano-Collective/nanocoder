@@ -727,6 +727,14 @@ export interface TrustedDirectoryRecord {
 	fingerprint: string;
 }
 
+export interface UiPreferences {
+	/**
+	 * Maximum frames per second for Ink TUI rendering.
+	 * Accepted integer values from 1 through 60. Defaults to 30.
+	 */
+	maxFps?: number;
+}
+
 export interface UserPreferences {
 	lastProvider?: string;
 	lastModel?: string;
@@ -753,7 +761,7 @@ export interface UserPreferences {
 	notifications?: NotificationsConfig;
 	ciWatch?: CiWatchConfig;
 	/**
-	 * Namespaced settings (sessions, paste) read from nanocoder-preferences.json
+	 * Namespaced settings (sessions, paste, ui) read from nanocoder-preferences.json
 	 * by the loaders. Kept under `nanocoder` to match the on-disk shape the
 	 * `loadSessionConfig` / `loadPasteConfig` loaders read.
 	 */
@@ -770,6 +778,7 @@ export interface UserPreferences {
 			titleProvider?: string;
 		};
 		paste?: PasteConfig;
+		ui?: UiPreferences;
 	};
 	reasoningExpanded?: boolean;
 	compactToolDisplay?: boolean;
