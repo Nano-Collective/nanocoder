@@ -1405,7 +1405,7 @@ test.serial('execute(): a trustLevel denies git_pr comment/review/create even wh
 		id,
 		function: {name: 'git_pr', arguments: JSON.stringify(args)},
 	});
-	const toolResults: string[] = [];
+	const toolResults = new Map<string, string>();
 	const client = createMockClient(
 		[
 			{
@@ -1421,7 +1421,9 @@ test.serial('execute(): a trustLevel denies git_pr comment/review/create even wh
 		],
 		messages => {
 			for (const m of messages) {
-				if (m.role === 'tool') toolResults.push(String(m.content));
+				if (m.role === 'tool' && m.tool_call_id) {
+					toolResults.set(m.tool_call_id, String(m.content));
+				}
 			}
 		},
 	);
@@ -1438,10 +1440,12 @@ test.serial('execute(): a trustLevel denies git_pr comment/review/create even wh
 
 	t.true(result.success);
 	t.deepEqual(gitPrCalls, [{diff: 7}], 'only the read-only action may run');
-	t.is(
-		toolResults.filter(r => r.includes('not permitted at trust level')).length,
-		3,
-	);
+	// Pin which call was denied: review, comment and create by id, not just
+	// "three of four", so a swapped decision can't pass.
+	for (const id of ['tc1', 'tc2', 'tc3']) {
+		t.regex(toolResults.get(id) ?? '', /not permitted at trust level/, id);
+	}
+	t.is(toolResults.get('tc4'), 'ok', 'the read-only diff call ran');
 });
 
 test.serial('execute(): an explicit alwaysAllow replaces the project config alwaysAllow', async t => {

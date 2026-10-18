@@ -147,6 +147,11 @@ export function isActionAllowed(
  * `git_pr` selects its action by which field is present, so every present
  * action field must be allowed - a call mixing a read with a `comment` is
  * denied as a whole.
+ *
+ * `null` and `undefined` both mean "field not supplied" (`!= null` on
+ * purpose): git_pr runs its write actions only when the field is truthy, so
+ * `null` never selects one, and some providers fill unused optional fields
+ * with `null` - treating that as present would deny harmless read calls.
  */
 export function isGitPrCallAllowed(
 	level: TrustLevel,

@@ -31,7 +31,14 @@ import {
 	formatFindingsForPrompt,
 	type SecurityScanResult,
 } from './security-scan';
-import {getAllowedToolNames} from './trust';
+import {
+	getAllowedToolNames,
+	getHeadlessAutoApproveToolNames,
+	type TrustLevel,
+} from './trust';
+
+/** `verify` is a comment-only surface by design: the harness does the posting. */
+const VERIFY_TRUST_LEVEL: TrustLevel = 'comment-only';
 
 export interface VerifyCliOptions {
 	projectRoot: string;
@@ -71,16 +78,16 @@ async function defaultRunSubagent(
 		projectRoot,
 		'headless',
 	);
-	// Narrow the tools to comment-only's list so the subagent's frontmatter
-	// can't silently drift from trust.ts. `trustLevel` makes the executor
-	// deny any git_pr comment/review/create call outright, and the empty
-	// `alwaysAllow` replaces the user/project config's list: this run reviews
-	// a PR checkout whose own agents.config.json must not pre-approve tools.
-	// Posting happens only in the harness, via --post-review.
+	// Narrow the tools to the level's list so the subagent's frontmatter can't
+	// silently drift from trust.ts. `trustLevel` makes the executor deny any
+	// git_pr action the level doesn't allow, and `alwaysAllow` replaces the
+	// user/project config's list: this run reviews a PR checkout whose own
+	// agents.config.json must not pre-approve tools. Posting happens only in
+	// the harness, via --post-review.
 	return executor.execute(task, signal, 0, undefined, undefined, {
-		tools: getAllowedToolNames('comment-only'),
-		alwaysAllow: [],
-		trustLevel: 'comment-only',
+		tools: getAllowedToolNames(VERIFY_TRUST_LEVEL),
+		alwaysAllow: getHeadlessAutoApproveToolNames(VERIFY_TRUST_LEVEL),
+		trustLevel: VERIFY_TRUST_LEVEL,
 	});
 }
 

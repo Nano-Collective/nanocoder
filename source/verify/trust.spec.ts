@@ -81,6 +81,10 @@ test('isGitPrCallAllowed checks every action present in the call arguments', t =
 		}),
 	);
 	t.true(isGitPrCallAllowed('auto-fix', {create: {title: 'x'}}));
+	// null / undefined mean "not supplied": some providers fill unused optional
+	// fields with null, and git_pr only runs write actions for truthy fields.
+	t.true(isGitPrCallAllowed('comment-only', {diff: 7, comment: null}));
+	t.true(isGitPrCallAllowed('comment-only', {diff: 7, review: undefined}));
 });
 
 test('comment-only requires an explicit action for git_pr', t => {
