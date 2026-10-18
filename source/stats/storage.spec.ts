@@ -1,4 +1,5 @@
 import * as fs from 'node:fs';
+import {createRequire, syncBuiltinESMExports} from 'node:module';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import test from 'ava';
@@ -484,4 +485,56 @@ test('flush merges changes written by another session', t => {
 		100,
 	);
 	t.is(loaded.daily[0]?.byPair[makePairKey('Ollama', 'qwen')]?.tokens, 200);
+});
+
+test('readStatsLedger returns an empty ledger when the stats path cannot be read as a file', t => {
+	const statsPath = getStatsFilePath();
+
+	fs.mkdirSync(statsPath, {recursive: true});
+	try {
+		const ledger = readStatsLedger();
+		t.is(ledger.totalTokens, 0);
+		t.deepEqual(ledger.daily, []);
+	} finally {
+		fs.rmdirSync(statsPath);
+	}
+});
+
+test('readStatsLedger reads without probing existsSync on the stats files', t => {
+	const canonicalPath = getStatsFilePath();
+	const legacyPath = path.join(
+		path.dirname(canonicalPath),
+		LEGACY_STATS_FILE_NAME,
+	);
+	
+	const cjsFs = createRequire(import.meta.url)('node:fs') as typeof fs;
+	const originalExistsSync = cjsFs.existsSync;
+	let probes = 0;
+	cjsFs.existsSync = ((p: fs.PathLike) => {
+		const name = path.basename(String(p));
+		if (name === STATS_FILE_NAME || name === LEGACY_STATS_FILE_NAME) {
+			probes++;
+		}
+		return originalExistsSync(p);
+	}) as typeof fs.existsSync;
+	syncBuiltinESMExports();
+
+	try {
+
+		readStatsLedger();
+
+		
+		fs.mkdirSync(path.dirname(legacyPath), {recursive: true});
+		const legacy = createEmptyLedger(1_700_000_000_000);
+		fs.writeFileSync(legacyPath, JSON.stringify(legacy), 'utf8');
+		readStatsLedger();
+
+		t.true(writeStatsLedger(createEmptyLedger(1_700_000_000_000)));
+		readStatsLedger();
+	} finally {
+		cjsFs.existsSync = originalExistsSync;
+		syncBuiltinESMExports();
+	}
+
+	t.is(probes, 0);
 });

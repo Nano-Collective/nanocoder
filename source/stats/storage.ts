@@ -7,6 +7,7 @@
  */
 
 import * as fs from 'node:fs';
+import {readFileSync} from 'node:fs';
 import * as path from 'node:path';
 import {getAppDataPath} from '@/config/paths';
 import {formatError} from '@/utils/error-formatter';
@@ -71,9 +72,7 @@ function getLegacyStatsFilePath(): string {
 
 function ensureAppDataDir(): void {
 	const dir = getAppDataPath();
-	if (!fs.existsSync(dir)) {
-		fs.mkdirSync(dir, {recursive: true});
-	}
+	fs.mkdirSync(dir, {recursive: true});
 }
 
 export function createEmptyLedger(now = Date.now()): StatsLedger {
@@ -215,25 +214,37 @@ function normalizeLedger(raw: unknown): StatsLedger {
 	};
 }
 
-function resolveStatsReadPath(): {filePath: string; isLegacy: boolean} {
-	const currentPath = getStatsFilePath();
-	if (fs.existsSync(currentPath)) {
-		return {filePath: currentPath, isLegacy: false};
+function readFileIfExists(filePath: string): string | null {
+	try {
+		return readFileSync(filePath, 'utf-8');
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+			return null;
+		}
+		throw error;
 	}
-	const legacyPath = getLegacyStatsFilePath();
-	return {
-		filePath: fs.existsSync(legacyPath) ? legacyPath : currentPath,
-		isLegacy: fs.existsSync(legacyPath),
-	};
 }
 
 export function readStatsLedger(): StatsLedger {
 	try {
-		const {filePath, isLegacy} = resolveStatsReadPath();
-		if (!fs.existsSync(filePath)) {
-			return createEmptyLedger();
+		const currentPath = getStatsFilePath();
+		const legacyPath = getLegacyStatsFilePath();
+
+		let content = readFileIfExists(currentPath);
+		let isLegacy = false;
+		let filePath = currentPath;
+
+		if (content === null) {
+			content = readFileIfExists(legacyPath);
+
+			if (content !== null) {
+				isLegacy = true;
+				filePath = legacyPath;
+			} else {
+				return createEmptyLedger();
+			}
 		}
-		const content = fs.readFileSync(filePath, 'utf-8');
+
 		const parsed = JSON.parse(content) as unknown;
 		const ledger = normalizeLedger(parsed);
 		const needsSchemaMigration =
