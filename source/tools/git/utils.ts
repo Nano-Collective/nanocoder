@@ -6,7 +6,7 @@
  */
 
 import {spawn} from 'node:child_process';
-import {existsSync, readFileSync} from 'node:fs';
+import {accessSync, constants, existsSync, readFileSync} from 'node:fs';
 import {delimiter, isAbsolute, join} from 'node:path';
 import {getProjectRoot} from '@/services/session-cwd';
 import {getLogger} from '@/utils/logging';
@@ -85,9 +85,16 @@ function isBinaryOnPath(name: string): boolean {
 	let found = false;
 	for (const dir of pathEntries) {
 		for (const ext of extensions) {
-			if (existsSync(join(dir, name + ext))) {
+			const candidate = join(dir, name + ext);
+			try {
+				// X_OK mirrors whether a shell could actually exec the file: it
+				// checks the executable bit on Unix and is a no-op on Windows
+				// (where PATHEXT above does the equivalent filtering).
+				accessSync(candidate, constants.X_OK);
 				found = true;
 				break;
+			} catch {
+				// Missing or not executable — keep looking.
 			}
 		}
 		if (found) break;
@@ -95,6 +102,15 @@ function isBinaryOnPath(name: string): boolean {
 
 	binaryOnPathCache.set(name, found);
 	return found;
+}
+
+/**
+ * @internal Test-only: clear the memoized PATH lookups so a test can point
+ * PATH at a fixture directory and get a fresh verdict instead of the
+ * cached one from the real environment.
+ */
+export function resetBinaryAvailabilityCacheForTests(): void {
+	binaryOnPathCache.clear();
 }
 
 /**
@@ -109,6 +125,12 @@ export function isGitAvailable(): boolean {
  * spawn-free). Walks up from `process.cwd()` looking for `.git`, the same
  * filesystem signal the boot summary uses — also true inside worktrees,
  * where `.git` is a `gitdir:` file rather than a directory.
+ *
+ * Unlike `git rev-parse --is-inside-work-tree`, this intentionally ignores
+ * the `GIT_DIR` / `GIT_WORK_TREE` environment variables: honoring them
+ * would mean shelling out again, which is exactly the cost this check
+ * exists to avoid. Advanced setups pointing GIT_DIR at an external repo
+ * will have the git tools hidden; execute_bash remains available.
  */
 export function isInsideGitRepo(): boolean {
 	return findGitDirSync() !== null;
