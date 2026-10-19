@@ -25,7 +25,12 @@ import {
 	STDERR_TRUNCATION_NOTICE,
 	STDOUT_TRUNCATION_NOTICE,
 } from '@/utils/stream-collector';
-import {planBashSpawn, resolveJailRoot, spawnPlanned} from './bash-sandbox.js';
+import {
+	planBashSpawn,
+	resolveJailRoot,
+	sandboxedCommandGroup,
+	spawnPlanned,
+} from './bash-sandbox.js';
 import {
 	getProjectRoot,
 	getSafeSessionCwd,
@@ -39,19 +44,37 @@ const isWindows = platform === 'win32';
  * under a wrapping `sh`, which can exit (on SIGTERM, or on its own after
  * backgrounding a job) while descendants live on in the group. The PGID
  * cannot be recycled while any member is alive, so a successful probe means
- * a signal reaches our own processes.
+ * a signal reaches our own processes. With the Linux jail on, the command
+ * runs in a second group that bwrap started, which counts too.
  */
 function isGroupAlive(proc: ChildProcess): boolean {
 	if (proc.pid === undefined) return false;
 	if (isWindows) {
 		return proc.exitCode === null && proc.signalCode === null;
 	}
+	const command = sandboxedCommandGroup(proc);
+	return probeGroup(proc.pid) || (command !== undefined && probeGroup(command));
+}
+
+function probeGroup(pgid: number): boolean {
 	try {
-		process.kill(-proc.pid, 0);
+		process.kill(-pgid, 0);
 		return true;
 	} catch {
 		return false;
 	}
+}
+
+function signalGroups(proc: ChildProcess, signal: NodeJS.Signals): void {
+	const command = sandboxedCommandGroup(proc);
+	if (command !== undefined) {
+		try {
+			process.kill(-command, signal);
+		} catch {
+			// Already gone.
+		}
+	}
+	signalProcessTree(proc, signal);
 }
 
 export interface BashExecutionState {
@@ -401,7 +424,7 @@ export class BashExecutor extends EventEmitter {
 			...this.leftovers,
 		];
 		for (const proc of procs) {
-			if (isGroupAlive(proc)) signalProcessTree(proc, 'SIGKILL');
+			if (isGroupAlive(proc)) signalGroups(proc, 'SIGKILL');
 		}
 	}
 
@@ -442,8 +465,9 @@ export class BashExecutor extends EventEmitter {
 	 *
 	 * On Unix the child is spawned `detached`, so it leads its own process
 	 * group; signalling the negative PID reaches the whole group (the command
-	 * plus anything it spawned). On Windows the child is `cmd.exe`, so
-	 * `taskkill /T` stops the program it started too.
+	 * plus anything it spawned). With the Linux jail on, the group bwrap
+	 * started the command in is signalled too. On Windows the child is
+	 * `cmd.exe`, so `taskkill /T` stops the program it started too.
 	 *
 	 * Sends SIGTERM first. If the process has not exited after a grace period
 	 * (2 seconds), sends SIGKILL to guarantee termination even if SIGTERM is
@@ -456,7 +480,7 @@ export class BashExecutor extends EventEmitter {
 		if (!isGroupAlive(proc)) return Promise.resolve();
 
 		// Initial SIGTERM
-		signalProcessTree(proc, 'SIGTERM');
+		signalGroups(proc, 'SIGTERM');
 
 		return new Promise(resolve => {
 			// Poll liveness every 50ms so cleanup triggers as soon as all
@@ -471,7 +495,7 @@ export class BashExecutor extends EventEmitter {
 			// SIGTERM above.
 			const sigkillTimer = setTimeout(() => {
 				if (isGroupAlive(proc)) {
-					signalProcessTree(proc, 'SIGKILL');
+					signalGroups(proc, 'SIGKILL');
 				} else {
 					finish();
 				}
