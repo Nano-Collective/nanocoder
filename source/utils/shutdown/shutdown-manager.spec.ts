@@ -264,6 +264,62 @@ test.serial('gracefulShutdown passes exit code', async (t) => {
 	t.is(exitCalled, 42);
 });
 
+test.serial(
+	'a failure requested during a clean shutdown in flight sets the exit code',
+	async (t) => {
+		const manager = getShutdownManager();
+		let release: () => void = () => undefined;
+		manager.register({
+			name: 'slow',
+			priority: 10,
+			handler: () =>
+				new Promise<void>((resolve) => {
+					release = resolve;
+				}),
+		});
+
+		// A signal starts a clean shutdown; while its handlers run, the work it
+		// interrupted reports a failure. A later 0 does not clear it, and the
+		// first failure wins over a later one.
+		const inFlight = manager.gracefulShutdown(0);
+		await manager.gracefulShutdown(1);
+		await manager.gracefulShutdown(0);
+		await manager.gracefulShutdown(2);
+		t.is(exitCalled, null);
+
+		release();
+		await inFlight;
+		t.is(exitCalled, 1);
+	},
+);
+
+test.serial(
+	'an unhandled error during a clean shutdown in flight does not change the exit code',
+	async (t) => {
+		const manager = getShutdownManager();
+		let release: () => void = () => undefined;
+		manager.register({
+			name: 'slow',
+			priority: 10,
+			handler: () =>
+				new Promise<void>((resolve) => {
+					release = resolve;
+				}),
+		});
+
+		const inFlight = manager.gracefulShutdown(0);
+		// What a teardown rejection reaches: the bound process listeners.
+		// biome-ignore lint/suspicious/noExplicitAny: reaching the private listeners
+		const listeners = manager as any;
+		listeners.boundUncaughtException(new Error('teardown'));
+		listeners.boundUnhandledRejection(new Error('teardown'), Promise.resolve());
+
+		release();
+		await inFlight;
+		t.is(exitCalled, 0);
+	},
+);
+
 test.serial('uses NANOCODER_DEFAULT_SHUTDOWN_TIMEOUT env var', (t) => {
 	const originalEnv = process.env.NANOCODER_DEFAULT_SHUTDOWN_TIMEOUT;
 

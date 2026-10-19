@@ -15,6 +15,7 @@ import type { HooksConfig } from "@/types/config";
 import { TOOL_APPROVAL_REQUIRED_KIND } from "@/constants";
 import type { ToolManager } from "@/tools/tool-manager";
 import type { LLMClient } from "@/types/core";
+import { ShutdownManager } from "@/utils/shutdown";
 import type { PlainConversationOutcome } from "./conversation.js";
 import { runPlainShell } from "./shell.js";
 import type { RunPlainShellDeps } from "./shell.js";
@@ -156,6 +157,74 @@ test.serial("plain shell creates a session for artifact tools", async (t) => {
 
 	t.regex(sessionId ?? "", /^[0-9a-f-]{36}$/);
 	t.is(workingDirectory, process.cwd());
+});
+
+test.serial("a run aborted by a signal still reports and exits with its own code", async (t) => {
+	// A real ShutdownManager, driven the way SIGTERM drives it: the signal
+	// starts a clean shutdown (code 0) while the conversation is in flight, and
+	// runPlainShell's handler aborts the run. The run's "error" report must
+	// still be printed, and its exit code (1) must win over the signal's 0.
+	const manager = new ShutdownManager({timeoutMs: 2000});
+	const originalExit = process.exit;
+	let exitCode: number | undefined;
+	process.exit = ((code?: number) => {
+		exitCode = code ?? 0;
+	}) as typeof process.exit;
+	const stdout = capturingStdout();
+	let signalShutdown: Promise<void> = Promise.resolve();
+	let deletes = 0;
+	try {
+		await runPlainShell({
+			prompt: "do the thing",
+			developmentMode: "yolo",
+			trustDirectory: true,
+			outputFormat: "json",
+			deps: baseDeps({
+				initializePlain: makeFakeInitializePlain(),
+				// The run's own artifact cleanup is still on disk when the shutdown
+				// handler's cleanup returns, as with real file I/O. The handler must
+				// not let the process exit before the run has reported.
+				artifacts: {
+					cleanupStaleEphemeralSessions: async () => undefined,
+					markEphemeralSession: async () => undefined,
+					deleteSessionArtifacts: async () => {
+						deletes++;
+						if (deletes === 1) await new Promise(resolve => setTimeout(resolve, 50));
+					},
+				},
+				runPlainConversation: async options => {
+					// Let runPlainShell hold the conversation promise, as it does by
+					// the time a real signal arrives.
+					await new Promise<void>(resolve => setImmediate(resolve));
+					signalShutdown = manager.gracefulShutdown(0);
+					await new Promise<void>(resolve => {
+						if (options.abortSignal.aborted) resolve();
+						else options.abortSignal.addEventListener("abort", () => resolve(), {once: true});
+					});
+					return {
+						kind: "error",
+						message: "Aborted",
+						finalText: "",
+						reasoning: null,
+						steps: 1,
+						toolCalls: [],
+					};
+				},
+				getShutdownManager: () => manager,
+			}),
+		});
+		await signalShutdown;
+	} finally {
+		stdout.restore();
+		process.exit = originalExit;
+		manager.reset();
+	}
+
+	const report = JSON.parse(stdout.get());
+	t.is(report.kind, "error");
+	t.is(report.message, "Aborted");
+	t.is(report.exitCode, 1);
+	t.is(exitCode, 1);
 });
 
 test.serial("plain shell marks and cleans its ephemeral artifact session", async (t) => {
