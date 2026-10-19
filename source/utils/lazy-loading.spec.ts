@@ -16,25 +16,19 @@ function runLoadProbe(
 	steps: string,
 ): LoadCounts {
 	const script = `
-		import {registerHooks} from 'node:module';
+		import {createRequire} from 'node:module';
 		import {resolve} from 'node:path';
 		import {pathToFileURL} from 'node:url';
 
-		const seen = new Set();
+		const require = createRequire(import.meta.url);
 
-		registerHooks({
-			load(url, context, next) {
-				seen.add(url);
-				return next(url, context);
-			},
-		});
-
-		const pattern = new RegExp(
-			'node_modules[/\\\\\\\\]' + ${JSON.stringify(packageName)} + '[/\\\\\\\\]'
-		);
+		const packagePath =
+			'/node_modules/' + ${JSON.stringify(packageName)} + '/';
 
 		const count = () =>
-			[...seen].filter(url => pattern.test(url)).length;
+			Object.keys(require.cache).filter(path =>
+				path.replaceAll('\\\\', '/').includes(packagePath)
+			).length;
 
 		const before = count();
 
@@ -57,7 +51,7 @@ function runLoadProbe(
 
 	const result = spawnSync(
 		process.execPath,
-		['--input-type=module', '-e', script],
+		['--import=tsx', '--input-type=module', '-e', script],
 		{
 			cwd: process.cwd(),
 			encoding: 'utf8',
@@ -85,7 +79,7 @@ function runLoadProbe(
 
 test('yaml loads only when nonempty frontmatter is parsed', t => {
 	const counts = runLoadProbe(
-		'dist/utils/frontmatter.js',
+		'source/utils/frontmatter.ts',
 		'yaml',
 		`
 		module.splitFrontmatter('# Markdown without frontmatter');
@@ -109,10 +103,11 @@ test('yaml loads only when nonempty frontmatter is parsed', t => {
 
 test('cli-table3 loads only when a valid table is rendered', t => {
 	const counts = runLoadProbe(
-		'dist/markdown-parser/table-parser.js',
+		'source/markdown-parser/table-parser.ts',
 		'cli-table3',
 		`
 		const colors = {primary: '#ffffff'};
+
 		module.parseMarkdownTable('Plain text', colors, 80);
 		module.parseMarkdownTable('| Invalid | Table |', colors, 80);
 		const afterUnused = count();
