@@ -210,6 +210,11 @@
 					"scope": "resource",
 					"description": "Show Explain Code / Generate Tests actions above functions and classes in the editor."
 				},
+				"nanocoder.terminalErrors": {
+					"type": "boolean",
+					"default": true,
+					"description": "Offer a Fix with Nanocoder action when a command fails in an integrated terminal. Needs the terminal's shell integration to report exit codes."
+				},
 				"nanocoder.showTokenUsage": {
 					"type": "boolean",
 					"default": false,

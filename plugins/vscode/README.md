@@ -15,6 +15,7 @@ The extension provides a native sidebar chat powered by the Agent Client Protoco
 - **Cancellation**: Stop ends the whole turn - the current tool aborts and queued tools are skipped
 - **Diff Previews**: Click a file-edit card to open the change in VS Code's diff viewer
 - **Editor Code Lenses**: `Explain Code` and `Generate Tests` links above every function, method, constructor and class - clicking one opens the chat and sends that symbol as context
+- **Fix with Nanocoder**: When a command fails in an integrated terminal, a notification offers to open the chat and send the command, its exit code and its output. Needs the terminal's shell integration (on by default in VS Code's terminals); Ctrl+C is not treated as a failure
 - **Legacy Companion Mode** (opt-in): Pairs with a terminal CLI session over WebSocket for diff previews and editor context
 
 ## Installation
@@ -129,6 +130,7 @@ Configure the extension in VS Code settings (`Ctrl+,` / `Cmd+,`):
 | `nanocoder.model`           | (empty)       | Model for Nanocoder sessions (set via the model dropdown)             |
 | `nanocoder.showDiffPreview` | `true`        | Show diff preview before applying file changes                        |
 | `nanocoder.codeLens`        | `true`        | Show Explain Code / Generate Tests lenses above functions and classes  |
+| `nanocoder.terminalErrors`  | `true`        | Offer Fix with Nanocoder when a command fails in an integrated terminal |
 | `nanocoder.autoConnect`     | `false`       | Auto-connect the legacy WebSocket companion on startup                |
 | `nanocoder.serverPort`      | `51820`       | WebSocket port for the legacy companion mode                          |
 
