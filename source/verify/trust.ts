@@ -37,18 +37,18 @@ interface ToolAllowance {
 	actions?: readonly GitPrAction[];
 }
 
-const GIT_PR_READ_AND_REVIEW_ACTIONS: readonly GitPrAction[] = [
+const GIT_PR_READ_ACTIONS: readonly GitPrAction[] = [
 	'view',
 	'list',
 	'diff',
-	'comment',
-	'review',
 	'checks',
 	'logs',
 ];
 
 const GIT_PR_ALL_ACTIONS: readonly GitPrAction[] = [
-	...GIT_PR_READ_AND_REVIEW_ACTIONS,
+	...GIT_PR_READ_ACTIONS,
+	'comment',
+	'review',
 	'create',
 ];
 
@@ -90,8 +90,9 @@ const MUTATION_TOOLS: readonly ToolAllowance[] = [
 /**
  * Per-level tool allowlists.
  *
- * - comment-only: investigate + comment/review on PRs. No working-tree
- *   writes, no `git_pr` create/merge.
+ * - comment-only: investigate only, including read-only `git_pr` actions.
+ *   No working-tree writes and no `git_pr` comment/review/create: the
+ *   harness posts the result, never the agent.
  * - auto-fix: comment-only + file mutation/local commit + `git_pr` create
  *   (Phase 4's flow opens a fresh branch and a *draft* PR rather than
  *   pushing to the original branch directly — that workflow constraint is
@@ -108,7 +109,7 @@ const AUTO_FIX_TOOLS: readonly ToolAllowance[] = [
 const TRUST_POLICIES: Record<TrustLevel, readonly ToolAllowance[]> = {
 	'comment-only': [
 		...INVESTIGATION_TOOLS,
-		{tool: 'git_pr', actions: GIT_PR_READ_AND_REVIEW_ACTIONS},
+		{tool: 'git_pr', actions: GIT_PR_READ_ACTIONS},
 	],
 	// full-commit has the same tool surface as auto-fix by design (see the
 	// doc comment above) — shares the same array so the two levels can't
@@ -139,6 +140,26 @@ export function isActionAllowed(
 	if (!allowance.actions) return true;
 	if (action === undefined) return false;
 	return allowance.actions.includes(action);
+}
+
+/**
+ * Whether a `git_pr` call's arguments are permitted at the given trust level.
+ * `git_pr` selects its action by which field is present, so every present
+ * action field must be allowed - a call mixing a read with a `comment` is
+ * denied as a whole.
+ *
+ * `null` and `undefined` both mean "field not supplied" (`!= null` on
+ * purpose): git_pr runs its write actions only when the field is truthy, so
+ * `null` never selects one, and some providers fill unused optional fields
+ * with `null` - treating that as present would deny harmless read calls.
+ */
+export function isGitPrCallAllowed(
+	level: TrustLevel,
+	args: Record<string, unknown>,
+): boolean {
+	return GIT_PR_ALL_ACTIONS.filter(action => args[action] != null).every(
+		action => isActionAllowed(level, 'git_pr', action),
+	);
 }
 
 /**

@@ -227,10 +227,12 @@ Commands:
                                   comment-only. full-commit prompts a one-time confirmation.
                                   start refuses to run in an untrusted directory; pass
                                   --trust-directory to bypass the check for this run only.
-  verify --pr <n> [--post-review] [--provider <name>] [--model <name>]
+  verify --pr <n> [--post-review] [--trust-directory] [--provider <name>] [--model <name>]
                                   Headless, read-only PR review: runs the verify-pr-review
                                   subagent plus a semgrep pass. Prints the review to stdout
                                   by default; posts it as a PR comment with --post-review.
+                                  Refuses an untrusted directory; pass --trust-directory
+                                  to bypass the check for this run only.
                                   --provider/--model select the LLM (see Options below).
   skills add <target>             Install a skill bundle from a git repository.
                                   <target> is an index name, owner/repo, a git URL, or a local path.
@@ -827,7 +829,7 @@ async function main(): Promise<void> {
 		// Screen mode: fullscreen (alt screen + in-app scroll) by DEFAULT.
 		// Passing --no-alt-screen or setting alternateScreen:false in preferences
 		// forces inline mode (main screen + native scrollback).
-		const {getAlternateScreen, getMouseReporting} = await import(
+		const {getAlternateScreen, getMouseReporting, getMaxFps} = await import(
 			'@/config/preferences'
 		);
 		const altScreenAllowed =
@@ -996,6 +998,7 @@ async function main(): Promise<void> {
 				// farewell frame before the process dies.
 				exitOnCtrlC: false,
 				...(inkStdin ? {stdin: inkStdin} : {}),
+				maxFps: getMaxFps(),
 			},
 		);
 

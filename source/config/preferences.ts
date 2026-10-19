@@ -260,6 +260,24 @@ export function untrustedReason(recheck: TrustRecheck | null | undefined) {
 }
 
 /**
+ * Refusal for non-interactive entry points (`--plain`, `verify`). The two
+ * bypasses last different lengths of time - the flag covers one run, the
+ * variable saves the directory to `trustedDirectories` - so the message
+ * names which is which. Shared by the text and `--json` outputs.
+ */
+export function untrustedDirectoryMessage(
+	cwd: string,
+	recheck?: TrustRecheck | null,
+): string {
+	return (
+		`Directory ${cwd} ${untrustedReason(recheck)}` +
+		`. Pass --trust-directory to bypass the ` +
+		`disclaimer for this run only, or set NANOCODER_TRUST_DIRECTORY=1 to ` +
+		`trust this directory permanently.`
+	);
+}
+
+/**
  * Record this folder, including a fingerprint of what it will run. The
  * prompt passes the fingerprint it showed, so a file that lands while it
  * is open is asked about on the next start instead of trusted unseen.
@@ -459,6 +477,49 @@ export function updatePasteThreshold(threshold: number): void {
 		preferences.nanocoder.paste.singleLineThreshold = Math.round(threshold);
 	}
 	savePreferences(preferences);
+}
+
+/** Ink's default rendering frame rate when maxFps is not configured. */
+export const DEFAULT_MAX_FPS = 30;
+/** Minimum allowable frame rate limit for Ink's maxFps (1 frame per second). */
+export const MIN_MAX_FPS = 1;
+/** Maximum allowable frame rate limit for Ink's maxFps (60 frames per second). */
+export const MAX_MAX_FPS = 60;
+
+/**
+ * Validate Ink's maxFps preference.
+ * Must be an integer between MIN_MAX_FPS (1) and MAX_MAX_FPS (60) inclusive.
+ */
+export function isValidMaxFps(value: unknown): value is number {
+	return (
+		typeof value === 'number' &&
+		Number.isInteger(value) &&
+		value >= MIN_MAX_FPS &&
+		value <= MAX_MAX_FPS
+	);
+}
+
+/**
+ * Get the configured maxFps preference if valid, or undefined if unset or invalid.
+ * Reads the namespaced `nanocoder.ui.maxFps` preference.
+ */
+export function getUiMaxFps(
+	preferences = loadPreferences(),
+): number | undefined {
+	const value = preferences.nanocoder?.ui?.maxFps;
+	if (isValidMaxFps(value)) {
+		return value;
+	}
+	return undefined;
+}
+
+/**
+ * Get the effective maximum TUI frame rate for Ink rendering.
+ * Returns the validated integer from preferences (1-60), or preserves
+ * the default of 30 FPS when not configured or when an invalid value is rejected.
+ */
+export function getMaxFps(preferences = loadPreferences()): number {
+	return getUiMaxFps(preferences) ?? DEFAULT_MAX_FPS;
 }
 
 /**

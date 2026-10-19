@@ -31,6 +31,8 @@ export class AcpSession {
 	developmentMode: DevelopmentMode;
 	/** True while a prompt turn is being processed. Overlapping calls wait on acquireTurn(). */
 	turnActive = false;
+	/** Set by session/close. Queued prompts check it before they start. */
+	closed = false;
 	/** URI of the file currently focused in the editor client (e.g. VS Code). */
 	activeFile?: string;
 	private memoryFinder?: SemanticMemoryManager;
@@ -57,6 +59,11 @@ export class AcpSession {
 
 	cancel(): void {
 		this.abortController.abort();
+	}
+
+	close(): void {
+		this.closed = true;
+		this.cancel();
 	}
 
 	beginTurn(): void {

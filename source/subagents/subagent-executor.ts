@@ -58,6 +58,7 @@ import {signalToolApproval} from '@/utils/tool-approval-queue';
 import {parseToolArguments} from '@/utils/tool-args-parser';
 import {toolErrorToContent} from '@/utils/tool-validation';
 import {truncateToolResult} from '@/utils/truncate-tool-result';
+import {isGitPrCallAllowed, type TrustLevel} from '@/verify/trust';
 import {getSubagentLoader} from './subagent-loader.js';
 import type {
 	SubagentConfigWithSource,
@@ -206,7 +207,12 @@ export class SubagentExecutor {
 	 *                  `ctx.alwaysAllow`) — for tools whose `approval` policy
 	 *                  isn't mode-aware and would otherwise be silently
 	 *                  auto-denied in headless mode (no approval-queue
-	 *                  handler is ever registered there).
+	 *                  handler is ever registered there). When given, it
+	 *                  replaces the user/project `alwaysAllow` config rather
+	 *                  than adding to it, so a checked-out repo's own config
+	 *                  can't pre-approve tools for a trust-gated run.
+	 *                  `trustLevel` makes every `git_pr` call be checked
+	 *                  against that level's allowed actions before approval.
 	 */
 	async execute(
 		task: SubagentTask,
@@ -218,6 +224,7 @@ export class SubagentExecutor {
 			tools?: string[];
 			disallowedTools?: string[];
 			alwaysAllow?: string[];
+			trustLevel?: TrustLevel;
 		},
 	): Promise<SubagentResult> {
 		const startTime = Date.now();
@@ -252,6 +259,7 @@ export class SubagentExecutor {
 						tools: toolOverride.tools ?? loadedConfig.tools,
 						disallowedTools:
 							toolOverride.disallowedTools ?? loadedConfig.disallowedTools,
+						trustLevel: toolOverride.trustLevel,
 					}
 				: loadedConfig;
 
@@ -842,10 +850,7 @@ export class SubagentExecutor {
 		const toolEntry = this.toolManager.getToolEntry(toolName);
 		return resolveToolApproval(toolName, toolEntry, rawArguments, {
 			mode: this.currentMode(),
-			alwaysAllow: [
-				...(getAppConfig().alwaysAllow ?? []),
-				...(alwaysAllow ?? []),
-			],
+			alwaysAllow: alwaysAllow ?? getAppConfig().alwaysAllow ?? [],
 		});
 	}
 
@@ -897,6 +902,19 @@ export class SubagentExecutor {
 				arguments: parsedArgs,
 			},
 		};
+
+		// A trust-gated run (verify, daemon CI) must never post to GitHub itself:
+		// the harness does that. Enforced here rather than relying on the
+		// approval prompt, which `alwaysAllow` or yolo mode would skip.
+		if (
+			toolName === 'git_pr' &&
+			config.trustLevel &&
+			!isGitPrCallAllowed(config.trustLevel, parsedArgs)
+		) {
+			return {
+				content: `Error: this git_pr action is not permitted at trust level '${config.trustLevel}'. Posting to GitHub is done by the harness.`,
+			};
+		}
 
 		// Subagents run their own loop rather than going through processToolUse,
 		// so the lifecycle gate has to be applied here too — a policy hook must
