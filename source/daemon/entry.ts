@@ -37,15 +37,10 @@ import {startDaemon} from './daemon';
 // The daemon's own `verify-ci-investigator` subagent must be pinned to a
 // trust-level tool allowlist at execution time rather than trusting its
 // frontmatter `tools:` list alone — see `source/verify/trust.ts`. Mirrors
-// the same `toolOverride` use `verify/cli.ts` makes for `verify-pr-review`:
-// name-level only, so it doesn't stop `git_pr`'s comment/review/create
-// argument shapes on its own. What actually blocks those calls at
-// `comment-only` is that this `buildExecutor` never registers a
-// tool-approval-queue handler, so any `git_pr` call requiring confirmation
-// is auto-denied by `signalToolApproval()`'s default — a property of
-// headless mode, not of this list. `resolveToolApproval`'s first check
-// (`ctx.alwaysAllow`) would also bypass approval; at `auto-fix`/
-// `full-commit` it's deliberately populated with `git_commit` (see
+// the same `toolOverride` use `verify/cli.ts` makes for `verify-pr-review`.
+// `trustLevel` makes the executor deny any `git_pr` action the level doesn't
+// allow, and `alwaysAllow` replaces the user/project config's list: it holds
+// `git_commit` at `auto-fix`/`full-commit` (see
 // `getHeadlessAutoApproveToolNames`) but never `git_pr` — GitHub-mutating
 // calls stay harness-mediated (`ci-fix-orchestrator.ts`'s push/PR step)
 // even at the most-trusted level.
@@ -56,6 +51,7 @@ const trustLevel = isTrustLevel(process.env.NANOCODER_CI_TRUST_LEVEL)
 const ciInvestigatorOverride = {
 	tools: getAllowedToolNames(trustLevel),
 	alwaysAllow: getHeadlessAutoApproveToolNames(trustLevel),
+	trustLevel,
 };
 
 async function main(): Promise<void> {

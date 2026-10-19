@@ -260,6 +260,24 @@ export function untrustedReason(recheck: TrustRecheck | null | undefined) {
 }
 
 /**
+ * Refusal for non-interactive entry points (`--plain`, `verify`). The two
+ * bypasses last different lengths of time - the flag covers one run, the
+ * variable saves the directory to `trustedDirectories` - so the message
+ * names which is which. Shared by the text and `--json` outputs.
+ */
+export function untrustedDirectoryMessage(
+	cwd: string,
+	recheck?: TrustRecheck | null,
+): string {
+	return (
+		`Directory ${cwd} ${untrustedReason(recheck)}` +
+		`. Pass --trust-directory to bypass the ` +
+		`disclaimer for this run only, or set NANOCODER_TRUST_DIRECTORY=1 to ` +
+		`trust this directory permanently.`
+	);
+}
+
+/**
  * Record this folder, including a fingerprint of what it will run. The
  * prompt passes the fingerprint it showed, so a file that lands while it
  * is open is asked about on the next start instead of trusted unseen.

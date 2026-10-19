@@ -11,8 +11,7 @@ import {
 	loadPreferences,
 	resolveProjectContextPreferences,
 	savePreferences,
-	type TrustRecheck,
-	untrustedReason,
+	untrustedDirectoryMessage,
 } from '@/config/preferences';
 import {resolveTune} from '@/config/tune';
 import {
@@ -86,23 +85,6 @@ const defaultDeps: RunPlainShellDeps = {
 	appendRelevantProjectContextWithCount,
 	artifacts: artifactManager,
 };
-
-/**
- * The two bypasses last different lengths of time - the flag covers one run,
- * the variable saves the directory to `trustedDirectories` - so the message
- * names which is which. Shared by the text and `--json` outputs.
- */
-function untrustedDirectoryMessage(
-	cwd: string,
-	recheck?: TrustRecheck | null,
-): string {
-	return (
-		`Directory ${cwd} ${untrustedReason(recheck)}` +
-		`. Pass --trust-directory to bypass the ` +
-		`disclaimer for this run only, or set NANOCODER_TRUST_DIRECTORY=1 to ` +
-		`trust this directory permanently.`
-	);
-}
 
 /**
  * Headless equivalent of `nanocoder run "..."`. Skips Ink entirely:
