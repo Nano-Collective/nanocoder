@@ -2,6 +2,8 @@
 
 Thank you for helping keep Nanocoder and its users safe.
 
+This policy covers the Nanocoder CLI, the VS Code extension, and the packages we publish (npm, Homebrew and Nix).
+
 ## Supported versions
 
 We fix security issues in the **latest release** only. Please upgrade before reporting, or check that the issue
@@ -25,6 +27,9 @@ Please include:
 - steps to reproduce, ideally with a **harmless** proof of concept (marker files, fake tokens, local servers).
   Please do not test against real accounts, real credentials or systems you do not own;
 - the impact as you understand it, and a suggested fix if you have one.
+
+If you cannot use GitHub's form, ask in our [Discord](https://discord.gg/ktPDV6rekE) for a private way to reach a
+maintainer. **Please do not post any details of the issue there.**
 
 ## What to expect
 
