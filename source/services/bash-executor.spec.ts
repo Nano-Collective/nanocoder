@@ -1,6 +1,6 @@
 import test, {type ExecutionContext} from 'ava';
 import {spawn} from 'node:child_process';
-import {mkdtempSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
+import {mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -657,12 +657,8 @@ test('cancel - SIGKILL fallback terminates processes that ignore SIGTERM', async
 	);
 
 	// Wait for process to spawn and capture its output
-	await new Promise(resolve => setTimeout(resolve, 300));
-	const state = executor.getState(executionId);
-	t.truthy(state);
-	const match = state?.fullOutput.match(/PID:(\d+)/);
-	t.truthy(match, 'Should have captured the child PID');
-	const childPid = match ? Number(match[1]) : undefined;
+	const childPid = await childPidOf(executor, executionId);
+	t.truthy(childPid, 'Should have captured the child PID');
 
 	const start = Date.now();
 	const cancelled = executor.cancel(executionId);
@@ -804,13 +800,25 @@ const IGNORES_SIGTERM = `trap '' TERM; echo PID:$$; while :; do sleep 0.2; done`
 // Exits at once and leaves `sleep` running in its process group.
 const LEAVES_A_JOB = 'sleep 60 > /dev/null 2>&1 & echo PID:$$';
 
+// On Linux, zombies don't count: they can stay unreaped for good when pid 1
+// doesn't reap orphans, as in some containers.
 function isGroupAlive(pgid: number): boolean {
 	try {
 		process.kill(-pgid, 0);
-		return true;
 	} catch {
 		return false;
 	}
+	if (process.platform !== 'linux') return true;
+	return readdirSync('/proc').some(pid => {
+		if (!/^\d+$/.test(pid)) return false;
+		try {
+			const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
+			const [state, , pgrp] = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
+			return state !== 'Z' && Number(pgrp) === pgid;
+		} catch {
+			return false;
+		}
+	});
 }
 
 // If an assertion fails first, don't leave a loop that ignores SIGTERM behind.
@@ -899,8 +907,9 @@ while (!runningPgid) {
 }
 const leftoverPgid = finished.fullOutput.match(/PID:(\\d+)/)[1];
 console.log('READY ' + runningPgid + ' ' + leftoverPgid);
-if (mode === 'exit') process.exit(0);
-setInterval(() => {}, 1000);
+// Exit only when told to, so the test can see both groups running first.
+if (mode === 'exit') process.stdin.once('data', () => process.exit(0));
+else setInterval(() => {}, 1000);
 `;
 
 async function stopWorker(
@@ -931,7 +940,7 @@ async function stopWorker(
 					new URL('../../tsconfig.json', import.meta.url),
 				),
 			},
-			stdio: ['ignore', 'pipe', 'pipe'],
+			stdio: ['pipe', 'pipe', 'pipe'],
 		},
 	);
 	let stdout = '';
@@ -955,7 +964,8 @@ async function stopWorker(
 	killGroupsOnTeardown(t, pgids);
 	t.true(pgids.every(isGroupAlive), 'both groups should be running before the worker stops');
 
-	if (how !== 'exit') child.kill(how);
+	if (how === 'exit') child.stdin.write('go\n');
+	else child.kill(how);
 	return {code: await exited, pgids};
 }
 

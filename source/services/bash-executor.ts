@@ -4,6 +4,7 @@ import {EventEmitter} from 'node:events';
 import {
 	existsSync,
 	mkdtempSync,
+	readdirSync,
 	readFileSync,
 	rmSync,
 	unlinkSync,
@@ -63,6 +64,40 @@ function probeGroup(pgid: number): boolean {
 	} catch {
 		return false;
 	}
+}
+
+/**
+ * Linux only: whether the group still has a member that is not a zombie. A
+ * process that has exited stays in its group until it is reaped, and an
+ * orphan is reaped by pid 1, which in a container (`node`, `sleep infinity`)
+ * may never do it, so the probe above can say "alive" for good. Reads /proc,
+ * so callers run it far less often than the probe.
+ */
+function hasRunningMember(proc: ChildProcess): boolean {
+	if (platform !== 'linux' || proc.pid === undefined) return true;
+	const groups = new Set([proc.pid, sandboxedCommandGroup(proc)]);
+	let pids: string[];
+	try {
+		pids = readdirSync('/proc');
+	} catch {
+		return true;
+	}
+	for (const pid of pids) {
+		if (!/^\d+$/.test(pid)) continue;
+		try {
+			const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
+			// After "(comm) ": state, ppid, pgrp, ...
+			const [state, , pgrp] = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
+			if (state !== 'Z' && groups.has(Number(pgrp))) return true;
+		} catch {
+			// Exited while we looked.
+		}
+	}
+	return false;
+}
+
+function isGroupRunning(proc: ChildProcess): boolean {
+	return isGroupAlive(proc) && hasRunningMember(proc);
 }
 
 function signalGroups(proc: ChildProcess, signal: NodeJS.Signals): void {
@@ -445,12 +480,12 @@ export class BashExecutor extends EventEmitter {
 	 * group id can be reused by an unrelated process.
 	 */
 	private trackLeftovers(proc: ChildProcess): void {
-		if (!isGroupAlive(proc)) return;
+		if (!isGroupRunning(proc)) return;
 		this.leftovers.add(proc);
 		if (this.leftoverPrune) return;
 		this.leftoverPrune = setInterval(() => {
 			for (const leftover of this.leftovers) {
-				if (!isGroupAlive(leftover)) this.leftovers.delete(leftover);
+				if (!isGroupRunning(leftover)) this.leftovers.delete(leftover);
 			}
 			if (this.leftovers.size === 0) {
 				clearInterval(this.leftoverPrune);
@@ -484,9 +519,17 @@ export class BashExecutor extends EventEmitter {
 
 		return new Promise(resolve => {
 			// Poll liveness every 50ms so cleanup triggers as soon as all
-			// processes in the process group have exited.
+			// processes in the process group have exited. Every 4th poll
+			// also looks past zombies nothing will reap.
+			let polls = 0;
 			const pollInterval = setInterval(() => {
-				if (!isGroupAlive(proc)) finish();
+				polls++;
+				if (
+					!isGroupAlive(proc) ||
+					(polls % 4 === 0 && !hasRunningMember(proc))
+				) {
+					finish();
+				}
 			}, 50);
 
 			// SIGKILL fallback after 2 seconds for anything that trapped or

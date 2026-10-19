@@ -18,16 +18,22 @@ function createExecutor(): BashExecutor {
 	return executor;
 }
 
+// A zombie has exited, so it doesn't count. It can stay unreaped for good
+// when pid 1 doesn't reap orphans, as in some containers.
 function isAlive(pid: number): boolean {
 	try {
 		process.kill(pid, 0);
+		if (platform === 'linux') {
+			const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
+			return stat.slice(stat.lastIndexOf(')') + 2, stat.lastIndexOf(')') + 3) !== 'Z';
+		}
 		return true;
 	} catch {
 		return false;
 	}
 }
 
-// An exited process can stay a zombie briefly until it is reaped.
+// On macOS an exited process can stay a zombie briefly until it is reaped.
 async function isGoneWithin(pid: number, ms: number): Promise<boolean> {
 	const deadline = Date.now() + ms;
 	while (isAlive(pid) && Date.now() < deadline) {
