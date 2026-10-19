@@ -20,7 +20,10 @@ import {
 } from '@/constants';
 import {appendRelevantProjectContextWithCount} from '@/memory/project-context';
 import {SemanticMemoryManager} from '@/memory/semantic-memory-manager';
-import {runPlainConversation} from '@/plain/conversation';
+import {
+	type PlainConversationOutcome,
+	runPlainConversation,
+} from '@/plain/conversation';
 import {initializePlain} from '@/plain/initialize';
 import {
 	color,
@@ -306,7 +309,7 @@ export async function runPlainShell(
 		writeLine();
 	}
 
-	let outcome;
+	let outcome: PlainConversationOutcome;
 	try {
 		conversationPromise = deps.runPlainConversation({
 			client,
@@ -323,6 +326,18 @@ export async function runPlainShell(
 			workingDirectory: process.cwd(),
 		});
 		outcome = await conversationPromise;
+	} catch (error) {
+		// runPlainConversation returns provider failures as an `error` outcome
+		// itself. This backstop covers anything else it throws, so the run
+		// still reports and exits through graceful shutdown (session-end).
+		outcome = {
+			kind: 'error',
+			message: formatError(error),
+			finalText: '',
+			reasoning: null,
+			toolCalls: [],
+			steps: 0,
+		};
 	} finally {
 		process.off('SIGINT', sigint);
 		await cleanupArtifacts();
