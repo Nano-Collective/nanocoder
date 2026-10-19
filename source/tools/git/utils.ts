@@ -8,6 +8,7 @@
 import {spawn} from 'node:child_process';
 import {accessSync, constants, existsSync, readFileSync} from 'node:fs';
 import {delimiter, isAbsolute, join} from 'node:path';
+import {TIMEOUT_GH_METADATA_MS, TIMEOUT_GIT_PUSH_MS} from '@/constants';
 import {getProjectRoot} from '@/services/session-cwd';
 import {getLogger} from '@/utils/logging';
 
@@ -328,11 +329,14 @@ const GIT_ENV = {...process.env, GIT_TERMINAL_PROMPT: '0'};
  * stdin is closed so nothing the child runs can block on it, and the whole
  * call is bounded by a timeout as a backstop for prompts that bypass stdin
  * (ssh passphrases and gpg pinentry read the tty directly).
+ *
+ * `timeoutMs` overrides the default bound for slower calls (e.g. push).
  */
 function execProcess(
 	command: string,
 	args: string[],
 	label: string,
+	timeoutMs?: number,
 ): Promise<string> {
 	return new Promise((resolve, reject) => {
 		// The project root, not the live process cwd: inside an ACP session it is
@@ -349,18 +353,17 @@ function execProcess(
 		// Settle here rather than on `close`: a helper the child spawned (ssh,
 		// gpg, credential manager) inherits the stderr pipe, and `close` does
 		// not fire until every holder of that pipe has exited.
+		const limitMs = timeoutMs && timeoutMs > 0 ? timeoutMs : GIT_TIMEOUT_MS;
 		const timer = setTimeout(() => {
 			proc.stdout.destroy();
 			proc.stderr.destroy();
 			proc.kill();
 			settle(() =>
 				reject(
-					new Error(
-						`${label} command timed out after ${GIT_TIMEOUT_MS / 1000}s`,
-					),
+					new Error(`${label} command timed out after ${limitMs / 1000}s`),
 				),
 			);
-		}, GIT_TIMEOUT_MS);
+		}, limitMs);
 
 		const settle = (finish: () => void) => {
 			if (settled) return;
@@ -400,15 +403,22 @@ function execProcess(
 /**
  * Execute a git command and return the output
  */
-export async function execGit(args: string[]): Promise<string> {
-	return execProcess('git', args, 'Git');
+export async function execGit(
+	args: string[],
+	timeoutMs?: number,
+): Promise<string> {
+	return execProcess('git', args, 'Git', timeoutMs);
 }
 
 /**
- * Execute a gh CLI command and return the output
+ * Execute a gh CLI command and return the output. Pass `timeoutMs` for
+ * calls that can be slow/hang (e.g. fetching CI run logs).
  */
-export async function execGh(args: string[]): Promise<string> {
-	return execProcess('gh', args, 'gh');
+export async function execGh(
+	args: string[],
+	timeoutMs?: number,
+): Promise<string> {
+	return execProcess('gh', args, 'gh', timeoutMs);
 }
 
 // ============================================================================
@@ -472,6 +482,145 @@ export async function getCurrentBranch(): Promise<string> {
 		logger.debug('Failed to get current branch', {error});
 		return 'HEAD'; // Detached HEAD state
 	}
+}
+
+/**
+ * Get the current commit SHA. Used to confirm the local working tree
+ * actually matches a PR's head commit — robust to detached-HEAD checkouts
+ * (common in CI) and to local branches named differently than the PR's
+ * head branch, unlike comparing branch names.
+ */
+export async function getCurrentCommitSha(): Promise<string> {
+	return execGit(['rev-parse', 'HEAD']);
+}
+
+/**
+ * Head/base branch names and the head commit SHA for a PR, resolved via
+ * `gh pr view`.
+ */
+export interface PrRefs {
+	headRefName: string;
+	baseRefName: string;
+	headRefOid: string;
+}
+
+/**
+ * Resolve a PR's head/base branch names and head commit SHA. Used to
+ * confirm the local working tree actually matches the PR being reviewed
+ * before scanning it. Bounded by TIMEOUT_GH_METADATA_MS since this backs a
+ * headless/unattended command (`nanocoder verify`) that must not hang
+ * indefinitely on a stalled `gh` call.
+ */
+export async function getPrRefs(pr: number): Promise<PrRefs> {
+	const output = await execGh(
+		[
+			'pr',
+			'view',
+			pr.toString(),
+			'--json',
+			'headRefName,baseRefName,headRefOid',
+		],
+		TIMEOUT_GH_METADATA_MS,
+	);
+	return JSON.parse(output) as PrRefs;
+}
+
+/**
+ * List the file paths changed by a PR, for scoping tools (e.g. semgrep) to
+ * just what the PR touches instead of the whole repo. Bounded by
+ * TIMEOUT_GH_METADATA_MS — see {@link getPrRefs}.
+ */
+export async function getPrChangedFiles(pr: number): Promise<string[]> {
+	const output = await execGh(
+		['pr', 'diff', pr.toString(), '--name-only'],
+		TIMEOUT_GH_METADATA_MS,
+	);
+	return output
+		.split('\n')
+		.map(line => line.trim())
+		.filter(Boolean);
+}
+
+/**
+ * Resolve the open PR number for a branch, if one exists. Used by the daemon
+ * to decide whether a CI-failure diagnosis should be posted as a PR comment
+ * (no PR yet — e.g. a branch pushed before opening one — just means there's
+ * nowhere to post it). Bounded by TIMEOUT_GH_METADATA_MS — see {@link getPrRefs}.
+ */
+export async function getPrNumberForBranch(
+	branch: string,
+): Promise<number | undefined> {
+	const output = await execGh(
+		['pr', 'list', '--head', branch, '--json', 'number', '--limit', '1'],
+		TIMEOUT_GH_METADATA_MS,
+	);
+	const results = JSON.parse(output) as Array<{number: number}>;
+	return results[0]?.number;
+}
+
+/**
+ * Post a comment-only review to a PR. Shared by `verify --pr`'s
+ * `--post-review` and the daemon's CI-investigation posting — both want the
+ * exact same `gh pr review --comment` call.
+ */
+export async function postPrComment(pr: number, body: string): Promise<void> {
+	await execGh(['pr', 'review', pr.toString(), '--comment', '--body', body]);
+}
+
+/**
+ * Push a branch to `origin`. Harness-only (not an agent-facing tool) —
+ * used by the daemon's auto-fix/full-commit flow to publish a fix that was
+ * committed inside an isolated clone (see `ci-fix-worktree.ts`). Pass `cwd`
+ * to run this against that clone rather than the current process's own
+ * directory — the clone has its own independent object database, so the
+ * new commits only exist there, not wherever this function happens to be
+ * called from. Bounded by TIMEOUT_GIT_PUSH_MS since this backs an
+ * unattended background caller that must not hang forever on a stalled
+ * network push.
+ */
+export async function pushBranch(
+	branch: string,
+	opts?: {setUpstream?: boolean; cwd?: string},
+): Promise<void> {
+	const args: string[] = [];
+	if (opts?.cwd) args.push('-C', opts.cwd);
+	args.push('push');
+	if (opts?.setUpstream) args.push('-u');
+	args.push('origin', branch);
+	await execGit(args, TIMEOUT_GIT_PUSH_MS);
+}
+
+/**
+ * Open a draft PR. Harness-only (not an agent-facing tool) — deliberately
+ * NOT a reuse of `git-pr.tsx`'s `create` action, which infers `head` from
+ * `getCurrentBranch()` (the *caller's* current branch). That's wrong here:
+ * the daemon's own cwd is `projectRoot`, not the worktree whose branch is
+ * the actual PR head, so `head` must be passed explicitly. Bounded by
+ * TIMEOUT_GH_METADATA_MS — see {@link getPrRefs}.
+ */
+export async function createDraftPr(opts: {
+	title: string;
+	body: string;
+	base: string;
+	head: string;
+}): Promise<string> {
+	const output = await execGh(
+		[
+			'pr',
+			'create',
+			'--title',
+			opts.title,
+			'--base',
+			opts.base,
+			'--head',
+			opts.head,
+			'--draft',
+			'--body',
+			opts.body,
+		],
+		TIMEOUT_GH_METADATA_MS,
+	);
+	return output.trim();
 }
 
 /**

@@ -124,6 +124,14 @@ export class Uri {
 	}
 }
 
+/** A glob matched relative to `base` (a folder, as in the real API). */
+export class RelativePattern {
+	constructor(
+		public readonly base: Uri | {uri: Uri} | string,
+		public readonly pattern: string,
+	) {}
+}
+
 export enum SymbolKind {
 	File = 0,
 	Module = 1,
@@ -195,10 +203,17 @@ export const __test = {
 	/** Backs `workspace.asRelativePath`. */
 	asRelativePath: (target: Uri | string): string =>
 		typeof target === 'string' ? target : target.fsPath,
+	/** Backs `workspace.findFiles`. */
+	findFiles: async (
+		_include: RelativePattern | string,
+		_exclude?: string,
+		_limit?: number,
+	): Promise<Uri[]> => [],
 	/** Messages surfaced through `window.show*Message`, newest last. */
 	shownMessages: [] as {kind: 'info' | 'warning' | 'error'; message: string}[],
 
 	reset(): void {
+		__test.findFiles = async () => [];
 		__test.configuration = (_s, _k, fallback) => fallback;
 		__test.executeCommand = async () => undefined;
 		__test.openTextDocument = async () => ({
@@ -223,6 +238,8 @@ export const workspace = {
 			update: async () => undefined,
 		};
 	},
+	findFiles: (include: RelativePattern | string, exclude?: string, limit?: number) =>
+		__test.findFiles(include, exclude, limit),
 	openTextDocument: (uri: Uri) => __test.openTextDocument(uri),
 	asRelativePath: (target: Uri | string) => __test.asRelativePath(target),
 	onDidChangeConfiguration: () => noopDisposable,

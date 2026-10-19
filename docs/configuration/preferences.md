@@ -81,6 +81,28 @@ You can change this via `/settings` → **Input** → **Paste Threshold**, or by
 }
 ```
 
+### TUI Frame Rate (maxFps)
+
+For slower terminals (such as remote SSH sessions, Windows Terminal over remote connections, or tmux) and resource-constrained CPUs, you can configure Ink's maximum TUI rendering frame rate with the `nanocoder.ui.maxFps` setting:
+
+| Option | Type | Default | Accepted Range | Description |
+|--------|------|---------|----------------|-------------|
+| `nanocoder.ui.maxFps` | number (integer) | `30` | `1` – `60` | Maximum frames per second for Ink terminal UI updates. Lowering this value (e.g., to 10 or 15) reduces CPU load and terminal redraw overhead on low-power devices. |
+
+When omitted or set to an invalid value (such as non-integers, numbers below 1, or numbers above 60), Nanocoder safely rejects the invalid value and preserves Ink's default behavior of 30 FPS.
+
+You can configure this by editing your preferences file (`nanocoder-preferences.json`):
+
+```json
+{
+  "nanocoder": {
+    "ui": {
+      "maxFps": 15
+    }
+  }
+}
+```
+
 ### Reasoning Traces
 
 Expanding reasoning traces can also be configured in the preferences file with the `reasoningExpanded` field:
@@ -97,7 +119,7 @@ You can change this via `/settings` → **Behavior** → **Reasoning Traces**, o
 }
 ```
 
-Reasoning traces can also be toggled dynamically with the Ctrl+R keyboard shortcut.
+Reasoning traces can also be toggled dynamically with the Ctrl+N keyboard shortcut.
 
 ### Usage and Cost Footer
 
@@ -174,6 +196,53 @@ Desktop notification preferences are stored under the top-level `notifications` 
 Any event you leave out of `notifications.events` keeps its default of `true`, so `{"notifications": {"enabled": true}}` turns on every event.
 
 You can change these via `/settings` → **Input** → **Notifications**. See [Desktop Notifications](../features/notifications.md) for full details including platform-specific setup.
+
+### CI Watch Configuration
+
+Background CI-watch preferences are stored under the top-level `ciWatch` key of your **global** preferences file (a project-level `nanocoder-preferences.json` is ignored for this key, since turning on background polling is a personal decision). When enabled, the daemon (`nanocoder daemon start`) polls GitHub Actions for failures on the current branch and automatically investigates them:
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `ciWatch.enabled` | boolean | `false` | Enable background CI-watch polling. Requires the `gh` CLI to be installed and authenticated. |
+| `ciWatch.pollIntervalMs` | number | `30000` | Base interval between polls, in milliseconds. |
+| `ciWatch.maxPollIntervalMs` | number | `300000` | Backoff ceiling applied when consecutive `gh` calls fail. |
+
+There's no `/settings` wizard for this yet — set it by hand-editing the preferences file:
+
+```json
+{
+  "ciWatch": {
+    "enabled": true,
+    "pollIntervalMs": 30000
+  }
+}
+```
+
+### Project-Level Verify Policy (`agents.config.json`)
+
+Whether CI-watch investigations can auto-fix a failure — and how aggressively — is a project policy, not a personal preference, so it lives in the project's own committed `agents.config.json` under `nanocoder.verify` instead:
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `nanocoder.verify.trustLevel` | `"comment-only"` \| `"auto-fix"` \| `"full-commit"` | `comment-only` | See `nanocoder daemon start --trust` below. |
+| `nanocoder.verify.pollIntervalMs` | number | — | Overrides `ciWatch.pollIntervalMs` above when set. |
+| `nanocoder.verify.maxPollIntervalMs` | number | — | Overrides `ciWatch.maxPollIntervalMs` above when set. |
+
+```json
+{
+  "nanocoder": {
+    "verify": {
+      "trustLevel": "auto-fix"
+    }
+  }
+}
+```
+
+`nanocoder daemon start --trust <comment-only|auto-fix|full-commit>` overrides this for a single run; the config value is used when the flag is omitted, falling back to `comment-only` if neither is set:
+
+- **`comment-only`** (default) — investigates and diagnoses a CI failure, posting the diagnosis as a PR comment. Never mutates anything.
+- **`auto-fix`** — additionally implements and commits a fix in an isolated `git clone`, then pushes a new branch and opens a **draft PR** for human review. The original failing branch is never touched directly.
+- **`full-commit`** — pushes the fix **directly to the failing branch**, with no draft PR and no review step. `daemon start --trust full-commit` shows a one-time security warning per project before starting; subsequent starts for the same project skip it.
 
 When you restart Nanocoder, it automatically restores your last provider, model, theme, shape, paste threshold, and notification preferences.
 

@@ -334,23 +334,57 @@ export class SessionManager {
 	 * directories; with autosave on, every `/clear` retires a session id and
 	 * only the persisted ones are kept.
 	 *
-	 * Best-effort: a missing or unreadable session index means "keep nothing
-	 * known", and any failure is swallowed — reclaiming disk must never block
-	 * or crash startup.
+	 * The startup caller fires this before anything has initialized the
+	 * manager, and with autosave off nothing ever does. So the sessions
+	 * directory is resolved here, read-only: no directory is created, no index
+	 * is rewritten and retention does not run. A store that exists but cannot
+	 * be read keeps every artifact directory, because treating every saved
+	 * session as unknown would delete their plans, tasks and walkthroughs.
+	 *
+	 * Best-effort: any failure is swallowed, since reclaiming disk must never
+	 * block or crash startup.
 	 */
 	async cleanupOrphanedArtifacts(liveSessionId?: string): Promise<void> {
 		try {
-			let known: string[] = [];
-			try {
-				known = (await this.readIndex()).map(session => session.id);
-			} catch {
-				known = [];
-			}
-			if (liveSessionId) known.push(liveSessionId);
+			const known = await this.knownSessionIds();
+			if (!known) return;
+			if (liveSessionId) known.add(liveSessionId);
 			await this.artifacts.cleanupOrphanedSessions(known);
 		} catch {
 			// Never let artifact housekeeping break startup.
 		}
+	}
+
+	/**
+	 * Ids of every saved session: the session files on disk plus anything the
+	 * index lists, so neither a lost index entry nor a stray one decides alone.
+	 * An empty set when there is no sessions directory (nothing was ever
+	 * saved), and null when the store exists but cannot be read.
+	 */
+	private async knownSessionIds(): Promise<Set<string> | null> {
+		if (!this.sessionsIndexPath) this.resolveSessionsDir();
+
+		let known: Set<string>;
+		try {
+			known = await this.listSessionFileIds();
+		} catch (error) {
+			return isEnoent(error) ? new Set() : null;
+		}
+
+		try {
+			const parsed: unknown = JSON.parse(
+				await fs.readFile(this.sessionsIndexPath, 'utf-8'),
+			);
+			if (Array.isArray(parsed)) {
+				for (const entry of parsed.filter(isValidSessionMetadata)) {
+					known.add(entry.id);
+				}
+			}
+		} catch {
+			// No usable index: the session files on disk already name every
+			// saved session.
+		}
+		return known;
 	}
 
 	async listSessions(options?: {
