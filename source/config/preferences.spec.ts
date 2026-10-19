@@ -2270,7 +2270,7 @@ test.serial('directoryTrustRefusal returns the refusal message for an untrusted 
 	t.regex(message ?? '', /NANOCODER_TRUST_DIRECTORY=1/);
 });
 
-test.serial('directoryTrustRefusal words a changed fingerprint differently from an unknown directory', t => {
+test.serial('directoryTrustRefusal words a path-only entry as needing re-approval after the upgrade', t => {
 	delete process.env.NANOCODER_TRUST_DIRECTORY;
 	const dir = process.cwd();
 	const message = directoryTrustRefusal(dir, false, {
@@ -2280,6 +2280,21 @@ test.serial('directoryTrustRefusal words a changed fingerprint differently from 
 		},
 	});
 	t.regex(message ?? '', /needs re-approval after the upgrade/);
+});
+
+test.serial('directoryTrustRefusal words a changed fingerprint differently from an unknown directory', t => {
+	delete process.env.NANOCODER_TRUST_DIRECTORY;
+	const dir = process.cwd();
+	const message = directoryTrustRefusal(dir, false, {
+		loadPreferences: () => ({
+			trustedDirectories: [{path: dir, fingerprint: 'old'}],
+		}),
+		savePreferences: () => {
+			t.fail('should not persist when refusing');
+		},
+	});
+	t.regex(message ?? '', /changed since you trusted it/);
+	t.notRegex(message ?? '', /is not trusted/);
 });
 
 test('directoryTrustRefusal is null when bypassed or already trusted', t => {
