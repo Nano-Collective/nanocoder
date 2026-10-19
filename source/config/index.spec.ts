@@ -1,4 +1,4 @@
-import {existsSync, mkdirSync, readFileSync, rmSync, writeFileSync,statSync,utimesSync} from 'fs';
+import {existsSync, mkdirSync, readFileSync, rmSync, writeFileSync,statSync,utimesSync, mkdtempSync} from 'fs';
 import {tmpdir} from 'os';
 import {join} from 'path';
 import test from 'ava';
@@ -1647,6 +1647,53 @@ test.serial('reloadAppConfig invalidates cached agents config', t => {
 		// Explicit reload must discard cached JSON.
 		reloadAppConfig();
 
+		t.is(loadDefaultMode(), 'yolo');
+	} finally {
+		process.chdir(originalCwd);
+
+		if (originalConfigDir === undefined) {
+			delete process.env.NANOCODER_CONFIG_DIR;
+		} else {
+			process.env.NANOCODER_CONFIG_DIR = originalConfigDir;
+		}
+
+		clearAppConfig();
+		rmSync(dir, {recursive: true, force: true});
+	}
+});
+
+
+test.serial('agents config cache detects external file modifications', t => {
+	const dir = mkdtempSync(join(tmpdir(), 'nanocoder-agents-cache-'));
+	const configFile = join(dir, 'agents.config.json');
+
+	const originalCwd = process.cwd();
+	const originalConfigDir = process.env.NANOCODER_CONFIG_DIR;
+
+	try {
+		process.chdir(dir);
+		process.env.NANOCODER_CONFIG_DIR = join(dir, 'global');
+
+		writeFileSync(
+			configFile,
+			JSON.stringify({nanocoder: {defaultMode: 'plan'}}),
+		);
+
+		clearAppConfig();
+
+		t.is(loadDefaultMode(), 'plan');
+
+		// Simulate an external modification.
+		writeFileSync(
+			configFile,
+			JSON.stringify({nanocoder: {defaultMode: 'yolo'}}),
+		);
+
+		// Guarantee a different modification timestamp.
+		const changedTime = new Date(Date.now() + 60_000);
+		utimesSync(configFile, changedTime, changedTime);
+
+		// No reloadAppConfig() here.
 		t.is(loadDefaultMode(), 'yolo');
 	} finally {
 		process.chdir(originalCwd);

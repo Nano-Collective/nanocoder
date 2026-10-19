@@ -1,3 +1,4 @@
+
 import {existsSync, mkdirSync, readFileSync, rmSync, writeFileSync,mkdtempSync,utimesSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
@@ -2950,5 +2951,45 @@ test.serial('loadPreferences refreshes global-only settings after external edits
 
 		resetPreferencesCache();
 		rmSync(root, {recursive: true, force: true});
+	}
+});
+
+
+test.serial('cached preference getters detect external file changes', t => {
+	const dir = mkdtempSync(path.join(tmpdir(), 'nanocoder-derived-cache-'));
+	const previousDir = process.env.NANOCODER_CONFIG_DIR;
+
+	try {
+		process.env.NANOCODER_CONFIG_DIR = dir;
+
+		const file = path.join(dir, 'nanocoder-preferences.json');
+
+		writeFileSync(
+			file,
+			JSON.stringify({showAgentBashOutput: false}),
+		);
+
+		resetPreferencesCache();
+
+		t.false(getShowAgentBashOutput());
+
+		writeFileSync(
+			file,
+			JSON.stringify({showAgentBashOutput: true}),
+		);
+
+		const changedTime = new Date(Date.now() + 60_000);
+		utimesSync(file, changedTime, changedTime);
+
+		t.true(getShowAgentBashOutput());
+	} finally {
+		if (previousDir === undefined) {
+			delete process.env.NANOCODER_CONFIG_DIR;
+		} else {
+			process.env.NANOCODER_CONFIG_DIR = previousDir;
+		}
+
+		resetPreferencesCache();
+		rmSync(dir, {recursive: true, force: true});
 	}
 });

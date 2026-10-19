@@ -199,17 +199,45 @@ export function getPreferencesVersion(): number {
 
 // Caches a derived preference, keyed on NANOCODER_CONFIG_DIR and getPreferencesVersion()
 // (bumped on every write), so the value never goes stale after a settings change.
+
+
 function cachedPreference<T>(read: (prefs: UserPreferences) => T): () => T {
-	let cache: {dir?: string; version: number; value: T} | null = null;
+	let cache: {
+		dir?: string;
+		version: number;
+		value: T;
+	} | null = null;
+
 	return () => {
 		const dir = process.env.NANOCODER_CONFIG_DIR;
 		const version = getPreferencesVersion();
-		if (!cache || cache.dir !== dir || cache.version !== version) {
-			cache = {dir, version, value: read(loadPreferences())};
+
+		// Preserve the existing cached value when the file is missing.
+		if (
+			cache &&
+			cache.dir === dir &&
+			cache.version === version
+		) {
+			const preferencesPath = getPreferencesPath();
+
+			if (getFileMtime(preferencesPath) === null) {
+				return cache.value;
+			}
 		}
-		return cache.value;
+
+		// loadPreferences detects external modifications through mtime.
+		const value = read(loadPreferences());
+
+		cache = {
+			dir,
+			version,
+			value,
+		};
+
+		return value;
 	};
 }
+
 
 /**
  * Writes the preferences file. Returns `false` when the write failed — the
