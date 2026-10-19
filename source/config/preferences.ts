@@ -369,6 +369,21 @@ export function ensureDirectoryTrust(
 	};
 }
 
+/**
+ * `ensureDirectoryTrust` for entry points that just refuse: the message to
+ * print when `directory` is not trusted, or null when it is.
+ */
+export function directoryTrustRefusal(
+	directory: string,
+	bypass: boolean,
+	deps?: DirectoryTrustDeps,
+): string | null {
+	const trust = ensureDirectoryTrust(directory, bypass, deps);
+	return trust.trusted
+		? null
+		: untrustedDirectoryMessage(path.resolve(directory), trust.recheck); // nosemgrep
+}
+
 export function updateLastUsed(provider: string, model: string): void {
 	const preferences = loadPreferences();
 	preferences.lastProvider = provider;
