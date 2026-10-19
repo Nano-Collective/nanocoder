@@ -69,6 +69,33 @@ test('cleanTerminalOutput removes colours and shell integration markers', t => {
 	t.is(cleanTerminalOutput(raw), 'Error: boom\ndone');
 });
 
+test('cleanTerminalOutput removes the whole range of CSI sequences', t => {
+	const raw =
+		'\u001b[?25l\u001b[38;2;10;20;30mrgb\u001b[2K\u001b[1;31;4m!\u001b[0m\u001b[3 q';
+	t.is(cleanTerminalOutput(raw), 'rgb!');
+});
+
+test('cleanTerminalOutput removes OSC links and titles, with either terminator', t => {
+	const raw =
+		'\u001b]8;;https://example.test\u0007click\u001b]8;;\u0007 \u001b]0;title\u001b\\here';
+	t.is(cleanTerminalOutput(raw), 'click here');
+});
+
+test('cleanTerminalOutput removes charset and other multi-byte escapes', t => {
+	t.is(cleanTerminalOutput('\u001b(Bhello\u001b#8 world'), 'hello world');
+});
+
+test('cleanTerminalOutput drops an OSC that was cut off before its terminator', t => {
+	t.is(
+		cleanTerminalOutput('failed\n\u001b]0;window title never ended'),
+		'failed',
+	);
+});
+
+test('cleanTerminalOutput never leaves an escape character behind', t => {
+	t.notRegex(cleanTerminalOutput('a\u001b b\u001b[31m c\u001b'), /\u001b/);
+});
+
 test('cleanTerminalOutput keeps the end of long output, where the error is', t => {
 	const cleaned = cleanTerminalOutput(
 		`${'x'.repeat(MAX_TERMINAL_OUTPUT_CHARS + 500)}FINAL ERROR`,

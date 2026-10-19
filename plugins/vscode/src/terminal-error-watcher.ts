@@ -8,10 +8,13 @@ const MAX_NOTICE_COMMAND_CHARS = 80;
 // The shell's exit code when the user stops a command with Ctrl+C.
 const SIGINT_EXIT_CODE = 130;
 
-// Terminal output carries colours and the shell integration's own markers.
+// Terminal output carries colours, links and the shell integration's own
+// markers. In order: OSC (ended by BEL, ESC \ or the end of the text, since
+// the tail may be cut mid-sequence), CSI with its full parameter range, escapes
+// with intermediate bytes such as `ESC ( B`, two-byte escapes, and any ESC left.
 // biome-ignore lint/suspicious/noControlCharactersInRegex: matching escape sequences is the point
 const ESCAPE_SEQUENCES =
-	/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b\[[0-?]*[ -/]*[@-~]|\x1b[@-Z\\-_]/g;
+	/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\|$)|\x1b\[[0-?]*[ -/]*[@-~]|\x1b[ -/]+[0-~]|\x1b[@-Z\\-_]|\x1b/g;
 
 export function cleanTerminalOutput(raw: string): string {
 	const text = raw.replace(ESCAPE_SEQUENCES, '').replace(/\r\n?/g, '\n').trim();
@@ -66,6 +69,11 @@ async function collectTail(stream: AsyncIterable<string>): Promise<string> {
  * terminal, and sends the command and its output to the chat when taken. Needs
  * the terminal's shell integration to report exit codes; without it no
  * execution events fire and nothing is offered.
+ *
+ * Terminal output is untrusted text (any program can print anything). It is
+ * only kept in memory here and reaches the agent solely when the user takes the
+ * action, after their own request and inside a fenced block. That limits the
+ * exposure, but cannot stop a model from following text a program printed.
  */
 export function registerTerminalErrorWatcher(
 	chatProvider: Pick<ChatWebviewProvider, 'sendPrompt'>,

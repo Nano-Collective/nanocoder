@@ -213,7 +213,7 @@
 				"nanocoder.terminalErrors": {
 					"type": "boolean",
 					"default": true,
-					"description": "Offer a Fix with Nanocoder action when a command fails in an integrated terminal. Needs the terminal's shell integration to report exit codes."
+					"description": "Offer a Fix with Nanocoder action when a command fails in an integrated terminal. Needs the terminal's shell integration (terminal.integrated.shellIntegration.enabled) to report exit codes; without it nothing is offered. Nothing is sent to the agent until you take the action."
 				},
 				"nanocoder.showTokenUsage": {
 					"type": "boolean",
