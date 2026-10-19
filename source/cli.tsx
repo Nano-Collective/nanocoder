@@ -86,7 +86,20 @@ if (args[0] === 'daemon') {
 	const {runDaemonCli} = await import('@/daemon/cli');
 	const result = await runDaemonCli(sub as DaemonSub, {
 		projectRoot: process.cwd(),
+		args: args.slice(2),
 		trustDirectory: args.includes('--trust-directory'),
+	});
+	if (result.output) console.log(result.output);
+	process.exit(result.exitCode);
+}
+
+// Handle `nanocoder verify --pr <n> [--post-review]` — fast path. Headless
+// PR review; pulls in the full LLM/tool/subagent stack (unlike `daemon`
+// above) but never Ink.
+if (args[0] === 'verify') {
+	const {runVerifyCli} = await import('@/verify/cli');
+	const result = await runVerifyCli(args.slice(1), {
+		projectRoot: process.cwd(),
 	});
 	if (result.output) console.log(result.output);
 	process.exit(result.exitCode);
@@ -208,8 +221,19 @@ Commands:
   worktree <PR-number>            Start an interactive session in a new worktree for a GitHub PR.
   daemon <subcommand>             Manage the per-project skill daemon.
                                   Subcommands: start, stop, status, logs, install, uninstall.
+                                  start [--trust <comment-only|auto-fix|full-commit>]
+                                  Trust level for daemon-triggered CI investigation/auto-fix;
+                                  defaults to agents.config.json's verify.trustLevel, then
+                                  comment-only. full-commit prompts a one-time confirmation.
                                   start refuses to run in an untrusted directory; pass
                                   --trust-directory to bypass the check for this run only.
+  verify --pr <n> [--post-review] [--trust-directory] [--provider <name>] [--model <name>]
+                                  Headless, read-only PR review: runs the verify-pr-review
+                                  subagent plus a semgrep pass. Prints the review to stdout
+                                  by default; posts it as a PR comment with --post-review.
+                                  Refuses an untrusted directory; pass --trust-directory
+                                  to bypass the check for this run only.
+                                  --provider/--model select the LLM (see Options below).
   skills add <target>             Install a skill bundle from a git repository.
                                   <target> is an index name, owner/repo, a git URL, or a local path.
                                   Flags: --ref, --subdir, --global, --force, --yes, --index.
@@ -279,6 +303,8 @@ Examples:
   nanocoder --continue
   nanocoder --resume last
   nanocoder --resume
+  nanocoder verify --pr 861
+  nanocoder verify --pr 861 --post-review
   nanocoder storage
   nanocoder storage --format json | jq .sections
   `);
@@ -802,7 +828,7 @@ async function main(): Promise<void> {
 		// Screen mode: fullscreen (alt screen + in-app scroll) by DEFAULT.
 		// Passing --no-alt-screen or setting alternateScreen:false in preferences
 		// forces inline mode (main screen + native scrollback).
-		const {getAlternateScreen, getMouseReporting} = await import(
+		const {getAlternateScreen, getMouseReporting, getMaxFps} = await import(
 			'@/config/preferences'
 		);
 		const altScreenAllowed =
@@ -971,6 +997,7 @@ async function main(): Promise<void> {
 				// farewell frame before the process dies.
 				exitOnCtrlC: false,
 				...(inkStdin ? {stdin: inkStdin} : {}),
+				maxFps: getMaxFps(),
 			},
 		);
 

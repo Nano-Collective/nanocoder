@@ -280,5 +280,6 @@ Extend Nanocoder's capabilities by connecting [MCP (Model Context Protocol) serv
 | [Tune](tune.md) | Runtime model tuning for tool profiles, parameters, and compaction |
 | [Desktop Notifications](notifications.md) | Get notified when Nanocoder needs your attention |
 | [Keyboard Shortcuts](keyboard-shortcuts.md) | Complete keyboard shortcut reference |
+| [Verify](verify.md) | Headless, read-only PR review from the command line (`nanocoder verify --pr <n>`) |
 | [Shell Completions](shell-completions.md) | Tab completion for the `nanocoder` CLI in bash, zsh and fish |
 | [Tool Output Conventions](tool-output-conventions.md) | What the file tools return to the model after reads and edits |
