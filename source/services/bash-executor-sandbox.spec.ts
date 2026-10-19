@@ -207,18 +207,22 @@ test.serial(
 				'jailTmp must still exist while background descendant is handling SIGTERM',
 			);
 
-			const result = await promise;
-			t.true(result.isComplete);
+			let settled = false;
+			void promise.then(() => {
+				settled = true;
+			});
 
-			// Immediately after cancel resolves, the shell has closed but node is still in its 300ms delay.
+			// The shell has exited on SIGTERM, but node is still in its 300ms delay.
+			await new Promise(resolve => setTimeout(resolve, 150));
+			t.false(settled, 'the cancel is not reported while a descendant still runs');
 			t.true(
 				existsSync(jailTmp!),
 				'jailTmp must not be removed prematurely when wrapper shell exits before descendants',
 			);
 
-			// Wait for the background node process to write and exit (300ms delay + reap poll)
-			await new Promise(resolve => setTimeout(resolve, 700));
-
+			// Reported once the background node process has written and exited.
+			const result = await promise;
+			t.true(result.isComplete);
 			t.false(
 				existsSync(jailTmp!),
 				'jailTmp must be cleaned up after process group terminates',

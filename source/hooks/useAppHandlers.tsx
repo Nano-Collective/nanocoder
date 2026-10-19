@@ -227,7 +227,8 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 		// headless) path runs bash without mounting the live BashProgress that
 		// owns the escape->cancel handler, so aborting the controller alone would
 		// leave the command running until it finished naturally. Cancelling here
-		// resolves the bash promise right away regardless of execution path.
+		// resolves the bash promise as soon as the command has stopped,
+		// regardless of execution path.
 		const activeBashIds = bashExecutor.getActiveExecutionIds();
 		for (const id of activeBashIds) {
 			bashExecutor.cancel(id);
