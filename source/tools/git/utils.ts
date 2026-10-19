@@ -6,7 +6,13 @@
  */
 
 import {spawn} from 'node:child_process';
-import {accessSync, constants, existsSync, readFileSync} from 'node:fs';
+import {
+	accessSync,
+	constants,
+	existsSync,
+	readFileSync,
+	statSync,
+} from 'node:fs';
 import {delimiter, isAbsolute, join} from 'node:path';
 import {TIMEOUT_GH_METADATA_MS, TIMEOUT_GIT_PUSH_MS} from '@/constants';
 import {getProjectRoot} from '@/services/session-cwd';
@@ -70,12 +76,18 @@ const binaryOnPathCache = new Map<string, boolean>();
  * Check whether an executable resolves on PATH without spawning a shell.
  * Mirrors shell resolution: every PATH entry is checked against the bare
  * name plus each PATHEXT extension on Windows (`.exe`, `.cmd`, ...).
+ * cmd.exe accepts quoted PATH entries (`"C:\Program Files\Git\cmd"`), so
+ * surrounding quotes are stripped before the directory is stat-ed — without
+ * that, git could be installed and working while this scan misses it.
  */
 function isBinaryOnPath(name: string): boolean {
 	const cached = binaryOnPathCache.get(name);
 	if (cached !== undefined) return cached;
 
-	const pathEntries = (process.env.PATH ?? '').split(delimiter).filter(Boolean);
+	const pathEntries = (process.env.PATH ?? '')
+		.split(delimiter)
+		.map(entry => entry.replace(/^"(.*)"$/, '$1'))
+		.filter(Boolean);
 	const extensions =
 		process.platform === 'win32'
 			? (process.env.PATHEXT ?? '.COM;.EXE;.BAT;.CMD')
@@ -88,6 +100,9 @@ function isBinaryOnPath(name: string): boolean {
 		for (const ext of extensions) {
 			const candidate = join(dir, name + ext);
 			try {
+				// Regular file only: a directory named like the binary must not
+				// count as an installed executable.
+				if (!statSync(candidate).isFile()) continue;
 				// X_OK mirrors whether a shell could actually exec the file: it
 				// checks the executable bit on Unix and is a no-op on Windows
 				// (where PATHEXT above does the equivalent filtering).
@@ -95,7 +110,7 @@ function isBinaryOnPath(name: string): boolean {
 				found = true;
 				break;
 			} catch {
-				// Missing or not executable — keep looking.
+				// Missing, not a file, or not executable — keep looking.
 			}
 		}
 		if (found) break;
@@ -278,9 +293,9 @@ export function getDefaultBranchSync(
  * `<Static>` render path. Returns null when not in a git repository so
  * callers can cleanly omit the surface.
  *
- * Skips the `isInsideGitRepo()` shell-out: `getCurrentBranchSync` already
- * returns null whenever no `.git` directory is found, which is the same
- * signal at zero process-spawn cost.
+ * Skips the `isInsideGitRepo()` check entirely: `getCurrentBranchSync`
+ * already returns null whenever no `.git` directory is found, which is the
+ * same signal at zero cost.
  */
 export function getGitStatusSummarySync(
 	startDir: string = process.cwd(),
