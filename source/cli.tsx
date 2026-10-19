@@ -827,7 +827,7 @@ async function main(): Promise<void> {
 		// Screen mode: fullscreen (alt screen + in-app scroll) by DEFAULT.
 		// Passing --no-alt-screen or setting alternateScreen:false in preferences
 		// forces inline mode (main screen + native scrollback).
-		const {getAlternateScreen, getMouseReporting} = await import(
+		const {getAlternateScreen, getMouseReporting, getMaxFps} = await import(
 			'@/config/preferences'
 		);
 		const altScreenAllowed =
@@ -996,6 +996,7 @@ async function main(): Promise<void> {
 				// farewell frame before the process dies.
 				exitOnCtrlC: false,
 				...(inkStdin ? {stdin: inkStdin} : {}),
+				maxFps: getMaxFps(),
 			},
 		);
 
