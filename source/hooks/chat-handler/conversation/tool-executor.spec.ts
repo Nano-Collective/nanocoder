@@ -1,5 +1,6 @@
 import test from 'ava';
-import {displayExecutedTool, executeToolsDirectly} from './tool-executor.js';
+import {displayExecutedTool, executeToolsDirectly, executeApprovedTool} from './tool-executor.js';
+import {setWebToolLifecyclePublisher} from '@/web/tool-lifecycle';
 import type {ToolCall, ToolResult} from '@/types/core';
 
 // ============================================================================
@@ -10,6 +11,15 @@ import {setToolRegistryGetter} from '@/message-handler';
 import {ToolValidationError} from '@/utils/tool-validation';
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+test('web lifecycle reports structured tool failures as failed', async t => {
+	const outcomes: boolean[] = [];
+	setWebToolLifecyclePublisher({started: () => {}, finished: (_id, _name, ok) => outcomes.push(ok)});
+	t.teardown(() => setWebToolLifecyclePublisher(null));
+	const toolCall = {id: 'failed', function: {name: 'write_file', arguments: {}}};
+	await executeApprovedTool(toolCall, null, async () => ({tool_call_id: toolCall.id, role: 'tool', name: 'write_file', content: 'Rejected', isError: true}));
+	t.deepEqual(outcomes, [false]);
+});
 
 // Mock tool registry for tests
 const mockToolHandler: ToolCall['function']['name'] extends infer T

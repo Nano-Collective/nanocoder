@@ -14,6 +14,8 @@ import {getBaseSystemPrompt, useChatHandler} from './useChatHandler';
 import type {UseChatHandlerProps, ChatHandlerReturn} from './types';
 import type {LLMClient, Message} from '../../types/core';
 import {useUserMessageQueue} from '../useUserMessageQueue';
+import {createWebRuntimeBridge} from '@/web/runtime-bridge';
+import type {WebServerEvent} from '@/web/protocol';
 import {
         resetSessionCwd,
         setProjectRoot,
@@ -116,6 +118,45 @@ test('useChatHandler - returns correct interface', t => {
 	t.true('streamingReasoning' in hookResult!);
 	t.true('tokenCount' in hookResult!);
 });
+
+for (const timing of ['burst', 'last-token', 'nonstream'] as const) {
+	test(`browser observer delivers the complete ${timing} reply before completion`, async t => {
+		const events: WebServerEvent[] = [];
+		const bridge = createWebRuntimeBridge(event => events.push(event));
+		let hook: ChatHandlerReturn | null = null;
+		let releaseLastToken: () => void = () => {};
+		const lastTokenGate = new Promise<void>(resolve => {releaseLastToken = resolve;});
+		const client: LLMClient = {
+			...createMockClient(),
+			chat: async (_messages, _tools, callbacks) => {
+				if (timing !== 'nonstream') {
+					callbacks.onToken('Hello');
+					if (timing === 'last-token') await lastTokenGate;
+					callbacks.onToken(' world');
+				}
+				return {choices: [{message: {role: 'assistant', content: 'Hello world'}}]};
+			},
+		};
+		const instance = render(<TestHookComponent {...createMockProps({client, toolManager: createMockToolManager(),
+			onAssistantContent: bridge.publishAssistantContent,
+		})} onResult={result => {hook = result;}} />);
+		await waitForCondition(() => hook !== null);
+		bridge.bindRuntimeHandlers({submitMessage: text => hook!.handleChatMessage(text), cancel: () => {}, resetSession: () => {}});
+		await bridge.handleClientEvent({type: 'user_message', id: timing, text: 'hello'});
+		if (timing === 'last-token') {
+			await waitForCondition(() => events.some(event => event.type === 'assistant_delta'));
+			t.deepEqual(events.filter(event => event.type === 'assistant_delta').map(event => event.text), ['Hello']);
+			t.false(events.some(event => event.type === 'turn_completed'));
+			releaseLastToken();
+		}
+		await waitForCondition(() => !bridge.hasActiveBrowserTurn());
+		const text = events.filter(event => event.type === 'assistant_delta').map(event => event.text).join('');
+		t.is(text, 'Hello world');
+		t.deepEqual(events.filter(event => event.type === 'assistant_delta').map(event => event.text), timing === 'nonstream' ? ['Hello world'] : ['Hello', ' world']);
+		t.true(events.findIndex(event => event.type === 'turn_completed') > events.findIndex(event => event.type === 'assistant_delta'));
+		instance.unmount();
+	});
+}
 
 test('useChatHandler - returns correct function types', t => {
 	let hookResult: ChatHandlerReturn | null = null;
@@ -374,6 +415,43 @@ test('useChatHandler - callbacks are provided', t => {
 	t.truthy(hookResult);
 	// The hook should successfully initialize with callbacks
 	t.is(typeof props.onConversationComplete, 'function');
+});
+
+test('useChatHandler - reports setup failures through the error observer', async t => {
+	let hookResult: ChatHandlerReturn | null = null;
+	const observedErrors: unknown[] = [];
+	const throwingToolManager = {
+		...createMockToolManager(),
+		getToolNames: () => {
+			throw new Error('command prompt failed');
+		},
+	} as NonNullable<UseChatHandlerProps['toolManager']>;
+	const customCommandLoader = {
+		findRelevantCommands: () => [],
+	} as unknown as NonNullable<UseChatHandlerProps['customCommandLoader']>;
+
+	const rendered = render(
+		<TestHookComponent
+			{...createMockProps({
+				client: createMockClient(),
+				toolManager: throwingToolManager,
+				customCommandLoader,
+				onError: error => {
+					observedErrors.push(error);
+				},
+			})}
+			onResult={result => {
+				hookResult = result;
+			}}
+		/>,
+	);
+
+	await waitForCondition(() => hookResult !== null);
+	await hookResult!.handleChatMessage('current turn');
+
+	t.is(observedErrors.length, 1);
+	t.is((observedErrors[0] as Error).message, 'command prompt failed');
+	rendered.unmount();
 });
 
 test('useChatHandler - drains queued message when setup fails before conversation loop', async t => {

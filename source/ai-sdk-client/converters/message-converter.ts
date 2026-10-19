@@ -7,6 +7,7 @@ import type {
 	UserContent,
 } from 'ai';
 import type {ImageAttachment, Message} from '@/types/index';
+import {normalizeImageAttachment} from '@/utils/image-attachment';
 import {getLogger} from '@/utils/logging';
 import {filterModelFacing} from '@/utils/message-visibility';
 import {truncateToolResult} from '@/utils/truncate-tool-result';
@@ -284,15 +285,26 @@ export function convertToModelMessages(
 					content.push({type: 'text', text: msg.content} as TextPart);
 				}
 				for (const image of msg.images) {
+					let normalized;
+					try {
+						normalized = normalizeImageAttachment(image);
+					} catch {
+						getLogger().warn(
+							'Ignoring an invalid image attachment in conversation history',
+						);
+						continue;
+					}
 					content.push({
 						type: 'image',
-						image: `data:${image.mediaType};base64,${image.data}`,
-						mediaType: image.mediaType,
+						image: `data:${normalized.mediaType};base64,${normalized.data}`,
+						mediaType: normalized.mediaType,
 					} as ImagePart);
 				}
 				return {
 					role: 'user',
-					content,
+					content: content.length
+						? content
+						: [{type: 'text', text: '[Invalid image attachment omitted]'}],
 				};
 			}
 

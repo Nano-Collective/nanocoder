@@ -4,6 +4,7 @@ import {ChatHistory} from '@/app/components/chat-history';
 import {ChatInput} from '@/app/components/chat-input';
 import {ModalSelectors} from '@/app/components/modal-selectors';
 import type {SettingsTabId} from '@/app/components/settings-constants';
+import {WebModeFooter} from '@/app/components/web-mode-footer';
 import {artifactManager} from '@/artifacts/artifact-manager';
 import ArchitectReviewPrompt from '@/components/architect-review-prompt';
 import {SessionArtifactLinks} from '@/components/artifact-links-display';
@@ -62,6 +63,7 @@ interface InteractiveAppProps {
 	 */
 	altScreenActive?: boolean;
 	isSaving?: boolean;
+	webUrl?: string;
 }
 
 /**
@@ -91,6 +93,7 @@ export function InteractiveApp({
 	clearKey,
 	altScreenActive = false,
 	isSaving,
+	webUrl,
 }: InteractiveAppProps): React.ReactElement {
 	const nextRestoredDraftIdRef = React.useRef(1);
 	// Tune / IDE are launched by closing settings first, so their exit has no way
@@ -711,6 +714,7 @@ export function InteractiveApp({
 							refreshKey={artifactRefreshKey}
 						/>
 					</Box>
+					{webUrl && <WebModeFooter url={webUrl} />}
 				</Box>
 
 				{appState.startChat &&

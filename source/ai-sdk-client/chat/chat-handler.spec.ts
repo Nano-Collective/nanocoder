@@ -1121,7 +1121,7 @@ test('openai-compatible: a tool screenshot reaches the request body as an image_
 				content: 'Screenshot of http://localhost:3000/',
 				tool_call_id: 'call_shot',
 				name: 'browser',
-				images: [{data: 'SCREENSHOT_B64', mediaType: 'image/jpeg'}],
+				images: [{data: 'U0NSRUVOU0hPVA==', mediaType: 'image/jpeg'}],
 			},
 		],
 		tools: {},
@@ -1141,7 +1141,7 @@ test('openai-compatible: a tool screenshot reaches the request body as an image_
 			{type: 'text', text: 'Images from the tool results above.'},
 			{
 				type: 'image_url',
-				image_url: {url: 'data:image/jpeg;base64,SCREENSHOT_B64'},
+				image_url: {url: 'data:image/jpeg;base64,U0NSRUVOU0hPVA=='},
 			},
 		],
 	});

@@ -118,6 +118,14 @@ test('MessageBuilder addUserMessage adds user message', t => {
 	t.is(messages.length, 1);
 	t.is(messages[0].role, 'user');
 	t.is(messages[0].content, 'Hello');
+	t.is(messages[0].id, undefined);
+});
+
+test('MessageBuilder addUserMessage preserves an external id so the browser can inline errors next to the prompt that triggered them', t => {
+	const builder = new MessageBuilder([]);
+	builder.addUserMessage('Hello', undefined, 'browser-message-1');
+	const messages = builder.build();
+	t.is(messages[0].id, 'browser-message-1');
 });
 
 test('MessageBuilder addErrorMessage adds error as user message', t => {
