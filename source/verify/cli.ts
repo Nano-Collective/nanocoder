@@ -14,7 +14,7 @@
  */
 
 import {existsSync} from 'node:fs';
-import {join, resolve} from 'node:path';
+import {join} from 'node:path';
 import type {SubagentTask} from '@/subagents/types';
 import {
 	getCurrentCommitSha,
@@ -161,13 +161,8 @@ const defaultDeps: VerifyCliDeps = {
 	// Lazy import: config/preferences pulls in most of the config stack, which
 	// the argument-error fast paths above shouldn't pay for.
 	checkTrust: async (directory, bypass) => {
-		const {ensureDirectoryTrust, untrustedDirectoryMessage} = await import(
-			'@/config/preferences'
-		);
-		const trust = ensureDirectoryTrust(directory, bypass);
-		return trust.trusted
-			? null
-			: untrustedDirectoryMessage(resolve(directory), trust.recheck);
+		const {directoryTrustRefusal} = await import('@/config/preferences');
+		return directoryTrustRefusal(directory, bypass);
 	},
 	initializePlain: async opts => {
 		const {initializePlain} = await import('@/plain/initialize');
