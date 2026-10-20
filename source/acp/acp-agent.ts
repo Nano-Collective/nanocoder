@@ -566,8 +566,13 @@ export class AcpAgent implements Agent {
 				throw new Error(`Unknown provider: ${providerId}`);
 			}
 
+			const {client: newClient} = await createLLMClient(
+				providerId,
+				undefined,
+				undefined,
+				{strictProvider: true},
+			);
 			this.initContext.provider = providerId;
-			const {client: newClient} = await createLLMClient(providerId);
 			this.initContext.client = newClient;
 			setAutoCommitClient(newClient);
 
