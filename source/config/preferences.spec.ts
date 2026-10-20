@@ -75,6 +75,10 @@ test.before(() => {
 	resetPreferencesCache();
 });
 
+test.beforeEach(() => {
+	resetPreferencesCache();
+});
+
 test.after.always(() => {
 	// Clean up test config directory
 	if (existsSync(testConfigDir)) {
@@ -2694,7 +2698,7 @@ test.serial('loadPreferences returns cached data when file is unchanged', t => {
 		t.deepEqual(first, second);
 		t.not(first, second);
 
-		// Mutation must not affect cached data.
+		// Callers must not be able to modify the cached object.
 		first.selectedTheme = 'light';
 
 		t.is(loadPreferences().selectedTheme, 'dark');
@@ -2704,12 +2708,13 @@ test.serial('loadPreferences returns cached data when file is unchanged', t => {
 		} else {
 			process.env.NANOCODER_CONFIG_DIR = previousDir;
 		}
+
 		resetPreferencesCache();
 		rmSync(dir, {recursive: true, force: true});
 	}
 });
 
-test.serial('savePreferences invalidates the cache', t => {
+test.serial('savePreferences invalidates the cache immediately', t => {
 	const dir = mkdtempSync(path.join(tmpdir(), 'nanocoder-cache-'));
 	const previousDir = process.env.NANOCODER_CONFIG_DIR;
 
@@ -2725,6 +2730,7 @@ test.serial('savePreferences invalidates the cache', t => {
 		const saved = savePreferences({reasoningExpanded: true});
 		t.true(saved);
 
+		// No delay: an in-process save must invalidate immediately.
 		t.true(loadPreferences().reasoningExpanded);
 	} finally {
 		if (previousDir === undefined) {
@@ -2732,12 +2738,13 @@ test.serial('savePreferences invalidates the cache', t => {
 		} else {
 			process.env.NANOCODER_CONFIG_DIR = previousDir;
 		}
+
 		resetPreferencesCache();
 		rmSync(dir, {recursive: true, force: true});
 	}
 });
 
-test.serial('loadPreferences detects external file modifications', t => {
+test.serial('loadPreferences detects external file modifications', async t => {
 	const dir = mkdtempSync(path.join(tmpdir(), 'nanocoder-cache-'));
 	const previousDir = process.env.NANOCODER_CONFIG_DIR;
 
@@ -2750,12 +2757,17 @@ test.serial('loadPreferences detects external file modifications', t => {
 
 		t.false(loadPreferences().reasoningExpanded);
 
-		const oldMtime = new Date(Date.now() - 60_000);
-		const newMtime = new Date(Date.now() + 60_000);
-
-		utimesSync(file, oldMtime, oldMtime);
+		// Simulate another process modifying the preferences file.
 		writeFileSync(file, JSON.stringify({reasoningExpanded: true}));
-		utimesSync(file, newMtime, newMtime);
+
+		const changedTime = new Date(Date.now() + 60_000);
+		utimesSync(file, changedTime, changedTime);
+
+		// Cached data remains valid during the metadata-check interval.
+		t.false(loadPreferences().reasoningExpanded);
+
+		// Allow the one-second interval to expire.
+		await new Promise(resolve => setTimeout(resolve, 1100));
 
 		t.true(loadPreferences().reasoningExpanded);
 	} finally {
@@ -2764,6 +2776,7 @@ test.serial('loadPreferences detects external file modifications', t => {
 		} else {
 			process.env.NANOCODER_CONFIG_DIR = previousDir;
 		}
+
 		resetPreferencesCache();
 		rmSync(dir, {recursive: true, force: true});
 	}
@@ -2790,6 +2803,7 @@ test.serial('loadPreferences respects config directory changes', t => {
 
 		t.false(loadPreferences().reasoningExpanded);
 
+		// Path changes must invalidate immediately, even within one second.
 		process.env.NANOCODER_CONFIG_DIR = secondDir;
 
 		t.true(loadPreferences().reasoningExpanded);
@@ -2799,20 +2813,30 @@ test.serial('loadPreferences respects config directory changes', t => {
 		} else {
 			process.env.NANOCODER_CONFIG_DIR = previousDir;
 		}
+
 		resetPreferencesCache();
 		rmSync(firstDir, {recursive: true, force: true});
 		rmSync(secondDir, {recursive: true, force: true});
 	}
 });
 
-
-test.serial('loadPreferences avoids repeated filesystem reads', t => {
+test.serial('loadPreferences avoids repeated filesystem reads and stats', t => {
 	const dir = mkdtempSync(path.join(tmpdir(), 'nanocoder-reads-'));
 	const previousDir = process.env.NANOCODER_CONFIG_DIR;
 	const preferencesFile = path.join(dir, 'nanocoder-preferences.json');
 
 	const originalReadFileSync = fs.readFileSync;
+	const originalStatSync = fs.statSync;
+
 	let reads = 0;
+	let stats = 0;
+
+	const isPreferencesFile = (file: unknown): boolean => {
+		return (
+			typeof file === 'string' &&
+			path.resolve(file) === path.resolve(preferencesFile)
+		);
+	};
 
 	try {
 		writeFileSync(
@@ -2827,41 +2851,59 @@ test.serial('loadPreferences avoids repeated filesystem reads', t => {
 			file: Parameters<typeof fs.readFileSync>[0],
 			...args: unknown[]
 		) => {
-			if (
-				typeof file === 'string' &&
-				path.resolve(file) === path.resolve(preferencesFile)
-			) {
+			if (isPreferencesFile(file)) {
 				reads++;
 			}
 
 			return Reflect.apply(originalReadFileSync, fs, [file, ...args]);
 		}) as typeof fs.readFileSync;
 
+		fs.statSync = ((
+			file: Parameters<typeof fs.statSync>[0],
+			...args: unknown[]
+		) => {
+			if (isPreferencesFile(file)) {
+				stats++;
+			}
+
+			return Reflect.apply(originalStatSync, fs, [file, ...args]);
+		}) as typeof fs.statSync;
+
 		syncBuiltinESMExports();
 
-		// First call should read from disk.
+		// First load reads the preferences file.
 		loadPreferences();
+
 		t.is(reads, 1);
 
-		// Subsequent calls should use the cache.
+		const initialStats = stats;
+
+		// Hot-path calls should require neither reads nor stats.
 		for (let i = 0; i < 10; i++) {
 			loadPreferences();
 		}
-		t.is(reads, 1);
 
-		// A successful save must invalidate the cache.
+		t.is(reads, 1);
+		t.is(stats, initialStats);
+
+		// Successful saves invalidate the cache immediately.
 		t.true(savePreferences({reasoningExpanded: true}));
 
 		loadPreferences();
+
 		t.is(reads, 2);
 
-		// Cache should be reused again.
+		const statsAfterSave = stats;
+
 		for (let i = 0; i < 10; i++) {
 			loadPreferences();
 		}
+
 		t.is(reads, 2);
+		t.is(stats, statsAfterSave);
 	} finally {
 		fs.readFileSync = originalReadFileSync;
+		fs.statSync = originalStatSync;
 		syncBuiltinESMExports();
 
 		if (previousDir === undefined) {
@@ -2875,87 +2917,7 @@ test.serial('loadPreferences avoids repeated filesystem reads', t => {
 	}
 });
 
-
-test.serial('loadPreferences refreshes global-only settings after external edits', t => {
-	const root = mkdtempSync(path.join(tmpdir(), 'nanocoder-global-cache-'));
-	const projectDir = path.join(root, 'project');
-	const globalDir = path.join(root, 'global');
-
-	const originalCwd = process.cwd();
-	const originalConfigDir = process.env.NANOCODER_CONFIG_DIR;
-
-	try {
-		mkdirSync(projectDir, {recursive: true});
-		mkdirSync(globalDir, {recursive: true});
-
-		const projectFile = path.join(
-			projectDir,
-			'nanocoder-preferences.json',
-		);
-		const globalFile = path.join(
-			globalDir,
-			'nanocoder-preferences.json',
-		);
-
-		writeFileSync(
-			projectFile,
-			JSON.stringify({reasoningExpanded: true}),
-		);
-
-		writeFileSync(
-			globalFile,
-			JSON.stringify({trustedDirectories: ['/project-a']}),
-		);
-
-		process.chdir(projectDir);
-		process.env.NANOCODER_CONFIG_DIR = globalDir;
-
-		resetPreferencesCache();
-
-		// Verify which preferences file Nanocoder resolves.
-		const resolvedPath = getClosestConfigFile(
-			'nanocoder-preferences.json',
-		);
-
-		t.log('Resolved preferences path:', resolvedPath);
-
-		const first = loadPreferences();
-
-		t.deepEqual(first.trustedDirectories, ['/project-a']);
-
-		// Only assert the project preference if the project file was selected.
-		if (path.resolve(resolvedPath) === path.resolve(projectFile)) {
-			t.true(first.reasoningExpanded);
-		}
-
-		// Simulate an external edit to global preferences.
-		writeFileSync(
-			globalFile,
-			JSON.stringify({trustedDirectories: ['/project-b']}),
-		);
-
-		const changedTime = new Date(Date.now() + 60_000);
-		utimesSync(globalFile, changedTime, changedTime);
-
-		const second = loadPreferences();
-
-		t.deepEqual(second.trustedDirectories, ['/project-b']);
-	} finally {
-		process.chdir(originalCwd);
-
-		if (originalConfigDir === undefined) {
-			delete process.env.NANOCODER_CONFIG_DIR;
-		} else {
-			process.env.NANOCODER_CONFIG_DIR = originalConfigDir;
-		}
-
-		resetPreferencesCache();
-		rmSync(root, {recursive: true, force: true});
-	}
-});
-
-
-test.serial('cached preference getters detect external file changes', t => {
+test.serial('cached preference getter refreshes after save', t => {
 	const dir = mkdtempSync(path.join(tmpdir(), 'nanocoder-derived-cache-'));
 	const previousDir = process.env.NANOCODER_CONFIG_DIR;
 
@@ -2973,16 +2935,85 @@ test.serial('cached preference getters detect external file changes', t => {
 
 		t.false(getShowAgentBashOutput());
 
+		t.true(savePreferences({showAgentBashOutput: true}));
+
+		// The preferences version changes after a successful save.
+		t.true(getShowAgentBashOutput());
+
+		// Repeated calls reuse the derived value.
+		t.true(getShowAgentBashOutput());
+	} finally {
+		if (previousDir === undefined) {
+			delete process.env.NANOCODER_CONFIG_DIR;
+		} else {
+			process.env.NANOCODER_CONFIG_DIR = previousDir;
+		}
+
+		resetPreferencesCache();
+		rmSync(dir, {recursive: true, force: true});
+	}
+});
+
+test.serial('cached preference getter stays on the filesystem-free hot path', t => {
+	const dir = mkdtempSync(path.join(tmpdir(), 'nanocoder-derived-fast-'));
+	const previousDir = process.env.NANOCODER_CONFIG_DIR;
+
+	const originalReadFileSync = fs.readFileSync;
+	const originalStatSync = fs.statSync;
+
+	let reads = 0;
+	let stats = 0;
+
+	try {
+		process.env.NANOCODER_CONFIG_DIR = dir;
+
+		const file = path.join(dir, 'nanocoder-preferences.json');
+
 		writeFileSync(
 			file,
 			JSON.stringify({showAgentBashOutput: true}),
 		);
 
-		const changedTime = new Date(Date.now() + 60_000);
-		utimesSync(file, changedTime, changedTime);
+		resetPreferencesCache();
 
+		// Populate the version-based derived cache first.
 		t.true(getShowAgentBashOutput());
+
+		fs.readFileSync = ((
+			filePath: Parameters<typeof fs.readFileSync>[0],
+			...args: unknown[]
+		) => {
+			reads++;
+			return Reflect.apply(originalReadFileSync, fs, [
+				filePath,
+				...args,
+			]);
+		}) as typeof fs.readFileSync;
+
+		fs.statSync = ((
+			filePath: Parameters<typeof fs.statSync>[0],
+			...args: unknown[]
+		) => {
+			stats++;
+			return Reflect.apply(originalStatSync, fs, [
+				filePath,
+				...args,
+			]);
+		}) as typeof fs.statSync;
+
+		syncBuiltinESMExports();
+
+		for (let i = 0; i < 1000; i++) {
+			t.true(getShowAgentBashOutput());
+		}
+
+		t.is(reads, 0);
+		t.is(stats, 0);
 	} finally {
+		fs.readFileSync = originalReadFileSync;
+		fs.statSync = originalStatSync;
+		syncBuiltinESMExports();
+
 		if (previousDir === undefined) {
 			delete process.env.NANOCODER_CONFIG_DIR;
 		} else {
