@@ -89,6 +89,20 @@ async function waitUntil(predicate: () => boolean, timeoutMs = 400) {
 	}
 }
 
+// Keys sent before the checks settle are dropped on purpose (the selector is
+// not mounted yet), so tests that answer the prompt wait for it first.
+function waitForPrompt(lastFrame: () => string | undefined) {
+	return waitUntil(() => /Yes, execute this tool/.test(lastFrame() ?? ''));
+}
+
+function deferred<T>() {
+	let resolve: (value: T) => void = () => {};
+	const promise = new Promise<T>(r => {
+		resolve = r;
+	});
+	return {promise, resolve};
+}
+
 test.before(() => {
 	setToolManagerGetter(() => null);
 });
@@ -188,7 +202,12 @@ test('formatter crash auto-cancels without showing the approval prompt', async t
 });
 
 test('pressing Enter on the "No" option declines the tool', async t => {
-	const {stdin, record} = mountConfirmation(t, {}, {path: 'a.txt'});
+	const {stdin, lastFrame, record} = mountConfirmation(
+		t,
+		{},
+		{path: 'a.txt'},
+	);
+	await waitForPrompt(lastFrame);
 
 	// Move the highlight down to "No, cancel execution" and select it. Let the
 	// highlight re-render before pressing Enter so the selection actually lands
@@ -230,7 +249,12 @@ test('MCP tools render the server-qualified prompt', async t => {
 });
 
 test('a second answer from the same instance is ignored', async t => {
-	const {stdin, record} = mountConfirmation(t, {}, {path: 'a.txt'});
+	const {stdin, lastFrame, record} = mountConfirmation(
+		t,
+		{},
+		{path: 'a.txt'},
+	);
+	await waitForPrompt(lastFrame);
 
 	// Approve, then press Escape before the app would have unmounted this
 	// instance. The queue resolves its head on every answer, so a second answer
@@ -276,6 +300,7 @@ test('the guard resets when a new request reuses the instance', async t => {
 		setToolManagerGetter(() => null);
 	});
 
+	await waitForPrompt(app.lastFrame);
 	app.stdin.write('\r');
 	await waitUntil(() => record.confirmations.length > 0);
 
@@ -318,4 +343,82 @@ test('a validator that throws reports the error without auto-cancelling', async 
 	t.regex(lastFrame() ?? '', /validator exploded/);
 	t.deepEqual(record.confirmations, [], 'a validation error must not answer');
 	t.deepEqual(record.cancels, [], 'a validation error must not auto-cancel');
+});
+
+test('Enter is ignored while the validator is still running', async t => {
+	const validation = deferred<{valid: true}>();
+	const {stdin, lastFrame, record} = mountConfirmation(
+		t,
+		{getToolValidator: () => () => validation.promise},
+		{path: 'a.txt'},
+	);
+
+	await waitUntil(() => /Checking tool call/.test(lastFrame() ?? ''));
+	const pendingFrame = lastFrame() ?? '';
+	t.regex(pendingFrame, /Checking tool call/, 'pending state must be visible');
+	t.regex(pendingFrame, /Press Escape to cancel/);
+	t.false(
+		/Yes, execute this tool/.test(pendingFrame),
+		'selector must not render while the validator runs',
+	);
+
+	stdin.write('\r');
+	await sleep(50);
+	t.deepEqual(record.confirmations, [], 'Enter must not approve mid-check');
+
+	validation.resolve({valid: true});
+	await waitForPrompt(lastFrame);
+	t.false(/Checking tool call/.test(lastFrame() ?? ''));
+	t.deepEqual(
+		record.confirmations,
+		[],
+		'an early Enter must not be replayed once the prompt appears',
+	);
+
+	stdin.write('\r');
+	await waitUntil(() => record.confirmations.length > 0);
+	t.deepEqual(record.confirmations, [true]);
+});
+
+test('Enter is ignored while the formatter preview is loading', async t => {
+	const preview = deferred<string>();
+	const {stdin, lastFrame, record} = mountConfirmation(
+		t,
+		{getToolFormatter: () => () => preview.promise},
+		{path: 'a.txt'},
+	);
+
+	await waitUntil(() => /Loading preview/.test(lastFrame() ?? ''));
+	const loadingFrame = lastFrame() ?? '';
+	t.regex(loadingFrame, /Loading preview/);
+	t.false(
+		/Yes, execute this tool/.test(loadingFrame),
+		'selector must not render while the preview loads',
+	);
+
+	stdin.write('\r');
+	await sleep(50);
+	t.deepEqual(record.confirmations, [], 'Enter must not approve blind');
+
+	preview.resolve('preview body');
+	await waitForPrompt(lastFrame);
+	t.regex(lastFrame() ?? '', /preview body/, 'preview renders before prompt');
+	t.deepEqual(record.confirmations, []);
+});
+
+test('Escape cancels while the checks are still running', async t => {
+	const validation = deferred<{valid: true}>();
+	const {stdin, lastFrame, record} = mountConfirmation(
+		t,
+		{getToolValidator: () => () => validation.promise},
+		{path: 'a.txt'},
+	);
+
+	await waitUntil(() => /Checking tool call/.test(lastFrame() ?? ''));
+	stdin.write('\u001B');
+	await waitUntil(() => record.cancels.length > 0);
+
+	t.deepEqual(record.cancels, [1], 'Escape must cancel mid-check');
+	t.deepEqual(record.confirmations, []);
+	validation.resolve({valid: true});
 });

@@ -40,6 +40,10 @@ export default function ToolConfirmation({
 	const [isLoadingPreview, setIsLoadingPreview] = React.useState(false);
 	const [hasFormatterError, setHasFormatterError] = React.useState(false);
 	const [hasValidationError, setHasValidationError] = React.useState(false);
+	// True until the schema check, validator and formatter preview have all
+	// settled. The Yes/No selector stays unmounted until then so Enter cannot
+	// approve a call before it has been checked and shown. Escape still cancels.
+	const [isChecking, setIsChecking] = React.useState(true);
 
 	// One answer per request. The queue in useGlobalHandlerQueues resolves its
 	// head on every answer, so a second answer for a request that is already
@@ -56,6 +60,7 @@ export default function ToolConfirmation({
 	if (toolCall !== previousToolCall) {
 		setPreviousToolCall(toolCall);
 		answeredRef.current = false;
+		setIsChecking(true);
 	}
 	const answerOnce = React.useCallback((settle: () => void) => {
 		if (answeredRef.current) return;
@@ -71,6 +76,12 @@ export default function ToolConfirmation({
 
 	// Load formatter preview
 	React.useEffect(() => {
+		// A newer request (or theme change) re-runs this effect; results from
+		// the stale run must not open the gate for the new one.
+		let cancelled = false;
+		setIsChecking(true);
+		setIsLoadingPreview(false);
+
 		const loadPreview = async () => {
 			if (!toolManager) return;
 
@@ -104,6 +115,7 @@ export default function ToolConfirmation({
 			if (validator) {
 				try {
 					const validationResult = await validator(parsedArgs);
+					if (cancelled) return;
 					if (!validationResult.valid) {
 						setHasValidationError(true);
 						setFormatterPreview(
@@ -112,6 +124,7 @@ export default function ToolConfirmation({
 						return;
 					}
 				} catch (error) {
+					if (cancelled) return;
 					const logger = getLogger();
 					logger.error({error: formatError(error)}, 'Error running validator');
 					const errorMsg = `Validation error: ${formatError(error)}`;
@@ -127,8 +140,10 @@ export default function ToolConfirmation({
 				setIsLoadingPreview(true);
 				try {
 					const preview = await formatter(parsedArgs);
+					if (cancelled) return;
 					setFormatterPreview(preview);
 				} catch (error) {
+					if (cancelled) return;
 					const logger = getLogger();
 					logger.error(
 						{error: formatError(error)},
@@ -139,12 +154,18 @@ export default function ToolConfirmation({
 						<Text color={colors.error}>Error: {String(error)}</Text>,
 					);
 				} finally {
-					setIsLoadingPreview(false);
+					if (!cancelled) setIsLoadingPreview(false);
 				}
 			}
 		};
 
-		void loadPreview();
+		void loadPreview().finally(() => {
+			if (!cancelled) setIsChecking(false);
+		});
+
+		return () => {
+			cancelled = true;
+		};
 	}, [toolCall, toolManager, colors.error]);
 
 	// Handle escape key to cancel
@@ -192,6 +213,12 @@ export default function ToolConfirmation({
 			marginBottom={1}
 		>
 			<Box flexDirection="column">
+				{isChecking && !isLoadingPreview && (
+					<Box marginBottom={1}>
+						<Text color={colors.secondary}>Checking tool call...</Text>
+					</Box>
+				)}
+
 				{/* Formatter preview */}
 				{isLoadingPreview && (
 					<Box marginBottom={1}>
@@ -213,10 +240,17 @@ export default function ToolConfirmation({
 					</Box>
 				)}
 
-				{/* Show the approval prompt unless a formatter crash already
-					auto-cancelled the call. Validation errors render above the
-					prompt so the user sees what is wrong before deciding. */}
-				{!hasFormatterError && (
+				{isChecking && (
+					<Box>
+						<Text color={colors.secondary}>Press Escape to cancel</Text>
+					</Box>
+				)}
+
+				{/* Show the approval prompt once every check has settled, unless a
+					formatter crash already auto-cancelled the call. Validation
+					errors render above the prompt so the user sees what is wrong
+					before deciding. */}
+				{!isChecking && !hasFormatterError && (
 					<>
 						<Box marginBottom={1}>
 							<Text color={colors.tool}>
