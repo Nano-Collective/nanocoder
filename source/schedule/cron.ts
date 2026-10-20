@@ -36,8 +36,11 @@ export function formatCronHuman(expression: string): string {
 	const parts = expression.trim().split(/\s+/);
 	if (parts.length < 5 || parts.length > 6) return expression;
 
-	// A leading seconds field shifts every following field by one.
+	// A leading seconds field shifts every following field by one. Only a zero
+	// seconds field is safe to describe with the five-field sentences; any
+	// other seconds value would be silently dropped, so return the input.
 	const offset = parts.length === 6 ? 1 : 0;
+	if (offset === 1 && parts[0] !== '0') return expression;
 	const [minute, hour, dayOfMonth, month, dayOfWeek] = [
 		parts[offset],
 		parts[offset + 1],
@@ -70,20 +73,22 @@ export function formatCronHuman(expression: string): string {
 		monthMatch &&
 		weekdayMatch
 	) {
-		return `every ${minuteStep} minutes`;
+		return minuteStep === 1 ? 'every minute' : `every ${minuteStep} minutes`;
 	}
 
+	// A wildcard minute with a stepped hour fires every minute of the selected
+	// hours, which the hourly sentence would mislabel, so leave it to the
+	// raw-expression fallback below.
 	const hourStep = stepValue(hour);
 	if (
 		minuteStep === null &&
+		!isWildcard(minute) &&
 		hourStep !== null &&
 		dayMatch &&
 		monthMatch &&
 		weekdayMatch
 	) {
-		return minute === '*'
-			? `every ${hourStep} hours`
-			: `every ${hourStep} hours at minute ${minute}`;
+		return `every ${hourStep} hours at minute ${minute}`;
 	}
 
 	if (
