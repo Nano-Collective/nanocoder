@@ -74,6 +74,46 @@ async function createTestFile(
 	return filePath;
 }
 
+// Encoding Round-Trip Tests
+// ============================================================================
+
+test('string_replace: refuses a file whose bytes cannot round-trip UTF-8', async t => {
+	// A Latin-1 \u00E9 byte on a line the edit never touches must survive the edit.
+	// Decoding the whole file as UTF-8 turns it into U+FFFD, and writing that back
+	// damages the untouched line (#1854).
+	const filePath = join(testDir, 'legacy.txt');
+	await writeFile(filePath, Buffer.from('caf\u00E9\nold\n', 'latin1'));
+
+	const error = await t.throwsAsync(
+		executeStringReplace({
+			path: filePath,
+			old_str: 'old',
+			new_str: 'new',
+		}),
+	);
+
+	t.truthy(error);
+	t.regex(error.message, /not valid UTF-8/);
+
+	// The file on disk is untouched.
+	const after = await readFile(filePath);
+	t.deepEqual(after, Buffer.from('caf\u00E9\nold\n', 'latin1'));
+});
+
+test('string_replace: still edits a valid UTF-8 file with non-ASCII content', async t => {
+	const filePath = await createTestFile('utf8.txt', 'caf\u00E9\nold\n');
+
+	const result = await executeStringReplace({
+		path: filePath,
+		old_str: 'old',
+		new_str: 'new',
+	});
+
+	t.true(result.includes('new'));
+	const after = await readFile(filePath);
+	t.deepEqual(after, Buffer.from('caf\u00E9\nnew\n', 'utf-8'));
+});
+
 // ============================================================================
 // Approval Tests
 // ============================================================================

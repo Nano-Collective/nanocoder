@@ -8,7 +8,11 @@ import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 import {EditRecoveryError} from '@/utils/edit-recovery';
 import {formatError} from '@/utils/error-formatter';
-import {getCachedFileContent, invalidateCache} from '@/utils/file-cache';
+import {
+	assertRoundTrippable,
+	getCachedFileContent,
+	invalidateCache,
+} from '@/utils/file-cache';
 import {replaceFirstLiteral} from '@/utils/literal-replace';
 import {validateEditableFormat, validatePath} from '@/utils/path-validators';
 import {
@@ -104,6 +108,9 @@ const executeStringReplace = async (
 	}
 
 	const newContent = replaceFirstLiteral(fileContent, old_str, new_str);
+	// Refuse rather than write a file whose untouched bytes would be replaced
+	// with U+FFFD by the lossy UTF-8 decode behind the cached content.
+	await assertRoundTrippable(absPath, fileContent);
 	await writeFile(absPath, newContent, 'utf-8');
 	invalidateCache(absPath);
 	// The model now knows the file's current contents, so a follow-up edit is
