@@ -508,6 +508,8 @@ export const executeToolsDirectly = async (
 		 */
 		signal?: AbortSignal;
 		executionContext?: Omit<ToolExecutionContext, 'abortSignal'>;
+		/** Stop the batch when an execution-time approval decision changes. */
+		beforeExecute?: (toolCall: ToolCall) => Promise<boolean>;
 	},
 ): Promise<ToolResult[]> => {
 	// Import processToolUse here to avoid circular dependencies
@@ -524,6 +526,11 @@ export const executeToolsDirectly = async (
 	const directResults: ToolResult[] = [];
 
 	for (const {group, type} of groups) {
+		for (const toolCall of group) {
+			if (options?.beforeExecute && !(await options.beforeExecute(toolCall))) {
+				return directResults;
+			}
+		}
 		let executions: Array<{
 			toolCall: ToolCall;
 			result: ToolResult;

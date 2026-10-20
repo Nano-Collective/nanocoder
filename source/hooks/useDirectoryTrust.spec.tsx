@@ -1,9 +1,11 @@
-import {mkdtemp, rm} from 'node:fs/promises';
+import {mkdir, mkdtemp, rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join, resolve, sep} from 'node:path';
 import test from 'ava';
 import {render} from 'ink-testing-library';
 import React from 'react';
+import {writeFileSync} from 'node:fs';
+import {describeProjectTrust} from '@/config/project-trust';
 import {
 	isDirectoryTrusted,
 	loadPreferences,
@@ -52,10 +54,30 @@ const flush = () => new Promise(resolve => setTimeout(resolve, 30));
 
 // Serial: each test swaps the process-wide NANOCODER_CONFIG_DIR.
 test.serial('reports trust exactly as isDirectoryTrusted does', async t => {
-	const cases: Array<{label: string; stored: (root: string) => string[]}> = [
+	const cases: Array<{
+		label: string;
+		stored: (root: string) => Array<string | {path: string; fingerprint: string}>;
+	}> = [
 		{label: 'no entries', stored: () => []},
-		{label: 'exact entry', stored: root => [root]},
-		{label: 'un-normalized entry', stored: root => [unnormalized(root)]},
+		{
+			label: 'current fingerprint',
+			stored: root => [
+				{path: root, fingerprint: describeProjectTrust(root).fingerprint},
+			],
+		},
+		{
+			label: 'un-normalized entry',
+			stored: root => [
+				{
+					path: unnormalized(root),
+					fingerprint: describeProjectTrust(root).fingerprint,
+				},
+			],
+		},
+		{
+			label: 'path only',
+			stored: root => [root],
+		},
 		{label: 'unrelated entry', stored: root => [join(root, 'elsewhere')]},
 	];
 
@@ -89,7 +111,12 @@ test.serial(
 			t.true(hook.current?.isTrusted);
 			unmount();
 			resetPreferencesCache();
-			t.deepEqual(loadPreferences().trustedDirectories, [resolve(root)]);
+			t.deepEqual(loadPreferences().trustedDirectories, [
+				{
+					path: resolve(root),
+					fingerprint: describeProjectTrust(root).fingerprint,
+				},
+			]);
 		});
 	},
 );
@@ -100,7 +127,10 @@ test.serial(
 		await withIsolatedPreferences(async root => {
 			// Stored in a form only the shared resolution rule recognises: an
 			// exact-string check would miss it and append a duplicate entry.
-			const stored = unnormalized(root);
+			const stored = {
+				path: unnormalized(root),
+				fingerprint: describeProjectTrust(root).fingerprint,
+			};
 			savePreferences({trustedDirectories: [stored]});
 			resetPreferencesCache();
 
@@ -113,6 +143,31 @@ test.serial(
 			unmount();
 			resetPreferencesCache();
 			t.deepEqual(loadPreferences().trustedDirectories, [stored]);
+		});
+	},
+);
+
+test.serial(
+	'handleConfirmTrust saves the fingerprint the prompt showed',
+	async t => {
+		await withIsolatedPreferences(async root => {
+			const shown = describeProjectTrust(root).fingerprint;
+			const {hook, unmount} = mountHook(root);
+
+			// A plugin lands while the prompt is still open.
+			const plugins = join(root, '.nanocoder', 'plugins');
+			await mkdir(plugins, {recursive: true});
+			writeFileSync(join(plugins, 'late.mjs'), 'export default {}\n');
+
+			hook.current?.handleConfirmTrust(shown);
+			await flush();
+			unmount();
+			resetPreferencesCache();
+
+			t.deepEqual(loadPreferences().trustedDirectories, [
+				{path: resolve(root), fingerprint: shown},
+			]);
+			t.false(isDirectoryTrusted(root, loadPreferences()));
 		});
 	},
 );

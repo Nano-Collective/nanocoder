@@ -195,3 +195,38 @@ test('createErrorInfo - recognizes ETIMEDOUT as a network and timeout error', t 
 	t.true(result.isTimeoutError);
 	t.is(result.code, 'ETIMEDOUT');
 });
+
+test('createErrorInfo - validation message is not classified as network', t => {
+	const result = createErrorInfo(new Error('validation failed for connection'));
+
+	t.true(result.isValidationError);
+	t.false(result.isNetworkError);
+	t.false(result.isTimeoutError);
+});
+
+test('createErrorInfo - network error code wins over validation keywords', t => {
+	const error = Object.assign(new Error('invalid endpoint'), {
+		code: 'ECONNREFUSED',
+	});
+	const result = createErrorInfo(error);
+
+	t.true(result.isNetworkError);
+	t.true(result.isValidationError);
+});
+
+test('createErrorInfo - ETIMEDOUT wins over validation keywords', t => {
+	const error = Object.assign(new Error('api key required'), {
+		code: 'ETIMEDOUT',
+	});
+	const result = createErrorInfo(error);
+
+	t.true(result.isNetworkError);
+	t.true(result.isTimeoutError);
+});
+
+test('createErrorInfo - validation message is not classified as timeout', t => {
+	const result = createErrorInfo(new Error('validation timeout'));
+
+	t.true(result.isValidationError);
+	t.false(result.isTimeoutError);
+});

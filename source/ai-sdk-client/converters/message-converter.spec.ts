@@ -262,6 +262,112 @@ test('convertToModelMessages converts tool message', t => {
 	t.is(content[0].output?.value, 'Tool result');
 });
 
+test('convertToModelMessages emits image-data parts for tool screenshots', t => {
+	const messages: Message[] = [
+		{
+			role: 'assistant',
+			content: '',
+			tool_calls: [
+				{id: 'call_shot', function: {name: 'browser', arguments: {}}},
+			],
+		},
+		{
+			role: 'tool',
+			content: 'Screenshot of http://localhost:3000/',
+			tool_call_id: 'call_shot',
+			name: 'browser',
+			images: [{data: 'abc', mediaType: 'image/jpeg'}],
+		},
+	];
+
+	const result = convertToModelMessages(messages);
+	const toolMsg = result[1];
+	t.is(toolMsg.role, 'tool');
+	if (toolMsg.role !== 'tool' || !Array.isArray(toolMsg.content)) {
+		t.fail('screenshot tool result must be a tool message');
+		return;
+	}
+	const part = toolMsg.content[0];
+	if (!part || part.type !== 'tool-result' || part.output.type !== 'content') {
+		t.fail('screenshot must use the SDK content tool-result output');
+		return;
+	}
+	t.deepEqual(part.output.value, [
+		{type: 'text', text: 'Screenshot of http://localhost:3000/'},
+		{type: 'image-data', data: 'abc', mediaType: 'image/jpeg'},
+	]);
+});
+
+test('convertToModelMessages moves tool images after the whole run of tool results', t => {
+	const messages: Message[] = [
+		{
+			role: 'assistant',
+			content: '',
+			tool_calls: [
+				{id: 'call_shot', function: {name: 'browser', arguments: {}}},
+				{id: 'call_read', function: {name: 'read_file', arguments: {}}},
+			],
+		},
+		{
+			role: 'tool',
+			content: 'Screenshot',
+			tool_call_id: 'call_shot',
+			name: 'browser',
+			images: [{data: 'abc', mediaType: 'image/jpeg'}],
+		},
+		{
+			role: 'tool',
+			content: 'file body',
+			tool_call_id: 'call_read',
+			name: 'read_file',
+		},
+		{role: 'user', content: 'next'},
+	];
+
+	const result = convertToModelMessages(messages, 'user-message');
+	t.deepEqual(
+		result.map(m => m.role),
+		['assistant', 'tool', 'tool', 'user', 'user'],
+	);
+	t.deepEqual(result[3], {
+		role: 'user',
+		content: [
+			{type: 'text', text: 'Images from the tool results above.'},
+			{type: 'image', image: 'data:image/jpeg;base64,abc', mediaType: 'image/jpeg'},
+		],
+	});
+	t.false(JSON.stringify(result.slice(0, 3)).includes('abc'));
+});
+
+test('convertToModelMessages drops tool images for a model without image input', t => {
+	const messages: Message[] = [
+		{
+			role: 'assistant',
+			content: '',
+			tool_calls: [
+				{id: 'call_shot', function: {name: 'browser', arguments: {}}},
+			],
+		},
+		{
+			role: 'tool',
+			content: 'Screenshot',
+			tool_call_id: 'call_shot',
+			name: 'browser',
+			images: [{data: 'abc', mediaType: 'image/jpeg'}],
+		},
+	];
+
+	const result = convertToModelMessages(messages, 'omit');
+	t.is(result.length, 2);
+	const serialized = JSON.stringify(result);
+	t.false(serialized.includes('abc'));
+	t.true(
+		serialized.includes(
+			'Screenshot\\n[Image not sent: this model does not accept image input.]',
+		),
+	);
+});
+
 test('convertToModelMessages emits a json output for structured tool results', t => {
 	const messages: Message[] = [
 		{

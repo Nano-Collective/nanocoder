@@ -64,7 +64,8 @@ export const lazyCommands: LazyCommand[] = [
 	},
 	{
 		name: 'copy',
-		description: 'Copy the last assistant response to the clipboard',
+		description:
+			'Copy the last assistant response to the clipboard (/copy [code] for the last code block)',
 		load: () => import('@/commands/copy').then(m => m.copyCommand),
 	},
 	{
@@ -85,6 +86,7 @@ export const lazyCommands: LazyCommand[] = [
 		description:
 			'Review a branch or PR diff for bugs, security issues, and style violations',
 		progressLabel: 'Reviewing code',
+		echoInvocation: true,
 		load: () => import('@/commands/review').then(m => m.reviewCommand),
 	},
 	{

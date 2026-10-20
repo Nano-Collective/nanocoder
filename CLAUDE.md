@@ -23,6 +23,7 @@ pnpm run test:lint                              # Biome lint check
 pnpm run test:lint:fix                          # Auto-fix lint/format issues
 pnpm run test:knip                              # Unused code detection
 pnpm run test:benchmark                         # Run model benchmarks
+pnpm run test:agent-eval                        # Agent evaluation harness (steps/tokens/cost per task; needs a model, not part of test:all)
 
 # VS Code extension
 pnpm run build:vscode   # Build extension to assets/nanocoder-vscode.vsix

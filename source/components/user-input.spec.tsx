@@ -1,3 +1,4 @@
+import '../test-utils/isolated-config-dir';
 import {mkdtempSync, rmSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
@@ -11,7 +12,9 @@ import {TitleShapeContext} from '../hooks/useTitleShape';
 import {UIStateProvider, useUIStateContext} from '../hooks/useUIState';
 import {clearFileListCache} from '../utils/file-autocomplete';
 import {pasteEvents} from '../utils/terminal-paste';
-import UserInput from './user-input';
+import UserInput, {findReverseMatch} from './user-input';
+import {getClosestConfigFile} from '../config/index';
+import {promptHistory} from '../prompt-history';
 
 console.log(`\nuser-input.spec.tsx – ${React.version}`);
 
@@ -271,7 +274,8 @@ test('UserInput opens the shortcuts overlay on ? in an empty prompt and closes i
 
 	stdin.write('?');
 	await waitForFrame(lastFrame, /Keyboard Shortcuts/);
-	t.regex(lastFrame()!, /Shift\+Tab/);
+	// The legend row, not the status row's "(Shift+Tab to cycle)" hint below it.
+	t.regex(lastFrame()!, /Cycle development mode/);
 	t.notRegex(stripAnsi(lastFrame()!), /Ask anything/);
 
 	// Keys are swallowed while the overlay is open, so the prompt stays empty
@@ -403,6 +407,82 @@ test.serial(
 				'Mode indicator text should start one step to the right of the input box border',
 			);
 
+			unmount();
+		} finally {
+			Object.defineProperty(process.stdout, 'columns', {
+				value: originalColumns,
+				configurable: true,
+			});
+		}
+	},
+);
+
+// Serial: these mutate the global process.stdout.columns. Run alone so the
+// forced width can't leak into a concurrently-rendering sibling test.
+test.serial(
+	'UserInput keeps the left border, prompt marker, and placeholder start visible below the 40-col width floor',
+	t => {
+		const originalColumns = process.stdout.columns;
+		// Narrower than PROMPT_WIDTH_MIN (40): before the fix, the box's width
+		// floor exceeded the terminal it was centered in, so Ink gave it a
+		// negative left offset and clipped the border/marker/placeholder start.
+		Object.defineProperty(process.stdout, 'columns', {
+			value: 30,
+			configurable: true,
+		});
+
+		try {
+			const {lastFrame, unmount} = render(
+				<TestWrapper>
+					<UserInput forceFocus={true} />
+				</TestWrapper>,
+			);
+
+			const output = stripAnsi(lastFrame() ?? '');
+			t.regex(output, /╭/, 'left border must be on-screen, not clipped');
+			t.regex(output, />\s/, 'prompt marker must be on-screen, not clipped');
+			t.regex(
+				output,
+				/Ask/,
+				'the start of the placeholder must be visible, not cut off from the left',
+			);
+			unmount();
+		} finally {
+			Object.defineProperty(process.stdout, 'columns', {
+				value: originalColumns,
+				configurable: true,
+			});
+		}
+	},
+);
+
+test.serial(
+	'UserInput input box never exceeds the terminal width it is centered in',
+	t => {
+		const originalColumns = process.stdout.columns;
+		Object.defineProperty(process.stdout, 'columns', {
+			value: 20,
+			configurable: true,
+		});
+
+		try {
+			const {lastFrame, unmount} = render(
+				<TestWrapper>
+					<UserInput forceFocus={true} />
+				</TestWrapper>,
+			);
+
+			const output = stripAnsi(lastFrame() ?? '');
+			const borderLine = output.split('\n').find(line => line.includes('╭'));
+			t.truthy(borderLine, 'left border must be on-screen, not clipped');
+			// The old unclamped floor (40) would have pushed this line's rendered
+			// content well past the 20-column terminal; every line must fit.
+			for (const line of output.split('\n')) {
+				t.true(
+					line.length <= 20,
+					`line exceeds the 20-column terminal width: ${JSON.stringify(line)}`,
+				);
+			}
 			unmount();
 		} finally {
 			Object.defineProperty(process.stdout, 'columns', {
@@ -1218,6 +1298,41 @@ test('UserInput does not insert a literal character when ctrl+t is pressed', asy
 	unmount();
 });
 
+test('UserInput calls onToggleReasoningExpanded when ctrl+n is pressed', async t => {
+	let toggles = 0;
+
+	const {stdin, unmount} = render(
+		<TestWrapper>
+			<UserInput
+				forceFocus={true}
+				onToggleReasoningExpanded={() => toggles++}
+			/>
+		</TestWrapper>,
+	);
+
+	stdin.write('\u000e');
+	await waitForCondition(() => toggles === 1);
+
+	t.is(toggles, 1);
+	unmount();
+});
+
+test('UserInput does not insert a literal character when ctrl+n is pressed', async t => {
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput forceFocus={true} onToggleReasoningExpanded={() => {}} />
+		</TestWrapper>,
+	);
+
+	stdin.write('hi');
+	await waitForFrame(lastFrame, /hi/);
+	stdin.write('\u000e');
+	await wait(50);
+
+	t.notRegex(lastFrame()!, /hig/);
+	unmount();
+});
+
 // ============================================================================
 // Undo / Redo (Ctrl+Z / Ctrl+Y) Tests
 // ============================================================================
@@ -1302,13 +1417,14 @@ test('UserInput ctrl+z does not insert a literal character', async t => {
 		</TestWrapper>,
 	);
 
-	stdin.write('ab');
-	await waitForFrame(lastFrame, /ab/);
+	// Not 'ab': the status row's "(Shift+Tab to cycle)" hint contains it.
+	stdin.write('xy');
+	await waitForFrame(lastFrame, /xy/);
 	stdin.write('\u001a');
 	await wait(50);
 
-	// Undo should remove "b", not append a control character.
-	t.notRegex(lastFrame()!, /ab/);
+	// Undo should remove "y", not append a control character.
+	t.notRegex(lastFrame()!, /xy/);
 	unmount();
 });
 
@@ -1446,6 +1562,74 @@ test('Enter on a partly typed command still completes it without submitting', as
 
 	t.regex(stripAnsi(lastFrame()!), /\/test-help/);
 	t.is(submitted, null);
+});
+
+test('Escape on an empty composer does not offer to clear', async t => {
+	// Nothing to clear: no text, no attachments, no active editor pill.
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput forceFocus={true} />
+		</TestWrapper>,
+	);
+
+	stdin.write('\u001B');
+	// Can't synchronize on a second keystroke here: any other key - including
+	// one sent purely to prove Escape's handler has run - dismisses the hint
+	// itself (user-input.tsx's own "clear clear message on other input"), so
+	// it would pass whether or not Escape actually skipped showing it. 500ms
+	// is generous slack for a synchronous state update with no async work in
+	// between.
+	await wait(500);
+
+	t.notRegex(lastFrame()!, /Press escape again to clear/);
+	unmount();
+});
+
+test('Escape still offers to clear when the composer has text', async t => {
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput forceFocus={true} />
+		</TestWrapper>,
+	);
+
+	stdin.write('hello');
+	await waitForFrame(lastFrame, /hello/);
+	stdin.write('\u001B');
+	await waitForFrame(lastFrame, /Press escape again to clear/);
+
+	stdin.write('\u001B');
+	await waitForCondition(
+		() => !/hello/.test(stripAnsi(lastFrame() ?? '')),
+	);
+
+	t.notRegex(stripAnsi(lastFrame()!), /Press escape again to clear/);
+	unmount();
+});
+
+test('Escape with only an active editor pill still offers to clear, and clearing dismisses it', async t => {
+	// The pill is the only clearable thing here - an empty-input skip must not
+	// strand it undismissable.
+	let dismissed = 0;
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput
+				forceFocus={true}
+				activeEditor={{fileName: 'app.ts'}}
+				onDismissActiveEditor={() => {
+					dismissed++;
+				}}
+			/>
+		</TestWrapper>,
+	);
+
+	stdin.write('\u001B');
+	await waitForFrame(lastFrame, /Press escape again to clear/);
+
+	stdin.write('\u001B');
+	await waitForCondition(() => dismissed > 0);
+
+	t.is(dismissed, 1);
+	unmount();
 });
 
 test('completion menu dismissal/reset after selection or escape', async t => {
@@ -1915,3 +2099,413 @@ test.serial(
 		unmount();
 	},
 );
+
+// A paste lands out of band, while TextInput still holds the value it last
+// rendered. Keys that arrive before the re-render must build on the paste,
+// not on that stale value. No awaits between the paste and the keys: that
+// gap is the race.
+const PASTE = 'line one\nline two\nline three';
+
+test.serial(
+	'UserInput keeps a paste placeholder when typing lands immediately after it',
+	async t => {
+		const {stdin, lastFrame, unmount} = render(
+			<TestWrapper>
+				<UserInput forceFocus={true} />
+			</TestWrapper>,
+		);
+
+		await wait(50);
+		pasteEvents.emit('paste', PASTE);
+		stdin.write('x');
+
+		await waitForFrame(lastFrame, /\[Paste #\d+: [^\]]+\]x/);
+		t.pass();
+		unmount();
+	},
+);
+
+test.serial(
+	'UserInput keeps a paste and key order when several keys land immediately after it',
+	async t => {
+		const {stdin, lastFrame, unmount} = render(
+			<TestWrapper>
+				<UserInput forceFocus={true} />
+			</TestWrapper>,
+		);
+
+		await wait(50);
+		pasteEvents.emit('paste', PASTE);
+		stdin.write('x');
+		stdin.write('y');
+		stdin.write('z');
+
+		await waitForFrame(lastFrame, /\[Paste #\d+: [^\]]+\]xyz/);
+		t.pass();
+		unmount();
+	},
+);
+
+test.serial(
+	'UserInput applies a Backspace that lands immediately after a paste at the post-paste caret',
+	async t => {
+		const {stdin, lastFrame, unmount} = render(
+			<TestWrapper>
+				<UserInput forceFocus={true} />
+			</TestWrapper>,
+		);
+
+		await wait(50);
+		stdin.write('abc');
+		await waitForFrame(lastFrame, /abc/);
+		pasteEvents.emit('paste', PASTE);
+		// The caret is parked after the placeholder, so the Backspace removes
+		// it whole - as it would once the paste is shown - and "abc" survives.
+		// It must not be swallowed (placeholder left behind) or applied to the
+		// pre-paste value.
+		stdin.write('\u007F');
+
+		await waitForCondition(() => !(lastFrame() ?? '').includes('[Paste #'));
+		await wait(50);
+		const frame = stripAnsi(lastFrame()!);
+		t.notRegex(frame, /\[Paste #/);
+		t.regex(frame, /abc/);
+		unmount();
+	},
+);
+
+test.serial(
+	'UserInput puts a key that lands immediately after a mid-string paste right after the splice',
+	async t => {
+		const {stdin, lastFrame, unmount} = render(
+			<TestWrapper>
+				<UserInput forceFocus={true} />
+			</TestWrapper>,
+		);
+
+		await wait(50);
+		stdin.write('abc');
+		await waitForFrame(lastFrame, /abc/);
+		// Caret to offset 1 (between 'a' and 'bc').
+		stdin.write('\x1B[D');
+		stdin.write('\x1B[D');
+		await wait(50);
+
+		// No await between the paste and the key.
+		pasteEvents.emit('paste', 'XY');
+		stdin.write('Z');
+
+		await waitForFrame(lastFrame, /aXYZbc/);
+		t.regex(stripAnsi(lastFrame()!), /aXYZbc/);
+		unmount();
+	},
+);
+
+test.serial(
+	'UserInput submits a paste when Enter lands immediately after it',
+	async t => {
+		let submittedDisplay: string | undefined;
+
+		const {stdin, lastFrame, unmount} = render(
+			<TestWrapper>
+				<UserInput
+					forceFocus={true}
+					onSubmit={(_message, display) => {
+						submittedDisplay = display;
+					}}
+				/>
+			</TestWrapper>,
+		);
+
+		await wait(50);
+		pasteEvents.emit('paste', PASTE);
+		stdin.write('\r');
+
+		await waitForCondition(() => submittedDisplay !== undefined);
+		t.regex(submittedDisplay!, /\[Paste #\d+: [^\]]+\]/);
+		t.notRegex(lastFrame()!, /\[Paste #/);
+		unmount();
+	},
+);
+
+// ============================================================================
+// Reverse History Search (Ctrl+R / bck-i-search) Tests
+// ============================================================================
+
+// Start every history-dependent test from an empty history. This only touches
+// the temp config dir set up by test-utils/isolated-config-dir, never the
+// developer's real prompt history.
+async function resetPromptHistory(): Promise<void> {
+	writeFileSync(
+		getClosestConfigFile('.nano-coder-history'),
+		'---JSON_FORMAT---[]',
+		'utf8',
+	);
+	await promptHistory.loadHistory();
+}
+
+test('findReverseMatch finds matches backwards from newest to oldest', t => {
+	const history = [
+		{displayValue: 'git log', placeholderContent: {}},
+		{displayValue: 'npm test', placeholderContent: {}},
+		{displayValue: 'git status', placeholderContent: {}},
+	];
+
+	// Search from newest (index 2)
+	const match1 = findReverseMatch(history, 'git', 2);
+	t.truthy(match1);
+	t.is(match1?.index, 2);
+	t.is(match1?.match.displayValue, 'git status');
+
+	// Search backwards from index 1
+	const match2 = findReverseMatch(history, 'git', 1);
+	t.truthy(match2);
+	t.is(match2?.index, 0);
+	t.is(match2?.match.displayValue, 'git log');
+
+	// Search non-matching
+	const matchNone = findReverseMatch(history, 'python', 2);
+	t.is(matchNone, null);
+});
+
+test('findReverseMatch is case-insensitive', t => {
+	const history = [
+		{displayValue: 'Git Commit -m "feat"', placeholderContent: {}},
+	];
+	const match = findReverseMatch(history, 'git commit', 0);
+	t.truthy(match);
+	t.is(match?.match.displayValue, 'Git Commit -m "feat"');
+});
+
+test.serial('UserInput enters reverse prompt search on ctrl+r and displays matched prompt', async t => {
+	await resetPromptHistory();
+	promptHistory.addPrompt('seed alpha prompt');
+	promptHistory.addPrompt('seed beta prompt');
+	await promptHistory.saveHistory();
+
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput forceFocus={true} />
+		</TestWrapper>,
+	);
+
+	await wait(50);
+	stdin.write('\u0012');
+	await waitForFrame(lastFrame, /seed beta prompt/);
+	t.regex(lastFrame()!, /\(reverse-i-search\)`/);
+	unmount();
+});
+
+test.serial('UserInput filters history during reverse search as query is typed', async t => {
+	await resetPromptHistory();
+	promptHistory.addPrompt('special deploy command');
+	promptHistory.addPrompt('common test command');
+	await promptHistory.saveHistory();
+
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput forceFocus={true} />
+		</TestWrapper>,
+	);
+
+	await wait(50);
+	stdin.write('\u0012');
+	await waitForFrame(lastFrame, /\(reverse-i-search\)`/);
+
+	stdin.write('deploy');
+	await waitForFrame(lastFrame, /special deploy command/);
+	t.regex(stripAnsi(lastFrame() ?? ''), /\(reverse-i-search\)`deploy':/);
+	unmount();
+});
+
+test.serial('UserInput cycles older matches on repeated ctrl+r', async t => {
+	promptHistory.addPrompt('echo first unique');
+	promptHistory.addPrompt('echo second unique');
+	promptHistory.addPrompt('echo third unique');
+	await promptHistory.saveHistory();
+
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput forceFocus={true} />
+		</TestWrapper>,
+	);
+
+	await wait(50);
+	stdin.write('\u0012');
+	await waitForFrame(lastFrame, /\(reverse-i-search\)`/);
+
+	stdin.write('echo');
+	await waitForFrame(lastFrame, /echo third unique/);
+
+	// Press Ctrl+R to cycle to older match
+	stdin.write('\u0012');
+	await waitForFrame(lastFrame, /echo second unique/);
+
+	// Press Ctrl+R again to cycle to oldest match
+	stdin.write('\u0012');
+	await waitForFrame(lastFrame, /echo first unique/);
+
+	// Press Ctrl+R again - stops at oldest match
+	stdin.write('\u0012');
+	await wait(50);
+	t.regex(lastFrame()!, /echo first unique/);
+
+	unmount();
+});
+
+test.serial('UserInput commits matched prompt into input on Enter', async t => {
+	promptHistory.addPrompt('confirmed reusable command');
+	await promptHistory.saveHistory();
+
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput forceFocus={true} />
+		</TestWrapper>,
+	);
+
+	await wait(50);
+	stdin.write('\u0012');
+	await waitForFrame(lastFrame, /\(reverse-i-search\)`/);
+
+	stdin.write('reusable');
+	await waitForFrame(lastFrame, /confirmed reusable command/);
+
+	// Press Enter to accept
+	stdin.write('\r');
+	await wait(50);
+
+	// Search UI should be dismissed and input should contain the accepted prompt
+	t.notRegex(lastFrame()!, /\(reverse-i-search\)/);
+	t.regex(lastFrame()!, /confirmed reusable command/);
+	unmount();
+});
+
+test.serial('UserInput cancels reverse search on Escape and restores original draft', async t => {
+	await resetPromptHistory();
+	promptHistory.addPrompt('history command to ignore');
+	await promptHistory.saveHistory();
+
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput forceFocus={true} />
+		</TestWrapper>,
+	);
+
+	// Type initial draft
+	stdin.write('my in-progress draft');
+	await waitForFrame(lastFrame, /my in-progress draft/);
+
+	// Open reverse search
+	stdin.write('\u0012');
+	await waitForFrame(lastFrame, /\(reverse-i-search\)`/);
+
+	// Press Escape to cancel
+	stdin.write('\u001b');
+	await wait(50);
+
+	// Search UI should be dismissed and draft restored
+	t.notRegex(lastFrame()!, /\(reverse-i-search\)/);
+	t.regex(lastFrame()!, /my in-progress draft/);
+	unmount();
+});
+
+test.serial('UserInput shows failed reverse search and handles backspace in search mode', async t => {
+	await resetPromptHistory();
+	promptHistory.addPrompt('unique testing match');
+	await promptHistory.saveHistory();
+
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput forceFocus={true} />
+		</TestWrapper>,
+	);
+
+	await wait(50);
+	stdin.write('\u0012');
+	await waitForFrame(lastFrame, /\(reverse-i-search\)`/);
+
+	// Type non-matching character
+	stdin.write('z');
+	await waitForFrame(lastFrame, /failed reverse-i-search/);
+	t.regex(
+		stripAnsi(lastFrame() ?? ''),
+		/\(failed reverse-i-search\)`z':/,
+	);
+
+	// Backspace to remove non-matching character, restoring empty query
+	stdin.write('\u0008');
+	await waitForCondition(() => /`':/.test(stripAnsi(lastFrame() ?? '')));
+
+	// Type matching query
+	stdin.write('testing');
+	await waitForCondition(() =>
+		/`testing':/.test(stripAnsi(lastFrame() ?? '')),
+	);
+	t.regex(lastFrame()!, /unique testing match/);
+	unmount();
+});
+
+
+test.serial('UserInput types ? into the reverse-search query instead of opening the shortcuts overlay', async t => {
+	await resetPromptHistory();
+	promptHistory.addPrompt('why does this fail?');
+	await promptHistory.saveHistory();
+
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput forceFocus={true} />
+		</TestWrapper>,
+	);
+
+	await wait(50);
+	stdin.write('\u0012');
+	await waitForFrame(lastFrame, /\(reverse-i-search\)`/);
+
+	// The prompt is empty here, which is exactly when a bare ? opens the overlay.
+	stdin.write('?');
+	// The empty query already shows the newest entry, so wait for the query
+	// itself to gain the ? rather than for the match text.
+	await waitForCondition(() =>
+		/\(reverse-i-search\)`\?':/.test(stripAnsi(lastFrame() ?? '')),
+	);
+
+	const frame = stripAnsi(lastFrame() ?? '');
+	t.regex(frame, /why does this fail\?/);
+	t.notRegex(frame, /Keyboard Shortcuts/);
+	unmount();
+});
+
+test('UserInput lists Ctrl+N for reasoning and Ctrl+R for history search in the shortcuts overlay', async t => {
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput forceFocus={true} />
+		</TestWrapper>,
+	);
+
+	await wait(50);
+	stdin.write('?');
+	await waitForFrame(lastFrame, /Keyboard Shortcuts/);
+
+	const frame = stripAnsi(lastFrame() ?? '');
+	t.regex(frame, /Ctrl\+N — Toggle reasoning traces/);
+	t.regex(frame, /Ctrl\+R — Reverse search prompt history/);
+	unmount();
+});
+
+test('UserInput leaves Ctrl+G alone so voice push-to-talk keeps working', async t => {
+	let toggles = 0;
+	const {stdin, unmount} = render(
+		<TestWrapper>
+			<UserInput
+				forceFocus={true}
+				onToggleReasoningExpanded={() => toggles++}
+			/>
+		</TestWrapper>,
+	);
+
+	stdin.write('\u0007');
+	await wait(100);
+
+	t.is(toggles, 0);
+	unmount();
+});

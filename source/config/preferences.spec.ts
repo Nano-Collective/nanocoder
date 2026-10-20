@@ -2,6 +2,7 @@ import {existsSync, mkdirSync, readFileSync, rmSync, writeFileSync} from 'node:f
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
+import {describeProjectTrust} from '@/config/project-trust';
 import {
 	DEFAULT_MEMORY_LIMIT,
 	DEFAULT_TOKEN_BUDGET,
@@ -11,7 +12,9 @@ import {
 	MIN_TOKEN_BUDGET,
 } from '@/memory/project-context';
 import {
+	directoryTrustRefusal,
 	ensureDirectoryTrust,
+	grantDirectoryTrust,
 	getCompactToolDisplay,
 	getLastUsedModel,
 	getNanocoderShape,
@@ -44,6 +47,13 @@ import {
 	updateMouseReporting,
 	updateShowAgentBashOutput,
 	updateShowUsageFooter,
+	trustRecheck,
+	DEFAULT_MAX_FPS,
+	MIN_MAX_FPS,
+	MAX_MAX_FPS,
+	isValidMaxFps,
+	getUiMaxFps,
+	getMaxFps,
 } from './preferences';
 import {updatePreferencesNestedValue} from '@/config/config-writer';
 import type {UserPreferences} from '@/types/index';
@@ -2106,14 +2116,62 @@ test('isDirectoryTrusted returns false when trustedDirectories is empty', t => {
 	t.false(isDirectoryTrusted('/some/project', {}));
 });
 
-test('isDirectoryTrusted matches an exact entry', t => {
+test('isDirectoryTrusted matches a record with the current fingerprint', t => {
 	const dir = process.cwd();
-	t.true(isDirectoryTrusted(dir, {trustedDirectories: [dir]}));
+	const fingerprint = describeProjectTrust(dir).fingerprint;
+	t.true(
+		isDirectoryTrusted(dir, {
+			trustedDirectories: [{path: dir, fingerprint}],
+		}),
+	);
+	t.true(
+		isDirectoryTrusted(dir, {
+			trustedDirectories: [{path: '.', fingerprint}],
+		}),
+	);
 });
 
-test('isDirectoryTrusted resolves relative entries before comparing', t => {
+test('isDirectoryTrusted ignores a path that has no fingerprint', t => {
 	const dir = process.cwd();
-	t.true(isDirectoryTrusted(dir, {trustedDirectories: ['.']}));
+	t.false(isDirectoryTrusted(dir, {trustedDirectories: [dir]}));
+});
+
+test('isDirectoryTrusted ignores a stale fingerprint', t => {
+	const dir = process.cwd();
+	t.false(
+		isDirectoryTrusted(dir, {
+			trustedDirectories: [{path: dir, fingerprint: 'stale'}],
+		}),
+	);
+});
+
+test('isDirectoryTrusted is false after a plugin is added', t => {
+	const root = join(tmpdir(), `trust-plugin-${Date.now()}`);
+	mkdirSync(join(root, '.nanocoder', 'plugins'), {recursive: true});
+	try {
+		const before = describeProjectTrust(root).fingerprint;
+		writeFileSync(
+			join(root, '.nanocoder', 'plugins', 'pulled.mjs'),
+			'export default {name:"pulled"}\n',
+		);
+		t.false(
+			isDirectoryTrusted(root, {
+				trustedDirectories: [{path: root, fingerprint: before}],
+			}),
+		);
+		t.true(
+			isDirectoryTrusted(root, {
+				trustedDirectories: [
+					{
+						path: root,
+						fingerprint: describeProjectTrust(root).fingerprint,
+					},
+				],
+			}),
+		);
+	} finally {
+		rmSync(root, {recursive: true, force: true});
+	}
 });
 
 test('isDirectoryTrusted does not match an unrelated directory', t => {
@@ -2140,7 +2198,11 @@ test('ensureDirectoryTrust trusts an already-recorded directory without persisti
 	const dir = process.cwd();
 	let saveCalled = false;
 	const result = ensureDirectoryTrust(dir, false, {
-		loadPreferences: () => ({trustedDirectories: [dir]}),
+		loadPreferences: () => ({
+			trustedDirectories: [
+				{path: dir, fingerprint: describeProjectTrust(dir).fingerprint},
+			],
+		}),
 		savePreferences: () => {
 			saveCalled = true;
 		},
@@ -2159,9 +2221,115 @@ test.serial(
 				t.fail('should not persist when refusing');
 			},
 		});
-		t.deepEqual(result, {trusted: false, persisted: false});
+		t.deepEqual(result, {trusted: false, persisted: false, recheck: null});
 	},
 );
+
+test.serial(
+	'ensureDirectoryTrust flags a trusted directory whose fingerprint changed',
+	t => {
+		delete process.env.NANOCODER_TRUST_DIRECTORY;
+		const dir = process.cwd();
+		const result = ensureDirectoryTrust(dir, false, {
+			loadPreferences: () => ({
+				trustedDirectories: [{path: dir, fingerprint: 'old'}],
+			}),
+			savePreferences: () => {
+				t.fail('should not persist when refusing');
+			},
+		});
+		t.deepEqual(result, {trusted: false, persisted: false, recheck: 'changed'});
+	},
+);
+
+test.serial(
+	'ensureDirectoryTrust says a path-only entry needs re-approval after the upgrade',
+	t => {
+		delete process.env.NANOCODER_TRUST_DIRECTORY;
+		const dir = process.cwd();
+		const result = ensureDirectoryTrust(dir, false, {
+			loadPreferences: () => ({trustedDirectories: [dir]}),
+			savePreferences: () => {
+				t.fail('should not persist when refusing');
+			},
+		});
+		t.deepEqual(result, {trusted: false, persisted: false, recheck: 'upgrade'});
+	},
+);
+
+test.serial('directoryTrustRefusal returns the refusal message for an untrusted directory', t => {
+	delete process.env.NANOCODER_TRUST_DIRECTORY;
+	const message = directoryTrustRefusal('/untrusted/project', false, {
+		loadPreferences: () => ({trustedDirectories: []}),
+		savePreferences: () => {
+			t.fail('should not persist when refusing');
+		},
+	});
+	t.regex(message ?? '', /is not trusted/);
+	t.regex(message ?? '', /--trust-directory/);
+	t.regex(message ?? '', /NANOCODER_TRUST_DIRECTORY=1/);
+});
+
+test.serial('directoryTrustRefusal words a path-only entry as needing re-approval after the upgrade', t => {
+	delete process.env.NANOCODER_TRUST_DIRECTORY;
+	const dir = process.cwd();
+	const message = directoryTrustRefusal(dir, false, {
+		loadPreferences: () => ({trustedDirectories: [dir]}),
+		savePreferences: () => {
+			t.fail('should not persist when refusing');
+		},
+	});
+	t.regex(message ?? '', /needs re-approval after the upgrade/);
+});
+
+test.serial('directoryTrustRefusal words a changed fingerprint differently from an unknown directory', t => {
+	delete process.env.NANOCODER_TRUST_DIRECTORY;
+	const dir = process.cwd();
+	const message = directoryTrustRefusal(dir, false, {
+		loadPreferences: () => ({
+			trustedDirectories: [{path: dir, fingerprint: 'old'}],
+		}),
+		savePreferences: () => {
+			t.fail('should not persist when refusing');
+		},
+	});
+	t.regex(message ?? '', /changed since you trusted it/);
+	t.notRegex(message ?? '', /is not trusted/);
+});
+
+test('directoryTrustRefusal is null when bypassed or already trusted', t => {
+	const deps = {
+		loadPreferences: () => ({trustedDirectories: []}),
+		savePreferences: () => {
+			t.fail('should not persist');
+		},
+	};
+	t.is(directoryTrustRefusal('/untrusted/project', true, deps), null);
+
+	const dir = process.cwd();
+	t.is(
+		directoryTrustRefusal(dir, false, {
+			...deps,
+			loadPreferences: () => ({
+				trustedDirectories: [
+					{path: dir, fingerprint: describeProjectTrust(dir).fingerprint},
+				],
+			}),
+		}),
+		null,
+	);
+});
+
+test('trust checks skip malformed entries instead of throwing', t => {
+	const dir = process.cwd();
+	const preferences = {
+		trustedDirectories: [null, {}, {path: 5}, 7],
+	} as unknown as UserPreferences;
+	t.false(isDirectoryTrusted(dir, preferences));
+	t.is(trustRecheck(dir, preferences), null);
+	const granted = grantDirectoryTrust(preferences, dir);
+	t.true(isDirectoryTrusted(dir, granted));
+});
 
 test.serial(
 	'ensureDirectoryTrust with NANOCODER_TRUST_DIRECTORY=1 trusts and persists a new entry',
@@ -2178,7 +2346,12 @@ test.serial(
 			});
 			t.true(result.trusted);
 			t.true(result.persisted);
-			t.deepEqual(savedPreferences?.trustedDirectories, [target]);
+			t.deepEqual(savedPreferences?.trustedDirectories, [
+				{
+					path: target,
+					fingerprint: describeProjectTrust(target).fingerprint,
+				},
+			]);
 		} finally {
 			delete process.env.NANOCODER_TRUST_DIRECTORY;
 		}
@@ -2193,13 +2366,44 @@ test.serial(
 			const dir = process.cwd();
 			let saveCalled = false;
 			const result = ensureDirectoryTrust(dir, false, {
-				loadPreferences: () => ({trustedDirectories: [dir]}),
+				loadPreferences: () => ({
+					trustedDirectories: [
+						{
+							path: dir,
+							fingerprint: describeProjectTrust(dir).fingerprint,
+						},
+					],
+				}),
 				savePreferences: () => {
 					saveCalled = true;
 				},
 			});
 			t.deepEqual(result, {trusted: true, persisted: false});
 			t.false(saveCalled);
+		} finally {
+			delete process.env.NANOCODER_TRUST_DIRECTORY;
+		}
+	},
+);
+
+test.serial(
+	'ensureDirectoryTrust with NANOCODER_TRUST_DIRECTORY=1 replaces a path-only entry',
+	t => {
+		process.env.NANOCODER_TRUST_DIRECTORY = '1';
+		let savedPreferences: UserPreferences | null = null;
+		try {
+			const dir = process.cwd();
+			const result = ensureDirectoryTrust(dir, false, {
+				loadPreferences: () => ({trustedDirectories: [dir]}),
+				savePreferences: prefs => {
+					savedPreferences = prefs;
+				},
+			});
+			t.true(result.trusted);
+			t.true(result.persisted);
+			t.deepEqual(savedPreferences?.trustedDirectories, [
+				{path: dir, fingerprint: describeProjectTrust(dir).fingerprint},
+			]);
 		} finally {
 			delete process.env.NANOCODER_TRUST_DIRECTORY;
 		}
@@ -2306,5 +2510,227 @@ test.serial(
 			t.deepEqual(global.trustedDirectories, ['/newly/trusted']);
 			t.is(global.lastModel, 'kept');
 		});
+	},
+);
+
+test.serial(
+	'loadPreferences ignores fullCommitConfirmedProjects and ciWatch from a project-level preferences file',
+	t => {
+		withProjectPreferences(
+			{
+				fullCommitConfirmedProjects: ['/evil'],
+				ciWatch: {enabled: true},
+			},
+			null,
+			() => {
+				const prefs = loadPreferences();
+				t.is(prefs.fullCommitConfirmedProjects, undefined);
+				t.is(prefs.ciWatch, undefined);
+			},
+		);
+	},
+);
+
+test.serial(
+	'loadPreferences takes fullCommitConfirmedProjects and ciWatch from the global file',
+	t => {
+		withProjectPreferences(
+			{fullCommitConfirmedProjects: ['/evil'], ciWatch: {enabled: false}},
+			{fullCommitConfirmedProjects: ['/mine'], ciWatch: {enabled: true}},
+			() => {
+				const prefs = loadPreferences();
+				t.deepEqual(prefs.fullCommitConfirmedProjects, ['/mine']);
+				t.true(prefs.ciWatch?.enabled);
+			},
+		);
+	},
+);
+
+test.serial(
+	'savePreferences writes fullCommitConfirmedProjects to the global file, never the project file',
+	t => {
+		withProjectPreferences({}, {lastModel: 'kept'}, ({projectFile, globalFile}) => {
+			const prefs = loadPreferences();
+			prefs.fullCommitConfirmedProjects = ['/confirmed'];
+			savePreferences(prefs);
+
+			const project = JSON.parse(readFileSync(projectFile, 'utf-8'));
+			const global = JSON.parse(readFileSync(globalFile, 'utf-8'));
+			t.is(project.fullCommitConfirmedProjects, undefined);
+			t.deepEqual(global.fullCommitConfirmedProjects, ['/confirmed']);
+			t.is(global.lastModel, 'kept');
+		});
+	},
+);
+
+// ============================================================================
+// maxFps (TUI Frame Rate Limit) Tests
+// ============================================================================
+
+test('maxFps constants have expected values', t => {
+	t.is(DEFAULT_MAX_FPS, 30);
+	t.is(MIN_MAX_FPS, 1);
+	t.is(MAX_MAX_FPS, 60);
+});
+
+test('isValidMaxFps accepts valid integers between 1 and 60', t => {
+	t.true(isValidMaxFps(1));
+	t.true(isValidMaxFps(15));
+	t.true(isValidMaxFps(30));
+	t.true(isValidMaxFps(45));
+	t.true(isValidMaxFps(60));
+});
+
+test('isValidMaxFps rejects out-of-range numbers', t => {
+	t.false(isValidMaxFps(0));
+	t.false(isValidMaxFps(-1));
+	t.false(isValidMaxFps(-30));
+	t.false(isValidMaxFps(61));
+	t.false(isValidMaxFps(100));
+});
+
+test('isValidMaxFps rejects non-integer numbers', t => {
+	t.false(isValidMaxFps(0.5));
+	t.false(isValidMaxFps(15.5));
+	t.false(isValidMaxFps(30.1));
+	t.false(isValidMaxFps(59.9));
+	t.false(isValidMaxFps(NaN));
+	t.false(isValidMaxFps(Number.POSITIVE_INFINITY));
+	t.false(isValidMaxFps(Number.NEGATIVE_INFINITY));
+});
+
+test('isValidMaxFps rejects non-number types', t => {
+	t.false(isValidMaxFps('30'));
+	t.false(isValidMaxFps(''));
+	t.false(isValidMaxFps(null));
+	t.false(isValidMaxFps(undefined));
+	t.false(isValidMaxFps(true));
+	t.false(isValidMaxFps(false));
+	t.false(isValidMaxFps({}));
+	t.false(isValidMaxFps([]));
+});
+
+test.serial(
+	'getMaxFps returns DEFAULT_MAX_FPS (30) when preference is not configured',
+	t => {
+		const preferencesPath = getTestPreferencesPath();
+		writeFileSync(
+			preferencesPath,
+			JSON.stringify({lastProvider: 'test'}),
+			'utf-8',
+		);
+
+		try {
+			t.is(getMaxFps(), 30);
+			t.is(getUiMaxFps(), undefined);
+		} finally {
+			if (existsSync(preferencesPath)) {
+				rmSync(preferencesPath, {force: true});
+			}
+		}
+	},
+);
+
+test.serial(
+	'getMaxFps returns DEFAULT_MAX_FPS (30) when file does not exist',
+	t => {
+		const preferencesPath = getTestPreferencesPath();
+		if (existsSync(preferencesPath)) {
+			rmSync(preferencesPath, {force: true});
+		}
+
+		t.is(getMaxFps(), 30);
+		t.is(getUiMaxFps(), undefined);
+	},
+);
+
+test.serial(
+	'getMaxFps returns valid configured value from nanocoder.ui.maxFps',
+	t => {
+		const preferencesPath = getTestPreferencesPath();
+		const prefs: UserPreferences = {
+			nanocoder: {
+				ui: {
+					maxFps: 15,
+				},
+			},
+		};
+		writeFileSync(preferencesPath, JSON.stringify(prefs, null, 2), 'utf-8');
+
+		try {
+			t.is(getMaxFps(), 15);
+			t.is(getUiMaxFps(), 15);
+		} finally {
+			if (existsSync(preferencesPath)) {
+				rmSync(preferencesPath, {force: true});
+			}
+		}
+	},
+);
+
+test.serial(
+	'getMaxFps rejects invalid values and falls back to default 30',
+	t => {
+		const preferencesPath = getTestPreferencesPath();
+		const invalidCases = [0, -5, 61, 100, 15.5, '15', null, true, {}];
+
+		try {
+			for (const invalid of invalidCases) {
+				writeFileSync(
+					preferencesPath,
+					JSON.stringify({nanocoder: {ui: {maxFps: invalid}}}, null, 2),
+					'utf-8',
+				);
+				t.is(
+					getMaxFps(),
+					30,
+					`Expected default 30 for invalid value: ${JSON.stringify(invalid)}`,
+				);
+				t.is(
+					getUiMaxFps(),
+					undefined,
+					`Expected undefined for invalid value: ${JSON.stringify(invalid)}`,
+				);
+			}
+		} finally {
+			if (existsSync(preferencesPath)) {
+				rmSync(preferencesPath, {force: true});
+			}
+		}
+	},
+);
+
+test.serial(
+	'updatePreferencesNestedValue writes ui.maxFps properly and preserves existing preferences',
+	t => {
+		const preferencesPath = getTestPreferencesPath();
+		const initialPrefs: UserPreferences = {
+			lastProvider: 'test-provider',
+			nanocoder: {
+				paste: {singleLineThreshold: 500},
+			},
+		};
+		writeFileSync(
+			preferencesPath,
+			JSON.stringify(initialPrefs, null, 2),
+			'utf-8',
+		);
+
+		try {
+			updatePreferencesNestedValue('ui', 'maxFps', 24);
+
+			const data = JSON.parse(
+				readFileSync(preferencesPath, 'utf-8'),
+			) as UserPreferences;
+			t.is(data.nanocoder?.ui?.maxFps, 24);
+			t.is(data.lastProvider, 'test-provider');
+			t.is(data.nanocoder?.paste?.singleLineThreshold, 500);
+			t.is(getMaxFps(), 24);
+			t.is(getUiMaxFps(), 24);
+		} finally {
+			if (existsSync(preferencesPath)) {
+				rmSync(preferencesPath, {force: true});
+			}
+		}
 	},
 );

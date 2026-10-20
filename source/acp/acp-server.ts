@@ -1,6 +1,7 @@
 import {AgentSideConnection, ndJsonStream} from '@agentclientprotocol/sdk';
 import {AcpAgent} from '@/acp/acp-agent';
 import type {AcpInitContext} from '@/acp/acp-types';
+import {directoryTrustRefusal} from '@/config/preferences';
 import {initializePlain} from '@/plain/initialize';
 import {getLogger} from '@/utils/logging';
 import {getShutdownManager} from '@/utils/shutdown';
@@ -11,12 +12,27 @@ export interface RunAcpServerOptions {
 	cliProvider?: string;
 	cliModel?: string;
 	appVersion?: string;
+	/** Trust the working directory for this run only (`--trust-directory`). */
+	trustDirectory?: boolean;
 }
 
 export async function runAcpServer(
 	options: RunAcpServerOptions = {},
 ): Promise<void> {
 	logger.info('ACP server starting...');
+
+	// initializePlain() loads the working directory's project config
+	// (providers, hooks, MCP servers), so refuse an untrusted folder first,
+	// as `nanocoder run` does. stdout carries the protocol, so report on stderr.
+	const refusal = directoryTrustRefusal(
+		process.cwd(),
+		options.trustDirectory ?? false,
+	);
+	if (refusal) {
+		logger.error(`ACP not started: ${refusal}`);
+		process.stderr.write(`[nanocoder] ${refusal}\n`);
+		process.exit(1);
+	}
 
 	let initContext: AcpInitContext;
 	try {

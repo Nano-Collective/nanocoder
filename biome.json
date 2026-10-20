@@ -18,6 +18,7 @@
 			"!plugins/vscode",
 			"!plugins/*/dist",
 			"plugins/voice/src/**",
+			"!benchmarks/agent/fixtures",
 			"!**/*.spec.ts",
 			"!**/*.spec.tsx",
 			"!.husky",

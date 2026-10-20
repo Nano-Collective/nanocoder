@@ -1,7 +1,7 @@
 ---
 title: "Opper"
 description: "Configure Opper as a cloud AI provider for Nanocoder"
-sidebar_order: 31
+sidebar_order: 28
 ---
 
 # Opper

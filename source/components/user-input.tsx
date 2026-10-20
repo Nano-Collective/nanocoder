@@ -4,7 +4,10 @@ import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {commandRegistry} from '@/commands';
 import {DevelopmentModeIndicator} from '@/components/development-mode-indicator';
 import {HelpRow} from '@/components/json-viewer/json-viewer';
-import TextInput, {type TextInputHandle} from '@/components/text-input';
+import TextInput, {
+	type TextInputHandle,
+	useRawInput,
+} from '@/components/text-input';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {useInputState} from '@/hooks/useInputState';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
@@ -142,7 +145,8 @@ const KEYBOARD_SHORTCUTS: Array<[keybind: string, label: string]> = [
 	['Ctrl+V / Ctrl+X', 'Attach clipboard image / remove last image'],
 	['Shift+Tab', 'Cycle development mode'],
 	['Ctrl+O', 'Toggle compact tool output'],
-	['Ctrl+R', 'Toggle reasoning traces'],
+	['Ctrl+N', 'Toggle reasoning traces'],
+	['Ctrl+R', 'Reverse search prompt history'],
 	['Ctrl+T', 'Collapse / expand task list'],
 	['Ctrl+S', 'Attach / cycle running subagents'],
 	['Esc', 'Cancel response'],
@@ -152,6 +156,22 @@ const KEYBOARD_SHORTCUTS: Array<[keybind: string, label: string]> = [
 
 // Prompt box width floor: keeps narrow terminals legible.
 const PROMPT_WIDTH_MIN = 40;
+
+export function findReverseMatch(
+	history: InputState[],
+	query: string,
+	startIndex: number,
+): {index: number; match: InputState} | null {
+	if (history.length === 0) return null;
+	const queryLower = query.toLowerCase();
+	const start = Math.min(startIndex, history.length - 1);
+	for (let i = start; i >= 0; i--) {
+		if (history[i].displayValue.toLowerCase().includes(queryLower)) {
+			return {index: i, match: history[i]};
+		}
+	}
+	return null;
+}
 
 interface ChatProps {
 	onSubmit?: (
@@ -167,7 +187,7 @@ interface ChatProps {
 	disabled?: boolean; // Disable input when AI is processing
 	isBusy?: boolean; // True when in-flight work is cancellable; Escape is owned by the global handler, so it must not clear the input
 	onToggleMode?: () => void; // Callback when user presses shift+tab to toggle development mode
-	onToggleReasoningExpanded?: () => void; // Callback when user presses ctrl+r to toggle expanded reasoning traces
+	onToggleReasoningExpanded?: () => void; // Callback when user presses ctrl+n to toggle expanded reasoning traces
 	onToggleCompactDisplay?: () => void; // Callback when user presses ctrl+o to toggle compact tool display
 	onToggleTaskList?: () => void; // Callback when user presses ctrl+t to collapse/expand the live task list
 	compactToolDisplay?: boolean; // Current compact display state
@@ -240,8 +260,14 @@ export default function UserInput({
 	const {isNarrow, actualWidth, truncate} = useResponsiveTerminal();
 	// Prompt spans the full terminal width at every size (minus a 4-col
 	// margin so the rounded border never wraps and shatters), floored at 40
-	// cols for legibility on tiny terminals.
-	const promptWidth = Math.max(PROMPT_WIDTH_MIN, actualWidth - 4);
+	// cols for legibility on tiny terminals. Clamped back down to actualWidth
+	// so that floor can never exceed the parent it's centered in - Ink centers
+	// an over-wide child by giving it a negative left offset, which clips the
+	// border, the prompt marker, and the start of the text instead of the end.
+	const promptWidth = Math.min(
+		actualWidth,
+		Math.max(PROMPT_WIDTH_MIN, actualWidth - 4),
+	);
 	// Must match the wrapWidth passed to TextInput below — both sides use it to
 	// decide whether Up/Down means line navigation or history.
 	const inputWrapWidth = promptWidth - 4;
@@ -286,6 +312,17 @@ export default function UserInput({
 	const [showShortcuts, setShowShortcuts] = useState(false);
 	const lastRestoredDraftIdRef = useRef<number | null>(null);
 
+	// Reverse prompt search state (Ctrl+R / bck-i-search)
+	const [isReverseSearchMode, setIsReverseSearchMode] = useState(false);
+	const [reverseSearchQuery, setReverseSearchQuery] = useState('');
+	const [reverseSearchIndex, setReverseSearchIndex] = useState(-1);
+	const [reverseSearchMatch, setReverseSearchMatch] =
+		useState<InputState | null>(null);
+	const reverseSearchDraftRef = useRef<InputState>({
+		displayValue: '',
+		placeholderContent: {},
+	});
+
 	const {
 		input,
 		historyIndex,
@@ -295,6 +332,7 @@ export default function UserInput({
 		resetInput,
 		deletePlaceholder: _deletePlaceholder,
 		currentState,
+		currentStateRef,
 		setInputState,
 		undo,
 		redo,
@@ -328,9 +366,6 @@ export default function UserInput({
 	// Check if we're in bash mode (input starts with !)
 	const isBashMode = input.trim().startsWith('!');
 
-	// Check if we're in command mode (input starts with /)
-	const isCommandMode = input.trim().startsWith('/');
-
 	// Load history on mount
 	useEffect(() => {
 		void promptHistory.loadHistory();
@@ -352,7 +387,13 @@ export default function UserInput({
 			const cursorOffset = textInputRef.current?.getCursorOffset();
 			const result = insertPaste(payload, cursorOffset);
 			if (result && textInputRef.current) {
-				textInputRef.current.setCursorOffset(result.cursorOffset);
+				// Hand TextInput the pasted value along with the caret: keys in the
+				// same stdin batch as the paste land before it re-renders, and
+				// must edit the pasted value, not the one it last rendered.
+				textInputRef.current.setCursorOffset(
+					result.cursorOffset,
+					currentStateRef.current.displayValue,
+				);
 			} else if (!result) {
 				setTextInputKey(prev => prev + 1);
 			}
@@ -361,7 +402,7 @@ export default function UserInput({
 		return () => {
 			pasteEvents.off('paste', handleTerminalPaste);
 		};
-	}, [disabled, effectiveFocus, insertPaste]);
+	}, [disabled, effectiveFocus, insertPaste, currentStateRef]);
 
 	useEffect(() => {
 		if (
@@ -480,41 +521,51 @@ export default function UserInput({
 		void runFileAutocomplete();
 	}, [input]);
 
+	// Command completions for a given input value. Shared by the memo below
+	// and the Enter gate, which can run ahead of a re-render (see there).
+	const getCommandCompletions = useCallback(
+		(value: string): Completion[] => {
+			if (!value.trim().startsWith('/') || isFileAutocompleteMode) {
+				return [];
+			}
+
+			// Once the user types a space, they're entering arguments for the
+			// command (e.g. `/model gpt-4`). Stop offering completions so Enter
+			// submits the command-with-args instead of selecting a completion and
+			// dropping everything after the command name.
+			if (value.slice(1).includes(' ')) {
+				return [];
+			}
+
+			const commandPrefix = value.slice(1).split(' ')[0];
+
+			const builtInCompletions = commandRegistry.getCompletions(commandPrefix);
+			const mcpPromptNames = (
+				getToolManager()?.getMCPClient()?.getAllPrompts() ?? []
+			).map(p => `mcp:${p.serverName}:${p.name}`);
+			const customCompletions = [...customCommands, ...mcpPromptNames]
+				.filter(cmd => {
+					// Include all when no prefix, otherwise filter by prefix
+					return (
+						!commandPrefix ||
+						cmd.toLowerCase().includes(commandPrefix.toLowerCase())
+					);
+				})
+				.sort((a, b) => a.localeCompare(b));
+
+			return [
+				...builtInCompletions.map(cmd => ({name: cmd, isCustom: false})),
+				...customCompletions.map(cmd => ({name: cmd, isCustom: true})),
+			] as Completion[];
+		},
+		[isFileAutocompleteMode, customCommands],
+	);
+
 	// Calculate command completions using useMemo to prevent flashing
-	const commandCompletions = useMemo(() => {
-		if (!isCommandMode || isFileAutocompleteMode) {
-			return [];
-		}
-
-		// Once the user types a space, they're entering arguments for the
-		// command (e.g. `/model gpt-4`). Stop offering completions so Enter
-		// submits the command-with-args instead of selecting a completion and
-		// dropping everything after the command name.
-		if (input.slice(1).includes(' ')) {
-			return [];
-		}
-
-		const commandPrefix = input.slice(1).split(' ')[0];
-
-		const builtInCompletions = commandRegistry.getCompletions(commandPrefix);
-		const mcpPromptNames = (
-			getToolManager()?.getMCPClient()?.getAllPrompts() ?? []
-		).map(p => `mcp:${p.serverName}:${p.name}`);
-		const customCompletions = [...customCommands, ...mcpPromptNames]
-			.filter(cmd => {
-				// Include all when no prefix, otherwise filter by prefix
-				return (
-					!commandPrefix ||
-					cmd.toLowerCase().includes(commandPrefix.toLowerCase())
-				);
-			})
-			.sort((a, b) => a.localeCompare(b));
-
-		return [
-			...builtInCompletions.map(cmd => ({name: cmd, isCustom: false})),
-			...customCompletions.map(cmd => ({name: cmd, isCustom: true})),
-		] as Completion[];
-	}, [input, isCommandMode, isFileAutocompleteMode, customCommands]);
+	const commandCompletions = useMemo(
+		() => getCommandCompletions(input),
+		[getCommandCompletions, input],
+	);
 
 	// The menu opens whenever completions exist, unless it was closed for this
 	// exact input or the input was recalled from history (keep ↑/↓ free to
@@ -639,9 +690,12 @@ export default function UserInput({
 	const handleSubmit = useCallback(() => {
 		if (!onSubmit && !onQueueMessage) return;
 
+		// The ref, not the render-time currentState: Enter can arrive in the
+		// same stdin batch as a paste, before this component re-renders with it.
+		const latestState = currentStateRef.current;
 		let images = attachments;
-		let assembled = assemblePrompt(currentState);
-		let display = currentState.displayValue;
+		let assembled = assemblePrompt(latestState);
+		let display = latestState.displayValue;
 
 		// Image file paths the user typed, pasted, or dragged into the terminal
 		// (often quoted, mixed in with prose) become attachments; the literal
@@ -666,8 +720,8 @@ export default function UserInput({
 		if (!assembled.trim() && images.length === 0) return;
 
 		const inputStateForHistory: InputState = {
-			displayValue: currentState.displayValue,
-			placeholderContent: {...currentState.placeholderContent},
+			displayValue: latestState.displayValue,
+			placeholderContent: {...latestState.placeholderContent},
 		};
 
 		if (isBusy && !assembled.trim().startsWith('/') && onQueueMessage) {
@@ -707,7 +761,7 @@ export default function UserInput({
 		onQueueMessage,
 		resetInput,
 		resetUIState,
-		currentState,
+		currentStateRef,
 		isBusy,
 		onSubmittedDraft,
 		onDismissSuggestion,
@@ -737,11 +791,15 @@ export default function UserInput({
 			setAttachments([]);
 			onDismissActiveEditor?.();
 			focus('user-input');
-		} else {
+		} else if (input || attachments.length > 0 || activeEditor) {
+			// Nothing to clear otherwise - no-op instead of arming a hint for a
+			// second Escape that would have nothing to do either.
 			setShowClearMessage(true);
 		}
 	}, [
 		input,
+		attachments,
+		activeEditor,
 		showCompletions,
 		isFileAutocompleteMode,
 		suggestedCommand,
@@ -920,12 +978,17 @@ export default function UserInput({
 		onRemoveQueuedMessage,
 	]);
 
+	const rawInputRef = useRawInput();
+
 	useInput((inputChar, key) => {
 		// `?` in an empty prompt toggles the shortcuts overlay, which swallows
 		// every other key until `?` or Escape closes it.
+		// Reverse search owns the keyboard: its query is empty at first, so
+		// without the guard typing `?` there would open the overlay instead.
 		if (
 			inputChar === '?' &&
 			!disabled &&
+			!isReverseSearchMode &&
 			(showShortcutsRef.current || inputRef.current === '')
 		) {
 			setShortcutsOpen(!showShortcutsRef.current);
@@ -956,8 +1019,9 @@ export default function UserInput({
 			return;
 		}
 
-		// Handle ctrl+r to toggle expanded reasoning traces (always available)
-		if (key.ctrl && inputChar === 'r' && onToggleReasoningExpanded) {
+		// Handle ctrl+n to toggle expanded reasoning traces (always available;
+		// ctrl+g is voice push-to-talk and ctrl+r is reverse history search)
+		if (key.ctrl && inputChar === 'n' && onToggleReasoningExpanded) {
 			onToggleReasoningExpanded();
 			return;
 		}
@@ -979,6 +1043,127 @@ export default function UserInput({
 
 		// Block all other input when disabled
 		if (disabled) {
+			return;
+		}
+
+		// Reverse prompt search mode (Ctrl+R / bck-i-search)
+		if (isReverseSearchMode) {
+			// Ctrl+C is deliberately not handled here: App.tsx's global handler
+			// exits the app on it, so it can't double as "cancel search".
+			if (key.escape) {
+				// Cancel search, restore draft
+				setInputState(reverseSearchDraftRef.current);
+				setIsReverseSearchMode(false);
+				setReverseSearchQuery('');
+				setReverseSearchIndex(-1);
+				setReverseSearchMatch(null);
+				setTextInputKey(prev => prev + 1);
+				focus('user-input');
+				return;
+			}
+
+			if (key.return) {
+				// Accept match and exit search mode
+				if (reverseSearchMatch) {
+					setInputState(reverseSearchMatch);
+				}
+				setIsReverseSearchMode(false);
+				setReverseSearchQuery('');
+				setReverseSearchIndex(-1);
+				setReverseSearchMatch(null);
+				setTextInputKey(prev => prev + 1);
+				focus('user-input');
+				return;
+			}
+
+			if (key.ctrl && inputChar === 'r') {
+				// Cycle to next older match with current query (stop at oldest)
+				const history = promptHistory.getHistory();
+				if (history.length > 0 && reverseSearchIndex > 0) {
+					const olderMatch = findReverseMatch(
+						history,
+						reverseSearchQuery,
+						reverseSearchIndex - 1,
+					);
+					if (olderMatch) {
+						setReverseSearchIndex(olderMatch.index);
+						setReverseSearchMatch(olderMatch.match);
+					}
+				}
+				return;
+			}
+
+			if (key.backspace || key.delete) {
+				const history = promptHistory.getHistory();
+				const nextQuery = reverseSearchQuery.slice(0, -1);
+				setReverseSearchQuery(nextQuery);
+				const matchResult = findReverseMatch(
+					history,
+					nextQuery,
+					history.length - 1,
+				);
+				if (matchResult) {
+					setReverseSearchIndex(matchResult.index);
+					setReverseSearchMatch(matchResult.match);
+				} else {
+					setReverseSearchIndex(-1);
+					setReverseSearchMatch(null);
+				}
+				return;
+			}
+
+			// Ignore other control/meta combinations while in search mode
+			if (key.ctrl || key.meta) {
+				return;
+			}
+
+			// Handle regular text typing into search query
+			if (
+				inputChar &&
+				!key.upArrow &&
+				!key.downArrow &&
+				!key.leftArrow &&
+				!key.rightArrow &&
+				!key.tab
+			) {
+				const history = promptHistory.getHistory();
+				const nextQuery = reverseSearchQuery + inputChar;
+				setReverseSearchQuery(nextQuery);
+				const matchResult = findReverseMatch(
+					history,
+					nextQuery,
+					history.length - 1,
+				);
+				if (matchResult) {
+					setReverseSearchIndex(matchResult.index);
+					setReverseSearchMatch(matchResult.match);
+				} else {
+					setReverseSearchIndex(-1);
+					setReverseSearchMatch(null);
+				}
+				return;
+			}
+
+			return;
+		}
+
+		// Handle ctrl+r to enter reverse prompt search
+		if (key.ctrl && inputChar === 'r') {
+			const history = promptHistory.getHistory();
+			reverseSearchDraftRef.current = currentState;
+			setIsReverseSearchMode(true);
+			setReverseSearchQuery('');
+			setShowCompletions(false);
+			setIsFileAutocompleteMode(false);
+			setShowClearMessage(false);
+			const initialMatch = findReverseMatch(history, '', history.length - 1);
+			if (initialMatch) {
+				setReverseSearchIndex(initialMatch.index);
+				setReverseSearchMatch(initialMatch.match);
+			} else {
+				setReverseSearchIndex(-1);
+				setReverseSearchMatch(null);
+			}
 			return;
 		}
 
@@ -1102,7 +1287,7 @@ export default function UserInput({
 		// offset, so the newline lands where the caret is. Bail out here before
 		// any of the Enter handling below, since ESC+CR and the kitty CSI-u
 		// encoding of Shift+Enter both arrive with `key.return` set.
-		if (isNewlineKey(inputChar, key)) {
+		if (isNewlineKey(inputChar, key, rawInputRef.current)) {
 			return;
 		}
 
@@ -1111,12 +1296,24 @@ export default function UserInput({
 		// between still sees it closed and would submit the raw command fragment.
 		// When the menu state says closed, fall back to the memoized completions
 		// the effect is about to show.
+		//
+		// Decide on the latest input, not the render-time one: Enter can arrive
+		// in the same stdin batch as the keys before it, ahead of a re-render,
+		// and handleSubmit submits the latest input - so a gate that looked at
+		// the stale `input` would let a fresh command fragment through.
+		const latestInput = currentStateRef.current.displayValue;
+		const isStale = latestInput !== input;
 		const menuItems =
-			showCompletions && completions.length > 0 && selectedCompletionIndex >= 0
+			!isStale &&
+			showCompletions &&
+			completions.length > 0 &&
+			selectedCompletionIndex >= 0
 				? completions
-				: isMenuSuppressedFor(input)
+				: isMenuSuppressedFor(latestInput)
 					? []
-					: commandCompletions;
+					: isStale
+						? getCommandCompletions(latestInput)
+						: commandCompletions;
 		if (key.return && !key.shift && menuItems.length > 0) {
 			const selected =
 				menuItems[
@@ -1125,7 +1322,7 @@ export default function UserInput({
 			const completedText = `/${selected.name}`;
 			// Already typed in full, so there is nothing to complete: fall
 			// through and submit instead of needing a second Enter.
-			if (completedText !== input) {
+			if (completedText !== latestInput) {
 				completionJustSelectedRef.current = true;
 				dismissedForInputRef.current = completedText;
 				setInputState({
@@ -1311,28 +1508,66 @@ export default function UserInput({
 					borderColor={isBashMode ? colors.tool : colors.primary}
 				>
 					{/* Input row */}
-					<Box>
-						{input.length === 0 && (
-							<Text color={isBashMode ? colors.tool : textColor}>{'>'} </Text>
-						)}
-						<TextInput
-							ref={textInputRef}
-							key={textInputKey}
-							value={input}
-							onChange={handleInputChange}
-							onEdgeArrow={handleHistoryNavigation}
-							onSubmit={handleSubmit}
-							onEnter={handleSubmit}
-							placeholder={
-								suggestedCommand
-									? `Try ${suggestedCommand} · Tab to insert · Esc to dismiss`
-									: 'Ask anything...'
-							}
-							focus={effectiveFocus}
-							wrapWidth={inputWrapWidth}
-							handleEnter={false}
-						/>
-					</Box>
+					{isReverseSearchMode ? (
+						<Box flexDirection="column">
+							<Box>
+								<Text
+									color={
+										reverseSearchMatch || reverseSearchQuery === ''
+											? colors.info
+											: colors.error
+									}
+									bold
+								>
+									{reverseSearchMatch || reverseSearchQuery === ''
+										? '(reverse-i-search)`'
+										: '(failed reverse-i-search)`'}
+								</Text>
+								<Text color={colors.primary} bold>
+									{reverseSearchQuery}
+								</Text>
+								<Text
+									color={
+										reverseSearchMatch || reverseSearchQuery === ''
+											? colors.info
+											: colors.error
+									}
+									bold
+								>
+									{"': "}
+								</Text>
+								<Text color={reverseSearchMatch ? textColor : colors.secondary}>
+									{reverseSearchMatch ? reverseSearchMatch.displayValue : ''}
+								</Text>
+							</Box>
+							<Text color={colors.secondary}>
+								Enter: select · Esc: cancel · Ctrl+R: cycle older
+							</Text>
+						</Box>
+					) : (
+						<Box>
+							{input.length === 0 && (
+								<Text color={isBashMode ? colors.tool : textColor}>{'>'} </Text>
+							)}
+							<TextInput
+								ref={textInputRef}
+								key={textInputKey}
+								value={input}
+								onChange={handleInputChange}
+								onEdgeArrow={handleHistoryNavigation}
+								onSubmit={handleSubmit}
+								onEnter={handleSubmit}
+								placeholder={
+									suggestedCommand
+										? `Try ${suggestedCommand} · Tab to insert · Esc to dismiss`
+										: 'Ask anything...'
+								}
+								focus={effectiveFocus}
+								wrapWidth={inputWrapWidth}
+								handleEnter={false}
+							/>
+						</Box>
+					)}
 
 					{showClearMessage && (
 						<Text color={colors.secondary}>Press escape again to clear</Text>

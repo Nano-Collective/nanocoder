@@ -86,7 +86,20 @@ if (args[0] === 'daemon') {
 	const {runDaemonCli} = await import('@/daemon/cli');
 	const result = await runDaemonCli(sub as DaemonSub, {
 		projectRoot: process.cwd(),
+		args: args.slice(2),
 		trustDirectory: args.includes('--trust-directory'),
+	});
+	if (result.output) console.log(result.output);
+	process.exit(result.exitCode);
+}
+
+// Handle `nanocoder verify --pr <n> [--post-review]` — fast path. Headless
+// PR review; pulls in the full LLM/tool/subagent stack (unlike `daemon`
+// above) but never Ink.
+if (args[0] === 'verify') {
+	const {runVerifyCli} = await import('@/verify/cli');
+	const result = await runVerifyCli(args.slice(1), {
+		projectRoot: process.cwd(),
 	});
 	if (result.output) console.log(result.output);
 	process.exit(result.exitCode);
@@ -205,10 +218,22 @@ Commands:
   copilot login [provider-name]   Log in to GitHub Copilot (device flow). Saves credentials for the "GitHub Copilot" provider.
   codex login [provider-name]     Log in to ChatGPT/Codex (device flow). Saves credentials for the "ChatGPT" provider.
   review <branch|pr-number>       Review a branch or PR diff for bugs, security issues, and style violations.
+  worktree <PR-number>            Start an interactive session in a new worktree for a GitHub PR.
   daemon <subcommand>             Manage the per-project skill daemon.
                                   Subcommands: start, stop, status, logs, install, uninstall.
+                                  start [--trust <comment-only|auto-fix|full-commit>]
+                                  Trust level for daemon-triggered CI investigation/auto-fix;
+                                  defaults to agents.config.json's verify.trustLevel, then
+                                  comment-only. full-commit prompts a one-time confirmation.
                                   start refuses to run in an untrusted directory; pass
                                   --trust-directory to bypass the check for this run only.
+  verify --pr <n> [--post-review] [--trust-directory] [--provider <name>] [--model <name>]
+                                  Headless, read-only PR review: runs the verify-pr-review
+                                  subagent plus a semgrep pass. Prints the review to stdout
+                                  by default; posts it as a PR comment with --post-review.
+                                  Refuses an untrusted directory; pass --trust-directory
+                                  to bypass the check for this run only.
+                                  --provider/--model select the LLM (see Options below).
   skills add <target>             Install a skill bundle from a git repository.
                                   <target> is an index name, owner/repo, a git URL, or a local path.
                                   Flags: --ref, --subdir, --global, --force, --yes, --index.
@@ -235,8 +260,8 @@ Options:
                       line. Necessary for large prompts: Linux caps a single
                       argument at 128 KiB and execve fails with E2BIG.
   --trust-directory   Skip the first-run directory trust prompt for this run only.
-                      Valid with the "run" command and "daemon start". Does not modify
-                      the preferences file.
+                      Valid with "run", "daemon start", "verify" and --acp. Does not
+                      modify the preferences file.
   --plain             Use a lightweight, Ink-free runtime for non-interactive runs.
                       Only valid with the "run" command. Auto-enables in CI / non-TTY.
   --no-plain          Force the Ink runtime even in CI / non-TTY environments.
@@ -252,7 +277,8 @@ Options:
                       Only valid with the "run" command. Always uses the plain runtime.
   --output-format     Specify stdout format ('text' or 'json'). Synonym for --json.
   --acp               Run as an ACP (Agent Client Protocol) server for editor integration.
-                      Communicates via JSON-RPC over stdin/stdout.
+                      Communicates via JSON-RPC over stdin/stdout. Refuses an untrusted
+                      directory unless --trust-directory is passed.
   -c, --continue      Resume the most recent session for the current directory, silently.
                       Starts a fresh session if none exists. Interactive mode only.
   -r, --resume [id]   Resume a session by id or 1-based list index (e.g. "last", "2",
@@ -274,13 +300,23 @@ Examples:
   nanocoder review main
   nanocoder review feature/auth
   nanocoder review 42
+  nanocoder worktree 42
   nanocoder --continue
   nanocoder --resume last
   nanocoder --resume
+  nanocoder verify --pr 861
+  nanocoder verify --pr 861 --post-review
   nanocoder storage
   nanocoder storage --format json | jq .sections
   `);
 	process.exit(0);
+}
+
+const {validateCliArgs} = await import('./cli-args.js');
+const cliArgsError = validateCliArgs(args);
+if (cliArgsError) {
+	console.error(cliArgsError);
+	process.exit(1);
 }
 
 // Validate output format value to prevent injection
@@ -292,6 +328,19 @@ async function main(): Promise<void> {
 	// Parse args and dispatch non-TUI branches BEFORE importing ink or @/app.
 	// Those packages pull ~thousand+ modules; --acp / --plain / auth must stay
 	// on the lightweight path. Ink + App load only in the final TUI branch.
+	if (args[0] === 'worktree') {
+		const {createPrWorktree, parseWorktreePrNumber} = await import(
+			'./commands/gh-pr-worktree'
+		);
+		const prNumber = parseWorktreePrNumber(args.slice(1));
+		if (!process.stdin.isTTY || !process.stdout.isTTY) {
+			throw new Error(
+				'`nanocoder worktree` requires an interactive terminal (TTY).',
+			);
+		}
+		const worktreePath = await createPrWorktree(prNumber);
+		console.log(`Starting Nanocoder in ${worktreePath}`);
+	}
 
 	const vscodeMode = args.includes('--vscode');
 
@@ -575,9 +624,9 @@ async function main(): Promise<void> {
 	// (rather than silently dropping) if the user passes it interactively
 	// or with `review` (review is TTY-only but sets nonInteractiveMode).
 	const trustDirectoryRequested = args.includes('--trust-directory');
-	if (trustDirectoryRequested && !isRunCommand) {
+	if (trustDirectoryRequested && !isRunCommand && !args.includes('--acp')) {
 		console.error(
-			'--trust-directory only applies to non-interactive commands (`nanocoder run ...`, `nanocoder daemon start`); ignoring.',
+			'--trust-directory only applies to non-interactive commands (`nanocoder run ...`, `nanocoder daemon start`, `nanocoder verify`, `nanocoder --acp`); ignoring.',
 		);
 	}
 	const trustDirectory = trustDirectoryRequested && isRunCommand;
@@ -711,7 +760,12 @@ async function main(): Promise<void> {
 		}
 	} else if (acpMode) {
 		const {runAcpServer} = await import('@/acp/acp-server');
-		await runAcpServer({cliProvider, cliModel, appVersion: version});
+		await runAcpServer({
+			cliProvider,
+			cliModel,
+			appVersion: version,
+			trustDirectory: trustDirectoryRequested,
+		});
 	} else if (plainMode && nonInteractivePrompt) {
 		// Headless, Ink-free path. Note: --plain is currently only valid with
 		// `run`, so we must have a non-empty prompt here.
@@ -781,7 +835,7 @@ async function main(): Promise<void> {
 		// Screen mode: fullscreen (alt screen + in-app scroll) by DEFAULT.
 		// Passing --no-alt-screen or setting alternateScreen:false in preferences
 		// forces inline mode (main screen + native scrollback).
-		const {getAlternateScreen, getMouseReporting} = await import(
+		const {getAlternateScreen, getMouseReporting, getMaxFps} = await import(
 			'@/config/preferences'
 		);
 		const altScreenAllowed =
@@ -950,6 +1004,7 @@ async function main(): Promise<void> {
 				// farewell frame before the process dies.
 				exitOnCtrlC: false,
 				...(inkStdin ? {stdin: inkStdin} : {}),
+				maxFps: getMaxFps(),
 			},
 		);
 
@@ -998,7 +1053,15 @@ async function main(): Promise<void> {
 	}
 }
 
-main().catch(err => {
+main().catch(async (err: unknown) => {
 	console.error(err instanceof Error ? err.message : err);
-	process.exit(1);
+	// Exit through the shutdown manager so registered handlers still run, such
+	// as the session-end hook of `run` / --plain. It exits the process itself,
+	// or returns early when a shutdown is already under way and that one will.
+	try {
+		const {getShutdownManager} = await import('@/utils/shutdown');
+		await getShutdownManager().gracefulShutdown(1);
+	} catch {
+		process.exit(1);
+	}
 });

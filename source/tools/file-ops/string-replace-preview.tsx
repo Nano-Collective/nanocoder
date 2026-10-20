@@ -6,6 +6,7 @@ import ToolMessage, {CappedLines} from '@/components/tool-message';
 import {getColors} from '@/config/index';
 import {getSyntaxTheme} from '@/config/themes';
 import {DEFAULT_TERMINAL_COLUMNS} from '@/constants';
+import {getSafeSessionCwd} from '@/services/session-cwd';
 import type {Colors} from '@/types/index';
 import {truncateAnsi} from '@/utils/ansi-truncate';
 import {formatError} from '@/utils/error-formatter';
@@ -42,7 +43,7 @@ export async function formatStringReplacePreview(
 	const isResult = result !== undefined;
 
 	try {
-		const absPath = resolve(path);
+		const absPath = resolve(getSafeSessionCwd(), path);
 		const cached = await getCachedFileContent(absPath);
 		const fileContent = cached.content;
 		const ext = path.split('.').pop()?.toLowerCase() ?? '';

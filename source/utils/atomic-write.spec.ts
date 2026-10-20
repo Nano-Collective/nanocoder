@@ -1,7 +1,7 @@
 import * as path from 'path';
 import test from 'ava';
 import * as fs from 'fs/promises';
-import {atomicWriteFile} from './atomic-write';
+import {atomicWriteFile, publishFileNoClobber, setLinkSyncForTests} from './atomic-write';
 
 async function createTempDir(): Promise<string> {
 	const tempDir = path.join(
@@ -76,5 +76,73 @@ test.serial('atomicWriteFile leaves no temp file behind on failure', async t => 
 		t.false(dirListing.some(name => name.endsWith('.tmp')));
 	} finally {
 		await cleanupTempDir(tempDir);
+	}
+});
+
+test.serial('publishFileNoClobber publishes when the destination is absent', async t => {
+	const tempDir = await createTempDir();
+	try {
+		const filePath = path.join(tempDir, 'usage.json');
+
+		t.true(publishFileNoClobber(filePath, '{"totalLifetime": 5}'));
+		t.is(await fs.readFile(filePath, 'utf-8'), '{"totalLifetime": 5}');
+		// No temp litter left behind.
+		const dirListing = await fs.readdir(tempDir);
+		t.false(dirListing.some(name => name.includes('.tmp')));
+	} finally {
+		await cleanupTempDir(tempDir);
+	}
+});
+
+test.serial('publishFileNoClobber keeps the existing file when a peer won the race', async t => {
+	// The concurrent-publish window (destination appearing between the
+	// exists check and the publish) cannot be staged single-threaded —
+	// link(2) atomicity is the arbiter — so this covers the seam where the
+	// old and new code differ: it fails against a copy-based implementation
+	// (verified by mutation) and passes against the link-based one.
+	const tempDir = await createTempDir();
+	try {
+		const filePath = path.join(tempDir, 'usage.json');
+		await fs.writeFile(filePath, 'winner-data', 'utf-8');
+
+		t.false(publishFileNoClobber(filePath, 'stale-data'));
+		t.is(await fs.readFile(filePath, 'utf-8'), 'winner-data');
+		const dirListing = await fs.readdir(tempDir);
+		t.false(dirListing.some(name => name.includes('.tmp')));
+	} finally {
+		await cleanupTempDir(tempDir);
+	}
+});
+
+test.serial('publishFileNoClobber falls back to exclusive write when hard links are unsupported', async t => {
+	// Simulate FAT/exFAT or SMB/FUSE mounts where linkSync throws EPERM.
+	const linkError = new Error(
+		'operation not permitted, link',
+	) as NodeJS.ErrnoException;
+	linkError.code = 'EPERM';
+	setLinkSyncForTests(() => {
+		throw linkError;
+	});
+	try {
+		const tempDir = await createTempDir();
+		try {
+			const filePath = path.join(tempDir, 'usage.json');
+
+			// Absent destination: the exclusive-create fallback publishes.
+			t.true(publishFileNoClobber(filePath, 'fallback-data'));
+			t.is(await fs.readFile(filePath, 'utf-8'), 'fallback-data');
+
+			// Present destination: EEXIST from the fallback likewise means a
+			// peer won — content stays untouched.
+			t.false(publishFileNoClobber(filePath, 'stale-data'));
+			t.is(await fs.readFile(filePath, 'utf-8'), 'fallback-data');
+
+			const dirListing = await fs.readdir(tempDir);
+			t.false(dirListing.some(name => name.includes('.tmp')));
+		} finally {
+			await cleanupTempDir(tempDir);
+		}
+	} finally {
+		setLinkSyncForTests();
 	}
 });

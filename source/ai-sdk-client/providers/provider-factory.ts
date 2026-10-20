@@ -527,6 +527,9 @@ export async function createProvider(
 		headers['X-Title'] = 'Nanocoder';
 	}
 
+	const includeUsage =
+		typeof config.includeUsage === 'boolean' ? config.includeUsage : true;
+
 	// Opper (https://opper.ai) names the calling application on its traces via
 	// X-Opper-Name, so runs show up as "nanocoder" in the user's Opper console.
 	if (isOpperProvider(providerConfig.name)) {
@@ -542,6 +545,7 @@ export async function createProvider(
 			apiKey: config.apiKey ?? 'dummy-key',
 			fetch: createUndiciFetch(undiciAgent),
 			headers,
+			includeUsage,
 		}),
 	};
 }

@@ -106,6 +106,7 @@ Keep API keys out of version control using environment variables. Variables are 
 | `NANOCODER_CONTEXT_LIMIT` | Default context limit (tokens) used when no session override or provider `contextWindow`/`contextWindows` applies. It is checked before models.dev metadata (see [Context Limit Resolution Order](#context-limit-resolution-order)). Enables auto-compact and `/usage` to work correctly. The `--context-max` CLI flag takes priority |
 | `NANOCODER_DATA_DIR` | Override the application data directory for internal data like usage statistics |
 | `NANOCODER_INSTALL_METHOD` | Override installation detection (`npm`, `homebrew`, `nix`, `unknown`) |
+| `NANOCODER_NO_UPDATE_CHECK` | Set to `1` to disable automatic update checks at startup. Running `/update` still performs an explicit check |
 | `NANOCODER_DEFAULT_SHUTDOWN_TIMEOUT` | Graceful shutdown timeout in milliseconds (default: 5000) |
 | `NANOCODER_MAX_TURNS` | Maximum LLM turns for headless runs (`--plain` and ACP). Overrides `nanocoder.headless.maxTurns`; default 200. See [Headless](#headless) |
 | `NANOCODER_TRUST_DIRECTORY` | Set to `1` to trust the working directory for a `--plain` run or `nanocoder daemon start`, and save it to `trustedDirectories` for later runs. See [Getting Started](../getting-started/index.md) |
@@ -269,6 +270,25 @@ This is not a secrets boundary. Network is blocked, writes outside the project a
 
 Timeouts and cancel are unchanged. This does not sandbox custom tools or MCP.
 
+### Auto-commit
+
+Set `nanocoder.autoCommit` to `true` (boolean; any other value is treated as off, with a warning) to commit every successful agent file edit (`write_file`, `string_replace`, `diff_edit`) as it happens. Each edit becomes its own commit, so you can `git revert` a single agent mistake without losing the rest of the session. Default is off.
+
+```json
+{
+  "nanocoder": {
+    "autoCommit": true
+  }
+}
+```
+
+- **Only the edited file is committed.** Changes in other files (staged or unstaged) are left untouched. Note that prior uncommitted changes in the *same edited file* are included in that file's commit. New files created by the agent are also included.
+- **Commit messages** are Conventional Commits (`feat: ...`, `fix: ...`) written by the current model from that file's diff, using the same prompt as `/commit`. If the model call fails or returns nothing, the message falls back to `chore: update <path>`.
+- **Skipped, not failed:** outside a git repository, for gitignored files, for edits that leave the file unchanged, and while a merge, rebase, cherry-pick or revert is in progress. A failing commit (a rejecting pre-commit hook, missing git identity) is logged as a warning, the exact prior staging state of the file is restored (un-staging it if it was not previously staged, or restoring its prior staged version), and the edit stays in the working tree.
+- Your git hooks and commit signing run as normal. The model is told the commit hash in the tool result.
+
+This produces one commit per edit. Squash them before opening a PR if you prefer a tidier history (`git rebase -i`, or `git reset --soft <base>` and commit again).
+
 ### Retry Limits
 
 Caps on how many times the conversation loop auto-retries a failing pattern without user intervention, so a stuck model cannot silently drain tokens. They apply in both runtimes: the interactive TUI loop and the `--plain` runtime used by `nanocoder run "..."` in CI and non-TTY environments (where they act within the [Headless](#headless) `maxTurns` ceiling). These are agent-loop limits — the per-provider `maxRetries` setting is unrelated and governs network request retries (see [Providers](providers/index.md)).
@@ -340,7 +360,7 @@ Set the initial development mode for all new interactive sessions. Without this 
 | Value | Description |
 |-------|-------------|
 | `"normal"` | Standard mode - tools that change things prompt for approval; read-only tools run directly |
-| `"auto-accept"` | Semi-automatic - read-only and safe tools auto-run; bash and tools marked as always needing approval still prompt |
+| `"auto-accept"` | Semi-automatic - read-only and safe tools auto-run; bash, file deletes and overwrites, and tools marked as always needing approval still prompt |
 | `"yolo"` | Fully automatic — no confirmations at all |
 | `"plan"` | Read-only exploration mode — only read/search/list tools available |
 | `"architect"` | Plan-then-build mode. See [Development Modes](../features/development-modes.md) |
@@ -424,6 +444,27 @@ Run your own shell commands at fixed points in the agent loop — before/after a
 Each entry takes `command` (required), plus optional `matchTools` (tool names the hook applies to; omitted means all), `matchPaths` (file globs the hook applies to; see [Scoping by file](../features/hooks.md#scoping-by-file)), `timeout` (ms, default 30000, except `session-end` which defaults to 2000 to fit inside the shutdown budget), and `name` (label used in messages and `/doctor`). Context arrives as `NANOCODER_*` environment variables - `$VAR` references inside `command` are deliberately left unexpanded at load time so the shell sees them.
 
 Hooks are project-local shell commands, so they carry the same code-execution weight as project MCP servers in `.mcp.json` and are gated by the same directory-trust prompt. See [Lifecycle Hooks](../features/hooks.md) for the full event list, environment contract, and blocking semantics.
+
+### Formatters
+
+Run a code formatter on every file the agent writes, so its diffs come out in your project's style instead of the model's:
+
+```json
+{
+  "nanocoder": {
+    "formatters": [
+      {"match": ["**/*.{ts,tsx,js,json}"], "command": "npx biome format --write \"$FILE\""},
+      {"match": "**/*.go", "command": "gofmt -w \"$FILE\"", "name": "gofmt"}
+    ]
+  }
+}
+```
+
+Each entry takes `match` (required; globs relative to the project root, same dialect as hook `matchPaths`; a single string is accepted), `command` (required), plus optional `timeout` (ms, default 30000) and `name` (label used in messages and `/doctor`). `/doctor` lists every formatter that loaded, so you can check your config was picked up. The written file's absolute path is in `$FILE` (also `$NANOCODER_FILE`); quote it, and the command runs from the project root. Commands run through `sh -c`, or `cmd.exe` on Windows; there `$FILE` and `${FILE}` are rewritten to cmd.exe's `%FILE%` (quoted if you left them unquoted), so the same command works on both.
+
+Formatters run after a successful `write_file`, `string_replace` or `diff_edit` (in the main agent and in subagents), in config order, and before any `post-tool-use` hooks, so a hook that commits or lints sees the formatted file. Built-in auto-commit runs after both formatters and hooks. If a formatter changes the file, the tool result tells the model to re-read it before its next edit. A formatter that fails or times out is logged without failing the write; any partial changes it made remain on disk and are reported to the model. Files outside the project root are never formatted.
+
+Formatters are project-local shell commands, so like hooks they are gated by the directory-trust prompt. Like other `nanocoder.*` blocks, a project `formatters` list replaces the global one rather than merging with it.
 
 ### Custom System Prompt
 
@@ -535,5 +576,6 @@ Checkpoints deliberately skip `.nanocoderignore`. A file you hid from listings i
 - [Preferences](preferences.md) - User preferences and application data
 - [Logging](logging.md) - Structured logging with Pino
 - [Lifecycle Hooks](../features/hooks.md) - Shell commands run at fixed points in the agent loop
+- [Formatters](#formatters) - Format every file the agent writes
 
 See also [Inspecting the Effective Configuration](#inspecting-the-effective-configuration) for debugging which layer supplied a value.

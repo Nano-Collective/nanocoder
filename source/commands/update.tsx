@@ -87,7 +87,9 @@ export const updateCommand: Command = {
 		logInfo('Checking for available updates...', true);
 
 		try {
-			const updateInfo = await checkForUpdates();
+			// The user explicitly requested an update check, so bypass the startup
+			// cooldown and NANOCODER_NO_UPDATE_CHECK opt-out.
+			const updateInfo = await checkForUpdates({force: true});
 
 			if (updateInfo.hasUpdate) {
 				// Show updating message

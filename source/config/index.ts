@@ -9,6 +9,7 @@ import {
 } from '@/config/mcp-config-loader';
 import {getConfigPath} from '@/config/paths';
 import {
+	getCiWatchPreference,
 	getNotificationsPreference,
 	loadPreferences,
 } from '@/config/preferences';
@@ -27,10 +28,12 @@ import {HOOK_EVENTS} from '@/types/config';
 import type {
 	AppConfig,
 	AutoCompactConfig,
+	CiWatchConfig,
 	Colors,
 	CompressionMode,
 	CompressionStrategy,
 	DevelopmentMode,
+	FormatterDefinition,
 	HookDefinition,
 	HookEvent,
 	HooksConfig,
@@ -41,10 +44,12 @@ import type {
 	RetryLimitsConfig,
 	SystemPromptConfig,
 	TuneConfig,
+	VerifyConfig,
 } from '@/types/index';
 import {clampThreshold} from '@/utils/message-compression';
 import {logError, logWarning} from '@/utils/message-queue';
 import {DEFAULT_SINGLE_LINE_PASTE_THRESHOLD} from '@/utils/paste-utils';
+import {isTrustLevel} from '@/verify/trust';
 
 export {DEFAULT_SESSION_CONFIG} from '@/config/session-config';
 
@@ -435,6 +440,23 @@ function loadSandboxConfig(): boolean {
 	);
 }
 
+function loadAutoCommitConfig(): boolean {
+	return (
+		loadHierarchicalConfig('agents.config.json', 'autoCommit', config => {
+			const value = config.nanocoder?.autoCommit;
+			if (value === true) return true;
+			if (value === false) return false;
+			if (value !== undefined) {
+				logWarning(
+					`nanocoder.autoCommit must be true or false (got ${JSON.stringify(value)}); treating as off`,
+				);
+				return false;
+			}
+			return null;
+		}) ?? false
+	);
+}
+
 function loadAlwaysAllowConfig(): string[] | undefined {
 	return (
 		loadHierarchicalConfig('agents.config.json', 'alwaysAllow', config => {
@@ -633,6 +655,63 @@ function loadHooksConfig(): HooksConfig | undefined {
 	);
 }
 
+/**
+ * Parse one formatter entry. Like hooks, an invalid entry is dropped with an
+ * error rather than failing the whole config.
+ */
+function parseFormatterDefinition(raw: unknown): FormatterDefinition | null {
+	if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+
+	const entry = raw as Record<string, unknown>;
+	const command = entry.command;
+	if (typeof command !== 'string' || command.trim() === '') return null;
+
+	const rawMatch =
+		typeof entry.match === 'string' ? [entry.match] : entry.match;
+	const match = Array.isArray(rawMatch)
+		? rawMatch.filter(
+				(item: unknown): item is string =>
+					typeof item === 'string' && item.trim() !== '',
+			)
+		: [];
+	// Unlike a hook, a formatter with no `match` is not widened to every file:
+	// running `prettier --write` on a Go file is never what was meant.
+	if (match.length === 0) return null;
+
+	const definition: FormatterDefinition = {match, command};
+	if (typeof entry.timeout === 'number' && Number.isFinite(entry.timeout)) {
+		definition.timeout = Math.max(1, Math.round(entry.timeout));
+	}
+	if (typeof entry.name === 'string' && entry.name.trim() !== '') {
+		definition.name = entry.name.trim();
+	}
+	return definition;
+}
+
+function loadFormattersConfig(): FormatterDefinition[] | undefined {
+	return (
+		loadHierarchicalConfig('agents.config.json', 'formatters', config => {
+			const formatters = config.nanocoder?.formatters;
+			if (!Array.isArray(formatters)) return null;
+
+			const parsed = formatters
+				.map(parseFormatterDefinition)
+				.filter(
+					(formatter): formatter is FormatterDefinition => formatter !== null,
+				);
+			if (parsed.length !== formatters.length) {
+				logError(
+					"Invalid formatters config: entries need a 'command' string and a non-empty 'match' glob list.",
+				);
+			}
+
+			// No env substitution, for the same reason as hooks: `$FILE` must
+			// reach the shell rather than being expanded at config-load time.
+			return parsed;
+		}) ?? undefined
+	);
+}
+
 function loadModeProvidersConfig(
 	providers: ProviderConfig[],
 ): Partial<Record<DevelopmentMode, ModeProviderConfig>> | undefined {
@@ -709,6 +788,48 @@ function loadNotificationsConfig(): NotificationsConfig | undefined {
 	return getNotificationsPreference();
 }
 
+// Load project-level verify policy (trust level, poll cadence overrides)
+// from agents.config.json. Unlike ciWatch.enabled (a personal, per-machine
+// opt-in kept in preferences), trust level and cadence are security/policy
+// decisions appropriate to commit and review with the rest of the project.
+function loadVerifyConfig(): VerifyConfig | undefined {
+	return (
+		loadHierarchicalConfig('agents.config.json', 'verify', config => {
+			const verify = config.nanocoder?.verify;
+			if (!verify || typeof verify !== 'object') return null;
+			const result: VerifyConfig = {};
+			if (isTrustLevel(verify.trustLevel)) {
+				result.trustLevel = verify.trustLevel;
+			}
+			if (typeof verify.pollIntervalMs === 'number') {
+				result.pollIntervalMs = verify.pollIntervalMs;
+			}
+			if (typeof verify.maxPollIntervalMs === 'number') {
+				result.maxPollIntervalMs = verify.maxPollIntervalMs;
+			}
+			return Object.keys(result).length > 0 ? result : null;
+		}) ?? undefined
+	);
+}
+
+// Load CI-watch configuration: `enabled` always comes from preferences (a
+// personal opt-in); `pollIntervalMs`/`maxPollIntervalMs` prefer the
+// project-level `verify` overrides from agents.config.json when set, since
+// poll cadence is more appropriately a reviewable project policy.
+function loadCiWatchConfig(): CiWatchConfig | undefined {
+	const preferencesValue = getCiWatchPreference();
+	const projectOverrides = loadVerifyConfig();
+	if (!preferencesValue && !projectOverrides) return undefined;
+	return {
+		enabled: preferencesValue?.enabled ?? false,
+		pollIntervalMs:
+			projectOverrides?.pollIntervalMs ?? preferencesValue?.pollIntervalMs,
+		maxPollIntervalMs:
+			projectOverrides?.maxPollIntervalMs ??
+			preferencesValue?.maxPollIntervalMs,
+	};
+}
+
 export function loadDefaultMode(): CliMode | undefined {
 	return (
 		loadHierarchicalConfig('agents.config.json', 'defaultMode', config => {
@@ -768,8 +889,16 @@ function loadAppConfig(): AppConfig {
 	// Load lifecycle hooks (shell commands run at fixed points in the agent loop)
 	const hooks = loadHooksConfig();
 
+	// Load formatters (run on files the agent writes, before post-tool-use)
+	const formatters = loadFormattersConfig();
+
 	// Load notifications configuration
 	const notifications = loadNotificationsConfig();
+	// Load project-level verify policy (must load before ciWatch, which
+	// layers its poll-cadence overrides on top of the preferences value)
+	const verify = loadVerifyConfig();
+	// Load CI-watch configuration
+	const ciWatch = loadCiWatchConfig();
 
 	// Load mode providers configuration
 	const modeProviders = loadModeProvidersConfig(providers);
@@ -777,6 +906,8 @@ function loadAppConfig(): AppConfig {
 	const tune = loadTuneConfig();
 
 	const sandbox = loadSandboxConfig();
+
+	const autoCommit = loadAutoCommitConfig();
 
 	// Load user-defined LSP servers (auto-discovery still runs alongside)
 	const lspServers = loadLspServersConfig();
@@ -795,10 +926,14 @@ function loadAppConfig(): AppConfig {
 		disabledTools,
 		systemPrompt,
 		hooks,
+		formatters,
 		notifications,
+		ciWatch,
+		verify,
 		modeProviders,
 		tune,
 		sandbox,
+		autoCommit,
 	};
 }
 
