@@ -1,3 +1,4 @@
+import {isUtf8} from 'node:buffer';
 import fs from 'node:fs/promises';
 import {CACHE_FILE_TTL_MS, MAX_FILE_READ_RETRIES} from '@/constants';
 import {isDerivedContentPath} from '@/utils/derived-content';
@@ -24,6 +25,14 @@ export interface CachedFile {
 	 * content back must refuse these paths: the transcript is not the document.
 	 */
 	derived: boolean;
+	/**
+	 * True when the bytes on disk are not valid UTF-8 (a legacy encoding such as
+	 * Latin-1 or Shift-JIS), so decoding replaced some of them with U+FFFD and
+	 * `content` no longer matches the file. Writing `content` back would change
+	 * those bytes even where an edit didn't touch them, so callers that write it
+	 * back must refuse these files. Always false for derived content.
+	 */
+	notUtf8: boolean;
 }
 
 interface CacheEntry {
@@ -152,6 +161,7 @@ async function readAndCacheFile(
 	}
 
 	let content: string;
+	let notUtf8 = false;
 	const derived = isDerivedContentPath(absPath);
 
 	if (derived) {
@@ -170,6 +180,7 @@ async function readAndCacheFile(
 		}
 	} else {
 		content = buffer.toString('utf-8');
+		notUtf8 = !isUtf8(buffer);
 	}
 
 	const cachedFile: CachedFile = {
@@ -178,6 +189,7 @@ async function readAndCacheFile(
 		mtime: mtimeAfter,
 		cachedAt: now,
 		derived,
+		notUtf8,
 	};
 
 	// Enforce max cache size with LRU eviction
