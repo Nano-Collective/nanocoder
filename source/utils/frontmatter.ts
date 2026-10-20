@@ -1,7 +1,6 @@
 import {createRequire} from 'node:module';
 
 type YamlParse = typeof import('yaml').parse;
-
 let yamlParse: YamlParse | undefined;
 
 function getYamlParse(): YamlParse {
@@ -65,19 +64,15 @@ export function parseYamlObject(
 	frontmatter: string,
 ): Record<string, unknown> | null {
 	if (!frontmatter.trim()) return {};
-
 	const parse = getYamlParse();
-
 	let parsed: unknown;
 	try {
 		parsed = parse(frontmatter);
 	} catch {
 		return null;
 	}
-
 	if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
 		return null;
 	}
-
 	return parsed as Record<string, unknown>;
 }
