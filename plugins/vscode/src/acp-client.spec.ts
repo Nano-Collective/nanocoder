@@ -377,3 +377,20 @@ test('NanocoderAcpClient - a creation still in flight does not overwrite a resum
 	t.is(await pending, 'session-resumed');
 	t.is((client as any)._sessionId, 'session-resumed');
 });
+
+test('NanocoderAcpClient - tracks lastActiveSessionId across reconnects and clears on newChat', async (t) => {
+	const outputChannel = {appendLine: () => {}} as any;
+	const stateManager = new AcpStateManager();
+	const client = new NanocoderAcpClient(outputChannel, stateManager);
+
+	client.setConnection({} as any);
+	(client as any)._sessionId = 'session-123';
+
+	client.setConnection({} as any);
+	t.is(client.sessionId, undefined, 'sessionId is cleared on reconnect');
+	t.is(client.lastActiveSessionId, 'session-123', 'lastActiveSessionId captures prior session');
+
+	client.newChat();
+	t.is(client.lastActiveSessionId, undefined, 'newChat clears lastActiveSessionId');
+});
+
