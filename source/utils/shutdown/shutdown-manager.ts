@@ -13,6 +13,7 @@ export class ShutdownManager {
 
 	private boundSigterm: () => void;
 	private boundSigint: () => void;
+	private boundSighup: () => void;
 	private boundUncaughtException: (err: Error) => void;
 	private boundUnhandledRejection: (
 		reason: unknown,
@@ -32,6 +33,14 @@ export class ShutdownManager {
 			void this.gracefulShutdown(0);
 		};
 		this.boundSigint = () => {
+			void this.gracefulShutdown(0);
+		};
+		// A closed terminal or dropped SSH session. With no listener Node exits
+		// on SIGHUP straight away and no handler runs. Kept with `on`, unlike
+		// the two above: a hangup often arrives twice (the shell forwards one,
+		// then the kernel sends one when the shell exits), and a second one
+		// is not a request to force-quit.
+		this.boundSighup = () => {
 			void this.gracefulShutdown(0);
 		};
 		this.boundUncaughtException = (err: Error) => {
@@ -76,6 +85,15 @@ export class ShutdownManager {
 		this.handlers.delete(name);
 	}
 
+	/**
+	 * Apply an explicit timeout even if another subsystem created the singleton.
+	 * Applies to shutdowns that start after this call; a shutdown already in
+	 * flight keeps the timeout it started with.
+	 */
+	setTimeoutMs(timeoutMs: number): void {
+		this.timeoutMs = timeoutMs;
+	}
+
 	async gracefulShutdown(exitCode = 0): Promise<void> {
 		if (this.isShuttingDown) {
 			return;
@@ -115,6 +133,7 @@ export class ShutdownManager {
 	private setupSignalHandlers(): void {
 		nodeProcess.once('SIGTERM', this.boundSigterm);
 		nodeProcess.once('SIGINT', this.boundSigint);
+		nodeProcess.on('SIGHUP', this.boundSighup);
 		nodeProcess.on('uncaughtException', this.boundUncaughtException);
 		nodeProcess.on('unhandledRejection', this.boundUnhandledRejection);
 	}
@@ -124,6 +143,7 @@ export class ShutdownManager {
 		this.isShuttingDown = false;
 		nodeProcess.removeListener('SIGTERM', this.boundSigterm);
 		nodeProcess.removeListener('SIGINT', this.boundSigint);
+		nodeProcess.removeListener('SIGHUP', this.boundSighup);
 		nodeProcess.removeListener(
 			'uncaughtException',
 			this.boundUncaughtException,
@@ -142,6 +162,8 @@ export function getShutdownManager(
 ): ShutdownManager {
 	if (!instance) {
 		instance = new ShutdownManager(options);
+	} else if (options?.timeoutMs !== undefined) {
+		instance.setTimeoutMs(options.timeoutMs);
 	}
 	return instance;
 }

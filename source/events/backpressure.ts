@@ -34,6 +34,7 @@ export interface BackpressureOptions {
 const DEFAULT_DEBOUNCE_MS = 500;
 
 export class BackpressureDispatcher implements SubscriptionDispatcher {
+	private disposed = false;
 	private readonly inFlight: Set<SubscriptionId> = new Set();
 	private readonly debouncers: Map<SubscriptionId, NodeJS.Timeout> = new Map();
 	private readonly pendingEvents: Map<
@@ -47,6 +48,7 @@ export class BackpressureDispatcher implements SubscriptionDispatcher {
 	) {}
 
 	dispatch(sub: Subscription, event: Event): void | Promise<void> {
+		if (this.disposed) return;
 		if (event.kind === 'file.changed') {
 			this.scheduleDebounced(sub, event);
 			return;
@@ -88,10 +90,11 @@ export class BackpressureDispatcher implements SubscriptionDispatcher {
 
 	/**
 	 * Clear pending debouncers. The daemon calls this on shutdown so timers
-	 * don't keep the event loop alive. In-flight runs are not interrupted
-	 * (they're the inner dispatcher's responsibility).
+	 * don't keep the event loop alive, and reject new events. In-flight runs
+	 * are not interrupted (they're the inner dispatcher's responsibility).
 	 */
 	dispose(): void {
+		this.disposed = true;
 		for (const timer of this.debouncers.values()) clearTimeout(timer);
 		this.debouncers.clear();
 		this.pendingEvents.clear();

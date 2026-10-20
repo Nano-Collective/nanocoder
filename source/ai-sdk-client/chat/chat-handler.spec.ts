@@ -1085,3 +1085,64 @@ test('stopOnUnknownTool stops on a call to a tool that does not exist', t => {
 	);
 	t.false(stopOnUnknownTool({steps: []} as never) as boolean);
 });
+
+test('openai-compatible: a tool screenshot reaches the request body as an image_url part', async t => {
+	const {createOpenAICompatible} = await import('@ai-sdk/openai-compatible');
+	let body: {messages: Array<{role: string; content: unknown}>} | undefined;
+	const model = createOpenAICompatible({
+		name: 'Ollama',
+		baseURL: 'http://localhost:11434/v1',
+		fetch: async (_input, init) => {
+			body = JSON.parse(String(init?.body));
+			throw new Error('request captured');
+		},
+	})('llava');
+
+	await handleChat({
+		model,
+		currentModel: 'llava',
+		providerConfig: {
+			name: 'Ollama',
+			type: 'openai',
+			models: ['llava'],
+			config: {baseURL: 'http://localhost:11434/v1'},
+		},
+		messages: [
+			{role: 'user', content: 'check the page'},
+			{
+				role: 'assistant',
+				content: '',
+				tool_calls: [
+					{id: 'call_shot', function: {name: 'browser', arguments: {}}},
+				],
+			},
+			{
+				role: 'tool',
+				content: 'Screenshot of http://localhost:3000/',
+				tool_call_id: 'call_shot',
+				name: 'browser',
+				images: [{data: 'SCREENSHOT_B64', mediaType: 'image/jpeg'}],
+			},
+		],
+		tools: {},
+		callbacks: {},
+		maxRetries: 0,
+	}).catch(() => undefined);
+
+	const [, , toolMessage, imageMessage] = body?.messages ?? [];
+	t.deepEqual(toolMessage, {
+		role: 'tool',
+		tool_call_id: 'call_shot',
+		content: 'Screenshot of http://localhost:3000/',
+	});
+	t.deepEqual(imageMessage, {
+		role: 'user',
+		content: [
+			{type: 'text', text: 'Images from the tool results above.'},
+			{
+				type: 'image_url',
+				image_url: {url: 'data:image/jpeg;base64,SCREENSHOT_B64'},
+			},
+		],
+	});
+});

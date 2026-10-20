@@ -70,6 +70,22 @@ test('MessageBuilder addToolResults adds tool messages', t => {
 	t.is(messages[1].tool_call_id, 'tool_2');
 });
 
+test('MessageBuilder keeps tool images off the text content', t => {
+	const builder = new MessageBuilder([]);
+	builder.addToolResults([
+		{
+			tool_call_id: 'shot',
+			role: 'tool',
+			name: 'browser',
+			content: 'Screenshot of http://localhost:3000/',
+			images: [{data: 'abc', mediaType: 'image/jpeg'}],
+		},
+	]);
+	const [message] = builder.build();
+	t.deepEqual(message.images, [{data: 'abc', mediaType: 'image/jpeg'}]);
+	t.is(message.content, 'Screenshot of http://localhost:3000/');
+});
+
 test('MessageBuilder caps results from optimized execution paths', t => {
 	const content = `HEAD\n${'middle\n'.repeat(MAX_TOOL_RESULT_CHARS)}TAIL`;
 	const builder = new MessageBuilder([]);

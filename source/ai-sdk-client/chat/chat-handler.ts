@@ -7,6 +7,7 @@ import {
 	ToolCallRepairError,
 } from 'ai';
 import {MAX_TOOL_STEPS} from '@/constants';
+import {getModelAcceptsImages} from '@/models/models-dev-client';
 
 /**
  * Stop the SDK's step loop at a call to a tool that does not exist.
@@ -53,6 +54,7 @@ import {
 import {getSafeMemory} from '@/utils/logging/safe-process.js';
 import {
 	convertToModelMessages,
+	type ToolImageDelivery,
 	withCacheBreakpoints,
 } from '../converters/message-converter.js';
 import {convertAISDKToolCalls} from '../converters/tool-converter.js';
@@ -109,7 +111,10 @@ export async function handleChat(
 		onPrivacyEvent,
 	} = params;
 	const logger = getLogger();
-
+	const errorContext = {
+		providerName: providerConfig.name,
+		baseUrl: providerConfig.config.baseURL,
+	};
 	// Check if already aborted before starting
 	if (signal?.aborted) {
 		logger.debug('Chat request already aborted');
@@ -201,7 +206,21 @@ export async function handleChat(
 
 			// Convert messages to AI SDK v5 ModelMessage format
 			const promptCaching = isPromptCachingEnabled(providerConfig);
-			const convertedMessages = convertToModelMessages(finalNonSystemMessages);
+			// `*.chat` is the SDK's Chat Completions model: openai-compatible
+			// providers and Copilot's non-GPT-5 route.
+			const hasToolImages = finalNonSystemMessages.some(
+				m => m.role === 'tool' && !!m.images?.length,
+			);
+			const toolImages: ToolImageDelivery =
+				hasToolImages && (await getModelAcceptsImages(currentModel)) === false
+					? 'omit'
+					: typeof model !== 'string' && model.provider.endsWith('.chat')
+						? 'user-message'
+						: 'inline';
+			const convertedMessages = convertToModelMessages(
+				finalNonSystemMessages,
+				toolImages,
+			);
 			const modelMessages = promptCaching
 				? withCacheBreakpoints(convertedMessages, finalSystemContent)
 				: convertedMessages;
@@ -622,6 +641,7 @@ export async function handleChat(
 					if (streamingErrors.length > 0) {
 						const userMessage = parseAPIError(
 							streamingErrors[streamingErrors.length - 1],
+							errorContext,
 						);
 						throw new Error(userMessage);
 					}
@@ -654,12 +674,12 @@ export async function handleChat(
 					};
 				}
 				// There's a real error underneath, parse it
-				const userMessage = parseAPIError(rootError);
+				const userMessage = parseAPIError(rootError, errorContext);
 				throw new Error(userMessage);
 			}
 
 			// Parse any other error (including RetryError and APICallError)
-			const userMessage = parseAPIError(error);
+			const userMessage = parseAPIError(error, errorContext);
 			throw new Error(userMessage);
 		}
 	}, correlationId); // End of withNewCorrelationContext

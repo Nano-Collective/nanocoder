@@ -150,6 +150,8 @@ Each hook is run with the relevant context in its environment. Nothing is passed
 
 Hook commands are **not** env-substituted when the config is read, so `$NANOCODER_FILE` in your `command` reaches the shell intact.
 
+On Windows the command runs through `cmd.exe`, which expands `%VAR%` rather than `$VAR`. So the examples on this page work unchanged, references to the path variables (`$NANOCODER_FILE`, `$NANOCODER_CWD`, `$NANOCODER_SESSION_CWD`, in either `$VAR` or `${VAR}` form) are rewritten to `%VAR%` before the command runs, and wrapped in double quotes when you left them unquoted. A path containing a `"` or a line break, which cmd.exe cannot quote, makes the hook fail to run rather than run with a broken command line. The free-text variables (`NANOCODER_TOOL_ARGS`, `NANOCODER_COMMAND`, `NANOCODER_TOOL_RESULT`, `NANOCODER_PROMPT`) are never rewritten, because they can contain quotes; read them from a script instead of putting them in the command line.
+
 Hooks run in config order, sequentially, **with the project root as their cwd** — not the agent's current shell directory. A hook is defined in project config, so a relative `command` like `.nanocoder/hooks/guard.sh` has to keep resolving after the model has `cd`-ed somewhere else. Read `NANOCODER_SESSION_CWD` when you want to act on where the shell actually is.
 
 ## Blocking a tool call
@@ -199,7 +201,7 @@ A hook that prints nothing injects nothing.
 
 ## In-process plugins
 
-A plugin is a JavaScript module that runs inside Nanocoder instead of as a shell command. Put one `.mjs` file directly in `.nanocoder/plugins/` at the project root. `.mjs` is required so Node loads it as ESM even when the project itself is CommonJS. Files load in filename order, and only after you have trusted the directory. The chat prompt waits for that load. A plugin runs with the same privileges as Nanocoder itself, so treat it like any other code in the repository.
+A plugin is a JavaScript module that runs inside Nanocoder instead of as a shell command. Put one `.mjs` file directly in `.nanocoder/plugins/` at the project root. `.mjs` is required so Node loads it as ESM even when the project itself is CommonJS. Files load in filename order, and only after you have trusted the directory. The chat prompt waits for that load. A file that has not finished loading after 30 seconds is skipped, and the files after it still load. A plugin runs with the same privileges as Nanocoder itself, so treat it like any other code in the repository.
 
 The default export is the plugin object. There is nothing to import at runtime. For editor type checking, point a JSDoc `@type` at the published types:
 

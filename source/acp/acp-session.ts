@@ -3,6 +3,10 @@ import type {
 	ClientCapabilities,
 } from '@agentclientprotocol/sdk';
 import {SemanticMemoryManager} from '@/memory/semantic-memory-manager';
+import {
+	createSessionCwdScope,
+	type SessionCwdScope,
+} from '@/services/session-cwd';
 import {TimelineManager} from '@/services/timeline-manager';
 import type {DevelopmentMode, Message} from '@/types/core';
 
@@ -12,6 +16,13 @@ export class AcpSession {
 	readonly conn: AgentSideConnection;
 	readonly clientCapabilities?: ClientCapabilities;
 	readonly timeline: TimelineManager;
+	/**
+	 * Where this session's tools run: `cwd` from the client, moved by a bash
+	 * `cd`. Turns run inside it, so relative paths, bash, the path boundary and
+	 * the system prompt follow the session, not the directory the agent was
+	 * spawned in.
+	 */
+	readonly cwdScope: SessionCwdScope;
 
 	messages: Message[] = [];
 	systemMessage?: Message;
@@ -20,6 +31,8 @@ export class AcpSession {
 	developmentMode: DevelopmentMode;
 	/** True while a prompt turn is being processed. Overlapping calls wait on acquireTurn(). */
 	turnActive = false;
+	/** Set by session/close. Queued prompts check it before they start. */
+	closed = false;
 	/** URI of the file currently focused in the editor client (e.g. VS Code). */
 	activeFile?: string;
 	private memoryFinder?: SemanticMemoryManager;
@@ -37,6 +50,7 @@ export class AcpSession {
 		this.clientCapabilities = options.clientCapabilities;
 		this.developmentMode = options.initialMode ?? 'auto-accept';
 		this.timeline = new TimelineManager(options.cwd, options.sessionId);
+		this.cwdScope = createSessionCwdScope(options.cwd);
 	}
 
 	getMemoryFinder(): SemanticMemoryManager {
@@ -45,6 +59,11 @@ export class AcpSession {
 
 	cancel(): void {
 		this.abortController.abort();
+	}
+
+	close(): void {
+		this.closed = true;
+		this.cancel();
 	}
 
 	beginTurn(): void {

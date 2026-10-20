@@ -1,4 +1,4 @@
-import {mkdtemp, readFile, rm, writeFile} from 'node:fs/promises';
+import {mkdir, mkdtemp, readFile, rm, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
@@ -7,6 +7,7 @@ import React from 'react';
 import {themes} from '../../config/themes.js';
 import {resolveToolApproval} from '../approval-policy.js';
 import {ThemeContext} from '../../hooks/useTheme.js';
+import {resetSessionCwd, setSessionCwd} from '../../services/session-cwd.js';
 import {stringReplaceTool} from './string-replace.js';
 import {clearReadTracker, markFileSeen} from '../../utils/read-tracker.js';
 import {readFileTool} from '../read-file.js';
@@ -870,6 +871,34 @@ test('string_replace formatter: renders preview with basic replacement', async t
 	t.regex(output!, /string_replace/);
 	t.regex(output!, /Path:/);
 	t.regex(output!, /Replacing 1 line/);
+});
+
+test('string_replace formatter: preview follows the session cwd', async t => {
+	const root = await mkdtemp(join(tmpdir(), 'string-replace-cwd-'));
+	const sub = join(root, 'sub');
+	await mkdir(sub);
+	await writeFile(join(root, 'note.txt'), 'launch text\n', 'utf-8');
+	await writeFile(join(sub, 'note.txt'), 'session text\n', 'utf-8');
+	setSessionCwd(sub);
+	try {
+		const formatter = stringReplaceTool.formatter;
+		if (!formatter) {
+			t.fail('Formatter not defined');
+			return;
+		}
+		const element = await formatter({
+			path: 'note.txt',
+			old_str: 'session text',
+			new_str: 'edited text',
+		});
+		const {lastFrame} = render(<TestThemeProvider>{element}</TestThemeProvider>);
+		const output = lastFrame() ?? '';
+		t.regex(output, /Replacing 1 line/);
+		t.false(/Content not found/.test(output));
+	} finally {
+		resetSessionCwd();
+		await rm(root, {recursive: true, force: true});
+	}
 });
 
 test('string_replace formatter: says when the line cap hides edits', async t => {

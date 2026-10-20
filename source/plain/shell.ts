@@ -11,6 +11,7 @@ import {
 	loadPreferences,
 	resolveProjectContextPreferences,
 	savePreferences,
+	untrustedDirectoryMessage,
 } from '@/config/preferences';
 import {resolveTune} from '@/config/tune';
 import {
@@ -122,8 +123,11 @@ export async function runPlainShell(
 		);
 	}
 	if (!trust.trusted) {
+		const message = untrustedDirectoryMessage(
+			path.resolve(process.cwd()),
+			trust.recheck,
+		);
 		if (isJson) {
-			const cwd = path.resolve(process.cwd());
 			emitJsonReport({
 				kind: 'error',
 				exitCode: 1,
@@ -132,14 +136,10 @@ export async function runPlainShell(
 				toolCalls: [],
 				steps: 0,
 				filesChanged: [],
-				message: `Directory ${cwd} is not trusted. Pass --trust-directory or set NANOCODER_TRUST_DIRECTORY=1 to bypass the disclaimer for this run.`,
+				message,
 			});
 		} else {
-			const cwd = path.resolve(process.cwd());
-			writeError(
-				`Directory ${cwd} is not trusted. Pass --trust-directory or set ` +
-					`NANOCODER_TRUST_DIRECTORY=1 to bypass the disclaimer for this run.`,
-			);
+			writeError(message);
 		}
 		await deps.getShutdownManager().gracefulShutdown(1);
 		return;
