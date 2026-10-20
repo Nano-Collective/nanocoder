@@ -284,10 +284,12 @@ test('ChatWebviewProvider - showDiff message from webview requests diff preview 
 	await (provider as any)._handleWebviewMessage({
 		type: 'showDiff',
 		toolCallId: 'tool-call-webview',
+		filePath: 'src/file.ts',
 	});
 
 	const calls = getShowDiffCalls();
 	t.is(calls.length, 1);
 	t.is(calls[0].id, 'tool-call-webview');
+	t.is(calls[0].options?.filePath, 'src/file.ts');
 	t.falsy(calls[0].options?.restoreTerminalFocus, 'Webview showDiff must not set restoreTerminalFocus: true');
 });

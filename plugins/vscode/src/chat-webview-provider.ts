@@ -108,7 +108,7 @@ export class ChatWebviewProvider
 		};
 
 		this._acpClient.onConnectionReady = () => {
-			this._diffManager.clearPendingChanges();
+			void this._diffManager.clearPendingChanges();
 			this._initializeSessionIfReady();
 		};
 	}
@@ -207,7 +207,7 @@ export class ChatWebviewProvider
 	public resetSessionState(): void {
 		this._planReview.reset();
 		this._artifacts.reset();
-		this._diffManager.clearPendingChanges();
+		void this._diffManager.clearPendingChanges();
 		this.postArtifacts();
 	}
 
@@ -336,7 +336,9 @@ export class ChatWebviewProvider
 						break;
 					case 'showDiff':
 						this._outputChannel.appendLine(`[Webview] User requested to see diff for: ${message.toolCallId}`);
-						this._diffManager.showDiff(message.toolCallId);
+						void this._diffManager.showDiff(message.toolCallId, {
+							filePath: message.filePath,
+						});
 						break;
 
 					case 'setMode':
@@ -373,7 +375,7 @@ export class ChatWebviewProvider
 						this._outputChannel.appendLine(`[Webview] User resumed session: ${message.sessionId}`);
 						this._planReview.reset();
 						this._artifacts.reset();
-						this._diffManager.clearPendingChanges();
+						void this._diffManager.clearPendingChanges();
 						this.postArtifacts();
 						this._discardQueuedPrompts('resume session');
 						this.postMessage({type: 'clear', isLoading: true});

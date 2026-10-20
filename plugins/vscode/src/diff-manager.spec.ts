@@ -53,6 +53,29 @@ test('DiffManager - showDiff falls back to prefix matching when called with bare
 	t.truthy(diffManager.getPendingChange('tool-call-abc'), 'getPendingChange must also find change by prefix');
 });
 
+test('DiffManager - showDiff with filePath opens only the matching change', async (t) => {
+	const { diffManager, executedCommands } = setupDiffManager();
+
+	diffManager.addPendingChange(createPendingChange({
+		id: 'tool-call-abc_src/a.ts',
+		filePath: 'src/a.ts',
+		originalContent: 'old a',
+		newContent: 'new a',
+	}));
+	diffManager.addPendingChange(createPendingChange({
+		id: 'tool-call-abc_src/b.ts',
+		filePath: 'src/b.ts',
+		originalContent: 'old b',
+		newContent: 'new b',
+	}));
+
+	await diffManager.showDiff('tool-call-abc', { filePath: 'src/b.ts' });
+
+	const diffCommands = executedCommands.filter(c => c.command === 'vscode.diff');
+	t.is(diffCommands.length, 1, 'showDiff with filePath must open only the matching change');
+	t.is(diffManager.getPendingChange('tool-call-abc', 'src/b.ts')?.filePath, 'src/b.ts');
+});
+
 test('DiffManager - closeDiff removes all compound changes sharing toolCallId prefix', async (t) => {
 	const { diffManager } = setupDiffManager();
 

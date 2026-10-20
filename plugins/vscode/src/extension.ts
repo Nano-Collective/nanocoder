@@ -132,7 +132,6 @@ export function activate(context: vscode.ExtensionContext) {
 			void acpClient.cancel();
 			acpClient.newChat();
 			chatProvider.resetSessionState();
-			diffManager.clearPendingChanges();
 			chatProvider.postMessage({type: 'clear'});
 			outputChannel.appendLine('[Extension] New chat started — session cleared.');
 		}),

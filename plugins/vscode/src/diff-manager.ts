@@ -83,7 +83,18 @@ export class DiffManager {
 	/**
 	 * Get a specific pending change
 	 */
-	getPendingChange(id: string): PendingChange | undefined {
+	getPendingChange(id: string, filePath?: string): PendingChange | undefined {
+		if (filePath) {
+			const norm = path.normalize(filePath);
+			return (
+				this.pendingChanges.get(`${id}_${norm}`) ??
+				Array.from(this.pendingChanges.values()).find(
+					c =>
+						(c.id === id || c.id.startsWith(`${id}_`)) &&
+						path.normalize(c.filePath) === norm,
+				)
+			);
+		}
 		return (
 			this.pendingChanges.get(id) ??
 			Array.from(this.pendingChanges.values()).find(c =>
@@ -109,10 +120,35 @@ export class DiffManager {
 	 * Show diff preview for a pending change
 	 * Uses virtual documents to prevent linters from running
 	 * Optionally preserves terminal focus by restoring it after showing the diff (default: false).
-	 * If given a bare toolCallId matching multiple compound-keyed changes, fans out and opens all matching diff tabs.
+	 * If filePath is specified, opens only the change matching that file under id.
+	 * If given a bare toolCallId matching multiple compound-keyed changes without filePath, fans out and opens all matching diff tabs.
 	 */
-	async showDiff(id: string, options?: { restoreTerminalFocus?: boolean }): Promise<void> {
-		const change = this.pendingChanges.get(id);
+	async showDiff(
+		id: string,
+		options?: { restoreTerminalFocus?: boolean; filePath?: string },
+	): Promise<void> {
+		let change = this.pendingChanges.get(id);
+		let targetId = id;
+
+		if (!change && options?.filePath) {
+			const norm = path.normalize(options.filePath);
+			const compoundKey = `${id}_${norm}`;
+			change = this.pendingChanges.get(compoundKey);
+			if (change) {
+				targetId = compoundKey;
+			} else {
+				const match = Array.from(this.pendingChanges.values()).find(
+					c =>
+						(c.id === id || c.id.startsWith(`${id}_`)) &&
+						path.normalize(c.filePath) === norm,
+				);
+				if (match) {
+					change = match;
+					targetId = match.id;
+				}
+			}
+		}
+
 		if (!change) {
 			const matchingChanges = Array.from(this.pendingChanges.values()).filter(c =>
 				c.id.startsWith(`${id}_`),
@@ -136,13 +172,13 @@ export class DiffManager {
 
 		// For new files, show the content directly with syntax highlighting
 		if (isNewFile) {
-			const modifiedUri = this.createVirtualUri(id, 'new', fileName);
+			const modifiedUri = this.createVirtualUri(targetId, 'new', fileName);
 
 			// Set content in our virtual document provider
 			this.contentProvider.setContent(modifiedUri, change.newContent);
 
 			// Track this editor
-			this.openEditors.set(id, [modifiedUri]);
+			this.openEditors.set(targetId, [modifiedUri]);
 
 			// Open the new file content for preview
 			const doc = await vscode.workspace.openTextDocument(modifiedUri);
@@ -160,15 +196,15 @@ export class DiffManager {
 		}
 
 		// For existing files, show diff using virtual documents
-		const originalUri = this.createVirtualUri(id, 'original', fileName);
-		const modifiedUri = this.createVirtualUri(id, 'modified', fileName);
+		const originalUri = this.createVirtualUri(targetId, 'original', fileName);
+		const modifiedUri = this.createVirtualUri(targetId, 'modified', fileName);
 
 		// Set content in our virtual document provider
 		this.contentProvider.setContent(originalUri, change.originalContent);
 		this.contentProvider.setContent(modifiedUri, change.newContent);
 
 		// Track these editors
-		this.openEditors.set(id, [originalUri, modifiedUri]);
+		this.openEditors.set(targetId, [originalUri, modifiedUri]);
 
 		// Open diff editor with preserveFocus to avoid stealing terminal focus
 		const title = `Nanocoder: ${fileName} (${change.toolName})`;
