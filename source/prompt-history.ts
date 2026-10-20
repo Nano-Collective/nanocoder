@@ -13,6 +13,7 @@ export class PromptHistory {
 	private currentIndex: number = -1;
 	private readonly historyFile: string;
 	private savePromise: Promise<void> = Promise.resolve();
+	private preserveUnreadableHistory = false;
 
 	constructor(historyFile?: string) {
 		this.historyFile =
@@ -50,10 +51,20 @@ export class PromptHistory {
 				this.history = this.migrateStringArrayToInputState(stringEntries);
 			}
 			this.currentIndex = -1;
-		} catch {
-			// File doesn't exist yet, start with empty history
+			this.preserveUnreadableHistory = false;
+		} catch (error) {
+			// A missing history file is expected on first use. Other errors, such as
+			// malformed JSON from an interrupted write, must not be overwritten by a
+			// later save in this session.
 			this.history = [];
 			this.currentIndex = -1;
+			this.preserveUnreadableHistory =
+				typeof error === 'object' && error !== null && 'code' in error
+					? error.code !== 'ENOENT'
+					: true;
+			if (this.preserveUnreadableHistory) {
+				logError(`Failed to load prompt history: ${formatError(error)}`);
+			}
 		}
 	}
 
@@ -67,6 +78,8 @@ export class PromptHistory {
 	}
 
 	async saveHistory(): Promise<void> {
+		if (this.preserveUnreadableHistory) return;
+
 		// Chain this save onto the previous save to prevent concurrent writes
 		this.savePromise = this.savePromise.then(async () => {
 			try {
