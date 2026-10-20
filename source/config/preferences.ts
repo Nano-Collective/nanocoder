@@ -157,7 +157,13 @@ function cachedPreference<T>(read: (prefs: UserPreferences) => T): () => T {
 	};
 }
 
-export function savePreferences(preferences: UserPreferences): void {
+/**
+ * Writes the preferences file. Returns `false` when the write failed — the
+ * error is logged here rather than thrown, so callers that must know whether
+ * the value actually reached disk (the trust gate, whose message claims a
+ * persisted entry) have a signal to branch on.
+ */
+export function savePreferences(preferences: UserPreferences): boolean {
 	try {
 		const preferencesPath = getPreferencesPath();
 		if (isProjectPreferencesPath(preferencesPath)) {
@@ -180,7 +186,7 @@ export function savePreferences(preferences: UserPreferences): void {
 		}
 	} catch (error) {
 		logError(`Failed to save preferences: ${String(error)}`);
-		return;
+		return false;
 	}
 
 	preferencesVersion++;
@@ -188,6 +194,7 @@ export function savePreferences(preferences: UserPreferences): void {
 	for (const listener of preferencesListeners) {
 		listener();
 	}
+	return true;
 }
 
 /** The path a trust entry names, or null for a hand-edited entry with none. */
@@ -253,6 +260,24 @@ export function untrustedReason(recheck: TrustRecheck | null | undefined) {
 }
 
 /**
+ * Refusal for non-interactive entry points (`--plain`, `verify`). The two
+ * bypasses last different lengths of time - the flag covers one run, the
+ * variable saves the directory to `trustedDirectories` - so the message
+ * names which is which. Shared by the text and `--json` outputs.
+ */
+export function untrustedDirectoryMessage(
+	cwd: string,
+	recheck?: TrustRecheck | null,
+): string {
+	return (
+		`Directory ${cwd} ${untrustedReason(recheck)}` +
+		`. Pass --trust-directory to bypass the ` +
+		`disclaimer for this run only, or set NANOCODER_TRUST_DIRECTORY=1 to ` +
+		`trust this directory permanently.`
+	);
+}
+
+/**
  * Record this folder, including a fingerprint of what it will run. The
  * prompt passes the fingerprint it showed, so a file that lands while it
  * is open is asked about on the next start instead of trusted unseen.
@@ -275,15 +300,28 @@ export function grantDirectoryTrust(
 
 export interface DirectoryTrustResult {
 	trusted: boolean;
-	/** True if this call persisted a new trust entry (env-var bypass only). */
+	/**
+	 * True if this call persisted a new trust entry (env-var bypass only).
+	 * Stays false when the write failed, so callers never announce a trust
+	 * the next boot would not see.
+	 */
 	persisted: boolean;
+	/**
+	 * True when the env-var bypass granted trust for this run but the write
+	 * did not land. `persisted === false` alone cannot say this: the one-shot
+	 * `bypass` argument and an already-recorded directory both leave it false
+	 * without anything having gone wrong. Callers warn on this flag so a
+	 * failed write is not silent.
+	 */
+	persistFailed?: boolean;
 	/** Set when refusing a folder that has a trust entry. */
 	recheck?: TrustRecheck | null;
 }
 
 export interface DirectoryTrustDeps {
 	loadPreferences: typeof loadPreferences;
-	savePreferences: typeof savePreferences;
+	/** Savers may report failure (`false`); anything else counts as written. */
+	savePreferences: (preferences: UserPreferences) => boolean | void;
 }
 
 /**
@@ -311,8 +349,17 @@ export function ensureDirectoryTrust(
 	}
 
 	if (process.env.NANOCODER_TRUST_DIRECTORY === '1') {
-		deps.savePreferences(grantDirectoryTrust(preferences, directory));
-		return {trusted: true, persisted: true};
+		// `savePreferences` swallows write errors and reports them as `false`.
+		// Propagate that instead of unconditionally claiming a persisted trust:
+		// the callers print "Marked ... as trusted" on `persisted`, and on a
+		// failed write the daemon's own gate would then refuse a directory the
+		// user was just told was trusted. Savers that report nothing (test
+		// doubles, older injections) keep the previous behaviour.
+		const saved = deps.savePreferences(
+			grantDirectoryTrust(preferences, directory),
+		);
+		const persisted = saved !== false;
+		return {trusted: true, persisted, persistFailed: !persisted};
 	}
 
 	return {
@@ -320,6 +367,21 @@ export function ensureDirectoryTrust(
 		persisted: false,
 		recheck: trustRecheck(directory, preferences),
 	};
+}
+
+/**
+ * `ensureDirectoryTrust` for entry points that just refuse: the message to
+ * print when `directory` is not trusted, or null when it is.
+ */
+export function directoryTrustRefusal(
+	directory: string,
+	bypass: boolean,
+	deps?: DirectoryTrustDeps,
+): string | null {
+	const trust = ensureDirectoryTrust(directory, bypass, deps);
+	return trust.trusted
+		? null
+		: untrustedDirectoryMessage(path.resolve(directory), trust.recheck); // nosemgrep
 }
 
 export function updateLastUsed(provider: string, model: string): void {
@@ -430,6 +492,49 @@ export function updatePasteThreshold(threshold: number): void {
 		preferences.nanocoder.paste.singleLineThreshold = Math.round(threshold);
 	}
 	savePreferences(preferences);
+}
+
+/** Ink's default rendering frame rate when maxFps is not configured. */
+export const DEFAULT_MAX_FPS = 30;
+/** Minimum allowable frame rate limit for Ink's maxFps (1 frame per second). */
+export const MIN_MAX_FPS = 1;
+/** Maximum allowable frame rate limit for Ink's maxFps (60 frames per second). */
+export const MAX_MAX_FPS = 60;
+
+/**
+ * Validate Ink's maxFps preference.
+ * Must be an integer between MIN_MAX_FPS (1) and MAX_MAX_FPS (60) inclusive.
+ */
+export function isValidMaxFps(value: unknown): value is number {
+	return (
+		typeof value === 'number' &&
+		Number.isInteger(value) &&
+		value >= MIN_MAX_FPS &&
+		value <= MAX_MAX_FPS
+	);
+}
+
+/**
+ * Get the configured maxFps preference if valid, or undefined if unset or invalid.
+ * Reads the namespaced `nanocoder.ui.maxFps` preference.
+ */
+export function getUiMaxFps(
+	preferences = loadPreferences(),
+): number | undefined {
+	const value = preferences.nanocoder?.ui?.maxFps;
+	if (isValidMaxFps(value)) {
+		return value;
+	}
+	return undefined;
+}
+
+/**
+ * Get the effective maximum TUI frame rate for Ink rendering.
+ * Returns the validated integer from preferences (1-60), or preserves
+ * the default of 30 FPS when not configured or when an invalid value is rejected.
+ */
+export function getMaxFps(preferences = loadPreferences()): number {
+	return getUiMaxFps(preferences) ?? DEFAULT_MAX_FPS;
 }
 
 /**

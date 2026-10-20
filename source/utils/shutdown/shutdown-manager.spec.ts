@@ -283,6 +283,9 @@ test.serial('programmatic timeoutMs takes priority over env var', (t) => {
 	t.is(manager['timeoutMs'], 15000);
 
 	process.env.NANOCODER_DEFAULT_SHUTDOWN_TIMEOUT = originalEnv ?? '';
+	// Not the singleton, so resetShutdownManager() won't remove its signal
+	// handlers; a later test that emits a signal would trigger it too.
+	manager.reset();
 });
 
 test.serial('invalid env var falls back to default', (t) => {
@@ -295,4 +298,38 @@ test.serial('invalid env var falls back to default', (t) => {
 
 	process.env.NANOCODER_DEFAULT_SHUTDOWN_TIMEOUT = originalEnv ?? '';
 	resetShutdownManager();
+});
+
+test.serial('SIGHUP runs a graceful shutdown, and a second hangup does not cut it short', async (t) => {
+	const manager = getShutdownManager();
+	let runs = 0;
+	let finished = false;
+	manager.register({
+		name: 'slow-drain',
+		priority: 10,
+		async handler() {
+			runs++;
+			await new Promise(resolve => setTimeout(resolve, 50));
+			finished = true;
+		},
+	});
+
+	process.emit('SIGHUP');
+	// A closed terminal often delivers two. With no listener left, the second
+	// would kill the process before the handlers finish.
+	t.true(process.listenerCount('SIGHUP') > 0, 'still listening after the first SIGHUP');
+	process.emit('SIGHUP');
+	await new Promise(resolve => setTimeout(resolve, 200));
+
+	t.is(runs, 1);
+	t.true(finished);
+	t.is(exitCalled, 0);
+});
+
+test.serial('reset removes the SIGHUP listener', (t) => {
+	const before = process.listenerCount('SIGHUP');
+	getShutdownManager();
+	t.is(process.listenerCount('SIGHUP'), before + 1);
+	resetShutdownManager();
+	t.is(process.listenerCount('SIGHUP'), before);
 });

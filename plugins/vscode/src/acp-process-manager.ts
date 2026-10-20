@@ -7,7 +7,7 @@ import {AcpStateManager, ACPStatus} from './acp-state';
 import {NanocoderAcpClient} from './acp-client';
 import {findCliPath, nodeExistsAlongside, promptInstallCli, resolveSpawnEnv} from './cli-discovery';
 import {planCliSpawn} from './cli-path-discovery';
-import {resolveExtensionCwd} from './workspace-utils';
+import {acpCliArgs, resolveExtensionCwd} from './workspace-utils';
 
 export class AcpProcessManager {
 	private childProcess: cp.ChildProcess | null = null;
@@ -92,7 +92,8 @@ export class AcpProcessManager {
 			return;
 		}
 
-		this.outputChannel.appendLine(`Starting ACP process: ${cliPath} --acp`);
+		const acpArgs = acpCliArgs();
+		this.outputChannel.appendLine(`Starting ACP process: ${cliPath} ${acpArgs.join(' ')}`);
 		// Spawn with the login shell's PATH so the CLI's `#!/usr/bin/env node`
 		// shebang (and the dev-fallback `node`) resolve the same node the user
 		// gets in a terminal, not launchd's - which may be an older install.
@@ -113,7 +114,7 @@ export class AcpProcessManager {
 		const cwdSetting = resolveExtensionCwd();
 		// On Windows the discovered path is usually an npm/pnpm shim, which
 		// cannot be spawned directly - see planCliSpawn.
-		const plan = planCliSpawn(cliPath, ['--acp']);
+		const plan = planCliSpawn(cliPath, acpArgs);
 		if (plan.command !== cliPath) {
 			this.outputChannel.appendLine(
 				`Resolved launch command: ${plan.command} ${plan.args.join(' ')}${plan.shell ? ' (via shell)' : ''}`
