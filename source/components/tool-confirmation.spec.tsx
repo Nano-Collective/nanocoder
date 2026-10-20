@@ -422,3 +422,57 @@ test('Escape cancels while the checks are still running', async t => {
 	t.deepEqual(record.confirmations, []);
 	validation.resolve({valid: true});
 });
+
+test('a formatter crash does not cancel the next request in a reused instance', async t => {
+	// The crash auto-cancels the first request. If its error state carried over
+	// to the next request, the auto-cancel would fire again and decline that
+	// call before the user ever saw it.
+	let crash = true;
+	const record: ConfirmationRecord = {confirmations: [], cancels: []};
+	const manager = mockToolManager({
+		getToolFormatter: () => async () => {
+			if (crash) throw new Error('boom');
+			return 'healthy preview';
+		},
+	});
+	setToolManagerGetter(() => manager);
+
+	let advance: (next: ToolCall) => void = () => {};
+	function Harness() {
+		const [call, setCall] = React.useState(toolCall('schema_tool', {
+			path: 'a.txt',
+		}));
+		advance = setCall;
+		return (
+			<ToolConfirmation
+				toolCall={call}
+				onConfirm={confirmed => record.confirmations.push(confirmed)}
+				onCancel={() => {
+					record.cancels.push(1);
+				}}
+			/>
+		);
+	}
+
+	const app = renderWithTheme(<Harness />);
+	t.teardown(() => {
+		app.unmount();
+		setToolManagerGetter(() => null);
+	});
+
+	await waitUntil(() => record.confirmations.length > 0);
+	t.deepEqual(record.confirmations, [false], 'the crash must auto-cancel');
+
+	crash = false;
+	advance({id: 'call-2', function: {name: 'schema_tool', arguments: {path: 'b.txt'}}});
+	await waitForPrompt(app.lastFrame);
+
+	const frame = app.lastFrame() ?? '';
+	t.deepEqual(
+		record.confirmations,
+		[false],
+		'the healthy request must not be auto-cancelled',
+	);
+	t.regex(frame, /healthy preview/);
+	t.false(/cancelled due to formatter/.test(frame));
+});

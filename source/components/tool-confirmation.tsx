@@ -60,7 +60,14 @@ export default function ToolConfirmation({
 	if (toolCall !== previousToolCall) {
 		setPreviousToolCall(toolCall);
 		answeredRef.current = false;
+		// Reset during render, not in the preview effect: the auto-cancel effect
+		// runs in the same commit and would act on the previous request's
+		// formatter error, cancelling the new call before it is shown.
 		setIsChecking(true);
+		setIsLoadingPreview(false);
+		setHasFormatterError(false);
+		setHasValidationError(false);
+		setFormatterPreview(null);
 	}
 	const answerOnce = React.useCallback((settle: () => void) => {
 		if (answeredRef.current) return;
