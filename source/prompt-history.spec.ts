@@ -1,11 +1,16 @@
 import {
+	chmodSync,
 	existsSync,
+	lstatSync,
 	mkdirSync,
 	readdirSync,
 	rmSync,
+	statSync,
+	symlinkSync,
 	writeFileSync,
 	readFileSync,
 } from 'fs';
+import fsPromises from 'fs/promises';
 import {tmpdir} from 'os';
 import {basename, join} from 'path';
 import test from 'ava';
@@ -860,4 +865,103 @@ test('saveHistory writes atomically and leaves no temporary files', async t => {
 		name => name.startsWith(prefix) && name.endsWith('.tmp'),
 	);
 	t.deepEqual(leftovers, [], 'no .tmp files should remain after save');
+});
+
+test.serial('a file that cannot be read is left in place and not overwritten', async t => {
+	// A read error (permissions, I/O) says nothing about the content, so an
+	// intact history must not be moved aside as "corrupt", and must not be
+	// replaced by a save of the empty history we ended up with.
+	const tempFile = join(
+		testDir,
+		`history-unreadable-${Date.now()}-${Math.random()}.json`,
+	);
+	const original = `${JSON_FORMAT_MARKER}[{"displayValue":"keep me","placeholderContent":{}}]`;
+	writeFileSync(tempFile, original, 'utf8');
+
+	const realReadFile = fsPromises.readFile;
+	fsPromises.readFile = (async (...args: Parameters<typeof realReadFile>) => {
+		if (String(args[0]) === tempFile) {
+			throw Object.assign(new Error('EACCES: permission denied'), {
+				code: 'EACCES',
+			});
+		}
+		return realReadFile(...args);
+	}) as typeof fsPromises.readFile;
+
+	const history = new PromptHistory(tempFile);
+	try {
+		await history.loadHistory();
+		history.addPrompt('typed while unreadable');
+		await history.saveHistory();
+	} finally {
+		fsPromises.readFile = realReadFile;
+	}
+
+	t.is(readFileSync(tempFile, 'utf8'), original, 'the file must be untouched');
+	t.deepEqual(
+		readdirSync(testDir).filter(name =>
+			name.startsWith(`${basename(tempFile)}.`),
+		),
+		[],
+		'nothing is quarantined and no temp file is left behind',
+	);
+
+	// Once the cause is fixed, the next load brings the history back and saves
+	// work again.
+	await history.loadHistory();
+	t.deepEqual(history.getHistoryStrings(), ['keep me']);
+	history.addPrompt('after recovery');
+	await history.saveHistory();
+	const reloaded = new PromptHistory(tempFile);
+	await reloaded.loadHistory();
+	t.deepEqual(reloaded.getHistoryStrings(), ['keep me', 'after recovery']);
+});
+
+const posixOnly = process.platform === 'win32' ? test.skip : test;
+
+posixOnly('saveHistory keeps the permissions of an existing history file', async t => {
+	const tempFile = join(
+		testDir,
+		`history-mode-${Date.now()}-${Math.random()}.json`,
+	);
+	writeFileSync(
+		tempFile,
+		`${JSON_FORMAT_MARKER}[{"displayValue":"private","placeholderContent":{}}]`,
+		'utf8',
+	);
+	chmodSync(tempFile, 0o600);
+
+	const history = new PromptHistory(tempFile);
+	await history.loadHistory();
+	history.addPrompt('another');
+	await history.saveHistory();
+
+	t.is(statSync(tempFile).mode & 0o777, 0o600, 'a 0600 file stays 0600');
+});
+
+posixOnly('saveHistory writes through a symlinked history file', async t => {
+	const dir = join(testDir, `history-link-${Date.now()}-${Math.random()}`);
+	mkdirSync(dir, {recursive: true});
+	const realFile = join(dir, 'real-history');
+	const link = join(dir, 'linked-history');
+	writeFileSync(
+		realFile,
+		`${JSON_FORMAT_MARKER}[{"displayValue":"old","placeholderContent":{}}]`,
+		'utf8',
+	);
+	symlinkSync(realFile, link);
+
+	const history = new PromptHistory(link);
+	await history.loadHistory();
+	history.addPrompt('new');
+	await history.saveHistory();
+
+	t.true(lstatSync(link).isSymbolicLink(), 'the symlink must survive a save');
+	const reloaded = new PromptHistory(realFile);
+	await reloaded.loadHistory();
+	t.deepEqual(
+		reloaded.getHistoryStrings(),
+		['old', 'new'],
+		'the file behind the link receives the save',
+	);
 });

@@ -1,7 +1,7 @@
-import crypto from 'crypto';
 import fs from 'fs/promises';
 import {getClosestConfigFile} from '@/config/index';
 import {MAX_PROMPT_HISTORY_SIZE} from '@/constants';
+import {atomicWriteFile} from '@/utils/atomic-write';
 import {formatError} from '@/utils/error-formatter';
 import {logError} from '@/utils/message-queue';
 import type {InputState} from './types/hooks';
@@ -27,6 +27,9 @@ export class PromptHistory {
 	private currentIndex: number = -1;
 	private readonly historyFile: string;
 	private savePromise: Promise<void> = Promise.resolve();
+	// Set when the file exists but could not be read (permissions, I/O). The
+	// content is unknown, so saving would replace history we never saw.
+	private persistenceBlocked = false;
 
 	constructor(historyFile?: string) {
 		this.historyFile =
@@ -34,6 +37,7 @@ export class PromptHistory {
 	}
 
 	async loadHistory(): Promise<void> {
+		this.persistenceBlocked = false;
 		try {
 			const content = await fs.readFile(this.historyFile, 'utf8');
 
@@ -48,7 +52,9 @@ export class PromptHistory {
 				const jsonContent = content.slice(JSON_FORMAT_MARKER.length);
 				const parsed: unknown = JSON.parse(jsonContent);
 				if (!Array.isArray(parsed)) {
-					throw new Error('Prompt history file does not contain an array');
+					throw new SyntaxError(
+						'Prompt history file does not contain an array',
+					);
 				}
 				this.history = parsed as InputState[];
 			} else if (content.includes(ENTRY_SEPARATOR)) {
@@ -77,25 +83,38 @@ export class PromptHistory {
 				return;
 			}
 
-			// The file exists but could not be read or parsed - a truncated
-			// JSON payload left behind by a crash mid-save is the common case.
-			// Moving it aside preserves the old entries for recovery and stops
-			// the next save from overwriting them with the empty history.
-			await this.quarantineCorruptFile(error);
+			if (error instanceof SyntaxError) {
+				// The file was read but its content is not valid history - a
+				// truncated JSON payload left behind by a crash mid-save is the
+				// common case. Moving it aside preserves the old entries for
+				// recovery and stops the next save from replacing them with the
+				// empty history.
+				await this.quarantineCorruptFile(error);
+				return;
+			}
+
+			// The file could not be read at all (permissions, I/O error, ...).
+			// That says nothing about its content, so leave it where it is, and
+			// do not save: that would replace entries we never saw. Fixing the
+			// cause brings the history back on the next load.
+			this.persistenceBlocked = true;
+			logError(
+				`Prompt history could not be read, leaving it untouched and not saving it this session: ${formatError(error)}`,
+			);
 		}
 	}
 
 	/**
-	 * Move an unreadable history file out of the way so the next save starts
-	 * fresh instead of destroying it. Best effort: if the rename fails the
-	 * file is left untouched, and the atomic write in saveHistory means a
+	 * Move a history file with invalid content out of the way so the next save
+	 * starts fresh instead of destroying it. Best effort: if the rename fails
+	 * the file is left untouched, and the atomic write in saveHistory means a
 	 * later save renames a complete temp file into place rather than
 	 * truncating the existing one.
 	 */
 	private async quarantineCorruptFile(error: unknown): Promise<void> {
 		const backupPath = await this.nextAvailableBackupPath();
 		logError(
-			`Prompt history file is unreadable, backing it up to ${backupPath}: ${formatError(error)}`,
+			`Prompt history file is corrupt, backing it up to ${backupPath}: ${formatError(error)}`,
 		);
 		try {
 			await fs.rename(this.historyFile, backupPath);
@@ -134,27 +153,43 @@ export class PromptHistory {
 		}));
 	}
 
+	/**
+	 * Where to write: the real file behind a symlink (a renamed-over link would
+	 * be replaced by a plain file and leave its target stale), and the mode the
+	 * existing file has, if any.
+	 */
+	private async resolveWriteTarget(): Promise<{path: string; mode?: number}> {
+		let path = this.historyFile;
+		try {
+			path = await fs.realpath(this.historyFile);
+		} catch {
+			// Not there yet: write the path as given.
+		}
+		try {
+			return {path, mode: (await fs.stat(path)).mode & 0o777};
+		} catch {
+			return {path};
+		}
+	}
+
 	async saveHistory(): Promise<void> {
 		// Chain this save onto the previous save to prevent concurrent writes
 		this.savePromise = this.savePromise.then(async () => {
+			if (this.persistenceBlocked) return;
 			try {
 				const jsonContent = JSON.stringify(this.history, null, 2);
 				// Write to a temp file and rename into place. writeFile alone
 				// truncates in place, so a crash mid-save used to leave a file
 				// starting with the marker followed by broken JSON, which the
-				// next load discarded.
-				const temporaryPath = `${this.historyFile}.${crypto.randomUUID()}.tmp`;
-				try {
-					await fs.writeFile(
-						temporaryPath,
-						JSON_FORMAT_MARKER + jsonContent,
-						'utf8',
-					);
-					await fs.rename(temporaryPath, this.historyFile);
-				} catch (writeError) {
-					await fs.unlink(temporaryPath).catch(() => {});
-					throw writeError;
-				}
+				// next load discarded. Rename replaces whatever is at the path,
+				// so write to the real file behind a symlink and give the new
+				// file the old one's permissions, as an in-place write would.
+				const target = await this.resolveWriteTarget();
+				await atomicWriteFile(
+					target.path,
+					JSON_FORMAT_MARKER + jsonContent,
+					target.mode === undefined ? undefined : {mode: target.mode},
+				);
 			} catch (error) {
 				// Silently fail to avoid disrupting the user experience
 				const errorMessage = formatError(error);
