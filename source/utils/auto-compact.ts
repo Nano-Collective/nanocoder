@@ -194,10 +194,12 @@ export async function performAutoCompact(
 		// a single synthetic message. Falls back to mechanical on any failure
 		// (network error, malformed response, etc.) so a transient model issue
 		// never blocks compaction.
+		let llmFallback = false;
 		if (strategy === 'llm' && client) {
 			if (signal?.aborted) {
 				return null;
 			}
+			llmFallback = true;
 			if (config.notifyUser && onNotify) {
 				onNotify('auto-compacting context...');
 			}
@@ -215,6 +217,7 @@ export async function performAutoCompact(
 				}
 
 				if (llmCompressed) {
+					llmFallback = false;
 					// Tool definitions are constant across compaction, so include them on
 					// both sides — otherwise the reduction % is inflated by tokens that
 					// never get removed.
@@ -264,8 +267,11 @@ export async function performAutoCompact(
 		// Show notification if enabled
 		if (config.notifyUser && onNotify) {
 			const reduction = Math.round(result.reductionPercentage);
+			const fallbackNotice = llmFallback
+				? ' (summary degraded: LLM call failed)'
+				: '';
 			onNotify(
-				`Context at ${Math.round(usagePercentage)}% capacity - auto-compacting...\n\nContext Compacted: ${result.originalTokenCount.toLocaleString()} tokens → ${result.compressedTokenCount.toLocaleString()} tokens (${reduction}% reduction)`,
+				`Context at ${Math.round(usagePercentage)}% capacity - auto-compacting${fallbackNotice}...\n\nContext Compacted: ${result.originalTokenCount.toLocaleString()} tokens → ${result.compressedTokenCount.toLocaleString()} tokens (${reduction}% reduction)`,
 			);
 		}
 

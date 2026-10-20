@@ -22,6 +22,7 @@ import type {ToolManager} from '@/tools/tool-manager';
 import type {TuneConfig} from '@/types/config';
 import type {
 	DevelopmentMode,
+	LLMChatResponse,
 	LLMClient,
 	Message,
 	ModeOverrides,
@@ -29,6 +30,7 @@ import type {
 	ToolResult,
 } from '@/types/core';
 import {maybeAutoCompact} from '@/utils/auto-compact';
+import {formatError} from '@/utils/error-formatter';
 import {capMessagesForModel} from '@/utils/message-capping';
 
 export interface ToolCallLog {
@@ -321,37 +323,58 @@ async function runPlainConversationBody(
 			? [{role: 'user', content: FINAL_TURN_INSTRUCTION}]
 			: [];
 
-		const result = await client.chat(
-			[systemMessage, ...cappedMessages, ...finalTurnNotice],
-			tools,
-			{
-				onReasoningToken: (token: string) => {
-					streamedReasoning += token;
-					accumulatedReasoning += token;
-					if (!isJson) {
-						if (!reasoningPrinted) {
-							reasoningPrinted = true;
-							write(color('gray', '> '));
+		let result: LLMChatResponse;
+		try {
+			result = await client.chat(
+				[systemMessage, ...cappedMessages, ...finalTurnNotice],
+				tools,
+				{
+					onReasoningToken: (token: string) => {
+						streamedReasoning += token;
+						accumulatedReasoning += token;
+						if (!isJson) {
+							if (!reasoningPrinted) {
+								reasoningPrinted = true;
+								write(color('gray', '> '));
+							}
+							write(color('gray', token));
 						}
-						write(color('gray', token));
-					}
+					},
+					onToken: (token: string) => {
+						accumulatedFinalText += token;
+						if (!isJson) {
+							if (reasoningPrinted && !contentStarted) {
+								writeLine();
+							}
+							if (!contentStarted) {
+								contentStarted = true;
+							}
+							write(token);
+						}
+					},
 				},
-				onToken: (token: string) => {
-					accumulatedFinalText += token;
-					if (!isJson) {
-						if (reasoningPrinted && !contentStarted) {
-							writeLine();
-						}
-						if (!contentStarted) {
-							contentStarted = true;
-						}
-						write(token);
-					}
-				},
-			},
-			abortSignal,
-			modeOverrides,
-		);
+				abortSignal,
+				modeOverrides,
+			);
+		} catch (error) {
+			// An HTTP error or dropped connection rejects here. Return it as an
+			// `error` outcome so the caller still prints its report (with the
+			// tool calls that already ran) and exits through graceful shutdown.
+			// The failed request was still a model call, so it counts as a step.
+			steps++;
+			if (!isJson && (reasoningPrinted || contentStarted)) {
+				writeLine();
+			}
+			return {
+				kind: 'error',
+				message: abortSignal.aborted ? 'Aborted' : formatError(error),
+				finalText: accumulatedFinalText,
+				reasoning: accumulatedReasoning || null,
+				toolCalls: toolCallsLog,
+				steps,
+				usage: getUsage(),
+			};
+		}
 		steps++;
 
 		// The client always returns a `usage` object, but every field inside it is
