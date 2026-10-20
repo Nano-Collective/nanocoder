@@ -12,7 +12,11 @@ import {TitleShapeContext} from '../hooks/useTitleShape';
 import {UIStateProvider, useUIStateContext} from '../hooks/useUIState';
 import {clearFileListCache} from '../utils/file-autocomplete';
 import {pasteEvents} from '../utils/terminal-paste';
-import UserInput, {findReverseMatch} from './user-input';
+import UserInput, {
+	findReverseMatch,
+	KEYBOARD_SHORTCUTS,
+	SHORTCUTS_OVERHEAD_ROWS,
+} from './user-input';
 import {getClosestConfigFile} from '../config/index';
 import {promptHistory} from '../prompt-history';
 
@@ -304,6 +308,225 @@ test('UserInput closes the shortcuts overlay on a second ?', async t => {
 	);
 	t.notRegex(lastFrame()!, /Keyboard Shortcuts/);
 	unmount();
+});
+
+test('UserInput reports the shortcuts overlay opening and closing, including on unmount', async t => {
+	const changes: boolean[] = [];
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput
+				forceFocus={true}
+				onShortcutsOverlayChange={open => changes.push(open)}
+			/>
+		</TestWrapper>,
+	);
+
+	stdin.write('?');
+	await waitForFrame(lastFrame, /Keyboard Shortcuts/);
+	stdin.write('\x1B');
+	await waitForFrame(lastFrame, /Ask anything/);
+	stdin.write('?');
+	await waitForFrame(lastFrame, /Keyboard Shortcuts/);
+	// Unmounting with the overlay open, as when a tool confirmation replaces
+	// the composer, must still report it closed.
+	unmount();
+	await waitForCondition(() => changes.length === 4);
+	t.deepEqual(changes, [true, false, true, false]);
+});
+
+// The overlay sizes itself from process.stdout.rows; run serially so another
+// test's terminal size never leaks into the frame being measured.
+const withTerminalRows = async (rows: number, run: () => Promise<void>) => {
+	const originalRows = process.stdout.rows;
+	process.stdout.rows = rows;
+	try {
+		await run();
+	} finally {
+		process.stdout.rows = originalRows;
+	}
+};
+
+// The app frame pads the live area with one row above and one below.
+const APP_FRAME_PADDING_ROWS = 2;
+
+// Windows and rows below are derived from the legend, so adding a shortcut
+// does not break these tests.
+const SHORTCUT_COUNT = KEYBOARD_SHORTCUTS.length;
+const visibleShortcuts = (rows: number) =>
+	Math.max(1, Math.min(SHORTCUT_COUNT, rows - SHORTCUTS_OVERHEAD_ROWS));
+// The overlay's position label for a window whose top row is `start` (0-based),
+// clamped to the last full window like the overlay does.
+const shortcutsWindow = (rows: number, start: number) => {
+	const visible = visibleShortcuts(rows);
+	const first = Math.min(start, SHORTCUT_COUNT - visible);
+	return new RegExp(`${first + 1}-${first + visible} of ${SHORTCUT_COUNT}`);
+};
+const escapeRegExp = (value: string) =>
+	value.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&');
+const shortcutRow = (index: number) => {
+	const entry = KEYBOARD_SHORTCUTS.at(index);
+	if (!entry) throw new Error(`No shortcut at index ${index}`);
+	return new RegExp(escapeRegExp(`${entry[0]} — ${entry[1]}`));
+};
+
+test.serial('UserInput fits the shortcuts overlay and its close hint on a short terminal', async t => {
+	await withTerminalRows(18, async () => {
+		const {stdin, lastFrame, unmount} = render(
+			<TestWrapper>
+				<UserInput forceFocus={true} />
+			</TestWrapper>,
+		);
+
+		stdin.write('?');
+		await waitForFrame(lastFrame, /Keyboard Shortcuts/);
+		const frame = stripAnsi(lastFrame() ?? '');
+		t.regex(frame, /\? or Esc to close/);
+		t.regex(frame, /↑\/↓ scroll/);
+		t.notRegex(frame, shortcutRow(-1));
+		t.true(frame.split('\n').length <= 18 - APP_FRAME_PADDING_ROWS);
+		unmount();
+	});
+});
+
+test.serial('UserInput keeps each shortcut on one row on a narrow terminal', async t => {
+	const originalColumns = process.stdout.columns;
+	process.stdout.columns = 60;
+	try {
+		await withTerminalRows(18, async () => {
+			const {stdin, lastFrame, unmount} = render(
+				<TestWrapper>
+					<UserInput forceFocus={true} />
+				</TestWrapper>,
+			);
+
+			stdin.write('?');
+			await waitForFrame(lastFrame, /Keyboard Shortcuts/);
+			const frame = stripAnsi(lastFrame() ?? '');
+			// "Tab — Accept suggestion / insert suggested command" is wider than
+			// the box at 60 columns; it must be cut, not wrapped onto a second row.
+			t.regex(frame, /Tab — Accept suggestion/);
+			t.notRegex(frame, /^\s*│\s+command\s+│/m);
+			t.regex(frame, /\? or Esc to close/);
+			t.regex(frame, /╰─+╯/);
+			t.true(frame.split('\n').length <= 18 - APP_FRAME_PADDING_ROWS);
+			unmount();
+		});
+	} finally {
+		process.stdout.columns = originalColumns;
+	}
+});
+
+test.serial('UserInput scrolls the shortcuts overlay with the arrow and page keys', async t => {
+	await withTerminalRows(18, async () => {
+		const {stdin, lastFrame, unmount} = render(
+			<TestWrapper>
+				<UserInput forceFocus={true} />
+			</TestWrapper>,
+		);
+
+		stdin.write('?');
+		await waitForFrame(lastFrame, /Keyboard Shortcuts/);
+		t.regex(stripAnsi(lastFrame() ?? ''), shortcutRow(0));
+
+		stdin.write('\x1B[B');
+		await waitForCondition(
+			() => !shortcutRow(0).test(stripAnsi(lastFrame() ?? '')),
+		);
+
+		// Page Down past the end clamps to the last window.
+		const pages = Math.ceil(SHORTCUT_COUNT / visibleShortcuts(18));
+		for (let i = 0; i < pages; i++) stdin.write('\x1B[6~');
+		await waitForFrame(lastFrame, shortcutsWindow(18, SHORTCUT_COUNT));
+		t.regex(stripAnsi(lastFrame() ?? ''), shortcutRow(-2));
+		t.regex(stripAnsi(lastFrame() ?? ''), shortcutRow(-1));
+
+		for (let i = 0; i < pages; i++) stdin.write('\x1B[5~');
+		await waitForFrame(lastFrame, shortcutRow(0));
+		t.regex(stripAnsi(lastFrame() ?? ''), shortcutsWindow(18, 0));
+		unmount();
+	});
+});
+
+test.serial('UserInput keeps the shortcuts overlay top row across a grow-then-shrink resize', async t => {
+	await withTerminalRows(18, async () => {
+		const {stdin, lastFrame, unmount} = render(
+			<TestWrapper>
+				<UserInput forceFocus={true} />
+			</TestWrapper>,
+		);
+
+		stdin.write('?');
+		await waitForFrame(lastFrame, /Keyboard Shortcuts/);
+		const pages = Math.ceil(SHORTCUT_COUNT / visibleShortcuts(18));
+		for (let i = 0; i < pages; i++) stdin.write('\x1B[6~');
+		await waitForFrame(lastFrame, shortcutsWindow(18, SHORTCUT_COUNT));
+
+		// Growing pulls the top row up so the taller window still ends on the
+		// last shortcut.
+		const topAfterGrow = SHORTCUT_COUNT - visibleShortcuts(24);
+		process.stdout.rows = 24;
+		process.stdout.emit('resize');
+		await waitForFrame(lastFrame, shortcutsWindow(24, topAfterGrow));
+
+		// Shrinking again keeps that top row instead of jumping back down.
+		process.stdout.rows = 16;
+		process.stdout.emit('resize');
+		await waitForFrame(lastFrame, shortcutsWindow(16, topAfterGrow));
+		t.regex(stripAnsi(lastFrame() ?? ''), shortcutRow(topAfterGrow));
+		unmount();
+	});
+});
+
+test.serial('UserInput shows every shortcut without a scroll hint on a tall terminal', async t => {
+	await withTerminalRows(60, async () => {
+		const {stdin, lastFrame, unmount} = render(
+			<TestWrapper>
+				<UserInput forceFocus={true} />
+			</TestWrapper>,
+		);
+
+		stdin.write('?');
+		await waitForFrame(lastFrame, /Keyboard Shortcuts/);
+		const frame = stripAnsi(lastFrame() ?? '');
+		t.regex(frame, shortcutRow(0));
+		t.regex(frame, shortcutRow(-1));
+		t.regex(frame, /Press \? or Esc to close/);
+		t.notRegex(frame, /↑\/↓ scroll/);
+		unmount();
+	});
+});
+
+test.serial('UserInput keeps the voice state on the one mode line under the shortcuts overlay', async t => {
+	const originalColumns = process.stdout.columns;
+	process.stdout.columns = 60;
+	try {
+		await withTerminalRows(18, async () => {
+			const {stdin, lastFrame, unmount} = render(
+				<TestWrapper>
+					<UserInput
+						forceFocus={true}
+						voice={{state: 'listening'}}
+					/>
+				</TestWrapper>,
+			);
+
+			stdin.write('?');
+			await waitForFrame(lastFrame, /Keyboard Shortcuts/);
+			const frame = stripAnsi(lastFrame() ?? '');
+			const lines = frame.split('\n');
+			// The voice state shares the status row the overlay already budgets
+			// for, so it stays visible and adds no rows.
+			const modeLine = lines.find(line => /● listening/.test(line));
+			t.truthy(modeLine);
+			t.regex(modeLine ?? '', /normal/);
+			t.regex(frame, /\? or Esc to close/);
+			t.regex(frame, /╰─+╯/);
+			t.true(lines.length <= 18 - APP_FRAME_PADDING_ROWS);
+			unmount();
+		});
+	} finally {
+		process.stdout.columns = originalColumns;
+	}
 });
 
 test('UserInput types ? literally when the prompt is not empty', async t => {
@@ -2527,37 +2750,43 @@ test.serial('UserInput types ? into the reverse-search query instead of opening 
 	unmount();
 });
 
-test('UserInput lists Ctrl+N for reasoning and Ctrl+R for history search in the shortcuts overlay', async t => {
-	const {stdin, lastFrame, unmount} = render(
-		<TestWrapper>
-			<UserInput forceFocus={true} />
-		</TestWrapper>,
-	);
+// The overlay only shows as many shortcuts as the terminal height allows, so
+// these legend checks render tall enough to see every entry.
+test.serial('UserInput lists Ctrl+N for reasoning and Ctrl+R for history search in the shortcuts overlay', async t => {
+	await withTerminalRows(60, async () => {
+		const {stdin, lastFrame, unmount} = render(
+			<TestWrapper>
+				<UserInput forceFocus={true} />
+			</TestWrapper>,
+		);
 
-	await wait(50);
-	stdin.write('?');
-	await waitForFrame(lastFrame, /Keyboard Shortcuts/);
+		await wait(50);
+		stdin.write('?');
+		await waitForFrame(lastFrame, /Keyboard Shortcuts/);
 
-	const frame = stripAnsi(lastFrame() ?? '');
-	t.regex(frame, /Ctrl\+N — Toggle reasoning traces/);
-	t.regex(frame, /Ctrl\+R — Reverse search prompt history/);
-	unmount();
+		const frame = stripAnsi(lastFrame() ?? '');
+		t.regex(frame, /Ctrl\+N — Toggle reasoning traces/);
+		t.regex(frame, /Ctrl\+R — Reverse search prompt history/);
+		unmount();
+	});
 });
 
-test('UserInput lists Ctrl+G voice push-to-talk in the shortcuts overlay', async t => {
-	const {stdin, lastFrame, unmount} = render(
-		<TestWrapper>
-			<UserInput forceFocus={true} />
-		</TestWrapper>,
-	);
+test.serial('UserInput lists Ctrl+G voice push-to-talk in the shortcuts overlay', async t => {
+	await withTerminalRows(60, async () => {
+		const {stdin, lastFrame, unmount} = render(
+			<TestWrapper>
+				<UserInput forceFocus={true} />
+			</TestWrapper>,
+		);
 
-	await wait(50);
-	stdin.write('?');
-	await waitForFrame(lastFrame, /Keyboard Shortcuts/);
+		await wait(50);
+		stdin.write('?');
+		await waitForFrame(lastFrame, /Keyboard Shortcuts/);
 
-	const frame = stripAnsi(lastFrame() ?? '');
-	t.regex(frame, /Ctrl\+G — Voice push-to-talk \(when \/voice is on\)/);
-	unmount();
+		const frame = stripAnsi(lastFrame() ?? '');
+		t.regex(frame, /Ctrl\+G — Voice push-to-talk \(when \/voice is on\)/);
+		unmount();
+	});
 });
 
 test('findReverseMatch skips malformed history entries instead of throwing', t => {
