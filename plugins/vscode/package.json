@@ -202,7 +202,7 @@
 				"nanocoder.cwd": {
 					"type": "string",
 					"scope": "resource",
-					"description": "Working directory for the Nanocoder CLI. Defaults to the current VS Code workspace root."
+					"description": "Working directory for the Nanocoder CLI, new sessions, settings and @ mention search. Defaults to the current VS Code workspace root, and takes priority over it when set. With no folder open, sessions use your home directory and @ mention search finds no files."
 				},
 				"nanocoder.codeLens": {
 					"type": "boolean",

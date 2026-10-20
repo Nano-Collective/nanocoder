@@ -5,6 +5,7 @@ import test from 'ava';
 import {runAcpConversation} from '@/acp/acp-conversation';
 import {AcpSession} from '@/acp/acp-session';
 import {clearAppConfig, reloadAppConfig} from '@/config/index';
+import {describeProjectTrust} from '@/config/project-trust';
 import {
 	appendPostToolUseOutput,
 	runLifecycleHooks,
@@ -42,6 +43,10 @@ function withPlugins(files: Record<string, string>): string {
 	}
 	setProjectRoot(root);
 	return root;
+}
+
+function trustedRecord(root: string) {
+	return {path: root, fingerprint: describeProjectTrust(root).fingerprint};
 }
 
 function bashCall(command: string): ToolCall {
@@ -290,7 +295,7 @@ test.serial(
 
 		writeFileSync(
 			join(configDir, 'nanocoder-preferences.json'),
-			JSON.stringify({trustedDirectories: [root]}),
+			JSON.stringify({trustedDirectories: [trustedRecord(root)]}),
 			'utf-8',
 		);
 		resetPluginsForTests();
@@ -323,7 +328,9 @@ test.serial('concurrent workspace scopes isolate plugins and exclude untrusted p
 	mkdirSync(configDir, {recursive: true});
 	writeFileSync(
 		join(configDir, 'nanocoder-preferences.json'),
-		JSON.stringify({trustedDirectories: [guardRoot, otherRoot]}),
+		JSON.stringify({
+			trustedDirectories: [trustedRecord(guardRoot), trustedRecord(otherRoot)],
+		}),
 	);
 	// Even a loaded default plugin must not leak into an ACP workspace.
 	setProjectRoot(guardRoot);
@@ -353,7 +360,7 @@ for (const decision of ['deny', 'defer']) {
 		mkdirSync(configDir, {recursive: true});
 		writeFileSync(
 			join(configDir, 'nanocoder-preferences.json'),
-			JSON.stringify({trustedDirectories: [root]}),
+			JSON.stringify({trustedDirectories: [trustedRecord(root)]}),
 		);
 		// Launch directory differs from the session's workspace.
 		setProjectRoot(testDir);

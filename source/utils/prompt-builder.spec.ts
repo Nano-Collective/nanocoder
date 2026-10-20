@@ -4,6 +4,10 @@ import {tmpdir} from 'os';
 import {join} from 'path';
 import {resetPreferencesCache} from '@/config/preferences';
 import {
+	createSessionCwdScope,
+	runInSessionCwdScope,
+} from '@/services/session-cwd';
+import {
 	buildSystemPrompt,
 	getLastBuiltPrompt,
 	resetSectionCache,
@@ -439,6 +443,37 @@ test('buildSystemPrompt - non-nano with includeAgentsMd=false omits AGENTS.md', 
 	};
 	const result = buildSystemPrompt('normal', tune, NANO_TOOLS);
 	t.false(result.includes('Additional Context'));
+});
+
+// ============================================================================
+// buildSystemPrompt — ACP session working directory (#1707)
+// ============================================================================
+
+test('buildSystemPrompt - reports the session cwd inside a session scope', t => {
+	const dir = mkdtempSync(join(tmpdir(), 'nc-prompt-cwd-'));
+	try {
+		const result = runInSessionCwdScope(createSessionCwdScope(dir), () =>
+			buildSystemPrompt('normal', TUNE_DEFAULTS, NANO_TOOLS),
+		);
+		t.true(result.includes(`Current Working Directory: ${dir}`));
+		t.false(result.includes(`Current Working Directory: ${process.cwd()}`));
+	} finally {
+		rmSync(dir, {recursive: true, force: true});
+	}
+});
+
+test('buildSystemPrompt - appends the session project AGENTS.md inside a session scope', t => {
+	const dir = mkdtempSync(join(tmpdir(), 'nc-prompt-agents-'));
+	try {
+		writeFileSync(join(dir, 'AGENTS.md'), 'SESSION PROJECT GUIDANCE');
+		const tune: TuneConfig = {...TUNE_NANO, includeAgentsMd: true};
+		const result = runInSessionCwdScope(createSessionCwdScope(dir), () =>
+			buildSystemPrompt('normal', tune, NANO_TOOLS),
+		);
+		t.true(result.includes('SESSION PROJECT GUIDANCE'));
+	} finally {
+		rmSync(dir, {recursive: true, force: true});
+	}
 });
 
 // ============================================================================

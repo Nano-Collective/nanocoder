@@ -66,6 +66,8 @@ Sessions are stored in the platform-specific app data directory:
 
 If `XDG_DATA_HOME` is set, `$XDG_DATA_HOME/nanocoder/sessions/` is used instead, on every platform. This can be overridden via the `directory` config option or `NANOCODER_DATA_DIR` environment variable.
 
+Every Nanocoder process shares this store: other terminals, the VS Code extension, and parallel `nanocoder run`s. Updates to the session index (`sessions.json`) take a short-lived lock file, `sessions.json.lock`, so sessions saved at the same time from different processes are all kept. At startup the index is also checked against the session files on disk: a session file missing from the index is added back, and an entry whose file is gone is removed.
+
 ### Session Artifacts
 
 Alongside `sessions/`, each session gets an `artifacts/<session id>/` directory holding the files behind the **Plan**, **Tasks**, and **Walkthrough** shortcuts above the prompt. They are written with owner-only permissions and never placed in your project directory.

@@ -241,6 +241,10 @@ export function loadProviderConfigs(): AIProviderConfig[] {
 					: {}),
 				...provider.headers,
 			},
+			includeUsage:
+				typeof provider.includeUsage === 'boolean'
+					? provider.includeUsage
+					: undefined,
 		},
 	}));
 }
