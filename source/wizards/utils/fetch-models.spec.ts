@@ -1,5 +1,24 @@
 import test from 'ava';
-import {resolveOpenAICompatibleModelsEndpoint} from './fetch-models.js';
+import {fetchModels, resolveOpenAICompatibleModelsEndpoint} from './fetch-models.js';
+
+test.serial('wizard filters legacy MiniMax discovery and orders Flash before M3', async t => {
+	const originalFetch = globalThis.fetch;
+	globalThis.fetch = async () => new Response(JSON.stringify({data: [
+		{id: 'MiniMax-M2.7'},
+		{id: 'MiniMax-M3'},
+		{id: 'MiniMax-M3.1-Flash'},
+		{id: 'speech-2.8-hd'},
+	]}));
+	try {
+		const result = await fetchModels('https://api.minimax.io/anthropic/v1', 'anthropic', 'offline-test-key');
+		t.true(result.success);
+		t.deepEqual(result.models.map(model => model.id), ['MiniMax-M3.1-Flash', 'MiniMax-M3', 'speech-2.8-hd']);
+		const custom = await fetchModels('https://custom.example/v1', 'openai-compatible');
+		t.true(custom.models.some(model => model.id === 'MiniMax-M2.7'));
+	} finally {
+		globalThis.fetch = originalFetch;
+	}
+});
 
 test('appends /models to a /v1 base URL', t => {
 	t.is(

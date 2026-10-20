@@ -9,6 +9,7 @@
  * - google: GET {baseUrl}/models with x-goog-api-key header
  */
 
+import {filterMiniMaxModels} from '@/models/minimax-models';
 import {formatError} from '@/utils/error-formatter';
 
 export interface FetchedModel {
@@ -113,7 +114,12 @@ export async function fetchModels(
 		}
 
 		// Parse response based on API type
-		const models = parseModelsResponse(data, apiCompatibility);
+		const models = filterMiniMaxModels(
+			parseModelsResponse(data, apiCompatibility).sort((a, b) =>
+				a.name.localeCompare(b.name),
+			),
+			baseUrl,
+		);
 
 		if (models.length === 0) {
 			return {
@@ -122,8 +128,6 @@ export async function fetchModels(
 				error: 'No models found',
 			};
 		}
-
-		models.sort((a, b) => a.name.localeCompare(b.name));
 
 		return {success: true, models};
 	} catch (err) {
