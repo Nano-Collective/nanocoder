@@ -100,6 +100,21 @@ test.serial('a renamed session keeps its name through the next autosave', async 
 	view.unmount();
 });
 
+test.serial('the newest of two quick renames is the one saved', async t => {
+	const view = renderHook([first]);
+	t.truthy(await sessionTitled('fix the login bug'));
+
+	view.hook.renameSession('Old name');
+	view.hook.renameSession('Newest name');
+
+	const saved = await sessionTitled('Newest name');
+	t.is(saved?.title, 'Newest name');
+	t.true(saved?.titleManuallySet);
+	const titles = (await sessionManager.listSessions()).map(s => s.title);
+	t.false(titles.includes('Old name'));
+	view.unmount();
+});
+
 test.serial('a rename before the first save names the new session', async t => {
 	const view = renderHook([]);
 	await wait(50);
