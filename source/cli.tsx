@@ -1053,7 +1053,15 @@ async function main(): Promise<void> {
 	}
 }
 
-main().catch(err => {
+main().catch(async (err: unknown) => {
 	console.error(err instanceof Error ? err.message : err);
-	process.exit(1);
+	// Exit through the shutdown manager so registered handlers still run, such
+	// as the session-end hook of `run` / --plain. It exits the process itself,
+	// or returns early when a shutdown is already under way and that one will.
+	try {
+		const {getShutdownManager} = await import('@/utils/shutdown');
+		await getShutdownManager().gracefulShutdown(1);
+	} catch {
+		process.exit(1);
+	}
 });

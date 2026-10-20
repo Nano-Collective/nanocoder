@@ -9,6 +9,7 @@ const ENV_SHUTDOWN_TIMEOUT = 'NANOCODER_DEFAULT_SHUTDOWN_TIMEOUT';
 export class ShutdownManager {
 	private handlers: Map<string, ShutdownHandler> = new Map();
 	private isShuttingDown = false;
+	private exitCode = 0;
 	private timeoutMs: number;
 
 	private boundSigterm: () => void;
@@ -53,7 +54,7 @@ export class ShutdownManager {
 					`Uncaught exception (logger unavailable): ${err.stack ?? err.message}\n`,
 				);
 			}
-			void this.gracefulShutdown(1);
+			this.failFromUnhandledError();
 		};
 		this.boundUnhandledRejection = (
 			reason: unknown,
@@ -71,7 +72,7 @@ export class ShutdownManager {
 					`Unhandled promise rejection (logger unavailable): ${detail}\n`,
 				);
 			}
-			void this.gracefulShutdown(1);
+			this.failFromUnhandledError();
 		};
 
 		this.setupSignalHandlers();
@@ -96,9 +97,16 @@ export class ShutdownManager {
 
 	async gracefulShutdown(exitCode = 0): Promise<void> {
 		if (this.isShuttingDown) {
+			// A failure reported while a clean shutdown is already under way must
+			// not be lost: a `run` aborted by the same SIGTERM reports exit 1, and
+			// the signal's shutdown would otherwise exit 0. The first failure wins.
+			if (exitCode !== 0 && this.exitCode === 0) {
+				this.exitCode = exitCode;
+			}
 			return;
 		}
 		this.isShuttingDown = true;
+		this.exitCode = exitCode;
 
 		const logger = loggerProvider.getLogger();
 		logger.info('Graceful shutdown initiated', {exitCode});
@@ -127,7 +135,18 @@ export class ShutdownManager {
 
 		await Promise.race([shutdownPromise, timeoutPromise]);
 
-		nodeProcess.exit(exitCode);
+		nodeProcess.exit(this.exitCode);
+	}
+
+	/**
+	 * An unhandled error starts a failing shutdown. During a shutdown that is
+	 * already under way it is only logged: tearing things down (closing MCP
+	 * connections, aborting requests) can reject on its own, and that must not
+	 * turn a clean exit into a failure.
+	 */
+	private failFromUnhandledError(): void {
+		if (this.isShuttingDown) return;
+		void this.gracefulShutdown(1);
 	}
 
 	private setupSignalHandlers(): void {
@@ -141,6 +160,7 @@ export class ShutdownManager {
 	reset(): void {
 		this.handlers.clear();
 		this.isShuttingDown = false;
+		this.exitCode = 0;
 		nodeProcess.removeListener('SIGTERM', this.boundSigterm);
 		nodeProcess.removeListener('SIGINT', this.boundSigint);
 		nodeProcess.removeListener('SIGHUP', this.boundSighup);
