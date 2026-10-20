@@ -50,6 +50,10 @@ test('does not validate free-form prompt tokens after run', t => {
 
 test('accepts review targets and resume session identifiers', t => {
 	t.is(validateCliArgs(['review', 'main']), undefined);
+	t.is(
+		validateCliArgs(['swarm', '--workers', '3', '--swarm-mode', 'apply', 'task']),
+		undefined,
+	);
 	t.is(validateCliArgs(['--resume', 'last']), undefined);
 });
 

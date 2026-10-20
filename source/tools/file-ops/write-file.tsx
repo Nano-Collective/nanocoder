@@ -405,11 +405,16 @@ const writeFileFormatter = async (
 	return <WriteFileFormatter args={args} previousContent={previousContent} />;
 };
 
-const writeFileValidator = async (args: {
-	path: string;
-	content: unknown;
-}): Promise<{valid: true} | {valid: false; error: string}> => {
-	const pathResult = validatePath(args.path);
+const writeFileValidator = async (
+	args: {
+		path: string;
+		content: unknown;
+	},
+	context?: import('@/types/core').ToolContext,
+): Promise<{valid: true} | {valid: false; error: string}> => {
+	const pathResult = validatePath(args.path, {
+		restrictedScope: context?.restrictedScope,
+	});
 	if (!pathResult.valid) return pathResult;
 
 	const formatResult = validateEditableFormat(args.path);

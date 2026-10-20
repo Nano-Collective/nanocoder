@@ -126,6 +126,9 @@ coverage
 .nanocoder/ci-watch-state.json
 .generated-prompts/
 .nanocoder/skills
+.nanocoder/worktrees/
+.nanocoder/*.patch
+.nanocoder/*.json
 
 # Generated quality report (baseline.json is checked in, others are not)
 benchmarks/report.json

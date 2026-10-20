@@ -50,6 +50,8 @@ export interface RunPlainShellOptions {
 	cliModel?: string;
 	trustDirectory: boolean;
 	outputFormat: 'text' | 'json';
+	restrictedScope?: string | string[];
+	telemetry?: boolean;
 	/**
 	 * Injectable seams for testing. Each defaults to the real implementation,
 	 * so production call sites never need to pass this. Mirrors the pattern
@@ -107,6 +109,8 @@ export async function runPlainShell(
 		cliModel,
 		trustDirectory,
 		outputFormat,
+		restrictedScope,
+		telemetry,
 	} = options;
 
 	const deps: RunPlainShellDeps = {...defaultDeps, ...options.deps};
@@ -187,7 +191,7 @@ export async function runPlainShell(
 	const availableNames = toolManager.getAvailableToolNames(
 		tune,
 		developmentMode,
-		undefined,
+		['ask_user', 'agent'], // Disable interactive tools in headless mode
 		model,
 	);
 	const basePrompt = buildSystemPrompt(
@@ -321,6 +325,8 @@ export async function runPlainShell(
 			outputFormat,
 			sessionId,
 			workingDirectory: process.cwd(),
+			restrictedScope,
+			telemetry,
 		});
 		outcome = await conversationPromise;
 	} finally {

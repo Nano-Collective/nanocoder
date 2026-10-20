@@ -22,6 +22,18 @@ export const VALID_MODES = [
 export type CliMode = Extract<DevelopmentMode, (typeof VALID_MODES)[number]>;
 
 /**
+ * Configuration for the Swarm Mode mock Phase 1.
+ */
+export interface SwarmConfig {
+	prompt: string;
+	workers: number;
+	swarmMode: 'review' | 'apply' | 'yolo';
+	restrictedScope?: string | string[];
+	provider?: string;
+	model?: string;
+}
+
+/**
  * Props for the main App component
  */
 export interface AppProps {
@@ -56,10 +68,18 @@ export interface AppProps {
 	 */
 	initialSession?: Session;
 	/**
+	 * File paths to restrict tool execution to.
+	 */
+	restrictedScope?: string | string[];
+	/**
 	 * Set when `--resume` was passed with no id: opens the session picker
 	 * (activeMode `'sessionSelector'`) as soon as the app mounts.
 	 */
 	openSessionSelectorOnStart?: boolean;
+	/**
+	 * Configuration for the swarm mode execution.
+	 */
+	swarmConfig?: SwarmConfig;
 }
 
 /**

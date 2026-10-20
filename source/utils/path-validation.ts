@@ -17,6 +17,7 @@ import path from 'node:path';
  * - Absolute path escapes (/etc/passwd, C:\Windows\System32)
  * - Null byte injection (\0)
  * - Path separator confusion (mixing / and \)
+ * - Scope boundary escapes via sibling-prefix collisions
  */
 
 /**
@@ -232,6 +233,40 @@ export function isRealPathInside(target: string, root: string): boolean {
 		return isPathInside(realpathSync(target), realpathSync(root));
 	} catch {
 		return false;
+	}
+}
+
+/**
+ * Validates that an absolute file path is strictly contained within the absolute
+ * restricted scope. It uses path.relative() to defeat sibling-prefix attacks
+ * (e.g. scope "src/" vs target "src2/").
+ *
+ * @param absoluteFilePath - The absolute target file path
+ * @param restrictedScopePath - The absolute boundary path
+ * @throws Error if the path escapes the restricted scope
+ */
+export function checkRestrictedScope(
+	absoluteFilePath: string,
+	restrictedScopePath: string | string[],
+): void {
+	const scopes = Array.isArray(restrictedScopePath)
+		? restrictedScopePath
+		: [restrictedScopePath];
+
+	const isInsideAny = scopes.some(scope => {
+		const relative = path.relative(scope, absoluteFilePath);
+		const outside =
+			relative === '..' ||
+			relative.startsWith(`..${path.sep}`) ||
+			path.isAbsolute(relative);
+		return !outside;
+	});
+
+	if (!isInsideAny) {
+		const scopeStr = scopes.join(', ');
+		throw new Error(
+			`Path escapes restricted scope. Target: ${absoluteFilePath}, Scope: ${scopeStr}`,
+		);
 	}
 }
 

@@ -13,6 +13,7 @@ import {
 	isRealPathInside,
 	isValidFilePath,
 	resolveFilePath,
+	checkRestrictedScope,
 } from './path-validation';
 
 // Test suite for isValidFilePath
@@ -375,6 +376,38 @@ test('isRealPathInside: fails closed when a path cannot be resolved', t => {
 	// path: callers use it as a boundary, so unresolvable means deny.
 	t.false(isRealPathInside(join(root, 'nope'), root));
 	t.false(isRealPathInside(root, join(root, 'nope')));
+});
+
+// Test suite for checkRestrictedScope
+
+test('checkRestrictedScope: allows path inside restricted scope', t => {
+	t.notThrows(() => checkRestrictedScope('/project/src/auth/file.ts', '/project/src/auth'));
+});
+
+test('checkRestrictedScope: allows path inside array of restricted scopes', t => {
+	t.notThrows(() => checkRestrictedScope('/project/src/auth/file.ts', ['/project/src/api', '/project/src/auth']));
+});
+
+test('checkRestrictedScope: rejects path outside restricted scope (traversal)', t => {
+	t.throws(() => checkRestrictedScope('/project/src/api/file.ts', '/project/src/auth'), {
+		message: /Path escapes restricted scope/
+	});
+	
+	t.throws(() => checkRestrictedScope('/project/src/auth/../api/file.ts', '/project/src/auth'), {
+		message: /Path escapes restricted scope/
+	});
+});
+
+test('checkRestrictedScope: rejects sibling-prefix attacks', t => {
+	// e.g., allowed scope is /project/src/auth, target is /project/src/auth2
+	t.throws(() => checkRestrictedScope('/project/src/auth2/file.ts', '/project/src/auth'), {
+		message: /Path escapes restricted scope/
+	});
+});
+
+test('checkRestrictedScope: normalizes paths to handle slashes and dots', t => {
+	t.notThrows(() => checkRestrictedScope('/project/src/auth/./file.ts', '/project/src/auth/'));
+	t.notThrows(() => checkRestrictedScope('/project/src/auth/file.ts', '/project/src/auth/./'));
 });
 
 test.serial('resolveFilePath: accepts the other spelling of a symlinked project root', t => {

@@ -123,6 +123,7 @@ export interface ToolExecutionContext {
 	abortSignal?: AbortSignal;
 	sessionId?: string;
 	workingDirectory?: string;
+	context?: ToolContext;
 }
 
 export type ToolHandler = (
@@ -152,9 +153,14 @@ export type ToolValidationResult =
 	| {valid: true}
 	| {valid: false; error: string; details?: ValidationErrorDetail[]};
 
+export interface ToolContext {
+	restrictedScope?: string | string[];
+}
+
 export type ToolValidator = (
 	// biome-ignore lint/suspicious/noExplicitAny: Dynamic typing required -- Tool arguments are dynamically typed
 	args: any,
+	context?: ToolContext,
 ) => Promise<ToolValidationResult>;
 
 export type StreamingFormatter = (
@@ -294,6 +300,13 @@ export interface LLMClient {
 		signal?: AbortSignal,
 		modeOverrides?: ModeOverrides,
 	): Promise<LLMChatResponse>;
+	generateStructuredObject?<T>(
+		prompt: string,
+		// biome-ignore lint/suspicious/noExplicitAny: zod schema
+		schema: any,
+		system?: string,
+		signal?: AbortSignal,
+	): Promise<T>;
 	clearContext(): Promise<void>;
 	getTimeout(): number | undefined;
 }

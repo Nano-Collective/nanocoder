@@ -23,6 +23,7 @@ const VALUED_FLAGS = [
 	'--mode',
 	'--output-format',
 	'--prompt-file',
+	'--restricted-scope',
 ] as const;
 
 /** A flag standing alone. */
@@ -32,6 +33,7 @@ const BARE_FLAGS = [
 	'--trust-directory',
 	'--plain',
 	'--no-plain',
+	'--telemetry',
 	'--alt-screen',
 	'--no-alt-screen',
 	// Display concerns, like the alt-screen pair above. Meaningless on a

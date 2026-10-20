@@ -2,14 +2,21 @@ import {extname} from 'node:path';
 import {getProjectRoot, getSessionCwd} from '@/services/session-cwd';
 import {isDerivedContentPath} from '@/utils/derived-content';
 import {formatError} from '@/utils/error-formatter';
-import {isValidFilePath, resolveFilePath} from '@/utils/path-validation';
+import {
+	checkRestrictedScope,
+	isValidFilePath,
+	resolveFilePath,
+} from '@/utils/path-validation';
 
 type ValidationResult = {valid: true} | {valid: false; error: string};
 
 /**
  * Validates a single file path: checks format and project boundary.
  */
-export function validatePath(path: string): ValidationResult {
+export function validatePath(
+	path: string,
+	options?: {restrictedScope?: string | string[]},
+): ValidationResult {
 	const cwd = getSessionCwd();
 	const root = getProjectRoot();
 	if (!isValidFilePath(path, root)) {
@@ -20,7 +27,14 @@ export function validatePath(path: string): ValidationResult {
 	}
 
 	try {
-		resolveFilePath(path, cwd, root);
+		const absolutePath = resolveFilePath(path, cwd, root);
+		if (options?.restrictedScope) {
+			const scopes = Array.isArray(options.restrictedScope)
+				? options.restrictedScope
+				: [options.restrictedScope];
+			const absoluteScopes = scopes.map(s => resolveFilePath(s, cwd, root));
+			checkRestrictedScope(absolutePath, absoluteScopes);
+		}
 	} catch (error) {
 		const errorMessage = formatError(error);
 		return {
@@ -54,6 +68,7 @@ export function validateEditableFormat(path: string): ValidationResult {
 export function validatePathPair(
 	source: string,
 	destination: string,
+	options?: {restrictedScope?: string | string[]},
 ): ValidationResult {
 	const cwd = getSessionCwd();
 	const root = getProjectRoot();
@@ -72,8 +87,17 @@ export function validatePathPair(
 	}
 
 	try {
-		resolveFilePath(source, cwd, root);
-		resolveFilePath(destination, cwd, root);
+		const absSource = resolveFilePath(source, cwd, root);
+		const absDest = resolveFilePath(destination, cwd, root);
+
+		if (options?.restrictedScope) {
+			const scopes = Array.isArray(options.restrictedScope)
+				? options.restrictedScope
+				: [options.restrictedScope];
+			const absoluteScopes = scopes.map(s => resolveFilePath(s, cwd, root));
+			checkRestrictedScope(absSource, absoluteScopes);
+			checkRestrictedScope(absDest, absoluteScopes);
+		}
 	} catch (error) {
 		const errorMessage = formatError(error);
 		return {

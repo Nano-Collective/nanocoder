@@ -7,6 +7,7 @@ const COMMANDS = [
 	'run',
 	'review',
 	'worktree',
+	'swarm',
 	'init',
 	'copilot',
 	'codex',
@@ -128,7 +129,9 @@ function validateTopLevelArgs(args: string[], end: number): string | undefined {
  * text, where option-looking tokens may be part of the user's request.
  */
 export function validateCliArgs(args: string[]): string | undefined {
-	if (args[0] === 'review' || args[0] === 'worktree') return undefined;
+	// These parse their own arguments (a free-form prompt plus their own flags).
+	if (args[0] === 'review' || args[0] === 'worktree' || args[0] === 'swarm')
+		return undefined;
 
 	if (args[0] === 'codex' || args[0] === 'copilot') {
 		if (args[1] === 'login') return undefined;

@@ -742,3 +742,24 @@ test('every flag the parser knows is stripped from the review target', t => {
 		);
 	}
 });
+
+test('parseRunPrompt: strips the flags the swarm coordinator passes to workers', t => {
+	t.is(
+		parsePrompt([
+			'run',
+			'--mode',
+			'auto-accept',
+			'--json',
+			'--telemetry',
+			'--trust-directory',
+			'--restricted-scope',
+			'src/a,src/b',
+			'do the thing',
+		]),
+		'do the thing',
+	);
+	t.is(
+		parsePrompt(['run', '--restricted-scope=src/a', 'do the thing']),
+		'do the thing',
+	);
+});
