@@ -13,6 +13,7 @@ export class PromptHistory {
 	private currentIndex: number = -1;
 	private readonly historyFile: string;
 	private savePromise: Promise<void> = Promise.resolve();
+	private canSaveHistory = true;
 
 	constructor(historyFile?: string) {
 		this.historyFile =
@@ -49,11 +50,20 @@ export class PromptHistory {
 					.filter(line => line.trim() !== '');
 				this.history = this.migrateStringArrayToInputState(stringEntries);
 			}
+			this.canSaveHistory = true;
 			this.currentIndex = -1;
-		} catch {
-			// File doesn't exist yet, start with empty history
+		} catch (error) {
+			// A missing file is a normal first-run case. Other read or parse
+			// failures must not let the next prompt overwrite the original file.
 			this.history = [];
 			this.currentIndex = -1;
+			this.canSaveHistory = false;
+
+			if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+				this.canSaveHistory = true;
+			} else {
+				logError(`Failed to load prompt history: ${formatError(error)}`);
+			}
 		}
 	}
 
@@ -67,6 +77,8 @@ export class PromptHistory {
 	}
 
 	async saveHistory(): Promise<void> {
+		if (!this.canSaveHistory) return;
+
 		// Chain this save onto the previous save to prevent concurrent writes
 		this.savePromise = this.savePromise.then(async () => {
 			try {
