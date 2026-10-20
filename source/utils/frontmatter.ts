@@ -66,9 +66,11 @@ export function parseYamlObject(
 ): Record<string, unknown> | null {
 	if (!frontmatter.trim()) return {};
 
+	const parse = getYamlParse();
+
 	let parsed: unknown;
 	try {
-		parsed = getYamlParse()(frontmatter);
+		parsed = parse(frontmatter);
 	} catch {
 		return null;
 	}

@@ -2,4 +2,4 @@
 "@nanocollective/nanocoder": patch
 ---
 
-Lazy-load yaml and cli-table3 on first use to reduce startup module loading.
+Remove `yaml` and `cli-table3` from the startup import graph by loading them on demand.
