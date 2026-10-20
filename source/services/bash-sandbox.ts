@@ -38,6 +38,17 @@ export function findBwrap(pathEnv = process.env.PATH): string | undefined {
 
 const bwrapJailCache = new Map<string, boolean>();
 
+// --new-session starts the command in a session of its own, outside the
+// process group bwrap was spawned into, so signalling that group reaches only
+// bwrap. bwrap reports the command's pid on --info-fd; as a session leader
+// that pid is also the command's process group id.
+const commandGroups = new WeakMap<ChildProcess, number>();
+
+/** The process group bwrap started the command in, once bwrap has said. */
+export function sandboxedCommandGroup(proc: ChildProcess): number | undefined {
+	return commandGroups.get(proc);
+}
+
 function bwrapCanUnshareNet(bwrap: string): boolean {
 	const hit = bwrapJailCache.get(bwrap);
 	if (hit !== undefined) return hit;
@@ -80,6 +91,8 @@ function bwrapArgs(
 	spawnCommand: string,
 ): string[] {
 	return [
+		'--info-fd',
+		'3',
 		'--die-with-parent',
 		'--new-session',
 		'--unshare-net',
@@ -208,5 +221,22 @@ export function spawnPlanned(
 	const bin = plan.bin === 'bwrap' ? plan.bwrap : '/usr/bin/sandbox-exec';
 	// codeql[js/shell-command-built-from-environment] resolved jail binary; argv is not a shell string
 	// codeql[js/shell-command-constructed-from-input]
-	return spawn(bin, plan.args, spawnOpts);
+	const proc = spawn(bin, plan.args, {
+		...spawnOpts,
+		// fd 3 carries bwrap's --info-fd report.
+		stdio: plan.bin === 'bwrap' ? ['pipe', 'pipe', 'pipe', 'pipe'] : 'pipe',
+	});
+	if (plan.bin === 'bwrap') {
+		let info = '';
+		const report = proc.stdio[3];
+		report?.on('data', (chunk: Buffer) => {
+			info += chunk.toString();
+			const pid = info.match(/"child-pid":\s*(\d+)/)?.[1];
+			if (pid) commandGroups.set(proc, Number(pid));
+		});
+		report?.on('error', () => {
+			// No report: the executor still signals bwrap's own group.
+		});
+	}
+	return proc;
 }
