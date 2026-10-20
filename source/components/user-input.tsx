@@ -3,14 +3,13 @@ import Spinner from 'ink-spinner';
 import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {commandRegistry} from '@/commands';
 import {DevelopmentModeIndicator} from '@/components/development-mode-indicator';
-import {HelpRow} from '@/components/json-viewer/json-viewer';
 import TextInput, {
 	type TextInputHandle,
 	useRawInput,
 } from '@/components/text-input';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {useInputState} from '@/hooks/useInputState';
-import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
+import {useResponsiveTerminal, useTerminalRows} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {useUIStateContext} from '@/hooks/useUIState';
 import type {
@@ -154,6 +153,15 @@ const KEYBOARD_SHORTCUTS: Array<[keybind: string, label: string]> = [
 	['?', 'Toggle this overlay (in an empty prompt)'],
 ];
 
+// Rows around the shortcut list that must stay on screen so the close hint
+// and the lower border are never pushed below a short terminal: the overlay's
+// title row, borders and padding (5), the blank row and hint row under the
+// list (2), the status row (1), the app frame's padding (2), and one spare
+// row, because Ink repaints the whole inline transcript on every render once
+// a frame is as tall as the terminal. The parent hides the rest of the footer
+// while the overlay is open; see onShortcutsOverlayChange.
+const SHORTCUTS_OVERHEAD_ROWS = 11;
+
 // Prompt box width floor: keeps narrow terminals legible.
 const PROMPT_WIDTH_MIN = 40;
 
@@ -218,6 +226,12 @@ interface ChatProps {
 	 * one column less to fill.
 	 */
 	fullscreen?: boolean;
+	/**
+	 * Fires when the `?` shortcuts overlay opens or closes. The overlay sizes
+	 * itself as if it had the footer to itself and takes over PgUp/PgDn, so
+	 * the parent hides its other footer rows and pauses its own scrolling.
+	 */
+	onShortcutsOverlayChange?: (open: boolean) => void;
 }
 
 export default function UserInput({
@@ -251,6 +265,7 @@ export default function UserInput({
 	suggestedCommand = null,
 	onDismissSuggestion,
 	fullscreen = false,
+	onShortcutsOverlayChange,
 }: ChatProps) {
 	const {isFocused, focus} = useFocus({autoFocus: !disabled, id: 'user-input'});
 	const effectiveFocus = forceFocus || isFocused;
@@ -347,6 +362,54 @@ export default function UserInput({
 	const setShortcutsOpen = (open: boolean) => {
 		showShortcutsRef.current = open;
 		setShowShortcuts(open);
+		if (open) setShortcutsScroll(0);
+		onShortcutsOverlayChange?.(open);
+	};
+	// A tool confirmation or question prompt can replace this component while
+	// the overlay is open. Report it closed then, or the parent keeps its
+	// footer hidden and its scrolling paused with no overlay on screen.
+	const onShortcutsOverlayChangeRef = useRef(onShortcutsOverlayChange);
+	onShortcutsOverlayChangeRef.current = onShortcutsOverlayChange;
+	useEffect(
+		() => () => {
+			if (showShortcutsRef.current) {
+				onShortcutsOverlayChangeRef.current?.(false);
+			}
+		},
+		[],
+	);
+
+	// The overlay shows a window of the legend sized to the terminal height.
+	// The clamp is recomputed every render, so shrinking the terminal while
+	// the overlay is open keeps the window inside the list.
+	const terminalRows = useTerminalRows();
+	const [shortcutsScroll, setShortcutsScroll] = useState(0);
+	const shortcutsVisibleCount = Math.max(
+		1,
+		Math.min(KEYBOARD_SHORTCUTS.length, terminalRows - SHORTCUTS_OVERHEAD_ROWS),
+	);
+	const shortcutsMaxStart = KEYBOARD_SHORTCUTS.length - shortcutsVisibleCount;
+	const shortcutsStart = Math.min(shortcutsScroll, shortcutsMaxStart);
+	// Keep the clamp from a taller terminal, so shrinking it again keeps the
+	// same top row instead of jumping back to the older, deeper offset.
+	useEffect(() => {
+		if (shortcutsScroll > shortcutsMaxStart) {
+			setShortcutsScroll(shortcutsMaxStart);
+		}
+	}, [shortcutsScroll, shortcutsMaxStart]);
+	const shortcutsWindowRef = useRef({
+		maxStart: shortcutsMaxStart,
+		pageSize: shortcutsVisibleCount,
+	});
+	shortcutsWindowRef.current = {
+		maxStart: shortcutsMaxStart,
+		pageSize: shortcutsVisibleCount,
+	};
+	const scrollShortcuts = (delta: number) => {
+		const {maxStart} = shortcutsWindowRef.current;
+		setShortcutsScroll(prev =>
+			Math.max(0, Math.min(Math.min(prev, maxStart) + delta, maxStart)),
+		);
 	};
 
 	const {
@@ -982,7 +1045,8 @@ export default function UserInput({
 
 	useInput((inputChar, key) => {
 		// `?` in an empty prompt toggles the shortcuts overlay, which swallows
-		// every other key until `?` or Escape closes it.
+		// every other key until `?` or Escape closes it. ↑/↓ and PgUp/PgDn
+		// scroll the legend when it is taller than the terminal allows.
 		// Reverse search owns the keyboard: its query is empty at first, so
 		// without the guard typing `?` there would open the overlay instead.
 		if (
@@ -995,7 +1059,12 @@ export default function UserInput({
 			return;
 		}
 		if (showShortcutsRef.current) {
+			const {pageSize} = shortcutsWindowRef.current;
 			if (key.escape) setShortcutsOpen(false);
+			else if (key.upArrow) scrollShortcuts(-1);
+			else if (key.downArrow) scrollShortcuts(1);
+			else if (key.pageUp) scrollShortcuts(-pageSize);
+			else if (key.pageDown) scrollShortcuts(pageSize);
 			return;
 		}
 
@@ -1484,16 +1553,26 @@ export default function UserInput({
 						marginTop={1}
 						flexDirection="column"
 					>
-						{KEYBOARD_SHORTCUTS.map(([keybind, label]) => (
-							<HelpRow
-								key={keybind}
-								keybind={keybind}
-								label={label}
-								colors={colors}
-							/>
+						{KEYBOARD_SHORTCUTS.slice(
+							shortcutsStart,
+							shortcutsStart + shortcutsVisibleCount,
+						).map(([keybind, label]) => (
+							// One row per shortcut: a wrapped label would add rows the
+							// height budget above does not count.
+							<Text key={keybind} wrap="truncate-end">
+								<Text color={colors.primary} bold>
+									{keybind}
+								</Text>
+								<Text color={colors.text}> — {label}</Text>
+							</Text>
 						))}
 						<Box marginTop={1}>
-							<Text color={colors.secondary}>Press ? or Esc to close</Text>
+							{/* The close hint leads so truncation drops the position first. */}
+							<Text color={colors.secondary} wrap="truncate-end">
+								{shortcutsMaxStart > 0
+									? `? or Esc to close · ↑/↓ scroll · ${shortcutsStart + 1}-${shortcutsStart + shortcutsVisibleCount} of ${KEYBOARD_SHORTCUTS.length}`
+									: 'Press ? or Esc to close'}
+							</Text>
 						</Box>
 					</TitledBoxWithPreferences>
 				)}
@@ -1669,7 +1748,8 @@ export default function UserInput({
 				</Box>
 			</Box>
 
-			{attachments.length > 0 && (
+			{/* Part of the composer, so it hides with the input box. */}
+			{!showShortcuts && attachments.length > 0 && (
 				<Box marginTop={1}>
 					<Text color={colors.info}>
 						{attachments
