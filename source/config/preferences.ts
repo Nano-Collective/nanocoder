@@ -116,7 +116,6 @@ function writeGlobalOnlyPreferences(values: Partial<UserPreferences>): void {
 	);
 }
 
-
 export function loadPreferences(): UserPreferences {
 	try {
 		const preferencesPath = getPreferencesPath();
@@ -187,7 +186,6 @@ export function loadPreferences(): UserPreferences {
 	return {};
 }
 
-
 // Preferences are written straight to disk, so React has no natural signal that
 // a setting flipped. Consumers holding derived state (e.g. the memoized system
 // prompt in useChatHandler) subscribe here and re-read on the next render.
@@ -214,28 +212,19 @@ export function getPreferencesVersion(): number {
 	return preferencesVersion;
 }
 
-// Keep derived preferences on the filesystem-free hot path.
-// They refresh after in-process writes or config-directory changes;
-// external edits are detected by loadPreferences() on its next metadata check.
+// Caches a derived preference, keyed on NANOCODER_CONFIG_DIR and getPreferencesVersion()
+// (bumped on every write), so the value never goes stale after a settings change.
 function cachedPreference<T>(read: (prefs: UserPreferences) => T): () => T {
 	let cache: {dir?: string; version: number; value: T} | null = null;
-
 	return () => {
 		const dir = process.env.NANOCODER_CONFIG_DIR;
 		const version = getPreferencesVersion();
-
 		if (!cache || cache.dir !== dir || cache.version !== version) {
-			cache = {
-				dir,
-				version,
-				value: read(loadPreferences()),
-			};
+			cache = {dir, version, value: read(loadPreferences())};
 		}
-
 		return cache.value;
 	};
 }
-
 
 /**
  * Writes the preferences file. Returns `false` when the write failed — the
