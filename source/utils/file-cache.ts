@@ -31,6 +31,50 @@ interface CacheEntry {
 	accessOrder: number;
 }
 
+/**
+ * Error thrown when a file's bytes cannot survive a UTF-8 decode/encode round
+ * trip, so writing decoded content back would change bytes the edit never
+ * touched. Legacy-encoded files (Latin-1, Windows-1252, Shift-JIS, ...) hit
+ * this: every byte that does not decode becomes U+FFFD.
+ */
+export class NotRoundTrippableError extends Error {
+	constructor(public readonly path: string) {
+		super(
+			`${path} is not valid UTF-8. Editing it would replace bytes outside the edit ` +
+				`with the replacement character, so the edit was refused. Convert the file to ` +
+				`UTF-8 first (for example with iconv) and try again.`,
+		);
+		this.name = 'NotRoundTrippableError';
+	}
+}
+
+/**
+ * Asserts that a file's current bytes can be reconstructed from the cached
+ * content.
+ *
+ * The cache decodes with `Buffer.toString('utf-8')`, which is lossy: a byte
+ * that is not valid UTF-8 becomes U+FFFD and cannot be recovered on write.
+ * Callers that write the cached content back must check this first, or an edit
+ * to one line silently damages every other line carrying such a byte.
+ *
+ * The check re-encodes the cached content and compares against the bytes on
+ * disk: comparing decodes instead would pass, because decoding the damaged
+ * bytes reproduces the same replacement characters.
+ *
+ * Returns normally when the round trip is lossless; throws
+ * {@link NotRoundTrippableError} otherwise.
+ */
+export async function assertRoundTrippable(
+	absPath: string,
+	cachedContent: string,
+): Promise<void> {
+	const onDisk = await fs.readFile(absPath);
+	if (Buffer.from(cachedContent, 'utf-8').equals(onDisk)) {
+		return;
+	}
+	throw new NotRoundTrippableError(absPath);
+}
+
 // Internal cache storage
 const cache = new Map<string, CacheEntry>();
 let accessCounter = 0;
