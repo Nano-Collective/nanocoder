@@ -51,6 +51,21 @@ function indentOf(frame: string, pattern: RegExp): number {
 }
 const VERSION = packageJson.version;
 
+/** Wait for an asynchronous banner repaint after its dynamic imports finish. */
+async function waitForWordmark(
+	lastFrame: () => string | undefined,
+	glyphs: RegExp,
+): Promise<string> {
+	const deadline = Date.now() + 3000;
+	while (Date.now() < deadline) {
+		const frame = stripAnsi(lastFrame() ?? '');
+		if (glyphs.test(frame)) return frame;
+		await new Promise(resolve => setTimeout(resolve, 10));
+	}
+	return stripAnsi(lastFrame() ?? '');
+}
+
+
 // ============================================================================
 // Narrow Terminal Tests (width < 90 → text logo per mock ladder)
 // ============================================================================
@@ -158,7 +173,7 @@ test.serial('WelcomeMessage marks a detached HEAD', t => {
 	t.regex(branchLine!, /9f1c0de \(detached\)/);
 });
 
-test('WelcomeMessage renders compact layout for narrow terminal', t => {
+test.serial('WelcomeMessage renders compact layout for narrow terminal', t => {
 	const originalColumns = process.stdout.columns;
 	process.stdout.columns = 50;
 
@@ -171,7 +186,7 @@ test('WelcomeMessage renders compact layout for narrow terminal', t => {
 	process.stdout.columns = originalColumns;
 });
 
-test('WelcomeMessage shows version in narrow layout', t => {
+test.serial('WelcomeMessage shows version in narrow layout', t => {
 	const originalColumns = process.stdout.columns;
 	process.stdout.columns = 50;
 
@@ -186,7 +201,7 @@ test('WelcomeMessage shows version in narrow layout', t => {
 	process.stdout.columns = originalColumns;
 });
 
-test('WelcomeMessage shows centered welcome and location in narrow layout', t => {
+test.serial('WelcomeMessage shows centered welcome and location in narrow layout', t => {
 	const originalColumns = process.stdout.columns;
 	process.stdout.columns = 50;
 
@@ -207,7 +222,7 @@ test('WelcomeMessage shows centered welcome and location in narrow layout', t =>
 	process.stdout.columns = originalColumns;
 });
 
-test('WelcomeMessage shows the given tip in narrow layout', t => {
+test.serial('WelcomeMessage shows the given tip in narrow layout', t => {
 	const originalColumns = process.stdout.columns;
 	process.stdout.columns = 50;
 
@@ -218,20 +233,17 @@ test('WelcomeMessage shows the given tip in narrow layout', t => {
 	process.stdout.columns = originalColumns;
 });
 
-test('WelcomeMessage has no hero box in narrow layout', t => {
+test.serial('WelcomeMessage has no hero box in narrow layout', async t => {
 	const originalColumns = process.stdout.columns;
 	process.stdout.columns = 50;
-
 	const {lastFrame} = renderWithTheme(<WelcomeMessage availableRows={40} />);
-
-	const output = lastFrame();
+	const output = await waitForWordmark(lastFrame, /[_█]/);
 	t.truthy(output);
 	// New design removed TitledBox hero — should NOT contain old box text
 	t.notRegex(output!, /Tips for getting started/);
 	t.notRegex(output!, /Quick tips/);
 	// Small pixel logo (tiny) for 50-90, not spaced text
 	t.regex(output!, /█/);
-
 	process.stdout.columns = originalColumns;
 });
 
@@ -239,21 +251,18 @@ test('WelcomeMessage has no hero box in narrow layout', t => {
 // Normal Terminal Tests (80 <= width < 90 still text logo per 90 threshold)
 // ============================================================================
 
-test('WelcomeMessage renders NC monogram at widths below 82', t => {
+test.serial('WelcomeMessage renders NC monogram at widths below 82', async t => {
 	const originalColumns = process.stdout.columns;
 	process.stdout.columns = 80;
-
 	const {lastFrame} = renderWithTheme(<WelcomeMessage availableRows={40} />);
-
-	const output = lastFrame();
+	const output = await waitForWordmark(lastFrame, /[_█]/);
 	t.truthy(output);
 	// 80 < 82 → falls back to NC monogram in block font
 	t.regex(output!, /█/);
-
 	process.stdout.columns = originalColumns;
 });
 
-test('WelcomeMessage shows welcome message for normal terminal', t => {
+test.serial('WelcomeMessage shows welcome message for normal terminal', t => {
 	const originalColumns = process.stdout.columns;
 	process.stdout.columns = 80;
 
@@ -270,7 +279,7 @@ test('WelcomeMessage shows welcome message for normal terminal', t => {
 	process.stdout.columns = originalColumns;
 });
 
-test('WelcomeMessage shows menu for normal terminal', t => {
+test.serial('WelcomeMessage shows menu for normal terminal', t => {
 	const originalColumns = process.stdout.columns;
 	process.stdout.columns = 80;
 
@@ -291,7 +300,7 @@ test('WelcomeMessage shows menu for normal terminal', t => {
 // Each menu row is one line, label then key. Where the full menu no longer
 // fits across, the short one takes over, and below that the menu is left out,
 // rather than any row wrapping its key onto a line of its own.
-test('WelcomeMessage steps the menu down to fit narrow terminals', t => {
+test.serial('WelcomeMessage steps the menu down to fit narrow terminals', t => {
 	const originalColumns = process.stdout.columns;
 	const menuAt = (columns: number) => {
 		process.stdout.columns = columns;
@@ -316,7 +325,7 @@ test('WelcomeMessage steps the menu down to fit narrow terminals', t => {
 	}
 });
 
-test('WelcomeMessage shows location and shortcuts for normal terminal', t => {
+test.serial('WelcomeMessage shows location and shortcuts for normal terminal', t => {
 	const originalColumns = process.stdout.columns;
 	process.stdout.columns = 80;
 
@@ -333,7 +342,7 @@ test('WelcomeMessage shows location and shortcuts for normal terminal', t => {
 	process.stdout.columns = originalColumns;
 });
 
-test('WelcomeMessage centers horizontally and vertically', t => {
+test.serial('WelcomeMessage centers horizontally and vertically', t => {
 	const originalColumns = process.stdout.columns;
 	process.stdout.columns = 80;
 
@@ -371,7 +380,7 @@ test('WelcomeMessage centers horizontally and vertically', t => {
 	process.stdout.columns = originalColumns;
 });
 
-test('WelcomeMessage shows the given tip in full layout', t => {
+test.serial('WelcomeMessage shows the given tip in full layout', t => {
 	const originalColumns = process.stdout.columns;
 	process.stdout.columns = 120;
 
@@ -382,7 +391,7 @@ test('WelcomeMessage shows the given tip in full layout', t => {
 	process.stdout.columns = originalColumns;
 });
 
-test('WelcomeMessage renders the tip at various column widths', t => {
+test.serial('WelcomeMessage renders the tip at various column widths', t => {
 	const originalColumns = process.stdout.columns;
 
 	for (const columns of [50, 120]) {
@@ -402,7 +411,7 @@ test('WelcomeMessage renders the tip at various column widths', t => {
 	process.stdout.columns = originalColumns;
 });
 
-test('WelcomeMessage falls back to a catalogue tip when none is given', t => {
+test.serial('WelcomeMessage falls back to a catalogue tip when none is given', t => {
 	const originalColumns = process.stdout.columns;
 	process.stdout.columns = 120;
 
@@ -422,22 +431,19 @@ test('WelcomeMessage falls back to a catalogue tip when none is given', t => {
 // Wide Terminal Tests (width >= 90 → full BigText art)
 // ============================================================================
 
-test('WelcomeMessage renders full art logo for wide terminal', t => {
+test.serial('WelcomeMessage renders full art logo for wide terminal', async t => {
 	const originalColumns = process.stdout.columns;
 	process.stdout.columns = 120;
-
 	const {lastFrame} = renderWithTheme(<WelcomeMessage availableRows={40} />);
-
-	const output = lastFrame();
+	const output = await waitForWordmark(lastFrame, /[_█]/);
 	t.truthy(output);
 	// Large art (simple) renders with _ | \ etc, small (tiny) with █ — either is art
 	t.regex(output!, /[_█]/);
 	t.regex(output!, /Welcome to Nanocoder/);
-
 	process.stdout.columns = originalColumns;
 });
 
-test('WelcomeMessage shows centered footer for wide terminal', t => {
+test.serial('WelcomeMessage shows centered footer for wide terminal', t => {
 	const originalColumns = process.stdout.columns;
 	process.stdout.columns = 120;
 
@@ -455,7 +461,7 @@ test('WelcomeMessage shows centered footer for wide terminal', t => {
 // Component Structure Tests
 // ============================================================================
 
-test('WelcomeMessage renders without crashing', t => {
+test.serial('WelcomeMessage renders without crashing', t => {
 	const originalColumns = process.stdout.columns;
 	process.stdout.columns = 80;
 
@@ -466,7 +472,7 @@ test('WelcomeMessage renders without crashing', t => {
 	process.stdout.columns = originalColumns;
 });
 
-test('WelcomeMessage has consistent layout structure', t => {
+test.serial('WelcomeMessage has consistent layout structure', t => {
 	const originalColumns = process.stdout.columns;
 	process.stdout.columns = 80;
 
@@ -479,7 +485,7 @@ test('WelcomeMessage has consistent layout structure', t => {
 	process.stdout.columns = originalColumns;
 });
 
-test('WelcomeMessage displays gradient text', t => {
+test.serial('WelcomeMessage displays gradient text', t => {
 	const originalColumns = process.stdout.columns;
 	process.stdout.columns = 80;
 
@@ -496,35 +502,29 @@ test('WelcomeMessage displays gradient text', t => {
 // Edge Cases — responsive ladder rows
 // ============================================================================
 
-test('WelcomeMessage handles boundary at width 80', t => {
+test.serial('WelcomeMessage handles boundary at width 80', async t => {
 	const originalColumns = process.stdout.columns;
 	process.stdout.columns = 80;
-
 	const {lastFrame} = renderWithTheme(<WelcomeMessage availableRows={40} />);
-
-	const output = lastFrame();
+	const output = await waitForWordmark(lastFrame, /[_█]/);
 	t.truthy(output);
 	// NC block monogram is identical at every width
 	t.regex(output!, /█/);
-
 	process.stdout.columns = originalColumns;
 });
 
-test('WelcomeMessage handles boundary at width 90', t => {
+test.serial('WelcomeMessage handles boundary at width 90', async t => {
 	const originalColumns = process.stdout.columns;
 	process.stdout.columns = 90;
-
 	const {lastFrame} = renderWithTheme(<WelcomeMessage availableRows={40} />);
-
-	const output = lastFrame();
+	const output = await waitForWordmark(lastFrame, /[_█]/);
 	t.truthy(output);
 	// At 90 the full NANOCODER block wordmark renders (threshold is 90)
 	t.regex(output!, /[_█]/);
-
 	process.stdout.columns = originalColumns;
 });
 
-test('WelcomeMessage fits the viewport of a standard 80x24 terminal', t => {
+test.serial('WelcomeMessage fits the viewport of a standard 80x24 terminal', t => {
 	const originalColumns = process.stdout.columns;
 	process.stdout.columns = 80;
 
@@ -545,7 +545,7 @@ test('WelcomeMessage fits the viewport of a standard 80x24 terminal', t => {
 	process.stdout.columns = originalColumns;
 });
 
-test('WelcomeMessage trims the menu when the banner has under 16 rows', t => {
+test.serial('WelcomeMessage trims the menu when the banner has under 16 rows', t => {
 	const originalColumns = process.stdout.columns;
 	process.stdout.columns = 100;
 
@@ -562,7 +562,7 @@ test('WelcomeMessage trims the menu when the banner has under 16 rows', t => {
 	process.stdout.columns = originalColumns;
 });
 
-test('WelcomeMessage hides the menu when the banner has under 14 rows', t => {
+test.serial('WelcomeMessage hides the menu when the banner has under 14 rows', t => {
 	const originalColumns = process.stdout.columns;
 	process.stdout.columns = 100;
 
@@ -578,7 +578,7 @@ test('WelcomeMessage hides the menu when the banner has under 14 rows', t => {
 	process.stdout.columns = originalColumns;
 });
 
-test('WelcomeMessage hides logo when rows < 16', t => {
+test.serial('WelcomeMessage hides logo when rows < 16', t => {
 	const originalColumns = process.stdout.columns;
 	const originalRows = process.stdout.rows;
 	process.stdout.columns = 100;
@@ -597,7 +597,7 @@ test('WelcomeMessage hides logo when rows < 16', t => {
 	process.stdout.rows = originalRows;
 });
 
-test('WelcomeMessage handles very narrow terminal', t => {
+test.serial('WelcomeMessage handles very narrow terminal', t => {
 	const originalColumns = process.stdout.columns;
 	process.stdout.columns = 30;
 
@@ -610,16 +610,13 @@ test('WelcomeMessage handles very narrow terminal', t => {
 	process.stdout.columns = originalColumns;
 });
 
-test('WelcomeMessage handles very wide terminal', t => {
+test.serial('WelcomeMessage handles very wide terminal', async t => {
 	const originalColumns = process.stdout.columns;
 	process.stdout.columns = 200;
-
 	const {lastFrame} = renderWithTheme(<WelcomeMessage availableRows={40} />);
-
-	const output = lastFrame();
+	const output = await waitForWordmark(lastFrame, /[_█]/);
 	t.truthy(output);
 	t.regex(output!, /[_█]/);
-
 	process.stdout.columns = originalColumns;
 });
 
@@ -652,47 +649,39 @@ const CHROME_GLYPHS = /[╔╗╝╚╠╦╩═║╩╬]/;
 // The 3d font draws in runs of backslashes; nothing else in the banner does.
 const THREE_D_GLYPHS = /\\{3}/;
 
-test('WelcomeMessage renders the wordmark in the configured Nanocoder Shape', t => {
+test.serial('WelcomeMessage renders the wordmark in the configured Nanocoder Shape', async t => {
 	const originalColumns = process.stdout.columns;
 	process.stdout.columns = 100;
 	t.teardown(() => {
 		savePreferences({});
 		process.stdout.columns = originalColumns;
 	});
-
 	savePreferences({nanocoderShape: 'tiny'});
-
-	const output = stripAnsi(
-		renderWithTheme(<WelcomeMessage availableRows={40} />).lastFrame() ?? '',
-	);
-
+	const {lastFrame} = renderWithTheme(<WelcomeMessage availableRows={40} />);
+	const output = await waitForWordmark(lastFrame, TINY_NA);
 	t.regex(output, TINY_NA, 'wordmark must use the configured font');
 	t.notRegex(output, BLOCK_GLYPHS, 'block font must not survive the preference');
 });
 
-test('WelcomeMessage repaints the wordmark when the shape preference changes', async t => {
+test.serial('WelcomeMessage repaints the wordmark when the shape preference changes', async t => {
 	const originalColumns = process.stdout.columns;
 	process.stdout.columns = 100;
 	t.teardown(() => {
 		savePreferences({});
 		process.stdout.columns = originalColumns;
 	});
-
 	const {lastFrame} = renderWithTheme(<WelcomeMessage availableRows={40} />);
-	t.regex(stripAnsi(lastFrame() ?? ''), BLOCK_GLYPHS, 'block is the default');
-
+	t.regex(await waitForWordmark(lastFrame, BLOCK_GLYPHS), BLOCK_GLYPHS, 'block is the default');
 	// The settings panel writes straight to disk, so the banner only follows
 	// along if it subscribed to preference writes — the bug this covers is the
 	// shape changing and nothing on screen moving.
 	savePreferences({nanocoderShape: 'chrome'});
-	await new Promise(resolve => setTimeout(resolve, 50));
-
-	const after = stripAnsi(lastFrame() ?? '');
+	const after = await waitForWordmark(lastFrame, CHROME_N);
 	t.regex(after, CHROME_N, 'wordmark must follow the new shape');
 	t.notRegex(after, BLOCK_GLYPHS);
 });
 
-test('WelcomeMessage sizes the width threshold to the chosen font', t => {
+test.serial('WelcomeMessage sizes the width threshold to the chosen font', async t => {
 	const originalColumns = process.stdout.columns;
 	// 50 cols is below block's 90-col threshold, so block would fall back to
 	// the monogram here. chrome's "NANOCODER" is only 36 cols, so it fits.
@@ -701,20 +690,16 @@ test('WelcomeMessage sizes the width threshold to the chosen font', t => {
 		savePreferences({});
 		process.stdout.columns = originalColumns;
 	});
-
 	savePreferences({nanocoderShape: 'chrome'});
-
-	const output = stripAnsi(
-		renderWithTheme(<WelcomeMessage availableRows={40} />).lastFrame() ?? '',
-	);
-
+	const {lastFrame} = renderWithTheme(<WelcomeMessage availableRows={40} />);
+	const output = await waitForWordmark(lastFrame, CHROME_GLYPHS);
 	t.true(
 		logoWidth(output, CHROME_GLYPHS) > 30,
 		'the full wordmark must render when the font is narrow enough for it',
 	);
 });
 
-test('WelcomeMessage drops the wordmark when the font is wider than the terminal', t => {
+test.serial('WelcomeMessage drops the wordmark when the font is wider than the terminal', t => {
 	const originalColumns = process.stdout.columns;
 	// 3d's monogram alone is 35 cols wide.
 	process.stdout.columns = 30;
@@ -734,29 +719,26 @@ test('WelcomeMessage drops the wordmark when the font is wider than the terminal
 	t.regex(output, /Welcome to Nanocoder/, 'the rest of the banner stays');
 });
 
-test('WelcomeMessage sizes the row budget to the chosen font', t => {
+test.serial('WelcomeMessage sizes the row budget to the chosen font', async t => {
 	const originalColumns = process.stdout.columns;
 	process.stdout.columns = 100;
 	t.teardown(() => {
 		savePreferences({});
 		process.stdout.columns = originalColumns;
 	});
-
 	// 22 rows is the four-item menu (16) plus tiny's 6-row wordmark, but six
 	// short of what the block wordmark needs.
 	savePreferences({nanocoderShape: 'tiny'});
-	const withTiny = stripAnsi(
-		renderWithTheme(<WelcomeMessage availableRows={22} />).lastFrame() ?? '',
-	);
+	const tinyRender = renderWithTheme(<WelcomeMessage availableRows={22} />);
+	const withTiny = await waitForWordmark(tinyRender.lastFrame, TINY_NA);
 	t.regex(withTiny, TINY_NA, 'a short font still fits in 22 rows');
-
 	savePreferences({});
 	const withBlock = stripAnsi(
 		renderWithTheme(<WelcomeMessage availableRows={22} />).lastFrame() ?? '',
 	);
 	t.notRegex(withBlock, BLOCK_GLYPHS, 'the taller default does not');
 });
-test('WelcomeMessage subtitle is the project description, not local-first coding agent', t => {
+test.serial('WelcomeMessage subtitle is the project description, not local-first coding agent', t => {
 	const originalColumns = process.stdout.columns;
 	process.stdout.columns = 80;
 	const {lastFrame} = renderWithTheme(<WelcomeMessage availableRows={40} />);
