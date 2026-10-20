@@ -180,7 +180,7 @@ export class NanocoderAcpClient {
 
 		try {
 			const ext = vscode.extensions.getExtension('nanocollective.nanocoder-vscode');
-			const version = ext?.packageJSON?.version || '0.3.0';
+			const version = ext?.packageJSON?.version || '0.4.0';
 
 			// Perform ACP initialize handshake
 			const initResult = await this.connection.initialize({
