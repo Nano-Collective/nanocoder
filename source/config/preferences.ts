@@ -30,12 +30,14 @@ import {log} from '@/utils/logging';
 let PREFERENCES_PATH: string | null = null;
 let CACHED_CONFIG_DIR: string | undefined = undefined;
 let cachedVoicePreference: import('@/types/config').VoiceConfig | undefined;
+const PREFERENCES_STAT_INTERVAL_MS = 1000;
 
 type PreferencesCache = {
 	path: string;
 	version: number;
-	mtimeMs: number;
+	mtimeMs: number | null;
 	globalMtimeMs: number | null;
+	lastCheckedAt: number;
 	data: UserPreferences;
 };
 
@@ -159,22 +161,37 @@ export function loadPreferences(): UserPreferences {
 	try {
 		const preferencesPath = getPreferencesPath();
 		const version = getPreferencesVersion();
+		const now = Date.now();
+		const cache = preferencesCache;
+
+		// Internal writes invalidate immediately. Unchanged preferences
+		// avoid filesystem I/O until the next scheduled metadata check.
+		if (
+			cache &&
+			cache.path === preferencesPath &&
+			cache.version === version &&
+			now - cache.lastCheckedAt >= 0 &&
+			now - cache.lastCheckedAt < PREFERENCES_STAT_INTERVAL_MS
+		) {
+			return structuredClone(cache.data);
+		}
 
 		const mtimeMs = getFileMtime(preferencesPath);
-
 		const isProject = isProjectPreferencesPath(preferencesPath);
 		const globalMtimeMs = isProject
 			? getFileMtime(getGlobalPreferencesPath())
 			: null;
 
 		if (
-			preferencesCache &&
-			preferencesCache.path === preferencesPath &&
-			preferencesCache.version === version &&
-			preferencesCache.mtimeMs === mtimeMs &&
-			preferencesCache.globalMtimeMs === globalMtimeMs
+			cache &&
+			cache.path === preferencesPath &&
+			cache.version === version &&
+			mtimeMs !== null &&
+			cache.mtimeMs === mtimeMs &&
+			cache.globalMtimeMs === globalMtimeMs
 		) {
-			return structuredClone(preferencesCache.data);
+			cache.lastCheckedAt = now;
+			return structuredClone(cache.data);
 		}
 
 		const data = JSON.parse(
@@ -188,19 +205,17 @@ export function loadPreferences(): UserPreferences {
 			for (const key of GLOBAL_ONLY_KEYS) {
 				const value = globalPrefs?.[key];
 
-				if (value === undefined) {
-					delete mutable[key];
-				} else {
-					mutable[key] = value;
-				}
+				if (value === undefined) delete mutable[key];
+				else mutable[key] = value;
 			}
 		}
 
 		preferencesCache = {
 			path: preferencesPath,
 			version,
-			mtimeMs: mtimeMs ?? -1,
+			mtimeMs,
 			globalMtimeMs,
+			lastCheckedAt: now,
 			data: structuredClone(data),
 		};
 
@@ -211,6 +226,7 @@ export function loadPreferences(): UserPreferences {
 
 	return {};
 }
+
 
 // Preferences are written straight to disk, so React has no natural signal that
 // a setting flipped. Consumers holding derived state (e.g. the memoized system
@@ -238,41 +254,28 @@ export function getPreferencesVersion(): number {
 	return preferencesVersion;
 }
 
-// Caches a derived preference, keyed on NANOCODER_CONFIG_DIR and getPreferencesVersion()
-// (bumped on every write), so the value never goes stale after a settings change.
-
+// Keep derived preferences on the filesystem-free hot path.
+// They refresh after in-process writes or config-directory changes;
+// external edits are detected by loadPreferences() on its next metadata check.
 function cachedPreference<T>(read: (prefs: UserPreferences) => T): () => T {
-	let cache: {
-		dir?: string;
-		version: number;
-		value: T;
-	} | null = null;
+	let cache: {dir?: string; version: number; value: T} | null = null;
 
 	return () => {
 		const dir = process.env.NANOCODER_CONFIG_DIR;
 		const version = getPreferencesVersion();
 
-		// Preserve the existing cached value when the file is missing.
-		if (cache && cache.dir === dir && cache.version === version) {
-			const preferencesPath = getPreferencesPath();
-
-			if (getFileMtime(preferencesPath) === null) {
-				return cache.value;
-			}
+		if (!cache || cache.dir !== dir || cache.version !== version) {
+			cache = {
+				dir,
+				version,
+				value: read(loadPreferences()),
+			};
 		}
 
-		// loadPreferences detects external modifications through mtime.
-		const value = read(loadPreferences());
-
-		cache = {
-			dir,
-			version,
-			value,
-		};
-
-		return value;
+		return cache.value;
 	};
 }
+
 
 /**
  * Writes the preferences file. Returns `false` when the write failed — the
