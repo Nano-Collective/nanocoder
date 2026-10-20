@@ -424,6 +424,59 @@ test('diff_edit validator refuses a .docx path', async t => {
 	}
 });
 
+// #1854: the whole file is written back as UTF-8, so a file that isn't valid
+// UTF-8 would have every undecodable byte rewritten as U+FFFD.
+// "café" then the edited line, in Latin-1: the é is a lone E9 byte.
+const LATIN1_BYTES = Buffer.from('caf\xe9\nconst oldValue = 1;\n', 'latin1');
+
+test('diff_edit refuses a Latin-1 file and leaves every byte unchanged', async t => {
+	const filePath = join(testDir, 'legacy.js');
+	await writeFile(filePath, LATIN1_BYTES);
+
+	await t.throwsAsync(
+		executeDiffEdit({path: projectRelativePath(filePath), diff: sampleDiff}),
+		{message: /not valid UTF-8/},
+	);
+
+	t.deepEqual(await readFile(filePath), LATIN1_BYTES);
+});
+
+test('diff_edit validator refuses a Latin-1 file', async t => {
+	const validator = diffEditTool.validator;
+	if (!validator) {
+		t.fail('diff_edit validator not defined');
+		return;
+	}
+
+	const filePath = join(testDir, 'legacy.js');
+	await writeFile(filePath, LATIN1_BYTES);
+	markFileSeen(filePath);
+
+	const result = await validator({
+		path: projectRelativePath(filePath),
+		diff: sampleDiff,
+	});
+
+	t.false(result.valid);
+	if (!result.valid) {
+		t.regex(result.error, /not valid UTF-8/);
+	}
+});
+
+test('diff_edit edits a UTF-8 file with non-ASCII text and keeps other lines byte for byte', async t => {
+	const filePath = await createTestFile(
+		'utf8.js',
+		'// café ✓ 日本\nconst oldValue = 1;\n',
+	);
+
+	await executeDiffEdit({path: projectRelativePath(filePath), diff: sampleDiff});
+
+	t.deepEqual(
+		await readFile(filePath),
+		Buffer.from('// café ✓ 日本\nconst newValue = 2;\n', 'utf-8'),
+	);
+});
+
 test('diff_edit writes $ substitution tokens literally', async t => {
 	const filePath = await createTestFile(
 		'dollars.sh',
