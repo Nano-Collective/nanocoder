@@ -114,18 +114,18 @@ export async function fetchModels(
 		}
 
 		// Parse response based on API type
-		const models = filterMiniMaxModels(
-			parseModelsResponse(data, apiCompatibility).sort((a, b) =>
-				a.name.localeCompare(b.name),
-			),
-			baseUrl,
+		const discovered = parseModelsResponse(data, apiCompatibility).sort(
+			(a, b) => a.name.localeCompare(b.name),
 		);
+		const models = filterMiniMaxModels(discovered, baseUrl);
 
 		if (models.length === 0) {
 			return {
 				success: false,
 				models: [],
-				error: 'No models found',
+				error: discovered.length
+					? 'No current MiniMax text models found; enter a model ID manually'
+					: 'No models found',
 			};
 		}
 

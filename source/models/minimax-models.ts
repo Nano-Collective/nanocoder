@@ -18,7 +18,10 @@ export function filterMiniMaxModels<T extends {id: string}>(
 	} else if (url.hostname === 'openrouter.ai') {
 		current = ['minimax/minimax-m3.1-flash:free', 'minimax/minimax-m3'];
 		textModel = /^minimax\/(?:minimax-(?:m\d|(?:text|vl)-01|01)|abab)/i;
-	} else if (url.hostname === 'opencode.ai') {
+	} else if (
+		url.hostname === 'opencode.ai' &&
+		/^\/zen(?:\/|$)/.test(url.pathname)
+	) {
 		current = ['minimax-m3.1-flash-free', 'minimax-m3'];
 		textModel = /^minimax-(?:m\d|(?:text|vl)-01|01)/i;
 	} else {

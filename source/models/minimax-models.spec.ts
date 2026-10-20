@@ -83,6 +83,8 @@ test('custom, local and lookalike endpoints preserve every explicit ID', t => {
 		'http://localhost:11434',
 		'https://api.minimax.io.example/v1',
 		'https://example.com/openrouter.ai',
+		'https://opencode.ai/custom/v1',
+		'https://opencode.ai/zenith/v1',
 		'invalid',
 	]) {
 		t.is(filterMiniMaxModels(input, url), input);

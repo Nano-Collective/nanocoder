@@ -20,6 +20,19 @@ test.serial('wizard filters legacy MiniMax discovery and orders Flash before M3'
 	}
 });
 
+test.serial('filtered discovery offers a useful manual-entry fallback', async t => {
+	const originalFetch = globalThis.fetch;
+	globalThis.fetch = async () => new Response(JSON.stringify({data: [{id: 'MiniMax-M2.7'}]}));
+	try {
+		const result = await fetchModels('https://api.minimax.io/anthropic/v1', 'anthropic', 'offline-test-key');
+		t.false(result.success);
+		t.deepEqual(result.models, []);
+		t.is(result.error, 'No current MiniMax text models found; enter a model ID manually');
+	} finally {
+		globalThis.fetch = originalFetch;
+	}
+});
+
 test('appends /models to a /v1 base URL', t => {
 	t.is(
 		resolveOpenAICompatibleModelsEndpoint('https://openrouter.ai/api/v1'),
