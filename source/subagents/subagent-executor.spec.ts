@@ -356,6 +356,45 @@ test.serial('executes tool calls and returns final response', async t => {
 	t.is(result.output, 'Found the file with 100 lines');
 });
 
+test.serial('toolOverride replaces the effective tool list beyond what frontmatter declares', async t => {
+	// 'explore's frontmatter tools list does not include write_file, so
+	// without an override this call would be filtered out before reaching
+	// the model. toolOverride.tools should replace the effective list.
+	const writeHandler = async (args: unknown) => {
+		const parsed = args as {path: string};
+		return `Wrote ${parsed.path}`;
+	};
+
+	const toolManager = createMockToolManager({
+		write_file: {handler: writeHandler, readOnly: false},
+	});
+
+	const client = createMockClient([
+		{
+			content: '',
+			tool_calls: [{
+				id: 'tc1',
+				function: {name: 'write_file', arguments: '{"path": "out.txt"}'},
+			}],
+		},
+		{content: 'Wrote the file'},
+	]);
+
+	const executor = new SubagentExecutor(toolManager, client);
+
+	const result = await executor.execute(
+		{subagent_type: 'explore', description: 'Write a file'},
+		undefined,
+		0,
+		undefined,
+		undefined,
+		{tools: ['write_file']},
+	);
+
+	t.true(result.success);
+	t.is(result.output, 'Wrote the file');
+});
+
 test.serial('keeps screenshot images on a subagent tool message', async t => {
 	const toolManager = createMockToolManager({
 		read_file: {
@@ -1265,6 +1304,185 @@ test('mode resolver overrides the static parentMode and is read live', async t =
 	t.true(await needsApproval('execute_bash'));
 });
 
+// ============================================================================
+// Phase 4: toolOverride.alwaysAllow bypasses approval for otherwise
+// mode-blind, unconditionally-approval-required tools (e.g. git_commit's
+// `approval: true`, which would otherwise be silently auto-denied in
+// headless mode since no approval-queue handler is ever registered there).
+// ============================================================================
+
+test.serial('needsApprovalForTool: alwaysAllow bypasses an unconditional approval:true policy', async t => {
+	const toolManager = createMockToolManager({
+		git_commit: {handler: async () => 'committed', readOnly: false, needsApproval: true},
+	});
+	const client = createMockClient([]);
+	const executor = new SubagentExecutor(toolManager, client, process.cwd(), 'headless');
+
+	const needsApproval = (alwaysAllow?: string[]) =>
+		(executor as unknown as {
+			needsApprovalForTool: (
+				n: string,
+				a: unknown,
+				alwaysAllow?: string[],
+			) => Promise<boolean>;
+		}).needsApprovalForTool('git_commit', {}, alwaysAllow);
+
+	t.true(
+		await needsApproval(undefined),
+		'without alwaysAllow, git_commit still requires approval even in headless mode',
+	);
+	t.false(
+		await needsApproval(['git_commit']),
+		'alwaysAllow including git_commit bypasses its approval:true policy',
+	);
+	t.true(
+		await needsApproval(['some_other_tool']),
+		'alwaysAllow not including git_commit does not bypass it',
+	);
+});
+
+test.serial('execute(): toolOverride.alwaysAllow lets an approval-required tool run without signalToolApproval', async t => {
+	const commitHandler = async () => 'committed';
+	const toolManager = createMockToolManager({
+		git_commit: {handler: commitHandler, readOnly: false, needsApproval: true},
+	});
+
+	let approvalRequested = false;
+	setGlobalToolApprovalHandler(async () => {
+		approvalRequested = true;
+		return true;
+	});
+
+	const client = createMockClient([
+		{
+			content: '',
+			tool_calls: [
+				{id: 'tc1', function: {name: 'git_commit', arguments: '{"message":"fix"}'}},
+			],
+		},
+		{content: 'Committed the fix'},
+	]);
+
+	const executor = new SubagentExecutor(toolManager, client, process.cwd(), 'headless');
+
+	const result = await executor.execute(
+		{subagent_type: 'explore', description: 'Commit a fix'},
+		undefined,
+		0,
+		undefined,
+		{tools: ['git_commit'], alwaysAllow: ['git_commit']},
+	);
+
+	t.true(result.success);
+	t.is(result.output, 'Committed the fix');
+	t.false(
+		approvalRequested,
+		'signalToolApproval should never be reached when alwaysAllow covers the tool',
+	);
+
+	// Restore auto-approve handler for other tests
+	setGlobalToolApprovalHandler(async () => true);
+});
+
+test.serial('execute(): a trustLevel denies git_pr comment/review/create even when approval would be granted', async t => {
+	const gitPrCalls: unknown[] = [];
+	const toolManager = createMockToolManager({
+		git_pr: {
+			handler: async args => {
+				gitPrCalls.push(args);
+				return 'ok';
+			},
+			readOnly: false,
+			needsApproval: true,
+		},
+	});
+
+	// The global handler approves everything, so only the trust-level check
+	// stands between the model and a posted review.
+	setGlobalToolApprovalHandler(async () => true);
+
+	const call = (id: string, args: object) => ({
+		id,
+		function: {name: 'git_pr', arguments: JSON.stringify(args)},
+	});
+	const toolResults = new Map<string, string>();
+	const client = createMockClient(
+		[
+			{
+				content: '',
+				tool_calls: [
+					call('tc1', {review: {pr: 7, verdict: 'approve'}}),
+					call('tc2', {comment: {pr: 7, body: 'x'}}),
+					call('tc3', {create: {title: 'x'}}),
+					call('tc4', {diff: 7}),
+				],
+			},
+			{content: 'done'},
+		],
+		messages => {
+			for (const m of messages) {
+				if (m.role === 'tool' && m.tool_call_id) {
+					toolResults.set(m.tool_call_id, String(m.content));
+				}
+			}
+		},
+	);
+	const executor = new SubagentExecutor(toolManager, client, process.cwd(), 'headless');
+
+	const result = await executor.execute(
+		{subagent_type: 'explore', description: 'Review a PR'},
+		undefined,
+		0,
+		undefined,
+		undefined,
+		{tools: ['git_pr'], alwaysAllow: [], trustLevel: 'comment-only'},
+	);
+
+	t.true(result.success);
+	t.deepEqual(gitPrCalls, [{diff: 7}], 'only the read-only action may run');
+	// Pin which call was denied: review, comment and create by id, not just
+	// "three of four", so a swapped decision can't pass.
+	for (const id of ['tc1', 'tc2', 'tc3']) {
+		t.regex(toolResults.get(id) ?? '', /not permitted at trust level/, id);
+	}
+	t.is(toolResults.get('tc4'), 'ok', 'the read-only diff call ran');
+});
+
+test.serial('execute(): an explicit alwaysAllow replaces the project config alwaysAllow', async t => {
+	const leave = enterSubagentHookFixture({}, {alwaysAllow: ['git_pr']});
+	try {
+		const toolManager = createMockToolManager({
+			git_pr: {handler: async () => 'ok', readOnly: false, needsApproval: true},
+		});
+		const executor = new SubagentExecutor(
+			toolManager,
+			createMockClient([]),
+			process.cwd(),
+			'headless',
+		);
+		const needsApproval = (alwaysAllow?: string[]) =>
+			(executor as unknown as {
+				needsApprovalForTool: (
+					n: string,
+					a: unknown,
+					alwaysAllow?: string[],
+				) => Promise<boolean>;
+			}).needsApprovalForTool('git_pr', {}, alwaysAllow);
+
+		t.false(
+			await needsApproval(undefined),
+			'with no override the project config still applies',
+		);
+		t.true(
+			await needsApproval([]),
+			'an explicit override must not inherit the project config',
+		);
+		t.false(await needsApproval(['git_pr']));
+	} finally {
+		leave();
+	}
+});
+
 test('without a resolver, approval falls back to the static parentMode', async t => {
 	const toolManager = createMockToolManager({
 		execute_bash: {handler: async () => 'ok', readOnly: false, needsApproval: true},
@@ -1625,7 +1843,10 @@ const SUBAGENT_HOOK_DIR = join(
 	`nanocoder-subagent-hooks-${Date.now()}`,
 );
 
-function enterSubagentHookFixture(hooks: HooksConfig): () => void {
+function enterSubagentHookFixture(
+	hooks: HooksConfig,
+	extraConfig: Record<string, unknown> = {},
+): () => void {
 	const previousCwd = process.cwd();
 	const previousConfigDir = process.env.NANOCODER_CONFIG_DIR;
 	mkdirSync(SUBAGENT_HOOK_DIR, {recursive: true});
@@ -1637,7 +1858,7 @@ function enterSubagentHookFixture(hooks: HooksConfig): () => void {
 	setProjectRoot(SUBAGENT_HOOK_DIR);
 	writeFileSync(
 		join(SUBAGENT_HOOK_DIR, 'agents.config.json'),
-		JSON.stringify({nanocoder: {hooks}}),
+		JSON.stringify({nanocoder: {hooks, ...extraConfig}}),
 		'utf-8',
 	);
 	reloadAppConfig();

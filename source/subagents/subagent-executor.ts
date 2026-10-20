@@ -58,6 +58,7 @@ import {signalToolApproval} from '@/utils/tool-approval-queue';
 import {parseToolArguments} from '@/utils/tool-args-parser';
 import {toolErrorToContent} from '@/utils/tool-validation';
 import {truncateToolResult} from '@/utils/truncate-tool-result';
+import {isGitPrCallAllowed, type TrustLevel} from '@/verify/trust';
 import {getSubagentLoader} from './subagent-loader.js';
 import type {
 	SubagentConfigWithSource,
@@ -195,6 +196,23 @@ export class SubagentExecutor {
 	 * @param agentId - Optional unique ID for concurrent progress tracking.
 	 *                  When provided, progress is written to the agent-specific
 	 *                  slot in the progress map instead of the global singleton.
+	 * @param toolOverride - Optional runtime narrowing of the subagent's
+	 *                  `tools`/`disallowedTools`, applied on top of whatever
+	 *                  the loaded config (frontmatter) declares. Lets a
+	 *                  caller enforce a trust-level allowlist (see
+	 *                  `source/verify/trust.ts`) without needing a second,
+	 *                  hand-maintained tool list in the subagent's own file.
+	 *                  `alwaysAllow` additionally skips the approval prompt
+	 *                  for the named tools (see `resolveToolApproval`'s
+	 *                  `ctx.alwaysAllow`) — for tools whose `approval` policy
+	 *                  isn't mode-aware and would otherwise be silently
+	 *                  auto-denied in headless mode (no approval-queue
+	 *                  handler is ever registered there). When given, it
+	 *                  replaces the user/project `alwaysAllow` config rather
+	 *                  than adding to it, so a checked-out repo's own config
+	 *                  can't pre-approve tools for a trust-gated run.
+	 *                  `trustLevel` makes every `git_pr` call be checked
+	 *                  against that level's allowed actions before approval.
 	 */
 	async execute(
 		task: SubagentTask,
@@ -202,6 +220,12 @@ export class SubagentExecutor {
 		depth = 0,
 		agentId?: string,
 		executionContext?: Omit<ToolExecutionContext, 'abortSignal'>,
+		toolOverride?: {
+			tools?: string[];
+			disallowedTools?: string[];
+			alwaysAllow?: string[];
+			trustLevel?: TrustLevel;
+		},
 	): Promise<SubagentResult> {
 		const startTime = Date.now();
 
@@ -217,9 +241,9 @@ export class SubagentExecutor {
 
 		try {
 			const loader = getSubagentLoader(this.projectRoot);
-			const config = await loader.getSubagent(task.subagent_type);
+			const loadedConfig = await loader.getSubagent(task.subagent_type);
 
-			if (!config) {
+			if (!loadedConfig) {
 				return {
 					subagentName: task.subagent_type,
 					output: '',
@@ -228,6 +252,16 @@ export class SubagentExecutor {
 					executionTimeMs: Date.now() - startTime,
 				};
 			}
+
+			const config: SubagentConfigWithSource = toolOverride
+				? {
+						...loadedConfig,
+						tools: toolOverride.tools ?? loadedConfig.tools,
+						disallowedTools:
+							toolOverride.disallowedTools ?? loadedConfig.disallowedTools,
+						trustLevel: toolOverride.trustLevel,
+					}
+				: loadedConfig;
 
 			const context = this.createSubagentContext(config, task);
 			const filteredTools = this.filterTools(config);
@@ -283,6 +317,7 @@ export class SubagentExecutor {
 							agentId,
 							executionContext,
 							recordUsage,
+							toolOverride?.alwaysAllow,
 						),
 				);
 
@@ -529,6 +564,7 @@ export class SubagentExecutor {
 		agentId?: string,
 		executionContext?: Omit<ToolExecutionContext, 'abortSignal'>,
 		onApiCallComplete?: SubagentApiCallHandler,
+		alwaysAllow?: string[],
 	): Promise<string> {
 		let iterations = 0;
 		let totalToolCalls = 0;
@@ -775,6 +811,7 @@ export class SubagentExecutor {
 							config,
 							signal,
 							executionContext,
+							alwaysAllow,
 						),
 				);
 
@@ -808,11 +845,12 @@ export class SubagentExecutor {
 	private async needsApprovalForTool(
 		toolName: string,
 		rawArguments: unknown,
+		alwaysAllow?: string[],
 	): Promise<boolean> {
 		const toolEntry = this.toolManager.getToolEntry(toolName);
 		return resolveToolApproval(toolName, toolEntry, rawArguments, {
 			mode: this.currentMode(),
-			alwaysAllow: getAppConfig().alwaysAllow ?? [],
+			alwaysAllow: alwaysAllow ?? getAppConfig().alwaysAllow ?? [],
 		});
 	}
 
@@ -826,6 +864,7 @@ export class SubagentExecutor {
 		config: SubagentConfigWithSource,
 		signal?: AbortSignal,
 		executionContext?: Omit<ToolExecutionContext, 'abortSignal'>,
+		alwaysAllow?: string[],
 	): Promise<{content: string; images?: Message['images']}> {
 		if (signal?.aborted) {
 			return {content: 'Error: Execution was cancelled'};
@@ -864,6 +903,19 @@ export class SubagentExecutor {
 			},
 		};
 
+		// A trust-gated run (verify, daemon CI) must never post to GitHub itself:
+		// the harness does that. Enforced here rather than relying on the
+		// approval prompt, which `alwaysAllow` or yolo mode would skip.
+		if (
+			toolName === 'git_pr' &&
+			config.trustLevel &&
+			!isGitPrCallAllowed(config.trustLevel, parsedArgs)
+		) {
+			return {
+				content: `Error: this git_pr action is not permitted at trust level '${config.trustLevel}'. Posting to GitHub is done by the harness.`,
+			};
+		}
+
 		// Subagents run their own loop rather than going through processToolUse,
 		// so the lifecycle gate has to be applied here too — a policy hook must
 		// hold for delegated work as much as for the main conversation. It runs
@@ -878,6 +930,7 @@ export class SubagentExecutor {
 		const needsApproval = await this.needsApprovalForTool(
 			toolName,
 			rawArguments,
+			alwaysAllow,
 		);
 		if (needsApproval) {
 			const vote = await consultPluginPermission(toolName, parsedArgs);
