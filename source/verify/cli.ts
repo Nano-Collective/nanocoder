@@ -8,10 +8,9 @@
  * (`--post-review`).
  *
  * Posting is done here, by the harness, never by the subagent's own tool
- * calls — a headless run has no registered tool-approval-queue handler, so
- * any `git_pr comment/review` call the subagent attempted would be silently
- * auto-denied (see `source/utils/tool-approval-queue.ts`). See the plan
- * doc / EXPLANATION.md for the full rationale.
+ * calls — the executor denies any `git_pr comment/review/create` call the
+ * subagent attempts (see `defaultRunSubagent`). See the plan doc /
+ * EXPLANATION.md for the full rationale.
  */
 
 import {existsSync} from 'node:fs';
@@ -32,13 +31,22 @@ import {
 	formatFindingsForPrompt,
 	type SecurityScanResult,
 } from './security-scan';
-import {getAllowedToolNames} from './trust';
+import {
+	getAllowedToolNames,
+	getHeadlessAutoApproveToolNames,
+	type TrustLevel,
+} from './trust';
+
+/** `verify` is a comment-only surface by design: the harness does the posting. */
+const VERIFY_TRUST_LEVEL: TrustLevel = 'comment-only';
 
 export interface VerifyCliOptions {
 	projectRoot: string;
 }
 
 export interface VerifyCliDeps {
+	/** Resolves to the refusal message when `directory` is untrusted, else null. */
+	checkTrust: (directory: string, bypass: boolean) => Promise<string | null>;
 	initializePlain: typeof import('@/plain/initialize').initializePlain;
 	isGhAvailable: typeof isGhAvailable;
 	getCurrentCommitSha: typeof getCurrentCommitSha;
@@ -70,20 +78,16 @@ async function defaultRunSubagent(
 		projectRoot,
 		'headless',
 	);
-	// Narrow the tool *names* available to comment-only's list, so the
-	// subagent's frontmatter can't silently drift from trust.ts. This is
-	// name-level only — it doesn't stop git_pr's comment/review/create
-	// argument shapes, which trust.ts's isActionAllowed() would deny at
-	// comment-only but which nothing currently enforces at call time. The
-	// actual reason a mutating git_pr call can't succeed here is that
-	// git_pr's own `approval` fn requires confirmation for those actions,
-	// and headless mode has no registered approval handler, so
-	// signalToolApproval() auto-denies (see source/utils/tool-approval-queue.ts).
-	// That's a property of headless mode, not of this tool list — if a
-	// future trust level ever runs headless with an approval handler
-	// registered, this override alone would no longer be sufficient.
+	// Narrow the tools to the level's list so the subagent's frontmatter can't
+	// silently drift from trust.ts. `trustLevel` makes the executor deny any
+	// git_pr action the level doesn't allow, and `alwaysAllow` replaces the
+	// user/project config's list: this run reviews a PR checkout whose own
+	// agents.config.json must not pre-approve tools. Posting happens only in
+	// the harness, via --post-review.
 	return executor.execute(task, signal, 0, undefined, undefined, {
-		tools: getAllowedToolNames('comment-only'),
+		tools: getAllowedToolNames(VERIFY_TRUST_LEVEL),
+		alwaysAllow: getHeadlessAutoApproveToolNames(VERIFY_TRUST_LEVEL),
+		trustLevel: VERIFY_TRUST_LEVEL,
 	});
 }
 
@@ -92,7 +96,7 @@ async function defaultPostReview(pr: number, body: string): Promise<void> {
 }
 
 const USAGE =
-	'Usage: nanocoder verify --pr <number> [--post-review] [--provider <name>] [--model <name>]';
+	'Usage: nanocoder verify --pr <number> [--post-review] [--trust-directory] [--provider <name>] [--model <name>]';
 
 const PROVIDER_PATTERN = /^[a-zA-Z0-9_-]+$/;
 const MODEL_PATTERN = /^[a-zA-Z0-9_/.:-]+$/;
@@ -100,6 +104,7 @@ const MODEL_PATTERN = /^[a-zA-Z0-9_/.:-]+$/;
 interface ParsedArgs {
 	pr: number;
 	postReview: boolean;
+	trustDirectory: boolean;
 	provider?: string;
 	model?: string;
 }
@@ -107,6 +112,7 @@ interface ParsedArgs {
 function parseArgs(args: string[]): ParsedArgs | {error: string} {
 	let prRaw: string | undefined;
 	let postReview = false;
+	let trustDirectory = false;
 	let provider: string | undefined;
 	let model: string | undefined;
 
@@ -117,6 +123,8 @@ function parseArgs(args: string[]): ParsedArgs | {error: string} {
 			i++;
 		} else if (arg === '--post-review') {
 			postReview = true;
+		} else if (arg === '--trust-directory') {
+			trustDirectory = true;
 		} else if (arg === '--provider') {
 			const value = args[i + 1];
 			i++;
@@ -146,10 +154,16 @@ function parseArgs(args: string[]): ParsedArgs | {error: string} {
 		};
 	}
 
-	return {pr, postReview, provider, model};
+	return {pr, postReview, trustDirectory, provider, model};
 }
 
 const defaultDeps: VerifyCliDeps = {
+	// Lazy import: config/preferences pulls in most of the config stack, which
+	// the argument-error fast paths above shouldn't pay for.
+	checkTrust: async (directory, bypass) => {
+		const {directoryTrustRefusal} = await import('@/config/preferences');
+		return directoryTrustRefusal(directory, bypass);
+	},
 	initializePlain: async opts => {
 		const {initializePlain} = await import('@/plain/initialize');
 		return initializePlain(opts);
@@ -180,7 +194,15 @@ export async function runVerifyCli(
 	if ('error' in parsed) {
 		return {exitCode: 1, output: `${parsed.error}\n${USAGE}`};
 	}
-	const {pr, postReview, provider, model} = parsed;
+	const {pr, postReview, trustDirectory, provider, model} = parsed;
+
+	// The checked-out PR is untrusted code, and initializePlain() loads its
+	// project config (providers, hooks, MCP servers), so refuse an untrusted
+	// folder the same way `nanocoder run` does before anything is loaded.
+	const refusal = await deps.checkTrust(opts.projectRoot, trustDirectory);
+	if (refusal) {
+		return {exitCode: 1, output: refusal};
+	}
 
 	if (!deps.isGhAvailable()) {
 		return {

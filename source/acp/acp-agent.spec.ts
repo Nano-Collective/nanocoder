@@ -1,5 +1,11 @@
 import {randomUUID} from 'node:crypto';
-import {mkdirSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
+import {
+	existsSync,
+	mkdirSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
@@ -530,6 +536,63 @@ test('AcpAgent.setSessionConfigOption - throws on unknown config option', async 
 	);
 });
 
+test.serial(
+	'AcpAgent.setSessionConfigOption - does not fall back when provider fails',
+	async t => {
+		const configPath = join(testConfigDir, 'agents.config.json');
+		const originalConfig = existsSync(configPath)
+			? readFileSync(configPath, 'utf8')
+			: undefined;
+		writeFileSync(
+			configPath,
+			JSON.stringify({
+				nanocoder: {
+					providers: [
+						{
+							name: 'Fallback Provider',
+							baseUrl: 'http://localhost:8000/v1',
+							models: ['fallback-model'],
+						},
+						{
+							name: 'Failing Copilot Provider',
+							baseUrl: 'https://api.example.com/v1',
+							sdkProvider: 'github-copilot',
+							models: ['copilot-model'],
+						},
+					],
+				},
+			}),
+		);
+		clearAppConfig();
+
+		try {
+			const {agent} = createAgent();
+			const session = await agent.newSession({cwd: '/tmp'});
+			const originalClient = agent['initContext'].client;
+
+			await t.throwsAsync(
+				agent.setSessionConfigOption({
+					sessionId: session.sessionId,
+					configId: 'provider',
+					value: 'Failing Copilot Provider',
+				}),
+				{
+					message: /Explicitly requested provider 'Failing Copilot Provider' failed/,
+				},
+			);
+			t.is(agent['initContext'].provider, 'test-provider');
+			t.is(agent['initContext'].client, originalClient);
+		} finally {
+			if (originalConfig === undefined) {
+				rmSync(configPath, {force: true});
+			} else {
+				writeFileSync(configPath, originalConfig);
+			}
+			clearAppConfig();
+		}
+	},
+);
+
 test('AcpAgent.setSessionConfigOption - throws on unknown model', async t => {
 	const {agent} = createAgent();
 	const session = await agent.newSession({cwd: '/tmp'});
@@ -914,6 +977,87 @@ test('AcpAgent.prompt - a cancelled turn does not block the next prompt', async 
 		prompt: [{type: 'text', text: 'second'}],
 	});
 	t.is(next.stopReason, 'end_turn');
+});
+
+// ============================================================================
+// closeSession()
+// ============================================================================
+
+test('AcpAgent.closeSession - does not throw on unknown session', async t => {
+	const {agent} = createAgent();
+	t.deepEqual(await agent.closeSession({sessionId: 'nonexistent'}), {});
+});
+
+test('AcpAgent.closeSession - frees the session from memory', async t => {
+	const {agent} = createAgent();
+	const session = await agent.newSession({cwd: '/tmp'});
+
+	await agent.closeSession({sessionId: session.sessionId});
+
+	await t.throwsAsync(
+		agent.prompt({
+			sessionId: session.sessionId,
+			prompt: [{type: 'text', text: 'hi'}],
+		}),
+		{message: `Session not found: ${session.sessionId}`},
+	);
+});
+
+test('AcpAgent.closeSession - keeps the session on disk for a later resume', async t => {
+	const {agent} = createAgent();
+	const session = await agent.newSession({cwd: '/tmp'});
+	// An empty session is never written to disk, so give it one turn first.
+	await agent.prompt({
+		sessionId: session.sessionId,
+		prompt: [{type: 'text', text: 'first'}],
+	});
+
+	await agent.closeSession({sessionId: session.sessionId});
+
+	await t.notThrowsAsync(
+		agent.resumeSession({sessionId: session.sessionId, cwd: '/tmp'}),
+	);
+	const next = await agent.prompt({
+		sessionId: session.sessionId,
+		prompt: [{type: 'text', text: 'hi'}],
+	});
+	t.is(next.stopReason, 'end_turn');
+});
+
+test('AcpAgent.closeSession - a prompt queued behind the closed turn never starts', async t => {
+	const context = createMockInitContext();
+	let chatCalls = 0;
+	let releaseChat!: () => void;
+	const chatGate = new Promise<void>(resolve => {
+		releaseChat = resolve;
+	});
+	(context.client as any).chat = async () => {
+		chatCalls++;
+		await chatGate;
+		return {choices: [{message: {content: 'Test response'}}]};
+	};
+	const agent = new AcpAgent(context, createMockConn());
+	const session = await agent.newSession({cwd: '/tmp'});
+
+	const first = agent.prompt({
+		sessionId: session.sessionId,
+		prompt: [{type: 'text', text: 'first'}],
+	});
+	const queued = agent.prompt({
+		sessionId: session.sessionId,
+		prompt: [{type: 'text', text: 'second'}],
+	});
+	// Let the first turn reach the model before closing.
+	while (chatCalls === 0) {
+		await new Promise(resolve => setImmediate(resolve));
+	}
+
+	await agent.closeSession({sessionId: session.sessionId});
+	releaseChat();
+	await first.catch(() => {});
+
+	t.is((await queued).stopReason, 'cancelled');
+	t.is(chatCalls, 1);
 });
 
 // ============================================================================

@@ -125,6 +125,11 @@ export interface SubagentConfigWithSource extends SubagentConfig {
 	 * Target is implicit (this subagent). Resolved by the skill registrar.
 	 */
 	subscribe?: import('@/types/skills').SkillTrigger[];
+	/**
+	 * Runtime-only, never read from a file: set by `execute()` from its
+	 * `toolOverride` so `git_pr` calls are checked against this trust level.
+	 */
+	trustLevel?: import('@/verify/trust').TrustLevel;
 }
 
 /**

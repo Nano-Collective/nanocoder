@@ -4,6 +4,7 @@
 
 import {execSync} from 'node:child_process';
 import {
+	chmodSync,
 	mkdirSync,
 	mkdtempSync,
 	realpathSync,
@@ -22,6 +23,7 @@ import {
 	execGit,
 	isGitAvailable,
 	isGhAvailable,
+	resetBinaryAvailabilityCacheForTests,
 	getCurrentBranchSync,
 	getDefaultBranchSync,
 	getGitStatusSummarySync,
@@ -47,6 +49,85 @@ test('isGitAvailable returns boolean', t => {
 test('isGhAvailable returns boolean', t => {
 	const result = isGhAvailable();
 	t.is(typeof result, 'boolean');
+});
+
+test.serial(
+	'PATH scan matches exec verdict for non-executable binaries (Unix only)',
+	t => {
+		if (process.platform === 'win32') {
+			t.pass('executable bits are not meaningful on Windows; skipping');
+			return;
+		}
+		const dir = mkdtempSync(join(tmpdir(), 'nanocoder-path-scan-'));
+		const originalPath = process.env.PATH;
+		const fixture = join(dir, 'git');
+		try {
+			writeFileSync(fixture, '#!/bin/sh\nexit 0\n');
+
+			// Present but not executable: a shell could not exec it, so the
+			// scan must report git unavailable — same verdict execSync gives.
+			chmodSync(fixture, 0o644);
+			process.env.PATH = dir;
+			resetBinaryAvailabilityCacheForTests();
+			t.false(isGitAvailable(), 'non-executable git on PATH is not available');
+
+			// Flip the executable bit: now the scan finds it.
+			chmodSync(fixture, 0o755);
+			resetBinaryAvailabilityCacheForTests();
+			t.true(isGitAvailable(), 'executable git on PATH is available');
+		} finally {
+			process.env.PATH = originalPath;
+			resetBinaryAvailabilityCacheForTests();
+			rmSync(dir, {recursive: true, force: true});
+		}
+	},
+);
+
+test.serial('PATH scan honours quoted PATH entries', t => {
+	const dir = mkdtempSync(join(tmpdir(), 'nanocoder-quoted-path-'));
+	const originalPath = process.env.PATH;
+	const binaryName = process.platform === 'win32' ? 'git.cmd' : 'git';
+	try {
+		writeFileSync(
+			join(dir, binaryName),
+			process.platform === 'win32' ? '@echo off\r\n' : '#!/bin/sh\nexit 0\n',
+		);
+		chmodSync(join(dir, binaryName), 0o755);
+
+		// cmd.exe accepts quoted PATH entries like "C:\Program Files\Git\cmd";
+		// the old `git --version` check resolved them, so the scan must too —
+		// otherwise git tools would silently disappear for those installs.
+		process.env.PATH = `"${dir}"`;
+		resetBinaryAvailabilityCacheForTests();
+		t.true(
+			isGitAvailable(),
+			'quoted PATH entry should still resolve the binary',
+		);
+	} finally {
+		process.env.PATH = originalPath;
+		resetBinaryAvailabilityCacheForTests();
+		rmSync(dir, {recursive: true, force: true});
+	}
+});
+
+test.serial('PATH scan ignores directories named like the binary', t => {
+	const dir = mkdtempSync(join(tmpdir(), 'nanocoder-path-dir-'));
+	const originalPath = process.env.PATH;
+	const binaryName = process.platform === 'win32' ? 'git.cmd' : 'git';
+	try {
+		mkdirSync(join(dir, binaryName));
+
+		process.env.PATH = dir;
+		resetBinaryAvailabilityCacheForTests();
+		t.false(
+			isGitAvailable(),
+			'a directory on PATH must not count as an installed binary',
+		);
+	} finally {
+		process.env.PATH = originalPath;
+		resetBinaryAvailabilityCacheForTests();
+		rmSync(dir, {recursive: true, force: true});
+	}
 });
 
 // ============================================================================
