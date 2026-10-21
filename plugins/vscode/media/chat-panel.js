@@ -2430,6 +2430,12 @@
 				// the previous one touched.
 				attachedPaths = attachedPaths.filter(a => !a.agentEdited);
 				renderChips();
+				// The card lists edits waiting on approval in the conversation that just
+				// ended, so it starts empty in the next one.
+				pendingChanges = [];
+				pendingChangesDismissed = false;
+				pendingChangesCollapsed = false;
+				renderPendingChanges();
 				turnCancelled = false;
 				agentTurnId = 0;
 				turnStartedAt = 0;

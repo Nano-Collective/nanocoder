@@ -478,6 +478,44 @@ test('does not duplicate a pending change for the same file when tool call ids d
 	t.is(content.children[0].children[1].children[1].textContent, ' -1');
 });
 
+test('clears the pending changes card when the conversation is cleared', t => {
+	const panel = createPanel();
+
+	panel.post({
+		type: 'pendingChangeAdded',
+		toolCallId: 'change-1',
+		filePath: 'auth.ts',
+		additions: 1,
+		deletions: 0,
+	});
+
+	t.false(panel.pendingChangesContainer.classList.contains('hidden'));
+
+	panel.post({type: 'clear'});
+
+	t.true(panel.pendingChangesContainer.classList.contains('hidden'));
+	t.is(panel.pendingChangesContainer.children.length, 0);
+});
+
+test('opens the next card expanded after a collapsed conversation is cleared', t => {
+	const panel = createPanel();
+	const change = {
+		type: 'pendingChangeAdded',
+		toolCallId: 'change-1',
+		filePath: 'auth.ts',
+		additions: 1,
+		deletions: 0,
+	};
+
+	panel.post(change);
+	panel.pendingChangesContainer.children[0].children[0].click();
+	panel.post({type: 'clear'});
+	panel.post(change);
+
+	const content = panel.pendingChangesContainer.children[0].children[1];
+	t.false(content.classList.contains('hidden'));
+});
+
 test('renders thoughts as markdown when marked is loaded', t => {
 	const panel = createPanel({marked: true});
 
