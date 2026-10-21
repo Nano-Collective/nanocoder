@@ -15,18 +15,50 @@ export type MarkdownPart =
 	| {type: 'text'; content: string}
 	| {type: 'code'; content: string};
 
-// Internal helper: run all markdown processing but leave __CODE_BLOCK_N__ markers
+// Choose a marker prefix that cannot occur in the decoded source text. Each
+// parse call is synchronous and restores its markers before returning, so the
+// same namespace can be reused by a later call.
+function _getPlaceholderPrefixes(text: string): {
+	codePrefix: string;
+	inlinePrefix: string;
+} {
+	let namespace = 0;
+	let namespacePrefix = `__NANOCODER_MD_${namespace}__`;
+	while (text.includes(namespacePrefix)) {
+		namespace += 1;
+		namespacePrefix = `__NANOCODER_MD_${namespace}__`;
+	}
+	return {
+		codePrefix: `${namespacePrefix}CODE_BLOCK_`,
+		inlinePrefix: `${namespacePrefix}INLINE_CODE_`,
+	};
+}
+
+// Internal helper: run all markdown processing but leave namespaced markers
 // in place so callers can decide how to handle code blocks independently.
 function _parseMarkdownCore(
 	text: string,
 	themeColors: Colors,
 	width?: number,
-): {text: string; codeBlocks: string[]; inlineCodes: string[]} {
+): {
+	text: string;
+	codeBlocks: string[];
+	inlineCodes: string[];
+	codeMarkers: string[];
+	inlineMarkers: string[];
+} {
+	// Pick markers against decoded input while keeping fenced code untouched
+	// until after its placeholders have been inserted.
+	const decodedSource = decodeHtmlEntities(text);
+	const {codePrefix, inlinePrefix} = _getPlaceholderPrefixes(decodedSource);
+
 	// Initialize markdown processing
 	let result = text;
 
 	const codeBlocks: string[] = [];
 	const inlineCodes: string[] = [];
+	const codeMarkers: string[] = [];
+	const inlineMarkers: string[] = [];
 
 	// Extract and protect fenced code blocks BEFORE HTML processing
 	result = result.replace(
@@ -48,7 +80,8 @@ function _parseMarkdownCore(
 					language: lang || 'plaintext',
 					theme: getSyntaxTheme(themeColors),
 				});
-				const placeholder = `__CODE_BLOCK_${codeBlocks.length}__`;
+				const placeholder = `${codePrefix}${codeBlocks.length}__`;
+				codeMarkers.push(placeholder);
 				codeBlocks.push(highlighted);
 				return placeholder;
 			} catch {
@@ -56,7 +89,8 @@ function _parseMarkdownCore(
 				const formatted = chalk.hex(themeColors.tool)(
 					dedented.trim().replace(/\t/g, '  '),
 				);
-				const placeholder = `__CODE_BLOCK_${codeBlocks.length}__`;
+				const placeholder = `${codePrefix}${codeBlocks.length}__`;
+				codeMarkers.push(placeholder);
 				codeBlocks.push(formatted);
 				return placeholder;
 			}
@@ -80,7 +114,8 @@ function _parseMarkdownCore(
 	// unextracted fenced blocks (e.g. inside a blockquote) don't form a span.
 	result = result.replace(/`([^`\n]+)`/g, (_match, code: string) => {
 		const formatted = chalk.hex(themeColors.tool)(String(code).trim());
-		const placeholder = `__INLINE_CODE_${inlineCodes.length}__`;
+		const placeholder = `${inlinePrefix}${inlineCodes.length}__`;
+		inlineMarkers.push(placeholder);
 		inlineCodes.push(formatted);
 		return placeholder;
 	});
@@ -129,7 +164,25 @@ function _parseMarkdownCore(
 		return chalk.hex(themeColors.secondary).italic(`> ${text}`);
 	});
 
-	return {text: result, codeBlocks, inlineCodes};
+	return {text: result, codeBlocks, inlineCodes, codeMarkers, inlineMarkers};
+}
+
+function _replaceMarkers(
+	text: string,
+	markers: string[],
+	values: string[],
+): string {
+	let result = '';
+	let cursor = 0;
+	for (const [index, marker] of markers.entries()) {
+		const markerIndex = text.indexOf(marker, cursor);
+		if (markerIndex === -1) continue;
+
+		result += text.slice(cursor, markerIndex);
+		result += values[index] ?? '';
+		cursor = markerIndex + marker.length;
+	}
+	return result + text.slice(cursor);
 }
 
 // Basic markdown parser for terminal — returns a single flat string
@@ -142,14 +195,11 @@ export function parseMarkdown(
 		text: processed,
 		codeBlocks,
 		inlineCodes,
+		codeMarkers,
+		inlineMarkers,
 	} = _parseMarkdownCore(text, themeColors, width);
-	let result = processed;
-	result = result.replace(/__CODE_BLOCK_(\d+)__/g, (_match, index: string) => {
-		return codeBlocks[parseInt(index, 10)] || '';
-	});
-	result = result.replace(/__INLINE_CODE_(\d+)__/g, (_match, index: string) => {
-		return inlineCodes[parseInt(index, 10)] || '';
-	});
+	let result = _replaceMarkers(processed, codeMarkers, codeBlocks);
+	result = _replaceMarkers(result, inlineMarkers, inlineCodes);
 	return result;
 }
 
@@ -164,31 +214,30 @@ export function parseMarkdownParts(
 		text: processed,
 		codeBlocks,
 		inlineCodes,
+		codeMarkers,
+		inlineMarkers,
 	} = _parseMarkdownCore(text, themeColors, width);
 
 	// Restore inline code inside text segments (they stay with the text)
-	const withInline = processed.replace(
-		/__INLINE_CODE_(\d+)__/g,
-		(_match, index: string) => inlineCodes[parseInt(index, 10)] || '',
-	);
-
-	// Split on code block markers; split() with a capture group interleaves
-	// text and index strings: [text, idx, text, idx, ...]
-	const segments = withInline.split(/__CODE_BLOCK_(\d+)__/);
+	const withInline = _replaceMarkers(processed, inlineMarkers, inlineCodes);
 	const parts: MarkdownPart[] = [];
+	let cursor = 0;
 
-	for (let i = 0; i < segments.length; i++) {
-		if (i % 2 === 0) {
-			// Even indices are text segments
-			const content = segments[i];
-			if (content) parts.push({type: 'text', content});
-		} else {
-			// Odd indices are captured code block indices
-			const idx = parseInt(segments[i] ?? '0', 10);
-			const codeContent = codeBlocks[idx];
-			if (codeContent) parts.push({type: 'code', content: codeContent});
-		}
+	for (const [index, marker] of codeMarkers.entries()) {
+		const markerIndex = withInline.indexOf(marker, cursor);
+		if (markerIndex === -1) continue;
+
+		const textContent = withInline.slice(cursor, markerIndex);
+		if (textContent) parts.push({type: 'text', content: textContent});
+
+		const codeContent = codeBlocks[index];
+		if (codeContent) parts.push({type: 'code', content: codeContent});
+
+		cursor = markerIndex + marker.length;
 	}
+
+	const trailingText = withInline.slice(cursor);
+	if (trailingText) parts.push({type: 'text', content: trailingText});
 
 	return parts;
 }

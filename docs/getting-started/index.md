@@ -55,7 +55,7 @@ nanocoder -h
 | `--output-format` | | Set the `stdout` format, `text` or `json`. Synonym for `--json` |
 | `--context-max` | | Set maximum context length in tokens (supports k/K suffix, e.g. `128k`) |
 | `--mode` | | Start in a specific [development mode](../features/development-modes.md) - `normal`, `auto-accept`, `yolo`, `plan`, or `architect`. Defaults to `auto-accept` for `run` mode; interactive sessions use `defaultMode` from `agents.config.json` if set, otherwise `normal`. |
-| `--trust-directory` | | Skip the first-run directory trust prompt for this run only. Valid with `run` and `nanocoder daemon start`; ignored (with a warning) in interactive mode. The trust is ephemeral - `trustedDirectories` in your preferences file is not modified. |
+| `--trust-directory` | | Skip the first-run directory trust prompt for this run only. Valid with `run`, `nanocoder daemon start`, `nanocoder verify` and `--acp`; ignored (with a warning) in interactive mode. The trust is ephemeral - `trustedDirectories` in your preferences file is not modified. |
 | `--alt-screen` | | Start in fullscreen mode: a fixed-height layout on the alternate screen buffer with in-app scrolling (enabled by default). |
 | `--no-alt-screen` | | Disable fullscreen mode and force inline mode (main screen, chat history in the terminal's native scrollback). |
 | `--mouse` | | In fullscreen mode, the mouse wheel scrolls the chat viewport; select text with Shift+drag (Option+drag in iTerm2). Enabled by default. |
@@ -220,7 +220,7 @@ An existing directory or local branch causes an error; Nanocoder never overwrite
 
 - Automatically executes the given prompt
 - Defaults to auto-accept (tools execute without confirmation); override with `--mode` (e.g. `--mode yolo` or `--mode plan`)
-- In CI, non-TTY environments, or with `--plain` / `--json`, renders through the lightweight plain shell - no welcome banner, no boxed user echo, no "ctrl+r to expand" hints. A single boot line shows the provider, model and mode, assistant text prints as plain markdown, and a single spinner status line shows progress below the transcript. In an interactive terminal without `--plain`, `run` uses the regular Ink UI with the welcome banner hidden.
+- In CI, non-TTY environments, or with `--plain` / `--json`, renders through the lightweight plain shell - no welcome banner, no boxed user echo, no "ctrl+n to expand" hints. A single boot line shows the provider, model and mode, assistant text prints as plain markdown, and a single spinner status line shows progress below the transcript. In an interactive terminal without `--plain`, `run` uses the regular Ink UI with the welcome banner hidden.
 - Tools render chronologically as they run (e.g. `⚒ Read 1 file`) and appear in stdout before the assistant's next response
 - If a tool requires approval that auto-accept won't grant (e.g. bash or a `file_op` delete in `--mode auto-accept`, or any approval-gated tool in `--mode normal`), nanocoder prints `Tool approval required for: ...` and exits with status code `1` (`2` under `--plain`, including JSON output)
 - Exits with status code `1` when the run fails: a provider or connection error, a retry limit being hit (e.g. malformed tool calls the model cannot self-correct), or the run timing out

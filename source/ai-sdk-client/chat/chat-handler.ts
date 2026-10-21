@@ -111,7 +111,10 @@ export async function handleChat(
 		onPrivacyEvent,
 	} = params;
 	const logger = getLogger();
-
+	const errorContext = {
+		providerName: providerConfig.name,
+		baseUrl: providerConfig.config.baseURL,
+	};
 	// Check if already aborted before starting
 	if (signal?.aborted) {
 		logger.debug('Chat request already aborted');
@@ -638,6 +641,7 @@ export async function handleChat(
 					if (streamingErrors.length > 0) {
 						const userMessage = parseAPIError(
 							streamingErrors[streamingErrors.length - 1],
+							errorContext,
 						);
 						throw new Error(userMessage);
 					}
@@ -670,12 +674,12 @@ export async function handleChat(
 					};
 				}
 				// There's a real error underneath, parse it
-				const userMessage = parseAPIError(rootError);
+				const userMessage = parseAPIError(rootError, errorContext);
 				throw new Error(userMessage);
 			}
 
 			// Parse any other error (including RetryError and APICallError)
-			const userMessage = parseAPIError(error);
+			const userMessage = parseAPIError(error, errorContext);
 			throw new Error(userMessage);
 		}
 	}, correlationId); // End of withNewCorrelationContext

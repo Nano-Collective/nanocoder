@@ -18,6 +18,30 @@ function createExecutor(): BashExecutor {
 	return executor;
 }
 
+// A zombie has exited, so it doesn't count. It can stay unreaped for good
+// when pid 1 doesn't reap orphans, as in some containers.
+function isAlive(pid: number): boolean {
+	try {
+		process.kill(pid, 0);
+		if (platform === 'linux') {
+			const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
+			return stat.slice(stat.lastIndexOf(')') + 2, stat.lastIndexOf(')') + 3) !== 'Z';
+		}
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+// On macOS an exited process can stay a zombie briefly until it is reaped.
+async function isGoneWithin(pid: number, ms: number): Promise<boolean> {
+	const deadline = Date.now() + ms;
+	while (isAlive(pid) && Date.now() < deadline) {
+		await new Promise(resolve => setTimeout(resolve, 20));
+	}
+	return !isAlive(pid);
+}
+
 test.afterEach(() => {
 	for (const executor of executors) {
 		for (const id of executor.getActiveExecutionIds()) {
@@ -187,14 +211,16 @@ test.serial(
 			// directly into node. When SIGTERM is sent to the group, sh exits immediately
 			// while the descendant traps SIGTERM, delays 300ms, and writes to $TMPDIR.
 			const cmd =
-				'node -e \'const fs = require("fs"); const path = require("path"); process.on("SIGTERM", () => { setTimeout(() => { try { fs.writeFileSync(path.join(process.env.TMPDIR || "/tmp", "sigterm.txt"), "done"); } catch {} process.exit(0); }, 300); }); console.log("READY"); setInterval(() => {}, 1000);\' & wait';
+				'node -e \'const fs = require("fs"); const path = require("path"); process.on("SIGTERM", () => { setTimeout(() => { try { fs.writeFileSync(path.join(process.env.TMPDIR || "/tmp", "sigterm.txt"), "done"); } catch {} process.exit(0); }, 300); }); console.log("READY:" + process.pid); setInterval(() => {}, 1000);\' & wait';
 			const {executionId, promise} = executor.execute(cmd);
 
-			for (let tick = 0; tick < 30; tick++) {
+			let nodePid = 0;
+			for (let tick = 0; tick < 30 && !nodePid; tick++) {
 				await new Promise(resolve => setTimeout(resolve, 100));
 				const state = executor.getState(executionId);
-				if (state?.fullOutput.includes('READY')) break;
+				nodePid = Number(state?.fullOutput.match(/READY:(\d+)/)?.[1] ?? 0);
 			}
+			t.truthy(nodePid, 'Should have captured the background node PID');
 
 			const jailTmp = executor.getJailTmp(executionId);
 			t.truthy(jailTmp, 'jailTmp must be defined when sandbox is enabled');
@@ -207,18 +233,23 @@ test.serial(
 				'jailTmp must still exist while background descendant is handling SIGTERM',
 			);
 
-			const result = await promise;
-			t.true(result.isComplete);
+			let settled = false;
+			void promise.then(() => {
+				settled = true;
+			});
 
-			// Immediately after cancel resolves, the shell has closed but node is still in its 300ms delay.
+			// The shell has exited on SIGTERM, but node is still in its 300ms delay.
+			await new Promise(resolve => setTimeout(resolve, 150));
+			t.false(settled, 'the cancel is not reported while a descendant still runs');
 			t.true(
 				existsSync(jailTmp!),
 				'jailTmp must not be removed prematurely when wrapper shell exits before descendants',
 			);
 
-			// Wait for the background node process to write and exit (300ms delay + reap poll)
-			await new Promise(resolve => setTimeout(resolve, 700));
-
+			// Reported once the background node process has written and exited.
+			const result = await promise;
+			t.true(result.isComplete);
+			t.true(await isGoneWithin(nodePid, 500), 'the background node process must be gone');
 			t.false(
 				existsSync(jailTmp!),
 				'jailTmp must be cleaned up after process group terminates',
@@ -234,3 +265,43 @@ test.serial(
 		}
 	},
 );
+
+// #1833: on Linux, bwrap's --new-session puts the command in a process group
+// of its own, which signalling bwrap's group never reached.
+test.serial('stopAll stops a job a sandboxed command left behind', async t => {
+	if (platform === 'win32' || (platform === 'linux' && !findBwrap())) {
+		t.pass();
+		return;
+	}
+
+	const previousSandbox = getAppConfig().sandbox;
+	const tmpDir = realpathSync(mkdtempSync(join(tmpdir(), 'nc-test-jail-')));
+	getAppConfig().sandbox = true;
+	setProjectRoot(tmpDir);
+	setSessionCwd(tmpDir);
+	let jobPid = 0;
+
+	try {
+		const executor = createExecutor();
+		const finished = await executor.execute(
+			"node -e 'process.on(\"SIGTERM\", () => {}); setInterval(() => {}, 1000)' > /dev/null 2>&1 & echo PID:$!",
+		).promise;
+		jobPid = Number(finished.fullOutput.match(/PID:(\d+)/)?.[1] ?? 0);
+		t.is(finished.exitCode, 0);
+		t.truthy(jobPid, 'Should have captured the background job PID');
+		t.true(isAlive(jobPid), 'the job should still be running');
+
+		await executor.stopAll();
+
+		t.true(await isGoneWithin(jobPid, 500), 'the job must be gone once stopAll resolves');
+	} finally {
+		if (jobPid && isAlive(jobPid)) process.kill(jobPid, 'SIGKILL');
+		getAppConfig().sandbox = previousSandbox;
+		resetSessionCwd();
+		try {
+			rmSync(tmpDir, {recursive: true, force: true});
+		} catch {
+			// best-effort cleanup
+		}
+	}
+});

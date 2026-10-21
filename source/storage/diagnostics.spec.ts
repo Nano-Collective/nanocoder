@@ -343,6 +343,23 @@ test('unexpected files and directories are accounted for without being treated a
 	}
 });
 
+test('the session index lock is part of the index, not an unexpected entry', async t => {
+	const {projectRoot, appDataDir, sessionsDir, configDir} = await fixture(t);
+	await fs.mkdir(sessionsDir, {recursive: true});
+	await fs.writeFile(path.join(sessionsDir, 'sessions.json'), '[]');
+	await fs.writeFile(path.join(sessionsDir, 'sessions.json.lock'), '12345');
+	const report = await collectStorageReport({
+		projectRoot,
+		appDataDir,
+		sessionsDir,
+		configDir,
+		now: NOW,
+	});
+	t.false(
+		report.sections.sessions.findings.some(f => f.code === 'unexpected_entry'),
+	);
+});
+
 test('unsafe snapshot paths are reported at metadata, not outside the store', async t => {
 	const {projectRoot, appDataDir, sessionsDir, configDir} = await fixture(t);
 	const checkpoint = path.join(projectRoot, '.nanocoder', 'checkpoints', 'v1');

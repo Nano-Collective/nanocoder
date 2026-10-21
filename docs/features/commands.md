@@ -127,7 +127,7 @@ nanocoder run "Add error handling to src/api.ts"
 
 This submits the prompt and exits when complete. Useful for CI pipelines, git hooks, or chaining with other tools.
 
-Run mode renders through a dedicated minimal shell: no welcome banner, no boxed "You:" echo, no trailing token counts, no `ctrl+r to expand` hints. Assistant text streams as plain markdown, tools render chronologically as one-liners (e.g. `⚒ Read 1 file`), and a single status line below the transcript shows progress.
+Run mode renders through a dedicated minimal shell: no welcome banner, no boxed "You:" echo, no trailing token counts, no `ctrl+n to expand` hints. Assistant text streams as plain markdown, tools render chronologically as one-liners (e.g. `⚒ Read 1 file`), and a single status line below the transcript shows progress.
 
 By default, `run` uses auto-accept. Override with `--mode` to boot into a different [development mode](development-modes.md):
 
@@ -206,4 +206,4 @@ The emitted object looks like:
 
 Two more fields appear conditionally: `message` (the error text, when `kind` is `"error"`) and `toolNames` (the tools awaiting approval, when `kind` is `"tool-approval-required"`).
 
-On error (e.g. an untrusted workspace directory, the turn limit being hit without a final answer, or an agent-loop [retry limit](../configuration/index.md#retry-limits) being hit), `kind` is `"error"` and the object still includes whatever `toolCalls` were captured before the failure, so partial progress isn't silently dropped.
+On error (e.g. an untrusted workspace directory, a provider request that fails with an HTTP error or a dropped connection, the turn limit being hit without a final answer, or an agent-loop [retry limit](../configuration/index.md#retry-limits) being hit), `kind` is `"error"` and the object still includes whatever `toolCalls` were captured before the failure, so partial progress isn't silently dropped.

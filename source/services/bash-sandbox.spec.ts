@@ -100,6 +100,9 @@ test('planBashSpawn on linux with bwrap uses --unshare-net, --tmpfs, --new-sessi
 	}
 	t.true(plan.args.includes('--unshare-net'));
 	t.true(plan.args.includes('--new-session'));
+	// --new-session moves the command out of the group nanocoder signals;
+	// --info-fd reports its pid so the executor can stop it anyway.
+	t.deepEqual(plan.args.slice(0, 2), ['--info-fd', '3']);
 	t.true(plan.args.includes('--tmpfs'));
 	t.true(plan.args.includes('/tmp/proj'));
 	t.true(plan.args.includes('/tmp/jail'));

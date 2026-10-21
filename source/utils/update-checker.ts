@@ -2,9 +2,11 @@ import {loadPreferences, savePreferences} from '@/config/preferences';
 import {TIMEOUT_UPDATE_CHECK_MS} from '@/constants';
 import type {NpmRegistryResponse, UpdateInfo} from '@/types/index';
 import {formatError} from '@/utils/error-formatter';
-import {logError} from '@/utils/message-queue';
+import {getLogger} from '@/utils/logging';
 import {detectInstallationMethod} from './installation-detector';
 import {getPackageVersion, UNKNOWN_VERSION} from './package-version';
+
+const UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
 const UPDATE_COMMANDS = {
 	NPM: 'npm update -g @nanocollective/nanocoder',
@@ -71,10 +73,17 @@ async function fetchLatestVersion(): Promise<string | null> {
 		}
 
 		const data = (await response.json()) as NpmRegistryResponse;
+		if (typeof data.version !== 'string' || data.version.length === 0) {
+			throw new Error('Registry response did not contain a version');
+		}
+
 		return data.version;
 	} catch (error) {
 		const errorMessage = formatError(error);
-		logError(`Failed to fetch latest version: ${errorMessage}`);
+		getLogger().warn(
+			{error: errorMessage},
+			'Failed to fetch the latest Nanocoder version',
+		);
 		return null;
 	}
 }
@@ -89,15 +98,42 @@ function updateLastCheckTime(): void {
 }
 
 /**
- * Check for package updates
+ * Automatic checks run at most once every 24 hours after a successful check.
+ * Future timestamps are ignored so a clock change cannot disable checks.
  */
-export async function checkForUpdates(): Promise<UpdateInfo> {
+function hasRecentSuccessfulCheck(): boolean {
+	const lastUpdateCheck = loadPreferences().lastUpdateCheck;
+	const now = Date.now();
+
+	return (
+		typeof lastUpdateCheck === 'number' &&
+		Number.isFinite(lastUpdateCheck) &&
+		lastUpdateCheck > 0 &&
+		lastUpdateCheck <= now &&
+		now - lastUpdateCheck < UPDATE_CHECK_INTERVAL_MS
+	);
+}
+
+/**
+ * Check for package updates. Pass `force` for an explicit user-requested check.
+ */
+export async function checkForUpdates(
+	options: {force?: boolean} = {},
+): Promise<UpdateInfo> {
 	const currentVersion = getPackageVersion();
 
 	// A broken install has no version to compare. The banner and /doctor
 	// already show "unknown"; posting an error to the chat on top of that (it
 	// used to, and it pushed the welcome screen away) helps nobody.
 	if (currentVersion === UNKNOWN_VERSION) {
+		return {hasUpdate: false, currentVersion};
+	}
+
+	if (
+		!options.force &&
+		(process.env.NANOCODER_NO_UPDATE_CHECK === '1' ||
+			hasRecentSuccessfulCheck())
+	) {
 		return {hasUpdate: false, currentVersion};
 	}
 
@@ -152,10 +188,7 @@ export async function checkForUpdates(): Promise<UpdateInfo> {
 		};
 	} catch (error) {
 		const errorMessage = formatError(error);
-		logError(`Update check failed: ${errorMessage}`);
-
-		// Still update the timestamp to prevent hammering the API on repeated failures
-		updateLastCheckTime();
+		getLogger().error({error: errorMessage}, 'Update check failed');
 
 		return {
 			hasUpdate: false,

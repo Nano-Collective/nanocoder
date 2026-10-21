@@ -24,6 +24,337 @@ test('parseToolCalls: successfully parses valid XML tool call', t => {
 	}
 });
 
+test('parseToolCalls: parses XML tool calls whose values contain =', t => {
+	const content = `<execute_bash><command>FOO=1 echo hi</command></execute_bash>
+<string_replace><path>a.ts</path><old_str>const x = 1;</old_str><new_str>const x = 2;</new_str></string_replace>`;
+
+	const result = parseToolCalls(content);
+
+	t.true(result.success);
+	if (result.success) {
+		t.is(result.toolCalls.length, 2);
+		t.is(result.toolCalls[0].function.name, 'execute_bash');
+		t.deepEqual(result.toolCalls[0].function.arguments, {
+			command: 'FOO=1 echo hi',
+		});
+		t.is(result.toolCalls[1].function.name, 'string_replace');
+		t.deepEqual(result.toolCalls[1].function.arguments, {
+			path: 'a.ts',
+			old_str: 'const x = 1;',
+			new_str: 'const x = 2;',
+		});
+	}
+});
+
+const EMBEDDED_XML =
+	'<execute_bash><command>FOO=1 echo hi</command></execute_bash>';
+
+test('parseToolCalls: XML quoted inside a Llama function-tag call stays an argument', t => {
+	const args = {path: 'examples.md', content: EMBEDDED_XML};
+	const content = `<function=write_file>${JSON.stringify(args)}</function>`;
+
+	const result = parseToolCalls(content);
+
+	t.true(result.success);
+	if (result.success) {
+		t.is(result.toolCalls.length, 1);
+		t.is(result.toolCalls[0].function.name, 'write_file');
+		t.deepEqual(result.toolCalls[0].function.arguments, args);
+	}
+});
+
+test('parseToolCalls: XML quoted inside a JSON tool call stays an argument', t => {
+	const args = {path: 'examples.md', content: EMBEDDED_XML};
+	const content = JSON.stringify({name: 'write_file', arguments: args});
+
+	const result = parseToolCalls(content);
+
+	t.true(result.success);
+	if (result.success) {
+		t.is(result.toolCalls.length, 1);
+		t.is(result.toolCalls[0].function.name, 'write_file');
+		t.deepEqual(result.toolCalls[0].function.arguments, args);
+	}
+});
+
+test('parseToolCalls: JSON strings containing braces and escapes keep XML as an argument', t => {
+	for (const prefix of [
+		'{{x}}',
+		'a "quoted }} value"',
+		'C:\\templates\\{{x}}',
+		'an unclosed { brace and }}} closers',
+	]) {
+		const args = {path: 'docs.md', content: `${prefix} ${EMBEDDED_XML}`};
+		const result = parseToolCalls(
+			JSON.stringify({name: 'write_file', arguments: args}),
+		);
+
+		t.true(result.success, prefix);
+		if (result.success) {
+			t.is(result.toolCalls.length, 1, prefix);
+			t.is(result.toolCalls[0].function.name, 'write_file', prefix);
+			t.deepEqual(result.toolCalls[0].function.arguments, args, prefix);
+			t.is(result.cleanedContent, '', prefix);
+		}
+	}
+});
+
+test('parseToolCalls: scans complete JSON objects with nested arguments and reordered keys', t => {
+	const args = {
+		path: 'docs.md',
+		content: EMBEDDED_XML,
+		options: {groups: [{message: '}}', values: [1, true, null]}]},
+	};
+	const result = parseToolCalls(
+		JSON.stringify({arguments: args, name: 'write_file'}),
+	);
+
+	t.true(result.success);
+	if (result.success) {
+		t.is(result.toolCalls.length, 1);
+		t.is(result.toolCalls[0].function.name, 'write_file');
+		t.deepEqual(result.toolCalls[0].function.arguments, args);
+		t.is(result.cleanedContent, '');
+	}
+});
+
+test('parseToolCalls: finds JSON tool calls inside wrapper objects', t => {
+	const call = {name: 'read_file', arguments: {path: 'src/a.ts'}};
+	for (const wrapper of [
+		{tool_calls: [call]},
+		{tool_call: call},
+		{response: {action: call}},
+		{name: 'plan', steps: [call]},
+	]) {
+		const content = JSON.stringify(wrapper);
+		const result = parseToolCalls(content);
+
+		t.true(result.success, content);
+		if (result.success) {
+			t.is(result.toolCalls.length, 1, content);
+			t.is(result.toolCalls[0].function.name, 'read_file', content);
+			t.deepEqual(
+				result.toolCalls[0].function.arguments,
+				call.arguments,
+				content,
+			);
+		}
+	}
+});
+
+test('parseToolCalls: finds every JSON tool call in a tool_calls array', t => {
+	const content = JSON.stringify({
+		tool_calls: [
+			{name: 'read_file', arguments: {path: 'a.ts'}},
+			{name: 'read_file', arguments: {path: 'b.ts'}},
+		],
+	});
+
+	const result = parseToolCalls(content);
+
+	t.true(result.success);
+	if (result.success) {
+		t.deepEqual(
+			result.toolCalls.map(call => call.function.arguments),
+			[{path: 'a.ts'}, {path: 'b.ts'}],
+		);
+	}
+});
+
+test('parseToolCalls: many unterminated JSON openers do not stall parsing', t => {
+	// ~315 KB each: rescanning to the end from every opener takes seconds.
+	for (const opener of [
+		`{"${'x'.repeat(61)}`,
+		'{"name":"read_file","arguments":{"path":"a.ts"}'.padEnd(63),
+	]) {
+		const content = opener.repeat(5000);
+
+		const started = Date.now();
+		const result = parseToolCalls(content);
+		const elapsed = Date.now() - started;
+
+		t.true(result.success, opener);
+		if (result.success) {
+			t.is(result.toolCalls.length, 0, opener);
+		}
+		t.true(elapsed < 500, `${opener.trim()}: ${elapsed}ms`);
+	}
+});
+
+const CUT_OFF_CALL =
+	'{"name":"write_file","arguments":{"path":"a.ts","content":"console.log(\\"hi\\");';
+
+test('parseToolCalls: cut-off JSON calls on their own lines stop at the newline', t => {
+	// ~400 KB: rescanning to the end from every call takes about 2 s, and
+	// the scan budget would run out before the last call.
+	const valid = {name: 'read_file', arguments: {path: 'b.ts'}};
+	for (const cutOff of [CUT_OFF_CALL, `${CUT_OFF_CALL}\\`]) {
+		const content = `${Array(5000).fill(cutOff).join('\n')}\n${JSON.stringify(valid)}`;
+
+		const started = Date.now();
+		const result = parseToolCalls(content);
+		const elapsed = Date.now() - started;
+
+		t.true(result.success, cutOff);
+		if (result.success) {
+			t.is(result.toolCalls.length, 1, cutOff);
+			t.is(result.toolCalls[0].function.name, 'read_file', cutOff);
+			t.deepEqual(
+				result.toolCalls[0].function.arguments,
+				valid.arguments,
+				cutOff,
+			);
+		}
+		t.true(elapsed < 500, `Parsing ${content.length} chars took ${elapsed}ms`);
+	}
+});
+
+test('parseToolCalls: XML in a JSON call after a few cut-off calls stays an argument', t => {
+	const args = {path: 'examples.md', content: EMBEDDED_XML};
+	const content = `${Array(20).fill(CUT_OFF_CALL).join(' ')} ${JSON.stringify({name: 'write_file', arguments: args})}`;
+
+	const result = parseToolCalls(content);
+
+	t.true(result.success);
+	if (result.success) {
+		t.is(result.toolCalls.length, 1);
+		t.is(result.toolCalls[0].function.name, 'write_file');
+		t.deepEqual(result.toolCalls[0].function.arguments, args);
+	}
+});
+
+test('parseToolCalls: rejects a reply that runs out of JSON scan budget', t => {
+	// ~400 KB with no newline to stop at: without a budget each call is
+	// rescanned to the end, about 2 s. The XML in the last call's arguments
+	// must not run once the scan gives up.
+	const args = {path: 'examples.md', content: EMBEDDED_XML};
+	const content = `${Array(5000).fill(CUT_OFF_CALL).join(' ')} ${JSON.stringify({name: 'write_file', arguments: args})}`;
+
+	const started = Date.now();
+	const result = parseToolCalls(content);
+	const elapsed = Date.now() - started;
+
+	t.false(result.success);
+	if (!result.success) {
+		t.regex(result.error, /incomplete JSON tool calls/);
+	}
+	t.true(elapsed < 500, `Parsing ${content.length} chars took ${elapsed}ms`);
+});
+
+test('parseToolCalls: cut-off JSON calls inside an XML call argument stay content', t => {
+	// ~16 KB: enough to run out of JSON scan budget if these are scanned.
+	const fileContent = Array(200).fill(CUT_OFF_CALL).join(' ');
+	const content = `<write_file><path>notes.md</path><content>${fileContent}</content></write_file>`;
+
+	const result = parseToolCalls(content);
+
+	t.true(result.success);
+	if (result.success) {
+		t.is(result.toolCalls.length, 1);
+		t.is(result.toolCalls[0].function.name, 'write_file');
+		t.deepEqual(result.toolCalls[0].function.arguments, {
+			path: 'notes.md',
+			content: fileContent,
+		});
+	}
+});
+
+test('parseToolCalls: unclosed tags before a code fence do not stall parsing', t => {
+	// ~630 KB: scanning these tags for a call around the fence takes about 1 s.
+	const tags = `<item>${'x'.repeat(57)}`.repeat(10000);
+	const content = `${tags}\n\`\`\`\nhello\n\`\`\``;
+
+	const started = Date.now();
+	const result = parseToolCalls(content);
+	const elapsed = Date.now() - started;
+
+	t.true(result.success);
+	if (result.success) {
+		t.is(result.toolCalls.length, 0);
+	}
+	t.true(elapsed < 100, `Parsing ${content.length} chars took ${elapsed}ms`);
+});
+
+test('parseToolCalls: function-tag examples inside XML arguments keep their contents', t => {
+	const example = '<function=read_file>{"path":"a.ts"}</function>';
+	for (const content of [
+		`<write_file><path>docs.md</path><content>${example}</content></write_file>`,
+		`<tool_call><write_file><path>docs.md</path><content>${example}</content></write_file></tool_call>`,
+	]) {
+		const result = parseToolCalls(content);
+
+		t.true(result.success);
+		if (result.success) {
+			t.is(result.toolCalls.length, 1);
+			t.is(result.toolCalls[0].function.name, 'write_file');
+			t.deepEqual(result.toolCalls[0].function.arguments, {
+				path: 'docs.md',
+				content: example,
+			});
+			t.is(result.cleanedContent, '');
+		}
+	}
+});
+
+test('parseToolCalls: fenced JSON call quoted inside an XML call stays an argument', t => {
+	const quoted = JSON.stringify({
+		name: 'write_file',
+		arguments: {path: 'examples.md', content: EMBEDDED_XML},
+	});
+	const fenced = `\`\`\`json\n${quoted}\n\`\`\``;
+	const content = `<write_file><path>a.md</path><content>${fenced}</content></write_file>`;
+
+	const result = parseToolCalls(content);
+
+	t.true(result.success);
+	if (result.success) {
+		t.is(result.toolCalls.length, 1);
+		t.is(result.toolCalls[0].function.name, 'write_file');
+		t.deepEqual(result.toolCalls[0].function.arguments, {
+			path: 'a.md',
+			content: fenced,
+		});
+	}
+});
+
+test('parseToolCalls: JSON argument survives an HTML wrapper around a fenced XML call', t => {
+	const json = '{"name": "read_file", "arguments": {"path": "/x"}}';
+	const content = `<div>\n\`\`\`xml\n<write_file><path>a.json</path><content>${json}</content></write_file>\n\`\`\`\n</div>`;
+
+	const result = parseToolCalls(content);
+
+	t.true(result.success);
+	if (result.success) {
+		t.is(result.toolCalls.length, 1);
+		t.is(result.toolCalls[0].function.name, 'write_file');
+		t.deepEqual(result.toolCalls[0].function.arguments, {
+			path: 'a.json',
+			content: {name: 'read_file', arguments: {path: '/x'}},
+		});
+	}
+});
+
+test('parseToolCalls: JSON tool call quoted inside an XML call stays an argument', t => {
+	const json = '{"name": "read_file", "arguments": {"path": "/x"}}';
+
+	for (const content of [
+		`<write_file><path>a.json</path><content>${json}</content></write_file>`,
+		`<tool_call><write_file><path>a.json</path><content>${json}</content></write_file></tool_call>`,
+	]) {
+		const result = parseToolCalls(content);
+
+		t.true(result.success);
+		if (result.success) {
+			t.is(result.toolCalls.length, 1);
+			t.is(result.toolCalls[0].function.name, 'write_file');
+			t.deepEqual(result.toolCalls[0].function.arguments, {
+				path: 'a.json',
+				content: {name: 'read_file', arguments: {path: '/x'}},
+			});
+		}
+	}
+});
+
 test('parseToolCalls: detects malformed mixed function/parameter syntax (non-JSON body)', t => {
 	// The outer <function=name> body is XML, not JSON, so the function-tag
 	// parser skips it. The inner <parameter=name> still triggers the
