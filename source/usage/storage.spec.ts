@@ -148,7 +148,8 @@ test('migration skips when new file already exists', t => {
 		totalLifetime: 999,
 		lastUpdated: Date.now(),
 	};
-	fs.writeFileSync(newFilePath, JSON.stringify(newData), 'utf-8');
+	const newPayload = JSON.stringify(newData);
+	fs.writeFileSync(newFilePath, newPayload, 'utf-8');
 
 	process.env.NANOCODER_CONFIG_DIR = legacyConfigDir;
 
@@ -161,6 +162,11 @@ test('migration skips when new file already exists', t => {
 	// Legacy file should still exist (wasn't touched)
 	t.true(fs.existsSync(legacyFilePath));
 	t.true(fs.existsSync(newFilePath));
+	// And the existing file must survive byte-identical: adoption means
+	// no write of any kind, not just preserved parsed values. (The
+	// concurrent-publish path itself is covered by the `publishFileNoClobber`
+	// unit tests in atomic-write.spec.ts.)
+	t.is(fs.readFileSync(newFilePath, 'utf-8'), newPayload);
 });
 
 test('migration handles missing legacy config directory gracefully', t => {

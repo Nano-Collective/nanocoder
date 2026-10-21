@@ -637,6 +637,9 @@
 				"headers": {
 					"$ref": "#/definitions/RecordStringString"
 				},
+				"includeUsage": {
+					"type": "boolean"
+				},
 				"maxOutputTokens": {
 					"type": "number"
 				},

@@ -20,7 +20,7 @@ jobs:
       fail-on-coverage-drop: true
       validate-changesets: true
 
-  # The cmd.exe parser and Node's Windows argv handling cannot be exercised by
+  # Windows command quoting and LSP .cmd shims cannot be exercised by
   # the Linux-only shared job. Keep this scoped to the affected specs.
   custom-tools-windows:
     name: Custom Tools (Windows)
@@ -41,8 +41,49 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Verify cmd.exe quoting
-        run: pnpm run test:ava source/custom-tools/template.spec.ts source/custom-tools/handler.spec.ts
+      - name: Verify Windows command quoting and LSP startup
+        run: >-
+          pnpm run test:ava
+          source/custom-tools/template.spec.ts
+          source/custom-tools/handler.spec.ts
+          source/lsp/windows-spawn.spec.ts
+
+      - name: Verify execute_bash stops the whole tree
+        run: pnpm run test:ava source/services/bash-executor.spec.ts --match "tree kill:*"
+
+      # The rest of this spec assumes a POSIX shell, so run only the cmd.exe cases.
+      - name: Verify execute_bash cmd.exe quoting
+        run: pnpm run test:ava source/services/bash-executor.spec.ts --match="cmd.exe quoting*"
+
+  # pnpm runs package.json scripts through cmd.exe on Windows, so POSIX-only
+  # commands in the build script (mkdir -p, cp, chmod) break there. The shared
+  # job only builds on Linux, so build on Windows here with no Unix shell.
+  build-windows:
+    name: Build (Windows)
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build project
+        run: pnpm run build
+
+      - name: Verify the build output
+        run: node dist/cli.js --version
 
   # Tests and builds the VS Code extension.
   vscode-extension:

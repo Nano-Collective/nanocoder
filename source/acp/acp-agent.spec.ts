@@ -1,4 +1,11 @@
-import {mkdirSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
+import {randomUUID} from 'node:crypto';
+import {
+	existsSync,
+	mkdirSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
@@ -13,6 +20,9 @@ import {
 import {convertToModelMessages} from '@/ai-sdk-client/converters/message-converter';
 import {sessionManager} from '@/session/session-manager';
 import {SemanticMemoryManager} from '@/memory/semantic-memory-manager';
+import {readFileTool} from '@/tools/read-file';
+import type {Message} from '@/types/core';
+import {clearReadTracker} from '@/utils/read-tracker';
 
 console.log('\nacp-agent.spec.ts');
 
@@ -526,6 +536,63 @@ test('AcpAgent.setSessionConfigOption - throws on unknown config option', async 
 	);
 });
 
+test.serial(
+	'AcpAgent.setSessionConfigOption - does not fall back when provider fails',
+	async t => {
+		const configPath = join(testConfigDir, 'agents.config.json');
+		const originalConfig = existsSync(configPath)
+			? readFileSync(configPath, 'utf8')
+			: undefined;
+		writeFileSync(
+			configPath,
+			JSON.stringify({
+				nanocoder: {
+					providers: [
+						{
+							name: 'Fallback Provider',
+							baseUrl: 'http://localhost:8000/v1',
+							models: ['fallback-model'],
+						},
+						{
+							name: 'Failing Copilot Provider',
+							baseUrl: 'https://api.example.com/v1',
+							sdkProvider: 'github-copilot',
+							models: ['copilot-model'],
+						},
+					],
+				},
+			}),
+		);
+		clearAppConfig();
+
+		try {
+			const {agent} = createAgent();
+			const session = await agent.newSession({cwd: '/tmp'});
+			const originalClient = agent['initContext'].client;
+
+			await t.throwsAsync(
+				agent.setSessionConfigOption({
+					sessionId: session.sessionId,
+					configId: 'provider',
+					value: 'Failing Copilot Provider',
+				}),
+				{
+					message: /Explicitly requested provider 'Failing Copilot Provider' failed/,
+				},
+			);
+			t.is(agent['initContext'].provider, 'test-provider');
+			t.is(agent['initContext'].client, originalClient);
+		} finally {
+			if (originalConfig === undefined) {
+				rmSync(configPath, {force: true});
+			} else {
+				writeFileSync(configPath, originalConfig);
+			}
+			clearAppConfig();
+		}
+	},
+);
+
 test('AcpAgent.setSessionConfigOption - throws on unknown model', async t => {
 	const {agent} = createAgent();
 	const session = await agent.newSession({cwd: '/tmp'});
@@ -629,6 +696,58 @@ test('AcpAgent.prompt - resolves cleanly on user cancellation instead of throwin
 	const notice = persisted[persisted.length - 1];
 	t.is(notice.role, 'assistant');
 	t.true(notice.displayOnly, 'the cancel notice must never reach the model');
+});
+
+const promptCustomCommandWithFile = async (
+	content: string,
+	parameters?: string[],
+): Promise<string> => {
+	const {agent} = createAgent();
+	agent['initContext'].customCommandLoader = {
+		getAllCommands: () => [],
+		getCommand: (name: string) =>
+			name === 'review'
+				? {
+						name: 'review',
+						fullName: 'review',
+						path: '/tmp/review.md',
+						content,
+						metadata: parameters ? {parameters} : {},
+					}
+				: undefined,
+	} as any;
+	let sent = '';
+	agent['initContext'].client.chat = async (messages: any[]) => {
+		sent = String(messages.findLast(m => m.role === 'user')?.content ?? '');
+		return {choices: [{message: {content: 'ok'}}]};
+	};
+	const session = await agent.newSession({cwd: '/tmp'});
+	await agent.prompt({
+		sessionId: session.sessionId,
+		prompt: [
+			{type: 'text', text: '/review'},
+			{
+				type: 'resource',
+				resource: {uri: 'src/auth.ts', text: 'export const auth = 1;'},
+			},
+		],
+	});
+	return sent;
+};
+
+test('AcpAgent.prompt - custom command keeps an attached file after the body', async t => {
+	const sent = await promptCustomCommandWithFile('Review the code.');
+	t.true(sent.includes('Review the code.'));
+	t.true(sent.includes('export const auth = 1;'));
+	t.true(sent.indexOf('Review the code.') < sent.indexOf('Contents of'));
+});
+
+test('AcpAgent.prompt - an attached file does not fill a custom command parameter', async t => {
+	const sent = await promptCustomCommandWithFile('Review {{target}}.', [
+		'target=HEAD',
+	]);
+	t.true(sent.includes('Review HEAD.'));
+	t.true(sent.includes('export const auth = 1;'));
 });
 
 test('AcpAgent.prompt - serializes overlapping prompts instead of throwing', async t => {
@@ -858,6 +977,87 @@ test('AcpAgent.prompt - a cancelled turn does not block the next prompt', async 
 		prompt: [{type: 'text', text: 'second'}],
 	});
 	t.is(next.stopReason, 'end_turn');
+});
+
+// ============================================================================
+// closeSession()
+// ============================================================================
+
+test('AcpAgent.closeSession - does not throw on unknown session', async t => {
+	const {agent} = createAgent();
+	t.deepEqual(await agent.closeSession({sessionId: 'nonexistent'}), {});
+});
+
+test('AcpAgent.closeSession - frees the session from memory', async t => {
+	const {agent} = createAgent();
+	const session = await agent.newSession({cwd: '/tmp'});
+
+	await agent.closeSession({sessionId: session.sessionId});
+
+	await t.throwsAsync(
+		agent.prompt({
+			sessionId: session.sessionId,
+			prompt: [{type: 'text', text: 'hi'}],
+		}),
+		{message: `Session not found: ${session.sessionId}`},
+	);
+});
+
+test('AcpAgent.closeSession - keeps the session on disk for a later resume', async t => {
+	const {agent} = createAgent();
+	const session = await agent.newSession({cwd: '/tmp'});
+	// An empty session is never written to disk, so give it one turn first.
+	await agent.prompt({
+		sessionId: session.sessionId,
+		prompt: [{type: 'text', text: 'first'}],
+	});
+
+	await agent.closeSession({sessionId: session.sessionId});
+
+	await t.notThrowsAsync(
+		agent.resumeSession({sessionId: session.sessionId, cwd: '/tmp'}),
+	);
+	const next = await agent.prompt({
+		sessionId: session.sessionId,
+		prompt: [{type: 'text', text: 'hi'}],
+	});
+	t.is(next.stopReason, 'end_turn');
+});
+
+test('AcpAgent.closeSession - a prompt queued behind the closed turn never starts', async t => {
+	const context = createMockInitContext();
+	let chatCalls = 0;
+	let releaseChat!: () => void;
+	const chatGate = new Promise<void>(resolve => {
+		releaseChat = resolve;
+	});
+	(context.client as any).chat = async () => {
+		chatCalls++;
+		await chatGate;
+		return {choices: [{message: {content: 'Test response'}}]};
+	};
+	const agent = new AcpAgent(context, createMockConn());
+	const session = await agent.newSession({cwd: '/tmp'});
+
+	const first = agent.prompt({
+		sessionId: session.sessionId,
+		prompt: [{type: 'text', text: 'first'}],
+	});
+	const queued = agent.prompt({
+		sessionId: session.sessionId,
+		prompt: [{type: 'text', text: 'second'}],
+	});
+	// Let the first turn reach the model before closing.
+	while (chatCalls === 0) {
+		await new Promise(resolve => setImmediate(resolve));
+	}
+
+	await agent.closeSession({sessionId: session.sessionId});
+	releaseChat();
+	await first.catch(() => {});
+
+	t.is((await queued).stopReason, 'cancelled');
+	t.is(chatCalls, 1);
 });
 
 // ============================================================================
@@ -1381,3 +1581,160 @@ test('AcpAgent.extMethod - retryTurn drops timeline checkpoints from the retried
 	}
 });
 
+
+// ============================================================================
+// read_file stubs follow the chat history
+// ============================================================================
+
+function createReadAgent(file: string): AcpAgent {
+	const context = createMockInitContext();
+	(context.client as any).chat = async (messages: Message[]) => {
+		const last = messages.at(-1);
+		if (last?.role === 'user' && String(last.content).includes('read it')) {
+			return {
+				choices: [
+					{
+						message: {
+							content: '',
+							tool_calls: [
+								{
+									id: `call-${randomUUID()}`,
+									function: {name: 'read_file', arguments: {path: file}},
+								},
+							],
+						},
+					},
+				],
+			};
+		}
+		return {choices: [{message: {content: 'done'}}]};
+	};
+	context.toolManager = {
+		...context.toolManager,
+		getAvailableToolNames: () => ['read_file'],
+		hasTool: () => true,
+		getToolEntry: () => ({approval: false}),
+	} as any;
+	return new AcpAgent(context, createMockConn());
+}
+
+async function sendText(agent: AcpAgent, sessionId: string, text: string) {
+	await agent.prompt({sessionId, prompt: [{type: 'text', text}]});
+}
+
+async function withAcpReadFixture(
+	run: (fixture: {
+		agent: AcpAgent;
+		sessionId: string;
+		dir: string;
+		lastRead: () => string;
+	}) => Promise<void>,
+): Promise<void> {
+	clearReadTracker();
+	let last = '';
+	setToolManagerGetter(() => null);
+	setToolRegistryGetter(() => ({
+		read_file: async (args: any) => {
+			last = await readFileTool.tool.execute!(args, {
+				toolCallId: 'read',
+				messages: [],
+			});
+			return last;
+		},
+	}));
+	const dir = join(process.cwd(), `acp-read-stub-${randomUUID()}`);
+	mkdirSync(dir, {recursive: true});
+	const file = join(dir, 'kept.ts');
+	writeFileSync(file, 'export const kept = 1;\n');
+	try {
+		const agent = createReadAgent(file);
+		const {sessionId} = await agent.newSession({cwd: dir, mcpServers: []});
+		await run({agent, sessionId, dir, lastRead: () => last});
+	} finally {
+		clearReadTracker();
+		setToolRegistryGetter(() => ({}));
+		rmSync(dir, {recursive: true, force: true});
+	}
+}
+
+test.serial('ACP /clear makes the next read_file return the file', async t => {
+	await withAcpReadFixture(async ({agent, sessionId, lastRead}) => {
+		await sendText(agent, sessionId, 'read it');
+		t.true(lastRead().includes('kept = 1'));
+		await sendText(agent, sessionId, 'read it');
+		t.true(lastRead().includes('already in context'));
+
+		await sendText(agent, sessionId, '/clear');
+		await sendText(agent, sessionId, 'read it');
+		t.true(lastRead().includes('kept = 1'));
+	});
+});
+
+test.serial('ACP retryTurn makes the next read_file return the file', async t => {
+	await withAcpReadFixture(async ({agent, sessionId, lastRead}) => {
+		await sendText(agent, sessionId, 'read it');
+		t.true(lastRead().includes('kept = 1'));
+
+		await agent.extMethod('retryTurn', {sessionId});
+		await sendText(agent, sessionId, 'read it');
+		t.true(lastRead().includes('kept = 1'));
+	});
+});
+
+test.serial(
+	'ACP timeline/revert makes the next read_file return the file',
+	async t => {
+		await withAcpReadFixture(async ({agent, sessionId, dir, lastRead}) => {
+			await sendText(agent, sessionId, 'read it');
+			t.true(lastRead().includes('kept = 1'));
+
+			const session = (agent as any).sessions.get(sessionId);
+			writeFileSync(join(dir, 'other.ts'), 'before');
+			const entry = await session.timeline.capture({
+				toolCallId: 'call-other',
+				toolName: 'write_file',
+				title: 'write_file: other.ts',
+				truncateToMessageIndex: 0,
+				files: new Map([['other.ts', 'before']]),
+			});
+			await agent.extMethod('timeline/revert', {
+				sessionId,
+				checkpointId: entry.id,
+			});
+
+			await sendText(agent, sessionId, 'read it');
+			t.true(lastRead().includes('kept = 1'));
+		});
+	},
+);
+
+test.serial(
+	'ACP resumeSession makes the next read_file return the file',
+	async t => {
+		await withAcpReadFixture(async ({agent, sessionId, dir, lastRead}) => {
+			await sendText(agent, sessionId, 'read it');
+			t.true(lastRead().includes('kept = 1'));
+
+			await agent.resumeSession({sessionId, cwd: dir, mcpServers: []});
+			await sendText(agent, sessionId, 'read it');
+			t.true(lastRead().includes('kept = 1'));
+		});
+	},
+);
+
+test.serial(
+	'ACP loadSession from disk makes the next read_file return the file',
+	async t => {
+		await withAcpReadFixture(async ({agent, sessionId, dir, lastRead}) => {
+			await sendText(agent, sessionId, 'read it');
+			t.true(lastRead().includes('kept = 1'));
+
+			(agent as any).sessions.delete(sessionId);
+			t.false((agent as any).sessions.has(sessionId));
+			await agent.loadSession({sessionId, cwd: dir, mcpServers: []});
+			t.true((agent as any).sessions.has(sessionId));
+			await sendText(agent, sessionId, 'read it');
+			t.true(lastRead().includes('kept = 1'));
+		});
+	},
+);

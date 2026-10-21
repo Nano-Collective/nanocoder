@@ -1,3 +1,6 @@
+import {mkdtempSync, mkdirSync, rmSync, writeFileSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 import test from 'ava';
 import React from 'react';
 import {renderWithTheme} from '../test-utils/render-with-theme.js';
@@ -175,4 +178,34 @@ test('SecurityDisclaimer maintains consistent layout', t => {
 
 	// Check for TitledBox structure
 	t.regex(output!, /│/); // Border characters from TitledBox
+});
+
+test('SecurityDisclaimer names the plugins and hooks in the folder', t => {
+	const root = mkdtempSync(join(tmpdir(), 'trust-prompt-'));
+	try {
+		const pluginDir = join(root, '.nanocoder', 'plugins');
+		mkdirSync(pluginDir, {recursive: true});
+		writeFileSync(join(pluginDir, 'pulled.mjs'), 'export default {}\n');
+		writeFileSync(
+			join(root, 'agents.config.json'),
+			JSON.stringify({
+				nanocoder: {
+					hooks: {'session-start': [{command: 'echo hooked'}]},
+				},
+			}),
+		);
+
+		const {lastFrame} = renderWithTheme(
+			<SecurityDisclaimer
+				directory={root}
+				onConfirm={() => {}}
+				onExit={() => {}}
+			/>,
+		);
+		const output = lastFrame() ?? '';
+		t.regex(output, /1 plugin/);
+		t.regex(output, /1 session-start hook/);
+	} finally {
+		rmSync(root, {recursive: true, force: true});
+	}
 });

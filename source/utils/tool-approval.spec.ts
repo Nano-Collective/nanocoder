@@ -27,6 +27,37 @@ test('returned function is mode-aware', t => {
 	t.false(approvalFn({}, 'architect'), 'architect skips per-tool approval');
 });
 
+test('an irreversible call still requires approval in auto-accept', t => {
+	const approvalFn = createFileToolApproval<{op: string}>('irreversible_tool', {
+		isIrreversible: args => args.op === 'delete',
+	});
+	t.true(approvalFn({op: 'delete'}, 'auto-accept'));
+	t.false(approvalFn({op: 'edit'}, 'auto-accept'), 'other calls are waived');
+});
+
+test('isIrreversible only changes auto-accept', t => {
+	const approvalFn = createFileToolApproval('always_irreversible_tool', {
+		isIrreversible: () => true,
+	});
+	t.true(approvalFn({}, 'normal'), 'normal already asks');
+	t.false(approvalFn({}, 'headless'), 'headless has no one to ask');
+	t.false(approvalFn({}, 'architect'), 'architect checkpoints instead');
+});
+
+test('isIrreversible is not consulted outside auto-accept', t => {
+	let calls = 0;
+	const approvalFn = createFileToolApproval('counted_tool', {
+		isIrreversible: () => {
+			calls++;
+			return true;
+		},
+	});
+	approvalFn({}, 'normal');
+	approvalFn({}, 'headless');
+	approvalFn({}, 'architect');
+	t.is(calls, 0);
+});
+
 test('different tool names produce independent functions', t => {
 	const fn1 = createFileToolApproval('write_file');
 	const fn2 = createFileToolApproval('delete_file');
@@ -65,6 +96,12 @@ test.serial('alwaysAllow short-circuits approval for the listed tool', async t =
 		// `write_file` isn't in alwaysAllow, so in normal mode it still needs
 		// approval (the alwaysAllow path must not short-circuit it).
 		t.true(other({}, 'normal'));
+
+		// Pre-authorizing a tool covers its irreversible calls too.
+		const irreversible = createFileToolApproval('execute_bash', {
+			isIrreversible: () => true,
+		});
+		t.false(irreversible({}, 'auto-accept'));
 	} finally {
 		if (originalConfigDir === undefined) {
 			delete process.env.NANOCODER_CONFIG_DIR;

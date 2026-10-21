@@ -1,5 +1,5 @@
 import {constants} from 'node:fs';
-import {access, lstat, readFile} from 'node:fs/promises';
+import {access, lstat, readFile, stat} from 'node:fs/promises';
 import {resolve} from 'node:path';
 import {Box, Text} from 'ink';
 import React from 'react';
@@ -109,8 +109,10 @@ const executeReadFile = async (args: {
 			return output;
 		}
 
-		const stats = await lstat(absPath);
-		if (stats.isFile() || stats.isSymbolicLink()) {
+		// stat, not lstat: a symlink's own mtime/size never change when its
+		// target does, so the stub check must compare the target's.
+		const stats = await stat(absPath);
+		if (stats.isFile()) {
 			const stub = matchReadContent(
 				absPath,
 				stats,

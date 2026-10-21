@@ -1,11 +1,31 @@
 import {randomUUID} from 'node:crypto';
-import {mkdirSync, rmSync, writeFileSync} from 'node:fs';
+import {
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	realpathSync,
+	rmSync,
+	writeFileSync,
+} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
 import type {AgentSideConnection} from '@agentclientprotocol/sdk';
 import {AcpSession} from '@/acp/acp-session';
 import {runAcpConversation} from '@/acp/acp-conversation';
+import {
+	getSessionCwd,
+	resetSessionCwd,
+	setProjectRoot,
+	setSessionCwd,
+} from '@/services/session-cwd';
+import {executeBashTool} from '@/tools/execute-bash';
+import {fileOpTool} from '@/tools/file-ops/file-op';
+import {writeFileTool} from '@/tools/file-ops/write-file';
+import {readFileTool} from '@/tools/read-file';
+import {ToolRegistry} from '@/tools/tool-registry';
+import {clearReadTracker} from '@/utils/read-tracker';
 import {signalToolApproval} from '@/utils/tool-approval-queue';
 import {
 	setToolRegistryGetter,
@@ -1236,6 +1256,63 @@ test('runAcpConversation - marks tool as failed when result starts with Error', 
 	t.is(failedUpdate?.update.rawOutput, 'Error: something went wrong');
 });
 
+test('runAcpConversation - marks tool as failed when it reports isError without an Error prefix', async t => {
+	const {conn, updates} = createMockConn();
+	const session = createMockSession(conn, {devMode: 'yolo'});
+	const toolManager = {
+		...createMockToolManager(),
+		hasTool: () => true,
+		getToolEntry: () => ({approval: false}),
+	};
+
+	// A command that ran and exited non-zero: the text is a plain exit report
+	setToolRegistryGetter(() => ({
+		failing_tool: async () => ({llmContent: 'EXIT_CODE: 3\n', isError: true}),
+	}));
+
+	let callCount = 0;
+	const client = {
+		chat: async () => {
+			callCount++;
+			if (callCount === 1) {
+				return {
+					choices: [
+						{
+							message: {
+								content: '',
+								tool_calls: [
+									createMockToolCall('failing_tool', {}, 'call-1'),
+								],
+							},
+						},
+					],
+				};
+			}
+
+			return {
+				choices: [{message: {content: 'The command failed'}}],
+			};
+		},
+	} as unknown as LLMClient;
+
+	await runAcpConversation({
+		session,
+		client,
+		toolManager: toolManager as any,
+		conn,
+		nonInteractiveAlwaysAllow: [],
+	});
+
+	const finalUpdates = updates.filter(
+		(u: any) =>
+			u.update.sessionUpdate === 'tool_call_update' &&
+			(u.update.status === 'failed' || u.update.status === 'completed'),
+	);
+	t.is(finalUpdates.length, 1);
+	t.is(finalUpdates[0].update.status, 'failed');
+	t.is(finalUpdates[0].update.rawOutput, 'EXIT_CODE: 3\n');
+});
+
 // ============================================================================
 // Permission denied
 // ============================================================================
@@ -2338,4 +2415,444 @@ test('runAcpConversation - the approval handler does not outlive the turn', asyn
 
 	t.false(afterTurn);
 	t.is(permissionRequests.length, 1);
+});
+
+async function readThroughAcp(
+	session: AcpSession,
+	conn: AgentSideConnection,
+	path: string,
+): Promise<string> {
+	setToolRegistryGetter(() => ({
+		read_file: (args: any) =>
+			readFileTool.tool.execute!(args, {toolCallId: 'read', messages: []}),
+	}));
+	let calls = 0;
+	const client = {
+		chat: async () => {
+			calls++;
+			return calls === 1
+				? {
+						choices: [
+							{
+								message: {
+									content: '',
+									tool_calls: [createMockToolCall('read_file', {path})],
+								},
+							},
+						],
+					}
+				: {choices: [{message: {content: 'done'}}]};
+		},
+	} as unknown as LLMClient;
+
+	await runAcpConversation({
+		session,
+		client,
+		toolManager: {...createMockToolManager(), hasTool: () => true} as any,
+		conn,
+		nonInteractiveAlwaysAllow: [],
+	});
+	const result = session.messages.findLast(
+		(m: Message) => m.role === 'tool' && m.name === 'read_file',
+	);
+	return String(result?.content ?? '');
+}
+
+test.serial(
+	'runAcpConversation - one ACP chat does not get read stubs from another',
+	async t => {
+		clearReadTracker();
+		const dir = join(process.cwd(), `test-acp-read-scope-${randomUUID()}`);
+		mkdirSync(dir, {recursive: true});
+		const file = join(dir, 'shared.ts');
+		writeFileSync(file, 'export const shared = 1;\n');
+		try {
+			const {conn} = createMockConn();
+			const first = createMockSession(conn, {devMode: 'yolo'});
+			const second = createMockSession(conn, {devMode: 'yolo'});
+
+			t.true(
+				(await readThroughAcp(first, conn, file)).includes('shared = 1'),
+			);
+			const other = await readThroughAcp(second, conn, file);
+			t.true(other.includes('shared = 1'));
+			t.false(other.includes('already in context'));
+		} finally {
+			clearReadTracker();
+			rmSync(dir, {recursive: true, force: true});
+		}
+	},
+);
+
+test.serial(
+	'runAcpConversation - a repeat read in the same ACP chat still stubs',
+	async t => {
+		clearReadTracker();
+		const dir = join(process.cwd(), `test-acp-read-scope-${randomUUID()}`);
+		mkdirSync(dir, {recursive: true});
+		const file = join(dir, 'same.ts');
+		writeFileSync(file, 'export const same = 1;\n');
+		try {
+			const {conn} = createMockConn();
+			const session = createMockSession(conn, {devMode: 'yolo'});
+
+			t.true(
+				(await readThroughAcp(session, conn, file)).includes('same = 1'),
+			);
+			t.true(
+				(await readThroughAcp(session, conn, file)).includes(
+					'already in context',
+				),
+			);
+		} finally {
+			clearReadTracker();
+			rmSync(dir, {recursive: true, force: true});
+		}
+	},
+);
+
+// ============================================================================
+// file_op approval in auto-accept (#1683)
+// ============================================================================
+
+// ACP sessions start in auto-accept. A file_op delete, or a move/copy onto an
+// existing file, must still reach the client for permission there, the same
+// as `rm` through execute_bash. These drive the real file_op tool so the file
+// on disk is the evidence.
+
+const createFileOpWorkspace = (t: any): string => {
+	const cwd = join(
+		tmpdir(),
+		`nanocoder-file-op-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+	);
+	mkdirSync(cwd, {recursive: true});
+	writeFileSync(join(cwd, 'greet.py'), "print('Hello, Agent!')\n");
+	writeFileSync(join(cwd, 'other.py'), "print('other')\n");
+	setProjectRoot(cwd);
+	setSessionCwd(cwd);
+	t.teardown(() => {
+		resetSessionCwd();
+		rmSync(cwd, {recursive: true, force: true});
+	});
+	return cwd;
+};
+
+const runFileOpTurn = async (
+	cwd: string,
+	args: Record<string, unknown>,
+	outcome: {outcome: 'selected'; optionId: string} | {outcome: 'cancelled'},
+) => {
+	const permissionRequests: any[] = [];
+	const {conn, updates} = createMockConn();
+	(conn as any).requestPermission = async (request: any) => {
+		permissionRequests.push(request);
+		return {outcome};
+	};
+
+	// Left at the ACP default mode, as an editor client that never changes it.
+	const session = createMockSession(conn, {cwd});
+	const registry = ToolRegistry.fromToolExports([fileOpTool]);
+	setToolRegistryGetter(() => registry.getHandlers());
+	const toolManager = {
+		...createMockToolManager(),
+		hasTool: (name: string) => registry.hasTool(name),
+		getToolEntry: (name: string) => registry.getEntry(name),
+		isReadOnly: () => false,
+	};
+
+	let callCount = 0;
+	const client = {
+		chat: async () => {
+			callCount++;
+			if (callCount === 1) {
+				return {
+					choices: [
+						{
+							message: {
+								content: '',
+								tool_calls: [createMockToolCall('file_op', args, 'call-op')],
+							},
+						},
+					],
+				};
+			}
+			return {choices: [{message: {content: 'done'}}]};
+		},
+	} as unknown as LLMClient;
+
+	const result = await runAcpConversation({
+		session,
+		client,
+		toolManager: toolManager as any,
+		conn,
+		nonInteractiveAlwaysAllow: [],
+	});
+
+	const statuses = updates
+		.filter((u: any) => u.update.toolCallId === 'call-op')
+		.map((u: any) => u.update.status);
+
+	return {result, session, permissionRequests, statuses};
+};
+
+const allow = {outcome: 'selected', optionId: 'allow'} as const;
+const deny = {outcome: 'selected', optionId: 'deny'} as const;
+const cancel = {outcome: 'cancelled'} as const;
+
+test('runAcpConversation - an auto-accept session asks before file_op deletes, and approval runs it', async t => {
+	const cwd = createFileOpWorkspace(t);
+
+	const {result, permissionRequests, statuses} = await runFileOpTurn(
+		cwd,
+		{operation: 'delete', path: 'greet.py'},
+		allow,
+	);
+
+	t.is(result.stopReason, 'end_turn');
+	t.is(permissionRequests.length, 1);
+	t.is(permissionRequests[0].toolCall.toolCallId, 'call-op');
+	t.is(permissionRequests[0].toolCall.kind, 'delete');
+	t.true(statuses.includes('completed'));
+	t.false(existsSync(join(cwd, 'greet.py')));
+});
+
+test('runAcpConversation - a denied file_op delete leaves the file intact', async t => {
+	const cwd = createFileOpWorkspace(t);
+
+	const {result, session, permissionRequests, statuses} = await runFileOpTurn(
+		cwd,
+		{operation: 'delete', path: 'greet.py'},
+		deny,
+	);
+
+	t.is(result.stopReason, 'end_turn');
+	t.is(permissionRequests.length, 1);
+	t.true(statuses.includes('failed'));
+	t.true(
+		session.messages.some(
+			(m: any) => m.role === 'tool' && m.content === 'Tool call denied by user',
+		),
+	);
+	t.is(readFileSync(join(cwd, 'greet.py'), 'utf8'), "print('Hello, Agent!')\n");
+});
+
+test('runAcpConversation - a cancelled file_op delete leaves the file intact', async t => {
+	const cwd = createFileOpWorkspace(t);
+
+	const {result, permissionRequests} = await runFileOpTurn(
+		cwd,
+		{operation: 'delete', path: 'greet.py'},
+		cancel,
+	);
+
+	t.is(result.stopReason, 'cancelled');
+	t.is(permissionRequests.length, 1);
+	t.is(readFileSync(join(cwd, 'greet.py'), 'utf8'), "print('Hello, Agent!')\n");
+});
+
+for (const operation of ['move', 'copy']) {
+	test(`runAcpConversation - an auto-accept session asks before a file_op ${operation} overwrites, and approval runs it`, async t => {
+		const cwd = createFileOpWorkspace(t);
+
+		const {permissionRequests, statuses} = await runFileOpTurn(
+			cwd,
+			{operation, path: 'greet.py', destination: 'other.py'},
+			allow,
+		);
+
+		t.is(permissionRequests.length, 1);
+		t.true(statuses.includes('completed'));
+		t.is(readFileSync(join(cwd, 'other.py'), 'utf8'), "print('Hello, Agent!')\n");
+	});
+
+	test(`runAcpConversation - a denied file_op ${operation} onto an existing file leaves both files intact`, async t => {
+		const cwd = createFileOpWorkspace(t);
+
+		const {permissionRequests} = await runFileOpTurn(
+			cwd,
+			{operation, path: 'greet.py', destination: 'other.py'},
+			deny,
+		);
+
+		t.is(permissionRequests.length, 1);
+		t.is(readFileSync(join(cwd, 'greet.py'), 'utf8'), "print('Hello, Agent!')\n");
+		t.is(readFileSync(join(cwd, 'other.py'), 'utf8'), "print('other')\n");
+	});
+
+	test(`runAcpConversation - a cancelled file_op ${operation} onto an existing file leaves both files intact`, async t => {
+		const cwd = createFileOpWorkspace(t);
+
+		const {result, permissionRequests} = await runFileOpTurn(
+			cwd,
+			{operation, path: 'greet.py', destination: 'other.py'},
+			cancel,
+		);
+
+		t.is(result.stopReason, 'cancelled');
+		t.is(permissionRequests.length, 1);
+		t.is(readFileSync(join(cwd, 'greet.py'), 'utf8'), "print('Hello, Agent!')\n");
+		t.is(readFileSync(join(cwd, 'other.py'), 'utf8'), "print('other')\n");
+	});
+}
+
+test('runAcpConversation - a file_op move to a new path still runs unprompted in auto-accept', async t => {
+	const cwd = createFileOpWorkspace(t);
+
+	const {permissionRequests, statuses} = await runFileOpTurn(
+		cwd,
+		{operation: 'move', path: 'greet.py', destination: 'hello.py'},
+		deny,
+	);
+
+	t.is(permissionRequests.length, 0);
+	t.true(statuses.includes('completed'));
+	t.false(existsSync(join(cwd, 'greet.py')));
+	t.true(existsSync(join(cwd, 'hello.py')));
+});
+
+// ============================================================================
+// Session working directory (#1707)
+// ============================================================================
+
+// The ACP spec makes the `cwd` from session/new the base for relative paths and
+// the boundary for tool operations, wherever the agent was spawned. These tests
+// run the agent from the repository checkout and point the session at a temp
+// project, so every assertion separates the session cwd from process.cwd().
+
+const createCwdProject = (t: any, name: string): string => {
+	const dir = realpathSync(
+		mkdtempSync(join(tmpdir(), `nanocoder-acp-cwd-${name}-`)),
+	);
+	writeFileSync(join(dir, 'marker.txt'), `${name} marker\n`);
+	t.teardown(() => rmSync(dir, {recursive: true, force: true}));
+	return dir;
+};
+
+const runScriptedToolTurns = async (
+	session: AcpSession,
+	toolCallTurns: ToolCall[][],
+	holdFinalAnswer?: Promise<unknown>,
+) => {
+	const registry = ToolRegistry.fromToolExports([
+		readFileTool,
+		writeFileTool,
+		executeBashTool,
+	]);
+	setToolRegistryGetter(() => registry.getHandlers());
+	const toolManager = {
+		...createMockToolManager(),
+		hasTool: (name: string) => registry.hasTool(name),
+		getToolEntry: (name: string) => registry.getEntry(name),
+		isReadOnly: (name: string) => name === 'read_file',
+	};
+
+	let callCount = 0;
+	const client = {
+		chat: async () => {
+			const toolCalls = toolCallTurns[callCount++];
+			if (toolCalls) {
+				return {choices: [{message: {content: '', tool_calls: toolCalls}}]};
+			}
+			await holdFinalAnswer;
+			return {choices: [{message: {content: 'done'}}]};
+		},
+	} as unknown as LLMClient;
+
+	await runAcpConversation({
+		session,
+		client,
+		toolManager: toolManager as any,
+		conn: session.conn,
+		nonInteractiveAlwaysAllow: [],
+	});
+
+	return session.messages
+		.filter((m: any) => m.role === 'tool')
+		.map((m: any) => String(m.content));
+};
+
+test.serial('runAcpConversation - tools resolve against the session cwd, not the agent launch directory', async t => {
+	const project = createCwdProject(t, 'PROJECT');
+	t.not(project, process.cwd());
+	// A regression would write here; never leave it in the checkout.
+	t.teardown(() =>
+		rmSync(join(process.cwd(), 'created-by-agent.txt'), {force: true}),
+	);
+
+	const {conn} = createMockConn();
+	const session = createMockSession(conn, {devMode: 'yolo', cwd: project});
+	const results = await runScriptedToolTurns(session, [
+		[createMockToolCall('read_file', {path: 'marker.txt'}, 'call-read')],
+		[
+			createMockToolCall(
+				'write_file',
+				{path: 'created-by-agent.txt', content: 'hello\n'},
+				'call-write',
+			),
+		],
+		[createMockToolCall('execute_bash', {command: 'pwd'}, 'call-pwd')],
+		[
+			createMockToolCall(
+				'write_file',
+				{path: join(project, 'absolute.txt'), content: 'inside\n'},
+				'call-absolute',
+			),
+		],
+	]);
+
+	t.true(results[0].includes('PROJECT marker'), results[0]);
+	t.true(existsSync(join(project, 'created-by-agent.txt')));
+	t.false(existsSync(join(process.cwd(), 'created-by-agent.txt')));
+	t.true(results[2].includes(project), results[2]);
+	t.true(
+		existsSync(join(project, 'absolute.txt')),
+		'an absolute path inside the session cwd is within the boundary',
+	);
+});
+
+test.serial('runAcpConversation - a bash cd persists for the session and stays out of the process cwd', async t => {
+	const project = createCwdProject(t, 'CD');
+	mkdirSync(join(project, 'sub'));
+	writeFileSync(join(project, 'sub', 'inner.txt'), 'inner file\n');
+
+	const {conn} = createMockConn();
+	const session = createMockSession(conn, {devMode: 'yolo', cwd: project});
+	const results = await runScriptedToolTurns(session, [
+		[createMockToolCall('execute_bash', {command: 'cd sub'}, 'call-cd')],
+		[createMockToolCall('read_file', {path: 'inner.txt'}, 'call-inner')],
+	]);
+
+	t.true(results[1].includes('inner file'), results[1]);
+	t.is(getSessionCwd(), process.cwd(), 'the cd did not move the process-wide cwd');
+});
+
+test.serial('runAcpConversation - concurrent sessions keep their own working directories', async t => {
+	const first = createCwdProject(t, 'FIRST');
+	const second = createCwdProject(t, 'SECOND');
+
+	const run = (cwd: string, id: string, holdFinalAnswer?: Promise<unknown>) => {
+		const {conn} = createMockConn();
+		const session = createMockSession(conn, {devMode: 'yolo', cwd});
+		return runScriptedToolTurns(
+			session,
+			[[createMockToolCall('read_file', {path: 'marker.txt'}, id)]],
+			holdFinalAnswer,
+		);
+	};
+	// The first turn stays open until the second one ends, so both sessions
+	// are mid-turn together. Ending in that order also keeps the per-turn
+	// approval handler's LIFO restore intact for the tests that follow.
+	let releaseFirst = () => {};
+	const secondDone = new Promise<void>(resolveRelease => {
+		releaseFirst = resolveRelease;
+	});
+	const firstRun = run(first, 'call-first', secondDone);
+	const secondRun = run(second, 'call-second').finally(releaseFirst);
+	const [firstResults, secondResults] = await Promise.all([
+		firstRun,
+		secondRun,
+	]);
+
+	t.true(firstResults[0].includes('FIRST marker'), firstResults[0]);
+	t.true(secondResults[0].includes('SECOND marker'), secondResults[0]);
 });

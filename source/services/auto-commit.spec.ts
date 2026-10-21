@@ -8,9 +8,11 @@ import {
 } from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
+import type {ReactElement, ReactNode} from 'react';
 import test from 'ava';
 import {getAppConfig} from '../config/index';
 import type {LLMClient} from '../types/core';
+import {setGlobalMessageQueue} from '../utils/message-queue';
 import {getProjectRoot, setProjectRoot} from './session-cwd';
 import {
 	cleanMessage,
@@ -85,8 +87,48 @@ test.serial('commits the edited file with the generated message', async t => {
 		t.regex(note ?? '', /^\[auto-commit\] [a-f0-9]{7,} feat: add a constant$/);
 		t.is(commitCount(dir), 2);
 		t.is(git(dir, 'log -1 --format=%s'), 'feat: add a constant');
+		t.is(
+			git(dir, 'log -1 --format=%B'),
+			'feat: add a constant\n\nNanocoder-Auto-Commit: true',
+		);
+		t.is(
+			git(dir, 'log -1 --format=%H --grep=Nanocoder-Auto-Commit'),
+			git(dir, 'rev-parse HEAD'),
+		);
 		t.is(git(dir, 'show --name-only --format= HEAD'), 'a.ts');
 	} finally {
+		rmSync(dir, {recursive: true, force: true});
+	}
+});
+
+test.serial('skips auto-commit on detached HEAD without touching the index', async t => {
+	const dir = makeRepo();
+	const messages: ReactNode[] = [];
+	setGlobalMessageQueue(component => messages.push(component));
+	try {
+		git(dir, 'checkout -q --detach HEAD');
+
+		const staged = join(dir, 'staged.txt');
+		writeFileSync(staged, 'user staged\n');
+		git(dir, 'add staged.txt');
+
+		const file = join(dir, 'agent.ts');
+		writeFileSync(file, 'export const agent = true;\n');
+
+		t.is(await maybeAutoCommit('write_file', {path: file}), null);
+		t.is(commitCount(dir), 1);
+		const status = git(dir, 'status --porcelain');
+		t.true(status.includes('A  staged.txt'), status);
+		t.true(status.includes('?? agent.ts'), status);
+
+		writeFileSync(file, 'export const agent = false;\n');
+		t.is(await maybeAutoCommit('write_file', {path: file}), null);
+		t.is(messages.length, 1, 'detached-HEAD warning is shown only once');
+		const warning = messages[0] as ReactElement<{message: string}>;
+		t.true(warning.props.message.includes('HEAD is detached or could not be verified'));
+		t.true(warning.props.message.includes('Check out a branch to keep agent commits reachable'));
+	} finally {
+		setGlobalMessageQueue(() => {});
 		rmSync(dir, {recursive: true, force: true});
 	}
 });
@@ -111,6 +153,33 @@ test.serial("leaves the user's other changes out of the commit", async t => {
 		rmSync(dir, {recursive: true, force: true});
 	}
 });
+
+test.serial(
+	'commits a file whose name is a glob pattern without matching other files',
+	async t => {
+		const dir = makeRepo();
+		try {
+			writeFileSync(join(dir, 'a.txt'), 'a\n');
+			writeFileSync(join(dir, 'b.txt'), 'b\n');
+			git(dir, 'add a.txt b.txt');
+			git(dir, 'commit -q -m "add a and b"');
+			// The user's own uncommitted edits, which "[ab].txt" matches as a glob.
+			writeFileSync(join(dir, 'a.txt'), 'user edit a\n');
+			writeFileSync(join(dir, 'b.txt'), 'user edit b\n');
+
+			const file = join(dir, '[ab].txt');
+			writeFileSync(file, 'agent\n');
+			await maybeAutoCommit('write_file', {path: file});
+
+			t.is(git(dir, 'show --name-only --format= HEAD'), '[ab].txt');
+			const status = git(dir, 'status --porcelain');
+			t.true(status.includes(' M a.txt'), status);
+			t.true(status.includes(' M b.txt'), status);
+		} finally {
+			rmSync(dir, {recursive: true, force: true});
+		}
+	},
+);
 
 test.serial('ignores tools that do not edit files', async t => {
 	const dir = makeRepo();
@@ -319,3 +388,85 @@ test('cleanMessage strips a code fence around the message', t => {
 	t.is(cleanMessage('  docs: y  '), 'docs: y');
 	t.is(cleanMessage(undefined), '');
 });
+
+test.serial('un-stages the file when git commit fails', async t => {
+	const dir = makeRepo();
+	try {
+		const hooksDir = join(dir, '.hooks');
+		mkdirSync(hooksDir, {recursive: true});
+		const hookFile = join(hooksDir, 'pre-commit');
+		writeFileSync(hookFile, '#!/bin/sh\nexit 1\n', {mode: 0o755});
+		git(dir, `config core.hooksPath "${hooksDir}"`);
+
+		const file = join(dir, 'a.ts');
+		writeFileSync(file, 'export const a = 1;\n');
+
+		const note = await maybeAutoCommit('write_file', {path: file});
+
+		t.is(note, null);
+		t.is(commitCount(dir), 1);
+		t.is(git(dir, 'diff --cached --name-only'), '');
+		const status = git(dir, 'status --porcelain');
+		t.true(status.includes('?? a.ts'), status);
+	} finally {
+		rmSync(dir, {recursive: true, force: true});
+	}
+});
+
+test.serial(
+	'preserves staged status when commit fails if file was already staged',
+	async t => {
+		const dir = makeRepo();
+		try {
+			const hooksDir = join(dir, '.hooks');
+			mkdirSync(hooksDir, {recursive: true});
+			const hookFile = join(hooksDir, 'pre-commit');
+			writeFileSync(hookFile, '#!/bin/sh\nexit 1\n', {mode: 0o755});
+			git(dir, `config core.hooksPath "${hooksDir}"`);
+
+			const file = join(dir, 'base.txt');
+			writeFileSync(file, 'stage 1\n');
+			git(dir, 'add base.txt');
+			const originalSha = git(dir, 'ls-files -s -- base.txt').split(/\s+/)[1];
+
+			writeFileSync(file, 'stage 2\n');
+			const note = await maybeAutoCommit('write_file', {path: file});
+
+			t.is(note, null);
+			t.is(commitCount(dir), 1);
+			t.is(git(dir, 'diff --cached --name-only'), 'base.txt');
+			const restoredSha = git(dir, 'ls-files -s -- base.txt').split(/\s+/)[1];
+			t.is(restoredSha, originalSha);
+			t.is(git(dir, 'show :base.txt'), 'stage 1');
+		} finally {
+			rmSync(dir, {recursive: true, force: true});
+		}
+	},
+);
+
+test.serial(
+	'restores index when edit produces an empty diff against HEAD',
+	async t => {
+		const dir = makeRepo();
+		try {
+			const file = join(dir, 'base.txt');
+			writeFileSync(file, 'stage 1\n');
+			git(dir, 'add base.txt');
+			const originalSha = git(dir, 'ls-files -s -- base.txt').split(/\s+/)[1];
+
+			// Agent writes identical content to HEAD ('base\n')
+			writeFileSync(file, 'base\n');
+			const note = await maybeAutoCommit('write_file', {path: file});
+
+			t.is(note, null);
+			t.is(commitCount(dir), 1);
+			// Exact prior staging state ('stage 1') is restored
+			t.is(git(dir, 'diff --cached --name-only'), 'base.txt');
+			const restoredSha = git(dir, 'ls-files -s -- base.txt').split(/\s+/)[1];
+			t.is(restoredSha, originalSha);
+			t.is(git(dir, 'show :base.txt'), 'stage 1');
+		} finally {
+			rmSync(dir, {recursive: true, force: true});
+		}
+	},
+);
