@@ -1,11 +1,13 @@
-import {type ChildProcess, spawn} from 'node:child_process';
+import {spawn} from 'node:child_process';
 import {existsSync} from 'node:fs';
 import {isAbsolute, resolve} from 'node:path';
 import {TRUNCATION_OUTPUT_LIMIT} from '@/constants';
-import {renderBody} from '@/custom-tools/template';
+import {cmdQuote, renderBody, shellQuote} from '@/custom-tools/template';
 import type {CustomToolMetadata} from '@/types/custom-tools';
 import type {ToolHandler} from '@/types/index';
 import {isRealPathInside} from '@/utils/path-validation';
+import {signalProcessTree} from '@/utils/process-tree';
+import {isWindowsCmd, shellArgs} from '@/utils/shell-args';
 import {
 	makeStreamCollector,
 	STDERR_TRUNCATION_NOTICE,
@@ -24,13 +26,14 @@ export function buildHandler(
 	projectRoot: string,
 ): ToolHandler {
 	return async (args: Record<string, unknown>): Promise<string> => {
+		const shell = pickShell(metadata.shell);
 		const rendered = renderBody(
 			body,
 			applyParameterDefaults(metadata, args ?? {}),
+			isWindowsCmd(shell) ? cmdQuote : shellQuote,
 		);
 		const cwd = resolveCwd(metadata.cwd, projectRoot);
 		const env = mergeEnv(metadata.env);
-		const shell = pickShell(metadata.shell);
 		return runScript(rendered, {
 			cwd,
 			env,
@@ -88,6 +91,10 @@ export function runScript(
 			env: options.env,
 			stdio: ['ignore', 'pipe', 'pipe'],
 			detached: process.platform !== 'win32',
+			// cmd.exe parses a command string itself. Let it receive the wrapper and
+			// the doubled quotes from shellArgs verbatim; libuv quoting them again
+			// changes the argv seen by the child command.
+			windowsVerbatimArguments: isWindowsCmd(options.shell),
 		});
 
 		let stdout = '';
@@ -100,7 +107,7 @@ export function runScript(
 			// process group.
 			child.stdout?.destroy();
 			child.stderr?.destroy();
-			killProcessTree(child);
+			signalProcessTree(child);
 
 			// Force-kill the group if it refuses to die within a grace window.
 			// No `!child.killed` guard: Node sets that flag the moment a signal
@@ -109,11 +116,13 @@ export function runScript(
 			// the single-process case, the shell exiting does not mean its group
 			// is empty, and reaping a descendant that ignored SIGTERM is the
 			// whole point. Firing against an already-dead group is harmless:
-			// killProcessTree swallows the ESRCH, and it is unref'd so it never
-			// holds the process open.
-			setTimeout(() => {
-				killProcessTree(child, 'SIGKILL');
-			}, 1_000).unref();
+			// signalProcessTree swallows the ESRCH, and it is unref'd so it never
+			// holds the process open. Windows already used taskkill /F.
+			if (process.platform !== 'win32') {
+				setTimeout(() => {
+					signalProcessTree(child, 'SIGKILL');
+				}, 1_000).unref();
+			}
 
 			// Settle now rather than waiting for `exit`/`close`: neither is
 			// guaranteed to be prompt while a descendant holds an inherited
@@ -165,45 +174,6 @@ export function runScript(
 			});
 		});
 	});
-}
-
-/**
- * Terminate the spawned shell and its descendants.
- *
- * The child is spawned `detached` on Unix, making it the leader of its own
- * process group; signalling the negative PID kills the whole tree, so work the
- * tool backgrounded cannot survive the shell's timeout. Windows has no process
- * groups here, so we fall back to the single process: a descendant the tool
- * backgrounded keeps running to completion (the promise already settled, so
- * this leaks a stray process rather than hanging the call — documented
- * limitation; a Job Object / `taskkill /T` could close it).
- */
-function killProcessTree(
-	child: ChildProcess,
-	signal: NodeJS.Signals = 'SIGTERM',
-): void {
-	const pid = child.pid;
-	if (pid === undefined) return;
-
-	if (process.platform === 'win32') {
-		try {
-			child.kill(signal);
-		} catch {
-			// Process already exited; nothing to terminate.
-		}
-		return;
-	}
-
-	try {
-		process.kill(-pid, signal);
-	} catch {
-		// Group already gone (or never formed) — fall back to the lone process.
-		try {
-			child.kill(signal);
-		} catch {
-			// Process already exited; nothing to terminate.
-		}
-	}
 }
 
 /**
@@ -293,16 +263,6 @@ export function expandVars(value: string): string {
 		if (v !== undefined) return v;
 		return def ?? '';
 	});
-}
-
-/** cmd.exe: /d (skip AutoRun), /s (deterministic quotes), /c. POSIX: -c. */
-export function shellArgs(shell: string, script: string): string[] {
-	return isWindowsCmd(shell) ? ['/d', '/s', '/c', script] : ['-c', script];
-}
-
-function isWindowsCmd(shell: string): boolean {
-	const name = shell.replaceAll('\\', '/').split('/').pop() ?? '';
-	return /^cmd(\.exe)?$/i.test(name);
 }
 
 function pickShell(configured: string | undefined): string {

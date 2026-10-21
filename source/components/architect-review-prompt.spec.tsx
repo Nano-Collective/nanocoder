@@ -14,7 +14,10 @@ interface Calls {
 	revise: string[];
 }
 
-function renderPrompt() {
+function renderPrompt({
+	filesChanged = ['test.txt'],
+	filesMissing = [],
+}: {filesChanged?: string[]; filesMissing?: string[]} = {}) {
 	const calls: Calls = {keep: 0, revert: 0, revise: []};
 
 	const rendered = renderWithTheme(
@@ -28,13 +31,16 @@ function renderPrompt() {
 			onRevertAndRevise={instructions => {
 				calls.revise.push(instructions);
 			}}
-			filesChanged={['test.txt']}
-			filesMissing={[]}
+			filesChanged={filesChanged}
+			filesMissing={filesMissing}
 		/>,
 	);
 
 	return {...rendered, calls};
 }
+
+const manyFiles = (count: number, prefix = 'file') =>
+	Array.from({length: count}, (_, i) => `src/${prefix}${i + 1}.ts`);
 
 test('Keep leaves changes in place', async t => {
 	const {stdin, unmount, calls} = renderPrompt();
@@ -150,6 +156,50 @@ test('Escape in revise mode returns to the options without resolving', async t =
 	t.is(calls.keep, 0);
 	t.is(calls.revert, 0);
 	t.deepEqual(calls.revise, []);
+
+	unmount();
+});
+
+// A large Architect turn must not push Keep/Revert/Revise off screen by
+// printing an unbounded file list (#1533). Matches LiveCompactCounts's cap.
+test('changed-files list caps at 5 rows with a "+N more" line', async t => {
+	const {lastFrame, unmount} = renderPrompt({filesChanged: manyFiles(8)});
+
+	await tick();
+	const output = lastFrame() ?? '';
+	t.regex(output, /file5.ts/);
+	t.notRegex(output, /file6.ts/);
+	t.regex(output, /\+3 more/);
+
+	unmount();
+});
+
+test('changed-files list shows exactly 5 files without a "+N more" line', async t => {
+	const {lastFrame, unmount} = renderPrompt({filesChanged: manyFiles(5)});
+
+	await tick();
+	const output = lastFrame() ?? '';
+	t.regex(output, /file5.ts/);
+	t.notRegex(output, /more/);
+
+	unmount();
+});
+
+test('new-files list is capped too, and the choices stay reachable', async t => {
+	const {lastFrame, unmount} = renderPrompt({
+		filesChanged: manyFiles(20, 'changed'),
+		filesMissing: manyFiles(20, 'new'),
+	});
+
+	await tick();
+	const output = lastFrame() ?? '';
+	t.notRegex(output, /changed16.ts/);
+	t.notRegex(output, /new16.ts/);
+	t.regex(output, /\+15 more/);
+	t.true(
+		output.includes('Esc to keep'),
+		'the Keep/Revert/Revise footer must still render past a large file list',
+	);
 
 	unmount();
 });

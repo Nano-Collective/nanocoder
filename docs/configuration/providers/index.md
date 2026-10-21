@@ -41,6 +41,8 @@ Hosted services using the OpenAI-compatible API format.
 - [Requesty](requesty.md) - OpenAI-compatible LLM router for multiple AI providers
 - [OrcaRouter](orcarouter.md) - OpenAI-compatible LLM router for multiple AI providers
 - [Cheaper Inference](cheaper-inference.md) - OpenAI-compatible gateway for models from multiple AI providers
+- [API Route](api-route.md) - OpenAI-compatible gateway for models from multiple AI providers
+- [FutureInfra](futureinfra.md) - OpenAI-compatible AI API router for models from multiple AI providers
 - [Heabsy](heabsy.md) - EU-hosted OpenAI-compatible inference for open models
 - [Together AI](together.md) - Fast inference for open-source models with OpenAI-compatible API
 - [Groq](groq.md) - Very fast open-weight model inference on LPU hardware
@@ -88,6 +90,7 @@ Use dedicated AI SDK packages for native API support, enabled via the `sdkProvid
 | `disableTools` | Disable tool calling for the entire provider (optional, boolean) |
 | `disableToolModels` | List of model names to disable tool calling for (optional) |
 | `promptCaching` | Set to `false` to opt out of prompt caching (optional, boolean). Only read when `sdkProvider` is `anthropic`, where it defaults to `true`; ignored on every other SDK provider. See [Anthropic](anthropic.md#prompt-caching) |
+| `includeUsage` | Whether to request streaming token usage metrics (`stream_options: { include_usage: true }`). Defaults to `true` for OpenAI-compatible providers. Set to `false` for proxies or inference endpoints that reject `stream_options` (optional, boolean) |
 | `requestTimeout` | Fallback for `socketTimeout` in milliseconds (optional). Not a separate whole-request deadline, see [Timeouts & Connection Pooling](#timeouts--connection-pooling) |
 | `socketTimeout` | Connect, response-header and body timeout in milliseconds (default: 120,000, or 600,000 for a local `baseUrl`). Uses `requestTimeout` if not set. Set to `-1` to disable (optional) |
 | `maxRetries` | How many times a failed network request is retried (default: 2). Unrelated to the agent-loop [Retry Limits](../index.md#retry-limits), which cap how often the model may repeat itself (optional) |

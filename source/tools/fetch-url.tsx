@@ -5,10 +5,11 @@ import {Box, Text} from 'ink';
 import React from 'react';
 import {DEFAULT_TERMINAL_COLUMNS, MAX_URL_CONTENT_BYTES} from '@/constants';
 import {useTheme} from '@/hooks/useTheme';
-import {assertPublicHttpUrl} from '@/tools/fetch-url-guard';
+import {assertResolvedPublicHttpUrl} from '@/tools/fetch-url-guard';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
+import {withPreservedProcess} from '@/utils/preserve-process';
 import {calculateTokens} from '@/utils/token-calculator';
 
 interface FetchArgs {
@@ -93,9 +94,9 @@ const resolveSafeRedirects = async (url: string): Promise<string> => {
 };
 
 const executeFetchUrl = async (args: FetchArgs): Promise<string> => {
-	assertPublicHttpUrl(args.url);
-
 	try {
+		// The first hop of this walk runs the URL through the validator, which
+		// does the text checks and the DNS lookup.
 		const safeUrl = await resolveSafeRedirects(args.url);
 
 		// Use get-md to convert URL to LLM-friendly markdown (lazy import
@@ -104,8 +105,11 @@ const executeFetchUrl = async (args: FetchArgs): Promise<string> => {
 		const {convertToMarkdown} = await import('@nanocollective/get-md');
 		// The redirect chain was validated hop by hop above. Keep redirects off
 		// for the conversion fetch as well, so a changed response cannot escape
-		// validation between the probe and conversion requests.
-		const result = await convertToMarkdown(safeUrl, {followRedirects: false});
+		// validation between the probe and conversion requests. The conversion
+		// runs guarded to protect `globalThis.process` from happy-dom overwrites.
+		const result = await withPreservedProcess(() =>
+			convertToMarkdown(safeUrl, {followRedirects: false}),
+		);
 
 		const content = result.markdown;
 
@@ -215,17 +219,14 @@ const fetchUrlFormatter = (
 	);
 };
 
-const fetchUrlValidator = (
+const fetchUrlValidator = async (
 	args: FetchArgs,
 ): Promise<{valid: true} | {valid: false; error: string}> => {
 	try {
-		assertPublicHttpUrl(args.url);
-		return Promise.resolve({valid: true});
+		await assertResolvedPublicHttpUrl(args.url);
+		return {valid: true};
 	} catch (error: unknown) {
-		return Promise.resolve({
-			valid: false,
-			error: formatError(error),
-		});
+		return {valid: false, error: formatError(error)};
 	}
 };
 

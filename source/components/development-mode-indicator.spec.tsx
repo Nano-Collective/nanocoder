@@ -706,8 +706,7 @@ test('saving indicator renders when there is sufficient width', t => {
 });
 
 test('shift hint drops before the session name is truncated', t => {
-	// 60 columns is narrow (shift hint offered) but too tight for the hint
-	// and the full session name together.
+	// 60 columns is too tight for the hint and the full session name together.
 	const output = renderWithWidth(
 		<DevelopmentModeIndicator
 			developmentMode="normal"
@@ -721,5 +720,35 @@ test('shift hint drops before the session name is truncated', t => {
 	);
 
 	t.regex(output, /Auth refactor/);
+	t.notRegex(output, /Shift\+Tab/);
+});
+
+test('shift hint is shown by default on terminals with room to spare', t => {
+	// The hint used to render only below 80 columns, so it was missing exactly
+	// where there was room for it.
+	for (const columns of [70, 100, WIDE]) {
+		const output = renderWithWidth(
+			<DevelopmentModeIndicator
+				developmentMode="normal"
+				colors={mockColors}
+				contextPercentUsed={null}
+			/>,
+			columns,
+		);
+
+		t.regex(output, /Shift\+Tab to cycle/, `missing at ${columns} columns`);
+	}
+});
+
+test('shift hint is not offered in headless mode', t => {
+	const output = renderWithWidth(
+		<DevelopmentModeIndicator
+			developmentMode="headless"
+			colors={mockColors}
+			contextPercentUsed={null}
+		/>,
+	);
+
+	t.regex(output, /headless mode on/);
 	t.notRegex(output, /Shift\+Tab/);
 });

@@ -27,6 +27,7 @@ import {parseToolArguments} from '@/utils/tool-args-parser';
 import {
 	ALWAYS_EXPANDED_TOOLS,
 	displayToolResult,
+	isToolResultError,
 	LIVE_TASK_TOOLS,
 	recordExpandableToolResult,
 } from '@/utils/tool-result-display';
@@ -165,15 +166,12 @@ export const displayExecutedTool = async (
 		// per-tool one-liners straight to the static queue to keep
 		// tool activity in chronological order.
 		//
-		// Failures (generic "Error: …" or the streaming bash path's
-		// "⚒ Validation failed: …") don't fold into the count tally; they
-		// render as a condensed red one-liner ("⚒ write_file failed")
-		// instead of the full error. The model still receives the full
-		// error in conversation history — mirror displayToolResult's detection.
-		const isError =
-			result.content.startsWith('Error: ') ||
-			result.content.startsWith('⚒ Validation failed');
-		if (isError) {
+		// Failures don't fold into the count tally; they render as a
+		// condensed red one-liner ("⚒ write_file failed") instead of the
+		// full error. The model still receives the full error in
+		// conversation history — share displayToolResult's detection, so a
+		// command that merely exited non-zero cannot read as a success.
+		if (isToolResultError(result)) {
 			// Condense failures to a short red one-liner in compact mode.
 			await displayToolResult(
 				toolCall,
@@ -510,6 +508,8 @@ export const executeToolsDirectly = async (
 		 */
 		signal?: AbortSignal;
 		executionContext?: Omit<ToolExecutionContext, 'abortSignal'>;
+		/** Stop the batch when an execution-time approval decision changes. */
+		beforeExecute?: (toolCall: ToolCall) => Promise<boolean>;
 	},
 ): Promise<ToolResult[]> => {
 	// Import processToolUse here to avoid circular dependencies
@@ -526,6 +526,11 @@ export const executeToolsDirectly = async (
 	const directResults: ToolResult[] = [];
 
 	for (const {group, type} of groups) {
+		for (const toolCall of group) {
+			if (options?.beforeExecute && !(await options.beforeExecute(toolCall))) {
+				return directResults;
+			}
+		}
 		let executions: Array<{
 			toolCall: ToolCall;
 			result: ToolResult;

@@ -33,7 +33,7 @@ Type `/` in the chat input to see available commands. All commands start with `/
 | `/copy` | Copy the last assistant response to the system clipboard. Use `/copy code` to copy just the last fenced code block from the last response |
 | `/expand [n]` | Print tool result `n` in full. Long tool output is cut to 20 lines with a `/expand n` hint; run `/expand` without a number to list recent results |
 | `/commit` | Generate a Conventional Commit message from staged Git changes. Add `--copy` (or `-c`) to also copy the message to the system clipboard. A spinner shows while the model is working |
-| `/review` | Review a branch or PR diff for bugs, security issues, and style violations. Usage: `/review <branch-or-pr-number>` (e.g. `/review main`, `/review 42`) |
+| `/review` | One-shot, diff-only review of the current branch or one target. Usage: `/review [quick] [<branch-or-PR-number-or-GitHub-PR-URL>]` (e.g. `/review`, `/review main`, `/review quick 42`, `/review https://github.com/owner/repo/pull/42`). Bare PR numbers are resolved across configured GitHub remotes and their fork parents; ambiguous numbers require a full PR URL |
 | `/doctor` | Show environment health report for bug reports |
 | `/update` | Update Nanocoder to the latest version |
 | `/usage` | Get current model context usage visually |
@@ -55,6 +55,25 @@ Type `/` in the chat input to see available commands. All commands start with `/
 | `/credits` | Show project contributors and dependencies |
 | `/copilot-login [providerName]` | Log in to GitHub Copilot via device flow. Saves credentials for the named provider, "GitHub Copilot" by default |
 | `/codex-login` | Log in to ChatGPT/Codex via device flow. Saves credentials for the "ChatGPT" provider |
+| `/voice` | Configure Voice Mode (`/voice [hands-free|ptt|stt <local|cloud>|tts <local|cloud>|status|mode <push-to-talk|hands-free>]`) |
+
+## Voice Mode
+
+Nanocoder includes a local-first Realtime Voice Mode supporting push-to-talk, hands-free voice activity detection (VAD), barge-in interruption, and optional cloud STT/TTS.
+
+| Command | Description |
+|---------|-------------|
+| `/voice` | Toggle voice mode on/off |
+| `/voice ptt` or `/voice push-to-talk` | Switch to push-to-talk mode (use `Ctrl+G` to record/submit) |
+| `/voice hands-free` | Switch to hands-free mode (automatic VAD speech detection) |
+| `/voice stt [local\|cloud]` | Configure speech-to-text backend (local Whisper or opt-in cloud) |
+| `/voice tts [local\|cloud]` | Configure text-to-speech backend (local Piper or opt-in cloud; cloud sends generated text to OpenAI) |
+| `/voice status` | Display current voice configuration and backend status |
+| `/voice mode <push-to-talk\|hands-free>` | Set specific activation mode |
+
+Push-to-talk (`Ctrl+G`) can interrupt a response at any point, including while it is being spoken. In hands-free mode, speech has to last about 300 ms before it counts, so a cough or a door does not cancel a run. Speech that starts while a response is being spoken is ignored, so the speakers cannot interrupt themselves; use `Ctrl+G` to cut playback short. Hands-free speech is also ignored while a typed prompt is running or a confirmation is on screen.
+
+Hands-free mode is paused in yolo mode, so ambient speech cannot trigger unconfirmed tool calls. Cloud STT sends microphone audio to OpenAI, and cloud TTS sends the response text; both are opt-in and local is the default.
 
 ### Exporting a Session
 
@@ -69,7 +88,6 @@ Type `/` in the chat input to see available commands. All commands start with `/
 JSON exports keep full message content and session metadata, for replay or evaluation. The file is written relative to the current directory and must stay inside the project: `~` is not expanded, `..` segments are refused, and absolute paths outside the project root are rejected. A generated filename gets a numeric suffix rather than overwriting an earlier export; a filename you type overwrites an existing file.
 
 ## Special Input Syntax
-
 These shortcuts work directly in the chat input — no `/` prefix needed.
 
 | Syntax | Description |
@@ -109,7 +127,7 @@ nanocoder run "Add error handling to src/api.ts"
 
 This submits the prompt and exits when complete. Useful for CI pipelines, git hooks, or chaining with other tools.
 
-Run mode renders through a dedicated minimal shell: no welcome banner, no boxed "You:" echo, no trailing token counts, no `ctrl+r to expand` hints. Assistant text streams as plain markdown, tools render chronologically as one-liners (e.g. `⚒ Read 1 file`), and a single status line below the transcript shows progress.
+Run mode renders through a dedicated minimal shell: no welcome banner, no boxed "You:" echo, no trailing token counts, no `ctrl+n to expand` hints. Assistant text streams as plain markdown, tools render chronologically as one-liners (e.g. `⚒ Read 1 file`), and a single status line below the transcript shows progress.
 
 By default, `run` uses auto-accept. Override with `--mode` to boot into a different [development mode](development-modes.md):
 
@@ -188,4 +206,4 @@ The emitted object looks like:
 
 Two more fields appear conditionally: `message` (the error text, when `kind` is `"error"`) and `toolNames` (the tools awaiting approval, when `kind` is `"tool-approval-required"`).
 
-On error (e.g. an untrusted workspace directory, the turn limit being hit without a final answer, or an agent-loop [retry limit](../configuration/index.md#retry-limits) being hit), `kind` is `"error"` and the object still includes whatever `toolCalls` were captured before the failure, so partial progress isn't silently dropped.
+On error (e.g. an untrusted workspace directory, a provider request that fails with an HTTP error or a dropped connection, the turn limit being hit without a final answer, or an agent-loop [retry limit](../configuration/index.md#retry-limits) being hit), `kind` is `"error"` and the object still includes whatever `toolCalls` were captured before the failure, so partial progress isn't silently dropped.

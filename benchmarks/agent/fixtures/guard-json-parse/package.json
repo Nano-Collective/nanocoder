@@ -1,0 +1,5 @@
+{
+	"name": "guard-json-parse-fixture",
+	"private": true,
+	"type": "module"
+}

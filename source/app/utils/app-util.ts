@@ -15,16 +15,34 @@ import {
 	DELAY_COMMAND_COMPLETE_MS,
 	MAX_SESSION_NAME_LENGTH,
 } from '@/constants';
+import {parseCustomCommandArgs} from '@/custom-commands/args';
+import {expandCustomCommandPrompt} from '@/custom-commands/executor';
 import {sharedProposalStore} from '@/memory/proposal-store';
 import {CheckpointManager} from '@/services/checkpoint-manager';
 import {clearPendingHookContext} from '@/services/lifecycle-hooks';
 import {generateKey} from '@/session/key-generator';
 import {resetStatsLedger} from '@/stats/record';
-import {executeBashCommand, formatBashResultForLLM} from '@/tools/execute-bash';
+import {
+	distillBashResultForLLM,
+	executeBashCommand,
+} from '@/tools/execute-bash';
 import type {ImageAttachment, LLMClient} from '@/types/core';
 import type {Message, MessageSubmissionOptions} from '@/types/index';
 import {formatError} from '@/utils/error-formatter';
-import {errorMsg, infoMsg, successMsg} from '@/utils/message-factory';
+import {
+	applyOnceOverrides,
+	expandOverrideArgs,
+	formatInlineToken,
+	getOnceThreshold,
+	isRecognizedOverrideKey,
+	parseInlineOverrides,
+} from '@/utils/inline-overrides';
+import {
+	errorMsg,
+	infoMsg,
+	successMsg,
+	warningMsg,
+} from '@/utils/message-factory';
 import {clearReadTracker} from '@/utils/read-tracker';
 import {clearExpandableToolResults} from '@/utils/tool-result-display';
 import {handleCompactCommand} from './handlers/compact-handler';
@@ -75,73 +93,6 @@ const CHECKPOINT_SUBCOMMANDS = {
 	RESTORE: 'restore',
 } as const;
 
-const ARGUMENT_QUOTE_CHARS = new Set(['"', "'", '`']);
-
-/**
- * Parses command arguments while preserving quoted multi-word values.
- */
-export function parseCustomCommandArgs(input: string): string[] {
-	const args: string[] = [];
-	let currentArg = '';
-	let quoteChar: string | null = null;
-	let isEscaped = false;
-	let hasCurrentArg = false;
-
-	for (const char of input.trim()) {
-		if (isEscaped) {
-			currentArg += char;
-			hasCurrentArg = true;
-			isEscaped = false;
-			continue;
-		}
-
-		if (char === '\\') {
-			isEscaped = true;
-			hasCurrentArg = true;
-			continue;
-		}
-
-		if (quoteChar) {
-			if (char === quoteChar) {
-				quoteChar = null;
-			} else {
-				currentArg += char;
-			}
-			hasCurrentArg = true;
-			continue;
-		}
-
-		if (ARGUMENT_QUOTE_CHARS.has(char)) {
-			quoteChar = char;
-			hasCurrentArg = true;
-			continue;
-		}
-
-		if (/\s/.test(char)) {
-			if (hasCurrentArg) {
-				args.push(currentArg);
-				currentArg = '';
-				hasCurrentArg = false;
-			}
-			continue;
-		}
-
-		currentArg += char;
-		hasCurrentArg = true;
-	}
-
-	if (isEscaped) {
-		currentArg += '\\';
-		hasCurrentArg = true;
-	}
-
-	if (hasCurrentArg) {
-		args.push(currentArg);
-	}
-
-	return args;
-}
-
 /**
  * Handles bash commands prefixed with !
  */
@@ -185,7 +136,9 @@ async function handleBashCommand(
 			}),
 		);
 
-		const llmContext = formatBashResultForLLM(result);
+		// No re-run here: the user typed this command, so nothing else is run
+		// on their behalf.
+		const llmContext = await distillBashResultForLLM(result);
 
 		if (llmContext) {
 			const userMessage: Message = {
@@ -230,14 +183,9 @@ async function handleCustomCommand(
 		return false;
 	}
 
-	const rawArgs = message.slice(commandName.length + 2).trim();
-	const args = parseCustomCommandArgs(rawArgs);
-
-	const processedPrompt = customCommandExecutor?.execute(
-		customCommand,
-		args,
-		rawArgs,
-	);
+	const processedPrompt = customCommandExecutor
+		? expandCustomCommandPrompt(customCommand, message, customCommandExecutor)
+		: undefined;
 
 	if (processedPrompt) {
 		await onHandleChatMessage(processedPrompt);
@@ -608,7 +556,12 @@ async function handleBuiltInCommand(
 	// perceptible — and release it in `finally` so a throwing handler cannot
 	// strand a spinner that never resolves.
 	const commandName = message.slice(1).trim().split(/\s+/)[0];
-	const progressLabel = commandRegistry.get(commandName)?.progressLabel;
+	const command = commandRegistry.get(commandName);
+	const progressLabel = command?.progressLabel;
+
+	if (command?.echoInvocation) {
+		onAddToChatQueue(infoMsg(`$ ${message.trim()}`, 'command-invocation'));
+	}
 
 	if (progressLabel) {
 		setLiveComponent(
@@ -694,6 +647,8 @@ async function handleSlashCommand(
 	// live server, not a module import. Intercepting here instead mirrors how
 	// handleCustomCommand (checked just above) already dispatches the other
 	// runtime-discovered command source - project `.nanocoder/commands/` files.
+	// Both runtime-discovered sources bypass `?key=value` parsing below and
+	// receive the raw message, so free-text `?word` tokens are never stripped.
 	if (
 		await handleMCPPromptCommand(
 			commandName,
@@ -704,34 +659,82 @@ async function handleSlashCommand(
 		return;
 	}
 
-	const commandParts = message.slice(1).trim().split(/\s+/);
+	// ?key=value tokens let a user test a per-session setting for one
+	// command without committing it to the session. Recognised keys are
+	// consumed here: once-scoped settings via the session-override stores
+	// (restored in `finally`), legacy boolean flags by expanding them to
+	// their `--flag` form. Anything else is forwarded to the command
+	// handler verbatim (rebuilt into `commandParts`/`cleanedMessage`) so
+	// each command's own unknown-arg handling runs — and surfaced once as
+	// a warning so a typo like `?threshhold=80` cannot silently no-op.
+	const rawParts = message.slice(1).trim().split(/\s+/);
+	const {args: positional, overrides} = parseInlineOverrides(rawParts.slice(1));
+	const recognized = overrides.filter(o => isRecognizedOverrideKey(o.key));
+	const passthrough = overrides
+		.filter(o => !isRecognizedOverrideKey(o.key))
+		.map(formatInlineToken);
+	const expandedFlags = expandOverrideArgs(recognized);
+	const restTokens = [...positional, ...passthrough, ...expandedFlags].join(
+		' ',
+	);
+	const cleanedMessage = restTokens
+		? `/${commandName} ${restTokens}`
+		: `/${commandName}`;
+	const restoreOnce = await applyOnceOverrides(recognized);
+	// Explicit once-context for consumers: unlike the session store (which
+	// cannot tell a once-override apart from a persisted one), this is only
+	// set when the user typed `?threshold=` on this command.
+	const onceThreshold = getOnceThreshold(recognized);
+	try {
+		const commandParts = [
+			commandName,
+			...positional,
+			...passthrough,
+			...expandedFlags,
+		];
 
-	if (await handleCompactCommand(commandParts, options)) return;
-	if (await handleContextMaxCommand(commandParts, options)) return;
-	if (await handleCommandCreate(commandParts, options)) return;
-	if (await handleAgentCreate(commandParts, options)) return;
-	if (await handleAgentCopy(commandParts, options)) return;
-	if (await handleToolCreate(commandParts, options)) return;
-	if (await handleSkillsCreate(commandParts, options)) return;
-	if (await handleSpecialCommand(commandName, options)) return;
-	if (await handleCheckpointLoad(commandParts, options)) return;
-	// Stateful handlers that replay or resume chat flow live alongside each other.
-	if (await handleResumeCommand(commandParts, options)) return;
-	if (
-		await handleRetryCommand(
-			[
-				commandName,
-				...parseCustomCommandArgs(message.slice(commandName.length + 2)),
-			],
-			options,
+		if (passthrough.length > 0) {
+			const keys = [...new Set(passthrough)].join(', ');
+			options.onAddToChatQueue(
+				warningMsg(
+					`Unknown inline override(s): ${keys} — no once-scoped setting or flag matches. Forwarded to the command unchanged.`,
+					'inline-override-unknown',
+				),
+			);
+		}
+
+		if (await handleCompactCommand(commandParts, options, onceThreshold))
+			return;
+		if (await handleContextMaxCommand(commandParts, options)) return;
+		if (await handleCommandCreate(commandParts, options)) return;
+		if (await handleAgentCreate(commandParts, options)) return;
+		if (await handleAgentCopy(commandParts, options)) return;
+		if (await handleToolCreate(commandParts, options)) return;
+		if (await handleSkillsCreate(commandParts, options)) return;
+		if (await handleSpecialCommand(commandName, options)) return;
+		if (await handleCheckpointLoad(commandParts, options)) return;
+		// Stateful handlers that replay or resume chat flow live alongside each other.
+		if (await handleResumeCommand(commandParts, options)) return;
+		if (
+			await handleRetryCommand(
+				[
+					commandName,
+					...parseCustomCommandArgs(
+						cleanedMessage.slice(commandName.length + 2),
+					),
+				],
+				options,
+			)
 		)
-	)
-		return;
-	if (handleCopilotLogin(commandParts, options)) return;
-	if (handleCodexLogin(commandParts, options)) return;
-	if (handleStatsCommand(commandParts, options)) return;
+			return;
+		if (handleCopilotLogin(commandParts, options)) return;
+		if (handleCodexLogin(commandParts, options)) return;
+		if (handleStatsCommand(commandParts, options)) return;
 
-	await handleBuiltInCommand(message, options);
+		await handleBuiltInCommand(cleanedMessage, options);
+	} finally {
+		restoreOnce();
+	}
 }
 
 /**

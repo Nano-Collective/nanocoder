@@ -25,6 +25,11 @@ import {
 } from '@/hooks/chat-handler/utils/tool-filters';
 import {processToolUse} from '@/message-handler';
 import {
+	consultPluginPermission,
+	withTrustedProjectPlugins,
+} from '@/plugins/host';
+import {runInSessionCwdScope} from '@/services/session-cwd';
+import {
 	getAllSubagentProgress,
 	type SubagentEvent,
 } from '@/services/subagent-events';
@@ -45,6 +50,10 @@ import {formatCompactTokenCount} from '@/usage/format';
 import {buildResponseUsage} from '@/usage/response-usage';
 import {maybeAutoCompact} from '@/utils/auto-compact';
 import {capMessagesForModel} from '@/utils/message-capping';
+import {
+	clearReadContentScope,
+	runWithReadContentScope,
+} from '@/utils/read-tracker';
 import {
 	type PendingToolApproval,
 	setGlobalToolApprovalHandler,
@@ -170,10 +179,26 @@ export async function runAcpConversation(
 		createSubagentApprovalHandler(options.session, options.conn),
 	);
 	try {
-		return await runTurn(options);
+		// Each ACP session runs in its own working directory (#1707), and one
+		// editor process can host several chats. A read_file stub only makes
+		// sense in the chat whose history holds the earlier read.
+		return await runInSessionCwdScope(options.session.cwdScope, () =>
+			runWithReadContentScope(acpReadScope(options.session.sessionId), () =>
+				withTrustedProjectPlugins(options.session.cwd, () => runTurn(options)),
+			),
+		);
 	} finally {
 		restoreApprovalHandler();
 	}
+}
+
+function acpReadScope(sessionId: string): string {
+	return `acp:${sessionId}`;
+}
+
+/** Forget read stubs for a chat whose history was cut, swapped, or deleted. */
+export function clearAcpReadStubs(sessionId: string): void {
+	clearReadContentScope(acpReadScope(sessionId));
 }
 
 const SUBAGENT_TOOL_CALL_PREFIX = 'subagent:';
@@ -548,6 +573,27 @@ async function runTurn(
 			);
 
 			if (needsApproval) {
+				const vote = await consultPluginPermission(
+					toolCall.function.name,
+					toolCall.function.arguments,
+				);
+				if (vote.decision === 'deny') {
+					await emitToolCallUpdate(
+						session,
+						conn,
+						toolCall,
+						'failed',
+						vote.reason,
+					);
+					toolResults.push({
+						tool_call_id: toolCall.id,
+						role: 'tool',
+						name: toolCall.function.name,
+						content: `Tool call denied: ${vote.reason}`,
+					});
+					continue;
+				}
+
 				const permission = await requestToolPermission(
 					session,
 					toolCall,
@@ -667,9 +713,12 @@ async function runTurn(
 			isPolling = false;
 			if (pollInterval) clearInterval(pollInterval);
 
-			const status: ToolCallStatus = toolResult.content.startsWith('Error')
-				? 'failed'
-				: 'completed';
+			// isError covers failures whose text doesn't start with "Error": a
+			// validation failure, or a command that exited non-zero.
+			const status: ToolCallStatus =
+				toolResult.isError || toolResult.content.startsWith('Error')
+					? 'failed'
+					: 'completed';
 			await emitToolCallUpdate(
 				session,
 				conn,

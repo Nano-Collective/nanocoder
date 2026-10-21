@@ -1,0 +1,5 @@
+{
+	"name": "failing-test-fixture",
+	"private": true,
+	"type": "module"
+}

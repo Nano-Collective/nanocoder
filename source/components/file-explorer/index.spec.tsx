@@ -1,3 +1,6 @@
+import {mkdirSync, mkdtempSync, rmSync, writeFileSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 import test from 'ava';
 import React from 'react';
 import stripAnsi from 'strip-ansi';
@@ -379,4 +382,68 @@ test('FileExplorer keeps the frame while the tree is still loading', t => {
 	const output = stripAnsi(lastFrame() ?? '');
 	t.regex(output, /╭/);
 	t.regex(output, /Loading file tree/);
+});
+
+test('FileExplorer keeps a valid selection when leaving a search shortens the list', async t => {
+	// The explorer reads process.cwd(), so run it from a fixture: two
+	// directories of matching files make a long search result list next to a
+	// three-row tree.
+	const root = mkdtempSync(join(tmpdir(), 'nanocoder-explorer-'));
+	for (const dir of ['dir-a', 'dir-b']) {
+		mkdirSync(join(root, dir));
+		for (let i = 1; i <= 6; i++) {
+			writeFileSync(join(root, dir, `match-${i}.txt`), '');
+		}
+	}
+	writeFileSync(join(root, 'top.txt'), '');
+
+	const originalCwd = process.cwd();
+	process.chdir(root);
+	const {stdin, lastFrame, unmount} = renderWithAllContexts(
+		<FileExplorer onClose={() => {}} />,
+	);
+	t.teardown(() => {
+		unmount();
+		process.chdir(originalCwd);
+		rmSync(root, {recursive: true, force: true});
+	});
+
+	const frame = () => stripAnsi(lastFrame() ?? '');
+	// Poll rather than sleep: a fixed wait can read the frame before Ink flushes.
+	const waitFor = async (pattern: RegExp) => {
+		const start = Date.now();
+		while (!pattern.test(frame()) && Date.now() - start < 3000) {
+			await new Promise(resolve => setTimeout(resolve, 20));
+		}
+	};
+	const press = async (key: string) => {
+		stdin.write(key);
+		await new Promise(resolve => setTimeout(resolve, 30));
+	};
+
+	await waitFor(/dir-a\//);
+	await press('/');
+	await waitFor(/Search:/);
+	for (const char of 'match') {
+		await press(char);
+	}
+	await waitFor(/match-1\.txt/);
+
+	// Deep into the 12 search results, well past the end of the 3-row tree.
+	for (let i = 0; i < 8; i++) {
+		await press('\u001b[B');
+	}
+	await waitFor(/match-3\.txt \(0 B\)/);
+	t.regex(frame(), /match-3\.txt \(0 B\)/);
+
+	// Leaving the search must land on a real row. The status bar shows the
+	// selected node, and used to go blank here.
+	await press('\u001b');
+	await waitFor(/top\.txt \(0 B\)/);
+	t.regex(frame(), /top\.txt \(0 B\)/);
+
+	// ...and navigation keeps working from there.
+	await press('\u001b[A');
+	await waitFor(/dir-b(?!\/)/);
+	t.regex(frame(), /dir-b(?!\/)/);
 });

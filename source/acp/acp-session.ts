@@ -3,6 +3,10 @@ import type {
 	ClientCapabilities,
 } from '@agentclientprotocol/sdk';
 import {SemanticMemoryManager} from '@/memory/semantic-memory-manager';
+import {
+	createSessionCwdScope,
+	type SessionCwdScope,
+} from '@/services/session-cwd';
 import {TimelineManager} from '@/services/timeline-manager';
 import type {DevelopmentMode, Message} from '@/types/core';
 
@@ -12,14 +16,23 @@ export class AcpSession {
 	readonly conn: AgentSideConnection;
 	readonly clientCapabilities?: ClientCapabilities;
 	readonly timeline: TimelineManager;
+	/**
+	 * Where this session's tools run: `cwd` from the client, moved by a bash
+	 * `cd`. Turns run inside it, so relative paths, bash, the path boundary and
+	 * the system prompt follow the session, not the directory the agent was
+	 * spawned in.
+	 */
+	readonly cwdScope: SessionCwdScope;
 
 	messages: Message[] = [];
 	systemMessage?: Message;
 	baseSystemMessage?: Message;
 	abortController = new AbortController();
 	developmentMode: DevelopmentMode;
-	/** True while a prompt turn is being processed, to reject overlapping prompts. */
+	/** True while a prompt turn is being processed. Overlapping calls wait on acquireTurn(). */
 	turnActive = false;
+	/** Set by session/close. Queued prompts check it before they start. */
+	closed = false;
 	/** URI of the file currently focused in the editor client (e.g. VS Code). */
 	activeFile?: string;
 	private memoryFinder?: SemanticMemoryManager;
@@ -37,6 +50,7 @@ export class AcpSession {
 		this.clientCapabilities = options.clientCapabilities;
 		this.developmentMode = options.initialMode ?? 'auto-accept';
 		this.timeline = new TimelineManager(options.cwd, options.sessionId);
+		this.cwdScope = createSessionCwdScope(options.cwd);
 	}
 
 	getMemoryFinder(): SemanticMemoryManager {
@@ -47,8 +61,53 @@ export class AcpSession {
 		this.abortController.abort();
 	}
 
+	close(): void {
+		this.closed = true;
+		this.cancel();
+	}
+
 	beginTurn(): void {
 		this.abortController = new AbortController();
 		this.turnActive = true;
+	}
+
+	/**
+	 * FIFO lock so a follow-up `prompt()` waits for the in-flight turn instead
+	 * of throwing. Overlapping calls used to surface in VS Code as
+	 * `RequestError: Internal error`.
+	 *
+	 * The idle path claims the lock synchronously. `await` always yields, and
+	 * a cancel that lands in that gap must abort the controller `beginTurn`
+	 * just installed — not the one the next `beginTurn` would replace.
+	 */
+	private _held = false;
+	private _waiters: Array<() => void> = [];
+
+	acquireTurn(): {immediate: boolean; ready: Promise<void>} {
+		if (!this._held) {
+			this._held = true;
+			this.turnActive = true;
+			return {immediate: true, ready: Promise.resolve()};
+		}
+		return {
+			immediate: false,
+			ready: new Promise(resolve => {
+				this._waiters.push(() => {
+					this._held = true;
+					this.turnActive = true;
+					resolve();
+				});
+			}),
+		};
+	}
+
+	releaseTurn(): void {
+		const next = this._waiters.shift();
+		if (next) {
+			next();
+			return;
+		}
+		this._held = false;
+		this.turnActive = false;
 	}
 }

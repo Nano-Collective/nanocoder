@@ -25,6 +25,7 @@ import {
 	runLifecycleHooks,
 	runPreToolUseGate,
 	takePendingHookContext,
+	toPlatformHookCommand,
 } from './lifecycle-hooks';
 
 console.log(`\nlifecycle-hooks.spec.ts`);
@@ -281,8 +282,43 @@ test.serial('a non-zero exit on an observe-only event never blocks', async t => 
 	});
 
 	t.false(outcome.blocked);
-	// The failing hook contributes nothing; the next one still runs.
+	// The failing hook is reported separately, not mixed into the passing
+	// output, and the next one still runs.
 	t.is(outcome.output, 'still ran');
+	t.deepEqual(outcome.failures, [{exitCode: 1, output: 'warned'}]);
+});
+
+test.serial('a failing observe-only hook reports both stdout and stderr', async t => {
+	withHooks({
+		'post-tool-use': [
+			{
+				command: node(
+					"console.log('2 tests failed');console.error('expected 1, got 2');process.exit(2)",
+				),
+			},
+		],
+	});
+
+	const outcome = await runLifecycleHooks('post-tool-use', {
+		toolName: 'write_file',
+	});
+
+	t.deepEqual(outcome.failures, [
+		{exitCode: 2, output: '2 tests failed\nexpected 1, got 2'},
+	]);
+});
+
+test.serial('a vetoing event does not report failures', async t => {
+	withHooks({
+		'pre-tool-use': [{command: node("console.log('no');process.exit(1)")}],
+	});
+
+	const outcome = await runLifecycleHooks('pre-tool-use', {
+		toolName: 'write_file',
+	});
+
+	t.true(outcome.blocked);
+	t.deepEqual(outcome.failures, []);
 });
 
 test.serial('a hook that times out does not block the action', async t => {
@@ -502,6 +538,71 @@ test.serial('post-tool-use stdout is folded into the tool result', async t => {
 	t.is(
 		result.content,
 		'wrote 1 file\n\n<hook-output event="post-tool-use">\nformatted\n</hook-output>',
+	);
+});
+
+test.serial('a failing post-tool-use hook reaches the model with its exit code', async t => {
+	setToolRegistryGetter(() => ({
+		write_file: async () => 'wrote 1 file',
+	}));
+	withHooks({
+		'post-tool-use': [
+			{
+				matchTools: ['write_file'],
+				command: node("console.error('lint: unused variable x');process.exit(1)"),
+			},
+		],
+	});
+
+	const result = await processToolUse(writeFileCall());
+
+	t.is(
+		result.content,
+		'wrote 1 file\n\n<hook-output event="post-tool-use" exit="1">\nlint: unused variable x\n</hook-output>',
+	);
+	// The tool itself succeeded; only the check after it failed.
+	t.falsy(result.isError);
+});
+
+test.serial('passing and failing post-tool-use output are both forwarded', async t => {
+	setToolRegistryGetter(() => ({
+		write_file: async () => 'wrote 1 file',
+	}));
+	withHooks({
+		'post-tool-use': [
+			{matchTools: ['write_file'], command: node("console.log('formatted')")},
+			{
+				matchTools: ['write_file'],
+				command: node("console.log('1 test failed');process.exit(1)"),
+			},
+		],
+	});
+
+	const result = await processToolUse(writeFileCall());
+
+	t.is(
+		result.content,
+		'wrote 1 file\n\n' +
+			'<hook-output event="post-tool-use">\nformatted\n</hook-output>\n\n' +
+			'<hook-output event="post-tool-use" exit="1">\n1 test failed\n</hook-output>',
+	);
+});
+
+test.serial('a silent failing post-tool-use hook still tells the model', async t => {
+	setToolRegistryGetter(() => ({
+		write_file: async () => 'wrote 1 file',
+	}));
+	withHooks({
+		'post-tool-use': [
+			{matchTools: ['write_file'], command: node('process.exit(3)')},
+		],
+	});
+
+	const result = await processToolUse(writeFileCall());
+
+	t.is(
+		result.content,
+		'wrote 1 file\n\n<hook-output event="post-tool-use" exit="3">\n(no output)\n</hook-output>',
 	);
 });
 
@@ -754,6 +855,35 @@ test.serial(
 	},
 );
 
+test.serial(
+	'a failing post-tool-use hook survives the cap when the rest is long',
+	async t => {
+		setToolRegistryGetter(() => ({
+			write_file: async () => 'r'.repeat(19_000),
+		}));
+		withHooks({
+			'post-tool-use': [
+				{command: node("console.log('p'.repeat(15000))")},
+				{command: node("console.error('lint: 47 errors');process.exit(1)")},
+			],
+		});
+
+		const result = await processToolUse(writeFileCall());
+		const content = String(result.content);
+		const cap = truncateToolResult('y'.repeat(500_000)).length;
+
+		t.true(content.length <= cap, 'the result is still capped');
+		t.true(content.includes('Output truncated'), 'something was cut');
+		// The long tool result and the chatty passing hook are cut from the
+		// middle; the failure, appended last, sits in the kept tail.
+		t.true(
+			content.endsWith(
+				'<hook-output event="post-tool-use" exit="1">\nlint: 47 errors\n</hook-output>',
+			),
+		);
+	},
+);
+
 test.serial('session-start context waits for a slow hook', async t => {
 	withHooks({
 		'session-start': [
@@ -910,3 +1040,91 @@ posixTest.serial(
 		t.false(alive, `hook pid ${pid} outlived its timeout`);
 	},
 );
+
+// cmd.exe expands `%FILE%`, not `$FILE`, so the documented POSIX-style
+// references are renamed on Windows (#1688). Pure string checks, so every
+// platform covers the Windows branch.
+const PATH_ENV: NodeJS.ProcessEnv = {
+	FILE: 'C:\\proj\\a&b c.ts',
+	NANOCODER_FILE: 'C:\\proj\\a&b c.ts',
+	NANOCODER_CWD: 'C:\\proj',
+	NANOCODER_TOOL_ARGS: '{"path":"x"}',
+};
+
+test('toPlatformHookCommand leaves POSIX commands untouched', t => {
+	for (const platform of ['linux', 'darwin'] as const) {
+		t.deepEqual(
+			toPlatformHookCommand('gofmt -w "$FILE"', PATH_ENV, platform),
+			{command: 'gofmt -w "$FILE"'},
+		);
+	}
+});
+
+test('toPlatformHookCommand renames path references for cmd.exe', t => {
+	const cases: Array<[string, string]> = [
+		['npx biome format --write "$FILE"', 'npx biome format --write "%FILE%"'],
+		['gofmt -w "${FILE}"', 'gofmt -w "%FILE%"'],
+		['biome check --write "$NANOCODER_FILE"', 'biome check --write "%NANOCODER_FILE%"'],
+		['cd "$NANOCODER_CWD" && x', 'cd "%NANOCODER_CWD%" && x'],
+		// Unquoted references are quoted so `&` in a path stays literal.
+		['gofmt -w $FILE', 'gofmt -w "%FILE%"'],
+		['gofmt -w ${FILE}', 'gofmt -w "%FILE%"'],
+		// `^"` is an escaped quote outside a quoted region, not an opening one.
+		['echo ^"$FILE', 'echo ^""%FILE%"'],
+		// Free-text and unknown variables are not translated.
+		['log "$NANOCODER_TOOL_ARGS" $FILENAME $file', 'log "$NANOCODER_TOOL_ARGS" $FILENAME $file'],
+		['echo %FILE%', 'echo %FILE%'],
+	];
+	for (const [input, expected] of cases) {
+		t.deepEqual(toPlatformHookCommand(input, PATH_ENV, 'win32'), {
+			command: expected,
+		}, input);
+	}
+});
+
+// A closing quote straight after a trailing backslash is an escaped quote to
+// most programs' argument parser: `"C:\proj\" next` arrives as the single
+// argument `C:\proj" next`. A drive root (`C:\`) is the usual way to get here.
+test('toPlatformHookCommand keeps a trailing backslash from escaping the closing quote', t => {
+	const cases: Array<[string, string, string]> = [
+		['C:\\proj\\', 'tool "$NANOCODER_CWD" next', 'tool "%NANOCODER_CWD%." next'],
+		['C:\\', 'tool "$NANOCODER_CWD" next', 'tool "%NANOCODER_CWD%." next'],
+		// Unquoted references get quotes of their own, so they are covered too.
+		['C:\\', 'tool $NANOCODER_CWD next', 'tool "%NANOCODER_CWD%." next'],
+		['C:\\', 'tool ${NANOCODER_CWD} next', 'tool "%NANOCODER_CWD%." next'],
+		// More path text after the reference: no quote follows it, so no suffix.
+		['C:\\proj\\', 'tool "$NANOCODER_CWD\\sub" next', 'tool "%NANOCODER_CWD%\\sub" next'],
+		// No trailing backslash: the path is left exactly as it was.
+		['C:\\proj', 'tool "$NANOCODER_CWD" next', 'tool "%NANOCODER_CWD%" next'],
+	];
+	for (const [cwd, input, expected] of cases) {
+		t.deepEqual(
+			toPlatformHookCommand(input, {NANOCODER_CWD: cwd}, 'win32'),
+			{command: expected},
+			`${cwd} | ${input}`,
+		);
+	}
+});
+
+test('toPlatformHookCommand expands an unset path variable to nothing', t => {
+	t.deepEqual(
+		toPlatformHookCommand('echo "$NANOCODER_SESSION_CWD" $NANOCODER_SESSION_CWD.', PATH_ENV, 'win32'),
+		{command: 'echo "" .'},
+	);
+});
+
+test('toPlatformHookCommand refuses a path cmd.exe cannot quote', t => {
+	for (const value of ['a" & calc & "', 'a\r\nb', 'a\0b']) {
+		const result = toPlatformHookCommand(
+			'check "$NANOCODER_FILE"',
+			{NANOCODER_FILE: value},
+			'win32',
+		);
+		t.true('failure' in result, JSON.stringify(value));
+	}
+	// A command that never references the value is not affected by it.
+	t.deepEqual(
+		toPlatformHookCommand('echo ok', {NANOCODER_FILE: 'a"b'}, 'win32'),
+		{command: 'echo ok'},
+	);
+});

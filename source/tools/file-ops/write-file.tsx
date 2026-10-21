@@ -18,7 +18,11 @@ import {normalizeIndentation} from '@/utils/indentation-normalizer';
 import {collapseUnchangedLines, computeLineDiff} from '@/utils/inline-diff';
 import {validateEditableFormat, validatePath} from '@/utils/path-validators';
 import {getLanguageFromExtension} from '@/utils/programming-language-helper';
-import {hasSeenFile, markFileSeen} from '@/utils/read-tracker';
+import {
+	forgetReadContent,
+	hasSeenFile,
+	markFileSeen,
+} from '@/utils/read-tracker';
 import {calculateTokens} from '@/utils/token-calculator';
 import {createFileToolApproval} from '@/utils/tool-approval';
 import {ensureString} from '@/utils/type-helpers';
@@ -70,6 +74,7 @@ const executeWriteFile = async (args: {
 	// The file's contents are now known to the model (it just wrote them), so a
 	// follow-up edit or rewrite is not blind.
 	markFileSeen(absPath);
+	forgetReadContent(absPath);
 
 	// Read back to verify the write succeeded (but don't echo the content back
 	// to the model — it just sent us that exact content as the tool call

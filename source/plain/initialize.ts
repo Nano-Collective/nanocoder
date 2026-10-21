@@ -17,6 +17,7 @@ import {
 	setToolRegistryGetter,
 } from '@/message-handler';
 import {writeStatus} from '@/plain/writer';
+import {setAutoCommitClient} from '@/services/auto-commit';
 import {
 	recordSubagentApiCallForStats,
 	SubagentExecutor,
@@ -77,7 +78,12 @@ export async function initializePlain(
 	let client: LLMClient;
 	let actualProvider: string;
 	try {
-		const result = await createLLMClient(preferredProvider, preferredModel);
+		const result = await createLLMClient(
+			preferredProvider,
+			preferredModel,
+			undefined,
+			{strictProvider: Boolean(options.cliProvider)},
+		);
 		client = result.client;
 		actualProvider = result.actualProvider;
 	} catch (error) {
@@ -110,6 +116,7 @@ export async function initializePlain(
 	}
 
 	updateLastUsed(actualProvider, finalModel);
+	setAutoCommitClient(client);
 
 	const subagentExecutor = new SubagentExecutor(
 		toolManager,

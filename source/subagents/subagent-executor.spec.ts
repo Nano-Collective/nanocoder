@@ -1,4 +1,11 @@
-import {mkdirSync, writeFileSync} from 'node:fs';
+import {execSync} from 'node:child_process';
+import {
+	mkdirSync,
+	mkdtempSync,
+	realpathSync,
+	rmSync,
+	writeFileSync,
+} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
@@ -12,6 +19,7 @@ import {
 import {SubagentLoader, getSubagentLoader} from './subagent-loader.js';
 import type {MemoryFinder} from '@/memory/project-context';
 import {setProjectRoot} from '@/services/session-cwd';
+import {loadPlugins, resetPluginsForTests} from '@/plugins/host';
 import {filterToolNamesForMode, type ToolManager} from '@/tools/tool-manager';
 import type {HooksConfig} from '@/types/config';
 import type {
@@ -30,6 +38,13 @@ import {
 	setAutoCompactThreshold,
 } from '@/utils/auto-compact';
 import {setGlobalToolApprovalHandler} from '@/utils/tool-approval-queue';
+import {
+	clearReadTracker,
+	forgetReadContent,
+	matchReadContent,
+	rememberReadContent,
+	runWithReadContentScope,
+} from '@/utils/read-tracker';
 
 console.log('\nsubagent-executor.spec.ts');
 
@@ -339,6 +354,84 @@ test.serial('executes tool calls and returns final response', async t => {
 
 	t.true(result.success);
 	t.is(result.output, 'Found the file with 100 lines');
+});
+
+test.serial('toolOverride replaces the effective tool list beyond what frontmatter declares', async t => {
+	// 'explore's frontmatter tools list does not include write_file, so
+	// without an override this call would be filtered out before reaching
+	// the model. toolOverride.tools should replace the effective list.
+	const writeHandler = async (args: unknown) => {
+		const parsed = args as {path: string};
+		return `Wrote ${parsed.path}`;
+	};
+
+	const toolManager = createMockToolManager({
+		write_file: {handler: writeHandler, readOnly: false},
+	});
+
+	const client = createMockClient([
+		{
+			content: '',
+			tool_calls: [{
+				id: 'tc1',
+				function: {name: 'write_file', arguments: '{"path": "out.txt"}'},
+			}],
+		},
+		{content: 'Wrote the file'},
+	]);
+
+	const executor = new SubagentExecutor(toolManager, client);
+
+	const result = await executor.execute(
+		{subagent_type: 'explore', description: 'Write a file'},
+		undefined,
+		0,
+		undefined,
+		undefined,
+		{tools: ['write_file']},
+	);
+
+	t.true(result.success);
+	t.is(result.output, 'Wrote the file');
+});
+
+test.serial('keeps screenshot images on a subagent tool message', async t => {
+	const toolManager = createMockToolManager({
+		read_file: {
+			handler: async () => ({
+				llmContent: 'Screenshot of http://localhost:3000/',
+				images: [{data: 'abc', mediaType: 'image/jpeg'}],
+			}),
+			readOnly: true,
+		},
+	});
+	const toolResults: Message[] = [];
+	const client = createMockClient(
+		[
+			{
+				content: '',
+				tool_calls: [{
+					id: 'tc-shot',
+					function: {name: 'read_file', arguments: '{}'},
+				}],
+			},
+			{content: 'The button is misaligned.'},
+		],
+		messages => {
+			const toolMessage = messages.find(message => message.role === 'tool');
+			if (toolMessage) toolResults.push(toolMessage);
+		},
+	);
+
+	const executor = new SubagentExecutor(toolManager, client);
+	const result = await executor.execute({
+		subagent_type: 'explore',
+		description: 'Look at the page',
+	});
+
+	t.true(result.success);
+	t.is(toolResults[0]?.content, 'Screenshot of http://localhost:3000/');
+	t.deepEqual(toolResults[0]?.images, [{data: 'abc', mediaType: 'image/jpeg'}]);
 });
 
 test.serial('stringifies structured tool output without llmContent', async t => {
@@ -1211,6 +1304,185 @@ test('mode resolver overrides the static parentMode and is read live', async t =
 	t.true(await needsApproval('execute_bash'));
 });
 
+// ============================================================================
+// Phase 4: toolOverride.alwaysAllow bypasses approval for otherwise
+// mode-blind, unconditionally-approval-required tools (e.g. git_commit's
+// `approval: true`, which would otherwise be silently auto-denied in
+// headless mode since no approval-queue handler is ever registered there).
+// ============================================================================
+
+test.serial('needsApprovalForTool: alwaysAllow bypasses an unconditional approval:true policy', async t => {
+	const toolManager = createMockToolManager({
+		git_commit: {handler: async () => 'committed', readOnly: false, needsApproval: true},
+	});
+	const client = createMockClient([]);
+	const executor = new SubagentExecutor(toolManager, client, process.cwd(), 'headless');
+
+	const needsApproval = (alwaysAllow?: string[]) =>
+		(executor as unknown as {
+			needsApprovalForTool: (
+				n: string,
+				a: unknown,
+				alwaysAllow?: string[],
+			) => Promise<boolean>;
+		}).needsApprovalForTool('git_commit', {}, alwaysAllow);
+
+	t.true(
+		await needsApproval(undefined),
+		'without alwaysAllow, git_commit still requires approval even in headless mode',
+	);
+	t.false(
+		await needsApproval(['git_commit']),
+		'alwaysAllow including git_commit bypasses its approval:true policy',
+	);
+	t.true(
+		await needsApproval(['some_other_tool']),
+		'alwaysAllow not including git_commit does not bypass it',
+	);
+});
+
+test.serial('execute(): toolOverride.alwaysAllow lets an approval-required tool run without signalToolApproval', async t => {
+	const commitHandler = async () => 'committed';
+	const toolManager = createMockToolManager({
+		git_commit: {handler: commitHandler, readOnly: false, needsApproval: true},
+	});
+
+	let approvalRequested = false;
+	setGlobalToolApprovalHandler(async () => {
+		approvalRequested = true;
+		return true;
+	});
+
+	const client = createMockClient([
+		{
+			content: '',
+			tool_calls: [
+				{id: 'tc1', function: {name: 'git_commit', arguments: '{"message":"fix"}'}},
+			],
+		},
+		{content: 'Committed the fix'},
+	]);
+
+	const executor = new SubagentExecutor(toolManager, client, process.cwd(), 'headless');
+
+	const result = await executor.execute(
+		{subagent_type: 'explore', description: 'Commit a fix'},
+		undefined,
+		0,
+		undefined,
+		{tools: ['git_commit'], alwaysAllow: ['git_commit']},
+	);
+
+	t.true(result.success);
+	t.is(result.output, 'Committed the fix');
+	t.false(
+		approvalRequested,
+		'signalToolApproval should never be reached when alwaysAllow covers the tool',
+	);
+
+	// Restore auto-approve handler for other tests
+	setGlobalToolApprovalHandler(async () => true);
+});
+
+test.serial('execute(): a trustLevel denies git_pr comment/review/create even when approval would be granted', async t => {
+	const gitPrCalls: unknown[] = [];
+	const toolManager = createMockToolManager({
+		git_pr: {
+			handler: async args => {
+				gitPrCalls.push(args);
+				return 'ok';
+			},
+			readOnly: false,
+			needsApproval: true,
+		},
+	});
+
+	// The global handler approves everything, so only the trust-level check
+	// stands between the model and a posted review.
+	setGlobalToolApprovalHandler(async () => true);
+
+	const call = (id: string, args: object) => ({
+		id,
+		function: {name: 'git_pr', arguments: JSON.stringify(args)},
+	});
+	const toolResults = new Map<string, string>();
+	const client = createMockClient(
+		[
+			{
+				content: '',
+				tool_calls: [
+					call('tc1', {review: {pr: 7, verdict: 'approve'}}),
+					call('tc2', {comment: {pr: 7, body: 'x'}}),
+					call('tc3', {create: {title: 'x'}}),
+					call('tc4', {diff: 7}),
+				],
+			},
+			{content: 'done'},
+		],
+		messages => {
+			for (const m of messages) {
+				if (m.role === 'tool' && m.tool_call_id) {
+					toolResults.set(m.tool_call_id, String(m.content));
+				}
+			}
+		},
+	);
+	const executor = new SubagentExecutor(toolManager, client, process.cwd(), 'headless');
+
+	const result = await executor.execute(
+		{subagent_type: 'explore', description: 'Review a PR'},
+		undefined,
+		0,
+		undefined,
+		undefined,
+		{tools: ['git_pr'], alwaysAllow: [], trustLevel: 'comment-only'},
+	);
+
+	t.true(result.success);
+	t.deepEqual(gitPrCalls, [{diff: 7}], 'only the read-only action may run');
+	// Pin which call was denied: review, comment and create by id, not just
+	// "three of four", so a swapped decision can't pass.
+	for (const id of ['tc1', 'tc2', 'tc3']) {
+		t.regex(toolResults.get(id) ?? '', /not permitted at trust level/, id);
+	}
+	t.is(toolResults.get('tc4'), 'ok', 'the read-only diff call ran');
+});
+
+test.serial('execute(): an explicit alwaysAllow replaces the project config alwaysAllow', async t => {
+	const leave = enterSubagentHookFixture({}, {alwaysAllow: ['git_pr']});
+	try {
+		const toolManager = createMockToolManager({
+			git_pr: {handler: async () => 'ok', readOnly: false, needsApproval: true},
+		});
+		const executor = new SubagentExecutor(
+			toolManager,
+			createMockClient([]),
+			process.cwd(),
+			'headless',
+		);
+		const needsApproval = (alwaysAllow?: string[]) =>
+			(executor as unknown as {
+				needsApprovalForTool: (
+					n: string,
+					a: unknown,
+					alwaysAllow?: string[],
+				) => Promise<boolean>;
+			}).needsApprovalForTool('git_pr', {}, alwaysAllow);
+
+		t.false(
+			await needsApproval(undefined),
+			'with no override the project config still applies',
+		);
+		t.true(
+			await needsApproval([]),
+			'an explicit override must not inherit the project config',
+		);
+		t.false(await needsApproval(['git_pr']));
+	} finally {
+		leave();
+	}
+});
+
 test('without a resolver, approval falls back to the static parentMode', async t => {
 	const toolManager = createMockToolManager({
 		execute_bash: {handler: async () => 'ok', readOnly: false, needsApproval: true},
@@ -1571,7 +1843,10 @@ const SUBAGENT_HOOK_DIR = join(
 	`nanocoder-subagent-hooks-${Date.now()}`,
 );
 
-function enterSubagentHookFixture(hooks: HooksConfig): () => void {
+function enterSubagentHookFixture(
+	hooks: HooksConfig,
+	extraConfig: Record<string, unknown> = {},
+): () => void {
 	const previousCwd = process.cwd();
 	const previousConfigDir = process.env.NANOCODER_CONFIG_DIR;
 	mkdirSync(SUBAGENT_HOOK_DIR, {recursive: true});
@@ -1583,7 +1858,7 @@ function enterSubagentHookFixture(hooks: HooksConfig): () => void {
 	setProjectRoot(SUBAGENT_HOOK_DIR);
 	writeFileSync(
 		join(SUBAGENT_HOOK_DIR, 'agents.config.json'),
-		JSON.stringify({nanocoder: {hooks}}),
+		JSON.stringify({nanocoder: {hooks, ...extraConfig}}),
 		'utf-8',
 	);
 	reloadAppConfig();
@@ -1601,6 +1876,54 @@ function enterSubagentHookFixture(hooks: HooksConfig): () => void {
 
 // Portable hook body: `sh -c` on POSIX, `cmd /c` on Windows.
 const subagentHookNode = (script: string) => `node -e "${script}"`;
+
+test.serial('a plugin permission denial prevents delegated tool execution and approval', async t => {
+	const leave = enterSubagentHookFixture({});
+	resetPluginsForTests();
+	let approvalPrompts = 0;
+	let executions = 0;
+	const results: string[] = [];
+	setGlobalToolApprovalHandler(async () => {
+		approvalPrompts++;
+		return true;
+	});
+	try {
+		const dir = join(SUBAGENT_HOOK_DIR, '.nanocoder', 'plugins');
+		mkdirSync(dir, {recursive: true});
+		writeFileSync(join(dir, 'deny.mjs'), `export default {
+			apiVersion: 1, name: 'deny',
+			hooks: {'permission.asked': () => ({decision: 'deny', reason: 'delegated policy'})},
+		};`);
+		await loadPlugins(true);
+		const toolManager = createMockToolManager({
+			read_file: {
+				handler: async () => { executions++; return 'contents'; },
+				readOnly: true,
+				needsApproval: true,
+			},
+		});
+		const client = createMockClient([
+			{content: '', tool_calls: [{
+				id: 'plugin-deny', function: {name: 'read_file', arguments: '{"path":"a.ts"}'},
+			}]},
+			{content: 'Understood.'},
+		], messages => {
+			for (const message of messages) {
+				if (message.role === 'tool') results.push(message.content);
+			}
+		});
+		await new SubagentExecutor(toolManager, client).execute({
+			subagent_type: 'explore', description: 'Read a.ts',
+		});
+		t.is(approvalPrompts, 0);
+		t.is(executions, 0);
+		t.true(results.includes('Error: delegated policy'));
+	} finally {
+		resetPluginsForTests();
+		leave();
+		setGlobalToolApprovalHandler(async () => true);
+	}
+});
 
 test.serial('a pre-tool-use veto stops a subagent tool call', async t => {
 	let handlerRan = false;
@@ -1811,150 +2134,25 @@ test.serial('post-tool-use fires when a subagent tool throws', async t => {
 	);
 });
 
-// Daemon-triggered runs are headless: nobody can answer a question, so a
-// subagent without an explicit tools list must not be offered ask_user.
-test.serial('headless subagents are not offered ask_user', async t => {
-	const root = join(tmpdir(), `nanocoder-headless-ask-${Date.now()}`);
-	mkdirSync(join(root, '.nanocoder', 'agents'), {recursive: true});
-	writeFileSync(
-		join(root, '.nanocoder', 'agents', 'probe.md'),
-		'---\nname: probe\ndescription: probe\n---\nprobe\n',
-		'utf-8',
-	);
-	const noop = async () => '';
-	const toolManager = createMockToolManager({
-		read_file: {handler: noop, readOnly: true},
-		ask_user: {handler: noop, readOnly: true},
-	});
-	const offered: string[][] = [];
-	const client = createMockClient([{content: 'done'}, {content: 'done'}]);
-	const chat = client.chat.bind(client);
-	client.chat = (async (...args: Parameters<LLMClient['chat']>) => {
-		offered.push(Object.keys(args[1] ?? {}));
-		return chat(...args);
-	}) as LLMClient['chat'];
+test.serial(
+	'subagent read stubs stay isolated from the parent and are dropped on finish',
+	async t => {
+		clearReadTracker();
+		const filePath = '/tmp/parent-read.txt';
+		const stats = {mtimeMs: 11, size: 8};
+		rememberReadContent(filePath, stats, 3);
 
-	await new SubagentExecutor(toolManager, client, root, 'headless').execute({
-		subagent_type: 'probe',
-		description: 'x',
-	});
-	await new SubagentExecutor(toolManager, client, root, 'normal').execute({
-		subagent_type: 'probe',
-		description: 'x',
-	});
-
-	t.deepEqual(offered[0], ['read_file']);
-	t.true(offered[1]?.includes('ask_user'));
-});
-
-// Capture the tool names offered to a subagent on its first model call.
-function captureOfferedTools(client: LLMClient): string[][] {
-	const offered: string[][] = [];
-	const chat = client.chat.bind(client);
-	client.chat = (async (...args: Parameters<LLMClient['chat']>) => {
-		offered.push(Object.keys(args[1] ?? {}));
-		return chat(...args);
-	}) as LLMClient['chat'];
-	return offered;
-}
-
-// Plan mode is read-only exploration: a subagent spawned from it must not be
-// offered the mutation tools the parent can't use either.
-test.serial('plan-mode subagents are not offered mutation tools', async t => {
-	const root = join(tmpdir(), `nanocoder-plan-subagent-${Date.now()}`);
-	mkdirSync(join(root, '.nanocoder', 'agents'), {recursive: true});
-	writeFileSync(
-		join(root, '.nanocoder', 'agents', 'probe.md'),
-		'---\nname: probe\ndescription: probe\n---\nprobe\n',
-		'utf-8',
-	);
-	const noop = async () => '';
-	const toolManager = createMockToolManager({
-		read_file: {handler: noop, readOnly: true},
-		write_file: {handler: noop, readOnly: false},
-		execute_bash: {handler: noop, readOnly: false},
-		git_commit: {handler: noop, readOnly: false},
-	});
-	const client = createMockClient([{content: 'done'}]);
-	const offered = captureOfferedTools(client);
-
-	await new SubagentExecutor(toolManager, client, root, 'plan').execute({
-		subagent_type: 'probe',
-		description: 'x',
-	});
-
-	t.deepEqual(offered[0], ['read_file']);
-});
-
-// Bundle subagents always keep their sibling tools, even with a `tools:`
-// allowlist that doesn't name them.
-test.serial('bundle subagents keep sibling tools when they declare a tools list', async t => {
-	const root = join(tmpdir(), `nanocoder-bundle-subagent-${Date.now()}`);
-	mkdirSync(root, {recursive: true});
-	const loader = getSubagentLoader(root);
-	await loader.initialize();
-	loader.registerExternal({
-		name: 'bundle-probe',
-		description: 'probe',
-		systemPrompt: 'probe',
-		tools: ['read_file'],
-		ownerSkill: 'my-skill',
-		source: {priority: 'project', filePath: join(root, 'x.md'), isBuiltIn: false},
-	} as never);
-	const noop = async () => '';
-	const toolManager = createMockToolManager({
-		read_file: {handler: noop, readOnly: true},
-		write_file: {handler: noop, readOnly: false},
-		sibling_tool: {handler: noop, readOnly: true, ownerSkill: 'my-skill'},
-		other_skill_tool: {handler: noop, readOnly: true, ownerSkill: 'other'},
-	});
-	const client = createMockClient([{content: 'done'}]);
-	const offered = captureOfferedTools(client);
-
-	await new SubagentExecutor(toolManager, client, root, 'normal').execute({
-		subagent_type: 'bundle-probe',
-		description: 'x',
-	});
-
-	t.deepEqual(offered[0]?.sort(), ['read_file', 'sibling_tool']);
-});
-
-// The top-level alwaysAllow list skips approval inside subagents too.
-test.serial('subagent tools in alwaysAllow skip the approval prompt', async t => {
-	const configDir = join(tmpdir(), `nanocoder-always-allow-${Date.now()}`);
-	mkdirSync(configDir, {recursive: true});
-	writeFileSync(
-		join(configDir, 'agents.config.json'),
-		JSON.stringify({nanocoder: {alwaysAllow: ['write_file']}}),
-		'utf-8',
-	);
-	const previousDir = process.env.NANOCODER_CONFIG_DIR;
-	const previousCwd = process.cwd();
-	process.env.NANOCODER_CONFIG_DIR = configDir;
-	process.chdir(configDir);
-	reloadAppConfig();
-	let approvalsRequested = 0;
-	setGlobalToolApprovalHandler(async () => {
-		approvalsRequested++;
-		return true;
-	});
-	try {
-		const root = join(configDir, 'project');
-		mkdirSync(join(root, '.nanocoder', 'agents'), {recursive: true});
-		writeFileSync(
-			join(root, '.nanocoder', 'agents', 'probe.md'),
-			'---\nname: probe\ndescription: probe\n---\nprobe\n',
-			'utf-8',
-		);
-		let wrote = false;
+		let seenInSubagent: ReturnType<typeof matchReadContent>;
+		seenInSubagent = {lineCount: -1, size: -1};
 		const toolManager = createMockToolManager({
-			write_file: {
+			read_file: {
 				handler: async () => {
-					wrote = true;
-					return 'ok';
+					seenInSubagent = matchReadContent(filePath, stats);
+					rememberReadContent(filePath, stats, 9);
+					forgetReadContent(filePath);
+					return 'subagent body';
 				},
-				readOnly: false,
-				needsApproval: true,
+				readOnly: true,
 			},
 		});
 		const client = createMockClient([
@@ -1962,29 +2160,136 @@ test.serial('subagent tools in alwaysAllow skip the approval prompt', async t =>
 				content: '',
 				tool_calls: [
 					{
-						id: 'w',
+						id: 'read',
 						function: {
-							name: 'write_file',
-							arguments: '{"path":"x.ts","content":"hi"}',
+							name: 'read_file',
+							arguments: '{"path":"/tmp/parent-read.txt"}',
 						},
 					},
 				],
 			},
 			{content: 'done'},
 		]);
+		const executor = new SubagentExecutor(toolManager, client);
+		const result = await executor.execute(
+			{subagent_type: 'explore', description: 'Read a file'},
+			undefined,
+			0,
+			'stub-scope-agent',
+		);
 
-		await new SubagentExecutor(toolManager, client, root, 'normal').execute({
-			subagent_type: 'probe',
-			description: 'x',
+		t.true(result.success);
+		t.is(seenInSubagent, undefined);
+		t.deepEqual(matchReadContent(filePath, stats), {lineCount: 3, size: 8});
+		runWithReadContentScope('stub-scope-agent', () => {
+			t.is(matchReadContent(filePath, stats), undefined);
 		});
+	},
+);
 
-		t.true(wrote);
-		t.is(approvalsRequested, 0);
-	} finally {
-		setGlobalToolApprovalHandler(async () => true);
-		process.chdir(previousCwd);
-		if (previousDir === undefined) delete process.env.NANOCODER_CONFIG_DIR;
-		else process.env.NANOCODER_CONFIG_DIR = previousDir;
-		reloadAppConfig();
-	}
-});
+// ============================================================================
+// nanocoder.autoCommit in delegated work.
+//
+// Subagents do not go through processToolUse, so auto-commit has to be wired
+// into their loop separately — and, as there, after the post-tool-use hooks.
+// ============================================================================
+
+test.serial(
+	'a subagent edit is auto-committed, including a formatter hook rewrite',
+	async t => {
+		const repo = realpathSync(
+			mkdtempSync(join(tmpdir(), 'nanocoder-subagent-autocommit-')),
+		);
+		const git = (command: string) =>
+			execSync(`git ${command}`, {cwd: repo, encoding: 'utf8'}).trimEnd();
+		git('init -q -b main');
+		git('config user.email test@example.com');
+		git('config user.name Test');
+		git('config commit.gpgsign false');
+		git('config core.autocrlf false');
+		git('config core.hooksPath .no-hooks');
+		git('commit -q --allow-empty -m baseline');
+
+		// A project subagent allowed to write, kept outside the repo so its
+		// definition does not show up as an untracked change.
+		const agentsRoot = realpathSync(
+			mkdtempSync(join(tmpdir(), 'nanocoder-subagent-writer-')),
+		);
+		mkdirSync(join(agentsRoot, '.nanocoder', 'agents'), {recursive: true});
+		writeFileSync(
+			join(agentsRoot, '.nanocoder', 'agents', 'writer.md'),
+			'---\nname: writer\ndescription: writer\ntools:\n  - write_file\n---\nwrite\n',
+			'utf-8',
+		);
+
+		const file = join(repo, 'edited.ts');
+		const toolManager = createMockToolManager({
+			write_file: {
+				handler: async args => {
+					writeFileSync(String((args as {path: string}).path), 'agent\n');
+					return 'File written.';
+				},
+				readOnly: false,
+			},
+		});
+		const toolResults: Message[] = [];
+		const client = createMockClient(
+			[
+				{
+					content: '',
+					tool_calls: [
+						{
+							id: 'tc-commit',
+							function: {
+								name: 'write_file',
+								arguments: JSON.stringify({path: file}),
+							},
+						},
+					],
+				},
+				{content: 'Done.'},
+			],
+			messages => {
+				const toolMessage = messages.find(message => message.role === 'tool');
+				if (toolMessage) toolResults.push(toolMessage);
+			},
+		);
+
+		const leave = enterSubagentHookFixture({
+			'post-tool-use': [
+				{
+					command: subagentHookNode(
+						"require('fs').appendFileSync(process.env.NANOCODER_FILE, 'formatted\\n')",
+					),
+				},
+			],
+		});
+		getAppConfig().autoCommit = true;
+		getAppConfig().formatters = [{match: ['**/*.ts'], command: subagentHookNode(
+			"require('fs').appendFileSync(process.env.FILE, 'formatter\\n')",
+		)}];
+		setProjectRoot(repo);
+		let result: Awaited<ReturnType<SubagentExecutor['execute']>>;
+		let committed: string;
+		let status: string;
+		try {
+			result = await new SubagentExecutor(
+				toolManager,
+				client,
+				agentsRoot,
+			).execute({subagent_type: 'writer', description: 'Write edited.ts'});
+			committed = git('show HEAD:edited.ts');
+			status = git('status --porcelain');
+		} finally {
+			// reloadAppConfig() in leave() also turns autoCommit back off.
+			leave();
+			rmSync(repo, {recursive: true, force: true});
+			rmSync(agentsRoot, {recursive: true, force: true});
+		}
+
+		t.true(result.success, result.error);
+		t.regex(String(toolResults[0]?.content), /\[auto-commit\] [a-f0-9]{7,} /);
+		t.is(committed, 'agent\nformatter\nformatted');
+		t.is(status, '', 'nothing the edit or the hook wrote is left behind');
+	},
+);

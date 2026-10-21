@@ -56,6 +56,7 @@ import {describeGapsMessage} from '@/utils/checkpoint-utils';
 import {formatError} from '@/utils/error-formatter';
 import {getLogger} from '@/utils/logging';
 import {getLastBuiltPrompt} from '@/utils/prompt-builder';
+import {bumpReadContentGeneration} from '@/utils/read-tracker';
 
 interface UseAppHandlersProps {
 	// State
@@ -226,7 +227,8 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 		// headless) path runs bash without mounting the live BashProgress that
 		// owns the escape->cancel handler, so aborting the controller alone would
 		// leave the command running until it finished naturally. Cancelling here
-		// resolves the bash promise right away regardless of execution path.
+		// resolves the bash promise as soon as the command has stopped,
+		// regardless of execution path.
 		const activeBashIds = bashExecutor.getActiveExecutionIds();
 		for (const id of activeBashIds) {
 			bashExecutor.cancel(id);
@@ -566,6 +568,8 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 	const applySession = React.useCallback(
 		(session: Session) => {
 			props.updateMessages(session.messages);
+			// The resumed history has not seen this process's reads.
+			bumpReadContentGeneration();
 			props.setCurrentProvider(session.provider);
 			props.setCurrentModel(session.model);
 			props.setCurrentSessionId(session.id);

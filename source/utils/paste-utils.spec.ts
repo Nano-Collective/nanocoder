@@ -123,6 +123,52 @@ test('repeated pasted text survives the complete prompt round trip', t => {
 	t.is(assemblePrompt(result!), currentDisplayValue);
 });
 
+test('back-to-back pastes stay separated in the assembled prompt', t => {
+	// The composer shows two tidy placeholders, but with nothing between them
+	// they expanded flush against each other at submit, so the last line of the
+	// first paste fused with the first line of the second.
+	const first = 'first line\nAAA';
+	const second = 'BBB\nsecond line';
+
+	const afterFirst = handlePaste(first, '', {});
+	t.truthy(afterFirst);
+	t.false(
+		afterFirst!.displayValue.startsWith('\n'),
+		'an empty composer must not gain a leading newline',
+	);
+
+	const afterSecond = handlePaste(
+		second,
+		afterFirst!.displayValue,
+		afterFirst!.placeholderContent,
+	);
+	t.truthy(afterSecond);
+
+	const assembled = assemblePrompt(afterSecond!);
+	t.false(assembled.includes('AAABBB'), 'the paste boundary must survive');
+	t.true(assembled.includes('AAA\nBBB'));
+});
+
+test('a composer already ending in whitespace gains no extra separator', t => {
+	// The separator exists to keep blocks apart, so whitespace the user typed
+	// is left as it is rather than doubled.
+	const pastedText = 'BBB\nsecond line';
+
+	const afterSpace = handlePaste(pastedText, 'look at this: ', {});
+	t.truthy(afterSpace);
+	t.true(
+		assemblePrompt(afterSpace!).startsWith('look at this: BBB'),
+		'a trailing space must carry the paste on the same line',
+	);
+
+	const afterNewline = handlePaste(pastedText, 'look at this:\n', {});
+	t.truthy(afterNewline);
+	t.true(
+		assemblePrompt(afterNewline!).startsWith('look at this:\nBBB'),
+		'a trailing newline must not be doubled',
+	);
+});
+
 test('handlePaste preserves existing pasted content', t => {
 	const existingPlaceholderContent: Record<string, PlaceholderContent> = {
 		'123': {
@@ -389,9 +435,10 @@ test('handlePaste with cursorOffset creates a placeholder at the caret', t => {
 	const result = handlePaste(pasted, 'hello world', {}, 'bracketed', 5)!;
 
 	t.truthy(result);
-	// Placeholder lands between "hello" and " world", not at the end.
+	// Placeholder lands between "hello" and " world", not at the end, on its
+	// own line because "hello" would otherwise fuse with the paste.
 	const idx = result.displayValue.indexOf('[Paste #');
-	t.is(result.displayValue.slice(0, idx), 'hello');
+	t.is(result.displayValue.slice(0, idx), 'hello\n');
 	t.is(result.displayValue.slice(idx).startsWith('[Paste #1: 801 chars]'), true);
 	t.is(result.displayValue.endsWith(' world'), true);
 
@@ -413,6 +460,44 @@ test('handlePaste with cursorOffset does not trigger the dedup replaceAll', t =>
 	// Placeholder spliced between the two markers; both X-runs are preserved.
 	t.true(result.displayValue.startsWith(`prefix ${marker} middle `));
 	t.true(
-		result.displayValue.endsWith(`[Paste #1: 801 chars]${marker}`),
+		result.displayValue.endsWith(`[Paste #1: 801 chars]\n${marker}`),
 	);
+});
+
+test('back-to-back pastes at the caret stay separated in the assembled prompt', t => {
+	// Bracketed paste always supplies the caret, so this is the path a real
+	// terminal paste takes.
+	const afterFirst = handlePaste('first line\nAAA', '', {}, 'bracketed', 0)!;
+	t.false(afterFirst.displayValue.startsWith('\n'));
+
+	const afterSecond = handlePaste(
+		'BBB\nsecond line',
+		afterFirst.displayValue,
+		afterFirst.placeholderContent,
+		'bracketed',
+		afterFirst.displayValue.length,
+	)!;
+
+	t.is(assemblePrompt(afterSecond), 'first line\nAAA\nBBB\nsecond line');
+});
+
+test('a paste at the caret before an existing placeholder stays separated', t => {
+	const afterFirst = handlePaste('BBB\nsecond line', '', {}, 'bracketed', 0)!;
+
+	const afterSecond = handlePaste(
+		'first line\nAAA',
+		afterFirst.displayValue,
+		afterFirst.placeholderContent,
+		'bracketed',
+		0,
+	)!;
+
+	t.is(assemblePrompt(afterSecond), 'first line\nAAA\nBBB\nsecond line');
+});
+
+test('a paste at the caret between whitespace gains no separator', t => {
+	const value = 'look at this:  please';
+	const result = handlePaste('AAA\nBBB', value, {}, 'bracketed', 14)!;
+
+	t.is(assemblePrompt(result), 'look at this: AAA\nBBB please');
 });

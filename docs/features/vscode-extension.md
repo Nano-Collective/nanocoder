@@ -22,6 +22,7 @@ The Nanocoder VS Code extension provides a native sidebar chat powered by the Ag
 - **Live Subagent Progress**: Delegated agent runs show live token usage and tool activity on their card while they work.
 - **Agent Action List**: Tool calls are announced before the batch runs, so you can see queued work rather than only what has finished.
 - **Task Checklist**: When the AI plans work with the task tool, a live checklist card shows each task's status and overall progress.
+- **Queued Follow-ups**: Type a follow-up while a turn is still running and it waits in line instead of being rejected. Queued messages show a Queued badge and run in order as the agent frees up.
 - **Cancellation**: The Stop button or the Escape key ends the whole turn - the current tool is aborted and any queued tools are skipped.
 - **Configuration Management**: The `Nanocoder: Open Configuration` command opens your `agents.config.json` - the project-level file if there is one, otherwise the global one.
 - **Legacy Companion Mode**: The original WebSocket companion for terminal CLI sessions is still available, now opt-in.
@@ -60,7 +61,7 @@ nanocoder --vscode
 
 ## Using the Sidebar Chat
 
-1. **Open the chat**: Click the Nanocoder icon in the Activity Bar. The extension spawns `nanocoder --acp` in the background and connects automatically - your project's `agents.config.json` (or your global config) is picked up as usual.
+1. **Open the chat**: Click the Nanocoder icon in the Activity Bar. The extension spawns `nanocoder --acp` in the background and connects automatically - your project's `agents.config.json` (or your global config) is picked up as usual. If the workspace is not trusted in VS Code (Restricted Mode), the extension does not pass `--trust-directory`, so the CLI only runs there if you have already trusted the folder with Nanocoder.
 
 2. **Chat**: Responses stream in as they generate. Everything the agent does to answer - its thoughts, tool calls, edit cards and task plan - is collected, in order, into one collapsible work summary per turn. The reply text stays outside it, so the answer is never hidden. The header reads "Working..." while the turn runs, then "Worked for", "Stopped after" or "Failed after" plus the duration, and the summary folds away when the turn ends (unless you opened or closed it yourself). It reopens automatically when a tool inside it needs your approval.
 
@@ -74,7 +75,9 @@ nanocoder --vscode
 
 4. **Approvals**: In modes that require confirmation, tool cards show Approve / Deny buttons inline. When the AI asks you a question (the `ask_user` tool), the full question is shown with one button per answer.
 
-5. **Stop**: The send button becomes a stop button while a turn is running. Pressing it - or pressing **Escape** anywhere in the chat panel - cancels the current tool, skips any queued tools, and ends the turn. No further requests are made until you send another message.
+5. **Queue a follow-up**: You do not have to wait for a turn to finish. Type your next instruction and press Enter - it appears in the transcript with a Queued badge and is sent as soon as the current turn ends. Queued messages run in the order you submitted them, and the `×` next to the badge removes one before it starts.
+
+6. **Stop**: While a turn is running and the composer is empty, the send button is a stop button. Pressing it - or pressing **Escape** anywhere in the chat panel - cancels the current tool, skips any queued tools, discards any queued follow-ups, and ends the turn. No further requests are made until you send another message. As soon as you type a follow-up the button turns back into Send so clicking it queues rather than cancels.
 
 ### Provider, Model, and Mode
 
@@ -169,7 +172,7 @@ The extension can be configured in VS Code settings (`Cmd+,` / `Ctrl+,`):
 | Setting                     | Default       | Description                                                          |
 | --------------------------- | ------------- | -------------------------------------------------------------------- |
 | `nanocoder.cliPath`         | (empty)       | Absolute path to the nanocoder CLI. If empty, uses the global install |
-| `nanocoder.cwd`             | (empty)       | Working directory for the CLI. Defaults to the workspace root         |
+| `nanocoder.cwd`             | (empty)       | Working directory for the CLI, new sessions, settings and `@` mention search. Defaults to the workspace root, and takes priority over it when set. With no folder open, sessions use your home directory and `@` search finds no files |
 | `nanocoder.mode`            | `auto-accept` | Operating mode for the assistant                                      |
 | `nanocoder.model`           | (empty)       | Model for Nanocoder sessions (set via the model dropdown)             |
 | `nanocoder.showDiffPreview` | `true`        | Show diff preview before applying file changes                        |

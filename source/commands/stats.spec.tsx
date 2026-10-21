@@ -118,7 +118,16 @@ test('StatsDisplay changes range with arrow keys and closes on Escape', async t 
 	await waitFor(frameMatches(/\[3m\]/));
 	t.regex(stripAnsi(lastFrame() ?? ''), /\[3m\]/);
 
+	// Two presses in one tick. Ink re-registers the input handler in a passive
+	// effect that runs after the frame is painted, so the second press is still
+	// dispatched with the previous render's range - stepping from that captured
+	// value lands on 3m again and wedges the tabs there.
 	stdin.write('\u001B[C');
+	stdin.write('\u001B[C');
+	await waitFor(frameMatches(/\[7d\]/));
+	t.regex(stripAnsi(lastFrame() ?? ''), /\[7d\]/);
+
+	stdin.write('\u001B[D');
 	await waitFor(frameMatches(/\[all-time\]/));
 	t.regex(stripAnsi(lastFrame() ?? ''), /\[all-time\]/);
 

@@ -1,6 +1,7 @@
 import test from 'ava';
 import {renderWithTheme as render} from '@/test-utils/render-with-theme';
 import React from 'react';
+import stripAnsi from 'strip-ansi';
 import {McpStep} from './mcp-step.js';
 
 // ============================================================================
@@ -1104,6 +1105,167 @@ test('McpStep editing an X-API-Key template instance keeps its saved key', async
 	unmount();
 });
 
+test('McpStep lists FXMacroData on the remote servers tab', async t => {
+	const {lastFrame, stdin, unmount} = render(
+		<McpStep onComplete={() => {}} />,
+	);
+
+	await waitTick();
+	// "Add MCP servers", then Tab over to the remote templates.
+	stdin.write('\r');
+	await waitTick();
+	stdin.write('\t');
+	await waitTick();
+
+	const output = lastFrame()!;
+	t.regex(output, /Select a remote MCP server to add:/);
+	t.regex(output, /FXMacroData/);
+
+	unmount();
+});
+
+// FXMacroData keeps the key optional (keyless covers the free USD tier) and
+// stores it as a bearer Authorization header, so edits must round-trip both a
+// saved key and no key at all.
+const fxmacrodataServer = (headers?: {Authorization: string}) => ({
+	'fxmacrodata-work': {
+		name: 'fxmacrodata-work',
+		transport: 'http' as const,
+		url: 'https://mcp.fxmacrodata.com',
+		...(headers ? {headers} : {}),
+		templateId: 'fxmacrodata',
+		tags: ['fxmacrodata', 'finance', 'macro', 'forex', 'http'],
+	},
+});
+
+test('McpStep editing a keyed FXMacroData server keeps its bearer key', async t => {
+	const {lastFrame, stdin, unmount} = render(
+		<McpStep
+			onComplete={() => {}}
+			existingServers={fxmacrodataServer({Authorization: 'Bearer test-key'})}
+			initialEditName="fxmacrodata-work"
+		/>,
+	);
+
+	await waitTick();
+	// Item 1 is "Edit this server".
+	stdin.write('1');
+	await waitTick();
+	t.regex(lastFrame()!, /FXMacroData Configuration/);
+	t.notRegex(lastFrame()!, /Custom MCP Server Configuration/);
+
+	// Accept the prefilled server name; the key field opens prefilled.
+	stdin.write('\r');
+	await waitTick();
+	t.regex(lastFrame()!, /FXMacroData API key/);
+	stdin.write('\r');
+	await waitTick();
+
+	t.notRegex(lastFrame()!, /This field is required/);
+	t.notRegex(lastFrame()!, /must not contain/);
+	t.notRegex(lastFrame()!, /FXMacroData API key/);
+
+	unmount();
+});
+
+test('McpStep editing a keyless FXMacroData server accepts an empty key', async t => {
+	const {lastFrame, stdin, unmount} = render(
+		<McpStep
+			onComplete={() => {}}
+			existingServers={fxmacrodataServer()}
+			initialEditName="fxmacrodata-work"
+		/>,
+	);
+
+	await waitTick();
+	stdin.write('1');
+	await waitTick();
+	t.regex(lastFrame()!, /FXMacroData Configuration/);
+
+	stdin.write('\r');
+	await waitTick();
+	t.regex(lastFrame()!, /FXMacroData API key/);
+	stdin.write('\r');
+	await waitTick();
+
+	t.notRegex(lastFrame()!, /This field is required/);
+	t.notRegex(lastFrame()!, /FXMacroData API key/);
+
+	unmount();
+});
+
+test('McpStep rejects an FXMacroData key with a space inside it', async t => {
+	const {lastFrame, stdin, unmount} = render(
+		<McpStep
+			onComplete={() => {}}
+			existingServers={fxmacrodataServer()}
+			initialEditName="fxmacrodata-work"
+		/>,
+	);
+
+	await waitTick();
+	stdin.write('1');
+	await waitTick();
+	stdin.write('\r');
+	await waitTick();
+	stdin.write('test key');
+	await waitTick();
+	stdin.write('\r');
+	await waitTick();
+
+	const output = lastFrame()!;
+	t.regex(output, /must not contain spaces/);
+	t.regex(output, /FXMacroData API key/, 'should stay on the key field');
+
+	unmount();
+});
+
+// Regression (#1424): a renamed github-remote saved before the templateId
+// stamp only has a `github` tag, which is the stdio template. Edit opened
+// Custom and saving dropped Authorization. The token field is required, so
+// the saved bearer value has to come back filled in.
+test('McpStep editing a renamed github-remote server keeps its bearer token', async t => {
+	const servers = {
+		'gh-work': {
+			name: 'gh-work',
+			transport: 'http' as const,
+			url: 'https://api.githubcopilot.com/mcp/',
+			headers: {Authorization: 'Bearer ghp_test123'},
+			tags: ['remote', 'github', 'git', 'repository', 'http'],
+		},
+	};
+
+	const {lastFrame, stdin, unmount} = render(
+		<McpStep
+			onComplete={() => {}}
+			existingServers={servers}
+			initialEditName="gh-work"
+		/>,
+	);
+
+	await waitTick();
+	stdin.write('1');
+	await waitTick();
+
+	const output = lastFrame()!;
+	t.regex(output, /GitHub \(Remote\) Configuration/);
+	t.notRegex(output, /Custom MCP Server Configuration/);
+
+	// Accept the prefilled name, then the prefilled token.
+	stdin.write('\r');
+	await waitTick();
+	t.regex(lastFrame()!, /GitHub Personal Access Token/);
+	stdin.write('\r');
+	await waitTick();
+	t.notRegex(
+		lastFrame()!,
+		/This field is required/,
+		'the saved bearer token should prefill the required githubToken field',
+	);
+
+	unmount();
+});
+
 test('McpStep falls back to the menu when initialEditName is unknown', t => {
 	const {lastFrame} = render(
 		<McpStep
@@ -1122,4 +1284,84 @@ test('McpStep without initialEditName still opens the initial menu', t => {
 	);
 
 	t.regex(lastFrame()!, /Add MCP servers/);
+});
+
+test('McpStep lets Backspace edit the environment variables field', async t => {
+	let saved: Record<string, {env?: Record<string, string>}> = {};
+	const existingServers = {
+		'my-server': {
+			name: 'my-server',
+			transport: 'stdio' as const,
+			command: 'node',
+			tags: ['custom'],
+		},
+	};
+	// Open straight on "Edit this server", so no arrow key is needed to get
+	// to the form.
+	const {stdin, lastFrame} = render(
+		<McpStep
+			onComplete={servers => {
+				saved = servers;
+			}}
+			existingServers={existingServers}
+			initialEditName="my-server"
+		/>,
+	);
+
+	const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+	// CI renders with colour on; match against the text, not its escape codes.
+	const frame = () => stripAnsi(lastFrame() ?? '');
+	// Generous: a loaded CI runner can take well over a second to render.
+	const waitFor = async (until: RegExp) => {
+		for (let i = 0; i < 50 && !until.test(frame()); i++) {
+			await sleep(100);
+		}
+		t.regex(frame(), until);
+	};
+	// A key sent before its screen has mounted is lost, so Enter is re-sent
+	// until the target shows. That is only safe for Enter here: a surplus one
+	// skips an optional field or adds a blank env line, which is ignored.
+	// Keys that would overshoot (arrows, Esc) are sent once, after their
+	// screen shows, and then waited on.
+	const pressEnterUntil = async (until: RegExp) => {
+		for (let i = 0; i < 20 && !until.test(frame()); i++) {
+			stdin.write('\r');
+			await sleep(250);
+		}
+		t.regex(frame(), until);
+	};
+	const pressOnce = async (key: string, screen: RegExp, until: RegExp) => {
+		await waitFor(screen);
+		await sleep(100);
+		stdin.write(key);
+		await waitFor(until);
+	};
+
+	// Edit this server, then accept the transport, name, URL, command and
+	// args fields.
+	await waitFor(/Edit this server/);
+	await pressEnterUntil(/Environment variables/);
+
+	// One key per write, as a person types. Keys this close together reach
+	// the handler before a re-render, so each edit must build on the last.
+	const type = async (keys: string[]) => {
+		for (const key of keys) {
+			stdin.write(key);
+			await sleep(20);
+		}
+	};
+	await type([...'API_KEY=abc123XY']);
+	await waitFor(/API_KEY=abc123XY/);
+	await type(['\u007F', '\u007F']);
+	await waitFor(/API_KEY=abc123(?!X)/);
+
+	// Esc submits the field. Done & Save is last in the list, and Up from the
+	// first item wraps to the last in ink-select-input.
+	await pressOnce('\u001B', /API_KEY=abc123(?!X)/, /Added: my-server/);
+	await pressOnce('\u001B[A', /Added: my-server/, /> Done & Save/);
+	stdin.write('\r');
+	for (let i = 0; i < 50 && !saved['my-server']; i++) {
+		await sleep(100);
+	}
+	t.deepEqual(saved['my-server']?.env, {API_KEY: 'abc123'});
 });

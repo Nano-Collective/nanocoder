@@ -15,6 +15,9 @@ import {
 	type ProjectContextOptions,
 } from '@/memory/project-context';
 import {SemanticMemoryManager} from '@/memory/semantic-memory-manager';
+import {consultPluginPermission} from '@/plugins/host';
+import {maybeAutoCommit} from '@/services/auto-commit';
+import {formatWrittenFile} from '@/services/formatters';
 import {
 	appendPostToolUseOutput,
 	runPreToolUseGate,
@@ -47,10 +50,15 @@ import type {
 import {maybeAutoCompact} from '@/utils/auto-compact';
 import {formatError} from '@/utils/error-formatter';
 import {capMessagesForModel} from '@/utils/message-capping';
+import {
+	clearReadContentScope,
+	runWithReadContentScope,
+} from '@/utils/read-tracker';
 import {signalToolApproval} from '@/utils/tool-approval-queue';
 import {parseToolArguments} from '@/utils/tool-args-parser';
 import {toolErrorToContent} from '@/utils/tool-validation';
 import {truncateToolResult} from '@/utils/truncate-tool-result';
+import {isGitPrCallAllowed, type TrustLevel} from '@/verify/trust';
 import {getSubagentLoader} from './subagent-loader.js';
 import type {
 	SubagentConfigWithSource,
@@ -188,6 +196,23 @@ export class SubagentExecutor {
 	 * @param agentId - Optional unique ID for concurrent progress tracking.
 	 *                  When provided, progress is written to the agent-specific
 	 *                  slot in the progress map instead of the global singleton.
+	 * @param toolOverride - Optional runtime narrowing of the subagent's
+	 *                  `tools`/`disallowedTools`, applied on top of whatever
+	 *                  the loaded config (frontmatter) declares. Lets a
+	 *                  caller enforce a trust-level allowlist (see
+	 *                  `source/verify/trust.ts`) without needing a second,
+	 *                  hand-maintained tool list in the subagent's own file.
+	 *                  `alwaysAllow` additionally skips the approval prompt
+	 *                  for the named tools (see `resolveToolApproval`'s
+	 *                  `ctx.alwaysAllow`) — for tools whose `approval` policy
+	 *                  isn't mode-aware and would otherwise be silently
+	 *                  auto-denied in headless mode (no approval-queue
+	 *                  handler is ever registered there). When given, it
+	 *                  replaces the user/project `alwaysAllow` config rather
+	 *                  than adding to it, so a checked-out repo's own config
+	 *                  can't pre-approve tools for a trust-gated run.
+	 *                  `trustLevel` makes every `git_pr` call be checked
+	 *                  against that level's allowed actions before approval.
 	 */
 	async execute(
 		task: SubagentTask,
@@ -195,6 +220,12 @@ export class SubagentExecutor {
 		depth = 0,
 		agentId?: string,
 		executionContext?: Omit<ToolExecutionContext, 'abortSignal'>,
+		toolOverride?: {
+			tools?: string[];
+			disallowedTools?: string[];
+			alwaysAllow?: string[];
+			trustLevel?: TrustLevel;
+		},
 	): Promise<SubagentResult> {
 		const startTime = Date.now();
 
@@ -210,9 +241,9 @@ export class SubagentExecutor {
 
 		try {
 			const loader = getSubagentLoader(this.projectRoot);
-			const config = await loader.getSubagent(task.subagent_type);
+			const loadedConfig = await loader.getSubagent(task.subagent_type);
 
-			if (!config) {
+			if (!loadedConfig) {
 				return {
 					subagentName: task.subagent_type,
 					output: '',
@@ -221,6 +252,16 @@ export class SubagentExecutor {
 					executionTimeMs: Date.now() - startTime,
 				};
 			}
+
+			const config: SubagentConfigWithSource = toolOverride
+				? {
+						...loadedConfig,
+						tools: toolOverride.tools ?? loadedConfig.tools,
+						disallowedTools:
+							toolOverride.disallowedTools ?? loadedConfig.disallowedTools,
+						trustLevel: toolOverride.trustLevel,
+					}
+				: loadedConfig;
 
 			const context = this.createSubagentContext(config, task);
 			const filteredTools = this.filterTools(config);
@@ -264,15 +305,20 @@ export class SubagentExecutor {
 			};
 
 			try {
-				const output = await this.runSubagentConversation(
-					client,
-					messages,
-					filteredTools,
-					config,
-					signal,
-					agentId,
-					executionContext,
-					recordUsage,
+				const output = await runWithReadContentScope(
+					agentId ?? 'subagent',
+					() =>
+						this.runSubagentConversation(
+							client,
+							messages,
+							filteredTools,
+							config,
+							signal,
+							agentId,
+							executionContext,
+							recordUsage,
+							toolOverride?.alwaysAllow,
+						),
 				);
 
 				// Read the final estimated progress count. Provider-reported usage is
@@ -292,6 +338,7 @@ export class SubagentExecutor {
 				await Promise.allSettled(pendingUsageWrites);
 				if (agentId) {
 					cleanupSubagentSession(agentId);
+					clearReadContentScope(agentId);
 				}
 				restoreParent();
 			}
@@ -517,6 +564,7 @@ export class SubagentExecutor {
 		agentId?: string,
 		executionContext?: Omit<ToolExecutionContext, 'abortSignal'>,
 		onApiCallComplete?: SubagentApiCallHandler,
+		alwaysAllow?: string[],
 	): Promise<string> {
 		let iterations = 0;
 		let totalToolCalls = 0;
@@ -753,21 +801,27 @@ export class SubagentExecutor {
 				emitProgress('tool_call', toolName);
 				await new Promise(resolve => setTimeout(resolve, 50));
 
-				const toolResult = await this.executeToolCall(
-					toolName,
-					toolCall.function.arguments,
-					toolCall.id,
-					config,
-					signal,
-					executionContext,
+				const toolResult = await runWithReadContentScope(
+					agentId ?? 'subagent',
+					() =>
+						this.executeToolCall(
+							toolName,
+							toolCall.function.arguments,
+							toolCall.id,
+							config,
+							signal,
+							executionContext,
+							alwaysAllow,
+						),
 				);
 
 				// Count tokens from tool results
-				totalTokens += estimateTokens(toolResult);
+				totalTokens += estimateTokens(toolResult.content);
 
 				messages.push({
 					role: 'tool',
-					content: toolResult,
+					content: toolResult.content,
+					...(toolResult.images ? {images: toolResult.images} : {}),
 					tool_call_id: toolCall.id,
 					name: toolName,
 				});
@@ -791,11 +845,12 @@ export class SubagentExecutor {
 	private async needsApprovalForTool(
 		toolName: string,
 		rawArguments: unknown,
+		alwaysAllow?: string[],
 	): Promise<boolean> {
 		const toolEntry = this.toolManager.getToolEntry(toolName);
 		return resolveToolApproval(toolName, toolEntry, rawArguments, {
 			mode: this.currentMode(),
-			alwaysAllow: getAppConfig().alwaysAllow ?? [],
+			alwaysAllow: alwaysAllow ?? getAppConfig().alwaysAllow ?? [],
 		});
 	}
 
@@ -809,9 +864,10 @@ export class SubagentExecutor {
 		config: SubagentConfigWithSource,
 		signal?: AbortSignal,
 		executionContext?: Omit<ToolExecutionContext, 'abortSignal'>,
-	): Promise<string> {
+		alwaysAllow?: string[],
+	): Promise<{content: string; images?: Message['images']}> {
 		if (signal?.aborted) {
-			return 'Error: Execution was cancelled';
+			return {content: 'Error: Execution was cancelled'};
 		}
 
 		// Enforce the allow-list at the execution boundary, not just when
@@ -822,15 +878,16 @@ export class SubagentExecutor {
 		// files, and let any subagent overwrite the parent session's plan, task
 		// list, or walkthrough (subagents run with the parent's session id).
 		if (!this.getAvailableToolNames(config).includes(toolName)) {
-			return (
-				`Error: Tool '${toolName}' is not available to this subagent. ` +
-				'Use only the tools listed in your instructions.'
-			);
+			return {
+				content:
+					`Error: Tool '${toolName}' is not available to this subagent. ` +
+					'Use only the tools listed in your instructions.',
+			};
 		}
 
 		const toolHandler = this.toolManager.getToolHandler(toolName);
 		if (!toolHandler) {
-			return `Error: Tool '${toolName}' not found`;
+			return {content: `Error: Tool '${toolName}' not found`};
 		}
 
 		// One ToolCall object for this call, shared by the approval prompt and
@@ -846,6 +903,19 @@ export class SubagentExecutor {
 			},
 		};
 
+		// A trust-gated run (verify, daemon CI) must never post to GitHub itself:
+		// the harness does that. Enforced here rather than relying on the
+		// approval prompt, which `alwaysAllow` or yolo mode would skip.
+		if (
+			toolName === 'git_pr' &&
+			config.trustLevel &&
+			!isGitPrCallAllowed(config.trustLevel, parsedArgs)
+		) {
+			return {
+				content: `Error: this git_pr action is not permitted at trust level '${config.trustLevel}'. Posting to GitHub is done by the harness.`,
+			};
+		}
+
 		// Subagents run their own loop rather than going through processToolUse,
 		// so the lifecycle gate has to be applied here too — a policy hook must
 		// hold for delegated work as much as for the main conversation. It runs
@@ -853,15 +923,21 @@ export class SubagentExecutor {
 		// approve something that is about to be refused anyway.
 		const gate = await runPreToolUseGate(toolCall, parsedArgs);
 		if (gate.blocked) {
-			return `Error: ${gate.reason}`;
+			return {content: `Error: ${gate.reason}`};
 		}
 
 		// Check if this tool needs user approval
 		const needsApproval = await this.needsApprovalForTool(
 			toolName,
 			rawArguments,
+			alwaysAllow,
 		);
 		if (needsApproval) {
+			const vote = await consultPluginPermission(toolName, parsedArgs);
+			if (vote.decision === 'deny') {
+				return {content: `Error: ${vote.reason}`};
+			}
+
 			// Pass the turn's signal: without it this await is the one place a
 			// subagent cannot be cancelled. `tool-executor` starts a batch of
 			// them and joins with `Promise.allSettled`, so one subagent parked
@@ -876,7 +952,7 @@ export class SubagentExecutor {
 			);
 
 			if (!approved) {
-				return 'Tool execution was denied by the user.';
+				return {content: 'Tool execution was denied by the user.'};
 			}
 		}
 
@@ -891,22 +967,47 @@ export class SubagentExecutor {
 				typeof result === 'string'
 					? result
 					: (result.llmContent ?? JSON.stringify(result));
-			return appendPostToolUseOutput(
+			const images =
+				typeof result === 'object' &&
+				result !== null &&
+				'images' in result &&
+				Array.isArray(result.images)
+					? result.images
+					: undefined;
+			// Formatters run on a successful write, before post-tool-use, as in
+			// processToolUse.
+			const truncated = truncateToolResult(content);
+			const failed =
+				typeof result !== 'string' && 'isError' in result && result.isError;
+			const formatted = failed
+				? truncated
+				: await formatWrittenFile(toolName, parsedArgs, truncated);
+			const withHooks = await appendPostToolUseOutput(
 				toolName,
 				parsedArgs,
-				truncateToolResult(content),
+				formatted,
 			);
+			// After the hooks, so a formatter hook's rewrite is committed too.
+			const commitNote = failed
+				? null
+				: await maybeAutoCommit(toolName, parsedArgs);
+			return {
+				content: commitNote ? `${withHooks}\n\n${commitNote}` : withHooks,
+				...(images && images.length > 0 ? {images} : {}),
+			};
 		} catch (error) {
 			// Handler validation failures surface here too (the handler is
 			// validated), formatted with any structured detail. post-tool-use
 			// still fires: a failed delegated call is exactly what an audit-log
 			// hook needs to see, and dropping it would make this surface disagree
 			// with processToolUse.
-			return appendPostToolUseOutput(
-				toolName,
-				parsedArgs,
-				truncateToolResult(toolErrorToContent(error)),
-			);
+			return {
+				content: await appendPostToolUseOutput(
+					toolName,
+					parsedArgs,
+					truncateToolResult(toolErrorToContent(error)),
+				),
+			};
 		}
 	}
 }

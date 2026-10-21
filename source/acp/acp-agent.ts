@@ -5,6 +5,8 @@ import type {
 	AuthenticateResponse,
 	CancelNotification,
 	ClientCapabilities,
+	CloseSessionRequest,
+	CloseSessionResponse,
 	DeleteSessionRequest,
 	DeleteSessionResponse,
 	DidFocusDocumentNotification,
@@ -37,7 +39,8 @@ import {
 	negotiateProtocolVersion,
 } from '@/acp/acp-capabilities';
 import {acpContentToUserMessage} from '@/acp/acp-content';
-import {runAcpConversation} from '@/acp/acp-conversation';
+import {clearAcpReadStubs, runAcpConversation} from '@/acp/acp-conversation';
+import {acpCustomCommandText} from '@/acp/acp-custom-command';
 import {AcpSession} from '@/acp/acp-session';
 import {resolveTruncationPoint} from '@/acp/acp-timeline';
 import type {AcpInitContext} from '@/acp/acp-types';
@@ -53,6 +56,8 @@ import {
 } from '@/config/preferences';
 import {resolveTune} from '@/config/tune';
 import {appendRelevantProjectContextWithCount} from '@/memory/project-context';
+import {setAutoCommitClient} from '@/services/auto-commit';
+import {runInSessionCwdScope} from '@/services/session-cwd';
 import {TimelineManager} from '@/services/timeline-manager';
 import {maybeGenerateTitle} from '@/session/maybe-generate-title';
 import {sessionManager} from '@/session/session-manager';
@@ -168,6 +173,7 @@ export class AcpAgent implements Agent {
 			await sessionManager.initialize();
 			const persisted = await sessionManager.loadSession(params.sessionId);
 			session = this.registerSession(params.sessionId, params.cwd);
+			clearAcpReadStubs(params.sessionId);
 			if (persisted) {
 				session.messages = persisted.messages;
 			}
@@ -195,15 +201,25 @@ export class AcpAgent implements Agent {
 			throw new Error(`Session not found: ${params.sessionId}`);
 		}
 
-		// ACP clients drive one turn per session at a time; reject overlap rather
-		// than letting two turns interleave mutations of session.messages.
-		if (session.turnActive) {
-			throw new Error(
-				`Prompt already in progress for session: ${params.sessionId}`,
-			);
+		// Wait for any in-flight turn. Rejecting overlap made the VS Code
+		// webview toast `RequestError: Internal error` whenever a follow-up
+		// was submitted mid-turn. Acquire before the first await so two
+		// concurrent calls cannot both pass an idle check.
+		const ticket = session.acquireTurn();
+		if (ticket.immediate) {
+			session.beginTurn();
+		}
+		await ticket.ready;
+		if (!ticket.immediate) {
+			session.beginTurn();
 		}
 
-		session.beginTurn();
+		// A prompt queued behind a turn that session/close cancelled must not
+		// start once the lock frees up: the client has already let go of it.
+		if (session.closed) {
+			session.releaseTurn();
+			return {stopReason: 'cancelled'};
+		}
 
 		// Both the cancel early-return below and the rethrow after it still run
 		// the finally, so a clean turn has to be tracked explicitly rather than
@@ -212,14 +228,16 @@ export class AcpAgent implements Agent {
 		const turnStart = Date.now();
 
 		try {
-			const {text: userText, images} = await acpContentToUserMessage(
-				params.prompt,
-				{
-					conn: this.conn,
-					sessionId: params.sessionId,
-					canReadTextFile: this.clientCapabilities?.fs?.readTextFile ?? false,
-				},
-			);
+			const {
+				text: userText,
+				typedText,
+				sections,
+				images,
+			} = await acpContentToUserMessage(params.prompt, {
+				conn: this.conn,
+				sessionId: params.sessionId,
+				canReadTextFile: this.clientCapabilities?.fs?.readTextFile ?? false,
+			});
 			logger.info(
 				`ACP prompt: session=${params.sessionId} text=${userText.slice(0, 100)} images=${images.length}`,
 			);
@@ -240,9 +258,11 @@ export class AcpAgent implements Agent {
 						this.initContext.customCommandLoader?.getCommand(commandName);
 
 					if (command) {
-						// Custom user-defined command — expand its instructions into the prompt
-						const commandInstruction = `### ${command.fullName}\n\n${command.content}`;
-						contextualUserText = `${contextualUserText}\n\n## Included Command Instructions\n\n${commandInstruction}\n\nPlease follow these instructions for the user's request above.`;
+						contextualUserText = acpCustomCommandText(
+							typedText,
+							command,
+							sections,
+						);
 					} else {
 						// Check for built-in commands that have special ACP handling
 						const sendBuiltinReply = (msg: string) => {
@@ -268,6 +288,7 @@ export class AcpAgent implements Agent {
 						if (commandName === 'clear') {
 							// Clear the conversation history and action timeline
 							session.messages = [];
+							clearAcpReadStubs(params.sessionId);
 							await session.timeline.clear();
 							const msg = 'Conversation cleared.';
 							this.conn.sessionUpdate({
@@ -447,7 +468,6 @@ export class AcpAgent implements Agent {
 
 			throw error;
 		} finally {
-			session.turnActive = false;
 			await this.saveAcpSessionToDisk(session).catch(err => {
 				logger.error(`Failed to save ACP session ${session.sessionId}: ${err}`);
 			});
@@ -475,6 +495,7 @@ export class AcpAgent implements Agent {
 					},
 				}).catch(() => {});
 			}
+			session.releaseTurn();
 		}
 	}
 
@@ -484,6 +505,24 @@ export class AcpAgent implements Agent {
 			logger.info(`ACP cancel: session=${params.sessionId}`);
 			session.cancel();
 		}
+	}
+
+	/**
+	 * Cancels any in-flight turn and frees the session's in-memory state. The
+	 * session stays on disk, so the client can load or resume it later.
+	 */
+	async closeSession(
+		params: CloseSessionRequest,
+	): Promise<CloseSessionResponse> {
+		const session = this.sessions.get(params.sessionId);
+		if (!session) {
+			return {};
+		}
+		logger.info(`ACP closeSession: session=${params.sessionId}`);
+		session.close();
+		this.sessions.delete(params.sessionId);
+		await session.timeline.dispose();
+		return {};
 	}
 
 	async setSessionMode(
@@ -524,9 +563,15 @@ export class AcpAgent implements Agent {
 				throw new Error(`Unknown provider: ${providerId}`);
 			}
 
+			const {client: newClient} = await createLLMClient(
+				providerId,
+				undefined,
+				undefined,
+				{strictProvider: true},
+			);
 			this.initContext.provider = providerId;
-			const {client: newClient} = await createLLMClient(providerId);
 			this.initContext.client = newClient;
+			setAutoCommitClient(newClient);
 
 			const availableModels = await newClient.getAvailableModels();
 			if (availableModels.includes(this.initContext.model)) {
@@ -610,6 +655,7 @@ export class AcpAgent implements Agent {
 		await sessionManager.deleteSession(params.sessionId);
 		// Evict from in-memory map if present
 		this.sessions.delete(params.sessionId);
+		clearAcpReadStubs(params.sessionId);
 		logger.info(`ACP deleteSession: ${params.sessionId}`);
 		return {};
 	}
@@ -630,6 +676,7 @@ export class AcpAgent implements Agent {
 			persisted.workingDirectory,
 		);
 		session.messages = persisted.messages;
+		clearAcpReadStubs(params.sessionId);
 		logger.info(
 			`ACP resumeSession: ${params.sessionId} messages=${persisted.messages.length}`,
 		);
@@ -702,6 +749,7 @@ export class AcpAgent implements Agent {
 				0,
 				resolveTruncationPoint(session.messages, result.revertedTo),
 			);
+			clearAcpReadStubs(sessionId);
 			// Harness chrome, not model output: it tells the user what the revert
 			// did. The model learns about the revert from the truncated history
 			// itself, so this must never come back as its own past turn.
@@ -757,6 +805,7 @@ export class AcpAgent implements Agent {
 			}
 			if (targetUserIdx >= 0) {
 				session.messages = session.messages.slice(0, targetUserIdx);
+				clearAcpReadStubs(sessionId);
 				await this.saveAcpSessionToDisk(session);
 				await session.timeline.truncateAfter(targetUserIdx);
 			}
@@ -1001,13 +1050,17 @@ export class AcpAgent implements Agent {
 			undefined,
 			model,
 		);
-		const basePrompt = buildSystemPrompt(
-			session.developmentMode,
-			tune,
-			availableNames,
-			toolsDisabled,
-			getAppConfig().systemPrompt,
-			model,
+		// Inside the session's scope, so the working directory the prompt reports
+		// and the AGENTS.md it appends come from the session's `cwd`.
+		const basePrompt = runInSessionCwdScope(session.cwdScope, () =>
+			buildSystemPrompt(
+				session.developmentMode,
+				tune,
+				availableNames,
+				toolsDisabled,
+				getAppConfig().systemPrompt,
+				model,
+			),
 		);
 		const toolsForPrompt = toolsDisabled
 			? toolManager.getFilteredTools(availableNames)
