@@ -21,7 +21,7 @@ sidebar_order: 28
 
 ## Setup
 
-1. Get an API key in the [Heabsy console](https://platform.heabsy.com); accounts are opened on request at [heabsy.com/contacts](https://heabsy.com/contacts).
+1. Sign in to the [Heabsy console](https://platform.heabsy.com) and create an API key.
 2. Paste the key into the `/settings providers` wizard, or export `HEABSY_API_KEY` and reference it as `"${HEABSY_API_KEY}"` in `apiKey` as shown above.
 
 See the [Heabsy model catalog](https://heabsy.com/models) for prices and for which models run in the EEA tier.
