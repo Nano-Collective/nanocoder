@@ -1256,6 +1256,63 @@ test('runAcpConversation - marks tool as failed when result starts with Error', 
 	t.is(failedUpdate?.update.rawOutput, 'Error: something went wrong');
 });
 
+test('runAcpConversation - marks tool as failed when it reports isError without an Error prefix', async t => {
+	const {conn, updates} = createMockConn();
+	const session = createMockSession(conn, {devMode: 'yolo'});
+	const toolManager = {
+		...createMockToolManager(),
+		hasTool: () => true,
+		getToolEntry: () => ({approval: false}),
+	};
+
+	// A command that ran and exited non-zero: the text is a plain exit report
+	setToolRegistryGetter(() => ({
+		failing_tool: async () => ({llmContent: 'EXIT_CODE: 3\n', isError: true}),
+	}));
+
+	let callCount = 0;
+	const client = {
+		chat: async () => {
+			callCount++;
+			if (callCount === 1) {
+				return {
+					choices: [
+						{
+							message: {
+								content: '',
+								tool_calls: [
+									createMockToolCall('failing_tool', {}, 'call-1'),
+								],
+							},
+						},
+					],
+				};
+			}
+
+			return {
+				choices: [{message: {content: 'The command failed'}}],
+			};
+		},
+	} as unknown as LLMClient;
+
+	await runAcpConversation({
+		session,
+		client,
+		toolManager: toolManager as any,
+		conn,
+		nonInteractiveAlwaysAllow: [],
+	});
+
+	const finalUpdates = updates.filter(
+		(u: any) =>
+			u.update.sessionUpdate === 'tool_call_update' &&
+			(u.update.status === 'failed' || u.update.status === 'completed'),
+	);
+	t.is(finalUpdates.length, 1);
+	t.is(finalUpdates[0].update.status, 'failed');
+	t.is(finalUpdates[0].update.rawOutput, 'EXIT_CODE: 3\n');
+});
+
 // ============================================================================
 // Permission denied
 // ============================================================================
