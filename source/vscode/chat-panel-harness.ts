@@ -504,6 +504,5 @@ export function createPanel(options: {marked?: boolean} = {}) {
 			root,
 			'pending-changes-container',
 		) as StubElement,
-
 	};
 }
