@@ -1,7 +1,7 @@
 ---
 title: "Heabsy"
 description: "Configure Heabsy as a cloud AI provider for Nanocoder"
-sidebar_order: 27
+sidebar_order: 28
 ---
 
 # Heabsy
