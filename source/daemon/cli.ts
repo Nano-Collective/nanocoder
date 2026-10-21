@@ -31,7 +31,13 @@ import {
 	isFullCommitTrustConfirmed,
 	recordFullCommitTrustConfirmed,
 } from './full-commit-trust';
-import {getLockfilePath, readLiveLockfile, readLockfile} from './lockfile';
+import {
+	getLockfilePath,
+	getSocketPath,
+	readLiveLockfile,
+	readLockfile,
+	writeLockfile,
+} from './lockfile';
 
 function getLogPath(projectRoot: string): string {
 	return join(projectRoot, '.nanocoder', 'daemon.log');
@@ -231,6 +237,12 @@ async function uninstallCommand(
 async function start(opts: DaemonCliOptions): Promise<DaemonCliResult> {
 	const live = await readLiveLockfile(opts.projectRoot);
 	if (live) {
+		if (live.starting) {
+			return {
+				exitCode: 0,
+				output: `Daemon is starting (pid ${live.pid}, lockfile exists but the socket is not bound yet). Run \`nanocoder daemon status\` shortly to confirm it is ready.`,
+			};
+		}
 		return {
 			exitCode: 0,
 			output: `Daemon already running (pid ${live.pid}).`,
@@ -323,14 +335,30 @@ async function start(opts: DaemonCliOptions): Promise<DaemonCliResult> {
 		};
 	}
 
+	// Publish a starting marker before the boot wait begins: a concurrent
+	// `start` then reads a live pid at the lockfile path and must not spawn
+	// a second daemon while this one is still loading (#1737). The daemon
+	// overwrites the marker with its real lockfile once the socket is
+	// bound, and `readLiveLockfile` reaps a dead pid, so a boot that dies
+	// before that point cleans itself up.
+	if (child.pid) {
+		await writeLockfile({
+			pid: child.pid,
+			socketPath: getSocketPath(opts.projectRoot),
+			startedAt: Date.now(),
+			projectRoot: opts.projectRoot,
+			starting: true,
+		});
+	}
+
 	// Wait briefly for the daemon to write its lockfile, so `start` reports
 	// success only if the boot actually happened.
 	const lock = await waitForLockfile(opts.projectRoot, 5000);
 	if (!lock) {
 		return {
-			exitCode: 1,
+			exitCode: 0,
 			output:
-				'Daemon process spawned but did not write a lockfile within 5s. Check the daemon log.',
+				'Daemon process spawned and is still starting. Run `nanocoder daemon status` shortly to confirm it is ready.',
 		};
 	}
 
@@ -423,6 +451,12 @@ async function status(opts: DaemonCliOptions): Promise<DaemonCliResult> {
 			output: `Stale lockfile cleaned (was pid ${lock.pid}). Daemon is not running.`,
 		};
 	}
+	if (live.starting) {
+		return {
+			exitCode: 0,
+			output: `Starting. pid ${live.pid} is still booting and has not bound the socket yet.`,
+		};
+	}
 	const uptime = formatUptime(Date.now() - live.startedAt);
 	return {
 		exitCode: 0,
@@ -508,7 +542,11 @@ async function waitForLockfile(
 			// the socket location can depend on TMPDIR, which need not match
 			// between a launchd/systemd-started daemon and this process.
 			const live = await readLiveLockfile(projectRoot);
-			if (live) return {pid: live.pid, socketPath: live.socketPath};
+			// The boot is only finished when the daemon's own lockfile, not
+			// the starting marker `start` itself published, sits at the path.
+			if (live && !live.starting) {
+				return {pid: live.pid, socketPath: live.socketPath};
+			}
 		}
 		await new Promise(r => setTimeout(r, 50));
 	}
