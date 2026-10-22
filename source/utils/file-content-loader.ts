@@ -122,6 +122,9 @@ export async function loadFileContent(
 
 		// Split into lines
 		const allLines = content.split('\n');
+		if (content.endsWith('\n')) {
+			allLines.pop();
+		}
 		const totalLines = allLines.length;
 
 		// Extract line range if specified
