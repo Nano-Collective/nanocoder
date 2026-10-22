@@ -25,7 +25,9 @@ function resolveInitialConfig(): FirewallConfig {
 				...fw,
 				enabled,
 				mode,
-				protectedPatterns: fw.protectedPatterns ? [...fw.protectedPatterns] : [],
+				protectedPatterns: fw.protectedPatterns
+					? [...fw.protectedPatterns]
+					: [],
 			};
 		}
 	} catch {
