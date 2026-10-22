@@ -1,5 +1,5 @@
 import {config as loadEnv} from 'dotenv';
-import {existsSync, mkdirSync, readFileSync, writeFileSync} from 'fs';
+import {existsSync, mkdirSync, readFileSync, statSync, writeFileSync} from 'fs';
 import {join} from 'path';
 import {type CliMode, VALID_MODES} from '@/app/types';
 import {substituteEnvVars} from '@/config/env-substitution';
@@ -131,6 +131,37 @@ function createDefaultConfFile(filePath: string, fileName: string): void {
 	}
 }
 
+type ConfigFileCacheEntry = {
+	mtimeMs: number;
+	size: number;
+	data: unknown;
+};
+
+const configFileCache = new Map<string, ConfigFileCacheEntry>();
+
+function readCachedConfigFile(configPath: string): unknown {
+	const stats = statSync(configPath);
+	const cached = configFileCache.get(configPath);
+
+	if (
+		cached &&
+		cached.mtimeMs === stats.mtimeMs &&
+		cached.size === stats.size
+	) {
+		return structuredClone(cached.data);
+	}
+
+	const data: unknown = JSON.parse(readFileSync(configPath, 'utf-8'));
+
+	configFileCache.set(configPath, {
+		mtimeMs: stats.mtimeMs,
+		size: stats.size,
+		data: structuredClone(data),
+	});
+
+	return data;
+}
+
 /**
  * Read a JSON config file and hand the parsed contents to `extract`. Returns
  * null when the file is missing, unparseable, or `extract` rejects it. The
@@ -147,7 +178,7 @@ function tryLoadConfig<T>(
 	}
 
 	try {
-		const config = JSON.parse(readFileSync(configPath, 'utf-8'));
+		const config = readCachedConfigFile(configPath);
 		return extract(config);
 	} catch (error) {
 		logError(
@@ -997,12 +1028,13 @@ export function getRetryLimits(): RetryLimitsConfig {
 
 // Function to reload the app configuration (useful after config file changes)
 export function reloadAppConfig(): void {
+	configFileCache.clear();
 	_appConfig = loadAppConfig();
 	_configGeneration++;
 }
 
-// Function to clear the cached app configuration (useful for testing)
 export function clearAppConfig(): void {
+	configFileCache.clear();
 	_appConfig = null;
 	_configGeneration++;
 }
