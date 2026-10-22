@@ -3,7 +3,7 @@ import {join, relative} from 'node:path';
 import test from 'ava';
 import {processToolUse, setToolRegistryGetter} from '@/message-handler';
 import type {EditRecoveryPayload} from '@/utils/edit-recovery';
-import {clearReadTracker, markFileSeen} from '@/utils/read-tracker';
+import {clearReadTracker, markFileSeenAndVisible} from '@/utils/read-tracker';
 import {withValidation} from '@/utils/tool-validation';
 import {diffEditTool} from './diff-edit';
 import {stringReplaceTool} from './string-replace';
@@ -28,7 +28,7 @@ test('validated string_replace returns evidence through processToolUse and exact
 	const path = relative(process.cwd(), file);
 	const original = 'function run() {\n\n\tstart();\n}\n';
 	await writeFile(file, original);
-	markFileSeen(file);
+	markFileSeenAndVisible(file);
 	const execute = stringReplaceTool.tool.execute!;
 	setToolRegistryGetter(() => ({
 		string_replace: withValidation(args => execute(args, {toolCallId: 'test', messages: []}), stringReplaceTool.validator),
@@ -64,7 +64,7 @@ test('diff_edit reports the failing block and never applies earlier valid blocks
 	const path = relative(process.cwd(), file);
 	const original = 'const first = 1;\n\tconst second = 2;\n';
 	await writeFile(file, original);
-	markFileSeen(file);
+	markFileSeenAndVisible(file);
 	const block = (search: string, replacement: string) => ['<<<<<<< SEARCH', search, '=======', replacement, '>>>>>>> REPLACE'].join('\n');
 	const diff = block('const first = 1;', 'const first = 3;') + '\n' + block('  const second = 2;', 'const second = 4;');
 	const validation = await diffEditTool.validator!({path, diff});

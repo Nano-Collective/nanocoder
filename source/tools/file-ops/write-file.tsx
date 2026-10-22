@@ -1,5 +1,5 @@
 import {constants, existsSync} from 'node:fs';
-import {access, readFile, writeFile} from 'node:fs/promises';
+import {access, lstat, readFile, writeFile} from 'node:fs/promises';
 import {dirname, resolve} from 'node:path';
 import {highlight} from 'cli-highlight';
 import {Box, Text} from 'ink';
@@ -20,8 +20,11 @@ import {validateEditableFormat, validatePath} from '@/utils/path-validators';
 import {getLanguageFromExtension} from '@/utils/programming-language-helper';
 import {
 	forgetReadContent,
+	forgetVisibilityReceipt,
 	hasSeenFile,
+	hasVisibleLines,
 	markFileSeen,
+	recordVisibilityReceipt,
 } from '@/utils/read-tracker';
 import {calculateTokens} from '@/utils/token-calculator';
 import {createFileToolApproval} from '@/utils/tool-approval';
@@ -75,6 +78,15 @@ const executeWriteFile = async (args: {
 	// follow-up edit or rewrite is not blind.
 	markFileSeen(absPath);
 	forgetReadContent(absPath);
+	// Record full-file visibility receipt since the model just wrote all content
+	forgetVisibilityReceipt(absPath);
+	try {
+		const stats = await lstat(absPath);
+		// Full file visibility (undefined start/end means entire file)
+		recordVisibilityReceipt(absPath, stats, undefined, undefined);
+	} catch {
+		// If stat fails, fall back to file-level tracking only
+	}
 
 	// Read back to verify the write succeeded (but don't echo the content back
 	// to the model — it just sent us that exact content as the tool call
@@ -455,6 +467,32 @@ const writeFileValidator = async (args: {
 			valid: false,
 			error: `"${args.path}" already exists and you have not read it this session. Call read_file on it first — if the file is over 300 lines, specify start_line and end_line to read its actual content, not just metadata — so you don't discard existing content, then retry. For small changes, prefer string_replace over a full overwrite.`,
 		};
+	}
+
+	// Line-level visibility check for overwrites: if the file exists and has been
+	// seen at the file level, ensure the agent has actually read the content
+	// being overwritten. This prevents partial reads followed by blind overwrites.
+	if (existsSync(absPath) && hasSeenFile(absPath)) {
+		try {
+			const stats = await lstat(absPath);
+			const cached = await getCachedFileContent(absPath);
+			const fileContent = cached.content;
+			const totalLines = fileContent.split('\n').length;
+
+			// Check if all lines in the existing file have been seen
+			const allLines = Array.from({length: totalLines}, (_, i) => i + 1);
+			const visibilityCheck = hasVisibleLines(absPath, stats, allLines);
+
+			if (!visibilityCheck.visible) {
+				return {
+					valid: false,
+					error: `You are overwriting "${args.path}" but haven't read all of its content. ${visibilityCheck.error} Read the entire file before overwriting, or use string_replace for targeted edits.`,
+				};
+			}
+		} catch {
+			// If visibility check fails (file deleted, etc.), fall back to file-level
+			// check which already passed. This preserves backward compatibility.
+		}
 	}
 
 	// Allow empty strings (intentional file creation)

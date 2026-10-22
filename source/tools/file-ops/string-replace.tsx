@@ -1,5 +1,5 @@
 import {constants} from 'node:fs';
-import {access, writeFile} from 'node:fs/promises';
+import {access, lstat, writeFile} from 'node:fs/promises';
 import {resolve} from 'node:path';
 import React from 'react';
 import {getColors} from '@/config/index';
@@ -13,8 +13,11 @@ import {replaceFirstLiteral} from '@/utils/literal-replace';
 import {validateEditableFormat, validatePath} from '@/utils/path-validators';
 import {
 	forgetReadContent,
+	getLineNumbersForText,
 	hasSeenFile,
+	hasVisibleLines,
 	markFileSeen,
+	recordVisibilityReceipt,
 } from '@/utils/read-tracker';
 import {createFileToolApproval} from '@/utils/tool-approval';
 import {
@@ -110,6 +113,20 @@ const executeStringReplace = async (
 	// not blind.
 	markFileSeen(absPath);
 	forgetReadContent(absPath);
+	// Record visibility for the new edited range. Don't clear other receipts —
+	// mtime/size tracking in hasVisibleLines already detects external changes,
+	// and clearing here would incorrectly invalidate other legitimately-read
+	// ranges in the same file.
+	try {
+		const stats = await lstat(absPath);
+		const matchIndex = fileContent.indexOf(old_str);
+		const startLine = fileContent.slice(0, matchIndex).split('\n').length;
+		const newStrLines = new_str.split('\n');
+		const newEndLine = startLine + newStrLines.length - 1;
+		recordVisibilityReceipt(absPath, stats, startLine, newEndLine);
+	} catch {
+		// If stat fails, fall back to file-level tracking only
+	}
 
 	const oldStrLines = old_str.split('\n');
 	const newStrLines = new_str.split('\n');
@@ -280,6 +297,26 @@ const stringReplaceValidator = async (
 				valid: false,
 				error: `Found ${occurrences} matches for the search string. Please provide more surrounding context to make the match unique.`,
 			};
+		}
+
+		// Line-level visibility check: ensure the agent has actually read the lines
+		// being edited. This prevents blind edits where the model hallucinates
+		// content it never saw.
+		const targetLines = getLineNumbersForText(fileContent, old_str);
+		if (targetLines.length > 0) {
+			try {
+				const stats = await lstat(absPath);
+				const visibilityCheck = hasVisibleLines(absPath, stats, targetLines);
+				if (!visibilityCheck.visible) {
+					return {
+						valid: false,
+						error: visibilityCheck.error ?? 'Lines not visible',
+					};
+				}
+			} catch {
+				// If we can't stat the file, fall back to file-level check (already passed)
+				// This preserves backward compatibility if stat fails for any reason
+			}
 		}
 	} catch (error) {
 		const errorMessage = formatError(error);
