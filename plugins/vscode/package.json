@@ -223,7 +223,7 @@
 		"vscode:prepublish": "pnpm run build",
 		"build": "concurrently \"pnpm run build:ext\" \"pnpm run build:css\"",
 		"watch": "concurrently \"pnpm run watch:ext\" \"pnpm run watch:css\"",
-		"build:ext": "esbuild ./src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --minify --sourcemap",
+		"build:ext": "esbuild ./src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --minify",
 		"watch:ext": "esbuild ./src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --watch",
 		"build:css": "tailwindcss -i ./src/styles.css -o ./media/chat-panel.css --minify",
 		"watch:css": "tailwindcss -i ./src/styles.css -o ./media/chat-panel.css --watch",
