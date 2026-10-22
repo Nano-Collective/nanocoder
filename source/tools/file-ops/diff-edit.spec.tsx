@@ -8,7 +8,10 @@ import {ThemeContext} from '../../hooks/useTheme.js';
 import {resolveToolApproval} from '../approval-policy.js';
 import {clearReadTracker, markFileSeen} from '../../utils/read-tracker.js';
 import {diffEditTool, parseDiffEditBlocks} from './diff-edit.js';
-import {resetFirewallConfig} from '../../firewall/mutation-firewall.js';
+import {
+	resetFirewallConfig,
+	setFirewallConfig,
+} from '../../firewall/mutation-firewall.js';
 
 console.log(`\ndiff-edit.spec.tsx - ${React.version}`);
 
@@ -503,6 +506,7 @@ test('diff_edit formatter does not render description when omitted', async t => 
 });
 
 test('diff_edit: throws when mutation firewall blocks test deletion', async t => {
+	setFirewallConfig({mode: 'strict', enabled: true});
 	const filePath = await createTestFile(
 		'math.spec.ts',
 		"test('adds numbers', () => {});\ntest('multiplies numbers', () => {});\n",

@@ -10,7 +10,10 @@ import {ThemeContext} from '../../hooks/useTheme.js';
 import {resetSessionCwd, setSessionCwd} from '../../services/session-cwd.js';
 import {stringReplaceTool} from './string-replace.js';
 import {clearReadTracker, markFileSeen} from '../../utils/read-tracker.js';
-import {resetFirewallConfig} from '../../firewall/mutation-firewall.js';
+import {
+	resetFirewallConfig,
+	setFirewallConfig,
+} from '../../firewall/mutation-firewall.js';
 import {readFileTool} from '../read-file.js';
 import {buildMinimalPdf} from '../../test-utils/minimal-pdf.js';
 
@@ -1324,6 +1327,7 @@ test('string_replace: formatter does not render description when omitted', async
 });
 
 test('string_replace: throws when mutation firewall blocks test deletion', async t => {
+	setFirewallConfig({mode: 'strict', enabled: true});
 	const filePath = await createTestFile(
 		'feature.spec.ts',
 		"test('feature A', () => {});\ntest('feature B', () => {});\n",

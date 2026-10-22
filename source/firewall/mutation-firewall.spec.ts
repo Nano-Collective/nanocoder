@@ -11,7 +11,18 @@ test.beforeEach(() => {
 	resetFirewallConfig();
 });
 
-test('allows harmless mutations without violations', (t) => {
+test('defaults to disabled (opt-in)', (t) => {
+	const config = getFirewallConfig();
+	t.false(config.enabled);
+	t.is(config.mode, 'disabled');
+
+	const result = evaluateMutationEnvelope('package.json', '{}', '{"a": 1}');
+	t.true(result.allowed);
+	t.is(result.violations.length, 0);
+});
+
+test('allows harmless mutations without violations in strict mode', (t) => {
+	setFirewallConfig({ mode: 'strict' });
 	const oldCode = `export function add(a: number, b: number): number { return a + b; }`;
 	const newCode = `export function add(a: number, b: number): number { return (a + b); }`;
 
@@ -21,7 +32,7 @@ test('allows harmless mutations without violations', (t) => {
 });
 
 test('blocks modification to protected configuration files', (t) => {
-	setFirewallConfig({ protectedPatterns: ['package.json'] });
+	setFirewallConfig({ mode: 'strict', protectedPatterns: ['package.json'] });
 	const oldContent = `{"name": "test"}`;
 	const newContent = `{"name": "test", "version": "1.0.0"}`;
 
@@ -32,7 +43,7 @@ test('blocks modification to protected configuration files', (t) => {
 });
 
 test('anchors protected patterns and does not match unanchored suffixes', (t) => {
-	setFirewallConfig({ protectedPatterns: ['package.json'] });
+	setFirewallConfig({ mode: 'strict', protectedPatterns: ['package.json'] });
 	const result = evaluateMutationEnvelope('my-package.json', '{}', '{"a": 1}');
 	t.true(result.allowed);
 	t.is(result.violations.length, 0);
@@ -61,6 +72,7 @@ test('allows protected config files when disabled or lenient', (t) => {
 });
 
 test('blocks injection of any types in strict mode', (t) => {
+	setFirewallConfig({ mode: 'strict' });
 	const oldCode = `const x: number = 1;`;
 	const newCode = `const x: any = 1;`;
 
@@ -72,6 +84,7 @@ test('blocks injection of any types in strict mode', (t) => {
 });
 
 test('blocks test deletion in test files', (t) => {
+	setFirewallConfig({ mode: 'strict' });
 	const oldCode = `test('case 1', () => {});\ntest('case 2', () => {});`;
 	const newCode = `test('case 1', () => {});`;
 
@@ -82,7 +95,7 @@ test('blocks test deletion in test files', (t) => {
 });
 
 test('can configure custom protected patterns', (t) => {
-	setFirewallConfig({ protectedPatterns: ['secrets/**', 'config.yaml'] });
+	setFirewallConfig({ mode: 'strict', protectedPatterns: ['secrets/**', 'config.yaml'] });
 	const config = getFirewallConfig();
 	t.deepEqual(config.protectedPatterns, ['secrets/**', 'config.yaml']);
 

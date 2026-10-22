@@ -25,8 +25,17 @@ test('firewallCommand renders status view by default', async (t) => {
 	const output = lastFrame() || '';
 
 	t.true(output.includes('Mutation Firewall Configuration'));
-	t.true(output.includes('ENABLED'));
-	t.true(output.includes('STRICT'));
+	t.true(output.includes('DISABLED'));
+});
+
+test('firewallCommand enables and disables firewall', async (t) => {
+	await firewallCommand.handler(['enable'], [], mockMetadata);
+	t.is(getFirewallConfig().mode, 'strict');
+	t.true(getFirewallConfig().enabled);
+
+	await firewallCommand.handler(['disable'], [], mockMetadata);
+	t.is(getFirewallConfig().mode, 'disabled');
+	t.false(getFirewallConfig().enabled);
 });
 
 test('firewallCommand configures mode', async (t) => {
@@ -58,10 +67,11 @@ test('firewallCommand manages protected patterns', async (t) => {
 });
 
 test('firewallCommand resets config', async (t) => {
-	await firewallCommand.handler(['mode', 'disabled'], [], mockMetadata);
-	t.is(getFirewallConfig().mode, 'disabled');
-
-	await firewallCommand.handler(['reset'], [], mockMetadata);
+	await firewallCommand.handler(['mode', 'strict'], [], mockMetadata);
 	t.is(getFirewallConfig().mode, 'strict');
 	t.true(getFirewallConfig().enabled);
+
+	await firewallCommand.handler(['reset'], [], mockMetadata);
+	t.is(getFirewallConfig().mode, 'disabled');
+	t.false(getFirewallConfig().enabled);
 });

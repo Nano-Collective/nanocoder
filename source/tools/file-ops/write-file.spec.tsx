@@ -10,7 +10,10 @@ import {resolveToolApproval} from '../approval-policy.js';
 import {ThemeContext} from '../../hooks/useTheme.js';
 import {writeFileTool} from './write-file.js';
 import {clearReadTracker, markFileSeen} from '../../utils/read-tracker.js';
-import {resetFirewallConfig} from '../../firewall/mutation-firewall.js';
+import {
+	resetFirewallConfig,
+	setFirewallConfig,
+} from '../../firewall/mutation-firewall.js';
 
 // ============================================================================
 // Test Helpers
@@ -1142,6 +1145,7 @@ test('write_file formatter: does not render description when omitted', async t =
 });
 
 test('write_file: throws when mutation firewall blocks test deletion', async t => {
+	setFirewallConfig({mode: 'strict', enabled: true});
 	const filePath = await createTestFile(
 		'service.spec.ts',
 		"test('preserves behavior', () => {});\ntest('old test', () => {});\n",
@@ -1162,6 +1166,12 @@ test('write_file: throws when mutation firewall blocks test deletion', async t =
 });
 
 test('write_file: fails closed when existing file cannot be read and leaves disk untouched', async t => {
+	if (process.platform === 'win32') {
+		t.pass('Skipped on Windows: POSIX chmod 000 is not supported');
+		return;
+	}
+
+	setFirewallConfig({mode: 'strict', enabled: true});
 	const filePath = await createTestFile('protected.txt', 'secret original content');
 	await chmod(filePath, 0o000);
 

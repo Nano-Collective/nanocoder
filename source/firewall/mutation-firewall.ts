@@ -1,5 +1,6 @@
 import {relative, resolve} from 'node:path';
 import ignore from 'ignore';
+import {getAppConfig} from '@/config/index';
 import type {
 	FirewallConfig,
 	FirewallEvaluationResult,
@@ -12,46 +13,71 @@ import {
 	detectExportSignatureModifications,
 } from './ast-checker';
 
-let currentConfig: FirewallConfig = {...FIREWALL_DEFAULTS};
+function resolveInitialConfig(): FirewallConfig {
+	try {
+		const appConfig = getAppConfig();
+		if (appConfig.firewall) {
+			const fw = appConfig.firewall;
+			const enabled = fw.enabled ?? (fw.mode ? fw.mode !== 'disabled' : false);
+			const mode = fw.mode ?? (enabled ? 'strict' : 'disabled');
+			return {
+				...FIREWALL_DEFAULTS,
+				...fw,
+				enabled,
+				mode,
+				protectedPatterns: fw.protectedPatterns ? [...fw.protectedPatterns] : [],
+			};
+		}
+	} catch {
+		// AppConfig may not be loaded yet
+	}
+	return {...FIREWALL_DEFAULTS};
+}
+
+let sessionConfig: FirewallConfig | null = null;
 
 /**
  * Gets the current active firewall configuration.
  */
 export function getFirewallConfig(): FirewallConfig {
-	return {...currentConfig};
+	if (sessionConfig === null) {
+		sessionConfig = resolveInitialConfig();
+	}
+	return {...sessionConfig};
 }
 
 /**
- * Updates the active firewall configuration.
+ * Updates the active firewall configuration for the current session.
  */
 export function setFirewallConfig(
 	config: Partial<FirewallConfig>,
 ): FirewallConfig {
-	const nextMode = config.mode ?? currentConfig.mode;
+	const current = getFirewallConfig();
+	const nextMode = config.mode ?? current.mode;
 	const nextEnabled =
 		config.enabled !== undefined
 			? config.enabled
 			: config.mode !== undefined
 				? config.mode !== 'disabled'
-				: currentConfig.enabled;
+				: current.enabled;
 
-	currentConfig = {
-		...currentConfig,
+	sessionConfig = {
+		...current,
 		...config,
 		enabled: nextEnabled,
 		mode: nextMode,
 		protectedPatterns: config.protectedPatterns
 			? [...config.protectedPatterns]
-			: currentConfig.protectedPatterns,
+			: current.protectedPatterns,
 	};
 	return getFirewallConfig();
 }
 
 /**
- * Resets the firewall configuration to defaults.
+ * Resets the firewall configuration to defaults or agents.config.json.
  */
 export function resetFirewallConfig(): FirewallConfig {
-	currentConfig = {...FIREWALL_DEFAULTS};
+	sessionConfig = resolveInitialConfig();
 	return getFirewallConfig();
 }
 
@@ -104,7 +130,7 @@ export function evaluateMutationEnvelope(
 	customConfig?: Partial<FirewallConfig>,
 ): FirewallEvaluationResult {
 	const config: FirewallConfig = {
-		...currentConfig,
+		...getFirewallConfig(),
 		...customConfig,
 	};
 

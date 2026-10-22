@@ -21,6 +21,16 @@ export const firewallCommand: Command = {
 
 		const subCommand = args[0]?.toLowerCase();
 
+		if (subCommand === 'enable') {
+			setFirewallConfig({mode: 'strict', enabled: true});
+			return successMsg("Firewall enabled in 'strict' mode.", 'firewall');
+		}
+
+		if (subCommand === 'disable') {
+			setFirewallConfig({mode: 'disabled', enabled: false});
+			return successMsg('Firewall disabled.', 'firewall');
+		}
+
 		if (subCommand === 'mode') {
 			const mode = args[1]?.toLowerCase() as FirewallMode;
 			if (!mode || !['strict', 'lenient', 'disabled'].includes(mode)) {

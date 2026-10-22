@@ -7,7 +7,10 @@ import React from 'react';
 import ToolMessage, {CappedLines} from '@/components/tool-message';
 import {getSyntaxTheme} from '@/config/themes';
 import {DEFAULT_TERMINAL_COLUMNS} from '@/constants';
-import {evaluateMutationEnvelope} from '@/firewall/mutation-firewall';
+import {
+	evaluateMutationEnvelope,
+	getFirewallConfig,
+} from '@/firewall/mutation-firewall';
 import {ThemeContext} from '@/hooks/useTheme';
 import {getSafeSessionCwd} from '@/services/session-cwd';
 import type {NanocoderToolExport} from '@/types/core';
@@ -77,9 +80,12 @@ const executeWriteFile = async (args: {
 				originalContent = await readFile(absPath, 'utf-8');
 				previousContentCache.set(absPath, originalContent);
 			} catch (readError) {
-				throw new Error(
-					`[Mutation Firewall] Blocked mutation: failed to read existing file '${args.path}' for validation: ${formatError(readError)}`,
-				);
+				const fwConfig = getFirewallConfig();
+				if (fwConfig.enabled && fwConfig.mode !== 'disabled') {
+					throw new Error(
+						`[Mutation Firewall] Blocked mutation: failed to read existing file '${args.path}' for validation: ${formatError(readError)}`,
+					);
+				}
 			}
 		}
 	}
