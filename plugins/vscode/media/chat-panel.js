@@ -2490,8 +2490,10 @@
 			case 'pendingChangeAdded':
 				pendingChangesDismissed = false;
 
+				// The same action announced twice replaces itself. Two separate actions on
+				// one file stay separate, since each may still be waiting for approval.
 				pendingChanges = pendingChanges.filter(
-					change => change.toolCallId !== message.toolCallId && change.filePath !== message.filePath
+					change => change.toolCallId !== message.toolCallId
 				);
 
 				pendingChanges.push({

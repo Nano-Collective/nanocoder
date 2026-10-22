@@ -451,7 +451,7 @@ test('renders a pending change from an ACP diff update', t => {
 	t.is(row.children[1].children[1].textContent, ' -0')
 });
 
-test('does not duplicate a pending change for the same file when tool call ids differ', t => {
+test('replaces a pending change announced again with the same tool call id', t => {
 	const panel = createPanel();
 
 	panel.post({
@@ -461,7 +461,31 @@ test('does not duplicate a pending change for the same file when tool call ids d
 		additions: 1,
 		deletions: 0,
 	});
+	panel.post({
+		type: 'pendingChangeAdded',
+		toolCallId: 'change-1',
+		filePath: 'auth.ts',
+		additions: 2,
+		deletions: 1,
+	});
 
+	const content = panel.pendingChangesContainer.children[0].children[1];
+
+	t.is(content.children.length, 1);
+	t.is(content.children[0].children[1].children[0].textContent, '+2');
+	t.is(content.children[0].children[1].children[1].textContent, ' -1');
+});
+
+test('keeps two pending changes to the same file when their tool call ids differ', t => {
+	const panel = createPanel();
+
+	panel.post({
+		type: 'pendingChangeAdded',
+		toolCallId: 'change-1',
+		filePath: 'auth.ts',
+		additions: 1,
+		deletions: 0,
+	});
 	panel.post({
 		type: 'pendingChangeAdded',
 		toolCallId: 'change-2',
@@ -470,12 +494,15 @@ test('does not duplicate a pending change for the same file when tool call ids d
 		deletions: 1,
 	});
 
-	const card = panel.pendingChangesContainer.children[0];
-	const content = card.children[1];
+	const content = panel.pendingChangesContainer.children[0].children[1];
 
-	t.is(content.children.length, 1);
-	t.is(content.children[0].children[1].children[0].textContent, '+2');
-	t.is(content.children[0].children[1].children[1].textContent, ' -1');
+	t.is(content.children.length, 2);
+
+	content.children[0].click();
+	t.deepEqual(panel.sent.at(-1), {
+		type: 'showDiff',
+		toolCallId: 'change-1',
+	});
 });
 
 test('clears the pending changes card when the conversation is cleared', t => {
