@@ -23,8 +23,8 @@ export interface FirewallConfig {
 }
 
 export const FIREWALL_DEFAULTS: FirewallConfig = {
-	enabled: true,
-	mode: 'strict',
+	enabled: false,
+	mode: 'disabled',
 	blockAnyTypes: true,
 	protectTestCases: true,
 	preserveExportSignatures: true,

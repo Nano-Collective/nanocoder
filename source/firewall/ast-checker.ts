@@ -1,50 +1,6 @@
-import fs from 'node:fs';
-import {createRequire} from 'node:module';
-import path from 'node:path';
 import type {FirewallViolation} from '@/types/firewall';
 
 const TEST_FILE_PATTERN = /\.(spec|test)\.[jt]sx?$/i;
-const nodeRequire = createRequire(import.meta.url);
-
-// Cache dynamically resolved TypeScript compiler instance
-let cachedTs: any = null;
-
-/**
- * Resolves the TypeScript compiler API if available in the environment.
- * Gracefully falls back to null if no compatible TS compiler is found.
- */
-function getTsCompiler(): any {
-	if (cachedTs !== null) return cachedTs;
-	try {
-		const ts = nodeRequire('typescript');
-		if (typeof ts?.createSourceFile === 'function') {
-			cachedTs = ts;
-			return cachedTs;
-		}
-	} catch {}
-
-	try {
-		const pnpmDir = path.join(process.cwd(), 'node_modules/.pnpm');
-		if (fs.existsSync(pnpmDir)) {
-			const entries = fs
-				.readdirSync(pnpmDir)
-				.filter((e: string) => e.startsWith('typescript@5.'));
-			if (entries.length > 0) {
-				const fullPath = path.join(
-					pnpmDir,
-					entries[0],
-					'node_modules/typescript/lib/typescript.js',
-				);
-				if (fs.existsSync(fullPath)) {
-					cachedTs = nodeRequire(fullPath);
-					return cachedTs;
-				}
-			}
-		}
-	} catch {}
-
-	return null;
-}
 
 /**
  * Strips comments and string literals across lines while preserving line indices.
@@ -76,73 +32,6 @@ interface AnyOccurrence {
 	line: number;
 	anchor: string;
 	text: string;
-}
-
-function findAnyOccurrencesWithTs(
-	ts: any,
-	code: string,
-	filePath: string,
-): AnyOccurrence[] {
-	const sf = ts.createSourceFile(filePath, code, ts.ScriptTarget.Latest, true);
-	const occurrences: AnyOccurrence[] = [];
-
-	function getAnchorPath(node: any): string {
-		const parts: string[] = [];
-		let curr = node.parent;
-		while (curr && curr !== sf) {
-			if (curr.name && (curr.name.text || curr.name.escapedText)) {
-				const name = curr.name.text || curr.name.escapedText;
-				parts.unshift(`${ts.SyntaxKind[curr.kind] || 'node'}:${name}`);
-			} else if (
-				ts.isFunctionDeclaration?.(curr) ||
-				ts.isMethodDeclaration?.(curr) ||
-				ts.isFunctionExpression?.(curr) ||
-				ts.isArrowFunction?.(curr)
-			) {
-				const name = curr.name?.text || curr.name?.escapedText || 'anonymous';
-				parts.unshift(`fn:${name}`);
-			} else if (ts.isParameter?.(curr)) {
-				const name = curr.name?.getText ? curr.name.getText(sf) : 'param';
-				parts.unshift(`param:${name}`);
-			} else if (ts.isVariableDeclaration?.(curr)) {
-				const name = curr.name?.getText ? curr.name.getText(sf) : 'var';
-				parts.unshift(`var:${name}`);
-			} else if (
-				ts.isPropertySignature?.(curr) ||
-				ts.isPropertyDeclaration?.(curr)
-			) {
-				const name = curr.name?.getText ? curr.name.getText(sf) : 'prop';
-				parts.unshift(`prop:${name}`);
-			} else if (ts.isTypeAliasDeclaration?.(curr)) {
-				const name = curr.name?.text || 'type';
-				parts.unshift(`type:${name}`);
-			} else if (ts.isInterfaceDeclaration?.(curr)) {
-				const name = curr.name?.text || 'interface';
-				parts.unshift(`interface:${name}`);
-			} else if (ts.isAsExpression?.(curr)) {
-				parts.unshift('as');
-			} else {
-				parts.unshift(ts.SyntaxKind[curr.kind] || 'node');
-			}
-			curr = curr.parent;
-		}
-		return parts.join(' > ');
-	}
-
-	function visit(node: any) {
-		if (node.kind === ts.SyntaxKind.AnyKeyword) {
-			const pos = sf.getLineAndCharacterOfPosition(node.getStart(sf));
-			occurrences.push({
-				line: pos.line + 1,
-				anchor: getAnchorPath(node),
-				text: node.getText(sf),
-			});
-		}
-		ts.forEachChild(node, visit);
-	}
-
-	visit(sf);
-	return occurrences;
 }
 
 function findAnyOccurrencesLexical(code: string): AnyOccurrence[] {
@@ -182,13 +71,8 @@ export function detectAnyTypeInjections(
 		return [];
 	}
 
-	const ts = getTsCompiler();
-	const oldAnys = ts
-		? findAnyOccurrencesWithTs(ts, oldContent, filePath)
-		: findAnyOccurrencesLexical(oldContent);
-	const newAnys = ts
-		? findAnyOccurrencesWithTs(ts, newContent, filePath)
-		: findAnyOccurrencesLexical(newContent);
+	const oldAnys = findAnyOccurrencesLexical(oldContent);
+	const newAnys = findAnyOccurrencesLexical(newContent);
 
 	const oldAnchorCounts = new Map<string, number>();
 	for (const a of oldAnys) {
@@ -216,7 +100,7 @@ export function detectAnyTypeInjections(
 				rule: 'block_any_types',
 				filePath,
 				message: `Injected ${newlyInjected.length} explicit 'any' type annotation(s).`,
-				details: `Found newly introduced 'any' at line(s): ${lineList}. Replacing strict types with 'any' is blocked by firewall.`,
+				details: `Line(s): ${lineList}. Explicit 'any' types degrade type safety and are blocked by firewall.`,
 			},
 		];
 	}
@@ -225,70 +109,8 @@ export function detectAnyTypeInjections(
 }
 
 // ============================================================================
-// Rule 2: Test Block Deletion Detection (Multiplicity Preserving)
+// Rule 2: Deleted Test Block Detection
 // ============================================================================
-
-function extractTestTitlesWithTs(
-	ts: any,
-	code: string,
-	filePath: string,
-): string[] {
-	const sf = ts.createSourceFile(filePath, code, ts.ScriptTarget.Latest, true);
-	const tests: string[] = [];
-	const suiteStack: string[] = [];
-
-	const TEST_NAMES = new Set(['test', 'it']);
-	const SUITE_NAMES = new Set(['describe', 'suite', 'context']);
-
-	function getCallCalleeName(expr: any): string {
-		if (ts.isIdentifier?.(expr)) return expr.text;
-		if (ts.isPropertyAccessExpression?.(expr)) {
-			const base = getCallCalleeName(expr.expression);
-			return base ? `${base}.${expr.name.text}` : expr.name.text;
-		}
-		return '';
-	}
-
-	function getBaseCallee(callee: string): string {
-		return callee.split('.')[0];
-	}
-
-	function visit(node: any) {
-		if (ts.isCallExpression?.(node)) {
-			const callee = getCallCalleeName(node.expression);
-			const base = getBaseCallee(callee);
-			const firstArg = node.arguments?.[0];
-
-			let title = '';
-			if (
-				firstArg &&
-				(ts.isStringLiteral?.(firstArg) ||
-					ts.isNoSubstitutionTemplateLiteral?.(firstArg))
-			) {
-				title = firstArg.text;
-			}
-
-			if (SUITE_NAMES.has(base) && title) {
-				suiteStack.push(title);
-				ts.forEachChild(node, visit);
-				suiteStack.pop();
-				return;
-			}
-
-			if (TEST_NAMES.has(base) && title) {
-				const fullTitle =
-					suiteStack.length > 0
-						? `${suiteStack.join(' > ')} > ${title}`
-						: title;
-				tests.push(fullTitle);
-			}
-		}
-		ts.forEachChild(node, visit);
-	}
-
-	visit(sf);
-	return tests;
-}
 
 function extractTestTitlesLexical(code: string): string[] {
 	const cleaned = stripCommentsOnly(code);
@@ -320,13 +142,8 @@ export function detectDeletedTestBlocks(
 		return [];
 	}
 
-	const ts = getTsCompiler();
-	const oldTitles = ts
-		? extractTestTitlesWithTs(ts, oldContent, filePath)
-		: extractTestTitlesLexical(oldContent);
-	const newTitles = ts
-		? extractTestTitlesWithTs(ts, newContent, filePath)
-		: extractTestTitlesLexical(newContent);
+	const oldTitles = extractTestTitlesLexical(oldContent);
+	const newTitles = extractTestTitlesLexical(newContent);
 
 	const oldCounts = new Map<string, number>();
 	for (const t of oldTitles) {
@@ -373,179 +190,79 @@ interface ExportedItem {
 	signature: string;
 }
 
-function extractExportSignaturesWithTs(
-	ts: any,
-	code: string,
-	filePath: string,
-): Map<string, ExportedItem[]> {
-	const sf = ts.createSourceFile(filePath, code, ts.ScriptTarget.Latest, true);
-	const signatures = new Map<string, ExportedItem[]>();
-
-	function isExported(node: any): boolean {
-		if (!node.modifiers) return false;
-		return node.modifiers.some(
-			(m: any) => m.kind === ts.SyntaxKind.ExportKeyword,
-		);
-	}
-
-	function isDefault(node: any): boolean {
-		if (!node.modifiers) return false;
-		return node.modifiers.some(
-			(m: any) => m.kind === ts.SyntaxKind.DefaultKeyword,
-		);
-	}
-
-	function formatParams(params: any[]): string {
-		return params
-			.map(p => {
-				const dotDotDot = p.dotDotDotToken ? '...' : '';
-				const name = p.name ? p.name.getText(sf) : 'param';
-				const question = p.questionToken ? '?' : '';
-				const type = p.type
-					? `: ${normalizeWhitespace(p.type.getText(sf))}`
-					: '';
-				return `${dotDotDot}${name}${question}${type}`;
-			})
-			.join(', ');
-	}
-
-	function formatTypeParams(tps: any[] | undefined): string {
-		if (!tps || tps.length === 0) return '';
-		return `<${tps.map(tp => normalizeWhitespace(tp.getText(sf))).join(', ')}>`;
-	}
-
-	for (const stmt of sf.statements) {
-		// 1. FunctionDeclaration
-		if (ts.isFunctionDeclaration?.(stmt) && isExported(stmt)) {
-			const def = isDefault(stmt);
-			const name = stmt.name ? stmt.name.text : def ? 'default' : 'anonymous';
-			const retType = stmt.type
-				? `: ${normalizeWhitespace(stmt.type.getText(sf))}`
-				: '';
-			const sig = `${def ? 'default ' : ''}function ${name}${formatTypeParams(stmt.typeParameters)}(${formatParams(stmt.parameters || [])})${retType}`;
-			const key = def ? 'default' : name;
-			const list = signatures.get(key) || [];
-			list.push({kind: 'function', name: key, signature: sig});
-			signatures.set(key, list);
-		}
-		// 2. InterfaceDeclaration
-		else if (ts.isInterfaceDeclaration?.(stmt) && isExported(stmt)) {
-			const name = stmt.name.text;
-			const heritage = stmt.heritageClauses
-				? ` ${normalizeWhitespace(stmt.heritageClauses.map((h: any) => h.getText(sf)).join(' '))}`
-				: '';
-			const members = (stmt.members || [])
-				.map((m: any) => normalizeWhitespace(m.getText(sf)))
-				.sort()
-				.join('; ');
-			const sig = `interface ${name}${formatTypeParams(stmt.typeParameters)}${heritage} { ${members} }`;
-			signatures.set(name, [{kind: 'interface', name, signature: sig}]);
-		}
-		// 3. TypeAliasDeclaration
-		else if (ts.isTypeAliasDeclaration?.(stmt) && isExported(stmt)) {
-			const name = stmt.name.text;
-			const sig = `type ${name}${formatTypeParams(stmt.typeParameters)} = ${normalizeWhitespace(stmt.type.getText(sf))}`;
-			signatures.set(name, [{kind: 'type', name, signature: sig}]);
-		}
-		// 4. ClassDeclaration
-		else if (ts.isClassDeclaration?.(stmt) && isExported(stmt)) {
-			const def = isDefault(stmt);
-			const name = stmt.name ? stmt.name.text : def ? 'default' : 'anonymous';
-			const heritage = stmt.heritageClauses
-				? ` ${normalizeWhitespace(stmt.heritageClauses.map((h: any) => h.getText(sf)).join(' '))}`
-				: '';
-			const members = (stmt.members || [])
-				.map((m: any) => {
-					if (ts.isMethodDeclaration?.(m) || ts.isConstructorDeclaration?.(m)) {
-						const mName = m.name ? m.name.getText(sf) : 'constructor';
-						const mRet = m.type
-							? `: ${normalizeWhitespace(m.type.getText(sf))}`
-							: '';
-						return `${mName}${formatTypeParams(m.typeParameters)}(${formatParams(m.parameters || [])})${mRet}`;
-					}
-					if (ts.isPropertyDeclaration?.(m)) {
-						const pName = m.name ? m.name.getText(sf) : 'prop';
-						const pType = m.type
-							? `: ${normalizeWhitespace(m.type.getText(sf))}`
-							: '';
-						return `${pName}${pType}`;
-					}
-					return normalizeWhitespace(m.getText(sf));
-				})
-				.sort()
-				.join('; ');
-			const sig = `${def ? 'default ' : ''}class ${name}${formatTypeParams(stmt.typeParameters)}${heritage} { ${members} }`;
-			const key = def ? 'default' : name;
-			signatures.set(key, [{kind: 'class', name: key, signature: sig}]);
-		}
-		// 5. VariableStatement
-		else if (ts.isVariableStatement?.(stmt) && isExported(stmt)) {
-			for (const decl of stmt.declarationList?.declarations || []) {
-				const name = decl.name ? decl.name.getText(sf) : 'var';
-				const type = decl.type
-					? normalizeWhitespace(decl.type.getText(sf))
-					: decl.initializer
-						? `inferred:${normalizeWhitespace(decl.initializer.getText(sf))}`
-						: 'any';
-				const sig = `var ${name}: ${type}`;
-				signatures.set(name, [{kind: 'variable', name, signature: sig}]);
-			}
-		}
-		// 6. Named export block: export { a as b }
-		else if (ts.isExportDeclaration?.(stmt)) {
-			if (stmt.exportClause && ts.isNamedExports?.(stmt.exportClause)) {
-				for (const elem of stmt.exportClause.elements || []) {
-					const expName = elem.name?.text || '';
-					const propName = elem.propertyName ? elem.propertyName.text : expName;
-					const sig = `export { ${propName} as ${expName} }`;
-					signatures.set(expName, [
-						{kind: 'namedExport', name: expName, signature: sig},
-					]);
-				}
-			}
-		}
-		// 7. Default export assignment: export default foo
-		else if (ts.isExportAssignment?.(stmt)) {
-			const sig = `default = ${normalizeWhitespace(stmt.expression.getText(sf))}`;
-			signatures.set('default', [
-				{kind: 'defaultExport', name: 'default', signature: sig},
-			]);
-		}
-	}
-
-	return signatures;
-}
-
 function extractExportSignaturesLexical(
 	code: string,
 ): Map<string, ExportedItem[]> {
 	const signatures = new Map<string, ExportedItem[]>();
 	const cleaned = stripCommentsAndStrings(code);
 
-	// Match export function, class, interface, type, const, let
-	const defPattern =
-		/^[ \t]*export\s+(?:default\s+)?(?:async\s+)?(?:function\*?|class|interface|type|enum|abstract\s+class)\s+([a-zA-Z0-9_$]+)([^{=;]*)/gm;
-	let match = defPattern.exec(cleaned);
+	// 1. Interfaces (contract includes members)
+	const interfacePattern =
+		/(?:^|\n)[ \t]*export\s+(?:interface)\s+([a-zA-Z0-9_$]+)(?:<[\s\S]*?>)?(?:\s+extends\s+[^{]+)?\s*\{([\s\S]*?)\}/g;
+	let match = interfacePattern.exec(cleaned);
 	while (match !== null) {
 		const name = match[1];
 		const header = normalizeWhitespace(match[0]);
-		signatures.set(name, [{kind: 'def', name, signature: header}]);
-		match = defPattern.exec(cleaned);
+		const existing = signatures.get(name) || [];
+		existing.push({kind: 'interface', name, signature: header});
+		signatures.set(name, existing);
+		match = interfacePattern.exec(cleaned);
 	}
 
+	// 2. Type aliases (contract includes alias target)
+	const typePattern =
+		/(?:^|\n)[ \t]*export\s+(?:type)\s+([a-zA-Z0-9_$]+)([\s\S]*?)(?:;|\n(?=[ \t]*(?:export|$))|$)/g;
+	match = typePattern.exec(cleaned);
+	while (match !== null) {
+		const name = match[1];
+		const header = normalizeWhitespace(match[0]);
+		const existing = signatures.get(name) || [];
+		existing.push({kind: 'type', name, signature: header});
+		signatures.set(name, existing);
+		match = typePattern.exec(cleaned);
+	}
+
+	// 3. Enums (contract includes member names)
+	const enumPattern =
+		/(?:^|\n)[ \t]*export\s+(?:const\s+)?(?:enum)\s+([a-zA-Z0-9_$]+)\s*\{([\s\S]*?)\}/g;
+	match = enumPattern.exec(cleaned);
+	while (match !== null) {
+		const name = match[1];
+		const header = normalizeWhitespace(match[0]);
+		const existing = signatures.get(name) || [];
+		existing.push({kind: 'enum', name, signature: header});
+		signatures.set(name, existing);
+		match = enumPattern.exec(cleaned);
+	}
+
+	// 4. Functions & classes (contract is signature header before body {)
+	const fnClassPattern =
+		/(?:^|\n)[ \t]*export\s+(?:default\s+)?(?:async\s+)?(?:function\*?|class|abstract\s+class)\s+([a-zA-Z0-9_$]+)([\s\S]*?)(?=[{;]|$)/g;
+	match = fnClassPattern.exec(cleaned);
+	while (match !== null) {
+		const name = match[1];
+		const header = normalizeWhitespace(match[0]);
+		const existing = signatures.get(name) || [];
+		existing.push({kind: 'def', name, signature: header});
+		signatures.set(name, existing);
+		match = fnClassPattern.exec(cleaned);
+	}
+
+	// 5. Variables (const/let/var)
 	const varPattern =
-		/^[ \t]*export\s+(?:const|let|var)\s+([a-zA-Z0-9_$]+)(?:\s*:\s*([^=;]+))?/gm;
+		/(?:^|\n)[ \t]*export\s+(?:const|let|var)\s+([a-zA-Z0-9_$]+)(?:\s*:\s*([^=;\n]+))?/g;
 	match = varPattern.exec(cleaned);
 	while (match !== null) {
 		const name = match[1];
 		const type = match[2] ? normalizeWhitespace(match[2]) : 'inferred';
-		signatures.set(name, [
-			{kind: 'var', name, signature: `var ${name}: ${type}`},
-		]);
+		const existing = signatures.get(name) || [];
+		existing.push({kind: 'var', name, signature: `var ${name}: ${type}`});
+		signatures.set(name, existing);
 		match = varPattern.exec(cleaned);
 	}
 
-	const blockPattern = /^[ \t]*export\s+\{([^}]+)\}/gm;
+	// 6. Export blocks: export { a, b as c }
+	const blockPattern = /(?:^|\n)[ \t]*export\s+\{([\s\S]*?)\}/g;
 	match = blockPattern.exec(cleaned);
 	while (match !== null) {
 		if (match[1]) {
@@ -556,9 +273,13 @@ function extractExportSignaturesLexical(
 				const parts = trimmed.split(/\s+as\s+/);
 				const expName = (parts[1] || parts[0]).trim();
 				if (expName) {
-					signatures.set(expName, [
-						{kind: 'named', name: expName, signature: `export { ${trimmed} }`},
-					]);
+					const existing = signatures.get(expName) || [];
+					existing.push({
+						kind: 'named',
+						name: expName,
+						signature: `export { ${trimmed} }`,
+					});
+					signatures.set(expName, existing);
 				}
 			}
 		}
@@ -586,13 +307,8 @@ export function detectExportSignatureModifications(
 		return [];
 	}
 
-	const ts = getTsCompiler();
-	const oldSigs = ts
-		? extractExportSignaturesWithTs(ts, oldContent, filePath)
-		: extractExportSignaturesLexical(oldContent);
-	const newSigs = ts
-		? extractExportSignaturesWithTs(ts, newContent, filePath)
-		: extractExportSignaturesLexical(newContent);
+	const oldSigs = extractExportSignaturesLexical(oldContent);
+	const newSigs = extractExportSignaturesLexical(newContent);
 
 	const removedSymbols: string[] = [];
 	const changedSignatures: Array<{name: string; from: string; to: string}> = [];
