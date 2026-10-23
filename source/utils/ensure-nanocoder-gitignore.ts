@@ -2,7 +2,13 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import {logWarning} from './message-queue';
 
-const RUNTIME_ENTRIES = ['/checkpoints/', '/timeline/', '/daemon.*'];
+const RUNTIME_ENTRIES = [
+	'/checkpoints/',
+	'/timeline/',
+	'/daemon.*',
+	// The daemon's CI watcher state, plus its atomic-write temp siblings.
+	'/ci-watch-state.json*',
+];
 
 const pending = new Map<string, Promise<void>>();
 

@@ -96,7 +96,7 @@ variable is the point of the output and the reference is not itself a secret.
 
 ## Environment Variables
 
-Keep API keys out of version control using environment variables. Variables are loaded from shell environment (`.bashrc`, `.zshrc`) or `.env` file in your working directory.
+Keep API keys out of version control using environment variables. Variables are loaded from shell environment (`.bashrc`, `.zshrc`) or `.env` file in your working directory. Shell variables win over `.env` values. A project `.env` cannot set `NANOCODER_TRUST_DIRECTORY`, `NANOCODER_CONFIG_DIR`, `NANOCODER_MCPSERVERS`, `NANOCODER_MCPSERVERS_FILE`, or `NANOCODER_CI_TRUST_LEVEL`, since it is loaded before the directory trust check; set those in your shell instead.
 
 ### General
 
@@ -284,7 +284,8 @@ Set `nanocoder.autoCommit` to `true` (boolean; any other value is treated as off
 
 - **Only the edited file is committed.** Changes in other files (staged or unstaged) are left untouched. Note that prior uncommitted changes in the *same edited file* are included in that file's commit. New files created by the agent are also included.
 - **Commit messages** are Conventional Commits (`feat: ...`, `fix: ...`) written by the current model from that file's diff, using the same prompt as `/commit`. If the model call fails or returns nothing, the message falls back to `chore: update <path>`.
-- **Skipped, not failed:** outside a git repository, for gitignored files, for edits that leave the file unchanged, and while a merge, rebase, cherry-pick or revert is in progress. A failing commit (a rejecting pre-commit hook, missing git identity) is logged as a warning, the exact prior staging state of the file is restored (un-staging it if it was not previously staged, or restoring its prior staged version), and the edit stays in the working tree.
+- **Skipped, not failed:** outside a git repository, for gitignored files, for edits that leave the file unchanged, on a detached HEAD (check out a branch so agent commits stay reachable; you are warned once per repository), and while a merge, rebase, cherry-pick or revert is in progress. A failing commit (a rejecting pre-commit hook, missing git identity) is logged as a warning, the exact prior staging state of the file is restored (un-staging it if it was not previously staged, or restoring its prior staged version), and the edit stays in the working tree.
+- Auto-commit works the same in the TUI, `--plain` runs, ACP sessions, and daemon-triggered runs, using that session's model for the message.
 - Your git hooks and commit signing run as normal. The model is told the commit hash in the tool result.
 
 This produces one commit per edit. Squash them before opening a PR if you prefer a tidier history (`git rebase -i`, or `git reset --soft <base>` and commit again).
