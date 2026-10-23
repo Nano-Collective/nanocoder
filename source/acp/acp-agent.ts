@@ -521,7 +521,18 @@ export class AcpAgent implements Agent {
 		logger.info(`ACP closeSession: session=${params.sessionId}`);
 		session.close();
 		this.sessions.delete(params.sessionId);
-		await session.timeline.dispose();
+		clearAcpReadStubs(params.sessionId);
+		// close() only signals the running turn to stop. Wait for it (and any
+		// prompts queued behind it, which bail out on `closed`) to give up the
+		// turn lock before releasing the timeline lock, so a checkpoint the
+		// turn is still writing never lands after the lock is gone.
+		const ticket = session.acquireTurn();
+		await ticket.ready;
+		try {
+			await session.timeline.dispose();
+		} finally {
+			session.releaseTurn();
+		}
 		return {};
 	}
 

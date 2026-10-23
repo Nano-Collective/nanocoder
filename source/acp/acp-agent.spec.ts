@@ -22,7 +22,12 @@ import {sessionManager} from '@/session/session-manager';
 import {SemanticMemoryManager} from '@/memory/semantic-memory-manager';
 import {readFileTool} from '@/tools/read-file';
 import type {Message} from '@/types/core';
-import {clearReadTracker} from '@/utils/read-tracker';
+import {
+	clearReadTracker,
+	matchReadContent,
+	rememberReadContent,
+	runWithReadContentScope,
+} from '@/utils/read-tracker';
 
 console.log('\nacp-agent.spec.ts');
 
@@ -1052,12 +1057,79 @@ test('AcpAgent.closeSession - a prompt queued behind the closed turn never start
 		await new Promise(resolve => setImmediate(resolve));
 	}
 
-	await agent.closeSession({sessionId: session.sessionId});
+	const closing = agent.closeSession({sessionId: session.sessionId});
 	releaseChat();
+	await closing;
 	await first.catch(() => {});
 
 	t.is((await queued).stopReason, 'cancelled');
 	t.is(chatCalls, 1);
+});
+
+test('AcpAgent.closeSession - releases the timeline lock only after the cancelled turn ends', async t => {
+	const context = createMockInitContext();
+	let chatCalls = 0;
+	let releaseChat!: () => void;
+	const chatGate = new Promise<void>(resolve => {
+		releaseChat = resolve;
+	});
+	(context.client as any).chat = async () => {
+		chatCalls++;
+		await chatGate;
+		return {choices: [{message: {content: 'Test response'}}]};
+	};
+	const agent = new AcpAgent(context, createMockConn());
+	const session = await agent.newSession({cwd: '/tmp'});
+	const acpSession = (agent as any).sessions.get(session.sessionId);
+	let disposed = false;
+	const originalDispose = acpSession.timeline.dispose.bind(acpSession.timeline);
+	acpSession.timeline.dispose = async () => {
+		disposed = true;
+		await originalDispose();
+	};
+
+	const first = agent.prompt({
+		sessionId: session.sessionId,
+		prompt: [{type: 'text', text: 'first'}],
+	});
+	while (chatCalls === 0) {
+		await new Promise(resolve => setImmediate(resolve));
+	}
+
+	let closed = false;
+	const closing = agent
+		.closeSession({sessionId: session.sessionId})
+		.then(() => {
+			closed = true;
+		});
+	for (let i = 0; i < 10; i++) {
+		await new Promise(resolve => setImmediate(resolve));
+	}
+	t.false(disposed, 'timeline lock is held while the turn is still running');
+	t.false(closed);
+
+	releaseChat();
+	await first.catch(() => {});
+	await closing;
+	t.true(disposed);
+	t.false(acpSession.turnActive);
+});
+
+test('AcpAgent.closeSession - clears the session read stubs', async t => {
+	const {agent} = createAgent();
+	const session = await agent.newSession({cwd: '/tmp'});
+	const scope = `acp:${session.sessionId}`;
+	const file = join(tmpdir(), 'acp-close-stub.txt');
+	const stats = {mtimeMs: 1, size: 1};
+	runWithReadContentScope(scope, () => rememberReadContent(file, stats, 1));
+	t.truthy(runWithReadContentScope(scope, () => matchReadContent(file, stats)));
+
+	await agent.closeSession({sessionId: session.sessionId});
+
+	t.is(
+		runWithReadContentScope(scope, () => matchReadContent(file, stats)),
+		undefined,
+	);
 });
 
 // ============================================================================
