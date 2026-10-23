@@ -60,6 +60,7 @@ import {
 import {convertAISDKToolCalls} from '../converters/tool-converter.js';
 import {extractRootError} from '../error-handling/error-extractor.js';
 import {parseAPIError} from '../error-handling/error-parser.js';
+import {isImageSupportError} from '../error-handling/image-error-detector.js';
 import {isToolSupportError} from '../error-handling/tool-error-detector.js';
 import {rehydrateResponse, scrubOutgoing} from './privacy.js';
 import {
@@ -72,6 +73,22 @@ import {
 } from './streaming-handler.js';
 
 type SDKProviderOptions = Parameters<typeof streamText>[0]['providerOptions'];
+
+/**
+ * Provider/model pairs that rejected a request for carrying tool images this
+ * session. models.dev only knows hosted models, so a local text-only model
+ * (most Ollama / llama.cpp ids) gets images sent optimistically; once its
+ * server refuses them, every later request in the session omits them instead
+ * of failing on the same screenshot sitting in history.
+ */
+const imageRejectingModels = new Set<string>();
+
+function imageRejectionKey(
+	providerConfig: AIProviderConfig,
+	currentModel: string,
+): string {
+	return `${providerConfig.name}\u0000${currentModel}`;
+}
 
 export interface ChatHandlerParams {
 	model: LanguageModel;
@@ -165,6 +182,9 @@ export async function handleChat(
 	// with no `cause`; without consulting this array the catch can't tell a
 	// network failure apart from a genuine empty model turn.
 	const streamingErrors: Error[] = [];
+	// Set once the request is built: whether it carried tool images, so a
+	// rejection can be retried once with them omitted.
+	let sentToolImages = false;
 
 	return await withNewCorrelationContext(async _context => {
 		try {
@@ -211,12 +231,21 @@ export async function handleChat(
 			const hasToolImages = finalNonSystemMessages.some(
 				m => m.role === 'tool' && !!m.images?.length,
 			);
-			const toolImages: ToolImageDelivery =
-				hasToolImages && (await getModelAcceptsImages(currentModel)) === false
-					? 'omit'
-					: typeof model !== 'string' && model.provider.endsWith('.chat')
-						? 'user-message'
-						: 'inline';
+			// Unknown models (null from models.dev) still get images: local
+			// vision models are common and have no listing. A refusal is caught
+			// below, retried without images and remembered for the session.
+			const omitToolImages =
+				hasToolImages &&
+				(imageRejectingModels.has(
+					imageRejectionKey(providerConfig, currentModel),
+				) ||
+					(await getModelAcceptsImages(currentModel)) === false);
+			sentToolImages = hasToolImages && !omitToolImages;
+			const toolImages: ToolImageDelivery = omitToolImages
+				? 'omit'
+				: typeof model !== 'string' && model.provider.endsWith('.chat')
+					? 'user-message'
+					: 'inline';
 			const convertedMessages = convertToModelMessages(
 				finalNonSystemMessages,
 				toolImages,
@@ -528,6 +557,23 @@ export async function handleChat(
 					provider: providerConfig.name,
 				});
 				throw new Error('Operation was cancelled');
+			}
+
+			// The model refused the tool screenshots. Checked before the tool
+			// support retry because an image rejection can also read like a
+			// generic 400. sentToolImages is false on the retry (the model is
+			// now in the set), so this runs at most once per request.
+			if (sentToolImages && isImageSupportError(error, streamingErrors)) {
+				imageRejectingModels.add(
+					imageRejectionKey(providerConfig, currentModel),
+				);
+				logger.warn('Model rejected image input, retrying without images', {
+					model: currentModel,
+					error: error instanceof Error ? error.message : error,
+					correlationId,
+					provider: providerConfig.name,
+				});
+				return await handleChat(params);
 			}
 
 			// Check if error indicates tool support issue and we haven't retried
