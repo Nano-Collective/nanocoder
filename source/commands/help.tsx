@@ -79,6 +79,11 @@ function Help({
 				{' '}
 				• Keyboard shortcuts {'>'} press ? in an empty prompt
 			</Text>
+			<Text color={colors.text}>
+				{' '}
+				• Try a setting for one command {'>'} /usage ?context-max=200k (/compact
+				and /usage accept ?key=value)
+			</Text>
 
 			{selectedCommand ? (
 				<CommandDetails command={selectedCommand} />

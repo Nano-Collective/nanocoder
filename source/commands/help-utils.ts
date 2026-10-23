@@ -1,3 +1,4 @@
+import {SETTINGS_TAB_IDS} from '@/app/components/settings-constants';
 import type {Command} from '@/types/index';
 
 export const HELP_CATEGORY_ORDER = [
@@ -49,6 +50,7 @@ const CATEGORY_COMMANDS: Record<HelpCategory, readonly string[]> = {
 		'settings',
 		'tune',
 		'update',
+		'voice',
 	],
 	'Coding & Agent Tools': [
 		'agents',
@@ -94,9 +96,9 @@ const COMMAND_HELP_OVERRIDES: Record<string, CommandHelpOverrides> = {
 		usage:
 			'/checkpoint <create|save|list|ls|load|restore|delete|remove|rm> [name]',
 		options: [
-			'create|save <name>',
+			'create|save [name]',
 			'list|ls',
-			'load|restore <name>',
+			'load|restore [name]',
 			'delete|remove|rm <name>',
 		],
 		examples: [
@@ -122,8 +124,16 @@ const COMMAND_HELP_OVERRIDES: Record<string, CommandHelpOverrides> = {
 			'--auto-on',
 			'--auto-off',
 			'--threshold <50-95>',
+			'?threshold=<50-95> (this run only: skip if usage is below it)',
+			'?context-max=<n> (this run only)',
+			'?auto-compact=<on|off> (this run only)',
+			'?preview, ?llm, ?mechanical, ?aggressive, ?conservative',
 		],
-		examples: ['/compact --preview', '/compact --mechanical --threshold 80'],
+		examples: [
+			'/compact --preview',
+			'/compact --mechanical --threshold 80',
+			'/compact ?threshold=80',
+		],
 	},
 	commands: {
 		usage: '/commands [show <name>|create <name>]',
@@ -141,8 +151,9 @@ const COMMAND_HELP_OVERRIDES: Record<string, CommandHelpOverrides> = {
 		examples: ['/context-max', '/context-max 128k', '/context-max --reset'],
 	},
 	copy: {
-		usage: '/copy',
-		examples: ['/copy'],
+		usage: '/copy [code]',
+		options: ['code'],
+		examples: ['/copy', '/copy code'],
 	},
 	expand: {
 		usage: '/expand [result-number]',
@@ -185,6 +196,11 @@ const COMMAND_HELP_OVERRIDES: Record<string, CommandHelpOverrides> = {
 		aliases: ['sessions', 'history'],
 		examples: ['/resume'],
 	},
+	review: {
+		usage: '/review [quick] [<branch | PR number | GitHub PR URL>]',
+		options: ['quick', '<branch>', '<PR number>', '<GitHub PR URL>'],
+		examples: ['/review', '/review quick', '/review main', '/review 42'],
+	},
 	retry: {
 		usage: '/retry [--model <id>] [--provider <name>]',
 		options: ['--model <id>', '--provider <name>'],
@@ -192,7 +208,7 @@ const COMMAND_HELP_OVERRIDES: Record<string, CommandHelpOverrides> = {
 	},
 	settings: {
 		usage: '/settings [tab]',
-		options: ['providers', 'mcp', 'theme', 'appearance'],
+		options: SETTINGS_TAB_IDS,
 		examples: ['/settings', '/settings providers'],
 	},
 	skills: {
@@ -226,6 +242,25 @@ const COMMAND_HELP_OVERRIDES: Record<string, CommandHelpOverrides> = {
 		usage: '/tools [create <name>]',
 		options: ['create <name>'],
 		examples: ['/tools', '/tools create kubectl-pods'],
+	},
+	usage: {
+		usage: '/usage [?context-max=<n>]',
+		options: ['?context-max=<n> (this run only, e.g. 200k)'],
+		examples: ['/usage', '/usage ?context-max=200k'],
+	},
+	voice: {
+		usage:
+			'/voice [on|off|status|hands-free|ptt|mode <push-to-talk|hands-free>|stt <local|cloud>|tts <local|cloud>]',
+		options: [
+			'on|off',
+			'status',
+			'hands-free',
+			'ptt|push-to-talk',
+			'mode <push-to-talk|hands-free>',
+			'stt <local|cloud>',
+			'tts <local|cloud>',
+		],
+		examples: ['/voice on', '/voice ptt', '/voice stt local'],
 	},
 };
 
