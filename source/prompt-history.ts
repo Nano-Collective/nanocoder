@@ -22,6 +22,36 @@ async function pathExists(filePath: string): Promise<boolean> {
 	}
 }
 
+/**
+ * Keep only usable entries from a parsed JSON history array. The file is
+ * user-editable, so a valid array can still hold `null`, numbers or bare
+ * strings; consumers (Up-arrow, Ctrl+R) call string methods on
+ * `displayValue` and would throw on those. Bare strings are upgraded to
+ * entries, anything without a string `displayValue` is dropped.
+ */
+function normalizeHistoryEntries(entries: unknown[]): InputState[] {
+	const normalized: InputState[] = [];
+	for (const entry of entries) {
+		if (typeof entry === 'string') {
+			if (entry.trim()) {
+				normalized.push({displayValue: entry, placeholderContent: {}});
+			}
+			continue;
+		}
+		if (typeof entry !== 'object' || entry === null) continue;
+		const {displayValue, placeholderContent} = entry as Partial<InputState>;
+		if (typeof displayValue !== 'string') continue;
+		normalized.push({
+			...(entry as InputState),
+			placeholderContent:
+				typeof placeholderContent === 'object' && placeholderContent !== null
+					? placeholderContent
+					: {},
+		});
+	}
+	return normalized;
+}
+
 export class PromptHistory {
 	private history: InputState[] = [];
 	private currentIndex: number = -1;
@@ -56,7 +86,7 @@ export class PromptHistory {
 						'Prompt history file does not contain an array',
 					);
 				}
-				this.history = parsed as InputState[];
+				this.history = normalizeHistoryEntries(parsed);
 			} else if (content.includes(ENTRY_SEPARATOR)) {
 				// LEGACY_MIGRATION_REMOVE_AFTER: 1.27.0
 				// Old format using ENTRY_SEPARATOR. Migrate to InputState on read.

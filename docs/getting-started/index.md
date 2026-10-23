@@ -214,6 +214,8 @@ nanocoder worktree 42
 
 This starts an interactive Nanocoder session at PR #42's head in a new Git worktree. Git and an authenticated GitHub CLI (`gh auth login`) are required. When `origin` is your fork and `upstream` is the project repository, Nanocoder looks up and fetches the PR from `upstream`; this also works for PRs submitted from contributor forks. The worktree is a sibling of the repository, named `<repository>-pr-42`, with local branch `nanocoder/pr-42`. The launching repository's branch, index, and files are left alone.
 
+Global options such as `--provider`, `--model`, `--context-max` and `--mode` can follow the PR number and apply to the new session, for example `nanocoder worktree 42 --provider openrouter --mode plan`.
+
 An existing directory or local branch causes an error; Nanocoder never overwrites or reuses it. The worktree and branch remain after the session ends, so you can return to your changes. When finished, remove them from the original repository with `git worktree remove <path>` and `git branch -d nanocoder/pr-42`. If setup fails, Nanocoder removes only the directory and branch it created for that attempt.
 
 **Non-interactive mode behavior:**

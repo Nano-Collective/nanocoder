@@ -239,15 +239,20 @@ test('isRecognizedOverrideKey accepts once-scoped settings and legacy flags', t 
 		'mechanical',
 		'aggressive',
 		'conservative',
-		'auto-on',
-		'auto-off',
 	]) {
 		t.true(isRecognizedOverrideKey(key), `${key} is recognised`);
 	}
 });
 
 test('isRecognizedOverrideKey rejects unknown keys', t => {
-	for (const key of ['unknown', 'threshhold', 'config', 'once']) {
+	for (const key of [
+		'unknown',
+		'threshhold',
+		'config',
+		'once',
+		'auto-on',
+		'auto-off',
+	]) {
 		t.false(isRecognizedOverrideKey(key), `${key} is not recognised`);
 	}
 });
@@ -261,13 +266,11 @@ test('formatInlineToken rebuilds the original ?token', t => {
 	);
 });
 
-test('expandOverrideArgs forwards auto-on and auto-off to their --flags', t => {
-	t.deepEqual(expandOverrideArgs([{key: 'auto-on', value: true}]), [
-		'--auto-on',
-	]);
-	t.deepEqual(expandOverrideArgs([{key: 'auto-off', value: true}]), [
-		'--auto-off',
-	]);
+test('expandOverrideArgs never expands session-persisting auto-on/auto-off', t => {
+	// `--auto-on` / `--auto-off` change auto-compact for the whole session,
+	// so expanding `?auto-on` into them would leak past the one command.
+	t.deepEqual(expandOverrideArgs([{key: 'auto-on', value: true}]), []);
+	t.deepEqual(expandOverrideArgs([{key: 'auto-off', value: true}]), []);
 });
 
 // ============================================================================

@@ -44,3 +44,23 @@ test('unknown top-level flags and commands fail before the app starts', t => {
 		t.is(result.stdout, '');
 	}
 });
+
+test('a command after an option is reported as misplaced, not unknown', t => {
+	const result = runCli(['--trust-directory', 'daemon', 'start']);
+	t.is(result.status, 1, result.stderr);
+	t.true(
+		result.stderr.includes(
+			'Put "daemon" first: nanocoder daemon start --trust-directory',
+		),
+		result.stderr,
+	);
+	t.false(result.stderr.includes('Did you mean'), result.stderr);
+});
+
+test('worktree accepts global options after the PR number', t => {
+	// Spawned without a TTY, so a run that gets past argument parsing stops
+	// at the interactive-terminal check instead of creating a worktree.
+	const result = runCli(['worktree', '42', '--provider', 'ollama', '--mode', 'plan']);
+	t.false(result.stderr.includes('Usage: nanocoder worktree'), result.stderr);
+	t.true(result.stderr.includes('requires an interactive terminal'), result.stderr);
+});

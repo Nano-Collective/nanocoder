@@ -659,15 +659,25 @@ async function handleSlashCommand(
 		return;
 	}
 
+	const rawParts = message.slice(1).trim().split(/\s+/);
+
+	// Only commands that actually read once-scoped settings parse inline
+	// overrides. Every other command - especially free-text ones like
+	// `/remember` or `/tasks add` - receives its args untouched, so a
+	// literal `?word` is never reordered, expanded into a flag or warned on.
+	if (!INLINE_OVERRIDE_COMMANDS.has(commandName)) {
+		await dispatchSlashCommand(commandName, rawParts, message, options);
+		return;
+	}
+
 	// ?key=value tokens let a user test a per-session setting for one
 	// command without committing it to the session. Recognised keys are
 	// consumed here: once-scoped settings via the session-override stores
 	// (restored in `finally`), legacy boolean flags by expanding them to
 	// their `--flag` form. Anything else is forwarded to the command
 	// handler verbatim (rebuilt into `commandParts`/`cleanedMessage`) so
-	// each command's own unknown-arg handling runs — and surfaced once as
+	// each command's own unknown-arg handling runs - and surfaced once as
 	// a warning so a typo like `?threshhold=80` cannot silently no-op.
-	const rawParts = message.slice(1).trim().split(/\s+/);
 	const {args: positional, overrides} = parseInlineOverrides(rawParts.slice(1));
 	const recognized = overrides.filter(o => isRecognizedOverrideKey(o.key));
 	const passthrough = overrides
@@ -686,55 +696,75 @@ async function handleSlashCommand(
 	// set when the user typed `?threshold=` on this command.
 	const onceThreshold = getOnceThreshold(recognized);
 	try {
-		const commandParts = [
-			commandName,
-			...positional,
-			...passthrough,
-			...expandedFlags,
-		];
-
 		if (passthrough.length > 0) {
 			const keys = [...new Set(passthrough)].join(', ');
 			options.onAddToChatQueue(
 				warningMsg(
-					`Unknown inline override(s): ${keys} — no once-scoped setting or flag matches. Forwarded to the command unchanged.`,
+					`Unknown inline override(s): ${keys} - no once-scoped setting or flag matches. Forwarded to the command unchanged.`,
 					'inline-override-unknown',
 				),
 			);
 		}
 
-		if (await handleCompactCommand(commandParts, options, onceThreshold))
-			return;
-		if (await handleContextMaxCommand(commandParts, options)) return;
-		if (await handleCommandCreate(commandParts, options)) return;
-		if (await handleAgentCreate(commandParts, options)) return;
-		if (await handleAgentCopy(commandParts, options)) return;
-		if (await handleToolCreate(commandParts, options)) return;
-		if (await handleSkillsCreate(commandParts, options)) return;
-		if (await handleSpecialCommand(commandName, options)) return;
-		if (await handleCheckpointLoad(commandParts, options)) return;
-		// Stateful handlers that replay or resume chat flow live alongside each other.
-		if (await handleResumeCommand(commandParts, options)) return;
-		if (
-			await handleRetryCommand(
-				[
-					commandName,
-					...parseCustomCommandArgs(
-						cleanedMessage.slice(commandName.length + 2),
-					),
-				],
-				options,
-			)
-		)
-			return;
-		if (handleCopilotLogin(commandParts, options)) return;
-		if (handleCodexLogin(commandParts, options)) return;
-		if (handleStatsCommand(commandParts, options)) return;
-
-		await handleBuiltInCommand(cleanedMessage, options);
+		await dispatchSlashCommand(
+			commandName,
+			[commandName, ...positional, ...passthrough, ...expandedFlags],
+			cleanedMessage,
+			options,
+			onceThreshold,
+		);
 	} finally {
 		restoreOnce();
 	}
+}
+
+/**
+ * Built-in commands that accept inline `?key=value` overrides. These are the
+ * commands whose handlers observe the once-scoped settings (`/usage` reads
+ * the context limit, `/compact` the threshold and its boolean flags).
+ */
+const INLINE_OVERRIDE_COMMANDS: ReadonlySet<string> = new Set([
+	'compact',
+	'usage',
+]);
+
+/**
+ * Route a parsed slash command through the stateful handlers, falling back
+ * to the built-in command registry.
+ */
+async function dispatchSlashCommand(
+	commandName: string,
+	commandParts: string[],
+	cleanedMessage: string,
+	options: MessageSubmissionOptions,
+	onceThreshold?: number,
+): Promise<void> {
+	if (await handleCompactCommand(commandParts, options, onceThreshold)) return;
+	if (await handleContextMaxCommand(commandParts, options)) return;
+	if (await handleCommandCreate(commandParts, options)) return;
+	if (await handleAgentCreate(commandParts, options)) return;
+	if (await handleAgentCopy(commandParts, options)) return;
+	if (await handleToolCreate(commandParts, options)) return;
+	if (await handleSkillsCreate(commandParts, options)) return;
+	if (await handleSpecialCommand(commandName, options)) return;
+	if (await handleCheckpointLoad(commandParts, options)) return;
+	// Stateful handlers that replay or resume chat flow live alongside each other.
+	if (await handleResumeCommand(commandParts, options)) return;
+	if (
+		await handleRetryCommand(
+			[
+				commandName,
+				...parseCustomCommandArgs(cleanedMessage.slice(commandName.length + 2)),
+			],
+			options,
+		)
+	)
+		return;
+	if (handleCopilotLogin(commandParts, options)) return;
+	if (handleCodexLogin(commandParts, options)) return;
+	if (handleStatsCommand(commandParts, options)) return;
+
+	await handleBuiltInCommand(cleanedMessage, options);
 }
 
 /**
