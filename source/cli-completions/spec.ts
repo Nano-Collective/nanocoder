@@ -46,8 +46,21 @@ export const COMPLETION_SUBCOMMANDS: readonly CompletionSubcommand[] = [
 		description: 'Run in non-interactive mode',
 	},
 	{
+		name: 'review',
+		description: 'Review a branch or PR diff',
+	},
+	{
 		name: 'worktree',
 		description: 'Start in a new worktree for a GitHub PR',
+	},
+	{
+		name: 'verify',
+		description: 'Headless, read-only PR review (--pr <n>)',
+	},
+	{
+		name: 'skills',
+		description: 'Install a skill bundle from a git repository',
+		children: ['add'],
 	},
 	{
 		name: 'storage',
@@ -135,6 +148,22 @@ export const COMPLETION_FLAGS: readonly CompletionFlag[] = [
 		name: 'no-alt-screen',
 		takesValue: false,
 		description: 'Force inline mode (main screen + native scrollback)',
+	},
+	{
+		name: 'mouse',
+		takesValue: false,
+		description: 'Mouse wheel scrolls the chat viewport in fullscreen mode',
+	},
+	{
+		name: 'no-mouse',
+		takesValue: false,
+		description: 'Disable mouse reporting in fullscreen mode',
+	},
+	{
+		name: 'prompt-file',
+		takesValue: true,
+		valueName: 'file',
+		description: 'Read the run prompt from a file (run mode only)',
 	},
 	{
 		name: 'json',
