@@ -94,6 +94,82 @@ test('NanocoderAcpClient - newChat clears pending permissions', async (t) => {
 	t.false(client.hasPendingPermissions(), 'Abandoning the chat abandons its approval prompts');
 });
 
+async function makeHandshakenClient(
+	agentCapabilities: unknown,
+	closeSession: (params: {sessionId: string}) => Promise<unknown>,
+) {
+	const lines: string[] = [];
+	const client = new NanocoderAcpClient(
+		{appendLine: (line: string) => lines.push(line)} as any,
+		new AcpStateManager(),
+	);
+	client.setConnection({
+		initialize: async () => ({agentInfo: {version: '1.32.0'}, agentCapabilities}),
+		closeSession,
+	} as any);
+	await client.initializeHandshake();
+	(client as any)._sessionId = 'session-old';
+	return {client, lines};
+}
+
+test('NanocoderAcpClient - newChat closes the old session when the agent supports it', async (t) => {
+	const closed: string[] = [];
+	const {client} = await makeHandshakenClient(
+		{sessionCapabilities: {close: {}}},
+		async ({sessionId}) => {
+			closed.push(sessionId);
+			return {};
+		},
+	);
+
+	client.newChat();
+
+	t.deepEqual(closed, ['session-old']);
+	t.is((client as any)._sessionId, undefined);
+});
+
+test('NanocoderAcpClient - newChat does not send session/close without the capability', async (t) => {
+	let calls = 0;
+	const {client} = await makeHandshakenClient({}, async () => {
+		calls++;
+		return {};
+	});
+
+	client.newChat();
+
+	t.is(calls, 0);
+});
+
+test('NanocoderAcpClient - newChat logs a failed session/close instead of throwing', async (t) => {
+	const {client, lines} = await makeHandshakenClient(
+		{sessionCapabilities: {close: {}}},
+		async () => {
+			throw new Error('agent gone');
+		},
+	);
+
+	t.notThrows(() => client.newChat());
+	await new Promise(resolve => setImmediate(resolve));
+
+	t.true(lines.some(line => line.includes('Failed to close session session-old: Error: agent gone')));
+});
+
+test('NanocoderAcpClient - newChat with no session sends no session/close', async (t) => {
+	let calls = 0;
+	const {client} = await makeHandshakenClient(
+		{sessionCapabilities: {close: {}}},
+		async () => {
+			calls++;
+			return {};
+		},
+	);
+	(client as any)._sessionId = undefined;
+
+	client.newChat();
+
+	t.is(calls, 0);
+});
+
 test('NanocoderAcpClient - a cancelled prompt does not raise an error toast', async (t) => {
 	let rejectPrompt: (error: Error) => void = () => {};
 	const client = makeClient({

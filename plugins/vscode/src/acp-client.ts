@@ -53,6 +53,8 @@ export class NanocoderAcpClient {
 	 * signal lets `newSession` race the handshake and fail silently.
 	 */
 	private _handshakeComplete = false;
+	/** Whether the agent advertised `sessionCapabilities.close` at initialize. */
+	private _supportsSessionClose = false;
 
 	get isHandshakeComplete(): boolean {
 		return this._handshakeComplete && this.connection != null;
@@ -116,6 +118,7 @@ export class NanocoderAcpClient {
 		this._abandonPendingSession();
 		this._clearPendingPermissions();
 		this._handshakeComplete = false;
+		this._supportsSessionClose = false;
 	}
 
 	/** Drop any in-flight session creation; see {@link _sessionGeneration}. */
@@ -202,6 +205,9 @@ export class NanocoderAcpClient {
 				);
 				return false;
 			}
+
+			this._supportsSessionClose =
+				initResult.agentCapabilities?.sessionCapabilities?.close != null;
 
 			// Complete handshake
 			this._handshakeComplete = true;
@@ -380,7 +386,20 @@ export class NanocoderAcpClient {
 	newChat(): void {
 		// Abandoning the conversation abandons its approval prompts too.
 		this._clearPendingPermissions();
+		const previousSessionId = this._sessionId;
 		this._sessionId = undefined;
+		// Let the agent cancel the old session's work and free its resources
+		// (timeline lock, in-memory history). Fire-and-forget: New Chat must
+		// not wait on the agent, and a failure only leaves the session open.
+		if (previousSessionId && this.connection && this._supportsSessionClose) {
+			this.connection
+				.closeSession({sessionId: previousSessionId})
+				.catch(error => {
+					this.outputChannel.appendLine(
+						`Failed to close session ${previousSessionId}: ${error}`,
+					);
+				});
+		}
 		// ...and a session still being created for it.
 		this._abandonPendingSession();
 		this.onSessionArtifacts?.(undefined);
