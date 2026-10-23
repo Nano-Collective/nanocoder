@@ -96,7 +96,7 @@ variable is the point of the output and the reference is not itself a secret.
 
 ## Environment Variables
 
-Keep API keys out of version control using environment variables. Variables are loaded from shell environment (`.bashrc`, `.zshrc`) or `.env` file in your working directory.
+Keep API keys out of version control using environment variables. Variables are loaded from shell environment (`.bashrc`, `.zshrc`) or `.env` file in your working directory. Shell variables win over `.env` values. A project `.env` cannot set `NANOCODER_TRUST_DIRECTORY`, `NANOCODER_CONFIG_DIR`, `NANOCODER_MCPSERVERS`, `NANOCODER_MCPSERVERS_FILE`, or `NANOCODER_CI_TRUST_LEVEL`, since it is loaded before the directory trust check; set those in your shell instead.
 
 ### General
 
