@@ -188,7 +188,8 @@ export function isTrustLevel(value: unknown): value is TrustLevel {
 // trust level has already vetted them into getAllowedToolNames() above.
 // Deliberately excludes `git_pr` at every level, even full-commit: posting
 // to / mutating GitHub must always be harness-mediated (see
-// `postPrComment`/`pushBranch`/`createDraftPr` in `source/tools/git/utils.ts`),
+// `postPrComment`/`createDraftPr` in `source/tools/git/utils.ts`, and
+// `publishFromClone` in `source/daemon/ci-fix-orchestrator.ts`),
 // never an auto-approved raw tool call from the subagent itself — that
 // invariant is what makes the "harness posts, not the LLM" pattern from
 // Phase 2/3 hold even at the most-trusted level. The other MUTATION_TOOLS
@@ -197,6 +198,10 @@ export function isTrustLevel(value: unknown): value is TrustLevel {
 // not needing approval. Only `git_commit` has an unconditional
 // `approval: true`, which is otherwise silently auto-denied in headless
 // mode (no approval-queue handler is ever registered there).
+// Because `execute_bash` runs unapproved here, the CI fix runner is started
+// without any git/gh credentials (`buildFixRunnerEnv` in
+// `source/daemon/ci-fix-orchestrator.ts`), so a raw `git push` or `gh pr
+// merge` from bash fails; the daemon publishes from its own process.
 const HEADLESS_AUTO_APPROVE_TOOLS: Record<TrustLevel, readonly string[]> = {
 	'comment-only': [],
 	'auto-fix': ['git_commit'],

@@ -7,15 +7,27 @@
  */
 
 import {type ChildProcess, spawn} from 'node:child_process';
-import {mkdtempSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
+import {
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {fileURLToPath} from 'node:url';
-import {TIMEOUT_CI_FIX_RUNNER_MS} from '@/constants';
+import {fileURLToPath, pathToFileURL} from 'node:url';
+import {
+	TIMEOUT_CI_FIX_RUNNER_MS,
+	TIMEOUT_GH_LOG_MS,
+	TIMEOUT_GIT_PUSH_MS,
+} from '@/constants';
 import type {CiFixRunnerInput, CiFixRunnerResult} from '@/daemon/ci-fix-runner';
 import type {CiJobFailedPayload} from '@/events/types';
 import type {SubagentResult, SubagentTask} from '@/subagents/types';
-import {createDraftPr, pushBranch} from '@/tools/git/utils';
+import {createDraftPr, execGh, execGit} from '@/tools/git/utils';
+import {formatError} from '@/utils/error-formatter';
+import {redactSecrets} from '@/verify/redact-secrets';
 import type {TrustLevel} from '@/verify/trust';
 import {
 	type CiFixWorktree,
@@ -31,14 +43,182 @@ export interface CiFixOrchestratorDeps {
 		input: CiFixRunnerInput,
 		opts?: {signal?: AbortSignal; cwd?: string},
 	) => Promise<CiFixRunnerResult>;
-	pushBranch: typeof pushBranch;
+	/** Fetch the failing steps' log in this (credentialed) process and stage
+	 * it inside the clone for the runner. Returns the path relative to the
+	 * clone, or undefined when the log could not be fetched. */
+	stageFailedLog: (
+		clonePath: string,
+		runId: number,
+	) => Promise<string | undefined>;
+	/** Publish the clone's branch to origin from this process. */
+	publishBranch: (opts: PublishBranchOptions) => Promise<void>;
 	createDraftPr: typeof createDraftPr;
 	/** SHAs of commits this daemon already published as CI fixes. */
 	readAutoFixedShas: (projectRoot: string) => Promise<string[]>;
 	recordAutoFixedShas: (projectRoot: string, shas: string[]) => Promise<void>;
 }
 
+export interface PublishBranchOptions {
+	projectRoot: string;
+	clonePath: string;
+	/** Branch inside the clone, and the branch name to publish on origin. */
+	branch: string;
+	runId: number;
+}
+
 const MAX_TRACKED_AUTO_FIXED_SHAS = 50;
+
+/**
+ * Where the parent stages the failed-step log, relative to the clone. Inside
+ * `.git/` so it is reachable by the runner's path-contained `read_file` but
+ * can never be staged or committed.
+ */
+const FAILED_LOG_RELATIVE_PATH = '.git/nanocoder-ci/failed-steps.log';
+
+// Env vars that carry GitHub / git credentials, or that point git at a
+// credential source, removed from the fix runner's environment. The runner
+// executes `execute_bash` with no approval in a clone whose origin is the
+// real repo, steered by an attacker-controllable CI log: anything here would
+// let an injected instruction `git push --force` or `gh pr merge`.
+const CREDENTIAL_ENV_VARS: readonly string[] = [
+	'GH_TOKEN',
+	'GITHUB_TOKEN',
+	'GH_ENTERPRISE_TOKEN',
+	'GITHUB_ENTERPRISE_TOKEN',
+	'GH_CONFIG_DIR',
+	'SSH_AUTH_SOCK',
+	'SSH_AGENT_PID',
+	'GIT_ASKPASS',
+	'SSH_ASKPASS',
+	'GIT_SSH',
+	'GIT_SSH_COMMAND',
+	'GIT_PROXY_COMMAND',
+	'GIT_CONFIG_PARAMETERS',
+	'GIT_CONFIG_COUNT',
+	'GIT_CONFIG_GLOBAL',
+	'GIT_CONFIG_SYSTEM',
+];
+
+const CREDENTIAL_ENV_PATTERNS: readonly RegExp[] = [
+	// GH_PAT, GITHUB_PAT, GITHUB_APP_TOKEN, GH_ENTERPRISE_TOKEN...
+	/^(GH|GITHUB)_(.*_)?(TOKEN|PAT)$/,
+	/^GIT_CONFIG_(KEY|VALUE)_\d+$/,
+];
+
+/**
+ * Build the fix runner's environment: the daemon's own environment (the
+ * runner still needs provider API keys, which config may read from env)
+ * minus every git/gh credential vector, plus settings that make a push or
+ * an authenticated `gh` call from inside the runner fail:
+ *
+ * - no token env vars and an empty `GH_CONFIG_DIR`, so `gh` is logged out;
+ * - no ssh-agent socket, and `GIT_SSH_COMMAND=false`, so ssh remotes fail;
+ * - no askpass or terminal prompt, no system git config, and
+ *   `credential.helper` reset to empty (command-scope config, which outranks
+ *   the user's global helper), so https remotes have no credentials;
+ * - `remote.origin.pushurl` pointed at a dead URL as a belt-and-braces stop.
+ *
+ * The publish step runs afterwards in the daemon process with the user's
+ * normal credentials (see `publishFromClone`).
+ */
+export function buildFixRunnerEnv(
+	baseEnv: NodeJS.ProcessEnv,
+	opts: {ghConfigDir: string; inputPath: string; resultPath: string},
+): NodeJS.ProcessEnv {
+	const env: NodeJS.ProcessEnv = {};
+	for (const [key, value] of Object.entries(baseEnv)) {
+		if (CREDENTIAL_ENV_VARS.includes(key)) continue;
+		if (CREDENTIAL_ENV_PATTERNS.some(re => re.test(key))) continue;
+		env[key] = value;
+	}
+	return {
+		...env,
+		GH_CONFIG_DIR: opts.ghConfigDir,
+		GH_PROMPT_DISABLED: '1',
+		GIT_TERMINAL_PROMPT: '0',
+		GIT_ASKPASS: 'false',
+		SSH_ASKPASS_REQUIRE: 'never',
+		GIT_SSH_COMMAND: 'false',
+		GIT_CONFIG_NOSYSTEM: '1',
+		GIT_CONFIG_COUNT: '2',
+		GIT_CONFIG_KEY_0: 'credential.helper',
+		GIT_CONFIG_VALUE_0: '',
+		GIT_CONFIG_KEY_1: 'remote.origin.pushurl',
+		GIT_CONFIG_VALUE_1: 'nanocoder-push-disabled://ci-fix-runner',
+		NANOCODER_CI_FIX_INPUT_PATH: opts.inputPath,
+		NANOCODER_CI_FIX_RESULT_PATH: opts.resultPath,
+	};
+}
+
+/**
+ * Fetch the failing steps' log with the daemon's own `gh` login, then write
+ * it under the clone's `.git/` for the runner to read. The runner itself has
+ * no GitHub credentials (see `buildFixRunnerEnv`), so this is its only way
+ * to see the log.
+ */
+async function stageFailedLogInClone(
+	clonePath: string,
+	runId: number,
+): Promise<string | undefined> {
+	try {
+		const log = await execGh(
+			['run', 'view', runId.toString(), '--log-failed'],
+			TIMEOUT_GH_LOG_MS,
+		);
+		const absPath = join(clonePath, FAILED_LOG_RELATIVE_PATH);
+		mkdirSync(join(absPath, '..'), {recursive: true});
+		writeFileSync(absPath, log, 'utf-8');
+		return FAILED_LOG_RELATIVE_PATH;
+	} catch (err) {
+		console.error(
+			`Could not fetch failed-step log for run ${runId}: ${formatError(err)}`,
+		);
+		return undefined;
+	}
+}
+
+/**
+ * Publish the fix without trusting anything inside the clone. The runner
+ * could have rewritten the clone's `.git/config` (a different origin URL, a
+ * `credential.helper` or `core.sshCommand` that runs a command, `insteadOf`
+ * rewrites) or planted hooks, and a `git push` run inside the clone would
+ * honour all of it with the user's real credentials. Instead, fetch the
+ * branch from the clone into a private ref of the user's own repository and
+ * push from there, to the project's own `origin`, with hooks skipped (a
+ * fresh clone never had any, so this matches what pushing from it did).
+ */
+export async function publishFromClone(
+	opts: PublishBranchOptions,
+	exec: typeof execGit = execGit,
+): Promise<void> {
+	const ref = `refs/nanocoder/ci-fix/${opts.runId}`;
+	await exec([
+		'-C',
+		opts.projectRoot,
+		'fetch',
+		'--no-tags',
+		'--no-write-fetch-head',
+		pathToFileURL(opts.clonePath).href,
+		`+refs/heads/${opts.branch}:${ref}`,
+	]);
+	try {
+		await exec(
+			[
+				'-C',
+				opts.projectRoot,
+				'push',
+				'--no-verify',
+				'origin',
+				`${ref}:refs/heads/${opts.branch}`,
+			],
+			TIMEOUT_GIT_PUSH_MS,
+		);
+	} finally {
+		await exec(['-C', opts.projectRoot, 'update-ref', '-d', ref]).catch(
+			() => undefined,
+		);
+	}
+}
 
 function extractCiPayload(task: SubagentTask): CiJobFailedPayload | undefined {
 	const trigger = task.context?.trigger as
@@ -59,6 +239,8 @@ function defaultSpawnFixRunner(
 		const workDir = mkdtempSync(join(tmpdir(), 'nanocoder-ci-fix-io-'));
 		const inputPath = join(workDir, 'input.json');
 		const resultPath = join(workDir, 'result.json');
+		const ghConfigDir = join(workDir, 'gh-config');
+		mkdirSync(ghConfigDir);
 		writeFileSync(inputPath, JSON.stringify(input), 'utf-8');
 
 		const cleanupIoDir = () => rmSync(workDir, {recursive: true, force: true});
@@ -70,11 +252,11 @@ function defaultSpawnFixRunner(
 			// often defined in an uncommitted local config).
 			child = spawn(process.execPath, [runnerEntry], {
 				cwd: opts.cwd,
-				env: {
-					...process.env,
-					NANOCODER_CI_FIX_INPUT_PATH: inputPath,
-					NANOCODER_CI_FIX_RESULT_PATH: resultPath,
-				},
+				env: buildFixRunnerEnv(process.env, {
+					ghConfigDir,
+					inputPath,
+					resultPath,
+				}),
 				stdio: 'inherit',
 			});
 		} catch (err) {
@@ -133,7 +315,8 @@ const defaultDeps: CiFixOrchestratorDeps = {
 	createWorktree: createCiFixWorktree,
 	removeWorktree: removeCiFixWorktree,
 	spawnFixRunner: defaultSpawnFixRunner,
-	pushBranch,
+	stageFailedLog: stageFailedLogInClone,
+	publishBranch: opts => publishFromClone(opts),
 	createDraftPr,
 	readAutoFixedShas: async projectRoot =>
 		(await readCiWatchState(projectRoot)).autoFixedShas ?? [],
@@ -172,7 +355,8 @@ export async function runCiAutoFixFlow(
 		createWorktree,
 		removeWorktree,
 		spawnFixRunner,
-		pushBranch,
+		stageFailedLog,
+		publishBranch,
 		createDraftPr,
 		readAutoFixedShas,
 		recordAutoFixedShas,
@@ -229,6 +413,8 @@ export async function runCiAutoFixFlow(
 	}
 
 	try {
+		const failedLogPath = await stageFailedLog(worktree.path, payload.runId);
+
 		let runnerResult: CiFixRunnerResult;
 		try {
 			runnerResult = await spawnFixRunner(
@@ -237,6 +423,7 @@ export async function runCiAutoFixFlow(
 					trustLevel,
 					payload,
 					taskDescription: task.description,
+					failedLogPath,
 				},
 				{signal, cwd: projectRoot},
 			);
@@ -270,20 +457,23 @@ export async function runCiAutoFixFlow(
 			});
 		}
 
+		const publishOpts: PublishBranchOptions = {
+			projectRoot,
+			clonePath: worktree.path,
+			branch: worktree.branch,
+			runId: payload.runId,
+		};
 		let pushed = false;
 		try {
 			if (trustLevel === 'auto-fix') {
-				await pushBranch(worktree.branch, {
-					setUpstream: true,
-					cwd: worktree.path,
-				});
+				await publishBranch(publishOpts);
 				pushed = true;
 				await recordAutoFixedShas(projectRoot, runnerResult.commitShas).catch(
 					() => undefined,
 				);
 				const prUrl = await createDraftPr({
 					title: `fix(ci): ${payload.workflowName} failed on ${payload.branch}`,
-					body: runnerResult.output,
+					body: redactSecrets(runnerResult.output),
 					base: payload.branch,
 					head: worktree.branch,
 				});
@@ -294,7 +484,7 @@ export async function runCiAutoFixFlow(
 				});
 			}
 
-			await pushBranch(worktree.branch, {cwd: worktree.path});
+			await publishBranch(publishOpts);
 			await recordAutoFixedShas(projectRoot, runnerResult.commitShas).catch(
 				() => undefined,
 			);

@@ -212,7 +212,11 @@ export class SubagentExecutor {
 	 *                  than adding to it, so a checked-out repo's own config
 	 *                  can't pre-approve tools for a trust-gated run.
 	 *                  `trustLevel` makes every `git_pr` call be checked
-	 *                  against that level's allowed actions before approval.
+	 *                  against that level's allowed actions before approval,
+	 *                  and resolves the subagent from built-in definitions
+	 *                  only: a trust-gated run reads attacker-controlled
+	 *                  input, and a project-level agent of the same name
+	 *                  would let that input's own checkout replace it.
 	 */
 	async execute(
 		task: SubagentTask,
@@ -241,7 +245,9 @@ export class SubagentExecutor {
 
 		try {
 			const loader = getSubagentLoader(this.projectRoot);
-			const loadedConfig = await loader.getSubagent(task.subagent_type);
+			const loadedConfig = toolOverride?.trustLevel
+				? await loader.getBuiltInSubagent(task.subagent_type)
+				: await loader.getSubagent(task.subagent_type);
 
 			if (!loadedConfig) {
 				return {
