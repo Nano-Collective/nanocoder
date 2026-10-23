@@ -24,6 +24,9 @@ export interface DaemonLock {
 	socketPath: string;
 	startedAt: number;
 	projectRoot: string;
+	/** CI investigation trust level the daemon was started with. Optional:
+	 * absent in lockfiles written by older daemons. */
+	ciTrustLevel?: string;
 }
 
 export function getLockfilePath(projectRoot: string): string {

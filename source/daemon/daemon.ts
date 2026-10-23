@@ -56,6 +56,7 @@ import type {CiWatchConfig} from '@/types/config';
 import {formatError} from '@/utils/error-formatter';
 import {sendNotification} from '@/utils/notifications';
 import {formatCiReport} from '@/verify/format-ci-report';
+import {isTrustLevel} from '@/verify/trust';
 import {readCiWatchState, writeCiWatchState} from './ci-watch-state';
 import {DaemonIpcServer} from './ipc';
 import {
@@ -440,6 +441,11 @@ export async function startDaemon(opts: DaemonOptions): Promise<DaemonHandle> {
 			socketPath: getSocketPath(opts.projectRoot),
 			startedAt: Date.now(),
 			projectRoot: opts.projectRoot,
+			// Same resolution as entry.ts, so `daemon status` reports the
+			// level actually in effect.
+			ciTrustLevel: isTrustLevel(process.env.NANOCODER_CI_TRUST_LEVEL)
+				? process.env.NANOCODER_CI_TRUST_LEVEL
+				: 'comment-only',
 		});
 	} catch (err) {
 		await stop();
