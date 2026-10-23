@@ -45,7 +45,7 @@ import {formatError} from '@/utils/error-formatter';
 const DEFAULT_POLL_INTERVAL_MS = 30_000;
 /** Floor for a configured `pollIntervalMs`: each poll is a `gh` API call,
  * and a tiny value (say 10) would burn through the rate limit. */
-export const MIN_POLL_INTERVAL_MS = 5_000;
+const MIN_POLL_INTERVAL_MS = 5_000;
 const DEFAULT_MAX_POLL_INTERVAL_MS = 300_000;
 const RUN_LIST_LIMIT = 10;
 const MAX_TRACKED_RUN_IDS = 50;

@@ -73,7 +73,7 @@ const MAX_TRACKED_AUTO_FIXED_SHAS = 50;
  * `.git/` so it is reachable by the runner's path-contained `read_file` but
  * can never be staged or committed.
  */
-export const FAILED_LOG_RELATIVE_PATH = '.git/nanocoder-ci/failed-steps.log';
+const FAILED_LOG_RELATIVE_PATH = '.git/nanocoder-ci/failed-steps.log';
 
 // Env vars that carry GitHub / git credentials, or that point git at a
 // credential source, removed from the fix runner's environment. The runner
