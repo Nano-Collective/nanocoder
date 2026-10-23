@@ -3,7 +3,8 @@ import {
 	RUN_FLAGS_WITH_VALUES,
 } from './run-prompt-args.js';
 
-const COMMANDS = [
+/** Top-level commands. Exported so the completion spec can be checked against it. */
+export const COMMANDS = [
 	'run',
 	'review',
 	'worktree',
@@ -11,6 +12,7 @@ const COMMANDS = [
 	'copilot',
 	'codex',
 	'daemon',
+	'verify',
 	'skills',
 	'config',
 	'storage',
@@ -93,13 +95,40 @@ function unknownOptionError(option: string): string {
 
 function unknownCommandError(command: string): string {
 	const match = findSuggestion(command, COMMANDS);
-	return match
+	// Never suggest the word the user already typed: a known command only
+	// reaches here when it is out of position (see misplacedCommandError).
+	return match && match !== command
 		? `Unknown command "${command}". Did you mean "${match}"?`
 		: `Unknown command "${command}". Run "nanocoder --help" to see available commands.`;
 }
 
-function validateTopLevelArgs(args: string[], end: number): string | undefined {
-	for (let i = 0; i < end; i++) {
+/**
+ * A known command typed after one or more options, e.g.
+ * `nanocoder --trust-directory daemon start`. Commands are only recognised
+ * as the first argument, so point at the working order instead of claiming
+ * the command does not exist.
+ */
+function misplacedCommandError(args: string[], commandIndex: number): string {
+	const command = args[commandIndex];
+	const reordered = [
+		command,
+		...args.slice(commandIndex + 1),
+		...args.slice(0, commandIndex),
+	].join(' ');
+	return `Put "${command}" first: nanocoder ${reordered}`;
+}
+
+interface ScannedArgs {
+	/** Indexes of arguments that are neither a known option nor its value. */
+	positionals: number[];
+	/** Set when an unknown option is found; scanning stops there. */
+	error?: string;
+}
+
+/** Walk `args[start..end)`, skipping known options and their values. */
+function scanArgs(args: string[], start: number, end: number): ScannedArgs {
+	const positionals: number[] = [];
+	for (let i = start; i < end; i++) {
 		const arg = args[i];
 		if (FLAGS_WITH_VALUES.has(arg)) {
 			const value = args[i + 1];
@@ -116,10 +145,44 @@ function validateTopLevelArgs(args: string[], end: number): string | undefined {
 			}
 			continue;
 		}
-		if (arg.startsWith('-')) return unknownOptionError(arg);
-		return unknownCommandError(arg);
+		if (arg.startsWith('-')) {
+			return {positionals, error: unknownOptionError(arg)};
+		}
+		positionals.push(i);
 	}
-	return undefined;
+	return {positionals};
+}
+
+function validateTopLevelArgs(args: string[], end: number): string | undefined {
+	const {positionals, error} = scanArgs(args, 0, end);
+	const first = positionals[0];
+	// An unknown option before the first positional wins; otherwise report
+	// the positional, which comes first on the command line.
+	if (first === undefined) return error;
+	if ((COMMANDS as readonly string[]).includes(args[first])) {
+		return misplacedCommandError(args, first);
+	}
+	return unknownCommandError(args[first]);
+}
+
+const WORKTREE_USAGE =
+	'Usage: nanocoder worktree <PR-number> [options] (a positive GitHub PR number is required).';
+
+/**
+ * Split `nanocoder worktree ...` into its PR-number positionals and options.
+ * Global options (`--provider`, `--model`, `--mode`, ...) may follow or
+ * precede the PR number and are read by the normal startup path, so the
+ * session in the new worktree honours them. Returns the positional
+ * arguments (callers require exactly one PR number) or an error message.
+ */
+export function parseWorktreeArgs(
+	args: string[],
+): {positionals: string[]} | {error: string} {
+	const {positionals, error} = scanArgs(args, 1, args.length);
+	if (error) return {error};
+	const values = positionals.map(index => args[index]);
+	if (values.length !== 1) return {error: WORKTREE_USAGE};
+	return {positionals: values};
 }
 
 /**
@@ -128,7 +191,12 @@ function validateTopLevelArgs(args: string[], end: number): string | undefined {
  * text, where option-looking tokens may be part of the user's request.
  */
 export function validateCliArgs(args: string[]): string | undefined {
-	if (args[0] === 'review' || args[0] === 'worktree') return undefined;
+	if (args[0] === 'review') return undefined;
+
+	if (args[0] === 'worktree') {
+		const result = parseWorktreeArgs(args);
+		return 'error' in result ? result.error : undefined;
+	}
 
 	if (args[0] === 'codex' || args[0] === 'copilot') {
 		if (args[1] === 'login') return undefined;
