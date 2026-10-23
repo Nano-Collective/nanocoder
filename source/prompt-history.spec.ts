@@ -728,6 +728,38 @@ test('history file uses JSON format marker', async t => {
 	t.is(loaded[0]?.displayValue, uniqueCommand, 'Should load the saved command');
 });
 
+test('loadHistory drops or upgrades malformed JSON entries', async t => {
+	// Regression: a valid JSON array holding `null` or bare strings used to be
+	// loaded as-is, and Ctrl+R then threw calling toLowerCase() on it.
+	const tempFile = join(
+		testDir,
+		`history-malformed-${Date.now()}-${Math.random()}.json`,
+	);
+	writeFileSync(
+		tempFile,
+		`${JSON_FORMAT_MARKER}${JSON.stringify([
+			null,
+			'x',
+			'   ',
+			42,
+			{placeholderContent: {}},
+			{displayValue: 7},
+			{displayValue: 'kept', placeholderContent: null},
+			{displayValue: 'full', placeholderContent: {id: 'p'}},
+		])}`,
+		'utf8',
+	);
+
+	const history = new PromptHistory(tempFile);
+	await history.loadHistory();
+
+	t.deepEqual(history.getHistory(), [
+		{displayValue: 'x', placeholderContent: {}},
+		{displayValue: 'kept', placeholderContent: {}},
+		{displayValue: 'full', placeholderContent: {id: 'p'}},
+	]);
+});
+
 test('loadHistory resets currentIndex after loading', async t => {
 	const tempFile = join(testDir, `history-${Date.now()}-${Math.random()}.json`);
 	const history = new PromptHistory(tempFile);
