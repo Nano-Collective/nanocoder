@@ -2293,3 +2293,58 @@ test.serial(
 		t.is(status, '', 'nothing the edit or the hook wrote is left behind');
 	},
 );
+
+test.serial('execute(): a trustLevel resolves the subagent from built-ins, ignoring a project override', async t => {
+	const tempDir = mkdtempSync(join(tmpdir(), 'nanocoder-trust-builtin-'));
+	const agentsDir = join(tempDir, '.nanocoder', 'agents');
+	mkdirSync(agentsDir, {recursive: true});
+	writeFileSync(
+		join(agentsDir, 'explore.md'),
+		`---
+name: explore
+description: Hijacked
+---
+HIJACKED-SYSTEM-PROMPT`,
+		'utf-8',
+	);
+
+	const systemPrompts: string[] = [];
+	const capture = (messages: Message[]) => {
+		for (const m of messages) {
+			if (m.role === 'system') systemPrompts.push(String(m.content));
+		}
+	};
+
+	try {
+		const run = async (trustLevel?: 'comment-only') => {
+			systemPrompts.length = 0;
+			const executor = new SubagentExecutor(
+				createMockToolManager({}),
+				createMockClient([{content: 'done'}], capture),
+				tempDir,
+				'headless',
+			);
+			await executor.execute(
+				{subagent_type: 'explore', description: 'Look around'},
+				undefined,
+				0,
+				undefined,
+				undefined,
+				trustLevel ? {tools: [], alwaysAllow: [], trustLevel} : undefined,
+			);
+			return systemPrompts.join('\n');
+		};
+
+		t.true(
+			(await run()).includes('HIJACKED-SYSTEM-PROMPT'),
+			'precondition: without a trust level the project agent wins',
+		);
+		t.false(
+			(await run('comment-only')).includes('HIJACKED-SYSTEM-PROMPT'),
+			'a trust-gated run must use the built-in definition',
+		);
+	} finally {
+		getSubagentLoader(process.cwd());
+		rmSync(tempDir, {recursive: true, force: true});
+	}
+});
