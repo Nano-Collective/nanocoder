@@ -11,7 +11,7 @@ import {
 } from './protocol';
 import {AcpStateManager, ACPStatus} from './acp-state';
 import {getGlobalConfigDir, resolveConfigPath} from './settings-manager';
-import {NanocoderAcpClient} from './acp-client';
+import {NanocoderAcpClient, currentFocusedEditor} from './acp-client';
 import {AcpProcessManager} from './acp-process-manager';
 import {AcpStatusBarController} from './acp-status-bar';
 import {ChatWebviewProvider} from './chat-webview-provider';
@@ -171,7 +171,7 @@ export function activate(context: vscode.ExtensionContext) {
 	context.subscriptions.push(
 		vscode.window.onDidChangeActiveTextEditor(() => scheduleActiveEditorSend()),
 		vscode.window.onDidChangeTextEditorSelection(event => {
-			if (event.textEditor === vscode.window.activeTextEditor) {
+			if (event.textEditor === currentFocusedEditor()) {
 				scheduleActiveEditorSend();
 			}
 		}),
@@ -392,7 +392,7 @@ function startCli(): void {
 // Send workspace context to CLI
 function sendWorkspaceContext(): void {
 	const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
-	const activeEditor = vscode.window.activeTextEditor;
+	const activeEditor = currentFocusedEditor();
 
 	// Get open files
 	const openFiles = vscode.workspace.textDocuments
@@ -430,7 +430,7 @@ function scheduleActiveEditorSend(): void {
 // Push the current active editor + selection to the CLI. When no editor is
 // active or the document isn't a file on disk, clear the CLI-side state.
 function sendActiveEditor(): void {
-	const editor = vscode.window.activeTextEditor;
+	const editor = currentFocusedEditor();
 	
 	// 1. Notify the local ACP GUI backend
 	if (acpClient) {

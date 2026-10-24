@@ -1810,3 +1810,29 @@ test.serial(
 		});
 	},
 );
+
+test.serial(
+	'AcpAgent.extMethod - clearFocusDocument clears the focused file for a session',
+	async t => {
+		const {agent} = createAgent();
+		const {sessionId} = await agent.newSession({cwd: '/tmp'});
+		await agent.unstable_didFocusDocument({
+			sessionId,
+			uri: 'file:///tmp/foo.ts',
+			version: 1,
+			position: {line: 0, character: 0},
+		} as any);
+		t.is((agent as any).sessions.get(sessionId).activeFile, 'file:///tmp/foo.ts');
+
+		const result = await agent.extMethod('clearFocusDocument', {sessionId});
+		t.deepEqual(result, {ok: true});
+		t.is((agent as any).sessions.get(sessionId).activeFile, undefined);
+	},
+);
+
+test('AcpAgent.extMethod - clearFocusDocument requires a string sessionId', async t => {
+	const {agent} = createAgent();
+	await t.throwsAsync(agent.extMethod('clearFocusDocument', {sessionId: 1}), {
+		message: /requires string sessionId/,
+	});
+});
