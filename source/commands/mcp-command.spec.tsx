@@ -318,3 +318,27 @@ test('MCP command: uses transport type getTransportIcon function correctly', t =
 		);
 	}
 });
+
+test('MCP command: redacts sensitive credentials and tokens in server URL', t => {
+	const mockToolManager = {
+		getConnectedServers: () => ['secure-mcp'],
+		getServerTools: () => [],
+		getServerInfo: () => ({
+			name: 'secure-mcp',
+			transport: 'http' as any,
+			toolCount: 0,
+			connected: true,
+			url: 'https://mcp.example.com/api/mcp/s/PATHTOKEN-LEAKCHECK/mcp?api_key=APIKEY-LEAKCHECK',
+		}),
+	} as unknown as ToolManager;
+
+	const {lastFrame} = renderWithTheme(<MCP toolManager={mockToolManager} />);
+	const output = (lastFrame() ?? '').replace(/[│\n\r]/g, '');
+
+	t.notRegex(output, /PATHTOKEN-LEAKCHECK/);
+	t.notRegex(output, /APIKEY-LEAKCHECK/);
+	t.regex(
+		output,
+		/URL:\s*https:\/\/mcp\.example\.com\/api\/mcp\/s\/<redacted>\/mcp/,
+	);
+});
