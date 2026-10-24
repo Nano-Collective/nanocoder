@@ -3,9 +3,24 @@
  * Uses llama-tokenizer-js package
  */
 
-import llamaTokenizer from 'llama-tokenizer-js';
+import {createRequire} from 'node:module';
 import type {Message} from '@/types/core';
 import type {Tokenizer} from '../../types/tokenization';
+
+type LlamaModule = typeof import('llama-tokenizer-js');
+type LlamaTokenizerInstance = LlamaModule['default'];
+
+const require = createRequire(import.meta.url);
+let llamaTokenizer: LlamaTokenizerInstance | undefined;
+
+/** Load llama-tokenizer-js on first use so non-Llama sessions never pay for it */
+function loadLlama(): LlamaTokenizerInstance {
+	if (!llamaTokenizer) {
+		const mod = require('llama-tokenizer-js');
+		llamaTokenizer = (mod.default ?? mod) as LlamaTokenizerInstance;
+	}
+	return llamaTokenizer;
+}
 
 export class LlamaTokenizer implements Tokenizer {
 	private modelName: string;
@@ -16,7 +31,7 @@ export class LlamaTokenizer implements Tokenizer {
 
 	encode(text: string): number {
 		try {
-			const tokens = llamaTokenizer.encode(text);
+			const tokens = loadLlama().encode(text);
 			return tokens.length;
 		} catch {
 			// Fallback to character-based estimation if tokenization fails
