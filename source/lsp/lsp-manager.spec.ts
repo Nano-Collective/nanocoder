@@ -488,3 +488,43 @@ test('LSPManager - events still work after shutdown', async t => {
 	manager.emit('diagnostics', {uri: 'test', diagnostics: []});
 	t.true(called);
 });
+
+// fileToUri: paths must become valid, percent-encoded, absolute file URIs so
+// they match the URIs language servers publish diagnostics under.
+const toUri = (filePath: string): string =>
+	(
+		new LSPManager() as unknown as {fileToUri(p: string): string}
+	).fileToUri(filePath);
+
+test('fileToUri - plain absolute path', t => {
+	t.is(toUri('/tmp/proj/src/app.ts'), 'file:///tmp/proj/src/app.ts');
+});
+
+test('fileToUri - percent-encodes spaces', t => {
+	t.is(toUri('/tmp/my proj/bad file.ts'), 'file:///tmp/my%20proj/bad%20file.ts');
+});
+
+test('fileToUri - percent-encodes non-ASCII', t => {
+	t.is(
+		toUri('/tmp/中文/文件.ts'),
+		'file:///tmp/%E4%B8%AD%E6%96%87/%E6%96%87%E4%BB%B6.ts',
+	);
+});
+
+test('fileToUri - encodes # and % instead of truncating', t => {
+	t.is(toUri('/tmp/h#sh/p%ct.ts'), 'file:///tmp/h%23sh/p%25ct.ts');
+});
+
+test('fileToUri - resolves relative paths against cwd', t => {
+	const original = process.cwd;
+	process.cwd = () => '/tmp/work dir';
+	try {
+		t.is(toUri('src/app.ts'), 'file:///tmp/work%20dir/src/app.ts');
+	} finally {
+		process.cwd = original;
+	}
+});
+
+test('fileToUri - leaves existing file URIs unchanged', t => {
+	t.is(toUri('file:///C:/src/app.ts'), 'file:///C:/src/app.ts');
+});
