@@ -1,5 +1,4 @@
 import {readFile} from 'node:fs/promises';
-import {highlight} from 'cli-highlight';
 import {Box, Text, useFocus, useInput} from 'ink';
 import {useEffect, useMemo, useState} from 'react';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
@@ -19,6 +18,7 @@ import {
 	flattenTree,
 	flattenTreeAll,
 } from '@/utils/file-tree';
+import {highlight} from '@/utils/highlighter';
 import {compressIndentation} from '@/utils/indentation-normalizer';
 import {getVSCodeServerSync} from '@/vscode/vscode-server';
 import {TreeItem} from './tree-item';
