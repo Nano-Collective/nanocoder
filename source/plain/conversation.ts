@@ -16,6 +16,11 @@ import {
 import {computeToolCallSignature} from '@/hooks/chat-handler/utils/tool-signature';
 import {processToolUse} from '@/message-handler';
 import {color, write, writeError, writeLine, writeStatus} from '@/plain/writer';
+import {
+	formatVerificationSummary,
+	recordToolOutcome,
+	takeEvidenceRejection,
+} from '@/services/completion-ledger';
 import {parseToolCalls} from '@/tool-calling/index';
 import {resolveToolApproval} from '@/tools/approval-policy';
 import type {ToolManager} from '@/tools/tool-manager';
@@ -681,9 +686,34 @@ async function runPlainConversationBody(
 				messages = [...messages, walkthroughFallback];
 				continue;
 			}
+
+			// With `nanocoder.verify` set, a run that edited files cannot end
+			// until the required commands have exited 0 since the last edit.
+			const evidenceRejection = finalTurn
+				? null
+				: takeEvidenceRejection(walkthroughLifecycle.ledger);
+			if (evidenceRejection) {
+				if (!isJson) {
+					writeStatus(
+						'edits are not verified yet - asking for the required checks',
+					);
+				}
+				finalTextBeforeWalkthroughNudge ??= accumulatedFinalText;
+				messages = [...messages, evidenceRejection];
+				continue;
+			}
+			const verification = formatVerificationSummary(
+				walkthroughLifecycle.ledger,
+			);
+			// The answer was already streamed to stdout; the proof follows it.
+			if (verification && !isJson) {
+				writeLine();
+				writeLine(verification);
+			}
+			const answer = finalTextBeforeWalkthroughNudge ?? accumulatedFinalText;
 			return {
 				kind: 'success',
-				finalText: finalTextBeforeWalkthroughNudge ?? accumulatedFinalText,
+				finalText: verification ? `${answer}\n\n${verification}` : answer,
 				reasoning: accumulatedReasoning || null,
 				toolCalls: toolCallsLog,
 				steps,
@@ -747,6 +777,7 @@ async function runPlainConversationBody(
 				workingDirectory,
 			});
 			toolResults.push(toolResult);
+			recordToolOutcome(walkthroughLifecycle.ledger, toolCall, toolResult);
 			if (!toolResult.isError) {
 				observeSuccessfulLifecycleTool(walkthroughLifecycle, toolCall);
 			}
