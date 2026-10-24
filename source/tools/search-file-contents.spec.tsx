@@ -764,10 +764,14 @@ test.serial(
 				const contentLine = result.split('\n').find(l => l.includes('searchTarget'));
 				t.truthy(contentLine, 'Should have content line');
 				// Content follows the `file:line:` prefix in grep-style output;
-				// strip it before checking the truncated length.
+				// strip it, and the trailing span handle, before checking the
+				// truncated length.
 				const contentMatch = contentLine!.match(/^.+?:\d+:(.*)$/);
 				t.truthy(contentMatch, 'Content line should be in file:line:content format');
-				const trimmedContent = contentMatch![1];
+				const trimmedContent = contentMatch![1].replace(
+					/ \[@span:[a-z0-9]+\]$/,
+					'',
+				);
 				t.true(
 					trimmedContent.length <= 301, // 300 + ellipsis (1 char)
 					`Content should be truncated, got ${trimmedContent.length} chars`,
