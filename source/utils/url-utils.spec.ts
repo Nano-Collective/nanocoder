@@ -1,5 +1,5 @@
 import test from 'ava';
-import {isLocalURL} from './url-utils';
+import {isLocalURL, redactUrlSecrets} from './url-utils';
 
 // ============================================================================
 // isLocalURL - localhost
@@ -80,3 +80,37 @@ test('isLocalURL handles malformed URL with 127.0.0.1', t => {
 test('isLocalURL returns false for malformed non-local URL', t => {
 	t.false(isLocalURL('not-a-url'));
 });
+
+// ============================================================================
+// redactUrlSecrets
+// ============================================================================
+
+test('redactUrlSecrets removes credentials and query parameters from URLs', t => {
+	const raw =
+		'https://user:sk-test-LEAKCHECK123@proxy.example.com/v1?key=QUERYKEY-LEAKCHECK';
+	t.is(redactUrlSecrets(raw), 'https://proxy.example.com/v1');
+});
+
+test('redactUrlSecrets masks long token path segments and strips queries', t => {
+	const raw =
+		'https://mcp.example.com/api/mcp/s/PATHTOKEN-LEAKCHECK/mcp?api_key=APIKEY-LEAKCHECK';
+	t.is(redactUrlSecrets(raw), 'https://mcp.example.com/api/mcp/s/<redacted>/mcp');
+});
+
+test('redactUrlSecrets masks token-like path segments with sk- prefix', t => {
+	const raw = 'https://proxy.example.com/v1/sk-abc1234/models';
+	t.is(redactUrlSecrets(raw), 'https://proxy.example.com/v1/<redacted>/models');
+});
+
+test('redactUrlSecrets preserves standard short path segments', t => {
+	const raw = 'https://openrouter.ai/api/v1/chat/completions';
+	t.is(redactUrlSecrets(raw), 'https://openrouter.ai/api/v1/chat/completions');
+});
+
+test('redactUrlSecrets handles empty and nullish values gracefully', t => {
+	t.is(redactUrlSecrets(undefined), undefined);
+	t.is(redactUrlSecrets(null), undefined);
+	t.is(redactUrlSecrets(''), undefined);
+	t.is(redactUrlSecrets('   '), undefined);
+});
+

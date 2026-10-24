@@ -20,7 +20,7 @@ import {HOOK_EVENTS, type HookEvent} from '@/types/config';
 import type {AIProviderConfig, Command} from '@/types/index';
 import {formatError} from '@/utils/error-formatter';
 import {getPackageVersion} from '@/utils/package-version';
-import {isLocalURL} from '@/utils/url-utils';
+import {isLocalURL, redactUrlSecrets} from '@/utils/url-utils';
 
 const LOCAL_PROBE_TIMEOUT_MS = 500;
 
@@ -178,20 +178,23 @@ async function collectProviders(
 
 	return Promise.all(
 		providers.map(async provider => {
-			const baseURL = provider.config.baseURL ?? null;
-			const local = baseURL ? isLocalURL(baseURL) : false;
+			const rawBaseURL = provider.config.baseURL ?? null;
+			const local = rawBaseURL ? isLocalURL(rawBaseURL) : false;
 			const reachability =
-				baseURL && local
-					? await deps.probeLocalProvider(baseURL)
-					: baseURL
+				rawBaseURL && local
+					? await deps.probeLocalProvider(rawBaseURL)
+					: rawBaseURL
 						? 'not-local'
 						: 'skipped';
+			const baseURL = rawBaseURL
+				? (redactUrlSecrets(rawBaseURL) ?? null)
+				: null;
 
 			return {
 				name: provider.name,
 				modelCount: provider.models.length,
 				baseURL,
-				location: baseURL ? (local ? 'local' : 'hosted') : 'unknown',
+				location: rawBaseURL ? (local ? 'local' : 'hosted') : 'unknown',
 				reachability,
 			};
 		}),
@@ -211,7 +214,7 @@ function collectMcp(toolManager: ToolManager | null): DoctorMcpServer[] {
 			toolCount: serverTools.length,
 			resourceCount: serverInfo?.resourceCount ?? 0,
 			promptCount: serverInfo?.promptCount ?? 0,
-			url: serverInfo?.url,
+			url: redactUrlSecrets(serverInfo?.url),
 		};
 	});
 }
