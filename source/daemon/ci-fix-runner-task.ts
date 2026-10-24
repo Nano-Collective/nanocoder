@@ -19,7 +19,7 @@ export function getRunnerToolNames(
 
 export function buildRunnerTaskDescription(input: CiFixRunnerInput): string {
 	const logNote = input.failedLogPath
-		? `The failing steps' log (\`gh run view ${input.payload.runId} --log-failed\`) has been saved to \`${input.failedLogPath}\`. Read it with \`read_file\` (use start_line/end_line for long logs) or search it with \`execute_bash\` (e.g. \`grep -n\`).`
+		? `The failing steps' log (\`gh run view ${input.payload.runId} --log-failed\`) has been saved to \`${input.failedLogPath}\`. Read it with \`read_file\` (use start_line/end_line for long logs).`
 		: `The failing steps' log for run ${input.payload.runId} could not be fetched. Diagnose from the checked-out code and the run's metadata, and say so in your diagnosis.`;
 	return [
 		input.taskDescription,

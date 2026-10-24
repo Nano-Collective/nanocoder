@@ -11,7 +11,7 @@ Added the Agentic CI/CD Gate: Nanocoder can now review pull requests and investi
 
 Safety notes:
 
-- At `auto-fix` and `full-commit`, the fix run starts without GitHub tokens, gh login, ssh-agent or git credential helpers, reads the failed-step log the daemon fetched for it, and cannot push; the daemon publishes the result from the clone to the project's own `origin`.
+- At `auto-fix` and `full-commit`, the fix agent can edit and commit but has no shell tool, so it cannot run commands steered by a CI log; CI on its draft PR or push verifies the fix. The fix run also starts without GitHub tokens, gh login, ssh-agent or git credential helpers, reads the failed-step log the daemon fetched for it, and cannot push; the daemon publishes the result from the clone to the project's own `origin`.
 - `verify` and CI investigations always use the built-in `verify-pr-review` and `verify-ci-investigator` agents, so a pull request cannot supply its own reviewer.
 - Anything posted to GitHub passes through a secret-redaction step first, and semgrep receives the changed paths after `--`.
 - A `verify.trustLevel` of `auto-fix` or `full-commit` in `agents.config.json` needs confirmation at `daemon start`; unattended starts, including the installed service, fall back to `comment-only`. `--trust=<level>` is accepted, `daemon status` shows the running level, and starting with a different level while a daemon runs says it was not applied.

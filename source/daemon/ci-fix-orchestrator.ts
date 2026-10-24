@@ -77,9 +77,10 @@ const FAILED_LOG_RELATIVE_PATH = '.git/nanocoder-ci/failed-steps.log';
 
 // Env vars that carry GitHub / git credentials, or that point git at a
 // credential source, removed from the fix runner's environment. The runner
-// executes `execute_bash` with no approval in a clone whose origin is the
-// real repo, steered by an attacker-controllable CI log: anything here would
-// let an injected instruction `git push --force` or `gh pr merge`.
+// works in a clone whose origin is the real repo, steered by an
+// attacker-controllable CI log. It has no shell tool, but nothing it starts
+// (formatters, hooks, git itself) should hold credentials that could
+// `git push --force` or `gh pr merge`.
 const CREDENTIAL_ENV_VARS: readonly string[] = [
 	'GH_TOKEN',
 	'GITHUB_TOKEN',
