@@ -430,9 +430,9 @@ test.serial('resolveFilePath: a symlinked root still rejects paths really outsid
 });
 
 test('normalizeForCompare: normalizes case on win32 and preserves case on posix', t => {
-	t.is(
+	t.not(
 		normalizeForCompare('/Proj/App', 'linux'),
-		normalizeForCompare('/Proj/App', 'linux'),
+		normalizeForCompare('/proj/app', 'linux'),
 	);
 	t.is(
 		normalizeForCompare('C:\\Proj\\App', 'win32'),

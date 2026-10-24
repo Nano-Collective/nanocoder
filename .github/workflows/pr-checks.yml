@@ -55,6 +55,13 @@ jobs:
       - name: Verify execute_bash cmd.exe quoting
         run: pnpm run test:ava source/services/bash-executor.spec.ts --match="cmd.exe quoting*"
 
+      - name: Verify Windows path validation and preferences case normalization
+        run: >-
+          pnpm run test:ava
+          source/utils/path-validation.spec.ts
+          source/config/preferences.spec.ts
+          --match="*case on Windows*"
+
   # pnpm runs package.json scripts through cmd.exe on Windows, so POSIX-only
   # commands in the build script (mkdir -p, cp, chmod) break there. The shared
   # job only builds on Linux, so build on Windows here with no Unix shell.

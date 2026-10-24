@@ -197,6 +197,14 @@ export function resolveFilePath(
  * inside the root can still point outside it. Use `isRealPathInside` when the
  * path may be attacker- or config-controlled.
  */
+/**
+ * Normalizes a path for comparison: resolves it to an absolute path,
+ * and on Windows (win32) lowercases it because Windows filesystems
+ * are case-insensitive.
+ *
+ * @param p - The path to normalize.
+ * @param platform - Test seam; production code must leave this as the default (`process.platform`).
+ */
 export function normalizeForCompare(
 	p: string,
 	platform: NodeJS.Platform = process.platform,
@@ -205,6 +213,13 @@ export function normalizeForCompare(
 	return platform === 'win32' ? resolved.toLowerCase() : resolved;
 }
 
+/**
+ * Lexical containment check with platform-aware case sensitivity.
+ *
+ * @param target - The path being checked.
+ * @param root - The containing root directory.
+ * @param platform - Test seam; production callers must leave this as the default (`process.platform`).
+ */
 export function isPathInside(
 	target: string,
 	root: string,
