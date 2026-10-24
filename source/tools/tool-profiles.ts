@@ -1,3 +1,7 @@
+import {
+	getAllCalibrationProfiles,
+	getCalibrationProfile,
+} from '@/calibration/calibration-store';
 import type {ToolProfile} from '@/types/config';
 
 /** Concrete profiles — the result of resolving 'auto'. */
@@ -72,13 +76,40 @@ function modelParamsBillions(model: string): number | null {
 }
 
 /**
- * Infer a concrete profile from the active model id.
+ * Infer a concrete profile from the active model id or calibration profile.
  *
+ * Checks if a calibrated benchmark profile exists for the provider and model.
  * Small local models benefit from a slim tool set and prompt; large or
  * cloud-hosted models (no size hint in the id) get the full surface.
  */
-export function inferToolProfile(model?: string): ConcreteProfile {
+export function inferToolProfile(
+	model?: string,
+	provider?: string,
+): ConcreteProfile {
 	if (!model) return 'full';
+
+	if (provider) {
+		try {
+			const cal = getCalibrationProfile(provider, model);
+			if (cal) {
+				return cal.recommendedProfile;
+			}
+		} catch {
+			// Fallback to heuristic
+		}
+	} else {
+		try {
+			const all = getAllCalibrationProfiles();
+			const modelLower = model.toLowerCase().trim();
+			for (const profile of Object.values(all)) {
+				if (profile.model.toLowerCase().trim() === modelLower) {
+					return profile.recommendedProfile;
+				}
+			}
+		} catch {
+			// Fallback to heuristic
+		}
+	}
 
 	const params = modelParamsBillions(model);
 	if (params === null) return 'full'; // cloud / unknown — assume capable
@@ -93,8 +124,9 @@ export function inferToolProfile(model?: string): ConcreteProfile {
 export function resolveToolProfile(
 	profile: ToolProfile,
 	model?: string,
+	provider?: string,
 ): ConcreteProfile {
-	return profile === 'auto' ? inferToolProfile(model) : profile;
+	return profile === 'auto' ? inferToolProfile(model, provider) : profile;
 }
 
 /**
@@ -104,8 +136,9 @@ export function resolveToolProfile(
 export function getToolsForProfile(
 	profile: ToolProfile,
 	model?: string,
+	provider?: string,
 ): string[] {
-	return TOOL_PROFILES[resolveToolProfile(profile, model)];
+	return TOOL_PROFILES[resolveToolProfile(profile, model, provider)];
 }
 
 /**
@@ -115,8 +148,9 @@ export function getToolsForProfile(
 export function isSingleToolProfile(
 	profile: ToolProfile,
 	model?: string,
+	provider?: string,
 ): boolean {
-	const resolved = resolveToolProfile(profile, model);
+	const resolved = resolveToolProfile(profile, model, provider);
 	return resolved === 'minimal' || resolved === 'nano';
 }
 
@@ -125,6 +159,10 @@ export function isSingleToolProfile(
  * coding-practices, uses shortened task-approach/file-editing/constraints,
  * shortened SYSTEM INFORMATION).
  */
-export function isNanoProfile(profile: ToolProfile, model?: string): boolean {
-	return resolveToolProfile(profile, model) === 'nano';
+export function isNanoProfile(
+	profile: ToolProfile,
+	model?: string,
+	provider?: string,
+): boolean {
+	return resolveToolProfile(profile, model, provider) === 'nano';
 }
