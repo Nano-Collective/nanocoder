@@ -1270,9 +1270,10 @@ test('XML fallback - tool definitions include examples per tool', t => {
 });
 
 test('disconnectMCP - keeps skill tools and leaves the web_search gate alone', async t => {
-	// The rebuild this guards against restored `allToolExports` wholesale, which
-	// dropped skill-registered tools and resurrected web_search even when the
-	// constructor had unregistered it for a missing Brave key.
+	// The rebuild this guards against restored the built-in tool exports
+	// wholesale, which dropped skill-registered tools and resurrected
+	// web_search even when the constructor had unregistered it for a
+	// missing Brave key.
 	const manager = new ToolManager();
 	const webSearchBefore = manager.hasTool('web_search');
 

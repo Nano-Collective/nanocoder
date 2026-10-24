@@ -20,7 +20,10 @@ import {
 } from '@/constants';
 import {appendRelevantProjectContextWithCount} from '@/memory/project-context';
 import {SemanticMemoryManager} from '@/memory/semantic-memory-manager';
-import {runPlainConversation} from '@/plain/conversation';
+import {
+	type PlainConversationOutcome,
+	runPlainConversation,
+} from '@/plain/conversation';
 import {initializePlain} from '@/plain/initialize';
 import {
 	color,
@@ -290,15 +293,31 @@ export async function runPlainShell(
 		cleaned = true;
 		shutdownManager.unregister(cleanupHandlerName);
 	};
+	// Resolved just before the run asks to shut down with its own exit code.
+	// A shutdown started by SIGTERM/SIGINT waits for it, so the aborted run
+	// still prints its report and the process exits with the run's code (1)
+	// rather than the signal's 0. It must resolve before gracefulShutdown is
+	// called: on a normal finish that call runs this handler itself.
+	let markReported: () => void = () => undefined;
+	const reported = new Promise<void>(resolve => {
+		markReported = resolve;
+	});
 	shutdownManager.register({
 		name: cleanupHandlerName,
 		priority: 10,
 		handler: async () => {
 			abortController.abort();
-			await conversationPromise?.catch(() => undefined);
+			if (conversationPromise) {
+				await conversationPromise.catch(() => undefined);
+				await reported;
+			}
 			await cleanupArtifacts();
 		},
 	});
+	const finish = async (code: number) => {
+		markReported();
+		await shutdown(code, deps);
+	};
 
 	const nonInteractiveAlwaysAllow = getAppConfig().alwaysAllow ?? [];
 
@@ -306,7 +325,7 @@ export async function runPlainShell(
 		writeLine();
 	}
 
-	let outcome;
+	let outcome: PlainConversationOutcome;
 	try {
 		conversationPromise = deps.runPlainConversation({
 			client,
@@ -323,6 +342,18 @@ export async function runPlainShell(
 			workingDirectory: process.cwd(),
 		});
 		outcome = await conversationPromise;
+	} catch (error) {
+		// runPlainConversation returns provider failures as an `error` outcome
+		// itself. This backstop covers anything else it throws, so the run
+		// still reports and exits through graceful shutdown (session-end).
+		outcome = {
+			kind: 'error',
+			message: formatError(error),
+			finalText: '',
+			reasoning: null,
+			toolCalls: [],
+			steps: 0,
+		};
 	} finally {
 		process.off('SIGINT', sigint);
 		await cleanupArtifacts();
@@ -381,13 +412,14 @@ export async function runPlainShell(
 
 		emitJsonReport(report);
 
+		markReported();
 		await deps.getShutdownManager().gracefulShutdown(exitCode);
 		return;
 	}
 
 	switch (outcome.kind) {
 		case 'success':
-			await shutdown(0, deps);
+			await finish(0);
 			return;
 		case TOOL_APPROVAL_REQUIRED_KIND:
 			writeError(
@@ -396,11 +428,11 @@ export async function runPlainShell(
 					outcome.autoAcceptWouldRun,
 				),
 			);
-			await shutdown(2, deps);
+			await finish(2);
 			return;
 		case 'error':
 			writeError(outcome.message);
-			await shutdown(1, deps);
+			await finish(1);
 			return;
 	}
 }

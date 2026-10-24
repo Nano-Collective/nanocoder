@@ -5,9 +5,15 @@
  * status parsing, and availability checks.
  */
 
-import {execSync, spawn} from 'node:child_process';
-import {existsSync, readFileSync} from 'node:fs';
-import {isAbsolute, join} from 'node:path';
+import {spawn} from 'node:child_process';
+import {
+	accessSync,
+	constants,
+	existsSync,
+	readFileSync,
+	statSync,
+} from 'node:fs';
+import {delimiter, isAbsolute, join} from 'node:path';
 import {TIMEOUT_GH_METADATA_MS, TIMEOUT_GIT_PUSH_MS} from '@/constants';
 import {getProjectRoot} from '@/services/session-cwd';
 import {getLogger} from '@/utils/logging';
@@ -53,42 +59,104 @@ export interface CommitInfo {
 
 // ============================================================================
 // Availability Checks (Synchronous - for conditional tool registration)
+//
+// These must never spawn child processes: they run while the tool registry
+// is built, and blocking on `git`/`gh` before the first rendered frame used
+// to cost ~200ms of startup (#1819). Availability is resolved by scanning
+// PATH / the .git directory on the filesystem instead.
 // ============================================================================
 
 /**
- * Check if git is available on the system (synchronous)
+ * Memoized PATH lookup per binary name. PATH is fixed for the life of a
+ * process, so each name costs one scan rather than one scan per call.
+ */
+const binaryOnPathCache = new Map<string, boolean>();
+
+/**
+ * Check whether an executable resolves on PATH without spawning a shell.
+ * Mirrors shell resolution: every PATH entry is checked against the bare
+ * name plus each PATHEXT extension on Windows (`.exe`, `.cmd`, ...).
+ * cmd.exe accepts quoted PATH entries (`"C:\Program Files\Git\cmd"`), so
+ * surrounding quotes are stripped before the directory is stat-ed — without
+ * that, git could be installed and working while this scan misses it.
+ */
+function isBinaryOnPath(name: string): boolean {
+	const cached = binaryOnPathCache.get(name);
+	if (cached !== undefined) return cached;
+
+	const pathEntries = (process.env.PATH ?? '')
+		.split(delimiter)
+		.map(entry => entry.replace(/^"(.*)"$/, '$1'))
+		.filter(Boolean);
+	const extensions =
+		process.platform === 'win32'
+			? (process.env.PATHEXT ?? '.COM;.EXE;.BAT;.CMD')
+					.split(';')
+					.filter(Boolean)
+			: [''];
+
+	let found = false;
+	for (const dir of pathEntries) {
+		for (const ext of extensions) {
+			const candidate = join(dir, name + ext);
+			try {
+				// Regular file only: a directory named like the binary must not
+				// count as an installed executable.
+				if (!statSync(candidate).isFile()) continue;
+				// X_OK mirrors whether a shell could actually exec the file: it
+				// checks the executable bit on Unix and is a no-op on Windows
+				// (where PATHEXT above does the equivalent filtering).
+				accessSync(candidate, constants.X_OK);
+				found = true;
+				break;
+			} catch {
+				// Missing, not a file, or not executable — keep looking.
+			}
+		}
+		if (found) break;
+	}
+
+	binaryOnPathCache.set(name, found);
+	return found;
+}
+
+/**
+ * @internal Test-only: clear the memoized PATH lookups so a test can point
+ * PATH at a fixture directory and get a fresh verdict instead of the
+ * cached one from the real environment.
+ */
+export function resetBinaryAvailabilityCacheForTests(): void {
+	binaryOnPathCache.clear();
+}
+
+/**
+ * Check if git is available on the system (synchronous, spawn-free)
  */
 export function isGitAvailable(): boolean {
-	try {
-		execSync('git --version', {stdio: 'ignore'});
-		return true;
-	} catch {
-		return false;
-	}
+	return isBinaryOnPath('git');
 }
 
 /**
- * Check if the current directory is inside a git repository (synchronous)
+ * Check if the current directory is inside a git repository (synchronous,
+ * spawn-free). Walks up from `process.cwd()` looking for `.git`, the same
+ * filesystem signal the boot summary uses — also true inside worktrees,
+ * where `.git` is a `gitdir:` file rather than a directory.
+ *
+ * Unlike `git rev-parse --is-inside-work-tree`, this intentionally ignores
+ * the `GIT_DIR` / `GIT_WORK_TREE` environment variables: honoring them
+ * would mean shelling out again, which is exactly the cost this check
+ * exists to avoid. Advanced setups pointing GIT_DIR at an external repo
+ * will have the git tools hidden; execute_bash remains available.
  */
 export function isInsideGitRepo(): boolean {
-	try {
-		execSync('git rev-parse --is-inside-work-tree', {stdio: 'ignore'});
-		return true;
-	} catch {
-		return false;
-	}
+	return findGitDirSync() !== null;
 }
 
 /**
- * Check if gh CLI is available on the system (synchronous)
+ * Check if gh CLI is available on the system (synchronous, spawn-free)
  */
 export function isGhAvailable(): boolean {
-	try {
-		execSync('gh --version', {stdio: 'ignore'});
-		return true;
-	} catch {
-		return false;
-	}
+	return isBinaryOnPath('gh');
 }
 
 // ============================================================================
@@ -225,9 +293,9 @@ export function getDefaultBranchSync(
  * `<Static>` render path. Returns null when not in a git repository so
  * callers can cleanly omit the surface.
  *
- * Skips the `isInsideGitRepo()` shell-out: `getCurrentBranchSync` already
- * returns null whenever no `.git` directory is found, which is the same
- * signal at zero process-spawn cost.
+ * Skips the `isInsideGitRepo()` check entirely: `getCurrentBranchSync`
+ * already returns null whenever no `.git` directory is found, which is the
+ * same signal at zero cost.
  */
 export function getGitStatusSummarySync(
 	startDir: string = process.cwd(),

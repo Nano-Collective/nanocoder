@@ -713,9 +713,12 @@ async function runTurn(
 			isPolling = false;
 			if (pollInterval) clearInterval(pollInterval);
 
-			const status: ToolCallStatus = toolResult.content.startsWith('Error')
-				? 'failed'
-				: 'completed';
+			// isError covers failures whose text doesn't start with "Error": a
+			// validation failure, or a command that exited non-zero.
+			const status: ToolCallStatus =
+				toolResult.isError || toolResult.content.startsWith('Error')
+					? 'failed'
+					: 'completed';
 			await emitToolCallUpdate(
 				session,
 				conn,

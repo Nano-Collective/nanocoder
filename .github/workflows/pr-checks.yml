@@ -51,6 +51,10 @@ jobs:
       - name: Verify execute_bash stops the whole tree
         run: pnpm run test:ava source/services/bash-executor.spec.ts --match "tree kill:*"
 
+      # The rest of this spec assumes a POSIX shell, so run only the cmd.exe cases.
+      - name: Verify execute_bash cmd.exe quoting
+        run: pnpm run test:ava source/services/bash-executor.spec.ts --match="cmd.exe quoting*"
+
   # pnpm runs package.json scripts through cmd.exe on Windows, so POSIX-only
   # commands in the build script (mkdir -p, cp, chmod) break there. The shared
   # job only builds on Linux, so build on Windows here with no Unix shell.
