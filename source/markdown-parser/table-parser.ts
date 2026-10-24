@@ -1,8 +1,22 @@
+import {createRequire} from 'node:module';
 import chalk from 'chalk';
-import Table from 'cli-table3';
 import {DEFAULT_TERMINAL_WIDTH, TABLE_COLUMN_MIN_WIDTH} from '@/constants';
 import type {Colors} from '../types/markdown-parser';
 import {stripMarkdown} from './utils';
+
+type TableConstructor = typeof import('cli-table3');
+
+let tableConstructor: TableConstructor | undefined;
+
+function getTableConstructor(): TableConstructor {
+	if (!tableConstructor) {
+		tableConstructor = createRequire(import.meta.url)(
+			'cli-table3',
+		) as TableConstructor;
+	}
+
+	return tableConstructor;
+}
 
 // Parse markdown tables using cli-table3
 export function parseMarkdownTable(
@@ -89,6 +103,7 @@ export function parseMarkdownTable(
 	}
 
 	// Create table with cli-table3 - full borders, proper alignment
+	const Table = getTableConstructor();
 	const table = new Table({
 		head: header.map(cell => chalk.hex(themeColors.primary).bold(cell)),
 		colWidths: colWidths,
