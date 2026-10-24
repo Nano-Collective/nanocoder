@@ -16,6 +16,22 @@ export interface StateSyncPayload {
 	availableProviders: string[];
 }
 
+/**
+ * Outcome of a provider or model switch, so the UI only reports what really
+ * happened. `persistError` is set when the session switched but saving the
+ * VS Code setting failed.
+ */
+export type ConfigSwitchResult =
+	| {ok: true; persistError?: string}
+	| {ok: false; error: string};
+
+const NOT_CONNECTED = 'not connected to the Nanocoder agent';
+const NO_SESSION = 'no active session';
+
+function errorText(error: unknown): string {
+	return error instanceof Error ? error.message : String(error);
+}
+
 export class NanocoderAcpClient {
 	public connection: ClientSideConnection | null = null;
 	private outputChannel: vscode.OutputChannel;
@@ -336,8 +352,9 @@ export class NanocoderAcpClient {
 		}
 	}
 
-	async setSessionProvider(providerId: string, persist = true): Promise<void> {
-		if (!this.connection || !this._sessionId) return;
+	async setSessionProvider(providerId: string, persist = true,): Promise<ConfigSwitchResult> {
+		if (!this.connection) return {ok: false, error: NOT_CONNECTED};
+		if (!this._sessionId) return {ok: false, error: NO_SESSION};
 		try {
 			const result = await this.connection.setSessionConfigOption({
 				sessionId: this._sessionId,
@@ -352,13 +369,16 @@ export class NanocoderAcpClient {
 				this.currentProvider = providerId;
 			}
 			this.notifyStateSync();
+			return {ok: true};
 		} catch (error) {
 			this.outputChannel.appendLine(`Failed to set provider: ${error}`);
+			return {ok: false, error: errorText(error)};
 		}
 	}
 
-	async setSessionModel(modelId: string, persist = true): Promise<void> {
-		if (!this.connection || !this._sessionId) return;
+	async setSessionModel(modelId: string, persist = true,): Promise<ConfigSwitchResult> {
+		if (!this.connection) return {ok: false, error: NOT_CONNECTED};
+		if (!this._sessionId) return {ok: false, error: NO_SESSION};
 		try {
 			const result = await this.connection.setSessionConfigOption({
 				sessionId: this._sessionId,
@@ -372,14 +392,23 @@ export class NanocoderAcpClient {
 				this.currentModel = modelId;
 			}
 			this.notifyStateSync();
-
-			if (persist) {
-				const config = vscode.workspace.getConfiguration('nanocoder');
-				await config.update('model', modelId, vscode.ConfigurationTarget.Global);
-			}
 		} catch (error) {
 			this.outputChannel.appendLine(`Failed to set model: ${error}`);
+			return {ok: false, error: errorText(error)};
 		}
+
+		// The session already switched; a failed save only loses the default
+		// for new sessions, so it is reported apart from the switch itself.
+		if (persist) {
+			try {
+				const config = vscode.workspace.getConfiguration('nanocoder');
+				await config.update('model', modelId, vscode.ConfigurationTarget.Global);
+			} catch (error) {
+				this.outputChannel.appendLine(`Failed to save model setting: ${error}`);
+				return {ok: true, persistError: errorText(error)};
+			}
+		}
+		return {ok: true};
 	}
 
 	/** Start a new conversation by clearing the cached session ID. */
