@@ -31,6 +31,7 @@ import {
 	writeError,
 	writeLine,
 	writeStatus,
+	writeWarning,
 } from '@/plain/writer';
 import {loadPlugins} from '@/plugins/host';
 import {
@@ -43,6 +44,7 @@ import {getTuneToolMode} from '@/types/config';
 import type {DevelopmentMode, Message} from '@/types/core';
 import {applyTuneCompaction} from '@/utils/auto-compact';
 import {formatError} from '@/utils/error-formatter';
+import {setMessageQueueSink} from '@/utils/message-queue';
 import {buildSystemPrompt, setLastBuiltPrompt} from '@/utils/prompt-builder';
 import {getShutdownManager} from '@/utils/shutdown';
 
@@ -115,6 +117,16 @@ export async function runPlainShell(
 	const deps: RunPlainShellDeps = {...defaultDeps, ...options.deps};
 
 	const isJson = outputFormat === 'json';
+	const collectedWarnings: string[] = [];
+	setMessageQueueSink((type, message) => {
+		if (type === 'error') {
+			collectedWarnings.push(message);
+			writeError(message);
+		} else if (type === 'warning') {
+			collectedWarnings.push(message);
+			writeWarning(message);
+		}
+	});
 
 	const trust = ensureDirectoryTrust(process.cwd(), trustDirectory, {
 		loadPreferences: deps.loadPreferences,
@@ -140,10 +152,12 @@ export async function runPlainShell(
 				steps: 0,
 				filesChanged: [],
 				message,
+				warnings: collectedWarnings,
 			});
 		} else {
 			writeError(message);
 		}
+		setMessageQueueSink(null);
 		await deps.getShutdownManager().gracefulShutdown(1);
 		return;
 	}
@@ -163,10 +177,12 @@ export async function runPlainShell(
 				steps: 0,
 				filesChanged: [],
 				message: formattedErr,
+				warnings: collectedWarnings,
 			});
 		} else {
 			writeError(formattedErr);
 		}
+		setMessageQueueSink(null);
 		await deps.getShutdownManager().gracefulShutdown(1);
 		return;
 	}
@@ -254,10 +270,12 @@ export async function runPlainShell(
 				steps: 0,
 				filesChanged: [],
 				message,
+				warnings: collectedWarnings,
 			});
 		} else {
 			writeError(message);
 		}
+		setMessageQueueSink(null);
 		await deps.getShutdownManager().gracefulShutdown(1);
 		return;
 	}
@@ -282,6 +300,13 @@ export async function runPlainShell(
 	await deps.artifacts.markEphemeralSession(sessionId);
 
 	const shutdownManager = deps.getShutdownManager();
+	shutdownManager.register({
+		name: 'plain-shell-message-sink-cleanup',
+		priority: 100,
+		handler: async () => {
+			setMessageQueueSink(null);
+		},
+	});
 	const cleanupHandlerName = `plain-artifacts-${sessionId}`;
 	let conversationPromise:
 		| ReturnType<typeof deps.runPlainConversation>
@@ -399,6 +424,7 @@ export async function runPlainShell(
 			toolCalls: formattedToolCalls,
 			steps: outcome.steps,
 			filesChanged: Array.from(filesChangedSet),
+			warnings: collectedWarnings,
 			...(outcome.usage && {
 				usage: outcome.usage,
 			}),
@@ -413,6 +439,7 @@ export async function runPlainShell(
 		emitJsonReport(report);
 
 		markReported();
+		setMessageQueueSink(null);
 		await deps.getShutdownManager().gracefulShutdown(exitCode);
 		return;
 	}
@@ -503,6 +530,7 @@ function emitJsonReport(report: unknown): void {
 }
 
 async function shutdown(code: number, deps: RunPlainShellDeps): Promise<void> {
+	setMessageQueueSink(null);
 	if (code === 0) {
 		writeLine();
 		writeStatus(color('green', 'done'));
