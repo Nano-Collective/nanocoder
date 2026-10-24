@@ -95,6 +95,12 @@ export const lazyCommands: LazyCommand[] = [
 		load: () => import('@/commands/doctor').then(m => m.doctorCommand),
 	},
 	{
+		name: 'whoami',
+		description:
+			'Show the active provider, model, base URL, and masked API key',
+		load: () => import('@/commands/whoami').then(m => m.whoamiCommand),
+	},
+	{
 		name: 'model',
 		description: 'Select a model from any configured provider',
 		load: () => import('@/commands/model').then(m => m.modelCommand),
