@@ -19,6 +19,7 @@ import {
 	NanocoderCodeLensProvider,
 	sendCodeLensPrompt,
 } from './code-lens-provider';
+import {registerTerminalErrorWatcher} from './terminal-error-watcher';
 import { resolveExtensionCwd } from './workspace-utils';
 
 const DEFAULT_PORT = 51820;
@@ -165,6 +166,9 @@ export function activate(context: vscode.ExtensionContext) {
 			sendCodeLensPrompt(chatProvider, 'Write unit tests for this code.', uri, range),
 		),
 	);
+
+	// "Fix with Nanocoder" on a command that fails in an integrated terminal.
+	context.subscriptions.push(registerTerminalErrorWatcher(chatProvider));
 
 	// Push active editor state to the CLI so the input box can show an
 	// "In <file>" pill and auto-attach a selection as context on submit.
