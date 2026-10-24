@@ -3,6 +3,7 @@ import {Box, Text} from 'ink';
 import React from 'react';
 import {loadProviderConfigs} from '@/client-factory';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
+import {getAppConfig, getRetryLimits} from '@/config/index';
 import {
 	type DaemonLock,
 	readLiveLockfile,
@@ -60,6 +61,22 @@ export interface DoctorFormatter {
 	match: string[];
 }
 
+/**
+ * The post-edit check as configured, flattened so the report can render an
+ * unconfigured case without a separate shape.
+ */
+export type DoctorVerification =
+	| {configured: false; maxAttempts: number}
+	| {
+			configured: true;
+			/** argv joined for display, so it can be copied and run as-is. */
+			command: string;
+			enabled: boolean;
+			timeoutMs: number;
+			maxOutputBytes: number;
+			maxAttempts: number;
+	  };
+
 export interface DoctorReport {
 	system: {
 		nodeVersion: string;
@@ -75,6 +92,7 @@ export interface DoctorReport {
 	mcp: Section<DoctorMcpServer[]>;
 	hooks: Section<DoctorHook[]>;
 	formatters: Section<DoctorFormatter[]>;
+	verification: Section<DoctorVerification>;
 	daemon: Section<
 		| {state: 'running'; lock: DaemonLock; uptimeMs: number}
 		| {state: 'not-running'}
@@ -238,6 +256,31 @@ function collectFormatters(): DoctorFormatter[] {
 	}));
 }
 
+/**
+ * The configured post-edit check, as a command the user can read and run.
+ *
+ * A project-supplied `verification.command` is executed by the agent, so it
+ * belongs beside the hook, formatter and MCP commands here rather than only in
+ * the config file: the trust disclaimer is a single yes/no for the whole
+ * directory, and this is the one place the user can see what they actually
+ * agreed to.
+ */
+function collectVerification(): DoctorVerification {
+	const config = getAppConfig().verification;
+	const maxAttempts = getRetryLimits().maxVerificationAttempts;
+	if (!config?.command) {
+		return {configured: false, maxAttempts};
+	}
+	return {
+		configured: true,
+		command: config.command.join(' '),
+		enabled: config.enabled,
+		timeoutMs: config.timeoutMs,
+		maxOutputBytes: config.maxOutputBytes,
+		maxAttempts,
+	};
+}
+
 function normalizeDaemon(
 	lock: DaemonLock | null,
 	now: number,
@@ -263,16 +306,25 @@ function normalizeDaemon(
 export async function collectDoctorReport(
 	dependencies: DoctorDependencies = defaultDependencies(),
 ): Promise<DoctorReport> {
-	const [nanocoder, providers, lsp, mcp, hooks, formatters, daemonLock] =
-		await Promise.all([
-			settle(() => dependencies.getVersion().then(version => ({version}))),
-			settle(() => collectProviders(dependencies)),
-			settle(() => dependencies.getLspStatus()),
-			settle(() => collectMcp(dependencies.getToolManager())),
-			settle(() => collectHooks()),
-			settle(() => collectFormatters()),
-			settle(() => dependencies.getDaemonLock()),
-		]);
+	const [
+		nanocoder,
+		providers,
+		lsp,
+		mcp,
+		hooks,
+		formatters,
+		verification,
+		daemonLock,
+	] = await Promise.all([
+		settle(() => dependencies.getVersion().then(version => ({version}))),
+		settle(() => collectProviders(dependencies)),
+		settle(() => dependencies.getLspStatus()),
+		settle(() => collectMcp(dependencies.getToolManager())),
+		settle(() => collectHooks()),
+		settle(() => collectFormatters()),
+		settle(() => collectVerification()),
+		settle(() => dependencies.getDaemonLock()),
+	]);
 
 	return {
 		system: {
@@ -286,6 +338,7 @@ export async function collectDoctorReport(
 		mcp,
 		hooks,
 		formatters,
+		verification,
 		daemon:
 			daemonLock.status === 'ok'
 				? normalizeDaemon(daemonLock.data, dependencies.now())
@@ -438,6 +491,32 @@ export function Doctor({report}: {report: DoctorReport}) {
 						• {formatter.label} • {formatter.match.join(', ')}
 					</Text>
 				))
+			)}
+
+			<SectionTitle>Verification</SectionTitle>
+			{report.verification.status === 'error' ? (
+				<SectionError message={report.verification.error} />
+			) : !report.verification.data.configured ? (
+				<Text color={colors.secondary}>
+					• No post-edit verification command configured
+					<Text color={colors.secondary}>
+						{'  '}
+						(set nanocoder.verification.command)
+					</Text>
+				</Text>
+			) : (
+				<>
+					<Text color={colors.text}>
+						• {report.verification.data.command}
+						{report.verification.data.enabled ? null : ' • disabled'}
+					</Text>
+					<Text color={colors.secondary}>
+						• timeout {report.verification.data.timeoutMs}ms • max output{' '}
+						{report.verification.data.maxOutputBytes}B • up to{' '}
+						{report.verification.data.maxAttempts} attempt
+						{report.verification.data.maxAttempts === 1 ? '' : 's'} per turn
+					</Text>
+				</>
 			)}
 
 			<SectionTitle>Daemon</SectionTitle>

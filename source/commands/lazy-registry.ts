@@ -268,6 +268,12 @@ export const lazyCommands: LazyCommand[] = [
 		load: () => import('@/commands/privacy').then(m => m.privacyCommand),
 	},
 	{
+		name: 'verify',
+		description: 'Run the configured verification check and report the result',
+		progressLabel: 'Running verification',
+		load: () => import('@/commands/verify').then(m => m.verifyCommand),
+	},
+	{
 		name: 'voice',
 		description: 'Toggle voice mode and configure voice settings',
 		load: () => import('@/commands/voice').then(m => m.voiceCommand),
