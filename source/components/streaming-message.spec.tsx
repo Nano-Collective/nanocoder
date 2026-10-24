@@ -259,7 +259,7 @@ test('StreamingMessage handles a huge streaming message without OOM/slowness', t
 		</MockThemeProvider>,
 	);
 	// Simulate streaming flushes appending more content (the chat loop does
-	// this at ~150ms intervals during generation).
+	// this in ~50ms frames during generation).
 	let current = message;
 	for (let i = 0; i < 20; i++) {
 		current += `\nappended-${i} ${'token '.repeat(20)}`;
