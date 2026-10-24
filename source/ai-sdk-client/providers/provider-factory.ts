@@ -30,6 +30,7 @@ import {
 import type {AIProviderConfig} from '@/types/index';
 import {getLogger} from '@/utils/logging';
 import {isOpenRouterProvider} from './openrouter.js';
+import {isOpperProvider} from './opper.js';
 import {isOrcaRouterProvider} from './orcarouter.js';
 import {isRequestyProvider} from './requesty.js';
 
@@ -528,6 +529,12 @@ export async function createProvider(
 
 	const includeUsage =
 		typeof config.includeUsage === 'boolean' ? config.includeUsage : true;
+
+	// Opper (https://opper.ai) names the calling application on its traces via
+	// X-Opper-Name, so runs show up as "nanocoder" in the user's Opper console.
+	if (isOpperProvider(providerConfig.name)) {
+		headers['X-Opper-Name'] = 'nanocoder';
+	}
 
 	const {createOpenAICompatible} = await import('@ai-sdk/openai-compatible');
 	return {
