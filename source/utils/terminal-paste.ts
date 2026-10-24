@@ -1,5 +1,3 @@
-import {EventEmitter} from 'node:events';
-
 /**
  * Bracketed paste (DECSET 2004) support.
  *
@@ -42,8 +40,44 @@ const MAX_PASTE_CHARS = 10_000_000;
  */
 const MIN_PARTIAL_START = 3;
 
-/** Singleton bus: cli.tsx publishes payloads, UserInput subscribes. */
-export const pasteEvents = new EventEmitter();
+/**
+ * Deliver one paste payload to the active paste consumer, if any.
+ *
+ * Returns true when a consumer handled it. Handled means "accepted": a
+ * disabled or unfocused consumer unregisters and reports false so the
+ * payload can fall through to the next candidate (or be dropped).
+ */
+export function emitPaste(payload: string): boolean {
+	for (let index = pasteTargets.length - 1; index >= 0; index--) {
+		if (pasteTargets[index](payload)) return true;
+	}
+	return false;
+}
+
+/**
+ * Stack of paste consumers, innermost (most recently registered) first.
+ * Components with a keyboard-editable field push an accept callback on
+ * mount (when focused) and pop it on unmount/blur. The stack ordering
+ * matches Ink's focus nesting: an open modal or wizard field registers
+ * after the chat input and so receives pastes first while it is focused.
+ */
+const pasteTargets: Array<(payload: string) => boolean> = [];
+
+/**
+ * Register `accept` as the current innermost paste consumer. `accept` must
+ * return true when it consumed the payload; returning false (e.g. because
+ * the component became disabled or lost focus) lets the next candidate
+ * handle it. Returns an unregister function.
+ */
+export function registerPasteTarget(
+	accept: (payload: string) => boolean,
+): () => void {
+	pasteTargets.push(accept);
+	return () => {
+		const index = pasteTargets.lastIndexOf(accept);
+		if (index !== -1) pasteTargets.splice(index, 1);
+	};
+}
 
 /**
  * Length of the longest suffix of `text` that is a proper prefix of
@@ -60,28 +94,25 @@ function partialMarkerLength(text: string, marker: string): number {
 	return 0;
 }
 
-export interface PasteSplit {
-	/** Input with every bracketed paste (markers and payload) removed. */
-	clean: string;
-	/** Complete paste payloads found in this chunk, in order. */
-	pastes: string[];
-}
+export type InputSegment =
+	| {kind: 'key'; text: string}
+	| {kind: 'paste'; payload: string};
 
 /**
  * Build a stateful splitter that lifts bracketed pastes out of a stdin
  * stream. Pastes routinely span several chunks, so the returned function
  * keeps the in-progress payload and any partial marker between calls.
+ * Return keys and pastes in stream order, including keys after a paste.
  */
-export function createPasteExtractor(): (chunk: string) => PasteSplit {
+export function createPasteExtractor(): (chunk: string) => InputSegment[] {
 	let inPaste = false;
 	let payload = '';
 	let carry = '';
 
-	return (chunk: string): PasteSplit => {
+	return (chunk: string): InputSegment[] => {
 		let rest = carry + chunk;
 		carry = '';
-		let clean = '';
-		const pastes: string[] = [];
+		const segments: InputSegment[] = [];
 
 		while (rest.length > 0) {
 			if (inPaste) {
@@ -93,13 +124,13 @@ export function createPasteExtractor(): (chunk: string) => PasteSplit {
 					payload += rest.slice(0, rest.length - partial);
 					carry = rest.slice(rest.length - partial);
 					if (payload.length > MAX_PASTE_CHARS) {
-						pastes.push(payload);
+						segments.push({kind: 'paste', payload});
 						payload = '';
 					}
 					break;
 				}
 				payload += rest.slice(0, end);
-				pastes.push(payload);
+				segments.push({kind: 'paste', payload});
 				payload = '';
 				inPaste = false;
 				rest = rest.slice(end + PASTE_END.length);
@@ -110,15 +141,16 @@ export function createPasteExtractor(): (chunk: string) => PasteSplit {
 			if (start === -1) {
 				const found = partialMarkerLength(rest, PASTE_START);
 				const partial = found >= MIN_PARTIAL_START ? found : 0;
-				clean += rest.slice(0, rest.length - partial);
+				const text = rest.slice(0, rest.length - partial);
+				if (text) segments.push({kind: 'key', text});
 				carry = rest.slice(rest.length - partial);
 				break;
 			}
-			clean += rest.slice(0, start);
+			if (start > 0) segments.push({kind: 'key', text: rest.slice(0, start)});
 			inPaste = true;
 			rest = rest.slice(start + PASTE_START.length);
 		}
 
-		return {clean, pastes};
+		return segments;
 	};
 }
