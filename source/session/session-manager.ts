@@ -158,6 +158,7 @@ export class SessionManager {
 			model: sessionData.model,
 			workingDirectory: sessionData.workingDirectory,
 			messages: sessionData.messages,
+			titleManuallySet: sessionData.titleManuallySet,
 		};
 
 		await this.saveSession(session);
