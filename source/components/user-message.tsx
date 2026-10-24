@@ -70,13 +70,13 @@ export default memo(function UserMessage({
 	const tokens = calculateTokens(tokenContent ?? message);
 
 	// Non-interactive (`run`) mode: the user already knows what prompt they
-	// submitted — echoing it back as a boxed "You:" block is pure noise.
+	// submitted — echoing it back as a "You:" block is pure noise.
 	if (nonInteractive) {
 		return null;
 	}
 
-	// Inner text width: outer width minus left border (1) and padding (1 each side)
-	const textWidth = boxWidth - 3;
+	// Inner text width: the body is indented by 2.
+	const textWidth = boxWidth - 2;
 	const strippedMessage = stripVSCodeContext(message);
 	const wordCount = [...strippedMessage.matchAll(/\S+/g)].length;
 	const isLongMessage =
@@ -92,74 +92,47 @@ export default memo(function UserMessage({
 	const lines = displayMessage.split('\n');
 
 	return (
-		<>
-			<Box marginBottom={1}>
-				<Text color={colors.primary} bold>
-					You:
-				</Text>
-			</Box>
+		<Box flexDirection="column" marginBottom={1}>
+			<Text color={colors.primary} bold>
+				You:
+			</Text>
+			<Box flexDirection="column" marginLeft={2}>
+				{lines.map((line, lineIndex) => {
+					// Skip empty lines — they create paragraph spacing via marginBottom.
+					if (line.trim() === '') {
+						return null;
+					}
 
-			<Box
-				flexDirection="column"
-				marginBottom={1}
-				backgroundColor={colors.base}
-				width={boxWidth}
-				padding={1}
-				borderStyle="bold"
-				borderLeft={true}
-				borderRight={false}
-				borderTop={false}
-				borderBottom={false}
-				borderLeftColor={colors.primary}
-			>
-				<Box flexDirection="column">
-					{lines.map((line, lineIndex) => {
-						// Skip empty lines — they create paragraph spacing via marginBottom.
-						if (line.trim() === '') {
-							return null;
-						}
+					const segments = parseLineWithPlaceholders(line);
+					const isEndOfParagraph =
+						lineIndex + 1 < lines.length && lines[lineIndex + 1].trim() === '';
 
-						const segments = parseLineWithPlaceholders(line);
-						const isEndOfParagraph =
-							lineIndex + 1 < lines.length &&
-							lines[lineIndex + 1].trim() === '';
-
-						return (
-							<Box key={lineIndex} marginBottom={isEndOfParagraph ? 1 : 0}>
-								<Text>
-									{segments.map((segment, segIndex) => (
-										<Text
-											key={segIndex}
-											color={segment.isPlaceholder ? colors.info : colors.text}
-											bold={segment.isPlaceholder}
-										>
-											{segment.text}
-										</Text>
-									))}
-								</Text>
-							</Box>
-						);
-					})}
-				</Box>
-			</Box>
-
-			{isLongMessage && (
-				<Box marginBottom={1}>
+					return (
+						<Box key={lineIndex} marginBottom={isEndOfParagraph ? 1 : 0}>
+							<Text>
+								{segments.map((segment, segIndex) => (
+									<Text
+										key={segIndex}
+										color={segment.isPlaceholder ? colors.info : colors.text}
+										bold={segment.isPlaceholder}
+									>
+										{segment.text}
+									</Text>
+								))}
+							</Text>
+						</Box>
+					);
+				})}
+				{isLongMessage && (
 					<Text color={colors.secondary}>Full prompt: ↑ history</Text>
-				</Box>
-			)}
-
-			{imageCount > 0 && (
-				<Box marginBottom={1}>
+				)}
+				{imageCount > 0 && (
 					<Text color={colors.info}>
 						■ {imageCount} image{imageCount === 1 ? '' : 's'} attached
 					</Text>
-				</Box>
-			)}
-
-			<Box marginBottom={2}>
+				)}
 				<Text color={colors.secondary}>~{tokens.toLocaleString()} tokens</Text>
 			</Box>
-		</>
+		</Box>
 	);
 });
