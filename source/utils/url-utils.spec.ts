@@ -114,3 +114,16 @@ test('redactUrlSecrets handles empty and nullish values gracefully', t => {
 	t.is(redactUrlSecrets('   '), undefined);
 });
 
+test('redactUrlSecrets masks tokens and strips credentials on schemeless URLs', t => {
+	const schemelessToken = 'proxy.example.com/v1/sk-abc123def4567890';
+	t.is(redactUrlSecrets(schemelessToken), 'proxy.example.com/v1/<redacted>');
+
+	const schemelessUserinfo =
+		'user:pass@proxy.example.com/v1/sk-abc123def4567890';
+	t.is(redactUrlSecrets(schemelessUserinfo), 'proxy.example.com/v1/<redacted>');
+
+	const schemelessQuery =
+		'user:secret@proxy.example.com/v1/models?api_key=SECRET123';
+	t.is(redactUrlSecrets(schemelessQuery), 'proxy.example.com/v1/models');
+});
+
