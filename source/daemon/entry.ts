@@ -22,7 +22,7 @@ import {
 	SubagentExecutor,
 } from '@/subagents/subagent-executor';
 import type {SubagentResult, SubagentTask} from '@/subagents/types';
-import {ToolManager} from '@/tools/tool-manager';
+import {describeSkippedMCPTools, ToolManager} from '@/tools/tool-manager';
 import type {DevelopmentMode} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
 import {setNotificationsConfig} from '@/utils/notifications';
@@ -168,13 +168,17 @@ async function main(): Promise<void> {
 	if (mcpServers && mcpServers.length > 0) {
 		validateProjectConfigSecurity(mcpServers);
 		try {
-			await toolManager.initializeMCP(mcpServers, result => {
+			const results = await toolManager.initializeMCP(mcpServers, result => {
 				if (!result.success) {
 					console.error(
 						`MCP server failed: ${result.serverName} (${result.error})`,
 					);
 				}
 			});
+			for (const result of results) {
+				const warning = describeSkippedMCPTools(result);
+				if (warning) console.error(warning);
+			}
 		} catch (err) {
 			console.error(`MCP initialization error: ${formatError(err)}`);
 		}

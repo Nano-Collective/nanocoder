@@ -257,6 +257,17 @@ Two consequences worth calling out:
   `"enabled": false`, or don't configure that server in a project whose skills
   run under the daemon.
 
+## Tool Name Collisions
+
+Built-in tools always win. If a server offers a tool with the same name as a
+built-in or [custom tool](../features/custom-tools.md), for example the
+filesystem server's `write_file` and `list_directory` or the git server's
+`git_status` and `git_commit`, the server's version is skipped, and Nanocoder
+prints a warning at startup naming the server and the skipped tools. The
+existing tool keeps its behaviour and its approval rules, and the server's
+other tools work as usual. When a server goes unhealthy or disconnects, only
+the tools it registered are removed.
+
 ## Resources and Prompts
 
 A server can also declare MCP resources and prompts, alongside tools:

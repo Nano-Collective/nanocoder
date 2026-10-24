@@ -270,25 +270,26 @@ echo`,
 	manager.initializeCustomTools(projectRoot);
 	t.true(manager.isCustomTool('survives_mcp_disconnect'));
 
-	// Stand in for a connected server: a registered tool that the client
-	// reports, so unregisterMany() has a name to remove and the test fails if
-	// that call ever goes away.
-	manager.registerSkillTool({
-		name: 'mcp_reported_tool',
-		tool: {description: 'from mcp', execute: async () => 'ok'} as never,
-		handler: async () => 'ok',
-	});
+	// Stand in for a connected server whose tool goes through initializeMCP, so
+	// disconnectMCP() has an MCP-registered name to remove and the test fails
+	// if that removal ever goes away.
 	(
-		manager as unknown as {
-			mcpClient: {
-				getNativeToolsRegistry: () => Record<string, unknown>;
-				disconnect: () => Promise<void>;
-			};
-		}
-	).mcpClient = {
-		getNativeToolsRegistry: () => ({mcp_reported_tool: {}}),
+		manager as unknown as {createMCPClient: () => Promise<unknown>}
+	).createMCPClient = async () => ({
+		onHealthChange: () => () => {},
+		connectToServers: async () => [{serverName: 'stand-in', success: true}],
+		getToolEntries: () => [
+			{
+				name: 'mcp_reported_tool',
+				tool: {description: 'from mcp', execute: async () => 'ok'} as never,
+				handler: async () => 'ok',
+			},
+		],
 		disconnect: async () => {},
-	};
+	});
+	await manager.initializeMCP([
+		{name: 'stand-in', transport: 'http', url: 'http://localhost/mcp'},
+	]);
 	t.true(manager.hasTool('mcp_reported_tool'));
 
 	await manager.disconnectMCP();
