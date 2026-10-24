@@ -131,6 +131,21 @@ const x = 1;
 	t.deepEqual(result[0].parameters, {path: 'a.ts'});
 });
 
+test('parseToolCalls - keeps a leading call before a plain fenced code example', t => {
+	const content = `<read_file><path>src/app.ts</path></read_file>
+
+Here is the relevant code:
+
+\`\`\`js
+const x = 1;
+\`\`\``;
+	const result = XMLToolCallParser.parseToolCalls(content);
+
+	t.is(result.length, 1);
+	t.is(result[0].toolName, 'read_file');
+	t.deepEqual(result[0].parameters, {path: 'src/app.ts'});
+});
+
 test('parseToolCalls - still rejects <parameter=name> attribute syntax', t => {
 	for (const content of [
 		'<read_file><parameter=path>/test.txt</parameter></read_file>',
