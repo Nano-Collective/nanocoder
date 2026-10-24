@@ -1,7 +1,6 @@
 import {constants, existsSync} from 'node:fs';
 import {access, readFile, writeFile} from 'node:fs/promises';
 import {dirname, resolve} from 'node:path';
-import {highlight} from 'cli-highlight';
 import {Box, Text} from 'ink';
 import React from 'react';
 import ToolMessage, {CappedLines} from '@/components/tool-message';
@@ -23,6 +22,7 @@ import {
 	hasSeenFile,
 	markFileSeen,
 } from '@/utils/read-tracker';
+import {highlightCode} from '@/utils/syntax-highlighter';
 import {calculateTokens} from '@/utils/token-calculator';
 import {createFileToolApproval} from '@/utils/tool-approval';
 import {ensureString} from '@/utils/type-helpers';
@@ -204,7 +204,7 @@ const WriteFileFormatter = React.memo(
 										let displayLine: string;
 										try {
 											displayLine = truncateAnsi(
-												highlight(entry.text, {
+												highlightCode(entry.text, {
 													language,
 													theme: getSyntaxTheme(colors),
 												}),
@@ -285,7 +285,7 @@ const WriteFileFormatter = React.memo(
 								const lineNumStr = String(i + 1).padStart(4, ' ');
 
 								try {
-									const highlighted = highlight(line, {
+									const highlighted = highlightCode(line, {
 										language,
 										theme: getSyntaxTheme(colors),
 									});
