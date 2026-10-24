@@ -189,19 +189,37 @@ export function resolveFilePath(
  * fail when the workspace root is a drive or `/` (containers, root-owned
  * checkouts). See #1240.
  *
+ * Windows paths are case-insensitive, so path comparisons are normalized to
+ * lowercase on win32 to prevent false containment failures when drive letters
+ * or directories differ only in case.
+ *
  * This is purely lexical — it never touches the filesystem, so a symlink
  * inside the root can still point outside it. Use `isRealPathInside` when the
  * path may be attacker- or config-controlled.
  */
-export function isPathInside(target: string, root: string): boolean {
-	const normalizedRoot = path.resolve(root);
-	const normalizedTarget = path.resolve(target);
+export function normalizeForCompare(
+	p: string,
+	platform: NodeJS.Platform = process.platform,
+): string {
+	const resolved = path.resolve(p); // nosemgrep
+	return platform === 'win32' ? resolved.toLowerCase() : resolved;
+}
+
+export function isPathInside(
+	target: string,
+	root: string,
+	platform: NodeJS.Platform = process.platform,
+): boolean {
+	const normalizedRoot = normalizeForCompare(root, platform);
+	const normalizedTarget = normalizeForCompare(target, platform);
 	if (normalizedTarget === normalizedRoot) {
 		return true;
 	}
-	const prefix = normalizedRoot.endsWith(path.sep)
-		? normalizedRoot
-		: normalizedRoot + path.sep;
+	const sep = platform === 'win32' ? '\\' : path.sep;
+	const prefix =
+		normalizedRoot.endsWith(sep) || normalizedRoot.endsWith(path.sep)
+			? normalizedRoot
+			: normalizedRoot + sep;
 	return normalizedTarget.startsWith(prefix);
 }
 
