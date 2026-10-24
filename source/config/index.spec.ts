@@ -1606,3 +1606,31 @@ test.serial(
 		);
 	},
 );
+
+test.serial(
+	'loadAppConfig reads nanocoder.firewall from agents.config.json',
+	async t => {
+		await withVerifyConfig(
+			'firewall-config',
+			{
+				nanocoder: {
+					firewall: {
+						enabled: true,
+						mode: 'strict',
+						protectedPatterns: ['src/**/*.test.ts'],
+						rules: {
+							blockAnyTypeInjection: false,
+						},
+					},
+				},
+			},
+			{},
+			appConfig => {
+				t.is(appConfig.firewall?.enabled, true);
+				t.is(appConfig.firewall?.mode, 'strict');
+				t.deepEqual(appConfig.firewall?.protectedPatterns, ['src/**/*.test.ts']);
+				t.is(appConfig.firewall?.rules?.blockAnyTypeInjection, false);
+			},
+		);
+	},
+);
