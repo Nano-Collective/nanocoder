@@ -3,10 +3,10 @@
  * Detects installed language servers on the system
  */
 
-import {execFileSync} from 'child_process';
 import spawn from 'cross-spawn';
-import {existsSync} from 'fs';
-import {join} from 'path';
+import {existsSync, constants as fsConstants} from 'fs';
+import {access, readdir, stat} from 'fs/promises';
+import {delimiter, join, resolve} from 'path';
 import {
 	TIMEOUT_LSP_SPAWN_VERIFICATION_MS,
 	TIMEOUT_LSP_VERIFICATION_MS,
@@ -15,6 +15,15 @@ import {createChildLogger} from '@/utils/logging';
 import type {LSPServerConfig} from './lsp-client';
 
 const logger = createChildLogger({module: 'lsp-discovery'});
+
+interface PathDirectorySnapshot {
+	path: string;
+	entries: Set<string>;
+}
+
+let cachedPathSnapshot:
+	| {key: string; value: Promise<PathDirectorySnapshot[]>}
+	| undefined;
 
 /**
  * Deno project configuration file names
@@ -243,60 +252,172 @@ export function isDenoProject(projectRoot: string = process.cwd()): boolean {
 	return false;
 }
 
-/**
- * Check if a command is available in PATH or locally in node_modules
- * Returns the path to use, or null if not found
- */
-function findCommand(command: string): string | null {
-	// First check PATH
-	try {
-		const checkCmd = process.platform === 'win32' ? 'where' : 'which';
-		execFileSync(checkCmd, [command], {stdio: 'ignore'});
-		return command;
-	} catch {
-		// Not in PATH - expected for many servers
-		logger.trace({command}, 'Command not in PATH');
+function getWindowsExtensions(): string[] {
+	const configured = process.env.PATHEXT;
+	return (configured || '.COM;.EXE;.BAT;.CMD')
+		.split(';')
+		.map(extension => extension.trim().toLowerCase())
+		.filter(extension => /^\.[a-z0-9_-]+$/.test(extension));
+}
+
+function getPathSnapshotKey(): string {
+	return [
+		process.platform,
+		process.env.PATH ?? '',
+		process.env.PATHEXT ?? '',
+		process.cwd(),
+	].join('\0');
+}
+
+async function scanPathDirectories(): Promise<PathDirectorySnapshot[]> {
+	const rawDirectories = (process.env.PATH ?? '').split(delimiter);
+	const directories = rawDirectories.map(directory => {
+		const unquoted =
+			process.platform === 'win32' &&
+			directory.startsWith('"') &&
+			directory.endsWith('"')
+				? directory.slice(1, -1)
+				: directory;
+		// PATH is local process configuration and each entry is intentionally a search directory.
+		return resolve(unquoted || process.cwd()); // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal -- PATH entries are local search roots, not request-supplied file paths.
+	});
+	const uniqueDirectories = [...new Set(directories)];
+
+	return Promise.all(
+		uniqueDirectories.map(async directory => {
+			try {
+				return {
+					path: directory,
+					entries: new Set(await readdir(directory)),
+				};
+			} catch {
+				// PATH often contains stale or inaccessible entries. Ignore those,
+				// just as command lookup does, and continue with the remaining paths.
+				return {path: directory, entries: new Set<string>()};
+			}
+		}),
+	);
+}
+
+function getPathSnapshot(): Promise<PathDirectorySnapshot[]> {
+	const key = getPathSnapshotKey();
+	if (!cachedPathSnapshot || cachedPathSnapshot.key !== key) {
+		cachedPathSnapshot = {key, value: scanPathDirectories()};
+	}
+	return cachedPathSnapshot.value;
+}
+
+function findPathEntry(
+	command: string,
+	entries: Set<string>,
+	extensions: string[],
+): string | undefined {
+	if (process.platform !== 'win32') {
+		return entries.has(command) ? command : undefined;
 	}
 
-	// Windows needs an executable or batch shim, rather than the POSIX shim.
+	const byLowerCase = new Map(
+		[...entries].map(entry => [entry.toLowerCase(), entry]),
+	);
+	const normalizedCommand = command.toLowerCase();
+	const names = [
+		normalizedCommand,
+		...extensions.map(ext => `${normalizedCommand}${ext}`),
+	];
+	for (const name of names) {
+		const match = byLowerCase.get(name);
+		if (match) return match;
+	}
+	return undefined;
+}
+
+async function isRunnableFile(path: string): Promise<boolean> {
+	try {
+		const metadata = await stat(path);
+		if (!metadata.isFile()) return false;
+		await access(
+			path,
+			process.platform === 'win32' ? fsConstants.F_OK : fsConstants.X_OK,
+		);
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * Check if a command is available in PATH or locally in node_modules.
+ * PATH directories are read asynchronously once per process/environment; no
+ * `where`/`which` child process is needed during startup.
+ * @internal
+ */
+export async function findCommand(command: string): Promise<string | null> {
+	if (!/^[a-z0-9][a-z0-9._-]*$/i.test(command)) return null;
+
+	const pathDirectories = await getPathSnapshot();
 	const extensions =
-		process.platform === 'win32' ? ['.exe', '.cmd', '.bat'] : [''];
+		process.platform === 'win32' ? getWindowsExtensions() : [''];
 
-	for (const extension of extensions) {
-		const binName = `${command}${extension}`;
-		const localBinPath = join(process.cwd(), 'node_modules', '.bin', binName); // nosemgrep
+	for (const directory of pathDirectories) {
+		const entry = findPathEntry(command, directory.entries, extensions);
+		// `entry` is one basename returned by readdir; joining it to its PATH root is the intended lookup.
+		const candidatePath = entry
+			? join(directory.path, entry) // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal -- `entry` comes from readdir and cannot contain path separators.
+			: undefined;
+		if (candidatePath && (await isRunnableFile(candidatePath))) {
+			return command;
+		}
+	}
 
-		if (existsSync(localBinPath)) {
+	// PATH was already read above. Check local shims without blocking the
+	// event loop too, honouring PATHEXT on Windows.
+	const localExtensions =
+		process.platform === 'win32' ? getWindowsExtensions() : [''];
+	for (const extension of localExtensions) {
+		const localBinPath = join(
+			process.cwd(),
+			'node_modules',
+			'.bin',
+			`${command}${extension}`, // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal -- command names and PATHEXT suffixes are validated before this local shim lookup.
+		);
+		if (await isRunnableFile(localBinPath)) {
 			return localBinPath;
 		}
 	}
 
+	logger.trace({command}, 'Command not found in PATH or local node_modules');
 	return null;
 }
 
 /**
  * Check if a command works by running a check command
  */
-function verifyServer(command: string, args: string[]): boolean {
-	try {
-		const result = spawn.sync(command, args, {
-			stdio: 'ignore',
-			timeout: TIMEOUT_LSP_VERIFICATION_MS,
-		});
+function verifyServer(command: string, args: string[]): Promise<boolean> {
+	return new Promise(resolveResult => {
+		let settled = false;
+		let timeout: NodeJS.Timeout | undefined;
+		const finish = (verified: boolean, error?: Error | null) => {
+			if (settled) return;
+			settled = true;
+			if (timeout) clearTimeout(timeout);
+			if (!verified) {
+				logger.trace({command, args, err: error}, 'Server verification failed');
+			}
+			resolveResult(verified);
+		};
 
-		if (result.error || result.status !== 0) {
-			logger.trace(
-				{command, args, err: result.error, status: result.status},
-				'Server verification failed',
-			);
-			return false;
+		try {
+			const child = spawn(command, args, {stdio: 'ignore'});
+			timeout = setTimeout(() => {
+				child.kill();
+				finish(false, new Error('Server verification timed out'));
+			}, TIMEOUT_LSP_VERIFICATION_MS);
+			child.once('error', error => finish(false, error));
+			child.once('close', code => finish(code === 0));
+		} catch (error) {
+			finish(false, error instanceof Error ? error : new Error(String(error)));
 		}
-
-		return true;
-	} catch {
-		logger.trace({command, args}, 'Server verification failed');
-		return false;
-	}
+	});
 }
 
 /**
@@ -378,6 +499,8 @@ export async function discoverLanguageServers(
 ): Promise<LSPServerConfig[]> {
 	const discovered: LSPServerConfig[] = [];
 	const coveredLanguages = new Set<string>();
+	const commandLookups = new Map<string, Promise<string | null>>();
+	const verifications = new Map<string, Promise<boolean>>();
 	const orderedServers = getOrderedServers(projectRoot);
 
 	for (const server of orderedServers) {
@@ -388,37 +511,52 @@ export async function discoverLanguageServers(
 		if (!hasNewLanguages) continue;
 
 		// Check if command exists (in PATH or local node_modules)
-		const commandPath = findCommand(server.command);
+		let commandLookup = commandLookups.get(server.command);
+		if (!commandLookup) {
+			commandLookup = findCommand(server.command);
+			commandLookups.set(server.command, commandLookup);
+		}
+		const commandPath = await commandLookup;
 		if (!commandPath) continue;
 
 		// Verify server works based on verification method
 		// Use the resolved command path for verification
 		const verificationMethod = server.verificationMethod || 'version';
 
-		let verified = true;
-		switch (verificationMethod) {
-			case 'version':
-				// Use the existing check command approach
-				if (server.checkCommand) {
-					// Parse the known check arguments separately to preserve spaces in the path.
-					const checkArgs = server.checkCommand.trim().split(/\s+/).slice(1);
-					verified = verifyServer(commandPath, checkArgs);
-				}
-				break;
+		// Multiple definitions can point to one executable (for example YAML and
+		// Docker Compose). Reuse an actual verification even if their methods differ.
+		const verificationKey = commandPath;
+		let sharedVerification = verifications.get(verificationKey);
+		if (!sharedVerification) {
+			switch (verificationMethod) {
+				case 'version':
+					if (server.checkCommand) {
+						// Parse the known check arguments separately to preserve spaces in the path.
+						const checkArgs = server.checkCommand.trim().split(/\s+/).slice(1);
+						sharedVerification = verifyServer(commandPath, checkArgs);
+					}
+					break;
 
-			case 'lsp':
-				// Use the new LSP verification approach
-				verified = await verifyLSPServerWithCommunication(
-					commandPath,
-					server.args,
-				);
-				break;
+				case 'lsp':
+					sharedVerification = verifyLSPServerWithCommunication(
+						commandPath,
+						server.args,
+					);
+					break;
 
-			case 'none':
-				// Skip verification, only check if command exists
-				break;
+				case 'none':
+					// Skip verification, only check if command exists.
+					break;
+			}
+			if (sharedVerification) {
+				verifications.set(verificationKey, sharedVerification);
+			} else {
+				// A skipped check must not prevent a later definition from running
+				// its real verification for this same executable.
+				sharedVerification = Promise.resolve(true);
+			}
 		}
-
+		const verified = await sharedVerification;
 		if (!verified) continue;
 
 		// Add to discovered servers with resolved command path
@@ -523,9 +661,12 @@ export function getLanguageId(extension: string): string {
 /**
  * Get install hints for missing language servers
  */
-export function getMissingServerHints(extensions: string[]): string[] {
+export async function getMissingServerHints(
+	extensions: string[],
+): Promise<string[]> {
 	const hints: string[] = [];
 	const checkedServers = new Set<string>();
+	const commandLookups = new Map<string, Promise<string | null>>();
 
 	for (const ext of extensions) {
 		const e = ext.startsWith('.') ? ext.slice(1) : ext;
@@ -536,7 +677,13 @@ export function getMissingServerHints(extensions: string[]): string[] {
 
 			checkedServers.add(server.name);
 
-			if (!findCommand(server.command) && server.installHint) {
+			if (!server.installHint) continue;
+			let commandLookup = commandLookups.get(server.command);
+			if (!commandLookup) {
+				commandLookup = findCommand(server.command);
+				commandLookups.set(server.command, commandLookup);
+			}
+			if (!(await commandLookup)) {
 				hints.push(`${server.name}: ${server.installHint}`);
 			}
 		}
@@ -570,16 +717,27 @@ export function findLocalServer(
 /**
  * Get all known language servers with their availability status
  */
-export function getKnownServersStatus(): Array<{
-	name: string;
-	available: boolean;
-	languages: string[];
-	installHint?: string;
-}> {
-	return KNOWN_SERVERS.map(server => ({
-		name: server.name,
-		available: findCommand(server.command) !== null,
-		languages: server.languages,
-		installHint: server.installHint,
-	}));
+export async function getKnownServersStatus(): Promise<
+	Array<{
+		name: string;
+		available: boolean;
+		languages: string[];
+		installHint?: string;
+	}>
+> {
+	const commandLookups = new Map<string, Promise<string | null>>();
+	for (const server of KNOWN_SERVERS) {
+		if (!commandLookups.has(server.command)) {
+			commandLookups.set(server.command, findCommand(server.command));
+		}
+	}
+
+	return Promise.all(
+		KNOWN_SERVERS.map(async server => ({
+			name: server.name,
+			available: (await commandLookups.get(server.command)) !== null,
+			languages: server.languages,
+			installHint: server.installHint,
+		})),
+	);
 }
