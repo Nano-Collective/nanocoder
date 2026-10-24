@@ -853,3 +853,25 @@ test('executeWebSearch leaves ordinary text with only the minimal escapes', asyn
 		'# Web Search Results: "test"\n\n## 1. Node.js v22.20.0 - Release Notes \\| nodejs.org\n\n**URL:** <https://nodejs.org/en/blog/release/v22.20.0>\n\nNode.js 22 (LTS) - fast, stable. See #1 + more\n\n---\n\n',
 	);
 });
+
+test('executeWebSearch drops URLs that do not parse as a plain http(s) URL', async t => {
+	const result = await searchWith([
+		{title: 'A', url: 'https://example.com\njavascript:alert(1)'},
+		{title: 'B', url: 'https://'},
+		{title: 'C', url: 'https://ok.example/path?q=1'},
+	]);
+
+	t.notRegex(result, /javascript/);
+	t.notRegex(result, /<https:\/\/>/);
+	t.is(result.match(/^\*\*URL:\*\* /gm)?.length, 1);
+	t.true(result.includes('**URL:** <https://ok.example/path?q=1>\n'));
+});
+
+test('executeWebSearch keeps a leading "N)" from forming an ordered list', async t => {
+	const result = await searchWith([
+		{title: '1) Fake', url: 'https://a.example', description: '2) Fake item\n3) Another'},
+	]);
+
+	t.true(result.includes('## 1. \\1) Fake\n'));
+	t.true(result.includes('\n\\2) Fake item 3) Another\n'));
+});

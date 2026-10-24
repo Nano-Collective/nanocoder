@@ -38,6 +38,17 @@ const escapeMarkdown = (text: string): string =>
 		.replace(/[\\`*_[\]<>~|=]/g, '\\$&')
 		.replace(/^(?=[#+-]|\d+[.)])/, '\\');
 
+const toSafeUrl = (raw: string): string | undefined => {
+	const url = raw.replace(/[\s<>]/g, '');
+	if (!/^https?:\/\//i.test(url)) return undefined;
+	try {
+		const {protocol} = new URL(url);
+		return protocol === 'http:' || protocol === 'https:' ? url : undefined;
+	} catch {
+		return undefined;
+	}
+};
+
 export const executeWebSearch = async (
 	args: SearchArgs,
 	apiKeyOverride?: string,
@@ -89,8 +100,8 @@ export const executeWebSearch = async (
 			const result = results[i];
 			if (!result) continue;
 			formattedResults += `## ${i + 1}. ${escapeMarkdown(result.title)}\n\n`;
-			const url = result.url.replace(/[\s<>]/g, '');
-			if (/^https?:\/\//i.test(url)) {
+			const url = toSafeUrl(result.url);
+			if (url) {
 				formattedResults += `**URL:** <${url}>\n\n`;
 			}
 			if (result.description) {
