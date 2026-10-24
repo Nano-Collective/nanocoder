@@ -63,6 +63,7 @@ function createDependencies(
 					description: 'Project filesystem',
 				}),
 			}) as never,
+		getPlugins: () => [],
 		getDaemonLock: async () => ({
 			pid: 1234,
 			socketPath: '/tmp/nanocoder.sock',
@@ -90,6 +91,43 @@ test('Doctor renders all diagnostic sections in one report', async t => {
 	t.regex(output!, /Hooks/);
 	t.regex(output!, /Formatters/);
 	t.regex(output!, /Daemon/);
+});
+
+test('Doctor lists loaded plugins with their files and hooks', async t => {
+	const report = await collectDoctorReport(
+		createDependencies({
+			getPlugins: () => [
+				{
+					name: 'guard',
+					file: 'guard.mjs',
+					hooks: ['tool.execute.before', 'permission.asked'],
+				},
+			],
+		}),
+	);
+
+	t.is(report.plugins.status, 'ok');
+	t.deepEqual(report.plugins.data, [
+		{
+			name: 'guard',
+			file: 'guard.mjs',
+			hooks: ['tool.execute.before', 'permission.asked'],
+		},
+	]);
+	const {lastFrame} = renderWithTheme(<Doctor report={report} />);
+	const output = lastFrame()!;
+
+	t.regex(output, /Plugins/);
+	t.regex(output, /guard • guard\.mjs • tool\.execute\.before, permission\.asked/);
+});
+
+test('Doctor reports when no plugins are loaded', async t => {
+	const report = await collectDoctorReport(createDependencies());
+
+	t.is(report.plugins.status, 'ok');
+	t.deepEqual(report.plugins.data, []);
+	const {lastFrame} = renderWithTheme(<Doctor report={report} />);
+	t.regex(lastFrame()!, /No plugins loaded/);
 });
 
 test('Doctor lists configured lifecycle hooks', async t => {
