@@ -368,16 +368,23 @@ function extractErrorInfo(content: string): {
 	return null;
 }
 
-// Check if content indicates success
+// Check if content indicates success.
+// Only a short, single-line result counts: a multi-line log that happens to
+// contain "completed successfully" may also report failures further down,
+// so it must not be collapsed into "Result: success" (#1633).
 function isSuccess(content: string): boolean {
+	const text = content.trim();
+	if (text.includes('\n')) {
+		return false;
+	}
 	const successPatterns = [
 		/^success$/i,
 		/^ok$/i,
 		/^done$/i,
-		/completed successfully/i,
-		/no errors/i,
+		/^.{0,80}completed successfully\.?$/i,
+		/^no errors\.?$/i,
 	];
-	return successPatterns.some(pattern => pattern.test(content));
+	return successPatterns.some(pattern => pattern.test(text));
 }
 
 // Check for error in content
@@ -393,14 +400,24 @@ function extractKeyInfo(content: string): string | null {
 		return null;
 	}
 
+	// A line that reports a failure must survive, even when an earlier line
+	// reads like a success (#1633): "Build completed successfully" followed by
+	// "failures: 3" must not compress to the first line alone.
+	const failureLine = lines.find(
+		line => line.length < 100 && checkForError(line),
+	);
+
 	// Prefer short, informative lines
 	for (const line of lines.slice(0, 5)) {
 		if (line.length < 100 && !line.includes('...') && !line.includes('node:')) {
+			if (failureLine && failureLine !== line) {
+				return `${line} | ${failureLine}`;
+			}
 			return line;
 		}
 	}
 
-	return null;
+	return failureLine ?? null;
 }
 
 // Compress user message
