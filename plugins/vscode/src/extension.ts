@@ -301,7 +301,7 @@ function handleFileChange(message: FileChangeMessage): void {
 
 	if (showDiffPreview) {
 		// Show diff immediately
-		diffManager.showDiff(message.id);
+		diffManager.showDiff(message.id, {restoreTerminalFocus: true});
 	}
 }
 
