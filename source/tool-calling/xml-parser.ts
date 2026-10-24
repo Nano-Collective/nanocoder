@@ -25,8 +25,9 @@ export class XMLToolCallParser {
 		const toolCalls: ParsedToolCall[] = [];
 		let match;
 
-		// Process the first fenced block as before, but also retain what follows:
-		// a tool call may appear after an ordinary code example.
+		// A fence inside a parameter value (e.g. markdown in write_file content)
+		// is that argument, not a wrapper. A tool call may also appear on either
+		// side of an ordinary code example, so retain both sides of the fence.
 		let processedContent = ensureString(content);
 		const codeBlockMatch = processedContent.match(
 			/```(?:\w+)?\s*\n?([\s\S]*?)\n?```/,
@@ -35,9 +36,15 @@ export class XMLToolCallParser {
 			codeBlockMatch?.[1] &&
 			!this.isInsideParameterValue(processedContent, codeBlockMatch.index ?? 0)
 		) {
-			const afterBlock = (codeBlockMatch.index ?? 0) + codeBlockMatch[0].length;
+			const blockStart = codeBlockMatch.index ?? 0;
+			const afterBlock = blockStart + codeBlockMatch[0].length;
+			const beforeBlock = processedContent.slice(0, blockStart);
+			// Ignore prose and incomplete tags before the fence. Besides not
+			// participating in tool-call parsing, many unclosed tags can make the
+			// XML matcher repeatedly scan a large prefix.
+			const parseablePrefix = /<\/\w+>/.test(beforeBlock) ? beforeBlock : '';
 			processedContent =
-				`${codeBlockMatch[1]}\n${processedContent.slice(afterBlock)}`.trim();
+				`${parseablePrefix}\n${codeBlockMatch[1]}\n${processedContent.slice(afterBlock)}`.trim();
 		}
 
 		// Remove <tool_call> wrapper tags if present
@@ -55,6 +62,9 @@ export class XMLToolCallParser {
 
 			// Validate that this is a properly formed tool call
 			if (!this.isValidToolCall(fullMatch, toolName)) {
+				// A generic XML wrapper may enclose a real tool call. Continue
+				// scanning inside rejected matches, as findToolCallRanges does.
+				this.TOOL_CALL_REGEX.lastIndex = (match.index ?? 0) + 1;
 				continue;
 			}
 
@@ -166,6 +176,7 @@ export class XMLToolCallParser {
 			'footer',
 			'nav',
 			'aside',
+			'response',
 		];
 		if (htmlTags.includes(toolName.toLowerCase())) {
 			return false;

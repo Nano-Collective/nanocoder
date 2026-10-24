@@ -115,6 +115,22 @@ test('parseToolCalls - still unwraps a fenced call inside a generic wrapper tag'
 	}
 });
 
+test('parseToolCalls - finds a leading call inside a wrapper before a code fence', t => {
+	const content = `<response><read_file><path>a.ts</path></read_file>
+
+Here is the relevant code:
+
+\`\`\`javascript
+const x = 1;
+\`\`\`
+</response>`;
+	const result = XMLToolCallParser.parseToolCalls(content);
+
+	t.is(result.length, 1);
+	t.is(result[0].toolName, 'read_file');
+	t.deepEqual(result[0].parameters, {path: 'a.ts'});
+});
+
 test('parseToolCalls - still rejects <parameter=name> attribute syntax', t => {
 	for (const content of [
 		'<read_file><parameter=path>/test.txt</parameter></read_file>',
