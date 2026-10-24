@@ -407,6 +407,7 @@ export async function runPlainShell(
 			}),
 			...(outcome.kind === TOOL_APPROVAL_REQUIRED_KIND && {
 				toolNames: outcome.toolNames,
+				autoAcceptWouldRun: outcome.autoAcceptWouldRun,
 			}),
 		};
 
