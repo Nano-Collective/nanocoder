@@ -25,9 +25,8 @@ export class XMLToolCallParser {
 		const toolCalls: ParsedToolCall[] = [];
 		let match;
 
-		// Handle content that might be wrapped in markdown code blocks. A fence
-		// inside a parameter value (e.g. markdown in write_file content) is that
-		// argument, not a wrapper.
+		// Process the first fenced block as before, but also retain what follows:
+		// a tool call may appear after an ordinary code example.
 		let processedContent = ensureString(content);
 		const codeBlockMatch = processedContent.match(
 			/```(?:\w+)?\s*\n?([\s\S]*?)\n?```/,
@@ -36,7 +35,9 @@ export class XMLToolCallParser {
 			codeBlockMatch?.[1] &&
 			!this.isInsideParameterValue(processedContent, codeBlockMatch.index ?? 0)
 		) {
-			processedContent = codeBlockMatch[1].trim();
+			const afterBlock = (codeBlockMatch.index ?? 0) + codeBlockMatch[0].length;
+			processedContent =
+				`${codeBlockMatch[1]}\n${processedContent.slice(afterBlock)}`.trim();
 		}
 
 		// Remove <tool_call> wrapper tags if present
