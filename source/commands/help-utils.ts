@@ -33,6 +33,7 @@ const CATEGORY_COMMANDS: Record<HelpCategory, readonly string[]> = {
 		'copy',
 		'expand',
 		'export',
+		'plans',
 		'rename',
 		'resume',
 		'retry',
@@ -176,6 +177,15 @@ const COMMAND_HELP_OVERRIDES: Record<string, CommandHelpOverrides> = {
 		usage: '/memory [list|ls|delete|rm <id>|clear|propose|accept <n>]',
 		options: ['list|ls', 'delete|rm <id>', 'clear', 'propose', 'accept <n>'],
 		examples: ['/memory', '/memory delete 12ab34cd', '/memory propose'],
+	},
+	plans: {
+		usage: '/plans [list|show [id]|use <id|none>|delete <id>]',
+		options: ['list', 'show [id]', 'use <id|none>', 'delete|rm <id>'],
+		examples: [
+			'/plans',
+			'/plans show auth-refactor',
+			'/plans use auth-refactor',
+		],
 	},
 	remember: {
 		usage: '/remember [--category <name>] <memory>',

@@ -214,6 +214,11 @@ export const lazyCommands: LazyCommand[] = [
 		load: () => import('@/commands/tasks').then(m => m.tasksCommand),
 	},
 	{
+		name: 'plans',
+		description: 'View and manage persistent plan graphs',
+		load: () => import('@/commands/plans').then(m => m.plansCommand),
+	},
+	{
 		name: 'settings',
 		description:
 			'Configure settings (providers, MCP, theme, shapes, paste threshold). Accepts a tab: /settings providers',

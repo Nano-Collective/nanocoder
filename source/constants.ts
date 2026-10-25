@@ -123,6 +123,7 @@ export const TIPS = [
 	'Use @ followed by a file path to add that file to context.',
 	'Use /explorer to browse project files and add them to context.',
 	'Run /checkpoint create before a risky refactor so you can restore it later.',
+	'Run /plans to see plan-graph progress and which task is ready next.',
 	'Run /compact --preview to inspect a context compression before applying it.',
 	'Run /copy to copy the last assistant response to your clipboard.',
 	'Run /usage to see how much of the current model context is in use.',
