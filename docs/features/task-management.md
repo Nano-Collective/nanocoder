@@ -57,7 +57,16 @@ Task state belongs to the session, not to your project directory.
 
 `write_tasks` is part of the **full** tool profile. The `minimal` and `nano` profiles deliberately trade it away for a smaller prompt, so the AI will not create or update tasks while one of those profiles is active — `/tasks` still works for managing the list by hand. See [Tune](tune.md) for how profiles resolve.
 
+## Tasks and Plan Graphs
+
+Tasks are session-scoped and flat — a checklist for the current conversation.
+Plan graphs are project-scoped and dependency-aware, and they persist across
+sessions. For work that outlives a session or must happen in a specific order,
+use a [persistent plan graph](persistent-plans.md); use tasks for the short
+checklist within one session.
+
 ## Related
 
 - [Development Modes](development-modes.md) — plan mode produces a plan artifact alongside the task list
+- [Persistent Plan Graphs](persistent-plans.md) — durable, dependency-aware plans and the `/plans` dashboard
 - [Session Management](session-management.md) — how sessions and their artifacts are stored and resumed

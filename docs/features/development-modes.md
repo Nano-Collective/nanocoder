@@ -40,7 +40,7 @@ Plan and architect are the two reviewing modes, and they review different things
 
 The default mode. Every tool call that can change something requires your explicit confirmation before execution.
 
-Read-only tools (`read_file`, `find_files`, `search_file_contents`, `list_directory`, `git_status`, `git_diff`, `git_log`, `lsp_get_diagnostics`, `web_search`, `fetch_url`, `check_skill`) and the conversation tools (`ask_user`, `agent`, `write_tasks`, `write_plan`, `write_walkthrough`) run without a prompt. So does anything in `nanocoder.alwaysAllow`.
+Read-only tools (`read_file`, `find_files`, `search_file_contents`, `list_directory`, `git_status`, `git_diff`, `git_log`, `lsp_get_diagnostics`, `web_search`, `fetch_url`, `check_skill`, `get_plan`) and the conversation tools (`ask_user`, `agent`, `write_tasks`, `write_plan`, `update_plan_node`, `write_walkthrough`) run without a prompt. So does anything in `nanocoder.alwaysAllow`.
 
 - See exactly what the AI wants to do before it happens
 - Approve or reject each action individually
@@ -101,11 +101,11 @@ Plan mode removes mutation tools and leaves only read-only and interaction tools
 | **Diagnostics** | `lsp_get_diagnostics` |
 | **Web** | `web_search`, `fetch_url` |
 | **Interaction** | `ask_user`, `agent` |
-| **Plan artifact** | `write_plan` |
+| **Plan artifact** | `write_plan`, `get_plan` |
 
-`write_plan` is the one write plan mode allows, and it only ever writes to the session's own artifact directory — never to your project. It exists in plan mode only; the other modes do not have it.
+`write_plan` is the one write plan mode allows. It writes the Markdown plan to the session's own artifact directory. When the model also passes `nodes`, it persists the dependency graph to `.nanocoder/plans/` in the project — gitignored runtime state, so the plan survives session restarts. `write_plan` exists in plan mode only; the other modes do not have it.
 
-The following are **excluded**: the file mutation tools (`write_file`, `string_replace`, `diff_edit`, `file_op`, `lsp_format_document`), `execute_bash`, `browser`, the task and walkthrough tools (`write_tasks`, `write_walkthrough`), and the git write tools (`git_add`, `git_commit`, `git_pr`). Custom tools are available only when they declare `approval: never` and `read_only: true`.
+The following are **excluded**: the file mutation tools (`write_file`, `string_replace`, `diff_edit`, `file_op`, `lsp_format_document`), `execute_bash`, `browser`, the task and walkthrough tools (`write_tasks`, `write_walkthrough`), the git write tools (`git_add`, `git_commit`, `git_pr`), and `update_plan_node` — planning may define the graph, but marking work as done is execution. Custom tools are available only when they declare `approval: never` and `read_only: true`.
 
 Subagents started with `agent` in plan mode get the same exclusions, so delegating work does not open a path to a mutation.
 
@@ -138,6 +138,10 @@ Plan mode writes to the session's artifact directory under the app data path, ne
 | **Walkthrough** | `walkthrough.md` | `write_walkthrough` after implementing |
 
 Artifacts are restored when you resume a session and are deleted along with it. See [Session Management](session-management.md).
+
+A plan graph is different: it is project state under `.nanocoder/plans/`, not a
+session artifact. It survives the session that created it and can be resumed by
+another one. See [Persistent Plan Graphs](persistent-plans.md).
 
 ### Plan Mode with Tune
 

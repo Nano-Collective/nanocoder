@@ -62,6 +62,9 @@ const MODE_EXCLUDED_TOOLS: Record<DevelopmentMode, string[]> = {
 		// replace this blunt exclusion once the verify subcommand (issue
 		// #861) consumes it.
 		'git_pr',
+		// Plan mode may create/refine the plan graph through write_plan, but it
+		// must not mark work as done — that is execution, not planning.
+		'update_plan_node',
 	],
 	headless: ['ask_user', 'agent', 'write_plan'],
 	architect: ['write_plan', 'git_commit', 'git_pr'],
@@ -121,6 +124,7 @@ export function filterToolNamesForMode(
  */
 export const SESSION_ARTIFACT_TOOLS = [
 	'write_plan',
+	'update_plan_node',
 	'write_tasks',
 	'write_walkthrough',
 ] as const;

@@ -19,6 +19,7 @@ Type `/` in the chat input to see available commands. All commands start with `/
 | `/model` | Switch between available models from any configured provider |
 | `/status` | Display current status (CWD, provider, model, theme, available updates, AGENTS setup) |
 | `/tasks` | Manage task list for tracking complex work (see [Task Management](task-management.md)) |
+| `/plans` | View and manage persistent plan graphs: `/plans` (list), `/plans show [id]`, `/plans use <id\|none>`, `/plans delete <id>` (see [Persistent Plan Graphs](persistent-plans.md)) |
 | `/model-database` | Browse coding models from OpenRouter (searchable, filterable by open/proprietary). Enter copies the highlighted model's ID to the clipboard and, when the active provider is OpenRouter, also switches the session to that model |
 | `/settings` | Interactive settings menu. Accepts a tab name to jump straight there: `/settings providers`, `/settings mcp`, `/settings appearance`, `/settings input`, `/settings behavior`, `/settings advanced` |
 | `/mcp` | Show connected MCP servers and their tools |
