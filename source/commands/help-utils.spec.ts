@@ -1,5 +1,7 @@
 import test from 'ava';
 import {SETTINGS_TAB_IDS} from '@/app/components/settings-constants';
+import {lazyCommands} from '@/commands/lazy-registry';
+import {settingsCommand} from '@/commands/settings';
 import type {Command} from '@/types/index';
 import {
 	findHelpCommand,
@@ -118,4 +120,15 @@ test('getCommandHelpDetails documents inline ?key=value overrides', t => {
 	const compact = getCommandHelpDetails(command('compact'));
 	t.true(compact.options?.some(option => option.startsWith('?threshold=')));
 	t.false(compact.options?.some(option => option.includes('?auto-on')));
+});
+
+test('the /settings description names the real tabs, not "theme"', t => {
+	const lazy = lazyCommands.find(entry => entry.name === 'settings');
+	t.truthy(lazy);
+	for (const description of [lazy!.description, settingsCommand.description]) {
+		t.notRegex(description, /theme/i);
+		for (const tab of SETTINGS_TAB_IDS) {
+			t.true(description.includes(tab), `${tab} missing from: ${description}`);
+		}
+	}
 });
