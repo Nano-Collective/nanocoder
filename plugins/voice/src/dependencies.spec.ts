@@ -199,6 +199,34 @@ test.serial('installDependencies downloads the checksummed whisper model on ever
 	t.is(model?.expectedSha256, ASSET_CHECKSUMS['ggml-base.en.bin']);
 });
 
+test.serial('macOS: a failed Piper download still fetches the whisper model, with monotonic progress', async (t) => {
+	if (process.platform !== 'darwin') {
+		t.pass('darwin-only install branch');
+		return;
+	}
+	rmSync(join(getVoiceBinDir(), 'ggml-base.en.bin'), {force: true});
+	rmSync(join(getVoiceBinDir(), 'piper'), {force: true});
+	const downloaded: string[] = [];
+	const progress: number[] = [];
+	await t.throwsAsync(
+		installDependencies({
+			execRunner: async () => {},
+			onProgress: (_message, percent) => {
+				progress.push(percent);
+			},
+			downloadFn: async url => {
+				downloaded.push(url);
+				if (url.includes('/rhasspy/piper/releases/')) {
+					throw new Error('piper download failed');
+				}
+			},
+		}),
+		{message: /piper download failed/},
+	);
+	t.true(downloaded.some(url => url.endsWith('/ggml-base.en.bin')));
+	t.deepEqual(progress, [...progress].sort((a, b) => a - b));
+});
+
 test('tailOutput keeps only the last non-empty lines', t => {
 	const text = Array.from({length: 30}, (_, i) => `line ${i}`).join('\n');
 	const tail = tailOutput(`${text}\n\n`, 3);
