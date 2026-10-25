@@ -14,11 +14,12 @@ import {logWarning} from '@/utils/message-queue';
  * it, git reports all of it as untracked, so every checkpoint snapshotted the
  * earlier checkpoints (0, 2, 6, 14, 30 files...) until the file cap crowded
  * out the user's real changes, and restoring one wrote stale checkpoint and
- * timeline data back over the live store. User content under `.nanocoder/`
- * (commands, agents, tools, skills) is still captured.
+ * timeline data back over the live store. Plan graphs are runtime state too, so
+ * a checkpoint must not resurrect an old graph over the live one. User content
+ * under `.nanocoder/` (commands, agents, tools, skills) is still captured.
  */
 const NANOCODER_STATE_PATH =
-	/^\.nanocoder\/(?:checkpoints\/|timeline\/|timeline\.|daemon\.)/;
+	/^\.nanocoder\/(?:checkpoints\/|timeline\/|timeline\.|plans\/|daemon\.)/;
 
 function isNanocoderStatePath(file: string): boolean {
 	return NANOCODER_STATE_PATH.test(file.replace(/\\/g, '/'));
