@@ -2,7 +2,7 @@
  * Pino logger implementation with environment-specific transport support
  */
 
-import {existsSync, mkdirSync} from 'fs';
+import {existsSync, mkdirSync, openSync} from 'fs';
 import {join} from 'path';
 import pino, {type Logger as PinoLogger} from 'pino';
 import {createConfig, getDefaultLogDirectory} from './config.js';
@@ -104,11 +104,16 @@ function createEnvironmentLogger(
 
 		const logFilePath = join(logDir, `nanocoder-${localDate}.log`);
 
-		// Use pino.destination() instead of pino.transport() for synchronous flush support
+		// Use pino.destination() instead of pino.transport() for synchronous flush support.
+		// Open the file here, synchronously, and hand over the descriptor: given a
+		// path, sonic-boom opens it asynchronously, and a process that exits
+		// before that finishes (a fast `nanocoder verify --help`) makes pino's own
+		// exit hook throw "sonic boom is not ready yet", which the shutdown
+		// manager reports as a fatal error and turns into exit code 1.
+		mkdirSync(logDir, {recursive: true});
 		const destination = pino.destination({
-			dest: logFilePath,
+			dest: openSync(logFilePath, 'a'),
 			sync: false, // Async writes for performance
-			mkdir: true,
 		});
 
 		flushOnExit(destination);
