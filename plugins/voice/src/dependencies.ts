@@ -386,6 +386,17 @@ export async function installDependencies(
 			);
 		}
 
+		// The Whisper model is what speech-to-text needs, so fetch it on its own
+		// first: a failed Piper (text-to-speech) download must not skip it.
+		onProgress?.('Fetching Whisper ggml model...', 60);
+		try {
+			await ensureWhisperModel(binDir, downloadFn);
+		} catch (err) {
+			throw new Error(
+				`macOS Whisper model download failed: ${err instanceof Error ? err.message : String(err)}`,
+			);
+		}
+
 		onProgress?.('Fetching piper TTS binary & voice model...', 70);
 		const piperBin = join(binDir, 'piper');
 		const piperModel = join(binDir, 'en_US-lessac-medium.onnx');
@@ -421,9 +432,6 @@ export async function installDependencies(
 					chmodSync(piperBin, 0o755);
 				}
 			}
-
-			onProgress?.('Fetching Whisper ggml model...', 60);
-			await ensureWhisperModel(binDir, downloadFn);
 
 			if (!existsSync(piperModel)) {
 				await downloadFn(

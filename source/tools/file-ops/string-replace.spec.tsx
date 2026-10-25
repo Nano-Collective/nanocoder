@@ -7,7 +7,12 @@ import React from 'react';
 import {themes} from '../../config/themes.js';
 import {resolveToolApproval} from '../approval-policy.js';
 import {ThemeContext} from '../../hooks/useTheme.js';
-import {resetSessionCwd, setSessionCwd} from '../../services/session-cwd.js';
+import {
+	getProjectRoot,
+	resetSessionCwd,
+	setSessionCwd,
+} from '../../services/session-cwd.js';
+import {stringReplaceDisplayPath} from './string-replace-preview.js';
 import {stringReplaceTool} from './string-replace.js';
 import {clearReadTracker, markFileSeen} from '../../utils/read-tracker.js';
 import {readFileTool} from '../read-file.js';
@@ -898,6 +903,26 @@ test('string_replace formatter: preview follows the session cwd', async t => {
 	} finally {
 		resetSessionCwd();
 		await rm(root, {recursive: true, force: true});
+	}
+});
+
+test('string_replace preview labels the file the session cwd resolves to', async t => {
+	// Inside the project: relative to the project root, so a `cd sub` edit of
+	// `note.txt` reads as `sub/note.txt`, not as the root's `note.txt`.
+	setSessionCwd(join(getProjectRoot(), 'source'));
+	try {
+		t.is(stringReplaceDisplayPath('note.txt'), join('source', 'note.txt'));
+	} finally {
+		resetSessionCwd();
+	}
+	// Outside the project: absolute.
+	const outside = await mkdtemp(join(tmpdir(), 'string-replace-outside-'));
+	setSessionCwd(outside);
+	try {
+		t.is(stringReplaceDisplayPath('note.txt'), join(outside, 'note.txt'));
+	} finally {
+		resetSessionCwd();
+		await rm(outside, {recursive: true, force: true});
 	}
 });
 

@@ -30,6 +30,33 @@ function _isPromise<T>(value: T | Promise<T> | void): value is Promise<T> {
 	);
 }
 
+type FileDestination = ReturnType<typeof pino.destination>;
+
+const openDestinations = new Set<FileDestination>();
+let exitHandlerRegistered = false;
+
+/**
+ * The async destination buffers; a CLI that calls process.exit() right after
+ * logging (`run`, `--json`) would otherwise drop the last lines, typically
+ * the warn/error that explains the exit. One shared exit handler, so creating
+ * many loggers does not pile up listeners.
+ */
+function flushOnExit(destination: FileDestination): void {
+	openDestinations.add(destination);
+	destination.once('close', () => openDestinations.delete(destination));
+	if (exitHandlerRegistered) return;
+	exitHandlerRegistered = true;
+	process.once('exit', () => {
+		for (const dest of openDestinations) {
+			try {
+				dest.flushSync();
+			} catch {
+				// Not open yet or already closed: nothing to flush.
+			}
+		}
+	});
+}
+
 /**
  * Determine transport configuration based on environment and CLI settings
  * Currently returns a fixed configuration for all environments (file logging only)
@@ -83,6 +110,8 @@ function createEnvironmentLogger(
 			sync: false, // Async writes for performance
 			mkdir: true,
 		});
+
+		flushOnExit(destination);
 
 		const pinoLogger = pino(baseConfig, destination);
 		const redactionRules = createRedactionRules(
@@ -148,7 +177,8 @@ function createEnhancedLogger(
 			if (destination && 'flush' in destination) {
 				const flushMethod = destination.flush as (() => void) | undefined;
 				if (flushMethod && typeof flushMethod === 'function') {
-					flushMethod();
+					// Bound call: sonic-boom's methods read `this`.
+					flushMethod.call(destination);
 				}
 			}
 		},
@@ -159,7 +189,11 @@ function createEnhancedLogger(
 					| (() => void)
 					| undefined;
 				if (flushSyncMethod && typeof flushSyncMethod === 'function') {
-					flushSyncMethod();
+					try {
+						flushSyncMethod.call(destination);
+					} catch {
+						// Not open yet or already closed: nothing to flush.
+					}
 				}
 			}
 		},
