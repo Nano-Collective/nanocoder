@@ -1,13 +1,14 @@
 import path from 'path';
 import {useCallback, useState} from 'react';
 import {
+	ensureDirectoryTrust,
 	grantDirectoryTrust,
 	isDirectoryTrusted,
 	loadPreferences,
 	savePreferences,
 } from '@/config/preferences';
 import {formatError} from '@/utils/error-formatter';
-import {logError, logInfo} from '@/utils/message-queue';
+import {logError, logInfo, logWarning} from '@/utils/message-queue';
 
 interface UseDirectoryTrustReturn {
 	isTrusted: boolean;
@@ -27,10 +28,21 @@ function checkTrustSync(directory: string): {
 	error: string | null;
 } {
 	try {
-		return {
-			trusted: isDirectoryTrusted(directory, loadPreferences()),
-			error: null,
-		};
+		// Same resolution as --plain, ACP and the daemon, including
+		// NANOCODER_TRUST_DIRECTORY=1 recording the folder as trusted. A
+		// project .env cannot set that variable (see project-dotenv), so only
+		// the user's own shell can skip the disclaimer this way.
+		const trust = ensureDirectoryTrust(directory, false);
+		if (trust.persisted) {
+			logInfo(
+				`Marked ${path.resolve(directory)} as trusted (NANOCODER_TRUST_DIRECTORY=1).`, // nosemgrep
+			);
+		} else if (trust.persistFailed) {
+			logWarning(
+				'NANOCODER_TRUST_DIRECTORY=1 trusted this directory for this run, but saving it to your preferences failed.',
+			);
+		}
+		return {trusted: trust.trusted, error: null};
 	} catch (err) {
 		const errorMessage = formatError(err);
 		logError(`${errorMessage}`);
