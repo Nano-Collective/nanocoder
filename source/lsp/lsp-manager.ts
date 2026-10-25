@@ -427,7 +427,11 @@ export class LSPManager extends EventEmitter {
 		if (this.openTexts.has(uri)) {
 			client.updateDocument(uri, content);
 		} else {
-			client.openDocument(uri, getLanguageId(extname(filePath).slice(1)), content);
+			client.openDocument(
+				uri,
+				getLanguageId(extname(filePath).slice(1)),
+				content,
+			);
 		}
 		this.openTexts.set(uri, content);
 
