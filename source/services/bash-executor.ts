@@ -101,6 +101,30 @@ function isGroupRunning(proc: ChildProcess): boolean {
 	return isGroupAlive(proc) && hasRunningMember(proc);
 }
 
+/**
+ * How long to keep reading a command's output after its shell exits, when
+ * something (a background job) still holds the pipes open. Output the shell
+ * wrote is already in the pipe by then and drains in milliseconds, so stop
+ * once the pipes have been quiet for OUTPUT_QUIET_MS, and in any case after
+ * OUTPUT_DRAIN_MAX_MS so a chatty job cannot hold the result back.
+ */
+const OUTPUT_QUIET_MS = 150;
+const OUTPUT_DRAIN_MAX_MS = 1000;
+
+/**
+ * Stop collecting from a finished command's pipes without closing them: a
+ * background job still writing to a closed pipe would die of SIGPIPE. The
+ * data is read and dropped, and the pipes no longer keep Node alive.
+ */
+function detachStreams(proc: ChildProcess): void {
+	for (const stream of [proc.stdout, proc.stderr]) {
+		if (!stream || stream.destroyed) continue;
+		stream.removeAllListeners('data');
+		stream.on('data', () => {});
+		(stream as {unref?: () => void}).unref?.();
+	}
+}
+
 function signalGroups(proc: ChildProcess, signal: NodeJS.Signals): void {
 	const command = sandboxedCommandGroup(proc);
 	if (command !== undefined) {
@@ -276,8 +300,9 @@ export class BashExecutor extends EventEmitter {
 			state.stderr += text;
 		}, STDERR_TRUNCATION_NOTICE);
 
-		// Both streams are finished by the time `close`/`error` runs, so release
-		// whatever the decoders were holding back mid-character. `cancel()`
+		// Both streams are finished (or past their drain grace period) when the
+		// command completes, so release whatever the decoders were holding back
+		// mid-character. `cancel()`
 		// resolves and unregisters the execution before either handler gets
 		// here, so a cancelled run never flushes: its pending partial character
 		// is dropped along with the rest of the output it never produced.
@@ -288,7 +313,9 @@ export class BashExecutor extends EventEmitter {
 		};
 
 		// Collect output
+		let lastOutputAt = 0;
 		proc.stdout?.on('data', (data: Buffer) => {
+			lastOutputAt = Date.now();
 			stdoutCollector.collect(data);
 			state.outputPreview = state.fullOutput.slice(-BASH_OUTPUT_PREVIEW_LENGTH);
 			// Emit progress immediately when output is received
@@ -297,6 +324,7 @@ export class BashExecutor extends EventEmitter {
 		});
 
 		proc.stderr?.on('data', (data: Buffer) => {
+			lastOutputAt = Date.now();
 			stderrCollector.collect(data);
 			// Emit progress immediately when stderr is received
 			this.emit('progress', {...state});
@@ -345,7 +373,17 @@ export class BashExecutor extends EventEmitter {
 
 			this.executions.set(executionId, entry);
 
-			proc.on('close', (code: number | null) => {
+			// Finish when the shell exits, not when every pipe holder does. A job
+			// it backgrounded (`npm run dev &`) inherits stdout and keeps the
+			// pipes open for its whole life, so waiting for `close` would block
+			// until that job exits. Give the pipes a short grace period to drain
+			// what the shell itself wrote, then stop collecting and leave the job
+			// running; trackLeftovers() keeps it reachable for shutdown cleanup.
+			let exitCode: number | null = null;
+			let graceTimer: NodeJS.Timeout | undefined;
+
+			const finish = (code: number | null) => {
+				if (graceTimer) clearTimeout(graceTimer);
 				if (entry.timeoutId) clearTimeout(entry.timeoutId);
 				if (entry.signal && entry.abortListener) {
 					entry.signal.removeEventListener('abort', entry.abortListener);
@@ -355,6 +393,7 @@ export class BashExecutor extends EventEmitter {
 				if (!this.executions.has(executionId)) return;
 
 				flushStreams();
+				detachStreams(proc);
 
 				// Persist `cd` only on a real completion, not a cancel/timeout.
 				applyCapturedCwd();
@@ -366,9 +405,34 @@ export class BashExecutor extends EventEmitter {
 				this.emit('complete', {...state});
 				this.executions.delete(executionId);
 				resolve({...state});
+			};
+
+			proc.on('exit', (code: number | null) => {
+				exitCode = code;
+				const exitedAt = Date.now();
+				const drain = () => {
+					const now = Date.now();
+					if (
+						now - lastOutputAt < OUTPUT_QUIET_MS &&
+						now - exitedAt < OUTPUT_DRAIN_MAX_MS
+					) {
+						graceTimer = setTimeout(drain, OUTPUT_QUIET_MS);
+						return;
+					}
+					// Timers run before the I/O poll, so after a busy event loop
+					// output can be waiting unread. setImmediate runs after the
+					// poll, once it has been collected.
+					setImmediate(() => finish(exitCode));
+				};
+				graceTimer = setTimeout(drain, OUTPUT_QUIET_MS);
+			});
+
+			proc.on('close', (code: number | null) => {
+				finish(exitCode ?? code);
 			});
 
 			proc.on('error', (error: Error) => {
+				if (graceTimer) clearTimeout(graceTimer);
 				if (entry.timeoutId) clearTimeout(entry.timeoutId);
 				if (entry.signal && entry.abortListener) {
 					entry.signal.removeEventListener('abort', entry.abortListener);
