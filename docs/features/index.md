@@ -169,6 +169,11 @@ For multi-step tasks, the [task management](task-management.md) system keeps you
 
 The AI also has a task tool and will proactively create and update tasks when working on involved problems. Task state lives with the session rather than in your project directory, and is restored when you resume.
 
+For work that spans sessions or has real ordering constraints, plan mode can
+persist its output as a dependency graph instead. The graph is written to
+`.nanocoder/plans/`, and `/plans` shows a progress dashboard such as
+"3/12 done, blocked on auth". See [Persistent Plan Graphs](persistent-plans.md).
+
 ## Customizing Nanocoder
 
 ### Project Setup with `/init`
@@ -272,6 +277,7 @@ Extend Nanocoder's capabilities by connecting [MCP (Model Context Protocol) serv
 | [Session Management](session-management.md) | Automatic session saving and resumption |
 | [Storage Diagnostics](storage-diagnostics.md) | Read-only storage overview and JSON report |
 | [Task Management](task-management.md) | Tracking multi-step work |
+| [Persistent Plan Graphs](persistent-plans.md) | Durable, dependency-aware plans that survive session restarts |
 | [Semantic Memory](semantic-memory.md) | Save durable project facts and recall them automatically across sessions |
 | [File Explorer](file-explorer.md) | Interactive file browser for context selection |
 | [Image Attachments](image-attachments.md) | Send screenshots and images to vision-capable models |
