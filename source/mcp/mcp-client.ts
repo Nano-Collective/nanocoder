@@ -165,6 +165,30 @@ export class MCPClient {
 		return code === -32601;
 	}
 
+	/**
+	 * Remote (HTTP / WebSocket) transports can lose their session without the
+	 * transport ever closing, so ping-based recovery may never succeed. Stdio
+	 * servers keep the old behaviour: their transport closes when the child
+	 * exits, which already triggers a reconnect.
+	 */
+	private isRemoteServer(serverName: string): boolean {
+		const transport = this.serverConfigs.get(serverName)?.transport;
+		return transport !== undefined && transport !== 'stdio';
+	}
+
+	/**
+	 * A Streamable HTTP server answers 404 for a session it no longer knows,
+	 * typically because it restarted. The MCP spec says the client must start
+	 * a new session; pinging with the old session id can never succeed.
+	 */
+	private isSessionGoneResponse(serverName: string, error: unknown): boolean {
+		if (!this.isRemoteServer(serverName)) return false;
+		if (!error || typeof error !== 'object') return false;
+		if ((error as {code?: unknown}).code === 404) return true;
+		const message = (error as {message?: unknown}).message;
+		return typeof message === 'string' && /session not found/i.test(message);
+	}
+
 	private async restoreServerHealth(
 		serverName: string,
 		client: Client,
@@ -465,20 +489,42 @@ export class MCPClient {
 					const currentFailures =
 						(this.healthFailureCounts.get(serverName) ?? 0) + 1;
 					this.healthFailureCounts.set(serverName, currentFailures);
+					const status = this.health.get(serverName);
+					const sessionGone = this.isSessionGoneResponse(serverName, error);
 					// One missed ping is not enough to pull a server's tools
 					// mid-turn; require two in a row. A pending ping can also
 					// reject after an intentional disconnect, hence the status check.
+					// A lost session is final, so it does not wait for a second miss.
 					if (
-						currentFailures >= 2 &&
-						this.health.get(serverName) === 'connected' &&
+						(currentFailures >= 2 || sessionGone) &&
+						status === 'connected' &&
 						isCurrent()
 					) {
 						this.markServerUnhealthy(serverName, error);
 					}
+					// A remote server whose recovery ping failed, or whose session is
+					// gone, may have restarted: the old session will never answer
+					// again and HTTP never fires onclose. Rebuild the connection
+					// through the reconnect loop instead of pinging on.
+					if (
+						(sessionGone || status === 'unhealthy') &&
+						this.isRemoteServer(serverName) &&
+						this.health.get(serverName) === 'unhealthy' &&
+						isCurrent() &&
+						!this.closing.has(serverName)
+					) {
+						this.clearHealthTimer(serverName);
+						this.healthFailureCounts.delete(serverName);
+						this.scheduleReconnect(serverName);
+					}
 				}
 			} finally {
 				this.healthChecksInFlight.delete(serverName);
-				if (!this.closing.has(serverName)) {
+				if (
+					!this.closing.has(serverName) &&
+					// Handed to the reconnect loop: the new client runs its own checks.
+					!this.reconnectTimers.has(serverName)
+				) {
 					const failureCount = this.healthFailureCounts.get(serverName) ?? 0;
 					scheduleNext(MCPClient.backoffDelay(interval, failureCount));
 				}
