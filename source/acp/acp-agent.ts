@@ -56,6 +56,7 @@ import {
 } from '@/config/preferences';
 import {resolveTune} from '@/config/tune';
 import {appendRelevantProjectContextWithCount} from '@/memory/project-context';
+import {appendActivePlanContext} from '@/plans/context';
 import {setAutoCommitClient} from '@/services/auto-commit';
 import {runInSessionCwdScope} from '@/services/session-cwd';
 import {TimelineManager} from '@/services/timeline-manager';
@@ -388,11 +389,17 @@ export class AcpAgent implements Agent {
 					session.getMemoryFinder(),
 					getProjectContextPreferences(),
 				);
+				// Plan graphs are project state and change between turns. Read them
+				// inside the session's cwd scope so an editor session sees the plan
+				// for its own workspace, not the agent's launch directory.
+				const systemPrompt = await runInSessionCwdScope(session.cwdScope, () =>
+					appendActivePlanContext(projectContext.systemPrompt),
+				);
 				session.systemMessage = {
 					role: 'system',
-					content: projectContext.systemPrompt,
+					content: systemPrompt,
 				};
-				setLastBuiltPrompt(projectContext.systemPrompt);
+				setLastBuiltPrompt(systemPrompt);
 				if (projectContext.memoryCount > 0) {
 					logger.info(
 						`ACP recall: session=${params.sessionId} count=${projectContext.memoryCount}`,

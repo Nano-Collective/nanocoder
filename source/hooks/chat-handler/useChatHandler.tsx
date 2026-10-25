@@ -13,6 +13,7 @@ import {CommandIntegration} from '@/custom-commands/command-integration';
 import {appendRelevantProjectContextWithCount} from '@/memory/project-context';
 import {SemanticMemoryManager} from '@/memory/semantic-memory-manager';
 import {processToolUse} from '@/message-handler';
+import {appendActivePlanContext} from '@/plans/context';
 import {generateKey} from '@/session/key-generator';
 import {getTuneToolMode} from '@/types/config';
 import type {ImageAttachment, Message} from '@/types/core';
@@ -446,6 +447,10 @@ export function useChatHandler({
 				{...getProjectContextPreferences(), ...projectContextOptions},
 			);
 			systemPrompt = projectContext.systemPrompt;
+			// Persisted plan state changes between turns and must be visible after
+			// a restart, so it is appended here rather than baked into the cached
+			// base prompt.
+			systemPrompt = await appendActivePlanContext(systemPrompt);
 			setLastBuiltPrompt(systemPrompt);
 			if (projectContext.memoryCount > 0) {
 				addToChatQueue(

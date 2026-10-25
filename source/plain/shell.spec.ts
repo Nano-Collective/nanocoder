@@ -803,6 +803,50 @@ test.serial(
 );
 
 test.serial(
+	"plain mode appends the persisted plan to the system prompt",
+	async (t) => {
+		const shutdown: CapturedShutdown = {code: null};
+		const stdout = capturingStdout();
+		const stderr = capturingStderr();
+		let systemContent = "";
+		try {
+			await runPlainShell({
+				prompt: "continue the plan",
+				developmentMode: "auto-accept",
+				trustDirectory: true,
+				outputFormat: "text",
+				deps: baseDeps({
+					initializePlain: makeFakeInitializePlain(),
+					runPlainConversation: async (options) => {
+						systemContent = String(options.systemMessage.content);
+						return {
+							kind: "success",
+							finalText: "all done",
+							reasoning: null,
+							steps: 1,
+							toolCalls: [],
+						};
+					},
+					getShutdownManager: makeFakeShutdownManager(shutdown),
+					appendRelevantProjectContextWithCount: async (systemPrompt) => ({
+						systemPrompt,
+						memoryCount: 0,
+					}),
+					appendActivePlanContext: async (systemPrompt) =>
+						`${systemPrompt}\n\n## ACTIVE PLAN (persisted)\n\n- api`,
+				}),
+			});
+		} finally {
+			stdout.restore();
+			stderr.restore();
+		}
+
+		t.true(systemContent.includes("## ACTIVE PLAN (persisted)"));
+		t.is(shutdown.code, 0);
+	},
+);
+
+test.serial(
 	"text mode recalls relevant project memories and surfaces the count on stderr",
 	async (t) => {
 		const shutdown: CapturedShutdown = { code: null };
