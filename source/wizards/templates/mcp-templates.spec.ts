@@ -315,6 +315,11 @@ test('deed-page template: builds keyless HTTP config', t => {
 	t.is(config.transport, 'http');
 	t.is(config.url, 'https://deed.page/mcp');
 	t.is(config.timeout, 30000);
+	t.is(
+		config.description,
+		'Publish HTML or a folder of files as a public website on deed.page. No API key needed; published pages are public.',
+	);
+	t.is(config.templateId, 'deed-page');
 	t.falsy(config.headers);
 	t.deepEqual(config.tags, ['remote', 'publish', 'hosting', 'http']);
 });
@@ -325,11 +330,11 @@ test('deed-page template: keeps a renamed server and custom URL', t => {
 
 	const config = template!.buildConfig({
 		serverName: 'publish',
-		url: 'https://deed.page/mcp',
+		url: 'https://deed.page/mcp?tenant=acme',
 	});
 
 	t.is(config.name, 'publish');
-	t.is(config.url, 'https://deed.page/mcp');
+	t.is(config.url, 'https://deed.page/mcp?tenant=acme');
 });
 
 test('github-remote template: builds correct HTTP config with headers', t => {
