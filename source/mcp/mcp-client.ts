@@ -750,6 +750,15 @@ export class MCPClient {
 				this.serverConfigs.set(normalizedServer.name, normalizedServer);
 				this.serverTools.set(normalizedServer.name, tools);
 				this.toolMappingCache = null;
+				const shadowed = this.getToolNameConflicts().filter(conflict =>
+					conflict.servers.includes(normalizedServer.name),
+				);
+				if (shadowed.length > 0) {
+					this.logger.warn('MCP tool names shared by more than one server', {
+						serverName: normalizedServer.name,
+						conflicts: shadowed,
+					});
+				}
 				this.serverResources.set(normalizedServer.name, resources);
 				this.serverPrompts.set(normalizedServer.name, prompts);
 				this.setServerHealth(normalizedServer.name, 'connected');
@@ -938,6 +947,33 @@ export class MCPClient {
 		}
 
 		return tools;
+	}
+
+	/**
+	 * Tool names exposed by more than one connected server. Tools are keyed by
+	 * name, so only one of them is callable: the server connected last (later
+	 * in `serverTools` order) handles every call to that name.
+	 */
+	getToolNameConflicts(): Array<{
+		tool: string;
+		servers: string[];
+		active: string;
+	}> {
+		const owners = new Map<string, string[]>();
+		for (const [serverName, serverTools] of this.serverTools.entries()) {
+			for (const mcpTool of serverTools) {
+				const list = owners.get(mcpTool.name) ?? [];
+				list.push(serverName);
+				owners.set(mcpTool.name, list);
+			}
+		}
+		const conflicts: Array<{tool: string; servers: string[]; active: string}> =
+			[];
+		for (const [tool, servers] of owners) {
+			if (servers.length < 2) continue;
+			conflicts.push({tool, servers, active: servers[servers.length - 1]});
+		}
+		return conflicts;
 	}
 
 	/**

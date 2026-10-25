@@ -24,6 +24,7 @@ import type {
 	ToolValidator,
 } from '@/types/index';
 import type {MCPHealthChange} from '@/types/mcp';
+import {logWarning} from '@/utils/message-queue';
 import {getShutdownManager} from '@/utils/shutdown';
 
 /**
@@ -212,6 +213,23 @@ export class ToolManager {
 
 			const mcpToolEntries = this.mcpClient.getToolEntries();
 			this.registry.registerMany(mcpToolEntries);
+
+			// Tools are keyed by name, so a name two servers share silently
+			// reaches only one of them. Say which.
+			const conflicts = this.mcpClient.getToolNameConflicts();
+			if (conflicts.length > 0) {
+				const lines = conflicts
+					.slice(0, 5)
+					.map(
+						c =>
+							`"${c.tool}" (${c.servers.join(', ')}; calls go to ${c.active})`,
+					);
+				const more =
+					conflicts.length > 5 ? ` and ${conflicts.length - 5} more` : '';
+				logWarning(
+					`MCP servers expose the same tool names, so only one server handles each: ${lines.join('; ')}${more}.`,
+				);
+			}
 
 			return results;
 		}

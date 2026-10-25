@@ -2717,3 +2717,31 @@ test('MCPClient.disconnect: clears resources and prompts', async t => {
 	t.is(client.getAllResources().length, 0);
 	t.is(client.getAllPrompts().length, 0);
 });
+
+test('getToolNameConflicts names tools two servers share and which one handles them', t => {
+	const client = new MCPClient();
+	const internal = client as unknown as {
+		serverTools: Map<string, Array<{name: string; serverName: string}>>;
+	};
+	internal.serverTools.set('alpha', [
+		{name: 'echo', serverName: 'alpha'},
+		{name: 'only-alpha', serverName: 'alpha'},
+	]);
+	internal.serverTools.set('beta', [{name: 'echo', serverName: 'beta'}]);
+
+	t.deepEqual(client.getToolNameConflicts(), [
+		{tool: 'echo', servers: ['alpha', 'beta'], active: 'beta'},
+	]);
+	// The reported winner is the one calls are actually routed to.
+	t.is(client.getToolMapping().get('echo')?.serverName, 'beta');
+});
+
+test('getToolNameConflicts is empty when tool names are unique', t => {
+	const client = new MCPClient();
+	const internal = client as unknown as {
+		serverTools: Map<string, Array<{name: string; serverName: string}>>;
+	};
+	internal.serverTools.set('alpha', [{name: 'a', serverName: 'alpha'}]);
+	internal.serverTools.set('beta', [{name: 'b', serverName: 'beta'}]);
+	t.deepEqual(client.getToolNameConflicts(), []);
+});
