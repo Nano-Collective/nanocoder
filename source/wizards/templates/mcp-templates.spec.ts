@@ -305,6 +305,33 @@ test('context7 template: builds correct HTTP config', t => {
 	t.deepEqual(config.tags, ['remote', 'context', 'information', 'http']);
 });
 
+test('deed-page template: builds keyless HTTP config', t => {
+	const template = MCP_TEMPLATES.find(t => t.id === 'deed-page');
+	t.truthy(template);
+
+	const config = template!.buildConfig({});
+
+	t.is(config.name, 'deed-page');
+	t.is(config.transport, 'http');
+	t.is(config.url, 'https://deed.page/mcp');
+	t.is(config.timeout, 30000);
+	t.falsy(config.headers);
+	t.deepEqual(config.tags, ['remote', 'publish', 'hosting', 'http']);
+});
+
+test('deed-page template: keeps a renamed server and custom URL', t => {
+	const template = MCP_TEMPLATES.find(t => t.id === 'deed-page');
+	t.truthy(template);
+
+	const config = template!.buildConfig({
+		serverName: 'publish',
+		url: 'https://deed.page/mcp',
+	});
+
+	t.is(config.name, 'publish');
+	t.is(config.url, 'https://deed.page/mcp');
+});
+
 test('github-remote template: builds correct HTTP config with headers', t => {
 	const template = MCP_TEMPLATES.find(t => t.id === 'github-remote');
 	t.truthy(template);
