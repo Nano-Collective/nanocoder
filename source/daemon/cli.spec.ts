@@ -13,7 +13,7 @@ import {
 	savePreferences,
 } from '@/config/preferences';
 import {describeProjectTrust} from '@/config/project-trust';
-import {runDaemonCli} from './cli';
+import {CONFIG_AUTO_FIX_WARNING, runDaemonCli} from './cli';
 import {
 	getLockfilePath,
 	getSocketPath,
@@ -617,6 +617,31 @@ test.serial('unknown flag is rejected with exit 1 and no daemon spawned', async 
 	}
 });
 
+test.serial('--help prints usage, exits 0 and never runs the subcommand', async t => {
+	const root = await tempProject();
+	const launcher = successfulLaunchDaemon(root);
+	try {
+		const start = await runDaemonCli('start', {
+			projectRoot: root,
+			trustDirectory: true,
+			args: ['--help'],
+			launchDaemon: launcher.launch,
+		});
+		t.is(start.exitCode, 0);
+		t.regex(start.output, /^Usage: nanocoder daemon start/);
+		t.is(launcher.calls.length, 0);
+
+		const install = await runDaemonCli('install', {
+			projectRoot: root,
+			args: ['-h'],
+		});
+		t.is(install.exitCode, 0);
+		t.is(install.output, 'Usage: nanocoder daemon install');
+	} finally {
+		await rm(root, {recursive: true, force: true});
+	}
+});
+
 test.serial('invalid --trust value is rejected with exit 1', async t => {
 	const root = await tempProject();
 	const launcher = successfulLaunchDaemon(root);
@@ -1044,4 +1069,11 @@ test.serial('status shows the CI trust level from the lockfile', async t => {
 		await removeLockfile(root);
 		await rm(root, {recursive: true, force: true});
 	}
+});
+
+test('config auto-fix warning describes the shell-less fix agent', t => {
+	const text = CONFIG_AUTO_FIX_WARNING('/repo');
+	t.notRegex(text, /runs shell commands/);
+	t.regex(text, /edits files and commits/);
+	t.regex(text, /no\s+shell/);
 });

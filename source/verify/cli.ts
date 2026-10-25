@@ -190,6 +190,10 @@ export async function runVerifyCli(
 ): Promise<VerifyCliResult> {
 	const deps: VerifyCliDeps = {...defaultDeps, ...depsOverride};
 
+	if (args.includes('--help') || args.includes('-h')) {
+		return {exitCode: 0, output: USAGE};
+	}
+
 	const parsed = parseArgs(args);
 	if ('error' in parsed) {
 		return {exitCode: 1, output: `${parsed.error}\n${USAGE}`};
