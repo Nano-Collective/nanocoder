@@ -151,6 +151,7 @@ test('write_plan persists and replaces a dependency graph without changing conte
 			stored?.nodes.map(node => node.id),
 			['db', 'api'],
 		);
+		t.deepEqual(stored?.nodes[1]?.dependsOn, ['db']);
 		t.is(stored?.nodes[1]?.agent, 'general');
 
 		// Omitting plan_id replaces the active graph rather than creating a new one.

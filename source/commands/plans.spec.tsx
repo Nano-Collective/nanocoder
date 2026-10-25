@@ -88,6 +88,16 @@ test('plans command switches the active plan and can clear it', async t => {
 	});
 });
 
+test('plans command keeps the current plan active when the requested id is missing', async t => {
+	await withStore(async (command, store) => {
+		const before = await store.getActivePlanId();
+		const result = await command.handler(['use', 'auth-refacor']);
+		t.is(await store.getActivePlanId(), before);
+		const {lastFrame} = renderWithTheme(result as React.ReactElement);
+		t.true(lastFrame()?.includes('not found'));
+	});
+});
+
 test('plans command deletes a graph and updates the listing', async t => {
 	await withStore(async (command, store) => {
 		const result = await command.handler(['delete', 'auth-refactor']);

@@ -108,11 +108,11 @@ export function createPlansCommand(
 						return messageElement('No plan is active.');
 					}
 
-					await store.setActivePlanId(planId);
 					const plan = await store.loadPlan(planId);
 					if (!plan) {
 						return messageElement(`Plan "${planId}" not found.`, true);
 					}
+					await store.setActivePlanId(planId);
 					return React.createElement(PlanGraphDisplay, {
 						key: generateKey('plans-use'),
 						plan,
