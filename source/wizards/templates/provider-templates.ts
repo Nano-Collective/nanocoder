@@ -452,6 +452,13 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 		apiKeyPrompt: 'API Key (from futureinfra.ai/console/?screen=ai-router)',
 		modelDefault: 'openai/gpt-4o-mini',
 	}),
+	apiKeyTemplate({
+		id: 'atmorouter',
+		name: 'AtmoRouter',
+		baseUrl: 'https://atmorouter.dev/v1',
+		apiKeyPrompt: 'API Key (from https://atmorouter.dev/dashboard/keys)',
+		modelDefault: 'cc/claude-sonnet-4-6',
+	}),
 	{
 		id: 'openai',
 		name: 'OpenAI',

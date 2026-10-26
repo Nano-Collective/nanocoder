@@ -670,6 +670,39 @@ test('futureinfra template: uses default provider name and model default', t => 
 	t.is(config.name, 'FutureInfra');
 });
 
+test('atmorouter template: sets baseUrl, default model, and parses models', t => {
+	const template = PROVIDER_TEMPLATES.find(t => t.id === 'atmorouter');
+	t.truthy(template);
+
+	const config = template!.buildConfig({
+		providerName: 'AtmoRouter',
+		apiKey: 'test-key',
+		model: 'cc/claude-sonnet-4-6, cbcn/glm-5.3',
+	});
+
+	t.is(config.name, 'AtmoRouter');
+	t.is(config.baseUrl, 'https://atmorouter.dev/v1');
+	t.is(config.apiKey, 'test-key');
+	t.is(config.sdkProvider, undefined);
+	t.deepEqual(config.models, ['cc/claude-sonnet-4-6', 'cbcn/glm-5.3']);
+});
+
+test('atmorouter template: uses default provider name and model default', t => {
+	const template = PROVIDER_TEMPLATES.find(t => t.id === 'atmorouter');
+	t.truthy(template);
+
+	const modelField = template!.fields.find(f => f.name === 'model');
+	t.is(modelField?.default, 'cc/claude-sonnet-4-6');
+
+	const config = template!.buildConfig({
+		providerName: '',
+		apiKey: 'test-key',
+		model: 'cc/claude-sonnet-4-6',
+	});
+
+	t.is(config.name, 'AtmoRouter');
+});
+
 // ============================================================================
 // Tests for template ID vs sdkProvider collision prevention
 // Providers that use sdkProvider: 'anthropic' (like MiniMax, Kimi) must not
