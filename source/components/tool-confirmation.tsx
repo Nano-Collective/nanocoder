@@ -88,87 +88,95 @@ export default function ToolConfirmation({
 		let cancelled = false;
 		setIsChecking(true);
 		setIsLoadingPreview(false);
+		setHasFormatterError(false);
+		setHasValidationError(false);
+		setFormatterPreview(null);
 
 		const loadPreview = async () => {
-			if (!toolManager) return;
-
-			let parsedArgs: Record<string, unknown> = {};
 			try {
-				parsedArgs = parseToolArguments(toolCall.function.arguments);
-			} catch {
-				// Leave as {} — the schema/validator will surface the real problem.
-			}
+				if (!toolManager) return;
 
-			// 1. Schema type-check — the same check the executed handler runs, so a
-			// wrong-typed argument shows red here and is fed back to the model.
-			const schema = getToolJsonSchema(
-				toolManager.getToolEntry(toolCall.function.name)?.tool,
-			);
-			const typeErrors = schema
-				? validateArgsAgainstSchema(parsedArgs, schema)
-				: [];
-			if (typeErrors.length > 0) {
-				const msg = formatValidationError(
-					'one or more arguments have the wrong type — fix the types and call the tool again',
-					typeErrors,
-				);
-				setHasValidationError(true);
-				setFormatterPreview(<Text color={colors.error}>{msg}</Text>);
-				return;
-			}
-
-			// 2. Per-tool validator.
-			const validator = toolManager.getToolValidator(toolCall.function.name);
-			if (validator) {
+				let parsedArgs: Record<string, unknown> = {};
 				try {
-					const validationResult = await validator(parsedArgs);
-					if (cancelled) return;
-					if (!validationResult.valid) {
-						setHasValidationError(true);
-						setFormatterPreview(
-							<Text color={colors.error}>{validationResult.error}</Text>,
-						);
-						return;
-					}
-				} catch (error) {
-					if (cancelled) return;
-					const logger = getLogger();
-					logger.error({error: formatError(error)}, 'Error running validator');
-					const errorMsg = `Validation error: ${formatError(error)}`;
+					parsedArgs = parseToolArguments(toolCall.function.arguments);
+				} catch {
+					// Leave as {} — the schema/validator will surface the real problem.
+				}
+
+				// 1. Schema type-check — the same check the executed handler runs, so a
+				// wrong-typed argument shows red here and is fed back to the model.
+				const schema = getToolJsonSchema(
+					toolManager.getToolEntry(toolCall.function.name)?.tool,
+				);
+				const typeErrors = schema
+					? validateArgsAgainstSchema(parsedArgs, schema)
+					: [];
+				if (typeErrors.length > 0) {
+					const msg = formatValidationError(
+						'one or more arguments have the wrong type — fix the types and call the tool again',
+						typeErrors,
+					);
 					setHasValidationError(true);
-					setFormatterPreview(<Text color={colors.error}>{errorMsg}</Text>);
+					setFormatterPreview(<Text color={colors.error}>{msg}</Text>);
 					return;
 				}
-			}
 
-			// 3. Formatter preview.
-			const formatter = toolManager.getToolFormatter(toolCall.function.name);
-			if (formatter) {
-				setIsLoadingPreview(true);
-				try {
-					const preview = await formatter(parsedArgs);
-					if (cancelled) return;
-					setFormatterPreview(preview);
-				} catch (error) {
-					if (cancelled) return;
-					const logger = getLogger();
-					logger.error(
-						{error: formatError(error)},
-						'Error loading formatter preview',
-					);
-					setHasFormatterError(true);
-					setFormatterPreview(
-						<Text color={colors.error}>Error: {String(error)}</Text>,
-					);
-				} finally {
-					if (!cancelled) setIsLoadingPreview(false);
+				// 2. Per-tool validator.
+				const validator = toolManager.getToolValidator(toolCall.function.name);
+				if (validator) {
+					try {
+						const validationResult = await validator(parsedArgs);
+						if (cancelled) return;
+						if (!validationResult.valid) {
+							setHasValidationError(true);
+							setFormatterPreview(
+								<Text color={colors.error}>{validationResult.error}</Text>,
+							);
+							return;
+						}
+					} catch (error) {
+						if (cancelled) return;
+						const logger = getLogger();
+						logger.error(
+							{error: formatError(error)},
+							'Error running validator',
+						);
+						const errorMsg = `Validation error: ${formatError(error)}`;
+						setHasValidationError(true);
+						setFormatterPreview(<Text color={colors.error}>{errorMsg}</Text>);
+						return;
+					}
 				}
+
+				// 3. Formatter preview.
+				const formatter = toolManager.getToolFormatter(toolCall.function.name);
+				if (formatter) {
+					setIsLoadingPreview(true);
+					try {
+						const preview = await formatter(parsedArgs);
+						if (cancelled) return;
+						setFormatterPreview(preview);
+					} catch (error) {
+						if (cancelled) return;
+						const logger = getLogger();
+						logger.error(
+							{error: formatError(error)},
+							'Error loading formatter preview',
+						);
+						setHasFormatterError(true);
+						setFormatterPreview(
+							<Text color={colors.error}>Error: {String(error)}</Text>,
+						);
+					} finally {
+						if (!cancelled) setIsLoadingPreview(false);
+					}
+				}
+			} finally {
+				if (!cancelled) setIsChecking(false);
 			}
 		};
 
-		void loadPreview().finally(() => {
-			if (!cancelled) setIsChecking(false);
-		});
+		void loadPreview();
 
 		return () => {
 			cancelled = true;
