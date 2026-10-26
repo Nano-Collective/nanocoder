@@ -456,8 +456,7 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 		id: 'runcrate',
 		name: 'Runcrate',
 		baseUrl: 'https://api.runcrate.ai/v1',
-		apiKeyPrompt:
-			'API Key (from https://www.runcrate.ai/dashboard/api-keys?utm_source=nanocoder&utm_medium=directory&utm_campaign=gpu_pricing)',
+		apiKeyPrompt: 'API Key (from https://www.runcrate.ai/dashboard/api-keys)',
 		modelDefault: 'deepseek-ai/DeepSeek-V4.1-Flash',
 	}),
 	{

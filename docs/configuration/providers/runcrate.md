@@ -6,7 +6,7 @@ sidebar_order: 31
 
 # Runcrate
 
-[Runcrate](https://www.runcrate.ai/?utm_source=nanocoder&utm_medium=directory&utm_campaign=gpu_pricing) is a GPU cloud that also serves open models, such as DeepSeek V4.1 Flash, GLM-5.3, Qwen3.8 Flash and gpt-oss 120B, on an OpenAI-compatible API. It speaks the OpenAI Chat Completions API, including streaming and tool calling, so it works as a drop-in coding provider for Nanocoder. Open models are free with your GitHub account.
+[Runcrate](https://www.runcrate.ai/?utm_source=nanocoder&utm_medium=listing&utm_campaign=gpu_pricing) is a GPU cloud that also serves open models, such as DeepSeek V4.1 Flash, GLM-5.3, Qwen3.8 Flash and gpt-oss 120B, on an OpenAI-compatible API. It speaks the OpenAI Chat Completions API, including streaming and tool calling, so it works as a drop-in coding provider for Nanocoder. Five open models (DeepSeek V4.1 Flash, GLM-5.3, GLM-5.3 Flash, Qwen3.8 Flash and gpt-oss 120B) include a limited [free allowance](https://www.runcrate.ai/inference/free?utm_source=nanocoder&utm_medium=listing&utm_campaign=gpu_pricing) when you sign in with a GitHub account that is at least 30 days old. The allowance is shared by the workspace and resets per session and weekly; past it, requests are billed from your balance or stop until it resets.
 
 ## Configuration
 
@@ -21,8 +21,9 @@ sidebar_order: 31
 
 ## Setup
 
-1. Sign in and create an API key in the [Runcrate dashboard](https://www.runcrate.ai/dashboard/api-keys?utm_source=nanocoder&utm_medium=directory&utm_campaign=gpu_pricing) (keys start with `rc_live_`)
-2. Set `RUNCRATE_API_KEY`, or paste the key into the wizard
+1. Sign in to [Runcrate](https://www.runcrate.ai/?utm_source=nanocoder&utm_medium=listing&utm_campaign=gpu_pricing) with GitHub. The free allowance applies only when you sign in with a GitHub account that is at least 30 days old.
+2. Create an API key in the [Runcrate dashboard](https://www.runcrate.ai/dashboard/api-keys?utm_source=nanocoder&utm_medium=listing&utm_campaign=gpu_pricing) (keys start with `rc_live_`). The same page shows how much free usage is left and when it resets.
+3. Set `RUNCRATE_API_KEY`, or paste the key into the wizard
 
 ## Models
 
