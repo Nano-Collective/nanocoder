@@ -2,7 +2,7 @@
  * Git Utils Tests
  */
 
-import {execSync} from 'node:child_process';
+import {execFileSync, execSync} from 'node:child_process';
 import {
 	chmodSync,
 	mkdirSync,
@@ -21,6 +21,7 @@ import {
 import {
 	parseGitStatus,
 	execGit,
+	execGitBuffer,
 	isGitAvailable,
 	isGhAvailable,
 	resetBinaryAvailabilityCacheForTests,
@@ -36,6 +37,64 @@ import {
 // ============================================================================
 
 console.log('\nutils.spec.ts – Git Utilities');
+
+test('execGitBuffer preserves binary stdout and execGit honors cancellation', async t => {
+	const env = {
+		...process.env,
+		GIT_CONFIG_GLOBAL: '/dev/null',
+		GIT_CONFIG_NOSYSTEM: '1',
+		GIT_TERMINAL_PROMPT: '0',
+	};
+	const directory = mkdtempSync(join(tmpdir(), 'nanocoder-git-buffer-'));
+	const repository = join(directory, 'repo');
+	const hooks = join(repository, '.empty-hooks');
+	mkdirSync(hooks, {recursive: true});
+	t.teardown(() => rmSync(directory, {recursive: true, force: true}));
+	execFileSync('git', ['init', '--initial-branch=main', repository], {
+		stdio: 'ignore',
+		env,
+	});
+	execFileSync('git', ['-C', repository, 'config', 'user.name', 'Git test'], {env});
+	execFileSync('git', [
+		'-C',
+		repository,
+		'config',
+		'user.email',
+		'git-test@example.test',
+	], {env});
+	execFileSync('git', ['-C', repository, 'config', 'core.hooksPath', hooks], {env});
+	const contents = Buffer.concat([
+		Buffer.alloc(65_535, 0x61),
+		Buffer.from('€\0'),
+		Buffer.alloc(70_000, 0x62),
+		Buffer.from('\n'),
+	]);
+	writeFileSync(join(repository, 'binary.bin'), contents);
+	execFileSync('git', ['-C', repository, 'add', '--', 'binary.bin'], {env});
+	execFileSync('git', ['-C', repository, 'commit', '-m', 'test binary output'], {
+		stdio: 'ignore',
+		env,
+	});
+	const oid = execFileSync('git', ['-C', repository, 'rev-parse', 'HEAD'], {
+		encoding: 'utf8',
+		env,
+	}).trim();
+	const output = await execGitBuffer([
+		'-C',
+		repository,
+		'cat-file',
+		'blob',
+		`${oid}:binary.bin`,
+	]);
+	t.deepEqual(output, contents);
+
+	const controller = new AbortController();
+	controller.abort();
+	await t.throwsAsync(
+		execGit(['--version'], undefined, {signal: controller.signal}),
+		{message: 'Git command cancelled'},
+	);
+});
 
 // ============================================================================
 // Availability Check Tests
