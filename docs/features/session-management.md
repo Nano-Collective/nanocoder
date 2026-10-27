@@ -19,6 +19,8 @@ Nanocoder automatically saves your conversations so you can close the terminal a
 
 You can also use the aliases `/sessions` or `/history`.
 
+Resuming switches to the provider and model the session was using. If that provider is no longer configured, Nanocoder shows an error and keeps your current model.
+
 In the selector, start typing to filter sessions by title; Backspace edits the filter, arrow keys and Enter pick a result, and Esc cancels.
 
 ### From the Command Line
@@ -33,6 +35,8 @@ nanocoder --resume {id}   # resume a specific session by ID or list index
 ```
 
 `--continue` silently starts a fresh session if no previous session exists for the current directory, while `--resume` exits with an error if the requested session is not found. The two flags are mutually exclusive, and both are interactive-only — they cannot be combined with `run`. See the [CLI Options Reference](../getting-started/index.md#cli-options) for the full flag list.
+
+`--continue`, `--resume last` and `--resume {id}` keep the provider and model Nanocoder starts with (from `--provider`/`--model`, `modeProviders`, or your last-used provider), not the session's; use `/model` to switch afterwards. Picking a session in the selector that a bare `--resume` opens switches to the session's provider and model, like `/resume`.
 
 ## Renaming a Session
 

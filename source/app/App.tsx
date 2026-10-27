@@ -549,8 +549,6 @@ export default function App({
 		setShowAllSessions: appState.setShowAllSessions,
 		setCurrentSessionId: appState.setCurrentSessionId,
 		setSessionName: appState.setSessionName,
-		setCurrentProvider: appState.setCurrentProvider,
-		setCurrentModel: appState.setCurrentModel,
 		setLiveTaskList: appState.setLiveTaskList,
 		setPlanReviewState: appState.setPlanReviewState,
 		setArchitectReviewState: appState.setArchitectReviewState,
@@ -573,12 +571,14 @@ export default function App({
 	});
 
 	// Apply a session resolved by cli.tsx from --continue/--resume <id> (or open
-	// the picker for a bare --resume), once on mount. Reuses the exact same
-	// applySession path as the in-app /resume command so messages, provider,
-	// model, sessionId, key-generator reseed, and scrollback replay all stay
-	// in sync. Guarded by a ref (not an empty dep array) so a re-render before
-	// the effect fires — e.g. from the vscode-prompt-dispatcher bind above —
-	// can't apply it twice.
+	// the picker for a bare --resume), once on mount. Reuses the same
+	// applySession path as the in-app /resume command so messages, sessionId,
+	// key-generator reseed, and scrollback replay all stay in sync. Provider
+	// and model come from init, which creates the client after this runs; the
+	// in-app /resume switches the client itself (resumeSession), which would
+	// race init here. Guarded by a ref (not an empty dep array) so a re-render
+	// before the effect fires — e.g. from the vscode-prompt-dispatcher bind
+	// above — can't apply it twice.
 	const startupSessionAppliedRef = React.useRef(false);
 	// biome-ignore lint/correctness/useExhaustiveDependencies: startup-only effect, guarded by the ref above
 	React.useEffect(() => {

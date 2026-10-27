@@ -100,8 +100,6 @@ interface UseAppHandlersProps {
 	setShowAllSessions: (value: boolean) => void;
 	setCurrentSessionId: (value: string | null) => void;
 	setSessionName: (value: string) => void;
-	setCurrentProvider: (value: string) => void;
-	setCurrentModel: (value: string) => void;
 	setLiveTaskList: (value: Task[] | null) => void;
 	setPlanReviewState: (
 		value: {show: boolean; originalMessage: string} | null,
@@ -143,6 +141,7 @@ interface UseAppHandlersProps {
 		provider: string,
 		model: string,
 		isProgrammatic?: boolean,
+		history?: Message[],
 	) => Promise<boolean>;
 
 	// Chat handler
@@ -564,14 +563,15 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 		[props.setShowAllSessions, props.setActiveMode, props],
 	);
 
-	// Load and apply a session (messages, provider, model)
+	// Load and apply a session's conversation. Provider and model are left to
+	// whoever owns the client (resumeSession below, or init at startup): setting
+	// the labels here without the client made replies from the old model get
+	// labelled, saved and priced as the resumed one.
 	const applySession = React.useCallback(
 		(session: Session) => {
 			props.updateMessages(session.messages);
 			// The resumed history has not seen this process's reads.
 			bumpReadContentGeneration();
-			props.setCurrentProvider(session.provider);
-			props.setCurrentModel(session.model);
 			props.setCurrentSessionId(session.id);
 			setKeyGeneratorSessionId(session.id);
 			void loadTasks(session.id).then(tasks => {
@@ -597,8 +597,6 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 		},
 		[
 			props.updateMessages,
-			props.setCurrentProvider,
-			props.setCurrentModel,
 			props.setCurrentSessionId,
 			props.setActiveMode,
 			props.addToChatQueue,
@@ -606,12 +604,32 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 		],
 	);
 
+	// In-app resume (/resume <id> and the session picker): apply the session,
+	// then switch the client to its provider and model with the same
+	// programmatic switch the mode toggle uses. The conversation goes first so
+	// that, between the two steps, autosave pairs the resumed messages with the
+	// client still live rather than the old messages with the new labels. If
+	// the provider is no longer configured, handleModelSelect reports it and the
+	// current client and labels stay.
+	const resumeSession = React.useCallback(
+		async (session: Session) => {
+			applySession(session);
+			await props.handleModelSelect(
+				session.provider,
+				session.model,
+				true,
+				session.messages,
+			);
+		},
+		[applySession, props.handleModelSelect, props],
+	);
+
 	const handleSessionSelect = React.useCallback(
 		async (sessionId: string) => {
 			try {
 				const session = await sessionManager.loadSession(sessionId);
 				if (session) {
-					applySession(session);
+					await resumeSession(session);
 				} else {
 					props.addToChatQueue(
 						<ErrorMessage
@@ -633,7 +651,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 				props.setActiveMode(null);
 			}
 		},
-		[applySession, props.addToChatQueue, props.setActiveMode, props],
+		[resumeSession, props.addToChatQueue, props.setActiveMode, props],
 	);
 
 	const handleSessionCancel = React.useCallback(() => {
@@ -964,7 +982,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 					onEnterTune: props.enterTune,
 					onEnterCheckpointLoadMode: enterCheckpointLoadMode,
 					onEnterSessionSelectorMode: enterSessionSelectorMode,
-					onResumeSession: session => applySession(session),
+					onResumeSession: resumeSession,
 					onShowStatus: handleShowStatus,
 					onHandleChatMessage: props.handleChatMessage,
 					onSwitchModel: props.handleModelSelect,
@@ -1025,7 +1043,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 			clearMessages,
 			enterCheckpointLoadMode,
 			handleShowStatus,
-			applySession,
+			resumeSession,
 			enterSessionSelectorMode,
 			props,
 		],
