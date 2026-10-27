@@ -147,7 +147,7 @@ A project-level agent with the same `name` as a built-in or user-level agent ove
 
 ## Loop Protection
 
-A subagent that re-issues the identical tool call(s) on consecutive turns is stopped by the same [`maxRepeatedToolCalls`](../configuration/index.md#retry-limits) cap the main agent uses (default 3). There is nobody to ask inside a delegated run, so it never pauses: the run fails with an error naming the setting. Calls to nonexistent tools count toward the streak too, so a subagent stuck on a tool it doesn't have hits the same cap.
+A subagent that re-issues the identical tool call(s) on consecutive turns is stopped by the same [`maxRepeatedToolCalls`](../configuration/index.md#retry-limits) cap the main agent uses (default 3). There is nobody to ask inside a delegated run, so it never pauses: the run fails with an error naming the setting. Calls to nonexistent tools, and calls whose arguments aren't valid JSON, count toward the streak too, so a subagent stuck on a tool it doesn't have, or on a call it can't get right, hits the same cap.
 
 Whatever the subagent produced before it got stuck is still handed to the main agent under a `Partial output produced before stopping:` heading, so useful work isn't discarded along with the failure.
 

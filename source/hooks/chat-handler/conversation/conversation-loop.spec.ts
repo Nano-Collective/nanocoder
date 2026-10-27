@@ -2479,6 +2479,84 @@ test.serial('repeated-tool-call limit pauses and stops when the user declines', 
 	t.truthy(stopMessage, 'Should queue the loop-detected ErrorMessage');
 });
 
+test.serial('a call with unparsable arguments is answered with the error and counts toward the limit', async t => {
+	// What the client returns for a call whose arguments could not be parsed
+	// (see convertAISDKToolCall): `{}` in their place, and the parse error.
+	let chatCallCount = 0;
+	let confirmPrompts = 0;
+	let questionCount = 0;
+	const queuedComponents: any[] = [];
+	const savedMessages: Message[][] = [];
+	setGlobalToolConfirmHandler(async () => {
+		confirmPrompts++;
+		return true;
+	});
+	setGlobalQuestionHandler(async question => {
+		questionCount += 1;
+		return question.options[0];
+	});
+
+	try {
+		await withRetryLimits({maxRepeatedToolCalls: 3}, async () => {
+			await processAssistantResponse(
+				createDefaultParams({
+					client: {
+						chat: async (): Promise<LLMChatResponse> => {
+							chatCallCount++;
+							return {
+								choices: [
+									{
+										message: {
+											role: 'assistant',
+											content: '',
+											tool_calls: [
+												{
+													id: 'call_bad',
+													function: {name: 'read_file', arguments: {}},
+													argumentsError:
+														'not valid JSON: Unexpected end of JSON input',
+												},
+											],
+										},
+									},
+								],
+								toolsDisabled: false,
+							};
+						},
+					},
+					toolManager: createMockToolManager({
+						tools: ['read_file'],
+						needsApproval: true,
+					}),
+					addToChatQueue: (component: any) => queuedComponents.push(component),
+					setMessages: (messages: Message[]) => savedMessages.push(messages),
+				}),
+			);
+		});
+	} finally {
+		setGlobalToolConfirmHandler(async () => true);
+	}
+
+	// One model request per turn, and the third identical turn trips the limit.
+	t.is(chatCallCount, 3);
+	t.is(questionCount, 1);
+	t.is(confirmPrompts, 0, 'the user is never asked to approve a broken call');
+	t.truthy(
+		queuedComponents.find(
+			(c: any) =>
+				c.props?.message ===
+				'Model sent invalid arguments for "read_file" (not valid JSON: Unexpected end of JSON input) — asking it to retry.',
+		),
+	);
+	const result = savedMessages
+		.at(-1)
+		?.find(m => m.role === 'tool' && m.tool_call_id === 'call_bad');
+	t.regex(
+		String(result?.content),
+		/^Invalid arguments for tool "read_file": not valid JSON: Unexpected end of JSON input\. The call was not run\./,
+	);
+});
+
 test.serial('repeated-tool-call limit grants another window when the user continues', async t => {
 	let chatCallCount = 0;
 	let questionCount = 0;

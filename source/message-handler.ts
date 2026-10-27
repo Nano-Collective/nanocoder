@@ -1,4 +1,5 @@
 import type {CustomCommandLoader} from '@/custom-commands/loader';
+import {invalidArgumentsResult} from '@/hooks/chat-handler/utils/tool-filters';
 import {maybeAutoCommit} from '@/services/auto-commit';
 import {formatWrittenFile} from '@/services/formatters';
 import {
@@ -59,6 +60,13 @@ export async function processToolUse(
 	if (toolCall.function.name === '__xml_validation_error__') {
 		const args = toolCall.function.arguments as {error: string};
 		throw new Error(args.error);
+	}
+
+	// Unparsable arguments arrive as `{}`. The conversation loops reject these
+	// calls before they get here; this keeps any other caller from running the
+	// tool with that placeholder.
+	if (toolCall.argumentsError !== undefined) {
+		return invalidArgumentsResult(toolCall);
 	}
 
 	if (!toolRegistryGetter) {

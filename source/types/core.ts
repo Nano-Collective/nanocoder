@@ -64,6 +64,13 @@ export interface ToolCall {
 		name: string;
 		arguments: Record<string, unknown>;
 	};
+	/**
+	 * Set when the model's arguments were not a JSON object, such as text cut
+	 * off at the output-token limit. `arguments` is then `{}`, so the broken
+	 * text is never run or replayed. The call must not be run: it is answered
+	 * with this error so the model can retry.
+	 */
+	argumentsError?: string;
 }
 
 export interface ToolResult {

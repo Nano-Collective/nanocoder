@@ -8,6 +8,7 @@
 import {createLLMClient} from '@/client-factory';
 import {getAppConfig, getRetryLimits} from '@/config/index';
 import {getProjectContextPreferences} from '@/config/preferences';
+import {invalidArgumentsResult} from '@/hooks/chat-handler/utils/tool-filters';
 import {computeToolCallSignature} from '@/hooks/chat-handler/utils/tool-signature';
 import {
 	appendRelevantProjectContextWithCount,
@@ -807,19 +808,23 @@ export class SubagentExecutor {
 				emitProgress('tool_call', toolName);
 				await new Promise(resolve => setTimeout(resolve, 50));
 
-				const toolResult = await runWithReadContentScope(
-					agentId ?? 'subagent',
-					() =>
-						this.executeToolCall(
-							toolName,
-							toolCall.function.arguments,
-							toolCall.id,
-							config,
-							signal,
-							executionContext,
-							alwaysAllow,
-						),
-				);
+				// Unparsable arguments arrive as `{}`: answer the call with the
+				// parse error rather than run the tool (or ask to approve it) with
+				// that placeholder.
+				const toolResult =
+					toolCall.argumentsError !== undefined
+						? {content: invalidArgumentsResult(toolCall).content}
+						: await runWithReadContentScope(agentId ?? 'subagent', () =>
+								this.executeToolCall(
+									toolName,
+									toolCall.function.arguments,
+									toolCall.id,
+									config,
+									signal,
+									executionContext,
+									alwaysAllow,
+								),
+							);
 
 				// Count tokens from tool results
 				totalTokens += estimateTokens(toolResult.content);

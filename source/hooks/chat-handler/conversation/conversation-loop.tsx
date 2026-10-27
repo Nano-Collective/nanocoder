@@ -820,16 +820,21 @@ export const processAssistantResponse = async (
 		}
 	};
 
-	// Handle error results for non-existent tools
+	// Handle error results for rejected calls: non-existent tools, and calls
+	// whose arguments could not be parsed
 	if (errorResults.length > 0) {
 		// Show the user a concise notice. The full recovery hint (including the
-		// list of available tools) lives in error.content and is sent to the
+		// list of available tools) lives in the error result and is sent to the
 		// MODEL via addToolResults below — it would be noise in the chat.
-		for (const error of errorResults) {
+		for (const toolCall of partition.rejectedToolCalls) {
 			addToChatQueue(
 				<ErrorMessage
-					key={generateKey(`unknown-tool-${error.tool_call_id}`)}
-					message={`Model called an unavailable tool ("${error.name}") — asking it to retry with a valid tool.`}
+					key={generateKey(`rejected-tool-${toolCall.id}`)}
+					message={
+						toolCall.argumentsError === undefined
+							? `Model called an unavailable tool ("${toolCall.function.name}") — asking it to retry with a valid tool.`
+							: `Model sent invalid arguments for "${toolCall.function.name}" (${toolCall.argumentsError}) — asking it to retry.`
+					}
 					hideBox={true}
 				/>,
 			);
@@ -841,10 +846,10 @@ export const processAssistantResponse = async (
 		const updatedMessagesWithError = errorBuilder.build();
 		setMessages(updatedMessagesWithError);
 
-		// Unknown-tool turns count toward the repeated-call streak, so a model
-		// stuck calling a nonexistent tool cannot recurse unbounded. The error
-		// and aborted results above are already paired in history, so a stop
-		// here keeps the 1:1 tool-call/result mapping intact.
+		// Rejected-call turns count toward the repeated-call streak, so a model
+		// stuck on a nonexistent tool or unparsable arguments cannot recurse
+		// unbounded. The error and aborted results above are already paired in
+		// history, so a stop here keeps the 1:1 tool-call/result mapping intact.
 		if (currentRepeatedCount >= maxRepeatedToolCalls) {
 			const continueAnyway = await promptContinueRepeatedCalls();
 			if (!continueAnyway) {

@@ -150,7 +150,7 @@ const managerWith = (knownTools: string[]) =>
 	}) as unknown as ToolManager;
 
 test('partitionUnknownToolCalls - treats the XML validation marker as unknown', t => {
-	const {validToolCalls, unknownToolCalls, errorResults} =
+	const {validToolCalls, rejectedToolCalls, errorResults} =
 		partitionUnknownToolCalls(
 			[
 				{id: 'call_1', function: {name: 'known_tool', arguments: {}}},
@@ -165,7 +165,7 @@ test('partitionUnknownToolCalls - treats the XML validation marker as unknown', 
 		['call_1'],
 	);
 	t.deepEqual(
-		unknownToolCalls.map(c => c.id),
+		rejectedToolCalls.map(c => c.id),
 		['call_2', 'call_3'],
 	);
 	t.deepEqual(
@@ -200,6 +200,97 @@ test('buildAbandonedTurnMessages - every emitted call has a matching result', t 
 		r => r.tool_call_id === 'call_good',
 	);
 	t.regex(String(aborted?.content), /Execution aborted/);
+});
+
+// A call to a real tool whose arguments could not be parsed (see
+// convertAISDKToolCall): `{}` in their place, and the parse error.
+const unparsableCall: ToolCall = {
+	id: 'call_bad',
+	function: {name: 'read_file', arguments: {}},
+	argumentsError:
+		"not valid JSON: Expected ',' or '}' after property value in JSON at position 20",
+};
+
+for (const [label, partition] of [
+	['filterValidToolCalls', filterValidToolCalls],
+	['partitionUnknownToolCalls', partitionUnknownToolCalls],
+] as const) {
+	test(`${label} - rejects a call to a real tool whose arguments could not be parsed`, t => {
+		const {validToolCalls, rejectedToolCalls, errorResults} = partition(
+			[
+				{id: 'call_good', function: {name: 'read_file', arguments: {path: 'a'}}},
+				unparsableCall,
+			],
+			managerWith(['read_file']),
+		);
+
+		t.deepEqual(
+			validToolCalls.map(c => c.id),
+			['call_good'],
+		);
+		t.deepEqual(
+			rejectedToolCalls.map(c => c.id),
+			['call_bad'],
+		);
+		t.is(errorResults.length, 1);
+		t.is(errorResults[0].tool_call_id, 'call_bad');
+		t.is(errorResults[0].name, 'read_file');
+		t.true(errorResults[0].isError);
+		t.is(
+			errorResults[0].content,
+			`Invalid arguments for tool "read_file": not valid JSON: Expected ',' or '}' after property value in JSON at position 20. The call was not run. Send it again with complete, valid JSON arguments; if they were cut off at the output-token limit, make the call smaller.`,
+		);
+	});
+}
+
+test('filterValidToolCalls - rejects unparsable arguments without a tool manager', t => {
+	const {validToolCalls, errorResults} = filterValidToolCalls(
+		[unparsableCall],
+		null,
+	);
+
+	t.is(validToolCalls.length, 0);
+	t.regex(errorResults[0].content, /^Invalid arguments for tool "read_file"/);
+});
+
+test('partitionUnknownToolCalls - an unknown tool is reported as unknown even with unparsable arguments', t => {
+	// "Does not exist" is the more useful hint: the model has to pick another
+	// tool before its arguments matter.
+	const {errorResults} = partitionUnknownToolCalls(
+		[{...unparsableCall, function: {name: 'ghost_tool', arguments: {}}}],
+		managerWith(['read_file']),
+	);
+
+	t.deepEqual(
+		errorResults.map(r => r.content),
+		['Unknown tool: ghost_tool'],
+	);
+});
+
+test('buildAbandonedTurnMessages - a call with unparsable arguments abandons the turn', t => {
+	const partition = partitionUnknownToolCalls(
+		[
+			{id: 'call_good', function: {name: 'read_file', arguments: {path: 'a'}}},
+			unparsableCall,
+		],
+		managerWith(['read_file']),
+	);
+
+	const {emittedToolCalls, resultsForAbandonedTurn} =
+		buildAbandonedTurnMessages(partition);
+
+	// Both calls stay in history, each paired with a result: the invalid one
+	// with its error, the valid one with a cancellation, as for unknown tools.
+	t.deepEqual(
+		emittedToolCalls.map(c => c.id),
+		['call_good', 'call_bad'],
+	);
+	t.deepEqual(
+		resultsForAbandonedTurn.map(r => r.tool_call_id).sort(),
+		['call_bad', 'call_good'],
+	);
+	// What is replayed for the invalid call is `{}`, never the raw text.
+	t.deepEqual(emittedToolCalls[1].function.arguments, {});
 });
 
 test('buildAbandonedTurnMessages - a clean turn produces no abandoned results', t => {
