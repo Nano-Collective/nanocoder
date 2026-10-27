@@ -94,6 +94,12 @@ function unknownOptionError(option: string): string {
 }
 
 function unknownCommandError(command: string): string {
+	// An option typed without its dashes, e.g. `nanocoder acp` for `--acp`.
+	// Other agents (opencode) start ACP with a bare `acp` subcommand.
+	const option = `--${command}`;
+	if (FLAGS_WITH_VALUES.has(option) || FLAGS_WITHOUT_VALUES.has(option)) {
+		return `Unknown command "${command}". Did you mean "${option}"?`;
+	}
 	const match = findSuggestion(command, COMMANDS);
 	// Never suggest the word the user already typed: a known command only
 	// reaches here when it is out of position (see misplacedCommandError).

@@ -34,6 +34,7 @@ test('unknown top-level flags and commands fail before the app starts', t => {
 			args: ['conifg', 'list'],
 			error: 'Did you mean "config"?',
 		},
+		{args: ['acp'], error: 'Did you mean "--acp"?'},
 		{args: ['fix the tests'], error: 'Unknown command "fix the tests".'},
 	];
 
