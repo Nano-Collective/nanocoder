@@ -1073,6 +1073,52 @@ test.serial('read_file metadata_only returns file info without content', async t
 	}
 });
 
+test.serial('read_file metadata_only does not label a file that is not valid UTF-8 as UTF-8', async t => {
+	t.timeout(10000);
+	const testDir = join(process.cwd(), 'test-meta-latin1');
+
+	try {
+		mkdirSync(testDir, {recursive: true});
+		// "café" in Latin-1 (a single E9 byte), then a second line.
+		writeFileSync(
+			join(testDir, 'legacy.legacy'),
+			Buffer.from([0x63, 0x61, 0x66, 0xe9, 0x0a, 0x6f, 0x6c, 0x64, 0x0a]),
+		);
+
+		const result = await readFileTool.tool.execute!(
+			{path: join(testDir, 'legacy.legacy'), metadata_only: true},
+			{toolCallId: 'test', messages: []},
+		);
+
+		t.notRegex(result, /Encoding: UTF-8/);
+		t.regex(
+			result,
+			/Encoding: Not valid UTF-8 \(a legacy encoding such as Latin-1, Windows-1252 or Shift-JIS, or binary data\)\n/,
+		);
+	} finally {
+		rmSync(testDir, {recursive: true, force: true});
+	}
+});
+
+test.serial('read_file metadata_only still labels UTF-8 with non-ASCII text as UTF-8', async t => {
+	t.timeout(10000);
+	const testDir = join(process.cwd(), 'test-meta-utf8');
+
+	try {
+		mkdirSync(testDir, {recursive: true});
+		writeFileSync(join(testDir, 'notes.txt'), 'café ✓ 日本\n', 'utf-8');
+
+		const result = await readFileTool.tool.execute!(
+			{path: join(testDir, 'notes.txt'), metadata_only: true},
+			{toolCallId: 'test', messages: []},
+		);
+
+		t.regex(result, /Encoding: UTF-8\n/);
+	} finally {
+		rmSync(testDir, {recursive: true, force: true});
+	}
+});
+
 test.serial('read_file metadata_only handles directories', async t => {
 	t.timeout(10000);
 	const testDir = join(process.cwd(), 'test-meta-dir');
