@@ -120,6 +120,10 @@ test('suggests the option when one is typed without its dashes', t => {
 		validateCliArgs(['vscode', '--vscode-port', '5000']),
 		'Unknown command "vscode". Did you mean "--vscode"?',
 	);
+	t.is(
+		validateCliArgs(['provider']),
+		'Unknown command "provider". Did you mean "--provider"?',
+	);
 });
 
 test('suggests verify for a misspelled verify command', t => {

@@ -80,12 +80,12 @@ Xcode versions that support custom agents in the coding assistant can run Nanoco
 
 1. Find the full path to Nanocoder with `which nanocoder`. Xcode doesn't read your shell's `PATH` or expand `~`, so it needs the absolute path.
 2. Trust your project folder once: open a terminal in it, run `nanocoder` and accept the trust prompt. `nanocoder --acp` refuses a folder you haven't trusted (see [Troubleshooting](#troubleshooting)).
-3. In Xcode, choose **Xcode > Settings**, select **Intelligence**, and under **Agents** click **Add an Agent**.
-4. Set **Command** to the path from step 1 and **Arguments** to `--acp`. To pin a provider or model, add them after it, e.g. `--acp --provider ollama --model qwen2.5-coder:7b`.
+3. In Xcode, choose **Xcode > Settings**, select **Intelligence**, and click **Add an Agent**. The section and field names vary between Xcode versions.
+4. Set the agent's command (labelled **Command** or **Executable**) to the path from step 1 and **Arguments** to `--acp`. To pin a provider or model, add them after it, e.g. `--acp --provider ollama --model qwen2.5-coder:7b`.
 
 The flag is `--acp`, not a bare `acp` (the form some other agents use).
 
-If the agent fails to start because `node` can't be found, set **Command** to the output of `which node` and **Arguments** to the Nanocoder path followed by `--acp`.
+If the agent fails to start because `node` can't be found, set the command to the output of `which node` and **Arguments** to the Nanocoder path followed by `--acp`.
 
 ## Requirements
 
