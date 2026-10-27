@@ -1,5 +1,6 @@
 import type {TitleShape} from '@/components/ui/styled-title';
 import type {DevelopmentMode} from '@/types/core';
+import type {FirewallConfig} from '@/types/firewall';
 import type {NanocoderShape, ThemePreset} from '@/types/ui';
 import type {TrustLevel} from '@/verify/trust';
 
@@ -412,6 +413,8 @@ export interface DiskNanocoderConfig {
 	sandbox?: boolean;
 	/** Commit each successful agent file edit (only that file) with a generated Conventional Commit message. Off by default. */
 	autoCommit?: boolean;
+	/** Negative-space mutation firewall. Off by default. */
+	firewall?: Partial<FirewallConfig>;
 }
 
 /**
@@ -530,6 +533,9 @@ export interface AppConfig {
 
 	// Agent-loop retry limits (interactive conversation loop)
 	retries?: RetryLimitsConfig;
+
+	// Negative-space mutation firewall
+	firewall?: Partial<FirewallConfig>;
 }
 
 // MCP Server configuration with source tracking

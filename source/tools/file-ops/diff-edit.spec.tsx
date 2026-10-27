@@ -8,6 +8,10 @@ import {ThemeContext} from '../../hooks/useTheme.js';
 import {resolveToolApproval} from '../approval-policy.js';
 import {clearReadTracker, markFileSeen} from '../../utils/read-tracker.js';
 import {diffEditTool, parseDiffEditBlocks} from './diff-edit.js';
+import {
+	resetFirewallConfig,
+	setFirewallConfig,
+} from '../../firewall/mutation-firewall.js';
 
 console.log(`\ndiff-edit.spec.tsx - ${React.version}`);
 
@@ -30,6 +34,7 @@ let testDir: string;
 test.beforeEach(async () => {
 	testDir = await mkdtemp(join(process.cwd(), '.diff-edit-test-'));
 	clearReadTracker();
+	resetFirewallConfig();
 });
 
 test.afterEach(async () => {
@@ -498,4 +503,34 @@ test('diff_edit formatter does not render description when omitted', async t => 
 	const output = lastFrame();
 	t.truthy(output);
 	t.notRegex(output!, /Description:/);
+});
+
+test('diff_edit: throws when mutation firewall blocks test deletion', async t => {
+	setFirewallConfig({mode: 'strict', enabled: true});
+	const filePath = await createTestFile(
+		'math.spec.ts',
+		"test('adds numbers', () => {});\ntest('multiplies numbers', () => {});\n",
+	);
+	markFileSeen(filePath);
+	const relPath = projectRelativePath(filePath);
+
+	const diff = `<<<<<<< SEARCH
+test('adds numbers', () => {});
+test('multiplies numbers', () => {});
+=======
+test('adds numbers', () => {});
+>>>>>>> REPLACE`;
+
+	await t.throwsAsync(
+		async () => {
+			await executeDiffEdit({
+				path: relPath,
+				diff,
+			});
+		},
+		{message: /\[Mutation Firewall\] Blocked mutation/},
+	);
+
+	const content = await readFile(filePath, 'utf-8');
+	t.true(content.includes('multiplies numbers'));
 });

@@ -25,6 +25,7 @@ import {
 	MAX_TRUNCATED_TURNS,
 } from '@/constants';
 import {HOOK_EVENTS} from '@/types/config';
+import type {FirewallConfig} from '@/types/firewall';
 import type {
 	AppConfig,
 	AutoCompactConfig,
@@ -449,6 +450,18 @@ function loadAutoCommitConfig(): boolean {
 			}
 			return null;
 		}) ?? false
+	);
+}
+
+function loadFirewallConfig(): Partial<FirewallConfig> | undefined {
+	return (
+		loadHierarchicalConfig('agents.config.json', 'firewall', config => {
+			const fw = config.nanocoder?.firewall;
+			if (fw && typeof fw === 'object') {
+				return fw;
+			}
+			return null;
+		}) ?? undefined
 	);
 }
 
@@ -904,6 +917,8 @@ function loadAppConfig(): AppConfig {
 
 	const autoCommit = loadAutoCommitConfig();
 
+	const firewall = loadFirewallConfig();
+
 	// Load user-defined LSP servers (auto-discovery still runs alongside)
 	const lspServers = loadLspServersConfig();
 
@@ -929,6 +944,7 @@ function loadAppConfig(): AppConfig {
 		tune,
 		sandbox,
 		autoCommit,
+		firewall,
 	};
 }
 
