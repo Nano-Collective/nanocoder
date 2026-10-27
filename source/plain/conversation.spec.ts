@@ -1643,6 +1643,155 @@ test.serial(
 	},
 );
 
+// What the client returns for a call to a real tool whose arguments could not
+// be parsed (see convertAISDKToolCall): `{}` in their place, and the error.
+function unparsableArgumentsResponse(): Partial<LLMChatResponse> {
+	return {
+		choices: [
+			{
+				message: {
+					role: "assistant",
+					content: "",
+					tool_calls: [
+						{
+							id: "call-bad",
+							function: { name: "read_file", arguments: {} },
+							argumentsError:
+								"not valid JSON: Expected ',' or '}' after property value in JSON at position 20",
+						},
+					],
+				},
+			},
+		],
+		usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
+	};
+}
+
+test.serial(
+	"a call with unparsable arguments is not run and counts toward the repeated-call cap",
+	async (t) => {
+		// One model request per turn, so steps and usage cover every request
+		// and the cap stops a stuck model after maxRepeatedToolCalls of them.
+		let handlerRuns = 0;
+		setToolRegistryGetter(() => ({
+			read_file: (async () => {
+				handlerRuns++;
+				return "file contents";
+			}) as ToolHandler,
+		}));
+		const calls: RecordedCall[] = [];
+		const client = makeRecordingClient(
+			[
+				unparsableArgumentsResponse(),
+				unparsableArgumentsResponse(),
+				unparsableArgumentsResponse(),
+			],
+			calls,
+		);
+		const toolManager = makeFakeToolManager({
+			knownTools: new Set(["read_file"]),
+			// Approval is required, so a call that reached the approval step
+			// would stop a non-interactive run with tool-approval-required.
+			needsApprovalByName: { read_file: true },
+		});
+
+		const outcome = await runPlainConversation({
+			client,
+			toolManager,
+			systemMessage: SYSTEM,
+			initialMessages: [USER],
+			developmentMode: "normal",
+			nonInteractiveAlwaysAllow: [],
+			abortSignal: new AbortController().signal,
+		});
+
+		t.is(outcome.kind, "error");
+		if (outcome.kind === "error") {
+			t.regex(outcome.message, /repeated the same tool call 3 times/i);
+		}
+		t.is(calls.length, 3);
+		t.is(outcome.steps, 3);
+		t.is(outcome.usage?.totalTokens, 45);
+		t.is(handlerRuns, 0, "the tool never runs with the {} placeholder");
+		t.is(outcome.toolCalls.length, 3);
+		for (const logged of outcome.toolCalls) {
+			t.is(logged.name, "read_file");
+			t.is(logged.result, null);
+			t.regex(String(logged.error), /^Invalid arguments for tool "read_file": not valid JSON/);
+		}
+
+		// What the second request replays for the first turn: the call with
+		// `{}`, paired with the error the model is asked to fix.
+		const replayed = calls[1].messages;
+		const assistant = replayed.find(
+			(m) => m.role === "assistant" && m.tool_calls?.length,
+		);
+		t.deepEqual(assistant?.tool_calls?.[0].function.arguments, {});
+		const result = replayed.find(
+			(m) => m.role === "tool" && m.tool_call_id === "call-bad",
+		);
+		t.regex(String(result?.content), /^Invalid arguments for tool "read_file"/);
+		t.regex(String(result?.content), /The call was not run/);
+	},
+);
+
+test.serial(
+	"a model that fixes its unparsable arguments goes on normally",
+	async (t) => {
+		const ran: unknown[] = [];
+		setToolRegistryGetter(() => ({
+			read_file: (async (args: unknown) => {
+				ran.push(args);
+				return "hi there";
+			}) as ToolHandler,
+		}));
+		const calls: RecordedCall[] = [];
+		const client = makeRecordingClient(
+			[
+				unparsableArgumentsResponse(),
+				{
+					choices: [
+						{
+							message: {
+								role: "assistant",
+								content: "",
+								tool_calls: [
+									{
+										id: "call-good",
+										function: {
+											name: "read_file",
+											arguments: { path: "hello.txt" },
+										},
+									},
+								],
+							},
+						},
+					],
+				},
+				{ choices: [{ message: { role: "assistant", content: "done" } }] },
+			],
+			calls,
+		);
+		const toolManager = makeFakeToolManager({
+			knownTools: new Set(["read_file"]),
+		});
+
+		const outcome = await runPlainConversation({
+			client,
+			toolManager,
+			systemMessage: SYSTEM,
+			initialMessages: [USER],
+			developmentMode: "auto-accept",
+			nonInteractiveAlwaysAllow: [],
+			abortSignal: new AbortController().signal,
+		});
+
+		t.is(outcome.kind, "success");
+		t.is(calls.length, 3);
+		t.deepEqual(ran, [{ path: "hello.txt" }]);
+	},
+);
+
 test.serial(
 	"unknown-tool calls one under the cap still let the model recover",
 	async (t) => {

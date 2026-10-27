@@ -10,25 +10,20 @@ import {MAX_TOOL_STEPS} from '@/constants';
 import {getModelAcceptsImages} from '@/models/models-dev-client';
 
 /**
- * Stop the SDK's step loop at a call to a tool that does not exist.
+ * Stop the SDK's step loop at an invalid tool call: one to a tool that does
+ * not exist, or one whose arguments cannot be parsed (a typo, or a call cut
+ * off at the output-token limit).
  *
  * Tools reach the SDK with `execute` stripped, so a valid call already ends
- * the step. An unknown one does not: the SDK answers it with an automatic
- * error result and runs another step, so a model stuck on a nonexistent tool
- * looped up to MAX_TOOL_STEPS times inside one chat() call, invisible to the
- * conversation loop's unknown-tool handling and its repeated-call cap
- * (`nanocoder.retries.maxRepeatedToolCalls`). Ending the step hands the call
- * back so both apply.
+ * the step. An invalid one does not: the SDK answers it with an automatic
+ * error result and runs another step, so a model stuck on a bad call looped
+ * up to MAX_TOOL_STEPS times inside one chat() call. Those requests were
+ * missing from the conversation loop's steps and usage, and its retry limits
+ * (`nanocoder.retries.maxRepeatedToolCalls`) only applied after each hidden
+ * batch. Ending the step hands the call back so the loop handles it.
  */
-export const stopOnUnknownTool: StopCondition<ToolSet> = ({steps}) =>
-	steps
-		.at(-1)
-		?.toolCalls.some(
-			call =>
-				call?.dynamic === true &&
-				call.invalid === true &&
-				NoSuchToolError.isInstance(call.error),
-		) ?? false;
+export const stopOnInvalidToolCall: StopCondition<ToolSet> = ({steps}) =>
+	steps.at(-1)?.toolCalls.some(call => call?.invalid === true) ?? false;
 
 import type {
 	AIProviderConfig,
@@ -300,7 +295,7 @@ export async function handleChat(
 				tools: aiTools,
 				abortSignal: signal,
 				maxRetries,
-				stopWhen: [stepCountIs(MAX_TOOL_STEPS), stopOnUnknownTool],
+				stopWhen: [stepCountIs(MAX_TOOL_STEPS), stopOnInvalidToolCall],
 				onStepFinish: createOnStepFinishHandler(callbacks),
 				prepareStep: createPrepareStepHandler(),
 				onError: ({error}) => {

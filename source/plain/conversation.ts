@@ -508,9 +508,9 @@ async function runPlainConversationBody(
 		const cleanedContent = xmlParse.cleanedContent;
 
 		const partition = partitionUnknownToolCalls(allToolCalls, toolManager);
-		const {validToolCalls, unknownToolCalls, errorResults} = partition;
-		// errorResults is paired 1:1 with unknownToolCalls, in the same order.
-		for (const [index, toolCall] of unknownToolCalls.entries()) {
+		const {validToolCalls, rejectedToolCalls, errorResults} = partition;
+		// errorResults is paired 1:1 with rejectedToolCalls, in the same order.
+		for (const [index, toolCall] of rejectedToolCalls.entries()) {
 			toolCallsLog.push({
 				name: toolCall.function.name,
 				arguments: toolCall.function.arguments || {},
@@ -573,10 +573,11 @@ async function runPlainConversationBody(
 		}
 
 		if (errorResults.length > 0) {
-			// Unknown-tool turns count toward the repeated-call streak, so a model
-			// stuck calling a nonexistent tool trips the same cap instead of
-			// draining tokens until maxTurns. The signature covers every call the
-			// model emitted this turn, valid and unknown alike.
+			// Turns with a rejected call (an unknown tool, or arguments that could
+			// not be parsed) count toward the repeated-call streak, so a model
+			// stuck on a bad call trips the same cap instead of draining tokens
+			// until maxTurns. The signature covers every call the model emitted
+			// this turn, valid and rejected alike.
 			const stopped = trackRepeatedToolCalls(allToolCalls);
 			if (stopped) {
 				return stopped;

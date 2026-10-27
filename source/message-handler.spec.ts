@@ -133,6 +133,33 @@ test('processToolUse - throws on unknown tool', async t => {
 	});
 });
 
+test('processToolUse - refuses a call whose arguments could not be parsed', async t => {
+	// Such a call carries `{}` in place of its arguments. A tool that can run
+	// with no arguments (git_status, list_directory) must not run on it.
+	let ran = false;
+	setToolRegistryGetter(
+		createMockToolRegistry({
+			git_status: async () => {
+				ran = true;
+				return 'clean';
+			},
+		}),
+	);
+
+	const result = await processToolUse({
+		...createMockToolCall('git_status', {}),
+		argumentsError: 'not valid JSON: Unexpected end of JSON input',
+	});
+
+	t.false(ran);
+	t.true(result.isError);
+	t.is(result.tool_call_id, 'test-call-id');
+	t.regex(
+		result.content,
+		/^Invalid arguments for tool "git_status": not valid JSON: Unexpected end of JSON input\. The call was not run\./,
+	);
+});
+
 // Test processToolUse - successful execution
 test('processToolUse - executes tool successfully with object arguments', async t => {
 	const mockHandler: ToolHandler = async (args: {path: string}) => {
