@@ -54,7 +54,10 @@ import {
 	clearReadContentScope,
 	runWithReadContentScope,
 } from '@/utils/read-tracker';
-import {signalToolApproval} from '@/utils/tool-approval-queue';
+import {
+	getSubagentToolBridge,
+	signalToolApproval,
+} from '@/utils/tool-approval-queue';
 import {parseToolArguments} from '@/utils/tool-args-parser';
 import {toolErrorToContent} from '@/utils/tool-validation';
 import {truncateToolResult} from '@/utils/truncate-tool-result';
@@ -813,7 +816,10 @@ export class SubagentExecutor {
 						this.executeToolCall(
 							toolName,
 							toolCall.function.arguments,
-							toolCall.id,
+							// Scoped to this subagent: the model names its own calls
+							// (`call_1`), so two subagents would otherwise share ids on
+							// the client.
+							agentId ? `${agentId}:${toolCall.id}` : toolCall.id,
 							config,
 							signal,
 							executionContext,
@@ -852,10 +858,11 @@ export class SubagentExecutor {
 		toolName: string,
 		rawArguments: unknown,
 		alwaysAllow?: string[],
+		mode: DevelopmentMode = this.currentMode(),
 	): Promise<boolean> {
 		const toolEntry = this.toolManager.getToolEntry(toolName);
 		return resolveToolApproval(toolName, toolEntry, rawArguments, {
-			mode: this.currentMode(),
+			mode,
 			alwaysAllow: alwaysAllow ?? getAppConfig().alwaysAllow ?? [],
 		});
 	}
@@ -909,6 +916,18 @@ export class SubagentExecutor {
 			},
 		};
 
+		// A client that takes subagent tool calls (ACP) sees every call, not just
+		// the ones needing approval, and each ends with its real outcome.
+		const bridge = getSubagentToolBridge(executionContext?.sessionId);
+		await bridge?.begin(toolCall, config.name);
+		const finish = async (
+			result: {content: string; images?: Message['images']},
+			failed: boolean,
+		) => {
+			await bridge?.end(toolCall, {content: result.content, failed});
+			return result;
+		};
+
 		// A trust-gated run (verify, daemon CI) must never post to GitHub itself:
 		// the harness does that. Enforced here rather than relying on the
 		// approval prompt, which `alwaysAllow` or yolo mode would skip.
@@ -917,9 +936,12 @@ export class SubagentExecutor {
 			config.trustLevel &&
 			!isGitPrCallAllowed(config.trustLevel, parsedArgs)
 		) {
-			return {
-				content: `Error: this git_pr action is not permitted at trust level '${config.trustLevel}'. Posting to GitHub is done by the harness.`,
-			};
+			return finish(
+				{
+					content: `Error: this git_pr action is not permitted at trust level '${config.trustLevel}'. Posting to GitHub is done by the harness.`,
+				},
+				true,
+			);
 		}
 
 		// Subagents run their own loop rather than going through processToolUse,
@@ -929,19 +951,22 @@ export class SubagentExecutor {
 		// approve something that is about to be refused anyway.
 		const gate = await runPreToolUseGate(toolCall, parsedArgs);
 		if (gate.blocked) {
-			return {content: `Error: ${gate.reason}`};
+			return finish({content: `Error: ${gate.reason}`}, true);
 		}
 
-		// Check if this tool needs user approval
+		// Check if this tool needs user approval. A bridge supplies its own
+		// session's mode: the executor is shared, so its mode can't be right for
+		// every session at once.
 		const needsApproval = await this.needsApprovalForTool(
 			toolName,
 			rawArguments,
 			alwaysAllow,
+			bridge?.getMode(),
 		);
 		if (needsApproval) {
 			const vote = await consultPluginPermission(toolName, parsedArgs);
 			if (vote.decision === 'deny') {
-				return {content: `Error: ${vote.reason}`};
+				return finish({content: `Error: ${vote.reason}`}, true);
 			}
 
 			// Pass the turn's signal: without it this await is the one place a
@@ -949,16 +974,28 @@ export class SubagentExecutor {
 			// them and joins with `Promise.allSettled`, so one subagent parked
 			// on an unanswerable approval kept the whole turn open. On abort
 			// the queue settles this with a denial.
-			const approved = await signalToolApproval(
-				{
-					toolCall,
-					subagentName: config.name,
-				},
-				signal,
-			);
+			const decision = bridge
+				? await bridge.approve(toolCall, signal)
+				: (await signalToolApproval(
+							{
+								toolCall,
+								subagentName: config.name,
+							},
+							signal,
+						))
+					? 'approved'
+					: 'denied';
 
-			if (!approved) {
-				return {content: 'Tool execution was denied by the user.'};
+			if (decision !== 'approved') {
+				return finish(
+					{
+						content:
+							decision === 'cancelled'
+								? 'Tool execution was cancelled by the user.'
+								: 'Tool execution was denied by the user.',
+					},
+					true,
+				);
 			}
 		}
 
@@ -997,23 +1034,29 @@ export class SubagentExecutor {
 			const commitNote = failed
 				? null
 				: await maybeAutoCommit(toolName, parsedArgs);
-			return {
-				content: commitNote ? `${withHooks}\n\n${commitNote}` : withHooks,
-				...(images && images.length > 0 ? {images} : {}),
-			};
+			return finish(
+				{
+					content: commitNote ? `${withHooks}\n\n${commitNote}` : withHooks,
+					...(images && images.length > 0 ? {images} : {}),
+				},
+				!!failed,
+			);
 		} catch (error) {
 			// Handler validation failures surface here too (the handler is
 			// validated), formatted with any structured detail. post-tool-use
 			// still fires: a failed delegated call is exactly what an audit-log
 			// hook needs to see, and dropping it would make this surface disagree
 			// with processToolUse.
-			return {
-				content: await appendPostToolUseOutput(
-					toolName,
-					parsedArgs,
-					truncateToolResult(toolErrorToContent(error)),
-				),
-			};
+			return finish(
+				{
+					content: await appendPostToolUseOutput(
+						toolName,
+						parsedArgs,
+						truncateToolResult(toolErrorToContent(error)),
+					),
+				},
+				true,
+			);
 		}
 	}
 }

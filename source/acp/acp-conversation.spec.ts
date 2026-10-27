@@ -26,7 +26,7 @@ import {writeFileTool} from '@/tools/file-ops/write-file';
 import {readFileTool} from '@/tools/read-file';
 import {ToolRegistry} from '@/tools/tool-registry';
 import {clearReadTracker} from '@/utils/read-tracker';
-import {signalToolApproval} from '@/utils/tool-approval-queue';
+import {getSubagentToolBridge} from '@/utils/tool-approval-queue';
 import {
 	setToolRegistryGetter,
 	setToolManagerGetter,
@@ -2263,22 +2263,25 @@ test.serial(
 
 
 // ============================================================================
-// Sub-agent tool approval (#1019)
+// Sub-agent tool calls (#1019, #1105)
 // ============================================================================
 
 /**
- * Drives signalToolApproval from inside the turn, which is the only way the
- * sub-agent executor ever reaches it. Firing it after runAcpConversation
- * returned would only pass while the handler leaked past the turn.
+ * Drives the session's sub-agent bridge from inside the turn, which is the only
+ * way the sub-agent executor ever reaches it. Firing it after runAcpConversation
+ * returned would only pass while the bridge leaked past the turn.
  */
-const approveFromInsideTurn = async (
+const callThroughBridge = async (
 	requestPermission: (p: any) => Promise<any>,
-	subagentName = 'docs',
+	{
+		ask = true,
+		outcome = {content: 'wrote it', failed: false},
+	}: {ask?: boolean; outcome?: {content: string; failed: boolean}} = {},
 ) => {
 	const updates: any[] = [];
 	const permissionRequests: any[] = [];
-	let approved: boolean | undefined;
-	let signalled = false;
+	let decision: string | undefined;
+	let called = false;
 
 	const conn = {
 		sessionUpdate: async (u: any) => {
@@ -2291,17 +2294,20 @@ const approveFromInsideTurn = async (
 	} as unknown as AgentSideConnection;
 
 	const session = createMockSession(conn);
-	// chat() is awaited by the turn, so this is a point where the handler is
-	// installed and the turn has not returned - the state the sub-agent
-	// executor signals from.
+	// chat() is awaited by the turn, so this is a point where the bridge is
+	// registered and the turn has not returned - the state the sub-agent
+	// executor calls it from.
 	const client = {
 		chat: async () => {
-			if (!signalled) {
-				signalled = true;
-				approved = await signalToolApproval({
-					toolCall: createMockToolCall('write_file', {path: 'a.txt'}, 'call-1'),
-					subagentName,
-				});
+			if (!called) {
+				called = true;
+				const bridge = getSubagentToolBridge(session.sessionId)!;
+				const toolCall = createMockToolCall('write_file', {path: 'a.txt'}, 'call-1');
+				await bridge.begin(toolCall, 'docs');
+				if (ask) {
+					decision = await bridge.approve(toolCall);
+				}
+				await bridge.end(toolCall, outcome);
 			}
 			return {
 				choices: [{message: {content: 'done', tool_calls: []}}],
@@ -2325,15 +2331,16 @@ const approveFromInsideTurn = async (
 		nonInteractiveAlwaysAllow: [],
 	});
 
-	return {approved, updates, permissionRequests, session};
+	return {decision, updates, permissionRequests, session};
 };
 
-test('runAcpConversation - a sub-agent tool call reaches the client for permission', async t => {
-	const {approved, updates, permissionRequests} = await approveFromInsideTurn(
-		async () => ({outcome: {outcome: 'selected', optionId: 'allow'}}),
-	);
+const allowOnce = async () => ({outcome: {outcome: 'selected', optionId: 'allow'}});
 
-	t.true(approved);
+test('runAcpConversation - a sub-agent tool call is announced, approved and settled with its real outcome', async t => {
+	const {decision, updates, permissionRequests} =
+		await callThroughBridge(allowOnce);
+
+	t.is(decision, 'approved');
 	t.is(permissionRequests.length, 1);
 
 	// Prefixed: sub-agent ids come from the sub-agent's own model and share an
@@ -2347,74 +2354,169 @@ test('runAcpConversation - a sub-agent tool call reaches the client for permissi
 		(u: any) => u.sessionUpdate === 'tool_call' && u.toolCallId === announcedId,
 	);
 	t.is(announced.length, 1);
+	t.is(announced[0].status, 'pending');
 
-	// Settled rather than left spinning: the sub-agent layer reports no result.
+	// Settled by the tool's own result, not by the approval.
 	const terminal = updates.filter(
 		(u: any) => u.toolCallId === announcedId && u.status === 'completed',
 	);
 	t.is(terminal.length, 1);
+	t.is(terminal[0].rawOutput, 'wrote it');
 });
 
-test('runAcpConversation - a denied sub-agent tool call is reported as failed', async t => {
-	const {approved, updates, permissionRequests} = await approveFromInsideTurn(
-		async () => ({outcome: {outcome: 'selected', optionId: 'deny'}}),
-	);
+test('runAcpConversation - a sub-agent call that fails after approval is reported failed', async t => {
+	const {updates} = await callThroughBridge(allowOnce, {
+		outcome: {content: 'Error: disk full', failed: true},
+	});
 
-	t.false(approved);
-	t.is(permissionRequests.length, 1);
-	const failed = updates.filter(
-		(u: any) => u.toolCallId === 'subagent:call-1' && u.status === 'failed',
-	);
+	// Approval no longer claims success: only the tool's result settles the card.
+	const forCall = updates.filter((u: any) => u.toolCallId === 'subagent:call-1');
+	t.false(forCall.some((u: any) => u.status === 'completed'));
+	const failed = forCall.filter((u: any) => u.status === 'failed');
 	t.is(failed.length, 1);
-	t.is(failed[0].rawOutput, 'Denied by user');
+	t.is(failed[0].rawOutput, 'Error: disk full');
 });
 
-test('runAcpConversation - a cancelled sub-agent permission denies the call', async t => {
-	const {approved, updates, permissionRequests} = await approveFromInsideTurn(
-		async () => ({outcome: {outcome: 'cancelled'}}),
-	);
+test('runAcpConversation - a sub-agent call needing no approval is still announced and settled', async t => {
+	const {updates, permissionRequests} = await callThroughBridge(allowOnce, {
+		ask: false,
+	});
 
-	// t.false(approved) alone would pass with no handler installed at all,
-	// since the slot's fallback already denies. The request reaching the
-	// connection and the call being settled are the parts that need one.
-	t.false(approved);
+	t.is(permissionRequests.length, 0);
+	const forCall = updates.filter((u: any) => u.toolCallId === 'subagent:call-1');
+	t.is(forCall[0].sessionUpdate, 'tool_call');
+	t.is(forCall[forCall.length - 1].status, 'completed');
+});
+
+test('runAcpConversation - a denied sub-agent permission is reported as denied', async t => {
+	const {decision, permissionRequests} = await callThroughBridge(async () => ({
+		outcome: {outcome: 'selected', optionId: 'deny'},
+	}));
+
+	t.is(decision, 'denied');
 	t.is(permissionRequests.length, 1);
-	const failed = updates.filter(
-		(u: any) => u.toolCallId === 'subagent:call-1' && u.status === 'failed',
-	);
-	t.is(failed.length, 1);
+});
+
+test('runAcpConversation - a cancelled sub-agent permission is reported as cancelled', async t => {
+	const {decision, permissionRequests} = await callThroughBridge(async () => ({
+		outcome: {outcome: 'cancelled'},
+	}));
+
 	// Distinct from the deny path, so a client can tell a user's refusal from
 	// a turn that was torn down under it.
-	t.is(failed[0].rawOutput, 'Cancelled by user');
+	t.is(decision, 'cancelled');
+	t.is(permissionRequests.length, 1);
 });
 
 test('runAcpConversation - a transport failure denies the tool rather than aborting the sub-agent', async t => {
-	const {approved, permissionRequests} = await approveFromInsideTurn(async () => {
+	const {decision, permissionRequests} = await callThroughBridge(async () => {
 		throw new Error('connection closed');
 	});
 
-	// signalToolApproval is awaited outside the sub-agent executor's own try, so
-	// a throw here would abort the whole run instead of denying one tool.
-	t.false(approved);
+	// The bridge is awaited outside the sub-agent executor's own try, so a
+	// throw here would abort the whole run instead of denying one tool.
+	t.is(decision, 'denied');
 	t.is(permissionRequests.length, 1);
 });
 
-test('runAcpConversation - the approval handler does not outlive the turn', async t => {
-	const {permissionRequests} = await approveFromInsideTurn(async () => ({
-		outcome: {outcome: 'selected', optionId: 'allow'},
-	}));
-	t.is(permissionRequests.length, 1);
+test('runAcpConversation - the sub-agent bridge does not outlive the turn', async t => {
+	const {session} = await callThroughBridge(allowOnce);
 
-	// The slot is a module singleton shared across sessions, so a handler left
-	// installed would answer a later session's approvals with this turn's
-	// session id and abort controller.
-	const afterTurn = await signalToolApproval({
-		toolCall: createMockToolCall('write_file', {path: 'b.txt'}, 'call-2'),
-		subagentName: 'docs',
+	// A bridge left registered would keep a finished turn's session and
+	// connection reachable.
+	t.is(getSubagentToolBridge(session.sessionId), undefined);
+});
+
+test('runAcpConversation - the sub-agent bridge reports the session mode as it is now', async t => {
+	const seen: string[] = [];
+	const {conn} = createMockConn();
+	const session = createMockSession(conn, {devMode: 'normal'});
+	const client = {
+		chat: async () => {
+			const bridge = getSubagentToolBridge(session.sessionId)!;
+			seen.push(bridge.getMode());
+			// A switch made while the sub-agent is running.
+			session.developmentMode = 'yolo';
+			seen.push(bridge.getMode());
+			return {
+				choices: [{message: {content: 'done', tool_calls: []}}],
+				toolsDisabled: false,
+			};
+		},
+	} as unknown as LLMClient;
+
+	await runAcpConversation({
+		session,
+		client,
+		toolManager: {
+			getAvailableToolNames: () => [],
+			getFilteredTools: () => ({}),
+			hasTool: () => false,
+			getToolEntry: () => undefined,
+			isReadOnly: () => true,
+		} as any,
+		conn,
+		nonInteractiveAlwaysAllow: [],
 	});
 
-	t.false(afterTurn);
-	t.is(permissionRequests.length, 1);
+	t.deepEqual(seen, ['normal', 'yolo']);
+});
+
+test('runAcpConversation - overlapping sessions each answer their own sub-agent prompts', async t => {
+	const makeSession = () => {
+		const permissionRequests: any[] = [];
+		const conn = {
+			sessionUpdate: async () => {},
+			requestPermission: async (p: any) => {
+				permissionRequests.push(p);
+				return {outcome: {outcome: 'selected', optionId: 'allow'}};
+			},
+		} as unknown as AgentSideConnection;
+		return {conn, permissionRequests, session: createMockSession(conn)};
+	};
+	const a = makeSession();
+	const b = makeSession();
+
+	// Both turns wait inside chat() until both are running: the overlap the
+	// single process-wide slot answered with the later session's connection.
+	let started = 0;
+	let release!: () => void;
+	const bothRunning = new Promise<void>(resolve => {
+		release = resolve;
+	});
+	const run = (s: ReturnType<typeof makeSession>) =>
+		runAcpConversation({
+			session: s.session,
+			client: {
+				chat: async () => {
+					if (++started === 2) release();
+					await bothRunning;
+					await getSubagentToolBridge(s.session.sessionId)!.approve(
+						createMockToolCall('write_file', {path: 'a.txt'}, 'call-1'),
+					);
+					return {
+						choices: [{message: {content: 'done', tool_calls: []}}],
+						toolsDisabled: false,
+					};
+				},
+			} as unknown as LLMClient,
+			toolManager: {
+				getAvailableToolNames: () => [],
+				getFilteredTools: () => ({}),
+				hasTool: () => false,
+				getToolEntry: () => undefined,
+				isReadOnly: () => true,
+			} as any,
+			conn: s.conn,
+			nonInteractiveAlwaysAllow: [],
+		});
+
+	await Promise.all([run(a), run(b)]);
+
+	t.is(a.permissionRequests.length, 1);
+	t.is(a.permissionRequests[0].sessionId, a.session.sessionId);
+	t.is(b.permissionRequests.length, 1);
+	t.is(b.permissionRequests[0].sessionId, b.session.sessionId);
 });
 
 async function readThroughAcp(
