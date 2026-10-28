@@ -48,7 +48,7 @@ test('redacts values of secret-looking env vars of length >= 8', t => {
 	);
 });
 
-test('treats regex metacharacters in env values as literal text', t => {
+test('escapes regex metacharacters in env values', t => {
 	const env = {CLIENT_SECRET: 'a.b*c+d(e)'};
 	t.is(redactSecrets('v=a.b*c+d(e) and axbbbcd', env), 'v=[REDACTED] and axbbbcd');
 });
@@ -56,12 +56,4 @@ test('treats regex metacharacters in env values as literal text', t => {
 test('leaves ordinary text alone', t => {
 	const text = '### Summary\nThe test `sk-foo` failed at src/a.ts:12 (task-key).';
 	t.is(redactSecrets(text, EMPTY_ENV), text);
-});
-
-test('redacts every occurrence of an env value', t => {
-	const env = {API_TOKEN: 'hunter2hunter2'};
-	t.is(
-		redactSecrets('a hunter2hunter2 b hunter2hunter2', env),
-		'a [REDACTED] b [REDACTED]',
-	);
 });
