@@ -1,4 +1,4 @@
-import {existsSync} from 'fs';
+import {existsSync, readFileSync} from 'fs';
 import {join} from 'path';
 import {AISDKClient} from '@/ai-sdk-client';
 import {
@@ -11,6 +11,7 @@ import {
 } from '@/config/copilot-credentials';
 import {getClosestConfigFile} from '@/config/index';
 import {loadAllProviderConfigs} from '@/config/mcp-config-loader';
+import {getConfigPath} from '@/config/paths';
 import {loadPreferences} from '@/config/preferences';
 import type {AIProviderConfig, LLMClient} from '@/types/index';
 import {formatError} from '@/utils/error-formatter';
@@ -23,6 +24,7 @@ export class ConfigurationError extends Error {
 		public configPath: string,
 		public cwdPath?: string,
 		public isEmptyConfig: boolean = false,
+		public unreadableError?: string,
 	) {
 		super(message);
 		this.name = 'ConfigurationError';
@@ -77,11 +79,26 @@ async function createAISDKClient(
 				false,
 			);
 		} else {
+			let unreadableError: string | undefined;
+			const projectFile = join(cwd, 'agents.config.json');
+			const globalFile = join(getConfigPath(), 'agents.config.json');
+			const filesToCheck = [projectFile, globalFile, configPath].filter(
+				(file, index, self) => existsSync(file) && self.indexOf(file) === index,
+			);
+			for (const file of filesToCheck) {
+				try {
+					JSON.parse(readFileSync(file, 'utf-8'));
+				} catch (err) {
+					unreadableError = `unreadable: ${file}: ${err instanceof Error ? err.message : String(err)}`;
+					break;
+				}
+			}
 			throw new ConfigurationError(
-				'No providers configured in agents.config.json',
+				unreadableError || 'No providers configured in agents.config.json',
 				configPath,
 				cwdPath,
-				true,
+				!unreadableError,
+				unreadableError,
 			);
 		}
 	}

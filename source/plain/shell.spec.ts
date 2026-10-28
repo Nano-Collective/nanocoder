@@ -15,6 +15,7 @@ import type { HooksConfig } from "@/types/config";
 import { TOOL_APPROVAL_REQUIRED_KIND } from "@/constants";
 import type { ToolManager } from "@/tools/tool-manager";
 import type { LLMClient } from "@/types/core";
+import { logError, logWarning } from "@/utils/message-queue";
 import { ShutdownManager } from "@/utils/shutdown";
 import type { PlainConversationOutcome } from "./conversation.js";
 import { runPlainShell } from "./shell.js";
@@ -1380,5 +1381,124 @@ test.serial(
 		);
 		t.is(run.exitCode, 1);
 		t.is(run.sessionEnd, "end", "session-end must run on the error path");
+	},
+);
+
+test.serial(
+	"plain shell captures logWarning and logError to stderr and includes warnings in json report",
+	async (t) => {
+		const stdout = capturingStdout();
+		const stderr = capturingStderr();
+		try {
+			await runPlainShell({
+				prompt: "test warning capture",
+				developmentMode: "yolo",
+				trustDirectory: true,
+				outputFormat: "json",
+				deps: baseDeps({
+					initializePlain: async () => {
+						logWarning("Invalid hooks config: unknown lifecycle event 'post-tool-uze'.");
+						logWarning("Invalid formatters config: entries need a 'command' string.");
+						logError("Plugin bad.mjs failed to load: boom from plugin");
+						return {
+							client: FAKE_CLIENT,
+							toolManager: FAKE_TOOL_MANAGER,
+							provider: "fake-provider",
+							model: "fake-model",
+						};
+					},
+					runPlainConversation: async () => ({
+						kind: "success",
+						finalText: "done",
+						reasoning: null,
+						steps: 1,
+						toolCalls: [],
+					}),
+				}),
+			});
+		} finally {
+			stdout.restore();
+			stderr.restore();
+		}
+
+		const stderrOutput = stderr.get();
+		t.true(stderrOutput.includes("unknown lifecycle event 'post-tool-uze'"));
+		t.true(stderrOutput.includes("entries need a 'command' string"));
+		t.true(stderrOutput.includes("Plugin bad.mjs failed to load: boom from plugin"));
+
+		const jsonOutput = JSON.parse(stdout.get());
+		t.is(jsonOutput.kind, "success");
+		t.truthy(jsonOutput.warnings);
+		t.is(jsonOutput.warnings.length, 3);
+		t.true(jsonOutput.warnings[0].includes("unknown lifecycle event 'post-tool-uze'"));
+		t.true(jsonOutput.warnings[1].includes("entries need a 'command' string"));
+		t.true(jsonOutput.warnings[2].includes("Plugin bad.mjs failed to load: boom from plugin"));
+	},
+);
+
+test.serial(
+	"plain shell includes collected warnings in prompt-gate-blocked json report",
+	async (t) => {
+		const previousCwd = process.cwd();
+		const previousConfigDir = process.env.NANOCODER_CONFIG_DIR;
+		mkdirSync(HOOK_DIR, { recursive: true });
+		process.env.NANOCODER_CONFIG_DIR = join(HOOK_DIR, "no-global-config");
+		process.chdir(HOOK_DIR);
+		setProjectRoot(HOOK_DIR);
+		clearPendingHookContext();
+		resetSessionStartHooks();
+
+		const stdout = capturingStdout();
+		const stderr = capturingStderr();
+		try {
+			withPlainHooks({
+				"user-prompt-submit": [
+					{
+						name: "veto-guard",
+						command: hookNode("console.log('prompt rejected by policy');process.exit(1)"),
+					},
+				],
+			});
+			await runPlainShell({
+				prompt: "blocked prompt",
+				developmentMode: "yolo",
+				trustDirectory: true,
+				outputFormat: "json",
+				deps: baseDeps({
+					initializePlain: async () => {
+						logWarning("Some startup warning");
+						return {
+							client: FAKE_CLIENT,
+							toolManager: FAKE_TOOL_MANAGER,
+							provider: "fake-provider",
+							model: "fake-model",
+						};
+					},
+				}),
+			});
+		} finally {
+			stdout.restore();
+			stderr.restore();
+			process.chdir(previousCwd);
+			if (previousConfigDir === undefined) {
+				delete process.env.NANOCODER_CONFIG_DIR;
+			} else {
+				process.env.NANOCODER_CONFIG_DIR = previousConfigDir;
+			}
+			setProjectRoot(previousCwd);
+			clearAppConfig();
+			clearPendingHookContext();
+			resetSessionStartHooks();
+		}
+
+		const stderrOutput = stderr.get();
+		t.true(stderrOutput.includes("Some startup warning"));
+
+		const jsonOutput = JSON.parse(stdout.get());
+		t.is(jsonOutput.kind, "error");
+		t.truthy(jsonOutput.warnings);
+		t.is(jsonOutput.warnings.length, 1);
+		t.is(jsonOutput.warnings[0], "Some startup warning");
+		t.true(jsonOutput.message.includes("prompt rejected by policy"));
 	},
 );
