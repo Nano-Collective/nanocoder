@@ -3005,6 +3005,64 @@ test.serial('runAcpConversation - a call the model already returned is refused o
 	t.true(String(refusal?.content).includes('not available in plan mode'));
 });
 
+test.serial('runAcpConversation - a lone refused call is still announced to the client as failed', async t => {
+	const updates: any[] = [];
+	const {cwd, permissionRequests} = await runModeSwitchTurn(
+		t,
+		'yolo',
+		[{toolCalls: [writeCall('only.txt', 'call-1')], switchTo: 'plan'}],
+		'allow',
+		update => updates.push(update),
+	);
+
+	t.is(permissionRequests.length, 0);
+	t.false(existsSync(join(cwd, 'only.txt')));
+	t.deepEqual(
+		updates
+			.filter(u => u.toolCallId === 'call-1')
+			.map(u => [u.sessionUpdate, u.status]),
+		[
+			['tool_call', 'pending'],
+			['tool_call_update', 'failed'],
+		],
+	);
+});
+
+test.serial('runAcpConversation - a prose plan is persisted after a switch into plan mode', async t => {
+	const {conn} = createMockConn();
+	const session = createMockSession(conn, {devMode: 'normal'});
+	const toolManager = {
+		...createMockToolManager(),
+		getAvailableToolNames: (_tune: unknown, mode: DevelopmentMode) =>
+			mode === 'plan' ? ['read_file', 'write_plan'] : ['read_file'],
+		hasTool: () => true,
+		getToolEntry: () => ({approval: false}),
+	};
+	let persistedContent: unknown;
+	setToolRegistryGetter(() => ({
+		write_plan: async (args: unknown) => {
+			persistedContent = (args as {content?: unknown}).content;
+			return 'Plan saved';
+		},
+	}));
+	const client = {
+		chat: async () => {
+			session.developmentMode = 'plan';
+			return {choices: [{message: {content: '# Plan\n\n1. Build it.'}}]};
+		},
+	} as unknown as LLMClient;
+
+	await runAcpConversation({
+		session,
+		client,
+		toolManager: toolManager as any,
+		conn,
+		nonInteractiveAlwaysAllow: [],
+	});
+
+	t.is(persistedContent, '# Plan\n\n1. Build it.');
+});
+
 test.serial('runAcpConversation - a mode switch in one session does not reach another', async t => {
 	const [switched, untouched] = await Promise.all([
 		runModeSwitchTurn(t, 'yolo', [

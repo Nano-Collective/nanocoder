@@ -449,7 +449,9 @@ async function runTurn(
 			if (
 				session.developmentMode === 'plan' &&
 				!wrotePlan &&
-				availableNames.includes('write_plan') &&
+				toolManager
+					.getAvailableToolNames(undefined, session.developmentMode)
+					.includes('write_plan') &&
 				cleanedContent.trim().length > 0
 			) {
 				const fallbackCall: ToolCall = {
@@ -546,9 +548,18 @@ async function runTurn(
 					.includes(toolName)
 			) {
 				const reason = `Error: ${toolName} is not available in ${session.developmentMode} mode`;
-				if (announcedBatch) {
-					await emitToolCallUpdate(session, conn, toolCall, 'failed', reason);
+				// A lone call has not been announced yet; give the failed update a
+				// card to land on.
+				if (!announcedBatch) {
+					await emitToolCall(
+						session,
+						conn,
+						toolCall,
+						'pending',
+						await buildToolCallMeta(toolCall, {withDiff: false}),
+					);
 				}
+				await emitToolCallUpdate(session, conn, toolCall, 'failed', reason);
 				toolResults.push({
 					tool_call_id: toolCall.id,
 					role: 'tool',
