@@ -69,6 +69,8 @@ nanocoder -h
 | `worktree <PR-number>` | | Start an interactive session in a new Git worktree at a PR's head |
 | `daemon <start\|stop\|status\|logs\|install\|uninstall>` | | Manage the per-project [skill daemon](../features/skills.md#the-daemon). `start` refuses an untrusted directory unless `--trust-directory` is passed |
 | `skills add <target>` | | Install a skill bundle from an index name, `owner/repo`, a git URL or a local path. Flags: `--ref`, `--subdir`, `--global`, `--force`, `--yes`, `--index` |
+| `trust --status [--json]` | | Show whether this folder is trusted (`trusted`, `not-trusted`, `changed` or `needs-re-approval`), what it will run, and its fingerprint. Runs nothing from the folder |
+| `trust --grant <fingerprint>` | | Trust this folder only if its fingerprint still matches `<fingerprint>` |
 | `config <list\|show [key]\|diff>` | | Inspect the resolved configuration and where each value came from. Add `--json` for machine output |
 | `completion <bash\|zsh\|fish>` | | Print a [shell completion](../features/shell-completions.md) script |
 | `copilot login [provider-name]` | | Log in to GitHub Copilot with the device-code flow. Credentials are saved for the named provider (default `GitHub Copilot`) and must match the provider's `name` in your config |

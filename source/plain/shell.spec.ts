@@ -3,7 +3,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { type ExecutionContext } from "ava";
 import { clearAppConfig, reloadAppConfig } from "@/config/index";
-import { describeProjectTrust } from "@/config/project-trust";
+import {
+	describeProjectTrust,
+	TRUST_FINGERPRINT_VERSION,
+} from "@/config/project-trust";
 import {
 	clearPendingHookContext,
 	resetSessionStartHooks,
@@ -718,6 +721,7 @@ test.serial(
 			{
 				path: process.cwd(),
 				fingerprint: describeProjectTrust(process.cwd()).fingerprint,
+				fingerprintVersion: TRUST_FINGERPRINT_VERSION,
 			},
 		]);
 	},

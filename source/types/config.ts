@@ -725,6 +725,8 @@ export interface VoiceConfig {
 export interface TrustedDirectoryRecord {
 	path: string;
 	fingerprint: string;
+	/** `TRUST_FINGERPRINT_VERSION` when saved. Records without one are version 1. */
+	fingerprintVersion?: number;
 }
 
 export interface UiPreferences {

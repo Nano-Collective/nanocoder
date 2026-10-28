@@ -2,7 +2,10 @@ import {existsSync, mkdirSync, readFileSync, rmSync, writeFileSync} from 'node:f
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
-import {describeProjectTrust} from '@/config/project-trust';
+import {
+	describeProjectTrust,
+	TRUST_FINGERPRINT_VERSION,
+} from '@/config/project-trust';
 import {
 	DEFAULT_MEMORY_LIMIT,
 	DEFAULT_TOKEN_BUDGET,
@@ -2297,6 +2300,40 @@ test.serial('directoryTrustRefusal words a changed fingerprint differently from 
 	t.notRegex(message ?? '', /is not trusted/);
 });
 
+test('a trust record without a version counts as version 1, and grants record one', t => {
+	const dir = process.cwd();
+	const fingerprint = describeProjectTrust(dir).fingerprint;
+	t.true(
+		isDirectoryTrusted(dir, {
+			trustedDirectories: [{path: dir, fingerprint}],
+		}),
+	);
+	t.like(grantDirectoryTrust({}, dir).trustedDirectories?.[0], {
+		fingerprintVersion: TRUST_FINGERPRINT_VERSION,
+	});
+});
+
+test('a trust record from another fingerprint version needs re-approval', t => {
+	const dir = process.cwd();
+	const preferences = {
+		trustedDirectories: [
+			{
+				path: dir,
+				fingerprint: describeProjectTrust(dir).fingerprint,
+				fingerprintVersion: TRUST_FINGERPRINT_VERSION + 1,
+			},
+		],
+	};
+	t.false(isDirectoryTrusted(dir, preferences));
+	t.is(trustRecheck(dir, preferences), 'upgrade');
+	t.is(
+		trustRecheck(dir, {
+			trustedDirectories: [{path: dir, fingerprint: 'stale'}],
+		}),
+		'changed',
+	);
+});
+
 test('directoryTrustRefusal is null when bypassed or already trusted', t => {
 	const deps = {
 		loadPreferences: () => ({trustedDirectories: []}),
@@ -2350,6 +2387,7 @@ test.serial(
 				{
 					path: target,
 					fingerprint: describeProjectTrust(target).fingerprint,
+					fingerprintVersion: TRUST_FINGERPRINT_VERSION,
 				},
 			]);
 		} finally {
@@ -2402,7 +2440,11 @@ test.serial(
 			t.true(result.trusted);
 			t.true(result.persisted);
 			t.deepEqual(savedPreferences?.trustedDirectories, [
-				{path: dir, fingerprint: describeProjectTrust(dir).fingerprint},
+				{
+					path: dir,
+					fingerprint: describeProjectTrust(dir).fingerprint,
+					fingerprintVersion: TRUST_FINGERPRINT_VERSION,
+				},
 			]);
 		} finally {
 			delete process.env.NANOCODER_TRUST_DIRECTORY;

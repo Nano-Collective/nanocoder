@@ -3,7 +3,10 @@ import {existsSync, mkdirSync, readFileSync} from 'fs';
 import type {TitleShape} from '@/components/ui/styled-title';
 import {getClosestConfigFile} from '@/config/index';
 import {getConfigPath} from '@/config/paths';
-import {describeProjectTrust} from '@/config/project-trust';
+import {
+	describeProjectTrust,
+	TRUST_FINGERPRINT_VERSION,
+} from '@/config/project-trust';
 import {
 	DEFAULT_MEMORY_LIMIT,
 	DEFAULT_TOKEN_BUDGET,
@@ -16,6 +19,7 @@ import {
 import type {
 	CiWatchConfig,
 	NotificationsConfig,
+	TrustedDirectoryRecord,
 	TuneConfig,
 } from '@/types/config';
 import type {UserPreferences} from '@/types/index';
@@ -207,6 +211,11 @@ function trustPath(entry: unknown): string | null {
 	return null;
 }
 
+/** Records saved before fingerprints were versioned are version 1. */
+function isCurrentFingerprintVersion(entry: TrustedDirectoryRecord): boolean {
+	return (entry.fingerprintVersion ?? 1) === TRUST_FINGERPRINT_VERSION;
+}
+
 /**
  * True if `directory` is recorded with a fingerprint that still matches
  * what the folder will run. Shared by every trust-gated entry point —
@@ -225,6 +234,7 @@ export function isDirectoryTrusted(
 			typeof entry === 'object' &&
 			entryPath !== null &&
 			path.resolve(entryPath) === resolved && // nosemgrep
+			isCurrentFingerprintVersion(entry) &&
 			entry.fingerprint === fingerprint
 		);
 	});
@@ -232,7 +242,8 @@ export function isDirectoryTrusted(
 
 /**
  * Why a folder with a trust entry is asked again: its fingerprint changed,
- * or the entry is a bare path saved before fingerprints existed.
+ * or the entry can't be compared (a bare path saved before fingerprints
+ * existed, or a fingerprint from another version).
  */
 export type TrustRecheck = 'changed' | 'upgrade';
 
@@ -246,7 +257,9 @@ export function trustRecheck(
 	for (const entry of preferences.trustedDirectories ?? []) {
 		const entryPath = trustPath(entry);
 		if (entryPath === null || path.resolve(entryPath) !== resolved) continue; // nosemgrep
-		if (typeof entry !== 'string') return 'changed';
+		if (typeof entry !== 'string') {
+			return isCurrentFingerprintVersion(entry) ? 'changed' : 'upgrade';
+		}
 		recheck = 'upgrade';
 	}
 	return recheck;
@@ -294,7 +307,11 @@ export function grantDirectoryTrust(
 			return entryPath === null || path.resolve(entryPath) !== resolved; // nosemgrep
 		},
 	);
-	trustedDirectories.push({path: resolved, fingerprint});
+	trustedDirectories.push({
+		path: resolved,
+		fingerprint,
+		fingerprintVersion: TRUST_FINGERPRINT_VERSION,
+	});
 	return {...preferences, trustedDirectories};
 }
 

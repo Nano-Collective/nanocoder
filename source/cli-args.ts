@@ -15,6 +15,7 @@ export const COMMANDS = [
 	'verify',
 	'skills',
 	'config',
+	'trust',
 	'storage',
 	'completion',
 ] as const;

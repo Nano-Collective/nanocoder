@@ -77,6 +77,10 @@ export const COMPLETION_SUBCOMMANDS: readonly CompletionSubcommand[] = [
 		children: ['list', 'show', 'diff'],
 	},
 	{
+		name: 'trust',
+		description: 'Check or grant trust for this folder (--status, --grant)',
+	},
+	{
 		name: 'codex',
 		description: 'Log in to ChatGPT/Codex (device flow)',
 		children: ['login'],
