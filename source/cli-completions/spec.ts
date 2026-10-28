@@ -187,6 +187,18 @@ export const COMPLETION_FLAGS: readonly CompletionFlag[] = [
 		description: 'Run as an ACP (Agent Client Protocol) server',
 	},
 	{
+		name: 'status',
+		takesValue: false,
+		description: 'Show whether this folder is trusted (trust command only)',
+	},
+	{
+		name: 'grant',
+		takesValue: true,
+		valueName: 'fingerprint',
+		description:
+			'Trust this folder if its fingerprint still matches (trust command only)',
+	},
+	{
 		name: 'vscode',
 		takesValue: false,
 		description: 'Run in VS Code mode',

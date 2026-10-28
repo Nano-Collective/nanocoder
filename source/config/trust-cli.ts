@@ -44,13 +44,15 @@ export function runTrustCli(
 	options: {cwd?: string} = {},
 ): TrustCliResult {
 	const cwd = path.resolve(options.cwd ?? process.cwd()); // nosemgrep
-	const [flag, value] = args;
+	const rest = args.filter(arg => arg !== '--json');
+	const jsonFlags = args.length - rest.length;
 
-	if (flag === '--status' && (args.length === 1 || value === '--json')) {
-		return status(cwd, args.length === 2);
+	// `--json` only applies to --status, and only once.
+	if (rest.length === 1 && rest[0] === '--status' && jsonFlags <= 1) {
+		return status(cwd, jsonFlags === 1);
 	}
-	if (flag === '--grant' && args.length === 2 && value) {
-		return grant(cwd, value);
+	if (rest.length === 2 && rest[0] === '--grant' && jsonFlags === 0) {
+		return grant(cwd, rest[1]);
 	}
 	const help = args.length === 0 || args[0] === '--help' || args[0] === '-h';
 	return {

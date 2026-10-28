@@ -1,8 +1,7 @@
 import path from 'node:path';
 import {existsSync, mkdirSync, readFileSync} from 'fs';
 import type {TitleShape} from '@/components/ui/styled-title';
-import {getClosestConfigFile} from '@/config/index';
-import {getConfigPath} from '@/config/paths';
+import {getClosestConfigFile, getConfigPath} from '@/config/paths';
 import {
 	describeProjectTrust,
 	TRUST_FINGERPRINT_VERSION,

@@ -1,6 +1,8 @@
+import {spawnSync} from 'node:child_process';
 import {mkdirSync, mkdtempSync, rmSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
+import {fileURLToPath} from 'node:url';
 import test from 'ava';
 import {loadPreferences, resetPreferencesCache} from '@/config/preferences';
 import {describeProjectTrust} from '@/config/project-trust';
@@ -84,12 +86,56 @@ test.serial('a record from another fingerprint version needs re-approval', t => 
 	t.is(statusJson().status, 'needs-re-approval');
 });
 
+test("does not load the folder's .env into the environment", t => {
+	const folder = mkdtempSync(join(tmpdir(), 'nanocoder-trust-cli-env-'));
+	t.teardown(() => rmSync(folder, {recursive: true, force: true}));
+	writeFileSync(join(folder, '.env'), 'TRUST_CLI_DOTENV_PROBE=loaded\n');
+
+	// A fresh process, started in the folder, so importing the command is
+	// the only thing that could read its .env.
+	const module = import.meta.resolve('./trust-cli.ts');
+	const script = `
+		const {runTrustCli} = await import(${JSON.stringify(module)});
+		const result = runTrustCli(['--status', '--json']);
+		console.log(JSON.stringify({exitCode: result.exitCode, probe: process.env.TRUST_CLI_DOTENV_PROBE ?? null}));
+	`;
+	const run = spawnSync(
+		process.execPath,
+		['--import', import.meta.resolve('tsx'), '--input-type=module', '-e', script],
+		{
+			encoding: 'utf8',
+			cwd: folder,
+			timeout: 60_000,
+			env: {
+				...process.env,
+				NANOCODER_CONFIG_DIR: configDir,
+				TSX_TSCONFIG_PATH: fileURLToPath(
+					new URL('../../tsconfig.json', import.meta.url),
+				),
+			},
+		},
+	);
+	t.is(run.status, 0, run.stderr);
+	t.deepEqual(JSON.parse(run.stdout.trim()), {exitCode: 0, probe: null});
+});
+
 test('rejects unknown or incomplete arguments and prints usage for none', t => {
-	for (const args of [['--grant'], ['--status', '--grant'], ['--bogus']]) {
+	for (const args of [
+		['--grant'],
+		['--status', '--grant'],
+		['--bogus'],
+		['--status', '--json', 'extra'],
+		['--status', '--json', '--json'],
+		['--grant', 'abc', '--json'],
+	]) {
 		const result = runTrustCli(args, {cwd: project});
 		t.is(result.exitCode, 1);
 		t.regex(result.output, /Usage: nanocoder trust/);
 	}
+	t.is(
+		JSON.parse(runTrustCli(['--json', '--status'], {cwd: project}).output).path,
+		project,
+	);
 	const help = runTrustCli([], {cwd: project});
 	t.is(help.exitCode, 0);
 	t.regex(help.output, /Usage: nanocoder trust/);

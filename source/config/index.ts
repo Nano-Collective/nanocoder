@@ -1,4 +1,4 @@
-import {existsSync, mkdirSync, readFileSync, writeFileSync} from 'fs';
+import {existsSync, readFileSync} from 'fs';
 import {join} from 'path';
 import {type CliMode, VALID_MODES} from '@/app/types';
 import {substituteEnvVars} from '@/config/env-substitution';
@@ -51,6 +51,7 @@ import {logError, logWarning} from '@/utils/message-queue';
 import {DEFAULT_SINGLE_LINE_PASTE_THRESHOLD} from '@/utils/paste-utils';
 import {isTrustLevel} from '@/verify/trust';
 
+export {confDirMap, getClosestConfigFile} from '@/config/paths';
 export {DEFAULT_SESSION_CONFIG} from '@/config/session-config';
 
 // Load .env file from working directory (shell environment takes precedence).
@@ -59,71 +60,6 @@ const dotenvResult = loadProjectDotenv(process.cwd());
 const dotenvWarning = ignoredDotenvWarning(dotenvResult.ignored);
 if (dotenvWarning) {
 	process.stderr.write(`${dotenvWarning}\n`);
-}
-
-// Hold a map of what config files are where
-export const confDirMap: Record<string, string> = {};
-
-// Find the closest config file for the requested configuration file
-export function getClosestConfigFile(fileName: string): string {
-	try {
-		const configDir = getConfigPath();
-
-		// If NANOCODER_CONFIG_DIR is explicitly set, skip cwd and home checks
-		// and use only the config directory (important for tests and explicit overrides)
-		const isExplicitConfigDir = Boolean(process.env.NANOCODER_CONFIG_DIR);
-
-		if (!isExplicitConfigDir) {
-			// First, lets check for a working directory config
-			const cwdPath = join(process.cwd(), fileName); // nosemgrep
-			if (existsSync(cwdPath)) {
-				// nosemgrep
-				confDirMap[fileName] = cwdPath; // nosemgrep
-
-				return cwdPath; // nosemgrep
-			}
-		}
-
-		// Last, lets look for an user level config.
-
-		// If the file doesn't exist, create it
-		const configPath = join(configDir, fileName); // nosemgrep
-		if (!existsSync(configPath)) {
-			// nosemgrep
-			createDefaultConfFile(configDir, fileName);
-		}
-
-		confDirMap[fileName] = configPath; // nosemgrep
-
-		return configPath; // nosemgrep
-	} catch (error) {
-		logError(`Failed to load ${fileName}: ${String(error)}`);
-	}
-
-	// The code should never hit this, but it makes the TS compiler happy.
-	return fileName;
-}
-
-function createDefaultConfFile(filePath: string, fileName: string): void {
-	try {
-		// If we cant find any, lets assume this is the first user run, create the
-		// correct file and direct the user to configure them correctly,
-		const configFilePath = join(filePath, fileName); // nosemgrep
-		if (!existsSync(configFilePath)) {
-			// nosemgrep
-			// Maybe add a better sample config?
-			const sampleConfig = {};
-
-			mkdirSync(filePath, {recursive: true});
-			writeFileSync(
-				configFilePath, // nosemgrep
-				JSON.stringify(sampleConfig, null, 2),
-				'utf-8',
-			);
-		}
-	} catch (error) {
-		logError(`Failed to write ${filePath}: ${String(error)}`);
-	}
 }
 
 /**
