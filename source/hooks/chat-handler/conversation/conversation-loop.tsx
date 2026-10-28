@@ -18,6 +18,11 @@ import {
 } from '@/constants';
 import {consultPluginPermission} from '@/plugins/host';
 import {CheckpointManager} from '@/services/checkpoint-manager';
+import {
+	formatVerificationSummary,
+	recordToolOutcome,
+	takeEvidenceRejection,
+} from '@/services/completion-ledger';
 import {runPreToolUseGate} from '@/services/lifecycle-hooks';
 import {getProjectRoot} from '@/services/session-cwd';
 import {generateKey} from '@/session/key-generator';
@@ -1100,9 +1105,12 @@ export const processAssistantResponse = async (
 			);
 			turnResults.push(...directResults);
 			for (const [index, result] of directResults.entries()) {
+				const toolCall = autoTools[index];
+				if (toolCall) {
+					recordToolOutcome(walkthroughLifecycle.ledger, toolCall, result);
+				}
 				if (!result.isError) {
 					onToolExecuted?.(result.name);
-					const toolCall = autoTools[index];
 					if (toolCall) {
 						observeSuccessfulLifecycleTool(walkthroughLifecycle, toolCall);
 					}
@@ -1197,6 +1205,11 @@ export const processAssistantResponse = async (
 					controller.signal,
 				);
 				turnResults.push(execution.result);
+				recordToolOutcome(
+					walkthroughLifecycle.ledger,
+					toolCall,
+					execution.result,
+				);
 				if (!execution.result.isError) {
 					onToolExecuted?.(execution.result.name);
 					observeSuccessfulLifecycleTool(walkthroughLifecycle, toolCall);
@@ -1447,12 +1460,52 @@ export const processAssistantResponse = async (
 			return;
 		}
 
+		// With `nanocoder.verify` set, a turn that edited files cannot end until
+		// the required commands have exited 0 since the last edit.
+		const evidenceRejection = controller.signal.aborted
+			? null
+			: takeEvidenceRejection(walkthroughLifecycle.ledger);
+		if (evidenceRejection) {
+			const messagesWithRejection = [...updatedMessages, evidenceRejection];
+			setMessages(messagesWithRejection);
+			addToChatQueue(
+				<InfoMessage
+					key={generateKey('verification-required')}
+					message="Edits are not verified yet - asking the model to run the required checks."
+					hideBox={true}
+				/>,
+			);
+			await flushAll();
+			await processAssistantResponse({
+				...params,
+				abortController: controller,
+				messages: messagesWithRejection,
+				conversationStartTime: startTime,
+				emptyTurnCount: 0,
+				malformedRetryCount: 0,
+				lastToolSignature: undefined,
+				repeatedToolCallCount: 0,
+				walkthroughLifecycle,
+			});
+			return;
+		}
+
 		// Flush any residual compact counts and task updates from turns that
 		// didn't emit reasoning so they persist in scrollback at conversation end.
 		params.onFinalAssistantText?.(cleanedContent);
 		await flushAll();
 
 		setIsGenerating(false);
+		const verification = formatVerificationSummary(walkthroughLifecycle.ledger);
+		if (verification) {
+			addToChatQueue(
+				<InfoMessage
+					key={generateKey('verification-summary')}
+					message={verification}
+					hideBox={true}
+				/>,
+			);
+		}
 		addToChatQueue(
 			<InfoMessage
 				key={generateKey('completion-time')}

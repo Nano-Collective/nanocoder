@@ -104,6 +104,26 @@ test('lastTurnEditedFiles looks past the synthetic auto-diagnostics prompt', t =
 	t.true(lastTurnEditedFiles(messages));
 });
 
+test('lastTurnEditedFiles looks past the synthetic verification prompt', t => {
+	const messages: Message[] = [
+		{role: 'user', content: 'edit it'},
+		{
+			role: 'assistant',
+			content: '',
+			tool_calls: [toolCall('1', 'write_file', {path: 'a.ts'})],
+		},
+		toolResult('1', 'write_file'),
+		{
+			role: 'user',
+			content:
+				'<nanocoder-internal-verification>\nYou changed files but have not verified them.\n</nanocoder-internal-verification>',
+		},
+		{role: 'assistant', content: 'verified'},
+	];
+
+	t.true(lastTurnEditedFiles(messages));
+});
+
 const createLoopParams = (overrides = {}) => ({
 	systemMessage: {role: 'system', content: 'You are a helpful assistant'} as Message,
 	messages: [{role: 'user', content: 'Hello'}] as Message[],

@@ -12,6 +12,7 @@ import {loadPlugins, resetPluginsForTests} from '@/plugins/host.js';
 import {resetSessionCwd, setProjectRoot, setSessionCwd} from '@/services/session-cwd.js';
 import {setToolRegistryGetter} from '@/message-handler.js';
 import {fileOpTool} from '@/tools/file-ops/file-op.js';
+import '@/tools/file-ops/write-file';
 import {ToolRegistry} from '@/tools/tool-registry.js';
 import type {HooksConfig} from '@/types/config';
 import {resetShutdownManager} from '@/utils/shutdown/shutdown-manager.js';
@@ -3330,3 +3331,99 @@ for (const [listed, expectedPrompts] of [
 		},
 	);
 }
+
+// ============================================================================
+// nanocoder.verify: a turn that edited files cannot end without evidence
+// ============================================================================
+
+const verifyTurns = (bashCommand: string) => [
+	{role: 'assistant', content: '', tool_calls: [{id: 'w', function: {name: 'write_file', arguments: {path: 'a.ts', content: 'x'}}}]},
+	{role: 'assistant', content: 'Done.'},
+	{role: 'assistant', content: '', tool_calls: [{id: 'b', function: {name: 'execute_bash', arguments: {command: bashCommand}}}]},
+	{role: 'assistant', content: 'Confirmed.'},
+	{role: 'assistant', content: 'Fine.'},
+];
+
+// `confirm` runs the tools through the user-confirmation path instead of yolo.
+async function runVerifiedTurn(
+	bashOutput: string,
+	bashCommand = 'pnpm test',
+	confirm = false,
+) {
+	let prompts = 0;
+	setGlobalToolConfirmHandler(async () => {
+		prompts++;
+		return true;
+	});
+	setToolRegistryGetter(() => ({
+		write_file: (async () => 'File written') as never,
+		execute_bash: (async () => bashOutput) as never,
+	}));
+	const previous = getAppConfig().verify;
+	getAppConfig().verify = {required: ['pnpm test']};
+	let calls = 0;
+	const seen: string[] = [];
+	const notes: string[] = [];
+	let completed = 0;
+	const turns = verifyTurns(bashCommand);
+	const client = {
+		chat: async (messages: Message[]): Promise<LLMChatResponse> => {
+			seen.push(messages.at(-1)?.content ?? '');
+			return {choices: [{message: turns[calls++]}], toolsDisabled: false} as never;
+		},
+	};
+	try {
+		await processAssistantResponse(createDefaultParams({
+			client,
+			toolManager: {
+				...createMockToolManager({tools: ['write_file', 'execute_bash'], needsApproval: confirm}),
+				getToolFormatter: () => undefined,
+			},
+			developmentMode: confirm ? 'normal' : 'yolo',
+			addToChatQueue: (node: {props?: {message?: string}}) => {
+				notes.push(String(node?.props?.message ?? ''));
+			},
+			onConversationComplete: () => {
+				completed++;
+			},
+		}) as never);
+	} finally {
+		getAppConfig().verify = previous;
+		setToolRegistryGetter(() => ({}));
+	}
+	return {calls, seen, notes, completed, prompts};
+}
+
+test.serial('processAssistantResponse - nanocoder.verify sends the model back until the required command passes', async t => {
+	const {calls, seen, notes, completed} = await runVerifiedTurn('EXIT_CODE: 0\nok');
+
+	t.is(calls, 4);
+	t.true(seen[2]?.includes('`pnpm test` (not run)'), 'the model is told what to run');
+	t.is(completed, 1);
+	t.true(notes.some(note => note.includes('not verified yet')), 'the user sees why it continues');
+	t.true(notes.includes('Verification: ✓ pnpm test (exit 0)'));
+});
+
+test.serial('processAssistantResponse - nanocoder.verify does not accept a failing run', async t => {
+	const {calls, seen, notes, completed} = await runVerifiedTurn('EXIT_CODE: 1\nFAIL');
+
+	t.is(calls, 5, 'reminded again after the failure, then allowed to finish');
+	t.true(seen[4]?.includes('last run exited 1'));
+	t.is(completed, 1);
+	t.true(notes.includes('Verification: ✗ pnpm test (last run exited 1)'));
+});
+
+test.serial('processAssistantResponse - nanocoder.verify ignores a piped run', async t => {
+	const {seen} = await runVerifiedTurn('EXIT_CODE: 0\nok', 'pnpm test | tail -5');
+
+	t.true(seen[4]?.includes('hidden by a pipe'));
+});
+
+test.serial('processAssistantResponse - nanocoder.verify also counts tools the user confirmed', async t => {
+	const {calls, seen, notes, prompts} = await runVerifiedTurn('EXIT_CODE: 0\nok', 'pnpm test', true);
+
+	t.is(prompts, 2, 'both tools went through the confirmation path');
+	t.is(calls, 4);
+	t.true(seen[2]?.includes('`pnpm test` (not run)'));
+	t.true(notes.includes('Verification: ✓ pnpm test (exit 0)'));
+});
