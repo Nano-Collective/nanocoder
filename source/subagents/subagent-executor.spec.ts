@@ -2615,3 +2615,98 @@ test.serial('a session without a bridge still uses the global approval slot', as
 	// Restore auto-approve handler for other tests
 	setGlobalToolApprovalHandler(async () => true);
 });
+
+test.serial('a bridge is told when a tool reports failure in its text', async t => {
+	// Many built-in tools return "Error: ..." as plain text, not a structured
+	// isError result; the top-level ACP path reads both as a failure.
+	const toolManager = createMockToolManager({
+		git_status: {
+			handler: async () => 'Error: not a git repository',
+			readOnly: false,
+			needsApproval: true,
+		},
+	});
+	const {bridge, events} = createRecordingBridge();
+
+	await runExploreWithBridge(toolManager, [{id: 'tc1', name: 'git_status'}], bridge);
+
+	t.is(events[2], 'end agent-1:tc1 failed Error: not a git repository');
+});
+
+test.serial('a bridge sees a call refused before it runs, settled as failed', async t => {
+	const toolManager = createMockToolManager({
+		read_file: {handler: async () => 'content', readOnly: true},
+	});
+	const {bridge, events} = createRecordingBridge();
+
+	// explore is not offered write_file, and nothing named invented_tool exists.
+	await runExploreWithBridge(
+		toolManager,
+		[
+			{id: 'tc1', name: 'write_file'},
+			{id: 'tc2', name: 'invented_tool'},
+		],
+		bridge,
+	);
+
+	t.is(events.length, 4);
+	t.is(events[0], 'begin agent-1:tc1');
+	t.true(events[1].startsWith('end agent-1:tc1 failed'));
+	t.is(events[2], 'begin agent-1:tc2');
+	t.true(events[3].startsWith('end agent-1:tc2 failed'));
+});
+
+test.serial('a subagent is limited to the tools of the bridge session mode', async t => {
+	// The shared executor is in 'normal' mode, as the ACP one is; only the
+	// session's own mode decides what its subagents may use.
+	for (const [mode, shouldRun] of [
+		['plan', false],
+		['yolo', true],
+	] as const) {
+		let ran = false;
+		const toolManager = createMockToolManager({
+			write_file: {
+				handler: async () => {
+					ran = true;
+					return 'written';
+				},
+				readOnly: false,
+				needsApproval: true,
+			},
+		});
+		const {bridge, events} = createRecordingBridge({mode});
+		const unregister = registerSubagentToolBridge('session-1', bridge);
+
+		try {
+			await new SubagentExecutor(
+				toolManager,
+				createMockClient([
+					{
+						content: '',
+						tool_calls: [
+							{id: 'tc1', function: {name: 'write_file', arguments: '{}'}},
+						],
+					},
+					{content: 'Done'},
+				]),
+			).execute(
+				{subagent_type: 'explore', description: 'Write a file'},
+				undefined,
+				0,
+				'agent-1',
+				{sessionId: 'session-1'},
+				{tools: ['write_file']},
+			);
+		} finally {
+			unregister();
+		}
+
+		t.is(ran, shouldRun, mode);
+		if (!shouldRun) {
+			t.true(
+				events[1].startsWith('end agent-1:tc1 failed Error: Tool'),
+				`${mode}: ${events[1]}`,
+			);
+		}
+	}
+});
