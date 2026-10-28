@@ -48,7 +48,7 @@ test('redacts values of secret-looking env vars of length >= 8', t => {
 	);
 });
 
-test('escapes regex metacharacters in env values', t => {
+test('treats regex metacharacters in env values as literal text', t => {
 	const env = {CLIENT_SECRET: 'a.b*c+d(e)'};
 	t.is(redactSecrets('v=a.b*c+d(e) and axbbbcd', env), 'v=[REDACTED] and axbbbcd');
 });
