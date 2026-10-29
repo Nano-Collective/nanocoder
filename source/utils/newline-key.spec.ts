@@ -7,10 +7,8 @@ import {isNewlineKey} from './newline-key';
  * plus `useInput`'s mapping actually produce for each byte sequence, captured
  * by running the sequence through `ink/build/parse-keypress.js`. Each case
  * names the sequence and the terminal that sends it.
- *
- * Note that Ink strips the leading ESC from `input` but leaves `raw` intact,
- * which is why the modifyOtherKeys cases below differ between the two.
  */
+const ESC = '\u001b';
 const keyFor = (overrides: Partial<Key>): Key =>
 	({
 		upArrow: false,
@@ -32,8 +30,6 @@ const keyFor = (overrides: Partial<Key>): Key =>
 		...overrides,
 	}) as Key;
 
-const ESC = '\u001b';
-
 // --- recognised as newline ---
 
 test('LF from Ctrl+J inserts a newline', t => {
@@ -53,9 +49,8 @@ test('Shift+Enter in the kitty CSI-u encoding inserts a newline', t => {
 	);
 });
 
-test('ESC+CR (Option+Enter on macOS) inserts a newline', t => {
-	// ESC CR -> name 'return', option true, which Ink surfaces as meta. Ink
-	// leaves raw undefined for this one.
+test('Alt+Enter in the kitty CSI-u encoding inserts a newline', t => {
+	// ESC [13;3u -> name 'return', meta true.
 	t.true(isNewlineKey('\r', keyFor({return: true, meta: true})));
 });
 

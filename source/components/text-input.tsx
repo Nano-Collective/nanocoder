@@ -1,3 +1,4 @@
+import type {EventEmitter} from 'node:events';
 import chalk from 'chalk';
 import {type Key, Text, useInput, useStdin} from 'ink';
 import {
@@ -31,7 +32,12 @@ import {
  * re-subscribe in.
  */
 export function useRawInput() {
-	const {internal_eventEmitter: emitter} = useStdin();
+	// Ink 8 hides this internal member from its public type, but still returns
+	// the context containing the same emitter used by useInput. Keep #1670's
+	// patch-independent capture without a patched Key field or runtime Ink patch.
+	const {internal_eventEmitter: emitter} = useStdin() as ReturnType<
+		typeof useStdin
+	> & {internal_eventEmitter: EventEmitter};
 	const rawRef = useRef('');
 
 	useEffect(() => {
@@ -345,6 +351,13 @@ const TextInput = forwardRef<TextInputHandle, Props>(function TextInput(
 
 	useInput(
 		(input, key) => {
+			// Kitty keyboard protocol reports key release events; with
+			// reportEventTypes enabled every press would otherwise be handled
+			// twice (once for press, once for release).
+			if (key.eventType === 'release') {
+				return;
+			}
+
 			if ((key.ctrl && input === 'c') || key.tab || (key.shift && key.tab)) {
 				return;
 			}
@@ -570,10 +583,7 @@ const TextInput = forwardRef<TextInputHandle, Props>(function TextInput(
 					nextCursorOffset = start;
 				}
 			} else if (key.delete) {
-				// Delete removes the character after the cursor (forward delete).
-				// Only reached for the forward Delete key (\x1b[3~); the
-				// physical Backspace (\x7f) and Option/Alt+Backspace (\x1b\x7f)
-				// are handled in the branch above.
+				// Delete removes the character after the cursor (forward delete, '\x1b[3~').
 				if (cursorOffsetRef.current < originalValueRef.current.length) {
 					nextValue =
 						originalValueRef.current.slice(0, cursorOffsetRef.current) +
@@ -605,6 +615,8 @@ const TextInput = forwardRef<TextInputHandle, Props>(function TextInput(
 			if (nextCursorOffset > nextValue.length) {
 				nextCursorOffset = nextValue.length;
 			}
+			// Never let the caret sit inside a surrogate pair.
+			nextCursorOffset = snapToCharBoundary(nextValue, nextCursorOffset);
 
 			// Update refs immediately so the next event in the same stdin.read()
 			// block sees the correct values (Ink doesn't re-render between events)

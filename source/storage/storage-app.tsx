@@ -30,7 +30,8 @@ function size(bytes: number): string {
 
 /** Ink's stdout, not process.stdout, is the surface used by the renderer. */
 function useViewport() {
-	const {stdout} = useStdout();
+	const {stdout: stream} = useStdout();
+	const stdout = stream as NodeJS.WriteStream;
 	const [viewport, setViewport] = useState(() => ({
 		columns: stdout.columns || 80,
 		rows: stdout.rows || 24,
