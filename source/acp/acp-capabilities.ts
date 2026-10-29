@@ -36,7 +36,11 @@ export const ACP_EXT_ALIASES = [
 ] as const;
 
 /** Every custom request, advertised in `agentCapabilities._meta.nanocoder`. */
-export const ACP_EXT_METHODS = [...ACP_EXT_ALIASES, 'cancelSubagent'] as const;
+export const ACP_EXT_METHODS = [
+	...ACP_EXT_ALIASES,
+	'timeline/read',
+	'cancelSubagent',
+] as const;
 
 /** Sent when a session is titled in the background. */
 export const ACP_SESSION_TITLE_NOTIFICATION = '_nanocoder/sessionTitleChanged';
