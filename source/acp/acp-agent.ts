@@ -45,12 +45,16 @@ import {
 	developmentModeToAcpMode,
 	getAgentCapabilities,
 	getAvailableModes,
+	isVsCodeClient,
 	negotiateProtocolVersion,
 	parseDisabledTools,
 } from '@/acp/acp-capabilities';
 import {acpContentToUserMessage} from '@/acp/acp-content';
 import {clearAcpReadStubs, runAcpConversation} from '@/acp/acp-conversation';
-import {acpCustomCommandText} from '@/acp/acp-custom-command';
+import {
+	acpCustomCommandText,
+	builtinCommandReply,
+} from '@/acp/acp-custom-command';
 import {AcpSession} from '@/acp/acp-session';
 import {resolveTruncationPoint} from '@/acp/acp-timeline';
 import type {AcpInitContext} from '@/acp/acp-types';
@@ -114,6 +118,7 @@ export class AcpAgent implements Agent {
 	private conn: AgentSideConnection;
 	private appVersion: string;
 	private clientCapabilities?: ClientCapabilities;
+	private clientInfo?: InitializeRequest['clientInfo'];
 	/** Bare extension method names already reported as deprecated. */
 	private warnedExtAliases = new Set<string>();
 	/**
@@ -139,6 +144,8 @@ export class AcpAgent implements Agent {
 		// session knows whether it may use client-side fs reads (e.g. for
 		// `@`-mentioned files that carry their live editor buffer).
 		this.clientCapabilities = params.clientCapabilities;
+		// Which client this is decides how built-in slash commands are worded.
+		this.clientInfo = params.clientInfo;
 
 		return {
 			protocolVersion: negotiateProtocolVersion(params.protocolVersion),
@@ -343,63 +350,13 @@ export class AcpAgent implements Agent {
 							return {stopReason: 'end_turn'};
 						}
 
-						if (commandName === 'help') {
-							const customCmds =
-								this.initContext.customCommandLoader?.getAllCommands() ?? [];
-							const customList =
-								customCmds.length > 0
-									? customCmds
-											.map(
-												c =>
-													`- \`/${c.fullName}\` — ${c.metadata.description || 'custom command'}`,
-											)
-											.join('\n')
-									: '';
-							const msg = [
-								'**Available slash commands in VS Code GUI:**',
-								'',
-								'- `/clear` — Clear the current conversation',
-								'- `/copy` — Copy the last assistant response',
-								'- `/copy code` — Copy the last code block from the last response',
-								'- `/help` — Show this help message',
-								'',
-								'**Not available in VS Code GUI** (CLI-only):',
-								'- `/init`, `/theme`, `/context-max`, `/compact`, `/usage`, and other interactive commands',
-								'',
-								customList ? `**Your custom commands:**\n${customList}` : '',
-							]
-								.filter(Boolean)
-								.join('\n');
-							return sendBuiltinReply(msg);
-						}
-
-						// `/copy` is normally intercepted by the webview before it
-						// reaches us, but `/help` advertises it, so a client without
-						// that interception must not get "unrecognized command".
-						if (commandName === 'copy') {
-							const msg =
-								'`/copy` is handled by the chat view. Type it in the Nanocoder chat input (or press Ctrl+Alt+Shift+C / Cmd+Alt+Shift+C for the last code block).';
-							return sendBuiltinReply(msg);
-						}
-
-						if (['model', 'provider'].includes(commandName)) {
-							const msg = `Use the ${commandName} selector in the chat header to switch ${commandName}s.`;
-							return sendBuiltinReply(msg);
-						}
-
-						if (commandName === 'settings') {
-							const msg =
-								'Use the Settings tab in the Nanocoder sidebar (the gear icon in the view title bar, or `Nanocoder: Settings` in the Command Palette).';
-							return sendBuiltinReply(msg);
-						}
-
-						if (
-							['init', 'theme', 'compact', 'context-max', 'usage'].includes(
-								commandName,
-							)
-						) {
-							const msg = `The \`/${commandName}\` command is only available in the interactive CLI (\`nanocoder\` in a terminal). It is not supported in the VS Code GUI.`;
-							return sendBuiltinReply(msg);
+						const reply = builtinCommandReply(
+							commandName,
+							isVsCodeClient(this.clientInfo),
+							this.initContext.customCommandLoader?.getAllCommands() ?? [],
+						);
+						if (reply) {
+							return sendBuiltinReply(reply);
 						}
 
 						// Truly unrecognized command

@@ -855,7 +855,13 @@ test('AcpAgent.prompt - routes text and images through to the conversation', asy
 // prompt() - built-in slash commands
 // ============================================================================
 
-const promptForBuiltinReply = async (text: string): Promise<string> => {
+const VSCODE_CLIENT = {name: 'Nanocoder VS Code Extension', version: '1.0.0'};
+
+/** The reply to `text`, from an agent whose client identified as `clientInfo`. */
+const promptForBuiltinReply = async (
+	text: string,
+	clientInfo?: {name: string; version: string} | null,
+): Promise<string> => {
 	const conn = createMockConn();
 	const replies: string[] = [];
 	conn.sessionUpdate = async (u: any) => {
@@ -864,6 +870,7 @@ const promptForBuiltinReply = async (text: string): Promise<string> => {
 		}
 	};
 	const agent = new AcpAgent(createMockInitContext(), conn);
+	await agent.initialize({protocolVersion: 1, clientInfo});
 	const session = await agent.newSession({cwd: '/tmp'});
 	await agent.prompt({
 		sessionId: session.sessionId,
@@ -872,21 +879,123 @@ const promptForBuiltinReply = async (text: string): Promise<string> => {
 	return replies.join('\n');
 };
 
-test('AcpAgent.prompt - /help advertises the copy commands', async t => {
-	const reply = await promptForBuiltinReply('/help');
-	t.true(reply.includes('`/copy`'));
-	t.true(reply.includes('`/copy code`'));
-});
+// The wording the VS Code extension has always been sent, word for word.
+const VSCODE_REPLIES: Record<string, string> = {
+	'/help': [
+		'**Available slash commands in VS Code GUI:**',
+		'- `/clear` — Clear the current conversation',
+		'- `/copy` — Copy the last assistant response',
+		'- `/copy code` — Copy the last code block from the last response',
+		'- `/help` — Show this help message',
+		'**Not available in VS Code GUI** (CLI-only):',
+		'- `/init`, `/theme`, `/context-max`, `/compact`, `/usage`, and other interactive commands',
+	].join('\n'),
+	'/copy':
+		'`/copy` is handled by the chat view. Type it in the Nanocoder chat input (or press Ctrl+Alt+Shift+C / Cmd+Alt+Shift+C for the last code block).',
+	'/model': 'Use the model selector in the chat header to switch models.',
+	'/provider':
+		'Use the provider selector in the chat header to switch providers.',
+	'/settings':
+		'Use the Settings tab in the Nanocoder sidebar (the gear icon in the view title bar, or `Nanocoder: Settings` in the Command Palette).',
+	'/init':
+		'The `/init` command is only available in the interactive CLI (`nanocoder` in a terminal). It is not supported in the VS Code GUI.',
+	'/usage':
+		'The `/usage` command is only available in the interactive CLI (`nanocoder` in a terminal). It is not supported in the VS Code GUI.',
+};
 
-test('AcpAgent.prompt - /copy points at the chat view instead of erroring', async t => {
-	const reply = await promptForBuiltinReply('/copy');
-	t.true(reply.includes('handled by the chat view'));
-	t.false(reply.includes('Unrecognized slash command'));
+test('AcpAgent.prompt - the VS Code extension gets the built-in replies unchanged', async t => {
+	for (const [command, expected] of Object.entries(VSCODE_REPLIES)) {
+		t.is(await promptForBuiltinReply(command, VSCODE_CLIENT), expected, command);
+	}
 });
 
 test('AcpAgent.prompt - /copy code is not treated as unrecognized', async t => {
-	const reply = await promptForBuiltinReply('/copy code');
-	t.false(reply.includes('Unrecognized slash command'));
+	for (const clientInfo of [VSCODE_CLIENT, undefined]) {
+		const reply = await promptForBuiltinReply('/copy code', clientInfo);
+		t.false(reply.includes('Unrecognized slash command'));
+	}
+});
+
+test('AcpAgent.prompt - any other client, or none, gets neutral built-in replies', async t => {
+	const neutral: Record<string, string> = {
+		'/copy': "`/copy` isn't available in this client.",
+		'/model': "Use your client's model selector.",
+		'/provider': "Use your client's provider selector.",
+		'/settings': "Use your client's settings.",
+		'/init':
+			'The `/init` command is only available in the interactive Nanocoder CLI (`nanocoder` in a terminal).',
+		'/theme':
+			'The `/theme` command is only available in the interactive Nanocoder CLI (`nanocoder` in a terminal).',
+		'/compact':
+			'The `/compact` command is only available in the interactive Nanocoder CLI (`nanocoder` in a terminal).',
+		'/context-max':
+			'The `/context-max` command is only available in the interactive Nanocoder CLI (`nanocoder` in a terminal).',
+		'/usage':
+			'The `/usage` command is only available in the interactive Nanocoder CLI (`nanocoder` in a terminal).',
+	};
+	const clients = [
+		{name: 'zed', version: '1.0.0'},
+		{name: 'Nanocoder Desktop', version: '0.1.0'},
+		undefined,
+		null,
+	];
+
+	for (const clientInfo of clients) {
+		const label = JSON.stringify(clientInfo);
+		for (const [command, expected] of Object.entries(neutral)) {
+			t.is(await promptForBuiltinReply(command, clientInfo), expected, `${command} ${label}`);
+		}
+		const help = await promptForBuiltinReply('/help', clientInfo);
+		t.true(help.startsWith('**Available slash commands:**'), label);
+		t.true(help.includes('`/clear`') && help.includes('`/help`'), label);
+		t.true(help.includes('`/init`, `/theme`, `/context-max`, `/compact`, `/usage`'), label);
+		// `/copy` is listed only where something handles it.
+		t.false(help.includes('/copy'), label);
+	}
+});
+
+test('AcpAgent.prompt - no neutral reply mentions VS Code, the sidebar or the chat header', async t => {
+	for (const command of [...Object.keys(VSCODE_REPLIES), '/theme', '/compact', '/context-max']) {
+		const reply = await promptForBuiltinReply(command, {name: 'zed', version: '1'});
+		t.notRegex(reply, /VS Code|sidebar|chat header|chat view|Ctrl\+Alt/i, command);
+	}
+});
+
+test('AcpAgent.prompt - /clear and an unknown command read the same for every client', async t => {
+	for (const command of ['/clear', '/definitelynotacommand']) {
+		const vsCode = await promptForBuiltinReply(command, VSCODE_CLIENT);
+		t.is(await promptForBuiltinReply(command, {name: 'zed', version: '1'}), vsCode);
+		t.is(await promptForBuiltinReply(command), vsCode);
+	}
+});
+
+test('AcpAgent.prompt - custom commands are listed in /help for every client', async t => {
+	const context = createMockInitContext();
+	context.customCommandLoader = {
+		getCommand: () => undefined,
+		getAllCommands: () => [
+			{fullName: 'review', metadata: {description: 'Review the diff'}},
+		],
+	} as any;
+	for (const clientInfo of [VSCODE_CLIENT, undefined]) {
+		const conn = createMockConn();
+		const replies: string[] = [];
+		conn.sessionUpdate = async (u: any) => {
+			if (u.update?.sessionUpdate === 'agent_message_chunk') {
+				replies.push(u.update.content.text);
+			}
+		};
+		const agent = new AcpAgent(context, conn);
+		await agent.initialize({protocolVersion: 1, clientInfo});
+		const session = await agent.newSession({cwd: '/tmp'});
+		await agent.prompt({
+			sessionId: session.sessionId,
+			prompt: [{type: 'text', text: '/help'}],
+		});
+		t.true(
+			replies.join('\n').endsWith('**Your custom commands:**\n- `/review` — Review the diff'),
+		);
+	}
 });
 
 test('AcpAgent.prompt - a built-in command exchange stays out of model context', async t => {

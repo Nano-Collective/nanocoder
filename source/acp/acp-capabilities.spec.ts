@@ -5,6 +5,7 @@ import {
 	developmentModeToAcpMode,
 	getAgentCapabilities,
 	getAvailableModes,
+	isVsCodeClient,
 	mergeDisabledTools,
 	parseDisabledTools,
 } from '@/acp/acp-capabilities';
@@ -99,6 +100,18 @@ test('developmentModeToAcpMode - passes through standard modes', t => {
 	t.is(developmentModeToAcpMode('auto-accept'), 'auto-accept');
 	t.is(developmentModeToAcpMode('yolo'), 'yolo');
 	t.is(developmentModeToAcpMode('plan'), 'plan');
+});
+
+// ============================================================================
+// isVsCodeClient
+// ============================================================================
+
+test('isVsCodeClient - only the VS Code extension is recognised', t => {
+	t.true(isVsCodeClient({name: 'Nanocoder VS Code Extension'}));
+	t.false(isVsCodeClient({name: 'zed'}));
+	t.false(isVsCodeClient({name: 'Nanocoder Desktop'}));
+	t.false(isVsCodeClient(undefined));
+	t.false(isVsCodeClient(null));
 });
 
 // ============================================================================
