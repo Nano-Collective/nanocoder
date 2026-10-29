@@ -57,9 +57,16 @@ export class AcpSession {
 		this.cwdScope = createSessionCwdScope(options.cwd);
 	}
 
-	/** What this session does not offer or run: the user's disabledTools plus the client's. */
-	effectiveDisabledTools(): string[] {
-		return mergeDisabledTools(getAppConfig().disabledTools, this.disabledTools);
+	/**
+	 * What this session does not offer or run: the user's disabledTools plus the
+	 * client's. With `isKnown`, the client's names that are not known tools are
+	 * left out, which is the list to report back as in effect.
+	 */
+	effectiveDisabledTools(isKnown?: (name: string) => boolean): string[] {
+		const requested = isKnown
+			? this.disabledTools.filter(isKnown)
+			: this.disabledTools;
+		return mergeDisabledTools(getAppConfig().disabledTools, requested);
 	}
 
 	getMemoryFinder(): SemanticMemoryManager {

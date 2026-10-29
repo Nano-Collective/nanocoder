@@ -45,10 +45,11 @@ export interface SubagentToolBridge {
 	getDisabledTools?(): readonly string[];
 	/** Announce a call before it is approved or run. */
 	begin(toolCall: ToolCall, subagentName: string): Promise<void>;
-	/** Ask the client to approve a call. */
+	/** Ask the client to approve a call, naming the subagent run that made it. */
 	approve(
 		toolCall: ToolCall,
 		abortSignal?: AbortSignal,
+		subagentRunId?: string,
 	): Promise<'approved' | 'denied' | 'cancelled'>;
 	/** Settle the announced call with what actually happened. */
 	end(
