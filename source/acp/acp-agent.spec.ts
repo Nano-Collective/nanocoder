@@ -12,7 +12,7 @@ import test from 'ava';
 import {artifactManager} from '@/artifacts/artifact-manager';
 import {AcpAgent} from '@/acp/acp-agent';
 import type {AcpInitContext} from '@/acp/acp-types';
-import {clearAppConfig} from '@/config';
+import {clearAppConfig, getAppConfig} from '@/config';
 import {
 	setToolRegistryGetter,
 	setToolManagerGetter,
@@ -1772,6 +1772,7 @@ function createReadAgent(file: string): AcpAgent {
 		...context.toolManager,
 		getAvailableToolNames: () => ['read_file'],
 		hasTool: () => true,
+		getMCPToolInfo: () => ({isMCPTool: false}),
 		getToolEntry: () => ({approval: false}),
 	} as any;
 	return new AcpAgent(context, createMockConn());
@@ -1897,3 +1898,37 @@ test.serial(
 		});
 	},
 );
+
+test.serial('AcpAgent - new, load and resume report the same approval policy', async t => {
+	const config = getAppConfig();
+	const previous = config.alwaysAllow;
+	config.alwaysAllow = ['write_file', 'browser'];
+	const context = createMockInitContext();
+	context.toolManager = {
+		...context.toolManager,
+		getAvailableToolNames: () => ['read_file', 'write_file'],
+		getMCPToolInfo: () => ({isMCPTool: false}),
+	} as any;
+	const agent = new AcpAgent(context, createMockConn());
+	const created = await agent.newSession({cwd: '/tmp'});
+
+	try {
+		await agent.prompt({
+			sessionId: created.sessionId,
+			prompt: [{type: 'text', text: 'Persist this session.'}],
+		});
+		const params = {sessionId: created.sessionId, cwd: '/tmp'};
+		const loaded = await agent.loadSession({...params, mcpServers: []});
+		const resumed = await agent.resumeSession(params);
+
+		for (const response of [created, loaded, resumed]) {
+			t.deepEqual(response._meta?.['nanocoder/approval'], {
+				alwaysAllow: ['write_file'],
+			});
+		}
+		t.truthy(loaded._meta?.['nanocoder/artifacts']);
+	} finally {
+		config.alwaysAllow = previous;
+		await agent.deleteSession({sessionId: created.sessionId});
+	}
+});
