@@ -1,5 +1,6 @@
 import test from 'ava';
 import * as vscode from 'vscode';
+import {isVsCodeClient} from '../../../source/acp/acp-capabilities';
 import { NanocoderAcpClient } from './acp-client';
 import { AcpStateManager } from './acp-state';
 
@@ -342,6 +343,21 @@ test('NanocoderAcpClient - handshake is incomplete until initialize succeeds', a
 
 	client.setConnection({initialize: async () => ({agentInfo: {version: '1.29.0'}})} as any);
 	t.false(client.isHandshakeComplete, 'A new connection must re-handshake');
+});
+
+test('NanocoderAcpClient - the handshake identifies it as the client the agent treats as VS Code', async (t) => {
+	let clientInfo: {name: string} | undefined;
+	const client = new NanocoderAcpClient({appendLine: () => {}} as any, new AcpStateManager());
+	client.setConnection({
+		initialize: async (params: {clientInfo?: {name: string}}) => {
+			clientInfo = params.clientInfo;
+			return {agentInfo: {version: '1.29.0'}};
+		},
+	} as any);
+
+	await client.initializeHandshake();
+
+	t.true(isVsCodeClient(clientInfo));
 });
 
 /**

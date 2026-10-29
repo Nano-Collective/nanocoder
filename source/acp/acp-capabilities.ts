@@ -19,8 +19,12 @@ const MODE_MAP: Record<SessionModeId, DevelopmentMode> = {
 // Own keys only, so the advertised modes and the mapping cannot drift apart.
 const ACP_MODES = Object.keys(MODE_MAP) as SessionModeId[];
 
-/** What the VS Code extension sends as `clientInfo.name` in `initialize`. */
-const VSCODE_CLIENT_NAME = 'Nanocoder VS Code Extension';
+/**
+ * What the VS Code extension sends as `clientInfo.name` in `initialize`. The
+ * extension imports this, so the name it sends and the one the agent
+ * recognises cannot drift apart.
+ */
+export const VSCODE_CLIENT_NAME = 'Nanocoder VS Code Extension';
 
 /** Whether the client is the VS Code extension; `clientInfo` may be missing. */
 export function isVsCodeClient(clientInfo?: {name: string} | null): boolean {

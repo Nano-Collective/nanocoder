@@ -924,6 +924,12 @@ test('AcpAgent.prompt - any other client, or none, gets neutral built-in replies
 		'/settings': "Use your client's settings.",
 		'/init':
 			'The `/init` command is only available in the interactive Nanocoder CLI (`nanocoder` in a terminal).',
+		'/theme':
+			'The `/theme` command is only available in the interactive Nanocoder CLI (`nanocoder` in a terminal).',
+		'/compact':
+			'The `/compact` command is only available in the interactive Nanocoder CLI (`nanocoder` in a terminal).',
+		'/context-max':
+			'The `/context-max` command is only available in the interactive Nanocoder CLI (`nanocoder` in a terminal).',
 		'/usage':
 			'The `/usage` command is only available in the interactive Nanocoder CLI (`nanocoder` in a terminal).',
 	};
