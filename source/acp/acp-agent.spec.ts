@@ -1941,6 +1941,8 @@ test('AcpAgent.setSessionMode - rejects an unknown mode and leaves the session u
 	};
 	const agent = new AcpAgent(createMockInitContext(), conn);
 	const session = await agent.newSession({cwd: '/tmp'});
+	// A mode other than the default, so "unchanged" cannot be the fallback.
+	await agent.setSessionMode({sessionId: session.sessionId, modeId: 'plan'});
 	updates.length = 0;
 
 	const error = await t.throwsAsync(
@@ -1954,7 +1956,7 @@ test('AcpAgent.setSessionMode - rejects an unknown mode and leaves the session u
 		cwd: '/tmp',
 		mcpServers: [],
 	});
-	t.is(loaded.modes?.currentModeId, 'auto-accept');
+	t.is(loaded.modes?.currentModeId, 'plan');
 });
 
 test('AcpAgent.setSessionMode - applies a mode and confirms it with current_mode_update', async t => {

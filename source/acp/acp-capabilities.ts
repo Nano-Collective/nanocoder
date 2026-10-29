@@ -6,14 +6,6 @@ import type {
 import {PROTOCOL_VERSION, RequestError} from '@agentclientprotocol/sdk';
 import type {DevelopmentMode} from '@/types/core';
 
-const ACP_MODES: SessionModeId[] = [
-	'normal',
-	'auto-accept',
-	'yolo',
-	'plan',
-	'architect',
-];
-
 const MODE_MAP: Record<SessionModeId, DevelopmentMode> = {
 	normal: 'normal',
 	'auto-accept': 'auto-accept',
@@ -21,6 +13,9 @@ const MODE_MAP: Record<SessionModeId, DevelopmentMode> = {
 	plan: 'plan',
 	architect: 'architect',
 };
+
+// Own keys only, so the advertised modes and the mapping cannot drift apart.
+const ACP_MODES = Object.keys(MODE_MAP) as SessionModeId[];
 
 /** ACP reserves `_`-prefixed method names for custom methods. */
 export const ACP_EXT_PREFIX = '_nanocoder/';
