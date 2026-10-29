@@ -31,6 +31,7 @@ import type {
 	SetSessionModeRequest,
 	SetSessionModeResponse,
 } from '@agentclientprotocol/sdk';
+import {getAlwaysAllowedTools} from '@/acp/acp-approval';
 import {
 	acpModeToDevelopmentMode,
 	developmentModeToAcpMode,
@@ -159,6 +160,7 @@ export class AcpAgent implements Agent {
 
 		return {
 			sessionId,
+			_meta: await this.buildApprovalMeta(session),
 			modes: this.buildModeState(session),
 			configOptions: await this.buildConfigOptions(),
 		};
@@ -190,6 +192,7 @@ export class AcpAgent implements Agent {
 
 		return {
 			_meta: {
+				...(await this.buildApprovalMeta(session)),
 				'nanocoder/artifacts': await listSessionArtifacts(params.sessionId),
 			},
 			modes: this.buildModeState(session),
@@ -699,6 +702,7 @@ export class AcpAgent implements Agent {
 
 		return {
 			_meta: {
+				...(await this.buildApprovalMeta(session)),
 				'nanocoder/artifacts': await listSessionArtifacts(params.sessionId),
 			},
 			modes: this.buildModeState(session),
@@ -880,6 +884,18 @@ export class AcpAgent implements Agent {
 		this.sessions.set(sessionId, session);
 		this.buildSystemPromptForSession(session);
 		return session;
+	}
+
+	private async buildApprovalMeta(session: AcpSession) {
+		return {
+			'nanocoder/approval': {
+				alwaysAllow: await getAlwaysAllowedTools(
+					this.initContext.toolManager,
+					session.developmentMode,
+					getAppConfig().alwaysAllow ?? [],
+				),
+			},
+		};
 	}
 
 	private buildModeState(session: AcpSession): SessionModeState {
