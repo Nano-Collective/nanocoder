@@ -34,6 +34,7 @@ import type {
 import {RequestError} from '@agentclientprotocol/sdk';
 import {getAlwaysAllowedTools} from '@/acp/acp-approval';
 import {
+	ACP_DISABLED_TOOLS_META,
 	ACP_EXT_METHODS,
 	ACP_EXT_PREFIX,
 	ACP_SESSION_TITLE_NOTIFICATION,
@@ -42,6 +43,7 @@ import {
 	getAgentCapabilities,
 	getAvailableModes,
 	negotiateProtocolVersion,
+	parseDisabledTools,
 } from '@/acp/acp-capabilities';
 import {acpContentToUserMessage} from '@/acp/acp-content';
 import {clearAcpReadStubs, runAcpConversation} from '@/acp/acp-conversation';
@@ -144,7 +146,11 @@ export class AcpAgent implements Agent {
 		const sessionId = crypto.randomUUID();
 		logger.info(`ACP newSession: ${sessionId} cwd=${params.cwd}`);
 
-		const session = this.registerSession(sessionId, params.cwd);
+		const session = this.registerSession(
+			sessionId,
+			params.cwd,
+			parseDisabledTools(params._meta),
+		);
 
 		await sessionManager.initialize();
 		await this.saveAcpSessionToDisk(session);
@@ -166,7 +172,10 @@ export class AcpAgent implements Agent {
 
 		return {
 			sessionId,
-			_meta: await this.buildApprovalMeta(session),
+			_meta: {
+				...(await this.buildApprovalMeta(session)),
+				...this.buildDisabledToolsMeta(session),
+			},
 			modes: this.buildModeState(session),
 			configOptions: await this.buildConfigOptions(),
 		};
@@ -184,9 +193,17 @@ export class AcpAgent implements Agent {
 				// Same error as resumeSession so clients can tell a missing session apart.
 				throw new Error(`Session not found on disk: ${params.sessionId}`);
 			}
-			session = this.registerSession(params.sessionId, params.cwd);
+			session = this.registerSession(
+				params.sessionId,
+				params.cwd,
+				parseDisabledTools(params._meta),
+			);
 			clearAcpReadStubs(params.sessionId);
 			session.messages = persisted.messages;
+		} else {
+			// The client sends the list on every load, so a live session takes the new one.
+			session.disabledTools = parseDisabledTools(params._meta);
+			this.buildSystemPromptForSession(session);
 		}
 
 		logger.info(
@@ -199,6 +216,7 @@ export class AcpAgent implements Agent {
 		return {
 			_meta: {
 				...(await this.buildApprovalMeta(session)),
+				...this.buildDisabledToolsMeta(session),
 				'nanocoder/artifacts': await listSessionArtifacts(params.sessionId),
 			},
 			modes: this.buildModeState(session),
@@ -704,6 +722,7 @@ export class AcpAgent implements Agent {
 		const session = this.registerSession(
 			params.sessionId,
 			persisted.workingDirectory,
+			parseDisabledTools(params._meta),
 		);
 		session.messages = persisted.messages;
 		clearAcpReadStubs(params.sessionId);
@@ -717,6 +736,7 @@ export class AcpAgent implements Agent {
 		return {
 			_meta: {
 				...(await this.buildApprovalMeta(session)),
+				...this.buildDisabledToolsMeta(session),
 				'nanocoder/artifacts': await listSessionArtifacts(params.sessionId),
 			},
 			modes: this.buildModeState(session),
@@ -904,7 +924,11 @@ export class AcpAgent implements Agent {
 		return session;
 	}
 
-	private registerSession(sessionId: string, cwd: string): AcpSession {
+	private registerSession(
+		sessionId: string,
+		cwd: string,
+		disabledTools: string[] = [],
+	): AcpSession {
 		const session = new AcpSession({
 			sessionId,
 			cwd,
@@ -912,9 +936,22 @@ export class AcpAgent implements Agent {
 			clientCapabilities: this.clientCapabilities,
 			initialMode: this.initContext.initialMode,
 		});
+		session.disabledTools = disabledTools;
 		this.sessions.set(sessionId, session);
 		this.buildSystemPromptForSession(session);
 		return session;
+	}
+
+	/** The tools this session does not offer or run, so a client can check its request was honoured. */
+	private buildDisabledToolsMeta(session: AcpSession) {
+		for (const name of session.disabledTools) {
+			if (!this.initContext.toolManager.hasTool(name)) {
+				logger.debug(
+					`ACP session ${session.sessionId}: ignoring unknown disabled tool "${name}"`,
+				);
+			}
+		}
+		return {[ACP_DISABLED_TOOLS_META]: session.effectiveDisabledTools()};
 	}
 
 	private async buildApprovalMeta(session: AcpSession) {
@@ -924,6 +961,7 @@ export class AcpAgent implements Agent {
 					this.initContext.toolManager,
 					session.developmentMode,
 					getAppConfig().alwaysAllow ?? [],
+					session.effectiveDisabledTools(),
 				),
 			},
 		};
@@ -1107,7 +1145,7 @@ export class AcpAgent implements Agent {
 		const availableNames = toolManager.getAvailableToolNames(
 			tune,
 			session.developmentMode,
-			undefined,
+			session.effectiveDisabledTools(),
 			model,
 		);
 		// Inside the session's scope, so the working directory the prompt reports

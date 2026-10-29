@@ -41,6 +41,8 @@ export const signalToolApproval = approvalSlot.signal;
 export interface SubagentToolBridge {
 	/** The session's mode right now, so approvals match the top-level loop. */
 	getMode(): DevelopmentMode;
+	/** Tools the session does not offer or run, which its subagents must not either. */
+	getDisabledTools?(): readonly string[];
 	/** Announce a call before it is approved or run. */
 	begin(toolCall: ToolCall, subagentName: string): Promise<void>;
 	/** Ask the client to approve a call. */

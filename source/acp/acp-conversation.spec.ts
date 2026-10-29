@@ -3178,3 +3178,129 @@ test.serial('runAcpConversation - a mode switch in one session does not reach an
 	t.is(untouched.permissionRequests.length, 0);
 	t.true(existsSync(join(untouched.cwd, 'b.txt')));
 });
+
+// ============================================================================
+// Tools the client turned off for a session
+// ============================================================================
+
+/**
+ * One turn in which the model calls `browser`. The tool manager honours the
+ * disabled list it is given, as the real one does, and the registry counts how
+ * many times the tool actually ran.
+ */
+const runBrowserCallTurn = async (disabledTools: string[]) => {
+	const updates: any[] = [];
+	const conn = {
+		sessionUpdate: async (u: any) => {
+			updates.push(u.update);
+		},
+		requestPermission: async () => ({
+			outcome: {outcome: 'selected', optionId: 'allow'},
+		}),
+	} as unknown as AgentSideConnection;
+	const session = createMockSession(conn, {devMode: 'yolo'});
+	session.disabledTools = disabledTools;
+
+	const offered: string[][] = [];
+	let ran = 0;
+	setToolRegistryGetter(() => ({
+		browser: async () => {
+			ran++;
+			return 'page text';
+		},
+	}));
+	const toolManager = {
+		...createMockToolManager(),
+		getAvailableToolNames: (
+			_tune: unknown,
+			_mode: unknown,
+			disabled?: readonly string[],
+		) => ['read_file', 'browser'].filter(name => !disabled?.includes(name)),
+		getFilteredTools: (names: string[]) => {
+			offered.push(names);
+			return {};
+		},
+		hasTool: () => true,
+		getToolEntry: () => ({approval: false}),
+	};
+
+	let requests = 0;
+	const client = {
+		chat: async () => {
+			requests++;
+			return requests === 1
+				? {
+						choices: [
+							{
+								message: {
+									content: '',
+									tool_calls: [createMockToolCall('browser', {}, 'browse-1')],
+								},
+							},
+						],
+					}
+				: {choices: [{message: {content: 'done'}}]};
+		},
+	} as unknown as LLMClient;
+
+	await runAcpConversation({
+		session,
+		client,
+		toolManager: toolManager as any,
+		conn,
+		nonInteractiveAlwaysAllow: [],
+	});
+
+	const toolResult = session.messages.findLast(
+		(m: Message) => m.role === 'tool',
+	);
+	return {offered, ran, toolResult, updates, session};
+};
+
+test.serial('runAcpConversation - a tool the session turned off is not offered, and a call to it is refused', async t => {
+	const {offered, ran, toolResult, updates} = await runBrowserCallTurn([
+		'browser',
+	]);
+
+	t.deepEqual(offered[0], ['read_file']);
+	// The model named it anyway: nothing ran, and it is told why.
+	t.is(ran, 0);
+	t.is(toolResult?.content, 'Error: browser is disabled in this session');
+	const failed = updates.filter(
+		(u: any) => u.toolCallId === 'browse-1' && u.status === 'failed',
+	);
+	t.is(failed.length, 1);
+});
+
+test.serial('runAcpConversation - another session in the same process still has the tool', async t => {
+	const off = await runBrowserCallTurn(['browser']);
+	const on = await runBrowserCallTurn([]);
+
+	t.is(off.ran, 0);
+	t.deepEqual(on.offered[0], ['read_file', 'browser']);
+	t.is(on.ran, 1);
+	t.is(on.toolResult?.content, 'page text');
+});
+
+test.serial('runAcpConversation - a session\'s subagents are told what the session turned off', async t => {
+	const {conn} = createMockConn();
+	const session = createMockSession(conn);
+	session.disabledTools = ['browser'];
+	let fromBridge: readonly string[] | undefined;
+	const client = {
+		chat: async () => {
+			fromBridge = getSubagentToolBridge(session.sessionId)?.getDisabledTools?.();
+			return {choices: [{message: {content: 'done', tool_calls: []}}]};
+		},
+	} as unknown as LLMClient;
+
+	await runAcpConversation({
+		session,
+		client,
+		toolManager: createMockToolManager() as any,
+		conn,
+		nonInteractiveAlwaysAllow: [],
+	});
+
+	t.deepEqual(fromBridge, ['browser']);
+});

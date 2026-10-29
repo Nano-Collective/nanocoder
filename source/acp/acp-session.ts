@@ -2,6 +2,8 @@ import type {
 	AgentSideConnection,
 	ClientCapabilities,
 } from '@agentclientprotocol/sdk';
+import {mergeDisabledTools} from '@/acp/acp-capabilities';
+import {getAppConfig} from '@/config/index';
 import {SemanticMemoryManager} from '@/memory/semantic-memory-manager';
 import {
 	createSessionCwdScope,
@@ -29,6 +31,8 @@ export class AcpSession {
 	baseSystemMessage?: Message;
 	abortController = new AbortController();
 	developmentMode: DevelopmentMode;
+	/** Tools the client turned off for this session. Not persisted: the client sends them on every new, load and resume. */
+	disabledTools: string[] = [];
 	/** True while a prompt turn is being processed. Overlapping calls wait on acquireTurn(). */
 	turnActive = false;
 	/** Set by session/close. Queued prompts check it before they start. */
@@ -51,6 +55,11 @@ export class AcpSession {
 		this.developmentMode = options.initialMode ?? 'auto-accept';
 		this.timeline = new TimelineManager(options.cwd, options.sessionId);
 		this.cwdScope = createSessionCwdScope(options.cwd);
+	}
+
+	/** What this session does not offer or run: the user's disabledTools plus the client's. */
+	effectiveDisabledTools(): string[] {
+		return mergeDisabledTools(getAppConfig().disabledTools, this.disabledTools);
 	}
 
 	getMemoryFinder(): SemanticMemoryManager {

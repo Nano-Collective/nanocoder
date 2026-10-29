@@ -113,6 +113,7 @@ function createSubagentToolBridge(
 
 	return {
 		getMode: () => session.developmentMode,
+		getDisabledTools: () => session.effectiveDisabledTools(),
 		begin: async (toolCall, subagentName) => {
 			const call = announced(toolCall);
 			try {
@@ -297,9 +298,12 @@ async function runTurn(
 		// session/set_mode can arrive at any point in a turn, so the mode is read
 		// live: here for the tools offered, and again per call for approval.
 		const requestMode = session.developmentMode;
+		// The client's per-session list on top of the user's own disabledTools.
+		const disabledTools = session.effectiveDisabledTools();
 		const availableNames = toolManager.getAvailableToolNames(
 			undefined,
 			requestMode,
+			disabledTools,
 		);
 		const tools = finalTurn ? {} : toolManager.getFilteredTools(availableNames);
 
@@ -442,7 +446,11 @@ async function runTurn(
 				session.developmentMode === 'plan' &&
 				!wrotePlan &&
 				toolManager
-					.getAvailableToolNames(undefined, session.developmentMode)
+					.getAvailableToolNames(
+						undefined,
+						session.developmentMode,
+						disabledTools,
+					)
 					.includes('write_plan') &&
 				cleanedContent.trim().length > 0
 			) {
@@ -532,14 +540,23 @@ async function runTurn(
 			// the mode has since changed and no longer offers it (e.g. a switch to
 			// plan), refuse it rather than run it under the new mode.
 			const toolName = toolCall.function.name;
+			// A tool the session does not offer is refused even if the model names it anyway.
+			const disabled = disabledTools.includes(toolName);
 			if (
-				session.developmentMode !== requestMode &&
-				availableNames.includes(toolName) &&
-				!toolManager
-					.getAvailableToolNames(undefined, session.developmentMode)
-					.includes(toolName)
+				disabled ||
+				(session.developmentMode !== requestMode &&
+					availableNames.includes(toolName) &&
+					!toolManager
+						.getAvailableToolNames(
+							undefined,
+							session.developmentMode,
+							disabledTools,
+						)
+						.includes(toolName))
 			) {
-				const reason = `Error: ${toolName} is not available in ${session.developmentMode} mode`;
+				const reason = disabled
+					? `Error: ${toolName} is disabled in this session`
+					: `Error: ${toolName} is not available in ${session.developmentMode} mode`;
 				// A lone call has not been announced yet; give the failed update a
 				// card to land on.
 				if (!announcedBatch) {
