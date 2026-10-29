@@ -12,6 +12,7 @@ import {
 	isPathInside,
 	isRealPathInside,
 	isValidFilePath,
+	normalizeForCompare,
 	resolveFilePath,
 } from './path-validation';
 
@@ -427,3 +428,47 @@ test.serial('resolveFilePath: a symlinked root still rejects paths really outsid
 		rmSync(base, {recursive: true, force: true});
 	}
 });
+
+test('normalizeForCompare: normalizes case on win32 and preserves case on posix', t => {
+	t.not(
+		normalizeForCompare('/Proj/App', 'linux'),
+		normalizeForCompare('/proj/app', 'linux'),
+	);
+	t.is(
+		normalizeForCompare('C:\\Proj\\App', 'win32'),
+		normalizeForCompare('c:\\proj\\app', 'win32'),
+	);
+});
+
+test('isPathInside: treats paths case-insensitively when platform is win32', t => {
+	t.true(isPathInside('C:\\Work\\Proj\\file.ts', 'c:\\work\\proj', 'win32'));
+	t.true(isPathInside('c:\\work\\proj', 'C:\\Work\\Proj', 'win32'));
+	t.true(isPathInside('c:\\work\\proj\\sub\\a.txt', 'C:\\Work\\Proj', 'win32'));
+	t.false(isPathInside('c:\\work\\proj-evil\\a.txt', 'C:\\Work\\Proj', 'win32'));
+	t.false(isPathInside('d:\\work\\proj\\a.txt', 'c:\\work\\proj', 'win32'));
+});
+
+if (process.platform === 'win32') {
+	test('isValidFilePath & resolveFilePath: accepts valid absolute paths differing in case on Windows', t => {
+		const base = mkdtempSync(join(tmpdir(), 'pathval-win-case-'));
+		try {
+			const lowerBase = base.toLowerCase();
+			const upperBase = base.toUpperCase();
+			const testFile = join(base, 'test.txt');
+			writeFileSync(testFile, 'hello');
+
+			t.true(isValidFilePath(testFile, lowerBase));
+			t.true(isValidFilePath(testFile, upperBase));
+			t.is(
+				resolveFilePath(testFile, lowerBase).toLowerCase(),
+				testFile.toLowerCase(),
+			);
+			t.is(
+				resolveFilePath(testFile, upperBase).toLowerCase(),
+				testFile.toLowerCase(),
+			);
+		} finally {
+			rmSync(base, {recursive: true, force: true});
+		}
+	});
+}

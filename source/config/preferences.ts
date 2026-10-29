@@ -22,6 +22,7 @@ import type {UserPreferences} from '@/types/index';
 import type {NanocoderShape, ThemePreset} from '@/types/ui';
 import {atomicWriteFileSync} from '@/utils/atomic-write';
 import {logError} from '@/utils/message-queue';
+import {normalizeForCompare} from '@/utils/path-validation';
 
 let PREFERENCES_PATH: string | null = null;
 let CACHED_CONFIG_DIR: string | undefined = undefined;
@@ -55,7 +56,8 @@ function getGlobalPreferencesPath(): string {
 
 function isProjectPreferencesPath(preferencesPath: string): boolean {
 	return (
-		path.resolve(preferencesPath) !== path.resolve(getGlobalPreferencesPath())
+		normalizeForCompare(preferencesPath) !== // nosemgrep
+		normalizeForCompare(getGlobalPreferencesPath()) // nosemgrep
 	);
 }
 
@@ -217,14 +219,14 @@ export function isDirectoryTrusted(
 	directory: string,
 	preferences: UserPreferences,
 ): boolean {
-	const resolved = path.resolve(directory); // nosemgrep
-	const fingerprint = describeProjectTrust(resolved).fingerprint;
+	const resolved = normalizeForCompare(directory); // nosemgrep
+	const fingerprint = describeProjectTrust(path.resolve(directory)).fingerprint;
 	return (preferences.trustedDirectories ?? []).some(entry => {
 		const entryPath = trustPath(entry);
 		return (
 			typeof entry === 'object' &&
 			entryPath !== null &&
-			path.resolve(entryPath) === resolved && // nosemgrep
+			normalizeForCompare(entryPath) === resolved && // nosemgrep
 			entry.fingerprint === fingerprint
 		);
 	});
@@ -241,11 +243,12 @@ export function trustRecheck(
 	directory: string,
 	preferences: UserPreferences,
 ): TrustRecheck | null {
-	const resolved = path.resolve(directory); // nosemgrep
+	const resolved = normalizeForCompare(directory); // nosemgrep
 	let recheck: TrustRecheck | null = null;
 	for (const entry of preferences.trustedDirectories ?? []) {
 		const entryPath = trustPath(entry);
-		if (entryPath === null || path.resolve(entryPath) !== resolved) continue; // nosemgrep
+		if (entryPath === null || normalizeForCompare(entryPath) !== resolved)
+			continue; // nosemgrep
 		if (typeof entry !== 'string') return 'changed';
 		recheck = 'upgrade';
 	}
@@ -288,10 +291,13 @@ export function grantDirectoryTrust(
 	fingerprint = describeProjectTrust(directory).fingerprint,
 ): UserPreferences {
 	const resolved = path.resolve(directory); // nosemgrep
+	const normalized = normalizeForCompare(directory);
 	const trustedDirectories = (preferences.trustedDirectories ?? []).filter(
 		entry => {
 			const entryPath = trustPath(entry);
-			return entryPath === null || path.resolve(entryPath) !== resolved; // nosemgrep
+			return (
+				entryPath === null || normalizeForCompare(entryPath) !== normalized // nosemgrep
+			);
 		},
 	);
 	trustedDirectories.push({path: resolved, fingerprint});
