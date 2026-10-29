@@ -21,6 +21,7 @@ import type {CustomCommandLoader} from '@/custom-commands/loader';
 import type {EventRouter} from '@/events/event-router';
 import type {
 	CiJobFailedFilter,
+	FileAiCommentFilter,
 	FileChangedFilter,
 	ScheduleCronFilter,
 	Subscription,
@@ -334,6 +335,20 @@ function buildSubscription(
 			},
 		};
 	}
+
+	if (trig.kind === 'file.ai-comment') {
+		const filter: FileAiCommentFilter = {};
+		if (trig.paths) filter.paths = trig.paths;
+		return {
+			ok: true,
+			subscription: {
+				...base,
+				kind: 'file.ai-comment',
+				...(Object.keys(filter).length > 0 ? {filter} : {}),
+			},
+		};
+	}
+
 	if (trig.kind === 'schedule.cron') {
 		const filter: ScheduleCronFilter = {cron: trig.cron};
 		return {ok: true, subscription: {...base, kind: 'schedule.cron', filter}};
