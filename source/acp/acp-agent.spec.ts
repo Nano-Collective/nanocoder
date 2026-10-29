@@ -1598,6 +1598,99 @@ test('AcpAgent.extMethod - timeline/list throws on missing session', async t => 
 	);
 });
 
+test('AcpAgent.extMethod - timeline/read returns the baseline of a turn from its earliest checkpoint', async t => {
+	const {agent} = createAgent();
+	const cwd = createTimelineWorkspace('read');
+	try {
+		const created = await agent.newSession({cwd, mcpServers: []});
+		const session = (agent as any).sessions.get(created.sessionId);
+		// One turn, two edits to a.ts: both checkpoints share the truncation point.
+		const first = await session.timeline.capture({
+			toolCallId: 'call-1',
+			toolName: 'write_file',
+			title: 'write_file: a.ts',
+			truncateToMessageIndex: 1,
+			files: new Map([['a.ts', 'v0'], ['made.ts', null]]),
+		});
+		const second = await session.timeline.capture({
+			toolCallId: 'call-2',
+			toolName: 'write_file',
+			title: 'write_file: a.ts',
+			truncateToMessageIndex: 1,
+			files: new Map([['a.ts', 'v1']]),
+		});
+		const read = (checkpointId: string, path: string) =>
+			agent.extMethod('_nanocoder/timeline/read', {
+				sessionId: created.sessionId,
+				checkpointId,
+				path,
+			});
+
+		t.deepEqual(await read(first.id, 'a.ts'), {kind: 'text', content: 'v0'});
+		t.deepEqual(await read(second.id, 'a.ts'), {kind: 'text', content: 'v1'});
+		t.deepEqual(await read(first.id, 'made.ts'), {kind: 'created'});
+		t.is((await read(second.id, 'made.ts')).kind, 'unavailable');
+
+		const listed = (await agent.extMethod('timeline/list', {
+			sessionId: created.sessionId,
+		})) as {entries: Array<{createdFiles: string[]}>};
+		t.deepEqual(listed.entries.map(entry => entry.createdFiles), [['made.ts'], []]);
+	} finally {
+		rmSync(cwd, {recursive: true, force: true});
+	}
+});
+
+test('AcpAgent.extMethod - timeline/read is unavailable after the checkpoint is reverted', async t => {
+	const {agent} = createAgent();
+	const cwd = createTimelineWorkspace('read-reverted');
+	try {
+		writeFileSync(join(cwd, 'a.ts'), 'before');
+		const created = await agent.newSession({cwd, mcpServers: []});
+		const session = (agent as any).sessions.get(created.sessionId);
+		session.messages = [
+			{role: 'user', content: 'edit a.ts'},
+			{role: 'assistant', content: '', tool_calls: [{id: 'call-1', function: {name: 'write_file'}}]},
+			{role: 'tool', content: 'wrote', name: 'write_file'},
+		];
+		const entry = await session.timeline.capture({
+			toolCallId: 'call-1',
+			toolName: 'write_file',
+			title: 'write_file: a.ts',
+			truncateToMessageIndex: 1,
+			files: new Map([['a.ts', 'before']]),
+		});
+		const params = {sessionId: created.sessionId, checkpointId: entry.id, path: 'a.ts'};
+
+		t.is((await agent.extMethod('timeline/read', params)).kind, 'text');
+		await agent.extMethod('timeline/revert', params);
+		t.is((await agent.extMethod('timeline/read', params)).kind, 'unavailable');
+	} finally {
+		rmSync(cwd, {recursive: true, force: true});
+	}
+});
+
+test('AcpAgent.extMethod - timeline/read rejects bad params, escaping paths and sessions that are not loaded', async t => {
+	const {agent} = createAgent();
+	const cwd = createTimelineWorkspace('read-bad');
+	try {
+		const created = await agent.newSession({cwd, mcpServers: []});
+		await t.throwsAsync(
+			agent.extMethod('timeline/read', {sessionId: created.sessionId, path: 'a.ts'}),
+			{message: 'timeline/read requires string sessionId, checkpointId and path'},
+		);
+		await t.throwsAsync(
+			agent.extMethod('timeline/read', {sessionId: created.sessionId, checkpointId: 'x', path: '../outside'}),
+			{message: /outside the workspace/},
+		);
+		await t.throwsAsync(
+			agent.extMethod('timeline/read', {sessionId: 'missing', checkpointId: 'x', path: 'a.ts'}),
+			{message: /Session not found/},
+		);
+	} finally {
+		rmSync(cwd, {recursive: true, force: true});
+	}
+});
+
 test('AcpAgent.prompt - recalls relevant project memories scoped to the session cwd, without accumulating across turns', async t => {
 	await new SemanticMemoryManager({cwd: '/tmp'}).addMemory({
 		content: 'Auth uses Clerk and avoids middleware.',

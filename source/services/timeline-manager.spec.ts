@@ -349,6 +349,108 @@ test.serial('TimelineManager skips binary files when snapshotting', async t => {
 	}
 });
 
+test.serial('TimelineManager readBefore returns the saved text, and list reports created files', async t => {
+	const tempDir = await createTempDir();
+	try {
+		await writeFile(tempDir, 'src/a.ts', 'version-1');
+		const manager = new TimelineManager(tempDir, 'session-read');
+		const entry = await manager.capture({
+			toolCallId: 'call-1',
+			toolName: 'execute_bash',
+			title: 'execute_bash',
+			truncateToMessageIndex: 1,
+			files: new Map([
+				['src/a.ts', 'version-1'],
+				['src/new.ts', null],
+			]),
+		});
+		await writeFile(tempDir, 'src/a.ts', 'version-2');
+
+		t.deepEqual(await manager.readBefore(entry?.id ?? '', 'src/a.ts'), {
+			kind: 'text',
+			content: 'version-1',
+		});
+		// An absolute path inside the workspace names the same file.
+		t.deepEqual(
+			await manager.readBefore(entry?.id ?? '', path.join(tempDir, 'src/a.ts')),
+			{kind: 'text', content: 'version-1'},
+		);
+		t.deepEqual(await manager.readBefore(entry?.id ?? '', 'src/new.ts'), {
+			kind: 'created',
+		});
+		t.deepEqual((await manager.list())[0].createdFiles, ['src/new.ts']);
+	} finally {
+		await cleanupTempDir(tempDir);
+	}
+});
+
+test.serial('TimelineManager readBefore reports unavailable for binary, unrecorded, reverted and pruned entries', async t => {
+	const tempDir = await createTempDir();
+	try {
+		await writeFile(tempDir, 'text.ts', 'hello');
+		await writeFile(tempDir, 'other.ts', 'not captured');
+		await fs.writeFile(path.join(tempDir, 'image.bin'), Buffer.from([0x89, 0x00]));
+		const manager = new TimelineManager(tempDir, 'session-unavailable');
+		const entry = await manager.capture({
+			toolCallId: 'call-1',
+			toolName: 'write_file',
+			title: 'write_file',
+			truncateToMessageIndex: 1,
+			files: await manager.snapshotPaths(['text.ts', 'image.bin']),
+		});
+		const id = entry?.id ?? '';
+
+		// Binary files are dropped at capture, so they look like any other
+		// path the checkpoint does not hold. Neither returns content.
+		for (const file of ['image.bin', 'other.ts']) {
+			const result = await manager.readBefore(id, file);
+			t.is(result.kind, 'unavailable', file);
+		}
+		t.is((await manager.readBefore('no-such-checkpoint', 'text.ts')).kind, 'unavailable');
+
+		// The saved file going missing is reported, not thrown.
+		await fs.rm(path.join(tempDir, '.nanocoder', 'timeline', 'session-unavailable', 'entries', id), {
+			recursive: true,
+		});
+		t.is((await manager.readBefore(id, 'text.ts')).kind, 'unavailable');
+
+		await manager.revertTo(id);
+		t.is((await manager.readBefore(id, 'text.ts')).kind, 'unavailable');
+	} finally {
+		await cleanupTempDir(tempDir);
+	}
+});
+
+test.serial('TimelineManager readBefore throws for a path outside the workspace and changes nothing', async t => {
+	const tempDir = await createTempDir();
+	try {
+		await writeFile(tempDir, 'a.ts', 'before');
+		const manager = new TimelineManager(tempDir, 'session-escape');
+		const entry = await manager.capture({
+			toolCallId: 'call-1',
+			toolName: 'write_file',
+			title: 'write_file',
+			truncateToMessageIndex: 1,
+			files: new Map([['a.ts', 'before']]),
+		});
+		const indexPath = path.join(tempDir, '.nanocoder', 'timeline', 'session-escape', 'timeline.json');
+		const indexBefore = await fs.readFile(indexPath, 'utf-8');
+
+		for (const bad of ['../outside.txt', path.resolve(tempDir, '..', 'x'), '.nanocoder/timeline/session-escape/timeline.json']) {
+			await t.throwsAsync(manager.readBefore(entry?.id ?? '', bad), {
+				message: /outside the workspace/,
+			});
+		}
+
+		await manager.readBefore(entry?.id ?? '', 'a.ts');
+		t.is(await fs.readFile(indexPath, 'utf-8'), indexBefore);
+		t.is(await fs.readFile(path.join(tempDir, 'a.ts'), 'utf-8'), 'before');
+		t.is((await manager.list()).length, 1);
+	} finally {
+		await cleanupTempDir(tempDir);
+	}
+});
+
 test.serial('TimelineManager revert covers every checkpoint in the same turn', async t => {
 	const tempDir = await createTempDir();
 	try {

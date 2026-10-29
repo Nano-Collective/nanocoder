@@ -777,6 +777,21 @@ export class AcpAgent implements Agent {
 			return {entries: await session.timeline.list()};
 		}
 
+		if (method === 'timeline/read') {
+			const {sessionId, checkpointId, path} = params;
+			if (
+				typeof sessionId !== 'string' ||
+				typeof checkpointId !== 'string' ||
+				typeof path !== 'string'
+			) {
+				throw new Error(
+					'timeline/read requires string sessionId, checkpointId and path',
+				);
+			}
+			const session = this.requireSession(sessionId);
+			return {...(await session.timeline.readBefore(checkpointId, path))};
+		}
+
 		if (method === 'timeline/revert') {
 			const sessionId = params.sessionId;
 			const checkpointId = params.checkpointId;

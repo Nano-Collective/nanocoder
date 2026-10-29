@@ -46,8 +46,9 @@ ACP reserves method names starting with `_` for custom methods. Nanocoder's are:
 | Method | Params | What it does |
 |--------|--------|--------------|
 | `_nanocoder/renameSession` | `sessionId`, `title` | Sets a session's title |
-| `_nanocoder/timeline/list` | `sessionId` | Lists the session's file-change checkpoints |
+| `_nanocoder/timeline/list` | `sessionId` | Lists the session's file-change checkpoints, including which `filesChanged` were `createdFiles` |
 | `_nanocoder/timeline/revert` | `sessionId`, `checkpointId` | Reverts the files and history to before a checkpoint |
+| `_nanocoder/timeline/read` | `sessionId`, `checkpointId`, `path` | Reads a file as it was just before a checkpoint's tool call (read-only; see [Reading before-images](#reading-before-images)) |
 | `_nanocoder/retryTurn` | `sessionId`, optional `promptText` | Removes the last turn so the prompt can be sent again |
 
 The agent also sends the `_nanocoder/sessionTitleChanged` notification when it titles a session in the background.
@@ -60,9 +61,29 @@ The agent also sends the `_nanocoder/sessionTitleChanged` notification when it t
 
 Take the names from that list as they are rather than building them from a prefix. An agent that doesn't list a method doesn't support it under that name.
 
-**Deprecated aliases.** The same methods are still answered under their old bare names (`renameSession`, `timeline/list`, `timeline/revert`, `retryTurn`) for clients that predate the prefix. The first use of each logs a deprecation notice. The aliases will be removed in a later release, announced in the changelog.
+**Deprecated aliases.** The methods that existed before the prefix are still answered under their old bare names (`renameSession`, `timeline/list`, `timeline/revert`, `retryTurn`) for clients that predate the prefix. The first use of each logs a deprecation notice. The aliases will be removed in a later release, announced in the changelog.
 
 **Unknown methods.** A custom request the agent doesn't recognise fails with the standard JSON-RPC "Method not found" error (`-32601`), so "not supported" can be told apart from "failed".
+
+### Reading before-images
+
+`_nanocoder/timeline/read` returns the saved copy of one file from just before a checkpoint's tool call. It only reads: files, history and the checkpoint index are not touched. The result is one of:
+
+- `{"kind": "text", "content": "..."}` - the file's contents before the call.
+- `{"kind": "created"}` - the file did not exist before the call, so there is no before-image.
+- `{"kind": "unavailable", "reason": "..."}` - there is nothing to return. This covers a checkpoint that was reverted or pruned, a path the checkpoint does not hold, a binary file, and a saved copy that is missing from disk.
+
+`path` is relative to the session's working directory, or an absolute path inside it. A path outside the working directory fails with an error. The session must be loaded, as for `timeline/list`.
+
+**Finding the baseline for a turn.** Each checkpoint is one tool call, and a turn can make several. Checkpoints from the same turn share `truncateToMessageIndex`, so the file as it was before the agent's turn is the before-image from the *earliest* checkpoint with that `truncateToMessageIndex` whose `filesChanged` contains the path. Use `createdFiles` from `timeline/list` to tell a created file from an edited one without a read.
+
+**Limits.**
+
+- Binary files are never saved, so they always read as `unavailable`.
+- A session keeps at most 50 checkpoints; older ones read as `unavailable`. Reverting deletes the reverted turn's checkpoints and every later one, so those read as `unavailable` too.
+- Timelines of sessions untouched for 7 days, or beyond the 20 most recent, are pruned.
+- A shell command or other tool whose targets are not known up front gets a checkpoint only when the Git scan of the workspace before and after the call is complete. A scan that hit its file cap, or that could not run, records none.
+- There is no size cap: a large text file is returned whole.
 
 ## Setup in Zed
 

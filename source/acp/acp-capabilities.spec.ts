@@ -29,6 +29,7 @@ test('getAgentCapabilities - returns session capabilities with close', t => {
 					'_nanocoder/renameSession',
 					'_nanocoder/timeline/list',
 					'_nanocoder/timeline/revert',
+					'_nanocoder/timeline/read',
 					'_nanocoder/retryTurn',
 				],
 				extNotifications: ['_nanocoder/sessionTitleChanged'],

@@ -12,6 +12,8 @@ export interface TimelineEntryMeta {
 	/** Slice `messages` to this index (exclusive) so the assistant tool_calls turn is dropped. */
 	truncateToMessageIndex: number;
 	filesChanged: string[];
+	/** The entries of `filesChanged` that did not exist before this tool call; revert unlinks them. */
+	createdFiles: string[];
 }
 
 export interface TimelineCaptureInput {
@@ -44,7 +46,10 @@ export interface TimelineIndex {
 	entries: TimelineIndexEntry[];
 }
 
-export interface TimelineIndexEntry extends TimelineEntryMeta {
-	/** Files that did not exist before this tool call; revert unlinks them. */
-	createdFiles: string[];
-}
+export type TimelineIndexEntry = TimelineEntryMeta;
+
+/** What a checkpoint holds for one path, as a client reads it back. */
+export type TimelineBeforeImage =
+	| {kind: 'text'; content: string}
+	| {kind: 'created'}
+	| {kind: 'unavailable'; reason: string};

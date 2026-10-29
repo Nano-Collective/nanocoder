@@ -29,6 +29,7 @@ export const ACP_EXT_METHODS = [
 	'renameSession',
 	'timeline/list',
 	'timeline/revert',
+	'timeline/read',
 	'retryTurn',
 ] as const;
 

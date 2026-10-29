@@ -7,6 +7,7 @@ import {
 	MAX_TIMELINE_SESSIONS,
 } from '@/constants';
 import type {
+	TimelineBeforeImage,
 	TimelineCaptureInput,
 	TimelineEntryMeta,
 	TimelineIndex,
@@ -240,6 +241,61 @@ export class TimelineManager {
 	async list(): Promise<TimelineEntryMeta[]> {
 		const index = await this.loadIndex();
 		return index.entries.map(entry => this.toMeta(entry));
+	}
+
+	/**
+	 * Read-only: the contents `filePath` had just before the checkpoint's tool
+	 * call. Only paths the checkpoint recorded are read, so this cannot be used
+	 * to read arbitrary files; a path outside the workspace throws.
+	 *
+	 * Binary files are never recorded (see `snapshotPaths`), so they come back
+	 * as `unavailable` along with any other path the checkpoint does not hold.
+	 */
+	async readBefore(
+		checkpointId: string,
+		filePath: string,
+	): Promise<TimelineBeforeImage> {
+		const relativePath = this.toRelativePath(filePath);
+		if (!relativePath) {
+			throw new Error(`Path is outside the workspace: '${filePath}'`);
+		}
+
+		const index = await this.loadIndex();
+		const entry = index.entries.find(
+			candidate => candidate.id === checkpointId,
+		);
+		if (!entry) {
+			return {
+				kind: 'unavailable',
+				reason: 'The checkpoint no longer exists (reverted or pruned)',
+			};
+		}
+		if (!entry.filesChanged.includes(relativePath)) {
+			return {
+				kind: 'unavailable',
+				reason:
+					'The checkpoint holds no before-image for this path (it is not part of the checkpoint, or it is binary)',
+			};
+		}
+		if (entry.createdFiles.includes(relativePath)) {
+			return {kind: 'created'};
+		}
+
+		try {
+			const filePathOnDisk = path.join(
+				this.entryFilesDir(entry.id),
+				relativePath,
+			); // nosemgrep
+			return {
+				kind: 'text',
+				content: await fs.readFile(filePathOnDisk, 'utf-8'),
+			};
+		} catch {
+			return {
+				kind: 'unavailable',
+				reason: 'The saved before-image is missing',
+			};
+		}
 	}
 
 	async capture(
@@ -487,6 +543,7 @@ export class TimelineManager {
 			timestamp: entry.timestamp,
 			truncateToMessageIndex: entry.truncateToMessageIndex,
 			filesChanged: entry.filesChanged,
+			createdFiles: entry.createdFiles,
 		};
 	}
 
