@@ -224,6 +224,11 @@ async function runTurn(
 		options;
 	const {abortController} = session;
 
+	// One id per prompt, shared by every checkpoint it records. The model
+	// round-trips inside a prompt each move `truncateToMessageIndex` forward, so
+	// a client cannot use that to tell which tool calls belong to one turn.
+	const turnId = crypto.randomUUID();
+
 	let messages = session.messages;
 	const walkthroughLifecycle = createWalkthroughLifecycle(messages);
 	let wrotePlan = false;
@@ -726,6 +731,7 @@ async function runTurn(
 				toolCall,
 				messages,
 				meta.title,
+				turnId,
 			);
 
 			let pollInterval: ReturnType<typeof setInterval> | null = null;

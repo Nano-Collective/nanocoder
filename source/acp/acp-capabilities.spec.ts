@@ -35,6 +35,7 @@ test('getAgentCapabilities - returns session capabilities with close', t => {
 					'_nanocoder/timeline/list',
 					'_nanocoder/timeline/revert',
 					'_nanocoder/retryTurn',
+					'_nanocoder/timeline/read',
 					'_nanocoder/cancelSubagent',
 				],
 				extNotifications: [

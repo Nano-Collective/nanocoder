@@ -2187,6 +2187,99 @@ test('runAcpConversation - does not capture a timeline checkpoint for read_file'
 	t.deepEqual(await session.timeline.list(), []);
 });
 
+test('runAcpConversation - checkpoints of one prompt share a turn id across model round-trips', async t => {
+	const {conn} = createMockConn();
+	const cwd = join(
+		tmpdir(),
+		`nanocoder-timeline-turn-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+	);
+	mkdirSync(cwd, {recursive: true});
+	t.teardown(() => rmSync(cwd, {recursive: true, force: true}));
+	writeFileSync(join(cwd, 'a.ts'), 'v0');
+
+	const session = createMockSession(conn, {devMode: 'yolo', cwd});
+	const toolManager = {
+		...createMockToolManager(),
+		hasTool: () => true,
+		isReadOnly: (name: string) => name !== 'write_file',
+	};
+
+	// Applies the edit, so each checkpoint's before-image is the previous write.
+	setToolRegistryGetter(() => ({
+		write_file: async (args: {path: string; content: string}) => {
+			writeFileSync(join(cwd, args.path), args.content);
+			return `Wrote ${args.path}`;
+		},
+	}));
+
+	// Each model round-trip edits a.ts once, then the prompt ends.
+	const scriptedClient = (contents: string[]) => {
+		let callCount = 0;
+		return {
+			chat: async () => {
+				const content = contents[callCount];
+				callCount++;
+				if (content === undefined) {
+					return {choices: [{message: {content: 'done'}}]};
+				}
+				return {
+					choices: [
+						{
+							message: {
+								content: '',
+								tool_calls: [
+									createMockToolCall(
+										'write_file',
+										{path: 'a.ts', content},
+										`call-${content}`,
+									),
+								],
+							},
+						},
+					],
+				};
+			},
+		} as unknown as LLMClient;
+	};
+	const runPrompt = (contents: string[]) =>
+		runAcpConversation({
+			session,
+			client: scriptedClient(contents),
+			toolManager: toolManager as any,
+			conn,
+			nonInteractiveAlwaysAllow: [],
+		});
+
+	await runPrompt(['v1', 'v2']);
+	await runPrompt(['v3']);
+
+	const [first, second, nextPrompt] = await session.timeline.list();
+
+	// Two round-trips of one prompt: `truncateToMessageIndex` moved on, so it
+	// cannot group them, but the turn id does.
+	t.not(first.truncateToMessageIndex, second.truncateToMessageIndex);
+	t.truthy(first.turnId);
+	t.is(first.turnId, second.turnId);
+	// The next prompt is a new turn.
+	t.truthy(nextPrompt.turnId);
+	t.not(nextPrompt.turnId, first.turnId);
+
+	// The documented baseline: the earliest checkpoint of the turn holds the
+	// file as it was before the agent touched it, not after its first edit.
+	t.deepEqual(await session.timeline.readBefore(first.id, 'a.ts'), {
+		kind: 'text',
+		content: 'v0',
+	});
+	t.deepEqual(await session.timeline.readBefore(second.id, 'a.ts'), {
+		kind: 'text',
+		content: 'v1',
+	});
+	t.deepEqual(await session.timeline.readBefore(nextPrompt.id, 'a.ts'), {
+		kind: 'text',
+		content: 'v2',
+	});
+});
+
 test.serial(
 	'runAcpConversation - compacts history before the next model turn when over the token threshold',
 	async t => {
