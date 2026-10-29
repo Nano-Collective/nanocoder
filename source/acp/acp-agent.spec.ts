@@ -2354,6 +2354,28 @@ test.serial('AcpAgent.prompt - a session calls its own MCP tool, which the proce
 	}
 });
 
+test.serial('AcpAgent.newSession - a client can turn off an MCP tool of the session', async t => {
+	const {agent, toolsOf} = createMcpAgent();
+	const created = await agent.newSession({
+		cwd: SESSION_CWD,
+		mcpServers: [fixtureServer('one', 'tool_one')],
+		_meta: {'nanocoder/disabledTools': ['tool_one', 'no_such_tool']},
+	});
+	try {
+		t.true(toolsOf(created.sessionId).hasTool('tool_one'));
+		// Known to this session, so it is reported; an unknown name is not.
+		t.deepEqual(
+			(created._meta?.['nanocoder/disabledTools'] as string[]).filter(name =>
+				['tool_one', 'no_such_tool'].includes(name),
+			),
+			['tool_one'],
+		);
+	} finally {
+		await agent.closeSession({sessionId: created.sessionId});
+		await agent.deleteSession({sessionId: created.sessionId});
+	}
+});
+
 test.serial('AcpAgent.newSession - the advertised alwaysAllow list includes the own MCP tools of the session', async t => {
 	const config = getAppConfig();
 	const previous = config.alwaysAllow;
@@ -2374,5 +2396,182 @@ test.serial('AcpAgent.newSession - the advertised alwaysAllow list includes the 
 		await agent.closeSession({sessionId: withServer.sessionId});
 		await agent.deleteSession({sessionId: withServer.sessionId});
 		await agent.deleteSession({sessionId: without.sessionId});
+	}
+});
+
+// ============================================================================
+// Per-session disabled tools
+// ============================================================================
+
+const DISABLED_META = 'nanocoder/disabledTools';
+
+/** An agent whose tool manager records the disabled list each prompt is built with. */
+const createDisabledToolsAgent = () => {
+	const offeredWith: Array<readonly string[] | undefined> = [];
+	const context = createMockInitContext();
+	context.toolManager = {
+		...context.toolManager,
+		hasTool: (name: string) => name === 'browser' || name === 'fetch_url',
+		getAvailableToolNames: (
+			_tune: unknown,
+			_mode: unknown,
+			disabled?: readonly string[],
+		) => {
+			offeredWith.push(disabled);
+			return ['read_file', 'browser', 'fetch_url'].filter(
+				name => !disabled?.includes(name),
+			);
+		},
+		getMCPToolInfo: () => ({isMCPTool: false}),
+	} as any;
+	return {agent: new AcpAgent(context, createMockConn()), offeredWith};
+};
+
+test.serial('AcpAgent - new, load and resume honour the client\'s disabled tools, on top of the user\'s', async t => {
+	const config = getAppConfig();
+	const previous = config.disabledTools;
+	config.disabledTools = ['fetch_url'];
+	const {agent, offeredWith} = createDisabledToolsAgent();
+	const meta = {[DISABLED_META]: ['browser']};
+	const created = await agent.newSession({cwd: '/tmp', _meta: meta});
+
+	try {
+		// The session's prompt was built with both lists, the user's kept.
+		t.deepEqual(offeredWith.at(-1), ['fetch_url', 'browser']);
+
+		await agent.prompt({
+			sessionId: created.sessionId,
+			prompt: [{type: 'text', text: 'Persist this session.'}],
+		});
+		const params = {sessionId: created.sessionId, cwd: '/tmp', _meta: meta};
+		const loaded = await agent.loadSession({...params, mcpServers: []});
+		const resumed = await agent.resumeSession(params);
+
+		for (const response of [created, loaded, resumed]) {
+			t.deepEqual(response._meta?.[DISABLED_META], ['fetch_url', 'browser']);
+		}
+	} finally {
+		config.disabledTools = previous;
+		await agent.deleteSession({sessionId: created.sessionId});
+	}
+});
+
+test.serial('AcpAgent - a session that did not ask keeps the tool, in the same process', async t => {
+	const {agent} = createDisabledToolsAgent();
+	const config = getAppConfig();
+	const previous = config.disabledTools;
+	config.disabledTools = [];
+	const without = await agent.newSession({cwd: '/tmp'});
+	const withBrowserOff = await agent.newSession({
+		cwd: '/tmp',
+		_meta: {[DISABLED_META]: ['browser']},
+	});
+
+	try {
+		t.deepEqual(without._meta?.[DISABLED_META], []);
+		t.deepEqual(withBrowserOff._meta?.[DISABLED_META], ['browser']);
+		// And the first was not changed by the second one being created.
+		t.deepEqual(
+			(agent as any).sessions.get(without.sessionId).effectiveDisabledTools(),
+			[],
+		);
+	} finally {
+		config.disabledTools = previous;
+		await agent.deleteSession({sessionId: without.sessionId});
+		await agent.deleteSession({sessionId: withBrowserOff.sessionId});
+	}
+});
+
+test.serial('AcpAgent.loadSession - a live session takes the list the client sends now', async t => {
+	const config = getAppConfig();
+	const previous = config.disabledTools;
+	config.disabledTools = [];
+	const {agent, offeredWith} = createDisabledToolsAgent();
+	const created = await agent.newSession({
+		cwd: '/tmp',
+		_meta: {[DISABLED_META]: ['browser']},
+	});
+
+	try {
+		const params = {sessionId: created.sessionId, cwd: '/tmp', mcpServers: []};
+		const swapped = await agent.loadSession({
+			...params,
+			_meta: {[DISABLED_META]: ['fetch_url']},
+		});
+		t.deepEqual(swapped._meta?.[DISABLED_META], ['fetch_url']);
+		// The prompt was rebuilt, so the tool list the model sees matches.
+		t.deepEqual(offeredWith.at(-1), ['fetch_url']);
+
+		// Sent on every load, so none sent means none disabled.
+		const cleared = await agent.loadSession(params);
+		t.deepEqual(cleared._meta?.[DISABLED_META], []);
+	} finally {
+		config.disabledTools = previous;
+		await agent.deleteSession({sessionId: created.sessionId});
+	}
+});
+
+test.serial('AcpAgent - the list is not persisted, so a resume without it disables nothing', async t => {
+	const config = getAppConfig();
+	const previous = config.disabledTools;
+	config.disabledTools = [];
+	const {agent} = createDisabledToolsAgent();
+	const created = await agent.newSession({
+		cwd: '/tmp',
+		_meta: {[DISABLED_META]: ['browser']},
+	});
+
+	try {
+		await agent.prompt({
+			sessionId: created.sessionId,
+			prompt: [{type: 'text', text: 'Persist this session.'}],
+		});
+		const stored = await sessionManager.loadSession(created.sessionId);
+		t.false(JSON.stringify(stored).includes('browser'));
+
+		const resumed = await agent.resumeSession({
+			sessionId: created.sessionId,
+			cwd: '/tmp',
+		});
+		t.deepEqual(resumed._meta?.[DISABLED_META], []);
+	} finally {
+		config.disabledTools = previous;
+		await agent.deleteSession({sessionId: created.sessionId});
+	}
+});
+
+// Serial: it patches the process-wide logger.
+test.serial('AcpAgent - an unknown or malformed disabled tool is ignored, with a debug log', async t => {
+	const config = getAppConfig();
+	const previous = config.disabledTools;
+	config.disabledTools = [];
+	const logger = getLogger();
+	const original = logger.debug;
+	const lines: string[] = [];
+	logger.debug = ((message: string) => {
+		lines.push(message);
+	}) as typeof logger.debug;
+	const {agent} = createDisabledToolsAgent();
+	let created: Awaited<ReturnType<typeof agent.newSession>> | undefined;
+	try {
+		created = await agent.newSession({
+			cwd: '/tmp',
+			_meta: {[DISABLED_META]: ['browser', 'no_such_tool', 42]},
+		});
+
+		// Only the unknown name is noted. Match the message, not a substring of
+		// it: the line also carries the session's random UUID.
+		const ignored = lines.filter(line =>
+			line.includes('ignoring unknown disabled tool'),
+		);
+		t.is(ignored.length, 1);
+		t.true(ignored[0].includes('"no_such_tool"'));
+		// A number is dropped before it can be named in a log, and the response
+		// lists only the tool that is actually in effect.
+		t.deepEqual(created._meta?.[DISABLED_META], ['browser']);
+	} finally {
+		logger.debug = original;
+		config.disabledTools = previous;
+		if (created) await agent.deleteSession({sessionId: created.sessionId});
 	}
 });

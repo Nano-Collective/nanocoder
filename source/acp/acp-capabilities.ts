@@ -108,6 +108,31 @@ export function acpMcpServersToConfig(servers: McpServer[] = []): {
 	return {servers: mapped, skipped};
 }
 
+/**
+ * `_meta` key a client sets on session/new, session/load and session/resume to
+ * turn tools off for that session, and under which the response reports the
+ * list in effect.
+ */
+export const ACP_DISABLED_TOOLS_META = 'nanocoder/disabledTools';
+
+/** The tool names a client asked to disable; anything but a list of strings is ignored. */
+export function parseDisabledTools(meta: unknown): string[] {
+	const requested = (meta as Record<string, unknown> | null | undefined)?.[
+		ACP_DISABLED_TOOLS_META
+	];
+	return Array.isArray(requested)
+		? requested.filter((name): name is string => typeof name === 'string')
+		: [];
+}
+
+/** The user's own disabledTools plus the session's; the session never replaces them. */
+export function mergeDisabledTools(
+	userDisabled: readonly string[] = [],
+	sessionDisabled: readonly string[] = [],
+): string[] {
+	return [...new Set([...userDisabled, ...sessionDisabled])];
+}
+
 export function getAvailableModes(): SessionModeId[] {
 	return ACP_MODES;
 }

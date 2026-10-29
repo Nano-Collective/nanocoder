@@ -2716,6 +2716,56 @@ test.serial('a subagent is limited to the tools of the bridge session mode', asy
 	}
 });
 
+test.serial('a subagent of a session that turned a tool off is not offered it and cannot run it', async t => {
+	const run = async (disabled: string[] | undefined) => {
+		let ran = 0;
+		const toolManager = createMockToolManager({
+			read_file: {
+				handler: async () => {
+					ran++;
+					return 'content';
+				},
+				readOnly: true,
+			},
+		});
+		const client = createMockClient([
+			{
+				content: '',
+				tool_calls: [{id: 'tc1', function: {name: 'read_file', arguments: '{}'}}],
+			},
+			{content: 'Done'},
+		]);
+		const offered: string[][] = [];
+		const chat = client.chat.bind(client);
+		(client as any).chat = (messages: Message[], tools: object, ...rest: unknown[]) => {
+			offered.push(Object.keys(tools));
+			return (chat as any)(messages, tools, ...rest);
+		};
+		const {bridge, events} = createRecordingBridge();
+		if (disabled) bridge.getDisabledTools = () => disabled;
+
+		await runExploreWithBridge(
+			toolManager,
+			[],
+			bridge,
+			new SubagentExecutor(toolManager, client),
+		);
+		return {offered, ran, events};
+	};
+
+	const off = await run(['read_file']);
+	t.false(off.offered[0].includes('read_file'));
+	// Named anyway, it is refused at the execution boundary and settled as failed.
+	t.is(off.ran, 0);
+	t.true(off.events.some(e => e.startsWith('end agent-1:tc1 failed')));
+	t.true(off.events.some(e => e.includes('not available to this subagent')));
+
+	// Nothing turned off, nothing changes.
+	const on = await run(undefined);
+	t.true(on.offered[0].includes('read_file'));
+	t.is(on.ran, 1);
+});
+
 // ============================================================================
 // Run lifecycle events and per-child cancel
 // ============================================================================

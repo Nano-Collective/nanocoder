@@ -328,13 +328,19 @@ export class SubagentExecutor {
 				: undefined;
 			emitRun?.('started');
 
-			// An ACP session's mode, not the shared executor's, decides which tools
-			// its subagents are offered, as it does for the top-level agent.
-			const mode =
-				getSubagentToolBridge(executionContext?.sessionId)?.getMode() ??
-				this.currentMode();
-			const context = this.createSubagentContext(config, task, mode);
-			const filteredTools = this.filterTools(config, mode);
+			// An ACP session's mode, and the tools it turned off, not the shared
+			// executor's, decide which tools its subagents are offered, as they do
+			// for the top-level agent.
+			const bridge = getSubagentToolBridge(executionContext?.sessionId);
+			const mode = bridge?.getMode() ?? this.currentMode();
+			const sessionDisabled = bridge?.getDisabledTools?.() ?? [];
+			const context = this.createSubagentContext(
+				config,
+				task,
+				mode,
+				sessionDisabled,
+			);
+			const filteredTools = this.filterTools(config, mode, sessionDisabled);
 			const recalled = await appendRelevantProjectContextWithCount(
 				context.systemMessage,
 				this.buildTaskPrompt(task),
@@ -447,6 +453,7 @@ export class SubagentExecutor {
 		config: SubagentConfigWithSource,
 		task: SubagentTask,
 		mode: DevelopmentMode,
+		sessionDisabled: readonly string[],
 	): SubagentContext {
 		const initialMessages = [
 			{
@@ -455,7 +462,11 @@ export class SubagentExecutor {
 			},
 		];
 
-		const availableTools = this.getAvailableToolNames(config, mode);
+		const availableTools = this.getAvailableToolNames(
+			config,
+			mode,
+			sessionDisabled,
+		);
 
 		return {
 			availableTools,
@@ -481,6 +492,7 @@ export class SubagentExecutor {
 	private getAvailableToolNames(
 		config: SubagentConfigWithSource,
 		mode: DevelopmentMode = this.currentMode(),
+		sessionDisabled: readonly string[] = [],
 	): string[] {
 		const allTools = Object.keys(
 			this.toolManager.getAllTools({forSkill: config.ownerSkill}),
@@ -505,10 +517,13 @@ export class SubagentExecutor {
 			);
 		}
 
-		// Honor the global disabledTools list — applies to subagents too.
-		const globalDisabled = getAppConfig().disabledTools;
-		if (globalDisabled && globalDisabled.length > 0) {
-			const disabledSet = new Set(globalDisabled);
+		// Honor the user's disabledTools list, and the session's own, which
+		// applies to subagents too.
+		const disabledSet = new Set([
+			...(getAppConfig().disabledTools ?? []),
+			...sessionDisabled,
+		]);
+		if (disabledSet.size > 0) {
 			available = available.filter(name => !disabledSet.has(name));
 		}
 
@@ -540,11 +555,16 @@ export class SubagentExecutor {
 	private filterTools(
 		config: SubagentConfigWithSource,
 		mode: DevelopmentMode,
+		sessionDisabled: readonly string[],
 	): Record<string, AISDKCoreTool> {
 		const allTools = this.toolManager.getAllTools({
 			forSkill: config.ownerSkill,
 		});
-		const availableNames = this.getAvailableToolNames(config, mode);
+		const availableNames = this.getAvailableToolNames(
+			config,
+			mode,
+			sessionDisabled,
+		);
 
 		const filtered: Record<string, AISDKCoreTool> = {} as Record<
 			string,
@@ -1010,7 +1030,11 @@ export class SubagentExecutor {
 		// Checked against the session's mode as it is now, so a switch to plan
 		// mid-run stops a subagent writing.
 		if (
-			!this.getAvailableToolNames(config, bridge?.getMode()).includes(toolName)
+			!this.getAvailableToolNames(
+				config,
+				bridge?.getMode(),
+				bridge?.getDisabledTools?.(),
+			).includes(toolName)
 		) {
 			return finish(
 				{

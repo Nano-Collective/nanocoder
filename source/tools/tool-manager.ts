@@ -315,7 +315,7 @@ export class ToolManager {
 	getAvailableToolNames(
 		tuneConfig?: TuneConfig,
 		developmentMode?: DevelopmentMode,
-		disabledTools?: string[],
+		disabledTools?: readonly string[],
 		model?: string,
 	): string[] {
 		let names = this.getToolNames();

@@ -90,3 +90,17 @@ test.serial('getAlwaysAllowedTools - leaves out tools the session is not offered
 		config.disabledTools = previous;
 	}
 });
+
+test('getAlwaysAllowedTools - leaves out tools the session turned off', async t => {
+	const manager = new ToolManager();
+	const alwaysAllow = ['read_file', 'write_file'];
+
+	t.deepEqual(
+		(
+			await getAlwaysAllowedTools(manager, 'auto-accept', alwaysAllow, [
+				'write_file',
+			])
+		).sort(),
+		['read_file'],
+	);
+});
