@@ -3451,10 +3451,16 @@ test.serial('runAcpConversation - a real sub-agent run reaches the client from s
 });
 
 test.serial('runAcpConversation - cancelling one sub-agent lets the parent turn continue', async t => {
+	let childModelCalled = false;
 	await startRealSubagents({
 		chat: (_m: unknown, _t: unknown, _c: unknown, signal?: AbortSignal) =>
 			new Promise((_resolve, reject) => {
-				signal?.addEventListener('abort', () => reject(new Error('Aborted')));
+				childModelCalled = true;
+				// A real client rejects on a signal that is already aborted, so
+				// this must too: a cancel can land before the call is made.
+				const abort = () => reject(new Error('Aborted'));
+				if (signal?.aborted) abort();
+				else signal?.addEventListener('abort', abort);
 			}),
 		getCurrentModel: () => 'm',
 		getProviderConfig: () => ({name: 'p'}),
@@ -3467,6 +3473,7 @@ test.serial('runAcpConversation - cancelling one sub-agent lets the parent turn 
 	const started = await waitFor(() =>
 		notifications.find(n => n.params.status === 'started'),
 	);
+	await waitFor(() => (childModelCalled ? true : undefined));
 	t.true(cancelSubagentRun(session.sessionId, started.params.childRunId));
 	const result = await turn;
 

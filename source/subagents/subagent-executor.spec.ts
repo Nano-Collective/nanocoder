@@ -2749,10 +2749,14 @@ function hangingClient(onAbort?: () => void, onStart?: () => void): LLMClient {
 	) =>
 		new Promise((_resolve, reject) => {
 			onStart?.();
-			signal?.addEventListener('abort', () => {
+			// A real client rejects on a signal that is already aborted, so this
+			// must too: a cancel can land before the call is made.
+			const abort = () => {
 				onAbort?.();
 				reject(new Error('Aborted'));
-			});
+			};
+			if (signal?.aborted) abort();
+			else signal?.addEventListener('abort', abort);
 		});
 	return client;
 }
@@ -2927,6 +2931,32 @@ test.serial('cancelling one run ends it and leaves its sibling and the turn runn
 		events.filter(e => e.childRunId === 'run-keep').at(-1)?.status,
 		'completed',
 	);
+});
+
+test.serial('a cancel that lands just before the model call is made still ends the run', async t => {
+	// The first progress event fires after the loop's own aborted check and
+	// before the model call, so cancelling there hands chat() a signal that is
+	// already aborted. A client that only listens for the event would hang.
+	const stop = onSubagentRunEvent(event => {
+		if (event.status === 'progress') cancelSubagentRun(SESSION, 'run-late');
+	});
+	try {
+		const result = await new SubagentExecutor(
+			createMockToolManager(),
+			hangingClient(),
+		).execute(
+			{subagent_type: 'explore', description: 'late'},
+			undefined,
+			0,
+			'run-late',
+			{sessionId: SESSION},
+		);
+
+		t.false(result.success);
+		t.is(result.error, 'Subagent was cancelled');
+	} finally {
+		stop();
+	}
 });
 
 test.serial('cancelling the turn cancels every run', async t => {
