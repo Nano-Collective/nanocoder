@@ -4,6 +4,7 @@ import React from 'react';
 import {DELAY_COMMAND_COMPLETE_MS} from '@/constants';
 import {useUserMessageQueue} from '@/hooks/useUserMessageQueue';
 import stripAnsi from 'strip-ansi';
+import type {Task} from '@/tools/tasks/types';
 import type {Message} from '@/types';
 import {renderWithTheme} from '../../test-utils/render-with-theme.js';
 import {InteractiveApp} from './interactive-app.js';
@@ -55,6 +56,7 @@ interface Overrides {
 	currentSessionId?: string | null;
 	toolManager?: unknown;
 	queuedMessages?: Array<{id: string; message: string; displayValue: string}>;
+	liveTaskList?: Task[] | null;
 	handleUserSubmit?: (message: string) => Promise<void>;
 	drainNextMessage?: (
 		dispatch: (message: {id: string; message: string; displayValue: string}) =>
@@ -105,7 +107,7 @@ function makeProps(o: Overrides = {}) {
 		sessionName: '',
 		compactToolCounts: null,
 		compactToolDisplay: false,
-		liveTaskList: null,
+		liveTaskList: o.liveTaskList ?? null,
 		showTaskList: true,
 		taskListHasUnread: false,
 		toggleTaskList: noop,
@@ -1191,6 +1193,100 @@ test('ChatInput is NOT rendered while plan review bar is showing', t => {
 	// The ChatInput prompt line should be absent — both inputs must not be
 	// active at the same time (double-input blocker).
 	t.notRegex(output, /What now\?/);
+});
+
+// ============================================================================
+// Shortcuts overlay
+// ============================================================================
+
+// The overlay sizes itself from process.stdout.rows; restore it afterwards so
+// a later test never renders for this test's terminal size.
+const withTerminalRows = async (rows: number, run: () => Promise<void>) => {
+	const originalRows = process.stdout.rows;
+	process.stdout.rows = rows;
+	try {
+		await run();
+	} finally {
+		process.stdout.rows = originalRows;
+	}
+};
+
+const frameText = (lastFrame: () => string | undefined) =>
+	stripAnsi(lastFrame() ?? '');
+
+const makeTask = (n: number): Task => ({
+	id: `task-${n}`,
+	title: `Live task ${n}`,
+	status: 'pending',
+	createdAt: '2026-01-01T00:00:00.000Z',
+	updatedAt: '2026-01-01T00:00:00.000Z',
+});
+
+test.serial('shortcuts overlay keeps its close hint on screen above a live task list', async t => {
+	await withTerminalRows(18, async () => {
+		const {stdin, lastFrame, unmount} = renderWithTheme(
+			<InteractiveApp
+				{...makeProps({
+					startChat: true,
+					client: {},
+					altScreenActive: true,
+					liveTaskList: [1, 2, 3].map(makeTask),
+				})}
+			/>,
+		);
+		await waitForCondition(() => /Live task 3/.test(frameText(lastFrame)));
+
+		stdin.write('?');
+		await waitForCondition(() =>
+			/Keyboard Shortcuts/.test(frameText(lastFrame)),
+		);
+		const frame = frameText(lastFrame);
+		t.regex(frame, /\? or Esc to close/);
+		t.regex(frame, /╰─+╯/);
+		t.regex(frame, /▶ normal/);
+		t.notRegex(frame, /Live task/);
+
+		stdin.write('?');
+		await waitForCondition(() => /Live task 3/.test(frameText(lastFrame)));
+		unmount();
+	});
+});
+
+test.serial('PgUp/PgDn scroll the shortcuts overlay but not the transcript behind it', async t => {
+	await withTerminalRows(18, async () => {
+		const transcript = Array.from({length: 40}, (_, i) => (
+			<Text key={`line-${i}`}>{`transcript line ${i}`}</Text>
+		));
+		const {stdin, lastFrame, unmount} = renderWithTheme(
+			<InteractiveApp
+				{...makeProps({
+					startChat: true,
+					client: {},
+					altScreenActive: true,
+					chatComponents: transcript,
+				})}
+			/>,
+		);
+		await waitForCondition(() =>
+			/transcript line 39/.test(frameText(lastFrame)),
+		);
+
+		stdin.write('?');
+		await waitForCondition(() => /1-7 of 18/.test(frameText(lastFrame)));
+		stdin.write('\x1B[6~');
+		await waitForCondition(() => /8-14 of 18/.test(frameText(lastFrame)));
+		stdin.write('\x1B[5~');
+		await waitForCondition(() => /1-7 of 18/.test(frameText(lastFrame)));
+
+		stdin.write('?');
+		await waitForCondition(
+			() => !/Keyboard Shortcuts/.test(frameText(lastFrame)),
+		);
+		const frame = frameText(lastFrame);
+		t.notRegex(frame, /new output returns to bottom/);
+		t.regex(frame, /transcript line 39/);
+		unmount();
+	});
 });
 
 // FileExplorer/IdeSelector start watchers that keep the event loop alive
