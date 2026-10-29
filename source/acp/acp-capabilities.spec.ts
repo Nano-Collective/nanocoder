@@ -66,8 +66,13 @@ test('acpModeToDevelopmentMode - maps plan', t => {
 	t.is(acpModeToDevelopmentMode('plan'), 'plan');
 });
 
-test('acpModeToDevelopmentMode - falls back to auto-accept for unknown mode', t => {
-	t.is(acpModeToDevelopmentMode('unknown' as any), 'auto-accept');
+test('acpModeToDevelopmentMode - rejects an unknown mode as invalid params', t => {
+	// "constructor" and "toString" exist on every object, so a plain lookup
+	// would have accepted them.
+	for (const modeId of ['norml', '', 'constructor', 'toString', '__proto__']) {
+		const error = t.throws(() => acpModeToDevelopmentMode(modeId));
+		t.is((error as {code?: number}).code, -32602, modeId);
+	}
 });
 
 // ============================================================================

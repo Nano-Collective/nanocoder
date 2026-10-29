@@ -775,6 +775,7 @@ async function main(): Promise<void> {
 			cliModel,
 			appVersion: version,
 			trustDirectory: trustDirectoryRequested,
+			mode: cliMode,
 		});
 	} else if (plainMode && nonInteractivePrompt) {
 		// Headless, Ink-free path. Note: --plain is currently only valid with

@@ -3,16 +3,8 @@ import type {
 	ProtocolVersion,
 	SessionModeId,
 } from '@agentclientprotocol/sdk';
-import {PROTOCOL_VERSION} from '@agentclientprotocol/sdk';
+import {PROTOCOL_VERSION, RequestError} from '@agentclientprotocol/sdk';
 import type {DevelopmentMode} from '@/types/core';
-
-const ACP_MODES: SessionModeId[] = [
-	'normal',
-	'auto-accept',
-	'yolo',
-	'plan',
-	'architect',
-];
 
 const MODE_MAP: Record<SessionModeId, DevelopmentMode> = {
 	normal: 'normal',
@@ -21,6 +13,9 @@ const MODE_MAP: Record<SessionModeId, DevelopmentMode> = {
 	plan: 'plan',
 	architect: 'architect',
 };
+
+// Own keys only, so the advertised modes and the mapping cannot drift apart.
+const ACP_MODES = Object.keys(MODE_MAP) as SessionModeId[];
 
 /** ACP reserves `_`-prefixed method names for custom methods. */
 export const ACP_EXT_PREFIX = '_nanocoder/';
@@ -83,7 +78,15 @@ export function negotiateProtocolVersion(
 export function acpModeToDevelopmentMode(
 	modeId: SessionModeId,
 ): DevelopmentMode {
-	return MODE_MAP[modeId] ?? 'auto-accept';
+	// Checked against the list, not MODE_MAP, which also answers to inherited
+	// keys such as "constructor".
+	if (!ACP_MODES.includes(modeId)) {
+		throw RequestError.invalidParams(
+			{modeId},
+			`Unknown session mode: ${modeId}`,
+		);
+	}
+	return MODE_MAP[modeId];
 }
 
 export function developmentModeToAcpMode(mode: DevelopmentMode): SessionModeId {
