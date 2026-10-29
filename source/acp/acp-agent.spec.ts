@@ -223,21 +223,32 @@ test('AcpAgent.initialize - advertises loadSession capability', async t => {
 	t.true(result.agentCapabilities?.loadSession);
 });
 
-test('AcpAgent.loadSession - creates a usable session for an unknown id', async t => {
+test('AcpAgent.loadSession - rejects an unknown id without creating a session', async t => {
 	const {agent} = createAgent();
-	const result = await agent.loadSession({
-		sessionId: 'persisted-123',
-		cwd: '/tmp',
-		mcpServers: [],
-	});
-	t.truthy(result.modes);
-	t.truthy(result.configOptions);
-	// The loaded session must accept prompts (no "session not found").
-	const prompt = await agent.prompt({
-		sessionId: 'persisted-123',
-		prompt: [{type: 'text', text: 'hi'}],
-	});
-	t.truthy(prompt.stopReason);
+	const sessionId = randomUUID();
+	await t.throwsAsync(
+		agent.loadSession({sessionId, cwd: '/tmp', mcpServers: []}),
+		{message: `Session not found on disk: ${sessionId}`},
+	);
+	t.false((agent as any).sessions.has(sessionId));
+	// Nothing was registered, so a following prompt fails and nothing is saved.
+	await t.throwsAsync(
+		agent.prompt({sessionId, prompt: [{type: 'text', text: 'hi'}]}),
+		{message: `Session not found: ${sessionId}`},
+	);
+	t.is(await sessionManager.loadSession(sessionId), null);
+});
+
+test('AcpAgent - loadSession and resumeSession reject an unknown id with the same error', async t => {
+	const {agent} = createAgent();
+	const sessionId = randomUUID();
+	const loadError = await t.throwsAsync(
+		agent.loadSession({sessionId, cwd: '/tmp', mcpServers: []}),
+	);
+	const resumeError = await t.throwsAsync(
+		agent.resumeSession({sessionId, cwd: '/tmp'}),
+	);
+	t.is(loadError?.message, resumeError?.message);
 });
 
 test('AcpAgent.loadSession - replays in-memory history for a known session', async t => {
