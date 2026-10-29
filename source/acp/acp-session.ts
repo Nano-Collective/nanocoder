@@ -8,7 +8,7 @@ import {
 	type SessionCwdScope,
 } from '@/services/session-cwd';
 import {TimelineManager} from '@/services/timeline-manager';
-import type {DevelopmentMode, Message} from '@/types/core';
+import type {DevelopmentMode, LLMClient, Message} from '@/types/core';
 
 export class AcpSession {
 	readonly sessionId: string;
@@ -35,6 +35,17 @@ export class AcpSession {
 	closed = false;
 	/** URI of the file currently focused in the editor client (e.g. VS Code). */
 	activeFile?: string;
+	/**
+	 * Provider, model and client this session talks to. They start from the
+	 * process default and change only through this session; a client is never
+	 * re-pointed at another model, so sessions that began on the same one do not
+	 * follow each other.
+	 */
+	provider = '';
+	model = '';
+	client?: LLMClient;
+	/** The model changed mid-turn: the prompt is rebuilt before the next turn. */
+	promptStale = false;
 	private memoryFinder?: SemanticMemoryManager;
 
 	constructor(options: {

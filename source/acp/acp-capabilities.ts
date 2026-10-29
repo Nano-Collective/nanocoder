@@ -52,6 +52,8 @@ export function getAgentCapabilities(): AgentCapabilities {
 			nanocoder: {
 				extMethods: ACP_EXT_METHODS.map(name => `${ACP_EXT_PREFIX}${name}`),
 				extNotifications: [...ACP_EXT_NOTIFICATIONS],
+				// Model and provider selection belong to each session.
+				perSessionModel: true,
 			},
 		},
 	};

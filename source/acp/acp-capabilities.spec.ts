@@ -32,6 +32,7 @@ test('getAgentCapabilities - returns session capabilities with close', t => {
 					'_nanocoder/retryTurn',
 				],
 				extNotifications: ['_nanocoder/sessionTitleChanged'],
+				perSessionModel: true,
 			},
 		},
 	});

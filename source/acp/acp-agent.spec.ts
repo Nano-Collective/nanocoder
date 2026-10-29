@@ -623,23 +623,269 @@ test('AcpAgent.setSessionConfigOption - throws on unknown model', async t => {
 	);
 });
 
-test('AcpAgent.setSessionConfigOption - switches the client model', async t => {
-	const {agent} = createAgent();
-	const session = await agent.newSession({cwd: '/tmp'});
-	const result = await agent.setSessionConfigOption({
-		sessionId: session.sessionId,
-		configId: 'model',
-		value: 'other-model',
+/** Runs `fn` with two configured providers, so a session can get a client of its own. */
+const withProviders = async (fn: () => Promise<void>): Promise<void> => {
+	const configPath = join(testConfigDir, 'agents.config.json');
+	const original = existsSync(configPath)
+		? readFileSync(configPath, 'utf8')
+		: undefined;
+	writeFileSync(
+		configPath,
+		JSON.stringify({
+			nanocoder: {
+				providers: [
+					{
+						name: 'test-provider',
+						baseUrl: 'http://localhost:1/v1',
+						models: ['test-model', 'other-model'],
+					},
+					{
+						name: 'second-provider',
+						baseUrl: 'http://localhost:1/v1',
+						models: ['second-model', 'other-model'],
+					},
+				],
+			},
+		}),
+	);
+	clearAppConfig();
+	try {
+		await fn();
+	} finally {
+		if (original === undefined) {
+			rmSync(configPath, {force: true});
+		} else {
+			writeFileSync(configPath, original);
+		}
+		clearAppConfig();
+	}
+};
+
+const optionValue = (options: any[] | null | undefined, id: string) =>
+	options?.find(o => o.id === id)?.currentValue;
+
+/** The session's own config options, as `session/load` reports them. */
+const configOptionsOf = async (agent: AcpAgent, sessionId: string) =>
+	(await agent.loadSession({sessionId, cwd: '/tmp', mcpServers: []}))
+		.configOptions;
+
+test.serial('AcpAgent.setSessionConfigOption - switches the client model', async t => {
+	await withProviders(async () => {
+		const {agent} = createAgent();
+		const session = await agent.newSession({cwd: '/tmp'});
+		const result = await agent.setSessionConfigOption({
+			sessionId: session.sessionId,
+			configId: 'model',
+			value: 'other-model',
+		});
+		t.is(optionValue(result.configOptions, 'model'), 'other-model');
+		const after = await agent.newSession({cwd: '/tmp'});
+		t.is(optionValue(after.configOptions, 'model'), 'other-model');
 	});
-	const modelOption = result.configOptions.find(
-		(o: any) => o.id === 'model',
-	) as any;
-	t.is(modelOption?.currentValue, 'other-model');
-	const after = await agent.newSession({cwd: '/tmp'});
-	const afterOption = after.configOptions?.find(
-		(o: any) => o.id === 'model',
-	) as any;
-	t.is(afterOption?.currentValue, 'other-model');
+});
+
+test.serial('AcpAgent.setSessionConfigOption - one session changing model or provider leaves the other alone', async t => {
+	await withProviders(async () => {
+		const {agent} = createAgent();
+		const a = await agent.newSession({cwd: '/tmp'});
+		const b = await agent.newSession({cwd: '/tmp'});
+		const shared = agent['initContext'].client;
+		const sessionA = agent['sessions'].get(a.sessionId)!;
+		const sessionB = agent['sessions'].get(b.sessionId)!;
+
+		await agent.setSessionConfigOption({
+			sessionId: a.sessionId,
+			configId: 'model',
+			value: 'other-model',
+		});
+		t.is(sessionA.client?.getCurrentModel(), 'other-model');
+		// The client B was created with is not touched or replaced.
+		t.is(sessionB.client, shared);
+		t.is(shared.getCurrentModel(), 'test-model');
+		t.is(optionValue(await configOptionsOf(agent, b.sessionId), 'model'), 'test-model');
+
+		const switched = await agent.setSessionConfigOption({
+			sessionId: b.sessionId,
+			configId: 'provider',
+			value: 'second-provider',
+		});
+		// The model B had is not on the new provider, so it takes that provider's first.
+		t.is(optionValue(switched.configOptions, 'provider'), 'second-provider');
+		t.is(optionValue(switched.configOptions, 'model'), 'second-model');
+		const optionsA = await configOptionsOf(agent, a.sessionId);
+		t.is(optionValue(optionsA, 'provider'), 'test-provider');
+		t.is(optionValue(optionsA, 'model'), 'other-model');
+	});
+});
+
+test.serial('AcpAgent.setSessionConfigOption - a model chosen during a turn applies from the next turn', async t => {
+	await withProviders(async () => {
+		const {agent} = createAgent();
+		const created = await agent.newSession({cwd: '/tmp'});
+		const session = agent['sessions'].get(created.sessionId)!;
+		const turnClient = agent['initContext'].client;
+		const promptBefore = session.baseSystemMessage;
+		const turnText =
+			'Please refactor the authentication middleware to use the new session API and add tests.';
+		let turnRequests = 0;
+		let seen: {stale: boolean; prompt: unknown} | undefined;
+		turnClient.chat = (async () => {
+			turnRequests++;
+			await agent.setSessionConfigOption({
+				sessionId: created.sessionId,
+				configId: 'model',
+				value: 'other-model',
+			});
+			seen = {stale: session.promptStale, prompt: session.baseSystemMessage};
+			return {choices: [{message: {content: 'done'}}]};
+		}) as any;
+
+		await agent.prompt({
+			sessionId: created.sessionId,
+			prompt: [{type: 'text', text: turnText}],
+		});
+		await agent['pendingTitleGeneration'];
+
+		// The running turn kept its client and its prompt; the change waits.
+		t.is(turnRequests, 1);
+		t.true(seen?.stale);
+		t.is(seen?.prompt, promptBefore);
+		t.not(session.client, turnClient);
+
+		let nextRequests = 0;
+		session.client = {
+			...turnClient,
+			getCurrentModel: () => 'other-model',
+			chat: async () => {
+				nextRequests++;
+				return {choices: [{message: {content: 'next'}}]};
+			},
+		} as any;
+		await agent.prompt({
+			sessionId: created.sessionId,
+			prompt: [{type: 'text', text: 'And now update the changelog as well, please.'}],
+		});
+		await agent['pendingTitleGeneration'];
+
+		t.false(session.promptStale);
+		t.not(session.baseSystemMessage, promptBefore);
+		t.true(nextRequests >= 1);
+		t.is(turnRequests, 1);
+	});
+});
+
+test.serial('AcpAgent.prompt - each session saves its own provider and model', async t => {
+	await withProviders(async () => {
+		const {agent} = createAgent();
+		await sessionManager.initialize();
+		const a = await agent.newSession({cwd: '/tmp'});
+		const b = await agent.newSession({cwd: '/tmp'});
+		await agent.setSessionConfigOption({
+			sessionId: a.sessionId,
+			configId: 'provider',
+			value: 'second-provider',
+		});
+		// A now has a real client for a provider that is not running.
+		agent['sessions'].get(a.sessionId)!.client!.chat = (async () => ({
+			choices: [{message: {content: 'ok'}}],
+		})) as any;
+		for (const id of [a.sessionId, b.sessionId]) {
+			await agent.prompt({
+				sessionId: id,
+				prompt: [{type: 'text', text: 'Hello there!'}],
+			}).catch(() => {});
+		}
+
+		const savedA = await sessionManager.readSession(a.sessionId);
+		const savedB = await sessionManager.readSession(b.sessionId);
+		t.is(savedA?.provider, 'second-provider');
+		t.is(savedA?.model, 'second-model');
+		t.is(savedB?.provider, 'test-provider');
+		t.is(savedB?.model, 'test-model');
+	});
+});
+
+test.serial('AcpAgent - resume and load restore the model a session was saved with', async t => {
+	await withProviders(async () => {
+		await sessionManager.initialize();
+		const saved = await sessionManager.createSession({
+			title: 'Saved',
+			messageCount: 1,
+			provider: 'second-provider',
+			model: 'other-model',
+			workingDirectory: '/tmp',
+			messages: [{role: 'user', content: 'hi'}],
+		});
+
+		const resumeAgent = createAgent().agent;
+		const resumed = await resumeAgent.resumeSession({
+			sessionId: saved.id,
+			cwd: '/tmp',
+		});
+		t.is(optionValue(resumed.configOptions, 'provider'), 'second-provider');
+		t.is(optionValue(resumed.configOptions, 'model'), 'other-model');
+		t.is(resumed._meta?.['nanocoder/modelFallback'], undefined);
+		// The process default for new sessions is not moved by a restore.
+		t.is(resumeAgent['initContext'].model, 'test-model');
+
+		const loadAgent = createAgent().agent;
+		const loaded = await loadAgent.loadSession({
+			sessionId: saved.id,
+			cwd: '/tmp',
+			mcpServers: [],
+		});
+		t.is(optionValue(loaded.configOptions, 'provider'), 'second-provider');
+		t.is(optionValue(loaded.configOptions, 'model'), 'other-model');
+		t.is(
+			loadAgent['sessions'].get(saved.id)?.client?.getCurrentModel(),
+			'other-model',
+		);
+	});
+});
+
+test.serial('AcpAgent.resumeSession - falls back to the default when the saved model or provider is gone, and says so', async t => {
+	await withProviders(async () => {
+		await sessionManager.initialize();
+		for (const [provider, model] of [
+			['test-provider', 'gone-model'],
+			['removed-provider', 'test-model'],
+		]) {
+			const saved = await sessionManager.createSession({
+				title: 'Saved',
+				messageCount: 1,
+				provider,
+				model,
+				workingDirectory: '/tmp',
+				messages: [{role: 'user', content: 'hi'}],
+			});
+			const {agent} = createAgent();
+			const resumed = await agent.resumeSession({
+				sessionId: saved.id,
+				cwd: '/tmp',
+			});
+
+			t.is(optionValue(resumed.configOptions, 'provider'), 'test-provider');
+			t.is(optionValue(resumed.configOptions, 'model'), 'test-model');
+			t.deepEqual(resumed._meta?.['nanocoder/modelFallback'], {provider, model});
+		}
+	});
+});
+
+test.serial('AcpAgent.resumeSession - a session saved on the default model needs no client of its own', async t => {
+	const {agent} = createAgent();
+	await sessionManager.initialize();
+	const saved = await sessionManager.createSession({
+		title: 'Saved',
+		messageCount: 1,
+		provider: 'test-provider',
+		model: 'test-model',
+		workingDirectory: '/tmp',
+		messages: [{role: 'user', content: 'hi'}],
+	});
+	const resumed = await agent.resumeSession({sessionId: saved.id, cwd: '/tmp'});
+
+	t.is(agent['sessions'].get(saved.id)?.client, agent['initContext'].client);
+	t.is(resumed._meta?.['nanocoder/modelFallback'], undefined);
 });
 
 // ============================================================================
