@@ -4,6 +4,8 @@ import {
 	developmentModeToAcpMode,
 	getAgentCapabilities,
 	getAvailableModes,
+	mergeDisabledTools,
+	parseDisabledTools,
 } from '@/acp/acp-capabilities';
 
 console.log('\nacp-capabilities.spec.ts');
@@ -92,4 +94,41 @@ test('developmentModeToAcpMode - passes through standard modes', t => {
 	t.is(developmentModeToAcpMode('auto-accept'), 'auto-accept');
 	t.is(developmentModeToAcpMode('yolo'), 'yolo');
 	t.is(developmentModeToAcpMode('plan'), 'plan');
+});
+
+// ============================================================================
+// Disabled tools
+// ============================================================================
+
+test('parseDisabledTools - reads the list a client sent under _meta', t => {
+	t.deepEqual(
+		parseDisabledTools({'nanocoder/disabledTools': ['browser', 'web_search']}),
+		['browser', 'web_search'],
+	);
+});
+
+test('parseDisabledTools - ignores anything that is not a list of names', t => {
+	t.deepEqual(parseDisabledTools(undefined), []);
+	t.deepEqual(parseDisabledTools(null), []);
+	t.deepEqual(parseDisabledTools({}), []);
+	t.deepEqual(parseDisabledTools({'nanocoder/disabledTools': 'browser'}), []);
+	t.deepEqual(
+		parseDisabledTools({'nanocoder/disabledTools': ['browser', 3, null, {}]}),
+		['browser'],
+	);
+});
+
+test('mergeDisabledTools - the session adds to the user\'s list and never replaces it', t => {
+	t.deepEqual(
+		mergeDisabledTools(['web_search'], ['browser']),
+		['web_search', 'browser'],
+	);
+	// A tool in both lists is listed once.
+	t.deepEqual(mergeDisabledTools(['browser'], ['browser', 'fetch_url']), [
+		'browser',
+		'fetch_url',
+	]);
+	t.deepEqual(mergeDisabledTools(undefined, ['browser']), ['browser']);
+	t.deepEqual(mergeDisabledTools(['web_search']), ['web_search']);
+	t.deepEqual(mergeDisabledTools(), []);
 });
