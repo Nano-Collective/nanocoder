@@ -1,8 +1,28 @@
+import {createRequire} from 'node:module';
 import chalk from 'chalk';
-import Table from 'cli-table3';
 import {DEFAULT_TERMINAL_WIDTH, TABLE_COLUMN_MIN_WIDTH} from '@/constants';
 import type {Colors} from '../types/markdown-parser';
 import {stripMarkdown} from './utils';
+
+// cli-table3 pulls in ~11 modules that nothing else needs until a table is
+// actually rendered (#1822), so the class is resolved through require on
+// first use instead of a static import.
+interface CliTableInstance {
+	push(cells: string[]): unknown;
+	toString(): string;
+}
+type CliTableCtor = new (options: Record<string, unknown>) => CliTableInstance;
+let cliTableCtor: CliTableCtor | null = null;
+
+function getCliTable(): CliTableCtor {
+	if (!cliTableCtor) {
+		const mod = createRequire(import.meta.url)('cli-table3') as CliTableCtor & {
+			default?: CliTableCtor;
+		};
+		cliTableCtor = mod.default ?? mod;
+	}
+	return cliTableCtor;
+}
 
 // Parse markdown tables using cli-table3
 export function parseMarkdownTable(
@@ -89,7 +109,7 @@ export function parseMarkdownTable(
 	}
 
 	// Create table with cli-table3 - full borders, proper alignment
-	const table = new Table({
+	const table = new (getCliTable())({
 		head: header.map(cell => chalk.hex(themeColors.primary).bold(cell)),
 		colWidths: colWidths,
 		style: {
