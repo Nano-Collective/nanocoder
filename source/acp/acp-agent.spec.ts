@@ -19,6 +19,7 @@ import {
 } from '@/message-handler';
 import {convertToModelMessages} from '@/ai-sdk-client/converters/message-converter';
 import {sessionManager} from '@/session/session-manager';
+import {getLogger} from '@/utils/logging';
 import {SemanticMemoryManager} from '@/memory/semantic-memory-manager';
 import {readFileTool} from '@/tools/read-file';
 import type {Message} from '@/types/core';
@@ -1207,11 +1208,86 @@ test.serial(
 	},
 );
 
-test('AcpAgent.extMethod - throws for an unknown method', async t => {
+test('AcpAgent.extMethod - an unknown method is "Method not found"', async t => {
 	const {agent} = createAgent();
-	await t.throwsAsync(agent.extMethod('bogus', {}), {
-		message: 'Unknown extension method: bogus',
-	});
+	for (const method of ['bogus', '_nanocoder/bogus', '_other/renameSession']) {
+		const error = await t.throwsAsync(agent.extMethod(method, {}));
+		t.is((error as {code?: number}).code, -32601, method);
+		t.regex(error?.message ?? '', /Method not found/);
+	}
+});
+
+test('AcpAgent.extMethod - answers on the prefixed name and on the bare alias', async t => {
+	const {agent} = createAgent();
+	const session = await agent.newSession({cwd: '/tmp'});
+	try {
+		await agent.prompt({
+			sessionId: session.sessionId,
+			prompt: [{type: 'text', text: 'hello'}],
+		});
+		for (const name of ['timeline/list', 'retryTurn', 'renameSession']) {
+			const params =
+				name === 'renameSession'
+					? {sessionId: session.sessionId, title: 'Same title'}
+					: {sessionId: session.sessionId};
+			const prefixed = await agent.extMethod(`_nanocoder/${name}`, params);
+			const bare = await agent.extMethod(name, params);
+			t.deepEqual(prefixed, bare, name);
+		}
+		// The same input errors identically under both names.
+		await t.throwsAsync(
+			agent.extMethod('_nanocoder/timeline/revert', {sessionId: 1}),
+			{message: 'timeline/revert requires string sessionId and checkpointId'},
+		);
+		await t.throwsAsync(
+			agent.extMethod('timeline/revert', {sessionId: 1}),
+			{message: 'timeline/revert requires string sessionId and checkpointId'},
+		);
+	} finally {
+		await agent.deleteSession({sessionId: session.sessionId});
+	}
+});
+
+// Serial: it patches the process-wide logger, and every bare-name call in the
+// other tests would land in the patch window as a stray notice.
+test.serial('AcpAgent.extMethod - a bare name logs one deprecation notice, a prefixed name none', async t => {
+	const {agent} = createAgent();
+	const logger = getLogger();
+	const original = logger.warn;
+	const warnings: string[] = [];
+	logger.warn = ((message: string) => {
+		warnings.push(message);
+	}) as typeof logger.warn;
+	try {
+		const params = {sessionId: 'nope'};
+		await t.throwsAsync(agent.extMethod('_nanocoder/timeline/list', params));
+		t.deepEqual(warnings, []);
+
+		await t.throwsAsync(agent.extMethod('timeline/list', params));
+		await t.throwsAsync(agent.extMethod('timeline/list', params));
+		await t.throwsAsync(agent.extMethod('retryTurn', params));
+		t.is(warnings.length, 2);
+		t.regex(warnings[0], /"timeline\/list" is deprecated; use "_nanocoder\/timeline\/list"/);
+		t.regex(warnings[1], /"retryTurn" is deprecated/);
+	} finally {
+		logger.warn = original;
+	}
+});
+
+test('AcpAgent.initialize - advertises the extension methods, and each one is handled', async t => {
+	const {agent} = createAgent();
+	const {agentCapabilities} = await agent.initialize({protocolVersion: 1});
+	const advertised = agentCapabilities?._meta?.nanocoder as {
+		extMethods: string[];
+		extNotifications: string[];
+	};
+	t.deepEqual(advertised.extNotifications, ['_nanocoder/sessionTitleChanged']);
+	t.true(advertised.extMethods.length > 0);
+	for (const method of advertised.extMethods) {
+		// Bad params fail inside the handler; an unsupported name would be -32601.
+		const error = await t.throwsAsync(agent.extMethod(method, {}));
+		t.not((error as {code?: number}).code, -32601, method);
+	}
 });
 
 test('AcpAgent.extMethod - renameSession throws on non-string sessionId/title', async t => {
