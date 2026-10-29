@@ -563,6 +563,14 @@ export class AcpAgent implements Agent {
 		// Rebuild system prompt for the new mode
 		this.buildSystemPromptForSession(session);
 
+		await this.conn.sessionUpdate({
+			sessionId: params.sessionId,
+			update: {
+				sessionUpdate: 'current_mode_update',
+				currentModeId: params.modeId,
+			},
+		});
+
 		return {};
 	}
 
@@ -902,7 +910,7 @@ export class AcpAgent implements Agent {
 			cwd,
 			conn: this.conn,
 			clientCapabilities: this.clientCapabilities,
-			initialMode: 'auto-accept',
+			initialMode: this.initContext.initialMode,
 		});
 		this.sessions.set(sessionId, session);
 		this.buildSystemPromptForSession(session);

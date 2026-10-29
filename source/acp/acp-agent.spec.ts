@@ -1932,3 +1932,80 @@ test.serial('AcpAgent - new, load and resume report the same approval policy', a
 		await agent.deleteSession({sessionId: created.sessionId});
 	}
 });
+
+test('AcpAgent.setSessionMode - rejects an unknown mode and leaves the session unchanged', async t => {
+	const updates: any[] = [];
+	const conn = createMockConn();
+	conn.sessionUpdate = async (update: any) => {
+		updates.push(update);
+	};
+	const agent = new AcpAgent(createMockInitContext(), conn);
+	const session = await agent.newSession({cwd: '/tmp'});
+	updates.length = 0;
+
+	const error = await t.throwsAsync(
+		agent.setSessionMode({sessionId: session.sessionId, modeId: 'norml'}),
+	);
+	t.is((error as {code?: number}).code, -32602);
+	t.deepEqual(updates, []);
+
+	const loaded = await agent.loadSession({
+		sessionId: session.sessionId,
+		cwd: '/tmp',
+		mcpServers: [],
+	});
+	t.is(loaded.modes?.currentModeId, 'auto-accept');
+});
+
+test('AcpAgent.setSessionMode - applies a mode and confirms it with current_mode_update', async t => {
+	const updates: any[] = [];
+	const conn = createMockConn();
+	conn.sessionUpdate = async (update: any) => {
+		updates.push(update);
+	};
+	const agent = new AcpAgent(createMockInitContext(), conn);
+	const session = await agent.newSession({cwd: '/tmp'});
+	updates.length = 0;
+
+	await agent.setSessionMode({sessionId: session.sessionId, modeId: 'plan'});
+	t.deepEqual(updates, [
+		{
+			sessionId: session.sessionId,
+			update: {sessionUpdate: 'current_mode_update', currentModeId: 'plan'},
+		},
+	]);
+
+	const loaded = await agent.loadSession({
+		sessionId: session.sessionId,
+		cwd: '/tmp',
+		mcpServers: [],
+	});
+	t.is(loaded.modes?.currentModeId, 'plan');
+});
+
+test('AcpAgent - sessions start in the init context mode on new, load and resume', async t => {
+	const context: AcpInitContext = {
+		...createMockInitContext(),
+		initialMode: 'normal',
+	};
+	const agent = new AcpAgent(context, createMockConn());
+	const created = await agent.newSession({cwd: '/tmp'});
+
+	try {
+		await agent.prompt({
+			sessionId: created.sessionId,
+			prompt: [{type: 'text', text: 'Persist this session.'}],
+		});
+		// A new agent holds nothing in memory, so load and resume register afresh.
+		const restarted = new AcpAgent(context, createMockConn());
+		const params = {sessionId: created.sessionId, cwd: '/tmp'};
+		const loaded = await restarted.loadSession({...params, mcpServers: []});
+		const resumed = await restarted.resumeSession(params);
+
+		t.is(created.modes?.currentModeId, 'normal');
+		t.is(loaded.modes?.currentModeId, 'normal');
+		t.is(resumed.modes?.currentModeId, 'normal');
+	} finally {
+		await agent.deleteSession({sessionId: created.sessionId});
+	}
+});

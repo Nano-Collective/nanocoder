@@ -3,6 +3,7 @@ import {AcpAgent} from '@/acp/acp-agent';
 import type {AcpInitContext} from '@/acp/acp-types';
 import {directoryTrustRefusal} from '@/config/preferences';
 import {initializePlain} from '@/plain/initialize';
+import type {DevelopmentMode} from '@/types/index';
 import {getLogger} from '@/utils/logging';
 import {getShutdownManager} from '@/utils/shutdown';
 
@@ -14,6 +15,8 @@ export interface RunAcpServerOptions {
 	appVersion?: string;
 	/** Trust the working directory for this run only (`--trust-directory`). */
 	trustDirectory?: boolean;
+	/** Starting mode of every session (`--mode`). */
+	mode?: DevelopmentMode;
 }
 
 export async function runAcpServer(
@@ -36,10 +39,13 @@ export async function runAcpServer(
 
 	let initContext: AcpInitContext;
 	try {
-		initContext = await initializePlain({
-			cliProvider: options.cliProvider,
-			cliModel: options.cliModel,
-		});
+		initContext = {
+			...(await initializePlain({
+				cliProvider: options.cliProvider,
+				cliModel: options.cliModel,
+			})),
+			initialMode: options.mode,
+		};
 	} catch (error) {
 		const msg = `ACP initialization failed: ${error instanceof Error ? error.message : String(error)}`;
 		logger.error(msg);
