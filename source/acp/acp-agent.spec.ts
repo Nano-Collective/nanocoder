@@ -9,6 +9,7 @@ import {
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
+import type {McpServer} from '@agentclientprotocol/sdk';
 import {artifactManager} from '@/artifacts/artifact-manager';
 import {AcpAgent} from '@/acp/acp-agent';
 import type {AcpInitContext} from '@/acp/acp-types';
@@ -19,9 +20,12 @@ import {
 } from '@/message-handler';
 import {convertToModelMessages} from '@/ai-sdk-client/converters/message-converter';
 import {sessionManager} from '@/session/session-manager';
+import {registerSubagentRun} from '@/services/subagent-events';
+import {resolveAutoCompactSettings} from '@/utils/auto-compact';
 import {getLogger} from '@/utils/logging';
 import {SemanticMemoryManager} from '@/memory/semantic-memory-manager';
 import {readFileTool} from '@/tools/read-file';
+import {ToolManager} from '@/tools/tool-manager';
 import type {Message} from '@/types/core';
 import {
 	clearReadTracker,
@@ -624,7 +628,10 @@ test('AcpAgent.setSessionConfigOption - throws on unknown model', async t => {
 });
 
 /** Runs `fn` with two configured providers, so a session can get a client of its own. */
-const withProviders = async (fn: () => Promise<void>): Promise<void> => {
+const withProviders = async (
+	fn: () => Promise<void>,
+	extraProviders: object[] = [],
+): Promise<void> => {
 	const configPath = join(testConfigDir, 'agents.config.json');
 	const original = existsSync(configPath)
 		? readFileSync(configPath, 'utf8')
@@ -644,6 +651,7 @@ const withProviders = async (fn: () => Promise<void>): Promise<void> => {
 						baseUrl: 'http://localhost:1/v1',
 						models: ['second-model', 'other-model'],
 					},
+					...extraProviders,
 				],
 			},
 		}),
@@ -725,6 +733,15 @@ test.serial('AcpAgent.setSessionConfigOption - a model chosen during a turn appl
 		const session = agent['sessions'].get(created.sessionId)!;
 		const turnClient = agent['initContext'].client;
 		const promptBefore = session.baseSystemMessage;
+		// Which model each rebuild of the prompt was for. The text of the prompt
+		// does not depend on the model for these test models, so the rebuild is
+		// observed directly rather than through a difference in its content.
+		const rebuiltFor: string[] = [];
+		const buildPrompt = agent['buildSystemPromptForSession'].bind(agent);
+		(agent as any).buildSystemPromptForSession = (target: {model: string}) => {
+			rebuiltFor.push(target.model);
+			buildPrompt(target as any);
+		};
 		const turnText =
 			'Please refactor the authentication middleware to use the new session API and add tests.';
 		let turnRequests = 0;
@@ -751,6 +768,8 @@ test.serial('AcpAgent.setSessionConfigOption - a model chosen during a turn appl
 		t.true(seen?.stale);
 		t.is(seen?.prompt, promptBefore);
 		t.not(session.client, turnClient);
+		// Nothing rebuilt the prompt while the turn was running.
+		t.deepEqual(rebuiltFor, []);
 
 		let nextRequests = 0;
 		session.client = {
@@ -768,10 +787,103 @@ test.serial('AcpAgent.setSessionConfigOption - a model chosen during a turn appl
 		await agent['pendingTitleGeneration'];
 
 		t.false(session.promptStale);
+		// Rebuilt once, for the model chosen during the first turn, before the next.
+		t.deepEqual(rebuiltFor, ['other-model']);
 		t.not(session.baseSystemMessage, promptBefore);
 		t.true(nextRequests >= 1);
 		t.is(turnRequests, 1);
 	});
+});
+
+test.serial('AcpAgent.setSessionConfigOption - one session\'s tune does not change when another compacts', async t => {
+	await withProviders(
+		async () => {
+			const {agent} = createAgent();
+			const a = await agent.newSession({cwd: '/tmp'});
+			const b = await agent.newSession({cwd: '/tmp'});
+			const sessionA = agent['sessions'].get(a.sessionId)!;
+			const sessionB = agent['sessions'].get(b.sessionId)!;
+			const compact = {
+				enabled: true,
+				threshold: 70,
+				mode: 'conservative' as const,
+			};
+			const before = resolveAutoCompactSettings(compact);
+
+			await agent.setSessionConfigOption({
+				sessionId: b.sessionId,
+				configId: 'provider',
+				value: 'aggressive-provider',
+			});
+
+			// B's provider asks for aggressive compaction; A's does not.
+			t.true(sessionB.aggressiveCompact);
+			t.false(sessionA.aggressiveCompact);
+			// And nothing process-wide moved, so A's running turn is unaffected.
+			t.deepEqual(resolveAutoCompactSettings(compact), before);
+
+			// Moving B back clears it again, still without touching A.
+			await agent.setSessionConfigOption({
+				sessionId: b.sessionId,
+				configId: 'provider',
+				value: 'test-provider',
+			});
+			t.false(sessionB.aggressiveCompact);
+		},
+		[
+			{
+				name: 'aggressive-provider',
+				baseUrl: 'http://localhost:1/v1',
+				models: ['aggressive-model'],
+				tune: {enabled: true, aggressiveCompact: true},
+			},
+		],
+	);
+});
+
+test.serial('AcpAgent.setSessionConfigOption - a provider that lists no models leaves the session with no model, not the old one', async t => {
+	await withProviders(
+		async () => {
+			const {agent} = createAgent();
+			await sessionManager.initialize();
+			const created = await agent.newSession({cwd: '/tmp'});
+			const session = agent['sessions'].get(created.sessionId)!;
+			t.is(session.model, 'test-model');
+
+			const switched = await agent.setSessionConfigOption({
+				sessionId: created.sessionId,
+				configId: 'provider',
+				value: 'no-models-provider',
+			});
+
+			// The old provider's model is not carried over to a provider it was never on.
+			t.is(session.provider, 'no-models-provider');
+			t.is(session.model, session.client?.getCurrentModel());
+			t.not(session.model, 'test-model');
+			t.is(optionValue(switched.configOptions, 'provider'), 'no-models-provider');
+			t.not(optionValue(switched.configOptions, 'model'), 'test-model');
+			const modelOptions = switched.configOptions?.find(o => o.id === 'model');
+			t.false(
+				(modelOptions as any).options.some((o: {value: string}) => o.value === 'test-model'),
+			);
+
+			// So what is saved never pairs the new provider with the old one's model.
+			// (A session with no messages is not written, so give it one.)
+			session.messages = [{role: 'user', content: 'Hello there.'}];
+			await agent['saveAcpSessionToDisk'](session);
+			const saved = await sessionManager.loadSession(created.sessionId);
+			t.is(saved?.provider, 'no-models-provider');
+			t.not(saved?.model, 'test-model');
+			await agent.deleteSession({sessionId: created.sessionId});
+		},
+		[
+			{
+				name: 'no-models-provider',
+				baseUrl: 'http://localhost:1/v1',
+				models: [],
+			},
+		],
+	);
 });
 
 test.serial('AcpAgent.prompt - each session saves its own provider and model', async t => {
@@ -1098,7 +1210,13 @@ test('AcpAgent.prompt - routes text and images through to the conversation', asy
 // prompt() - built-in slash commands
 // ============================================================================
 
-const promptForBuiltinReply = async (text: string): Promise<string> => {
+const VSCODE_CLIENT = {name: 'Nanocoder VS Code Extension', version: '1.0.0'};
+
+/** The reply to `text`, from an agent whose client identified as `clientInfo`. */
+const promptForBuiltinReply = async (
+	text: string,
+	clientInfo?: {name: string; version: string} | null,
+): Promise<string> => {
 	const conn = createMockConn();
 	const replies: string[] = [];
 	conn.sessionUpdate = async (u: any) => {
@@ -1107,6 +1225,7 @@ const promptForBuiltinReply = async (text: string): Promise<string> => {
 		}
 	};
 	const agent = new AcpAgent(createMockInitContext(), conn);
+	await agent.initialize({protocolVersion: 1, clientInfo});
 	const session = await agent.newSession({cwd: '/tmp'});
 	await agent.prompt({
 		sessionId: session.sessionId,
@@ -1115,21 +1234,123 @@ const promptForBuiltinReply = async (text: string): Promise<string> => {
 	return replies.join('\n');
 };
 
-test('AcpAgent.prompt - /help advertises the copy commands', async t => {
-	const reply = await promptForBuiltinReply('/help');
-	t.true(reply.includes('`/copy`'));
-	t.true(reply.includes('`/copy code`'));
-});
+// The wording the VS Code extension has always been sent, word for word.
+const VSCODE_REPLIES: Record<string, string> = {
+	'/help': [
+		'**Available slash commands in VS Code GUI:**',
+		'- `/clear` — Clear the current conversation',
+		'- `/copy` — Copy the last assistant response',
+		'- `/copy code` — Copy the last code block from the last response',
+		'- `/help` — Show this help message',
+		'**Not available in VS Code GUI** (CLI-only):',
+		'- `/init`, `/theme`, `/context-max`, `/compact`, `/usage`, and other interactive commands',
+	].join('\n'),
+	'/copy':
+		'`/copy` is handled by the chat view. Type it in the Nanocoder chat input (or press Ctrl+Alt+Shift+C / Cmd+Alt+Shift+C for the last code block).',
+	'/model': 'Use the model selector in the chat header to switch models.',
+	'/provider':
+		'Use the provider selector in the chat header to switch providers.',
+	'/settings':
+		'Use the Settings tab in the Nanocoder sidebar (the gear icon in the view title bar, or `Nanocoder: Settings` in the Command Palette).',
+	'/init':
+		'The `/init` command is only available in the interactive CLI (`nanocoder` in a terminal). It is not supported in the VS Code GUI.',
+	'/usage':
+		'The `/usage` command is only available in the interactive CLI (`nanocoder` in a terminal). It is not supported in the VS Code GUI.',
+};
 
-test('AcpAgent.prompt - /copy points at the chat view instead of erroring', async t => {
-	const reply = await promptForBuiltinReply('/copy');
-	t.true(reply.includes('handled by the chat view'));
-	t.false(reply.includes('Unrecognized slash command'));
+test('AcpAgent.prompt - the VS Code extension gets the built-in replies unchanged', async t => {
+	for (const [command, expected] of Object.entries(VSCODE_REPLIES)) {
+		t.is(await promptForBuiltinReply(command, VSCODE_CLIENT), expected, command);
+	}
 });
 
 test('AcpAgent.prompt - /copy code is not treated as unrecognized', async t => {
-	const reply = await promptForBuiltinReply('/copy code');
-	t.false(reply.includes('Unrecognized slash command'));
+	for (const clientInfo of [VSCODE_CLIENT, undefined]) {
+		const reply = await promptForBuiltinReply('/copy code', clientInfo);
+		t.false(reply.includes('Unrecognized slash command'));
+	}
+});
+
+test('AcpAgent.prompt - any other client, or none, gets neutral built-in replies', async t => {
+	const neutral: Record<string, string> = {
+		'/copy': "`/copy` isn't available in this client.",
+		'/model': "Use your client's model selector.",
+		'/provider': "Use your client's provider selector.",
+		'/settings': "Use your client's settings.",
+		'/init':
+			'The `/init` command is only available in the interactive Nanocoder CLI (`nanocoder` in a terminal).',
+		'/theme':
+			'The `/theme` command is only available in the interactive Nanocoder CLI (`nanocoder` in a terminal).',
+		'/compact':
+			'The `/compact` command is only available in the interactive Nanocoder CLI (`nanocoder` in a terminal).',
+		'/context-max':
+			'The `/context-max` command is only available in the interactive Nanocoder CLI (`nanocoder` in a terminal).',
+		'/usage':
+			'The `/usage` command is only available in the interactive Nanocoder CLI (`nanocoder` in a terminal).',
+	};
+	const clients = [
+		{name: 'zed', version: '1.0.0'},
+		{name: 'Nanocoder Desktop', version: '0.1.0'},
+		undefined,
+		null,
+	];
+
+	for (const clientInfo of clients) {
+		const label = JSON.stringify(clientInfo);
+		for (const [command, expected] of Object.entries(neutral)) {
+			t.is(await promptForBuiltinReply(command, clientInfo), expected, `${command} ${label}`);
+		}
+		const help = await promptForBuiltinReply('/help', clientInfo);
+		t.true(help.startsWith('**Available slash commands:**'), label);
+		t.true(help.includes('`/clear`') && help.includes('`/help`'), label);
+		t.true(help.includes('`/init`, `/theme`, `/context-max`, `/compact`, `/usage`'), label);
+		// `/copy` is listed only where something handles it.
+		t.false(help.includes('/copy'), label);
+	}
+});
+
+test('AcpAgent.prompt - no neutral reply mentions VS Code, the sidebar or the chat header', async t => {
+	for (const command of [...Object.keys(VSCODE_REPLIES), '/theme', '/compact', '/context-max']) {
+		const reply = await promptForBuiltinReply(command, {name: 'zed', version: '1'});
+		t.notRegex(reply, /VS Code|sidebar|chat header|chat view|Ctrl\+Alt/i, command);
+	}
+});
+
+test('AcpAgent.prompt - /clear and an unknown command read the same for every client', async t => {
+	for (const command of ['/clear', '/definitelynotacommand']) {
+		const vsCode = await promptForBuiltinReply(command, VSCODE_CLIENT);
+		t.is(await promptForBuiltinReply(command, {name: 'zed', version: '1'}), vsCode);
+		t.is(await promptForBuiltinReply(command), vsCode);
+	}
+});
+
+test('AcpAgent.prompt - custom commands are listed in /help for every client', async t => {
+	const context = createMockInitContext();
+	context.customCommandLoader = {
+		getCommand: () => undefined,
+		getAllCommands: () => [
+			{fullName: 'review', metadata: {description: 'Review the diff'}},
+		],
+	} as any;
+	for (const clientInfo of [VSCODE_CLIENT, undefined]) {
+		const conn = createMockConn();
+		const replies: string[] = [];
+		conn.sessionUpdate = async (u: any) => {
+			if (u.update?.sessionUpdate === 'agent_message_chunk') {
+				replies.push(u.update.content.text);
+			}
+		};
+		const agent = new AcpAgent(context, conn);
+		await agent.initialize({protocolVersion: 1, clientInfo});
+		const session = await agent.newSession({cwd: '/tmp'});
+		await agent.prompt({
+			sessionId: session.sessionId,
+			prompt: [{type: 'text', text: '/help'}],
+		});
+		t.true(
+			replies.join('\n').endsWith('**Your custom commands:**\n- `/review` — Review the diff'),
+		);
+	}
 });
 
 test('AcpAgent.prompt - a built-in command exchange stays out of model context', async t => {
@@ -1520,6 +1741,70 @@ test.serial('AcpAgent.extMethod - a bare name logs one deprecation notice, a pre
 	}
 });
 
+test('AcpAgent.extMethod - cancelSubagent cancels one run of the session and nothing else', async t => {
+	const {agent} = createAgent();
+	const session = await agent.newSession({cwd: '/tmp'});
+	const other = await agent.newSession({cwd: '/tmp'});
+	const cancelled: string[] = [];
+	const forget = [
+		registerSubagentRun('run-1', session.sessionId, () => cancelled.push('run-1')),
+		registerSubagentRun('run-2', session.sessionId, () => cancelled.push('run-2')),
+		registerSubagentRun('run-3', other.sessionId, () => cancelled.push('run-3')),
+	];
+	try {
+		t.deepEqual(
+			await agent.extMethod('_nanocoder/cancelSubagent', {
+				sessionId: session.sessionId,
+				childRunId: 'run-1',
+			}),
+			{cancelled: true},
+		);
+		// Another session's run, and a run that already ended, are not an error.
+		t.deepEqual(
+			await agent.extMethod('_nanocoder/cancelSubagent', {
+				sessionId: session.sessionId,
+				childRunId: 'run-3',
+			}),
+			{cancelled: false},
+		);
+		t.deepEqual(
+			await agent.extMethod('_nanocoder/cancelSubagent', {
+				sessionId: session.sessionId,
+				childRunId: 'gone',
+			}),
+			{cancelled: false},
+		);
+		t.deepEqual(cancelled, ['run-1']);
+	} finally {
+		for (const stop of forget) stop();
+		await agent.deleteSession({sessionId: session.sessionId});
+		await agent.deleteSession({sessionId: other.sessionId});
+	}
+});
+
+test('AcpAgent.extMethod - cancelSubagent validates its params, and methods added after the prefix have no bare alias', async t => {
+	const {agent} = createAgent();
+	await t.throwsAsync(
+		agent.extMethod('_nanocoder/cancelSubagent', {sessionId: 'x'}),
+		{message: 'cancelSubagent requires string sessionId and childRunId'},
+	);
+	await t.throwsAsync(
+		agent.extMethod('_nanocoder/cancelSubagent', {
+			sessionId: 'nope',
+			childRunId: 'run',
+		}),
+		{message: 'Session not found: nope'},
+	);
+	// Added after the prefix, so there is no old client to keep working.
+	for (const [method, params] of [
+		['cancelSubagent', {sessionId: 'x', childRunId: 'y'}],
+		['timeline/read', {sessionId: 'x', checkpointId: 'y', path: 'a.ts'}],
+	] as const) {
+		const error = await t.throwsAsync(agent.extMethod(method, params));
+		t.is((error as {code?: number}).code, -32601, method);
+	}
+});
+
 test('AcpAgent.initialize - advertises the extension methods, and each one is handled', async t => {
 	const {agent} = createAgent();
 	const {agentCapabilities} = await agent.initialize({protocolVersion: 1});
@@ -1527,7 +1812,10 @@ test('AcpAgent.initialize - advertises the extension methods, and each one is ha
 		extMethods: string[];
 		extNotifications: string[];
 	};
-	t.deepEqual(advertised.extNotifications, ['_nanocoder/sessionTitleChanged']);
+	t.deepEqual(advertised.extNotifications, [
+		'_nanocoder/sessionTitleChanged',
+		'_nanocoder/subagent',
+	]);
 	t.true(advertised.extMethods.length > 0);
 	for (const method of advertised.extMethods) {
 		// Bad params fail inside the handler; an unsupported name would be -32601.
@@ -1598,6 +1886,106 @@ test.serial(
 		);
 	},
 );
+
+test.serial(
+	'AcpAgent.extMethod - pinSession marks a session, session/list reports it, and it survives prompts and renames',
+	async t => {
+		const {agent} = createAgent();
+		await sessionManager.initialize();
+		const session = await agent.newSession({cwd: '/tmp'});
+		await agent.prompt({
+			sessionId: session.sessionId,
+			prompt: [{type: 'text', text: 'Hello!'}],
+		});
+		const isPinned = async () =>
+			(await agent.listSessions({})).sessions.find(
+				s => s.sessionId === session.sessionId,
+			)?._meta?.['nanocoder/pinned'];
+
+		t.is(await isPinned(), false);
+		t.deepEqual(
+			await agent.extMethod('_nanocoder/pinSession', {
+				sessionId: session.sessionId,
+				pinned: true,
+			}),
+			{pinned: true},
+		);
+		t.is(await isPinned(), true);
+
+		// ACP rebuilds the session field by field on every save.
+		await agent.extMethod('renameSession', {
+			sessionId: session.sessionId,
+			title: 'Kept title',
+		});
+		await agent.prompt({
+			sessionId: session.sessionId,
+			prompt: [{type: 'text', text: 'Follow-up message'}],
+		});
+		t.is(await isPinned(), true);
+		t.true((await sessionManager.readSession(session.sessionId))?.pinned);
+
+		await agent.extMethod('_nanocoder/pinSession', {
+			sessionId: session.sessionId,
+			pinned: false,
+		});
+		t.is(await isPinned(), false);
+	},
+);
+
+test.serial('AcpAgent.extMethod - pinSession rejects bad params and a session that is not on disk', async t => {
+	const {agent} = createAgent();
+	for (const params of [
+		{sessionId: 1, pinned: true},
+		{sessionId: 'x'},
+		{sessionId: 'x', pinned: 'yes'},
+	]) {
+		await t.throwsAsync(agent.extMethod('_nanocoder/pinSession', params), {
+			message: 'pinSession requires a string sessionId and a boolean pinned',
+		});
+	}
+	await t.throwsAsync(
+		agent.extMethod('_nanocoder/pinSession', {
+			sessionId: '00000000-0000-4000-8000-000000000000',
+			pinned: true,
+		}),
+		{message: /Session not found on disk/},
+	);
+});
+
+test.serial('AcpAgent.deleteSession - removes a pinned session', async t => {
+	const {agent} = createAgent();
+	await sessionManager.initialize();
+	const session = await agent.newSession({cwd: '/tmp'});
+	await agent.prompt({
+		sessionId: session.sessionId,
+		prompt: [{type: 'text', text: 'Hello!'}],
+	});
+	await agent.extMethod('_nanocoder/pinSession', {
+		sessionId: session.sessionId,
+		pinned: true,
+	});
+
+	await agent.deleteSession({sessionId: session.sessionId});
+
+	t.is(await sessionManager.readSession(session.sessionId), null);
+	t.false(
+		(await agent.listSessions({})).sessions.some(
+			s => s.sessionId === session.sessionId,
+		),
+	);
+});
+
+test.serial('AcpAgent.initialize - reports the effective retention settings', async t => {
+	const {agent} = createAgent();
+	const result = await agent.initialize({protocolVersion: 1});
+	t.deepEqual(result._meta, {
+		'nanocoder/retention': sessionManager.getRetention(),
+	});
+	t.deepEqual(sessionManager.getRetention(), {
+		retentionDays: 30,
+		maxSessions: 100,
+	});
+});
 
 // ============================================================================
 // background session titling
@@ -1842,6 +2230,101 @@ test('AcpAgent.extMethod - timeline/list throws on missing session', async t => 
 		agent.extMethod('timeline/list', {sessionId: 'missing'}),
 		{message: /Session not found/},
 	);
+});
+
+test('AcpAgent.extMethod - timeline/read returns the before-image of the checkpoint it is asked for', async t => {
+	const {agent} = createAgent();
+	const cwd = createTimelineWorkspace('read');
+	try {
+		const created = await agent.newSession({cwd, mcpServers: []});
+		const session = (agent as any).sessions.get(created.sessionId);
+		// Two edits to a.ts. Which checkpoint is a turn's baseline is decided by
+		// `turnId`; that grouping is covered through the real capture path in
+		// acp-conversation.spec.ts.
+		const first = await session.timeline.capture({
+			toolCallId: 'call-1',
+			toolName: 'write_file',
+			title: 'write_file: a.ts',
+			truncateToMessageIndex: 1,
+			files: new Map([['a.ts', 'v0'], ['made.ts', null]]),
+		});
+		const second = await session.timeline.capture({
+			toolCallId: 'call-2',
+			toolName: 'write_file',
+			title: 'write_file: a.ts',
+			truncateToMessageIndex: 1,
+			files: new Map([['a.ts', 'v1']]),
+		});
+		const read = (checkpointId: string, path: string) =>
+			agent.extMethod('_nanocoder/timeline/read', {
+				sessionId: created.sessionId,
+				checkpointId,
+				path,
+			});
+
+		t.deepEqual(await read(first.id, 'a.ts'), {kind: 'text', content: 'v0'});
+		t.deepEqual(await read(second.id, 'a.ts'), {kind: 'text', content: 'v1'});
+		t.deepEqual(await read(first.id, 'made.ts'), {kind: 'created'});
+		t.is((await read(second.id, 'made.ts')).kind, 'unavailable');
+
+		const listed = (await agent.extMethod('timeline/list', {
+			sessionId: created.sessionId,
+		})) as {entries: Array<{createdFiles: string[]}>};
+		t.deepEqual(listed.entries.map(entry => entry.createdFiles), [['made.ts'], []]);
+	} finally {
+		rmSync(cwd, {recursive: true, force: true});
+	}
+});
+
+test('AcpAgent.extMethod - timeline/read is unavailable after the checkpoint is reverted', async t => {
+	const {agent} = createAgent();
+	const cwd = createTimelineWorkspace('read-reverted');
+	try {
+		writeFileSync(join(cwd, 'a.ts'), 'before');
+		const created = await agent.newSession({cwd, mcpServers: []});
+		const session = (agent as any).sessions.get(created.sessionId);
+		session.messages = [
+			{role: 'user', content: 'edit a.ts'},
+			{role: 'assistant', content: '', tool_calls: [{id: 'call-1', function: {name: 'write_file'}}]},
+			{role: 'tool', content: 'wrote', name: 'write_file'},
+		];
+		const entry = await session.timeline.capture({
+			toolCallId: 'call-1',
+			toolName: 'write_file',
+			title: 'write_file: a.ts',
+			truncateToMessageIndex: 1,
+			files: new Map([['a.ts', 'before']]),
+		});
+		const params = {sessionId: created.sessionId, checkpointId: entry.id, path: 'a.ts'};
+
+		t.is((await agent.extMethod('_nanocoder/timeline/read', params)).kind, 'text');
+		await agent.extMethod('timeline/revert', params);
+		t.is((await agent.extMethod('_nanocoder/timeline/read', params)).kind, 'unavailable');
+	} finally {
+		rmSync(cwd, {recursive: true, force: true});
+	}
+});
+
+test('AcpAgent.extMethod - timeline/read rejects bad params, escaping paths and sessions that are not loaded', async t => {
+	const {agent} = createAgent();
+	const cwd = createTimelineWorkspace('read-bad');
+	try {
+		const created = await agent.newSession({cwd, mcpServers: []});
+		await t.throwsAsync(
+			agent.extMethod('_nanocoder/timeline/read', {sessionId: created.sessionId, path: 'a.ts'}),
+			{message: 'timeline/read requires string sessionId, checkpointId and path'},
+		);
+		await t.throwsAsync(
+			agent.extMethod('_nanocoder/timeline/read', {sessionId: created.sessionId, checkpointId: 'x', path: '../outside'}),
+			{message: /outside the workspace/},
+		);
+		await t.throwsAsync(
+			agent.extMethod('_nanocoder/timeline/read', {sessionId: 'missing', checkpointId: 'x', path: 'a.ts'}),
+			{message: /Session not found/},
+		);
+	} finally {
+		rmSync(cwd, {recursive: true, force: true});
+	}
 });
 
 test('AcpAgent.prompt - recalls relevant project memories scoped to the session cwd, without accumulating across turns', async t => {
@@ -2255,5 +2738,502 @@ test('AcpAgent - sessions start in the init context mode on new, load and resume
 		t.is(resumed.modes?.currentModeId, 'normal');
 	} finally {
 		await agent.deleteSession({sessionId: created.sessionId});
+	}
+});
+
+// ============================================================================
+// Client-supplied MCP servers
+// ============================================================================
+
+// A real MCP server over stdio, started with `node -e` so the test needs no
+// fixture file. It offers one tool, named by FIXTURE_TOOL.
+const sdkModule = (path: string) =>
+	JSON.stringify(import.meta.resolve(`@modelcontextprotocol/sdk/${path}`));
+const FIXTURE_SERVER = `
+import {Server} from ${sdkModule('server/index.js')};
+import {StdioServerTransport} from ${sdkModule('server/stdio.js')};
+import {ListToolsRequestSchema, CallToolRequestSchema} from ${sdkModule('types.js')};
+const tool = process.env.FIXTURE_TOOL;
+const server = new Server({name: 'fixture', version: '1.0.0'}, {capabilities: {tools: {}}});
+server.setRequestHandler(ListToolsRequestSchema, async () => ({
+	tools: [{name: tool, description: 'fixture tool', inputSchema: {type: 'object', properties: {}}}],
+}));
+server.setRequestHandler(CallToolRequestSchema, async request => ({
+	content: [{type: 'text', text: 'called ' + request.params.name}],
+}));
+await server.connect(new StdioServerTransport());
+`;
+
+const fixtureServer = (name: string, tool: string): McpServer => ({
+	name,
+	command: process.execPath,
+	args: ['--input-type=module', '-e', FIXTURE_SERVER],
+	env: [{name: 'FIXTURE_TOOL', value: tool}],
+});
+
+/** An agent whose shared tools are real, so sessions can layer MCP servers on them. */
+const createMcpAgent = () => {
+	const toolManager = new ToolManager();
+	const agent = new AcpAgent(
+		{...createMockInitContext(), toolManager},
+		createMockConn(),
+	);
+	const toolsOf = (sessionId: string): ToolManager =>
+		(agent as any).toolManagerFor(sessionId);
+	return {agent, toolManager, toolsOf};
+};
+
+const SESSION_CWD = '/tmp';
+
+test.serial('AcpAgent.newSession - the client\'s MCP servers exist in that session only', async t => {
+	const {agent, toolManager, toolsOf} = createMcpAgent();
+	const one = await agent.newSession({
+		cwd: SESSION_CWD,
+		mcpServers: [fixtureServer('one', 'tool_one')],
+	});
+	const two = await agent.newSession({
+		cwd: SESSION_CWD,
+		mcpServers: [fixtureServer('two', 'tool_two')],
+	});
+	try {
+		t.true(toolsOf(one.sessionId).hasTool('tool_one'));
+		t.false(toolsOf(one.sessionId).hasTool('tool_two'));
+		t.true(toolsOf(two.sessionId).hasTool('tool_two'));
+		t.false(toolsOf(two.sessionId).hasTool('tool_one'));
+		// Neither reaches the shared set that sessions without servers use.
+		t.false(toolManager.hasTool('tool_one'));
+		t.false(toolManager.hasTool('tool_two'));
+		// They run, and the built-in tools are still there.
+		t.regex(
+			String(await toolsOf(one.sessionId).getToolHandler('tool_one')?.({})),
+			/called tool_one/,
+		);
+		t.true(toolsOf(one.sessionId).hasTool('read_file'));
+	} finally {
+		await agent.closeSession({sessionId: one.sessionId});
+		await agent.closeSession({sessionId: two.sessionId});
+		await agent.deleteSession({sessionId: one.sessionId});
+		await agent.deleteSession({sessionId: two.sessionId});
+	}
+});
+
+test.serial('AcpAgent.closeSession - disconnects that session\'s servers and leaves the others connected', async t => {
+	const {agent, toolsOf} = createMcpAgent();
+	const one = await agent.newSession({
+		cwd: SESSION_CWD,
+		mcpServers: [fixtureServer('one', 'tool_one')],
+	});
+	const two = await agent.newSession({
+		cwd: SESSION_CWD,
+		mcpServers: [fixtureServer('two', 'tool_two')],
+	});
+	const oneTools = toolsOf(one.sessionId);
+	try {
+		await agent.closeSession({sessionId: one.sessionId});
+
+		t.is(oneTools.getMCPClient(), null);
+		t.false(oneTools.hasTool('tool_one'));
+		t.regex(
+			String(await toolsOf(two.sessionId).getToolHandler('tool_two')?.({})),
+			/called tool_two/,
+		);
+	} finally {
+		await agent.closeSession({sessionId: two.sessionId});
+		await agent.deleteSession({sessionId: one.sessionId});
+		await agent.deleteSession({sessionId: two.sessionId});
+	}
+});
+
+test.serial('AcpAgent.resumeSession - replaces the session\'s servers and closes the old ones', async t => {
+	const {agent, toolsOf} = createMcpAgent();
+	const created = await agent.newSession({
+		cwd: SESSION_CWD,
+		mcpServers: [fixtureServer('old', 'tool_old')],
+	});
+	const before = toolsOf(created.sessionId);
+	try {
+		// A session is only on disk, and so resumable, once a turn has run.
+		await agent.prompt({
+			sessionId: created.sessionId,
+			prompt: [{type: 'text', text: 'persist this session'}],
+		});
+		await agent.resumeSession({
+			sessionId: created.sessionId,
+			cwd: SESSION_CWD,
+			mcpServers: [fixtureServer('new', 'tool_new')],
+		});
+
+		t.is(before.getMCPClient(), null);
+		t.true(toolsOf(created.sessionId).hasTool('tool_new'));
+		t.false(toolsOf(created.sessionId).hasTool('tool_old'));
+	} finally {
+		await agent.closeSession({sessionId: created.sessionId});
+		await agent.deleteSession({sessionId: created.sessionId});
+	}
+});
+
+test.serial('AcpAgent.loadSession - a live session\'s servers are replaced without leaking the old connection', async t => {
+	const {agent, toolsOf} = createMcpAgent();
+	const created = await agent.newSession({
+		cwd: SESSION_CWD,
+		mcpServers: [fixtureServer('old', 'tool_old')],
+	});
+	const oldClient = toolsOf(created.sessionId).getMCPClient();
+	t.truthy(oldClient);
+	try {
+		await agent.loadSession({
+			sessionId: created.sessionId,
+			cwd: SESSION_CWD,
+			mcpServers: [fixtureServer('new', 'tool_new')],
+		});
+
+		const tools = toolsOf(created.sessionId);
+		t.true(tools.hasTool('tool_new'));
+		t.false(tools.hasTool('tool_old'));
+		t.not(tools.getMCPClient(), oldClient);
+		t.deepEqual(oldClient?.getConnectedServers(), []);
+
+		// An empty list is a replacement too: the session goes back to the shared set.
+		const connected = tools;
+		await agent.loadSession({
+			sessionId: created.sessionId,
+			cwd: SESSION_CWD,
+			mcpServers: [],
+		});
+		t.is(connected.getMCPClient(), null);
+		t.false(toolsOf(created.sessionId).hasTool('tool_new'));
+	} finally {
+		await agent.closeSession({sessionId: created.sessionId});
+		await agent.deleteSession({sessionId: created.sessionId});
+	}
+});
+
+test.serial('AcpAgent.newSession - a server that fails to connect is skipped and the request still succeeds', async t => {
+	const {agent, toolsOf} = createMcpAgent();
+	const created = await agent.newSession({
+		cwd: SESSION_CWD,
+		mcpServers: [
+			{
+				name: 'broken',
+				command: '/definitely/not/a/real/command',
+				args: [],
+				env: [],
+			},
+			fixtureServer('works', 'tool_works'),
+		],
+	});
+	try {
+		t.truthy(created.sessionId);
+		t.true(toolsOf(created.sessionId).hasTool('tool_works'));
+	} finally {
+		await agent.closeSession({sessionId: created.sessionId});
+		await agent.deleteSession({sessionId: created.sessionId});
+	}
+});
+
+test.serial('AcpAgent.newSession - an SSE server is left out and the others connect', async t => {
+	const {agent, toolsOf} = createMcpAgent();
+	const created = await agent.newSession({
+		cwd: SESSION_CWD,
+		mcpServers: [
+			{type: 'sse', name: 'events', url: 'http://127.0.0.1:1/sse', headers: []},
+			fixtureServer('works', 'tool_works'),
+		],
+	});
+	try {
+		t.deepEqual(
+			toolsOf(created.sessionId).getServerNames(),
+			['works'],
+		);
+	} finally {
+		await agent.closeSession({sessionId: created.sessionId});
+		await agent.deleteSession({sessionId: created.sessionId});
+	}
+});
+
+test.serial('AcpAgent.newSession - no servers, or none sent, leaves the session on the shared tools', async t => {
+	const {agent, toolManager, toolsOf} = createMcpAgent();
+	const empty = await agent.newSession({cwd: SESSION_CWD, mcpServers: []});
+	const missing = await agent.newSession({cwd: SESSION_CWD});
+	try {
+		t.is(toolsOf(empty.sessionId), toolManager);
+		t.is(toolsOf(missing.sessionId), toolManager);
+		t.is((agent as any).sessionToolManagers.size, 0);
+	} finally {
+		await agent.deleteSession({sessionId: empty.sessionId});
+		await agent.deleteSession({sessionId: missing.sessionId});
+	}
+});
+
+test.serial('AcpAgent.prompt - a session calls its own MCP tool, which the process-wide registry does not have', async t => {
+	let modelCalls = 0;
+	const base = createMockInitContext();
+	const agent = new AcpAgent(
+		{
+			...base,
+			toolManager: new ToolManager(),
+			client: {
+				...base.client,
+				chat: async () => {
+					modelCalls++;
+					return modelCalls === 1
+						? {
+								choices: [
+									{
+										message: {
+											content: '',
+											tool_calls: [
+												{id: 'call-1', function: {name: 'tool_works', arguments: {}}},
+											],
+										},
+									},
+								],
+							}
+						: {choices: [{message: {content: 'done'}}]};
+				},
+			} as any,
+		},
+		createMockConn(),
+	);
+	const created = await agent.newSession({
+		cwd: SESSION_CWD,
+		mcpServers: [fixtureServer('works', 'tool_works')],
+	});
+	try {
+		await agent.setSessionMode({sessionId: created.sessionId, modeId: 'yolo'});
+		await agent.prompt({
+			sessionId: created.sessionId,
+			prompt: [{type: 'text', text: 'use the tool'}],
+		});
+
+		const toolResult = (agent as any).sessions
+			.get(created.sessionId)
+			.messages.findLast((message: any) => message.role === 'tool');
+		t.regex(String(toolResult?.content), /called tool_works/);
+	} finally {
+		await agent.closeSession({sessionId: created.sessionId});
+		await agent.deleteSession({sessionId: created.sessionId});
+	}
+});
+
+test.serial('AcpAgent.newSession - a client can turn off an MCP tool of the session', async t => {
+	const {agent, toolsOf} = createMcpAgent();
+	const created = await agent.newSession({
+		cwd: SESSION_CWD,
+		mcpServers: [fixtureServer('one', 'tool_one')],
+		_meta: {'nanocoder/disabledTools': ['tool_one', 'no_such_tool']},
+	});
+	try {
+		t.true(toolsOf(created.sessionId).hasTool('tool_one'));
+		// Known to this session, so it is reported; an unknown name is not.
+		t.deepEqual(
+			(created._meta?.['nanocoder/disabledTools'] as string[]).filter(name =>
+				['tool_one', 'no_such_tool'].includes(name),
+			),
+			['tool_one'],
+		);
+	} finally {
+		await agent.closeSession({sessionId: created.sessionId});
+		await agent.deleteSession({sessionId: created.sessionId});
+	}
+});
+
+test.serial('AcpAgent.newSession - the advertised alwaysAllow list includes the own MCP tools of the session', async t => {
+	const config = getAppConfig();
+	const previous = config.alwaysAllow;
+	config.alwaysAllow = ['tool_one'];
+	const {agent} = createMcpAgent();
+	const withServer = await agent.newSession({
+		cwd: SESSION_CWD,
+		mcpServers: [fixtureServer('one', 'tool_one')],
+	});
+	const without = await agent.newSession({cwd: SESSION_CWD, mcpServers: []});
+	try {
+		const alwaysAllow = (response: {_meta?: Record<string, any> | null}) =>
+			response._meta?.['nanocoder/approval']?.alwaysAllow;
+		t.true(alwaysAllow(withServer).includes('tool_one'));
+		t.false(alwaysAllow(without).includes('tool_one'));
+	} finally {
+		config.alwaysAllow = previous;
+		await agent.closeSession({sessionId: withServer.sessionId});
+		await agent.deleteSession({sessionId: withServer.sessionId});
+		await agent.deleteSession({sessionId: without.sessionId});
+	}
+});
+
+// ============================================================================
+// Per-session disabled tools
+// ============================================================================
+
+const DISABLED_META = 'nanocoder/disabledTools';
+
+/** An agent whose tool manager records the disabled list each prompt is built with. */
+const createDisabledToolsAgent = () => {
+	const offeredWith: Array<readonly string[] | undefined> = [];
+	const context = createMockInitContext();
+	context.toolManager = {
+		...context.toolManager,
+		hasTool: (name: string) => name === 'browser' || name === 'fetch_url',
+		getAvailableToolNames: (
+			_tune: unknown,
+			_mode: unknown,
+			disabled?: readonly string[],
+		) => {
+			offeredWith.push(disabled);
+			return ['read_file', 'browser', 'fetch_url'].filter(
+				name => !disabled?.includes(name),
+			);
+		},
+		getMCPToolInfo: () => ({isMCPTool: false}),
+	} as any;
+	return {agent: new AcpAgent(context, createMockConn()), offeredWith};
+};
+
+test.serial('AcpAgent - new, load and resume honour the client\'s disabled tools, on top of the user\'s', async t => {
+	const config = getAppConfig();
+	const previous = config.disabledTools;
+	config.disabledTools = ['fetch_url'];
+	const {agent, offeredWith} = createDisabledToolsAgent();
+	const meta = {[DISABLED_META]: ['browser']};
+	const created = await agent.newSession({cwd: '/tmp', _meta: meta});
+
+	try {
+		// The session's prompt was built with both lists, the user's kept.
+		t.deepEqual(offeredWith.at(-1), ['fetch_url', 'browser']);
+
+		await agent.prompt({
+			sessionId: created.sessionId,
+			prompt: [{type: 'text', text: 'Persist this session.'}],
+		});
+		const params = {sessionId: created.sessionId, cwd: '/tmp', _meta: meta};
+		const loaded = await agent.loadSession({...params, mcpServers: []});
+		const resumed = await agent.resumeSession(params);
+
+		for (const response of [created, loaded, resumed]) {
+			t.deepEqual(response._meta?.[DISABLED_META], ['fetch_url', 'browser']);
+		}
+	} finally {
+		config.disabledTools = previous;
+		await agent.deleteSession({sessionId: created.sessionId});
+	}
+});
+
+test.serial('AcpAgent - a session that did not ask keeps the tool, in the same process', async t => {
+	const {agent} = createDisabledToolsAgent();
+	const config = getAppConfig();
+	const previous = config.disabledTools;
+	config.disabledTools = [];
+	const without = await agent.newSession({cwd: '/tmp'});
+	const withBrowserOff = await agent.newSession({
+		cwd: '/tmp',
+		_meta: {[DISABLED_META]: ['browser']},
+	});
+
+	try {
+		t.deepEqual(without._meta?.[DISABLED_META], []);
+		t.deepEqual(withBrowserOff._meta?.[DISABLED_META], ['browser']);
+		// And the first was not changed by the second one being created.
+		t.deepEqual(
+			(agent as any).sessions.get(without.sessionId).effectiveDisabledTools(),
+			[],
+		);
+	} finally {
+		config.disabledTools = previous;
+		await agent.deleteSession({sessionId: without.sessionId});
+		await agent.deleteSession({sessionId: withBrowserOff.sessionId});
+	}
+});
+
+test.serial('AcpAgent.loadSession - a live session takes the list the client sends now', async t => {
+	const config = getAppConfig();
+	const previous = config.disabledTools;
+	config.disabledTools = [];
+	const {agent, offeredWith} = createDisabledToolsAgent();
+	const created = await agent.newSession({
+		cwd: '/tmp',
+		_meta: {[DISABLED_META]: ['browser']},
+	});
+
+	try {
+		const params = {sessionId: created.sessionId, cwd: '/tmp', mcpServers: []};
+		const swapped = await agent.loadSession({
+			...params,
+			_meta: {[DISABLED_META]: ['fetch_url']},
+		});
+		t.deepEqual(swapped._meta?.[DISABLED_META], ['fetch_url']);
+		// The prompt was rebuilt, so the tool list the model sees matches.
+		t.deepEqual(offeredWith.at(-1), ['fetch_url']);
+
+		// Sent on every load, so none sent means none disabled.
+		const cleared = await agent.loadSession(params);
+		t.deepEqual(cleared._meta?.[DISABLED_META], []);
+	} finally {
+		config.disabledTools = previous;
+		await agent.deleteSession({sessionId: created.sessionId});
+	}
+});
+
+test.serial('AcpAgent - the list is not persisted, so a resume without it disables nothing', async t => {
+	const config = getAppConfig();
+	const previous = config.disabledTools;
+	config.disabledTools = [];
+	const {agent} = createDisabledToolsAgent();
+	const created = await agent.newSession({
+		cwd: '/tmp',
+		_meta: {[DISABLED_META]: ['browser']},
+	});
+
+	try {
+		await agent.prompt({
+			sessionId: created.sessionId,
+			prompt: [{type: 'text', text: 'Persist this session.'}],
+		});
+		const stored = await sessionManager.loadSession(created.sessionId);
+		t.false(JSON.stringify(stored).includes('browser'));
+
+		const resumed = await agent.resumeSession({
+			sessionId: created.sessionId,
+			cwd: '/tmp',
+		});
+		t.deepEqual(resumed._meta?.[DISABLED_META], []);
+	} finally {
+		config.disabledTools = previous;
+		await agent.deleteSession({sessionId: created.sessionId});
+	}
+});
+
+// Serial: it patches the process-wide logger.
+test.serial('AcpAgent - an unknown or malformed disabled tool is ignored, with a debug log', async t => {
+	const config = getAppConfig();
+	const previous = config.disabledTools;
+	config.disabledTools = [];
+	const logger = getLogger();
+	const original = logger.debug;
+	const lines: string[] = [];
+	logger.debug = ((message: string) => {
+		lines.push(message);
+	}) as typeof logger.debug;
+	const {agent} = createDisabledToolsAgent();
+	let created: Awaited<ReturnType<typeof agent.newSession>> | undefined;
+	try {
+		created = await agent.newSession({
+			cwd: '/tmp',
+			_meta: {[DISABLED_META]: ['browser', 'no_such_tool', 42]},
+		});
+
+		// Only the unknown name is noted. Match the message, not a substring of
+		// it: the line also carries the session's random UUID.
+		const ignored = lines.filter(line =>
+			line.includes('ignoring unknown disabled tool'),
+		);
+		t.is(ignored.length, 1);
+		t.true(ignored[0].includes('"no_such_tool"'));
+		// A number is dropped before it can be named in a log, and the response
+		// lists only the tool that is actually in effect.
+		t.deepEqual(created._meta?.[DISABLED_META], ['browser']);
+	} finally {
+		logger.debug = original;
+		config.disabledTools = previous;
+		if (created) await agent.deleteSession({sessionId: created.sessionId});
 	}
 });

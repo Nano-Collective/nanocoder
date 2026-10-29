@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import {ClientSideConnection} from '@agentclientprotocol/sdk';
-import {ACP_EXT_PREFIX, type ACP_EXT_METHODS} from '../../../source/acp/acp-capabilities';
+import {ACP_EXT_PREFIX, type ACP_EXT_METHODS, VSCODE_CLIENT_NAME} from '../../../source/acp/acp-capabilities';
 import {AcpStateManager, ACPStatus} from './acp-state';
 import {PromptAttempt} from './prompt-attempt';
 import { resolveExtensionCwd } from './workspace-utils';
@@ -192,7 +192,7 @@ export class NanocoderAcpClient {
 			// Perform ACP initialize handshake
 			const initResult = await this.connection.initialize({
 				clientInfo: {
-					name: 'Nanocoder VS Code Extension',
+					name: VSCODE_CLIENT_NAME,
 					version: version,
 				},
 				protocolVersion: 1,

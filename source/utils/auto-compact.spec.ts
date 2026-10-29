@@ -206,6 +206,36 @@ test('turning tune aggressive compact off keeps a user threshold override', t =>
 	t.is(resolveAutoCompactSettings(baseConfig).mode, 'conservative');
 });
 
+test('a caller\'s own aggressive-compact preset is used instead of the process-wide one', t => {
+	applyTuneCompaction({
+		enabled: true,
+		toolProfile: 'auto',
+		aggressiveCompact: true,
+	});
+	// The process-wide preset is on, but this caller has its own, which is off.
+	const own = resolveAutoCompactSettings(baseConfig, false);
+	t.is(own.threshold, 70);
+	t.is(own.mode, 'conservative');
+	t.false(own.hasOverrides);
+	t.is(resolveAutoCompactSettings(baseConfig).threshold, AGGRESSIVE_COMPACT_THRESHOLD);
+
+	// And the other way round: on for this caller, off process-wide.
+	applyTuneCompaction(undefined);
+	const aggressive = resolveAutoCompactSettings(baseConfig, true);
+	t.is(aggressive.threshold, AGGRESSIVE_COMPACT_THRESHOLD);
+	t.is(aggressive.mode, 'aggressive');
+	t.true(aggressive.hasOverrides);
+	t.is(resolveAutoCompactSettings(baseConfig).threshold, 70);
+});
+
+test('the caller\'s preset still sits below explicit /compact overrides', t => {
+	setAutoCompactThreshold(85);
+	setAutoCompactMode('default');
+	const resolved = resolveAutoCompactSettings(baseConfig, true);
+	t.is(resolved.threshold, 85);
+	t.is(resolved.mode, 'default');
+});
+
 // ==================== Proxy compatibility ====================
 
 test('autoCompactSessionOverrides proxy allows setting enabled', t => {

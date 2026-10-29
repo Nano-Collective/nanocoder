@@ -26,6 +26,14 @@ import {writeFileTool} from '@/tools/file-ops/write-file';
 import {readFileTool} from '@/tools/read-file';
 import {ToolRegistry} from '@/tools/tool-registry';
 import {clearReadTracker} from '@/utils/read-tracker';
+import {
+	cancelSubagentRun,
+	emitSubagentRunEvent,
+} from '@/services/subagent-events';
+import {SubagentExecutor} from '@/subagents/subagent-executor';
+import {getSubagentLoader} from '@/subagents/subagent-loader';
+import {agentTool, setAgentToolExecutor} from '@/tools/agent-tool';
+import type {ToolManager} from '@/tools/tool-manager';
 import {getSubagentToolBridge} from '@/utils/tool-approval-queue';
 import {
 	setToolRegistryGetter,
@@ -2179,6 +2187,99 @@ test('runAcpConversation - does not capture a timeline checkpoint for read_file'
 	t.deepEqual(await session.timeline.list(), []);
 });
 
+test('runAcpConversation - checkpoints of one prompt share a turn id across model round-trips', async t => {
+	const {conn} = createMockConn();
+	const cwd = join(
+		tmpdir(),
+		`nanocoder-timeline-turn-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+	);
+	mkdirSync(cwd, {recursive: true});
+	t.teardown(() => rmSync(cwd, {recursive: true, force: true}));
+	writeFileSync(join(cwd, 'a.ts'), 'v0');
+
+	const session = createMockSession(conn, {devMode: 'yolo', cwd});
+	const toolManager = {
+		...createMockToolManager(),
+		hasTool: () => true,
+		isReadOnly: (name: string) => name !== 'write_file',
+	};
+
+	// Applies the edit, so each checkpoint's before-image is the previous write.
+	setToolRegistryGetter(() => ({
+		write_file: async (args: {path: string; content: string}) => {
+			writeFileSync(join(cwd, args.path), args.content);
+			return `Wrote ${args.path}`;
+		},
+	}));
+
+	// Each model round-trip edits a.ts once, then the prompt ends.
+	const scriptedClient = (contents: string[]) => {
+		let callCount = 0;
+		return {
+			chat: async () => {
+				const content = contents[callCount];
+				callCount++;
+				if (content === undefined) {
+					return {choices: [{message: {content: 'done'}}]};
+				}
+				return {
+					choices: [
+						{
+							message: {
+								content: '',
+								tool_calls: [
+									createMockToolCall(
+										'write_file',
+										{path: 'a.ts', content},
+										`call-${content}`,
+									),
+								],
+							},
+						},
+					],
+				};
+			},
+		} as unknown as LLMClient;
+	};
+	const runPrompt = (contents: string[]) =>
+		runAcpConversation({
+			session,
+			client: scriptedClient(contents),
+			toolManager: toolManager as any,
+			conn,
+			nonInteractiveAlwaysAllow: [],
+		});
+
+	await runPrompt(['v1', 'v2']);
+	await runPrompt(['v3']);
+
+	const [first, second, nextPrompt] = await session.timeline.list();
+
+	// Two round-trips of one prompt: `truncateToMessageIndex` moved on, so it
+	// cannot group them, but the turn id does.
+	t.not(first.truncateToMessageIndex, second.truncateToMessageIndex);
+	t.truthy(first.turnId);
+	t.is(first.turnId, second.turnId);
+	// The next prompt is a new turn.
+	t.truthy(nextPrompt.turnId);
+	t.not(nextPrompt.turnId, first.turnId);
+
+	// The documented baseline: the earliest checkpoint of the turn holds the
+	// file as it was before the agent touched it, not after its first edit.
+	t.deepEqual(await session.timeline.readBefore(first.id, 'a.ts'), {
+		kind: 'text',
+		content: 'v0',
+	});
+	t.deepEqual(await session.timeline.readBefore(second.id, 'a.ts'), {
+		kind: 'text',
+		content: 'v1',
+	});
+	t.deepEqual(await session.timeline.readBefore(nextPrompt.id, 'a.ts'), {
+		kind: 'text',
+		content: 'v2',
+	});
+});
+
 test.serial(
 	'runAcpConversation - compacts history before the next model turn when over the token threshold',
 	async t => {
@@ -2281,7 +2382,12 @@ const callThroughBridge = async (
 	{
 		ask = true,
 		outcome = {content: 'wrote it', failed: false},
-	}: {ask?: boolean; outcome?: {content: string; failed: boolean}} = {},
+		subagentRunId,
+	}: {
+		ask?: boolean;
+		outcome?: {content: string; failed: boolean};
+		subagentRunId?: string;
+	} = {},
 ) => {
 	const updates: any[] = [];
 	const permissionRequests: any[] = [];
@@ -2310,7 +2416,7 @@ const callThroughBridge = async (
 				const toolCall = createMockToolCall('write_file', {path: 'a.txt'}, 'call-1');
 				await bridge.begin(toolCall, 'docs');
 				if (ask) {
-					decision = await bridge.approve(toolCall);
+					decision = await bridge.approve(toolCall, undefined, subagentRunId);
 				}
 				await bridge.end(toolCall, outcome);
 			}
@@ -3177,4 +3283,497 @@ test.serial('runAcpConversation - a mode switch in one session does not reach an
 	t.false(existsSync(join(switched.cwd, 'a.txt')));
 	t.is(untouched.permissionRequests.length, 0);
 	t.true(existsSync(join(untouched.cwd, 'b.txt')));
+});
+
+// ============================================================================
+// Tools the client turned off for a session
+// ============================================================================
+
+/**
+ * One turn in which the model calls `browser`. The tool manager honours the
+ * disabled list it is given, as the real one does, and the registry counts how
+ * many times the tool actually ran. With `turnOffWhileRequesting`, the client
+ * turns `browser` off (as a session/load would) after the model was offered it
+ * and before the call comes back.
+ */
+const runBrowserCallTurn = async (
+	disabledTools: string[],
+	{turnOffWhileRequesting = false} = {},
+) => {
+	const updates: any[] = [];
+	const conn = {
+		sessionUpdate: async (u: any) => {
+			updates.push(u.update);
+		},
+		requestPermission: async () => ({
+			outcome: {outcome: 'selected', optionId: 'allow'},
+		}),
+	} as unknown as AgentSideConnection;
+	const session = createMockSession(conn, {devMode: 'yolo'});
+	session.disabledTools = disabledTools;
+
+	const offered: string[][] = [];
+	let ran = 0;
+	setToolRegistryGetter(() => ({
+		browser: async () => {
+			ran++;
+			return 'page text';
+		},
+	}));
+	const toolManager = {
+		...createMockToolManager(),
+		getAvailableToolNames: (
+			_tune: unknown,
+			_mode: unknown,
+			disabled?: readonly string[],
+		) => ['read_file', 'browser'].filter(name => !disabled?.includes(name)),
+		getFilteredTools: (names: string[]) => {
+			offered.push(names);
+			return {};
+		},
+		hasTool: () => true,
+		getToolEntry: () => ({approval: false}),
+	};
+
+	let requests = 0;
+	const client = {
+		chat: async () => {
+			requests++;
+			if (requests === 1 && turnOffWhileRequesting) {
+				session.disabledTools = ['browser'];
+			}
+			return requests === 1
+				? {
+						choices: [
+							{
+								message: {
+									content: '',
+									tool_calls: [createMockToolCall('browser', {}, 'browse-1')],
+								},
+							},
+						],
+					}
+				: {choices: [{message: {content: 'done'}}]};
+		},
+	} as unknown as LLMClient;
+
+	await runAcpConversation({
+		session,
+		client,
+		toolManager: toolManager as any,
+		conn,
+		nonInteractiveAlwaysAllow: [],
+	});
+
+	const toolResult = session.messages.findLast(
+		(m: Message) => m.role === 'tool',
+	);
+	return {offered, ran, toolResult, updates, session};
+};
+
+test.serial('runAcpConversation - a tool the session turned off is not offered, and a call to it is refused', async t => {
+	const {offered, ran, toolResult, updates} = await runBrowserCallTurn([
+		'browser',
+	]);
+
+	t.deepEqual(offered[0], ['read_file']);
+	// The model named it anyway: nothing ran, and it is told why.
+	t.is(ran, 0);
+	t.is(toolResult?.content, 'Error: browser is disabled in this session');
+	const failed = updates.filter(
+		(u: any) => u.toolCallId === 'browse-1' && u.status === 'failed',
+	);
+	t.is(failed.length, 1);
+});
+
+test.serial('runAcpConversation - a tool turned off while the model is answering is refused, not run', async t => {
+	const {offered, ran, toolResult} = await runBrowserCallTurn([], {
+		turnOffWhileRequesting: true,
+	});
+
+	// It was offered, because the list was empty when the request was made.
+	t.deepEqual(offered[0], ['read_file', 'browser']);
+	t.is(ran, 0);
+	t.is(toolResult?.content, 'Error: browser is disabled in this session');
+});
+
+test.serial('runAcpConversation - another session in the same process still has the tool', async t => {
+	const off = await runBrowserCallTurn(['browser']);
+	const on = await runBrowserCallTurn([]);
+
+	t.is(off.ran, 0);
+	t.deepEqual(on.offered[0], ['read_file', 'browser']);
+	t.is(on.ran, 1);
+	t.is(on.toolResult?.content, 'page text');
+});
+
+test.serial('runAcpConversation - a session\'s subagents are told what the session turned off', async t => {
+	const {conn} = createMockConn();
+	const session = createMockSession(conn);
+	session.disabledTools = ['browser'];
+	let fromBridge: readonly string[] | undefined;
+	const client = {
+		chat: async () => {
+			fromBridge = getSubagentToolBridge(session.sessionId)?.getDisabledTools?.();
+			return {choices: [{message: {content: 'done', tool_calls: []}}]};
+		},
+	} as unknown as LLMClient;
+
+	await runAcpConversation({
+		session,
+		client,
+		toolManager: createMockToolManager() as any,
+		conn,
+		nonInteractiveAlwaysAllow: [],
+	});
+
+	t.deepEqual(fromBridge, ['browser']);
+});
+
+// ============================================================================
+// Sub-agent lifecycle notifications
+// ============================================================================
+
+/**
+ * One turn whose `agent` call plays a sub-agent run through the event store
+ * the way the executor does, so only the ACP wiring is under test.
+ */
+const runAgentTurn = async (
+	conn: AgentSideConnection,
+	session: AcpSession,
+	runId: string,
+) => {
+	let calls = 0;
+	const client = {
+		chat: async () => {
+			calls++;
+			return calls === 1
+				? {
+						choices: [
+							{
+								message: {
+									content: '',
+									tool_calls: [
+										createMockToolCall('agent', {}, `agent-call-${runId}`),
+									],
+								},
+							},
+						],
+					}
+				: {choices: [{message: {content: 'done'}}]};
+		},
+	} as unknown as LLMClient;
+
+	await runAcpConversation({
+		session,
+		client,
+		toolManager: {...createMockToolManager(), hasTool: () => true} as any,
+		conn,
+		nonInteractiveAlwaysAllow: [],
+	});
+};
+
+const subagentRegistry = () => {
+	setToolRegistryGetter(() => ({
+		agent: async (_args: any, options: any) => {
+			const base = {
+				childRunId: `run-${options.sessionId}`,
+				parentRunId: '',
+				sessionId: options.sessionId,
+				toolCallId: options.toolCallId,
+				name: 'explore',
+			};
+			emitSubagentRunEvent({...base, status: 'started'});
+			await new Promise(resolve => setTimeout(resolve, 20));
+			emitSubagentRunEvent({...base, status: 'progress', tokenCount: 5});
+			// Another session's run, which this session must not be told about.
+			emitSubagentRunEvent({
+				...base,
+				sessionId: 'someone-else',
+				childRunId: 'run-someone-else',
+				status: 'started',
+			});
+			emitSubagentRunEvent({...base, status: 'completed', result: 'found it'});
+			return 'found it';
+		},
+	}));
+};
+
+const createNotifyingConn = () => {
+	const notifications: Array<{method: string; params: any}> = [];
+	const conn = {
+		sessionUpdate: async () => {},
+		requestPermission: async () => ({
+			outcome: {outcome: 'selected', optionId: 'allow'},
+		}),
+		notify: async (method: string, params: any) => {
+			notifications.push({method, params});
+		},
+	} as unknown as AgentSideConnection;
+	return {conn, notifications};
+};
+
+test.serial('runAcpConversation - sends the sub-agent run to the client, tied to the agent call', async t => {
+	subagentRegistry();
+	const {conn, notifications} = createNotifyingConn();
+	const session = createMockSession(conn, {devMode: 'yolo'});
+
+	await runAgentTurn(conn, session, 'one');
+
+	t.true(notifications.every(n => n.method === '_nanocoder/subagent'));
+	t.deepEqual(
+		notifications.map(n => n.params.status),
+		['started', 'progress', 'completed'],
+	);
+	for (const {params} of notifications) {
+		t.is(params.sessionId, session.sessionId);
+		t.is(params.childRunId, `run-${session.sessionId}`);
+		t.is(params.toolCallId, 'agent-call-one');
+		t.is(params.parentRunId, '');
+	}
+	t.is(notifications.at(-1)?.params.result, 'found it');
+});
+
+test.serial('runAcpConversation - two sessions with sub-agents do not see each other\'s runs', async t => {
+	subagentRegistry();
+	const first = createNotifyingConn();
+	const second = createNotifyingConn();
+	const sessionA = createMockSession(first.conn, {devMode: 'yolo'});
+	const sessionB = createMockSession(second.conn, {devMode: 'yolo'});
+
+	await Promise.all([
+		runAgentTurn(first.conn, sessionA, 'a'),
+		runAgentTurn(second.conn, sessionB, 'b'),
+	]);
+
+	for (const [{notifications}, session] of [
+		[first, sessionA],
+		[second, sessionB],
+	] as const) {
+		t.is(notifications.length, 3);
+		t.true(notifications.every(n => n.params.sessionId === session.sessionId));
+	}
+});
+
+test.serial('runAcpConversation - a client that cannot take the notification still gets the turn', async t => {
+	subagentRegistry();
+	// The default mock connection has no notify(), so every send fails.
+	const {conn, updates} = createMockConn();
+	const session = createMockSession(conn, {devMode: 'yolo'});
+
+	await runAgentTurn(conn, session, 'quiet');
+
+	t.is(session.messages.findLast((m: Message) => m.role === 'tool')?.content, 'found it');
+	t.true(updates.length > 0);
+});
+
+test.serial('runAcpConversation - stops listening when the turn ends', async t => {
+	subagentRegistry();
+	const {conn, notifications} = createNotifyingConn();
+	const session = createMockSession(conn, {devMode: 'yolo'});
+	await runAgentTurn(conn, session, 'ended');
+	const before = notifications.length;
+
+	emitSubagentRunEvent({
+		childRunId: 'late',
+		parentRunId: '',
+		sessionId: session.sessionId,
+		name: 'explore',
+		status: 'started',
+	});
+	await new Promise(resolve => setTimeout(resolve, 20));
+
+	t.is(notifications.length, before);
+});
+
+test.serial('runAcpConversation - a sub-agent permission request names the run', async t => {
+	const {permissionRequests} = await callThroughBridge(
+		async () => ({outcome: {outcome: 'selected', optionId: 'allow'}}),
+		{subagentRunId: 'run-9'},
+	);
+
+	t.deepEqual(permissionRequests[0]._meta, {'nanocoder/childRunId': 'run-9'});
+});
+
+test.serial('runAcpConversation - a permission request without a run id carries no run meta', async t => {
+	const {permissionRequests} = await callThroughBridge(async () => ({
+		outcome: {outcome: 'selected', optionId: 'allow'},
+	}));
+
+	t.is(permissionRequests[0]._meta, undefined);
+});
+
+// ============================================================================
+// Sub-agent runs through the real agent tool and executor
+// ============================================================================
+
+const subagentToolManager = () =>
+	({
+		filterToolNamesForMode: (names: string[]) => names,
+		getOwnerSkill: () => undefined,
+		getAllTools: () => ({}),
+		getToolHandler: () => undefined,
+		getToolEntry: () => undefined,
+		isReadOnly: () => true,
+		getToolFormatter: () => undefined,
+		getStreamingFormatter: () => undefined,
+	}) as unknown as ToolManager;
+
+const startRealSubagents = async (subagentClient: LLMClient) => {
+	await getSubagentLoader().initialize();
+	setAgentToolExecutor(
+		new SubagentExecutor(subagentToolManager(), subagentClient),
+	);
+	setToolRegistryGetter(() => ({
+		agent: (args: any, options: any) => agentTool.tool.execute!(args, options),
+	}));
+};
+
+const agentCallTurn = (session: AcpSession, conn: AgentSideConnection) => {
+	let calls = 0;
+	const client = {
+		chat: async () => {
+			calls++;
+			return calls === 1
+				? {
+						choices: [
+							{
+								message: {
+									content: '',
+									tool_calls: [
+										createMockToolCall(
+											'agent',
+											{subagent_type: 'explore', description: 'look'},
+											'parent-agent-call',
+										),
+									],
+								},
+							},
+						],
+					}
+				: {choices: [{message: {content: 'parent finished'}}]};
+		},
+	} as unknown as LLMClient;
+	return runAcpConversation({
+		session,
+		client,
+		toolManager: {...createMockToolManager(), hasTool: () => true} as any,
+		conn,
+		nonInteractiveAlwaysAllow: [],
+	});
+};
+
+test.serial('runAcpConversation - a real sub-agent run reaches the client from start to completed', async t => {
+	await startRealSubagents({
+		chat: async () => ({choices: [{message: {content: 'child answer'}}]}),
+		getCurrentModel: () => 'm',
+		getProviderConfig: () => ({name: 'p'}),
+	} as unknown as LLMClient);
+	const {conn, notifications} = createNotifyingConn();
+	const session = createMockSession(conn, {devMode: 'yolo'});
+
+	const result = await agentCallTurn(session, conn);
+
+	t.is(result.stopReason, 'end_turn');
+	const statuses = notifications.map(n => n.params.status);
+	t.is(statuses[0], 'started');
+	t.is(statuses.at(-1), 'completed');
+	t.is(notifications.at(-1)?.params.result, 'child answer');
+	for (const {params} of notifications) {
+		t.is(params.sessionId, session.sessionId);
+		t.is(params.toolCallId, 'parent-agent-call');
+		t.is(params.name, 'explore');
+		t.is(params.parentRunId, '');
+	}
+	t.is(new Set(notifications.map(n => n.params.childRunId)).size, 1);
+});
+
+test.serial('runAcpConversation - cancelling one sub-agent lets the parent turn continue', async t => {
+	let childModelCalled = false;
+	await startRealSubagents({
+		chat: (_m: unknown, _t: unknown, _c: unknown, signal?: AbortSignal) =>
+			new Promise((_resolve, reject) => {
+				childModelCalled = true;
+				// A real client rejects on a signal that is already aborted, so
+				// this must too: a cancel can land before the call is made.
+				const abort = () => reject(new Error('Aborted'));
+				if (signal?.aborted) abort();
+				else signal?.addEventListener('abort', abort);
+			}),
+		getCurrentModel: () => 'm',
+		getProviderConfig: () => ({name: 'p'}),
+	} as unknown as LLMClient);
+	const {conn, notifications} = createNotifyingConn();
+	const session = createMockSession(conn, {devMode: 'yolo'});
+
+	const turn = agentCallTurn(session, conn);
+	// What a client does: wait for the run to be announced, then cancel it by id.
+	const started = await waitFor(() =>
+		notifications.find(n => n.params.status === 'started'),
+	);
+	await waitFor(() => (childModelCalled ? true : undefined));
+	t.true(cancelSubagentRun(session.sessionId, started.params.childRunId));
+	const result = await turn;
+
+	t.is(result.stopReason, 'end_turn');
+	t.false(session.abortController.signal.aborted);
+	t.is(notifications.at(-1)?.params.status, 'cancelled');
+	// The parent was told, so it can carry on rather than wait for a result.
+	const toolResult = session.messages.findLast(
+		(m: Message) => m.role === 'tool' && m.name === 'agent',
+	);
+	t.regex(String(toolResult?.content), /Subagent was cancelled/);
+	t.is(session.messages.at(-1)?.content, 'parent finished');
+});
+
+async function waitFor<T>(find: () => T | undefined): Promise<T> {
+	for (let i = 0; i < 100; i++) {
+		const found = find();
+		if (found) return found;
+		await new Promise(resolve => setTimeout(resolve, 20));
+	}
+	throw new Error('timed out waiting');
+}
+
+test.serial('runAcpConversation - a session with its own tools runs them, and others still use the shared registry', async t => {
+	const {conn} = createMockConn();
+	const runTurn = async (sessionTools?: ToolManager) => {
+		const session = createMockSession(conn, {devMode: 'yolo'});
+		let calls = 0;
+		const client = {
+			chat: async () => {
+				calls++;
+				return calls === 1
+					? {
+							choices: [
+								{
+									message: {
+										content: '',
+										tool_calls: [createMockToolCall('lookup', {})],
+									},
+								},
+							],
+						}
+					: {choices: [{message: {content: 'done'}}]};
+			},
+		} as unknown as LLMClient;
+		await runAcpConversation({
+			session,
+			client,
+			toolManager: {...createMockToolManager(), hasTool: () => true} as any,
+			sessionTools,
+			conn,
+			nonInteractiveAlwaysAllow: [],
+		});
+		return String(
+			session.messages.findLast((m: Message) => m.role === 'tool')?.content,
+		);
+	};
+	setToolRegistryGetter(() => ({lookup: async () => 'shared registry'}));
+	const own = {
+		getToolRegistry: () => ({lookup: async () => 'session registry'}),
+	} as unknown as ToolManager;
+
+	t.is(await runTurn(own), 'session registry');
+	t.is(await runTurn(), 'shared registry');
 });
