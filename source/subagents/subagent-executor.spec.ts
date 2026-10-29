@@ -38,6 +38,11 @@ import {
 	setAutoCompactThreshold,
 } from '@/utils/auto-compact';
 import {
+	cancelSubagentRun,
+	onSubagentRunEvent,
+	type SubagentRunEvent,
+} from '@/services/subagent-events';
+import {
 	registerSubagentToolBridge,
 	setGlobalToolApprovalHandler,
 	type SubagentToolBridge,
@@ -2709,4 +2714,352 @@ test.serial('a subagent is limited to the tools of the bridge session mode', asy
 			);
 		}
 	}
+});
+
+// ============================================================================
+// Run lifecycle events and per-child cancel
+// ============================================================================
+
+const SESSION = '11111111-1111-4111-8111-111111111111';
+const OTHER_SESSION = '22222222-2222-4222-8222-222222222222';
+
+function recordRunEvents() {
+	const events: SubagentRunEvent[] = [];
+	const stop = onSubagentRunEvent(event => events.push(event));
+	return {events, stop};
+}
+
+/** Poll until `condition` holds; a fixed sleep is a flake waiting for a loaded CI box. */
+async function waitUntil(condition: () => boolean, timeoutMs = 5000) {
+	const deadline = Date.now() + timeoutMs;
+	while (!condition()) {
+		if (Date.now() > deadline) throw new Error('timed out waiting');
+		await new Promise(resolve => setTimeout(resolve, 10));
+	}
+}
+
+/** A model call that never answers until it is aborted. */
+function hangingClient(onAbort?: () => void, onStart?: () => void): LLMClient {
+	const client = createMockClient([]);
+	(client as any).chat = (
+		_messages: unknown,
+		_tools: unknown,
+		_callbacks: unknown,
+		signal?: AbortSignal,
+	) =>
+		new Promise((_resolve, reject) => {
+			onStart?.();
+			// A real client rejects on a signal that is already aborted, so this
+			// must too: a cancel can land before the call is made.
+			const abort = () => {
+				onAbort?.();
+				reject(new Error('Aborted'));
+			};
+			if (signal?.aborted) abort();
+			else signal?.addEventListener('abort', abort);
+		});
+	return client;
+}
+
+test.serial('a run emits started, progress and completed with one stable id', async t => {
+	const toolManager = createMockToolManager({
+		read_file: {handler: async () => 'file contents', readOnly: true},
+	});
+	const client = createMockClient([
+		{
+			content: '',
+			tool_calls: [
+				{id: 'read', function: {name: 'read_file', arguments: '{"path":"a.ts"}'}},
+			],
+		},
+		{content: 'all done'},
+	]);
+	const executor = new SubagentExecutor(toolManager, client);
+	const {events, stop} = recordRunEvents();
+	try {
+		const result = await executor.execute(
+			{subagent_type: 'explore', description: 'Look around'},
+			undefined,
+			0,
+			'run-1',
+			{sessionId: SESSION, toolCallId: 'parent-call'},
+		);
+		t.true(result.success);
+	} finally {
+		stop();
+	}
+
+	t.deepEqual([...new Set(events.map(e => e.childRunId))], ['run-1']);
+	t.is(events[0].status, 'started');
+	t.is(events.at(-1)?.status, 'completed');
+	t.is(events.at(-1)?.result, 'all done');
+	t.true(events.slice(1, -1).length > 0);
+	t.true(events.slice(1, -1).every(e => e.status === 'progress'));
+	t.true(
+		events.some(e => e.lastTool === 'read_file' && (e.toolCallCount ?? 0) >= 1),
+	);
+	for (const event of events) {
+		t.is(event.name, 'explore');
+		t.is(event.sessionId, SESSION);
+		t.is(event.toolCallId, 'parent-call');
+		t.is(event.parentRunId, '');
+	}
+});
+
+test.serial('concurrent runs each emit their own stream', async t => {
+	const toolManager = createMockToolManager();
+	const {events, stop} = recordRunEvents();
+	try {
+		await Promise.all(
+			['run-a', 'run-b'].map(id =>
+				new SubagentExecutor(
+					toolManager,
+					createMockClient([{content: `done ${id}`}]),
+				).execute(
+					{subagent_type: 'explore', description: id},
+					undefined,
+					0,
+					id,
+					{sessionId: SESSION},
+				),
+			),
+		);
+	} finally {
+		stop();
+	}
+
+	for (const id of ['run-a', 'run-b']) {
+		const own = events.filter(e => e.childRunId === id);
+		t.deepEqual([own[0].status, own.at(-1)?.status], ['started', 'completed']);
+		t.is(own.at(-1)?.result, `done ${id}`);
+	}
+});
+
+test.serial('a nested run reports its parent run, and a run hands its own id to its tools', async t => {
+	let toolContext: ToolExecutionContext | undefined;
+	const toolManager = createMockToolManager({
+		read_file: {
+			handler: async (_args, options) => {
+				toolContext = options;
+				return 'x';
+			},
+			readOnly: true,
+		},
+	});
+	const client = createMockClient([
+		{
+			content: '',
+			tool_calls: [
+				{id: 'inner-call', function: {name: 'read_file', arguments: '{}'}},
+			],
+		},
+		{content: 'ok'},
+	]);
+	const {events, stop} = recordRunEvents();
+	try {
+		await new SubagentExecutor(toolManager, client).execute(
+			{subagent_type: 'explore', description: 'nested'},
+			undefined,
+			1,
+			'child-run',
+			{sessionId: SESSION, subagentRunId: 'parent-run'},
+		);
+	} finally {
+		stop();
+	}
+
+	t.true(events.length > 0);
+	t.true(events.every(e => e.parentRunId === 'parent-run'));
+	// A subagent started by one of these tools would name this run as its parent.
+	t.is(toolContext?.subagentRunId, 'child-run');
+	// Namespaced by run, so two runs' calls never share an id.
+	t.true(toolContext?.toolCallId?.endsWith('inner-call'));
+});
+
+test.serial('cancelling one run ends it and leaves its sibling and the turn running', async t => {
+	const toolManager = createMockToolManager();
+	const turn = new AbortController();
+	const siblingClient = createMockClient([]);
+	let hangingStarted = false;
+	let finishSibling: (() => void) | undefined;
+	(siblingClient as any).chat = () =>
+		new Promise(resolve => {
+			finishSibling = () =>
+				resolve({choices: [{message: {content: 'sibling done'}}]});
+		});
+
+	const {events, stop} = recordRunEvents();
+	try {
+		const cancelled = new SubagentExecutor(
+			toolManager,
+			hangingClient(undefined, () => {
+				hangingStarted = true;
+			}),
+		).execute(
+			{subagent_type: 'explore', description: 'a'},
+			turn.signal,
+			0,
+			'run-cancel',
+			{sessionId: SESSION},
+		);
+		const sibling = new SubagentExecutor(toolManager, siblingClient).execute(
+			{subagent_type: 'explore', description: 'b'},
+			turn.signal,
+			0,
+			'run-keep',
+			{sessionId: SESSION},
+		);
+		await waitUntil(() => hangingStarted && finishSibling !== undefined);
+
+		t.true(cancelSubagentRun(SESSION, 'run-cancel'));
+		const result = await cancelled;
+		t.false(result.success);
+		t.is(result.error, 'Subagent was cancelled');
+		t.false(turn.signal.aborted);
+
+		finishSibling?.();
+		t.true((await sibling).success);
+	} finally {
+		stop();
+	}
+
+	t.is(
+		events.filter(e => e.childRunId === 'run-cancel').at(-1)?.status,
+		'cancelled',
+	);
+	t.is(
+		events.filter(e => e.childRunId === 'run-keep').at(-1)?.status,
+		'completed',
+	);
+});
+
+test.serial('a cancel that lands just before the model call is made still ends the run', async t => {
+	// The first progress event fires after the loop's own aborted check and
+	// before the model call, so cancelling there hands chat() a signal that is
+	// already aborted. A client that only listens for the event would hang.
+	const stop = onSubagentRunEvent(event => {
+		if (event.status === 'progress') cancelSubagentRun(SESSION, 'run-late');
+	});
+	try {
+		const result = await new SubagentExecutor(
+			createMockToolManager(),
+			hangingClient(),
+		).execute(
+			{subagent_type: 'explore', description: 'late'},
+			undefined,
+			0,
+			'run-late',
+			{sessionId: SESSION},
+		);
+
+		t.false(result.success);
+		t.is(result.error, 'Subagent was cancelled');
+	} finally {
+		stop();
+	}
+});
+
+test.serial('cancelling the turn cancels every run', async t => {
+	const toolManager = createMockToolManager();
+	const turn = new AbortController();
+	let started = 0;
+	const {events, stop} = recordRunEvents();
+	try {
+		const runs = ['run-1', 'run-2'].map(id =>
+			new SubagentExecutor(
+				toolManager,
+				hangingClient(undefined, () => {
+					started++;
+				}),
+			).execute(
+				{subagent_type: 'explore', description: id},
+				turn.signal,
+				0,
+				id,
+				{sessionId: SESSION},
+			),
+		);
+		await waitUntil(() => started === 2);
+		turn.abort();
+		const results = await Promise.all(runs);
+		t.true(results.every(r => !r.success));
+	} finally {
+		stop();
+	}
+
+	for (const id of ['run-1', 'run-2']) {
+		t.is(events.filter(e => e.childRunId === id).at(-1)?.status, 'cancelled');
+	}
+});
+
+test.serial('a run of another session cannot be cancelled, and a finished run is forgotten', async t => {
+	const toolManager = createMockToolManager();
+	let aborted = false;
+	let started = false;
+	const run = new SubagentExecutor(
+		toolManager,
+		hangingClient(
+			() => {
+				aborted = true;
+			},
+			() => {
+				started = true;
+			},
+		),
+	).execute(
+		{subagent_type: 'explore', description: 'a'},
+		undefined,
+		0,
+		'run-scoped',
+		{sessionId: SESSION},
+	);
+	await waitUntil(() => started);
+
+	t.false(cancelSubagentRun(OTHER_SESSION, 'run-scoped'));
+	t.false(aborted);
+	t.true(cancelSubagentRun(SESSION, 'run-scoped'));
+	await run;
+	t.true(aborted);
+	t.false(cancelSubagentRun(SESSION, 'run-scoped'));
+});
+
+test.serial('a subagent approval request carries the run id', async t => {
+	const toolManager = createMockToolManager({
+		git_status: {
+			handler: async () => 'clean',
+			readOnly: false,
+			needsApproval: true,
+		},
+	});
+	let seen: string | undefined;
+	const unregister = registerSubagentToolBridge(SESSION, {
+		getMode: () => 'normal',
+		begin: async () => {},
+		approve: async (_toolCall, _signal, subagentRunId) => {
+			seen = subagentRunId;
+			return 'approved';
+		},
+		end: async () => {},
+	});
+	try {
+		const client = createMockClient([
+			{
+				content: '',
+				tool_calls: [
+					{id: 'tc1', function: {name: 'git_status', arguments: '{}'}},
+				],
+			},
+			{content: 'Done'},
+		]);
+		await new SubagentExecutor(toolManager, client).execute(
+			{subagent_type: 'explore', description: 'approval'},
+			undefined,
+			0,
+			'run-approval',
+			{sessionId: SESSION},
+		);
+	} finally {
+		unregister();
+	}
+	t.is(seen, 'run-approval');
 });

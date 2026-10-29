@@ -34,6 +34,7 @@ import type {
 import {RequestError} from '@agentclientprotocol/sdk';
 import {getAlwaysAllowedTools} from '@/acp/acp-approval';
 import {
+	ACP_EXT_ALIASES,
 	ACP_EXT_METHODS,
 	ACP_EXT_PREFIX,
 	ACP_SESSION_TITLE_NOTIFICATION,
@@ -63,6 +64,7 @@ import {resolveTune} from '@/config/tune';
 import {appendRelevantProjectContextWithCount} from '@/memory/project-context';
 import {setAutoCommitClient} from '@/services/auto-commit';
 import {runInSessionCwdScope} from '@/services/session-cwd';
+import {cancelSubagentRun} from '@/services/subagent-events';
 import {TimelineManager} from '@/services/timeline-manager';
 import {maybeGenerateTitle} from '@/session/maybe-generate-title';
 import {sessionManager} from '@/session/session-manager';
@@ -740,7 +742,8 @@ export class AcpAgent implements Agent {
 		const method = requested.startsWith(ACP_EXT_PREFIX)
 			? requested.slice(ACP_EXT_PREFIX.length)
 			: requested;
-		if (!(ACP_EXT_METHODS as readonly string[]).includes(method)) {
+		const known = method === requested ? ACP_EXT_ALIASES : ACP_EXT_METHODS;
+		if (!(known as readonly string[]).includes(method)) {
 			throw RequestError.methodNotFound(requested);
 		}
 		if (method === requested && !this.warnedExtAliases.has(method)) {
@@ -815,6 +818,19 @@ export class AcpAgent implements Agent {
 				revertedTo: result.revertedTo,
 				filesRestored: result.filesRestored,
 			};
+		}
+
+		if (method === 'cancelSubagent') {
+			const sessionId = params.sessionId;
+			const childRunId = params.childRunId;
+			if (typeof sessionId !== 'string' || typeof childRunId !== 'string') {
+				throw new Error(
+					'cancelSubagent requires string sessionId and childRunId',
+				);
+			}
+			this.requireSession(sessionId);
+			// False, not an error, when the run already ended: that race is normal.
+			return {cancelled: cancelSubagentRun(sessionId, childRunId)};
 		}
 
 		if (method === 'retryTurn') {
