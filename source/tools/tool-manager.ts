@@ -258,6 +258,8 @@ export class ToolManager {
 	}
 
 	protected async createMCPClient(): Promise<MCPClient> {
+		// The parent's factory builds a new client; its own is not handed over.
+		// Going through it keeps one seam for swapping the client in tests.
 		if (this.parent) return this.parent.createMCPClient();
 		const {MCPClient} = await import('@/mcp/mcp-client');
 		return new MCPClient();

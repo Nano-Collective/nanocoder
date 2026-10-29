@@ -1413,6 +1413,20 @@ test('forSession - sees the shared tools, live, and adds MCP tools of its own', 
 	t.true(session.hasTool('added_later'));
 });
 
+test('forSession - still reports a shared MCP tool as an MCP tool', async t => {
+	const base = new QueuedClientToolManager([
+		fakeMcpClient('shared_mcp', 'shared-server'),
+	]);
+	await base.initializeMCP([{...SESSION_SERVER, name: 'shared-server'}]);
+	const session = base.forSession();
+
+	t.deepEqual(session.getMCPToolInfo('shared_mcp'), {
+		isMCPTool: true,
+		serverName: 'shared-server',
+	});
+	t.deepEqual(session.getMCPToolInfo('read_file'), {isMCPTool: false});
+});
+
 test('forSession - two sessions with different servers do not see each other', async t => {
 	const base = new QueuedClientToolManager([
 		fakeMcpClient('tool_one'),

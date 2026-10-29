@@ -2288,3 +2288,26 @@ test.serial('AcpAgent.prompt - a session calls its own MCP tool, which the proce
 		await agent.deleteSession({sessionId: created.sessionId});
 	}
 });
+
+test.serial('AcpAgent.newSession - the advertised alwaysAllow list includes the own MCP tools of the session', async t => {
+	const config = getAppConfig();
+	const previous = config.alwaysAllow;
+	config.alwaysAllow = ['tool_one'];
+	const {agent} = createMcpAgent();
+	const withServer = await agent.newSession({
+		cwd: SESSION_CWD,
+		mcpServers: [fixtureServer('one', 'tool_one')],
+	});
+	const without = await agent.newSession({cwd: SESSION_CWD, mcpServers: []});
+	try {
+		const alwaysAllow = (response: {_meta?: Record<string, any> | null}) =>
+			response._meta?.['nanocoder/approval']?.alwaysAllow;
+		t.true(alwaysAllow(withServer).includes('tool_one'));
+		t.false(alwaysAllow(without).includes('tool_one'));
+	} finally {
+		config.alwaysAllow = previous;
+		await agent.closeSession({sessionId: withServer.sessionId});
+		await agent.deleteSession({sessionId: withServer.sessionId});
+		await agent.deleteSession({sessionId: without.sessionId});
+	}
+});

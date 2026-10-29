@@ -424,11 +424,13 @@ export class AcpAgent implements Agent {
 			const config = getAppConfig();
 			const nonInteractiveAlwaysAllow = config.alwaysAllow ?? [];
 
+			// The model is offered the tools its calls will run against.
+			const sessionTools = this.sessionToolManagers.get(session.sessionId);
 			const response = await runAcpConversation({
 				session,
 				client: this.initContext.client,
-				toolManager: this.toolManagerFor(session.sessionId),
-				sessionTools: this.sessionToolManagers.get(session.sessionId),
+				toolManager: sessionTools ?? this.initContext.toolManager,
+				sessionTools,
 				conn: this.conn,
 				nonInteractiveAlwaysAllow,
 			});
@@ -1001,7 +1003,7 @@ export class AcpAgent implements Agent {
 		return {
 			'nanocoder/approval': {
 				alwaysAllow: await getAlwaysAllowedTools(
-					this.initContext.toolManager,
+					this.toolManagerFor(session.sessionId),
 					session.developmentMode,
 					getAppConfig().alwaysAllow ?? [],
 				),
