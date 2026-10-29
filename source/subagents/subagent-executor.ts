@@ -54,7 +54,10 @@ import {
 	clearReadContentScope,
 	runWithReadContentScope,
 } from '@/utils/read-tracker';
-import {signalToolApproval} from '@/utils/tool-approval-queue';
+import {
+	getSubagentToolBridge,
+	signalToolApproval,
+} from '@/utils/tool-approval-queue';
 import {parseToolArguments} from '@/utils/tool-args-parser';
 import {toolErrorToContent} from '@/utils/tool-validation';
 import {truncateToolResult} from '@/utils/truncate-tool-result';
@@ -269,8 +272,13 @@ export class SubagentExecutor {
 					}
 				: loadedConfig;
 
-			const context = this.createSubagentContext(config, task);
-			const filteredTools = this.filterTools(config);
+			// An ACP session's mode, not the shared executor's, decides which tools
+			// its subagents are offered, as it does for the top-level agent.
+			const mode =
+				getSubagentToolBridge(executionContext?.sessionId)?.getMode() ??
+				this.currentMode();
+			const context = this.createSubagentContext(config, task, mode);
+			const filteredTools = this.filterTools(config, mode);
 			const recalled = await appendRelevantProjectContextWithCount(
 				context.systemMessage,
 				this.buildTaskPrompt(task),
@@ -366,6 +374,7 @@ export class SubagentExecutor {
 	private createSubagentContext(
 		config: SubagentConfigWithSource,
 		task: SubagentTask,
+		mode: DevelopmentMode,
 	): SubagentContext {
 		const initialMessages = [
 			{
@@ -374,7 +383,7 @@ export class SubagentExecutor {
 			},
 		];
 
-		const availableTools = this.getAvailableToolNames(config);
+		const availableTools = this.getAvailableToolNames(config, mode);
 
 		return {
 			availableTools,
@@ -397,7 +406,10 @@ export class SubagentExecutor {
 		return prompt;
 	}
 
-	private getAvailableToolNames(config: SubagentConfigWithSource): string[] {
+	private getAvailableToolNames(
+		config: SubagentConfigWithSource,
+		mode: DevelopmentMode = this.currentMode(),
+	): string[] {
 		const allTools = Object.keys(
 			this.toolManager.getAllTools({forSkill: config.ownerSkill}),
 		);
@@ -436,10 +448,7 @@ export class SubagentExecutor {
 		// could propose write_file or execute_bash, and a headless
 		// (daemon-triggered) run would be offered ask_user and tools that
 		// need an approval nobody is there to give.
-		available = this.toolManager.filterToolNamesForMode(
-			available,
-			this.currentMode(),
-		);
+		available = this.toolManager.filterToolNamesForMode(available, mode);
 
 		// Always exclude the session-artifact tools. Subagents run with the
 		// parent's session id, so `getAllTools()` (which applies no development
@@ -458,11 +467,12 @@ export class SubagentExecutor {
 	 */
 	private filterTools(
 		config: SubagentConfigWithSource,
+		mode: DevelopmentMode,
 	): Record<string, AISDKCoreTool> {
 		const allTools = this.toolManager.getAllTools({
 			forSkill: config.ownerSkill,
 		});
-		const availableNames = this.getAvailableToolNames(config);
+		const availableNames = this.getAvailableToolNames(config, mode);
 
 		const filtered: Record<string, AISDKCoreTool> = {} as Record<
 			string,
@@ -813,7 +823,10 @@ export class SubagentExecutor {
 						this.executeToolCall(
 							toolName,
 							toolCall.function.arguments,
-							toolCall.id,
+							// Scoped to this subagent: the model names its own calls
+							// (`call_1`), so two subagents would otherwise share ids on
+							// the client.
+							agentId ? `${agentId}:${toolCall.id}` : toolCall.id,
 							config,
 							signal,
 							executionContext,
@@ -852,10 +865,11 @@ export class SubagentExecutor {
 		toolName: string,
 		rawArguments: unknown,
 		alwaysAllow?: string[],
+		mode: DevelopmentMode = this.currentMode(),
 	): Promise<boolean> {
 		const toolEntry = this.toolManager.getToolEntry(toolName);
 		return resolveToolApproval(toolName, toolEntry, rawArguments, {
-			mode: this.currentMode(),
+			mode,
 			alwaysAllow: alwaysAllow ?? getAppConfig().alwaysAllow ?? [],
 		});
 	}
@@ -872,30 +886,6 @@ export class SubagentExecutor {
 		executionContext?: Omit<ToolExecutionContext, 'abortSignal'>,
 		alwaysAllow?: string[],
 	): Promise<{content: string; images?: Message['images']}> {
-		if (signal?.aborted) {
-			return {content: 'Error: Execution was cancelled'};
-		}
-
-		// Enforce the allow-list at the execution boundary, not just when
-		// choosing which tools to offer. `getToolHandler` resolves a handler for
-		// every *registered* tool, so a subagent that names a filtered tool
-		// anyway — hallucinated, or coaxed there by its own prompt — would
-		// otherwise run it. That let a read-only agent like `explore` write
-		// files, and let any subagent overwrite the parent session's plan, task
-		// list, or walkthrough (subagents run with the parent's session id).
-		if (!this.getAvailableToolNames(config).includes(toolName)) {
-			return {
-				content:
-					`Error: Tool '${toolName}' is not available to this subagent. ` +
-					'Use only the tools listed in your instructions.',
-			};
-		}
-
-		const toolHandler = this.toolManager.getToolHandler(toolName);
-		if (!toolHandler) {
-			return {content: `Error: Tool '${toolName}' not found`};
-		}
-
 		// One ToolCall object for this call, shared by the approval prompt and
 		// the lifecycle gate so runPreToolUseGate can key its once-per-call
 		// suppression on it.
@@ -909,6 +899,50 @@ export class SubagentExecutor {
 			},
 		};
 
+		// A client that takes subagent tool calls (ACP) sees every call, not just
+		// the ones needing approval, and each ends with its real outcome. That
+		// includes a call refused below, so a hallucinated tool leaves a trace.
+		const bridge = getSubagentToolBridge(executionContext?.sessionId);
+		await bridge?.begin(toolCall, config.name);
+		const finish = async (
+			result: {content: string; images?: Message['images']},
+			failed: boolean,
+		) => {
+			await bridge?.end(toolCall, {content: result.content, failed});
+			return result;
+		};
+
+		if (signal?.aborted) {
+			return finish({content: 'Error: Execution was cancelled'}, true);
+		}
+
+		// Enforce the allow-list at the execution boundary, not just when
+		// choosing which tools to offer. `getToolHandler` resolves a handler for
+		// every *registered* tool, so a subagent that names a filtered tool
+		// anyway — hallucinated, or coaxed there by its own prompt — would
+		// otherwise run it. That let a read-only agent like `explore` write
+		// files, and let any subagent overwrite the parent session's plan, task
+		// list, or walkthrough (subagents run with the parent's session id).
+		// Checked against the session's mode as it is now, so a switch to plan
+		// mid-run stops a subagent writing.
+		if (
+			!this.getAvailableToolNames(config, bridge?.getMode()).includes(toolName)
+		) {
+			return finish(
+				{
+					content:
+						`Error: Tool '${toolName}' is not available to this subagent. ` +
+						'Use only the tools listed in your instructions.',
+				},
+				true,
+			);
+		}
+
+		const toolHandler = this.toolManager.getToolHandler(toolName);
+		if (!toolHandler) {
+			return finish({content: `Error: Tool '${toolName}' not found`}, true);
+		}
+
 		// A trust-gated run (verify, daemon CI) must never post to GitHub itself:
 		// the harness does that. Enforced here rather than relying on the
 		// approval prompt, which `alwaysAllow` or yolo mode would skip.
@@ -917,9 +951,12 @@ export class SubagentExecutor {
 			config.trustLevel &&
 			!isGitPrCallAllowed(config.trustLevel, parsedArgs)
 		) {
-			return {
-				content: `Error: this git_pr action is not permitted at trust level '${config.trustLevel}'. Posting to GitHub is done by the harness.`,
-			};
+			return finish(
+				{
+					content: `Error: this git_pr action is not permitted at trust level '${config.trustLevel}'. Posting to GitHub is done by the harness.`,
+				},
+				true,
+			);
 		}
 
 		// Subagents run their own loop rather than going through processToolUse,
@@ -929,19 +966,22 @@ export class SubagentExecutor {
 		// approve something that is about to be refused anyway.
 		const gate = await runPreToolUseGate(toolCall, parsedArgs);
 		if (gate.blocked) {
-			return {content: `Error: ${gate.reason}`};
+			return finish({content: `Error: ${gate.reason}`}, true);
 		}
 
-		// Check if this tool needs user approval
+		// Check if this tool needs user approval. A bridge supplies its own
+		// session's mode: the executor is shared, so its mode can't be right for
+		// every session at once.
 		const needsApproval = await this.needsApprovalForTool(
 			toolName,
 			rawArguments,
 			alwaysAllow,
+			bridge?.getMode(),
 		);
 		if (needsApproval) {
 			const vote = await consultPluginPermission(toolName, parsedArgs);
 			if (vote.decision === 'deny') {
-				return {content: `Error: ${vote.reason}`};
+				return finish({content: `Error: ${vote.reason}`}, true);
 			}
 
 			// Pass the turn's signal: without it this await is the one place a
@@ -949,16 +989,28 @@ export class SubagentExecutor {
 			// them and joins with `Promise.allSettled`, so one subagent parked
 			// on an unanswerable approval kept the whole turn open. On abort
 			// the queue settles this with a denial.
-			const approved = await signalToolApproval(
-				{
-					toolCall,
-					subagentName: config.name,
-				},
-				signal,
-			);
+			const decision = bridge
+				? await bridge.approve(toolCall, signal)
+				: (await signalToolApproval(
+							{
+								toolCall,
+								subagentName: config.name,
+							},
+							signal,
+						))
+					? 'approved'
+					: 'denied';
 
-			if (!approved) {
-				return {content: 'Tool execution was denied by the user.'};
+			if (decision !== 'approved') {
+				return finish(
+					{
+						content:
+							decision === 'cancelled'
+								? 'Tool execution was cancelled by the user.'
+								: 'Tool execution was denied by the user.',
+					},
+					true,
+				);
 			}
 		}
 
@@ -983,8 +1035,14 @@ export class SubagentExecutor {
 			// Formatters run on a successful write, before post-tool-use, as in
 			// processToolUse.
 			const truncated = truncateToolResult(content);
+			// Failure is either a structured isError or, for the many tools that
+			// return plain text, an "Error..." message - as the top-level ACP path
+			// reads it.
 			const failed =
-				typeof result !== 'string' && 'isError' in result && result.isError;
+				(typeof result !== 'string' &&
+					'isError' in result &&
+					!!result.isError) ||
+				content.startsWith('Error');
 			const formatted = failed
 				? truncated
 				: await formatWrittenFile(toolName, parsedArgs, truncated);
@@ -997,23 +1055,29 @@ export class SubagentExecutor {
 			const commitNote = failed
 				? null
 				: await maybeAutoCommit(toolName, parsedArgs);
-			return {
-				content: commitNote ? `${withHooks}\n\n${commitNote}` : withHooks,
-				...(images && images.length > 0 ? {images} : {}),
-			};
+			return finish(
+				{
+					content: commitNote ? `${withHooks}\n\n${commitNote}` : withHooks,
+					...(images && images.length > 0 ? {images} : {}),
+				},
+				failed,
+			);
 		} catch (error) {
 			// Handler validation failures surface here too (the handler is
 			// validated), formatted with any structured detail. post-tool-use
 			// still fires: a failed delegated call is exactly what an audit-log
 			// hook needs to see, and dropping it would make this surface disagree
 			// with processToolUse.
-			return {
-				content: await appendPostToolUseOutput(
-					toolName,
-					parsedArgs,
-					truncateToolResult(toolErrorToContent(error)),
-				),
-			};
+			return finish(
+				{
+					content: await appendPostToolUseOutput(
+						toolName,
+						parsedArgs,
+						truncateToolResult(toolErrorToContent(error)),
+					),
+				},
+				true,
+			);
 		}
 	}
 }

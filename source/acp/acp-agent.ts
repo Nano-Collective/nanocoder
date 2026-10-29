@@ -178,11 +178,13 @@ export class AcpAgent implements Agent {
 			// Try loading from disk first so history persists across process restarts.
 			await sessionManager.initialize();
 			const persisted = await sessionManager.loadSession(params.sessionId);
+			if (!persisted) {
+				// Same error as resumeSession so clients can tell a missing session apart.
+				throw new Error(`Session not found on disk: ${params.sessionId}`);
+			}
 			session = this.registerSession(params.sessionId, params.cwd);
 			clearAcpReadStubs(params.sessionId);
-			if (persisted) {
-				session.messages = persisted.messages;
-			}
+			session.messages = persisted.messages;
 		}
 
 		logger.info(
