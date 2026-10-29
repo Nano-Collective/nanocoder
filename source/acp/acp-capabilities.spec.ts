@@ -23,6 +23,17 @@ test('getAgentCapabilities - returns session capabilities with close', t => {
 			list: {},
 			resume: {},
 		},
+		_meta: {
+			nanocoder: {
+				extMethods: [
+					'_nanocoder/renameSession',
+					'_nanocoder/timeline/list',
+					'_nanocoder/timeline/revert',
+					'_nanocoder/retryTurn',
+				],
+				extNotifications: ['_nanocoder/sessionTitleChanged'],
+			},
+		},
 	});
 });
 
