@@ -12,7 +12,11 @@ import {EditRecoveryError} from '@/utils/edit-recovery';
 import {formatError} from '@/utils/error-formatter';
 import {getCachedFileContent, invalidateCache} from '@/utils/file-cache';
 import {replaceFirstLiteral} from '@/utils/literal-replace';
-import {validateEditableFormat, validatePath} from '@/utils/path-validators';
+import {
+	validateEditableEncoding,
+	validateEditableFormat,
+	validatePath,
+} from '@/utils/path-validators';
 import {
 	forgetReadContent,
 	hasSeenFile,
@@ -272,6 +276,10 @@ const executeDiffEdit = async (args: DiffEditArgs): Promise<string> => {
 	const absPath = resolve(getSafeSessionCwd(), path);
 	const blocks = parseDiffEditBlocks(diff);
 	const cached = await getCachedFileContent(absPath);
+	const encodingResult = validateEditableEncoding(path, cached);
+	if (!encodingResult.valid) {
+		throw new Error(encodingResult.error);
+	}
 	const fileContent = cached.content;
 
 	validateBlocks(fileContent, blocks, path);
@@ -479,6 +487,8 @@ const diffEditValidator = async (
 
 	try {
 		const cached = await getCachedFileContent(absPath);
+		const encodingResult = validateEditableEncoding(args.path, cached);
+		if (!encodingResult.valid) return encodingResult;
 		validateBlocks(cached.content, blocks, args.path);
 	} catch (error) {
 		return {
