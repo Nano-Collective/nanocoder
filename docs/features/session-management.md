@@ -79,6 +79,18 @@ Alongside `sessions/`, each session gets an `artifacts/<session id>/` directory 
 
 See [Development Modes](development-modes.md) for how the artifacts are produced and [Task Management](task-management.md) for the task list specifically.
 
+### Retention and pinned sessions
+
+Sessions not used for `retentionDays` are deleted the next time any Nanocoder process starts, and when there are more than `maxSessions`, the least recently used ones are deleted too (see [Configuration](#configuration)). A client that keeps its own list of conversations, such as an editor extension or Nanocoder Desktop, can exempt the sessions it still references:
+
+- An ACP client calls `_nanocoder/pinSession` with `sessionId` and `pinned: true` to pin a session, and `pinned: false` to clear the mark. The session has to be saved already, which happens with its first message. Pinning never changes your configuration.
+- Neither limit deletes a pinned session, and pinned sessions are not counted toward `maxSessions`, so they cannot push out unpinned recent ones. The mark survives autosave, renames and resuming.
+- Deleting a pinned session, from a client (`session/delete`) or the CLI, still removes it together with its artifacts.
+- `session/list` reports the mark as `_meta["nanocoder/pinned"]`, so a client can find marks it no longer needs. Clearing a mark counts as using the session, so it then gets a full `retentionDays` again.
+- `initialize` reports the limits retention applies as `_meta["nanocoder/retention"]`: `{"retentionDays": 30, "maxSessions": 100}`.
+
+Any client can clear any mark, and pinned sessions stay on disk until someone unpins or deletes them. An older Nanocoder that shares the same store and does not know about the mark can still delete a pinned session.
+
 ## Configuration
 
 Customize session behaviour in your `nanocoder-preferences.json` (not `agents.config.json`):

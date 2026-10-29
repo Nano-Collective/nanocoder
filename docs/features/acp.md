@@ -36,7 +36,7 @@ With ACP the **client is the UI**: the agent runs headless and everything (strea
 - **`ask_user`** — when the agent asks a clarifying question, the options appear as selectable buttons in the editor. (Selection only; a free-form typed answer is not available over ACP.)
 - **`@`-mentioned files** — files you reference in the editor are read and included in the prompt, using the editor's live buffer (including unsaved edits) when available.
 - **Session persistence** - ACP sessions are saved to disk like TUI sessions (see [Session Management](session-management.md)). Loading or resuming a thread replays its history, even after the editor and agent restart. Loading or resuming a session ID that is neither in memory nor on disk fails with `Session not found on disk: <id>` instead of creating an empty session; only `session/new` creates one.
-- **Session management** - clients can list, resume, close and delete sessions. Nanocoder also answers a `_nanocoder/renameSession` extension method (`sessionId`, `title`; see [Extension methods](#extension-methods)), and new sessions get a generated title from the first message.
+- **Session management** - clients can list, resume, close and delete sessions. Nanocoder also answers a `_nanocoder/renameSession` extension method (`sessionId`, `title`; see [Extension methods](#extension-methods)), and new sessions get a generated title from the first message. `session/list` entries carry `_meta["nanocoder/pinned"]`, and the `initialize` response carries the effective `retentionDays` and `maxSessions` in `_meta["nanocoder/retention"]`.
 - **Images** - PNG, JPEG, GIF and WebP attachments are sent to the model as images.
 
 ## Extension methods
@@ -46,6 +46,7 @@ ACP reserves method names starting with `_` for custom methods. Nanocoder's are:
 | Method | Params | What it does |
 |--------|--------|--------------|
 | `_nanocoder/renameSession` | `sessionId`, `title` | Sets a session's title |
+| `_nanocoder/pinSession` | `sessionId`, `pinned` | Marks a session as retained, or clears the mark, so retention skips it (see [Pinned sessions](session-management.md#retention-and-pinned-sessions)) |
 | `_nanocoder/timeline/list` | `sessionId` | Lists the session's file-change checkpoints |
 | `_nanocoder/timeline/revert` | `sessionId`, `checkpointId` | Reverts the files and history to before a checkpoint |
 | `_nanocoder/retryTurn` | `sessionId`, optional `promptText` | Removes the last turn so the prompt can be sent again |

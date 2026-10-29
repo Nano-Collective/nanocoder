@@ -1207,3 +1207,149 @@ test('titleManuallySet also survives an index rebuild', async t => {
 	t.is(found?.title, 'My Own Name');
 	t.true(found?.titleManuallySet);
 });
+
+// --- pinned sessions ---
+
+const newSessionData = (title: string) => ({
+	title,
+	messageCount: 0,
+	provider: 'test',
+	model: 'test',
+	workingDirectory: '/tmp',
+	messages: [],
+});
+
+test.serial('setPinned marks and clears a session in the file and the index', async t => {
+	const session = await manager.createSession(newSessionData('Thread'));
+
+	t.truthy(await manager.setPinned(session.id, true));
+	t.true((await manager.readSession(session.id))?.pinned);
+	t.true((await manager.listSessions())[0].pinned);
+
+	// Autosave rewrites the session from what it read, so the mark rides along.
+	const read = await manager.readSession(session.id);
+	await manager.saveSession({...read!, messageCount: 3});
+	t.true((await manager.readSession(session.id))?.pinned);
+
+	await manager.setPinned(session.id, false);
+	t.is((await manager.readSession(session.id))?.pinned, undefined);
+	t.falsy((await manager.listSessions())[0].pinned);
+});
+
+test.serial('setPinned survives an index rebuild, rename and a fresh load', async t => {
+	const session = await manager.createSession(newSessionData('Thread'));
+	await manager.setPinned(session.id, true);
+	await manager.renameSession(session.id, 'Renamed');
+	t.true((await manager.loadSession(session.id))?.pinned);
+
+	await writeFile(join(sessionsDir, 'sessions.json'), 'not json at all');
+	t.true((await manager.listSessions())[0].pinned);
+});
+
+test.serial('setPinned returns null for a session that does not exist', async t => {
+	t.is(await manager.setPinned('00000000-0000-4000-8000-000000000000', true), null);
+	t.is(await manager.setPinned('../escape', true), null);
+});
+
+test.serial('setPinned gives an unpinned session a fresh retention window', async t => {
+	const session = await manager.createSession(newSessionData('Old thread'));
+	await manager.setPinned(session.id, true);
+
+	const indexPath = join(sessionsDir, 'sessions.json');
+	const index = JSON.parse(await readFile(indexPath, 'utf-8'));
+	index[0].lastAccessedAt = new Date(Date.now() - 60 * 86_400_000).toISOString();
+	await writeFile(indexPath, JSON.stringify(index), 'utf-8');
+
+	await manager.setPinned(session.id, false);
+	const mgr2 = new SessionManager(sessionsDir);
+	await mgr2.initialize();
+	t.is((await mgr2.listSessions()).length, 1);
+});
+
+test.serial('cleanupOldSessions keeps a pinned session and still removes the unpinned ones', async t => {
+	const artifacts = new ArtifactManager(join(testDir, 'pinned-artifacts'));
+	const mgr = new SessionManager(sessionsDir, artifacts);
+	await mgr.initialize();
+	const pinned = await mgr.createSession(newSessionData('Pinned'));
+	const unpinned = await mgr.createSession(newSessionData('Unpinned'));
+	await mgr.setPinned(pinned.id, true);
+	await artifacts.writeArtifact(pinned.id, 'implementation_plan', '# Keep\n');
+	await artifacts.writeArtifact(unpinned.id, 'implementation_plan', '# Drop\n');
+
+	// Both sit past the 30 day default.
+	const indexPath = join(sessionsDir, 'sessions.json');
+	const index = JSON.parse(await readFile(indexPath, 'utf-8'));
+	for (const entry of index) {
+		entry.lastAccessedAt = new Date(Date.now() - 60 * 86_400_000).toISOString();
+	}
+	await writeFile(indexPath, JSON.stringify(index), 'utf-8');
+
+	// A new process starting is what runs the cleanup.
+	const restarted = new SessionManager(sessionsDir, artifacts);
+	await restarted.initialize();
+
+	t.deepEqual((await restarted.listSessions()).map(s => s.id), [pinned.id]);
+	t.truthy(await restarted.loadSession(pinned.id));
+	t.truthy(await artifacts.readArtifact(pinned.id, 'implementation_plan'));
+	t.is(await restarted.readSession(unpinned.id), null);
+	t.is(await artifacts.readArtifact(unpinned.id, 'implementation_plan'), null);
+});
+
+test.serial('enforceSessionLimits does not count or remove pinned sessions', async t => {
+	const prevConfigDir = process.env.NANOCODER_CONFIG_DIR;
+	const customConfigDir = join(testDir, 'config');
+	await mkdir(customConfigDir, {recursive: true});
+	process.env.NANOCODER_CONFIG_DIR = customConfigDir;
+
+	try {
+		await writeFile(
+			join(customConfigDir, 'nanocoder-preferences.json'),
+			JSON.stringify({nanocoder: {sessions: {maxSessions: 2, retentionDays: 7}}}),
+			'utf-8',
+		);
+		reloadAppConfig();
+
+		const mgr = new SessionManager(join(testDir, 'limit-pinned'));
+		await mgr.initialize();
+		t.deepEqual(mgr.getRetention(), {retentionDays: 7, maxSessions: 2});
+
+		const pinned = await mgr.createSession(newSessionData('Pinned'));
+		await mgr.setPinned(pinned.id, true);
+		// The oldest by access, so it would go first if it were not pinned.
+		const index = JSON.parse(await readFile(join(testDir, 'limit-pinned', 'sessions.json'), 'utf-8'));
+		index[0].lastAccessedAt = new Date(Date.now() - 86_400_000).toISOString();
+		await writeFile(join(testDir, 'limit-pinned', 'sessions.json'), JSON.stringify(index), 'utf-8');
+
+		const ids: string[] = [];
+		for (let i = 0; i < 3; i++) {
+			ids.push((await mgr.createSession(newSessionData(`Session ${i}`))).id);
+		}
+
+		// Two unpinned fit the limit of 2 next to the pinned one; the third
+		// pushed out only the oldest unpinned session.
+		const remaining = (await mgr.listSessions()).map(s => s.id).sort();
+		t.deepEqual(remaining, [pinned.id, ids[1], ids[2]].sort());
+	} finally {
+		if (prevConfigDir === undefined) {
+			delete process.env.NANOCODER_CONFIG_DIR;
+		} else {
+			process.env.NANOCODER_CONFIG_DIR = prevConfigDir;
+		}
+		reloadAppConfig();
+	}
+});
+
+test.serial('deleteSession still removes a pinned session and its artifacts', async t => {
+	const artifacts = new ArtifactManager(join(testDir, 'delete-artifacts'));
+	const mgr = new SessionManager(sessionsDir, artifacts);
+	await mgr.initialize();
+	const session = await mgr.createSession(newSessionData('Pinned'));
+	await mgr.setPinned(session.id, true);
+	await artifacts.writeArtifact(session.id, 'implementation_plan', '# Plan\n');
+
+	await mgr.deleteSession(session.id);
+
+	t.is(await mgr.readSession(session.id), null);
+	t.deepEqual(await mgr.listSessions(), []);
+	t.is(await artifacts.readArtifact(session.id, 'implementation_plan'), null);
+});

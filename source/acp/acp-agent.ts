@@ -137,6 +137,7 @@ export class AcpAgent implements Agent {
 				version: this.appVersion,
 			},
 			authMethods: [],
+			_meta: {'nanocoder/retention': sessionManager.getRetention()},
 		};
 	}
 
@@ -662,6 +663,7 @@ export class AcpAgent implements Agent {
 				cwd: s.workingDirectory,
 				title: s.title,
 				updatedAt: s.lastAccessedAt,
+				_meta: {'nanocoder/pinned': s.pinned === true},
 			})),
 		};
 	}
@@ -766,6 +768,23 @@ export class AcpAgent implements Agent {
 			}
 			logger.info(`ACP extMethod renameSession: ${sessionId} -> "${title}"`);
 			return {title: updated.title};
+		}
+
+		if (method === 'pinSession') {
+			const sessionId = params.sessionId;
+			const pinned = params.pinned;
+			if (typeof sessionId !== 'string' || typeof pinned !== 'boolean') {
+				throw new Error(
+					'pinSession requires a string sessionId and a boolean pinned',
+				);
+			}
+
+			await sessionManager.initialize();
+			if (!(await sessionManager.setPinned(sessionId, pinned))) {
+				throw new Error(`Session not found on disk: ${sessionId}`);
+			}
+			logger.info(`ACP extMethod pinSession: ${sessionId} pinned=${pinned}`);
+			return {pinned};
 		}
 
 		if (method === 'timeline/list') {
@@ -1160,6 +1179,7 @@ export class AcpAgent implements Agent {
 						id: session.sessionId,
 						title: existingSession.title || 'New Session',
 						titleManuallySet: existingSession.titleManuallySet,
+						pinned: existingSession.pinned,
 						titleGenerated: existingSession.titleGenerated,
 						createdAt: existingSession.createdAt || timestamp,
 						lastAccessedAt: timestamp,
@@ -1190,6 +1210,7 @@ export class AcpAgent implements Agent {
 				id: session.sessionId,
 				title,
 				titleManuallySet: existingSession?.titleManuallySet,
+				pinned: existingSession?.pinned,
 				titleGenerated: existingSession?.titleGenerated,
 				createdAt: existingSession?.createdAt || timestamp,
 				lastAccessedAt: timestamp,

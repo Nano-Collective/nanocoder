@@ -27,6 +27,7 @@ export const ACP_EXT_PREFIX = '_nanocoder/';
  */
 export const ACP_EXT_METHODS = [
 	'renameSession',
+	'pinSession',
 	'timeline/list',
 	'timeline/revert',
 	'retryTurn',

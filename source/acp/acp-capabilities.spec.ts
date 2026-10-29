@@ -27,6 +27,7 @@ test('getAgentCapabilities - returns session capabilities with close', t => {
 			nanocoder: {
 				extMethods: [
 					'_nanocoder/renameSession',
+					'_nanocoder/pinSession',
 					'_nanocoder/timeline/list',
 					'_nanocoder/timeline/revert',
 					'_nanocoder/retryTurn',
