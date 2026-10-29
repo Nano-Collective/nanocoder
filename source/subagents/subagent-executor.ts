@@ -24,7 +24,10 @@ import {
 } from '@/services/lifecycle-hooks';
 import {
 	appendSubagentTool,
+	emitSubagentRunEvent,
 	getSubagentProgress,
+	registerSubagentRun,
+	type SubagentRunEvent,
 	subagentProgress,
 	updateSubagentProgress,
 	updateSubagentProgressById,
@@ -69,6 +72,12 @@ import type {
 	SubagentResult,
 	SubagentTask,
 } from './types.js';
+
+/** Reports a run's lifecycle; the run's identity is already filled in. */
+type SubagentRunEmitter = (
+	status: SubagentRunEvent['status'],
+	fields?: Partial<SubagentRunEvent>,
+) => void;
 
 /** Maximum recursion depth for subagent delegation */
 const MAX_SUBAGENT_DEPTH = 2;
@@ -260,6 +269,25 @@ export class SubagentExecutor {
 			};
 		}
 
+		// Each run sits under the turn's signal with its own controller, so a
+		// client can cancel one child without ending the turn, while cancelling
+		// the turn still reaches every child.
+		const childAbort = new AbortController();
+		let cancelledByClient = false;
+		const abortChild = () => childAbort.abort();
+		if (signal?.aborted) {
+			abortChild();
+		} else {
+			signal?.addEventListener('abort', abortChild, {once: true});
+		}
+		const unregisterRun = agentId
+			? registerSubagentRun(agentId, executionContext?.sessionId, () => {
+					cancelledByClient = true;
+					abortChild();
+				})
+			: undefined;
+		let emitRun: SubagentRunEmitter | undefined;
+
 		try {
 			const loader = getSubagentLoader(this.projectRoot);
 			const loadedConfig = toolOverride?.trustLevel
@@ -285,6 +313,20 @@ export class SubagentExecutor {
 						trustLevel: toolOverride.trustLevel,
 					}
 				: loadedConfig;
+
+			emitRun = agentId
+				? (status, fields) =>
+						emitSubagentRunEvent({
+							childRunId: agentId,
+							parentRunId: executionContext?.subagentRunId ?? '',
+							sessionId: executionContext?.sessionId,
+							toolCallId: executionContext?.toolCallId,
+							name: config.name,
+							status,
+							...fields,
+						})
+				: undefined;
+			emitRun?.('started');
 
 			// An ACP session's mode, not the shared executor's, decides which tools
 			// its subagents are offered, as it does for the top-level agent.
@@ -341,11 +383,12 @@ export class SubagentExecutor {
 							messages,
 							filteredTools,
 							config,
-							signal,
+							childAbort.signal,
 							agentId,
 							executionContext,
 							recordUsage,
 							toolOverride?.alwaysAllow,
+							emitRun,
 						),
 				);
 
@@ -355,6 +398,7 @@ export class SubagentExecutor {
 					? getSubagentProgress(agentId).tokenCount
 					: subagentProgress.tokenCount;
 
+				emitRun?.('completed', {tokenCount: finalTokenCount, result: output});
 				return {
 					subagentName: config.name,
 					output,
@@ -371,6 +415,12 @@ export class SubagentExecutor {
 				restoreParent();
 			}
 		} catch (error) {
+			const message = cancelledByClient
+				? 'Subagent was cancelled'
+				: formatError(error);
+			emitRun?.(childAbort.signal.aborted ? 'cancelled' : 'failed', {
+				error: message,
+			});
 			return {
 				subagentName: task.subagent_type,
 				// A loop stop still returns whatever the subagent produced before
@@ -379,9 +429,12 @@ export class SubagentExecutor {
 				output:
 					error instanceof SubagentLoopStopError ? error.partialOutput : '',
 				success: false,
-				error: formatError(error),
+				error: message,
 				executionTimeMs: Date.now() - startTime,
 			};
+		} finally {
+			signal?.removeEventListener('abort', abortChild);
+			unregisterRun?.();
 		}
 	}
 
@@ -600,8 +653,10 @@ export class SubagentExecutor {
 		executionContext?: Omit<ToolExecutionContext, 'abortSignal'>,
 		onApiCallComplete?: SubagentApiCallHandler,
 		alwaysAllow?: string[],
+		emitRun?: SubagentRunEmitter,
 	): Promise<string> {
 		let iterations = 0;
+		let lastTool: string | undefined;
 		let totalToolCalls = 0;
 		let totalTokens = 0;
 
@@ -651,6 +706,16 @@ export class SubagentExecutor {
 				updateSubagentProgressById(agentId, event);
 			} else {
 				updateSubagentProgress(event);
+			}
+
+			// The first call is the run starting, which `started` already says.
+			if (iterations > 0 && (status === 'running' || status === 'tool_call')) {
+				lastTool = currentTool ?? lastTool;
+				emitRun?.('progress', {
+					tokenCount: totalTokens,
+					toolCallCount: totalToolCalls,
+					lastTool,
+				});
 			}
 		};
 
@@ -848,7 +913,7 @@ export class SubagentExecutor {
 							agentId ? `${agentId}:${toolCall.id}` : toolCall.id,
 							config,
 							signal,
-							executionContext,
+							{...executionContext, subagentRunId: agentId},
 							alwaysAllow,
 						),
 				);
@@ -1009,7 +1074,11 @@ export class SubagentExecutor {
 			// on an unanswerable approval kept the whole turn open. On abort
 			// the queue settles this with a denial.
 			const decision = bridge
-				? await bridge.approve(toolCall, signal)
+				? await bridge.approve(
+						toolCall,
+						signal,
+						executionContext?.subagentRunId,
+					)
 				: (await signalToolApproval(
 							{
 								toolCall,
@@ -1036,6 +1105,7 @@ export class SubagentExecutor {
 		try {
 			const result = await toolHandler(parsedArgs, {
 				...executionContext,
+				toolCallId,
 				abortSignal: signal,
 			});
 			// Subagents converse in text, so collapse structured output to its

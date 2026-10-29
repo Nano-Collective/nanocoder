@@ -51,6 +51,23 @@ export function setAvailableAgentNames(
 }
 
 /**
+ * What the subagent inherits from the call that started it. The call and run
+ * IDs are only present when there are some, so callers that never set them see
+ * the same context as before they existed.
+ */
+function delegationContext(options?: ToolExecutionContext) {
+	return {
+		sessionId: options?.sessionId,
+		workingDirectory: options?.workingDirectory,
+		...(options?.toolManager && {toolManager: options.toolManager}),
+		...(options?.toolCallId !== undefined && {toolCallId: options.toolCallId}),
+		...(options?.subagentRunId !== undefined && {
+			subagentRunId: options.subagentRunId,
+		}),
+	};
+}
+
+/**
  * Start agent execution and return a promise with a unique agent ID.
  * Like executeBashCommand — starts immediately, doesn't block the caller.
  *
@@ -76,11 +93,7 @@ export function startAgentExecution(
 
 	const {subagent_type, description, prompt, context} = args;
 	const executor = executorInstance;
-	const executionContext = {
-		sessionId: options?.sessionId,
-		workingDirectory: options?.workingDirectory,
-		...(options?.toolManager && {toolManager: options.toolManager}),
-	};
+	const executionContext = delegationContext(options);
 
 	// Wrap in setTimeout(0) to fully detach from the current call stack.
 	// This ensures the caller can set up the live component and Ink can
@@ -147,11 +160,7 @@ async function executeAgent(
 		options?.abortSignal,
 		0,
 		agentId,
-		{
-			sessionId: options?.sessionId,
-			workingDirectory: options?.workingDirectory,
-			...(options?.toolManager && {toolManager: options.toolManager}),
-		},
+		delegationContext(options),
 	);
 
 	if (!result.success) {

@@ -130,6 +130,10 @@ export interface ToolExecutionContext {
 	 * same ones.
 	 */
 	toolManager?: ToolManager;
+	/** The call being executed, so a subagent it starts can name its parent call. */
+	toolCallId?: string;
+	/** Set for a subagent's own tool calls: the run executing them. */
+	subagentRunId?: string;
 }
 
 export type ToolHandler = (
