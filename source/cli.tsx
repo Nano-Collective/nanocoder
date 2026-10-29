@@ -141,7 +141,7 @@ if (args[0] === 'config') {
 // so it never loads the folder's project config or starts anything it defines.
 if (args[0] === 'trust') {
 	const {runTrustCli} = await import('@/config/trust-cli');
-	const result = runTrustCli(args.slice(1), {cwd: process.cwd()});
+	const result = runTrustCli(args.slice(1));
 	if (result.exitCode === 0) {
 		console.log(result.output);
 	} else {

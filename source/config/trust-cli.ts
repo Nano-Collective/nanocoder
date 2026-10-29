@@ -7,7 +7,6 @@
  * pair and `cli.tsx` decides which stream to print it on.
  */
 
-import path from 'node:path';
 import {
 	grantDirectoryTrust,
 	isDirectoryTrusted,
@@ -39,11 +38,13 @@ Options:
                        <fingerprint>. Fails if the folder changed since then.
   --json               Emit machine-readable JSON with --status`;
 
-export function runTrustCli(
-	args: readonly string[],
-	options: {cwd?: string} = {},
-): TrustCliResult {
-	const cwd = path.resolve(options.cwd ?? process.cwd()); // nosemgrep
+/**
+ * Always about the current folder: the folder inspected and the trust list
+ * read and written (which `loadPreferences` resolves from the same cwd) are
+ * the same place.
+ */
+export function runTrustCli(args: readonly string[]): TrustCliResult {
+	const cwd = process.cwd();
 	const rest = args.filter(arg => arg !== '--json');
 	const jsonFlags = args.length - rest.length;
 

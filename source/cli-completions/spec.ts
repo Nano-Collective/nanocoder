@@ -31,6 +31,8 @@ export interface CompletionSubcommand {
 	description: string;
 	/** Nested positional tokens, e.g. `daemon` → `start|stop|…`. */
 	children?: readonly string[];
+	/** Flags only this subcommand accepts, offered after it and nowhere else. */
+	flags?: readonly CompletionFlag[];
 }
 
 export const COMPLETION_SHELLS = ['bash', 'zsh', 'fish'] as const;
@@ -79,6 +81,24 @@ export const COMPLETION_SUBCOMMANDS: readonly CompletionSubcommand[] = [
 	{
 		name: 'trust',
 		description: 'Check or grant trust for this folder (--status, --grant)',
+		flags: [
+			{
+				name: 'status',
+				takesValue: false,
+				description: 'Show whether this folder is trusted',
+			},
+			{
+				name: 'grant',
+				takesValue: true,
+				valueName: 'fingerprint',
+				description: 'Trust this folder if its fingerprint still matches',
+			},
+			{
+				name: 'json',
+				takesValue: false,
+				description: 'Print --status as JSON',
+			},
+		],
 	},
 	{
 		name: 'codex',
@@ -186,18 +206,7 @@ export const COMPLETION_FLAGS: readonly CompletionFlag[] = [
 		takesValue: false,
 		description: 'Run as an ACP (Agent Client Protocol) server',
 	},
-	{
-		name: 'status',
-		takesValue: false,
-		description: 'Show whether this folder is trusted (trust command only)',
-	},
-	{
-		name: 'grant',
-		takesValue: true,
-		valueName: 'fingerprint',
-		description:
-			'Trust this folder if its fingerprint still matches (trust command only)',
-	},
+
 	{
 		name: 'vscode',
 		takesValue: false,

@@ -16,11 +16,13 @@ mkdirSync(join(project, '.nanocoder', 'plugins'), {recursive: true});
 writeFileSync(join(project, '.nanocoder', 'plugins', 'a.mjs'), 'export {};');
 
 test.before(() => {
+	process.chdir(project);
 	process.env.NANOCODER_CONFIG_DIR = configDir;
 	resetPreferencesCache();
 });
 
 test.after.always(() => {
+	process.chdir(tmpdir());
 	delete process.env.NANOCODER_CONFIG_DIR;
 	resetPreferencesCache();
 	rmSync(configDir, {recursive: true, force: true});
@@ -28,11 +30,11 @@ test.after.always(() => {
 });
 
 const statusJson = () =>
-	JSON.parse(runTrustCli(['--status', '--json'], {cwd: project}).output);
+	JSON.parse(runTrustCli(['--status', '--json']).output);
 
 test.serial('--status --json reports an untrusted folder without running it', t => {
 	const {fingerprint, summary} = describeProjectTrust(project);
-	const result = runTrustCli(['--status', '--json'], {cwd: project});
+	const result = runTrustCli(['--status', '--json']);
 	t.is(result.exitCode, 0);
 	t.like(JSON.parse(result.output), {
 		status: 'not-trusted',
@@ -43,7 +45,7 @@ test.serial('--status --json reports an untrusted folder without running it', t 
 });
 
 test.serial('--status prints text with the status and fingerprint', t => {
-	const result = runTrustCli(['--status'], {cwd: project});
+	const result = runTrustCli(['--status']);
 	t.is(result.exitCode, 0);
 	t.regex(result.output, /Status: not-trusted/);
 	t.regex(
@@ -53,7 +55,7 @@ test.serial('--status prints text with the status and fingerprint', t => {
 });
 
 test.serial('--grant fails for a fingerprint that no longer matches', t => {
-	const result = runTrustCli(['--grant', 'stale'], {cwd: project});
+	const result = runTrustCli(['--grant', 'stale']);
 	t.is(result.exitCode, 1);
 	t.regex(result.output, /changed since that fingerprint/);
 	t.is(statusJson().status, 'not-trusted');
@@ -62,7 +64,7 @@ test.serial('--grant fails for a fingerprint that no longer matches', t => {
 
 test.serial('--grant saves the folder, and a later edit reads as changed', t => {
 	const {fingerprint} = describeProjectTrust(project);
-	t.is(runTrustCli(['--grant', fingerprint], {cwd: project}).exitCode, 0);
+	t.is(runTrustCli(['--grant', fingerprint]).exitCode, 0);
 	t.is(statusJson().status, 'trusted');
 
 	writeFileSync(join(project, '.nanocoder', 'plugins', 'b.mjs'), 'export {};');
@@ -128,15 +130,15 @@ test('rejects unknown or incomplete arguments and prints usage for none', t => {
 		['--status', '--json', '--json'],
 		['--grant', 'abc', '--json'],
 	]) {
-		const result = runTrustCli(args, {cwd: project});
+		const result = runTrustCli(args);
 		t.is(result.exitCode, 1);
 		t.regex(result.output, /Usage: nanocoder trust/);
 	}
 	t.is(
-		JSON.parse(runTrustCli(['--json', '--status'], {cwd: project}).output).path,
-		project,
+		JSON.parse(runTrustCli(['--json', '--status']).output).path,
+		process.cwd(),
 	);
-	const help = runTrustCli([], {cwd: project});
+	const help = runTrustCli([]);
 	t.is(help.exitCode, 0);
 	t.regex(help.output, /Usage: nanocoder trust/);
 });
