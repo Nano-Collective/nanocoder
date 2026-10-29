@@ -37,8 +37,11 @@ export const ACP_EXT_METHODS = [
 	'retryTurn',
 ] as const;
 
+/** Sent when a session is titled in the background. */
+export const ACP_SESSION_TITLE_NOTIFICATION = '_nanocoder/sessionTitleChanged';
+
 /** Custom notifications the agent sends, by their full names. */
-const ACP_EXT_NOTIFICATIONS = ['_nanocoder/sessionTitleChanged'];
+const ACP_EXT_NOTIFICATIONS = [ACP_SESSION_TITLE_NOTIFICATION];
 
 export function getAgentCapabilities(): AgentCapabilities {
 	return {
@@ -53,7 +56,7 @@ export function getAgentCapabilities(): AgentCapabilities {
 		_meta: {
 			nanocoder: {
 				extMethods: ACP_EXT_METHODS.map(name => `${ACP_EXT_PREFIX}${name}`),
-				extNotifications: ACP_EXT_NOTIFICATIONS,
+				extNotifications: [...ACP_EXT_NOTIFICATIONS],
 			},
 		},
 	};

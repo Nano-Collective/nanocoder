@@ -35,6 +35,7 @@ import {RequestError} from '@agentclientprotocol/sdk';
 import {
 	ACP_EXT_METHODS,
 	ACP_EXT_PREFIX,
+	ACP_SESSION_TITLE_NOTIFICATION,
 	acpModeToDevelopmentMode,
 	developmentModeToAcpMode,
 	getAgentCapabilities,
@@ -492,7 +493,7 @@ export class AcpAgent implements Agent {
 						// Lands after the turn went idle, so the client may already be
 						// gone; an unhandled rejection here would kill the agent.
 						void this.conn
-							.notify('_nanocoder/sessionTitleChanged', {
+							.notify(ACP_SESSION_TITLE_NOTIFICATION, {
 								sessionId: session.sessionId,
 								title,
 							})

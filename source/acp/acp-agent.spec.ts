@@ -1237,7 +1237,9 @@ test('AcpAgent.extMethod - answers on the prefixed name and on the bare alias', 
 	}
 });
 
-test('AcpAgent.extMethod - a bare name logs one deprecation notice, a prefixed name none', async t => {
+// Serial: it patches the process-wide logger, and every bare-name call in the
+// other tests would land in the patch window as a stray notice.
+test.serial('AcpAgent.extMethod - a bare name logs one deprecation notice, a prefixed name none', async t => {
 	const {agent} = createAgent();
 	const logger = getLogger();
 	const original = logger.warn;

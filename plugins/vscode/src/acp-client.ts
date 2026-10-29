@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import {ClientSideConnection} from '@agentclientprotocol/sdk';
+import {ACP_EXT_PREFIX, type ACP_EXT_METHODS} from '../../../source/acp/acp-capabilities';
 import {AcpStateManager, ACPStatus} from './acp-state';
 import {PromptAttempt} from './prompt-attempt';
 import { resolveExtensionCwd } from './workspace-utils';
@@ -518,15 +519,16 @@ export class NanocoderAcpClient {
 	 * The advertised name when the agent lists it, else the bare name an agent
 	 * from before the `_nanocoder/` prefix understands.
 	 */
-	private extMethodName(advertised: string, legacy: string): string {
-		return this._extMethods.includes(advertised) ? advertised : legacy;
+	private extMethodName(method: (typeof ACP_EXT_METHODS)[number]): string {
+		const advertised = `${ACP_EXT_PREFIX}${method}`;
+		return this._extMethods.includes(advertised) ? advertised : method;
 	}
 
 	async renameSession(sessionId: string, title: string): Promise<void> {
 		if (!this.connection) return;
 		try {
 			await this.connection.extMethod(
-				this.extMethodName('_nanocoder/renameSession', 'renameSession'),
+				this.extMethodName('renameSession'),
 				{sessionId, title},
 			);
 		} catch (error) {
@@ -578,7 +580,7 @@ export class NanocoderAcpClient {
 		}
 		try {
 			await this.connection.extMethod(
-				this.extMethodName('_nanocoder/retryTurn', 'retryTurn'),
+				this.extMethodName('retryTurn'),
 				{
 					sessionId: this._sessionId,
 					promptText,
