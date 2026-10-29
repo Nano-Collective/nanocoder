@@ -1253,17 +1253,31 @@ test.serial('setPinned returns null for a session that does not exist', async t 
 
 test.serial('setPinned gives an unpinned session a fresh retention window', async t => {
 	const session = await manager.createSession(newSessionData('Old thread'));
+	const stale = await manager.createSession(newSessionData('Never touched'));
 	await manager.setPinned(session.id, true);
 
+	// setPinned reads the session file, not the index, and rewrites the index
+	// from it. So both must be old: aging only the index would be undone by the
+	// first save and leave the refresh untested.
+	const old = new Date(Date.now() - 60 * 86_400_000).toISOString();
+	for (const id of [session.id, stale.id]) {
+		const file = join(sessionsDir, `${id}.json`);
+		const data = JSON.parse(await readFile(file, 'utf-8'));
+		data.lastAccessedAt = old;
+		await writeFile(file, JSON.stringify(data), 'utf-8');
+	}
 	const indexPath = join(sessionsDir, 'sessions.json');
 	const index = JSON.parse(await readFile(indexPath, 'utf-8'));
-	index[0].lastAccessedAt = new Date(Date.now() - 60 * 86_400_000).toISOString();
+	for (const entry of index) entry.lastAccessedAt = old;
 	await writeFile(indexPath, JSON.stringify(index), 'utf-8');
 
 	await manager.setPinned(session.id, false);
+
+	// A new process starting is what runs the cleanup. The unpinned session was
+	// refreshed; the one nobody touched is as old as it looks and is removed.
 	const mgr2 = new SessionManager(sessionsDir);
 	await mgr2.initialize();
-	t.is((await mgr2.listSessions()).length, 1);
+	t.deepEqual((await mgr2.listSessions()).map(s => s.id), [session.id]);
 });
 
 test.serial('cleanupOldSessions keeps a pinned session and still removes the unpinned ones', async t => {

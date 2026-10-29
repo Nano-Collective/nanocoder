@@ -89,7 +89,7 @@ Sessions not used for `retentionDays` are deleted the next time any Nanocoder pr
 - `session/list` reports the mark as `_meta["nanocoder/pinned"]`, so a client can find marks it no longer needs. Clearing a mark counts as using the session, so it then gets a full `retentionDays` again.
 - `initialize` reports the limits retention applies as `_meta["nanocoder/retention"]`: `{"retentionDays": 30, "maxSessions": 100}`.
 
-Any client can clear any mark, and pinned sessions stay on disk until someone unpins or deletes them. An older Nanocoder that shares the same store and does not know about the mark can still delete a pinned session.
+Any client can clear any mark, and pinned sessions stay on disk until someone unpins or deletes them. The session list in the CLI and `nanocoder storage` do not show the mark yet, so for now it can only be seen and cleared through an ACP client. An older Nanocoder that shares the same store and does not know about the mark can still delete a pinned session.
 
 ## Configuration
 
