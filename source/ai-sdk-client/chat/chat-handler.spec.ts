@@ -758,6 +758,51 @@ async function streamRouting(parts: Record<string, unknown>[]): Promise<{
 	};
 }
 
+test('a backlog of stream chunks does not hold the event loop', async t => {
+	// Every part is queued before reading starts, the way a fast server or a
+	// busy moment leaves chunks buffered: nothing in the loop has to wait.
+	const deltas = Array.from({length: 5_000}, () => ({
+		type: 'text-delta',
+		id: '0',
+		delta: 'tok ',
+	}));
+	// The clock moves 1ms per read, so "time" is work done rather than wall
+	// time and the result does not depend on how fast the host is. The
+	// setImmediate chain samples it each time the event loop gets a turn.
+	const realNow = Date.now;
+	let clock = 0;
+	Date.now = () => ++clock;
+	const turns: number[] = [];
+	let sampling = true;
+	const sample = () => {
+		turns.push(clock);
+		if (sampling) setImmediate(sample);
+	};
+	setImmediate(sample);
+	let routed: Awaited<ReturnType<typeof streamRouting>>;
+	try {
+		routed = await streamRouting([
+			{type: 'text-start', id: '0'},
+			...deltas,
+			{type: 'text-end', id: '0'},
+		]);
+	} finally {
+		sampling = false;
+		Date.now = realNow;
+	}
+	turns.push(clock);
+
+	t.is(routed.content.length, deltas.length * 'tok '.length);
+	t.is(routed.text.join(''), routed.content);
+	const longestHold = Math.max(
+		...turns.slice(1).map((turn, i) => turn - (turns[i] as number)),
+	);
+	t.true(
+		longestHold < 100,
+		`the stream loop held the event loop for ${longestHold} clock reads`,
+	);
+});
+
 test('streams reasoning and text to their own callbacks', async t => {
 	const routed = await streamRouting([
 		{type: 'reasoning-start', id: 'r0'},

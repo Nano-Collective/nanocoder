@@ -67,6 +67,7 @@ import {
 	buildProviderOptions,
 	isPromptCachingEnabled,
 } from './provider-options.js';
+import {createStreamYielder, StreamFramer} from './stream-frames.js';
 import {
 	createOnStepFinishHandler,
 	createPrepareStepHandler,
@@ -355,65 +356,26 @@ export async function handleChat(
 				}),
 			});
 
-			// Stream tokens to the UI in batched chunks to avoid excessive
-			// React/Ink re-renders that cause terminal flickering.
-			const FLUSH_INTERVAL_MS = 150;
-			let tokenBuffer = '';
-			let flushTimer: ReturnType<typeof setTimeout> | null = null;
-			// Which callback the buffered run belongs to. Derived from the delta
-			// that filled the buffer, never from the start/end markers around it —
-			// providers disagree on those (the Responses API defers reasoning-end
-			// until the reasoning item completes, openai-compatible reopens
-			// reasoning without closing text, and some emit deltas with no start
-			// at all), so routing on them puts reasoning on the text callback.
-			let isReasoning = false;
+			// Tokens reach the UI in frames rather than one render per token, and
+			// the loop reading the stream is time-sliced, so neither rendering
+			// nor a backlog of buffered chunks starves input and paints.
+			const frames = new StreamFramer({
+				onText: text => callbacks.onToken?.(text),
+				onReasoning: text => callbacks.onReasoningToken?.(text),
+			});
+			const yieldIfDue = createStreamYielder();
 
-			const flushBuffer = () => {
-				if (tokenBuffer) {
-					if (isReasoning) {
-						callbacks.onReasoningToken?.(tokenBuffer);
-					} else {
-						callbacks.onToken?.(tokenBuffer);
-					}
-					tokenBuffer = '';
-				}
-				flushTimer = null;
-			};
-
-			const flushPending = () => {
-				if (flushTimer) {
-					clearTimeout(flushTimer);
-				}
-				flushBuffer();
-			};
-
-			let lastYield = Date.now();
 			for await (const chunk of result.fullStream) {
 				switch (chunk.type) {
-					// The delta type is the source of truth for routing: switching
-					// streams flushes what the previous one buffered before the flag
-					// moves, so a batch always leaves on the callback it was filled for.
+					// The delta type is the source of truth for routing (see
+					// StreamFramer.push).
 					case 'reasoning-delta':
-						if (!isReasoning) {
-							flushPending();
-							isReasoning = true;
-						}
 						accumulatedReasoning += chunk.text;
-						tokenBuffer += chunk.text;
-						if (!flushTimer) {
-							flushTimer = setTimeout(flushBuffer, FLUSH_INTERVAL_MS);
-						}
+						frames.push('reasoning', chunk.text);
 						break;
 					case 'text-delta':
-						if (isReasoning) {
-							flushPending();
-							isReasoning = false;
-						}
 						accumulatedText += chunk.text;
-						tokenBuffer += chunk.text;
-						if (!flushTimer) {
-							flushTimer = setTimeout(flushBuffer, FLUSH_INTERVAL_MS);
-						}
+						frames.push('text', chunk.text);
 						break;
 
 					// Pure flush points: they end a batch so each part reaches the UI
@@ -422,21 +384,15 @@ export async function handleChat(
 					case 'text-start':
 					case 'reasoning-end':
 					case 'text-end':
-						flushPending();
+						frames.flush();
 						break;
 				}
-				// Periodically yield to the event loop so timers and Ink renders
-				// can run during long streaming responses (e.g. subagent execution)
-				const now = Date.now();
-				if (now - lastYield >= 200) {
-					lastYield = now;
-					await new Promise<void>(resolve => setTimeout(resolve, 0));
-				}
+				await yieldIfDue();
 			}
 
 			// Safety net: flush any tokens still buffered if the stream ended
 			// without emitting a matching text-end / reasoning-end event.
-			flushPending();
+			frames.flush();
 
 			// After streaming completes, collect final results.
 			// `result.usage` is the FINAL step's usage (not `totalUsage`, which
