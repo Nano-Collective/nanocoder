@@ -59,6 +59,7 @@ function delegationContext(options?: ToolExecutionContext) {
 	return {
 		sessionId: options?.sessionId,
 		workingDirectory: options?.workingDirectory,
+		...(options?.toolManager && {toolManager: options.toolManager}),
 		...(options?.toolCallId !== undefined && {toolCallId: options.toolCallId}),
 		...(options?.subagentRunId !== undefined && {
 			subagentRunId: options.subagentRunId,

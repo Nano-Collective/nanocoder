@@ -6,6 +6,7 @@ import {
 	tool,
 } from 'ai';
 import React from 'react';
+import type {ToolManager} from '@/tools/tool-manager';
 import type {AIProviderConfig} from '@/types/config';
 import type {ResponseUsage} from '@/types/usage';
 
@@ -123,6 +124,12 @@ export interface ToolExecutionContext {
 	abortSignal?: AbortSignal;
 	sessionId?: string;
 	workingDirectory?: string;
+	/**
+	 * The tools this call runs against, when they are not the process-wide set:
+	 * an ACP session with MCP servers of its own. A subagent it starts uses the
+	 * same ones.
+	 */
+	toolManager?: ToolManager;
 	/** The call being executed, so a subagent it starts can name its parent call. */
 	toolCallId?: string;
 	/** Set for a subagent's own tool calls: the run executing them. */

@@ -86,6 +86,12 @@ export interface RunAcpConversationOptions {
 	session: AcpSession;
 	client: LLMClient;
 	toolManager: ToolManager;
+	/**
+	 * Set when the session has MCP servers of its own. Tool calls, and the
+	 * subagents they start, then run against these tools instead of the
+	 * process-wide set.
+	 */
+	sessionTools?: ToolManager;
 	conn: AgentSideConnection;
 	nonInteractiveAlwaysAllow: string[];
 }
@@ -773,6 +779,7 @@ async function runTurn(
 				abortSignal: abortController.signal,
 				sessionId: session.sessionId,
 				workingDirectory: session.cwd,
+				...(options.sessionTools && {toolManager: options.sessionTools}),
 				toolCallId: toolCall.id,
 			});
 			await finishTimelineCapture(session, timelineCapture);

@@ -3641,3 +3641,46 @@ async function waitFor<T>(find: () => T | undefined): Promise<T> {
 	}
 	throw new Error('timed out waiting');
 }
+
+test.serial('runAcpConversation - a session with its own tools runs them, and others still use the shared registry', async t => {
+	const {conn} = createMockConn();
+	const runTurn = async (sessionTools?: ToolManager) => {
+		const session = createMockSession(conn, {devMode: 'yolo'});
+		let calls = 0;
+		const client = {
+			chat: async () => {
+				calls++;
+				return calls === 1
+					? {
+							choices: [
+								{
+									message: {
+										content: '',
+										tool_calls: [createMockToolCall('lookup', {})],
+									},
+								},
+							],
+						}
+					: {choices: [{message: {content: 'done'}}]};
+			},
+		} as unknown as LLMClient;
+		await runAcpConversation({
+			session,
+			client,
+			toolManager: {...createMockToolManager(), hasTool: () => true} as any,
+			sessionTools,
+			conn,
+			nonInteractiveAlwaysAllow: [],
+		});
+		return String(
+			session.messages.findLast((m: Message) => m.role === 'tool')?.content,
+		);
+	};
+	setToolRegistryGetter(() => ({lookup: async () => 'shared registry'}));
+	const own = {
+		getToolRegistry: () => ({lookup: async () => 'session registry'}),
+	} as unknown as ToolManager;
+
+	t.is(await runTurn(own), 'session registry');
+	t.is(await runTurn(), 'shared registry');
+});
