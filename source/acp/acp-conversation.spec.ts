@@ -35,7 +35,12 @@ import {
 	resetSessionContextLimit,
 	setSessionContextLimit,
 } from '@/models/models-dev-client.js';
-import type {LLMClient, Message, ToolCall} from '@/types/core';
+import type {
+	DevelopmentMode,
+	LLMClient,
+	Message,
+	ToolCall,
+} from '@/types/core';
 import {
 	resetAutoCompactSession,
 	setAutoCompactStrategy,
@@ -2957,4 +2962,219 @@ test.serial('runAcpConversation - concurrent sessions keep their own working dir
 
 	t.true(firstResults[0].includes('FIRST marker'), firstResults[0]);
 	t.true(secondResults[0].includes('SECOND marker'), secondResults[0]);
+});
+
+// ============================================================================
+// session/set_mode during a turn (#1857)
+// ============================================================================
+
+// The client changes the mode at any point in a prompt, so the next model
+// request and every later approval must follow it. Each turn below flips the
+// mode while the model is "answering", which is after that request's tool list
+// was built and before its calls are approved - the window the bug lived in.
+
+const runModeSwitchTurn = async (
+	t: any,
+	devMode: DevelopmentMode,
+	turns: Array<{toolCalls: ToolCall[]; switchTo?: DevelopmentMode}>,
+	answer: 'allow' | 'deny' = 'deny',
+	onUpdate?: (update: any, session: AcpSession) => void,
+) => {
+	const cwd = createCwdProject(t, 'MODE');
+	const permissionRequests: any[] = [];
+	const offered: string[][] = [];
+	let session: AcpSession;
+	const conn = {
+		sessionUpdate: async (u: any) => onUpdate?.(u.update, session),
+		requestPermission: async (p: any) => {
+			permissionRequests.push(p);
+			return {outcome: {outcome: 'selected', optionId: answer}};
+		},
+	} as unknown as AgentSideConnection;
+	session = createMockSession(conn, {devMode, cwd});
+
+	const registry = ToolRegistry.fromToolExports([readFileTool, writeFileTool]);
+	setToolRegistryGetter(() => registry.getHandlers());
+	const toolManager = {
+		...createMockToolManager(),
+		getAvailableToolNames: (_tune: unknown, mode: DevelopmentMode) =>
+			mode === 'plan' ? ['read_file'] : ['read_file', 'write_file'],
+		// What each model request is actually offered.
+		getFilteredTools: (names: string[]) => {
+			offered.push(names);
+			return {};
+		},
+		hasTool: (name: string) => registry.hasTool(name),
+		getToolEntry: (name: string) => registry.getEntry(name),
+		isReadOnly: (name: string) => name === 'read_file',
+	};
+
+	let requests = 0;
+	const client = {
+		chat: async () => {
+			const turn = turns[requests++];
+			if (!turn) return {choices: [{message: {content: 'done'}}]};
+			if (turn.switchTo) session.developmentMode = turn.switchTo;
+			return {choices: [{message: {content: '', tool_calls: turn.toolCalls}}]};
+		},
+	} as unknown as LLMClient;
+
+	await runAcpConversation({
+		session,
+		client,
+		toolManager: toolManager as any,
+		conn,
+		nonInteractiveAlwaysAllow: [],
+	});
+
+	return {cwd, permissionRequests, offered, session};
+};
+
+const writeCall = (name: string, id: string) =>
+	createMockToolCall('write_file', {path: name, content: 'x\n'}, id);
+
+test.serial('runAcpConversation - a switch from yolo to normal mid-turn prompts for the next call', async t => {
+	const {cwd, permissionRequests} = await runModeSwitchTurn(t, 'yolo', [
+		{toolCalls: [writeCall('first.txt', 'call-1')]},
+		{toolCalls: [writeCall('second.txt', 'call-2')], switchTo: 'normal'},
+	]);
+
+	t.deepEqual(
+		permissionRequests.map(p => p.toolCall.toolCallId),
+		['call-2'],
+		'only the call after the switch is asked about',
+	);
+	t.true(existsSync(join(cwd, 'first.txt')));
+	t.false(existsSync(join(cwd, 'second.txt')), 'the denied call must not run');
+});
+
+test.serial('runAcpConversation - a switch from normal to yolo mid-turn stops prompting', async t => {
+	const {cwd, permissionRequests} = await runModeSwitchTurn(
+		t,
+		'normal',
+		[
+			{toolCalls: [writeCall('first.txt', 'call-1')]},
+			{toolCalls: [writeCall('second.txt', 'call-2')], switchTo: 'yolo'},
+		],
+		'allow',
+	);
+
+	t.deepEqual(
+		permissionRequests.map(p => p.toolCall.toolCallId),
+		['call-1'],
+	);
+	t.true(existsSync(join(cwd, 'first.txt')));
+	t.true(existsSync(join(cwd, 'second.txt')));
+});
+
+test.serial('runAcpConversation - the next model request offers the tools of the new mode', async t => {
+	const {offered} = await runModeSwitchTurn(t, 'yolo', [
+		{
+			toolCalls: [createMockToolCall('read_file', {path: 'marker.txt'}, 'call-1')],
+			switchTo: 'plan',
+		},
+	]);
+
+	t.deepEqual(offered.slice(0, 2), [['read_file', 'write_file'], ['read_file']]);
+});
+
+test.serial('runAcpConversation - a call the model already returned is refused once the mode no longer offers it', async t => {
+	// The batch was chosen in yolo; the switch to plan lands after its first call.
+	const {cwd, permissionRequests, session} = await runModeSwitchTurn(
+		t,
+		'yolo',
+		[
+			{
+				toolCalls: [
+					createMockToolCall('read_file', {path: 'marker.txt'}, 'call-1'),
+					writeCall('second.txt', 'call-2'),
+				],
+			},
+		],
+		'allow',
+		(update, current) => {
+			if (update.toolCallId === 'call-1' && update.status === 'completed') {
+				current.developmentMode = 'plan';
+			}
+		},
+	);
+
+	t.is(permissionRequests.length, 0, 'refused before it is ever put to the user');
+	t.false(existsSync(join(cwd, 'second.txt')));
+	const refusal = session.messages.find(
+		(m: any) => m.role === 'tool' && m.tool_call_id === 'call-2',
+	);
+	t.true(String(refusal?.content).includes('not available in plan mode'));
+});
+
+test.serial('runAcpConversation - a lone refused call is still announced to the client as failed', async t => {
+	const updates: any[] = [];
+	const {cwd, permissionRequests} = await runModeSwitchTurn(
+		t,
+		'yolo',
+		[{toolCalls: [writeCall('only.txt', 'call-1')], switchTo: 'plan'}],
+		'allow',
+		update => updates.push(update),
+	);
+
+	t.is(permissionRequests.length, 0);
+	t.false(existsSync(join(cwd, 'only.txt')));
+	t.deepEqual(
+		updates
+			.filter(u => u.toolCallId === 'call-1')
+			.map(u => [u.sessionUpdate, u.status]),
+		[
+			['tool_call', 'pending'],
+			['tool_call_update', 'failed'],
+		],
+	);
+});
+
+test.serial('runAcpConversation - a prose plan is persisted after a switch into plan mode', async t => {
+	const {conn} = createMockConn();
+	const session = createMockSession(conn, {devMode: 'normal'});
+	const toolManager = {
+		...createMockToolManager(),
+		getAvailableToolNames: (_tune: unknown, mode: DevelopmentMode) =>
+			mode === 'plan' ? ['read_file', 'write_plan'] : ['read_file'],
+		hasTool: () => true,
+		getToolEntry: () => ({approval: false}),
+	};
+	let persistedContent: unknown;
+	setToolRegistryGetter(() => ({
+		write_plan: async (args: unknown) => {
+			persistedContent = (args as {content?: unknown}).content;
+			return 'Plan saved';
+		},
+	}));
+	const client = {
+		chat: async () => {
+			session.developmentMode = 'plan';
+			return {choices: [{message: {content: '# Plan\n\n1. Build it.'}}]};
+		},
+	} as unknown as LLMClient;
+
+	await runAcpConversation({
+		session,
+		client,
+		toolManager: toolManager as any,
+		conn,
+		nonInteractiveAlwaysAllow: [],
+	});
+
+	t.is(persistedContent, '# Plan\n\n1. Build it.');
+});
+
+test.serial('runAcpConversation - a mode switch in one session does not reach another', async t => {
+	const [switched, untouched] = await Promise.all([
+		runModeSwitchTurn(t, 'yolo', [
+			{toolCalls: [writeCall('a.txt', 'call-a')], switchTo: 'normal'},
+		]),
+		runModeSwitchTurn(t, 'yolo', [{toolCalls: [writeCall('b.txt', 'call-b')]}]),
+	]);
+
+	t.is(switched.permissionRequests.length, 1);
+	t.false(existsSync(join(switched.cwd, 'a.txt')));
+	t.is(untouched.permissionRequests.length, 0);
+	t.true(existsSync(join(untouched.cwd, 'b.txt')));
 });

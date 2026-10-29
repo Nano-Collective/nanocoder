@@ -200,7 +200,7 @@ async function runTurn(
 ): Promise<PromptResponse> {
 	const {session, client, toolManager, conn, nonInteractiveAlwaysAllow} =
 		options;
-	const {developmentMode, abortController} = session;
+	const {abortController} = session;
 
 	let messages = session.messages;
 	const walkthroughLifecycle = createWalkthroughLifecycle(messages);
@@ -294,9 +294,12 @@ async function runTurn(
 		// rather than stopping mid-task at the ceiling.
 		const finalTurn = turn === maxTurns - 1;
 
+		// session/set_mode can arrive at any point in a turn, so the mode is read
+		// live: here for the tools offered, and again per call for approval.
+		const requestMode = session.developmentMode;
 		const availableNames = toolManager.getAvailableToolNames(
 			undefined,
-			developmentMode,
+			requestMode,
 		);
 		const tools = finalTurn ? {} : toolManager.getFilteredTools(availableNames);
 
@@ -436,9 +439,11 @@ async function runTurn(
 
 		if (validToolCalls.length === 0) {
 			if (
-				developmentMode === 'plan' &&
+				session.developmentMode === 'plan' &&
 				!wrotePlan &&
-				availableNames.includes('write_plan') &&
+				toolManager
+					.getAvailableToolNames(undefined, session.developmentMode)
+					.includes('write_plan') &&
 				cleanedContent.trim().length > 0
 			) {
 				const fallbackCall: ToolCall = {
@@ -523,6 +528,39 @@ async function runTurn(
 				continue;
 			}
 
+			// The model chose this call from the tools offered at request time. If
+			// the mode has since changed and no longer offers it (e.g. a switch to
+			// plan), refuse it rather than run it under the new mode.
+			const toolName = toolCall.function.name;
+			if (
+				session.developmentMode !== requestMode &&
+				availableNames.includes(toolName) &&
+				!toolManager
+					.getAvailableToolNames(undefined, session.developmentMode)
+					.includes(toolName)
+			) {
+				const reason = `Error: ${toolName} is not available in ${session.developmentMode} mode`;
+				// A lone call has not been announced yet; give the failed update a
+				// card to land on.
+				if (!announcedBatch) {
+					await emitToolCall(
+						session,
+						conn,
+						toolCall,
+						'pending',
+						await buildToolCallMeta(toolCall, {withDiff: false}),
+					);
+				}
+				await emitToolCallUpdate(session, conn, toolCall, 'failed', reason);
+				toolResults.push({
+					tool_call_id: toolCall.id,
+					role: 'tool',
+					name: toolName,
+					content: reason,
+				});
+				continue;
+			}
+
 			// Enrich the call with ACP metadata (kind, file locations, and a diff
 			// for edits) so the client can render rich tool cards and previews.
 			const meta = await buildToolCallMeta(toolCall);
@@ -561,7 +599,7 @@ async function runTurn(
 				toolCall,
 				toolManager,
 				nonInteractiveAlwaysAllow,
-				developmentMode,
+				session.developmentMode,
 			);
 
 			if (needsApproval) {
