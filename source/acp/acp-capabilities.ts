@@ -21,23 +21,35 @@ const ACP_MODES = Object.keys(MODE_MAP) as SessionModeId[];
 export const ACP_EXT_PREFIX = '_nanocoder/';
 
 /**
- * Custom requests, by the bare name clients sent before they were prefixed.
- * Those bare names still work as deprecated aliases; the prefixed names are
- * advertised in `agentCapabilities._meta.nanocoder.extMethods`.
+ * Custom requests older clients send by their bare name. Those names still
+ * work as deprecated aliases; methods added since are only answered under
+ * their prefixed name.
  */
-export const ACP_EXT_METHODS = [
+export const ACP_EXT_ALIASES = [
 	'renameSession',
 	'timeline/list',
 	'timeline/revert',
-	'timeline/read',
 	'retryTurn',
+] as const;
+
+/** Every custom request, advertised in `agentCapabilities._meta.nanocoder`. */
+export const ACP_EXT_METHODS = [
+	...ACP_EXT_ALIASES,
+	'timeline/read',
+	'cancelSubagent',
 ] as const;
 
 /** Sent when a session is titled in the background. */
 export const ACP_SESSION_TITLE_NOTIFICATION = '_nanocoder/sessionTitleChanged';
 
+/** Sent as each subagent run starts, progresses and ends. */
+export const ACP_SUBAGENT_NOTIFICATION = '_nanocoder/subagent';
+
 /** Custom notifications the agent sends, by their full names. */
-const ACP_EXT_NOTIFICATIONS = [ACP_SESSION_TITLE_NOTIFICATION];
+const ACP_EXT_NOTIFICATIONS = [
+	ACP_SESSION_TITLE_NOTIFICATION,
+	ACP_SUBAGENT_NOTIFICATION,
+];
 
 export function getAgentCapabilities(): AgentCapabilities {
 	return {
@@ -56,6 +68,31 @@ export function getAgentCapabilities(): AgentCapabilities {
 			},
 		},
 	};
+}
+
+/**
+ * `_meta` key a client sets on session/new, session/load and session/resume to
+ * turn tools off for that session, and under which the response reports the
+ * list in effect.
+ */
+export const ACP_DISABLED_TOOLS_META = 'nanocoder/disabledTools';
+
+/** The tool names a client asked to disable; anything but a list of strings is ignored. */
+export function parseDisabledTools(meta: unknown): string[] {
+	const requested = (meta as Record<string, unknown> | null | undefined)?.[
+		ACP_DISABLED_TOOLS_META
+	];
+	return Array.isArray(requested)
+		? requested.filter((name): name is string => typeof name === 'string')
+		: [];
+}
+
+/** The user's own disabledTools plus the session's; the session never replaces them. */
+export function mergeDisabledTools(
+	userDisabled: readonly string[] = [],
+	sessionDisabled: readonly string[] = [],
+): string[] {
+	return [...new Set([...userDisabled, ...sessionDisabled])];
 }
 
 export function getAvailableModes(): SessionModeId[] {

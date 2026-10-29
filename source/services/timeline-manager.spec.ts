@@ -451,6 +451,62 @@ test.serial('TimelineManager readBefore throws for a path outside the workspace 
 	}
 });
 
+test.serial('TimelineManager list reports the turn id, and omits it when none was recorded', async t => {
+	const tempDir = await createTempDir();
+	try {
+		await writeFile(tempDir, 'a.ts', 'v0');
+		const manager = new TimelineManager(tempDir, 'session-turn-id');
+		const input = {
+			toolCallId: 'call-1',
+			toolName: 'write_file',
+			title: 'write_file: a.ts',
+			truncateToMessageIndex: 1,
+			files: new Map([['a.ts', 'v0']]),
+		};
+		await manager.capture({...input, turnId: 'turn-1'});
+		await manager.capture({...input, toolCallId: 'call-2'});
+
+		const [withTurn, withoutTurn] = await manager.list();
+		t.is(withTurn.turnId, 'turn-1');
+		t.false('turnId' in withoutTurn);
+	} finally {
+		await cleanupTempDir(tempDir);
+	}
+});
+
+test.serial('TimelineManager readBefore does not follow a checkpoint id that escapes the timeline', async t => {
+	const tempDir = await createTempDir();
+	try {
+		await writeFile(tempDir, 'a.ts', 'before');
+		const manager = new TimelineManager(tempDir, 'session-tampered');
+		const entry = await manager.capture({
+			toolCallId: 'call-1',
+			toolName: 'write_file',
+			title: 'write_file: a.ts',
+			truncateToMessageIndex: 1,
+			files: new Map([['a.ts', 'before']]),
+		});
+		const timelineDir = path.join(tempDir, '.nanocoder', 'timeline', 'session-tampered');
+		// Where a crafted id would land: <timelineDir>/leak/files/a.ts.
+		await writeFile(timelineDir, 'leak/files/a.ts', 'LEAKED');
+		t.deepEqual(await manager.readBefore(entry?.id ?? '', 'a.ts'), {
+			kind: 'text',
+			content: 'before',
+		});
+
+		// The index is user-writable JSON on disk, so an id can be anything.
+		const tamperedId = '../leak';
+		const index = await (manager as any).loadIndex();
+		index.entries[0].id = tamperedId;
+
+		const result = await manager.readBefore(tamperedId, 'a.ts');
+		t.is(result.kind, 'unavailable');
+		t.false(JSON.stringify(result).includes('LEAKED'));
+	} finally {
+		await cleanupTempDir(tempDir);
+	}
+});
+
 test.serial('TimelineManager revert covers every checkpoint in the same turn', async t => {
 	const tempDir = await createTempDir();
 	try {

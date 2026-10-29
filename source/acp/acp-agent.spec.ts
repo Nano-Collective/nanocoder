@@ -19,6 +19,7 @@ import {
 } from '@/message-handler';
 import {convertToModelMessages} from '@/ai-sdk-client/converters/message-converter';
 import {sessionManager} from '@/session/session-manager';
+import {registerSubagentRun} from '@/services/subagent-events';
 import {getLogger} from '@/utils/logging';
 import {SemanticMemoryManager} from '@/memory/semantic-memory-manager';
 import {readFileTool} from '@/tools/read-file';
@@ -1274,6 +1275,70 @@ test.serial('AcpAgent.extMethod - a bare name logs one deprecation notice, a pre
 	}
 });
 
+test('AcpAgent.extMethod - cancelSubagent cancels one run of the session and nothing else', async t => {
+	const {agent} = createAgent();
+	const session = await agent.newSession({cwd: '/tmp'});
+	const other = await agent.newSession({cwd: '/tmp'});
+	const cancelled: string[] = [];
+	const forget = [
+		registerSubagentRun('run-1', session.sessionId, () => cancelled.push('run-1')),
+		registerSubagentRun('run-2', session.sessionId, () => cancelled.push('run-2')),
+		registerSubagentRun('run-3', other.sessionId, () => cancelled.push('run-3')),
+	];
+	try {
+		t.deepEqual(
+			await agent.extMethod('_nanocoder/cancelSubagent', {
+				sessionId: session.sessionId,
+				childRunId: 'run-1',
+			}),
+			{cancelled: true},
+		);
+		// Another session's run, and a run that already ended, are not an error.
+		t.deepEqual(
+			await agent.extMethod('_nanocoder/cancelSubagent', {
+				sessionId: session.sessionId,
+				childRunId: 'run-3',
+			}),
+			{cancelled: false},
+		);
+		t.deepEqual(
+			await agent.extMethod('_nanocoder/cancelSubagent', {
+				sessionId: session.sessionId,
+				childRunId: 'gone',
+			}),
+			{cancelled: false},
+		);
+		t.deepEqual(cancelled, ['run-1']);
+	} finally {
+		for (const stop of forget) stop();
+		await agent.deleteSession({sessionId: session.sessionId});
+		await agent.deleteSession({sessionId: other.sessionId});
+	}
+});
+
+test('AcpAgent.extMethod - cancelSubagent validates its params, and methods added after the prefix have no bare alias', async t => {
+	const {agent} = createAgent();
+	await t.throwsAsync(
+		agent.extMethod('_nanocoder/cancelSubagent', {sessionId: 'x'}),
+		{message: 'cancelSubagent requires string sessionId and childRunId'},
+	);
+	await t.throwsAsync(
+		agent.extMethod('_nanocoder/cancelSubagent', {
+			sessionId: 'nope',
+			childRunId: 'run',
+		}),
+		{message: 'Session not found: nope'},
+	);
+	// Added after the prefix, so there is no old client to keep working.
+	for (const [method, params] of [
+		['cancelSubagent', {sessionId: 'x', childRunId: 'y'}],
+		['timeline/read', {sessionId: 'x', checkpointId: 'y', path: 'a.ts'}],
+	] as const) {
+		const error = await t.throwsAsync(agent.extMethod(method, params));
+		t.is((error as {code?: number}).code, -32601, method);
+	}
+});
+
 test('AcpAgent.initialize - advertises the extension methods, and each one is handled', async t => {
 	const {agent} = createAgent();
 	const {agentCapabilities} = await agent.initialize({protocolVersion: 1});
@@ -1281,7 +1346,10 @@ test('AcpAgent.initialize - advertises the extension methods, and each one is ha
 		extMethods: string[];
 		extNotifications: string[];
 	};
-	t.deepEqual(advertised.extNotifications, ['_nanocoder/sessionTitleChanged']);
+	t.deepEqual(advertised.extNotifications, [
+		'_nanocoder/sessionTitleChanged',
+		'_nanocoder/subagent',
+	]);
 	t.true(advertised.extMethods.length > 0);
 	for (const method of advertised.extMethods) {
 		// Bad params fail inside the handler; an unsupported name would be -32601.
@@ -1598,13 +1666,15 @@ test('AcpAgent.extMethod - timeline/list throws on missing session', async t => 
 	);
 });
 
-test('AcpAgent.extMethod - timeline/read returns the baseline of a turn from its earliest checkpoint', async t => {
+test('AcpAgent.extMethod - timeline/read returns the before-image of the checkpoint it is asked for', async t => {
 	const {agent} = createAgent();
 	const cwd = createTimelineWorkspace('read');
 	try {
 		const created = await agent.newSession({cwd, mcpServers: []});
 		const session = (agent as any).sessions.get(created.sessionId);
-		// One turn, two edits to a.ts: both checkpoints share the truncation point.
+		// Two edits to a.ts. Which checkpoint is a turn's baseline is decided by
+		// `turnId`; that grouping is covered through the real capture path in
+		// acp-conversation.spec.ts.
 		const first = await session.timeline.capture({
 			toolCallId: 'call-1',
 			toolName: 'write_file',
@@ -1661,9 +1731,9 @@ test('AcpAgent.extMethod - timeline/read is unavailable after the checkpoint is 
 		});
 		const params = {sessionId: created.sessionId, checkpointId: entry.id, path: 'a.ts'};
 
-		t.is((await agent.extMethod('timeline/read', params)).kind, 'text');
+		t.is((await agent.extMethod('_nanocoder/timeline/read', params)).kind, 'text');
 		await agent.extMethod('timeline/revert', params);
-		t.is((await agent.extMethod('timeline/read', params)).kind, 'unavailable');
+		t.is((await agent.extMethod('_nanocoder/timeline/read', params)).kind, 'unavailable');
 	} finally {
 		rmSync(cwd, {recursive: true, force: true});
 	}
@@ -1675,15 +1745,15 @@ test('AcpAgent.extMethod - timeline/read rejects bad params, escaping paths and 
 	try {
 		const created = await agent.newSession({cwd, mcpServers: []});
 		await t.throwsAsync(
-			agent.extMethod('timeline/read', {sessionId: created.sessionId, path: 'a.ts'}),
+			agent.extMethod('_nanocoder/timeline/read', {sessionId: created.sessionId, path: 'a.ts'}),
 			{message: 'timeline/read requires string sessionId, checkpointId and path'},
 		);
 		await t.throwsAsync(
-			agent.extMethod('timeline/read', {sessionId: created.sessionId, checkpointId: 'x', path: '../outside'}),
+			agent.extMethod('_nanocoder/timeline/read', {sessionId: created.sessionId, checkpointId: 'x', path: '../outside'}),
 			{message: /outside the workspace/},
 		);
 		await t.throwsAsync(
-			agent.extMethod('timeline/read', {sessionId: 'missing', checkpointId: 'x', path: 'a.ts'}),
+			agent.extMethod('_nanocoder/timeline/read', {sessionId: 'missing', checkpointId: 'x', path: 'a.ts'}),
 			{message: /Session not found/},
 		);
 	} finally {
@@ -2102,5 +2172,182 @@ test('AcpAgent - sessions start in the init context mode on new, load and resume
 		t.is(resumed.modes?.currentModeId, 'normal');
 	} finally {
 		await agent.deleteSession({sessionId: created.sessionId});
+	}
+});
+
+// ============================================================================
+// Per-session disabled tools
+// ============================================================================
+
+const DISABLED_META = 'nanocoder/disabledTools';
+
+/** An agent whose tool manager records the disabled list each prompt is built with. */
+const createDisabledToolsAgent = () => {
+	const offeredWith: Array<readonly string[] | undefined> = [];
+	const context = createMockInitContext();
+	context.toolManager = {
+		...context.toolManager,
+		hasTool: (name: string) => name === 'browser' || name === 'fetch_url',
+		getAvailableToolNames: (
+			_tune: unknown,
+			_mode: unknown,
+			disabled?: readonly string[],
+		) => {
+			offeredWith.push(disabled);
+			return ['read_file', 'browser', 'fetch_url'].filter(
+				name => !disabled?.includes(name),
+			);
+		},
+		getMCPToolInfo: () => ({isMCPTool: false}),
+	} as any;
+	return {agent: new AcpAgent(context, createMockConn()), offeredWith};
+};
+
+test.serial('AcpAgent - new, load and resume honour the client\'s disabled tools, on top of the user\'s', async t => {
+	const config = getAppConfig();
+	const previous = config.disabledTools;
+	config.disabledTools = ['fetch_url'];
+	const {agent, offeredWith} = createDisabledToolsAgent();
+	const meta = {[DISABLED_META]: ['browser']};
+	const created = await agent.newSession({cwd: '/tmp', _meta: meta});
+
+	try {
+		// The session's prompt was built with both lists, the user's kept.
+		t.deepEqual(offeredWith.at(-1), ['fetch_url', 'browser']);
+
+		await agent.prompt({
+			sessionId: created.sessionId,
+			prompt: [{type: 'text', text: 'Persist this session.'}],
+		});
+		const params = {sessionId: created.sessionId, cwd: '/tmp', _meta: meta};
+		const loaded = await agent.loadSession({...params, mcpServers: []});
+		const resumed = await agent.resumeSession(params);
+
+		for (const response of [created, loaded, resumed]) {
+			t.deepEqual(response._meta?.[DISABLED_META], ['fetch_url', 'browser']);
+		}
+	} finally {
+		config.disabledTools = previous;
+		await agent.deleteSession({sessionId: created.sessionId});
+	}
+});
+
+test.serial('AcpAgent - a session that did not ask keeps the tool, in the same process', async t => {
+	const {agent} = createDisabledToolsAgent();
+	const config = getAppConfig();
+	const previous = config.disabledTools;
+	config.disabledTools = [];
+	const without = await agent.newSession({cwd: '/tmp'});
+	const withBrowserOff = await agent.newSession({
+		cwd: '/tmp',
+		_meta: {[DISABLED_META]: ['browser']},
+	});
+
+	try {
+		t.deepEqual(without._meta?.[DISABLED_META], []);
+		t.deepEqual(withBrowserOff._meta?.[DISABLED_META], ['browser']);
+		// And the first was not changed by the second one being created.
+		t.deepEqual(
+			(agent as any).sessions.get(without.sessionId).effectiveDisabledTools(),
+			[],
+		);
+	} finally {
+		config.disabledTools = previous;
+		await agent.deleteSession({sessionId: without.sessionId});
+		await agent.deleteSession({sessionId: withBrowserOff.sessionId});
+	}
+});
+
+test.serial('AcpAgent.loadSession - a live session takes the list the client sends now', async t => {
+	const config = getAppConfig();
+	const previous = config.disabledTools;
+	config.disabledTools = [];
+	const {agent, offeredWith} = createDisabledToolsAgent();
+	const created = await agent.newSession({
+		cwd: '/tmp',
+		_meta: {[DISABLED_META]: ['browser']},
+	});
+
+	try {
+		const params = {sessionId: created.sessionId, cwd: '/tmp', mcpServers: []};
+		const swapped = await agent.loadSession({
+			...params,
+			_meta: {[DISABLED_META]: ['fetch_url']},
+		});
+		t.deepEqual(swapped._meta?.[DISABLED_META], ['fetch_url']);
+		// The prompt was rebuilt, so the tool list the model sees matches.
+		t.deepEqual(offeredWith.at(-1), ['fetch_url']);
+
+		// Sent on every load, so none sent means none disabled.
+		const cleared = await agent.loadSession(params);
+		t.deepEqual(cleared._meta?.[DISABLED_META], []);
+	} finally {
+		config.disabledTools = previous;
+		await agent.deleteSession({sessionId: created.sessionId});
+	}
+});
+
+test.serial('AcpAgent - the list is not persisted, so a resume without it disables nothing', async t => {
+	const config = getAppConfig();
+	const previous = config.disabledTools;
+	config.disabledTools = [];
+	const {agent} = createDisabledToolsAgent();
+	const created = await agent.newSession({
+		cwd: '/tmp',
+		_meta: {[DISABLED_META]: ['browser']},
+	});
+
+	try {
+		await agent.prompt({
+			sessionId: created.sessionId,
+			prompt: [{type: 'text', text: 'Persist this session.'}],
+		});
+		const stored = await sessionManager.loadSession(created.sessionId);
+		t.false(JSON.stringify(stored).includes('browser'));
+
+		const resumed = await agent.resumeSession({
+			sessionId: created.sessionId,
+			cwd: '/tmp',
+		});
+		t.deepEqual(resumed._meta?.[DISABLED_META], []);
+	} finally {
+		config.disabledTools = previous;
+		await agent.deleteSession({sessionId: created.sessionId});
+	}
+});
+
+// Serial: it patches the process-wide logger.
+test.serial('AcpAgent - an unknown or malformed disabled tool is ignored, with a debug log', async t => {
+	const config = getAppConfig();
+	const previous = config.disabledTools;
+	config.disabledTools = [];
+	const logger = getLogger();
+	const original = logger.debug;
+	const lines: string[] = [];
+	logger.debug = ((message: string) => {
+		lines.push(message);
+	}) as typeof logger.debug;
+	const {agent} = createDisabledToolsAgent();
+	let created: Awaited<ReturnType<typeof agent.newSession>> | undefined;
+	try {
+		created = await agent.newSession({
+			cwd: '/tmp',
+			_meta: {[DISABLED_META]: ['browser', 'no_such_tool', 42]},
+		});
+
+		// Only the unknown name is noted. Match the message, not a substring of
+		// it: the line also carries the session's random UUID.
+		const ignored = lines.filter(line =>
+			line.includes('ignoring unknown disabled tool'),
+		);
+		t.is(ignored.length, 1);
+		t.true(ignored[0].includes('"no_such_tool"'));
+		// A number is dropped before it can be named in a log, and the response
+		// lists only the tool that is actually in effect.
+		t.deepEqual(created._meta?.[DISABLED_META], ['browser']);
+	} finally {
+		logger.debug = original;
+		config.disabledTools = previous;
+		if (created) await agent.deleteSession({sessionId: created.sessionId});
 	}
 });

@@ -37,6 +37,7 @@ With ACP the **client is the UI**: the agent runs headless and everything (strea
 - **`@`-mentioned files** — files you reference in the editor are read and included in the prompt, using the editor's live buffer (including unsaved edits) when available.
 - **Session persistence** - ACP sessions are saved to disk like TUI sessions (see [Session Management](session-management.md)). Loading or resuming a thread replays its history, even after the editor and agent restart. Loading or resuming a session ID that is neither in memory nor on disk fails with `Session not found on disk: <id>` instead of creating an empty session; only `session/new` creates one.
 - **Session management** - clients can list, resume, close and delete sessions. Nanocoder also answers a `_nanocoder/renameSession` extension method (`sessionId`, `title`; see [Extension methods](#extension-methods)), and new sessions get a generated title from the first message.
+- **Turning tools off for a session** - an editor that provides its own version of a tool, such as a browser, can ask Nanocoder not to offer the built-in one: send `_meta: {"nanocoder/disabledTools": ["browser"]}` on `session/new`, `session/load` or `session/resume`. The names are added to your own [`disabledTools`](../configuration/index.md#disabling-tools), never replacing it, and apply to that session only: the tools are left out of the tool list and the prompt, a call the model makes to one anyway is refused with an error and nothing runs, and subagents the session starts respect the same list. Other sessions are unaffected, and your config files are never read or changed for this. The response `_meta` reports the list in effect under the same key (yours and the editor's), so an editor can check that it was honoured. It is not saved with the session, so send it on every new, load and resume (a load or resume without it turns nothing off). A name that is not a known tool is ignored, and left out of the reported list.
 - **Images** - PNG, JPEG, GIF and WebP attachments are sent to the model as images.
 
 ## Extension methods
@@ -46,22 +47,23 @@ ACP reserves method names starting with `_` for custom methods. Nanocoder's are:
 | Method | Params | What it does |
 |--------|--------|--------------|
 | `_nanocoder/renameSession` | `sessionId`, `title` | Sets a session's title |
-| `_nanocoder/timeline/list` | `sessionId` | Lists the session's file-change checkpoints, including which `filesChanged` were `createdFiles` |
+| `_nanocoder/timeline/list` | `sessionId` | Lists the session's file-change checkpoints, including which `filesChanged` were `createdFiles` and the `turnId` of the prompt that made them |
 | `_nanocoder/timeline/revert` | `sessionId`, `checkpointId` | Reverts the files and history to before a checkpoint |
 | `_nanocoder/timeline/read` | `sessionId`, `checkpointId`, `path` | Reads a file as it was just before a checkpoint's tool call (read-only; see [Reading before-images](#reading-before-images)) |
 | `_nanocoder/retryTurn` | `sessionId`, optional `promptText` | Removes the last turn so the prompt can be sent again |
+| `_nanocoder/cancelSubagent` | `sessionId`, `childRunId` | Cancels one running subagent; the turn and the other subagents carry on (see [Subagent events](#subagent-events)) |
 
-The agent also sends the `_nanocoder/sessionTitleChanged` notification when it titles a session in the background.
+The agent also sends two notifications: `_nanocoder/sessionTitleChanged` when it titles a session in the background, and `_nanocoder/subagent` as each subagent run progresses (see [Subagent events](#subagent-events)).
 
 **Capability detection.** `initialize` lists the exact names under `agentCapabilities._meta.nanocoder`:
 
 ```json
-{"nanocoder": {"extMethods": ["_nanocoder/renameSession", "..."], "extNotifications": ["_nanocoder/sessionTitleChanged"]}}
+{"nanocoder": {"extMethods": ["_nanocoder/renameSession", "..."], "extNotifications": ["_nanocoder/sessionTitleChanged", "_nanocoder/subagent"]}}
 ```
 
 Take the names from that list as they are rather than building them from a prefix. An agent that doesn't list a method doesn't support it under that name.
 
-**Deprecated aliases.** The methods that existed before the prefix are still answered under their old bare names (`renameSession`, `timeline/list`, `timeline/revert`, `retryTurn`) for clients that predate the prefix. The first use of each logs a deprecation notice. The aliases will be removed in a later release, announced in the changelog.
+**Deprecated aliases.** The first four methods are still answered under their old bare names (`renameSession`, `timeline/list`, `timeline/revert`, `retryTurn`) for clients that predate the prefix. Methods added since, such as `timeline/read` and `cancelSubagent`, have no bare name. The first use of each logs a deprecation notice. The aliases will be removed in a later release, announced in the changelog.
 
 **Unknown methods.** A custom request the agent doesn't recognise fails with the standard JSON-RPC "Method not found" error (`-32601`), so "not supported" can be told apart from "failed".
 
@@ -75,7 +77,11 @@ Take the names from that list as they are rather than building them from a prefi
 
 `path` is relative to the session's working directory, or an absolute path inside it. A path outside the working directory fails with an error. The session must be loaded, as for `timeline/list`.
 
-**Finding the baseline for a turn.** Each checkpoint is one tool call, and a turn can make several. Checkpoints from the same turn share `truncateToMessageIndex`, so the file as it was before the agent's turn is the before-image from the *earliest* checkpoint with that `truncateToMessageIndex` whose `filesChanged` contains the path. Use `createdFiles` from `timeline/list` to tell a created file from an edited one without a read.
+**Finding the baseline for a turn.** Each checkpoint is one tool call, and one prompt can make many of them over several model round-trips. `truncateToMessageIndex` does not mark a turn: it moves forward with every round-trip, so two edits the agent makes for one prompt can carry different values. Use `turnId` instead. Every checkpoint recorded while the agent works on one prompt has the same `turnId` in `timeline/list`.
+
+The file as it was before the agent's turn is the before-image from the checkpoint with the lowest `seq` among those that share the turn's `turnId` and whose `filesChanged` contains the path. If that checkpoint also lists the path in `createdFiles`, the file did not exist before the turn. Checkpoints recorded by an older Nanocoder have no `turnId`, so their turns cannot be told apart. If the turn's earliest checkpoints were pruned (see the limits below), the earliest one left may already include the agent's own earlier edits.
+
+Use `createdFiles` from `timeline/list` to tell a created file from an edited one without a read.
 
 **Limits.**
 
@@ -84,6 +90,28 @@ Take the names from that list as they are rather than building them from a prefi
 - Timelines of sessions untouched for 7 days, or beyond the 20 most recent, are pruned.
 - A shell command or other tool whose targets are not known up front gets a checkpoint only when the Git scan of the workspace before and after the call is complete. A scan that hit its file cap, or that could not run, records none.
 - There is no size cap: a large text file is returned whole.
+
+### Subagent events
+
+When the agent delegates to a subagent, the parent `agent` tool call's title is refreshed with progress, and the subagent's own tool calls appear as `subagent:` cards, as before. A client that wants each subagent as its own run can also read the `_nanocoder/subagent` notifications, which carry:
+
+| Field | Meaning |
+|-------|---------|
+| `sessionId` | The session the run belongs to |
+| `toolCallId` | The parent's `agent` tool call that started the run |
+| `childRunId` | Identifies the run for as long as it lives |
+| `parentRunId` | The run that started this one; empty for a child of the turn |
+| `name` | The subagent's name |
+| `status` | `started`, `progress`, `completed`, `failed` or `cancelled` |
+| `tokenCount`, `toolCallCount`, `lastTool` | Progress, on `progress` and `completed` events |
+| `result` | The subagent's final output, on `completed` |
+| `error` | Why the run ended, on `failed` and `cancelled` |
+
+Every run sends `started`, then any number of `progress`, then exactly one of `completed`, `failed` or `cancelled`. Runs that overlap each send their own events; tell them apart by `childRunId`. A client that ignores the notification sees nothing different.
+
+**Cancelling one run.** `_nanocoder/cancelSubagent` with the `sessionId` and `childRunId` ends that run and returns `{"cancelled": true}`. The run reports `cancelled`, its parent `agent` call gets a "Subagent was cancelled" result, and the turn and the other subagents carry on. It returns `{"cancelled": false}` when there is nothing to cancel: the run already ended, or belongs to another session. Cancelling the turn with `session/cancel` still cancels every run.
+
+**Approvals.** The permission request for a subagent's tool call (its tool call ID starts with `subagent:`) carries the run in the request's `_meta` as `nanocoder/childRunId`.
 
 ## Setup in Zed
 

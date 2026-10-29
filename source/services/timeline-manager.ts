@@ -38,6 +38,10 @@ import {
  */
 const EXCLUDED_PREFIXES = ['.nanocoder/timeline/', '.nanocoder/checkpoints/'];
 
+/** Checkpoint ids are `crypto.randomUUID()`, and become a directory name. */
+const ENTRY_ID_PATTERN =
+	/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 /**
  * Snapshots round-trip through UTF-8, which silently corrupts binaries. A NUL
  * byte is the same heuristic git uses to call a blob binary.
@@ -281,11 +285,21 @@ export class TimelineManager {
 			return {kind: 'created'};
 		}
 
+		// The index is user-writable JSON on disk, and `entry.id` becomes part of
+		// a path below. Only an id this manager could have generated may do that.
+		if (!ENTRY_ID_PATTERN.test(entry.id)) {
+			logWarning('Ignoring unsafe checkpoint id in timeline index', true, {
+				context: {checkpointId: entry.id},
+			});
+			return {
+				kind: 'unavailable',
+				reason: 'The checkpoint has an invalid id in the timeline index',
+			};
+		}
+
 		try {
-			const filePathOnDisk = path.join(
-				this.entryFilesDir(entry.id),
-				relativePath,
-			); // nosemgrep
+			const filesDir = this.entryFilesDir(entry.id);
+			const filePathOnDisk = path.join(filesDir, relativePath); // nosemgrep
 			return {
 				kind: 'text',
 				content: await fs.readFile(filePathOnDisk, 'utf-8'),
@@ -338,6 +352,7 @@ export class TimelineManager {
 			truncateToMessageIndex: input.truncateToMessageIndex,
 			filesChanged: [...existing.keys(), ...createdFiles],
 			createdFiles,
+			...(input.turnId ? {turnId: input.turnId} : {}),
 		};
 
 		if (existing.size > 0) {
@@ -544,6 +559,7 @@ export class TimelineManager {
 			truncateToMessageIndex: entry.truncateToMessageIndex,
 			filesChanged: entry.filesChanged,
 			createdFiles: entry.createdFiles,
+			...(entry.turnId ? {turnId: entry.turnId} : {}),
 		};
 	}
 
