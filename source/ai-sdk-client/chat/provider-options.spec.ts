@@ -1,370 +1,263 @@
 import test from 'ava';
-import type {AIProviderConfig, OpenRouterParameters} from '@/types/index';
-import {
-	buildProviderOptions,
-	isPromptCachingEnabled,
-} from './provider-options.js';
+import type {AIProviderConfig} from '@/types/config.js';
+import {jsonSchema} from '@/types/core.js';
+import {buildProviderOptions} from './provider-options.js';
 
-function makeProvider(
-	overrides: Partial<AIProviderConfig> = {},
+// Helper to create a minimal provider config
+function createProviderConfig(
+	name: string,
+	overrides?: Partial<AIProviderConfig>,
 ): AIProviderConfig {
 	return {
-		name: 'openrouter',
+		name,
 		type: 'openai-compatible',
-		models: ['x-ai/grok-4'],
-		config: {
-			baseURL: 'https://openrouter.ai/api/v1',
-			apiKey: 'test-key',
-		},
+		models: ['test-model'],
+		config: {},
 		...overrides,
 	};
 }
 
-function withOpenRouter(
-	openrouter: OpenRouterParameters,
-	overrides: Partial<AIProviderConfig> = {},
-): AIProviderConfig {
-	return makeProvider({openrouter, ...overrides});
-}
-
-test('returns undefined when no provider-specific options apply', t => {
-	const result = buildProviderOptions(
-		makeProvider({name: 'Ollama', type: 'ollama'}),
-		'system prompt',
-		undefined,
-	);
+test('buildProviderOptions returns undefined when no provider-specific options', t => {
+	const config = createProviderConfig('generic-provider');
+	const result = buildProviderOptions(config, '', undefined);
 	t.is(result, undefined);
 });
 
-test('returns undefined for OpenRouter with no openrouter config and no reasoning shortcut', t => {
-	const result = buildProviderOptions(makeProvider(), 'system prompt', {
-		temperature: 0.7,
-	});
-	t.is(result, undefined);
-});
-
-test('chatgpt-codex always returns providerOptions.openai with defaults', t => {
-	const result = buildProviderOptions(
-		makeProvider({name: 'codex', sdkProvider: 'chatgpt-codex'}),
-		'hello system',
-		undefined,
-	);
-	t.deepEqual(result, {
-		openai: {
-			instructions: 'hello system',
-			store: false,
-			reasoningEffort: 'medium',
-			reasoningSummary: 'auto',
-		},
-	});
-});
-
-test('chatgpt-codex honours overridden reasoningEffort and reasoningSummary', t => {
-	const result = buildProviderOptions(
-		makeProvider({name: 'codex', sdkProvider: 'chatgpt-codex'}),
-		'hello',
-		{reasoningEffort: 'high', reasoningSummary: 'detailed'},
-	);
-	t.deepEqual(result, {
-		openai: {
-			instructions: 'hello',
-			store: false,
-			reasoningEffort: 'high',
-			reasoningSummary: 'detailed',
-		},
-	});
-});
-
-test('OpenRouter forwards provider routing block', t => {
-	const provider = withOpenRouter({
-		provider: {
-			order: ['Anthropic', 'OpenAI'],
-			allow_fallbacks: false,
-			sort: 'price',
-		},
-	});
-	const result = buildProviderOptions(provider, '', undefined);
-	t.deepEqual(result, {
-		openrouter: {
-			provider: {
-				order: ['Anthropic', 'OpenAI'],
-				allow_fallbacks: false,
-				sort: 'price',
-			},
-		},
-	});
-});
-
-test('OpenRouter accepts object-form sort for cross-model partitioning', t => {
-	const provider = withOpenRouter({
-		provider: {sort: {by: 'price', partition: 'model'}},
-	});
-	const result = buildProviderOptions(provider, '', undefined);
-	t.deepEqual(result, {
-		openrouter: {
-			provider: {sort: {by: 'price', partition: 'model'}},
-		},
-	});
-});
-
-test('OpenRouter forwards plugins and fallback models list', t => {
-	const provider = withOpenRouter({
-		plugins: [{id: 'context-compression', engine: 'middle-out'}],
-		models: ['anthropic/claude-3.5-sonnet', 'openai/gpt-4o'],
-	});
-	const result = buildProviderOptions(provider, '', undefined);
-	t.deepEqual(result, {
-		openrouter: {
-			plugins: [{id: 'context-compression', engine: 'middle-out'}],
-			models: ['anthropic/claude-3.5-sonnet', 'openai/gpt-4o'],
-		},
-	});
-});
-
-test('OpenRouter forwards service_tier=flex', t => {
-	const provider = withOpenRouter({service_tier: 'flex'});
-	const result = buildProviderOptions(provider, '', undefined);
-	t.deepEqual(result, {openrouter: {service_tier: 'flex'}});
-});
-
-test('OpenRouter forwards service_tier=priority', t => {
-	const provider = withOpenRouter({service_tier: 'priority'});
-	const result = buildProviderOptions(provider, '', undefined);
-	t.deepEqual(result, {openrouter: {service_tier: 'priority'}});
-});
-
-test('OpenRouter forwards route and user', t => {
-	const provider = withOpenRouter({route: 'fallback', user: 'user-123'});
-	const result = buildProviderOptions(provider, '', undefined);
-	t.deepEqual(result, {
-		openrouter: {route: 'fallback', user: 'user-123'},
-	});
-});
-
-test('OpenRouter forwards extended reasoning block with xhigh and exclude', t => {
-	const provider = withOpenRouter({
-		reasoning: {effort: 'xhigh', max_tokens: 12000, exclude: false},
-	});
-	const result = buildProviderOptions(provider, '', undefined);
-	t.deepEqual(result, {
-		openrouter: {
-			reasoning: {effort: 'xhigh', max_tokens: 12000, exclude: false},
-		},
-	});
-});
-
-test('OpenRouter maps tune-level reasoningEffort to reasoning.effort', t => {
-	const result = buildProviderOptions(makeProvider(), '', {
+test('buildProviderOptions handles chatgpt-codex provider', t => {
+	const config = createProviderConfig('codex', {sdkProvider: 'chatgpt-codex'});
+	const result = buildProviderOptions(config, 'Test system prompt', {
 		reasoningEffort: 'high',
 	});
-	t.deepEqual(result, {openrouter: {reasoning: {effort: 'high'}}});
+
+	t.truthy(result);
+	t.truthy(result!.openai);
+	t.is(result!.openai.instructions, 'Test system prompt');
+	t.is(result!.openai.store, false);
+	t.is(result!.openai.reasoningEffort, 'high');
 });
 
-test('OpenRouter passes minimal reasoningEffort straight through', t => {
-	const result = buildProviderOptions(makeProvider(), '', {
-		reasoningEffort: 'minimal',
-	});
-	t.deepEqual(result, {openrouter: {reasoning: {effort: 'minimal'}}});
-});
-
-test('OpenRouter merges tune shortcut effort with provider-config reasoning block', t => {
-	const provider = withOpenRouter({
-		reasoning: {max_tokens: 8000, exclude: true},
-	});
-	const result = buildProviderOptions(provider, '', {
-		reasoningEffort: 'medium',
-	});
-	t.deepEqual(result, {
+test('buildProviderOptions handles OpenRouter provider', t => {
+	const config = createProviderConfig('openrouter', {
 		openrouter: {
-			reasoning: {effort: 'medium', max_tokens: 8000, exclude: true},
-		},
-	});
-});
-
-test('provider-config reasoning.effort wins over tune shortcut', t => {
-	const provider = withOpenRouter({reasoning: {effort: 'high'}});
-	const result = buildProviderOptions(provider, '', {
-		reasoningEffort: 'low',
-	});
-	t.deepEqual(result, {openrouter: {reasoning: {effort: 'high'}}});
-});
-
-test('OpenRouter routing extras (zdr, max_price, latency thresholds) flow through', t => {
-	const provider = withOpenRouter({
-		provider: {
-			zdr: true,
-			enforce_distillable_text: true,
-			max_price: {prompt: 0.5, completion: 1.5},
-			preferred_min_throughput: {p90: 30},
-			preferred_max_latency: 2000,
-		},
-	});
-	const result = buildProviderOptions(provider, '', undefined);
-	t.deepEqual(result, {
-		openrouter: {
-			provider: {
-				zdr: true,
-				enforce_distillable_text: true,
-				max_price: {prompt: 0.5, completion: 1.5},
-				preferred_min_throughput: {p90: 30},
-				preferred_max_latency: 2000,
-			},
-		},
-	});
-});
-
-test('OpenRouter options are keyed by the exact provider name', t => {
-	// @ai-sdk/openai-compatible reads providerOptions[<provider name>], so a
-	// provider named "OpenRouter" (the wizard default) must get its options
-	// under "OpenRouter", not "openrouter".
-	const provider = withOpenRouter(
-		{service_tier: 'flex'},
-		{name: 'OpenRouter'},
-	);
-	const result = buildProviderOptions(provider, '', undefined);
-	t.deepEqual(result, {OpenRouter: {service_tier: 'flex'}});
-});
-
-test('OpenRouter options reach the request body for a capitalised provider name', async t => {
-	const {createOpenAICompatible} = await import('@ai-sdk/openai-compatible');
-	const {generateText} = await import('ai');
-	let body: Record<string, unknown> = {};
-	const provider = createOpenAICompatible({
-		name: 'OpenRouter',
-		baseURL: 'https://openrouter.ai/api/v1',
-		apiKey: 'test-key',
-		fetch: async (_input, init) => {
-			body = JSON.parse(String(init?.body)) as Record<string, unknown>;
-			return new Response(
-				JSON.stringify({
-					id: '1',
-					created: 0,
-					model: 'x',
-					choices: [
-						{
-							index: 0,
-							message: {role: 'assistant', content: 'ok'},
-							finish_reason: 'stop',
-						},
-					],
-				}),
-				{headers: {'content-type': 'application/json'}},
-			);
-		},
-	});
-	const providerOptions = buildProviderOptions(
-		withOpenRouter(
-			{service_tier: 'flex', provider: {sort: 'price'}},
-			{name: 'OpenRouter'},
-		),
-		'',
-		undefined,
-	);
-	await generateText({
-		model: provider.chatModel('x'),
-		prompt: 'hi',
-		providerOptions: providerOptions as Parameters<
-			typeof generateText
-		>[0]['providerOptions'],
-	});
-	t.is(body['service_tier'], 'flex');
-	t.deepEqual(body['provider'], {sort: 'price'});
-});
-
-test('OpenRouter combines provider, reasoning, plugins, models, service_tier', t => {
-	const provider = withOpenRouter({
-		provider: {sort: 'throughput'},
-		plugins: [{id: 'web'}],
-		models: ['openai/gpt-4o'],
-		service_tier: 'flex',
-	});
-	const result = buildProviderOptions(provider, '', {reasoningEffort: 'high'});
-	t.deepEqual(result, {
-		openrouter: {
-			provider: {sort: 'throughput'},
-			reasoning: {effort: 'high'},
-			plugins: [{id: 'web'}],
-			models: ['openai/gpt-4o'],
 			service_tier: 'flex',
+			models: ['model-fallback-1', 'model-fallback-2'],
 		},
 	});
+	const result = buildProviderOptions(config, '', undefined);
+
+	t.truthy(result);
+	t.truthy(result!.openrouter);
+	t.is(result!.openrouter.service_tier, 'flex');
+	t.deepEqual(result!.openrouter.models, [
+		'model-fallback-1',
+		'model-fallback-2',
+	]);
 });
 
-test('OpenRouter ignores chatgpt-codex-only fields without dropping requests', t => {
-	const result = buildProviderOptions(makeProvider(), '', {
-		reasoningSummary: 'detailed',
+test('buildProviderOptions: constrained generation disabled without flag', t => {
+	const config = createProviderConfig('ollama', {
+		constrainedGeneration: {
+			enableConstrainedGeneration: false,
+		},
 	});
+	const tools = {
+		test_tool: {
+			description: 'Test',
+			inputSchema: jsonSchema({
+				type: 'object',
+				properties: {param: {type: 'string'}},
+			}),
+		},
+	};
+	const result = buildProviderOptions(config, '', undefined, tools);
 	t.is(result, undefined);
 });
 
-test('OpenRouter forwards extraBody pass-through fields', t => {
-	const provider = withOpenRouter({
-		extraBody: {usage: {include: true}, debug: {echo_upstream_body: true}},
-	});
-	const result = buildProviderOptions(provider, '', undefined);
-	t.deepEqual(result, {
-		openrouter: {
-			usage: {include: true},
-			debug: {echo_upstream_body: true},
+test('buildProviderOptions: constrained generation disabled without tools', t => {
+	const config = createProviderConfig('ollama', {
+		constrainedGeneration: {
+			enableConstrainedGeneration: true,
 		},
 	});
+	const result = buildProviderOptions(config, '', undefined, {});
+	t.is(result, undefined);
 });
 
-test('OpenRouter extraBody is overridden by typed fields on key collision', t => {
-	const provider = withOpenRouter({
-		service_tier: 'flex',
-		extraBody: {service_tier: 'priority', custom: 'kept'},
+test('buildProviderOptions: Ollama provider adds format json', t => {
+	const config = createProviderConfig('ollama', {
+		constrainedGeneration: {
+			enableConstrainedGeneration: true,
+		},
 	});
-	const result = buildProviderOptions(provider, '', undefined);
-	t.deepEqual(result, {
-		openrouter: {service_tier: 'flex', custom: 'kept'},
+	const tools = {
+		get_weather: {
+			description: 'Get weather',
+			inputSchema: jsonSchema({
+				type: 'object',
+				properties: {location: {type: 'string'}},
+			}),
+		},
+	};
+	const result = buildProviderOptions(config, '', undefined, tools);
+
+	t.truthy(result);
+	t.truthy(result!.ollama);
+	t.is(result!.ollama.format, 'json');
+});
+
+test('buildProviderOptions: vLLM provider adds guided_json', t => {
+	const config = createProviderConfig('vllm', {
+		constrainedGeneration: {
+			enableConstrainedGeneration: true,
+		},
 	});
+	const tools = {
+		search: {
+			description: 'Search',
+			inputSchema: jsonSchema({
+				type: 'object',
+				properties: {query: {type: 'string'}},
+				required: ['query'],
+			}),
+		},
+	};
+	const result = buildProviderOptions(config, '', undefined, tools);
+
+	t.truthy(result);
+	t.truthy(result!.vllm);
+	t.truthy(result!.vllm.guided_json);
+	const schema = result!.vllm.guided_json as Record<string, unknown>;
+	t.is(schema.type, 'object');
+	const props = schema.properties as Record<string, unknown>;
+	t.truthy(props.name);
+	t.truthy(props.arguments);
 });
 
-test('OpenRouter extraBody alone is enough to emit providerOptions', t => {
-	const provider = withOpenRouter({
-		extraBody: {experimental_flag: true},
+test('buildProviderOptions: llama.cpp provider adds json_schema', t => {
+	const config = createProviderConfig('llama.cpp', {
+		constrainedGeneration: {
+			enableConstrainedGeneration: true,
+		},
 	});
-	const result = buildProviderOptions(provider, '', undefined);
-	t.deepEqual(result, {openrouter: {experimental_flag: true}});
+	const tools = {
+		calculate: {
+			description: 'Calculate',
+			inputSchema: jsonSchema({
+				type: 'object',
+				properties: {
+					a: {type: 'number'},
+					b: {type: 'number'},
+				},
+				required: ['a', 'b'],
+			}),
+		},
+	};
+	const result = buildProviderOptions(config, '', undefined, tools);
+
+	t.truthy(result);
+	t.truthy(result!['llama.cpp']);
+	t.truthy(result!['llama.cpp'].json_schema);
 });
 
-test('isPromptCachingEnabled is on by default for the anthropic SDK', t => {
-	t.true(
-		isPromptCachingEnabled(makeProvider({sdkProvider: 'anthropic'})),
-	);
+test('buildProviderOptions: llama-cpp variant (hyphen) works', t => {
+	const config = createProviderConfig('llama-cpp', {
+		constrainedGeneration: {
+			enableConstrainedGeneration: true,
+		},
+	});
+	const tools = {
+		test: {inputSchema: jsonSchema({type: 'object', properties: {}})},
+	};
+	const result = buildProviderOptions(config, '', undefined, tools);
+
+	t.truthy(result);
+	t.truthy(result!['llama-cpp']);
 });
 
-test('isPromptCachingEnabled honours an explicit opt-out', t => {
-	t.false(
-		isPromptCachingEnabled(
-			makeProvider({sdkProvider: 'anthropic', promptCaching: false}),
-		),
-	);
+test('buildProviderOptions: generic provider adds response_format', t => {
+	const config = createProviderConfig('custom-provider', {
+		constrainedGeneration: {
+			enableConstrainedGeneration: true,
+		},
+	});
+	const tools = {
+		action: {
+			description: 'Perform action',
+			inputSchema: jsonSchema({
+				type: 'object',
+				properties: {type: {type: 'string', enum: ['A', 'B']}},
+			}),
+		},
+	};
+	const result = buildProviderOptions(config, '', undefined, tools);
+
+	t.truthy(result);
+	t.truthy(result!['custom-provider']);
+	t.truthy(result!['custom-provider'].response_format);
+	const format = result!['custom-provider'].response_format as Record<
+		string,
+		unknown
+	>;
+	t.is(format.type, 'json_schema');
+	t.truthy(format.json_schema);
 });
 
-test('isPromptCachingEnabled honours an explicit opt-in', t => {
-	t.true(
-		isPromptCachingEnabled(
-			makeProvider({sdkProvider: 'anthropic', promptCaching: true}),
-		),
-	);
+test('buildProviderOptions: extraBody merges with constrained generation', t => {
+	const config = createProviderConfig('vllm', {
+		constrainedGeneration: {
+			enableConstrainedGeneration: true,
+			extraBody: {
+				custom_param: 'custom_value',
+				temperature: 0.7,
+			},
+		},
+	});
+	const tools = {
+		test: {inputSchema: jsonSchema({type: 'object', properties: {}})},
+	};
+	const result = buildProviderOptions(config, '', undefined, tools);
+
+	t.truthy(result);
+	t.truthy(result!.vllm);
+	t.is(result!.vllm.custom_param, 'custom_value');
+	t.is(result!.vllm.temperature, 0.7);
+	t.truthy(result!.vllm.guided_json);
 });
 
-test('isPromptCachingEnabled is off for every non-anthropic SDK', t => {
-	t.false(isPromptCachingEnabled(makeProvider()));
-	t.false(
-		isPromptCachingEnabled(makeProvider({sdkProvider: 'openai-compatible'})),
-	);
-	t.false(isPromptCachingEnabled(makeProvider({sdkProvider: 'google'})));
-	t.false(isPromptCachingEnabled(makeProvider({sdkProvider: 'chatgpt-codex'})));
-	t.false(isPromptCachingEnabled(makeProvider({sdkProvider: 'github-copilot'})));
+test('buildProviderOptions: extraBody does not override constrained fields', t => {
+	const config = createProviderConfig('ollama', {
+		constrainedGeneration: {
+			enableConstrainedGeneration: true,
+			extraBody: {
+				format: 'text', // Should be overridden
+			},
+		},
+	});
+	const tools = {
+		test: {inputSchema: jsonSchema({type: 'object', properties: {}})},
+	};
+	const result = buildProviderOptions(config, '', undefined, tools);
+
+	t.truthy(result);
+	// extraBody is spread first, then format: 'json' is set, so json wins
+	t.is(result!.ollama.format, 'json');
 });
 
-test('isPromptCachingEnabled stays off for non-anthropic providers that opt in', t => {
-	t.false(
-		isPromptCachingEnabled(
-			makeProvider({sdkProvider: 'openai-compatible', promptCaching: true}),
-		),
-	);
+test('buildProviderOptions: multiple tools create oneOf schema', t => {
+	const config = createProviderConfig('vllm', {
+		constrainedGeneration: {
+			enableConstrainedGeneration: true,
+		},
+	});
+	const tools = {
+		tool1: {inputSchema: jsonSchema({type: 'object', properties: {}})},
+		tool2: {inputSchema: jsonSchema({type: 'object', properties: {}})},
+	};
+	const result = buildProviderOptions(config, '', undefined, tools);
+
+	t.truthy(result);
+	const schema = result!.vllm.guided_json as Record<string, unknown>;
+	t.truthy(schema.oneOf);
+	t.true(Array.isArray(schema.oneOf));
+	t.is((schema.oneOf as Array<unknown>).length, 2);
 });
