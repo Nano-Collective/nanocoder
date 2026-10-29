@@ -527,6 +527,36 @@ test('getCachedFileContent - marks plain text content as not derived', async t =
 	}
 });
 
+test('getCachedFileContent - flags a file that is not valid UTF-8 (#1854)', async t => {
+	const tempDir = await createTempDir();
+	try {
+		const filePath = join(tempDir, 'legacy.txt');
+		// "café" in Latin-1: a lone E9 byte, which UTF-8 decoding turns into U+FFFD.
+		await writeFile(filePath, Buffer.from('caf\xe9\nold\n', 'latin1'));
+
+		const result = await getCachedFileContent(filePath);
+
+		t.true(result.notUtf8);
+		t.is(result.content, 'caf�\nold\n');
+	} finally {
+		await cleanupTempDir(tempDir);
+	}
+});
+
+test('getCachedFileContent - does not flag UTF-8 with non-ASCII text (#1854)', async t => {
+	const tempDir = await createTempDir();
+	try {
+		const filePath = join(tempDir, 'utf8.txt');
+		await writeFile(filePath, '﻿café ✓ 日本\n', 'utf-8');
+
+		const result = await getCachedFileContent(filePath);
+
+		t.false(result.notUtf8);
+	} finally {
+		await cleanupTempDir(tempDir);
+	}
+});
+
 test('getCachedFileContent - document extension check is case-insensitive', async t => {
 	const tempDir = await createTempDir();
 	try {

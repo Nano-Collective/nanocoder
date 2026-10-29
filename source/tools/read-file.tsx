@@ -1,5 +1,5 @@
 import {constants} from 'node:fs';
-import {access, lstat, readFile, stat} from 'node:fs/promises';
+import {access, lstat, stat} from 'node:fs/promises';
 import {resolve} from 'node:path';
 import {Box, Text} from 'ink';
 import React from 'react';
@@ -78,20 +78,15 @@ const executeReadFile = async (args: {
 					const fileType = getFileType(absPath);
 					output += `File Type: ${fileType}\n`;
 
-					// Detect likely encoding (simple heuristic)
-					let encoding = 'UTF-8';
-					try {
-						// `derived` records what the cache actually produced for this
-						// path, so the label cannot disagree with the content above.
-						if (cached.derived) {
-							encoding = 'Binary (Converted to Markdown)';
-						} else {
-							// Try to read as UTF-8
-							await readFile(absPath, 'utf-8');
-						}
-					} catch (_error: unknown) {
-						encoding = 'Binary/Unknown';
-					}
+					// `derived` and `notUtf8` record what the cache actually found for
+					// this path, so the label cannot disagree with the content above.
+					// Reading the file as UTF-8 never fails, since Node replaces bytes
+					// that don't decode with U+FFFD, so only the raw bytes can tell.
+					const encoding = cached.derived
+						? 'Binary (Converted to Markdown)'
+						: cached.notUtf8
+							? 'Not valid UTF-8 (a legacy encoding such as Latin-1, Windows-1252 or Shift-JIS, or binary data)'
+							: 'UTF-8';
 					output += `Encoding: ${encoding}\n`;
 				} catch (error: unknown) {
 					// If we can't read it, mark as not readable

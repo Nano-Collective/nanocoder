@@ -10,7 +10,11 @@ import {EditRecoveryError} from '@/utils/edit-recovery';
 import {formatError} from '@/utils/error-formatter';
 import {getCachedFileContent, invalidateCache} from '@/utils/file-cache';
 import {replaceFirstLiteral} from '@/utils/literal-replace';
-import {validateEditableFormat, validatePath} from '@/utils/path-validators';
+import {
+	validateEditableEncoding,
+	validateEditableFormat,
+	validatePath,
+} from '@/utils/path-validators';
 import {
 	forgetReadContent,
 	hasSeenFile,
@@ -84,6 +88,10 @@ const executeStringReplace = async (
 
 	const absPath = resolve(getSafeSessionCwd(), path);
 	const cached = await getCachedFileContent(absPath);
+	const encodingResult = validateEditableEncoding(path, cached);
+	if (!encodingResult.valid) {
+		throw new Error(encodingResult.error);
+	}
 	const fileContent = cached.content;
 
 	const occurrences = fileContent.split(old_str).length - 1;
@@ -260,6 +268,8 @@ const stringReplaceValidator = async (
 
 	try {
 		const cached = await getCachedFileContent(absPath);
+		const encodingResult = validateEditableEncoding(path, cached);
+		if (!encodingResult.valid) return encodingResult;
 		const fileContent = cached.content;
 		const occurrences = fileContent.split(old_str).length - 1;
 

@@ -1257,6 +1257,96 @@ test('string_replace validator: refuses a .docx path', async t => {
 	}
 });
 
+// ============================================================================
+// Encoding Guard Tests (#1854)
+// ============================================================================
+
+// "café" then "old", in Latin-1: the é is a lone E9 byte, not valid UTF-8.
+const LATIN1_BYTES = Buffer.from('caf\xe9\nold\n', 'latin1');
+
+test('string_replace: refuses a Latin-1 file and leaves every byte unchanged', async t => {
+	const filePath = join(testDir, 'legacy.txt');
+	await writeFile(filePath, LATIN1_BYTES);
+
+	await t.throwsAsync(
+		executeStringReplace({path: filePath, old_str: 'old', new_str: 'new'}),
+		{message: /not valid UTF-8/},
+	);
+
+	t.deepEqual(await readFile(filePath), LATIN1_BYTES);
+});
+
+test('string_replace: refuses Windows-1252 and Shift-JIS files too', async t => {
+	const files = {
+		// Windows-1252 curly quotes (93, 94) around "old".
+		'cp1252.txt': Buffer.from([0x93, 0x6f, 0x6c, 0x64, 0x94, 0x0a]),
+		// "日本" in Shift-JIS, then "old".
+		'sjis.txt': Buffer.from([0x93, 0xfa, 0x96, 0x7b, 0x0a, 0x6f, 0x6c, 0x64]),
+	};
+	for (const [name, bytes] of Object.entries(files)) {
+		const filePath = join(testDir, name);
+		await writeFile(filePath, bytes);
+
+		await t.throwsAsync(
+			executeStringReplace({path: filePath, old_str: 'old', new_str: 'new'}),
+			{message: /not valid UTF-8/},
+			name,
+		);
+		t.deepEqual(await readFile(filePath), bytes, name);
+	}
+});
+
+test('string_replace validator: refuses a Latin-1 file', async t => {
+	await writeFile(join(testDir, 'legacy.txt'), LATIN1_BYTES);
+
+	if (!stringReplaceTool.validator) {
+		t.fail('Validator not defined');
+		return;
+	}
+
+	const originalCwd = process.cwd();
+	try {
+		process.chdir(testDir);
+		markFileSeen('legacy.txt');
+
+		const result = await stringReplaceTool.validator({
+			path: 'legacy.txt',
+			old_str: 'old',
+			new_str: 'new',
+		});
+
+		t.false(result.valid);
+		if (!result.valid) {
+			t.regex(result.error, /not valid UTF-8/);
+		}
+	} finally {
+		process.chdir(originalCwd);
+	}
+});
+
+test('string_replace: edits a UTF-8 file with non-ASCII text and keeps other lines byte for byte', async t => {
+	const filePath = await createTestFile('utf8.txt', 'café ✓ 日本\nold\n');
+
+	await executeStringReplace({path: filePath, old_str: 'old', new_str: 'new'});
+
+	t.deepEqual(
+		await readFile(filePath),
+		Buffer.from('café ✓ 日本\nnew\n', 'utf-8'),
+	);
+});
+
+test('string_replace: edits a UTF-8 file with a BOM and keeps the BOM', async t => {
+	const filePath = join(testDir, 'bom.txt');
+	await writeFile(filePath, Buffer.from('﻿old\n', 'utf-8'));
+
+	await executeStringReplace({path: filePath, old_str: 'old', new_str: 'new'});
+
+	t.deepEqual(
+		await readFile(filePath),
+		Buffer.from([0xef, 0xbb, 0xbf, 0x6e, 0x65, 0x77, 0x0a]),
+	);
+});
+
 test('string_replace: numbered group tokens stay literal', async t => {
 	const filePath = await createTestFile('groups.sh', 'run "old"\n');
 
