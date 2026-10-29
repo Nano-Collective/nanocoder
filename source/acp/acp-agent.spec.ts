@@ -9,6 +9,7 @@ import {
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
+import type {McpServer} from '@agentclientprotocol/sdk';
 import {artifactManager} from '@/artifacts/artifact-manager';
 import {AcpAgent} from '@/acp/acp-agent';
 import type {AcpInitContext} from '@/acp/acp-types';
@@ -22,6 +23,7 @@ import {sessionManager} from '@/session/session-manager';
 import {getLogger} from '@/utils/logging';
 import {SemanticMemoryManager} from '@/memory/semantic-memory-manager';
 import {readFileTool} from '@/tools/read-file';
+import {ToolManager} from '@/tools/tool-manager';
 import type {Message} from '@/types/core';
 import {
 	clearReadTracker,
@@ -2008,6 +2010,281 @@ test('AcpAgent - sessions start in the init context mode on new, load and resume
 		t.is(loaded.modes?.currentModeId, 'normal');
 		t.is(resumed.modes?.currentModeId, 'normal');
 	} finally {
+		await agent.deleteSession({sessionId: created.sessionId});
+	}
+});
+
+// ============================================================================
+// Client-supplied MCP servers
+// ============================================================================
+
+// A real MCP server over stdio, started with `node -e` so the test needs no
+// fixture file. It offers one tool, named by FIXTURE_TOOL.
+const sdkModule = (path: string) =>
+	JSON.stringify(import.meta.resolve(`@modelcontextprotocol/sdk/${path}`));
+const FIXTURE_SERVER = `
+import {Server} from ${sdkModule('server/index.js')};
+import {StdioServerTransport} from ${sdkModule('server/stdio.js')};
+import {ListToolsRequestSchema, CallToolRequestSchema} from ${sdkModule('types.js')};
+const tool = process.env.FIXTURE_TOOL;
+const server = new Server({name: 'fixture', version: '1.0.0'}, {capabilities: {tools: {}}});
+server.setRequestHandler(ListToolsRequestSchema, async () => ({
+	tools: [{name: tool, description: 'fixture tool', inputSchema: {type: 'object', properties: {}}}],
+}));
+server.setRequestHandler(CallToolRequestSchema, async request => ({
+	content: [{type: 'text', text: 'called ' + request.params.name}],
+}));
+await server.connect(new StdioServerTransport());
+`;
+
+const fixtureServer = (name: string, tool: string): McpServer => ({
+	name,
+	command: process.execPath,
+	args: ['--input-type=module', '-e', FIXTURE_SERVER],
+	env: [{name: 'FIXTURE_TOOL', value: tool}],
+});
+
+/** An agent whose shared tools are real, so sessions can layer MCP servers on them. */
+const createMcpAgent = () => {
+	const toolManager = new ToolManager();
+	const agent = new AcpAgent(
+		{...createMockInitContext(), toolManager},
+		createMockConn(),
+	);
+	const toolsOf = (sessionId: string): ToolManager =>
+		(agent as any).toolManagerFor(sessionId);
+	return {agent, toolManager, toolsOf};
+};
+
+const SESSION_CWD = '/tmp';
+
+test.serial('AcpAgent.newSession - the client\'s MCP servers exist in that session only', async t => {
+	const {agent, toolManager, toolsOf} = createMcpAgent();
+	const one = await agent.newSession({
+		cwd: SESSION_CWD,
+		mcpServers: [fixtureServer('one', 'tool_one')],
+	});
+	const two = await agent.newSession({
+		cwd: SESSION_CWD,
+		mcpServers: [fixtureServer('two', 'tool_two')],
+	});
+	try {
+		t.true(toolsOf(one.sessionId).hasTool('tool_one'));
+		t.false(toolsOf(one.sessionId).hasTool('tool_two'));
+		t.true(toolsOf(two.sessionId).hasTool('tool_two'));
+		t.false(toolsOf(two.sessionId).hasTool('tool_one'));
+		// Neither reaches the shared set that sessions without servers use.
+		t.false(toolManager.hasTool('tool_one'));
+		t.false(toolManager.hasTool('tool_two'));
+		// They run, and the built-in tools are still there.
+		t.regex(
+			String(await toolsOf(one.sessionId).getToolHandler('tool_one')?.({})),
+			/called tool_one/,
+		);
+		t.true(toolsOf(one.sessionId).hasTool('read_file'));
+	} finally {
+		await agent.closeSession({sessionId: one.sessionId});
+		await agent.closeSession({sessionId: two.sessionId});
+		await agent.deleteSession({sessionId: one.sessionId});
+		await agent.deleteSession({sessionId: two.sessionId});
+	}
+});
+
+test.serial('AcpAgent.closeSession - disconnects that session\'s servers and leaves the others connected', async t => {
+	const {agent, toolsOf} = createMcpAgent();
+	const one = await agent.newSession({
+		cwd: SESSION_CWD,
+		mcpServers: [fixtureServer('one', 'tool_one')],
+	});
+	const two = await agent.newSession({
+		cwd: SESSION_CWD,
+		mcpServers: [fixtureServer('two', 'tool_two')],
+	});
+	const oneTools = toolsOf(one.sessionId);
+	try {
+		await agent.closeSession({sessionId: one.sessionId});
+
+		t.is(oneTools.getMCPClient(), null);
+		t.false(oneTools.hasTool('tool_one'));
+		t.regex(
+			String(await toolsOf(two.sessionId).getToolHandler('tool_two')?.({})),
+			/called tool_two/,
+		);
+	} finally {
+		await agent.closeSession({sessionId: two.sessionId});
+		await agent.deleteSession({sessionId: one.sessionId});
+		await agent.deleteSession({sessionId: two.sessionId});
+	}
+});
+
+test.serial('AcpAgent.resumeSession - replaces the session\'s servers and closes the old ones', async t => {
+	const {agent, toolsOf} = createMcpAgent();
+	const created = await agent.newSession({
+		cwd: SESSION_CWD,
+		mcpServers: [fixtureServer('old', 'tool_old')],
+	});
+	const before = toolsOf(created.sessionId);
+	try {
+		// A session is only on disk, and so resumable, once a turn has run.
+		await agent.prompt({
+			sessionId: created.sessionId,
+			prompt: [{type: 'text', text: 'persist this session'}],
+		});
+		await agent.resumeSession({
+			sessionId: created.sessionId,
+			cwd: SESSION_CWD,
+			mcpServers: [fixtureServer('new', 'tool_new')],
+		});
+
+		t.is(before.getMCPClient(), null);
+		t.true(toolsOf(created.sessionId).hasTool('tool_new'));
+		t.false(toolsOf(created.sessionId).hasTool('tool_old'));
+	} finally {
+		await agent.closeSession({sessionId: created.sessionId});
+		await agent.deleteSession({sessionId: created.sessionId});
+	}
+});
+
+test.serial('AcpAgent.loadSession - a live session\'s servers are replaced without leaking the old connection', async t => {
+	const {agent, toolsOf} = createMcpAgent();
+	const created = await agent.newSession({
+		cwd: SESSION_CWD,
+		mcpServers: [fixtureServer('old', 'tool_old')],
+	});
+	const oldClient = toolsOf(created.sessionId).getMCPClient();
+	t.truthy(oldClient);
+	try {
+		await agent.loadSession({
+			sessionId: created.sessionId,
+			cwd: SESSION_CWD,
+			mcpServers: [fixtureServer('new', 'tool_new')],
+		});
+
+		const tools = toolsOf(created.sessionId);
+		t.true(tools.hasTool('tool_new'));
+		t.false(tools.hasTool('tool_old'));
+		t.not(tools.getMCPClient(), oldClient);
+		t.deepEqual(oldClient?.getConnectedServers(), []);
+
+		// An empty list is a replacement too: the session goes back to the shared set.
+		const connected = tools;
+		await agent.loadSession({
+			sessionId: created.sessionId,
+			cwd: SESSION_CWD,
+			mcpServers: [],
+		});
+		t.is(connected.getMCPClient(), null);
+		t.false(toolsOf(created.sessionId).hasTool('tool_new'));
+	} finally {
+		await agent.closeSession({sessionId: created.sessionId});
+		await agent.deleteSession({sessionId: created.sessionId});
+	}
+});
+
+test.serial('AcpAgent.newSession - a server that fails to connect is skipped and the request still succeeds', async t => {
+	const {agent, toolsOf} = createMcpAgent();
+	const created = await agent.newSession({
+		cwd: SESSION_CWD,
+		mcpServers: [
+			{
+				name: 'broken',
+				command: '/definitely/not/a/real/command',
+				args: [],
+				env: [],
+			},
+			fixtureServer('works', 'tool_works'),
+		],
+	});
+	try {
+		t.truthy(created.sessionId);
+		t.true(toolsOf(created.sessionId).hasTool('tool_works'));
+	} finally {
+		await agent.closeSession({sessionId: created.sessionId});
+		await agent.deleteSession({sessionId: created.sessionId});
+	}
+});
+
+test.serial('AcpAgent.newSession - an SSE server is left out and the others connect', async t => {
+	const {agent, toolsOf} = createMcpAgent();
+	const created = await agent.newSession({
+		cwd: SESSION_CWD,
+		mcpServers: [
+			{type: 'sse', name: 'events', url: 'http://127.0.0.1:1/sse', headers: []},
+			fixtureServer('works', 'tool_works'),
+		],
+	});
+	try {
+		t.deepEqual(
+			toolsOf(created.sessionId).getServerNames(),
+			['works'],
+		);
+	} finally {
+		await agent.closeSession({sessionId: created.sessionId});
+		await agent.deleteSession({sessionId: created.sessionId});
+	}
+});
+
+test.serial('AcpAgent.newSession - no servers, or none sent, leaves the session on the shared tools', async t => {
+	const {agent, toolManager, toolsOf} = createMcpAgent();
+	const empty = await agent.newSession({cwd: SESSION_CWD, mcpServers: []});
+	const missing = await agent.newSession({cwd: SESSION_CWD});
+	try {
+		t.is(toolsOf(empty.sessionId), toolManager);
+		t.is(toolsOf(missing.sessionId), toolManager);
+		t.is((agent as any).sessionToolManagers.size, 0);
+	} finally {
+		await agent.deleteSession({sessionId: empty.sessionId});
+		await agent.deleteSession({sessionId: missing.sessionId});
+	}
+});
+
+test.serial('AcpAgent.prompt - a session calls its own MCP tool, which the process-wide registry does not have', async t => {
+	let modelCalls = 0;
+	const base = createMockInitContext();
+	const agent = new AcpAgent(
+		{
+			...base,
+			toolManager: new ToolManager(),
+			client: {
+				...base.client,
+				chat: async () => {
+					modelCalls++;
+					return modelCalls === 1
+						? {
+								choices: [
+									{
+										message: {
+											content: '',
+											tool_calls: [
+												{id: 'call-1', function: {name: 'tool_works', arguments: {}}},
+											],
+										},
+									},
+								],
+							}
+						: {choices: [{message: {content: 'done'}}]};
+				},
+			} as any,
+		},
+		createMockConn(),
+	);
+	const created = await agent.newSession({
+		cwd: SESSION_CWD,
+		mcpServers: [fixtureServer('works', 'tool_works')],
+	});
+	try {
+		await agent.setSessionMode({sessionId: created.sessionId, modeId: 'yolo'});
+		await agent.prompt({
+			sessionId: created.sessionId,
+			prompt: [{type: 'text', text: 'use the tool'}],
+		});
+
+		const toolResult = (agent as any).sessions
+			.get(created.sessionId)
+			.messages.findLast((message: any) => message.role === 'tool');
+		t.regex(String(toolResult?.content), /called tool_works/);
+	} finally {
+		await agent.closeSession({sessionId: created.sessionId});
 		await agent.deleteSession({sessionId: created.sessionId});
 	}
 });

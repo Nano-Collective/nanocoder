@@ -234,6 +234,20 @@ export class SubagentExecutor {
 			trustLevel?: TrustLevel;
 		},
 	): Promise<SubagentResult> {
+		// A subagent started from an ACP session works with that session's tools,
+		// MCP servers included. Same executor in every other respect.
+		const sessionTools = executionContext?.toolManager;
+		if (sessionTools && sessionTools !== this.toolManager) {
+			return this.withToolManager(sessionTools).execute(
+				task,
+				signal,
+				depth,
+				agentId,
+				executionContext,
+				toolOverride,
+			);
+		}
+
 		const startTime = Date.now();
 
 		if (depth >= MAX_SUBAGENT_DEPTH) {
@@ -369,6 +383,11 @@ export class SubagentExecutor {
 				executionTimeMs: Date.now() - startTime,
 			};
 		}
+	}
+
+	/** This executor, resolving tools from `toolManager` instead. */
+	private withToolManager(toolManager: ToolManager): SubagentExecutor {
+		return Object.assign(Object.create(this), {toolManager});
 	}
 
 	private createSubagentContext(

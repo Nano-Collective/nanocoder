@@ -18,6 +18,7 @@ import type {
 	ListSessionsResponse,
 	LoadSessionRequest,
 	LoadSessionResponse,
+	McpServer,
 	NewSessionRequest,
 	NewSessionResponse,
 	PromptRequest,
@@ -37,6 +38,7 @@ import {
 	ACP_EXT_METHODS,
 	ACP_EXT_PREFIX,
 	ACP_SESSION_TITLE_NOTIFICATION,
+	acpMcpServersToConfig,
 	acpModeToDevelopmentMode,
 	developmentModeToAcpMode,
 	getAgentCapabilities,
@@ -70,6 +72,7 @@ import {
 	ACTIVE_FILE_PREFIX,
 	deriveTitleFromFirstMessage,
 } from '@/session/title-generator';
+import type {ToolManager} from '@/tools/tool-manager';
 import {getTuneToolMode} from '@/types/config';
 import {applyTuneCompaction} from '@/utils/auto-compact';
 import {getLogger} from '@/utils/logging';
@@ -109,6 +112,11 @@ export class AcpAgent implements Agent {
 	private clientCapabilities?: ClientCapabilities;
 	/** Bare extension method names already reported as deprecated. */
 	private warnedExtAliases = new Set<string>();
+	/**
+	 * Tools of the sessions that brought MCP servers of their own. Every other
+	 * session uses the shared set in `initContext`.
+	 */
+	private sessionToolManagers = new Map<string, ToolManager>();
 
 	constructor(
 		initContext: AcpInitContext,
@@ -145,6 +153,7 @@ export class AcpAgent implements Agent {
 		logger.info(`ACP newSession: ${sessionId} cwd=${params.cwd}`);
 
 		const session = this.registerSession(sessionId, params.cwd);
+		await this.applyMcpServers(session, params.mcpServers);
 
 		await sessionManager.initialize();
 		await this.saveAcpSessionToDisk(session);
@@ -192,6 +201,7 @@ export class AcpAgent implements Agent {
 		logger.info(
 			`ACP loadSession: ${params.sessionId} cwd=${params.cwd} restored=${Boolean(existing)}`,
 		);
+		await this.applyMcpServers(session, params.mcpServers);
 
 		// Replay history so the client can rebuild the thread.
 		await this.replaySessionHistory(session);
@@ -417,7 +427,8 @@ export class AcpAgent implements Agent {
 			const response = await runAcpConversation({
 				session,
 				client: this.initContext.client,
-				toolManager: this.initContext.toolManager,
+				toolManager: this.toolManagerFor(session.sessionId),
+				sessionTools: this.sessionToolManagers.get(session.sessionId),
 				conn: this.conn,
 				nonInteractiveAlwaysAllow,
 			});
@@ -541,6 +552,8 @@ export class AcpAgent implements Agent {
 		await ticket.ready;
 		try {
 			await session.timeline.dispose();
+			// After the turn is over: it may still have been calling these tools.
+			await this.releaseMcpServers(params.sessionId);
 		} finally {
 			session.releaseTurn();
 		}
@@ -686,6 +699,7 @@ export class AcpAgent implements Agent {
 		// Evict from in-memory map if present
 		this.sessions.delete(params.sessionId);
 		clearAcpReadStubs(params.sessionId);
+		await this.releaseMcpServers(params.sessionId);
 		logger.info(`ACP deleteSession: ${params.sessionId}`);
 		return {};
 	}
@@ -701,10 +715,12 @@ export class AcpAgent implements Agent {
 
 		// Evict any stale in-memory session first
 		this.sessions.delete(params.sessionId);
+		await this.releaseMcpServers(params.sessionId);
 		const session = this.registerSession(
 			params.sessionId,
 			persisted.workingDirectory,
 		);
+		await this.applyMcpServers(session, params.mcpServers);
 		session.messages = persisted.messages;
 		clearAcpReadStubs(params.sessionId);
 		logger.info(
@@ -904,6 +920,70 @@ export class AcpAgent implements Agent {
 		return session;
 	}
 
+	private toolManagerFor(sessionId: string): ToolManager {
+		return (
+			this.sessionToolManagers.get(sessionId) ?? this.initContext.toolManager
+		);
+	}
+
+	/**
+	 * Connect the MCP servers a client sent for this session, in place of any it
+	 * had before. Their tools exist in this session only. A server that fails to
+	 * connect is logged and skipped; the request still succeeds.
+	 */
+	private async applyMcpServers(
+		session: AcpSession,
+		requested: McpServer[] | undefined,
+	): Promise<void> {
+		const {servers, skipped} = acpMcpServersToConfig(requested);
+		if (skipped.length > 0) {
+			logger.warn(
+				`ACP session ${session.sessionId}: unsupported MCP servers skipped: ${skipped.join(', ')}`,
+			);
+		}
+		const existing = this.sessionToolManagers.get(session.sessionId);
+		if (servers.length === 0 && !existing) return;
+
+		if (servers.length === 0) {
+			await this.releaseMcpServers(session.sessionId);
+		} else {
+			const manager = existing ?? this.initContext.toolManager.forSession();
+			this.sessionToolManagers.set(session.sessionId, manager);
+			try {
+				await manager.initializeMCP(servers, result => {
+					if (result.success) {
+						logger.info(
+							`ACP session ${session.sessionId}: MCP server connected: ${result.serverName}`,
+						);
+					} else {
+						logger.warn(
+							`ACP session ${session.sessionId}: MCP server failed: ${result.serverName} (${result.error})`,
+						);
+					}
+				});
+			} catch (error) {
+				logger.error(
+					`ACP session ${session.sessionId}: MCP initialization failed: ${String(error)}`,
+				);
+			}
+		}
+		// The prompt lists the tools the session has.
+		this.buildSystemPromptForSession(session);
+	}
+
+	/** Disconnect the MCP servers this session brought, and only those. */
+	private async releaseMcpServers(sessionId: string): Promise<void> {
+		const manager = this.sessionToolManagers.get(sessionId);
+		this.sessionToolManagers.delete(sessionId);
+		try {
+			await manager?.disconnectMCP();
+		} catch (error) {
+			logger.warn(
+				`ACP session ${sessionId}: MCP disconnect failed: ${String(error)}`,
+			);
+		}
+	}
+
 	private registerSession(sessionId: string, cwd: string): AcpSession {
 		const session = new AcpSession({
 			sessionId,
@@ -1089,7 +1169,7 @@ export class AcpAgent implements Agent {
 	}
 
 	private buildSystemPromptForSession(session: AcpSession): void {
-		const {toolManager} = this.initContext;
+		const toolManager = this.toolManagerFor(session.sessionId);
 		const {provider, model} = this.initContext;
 
 		const tune = resolveTune(

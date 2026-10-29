@@ -2710,3 +2710,45 @@ test.serial('a subagent is limited to the tools of the bridge session mode', asy
 		}
 	}
 });
+
+test.serial('a subagent started with a session\'s tool manager uses that session\'s tools', async t => {
+	const calls: string[] = [];
+	const sharedTools = createMockToolManager({
+		read_file: {handler: async () => 'shared read', readOnly: true},
+	});
+	const sessionTools = createMockToolManager({
+		read_file: {
+			handler: async () => {
+				calls.push('session');
+				return 'session read';
+			},
+			readOnly: true,
+		},
+	});
+	const client = createMockClient([
+		{
+			content: '',
+			tool_calls: [{id: 'tc1', function: {name: 'read_file', arguments: '{}'}}],
+		},
+		{content: 'done'},
+	]);
+	const executor = new SubagentExecutor(sharedTools, client);
+
+	const result = await executor.execute(
+		{subagent_type: 'explore', description: 'use the session tools'},
+		undefined,
+		0,
+		'scoped-run',
+		{toolManager: sessionTools},
+	);
+
+	t.true(result.success);
+	t.deepEqual(calls, ['session']);
+	// The same executor, unchanged, for the next call that carries no manager.
+	const plain = await executor.execute({
+		subagent_type: 'explore',
+		description: 'no session tools',
+	});
+	t.true(plain.success);
+	t.deepEqual(calls, ['session']);
+});

@@ -79,6 +79,7 @@ export function startAgentExecution(
 	const executionContext = {
 		sessionId: options?.sessionId,
 		workingDirectory: options?.workingDirectory,
+		...(options?.toolManager && {toolManager: options.toolManager}),
 	};
 
 	// Wrap in setTimeout(0) to fully detach from the current call stack.
@@ -149,6 +150,7 @@ async function executeAgent(
 		{
 			sessionId: options?.sessionId,
 			workingDirectory: options?.workingDirectory,
+			...(options?.toolManager && {toolManager: options.toolManager}),
 		},
 	);
 

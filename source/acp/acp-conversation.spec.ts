@@ -25,6 +25,7 @@ import {fileOpTool} from '@/tools/file-ops/file-op';
 import {writeFileTool} from '@/tools/file-ops/write-file';
 import {readFileTool} from '@/tools/read-file';
 import {ToolRegistry} from '@/tools/tool-registry';
+import type {ToolManager} from '@/tools/tool-manager';
 import {clearReadTracker} from '@/utils/read-tracker';
 import {getSubagentToolBridge} from '@/utils/tool-approval-queue';
 import {
@@ -3177,4 +3178,47 @@ test.serial('runAcpConversation - a mode switch in one session does not reach an
 	t.false(existsSync(join(switched.cwd, 'a.txt')));
 	t.is(untouched.permissionRequests.length, 0);
 	t.true(existsSync(join(untouched.cwd, 'b.txt')));
+});
+
+test.serial('runAcpConversation - a session with its own tools runs them, and others still use the shared registry', async t => {
+	const {conn} = createMockConn();
+	const runTurn = async (sessionTools?: ToolManager) => {
+		const session = createMockSession(conn, {devMode: 'yolo'});
+		let calls = 0;
+		const client = {
+			chat: async () => {
+				calls++;
+				return calls === 1
+					? {
+							choices: [
+								{
+									message: {
+										content: '',
+										tool_calls: [createMockToolCall('lookup', {})],
+									},
+								},
+							],
+						}
+					: {choices: [{message: {content: 'done'}}]};
+			},
+		} as unknown as LLMClient;
+		await runAcpConversation({
+			session,
+			client,
+			toolManager: {...createMockToolManager(), hasTool: () => true} as any,
+			sessionTools,
+			conn,
+			nonInteractiveAlwaysAllow: [],
+		});
+		return String(
+			session.messages.findLast((m: Message) => m.role === 'tool')?.content,
+		);
+	};
+	setToolRegistryGetter(() => ({lookup: async () => 'shared registry'}));
+	const own = {
+		getToolRegistry: () => ({lookup: async () => 'session registry'}),
+	} as unknown as ToolManager;
+
+	t.is(await runTurn(own), 'session registry');
+	t.is(await runTurn(), 'shared registry');
 });
