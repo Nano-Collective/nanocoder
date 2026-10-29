@@ -14,9 +14,15 @@ export async function getAlwaysAllowedTools(
 	>,
 	mode: DevelopmentMode,
 	alwaysAllow: readonly string[],
+	/** Tools the session does not offer; the user's own list included, as it replaces the default. */
+	disabledTools?: readonly string[],
 ): Promise<string[]> {
 	const allowed: string[] = [];
-	for (const name of toolManager.getAvailableToolNames(undefined, mode)) {
+	for (const name of toolManager.getAvailableToolNames(
+		undefined,
+		mode,
+		disabledTools,
+	)) {
 		if (
 			alwaysAllow.includes(name) ||
 			(!(await resolveToolApproval(

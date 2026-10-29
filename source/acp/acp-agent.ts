@@ -18,6 +18,7 @@ import type {
 	ListSessionsResponse,
 	LoadSessionRequest,
 	LoadSessionResponse,
+	McpServer,
 	NewSessionRequest,
 	NewSessionResponse,
 	PromptRequest,
@@ -34,15 +35,19 @@ import type {
 import {RequestError} from '@agentclientprotocol/sdk';
 import {getAlwaysAllowedTools} from '@/acp/acp-approval';
 import {
+	ACP_DISABLED_TOOLS_META,
+	ACP_EXT_ALIASES,
 	ACP_EXT_METHODS,
 	ACP_EXT_PREFIX,
 	ACP_SESSION_TITLE_NOTIFICATION,
+	acpMcpServersToConfig,
 	acpModeToDevelopmentMode,
 	developmentModeToAcpMode,
 	getAgentCapabilities,
 	getAvailableModes,
 	isVsCodeClient,
 	negotiateProtocolVersion,
+	parseDisabledTools,
 } from '@/acp/acp-capabilities';
 import {acpContentToUserMessage} from '@/acp/acp-content';
 import {clearAcpReadStubs, runAcpConversation} from '@/acp/acp-conversation';
@@ -67,6 +72,7 @@ import {resolveTune} from '@/config/tune';
 import {appendRelevantProjectContextWithCount} from '@/memory/project-context';
 import {setAutoCommitClient} from '@/services/auto-commit';
 import {runInSessionCwdScope} from '@/services/session-cwd';
+import {cancelSubagentRun} from '@/services/subagent-events';
 import {TimelineManager} from '@/services/timeline-manager';
 import {maybeGenerateTitle} from '@/session/maybe-generate-title';
 import {sessionManager} from '@/session/session-manager';
@@ -74,6 +80,7 @@ import {
 	ACTIVE_FILE_PREFIX,
 	deriveTitleFromFirstMessage,
 } from '@/session/title-generator';
+import type {ToolManager} from '@/tools/tool-manager';
 import {getTuneToolMode} from '@/types/config';
 import {applyTuneCompaction} from '@/utils/auto-compact';
 import {getLogger} from '@/utils/logging';
@@ -114,6 +121,11 @@ export class AcpAgent implements Agent {
 	private clientInfo?: InitializeRequest['clientInfo'];
 	/** Bare extension method names already reported as deprecated. */
 	private warnedExtAliases = new Set<string>();
+	/**
+	 * Tools of the sessions that brought MCP servers of their own. Every other
+	 * session uses the shared set in `initContext`.
+	 */
+	private sessionToolManagers = new Map<string, ToolManager>();
 
 	constructor(
 		initContext: AcpInitContext,
@@ -144,6 +156,7 @@ export class AcpAgent implements Agent {
 				version: this.appVersion,
 			},
 			authMethods: [],
+			_meta: {'nanocoder/retention': sessionManager.getRetention()},
 		};
 	}
 
@@ -151,7 +164,12 @@ export class AcpAgent implements Agent {
 		const sessionId = crypto.randomUUID();
 		logger.info(`ACP newSession: ${sessionId} cwd=${params.cwd}`);
 
-		const session = this.registerSession(sessionId, params.cwd);
+		const session = this.registerSession(
+			sessionId,
+			params.cwd,
+			parseDisabledTools(params._meta),
+		);
+		await this.applyMcpServers(session, params.mcpServers);
 
 		await sessionManager.initialize();
 		await this.saveAcpSessionToDisk(session);
@@ -173,7 +191,10 @@ export class AcpAgent implements Agent {
 
 		return {
 			sessionId,
-			_meta: await this.buildApprovalMeta(session),
+			_meta: {
+				...(await this.buildApprovalMeta(session)),
+				...this.buildDisabledToolsMeta(session),
+			},
 			modes: this.buildModeState(session),
 			configOptions: await this.buildConfigOptions(),
 		};
@@ -191,14 +212,23 @@ export class AcpAgent implements Agent {
 				// Same error as resumeSession so clients can tell a missing session apart.
 				throw new Error(`Session not found on disk: ${params.sessionId}`);
 			}
-			session = this.registerSession(params.sessionId, params.cwd);
+			session = this.registerSession(
+				params.sessionId,
+				params.cwd,
+				parseDisabledTools(params._meta),
+			);
 			clearAcpReadStubs(params.sessionId);
 			session.messages = persisted.messages;
+		} else {
+			// The client sends the list on every load, so a live session takes the new one.
+			session.disabledTools = parseDisabledTools(params._meta);
+			this.buildSystemPromptForSession(session);
 		}
 
 		logger.info(
 			`ACP loadSession: ${params.sessionId} cwd=${params.cwd} restored=${Boolean(existing)}`,
 		);
+		await this.applyMcpServers(session, params.mcpServers);
 
 		// Replay history so the client can rebuild the thread.
 		await this.replaySessionHistory(session);
@@ -206,6 +236,7 @@ export class AcpAgent implements Agent {
 		return {
 			_meta: {
 				...(await this.buildApprovalMeta(session)),
+				...this.buildDisabledToolsMeta(session),
 				'nanocoder/artifacts': await listSessionArtifacts(params.sessionId),
 			},
 			modes: this.buildModeState(session),
@@ -371,10 +402,13 @@ export class AcpAgent implements Agent {
 			const config = getAppConfig();
 			const nonInteractiveAlwaysAllow = config.alwaysAllow ?? [];
 
+			// The model is offered the tools its calls will run against.
+			const sessionTools = this.sessionToolManagers.get(session.sessionId);
 			const response = await runAcpConversation({
 				session,
 				client: this.initContext.client,
-				toolManager: this.initContext.toolManager,
+				toolManager: sessionTools ?? this.initContext.toolManager,
+				sessionTools,
 				conn: this.conn,
 				nonInteractiveAlwaysAllow,
 			});
@@ -498,6 +532,8 @@ export class AcpAgent implements Agent {
 		await ticket.ready;
 		try {
 			await session.timeline.dispose();
+			// After the turn is over: it may still have been calling these tools.
+			await this.releaseMcpServers(params.sessionId);
 		} finally {
 			session.releaseTurn();
 		}
@@ -619,6 +655,7 @@ export class AcpAgent implements Agent {
 				cwd: s.workingDirectory,
 				title: s.title,
 				updatedAt: s.lastAccessedAt,
+				_meta: {'nanocoder/pinned': s.pinned === true},
 			})),
 		};
 	}
@@ -643,6 +680,7 @@ export class AcpAgent implements Agent {
 		// Evict from in-memory map if present
 		this.sessions.delete(params.sessionId);
 		clearAcpReadStubs(params.sessionId);
+		await this.releaseMcpServers(params.sessionId);
 		logger.info(`ACP deleteSession: ${params.sessionId}`);
 		return {};
 	}
@@ -658,10 +696,13 @@ export class AcpAgent implements Agent {
 
 		// Evict any stale in-memory session first
 		this.sessions.delete(params.sessionId);
+		await this.releaseMcpServers(params.sessionId);
 		const session = this.registerSession(
 			params.sessionId,
 			persisted.workingDirectory,
+			parseDisabledTools(params._meta),
 		);
+		await this.applyMcpServers(session, params.mcpServers);
 		session.messages = persisted.messages;
 		clearAcpReadStubs(params.sessionId);
 		logger.info(
@@ -674,6 +715,7 @@ export class AcpAgent implements Agent {
 		return {
 			_meta: {
 				...(await this.buildApprovalMeta(session)),
+				...this.buildDisabledToolsMeta(session),
 				'nanocoder/artifacts': await listSessionArtifacts(params.sessionId),
 			},
 			modes: this.buildModeState(session),
@@ -697,7 +739,8 @@ export class AcpAgent implements Agent {
 		const method = requested.startsWith(ACP_EXT_PREFIX)
 			? requested.slice(ACP_EXT_PREFIX.length)
 			: requested;
-		if (!(ACP_EXT_METHODS as readonly string[]).includes(method)) {
+		const known = method === requested ? ACP_EXT_ALIASES : ACP_EXT_METHODS;
+		if (!(known as readonly string[]).includes(method)) {
 			throw RequestError.methodNotFound(requested);
 		}
 		if (method === requested && !this.warnedExtAliases.has(method)) {
@@ -725,6 +768,23 @@ export class AcpAgent implements Agent {
 			return {title: updated.title};
 		}
 
+		if (method === 'pinSession') {
+			const sessionId = params.sessionId;
+			const pinned = params.pinned;
+			if (typeof sessionId !== 'string' || typeof pinned !== 'boolean') {
+				throw new Error(
+					'pinSession requires a string sessionId and a boolean pinned',
+				);
+			}
+
+			await sessionManager.initialize();
+			if (!(await sessionManager.setPinned(sessionId, pinned))) {
+				throw new Error(`Session not found on disk: ${sessionId}`);
+			}
+			logger.info(`ACP extMethod pinSession: ${sessionId} pinned=${pinned}`);
+			return {pinned};
+		}
+
 		if (method === 'timeline/list') {
 			const sessionId = params.sessionId;
 			if (typeof sessionId !== 'string') {
@@ -732,6 +792,21 @@ export class AcpAgent implements Agent {
 			}
 			const session = this.requireSession(sessionId);
 			return {entries: await session.timeline.list()};
+		}
+
+		if (method === 'timeline/read') {
+			const {sessionId, checkpointId, path} = params;
+			if (
+				typeof sessionId !== 'string' ||
+				typeof checkpointId !== 'string' ||
+				typeof path !== 'string'
+			) {
+				throw new Error(
+					'timeline/read requires string sessionId, checkpointId and path',
+				);
+			}
+			const session = this.requireSession(sessionId);
+			return {...(await session.timeline.readBefore(checkpointId, path))};
 		}
 
 		if (method === 'timeline/revert') {
@@ -772,6 +847,19 @@ export class AcpAgent implements Agent {
 				revertedTo: result.revertedTo,
 				filesRestored: result.filesRestored,
 			};
+		}
+
+		if (method === 'cancelSubagent') {
+			const sessionId = params.sessionId;
+			const childRunId = params.childRunId;
+			if (typeof sessionId !== 'string' || typeof childRunId !== 'string') {
+				throw new Error(
+					'cancelSubagent requires string sessionId and childRunId',
+				);
+			}
+			this.requireSession(sessionId);
+			// False, not an error, when the run already ended: that race is normal.
+			return {cancelled: cancelSubagentRun(sessionId, childRunId)};
 		}
 
 		if (method === 'retryTurn') {
@@ -861,7 +949,75 @@ export class AcpAgent implements Agent {
 		return session;
 	}
 
-	private registerSession(sessionId: string, cwd: string): AcpSession {
+	private toolManagerFor(sessionId: string): ToolManager {
+		return (
+			this.sessionToolManagers.get(sessionId) ?? this.initContext.toolManager
+		);
+	}
+
+	/**
+	 * Connect the MCP servers a client sent for this session, in place of any it
+	 * had before. Their tools exist in this session only. A server that fails to
+	 * connect is logged and skipped; the request still succeeds.
+	 */
+	private async applyMcpServers(
+		session: AcpSession,
+		requested: McpServer[] | undefined,
+	): Promise<void> {
+		const {servers, skipped} = acpMcpServersToConfig(requested);
+		if (skipped.length > 0) {
+			logger.warn(
+				`ACP session ${session.sessionId}: unsupported MCP servers skipped: ${skipped.join(', ')}`,
+			);
+		}
+		const existing = this.sessionToolManagers.get(session.sessionId);
+		if (servers.length === 0 && !existing) return;
+
+		if (servers.length === 0) {
+			await this.releaseMcpServers(session.sessionId);
+		} else {
+			const manager = existing ?? this.initContext.toolManager.forSession();
+			this.sessionToolManagers.set(session.sessionId, manager);
+			try {
+				await manager.initializeMCP(servers, result => {
+					if (result.success) {
+						logger.info(
+							`ACP session ${session.sessionId}: MCP server connected: ${result.serverName}`,
+						);
+					} else {
+						logger.warn(
+							`ACP session ${session.sessionId}: MCP server failed: ${result.serverName} (${result.error})`,
+						);
+					}
+				});
+			} catch (error) {
+				logger.error(
+					`ACP session ${session.sessionId}: MCP initialization failed: ${String(error)}`,
+				);
+			}
+		}
+		// The prompt lists the tools the session has.
+		this.buildSystemPromptForSession(session);
+	}
+
+	/** Disconnect the MCP servers this session brought, and only those. */
+	private async releaseMcpServers(sessionId: string): Promise<void> {
+		const manager = this.sessionToolManagers.get(sessionId);
+		this.sessionToolManagers.delete(sessionId);
+		try {
+			await manager?.disconnectMCP();
+		} catch (error) {
+			logger.warn(
+				`ACP session ${sessionId}: MCP disconnect failed: ${String(error)}`,
+			);
+		}
+	}
+
+	private registerSession(
+		sessionId: string,
+		cwd: string,
+		disabledTools: string[] = [],
+	): AcpSession {
 		const session = new AcpSession({
 			sessionId,
 			cwd,
@@ -869,18 +1025,41 @@ export class AcpAgent implements Agent {
 			clientCapabilities: this.clientCapabilities,
 			initialMode: this.initContext.initialMode,
 		});
+		session.disabledTools = disabledTools;
 		this.sessions.set(sessionId, session);
 		this.buildSystemPromptForSession(session);
 		return session;
+	}
+
+	/**
+	 * The tools this session does not offer or run, so a client can check its
+	 * request was honoured. A requested name that is not a known tool is logged
+	 * and left out, so the list is what is actually in effect.
+	 */
+	private buildDisabledToolsMeta(session: AcpSession) {
+		const toolManager = this.toolManagerFor(session.sessionId);
+		for (const name of session.disabledTools) {
+			if (!toolManager.hasTool(name)) {
+				logger.debug(
+					`ACP session ${session.sessionId}: ignoring unknown disabled tool "${name}"`,
+				);
+			}
+		}
+		return {
+			[ACP_DISABLED_TOOLS_META]: session.effectiveDisabledTools(name =>
+				toolManager.hasTool(name),
+			),
+		};
 	}
 
 	private async buildApprovalMeta(session: AcpSession) {
 		return {
 			'nanocoder/approval': {
 				alwaysAllow: await getAlwaysAllowedTools(
-					this.initContext.toolManager,
+					this.toolManagerFor(session.sessionId),
 					session.developmentMode,
 					getAppConfig().alwaysAllow ?? [],
+					session.effectiveDisabledTools(),
 				),
 			},
 		};
@@ -1046,7 +1225,7 @@ export class AcpAgent implements Agent {
 	}
 
 	private buildSystemPromptForSession(session: AcpSession): void {
-		const {toolManager} = this.initContext;
+		const toolManager = this.toolManagerFor(session.sessionId);
 		const {provider, model} = this.initContext;
 
 		const tune = resolveTune(
@@ -1064,7 +1243,7 @@ export class AcpAgent implements Agent {
 		const availableNames = toolManager.getAvailableToolNames(
 			tune,
 			session.developmentMode,
-			undefined,
+			session.effectiveDisabledTools(),
 			model,
 		);
 		// Inside the session's scope, so the working directory the prompt reports
@@ -1117,6 +1296,7 @@ export class AcpAgent implements Agent {
 						id: session.sessionId,
 						title: existingSession.title || 'New Session',
 						titleManuallySet: existingSession.titleManuallySet,
+						pinned: existingSession.pinned,
 						titleGenerated: existingSession.titleGenerated,
 						createdAt: existingSession.createdAt || timestamp,
 						lastAccessedAt: timestamp,
@@ -1147,6 +1327,7 @@ export class AcpAgent implements Agent {
 				id: session.sessionId,
 				title,
 				titleManuallySet: existingSession?.titleManuallySet,
+				pinned: existingSession?.pinned,
 				titleGenerated: existingSession?.titleGenerated,
 				createdAt: existingSession?.createdAt || timestamp,
 				lastAccessedAt: timestamp,
