@@ -19,6 +19,7 @@ import {
 } from '@/message-handler';
 import {convertToModelMessages} from '@/ai-sdk-client/converters/message-converter';
 import {sessionManager} from '@/session/session-manager';
+import {registerSubagentRun} from '@/services/subagent-events';
 import {getLogger} from '@/utils/logging';
 import {SemanticMemoryManager} from '@/memory/semantic-memory-manager';
 import {readFileTool} from '@/tools/read-file';
@@ -1274,6 +1275,67 @@ test.serial('AcpAgent.extMethod - a bare name logs one deprecation notice, a pre
 	}
 });
 
+test('AcpAgent.extMethod - cancelSubagent cancels one run of the session and nothing else', async t => {
+	const {agent} = createAgent();
+	const session = await agent.newSession({cwd: '/tmp'});
+	const other = await agent.newSession({cwd: '/tmp'});
+	const cancelled: string[] = [];
+	const forget = [
+		registerSubagentRun('run-1', session.sessionId, () => cancelled.push('run-1')),
+		registerSubagentRun('run-2', session.sessionId, () => cancelled.push('run-2')),
+		registerSubagentRun('run-3', other.sessionId, () => cancelled.push('run-3')),
+	];
+	try {
+		t.deepEqual(
+			await agent.extMethod('_nanocoder/cancelSubagent', {
+				sessionId: session.sessionId,
+				childRunId: 'run-1',
+			}),
+			{cancelled: true},
+		);
+		// Another session's run, and a run that already ended, are not an error.
+		t.deepEqual(
+			await agent.extMethod('_nanocoder/cancelSubagent', {
+				sessionId: session.sessionId,
+				childRunId: 'run-3',
+			}),
+			{cancelled: false},
+		);
+		t.deepEqual(
+			await agent.extMethod('_nanocoder/cancelSubagent', {
+				sessionId: session.sessionId,
+				childRunId: 'gone',
+			}),
+			{cancelled: false},
+		);
+		t.deepEqual(cancelled, ['run-1']);
+	} finally {
+		for (const stop of forget) stop();
+		await agent.deleteSession({sessionId: session.sessionId});
+		await agent.deleteSession({sessionId: other.sessionId});
+	}
+});
+
+test('AcpAgent.extMethod - cancelSubagent validates its params and has no bare alias', async t => {
+	const {agent} = createAgent();
+	await t.throwsAsync(
+		agent.extMethod('_nanocoder/cancelSubagent', {sessionId: 'x'}),
+		{message: 'cancelSubagent requires string sessionId and childRunId'},
+	);
+	await t.throwsAsync(
+		agent.extMethod('_nanocoder/cancelSubagent', {
+			sessionId: 'nope',
+			childRunId: 'run',
+		}),
+		{message: 'Session not found: nope'},
+	);
+	// Added after the prefix, so there is no old client to keep working.
+	const error = await t.throwsAsync(
+		agent.extMethod('cancelSubagent', {sessionId: 'x', childRunId: 'y'}),
+	);
+	t.is((error as {code?: number}).code, -32601);
+});
+
 test('AcpAgent.initialize - advertises the extension methods, and each one is handled', async t => {
 	const {agent} = createAgent();
 	const {agentCapabilities} = await agent.initialize({protocolVersion: 1});
@@ -1281,7 +1343,10 @@ test('AcpAgent.initialize - advertises the extension methods, and each one is ha
 		extMethods: string[];
 		extNotifications: string[];
 	};
-	t.deepEqual(advertised.extNotifications, ['_nanocoder/sessionTitleChanged']);
+	t.deepEqual(advertised.extNotifications, [
+		'_nanocoder/sessionTitleChanged',
+		'_nanocoder/subagent',
+	]);
 	t.true(advertised.extMethods.length > 0);
 	for (const method of advertised.extMethods) {
 		// Bad params fail inside the handler; an unsupported name would be -32601.

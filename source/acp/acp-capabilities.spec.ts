@@ -30,8 +30,12 @@ test('getAgentCapabilities - returns session capabilities with close', t => {
 					'_nanocoder/timeline/list',
 					'_nanocoder/timeline/revert',
 					'_nanocoder/retryTurn',
+					'_nanocoder/cancelSubagent',
 				],
-				extNotifications: ['_nanocoder/sessionTitleChanged'],
+				extNotifications: [
+					'_nanocoder/sessionTitleChanged',
+					'_nanocoder/subagent',
+				],
 			},
 		},
 	});

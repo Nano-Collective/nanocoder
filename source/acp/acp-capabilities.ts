@@ -26,22 +26,31 @@ const MODE_MAP: Record<SessionModeId, DevelopmentMode> = {
 export const ACP_EXT_PREFIX = '_nanocoder/';
 
 /**
- * Custom requests, by the bare name clients sent before they were prefixed.
- * Those bare names still work as deprecated aliases; the prefixed names are
- * advertised in `agentCapabilities._meta.nanocoder.extMethods`.
+ * Custom requests older clients send by their bare name. Those names still
+ * work as deprecated aliases; methods added since are only answered under
+ * their prefixed name.
  */
-export const ACP_EXT_METHODS = [
+export const ACP_EXT_ALIASES = [
 	'renameSession',
 	'timeline/list',
 	'timeline/revert',
 	'retryTurn',
 ] as const;
 
+/** Every custom request, advertised in `agentCapabilities._meta.nanocoder`. */
+export const ACP_EXT_METHODS = [...ACP_EXT_ALIASES, 'cancelSubagent'] as const;
+
 /** Sent when a session is titled in the background. */
 export const ACP_SESSION_TITLE_NOTIFICATION = '_nanocoder/sessionTitleChanged';
 
+/** Sent as each subagent run starts, progresses and ends. */
+export const ACP_SUBAGENT_NOTIFICATION = '_nanocoder/subagent';
+
 /** Custom notifications the agent sends, by their full names. */
-const ACP_EXT_NOTIFICATIONS = [ACP_SESSION_TITLE_NOTIFICATION];
+const ACP_EXT_NOTIFICATIONS = [
+	ACP_SESSION_TITLE_NOTIFICATION,
+	ACP_SUBAGENT_NOTIFICATION,
+];
 
 export function getAgentCapabilities(): AgentCapabilities {
 	return {

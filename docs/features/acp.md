@@ -49,20 +49,43 @@ ACP reserves method names starting with `_` for custom methods. Nanocoder's are:
 | `_nanocoder/timeline/list` | `sessionId` | Lists the session's file-change checkpoints |
 | `_nanocoder/timeline/revert` | `sessionId`, `checkpointId` | Reverts the files and history to before a checkpoint |
 | `_nanocoder/retryTurn` | `sessionId`, optional `promptText` | Removes the last turn so the prompt can be sent again |
+| `_nanocoder/cancelSubagent` | `sessionId`, `childRunId` | Cancels one running subagent; the turn and the other subagents carry on (see [Subagent events](#subagent-events)) |
 
-The agent also sends the `_nanocoder/sessionTitleChanged` notification when it titles a session in the background.
+The agent also sends two notifications: `_nanocoder/sessionTitleChanged` when it titles a session in the background, and `_nanocoder/subagent` as each subagent run progresses (see [Subagent events](#subagent-events)).
 
 **Capability detection.** `initialize` lists the exact names under `agentCapabilities._meta.nanocoder`:
 
 ```json
-{"nanocoder": {"extMethods": ["_nanocoder/renameSession", "..."], "extNotifications": ["_nanocoder/sessionTitleChanged"]}}
+{"nanocoder": {"extMethods": ["_nanocoder/renameSession", "..."], "extNotifications": ["_nanocoder/sessionTitleChanged", "_nanocoder/subagent"]}}
 ```
 
 Take the names from that list as they are rather than building them from a prefix. An agent that doesn't list a method doesn't support it under that name.
 
-**Deprecated aliases.** The same methods are still answered under their old bare names (`renameSession`, `timeline/list`, `timeline/revert`, `retryTurn`) for clients that predate the prefix. The first use of each logs a deprecation notice. The aliases will be removed in a later release, announced in the changelog.
+**Deprecated aliases.** The first four methods are still answered under their old bare names (`renameSession`, `timeline/list`, `timeline/revert`, `retryTurn`) for clients that predate the prefix. Methods added since, such as `cancelSubagent`, have no bare name. The first use of each logs a deprecation notice. The aliases will be removed in a later release, announced in the changelog.
 
 **Unknown methods.** A custom request the agent doesn't recognise fails with the standard JSON-RPC "Method not found" error (`-32601`), so "not supported" can be told apart from "failed".
+
+### Subagent events
+
+When the agent delegates to a subagent, the parent `agent` tool call's title is refreshed with progress, and the subagent's own tool calls appear as `subagent:` cards, as before. A client that wants each subagent as its own run can also read the `_nanocoder/subagent` notifications, which carry:
+
+| Field | Meaning |
+|-------|---------|
+| `sessionId` | The session the run belongs to |
+| `toolCallId` | The parent's `agent` tool call that started the run |
+| `childRunId` | Identifies the run for as long as it lives |
+| `parentRunId` | The run that started this one; empty for a child of the turn |
+| `name` | The subagent's name |
+| `status` | `started`, `progress`, `completed`, `failed` or `cancelled` |
+| `tokenCount`, `toolCallCount`, `lastTool` | Progress, on `progress` and `completed` events |
+| `result` | The subagent's final output, on `completed` |
+| `error` | Why the run ended, on `failed` and `cancelled` |
+
+Every run sends `started`, then any number of `progress`, then exactly one of `completed`, `failed` or `cancelled`. Runs that overlap each send their own events; tell them apart by `childRunId`. A client that ignores the notification sees nothing different.
+
+**Cancelling one run.** `_nanocoder/cancelSubagent` with the `sessionId` and `childRunId` ends that run and returns `{"cancelled": true}`. The run reports `cancelled`, its parent `agent` call gets a "Subagent was cancelled" result, and the turn and the other subagents carry on. It returns `{"cancelled": false}` when there is nothing to cancel: the run already ended, or belongs to another session. Cancelling the turn with `session/cancel` still cancels every run.
+
+**Approvals.** The permission request for a subagent's tool call (its tool call ID starts with `subagent:`) carries the run in the request's `_meta` as `nanocoder/childRunId`.
 
 ## Setup in Zed
 
