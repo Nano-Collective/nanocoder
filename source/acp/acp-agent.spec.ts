@@ -1423,6 +1423,106 @@ test.serial(
 	},
 );
 
+test.serial(
+	'AcpAgent.extMethod - pinSession marks a session, session/list reports it, and it survives prompts and renames',
+	async t => {
+		const {agent} = createAgent();
+		await sessionManager.initialize();
+		const session = await agent.newSession({cwd: '/tmp'});
+		await agent.prompt({
+			sessionId: session.sessionId,
+			prompt: [{type: 'text', text: 'Hello!'}],
+		});
+		const isPinned = async () =>
+			(await agent.listSessions({})).sessions.find(
+				s => s.sessionId === session.sessionId,
+			)?._meta?.['nanocoder/pinned'];
+
+		t.is(await isPinned(), false);
+		t.deepEqual(
+			await agent.extMethod('_nanocoder/pinSession', {
+				sessionId: session.sessionId,
+				pinned: true,
+			}),
+			{pinned: true},
+		);
+		t.is(await isPinned(), true);
+
+		// ACP rebuilds the session field by field on every save.
+		await agent.extMethod('renameSession', {
+			sessionId: session.sessionId,
+			title: 'Kept title',
+		});
+		await agent.prompt({
+			sessionId: session.sessionId,
+			prompt: [{type: 'text', text: 'Follow-up message'}],
+		});
+		t.is(await isPinned(), true);
+		t.true((await sessionManager.readSession(session.sessionId))?.pinned);
+
+		await agent.extMethod('_nanocoder/pinSession', {
+			sessionId: session.sessionId,
+			pinned: false,
+		});
+		t.is(await isPinned(), false);
+	},
+);
+
+test.serial('AcpAgent.extMethod - pinSession rejects bad params and a session that is not on disk', async t => {
+	const {agent} = createAgent();
+	for (const params of [
+		{sessionId: 1, pinned: true},
+		{sessionId: 'x'},
+		{sessionId: 'x', pinned: 'yes'},
+	]) {
+		await t.throwsAsync(agent.extMethod('_nanocoder/pinSession', params), {
+			message: 'pinSession requires a string sessionId and a boolean pinned',
+		});
+	}
+	await t.throwsAsync(
+		agent.extMethod('_nanocoder/pinSession', {
+			sessionId: '00000000-0000-4000-8000-000000000000',
+			pinned: true,
+		}),
+		{message: /Session not found on disk/},
+	);
+});
+
+test.serial('AcpAgent.deleteSession - removes a pinned session', async t => {
+	const {agent} = createAgent();
+	await sessionManager.initialize();
+	const session = await agent.newSession({cwd: '/tmp'});
+	await agent.prompt({
+		sessionId: session.sessionId,
+		prompt: [{type: 'text', text: 'Hello!'}],
+	});
+	await agent.extMethod('_nanocoder/pinSession', {
+		sessionId: session.sessionId,
+		pinned: true,
+	});
+
+	await agent.deleteSession({sessionId: session.sessionId});
+
+	t.is(await sessionManager.readSession(session.sessionId), null);
+	t.false(
+		(await agent.listSessions({})).sessions.some(
+			s => s.sessionId === session.sessionId,
+		),
+	);
+});
+
+test.serial('AcpAgent.initialize - reports the effective retention settings', async t => {
+	const {agent} = createAgent();
+	const result = await agent.initialize({protocolVersion: 1});
+	t.deepEqual(result._meta, {
+		'nanocoder/retention': sessionManager.getRetention(),
+	});
+	t.deepEqual(sessionManager.getRetention(), {
+		retentionDays: 30,
+		maxSessions: 100,
+	});
+});
+
 // ============================================================================
 // background session titling
 // ============================================================================
