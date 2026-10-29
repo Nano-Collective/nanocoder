@@ -28,7 +28,7 @@ See the [Heabsy model catalog](https://heabsy.com/models) for prices and for whi
 
 ## Models
 
-Model names are passed through unchanged, for example `qwen38` (Qwen3.8 27B, EEA tier, 262k context, tool calling).
+Model names are passed through unchanged, for example `qwen38` (Qwen3.8 27B, EEA tier, 512k context, tool calling).
 
 ## Fetching Available Models
 
