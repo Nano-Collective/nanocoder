@@ -55,6 +55,8 @@ export class NanocoderAcpClient {
 	private _handshakeComplete = false;
 	/** Whether the agent advertised `sessionCapabilities.close` at initialize. */
 	private _supportsSessionClose = false;
+	/** Extension request names the agent advertised at initialize. */
+	private _extMethods: readonly string[] = [];
 
 	get isHandshakeComplete(): boolean {
 		return this._handshakeComplete && this.connection != null;
@@ -119,6 +121,7 @@ export class NanocoderAcpClient {
 		this._clearPendingPermissions();
 		this._handshakeComplete = false;
 		this._supportsSessionClose = false;
+		this._extMethods = [];
 	}
 
 	/** Drop any in-flight session creation; see {@link _sessionGeneration}. */
@@ -208,6 +211,10 @@ export class NanocoderAcpClient {
 
 			this._supportsSessionClose =
 				initResult.agentCapabilities?.sessionCapabilities?.close != null;
+			const advertised = (initResult.agentCapabilities?._meta?.nanocoder as
+				| { extMethods?: unknown }
+				| undefined)?.extMethods;
+			this._extMethods = Array.isArray(advertised) ? advertised : [];
 
 			// Complete handshake
 			this._handshakeComplete = true;
@@ -507,10 +514,21 @@ export class NanocoderAcpClient {
 		}
 	}
 
+	/**
+	 * The advertised name when the agent lists it, else the bare name an agent
+	 * from before the `_nanocoder/` prefix understands.
+	 */
+	private extMethodName(advertised: string, legacy: string): string {
+		return this._extMethods.includes(advertised) ? advertised : legacy;
+	}
+
 	async renameSession(sessionId: string, title: string): Promise<void> {
 		if (!this.connection) return;
 		try {
-			await this.connection.extMethod('renameSession', {sessionId, title});
+			await this.connection.extMethod(
+				this.extMethodName('_nanocoder/renameSession', 'renameSession'),
+				{sessionId, title},
+			);
 		} catch (error) {
 			this.outputChannel.appendLine(`renameSession failed: ${error}`);
 			vscode.window.showErrorMessage(`Failed to rename session: ${error}`);
@@ -559,10 +577,13 @@ export class NanocoderAcpClient {
 			return;
 		}
 		try {
-			await this.connection.extMethod('retryTurn', {
-				sessionId: this._sessionId,
-				promptText,
-			});
+			await this.connection.extMethod(
+				this.extMethodName('_nanocoder/retryTurn', 'retryTurn'),
+				{
+					sessionId: this._sessionId,
+					promptText,
+				},
+			);
 		} catch (error) {
 			this.outputChannel.appendLine(`retryTurn warning: ${error}`);
 		}

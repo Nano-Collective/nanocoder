@@ -453,3 +453,54 @@ test('NanocoderAcpClient - a creation still in flight does not overwrite a resum
 	t.is(await pending, 'session-resumed');
 	t.is((client as any)._sessionId, 'session-resumed');
 });
+
+async function makeExtClient(agentCapabilities: unknown) {
+	const calls: Array<{method: string; params: unknown}> = [];
+	const client = new NanocoderAcpClient(
+		{appendLine: () => {}} as any,
+		new AcpStateManager(),
+	);
+	client.setConnection({
+		initialize: async () => ({agentInfo: {version: '1.32.0'}, agentCapabilities}),
+		extMethod: async (method: string, params: unknown) => {
+			calls.push({method, params});
+			return {};
+		},
+	} as any);
+	await client.initializeHandshake();
+	(client as any)._sessionId = 'session-1';
+	return {client, calls};
+}
+
+test('NanocoderAcpClient - rename and retry use the extension names the agent advertises', async (t) => {
+	const {client, calls} = await makeExtClient({
+		_meta: {
+			nanocoder: {
+				extMethods: ['_nanocoder/renameSession', '_nanocoder/retryTurn'],
+			},
+		},
+	});
+
+	await client.renameSession('session-1', 'New title');
+	await client.retryTurn('again');
+
+	t.deepEqual(
+		calls.map((call) => call.method),
+		['_nanocoder/renameSession', '_nanocoder/retryTurn'],
+	);
+	t.deepEqual(calls[0].params, {sessionId: 'session-1', title: 'New title'});
+});
+
+test('NanocoderAcpClient - rename and retry fall back to the bare names for an agent that advertises none', async (t) => {
+	for (const agentCapabilities of [{}, {_meta: {nanocoder: {}}}, {_meta: {nanocoder: {extMethods: 'x'}}}]) {
+		const {client, calls} = await makeExtClient(agentCapabilities);
+
+		await client.renameSession('session-1', 'New title');
+		await client.retryTurn();
+
+		t.deepEqual(
+			calls.map((call) => call.method),
+			['renameSession', 'retryTurn'],
+		);
+	}
+});

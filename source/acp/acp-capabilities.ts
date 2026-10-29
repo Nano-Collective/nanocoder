@@ -22,6 +22,24 @@ const MODE_MAP: Record<SessionModeId, DevelopmentMode> = {
 	architect: 'architect',
 };
 
+/** ACP reserves `_`-prefixed method names for custom methods. */
+export const ACP_EXT_PREFIX = '_nanocoder/';
+
+/**
+ * Custom requests, by the bare name clients sent before they were prefixed.
+ * Those bare names still work as deprecated aliases; the prefixed names are
+ * advertised in `agentCapabilities._meta.nanocoder.extMethods`.
+ */
+export const ACP_EXT_METHODS = [
+	'renameSession',
+	'timeline/list',
+	'timeline/revert',
+	'retryTurn',
+] as const;
+
+/** Custom notifications the agent sends, by their full names. */
+const ACP_EXT_NOTIFICATIONS = ['_nanocoder/sessionTitleChanged'];
+
 export function getAgentCapabilities(): AgentCapabilities {
 	return {
 		loadSession: true,
@@ -31,6 +49,12 @@ export function getAgentCapabilities(): AgentCapabilities {
 			list: {},
 			delete: {},
 			resume: {},
+		},
+		_meta: {
+			nanocoder: {
+				extMethods: ACP_EXT_METHODS.map(name => `${ACP_EXT_PREFIX}${name}`),
+				extNotifications: ACP_EXT_NOTIFICATIONS,
+			},
 		},
 	};
 }

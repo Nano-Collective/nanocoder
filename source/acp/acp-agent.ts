@@ -31,7 +31,10 @@ import type {
 	SetSessionModeRequest,
 	SetSessionModeResponse,
 } from '@agentclientprotocol/sdk';
+import {RequestError} from '@agentclientprotocol/sdk';
 import {
+	ACP_EXT_METHODS,
+	ACP_EXT_PREFIX,
 	acpModeToDevelopmentMode,
 	developmentModeToAcpMode,
 	getAgentCapabilities,
@@ -102,6 +105,8 @@ export class AcpAgent implements Agent {
 	private conn: AgentSideConnection;
 	private appVersion: string;
 	private clientCapabilities?: ClientCapabilities;
+	/** Bare extension method names already reported as deprecated. */
+	private warnedExtAliases = new Set<string>();
 
 	constructor(
 		initContext: AcpInitContext,
@@ -708,11 +713,28 @@ export class AcpAgent implements Agent {
 	 * ACP's core methods don't include a way for the client to rename a
 	 * session (title is otherwise agent-driven, from the latest message).
 	 * `extMethod` is the protocol's sanctioned escape hatch for exactly this.
+	 *
+	 * Methods are named `_nanocoder/<name>`. The bare `<name>` still works as a
+	 * deprecated alias; anything else is "Method not found" so a client can
+	 * tell an unsupported method from a failed one.
 	 */
 	async extMethod(
-		method: string,
+		requested: string,
 		params: Record<string, unknown>,
 	): Promise<Record<string, unknown>> {
+		const method = requested.startsWith(ACP_EXT_PREFIX)
+			? requested.slice(ACP_EXT_PREFIX.length)
+			: requested;
+		if (!(ACP_EXT_METHODS as readonly string[]).includes(method)) {
+			throw RequestError.methodNotFound(requested);
+		}
+		if (method === requested && !this.warnedExtAliases.has(method)) {
+			this.warnedExtAliases.add(method);
+			logger.warn(
+				`ACP extMethod "${method}" is deprecated; use "${ACP_EXT_PREFIX}${method}"`,
+			);
+		}
+
 		if (method === 'renameSession') {
 			const sessionId = params.sessionId;
 			const title = params.title;
@@ -826,7 +848,7 @@ export class AcpAgent implements Agent {
 			return {ok: true, messagesCount: session.messages.length};
 		}
 
-		throw new Error(`Unknown extension method: ${method}`);
+		throw RequestError.methodNotFound(requested);
 	}
 
 	async unstable_listProviders(
