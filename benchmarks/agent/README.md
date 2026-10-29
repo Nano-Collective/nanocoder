@@ -15,6 +15,7 @@ pnpm run test:agent-eval             # every fixture, 5 runs each
 pnpm run test:agent-eval -- --fixture single-file-edit --runs 1
 pnpm run test:agent-eval -- --model qwen3:8b --provider ollama
 pnpm run test:agent-eval -- --cli ../nanocoder-1.29.0/dist/cli.js
+pnpm run test:agent-eval -- --help
 ```
 
 It is deliberately **not** part of `pnpm run test:all`: it needs real model
@@ -27,6 +28,11 @@ calls and takes minutes per run.
 | `--model`, `--provider` | Passed through to the CLI. Also read from `NANOCODER_AGENT_EVAL_MODEL` / `NANOCODER_AGENT_EVAL_PROVIDER`. |
 | `--fixture <name>` | Run one task only. |
 | `--out <path>` | Results file. Defaults to `benchmarks/agent/results.json` (gitignored). |
+
+Unknown options are rejected. `--help` lists the options and exits without
+checking for a built CLI or starting any model runs. If interrupted with
+Ctrl-C or SIGTERM, the active CLI subprocess is stopped and its temporary
+workspace is removed before the runner exits.
 
 ## Model tiers
 
