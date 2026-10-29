@@ -24,6 +24,13 @@ const SLASH_COMMAND_UTILS_SOURCE = readFileSync(
 	mediaUrl('slash-command-utils.js'),
 	'utf8',
 );
+// chat-panel.js calls NanocoderMarkdownHighlight.configureMarkdown at load. The
+// real marked and highlight.js bundles are not loaded here, and it does nothing
+// without them, so the hook alone is enough.
+const MARKDOWN_HIGHLIGHT_SOURCE = readFileSync(
+	mediaUrl('markdown-highlight.js'),
+	'utf8',
+);
 const PANEL_SOURCE = readFileSync(mediaUrl('chat-panel.js'), 'utf8');
 
 const SHELL_IDS = [
@@ -398,6 +405,7 @@ export function createPanel(options: {marked?: boolean} = {}) {
 	runInContext(MENTION_UTILS_SOURCE, sandbox);
 	runInContext(URI_UTILS_SOURCE, sandbox);
 	runInContext(SLASH_COMMAND_UTILS_SOURCE, sandbox);
+	runInContext(MARKDOWN_HIGHLIGHT_SOURCE, sandbox);
 	runInContext(PANEL_SOURCE, sandbox);
 
 	const container = findById(root, 'messages-container') as StubElement;

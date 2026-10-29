@@ -6,7 +6,7 @@ The extension provides a native sidebar chat powered by the Agent Client Protoco
 
 ## Features
 
-- **Native Sidebar Chat**: Streams responses with collapsible thinking sections, live tool-activity cards, and inline tool approvals
+- **Native Sidebar Chat**: Streams responses with syntax-highlighted code blocks as they arrive, a blinking cursor while the agent writes, collapsible thinking sections, live tool-activity cards, and inline tool approvals
 - **Provider, Model & Mode Switching**: Dropdowns in the chat header; switching provider refreshes the model list automatically
 - **Sessions**: New Chat, session history with resume and delete, persisted to disk across restarts
 - **Slash Commands**: `/help`, `/clear`, and custom commands from `.nanocoder/commands`
