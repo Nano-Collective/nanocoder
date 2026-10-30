@@ -1026,7 +1026,7 @@ test.serial(
 );
 
 test.serial(
-	'createLLMClient: handles provider with empty models array',
+	'createLLMClient: requires a model when the provider has no models list',
 	async t => {
 		globalThis.fetch = createMockFetch(true, 200);
 
@@ -1040,7 +1040,6 @@ test.serial(
 						{
 							name: 'EmptyModelsProvider',
 							baseUrl: 'http://localhost:8000/v1',
-							models: [],
 						},
 					],
 				},
@@ -1051,11 +1050,16 @@ test.serial(
 		process.cwd = () => configDir;
 		reloadAppConfig();
 
-		const result = await createLLMClient();
+		const error = await t.throwsAsync(createLLMClient(), {
+			instanceOf: ConfigurationError,
+		});
+		t.true(error.message.includes('EmptyModelsProvider'));
+		t.true(error.message.includes(join(configDir, 'agents.config.json')));
+		t.true(error.message.includes('--model'));
 
-		t.truthy(result);
-		t.truthy(result.client);
-		t.truthy(result.actualProvider); // Actual provider name may vary based on default config
+		const result = await createLLMClient(undefined, 'custom-model');
+		t.is(result.actualProvider, 'EmptyModelsProvider');
+		t.is(result.client.getCurrentModel(), 'custom-model');
 	},
 );
 
