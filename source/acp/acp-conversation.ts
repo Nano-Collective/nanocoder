@@ -110,6 +110,7 @@ export interface RunAcpConversationOptions {
 function createSubagentToolBridge(
 	session: AcpSession,
 	conn: AgentSideConnection,
+	client: LLMClient,
 ): SubagentToolBridge {
 	const metas = new Map<string, AcpToolCallMeta>();
 	// The sub-agent's own model names its tool calls and shares an id space
@@ -121,6 +122,9 @@ function createSubagentToolBridge(
 
 	return {
 		getMode: () => session.developmentMode,
+		// The client this turn started with, as the turn itself keeps it: a model
+		// picked while it runs applies from the next turn, subagents included.
+		getClient: () => client,
 		getDisabledTools: () => session.effectiveDisabledTools(),
 		begin: async (toolCall, subagentName) => {
 			const call = announced(toolCall);
@@ -178,7 +182,7 @@ export async function runAcpConversation(
 	// session and connection reachable.
 	const unregisterBridge = registerSubagentToolBridge(
 		options.session.sessionId,
-		createSubagentToolBridge(options.session, options.conn),
+		createSubagentToolBridge(options.session, options.conn, options.client),
 	);
 	// Tell the client about each subagent run of this session as it happens.
 	// Sent in order, and never allowed to fail the turn: a client that ignores
