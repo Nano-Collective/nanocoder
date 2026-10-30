@@ -12,6 +12,7 @@ import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {getLSPManager} from '@/lsp/lsp-manager';
 import {getToolManager} from '@/message-handler';
+import {getLoadedPlugins} from '@/plugins/host';
 import {getConfiguredFormatters} from '@/services/formatters';
 import {getConfiguredHooks} from '@/services/lifecycle-hooks';
 import {generateKey} from '@/session/key-generator';
@@ -60,6 +61,12 @@ export interface DoctorFormatter {
 	match: string[];
 }
 
+export interface DoctorPlugin {
+	name: string;
+	file: string;
+	hooks: string[];
+}
+
 export interface DoctorReport {
 	system: {
 		nodeVersion: string;
@@ -73,6 +80,7 @@ export interface DoctorReport {
 		servers: DoctorLspServer[];
 	}>;
 	mcp: Section<DoctorMcpServer[]>;
+	plugins: Section<DoctorPlugin[]>;
 	hooks: Section<DoctorHook[]>;
 	formatters: Section<DoctorFormatter[]>;
 	daemon: Section<
@@ -91,6 +99,7 @@ export interface DoctorDependencies {
 		servers: Array<{name: string; ready: boolean; languages: string[]}>;
 	}>;
 	getToolManager: () => ToolManager | null;
+	getPlugins: () => DoctorPlugin[];
 	getDaemonLock: () => Promise<DaemonLock | null>;
 	probeLocalProvider: (
 		baseURL: string,
@@ -158,6 +167,7 @@ function defaultDependencies(): DoctorDependencies {
 			return manager.getStatus();
 		},
 		getToolManager,
+		getPlugins: getLoadedPlugins,
 		getDaemonLock,
 		probeLocalProvider,
 	};
@@ -263,16 +273,25 @@ function normalizeDaemon(
 export async function collectDoctorReport(
 	dependencies: DoctorDependencies = defaultDependencies(),
 ): Promise<DoctorReport> {
-	const [nanocoder, providers, lsp, mcp, hooks, formatters, daemonLock] =
-		await Promise.all([
-			settle(() => dependencies.getVersion().then(version => ({version}))),
-			settle(() => collectProviders(dependencies)),
-			settle(() => dependencies.getLspStatus()),
-			settle(() => collectMcp(dependencies.getToolManager())),
-			settle(() => collectHooks()),
-			settle(() => collectFormatters()),
-			settle(() => dependencies.getDaemonLock()),
-		]);
+	const [
+		nanocoder,
+		providers,
+		lsp,
+		mcp,
+		plugins,
+		hooks,
+		formatters,
+		daemonLock,
+	] = await Promise.all([
+		settle(() => dependencies.getVersion().then(version => ({version}))),
+		settle(() => collectProviders(dependencies)),
+		settle(() => dependencies.getLspStatus()),
+		settle(() => collectMcp(dependencies.getToolManager())),
+		settle(() => dependencies.getPlugins()),
+		settle(() => collectHooks()),
+		settle(() => collectFormatters()),
+		settle(() => dependencies.getDaemonLock()),
+	]);
 
 	return {
 		system: {
@@ -284,6 +303,7 @@ export async function collectDoctorReport(
 		providers,
 		lsp,
 		mcp,
+		plugins,
 		hooks,
 		formatters,
 		daemon:
@@ -409,6 +429,20 @@ export function Doctor({report}: {report: DoctorReport}) {
 							? ` • ${server.promptCount} prompt${server.promptCount === 1 ? '' : 's'}`
 							: ''}
 						{server.url ? ` • ${server.url}` : ''}
+					</Text>
+				))
+			)}
+
+			<SectionTitle>Plugins</SectionTitle>
+			{report.plugins.status === 'error' ? (
+				<SectionError message={report.plugins.error} />
+			) : report.plugins.data.length === 0 ? (
+				<Text color={colors.secondary}>• No plugins loaded</Text>
+			) : (
+				report.plugins.data.map(plugin => (
+					<Text key={plugin.name} color={colors.text}>
+						• {plugin.name} • {plugin.file} •{' '}
+						{plugin.hooks.length > 0 ? plugin.hooks.join(', ') : 'no hooks'}
 					</Text>
 				))
 			)}
