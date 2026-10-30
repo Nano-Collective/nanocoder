@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import {ClientSideConnection} from '@agentclientprotocol/sdk';
+import {ACP_EXT_PREFIX, type ACP_EXT_METHODS, VSCODE_CLIENT_NAME} from '../../../source/acp/acp-capabilities';
 import {AcpStateManager, ACPStatus} from './acp-state';
 import {PromptAttempt} from './prompt-attempt';
 import { resolveExtensionCwd } from './workspace-utils';
@@ -53,6 +54,10 @@ export class NanocoderAcpClient {
 	 * signal lets `newSession` race the handshake and fail silently.
 	 */
 	private _handshakeComplete = false;
+	/** Whether the agent advertised `sessionCapabilities.close` at initialize. */
+	private _supportsSessionClose = false;
+	/** Extension request names the agent advertised at initialize. */
+	private _extMethods: readonly string[] = [];
 
 	get isHandshakeComplete(): boolean {
 		return this._handshakeComplete && this.connection != null;
@@ -116,6 +121,8 @@ export class NanocoderAcpClient {
 		this._abandonPendingSession();
 		this._clearPendingPermissions();
 		this._handshakeComplete = false;
+		this._supportsSessionClose = false;
+		this._extMethods = [];
 	}
 
 	/** Drop any in-flight session creation; see {@link _sessionGeneration}. */
@@ -180,12 +187,12 @@ export class NanocoderAcpClient {
 
 		try {
 			const ext = vscode.extensions.getExtension('nanocollective.nanocoder-vscode');
-			const version = ext?.packageJSON?.version || '0.3.0';
+			const version = ext?.packageJSON?.version || '0.4.0';
 
 			// Perform ACP initialize handshake
 			const initResult = await this.connection.initialize({
 				clientInfo: {
-					name: 'Nanocoder VS Code Extension',
+					name: VSCODE_CLIENT_NAME,
 					version: version,
 				},
 				protocolVersion: 1,
@@ -202,6 +209,13 @@ export class NanocoderAcpClient {
 				);
 				return false;
 			}
+
+			this._supportsSessionClose =
+				initResult.agentCapabilities?.sessionCapabilities?.close != null;
+			const advertised = (initResult.agentCapabilities?._meta?.nanocoder as
+				| { extMethods?: unknown }
+				| undefined)?.extMethods;
+			this._extMethods = Array.isArray(advertised) ? advertised : [];
 
 			// Complete handshake
 			this._handshakeComplete = true;
@@ -380,7 +394,20 @@ export class NanocoderAcpClient {
 	newChat(): void {
 		// Abandoning the conversation abandons its approval prompts too.
 		this._clearPendingPermissions();
+		const previousSessionId = this._sessionId;
 		this._sessionId = undefined;
+		// Let the agent cancel the old session's work and free its resources
+		// (timeline lock, in-memory history). Fire-and-forget: New Chat must
+		// not wait on the agent, and a failure only leaves the session open.
+		if (previousSessionId && this.connection && this._supportsSessionClose) {
+			this.connection
+				.closeSession({sessionId: previousSessionId})
+				.catch(error => {
+					this.outputChannel.appendLine(
+						`Failed to close session ${previousSessionId}: ${error}`,
+					);
+				});
+		}
 		// ...and a session still being created for it.
 		this._abandonPendingSession();
 		this.onSessionArtifacts?.(undefined);
@@ -488,10 +515,22 @@ export class NanocoderAcpClient {
 		}
 	}
 
+	/**
+	 * The advertised name when the agent lists it, else the bare name an agent
+	 * from before the `_nanocoder/` prefix understands.
+	 */
+	private extMethodName(method: (typeof ACP_EXT_METHODS)[number]): string {
+		const advertised = `${ACP_EXT_PREFIX}${method}`;
+		return this._extMethods.includes(advertised) ? advertised : method;
+	}
+
 	async renameSession(sessionId: string, title: string): Promise<void> {
 		if (!this.connection) return;
 		try {
-			await this.connection.extMethod('renameSession', {sessionId, title});
+			await this.connection.extMethod(
+				this.extMethodName('renameSession'),
+				{sessionId, title},
+			);
 		} catch (error) {
 			this.outputChannel.appendLine(`renameSession failed: ${error}`);
 			vscode.window.showErrorMessage(`Failed to rename session: ${error}`);
@@ -540,10 +579,13 @@ export class NanocoderAcpClient {
 			return;
 		}
 		try {
-			await this.connection.extMethod('retryTurn', {
-				sessionId: this._sessionId,
-				promptText,
-			});
+			await this.connection.extMethod(
+				this.extMethodName('retryTurn'),
+				{
+					sessionId: this._sessionId,
+					promptText,
+				},
+			);
 		} catch (error) {
 			this.outputChannel.appendLine(`retryTurn warning: ${error}`);
 		}

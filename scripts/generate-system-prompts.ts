@@ -10,7 +10,7 @@ import {existsSync, mkdirSync, writeFileSync} from 'fs';
 import {dirname, join} from 'path';
 import {fileURLToPath} from 'url';
 import {formatToolsForPrompt} from '@/ai-sdk-client/tools/tool-prompt-formatter';
-import {allToolExports} from '@/tools/index';
+import {getAllToolExports} from '@/tools/index';
 import {getToolsForProfile} from '@/tools/tool-profiles';
 import {ToolRegistry} from '@/tools/tool-registry';
 import type {ToolProfile, TuneConfig} from '@/types/config';
@@ -22,7 +22,7 @@ const __dirname = dirname(__filename);
 const outputDir = join(__dirname, '../.generated-prompts');
 
 // Build a real ToolRegistry from actual tool exports
-const registry = ToolRegistry.fromToolExports(allToolExports);
+const registry = ToolRegistry.fromToolExports(getAllToolExports());
 
 interface Variant {
 	name: string;

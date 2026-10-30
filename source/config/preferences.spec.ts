@@ -12,6 +12,7 @@ import {
 	MIN_TOKEN_BUDGET,
 } from '@/memory/project-context';
 import {
+	directoryTrustRefusal,
 	ensureDirectoryTrust,
 	grantDirectoryTrust,
 	getCompactToolDisplay,
@@ -2255,6 +2256,69 @@ test.serial(
 		t.deepEqual(result, {trusted: false, persisted: false, recheck: 'upgrade'});
 	},
 );
+
+test.serial('directoryTrustRefusal returns the refusal message for an untrusted directory', t => {
+	delete process.env.NANOCODER_TRUST_DIRECTORY;
+	const message = directoryTrustRefusal('/untrusted/project', false, {
+		loadPreferences: () => ({trustedDirectories: []}),
+		savePreferences: () => {
+			t.fail('should not persist when refusing');
+		},
+	});
+	t.regex(message ?? '', /is not trusted/);
+	t.regex(message ?? '', /--trust-directory/);
+	t.regex(message ?? '', /NANOCODER_TRUST_DIRECTORY=1/);
+});
+
+test.serial('directoryTrustRefusal words a path-only entry as needing re-approval after the upgrade', t => {
+	delete process.env.NANOCODER_TRUST_DIRECTORY;
+	const dir = process.cwd();
+	const message = directoryTrustRefusal(dir, false, {
+		loadPreferences: () => ({trustedDirectories: [dir]}),
+		savePreferences: () => {
+			t.fail('should not persist when refusing');
+		},
+	});
+	t.regex(message ?? '', /needs re-approval after the upgrade/);
+});
+
+test.serial('directoryTrustRefusal words a changed fingerprint differently from an unknown directory', t => {
+	delete process.env.NANOCODER_TRUST_DIRECTORY;
+	const dir = process.cwd();
+	const message = directoryTrustRefusal(dir, false, {
+		loadPreferences: () => ({
+			trustedDirectories: [{path: dir, fingerprint: 'old'}],
+		}),
+		savePreferences: () => {
+			t.fail('should not persist when refusing');
+		},
+	});
+	t.regex(message ?? '', /changed since you trusted it/);
+	t.notRegex(message ?? '', /is not trusted/);
+});
+
+test('directoryTrustRefusal is null when bypassed or already trusted', t => {
+	const deps = {
+		loadPreferences: () => ({trustedDirectories: []}),
+		savePreferences: () => {
+			t.fail('should not persist');
+		},
+	};
+	t.is(directoryTrustRefusal('/untrusted/project', true, deps), null);
+
+	const dir = process.cwd();
+	t.is(
+		directoryTrustRefusal(dir, false, {
+			...deps,
+			loadPreferences: () => ({
+				trustedDirectories: [
+					{path: dir, fingerprint: describeProjectTrust(dir).fingerprint},
+				],
+			}),
+		}),
+		null,
+	);
+});
 
 test('trust checks skip malformed entries instead of throwing', t => {
 	const dir = process.cwd();

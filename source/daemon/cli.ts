@@ -37,31 +37,54 @@ function getLogPath(projectRoot: string): string {
 	return join(projectRoot, '.nanocoder', 'daemon.log');
 }
 
+const TRUST_LEVEL_LIST = 'comment-only, auto-fix, full-commit';
+
 const START_USAGE =
-	'Usage: nanocoder daemon start [--trust <comment-only|auto-fix|full-commit>]';
+	'Usage: nanocoder daemon start [--trust <comment-only|auto-fix|full-commit>] [--trust-directory]';
 
 interface ParsedStartArgs {
 	trustLevel?: TrustLevel;
 }
 
+function parseTrustValue(
+	value: string | undefined,
+): TrustLevel | {error: string} {
+	// `--trust --trust-directory` / a trailing `--trust`: the level is
+	// missing, not invalid - say that rather than `Invalid --trust value: ""`.
+	if (value === undefined || value === '' || value.startsWith('-')) {
+		return {error: `--trust requires a level: one of ${TRUST_LEVEL_LIST}.`};
+	}
+	if (!isTrustLevel(value)) {
+		return {
+			error: `Invalid --trust value: "${value}". Must be one of ${TRUST_LEVEL_LIST}.`,
+		};
+	}
+	return value;
+}
+
 /**
  * Parse `daemon start`'s flags. Mirrors `verify/cli.ts`'s `parseArgs`:
  * hand-rolled loop, unknown-flag rejection, discriminated-union return.
+ * `--trust` is the CI investigation trust level; it is unrelated to
+ * `--trust-directory` (the directory trust gate).
  */
 function parseStartArgs(args: string[]): ParsedStartArgs | {error: string} {
 	let trustLevel: TrustLevel | undefined;
 
 	for (let i = 0; i < args.length; i++) {
-		const arg = args[i];
-		if (arg === '--trust') {
-			const value = args[i + 1];
-			i++;
-			if (!isTrustLevel(value)) {
-				return {
-					error: `Invalid --trust value: "${value ?? ''}". Must be one of comment-only, auto-fix, full-commit.`,
-				};
+		const arg = args[i] ?? '';
+		if (arg === '--trust' || arg.startsWith('--trust=')) {
+			let raw: string | undefined;
+			if (arg === '--trust') {
+				raw = args[i + 1];
+				// Don't swallow the next flag as the value.
+				if (raw !== undefined && !raw.startsWith('-')) i++;
+			} else {
+				raw = arg.slice('--trust='.length);
 			}
-			trustLevel = value;
+			const parsed = parseTrustValue(raw);
+			if (typeof parsed === 'object') return parsed;
+			trustLevel = parsed;
 		} else if (arg === '--trust-directory') {
 			// Handled by cli.tsx (passed as `trustDirectory`); not a start-arg here.
 		} else {
@@ -115,6 +138,38 @@ async function defaultConfirmFullCommitTrust(
 	}
 }
 
+const CONFIG_AUTO_FIX_WARNING = (projectRoot: string) => `
+Warning: agents.config.json sets verify.trustLevel to auto-fix for:
+  ${projectRoot}
+
+At this trust level, when CI watch detects a failure, the daemon runs an
+agent that edits files and runs shell commands with no confirmation,
+steered by the failed CI log, then opens a draft PR with its fix.
+
+The level came from a config file, not from --trust on this command, so it
+needs your confirmation. Pass --trust auto-fix to skip this prompt.
+`;
+
+/**
+ * Default confirmation for an elevated trust level that came from
+ * agents.config.json rather than the --trust flag. A config file can be
+ * committed by someone else (or changed by the PR the daemon is watching),
+ * so it must not raise the level on its own.
+ */
+async function defaultConfirmConfigAutoFixTrust(
+	projectRoot: string,
+): Promise<boolean> {
+	if (!process.stdin.isTTY) return false;
+	process.stdout.write(CONFIG_AUTO_FIX_WARNING(projectRoot));
+	const rl = createInterface({input: process.stdin, output: process.stdout});
+	try {
+		const answer = (await rl.question('Proceed? [y/N] ')).trim().toLowerCase();
+		return answer === 'y' || answer === 'yes';
+	} finally {
+		rl.close();
+	}
+}
+
 export interface DaemonCliResult {
 	exitCode: 0 | 1;
 	output: string;
@@ -143,6 +198,11 @@ export interface DaemonCliOptions {
 	args?: string[];
 	/** Test seam: override the one-time full-commit confirmation prompt. */
 	confirmFullCommitTrust?: (projectRoot: string) => Promise<boolean>;
+	/** Test seam: override the confirmation for `auto-fix` set by
+	 * agents.config.json rather than the --trust flag. */
+	confirmConfigAutoFixTrust?: (projectRoot: string) => Promise<boolean>;
+	/** Test seam: whether an interactive terminal can answer a prompt. */
+	isInteractive?: () => boolean;
 	/** Test seam: override the persisted confirmation check. */
 	isFullCommitTrustConfirmedFn?: typeof isFullCommitTrustConfirmed;
 	/** Test seam: override persisting the confirmation. */
@@ -229,11 +289,22 @@ async function uninstallCommand(
 }
 
 async function start(opts: DaemonCliOptions): Promise<DaemonCliResult> {
+	const parsed = parseStartArgs(opts.args ?? []);
+	if ('error' in parsed) {
+		return {exitCode: 1, output: `${parsed.error}\n${START_USAGE}`};
+	}
+
 	const live = await readLiveLockfile(opts.projectRoot);
 	if (live) {
+		const current = isTrustLevel(live.ciTrustLevel)
+			? ` CI trust level: ${live.ciTrustLevel}.`
+			: '';
+		const notApplied = parsed.trustLevel
+			? ` --trust ${parsed.trustLevel} was not applied; run \`nanocoder daemon stop\` and start it again to change the level.`
+			: '';
 		return {
 			exitCode: 0,
-			output: `Daemon already running (pid ${live.pid}).`,
+			output: `Daemon already running (pid ${live.pid}).${current}${notApplied}`,
 		};
 	}
 
@@ -276,24 +347,46 @@ async function start(opts: DaemonCliOptions): Promise<DaemonCliResult> {
 		};
 	}
 
-	const parsed = parseStartArgs(opts.args ?? []);
-	if ('error' in parsed) {
-		return {exitCode: 1, output: `${parsed.error}\n${START_USAGE}`};
-	}
-
 	const loadVerifyConfig =
 		opts.loadVerifyConfigFn ?? (() => getAppConfig().verify);
 	const configTrustLevel = loadVerifyConfig()?.trustLevel;
-	const trustLevel = resolveTrustLevel(parsed.trustLevel, configTrustLevel);
-	const trustSource = parsed.trustLevel
+	let trustLevel = resolveTrustLevel(parsed.trustLevel, configTrustLevel);
+	let trustSource = parsed.trustLevel
 		? '--trust flag'
 		: configTrustLevel
 			? 'agents.config.json'
 			: 'default';
 
+	const isConfirmed =
+		opts.isFullCommitTrustConfirmedFn ?? isFullCommitTrustConfirmed;
+	const isInteractive = opts.isInteractive ?? (() => !!process.stdin.isTTY);
+
+	// An elevated level from agents.config.json (which may be the project's
+	// own committed file) must be confirmed by the user. Unattended starts
+	// (`daemon install`'s service, scripts) cannot answer, so they fall back
+	// to comment-only instead of failing to start at all. A project already
+	// confirmed for full-commit has accepted a superset of auto-fix's risk.
+	if (!parsed.trustLevel && trustLevel !== 'comment-only') {
+		const alreadyConfirmed = isConfirmed(opts.projectRoot);
+		if (!alreadyConfirmed && !isInteractive()) {
+			const requested = trustLevel;
+			trustLevel = 'comment-only';
+			trustSource = `agents.config.json asked for ${requested}, which needs a one-time interactive confirmation (or --trust ${requested}) - using comment-only`;
+		} else if (!alreadyConfirmed && trustLevel === 'auto-fix') {
+			const confirm =
+				opts.confirmConfigAutoFixTrust ?? defaultConfirmConfigAutoFixTrust;
+			if (!(await confirm(opts.projectRoot))) {
+				return {
+					exitCode: 1,
+					output:
+						'Aborted: auto-fix trust from agents.config.json was not confirmed. ' +
+						'Pass --trust comment-only to start without it, or --trust auto-fix to opt in explicitly.',
+				};
+			}
+		}
+	}
+
 	if (trustLevel === 'full-commit') {
-		const isConfirmed =
-			opts.isFullCommitTrustConfirmedFn ?? isFullCommitTrustConfirmed;
 		if (!isConfirmed(opts.projectRoot)) {
 			const confirm =
 				opts.confirmFullCommitTrust ?? defaultConfirmFullCommitTrust;
@@ -424,9 +517,12 @@ async function status(opts: DaemonCliOptions): Promise<DaemonCliResult> {
 		};
 	}
 	const uptime = formatUptime(Date.now() - live.startedAt);
+	const trust = isTrustLevel(live.ciTrustLevel)
+		? `, CI trust level ${live.ciTrustLevel}`
+		: '';
 	return {
 		exitCode: 0,
-		output: `Running. pid ${live.pid}, socket ${live.socketPath}, uptime ${uptime}.`,
+		output: `Running. pid ${live.pid}, socket ${live.socketPath}, uptime ${uptime}${trust}.`,
 	};
 }
 

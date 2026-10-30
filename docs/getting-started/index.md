@@ -55,7 +55,7 @@ nanocoder -h
 | `--output-format` | | Set the `stdout` format, `text` or `json`. Synonym for `--json` |
 | `--context-max` | | Set maximum context length in tokens (supports k/K suffix, e.g. `128k`) |
 | `--mode` | | Start in a specific [development mode](../features/development-modes.md) - `normal`, `auto-accept`, `yolo`, `plan`, or `architect`. Defaults to `auto-accept` for `run` mode; interactive sessions use `defaultMode` from `agents.config.json` if set, otherwise `normal`. |
-| `--trust-directory` | | Skip the first-run directory trust prompt for this run only. Valid with `run` and `nanocoder daemon start`; ignored (with a warning) in interactive mode. The trust is ephemeral - `trustedDirectories` in your preferences file is not modified. |
+| `--trust-directory` | | Skip the first-run directory trust prompt for this run only. Valid with `run`, `nanocoder daemon start`, `nanocoder verify` and `--acp`; ignored (with a warning) in interactive mode. The trust is ephemeral - `trustedDirectories` in your preferences file is not modified. |
 | `--alt-screen` | | Start in fullscreen mode: a fixed-height layout on the alternate screen buffer with in-app scrolling (enabled by default). |
 | `--no-alt-screen` | | Disable fullscreen mode and force inline mode (main screen, chat history in the terminal's native scrollback). |
 | `--mouse` | | In fullscreen mode, the mouse wheel scrolls the chat viewport; select text with Shift+drag (Option+drag in iTerm2). Enabled by default. |
@@ -213,6 +213,8 @@ nanocoder worktree 42
 ```
 
 This starts an interactive Nanocoder session at PR #42's head in a new Git worktree. Git and an authenticated GitHub CLI (`gh auth login`) are required. When `origin` is your fork and `upstream` is the project repository, Nanocoder looks up and fetches the PR from `upstream`; this also works for PRs submitted from contributor forks. The worktree is a sibling of the repository, named `<repository>-pr-42`, with local branch `nanocoder/pr-42`. The launching repository's branch, index, and files are left alone.
+
+Global options such as `--provider`, `--model`, `--context-max` and `--mode` can follow the PR number and apply to the new session, for example `nanocoder worktree 42 --provider openrouter --mode plan`.
 
 An existing directory or local branch causes an error; Nanocoder never overwrites or reuses it. The worktree and branch remain after the session ends, so you can return to your changes. When finished, remove them from the original repository with `git worktree remove <path>` and `git branch -d nanocoder/pr-42`. If setup fails, Nanocoder removes only the directory and branch it created for that attempt.
 

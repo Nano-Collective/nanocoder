@@ -218,7 +218,8 @@ Commands:
   copilot login [provider-name]   Log in to GitHub Copilot (device flow). Saves credentials for the "GitHub Copilot" provider.
   codex login [provider-name]     Log in to ChatGPT/Codex (device flow). Saves credentials for the "ChatGPT" provider.
   review <branch|pr-number>       Review a branch or PR diff for bugs, security issues, and style violations.
-  worktree <PR-number>            Start an interactive session in a new worktree for a GitHub PR.
+  worktree <PR-number> [options]  Start an interactive session in a new worktree for a GitHub PR.
+                                  Accepts the global options below, e.g. --provider, --mode.
   daemon <subcommand>             Manage the per-project skill daemon.
                                   Subcommands: start, stop, status, logs, install, uninstall.
                                   start [--trust <comment-only|auto-fix|full-commit>]
@@ -260,8 +261,8 @@ Options:
                       line. Necessary for large prompts: Linux caps a single
                       argument at 128 KiB and execve fails with E2BIG.
   --trust-directory   Skip the first-run directory trust prompt for this run only.
-                      Valid with the "run" command and "daemon start". Does not modify
-                      the preferences file.
+                      Valid with "run", "daemon start", "verify" and --acp. Does not
+                      modify the preferences file.
   --plain             Use a lightweight, Ink-free runtime for non-interactive runs.
                       Only valid with the "run" command. Auto-enables in CI / non-TTY.
   --no-plain          Force the Ink runtime even in CI / non-TTY environments.
@@ -277,7 +278,8 @@ Options:
                       Only valid with the "run" command. Always uses the plain runtime.
   --output-format     Specify stdout format ('text' or 'json'). Synonym for --json.
   --acp               Run as an ACP (Agent Client Protocol) server for editor integration.
-                      Communicates via JSON-RPC over stdin/stdout.
+                      Communicates via JSON-RPC over stdin/stdout. Refuses an untrusted
+                      directory unless --trust-directory is passed.
   -c, --continue      Resume the most recent session for the current directory, silently.
                       Starts a fresh session if none exists. Interactive mode only.
   -r, --resume [id]   Resume a session by id or 1-based list index (e.g. "last", "2",
@@ -300,6 +302,7 @@ Examples:
   nanocoder review feature/auth
   nanocoder review 42
   nanocoder worktree 42
+  nanocoder worktree 42 --mode plan
   nanocoder --continue
   nanocoder --resume last
   nanocoder --resume
@@ -328,10 +331,18 @@ async function main(): Promise<void> {
 	// Those packages pull ~thousand+ modules; --acp / --plain / auth must stay
 	// on the lightweight path. Ink + App load only in the final TUI branch.
 	if (args[0] === 'worktree') {
-		const {createPrWorktree, parseWorktreePrNumber} = await import(
-			'./commands/gh-pr-worktree'
+		const [{createPrWorktree, parseWorktreePrNumber}, {parseWorktreeArgs}] =
+			await Promise.all([
+				import('./commands/gh-pr-worktree'),
+				import('./cli-args.js'),
+			]);
+		// Global options after the PR number (`--provider`, `--mode`, ...) are
+		// validated by validateCliArgs above and read by the normal startup
+		// path below, so the worktree session honours them.
+		const worktreeArgs = parseWorktreeArgs(args);
+		const prNumber = parseWorktreePrNumber(
+			'error' in worktreeArgs ? args.slice(1) : worktreeArgs.positionals,
 		);
-		const prNumber = parseWorktreePrNumber(args.slice(1));
 		if (!process.stdin.isTTY || !process.stdout.isTTY) {
 			throw new Error(
 				'`nanocoder worktree` requires an interactive terminal (TTY).',
@@ -623,9 +634,9 @@ async function main(): Promise<void> {
 	// (rather than silently dropping) if the user passes it interactively
 	// or with `review` (review is TTY-only but sets nonInteractiveMode).
 	const trustDirectoryRequested = args.includes('--trust-directory');
-	if (trustDirectoryRequested && !isRunCommand) {
+	if (trustDirectoryRequested && !isRunCommand && !args.includes('--acp')) {
 		console.error(
-			'--trust-directory only applies to non-interactive commands (`nanocoder run ...`, `nanocoder daemon start`); ignoring.',
+			'--trust-directory only applies to non-interactive commands (`nanocoder run ...`, `nanocoder daemon start`, `nanocoder verify`, `nanocoder --acp`); ignoring.',
 		);
 	}
 	const trustDirectory = trustDirectoryRequested && isRunCommand;
@@ -759,7 +770,13 @@ async function main(): Promise<void> {
 		}
 	} else if (acpMode) {
 		const {runAcpServer} = await import('@/acp/acp-server');
-		await runAcpServer({cliProvider, cliModel, appVersion: version});
+		await runAcpServer({
+			cliProvider,
+			cliModel,
+			appVersion: version,
+			trustDirectory: trustDirectoryRequested,
+			mode: cliMode,
+		});
 	} else if (plainMode && nonInteractivePrompt) {
 		// Headless, Ink-free path. Note: --plain is currently only valid with
 		// `run`, so we must have a non-empty prompt here.
@@ -1046,7 +1063,15 @@ async function main(): Promise<void> {
 	}
 }
 
-main().catch(err => {
+main().catch(async (err: unknown) => {
 	console.error(err instanceof Error ? err.message : err);
-	process.exit(1);
+	// Exit through the shutdown manager so registered handlers still run, such
+	// as the session-end hook of `run` / --plain. It exits the process itself,
+	// or returns early when a shutdown is already under way and that one will.
+	try {
+		const {getShutdownManager} = await import('@/utils/shutdown');
+		await getShutdownManager().gracefulShutdown(1);
+	} catch {
+		process.exit(1);
+	}
 });

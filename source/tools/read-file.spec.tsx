@@ -1,4 +1,4 @@
-import {mkdirSync, rmSync, writeFileSync} from 'node:fs';
+import {mkdirSync, rmSync, symlinkSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 import test from 'ava';
 import {render} from 'ink-testing-library';
@@ -1336,6 +1336,90 @@ test.serial('read_file returns the body again after compact generation bump', as
 			{toolCallId: 'test', messages: []},
 		);
 		t.true(result.includes('keep me'));
+	} finally {
+		rmSync(testDir, {recursive: true, force: true});
+	}
+});
+
+test.serial('read_file returns the new body after a symlinked file target changes', async t => {
+	t.timeout(10000);
+	const testDir = join(process.cwd(), 'test-read-stub-symlink-temp');
+
+	try {
+		mkdirSync(testDir, {recursive: true});
+		const targetPath = join(testDir, 'CLAUDE.md');
+		const linkPath = join(testDir, 'AGENTS.md');
+		writeFileSync(targetPath, 'Build with: npm run build\n');
+		symlinkSync('CLAUDE.md', linkPath);
+
+		const first = await readFileTool.tool.execute!(
+			{path: linkPath},
+			{toolCallId: 'test', messages: []},
+		);
+		t.true(first.includes('npm run build'));
+
+		// An unchanged target still stubs through the link.
+		const second = await readFileTool.tool.execute!(
+			{path: linkPath},
+			{toolCallId: 'test', messages: []},
+		);
+		t.true(second.includes('already in context'));
+
+		writeFileSync(targetPath, 'Build with: pnpm build\n');
+		const third = await readFileTool.tool.execute!(
+			{path: linkPath},
+			{toolCallId: 'test', messages: []},
+		);
+		t.true(third.includes('pnpm build'));
+		t.false(third.includes('already in context'));
+	} finally {
+		rmSync(testDir, {recursive: true, force: true});
+	}
+});
+
+test.serial('read_file reports a symlink as missing once its target is deleted', async t => {
+	t.timeout(10000);
+	const testDir = join(process.cwd(), 'test-read-stub-dangling-temp');
+
+	try {
+		mkdirSync(testDir, {recursive: true});
+		const targetPath = join(testDir, 'target.md');
+		const linkPath = join(testDir, 'link.md');
+		writeFileSync(targetPath, 'gone soon\n');
+		symlinkSync('target.md', linkPath);
+
+		await readFileTool.tool.execute!(
+			{path: linkPath},
+			{toolCallId: 'test', messages: []},
+		);
+
+		rmSync(targetPath);
+		await t.throwsAsync(
+			readFileTool.tool.execute!(
+				{path: linkPath},
+				{toolCallId: 'test', messages: []},
+			),
+			{message: /does not exist/},
+		);
+	} finally {
+		rmSync(testDir, {recursive: true, force: true});
+	}
+});
+
+test.serial('read_file metadata_only still describes a symlink as a link', async t => {
+	t.timeout(10000);
+	const testDir = join(process.cwd(), 'test-read-meta-symlink-temp');
+
+	try {
+		mkdirSync(testDir, {recursive: true});
+		const linkPath = join(testDir, 'dangling.md');
+		symlinkSync('missing.md', linkPath);
+
+		const result = await readFileTool.tool.execute!(
+			{path: linkPath, metadata_only: true},
+			{toolCallId: 'test', messages: []},
+		);
+		t.regex(result, /Type: symlink/);
 	} finally {
 		rmSync(testDir, {recursive: true, force: true});
 	}

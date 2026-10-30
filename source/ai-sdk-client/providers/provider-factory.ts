@@ -48,6 +48,74 @@ export type TaggedProvider =
 	| {kind: 'anthropic'; provider: AnthropicProvider}
 	| {kind: 'google'; provider: GoogleGenerativeAIProvider};
 
+type FetchLike = (
+	url: string | URL | Request,
+	options?: RequestInit,
+) => Promise<Response>;
+
+/** A 400/422 whose body names the streaming usage option. */
+const STREAM_OPTIONS_ERROR = /stream_options|include_usage/i;
+
+function withoutStreamOptions(body: string): string | undefined {
+	try {
+		const parsed = JSON.parse(body) as Record<string, unknown>;
+		if (!parsed || typeof parsed !== 'object' || !('stream_options' in parsed))
+			return undefined;
+		delete parsed.stream_options;
+		return JSON.stringify(parsed);
+	} catch {
+		return undefined;
+	}
+}
+
+/**
+ * Retry once without `stream_options` when an OpenAI-compatible endpoint
+ * rejects it. `includeUsage` defaults to true, which makes the SDK send
+ * `stream_options: {include_usage: true}`; some strict endpoints and proxies
+ * answer that with a 400 or 422. When the error body names the option, the
+ * request is replayed without it and later requests from this provider skip
+ * it up front, so the session keeps working (without streamed usage) rather
+ * than failing every turn. Setting `includeUsage` explicitly in the provider
+ * config bypasses this wrapper.
+ */
+export function createStreamOptionsFallbackFetch(
+	baseFetch: FetchLike,
+	providerName: string,
+): FetchLike {
+	let stripStreamOptions = false;
+	return async (url, options) => {
+		const body = options?.body;
+		if (typeof body !== 'string' || !body.includes('"stream_options"')) {
+			return baseFetch(url, options);
+		}
+		if (stripStreamOptions) {
+			const stripped = withoutStreamOptions(body);
+			return baseFetch(url, stripped ? {...options, body: stripped} : options);
+		}
+
+		const response = await baseFetch(url, options);
+		if (response.status !== 400 && response.status !== 422) return response;
+
+		let errorText: string;
+		try {
+			errorText = await response.clone().text();
+		} catch {
+			return response;
+		}
+		if (!STREAM_OPTIONS_ERROR.test(errorText)) return response;
+
+		const stripped = withoutStreamOptions(body);
+		if (!stripped) return response;
+
+		stripStreamOptions = true;
+		getLogger().warn(
+			'Endpoint rejected stream_options; retrying without streaming usage. Set "includeUsage": false in the provider config to skip this.',
+			{provider: providerName, status: response.status},
+		);
+		return baseFetch(url, {...options, body: stripped});
+	};
+}
+
 /**
  * Wraps undici's fetch so requests flow through the shared Agent. The Agent
  * carries TLS connect options (e.g. caCertPath), so any SDK provider given
@@ -526,8 +594,12 @@ export async function createProvider(
 		headers['X-Title'] = 'Nanocoder';
 	}
 
-	const includeUsage =
-		typeof config.includeUsage === 'boolean' ? config.includeUsage : true;
+	// Usage reporting is on by default. When the user has not set
+	// `includeUsage` explicitly, a strict endpoint that rejects
+	// `stream_options` gets one retry without it instead of failing the turn.
+	const includeUsageExplicit = typeof config.includeUsage === 'boolean';
+	const includeUsage = includeUsageExplicit ? config.includeUsage : true;
+	const baseFetch = createUndiciFetch(undiciAgent);
 
 	const {createOpenAICompatible} = await import('@ai-sdk/openai-compatible');
 	return {
@@ -536,7 +608,9 @@ export async function createProvider(
 			name: providerConfig.name,
 			baseURL: config.baseURL ?? '',
 			apiKey: config.apiKey ?? 'dummy-key',
-			fetch: createUndiciFetch(undiciAgent),
+			fetch: includeUsageExplicit
+				? baseFetch
+				: createStreamOptionsFallbackFetch(baseFetch, providerConfig.name),
 			headers,
 			includeUsage,
 		}),

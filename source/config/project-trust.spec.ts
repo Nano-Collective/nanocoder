@@ -294,3 +294,93 @@ test('symlinked command folders and skill bundles are followed', t => {
 		rmSync(shared, {recursive: true, force: true});
 	}
 });
+
+test('a .env file is listed and its content is fingerprinted', t => {
+	const root = tempRoot();
+	try {
+		writeFileSync(join(root, '.env'), 'API_KEY=one\n');
+		const first = describeProjectTrust(root);
+		t.true(first.envFile);
+		t.is(first.summary, 'This folder contains: a .env file.');
+		t.is(describeProjectTrust(root).fingerprint, first.fingerprint);
+
+		writeFileSync(join(root, '.env'), 'API_KEY=two\n');
+		t.not(describeProjectTrust(root).fingerprint, first.fingerprint);
+	} finally {
+		rmSync(root, {recursive: true, force: true});
+	}
+});
+
+test('settings that relax confirmations and provider base URLs are fingerprinted', t => {
+	const root = tempRoot();
+	const write = (nanocoder: object) =>
+		writeFileSync(join(root, 'agents.config.json'), JSON.stringify({nanocoder}));
+	try {
+		write({
+			alwaysAllow: ['execute_bash'],
+			defaultMode: 'yolo',
+			sandbox: false,
+			verify: {trustLevel: 'auto-fix', pollIntervalMs: 1000},
+			providers: [
+				{name: 'local', baseUrl: 'http://localhost:11434/v1'},
+				{name: 'nourl', models: ['x']},
+			],
+		});
+		const surface = describeProjectTrust(root);
+		t.is(surface.permissionSettings, 4);
+		t.is(surface.providerEndpoints, 1);
+		t.is(
+			surface.summary,
+			'This folder contains: 4 permission settings, 1 provider endpoint.',
+		);
+		t.is(describeProjectTrust(root).fingerprint, surface.fingerprint);
+
+		const variants: object[] = [
+			{alwaysAllow: ['execute_bash', 'write_file']},
+			{defaultMode: 'auto-accept'},
+			{sandbox: true},
+			{verify: {trustLevel: 'comment-only'}},
+			{providers: [{name: 'local', baseUrl: 'http://evil.example/v1'}]},
+		];
+		const seen = new Set([surface.fingerprint]);
+		for (const variant of variants) {
+			write(variant);
+			const fingerprint = describeProjectTrust(root).fingerprint;
+			t.false(seen.has(fingerprint), JSON.stringify(variant));
+			seen.add(fingerprint);
+		}
+	} finally {
+		rmSync(root, {recursive: true, force: true});
+	}
+});
+
+test('top-level providers are read when nanocoder.providers is absent', t => {
+	const root = tempRoot();
+	try {
+		writeFileSync(
+			join(root, 'agents.config.json'),
+			JSON.stringify({providers: [{name: 'p', baseUrl: 'http://a/v1'}]}),
+		);
+		t.is(describeProjectTrust(root).providerEndpoints, 1);
+	} finally {
+		rmSync(root, {recursive: true, force: true});
+	}
+});
+
+test('a folder without the newer inputs keeps its earlier fingerprint', t => {
+	const root = tempRoot();
+	try {
+		// Unrelated settings add nothing, so this matches an empty folder:
+		// the sha256 of no lines, as the earlier algorithm produced.
+		writeFileSync(
+			join(root, 'agents.config.json'),
+			JSON.stringify({nanocoder: {autoCompact: {enabled: true}, tune: {}}}),
+		);
+		t.is(
+			describeProjectTrust(root).fingerprint,
+			'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
+		);
+	} finally {
+		rmSync(root, {recursive: true, force: true});
+	}
+});

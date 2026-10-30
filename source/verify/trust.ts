@@ -77,14 +77,16 @@ const INVESTIGATION_TOOLS: readonly ToolAllowance[] = [
 // File-mutation tools — the write access the issue calls out explicitly as
 // denied in comment-only mode. `write_file`/`string_replace` are this
 // repo's primary editors (see CLAUDE.md); `git_add`/`git_commit` stage and
-// commit the result; `execute_bash` covers running tests/build to verify a
-// fix before committing it.
+// commit the result. `execute_bash` is deliberately left out: the fix agent
+// runs unattended and is steered by a CI log an attacker can influence, and
+// a shell as the user can read credentials on disk (`~/.config/gh`,
+// `~/.ssh`) by absolute path whatever the runner's environment says. The
+// fix is verified by the CI run its draft PR or push triggers instead.
 const MUTATION_TOOLS: readonly ToolAllowance[] = [
 	{tool: 'write_file'},
 	{tool: 'string_replace'},
 	{tool: 'git_add'},
 	{tool: 'git_commit'},
-	{tool: 'execute_bash'},
 ];
 
 /**
@@ -188,15 +190,19 @@ export function isTrustLevel(value: unknown): value is TrustLevel {
 // trust level has already vetted them into getAllowedToolNames() above.
 // Deliberately excludes `git_pr` at every level, even full-commit: posting
 // to / mutating GitHub must always be harness-mediated (see
-// `postPrComment`/`pushBranch`/`createDraftPr` in `source/tools/git/utils.ts`),
+// `postPrComment`/`createDraftPr` in `source/tools/git/utils.ts`, and
+// `publishFromClone` in `source/daemon/ci-fix-orchestrator.ts`),
 // never an auto-approved raw tool call from the subagent itself — that
 // invariant is what makes the "harness posts, not the LLM" pattern from
 // Phase 2/3 hold even at the most-trusted level. The other MUTATION_TOOLS
-// (`write_file`/`string_replace`/`git_add`/`execute_bash`) don't need to be
+// (`write_file`/`string_replace`/`git_add`) don't need to be
 // listed here: their own approval policies already treat headless mode as
 // not needing approval. Only `git_commit` has an unconditional
 // `approval: true`, which is otherwise silently auto-denied in headless
 // mode (no approval-queue handler is ever registered there).
+// As defence in depth the CI fix runner is also started without any git/gh
+// credentials (`buildFixRunnerEnv` in `source/daemon/ci-fix-orchestrator.ts`);
+// the daemon publishes from its own process.
 const HEADLESS_AUTO_APPROVE_TOOLS: Record<TrustLevel, readonly string[]> = {
 	'comment-only': [],
 	'auto-fix': ['git_commit'],

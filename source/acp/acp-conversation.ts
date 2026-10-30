@@ -3,6 +3,7 @@ import type {
 	PromptResponse,
 	ToolCallStatus,
 } from '@agentclientprotocol/sdk';
+import {ACP_SUBAGENT_NOTIFICATION} from '@/acp/acp-capabilities';
 import {requestToolPermission} from '@/acp/acp-permission';
 import {requestUserChoice} from '@/acp/acp-question';
 import type {AcpSession} from '@/acp/acp-session';
@@ -31,6 +32,7 @@ import {
 import {runInSessionCwdScope} from '@/services/session-cwd';
 import {
 	getAllSubagentProgress,
+	onSubagentRunEvent,
 	type SubagentEvent,
 } from '@/services/subagent-events';
 import {parseToolCalls} from '@/tool-calling/index';
@@ -55,8 +57,8 @@ import {
 	runWithReadContentScope,
 } from '@/utils/read-tracker';
 import {
-	type PendingToolApproval,
-	setGlobalToolApprovalHandler,
+	registerSubagentToolBridge,
+	type SubagentToolBridge,
 } from '@/utils/tool-approval-queue';
 import {createCancellationResults} from '@/utils/tool-cancellation';
 import {toOptionString} from '@/utils/type-helpers';
@@ -84,100 +86,110 @@ export interface RunAcpConversationOptions {
 	session: AcpSession;
 	client: LLMClient;
 	toolManager: ToolManager;
+	/**
+	 * Set when the session has MCP servers of its own. Tool calls, and the
+	 * subagents they start, then run against these tools instead of the
+	 * process-wide set.
+	 */
+	sessionTools?: ToolManager;
 	conn: AgentSideConnection;
 	nonInteractiveAlwaysAllow: string[];
 }
 
 /**
- * Sub-agent tool calls reach the approval slot in tool-approval-queue, which
- * only the Ink UI installs a handler for. Under ACP the slot fell back to
- * denying, so a dispatched sub-agent was refused without the client seeing a
- * request. Route those to the same session/request_permission channel the
- * top-level calls use.
+ * Sub-agent tool calls reach the client through a bridge registered under the
+ * session's id, so two sessions mid-turn can't answer each other's prompts
+ * (the process-wide approval slot only fits the Ink UI). Every call is
+ * announced, approved by the same rules as a top-level call, and settled with
+ * its real outcome.
+ *
+ * Each method catches a client or transport failure: they are awaited outside
+ * the sub-agent executor's own try, so a throw would abort the whole run
+ * instead of costing one card, or denying one tool.
  */
-function createSubagentApprovalHandler(
+function createSubagentToolBridge(
 	session: AcpSession,
 	conn: AgentSideConnection,
-): (approval: PendingToolApproval) => Promise<boolean> {
-	return async ({toolCall, subagentName}) => {
-		// The sub-agent's own model names its tool calls and shares an id space
-		// with the top-level ones, so prefix to keep the two cards distinct.
-		const announced: ToolCall = {
-			...toolCall,
-			id: `${SUBAGENT_TOOL_CALL_PREFIX}${toolCall.id}`,
-		};
+): SubagentToolBridge {
+	const metas = new Map<string, AcpToolCallMeta>();
+	// The sub-agent's own model names its tool calls and shares an id space
+	// with the top-level ones, so prefix to keep the two cards distinct.
+	const announced = (toolCall: ToolCall): ToolCall => ({
+		...toolCall,
+		id: `${SUBAGENT_TOOL_CALL_PREFIX}${toolCall.id}`,
+	});
 
-		try {
-			const meta = await buildToolCallMeta(announced);
-			const subagentMeta: AcpToolCallMeta = {
-				...meta,
-				title: `${meta.title} (${subagentName})`,
-			};
-
-			// Announced first: a permission request naming a tool call the
-			// client has not seen is rejected as invalid params.
-			await emitToolCall(session, conn, announced, 'pending', subagentMeta);
-
-			const permission = await requestToolPermission(
-				session,
-				announced,
-				conn,
-				subagentMeta,
-				session.abortController.signal,
-			);
-
-			if (permission === 'approved') {
-				// The sub-agent layer does not report its results back here, so
-				// settle the card on approval rather than leave it spinning
-				// forever. This does claim success before the tool has run: a
-				// call that then fails still shows completed. Reporting the
-				// real outcome means threading results out of the executor.
-				await emitToolCall(
+	return {
+		getMode: () => session.developmentMode,
+		getDisabledTools: () => session.effectiveDisabledTools(),
+		begin: async (toolCall, subagentName) => {
+			const call = announced(toolCall);
+			try {
+				const meta = await buildToolCallMeta(call);
+				const subagentMeta: AcpToolCallMeta = {
+					...meta,
+					title: `${meta.title} (${subagentName})`,
+				};
+				metas.set(call.id, subagentMeta);
+				// Announced first: a permission request naming a tool call the
+				// client has not seen is rejected as invalid params.
+				await emitToolCall(session, conn, call, 'pending', subagentMeta);
+			} catch {
+				// The call still runs; the client just never saw its card.
+			}
+		},
+		approve: async (toolCall, abortSignal, subagentRunId) => {
+			const call = announced(toolCall);
+			try {
+				return await requestToolPermission(
+					session,
+					call,
+					conn,
+					metas.get(call.id),
+					abortSignal,
+					subagentRunId ? {'nanocoder/childRunId': subagentRunId} : undefined,
+				);
+			} catch {
+				return 'denied';
+			}
+		},
+		end: async (toolCall, {content, failed}) => {
+			const call = announced(toolCall);
+			metas.delete(call.id);
+			try {
+				await emitToolCallUpdate(
 					session,
 					conn,
-					announced,
-					'completed',
-					subagentMeta,
-					'tool_call_update',
+					call,
+					failed ? 'failed' : 'completed',
+					content,
 				);
-				return true;
+			} catch {
+				// Nothing left to settle if the client is gone.
 			}
-
-			await emitToolCallUpdate(
-				session,
-				conn,
-				announced,
-				'failed',
-				permission === 'cancelled' ? 'Cancelled by user' : 'Denied by user',
-			);
-			return false;
-		} catch {
-			// signalToolApproval is awaited outside the sub-agent executor's own
-			// try, so a transport failure here would abort the whole sub-agent
-			// run. Deny the one tool instead and keep the safe-fallback posture.
-			return false;
-		}
+		},
 	};
 }
 
 export async function runAcpConversation(
 	options: RunAcpConversationOptions,
 ): Promise<PromptResponse> {
-	// The slot is a module singleton with last-writer-wins semantics, so the
-	// handler is scoped to this turn: without the teardown a finished turn's
-	// session, connection and aborted controller stay reachable, and the last
-	// turn to run would keep answering approvals for every later one.
-	//
-	// This does not make overlapping turns safe. turnActive is per session
-	// (acp-session.ts), so two sessions can be mid-turn at once, and for that
-	// window the later installer answers the earlier session's approvals
-	// against the wrong session id and abort controller. The restore is
-	// LIFO-correct, so routing rights hand back once the later turn ends.
-	// Closing the window itself needs the slot keyed by session id, or an
-	// approval channel threaded through SubagentExecutor.
-	const restoreApprovalHandler = setGlobalToolApprovalHandler(
-		createSubagentApprovalHandler(options.session, options.conn),
+	// Scoped to the turn: a bridge outliving it would keep a finished turn's
+	// session and connection reachable.
+	const unregisterBridge = registerSubagentToolBridge(
+		options.session.sessionId,
+		createSubagentToolBridge(options.session, options.conn),
 	);
+	// Tell the client about each subagent run of this session as it happens.
+	// Sent in order, and never allowed to fail the turn: a client that ignores
+	// the notification sees exactly what it saw before it existed.
+	let sentSubagentEvents: Promise<void> = Promise.resolve();
+	const stopSubagentEvents = onSubagentRunEvent(event => {
+		if (event.sessionId !== options.session.sessionId) return;
+		sentSubagentEvents = sentSubagentEvents
+			.then(() => options.conn.notify(ACP_SUBAGENT_NOTIFICATION, {...event}))
+			.catch(() => {});
+	});
 	try {
 		// Each ACP session runs in its own working directory (#1707), and one
 		// editor process can host several chats. A read_file stub only makes
@@ -188,7 +200,9 @@ export async function runAcpConversation(
 			),
 		);
 	} finally {
-		restoreApprovalHandler();
+		stopSubagentEvents();
+		await sentSubagentEvents;
+		unregisterBridge();
 	}
 }
 
@@ -208,7 +222,12 @@ async function runTurn(
 ): Promise<PromptResponse> {
 	const {session, client, toolManager, conn, nonInteractiveAlwaysAllow} =
 		options;
-	const {developmentMode, abortController} = session;
+	const {abortController} = session;
+
+	// One id per prompt, shared by every checkpoint it records. The model
+	// round-trips inside a prompt each move `truncateToMessageIndex` forward, so
+	// a client cannot use that to tell which tool calls belong to one turn.
+	const turnId = crypto.randomUUID();
 
 	let messages = session.messages;
 	const walkthroughLifecycle = createWalkthroughLifecycle(messages);
@@ -302,9 +321,15 @@ async function runTurn(
 		// rather than stopping mid-task at the ceiling.
 		const finalTurn = turn === maxTurns - 1;
 
+		// session/set_mode can arrive at any point in a turn, so the mode is read
+		// live: here for the tools offered, and again per call for approval.
+		const requestMode = session.developmentMode;
+		// The client's per-session list on top of the user's own disabledTools.
+		const disabledTools = session.effectiveDisabledTools();
 		const availableNames = toolManager.getAvailableToolNames(
 			undefined,
-			developmentMode,
+			requestMode,
+			disabledTools,
 		);
 		const tools = finalTurn ? {} : toolManager.getFilteredTools(availableNames);
 
@@ -444,9 +469,15 @@ async function runTurn(
 
 		if (validToolCalls.length === 0) {
 			if (
-				developmentMode === 'plan' &&
+				session.developmentMode === 'plan' &&
 				!wrotePlan &&
-				availableNames.includes('write_plan') &&
+				toolManager
+					.getAvailableToolNames(
+						undefined,
+						session.developmentMode,
+						disabledTools,
+					)
+					.includes('write_plan') &&
 				cleanedContent.trim().length > 0
 			) {
 				const fallbackCall: ToolCall = {
@@ -531,6 +562,51 @@ async function runTurn(
 				continue;
 			}
 
+			// The model chose this call from the tools offered at request time. If
+			// the mode has since changed and no longer offers it (e.g. a switch to
+			// plan), refuse it rather than run it under the new mode.
+			const toolName = toolCall.function.name;
+			// A tool the session does not offer is refused even if the model names it
+			// anyway. The list is read live, as the mode is: session/load can replace
+			// it at any point in a turn, and a tool the client just turned off must
+			// not run on the strength of the list this request was made with.
+			const disabled = session.effectiveDisabledTools().includes(toolName);
+			if (
+				disabled ||
+				(session.developmentMode !== requestMode &&
+					availableNames.includes(toolName) &&
+					!toolManager
+						.getAvailableToolNames(
+							undefined,
+							session.developmentMode,
+							disabledTools,
+						)
+						.includes(toolName))
+			) {
+				const reason = disabled
+					? `Error: ${toolName} is disabled in this session`
+					: `Error: ${toolName} is not available in ${session.developmentMode} mode`;
+				// A lone call has not been announced yet; give the failed update a
+				// card to land on.
+				if (!announcedBatch) {
+					await emitToolCall(
+						session,
+						conn,
+						toolCall,
+						'pending',
+						await buildToolCallMeta(toolCall, {withDiff: false}),
+					);
+				}
+				await emitToolCallUpdate(session, conn, toolCall, 'failed', reason);
+				toolResults.push({
+					tool_call_id: toolCall.id,
+					role: 'tool',
+					name: toolName,
+					content: reason,
+				});
+				continue;
+			}
+
 			// Enrich the call with ACP metadata (kind, file locations, and a diff
 			// for edits) so the client can render rich tool cards and previews.
 			const meta = await buildToolCallMeta(toolCall);
@@ -569,7 +645,7 @@ async function runTurn(
 				toolCall,
 				toolManager,
 				nonInteractiveAlwaysAllow,
-				developmentMode,
+				session.developmentMode,
 			);
 
 			if (needsApproval) {
@@ -655,6 +731,7 @@ async function runTurn(
 				toolCall,
 				messages,
 				meta.title,
+				turnId,
 			);
 
 			let pollInterval: ReturnType<typeof setInterval> | null = null;
@@ -708,14 +785,19 @@ async function runTurn(
 				abortSignal: abortController.signal,
 				sessionId: session.sessionId,
 				workingDirectory: session.cwd,
+				...(options.sessionTools && {toolManager: options.sessionTools}),
+				toolCallId: toolCall.id,
 			});
 			await finishTimelineCapture(session, timelineCapture);
 			isPolling = false;
 			if (pollInterval) clearInterval(pollInterval);
 
-			const status: ToolCallStatus = toolResult.content.startsWith('Error')
-				? 'failed'
-				: 'completed';
+			// isError covers failures whose text doesn't start with "Error": a
+			// validation failure, or a command that exited non-zero.
+			const status: ToolCallStatus =
+				toolResult.isError || toolResult.content.startsWith('Error')
+					? 'failed'
+					: 'completed';
 			await emitToolCallUpdate(
 				session,
 				conn,

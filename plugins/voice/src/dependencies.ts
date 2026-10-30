@@ -100,6 +100,36 @@ export function getVoiceBinDir(): string {
 	return join(getConfigDir(), 'voice-bin');
 }
 
+export const WHISPER_MODEL_FILE = 'ggml-base.en.bin';
+const WHISPER_MODEL_URL = `https://huggingface.co/ggerganov/whisper.cpp/resolve/main/${WHISPER_MODEL_FILE}`;
+
+/**
+ * Path of the Whisper ggml model the STT step will load: `WHISPER_MODEL` when
+ * set, otherwise the model the installer downloads into voice-bin.
+ */
+export function getWhisperModelPath(): string {
+	return (
+		process.env.WHISPER_MODEL || join(getVoiceBinDir(), WHISPER_MODEL_FILE)
+	);
+}
+
+/**
+ * Downloads the checksummed Whisper model into voice-bin unless it is
+ * already there. Shared by every platform branch of the installer.
+ */
+async function ensureWhisperModel(
+	binDir: string,
+	downloadFn: DownloadFunction,
+): Promise<void> {
+	const modelPath = join(binDir, WHISPER_MODEL_FILE);
+	if (existsSync(modelPath)) return;
+	await downloadFn(
+		WHISPER_MODEL_URL,
+		modelPath,
+		ASSET_CHECKSUMS[WHISPER_MODEL_FILE],
+	);
+}
+
 /**
  * Checks whether sox, whisper-cli/whisper.cpp, and piper are available on the system or in voice-bin.
  */
@@ -139,11 +169,15 @@ export async function checkDependenciesInstalled(
 		return false;
 	};
 
-	const [soxOk, whisperOk, piperOk] = await Promise.all([
+	const [soxOk, whisperBinOk, piperOk] = await Promise.all([
 		checkBinary(recCmd, platform === 'win32' ? ['--version'] : ['--help']),
 		checkBinary(whisperCmd, ['--help']),
 		checkBinary(piperCmd, ['--help']),
 	]);
+
+	// whisper-cli is useless without its model: Homebrew's whisper-cpp ships
+	// no model, so a present binary alone must not count as installed.
+	const whisperOk = whisperBinOk && existsSync(getWhisperModelPath());
 
 	const missing: ('sox' | 'whisper' | 'piper')[] = [];
 	if (!soxOk) missing.push('sox');
@@ -161,17 +195,55 @@ export async function checkDependenciesInstalled(
 	};
 }
 
-async function defaultExec(command: string, args: string[]): Promise<void> {
+const OUTPUT_TAIL_BYTES = 4096;
+const OUTPUT_TAIL_LINES = 15;
+
+/**
+ * Keeps the last `OUTPUT_TAIL_BYTES` of a child's combined output and returns
+ * its final non-empty lines, so a failure can say why without the child ever
+ * writing to the terminal the TUI owns.
+ */
+export function tailOutput(chunks: string, maxLines = OUTPUT_TAIL_LINES) {
+	return chunks
+		.split(/\r?\n|\r/)
+		.map(line => line.trimEnd())
+		.filter(line => line.length > 0)
+		.slice(-maxLines)
+		.join('\n');
+}
+
+/**
+ * Runs an installer step with its output piped, not inherited: an inherited
+ * stdout lets brew/make/cmake draw over the Ink UI. On failure the error
+ * carries a short tail of the output.
+ */
+export async function defaultExec(
+	command: string,
+	args: string[],
+): Promise<void> {
 	return new Promise((resolve, reject) => {
-		const proc = cp.spawn(command, args, {stdio: 'inherit'});
+		let tail = '';
+		const append = (data: Buffer) => {
+			tail += data.toString();
+			if (tail.length > OUTPUT_TAIL_BYTES) {
+				tail = tail.slice(-OUTPUT_TAIL_BYTES);
+			}
+		};
+		const proc = cp.spawn(command, args, {stdio: ['ignore', 'pipe', 'pipe']});
+		proc.stdout?.on('data', append);
+		proc.stderr?.on('data', append);
 		proc.on('close', code => {
-			if (code === 0) resolve();
-			else
-				reject(
-					new Error(
-						`Command ${command} ${args.join(' ')} failed with exit code ${code}`,
-					),
-				);
+			if (code === 0) {
+				resolve();
+				return;
+			}
+			const output = tailOutput(tail);
+			reject(
+				new Error(
+					`Command ${command} ${args.join(' ')} failed with exit code ${code}` +
+						(output ? `:\n${output}` : ''),
+				),
+			);
 		});
 		proc.on('error', err => {
 			reject(new Error(`Failed to execute ${command}: ${err.message}`));
@@ -350,6 +422,9 @@ export async function installDependencies(
 				}
 			}
 
+			onProgress?.('Fetching Whisper ggml model...', 60);
+			await ensureWhisperModel(binDir, downloadFn);
+
 			if (!existsSync(piperModel)) {
 				await downloadFn(
 					modelUrl,
@@ -398,18 +473,9 @@ export async function installDependencies(
 
 		onProgress?.('Fetching whisper.cpp binary & ggml model...', 65);
 		const whisperBin = join(binDir, 'whisper-cli');
-		const whisperModel = join(binDir, 'ggml-base.en.bin');
 
 		try {
-			const modelUrl =
-				'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin';
-			if (!existsSync(whisperModel)) {
-				await downloadFn(
-					modelUrl,
-					whisperModel,
-					ASSET_CHECKSUMS['ggml-base.en.bin'],
-				);
-			}
+			await ensureWhisperModel(binDir, downloadFn);
 
 			if (!existsSync(whisperBin)) {
 				// Build whisper.cpp from verified release source tarball
@@ -553,26 +619,17 @@ export async function installDependencies(
 
 		onProgress?.('Fetching whisper.cpp & piper Windows binaries...', 70);
 		const whisperBin = join(binDir, 'whisper-cli.exe');
-		const whisperModel = join(binDir, 'ggml-base.en.bin');
 		const piperBin = join(binDir, 'piper.exe');
 		const piperModel = join(binDir, 'en_US-lessac-medium.onnx');
 		const piperConfig = join(binDir, 'en_US-lessac-medium.onnx.json');
 
 		try {
-			const modelUrl =
-				'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin';
 			const piperModelUrl =
 				'https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/lessac/medium/en_US-lessac-medium.onnx';
 			const piperConfigUrl =
 				'https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/lessac/medium/en_US-lessac-medium.onnx.json';
 
-			if (!existsSync(whisperModel)) {
-				await downloadFn(
-					modelUrl,
-					whisperModel,
-					ASSET_CHECKSUMS['ggml-base.en.bin'],
-				);
-			}
+			await ensureWhisperModel(binDir, downloadFn);
 			if (!existsSync(piperModel)) {
 				await downloadFn(
 					piperModelUrl,

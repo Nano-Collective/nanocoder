@@ -1,5 +1,5 @@
 import test from 'ava';
-import {mkdtempSync} from 'node:fs';
+import {mkdirSync, mkdtempSync, rmSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 
@@ -18,9 +18,21 @@ import {
 	ASSET_CHECKSUMS,
 	getVoiceBinDir,
 	getConfigDir,
+	defaultExec,
+	tailOutput,
+	getWhisperModelPath,
 } from './dependencies.js';
 
-test('checkDependenciesInstalled returns true when all commands succeed', async (t) => {
+function writeWhisperModel(): string {
+	mkdirSync(getVoiceBinDir(), {recursive: true});
+	const modelPath = join(getVoiceBinDir(), 'ggml-base.en.bin');
+	writeFileSync(modelPath, 'model');
+	return modelPath;
+}
+
+test.serial('checkDependenciesInstalled returns true when all commands succeed', async (t) => {
+	const modelPath = writeWhisperModel();
+	t.teardown(() => rmSync(modelPath, {force: true}));
 	const mockChecker = async () => true;
 	const result = await checkDependenciesInstalled(mockChecker);
 	t.true(result.installed);
@@ -146,5 +158,66 @@ test('installDependencies fails gracefully on download failure', async (t) => {
 			});
 		},
 		{ message: /failed/i },
+	);
+});
+
+test.serial('checkDependenciesInstalled reports whisper missing when the ggml model is absent', async (t) => {
+	rmSync(join(getVoiceBinDir(), 'ggml-base.en.bin'), {force: true});
+	const result = await checkDependenciesInstalled(async () => true);
+	t.false(result.installed);
+	t.deepEqual(result.missing, ['whisper']);
+	t.false(result.details.whisper);
+});
+
+test.serial('checkDependenciesInstalled honours WHISPER_MODEL for the model check', async (t) => {
+	const original = process.env.WHISPER_MODEL;
+	const customModel = join(testConfigDir, 'custom-model.bin');
+	t.teardown(() => {
+		if (original === undefined) delete process.env.WHISPER_MODEL;
+		else process.env.WHISPER_MODEL = original;
+		rmSync(customModel, {force: true});
+	});
+	process.env.WHISPER_MODEL = customModel;
+	t.is(getWhisperModelPath(), customModel);
+	t.false((await checkDependenciesInstalled(async () => true)).details.whisper);
+	writeFileSync(customModel, 'model');
+	t.true((await checkDependenciesInstalled(async () => true)).installed);
+});
+
+test.serial('installDependencies downloads the checksummed whisper model on every platform', async (t) => {
+	rmSync(join(getVoiceBinDir(), 'ggml-base.en.bin'), {force: true});
+	const downloaded: {url: string; destPath: string; expectedSha256?: string}[] = [];
+	await installDependencies({
+		execRunner: async () => {},
+		downloadFn: async (url, destPath, expectedSha256) => {
+			downloaded.push({url, destPath, expectedSha256});
+		},
+	});
+	const model = downloaded.find(d => d.url.endsWith('/ggml-base.en.bin'));
+	t.truthy(model, `no whisper model download on ${process.platform}`);
+	t.is(model?.destPath, join(getVoiceBinDir(), 'ggml-base.en.bin'));
+	t.is(model?.expectedSha256, ASSET_CHECKSUMS['ggml-base.en.bin']);
+});
+
+test('tailOutput keeps only the last non-empty lines', t => {
+	const text = Array.from({length: 30}, (_, i) => `line ${i}`).join('\n');
+	const tail = tailOutput(`${text}\n\n`, 3);
+	t.is(tail, 'line 27\nline 28\nline 29');
+});
+
+test('defaultExec pipes output and reports its tail on failure', async t => {
+	const error = await t.throwsAsync(
+		defaultExec(process.execPath, [
+			'-e',
+			"console.log('building'); console.error('fatal: no compiler'); process.exit(3)",
+		]),
+	);
+	t.regex(error?.message ?? '', /exit code 3/);
+	t.regex(error?.message ?? '', /building\nfatal: no compiler/);
+});
+
+test('defaultExec resolves on success', async t => {
+	await t.notThrowsAsync(
+		defaultExec(process.execPath, ['-e', "console.log('ok')"]),
 	);
 });

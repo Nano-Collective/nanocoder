@@ -132,7 +132,7 @@ async function getMCPResourceCompletions(partialPath: string): Promise<
 }
 
 // Legend for the `?` overlay. Keep in sync with the bindings handled below,
-// in TextInput (readline keys) and in App (Ctrl+S, Ctrl+C).
+// in TextInput (readline keys) and in App (Ctrl+S, Ctrl+C, Ctrl+G).
 const KEYBOARD_SHORTCUTS: Array<[keybind: string, label: string]> = [
 	['Enter', 'Submit prompt'],
 	['Ctrl+J / Opt+Enter', 'New line'],
@@ -149,6 +149,7 @@ const KEYBOARD_SHORTCUTS: Array<[keybind: string, label: string]> = [
 	['Ctrl+R', 'Reverse search prompt history'],
 	['Ctrl+T', 'Collapse / expand task list'],
 	['Ctrl+S', 'Attach / cycle running subagents'],
+	['Ctrl+G', 'Voice push-to-talk (when /voice is on)'],
 	['Esc', 'Cancel response'],
 	['Ctrl+C', 'Exit'],
 	['?', 'Toggle this overlay (in an empty prompt)'],
@@ -166,7 +167,11 @@ export function findReverseMatch(
 	const queryLower = query.toLowerCase();
 	const start = Math.min(startIndex, history.length - 1);
 	for (let i = start; i >= 0; i--) {
-		if (history[i].displayValue.toLowerCase().includes(queryLower)) {
+		const displayValue = history[i]?.displayValue;
+		if (
+			typeof displayValue === 'string' &&
+			displayValue.toLowerCase().includes(queryLower)
+		) {
 			return {index: i, match: history[i]};
 		}
 	}

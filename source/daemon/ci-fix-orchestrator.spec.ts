@@ -2,7 +2,14 @@ import test from 'ava';
 import type {CiJobFailedPayload} from '@/events/types';
 import type {SubagentTask} from '@/subagents/types';
 import type {CiFixWorktree} from './ci-fix-worktree';
-import {runCiAutoFixFlow, type CiFixOrchestratorDeps} from './ci-fix-orchestrator';
+import {
+	buildFixRunnerEnv,
+	type CiFixOrchestratorDeps,
+	type PublishBranchOptions,
+	publishFromClone,
+	runCiAutoFixFlow,
+} from './ci-fix-orchestrator';
+import type {CiFixRunnerInput} from './ci-fix-runner';
 
 console.log('\nci-fix-orchestrator.spec.ts');
 
@@ -39,7 +46,8 @@ function stubDeps(
 		createWorktree: 0,
 		removeWorktree: 0,
 		spawnFixRunner: 0,
-		pushBranch: [] as Array<[string, {setUpstream?: boolean; cwd?: string} | undefined]>,
+		publishBranch: [] as PublishBranchOptions[],
+		runnerInputs: [] as CiFixRunnerInput[],
 		createDraftPr: [] as Array<{title: string; body: string; base: string; head: string}>,
 	};
 	const deps: CiFixOrchestratorDeps = {
@@ -54,8 +62,9 @@ function stubDeps(
 			calls.spawnFixRunner++;
 			return {success: true, committed: false, commitShas: [], output: 'no fix needed'};
 		},
-		pushBranch: async (branch, opts) => {
-			calls.pushBranch.push([branch, opts]);
+		stageFailedLog: async () => '.git/nanocoder-ci/failed-steps.log',
+		publishBranch: async opts => {
+			calls.publishBranch.push(opts);
 		},
 		createDraftPr: async opts => {
 			calls.createDraftPr.push(opts);
@@ -113,7 +122,7 @@ test('runner failure returns a failed result, worktree still removed', async t =
 	t.false(result.success);
 	t.regex(result.error ?? '', /subagent crashed/);
 	t.is(calls.removeWorktree, 1);
-	t.is(calls.pushBranch.length, 0);
+	t.is(calls.publishBranch.length, 0);
 });
 
 test('committed: false returns a successful result with no push/PR call', async t => {
@@ -123,7 +132,7 @@ test('committed: false returns a successful result with no push/PR call', async 
 
 	t.true(result.success);
 	t.is(result.output, 'no fix needed');
-	t.is(calls.pushBranch.length, 0);
+	t.is(calls.publishBranch.length, 0);
 	t.is(calls.createDraftPr.length, 0);
 	t.is(calls.removeWorktree, 1);
 });
@@ -142,10 +151,13 @@ test('auto-fix + committed pushes the fix branch and opens a draft PR against th
 
 	t.true(result.success);
 	t.true(result.fixApplied);
-	t.is(calls.pushBranch.length, 1);
-	t.is(calls.pushBranch[0]?.[0], FAKE_WORKTREE.branch);
-	t.true(calls.pushBranch[0]?.[1]?.setUpstream);
-	t.is(calls.pushBranch[0]?.[1]?.cwd, FAKE_WORKTREE.path);
+	t.is(calls.publishBranch.length, 1);
+	t.deepEqual(calls.publishBranch[0], {
+		projectRoot: '/repo',
+		clonePath: FAKE_WORKTREE.path,
+		branch: FAKE_WORKTREE.branch,
+		runId: PAYLOAD.runId,
+	});
 	t.is(calls.createDraftPr.length, 1);
 	t.is(calls.createDraftPr[0]?.base, PAYLOAD.branch);
 	t.is(calls.createDraftPr[0]?.head, FAKE_WORKTREE.branch);
@@ -171,10 +183,9 @@ test('full-commit + committed pushes directly to the branch with no draft PR', a
 
 	t.true(result.success);
 	t.true(result.fixApplied);
-	t.is(calls.pushBranch.length, 1);
-	t.is(calls.pushBranch[0]?.[0], FAKE_WORKTREE.branch);
-	t.falsy(calls.pushBranch[0]?.[1]?.setUpstream);
-	t.is(calls.pushBranch[0]?.[1]?.cwd, FAKE_WORKTREE.path);
+	t.is(calls.publishBranch.length, 1);
+	t.is(calls.publishBranch[0]?.branch, FAKE_WORKTREE.branch);
+	t.is(calls.publishBranch[0]?.clonePath, FAKE_WORKTREE.path);
 	t.is(calls.createDraftPr.length, 0);
 	t.is(calls.removeWorktree, 1);
 });
@@ -207,7 +218,7 @@ test('a failure before the push (no createDraftPr call yet) reports "pushing the
 			commitShas: ['deadbeef'],
 			output: 'fixed it',
 		}),
-		pushBranch: async () => {
+		publishBranch: async () => {
 			throw new Error('network unreachable');
 		},
 	});
@@ -271,7 +282,7 @@ test('abort during the runner skips push/PR and still removes the clone', async 
 	);
 
 	t.false(result.success);
-	t.is(calls.pushBranch.length, 0);
+	t.is(calls.publishBranch.length, 0);
 	t.is(calls.createDraftPr.length, 0);
 	t.is(calls.recorded.length, 0);
 	t.is(calls.removeWorktree, 1);
@@ -290,4 +301,166 @@ test('full-commit records the published commit SHAs', async t => {
 	await runCiAutoFixFlow(ciTask(), 'full-commit', '/repo', deps);
 
 	t.deepEqual(calls.recorded, ['c0ffee']);
+});
+
+// ============================================================================
+// The fix runner gets no git/gh credentials; publishing happens here.
+// ============================================================================
+
+const RUNNER_IO = {
+	ghConfigDir: '/tmp/io/gh-config',
+	inputPath: '/tmp/io/input.json',
+	resultPath: '/tmp/io/result.json',
+};
+
+test('buildFixRunnerEnv strips git/gh credential vectors', t => {
+	const env = buildFixRunnerEnv(
+		{
+			PATH: '/usr/bin',
+			HOME: '/home/u',
+			GH_TOKEN: 'gho_x',
+			GITHUB_TOKEN: 'ghs_x',
+			GH_ENTERPRISE_TOKEN: 'e1',
+			GITHUB_ENTERPRISE_TOKEN: 'e2',
+			GITHUB_PAT: 'p1',
+			GH_PAT: 'p2',
+			GITHUB_APP_TOKEN: 'p3',
+			SSH_AUTH_SOCK: '/tmp/agent.sock',
+			SSH_AGENT_PID: '123',
+			GIT_ASKPASS: '/usr/bin/askpass',
+			SSH_ASKPASS: '/usr/bin/ssh-askpass',
+			GIT_SSH: '/usr/bin/ssh',
+			GIT_CONFIG_PARAMETERS: "'credential.helper'='store'",
+			GIT_CONFIG_KEY_5: 'credential.helper',
+			GIT_CONFIG_VALUE_5: 'store',
+			GH_CONFIG_DIR: '/home/u/.config/gh',
+		},
+		RUNNER_IO,
+	);
+
+	for (const name of [
+		'GH_TOKEN',
+		'GITHUB_TOKEN',
+		'GH_ENTERPRISE_TOKEN',
+		'GITHUB_ENTERPRISE_TOKEN',
+		'GITHUB_PAT',
+		'GH_PAT',
+		'GITHUB_APP_TOKEN',
+		'SSH_AUTH_SOCK',
+		'SSH_AGENT_PID',
+		'SSH_ASKPASS',
+		'GIT_SSH',
+		'GIT_CONFIG_PARAMETERS',
+		'GIT_CONFIG_KEY_5',
+		'GIT_CONFIG_VALUE_5',
+	]) {
+		t.false(name in env, `${name} must not reach the runner`);
+	}
+	t.is(env.GH_CONFIG_DIR, RUNNER_IO.ghConfigDir, 'gh reads an empty config dir');
+});
+
+test('buildFixRunnerEnv keeps unrelated env (provider API keys) and sets push-blocking git config', t => {
+	const env = buildFixRunnerEnv(
+		{PATH: '/usr/bin', OPENROUTER_API_KEY: 'sk-or-1', ANTHROPIC_API_KEY: 'a'},
+		RUNNER_IO,
+	);
+
+	t.is(env.PATH, '/usr/bin');
+	t.is(env.OPENROUTER_API_KEY, 'sk-or-1');
+	t.is(env.ANTHROPIC_API_KEY, 'a');
+	t.is(env.GIT_TERMINAL_PROMPT, '0');
+	t.is(env.GIT_ASKPASS, 'false');
+	t.is(env.GIT_SSH_COMMAND, 'false');
+	t.is(env.GIT_CONFIG_NOSYSTEM, '1');
+	t.is(env.GH_PROMPT_DISABLED, '1');
+
+	const count = Number(env.GIT_CONFIG_COUNT);
+	const config: Record<string, string | undefined> = {};
+	for (let i = 0; i < count; i++) {
+		config[env[`GIT_CONFIG_KEY_${i}`] ?? ''] = env[`GIT_CONFIG_VALUE_${i}`];
+	}
+	t.is(config['credential.helper'], '', 'credential helpers are reset');
+	t.regex(config['remote.origin.pushurl'] ?? '', /disabled/);
+
+	t.is(env.NANOCODER_CI_FIX_INPUT_PATH, RUNNER_IO.inputPath);
+	t.is(env.NANOCODER_CI_FIX_RESULT_PATH, RUNNER_IO.resultPath);
+});
+
+test('the staged failed-step log path is handed to the runner', async t => {
+	const {deps, calls} = stubDeps({
+		spawnFixRunner: async input => {
+			calls.runnerInputs.push(input);
+			return {success: true, committed: false, commitShas: [], output: ''};
+		},
+	});
+
+	await runCiAutoFixFlow(ciTask(), 'auto-fix', '/repo', deps);
+
+	t.is(calls.runnerInputs[0]?.failedLogPath, '.git/nanocoder-ci/failed-steps.log');
+});
+
+test('publishFromClone fetches into the project repo and pushes from there, never from the clone', async t => {
+	const commands: string[][] = [];
+	await publishFromClone(
+		{projectRoot: '/repo', clonePath: '/tmp/clone', branch: 'fix-b', runId: 7},
+		async args => {
+			commands.push(args);
+			return '';
+		},
+	);
+
+	t.is(commands.length, 3);
+	for (const args of commands) {
+		t.deepEqual(args.slice(0, 2), ['-C', '/repo'], 'every git call runs in the project repo');
+	}
+	t.deepEqual(commands[0], [
+		'-C',
+		'/repo',
+		'fetch',
+		'--no-tags',
+		'--no-write-fetch-head',
+		'file:///tmp/clone',
+		'+refs/heads/fix-b:refs/nanocoder/ci-fix/7',
+	]);
+	t.deepEqual(commands[1], [
+		'-C',
+		'/repo',
+		'push',
+		'--no-verify',
+		'origin',
+		'refs/nanocoder/ci-fix/7:refs/heads/fix-b',
+	]);
+	t.deepEqual(commands[2], ['-C', '/repo', 'update-ref', '-d', 'refs/nanocoder/ci-fix/7']);
+});
+
+test('publishFromClone removes the temporary ref even when the push fails', async t => {
+	const commands: string[][] = [];
+	await t.throwsAsync(
+		publishFromClone(
+			{projectRoot: '/repo', clonePath: '/tmp/clone', branch: 'fix-b', runId: 7},
+			async args => {
+				commands.push(args);
+				if (args[2] === 'push') throw new Error('rejected');
+				return '';
+			},
+		),
+		{message: 'rejected'},
+	);
+	t.is(commands.at(-1)?.[2], 'update-ref');
+});
+
+test('the draft PR body is redacted', async t => {
+	const {deps, calls} = stubDeps({
+		spawnFixRunner: async () => ({
+			success: true,
+			committed: true,
+			commitShas: ['deadbeef'],
+			output: 'leaked ghp_abcdefghijklmnopqrstuvwxyz0123456789 in log',
+		}),
+	});
+
+	await runCiAutoFixFlow(ciTask(), 'auto-fix', '/repo', deps);
+
+	t.notRegex(calls.createDraftPr[0]?.body ?? '', /ghp_/);
+	t.regex(calls.createDraftPr[0]?.body ?? '', /\[REDACTED\]/);
 });

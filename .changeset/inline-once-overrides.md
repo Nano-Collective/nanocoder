@@ -7,7 +7,7 @@ Added `?key=value` inline overrides to slash commands. An override is applied vi
 **Working examples:**
 - `/usage ?context-max=200k` - renders context usage against a 200k limit for this command only, then restores the prior limit.
 - `/compact ?threshold=80` - gates the manual compaction on current usage: compacts normally at or above 80%, otherwise reports the usage and skips (mirroring the automatic path's gate). Composes with `?context-max`, which the gate reads as the limit.
-- `/compact ?preview`, `/compact ?auto-on` - boolean flags forwarded as their `--flag` long forms.
+- `/compact ?preview` - boolean flags forwarded as their `--flag` long forms.
 
 **Behavior:**
 - `threshold` values outside 50–95 and unparseable values are ignored (fail open: the command runs un-gated).
@@ -16,3 +16,5 @@ Added `?key=value` inline overrides to slash commands. An override is applied vi
 - Values containing additional `=` are preserved (`?config=key=value` → `'key=value'`).
 - Override applies only to the current command; it does not affect global session state.
 - Custom commands and MCP prompts bypass override parsing (they receive `?foo=1` literally).
+
+Overrides are parsed only for `/compact` and `/usage`, so other commands receive `?word` text unchanged, and every override is restored when the command finishes.

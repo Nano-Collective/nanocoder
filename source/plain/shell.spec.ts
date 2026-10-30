@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { type ExecutionContext } from "ava";
@@ -9,11 +9,13 @@ import {
 	resetSessionStartHooks,
 	SESSION_END_HOOK_HANDLER,
 } from "@/services/lifecycle-hooks";
+import { setToolRegistryGetter } from "@/message-handler";
 import { setProjectRoot } from "@/services/session-cwd";
 import type { HooksConfig } from "@/types/config";
 import { TOOL_APPROVAL_REQUIRED_KIND } from "@/constants";
 import type { ToolManager } from "@/tools/tool-manager";
 import type { LLMClient } from "@/types/core";
+import { ShutdownManager } from "@/utils/shutdown";
 import type { PlainConversationOutcome } from "./conversation.js";
 import { runPlainShell } from "./shell.js";
 import type { RunPlainShellDeps } from "./shell.js";
@@ -157,6 +159,74 @@ test.serial("plain shell creates a session for artifact tools", async (t) => {
 	t.is(workingDirectory, process.cwd());
 });
 
+test.serial("a run aborted by a signal still reports and exits with its own code", async (t) => {
+	// A real ShutdownManager, driven the way SIGTERM drives it: the signal
+	// starts a clean shutdown (code 0) while the conversation is in flight, and
+	// runPlainShell's handler aborts the run. The run's "error" report must
+	// still be printed, and its exit code (1) must win over the signal's 0.
+	const manager = new ShutdownManager({timeoutMs: 2000});
+	const originalExit = process.exit;
+	let exitCode: number | undefined;
+	process.exit = ((code?: number) => {
+		exitCode = code ?? 0;
+	}) as typeof process.exit;
+	const stdout = capturingStdout();
+	let signalShutdown: Promise<void> = Promise.resolve();
+	let deletes = 0;
+	try {
+		await runPlainShell({
+			prompt: "do the thing",
+			developmentMode: "yolo",
+			trustDirectory: true,
+			outputFormat: "json",
+			deps: baseDeps({
+				initializePlain: makeFakeInitializePlain(),
+				// The run's own artifact cleanup is still on disk when the shutdown
+				// handler's cleanup returns, as with real file I/O. The handler must
+				// not let the process exit before the run has reported.
+				artifacts: {
+					cleanupStaleEphemeralSessions: async () => undefined,
+					markEphemeralSession: async () => undefined,
+					deleteSessionArtifacts: async () => {
+						deletes++;
+						if (deletes === 1) await new Promise(resolve => setTimeout(resolve, 50));
+					},
+				},
+				runPlainConversation: async options => {
+					// Let runPlainShell hold the conversation promise, as it does by
+					// the time a real signal arrives.
+					await new Promise<void>(resolve => setImmediate(resolve));
+					signalShutdown = manager.gracefulShutdown(0);
+					await new Promise<void>(resolve => {
+						if (options.abortSignal.aborted) resolve();
+						else options.abortSignal.addEventListener("abort", () => resolve(), {once: true});
+					});
+					return {
+						kind: "error",
+						message: "Aborted",
+						finalText: "",
+						reasoning: null,
+						steps: 1,
+						toolCalls: [],
+					};
+				},
+				getShutdownManager: () => manager,
+			}),
+		});
+		await signalShutdown;
+	} finally {
+		stdout.restore();
+		process.exit = originalExit;
+		manager.reset();
+	}
+
+	const report = JSON.parse(stdout.get());
+	t.is(report.kind, "error");
+	t.is(report.message, "Aborted");
+	t.is(report.exitCode, 1);
+	t.is(exitCode, 1);
+});
+
 test.serial("plain shell marks and cleans its ephemeral artifact session", async (t) => {
 	const shutdown: CapturedShutdown = {code: null};
 	const stdout = capturingStdout();
@@ -205,41 +275,45 @@ test.serial("plain shell marks and cleans its ephemeral artifact session", async
 	]);
 });
 
-test.serial("plain shell cleans its ephemeral session when the conversation throws", async (t) => {
+test.serial("plain shell reports a conversation that throws and still cleans its ephemeral session", async (t) => {
 	const shutdown: CapturedShutdown = {code: null};
 	const stdout = capturingStdout();
 	let markedSessionId = "";
 	let deletedSessionId = "";
 	try {
-		await t.throwsAsync(
-			runPlainShell({
-				prompt: "do the thing",
-				developmentMode: "yolo",
-				trustDirectory: true,
-				outputFormat: "json",
-				deps: baseDeps({
-					initializePlain: makeFakeInitializePlain(),
-					runPlainConversation: async () => {
-						throw new Error("conversation failed");
+		await runPlainShell({
+			prompt: "do the thing",
+			developmentMode: "yolo",
+			trustDirectory: true,
+			outputFormat: "json",
+			deps: baseDeps({
+				initializePlain: makeFakeInitializePlain(),
+				runPlainConversation: async () => {
+					throw new Error("conversation failed");
+				},
+				artifacts: {
+					cleanupStaleEphemeralSessions: async () => undefined,
+					markEphemeralSession: async sessionId => {
+						markedSessionId = sessionId;
 					},
-					artifacts: {
-						cleanupStaleEphemeralSessions: async () => undefined,
-						markEphemeralSession: async sessionId => {
-							markedSessionId = sessionId;
-						},
-						deleteSessionArtifacts: async sessionId => {
-							deletedSessionId = sessionId;
-						},
+					deleteSessionArtifacts: async sessionId => {
+						deletedSessionId = sessionId;
 					},
-					getShutdownManager: makeFakeShutdownManager(shutdown),
-				}),
+				},
+				getShutdownManager: makeFakeShutdownManager(shutdown),
 			}),
-			{message: "conversation failed"},
-		);
+		});
 	} finally {
 		stdout.restore();
 	}
 
+	// The throw is reported like any other error and exits through graceful
+	// shutdown (which runs session-end), instead of escaping to the CLI.
+	const report = JSON.parse(stdout.get());
+	t.is(report.kind, "error");
+	t.is(report.exitCode, 1);
+	t.is(report.message, "conversation failed");
+	t.is(shutdown.code, 1);
 	t.regex(markedSessionId, /^[0-9a-f-]{36}$/);
 	t.is(deletedSessionId, markedSessionId);
 });
@@ -1133,4 +1207,211 @@ test.serial("plain shell registers a session-end hook handler", async (t) => {
 		registered.includes(SESSION_END_HOOK_HANDLER),
 		`session-end must be registered for every exit path, got: ${registered.join(", ")}`,
 	);
+});
+
+// ---------------------------------------------------------------------------
+// Provider failure after a tool ran
+//
+// client.chat rejects on an HTTP error or a dropped connection. The run still
+// has to print its report, with the tool call that already ran, exit 1, and
+// go through graceful shutdown so session-end fires.
+// ---------------------------------------------------------------------------
+
+// Runs its registered handlers like the real shutdown manager, so a test can
+// see the session-end hook fire.
+function makeRunningShutdownManager(captured: CapturedShutdown) {
+	const handlers = new Map<
+		string,
+		{ name: string; priority: number; handler: () => Promise<void> }
+	>();
+	return () => ({
+		register: (entry: {
+			name: string;
+			priority: number;
+			handler: () => Promise<void>;
+		}) => {
+			handlers.set(entry.name, entry);
+		},
+		unregister: (name: string) => {
+			handlers.delete(name);
+		},
+		gracefulShutdown: async (code: number) => {
+			captured.code = code;
+			const sorted = [...handlers.values()].sort(
+				(a, b) => a.priority - b.priority,
+			);
+			for (const entry of sorted) {
+				await entry.handler();
+			}
+		},
+	});
+}
+
+async function runShellWithFailingProvider(outputFormat: "json" | "text") {
+	const previousCwd = process.cwd();
+	const previousConfigDir = process.env.NANOCODER_CONFIG_DIR;
+	mkdirSync(HOOK_DIR, { recursive: true });
+	process.env.NANOCODER_CONFIG_DIR = join(HOOK_DIR, "no-global-config");
+	process.chdir(HOOK_DIR);
+	setProjectRoot(HOOK_DIR);
+	clearPendingHookContext();
+	resetSessionStartHooks();
+
+	const hooksLog = join(HOOK_DIR, `session-end-${outputFormat}.log`);
+	rmSync(hooksLog, { force: true });
+
+	// First request: a tool call. Second request: the provider fails.
+	let chatCalls = 0;
+	const client = {
+		getProviderConfig: () => ({ name: "test", type: "openai", models: [], config: {} }),
+		getCurrentModel: () => "fake-model",
+		chat: async () => {
+			chatCalls++;
+			if (chatCalls > 1) {
+				throw new Error("Server error (500): upstream failed");
+			}
+			return {
+				choices: [
+					{
+						message: {
+							role: "assistant",
+							content: "",
+							tool_calls: [
+								{
+									id: "call-1",
+									function: { name: "safe_tool", arguments: { command: "echo hi" } },
+								},
+							],
+						},
+					},
+				],
+			};
+		},
+	} as unknown as LLMClient;
+	const toolManager = {
+		...FAKE_TOOL_MANAGER,
+		getAvailableToolNames: () => ["safe_tool"],
+		getFilteredTools: () => ({ safe_tool: {} }),
+		hasTool: (name: string) => name === "safe_tool",
+		getToolEntry: (name: string) =>
+			name === "safe_tool"
+				? { name, tool: {}, handler: async () => "tool-output", approval: false }
+				: undefined,
+	} as unknown as ToolManager;
+	let toolRuns = 0;
+	setToolRegistryGetter(() => ({
+		safe_tool: (async () => {
+			toolRuns++;
+			return "tool-output";
+		}) as never,
+	}));
+
+	const shutdown: CapturedShutdown = { code: null };
+	const stdout = capturingStdout();
+	const stderr = capturingStderr();
+	try {
+		withPlainHooks({
+			"session-end": [
+				{ command: hookNode(`require('fs').appendFileSync('${hooksLog}', 'end')`) },
+			],
+		});
+		await runPlainShell({
+			prompt: "do it",
+			developmentMode: "yolo",
+			trustDirectory: true,
+			outputFormat,
+			deps: baseDeps({
+				initializePlain: makeFakeInitializePlain({ client, toolManager }),
+				getShutdownManager: makeRunningShutdownManager(shutdown) as never,
+			}),
+		});
+	} finally {
+		stdout.restore();
+		stderr.restore();
+		setToolRegistryGetter(() => ({}));
+		process.chdir(previousCwd);
+		if (previousConfigDir === undefined) {
+			delete process.env.NANOCODER_CONFIG_DIR;
+		} else {
+			process.env.NANOCODER_CONFIG_DIR = previousConfigDir;
+		}
+		setProjectRoot(previousCwd);
+		clearAppConfig();
+		clearPendingHookContext();
+		resetSessionStartHooks();
+	}
+
+	return {
+		stdout: stdout.get(),
+		stderr: stderr.get(),
+		exitCode: shutdown.code,
+		toolRuns,
+		sessionEnd: existsSync(hooksLog) ? readFileSync(hooksLog, "utf-8") : "",
+	};
+}
+
+test.serial(
+	"--json: a provider error after a tool call still reports the tool call, exits 1 and runs session-end",
+	async (t) => {
+		const run = await runShellWithFailingProvider("json");
+
+		t.is(run.toolRuns, 1);
+		const report = JSON.parse(run.stdout);
+		t.is(report.kind, "error");
+		t.is(report.exitCode, 1);
+		t.is(report.message, "Server error (500): upstream failed");
+		t.is(report.toolCalls.length, 1);
+		t.is(report.toolCalls[0].name, "safe_tool");
+		t.regex(String(report.toolCalls[0].result), /tool-output/);
+		t.is(run.exitCode, 1);
+		t.is(run.sessionEnd, "end", "session-end must run on the error path");
+	},
+);
+
+test.serial(
+	"text: a provider error after a tool call prints the error, exits 1 and runs session-end",
+	async (t) => {
+		const run = await runShellWithFailingProvider("text");
+
+		t.is(run.toolRuns, 1);
+		t.true(
+			run.stderr.includes("Server error (500): upstream failed"),
+			`expected the provider error on stderr, got: ${run.stderr}`,
+		);
+		t.is(run.exitCode, 1);
+		t.is(run.sessionEnd, "end", "session-end must run on the error path");
+	},
+);
+
+test.serial("plain shell initializes with the run's development mode", async (t) => {
+	const stdout = capturingStdout();
+	let initOptions: { developmentMode?: string } | undefined;
+	try {
+		await runPlainShell({
+			prompt: "do the thing",
+			developmentMode: "plan",
+			trustDirectory: true,
+			outputFormat: "json",
+			deps: baseDeps({
+				initializePlain: async (options) => {
+					initOptions = options;
+					return makeFakeInitializePlain()();
+				},
+				runPlainConversation: async () => ({
+					kind: "success",
+					finalText: "done",
+					reasoning: null,
+					steps: 1,
+					toolCalls: [],
+				}),
+				getShutdownManager: makeFakeShutdownManager({ code: null }),
+			}),
+		});
+	} finally {
+		stdout.restore();
+	}
+
+	// Subagents are built from this, so a plan-mode run can't hand them
+	// the editing tools its own agent is not offered.
+	t.is(initOptions?.developmentMode, "plan");
 });

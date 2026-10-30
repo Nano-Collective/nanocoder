@@ -1299,6 +1299,43 @@ test.serial('processAssistantResponse - compact-and-retry adds nudge message to 
 	}
 });
 
+test.serial('processAssistantResponse - compact-and-retry invalidates read_file stubs', async t => {
+	const {clearReadTracker, matchReadContent, rememberReadContent} = await import(
+		'@/utils/read-tracker.js'
+	);
+	clearReadTracker();
+	const stats = {mtimeMs: 1, size: 10};
+	rememberReadContent('/tmp/compact-retry/app.ts', stats, 3);
+
+	const messagesSetCalls: Message[][] = [];
+	const longContent = 'Verbose conversation content that exceeds thresholds for mechanical compression. '.repeat(30);
+	const params = createDefaultParams({
+		client: {
+			chat: async (): Promise<LLMChatResponse> => ({
+				choices: [{message: {role: 'assistant', content: '', tool_calls: undefined}}],
+				toolsDisabled: false,
+			}),
+		},
+		messages: [
+			{role: 'user', content: longContent},
+			{role: 'assistant', content: 'Prior response.'},
+		],
+		setMessages: (msgs: Message[]) => messagesSetCalls.push(msgs),
+		addToChatQueue: () => {},
+	});
+
+	await processAssistantResponse(params);
+
+	t.true(
+		messagesSetCalls.some(msgs =>
+			msgs.some(m => m.role === 'user' && m.content.includes('Context has been compacted')),
+		),
+		'compact-and-retry should have run',
+	);
+	t.is(matchReadContent('/tmp/compact-retry/app.ts', stats), undefined);
+	clearReadTracker();
+});
+
 test.serial('processAssistantResponse - MAX_COMPACT_RETRIES constant limits retry cycles', async t => {
 	// Verify that the total number of chat calls is bounded even when the model
 	// keeps returning empty responses. With MAX_EMPTY_TURNS=2 and MAX_COMPACT_RETRIES=1,

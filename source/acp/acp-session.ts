@@ -2,6 +2,8 @@ import type {
 	AgentSideConnection,
 	ClientCapabilities,
 } from '@agentclientprotocol/sdk';
+import {mergeDisabledTools} from '@/acp/acp-capabilities';
+import {getAppConfig} from '@/config/index';
 import {SemanticMemoryManager} from '@/memory/semantic-memory-manager';
 import {
 	createSessionCwdScope,
@@ -29,8 +31,12 @@ export class AcpSession {
 	baseSystemMessage?: Message;
 	abortController = new AbortController();
 	developmentMode: DevelopmentMode;
+	/** Tools the client turned off for this session. Not persisted: the client sends them on every new, load and resume. */
+	disabledTools: string[] = [];
 	/** True while a prompt turn is being processed. Overlapping calls wait on acquireTurn(). */
 	turnActive = false;
+	/** Set by session/close. Queued prompts check it before they start. */
+	closed = false;
 	/** URI of the file currently focused in the editor client (e.g. VS Code). */
 	activeFile?: string;
 	private memoryFinder?: SemanticMemoryManager;
@@ -51,12 +57,29 @@ export class AcpSession {
 		this.cwdScope = createSessionCwdScope(options.cwd);
 	}
 
+	/**
+	 * What this session does not offer or run: the user's disabledTools plus the
+	 * client's. With `isKnown`, the client's names that are not known tools are
+	 * left out, which is the list to report back as in effect.
+	 */
+	effectiveDisabledTools(isKnown?: (name: string) => boolean): string[] {
+		const requested = isKnown
+			? this.disabledTools.filter(isKnown)
+			: this.disabledTools;
+		return mergeDisabledTools(getAppConfig().disabledTools, requested);
+	}
+
 	getMemoryFinder(): SemanticMemoryManager {
 		return (this.memoryFinder ??= new SemanticMemoryManager({cwd: this.cwd}));
 	}
 
 	cancel(): void {
 		this.abortController.abort();
+	}
+
+	close(): void {
+		this.closed = true;
+		this.cancel();
 	}
 
 	beginTurn(): void {

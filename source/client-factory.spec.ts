@@ -16,6 +16,7 @@ console.log('\nclient-factory.spec.ts');
 // Store originals for restoration
 const originalFetch = globalThis.fetch;
 const originalCwd = process.cwd;
+const originalConfigDir = process.env.NANOCODER_CONFIG_DIR;
 
 // Create a temporary test directory
 const testDir = join(tmpdir(), `nanocoder-client-factory-test-${Date.now()}`);
@@ -75,6 +76,11 @@ test.afterEach(() => {
 	globalThis.fetch = originalFetch;
 	// Restore original cwd
 	process.cwd = originalCwd;
+	if (originalConfigDir === undefined) {
+		delete process.env.NANOCODER_CONFIG_DIR;
+	} else {
+		process.env.NANOCODER_CONFIG_DIR = originalConfigDir;
+	}
 });
 
 test.after.always(() => {
@@ -743,25 +749,13 @@ test.serial(
 );
 
 test.serial(
-	'createLLMClient: falls back when requested provider fails',
+	'createLLMClient: falls back when a non-strict requested provider fails',
 	async t => {
-		// Mock fetch: fail first call, succeed second
-		let callCount = 0;
-		globalThis.fetch = (async () => {
-			callCount++;
-			if (callCount === 1) {
-				throw new TypeError('Failed to fetch');
-			}
-			return {
-				ok: true,
-				status: 200,
-				statusText: 'OK',
-			} as Response;
-		}) as typeof fetch;
-
+		const failingProvider = 'TestProviderWithoutStoredCopilotCredential';
 		// Create config with multiple providers
 		const configDir = join(testDir, 'requested-fallback-test');
 		mkdirSync(configDir, {recursive: true});
+		process.env.NANOCODER_CONFIG_DIR = join(configDir, 'credentials');
 
 		createTestConfig(
 			{
@@ -773,8 +767,9 @@ test.serial(
 							models: ['model1'],
 						},
 						{
-							name: 'Provider2',
-							baseUrl: 'http://localhost:9000/v1',
+							name: failingProvider,
+							baseUrl: 'https://api.example.com/v1',
+							sdkProvider: 'github-copilot',
 							models: ['model2'],
 						},
 					],
@@ -790,12 +785,56 @@ test.serial(
 		reloadAppConfig();
 
 		// Request Provider2, which will fail, then fallback to Provider1
-		const result = await createLLMClient('Provider2');
+		const result = await createLLMClient(failingProvider);
 
 		t.truthy(result);
 		t.truthy(result.client);
-		// Should fallback to Provider1
-		t.truthy(result.actualProvider); // Actual provider name may vary based on default config
+		t.is(result.actualProvider, 'Provider1');
+	},
+);
+
+test.serial(
+	'createLLMClient: does not fall back when provider selection is strict',
+	async t => {
+		const failingProvider = 'TestProviderWithoutStoredCopilotCredential';
+		const configDir = join(testDir, 'strict-requested-provider-test');
+		mkdirSync(configDir, {recursive: true});
+		process.env.NANOCODER_CONFIG_DIR = join(configDir, 'credentials');
+		createTestConfig(
+			{
+				nanocoder: {
+					providers: [
+						{
+							name: 'Provider1',
+							baseUrl: 'http://localhost:8000/v1',
+							models: ['model1'],
+						},
+						{
+							name: failingProvider,
+							baseUrl: 'https://api.example.com/v1',
+							sdkProvider: 'github-copilot',
+							models: ['model2'],
+						},
+					],
+				},
+			},
+			configDir,
+		);
+		process.cwd = () => configDir;
+		clearAppConfig();
+		reloadAppConfig();
+
+		const error = await t.throwsAsync(
+			createLLMClient(failingProvider, undefined, undefined, {
+				strictProvider: true,
+			}),
+		);
+
+		t.true(
+			error.message.includes(
+				`Explicitly requested provider '${failingProvider}' failed`,
+			),
+		);
 	},
 );
 
