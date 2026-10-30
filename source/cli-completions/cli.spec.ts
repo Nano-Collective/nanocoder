@@ -168,3 +168,32 @@ test('every top-level command and run flag is in the completion spec', t => {
 		t.true(flags.has(flag), `missing flag ${flag}`);
 	}
 });
+
+test.serial('subcommand flags are offered after their subcommand only', t => {
+	for (const shell of COMPLETION_SHELLS) {
+		const script = scriptFor(shell);
+		for (const subcommand of COMPLETION_SUBCOMMANDS) {
+			for (const flag of subcommand.flags ?? []) {
+				t.true(
+					longFlagPattern(shell, flag.name).test(script),
+					`${shell}: missing --${flag.name} for ${subcommand.name}`,
+				);
+			}
+		}
+	}
+
+	// The global list is what `nanocoder --<TAB>` offers, and the CLI rejects
+	// these two at the top level.
+	const globalFlags = (/local flags="([^"]*)"/.exec(scriptFor('bash'))?.[1] ?? '')
+		.split(' ');
+	t.false(globalFlags.includes('--status'));
+	t.false(globalFlags.includes('--grant'));
+	t.true(globalFlags.includes('--json'));
+
+	t.regex(scriptFor('bash'), /trust\)\s+flags="--status --grant --json"/);
+	t.regex(scriptFor('zsh'), /trust\)\s+_arguments [^\n]*--status[^\n]*--grant/);
+	t.regex(
+		scriptFor('fish'),
+		/__fish_seen_subcommand_from trust' -l grant -r/,
+	);
+});

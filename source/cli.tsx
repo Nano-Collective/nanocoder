@@ -137,6 +137,22 @@ if (args[0] === 'config') {
 	process.exit(result.exitCode);
 }
 
+// Handle `nanocoder trust` — fast path. Reads and writes only the trust list in
+// the global preferences file, so it never loads the folder's project config or
+// starts anything it defines. Its import graph also stays free of React and Ink
+// (trust-cli.spec.ts checks this), which is why preferences.ts logs through
+// @/utils/logging and not the Ink message queue.
+if (args[0] === 'trust') {
+	const {runTrustCli} = await import('@/config/trust-cli');
+	const result = runTrustCli(args.slice(1));
+	if (result.exitCode === 0) {
+		console.log(result.output);
+	} else {
+		console.error(result.output);
+	}
+	process.exit(result.exitCode);
+}
+
 // Handle `nanocoder init` without booting the interactive app. The shared
 // initializer is also used by /init, so both entry points keep identical file
 // generation and overwrite behavior.
@@ -240,6 +256,10 @@ Commands:
                                   Flags: --ref, --subdir, --global, --force, --yes, --index.
   config <subcommand>             Inspect the resolved configuration and where each value came from.
                                   Subcommands: list, show [key], diff. Add --json for machine output.
+  trust --status [--json]         Show whether this folder is trusted, what it will run, and its
+                                  fingerprint. Runs nothing from the folder. Status is trusted,
+                                  not-trusted, changed or needs-re-approval.
+  trust --grant <fingerprint>     Trust this folder only if its fingerprint still matches.
   storage [--format json]         Inspect session and artifact storage (read-only).
                                   Interactive by default; JSON works without a TTY.
   completion <shell>              Generate a shell completion script (bash, zsh, or fish).

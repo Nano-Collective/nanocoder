@@ -9,6 +9,13 @@ import {getShutdownManager} from '@/utils/shutdown';
 
 const logger = getLogger();
 
+/**
+ * Exit code when startup is refused because the folder is not trusted, so a
+ * client can show a trust prompt without matching the message. Other startup
+ * failures exit 1.
+ */
+const ACP_TRUST_REFUSED_EXIT_CODE = 3;
+
 export interface RunAcpServerOptions {
 	cliProvider?: string;
 	cliModel?: string;
@@ -34,7 +41,7 @@ export async function runAcpServer(
 	if (refusal) {
 		logger.error(`ACP not started: ${refusal}`);
 		process.stderr.write(`[nanocoder] ${refusal}\n`);
-		process.exit(1);
+		process.exit(ACP_TRUST_REFUSED_EXIT_CODE);
 	}
 
 	let initContext: AcpInitContext;
