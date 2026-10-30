@@ -87,6 +87,15 @@ Otherwise Nanocoder uses your configured default provider and last-used model. Y
 - **Audio and other image types are not processed.** Audio, and images other than PNG, JPEG, GIF and WebP, are noted to the model but not sent.
 - **Sub-agent tool approvals ignore the session mode.** Tool calls inside a sub-agent always ask for permission, regardless of the ACP session's mode or the configured `alwaysAllow` list, so a `yolo` or `auto-accept` session is still prompted there. An approved sub-agent call is also marked `completed` as soon as it is approved, before it actually runs, so it may still fail afterwards. The sub-agent approval handler is also shared across the agent process, so if two sessions run sub-agents at the same time, an approval prompt can be routed to the wrong session.
 
+## Trusting a folder from a client
+
+Run these in the project folder. Neither loads the folder's config, `.env` or anything else it defines.
+
+- `nanocoder trust --status [--json]` prints the folder, a `status` (`trusted`, `not-trusted`, `changed` or `needs-re-approval`), a `summary` of what the folder will run, and its `fingerprint`.
+- `nanocoder trust --grant <fingerprint>` saves the folder only if its fingerprint still matches the one given. It exits `1` if the folder changed in the meantime, so the user can be asked about the new contents.
+
+Each trust entry records which fingerprint version it was saved with. An entry from another version reads as `needs-re-approval` instead of `changed`.
+
 ## Troubleshooting
 
 **Nanocoder doesn't appear / the thread fails to start**
@@ -97,16 +106,7 @@ Otherwise Nanocoder uses your configured default provider and last-used model. Y
 **"Directory ... is not trusted" and it exits immediately**
 
 - `nanocoder --acp` refuses a directory you haven't trusted, because it loads that directory's `agents.config.json`, hooks and MCP servers. Trust the folder by running `nanocoder` there once, set `NANOCODER_TRUST_DIRECTORY=1`, or add `--trust-directory` to the editor's `args` for a one-off. The VS Code extension adds it for you when the workspace is trusted in VS Code.
-- A trust refusal exits with code `3`; every other startup failure exits with `1`. A client can use that to show its own trust prompt, then check the folder with `nanocoder trust --status --json` and save exactly what it showed with `nanocoder trust --grant <fingerprint>`. See [Trusting a folder from a client](#trusting-a-folder-from-a-client) below.
-
-### Trusting a folder from a client
-
-Run these in the project folder. Neither loads the folder's config, `.env` or anything else it defines.
-
-- `nanocoder trust --status [--json]` prints the folder, a `status` (`trusted`, `not-trusted`, `changed` or `needs-re-approval`), a `summary` of what the folder will run, and its `fingerprint`.
-- `nanocoder trust --grant <fingerprint>` saves the folder only if its fingerprint still matches the one given. It exits `1` if the folder changed in the meantime, so the user can be asked about the new contents.
-
-Each trust entry records which fingerprint version it was saved with. An entry from another version reads as `needs-re-approval` instead of `changed`.
+- A trust refusal exits with code `3`; every other startup failure exits with `1`. A client can use that to show its own trust prompt, then check the folder with `nanocoder trust --status --json` and save exactly what it showed with `nanocoder trust --grant <fingerprint>`. See [Trusting a folder from a client](#trusting-a-folder-from-a-client) above.
 
 **"No provider configured" or it exits immediately**
 

@@ -10,8 +10,8 @@
 import {
 	grantDirectoryTrust,
 	isDirectoryTrusted,
-	loadPreferences,
-	savePreferences,
+	loadGlobalOnlyPreferences,
+	saveGlobalOnlyPreferences,
 	trustRecheck,
 } from '@/config/preferences';
 import {describeProjectTrust} from '@/config/project-trust';
@@ -39,9 +39,9 @@ Options:
   --json               Emit machine-readable JSON with --status`;
 
 /**
- * Always about the current folder: the folder inspected and the trust list
- * read and written (which `loadPreferences` resolves from the same cwd) are
- * the same place.
+ * Always about the current folder. The trust list is read from and written to
+ * the global preferences file only: a preferences file in the folder is never
+ * opened, so it can neither hide the list nor be changed by granting trust.
  */
 export function runTrustCli(args: readonly string[]): TrustCliResult {
 	const cwd = process.cwd();
@@ -65,7 +65,7 @@ export function runTrustCli(args: readonly string[]): TrustCliResult {
 }
 
 function status(cwd: string, json: boolean): TrustCliResult {
-	const preferences = loadPreferences();
+	const preferences = loadGlobalOnlyPreferences();
 	const {fingerprint, summary} = describeProjectTrust(cwd);
 	const recheck = trustRecheck(cwd, preferences);
 	const trustStatus: TrustStatus = isDirectoryTrusted(cwd, preferences)
@@ -105,7 +105,12 @@ function grant(cwd: string, fingerprint: string): TrustCliResult {
 			output: `Not trusted: ${cwd} changed since that fingerprint was taken. Run "nanocoder trust --status" and review it again.`,
 		};
 	}
-	if (!savePreferences(grantDirectoryTrust(loadPreferences(), cwd, current))) {
+	const {trustedDirectories} = grantDirectoryTrust(
+		loadGlobalOnlyPreferences(),
+		cwd,
+		current,
+	);
+	if (!saveGlobalOnlyPreferences({trustedDirectories})) {
 		return {exitCode: 1, output: `Could not save trust for ${cwd}.`};
 	}
 	return {exitCode: 0, output: `Trusted ${cwd}.`};

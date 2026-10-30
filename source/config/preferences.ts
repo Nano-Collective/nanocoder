@@ -24,7 +24,7 @@ import type {
 import type {UserPreferences} from '@/types/index';
 import type {NanocoderShape, ThemePreset} from '@/types/ui';
 import {atomicWriteFileSync} from '@/utils/atomic-write';
-import {logError} from '@/utils/message-queue';
+import {log} from '@/utils/logging';
 
 let PREFERENCES_PATH: string | null = null;
 let CACHED_CONFIG_DIR: string | undefined = undefined;
@@ -77,7 +77,7 @@ function readGlobalOnlyPreferences(): Partial<UserPreferences> | undefined {
 	try {
 		return JSON.parse(readFileSync(globalPath, 'utf-8')) as UserPreferences;
 	} catch (error) {
-		logError(`Failed to load global preferences: ${String(error)}`);
+		log.error(`Failed to load global preferences: ${String(error)}`);
 		return undefined;
 	}
 }
@@ -98,6 +98,44 @@ function writeGlobalOnlyPreferences(values: Partial<UserPreferences>): void {
 	);
 }
 
+/**
+ * The preferences kept only in the global file, read without opening a project
+ * preferences file in the current folder. For a caller that must not depend on
+ * what the folder contains, such as `nanocoder trust`: a project file that is
+ * unreadable or malformed cannot hide the trust list.
+ */
+export function loadGlobalOnlyPreferences(): UserPreferences {
+	const globalPrefs = readGlobalOnlyPreferences();
+	const values: Record<string, unknown> = {};
+	for (const key of GLOBAL_ONLY_KEYS) {
+		if (globalPrefs?.[key] !== undefined) values[key] = globalPrefs[key];
+	}
+	return values as UserPreferences;
+}
+
+/**
+ * Writes global-only keys to the global file and nothing else: a project
+ * preferences file in the current folder is neither read nor rewritten, so
+ * saving does not depend on the folder being writable. Returns `false` when
+ * the write failed.
+ */
+export function saveGlobalOnlyPreferences(
+	values: Partial<Pick<UserPreferences, (typeof GLOBAL_ONLY_KEYS)[number]>>,
+): boolean {
+	try {
+		writeGlobalOnlyPreferences(values);
+	} catch (error) {
+		log.error(`Failed to save global preferences: ${String(error)}`);
+		return false;
+	}
+
+	preferencesVersion++;
+	for (const listener of preferencesListeners) {
+		listener();
+	}
+	return true;
+}
+
 export function loadPreferences(): UserPreferences {
 	try {
 		const preferencesPath = getPreferencesPath();
@@ -115,7 +153,7 @@ export function loadPreferences(): UserPreferences {
 		}
 		return data;
 	} catch (error) {
-		logError(`Failed to load preferences: ${String(error)}`);
+		log.error(`Failed to load preferences: ${String(error)}`);
 	}
 	return {};
 }
@@ -188,7 +226,7 @@ export function savePreferences(preferences: UserPreferences): boolean {
 			);
 		}
 	} catch (error) {
-		logError(`Failed to save preferences: ${String(error)}`);
+		log.error(`Failed to save preferences: ${String(error)}`);
 		return false;
 	}
 

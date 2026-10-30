@@ -137,8 +137,11 @@ if (args[0] === 'config') {
 	process.exit(result.exitCode);
 }
 
-// Handle `nanocoder trust` — fast path. Reads and writes only the trust list,
-// so it never loads the folder's project config or starts anything it defines.
+// Handle `nanocoder trust` — fast path. Reads and writes only the trust list in
+// the global preferences file, so it never loads the folder's project config or
+// starts anything it defines. Its import graph also stays free of React and Ink
+// (trust-cli.spec.ts checks this), which is why preferences.ts logs through
+// @/utils/logging and not the Ink message queue.
 if (args[0] === 'trust') {
 	const {runTrustCli} = await import('@/config/trust-cli');
 	const result = runTrustCli(args.slice(1));
