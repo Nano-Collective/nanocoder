@@ -83,6 +83,11 @@ export type PlainConversationOutcome =
 	| {
 			kind: 'tool-approval-required';
 			toolNames: string[];
+			/**
+			 * Whether `--mode auto-accept` would have run every blocked call
+			 * without asking. Always false when the run is already in auto-accept.
+			 */
+			autoAcceptWouldRun: boolean;
 			finalText: string;
 			reasoning: string | null;
 			toolCalls: ToolCallLog[];
@@ -706,7 +711,7 @@ async function runPlainConversationBody(
 			return stopped;
 		}
 
-		const toolsNeedingApproval: string[] = [];
+		const toolsNeedingApproval: ToolCall[] = [];
 		const toolsToExecute: ToolCall[] = [];
 		for (const toolCall of validToolCalls) {
 			// Approval (including the yolo bypass) is resolved centrally.
@@ -717,7 +722,7 @@ async function runPlainConversationBody(
 				developmentMode,
 			);
 			if (needsApproval) {
-				toolsNeedingApproval.push(toolCall.function.name);
+				toolsNeedingApproval.push(toolCall);
 			} else {
 				toolsToExecute.push(toolCall);
 			}
@@ -726,7 +731,13 @@ async function runPlainConversationBody(
 		if (toolsNeedingApproval.length > 0) {
 			return {
 				kind: TOOL_APPROVAL_REQUIRED_KIND,
-				toolNames: toolsNeedingApproval,
+				toolNames: toolsNeedingApproval.map(tc => tc.function.name),
+				autoAcceptWouldRun: await evaluateAutoAcceptWouldRun(
+					toolsNeedingApproval,
+					toolManager,
+					nonInteractiveAlwaysAllow,
+					developmentMode,
+				),
 				finalText: accumulatedFinalText,
 				reasoning: accumulatedReasoning || null,
 				toolCalls: toolCallsLog,
@@ -807,4 +818,26 @@ async function evaluateNeedsApproval(
 		toolCall.function.arguments,
 		{mode, alwaysAllow: nonInteractiveAlwaysAllow},
 	);
+}
+
+// Decided per call rather than per tool name because auto-accept still asks
+// for some calls of tools it otherwise waives (a file_op delete, for one), so
+// the name alone can't say whether suggesting it would change the result.
+async function evaluateAutoAcceptWouldRun(
+	blockedToolCalls: ToolCall[],
+	toolManager: ToolManager,
+	nonInteractiveAlwaysAllow: string[],
+	mode: DevelopmentMode,
+): Promise<boolean> {
+	if (mode === 'auto-accept') return false;
+	for (const toolCall of blockedToolCalls) {
+		const needsApproval = await evaluateNeedsApproval(
+			toolCall,
+			toolManager,
+			nonInteractiveAlwaysAllow,
+			'auto-accept',
+		);
+		if (needsApproval) return false;
+	}
+	return true;
 }
