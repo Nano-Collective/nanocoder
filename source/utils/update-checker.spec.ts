@@ -566,3 +566,65 @@ test('checkForUpdates: handles general errors in main function', async t => {
 	t.false(result.hasUpdate);
 	t.truthy(result.currentVersion);
 });
+
+test('checkForUpdates: keeps reporting a found update during the cooldown without a network call', async t => {
+	// Regression: a check that found an update set the 24h throttle, and the
+	// next launch inside the window returned hasUpdate: false, hiding the
+	// banner although the update was still pending.
+	let fetchCount = 0;
+	globalThis.fetch = (async () => {
+		fetchCount++;
+		return createMockFetch(200, {version: '99.99.99'})();
+	}) as typeof fetch;
+
+	const first = await checkForUpdates();
+	t.true(first.hasUpdate);
+	t.is(fetchCount, 1);
+
+	const stored = JSON.parse(readFileSync(preferencesPath, 'utf-8')) as {
+		lastUpdateCheckLatestVersion?: string;
+	};
+	t.is(stored.lastUpdateCheckLatestVersion, '99.99.99');
+
+	const second = await checkForUpdates();
+	t.is(fetchCount, 1, 'throttled launch must not hit the network');
+	t.true(second.hasUpdate);
+	t.is(second.latestVersion, '99.99.99');
+	t.is(second.currentVersion, CURRENT_VERSION);
+	t.truthy(second.updateCommand);
+});
+
+test('checkForUpdates: a cached latest version that is not newer reports no update', async t => {
+	writeFileSync(
+		preferencesPath,
+		JSON.stringify({
+			lastUpdateCheck: Date.now() - 1_000,
+			lastUpdateCheckLatestVersion: CURRENT_VERSION,
+		}),
+	);
+	let fetchCount = 0;
+	globalThis.fetch = (async () => {
+		fetchCount++;
+		return createMockFetch(200, {version: '99.99.99'})();
+	}) as typeof fetch;
+
+	const result = await checkForUpdates();
+
+	t.false(result.hasUpdate);
+	t.is(fetchCount, 0);
+});
+
+test('checkForUpdates: opt-out hides a cached update too', async t => {
+	process.env.NANOCODER_NO_UPDATE_CHECK = '1';
+	writeFileSync(
+		preferencesPath,
+		JSON.stringify({
+			lastUpdateCheck: Date.now() - 1_000,
+			lastUpdateCheckLatestVersion: '99.99.99',
+		}),
+	);
+
+	const result = await checkForUpdates();
+
+	t.false(result.hasUpdate);
+});

@@ -1382,3 +1382,36 @@ test.serial(
 		t.is(run.sessionEnd, "end", "session-end must run on the error path");
 	},
 );
+
+test.serial("plain shell initializes with the run's development mode", async (t) => {
+	const stdout = capturingStdout();
+	let initOptions: { developmentMode?: string } | undefined;
+	try {
+		await runPlainShell({
+			prompt: "do the thing",
+			developmentMode: "plan",
+			trustDirectory: true,
+			outputFormat: "json",
+			deps: baseDeps({
+				initializePlain: async (options) => {
+					initOptions = options;
+					return makeFakeInitializePlain()();
+				},
+				runPlainConversation: async () => ({
+					kind: "success",
+					finalText: "done",
+					reasoning: null,
+					steps: 1,
+					toolCalls: [],
+				}),
+				getShutdownManager: makeFakeShutdownManager({ code: null }),
+			}),
+		});
+	} finally {
+		stdout.restore();
+	}
+
+	// Subagents are built from this, so a plan-mode run can't hand them
+	// the editing tools its own agent is not offered.
+	t.is(initOptions?.developmentMode, "plan");
+});

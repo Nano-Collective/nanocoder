@@ -52,6 +52,7 @@ import {infoMsg} from '@/utils/message-factory';
 import {logWarning} from '@/utils/message-queue';
 import {getLastBuiltPrompt} from '@/utils/prompt-builder';
 import {signalQuestion} from '@/utils/question-queue';
+import {bumpReadContentGeneration} from '@/utils/read-tracker';
 import {markRunFailed} from '@/utils/run-outcome';
 import {calculateTokens} from '@/utils/token-calculator';
 import {isFileMutationTool} from '@/utils/tool-approval';
@@ -1289,6 +1290,11 @@ export const processAssistantResponse = async (
 					const compressedUser = result.compressedMessages.filter(
 						m => m.role !== 'system',
 					);
+					// Aggressive compression truncates old read_file bodies, so a
+					// repeat read must return the content again, not the
+					// "unchanged since last read" stub. Same as /compact and
+					// auto-compact.
+					bumpReadContentGeneration();
 					setMessages(compressedUser);
 
 					addToChatQueue(

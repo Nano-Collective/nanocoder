@@ -27,6 +27,24 @@ export class ToolRegistry {
 	private tools: Map<string, ToolEntry> = new Map();
 
 	/**
+	 * A registry layered over another one: it reads what the parent has, live,
+	 * plus its own tools, and its own tools win. Registering and unregistering
+	 * only ever touch this layer, never the parent.
+	 */
+	constructor(private readonly parent?: ToolRegistry) {}
+
+	private lookup(name: string): ToolEntry | undefined {
+		return this.tools.get(name) ?? this.parent?.lookup(name);
+	}
+
+	/** Every entry visible here: the parent's, then this layer's on top. */
+	private visible(): Map<string, ToolEntry> {
+		return this.parent
+			? new Map([...this.parent.visible(), ...this.tools])
+			: this.tools;
+	}
+
+	/**
 	 * Register a complete tool entry
 	 * @param entry - The ToolEntry containing all tool metadata
 	 */
@@ -68,7 +86,7 @@ export class ToolRegistry {
 	 * @returns The ToolEntry or undefined if not found
 	 */
 	getEntry(name: string): ToolEntry | undefined {
-		return this.tools.get(name);
+		return this.lookup(name);
 	}
 
 	/**
@@ -77,7 +95,7 @@ export class ToolRegistry {
 	 * @returns The ToolHandler or undefined if not found
 	 */
 	getHandler(name: string): ToolHandler | undefined {
-		return this.tools.get(name)?.handler;
+		return this.lookup(name)?.handler;
 	}
 
 	/**
@@ -86,7 +104,7 @@ export class ToolRegistry {
 	 * @returns The ToolFormatter or undefined if not found
 	 */
 	getFormatter(name: string): ToolFormatter | undefined {
-		return this.tools.get(name)?.formatter;
+		return this.lookup(name)?.formatter;
 	}
 
 	/**
@@ -95,7 +113,7 @@ export class ToolRegistry {
 	 * @returns The ToolValidator or undefined if not found
 	 */
 	getValidator(name: string): ToolValidator | undefined {
-		return this.tools.get(name)?.validator;
+		return this.lookup(name)?.validator;
 	}
 
 	/**
@@ -104,7 +122,7 @@ export class ToolRegistry {
 	 * @returns The StreamingFormatter or undefined if not found
 	 */
 	getStreamingFormatter(name: string): StreamingFormatter | undefined {
-		return this.tools.get(name)?.streamingFormatter;
+		return this.lookup(name)?.streamingFormatter;
 	}
 
 	/**
@@ -113,7 +131,7 @@ export class ToolRegistry {
 	 * @returns The AISDKCoreTool or undefined if not found
 	 */
 	getTool(name: string): AISDKCoreTool | undefined {
-		return this.tools.get(name)?.tool;
+		return this.lookup(name)?.tool;
 	}
 
 	/**
@@ -122,7 +140,7 @@ export class ToolRegistry {
 	 */
 	getHandlers(): Record<string, ToolHandler> {
 		const handlers: Record<string, ToolHandler> = {};
-		for (const [name, entry] of this.tools) {
+		for (const [name, entry] of this.visible()) {
 			handlers[name] = entry.handler;
 		}
 		return handlers;
@@ -137,7 +155,7 @@ export class ToolRegistry {
 	 */
 	getNativeTools(): Record<string, AISDKCoreTool> {
 		const nativeTools: Record<string, AISDKCoreTool> = {};
-		for (const [name, entry] of this.tools) {
+		for (const [name, entry] of this.visible()) {
 			const {execute: _, ...toolWithoutExecute} = entry.tool;
 			nativeTools[name] = toolWithoutExecute as AISDKCoreTool;
 		}
@@ -149,7 +167,7 @@ export class ToolRegistry {
 	 * @returns Array of all ToolEntry objects
 	 */
 	getAllEntries(): ToolEntry[] {
-		return Array.from(this.tools.values());
+		return Array.from(this.visible().values());
 	}
 
 	/**
@@ -157,7 +175,7 @@ export class ToolRegistry {
 	 * @returns Array of all registered tool names
 	 */
 	getToolNames(): string[] {
-		return Array.from(this.tools.keys());
+		return Array.from(this.visible().keys());
 	}
 
 	/**
@@ -166,7 +184,7 @@ export class ToolRegistry {
 	 * @returns True if the tool exists, false otherwise
 	 */
 	hasTool(name: string): boolean {
-		return this.tools.has(name);
+		return this.lookup(name) !== undefined;
 	}
 
 	/**
@@ -174,7 +192,7 @@ export class ToolRegistry {
 	 * @returns The count of registered tools
 	 */
 	getToolCount(): number {
-		return this.tools.size;
+		return this.visible().size;
 	}
 
 	/**

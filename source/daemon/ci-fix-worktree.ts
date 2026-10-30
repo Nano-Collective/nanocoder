@@ -17,8 +17,9 @@
  * a worktree. A clone has its own independent object database, so checking
  * out that same branch a second time here is never a conflict. The
  * trade-off: the clone's new commits exist only in its own `.git`, so
- * publishing them (`pushBranch`) must run with this clone as its `cwd`,
- * not the daemon's project root — see `ci-fix-orchestrator.ts`.
+ * publishing fetches them back into the project repo first rather than
+ * pushing from the clone, whose config the fix run could have rewritten -
+ * see `publishFromClone` in `ci-fix-orchestrator.ts`.
  */
 
 import {mkdtempSync, rmSync} from 'node:fs';

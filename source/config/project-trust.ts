@@ -22,6 +22,12 @@ export interface ProjectTrustSurface {
 	subscribedSkills: number;
 	subscribedAgents: number;
 	subscribedCommands: number;
+	/** True when the folder has a `.env`, which is loaded into the environment. */
+	envFile: boolean;
+	/** `agents.config.json` settings that skip or relax confirmations. */
+	permissionSettings: number;
+	/** Project providers with a `baseUrl`, where prompts and code are sent. */
+	providerEndpoints: number;
 	fingerprint: string;
 	/** Null when this folder will not run any of the above. */
 	summary: string | null;
@@ -30,8 +36,12 @@ export interface ProjectTrustSurface {
 /**
  * What this folder will run once it is trusted: in-process plugins, hooks,
  * formatters, LSP servers, project MCP servers, custom tools, and the skills, agents,
- * and commands the daemon triggers on its own. The fingerprint covers those files,
- * so a later edit is visible even when the counts stay the same.
+ * and commands the daemon triggers on its own. Also the `.env` it loads, the
+ * project settings that relax confirmations (`alwaysAllow`, `defaultMode`,
+ * `sandbox`, `verify.trustLevel`), and project provider `baseUrl`s. The
+ * fingerprint covers those files, so a later edit is visible even when the
+ * counts stay the same. Each part adds a line only when present, so a folder
+ * without them keeps the fingerprint it had before they were covered.
  */
 export function describeProjectTrust(directory: string): ProjectTrustSurface {
 	const root = path.resolve(directory);
@@ -47,6 +57,9 @@ export function describeProjectTrust(directory: string): ProjectTrustSurface {
 	const subscribedSkills = listSubscribedSkills(root, lines);
 	const subscribedAgents = listSubscribedFiles(root, 'agents', false, lines);
 	const subscribedCommands = listSubscribedFiles(root, 'commands', true, lines);
+	const envFile = listEnvFile(root, lines);
+	const permissionSettings = listPermissionSettings(config, lines);
+	const providerEndpoints = listProviderEndpoints(config, lines);
 
 	const parts = [
 		countLabel(plugins, 'plugin', 'plugins'),
@@ -59,6 +72,9 @@ export function describeProjectTrust(directory: string): ProjectTrustSurface {
 		countLabel(subscribedSkills, 'subscribed skill', 'subscribed skills'),
 		countLabel(subscribedAgents, 'subscribed agent', 'subscribed agents'),
 		countLabel(subscribedCommands, 'subscribed command', 'subscribed commands'),
+		envFile ? 'a .env file' : null,
+		countLabel(permissionSettings, 'permission setting', 'permission settings'),
+		countLabel(providerEndpoints, 'provider endpoint', 'provider endpoints'),
 	].filter((part): part is string => part !== null);
 
 	return {
@@ -72,6 +88,9 @@ export function describeProjectTrust(directory: string): ProjectTrustSurface {
 		subscribedSkills,
 		subscribedAgents,
 		subscribedCommands,
+		envFile,
+		permissionSettings,
+		providerEndpoints,
 		fingerprint: createHash('sha256').update(lines.join('\n')).digest('hex'),
 		summary:
 			parts.length > 0 ? `This folder contains: ${parts.join(', ')}.` : null,
@@ -178,6 +197,73 @@ function listLspServers(
 		if (typeof name !== 'string' || typeof command !== 'string') continue;
 		if (command.trim() === '' || !Array.isArray(languages)) continue;
 		lines.push(`lsp ${JSON.stringify(entry)}`);
+		count++;
+	}
+	return count;
+}
+
+/** The project `.env` is loaded into the environment at startup. */
+function listEnvFile(root: string, lines: string[]): boolean {
+	const file = path.join(root, '.env');
+	if (!statOrNull(file)?.isFile()) return false;
+	lines.push(`env ${hashFile(file)}`);
+	return true;
+}
+
+/**
+ * Project settings that run tools without asking or loosen how they run.
+ * Each is fingerprinted by value, so turning one on later is a change.
+ */
+function listPermissionSettings(
+	config: ProjectConfig | undefined,
+	lines: string[],
+): number {
+	const nanocoder = config?.nanocoder;
+	if (!nanocoder || typeof nanocoder !== 'object') return 0;
+
+	const settings: [string, unknown][] = [
+		['alwaysAllow', nanocoder.alwaysAllow],
+		['defaultMode', nanocoder.defaultMode],
+		['sandbox', nanocoder.sandbox],
+		[
+			'verify.trustLevel',
+			nanocoder.verify && typeof nanocoder.verify === 'object'
+				? (nanocoder.verify as {trustLevel?: unknown}).trustLevel
+				: undefined,
+		],
+	];
+	let count = 0;
+	for (const [name, value] of settings) {
+		if (value === undefined) continue;
+		lines.push(`setting ${name} ${JSON.stringify(value)}`);
+		count++;
+	}
+	return count;
+}
+
+/**
+ * Project providers with a `baseUrl`, read the way the provider loader reads
+ * them (`nanocoder.providers`, else top-level `providers`). A swapped URL
+ * sends the conversation somewhere else.
+ */
+function listProviderEndpoints(
+	config: ProjectConfig | undefined,
+	lines: string[],
+): number {
+	const providers = Array.isArray(config?.nanocoder?.providers)
+		? config.nanocoder.providers
+		: Array.isArray(config?.providers)
+			? config.providers
+			: [];
+
+	let count = 0;
+	for (const entry of providers) {
+		if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue;
+		const {name, baseUrl} = entry as Record<string, unknown>;
+		if (baseUrl === undefined) continue;
+		lines.push(
+			`provider ${JSON.stringify(name)} baseUrl ${JSON.stringify(baseUrl)}`,
+		);
 		count++;
 	}
 	return count;
@@ -358,7 +444,13 @@ interface ProjectConfig {
 		hooks?: Partial<Record<HookEvent, unknown>>;
 		formatters?: unknown[];
 		lspServers?: unknown[];
+		alwaysAllow?: unknown;
+		defaultMode?: unknown;
+		sandbox?: unknown;
+		verify?: unknown;
+		providers?: unknown;
 	};
+	providers?: unknown;
 }
 
 function readProjectConfig(

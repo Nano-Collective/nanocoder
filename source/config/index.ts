@@ -1,4 +1,3 @@
-import {config as loadEnv} from 'dotenv';
 import {existsSync, mkdirSync, readFileSync, writeFileSync} from 'fs';
 import {join} from 'path';
 import {type CliMode, VALID_MODES} from '@/app/types';
@@ -13,6 +12,7 @@ import {
 	getNotificationsPreference,
 	loadPreferences,
 } from '@/config/preferences';
+import {ignoredDotenvWarning, loadProjectDotenv} from '@/config/project-dotenv';
 import {
 	DEFAULT_SESSION_CONFIG,
 	normalizeSessionConfig,
@@ -53,17 +53,12 @@ import {isTrustLevel} from '@/verify/trust';
 
 export {DEFAULT_SESSION_CONFIG} from '@/config/session-config';
 
-// Load .env file from working directory (shell environment takes precedence)
-// Suppress dotenv console output by temporarily redirecting stdout
-const envPath = join(process.cwd(), '.env');
-if (existsSync(envPath)) {
-	const originalWrite = process.stdout.write.bind(process.stdout);
-	process.stdout.write = () => true;
-	try {
-		loadEnv({path: envPath});
-	} finally {
-		process.stdout.write = originalWrite;
-	}
+// Load .env file from working directory (shell environment takes precedence).
+// Trust-related keys are dropped: this runs before the trust check.
+const dotenvResult = loadProjectDotenv(process.cwd());
+const dotenvWarning = ignoredDotenvWarning(dotenvResult.ignored);
+if (dotenvWarning) {
+	process.stderr.write(`${dotenvWarning}\n`);
 }
 
 // Hold a map of what config files are where

@@ -522,6 +522,14 @@ function readPackageScript(cwd: string, script: string): string | undefined {
 	}
 }
 
+/** Whether `script` has a `pre<script>` or `post<script>` that runs with it. */
+function hasLifecycleHooks(cwd: string, script: string): boolean {
+	return (
+		readPackageScript(cwd, `pre${script}`) !== undefined ||
+		readPackageScript(cwd, `post${script}`) !== undefined
+	);
+}
+
 function narrowArgs(runner: FailureRunner, target: FailingTarget): string[] {
 	// A path that starts with "-" would be read by the runner as a flag.
 	const fileArgs =
@@ -563,6 +571,7 @@ export function buildNarrowCommand(
 	if (!tokens) return null;
 
 	let argsNeedSeparator = false;
+	let launcher: string | undefined;
 	const program = invokedProgram(tokens);
 	if (!program || !binaries.includes(program)) {
 		const script = packageScript(tokens);
@@ -572,6 +581,18 @@ export function buildNarrowCommand(
 		const scriptProgram = bodyTokens ? invokedProgram(bodyTokens) : undefined;
 		if (!scriptProgram || !binaries.includes(scriptProgram)) return null;
 		argsNeedSeparator = script.argsNeedSeparator && !tokens.includes('--');
+		// Running the script by name also runs its pre/post scripts (a build,
+		// a lint, a coverage upload), which the automatic re-run must not
+		// repeat behind the user's back. npm 7+ skips only those hooks under
+		// --ignore-scripts and still runs the named script. pnpm rejects the
+		// flag on `run` and yarn 1 ignores it, so with hooks present they get
+		// no automatic re-run.
+		if (hasLifecycleHooks(cwd, script.script)) {
+			if (tokens[0] !== 'npm') return null;
+			if (!tokens.includes('--ignore-scripts')) {
+				launcher = 'npm --ignore-scripts';
+			}
+		}
 	}
 
 	const args = narrowArgs(report.runner, target);
@@ -582,7 +603,7 @@ export function buildNarrowCommand(
 			: args;
 	if (extraArgs.length === 0) return null;
 	return [
-		trimmed,
+		launcher ? trimmed.replace(/^npm\b/u, launcher) : trimmed,
 		...(argsNeedSeparator ? ['--'] : []),
 		...extraArgs.map(quoteArg),
 	].join(' ');

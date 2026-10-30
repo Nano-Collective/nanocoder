@@ -1,5 +1,13 @@
 import {execFileSync} from 'node:child_process';
-import {existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
+import {
+	existsSync,
+	mkdtempSync,
+	mkdirSync,
+	readFileSync,
+	realpathSync,
+	rmSync,
+	writeFileSync,
+} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {basename, dirname, join} from 'node:path';
 import test from 'ava';
@@ -17,7 +25,9 @@ type MockOptions = {
 };
 
 function fixture(options: MockOptions = {}) {
-	const root = mkdtempSync(join(tmpdir(), 'nanocoder-pr-test-'));
+	// realpath: macOS tmpdir is under the /var -> /private/var symlink, and
+	// process.cwd() reports the resolved path after chdir.
+	const root = realpathSync(mkdtempSync(join(tmpdir(), 'nanocoder-pr-test-')));
 	const worktree = join(dirname(root), `${basename(root)}-pr-42`);
 	const gitCalls: string[][] = [];
 	const ghCalls: string[][] = [];
@@ -253,7 +263,9 @@ test.serial('entering the worktree makes it the session cwd and project root', a
 });
 
 function localGitFixture() {
-	const fixtureRoot = mkdtempSync(join(tmpdir(), 'nanocoder pr git '));
+	const fixtureRoot = realpathSync(
+		mkdtempSync(join(tmpdir(), 'nanocoder pr git ')),
+	);
 	const repo = join(fixtureRoot, 'repo with spaces');
 	const bare = join(fixtureRoot, 'pull refs.git');
 	const worktree = join(fixtureRoot, 'repo with spaces-pr-42');

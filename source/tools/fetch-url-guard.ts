@@ -114,7 +114,10 @@ export function assertPublicHttpUrl(urlString: string): void {
 	}
 }
 
-/** @internal Test-only: swap the resolver so specs never reach real DNS. */
+/**
+ * Host lookup shared by fetch_url and the browser tool's request filter.
+ * Specs swap `resolve` so they never reach real DNS.
+ */
 export const hostResolver = {
 	resolve: async (hostname: string): Promise<string[]> =>
 		(await lookup(hostname, {all: true})).map(({address}) => address),

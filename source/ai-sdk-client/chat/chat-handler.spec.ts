@@ -1146,3 +1146,106 @@ test('openai-compatible: a tool screenshot reaches the request body as an image_
 		],
 	});
 });
+
+const screenshotHistory = (): Message[] => [
+	{role: 'user', content: 'check the page'},
+	{
+		role: 'assistant',
+		content: '',
+		tool_calls: [{id: 'call_shot', function: {name: 'browser', arguments: {}}}],
+	},
+	{
+		role: 'tool',
+		content: 'Screenshot of http://localhost:3000/',
+		tool_call_id: 'call_shot',
+		name: 'browser',
+		images: [{data: 'SCREENSHOT_B64', mediaType: 'image/jpeg'}],
+	},
+];
+
+async function chatWithLocalServer(
+	modelId: string,
+	respond: (body: string, call: number) => Response,
+) {
+	const {createOpenAICompatible} = await import('@ai-sdk/openai-compatible');
+	const bodies: string[] = [];
+	const model = createOpenAICompatible({
+		name: 'llama.cpp',
+		baseURL: 'http://localhost:8080/v1',
+		fetch: async (_input, init) => {
+			const body = String(init?.body);
+			bodies.push(body);
+			return respond(body, bodies.length);
+		},
+	})(modelId);
+	const run = () =>
+		handleChat({
+			model,
+			currentModel: modelId,
+			providerConfig: {
+				name: 'llama.cpp',
+				type: 'openai',
+				models: [modelId],
+				config: {baseURL: 'http://localhost:8080/v1'},
+			},
+			messages: screenshotHistory(),
+			tools: {},
+			callbacks: {},
+			maxRetries: 0,
+		});
+	return {bodies, run};
+}
+
+const imageRefusal = () =>
+	new Response(
+		JSON.stringify({
+			error: {
+				message:
+					'image input is not supported - hint: if this is unexpected, you may need to provide the mmproj',
+			},
+		}),
+		{status: 500, headers: {'content-type': 'application/json'}},
+	);
+
+const sseReply = (text: string) =>
+	new Response(
+		[
+			`data: ${JSON.stringify({id: '1', choices: [{index: 0, delta: {role: 'assistant', content: text}}]})}`,
+			`data: ${JSON.stringify({id: '1', choices: [{index: 0, delta: {}, finish_reason: 'stop'}]})}`,
+			'data: [DONE]',
+			'',
+		].join('\n\n'),
+		{status: 200, headers: {'content-type': 'text/event-stream'}},
+	);
+
+test.serial('a text-only local model that refuses a screenshot is retried without it and remembered', async t => {
+	const {bodies, run} = await chatWithLocalServer(
+		'local-text-only-refuses-images',
+		body => (body.includes('SCREENSHOT_B64') ? imageRefusal() : sseReply('ok')),
+	);
+
+	const first = await run();
+	t.is(first.choices[0]?.message.content, 'ok');
+	t.is(bodies.length, 2);
+	t.true(bodies[0]?.includes('SCREENSHOT_B64'));
+	t.false(bodies[1]?.includes('SCREENSHOT_B64'));
+	t.true(bodies[1]?.includes('Image not sent'));
+
+	// The next turn omits the image up front instead of failing again.
+	await run();
+	t.is(bodies.length, 3);
+	t.false(bodies[2]?.includes('SCREENSHOT_B64'));
+});
+
+test.serial('an unrelated server error is not retried without images', async t => {
+	const {bodies, run} = await chatWithLocalServer(
+		'local-model-unrelated-error',
+		() =>
+			new Response(JSON.stringify({error: {message: 'out of memory'}}), {
+				status: 500,
+				headers: {'content-type': 'application/json'},
+			}),
+	);
+	await t.throwsAsync(run());
+	t.is(bodies.length, 1);
+});

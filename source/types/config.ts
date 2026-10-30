@@ -742,6 +742,11 @@ export interface UserPreferences {
 		[key in string]?: string;
 	};
 	lastUpdateCheck?: number;
+	/**
+	 * Latest published version seen by the last successful update check, so
+	 * the update banner keeps showing during the 24h throttle window.
+	 */
+	lastUpdateCheckLatestVersion?: string;
 	selectedTheme?: ThemePreset;
 	/**
 	 * Theme whose palette colours syntax highlighting in code blocks, diffs, and

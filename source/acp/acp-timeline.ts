@@ -108,6 +108,7 @@ interface OpaqueCaptureContext {
 	toolName: string;
 	title: string;
 	truncateToMessageIndex: number;
+	turnId?: string;
 }
 
 interface DirectCaptureContext {
@@ -126,6 +127,7 @@ export async function beginTimelineCapture(
 	toolCall: ToolCall,
 	messages: Message[],
 	title: string,
+	turnId?: string,
 ): Promise<TimelineCaptureContext> {
 	const toolName = toolCall.function.name;
 	if (!isTimelineMutatingTool(toolManager, toolName)) {
@@ -144,6 +146,7 @@ export async function beginTimelineCapture(
 		toolName,
 		title,
 		truncateToMessageIndex,
+		turnId,
 	};
 
 	try {
@@ -217,6 +220,7 @@ export async function finishTimelineCapture(
 			toolName: context.toolName,
 			title: context.title,
 			truncateToMessageIndex: context.truncateToMessageIndex,
+			turnId: context.turnId,
 			files: context.files,
 		});
 	} catch (error) {
