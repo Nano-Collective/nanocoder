@@ -9,7 +9,7 @@
  * set by App.tsx, called from the subagent executor.
  */
 
-import type {DevelopmentMode, ToolCall} from '@/types/core';
+import type {DevelopmentMode, LLMClient, ToolCall} from '@/types/core';
 import {createGlobalHandlerSlot} from '@/utils/global-handler-slot';
 
 export interface PendingToolApproval {
@@ -43,6 +43,12 @@ export interface SubagentToolBridge {
 	getMode(): DevelopmentMode;
 	/** Tools the session does not offer or run, which its subagents must not either. */
 	getDisabledTools?(): readonly string[];
+	/**
+	 * The client the session's turn runs on. A subagent inherits its provider and
+	 * model from this one, not from the executor's startup client, so a model the
+	 * session picked reaches its subagents.
+	 */
+	getClient?(): LLMClient | undefined;
 	/** Announce a call before it is approved or run. */
 	begin(toolCall: ToolCall, subagentName: string): Promise<void>;
 	/** Ask the client to approve a call, naming the subagent run that made it. */

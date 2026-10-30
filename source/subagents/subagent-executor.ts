@@ -360,9 +360,12 @@ export class SubagentExecutor {
 			// different provider, or the parent client with model switching.
 			// When agentId is set (concurrent mode), always create a new client
 			// for non-inherit models to avoid mutating the shared parent.
+			// The session's own client when it has one (an ACP session that picked a
+			// model), so the subagent inherits that model and not the startup one.
 			const {client, restoreParent} = await this.prepareClient(
 				config,
 				!!agentId,
+				bridge?.getClient?.() ?? this.parentClient,
 			);
 			const pendingUsageWrites: Promise<void>[] = [];
 			const recordUsage = (call: ApiCallRecord): void => {
@@ -589,10 +592,13 @@ export class SubagentExecutor {
 	 *
 	 * @param concurrent - When true, creates a new client instead of mutating
 	 *                     the parent client's model (safe for parallel execution).
+	 * @param parent - The client the subagent inherits from: the executor's own,
+	 *                 or the calling session's.
 	 */
 	private async prepareClient(
 		config: SubagentConfigWithSource,
 		concurrent = false,
+		parent: LLMClient = this.parentClient,
 	): Promise<{
 		client: LLMClient;
 		restoreParent: () => void;
@@ -601,13 +607,13 @@ export class SubagentExecutor {
 			typeof config.contextWindow === 'number'
 				? config.contextWindow
 				: undefined;
-		const parentProviderConfig = this.parentClient.getProviderConfig();
+		const parentProviderConfig = parent.getProviderConfig();
 		const targetProvider = config.provider ?? parentProviderConfig.name;
 		const targetModel =
 			config.model && config.model !== 'inherit'
 				? config.model
 				: targetProvider === parentProviderConfig.name
-					? this.parentClient.getCurrentModel()
+					? parent.getCurrentModel()
 					: undefined;
 
 		if (requestedContextWindow) {
@@ -638,23 +644,23 @@ export class SubagentExecutor {
 				return {client, restoreParent: () => {}};
 			}
 
-			const availableModels = await this.parentClient.getAvailableModels();
+			const availableModels = await parent.getAvailableModels();
 			if (!availableModels.includes(config.model)) {
 				throw new Error(
 					`Model '${config.model}' is not available. Configured models: ${availableModels.join(', ')}`,
 				);
 			}
 
-			const originalModel = this.parentClient.getCurrentModel();
-			this.parentClient.setModel(config.model);
+			const originalModel = parent.getCurrentModel();
+			parent.setModel(config.model);
 			return {
-				client: this.parentClient,
-				restoreParent: () => this.parentClient.setModel(originalModel),
+				client: parent,
+				restoreParent: () => parent.setModel(originalModel),
 			};
 		}
 
 		// Inherit everything
-		return {client: this.parentClient, restoreParent: () => {}};
+		return {client: parent, restoreParent: () => {}};
 	}
 
 	/**

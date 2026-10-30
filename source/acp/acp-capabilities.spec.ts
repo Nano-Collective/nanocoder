@@ -44,6 +44,7 @@ test('getAgentCapabilities - returns session capabilities with close', t => {
 					'_nanocoder/sessionTitleChanged',
 					'_nanocoder/subagent',
 				],
+				perSessionModel: true,
 			},
 		},
 	});

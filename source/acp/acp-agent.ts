@@ -82,7 +82,7 @@ import {
 } from '@/session/title-generator';
 import type {ToolManager} from '@/tools/tool-manager';
 import {getTuneToolMode} from '@/types/config';
-import {applyTuneCompaction} from '@/utils/auto-compact';
+import type {LLMClient} from '@/types/core';
 import {getLogger} from '@/utils/logging';
 import {buildSystemPrompt, setLastBuiltPrompt} from '@/utils/prompt-builder';
 
@@ -196,13 +196,14 @@ export class AcpAgent implements Agent {
 				...this.buildDisabledToolsMeta(session),
 			},
 			modes: this.buildModeState(session),
-			configOptions: await this.buildConfigOptions(),
+			configOptions: await this.buildConfigOptions(session),
 		};
 	}
 
 	async loadSession(params: LoadSessionRequest): Promise<LoadSessionResponse> {
 		const existing = this.sessions.get(params.sessionId);
 		let session = existing;
+		let modelFallback: Awaited<ReturnType<typeof this.restoreSavedModel>>;
 
 		if (!session) {
 			// Try loading from disk first so history persists across process restarts.
@@ -219,6 +220,7 @@ export class AcpAgent implements Agent {
 			);
 			clearAcpReadStubs(params.sessionId);
 			session.messages = persisted.messages;
+			modelFallback = await this.restoreSavedModel(session, persisted);
 		} else {
 			// The client sends the list on every load, so a live session takes the new one.
 			session.disabledTools = parseDisabledTools(params._meta);
@@ -238,9 +240,10 @@ export class AcpAgent implements Agent {
 				...(await this.buildApprovalMeta(session)),
 				...this.buildDisabledToolsMeta(session),
 				'nanocoder/artifacts': await listSessionArtifacts(params.sessionId),
+				...(modelFallback ? {'nanocoder/modelFallback': modelFallback} : {}),
 			},
 			modes: this.buildModeState(session),
-			configOptions: await this.buildConfigOptions(),
+			configOptions: await this.buildConfigOptions(session),
 		};
 	}
 
@@ -277,6 +280,12 @@ export class AcpAgent implements Agent {
 		const turnStart = Date.now();
 
 		try {
+			// A model picked during the previous turn applies from this one.
+			if (session.promptStale) {
+				session.promptStale = false;
+				this.buildSystemPromptForSession(session);
+			}
+
 			const {
 				text: userText,
 				typedText,
@@ -406,7 +415,7 @@ export class AcpAgent implements Agent {
 			const sessionTools = this.sessionToolManagers.get(session.sessionId);
 			const response = await runAcpConversation({
 				session,
-				client: this.initContext.client,
+				client: this.clientFor(session),
 				toolManager: sessionTools ?? this.initContext.toolManager,
 				sessionTools,
 				conn: this.conn,
@@ -482,7 +491,7 @@ export class AcpAgent implements Agent {
 				this.pendingTitleGeneration = maybeGenerateTitle({
 					sessionId: session.sessionId,
 					messages: session.messages,
-					client: this.initContext.client,
+					client: this.clientFor(session),
 					onTitle: title => {
 						// notify(), not the deprecated extNotification() alias.
 						// The client receives it as extNotification(method, params).
@@ -592,23 +601,28 @@ export class AcpAgent implements Agent {
 				undefined,
 				{strictProvider: true},
 			);
-			this.initContext.provider = providerId;
-			this.initContext.client = newClient;
-			setAutoCommitClient(newClient);
 
+			// Keep the session's model when the new provider has it.
+			let model = session.model;
 			const availableModels = await newClient.getAvailableModels();
-			if (availableModels.includes(this.initContext.model)) {
-				newClient.setModel(this.initContext.model);
+			if (availableModels.includes(model)) {
+				newClient.setModel(model);
 			} else if (availableModels.length > 0) {
-				this.initContext.model = availableModels[0];
-				newClient.setModel(availableModels[0]);
+				model = availableModels[0];
+				newClient.setModel(model);
+			} else {
+				// A provider may list no models. The previous provider's model means
+				// nothing there, so the session takes the model the new client has
+				// (none, for such a provider) rather than keep a pair that was never
+				// valid.
+				model = newClient.getCurrentModel();
 			}
-			updateLastUsed(providerId, this.initContext.model);
+			this.selectModel(session, providerId, model, newClient);
 
 			logger.info(
 				`ACP setSessionConfigOption: session=${params.sessionId} configId=${params.configId} value=${providerId}`,
 			);
-			return {configOptions: await this.buildConfigOptions()};
+			return {configOptions: await this.buildConfigOptions(session)};
 		}
 
 		if (params.configId !== MODEL_CONFIG_ID) {
@@ -622,23 +636,98 @@ export class AcpAgent implements Agent {
 			throw new Error(`Invalid model value: ${String(modelId)}`);
 		}
 
-		const {client, provider} = this.initContext;
-		const available = await client.getAvailableModels();
+		const available = await this.clientFor(session).getAvailableModels();
 		if (!available.includes(modelId)) {
 			throw new Error(`Unknown model: ${modelId}`);
 		}
 
-		// Note: the LLM client is shared across all sessions, so the selected
-		// model is effectively process-global. This matches single-session ACP
-		// usage (Zed); a future multi-session client would see one shared model.
+		// A client is never re-pointed: another session may still be on it, or
+		// in the middle of a turn that started with it.
+		const {client} = await createLLMClient(
+			session.provider,
+			undefined,
+			undefined,
+			{strictProvider: true},
+		);
 		client.setModel(modelId);
-		this.initContext.model = modelId;
-		updateLastUsed(provider, modelId);
+		this.selectModel(session, session.provider, modelId, client);
 		logger.info(
 			`ACP setSessionConfigOption: session=${params.sessionId} configId=${params.configId} value=${modelId}`,
 		);
 
-		return {configOptions: await this.buildConfigOptions()};
+		return {configOptions: await this.buildConfigOptions(session)};
+	}
+
+	/**
+	 * Moves one session to a provider, model and client of its own. The choice
+	 * also becomes what sessions created from now on start with, and what the
+	 * user's last-used selection and auto-commit follow, as it did when the
+	 * selection was process-wide.
+	 */
+	private selectModel(
+		session: AcpSession,
+		provider: string,
+		model: string,
+		client: LLMClient,
+	): void {
+		session.provider = provider;
+		session.model = model;
+		session.client = client;
+		this.initContext.provider = provider;
+		this.initContext.model = model;
+		this.initContext.client = client;
+		setAutoCommitClient(client);
+		// A provider with no model is not a selection worth remembering.
+		if (model) {
+			updateLastUsed(provider, model);
+		}
+
+		// A running turn keeps the prompt and client it started with.
+		if (session.turnActive) {
+			session.promptStale = true;
+		} else {
+			this.buildSystemPromptForSession(session);
+		}
+	}
+
+	private clientFor(session: AcpSession): LLMClient {
+		return session.client ?? this.initContext.client;
+	}
+
+	/**
+	 * Puts a resumed session back on the provider and model it was saved with.
+	 * Returns the saved choice when it can no longer be used, so the response
+	 * can say the session stayed on the process default.
+	 */
+	private async restoreSavedModel(
+		session: AcpSession,
+		saved: {provider: string; model: string},
+	): Promise<{provider: string; model: string} | undefined> {
+		if (saved.provider === session.provider && saved.model === session.model) {
+			return undefined;
+		}
+		try {
+			const {client} = await createLLMClient(
+				saved.provider,
+				undefined,
+				undefined,
+				{strictProvider: true},
+			);
+			if (!(await client.getAvailableModels()).includes(saved.model)) {
+				throw new Error(`model ${saved.model} is not available`);
+			}
+			client.setModel(saved.model);
+			session.provider = saved.provider;
+			session.model = saved.model;
+			session.client = client;
+			this.buildSystemPromptForSession(session);
+			return undefined;
+		} catch (error) {
+			logger.warn(
+				`ACP session ${session.sessionId} stays on ${session.provider}/${session.model}: saved ${saved.provider}/${saved.model} is unavailable (${error instanceof Error ? error.message : String(error)})`,
+			);
+			return {provider: saved.provider, model: saved.model};
+		}
 	}
 
 	async listSessions(
@@ -705,6 +794,7 @@ export class AcpAgent implements Agent {
 		await this.applyMcpServers(session, params.mcpServers);
 		session.messages = persisted.messages;
 		clearAcpReadStubs(params.sessionId);
+		const modelFallback = await this.restoreSavedModel(session, persisted);
 		logger.info(
 			`ACP resumeSession: ${params.sessionId} messages=${persisted.messages.length}`,
 		);
@@ -717,9 +807,10 @@ export class AcpAgent implements Agent {
 				...(await this.buildApprovalMeta(session)),
 				...this.buildDisabledToolsMeta(session),
 				'nanocoder/artifacts': await listSessionArtifacts(params.sessionId),
+				...(modelFallback ? {'nanocoder/modelFallback': modelFallback} : {}),
 			},
 			modes: this.buildModeState(session),
-			configOptions: await this.buildConfigOptions(),
+			configOptions: await this.buildConfigOptions(session),
 		};
 	}
 
@@ -1026,6 +1117,10 @@ export class AcpAgent implements Agent {
 			initialMode: this.initContext.initialMode,
 		});
 		session.disabledTools = disabledTools;
+		// Pinned now, so a later selection in another session does not move it.
+		session.provider = this.initContext.provider;
+		session.model = this.initContext.model;
+		session.client = this.initContext.client;
 		this.sessions.set(sessionId, session);
 		this.buildSystemPromptForSession(session);
 		return session;
@@ -1179,10 +1274,12 @@ export class AcpAgent implements Agent {
 	// 0.25.0 folded model selection into the generic session-config system: a
 	// single "select" option in the `model` category, switched via
 	// setSessionConfigOption rather than the removed unstable_setSessionModel.
-	private async buildConfigOptions(): Promise<SessionConfigOption[]> {
-		const {client} = this.initContext;
+	private async buildConfigOptions(
+		session: AcpSession,
+	): Promise<SessionConfigOption[]> {
+		const client = this.clientFor(session);
 		const available = await client.getAvailableModels();
-		const currentModelId = client.getCurrentModel();
+		const currentModelId = session.model || client.getCurrentModel();
 
 		const modelIds = [...available];
 		// Ensure the active model is always present in the list so clients can
@@ -1194,7 +1291,7 @@ export class AcpAgent implements Agent {
 		const config = getAppConfig();
 		const providerNames = (config.providers ?? []).map(p => p.name);
 		const currentProvider =
-			this.initContext.provider || client.getProviderConfig().name || 'openai';
+			session.provider || client.getProviderConfig().name || 'openai';
 
 		const providerIds = [...providerNames];
 		if (
@@ -1226,14 +1323,16 @@ export class AcpAgent implements Agent {
 
 	private buildSystemPromptForSession(session: AcpSession): void {
 		const toolManager = this.toolManagerFor(session.sessionId);
-		const {provider, model} = this.initContext;
+		const {provider, model} = session;
 
 		const tune = resolveTune(
 			getAppConfig(),
-			this.initContext.client.getProviderConfig(),
+			this.clientFor(session).getProviderConfig(),
 			loadPreferences(),
 		);
-		applyTuneCompaction(tune);
+		// This session's own preset, applied to its turns only. The process-wide
+		// one would change when every other session compacts, mid-turn included.
+		session.aggressiveCompact = Boolean(tune.enabled && tune.aggressiveCompact);
 		const tuneToolMode = getTuneToolMode(tune);
 		const toolsDisabled =
 			tuneToolMode !== 'native' || isToolCallingDisabled(provider, model);
@@ -1301,9 +1400,8 @@ export class AcpAgent implements Agent {
 						createdAt: existingSession.createdAt || timestamp,
 						lastAccessedAt: timestamp,
 						messageCount: 0,
-						provider:
-							this.initContext.client.getProviderConfig().name || 'openai',
-						model: this.initContext.client.getCurrentModel() || 'gpt-4o',
+						provider: session.provider || 'openai',
+						model: session.model || 'gpt-4o',
 						workingDirectory: session.cwd,
 						messages: [],
 					});
@@ -1332,8 +1430,8 @@ export class AcpAgent implements Agent {
 				createdAt: existingSession?.createdAt || timestamp,
 				lastAccessedAt: timestamp,
 				messageCount: saveableMessages.length,
-				provider: this.initContext.client.getProviderConfig().name || 'openai',
-				model: this.initContext.client.getCurrentModel() || 'gpt-4o',
+				provider: session.provider || 'openai',
+				model: session.model || 'gpt-4o',
 				workingDirectory: session.cwd,
 				messages: session.messages.map(m => {
 					if (m.role === 'user' && typeof m.content === 'string') {

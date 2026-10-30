@@ -3114,6 +3114,87 @@ test.serial('a subagent approval request carries the run id', async t => {
 	t.is(seen, 'run-approval');
 });
 
+/** A client that records the model it was asked to use, under a provider name of its own. */
+function namedClient(model: string, answer: string) {
+	const used: string[] = [];
+	const client = createMockClient([{content: answer}]);
+	(client as any).getCurrentModel = () => model;
+	(client as any).chat = async () => {
+		used.push(model);
+		return {
+			choices: [{message: {content: answer}}],
+			toolsDisabled: false,
+		};
+	};
+	return {client, used};
+}
+
+test.serial('a subagent runs on the client its session\'s turn runs on, not the executor\'s own', async t => {
+	const executorOwn = namedClient('startup-model', 'from the startup client');
+	const sessionOwn = namedClient('session-model', 'from the session client');
+	const unregister = registerSubagentToolBridge(SESSION, {
+		getMode: () => 'normal',
+		getClient: () => sessionOwn.client,
+		begin: async () => {},
+		approve: async () => 'approved',
+		end: async () => {},
+	});
+	try {
+		const result = await new SubagentExecutor(
+			createMockToolManager(),
+			executorOwn.client,
+		).execute(
+			{subagent_type: 'explore', description: 'inherit'},
+			undefined,
+			0,
+			'run-session-client',
+			{sessionId: SESSION},
+		);
+		t.true(result.success);
+		t.is(result.output, 'from the session client');
+	} finally {
+		unregister();
+	}
+
+	t.deepEqual(sessionOwn.used, ['session-model']);
+	t.deepEqual(executorOwn.used, []);
+});
+
+test.serial('a subagent falls back to the executor\'s client when its session has none, or has no bridge', async t => {
+	const executorOwn = namedClient('startup-model', 'from the startup client');
+	const unregister = registerSubagentToolBridge(SESSION, {
+		getMode: () => 'normal',
+		begin: async () => {},
+		approve: async () => 'approved',
+		end: async () => {},
+	});
+	try {
+		const executor = new SubagentExecutor(
+			createMockToolManager(),
+			executorOwn.client,
+		);
+		const withBridge = await executor.execute(
+			{subagent_type: 'explore', description: 'no client on the bridge'},
+			undefined,
+			0,
+			'run-no-client',
+			{sessionId: SESSION},
+		);
+		const noBridge = await executor.execute(
+			{subagent_type: 'explore', description: 'no bridge at all'},
+			undefined,
+			0,
+			'run-no-bridge',
+			{sessionId: OTHER_SESSION},
+		);
+		t.is(withBridge.output, 'from the startup client');
+		t.is(noBridge.output, 'from the startup client');
+	} finally {
+		unregister();
+	}
+	t.deepEqual(executorOwn.used, ['startup-model', 'startup-model']);
+});
+
 test.serial('a subagent started with a session\'s tool manager uses that session\'s tools', async t => {
 	const calls: string[] = [];
 	const sharedTools = createMockToolManager({

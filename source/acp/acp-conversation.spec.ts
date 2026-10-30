@@ -3430,6 +3430,34 @@ test.serial('runAcpConversation - a session\'s subagents are told what the sessi
 	t.deepEqual(fromBridge, ['browser']);
 });
 
+test.serial('runAcpConversation - a session\'s subagents get the client the turn runs on, and keep it if the session changes', async t => {
+	const {conn} = createMockConn();
+	const session = createMockSession(conn);
+	let fromBridge: unknown;
+	let fromBridgeAfterSwitch: unknown;
+	const turnClient = {
+		chat: async () => {
+			fromBridge = getSubagentToolBridge(session.sessionId)?.getClient?.();
+			// The session picks another model while this turn is running.
+			session.client = {} as unknown as LLMClient;
+			fromBridgeAfterSwitch = getSubagentToolBridge(session.sessionId)?.getClient?.();
+			return {choices: [{message: {content: 'done', tool_calls: []}}]};
+		},
+	} as unknown as LLMClient;
+
+	await runAcpConversation({
+		session,
+		client: turnClient,
+		toolManager: createMockToolManager() as any,
+		conn,
+		nonInteractiveAlwaysAllow: [],
+	});
+
+	t.is(fromBridge, turnClient);
+	// The running turn keeps its client, so its subagents do too.
+	t.is(fromBridgeAfterSwitch, turnClient);
+});
+
 // ============================================================================
 // Sub-agent lifecycle notifications
 // ============================================================================
@@ -3629,11 +3657,26 @@ const startRealSubagents = async (subagentClient: LLMClient) => {
 	}));
 };
 
-const agentCallTurn = (session: AcpSession, conn: AgentSideConnection) => {
+/**
+ * A turn whose model calls the `agent` tool. A sub-agent runs on the client the
+ * turn runs on, so that client also answers the sub-agent's own request (the
+ * second one) the way `subagentClient` would.
+ */
+const agentCallTurn = (
+	session: AcpSession,
+	conn: AgentSideConnection,
+	subagentClient: LLMClient,
+) => {
 	let calls = 0;
 	const client = {
-		chat: async () => {
+		// What the sub-agent executor reads from the client it inherits from.
+		getCurrentModel: () => subagentClient.getCurrentModel(),
+		getProviderConfig: () => subagentClient.getProviderConfig(),
+		chat: async (...args: unknown[]) => {
 			calls++;
+			if (calls === 2) {
+				return (subagentClient.chat as (...a: unknown[]) => unknown)(...args);
+			}
 			return calls === 1
 				? {
 						choices: [
@@ -3664,15 +3707,16 @@ const agentCallTurn = (session: AcpSession, conn: AgentSideConnection) => {
 };
 
 test.serial('runAcpConversation - a real sub-agent run reaches the client from start to completed', async t => {
-	await startRealSubagents({
+	const subagentClient = {
 		chat: async () => ({choices: [{message: {content: 'child answer'}}]}),
 		getCurrentModel: () => 'm',
 		getProviderConfig: () => ({name: 'p'}),
-	} as unknown as LLMClient);
+	} as unknown as LLMClient;
+	await startRealSubagents(subagentClient);
 	const {conn, notifications} = createNotifyingConn();
 	const session = createMockSession(conn, {devMode: 'yolo'});
 
-	const result = await agentCallTurn(session, conn);
+	const result = await agentCallTurn(session, conn, subagentClient);
 
 	t.is(result.stopReason, 'end_turn');
 	const statuses = notifications.map(n => n.params.status);
@@ -3690,7 +3734,7 @@ test.serial('runAcpConversation - a real sub-agent run reaches the client from s
 
 test.serial('runAcpConversation - cancelling one sub-agent lets the parent turn continue', async t => {
 	let childModelCalled = false;
-	await startRealSubagents({
+	const subagentClient = {
 		chat: (_m: unknown, _t: unknown, _c: unknown, signal?: AbortSignal) =>
 			new Promise((_resolve, reject) => {
 				childModelCalled = true;
@@ -3702,11 +3746,12 @@ test.serial('runAcpConversation - cancelling one sub-agent lets the parent turn 
 			}),
 		getCurrentModel: () => 'm',
 		getProviderConfig: () => ({name: 'p'}),
-	} as unknown as LLMClient);
+	} as unknown as LLMClient;
+	await startRealSubagents(subagentClient);
 	const {conn, notifications} = createNotifyingConn();
 	const session = createMockSession(conn, {devMode: 'yolo'});
 
-	const turn = agentCallTurn(session, conn);
+	const turn = agentCallTurn(session, conn, subagentClient);
 	// What a client does: wait for the run to be announced, then cancel it by id.
 	const started = await waitFor(() =>
 		notifications.find(n => n.params.status === 'started'),

@@ -57,20 +57,23 @@ export interface ResolvedAutoCompactSettings {
 /**
  * Resolve the effective auto-compact settings.
  * Precedence: `/compact` session override > tune aggressive compact > config.
+ *
+ * `tuneAggressive` is for a caller that holds its own tune, such as an ACP
+ * session on its own provider; it is used instead of the process-wide preset
+ * that `applyTuneCompaction` sets, so one session's tune cannot change another's.
  */
-export function resolveAutoCompactSettings(config: {
-	enabled: boolean;
-	threshold: number;
-	mode: CompressionMode;
-	strategy?: CompressionStrategy;
-}): ResolvedAutoCompactSettings {
+export function resolveAutoCompactSettings(
+	config: {
+		enabled: boolean;
+		threshold: number;
+		mode: CompressionMode;
+		strategy?: CompressionStrategy;
+	},
+	tuneAggressive: boolean = tuneAggressiveCompact,
+): ResolvedAutoCompactSettings {
 	const session = autoCompactSessionOverrides;
-	const tuneThreshold = tuneAggressiveCompact
-		? AGGRESSIVE_COMPACT_THRESHOLD
-		: null;
-	const tuneMode: CompressionMode | null = tuneAggressiveCompact
-		? 'aggressive'
-		: null;
+	const tuneThreshold = tuneAggressive ? AGGRESSIVE_COMPACT_THRESHOLD : null;
+	const tuneMode: CompressionMode | null = tuneAggressive ? 'aggressive' : null;
 	return {
 		enabled: session.enabled ?? config.enabled,
 		threshold: session.threshold ?? tuneThreshold ?? config.threshold,
@@ -80,7 +83,7 @@ export function resolveAutoCompactSettings(config: {
 			session.enabled !== null ||
 			session.threshold !== null ||
 			session.mode !== null ||
-			tuneAggressiveCompact,
+			tuneAggressive,
 	};
 }
 
@@ -114,13 +117,16 @@ export async function performAutoCompact(
 	client?: LLMClient,
 	nativeTools?: Record<string, AISDKCoreTool>,
 	signal?: AbortSignal,
+	tuneAggressive?: boolean,
 ): Promise<Message[] | null> {
 	if (signal?.aborted) {
 		return null;
 	}
 
-	const {enabled, threshold, mode, strategy} =
-		resolveAutoCompactSettings(config);
+	const {enabled, threshold, mode, strategy} = resolveAutoCompactSettings(
+		config,
+		tuneAggressive,
+	);
 
 	if (!enabled) {
 		return null;
@@ -299,6 +305,9 @@ export async function maybeAutoCompact(
 		// them from the client.
 		provider?: string;
 		model?: string;
+		// A caller with its own tune (an ACP session) passes its aggressive-compact
+		// preset here instead of relying on the process-wide one.
+		aggressiveCompact?: boolean;
 	},
 ): Promise<Message[]> {
 	if (options?.signal?.aborted) {
@@ -321,6 +330,7 @@ export async function maybeAutoCompact(
 			client,
 			nativeTools,
 			options?.signal,
+			options?.aggressiveCompact,
 		);
 		return compressed ?? messages;
 	} catch (error) {
