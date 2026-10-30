@@ -283,6 +283,14 @@ function compressToolResultDefault(toolName: string, content: string): string {
 		return `Tool: ${toolName}\nResult: success`;
 	}
 
+	// A body that mentions both success and failure is ambiguous: reducing it
+	// to a single line could misrepresent the outcome (e.g. a build log that
+	// says "completed successfully" but also reports failures). Keep the
+	// leading lines verbatim instead, same shape as conservative mode.
+	if (mentionsSuccessAndFailure(content)) {
+		return compressToolResultConservative(toolName, content);
+	}
+
 	// Extract key information like first line, key metrics, etc.
 	const lines = content.split('\n');
 	const firstLine = lines[0] || '';
@@ -368,16 +376,28 @@ function extractErrorInfo(content: string): {
 	return null;
 }
 
-// Check if content indicates success
+// Check if content indicates success.
+// Every pattern is anchored to the whole (trimmed) body so that a mention of
+// success buried inside a larger log — e.g. "Build completed successfully" on
+// one line and "failures: 3" on another — is never mistaken for an overall
+// success (#1633).
 function isSuccess(content: string): boolean {
+	const trimmed = content.trim();
 	const successPatterns = [
 		/^success$/i,
 		/^ok$/i,
 		/^done$/i,
-		/completed successfully/i,
-		/no errors/i,
+		/^completed successfully\.?$/i,
+		/^no errors\.?$/i,
 	];
-	return successPatterns.some(pattern => pattern.test(content));
+	return successPatterns.some(pattern => pattern.test(trimmed));
+}
+
+// Whether the body refers to both a successful and a failed outcome, which
+// makes any single-line summary of the result unsafe
+function mentionsSuccessAndFailure(content: string): boolean {
+	const successMention = /success|completed successfully|no errors/i;
+	return successMention.test(content) && checkForError(content);
 }
 
 // Check for error in content
