@@ -82,3 +82,19 @@ test('parseContextLimit - empty string returns null', t => {
 test('parseContextLimit - overflowing digit string returns null', t => {
 	t.is(parseContextLimit('9'.repeat(400)), null);
 });
+
+// Validated after scaling and rounding: these were finite and positive when
+// parsed, but became 0 or Infinity before reaching the caller. See #1590.
+test('parseContextLimit - fraction that rounds to zero returns null', t => {
+	t.is(parseContextLimit('0.1'), null);
+	t.is(parseContextLimit('0.4'), null);
+});
+
+test('parseContextLimit - value that overflows only after k scaling returns null', t => {
+	t.is(parseContextLimit('9'.repeat(308) + 'k'), null);
+});
+
+test('parseContextLimit - smallest values that round to a positive limit', t => {
+	t.is(parseContextLimit('0.5'), 1);
+	t.is(parseContextLimit('1.5k'), 1500);
+});
