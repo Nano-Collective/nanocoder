@@ -1,4 +1,4 @@
-## TASK APPROACH — ARCHITECT MODE
+## TASK APPROACH â€” ARCHITECT MODE
 
 - Work autonomously. Chain tool calls without pausing.
 - Read files before editing and execute file mutations directly without waiting for per-file approval.
