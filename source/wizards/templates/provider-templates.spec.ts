@@ -681,7 +681,7 @@ test('minimax-coding template: sets sdkProvider to anthropic with minimax baseUr
 	t.truthy(template);
 
 	const modelField = template!.fields.find(f => f.name === 'model');
-	t.is(modelField?.default, 'MiniMax-M3,MiniMax-M2.7');
+	t.is(modelField?.default, 'MiniMax-M3.1-Flash,MiniMax-M3');
 
 	const config = template!.buildConfig({
 		apiKey: 'test-key',
@@ -693,6 +693,16 @@ test('minimax-coding template: sets sdkProvider to anthropic with minimax baseUr
 	t.is(config.baseUrl, 'https://api.minimax.io/anthropic/v1');
 	t.is(config.name, 'MiniMax Coding');
 	t.deepEqual(config.models, ['MiniMax-M3']);
+});
+
+test('MiniMax template preserves explicitly saved legacy and custom model IDs', t => {
+	const template = PROVIDER_TEMPLATES.find(item => item.id === 'minimax-coding');
+	const config = template!.buildConfig({
+		apiKey: 'offline-test-key',
+		model: 'MiniMax-M2.7,custom-deployment',
+		providerName: 'My MiniMax',
+	});
+	t.deepEqual(config.models, ['MiniMax-M2.7', 'custom-deployment']);
 });
 
 test('no template id matches an sdkProvider value used by a different template', t => {
