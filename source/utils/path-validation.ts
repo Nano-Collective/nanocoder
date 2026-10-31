@@ -191,7 +191,9 @@ export function resolveFilePath(
  *
  * Windows paths are case-insensitive, so path comparisons are normalized to
  * lowercase on win32 to prevent false containment failures when drive letters
- * or directories differ only in case.
+ * or directories differ only in case. Note that purely lexical comparisons
+ * intentionally assume standard Windows case-insensitivity and do not account
+ * for per-directory case sensitivity (e.g. NTFS case-sensitive flag via WSL).
  *
  * This is purely lexical — it never touches the filesystem, so a symlink
  * inside the root can still point outside it. Use `isRealPathInside` when the
@@ -200,7 +202,12 @@ export function resolveFilePath(
 /**
  * Normalizes a path for comparison: resolves it to an absolute path,
  * and on Windows (win32) lowercases it because Windows filesystems
- * are case-insensitive.
+ * are case-insensitive by default.
+ *
+ * Note: Lexical normalization explicitly excludes NTFS per-directory
+ * case-sensitivity modes (e.g. `fsutil file setCaseSensitiveInfo`). For
+ * filesystem-authoritative trust boundaries where case-sensitive directories
+ * may be present on Windows, callers must use `isRealPathInside`.
  *
  * @param p - The path to normalize.
  * @param platform - Test seam; production code must leave this as the default (`process.platform`).
