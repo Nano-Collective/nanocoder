@@ -449,6 +449,7 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 		id: 'cloudgpu',
 		name: 'CloudGPU',
 		baseUrl: 'https://cloudgpu.app/v1',
+		apiKeyPrompt: 'API Key (from cloudgpu.app/api/console)',
 		modelDefault: 'kimi-k3',
 	}),
 	apiKeyTemplate({
