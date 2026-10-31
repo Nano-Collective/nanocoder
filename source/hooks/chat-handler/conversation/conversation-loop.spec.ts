@@ -1,4 +1,4 @@
-import {mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
+import {existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
@@ -179,6 +179,102 @@ for (const scenario of [
 		}
 	});
 }
+
+// Shift+Tab can switch to plan mode at any point in a turn. The tool list the
+// model was offered is a snapshot, so a call it already made must be checked
+// against the mode as it is now, even when alwaysAllow would skip the prompt.
+const runMidTurnSwitch = async (
+	flipAt: 'response' | 'executed' | 'prompt',
+	mode: 'yolo' | 'auto-accept',
+	operations: Array<{operation: 'copy' | 'delete'; path: string; destination?: string}>,
+) => {
+	const cwd = mkdtempSync(join(tmpdir(), 'mode-switch-'));
+	const configDir = process.env.NANOCODER_CONFIG_DIR;
+	process.env.NANOCODER_CONFIG_DIR = cwd;
+	writeFileSync(join(cwd, 'agents.config.json'), JSON.stringify({nanocoder: {
+		alwaysAllow: mode === 'yolo' ? ['file_op'] : [],
+	}}));
+	setProjectRoot(cwd);
+	setSessionCwd(cwd);
+	reloadAppConfig();
+	writeFileSync(join(cwd, 'first.txt'), 'first file');
+	writeFileSync(join(cwd, 'second.txt'), 'second file');
+	const registry = ToolRegistry.fromToolExports([fileOpTool]);
+	setToolRegistryGetter(() => registry.getHandlers());
+	let prompts = 0;
+	setGlobalToolConfirmHandler(async () => {
+		prompts++;
+		return true;
+	});
+	const modeRef = {current: mode as string};
+	let calls = 0;
+	const client = {chat: async () => {
+		calls++;
+		if (calls === 1 && flipAt === 'response') modeRef.current = 'plan';
+		return {choices: [{message: calls === 1 ? {
+			role: 'assistant', content: '', tool_calls: operations.map((args, index) => ({
+				id: `op-${index}`, function: {name: 'file_op', arguments: JSON.stringify(args)},
+			})),
+		} : {role: 'assistant', content: 'done'}}]};
+	}};
+	try {
+		await processAssistantResponse(createDefaultParams({
+			client,
+			toolManager: {
+				...createMockToolManager({tools: ['file_op']}),
+				getAvailableToolNames: (_tune: unknown, current: string) =>
+					current === 'plan' ? ['read_file'] : ['file_op'],
+				getToolEntry: (name: string) => registry.getEntry(name),
+				getToolFormatter: () => undefined,
+			},
+			developmentMode: mode,
+			developmentModeRef: modeRef,
+			setIsGenerating: (generating: boolean) => {
+				if (flipAt === 'prompt' && !generating) modeRef.current = 'plan';
+			},
+			conversationStateManager: {current: {
+				updateAssistantMessage: () => {},
+				updateAfterToolExecution: () => {
+					if (flipAt === 'executed') modeRef.current = 'plan';
+				},
+			}},
+		}) as never);
+		return {cwd, prompts, exists: (name: string) => existsSync(join(cwd, name))};
+	} finally {
+		if (configDir === undefined) delete process.env.NANOCODER_CONFIG_DIR;
+		else process.env.NANOCODER_CONFIG_DIR = configDir;
+		clearAppConfig();
+		setGlobalToolConfirmHandler(async () => true);
+		resetSessionCwd();
+	}
+};
+
+test.serial('a switch to plan while the model answers refuses a call alwaysAllow would skip the prompt for', async t => {
+	const run = await runMidTurnSwitch('response', 'yolo', [
+		{operation: 'copy', path: 'first.txt', destination: 'target.txt'},
+	]);
+	t.false(run.exists('target.txt'));
+	rmSync(run.cwd, {recursive: true, force: true});
+});
+
+test.serial('a switch to plan between two tools of a batch stops the second one', async t => {
+	const run = await runMidTurnSwitch('executed', 'yolo', [
+		{operation: 'copy', path: 'first.txt', destination: 'one.txt'},
+		{operation: 'copy', path: 'second.txt', destination: 'two.txt'},
+	]);
+	t.true(run.exists('one.txt'), 'the call before the switch ran');
+	t.false(run.exists('two.txt'), 'the call after the switch did not');
+	rmSync(run.cwd, {recursive: true, force: true});
+});
+
+test.serial('a switch to plan before a confirmation prompt means the tool is not asked about', async t => {
+	const run = await runMidTurnSwitch('prompt', 'auto-accept', [
+		{operation: 'delete', path: 'first.txt'},
+	]);
+	t.is(run.prompts, 0);
+	t.true(run.exists('first.txt'));
+	rmSync(run.cwd, {recursive: true, force: true});
+});
 
 // Mock parseToolCalls function - imported from tool-parsing
 const mockParseToolCalls = (result: {
