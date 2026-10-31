@@ -139,7 +139,23 @@ const createMockClient = (
 };
 
 const createMockToolManager = () => ({
-	getAvailableToolNames: () => ['read_file'],
+	// What the session offers the model. A call to a registered tool outside
+	// this list is refused, so it must name every tool the tests below run.
+	getAvailableToolNames: () => [
+		'read_file',
+		'write_file',
+		'execute_bash',
+		'file_op',
+		'agent',
+		'browser',
+		'write_tasks',
+		'lookup',
+		'safe_tool',
+		'dangerous_tool',
+		'failing_tool',
+		'slow_tool',
+		'queued_tool',
+	],
 	getFilteredTools: () => ({}),
 	hasTool: (_name: string) => false,
 	getToolEntry: () => ({approval: false}),
@@ -598,6 +614,7 @@ test('runAcpConversation - forwards the ACP session id to artifact tools', async
 	});
 	const toolManager = {
 		...createMockToolManager(),
+		getAvailableToolNames: () => ['write_plan'],
 		hasTool: () => true,
 		getToolEntry: () => ({approval: false}),
 	};
@@ -3085,6 +3102,7 @@ const runModeSwitchTurn = async (
 	turns: Array<{toolCalls: ToolCall[]; switchTo?: DevelopmentMode}>,
 	answer: 'allow' | 'deny' = 'deny',
 	onUpdate?: (update: any, session: AcpSession) => void,
+	alwaysAllow: string[] = [],
 ) => {
 	const cwd = createCwdProject(t, 'MODE');
 	const permissionRequests: any[] = [];
@@ -3130,7 +3148,7 @@ const runModeSwitchTurn = async (
 		client,
 		toolManager: toolManager as any,
 		conn,
-		nonInteractiveAlwaysAllow: [],
+		nonInteractiveAlwaysAllow: alwaysAllow,
 	});
 
 	return {cwd, permissionRequests, offered, session};
@@ -3211,6 +3229,36 @@ test.serial('runAcpConversation - a call the model already returned is refused o
 		(m: any) => m.role === 'tool' && m.tool_call_id === 'call-2',
 	);
 	t.true(String(refusal?.content).includes('not available in plan mode'));
+});
+
+test.serial('runAcpConversation - a tool the plan mode never offered is refused even when the client would allow it', async t => {
+	const {cwd, permissionRequests, session} = await runModeSwitchTurn(
+		t,
+		'plan',
+		[{toolCalls: [writeCall('hidden.txt', 'call-1')]}],
+		'allow',
+	);
+
+	t.is(permissionRequests.length, 0, 'never put to the user');
+	t.false(existsSync(join(cwd, 'hidden.txt')));
+	const refusal = session.messages.find(
+		(m: any) => m.role === 'tool' && m.tool_call_id === 'call-1',
+	);
+	t.true(String(refusal?.content).includes('not available in plan mode'));
+});
+
+test.serial('runAcpConversation - alwaysAllow does not run a tool the plan mode never offered', async t => {
+	const {cwd, permissionRequests} = await runModeSwitchTurn(
+		t,
+		'plan',
+		[{toolCalls: [writeCall('hidden.txt', 'call-1')]}],
+		'allow',
+		undefined,
+		['write_file'],
+	);
+
+	t.is(permissionRequests.length, 0);
+	t.false(existsSync(join(cwd, 'hidden.txt')));
 });
 
 test.serial('runAcpConversation - a lone refused call is still announced to the client as failed', async t => {

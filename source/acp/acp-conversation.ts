@@ -569,9 +569,12 @@ async function runTurn(
 				continue;
 			}
 
-			// The model chose this call from the tools offered at request time. If
-			// the mode has since changed and no longer offers it (e.g. a switch to
-			// plan), refuse it rather than run it under the new mode.
+			// A registered tool the session's current mode does not offer is refused
+			// even if the model names it anyway: the offered list only narrows what
+			// the model sees, and alwaysAllow would otherwise run a hidden tool
+			// unprompted (a mutating tool in plan mode). This also covers a mode
+			// switch after the request (e.g. to plan). Unknown names fall through
+			// to the unknown-tool handling.
 			const toolName = toolCall.function.name;
 			// A tool the session does not offer is refused even if the model names it
 			// anyway. The list is read live, as the mode is: session/load can replace
@@ -580,8 +583,7 @@ async function runTurn(
 			const disabled = session.effectiveDisabledTools().includes(toolName);
 			if (
 				disabled ||
-				(session.developmentMode !== requestMode &&
-					availableNames.includes(toolName) &&
+				(toolManager.hasTool(toolName) &&
 					!toolManager
 						.getAvailableToolNames(
 							undefined,

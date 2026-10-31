@@ -615,7 +615,11 @@ export const processAssistantResponse = async (
 		);
 	}
 
-	const partition = filterValidToolCalls(allToolCalls, toolManager);
+	const partition = filterValidToolCalls(
+		allToolCalls,
+		toolManager,
+		availableNames,
+	);
 	const {validToolCalls, errorResults} = partition;
 	const {emittedToolCalls, resultsForAbandonedTurn} =
 		buildAbandonedTurnMessages(partition);
