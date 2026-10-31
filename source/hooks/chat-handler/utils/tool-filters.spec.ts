@@ -174,6 +174,51 @@ test('partitionUnknownToolCalls - treats the XML validation marker as unknown', 
 	);
 });
 
+test('partitionUnknownToolCalls - refuses a registered tool the model was not offered', t => {
+	const toolCalls: ToolCall[] = [
+		{id: 'call_1', function: {name: 'read_file', arguments: {}}},
+		{id: 'call_2', function: {name: 'write_file', arguments: {}}},
+	];
+	const manager = managerWith(['read_file', 'write_file']);
+
+	const {validToolCalls, unknownToolCalls, errorResults} =
+		partitionUnknownToolCalls(toolCalls, manager, ['read_file']);
+
+	t.deepEqual(
+		validToolCalls.map(c => c.id),
+		['call_1'],
+	);
+	t.deepEqual(
+		unknownToolCalls.map(c => c.id),
+		['call_2'],
+	);
+	t.is(errorResults[0].tool_call_id, 'call_2');
+	t.true(errorResults[0].content.includes('not available in the current mode'));
+	t.true(errorResults[0].isError);
+});
+
+test('filterValidToolCalls - refuses a registered tool the model was not offered', t => {
+	const manager = managerWith(['read_file', 'write_file']);
+
+	const {validToolCalls, errorResults} = filterValidToolCalls(
+		[{id: 'call_1', function: {name: 'write_file', arguments: {}}}],
+		manager,
+		['read_file'],
+	);
+
+	t.is(validToolCalls.length, 0);
+	t.true(errorResults[0].content.includes('not available in the current mode'));
+});
+
+test('filterValidToolCalls - without an offered list every registered tool is valid', t => {
+	const {validToolCalls} = filterValidToolCalls(
+		[{id: 'call_1', function: {name: 'write_file', arguments: {}}}],
+		managerWith(['write_file']),
+	);
+
+	t.is(validToolCalls.length, 1);
+});
+
 test('buildAbandonedTurnMessages - every emitted call has a matching result', t => {
 	// The invariant: a result whose tool_call is missing from the assistant
 	// message is orphaned and pruned before the request goes out.

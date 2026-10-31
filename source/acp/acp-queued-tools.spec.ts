@@ -71,7 +71,16 @@ const createMockSession = (
 };
 
 const createMockToolManager = () => ({
-	getAvailableToolNames: () => ['read_file'],
+	// A call to a registered tool outside this list is refused, so it must name
+	// every tool the tests below run.
+	getAvailableToolNames: () => [
+		'read_file',
+		'write_file',
+		'dangerous_tool',
+		'queued_tool',
+		'slow_tool',
+		'some_tool',
+	],
 	getFilteredTools: () => ({}),
 	hasTool: () => true,
 	getToolEntry: () => ({approval: false}),
