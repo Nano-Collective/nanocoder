@@ -452,6 +452,13 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 		apiKeyPrompt: 'API Key (from futureinfra.ai/console/?screen=ai-router)',
 		modelDefault: 'openai/gpt-4o-mini',
 	}),
+	apiKeyTemplate({
+		id: 'runcrate',
+		name: 'Runcrate',
+		baseUrl: 'https://api.runcrate.ai/v1',
+		apiKeyPrompt: 'API Key (from https://www.runcrate.ai/dashboard/api-keys)',
+		modelDefault: 'deepseek-ai/DeepSeek-V4.1-Flash',
+	}),
 	{
 		id: 'openai',
 		name: 'OpenAI',
