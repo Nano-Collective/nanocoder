@@ -446,6 +446,12 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 		modelDefault: 'gpt-5.5',
 	}),
 	apiKeyTemplate({
+		id: 'cloudgpu',
+		name: 'CloudGPU',
+		baseUrl: 'https://cloudgpu.app/v1',
+		modelDefault: 'kimi-k3',
+	}),
+	apiKeyTemplate({
 		id: 'futureinfra',
 		name: 'FutureInfra',
 		baseUrl: 'https://futureinfra.ai/v1/ai',

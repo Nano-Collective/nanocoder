@@ -634,6 +634,31 @@ test('api-route template: uses default provider name and model', t => {
 	t.is(template!.buildConfig({providerName: '', apiKey: 'test-key', model: 'gpt-5.5'}).name, 'API Route');
 });
 
+test('cloudgpu template: uses fixed endpoint and parses model IDs', t => {
+	const template = PROVIDER_TEMPLATES.find(t => t.id === 'cloudgpu');
+	t.truthy(template);
+
+	const config = template!.buildConfig({
+		providerName: 'CloudGPU',
+		apiKey: 'test-key',
+		model: 'kimi-k3, glm-5.2',
+	});
+
+	t.is(config.baseUrl, 'https://cloudgpu.app/v1');
+	t.is(config.apiKey, 'test-key');
+	t.is(config.sdkProvider, undefined);
+	t.deepEqual(config.models, ['kimi-k3', 'glm-5.2']);
+});
+
+test('cloudgpu template: uses default provider name and model', t => {
+	const template = PROVIDER_TEMPLATES.find(t => t.id === 'cloudgpu');
+	t.truthy(template);
+
+	const modelField = template!.fields.find(f => f.name === 'model');
+	t.is(modelField?.default, 'kimi-k3');
+	t.is(template!.buildConfig({providerName: '', apiKey: 'test-key', model: 'kimi-k3'}).name, 'CloudGPU');
+});
+
 test('futureinfra template: sets baseUrl, default model, and parses models', t => {
 	const template = PROVIDER_TEMPLATES.find(t => t.id === 'futureinfra');
 	t.truthy(template);
