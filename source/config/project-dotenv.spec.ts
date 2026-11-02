@@ -39,6 +39,9 @@ test('a project .env cannot set trust, config dir, or MCP variables', t => {
 		t.is(env.OTHER, 'x');
 		t.deepEqual(result.ignored, [...PROTECTED_ENV_KEYS]);
 		t.true(PROTECTED_ENV_KEYS.includes('NANOCODER_TRUST_DIRECTORY'));
+		// Where the trust record is read from and written to.
+		t.true(PROTECTED_ENV_KEYS.includes('XDG_CONFIG_HOME'));
+		t.true(PROTECTED_ENV_KEYS.includes('APPDATA'));
 	});
 });
 

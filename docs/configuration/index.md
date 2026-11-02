@@ -96,7 +96,7 @@ variable is the point of the output and the reference is not itself a secret.
 
 ## Environment Variables
 
-Keep API keys out of version control using environment variables. Variables are loaded from shell environment (`.bashrc`, `.zshrc`) or `.env` file in your working directory. Shell variables win over `.env` values. A project `.env` cannot set `NANOCODER_TRUST_DIRECTORY`, `NANOCODER_CONFIG_DIR`, `NANOCODER_MCPSERVERS`, `NANOCODER_MCPSERVERS_FILE`, or `NANOCODER_CI_TRUST_LEVEL`, since it is loaded before the directory trust check; set those in your shell instead.
+Keep API keys out of version control using environment variables. Variables are loaded from shell environment (`.bashrc`, `.zshrc`) or `.env` file in your working directory. Shell variables win over `.env` values. A project `.env` cannot set `NANOCODER_TRUST_DIRECTORY`, `NANOCODER_CONFIG_DIR`, `XDG_CONFIG_HOME`, `APPDATA`, `NANOCODER_MCPSERVERS`, `NANOCODER_MCPSERVERS_FILE`, or `NANOCODER_CI_TRUST_LEVEL`, since it is loaded before the directory trust check; set those in your shell instead.
 
 ### General
 
@@ -417,7 +417,7 @@ Names match the registered tool ids (`read_file`, `write_file`, `string_replace`
 
 `fetch_url` always refuses internal addresses, in every mode (including yolo and `alwaysAllow`): loopback, private ranges (RFC 1918, CGNAT, link-local and their IPv6 equivalents), `localhost` and `*.localhost`, and cloud metadata hosts such as `169.254.169.254` and `metadata.google.internal`. Every redirect hop is checked the same way.
 
-Resolution: project-level `agents.config.json` wins over the global config. The list is layered on top of `/tune` profiles and mode exclusions — if `nano` profile would otherwise expose `read_file`, listing it in `disabledTools` removes it. Subagents respect the global list even if their own `tools` allow-list includes the disabled name.
+An [ACP](../features/acp.md) client can add to this list for a single session, without touching your config. Resolution: project-level `agents.config.json` wins over the global config. The list is layered on top of `/tune` profiles and mode exclusions — if `nano` profile would otherwise expose `read_file`, listing it in `disabledTools` removes it. Subagents respect the global list even if their own `tools` allow-list includes the disabled name.
 
 ### Lifecycle Hooks
 

@@ -150,7 +150,7 @@ export async function runPlainShell(
 
 	let init;
 	try {
-		init = await deps.initializePlain({cliProvider, cliModel});
+		init = await deps.initializePlain({cliProvider, cliModel, developmentMode});
 	} catch (error) {
 		const formattedErr = formatError(error);
 		if (isJson) {

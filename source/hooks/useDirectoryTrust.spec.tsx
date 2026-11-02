@@ -5,7 +5,10 @@ import test from 'ava';
 import {render} from 'ink-testing-library';
 import React from 'react';
 import {writeFileSync} from 'node:fs';
-import {describeProjectTrust} from '@/config/project-trust';
+import {
+	describeProjectTrust,
+	TRUST_FINGERPRINT_VERSION,
+} from '@/config/project-trust';
 import {
 	isDirectoryTrusted,
 	loadPreferences,
@@ -115,6 +118,7 @@ test.serial(
 				{
 					path: resolve(root),
 					fingerprint: describeProjectTrust(root).fingerprint,
+					fingerprintVersion: TRUST_FINGERPRINT_VERSION,
 				},
 			]);
 		});
@@ -165,7 +169,11 @@ test.serial(
 			resetPreferencesCache();
 
 			t.deepEqual(loadPreferences().trustedDirectories, [
-				{path: resolve(root), fingerprint: shown},
+				{
+					path: resolve(root),
+					fingerprint: shown,
+					fingerprintVersion: TRUST_FINGERPRINT_VERSION,
+				},
 			]);
 			t.false(isDirectoryTrusted(root, loadPreferences()));
 		});
