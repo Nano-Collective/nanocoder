@@ -928,26 +928,23 @@ export class SubagentExecutor {
 				emitProgress('tool_call', toolName);
 				await new Promise(resolve => setTimeout(resolve, 50));
 
-				// Unparsable arguments arrive as `{}`: answer the call with the
-				// parse error rather than run the tool (or ask to approve it) with
-				// that placeholder.
-				const toolResult =
-					toolCall.argumentsError !== undefined
-						? {content: invalidArgumentsResult(toolCall).content}
-						: await runWithReadContentScope(agentId ?? 'subagent', () =>
-								this.executeToolCall(
-									toolName,
-									toolCall.function.arguments,
-									// Scoped to this subagent: the model names its own calls
-									// (`call_1`), so two subagents would otherwise share ids on
-									// the client.
-									agentId ? `${agentId}:${toolCall.id}` : toolCall.id,
-									config,
-									signal,
-									{...executionContext, subagentRunId: agentId},
-									alwaysAllow,
-								),
-							);
+				const toolResult = await runWithReadContentScope(
+					agentId ?? 'subagent',
+					() =>
+						this.executeToolCall(
+							toolName,
+							toolCall.function.arguments,
+							// Scoped to this subagent: the model names its own calls
+							// (`call_1`), so two subagents would otherwise share ids on
+							// the client.
+							agentId ? `${agentId}:${toolCall.id}` : toolCall.id,
+							config,
+							signal,
+							{...executionContext, subagentRunId: agentId},
+							alwaysAllow,
+							toolCall.argumentsError,
+						),
+				);
 
 				// Count tokens from tool results
 				totalTokens += estimateTokens(toolResult.content);
@@ -1000,6 +997,7 @@ export class SubagentExecutor {
 		signal?: AbortSignal,
 		executionContext?: Omit<ToolExecutionContext, 'abortSignal'>,
 		alwaysAllow?: string[],
+		argumentsError?: string,
 	): Promise<{content: string; images?: Message['images']}> {
 		// One ToolCall object for this call, shared by the approval prompt and
 		// the lifecycle gate so runPreToolUseGate can key its once-per-call
@@ -1012,6 +1010,7 @@ export class SubagentExecutor {
 				name: toolName,
 				arguments: parsedArgs,
 			},
+			...(argumentsError !== undefined ? {argumentsError} : {}),
 		};
 
 		// A client that takes subagent tool calls (ACP) sees every call, not just
@@ -1029,6 +1028,13 @@ export class SubagentExecutor {
 
 		if (signal?.aborted) {
 			return finish({content: 'Error: Execution was cancelled'}, true);
+		}
+
+		// Unparsable arguments arrive as `{}`: answer the call with the parse
+		// error rather than run the tool (or ask to approve it) with that
+		// placeholder.
+		if (toolCall.argumentsError !== undefined) {
+			return finish({content: invalidArgumentsResult(toolCall).content}, true);
 		}
 
 		// Enforce the allow-list at the execution boundary, not just when

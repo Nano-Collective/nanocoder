@@ -2763,6 +2763,46 @@ test.serial('a bridge sees a call refused before it runs, settled as failed', as
 	t.true(events[3].startsWith('end agent-1:tc2 failed'));
 });
 
+test.serial('a bridge sees a call with unparsable arguments, refused and settled as failed', async t => {
+	let ran = false;
+	const toolManager = createMockToolManager({
+		read_file: {
+			handler: async () => {
+				ran = true;
+				return 'content';
+			},
+			readOnly: true,
+		},
+	});
+	const {bridge, events} = createRecordingBridge();
+	const executor = new SubagentExecutor(
+		toolManager,
+		createMockClient([
+			{
+				content: '',
+				tool_calls: [
+					{
+						id: 'tc1',
+						function: {name: 'read_file', arguments: {}},
+						argumentsError: 'not valid JSON: Unexpected end of JSON input',
+					},
+				],
+			} as never,
+			{content: 'Done'},
+		]),
+	);
+
+	await runExploreWithBridge(toolManager, [], bridge, executor);
+
+	t.false(ran);
+	t.is(events.length, 2);
+	t.is(events[0], 'begin agent-1:tc1');
+	t.regex(
+		events[1],
+		/^end agent-1:tc1 failed Invalid arguments for tool "read_file": not valid JSON/,
+	);
+});
+
 test.serial('a subagent is limited to the tools of the bridge session mode', async t => {
 	// The shared executor is in 'normal' mode, as the ACP one is; only the
 	// session's own mode decides what its subagents may use.
