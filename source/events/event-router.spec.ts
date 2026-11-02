@@ -242,6 +242,46 @@ test('matchGlob: basic patterns', t => {
 	t.false(matchGlob('file.txt', 'other.txt'));
 });
 
+test('matchGlob: globstar slash preserves filename and directory boundaries', t => {
+	const cases: Array<[string, string, boolean]> = [
+		['**/foo.ts', 'foo.ts', true],
+		['**/foo.ts', 'a/foo.ts', true],
+		['**/foo.ts', 'a/b/foo.ts', true],
+		['**/foo.ts', 'barfoo.ts', false],
+		['**/foo.ts', 'a/barfoo.ts', false],
+		['**/package.json', 'mypackage.json', false],
+		['src/**/x.ts', 'src/x.ts', true],
+		['src/**/x.ts', 'src/a/x.ts', true],
+		['src/**/x.ts', 'src/a/b/x.ts', true],
+		['src/**/x.ts', 'src/abx.ts', false],
+		['src/**/x.ts', 'src/a/abx.ts', false],
+		['**/foo.ts', 'a\\foo.ts', true],
+		['**/foo.ts', 'a\\barfoo.ts', false],
+		['src\\**\\x.ts', 'src\\abx.ts', false],
+		['**/{foo,bar}.ts', 'a/foo.ts', true],
+		['**/{foo,bar}.ts', 'a/notfoo.ts', false],
+	];
+	for (const [pattern, path, expected] of cases) {
+		t.is(matchGlob(pattern, path), expected, `${pattern} vs ${path}`);
+	}
+});
+
+test('file.changed globstar filter ignores look-alike filenames', async t => {
+	const d = makeDispatcher();
+	const router = new EventRouter(d);
+	router.subscribe(fileChangedSub('exact-name', {filter: {paths: ['**/foo.ts']}}));
+
+	await router.emit(fileEvent('barfoo.ts'));
+	await router.emit(fileEvent('a/barfoo.ts'));
+	t.is(d.calls.length, 0);
+	await router.emit(fileEvent('foo.ts'));
+	await router.emit(fileEvent('a/foo.ts'));
+	t.deepEqual(d.calls.map(call => call.event.payload), [
+		{file: 'foo.ts', eventKind: 'change'},
+		{file: 'a/foo.ts', eventKind: 'change'},
+	]);
+});
+
 // Chokidar reports the platform separator, so on Windows a `/`-authored
 // pattern is asked to match `docs\guide.md`. Both directions matter: a
 // segment pattern must still match, and `*` must not cross a backslash any

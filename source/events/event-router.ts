@@ -163,11 +163,15 @@ function globToRegex(pattern: string): RegExp {
 		} else if (ch === '*') {
 			const next = pattern[i + 1];
 			if (next === '*') {
-				// `**` matches any characters including `/`
-				out += '.*';
 				i++;
-				// Consume a trailing `/` after `**` so `docs/**` matches `docs`
-				if (pattern[i + 1] === '/') i++;
+				if (pattern[i + 1] === '/') {
+					// Zero or more directories; a filename suffix is not a directory.
+					out += '(?:.*/)?';
+					i++;
+				} else {
+					// A trailing `**` can still span any characters, including `/`.
+					out += '.*';
+				}
 			} else {
 				// `*` matches anything except `/`
 				out += '[^/]*';
@@ -195,7 +199,7 @@ function globToRegex(pattern: string): RegExp {
 	}
 	// `out` is built by the escape loop above: every character is either a
 	// literal escaped with `\\`, or one of the fixed substrings `[^/]`, `.*`,
-	// `[^/]*`, `(?:`, `|`, `)`. There is no user-supplied raw regex syntax in
+	// `[^/]*`, `(?:.*/)?`, `(?:`, `|`, `)`. There is no user-supplied raw regex syntax in
 	// `out`, and the braces were checked for balance before any group opened.
 	// The shape is bounded by the glob length, so ReDoS is not reachable.
 	// nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp
