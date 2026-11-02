@@ -60,6 +60,7 @@ import {
 import type {CustomToolApprovalPolicy} from '@/types/custom-tools';
 import type {Skill, SkillToolVisibility} from '@/types/skills';
 import {formatError} from '@/utils/error-formatter';
+import {relativeEscapesRoot} from '@/utils/path-validation';
 
 const execFileAsync = promisify(execFile);
 
@@ -477,7 +478,7 @@ async function copyLocalDir(
 /** True when `child` is `parent` itself or sits under it. */
 function isContained(parent: string, child: string): boolean {
 	const rel = relative(resolve(parent), resolve(child));
-	return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
+	return rel === '' || (!relativeEscapesRoot(rel) && !isAbsolute(rel));
 }
 
 /**

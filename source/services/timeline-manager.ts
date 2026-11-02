@@ -19,6 +19,7 @@ import {atomicWriteFile} from '@/utils/atomic-write';
 import {ensureNanocoderGitignore} from '@/utils/ensure-nanocoder-gitignore';
 import {formatError} from '@/utils/error-formatter';
 import {logWarning} from '@/utils/message-queue';
+import {relativeEscapesRoot} from '@/utils/path-validation';
 import {FileSnapshotService} from './file-snapshot';
 import {
 	acquireTimelineLock,
@@ -155,7 +156,7 @@ export class TimelineManager {
 	toRelativePath(filePath: string): string | null {
 		const absolutePath = path.resolve(this.workspaceRoot, filePath); // nosemgrep
 		const relative = path.relative(this.workspaceRoot, absolutePath);
-		if (relative.startsWith('..') || path.isAbsolute(relative)) {
+		if (relativeEscapesRoot(relative) || path.isAbsolute(relative)) {
 			return null;
 		}
 		const normalized = relative.split(path.sep).join('/');
