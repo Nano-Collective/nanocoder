@@ -54,6 +54,22 @@
 	// Highlight fenced code in every marked.parse() below: streaming text,
 	// finished text and thought bubbles.
 	globalThis.NanocoderMarkdownHighlight.configureMarkdown(globalThis.marked, globalThis.hljs);
+	// ── Markdown rendering ──────────────────────────────────
+	// Every marked.parse() result goes through DOMPurify (markdown-utils.js)
+	// before it touches innerHTML. If the sanitizer did not load, show the raw
+	// text instead: unsanitized model output must never reach the DOM.
+	const markdownUtils = globalThis.NanocoderMarkdownUtils;
+
+	function setMarkdown(el, text) {
+		const html = markdownUtils
+			? markdownUtils.renderMarkdown(text, globalThis.marked, globalThis.DOMPurify)
+			: null;
+		if (html === null) {
+			el.textContent = text;
+		} else {
+			el.innerHTML = html;
+		}
+	}
 
 	// ── Slash command autocomplete state ────────────────────
 	const slashDropdown = document.getElementById('slash-dropdown');
@@ -1943,7 +1959,7 @@
 			if (role === 'agent') textContainer.dataset.turnId = String(agentTurnId);
 
 			if (typeof marked !== 'undefined') {
-				textContainer.innerHTML = marked.parse(parsedContent);
+				setMarkdown(textContainer, parsedContent);
 			} else {
 				textContainer.textContent = parsedContent;
 			}
@@ -2069,7 +2085,7 @@
 			syncLastAgentRawText();
 
 			if (typeof marked !== 'undefined') {
-				textContainer.innerHTML = marked.parse(currentTurnText);
+				setMarkdown(textContainer, currentTurnText);
 			} else {
 				textContainer.textContent = currentTurnText;
 			}
@@ -2113,7 +2129,7 @@
 				if (!renderTimeout) {
 					renderTimeout = setTimeout(() => {
 						if (currentTextEl) {
-							currentTextEl.innerHTML = marked.parse(currentTurnText);
+							setMarkdown(currentTextEl, currentTurnText);
 						}
 						renderTimeout = null;
 						scrollToBottomIfFollowing();
@@ -2179,7 +2195,7 @@
 		clearTimeout(renderTimeout);
 		renderTimeout = null;
 		if (currentTextEl && typeof marked !== 'undefined') {
-			currentTextEl.innerHTML = marked.parse(currentTurnText);
+			setMarkdown(currentTextEl, currentTurnText);
 		}
 	}
 
@@ -3478,7 +3494,7 @@
 
 		render() {
 			if (typeof marked !== 'undefined') {
-				this.body.innerHTML = marked.parse(this.text);
+				setMarkdown(this.body, this.text);
 			} else {
 				this.body.textContent = this.text;
 			}
