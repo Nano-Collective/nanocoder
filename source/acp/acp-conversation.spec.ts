@@ -666,6 +666,7 @@ test('runAcpConversation - completed write_plan exposes its artifact location', 
 	});
 	const toolManager = {
 		...createMockToolManager(),
+		getAvailableToolNames: () => ['read_file', 'write_plan'],
 		hasTool: () => true,
 		getToolEntry: () => ({approval: false}),
 	};
