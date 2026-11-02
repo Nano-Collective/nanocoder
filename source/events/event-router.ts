@@ -165,8 +165,9 @@ function globToRegex(pattern: string): RegExp {
 			if (next === '*') {
 				i++;
 				if (pattern[i + 1] === '/') {
-					// Zero or more directories; a filename suffix is not a directory.
-					out += '(?:.*/)?';
+					// Interior **/ needs a directory boundary. Preserve the legacy
+					// trailing **/ behavior for file filters that already use it.
+					out += pattern[i + 2] === undefined ? '.*' : '(?:.*/)?';
 					i++;
 				} else {
 					// A trailing `**` can still span any characters, including `/`.

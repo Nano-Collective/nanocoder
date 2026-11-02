@@ -260,6 +260,13 @@ test('matchGlob: globstar slash preserves filename and directory boundaries', t 
 		['src\\**\\x.ts', 'src\\abx.ts', false],
 		['**/{foo,bar}.ts', 'a/foo.ts', true],
 		['**/{foo,bar}.ts', 'a/notfoo.ts', false],
+		['docs/**/', 'docs/a.md', true],
+		['docs/**/', 'docs/deep/sub/file.md', true],
+		['docs/**/', 'src/a.md', false],
+		['**/', 'foo.ts', true],
+		['docs\\**\\', 'docs\\a.md', true],
+		['docs/**', 'docs/deep/sub/file.md', true],
+		['*a**a', 'a/a', true],
 	];
 	for (const [pattern, path, expected] of cases) {
 		t.is(matchGlob(pattern, path), expected, `${pattern} vs ${path}`);
