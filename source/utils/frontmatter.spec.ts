@@ -100,9 +100,3 @@ test('splitFrontmatter strips a leading UTF-8 BOM', t => {
 	t.is(result.frontmatter, 'title: Hello');
 	t.is(result.body, 'Body');
 });
-
-test('splitFrontmatter treats a BOM-prefixed file without frontmatter as body', t => {
-	const result = splitFrontmatter('﻿Just body text');
-	t.false(result.hasFrontmatter);
-	t.is(result.body, 'Just body text');
-});

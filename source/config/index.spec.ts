@@ -1606,3 +1606,56 @@ test.serial(
 		);
 	},
 );
+
+// Tests for BOM tolerance in the app config reader
+const bomConfigTestDir = join(
+	tmpdir(),
+	`nanocoder-bom-config-test-${Date.now()}`,
+);
+
+test.before(() => {
+	mkdirSync(bomConfigTestDir, {recursive: true});
+});
+
+test.after.always(() => {
+	if (existsSync(bomConfigTestDir)) {
+		rmSync(bomConfigTestDir, {recursive: true, force: true});
+	}
+});
+
+test.serial(
+	'reloadAppConfig reads agents.config.json that starts with a UTF-8 BOM',
+	async t => {
+		const originalCwd = process.cwd();
+		const originalEnv = process.env.NANOCODER_CONFIG_DIR;
+		const testSubdir = join(bomConfigTestDir, 'bom-config');
+		mkdirSync(testSubdir, {recursive: true});
+
+		try {
+			writeFileSync(
+				join(testSubdir, 'agents.config.json'),
+				'﻿' +
+					JSON.stringify({nanocoder: {retries: {maxEmptyTurns: 7}}}),
+				'utf-8',
+			);
+			process.chdir(testSubdir);
+			process.env.NANOCODER_CONFIG_DIR = join(
+				testSubdir,
+				'nonexistent-global',
+			);
+
+			const {reloadAppConfig: reload, getAppConfig} = await import(
+				'./index.js'
+			);
+			reload();
+			t.is(getAppConfig().retries?.maxEmptyTurns, 7);
+		} finally {
+			process.chdir(originalCwd);
+			if (originalEnv !== undefined) {
+				process.env.NANOCODER_CONFIG_DIR = originalEnv;
+			} else {
+				delete process.env.NANOCODER_CONFIG_DIR;
+			}
+		}
+	},
+);
