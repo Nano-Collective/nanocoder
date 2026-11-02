@@ -42,6 +42,7 @@ import {
 import {loadAllMCPConfigs} from '@/config/mcp-config-loader';
 import {getConfigPath} from '@/config/paths';
 import {loadPreferences} from '@/config/preferences';
+import {stripUtf8Bom} from '@/utils/strip-utf8-bom';
 
 /**
  * Where a value came from, in ascending precedence. `default` is a built-in
@@ -216,7 +217,9 @@ interface RawLayer {
 function parseJsonFile(path: string): Record<string, unknown> | null {
 	if (!existsSync(path)) return null;
 	try {
-		const parsed: unknown = JSON.parse(readFileSync(path, 'utf-8'));
+		const parsed: unknown = JSON.parse(
+			stripUtf8Bom(readFileSync(path, 'utf-8')),
+		);
 		return isPlainObject(parsed) ? parsed : null;
 	} catch {
 		return null;
@@ -232,7 +235,9 @@ function readRawFile(
 		return {layer, file, path, exists: false, data: null};
 	}
 	try {
-		const parsed: unknown = JSON.parse(readFileSync(path, 'utf-8'));
+		const parsed: unknown = JSON.parse(
+			stripUtf8Bom(readFileSync(path, 'utf-8')),
+		);
 		return {
 			layer,
 			file,

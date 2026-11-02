@@ -1,5 +1,7 @@
 import {parse as parseYaml} from 'yaml';
 
+import {stripUtf8Bom} from './strip-utf8-bom.js';
+
 /**
  * Result of splitting a markdown file into YAML frontmatter and body.
  */
@@ -20,12 +22,15 @@ export interface FrontmatterSplit {
  * `hasFrontmatter` is false.
  */
 export function splitFrontmatter(fileContent: string): FrontmatterSplit {
+	// Editors and some servers prefix the file with a UTF-8 BOM, which the
+	// `^`-anchored pattern below would otherwise miss.
+	const content = stripUtf8Bom(fileContent);
 	// The frontmatter group is optional (`(?:…)?`) so an empty block —
 	// `---\n---\n` with no lines between the delimiters — is still recognised
 	// rather than leaking the literal `---` markers into the body.
 	const frontmatterRegex =
 		/^---\s*\r?\n(?:([\s\S]*?)\r?\n)?---\s*\r?\n?([\s\S]*)$/;
-	const match = fileContent.match(frontmatterRegex);
+	const match = content.match(frontmatterRegex);
 	if (match && match[2] !== undefined) {
 		return {
 			frontmatter: match[1] ?? '',
@@ -35,7 +40,7 @@ export function splitFrontmatter(fileContent: string): FrontmatterSplit {
 	}
 	return {
 		frontmatter: '',
-		body: fileContent.trim(),
+		body: content.trim(),
 		hasFrontmatter: false,
 	};
 }

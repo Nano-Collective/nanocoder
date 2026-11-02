@@ -49,6 +49,7 @@ import type {
 import {clampThreshold} from '@/utils/message-compression';
 import {logError, logWarning} from '@/utils/message-queue';
 import {DEFAULT_SINGLE_LINE_PASTE_THRESHOLD} from '@/utils/paste-utils';
+import {stripUtf8Bom} from '@/utils/strip-utf8-bom';
 import {isTrustLevel} from '@/verify/trust';
 
 export {confDirMap, getClosestConfigFile} from '@/config/paths';
@@ -78,7 +79,7 @@ function tryLoadConfig<T>(
 	}
 
 	try {
-		const config = JSON.parse(readFileSync(configPath, 'utf-8'));
+		const config = JSON.parse(stripUtf8Bom(readFileSync(configPath, 'utf-8')));
 		return extract(config);
 	} catch (error) {
 		logError(

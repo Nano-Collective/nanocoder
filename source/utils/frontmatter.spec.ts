@@ -93,3 +93,16 @@ test('parseYamlObject returns null for a top-level array', t => {
 test('parseYamlObject returns null on invalid YAML', t => {
 	t.is(parseYamlObject('key: "unterminated'), null);
 });
+
+test('splitFrontmatter strips a leading UTF-8 BOM', t => {
+	const result = splitFrontmatter('﻿---\ntitle: Hello\n---\nBody');
+	t.true(result.hasFrontmatter);
+	t.is(result.frontmatter, 'title: Hello');
+	t.is(result.body, 'Body');
+});
+
+test('splitFrontmatter treats a BOM-prefixed file without frontmatter as body', t => {
+	const result = splitFrontmatter('﻿Just body text');
+	t.false(result.hasFrontmatter);
+	t.is(result.body, 'Just body text');
+});
