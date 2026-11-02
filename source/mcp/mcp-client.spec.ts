@@ -2602,3 +2602,30 @@ test('MCPClient.disconnect: clears resources and prompts', async t => {
 	t.is(client.getAllResources().length, 0);
 	t.is(client.getAllPrompts().length, 0);
 });
+
+// ============================================================================
+// Tests for tool result content
+// ============================================================================
+
+test('MCPClient.executeToolCall: joins every text block and summarises media', async t => {
+	const client = new MCPClient();
+	const callWith = (content: unknown[]) =>
+		(client as any).executeToolCall({callTool: async () => ({content})}, 'x', {});
+
+	t.is(
+		await callWith([
+			{type: 'text', text: 'BLOCK-ONE'},
+			{type: 'text', text: 'BLOCK-TWO'},
+			{type: 'text', text: 'BLOCK-THREE'},
+		]),
+		'BLOCK-ONE\nBLOCK-TWO\nBLOCK-THREE',
+	);
+	t.is(
+		await callWith([
+			{type: 'image', data: 'AAAA', mimeType: 'image/png'},
+			{type: 'text', text: 'CAPTION'},
+		]),
+		'[image/png, 3 bytes]\nCAPTION',
+	);
+	t.is(await callWith([]), 'Tool executed successfully (no output)');
+});

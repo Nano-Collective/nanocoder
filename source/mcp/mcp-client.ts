@@ -1163,40 +1163,31 @@ export class MCPClient {
 					correlationId,
 				});
 
-				// Convert result content to string
+				// Convert every content block to text; media is summarised, not dumped as base64
 				if (
 					result.content &&
 					Array.isArray(result.content) &&
 					result.content.length > 0
 				) {
-					const content = result.content[0] as
-						| {type: 'text'; text?: string}
-						| Record<string, unknown>;
-					if ('type' in content && content.type === 'text') {
-						const textContent = content as {type: 'text'; text?: string};
-						const responseText = textContent.text || '';
-
-						const finalMetrics = endMetrics(metrics);
-						this.logger.info('MCP tool execution completed', {
-							toolName,
-							responseLength: responseText.length,
-							duration: `${finalMetrics.duration.toFixed(2)}ms`,
-							correlationId,
-						});
-
-						return responseText;
-					}
-					const jsonResponse = JSON.stringify(content);
+					const responseText = result.content
+						.map(block => {
+							if (block.type === 'text') return block.text;
+							if (block.type === 'image' || block.type === 'audio') {
+								return `[${block.mimeType}, ${Buffer.byteLength(block.data, 'base64')} bytes]`;
+							}
+							return JSON.stringify(block);
+						})
+						.join('\n');
 
 					const finalMetrics = endMetrics(metrics);
-					this.logger.info('MCP tool execution completed (JSON)', {
+					this.logger.info('MCP tool execution completed', {
 						toolName,
-						responseLength: jsonResponse.length,
+						responseLength: responseText.length,
 						duration: `${finalMetrics.duration.toFixed(2)}ms`,
 						correlationId,
 					});
 
-					return jsonResponse;
+					return responseText;
 				}
 
 				const finalMetrics = endMetrics(metrics);
