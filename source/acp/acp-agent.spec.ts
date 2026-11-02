@@ -2741,6 +2741,88 @@ test('AcpAgent - sessions start in the init context mode on new, load and resume
 	}
 });
 
+/**
+ * Run `fn` from a project directory whose agents.config.json holds `nanocoder`.
+ * The global layer is NANOCODER_CONFIG_DIR, which this file points at an
+ * isolated temp dir, so only the project file can supply a default here.
+ */
+async function withProjectConfig<T>(
+	nanocoder: Record<string, unknown> | null,
+	fn: () => Promise<T>,
+): Promise<T> {
+	const projectDir = join(testConfigDir, `default-mode-${randomUUID()}`);
+	mkdirSync(projectDir, {recursive: true});
+	if (nanocoder) {
+		writeFileSync(
+			join(projectDir, 'agents.config.json'),
+			JSON.stringify({nanocoder}),
+			'utf-8',
+		);
+	}
+	const originalCwd = process.cwd();
+	process.chdir(projectDir);
+	try {
+		return await fn();
+	} finally {
+		process.chdir(originalCwd);
+		rmSync(projectDir, {recursive: true, force: true});
+	}
+}
+
+test.serial('AcpAgent.newSession - starts in defaultMode from agents.config.json', async t => {
+	await withProjectConfig({defaultMode: 'plan'}, async () => {
+		const {agent} = createAgent();
+		const created = await agent.newSession({cwd: '/tmp'});
+		t.is(created.modes?.currentModeId, 'plan');
+	});
+});
+
+test.serial('AcpAgent.newSession - --mode overrides defaultMode', async t => {
+	await withProjectConfig({defaultMode: 'plan'}, async () => {
+		const agent = new AcpAgent(
+			{...createMockInitContext(), initialMode: 'normal'},
+			createMockConn(),
+		);
+		const created = await agent.newSession({cwd: '/tmp'});
+		t.is(created.modes?.currentModeId, 'normal');
+	});
+});
+
+test.serial('AcpAgent.newSession - an invalid defaultMode falls back to auto-accept', async t => {
+	await withProjectConfig({defaultMode: 'turbo'}, async () => {
+		const {agent} = createAgent();
+		const created = await agent.newSession({cwd: '/tmp'});
+		t.is(created.modes?.currentModeId, 'auto-accept');
+	});
+});
+
+test.serial('AcpAgent.newSession - no defaultMode falls back to auto-accept', async t => {
+	await withProjectConfig({}, async () => {
+		const {agent} = createAgent();
+		const created = await agent.newSession({cwd: '/tmp'});
+		t.is(created.modes?.currentModeId, 'auto-accept');
+	});
+});
+
+test.serial('AcpAgent.newSession - a changed defaultMode applies to the next session', async t => {
+	await withProjectConfig({defaultMode: 'plan'}, async () => {
+		const {agent} = createAgent();
+		const first = await agent.newSession({cwd: '/tmp'});
+
+		// What the VS Code settings panel does: rewrite agents.config.json while
+		// the agent keeps running.
+		writeFileSync(
+			join(process.cwd(), 'agents.config.json'),
+			JSON.stringify({nanocoder: {defaultMode: 'normal'}}),
+			'utf-8',
+		);
+		const second = await agent.newSession({cwd: '/tmp'});
+
+		t.is(first.modes?.currentModeId, 'plan');
+		t.is(second.modes?.currentModeId, 'normal');
+	});
+});
+
 // ============================================================================
 // Client-supplied MCP servers
 // ============================================================================

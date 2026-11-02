@@ -92,7 +92,7 @@ The tab covers:
 - **Providers** - the configured providers, their base URLs and model lists. API keys are masked; the tab only shows whether a key is set.
 - **MCP servers** - each server's name and transport, plus its command or URL.
 - **Tool auto-approval** - the always-allow list.
-- **Default mode** - the mode new terminal CLI sessions start in (`nanocoder.defaultMode`). Sidebar chat sessions don't use it: they start in the mode stored in the VS Code `nanocoder.mode` setting (Auto-Accept by default), which the mode selector updates.
+- **Default mode** - the mode new sessions start in (`nanocoder.defaultMode`), in the terminal CLI and in the sidebar chat. A `nanocoder.mode` value you set in VS Code settings overrides it for sidebar chats. The mode selector writes that setting, so once you pick a mode there, new chats start in it. Clear `nanocoder.mode` to go back to the default mode. With neither set, sidebar chats start in Auto-Accept.
 - **Auto-compact** - whether it's enabled, its threshold, and its mode.
 - **Reasoning traces** - whether thinking is expanded by default.
 - **Sessions** - autosave on or off.
@@ -173,7 +173,7 @@ The extension can be configured in VS Code settings (`Cmd+,` / `Ctrl+,`):
 | --------------------------- | ------------- | -------------------------------------------------------------------- |
 | `nanocoder.cliPath`         | (empty)       | Absolute path to the nanocoder CLI. If empty, uses the global install |
 | `nanocoder.cwd`             | (empty)       | Working directory for the CLI, new sessions, settings and `@` mention search. Defaults to the workspace root, and takes priority over it when set. With no folder open, sessions use your home directory and `@` search finds no files |
-| `nanocoder.mode`            | `auto-accept` | Operating mode for the assistant                                      |
+| `nanocoder.mode`            | (unset)       | Mode new chat sessions start in. Set by the mode selector. When unset, sessions start in `defaultMode` from `agents.config.json`, or `auto-accept` |
 | `nanocoder.model`           | (empty)       | Model for Nanocoder sessions (set via the model dropdown)             |
 | `nanocoder.showDiffPreview` | `true`        | Show diff preview before applying file changes                        |
 | `nanocoder.codeLens`        | `true`        | Show `Explain Code` / `Generate Tests` lenses above symbols            |

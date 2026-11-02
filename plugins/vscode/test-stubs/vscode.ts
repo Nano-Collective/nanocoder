@@ -192,6 +192,16 @@ export const __test = {
 	/** Backs `workspace.getConfiguration(section, scope).get(key, default)`. */
 	configuration: (_section: string, _key: string, fallback: unknown): unknown =>
 		fallback,
+	/**
+	 * Backs `workspace.getConfiguration(section).inspect(key)`. Undefined means
+	 * the key is unknown; a value the user never set has no scope values.
+	 */
+	inspectConfiguration: (
+		_section: string,
+		_key: string,
+	):
+		| {globalValue?: unknown; workspaceValue?: unknown; workspaceFolderValue?: unknown}
+		| undefined => undefined,
 	/** Backs `commands.executeCommand`. */
 	executeCommand: async (_command: string, ..._args: unknown[]): Promise<any> =>
 		undefined,
@@ -215,6 +225,7 @@ export const __test = {
 	reset(): void {
 		__test.findFiles = async () => [];
 		__test.configuration = (_s, _k, fallback) => fallback;
+		__test.inspectConfiguration = () => undefined;
 		__test.executeCommand = async () => undefined;
 		__test.openTextDocument = async () => ({
 			languageId: 'plaintext',
@@ -235,6 +246,10 @@ export const workspace = {
 		return {
 			get: <T>(key: string, fallback?: T): T =>
 				__test.configuration(section, key, fallback) as T,
+			inspect: <T>(key: string) =>
+				__test.inspectConfiguration(section, key) as
+					| {globalValue?: T; workspaceValue?: T; workspaceFolderValue?: T}
+					| undefined,
 			update: async () => undefined,
 		};
 	},

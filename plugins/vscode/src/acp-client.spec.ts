@@ -1,7 +1,7 @@
 import test from 'ava';
 import * as vscode from 'vscode';
 import {isVsCodeClient} from '../../../source/acp/acp-capabilities';
-import { NanocoderAcpClient } from './acp-client';
+import { explicitModeSetting, NanocoderAcpClient } from './acp-client';
 import { AcpStateManager } from './acp-state';
 
 test('NanocoderAcpClient - permission flow', async (t) => {
@@ -533,4 +533,119 @@ test('NanocoderAcpClient - each extension method resolves on its own against wha
 		calls.map((call) => call.method),
 		['_nanocoder/renameSession', 'retryTurn'],
 	);
+});
+
+// ── Starting mode: agents.config.json defaultMode vs nanocoder.mode ─────────
+
+const inspecting = (scopes: Record<string, unknown> | undefined) => ({
+	inspect: (() => scopes) as any,
+});
+
+test('explicitModeSetting - a setting the user never set is undefined', (t) => {
+	// A default value alone (from any manifest) is not a choice the user made.
+	t.is(explicitModeSetting(inspecting({ key: 'nanocoder.mode', defaultValue: 'auto-accept' })), undefined);
+	t.is(explicitModeSetting(inspecting(undefined)), undefined);
+});
+
+test('explicitModeSetting - workspace folder beats workspace beats user', (t) => {
+	t.is(explicitModeSetting(inspecting({ globalValue: 'normal' })), 'normal');
+	t.is(explicitModeSetting(inspecting({ globalValue: 'normal', workspaceValue: 'plan' })), 'plan');
+	t.is(
+		explicitModeSetting(
+			inspecting({ globalValue: 'normal', workspaceValue: 'plan', workspaceFolderValue: 'yolo' }),
+		),
+		'yolo',
+	);
+});
+
+test('explicitModeSetting - an empty or non-string value is ignored', (t) => {
+	t.is(explicitModeSetting(inspecting({ globalValue: '' })), undefined);
+	t.is(explicitModeSetting(inspecting({ globalValue: 42 })), undefined);
+});
+
+/**
+ * A connection whose new session starts in `agentMode`, the mode the agent
+ * resolved from --mode or defaultMode. Records every setSessionMode call.
+ */
+function makeModeConnection(agentMode: string) {
+	const modeCalls: string[] = [];
+	const connection = {
+		newSession: async () => ({
+			sessionId: 'session-1',
+			modes: {
+				currentModeId: agentMode,
+				availableModes: ['normal', 'auto-accept', 'yolo', 'plan', 'architect'].map(id => ({ id })),
+			},
+		}),
+		setSessionMode: async ({ modeId }: { modeId: string }) => {
+			modeCalls.push(modeId);
+		},
+	};
+	return { connection, modeCalls };
+}
+
+function withModeSetting(scopes: Record<string, unknown>) {
+	const stub = (vscode as any).__test;
+	// get() never comes back empty here, as when the manifest declared an
+	// auto-accept default, so reading the mode through get() fails these tests.
+	stub.configuration = (section: string, key: string, fallback: unknown) =>
+		section === 'nanocoder' && key === 'mode'
+			? (scopes.workspaceFolderValue ?? scopes.workspaceValue ?? scopes.globalValue ?? 'auto-accept')
+			: fallback;
+	stub.inspectConfiguration = (section: string, key: string) =>
+		section === 'nanocoder' && key === 'mode'
+			? { key: 'nanocoder.mode', defaultValue: 'auto-accept', ...scopes }
+			: undefined;
+}
+
+test.serial('NanocoderAcpClient - a new session keeps the agent mode when nanocoder.mode is unset', async (t) => {
+	withModeSetting({});
+	try {
+		const { connection, modeCalls } = makeModeConnection('plan');
+		const client = makeConnectedClient(connection);
+
+		await client.getOrCreateSession('/cwd');
+
+		t.deepEqual(modeCalls, [], 'the manifest default must not override defaultMode');
+		t.is(client.currentMode, 'plan');
+	} finally {
+		(vscode as any).__test.reset();
+	}
+});
+
+test.serial('NanocoderAcpClient - an explicit nanocoder.mode overrides the agent mode', async (t) => {
+	withModeSetting({ globalValue: 'normal' });
+	try {
+		const { connection, modeCalls } = makeModeConnection('plan');
+		const client = makeConnectedClient(connection);
+
+		await client.getOrCreateSession('/cwd');
+
+		t.deepEqual(modeCalls, ['normal']);
+		t.is(client.currentMode, 'normal');
+	} finally {
+		(vscode as any).__test.reset();
+	}
+});
+
+test.serial('NanocoderAcpClient - an explicit nanocoder.mode the agent does not offer is ignored', async (t) => {
+	withModeSetting({ globalValue: 'turbo' });
+	const lines: string[] = [];
+	try {
+		const { connection, modeCalls } = makeModeConnection('plan');
+		const client = new NanocoderAcpClient(
+			{ appendLine: (line: string) => lines.push(line) } as any,
+			new AcpStateManager(),
+		);
+		client.setConnection(connection as any);
+		(client as any)._handshakeComplete = true;
+
+		await client.getOrCreateSession('/cwd');
+
+		t.deepEqual(modeCalls, []);
+		t.is(client.currentMode, 'plan');
+		t.true(lines.some(line => line.includes('Ignoring nanocoder.mode "turbo"')));
+	} finally {
+		(vscode as any).__test.reset();
+	}
 });

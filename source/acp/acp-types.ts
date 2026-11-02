@@ -8,6 +8,9 @@ export interface AcpInitContext {
 	customCommandLoader: CustomCommandLoader;
 	provider: string;
 	model: string;
-	/** Starting mode of every session (`--mode`); `auto-accept` when unset. */
+	/**
+	 * Starting mode of every session (`--mode`). When unset, sessions start in
+	 * `defaultMode` from agents.config.json, then `auto-accept`.
+	 */
 	initialMode?: DevelopmentMode;
 }

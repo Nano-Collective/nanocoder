@@ -17,6 +17,23 @@ export interface StateSyncPayload {
 	availableProviders: string[];
 }
 
+/**
+ * The `nanocoder.mode` value the user actually set, or undefined when they
+ * never set one. `get('mode')` cannot tell these apart: it falls back to the
+ * manifest default, which used to override `defaultMode` from
+ * agents.config.json on every new session.
+ */
+export function explicitModeSetting(
+	config: Pick<vscode.WorkspaceConfiguration, 'inspect'>,
+): string | undefined {
+	const inspected = config.inspect<string>('mode');
+	const value =
+		inspected?.workspaceFolderValue ??
+		inspected?.workspaceValue ??
+		inspected?.globalValue;
+	return typeof value === 'string' && value ? value : undefined;
+}
+
 export class NanocoderAcpClient {
 	public connection: ClientSideConnection | null = null;
 	private outputChannel: vscode.OutputChannel;
@@ -271,7 +288,10 @@ export class NanocoderAcpClient {
 		try {
 			// Get VS Code settings for initial preferences
 			const config = vscode.workspace.getConfiguration('nanocoder');
-			const initialMode = config.get<string>('mode') || 'auto-accept';
+			// The agent picks the starting mode (--mode, then defaultMode from
+			// agents.config.json, then auto-accept). Only a mode the user set in
+			// VS Code settings overrides it.
+			const initialMode = explicitModeSetting(config);
 			const initialModel = config.get<string>('model');
 
 			const result = await this.connection!.newSession({ cwd, mcpServers: [] });
@@ -295,8 +315,14 @@ export class NanocoderAcpClient {
 			}
 
 			// Force initial preferences if they differ
-			if (this.currentMode && this.currentMode !== initialMode && this.availableModes.includes(initialMode)) {
-				await this.setSessionMode(initialMode, false);
+			if (initialMode && this.currentMode && this.currentMode !== initialMode) {
+				if (this.availableModes.includes(initialMode)) {
+					await this.setSessionMode(initialMode, false);
+				} else {
+					this.outputChannel.appendLine(
+						`Ignoring nanocoder.mode "${initialMode}": the agent offers ${this.availableModes.join(', ')}.`,
+					);
+				}
 			}
 			if (initialModel && this.currentModel && this.currentModel !== initialModel && this.availableModels.includes(initialModel)) {
 				await this.setSessionModel(initialModel, false);

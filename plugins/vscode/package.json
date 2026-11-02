@@ -185,9 +185,8 @@
 				},
 				"nanocoder.mode": {
 					"type": "string",
-					"default": "auto-accept",
 					"scope": "resource",
-					"description": "The current operating mode for the Nanocoder assistant (e.g. chat, auto-accept)"
+					"description": "Mode new chat sessions start in, set by the mode selector. When unset, sessions start in nanocoder.defaultMode from agents.config.json, or auto-accept if that is not set either."
 				},
 				"nanocoder.model": {
 					"type": "string",

@@ -62,7 +62,7 @@ import {appendToolDefinitionsToPrompt} from '@/ai-sdk-client/tools/system-prompt
 import {artifactManager} from '@/artifacts/artifact-manager';
 import {isInternalWalkthroughMessage} from '@/artifacts/walkthrough-lifecycle';
 import {createLLMClient} from '@/client-factory';
-import {getAppConfig} from '@/config/index';
+import {getAppConfig, loadDefaultMode} from '@/config/index';
 import {
 	getProjectContextPreferences,
 	loadPreferences,
@@ -1114,7 +1114,11 @@ export class AcpAgent implements Agent {
 			cwd,
 			conn: this.conn,
 			clientCapabilities: this.clientCapabilities,
-			initialMode: this.initContext.initialMode,
+			// --mode wins, then defaultMode from agents.config.json. Read per
+			// session, so a default changed in the settings panel applies to the
+			// next new chat without restarting the agent. AcpSession falls back
+			// to auto-accept when neither is set.
+			initialMode: this.initContext.initialMode ?? loadDefaultMode(),
 		});
 		session.disabledTools = disabledTools;
 		// Pinned now, so a later selection in another session does not move it.
