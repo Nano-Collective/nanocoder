@@ -445,6 +445,37 @@ test.serial(
 );
 
 test.serial(
+	'listSessions matches workingDirectory case-insensitively on Windows',
+	async t => {
+		await manager.createSession({
+			title: 'Project',
+			messageCount: 0,
+			provider: 'test',
+			model: 'test',
+			workingDirectory: '/Work/Proj',
+			messages: [],
+		});
+
+		const originalPlatform = process.platform;
+		Object.defineProperty(process, 'platform', {
+			value: 'win32',
+			configurable: true,
+		});
+		try {
+			const filtered = await manager.listSessions({
+				workingDirectory: '/work/proj/',
+			});
+			t.is(filtered.length, 1);
+		} finally {
+			Object.defineProperty(process, 'platform', {
+				value: originalPlatform,
+				configurable: true,
+			});
+		}
+	},
+);
+
+test.serial(
 	'listSessions without filter returns all sessions',
 	async t => {
 		await manager.createSession({
