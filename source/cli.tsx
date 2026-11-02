@@ -137,6 +137,22 @@ if (args[0] === 'config') {
 	process.exit(result.exitCode);
 }
 
+// Handle `nanocoder trust` — fast path. Reads and writes only the trust list in
+// the global preferences file, so it never loads the folder's project config or
+// starts anything it defines. Its import graph also stays free of React and Ink
+// (trust-cli.spec.ts checks this), which is why preferences.ts logs through
+// @/utils/logging and not the Ink message queue.
+if (args[0] === 'trust') {
+	const {runTrustCli} = await import('@/config/trust-cli');
+	const result = runTrustCli(args.slice(1));
+	if (result.exitCode === 0) {
+		console.log(result.output);
+	} else {
+		console.error(result.output);
+	}
+	process.exit(result.exitCode);
+}
+
 // Handle `nanocoder init` without booting the interactive app. The shared
 // initializer is also used by /init, so both entry points keep identical file
 // generation and overwrite behavior.
@@ -218,7 +234,8 @@ Commands:
   copilot login [provider-name]   Log in to GitHub Copilot (device flow). Saves credentials for the "GitHub Copilot" provider.
   codex login [provider-name]     Log in to ChatGPT/Codex (device flow). Saves credentials for the "ChatGPT" provider.
   review <branch|pr-number>       Review a branch or PR diff for bugs, security issues, and style violations.
-  worktree <PR-number>            Start an interactive session in a new worktree for a GitHub PR.
+  worktree <PR-number> [options]  Start an interactive session in a new worktree for a GitHub PR.
+                                  Accepts the global options below, e.g. --provider, --mode.
   daemon <subcommand>             Manage the per-project skill daemon.
                                   Subcommands: start, stop, status, logs, install, uninstall.
                                   start [--trust <comment-only|auto-fix|full-commit>]
@@ -239,6 +256,10 @@ Commands:
                                   Flags: --ref, --subdir, --global, --force, --yes, --index.
   config <subcommand>             Inspect the resolved configuration and where each value came from.
                                   Subcommands: list, show [key], diff. Add --json for machine output.
+  trust --status [--json]         Show whether this folder is trusted, what it will run, and its
+                                  fingerprint. Runs nothing from the folder. Status is trusted,
+                                  not-trusted, changed or needs-re-approval.
+  trust --grant <fingerprint>     Trust this folder only if its fingerprint still matches.
   storage [--format json]         Inspect session and artifact storage (read-only).
                                   Interactive by default; JSON works without a TTY.
   completion <shell>              Generate a shell completion script (bash, zsh, or fish).
@@ -301,6 +322,7 @@ Examples:
   nanocoder review feature/auth
   nanocoder review 42
   nanocoder worktree 42
+  nanocoder worktree 42 --mode plan
   nanocoder --continue
   nanocoder --resume last
   nanocoder --resume
@@ -329,10 +351,18 @@ async function main(): Promise<void> {
 	// Those packages pull ~thousand+ modules; --acp / --plain / auth must stay
 	// on the lightweight path. Ink + App load only in the final TUI branch.
 	if (args[0] === 'worktree') {
-		const {createPrWorktree, parseWorktreePrNumber} = await import(
-			'./commands/gh-pr-worktree'
+		const [{createPrWorktree, parseWorktreePrNumber}, {parseWorktreeArgs}] =
+			await Promise.all([
+				import('./commands/gh-pr-worktree'),
+				import('./cli-args.js'),
+			]);
+		// Global options after the PR number (`--provider`, `--mode`, ...) are
+		// validated by validateCliArgs above and read by the normal startup
+		// path below, so the worktree session honours them.
+		const worktreeArgs = parseWorktreeArgs(args);
+		const prNumber = parseWorktreePrNumber(
+			'error' in worktreeArgs ? args.slice(1) : worktreeArgs.positionals,
 		);
-		const prNumber = parseWorktreePrNumber(args.slice(1));
 		if (!process.stdin.isTTY || !process.stdout.isTTY) {
 			throw new Error(
 				'`nanocoder worktree` requires an interactive terminal (TTY).',
@@ -765,6 +795,7 @@ async function main(): Promise<void> {
 			cliModel,
 			appVersion: version,
 			trustDirectory: trustDirectoryRequested,
+			mode: cliMode,
 		});
 	} else if (plainMode && nonInteractivePrompt) {
 		// Headless, Ink-free path. Note: --plain is currently only valid with

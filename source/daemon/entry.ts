@@ -33,6 +33,7 @@ import {
 	isTrustLevel,
 } from '@/verify/trust';
 import {startDaemon} from './daemon';
+import {prepareDaemonSession} from './entry-setup';
 
 // The daemon's own `verify-ci-investigator` subagent must be pinned to a
 // trust-level tool allowlist at execution time rather than trusting its
@@ -89,6 +90,10 @@ async function main(): Promise<void> {
 	if (notificationsConfig) {
 		setNotificationsConfig(notificationsConfig);
 	}
+
+	// Plugins (trusted: the start command's gate already ran) and the
+	// auto-commit message client, as the TUI and --plain set them up.
+	await prepareDaemonSession(client);
 
 	const toolManager = new ToolManager();
 

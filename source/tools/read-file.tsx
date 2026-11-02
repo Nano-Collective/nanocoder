@@ -21,12 +21,13 @@ import {isValidFilePath, resolveFilePath} from '@/utils/path-validation';
 import {
 	markFileSeen,
 	matchReadContent,
+	READ_STUB_MARKER,
 	rememberReadContent,
 } from '@/utils/read-tracker';
 import {calculateTokens} from '@/utils/token-calculator';
 
 function formatReadStub(path: string, lineCount: number, size: number): string {
-	return `[file: ${path} — already in context, unchanged since last read (${lineCount} lines, ${size} bytes). pass start_line/end_line to read the body again.]`;
+	return `[file: ${path} — ${READ_STUB_MARKER} (${lineCount} lines, ${size} bytes). pass start_line/end_line to read the body again.]`;
 }
 
 const executeReadFile = async (args: {

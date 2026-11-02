@@ -9,6 +9,10 @@ const runtimeModules = {
 		globalThis.cliTestContextLimit = value;
 	}`,
 	'@/app': 'export default function App() {}',
+	'@/acp/acp-server': `export async function runAcpServer(options) {
+		console.log(JSON.stringify({acpOptions: options}));
+		process.exit(0);
+	}`,
 	'@/utils/perf-buffer': 'export function installPerfBufferGuard() {}',
 	// Every export cli.tsx pulls from this module must be stubbed here: the
 	// loader short-circuits the whole specifier, so a missing name surfaces as
@@ -227,4 +231,18 @@ test('Ink render receives configured maxFps in render options', t => {
 	t.is(result.status, 0, result.stderr);
 	const output = JSON.parse(result.stdout);
 	t.is(output.inkOptions?.maxFps, 15);
+});
+
+test('--acp hands --mode to the ACP server as the starting mode', t => {
+	for (const option of [['--mode', 'normal'], ['--mode=normal']]) {
+		const result = runCli(['--acp', ...option]);
+		t.is(result.status, 0, result.stderr);
+		t.is(JSON.parse(result.stdout).acpOptions.mode, 'normal');
+	}
+});
+
+test('--acp without --mode leaves the starting mode unset', t => {
+	const result = runCli(['--acp']);
+	t.is(result.status, 0, result.stderr);
+	t.is(JSON.parse(result.stdout).acpOptions.mode, undefined);
 });

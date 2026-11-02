@@ -1,4 +1,5 @@
 import test from 'ava';
+import {SETTINGS_TAB_IDS} from '@/app/components/settings-constants';
 import type {Command} from '@/types/index';
 import {
 	findHelpCommand,
@@ -85,4 +86,36 @@ test('groupHelpCommands orders categories and commands deterministically', t => 
 			{category: 'Other', commands: ['z-command']},
 		],
 	);
+});
+
+test('getCommandHelpDetails matches what the commands actually accept', t => {
+	const settings = getCommandHelpDetails(command('settings'));
+	t.deepEqual(settings.options, [...SETTINGS_TAB_IDS]);
+	t.false(settings.options?.includes('theme'));
+
+	t.is(getCommandHelpDetails(command('copy')).usage, '/copy [code]');
+
+	const checkpoint = getCommandHelpDetails(command('checkpoint'));
+	t.true(checkpoint.options?.includes('create|save [name]'));
+	t.true(checkpoint.options?.includes('load|restore [name]'));
+
+	t.is(
+		getCommandHelpDetails(command('review')).usage,
+		'/review [quick] [<branch | PR number | GitHub PR URL>]',
+	);
+});
+
+test('getCommandHelpDetails files /voice under a real category', t => {
+	const voice = getCommandHelpDetails(command('voice'));
+	t.is(voice.category, 'Model & Configuration');
+	t.true(voice.options?.includes('stt <local|cloud>'));
+});
+
+test('getCommandHelpDetails documents inline ?key=value overrides', t => {
+	const usage = getCommandHelpDetails(command('usage'));
+	t.true(usage.examples?.includes('/usage ?context-max=200k'));
+
+	const compact = getCommandHelpDetails(command('compact'));
+	t.true(compact.options?.some(option => option.startsWith('?threshold=')));
+	t.false(compact.options?.some(option => option.includes('?auto-on')));
 });

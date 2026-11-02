@@ -2,9 +2,11 @@ import {loadPreferences, savePreferences} from '@/config/preferences';
 import {TIMEOUT_UPDATE_CHECK_MS} from '@/constants';
 import type {NpmRegistryResponse, UpdateInfo} from '@/types/index';
 import {formatError} from '@/utils/error-formatter';
-import {logError} from '@/utils/message-queue';
+import {getLogger} from '@/utils/logging';
 import {detectInstallationMethod} from './installation-detector';
 import {getPackageVersion, UNKNOWN_VERSION} from './package-version';
+
+const UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
 const UPDATE_COMMANDS = {
 	NPM: 'npm update -g @nanocollective/nanocoder',
@@ -71,27 +73,91 @@ async function fetchLatestVersion(): Promise<string | null> {
 		}
 
 		const data = (await response.json()) as NpmRegistryResponse;
+		if (typeof data.version !== 'string' || data.version.length === 0) {
+			throw new Error('Registry response did not contain a version');
+		}
+
 		return data.version;
 	} catch (error) {
 		const errorMessage = formatError(error);
-		logError(`Failed to fetch latest version: ${errorMessage}`);
+		getLogger().warn(
+			{error: errorMessage},
+			'Failed to fetch the latest Nanocoder version',
+		);
 		return null;
 	}
 }
 
 /**
- * Update the last update check timestamp in preferences
+ * Record a successful check: its time, and the latest version it found so
+ * a throttled launch can still show the update banner.
  */
-function updateLastCheckTime(): void {
+function recordSuccessfulCheck(latestVersion: string): void {
 	const preferences = loadPreferences();
 	preferences.lastUpdateCheck = Date.now();
+	preferences.lastUpdateCheckLatestVersion = latestVersion;
 	savePreferences(preferences);
 }
 
 /**
- * Check for package updates
+ * Automatic checks run at most once every 24 hours after a successful check.
+ * Future timestamps are ignored so a clock change cannot disable checks.
+ * Returns the latest version that check recorded (if any), or `null` when
+ * there is no recent successful check.
  */
-export async function checkForUpdates(): Promise<UpdateInfo> {
+function getRecentSuccessfulCheck(): {latestVersion?: string} | null {
+	const {lastUpdateCheck, lastUpdateCheckLatestVersion} = loadPreferences();
+	const now = Date.now();
+
+	const isRecent =
+		typeof lastUpdateCheck === 'number' &&
+		Number.isFinite(lastUpdateCheck) &&
+		lastUpdateCheck > 0 &&
+		lastUpdateCheck <= now &&
+		now - lastUpdateCheck < UPDATE_CHECK_INTERVAL_MS;
+	if (!isRecent) return null;
+
+	return typeof lastUpdateCheckLatestVersion === 'string' &&
+		lastUpdateCheckLatestVersion.length > 0
+		? {latestVersion: lastUpdateCheckLatestVersion}
+		: {};
+}
+
+function getUpdateDetails(): {command?: string; message?: string} {
+	switch (detectInstallationMethod()) {
+		case 'npm':
+			return {command: UPDATE_COMMANDS.NPM};
+		case 'homebrew':
+			return {command: UPDATE_COMMANDS.HOMEBREW};
+		case 'nix':
+			return {message: UPDATE_MESSAGES.NIX};
+		default:
+			// For 'unknown' fallback to a general message (do not attempt to run a command)
+			return {message: UPDATE_MESSAGES.UNKNOWN};
+	}
+}
+
+function buildUpdateInfo(
+	currentVersion: string,
+	latestVersion: string,
+): UpdateInfo {
+	const hasUpdate = isNewerVersion(currentVersion, latestVersion);
+	const updateDetails = hasUpdate ? getUpdateDetails() : {};
+	return {
+		hasUpdate,
+		currentVersion,
+		latestVersion,
+		updateCommand: updateDetails.command,
+		updateMessage: updateDetails.message,
+	};
+}
+
+/**
+ * Check for package updates. Pass `force` for an explicit user-requested check.
+ */
+export async function checkForUpdates(
+	options: {force?: boolean} = {},
+): Promise<UpdateInfo> {
 	const currentVersion = getPackageVersion();
 
 	// A broken install has no version to compare. The banner and /doctor
@@ -101,12 +167,25 @@ export async function checkForUpdates(): Promise<UpdateInfo> {
 		return {hasUpdate: false, currentVersion};
 	}
 
+	if (!options.force) {
+		if (process.env.NANOCODER_NO_UPDATE_CHECK === '1') {
+			return {hasUpdate: false, currentVersion};
+		}
+		const recentCheck = getRecentSuccessfulCheck();
+		if (recentCheck) {
+			// Throttled: no network call, but an update the last check found
+			// is still pending until the user installs it, so keep reporting
+			// it rather than hiding the banner for the rest of the window.
+			const cached = recentCheck.latestVersion;
+			if (cached && isNewerVersion(currentVersion, cached)) {
+				return buildUpdateInfo(currentVersion, cached);
+			}
+			return {hasUpdate: false, currentVersion};
+		}
+	}
+
 	try {
 		const latestVersion = await fetchLatestVersion();
-		if (latestVersion !== null) {
-			updateLastCheckTime();
-		}
-
 		if (!latestVersion) {
 			return {
 				hasUpdate: false,
@@ -114,48 +193,11 @@ export async function checkForUpdates(): Promise<UpdateInfo> {
 			};
 		}
 
-		const hasUpdate = isNewerVersion(currentVersion, latestVersion);
-
-		function getUpdateDetails(hasUpdate: boolean): {
-			command?: string;
-			message?: string;
-		} {
-			if (!hasUpdate) {
-				return {};
-			}
-
-			const method = detectInstallationMethod();
-
-			// Use constants defined at top of file for maintainability
-
-			switch (method) {
-				case 'npm':
-					return {command: UPDATE_COMMANDS.NPM};
-				case 'homebrew':
-					return {command: UPDATE_COMMANDS.HOMEBREW};
-				case 'nix':
-					return {message: UPDATE_MESSAGES.NIX};
-				default:
-					// For 'unknown' fallback to a general message (do not attempt to run a command)
-					return {message: UPDATE_MESSAGES.UNKNOWN};
-			}
-		}
-
-		const updateDetails = getUpdateDetails(hasUpdate);
-
-		return {
-			hasUpdate,
-			currentVersion,
-			latestVersion,
-			updateCommand: updateDetails.command,
-			updateMessage: updateDetails.message,
-		};
+		recordSuccessfulCheck(latestVersion);
+		return buildUpdateInfo(currentVersion, latestVersion);
 	} catch (error) {
 		const errorMessage = formatError(error);
-		logError(`Update check failed: ${errorMessage}`);
-
-		// Still update the timestamp to prevent hammering the API on repeated failures
-		updateLastCheckTime();
+		getLogger().error({error: errorMessage}, 'Update check failed');
 
 		return {
 			hasUpdate: false,

@@ -2492,6 +2492,34 @@ test('UserInput lists Ctrl+N for reasoning and Ctrl+R for history search in the 
 	unmount();
 });
 
+test('UserInput lists Ctrl+G voice push-to-talk in the shortcuts overlay', async t => {
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput forceFocus={true} />
+		</TestWrapper>,
+	);
+
+	await wait(50);
+	stdin.write('?');
+	await waitForFrame(lastFrame, /Keyboard Shortcuts/);
+
+	const frame = stripAnsi(lastFrame() ?? '');
+	t.regex(frame, /Ctrl\+G — Voice push-to-talk \(when \/voice is on\)/);
+	unmount();
+});
+
+test('findReverseMatch skips malformed history entries instead of throwing', t => {
+	const history = [
+		{displayValue: 'git log', placeholderContent: {}},
+		null,
+		'bare string',
+		{placeholderContent: {}},
+	] as unknown as Parameters<typeof findReverseMatch>[0];
+
+	t.notThrows(() => findReverseMatch(history, 'git', history.length - 1));
+	t.is(findReverseMatch(history, 'git', history.length - 1)?.index, 0);
+});
+
 test('UserInput leaves Ctrl+G alone so voice push-to-talk keeps working', async t => {
 	let toggles = 0;
 	const {stdin, unmount} = render(
