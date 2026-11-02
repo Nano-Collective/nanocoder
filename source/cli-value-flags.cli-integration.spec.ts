@@ -144,7 +144,7 @@ for (const {flag, value, property, expected} of flags) {
 }
 
 test('fused values preserve additional equals signs for existing validation', t => {
-	for (const flag of ['--model', '--provider', '--context-max']) {
+	for (const flag of ['--model', '--provider', '--context-max', '--vscode-port']) {
 		const result = runCli(['run', 'hello', `${flag}=123=extra`]);
 		t.is(result.status, 1);
 		t.true(
@@ -152,12 +152,26 @@ test('fused values preserve additional equals signs for existing validation', t 
 			result.stderr,
 		);
 	}
-	// Port parsing intentionally continues to accept a numeric prefix.
-	const result = runCli(['run', 'hello', '--vscode-port=3000=extra', 'world']);
-	t.is(result.status, 0, result.stderr);
-	const props = JSON.parse(result.stdout);
-	t.is(props.vscodePort, 3000);
-	t.is(props.nonInteractivePrompt, 'hello world');
+});
+
+test('--vscode-port rejects non-integer and out-of-range values', t => {
+	for (const value of ['abc', '8080abc', '0', '99999', '-1', '80.5']) {
+		const result = runCli(['--vscode-port', value, 'run', 'hello']);
+		t.is(result.status, 1, `${value}: ${result.stderr}`);
+		t.true(
+			result.stderr.includes(`Invalid --vscode-port value: "${value}"`),
+			result.stderr,
+		);
+	}
+});
+
+test('--context-max reports a negative number as an invalid value', t => {
+	const result = runCli(['--context-max', '-5', 'run', 'hello']);
+	t.is(result.status, 1);
+	t.true(
+		result.stderr.includes('Invalid --context-max value: "-5"'),
+		result.stderr,
+	);
 });
 
 test('all four fused flags are removed without consuming prompt words', t => {

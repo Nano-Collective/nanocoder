@@ -126,14 +126,23 @@ interface ScannedArgs {
 	error?: string;
 }
 
+/**
+ * Whether `value` is the value of the preceding option rather than the next
+ * option. A leading `-` number (`--context-max -5`) is a value, so it reaches
+ * the option's own validation instead of being reported as an unknown option.
+ */
+function isOptionValue(value: string | undefined): value is string {
+	if (!value || value === 'run') return false;
+	return !value.startsWith('-') || /^-\d/.test(value);
+}
+
 /** Walk `args[start..end)`, skipping known options and their values. */
 function scanArgs(args: string[], start: number, end: number): ScannedArgs {
 	const positionals: number[] = [];
 	for (let i = start; i < end; i++) {
 		const arg = args[i];
 		if (FLAGS_WITH_VALUES.has(arg)) {
-			const value = args[i + 1];
-			if (value && !value.startsWith('-') && value !== 'run') i++;
+			if (isOptionValue(args[i + 1])) i++;
 			continue;
 		}
 		if ([...FLAGS_WITH_VALUES].some(flag => arg.startsWith(`${flag}=`))) {
@@ -192,7 +201,9 @@ export function parseWorktreeArgs(
  * text, where option-looking tokens may be part of the user's request.
  */
 export function validateCliArgs(args: string[]): string | undefined {
-	if (args[0] === 'review') return undefined;
+	// The review target itself is checked by parseReviewCliArgs; only reject
+	// unknown options here so `review --bogus main` names the bad flag.
+	if (args[0] === 'review') return scanArgs(args, 1, args.length).error;
 
 	if (args[0] === 'worktree') {
 		const result = parseWorktreeArgs(args);

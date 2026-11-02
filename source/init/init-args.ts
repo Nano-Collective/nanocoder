@@ -13,6 +13,15 @@ export class InitArgumentError extends Error {
 	}
 }
 
+/** Flags `nanocoder init` accepts besides `--preset`. */
+const KNOWN_INIT_FLAGS: readonly string[] = [
+	'--force',
+	'-f',
+	'--lean',
+	'--help',
+	'-h',
+];
+
 export function parseInitArguments(
 	args: readonly string[],
 ): ParsedInitArguments {
@@ -37,6 +46,13 @@ export function parseInitArguments(
 				);
 			}
 			preset = value;
+		} else if (
+			argument.startsWith('-') &&
+			!KNOWN_INIT_FLAGS.includes(argument)
+		) {
+			throw new InitArgumentError(
+				`Unknown option "${argument}". Run "nanocoder init --help" to see available options.`,
+			);
 		}
 	}
 
