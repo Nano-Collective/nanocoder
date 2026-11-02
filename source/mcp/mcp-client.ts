@@ -28,6 +28,7 @@ import type {
 	MCPServer,
 	MCPTool,
 	MCPToolInputSchema,
+	StructuredToolOutput,
 	Tool,
 	ToolApprovalPolicy,
 	ToolParameterSchema,
@@ -915,10 +916,11 @@ export class MCPClient {
 					),
 					execute: async (input, _options) => {
 						// dynamicTool passes 'input' as unknown, validate at runtime
-						return await this.callTool(
+						const output = await this.callTool(
 							toolName,
 							input as Record<string, unknown>,
 						);
+						return typeof output === 'string' ? output : output.llmContent;
 					},
 				});
 
@@ -985,13 +987,17 @@ export class MCPClient {
 	getToolEntries(forServerName?: string): Array<{
 		name: string;
 		tool: AISDKCoreTool;
-		handler: (args: Record<string, unknown>) => Promise<string>;
+		handler: (
+			args: Record<string, unknown>,
+		) => Promise<string | StructuredToolOutput>;
 		approval: ToolApprovalPolicy;
 	}> {
 		const entries: Array<{
 			name: string;
 			tool: AISDKCoreTool;
-			handler: (args: Record<string, unknown>) => Promise<string>;
+			handler: (
+				args: Record<string, unknown>,
+			) => Promise<string | StructuredToolOutput>;
 			approval: ToolApprovalPolicy;
 		}> = [];
 
@@ -1020,9 +1026,12 @@ export class MCPClient {
 						undefined,
 						getToolJsonSchema(coreTool),
 						// The wrapper types its result as the generic
-						// ToolExecuteResult union; MCP handlers always resolve a
-						// string, so the narrower entry signature is safe here.
-					) as (args: Record<string, unknown>) => Promise<string>;
+						// ToolExecuteResult union; MCP handlers only resolve a string
+						// or a structured failure, so the narrower entry signature is
+						// safe here.
+					) as (
+						args: Record<string, unknown>,
+					) => Promise<string | StructuredToolOutput>;
 
 					// MCP tools take the same mode posture as built-in tools:
 					//   - auto-accept and headless both run unattended — headless is
@@ -1083,7 +1092,7 @@ export class MCPClient {
 	async callTool(
 		toolName: string,
 		args: Record<string, unknown>,
-	): Promise<string> {
+	): Promise<string | StructuredToolOutput> {
 		// First, try to find which server has this tool
 		const toolMapping = this.getToolMapping();
 		const mapping = toolMapping.get(toolName);
@@ -1136,7 +1145,7 @@ export class MCPClient {
 		client: Client,
 		toolName: string,
 		args: Record<string, unknown>,
-	): Promise<string> {
+	): Promise<string | StructuredToolOutput> {
 		const correlationId = generateCorrelationId();
 		const metrics = startMetrics();
 
@@ -1163,6 +1172,12 @@ export class MCPClient {
 					correlationId,
 				});
 
+				// A server reports a failed call with `isError: true` and the reason
+				// in `content`. The text stays exactly what it was; the flag rides
+				// alongside it so processToolUse can mark the call failed.
+				const output = (text: string): string | StructuredToolOutput =>
+					result.isError === true ? {llmContent: text, isError: true} : text;
+
 				// Convert result content to string
 				if (
 					result.content &&
@@ -1184,7 +1199,7 @@ export class MCPClient {
 							correlationId,
 						});
 
-						return responseText;
+						return output(responseText);
 					}
 					const jsonResponse = JSON.stringify(content);
 
@@ -1196,7 +1211,7 @@ export class MCPClient {
 						correlationId,
 					});
 
-					return jsonResponse;
+					return output(jsonResponse);
 				}
 
 				const finalMetrics = endMetrics(metrics);
@@ -1206,7 +1221,7 @@ export class MCPClient {
 					correlationId,
 				});
 
-				return 'Tool executed successfully (no output)';
+				return output('Tool executed successfully (no output)');
 			} catch (error) {
 				const errorMessage = formatError(error);
 				const errorName = error instanceof Error ? error.name : 'Unknown';
