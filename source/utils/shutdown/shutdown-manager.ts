@@ -149,6 +149,12 @@ export class ShutdownManager {
 		void this.gracefulShutdown(1);
 	}
 
+	removeSignalHandlers(): void {
+		nodeProcess.removeListener('SIGTERM', this.boundSigterm);
+		nodeProcess.removeListener('SIGINT', this.boundSigint);
+		nodeProcess.removeListener('SIGHUP', this.boundSighup);
+	}
+
 	private setupSignalHandlers(): void {
 		nodeProcess.once('SIGTERM', this.boundSigterm);
 		nodeProcess.once('SIGINT', this.boundSigint);
@@ -161,9 +167,7 @@ export class ShutdownManager {
 		this.handlers.clear();
 		this.isShuttingDown = false;
 		this.exitCode = 0;
-		nodeProcess.removeListener('SIGTERM', this.boundSigterm);
-		nodeProcess.removeListener('SIGINT', this.boundSigint);
-		nodeProcess.removeListener('SIGHUP', this.boundSighup);
+		this.removeSignalHandlers();
 		nodeProcess.removeListener(
 			'uncaughtException',
 			this.boundUncaughtException,

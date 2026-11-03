@@ -15,6 +15,7 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {getModelPricing} from '../../source/models/index';
+import {getShutdownManager} from '../../source/utils/shutdown';
 import {parseRunnerArgs, RUNNER_USAGE} from './args';
 import {
 	FIXTURE_PACK_ID,
@@ -30,6 +31,9 @@ import {
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, '..', '..');
 const fixturesDir = path.join(__dirname, 'fixtures');
+
+// The pricing import creates app-level handlers; this runner owns signal cleanup and exit codes.
+getShutdownManager().removeSignalHandlers();
 
 function formatSpread(spread: {median: number; iqr: number}): string {
 	const round = (value: number) =>
@@ -84,8 +88,13 @@ async function main(): Promise<void> {
 		exitCode = 143;
 		controller.abort();
 	};
+	const onSighup = () => {
+		exitCode = 129;
+		controller.abort();
+	};
 	process.once('SIGINT', onSigint);
 	process.once('SIGTERM', onSigterm);
+	process.once('SIGHUP', onSighup);
 
 	try {
 		try {
@@ -150,9 +159,11 @@ async function main(): Promise<void> {
 		console.log(`\nwrote ${path.relative(repoRoot, options.outPath)}`);
 	} catch (error) {
 		if (!controller.signal.aborted) throw error;
+		process.exitCode = exitCode;
 	} finally {
 		process.off('SIGINT', onSigint);
 		process.off('SIGTERM', onSigterm);
+		process.off('SIGHUP', onSighup);
 	}
 }
 

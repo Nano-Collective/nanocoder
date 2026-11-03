@@ -72,6 +72,35 @@ test.serial('resetShutdownManager creates new instance', (t) => {
 	t.not(a, b);
 });
 
+test.serial('removeSignalHandlers preserves exception handlers', (t) => {
+	const signalCounts = {
+		sigint: process.listenerCount('SIGINT'),
+		sigterm: process.listenerCount('SIGTERM'),
+		sighup: process.listenerCount('SIGHUP'),
+	};
+	const exceptionCounts = {
+		uncaught: process.listenerCount('uncaughtException'),
+		rejection: process.listenerCount('unhandledRejection'),
+	};
+	const manager = getShutdownManager();
+
+	t.is(process.listenerCount('SIGINT'), signalCounts.sigint + 1);
+	t.is(process.listenerCount('SIGTERM'), signalCounts.sigterm + 1);
+	t.is(process.listenerCount('SIGHUP'), signalCounts.sighup + 1);
+	manager.removeSignalHandlers();
+	t.is(process.listenerCount('SIGINT'), signalCounts.sigint);
+	t.is(process.listenerCount('SIGTERM'), signalCounts.sigterm);
+	t.is(process.listenerCount('SIGHUP'), signalCounts.sighup);
+	t.is(
+		process.listenerCount('uncaughtException'),
+		exceptionCounts.uncaught + 1,
+	);
+	t.is(
+		process.listenerCount('unhandledRejection'),
+		exceptionCounts.rejection + 1,
+	);
+});
+
 test.serial('handlers run in priority order (ascending)', async (t) => {
 	const order: string[] = [];
 	const manager = getShutdownManager();
