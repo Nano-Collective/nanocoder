@@ -1,117 +1,117 @@
 import test from 'ava';
-import {createPasteExtractor} from './terminal-paste';
+import {createPasteExtractor, emitPaste, registerPasteTarget} from './terminal-paste';
 
-// Tests for the bracketed paste (DECSET 2004) stdin splitter.
-// The payload must never reach the keypress parser — that is the bug
-// this exists to fix: a CR inside a pasted block submitted the prompt.
-
-console.log(`\nterminal-paste.spec.ts`);
+test.serial('pastes go to the innermost accepting target and fall back after unregister', t => {
+	const seen: string[] = [];
+	const outer = registerPasteTarget(payload => {
+		seen.push(`outer:${payload}`);
+		return true;
+	});
+	const inner = registerPasteTarget(payload => {
+		seen.push(`inner:${payload}`);
+		return true;
+	});
+	const disabled = registerPasteTarget(() => false);
+	t.teardown(disabled);
+	t.teardown(inner);
+	t.teardown(outer);
+	t.true(emitPaste('first'));
+	t.deepEqual(seen, ['inner:first']);
+	inner();
+	t.true(emitPaste('second'));
+	t.deepEqual(seen, ['inner:first', 'outer:second']);
+	outer();
+	t.false(emitPaste('unhandled'));
+});
 
 const START = '\x1b[200~';
 const END = '\x1b[201~';
+const key = (text: string) => ({kind: 'key', text});
+const paste = (payload: string) => ({kind: 'paste', payload});
 
+// Paste payloads must never reach the keypress parser: a pasted CR could submit.
 test('passes ordinary typing through untouched', t => {
-	const extract = createPasteExtractor();
-	const {clean, pastes} = extract('hello');
-	t.is(clean, 'hello');
-	t.deepEqual(pastes, []);
+	t.deepEqual(createPasteExtractor()('hello'), [key('hello')]);
 });
 
 test('lifts a complete paste out of a single chunk', t => {
-	const extract = createPasteExtractor();
-	const {clean, pastes} = extract(`${START}pasted text${END}`);
-	t.is(clean, '');
-	t.deepEqual(pastes, ['pasted text']);
+	t.deepEqual(createPasteExtractor()(`${START}pasted text${END}`), [
+		paste('pasted text'),
+	]);
 });
 
-test('keeps carriage returns inside the payload out of the clean stream', t => {
-	const extract = createPasteExtractor();
-	const {clean, pastes} = extract(`${START}line one\rline two\r\nline three${END}`);
-	t.is(clean, '', 'no CR may reach the keypress parser');
-	t.deepEqual(pastes, ['line one\rline two\r\nline three']);
+test('keeps carriage returns inside the payload out of the key stream', t => {
+	const payload = 'line one\rline two\r\nline three';
+	t.deepEqual(createPasteExtractor()(`${START}${payload}${END}`), [paste(payload)]);
 });
 
-test('preserves text typed before and after a paste', t => {
-	const extract = createPasteExtractor();
-	const {clean, pastes} = extract(`before${START}middle${END}after`);
-	t.is(clean, 'beforeafter');
-	t.deepEqual(pastes, ['middle']);
+test('preserves text typed before and after a paste in stream order', t => {
+	t.deepEqual(createPasteExtractor()(`before${START}middle${END}after`), [
+		key('before'),
+		paste('middle'),
+		key('after'),
+	]);
 });
 
-test('handles two pastes in one chunk', t => {
-	const extract = createPasteExtractor();
-	const {clean, pastes} = extract(`${START}one${END}${START}two${END}`);
-	t.is(clean, '');
-	t.deepEqual(pastes, ['one', 'two']);
+test('handles two pastes interleaved with keys in one chunk', t => {
+	t.deepEqual(createPasteExtractor()(`a${START}one${END}b${START}two${END}c`), [
+		key('a'),
+		paste('one'),
+		key('b'),
+		paste('two'),
+		key('c'),
+	]);
+});
+
+test('handles adjacent pastes, including empty payloads', t => {
+	t.deepEqual(createPasteExtractor()(`${START}${END}${START}two${END}`), [
+		paste(''),
+		paste('two'),
+	]);
 });
 
 test('reassembles a payload split across chunks', t => {
 	const extract = createPasteExtractor();
-	const first = extract(`${START}first half `);
-	t.is(first.clean, '');
-	t.deepEqual(first.pastes, []);
-
-	const second = extract(`second half${END}`);
-	t.is(second.clean, '');
-	t.deepEqual(second.pastes, ['first half second half']);
+	t.deepEqual(extract(`before${START}first half `), [key('before')]);
+	t.deepEqual(extract(`second half${END}after`), [
+		paste('first half second half'),
+		key('after'),
+	]);
 });
 
 test('reassembles a start marker split across chunks', t => {
 	const extract = createPasteExtractor();
-	const first = extract('\x1b[2');
-	t.is(first.clean, '', 'the partial marker is held back, not emitted');
-	t.deepEqual(first.pastes, []);
-
-	const second = extract(`00~payload${END}`);
-	t.is(second.clean, '');
-	t.deepEqual(second.pastes, ['payload']);
+	t.deepEqual(extract('\x1b[2'), []);
+	t.deepEqual(extract(`00~payload${END}`), [paste('payload')]);
 });
 
 test('reassembles an end marker split across chunks', t => {
 	const extract = createPasteExtractor();
-	extract(`${START}payload`);
-	const first = extract('\x1b');
-	t.deepEqual(first.pastes, [], 'a lone ESC inside a payload may be the end marker');
-
-	const second = extract('[201~');
-	t.deepEqual(second.pastes, ['payload']);
-	t.is(second.clean, '');
+	t.deepEqual(extract(`${START}payload`), []);
+	t.deepEqual(extract('\x1b'), []);
+	t.deepEqual(extract('[201~'), [paste('payload')]);
 });
 
 test('does not swallow a lone Escape keypress', t => {
-	const extract = createPasteExtractor();
-	const {clean, pastes} = extract('\x1b');
-	t.is(clean, '\x1b', 'Escape must reach the app on the same chunk');
-	t.deepEqual(pastes, []);
+	t.deepEqual(createPasteExtractor()('\x1b'), [key('\x1b')]);
 });
 
 test('does not swallow an arrow key', t => {
-	const extract = createPasteExtractor();
-	const {clean, pastes} = extract('\x1b[A');
-	t.is(clean, '\x1b[A');
-	t.deepEqual(pastes, []);
+	t.deepEqual(createPasteExtractor()('\x1b[A'), [key('\x1b[A')]);
 });
 
 test('treats an escape sequence inside a payload as literal text', t => {
-	const extract = createPasteExtractor();
 	const mouseLike = '\x1b[<64;10;5M';
-	const {clean, pastes} = extract(`${START}${mouseLike}${END}`);
-	t.is(clean, '');
-	t.deepEqual(pastes, [mouseLike], 'payload is opaque, never re-parsed');
+	t.deepEqual(createPasteExtractor()(`${START}${mouseLike}${END}`), [paste(mouseLike)]);
 });
 
 test('a payload containing the start marker text does not nest', t => {
-	const extract = createPasteExtractor();
-	const {clean, pastes} = extract(`${START}a${START}b${END}`);
-	t.is(clean, '');
-	t.deepEqual(pastes, [`a${START}b`]);
+	t.deepEqual(createPasteExtractor()(`${START}a${START}b${END}`), [paste(`a${START}b`)]);
 });
 
 test('keeps state independent per extractor', t => {
 	const a = createPasteExtractor();
 	const b = createPasteExtractor();
-	a.call(null, `${START}open`);
-	const result = b.call(null, 'typed');
-	t.is(result.clean, 'typed');
-	t.deepEqual(result.pastes, []);
+	a(`${START}open`);
+	t.deepEqual(b('typed'), [key('typed')]);
 });
