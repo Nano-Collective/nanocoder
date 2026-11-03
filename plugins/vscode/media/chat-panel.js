@@ -3764,10 +3764,6 @@
 		return diff ? diff.path : null;
 	}
 
-	function hasDiffContent(update) {
-		return diffPath(update) !== null;
-	}
-
 	// A path the extension host can actually open: `vscode.Uri.file()` resolves
 	// a relative one against the filesystem root, so a chip built from it would
 	// point at a file that does not exist and reject inside showTextDocument.
@@ -3881,7 +3877,7 @@
 		// that window - the whole approval wait - raised "Change <id> not found".
 		row.onclick = () => {
 			if (card.dataset.hasDiff !== 'true') return;
-			vscode.postMessage({ type: 'showDiff', toolCallId });
+			vscode.postMessage({ type: 'showDiff', toolCallId, filePath: card.dataset.diffPath });
 		};
 
 		const left = document.createElement('div');
@@ -3926,10 +3922,11 @@
 	}
 
 	// Reveal the diff affordance once the extension host has a change
-	// registered for this card - see hasDiffContent.
-	function setEditCardDiffAvailable(el) {
+	// registered for this card, and remember which file it shows.
+	function setEditCardDiffAvailable(el, filePath) {
 		if (el.dataset.hasDiff === 'true') return;
 		el.dataset.hasDiff = 'true';
+		el.dataset.diffPath = filePath;
 
 		const row = el.querySelector('.tool-card-row');
 		if (row) row.classList.add('cursor-pointer', 'hover:bg-vscode-list-hover');
@@ -3954,7 +3951,8 @@
 		const actionEl = el.querySelector('.tool-card-action');
 		if (actionEl) actionEl.textContent = state.action;
 
-		if (hasDiffContent(update)) setEditCardDiffAvailable(el);
+		const filePath = diffPath(update);
+		if (filePath) setEditCardDiffAvailable(el, filePath);
 
 		if (isSettled(state.status)) {
 			const actions = el.querySelector('.tool-actions');

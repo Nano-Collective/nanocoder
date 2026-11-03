@@ -35,6 +35,16 @@ class DiffContentProvider implements vscode.TextDocumentContentProvider {
 }
 
 /**
+ * Storage key for a pending change. A single tool call can report several
+ * diff blocks, so the key must include the file path or they overwrite each
+ * other. Both the producer (chat webview provider) and the consumer (the
+ * "Open Diff" click) must build the key through this function.
+ */
+export function diffChangeId(toolCallId: string, filePath: string): string {
+	return `${toolCallId}_${path.normalize(filePath)}`;
+}
+
+/**
  * Manages file diffs and change previews
  */
 export class DiffManager {
@@ -103,9 +113,11 @@ export class DiffManager {
 	/**
 	 * Show diff preview for a pending change
 	 * Uses virtual documents to prevent linters from running
-	 * Preserves terminal focus by restoring it after showing the diff
+	 * When `preserveTerminalFocus` is true (default), restores terminal focus
+	 * after showing the diff. Pass false when the diff was triggered from the
+	 * chat webview so the user stays in their current editor context.
 	 */
-	async showDiff(id: string): Promise<void> {
+	async showDiff(id: string, preserveTerminalFocus = true): Promise<void> {
 		const change = this.pendingChanges.get(id);
 		if (!change) {
 			vscode.window.showErrorMessage(`Change ${id} not found`);
@@ -133,10 +145,10 @@ export class DiffManager {
 			await vscode.window.showTextDocument(doc, {
 				preview: true,
 				preserveFocus: true,
-				});
+			});
 
 			// Restore terminal focus
-			if (activeTerminal) {
+			if (preserveTerminalFocus && activeTerminal) {
 				await vscode.commands.executeCommand('workbench.action.terminal.focus');
 			}
 
@@ -165,7 +177,7 @@ export class DiffManager {
 		);
 
 		// Restore terminal focus after diff opens
-		if (activeTerminal) {
+		if (preserveTerminalFocus && activeTerminal) {
 			await vscode.commands.executeCommand('workbench.action.terminal.focus');
 		}
 	}
@@ -295,6 +307,25 @@ export class DiffManager {
 			`Rejected changes to ${path.basename(change.filePath)}`,
 		);
 		return true;
+	}
+
+	/**
+	 * Drop every pending change and close its diff editors. Called when the
+	 * session those changes belonged to ends (new chat, resume, reconnect), so
+	 * stale virtual documents and records do not outlive it.
+	 */
+	async clearPendingChanges(): Promise<void> {
+		const ids = new Set([
+			...this.pendingChanges.keys(),
+			...this.openEditors.keys(),
+		]);
+		for (const id of ids) {
+			await this.closeEditors(id);
+		}
+		if (this.pendingChanges.size > 0) {
+			this.pendingChanges.clear();
+			this.notifyChanges();
+		}
 	}
 
 	/**
