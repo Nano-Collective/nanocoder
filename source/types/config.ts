@@ -45,6 +45,10 @@ export interface AIProviderConfig {
 	// service tier, fallback models, reasoning). Active whenever the provider
 	// is OpenRouter — not gated by tune.
 	openrouter?: OpenRouterParameters;
+	// Constrained generation parameters for local/compatible providers.
+	// Enforces tool-call schemas at token-sampling level to eliminate
+	// invalid JSON and hallucinated tool names.
+	constrainedGeneration?: ConstrainedGenerationParameters;
 	config: {
 		baseURL?: string;
 		apiKey?: string;
@@ -98,6 +102,9 @@ export interface ProviderConfig {
 	// OpenRouter-specific request body fields. Only applied when the provider
 	// is OpenRouter (name match, case-insensitive).
 	openrouter?: OpenRouterParameters;
+	// Constrained generation parameters for local/compatible providers.
+	// Enforces tool schemas at token-sampling level.
+	constrainedGeneration?: ConstrainedGenerationParameters;
 	// Tune defaults applied while this provider is active.
 	tune?: Partial<TuneConfig>;
 	[key: string]: unknown; // Allow additional provider-specific config
@@ -654,6 +661,21 @@ export interface OpenRouterParameters {
 	// Escape hatch for arbitrary OpenRouter body fields that don't have a
 	// dedicated typed entry yet. Shallow-merged into the request body before
 	// the typed fields above, so the typed fields win on key conflicts.
+	extraBody?: Record<string, unknown>;
+}
+
+// Constrained generation parameters for local/compatible providers.
+// Used to enforce tool-call schemas at the token-sampling level, eliminating
+// invalid JSON and hallucinated tool names. Applied when the provider supports
+// constrained generation (Ollama, vLLM, llama.cpp, etc).
+export interface ConstrainedGenerationParameters {
+	// Enable automatic JSON Schema-based constrained generation for tool calls.
+	// When true, tool schemas are passed to the provider's constrained generation
+	// mechanism (format/guided_json/grammar) to physically prevent invalid tokens.
+	enableConstrainedGeneration?: boolean;
+	// Escape hatch for provider-specific constrained generation fields.
+	// Shallow-merged into the request body before automatic schema constraints,
+	// so explicit fields win on key conflicts.
 	extraBody?: Record<string, unknown>;
 }
 

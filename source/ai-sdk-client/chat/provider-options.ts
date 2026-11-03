@@ -1,5 +1,10 @@
+import type {AISDKCoreTool} from '@/types/core.js';
 import type {AIProviderConfig, ModelParameters} from '@/types/index';
+import {isLlamaCppProvider} from '../providers/llama-cpp.js';
+import {isOllamaProvider} from '../providers/ollama.js';
 import {isOpenRouterProvider} from '../providers/openrouter.js';
+import {isVLLMProvider} from '../providers/vllm.js';
+import {compileToolsToJsonSchema} from '../tools/tool-schema-compiler.js';
 
 /**
  * Provider-scoped extras forwarded to streamText/generateText via
@@ -33,7 +38,7 @@ export function isPromptCachingEnabled(
 /**
  * Build the `providerOptions` value for a streamText/generateText call.
  *
- * Currently handles two providers:
+ * Currently handles these providers:
  *   - chatgpt-codex: requires `instructions`, `store: false`, and reasoning
  *     controls under the `openai` provider key (Responses API).
  *   - openrouter: forwards `provider`, `reasoning`, `plugins`, `models`,
@@ -41,6 +46,9 @@ export function isPromptCachingEnabled(
  *     the provider's configured name (see openAICompatibleOptionsKey). The top-level `reasoningEffort` (from
  *     ModelParameters / `/tune`) is mapped to `reasoning.effort` when the
  *     user has not provided a more specific `openrouter.reasoning` block.
+ *   - ollama/vllm/llama.cpp: forwards constrained generation parameters
+ *     (format/guided_json) when tools are active and constrained generation
+ *     is enabled in the provider config.
  *
  * OpenRouter options come from `providerConfig.openrouter` (always-on, set
  * in agents.config.json) — not from tune, so they aren't dropped when the
@@ -53,6 +61,7 @@ export function buildProviderOptions(
 	providerConfig: AIProviderConfig,
 	systemContent: string,
 	modelParameters: ModelParameters | undefined,
+	tools?: Record<string, AISDKCoreTool>,
 ): ProviderOptions | undefined {
 	if (providerConfig.sdkProvider === 'chatgpt-codex') {
 		return {
@@ -100,6 +109,71 @@ export function buildProviderOptions(
 			return undefined;
 		}
 		return {[openAICompatibleOptionsKey(providerConfig.name)]: payload};
+	}
+
+	// Constrained generation for local/compatible providers
+	// Compile tool schemas into format-specific parameters that enforce
+	// valid tool calls at the token-sampling level.
+	const constrainedGen = providerConfig.constrainedGeneration;
+	if (
+		constrainedGen?.enableConstrainedGeneration &&
+		tools &&
+		Object.keys(tools).length > 0
+	) {
+		const toolSchema = compileToolsToJsonSchema(tools);
+		if (!toolSchema) {
+			return undefined;
+		}
+
+		// Ollama uses 'format' parameter with 'json' value + schema
+		if (isOllamaProvider(providerConfig.name)) {
+			const payload: Record<string, unknown> = {
+				...(constrainedGen.extraBody ?? {}),
+				format: 'json',
+				// Note: Ollama's format parameter doesn't directly accept schema,
+				// but it enforces JSON structure. For full schema validation,
+				// users should use the extraBody escape hatch to pass custom params.
+			};
+			return {[openAICompatibleOptionsKey(providerConfig.name)]: payload};
+		}
+
+		// vLLM uses 'guided_json' parameter with the JSON Schema
+		if (isVLLMProvider(providerConfig.name)) {
+			const payload: Record<string, unknown> = {
+				...(constrainedGen.extraBody ?? {}),
+				guided_json: toolSchema,
+			};
+			return {[openAICompatibleOptionsKey(providerConfig.name)]: payload};
+		}
+
+		// llama.cpp uses 'json_schema' parameter (similar to OpenAI's response_format)
+		if (isLlamaCppProvider(providerConfig.name)) {
+			const payload: Record<string, unknown> = {
+				...(constrainedGen.extraBody ?? {}),
+				json_schema: toolSchema,
+			};
+			return {[openAICompatibleOptionsKey(providerConfig.name)]: payload};
+		}
+
+		// Generic OpenAI-compatible: try 'response_format' with json_schema
+		// This works for many OpenAI-compatible endpoints
+		const payload: Record<string, unknown> = {
+			...(constrainedGen.extraBody ?? {}),
+		};
+		// Only add if extraBody hasn't already specified it
+		if (!payload['response_format'] && !payload['json_schema']) {
+			payload['response_format'] = {
+				type: 'json_schema',
+				json_schema: {
+					name: 'tool_call',
+					strict: true,
+					schema: toolSchema,
+				},
+			};
+		}
+		if (Object.keys(payload).length > 0) {
+			return {[openAICompatibleOptionsKey(providerConfig.name)]: payload};
+		}
 	}
 
 	return undefined;
