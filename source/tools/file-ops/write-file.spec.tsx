@@ -616,7 +616,8 @@ test('write_file validator: rejects Windows system directories', async t => {
 
 			t.false(result.valid);
 			if (!result.valid) {
-				t.true(result.error.includes('system directory'));
+				// Windows absolute paths are rejected by shared path validation.
+				t.true(result.error.includes('Invalid file path'));
 			}
 		}
 	} else {
@@ -1138,5 +1139,4 @@ test('write_file formatter: does not render description when omitted', async t =
 	t.notRegex(output, /Description:/);
 	t.regex(output, /Path:\s*config\.json/);
 });
-
 
