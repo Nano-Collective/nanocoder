@@ -51,6 +51,10 @@
 
 	let showTokenUsage = false;
 
+	// Highlight fenced code in every marked.parse() below: streaming text,
+	// finished text and thought bubbles.
+	globalThis.NanocoderMarkdownHighlight.configureMarkdown(globalThis.marked, globalThis.hljs);
+
 	// ── Slash command autocomplete state ────────────────────
 	const slashDropdown = document.getElementById('slash-dropdown');
 	const { SLASH_COMMANDS, findSlashCommandToken, applySlashCommand } = globalThis.NanocoderSlashCommandUtils;
@@ -699,9 +703,11 @@
 					statusEl.dataset.status = 'cancelled';
 				}
 			});
+			// The turn is over (completed, cancelled or failed): no cursor may linger.
+			document.querySelectorAll('.streaming-cursor').forEach(el => el.classList.remove('streaming-cursor'));
 			stopVisualLoader();
 			finishCurrentWorkSummary(outcome);
-			
+
 			const hiddenFooters = document.querySelectorAll('.agent-footer-processing');
 			hiddenFooters.forEach(f => {
 				f.style.display = '';
@@ -2092,6 +2098,8 @@
 
 			currentTurnEl = msgEl;
 			currentTextEl = textContainer;
+			// Blinking cursor (CSS) while this block streams; see endCurrentTextBlock().
+			textContainer.classList.add('streaming-cursor');
 			scrollToBottomIfFollowing();
 		} else {
 			// Append to existing turn
@@ -2616,6 +2624,7 @@
 	function endCurrentTextBlock() {
 		flushPendingRender();
 		closeAgentSegment();
+		if (currentTextEl) currentTextEl.classList.remove('streaming-cursor');
 		currentTurnEl = null;
 		currentTextEl = null;
 		syncLastAgentRawText();
