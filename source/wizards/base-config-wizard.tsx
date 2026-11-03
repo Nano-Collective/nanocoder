@@ -7,7 +7,7 @@ import {
 	writeFileSync,
 } from 'node:fs';
 import {dirname, join} from 'node:path';
-import {Box, Text, useFocus, useInput} from 'ink';
+import {Box, Text, useApp, useFocus, useInput} from 'ink';
 import Spinner from 'ink-spinner';
 import React, {useCallback, useEffect, useState} from 'react';
 import {StyledSelectInput} from '@/components/ui/styled-select-input';
@@ -205,7 +205,7 @@ export function BaseConfigWizard<T>({
 		}
 	};
 
-	const openInEditor = () => {
+	const openInEditor = async () => {
 		try {
 			// Skip writing when config is corrupted — open the existing
 
@@ -215,15 +215,17 @@ export function BaseConfigWizard<T>({
 
 			const editor = detectEditor();
 
-			process.stdout.write('\x1B[?25h');
-			process.stdin.setRawMode?.(false);
+			// suspendTerminal hands the terminal to the child end to end: Ink
+			// stops reading input and writing frames, restores cooked mode,
+			// shows the cursor, exits bracketed paste, and repaints on resume —
+			// replacing the hand-rolled raw-mode/cursor toggles, which missed
+			// the app's own paste/mouse modes.
+			let result: ReturnType<typeof spawnSync> | undefined;
+			await suspendTerminal(() => {
+				result = spawnSync(editor, [configPath], {stdio: 'inherit'});
+			});
 
-			const result = spawnSync(editor, [configPath], {stdio: 'inherit'});
-
-			process.stdin.setRawMode?.(true);
-			process.stdout.write('\x1B[?25l');
-
-			if (result.status === 0) {
+			if (result?.status === 0) {
 				if (existsSync(configPath)) {
 					try {
 						const editedContent = readFileSync(configPath, 'utf-8');
@@ -247,8 +249,6 @@ export function BaseConfigWizard<T>({
 				setStep('summary');
 			}
 		} catch (err) {
-			process.stdin.setRawMode?.(true);
-			process.stdout.write('\x1B[?25l');
 			setError(
 				err instanceof Error
 					? `Failed to open editor: ${err.message}`
@@ -258,6 +258,7 @@ export function BaseConfigWizard<T>({
 		}
 	};
 
+	const {suspendTerminal} = useApp();
 	useInput((input, key) => {
 		if (step === 'complete' && key.return) {
 			onComplete(configPath);
@@ -275,7 +276,7 @@ export function BaseConfigWizard<T>({
 			configPath &&
 			(step === 'configure' || step === 'summary')
 		) {
-			openInEditor();
+			void openInEditor();
 		}
 	});
 
