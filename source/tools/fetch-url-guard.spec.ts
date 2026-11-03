@@ -56,6 +56,62 @@ test('assertPublicHttpUrl rejects loopback, metadata, RFC1918, IPv6 local', t =>
 	}
 });
 
+// --- IPv6 forms that embed an IPv4 address, and reserved IPv4 ranges (#1942) ---
+
+test('assertPublicHttpUrl rejects IPv6 forms that embed an internal IPv4 address', t => {
+	const blocked = [
+		'http://[::127.0.0.1]/', // ::/96 IPv4-compatible
+		'http://[::a00:1]/', // ::/96, 10.0.0.1
+		'http://[::ffff:7f00:1]/', // ::ffff:0:0/96 mapped, hex spelling
+		'http://[::ffff:0:7f00:1]/', // ::ffff:0:0:0/96 translated
+		'http://[64:ff9b::7f00:1]/', // 64:ff9b::/96 NAT64
+		'http://[64:ff9b::169.254.169.254]/', // NAT64, cloud metadata
+		'http://[2002:7f00:1::]/', // 2002::/16 6to4
+		'http://[2002:c0a8:101::1]/', // 6to4, 192.168.1.1
+	];
+	for (const url of blocked) {
+		t.throws(
+			() => assertPublicHttpUrl(url),
+			{message: /internal\/private network/},
+			url,
+		);
+	}
+});
+
+test('assertPublicHttpUrl allows IPv6 forms that embed a public IPv4 address', t => {
+	const allowed = [
+		'http://[64:ff9b::8.8.8.8]/',
+		'http://[2002:808:808::1]/',
+		'http://[::ffff:8.8.8.8]/',
+		'http://[2606:2800:220:1::1]/',
+	];
+	for (const url of allowed) {
+		t.notThrows(() => assertPublicHttpUrl(url), url);
+	}
+});
+
+test('assertPublicHttpUrl rejects reserved IPv4 ranges', t => {
+	const blocked = [
+		'http://192.0.0.1', // 192.0.0.0/24 IETF protocol assignments
+		'http://198.18.0.1', // 198.18.0.0/15 benchmarking
+		'http://198.19.255.254',
+		'http://224.0.0.1', // 224.0.0.0/4 multicast
+		'http://239.255.255.250',
+		'http://240.0.0.1', // 240.0.0.0/4 reserved
+		'http://255.255.255.255', // broadcast
+	];
+	for (const url of blocked) {
+		t.throws(
+			() => assertPublicHttpUrl(url),
+			{message: /internal\/private network/},
+			url,
+		);
+	}
+	for (const url of ['http://192.0.1.1', 'http://198.20.0.1', 'http://223.255.255.254']) {
+		t.notThrows(() => assertPublicHttpUrl(url), url);
+	}
+});
+
 // --- Names that resolve to internal addresses (#1662) ---
 // A fake resolver stands in for DNS, so none of this depends on the network.
 
@@ -103,6 +159,11 @@ test.serial('assertResolvedPublicHttpUrl rejects names that resolve to internal 
 		'cgnat.example.test': ['100.64.0.1'],
 		'linklocal.example.test': ['fe80::1'],
 		'ula.example.test': ['fd12:3456:789a::1'],
+		// Resolver output is not normalised the way URL hostnames are (#1942).
+		'compat.example.test': ['::127.0.0.1'],
+		'nat64.example.test': ['64:ff9b::7f00:1'],
+		'sixtofour.example.test': ['2002:a9fe:a9fe::1'],
+		'zoned.example.test': ['::ffff:0:7f00:1%1'],
 	};
 	await withResolver(table, async () => {
 		for (const host of Object.keys(table)) {
