@@ -497,6 +497,8 @@ export function getOrderedServers(
 export async function discoverLanguageServers(
 	projectRoot?: string,
 ): Promise<LSPServerConfig[]> {
+	// A new discovery pass must see tools installed since the previous pass.
+	cachedPathSnapshot = undefined;
 	const discovered: LSPServerConfig[] = [];
 	const coveredLanguages = new Set<string>();
 	const commandLookups = new Map<string, Promise<string | null>>();

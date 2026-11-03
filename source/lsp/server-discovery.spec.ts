@@ -68,6 +68,57 @@ test.serial('findCommand scans PATH without spawning where or which', async t =>
 	}
 });
 
+test.serial('discovery refreshes its PATH snapshot on each run', async t => {
+	const originalPath = process.env.PATH;
+	const originalPathExt = process.env.PATHEXT;
+	const originalCwd = process.cwd();
+	const tempRoot = mkdtempSync(join(tmpdir(), 'nanocoder-lsp-refresh-'));
+	const binDirectory = join(tempRoot, 'bin');
+	mkdirSync(binDirectory);
+	const extension = process.platform === 'win32' ? '.cmd' : '';
+	const commandPath = join(
+		binDirectory,
+		`typescript-language-server${extension}`,
+	);
+
+	try {
+		process.env.PATH = binDirectory;
+		process.chdir(tempRoot);
+		if (process.platform === 'win32') {
+			process.env.PATHEXT = '.CMD';
+		} else {
+			process.env.PATHEXT = originalPathExt;
+		}
+
+		t.false(
+			(await discoverLanguageServers(tempRoot)).some(
+				server => server.name === 'typescript-language-server',
+			),
+			'the server is absent on the first discovery run',
+		);
+
+		if (process.platform === 'win32') {
+			writeFileSync(commandPath, '@echo off\r\nexit /b 0\r\n', 'utf-8');
+		} else {
+			writeFileSync(commandPath, '#!/bin/sh\nexit 0\n', 'utf-8');
+			chmodSync(commandPath, 0o755);
+		}
+
+		const discovered = await discoverLanguageServers(tempRoot);
+		t.true(
+			discovered.some(server => server.name === 'typescript-language-server'),
+			'the next discovery run sees a server installed without PATH changing',
+		);
+	} finally {
+		process.chdir(originalCwd);
+		if (originalPath === undefined) delete process.env.PATH;
+		else process.env.PATH = originalPath;
+		if (originalPathExt === undefined) delete process.env.PATHEXT;
+		else process.env.PATHEXT = originalPathExt;
+		rmSync(tempRoot, {recursive: true, force: true});
+	}
+});
+
 test.serial('discovery verifies each executable once across server definitions', async t => {
 	const originalPath = process.env.PATH;
 	const originalPathExt = process.env.PATHEXT;
