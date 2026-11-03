@@ -23,6 +23,12 @@ test.before(async () => {
 	);
 
 	await writeFile(
+	join(testDir, 'trailing-newline.txt'),
+	'Line 1\nLine 2\nLine 3\n',
+	'utf-8',
+);
+
+	await writeFile(
 		join(testDir, 'app.tsx'),
 		'import React from "react";\n\nexport function App() {\n  return <div>Hello</div>;\n}',
 		'utf-8',
@@ -43,6 +49,15 @@ test.after.always(async () => {
 	} catch {
 		// Ignore cleanup errors
 	}
+});
+
+test('omits line range from header when no range is specified', async t => {
+	const filePath = join(testDir, 'test.txt');
+	const result = await loadFileContent(filePath);
+
+	t.true(result.success);
+	t.true(result.content!.startsWith(`Path: ${filePath}\n\n`));
+	t.false(result.content!.startsWith(`Path: ${filePath} (lines `));
 });
 
 // Tests for loadFileContent()
@@ -73,6 +88,11 @@ test('loads single line', async t => {
 	});
 
 	t.true(result.success);
+	t.true(
+	result.content!.startsWith(
+		`Path: ${join(testDir, 'test.txt')} (lines 3-3)`,
+	),
+   );
 	t.is(result.metadata.lineCount, 1);
 	t.deepEqual(result.metadata.lineRange, {start: 3, end: undefined});
 });
@@ -84,6 +104,11 @@ test('handles line range beyond file length', async t => {
 	});
 
 	t.true(result.success);
+	t.true(
+	result.content!.startsWith(
+		`Path: ${join(testDir, 'test.txt')} (lines 3-5)`,
+	),
+);
 	t.is(result.metadata.lineCount, 3); // Lines 3, 4, 5 (only 3 lines available)
 });
 
@@ -94,7 +119,25 @@ test('handles line start beyond file length', async t => {
 	});
 
 	t.true(result.success);
+	t.true(
+	result.content!.startsWith(
+		`Path: ${join(testDir, 'test.txt')}\n\n`,
+	),
+);
 	t.is(result.metadata.lineCount, 0); // No lines available
+});
+
+test('clamps line range to last real line when file ends with newline', async t => {
+	const filePath = join(testDir, 'trailing-newline.txt');
+	const result = await loadFileContent(filePath, {
+		start: 1,
+		end: 100,
+	});
+
+	t.true(result.success);
+	t.is(result.metadata.lineCount, 3);
+	t.deepEqual(result.metadata.lineRange, {start: 1, end: 3});
+	t.true(result.content!.startsWith(`Path: ${filePath} (lines 1-3)`));
 });
 
 test('handles non-existent file', async t => {
@@ -116,7 +159,7 @@ test('formats content with path header', async t => {
 	t.true(result.success);
 	t.truthy(result.content);
 	// Should have path header and content without line numbers
-	t.true(result.content!.startsWith(`Path: ${testFilePath}`));
+	t.true(result.content!.startsWith(`Path: ${testFilePath} (lines 2-3)`));
 	t.true(result.content!.includes('Line 2'));
 	t.true(result.content!.includes('Line 3'));
 });
