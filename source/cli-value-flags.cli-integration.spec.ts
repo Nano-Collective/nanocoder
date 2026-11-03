@@ -152,12 +152,24 @@ test('fused values preserve additional equals signs for existing validation', t 
 			result.stderr,
 		);
 	}
-	// Port parsing intentionally continues to accept a numeric prefix.
+	// Port parsing is strict: the numeric prefix is not silently accepted.
 	const result = runCli(['run', 'hello', '--vscode-port=3000=extra', 'world']);
-	t.is(result.status, 0, result.stderr);
-	const props = JSON.parse(result.stdout);
-	t.is(props.vscodePort, 3000);
-	t.is(props.nonInteractivePrompt, 'hello world');
+	t.is(result.status, 1);
+	t.true(
+		result.stderr.includes('Invalid --vscode-port value: "3000=extra"'),
+		result.stderr,
+	);
+});
+
+test('--vscode-port rejects non-numeric and out-of-range values', t => {
+	for (const value of ['abc', '99999', '8080abc', '0', '-1']) {
+		const result = runCli(['run', 'hello', `--vscode-port=${value}`]);
+		t.is(result.status, 1, value);
+		t.true(
+			result.stderr.includes(`Invalid --vscode-port value: "${value}"`),
+			result.stderr,
+		);
+	}
 });
 
 test('all four fused flags are removed without consuming prompt words', t => {

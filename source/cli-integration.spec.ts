@@ -138,6 +138,16 @@ test('CLI integration: review PR command retains its interactive guard', t => {
 	t.true(result.stderr.includes('`nanocoder review` requires an interactive terminal'));
 });
 
+test('CLI integration: review rejects unknown options', t => {
+	const result = spawnSync(
+		process.execPath,
+		[cliPath, 'review', '--bogus', 'main'],
+		{encoding: 'utf8'},
+	);
+	t.is(result.status, 1);
+	t.true(result.stderr.includes('Unknown option "--bogus"'), result.stderr);
+});
+
 test('CLI integration: init help exits successfully with preset guidance', t => {
 	const result = spawnSync(process.execPath, [cliPath, 'init', '--help'], {
 		encoding: 'utf8',
@@ -186,6 +196,23 @@ test.serial('CLI integration: init invalid preset exits with an error', t => {
 				'Unknown preset "constructor". Supported presets: react, nextjs, rust.',
 			),
 		);
+	} finally {
+		rmSync(projectPath, {recursive: true, force: true});
+	}
+});
+
+test.serial('CLI integration: init rejects unknown options', t => {
+	const projectPath = mkdtempSync(join(tmpdir(), 'nanocoder-cli-init-'));
+	try {
+		const result = spawnSync(
+			process.execPath,
+			[cliPath, 'init', '--bogus', '--preset', 'rust'],
+			{cwd: projectPath, encoding: 'utf8'},
+		);
+
+		t.is(result.status, 1);
+		t.true(result.stderr.includes('Unknown option "--bogus"'), result.stderr);
+		t.false(result.stdout.includes('initialized successfully'));
 	} finally {
 		rmSync(projectPath, {recursive: true, force: true});
 	}

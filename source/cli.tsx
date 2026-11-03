@@ -176,10 +176,19 @@ Examples:
 		process.exit(0);
 	}
 
-	const [{parseInitArguments}, initializer] = await Promise.all([
-		import('@/init/init-args'),
-		import('@/init/initializer'),
-	]);
+	const [{validateInitArgs}, {parseInitArguments}, initializer] =
+		await Promise.all([
+			import('./cli-args.js'),
+			import('@/init/init-args'),
+			import('@/init/initializer'),
+		]);
+	// This fast path runs before the shared top-level scan in this file, so
+	// `nanocoder init --bogus` must be rejected here instead of being ignored.
+	const initArgsError = validateInitArgs(args);
+	if (initArgsError) {
+		console.error(initArgsError);
+		process.exit(1);
+	}
 	try {
 		const options = parseInitArguments(args.slice(1));
 		const result = initializer.initializeProject({
@@ -386,10 +395,16 @@ async function main(): Promise<void> {
 				? args[portArgIndex].slice('--vscode-port='.length)
 				: args[portArgIndex + 1];
 	if (portValue) {
-		const port = parseInt(portValue, 10);
-		if (!isNaN(port) && port > 0 && port < 65536) {
-			vscodePort = port;
+		// Strict integer: a numeric prefix like `8080abc` or an out-of-range
+		// value must be reported, not silently rounded down or ignored.
+		const port = /^\d+$/.test(portValue) ? Number(portValue) : Number.NaN;
+		if (!Number.isInteger(port) || port < 1 || port > 65535) {
+			console.error(
+				`Invalid --vscode-port value: "${portValue}". Use an integer between 1 and 65535.`,
+			);
+			process.exit(1);
 		}
+		vscodePort = port;
 	}
 
 	// Extract --provider if specified — validate against allowlist pattern

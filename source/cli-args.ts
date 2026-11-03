@@ -32,6 +32,16 @@ const FLAGS_WITHOUT_VALUES = new Set([
 	'-h',
 ]);
 
+/** Options that belong to `nanocoder init` rather than the global set. */
+const INIT_FLAGS_WITH_VALUES = ['--preset'] as const;
+const INIT_FLAGS_WITHOUT_VALUES = [
+	'--force',
+	'-f',
+	'--lean',
+	'--help',
+	'-h',
+] as const;
+
 function editDistance(left: string, right: string): number {
 	const row = Array.from({length: right.length + 1}, (_, index) => index);
 	for (let i = 1; i <= left.length; i++) {
@@ -85,9 +95,11 @@ function findSuggestion(
 	return closest;
 }
 
-function unknownOptionError(option: string): string {
+function unknownOptionError(
+	option: string,
+	candidates: readonly string[],
+): string {
 	const optionName = option.split('=', 1)[0];
-	const candidates = [...FLAGS_WITH_VALUES, ...FLAGS_WITHOUT_VALUES];
 	const match = findSuggestion(optionName, candidates);
 	return match
 		? `Unknown option "${option}". Did you mean "${match}"?`
@@ -126,28 +138,55 @@ interface ScannedArgs {
 	error?: string;
 }
 
+/** Extra options a subcommand adds on top of the global set. */
+interface SubcommandFlags {
+	withValues?: readonly string[];
+	withoutValues?: readonly string[];
+}
+
+/**
+ * Whether `value` can be the value of the preceding option. A negative number
+ * counts, so `--context-max -5` reaches value validation and reports an
+ * invalid value instead of being read as an unknown `-5` flag.
+ */
+function isValueToken(value: string | undefined): boolean {
+	if (!value || value === 'run') return false;
+	return !value.startsWith('-') || /^-\d/.test(value);
+}
+
 /** Walk `args[start..end)`, skipping known options and their values. */
-function scanArgs(args: string[], start: number, end: number): ScannedArgs {
+function scanArgs(
+	args: string[],
+	start: number,
+	end: number,
+	subcommand: SubcommandFlags = {},
+): ScannedArgs {
+	const withValues = [...FLAGS_WITH_VALUES, ...(subcommand.withValues ?? [])];
+	const withoutValues = [
+		...FLAGS_WITHOUT_VALUES,
+		...(subcommand.withoutValues ?? []),
+	];
 	const positionals: number[] = [];
 	for (let i = start; i < end; i++) {
 		const arg = args[i];
-		if (FLAGS_WITH_VALUES.has(arg)) {
-			const value = args[i + 1];
-			if (value && !value.startsWith('-') && value !== 'run') i++;
+		if (withValues.includes(arg)) {
+			if (isValueToken(args[i + 1])) i++;
 			continue;
 		}
-		if ([...FLAGS_WITH_VALUES].some(flag => arg.startsWith(`${flag}=`))) {
+		if (withValues.some(flag => arg.startsWith(`${flag}=`))) {
 			continue;
 		}
-		if (FLAGS_WITHOUT_VALUES.has(arg)) {
-			if (arg === '--resume' || arg === '-r') {
-				const value = args[i + 1];
-				if (value && !value.startsWith('-') && value !== 'run') i++;
+		if (withoutValues.includes(arg)) {
+			if ((arg === '--resume' || arg === '-r') && isValueToken(args[i + 1])) {
+				i++;
 			}
 			continue;
 		}
 		if (arg.startsWith('-')) {
-			return {positionals, error: unknownOptionError(arg)};
+			return {
+				positionals,
+				error: unknownOptionError(arg, withValues.concat(withoutValues)),
+			};
 		}
 		positionals.push(i);
 	}
@@ -187,12 +226,31 @@ export function parseWorktreeArgs(
 }
 
 /**
+ * Reject misspelled options for `nanocoder init`. `init` has its own fast path
+ * in `cli.tsx` that runs before the global scan, so it calls this directly;
+ * sharing the scanner keeps both entry points reporting the same errors.
+ */
+export function validateInitArgs(args: string[]): string | undefined {
+	const {error} = scanArgs(args, 1, args.length, {
+		withValues: INIT_FLAGS_WITH_VALUES,
+		withoutValues: INIT_FLAGS_WITHOUT_VALUES,
+	});
+	return error;
+}
+
+/**
  * Reject misspelled top-level options and commands before the app starts.
  * Arguments after `run` are deliberately left alone because they are prompt
  * text, where option-looking tokens may be part of the user's request.
  */
 export function validateCliArgs(args: string[]): string | undefined {
-	if (args[0] === 'review') return undefined;
+	if (args[0] === 'init') return validateInitArgs(args);
+
+	if (args[0] === 'review') {
+		// Only global options are valid after `review`. Scanning them here stops
+		// `review --bogus main` from being reported as an extra review target.
+		return scanArgs(args, 1, args.length).error;
+	}
 
 	if (args[0] === 'worktree') {
 		const result = parseWorktreeArgs(args);

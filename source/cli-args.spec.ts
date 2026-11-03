@@ -1,5 +1,9 @@
 import test from 'ava';
-import {parseWorktreeArgs, validateCliArgs} from './cli-args.js';
+import {
+	parseWorktreeArgs,
+	validateCliArgs,
+	validateInitArgs,
+} from './cli-args.js';
 
 test('suggests the correct option for a transposed unknown flag', t => {
 	t.is(
@@ -51,6 +55,39 @@ test('does not validate free-form prompt tokens after run', t => {
 test('accepts review targets and resume session identifiers', t => {
 	t.is(validateCliArgs(['review', 'main']), undefined);
 	t.is(validateCliArgs(['--resume', 'last']), undefined);
+});
+
+test('review rejects unknown options instead of calling them extra targets', t => {
+	t.is(
+		validateCliArgs(['review', '--bogus', 'main']),
+		'Unknown option "--bogus". Run "nanocoder --help" to see available options.',
+	);
+	t.is(
+		validateCliArgs(['review', 'main', '--mdoe', 'plan']),
+		'Unknown option "--mdoe". Did you mean "--mode"?',
+	);
+	t.is(validateCliArgs(['review', 'main', '--json']), undefined);
+});
+
+test('init rejects unknown options and accepts its own flags', t => {
+	t.is(
+		validateCliArgs(['init', '--bogus', '--preset', 'rust']),
+		'Unknown option "--bogus". Run "nanocoder --help" to see available options.',
+	);
+	t.is(
+		validateInitArgs(['init', '--presett', 'rust']),
+		'Unknown option "--presett". Did you mean "--preset"?',
+	);
+	t.is(
+		validateCliArgs(['init', '--preset', 'rust', '--force', '--lean']),
+		undefined,
+	);
+	t.is(validateInitArgs(['init', '--help']), undefined);
+});
+
+test('a negative number is an option value, not an unknown flag', t => {
+	t.is(validateCliArgs(['--context-max', '-5', 'run', 'do a task']), undefined);
+	t.is(validateCliArgs(['--vscode-port', '-1', 'run', 'do a task']), undefined);
 });
 
 test('suggests the login subcommand for codex and copilot', t => {
