@@ -25,7 +25,7 @@ Type `/` in the chat input to see available commands. All commands start with `/
 | `/commands` | List custom commands. Subcommands: `show <name>`, `create <name>` (see [Custom Commands](custom-commands.md)) |
 | `/tools` | List available tools grouped by source (built-in, MCP, custom). Subcommand: `create <name>` (see [Custom Tools](custom-tools.md)) |
 | `/agents` | List subagents. `/agents show <name>` for details, `/agents copy <name>` to customize, `/agents create <name>` to scaffold a new one (see [Subagents](subagents.md)) |
-| `/checkpoint` | Save and restore file snapshots. Subcommands: `create`/`save`, `list`/`ls`, `load`/`restore`, `delete`/`remove`/`rm`, `help` (see [Checkpointing](checkpointing.md)) |
+| `/checkpoint` | Save and restore file snapshots. Subcommands: `create`/`save [name]` (name optional, auto-generated when omitted), `list`/`ls`, `load`/`restore`, `delete`/`remove`/`rm`, `help` (see [Checkpointing](checkpointing.md)) |
 | `/compact` | Compress message history to reduce context usage. Flags include `--llm`, `--mechanical`, `--default`, `--conservative`, `--aggressive`, `--preview` and `--restore`; `--strategy`, `--threshold`, `--auto-on` and `--auto-off` only change session settings (see [Context Compression](context-compression.md)) |
 | `/context-max` | Set maximum context length for the current session (e.g. `/context-max 128k`), or inspect the resolved context source. `/context-max --reset` clears the session override. Also available as `--context-max` CLI flag |
 | `/exit` | Exit the application (alias: `/quit`) |
@@ -36,7 +36,7 @@ Type `/` in the chat input to see available commands. All commands start with `/
 | `/review` | One-shot, diff-only review of the current branch or one target. Usage: `/review [quick] [<branch-or-PR-number-or-GitHub-PR-URL>]` (e.g. `/review`, `/review main`, `/review quick 42`, `/review https://github.com/owner/repo/pull/42`). Bare PR numbers are resolved across configured GitHub remotes and their fork parents; ambiguous numbers require a full PR URL |
 | `/doctor` | Show environment health report for bug reports |
 | `/update` | Update Nanocoder to the latest version |
-| `/usage` | Get current model context usage visually |
+| `/usage` | Get current model context usage visually. Accepts `?context-max=<n>` to preview usage against a different limit (see [Inline Overrides](#inline-overrides)) |
 | `/stats` | Lifetime usage (sessions, prompts, tokens). Ranges: `7d` / `3m` / `all-time`, either as an argument (`/stats 7d`) or with `←`/`→` in the view; `Esc`/`Enter` to close. Use `/stats reset` to clear the ledger |
 | `/tip [text]` | Show a random usage tip, shortcut, or slash command; pass text to pick from tips mentioning it |
 | `/lsp` | List connected LSP servers |
@@ -117,6 +117,25 @@ The `!` prefix runs a command in your shell and includes the output as context f
 !npm test -- --filter auth
 ```
 
+### Inline Overrides
+
+`/compact` and `/usage` accept `?key=value` tokens that change a setting for that one command only. The previous value is restored as soon as the command finishes, so nothing carries over to the rest of the session.
+
+```
+/usage ?context-max=200k       # Show usage as if the context limit were 200k
+/compact ?threshold=80         # Compact only if usage is at or above 80%
+/compact ?preview              # Same as /compact --preview
+```
+
+Supported keys:
+
+- `?context-max=<n>` - context limit for this command (accepts `k` suffixes, e.g. `128k`)
+- `?threshold=<50-95>` - on `/compact`, skip compaction when usage is below this percentage
+- `?auto-compact=<on|off>` - auto-compact enabled state for this command
+- `?preview`, `?llm`, `?mechanical`, `?aggressive`, `?conservative` - shorthand for the matching `/compact` flag
+
+Unknown keys are passed to the command unchanged and trigger a warning. Other commands do not parse `?` tokens, so text like `/remember ?important use tabs` is kept exactly as typed. To change a setting for the whole session, use the regular flags instead (for example `/compact --auto-on` or `/context-max 128k`).
+
 ## Non-Interactive Mode
 
 Run Nanocoder without an interactive session for scripting and automation:
@@ -127,7 +146,7 @@ nanocoder run "Add error handling to src/api.ts"
 
 This submits the prompt and exits when complete. Useful for CI pipelines, git hooks, or chaining with other tools.
 
-Run mode renders through a dedicated minimal shell: no welcome banner, no boxed "You:" echo, no trailing token counts, no `ctrl+r to expand` hints. Assistant text streams as plain markdown, tools render chronologically as one-liners (e.g. `⚒ Read 1 file`), and a single status line below the transcript shows progress.
+Run mode renders through a dedicated minimal shell: no welcome banner, no boxed "You:" echo, no trailing token counts, no `ctrl+n to expand` hints. Assistant text streams as plain markdown, tools render chronologically as one-liners (e.g. `⚒ Read 1 file`), and a single status line below the transcript shows progress.
 
 By default, `run` uses auto-accept. Override with `--mode` to boot into a different [development mode](development-modes.md):
 
@@ -204,6 +223,6 @@ The emitted object looks like:
 - `filesChanged` — deduplicated list of file paths touched by file-mutating tools (`write_file`, `string_replace`, `diff_edit`)
 - `usage` — provider-reported token counts summed across every turn of the run. Omitted entirely when the provider reports no token telemetry (common with local models), so an absent block means "unknown", never "zero". When a provider reports input and output counts but no total, `totalTokens` is derived as their sum.
 
-Two more fields appear conditionally: `message` (the error text, when `kind` is `"error"`) and `toolNames` (the tools awaiting approval, when `kind` is `"tool-approval-required"`).
+A few more fields appear conditionally: `message` (the error text, when `kind` is `"error"`), and, when `kind` is `"tool-approval-required"`, `toolNames` (the tools awaiting approval) and `autoAcceptWouldRun` (whether `--mode auto-accept` would have run every blocked call; when false, only `--mode yolo` or `alwaysAllow` unblocks it).
 
-On error (e.g. an untrusted workspace directory, the turn limit being hit without a final answer, or an agent-loop [retry limit](../configuration/index.md#retry-limits) being hit), `kind` is `"error"` and the object still includes whatever `toolCalls` were captured before the failure, so partial progress isn't silently dropped.
+On error (e.g. an untrusted workspace directory, a provider request that fails with an HTTP error or a dropped connection, the turn limit being hit without a final answer, or an agent-loop [retry limit](../configuration/index.md#retry-limits) being hit), `kind` is `"error"` and the object still includes whatever `toolCalls` were captured before the failure, so partial progress isn't silently dropped.

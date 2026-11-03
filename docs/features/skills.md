@@ -178,6 +178,10 @@ Event kinds:
 - `schedule.cron` - filter: `cron`, a standard 5-field expression (or
   6-field with seconds). An invalid expression is rejected when the
   file loads instead of reaching the daemon.
+- `ci.job.failed` - filter: `branches`, glob-matched against the failing
+  run's branch; omitted matches every branch. Only ever fires when the
+  daemon's CI watch is active - see
+  [CI Watch Configuration](../configuration/preferences.md#ci-watch-configuration).
 
 A malformed `subscribe:` block on a single-file command, agent or tool
 is logged and dropped: the member still loads, just without triggers.
@@ -215,6 +219,15 @@ nanocoder daemon uninstall  # remove the auto-start unit
 ```
 
 `daemon start` refuses to start in a directory you haven't trusted, because triggered runs execute tools without confirmation. Trust the directory by running `nanocoder` interactively there once, pass `--trust-directory` to bypass the check for that one start (not saved), or set `NANOCODER_TRUST_DIRECTORY=1` to trust it and save that for future runs.
+
+`daemon install` is not gated: it only writes the auto-start unit, and the
+gate applies when the daemon actually boots. Installing in an untrusted
+directory therefore succeeds and says so — install prints a warning naming
+both remedies — and every autostart boot after it is refused until you
+trust the directory. That refusal comes from `daemon start` itself, before
+the daemon child that owns `daemon.log` is spawned, so it goes to the
+`daemon start` command's own output — under an autostart service, wherever
+the service manager sends it — not to `daemon.log`.
 
 The daemon writes a JSON lockfile at `.nanocoder/daemon.json` (PID,
 socket path, start time) and an append-only log at

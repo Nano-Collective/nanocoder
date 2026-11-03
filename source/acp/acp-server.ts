@@ -1,16 +1,29 @@
 import {AgentSideConnection, ndJsonStream} from '@agentclientprotocol/sdk';
 import {AcpAgent} from '@/acp/acp-agent';
 import type {AcpInitContext} from '@/acp/acp-types';
+import {directoryTrustRefusal} from '@/config/preferences';
 import {initializePlain} from '@/plain/initialize';
+import type {DevelopmentMode} from '@/types/index';
 import {getLogger} from '@/utils/logging';
 import {getShutdownManager} from '@/utils/shutdown';
 
 const logger = getLogger();
 
+/**
+ * Exit code when startup is refused because the folder is not trusted, so a
+ * client can show a trust prompt without matching the message. Other startup
+ * failures exit 1.
+ */
+const ACP_TRUST_REFUSED_EXIT_CODE = 3;
+
 export interface RunAcpServerOptions {
 	cliProvider?: string;
 	cliModel?: string;
 	appVersion?: string;
+	/** Trust the working directory for this run only (`--trust-directory`). */
+	trustDirectory?: boolean;
+	/** Starting mode of every session (`--mode`). */
+	mode?: DevelopmentMode;
 }
 
 export async function runAcpServer(
@@ -18,12 +31,28 @@ export async function runAcpServer(
 ): Promise<void> {
 	logger.info('ACP server starting...');
 
+	// initializePlain() loads the working directory's project config
+	// (providers, hooks, MCP servers), so refuse an untrusted folder first,
+	// as `nanocoder run` does. stdout carries the protocol, so report on stderr.
+	const refusal = directoryTrustRefusal(
+		process.cwd(),
+		options.trustDirectory ?? false,
+	);
+	if (refusal) {
+		logger.error(`ACP not started: ${refusal}`);
+		process.stderr.write(`[nanocoder] ${refusal}\n`);
+		process.exit(ACP_TRUST_REFUSED_EXIT_CODE);
+	}
+
 	let initContext: AcpInitContext;
 	try {
-		initContext = await initializePlain({
-			cliProvider: options.cliProvider,
-			cliModel: options.cliModel,
-		});
+		initContext = {
+			...(await initializePlain({
+				cliProvider: options.cliProvider,
+				cliModel: options.cliModel,
+			})),
+			initialMode: options.mode,
+		};
 	} catch (error) {
 		const msg = `ACP initialization failed: ${error instanceof Error ? error.message : String(error)}`;
 		logger.error(msg);

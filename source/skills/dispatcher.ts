@@ -243,9 +243,23 @@ export function modeForSubscription(
 }
 
 function triggerContextFor(event: Event): TriggerContext {
-	return event.kind === 'file.changed'
-		? {type: 'event', kind: 'file.changed', payload: event.payload}
-		: {type: 'event', kind: 'schedule.cron', payload: event.payload};
+	switch (event.kind) {
+		case 'file.changed':
+			return {type: 'event', kind: 'file.changed', payload: event.payload};
+		case 'schedule.cron':
+			return {type: 'event', kind: 'schedule.cron', payload: event.payload};
+		case 'ci.job.failed':
+			return {type: 'event', kind: 'ci.job.failed', payload: event.payload};
+		default: {
+			// Exhaustiveness check: a new EventKind added without a case here
+			// fails the build instead of silently mislabeling the trigger
+			// context with the wrong kind/payload pairing.
+			const exhaustive: never = event;
+			throw new Error(
+				`triggerContextFor: unhandled event kind "${(exhaustive as Event).kind}"`,
+			);
+		}
+	}
 }
 
 /**

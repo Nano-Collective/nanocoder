@@ -1,5 +1,4 @@
-import {config as loadEnv} from 'dotenv';
-import {existsSync, mkdirSync, readFileSync, writeFileSync} from 'fs';
+import {existsSync, readFileSync} from 'fs';
 import {join} from 'path';
 import {type CliMode, VALID_MODES} from '@/app/types';
 import {substituteEnvVars} from '@/config/env-substitution';
@@ -9,9 +8,11 @@ import {
 } from '@/config/mcp-config-loader';
 import {getConfigPath} from '@/config/paths';
 import {
+	getCiWatchPreference,
 	getNotificationsPreference,
 	loadPreferences,
 } from '@/config/preferences';
+import {ignoredDotenvWarning, loadProjectDotenv} from '@/config/project-dotenv';
 import {
 	DEFAULT_SESSION_CONFIG,
 	normalizeSessionConfig,
@@ -27,6 +28,7 @@ import {HOOK_EVENTS} from '@/types/config';
 import type {
 	AppConfig,
 	AutoCompactConfig,
+	CiWatchConfig,
 	Colors,
 	CompressionMode,
 	CompressionStrategy,
@@ -42,89 +44,22 @@ import type {
 	RetryLimitsConfig,
 	SystemPromptConfig,
 	TuneConfig,
+	VerifyConfig,
 } from '@/types/index';
 import {clampThreshold} from '@/utils/message-compression';
 import {logError, logWarning} from '@/utils/message-queue';
 import {DEFAULT_SINGLE_LINE_PASTE_THRESHOLD} from '@/utils/paste-utils';
+import {isTrustLevel} from '@/verify/trust';
 
+export {confDirMap, getClosestConfigFile} from '@/config/paths';
 export {DEFAULT_SESSION_CONFIG} from '@/config/session-config';
 
-// Load .env file from working directory (shell environment takes precedence)
-// Suppress dotenv console output by temporarily redirecting stdout
-const envPath = join(process.cwd(), '.env');
-if (existsSync(envPath)) {
-	const originalWrite = process.stdout.write.bind(process.stdout);
-	process.stdout.write = () => true;
-	try {
-		loadEnv({path: envPath});
-	} finally {
-		process.stdout.write = originalWrite;
-	}
-}
-
-// Hold a map of what config files are where
-export const confDirMap: Record<string, string> = {};
-
-// Find the closest config file for the requested configuration file
-export function getClosestConfigFile(fileName: string): string {
-	try {
-		const configDir = getConfigPath();
-
-		// If NANOCODER_CONFIG_DIR is explicitly set, skip cwd and home checks
-		// and use only the config directory (important for tests and explicit overrides)
-		const isExplicitConfigDir = Boolean(process.env.NANOCODER_CONFIG_DIR);
-
-		if (!isExplicitConfigDir) {
-			// First, lets check for a working directory config
-			const cwdPath = join(process.cwd(), fileName); // nosemgrep
-			if (existsSync(cwdPath)) {
-				// nosemgrep
-				confDirMap[fileName] = cwdPath; // nosemgrep
-
-				return cwdPath; // nosemgrep
-			}
-		}
-
-		// Last, lets look for an user level config.
-
-		// If the file doesn't exist, create it
-		const configPath = join(configDir, fileName); // nosemgrep
-		if (!existsSync(configPath)) {
-			// nosemgrep
-			createDefaultConfFile(configDir, fileName);
-		}
-
-		confDirMap[fileName] = configPath; // nosemgrep
-
-		return configPath; // nosemgrep
-	} catch (error) {
-		logError(`Failed to load ${fileName}: ${String(error)}`);
-	}
-
-	// The code should never hit this, but it makes the TS compiler happy.
-	return fileName;
-}
-
-function createDefaultConfFile(filePath: string, fileName: string): void {
-	try {
-		// If we cant find any, lets assume this is the first user run, create the
-		// correct file and direct the user to configure them correctly,
-		const configFilePath = join(filePath, fileName); // nosemgrep
-		if (!existsSync(configFilePath)) {
-			// nosemgrep
-			// Maybe add a better sample config?
-			const sampleConfig = {};
-
-			mkdirSync(filePath, {recursive: true});
-			writeFileSync(
-				configFilePath, // nosemgrep
-				JSON.stringify(sampleConfig, null, 2),
-				'utf-8',
-			);
-		}
-	} catch (error) {
-		logError(`Failed to write ${filePath}: ${String(error)}`);
-	}
+// Load .env file from working directory (shell environment takes precedence).
+// Trust-related keys are dropped: this runs before the trust check.
+const dotenvResult = loadProjectDotenv(process.cwd());
+const dotenvWarning = ignoredDotenvWarning(dotenvResult.ignored);
+if (dotenvWarning) {
+	process.stderr.write(`${dotenvWarning}\n`);
 }
 
 /**
@@ -802,6 +737,48 @@ function loadNotificationsConfig(): NotificationsConfig | undefined {
 	return getNotificationsPreference();
 }
 
+// Load project-level verify policy (trust level, poll cadence overrides)
+// from agents.config.json. Unlike ciWatch.enabled (a personal, per-machine
+// opt-in kept in preferences), trust level and cadence are security/policy
+// decisions appropriate to commit and review with the rest of the project.
+function loadVerifyConfig(): VerifyConfig | undefined {
+	return (
+		loadHierarchicalConfig('agents.config.json', 'verify', config => {
+			const verify = config.nanocoder?.verify;
+			if (!verify || typeof verify !== 'object') return null;
+			const result: VerifyConfig = {};
+			if (isTrustLevel(verify.trustLevel)) {
+				result.trustLevel = verify.trustLevel;
+			}
+			if (typeof verify.pollIntervalMs === 'number') {
+				result.pollIntervalMs = verify.pollIntervalMs;
+			}
+			if (typeof verify.maxPollIntervalMs === 'number') {
+				result.maxPollIntervalMs = verify.maxPollIntervalMs;
+			}
+			return Object.keys(result).length > 0 ? result : null;
+		}) ?? undefined
+	);
+}
+
+// Load CI-watch configuration: `enabled` always comes from preferences (a
+// personal opt-in); `pollIntervalMs`/`maxPollIntervalMs` prefer the
+// project-level `verify` overrides from agents.config.json when set, since
+// poll cadence is more appropriately a reviewable project policy.
+function loadCiWatchConfig(): CiWatchConfig | undefined {
+	const preferencesValue = getCiWatchPreference();
+	const projectOverrides = loadVerifyConfig();
+	if (!preferencesValue && !projectOverrides) return undefined;
+	return {
+		enabled: preferencesValue?.enabled ?? false,
+		pollIntervalMs:
+			projectOverrides?.pollIntervalMs ?? preferencesValue?.pollIntervalMs,
+		maxPollIntervalMs:
+			projectOverrides?.maxPollIntervalMs ??
+			preferencesValue?.maxPollIntervalMs,
+	};
+}
+
 export function loadDefaultMode(): CliMode | undefined {
 	return (
 		loadHierarchicalConfig('agents.config.json', 'defaultMode', config => {
@@ -866,6 +843,11 @@ function loadAppConfig(): AppConfig {
 
 	// Load notifications configuration
 	const notifications = loadNotificationsConfig();
+	// Load project-level verify policy (must load before ciWatch, which
+	// layers its poll-cadence overrides on top of the preferences value)
+	const verify = loadVerifyConfig();
+	// Load CI-watch configuration
+	const ciWatch = loadCiWatchConfig();
 
 	// Load mode providers configuration
 	const modeProviders = loadModeProvidersConfig(providers);
@@ -897,6 +879,8 @@ function loadAppConfig(): AppConfig {
 		hooks,
 		formatters,
 		notifications,
+		ciWatch,
+		verify,
 		modeProviders,
 		tune,
 		sandbox,

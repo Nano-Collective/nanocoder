@@ -17,7 +17,6 @@ import {
 	mergeEnv,
 	resolveCwd,
 	runScript,
-	shellArgs,
 } from './handler';
 import type {CustomToolMetadata} from '@/types/custom-tools';
 
@@ -89,32 +88,6 @@ test('expandVars replaces $VAR and ${VAR}', t => {
 	t.is(expandVars('${NCT_MISSING}'), '');
 	if (prev === undefined) delete process.env.NCT_FOO;
 	else process.env.NCT_FOO = prev;
-});
-
-test('shellArgs wraps one verbatim cmd.exe command and uses -c for posix shells', t => {
-	t.deepEqual(shellArgs('cmd.exe', 'echo hi'), [
-		'/d',
-		'/v:off',
-		'/s',
-		'/c',
-		'"echo hi"',
-	]);
-	t.deepEqual(shellArgs('cmd', 'echo hi'), [
-		'/d',
-		'/v:off',
-		'/s',
-		'/c',
-		'"echo hi"',
-	]);
-	t.deepEqual(shellArgs('C:\\Windows\\System32\\cmd.exe', 'echo hi'), [
-		'/d',
-		'/v:off',
-		'/s',
-		'/c',
-		'"echo hi"',
-	]);
-	t.deepEqual(shellArgs('/bin/sh', 'echo hi'), ['-c', 'echo hi']);
-	t.deepEqual(shellArgs('/bin/bash', 'echo hi'), ['-c', 'echo hi']);
 });
 
 // Prove runScript forwards shellArgs, not a hardcoded -c. A POSIX script

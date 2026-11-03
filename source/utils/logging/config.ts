@@ -48,15 +48,6 @@ function createDevelopmentConfig(): EnhancedLoggerConfig {
 		redact: ['apiKey', 'token', 'password', 'secret'],
 		correlation: true,
 		serialize: false,
-		target: 'pino-pretty',
-		options: {
-			translateTime: 'HH:MM:ss Z',
-			ignore: 'pid,hostname',
-			messageFormat: undefined,
-			customPrettifiers: {},
-			levelFirst: false,
-			singleLine: false,
-		},
 	};
 }
 

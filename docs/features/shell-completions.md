@@ -44,11 +44,11 @@ nanocoder completion fish > ~/.config/fish/completions/nanocoder.fish
 
 The scripts cover the most common parts of the command line:
 
-- **Subcommands** — `init`, `run`, `daemon`, `config`, `codex`, `copilot`, `completion`, plus their nested arguments (`daemon start|stop|status|logs|install|uninstall`, `config list|show|diff`, `codex|copilot login`, and the shell names for `completion`).
-- **Flags** - the main top-level options (`--provider`, `--model`, `--mode`, `--context-max`, `--json`, `--output-format`, `--plain`, `--alt-screen`, `--acp`, `--vscode`, `--vscode-port`, `--trust-directory`, and their `--no-` forms where they exist), including short forms (`-c`, `-r`, `-h`, `-v`).
+- **Subcommands** - `init`, `run`, `review`, `worktree`, `verify`, `skills`, `storage`, `daemon`, `config`, `codex`, `copilot`, `completion`, plus their nested arguments (`daemon start|stop|status|logs|install|uninstall`, `config list|show|diff`, `skills add`, `codex|copilot login`, and the shell names for `completion`).
+- **Flags** - the main top-level options (`--provider`, `--model`, `--mode`, `--context-max`, `--json`, `--output-format`, `--plain`, `--alt-screen`, `--acp`, `--vscode`, `--vscode-port`, `--trust-directory`, `--prompt-file`, `--mouse`, and their `--no-` forms where they exist), including short forms (`-c`, `-r`, `-h`, `-v`).
 - **Known flag values** — `--mode normal|auto-accept|yolo|plan|architect` and `--output-format text|json` offer their closed sets of values.
 
-Some of the CLI is not covered yet: the `review` and `skills add` subcommands, `init`'s `--preset` and `--lean`, `--prompt-file`, and `--mouse` / `--no-mouse`. These still work when typed in full; they just won't tab-complete. Run `nanocoder --help` for the complete list.
+Some of the CLI is not covered yet: subcommand-specific options such as `init`'s `--preset` and `--lean` and `verify`'s `--pr` and `--post-review`. These still work when typed in full; they just won't tab-complete. Run `nanocoder --help` for the complete list.
 
 In-app slash commands (like `/clear` or `/doctor`) are not part of this — they are typed inside the TUI, which has its own completion, and the shell never sees them.
 

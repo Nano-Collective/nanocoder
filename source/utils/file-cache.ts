@@ -1,5 +1,10 @@
 import fs from 'node:fs/promises';
-import {CACHE_FILE_TTL_MS, MAX_FILE_READ_RETRIES} from '@/constants';
+import {
+	CACHE_FILE_TTL_MS,
+	MAX_CACHEABLE_FILE_SIZE_BYTES,
+	MAX_FILE_CACHE_BYTES,
+	MAX_FILE_READ_RETRIES,
+} from '@/constants';
 import {isDerivedContentPath} from '@/utils/derived-content';
 import {withPreservedProcess} from '@/utils/preserve-process';
 
@@ -10,12 +15,13 @@ import {withPreservedProcess} from '@/utils/preserve-process';
  * Entries auto-expire after TTL_MS and are invalidated if file mtime changes.
  */
 
-/** Maximum number of files to cache (exported for testing) */
+/** Maximum number of files to cache (exported for testing and backwards compatibility) */
 export const MAX_CACHE_SIZE = 50;
 
 export interface CachedFile {
 	content: string;
-	lines: string[];
+	readonly lines: string[];
+	readonly totalLines: number;
 	mtime: number;
 	cachedAt: number;
 	/**
@@ -26,14 +32,44 @@ export interface CachedFile {
 	derived: boolean;
 }
 
+function countLines(content: string): number {
+	let count = 1;
+	let pos = content.indexOf('\n');
+	while (pos !== -1) {
+		count++;
+		pos = content.indexOf('\n', pos + 1);
+	}
+	return count;
+}
+
+function toCachedFile(
+	content: string,
+	mtime = 0,
+	cachedAt = Date.now(),
+	derived = false,
+): CachedFile {
+	return {
+		content,
+		get lines() {
+			return content.split('\n');
+		},
+		totalLines: countLines(content),
+		mtime,
+		cachedAt,
+		derived,
+	};
+}
+
 interface CacheEntry {
 	data: CachedFile;
 	accessOrder: number;
+	sizeBytes: number;
 }
 
 // Internal cache storage
 const cache = new Map<string, CacheEntry>();
 let accessCounter = 0;
+let totalCachedBytes = 0;
 
 // Track pending reads to deduplicate concurrent requests for the same file
 const pendingReads = new Map<string, Promise<CachedFile>>();
@@ -45,6 +81,29 @@ function cleanupPendingRead(
 	if (pendingReads.get(absPath) === pending) {
 		pendingReads.delete(absPath);
 	}
+}
+
+function deleteFromCache(absPath: string): void {
+	const entry = cache.get(absPath);
+	if (entry) {
+		totalCachedBytes = Math.max(0, totalCachedBytes - entry.sizeBytes);
+		cache.delete(absPath);
+	}
+}
+
+/**
+ * Sweep expired entries from the cache based on TTL.
+ * Returns the number of entries swept.
+ */
+export function sweepExpired(now = Date.now()): number {
+	let sweptCount = 0;
+	for (const [key, entry] of cache) {
+		if (now - entry.data.cachedAt > CACHE_FILE_TTL_MS) {
+			deleteFromCache(key);
+			sweptCount++;
+		}
+	}
+	return sweptCount;
 }
 
 /**
@@ -66,7 +125,7 @@ export async function getCachedFileContent(
 
 		// Check if cache entry has expired (TTL)
 		if (now - data.cachedAt > CACHE_FILE_TTL_MS) {
-			cache.delete(absPath);
+			deleteFromCache(absPath);
 		} else {
 			// Check if file mtime has changed
 			try {
@@ -74,12 +133,14 @@ export async function getCachedFileContent(
 				const currentMtime = fileStat.mtimeMs;
 
 				if (currentMtime === data.mtime) {
-					// Cache hit - update access order for LRU
+					// Cache hit - update access order and move entry to end of Map for true LRU
 					entry.accessOrder = ++accessCounter;
+					cache.delete(absPath);
+					cache.set(absPath, entry);
 					return data;
 				}
 				// File was modified, invalidate cache and re-read
-				cache.delete(absPath);
+				deleteFromCache(absPath);
 
 				// Check for pending read before starting a new one (deduplication)
 				let pending = pendingReads.get(absPath);
@@ -100,7 +161,7 @@ export async function getCachedFileContent(
 				}
 			} catch {
 				// File may have been deleted, invalidate cache
-				cache.delete(absPath);
+				deleteFromCache(absPath);
 			}
 		}
 	}
@@ -172,23 +233,39 @@ async function readAndCacheFile(
 		content = buffer.toString('utf-8');
 	}
 
-	const cachedFile: CachedFile = {
-		content,
-		lines: content.split('\n'),
-		mtime: mtimeAfter,
-		cachedAt: now,
-		derived,
-	};
+	const sizeBytes = Buffer.byteLength(content, 'utf-8');
 
-	// Enforce max cache size with LRU eviction
-	if (cache.size >= MAX_CACHE_SIZE) {
+	// Sweep expired entries on insert
+	sweepExpired(now);
+
+	// Do not cache files exceeding the single-file size threshold or total budget
+	if (
+		sizeBytes > MAX_CACHEABLE_FILE_SIZE_BYTES ||
+		sizeBytes > MAX_FILE_CACHE_BYTES
+	) {
+		deleteFromCache(absPath);
+		return toCachedFile(content, mtimeAfter, now, derived);
+	}
+
+	// If replacing an existing entry for this path, remove old size first
+	deleteFromCache(absPath);
+
+	// Enforce byte budget and max item capacity with LRU eviction
+	while (
+		(totalCachedBytes + sizeBytes > MAX_FILE_CACHE_BYTES ||
+			cache.size >= MAX_CACHE_SIZE) &&
+		cache.size > 0
+	) {
 		evictLRU();
 	}
 
+	const cachedFile = toCachedFile(content, mtimeAfter, now, derived);
 	cache.set(absPath, {
 		data: cachedFile,
 		accessOrder: ++accessCounter,
+		sizeBytes,
 	});
+	totalCachedBytes += sizeBytes;
 
 	return cachedFile;
 }
@@ -200,7 +277,7 @@ async function readAndCacheFile(
  * @param absPath - Absolute path to the file to invalidate
  */
 export function invalidateCache(absPath: string): void {
-	cache.delete(absPath);
+	deleteFromCache(absPath);
 }
 
 /**
@@ -210,6 +287,7 @@ export function clearCache(): void {
 	cache.clear();
 	pendingReads.clear();
 	accessCounter = 0;
+	totalCachedBytes = 0;
 }
 
 /**
@@ -217,6 +295,13 @@ export function clearCache(): void {
  */
 export function getCacheSize(): number {
 	return cache.size;
+}
+
+/**
+ * Get current total cached bytes (for testing/debugging).
+ */
+export function getTotalCachedBytes(): number {
+	return totalCachedBytes;
 }
 
 /**
@@ -234,6 +319,6 @@ function evictLRU(): void {
 	}
 
 	if (oldestKey) {
-		cache.delete(oldestKey);
+		deleteFromCache(oldestKey);
 	}
 }
