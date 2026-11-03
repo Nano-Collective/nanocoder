@@ -31,31 +31,27 @@ interface Variant {
 	toolsDisabled?: boolean;
 }
 
-// Mode exclusions (mirrored from tool-manager.ts)
+// Mode exclusions (mirrored from source/tools/tool-manager.ts)
 const MODE_EXCLUDED_TOOLS: Record<DevelopmentMode, string[]> = {
-	normal: [],
-	'auto-accept': [],
+	normal: ['write_plan'],
+	'auto-accept': ['write_plan'],
+	yolo: ['write_plan'],
 	plan: [
 		'write_file',
 		'string_replace',
-		'delete_file',
-		'move_file',
-		'copy_file',
-		'create_directory',
+		'diff_edit',
+		'file_op',
+		'lsp_format_document',
 		'execute_bash',
-		'create_task',
-		'update_task',
-		'delete_task',
-		'list_tasks',
+		'browser',
+		'write_tasks',
+		'write_walkthrough',
 		'git_add',
 		'git_commit',
-		'git_push',
-		'git_pull',
-		'git_branch',
-		'git_stash',
-		'git_reset',
+		'git_pr',
 	],
-	scheduler: ['ask_user'],
+	headless: ['ask_user', 'agent', 'write_plan'],
+	architect: ['write_plan', 'git_commit', 'git_pr'],
 };
 
 function getAvailableNames(
@@ -97,7 +93,7 @@ function buildFullPrompt(v: Variant): string {
 
 	// For XML fallback variants, append real tool definitions
 	if (v.toolsDisabled) {
-		const nativeTools = registry.getNativeToolsWithoutExecute();
+		const nativeTools = registry.getNativeTools();
 		const nameSet = new Set(availableNames);
 		const filteredTools: Record<string, AISDKCoreTool> = {};
 		for (const [name, tool] of Object.entries(nativeTools)) {
@@ -116,143 +112,89 @@ function buildFullPrompt(v: Variant): string {
 	return prompt;
 }
 
-// Define variants: 3 profiles × 4 modes × 2 tool modes = 24 variants
-const variants: Variant[] = [
-	// Native tool calling
-	{name: 'full-normal', mode: 'normal', profile: 'full'},
-	{name: 'full-auto-accept', mode: 'auto-accept', profile: 'full'},
-	{name: 'full-plan', mode: 'plan', profile: 'full'},
-	{name: 'full-scheduler', mode: 'scheduler', profile: 'full'},
-	{name: 'minimal-normal', mode: 'normal', profile: 'minimal'},
-	{name: 'minimal-auto-accept', mode: 'auto-accept', profile: 'minimal'},
-	{name: 'minimal-plan', mode: 'plan', profile: 'minimal'},
-	{name: 'minimal-scheduler', mode: 'scheduler', profile: 'minimal'},
-	{name: 'nano-normal', mode: 'normal', profile: 'nano'},
-	{name: 'nano-auto-accept', mode: 'auto-accept', profile: 'nano'},
-	{name: 'nano-plan', mode: 'plan', profile: 'nano'},
-	{name: 'nano-scheduler', mode: 'scheduler', profile: 'nano'},
-
-	// XML fallback
-	{
-		name: 'full-normal-xml',
-		mode: 'normal',
-		profile: 'full',
-		toolsDisabled: true,
-	},
-	{
-		name: 'full-auto-accept-xml',
-		mode: 'auto-accept',
-		profile: 'full',
-		toolsDisabled: true,
-	},
-	{name: 'full-plan-xml', mode: 'plan', profile: 'full', toolsDisabled: true},
-	{
-		name: 'full-scheduler-xml',
-		mode: 'scheduler',
-		profile: 'full',
-		toolsDisabled: true,
-	},
-	{
-		name: 'minimal-normal-xml',
-		mode: 'normal',
-		profile: 'minimal',
-		toolsDisabled: true,
-	},
-	{
-		name: 'minimal-auto-accept-xml',
-		mode: 'auto-accept',
-		profile: 'minimal',
-		toolsDisabled: true,
-	},
-	{
-		name: 'minimal-plan-xml',
-		mode: 'plan',
-		profile: 'minimal',
-		toolsDisabled: true,
-	},
-	{
-		name: 'minimal-scheduler-xml',
-		mode: 'scheduler',
-		profile: 'minimal',
-		toolsDisabled: true,
-	},
-	{
-		name: 'nano-normal-xml',
-		mode: 'normal',
-		profile: 'nano',
-		toolsDisabled: true,
-	},
-	{
-		name: 'nano-auto-accept-xml',
-		mode: 'auto-accept',
-		profile: 'nano',
-		toolsDisabled: true,
-	},
-	{name: 'nano-plan-xml', mode: 'plan', profile: 'nano', toolsDisabled: true},
-	{
-		name: 'nano-scheduler-xml',
-		mode: 'scheduler',
-		profile: 'nano',
-		toolsDisabled: true,
-	},
-];
-
-// Generate
-if (!existsSync(outputDir)) {
-	mkdirSync(outputDir, {recursive: true});
+// Define variants: 3 profiles × 6 modes × 2 tool modes = 36 variants
+const modes = Object.keys(MODE_EXCLUDED_TOOLS) as DevelopmentMode[];
+const profiles: ToolProfile[] = ['full', 'minimal', 'nano'];
+const variants: Variant[] = [];
+for (const toolsDisabled of [false, true]) {
+	for (const profile of profiles) {
+		for (const mode of modes) {
+			variants.push({
+				name: `${profile}-${mode}${toolsDisabled ? '-xml' : ''}`,
+				mode,
+				profile,
+				...(toolsDisabled ? {toolsDisabled} : {}),
+			});
+		}
+	}
 }
 
-console.log(`Generating ${variants.length} system prompt variants...\n`);
+function main(): void {
+	// Generate
+	if (!existsSync(outputDir)) {
+		mkdirSync(outputDir, {recursive: true});
+	}
 
-interface GeneratedPrompt {
-	filename: string;
-	lines: number;
-	words: number;
-	chars: number;
-	label: string;
+	console.log(`Generating ${variants.length} system prompt variants...\n`);
+
+	interface GeneratedPrompt {
+		filename: string;
+		lines: number;
+		words: number;
+		chars: number;
+		label: string;
+	}
+
+	const results: GeneratedPrompt[] = [];
+
+	for (const v of variants) {
+		const prompt = buildFullPrompt(v);
+		const filename = `${v.name}.md`;
+		writeFileSync(join(outputDir, filename), prompt);
+
+		results.push({
+			filename,
+			lines: prompt.split('\n').length,
+			words: prompt.split(/\s+/).length,
+			chars: prompt.length,
+			label: [
+				`mode:${v.mode}`,
+				`profile:${v.profile}`,
+				v.toolsDisabled ? 'xml-fallback' : '',
+			]
+				.filter(Boolean)
+				.join(', '),
+		});
+	}
+
+	// Sort by size (smallest first)
+	results.sort((a, b) => a.chars - b.chars);
+
+	const summary: string[] = [];
+	for (const r of results) {
+		const tokens = Math.ceil(r.chars / 4);
+		const line = `  ${r.filename.padEnd(35)} ${String(r.lines).padStart(4)} lines  ${String(r.words).padStart(5)} words  ${String(r.chars).padStart(6)} chars  ~${String(tokens).padStart(5)} tokens  (${r.label})`;
+		summary.push(line);
+		console.log(line);
+	}
+
+	// Write index
+	const index = `# Generated System Prompts (sorted by size)
+
+	Generated: ${new Date().toISOString()}
+
+	${summary.join('\n')}
+	`;
+	writeFileSync(join(outputDir, 'INDEX.md'), index);
+
+	console.log(`\nOutput: .generated-prompts/`);
+	console.log(`Index:  .generated-prompts/INDEX.md`);
 }
 
-const results: GeneratedPrompt[] = [];
-
-for (const v of variants) {
-	const prompt = buildFullPrompt(v);
-	const filename = `${v.name}.md`;
-	writeFileSync(join(outputDir, filename), prompt);
-
-	results.push({
-		filename,
-		lines: prompt.split('\n').length,
-		words: prompt.split(/\s+/).length,
-		chars: prompt.length,
-		label: [
-			`mode:${v.mode}`,
-			`profile:${v.profile}`,
-			v.toolsDisabled ? 'xml-fallback' : '',
-		]
-			.filter(Boolean)
-			.join(', '),
-	});
+try {
+	main();
+} catch (error) {
+	console.error('Failed to generate system prompts:');
+	console.error(error);
+	process.exit(1);
 }
-
-// Sort by size (smallest first)
-results.sort((a, b) => a.chars - b.chars);
-
-const summary: string[] = [];
-for (const r of results) {
-	const tokens = Math.ceil(r.chars / 4);
-	const line = `  ${r.filename.padEnd(35)} ${String(r.lines).padStart(4)} lines  ${String(r.words).padStart(5)} words  ${String(r.chars).padStart(6)} chars  ~${String(tokens).padStart(5)} tokens  (${r.label})`;
-	summary.push(line);
-	console.log(line);
-}
-
-// Write index
-const index = `# Generated System Prompts (sorted by size)
-
-Generated: ${new Date().toISOString()}
-
-${summary.join('\n')}
-`;
-writeFileSync(join(outputDir, 'INDEX.md'), index);
-
-console.log(`\nOutput: .generated-prompts/`);
-console.log(`Index:  .generated-prompts/INDEX.md`);
