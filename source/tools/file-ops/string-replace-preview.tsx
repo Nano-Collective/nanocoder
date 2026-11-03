@@ -13,6 +13,7 @@ import {formatError} from '@/utils/error-formatter';
 import {getCachedFileContent} from '@/utils/file-cache';
 import {normalizeIndentation} from '@/utils/indentation-normalizer';
 import {areLinesSimilar, computeInlineDiff} from '@/utils/inline-diff';
+import {toFileLineEndings} from '@/utils/line-endings';
 import {getLanguageFromExtension} from '@/utils/programming-language-helper';
 
 interface StringReplaceArgs {
@@ -51,7 +52,8 @@ export async function formatStringReplacePreview(
 
 		// Preview mode - validate old_str exists and is unique
 		if (!isResult) {
-			const occurrences = fileContent.split(old_str).length - 1;
+			const occurrences =
+				fileContent.split(toFileLineEndings(fileContent, old_str)).length - 1;
 
 			if (occurrences === 0) {
 				return (
@@ -107,7 +109,10 @@ export async function formatStringReplacePreview(
 		}
 
 		// Find location of the match in the file
-		const searchStr = isResult ? new_str : old_str;
+		const searchStr = toFileLineEndings(
+			fileContent,
+			isResult ? new_str : old_str,
+		);
 		const matchIndex = fileContent.indexOf(searchStr);
 		const beforeContent = fileContent.substring(0, matchIndex);
 		const beforeLines = beforeContent.split('\n');
