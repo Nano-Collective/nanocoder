@@ -38,7 +38,7 @@ export interface ToolVisibilityOptions {
 }
 
 // Tools to exclude per development mode
-const MODE_EXCLUDED_TOOLS: Record<DevelopmentMode, string[]> = {
+export const MODE_EXCLUDED_TOOLS: Record<DevelopmentMode, string[]> = {
 	normal: ['write_plan'],
 	'auto-accept': ['write_plan'],
 	yolo: ['write_plan'],
