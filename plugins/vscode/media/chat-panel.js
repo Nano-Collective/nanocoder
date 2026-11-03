@@ -3873,6 +3873,9 @@
 		card.className = 'my-2 border border-vscode-widget-border rounded bg-vscode-editor-bg overflow-hidden group tool-card';
 		card.id = `tool-card-${toolCallId}`;
 
+		const initialPath = diffPath(update);
+		if (initialPath) card.dataset.filePath = initialPath;
+
 		const row = document.createElement('div');
 		row.className = 'tool-card-row flex items-center justify-between px-3 py-2';
 		// Guarded rather than unbound: the card is created from the queued
@@ -3881,7 +3884,9 @@
 		// that window - the whole approval wait - raised "Change <id> not found".
 		row.onclick = () => {
 			if (card.dataset.hasDiff !== 'true') return;
-			vscode.postMessage({ type: 'showDiff', toolCallId });
+			const message = { type: 'showDiff', toolCallId };
+			if (card.dataset.filePath) message.filePath = card.dataset.filePath;
+			vscode.postMessage(message);
 		};
 
 		const left = document.createElement('div');
@@ -3927,7 +3932,8 @@
 
 	// Reveal the diff affordance once the extension host has a change
 	// registered for this card - see hasDiffContent.
-	function setEditCardDiffAvailable(el) {
+	function setEditCardDiffAvailable(el, filePath) {
+		if (filePath) el.dataset.filePath = filePath;
 		if (el.dataset.hasDiff === 'true') return;
 		el.dataset.hasDiff = 'true';
 
@@ -3954,7 +3960,8 @@
 		const actionEl = el.querySelector('.tool-card-action');
 		if (actionEl) actionEl.textContent = state.action;
 
-		if (hasDiffContent(update)) setEditCardDiffAvailable(el);
+		const path = diffPath(update);
+		if (path) setEditCardDiffAvailable(el, path);
 
 		if (isSettled(state.status)) {
 			const actions = el.querySelector('.tool-actions');
