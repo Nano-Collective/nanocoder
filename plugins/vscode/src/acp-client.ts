@@ -96,8 +96,9 @@ export class NanocoderAcpClient {
 			}
 			if (e.affectsConfiguration('nanocoder.model')) {
 				const newModel = vscode.workspace.getConfiguration('nanocoder').get<string>('model');
-				if (newModel && newModel !== this.currentModel) {
-					this.setSessionModel(newModel, false);
+				// Without a session the new value is applied when one is created.
+				if (newModel && newModel !== this.currentModel && this.connection && this._sessionId) {
+					void this._applyModelSetting(newModel);
 				}
 			}
 		});
@@ -315,7 +316,7 @@ export class NanocoderAcpClient {
 				await this.setSessionMode(initialMode, false);
 			}
 			if (initialModel && this.currentModel && this.currentModel !== initialModel && this.availableModels.includes(initialModel)) {
-				await this.setSessionModel(initialModel, false);
+				await this._applyModelSetting(initialModel);
 			}
 
 			this.notifyStateSync();
@@ -417,6 +418,19 @@ export class NanocoderAcpClient {
 			}
 		}
 		return {ok: true};
+	}
+
+	/**
+	 * Apply the `nanocoder.model` setting to the session. Switches from the
+	 * model dropdown report their own result; this covers the setting itself.
+	 */
+	private async _applyModelSetting(modelId: string): Promise<void> {
+		const result = await this.setSessionModel(modelId, false);
+		if (!result.ok) {
+			vscode.window.showWarningMessage(
+				`Nanocoder: Could not switch to model ${modelId} from your settings: ${result.error}`,
+			);
+		}
 	}
 
 	/** Start a new conversation by clearing the cached session ID. */

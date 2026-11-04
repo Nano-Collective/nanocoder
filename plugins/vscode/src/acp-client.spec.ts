@@ -623,3 +623,108 @@ test('NanocoderAcpClient - a confirmed and saved model switch is reported as ok'
 	t.deepEqual(await client.setSessionModel('qwen'), {ok: true});
 	t.deepEqual(saved, [['model', 'qwen']]);
 });
+
+// ── applying the nanocoder.model setting ───────────────────
+
+/** Set `nanocoder.model` and collect the messages shown during one test. */
+function useModelSetting(t: import('ava').ExecutionContext, model: string) {
+	(vscode as any).__test.configuration = (
+		_section: string,
+		key: string,
+		fallback: unknown,
+	) => (key === 'model' ? model : fallback);
+	t.teardown(() => (vscode as any).__test.reset());
+	return () => (vscode as any).__test.shownMessages as {kind: string; message: string}[];
+}
+
+/** A connection whose new sessions start on `llama`, with `qwen` also available. */
+function sessionConnection(setSessionConfigOption: () => Promise<unknown>) {
+	return {
+		newSession: async () => ({
+			sessionId: 'session-new',
+			configOptions: [
+				{id: 'model', currentValue: 'llama', options: [{value: 'llama'}, {value: 'qwen'}]},
+			],
+		}),
+		setSessionConfigOption,
+	};
+}
+
+test('NanocoderAcpClient - a default model the new session rejects is reported', async t => {
+	const shown = useModelSetting(t, 'qwen');
+	const client = makeConnectedClient(
+		sessionConnection(() => Promise.reject(new Error('model is not loaded'))),
+	);
+
+	t.is(await client.getOrCreateSession('/cwd'), 'session-new');
+	t.is(client.currentModel, 'llama');
+	t.deepEqual(shown(), [
+		{
+			kind: 'warning',
+			message: 'Nanocoder: Could not switch to model qwen from your settings: model is not loaded',
+		},
+	]);
+});
+
+test('NanocoderAcpClient - a default model the new session accepts shows nothing', async t => {
+	const shown = useModelSetting(t, 'qwen');
+	const client = makeConnectedClient(sessionConnection(async () => ({})));
+
+	await client.getOrCreateSession('/cwd');
+
+	t.is(client.currentModel, 'qwen');
+	t.deepEqual(shown(), []);
+});
+
+/** Construct a client and capture its settings-change listener. */
+function clientWithSettingsListener(t: import('ava').ExecutionContext, connection: unknown) {
+	let listener: ((event: {affectsConfiguration(key: string): boolean}) => void) | undefined;
+	const original = vscode.workspace.onDidChangeConfiguration;
+	(vscode.workspace as any).onDidChangeConfiguration = (callback: typeof listener) => {
+		listener = callback;
+		return {dispose: () => {}};
+	};
+	t.teardown(() => {
+		(vscode.workspace as any).onDidChangeConfiguration = original;
+	});
+	const client = makeClient(connection);
+	client.currentModel = 'llama';
+	const changeModelSetting = () =>
+		listener?.({affectsConfiguration: key => key === 'nanocoder.model'});
+	return {client, changeModelSetting};
+}
+
+test('NanocoderAcpClient - a model setting change the agent rejects is reported', async t => {
+	const shown = useModelSetting(t, 'qwen');
+	const {changeModelSetting} = clientWithSettingsListener(t, {
+		setSessionConfigOption: () => Promise.reject(new Error('Connection closed')),
+	});
+
+	changeModelSetting();
+	await settle();
+
+	t.deepEqual(shown(), [
+		{
+			kind: 'warning',
+			message: 'Nanocoder: Could not switch to model qwen from your settings: Connection closed',
+		},
+	]);
+});
+
+test('NanocoderAcpClient - a model setting change without a session waits for the next one', async t => {
+	const shown = useModelSetting(t, 'qwen');
+	let calls = 0;
+	const {client, changeModelSetting} = clientWithSettingsListener(t, {
+		setSessionConfigOption: async () => {
+			calls++;
+			return {};
+		},
+	});
+	(client as any)._sessionId = undefined;
+
+	changeModelSetting();
+	await settle();
+
+	t.is(calls, 0);
+	t.deepEqual(shown(), []);
+});
