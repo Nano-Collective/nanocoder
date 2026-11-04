@@ -456,8 +456,9 @@ test('get_diagnostics validator: validates existing file', async t => {
 		return;
 	}
 
-	// Create a temporary directory and file
-	const tempDir = await mkdtemp(join(tmpdir(), 'lsp-diagnostics-test-'));
+	// Create a temporary directory and file inside the project: paths outside
+	// it are rejected before the existence check.
+	const tempDir = await mkdtemp(join(process.cwd(), 'lsp-diagnostics-test-'));
 	const testFile = join(tempDir, 'test.ts');
 
 	try {
@@ -478,13 +479,35 @@ test('get_diagnostics validator: rejects non-existent file', async t => {
 		return;
 	}
 
-	const nonExistentPath = '/this/path/does/not/exist/test.ts';
+	const nonExistentPath = 'this/path/does/not/exist/test.ts';
 	const result = await validator({path: nonExistentPath});
 
 	t.is(result.valid, false);
 	if (!result.valid) {
 		t.true(result.error.includes('does not exist'));
 		t.true(result.error.includes(nonExistentPath));
+	}
+});
+
+test('get_diagnostics validator: rejects paths outside the project', async t => {
+	const validator = getDiagnosticsTool.validator;
+	if (!validator) {
+		t.fail('Validator not defined');
+		return;
+	}
+	const outside = await mkdtemp(join(tmpdir(), 'lsp-diagnostics-outside-'));
+	try {
+		const file = join(outside, 'secret.ts');
+		await writeFile(file, 'const x = 1;');
+		for (const path of [file, '../outside.ts', '/etc/hosts']) {
+			const result = await validator({path});
+			t.is(result.valid, false, path);
+			if (!result.valid) {
+				t.regex(result.error, /within the project|Path validation failed/, path);
+			}
+		}
+	} finally {
+		await rm(outside, {recursive: true, force: true});
 	}
 });
 
