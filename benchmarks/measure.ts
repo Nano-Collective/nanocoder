@@ -714,10 +714,13 @@ export async function measure(): Promise<Measurements> {
 	const interactiveBootMsMedian = bootSamples[1];
 	// ACP server is long-lived (JSON-RPC over stdin/stdout). Poll until the
 	// module graph is stable, then terminate — same pattern as interactive.
+	// --trust-directory: --acp refuses an untrusted checkout, which would
+	// otherwise measure the refusal instead of the real startup.
+	const acpArgs = ['--acp', '--trust-directory'];
 	const acpRuns = [
-		await measureStartupUntilStable(['--acp'], 'acp'),
-		await measureStartupUntilStable(['--acp'], 'acp'),
-		await measureStartupUntilStable(['--acp'], 'acp'),
+		await measureStartupUntilStable(acpArgs, 'acp'),
+		await measureStartupUntilStable(acpArgs, 'acp'),
+		await measureStartupUntilStable(acpArgs, 'acp'),
 	];
 	const acpModuleCount = acpRuns[0].moduleCount;
 	const acpBootSamples = acpRuns.map(r => r.bootMs).sort((a, b) => a - b);

@@ -37,18 +37,18 @@ interface ToolAllowance {
 	actions?: readonly GitPrAction[];
 }
 
-const GIT_PR_READ_AND_REVIEW_ACTIONS: readonly GitPrAction[] = [
+const GIT_PR_READ_ACTIONS: readonly GitPrAction[] = [
 	'view',
 	'list',
 	'diff',
-	'comment',
-	'review',
 	'checks',
 	'logs',
 ];
 
 const GIT_PR_ALL_ACTIONS: readonly GitPrAction[] = [
-	...GIT_PR_READ_AND_REVIEW_ACTIONS,
+	...GIT_PR_READ_ACTIONS,
+	'comment',
+	'review',
 	'create',
 ];
 
@@ -77,21 +77,24 @@ const INVESTIGATION_TOOLS: readonly ToolAllowance[] = [
 // File-mutation tools — the write access the issue calls out explicitly as
 // denied in comment-only mode. `write_file`/`string_replace` are this
 // repo's primary editors (see CLAUDE.md); `git_add`/`git_commit` stage and
-// commit the result; `execute_bash` covers running tests/build to verify a
-// fix before committing it.
+// commit the result. `execute_bash` is deliberately left out: the fix agent
+// runs unattended and is steered by a CI log an attacker can influence, and
+// a shell as the user can read credentials on disk (`~/.config/gh`,
+// `~/.ssh`) by absolute path whatever the runner's environment says. The
+// fix is verified by the CI run its draft PR or push triggers instead.
 const MUTATION_TOOLS: readonly ToolAllowance[] = [
 	{tool: 'write_file'},
 	{tool: 'string_replace'},
 	{tool: 'git_add'},
 	{tool: 'git_commit'},
-	{tool: 'execute_bash'},
 ];
 
 /**
  * Per-level tool allowlists.
  *
- * - comment-only: investigate + comment/review on PRs. No working-tree
- *   writes, no `git_pr` create/merge.
+ * - comment-only: investigate only, including read-only `git_pr` actions.
+ *   No working-tree writes and no `git_pr` comment/review/create: the
+ *   harness posts the result, never the agent.
  * - auto-fix: comment-only + file mutation/local commit + `git_pr` create
  *   (Phase 4's flow opens a fresh branch and a *draft* PR rather than
  *   pushing to the original branch directly — that workflow constraint is
@@ -108,7 +111,7 @@ const AUTO_FIX_TOOLS: readonly ToolAllowance[] = [
 const TRUST_POLICIES: Record<TrustLevel, readonly ToolAllowance[]> = {
 	'comment-only': [
 		...INVESTIGATION_TOOLS,
-		{tool: 'git_pr', actions: GIT_PR_READ_AND_REVIEW_ACTIONS},
+		{tool: 'git_pr', actions: GIT_PR_READ_ACTIONS},
 	],
 	// full-commit has the same tool surface as auto-fix by design (see the
 	// doc comment above) — shares the same array so the two levels can't
@@ -142,6 +145,26 @@ export function isActionAllowed(
 }
 
 /**
+ * Whether a `git_pr` call's arguments are permitted at the given trust level.
+ * `git_pr` selects its action by which field is present, so every present
+ * action field must be allowed - a call mixing a read with a `comment` is
+ * denied as a whole.
+ *
+ * `null` and `undefined` both mean "field not supplied" (`!= null` on
+ * purpose): git_pr runs its write actions only when the field is truthy, so
+ * `null` never selects one, and some providers fill unused optional fields
+ * with `null` - treating that as present would deny harmless read calls.
+ */
+export function isGitPrCallAllowed(
+	level: TrustLevel,
+	args: Record<string, unknown>,
+): boolean {
+	return GIT_PR_ALL_ACTIONS.filter(action => args[action] != null).every(
+		action => isActionAllowed(level, 'git_pr', action),
+	);
+}
+
+/**
  * Dedup'd tool names permitted at the given trust level, for callers that
  * want a flat list (e.g. to pass into `ToolManager.getFilteredTools` or a
  * subagent's `tools` config) rather than per-action checks.
@@ -167,15 +190,19 @@ export function isTrustLevel(value: unknown): value is TrustLevel {
 // trust level has already vetted them into getAllowedToolNames() above.
 // Deliberately excludes `git_pr` at every level, even full-commit: posting
 // to / mutating GitHub must always be harness-mediated (see
-// `postPrComment`/`pushBranch`/`createDraftPr` in `source/tools/git/utils.ts`),
+// `postPrComment`/`createDraftPr` in `source/tools/git/utils.ts`, and
+// `publishFromClone` in `source/daemon/ci-fix-orchestrator.ts`),
 // never an auto-approved raw tool call from the subagent itself — that
 // invariant is what makes the "harness posts, not the LLM" pattern from
 // Phase 2/3 hold even at the most-trusted level. The other MUTATION_TOOLS
-// (`write_file`/`string_replace`/`git_add`/`execute_bash`) don't need to be
+// (`write_file`/`string_replace`/`git_add`) don't need to be
 // listed here: their own approval policies already treat headless mode as
 // not needing approval. Only `git_commit` has an unconditional
 // `approval: true`, which is otherwise silently auto-denied in headless
 // mode (no approval-queue handler is ever registered there).
+// As defence in depth the CI fix runner is also started without any git/gh
+// credentials (`buildFixRunnerEnv` in `source/daemon/ci-fix-orchestrator.ts`);
+// the daemon publishes from its own process.
 const HEADLESS_AUTO_APPROVE_TOOLS: Record<TrustLevel, readonly string[]> = {
 	'comment-only': [],
 	'auto-fix': ['git_commit'],

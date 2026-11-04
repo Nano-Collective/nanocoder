@@ -312,7 +312,7 @@ test('a gh error grows the backoff interval instead of throwing', async t => {
 
 	const source = new CiEventSource(router, {
 		branch: 'feature-x',
-		pollIntervalMs: 100,
+		pollIntervalMs: 5_000,
 		execGhFn: async () => {
 			throw new Error('gh: rate limited');
 		},
@@ -322,11 +322,11 @@ test('a gh error grows the backoff interval instead of throwing', async t => {
 
 	await t.notThrowsAsync(() => source.start());
 	await fireScheduled(scheduler.calls[0]);
-	t.is(scheduler.calls[1]?.ms, 100);
+	t.is(scheduler.calls[1]?.ms, 5_000);
 
 	await fireScheduled(scheduler.calls[1]);
 
-	t.is(scheduler.calls[2]?.ms, 200, 'second consecutive failure should back off further');
+	t.is(scheduler.calls[2]?.ms, 10_000, 'second consecutive failure should back off further');
 });
 
 test('unparseable output backs off instead of retrying at the fixed interval', async t => {
@@ -335,7 +335,7 @@ test('unparseable output backs off instead of retrying at the fixed interval', a
 
 	const source = new CiEventSource(router, {
 		branch: 'feature-x',
-		pollIntervalMs: 100,
+		pollIntervalMs: 5_000,
 		execGhFn: async () => 'not json {{{',
 		scheduleFn: scheduler.scheduleFn,
 		clearFn: scheduler.clearFn,
@@ -343,13 +343,13 @@ test('unparseable output backs off instead of retrying at the fixed interval', a
 
 	await source.start();
 	await fireScheduled(scheduler.calls[0]);
-	t.is(scheduler.calls[1]?.ms, 100);
+	t.is(scheduler.calls[1]?.ms, 5_000);
 
 	await fireScheduled(scheduler.calls[1]);
 
 	t.is(
 		scheduler.calls[2]?.ms,
-		200,
+		10_000,
 		'a second consecutive parse failure should back off further, not retry at the base interval',
 	);
 });
@@ -361,7 +361,7 @@ test('a successful poll resets the backoff after prior failures', async t => {
 
 	const source = new CiEventSource(router, {
 		branch: 'feature-x',
-		pollIntervalMs: 100,
+		pollIntervalMs: 5_000,
 		execGhFn: async () => {
 			callCount++;
 			if (callCount === 1) throw new Error('transient');
@@ -373,14 +373,14 @@ test('a successful poll resets the backoff after prior failures', async t => {
 	});
 
 	await source.start(); // scheduled poll 1 (0ms)
-	await fireScheduled(scheduler.calls[0]); // call 1: fails, backoff -> 100
-	t.is(scheduler.calls[1]?.ms, 100);
+	await fireScheduled(scheduler.calls[0]); // call 1: fails, backoff -> 5_000
+	t.is(scheduler.calls[1]?.ms, 5_000);
 
 	await fireScheduled(scheduler.calls[1]); // call 2: succeeds, resets backoff
-	t.is(scheduler.calls[2]?.ms, 100);
+	t.is(scheduler.calls[2]?.ms, 5_000);
 
 	await fireScheduled(scheduler.calls[2]); // call 3: fails again, fresh attempt=0
-	t.is(scheduler.calls[3]?.ms, 100, 'backoff should restart from base after the reset');
+	t.is(scheduler.calls[3]?.ms, 5_000, 'backoff should restart from base after the reset');
 });
 
 test('stop prevents any further polls from being scheduled', async t => {
@@ -406,4 +406,101 @@ test('stop prevents any further polls from being scheduled', async t => {
 
 	t.is(scheduler.calls.length, callsBefore, 'no new poll should be scheduled after stop()');
 	t.is(events.length, 1, 'the already-emitted event count should be unaffected');
+});
+
+test('a throwing router.emit does not stop polling, and later runs still dispatch', async t => {
+	const scheduler = stubScheduler();
+	const emitted: number[] = [];
+	const router = {
+		emit: async (event: Event) => {
+			const runId = (event.payload as {runId: number}).runId;
+			emitted.push(runId);
+			if (runId === 1) throw new Error('dispatcher blew up');
+		},
+	} as unknown as EventRouter;
+	let persisted: number[] = [];
+
+	const source = new CiEventSource(router, {
+		branch: 'feature-x',
+		execGhFn: async () =>
+			runListJson([
+				{...FAILED_RUN, databaseId: 1, workflowName: 'A'},
+				{...FAILED_RUN, databaseId: 2, workflowName: 'B'},
+			]),
+		onSeenFailedRunIdsChanged: ids => {
+			persisted = ids;
+		},
+		scheduleFn: scheduler.scheduleFn,
+		clearFn: scheduler.clearFn,
+	});
+
+	await source.start();
+	await fireScheduled(scheduler.calls[0]);
+
+	t.deepEqual(emitted, [1, 2], 'the second run still dispatches');
+	t.deepEqual(persisted, [1, 2], 'dedup state is still persisted');
+	t.is(scheduler.calls.length, 2, 'the next poll is scheduled');
+});
+
+test('a throwing onDetected or branch lookup still schedules the next poll', async t => {
+	const {router} = captureRouter();
+	const scheduler = stubScheduler();
+	const errors: unknown[] = [];
+	const originalError = console.error;
+	console.error = (...args: unknown[]) => {
+		errors.push(args);
+	};
+
+	try {
+		const source = new CiEventSource(router, {
+			getCurrentBranchFn: async () => {
+				throw new Error('detached HEAD');
+			},
+			execGhFn: async () => runListJson([]),
+			scheduleFn: scheduler.scheduleFn,
+			clearFn: scheduler.clearFn,
+		});
+		await source.start();
+		await fireScheduled(scheduler.calls[0]);
+		t.is(scheduler.calls.length, 2, 'polling continues after a throw');
+		t.true(errors.length > 0, 'the failure is logged');
+
+		await fireScheduled(scheduler.calls[1]);
+		t.true(
+			(scheduler.calls[2]?.ms ?? 0) > (scheduler.calls[1]?.ms ?? 0),
+			'repeated throws back off',
+		);
+	} finally {
+		console.error = originalError;
+	}
+});
+
+test('a non-array run list backs off instead of throwing', async t => {
+	const {router} = captureRouter();
+	const scheduler = stubScheduler();
+	const source = new CiEventSource(router, {
+		branch: 'feature-x',
+		execGhFn: async () => 'null',
+		scheduleFn: scheduler.scheduleFn,
+		clearFn: scheduler.clearFn,
+	});
+	await source.start();
+	await fireScheduled(scheduler.calls[0]);
+	t.is(scheduler.calls.length, 2);
+});
+
+test('pollIntervalMs is clamped to the 5s minimum', async t => {
+	const {router} = captureRouter();
+	const scheduler = stubScheduler();
+	const source = new CiEventSource(router, {
+		branch: 'feature-x',
+		pollIntervalMs: 10,
+		maxPollIntervalMs: 20,
+		execGhFn: async () => runListJson([]),
+		scheduleFn: scheduler.scheduleFn,
+		clearFn: scheduler.clearFn,
+	});
+	await source.start();
+	await fireScheduled(scheduler.calls[0]);
+	t.is(scheduler.calls[1]?.ms, 5_000);
 });

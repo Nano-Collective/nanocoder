@@ -1,6 +1,7 @@
 import {Box, Text, useFocus, useInput} from 'ink';
 import Spinner from 'ink-spinner';
 import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
+import stringWidth from 'string-width';
 import {commandRegistry} from '@/commands';
 import {DevelopmentModeIndicator} from '@/components/development-mode-indicator';
 import {HelpRow} from '@/components/json-viewer/json-viewer';
@@ -132,7 +133,7 @@ async function getMCPResourceCompletions(partialPath: string): Promise<
 }
 
 // Legend for the `?` overlay. Keep in sync with the bindings handled below,
-// in TextInput (readline keys) and in App (Ctrl+S, Ctrl+C).
+// in TextInput (readline keys) and in App (Ctrl+S, Ctrl+C, Ctrl+G).
 const KEYBOARD_SHORTCUTS: Array<[keybind: string, label: string]> = [
 	['Enter', 'Submit prompt'],
 	['Ctrl+J / Opt+Enter', 'New line'],
@@ -149,6 +150,7 @@ const KEYBOARD_SHORTCUTS: Array<[keybind: string, label: string]> = [
 	['Ctrl+R', 'Reverse search prompt history'],
 	['Ctrl+T', 'Collapse / expand task list'],
 	['Ctrl+S', 'Attach / cycle running subagents'],
+	['Ctrl+G', 'Voice push-to-talk (when /voice is on)'],
 	['Esc', 'Cancel response'],
 	['Ctrl+C', 'Exit'],
 	['?', 'Toggle this overlay (in an empty prompt)'],
@@ -156,6 +158,9 @@ const KEYBOARD_SHORTCUTS: Array<[keybind: string, label: string]> = [
 
 // Prompt box width floor: keeps narrow terminals legible.
 const PROMPT_WIDTH_MIN = 40;
+// Columns a queued-message row loses inside the prompt box: the rounded
+// border (2), paddingX (2), and the '▸ '/'  ' selection marker (2).
+const QUEUED_ROW_OVERHEAD = 6;
 
 export function findReverseMatch(
 	history: InputState[],
@@ -166,7 +171,11 @@ export function findReverseMatch(
 	const queryLower = query.toLowerCase();
 	const start = Math.min(startIndex, history.length - 1);
 	for (let i = start; i >= 0; i--) {
-		if (history[i].displayValue.toLowerCase().includes(queryLower)) {
+		const displayValue = history[i]?.displayValue;
+		if (
+			typeof displayValue === 'string' &&
+			displayValue.toLowerCase().includes(queryLower)
+		) {
 			return {index: i, match: history[i]};
 		}
 	}
@@ -981,6 +990,16 @@ export default function UserInput({
 	const rawInputRef = useRawInput();
 
 	useInput((inputChar, key) => {
+		// Ink's App resets the active focus id on every Escape, and TextInput only
+		// accepts keys while focused. Every Escape that leaves the composer on
+		// screen (dismissing a suggestion, closing the legend or a menu, arming
+		// the clear hint, or a no-op on an empty prompt) must reclaim focus, or
+		// typing goes dead until something else refocuses it. Queued after Ink's
+		// reset in the same batch, so this update wins.
+		if (key.escape && !disabled) {
+			focus('user-input');
+		}
+
 		// `?` in an empty prompt toggles the shortcuts overlay, which swallows
 		// every other key until `?` or Escape closes it.
 		// Reverse search owns the keyboard: its query is empty at first, so
@@ -1404,12 +1423,23 @@ export default function UserInput({
 				? ` (${message.images.length} image${message.images.length === 1 ? '' : 's'})`
 				: '';
 		const singleLine = message.displayValue.replace(/\s+/g, ' ').trim();
-		// Truncate against the true terminal width like tool result rows do, not
-		// boxWidth (which floors at 40 and would overflow narrow terminals). The
-		// overhead covers the box border + padding (2), the '▸ '/'  ' marker (2),
-		// and a right-edge safety margin.
-		const maxLength = Math.max(8, actualWidth - imageSuffix.length - 6);
-		const text = truncate(singleLine, maxLength);
+		// Budget against the prompt box the row actually renders in, not the
+		// terminal: the box is promptWidth wide, minus its border (2) and
+		// paddingX (2), minus the '▸ '/'  ' marker (2). Anything wider wraps.
+		const maxLength = Math.max(
+			8,
+			promptWidth - QUEUED_ROW_OVERHEAD - stringWidth(imageSuffix),
+		);
+		// cli-truncate can overshoot by a column when the cut falls inside a
+		// double-width character, so re-truncate until it really fits.
+		let text = truncate(singleLine, maxLength);
+		for (
+			let budget = maxLength - 1;
+			stringWidth(text) > maxLength && budget > 0;
+			budget--
+		) {
+			text = truncate(singleLine, budget);
+		}
 		return `${text}${imageSuffix}`;
 	};
 	const commandCompletionWindow = useMemo(

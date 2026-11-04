@@ -15,9 +15,11 @@ import {
 import type { ToolManager } from "@/tools/tool-manager";
 import type {
 	AISDKCoreTool,
+	DevelopmentMode,
 	LLMChatResponse,
 	LLMClient,
 	Message,
+	ToolApprovalPolicy,
 	ToolCall,
 	ToolEntry,
 	ToolHandler,
@@ -28,7 +30,8 @@ import { runPlainConversation } from "./conversation.js";
 process.env.NO_COLOR = "1";
 
 interface FakeClientOptions {
-	responses: Array<Partial<LLMChatResponse>>;
+	// An Error entry makes that call reject, the way a provider failure does.
+	responses: Array<Partial<LLMChatResponse> | Error>;
 }
 
 function makeFakeClient(options: FakeClientOptions): LLMClient {
@@ -46,6 +49,9 @@ function makeFakeClient(options: FakeClientOptions): LLMClient {
 			if (!partial) {
 				throw new Error("FakeClient ran out of canned responses");
 			}
+			if (partial instanceof Error) {
+				throw partial;
+			}
 			return {
 				choices: partial.choices ?? [
 					{ message: { role: "assistant", content: "" } },
@@ -60,7 +66,7 @@ function makeFakeClient(options: FakeClientOptions): LLMClient {
 
 interface FakeToolManagerOptions {
 	knownTools?: Set<string>;
-	needsApprovalByName?: Record<string, boolean>;
+	needsApprovalByName?: Record<string, ToolApprovalPolicy>;
 }
 
 function makeFakeToolManager(opts: FakeToolManagerOptions = {}): ToolManager {
@@ -267,6 +273,73 @@ test("returns tool-approval-required when a tool needs approval and mode is not 
 	t.is(outcome.steps, 1);
 	if (outcome.kind === TOOL_APPROVAL_REQUIRED_KIND) {
 		t.deepEqual(outcome.toolNames, ["risky_tool"]);
+		t.false(outcome.autoAcceptWouldRun);
+	}
+});
+
+// Mirrors the real policies: file edits are waived in auto-accept, bash is not.
+const waivedInAutoAccept: ToolApprovalPolicy = (_args, mode) =>
+	mode !== "auto-accept";
+const neverWaived: ToolApprovalPolicy = () => true;
+
+async function runBlockedTurn(
+	developmentMode: DevelopmentMode,
+	toolNames: string[],
+) {
+	const toolCalls: ToolCall[] = toolNames.map((name, index) => ({
+		id: `call-${index}`,
+		function: { name, arguments: {} },
+	}));
+	const client = makeFakeClient({
+		responses: [
+			{
+				choices: [
+					{
+						message: {
+							role: "assistant",
+							content: "",
+							tool_calls: toolCalls,
+						},
+					},
+				],
+			},
+		],
+	});
+	const toolManager = makeFakeToolManager({
+		knownTools: new Set(["edit_tool", "bash_tool"]),
+		needsApprovalByName: {
+			edit_tool: waivedInAutoAccept,
+			bash_tool: neverWaived,
+		},
+	});
+
+	return runPlainConversation({
+		client,
+		toolManager,
+		systemMessage: SYSTEM,
+		initialMessages: [USER],
+		developmentMode,
+		nonInteractiveAlwaysAllow: [],
+		abortSignal: new AbortController().signal,
+	});
+}
+
+test("autoAcceptWouldRun is true when auto-accept would run every blocked call", async (t) => {
+	const outcome = await runBlockedTurn("normal", ["edit_tool"]);
+
+	t.is(outcome.kind, TOOL_APPROVAL_REQUIRED_KIND);
+	if (outcome.kind === TOOL_APPROVAL_REQUIRED_KIND) {
+		t.true(outcome.autoAcceptWouldRun);
+	}
+});
+
+test("autoAcceptWouldRun is false when auto-accept would still ask for a call", async (t) => {
+	const outcome = await runBlockedTurn("normal", ["edit_tool", "bash_tool"]);
+
+	t.is(outcome.kind, TOOL_APPROVAL_REQUIRED_KIND);
+	if (outcome.kind === TOOL_APPROVAL_REQUIRED_KIND) {
+		t.deepEqual(outcome.toolNames, ["edit_tool", "bash_tool"]);
+		t.false(outcome.autoAcceptWouldRun);
 	}
 });
 
@@ -792,6 +865,88 @@ test("a successful tool handler is logged with a result and a null error", async
 	t.is(logged.error, null);
 	t.truthy(logged.result);
 	t.regex(String(logged.result), /tool-output/);
+});
+
+// --- Provider failures ---
+//
+// client.chat rejects on an HTTP error or a dropped connection. The loop turns
+// that into an `error` outcome, so the caller still prints its report and the
+// tool calls that already ran are not lost.
+
+test("a provider error after a tool call returns an error outcome with the tool call", async (t) => {
+	const toolCall: ToolCall = {
+		id: "call-1",
+		function: { name: "safe_tool", arguments: { command: "echo hi" } },
+	};
+	const client = makeFakeClient({
+		responses: [
+			{
+				choices: [
+					{
+						message: {
+							role: "assistant",
+							content: "",
+							tool_calls: [toolCall],
+						},
+					},
+				],
+			},
+			new Error("Server error (500): upstream failed"),
+		],
+	});
+	const toolManager = makeFakeToolManager({
+		knownTools: new Set(["safe_tool"]),
+		needsApprovalByName: { safe_tool: false },
+	});
+	setToolRegistryGetter(() => ({
+		safe_tool: (async () => "tool-output") as ToolHandler,
+	}));
+
+	const outcome = await runPlainConversation({
+		client,
+		toolManager,
+		systemMessage: SYSTEM,
+		initialMessages: [USER],
+		developmentMode: "auto-accept",
+		nonInteractiveAlwaysAllow: [],
+		abortSignal: new AbortController().signal,
+	});
+
+	t.is(outcome.kind, "error");
+	if (outcome.kind !== "error") return;
+	t.is(outcome.message, "Server error (500): upstream failed");
+	t.is(outcome.toolCalls.length, 1);
+	t.is(outcome.toolCalls[0].name, "safe_tool");
+	t.deepEqual(outcome.toolCalls[0].arguments, { command: "echo hi" });
+	t.regex(String(outcome.toolCalls[0].result), /tool-output/);
+	// The failed request counts too: `steps` is how many times the model was called.
+	t.is(outcome.steps, 2);
+});
+
+test("a request cancelled by the abort signal reports Aborted", async (t) => {
+	const controller = new AbortController();
+	const client = {
+		...makeFakeClient({ responses: [] }),
+		chat: async () => {
+			controller.abort();
+			throw new Error("Operation was cancelled");
+		},
+	} as unknown as LLMClient;
+
+	const outcome = await runPlainConversation({
+		client,
+		toolManager: makeFakeToolManager(),
+		systemMessage: SYSTEM,
+		initialMessages: [USER],
+		developmentMode: "auto-accept",
+		nonInteractiveAlwaysAllow: [],
+		abortSignal: controller.signal,
+	});
+
+	t.is(outcome.kind, "error");
+	if (outcome.kind !== "error") return;
+	t.is(outcome.message, "Aborted");
+	t.is(outcome.steps, 1);
 });
 
 test("multiple tool calls in one turn log success and failure independently", async (t) => {

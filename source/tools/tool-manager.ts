@@ -1,3 +1,4 @@
+import {randomUUID} from 'node:crypto';
 import {getAppConfig} from '@/config/index';
 import {getBraveSearchApiKey} from '@/config/nanocoder-tools-config';
 import {buildToolEntry} from '@/custom-tools/build-tool';
@@ -6,7 +7,7 @@ import {CustomToolLoader} from '@/custom-tools/loader';
 // inside `initializeMCP()` so sessions without MCP servers never pay the
 // cost of the @modelcontextprotocol/sdk import graph.
 import type {MCPClient} from '@/mcp/mcp-client';
-import {allToolExports} from '@/tools/index';
+import {getAllToolExports} from '@/tools/index';
 import {getToolsForProfile, resolveToolProfile} from '@/tools/tool-profiles';
 import {ToolRegistry} from '@/tools/tool-registry';
 import type {TuneConfig} from '@/types/config';
@@ -24,6 +25,8 @@ import type {
 	ToolValidator,
 } from '@/types/index';
 import type {MCPHealthChange} from '@/types/mcp';
+import {getLogger} from '@/utils/logging';
+import {logWarning} from '@/utils/message-queue';
 import {getShutdownManager} from '@/utils/shutdown';
 
 /**
@@ -144,13 +147,34 @@ export class ToolManager {
 		}
 	>();
 
-	constructor() {
-		this.registry = ToolRegistry.fromToolExports(allToolExports);
+	/** The manager this one is layered over; set only for a session's manager. */
+	private readonly parent?: ToolManager;
+	/** Shutdown handler name; one per manager, so closing one leaves the rest. */
+	private readonly mcpShutdownName: string;
+
+	constructor(parent?: ToolManager) {
+		this.parent = parent;
+		this.mcpShutdownName = parent ? `mcp-client:${randomUUID()}` : 'mcp-client';
+		if (parent) {
+			this.registry = new ToolRegistry(parent.registry);
+			this.customTools = parent.customTools;
+			return;
+		}
+		this.registry = ToolRegistry.fromToolExports(getAllToolExports());
 
 		// Remove web_search if no Brave Search API key is configured
 		if (!getBraveSearchApiKey()) {
 			this.registry.unregister('web_search');
 		}
+	}
+
+	/**
+	 * A manager for one ACP session: everything this one offers, read live,
+	 * plus MCP servers of its own that no other session sees. Connecting and
+	 * disconnecting it only ever touches those servers.
+	 */
+	forSession(): ToolManager {
+		return new ToolManager(this);
 	}
 
 	/**
@@ -189,7 +213,7 @@ export class ToolManager {
 					} else if (change.status === 'connected') {
 						const entries =
 							this.mcpClient?.getToolEntries(change.serverName) || [];
-						this.registry.registerMany(entries);
+						this.registerMcpTools(entries);
 					}
 				}),
 			].filter((unsubscribe): unsubscribe is () => void => !!unsubscribe);
@@ -198,7 +222,7 @@ export class ToolManager {
 			};
 
 			getShutdownManager().register({
-				name: 'mcp-client',
+				name: this.mcpShutdownName,
 				priority: 20,
 				handler: async () => {
 					await this.disconnectMCP();
@@ -210,15 +234,53 @@ export class ToolManager {
 				onProgress,
 			);
 
-			const mcpToolEntries = this.mcpClient.getToolEntries();
-			this.registry.registerMany(mcpToolEntries);
+			this.registerMcpTools(this.mcpClient.getToolEntries());
+
+			// Tools are keyed by name, so a name two servers share silently
+			// reaches only one of them. Say which.
+			const conflicts = this.mcpClient.getToolNameConflicts();
+			if (conflicts.length > 0) {
+				const lines = conflicts
+					.slice(0, 5)
+					.map(
+						c =>
+							`"${c.tool}" (${c.servers.join(', ')}; calls go to ${c.active})`,
+					);
+				const more =
+					conflicts.length > 5 ? ` and ${conflicts.length - 5} more` : '';
+				const message = `MCP servers expose the same tool names, so only one server handles each: ${lines.join('; ')}${more}.`;
+				// An ACP session's manager has no TUI to show a chat warning;
+				// log it there, as registerMcpTools does for its own collisions.
+				if (this.parent) getLogger().warn(message);
+				else logWarning(message);
+			}
 
 			return results;
 		}
 		return [];
 	}
 
+	/**
+	 * Register a server's tools. A session's manager never takes a name its
+	 * parent already offers: the existing tool wins and the new one is skipped.
+	 */
+	private registerMcpTools(entries: ToolEntry[]): void {
+		const free = entries.filter(entry => {
+			const taken = this.parent?.hasTool(entry.name);
+			if (taken) {
+				getLogger().warn(
+					`MCP tool "${entry.name}" skipped: a tool with that name already exists`,
+				);
+			}
+			return !taken;
+		});
+		this.registry.registerMany(free);
+	}
+
 	protected async createMCPClient(): Promise<MCPClient> {
+		// The parent's factory builds a new client; its own is not handed over.
+		// Going through it keeps one seam for swapping the client in tests.
+		if (this.parent) return this.parent.createMCPClient();
 		const {MCPClient} = await import('@/mcp/mcp-client');
 		return new MCPClient();
 	}
@@ -273,7 +335,7 @@ export class ToolManager {
 	getAvailableToolNames(
 		tuneConfig?: TuneConfig,
 		developmentMode?: DevelopmentMode,
-		disabledTools?: string[],
+		disabledTools?: readonly string[],
 		model?: string,
 	): string[] {
 		let names = this.getToolNames();
@@ -328,10 +390,15 @@ export class ToolManager {
 		return filterToolNamesForMode(names, mode, {
 			getCustomToolPolicy: name => this.getCustomToolPolicy(name),
 			getMcpReadOnly: name =>
-				mode === 'plan'
-					? this.mcpClient?.getToolMapping().get(name)?.readOnly
-					: undefined,
+				mode === 'plan' ? this.mcpReadOnly(name) : undefined,
 		});
+	}
+
+	private mcpReadOnly(name: string): boolean | undefined {
+		return (
+			this.mcpClient?.getToolMapping().get(name)?.readOnly ??
+			this.parent?.mcpReadOnly(name)
+		);
 	}
 
 	/**
@@ -489,12 +556,7 @@ export class ToolManager {
 	}
 
 	getMCPToolInfo(toolName: string): {isMCPTool: boolean; serverName?: string} {
-		if (!this.mcpClient) {
-			return {isMCPTool: false};
-		}
-
-		const toolMapping = this.mcpClient.getToolMapping();
-		const mapping = toolMapping.get(toolName);
+		const mapping = this.mcpClient?.getToolMapping().get(toolName);
 
 		if (mapping) {
 			return {
@@ -503,7 +565,7 @@ export class ToolManager {
 			};
 		}
 
-		return {isMCPTool: false};
+		return this.parent?.getMCPToolInfo(toolName) ?? {isMCPTool: false};
 	}
 
 	async disconnectMCP(): Promise<void> {
@@ -519,7 +581,7 @@ export class ToolManager {
 			this.mcpClient = null;
 		}
 
-		getShutdownManager().unregister('mcp-client');
+		getShutdownManager().unregister(this.mcpShutdownName);
 	}
 
 	getToolEntry(toolName: string): ToolEntry | undefined {
