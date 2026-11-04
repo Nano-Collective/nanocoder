@@ -187,6 +187,33 @@ test.serial('startAgentExecution forwards the parent execution context', async t
 	});
 });
 
+test.serial('startAgentExecution passes the calling tool call and run to the executor', async t => {
+	let receivedContext: unknown;
+	setAgentToolExecutor({
+		execute: async (...args: unknown[]) => {
+			receivedContext = args[4];
+			return {
+				subagentName: 'explore',
+				output: 'done',
+				success: true,
+				executionTimeMs: 1,
+			};
+		},
+	} as unknown as SubagentExecutor);
+
+	const {promise} = startAgentExecution(
+		{subagent_type: 'explore', description: 'Test'},
+		{
+			sessionId: '11111111-1111-4111-8111-111111111111',
+			toolCallId: 'agent-call',
+			subagentRunId: 'outer-run',
+		},
+	);
+	await promise;
+
+	t.like(receivedContext, {toolCallId: 'agent-call', subagentRunId: 'outer-run'});
+});
+
 // ============================================================================
 // ReadOnly Tests
 // ============================================================================

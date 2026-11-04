@@ -384,6 +384,23 @@ export const processAssistantResponse = async (
 			currentModel,
 		) ?? [];
 	const tools = toolManager ? toolManager.getFilteredTools(availableNames) : {};
+	// What the mode offers right now. Shift+Tab can change the mode while a turn
+	// is running, so a call is checked against this rather than the list above,
+	// which is only what this request offered.
+	const liveAvailableNames = () =>
+		toolManager?.getAvailableToolNames(
+			tune,
+			developmentModeRef?.current ?? developmentMode,
+			undefined,
+			currentModel,
+		);
+	// Why `toolCall` can't run now, or undefined when the mode still offers it.
+	const notOfferedReason = (toolCall: ToolCall) => {
+		const offered = liveAvailableNames();
+		return offered && !offered.includes(toolCall.function.name)
+			? `The tool "${toolCall.function.name}" is not available in the current mode.`
+			: undefined;
+	};
 
 	let streamedContent = '';
 	let streamedReasoning = '';
@@ -615,7 +632,11 @@ export const processAssistantResponse = async (
 		);
 	}
 
-	const partition = filterValidToolCalls(allToolCalls, toolManager);
+	const partition = filterValidToolCalls(
+		allToolCalls,
+		toolManager,
+		liveAvailableNames(),
+	);
 	const {validToolCalls, errorResults} = partition;
 	const {emittedToolCalls, resultsForAbandonedTurn} =
 		buildAbandonedTurnMessages(partition);
@@ -958,8 +979,8 @@ export const processAssistantResponse = async (
 						// tools are still executing takes effect on the next call.
 						mode: developmentModeRef?.current ?? developmentMode,
 						// The top-level alwaysAllow list applies in interactive
-						// sessions too; plan mode stays safe because its excluded
-						// tools are never offered in the first place.
+						// sessions too; plan mode stays safe because a call to a tool
+						// its mode excludes is refused before it gets here.
 						alwaysAllow: getAppConfig().alwaysAllow ?? [],
 					},
 				));
@@ -1004,6 +1025,18 @@ export const processAssistantResponse = async (
 		};
 
 		const turnResults: ToolResult[] = [...blockedResults];
+
+		// Refuse `toolCall` and cancel the rest of the auto batch behind it.
+		const stopBatchAt = (toolCall: ToolCall, reason: string) => {
+			refuseToolCall(toolCall, reason);
+			turnResults.push(
+				blockedResults[blockedResults.length - 1],
+				...createCancellationResults(
+					autoTools.slice(autoTools.indexOf(toolCall) + 1),
+				),
+			);
+			return false;
+		};
 
 		const inArchitectMode =
 			developmentModeRef?.current === 'architect' ||
@@ -1065,6 +1098,12 @@ export const processAssistantResponse = async (
 					beforeExecute: async toolCall => {
 						if (toolCall.function.name === '__xml_validation_error__')
 							return true;
+						// A mode switch since this batch was classified can hide the
+						// tool; alwaysAllow must not run it under the new mode.
+						const notOffered = notOfferedReason(toolCall);
+						if (notOffered) {
+							return stopBatchAt(toolCall, notOffered);
+						}
 						const needsApproval = await resolveToolApproval(
 							toolCall.function.name,
 							toolManager?.getToolEntry(toolCall.function.name),
@@ -1082,14 +1121,7 @@ export const processAssistantResponse = async (
 							),
 						);
 						if (vote.decision === 'deny') {
-							refuseToolCall(toolCall, vote.reason);
-							turnResults.push(
-								blockedResults[blockedResults.length - 1],
-								...createCancellationResults(
-									autoTools.slice(autoTools.indexOf(toolCall) + 1),
-								),
-							);
-							return false;
+							return stopBatchAt(toolCall, vote.reason);
 						}
 						confirmTools.unshift(
 							...autoTools.slice(autoTools.indexOf(toolCall)),
@@ -1158,6 +1190,13 @@ export const processAssistantResponse = async (
 
 			for (let i = 0; i < confirmTools.length; i++) {
 				const toolCall = confirmTools[i];
+				// Don't ask about a tool a mode switch has since hidden.
+				const notOffered = notOfferedReason(toolCall);
+				if (notOffered) {
+					refuseToolCall(toolCall, notOffered);
+					turnResults.push(blockedResults[blockedResults.length - 1]);
+					continue;
+				}
 				// Escape answers the prompt directly, but a turn aborted any
 				// other way must also release it - otherwise the loop stays
 				// parked here and the confirmation for a dead turn stays on
