@@ -167,7 +167,7 @@ Beyond providers and MCP servers, `agents.config.json` supports application-leve
 
 ### Language servers
 
-Nanocoder discovers installed language servers by scanning `PATH` when it starts. Discovery is asynchronous and enabled by default. To turn it off while still using explicitly configured servers, set `nanocoder.lsp.autoDiscover` to `false`:
+Nanocoder discovers installed language servers by scanning `PATH` when the LSP manager starts. Discovery is asynchronous and enabled by default. If you install a server while Nanocoder is running, restart it to discover the new server; each new discovery pass takes a fresh `PATH` snapshot. To turn auto-discovery off while still using explicitly configured servers, set `nanocoder.lsp.autoDiscover` to `false`:
 
 ```json
 {

@@ -347,8 +347,8 @@ async function isRunnableFile(path: string): Promise<boolean> {
 
 /**
  * Check if a command is available in PATH or locally in node_modules.
- * PATH directories are read asynchronously once per process/environment; no
- * `where`/`which` child process is needed during startup.
+ * PATH directories are scanned asynchronously and cached until the next
+ * discovery pass; no `where`/`which` child process is needed during startup.
  * @internal
  */
 export async function findCommand(command: string): Promise<string | null> {
