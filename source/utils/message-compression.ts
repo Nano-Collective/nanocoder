@@ -283,12 +283,13 @@ function compressToolResultDefault(toolName: string, content: string): string {
 		return `Tool: ${toolName}\nResult: success`;
 	}
 
-	// A body that mentions both success and failure is ambiguous: reducing it
-	// to a single line could misrepresent the outcome (e.g. a build log that
-	// says "completed successfully" but also reports failures). Keep the
-	// leading lines verbatim instead, same shape as conservative mode.
+	// A body that mentions both success and failure is ambiguous: a one-line
+	// summary could misrepresent the outcome, and the leading lines alone may
+	// not contain the failure (e.g. it is reported at the end of a build log).
+	// Keep the first line plus a line that reports the failure so the summary
+	// can neither claim success nor drop the failure.
 	if (mentionsSuccessAndFailure(content)) {
-		return compressToolResultConservative(toolName, content);
+		return compressMixedToolResult(toolName, content);
 	}
 
 	// Extract key information like first line, key metrics, etc.
@@ -302,6 +303,24 @@ function compressToolResultDefault(toolName: string, content: string): string {
 
 	// Fallback: truncate to first meaningful line
 	return `Tool: ${toolName}\nResult: ${firstLine.substring(0, 100)}`;
+}
+
+// Summarise a tool result that mentions both success and failure. The first
+// line and the first failure line always survive, so a failure reported past
+// the leading lines cannot be truncated away while the success line stays.
+function compressMixedToolResult(toolName: string, content: string): string {
+	const lines = content.split('\n').filter(line => line.trim());
+	const kept: string[] = [];
+	if (lines.length > 0) {
+		kept.push(lines[0]);
+	}
+
+	const failureLine = lines.slice(1).find(line => checkForError(line));
+	if (failureLine !== undefined && failureLine !== kept[0]) {
+		kept.push(failureLine);
+	}
+
+	return `Tool: ${toolName}\nResult: ${kept.join('\n')}`;
 }
 
 // Compress tool result in conservative mode
@@ -400,9 +419,15 @@ function mentionsSuccessAndFailure(content: string): boolean {
 	return successMention.test(content) && checkForError(content);
 }
 
-// Check for error in content
+// Check for error in content. Negated outcome phrasing ("no errors",
+// "0 failures", "zero exceptions") describes a passing run, so remove it
+// before sniffing for failure words.
 function checkForError(content: string): boolean {
-	return /error|exception|failed|failure/i.test(content);
+	const withoutNegatedOutcomes = content.replace(
+		/\b(?:no|0|zero)\s+(?:errors?|failures?|exceptions?)\b/gi,
+		'',
+	);
+	return /error|exception|failed|failure/i.test(withoutNegatedOutcomes);
 }
 
 // Extract key information from tool result
