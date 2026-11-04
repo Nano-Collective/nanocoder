@@ -881,7 +881,7 @@ test.serial(
 		const shutdown: CapturedShutdown = { code: null };
 		const stdout = capturingStdout();
 		const stderr = capturingStderr();
-		const calls: Array<{ systemPrompt: string; query: string }> = [];
+		const calls: Array<{ query: string }> = [];
 		try {
 			await runPlainShell({
 				prompt: "refactor the auth module",
@@ -898,10 +898,10 @@ test.serial(
 						toolCalls: [],
 					}),
 					getShutdownManager: makeFakeShutdownManager(shutdown),
-					appendRelevantProjectContextWithCount: async (systemPrompt, query) => {
-						calls.push({ systemPrompt, query });
+					buildProjectContextSection: async (query) => {
+						calls.push({ query });
 						return {
-							systemPrompt: `${systemPrompt}\n\n## Project Context\n\n- Auth uses Clerk.`,
+							content: "## Project Context\n\n- Auth uses Clerk.",
 							memoryCount: 2,
 						};
 					},
@@ -941,8 +941,8 @@ test.serial(
 						toolCalls: [],
 					}),
 					getShutdownManager: makeFakeShutdownManager(shutdown),
-					appendRelevantProjectContextWithCount: async (systemPrompt) => ({
-						systemPrompt,
+					buildProjectContextSection: async () => ({
+						content: "",
 						memoryCount: 0,
 					}),
 				}),
