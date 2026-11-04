@@ -2003,6 +2003,121 @@ test('MCPClient drops a reconnect that completes after disconnect', async t => {
 	t.is((client as any).reconnectTimers.size, 0);
 });
 
+// What the SDK's StreamableHTTPClientTransport throws when a restarted
+// server no longer knows the client's session id.
+const sessionNotFoundError = () => {
+	const error = new Error(
+		'Streamable HTTP error: Error POSTing to endpoint: {"jsonrpc":"2.0","error":{"code":-32001,"message":"Session not found"},"id":null}',
+	);
+	(error as any).code = 404;
+	return error;
+};
+
+// A server whose first client's session dies on `kill()`; every later client
+// (a fresh session) is healthy, as with a real server restart.
+const makeRestartingServer = () => {
+	const state = {down: false, restarted: false};
+	const make = (index: number) => {
+		const sdkClient: any = makeSdkClient();
+		sdkClient.ping = async () => {
+			if (index > 0) return;
+			if (state.restarted) throw sessionNotFoundError();
+			if (state.down) throw new TypeError('fetch failed');
+		};
+		const connect = sdkClient.connect;
+		sdkClient.connect = async (transport: any) => {
+			if (state.down && !state.restarted) throw new TypeError('fetch failed');
+			await connect(transport);
+		};
+		return sdkClient;
+	};
+	return {state, make};
+};
+
+test('MCPClient reconnects a restarted HTTP server whose session is gone', async t => {
+	const server = makeRestartingServer();
+	const client = new QueueMCPClient(server.make);
+	const changes: Array<{status: string}> = [];
+	client.onHealthChange(change => changes.push(change));
+	try {
+		await client.connectToServer({...httpServer, healthCheckInterval: 10});
+		server.state.restarted = true;
+
+		await waitFor(() => client.created.length === 2);
+		await waitFor(() => client.isServerConnected(httpServer.name));
+		t.is((client as any).clients.get(httpServer.name), client.created[1]);
+		t.true(client.created[0].closed, 'the stale client is closed');
+		t.deepEqual(
+			client.getServerTools(httpServer.name).map(tool => tool.name),
+			['reco_tool'],
+		);
+		t.is(Object.keys(client.getNativeToolsRegistry()).length, 1);
+		t.deepEqual(
+			changes.map(change => change.status),
+			['unhealthy', 'connected'],
+		);
+
+		// The new session stays healthy and no further clients are created.
+		await new Promise(resolve => setTimeout(resolve, 60));
+		t.is(client.created.length, 2);
+		t.true(client.isServerConnected(httpServer.name));
+	} finally {
+		await client.disconnect();
+	}
+});
+
+test('MCPClient reconnects an HTTP server that went down and came back', async t => {
+	const server = makeRestartingServer();
+	const client = new QueueMCPClient(server.make);
+	try {
+		await client.connectToServer({...httpServer, healthCheckInterval: 10});
+		server.state.down = true;
+		await waitFor(() => !client.isServerConnected(httpServer.name));
+		// While down, recovery goes through reconnect attempts, which fail.
+		await waitFor(() => client.created.length >= 2);
+		t.false(client.isServerConnected(httpServer.name));
+
+		server.state.restarted = true;
+		await waitFor(() => client.isServerConnected(httpServer.name), 3000);
+		const current = (client as any).clients.get(httpServer.name);
+		t.not(current, client.created[0]);
+		t.is(client.getServerTools(httpServer.name).length, 1);
+		t.is((client as any).reconnectAttempts.size, 0);
+		t.is((client as any).reconnectTimers.size, 0);
+	} finally {
+		await client.disconnect();
+	}
+});
+
+test('MCPClient keeps pinging an unhealthy stdio server instead of reconnecting', async t => {
+	let pingCalls = 0;
+	const client = new QueueMCPClient(() => {
+		const sdkClient: any = makeSdkClient();
+		sdkClient.ping = async () => {
+			pingCalls++;
+			throw sessionNotFoundError();
+		};
+		return sdkClient;
+	});
+	const serverName = 'stdio-server';
+	const sdkClient = (client as any).createClient();
+	(client as any).clients.set(serverName, sdkClient);
+	(client as any).serverConfigs.set(serverName, {
+		name: serverName,
+		transport: 'stdio',
+		command: 'true',
+	});
+	(client as any).health.set(serverName, 'unhealthy');
+	(client as any).startHealthChecks(serverName, sdkClient, {}, 5);
+	try {
+		await waitFor(() => pingCalls >= 3);
+		t.is((client as any).reconnectTimers.size, 0);
+		t.is(client.created.length, 1);
+	} finally {
+		await (client as any).forgetServer(serverName);
+	}
+});
+
 test('MCPClient rejects calls to an unhealthy server clearly', async t => {
 	const client = new SeamMCPClient({});
 	const serverName = 'unhealthy-server';
@@ -2601,6 +2716,34 @@ test('MCPClient.disconnect: clears resources and prompts', async t => {
 	t.is(client.getServerPrompts('mock').length, 0);
 	t.is(client.getAllResources().length, 0);
 	t.is(client.getAllPrompts().length, 0);
+});
+
+test('getToolNameConflicts names tools two servers share and which one handles them', t => {
+	const client = new MCPClient();
+	const internal = client as unknown as {
+		serverTools: Map<string, Array<{name: string; serverName: string}>>;
+	};
+	internal.serverTools.set('alpha', [
+		{name: 'echo', serverName: 'alpha'},
+		{name: 'only-alpha', serverName: 'alpha'},
+	]);
+	internal.serverTools.set('beta', [{name: 'echo', serverName: 'beta'}]);
+
+	t.deepEqual(client.getToolNameConflicts(), [
+		{tool: 'echo', servers: ['alpha', 'beta'], active: 'beta'},
+	]);
+	// The reported winner is the one calls are actually routed to.
+	t.is(client.getToolMapping().get('echo')?.serverName, 'beta');
+});
+
+test('getToolNameConflicts is empty when tool names are unique', t => {
+	const client = new MCPClient();
+	const internal = client as unknown as {
+		serverTools: Map<string, Array<{name: string; serverName: string}>>;
+	};
+	internal.serverTools.set('alpha', [{name: 'a', serverName: 'alpha'}]);
+	internal.serverTools.set('beta', [{name: 'b', serverName: 'beta'}]);
+	t.deepEqual(client.getToolNameConflicts(), []);
 });
 
 // ============================================================================
