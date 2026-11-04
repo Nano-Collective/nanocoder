@@ -15,7 +15,7 @@ sidebar_order: 18
 	"name": "Requesty",
 	"baseUrl": "https://router.requesty.ai/v1",
 	"apiKey": "${REQUESTY_API_KEY}",
-	"models": ["openai/gpt-4o-mini"]
+	"models": ["openai/gpt-6.1-sol"]
 }
 ```
 
@@ -25,7 +25,7 @@ sidebar_order: 18
 2. Generate an API key from the [API keys page](https://app.requesty.ai/api-keys)
 3. Browse available models in the [model list](https://app.requesty.ai/router/list)
 
-Model names follow the `provider/model-name` format, e.g. `openai/gpt-4o-mini` or `anthropic/claude-3.5-sonnet`.
+Model names follow the `provider/model-name` format, e.g. `openai/gpt-6.1-sol` or `anthropic/claude-sonnet-5-5`.
 
 ## Fetching Available Models
 
