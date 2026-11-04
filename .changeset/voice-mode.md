@@ -5,3 +5,4 @@
 - Cancelling a bash command now also stops background processes it left running, and force-kills any that ignore the normal stop signal after two seconds.
 - The Whisper model is downloaded with a checksum on every platform, a missing model counts as an uninstalled dependency, and installer output is captured instead of drawn over the UI. Ctrl+G is listed in the `?` shortcuts overlay.
 - Voice state shows on the mode line under the prompt (`voice (Ctrl+G to talk)`, `● listening`, `transcribing…`, `speaking`) instead of in a separate bordered panel, and voice notices print as plain lines.
+- On macOS the installer only asks Homebrew for the tools that are missing (`sox`, `whisper.cpp`), prefers native Homebrew in `/opt/homebrew` on Apple silicon, and explains a failed Homebrew install in a few lines (for example Intel Homebrew running under Rosetta, or an outdated Xcode) with the command to rerun for the full output.
