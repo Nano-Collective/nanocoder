@@ -29,7 +29,7 @@ function ipv4InCidr(ip: number, base: number, prefix: number): boolean {
 	return (ip & mask) === (base & mask);
 }
 
-function isPrivateOrLocalIpv4(ip: number): boolean {
+function isNonPublicIpv4(ip: number): boolean {
 	return (
 		ipv4InCidr(ip, 0x00000000, 8) || // 0.0.0.0/8
 		ipv4InCidr(ip, 0x0a000000, 8) || // 10.0.0.0/8
@@ -38,11 +38,13 @@ function isPrivateOrLocalIpv4(ip: number): boolean {
 		ipv4InCidr(ip, 0xa9fe0000, 16) || // 169.254.0.0/16
 		ipv4InCidr(ip, 0xac100000, 12) || // 172.16.0.0/12
 		ipv4InCidr(ip, 0xc0a80000, 16) || // 192.168.0.0/16
+		ipv4InCidr(ip, 0xc0000000, 24) || // 192.0.0.0/24
 		ipv4InCidr(ip, 0xc0000200, 24) || // 192.0.2.0/24 TEST-NET-1
-		ipv4InCidr(ip, 0xc0000000, 24) || // 192.0.0.0/24 (incl. 192.0.0.0/29 etc.)
 		ipv4InCidr(ip, 0xc6120000, 16) || // 198.18.0.0/15 benchmarking
+		ipv4InCidr(ip, 0xc6336400, 24) || // 198.51.100.0/24 TEST-NET-2
+		ipv4InCidr(ip, 0xcb007100, 24) || // 203.0.113.0/24 TEST-NET-3
 		ipv4InCidr(ip, 0xe0000000, 4) || // 224.0.0.0/4 multicast
-		ip === 0xffffffff // 255.255.255.255 limited broadcast
+		ipv4InCidr(ip, 0xf0000000, 4) // 240.0.0.0/4 reserved (incl. 255.255.255.255 limited broadcast)
 	);
 }
 
@@ -61,7 +63,7 @@ function ipv4FromMappedIpv6(host: string): number | null {
  * an embedded dotted-quad IPv4 tail. Returns null when `host` is not a
  * valid IPv6 literal.
  */
-function normalizeIpv6(host: string): number[] | null {
+export function normalizeIpv6(host: string): number[] | null {
 	const dotted = /(\d+\.\d+\.\d+\.\d+)$/.exec(host);
 	let expanded = host;
 	if (dotted?.[1]) {
@@ -99,26 +101,31 @@ function normalizeIpv6(host: string): number[] | null {
 /**
  * Extract the embedded IPv4 address from the IPv6 spellings that can carry
  * one (RFC 4291): IPv4-compatible `::/96` (`::127.0.0.1`), well-known
- * NAT64 prefix `64:ff9b::/96`, 6to4 `2002::/16`, and the
+ * NAT64 prefix `64:ff9b::/96` (RFC 6052 §2.1), 6to4 `2002::/16`, and the
  * `::ffff:0:0/96` (IPv4-translated) family. The standard
  * IPv4-mapped `::ffff:a.b.c.d` is handled by `ipv4FromMappedIpv6`.
  *
- * IPv6 addresses in any written form are normalised first: URL.hostname
- * does not guarantee a canonical spelling, so `::ffff:0:7f00:1` and
- * `::ffff:0:127.0.0.1` must both be recognised. Returns null when the
- * address does not match any of the embedded-IPv4 prefixes.
+ * Only the /96 well-known prefix is covered here; local-use prefixes
+ * (/32../64) are not.
+ *
+ * Returns null when the address does not match any of the embedded-IPv4 prefixes.
  */
-function ipv4FromEmbeddedIpv6(host: string): number | null {
-	const normalized = normalizeIpv6(host);
-	if (normalized === null) return null;
+function ipv4FromEmbeddedIpv6(normalized: number[]): number | null {
 	const [g0, g1, g2, g3, g4, g5, g6, g7] = normalized;
 
 	// 6to4: 2002:<ipv4>::/48 — embedded IPv4 is groups 1-2.
 	if (g0 === 0x2002) {
 		return ((g1 << 16) | g2) >>> 0;
 	}
-	// Well-known NAT64: 64:ff9b::<ipv4> — embedded IPv4 is the last two groups.
-	if (g0 === 0x64 && g1 === 0xff9b && g2 === 0 && g3 === 0) {
+	// Well-known NAT64: 64:ff9b::/96 — embedded IPv4 is the last two groups.
+	if (
+		g0 === 0x64 &&
+		g1 === 0xff9b &&
+		g2 === 0 &&
+		g3 === 0 &&
+		g4 === 0 &&
+		g5 === 0
+	) {
 		return ((g6 << 16) | g7) >>> 0;
 	}
 	// IPv4-compatible: ::<ipv4> — first six groups zero, last two are the IPv4.
@@ -143,13 +150,23 @@ function ipv4FromEmbeddedIpv6(host: string): number | null {
 
 function isBlockedIpv6(host: string): boolean {
 	if (!host.includes(':')) return false;
-	if (host === '::1' || host === '::') return true;
-	if (/^fe[89ab]/i.test(host)) return true; // fe80::/10 link-local
-	if (/^fe[cdef]/i.test(host)) return true; // fec0::/10 site-local
-	if (/^ff/i.test(host)) return true; // ff00::/8 multicast
-	if (/^f[cd]/i.test(host)) return true; // fc00::/7 unique-local
-	const embedded = ipv4FromEmbeddedIpv6(host);
-	if (embedded !== null) return isPrivateOrLocalIpv4(embedded);
+	const normalized = normalizeIpv6(host);
+	if (normalized === null) return false;
+
+	// Unspecified :: or loopback ::1 (including non-canonical forms e.g. 0:0:0:0:0:0:0:1)
+	const isAllZero = normalized.every(g => g === 0);
+	const isLoopback =
+		normalized.slice(0, 7).every(g => g === 0) && normalized[7] === 1;
+	if (isAllZero || isLoopback) return true;
+
+	const g0 = normalized[0];
+	if ((g0 & 0xffc0) === 0xfe80) return true; // fe80::/10 link-local
+	if ((g0 & 0xffc0) === 0xfec0) return true; // fec0::/10 site-local
+	if ((g0 & 0xff00) === 0xff00) return true; // ff00::/8 multicast
+	if ((g0 & 0xfe00) === 0xfc00) return true; // fc00::/7 unique-local
+
+	const embedded = ipv4FromEmbeddedIpv6(normalized);
+	if (embedded !== null) return isNonPublicIpv4(embedded);
 	return false;
 }
 
@@ -171,7 +188,7 @@ export function isBlockedFetchHost(hostname: string): boolean {
 
 	const bare = host.replace(/^\[|\]$/g, '');
 	const v4 = parseIpv4(bare) ?? ipv4FromMappedIpv6(bare);
-	if (v4 !== null) return isPrivateOrLocalIpv4(v4);
+	if (v4 !== null) return isNonPublicIpv4(v4);
 	return isBlockedIpv6(bare);
 }
 
