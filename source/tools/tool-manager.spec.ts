@@ -1373,6 +1373,7 @@ function fakeMcpClient(toolName: string, serverName = 'session-server') {
 		getNativeToolsRegistry: () => ({[toolName]: {}}),
 		getToolMapping: () =>
 			new Map([[toolName, {serverName, originalName: toolName, readOnly: true}]]),
+		getToolNameConflicts: () => [],
 		disconnect: async () => {},
 	};
 }
