@@ -2,6 +2,7 @@ import test from 'ava';
 import type {ModelMessage} from 'ai';
 import {jsonSchema, tool} from 'ai';
 import type {AISDKCoreTool} from '@/types/index';
+import {appendTurnContext} from '@/utils/turn-context';
 import {
 	comparePromptFingerprints,
 	fingerprintPrompt,
@@ -143,4 +144,43 @@ test('overlapping records are compared in call order', async t => {
 	]);
 	t.deepEqual(first, {kind: 'first'});
 	t.deepEqual(second, {kind: 'append-only', reusedMessages: 1});
+});
+
+// --- #1574 regression: per-turn context must not break the prefix ---
+//
+// Skills and recalled memories used to be appended to the system prompt, which
+// made the system block differ on every user message. These two tests pin the
+// difference the turn-context move makes, in the terms the tracker reports.
+
+test('per-turn context in the system prompt breaks the prefix every turn', async t => {
+	const tracker = new PrefixTracker();
+	const base = 'You are Nanocoder.';
+	await tracker.record(`${base}\n\n## Project Context\n- Auth uses Clerk.`, {readFile}, [user('refactor auth')]);
+
+	t.deepEqual(
+		await tracker.record(`${base}\n\n## Available Skills\n- changelog`, {readFile}, [
+			user('refactor auth'),
+			assistant('done'),
+			user('update the changelog'),
+		]),
+		{kind: 'system-changed'},
+	);
+});
+
+test('per-turn context in the user message keeps the prefix append-only', async t => {
+	const tracker = new PrefixTracker();
+	const base = 'You are Nanocoder.';
+	const turnOne = appendTurnContext('refactor auth', [
+		'## Project Context\n- Auth uses Clerk.',
+	]);
+	await tracker.record(base, {readFile}, [user(turnOne)]);
+
+	t.deepEqual(
+		await tracker.record(base, {readFile}, [
+			user(turnOne),
+			assistant('done'),
+			user(appendTurnContext('update the changelog', ['## Available Skills\n- changelog'])),
+		]),
+		{kind: 'append-only', reusedMessages: 1},
+	);
 });

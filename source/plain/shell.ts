@@ -18,7 +18,7 @@ import {
 	TOOL_APPROVAL_REQUIRED_KIND,
 	TOOL_APPROVAL_REQUIRED_PREFIX,
 } from '@/constants';
-import {appendRelevantProjectContextWithCount} from '@/memory/project-context';
+import {buildProjectContextSection} from '@/memory/project-context';
 import {SemanticMemoryManager} from '@/memory/semantic-memory-manager';
 import {
 	type PlainConversationOutcome,
@@ -45,6 +45,7 @@ import {applyTuneCompaction} from '@/utils/auto-compact';
 import {formatError} from '@/utils/error-formatter';
 import {buildSystemPrompt, setLastBuiltPrompt} from '@/utils/prompt-builder';
 import {getShutdownManager} from '@/utils/shutdown';
+import {appendTurnContext} from '@/utils/turn-context';
 
 export interface RunPlainShellOptions {
 	prompt: string;
@@ -70,7 +71,7 @@ export interface RunPlainShellDeps {
 	getShutdownManager: typeof getShutdownManager;
 	loadPreferences: typeof loadPreferences;
 	savePreferences: typeof savePreferences;
-	appendRelevantProjectContextWithCount: typeof appendRelevantProjectContextWithCount;
+	buildProjectContextSection: typeof buildProjectContextSection;
 	artifacts: Pick<
 		ArtifactManager,
 		| 'cleanupStaleEphemeralSessions'
@@ -85,7 +86,7 @@ const defaultDeps: RunPlainShellDeps = {
 	getShutdownManager,
 	loadPreferences,
 	savePreferences,
-	appendRelevantProjectContextWithCount,
+	buildProjectContextSection,
 	artifacts: artifactManager,
 };
 
@@ -211,13 +212,14 @@ export async function runPlainShell(
 		toolsForPrompt,
 	);
 
-	const projectContext = await deps.appendRelevantProjectContextWithCount(
-		toolPrompt,
+	// Recalled memories ride in the user message, not the system prompt, so
+	// the system block stays byte-stable for local KV-cache reuse (#1574).
+	const projectContext = await deps.buildProjectContextSection(
 		prompt,
 		new SemanticMemoryManager(),
 		resolveProjectContextPreferences(deps.loadPreferences()),
 	);
-	const systemContent = projectContext.systemPrompt;
+	const systemContent = toolPrompt;
 	if (projectContext.memoryCount > 0) {
 		writeStatus(
 			`Recalling ${projectContext.memoryCount} project memor${projectContext.memoryCount === 1 ? 'y' : 'ies'}...`,
@@ -268,9 +270,12 @@ export async function runPlainShell(
 	const initialMessages: Message[] = [
 		{
 			role: 'user',
-			content: hookContext
-				? `<hook-context>\n${hookContext}\n</hook-context>\n\n${prompt}`
-				: prompt,
+			content: appendTurnContext(
+				hookContext
+					? `<hook-context>\n${hookContext}\n</hook-context>\n\n${prompt}`
+					: prompt,
+				[projectContext.content],
+			),
 		},
 	];
 

@@ -10,15 +10,17 @@ import {
 	subscribeToPreferences,
 } from '@/config/preferences';
 import {CommandIntegration} from '@/custom-commands/command-integration';
-import {appendRelevantProjectContextWithCount} from '@/memory/project-context';
+import {buildProjectContextSection} from '@/memory/project-context';
 import {SemanticMemoryManager} from '@/memory/semantic-memory-manager';
 import {processToolUse} from '@/message-handler';
 import {generateKey} from '@/session/key-generator';
 import {getTuneToolMode} from '@/types/config';
 import type {ImageAttachment, Message} from '@/types/core';
+import {getLogger} from '@/utils/logging';
 import {MessageBuilder} from '@/utils/message-builder';
 import {infoMsg} from '@/utils/message-factory';
 import {buildSystemPrompt, setLastBuiltPrompt} from '@/utils/prompt-builder';
+import {appendTurnContext} from '@/utils/turn-context';
 import {processAssistantResponse} from './conversation/conversation-loop';
 import {createResetStreamingState} from './state/streaming-state';
 import type {ChatHandlerReturn, UseChatHandlerProps} from './types';
@@ -379,7 +381,12 @@ export function useChatHandler({
 		const displayMessage = displayValue ?? message;
 
 		// Add user message to chat using display version (with placeholders)
-		// Pass the full assembled message for accurate token counting
+		// Pass the full assembled message for accurate token counting.
+		//
+		// Queued before the per-turn context below, which awaits a semantic
+		// memory search: the bubble must echo immediately, not after a disk
+		// round-trip. The block it omits is counted in the status-line context
+		// %, which measures the message array rather than this bubble.
 		addToChatQueue(
 			<UserMessage
 				key={generateKey('user')}
@@ -388,6 +395,40 @@ export function useChatHandler({
 				imageCount={images?.length ?? 0}
 			/>,
 		);
+
+		// Per-turn context (skills matched for this request, memories recalled
+		// for it) rides at the end of the user message rather than being
+		// appended to the system prompt, so the system block stays byte-stable
+		// for the session and history remains append-only (#1574).
+		//
+		// Best-effort, matching the recall below: context is an optimization, so
+		// a broken skills loader degrades this turn instead of failing it.
+		let skillsSection = '';
+		try {
+			skillsSection = commandIntegration?.buildSkillsSection(message) ?? '';
+		} catch (error) {
+			getLogger().warn({error}, 'Failed to build the skills section');
+		}
+		const projectContext = await buildProjectContextSection(
+			message,
+			projectMemoryFinder,
+			// Preferences supply the defaults; an explicit prop still wins so
+			// callers (and tests) can override per session.
+			{...getProjectContextPreferences(), ...projectContextOptions},
+		);
+		const messageWithContext = appendTurnContext(message, [
+			skillsSection,
+			projectContext.content,
+		]);
+
+		if (projectContext.memoryCount > 0) {
+			addToChatQueue(
+				infoMsg(
+					`Recalling ${projectContext.memoryCount} project memor${projectContext.memoryCount === 1 ? 'y' : 'ies'}...`,
+					'memory-recall',
+				),
+			);
+		}
 
 		// Add user message to conversation history (single addition). Any
 		// caller-supplied historyMessages (e.g. the preceding turns of a
@@ -398,7 +439,7 @@ export function useChatHandler({
 		for (const historyMessage of historyMessages ?? []) {
 			builder.addMessage(historyMessage);
 		}
-		builder.addUserMessage(message, images);
+		builder.addUserMessage(messageWithContext, images);
 		const updatedMessages = builder.build();
 		setMessages(updatedMessages);
 
@@ -420,7 +461,13 @@ export function useChatHandler({
 		};
 
 		try {
-			let systemPrompt = getBaseSystemPrompt(
+			// Nothing per-turn is appended here any more: skills and recalled
+			// memories travel in the user message (see above), which is what
+			// makes the memo's "stable across turns" claim actually hold. The
+			// memo already published this prompt via setLastBuiltPrompt, so
+			// re-publishing it here would double-count the moved block against
+			// the context %, which sums getLastBuiltPrompt() and the messages.
+			const systemPrompt = getBaseSystemPrompt(
 				developmentMode,
 				cachedBasePrompt,
 				toolManager,
@@ -428,33 +475,6 @@ export function useChatHandler({
 				toolsDisabled,
 				currentModel,
 			);
-
-			// Enhance with relevant commands (progressive disclosure)
-			if (commandIntegration) {
-				systemPrompt = commandIntegration.enhanceSystemPrompt(
-					systemPrompt,
-					message,
-				);
-			}
-
-			const projectContext = await appendRelevantProjectContextWithCount(
-				systemPrompt,
-				message,
-				projectMemoryFinder,
-				// Preferences supply the defaults; an explicit prop still wins so
-				// callers (and tests) can override per session.
-				{...getProjectContextPreferences(), ...projectContextOptions},
-			);
-			systemPrompt = projectContext.systemPrompt;
-			setLastBuiltPrompt(systemPrompt);
-			if (projectContext.memoryCount > 0) {
-				addToChatQueue(
-					infoMsg(
-						`Recalling ${projectContext.memoryCount} project memor${projectContext.memoryCount === 1 ? 'y' : 'ies'}...`,
-						'memory-recall',
-					),
-				);
-			}
 
 			// Create stream request
 			const systemMessage: Message = {

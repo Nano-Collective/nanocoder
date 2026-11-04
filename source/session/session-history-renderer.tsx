@@ -11,6 +11,7 @@ import {useTheme} from '@/hooks/useTheme';
 import {generateKey} from '@/session/key-generator';
 import type {Message, ToolCall} from '@/types/core';
 import {parseToolArguments} from '@/utils/tool-args-parser';
+import {stripTurnContext} from '@/utils/turn-context';
 
 /**
  * Cap on how many trailing messages are replayed into scrollback on resume.
@@ -175,16 +176,22 @@ export function buildSessionHistoryComponents(
 
 	for (const message of replayed) {
 		switch (message.role) {
-			case 'user':
-				if (message.content.trim()) {
+			case 'user': {
+				// Per-turn context is harness-authored, never something the user
+				// typed, so scrollback shows the message without it. The stored
+				// message keeps the block — that is what keeps the replayed
+				// prefix identical to what was originally sent.
+				const userContent = stripTurnContext(message.content);
+				if (userContent.trim()) {
 					components.push(
 						<UserMessage
 							key={generateKey('resume-user')}
-							message={message.content}
+							message={userContent}
 						/>,
 					);
 				}
 				break;
+			}
 
 			case 'assistant': {
 				if (message.reasoning?.trim()) {

@@ -11,10 +11,16 @@ export interface ProjectContextOptions {
 	semanticMemoryEnabled?: boolean;
 }
 
-export interface ProjectContextResult {
-	systemPrompt: string;
+/** A formatted `## Project Context` section, empty when nothing was recalled. */
+export interface ProjectContextSection {
+	content: string;
 	memoryCount: number;
 }
+
+const EMPTY_SECTION: ProjectContextSection = Object.freeze({
+	content: '',
+	memoryCount: 0,
+});
 
 export const DEFAULT_MEMORY_LIMIT = 8;
 export const DEFAULT_TOKEN_BUDGET = 240;
@@ -101,8 +107,8 @@ function formatProjectContextWithCount(
 	memories: SemanticMemory[],
 	options: ProjectContextOptions = {},
 	changedFiles: Map<string, MemoryFileChange[]> = new Map(),
-): {content: string; memoryCount: number} {
-	if (memories.length === 0) return {content: '', memoryCount: 0};
+): ProjectContextSection {
+	if (memories.length === 0) return EMPTY_SECTION;
 
 	const tokenBudget = options.tokenBudget ?? DEFAULT_TOKEN_BUDGET;
 	const bullets: string[] = [];
@@ -127,7 +133,7 @@ function formatProjectContextWithCount(
 		usedTokens += bulletTokens;
 	}
 
-	if (bullets.length === 0) return {content: '', memoryCount: 0};
+	if (bullets.length === 0) return EMPTY_SECTION;
 
 	const body = bullets.join('\n');
 	const fence = fenceFor(body);
@@ -138,14 +144,22 @@ function formatProjectContextWithCount(
 	};
 }
 
-export async function appendRelevantProjectContextWithCount(
-	systemPrompt: string,
+/**
+ * Recall the memories relevant to `query` and format them as a standalone
+ * `## Project Context` section, or an empty section when there is nothing to
+ * add.
+ *
+ * Callers carry this in the turn's user message rather than in the system
+ * prompt, so the system block stays byte-stable across turns and local
+ * backends can reuse their KV cache (#1574). See `@/utils/turn-context`.
+ */
+export async function buildProjectContextSection(
 	query: string,
 	memoryFinder: MemoryFinder = new SemanticMemoryManager(),
 	options: ProjectContextOptions = {},
-): Promise<ProjectContextResult> {
+): Promise<ProjectContextSection> {
 	if (options.semanticMemoryEnabled === false) {
-		return {systemPrompt, memoryCount: 0};
+		return EMPTY_SECTION;
 	}
 
 	try {
@@ -153,20 +167,13 @@ export async function appendRelevantProjectContextWithCount(
 			query,
 			options.memoryLimit ?? DEFAULT_MEMORY_LIMIT,
 		);
-		const projectContext = formatProjectContextWithCount(
+		return formatProjectContextWithCount(
 			memories,
 			options,
 			await findChangedFiles(memoryFinder, memories),
 		);
-
-		if (!projectContext.content) return {systemPrompt, memoryCount: 0};
-
-		return {
-			systemPrompt: `${systemPrompt}\n\n${projectContext.content}`,
-			memoryCount: projectContext.memoryCount,
-		};
 	} catch (error) {
 		getLogger().warn({error}, 'Failed to recall project memories');
-		return {systemPrompt, memoryCount: 0};
+		return EMPTY_SECTION;
 	}
 }
