@@ -35,6 +35,7 @@ Type `/` in the chat input to see available commands. All commands start with `/
 | `/commit` | Generate a Conventional Commit message from staged Git changes. Add `--copy` (or `-c`) to also copy the message to the system clipboard. A spinner shows while the model is working |
 | `/review` | One-shot, diff-only review of the current branch or one target. Usage: `/review [quick] [<branch-or-PR-number-or-GitHub-PR-URL>]` (e.g. `/review`, `/review main`, `/review quick 42`, `/review https://github.com/owner/repo/pull/42`). Bare PR numbers are resolved across configured GitHub remotes and their fork parents; ambiguous numbers require a full PR URL |
 | `/doctor` | Show environment health report for bug reports |
+| `/whoami` | Show the active provider, model, base URL, and API key. The key keeps its first 3 and last 4 characters and hides the rest (keys under 20 characters are fully hidden), so the output is safe to screenshot |
 | `/update` | Update Nanocoder to the latest version |
 | `/usage` | Get current model context usage visually. Accepts `?context-max=<n>` to preview usage against a different limit (see [Inline Overrides](#inline-overrides)) |
 | `/stats` | Lifetime usage (sessions, prompts, tokens). Ranges: `7d` / `3m` / `all-time`, either as an argument (`/stats 7d`) or with `←`/`→` in the view; `Esc`/`Enter` to close. Use `/stats reset` to clear the ledger |
