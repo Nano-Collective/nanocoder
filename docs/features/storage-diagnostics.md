@@ -1,19 +1,21 @@
 ---
 title: "Storage Diagnostics"
 description: "Inspect local storage without changing files or starting a model"
+sidebar_order: 16
 ---
 
 # Storage diagnostics
 
 Run `nanocoder storage` in a terminal to inspect Nanocoder-wide sessions and
-artifacts alongside the current project's timeline and checkpoints. This opens
+artifacts alongside the current project's timeline and checkpoints. Sessions
+are project-scoped instead when `sessions.directory` is a relative path. This opens
 a dedicated, read-only dashboard without starting a chat session, loading a
 model, or asking you to trust the directory. The store list shows sizes and
 finding counts; the selected store shows its **global** or **project** scope,
 root path, limits, entries, and findings. On narrow terminals the panes stack.
-Use Up/Down to select a store, Enter to explore its entries, then Enter again
-for an item or finding's details and path. Esc goes back (or exits from the
-store list); `q` or Ctrl+C exits at any time. A "potential orphan" warning does
+Use Up/Down to select a store, Enter (or Right) to explore its entries, then
+Enter again for an item or finding's details and path. Esc (or Left) goes back,
+and Esc exits from the store list; `q` or Ctrl+C exits at any time. A "potential orphan" warning does
 not prove a session is inactive. Note that timeline and checkpoint directories
 are intentionally not cross-referenced against saved sessions because an unsaved 
 or live session can still legally own them, and checkpoints do not track session IDs.
