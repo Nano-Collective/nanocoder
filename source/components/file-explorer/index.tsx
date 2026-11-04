@@ -1,5 +1,4 @@
 import {readFile} from 'node:fs/promises';
-import {highlight} from 'cli-highlight';
 import {Box, Text, useFocus, useInput} from 'ink';
 import {useEffect, useMemo, useState} from 'react';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
@@ -20,6 +19,7 @@ import {
 	flattenTreeAll,
 } from '@/utils/file-tree';
 import {compressIndentation} from '@/utils/indentation-normalizer';
+import {highlightCode} from '@/utils/syntax-highlighter';
 import {getVSCodeServerSync} from '@/vscode/vscode-server';
 import {TreeItem} from './tree-item';
 import {
@@ -163,7 +163,7 @@ export function FileExplorer({onClose}: FileExplorerProps) {
 	const preview = useMemo(() => {
 		if (previewSource === null) return null;
 		try {
-			return highlight(previewSource, {
+			return highlightCode(previewSource, {
 				language: previewLanguage,
 				theme: getSyntaxTheme(colors),
 			});

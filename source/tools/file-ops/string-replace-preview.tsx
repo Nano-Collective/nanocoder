@@ -1,5 +1,4 @@
 import {resolve} from 'node:path';
-import {highlight} from 'cli-highlight';
 import {Box, Text} from 'ink';
 import React from 'react';
 import ToolMessage, {CappedLines} from '@/components/tool-message';
@@ -14,6 +13,7 @@ import {getCachedFileContent} from '@/utils/file-cache';
 import {normalizeIndentation} from '@/utils/indentation-normalizer';
 import {areLinesSimilar, computeInlineDiff} from '@/utils/inline-diff';
 import {getLanguageFromExtension} from '@/utils/programming-language-helper';
+import {highlightCode} from '@/utils/syntax-highlighter';
 
 interface StringReplaceArgs {
 	path: string;
@@ -177,7 +177,7 @@ export async function formatStringReplacePreview(
 			let displayLine: string;
 			try {
 				displayLine = truncateAnsi(
-					highlight(line, {language, theme: getSyntaxTheme(themeColors)}),
+					highlightCode(line, {language, theme: getSyntaxTheme(themeColors)}),
 					availableWidth,
 				);
 			} catch {
@@ -344,7 +344,7 @@ export async function formatStringReplacePreview(
 			let displayLine: string;
 			try {
 				displayLine = truncateAnsi(
-					highlight(line, {language, theme: getSyntaxTheme(themeColors)}),
+					highlightCode(line, {language, theme: getSyntaxTheme(themeColors)}),
 					availableWidth,
 				);
 			} catch {

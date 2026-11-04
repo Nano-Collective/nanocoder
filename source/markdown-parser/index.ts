@@ -1,7 +1,7 @@
 import chalk from 'chalk';
-import {highlight} from 'cli-highlight';
 import {getSyntaxTheme} from '@/config/themes';
 import type {Colors} from '../types/markdown-parser.js';
+import {highlightCode} from '../utils/syntax-highlighter.js';
 import {decodeHtmlEntities} from './html-entities.js';
 import {parseMarkdownTable} from './table-parser.js';
 
@@ -76,7 +76,7 @@ function _parseMarkdownCore(
 				// Convert tabs to 2 spaces to prevent terminal rendering at 8-space width
 				const codeStr = dedented.trim().replace(/\t/g, '  ');
 				// Apply syntax highlighting with detected language
-				const highlighted = highlight(codeStr, {
+				const highlighted = highlightCode(codeStr, {
 					language: lang || 'plaintext',
 					theme: getSyntaxTheme(themeColors),
 				});
