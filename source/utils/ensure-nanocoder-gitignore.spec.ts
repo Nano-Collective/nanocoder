@@ -23,6 +23,7 @@ test('creates gitignore and ignores runtime files but not configuration', async 
 		t.true(content.includes('/checkpoints/'));
 		t.true(content.includes('/timeline/'));
 		t.true(content.includes('/daemon.*'));
+		t.true(content.includes('/ci-watch-state.json*'));
 
 		const ignoredPaths = [
 			'.nanocoder/checkpoints/test/conversation.json',
@@ -30,6 +31,8 @@ test('creates gitignore and ignores runtime files but not configuration', async 
 			'.nanocoder/daemon.log',
 			'.nanocoder/daemon.json',
 			'.nanocoder/daemon.json.abc123.tmp',
+			'.nanocoder/ci-watch-state.json',
+			'.nanocoder/ci-watch-state.json.abc123.tmp',
 		];
 
 		for (const file of ignoredPaths) {
@@ -116,6 +119,7 @@ test('handles concurrent initialization without duplicate rules', async t => {
 			'/checkpoints/',
 			'/timeline/',
 			'/daemon.*',
+			'/ci-watch-state.json*',
 		]) {
 			t.is(
 				content.split('\n').filter(line => line === rule).length,

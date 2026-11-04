@@ -655,9 +655,10 @@ test.serial('--trust flag takes precedence over the project config value', async
 	}
 });
 
-test.serial('project config trust level is used when no flag is given', async t => {
+test.serial('project config trust level is used when no flag is given and the user confirms it', async t => {
 	const root = await tempProject();
 	const launcher = successfulLaunchDaemon(root);
+	let prompted = false;
 	try {
 		const result = await runDaemonCli('start', {
 			projectRoot: root,
@@ -665,7 +666,14 @@ test.serial('project config trust level is used when no flag is given', async t 
 			args: [],
 			launchDaemon: launcher.launch,
 			loadVerifyConfigFn: () => ({trustLevel: 'auto-fix'}),
+			isInteractive: () => true,
+			isFullCommitTrustConfirmedFn: () => false,
+			confirmConfigAutoFixTrust: async () => {
+				prompted = true;
+				return true;
+			},
 		});
+		t.true(prompted, 'a config-sourced auto-fix asks for confirmation');
 		t.is(result.exitCode, 0);
 		t.is(launcher.calls[0]?.trustLevel, 'auto-fix');
 		t.regex(result.output, /CI trust level: auto-fix \(agents\.config\.json\)/);
@@ -840,3 +848,200 @@ test.serial(
 		}
 	},
 );
+
+// ---- Elevated trust from agents.config.json needs the user's confirmation ----
+
+test.serial('config auto-fix without a terminal falls back to comment-only', async t => {
+	const root = await tempProject();
+	const launcher = successfulLaunchDaemon(root);
+	try {
+		const result = await runDaemonCli('start', {
+			projectRoot: root,
+			trustDirectory: true,
+			args: [],
+			launchDaemon: launcher.launch,
+			loadVerifyConfigFn: () => ({trustLevel: 'auto-fix'}),
+			isInteractive: () => false,
+			isFullCommitTrustConfirmedFn: () => false,
+			confirmConfigAutoFixTrust: async () => {
+				t.fail('no prompt without a terminal');
+				return true;
+			},
+		});
+		t.is(result.exitCode, 0);
+		t.is(launcher.calls[0]?.trustLevel, 'comment-only');
+		t.regex(result.output, /CI trust level: comment-only \(agents\.config\.json asked for auto-fix/);
+	} finally {
+		await rm(root, {recursive: true, force: true});
+		await removeLockfile(root);
+	}
+});
+
+test.serial('config full-commit without a terminal falls back to comment-only instead of failing', async t => {
+	const root = await tempProject();
+	const launcher = successfulLaunchDaemon(root);
+	try {
+		const result = await runDaemonCli('start', {
+			projectRoot: root,
+			trustDirectory: true,
+			args: [],
+			launchDaemon: launcher.launch,
+			loadVerifyConfigFn: () => ({trustLevel: 'full-commit'}),
+			isInteractive: () => false,
+			isFullCommitTrustConfirmedFn: () => false,
+		});
+		t.is(result.exitCode, 0);
+		t.is(launcher.calls[0]?.trustLevel, 'comment-only');
+	} finally {
+		await rm(root, {recursive: true, force: true});
+		await removeLockfile(root);
+	}
+});
+
+test.serial('declining a config auto-fix aborts without spawning', async t => {
+	const root = await tempProject();
+	const launcher = successfulLaunchDaemon(root);
+	try {
+		const result = await runDaemonCli('start', {
+			projectRoot: root,
+			trustDirectory: true,
+			args: [],
+			launchDaemon: launcher.launch,
+			loadVerifyConfigFn: () => ({trustLevel: 'auto-fix'}),
+			isInteractive: () => true,
+			isFullCommitTrustConfirmedFn: () => false,
+			confirmConfigAutoFixTrust: async () => false,
+		});
+		t.is(result.exitCode, 1);
+		t.regex(result.output, /not confirmed/);
+		t.is(launcher.calls.length, 0);
+	} finally {
+		await rm(root, {recursive: true, force: true});
+	}
+});
+
+test.serial('a confirmed project keeps its config level unattended', async t => {
+	const root = await tempProject();
+	const launcher = successfulLaunchDaemon(root);
+	try {
+		const result = await runDaemonCli('start', {
+			projectRoot: root,
+			trustDirectory: true,
+			args: [],
+			launchDaemon: launcher.launch,
+			loadVerifyConfigFn: () => ({trustLevel: 'auto-fix'}),
+			isInteractive: () => false,
+			isFullCommitTrustConfirmedFn: () => true,
+		});
+		t.is(result.exitCode, 0);
+		t.is(launcher.calls[0]?.trustLevel, 'auto-fix');
+	} finally {
+		await rm(root, {recursive: true, force: true});
+		await removeLockfile(root);
+	}
+});
+
+test.serial('an explicit --trust auto-fix needs no prompt', async t => {
+	const root = await tempProject();
+	const launcher = successfulLaunchDaemon(root);
+	try {
+		const result = await runDaemonCli('start', {
+			projectRoot: root,
+			trustDirectory: true,
+			args: ['--trust', 'auto-fix'],
+			launchDaemon: launcher.launch,
+			loadVerifyConfigFn: () => ({trustLevel: 'full-commit'}),
+			isInteractive: () => false,
+			isFullCommitTrustConfirmedFn: () => false,
+		});
+		t.is(result.exitCode, 0);
+		t.is(launcher.calls[0]?.trustLevel, 'auto-fix');
+	} finally {
+		await rm(root, {recursive: true, force: true});
+		await removeLockfile(root);
+	}
+});
+
+// ---- --trust parsing and already-running UX ----
+
+test.serial('--trust=<level> is accepted', async t => {
+	const root = await tempProject();
+	const launcher = successfulLaunchDaemon(root);
+	try {
+		const result = await runDaemonCli('start', {
+			projectRoot: root,
+			trustDirectory: true,
+			args: ['--trust=auto-fix'],
+			launchDaemon: launcher.launch,
+			loadVerifyConfigFn: () => undefined,
+		});
+		t.is(result.exitCode, 0);
+		t.is(launcher.calls[0]?.trustLevel, 'auto-fix');
+	} finally {
+		await rm(root, {recursive: true, force: true});
+		await removeLockfile(root);
+	}
+});
+
+for (const args of [['--trust', '--trust-directory'], ['--trust'], ['--trust=']]) {
+	test.serial(`${args.join(' ')} reports that --trust requires a level`, async t => {
+		const root = await tempProject();
+		const launcher = successfulLaunchDaemon(root);
+		try {
+			const result = await runDaemonCli('start', {
+				projectRoot: root,
+				trustDirectory: true,
+				args,
+				launchDaemon: launcher.launch,
+			});
+			t.is(result.exitCode, 1);
+			t.regex(result.output, /--trust requires a level/);
+			t.is(launcher.calls.length, 0);
+		} finally {
+			await rm(root, {recursive: true, force: true});
+		}
+	});
+}
+
+test.serial('start while running says a requested --trust level was not applied', async t => {
+	const root = await tempProject();
+	try {
+		await writeLockfile({
+			pid: process.pid,
+			socketPath: '/tmp/test-daemon.sock',
+			startedAt: Date.now(),
+			projectRoot: root,
+			ciTrustLevel: 'comment-only',
+		});
+		const result = await runDaemonCli('start', {
+			projectRoot: root,
+			trustDirectory: true,
+			args: ['--trust', 'auto-fix'],
+		});
+		t.is(result.exitCode, 0);
+		t.regex(result.output, /already running/);
+		t.regex(result.output, /CI trust level: comment-only/);
+		t.regex(result.output, /--trust auto-fix was not applied/);
+	} finally {
+		await removeLockfile(root);
+		await rm(root, {recursive: true, force: true});
+	}
+});
+
+test.serial('status shows the CI trust level from the lockfile', async t => {
+	const root = await tempProject();
+	try {
+		await writeLockfile({
+			pid: process.pid,
+			socketPath: '/tmp/test-daemon.sock',
+			startedAt: Date.now(),
+			projectRoot: root,
+			ciTrustLevel: 'auto-fix',
+		});
+		const result = await runDaemonCli('status', {projectRoot: root});
+		t.regex(result.output, /CI trust level auto-fix/);
+	} finally {
+		await removeLockfile(root);
+		await rm(root, {recursive: true, force: true});
+	}
+});

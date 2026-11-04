@@ -61,7 +61,7 @@ nanocoder --vscode
 
 ## Using the Sidebar Chat
 
-1. **Open the chat**: Click the Nanocoder icon in the Activity Bar. The extension spawns `nanocoder --acp` in the background and connects automatically - your project's `agents.config.json` (or your global config) is picked up as usual.
+1. **Open the chat**: Click the Nanocoder icon in the Activity Bar. The extension spawns `nanocoder --acp` in the background and connects automatically - your project's `agents.config.json` (or your global config) is picked up as usual. If the workspace is not trusted in VS Code (Restricted Mode), the extension does not pass `--trust-directory`, so the CLI only runs there if you have already trusted the folder with Nanocoder.
 
 2. **Chat**: Responses stream in as they generate. Everything the agent does to answer - its thoughts, tool calls, edit cards and task plan - is collected, in order, into one collapsible work summary per turn. The reply text stays outside it, so the answer is never hidden. The header reads "Working..." while the turn runs, then "Worked for", "Stopped after" or "Failed after" plus the duration, and the summary folds away when the turn ends (unless you opened or closed it yourself). It reopens automatically when a tool inside it needs your approval.
 

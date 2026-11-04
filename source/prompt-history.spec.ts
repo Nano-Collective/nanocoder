@@ -1,6 +1,18 @@
-import {existsSync, mkdirSync, rmSync, writeFileSync, readFileSync} from 'fs';
+import {
+	chmodSync,
+	existsSync,
+	lstatSync,
+	mkdirSync,
+	readdirSync,
+	rmSync,
+	statSync,
+	symlinkSync,
+	writeFileSync,
+	readFileSync,
+} from 'fs';
+import fsPromises from 'fs/promises';
 import {tmpdir} from 'os';
-import {join} from 'path';
+import {basename, join} from 'path';
 import test from 'ava';
 import {PromptHistory} from './prompt-history.js';
 import type {InputState} from './types/hooks';
@@ -716,6 +728,38 @@ test('history file uses JSON format marker', async t => {
 	t.is(loaded[0]?.displayValue, uniqueCommand, 'Should load the saved command');
 });
 
+test('loadHistory drops or upgrades malformed JSON entries', async t => {
+	// Regression: a valid JSON array holding `null` or bare strings used to be
+	// loaded as-is, and Ctrl+R then threw calling toLowerCase() on it.
+	const tempFile = join(
+		testDir,
+		`history-malformed-${Date.now()}-${Math.random()}.json`,
+	);
+	writeFileSync(
+		tempFile,
+		`${JSON_FORMAT_MARKER}${JSON.stringify([
+			null,
+			'x',
+			'   ',
+			42,
+			{placeholderContent: {}},
+			{displayValue: 7},
+			{displayValue: 'kept', placeholderContent: null},
+			{displayValue: 'full', placeholderContent: {id: 'p'}},
+		])}`,
+		'utf8',
+	);
+
+	const history = new PromptHistory(tempFile);
+	await history.loadHistory();
+
+	t.deepEqual(history.getHistory(), [
+		{displayValue: 'x', placeholderContent: {}},
+		{displayValue: 'kept', placeholderContent: {}},
+		{displayValue: 'full', placeholderContent: {id: 'p'}},
+	]);
+});
+
 test('loadHistory resets currentIndex after loading', async t => {
 	const tempFile = join(testDir, `history-${Date.now()}-${Math.random()}.json`);
 	const history = new PromptHistory(tempFile);
@@ -747,4 +791,209 @@ test('loadHistory treats the {} seed file as empty history', async t => {
 	const history = new PromptHistory(tempFile);
 	await history.loadHistory();
 	t.deepEqual(history.getHistory(), []);
+});
+
+test('loadHistory backs up a truncated history file instead of wiping it', async t => {
+	// A crash mid-save used to leave the marker followed by broken JSON. The
+	// next load treated that parse failure like a missing file, and the next
+	// save overwrote the old entries with an empty history.
+	const tempFile = join(
+		testDir,
+		`history-truncated-${Date.now()}-${Math.random()}.json`,
+	);
+	const truncated = `${JSON_FORMAT_MARKER}[{"displayValue":"keep me","placeholderContent":{}}`;
+	writeFileSync(tempFile, truncated, 'utf8');
+
+	const history = new PromptHistory(tempFile);
+	await history.loadHistory();
+
+	// The parse failed, so in-memory history starts empty...
+	t.deepEqual(history.getHistory(), []);
+
+	// ...but the bad file is preserved, byte for byte, as a backup.
+	const backup = `${tempFile}.corrupt`;
+	t.true(existsSync(backup), 'corrupt file should be backed up');
+	t.is(
+		readFileSync(backup, 'utf8'),
+		truncated,
+		'backup should keep the original bytes',
+	);
+
+	// The next prompt writes a fresh file and leaves the backup alone.
+	history.addPrompt('new prompt');
+	await history.saveHistory();
+
+	t.true(existsSync(tempFile), 'a fresh history file should exist');
+	t.is(
+		readFileSync(backup, 'utf8'),
+		truncated,
+		'backup should be untouched by the new save',
+	);
+
+	const reloaded = new PromptHistory(tempFile);
+	await reloaded.loadHistory();
+	t.deepEqual(reloaded.getHistoryStrings(), ['new prompt']);
+});
+
+test('loadHistory backs up a history file whose JSON is not an array', async t => {
+	const tempFile = join(
+		testDir,
+		`history-nonarray-${Date.now()}-${Math.random()}.json`,
+	);
+	const bad = `${JSON_FORMAT_MARKER}{"not":"an array"}`;
+	writeFileSync(tempFile, bad, 'utf8');
+
+	const history = new PromptHistory(tempFile);
+	await history.loadHistory();
+
+	t.deepEqual(history.getHistory(), []);
+	t.is(
+		readFileSync(`${tempFile}.corrupt`, 'utf8'),
+		bad,
+		'non-array payload should be quarantined',
+	);
+});
+
+test('a second corruption backs up alongside the first instead of overwriting it', async t => {
+	const tempFile = join(
+		testDir,
+		`history-twice-${Date.now()}-${Math.random()}.json`,
+	);
+	const first = `${JSON_FORMAT_MARKER}[{"displayValue":"first"}`;
+	const second = `${JSON_FORMAT_MARKER}[{"displayValue":"second"}`;
+
+	writeFileSync(tempFile, first, 'utf8');
+	await new PromptHistory(tempFile).loadHistory();
+
+	// The corrupt file reappears (another crash) at the same path.
+	writeFileSync(tempFile, second, 'utf8');
+	await new PromptHistory(tempFile).loadHistory();
+
+	const backups = readdirSync(testDir).filter(name =>
+		name.startsWith(`${basename(tempFile)}.corrupt`),
+	);
+	t.is(backups.length, 2, 'both corrupt files should be kept');
+	t.deepEqual(
+		backups
+			.map(name => readFileSync(join(testDir, name), 'utf8'))
+			.sort(),
+		[first, second].sort(),
+		'each backup should keep its own bytes',
+	);
+});
+
+test('saveHistory writes atomically and leaves no temporary files', async t => {
+	const tempFile = join(
+		testDir,
+		`history-atomic-${Date.now()}-${Math.random()}.json`,
+	);
+	const history = new PromptHistory(tempFile);
+
+	history.addPrompt('atomic write');
+	await history.saveHistory();
+
+	const prefix = `${basename(tempFile)}.`;
+	const leftovers = readdirSync(testDir).filter(
+		name => name.startsWith(prefix) && name.endsWith('.tmp'),
+	);
+	t.deepEqual(leftovers, [], 'no .tmp files should remain after save');
+});
+
+test.serial('a file that cannot be read is left in place and not overwritten', async t => {
+	// A read error (permissions, I/O) says nothing about the content, so an
+	// intact history must not be moved aside as "corrupt", and must not be
+	// replaced by a save of the empty history we ended up with.
+	const tempFile = join(
+		testDir,
+		`history-unreadable-${Date.now()}-${Math.random()}.json`,
+	);
+	const original = `${JSON_FORMAT_MARKER}[{"displayValue":"keep me","placeholderContent":{}}]`;
+	writeFileSync(tempFile, original, 'utf8');
+
+	const realReadFile = fsPromises.readFile;
+	fsPromises.readFile = (async (...args: Parameters<typeof realReadFile>) => {
+		if (String(args[0]) === tempFile) {
+			throw Object.assign(new Error('EACCES: permission denied'), {
+				code: 'EACCES',
+			});
+		}
+		return realReadFile(...args);
+	}) as typeof fsPromises.readFile;
+
+	const history = new PromptHistory(tempFile);
+	try {
+		await history.loadHistory();
+		history.addPrompt('typed while unreadable');
+		await history.saveHistory();
+	} finally {
+		fsPromises.readFile = realReadFile;
+	}
+
+	t.is(readFileSync(tempFile, 'utf8'), original, 'the file must be untouched');
+	t.deepEqual(
+		readdirSync(testDir).filter(name =>
+			name.startsWith(`${basename(tempFile)}.`),
+		),
+		[],
+		'nothing is quarantined and no temp file is left behind',
+	);
+
+	// Once the cause is fixed, the next load brings the history back and saves
+	// work again.
+	await history.loadHistory();
+	t.deepEqual(history.getHistoryStrings(), ['keep me']);
+	history.addPrompt('after recovery');
+	await history.saveHistory();
+	const reloaded = new PromptHistory(tempFile);
+	await reloaded.loadHistory();
+	t.deepEqual(reloaded.getHistoryStrings(), ['keep me', 'after recovery']);
+});
+
+const posixOnly = process.platform === 'win32' ? test.skip : test;
+
+posixOnly('saveHistory keeps the permissions of an existing history file', async t => {
+	const tempFile = join(
+		testDir,
+		`history-mode-${Date.now()}-${Math.random()}.json`,
+	);
+	writeFileSync(
+		tempFile,
+		`${JSON_FORMAT_MARKER}[{"displayValue":"private","placeholderContent":{}}]`,
+		'utf8',
+	);
+	chmodSync(tempFile, 0o600);
+
+	const history = new PromptHistory(tempFile);
+	await history.loadHistory();
+	history.addPrompt('another');
+	await history.saveHistory();
+
+	t.is(statSync(tempFile).mode & 0o777, 0o600, 'a 0600 file stays 0600');
+});
+
+posixOnly('saveHistory writes through a symlinked history file', async t => {
+	const dir = join(testDir, `history-link-${Date.now()}-${Math.random()}`);
+	mkdirSync(dir, {recursive: true});
+	const realFile = join(dir, 'real-history');
+	const link = join(dir, 'linked-history');
+	writeFileSync(
+		realFile,
+		`${JSON_FORMAT_MARKER}[{"displayValue":"old","placeholderContent":{}}]`,
+		'utf8',
+	);
+	symlinkSync(realFile, link);
+
+	const history = new PromptHistory(link);
+	await history.loadHistory();
+	history.addPrompt('new');
+	await history.saveHistory();
+
+	t.true(lstatSync(link).isSymbolicLink(), 'the symlink must survive a save');
+	const reloaded = new PromptHistory(realFile);
+	await reloaded.loadHistory();
+	t.deepEqual(
+		reloaded.getHistoryStrings(),
+		['old', 'new'],
+		'the file behind the link receives the save',
+	);
 });

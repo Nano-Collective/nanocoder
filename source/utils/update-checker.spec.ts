@@ -10,6 +10,7 @@ import {fileURLToPath} from 'url';
 import {tmpdir} from 'os';
 import test from 'ava';
 import {resetPreferencesCache} from '@/config/preferences';
+import {setGlobalMessageQueue} from '@/utils/message-queue';
 import {checkForUpdates} from './update-checker';
 
 console.log(`\nupdate-checker.spec.ts`);
@@ -22,9 +23,12 @@ const packageJson = JSON.parse(readFileSync(packageJsonPath, 'utf-8'));
 const CURRENT_VERSION = packageJson.version as string;
 
 const originalConfigDir = process.env.NANOCODER_CONFIG_DIR;
+const originalNoUpdateCheck = process.env.NANOCODER_NO_UPDATE_CHECK;
 const testConfigDir = mkdtempSync(join(tmpdir(), 'nanocoder-update-checker-'));
 process.env.NANOCODER_CONFIG_DIR = testConfigDir;
 resetPreferencesCache();
+const preferencesPath = join(testConfigDir, 'nanocoder-preferences.json');
+const UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
 // Mock fetch globally for testing
 const originalFetch = globalThis.fetch;
@@ -52,6 +56,9 @@ function createMockFetch(
 test.beforeEach(() => {
 	// Reset fetch before each test
 	globalThis.fetch = originalFetch;
+	delete process.env.NANOCODER_NO_UPDATE_CHECK;
+	writeFileSync(preferencesPath, '{}');
+	resetPreferencesCache();
 	// Default to npm install override
 	process.env.NANOCODER_INSTALL_METHOD = 'npm';
 });
@@ -60,6 +67,11 @@ test.afterEach(() => {
 	// Restore original fetch and env after each test
 	globalThis.fetch = originalFetch;
 	delete process.env.NANOCODER_INSTALL_METHOD;
+	if (originalNoUpdateCheck === undefined) {
+		delete process.env.NANOCODER_NO_UPDATE_CHECK;
+	} else {
+		process.env.NANOCODER_NO_UPDATE_CHECK = originalNoUpdateCheck;
+	}
 });
 
 test.after.always(() => {
@@ -209,6 +221,92 @@ test('checkForUpdates: handles network errors gracefully', async t => {
 	t.false(result.hasUpdate);
 	t.truthy(result.currentVersion);
 	t.is(result.latestVersion, undefined);
+});
+
+test('checkForUpdates: keeps network failures out of the chat queue', async t => {
+	const queuedMessages: unknown[] = [];
+	setGlobalMessageQueue(component => queuedMessages.push(component));
+	t.teardown(() => setGlobalMessageQueue(() => {}));
+	globalThis.fetch = createMockFetch(200, {}, true);
+
+	await checkForUpdates();
+
+	t.deepEqual(queuedMessages, []);
+});
+
+test('checkForUpdates: skips automatic checks within the 24-hour cooldown', async t => {
+	const recentTimestamp = Date.now() - UPDATE_CHECK_INTERVAL_MS / 2;
+	writeFileSync(preferencesPath, JSON.stringify({lastUpdateCheck: recentTimestamp}));
+	let fetchCount = 0;
+	globalThis.fetch = (async () => {
+		fetchCount++;
+		return createMockFetch(200, {version: '99.99.99'})();
+	}) as typeof fetch;
+
+	const result = await checkForUpdates();
+
+	t.false(result.hasUpdate);
+	t.is(result.latestVersion, undefined);
+	t.is(fetchCount, 0);
+});
+
+test('checkForUpdates: checks again after the 24-hour cooldown', async t => {
+	const oldTimestamp = Date.now() - UPDATE_CHECK_INTERVAL_MS - 1;
+	writeFileSync(preferencesPath, JSON.stringify({lastUpdateCheck: oldTimestamp}));
+	let fetchCount = 0;
+	globalThis.fetch = (async () => {
+		fetchCount++;
+		return createMockFetch(200, {
+			version: CURRENT_VERSION,
+			name: '@nanocollective/nanocoder',
+		})();
+	}) as typeof fetch;
+
+	const result = await checkForUpdates();
+	const preferences = JSON.parse(readFileSync(preferencesPath, 'utf-8')) as {
+		lastUpdateCheck?: number;
+	};
+
+	t.false(result.hasUpdate);
+	t.is(fetchCount, 1);
+	t.truthy(preferences.lastUpdateCheck);
+	t.true(preferences.lastUpdateCheck! > oldTimestamp);
+});
+
+test('checkForUpdates: supports opting out of automatic checks', async t => {
+	process.env.NANOCODER_NO_UPDATE_CHECK = '1';
+	let fetchCount = 0;
+	globalThis.fetch = (async () => {
+		fetchCount++;
+		return createMockFetch(200, {version: '99.99.99'})();
+	}) as typeof fetch;
+
+	const result = await checkForUpdates();
+
+	t.false(result.hasUpdate);
+	t.is(result.latestVersion, undefined);
+	t.is(fetchCount, 0);
+});
+
+test('checkForUpdates: force runs despite opt-out and recent timestamp', async t => {
+	process.env.NANOCODER_NO_UPDATE_CHECK = '1';
+	writeFileSync(
+		preferencesPath,
+		JSON.stringify({lastUpdateCheck: Date.now() - 1_000}),
+	);
+	let fetchCount = 0;
+	globalThis.fetch = (async () => {
+		fetchCount++;
+		return createMockFetch(200, {
+			version: '99.99.99',
+			name: '@nanocollective/nanocoder',
+		})();
+	}) as typeof fetch;
+
+	const result = await checkForUpdates({force: true});
+
+	t.true(result.hasUpdate);
+	t.is(fetchCount, 1);
 });
 
 test('checkForUpdates: handles HTTP 404 error', async t => {
@@ -467,4 +565,66 @@ test('checkForUpdates: handles general errors in main function', async t => {
 	// Should handle error gracefully
 	t.false(result.hasUpdate);
 	t.truthy(result.currentVersion);
+});
+
+test('checkForUpdates: keeps reporting a found update during the cooldown without a network call', async t => {
+	// Regression: a check that found an update set the 24h throttle, and the
+	// next launch inside the window returned hasUpdate: false, hiding the
+	// banner although the update was still pending.
+	let fetchCount = 0;
+	globalThis.fetch = (async () => {
+		fetchCount++;
+		return createMockFetch(200, {version: '99.99.99'})();
+	}) as typeof fetch;
+
+	const first = await checkForUpdates();
+	t.true(first.hasUpdate);
+	t.is(fetchCount, 1);
+
+	const stored = JSON.parse(readFileSync(preferencesPath, 'utf-8')) as {
+		lastUpdateCheckLatestVersion?: string;
+	};
+	t.is(stored.lastUpdateCheckLatestVersion, '99.99.99');
+
+	const second = await checkForUpdates();
+	t.is(fetchCount, 1, 'throttled launch must not hit the network');
+	t.true(second.hasUpdate);
+	t.is(second.latestVersion, '99.99.99');
+	t.is(second.currentVersion, CURRENT_VERSION);
+	t.truthy(second.updateCommand);
+});
+
+test('checkForUpdates: a cached latest version that is not newer reports no update', async t => {
+	writeFileSync(
+		preferencesPath,
+		JSON.stringify({
+			lastUpdateCheck: Date.now() - 1_000,
+			lastUpdateCheckLatestVersion: CURRENT_VERSION,
+		}),
+	);
+	let fetchCount = 0;
+	globalThis.fetch = (async () => {
+		fetchCount++;
+		return createMockFetch(200, {version: '99.99.99'})();
+	}) as typeof fetch;
+
+	const result = await checkForUpdates();
+
+	t.false(result.hasUpdate);
+	t.is(fetchCount, 0);
+});
+
+test('checkForUpdates: opt-out hides a cached update too', async t => {
+	process.env.NANOCODER_NO_UPDATE_CHECK = '1';
+	writeFileSync(
+		preferencesPath,
+		JSON.stringify({
+			lastUpdateCheck: Date.now() - 1_000,
+			lastUpdateCheckLatestVersion: '99.99.99',
+		}),
+	);
+
+	const result = await checkForUpdates();
+
+	t.false(result.hasUpdate);
 });

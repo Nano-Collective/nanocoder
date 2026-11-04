@@ -4,6 +4,7 @@ import type {
 } from '@/types/index';
 import type {MCPClient} from '@/mcp/mcp-client';
 import test from 'ava';
+import {getShutdownManager} from '@/utils/shutdown';
 import {ToolManager} from './tool-manager';
 import {getToolsForProfile} from './tool-profiles';
 
@@ -1270,9 +1271,10 @@ test('XML fallback - tool definitions include examples per tool', t => {
 });
 
 test('disconnectMCP - keeps skill tools and leaves the web_search gate alone', async t => {
-	// The rebuild this guards against restored `allToolExports` wholesale, which
-	// dropped skill-registered tools and resurrected web_search even when the
-	// constructor had unregistered it for a missing Brave key.
+	// The rebuild this guards against restored the built-in tool exports
+	// wholesale, which dropped skill-registered tools and resurrected
+	// web_search even when the constructor had unregistered it for a
+	// missing Brave key.
 	const manager = new ToolManager();
 	const webSearchBefore = manager.hasTool('web_search');
 
@@ -1341,4 +1343,160 @@ test('plan mode still exposes write_plan under a slim profile', t => {
 			)
 			.includes('write_plan'),
 	);
+});
+
+// ============================================================================
+// forSession(): a session's tools over the shared set
+// ============================================================================
+
+function fakeMcpClient(toolName: string, serverName = 'session-server') {
+	return {
+		onHealthChange: () => () => {},
+		async connectToServers() {
+			return [{serverName, success: true, toolCount: 1}];
+		},
+		getToolEntries() {
+			return [
+				{
+					name: toolName,
+					tool: {description: 'session tool', execute: async () => 'ok'} as never,
+					handler: async () => `ran ${toolName}`,
+				},
+			];
+		},
+		getNativeToolsRegistry: () => ({[toolName]: {}}),
+		getToolMapping: () =>
+			new Map([[toolName, {serverName, originalName: toolName, readOnly: true}]]),
+		disconnect: async () => {},
+	};
+}
+
+/** A manager whose MCP clients come from a list, one per connection. */
+class QueuedClientToolManager extends ToolManager {
+	constructor(private readonly clients: unknown[]) {
+		super();
+	}
+
+	protected async createMCPClient(): Promise<MCPClient> {
+		return this.clients.shift() as MCPClient;
+	}
+}
+
+const SESSION_SERVER: MCPServer = {
+	name: 'session-server',
+	transport: 'http',
+	url: 'http://localhost/mcp',
+};
+
+test('forSession - sees the shared tools, live, and adds MCP tools of its own', async t => {
+	const base = new QueuedClientToolManager([fakeMcpClient('only_here')]);
+	const session = base.forSession();
+
+	t.true(session.hasTool('read_file'));
+	await session.initializeMCP([SESSION_SERVER]);
+
+	t.true(session.hasTool('only_here'));
+	t.is(session.getToolEntry('only_here')?.name, 'only_here');
+	t.deepEqual(session.getMCPToolInfo('only_here'), {
+		isMCPTool: true,
+		serverName: 'session-server',
+	});
+	t.false(base.hasTool('only_here'));
+	t.false(base.getToolNames().includes('only_here'));
+
+	// Registered on the shared manager afterwards, still seen by the session.
+	base.registerSkillTool({
+		name: 'added_later',
+		handler: async () => 'ok',
+		tool: {execute: async () => 'ok'} as never,
+	});
+	t.true(session.hasTool('added_later'));
+});
+
+test('forSession - still reports a shared MCP tool as an MCP tool', async t => {
+	const base = new QueuedClientToolManager([
+		fakeMcpClient('shared_mcp', 'shared-server'),
+	]);
+	await base.initializeMCP([{...SESSION_SERVER, name: 'shared-server'}]);
+	const session = base.forSession();
+
+	t.deepEqual(session.getMCPToolInfo('shared_mcp'), {
+		isMCPTool: true,
+		serverName: 'shared-server',
+	});
+	t.deepEqual(session.getMCPToolInfo('read_file'), {isMCPTool: false});
+});
+
+test('forSession - two sessions with different servers do not see each other', async t => {
+	const base = new QueuedClientToolManager([
+		fakeMcpClient('tool_one'),
+		fakeMcpClient('tool_two'),
+	]);
+	const one = base.forSession();
+	const two = base.forSession();
+	await one.initializeMCP([SESSION_SERVER]);
+	await two.initializeMCP([SESSION_SERVER]);
+
+	t.true(one.hasTool('tool_one'));
+	t.false(one.hasTool('tool_two'));
+	t.true(two.hasTool('tool_two'));
+	t.false(two.hasTool('tool_one'));
+	t.is(await one.getToolHandler('tool_one')?.({}), 'ran tool_one');
+});
+
+test('forSession - disconnecting a session removes only its tools and leaves the shared ones connected', async t => {
+	const base = new QueuedClientToolManager([
+		fakeMcpClient('shared_mcp', 'shared-server'),
+		fakeMcpClient('session_mcp'),
+	]);
+	await base.initializeMCP([{...SESSION_SERVER, name: 'shared-server'}]);
+	const session = base.forSession();
+	await session.initializeMCP([SESSION_SERVER]);
+
+	await session.disconnectMCP();
+
+	t.false(session.hasTool('session_mcp'));
+	t.true(session.hasTool('shared_mcp'));
+	t.true(base.hasTool('shared_mcp'));
+	t.not(base.getMCPClient(), null);
+	t.is(session.getMCPClient(), null);
+});
+
+// Serial, and relative to what is registered already: the shutdown manager is
+// process-wide, and other tests in this file leave their handlers in it.
+test.serial('forSession - each manager keeps its own shutdown handler', async t => {
+	const base = new QueuedClientToolManager([
+		fakeMcpClient('shared_mcp', 'shared-server'),
+		fakeMcpClient('session_mcp'),
+	]);
+	await base.initializeMCP([{...SESSION_SERVER, name: 'shared-server'}]);
+	const handlers = () =>
+		[
+			...(
+				getShutdownManager() as unknown as {handlers: Map<string, unknown>}
+			).handlers.keys(),
+		].filter(name => name.startsWith('mcp-client'));
+	const before = handlers();
+	t.true(before.includes('mcp-client'));
+
+	const session = base.forSession();
+	await session.initializeMCP([SESSION_SERVER]);
+	t.is(handlers().length, before.length + 1);
+
+	await session.disconnectMCP();
+	// Closing the session must not take the shared manager's handler with it.
+	t.deepEqual(handlers(), before);
+	await base.disconnectMCP();
+});
+
+test('forSession - a session MCP tool never replaces a tool that already exists', async t => {
+	const base = new QueuedClientToolManager([fakeMcpClient('read_file')]);
+	const session = base.forSession();
+	await session.initializeMCP([SESSION_SERVER]);
+
+	// The built-in read_file stays, the server's same-named tool is skipped.
+	t.is(session.getToolEntry('read_file'), base.getToolEntry('read_file'));
+	t.true(session.isReadOnly('read_file'));
+	await session.disconnectMCP();
+	t.true(base.hasTool('read_file'));
 });

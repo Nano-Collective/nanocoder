@@ -8,6 +8,7 @@ import {
 	getAllowedToolNames,
 	getHeadlessAutoApproveToolNames,
 	isActionAllowed,
+	isGitPrCallAllowed,
 	isTrustLevel,
 	resolveTrustLevel,
 } from './trust';
@@ -51,15 +52,39 @@ test('comment-only denies web_search and fetch_url (headless + untrusted-diff ex
 	t.false(isActionAllowed('comment-only', 'fetch_url'));
 });
 
-test('comment-only allows git_pr read/comment/review actions but not create', t => {
+test('comment-only allows read-only git_pr actions but not comment/review/create', t => {
 	t.true(isActionAllowed('comment-only', 'git_pr', 'view'));
 	t.true(isActionAllowed('comment-only', 'git_pr', 'list'));
 	t.true(isActionAllowed('comment-only', 'git_pr', 'diff'));
-	t.true(isActionAllowed('comment-only', 'git_pr', 'comment'));
-	t.true(isActionAllowed('comment-only', 'git_pr', 'review'));
 	t.true(isActionAllowed('comment-only', 'git_pr', 'checks'));
 	t.true(isActionAllowed('comment-only', 'git_pr', 'logs'));
+	t.false(isActionAllowed('comment-only', 'git_pr', 'comment'));
+	t.false(isActionAllowed('comment-only', 'git_pr', 'review'));
 	t.false(isActionAllowed('comment-only', 'git_pr', 'create'));
+});
+
+test('isGitPrCallAllowed checks every action present in the call arguments', t => {
+	t.true(isGitPrCallAllowed('comment-only', {diff: 7}));
+	t.true(isGitPrCallAllowed('comment-only', {checks: {pr: 7}, view: 7}));
+	t.false(isGitPrCallAllowed('comment-only', {comment: {pr: 7, body: 'x'}}));
+	t.false(
+		isGitPrCallAllowed('comment-only', {
+			review: {pr: 7, verdict: 'approve'},
+		}),
+	);
+	t.false(isGitPrCallAllowed('comment-only', {create: {title: 'x'}}));
+	// A read mixed with a write is denied as a whole.
+	t.false(
+		isGitPrCallAllowed('comment-only', {
+			diff: 7,
+			comment: {pr: 7, body: 'x'},
+		}),
+	);
+	t.true(isGitPrCallAllowed('auto-fix', {create: {title: 'x'}}));
+	// null / undefined mean "not supplied": some providers fill unused optional
+	// fields with null, and git_pr only runs write actions for truthy fields.
+	t.true(isGitPrCallAllowed('comment-only', {diff: 7, comment: null}));
+	t.true(isGitPrCallAllowed('comment-only', {diff: 7, review: undefined}));
 });
 
 test('comment-only requires an explicit action for git_pr', t => {
@@ -79,7 +104,15 @@ test('auto-fix allows file mutation and local commit', t => {
 	t.true(isActionAllowed('auto-fix', 'string_replace'));
 	t.true(isActionAllowed('auto-fix', 'git_add'));
 	t.true(isActionAllowed('auto-fix', 'git_commit'));
-	t.true(isActionAllowed('auto-fix', 'execute_bash'));
+});
+
+test('no trust level allows execute_bash', t => {
+	// A shell as the user can read on-disk credentials by absolute path, so
+	// the unattended fix agent never gets one, whatever its level.
+	for (const level of ['comment-only', 'auto-fix', 'full-commit'] as const) {
+		t.false(isActionAllowed(level, 'execute_bash'));
+		t.false(getAllowedToolNames(level).includes('execute_bash'));
+	}
 });
 
 test('auto-fix allows git_pr create (to open a draft PR)', t => {
@@ -99,7 +132,6 @@ test('auto-fix still allows every comment-only tool', t => {
 
 test('full-commit allows everything auto-fix allows', t => {
 	t.true(isActionAllowed('full-commit', 'write_file'));
-	t.true(isActionAllowed('full-commit', 'execute_bash'));
 	t.true(isActionAllowed('full-commit', 'git_pr', 'create'));
 });
 

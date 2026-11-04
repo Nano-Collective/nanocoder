@@ -485,3 +485,53 @@ test('ToolRegistry - fromToolExports forwards the abort signal to execute', asyn
 	await handler?.({ path: 'a.ts' }, { abortSignal: controller.signal });
 	t.is(seen, controller.signal);
 });
+
+// ============================================================================
+// Layered registries (a session's tools over the shared set)
+// ============================================================================
+
+test('ToolRegistry - a layered registry reads its parent live and adds its own tools', t => {
+	const parent = new ToolRegistry();
+	parent.register(createMockToolEntry({name: 'shared'}));
+	const layer = new ToolRegistry(parent);
+	layer.register(createMockToolEntry({name: 'own'}));
+
+	t.deepEqual(layer.getToolNames().sort(), ['own', 'shared']);
+	t.is(layer.getToolCount(), 2);
+	t.true(layer.hasTool('shared'));
+	t.deepEqual(Object.keys(layer.getHandlers()).sort(), ['own', 'shared']);
+	t.deepEqual(Object.keys(layer.getNativeTools()).sort(), ['own', 'shared']);
+
+	// A tool the parent gains later is visible without re-copying anything.
+	parent.register(createMockToolEntry({name: 'later'}));
+	t.true(layer.hasTool('later'));
+	parent.unregister('shared');
+	t.false(layer.hasTool('shared'));
+});
+
+test('ToolRegistry - the parent never sees a layer\'s tools, and the layer cannot remove the parent\'s', t => {
+	const parent = new ToolRegistry();
+	parent.register(createMockToolEntry({name: 'shared'}));
+	const layer = new ToolRegistry(parent);
+	layer.register(createMockToolEntry({name: 'own'}));
+
+	t.false(parent.hasTool('own'));
+	t.is(parent.getToolCount(), 1);
+
+	layer.unregister('shared');
+	layer.clear();
+	t.true(parent.hasTool('shared'));
+	t.true(layer.hasTool('shared'));
+	t.false(layer.hasTool('own'));
+});
+
+test('ToolRegistry - a layer\'s own tool wins over the parent\'s of the same name', t => {
+	const parent = new ToolRegistry();
+	parent.register(createMockToolEntry({name: 'same', readOnly: false}));
+	const layer = new ToolRegistry(parent);
+	layer.register(createMockToolEntry({name: 'same', readOnly: true}));
+
+	t.true(layer.getEntry('same')?.readOnly);
+	t.false(parent.getEntry('same')?.readOnly);
+	t.is(layer.getToolCount(), 1);
+});

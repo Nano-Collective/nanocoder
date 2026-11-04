@@ -49,6 +49,8 @@ const SUCCESSFUL_RESULT: SubagentResult = {
 
 function baseDeps(overrides: Partial<VerifyCliDeps> = {}): Partial<VerifyCliDeps> {
 	return {
+		// Never read the real preferences file from a unit test.
+		checkTrust: async () => null,
 		isGhAvailable: () => true,
 		getCurrentCommitSha: async () => CURRENT_SHA,
 		getPrRefs: async () => MATCHING_REFS,
@@ -88,6 +90,49 @@ test('unknown flag returns exit code 1', async t => {
 	);
 	t.is(result.exitCode, 1);
 	t.true(result.output.includes('Unknown flag'));
+});
+
+test('an untrusted directory is refused before gh, the scan, or config loading', async t => {
+	let touched = false;
+	const mark = async () => {
+		touched = true;
+		throw new Error('must not be reached');
+	};
+	const result = await runVerifyCli(
+		['--pr', '861'],
+		{projectRoot: '.'},
+		baseDeps({
+			checkTrust: async () =>
+				'Directory /x is not trusted. Pass --trust-directory to bypass it.',
+			isGhAvailable: () => {
+				touched = true;
+				return true;
+			},
+			getPrRefs: mark,
+			runSecurityScan: mark,
+			initializePlain: mark,
+			runSubagent: mark,
+		}),
+	);
+	t.is(result.exitCode, 1);
+	t.true(result.output.includes('is not trusted'));
+	t.true(result.output.includes('--trust-directory'));
+	t.false(touched);
+});
+
+test('--trust-directory is forwarded as the one-run trust bypass', async t => {
+	const bypasses: boolean[] = [];
+	const checkTrust = async (_dir: string, bypass: boolean) => {
+		bypasses.push(bypass);
+		return null;
+	};
+	await runVerifyCli(['--pr', '861'], {projectRoot: '.'}, baseDeps({checkTrust}));
+	await runVerifyCli(
+		['--pr', '861', '--trust-directory'],
+		{projectRoot: '.'},
+		baseDeps({checkTrust}),
+	);
+	t.deepEqual(bypasses, [false, true]);
 });
 
 test('missing gh CLI returns exit code 1', async t => {
