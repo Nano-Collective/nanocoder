@@ -47,9 +47,10 @@ export function activate(context: vscode.ExtensionContext) {
 	acpStateManager = new AcpStateManager();
 	acpClient = new NanocoderAcpClient(outputChannel, acpStateManager);
 	acpProcessManager = new AcpProcessManager(outputChannel, acpStateManager, acpClient);
-	// The agent process (`nanocoder --acp`) is not spawned here: activation also
-	// happens for commands that never talk to it (Open Configuration, Show
-	// Output, the legacy companion). It starts when the chat view first resolves.
+	// The agent process (`nanocoder --acp`) is not spawned here: the extension
+	// activates in every window at startup (for the lenses and status bar), and
+	// windows that never use Nanocoder should not run it. It starts when the
+	// chat view first resolves.
 
 	// Create status bar item
 	statusBarItem = vscode.window.createStatusBarItem(

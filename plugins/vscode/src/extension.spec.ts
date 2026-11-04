@@ -15,10 +15,14 @@ function activateExtension(t: import('ava').ExecutionContext) {
 	const commands = new Map<string, (...args: unknown[]) => unknown>();
 	let viewProvider: vscode.WebviewViewProvider | undefined;
 	let launches = 0;
+	let codeLensProviders = 0;
+	let statusBarShown = false;
 
 	const originals = {
 		registerCommand: vscode.commands.registerCommand,
 		registerWebviewViewProvider: vscode.window.registerWebviewViewProvider,
+		createStatusBarItem: vscode.window.createStatusBarItem,
+		registerCodeLensProvider: vscode.languages.registerCodeLensProvider,
 		registerTextDocumentContentProvider: (vscode.workspace as any)
 			.registerTextDocumentContentProvider,
 		launch: (AcpProcessManager.prototype as any).launch,
@@ -40,6 +44,16 @@ function activateExtension(t: import('ava').ExecutionContext) {
 		return disposable;
 	};
 	(vscode.workspace as any).registerTextDocumentContentProvider = () => disposable;
+	(vscode.window as any).createStatusBarItem = () => ({
+		...(originals.createStatusBarItem as () => object)(),
+		show: () => {
+			statusBarShown = true;
+		},
+	});
+	(vscode.languages as any).registerCodeLensProvider = () => {
+		codeLensProviders++;
+		return disposable;
+	};
 	(AcpProcessManager.prototype as any).launch = async () => {
 		launches++;
 	};
@@ -69,6 +83,9 @@ function activateExtension(t: import('ava').ExecutionContext) {
 			originals.registerWebviewViewProvider;
 		(vscode.workspace as any).registerTextDocumentContentProvider =
 			originals.registerTextDocumentContentProvider;
+		(vscode.window as any).createStatusBarItem = originals.createStatusBarItem;
+		(vscode.languages as any).registerCodeLensProvider =
+			originals.registerCodeLensProvider;
 		(AcpProcessManager.prototype as any).launch = originals.launch;
 		ChatWebviewProvider.prototype.resolveWebviewView = originals.resolveWebviewView;
 		(vscode as any).__test.reset();
@@ -81,6 +98,8 @@ function activateExtension(t: import('ava').ExecutionContext) {
 		resolveChatView: () =>
 			viewProvider?.resolveWebviewView({} as any, {} as any, {} as any),
 		launches: () => launches,
+		codeLensProviders: () => codeLensProviders,
+		statusBarShown: () => statusBarShown,
 	};
 }
 
@@ -91,6 +110,15 @@ test.serial('activation does not spawn the agent process', async t => {
 	const extension = activateExtension(t);
 	await settle();
 
+	t.is(extension.launches(), 0);
+});
+
+test.serial('activation sets up the lenses and status bar without the agent', async t => {
+	const extension = activateExtension(t);
+	await settle();
+
+	t.is(extension.codeLensProviders(), 1);
+	t.true(extension.statusBarShown());
 	t.is(extension.launches(), 0);
 });
 
@@ -128,7 +156,7 @@ test.serial('restarting the agent before the chat view opens starts it once', as
 	t.is(extension.launches(), 1);
 });
 
-test('the manifest has no startup activation, so VS Code activates on use', t => {
+test('the manifest activates at startup, so lenses show before the chat is opened', t => {
 	const manifest = JSON.parse(
 		fs.readFileSync(
 			path.join(process.cwd(), 'plugins', 'vscode', 'package.json'),
@@ -136,12 +164,5 @@ test('the manifest has no startup activation, so VS Code activates on use', t =>
 		),
 	);
 
-	t.false(manifest.activationEvents.includes('onStartupFinished'));
-	// VS Code >= 1.74 derives onView / onCommand activation from these.
-	t.true(
-		manifest.contributes.views['nanocoder-sidebar'].some(
-			(view: {id: string}) => view.id === ChatWebviewProvider.viewType,
-		),
-	);
-	t.regex(manifest.engines.vscode, /^\^1\.(7[4-9]|[89]\d|\d{3,})\./);
+	t.true(manifest.activationEvents.includes('onStartupFinished'));
 });

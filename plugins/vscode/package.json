@@ -24,7 +24,9 @@
 		"ollama",
 		"local"
 	],
-	"activationEvents": [],
+	"activationEvents": [
+		"onStartupFinished"
+	],
 	"main": "./dist/extension.js",
 	"icon": "media/icon.png",
 	"contributes": {
@@ -174,7 +176,7 @@
 				"nanocoder.autoConnect": {
 					"type": "boolean",
 					"default": false,
-					"description": "Automatically connect to Nanocoder CLI when the extension activates, i.e. when the Nanocoder view is opened or a Nanocoder command runs (legacy WebSocket companion)"
+					"description": "Automatically connect to Nanocoder CLI on startup (legacy WebSocket companion)"
 				},
 				"nanocoder.showDiffPreview": {
 					"type": "boolean",
