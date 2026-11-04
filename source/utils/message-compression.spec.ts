@@ -590,6 +590,31 @@ test('compressMessages aggressive mode does not report "no errors" as an error (
 	);
 });
 
+test('compressMessages default mode truncates a long mixed-outcome line (#1633)', t => {
+	const tokenizer = createMockTokenizer();
+	// One long line that mentions both success and an error word, like verbose
+	// JSON. It must still be compressed, not kept in full.
+	const longBody = JSON.stringify({
+		success: true,
+		errors: ['boom', 'bang'],
+		payload: 'x'.repeat(20_000),
+	});
+	const messages: Message[] = [
+		createToolMessage('read_file', longBody),
+		createUserMessage('Recent'),
+	];
+
+	const result = compressMessages(messages, tokenizer, {
+		mode: 'default',
+		keepRecentMessages: 1,
+	});
+
+	const content = result.compressedMessages[0]?.content ?? '';
+	t.true(content.startsWith('Tool: read_file\nResult: '));
+	t.true(content.endsWith('...'));
+	t.true(content.length < 300);
+});
+
 // ==================== keepRecentMessages option ====================
 
 test('compressMessages respects custom keepRecentMessages value', t => {

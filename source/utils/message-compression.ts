@@ -308,19 +308,33 @@ function compressToolResultDefault(toolName: string, content: string): string {
 // Summarise a tool result that mentions both success and failure. The first
 // line and the first failure line always survive, so a failure reported past
 // the leading lines cannot be truncated away while the success line stays.
+// Each kept line is capped so a single-line body (e.g. verbose JSON) still
+// shrinks like it does in every other compression path.
 function compressMixedToolResult(toolName: string, content: string): string {
 	const lines = content.split('\n').filter(line => line.trim());
 	const kept: string[] = [];
 	if (lines.length > 0) {
-		kept.push(lines[0]);
+		kept.push(truncateLine(lines[0]));
 	}
 
 	const failureLine = lines.slice(1).find(line => checkForError(line));
-	if (failureLine !== undefined && failureLine !== kept[0]) {
-		kept.push(failureLine);
+	if (failureLine !== undefined && failureLine !== lines[0]) {
+		kept.push(truncateLine(failureLine));
 	}
 
 	return `Tool: ${toolName}\nResult: ${kept.join('\n')}`;
+}
+
+// Cap a single line at the default truncation limit, keeping the ellipsis
+// inside that budget.
+function truncateLine(
+	line: string,
+	limit: number = COMPRESSION_CONSTANTS.DEFAULT_TRUNCATION_LIMIT,
+): string {
+	if (line.length <= limit) {
+		return line;
+	}
+	return `${line.slice(0, limit - 3)}...`;
 }
 
 // Compress tool result in conservative mode
