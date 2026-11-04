@@ -72,6 +72,30 @@ function snapOutsideToken(
 	return index;
 }
 
+const isHighSurrogate = (codeUnit: number) =>
+	codeUnit >= 0xd800 && codeUnit <= 0xdbff;
+const isLowSurrogate = (codeUnit: number) =>
+	codeUnit >= 0xdc00 && codeUnit <= 0xdfff;
+
+/**
+ * Move a cut out of the middle of a surrogate pair (an emoji or other astral
+ * character), which would otherwise leave a lone surrogate in the result.
+ * `bias` moves the split character into the elided middle: `before` excludes
+ * the high surrogate from the head, `after` excludes the low surrogate from
+ * the tail, so the result never grows past the cap.
+ */
+function snapOutsideSurrogatePair(
+	content: string,
+	index: number,
+	bias: 'before' | 'after',
+): number {
+	if (index <= 0 || index >= content.length) return index;
+	const before = content.charCodeAt(index - 1);
+	const after = content.charCodeAt(index);
+	if (!isHighSurrogate(before) || !isLowSurrogate(after)) return index;
+	return bias === 'before' ? index - 1 : index + 1;
+}
+
 /**
  * Bound text returned by a tool before it is added to model context.
  *
@@ -92,16 +116,24 @@ export function truncateToolResult(
 	const headLength = Math.floor(contentBudget * HEAD_SHARE);
 	const tailLength = contentBudget - headLength;
 
-	const headEnd = snapOutsideToken(
+	const headEnd = snapOutsideSurrogatePair(
 		content,
-		snapOutsidePlaceholder(content, headLength, 'before'),
+		snapOutsideToken(
+			content,
+			snapOutsidePlaceholder(content, headLength, 'before'),
+			'before',
+		),
 		'before',
 	);
 	const tailStart = Math.max(
 		headEnd,
-		snapOutsideToken(
+		snapOutsideSurrogatePair(
 			content,
-			snapOutsidePlaceholder(content, content.length - tailLength, 'after'),
+			snapOutsideToken(
+				content,
+				snapOutsidePlaceholder(content, content.length - tailLength, 'after'),
+				'after',
+			),
 			'after',
 		),
 	);
