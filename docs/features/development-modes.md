@@ -27,10 +27,10 @@ The modes differ along two axes: whether each tool call is gated, and whether an
 | Mode | Per-tool approval | Reaches disk | Review point |
 |------|------------------|--------------|--------------|
 | **Normal** | Every tool that can change something | Yes | Before each call |
-| **Auto-accept** | Bash, `git_commit`, `git_pr` create, `file_op` deletes and overwrites, and custom tools with `approval: always` | Yes | Before risky calls |
+| **Auto-accept** | Bash, `browser`, `git_commit`, `git_pr` create/comment/review, `file_op` deletes and overwrites, and custom tools with `approval: always` | Yes | Before risky calls |
 | **Yolo** | None | Yes | None |
 | **Plan** | N/A - cannot mutate | No | The plan, before any work |
-| **Architect** | Same as auto-accept, plus MCP tools, minus `file_op` (the checkpoint covers it) | Yes | The whole turn, after it runs |
+| **Architect** | Bash, `browser`, MCP tools and custom tools with `approval: always` (`file_op` is covered by the checkpoint; `git_commit` and `git_pr` are removed) | Yes | The whole turn, after it runs |
 
 In every mode, tools listed in the top-level [`nanocoder.alwaysAllow`](../configuration/index.md#tool-auto-approval) skip the prompt.
 
@@ -56,7 +56,7 @@ Automatically accepts and executes most tool calls without confirmation. Some hi
 - Significantly faster for iterative workflows
 - All tool execution results are still displayed — you can see what happened
 - The AI can chain multiple actions without waiting for approval
-- Still prompts: `execute_bash`, `git_commit`, `git_pr` when it creates a pull request, `file_op` when it deletes a file or when a move or copy would overwrite an existing file, and custom tools declared `approval: always`. File edits, `git_add`, MCP tools, and custom tools with `approval: destructive` run without a prompt
+- Still prompts: `execute_bash`, `browser`, `git_commit`, `git_pr` when it creates, comments on or reviews a pull request, `file_op` when it deletes a file or when a move or copy would overwrite an existing file, and custom tools declared `approval: always`. File edits, `git_add`, MCP tools, and custom tools with `approval: destructive` run without a prompt
 - A delete or an overwrite shows no diff and cannot be undone, so `file_op` asks first, the same as `rm` through `execute_bash`. Creating directories, and moving or copying to a path that does not exist yet, still run without a prompt
 
 **When to use:** Tasks you trust the AI to handle — code generation, refactoring well-understood code, running tests, or when you want to step back and let the AI work through a problem.
@@ -188,7 +188,7 @@ Revert restores files. It does not undo side effects — a `git push`, a deleted
 Architect waives per-call approval for file mutation tools only. Everything with a side effect a checkpoint cannot undo still prompts exactly as it does in normal mode:
 
 - **Waived** — `write_file`, `string_replace`, `diff_edit`, `file_op`, `lsp_format_document`, and any custom tool that mutates files
-- **Still prompts** - `execute_bash`, `git_pr` when it creates a pull request, MCP tools (unless listed in the server's `alwaysAllow`), and custom tools declared `approval: always`
+- **Still prompts** - `execute_bash`, `browser`, MCP tools (unless listed in the server's `alwaysAllow`), and custom tools declared `approval: always`
 
 Gating a turn twice would make architect worse than normal mode rather than better, so the batching only pays off if the turn runs uninterrupted.
 
@@ -201,5 +201,7 @@ Architect removes the tools that would commit work past the review gate or write
 Architect checkpoints are the same mechanism as `/checkpoint`, created and released automatically. Each turn's checkpoint is deleted once you resolve the review bar, so they do not accumulate in `/checkpoint list`.
 
 If a checkpoint cannot be written — an unwritable directory, a full disk — the turn still runs and a warning is logged. The review bar will not offer revert for that turn.
+
+[`nanocoder.autoCommit`](../configuration/index.md#auto-commit) is not mode-aware: with it on, each edit in an architect turn is committed as it happens. Revert then restores the files but leaves those commits in your history, so the restored content shows up as uncommitted changes. Drop the commits with `git reset` or `git revert` if you do not want them, or leave auto-commit off while using architect.
 
 **When to use:** Multi-file refactors where approving each edit is noise, work you want to judge as a whole rather than step by step, or any time you would rather see the finished result and undo it than gate every step on the way there.
