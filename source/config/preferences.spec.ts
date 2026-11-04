@@ -56,6 +56,8 @@ import {
 	updateShowAgentBashOutput,
 	updateShowUsageFooter,
 	trustRecheck,
+	getPreferencesVersion,
+	subscribeToPreferences,
 	DEFAULT_MAX_FPS,
 	MIN_MAX_FPS,
 	MAX_MAX_FPS,
@@ -63,17 +65,16 @@ import {
 	getUiMaxFps,
 	getMaxFps,
 } from './preferences';
-import {updatePreferencesNestedValue} from '@/config/config-writer';
+import {
+	updatePreferencesNestedValue,
+	writeConfigFileAtomic,
+} from '@/config/config-writer';
 import type {UserPreferences} from '@/types/index';
 
 console.log('\npreferences.spec.ts');
 
 // Use environment variable to isolate config directory for tests
 const testConfigDir = join(tmpdir(), `nanocoder-test-config-${Date.now()}`);
-
-test.beforeEach(() => {
-	resetPreferencesCache();
-});
 
 test.before(() => {
 	// Set config directory for all tests
@@ -2786,6 +2787,99 @@ test.serial(
 			if (existsSync(preferencesPath)) {
 				rmSync(preferencesPath, {force: true});
 			}
+		}
+	},
+);
+
+test.serial(
+	'updatePreferencesNestedValue invalidates cached preferences and notifies subscribers',
+	t => {
+		const preferencesPath = getTestPreferencesPath();
+		let notifications = 0;
+		let unsubscribe: (() => void) | undefined;
+
+		try {
+			t.true(
+				savePreferences({
+					nanocoder: {ui: {maxFps: 30}},
+				}),
+			);
+			t.is(loadPreferences().nanocoder?.ui?.maxFps, 30);
+			t.is(getMaxFps(), 30);
+
+			const previousVersion = getPreferencesVersion();
+			unsubscribe = subscribeToPreferences(() => {
+				notifications++;
+			});
+
+			updatePreferencesNestedValue('ui', 'maxFps', 24);
+
+			t.is(getPreferencesVersion(), previousVersion + 1);
+			t.is(notifications, 1);
+			t.is(loadPreferences().nanocoder?.ui?.maxFps, 24);
+			t.is(getMaxFps(), 24);
+			t.is(notifications, 1);
+		} finally {
+			unsubscribe?.();
+			if (existsSync(preferencesPath)) {
+				rmSync(preferencesPath, {force: true});
+			}
+		}
+	},
+);
+
+test.serial(
+	'writeConfigFileAtomic invalidates preferences once after a successful preferences write',
+	t => {
+		const dir = mkdtempSync(path.join(tmpdir(), 'nanocoder-writer-cache-'));
+		const previousDir = process.env.NANOCODER_CONFIG_DIR;
+		const file = path.join(dir, 'nanocoder-preferences.json');
+		let notifications = 0;
+		let unsubscribe: (() => void) | undefined;
+
+		try {
+			process.env.NANOCODER_CONFIG_DIR = dir;
+			resetPreferencesCache();
+
+			t.true(savePreferences({showAgentBashOutput: false}));
+			t.false(getShowAgentBashOutput());
+
+			const previousVersion = getPreferencesVersion();
+			unsubscribe = subscribeToPreferences(() => {
+				notifications++;
+			});
+
+			writeConfigFileAtomic(file, {showAgentBashOutput: true});
+
+			t.is(getPreferencesVersion(), previousVersion + 1);
+			t.is(notifications, 1);
+			t.true(loadPreferences().showAgentBashOutput);
+			t.true(getShowAgentBashOutput());
+
+			const versionAfterWrite = getPreferencesVersion();
+
+			const blockingFile = path.join(dir, 'blocking-file');
+			writeFileSync(blockingFile, 'not a directory');
+
+			t.throws(() =>
+				writeConfigFileAtomic(
+					path.join(blockingFile, 'nanocoder-preferences.json'),
+					{showAgentBashOutput: false},
+				),
+			);
+			t.is(getPreferencesVersion(), versionAfterWrite);
+			t.is(notifications, 1);
+			t.true(getShowAgentBashOutput());
+		} finally {
+			unsubscribe?.();
+			if (previousDir === undefined) {
+				delete process.env.NANOCODER_CONFIG_DIR;
+			} else {
+				process.env.NANOCODER_CONFIG_DIR = previousDir;
+			}
+
+			resetPreferencesCache();
+			rmSync(dir, {recursive: true, force: true});
 		}
 	},
 );

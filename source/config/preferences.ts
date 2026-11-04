@@ -150,10 +150,7 @@ export function saveGlobalOnlyPreferences(
 		return false;
 	}
 
-	preferencesVersion++;
-	for (const listener of preferencesListeners) {
-		listener();
-	}
+	notifyPreferencesChanged();
 	return true;
 }
 
@@ -253,6 +250,18 @@ export function getPreferencesVersion(): number {
 	return preferencesVersion;
 }
 
+/**
+ * Invalidate cached preference data after a successful write and notify
+ * subscribers that the preference snapshot changed.
+ */
+export function notifyPreferencesChanged(): void {
+	preferencesCache = null;
+	preferencesVersion++;
+	for (const listener of preferencesListeners) {
+		listener();
+	}
+}
+
 // Caches a derived preference, keyed on NANOCODER_CONFIG_DIR and getPreferencesVersion()
 // (bumped on every write), so the value never goes stale after a settings change.
 function cachedPreference<T>(read: (prefs: UserPreferences) => T): () => T {
@@ -299,12 +308,8 @@ export function savePreferences(preferences: UserPreferences): boolean {
 		return false;
 	}
 
-	preferencesVersion++;
-	preferencesCache = null;
 	cachedVoicePreference = preferences.voice;
-	for (const listener of preferencesListeners) {
-		listener();
-	}
+	notifyPreferencesChanged();
 	return true;
 }
 
