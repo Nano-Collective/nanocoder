@@ -1116,3 +1116,105 @@ test('useChatHandler - sends a byte-identical system prompt across turns', async
 	t.false(sentUserMessages[1]?.includes('## Project Context'));
 	rendered.unmount();
 });
+
+// Skills are matched against the current request, so they travel in the turn's
+// user message rather than the system prompt (#1574). The builder is covered in
+// isolation by command-integration.spec.ts; what that cannot show is that the
+// section survives into the array handed to the client. It matters here because
+// the call site swallows failures by design (it falls back to '' so a broken
+// skills loader cannot break the turn), so a regression would produce no crash
+// and no red test — the model would just silently stop receiving skills.
+test('useChatHandler - sends per-turn skills to the model in the user message', async t => {
+	let hookResult: ChatHandlerReturn | null = null;
+	let sentMessages: Message[] = [];
+	const matchedAgainst: string[] = [];
+	const client: LLMClient = {
+		...createMockClient(),
+		chat: async (messages, _tools, callbacks) => {
+			sentMessages = messages;
+			callbacks.onFinish?.();
+			return {choices: [{message: {role: 'assistant', content: 'ok'}}]};
+		},
+	};
+
+	const customCommandLoader = {
+		findRelevantCommands: (request: string) => {
+			matchedAgainst.push(request);
+			return [
+				{
+					name: 'changelog',
+					fullName: 'changelog',
+					path: '/test/changelog.md',
+					metadata: {description: 'Write a changelog entry'},
+					content: 'Summarise the change in one self-contained bullet.',
+				},
+			];
+		},
+	} as unknown as NonNullable<UseChatHandlerProps['customCommandLoader']>;
+
+	const rendered = render(
+		<TestHookComponent
+			{...createMockProps({
+				client,
+				toolManager: createMockToolManager(),
+				customCommandLoader,
+			})}
+			onResult={result => {
+				hookResult = result;
+			}}
+		/>,
+	);
+
+	await waitForCondition(() => hookResult !== null);
+	await hookResult!.handleChatMessage('update the changelog');
+
+	// Skills are chosen for THIS request, so the user's text is the query.
+	t.deepEqual(matchedAgainst, ['update the changelog']);
+
+	const userMessage = String(sentMessages.at(-1)?.content ?? '');
+	t.true(userMessage.startsWith('update the changelog'));
+	t.true(userMessage.includes('## Available Skills'));
+	t.true(
+		userMessage.includes('Summarise the change in one self-contained bullet.'),
+	);
+	// The other half of the move: it must no longer be in the system block.
+	t.false(String(sentMessages[0]?.content ?? '').includes('## Available Skills'));
+	rendered.unmount();
+});
+
+test('useChatHandler - a turn with no skills and no memories is sent verbatim', async t => {
+	let hookResult: ChatHandlerReturn | null = null;
+	let sentMessages: Message[] = [];
+	const client: LLMClient = {
+		...createMockClient(),
+		chat: async (messages, _tools, callbacks) => {
+			sentMessages = messages;
+			callbacks.onFinish?.();
+			return {choices: [{message: {role: 'assistant', content: 'ok'}}]};
+		},
+	};
+
+	const rendered = render(
+		<TestHookComponent
+			{...createMockProps({
+				client,
+				toolManager: createMockToolManager(),
+				customCommandLoader: {
+					findRelevantCommands: () => [],
+				} as unknown as NonNullable<UseChatHandlerProps['customCommandLoader']>,
+				memoryFinder: {findRelevantMemories: async () => []},
+			})}
+			onResult={result => {
+				hookResult = result;
+			}}
+		/>,
+	);
+
+	await waitForCondition(() => hookResult !== null);
+	await hookResult!.handleChatMessage('just a question');
+
+	// Byte-identical, not merely "contains": an empty wrapper would still be a
+	// new prefix for every backend that caches on exact bytes.
+	t.is(String(sentMessages.at(-1)?.content ?? ''), 'just a question');
+	rendered.unmount();
+});
