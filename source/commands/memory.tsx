@@ -14,9 +14,8 @@ import {errorMsg, infoMsg, successMsg} from '@/utils/message-factory';
 interface MemoryCommandOptions {
 	memoryManager?: Pick<
 		SemanticMemoryManager,
-		'listMemories' | 'deleteMemory' | 'clearMemories'
-	> &
-		Partial<Pick<SemanticMemoryManager, 'addMemory'>>;
+		'listMemories' | 'deleteMemory' | 'clearMemories' | 'addMemory'
+	>;
 	summarizerService?: Pick<
 		SummarizerService,
 		'proposeMemoriesFromMessages' | 'acceptProposal'
@@ -188,13 +187,7 @@ export function createMemoryCommand(
 ): Command {
 	const memoryManager = options.memoryManager ?? new SemanticMemoryManager();
 	const summarizerService =
-		options.summarizerService ??
-		new SummarizerService(
-			'addMemory' in memoryManager &&
-				typeof memoryManager.addMemory === 'function'
-				? (memoryManager as Pick<SemanticMemoryManager, 'addMemory'>)
-				: undefined,
-		);
+		options.summarizerService ?? new SummarizerService(memoryManager);
 	// Defaults to a private store; only the exported singleton binds the shared
 	// one, so tests and any ad-hoc instance can't clobber each other's state.
 	const proposalStore = options.proposalStore ?? new ProposalStore();
