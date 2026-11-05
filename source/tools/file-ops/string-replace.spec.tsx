@@ -1419,3 +1419,22 @@ test('string_replace formatter: previews an LF edit for a CRLF file', async t =>
 	t.false(lastFrame()?.includes('Content not found') ?? true);
 	t.true(lastFrame()?.includes('ONE') ?? false);
 });
+
+test('string_replace formatter: result shows the edit line in a mixed-ending file', async t => {
+	const filePath = await createTestFile(
+		'mixed.txt',
+		'a\r\nb\r\nc\r\nd\r\nx\ny\n',
+	);
+	const args = {path: filePath, old_str: 'x\ny', new_str: 'X\nY'};
+
+	const result = await executeStringReplace(args);
+	t.is(await readFile(filePath, 'utf-8'), 'a\r\nb\r\nc\r\nd\r\nX\nY\n');
+
+	if (!stringReplaceTool.formatter) {
+		t.fail('Formatter not defined');
+		return;
+	}
+	const element = await stringReplaceTool.formatter(args, result);
+	const {lastFrame} = render(<TestThemeProvider>{element}</TestThemeProvider>);
+	t.true(lastFrame()?.includes('Location: lines 5-6') ?? false);
+});

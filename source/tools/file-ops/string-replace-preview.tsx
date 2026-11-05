@@ -61,11 +61,20 @@ export async function formatStringReplacePreview(
 		const absPath = resolve(getSafeSessionCwd(), path);
 		const cached = await getCachedFileContent(absPath);
 		const fileContent = cached.content;
-		const {oldStr: old_str, newStr: new_str} = fitEditToLineEndings(
+		const fitted = fitEditToLineEndings(
 			fileContent,
 			args.old_str,
 			args.new_str,
 		);
+		// After the write the file no longer holds old_str, so the fit cannot
+		// tell an edit kept as sent (LF region of a mixed file). Use the text
+		// that is actually in the file.
+		const keptAsSent =
+			isResult &&
+			!fileContent.includes(fitted.newStr) &&
+			fileContent.includes(args.new_str);
+		const old_str = keptAsSent ? args.old_str : fitted.oldStr;
+		const new_str = keptAsSent ? args.new_str : fitted.newStr;
 		const ext = path.split('.').pop()?.toLowerCase() ?? '';
 		const language = getLanguageFromExtension(ext);
 
