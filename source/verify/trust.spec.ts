@@ -104,7 +104,15 @@ test('auto-fix allows file mutation and local commit', t => {
 	t.true(isActionAllowed('auto-fix', 'string_replace'));
 	t.true(isActionAllowed('auto-fix', 'git_add'));
 	t.true(isActionAllowed('auto-fix', 'git_commit'));
-	t.true(isActionAllowed('auto-fix', 'execute_bash'));
+});
+
+test('no trust level allows execute_bash', t => {
+	// A shell as the user can read on-disk credentials by absolute path, so
+	// the unattended fix agent never gets one, whatever its level.
+	for (const level of ['comment-only', 'auto-fix', 'full-commit'] as const) {
+		t.false(isActionAllowed(level, 'execute_bash'));
+		t.false(getAllowedToolNames(level).includes('execute_bash'));
+	}
 });
 
 test('auto-fix allows git_pr create (to open a draft PR)', t => {
@@ -124,7 +132,6 @@ test('auto-fix still allows every comment-only tool', t => {
 
 test('full-commit allows everything auto-fix allows', t => {
 	t.true(isActionAllowed('full-commit', 'write_file'));
-	t.true(isActionAllowed('full-commit', 'execute_bash'));
 	t.true(isActionAllowed('full-commit', 'git_pr', 'create'));
 });
 

@@ -4,6 +4,7 @@ import test from 'ava';
 import {render} from 'ink-testing-library';
 import React from 'react';
 import {themes} from '../../config/themes.js';
+import {MAX_CACHEABLE_FILE_SIZE_BYTES} from '../../constants.js';
 import {ThemeContext} from '../../hooks/useTheme.js';
 import {resolveToolApproval} from '../approval-policy.js';
 import {clearReadTracker, markFileSeen} from '../../utils/read-tracker.js';
@@ -439,6 +440,25 @@ test('diff_edit refuses a Latin-1 file and leaves every byte unchanged', async t
 	);
 
 	t.deepEqual(await readFile(filePath), LATIN1_BYTES);
+});
+
+test('diff_edit refuses a Latin-1 file too large for the file cache', async t => {
+	// Over the cache's single-file limit, so the read is never cached.
+	const bytes = Buffer.concat([
+		Buffer.alloc(MAX_CACHEABLE_FILE_SIZE_BYTES + 1024, 'x'),
+		Buffer.from('\n', 'latin1'),
+		LATIN1_BYTES,
+	]);
+	const filePath = join(testDir, 'large-legacy.js');
+	await writeFile(filePath, bytes);
+
+	await t.throwsAsync(
+		executeDiffEdit({path: projectRelativePath(filePath), diff: sampleDiff}),
+		{message: /not valid UTF-8/},
+	);
+
+	// Buffer.equals, not deepEqual: AVA's deep diff is slow on megabytes.
+	t.true((await readFile(filePath)).equals(bytes), 'bytes unchanged');
 });
 
 test('diff_edit validator refuses a Latin-1 file', async t => {

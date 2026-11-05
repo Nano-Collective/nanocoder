@@ -5,9 +5,15 @@ import test from 'ava';
 import {render} from 'ink-testing-library';
 import React from 'react';
 import {themes} from '../../config/themes.js';
+import {MAX_CACHEABLE_FILE_SIZE_BYTES} from '../../constants.js';
 import {resolveToolApproval} from '../approval-policy.js';
 import {ThemeContext} from '../../hooks/useTheme.js';
-import {resetSessionCwd, setSessionCwd} from '../../services/session-cwd.js';
+import {
+	getProjectRoot,
+	resetSessionCwd,
+	setSessionCwd,
+} from '../../services/session-cwd.js';
+import {stringReplaceDisplayPath} from './string-replace-preview.js';
 import {stringReplaceTool} from './string-replace.js';
 import {clearReadTracker, markFileSeen} from '../../utils/read-tracker.js';
 import {readFileTool} from '../read-file.js';
@@ -901,6 +907,26 @@ test('string_replace formatter: preview follows the session cwd', async t => {
 	}
 });
 
+test('string_replace preview labels the file the session cwd resolves to', async t => {
+	// Inside the project: relative to the project root, so a `cd sub` edit of
+	// `note.txt` reads as `sub/note.txt`, not as the root's `note.txt`.
+	setSessionCwd(join(getProjectRoot(), 'source'));
+	try {
+		t.is(stringReplaceDisplayPath('note.txt'), join('source', 'note.txt'));
+	} finally {
+		resetSessionCwd();
+	}
+	// Outside the project: absolute.
+	const outside = await mkdtemp(join(tmpdir(), 'string-replace-outside-'));
+	setSessionCwd(outside);
+	try {
+		t.is(stringReplaceDisplayPath('note.txt'), join(outside, 'note.txt'));
+	} finally {
+		resetSessionCwd();
+		await rm(outside, {recursive: true, force: true});
+	}
+});
+
 test('string_replace formatter: says when the line cap hides edits', async t => {
 	const oldLines = Array.from({length: 25}, (_, i) => `old line ${i + 1}`);
 	const filePath = await createTestFile(
@@ -1274,6 +1300,25 @@ test('string_replace: refuses a Latin-1 file and leaves every byte unchanged', a
 	);
 
 	t.deepEqual(await readFile(filePath), LATIN1_BYTES);
+});
+
+test('string_replace: refuses a Latin-1 file too large for the file cache', async t => {
+	// Over the cache's single-file limit, so the read is never cached.
+	const bytes = Buffer.concat([
+		Buffer.alloc(MAX_CACHEABLE_FILE_SIZE_BYTES + 1024, 'x'),
+		Buffer.from('\n', 'latin1'),
+		LATIN1_BYTES,
+	]);
+	const filePath = join(testDir, 'large-legacy.txt');
+	await writeFile(filePath, bytes);
+
+	await t.throwsAsync(
+		executeStringReplace({path: filePath, old_str: 'old', new_str: 'new'}),
+		{message: /not valid UTF-8/},
+	);
+
+	// Buffer.equals, not deepEqual: AVA's deep diff is slow on megabytes.
+	t.true((await readFile(filePath)).equals(bytes), 'bytes unchanged');
 });
 
 test('string_replace: refuses Windows-1252 and Shift-JIS files too', async t => {
