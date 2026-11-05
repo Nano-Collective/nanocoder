@@ -369,7 +369,10 @@ export class LSPManager extends EventEmitter {
 	 */
 	private toFsPath(filePath: string): string {
 		if (filePath.startsWith('file://')) return fileURLToPath(filePath);
-		return resolve(getSessionCwd(), filePath);
+		// Paths reach here from lsp_get_diagnostics, whose validator confines them
+		// to the project (resolveFilePath), and from edits to files the tools
+		// already validated.
+		return resolve(getSessionCwd(), filePath); // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
 	}
 
 	/**

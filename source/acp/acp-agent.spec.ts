@@ -1234,7 +1234,7 @@ const promptForBuiltinReply = async (
 	return replies.join('\n');
 };
 
-// The wording the VS Code extension has always been sent, word for word.
+// The wording the VS Code extension is sent, word for word.
 const VSCODE_REPLIES: Record<string, string> = {
 	'/help': [
 		'**Available slash commands in VS Code GUI:**',
@@ -1247,9 +1247,10 @@ const VSCODE_REPLIES: Record<string, string> = {
 	].join('\n'),
 	'/copy':
 		'`/copy` is handled by the chat view. Type it in the Nanocoder chat input (or press Ctrl+Alt+Shift+C / Cmd+Alt+Shift+C for the last code block).',
-	'/model': 'Use the model selector in the chat header to switch models.',
+	'/model':
+		"Use the model picker on the chat input's bottom row to switch models.",
 	'/provider':
-		'Use the provider selector in the chat header to switch providers.',
+		'Use the Provider selector in the Configuration popover (the sliders button next to the model picker) to switch providers.',
 	'/settings':
 		'Use the Settings tab in the Nanocoder sidebar (the gear icon in the view title bar, or `Nanocoder: Settings` in the Command Palette).',
 	'/init':

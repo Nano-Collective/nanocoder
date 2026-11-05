@@ -14,13 +14,15 @@ sidebar_order: 23
 {
 	"name": "Kimi Code",
 	"sdkProvider": "anthropic",
-	"baseUrl": "https://api.kimi.com/coding/v1",
+	"baseUrl": "https://api.kimi.ai/coding/v1",
 	"apiKey": "your-kimi-api-key",
 	"models": ["your-model-name"]
 }
 ```
 
 The `sdkProvider: "anthropic"` field is required as Kimi's coding API uses the Anthropic message format.
+
+`https://api.kimi.ai/coding/v1` is the international endpoint. If your Kimi Code key was issued in mainland China, use `https://api.kimi.com/coding/v1` instead, since the key and base URL must come from the same region.
 
 ## Output Token Ceiling
 

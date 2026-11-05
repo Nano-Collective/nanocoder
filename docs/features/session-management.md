@@ -42,6 +42,8 @@ nanocoder --resume {id}   # resume a specific session by ID or list index
 
 The new name must be non-empty and **100 characters or less**. If the name exceeds this limit, an error message is displayed in chat.
 
+The name is saved with the session and shown in `/resume`. Later autosaves keep it rather than replacing it with a title derived from your messages. A rename made before you have sent the first message is applied once the session is created.
+
 ## What Gets Saved
 
 Each session captures:
@@ -64,7 +66,7 @@ Sessions are stored in the platform-specific app data directory:
 | Linux | `~/.local/share/nanocoder/sessions/` |
 | Windows | `%APPDATA%/nanocoder/sessions/` |
 
-If `XDG_DATA_HOME` is set, `$XDG_DATA_HOME/nanocoder/sessions/` is used instead, on every platform. This can be overridden via the `directory` config option or `NANOCODER_DATA_DIR` environment variable.
+The `directory` config option overrides all of these. Otherwise, if the `NANOCODER_DATA_DIR` environment variable is set, `$NANOCODER_DATA_DIR/sessions/` is used; failing that, if `XDG_DATA_HOME` is set, `$XDG_DATA_HOME/nanocoder/sessions/` is used, on every platform.
 
 Every Nanocoder process shares this store: other terminals, the VS Code extension, and parallel `nanocoder run`s. Updates to the session index (`sessions.json`) take a short-lived lock file, `sessions.json.lock`, so sessions saved at the same time from different processes are all kept. At startup the index is also checked against the session files on disk: a session file missing from the index is added back, and an entry whose file is gone is removed.
 
