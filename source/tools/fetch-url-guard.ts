@@ -39,7 +39,7 @@ function ipv4InCidr(ip: number, base: number, prefix: number): boolean {
 	return (ip & mask) === (base & mask);
 }
 
-function isPrivateOrLocalIpv4(ip: number): boolean {
+function isNonPublicIpv4(ip: number): boolean {
 	return (
 		ipv4InCidr(ip, 0x00000000, 8) || // 0.0.0.0/8
 		ipv4InCidr(ip, 0x0a000000, 8) || // 10.0.0.0/8
@@ -89,7 +89,7 @@ function ipv4FromIpv6(groups: number[]): number | null {
 		// ::ffff:0:0:0/96 IPv4-translated
 		if (e === 0xffff && f === 0) return low32;
 	}
-	// 64:ff9b::/96 NAT64 well-known prefix
+	// 64:ff9b::/96 NAT64 well-known prefix only; other RFC 6052 prefixes are not decoded
 	if (a === 0x64 && b === 0xff9b && c === 0 && d === 0 && e === 0 && f === 0) {
 		return low32;
 	}
@@ -127,7 +127,7 @@ export function isBlockedFetchHost(hostname: string): boolean {
 	const bare = host.replace(/^\[|\]$/g, '');
 	const v6 = parseIpv6(bare);
 	const v4 = parseIpv4(bare) ?? (v6 ? ipv4FromIpv6(v6) : null);
-	if (v4 !== null) return isPrivateOrLocalIpv4(v4);
+	if (v4 !== null) return isNonPublicIpv4(v4);
 	return isBlockedIpv6(bare);
 }
 

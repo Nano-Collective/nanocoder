@@ -137,6 +137,9 @@ test.serial('assertResolvedPublicHttpUrl allows names that resolve to public add
 		{
 			'docs.example.test': ['93.184.216.34'],
 			'dual.example.test': ['93.184.216.34', '2606:2800:220:1::1'],
+			// `new URL()` rewrites a dotted tail to hex, so only resolver output
+			// reaches the dotted branch of the parser (#1942).
+			'dotted.example.test': ['64:ff9b::8.8.8.8'],
 		},
 		async () => {
 			await t.notThrowsAsync(() =>
@@ -144,6 +147,9 @@ test.serial('assertResolvedPublicHttpUrl allows names that resolve to public add
 			);
 			await t.notThrowsAsync(() =>
 				assertResolvedPublicHttpUrl('http://dual.example.test:8080/'),
+			);
+			await t.notThrowsAsync(() =>
+				assertResolvedPublicHttpUrl('http://dotted.example.test/'),
 			);
 		},
 	);
