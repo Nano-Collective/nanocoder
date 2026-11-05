@@ -49,6 +49,53 @@ import {withValidation} from '@/utils/tool-validation';
 import {ensureString, isPlainObject} from '@/utils/type-helpers';
 import {TransportFactory} from './transport-factory.js';
 
+// Decoded size of base64 data, without decoding it.
+function base64ByteLength(data: string): number {
+	const padding = data.endsWith('==') ? 2 : data.endsWith('=') ? 1 : 0;
+	return Math.max(0, Math.floor((data.length * 3) / 4) - padding);
+}
+
+// Text for one MCP content block. Binary data is summarised, not dumped,
+// so base64 never reaches the model as text.
+function formatContentBlock(block: unknown): string {
+	if (!isPlainObject(block)) {
+		return JSON.stringify(block);
+	}
+	switch (block.type) {
+		case 'text':
+			return ensureString(block.text);
+		case 'image':
+		case 'audio': {
+			const data = ensureString(block.data);
+			const mimeType = ensureString(block.mimeType) || block.type;
+			return `[${mimeType}, ${base64ByteLength(data)} bytes]`;
+		}
+		case 'resource': {
+			const resource = isPlainObject(block.resource) ? block.resource : {};
+			if (typeof resource.text === 'string') {
+				return resource.text;
+			}
+			const parts = [`resource ${ensureString(resource.uri)}`];
+			if (typeof resource.mimeType === 'string') {
+				parts.push(resource.mimeType);
+			}
+			if (typeof resource.blob === 'string') {
+				parts.push(`${base64ByteLength(resource.blob)} bytes`);
+			}
+			return `[${parts.join(', ')}]`;
+		}
+		case 'resource_link':
+			return `[resource link: ${ensureString(block.uri)}]`;
+		default:
+			return JSON.stringify(block);
+	}
+}
+
+// Join every content block of a tool result, in order.
+function formatToolResultContent(content: unknown[]): string {
+	return content.map(formatContentBlock).join('\n');
+}
+
 export class MCPClient {
 	private clients: Map<string, Client> = new Map();
 	private transports: Map<string, ClientTransport> = new Map();
@@ -1251,34 +1298,18 @@ export class MCPClient {
 					Array.isArray(result.content) &&
 					result.content.length > 0
 				) {
-					const content = result.content[0] as
-						| {type: 'text'; text?: string}
-						| Record<string, unknown>;
-					if ('type' in content && content.type === 'text') {
-						const textContent = content as {type: 'text'; text?: string};
-						const responseText = textContent.text || '';
-
-						const finalMetrics = endMetrics(metrics);
-						this.logger.info('MCP tool execution completed', {
-							toolName,
-							responseLength: responseText.length,
-							duration: `${finalMetrics.duration.toFixed(2)}ms`,
-							correlationId,
-						});
-
-						return responseText;
-					}
-					const jsonResponse = JSON.stringify(content);
+					const responseText = formatToolResultContent(result.content);
 
 					const finalMetrics = endMetrics(metrics);
-					this.logger.info('MCP tool execution completed (JSON)', {
+					this.logger.info('MCP tool execution completed', {
 						toolName,
-						responseLength: jsonResponse.length,
+						blockCount: result.content.length,
+						responseLength: responseText.length,
 						duration: `${finalMetrics.duration.toFixed(2)}ms`,
 						correlationId,
 					});
 
-					return jsonResponse;
+					return responseText;
 				}
 
 				const finalMetrics = endMetrics(metrics);
