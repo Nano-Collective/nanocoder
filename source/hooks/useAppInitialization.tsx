@@ -300,9 +300,10 @@ export function useAppInitialization({
 	// Initialize LSP servers with auto-discovery
 	const initializeLSPServers = async () => {
 		const lspConfig = getAppConfig();
+		const autoDiscover = lspConfig.lsp?.autoDiscover !== false;
 		const lspManager = await getLSPManager({
 			rootUri: `file://${process.cwd()}`,
-			autoDiscover: true,
+			autoDiscover,
 			// Use custom servers from config if provided
 			servers: lspConfig.lspServers?.map(server => ({
 				name: server.name,
@@ -360,7 +361,7 @@ export function useAppInitialization({
 
 		try {
 			await lspManager.initialize({
-				autoDiscover: true,
+				autoDiscover,
 				servers: lspConfig.lspServers?.map(server => ({
 					name: server.name,
 					command: server.command,

@@ -1,6 +1,7 @@
 import {Box, Text} from 'ink';
 import React from 'react';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
+import {getAppConfig} from '@/config/index';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {getLSPManager} from '@/lsp/lsp-manager';
@@ -8,13 +9,14 @@ import {generateKey} from '@/session/key-generator';
 import type {Command} from '@/types/index';
 
 interface LSPProps {
+	autoDiscoveryEnabled?: boolean;
 	status: {
 		initialized: boolean;
 		servers: Array<{name: string; ready: boolean; languages: string[]}>;
 	};
 }
 
-export function LSP({status}: LSPProps) {
+export function LSP({autoDiscoveryEnabled = true, status}: LSPProps) {
 	const boxWidth = useTerminalWidth();
 	const {colors} = useTheme();
 	const {servers} = status;
@@ -29,6 +31,14 @@ export function LSP({status}: LSPProps) {
 			flexDirection="column"
 			marginBottom={1}
 		>
+			{!autoDiscoveryEnabled && (
+				<Box marginBottom={1}>
+					<Text color={colors.secondary}>
+						Automatic LSP discovery is disabled; only explicitly configured
+						servers will be used.
+					</Text>
+				</Box>
+			)}
 			{servers.length === 0 ? (
 				<>
 					<Box marginBottom={1}>
@@ -46,8 +56,7 @@ export function LSP({status}: LSPProps) {
 						<Text color={colors.secondary}>
 							{`{
   "nanocoder": {
-    "lsp": {
-      "servers": [
+    "lspServers": [
         {
           "name": "typescript-language-server",
           "command": "typescript-language-server",
@@ -55,15 +64,16 @@ export function LSP({status}: LSPProps) {
           "languages": ["ts", "js", "tsx", "jsx"]
         }
       ]
-    }
   }
 }`}
 						</Text>
 					</Box>
 
-					<Text color={colors.secondary}>
-						LSP servers will auto-discover based on your project files.
-					</Text>
+					{autoDiscoveryEnabled && (
+						<Text color={colors.secondary}>
+							LSP servers may auto-discover based on installed tools.
+						</Text>
+					)}
 				</>
 			) : (
 				<>
@@ -114,6 +124,7 @@ export const lspCommand: Command = {
 		return React.createElement(LSP, {
 			key: generateKey('lsp'),
 			status: status,
+			autoDiscoveryEnabled: getAppConfig().lsp?.autoDiscover !== false,
 		});
 	},
 };

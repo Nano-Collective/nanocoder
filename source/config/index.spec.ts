@@ -2,7 +2,13 @@ import {existsSync, mkdirSync, readFileSync, rmSync, writeFileSync} from 'fs';
 import {tmpdir} from 'os';
 import {join} from 'path';
 import test from 'ava';
-import {clearAppConfig, confDirMap, getClosestConfigFile, reloadAppConfig} from './index';
+import {
+	clearAppConfig,
+	confDirMap,
+	getAppConfig,
+	getClosestConfigFile,
+	reloadAppConfig,
+} from './index';
 import {resolveTune} from './tune';
 
 type AppConfig = ReturnType<typeof import('./index.js').getAppConfig>;
@@ -21,6 +27,58 @@ test.after.always(() => {
 	// Clean up test directory
 	if (existsSync(testDir)) {
 		rmSync(testDir, {recursive: true, force: true});
+	}
+});
+
+test.serial('LSP auto-discovery setting falls through config layers and defaults on', t => {
+	const originalCwd = process.cwd();
+	const originalConfigDir = process.env.NANOCODER_CONFIG_DIR;
+	const originalLspEnv = process.env.NANOCODER_LSP;
+	const globalDir = join(testDir, 'lsp-auto-discovery-global');
+	const projectDir = join(testDir, 'lsp-auto-discovery-project');
+	const overrideProjectDir = join(testDir, 'lsp-auto-discovery-override');
+	mkdirSync(globalDir, {recursive: true});
+	mkdirSync(projectDir, {recursive: true});
+	mkdirSync(overrideProjectDir, {recursive: true});
+	writeFileSync(
+		join(globalDir, 'agents.config.json'),
+		JSON.stringify({nanocoder: {lsp: {autoDiscover: false}}}),
+		'utf-8',
+	);
+
+	try {
+		process.env.NANOCODER_CONFIG_DIR = globalDir;
+		process.chdir(projectDir);
+		reloadAppConfig();
+		t.is(getAppConfig().lsp?.autoDiscover, false, 'uses the user-level value');
+
+		writeFileSync(
+			join(overrideProjectDir, 'agents.config.json'),
+			JSON.stringify({nanocoder: {lsp: {autoDiscover: true}}}),
+			'utf-8',
+		);
+		process.chdir(overrideProjectDir);
+		reloadAppConfig();
+		t.is(getAppConfig().lsp?.autoDiscover, true, 'project config takes precedence');
+
+		process.env.NANOCODER_LSP = 'off';
+		reloadAppConfig();
+		t.is(getAppConfig().lsp?.autoDiscover, false, 'environment can disable discovery');
+
+		process.env.NANOCODER_CONFIG_DIR = join(testDir, 'missing-lsp-config');
+		delete process.env.NANOCODER_LSP;
+		const defaultProjectDir = join(testDir, 'lsp-auto-discovery-default');
+		mkdirSync(defaultProjectDir, {recursive: true});
+		process.chdir(defaultProjectDir);
+		reloadAppConfig();
+		t.is(getAppConfig().lsp?.autoDiscover, true, 'defaults to enabled');
+	} finally {
+		clearAppConfig();
+		process.chdir(originalCwd);
+		if (originalConfigDir === undefined) delete process.env.NANOCODER_CONFIG_DIR;
+		else process.env.NANOCODER_CONFIG_DIR = originalConfigDir;
+		if (originalLspEnv === undefined) delete process.env.NANOCODER_LSP;
+		else process.env.NANOCODER_LSP = originalLspEnv;
 	}
 });
 
