@@ -752,3 +752,73 @@ test('shift hint is not offered in headless mode', t => {
 	t.regex(output, /headless mode on/);
 	t.notRegex(output, /Shift\+Tab/);
 });
+
+// ============================================================================
+// Voice segment
+// ============================================================================
+
+test('voice segment is absent when voice mode is off', t => {
+	const {lastFrame} = render(
+		<DevelopmentModeIndicator
+			developmentMode="normal"
+			colors={mockColors}
+			contextPercentUsed={1}
+			voice={null}
+		/>,
+	);
+	t.notRegex(stripAnsi(lastFrame()!), /voice|listening|Ctrl\+G/);
+});
+
+test('voice segment shows the idle label and its hint on the mode line', t => {
+	const {lastFrame} = render(
+		<DevelopmentModeIndicator
+			developmentMode="normal"
+			colors={mockColors}
+			contextPercentUsed={1}
+			voice={{state: 'idle', idleHint: 'Ctrl+G to talk'}}
+		/>,
+	);
+	const output = stripAnsi(lastFrame()!);
+	t.regex(output, /ctx: ~1% · voice \(Ctrl\+G to talk\)/);
+	t.is(output.split('\n').length, 1, 'stays on the one mode line');
+});
+
+test('voice segment shows each active state without the idle hint', t => {
+	const cases = [
+		['listening', /· ● listening/],
+		['processing', /· transcribing…/],
+		['speaking', /· speaking/],
+	] as const;
+	for (const [state, expected] of cases) {
+		const {lastFrame} = render(
+			<DevelopmentModeIndicator
+				developmentMode="normal"
+				colors={mockColors}
+				contextPercentUsed={1}
+				voice={{state, idleHint: 'Ctrl+G to talk'}}
+			/>,
+		);
+		const output = stripAnsi(lastFrame()!);
+		t.regex(output, expected, state);
+		t.notRegex(output, /Ctrl\+G/, state);
+	}
+});
+
+test('a tight row drops the voice hint first and keeps the voice label', t => {
+	// The width budget is the terminal width (80 when stdout is not a TTY)
+	// minus the indent: 68 columns fits the shift hint and the voice label
+	// (57) but not the voice hint on top (74).
+	const {lastFrame} = render(
+		<DevelopmentModeIndicator
+			developmentMode="normal"
+			colors={mockColors}
+			contextPercentUsed={1}
+			indentColumns={12}
+			voice={{state: 'idle', idleHint: 'Ctrl+G to talk'}}
+		/>,
+	);
+	const output = stripAnsi(lastFrame()!);
+	t.regex(output, /· voice/);
+	t.notRegex(output, /Ctrl\+G to talk/);
+	t.regex(output, /Shift\+Tab to cycle/, 'the voice hint gives way before the shift hint');
+});

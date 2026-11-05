@@ -28,7 +28,7 @@ A maximum of 5 agents can run concurrently. Excess calls receive an error and ca
 
 ## Built-In Subagents
 
-Nanocoder ships with one built-in subagent:
+Nanocoder ships with three built-in subagents: `explore` for everyday use, and two that power [Verify](verify.md) and the daemon's CI watch.
 
 ### explore
 
@@ -38,6 +38,16 @@ A codebase exploration agent. Use when you need to explore file structure, searc
 Tools: read_file, search_file_contents, find_files, list_directory,
        lsp_get_diagnostics, git_status, git_log, git_diff
 ```
+
+### verify-pr-review
+
+A read-only pull request reviewer. It reads the PR's diff, CI status and the static-analysis findings `nanocoder verify` injects, and writes a structured Markdown review. It never posts to GitHub itself; `nanocoder verify --post-review` does that.
+
+### verify-ci-investigator
+
+A CI failure investigator the daemon runs when [`ciWatch`](verify.md) sees a failed GitHub Actions run. It reads the failure logs and writes a root-cause diagnosis. At the `auto-fix` and `full-commit` trust levels it can also edit and commit a fix, but it has no shell tool and never pushes; the daemon publishes the result.
+
+`verify` and CI investigations always use the built-in copies of these two agents. A project or personal agent with the same name shows up in `/agents`, but it is ignored for those runs, so a pull request cannot supply its own reviewer.
 
 Use `/agents create <name>` or `/agents copy explore` to scaffold project-specific agents (e.g. a code reviewer, a test-writer, a security auditor) tailored to your codebase.
 
@@ -140,7 +150,7 @@ A project-level agent with the same `name` as a built-in or user-level agent ove
 ## Security
 
 - Subagent tools respect the same approval rules as the main agent, in the parent's current [development mode](development-modes.md). File edits prompt in normal mode; bash prompts in every mode except yolo (and headless); anything in the `alwaysAllow` list runs without a prompt.
-- Subagents also get the parent mode's tool exclusions. A subagent started in plan mode is never offered `write_file`, `execute_bash`, or any other tool plan mode removes, and a headless (daemon-triggered) subagent is never offered `ask_user` or tools that would need an approval nobody is there to give.
+- Subagents also get the parent mode's tool exclusions. A subagent started in plan mode is never offered `write_file`, `execute_bash`, or any other tool plan mode removes, and a headless (daemon-triggered) subagent is never offered `ask_user`, `agent` or `write_plan`, or custom tools that are not `approval: never`. Other built-in tools and MCP tools do run in headless mode without confirmation; see [Skills](skills.md#the-daemon).
 - The `tools` key in the agent definition controls which tools the subagent can access. Use this to restrict subagents to only the tools they need. The allow-list is enforced when a tool is *executed*, not just when the tool set is offered to the model, so a subagent cannot reach a tool it was never granted — including by naming one the model invented.
 - The session-artifact tools `write_plan`, `update_plan_node`, `write_tasks`, and `write_walkthrough` are never available to a subagent, regardless of its `tools` list. Subagents run under the parent's session, so allowing them would let a subagent overwrite the plan, task list, or walkthrough the main conversation is working from. Subagents report back through their return value instead.
 - The top-level `nanocoder.alwaysAllow` list in `agents.config.json` applies to every tool within subagents (built-in, custom, and git tools alike), so you can configure which tools run without prompts.
@@ -161,7 +171,7 @@ Subagents follow the same context rules as the main conversation: [`sessions.max
 
 ### Plan Mode
 
-In plan mode, subagents can run but any write tools they attempt will require user approval (same as the main agent in plan mode). The built-in agents only have read tools configured, so they work seamlessly in plan mode. A subagent cannot write the plan artifact — `write_plan` belongs to the main conversation.
+In plan mode, subagents can run but are never offered write tools (same as the main agent in plan mode), and a call to a tool that was not offered is refused. `explore` and `verify-pr-review` only have read tools configured, so they work unchanged in plan mode. A subagent cannot write the plan artifact - `write_plan` belongs to the main conversation.
 
 ### Headless Mode
 

@@ -48,10 +48,7 @@ export function redactSecrets(
 ): string {
 	let result = text;
 	for (const value of secretEnvValues(env)) {
-		// Secret values are literal strings, not patterns. split/join avoids
-		// compiling environment-controlled regular expressions and is immune to
-		// regex denial-of-service behavior.
-		result = result.split(value).join(REDACTED);
+		result = result.replaceAll(value, REDACTED);
 	}
 	for (const pattern of SECRET_PATTERNS) {
 		result = result.replace(pattern, REDACTED);

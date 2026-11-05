@@ -11,6 +11,7 @@ import type {
 import type {LanguageModel} from 'ai';
 import {handleChat, stopOnUnknownTool} from './chat-handler.js';
 import type {ChatHandlerParams} from './chat-handler.js';
+import {PrefixTracker} from './prefix-tracker.js';
 import {rehydrateResponse} from './privacy.js';
 
 // Note: This file contains basic structure tests
@@ -976,6 +977,41 @@ test('handleChat keeps the system string for non-anthropic providers', async t =
 	t.is(prompt[0]?.role, 'system');
 	t.is(prompt[0]?.providerOptions, undefined);
 	t.is(prompt[prompt.length - 1]?.providerOptions, undefined);
+});
+
+test('handleChat records each request with the prefix tracker', async t => {
+	const tracker = new PrefixTracker();
+	const send = (messages: Message[]) =>
+		handleChat({
+			model: capturingModel({}),
+			currentModel: 'test-model',
+			providerConfig: {
+				name: 'TestProvider',
+				type: 'openai',
+				models: ['test-model'],
+				config: {baseURL: 'https://api.test.com'},
+			},
+			messages,
+			tools: {},
+			callbacks: {},
+			maxRetries: 0,
+			prefixTracker: tracker,
+		});
+	const system: Message = {role: 'system', content: 'sys'};
+	await send([system, {role: 'user', content: 'hello'}]);
+	await send([
+		system,
+		{role: 'user', content: 'hello'},
+		{role: 'assistant', content: 'hi'},
+		{role: 'user', content: 'more'},
+	]);
+
+	// A third request that drops the first message must diverge at index 0,
+	// which proves both earlier requests were recorded in send order.
+	t.deepEqual(
+		await tracker.record('sys', undefined, [{role: 'user', content: 'more'}]),
+		{kind: 'history-changed', index: 0, previousMessages: 3},
+	);
 });
 
 // --- Output-token ceiling ---

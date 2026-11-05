@@ -221,7 +221,7 @@ export const lazyCommands: LazyCommand[] = [
 	{
 		name: 'settings',
 		description:
-			'Configure settings (providers, MCP, theme, shapes, paste threshold). Accepts a tab: /settings providers',
+			'Configure settings by tab (appearance, input, behavior, providers, mcp, advanced). Accepts a tab: /settings providers',
 		load: () => import('@/commands/settings').then(m => m.settingsCommand),
 	},
 	{
@@ -229,6 +229,12 @@ export const lazyCommands: LazyCommand[] = [
 		description:
 			'Tune model settings (parameters, tool profiles, prompt, compaction)',
 		load: () => import('@/commands/tune').then(m => m.tuneCommand),
+	},
+	{
+		name: 'macros',
+		description:
+			'Inspect repeated read-only tool sequences (/macros, /macros clear)',
+		load: () => import('@/commands/macros').then(m => m.macrosCommand),
 	},
 	{
 		name: 'schedule',

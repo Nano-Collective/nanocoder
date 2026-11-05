@@ -1,5 +1,6 @@
 import test from 'ava';
 import * as vscode from 'vscode';
+import {isVsCodeClient} from '../../../source/acp/acp-capabilities';
 import { NanocoderAcpClient } from './acp-client';
 import { AcpStateManager } from './acp-state';
 
@@ -97,6 +98,7 @@ test('NanocoderAcpClient - newChat clears pending permissions', async (t) => {
 async function makeHandshakenClient(
 	agentCapabilities: unknown,
 	closeSession: (params: {sessionId: string}) => Promise<unknown>,
+	extMethod?: (method: string, params: unknown) => Promise<unknown>,
 ) {
 	const lines: string[] = [];
 	const client = new NanocoderAcpClient(
@@ -106,6 +108,7 @@ async function makeHandshakenClient(
 	client.setConnection({
 		initialize: async () => ({agentInfo: {version: '1.32.0'}, agentCapabilities}),
 		closeSession,
+		extMethod,
 	} as any);
 	await client.initializeHandshake();
 	(client as any)._sessionId = 'session-old';
@@ -342,6 +345,21 @@ test('NanocoderAcpClient - handshake is incomplete until initialize succeeds', a
 	t.false(client.isHandshakeComplete, 'A new connection must re-handshake');
 });
 
+test('NanocoderAcpClient - the handshake identifies it as the client the agent treats as VS Code', async (t) => {
+	let clientInfo: {name: string} | undefined;
+	const client = new NanocoderAcpClient({appendLine: () => {}} as any, new AcpStateManager());
+	client.setConnection({
+		initialize: async (params: {clientInfo?: {name: string}}) => {
+			clientInfo = params.clientInfo;
+			return {agentInfo: {version: '1.29.0'}};
+		},
+	} as any);
+
+	await client.initializeHandshake();
+
+	t.true(isVsCodeClient(clientInfo));
+});
+
 /**
  * A connection whose newSession() calls stay pending until released, in call
  * order, so a test can act (New Chat, resume, reconnect) while one is in flight.
@@ -452,4 +470,67 @@ test('NanocoderAcpClient - a creation still in flight does not overwrite a resum
 
 	t.is(await pending, 'session-resumed');
 	t.is((client as any)._sessionId, 'session-resumed');
+});
+
+function recordExtCalls() {
+	const calls: Array<{method: string; params: unknown}> = [];
+	const extMethod = async (method: string, params: unknown) => {
+		calls.push({method, params});
+		return {};
+	};
+	return {calls, extMethod};
+}
+
+async function renameAndRetry(agentCapabilities: unknown) {
+	const {calls, extMethod} = recordExtCalls();
+	const {client} = await makeHandshakenClient(
+		agentCapabilities,
+		async () => ({}),
+		extMethod,
+	);
+	await client.renameSession('session-old', 'New title');
+	await client.retryTurn('again');
+	return {client, calls};
+}
+
+test('NanocoderAcpClient - rename and retry use the extension names the agent advertises', async (t) => {
+	const {calls} = await renameAndRetry({
+		_meta: {
+			nanocoder: {
+				extMethods: ['_nanocoder/renameSession', '_nanocoder/retryTurn'],
+			},
+		},
+	});
+
+	t.deepEqual(
+		calls.map((call) => call.method),
+		['_nanocoder/renameSession', '_nanocoder/retryTurn'],
+	);
+	t.deepEqual(calls[0].params, {sessionId: 'session-old', title: 'New title'});
+});
+
+test('NanocoderAcpClient - rename and retry fall back to the bare names for an agent that advertises none', async (t) => {
+	for (const agentCapabilities of [
+		{},
+		{_meta: {nanocoder: {}}},
+		{_meta: {nanocoder: {extMethods: 'x'}}},
+	]) {
+		const {calls} = await renameAndRetry(agentCapabilities);
+
+		t.deepEqual(
+			calls.map((call) => call.method),
+			['renameSession', 'retryTurn'],
+		);
+	}
+});
+
+test('NanocoderAcpClient - each extension method resolves on its own against what the agent advertises', async (t) => {
+	const {calls} = await renameAndRetry({
+		_meta: {nanocoder: {extMethods: ['_nanocoder/renameSession']}},
+	});
+
+	t.deepEqual(
+		calls.map((call) => call.method),
+		['_nanocoder/renameSession', 'retryTurn'],
+	);
 });

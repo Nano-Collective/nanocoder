@@ -2,7 +2,7 @@
  * Pino logger implementation with environment-specific transport support
  */
 
-import {existsSync, mkdirSync} from 'fs';
+import {existsSync, mkdirSync, openSync} from 'fs';
 import {join} from 'path';
 import pino, {type Logger as PinoLogger} from 'pino';
 import {createConfig, getDefaultLogDirectory} from './config.js';
@@ -28,6 +28,33 @@ function _isPromise<T>(value: T | Promise<T> | void): value is Promise<T> {
 		typeof value === 'object' &&
 		'then' in value
 	);
+}
+
+type FileDestination = ReturnType<typeof pino.destination>;
+
+const openDestinations = new Set<FileDestination>();
+let exitHandlerRegistered = false;
+
+/**
+ * The async destination buffers; a CLI that calls process.exit() right after
+ * logging (`run`, `--json`) would otherwise drop the last lines, typically
+ * the warn/error that explains the exit. One shared exit handler, so creating
+ * many loggers does not pile up listeners.
+ */
+function flushOnExit(destination: FileDestination): void {
+	openDestinations.add(destination);
+	destination.once('close', () => openDestinations.delete(destination));
+	if (exitHandlerRegistered) return;
+	exitHandlerRegistered = true;
+	process.once('exit', () => {
+		for (const dest of openDestinations) {
+			try {
+				dest.flushSync();
+			} catch {
+				// Not open yet or already closed: nothing to flush.
+			}
+		}
+	});
 }
 
 /**
@@ -77,12 +104,19 @@ function createEnvironmentLogger(
 
 		const logFilePath = join(logDir, `nanocoder-${localDate}.log`);
 
-		// Use pino.destination() instead of pino.transport() for synchronous flush support
+		// Use pino.destination() instead of pino.transport() for synchronous flush support.
+		// Open the file here, synchronously, and hand over the descriptor: given a
+		// path, sonic-boom opens it asynchronously, and a process that exits
+		// before that finishes (a fast `nanocoder verify --help`) makes pino's own
+		// exit hook throw "sonic boom is not ready yet", which the shutdown
+		// manager reports as a fatal error and turns into exit code 1.
+		mkdirSync(logDir, {recursive: true});
 		const destination = pino.destination({
-			dest: logFilePath,
+			dest: openSync(logFilePath, 'a'),
 			sync: false, // Async writes for performance
-			mkdir: true,
 		});
+
+		flushOnExit(destination);
 
 		const pinoLogger = pino(baseConfig, destination);
 		const redactionRules = createRedactionRules(
@@ -148,7 +182,8 @@ function createEnhancedLogger(
 			if (destination && 'flush' in destination) {
 				const flushMethod = destination.flush as (() => void) | undefined;
 				if (flushMethod && typeof flushMethod === 'function') {
-					flushMethod();
+					// Bound call: sonic-boom's methods read `this`.
+					flushMethod.call(destination);
 				}
 			}
 		},
@@ -159,7 +194,11 @@ function createEnhancedLogger(
 					| (() => void)
 					| undefined;
 				if (flushSyncMethod && typeof flushSyncMethod === 'function') {
-					flushSyncMethod();
+					try {
+						flushSyncMethod.call(destination);
+					} catch {
+						// Not open yet or already closed: nothing to flush.
+					}
 				}
 			}
 		},

@@ -687,3 +687,23 @@ test('processToolUse - handles empty string return value', async t => {
 
 	t.is(result.content, '');
 });
+
+test('processToolUse - runs a tool from the tool manager the call carries, not the process-wide set', async t => {
+	setToolRegistryGetter(createMockToolRegistry({shared: async () => 'shared'}));
+	const sessionTools = {
+		getToolRegistry: () => ({session_only: async () => 'from the session'}),
+	} as unknown as ToolManager;
+
+	const result = await processToolUse(createMockToolCall('session_only', {}), {
+		toolManager: sessionTools,
+	});
+	t.is(result.content, 'from the session');
+
+	// The process-wide set is not consulted for that call, so a tool only it has is unknown.
+	await t.throwsAsync(
+		processToolUse(createMockToolCall('shared', {}), {toolManager: sessionTools}),
+		{message: 'Unknown tool: shared'},
+	);
+	// And a call that carries none still uses it.
+	t.is((await processToolUse(createMockToolCall('shared', {}))).content, 'shared');
+});
