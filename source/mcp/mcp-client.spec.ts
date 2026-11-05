@@ -2806,7 +2806,7 @@ test('MCPClient.callTool: keeps embedded text resources and summarises blob reso
 	]);
 	t.is(
 		out,
-		'hello\n[resource file:///b.bin, application/zip, 2 bytes]\n[resource link: file:///c.md]',
+		'[resource file:///a.txt]\nhello\n[resource file:///b.bin, application/zip, 2 bytes]\n[resource link: file:///c.md]',
 	);
 });
 
@@ -2817,4 +2817,12 @@ test('MCPClient.callTool: keeps unknown blocks as JSON', async t => {
 
 test('MCPClient.callTool: keeps the no output message for empty content', async t => {
 	t.is(await callWithContent([]), 'Tool executed successfully (no output)');
+});
+
+test('MCPClient.callTool: measures data URL and wrapped base64 by decoded size', async t => {
+	const out = await callWithContent([
+		{type: 'image', data: 'data:image/png;base64,AAA=', mimeType: 'image/png'},
+		{type: 'audio', data: 'AAAA\nAAAA', mimeType: 'audio/wav'},
+	]);
+	t.is(out, '[image/png, 2 bytes]\n[audio/wav, 6 bytes]');
 });

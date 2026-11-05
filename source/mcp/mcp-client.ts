@@ -49,10 +49,12 @@ import {withValidation} from '@/utils/tool-validation';
 import {ensureString, isPlainObject} from '@/utils/type-helpers';
 import {TransportFactory} from './transport-factory.js';
 
-// Decoded size of base64 data, without decoding it.
+// Decoded size of base64 data, without decoding it. Tolerates a data URL
+// prefix and line breaks, which some servers send against the spec.
 function base64ByteLength(data: string): number {
-	const padding = data.endsWith('==') ? 2 : data.endsWith('=') ? 1 : 0;
-	return Math.max(0, Math.floor((data.length * 3) / 4) - padding);
+	const base64 = data.replace(/^data:[^,]*,/, '').replace(/\s/g, '');
+	const padding = base64.endsWith('==') ? 2 : base64.endsWith('=') ? 1 : 0;
+	return Math.max(0, Math.floor((base64.length * 3) / 4) - padding);
 }
 
 // Text for one MCP content block. Binary data is summarised, not dumped,
@@ -73,7 +75,8 @@ function formatContentBlock(block: unknown): string {
 		case 'resource': {
 			const resource = isPlainObject(block.resource) ? block.resource : {};
 			if (typeof resource.text === 'string') {
-				return resource.text;
+				// Keep the URI so texts from different resources stay apart.
+				return `[resource ${ensureString(resource.uri)}]\n${resource.text}`;
 			}
 			const parts = [`resource ${ensureString(resource.uri)}`];
 			if (typeof resource.mimeType === 'string') {
