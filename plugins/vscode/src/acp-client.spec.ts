@@ -534,3 +534,23 @@ test('NanocoderAcpClient - each extension method resolves on its own against wha
 		['_nanocoder/renameSession', 'retryTurn'],
 	);
 });
+
+test('NanocoderAcpClient - failed resumeSession retains existing _sessionId and returns false', async (t) => {
+	const originalShowError = vscode.window.showErrorMessage;
+	(vscode.window as any).showErrorMessage = () => Promise.resolve(undefined);
+	t.teardown(() => {
+		(vscode.window as any).showErrorMessage = originalShowError;
+	});
+
+	const outputChannel = {appendLine: () => {}} as any;
+	const stateManager = new AcpStateManager();
+	const client = new NanocoderAcpClient(outputChannel, stateManager);
+	client.setConnection({
+		resumeSession: () => Promise.reject(new Error('session corrupted')),
+	} as any);
+	(client as any)._sessionId = 'session-active';
+
+	const ok = await client.resumeSession('session-bogus');
+	t.false(ok);
+	t.is(client.sessionId, 'session-active', 'must retain existing session id on failure');
+});

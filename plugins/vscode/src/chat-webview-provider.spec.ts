@@ -345,3 +345,91 @@ test('ChatWebviewProvider - showDiff message from webview requests diff preview 
 	t.is(calls[0].options?.filePath, 'src/file.ts');
 	t.falsy(calls[0].options?.restoreTerminalFocus, 'Webview showDiff must not set restoreTerminalFocus: true');
 });
+
+test('ChatWebviewProvider - resumeSession failure retains existing transcript and does not post clear or sessionLoaded', async (t) => {
+	const {provider, acpClient, getPostedMessages, resetPostedMessages} = makeStubs();
+	(acpClient as any).resumeSession = async () => false;
+
+	resetPostedMessages();
+	const result = await provider.resumeSession('session-fail');
+
+	t.false(result);
+	const messages = getPostedMessages();
+	t.false(messages.some(m => m.type === 'clear'), 'must not clear the webview on failed resume');
+	t.false(messages.some(m => m.type === 'sessionLoaded'), 'must not send sessionLoaded on failed resume');
+});
+
+test('ChatWebviewProvider - resumeSession success buffers updates and posts clear then updates then sessionLoaded', async (t) => {
+	const {provider, acpClient, getPostedMessages, resetPostedMessages, getClearPendingChangesCalls} = makeStubs();
+	(acpClient as any).resumeSession = async () => {
+		(acpClient as any).onSessionUpdate?.({
+			sessionUpdate: 'agent_message_chunk',
+			content: {text: 'replayed turn'},
+		});
+		return true;
+	};
+
+	resetPostedMessages();
+	const result = await provider.resumeSession('session-success');
+
+	t.true(result);
+	t.is(getClearPendingChangesCalls(), 1, 'clearPendingChanges must be called on resume success');
+	const messages = getPostedMessages();
+	const types = messages.map(m => m.type);
+	const clearIdx = types.indexOf('clear');
+	const updateIdx = types.indexOf('acpUpdate');
+	const loadedIdx = types.indexOf('sessionLoaded');
+
+	t.true(clearIdx !== -1, 'clear must be sent on success');
+	t.true(updateIdx !== -1, 'buffered acpUpdate must be sent on success');
+	t.true(loadedIdx !== -1, 'sessionLoaded must be sent on success');
+	t.true(clearIdx < updateIdx, 'clear must precede buffered updates');
+	t.true(updateIdx < loadedIdx, 'buffered updates must precede sessionLoaded');
+});
+
+test('ChatWebviewProvider - resumeSession buffers only incoming session replay updates', async (t) => {
+	const {provider, acpClient, getPostedMessages, resetPostedMessages} = makeStubs();
+	(acpClient as any).resumeSession = async () => {
+		(acpClient as any).onSessionUpdate?.({
+			sessionUpdate: 'agent_message_chunk',
+			content: {text: 'replayed turn'},
+		});
+		(acpClient as any).onSessionArtifacts?.({
+			artifactPath: '/path/to/artifact.md',
+		});
+		return true;
+	};
+
+	resetPostedMessages();
+	const result = await provider.resumeSession('session-success');
+
+	t.true(result);
+	const messages = getPostedMessages();
+	const updates = messages.filter(m => m.type === 'acpUpdate');
+	t.is(updates.length, 1);
+	t.is(updates[0].update.content.text, 'replayed turn');
+});
+
+test('ChatWebviewProvider - resumeSession guards against concurrent overlapping resume calls', async (t) => {
+	const {provider, acpClient} = makeStubs();
+
+	let resumeCalls = 0;
+	let resolveResume: (val: boolean) => void = () => {};
+	(acpClient as any).resumeSession = () => {
+		resumeCalls++;
+		return new Promise<boolean>(resolve => {
+			resolveResume = resolve;
+		});
+	};
+
+	const firstResume = provider.resumeSession('session-first');
+	const secondResume = provider.resumeSession('session-second');
+
+	const secondResult = await secondResume;
+	t.false(secondResult, 'concurrent resume request must return false');
+	t.is(resumeCalls, 1, 'must not invoke acpClient.resumeSession for concurrent request');
+
+	resolveResume(true);
+	const firstResult = await firstResume;
+	t.true(firstResult, 'first resume request must complete successfully');
+});
