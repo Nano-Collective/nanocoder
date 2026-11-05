@@ -30,6 +30,7 @@ Type `/` in the chat input to see available commands. All commands start with `/
 | `/context-max` | Set maximum context length for the current session (e.g. `/context-max 128k`), or inspect the resolved context source. `/context-max --reset` clears the session override. Also available as `--context-max` CLI flag |
 | `/exit` | Exit the application (alias: `/quit`) |
 | `/export` | Export the current session to a markdown file, or to JSON with `/export --json` or a `.json` filename (see [Exporting a Session](#exporting-a-session)) |
+| `/share` | Write the current session to a single, self-contained HTML page you can open in any browser or send to someone, with secrets redacted. `/share --json` writes the same content as deterministic JSON (see [Sharing a Session](#sharing-a-session)) |
 | `/copy` | Copy the last assistant response to the system clipboard. Use `/copy code` to copy just the last fenced code block from the last response |
 | `/expand [n]` | Print tool result `n` in full. Long tool output is cut to 20 lines with a `/expand n` hint; run `/expand` without a number to list recent results |
 | `/commit` | Generate a Conventional Commit message from staged Git changes. Add `--copy` (or `-c`) to also copy the message to the system clipboard. A spinner shows while the model is working |
@@ -87,6 +88,24 @@ Hands-free mode is paused in yolo mode, so ambient speech cannot trigger unconfi
 ```
 
 JSON exports keep full message content and session metadata, for replay or evaluation. The file is written relative to the current directory and must stay inside the project: `~` is not expanded, `..` segments are refused, and absolute paths outside the project root are rejected. A generated filename gets a numeric suffix rather than overwriting an earlier export; a filename you type overwrites an existing file.
+
+### Sharing a Session
+
+```bash
+/share                          # HTML page, filename generated from your first prompt and the date
+/share notes/debug-session.html # HTML page, your filename
+/share --json                   # the same content as deterministic JSON
+/share run.json                 # a .json filename also selects JSON
+/share --no-redact              # keep secrets in (read the file before you send it)
+```
+
+`/share` writes one HTML file that shows the conversation in order: your prompts, the assistant's replies and reasoning, and each tool call with its arguments and result (collapsed until you click it). Nothing is uploaded. The page is static: it runs no JavaScript and its Content-Security-Policy blocks every network request, so it is safe to open from an email or a chat attachment and works offline.
+
+What is left out: the system prompt, and image data (an attached image is noted by its type only).
+
+Secrets are redacted by default: common token formats (GitHub, OpenAI/Anthropic-style `sk-` keys, AWS access key IDs, Slack tokens, private key blocks), the values of environment variables whose names contain `TOKEN`, `KEY`, `SECRET` or `PASSWORD`, and the `apiKey` of every configured provider. The message says how many were redacted. Only those known shapes are caught, and file paths, file contents and command output are kept as they are, so read the page before you send it.
+
+`--json` writes the same content as JSON: no timestamps, a fixed key order and sorted tool-argument keys, so sharing the same session twice gives the same bytes and two shares diff cleanly. File paths follow the same rules as `/export`: relative to the current directory, inside the project, a generated name never overwrites an earlier file, and a name you type does.
 
 ## Special Input Syntax
 These shortcuts work directly in the chat input — no `/` prefix needed.
