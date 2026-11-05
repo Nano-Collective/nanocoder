@@ -92,6 +92,38 @@ export function forgetReadContent(absPath: string): void {
 	}
 }
 
+/**
+ * Drop the stub entry for one path + range: its body has left the context
+ * the model sees (e.g. the message cap dropped it), so a repeat read must
+ * return the content again.
+ */
+export function forgetReadContentRange(
+	absPath: string,
+	startLine?: number,
+	endLine?: number,
+): void {
+	getReadContentScope().files.delete(
+		readContentKey(absPath, startLine, endLine),
+	);
+}
+
+/** Text every read_file stub carries, so callers can tell a stub from a body. */
+export const READ_STUB_MARKER = 'already in context, unchanged since last read';
+
+/**
+ * Whether a read_file result is a stub rather than a body. Matches the whole
+ * one-line shape, not just the marker, so reading a file that happens to
+ * contain the marker text (this one) still counts as a body.
+ */
+export function isReadStub(content: string): boolean {
+	return (
+		content.startsWith('[file: ') &&
+		content.endsWith(']') &&
+		!content.includes('\n') &&
+		content.includes(READ_STUB_MARKER)
+	);
+}
+
 /** Drop a subagent's stub map when that agent finishes. */
 export function clearReadContentScope(scopeId: string): void {
 	readContentScopes.delete(scopeId);

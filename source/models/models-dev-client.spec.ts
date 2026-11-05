@@ -437,8 +437,8 @@ test('getModelPricing - returns pricing for gpt-4o (models.dev)', async t => {
 	t.true(pricing!.output >= 0);
 });
 
-test('getModelPricing - returns pricing for claude-3-opus (models.dev)', async t => {
-	const pricing = await getModelPricing('claude-3-opus');
+test('getModelPricing - returns pricing for claude-opus-4-5 (models.dev)', async t => {
+	const pricing = await getModelPricing('claude-opus-4-5');
 	t.truthy(pricing);
 	t.true(typeof pricing!.input === 'number');
 	t.true(typeof pricing!.output === 'number');
