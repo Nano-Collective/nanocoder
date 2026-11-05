@@ -178,6 +178,7 @@ test('clicking a card with a registered diff posts showDiff', t => {
 	const posted = showDiffMessages(panel);
 	t.is(posted.length, 1);
 	t.is((posted[0] as any).toolCallId, 'call-1');
+	t.is((posted[0] as any).filePath, '/repo/src/a.ts');
 });
 
 test('the diff stays available after the call finishes', t => {

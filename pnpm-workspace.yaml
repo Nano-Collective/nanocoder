@@ -8,6 +8,19 @@ trustPolicy: no-downgrade
 
 overrides:
   tmp: ">=0.2.6"
+  # Security floors for transitive dependencies, each kept within the major
+  # its parents already allow (pnpm update cannot move these on its own).
+  "fast-uri@^3": "^3.1.9"
+  "zod@^4": "^4.6.7"
+  "brace-expansion@^5": "^5.0.11"
+  "js-yaml@^3": "^3.15.2"
+  "js-yaml@^4": "^4.3.2"
+  "launch-editor@^2": "^2.14.2"
+  "shell-quote@^1": "^1.11.0"
+  "markdown-it@^14": "^14.3.3"
+  "linkify-it@^5": "^5.0.2"
+  "form-data@^4": "^4.0.6"
+  "source-map-js@^1": "^1.2.2"
 
 allowBuilds:
   # Native file-watcher pulled in by @tailwindcss/cli. Only needed for
@@ -18,7 +31,7 @@ allowBuilds:
   keytar: true
   node-llama-cpp: false
 
-auditConfig: { ignoreGhsas: null }
+auditConfig: { ignoreGhsas: [ GHSA-58mr-gqgx-xq4g ] }
 
 ignoredBuiltDependencies:
   - protobufjs

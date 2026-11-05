@@ -1,16 +1,23 @@
 import test from 'ava';
-import fs, {mkdtemp, rm, writeFile} from 'node:fs/promises';
-import {mock} from 'node:test';
-import {tmpdir} from 'node:os';
-import {join} from 'node:path';
+import fs, { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mock } from 'node:test';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
-	getCachedFileContent,
-	invalidateCache,
+	CACHE_FILE_TTL_MS,
+	MAX_CACHEABLE_FILE_SIZE_BYTES,
+	MAX_FILE_CACHE_BYTES,
+} from '../constants.js';
+import {
 	clearCache,
 	getCacheSize,
+	getCachedFileContent,
+	getTotalCachedBytes,
+	invalidateCache,
 	MAX_CACHE_SIZE,
+	sweepExpired,
 } from './file-cache';
-import {buildMinimalPdf} from '@/test-utils/minimal-pdf';
+import { buildMinimalPdf } from '@/test-utils/minimal-pdf';
 
 // Helper to create a temp directory for tests
 async function createTempDir(): Promise<string> {
@@ -19,7 +26,7 @@ async function createTempDir(): Promise<string> {
 
 // Helper to clean up temp directory
 async function cleanupTempDir(dir: string): Promise<void> {
-	await rm(dir, {recursive: true, force: true});
+	await rm(dir, { recursive: true, force: true });
 }
 
 // Helper to add small delay
@@ -172,7 +179,7 @@ test('getCachedFileContent - concurrent access is deduplicated', async t => {
 test('getCachedFileContent - throws on non-existent file', async t => {
 	await t.throwsAsync(
 		async () => getCachedFileContent('/non/existent/file.txt'),
-		{code: 'ENOENT'},
+		{ code: 'ENOENT' },
 	);
 });
 
@@ -326,7 +333,7 @@ test('getCachedFileContent - does not clear a replacement pending read', async t
 			resolveReplacementReadStarted = resolve;
 		});
 
-		const syntheticStat = (mtimeMs: number) => ({mtimeMs});
+		const syntheticStat = (mtimeMs: number) => ({ mtimeMs });
 		const originalStat = fs.stat;
 		const originalReadFile = fs.readFile;
 
@@ -439,7 +446,7 @@ test('getCachedFileContent - throws descriptive error for corrupt PDF', async t 
 		// The real get-md will fail on a fake PDF and throw an error.
 		await t.throwsAsync(
 			async () => getCachedFileContent(filePath),
-			{message: /Failed to extract text from document/}
+			{ message: /Failed to extract text from document/ }
 		);
 	} finally {
 		await cleanupTempDir(tempDir);
@@ -457,7 +464,7 @@ test('getCachedFileContent - throws descriptive error for corrupt DOCX', async t
 		// We expect the file-cache to catch this and throw a descriptive error.
 		await t.throwsAsync(
 			async () => getCachedFileContent(filePath),
-			{message: /Failed to extract text from document/}
+			{ message: /Failed to extract text from document/ }
 		);
 	} finally {
 		await cleanupTempDir(tempDir);
@@ -535,9 +542,265 @@ test('getCachedFileContent - document extension check is case-insensitive', asyn
 
 		await t.throwsAsync(
 			async () => getCachedFileContent(filePath),
-			{message: /Failed to extract text from document/}
+			{ message: /Failed to extract text from document/ }
 		);
 	} finally {
 		await cleanupTempDir(tempDir);
 	}
 });
+
+// Tests for Byte Budget, Oversized Files, and TTL Sweep on Insert (#1781)
+
+test.serial(
+	'getCachedFileContent - does not cache files exceeding MAX_CACHEABLE_FILE_SIZE_BYTES',
+	async t => {
+		const tempDir = await createTempDir();
+		try {
+			const filePath = join(tempDir, 'oversized.txt');
+			// Create file slightly larger than single-file cache limit
+			const largeContent = 'X'.repeat(MAX_CACHEABLE_FILE_SIZE_BYTES + 1024);
+			await writeFile(filePath, largeContent, 'utf-8');
+
+			const result1 = await getCachedFileContent(filePath);
+			t.is(result1.content.length, largeContent.length);
+			t.is(getCacheSize(), 0, 'Oversized file must not be kept in cache');
+			t.is(getTotalCachedBytes(), 0);
+
+			// Subsequent read should not be a cache hit (new object returned)
+			const result2 = await getCachedFileContent(filePath);
+			t.not(result1, result2);
+			t.is(getCacheSize(), 0);
+		} finally {
+			await cleanupTempDir(tempDir);
+		}
+	},
+);
+
+test.serial(
+	'getCachedFileContent - deduplicates concurrent reads of oversized files without caching',
+	async t => {
+		const tempDir = await createTempDir();
+		try {
+			const filePath = join(tempDir, 'oversized-concurrent.txt');
+			const largeContent = 'Y'.repeat(MAX_CACHEABLE_FILE_SIZE_BYTES + 512);
+			await writeFile(filePath, largeContent, 'utf-8');
+
+			const [res1, res2] = await Promise.all([
+				getCachedFileContent(filePath),
+				getCachedFileContent(filePath),
+			]);
+
+			t.is(
+				res1,
+				res2,
+				'Concurrent reads of oversized files should be deduplicated',
+			);
+			t.is(
+				getCacheSize(),
+				0,
+				'Oversized file should not be kept in cache after read completes',
+			);
+		} finally {
+			await cleanupTempDir(tempDir);
+		}
+	},
+);
+
+test.serial(
+	'getCachedFileContent - evicts oldest entries when total byte budget is exceeded',
+	async t => {
+		const tempDir = await createTempDir();
+		try {
+			clearCache();
+			// Each file fits under MAX_CACHEABLE_FILE_SIZE_BYTES
+			const fileSizeBytes = MAX_CACHEABLE_FILE_SIZE_BYTES;
+			const fileCount = Math.floor(MAX_FILE_CACHE_BYTES / fileSizeBytes) + 1;
+			const filePaths: string[] = [];
+
+			for (let i = 0; i < fileCount; i++) {
+				const filePath = join(tempDir, `budget-file-${i}.txt`);
+				await writeFile(filePath, 'Z'.repeat(fileSizeBytes), 'utf-8');
+				filePaths.push(filePath);
+			}
+
+			// Cache up to byte budget
+			const cachedResults: Array<
+				Awaited<ReturnType<typeof getCachedFileContent>>
+			> = [];
+			for (let i = 0; i < fileCount - 1; i++) {
+				cachedResults.push(await getCachedFileContent(filePaths[i]!));
+			}
+			t.is(getCacheSize(), fileCount - 1);
+			t.is(getTotalCachedBytes(), (fileCount - 1) * fileSizeBytes);
+
+			// Add one more file to exceed MAX_FILE_CACHE_BYTES
+			const newCached = await getCachedFileContent(filePaths[fileCount - 1]!);
+
+			// Total cached bytes must not exceed MAX_FILE_CACHE_BYTES
+			t.true(getTotalCachedBytes() <= MAX_FILE_CACHE_BYTES);
+			t.is(getTotalCachedBytes(), (fileCount - 1) * fileSizeBytes);
+			t.is(getCacheSize(), fileCount - 1);
+
+			// Oldest entry (file 0) was evicted, so re-reading it must return a fresh object
+			const reReadOldest = await getCachedFileContent(filePaths[0]!);
+			t.not(
+				reReadOldest,
+				cachedResults[0],
+				'Oldest file should have been evicted from cache',
+			);
+
+			// Latest entry was kept in cache (same object reference)
+			const reReadNew = await getCachedFileContent(filePaths[fileCount - 1]!);
+			t.is(reReadNew, newCached, 'Newly cached file should remain in cache');
+		} finally {
+			await cleanupTempDir(tempDir);
+		}
+	},
+);
+
+test.serial(
+	'getCachedFileContent - LRU eviction by bytes preserves recently read entry and evicts older entry',
+	async t => {
+		const tempDir = await createTempDir();
+		try {
+			clearCache();
+			const fileSizeBytes = MAX_CACHEABLE_FILE_SIZE_BYTES; // 4 MB per file
+			const maxEntries = Math.floor(MAX_FILE_CACHE_BYTES / fileSizeBytes); // 8 files = 32 MB
+
+			const fileA = join(tempDir, 'lru-a.txt');
+			const fileB = join(tempDir, 'lru-b.txt');
+			const fileC = join(tempDir, 'lru-c.txt');
+
+			await writeFile(fileA, 'A'.repeat(fileSizeBytes), 'utf-8');
+			await writeFile(fileB, 'B'.repeat(fileSizeBytes), 'utf-8');
+			await writeFile(fileC, 'C'.repeat(fileSizeBytes), 'utf-8');
+
+			// 1. Read A, then read B
+			const resA1 = await getCachedFileContent(fileA);
+			const resB1 = await getCachedFileContent(fileB);
+			t.is(getCacheSize(), 2);
+
+			// 2. Read filler files to fill the rest of the cache up to budget
+			for (let i = 2; i < maxEntries; i++) {
+				const fillerPath = join(tempDir, `lru-filler-${i}.txt`);
+				await writeFile(fillerPath, 'F'.repeat(fileSizeBytes), 'utf-8');
+				await getCachedFileContent(fillerPath);
+			}
+			t.is(getCacheSize(), maxEntries);
+			t.is(getTotalCachedBytes(), MAX_FILE_CACHE_BYTES);
+
+			// 3. Re-read A (cache hit moves A to end of Map / most recently used)
+			const resA2 = await getCachedFileContent(fileA);
+			t.is(resA1, resA2, 'Cache hit returns same object reference');
+
+			// 4. Force eviction by reading C (4 MB) -> oldest entry B must be evicted, A must survive
+			await getCachedFileContent(fileC);
+			t.is(getCacheSize(), maxEntries);
+			t.is(getTotalCachedBytes(), MAX_FILE_CACHE_BYTES);
+
+			// Assert A survived (cache hit, same object reference)
+			const resA3 = await getCachedFileContent(fileA);
+			t.is(
+				resA1,
+				resA3,
+				'Entry A was re-read before C and should survive LRU eviction',
+			);
+
+			// Assert B was evicted (re-reading B returns a new object from disk)
+			const resB2 = await getCachedFileContent(fileB);
+			t.not(
+				resB1,
+				resB2,
+				'Entry B was least recently used and should have been evicted',
+			);
+		} finally {
+			await cleanupTempDir(tempDir);
+		}
+	},
+);
+
+test.serial(
+	'getCachedFileContent - sweeps expired entries on insert without re-reading them',
+	async t => {
+		const tempDir = await createTempDir();
+		const originalDateNow = Date.now;
+		try {
+			clearCache();
+			const fileA = join(tempDir, 'file-a.txt');
+			const fileB = join(tempDir, 'file-b.txt');
+			await writeFile(fileA, 'content-a', 'utf-8');
+			await writeFile(fileB, 'content-b', 'utf-8');
+
+			let simulatedTime = originalDateNow.call(Date);
+			Date.now = () => simulatedTime;
+
+			await getCachedFileContent(fileA);
+			t.is(getCacheSize(), 1);
+
+			// Advance time past CACHE_FILE_TTL_MS
+			simulatedTime += CACHE_FILE_TTL_MS + 100;
+
+			// Cache file B (new insert) - this should sweep expired file A
+			await getCachedFileContent(fileB);
+
+			// File A was not requested, but should have been purged by the insert sweep
+			t.is(getCacheSize(), 1);
+			t.is(getTotalCachedBytes(), Buffer.byteLength('content-b', 'utf-8'));
+		} finally {
+			Date.now = originalDateNow;
+			await cleanupTempDir(tempDir);
+		}
+	},
+);
+
+test.serial('sweepExpired - sweeps entries older than TTL directly', async t => {
+	const tempDir = await createTempDir();
+	try {
+		const filePath = join(tempDir, 'expire-test.txt');
+		await writeFile(filePath, 'hello', 'utf-8');
+
+		await getCachedFileContent(filePath);
+		t.is(getCacheSize(), 1);
+
+		// Before TTL: sweepExpired sweeps nothing
+		t.is(sweepExpired(Date.now()), 0);
+		t.is(getCacheSize(), 1);
+
+		// Advance simulated time past TTL
+		const future = Date.now() + CACHE_FILE_TTL_MS + 1000;
+		const swept = sweepExpired(future);
+		t.is(swept, 1);
+		t.is(getCacheSize(), 0);
+		t.is(getTotalCachedBytes(), 0);
+	} finally {
+		await cleanupTempDir(tempDir);
+	}
+});
+
+test.serial(
+	'getCachedFileContent - tracking total cached bytes accurately through invalidation and mtime updates',
+	async t => {
+		const tempDir = await createTempDir();
+		try {
+			const filePath = join(tempDir, 'byte-track.txt');
+			await writeFile(filePath, '12345', 'utf-8'); // 5 bytes
+
+			await getCachedFileContent(filePath);
+			t.is(getTotalCachedBytes(), 5);
+
+			// Modify file to 10 bytes
+			await delay(10);
+			await writeFile(filePath, '1234567890', 'utf-8'); // 10 bytes
+
+			await getCachedFileContent(filePath);
+			t.is(getTotalCachedBytes(), 10);
+
+			// Invalidate
+			invalidateCache(filePath);
+			t.is(getTotalCachedBytes(), 0);
+		} finally {
+			await cleanupTempDir(tempDir);
+		}
+	},
+);
+

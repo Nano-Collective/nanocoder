@@ -30,8 +30,13 @@ target. It does not show the next run time. There is no
 longer a `create`, `add`, `remove`, `start`, or `logs` subcommand.
 
 To add, remove, or edit a cron trigger, edit the source `.md` or
-`skill.yaml` file directly. Restart the daemon (`nanocoder daemon stop`
-then `nanocoder daemon start`) to pick up the change.
+`skill.yaml` file directly, then re-trust the folder and restart the
+daemon. Subscriptions are part of the folder's trust fingerprint, so after
+the edit `daemon start` refuses to run ("changed since you trusted it")
+until you trust the folder again: run `nanocoder` interactively there once,
+or run `nanocoder trust --status` and then
+`nanocoder trust --grant <fingerprint>`. Then run `nanocoder daemon stop`
+followed by `nanocoder daemon start` to pick up the change.
 
 ## Migration
 
@@ -78,8 +83,9 @@ nanocoder daemon start
 ```
 
 `daemon start` refuses to run in a directory you haven't trusted yet. Run
-`nanocoder` interactively there once to accept the disclaimer, or pass
-`--trust-directory` to skip the check for that run. See
+`nanocoder` interactively there once to accept the disclaimer, run
+`nanocoder trust --status` and then `nanocoder trust --grant <fingerprint>`,
+or pass `--trust-directory` to skip the check for that run. See
 **[Skills](./skills.md#the-daemon)** for the trust options in full.
 
 If `.nanocoder/schedules.json` is still present when Nanocoder boots, a

@@ -160,8 +160,14 @@ const COMMAND_HELP_OVERRIDES: Record<string, CommandHelpOverrides> = {
 		examples: ['/expand', '/expand 2'],
 	},
 	export: {
-		usage: '/export [filename]',
-		examples: ['/export', '/export session.md'],
+		usage: '/export [--json] [filename]',
+		options: ['--json'],
+		examples: [
+			'/export',
+			'/export session.md',
+			'/export --json',
+			'/export run.json',
+		],
 	},
 	init: {
 		usage: '/init [--preset <react|nextjs|rust>] [--force] [--lean]',
@@ -183,8 +189,9 @@ const COMMAND_HELP_OVERRIDES: Record<string, CommandHelpOverrides> = {
 		examples: ['/remember --category architecture Use TypeScript'],
 	},
 	privacy: {
-		usage: '/privacy',
-		examples: ['/privacy'],
+		usage: '/privacy inspect <text>',
+		options: ['inspect <text>'],
+		examples: ['/privacy inspect my email is test@example.com'],
 	},
 	repomap: {
 		usage: '/repomap [--tokens <n>]',
@@ -234,9 +241,23 @@ const COMMAND_HELP_OVERRIDES: Record<string, CommandHelpOverrides> = {
 		examples: ['/stats 7d', '/stats reset'],
 	},
 	tasks: {
-		usage: '/tasks [add <title>|remove|rm <number>|clear]',
-		options: ['add <title>', 'remove|rm <number>', 'clear'],
-		examples: ['/tasks', '/tasks add review pull request', '/tasks remove 2'],
+		usage:
+			'/tasks [list|add <title>|start <number>|done|complete <number>|remove|rm <number>|clear]',
+		options: [
+			'list',
+			'add <title>',
+			'start <number>',
+			'done|complete <number>',
+			'remove|rm <number>',
+			'clear',
+		],
+		examples: [
+			'/tasks',
+			'/tasks add review pull request',
+			'/tasks start 1',
+			'/tasks done 1',
+			'/tasks remove 2',
+		],
 	},
 	tools: {
 		usage: '/tools [create <name>]',

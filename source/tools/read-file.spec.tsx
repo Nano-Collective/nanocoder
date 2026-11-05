@@ -58,8 +58,11 @@ test('ReadFileFormatter renders with path', async t => {
 			return;
 		}
 
+		// Relative, as the model usually passes it: the formatter shows the
+		// path as given and cuts it at the line end, so an absolute path under
+		// a long checkout directory would hide the file name.
 		const element = await formatter(
-			{path: join(testDir, 'test.ts')},
+			{path: join('test-fmt', 'test.ts')},
 			'const x = 1;',
 		);
 		const {lastFrame} = render(
@@ -69,8 +72,7 @@ test('ReadFileFormatter renders with path', async t => {
 		const output = lastFrame();
 		t.truthy(output);
 		t.regex(output!, /read_file/);
-		// The path might be truncated or split across lines depending on terminal width
-		t.regex(output!, /test\.ts|tes[\s\S]*?t\.ts|test/);
+		t.regex(output!, /Path:\s+test-fmt[\\/]test\.ts/);
 	} finally {
 		rmSync(testDir, {recursive: true, force: true});
 	}

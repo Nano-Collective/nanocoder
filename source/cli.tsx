@@ -78,10 +78,12 @@ if (args[0] === 'daemon') {
 	] as const;
 	type DaemonSub = (typeof valid)[number];
 	if (!sub || !(valid as readonly string[]).includes(sub)) {
-		console.error(
-			'Usage: nanocoder daemon <start|stop|status|logs|install|uninstall>',
-		);
-		process.exit(sub ? 1 : 0);
+		const help = !sub || sub === '--help' || sub === '-h';
+		const usage =
+			'Usage: nanocoder daemon <start|stop|status|logs|install|uninstall>';
+		if (help) console.log(usage);
+		else console.error(usage);
+		process.exit(help ? 0 : 1);
 	}
 	const {runDaemonCli} = await import('@/daemon/cli');
 	const result = await runDaemonCli(sub as DaemonSub, {
@@ -109,9 +111,11 @@ if (args[0] === 'verify') {
 // installer (no Ink, no providers, no tool registry).
 if (args[0] === 'skills') {
 	const {runSkillsCli, SKILLS_CLI_USAGE} = await import('@/skills/install');
-	if (args[1] !== 'add') {
-		console.error(SKILLS_CLI_USAGE);
-		process.exit(args[1] ? 1 : 0);
+	if (args[1] !== 'add' || args.includes('--help') || args.includes('-h')) {
+		const help = !args[1] || args.includes('--help') || args.includes('-h');
+		if (help) console.log(SKILLS_CLI_USAGE);
+		else console.error(SKILLS_CLI_USAGE);
+		process.exit(help ? 0 : 1);
 	}
 	const result = await runSkillsCli({
 		projectRoot: process.cwd(),
@@ -810,11 +814,10 @@ async function main(): Promise<void> {
 			outputFormat,
 		});
 	} else {
-		// Interactive TUI — load Ink + App only now.
-		const [{render}, {default: App}] = await Promise.all([
-			import('ink'),
-			import('@/app'),
-		]);
+		// Interactive TUI — load Ink + App only now, with React's production
+		// build (see load-tui-renderer.ts).
+		const {loadTuiRenderer} = await import('@/app/load-tui-renderer');
+		const renderTui = await loadTuiRenderer();
 
 		// Prevent Node's global performance entry buffer from growing without
 		// bound during long Ink sessions. See issue #521.
@@ -1015,20 +1018,20 @@ async function main(): Promise<void> {
 			}) as unknown as NodeJS.ReadStream;
 		}
 
-		const result = render(
-			<App
-				vscodeMode={vscodeMode}
-				vscodePort={vscodePort}
-				nonInteractivePrompt={nonInteractivePrompt}
-				nonInteractiveMode={nonInteractiveMode}
-				cliProvider={cliProvider}
-				cliModel={cliModel}
-				cliMode={cliMode}
-				trustDirectory={trustDirectory}
-				altScreenActive={useAltScreen}
-				initialSession={initialSession}
-				openSessionSelectorOnStart={openSessionSelectorOnStart}
-			/>,
+		const result = renderTui(
+			{
+				vscodeMode,
+				vscodePort,
+				nonInteractivePrompt,
+				nonInteractiveMode,
+				cliProvider,
+				cliModel,
+				cliMode,
+				trustDirectory,
+				altScreenActive: useAltScreen,
+				initialSession,
+				openSessionSelectorOnStart,
+			},
 			{
 				// Ctrl+C is handled inside App (routed through the shutdown
 				// manager) so the exit-render handler below can paint the
