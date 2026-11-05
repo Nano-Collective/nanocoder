@@ -279,3 +279,18 @@ function process(a: string, b: any) {
 	t.true(violations[0].message.includes("Injected 1 explicit 'any'"));
 });
 
+test('detectAnyTypeInjections allows line shifts above existing any without reporting false injection', (t) => {
+	const oldCode = `import { foo } from './foo';\nlet y: any;\n`;
+	const newCode = `import { bar } from './bar';\nimport { foo } from './foo';\nlet y: any;\n`;
+	const violations = detectAnyTypeInjections('source/shift.ts', oldCode, newCode);
+	t.is(violations.length, 0);
+});
+
+test('detectAnyTypeInjections does not hide any after URLs in string literals', (t) => {
+	const oldCode = `const baseUrl = 'https://api.example.com';`;
+	const newCode = `const baseUrl = 'https://api.example.com';\nconst data: any = 1;`;
+	const violations = detectAnyTypeInjections('source/url.ts', oldCode, newCode);
+	t.is(violations.length, 1);
+	t.true(violations[0].message.includes("Injected 1 explicit 'any'"));
+});
+

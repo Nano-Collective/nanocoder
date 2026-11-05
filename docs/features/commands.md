@@ -21,6 +21,7 @@ Type `/` in the chat input to see available commands. All commands start with `/
 | `/tasks` | Manage task list for tracking complex work (see [Task Management](task-management.md)) |
 | `/model-database` | Browse coding models from OpenRouter (searchable, filterable by open/proprietary). Enter copies the highlighted model's ID to the clipboard and, when the active provider is OpenRouter, also switches the session to that model |
 | `/settings` | Interactive settings menu. Accepts a tab name to jump straight there: `/settings providers`, `/settings mcp`, `/settings appearance`, `/settings input`, `/settings behavior`, `/settings advanced` |
+| `/firewall` | Inspect and configure the negative-space mutation firewall. Subcommands: `status`, `enable`, `disable`, `mode <strict\|lenient\|disabled>`, `toggle <any\|tests\|exports>`, `protect <pattern>`, `unprotect <pattern>`, `reset` |
 | `/mcp` | Show connected MCP servers and their tools |
 | `/commands` | List custom commands. Subcommands: `show <name>`, `create <name>` (see [Custom Commands](custom-commands.md)) |
 | `/tools` | List available tools grouped by source (built-in, MCP, custom). Subcommand: `create <name>` (see [Custom Tools](custom-tools.md)) |

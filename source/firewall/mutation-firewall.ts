@@ -97,10 +97,10 @@ export function isProtectedPath(filePath: string, patterns: string[]): boolean {
 	// Resolve absolute paths relative to current working directory
 	const abs = resolve(clean);
 	const rel = relative(process.cwd(), abs).replace(/\\/g, '/');
-	const targetPath = (rel.startsWith('..') ? clean : rel).replace(
-		/^\.?\/+/,
-		'',
-	);
+	// Strip leading ../ references so external or parent paths still match rules
+	const targetPath = (rel.startsWith('..') ? clean : rel)
+		.replace(/^(\.\.\/)+/, '')
+		.replace(/^\.?\/+/, '');
 	if (!targetPath) return false;
 
 	try {

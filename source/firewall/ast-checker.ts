@@ -3,15 +3,71 @@ import type {FirewallViolation} from '@/types/firewall';
 const TEST_FILE_PATTERN = /\.(spec|test)\.[jt]sx?$/i;
 
 /**
- * Strips comments and string literals across lines while preserving line indices.
+ * Strips comments and string literals across lines while preserving character offsets and line breaks.
+ * Processes comments and strings with a single tokenizer pass so that URLs inside strings (e.g. 'http://x')
+ * do not treat subsequent code as comments.
  */
 function stripCommentsAndStrings(code: string): string {
-	return code
-		.replace(/\/\*[\s\S]*?\*\//g, match => match.replace(/[^\r\n]/g, ' '))
-		.replace(/\/\/.*$/gm, match => match.replace(/[^\r\n]/g, ' '))
-		.replace(/(["'`])(?:(?=(\\?))\2[\s\S])*?\1/g, match =>
-			match.replace(/[^\r\n]/g, ' '),
-		);
+	let result = '';
+	let i = 0;
+	const len = code.length;
+
+	while (i < len) {
+		const ch = code[i];
+		const next = code[i + 1];
+
+		// Single-line comment: // ...
+		if (ch === '/' && next === '/') {
+			while (i < len && code[i] !== '\n' && code[i] !== '\r') {
+				result += ' ';
+				i++;
+			}
+			continue;
+		}
+
+		// Multi-line block comment: /* ... */
+		if (ch === '/' && next === '*') {
+			result += '  ';
+			i += 2;
+			while (i < len) {
+				if (code[i] === '*' && code[i + 1] === '/') {
+					result += '  ';
+					i += 2;
+					break;
+				}
+				result += code[i] === '\n' ? '\n' : code[i] === '\r' ? '\r' : ' ';
+				i++;
+			}
+			continue;
+		}
+
+		// String literals: double quote, single quote, template literal backtick
+		if (ch === '"' || ch === "'" || ch === '`') {
+			const quote = ch;
+			result += ' ';
+			i++;
+			while (i < len) {
+				if (code[i] === '\\') {
+					result += '  ';
+					i += 2;
+					continue;
+				}
+				if (code[i] === quote) {
+					result += ' ';
+					i++;
+					break;
+				}
+				result += code[i] === '\n' ? '\n' : code[i] === '\r' ? '\r' : ' ';
+				i++;
+			}
+			continue;
+		}
+
+		result += ch;
+		i++;
+	}
+
+	return result;
 }
 
 function stripCommentsOnly(code: string): string {
@@ -37,6 +93,7 @@ interface AnyOccurrence {
 function findAnyOccurrencesLexical(code: string): AnyOccurrence[] {
 	const cleaned = stripCommentsAndStrings(code);
 	const lines = cleaned.split('\n');
+	const origLines = code.split('\n');
 	const occurrences: AnyOccurrence[] = [];
 
 	const anyPattern =
@@ -46,9 +103,10 @@ function findAnyOccurrencesLexical(code: string): AnyOccurrence[] {
 		const line = lines[i];
 		let match = anyPattern.exec(line);
 		while (match !== null) {
+			const originalSnippet = (origLines[i] ?? '').replace(/\s+/g, ' ').trim();
 			occurrences.push({
 				line: i + 1,
-				anchor: `line:${i + 1}:${match.index}`,
+				anchor: originalSnippet || `any:${match[0]}`,
 				text: match[0],
 			});
 			match = anyPattern.exec(line);

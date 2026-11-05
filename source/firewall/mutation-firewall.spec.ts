@@ -116,4 +116,5 @@ test('isProtectedPath table-driven path validation', (t) => {
 	t.false(isProtectedPath('deep/nested/yarn.lock.backup', ['**/*.lock']));
 	t.false(isProtectedPath('docs/readme.md', ['docs/**', '!docs/readme.md']));
 	t.false(isProtectedPath('any/path.ts', ['[invalid-glob']));
+	t.true(isProtectedPath('../other/package.json', ['package.json']));
 });
