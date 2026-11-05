@@ -1,4 +1,17 @@
-import {parse as parseYaml} from 'yaml';
+import {createRequire} from 'node:module';
+
+type YamlParse = typeof import('yaml').parse;
+let yamlParse: YamlParse | undefined;
+
+function getYamlParse(): YamlParse {
+	if (!yamlParse) {
+		const yaml = createRequire(import.meta.url)(
+			'yaml',
+		) as typeof import('yaml');
+		yamlParse = yaml.parse;
+	}
+	return yamlParse;
+}
 
 /**
  * Result of splitting a markdown file into YAML frontmatter and body.
@@ -51,9 +64,10 @@ export function parseYamlObject(
 	frontmatter: string,
 ): Record<string, unknown> | null {
 	if (!frontmatter.trim()) return {};
+	const parse = getYamlParse();
 	let parsed: unknown;
 	try {
-		parsed = parseYaml(frontmatter);
+		parsed = parse(frontmatter);
 	} catch {
 		return null;
 	}
