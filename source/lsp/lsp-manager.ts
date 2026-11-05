@@ -61,10 +61,20 @@ const FIRST_DIAGNOSTICS_WAIT_MS = 5000;
  * One spelling per file, so a URI the server publishes matches the one we
  * opened (servers re-encode URIs, e.g. a drive letter's colon on Windows).
  */
-function normalizeUri(uri: string): string {
+export function normalizeUri(
+	uri: string,
+	options?: {windows?: boolean},
+): string {
 	if (!uri.startsWith('file://')) return uri;
 	try {
-		return pathToFileURL(fileURLToPath(uri)).href;
+		const windows = options?.windows ?? process.platform === 'win32';
+		let filePath = fileURLToPath(uri, {windows});
+		// Windows drive letters are case-insensitive. Preserve the rest of the
+		// path: directories may opt into case-sensitive names.
+		if (windows) {
+			filePath = filePath.replace(/^[A-Z]:/, drive => drive.toLowerCase());
+		}
+		return pathToFileURL(filePath, {windows}).href;
 	} catch {
 		return uri;
 	}
@@ -380,7 +390,7 @@ export class LSPManager extends EventEmitter {
 	 */
 	private fileToUri(filePath: string): string {
 		if (filePath.startsWith('file://')) return normalizeUri(filePath);
-		return pathToFileURL(this.toFsPath(filePath)).href;
+		return normalizeUri(pathToFileURL(this.toFsPath(filePath)).href);
 	}
 
 	/**
