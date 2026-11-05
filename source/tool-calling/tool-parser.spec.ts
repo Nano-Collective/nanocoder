@@ -24,6 +24,54 @@ test('parseToolCalls: successfully parses valid XML tool call', t => {
 	}
 });
 
+test('parseToolCalls: finds XML tool calls after a fenced code example', t => {
+	const content = `Here is the relevant code:
+
+\`\`\`javascript
+const x = 1;
+\`\`\`
+
+<read_file><path>src/app.ts</path></read_file>`;
+
+	const result = parseToolCalls(content);
+
+	t.true(result.success);
+	if (result.success) {
+		t.is(result.toolCalls.length, 1);
+		t.is(result.toolCalls[0].function.name, 'read_file');
+		t.deepEqual(result.toolCalls[0].function.arguments, {
+			path: 'src/app.ts',
+		});
+		t.regex(result.cleanedContent, /Here is the relevant code:/);
+		t.regex(result.cleanedContent, /const x = 1;/);
+		t.notRegex(result.cleanedContent, /<read_file>/);
+	}
+});
+
+test('parseToolCalls: finds XML tool calls before a fenced code example', t => {
+	const content = `<read_file><path>src/app.ts</path></read_file>
+
+Here is the relevant code:
+
+\`\`\`javascript
+const x = 1;
+\`\`\``;
+
+	const result = parseToolCalls(content);
+
+	t.true(result.success);
+	if (result.success) {
+		t.is(result.toolCalls.length, 1);
+		t.is(result.toolCalls[0].function.name, 'read_file');
+		t.deepEqual(result.toolCalls[0].function.arguments, {
+			path: 'src/app.ts',
+		});
+		t.regex(result.cleanedContent, /Here is the relevant code:/);
+		t.regex(result.cleanedContent, /const x = 1;/);
+		t.notRegex(result.cleanedContent, /<read_file>/);
+	}
+});
+
 test('parseToolCalls: parses XML tool calls whose values contain =', t => {
 	const content = `<execute_bash><command>FOO=1 echo hi</command></execute_bash>
 <string_replace><path>a.ts</path><old_str>const x = 1;</old_str><new_str>const x = 2;</new_str></string_replace>`;
