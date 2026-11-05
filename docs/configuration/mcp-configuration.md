@@ -268,6 +268,11 @@ existing tool keeps its behaviour and its approval rules, and the server's
 other tools work as usual. When a server goes unhealthy or disconnects, only
 the tools it registered are removed.
 
+If two servers offer a tool with the same name, only one of them handles it,
+and a startup warning names the servers and the one its calls go to. When that
+name also belongs to a built-in or custom tool, it is skipped for every server
+that offers it.
+
 ## Resources and Prompts
 
 A server can also declare MCP resources and prompts, alongside tools:

@@ -285,6 +285,7 @@ echo`,
 				handler: async () => 'ok',
 			},
 		],
+		getToolNameConflicts: () => [],
 		disconnect: async () => {},
 	});
 	await manager.initializeMCP([

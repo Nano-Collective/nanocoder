@@ -4,6 +4,7 @@ import type {
 } from '@/types/index';
 import type {MCPClient} from '@/mcp/mcp-client';
 import test from 'ava';
+import {setGlobalMessageQueue} from '@/utils/message-queue';
 import {getShutdownManager} from '@/utils/shutdown';
 import {resolveToolApproval} from './approval-policy';
 import {describeSkippedMCPTools, ToolManager} from './tool-manager';
@@ -160,6 +161,9 @@ test('initializeMCP - unregisters tools when a server becomes unhealthy', async 
 		async connectToServers() {
 			return [{serverName: 'health-server', success: true, toolCount: 1}];
 		},
+		getToolNameConflicts() {
+			return [];
+		},
 		getToolEntries() {
 			return [
 				{
@@ -211,6 +215,9 @@ test('ToolManager re-registers MCP tools when server recovers to connected state
 		async connectToServers() {
 			return [{serverName: 'health-server', success: true, toolCount: 1}];
 		},
+		getToolNameConflicts() {
+			return [];
+		},
 		getToolEntries(_serverName?: string) {
 			return [
 				{
@@ -255,50 +262,104 @@ test('ToolManager re-registers MCP tools when server recovers to connected state
 // MCP tools named like a built-in (#1853)
 // ============================================================================
 
-// A server offering `tools`, none annotated read-only. Like the real client's
-// entries, they run without a prompt in auto-accept.
-function fakeMCPServer(serverName: string, tools: string[]) {
+// Connected servers, each offering its tools, none annotated read-only. Like
+// the real client's entries, they run without a prompt in auto-accept, and a
+// name more than one server offers routes to the server listed last.
+function fakeMCPServers(toolsByServer: Record<string, string[]>) {
 	let healthListener:
 		| ((change: {serverName: string; status: 'unhealthy' | 'connected'}) => void)
 		| undefined;
+	const serverTools = Object.entries(toolsByServer);
 	const client = {
 		onHealthChange(listener: typeof healthListener) {
 			healthListener = listener;
 			return () => {};
 		},
 		async connectToServers() {
-			return [{serverName, success: true, toolCount: tools.length}];
-		},
-		getToolEntries() {
-			return tools.map(name => ({
-				name,
-				tool: {
-					description: `[MCP:${serverName}] ${name}`,
-					execute: async () => 'mcp',
-				} as never,
-				handler: async () => 'mcp',
-				approval: (_args: unknown, mode: string) => mode !== 'auto-accept',
+			return serverTools.map(([serverName, tools]) => ({
+				serverName,
+				success: true,
+				toolCount: tools.length,
 			}));
 		},
+		getToolEntries(forServerName?: string) {
+			return serverTools
+				.filter(([serverName]) => !forServerName || serverName === forServerName)
+				.flatMap(([serverName, tools]) =>
+					tools.map(name => ({
+						name,
+						tool: {
+							description: `[MCP:${serverName}] ${name}`,
+							execute: async () => 'mcp',
+						} as never,
+						handler: async () => 'mcp',
+						approval: (_args: unknown, mode: string) => mode !== 'auto-accept',
+					})),
+				);
+		},
 		getNativeToolsRegistry() {
-			return Object.fromEntries(tools.map(name => [name, {}]));
+			return Object.fromEntries(
+				serverTools.flatMap(([, tools]) => tools.map(name => [name, {}])),
+			);
 		},
 		getToolMapping() {
 			return new Map(
-				tools.map(name => [
-					name,
-					{serverName, originalName: name, readOnly: false},
-				]),
+				serverTools.flatMap(([serverName, tools]) =>
+					tools.map(name => [
+						name,
+						{serverName, originalName: name, readOnly: false},
+					]),
+				),
 			);
+		},
+		getToolNameConflicts() {
+			const owners = new Map<string, string[]>();
+			for (const [serverName, tools] of serverTools) {
+				for (const name of tools) {
+					owners.set(name, [...(owners.get(name) ?? []), serverName]);
+				}
+			}
+			return [...owners]
+				.filter(([, servers]) => servers.length > 1)
+				.map(([tool, servers]) => ({tool, servers, active: servers.at(-1)}));
 		},
 		disconnect: async () => {},
 	};
 	return {
 		manager: new HealthSeamToolManager(client),
-		servers: [{name: serverName, transport: 'http' as const, url: 'http://localhost/mcp'}],
-		setHealth: (status: 'unhealthy' | 'connected') =>
+		servers: serverTools.map(([name]) => ({
+			name,
+			transport: 'http' as const,
+			url: 'http://localhost/mcp',
+		})),
+		setHealth: (serverName: string, status: 'unhealthy' | 'connected') =>
 			healthListener?.({serverName, status}),
 	};
+}
+
+function fakeMCPServer(serverName: string, tools: string[]) {
+	const fake = fakeMCPServers({[serverName]: tools});
+	return {
+		...fake,
+		setHealth: (status: 'unhealthy' | 'connected') =>
+			fake.setHealth(serverName, status),
+	};
+}
+
+/** Run `fn` with chat warnings captured, and return their text. */
+async function captureChatWarnings(fn: () => Promise<unknown>) {
+	const warnings: string[] = [];
+	setGlobalMessageQueue(component => {
+		const message = (component as {props?: {message?: unknown}}).props
+			?.message;
+		if (typeof message === 'string') warnings.push(message);
+	});
+	try {
+		await fn();
+	} finally {
+		setGlobalMessageQueue(() => {});
+	}
+	return warnings;
 }
 
 test('initializeMCP - skips an MCP tool named like a built-in and keeps the built-in', async t => {
@@ -414,6 +475,64 @@ test('describeSkippedMCPTools - names the server and the skipped tools', t => {
 			skippedTools: ['write_file', 'list_directory'],
 		}),
 		'MCP server "fs" offers tools that a built-in or custom tool already uses, so they were skipped: write_file, list_directory',
+	);
+});
+
+test.serial('initializeMCP - warns about a tool name two MCP servers share when nothing is skipped', async t => {
+	const {manager, servers} = fakeMCPServers({alpha: ['echo'], beta: ['echo']});
+	let results: MCPInitResult[] = [];
+
+	const warnings = await captureChatWarnings(async () => {
+		results = await manager.initializeMCP(servers);
+	});
+
+	t.deepEqual(warnings, [
+		'MCP servers expose the same tool names, so only one server handles each: "echo" (alpha, beta; calls go to beta).',
+	]);
+	t.deepEqual(
+		results.map(result => result.skippedTools),
+		[undefined, undefined],
+	);
+});
+
+test.serial('initializeMCP - warns about both a tool skipped for a built-in and a name two MCP servers share', async t => {
+	const {manager, servers} = fakeMCPServers({
+		alpha: ['write_file', 'echo'],
+		beta: ['echo'],
+	});
+	let results: MCPInitResult[] = [];
+
+	const warnings = await captureChatWarnings(async () => {
+		results = await manager.initializeMCP(servers);
+	});
+
+	t.deepEqual(warnings, [
+		'MCP servers expose the same tool names, so only one server handles each: "echo" (alpha, beta; calls go to beta).',
+	]);
+	t.deepEqual(results.map(describeSkippedMCPTools), [
+		'MCP server "alpha" offers tools that a built-in or custom tool already uses, so they were skipped: write_file',
+		null,
+	]);
+});
+
+test.serial('initializeMCP - a built-in name two MCP servers share is skipped for both, not reported as routed to one', async t => {
+	const {manager, servers} = fakeMCPServers({
+		alpha: ['read_file'],
+		beta: ['read_file'],
+	});
+	const builtIn = manager.getToolEntry('read_file');
+	let results: MCPInitResult[] = [];
+
+	const warnings = await captureChatWarnings(async () => {
+		results = await manager.initializeMCP(servers);
+	});
+
+	t.is(manager.getToolEntry('read_file'), builtIn);
+	// Calls go to the built-in, so naming a server they "go to" would be wrong.
+	t.deepEqual(warnings, []);
+	t.deepEqual(
+		results.map(result => result.skippedTools),
+		[['read_file'], ['read_file']],
 	);
 });
 
@@ -1109,6 +1228,7 @@ test('plan mode hides MCP tools unless the server annotates them read-only', asy
 					{serverName: 'gh', originalName: 'search_docs', readOnly: true},
 				],
 			]),
+		getToolNameConflicts: () => [],
 		disconnect: async () => {},
 	});
 	await manager.initializeMCP([
@@ -1536,6 +1656,7 @@ function fakeMcpClient(toolName: string, serverName = 'session-server') {
 		getNativeToolsRegistry: () => ({[toolName]: {}}),
 		getToolMapping: () =>
 			new Map([[toolName, {serverName, originalName: toolName, readOnly: true}]]),
+		getToolNameConflicts: () => [],
 		disconnect: async () => {},
 	};
 }

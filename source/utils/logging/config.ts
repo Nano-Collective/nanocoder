@@ -43,7 +43,6 @@ export function getDefaultLogDirectory(): string {
 function createDevelopmentConfig(): EnhancedLoggerConfig {
 	return {
 		level: (nodeProcess.env.NANOCODER_LOG_LEVEL as LogLevel) || 'debug',
-		destination: String(nodeProcess.stdout.fd),
 		pretty: true,
 		redact: ['apiKey', 'token', 'password', 'secret'],
 		correlation: true,

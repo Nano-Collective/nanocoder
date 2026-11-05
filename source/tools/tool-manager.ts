@@ -26,6 +26,7 @@ import type {
 } from '@/types/index';
 import type {MCPHealthChange} from '@/types/mcp';
 import {getLogger} from '@/utils/logging';
+import {logWarning} from '@/utils/message-queue';
 import {getShutdownManager} from '@/utils/shutdown';
 
 /**
@@ -249,16 +250,44 @@ export class ToolManager {
 				onProgress,
 			);
 
-			const skipped = this.registerMCPEntries(this.mcpClient.getToolEntries());
-			if (skipped.length === 0) {
+			const mcpClient = this.mcpClient;
+			const skipped = new Set(
+				this.registerMCPEntries(mcpClient.getToolEntries()),
+			);
+
+			// Tools are keyed by name, so a name two servers share silently
+			// reaches only one of them. Say which. A name that was skipped
+			// reaches neither server, so it is left to the skipped-tools warning.
+			const conflicts = mcpClient
+				.getToolNameConflicts()
+				.filter(conflict => !skipped.has(conflict.tool));
+			if (conflicts.length > 0) {
+				const lines = conflicts
+					.slice(0, 5)
+					.map(
+						c =>
+							`"${c.tool}" (${c.servers.join(', ')}; calls go to ${c.active})`,
+					);
+				const more =
+					conflicts.length > 5 ? ` and ${conflicts.length - 5} more` : '';
+				const message = `MCP servers expose the same tool names, so only one server handles each: ${lines.join('; ')}${more}.`;
+				// An ACP session's manager has no TUI to show a chat warning;
+				// log it there, as registerMCPEntries does for its own skips.
+				if (this.parent) getLogger().warn(message);
+				else logWarning(message);
+			}
+
+			if (skipped.size === 0) {
 				return results;
 			}
 
-			const mapping = this.mcpClient.getToolMapping();
+			// Every server offering a skipped name is told, not only the one the
+			// name would have been routed to.
 			return results.map(result => {
-				const skippedTools = skipped.filter(
-					name => mapping.get(name)?.serverName === result.serverName,
-				);
+				const skippedTools = mcpClient
+					.getToolEntries(result.serverName)
+					.map(entry => entry.name)
+					.filter(name => skipped.has(name));
 				return skippedTools.length > 0 ? {...result, skippedTools} : result;
 			});
 		}
