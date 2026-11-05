@@ -30,16 +30,18 @@ interface BraveSearchResponse {
 	};
 }
 
-const escapeMarkdown = (text: string): string =>
-	text
+const escapeMarkdown = (text: unknown): string =>
+	String(text ?? '')
 		.replace(/<\/?(?:strong|b|em|i|mark)>/gi, '')
 		.replace(/\s+/g, ' ')
 		.trim()
 		.replace(/[\\`*_[\]<>~|=]/g, '\\$&')
 		.replace(/^(?=[#+-]|\d+[.)])/, '\\');
 
-const toSafeUrl = (raw: string): string | undefined => {
-	const url = raw.replace(/[\s<>]/g, '');
+const toSafeUrl = (raw: unknown): string | undefined => {
+	const url = String(raw ?? '');
+	// Reject URLs with whitespace/controls; do not strip (host-join risk).
+	if (/[\s\u0000-\u001f\u007f]/.test(url)) return undefined;
 	if (!/^https?:\/\//i.test(url)) return undefined;
 	try {
 		const {protocol} = new URL(url);

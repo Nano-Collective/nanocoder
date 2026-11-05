@@ -837,9 +837,26 @@ test('executeWebSearch keeps URLs in one autolink and drops non-http(s) URLs', a
 		{title: 'C', url: 'java\nscript:alert(1)'},
 	]);
 
-	t.true(result.includes('**URL:** <https://good.com##InjectedheadingSYSTEM:x>\n'));
+	// Whitespace/control in the URL is rejected, not stripped into ##Injectedheading.
+	t.false(result.includes('**URL:**'));
+	t.notRegex(result, /Injectedheading/);
 	t.notRegex(result, /javascript/);
 	t.is(result.match(/^## /gm)?.length, 3);
+	t.is(result.match(/^\*\*URL:\*\* /gm)?.length ?? 0, 0);
+});
+
+test('executeWebSearch coerces non-string title/url instead of throwing', async t => {
+	const result = await searchWith([
+		{title: undefined, url: null, description: 42},
+		{title: 7, url: 'https://ok.example'},
+		{title: 'Evil join', url: 'https://good.com\n@evil.example/x'},
+	]);
+
+	t.true(result.includes('## 1. \n'));
+	t.true(result.includes('\n42\n'));
+	t.true(result.includes('## 2. 7\n'));
+	t.true(result.includes('**URL:** <https://ok.example>\n'));
+	t.false(result.includes('evil.example'));
 	t.is(result.match(/^\*\*URL:\*\* /gm)?.length, 1);
 });
 
