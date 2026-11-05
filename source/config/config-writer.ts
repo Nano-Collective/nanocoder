@@ -3,6 +3,7 @@ import {getClosestConfigFile} from '@/config/index';
 import type {UserPreferences} from '@/types/config';
 import {atomicWriteJson} from '@/utils/atomic-write';
 import {logError} from '@/utils/message-queue';
+import {stripUtf8Bom} from '@/utils/strip-utf8-bom';
 
 /**
  * Reads the active agents.config.json, merges the given partial update into the
@@ -99,7 +100,7 @@ function readConfigObject(
 ): Record<string, unknown> | undefined {
 	try {
 		if (existsSync(configPath)) {
-			return JSON.parse(readFileSync(configPath, 'utf-8'));
+			return JSON.parse(stripUtf8Bom(readFileSync(configPath, 'utf-8')));
 		}
 		return {};
 	} catch (error) {

@@ -2776,3 +2776,26 @@ test.serial(
 		}
 	},
 );
+
+
+test.serial(
+	'loadPreferences reads a preferences file that starts with a UTF-8 BOM',
+	t => {
+		const preferencesPath = getTestPreferencesPath();
+		writeFileSync(
+			preferencesPath,
+			'﻿' + JSON.stringify({lastProvider: 'bom-provider'}),
+			'utf-8',
+		);
+
+		try {
+			resetPreferencesCache();
+			const preferences = loadPreferences();
+			t.is(preferences.lastProvider, 'bom-provider');
+		} finally {
+			if (existsSync(preferencesPath)) {
+				rmSync(preferencesPath, {force: true});
+			}
+		}
+	},
+);
