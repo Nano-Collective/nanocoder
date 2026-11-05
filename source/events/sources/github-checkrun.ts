@@ -40,8 +40,12 @@ import type {EventRouter} from '@/events/event-router';
 import type {CiJobFailedPayload} from '@/events/types';
 import {execGh, getCurrentBranch} from '@/tools/git/utils';
 import {ExponentialBackoff} from '@/utils/backoff';
+import {formatError} from '@/utils/error-formatter';
 
 const DEFAULT_POLL_INTERVAL_MS = 30_000;
+/** Floor for a configured `pollIntervalMs`: each poll is a `gh` API call,
+ * and a tiny value (say 10) would burn through the rate limit. */
+const MIN_POLL_INTERVAL_MS = 5_000;
 const DEFAULT_MAX_POLL_INTERVAL_MS = 300_000;
 const RUN_LIST_LIMIT = 10;
 const MAX_TRACKED_RUN_IDS = 50;
@@ -97,10 +101,16 @@ export class CiEventSource {
 		private readonly options: CiEventSourceOptions = {},
 	) {
 		this.seenFailedRunIds = [...(options.initialSeenFailedRunIds ?? [])];
-		this.pollIntervalMs = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
+		this.pollIntervalMs = Math.max(
+			MIN_POLL_INTERVAL_MS,
+			options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS,
+		);
 		this.backoff = new ExponentialBackoff({
 			baseMs: this.pollIntervalMs,
-			maxMs: options.maxPollIntervalMs ?? DEFAULT_MAX_POLL_INTERVAL_MS,
+			maxMs: Math.max(
+				this.pollIntervalMs,
+				options.maxPollIntervalMs ?? DEFAULT_MAX_POLL_INTERVAL_MS,
+			),
 		});
 		this.execGhFn = options.execGhFn ?? execGh;
 		this.getCurrentBranchFn = options.getCurrentBranchFn ?? getCurrentBranch;
@@ -138,7 +148,25 @@ export class CiEventSource {
 		}, delayMs);
 	}
 
+	/**
+	 * Run one poll and always schedule the next one. Anything `poll()` throws
+	 * (branch resolution on a detached HEAD, a malformed run list, a throwing
+	 * `onDetected` or router) backs off rather than ending polling for the
+	 * rest of the daemon's life.
+	 */
 	private async pollOnce(): Promise<void> {
+		let nextDelayMs: number;
+		try {
+			nextDelayMs = await this.poll();
+		} catch (err) {
+			console.error(`CI watch poll failed: ${formatError(err)}`);
+			nextDelayMs = this.backoff.next();
+		}
+		this.scheduleNext(nextDelayMs);
+	}
+
+	/** One poll. Returns the delay before the next one. */
+	private async poll(): Promise<number> {
 		const branch = this.options.branch ?? (await this.getCurrentBranchFn());
 
 		let raw: string;
@@ -159,8 +187,7 @@ export class CiEventSource {
 				TIMEOUT_GH_METADATA_MS,
 			);
 		} catch {
-			this.scheduleNext(this.backoff.next());
-			return;
+			return this.backoff.next();
 		}
 
 		let runs: RunListEntry[];
@@ -172,9 +199,9 @@ export class CiEventSource {
 			// the fixed interval, since a real backoff.reset() already fired on
 			// the *previous* success and we don't want to hammer a source that
 			// keeps returning garbage.
-			this.scheduleNext(this.backoff.next());
-			return;
+			return this.backoff.next();
 		}
+		if (!Array.isArray(runs)) return this.backoff.next();
 
 		this.backoff.reset();
 
@@ -208,8 +235,20 @@ export class CiEventSource {
 				headSha: run.headSha,
 				url: run.url,
 			};
-			this.options.onDetected?.(payload);
-			await this.router.emit({kind: 'ci.job.failed', payload, at: this.now()});
+			// One run's failed dispatch must not drop the others, or skip
+			// persisting the dedup state below.
+			try {
+				this.options.onDetected?.(payload);
+				await this.router.emit({
+					kind: 'ci.job.failed',
+					payload,
+					at: this.now(),
+				});
+			} catch (err) {
+				console.error(
+					`CI watch failed to dispatch run ${run.databaseId}: ${formatError(err)}`,
+				);
+			}
 		}
 
 		if (newlyFailed.length > 0) {
@@ -221,6 +260,6 @@ export class CiEventSource {
 			this.options.onSeenFailedRunIdsChanged?.([...this.seenFailedRunIds]);
 		}
 
-		this.scheduleNext(this.pollIntervalMs);
+		return this.pollIntervalMs;
 	}
 }

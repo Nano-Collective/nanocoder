@@ -5,7 +5,11 @@ import * as path from 'node:path';
 import {
 	MAX_CONTEXT_DIR_ENTRIES,
 	MAX_CONTEXT_FILE_BYTES,
+	capText,
+	findOpenDocumentText,
 	isBinary,
+	type OpenDocument,
+	readAttachedFile,
 	readCappedDirectory,
 	readCappedFile,
 } from './context-attachment';
@@ -148,4 +152,84 @@ test('readCappedDirectory - throws for a missing directory so the caller can rep
 
 test('readCappedDirectory - default entry cap is 200', t => {
 	t.is(MAX_CONTEXT_DIR_ENTRIES, 200);
+});
+
+// ── open editor buffers ───────────────────────────────────
+
+function openDocument(fsPath: string, text: string, scheme = 'file'): OpenDocument {
+	return { uri: { scheme, fsPath }, getText: () => text };
+}
+
+test('readAttachedFile - an open editor with unsaved edits wins over the file on disk', t => {
+	const filePath = writeFile('draft.ts', 'export const saved = 1;\n');
+	const documents = [openDocument(filePath, 'export const unsaved = 2;\n')];
+
+	t.is(
+		readAttachedFile(filePath, p => findOpenDocumentText(p, documents)),
+		'export const unsaved = 2;\n',
+	);
+});
+
+test('readAttachedFile - reads the file from disk when no editor has it open', t => {
+	const filePath = writeFile('closed.ts', 'export const onDisk = 1;\n');
+	const documents = [openDocument(path.join(path.dirname(filePath), 'other.ts'), 'x')];
+
+	t.is(
+		readAttachedFile(filePath, p => findOpenDocumentText(p, documents)),
+		'export const onDisk = 1;\n',
+	);
+});
+
+test('readAttachedFile - uses an open buffer for a file that was never saved to disk', t => {
+	const filePath = path.join(makeTempDir(), 'new-file.ts');
+
+	t.is(
+		readAttachedFile(filePath, p =>
+			findOpenDocumentText(p, [openDocument(filePath, 'brand new\n')]),
+		),
+		'brand new\n',
+	);
+});
+
+test('readAttachedFile - caps an open buffer exactly like a file on disk', t => {
+	const text = 'a'.repeat(250);
+	const filePath = writeFile('big.txt', text);
+	const fromBuffer = readAttachedFile(filePath, () => text, 100);
+
+	t.is(fromBuffer, readCappedFile(filePath, 100));
+	t.true(fromBuffer?.endsWith('\n... [truncated: 150 of 250 bytes omitted]'));
+});
+
+test('capText - rejects text that looks binary, like readCappedFile', t => {
+	t.is(capText('header\u0000payload'), null);
+	t.is(capText('plain text'), 'plain text');
+	t.is(capText(''), '');
+});
+
+test('capText - counts the cap in UTF-8 bytes, not characters', t => {
+	const result = capText('ééé', 4);
+
+	t.true(result?.startsWith('éé'));
+	t.true(result?.endsWith('[truncated: 2 of 6 bytes omitted]'));
+});
+
+test('findOpenDocumentText - matches the same file through an unnormalized path', t => {
+	const dir = makeTempDir();
+	const filePath = path.join(dir, 'src', 'index.ts');
+	const documents = [openDocument(filePath, 'buffer text')];
+
+	t.is(
+		findOpenDocumentText(path.join(dir, 'src', '..', 'src', 'index.ts'), documents),
+		'buffer text',
+	);
+});
+
+test('findOpenDocumentText - ignores documents that are not files on disk', t => {
+	const filePath = path.join(makeTempDir(), 'index.ts');
+	const documents = [
+		openDocument(filePath, 'untitled buffer', 'untitled'),
+		openDocument(filePath, 'git diff view', 'git'),
+	];
+
+	t.is(findOpenDocumentText(filePath, documents), undefined);
 });

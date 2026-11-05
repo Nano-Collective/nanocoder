@@ -92,6 +92,15 @@ test('unknown flag returns exit code 1', async t => {
 	t.true(result.output.includes('Unknown flag'));
 });
 
+for (const flag of ['--help', '-h']) {
+	test(`${flag} prints usage and exits 0`, async t => {
+		const result = await runVerifyCli([flag], {projectRoot: '.'}, baseDeps());
+		t.is(result.exitCode, 0);
+		t.regex(result.output, /^Usage: nanocoder verify/);
+		t.false(result.output.includes('Unknown flag'));
+	});
+}
+
 test('an untrusted directory is refused before gh, the scan, or config loading', async t => {
 	let touched = false;
 	const mark = async () => {

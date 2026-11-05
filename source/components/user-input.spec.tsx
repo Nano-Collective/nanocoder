@@ -802,6 +802,58 @@ test.serial('UserInput keeps a long CJK queued message on a single row', t => {
 	}
 });
 
+// Serial: this test mutates the global process.stdout.columns. Run alone so the
+// narrowed width can't leak into a concurrently-rendering sibling test.
+test.serial('UserInput keeps queued messages on one row inside the prompt box at 60 cols', t => {
+	const originalColumns = process.stdout.columns;
+	Object.defineProperty(process.stdout, 'columns', {
+		value: 60,
+		configurable: true,
+	});
+
+	try {
+		// formatQueuedMessage used to budget against the terminal width, but the
+		// row renders inside the prompt box, which is 4 columns narrower plus its
+		// own border and padding, so the "..." wrapped onto a second row.
+		const ascii =
+			'alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo lima mike';
+		const cjk = '请把所有的测试用例都重新运行一遍然后告诉我结果'.repeat(4);
+		const {lastFrame, unmount} = render(
+			<TestWrapper>
+				<UserInput
+					forceFocus={true}
+					isBusy={true}
+					queuedMessages={[
+						{id: 'q-ascii', message: ascii, displayValue: ascii},
+						{
+							id: 'q-cjk',
+							message: cjk,
+							displayValue: cjk,
+							images: [{data: 'abc', mediaType: 'image/png'}],
+						},
+					]}
+				/>
+			</TestWrapper>,
+		);
+
+		const lines = stripAnsi(lastFrame() ?? '').split('\n');
+		const asciiRow = lines.find(line => line.includes('alpha bravo'));
+		const cjkRow = lines.find(line => line.includes('请把所有'));
+		t.truthy(asciiRow);
+		t.truthy(cjkRow);
+		// The ellipsis (and the image suffix) land on the message's own row.
+		t.true(asciiRow!.includes('...'), asciiRow);
+		t.true(cjkRow!.includes('...'), cjkRow);
+		t.true(cjkRow!.includes('(1 image)'), cjkRow);
+		unmount();
+	} finally {
+		Object.defineProperty(process.stdout, 'columns', {
+			value: originalColumns,
+			configurable: true,
+		});
+	}
+});
+
 test('UserInput navigates queued messages while busy with empty input', async t => {
 	const {stdin, lastFrame, unmount} = render(
 		<TestWrapper>
@@ -2490,6 +2542,34 @@ test('UserInput lists Ctrl+N for reasoning and Ctrl+R for history search in the 
 	t.regex(frame, /Ctrl\+N — Toggle reasoning traces/);
 	t.regex(frame, /Ctrl\+R — Reverse search prompt history/);
 	unmount();
+});
+
+test('UserInput lists Ctrl+G voice push-to-talk in the shortcuts overlay', async t => {
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput forceFocus={true} />
+		</TestWrapper>,
+	);
+
+	await wait(50);
+	stdin.write('?');
+	await waitForFrame(lastFrame, /Keyboard Shortcuts/);
+
+	const frame = stripAnsi(lastFrame() ?? '');
+	t.regex(frame, /Ctrl\+G — Voice push-to-talk \(when \/voice is on\)/);
+	unmount();
+});
+
+test('findReverseMatch skips malformed history entries instead of throwing', t => {
+	const history = [
+		{displayValue: 'git log', placeholderContent: {}},
+		null,
+		'bare string',
+		{placeholderContent: {}},
+	] as unknown as Parameters<typeof findReverseMatch>[0];
+
+	t.notThrows(() => findReverseMatch(history, 'git', history.length - 1));
+	t.is(findReverseMatch(history, 'git', history.length - 1)?.index, 0);
 });
 
 test('UserInput leaves Ctrl+G alone so voice push-to-talk keeps working', async t => {

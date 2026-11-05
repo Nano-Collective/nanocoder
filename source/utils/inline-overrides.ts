@@ -96,7 +96,8 @@ export function parseInlineOverrides(
  * Map of `?flag` names that should be expanded into the corresponding
  * `--flag value` CLI args so existing slash-command handlers can stay
  * oblivious to the override feature. Boolean overrides (`?preview`) expand
- * to a single `--preview` token. Keys that have once-scoped overrides (e.g.
+ * to a single `--preview` token. Only flags whose effect is limited to the
+ * command they appear on belong here, never ones that persist session state. Keys that have once-scoped overrides (e.g.
  * `?auto-compact`, `?threshold`) are NOT expanded here - they're only handled
  * via `applyOnceOverrides`.
  */
@@ -106,8 +107,10 @@ const LEGACY_FLAG_NAMES: Record<string, string> = {
 	mechanical: '--mechanical',
 	aggressive: '--aggressive',
 	conservative: '--conservative',
-	'auto-on': '--auto-on',
-	'auto-off': '--auto-off',
+	// `--auto-on` / `--auto-off` are deliberately absent: they toggle
+	// auto-compact for the rest of the session, which would break the
+	// "an override only lasts one command" contract. `?auto-compact=` is the
+	// once-scoped form.
 };
 
 /** Once-scoped keys consumed by `applyOnceOverrides` (never forwarded). */
