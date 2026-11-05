@@ -612,6 +612,10 @@
 				"includeAgentsMd": {
 					"type": "boolean"
 				},
+				"mcpDiscovery": {
+					"enum": ["always", "auto", "disabled"],
+					"type": "string"
+				},
 				"modelParameters": {
 					"$ref": "#/definitions/ModelParameters"
 				},

@@ -4,6 +4,7 @@ import {basename, dirname, isAbsolute, join, normalize, resolve} from 'path';
 import {fileURLToPath} from 'url';
 import {getProfessionalTone} from '@/config/preferences';
 import {getProjectRoot} from '@/services/session-cwd';
+import {getActiveToolManager} from '@/tools/tool-manager';
 import {isNanoProfile, isSingleToolProfile} from '@/tools/tool-profiles';
 import type {SystemPromptConfig, TuneConfig} from '@/types/config';
 import {TUNE_DEFAULTS} from '@/types/config';
@@ -326,6 +327,19 @@ export function buildSystemPrompt(
 
 ${getSubagentDescriptions()}`;
 		sections.push(subagentInfo);
+	}
+
+	// On-demand MCP Tool Catalog — only when load_tool_schema is available and catalog has unloaded tools
+	if (toolSet.has('load_tool_schema')) {
+		const activeManager = getActiveToolManager();
+		if (activeManager) {
+			const mcpCatalogSection = activeManager
+				.getMcpCatalog()
+				.formatCatalogSection();
+			if (mcpCatalogSection) {
+				sections.push(mcpCatalogSection);
+			}
+		}
 	}
 
 	// Professional ("boring") tone — user preference, opt-in. Placed last among
