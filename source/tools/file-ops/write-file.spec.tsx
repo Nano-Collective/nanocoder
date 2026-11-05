@@ -318,7 +318,7 @@ test('write_file validator: rejects non-existent parent directory', async t => {
 	}
 });
 
-test('write_file validator: rejects system directories', async t => {
+test('write_file validator: rejects system-like absolute paths outside the project', async t => {
 	if (!writeFileTool.validator) {
 		t.fail('Validator not defined');
 		return;
@@ -334,7 +334,7 @@ test('write_file validator: rejects system directories', async t => {
 
 		t.false(result.valid);
 		if (!result.valid) {
-			// Path validation rejects absolute paths before system directory check
+			// Containment rejects the absolute path before the system-directory guard runs.
 			t.true(result.error.includes('Invalid file path'));
 		}
 	}
@@ -499,10 +499,10 @@ test('write_file formatter: generates preview with large content', async t => {
 });
 
 // ============================================================================
-// Validator Additional System Directory Tests
+// Validator Additional Absolute Path Tests
 // ============================================================================
 
-test('write_file validator: rejects /etc directory', async t => {
+test('write_file validator: rejects /etc: an absolute path outside the project', async t => {
 	if (!writeFileTool.validator) {
 		t.fail('Validator not defined');
 		return;
@@ -515,12 +515,12 @@ test('write_file validator: rejects /etc directory', async t => {
 
 	t.false(result.valid);
 	if (!result.valid) {
-		// Path validation rejects absolute paths before system directory check
+		// Containment rejects the absolute path before the system-directory guard runs.
 		t.true(result.error.includes('Invalid file path'));
 	}
 });
 
-test('write_file validator: rejects /sys directory', async t => {
+test('write_file validator: rejects /sys: an absolute path outside the project', async t => {
 	if (!writeFileTool.validator) {
 		t.fail('Validator not defined');
 		return;
@@ -533,12 +533,12 @@ test('write_file validator: rejects /sys directory', async t => {
 
 	t.false(result.valid);
 	if (!result.valid) {
-		// Path validation rejects absolute paths before system directory check
+		// Containment rejects the absolute path before the system-directory guard runs.
 		t.true(result.error.includes('Invalid file path'));
 	}
 });
 
-test('write_file validator: rejects /proc directory', async t => {
+test('write_file validator: rejects /proc: an absolute path outside the project', async t => {
 	if (!writeFileTool.validator) {
 		t.fail('Validator not defined');
 		return;
@@ -551,12 +551,12 @@ test('write_file validator: rejects /proc directory', async t => {
 
 	t.false(result.valid);
 	if (!result.valid) {
-		// Path validation rejects absolute paths before system directory check
+		// Containment rejects the absolute path before the system-directory guard runs.
 		t.true(result.error.includes('Invalid file path'));
 	}
 });
 
-test('write_file validator: rejects /dev directory', async t => {
+test('write_file validator: rejects /dev: an absolute path outside the project', async t => {
 	if (!writeFileTool.validator) {
 		t.fail('Validator not defined');
 		return;
@@ -569,12 +569,12 @@ test('write_file validator: rejects /dev directory', async t => {
 
 	t.false(result.valid);
 	if (!result.valid) {
-		// Path validation rejects absolute paths before system directory check
+		// Containment rejects the absolute path before the system-directory guard runs.
 		t.true(result.error.includes('Invalid file path'));
 	}
 });
 
-test('write_file validator: rejects /boot directory', async t => {
+test('write_file validator: rejects /boot: an absolute path outside the project', async t => {
 	if (!writeFileTool.validator) {
 		t.fail('Validator not defined');
 		return;
@@ -587,12 +587,12 @@ test('write_file validator: rejects /boot directory', async t => {
 
 	t.false(result.valid);
 	if (!result.valid) {
-		// Path validation rejects absolute paths before system directory check
+		// Containment rejects the absolute path before the system-directory guard runs.
 		t.true(result.error.includes('Invalid file path'));
 	}
 });
 
-test('write_file validator: rejects Windows system directories', async t => {
+test('write_file validator: rejects Windows absolute paths outside the project', async t => {
 	if (!writeFileTool.validator) {
 		t.fail('Validator not defined');
 		return;
