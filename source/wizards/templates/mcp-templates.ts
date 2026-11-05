@@ -451,6 +451,42 @@ export const MCP_TEMPLATES: McpTemplate[] = [
 		transportType: 'http',
 	},
 	{
+		id: 'sofya',
+		name: 'Sofya',
+		description:
+			'Sofya web search, page fetch, content extraction and cited research MCP server',
+		command: '',
+		fields: [
+			{
+				name: 'serverName',
+				prompt: 'Server name',
+				required: true,
+				default: 'sofya',
+			},
+			{
+				name: 'apiKey',
+				prompt: 'Sofya API key (from https://sofya.co/dashboard)',
+				required: true,
+				sensitive: true,
+				validator: headerTokenValidator,
+			},
+		],
+		buildConfig: answers => ({
+			name: answers.serverName || 'sofya',
+			transport: 'http' as McpTransportType,
+			url: 'https://sofya.co/mcp',
+			description: 'Sofya web search, fetch, extract and research MCP server',
+			tags: ['sofya', 'search', 'web', 'research', 'http'],
+			timeout: TIMEOUT_MCP_DEFAULT_MS,
+			headers: {Authorization: `Bearer ${(answers.apiKey || '').trim()}`},
+			// Stamp the origin template so the edit flow can resolve this
+			// server back here even under a custom name.
+			templateId: 'sofya',
+		}),
+		category: 'remote',
+		transportType: 'http',
+	},
+	{
 		id: 'gitlab',
 		name: 'GitLab',
 		description: 'GitLab MCP server for repository management and operations',
