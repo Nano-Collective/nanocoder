@@ -49,6 +49,7 @@ const MODE_EXCLUDED_TOOLS: Record<DevelopmentMode, string[]> = {
 		'string_replace',
 		'diff_edit',
 		'file_op',
+		'syntax_island_edit',
 		'lsp_format_document',
 		'execute_bash',
 		'browser',

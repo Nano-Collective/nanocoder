@@ -18,6 +18,7 @@ const FILE_WRITING_TOOLS: ReadonlySet<string> = new Set([
 	'write_file',
 	'string_replace',
 	'diff_edit',
+	'syntax_island_edit',
 ]);
 
 export function getConfiguredFormatters(): FormatterDefinition[] {
