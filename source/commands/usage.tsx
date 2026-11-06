@@ -101,6 +101,8 @@ export const usageCommand: Command = {
 				nativeToolsDisabled,
 				config.systemPrompt,
 				model,
+				undefined,
+				toolManager,
 			);
 			if (nativeToolsDisabled) {
 				const fallbackToolFormat: 'xml' | 'json' =

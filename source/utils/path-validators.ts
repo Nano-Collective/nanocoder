@@ -2,6 +2,7 @@ import {extname} from 'node:path';
 import {getProjectRoot, getSessionCwd} from '@/services/session-cwd';
 import {isDerivedContentPath} from '@/utils/derived-content';
 import {formatError} from '@/utils/error-formatter';
+import type {CachedFile} from '@/utils/file-cache';
 import {isValidFilePath, resolveFilePath} from '@/utils/path-validation';
 
 type ValidationResult = {valid: true} | {valid: false; error: string};
@@ -45,6 +46,24 @@ export function validateEditableFormat(path: string): ValidationResult {
 	return {
 		valid: false,
 		error: `⚒ Cannot write to "${path}": reading a ${extname(path).toLowerCase()} file returns a markdown transcript, not the document itself, so writing an edit back would replace the document with that transcript. Do not retry — edit the document with a tool that understands its format, or save the new text to a separate file.`,
+	};
+}
+
+/**
+ * Rejects a file whose bytes are not valid UTF-8, such as Latin-1, Windows-1252
+ * or Shift-JIS. The edit tools work on the file decoded as UTF-8 and write the
+ * whole file back as UTF-8, so every byte that didn't decode would be written
+ * back as U+FFFD, on lines the edit never touched as well.
+ */
+export function validateEditableEncoding(
+	path: string,
+	file: Pick<CachedFile, 'notUtf8'>,
+): ValidationResult {
+	if (!file.notUtf8) return {valid: true};
+
+	return {
+		valid: false,
+		error: `⚒ Cannot edit "${path}": it is not valid UTF-8, so it probably uses a legacy encoding such as Latin-1, Windows-1252 or Shift-JIS. The edit would be written back as UTF-8, which would replace every byte that isn't valid UTF-8 with U+FFFD (�), including on lines the edit doesn't touch. Do not retry — tell the user, who can convert the file to UTF-8 first (for example with iconv) or make the change in an editor that keeps the file's encoding.`,
 	};
 }
 

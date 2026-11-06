@@ -14,6 +14,7 @@ import test from 'ava';
 import type {AgentSideConnection} from '@agentclientprotocol/sdk';
 import {AcpSession} from '@/acp/acp-session';
 import {runAcpConversation} from '@/acp/acp-conversation';
+import {MCPClient} from '@/mcp/mcp-client';
 import {
 	getSessionCwd,
 	resetSessionCwd,
@@ -1342,6 +1343,87 @@ test('runAcpConversation - marks tool as failed when it reports isError without 
 	t.is(finalUpdates.length, 1);
 	t.is(finalUpdates[0].update.status, 'failed');
 	t.is(finalUpdates[0].update.rawOutput, 'EXIT_CODE: 3\n');
+});
+
+test('runAcpConversation - an MCP result with isError is failed, a clean one completed, and the model gets the same text', async t => {
+	const {conn, updates} = createMockConn();
+	const session = createMockSession(conn, {devMode: 'yolo'});
+	const toolManager = {
+		...createMockToolManager(),
+		hasTool: () => true,
+		getToolEntry: () => ({approval: false}),
+	};
+
+	// Handlers come from a real MCPClient over a stubbed SDK client. A server
+	// reports a failed call as `isError: true` with the reason in its content.
+	const mcp = new MCPClient() as any;
+	const mcpTool = (name: string) => ({
+		name,
+		description: name,
+		serverName: 'srv',
+		inputSchema: {type: 'object', properties: {}},
+	});
+	mcp.serverTools.set('srv', [mcpTool('failing_tool'), mcpTool('safe_tool')]);
+	mcp.clients.set('srv', {
+		callTool: async ({name}: {name: string}) =>
+			name === 'failing_tool'
+				? {isError: true, content: [{type: 'text', text: 'boom failure'}]}
+				: {content: [{type: 'text', text: 'all good'}]},
+	});
+	setToolRegistryGetter(() =>
+		Object.fromEntries(
+			mcp.getToolEntries().map((e: any) => [e.name, e.handler]),
+		),
+	);
+
+	let callCount = 0;
+	const client = {
+		chat: async () => {
+			callCount++;
+			if (callCount === 1) {
+				return {
+					choices: [
+						{
+							message: {
+								content: '',
+								tool_calls: [
+									createMockToolCall('failing_tool', {}, 'call-bad'),
+									createMockToolCall('safe_tool', {}, 'call-good'),
+								],
+							},
+						},
+					],
+				};
+			}
+
+			return {choices: [{message: {content: 'done'}}]};
+		},
+	} as unknown as LLMClient;
+
+	await runAcpConversation({
+		session,
+		client,
+		toolManager: toolManager as any,
+		conn,
+		nonInteractiveAlwaysAllow: [],
+	});
+
+	const finalStatus = (id: string) =>
+		updates.find(
+			(u: any) =>
+				u.update.sessionUpdate === 'tool_call_update' &&
+				u.update.toolCallId === id &&
+				(u.update.status === 'failed' || u.update.status === 'completed'),
+		)?.update.status;
+	t.is(finalStatus('call-bad'), 'failed');
+	t.is(finalStatus('call-good'), 'completed');
+
+	// The flag is for the client; the model still gets the server's own text.
+	const toolText = (name: string) =>
+		session.messages.find((m: any) => m.role === 'tool' && m.name === name)
+			?.content;
+	t.is(toolText('failing_tool'), 'boom failure');
+	t.is(toolText('safe_tool'), 'all good');
 });
 
 // ============================================================================
