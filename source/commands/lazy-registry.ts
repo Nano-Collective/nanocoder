@@ -226,6 +226,12 @@ export const lazyCommands: LazyCommand[] = [
 		load: () => import('@/commands/tune').then(m => m.tuneCommand),
 	},
 	{
+		name: 'macros',
+		description:
+			'Inspect repeated read-only tool sequences (/macros, /macros clear)',
+		load: () => import('@/commands/macros').then(m => m.macrosCommand),
+	},
+	{
 		name: 'schedule',
 		description:
 			'List cron-triggered skills (single-file frontmatter + bundle skill.yaml). Read-only - edit the source file to change.',
@@ -271,5 +277,11 @@ export const lazyCommands: LazyCommand[] = [
 		name: 'voice',
 		description: 'Toggle voice mode and configure voice settings',
 		load: () => import('@/commands/voice').then(m => m.voiceCommand),
+	},
+	{
+		name: 'firewall',
+		description:
+			'Configure negative-space mutation firewall. Subcommands: status, mode <strict|lenient|disabled>, toggle <any|tests|exports>, protect <pattern>, unprotect <pattern>, reset',
+		load: () => import('@/commands/firewall').then(m => m.firewallCommand),
 	},
 ];

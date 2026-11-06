@@ -24,7 +24,12 @@ import {
 } from '@/components/vscode-extension-prompt';
 import WelcomeMessage from '@/components/welcome-message';
 import {getAppConfig, loadDefaultMode} from '@/config/index';
-import {getPrivacyPreference, updateSelectedTheme} from '@/config/preferences';
+import {
+	getPreferencesVersion,
+	getPrivacyPreference,
+	subscribeToPreferences,
+	updateSelectedTheme,
+} from '@/config/preferences';
 import {getThemeColors} from '@/config/themes';
 import {PrivacyContext} from '@/context/privacy-context';
 import {useChatHandler} from '@/hooks/chat-handler';
@@ -91,6 +96,15 @@ export default function App({
 
 	// Use extracted hooks
 	const appState = useAppState(initialDevelopmentMode);
+	const preferencesVersion = React.useSyncExternalStore(
+		subscribeToPreferences,
+		getPreferencesVersion,
+	);
+
+	const privacyEnabled = React.useMemo(() => {
+		void preferencesVersion;
+		return getPrivacyPreference();
+	}, [preferencesVersion]);
 	const userMessageQueue = useUserMessageQueue();
 	const {exit} = useApp();
 	const {isTrusted, handleConfirmTrust, isTrustLoading, isTrustedError} =
@@ -347,7 +361,7 @@ export default function App({
 		tune: appState.tune,
 		subagentsReady: appState.subagentsReady,
 		privacySessionMapRef: appState.privacySessionMapRef,
-		privacyEnabled: getPrivacyPreference(),
+		privacyEnabled,
 		ensureCurrentSessionId: appState.ensureCurrentSessionId,
 	});
 
@@ -567,8 +581,6 @@ export default function App({
 		setShowAllSessions: appState.setShowAllSessions,
 		setCurrentSessionId: appState.setCurrentSessionId,
 		setSessionName: handleRenameSession,
-		setCurrentProvider: appState.setCurrentProvider,
-		setCurrentModel: appState.setCurrentModel,
 		setLiveTaskList: appState.setLiveTaskList,
 		setPlanReviewState: appState.setPlanReviewState,
 		setArchitectReviewState: appState.setArchitectReviewState,
@@ -591,12 +603,14 @@ export default function App({
 	});
 
 	// Apply a session resolved by cli.tsx from --continue/--resume <id> (or open
-	// the picker for a bare --resume), once on mount. Reuses the exact same
-	// applySession path as the in-app /resume command so messages, provider,
-	// model, sessionId, key-generator reseed, and scrollback replay all stay
-	// in sync. Guarded by a ref (not an empty dep array) so a re-render before
-	// the effect fires — e.g. from the vscode-prompt-dispatcher bind above —
-	// can't apply it twice.
+	// the picker for a bare --resume), once on mount. Reuses the same
+	// applySession path as the in-app /resume command so messages, sessionId,
+	// key-generator reseed, and scrollback replay all stay in sync. Provider
+	// and model come from init, which creates the client after this runs; the
+	// in-app /resume switches the client itself (resumeSession), which would
+	// race init here. Guarded by a ref (not an empty dep array) so a re-render
+	// before the effect fires — e.g. from the vscode-prompt-dispatcher bind
+	// above — can't apply it twice.
 	const startupSessionAppliedRef = React.useRef(false);
 	// biome-ignore lint/correctness/useExhaustiveDependencies: startup-only effect, guarded by the ref above
 	React.useEffect(() => {
@@ -823,7 +837,7 @@ export default function App({
 			<TitleShapeContext.Provider value={titleShapeContextValue}>
 				<PrivacyContext.Provider
 					value={{
-						privacyEnabled: getPrivacyPreference(),
+						privacyEnabled,
 						privacySessionMapRef: appState.privacySessionMapRef,
 					}}
 				>

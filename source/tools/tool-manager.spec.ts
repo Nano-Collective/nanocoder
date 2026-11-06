@@ -1507,3 +1507,195 @@ test('forSession - a session MCP tool never replaces a tool that already exists'
 	await session.disconnectMCP();
 	t.true(base.hasTool('read_file'));
 });
+
+// ============================================================================
+// On-demand MCP Tool Discovery & Dynamic Hydration
+// ============================================================================
+
+test('mcp discovery keeps deferred tools in catalog until dynamically loaded', async t => {
+	const manager = new ToolManager();
+
+	// Mock MCPClient with 10 tools
+	const mockTools: any[] = [];
+	for (let i = 1; i <= 10; i++) {
+		mockTools.push({
+			name: `mcp_tool_${i}`,
+			tool: {
+				description: `MCP Tool ${i}`,
+				parameters: {type: 'object'},
+				execute: async () => `result ${i}`,
+			},
+			handler: async () => `result ${i}`,
+			approval: 'always',
+		});
+	}
+
+	(manager as any).createMCPClient = async () => ({
+		connectToServers: async () => [{serverName: 'test-server', success: true, toolCount: 10}],
+		getToolEntries: () => mockTools,
+		getToolMapping: () => new Map(mockTools.map(t => [t.name, {serverName: 'test-server', originalName: t.name, readOnly: false}])),
+		getNativeToolsRegistry: () => Object.fromEntries(mockTools.map(t => [t.name, t.tool])),
+		onHealthChange: () => () => {},
+		disconnect: async () => {},
+	});
+
+	// Auto-discovery activates because tool count >= 8
+	await manager.initializeMCP([{name: 'test-server', transport: 'stdio'}]);
+
+	const catalog = manager.getMcpCatalog();
+	t.is(catalog.size, 10);
+	t.is(catalog.getUnloaded().length, 10);
+	t.false(manager.hasTool('mcp_tool_1'));
+
+	// Hydrate on-demand
+	t.true(manager.loadMcpTool('mcp_tool_1'));
+	t.true(manager.hasTool('mcp_tool_1'));
+	t.is(catalog.getUnloaded().length, 9);
+	t.is(catalog.getLoaded().length, 1);
+
+	// Direct execution fallback auto-hydrates
+	t.false(manager.hasTool('mcp_tool_2'));
+	const handler = manager.getToolHandler('mcp_tool_2');
+	t.truthy(handler);
+	t.true(manager.hasTool('mcp_tool_2'));
+	t.is(catalog.getLoaded().length, 2);
+
+	// Disconnect clears catalog
+	await manager.disconnectMCP();
+	t.is(catalog.size, 0);
+	t.false(manager.hasTool('load_tool_schema'));
+});
+
+test('forSession - ending a session does not wipe the shared base catalog', async t => {
+	const base = new ToolManager();
+	const mockTools = [
+		{
+			name: 'base_tool_1',
+			tool: {description: 'Base Tool 1', parameters: {type: 'object'}, execute: async () => '1'},
+			handler: async () => '1',
+			approval: 'always',
+		},
+		{
+			name: 'base_tool_2',
+			tool: {description: 'Base Tool 2', parameters: {type: 'object'}, execute: async () => '2'},
+			handler: async () => '2',
+			approval: 'always',
+		},
+	];
+
+	(base as any).createMCPClient = async () => ({
+		connectToServers: async () => [{serverName: 'shared-server', success: true, toolCount: 2}],
+		getToolEntries: () => mockTools,
+		getToolMapping: () => new Map(mockTools.map(t => [t.name, {serverName: 'shared-server', originalName: t.name, readOnly: false}])),
+		getNativeToolsRegistry: () => Object.fromEntries(mockTools.map(t => [t.name, t.tool])),
+		onHealthChange: () => () => {},
+		disconnect: async () => {},
+	});
+
+	await base.initializeMCP([{name: 'shared-server', transport: 'stdio'}], undefined, undefined, {mcpDiscovery: 'always'});
+
+	t.is(base.getMcpCatalog().size, 2);
+	t.true(base.hasTool('load_tool_schema'), 'discovery registered load_tool_schema on base');
+
+	const session = base.forSession();
+	t.is(session.getMcpCatalog().size, 2, 'session inherits parent catalog entries');
+
+	await session.disconnectMCP();
+
+	t.is(base.getMcpCatalog().size, 2, 'base catalog must retain all entries after session disconnect');
+	t.true(base.getMcpCatalog().has('base_tool_1'));
+	t.true(base.getMcpCatalog().has('base_tool_2'));
+});
+
+test('ToolManager - load_tool_schema is not registered when no MCP servers or discovery disabled', async t => {
+	const manager = new ToolManager();
+	t.false(manager.hasTool('load_tool_schema'), 'must not register load_tool_schema by default');
+});
+
+test('ToolManager on-demand discovery obeys tuneConfig.mcpDiscovery === "always" for < 8 tools', async t => {
+	const manager = new ToolManager();
+	const mockTools: any[] = [];
+	for (let i = 1; i <= 3; i++) {
+		mockTools.push({
+			name: `mcp_tool_${i}`,
+			tool: {
+				description: `MCP Tool ${i}`,
+				parameters: {type: 'object'},
+				execute: async () => `result ${i}`,
+			},
+			handler: async () => `result ${i}`,
+			approval: 'always',
+		});
+	}
+
+	(manager as any).createMCPClient = async () => ({
+		connectToServers: async () => [{serverName: 'test-server', success: true, toolCount: 3}],
+		getToolEntries: () => mockTools,
+		getToolMapping: () => new Map(mockTools.map(t => [t.name, {serverName: 'test-server', originalName: t.name, readOnly: false}])),
+		getNativeToolsRegistry: () => Object.fromEntries(mockTools.map(t => [t.name, t.tool])),
+		onHealthChange: () => () => {},
+		disconnect: async () => {},
+	});
+
+	await manager.initializeMCP(
+		[{name: 'test-server', transport: 'stdio'}],
+		undefined,
+		undefined,
+		{mcpDiscovery: 'always'},
+	);
+
+	const catalog = manager.getMcpCatalog();
+	t.is(catalog.size, 3);
+	t.is(catalog.getUnloaded().length, 3);
+	t.false(manager.hasTool('mcp_tool_1'));
+
+	// Hydrate on-demand
+	t.true(manager.loadMcpTool('mcp_tool_1'));
+	t.true(manager.hasTool('mcp_tool_1'));
+	t.is(catalog.getUnloaded().length, 2);
+
+	await manager.disconnectMCP();
+});
+
+test('ToolManager on-demand discovery obeys tuneConfig.mcpDiscovery === "disabled" for >= 8 tools', async t => {
+	const manager = new ToolManager();
+	const mockTools: any[] = [];
+	for (let i = 1; i <= 10; i++) {
+		mockTools.push({
+			name: `mcp_tool_${i}`,
+			tool: {
+				description: `MCP Tool ${i}`,
+				parameters: {type: 'object'},
+				execute: async () => `result ${i}`,
+			},
+			handler: async () => `result ${i}`,
+			approval: 'always',
+		});
+	}
+
+	(manager as any).createMCPClient = async () => ({
+		connectToServers: async () => [{serverName: 'test-server', success: true, toolCount: 10}],
+		getToolEntries: () => mockTools,
+		getToolMapping: () => new Map(mockTools.map(t => [t.name, {serverName: 'test-server', originalName: t.name, readOnly: false}])),
+		getNativeToolsRegistry: () => Object.fromEntries(mockTools.map(t => [t.name, t.tool])),
+		onHealthChange: () => () => {},
+		disconnect: async () => {},
+	});
+
+	await manager.initializeMCP(
+		[{name: 'test-server', transport: 'stdio'}],
+		undefined,
+		undefined,
+		{mcpDiscovery: 'disabled'},
+	);
+
+	const catalog = manager.getMcpCatalog();
+	// When disabled, all tools are registered immediately and loaded into active tools
+	t.is(catalog.size, 10);
+	t.is(catalog.getUnloaded().length, 0);
+	t.is(catalog.getLoaded().length, 10);
+	t.true(manager.hasTool('mcp_tool_1'));
+	t.true(manager.hasTool('mcp_tool_10'));
+
+	await manager.disconnectMCP();
+});

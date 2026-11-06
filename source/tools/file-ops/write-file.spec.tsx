@@ -1,4 +1,4 @@
-import {mkdtemp, readFile, rm, writeFile} from 'node:fs/promises';
+import {chmod, mkdtemp, readFile, rm, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
@@ -10,6 +10,10 @@ import {resolveToolApproval} from '../approval-policy.js';
 import {ThemeContext} from '../../hooks/useTheme.js';
 import {writeFileTool} from './write-file.js';
 import {clearReadTracker, markFileSeen} from '../../utils/read-tracker.js';
+import {
+	resetFirewallConfig,
+	setFirewallConfig,
+} from '../../firewall/mutation-firewall.js';
 
 // ============================================================================
 // Test Helpers
@@ -39,6 +43,7 @@ test.beforeEach(async () => {
 	testDir = await mkdtemp(join(tmpdir(), 'write-file-test-'));
 	// Read-before-overwrite state is process-global; reset between serial tests.
 	clearReadTracker();
+	resetFirewallConfig();
 });
 
 // Clean up temporary directory after each test
@@ -1137,6 +1142,67 @@ test('write_file formatter: does not render description when omitted', async t =
 
 	t.notRegex(output, /Description:/);
 	t.regex(output, /Path:\s*config\.json/);
+});
+
+test('write_file: throws when mutation firewall blocks test deletion', async t => {
+	setFirewallConfig({mode: 'strict', enabled: true});
+	const filePath = await createTestFile(
+		'service.spec.ts',
+		"test('preserves behavior', () => {});\ntest('old test', () => {});\n",
+	);
+
+	await t.throwsAsync(
+		async () => {
+			await executeWriteFile({
+				path: filePath,
+				content: "test('preserves behavior', () => {});\n",
+			});
+		},
+		{message: /\[Mutation Firewall\] Blocked mutation/},
+	);
+
+	const content = await readFile(filePath, 'utf-8');
+	t.true(content.includes('old test'));
+});
+
+test('write_file: fails closed when existing file cannot be read and leaves disk untouched', async t => {
+	if (process.platform === 'win32') {
+		t.pass('Skipped on Windows: POSIX chmod 000 is not supported');
+		return;
+	}
+
+	setFirewallConfig({mode: 'strict', enabled: true});
+	const filePath = await createTestFile('protected.txt', 'secret original content');
+	await chmod(filePath, 0o000);
+
+	try {
+		await t.throwsAsync(
+			async () => {
+				await executeWriteFile({
+					path: filePath,
+					content: 'overwritten content',
+				});
+			},
+			{message: /\[Mutation Firewall\] Blocked mutation: failed to read existing file/},
+		);
+	} finally {
+		await chmod(filePath, 0o644);
+	}
+
+	const content = await readFile(filePath, 'utf-8');
+	t.is(content, 'secret original content');
+});
+
+test('write_file: genuinely new file write succeeds without read failure', async t => {
+	const filePath = join(testDir, 'new-file.txt');
+	const output = await executeWriteFile({
+		path: filePath,
+		content: 'brand new content',
+	});
+
+	t.truthy(output);
+	const content = await readFile(filePath, 'utf-8');
+	t.is(content, 'brand new content');
 });
 
 

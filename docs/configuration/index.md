@@ -309,7 +309,7 @@ Caps on how many times the conversation loop auto-retries a failing pattern with
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `maxRepeatedToolCalls` | number | `3` | Pause threshold for consecutive identical tool calls (minimum 2). The check fires when the same call (or set of calls) is emitted for the Nth consecutive turn, before that call runs - so the default of 3 executes the repeated call twice and pauses on the third emission. In an interactive session you are asked whether to continue - useful when the repetition is legitimate, such as polling a long-running job - or stop. `--plain` and other non-interactive runs stop with a clear error. Calls to unknown tools count toward the streak too, so a model stuck on a nonexistent tool hits the same cap. |
+| `maxRepeatedToolCalls` | number | `3` | Pause threshold for consecutive identical tool calls (minimum 2). The check fires when the same call (or set of calls) is emitted for the Nth consecutive turn, before that call runs - so the default of 3 executes the repeated call twice and pauses on the third emission. In an interactive session you are asked whether to continue - useful when the repetition is legitimate, such as polling a long-running job - or stop. `--plain` and other non-interactive runs stop with a clear error. Calls to unknown tools, and calls whose arguments aren't valid JSON (for example cut off at the output-token limit), count toward the streak too, so a model stuck on a bad call hits the same cap. Such calls aren't run. |
 | `maxEmptyTurns` | number | `2` | Consecutive empty assistant turns that are auto-nudged before giving up (minimum 0). The interactive loop additionally compacts the context and retries once before stopping; the `--plain` runtime stops directly after the nudges. |
 | `maxMalformedRetries` | number | `2` | Malformed self-correction retries allowed for text-parsed tool calls before the loop gives up (minimum 0). Applies to the XML fallback path in both runtimes. The interactive loop also parses tool-call text from native-tool models that emit it instead of native calls, so the cap covers that case there; the `--plain` runtime only parses text on the XML fallback path. |
 | `maxTruncatedTurns` | number | `2` | Consecutive turns cut off at the provider's output-token limit that are asked to continue before the loop accepts what it has (minimum 0). `--plain` runtime only. A truncated turn carries no tool calls, so without this the loop reads the fragment as a finished answer - see the note below. |
@@ -561,6 +561,40 @@ Brave's free tier includes 2,000 queries per month. [Get an API key here](https:
 ```
 
 The `apiKey` field supports environment variable substitution (`$VAR`, `${VAR}`, `${VAR:-default}`), so you can keep the actual key in your environment rather than in the config file.
+
+### Mutation Firewall
+
+The negative-space mutation firewall mechanically validates proposed file modifications before disk writes occur (`write_file`, `string_replace`, `diff_edit`). It prevents accidental destruction of tests, unintended stripping of exported API contracts, and injection of loose `any` types.
+
+The firewall is opt-in and disabled by default (`mode: "disabled"`).
+
+```json
+{
+  "nanocoder": {
+    "firewall": {
+      "enabled": true,
+      "mode": "strict",
+      "protectedPatterns": ["package.json", "pnpm-lock.yaml", ".github/workflows/**"],
+      "blockAnyTypes": true,
+      "protectTestCases": true,
+      "preserveExportSignatures": true
+    }
+  }
+}
+```
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `enabled` | boolean | `false` | Whether the firewall is active. |
+| `mode` | `"disabled"` \| `"lenient"` \| `"strict"` | `"disabled"` | In `strict` mode, violating mutations are blocked with an error. In `lenient` mode, warnings are logged while allowing writes. |
+| `protectedPatterns` | string[] | `[]` | Gitignore-style glob patterns for paths forbidden from modification by tools. |
+| `blockAnyTypes` | boolean | `true` | Prohibits introducing explicit `any` type annotations into previously typed code. |
+| `protectTestCases` | boolean | `true` | Prevents deletion of existing unit test cases in test files. |
+| `preserveExportSignatures` | boolean | `true` | Prevents breaking or removing exported functions, interfaces, types, and classes. |
+
+Use `/firewall` in chat to inspect or modify session overrides at runtime.
+
+> **Operational boundaries:** The mutation firewall validates mutation tools (`write_file`, `string_replace`, `diff_edit`). Non-content file operations via `file_op` (`delete_file`, `move_file`) and automatic document formatting via `lsp_format_document` bypass the mutation firewall.
 
 ## Ignoring Files
 
