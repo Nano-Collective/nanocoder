@@ -206,6 +206,18 @@ export function isPathInside(target: string, root: string): boolean {
 }
 
 /**
+ * True when a `path.relative(root, target)` result leaves `root`.
+ *
+ * `relative.startsWith('..')` is wrong here: a normal file named `..env`
+ * also starts with `..`, so checkpoints and the timeline would skip it
+ * (#1936). Only the bare parent segment (`..`) or a parent prefix
+ * (`../…`) escapes.
+ */
+export function relativeEscapesRoot(relative: string): boolean {
+	return relative === '..' || relative.startsWith('..' + path.sep);
+}
+
+/**
  * Symlink-aware containment: is `target` really inside `root` once every
  * symlink on both sides is resolved?
  *

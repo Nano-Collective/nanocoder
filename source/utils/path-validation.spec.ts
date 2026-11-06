@@ -12,6 +12,7 @@ import {
 	isPathInside,
 	isRealPathInside,
 	isValidFilePath,
+	relativeEscapesRoot,
 	resolveFilePath,
 } from './path-validation';
 
@@ -298,6 +299,14 @@ test.serial('resolveFilePath: containmentRoot lets a deep session cwd still reac
 	} finally {
 		rmSync(root, {recursive: true, force: true});
 	}
+});
+
+test('relativeEscapesRoot: parent segments escape; ..env does not', t => {
+	t.true(relativeEscapesRoot('..'));
+	t.true(relativeEscapesRoot(join('..', 'a')));
+	t.false(relativeEscapesRoot('..env'));
+	t.false(relativeEscapesRoot('src/app.ts'));
+	t.false(relativeEscapesRoot(''));
 });
 
 // Test suite for isPathInside / isRealPathInside

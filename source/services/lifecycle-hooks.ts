@@ -10,6 +10,7 @@ import {getKeyGeneratorSessionId} from '@/session/key-generator';
 import type {HookDefinition, HookEvent} from '@/types/config';
 import type {ToolCall} from '@/types/core';
 import {logError} from '@/utils/message-queue';
+import {relativeEscapesRoot} from '@/utils/path-validation';
 import {signalProcessTree} from '@/utils/process-tree';
 import {truncateToolResult} from '@/utils/truncate-tool-result';
 
@@ -293,7 +294,7 @@ function matchesAnyPath(patterns: string[], filePath: string): boolean {
 		const relativePath = relative(getProjectRoot(), filePath);
 		// Skip a path that escapes the root: `../` segments cannot usefully be
 		// matched against project-relative globs.
-		if (relativePath && !relativePath.startsWith('..')) {
+		if (relativePath && !relativeEscapesRoot(relativePath)) {
 			candidates.push(relativePath);
 		}
 	}

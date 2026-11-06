@@ -314,6 +314,15 @@ test.serial('TimelineManager toRelativePath rejects paths outside the workspace'
 	t.is(manager.toRelativePath('/etc/passwd'), null);
 });
 
+test.serial(
+	'TimelineManager toRelativePath keeps a file named ..env (#1936)',
+	t => {
+		const manager = new TimelineManager('/tmp/workspace', 'session-dotdot');
+		t.is(manager.toRelativePath('/tmp/workspace/..env'), '..env');
+		t.is(manager.toRelativePath('..env'), '..env');
+	},
+);
+
 test.serial('TimelineManager excludes its own data from capture', t => {
 	const manager = new TimelineManager('/tmp/workspace', 'session-self');
 	// Otherwise each opaque capture would snapshot the previous one: user

@@ -962,6 +962,30 @@ test.serial(
 );
 
 test.serial(
+	'captureFiles keeps a workspace file whose name starts with .. (#1936)',
+	async t => {
+		const tempDir = await createTempDir();
+		try {
+			const dotDotEnv = path.join(tempDir, '..env');
+			const okFile = path.join(tempDir, 'ok.txt');
+			await fs.writeFile(dotDotEnv, 'secret=1', 'utf-8');
+			await fs.writeFile(okFile, 'ok', 'utf-8');
+			const service = new FileSnapshotService(tempDir);
+
+			const {snapshots, skipped} = await service.captureFiles([
+				dotDotEnv,
+				okFile,
+			]);
+
+			t.deepEqual([...snapshots.keys()].sort(), ['..env', 'ok.txt']);
+			t.is(skipped.length, 0);
+		} finally {
+			await cleanupTempDir(tempDir);
+		}
+	},
+);
+
+test.serial(
 	'getModifiedFiles skips nanocoder runtime state but keeps .nanocoder user content',
 	async t => {
 		const tempDir = await createTempDir();
