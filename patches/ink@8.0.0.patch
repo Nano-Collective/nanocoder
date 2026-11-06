@@ -1,0 +1,17 @@
+diff --git a/build/ink.js b/build/ink.js
+index 30019a073d38ed05dca08f6221af187c429a536b..5254bf400cda5f4d7fdc95c0a0f6ccd8fd5cfd35 100644
+--- a/build/ink.js
++++ b/build/ink.js
+@@ -1,6 +1,11 @@
+ import process from 'node:process';
+ import React from 'react';
+-import { throttle } from 'es-toolkit/compat';
++// Patched by nanocoder: import the deep subpath directly so Node doesn't
++// resolve the entire `es-toolkit/compat` barrel file (which eagerly requires
++// ~1244 individual utility modules just to re-export them). Using the
++// subpath loads only `throttle`, dropping the CLI startup module count by
++// ~1240.
++import throttle from 'es-toolkit/compat/throttle';
+ import ansiEscapes from 'ansi-escapes';
+ import isInCi from 'is-in-ci';
+ import autoBind from 'auto-bind';
