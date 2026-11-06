@@ -175,6 +175,28 @@ test.serial(
 );
 
 test.serial(
+	'validatePathPair allows a system-directory source (read) under a filesystem root',
+	t => {
+		if (process.platform === 'win32') {
+			t.pass('POSIX-only system directories');
+			return;
+		}
+
+		const fsRoot = parsePath(process.cwd()).root;
+		setProjectRoot(fsRoot);
+		setSessionCwd(fsRoot);
+		try {
+			// Source is only read during copy/move, so the system-directory
+			// write guard must not reject it. Destination is a normal path.
+			const result = validatePathPair('/etc/passwd', '/tmp/copied.txt');
+			t.deepEqual(result, {valid: true});
+		} finally {
+			resetSessionCwd();
+		}
+	},
+);
+
+test.serial(
 	'validatePath rejects a Windows system directory when the project root is a drive root',
 	t => {
 		if (process.platform !== 'win32') {

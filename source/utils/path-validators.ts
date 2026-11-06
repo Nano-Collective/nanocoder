@@ -106,7 +106,10 @@ export function validateEditableEncoding(
 }
 
 /**
- * Validates a source + destination path pair: checks format and project boundary for both.
+ * Validates a source + destination path pair (copy/move): checks format and
+ * project boundary for both. The system-directory write guard applies only to
+ * the destination — the source is read, not written, so copying from a system
+ * directory is not blocked by this guard (containment still applies).
  */
 export function validatePathPair(
 	source: string,
@@ -128,23 +131,15 @@ export function validatePathPair(
 		};
 	}
 
-	let resolvedSource: string;
 	let resolvedDestination: string;
 	try {
-		resolvedSource = resolveFilePath(source, cwd, root);
+		resolveFilePath(source, cwd, root);
 		resolvedDestination = resolveFilePath(destination, cwd, root);
 	} catch (error) {
 		const errorMessage = formatError(error);
 		return {
 			valid: false,
 			error: `⚒ Path validation failed: ${errorMessage}`,
-		};
-	}
-
-	if (isInSystemDirectory(resolvedSource)) {
-		return {
-			valid: false,
-			error: `⚒ Cannot write files to system directory: "${source}"`,
 		};
 	}
 
