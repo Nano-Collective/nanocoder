@@ -30,7 +30,7 @@ function expandEnvVar(str: string): string {
 			}
 
 			if (defaultValue !== undefined) {
-				return defaultValue;
+				return expandEnvVar(defaultValue);
 			}
 
 			logError(

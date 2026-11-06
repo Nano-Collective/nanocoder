@@ -290,9 +290,16 @@ test('substituteEnvVars - handles consecutive $$ escapes', t => {
 	t.is(result, '$$');
 });
 
+test('substituteEnvVars - supports $$ escape in default values', t => {
+	const result = substituteEnvVars('${MISSING_VAR:-pa$$WORD}');
+	t.is(result, 'pa$WORD');
+});
+
 test('substituteEnvVars - prevents prototype pollution with __proto__ key', t => {
 	const malicious = JSON.parse('{"__proto__": {"polluted": true}, "valid": "data"}');
 	const result = substituteEnvVars(malicious) as Record<string, unknown>;
 	t.is(result.valid, 'data');
-	t.is(({} as Record<string, unknown>).polluted, undefined);
+	t.is(result.polluted, undefined, 'the result must not inherit the injected key');
+	t.is(Object.getPrototypeOf(result), Object.prototype, 'the prototype must be intact');
+	t.false(Object.hasOwn(result, '__proto__'), 'the hostile key must not become an own property');
 });
