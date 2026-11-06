@@ -107,6 +107,42 @@ test('a payload containing the start marker text does not nest', t => {
 	t.deepEqual(pastes, [`a${START}b`]);
 });
 
+test('a payload containing the end marker text is not truncated', t => {
+	const extract = createPasteExtractor();
+	const {clean, pastes} = extract(
+		`${START}line1
+line2-embeds-${END}-marker
+line3${END}`,
+	);
+	t.is(clean, '', 'nothing may leak into the keypress parser');
+	t.deepEqual(pastes, [`line1
+line2-embeds-${END}-marker
+line3`]);
+});
+
+test('an embedded end marker does not swallow the paste that follows', t => {
+	const extract = createPasteExtractor();
+	const {clean, pastes} = extract(
+		`${START}one-${END}-still one${END}${START}two${END}`,
+	);
+	t.is(clean, '');
+	t.deepEqual(pastes, [`one-${END}-still one`, 'two']);
+});
+
+// Known limitation: with the real end marker in a later chunk, an embedded
+// one at the chunk's edge is indistinguishable from the terminator, so the
+// paste still ends there. DECSET 2004 gives the payload no escaping to tell
+// the two apart.
+test('an embedded end marker at a chunk edge still ends the paste', t => {
+	const extract = createPasteExtractor();
+	const first = extract(`${START}line1-${END}`);
+	t.deepEqual(first.pastes, ['line1-']);
+	t.is(first.clean, '');
+	const second = extract(`-rest${END}`);
+	t.is(second.clean, `-rest${END}`, 'the rest leaks as ordinary input');
+	t.deepEqual(second.pastes, []);
+});
+
 test('keeps state independent per extractor', t => {
 	const a = createPasteExtractor();
 	const b = createPasteExtractor();
