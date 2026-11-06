@@ -11,8 +11,7 @@ export function sanitizeCatalogText(text: string): string {
 	if (!text) return '';
 	let sanitized = text
 		.replace(/[\r\n\t]+/g, ' ')
-		.replace(/<[^>]*>/g, '')
-		.replace(/[`*_#~]/g, '')
+		.replace(/[<>`*_#~]/g, '')
 		.replace(/\s{2,}/g, ' ')
 		.trim();
 	if (sanitized.length > 120) {
