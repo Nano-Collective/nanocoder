@@ -28,10 +28,6 @@ const SECRET_PATTERNS: readonly RegExp[] = [
 const SECRET_ENV_NAME = /TOKEN|KEY|SECRET|PASSWORD/i;
 const MIN_ENV_SECRET_LENGTH = 8;
 
-function escapeRegExp(value: string): string {
-	return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
 /**
  * Values of env vars whose names look secret, longest first so a value that
  * contains another is masked whole.
@@ -52,7 +48,7 @@ export function redactSecrets(
 ): string {
 	let result = text;
 	for (const value of secretEnvValues(env)) {
-		result = result.replace(new RegExp(escapeRegExp(value), 'g'), REDACTED);
+		result = result.replaceAll(value, REDACTED);
 	}
 	for (const pattern of SECRET_PATTERNS) {
 		result = result.replace(pattern, REDACTED);

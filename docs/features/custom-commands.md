@@ -31,7 +31,7 @@ mkdir -p .nanocoder/commands
 ```markdown
 ---
 description: Review code for issues and improvements
-aliases: [review]
+aliases: [rc]
 parameters: [filename]
 ---
 
@@ -56,13 +56,15 @@ Personal commands that follow you across projects go in the `commands/` folder o
 ```
 .nanocoder/commands/
   test.md              -> /test
-  review.md            -> /review
+  review-pr.md         -> /review-pr
   refactor/
     dry.md             -> /refactor:dry
     solid.md           -> /refactor:solid
 ```
 
 Subdirectories create namespaced commands using colon syntax (e.g., `refactor/dry.md` becomes `/refactor:dry`).
+
+Custom commands are checked before built-in commands, so a custom command or alias with the same name as a built-in (for example `review.md` or `aliases: [review]`) silently replaces the built-in `/review`. Pick names that do not collide with the [built-in commands](commands.md).
 
 ## Frontmatter Reference
 
@@ -110,11 +112,11 @@ Arrays can be written in either JSON-style or YAML dash syntax:
 
 ```yaml
 # JSON-style (inline)
-aliases: [review, code-review]
+aliases: [rc, code-review]
 
 # YAML dash syntax (multiline)
 aliases:
-  - review
+  - rc
   - code-review
 ```
 
@@ -131,7 +133,7 @@ Review {{filename}} using {{style}} conventions.
 ```
 
 ```bash
-/review src/app.ts airbnb
+/review-code src/app.ts airbnb
 # Becomes: Review src/app.ts using airbnb conventions.
 ```
 

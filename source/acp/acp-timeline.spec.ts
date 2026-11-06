@@ -153,8 +153,10 @@ const mockSession = (options: {
 }) => {
 	const scans = [...options.scans];
 	const captured: Array<Map<string, string | null>> = [];
+	const inputs: Array<{turnId?: string}> = [];
 	return {
 		captured,
+		inputs,
 		session: {
 			timeline: {
 				getModifiedFiles: () => {
@@ -176,8 +178,12 @@ const mockSession = (options: {
 					}
 					return map;
 				},
-				capture: async (input: {files: Map<string, string | null>}) => {
+				capture: async (input: {
+					files: Map<string, string | null>;
+					turnId?: string;
+				}) => {
 					captured.push(input.files);
+					inputs.push({turnId: input.turnId});
 					return metaFor();
 				},
 			},
@@ -292,4 +298,31 @@ test('opaque capture - a truncated after scan abandons the checkpoint', async t 
 	);
 	t.is(await finishTimelineCapture(session, context), null);
 	t.is(captured.length, 0);
+});
+
+test('capture - the turn id reaches the checkpoint, for direct and opaque tools', async t => {
+	const direct = mockSession({scans: []});
+	await beginTimelineCapture(
+		direct.session,
+		mockToolManager(),
+		toolCall('write_file', {path: 'a.ts'}),
+		[{role: 'assistant', content: ''}],
+		'write_file',
+		'turn-1',
+	);
+	t.deepEqual(direct.inputs, [{turnId: 'turn-1'}]);
+
+	const opaque = mockSession({
+		scans: [{files: []}, {files: ['brand-new.ts']}],
+	});
+	const context = await beginTimelineCapture(
+		opaque.session,
+		mockToolManager(),
+		toolCall('execute_bash', {command: 'touch brand-new.ts'}),
+		[{role: 'assistant', content: ''}],
+		'execute_bash',
+		'turn-2',
+	);
+	await finishTimelineCapture(opaque.session, context);
+	t.deepEqual(opaque.inputs, [{turnId: 'turn-2'}]);
 });

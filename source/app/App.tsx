@@ -505,6 +505,24 @@ export default function App({
 		}
 	}, [vscodeServer.actualPort, appState]);
 
+	// Setup session autosave
+	const {isSaving, renameSession} = useSessionAutosave({
+		messages: appState.messages,
+		currentProvider: appState.currentProvider,
+		currentModel: appState.currentModel,
+		currentSessionId: appState.currentSessionId,
+		setCurrentSessionId: appState.setCurrentSessionId,
+	});
+
+	const {setSessionName} = appState;
+	const handleRenameSession = React.useCallback(
+		(name: string) => {
+			setSessionName(name);
+			renameSession(name);
+		},
+		[setSessionName, renameSession],
+	);
+
 	// Setup app handlers
 	const appHandlers = useAppHandlers({
 		messages: appState.messages,
@@ -548,7 +566,7 @@ export default function App({
 		setCheckpointLoadData: appState.setCheckpointLoadData,
 		setShowAllSessions: appState.setShowAllSessions,
 		setCurrentSessionId: appState.setCurrentSessionId,
-		setSessionName: appState.setSessionName,
+		setSessionName: handleRenameSession,
 		setCurrentProvider: appState.setCurrentProvider,
 		setCurrentModel: appState.setCurrentModel,
 		setLiveTaskList: appState.setLiveTaskList,
@@ -621,15 +639,6 @@ export default function App({
 		setDevelopmentMode: appState.setDevelopmentMode,
 		handleMessageSubmit: appHandlers.handleMessageSubmit,
 		developmentMode: initialDevelopmentMode,
-	});
-
-	// Setup session autosave
-	const {isSaving} = useSessionAutosave({
-		messages: appState.messages,
-		currentProvider: appState.currentProvider,
-		currentModel: appState.currentModel,
-		currentSessionId: appState.currentSessionId,
-		setCurrentSessionId: appState.setCurrentSessionId,
 	});
 
 	// Memoize static components. We pin the run-mode header to the

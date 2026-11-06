@@ -39,14 +39,20 @@ test('a project .env cannot set trust, config dir, or MCP variables', t => {
 		t.is(env.OTHER, 'x');
 		t.deepEqual(result.ignored, [...PROTECTED_ENV_KEYS]);
 		t.true(PROTECTED_ENV_KEYS.includes('NANOCODER_TRUST_DIRECTORY'));
+		// Where the trust record is read from and written to.
+		t.true(PROTECTED_ENV_KEYS.includes('XDG_CONFIG_HOME'));
+		t.true(PROTECTED_ENV_KEYS.includes('APPDATA'));
 	});
 });
 
 test('protected keys from the real environment are kept', t => {
 	withDotenv('NANOCODER_TRUST_DIRECTORY=0\n', dir => {
 		const env: NodeJS.ProcessEnv = {NANOCODER_TRUST_DIRECTORY: '1'};
-		loadProjectDotenv(dir, env);
+		const result = loadProjectDotenv(dir, env);
 		t.is(env.NANOCODER_TRUST_DIRECTORY, '1');
+		// The shell's value wins anyway, so nothing was dropped and the user
+		// should not be warned about the .env.
+		t.deepEqual(result.ignored, []);
 	});
 });
 
