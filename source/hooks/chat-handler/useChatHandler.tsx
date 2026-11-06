@@ -168,6 +168,7 @@ export function useChatHandler({
 			getAppConfig().systemPrompt,
 			currentModel,
 			getProfessionalTone(),
+			toolManager,
 		);
 
 		const tools = toolsDisabled
