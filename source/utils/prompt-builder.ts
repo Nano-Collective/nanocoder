@@ -272,6 +272,14 @@ export function buildSystemPrompt(
 		sections.push(loadSection('task-management'));
 	}
 
+	// Persistent DAG instructions. Plan mode creates graphs with write_plan;
+	// execution modes update them with update_plan_node and read them with
+	// get_plan. Gate on either so slim profiles that only expose one still get
+	// the guidance.
+	if (toolSet.has('write_plan') || toolSet.has('get_plan')) {
+		sections.push(loadSection('plan-graph'));
+	}
+
 	if (toolSet.has('write_walkthrough') && developmentMode !== 'plan') {
 		sections.push(loadSection('walkthrough'));
 	}

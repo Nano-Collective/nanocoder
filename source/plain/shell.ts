@@ -32,6 +32,7 @@ import {
 	writeLine,
 	writeStatus,
 } from '@/plain/writer';
+import {appendActivePlanContext} from '@/plans/context';
 import {loadPlugins} from '@/plugins/host';
 import {
 	beginSessionStartHooks,
@@ -71,6 +72,7 @@ export interface RunPlainShellDeps {
 	loadPreferences: typeof loadPreferences;
 	savePreferences: typeof savePreferences;
 	appendRelevantProjectContextWithCount: typeof appendRelevantProjectContextWithCount;
+	appendActivePlanContext: typeof appendActivePlanContext;
 	artifacts: Pick<
 		ArtifactManager,
 		| 'cleanupStaleEphemeralSessions'
@@ -86,6 +88,7 @@ const defaultDeps: RunPlainShellDeps = {
 	loadPreferences,
 	savePreferences,
 	appendRelevantProjectContextWithCount,
+	appendActivePlanContext,
 	artifacts: artifactManager,
 };
 
@@ -217,7 +220,9 @@ export async function runPlainShell(
 		new SemanticMemoryManager(),
 		resolveProjectContextPreferences(deps.loadPreferences()),
 	);
-	const systemContent = projectContext.systemPrompt;
+	const systemContent = await deps.appendActivePlanContext(
+		projectContext.systemPrompt,
+	);
 	if (projectContext.memoryCount > 0) {
 		writeStatus(
 			`Recalling ${projectContext.memoryCount} project memor${projectContext.memoryCount === 1 ? 'y' : 'ies'}...`,

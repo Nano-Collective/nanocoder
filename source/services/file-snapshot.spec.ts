@@ -974,6 +974,11 @@ test.serial(
 				'{}',
 			);
 			await createTestFile(tempDir, '.nanocoder/timeline/index.json', '{}');
+			await createTestFile(
+				tempDir,
+				'.nanocoder/plans/auth-refactor.jsonl',
+				'{"type":"header"}\n',
+			);
 			await createTestFile(tempDir, '.nanocoder/daemon.log', 'log');
 			await createTestFile(tempDir, '.nanocoder/commands/check.md', 'cmd');
 
