@@ -15,6 +15,7 @@ const AUTO_COMMIT_TOOLS: ReadonlySet<string> = new Set([
 	'write_file',
 	'string_replace',
 	'diff_edit',
+	'syntax_island_edit',
 ]);
 
 /** Lines of diff handed to the model. One file's edit rarely needs more. */
