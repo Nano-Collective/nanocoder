@@ -11,7 +11,15 @@ import {xdgCache} from 'xdg-basedir';
 import {CACHE_MODELS_EXPIRATION_MS} from '@/constants';
 import {formatError} from '@/utils/error-formatter';
 import {getLogger} from '@/utils/logging';
-import type {CachedModelsData, ModelsDevDatabase} from './models-types.js';
+import {isModelsIndex} from './models-index.js';
+import type {CachedModelsData, ModelsIndex} from './models-types.js';
+
+/**
+ * Bump when the shape of the cached data changes. Cache files written with any
+ * other version (including the pre-index format, which has none) are ignored
+ * and refetched rather than misread.
+ */
+export const MODELS_CACHE_VERSION = 2;
 
 const DEFAULT_CACHE_DIR =
 	process.platform === 'darwin'
@@ -51,6 +59,19 @@ export async function readCache(): Promise<CachedModelsData | null> {
 			return null;
 		}
 
+		// Ignore caches written in another format (e.g. the full database that
+		// older versions stored) and let the caller fetch a fresh copy
+		if (
+			cached.version !== MODELS_CACHE_VERSION ||
+			!isModelsIndex(cached.data)
+		) {
+			getLogger().debug(
+				{version: cached.version},
+				'Ignoring models cache with unsupported format',
+			);
+			return null;
+		}
+
 		return cached;
 	} catch (error) {
 		// If there's any error reading cache, return null to trigger fresh fetch
@@ -60,18 +81,19 @@ export async function readCache(): Promise<CachedModelsData | null> {
 	}
 }
 
-export async function writeCache(data: ModelsDevDatabase): Promise<void> {
+export async function writeCache(data: ModelsIndex): Promise<void> {
 	try {
 		await ensureCacheDir();
 
 		const cached: CachedModelsData = {
+			version: MODELS_CACHE_VERSION,
 			data,
 			fetchedAt: Date.now(),
 			expiresAt: Date.now() + CACHE_MODELS_EXPIRATION_MS,
 		};
 
 		const cachePath = getCacheFilePath();
-		await writeFile(cachePath, JSON.stringify(cached, null, 2), 'utf-8');
+		await writeFile(cachePath, JSON.stringify(cached), 'utf-8');
 	} catch (error) {
 		const logger = getLogger();
 		logger.warn({error: formatError(error)}, 'Failed to write models cache');
