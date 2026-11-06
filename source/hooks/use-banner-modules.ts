@@ -10,7 +10,7 @@ export type BannerModules = {
 let loadedBannerModules: BannerModules | null = null;
 let bannerModulesPromise: Promise<BannerModules> | undefined;
 
-function loadBannerModules(): Promise<BannerModules> {
+export function loadBannerModules(): Promise<BannerModules> {
 	if (loadedBannerModules) return Promise.resolve(loadedBannerModules);
 
 	if (!bannerModulesPromise) {
