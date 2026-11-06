@@ -81,6 +81,27 @@ function providerDetails(context?: APIErrorContext): string {
 
 	return `${provider} at ${url}`;
 }
+
+const GENERIC_UNAUTHORIZED_MESSAGE =
+	'Authentication failed: Invalid API key or credentials';
+
+const OPENLLM_UNAUTHORIZED_MESSAGE =
+	'OpenLLM is not signed in. Run `openllm login` in a terminal, then try again.';
+
+/**
+ * The OpenLLM daemon answers 401 with an `openllm login` hint when it has no
+ * saved sign-in. Detected by content so it works for any provider name.
+ */
+export function openLLMSignInHint(details?: string): string | undefined {
+	return details?.toLowerCase().includes('openllm login')
+		? OPENLLM_UNAUTHORIZED_MESSAGE
+		: undefined;
+}
+
+function formatUnauthorizedMessage(details?: string): string {
+	return openLLMSignInHint(details) ?? GENERIC_UNAUTHORIZED_MESSAGE;
+}
+
 /**
  * Last-resort serializer for errors whose .message ended up as the literal
  * string "[object Object]" because something upstream stringified an object
@@ -180,7 +201,9 @@ function parseAPIErrorInternal(
 					return `Bad request: ${cleanMessage}${url}${body}`;
 				}
 				case 401:
-					return 'Authentication failed: Invalid API key or credentials';
+					return formatUnauthorizedMessage(
+						[cleanMessage, rootError.responseBody].filter(Boolean).join('\n'),
+					);
 				case 403:
 					return 'Access forbidden: Check your API permissions';
 				case 404:
@@ -235,7 +258,7 @@ function parseAPIErrorInternal(
 			case '400':
 				return `Bad request: ${cleanMessage}`;
 			case '401':
-				return 'Authentication failed: Invalid API key or credentials';
+				return formatUnauthorizedMessage(cleanMessage);
 			case '403':
 				return 'Access forbidden: Check your API permissions';
 			case '404':

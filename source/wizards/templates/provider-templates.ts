@@ -445,6 +445,13 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 		baseUrl: 'https://global.api-route.com/v1',
 		modelDefault: 'gpt-6.1-sol',
 	}),
+	localServerTemplate({
+		id: 'openllm',
+		name: 'OpenLLM',
+		defaultProviderName: 'OpenLLM',
+		defaultBaseUrl: 'http://127.0.0.1:8787/v1',
+		modelDefault: 'ultra',
+	}),
 	apiKeyTemplate({
 		id: 'futureinfra',
 		name: 'FutureInfra',

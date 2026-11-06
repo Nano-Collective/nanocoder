@@ -1,6 +1,6 @@
 import test from 'ava';
 import {APICallError, NoOutputGeneratedError} from 'ai';
-import {parseAPIError} from './error-parser.js';
+import {openLLMSignInHint, parseAPIError} from './error-parser.js';
 
 test('parseAPIError handles non-Error values', t => {
 	const result = parseAPIError('not an error');
@@ -38,6 +38,50 @@ test('parseAPIError handles APICallError with 401 status', t => {
 
 	const result = parseAPIError(error);
 	t.is(result, 'Authentication failed: Invalid API key or credentials');
+});
+
+test('parseAPIError surfaces OpenLLM unsigned-in 401 hint', t => {
+	const openllmBody = JSON.stringify({
+		error: {
+			message:
+				'[openllm] API key required.\nRun `openllm login` in a terminal to sign in through the browser (https://www.openllm.sh/sign-in), or `openllm login --api-key` to paste a key.\n',
+			type: 'auth_error',
+		},
+	});
+	const error = new APICallError({
+		message: 'Unauthorized',
+		url: 'http://127.0.0.1:8787/v1/chat/completions',
+		requestBodyValues: {},
+		statusCode: 401,
+		responseBody: openllmBody,
+		responseHeaders: {},
+		isRetryable: false,
+	});
+
+	const result = parseAPIError(error);
+	t.is(
+		result,
+		'OpenLLM is not signed in. Run `openllm login` in a terminal, then try again.',
+	);
+});
+
+test('openLLMSignInHint ignores 401 bodies without the openllm hint', t => {
+	t.is(openLLMSignInHint('Invalid API key'), undefined);
+});
+
+test('parseAPIError keeps generic 401 for status-in-message errors', t => {
+	const result = parseAPIError(new Error('401 Unauthorized: bad credentials'));
+	t.is(result, 'Authentication failed: Invalid API key or credentials');
+});
+
+test('parseAPIError surfaces OpenLLM hint from status-in-message 401', t => {
+	const result = parseAPIError(
+		new Error('401 Unauthorized: Run `openllm login` to continue'),
+	);
+	t.is(
+		result,
+		'OpenLLM is not signed in. Run `openllm login` in a terminal, then try again.',
+	);
 });
 
 test('parseAPIError handles APICallError with 404 status', t => {

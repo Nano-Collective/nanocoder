@@ -9,6 +9,7 @@
  * - google: GET {baseUrl}/models with x-goog-api-key header
  */
 
+import {openLLMSignInHint} from '@/ai-sdk-client/error-handling/error-parser.js';
 import {formatError} from '@/utils/error-formatter';
 
 export interface FetchedModel {
@@ -100,6 +101,14 @@ export async function fetchModels(
 			});
 
 			if (!response.ok) {
+				const signInHint =
+					response.status === 401
+						? openLLMSignInHint(await response.text().catch(() => ''))
+						: undefined;
+				if (signInHint) {
+					return {success: false, models: [], error: signInHint};
+				}
+
 				return {
 					success: false,
 					models: [],
