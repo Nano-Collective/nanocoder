@@ -57,6 +57,7 @@ export class ChatWebviewProvider
 
 	private readonly _settingsManager: SettingsManager;
 	private _isResumingSession = false;
+	private _targetResumingSessionId?: string;
 	private _resumedSessionUpdates: any[] = [];
 	private _resumedArtifactsMeta: unknown = undefined;
 
@@ -69,9 +70,22 @@ export class ChatWebviewProvider
 		this._settingsManager = new SettingsManager(this._outputChannel);
 		// Listen for session updates from ACP
 		this._acpClient.onSessionUpdate = (update: any) => {
+			const updateSessionId = update?.sessionId ?? update?.update?.sessionId;
+			const currentSessionId = this._acpClient.sessionId;
+			const isCurrentSessionUpdate = Boolean(
+				updateSessionId && currentSessionId && updateSessionId === currentSessionId
+			);
+
+			// Only buffer replay updates matching the target resumed session.
+			// Live updates from the current active/streaming session must stream through.
 			if (this._isResumingSession) {
-				this._resumedSessionUpdates.push(update);
-				return;
+				const isTargetReplay = Boolean(
+					this._targetResumingSessionId && updateSessionId === this._targetResumingSessionId
+				);
+				if (isTargetReplay || (!updateSessionId && !isCurrentSessionUpdate)) {
+					this._resumedSessionUpdates.push(update);
+					return;
+				}
 			}
 			this._planReview.observeSessionUpdate(update);
 			if (this._artifacts.observeSessionUpdate(update)) {
@@ -561,8 +575,15 @@ export class ChatWebviewProvider
 
 		this._outputChannel.appendLine(`[Webview] User resumed session: ${sessionId}`);
 		this._isResumingSession = true;
+		this._targetResumingSessionId = sessionId;
 		this._resumedSessionUpdates = [];
 		this._resumedArtifactsMeta = undefined;
+
+		this.postMessage({
+			type: 'sessionResuming',
+			isResuming: true,
+			sessionId,
+		});
 
 		try {
 			const success = await this._acpClient.resumeSession(sessionId);
@@ -599,8 +620,14 @@ export class ChatWebviewProvider
 			}
 		} finally {
 			this._isResumingSession = false;
+			this._targetResumingSessionId = undefined;
 			this._resumedSessionUpdates = [];
 			this._resumedArtifactsMeta = undefined;
+			this.postMessage({
+				type: 'sessionResuming',
+				isResuming: false,
+				sessionId,
+			});
 		}
 	}
 

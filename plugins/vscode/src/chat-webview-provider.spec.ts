@@ -433,3 +433,52 @@ test('ChatWebviewProvider - resumeSession guards against concurrent overlapping 
 	const firstResult = await firstResume;
 	t.true(firstResult, 'first resume request must complete successfully');
 });
+
+test('ChatWebviewProvider - resumeSession posts sessionResuming true and false', async (t) => {
+	const {provider, acpClient, getPostedMessages, resetPostedMessages} = makeStubs();
+	(acpClient as any).resumeSession = async () => true;
+
+	resetPostedMessages();
+	const result = await provider.resumeSession('session-test');
+
+	t.true(result);
+	const messages = getPostedMessages();
+	const resumingMessages = messages.filter(m => m.type === 'sessionResuming');
+	t.is(resumingMessages.length, 2);
+	t.true(resumingMessages[0].isResuming);
+	t.is(resumingMessages[0].sessionId, 'session-test');
+	t.false(resumingMessages[1].isResuming);
+	t.is(resumingMessages[1].sessionId, 'session-test');
+});
+
+test('ChatWebviewProvider - live updates from current session are streamed immediately and not buffered into replay', async (t) => {
+	const {provider, acpClient, getPostedMessages, resetPostedMessages} = makeStubs();
+	(acpClient as any).sessionId = 'current-active-session';
+	(acpClient as any).resumeSession = async () => {
+		// Live chunk from active streaming session:
+		(acpClient as any).onSessionUpdate?.({
+			sessionId: 'current-active-session',
+			sessionUpdate: 'agent_message_chunk',
+			content: {text: 'live streaming chunk'},
+		});
+		// Replay chunk for target session:
+		(acpClient as any).onSessionUpdate?.({
+			sessionId: 'target-resume-session',
+			sessionUpdate: 'agent_message_chunk',
+			content: {text: 'replayed chunk'},
+		});
+		return false; // Resume fails
+	};
+
+	resetPostedMessages();
+	const result = await provider.resumeSession('target-resume-session');
+
+	t.false(result);
+	const messages = getPostedMessages();
+	// Live chunk must have been posted to webview immediately, not dropped on failure
+	const liveUpdate = messages.find(m => m.type === 'acpUpdate' && m.update.content.text === 'live streaming chunk');
+	t.truthy(liveUpdate, 'live chunk from current session must not be dropped on resume failure');
+	// Replay chunk must NOT have been posted since resume failed
+	const replayUpdate = messages.find(m => m.type === 'acpUpdate' && m.update.content.text === 'replayed chunk');
+	t.falsy(replayUpdate, 'replayed chunk from target session must not be posted on failed resume');
+});

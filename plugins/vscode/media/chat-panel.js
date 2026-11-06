@@ -2363,6 +2363,9 @@
 				if (loader) loader.remove();
 				scrollToBottom(true);
 				break;
+			case 'sessionResuming':
+				setProcessing(message.isResuming);
+				break;
 			case 'acpUpdate':
 				handleAcpUpdate(message.update);
 				break;
