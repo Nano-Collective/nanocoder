@@ -1,3 +1,4 @@
+import {isUtf8} from 'node:buffer';
 import fs from 'node:fs/promises';
 import {
 	CACHE_FILE_TTL_MS,
@@ -30,6 +31,14 @@ export interface CachedFile {
 	 * content back must refuse these paths: the transcript is not the document.
 	 */
 	derived: boolean;
+	/**
+	 * True when the bytes on disk are not valid UTF-8 (a legacy encoding such as
+	 * Latin-1 or Shift-JIS), so decoding replaced some of them with U+FFFD and
+	 * `content` no longer matches the file. Writing `content` back would change
+	 * those bytes even where an edit didn't touch them, so callers that write it
+	 * back must refuse these files. Always false for derived content.
+	 */
+	notUtf8: boolean;
 }
 
 function countLines(content: string): number {
@@ -42,11 +51,15 @@ function countLines(content: string): number {
 	return count;
 }
 
+// The flags have no defaults: every entry, cached or not, must say whether its
+// content is derived and whether the bytes were valid UTF-8, or the edit tools'
+// guards would let a non-UTF-8 file through.
 function toCachedFile(
 	content: string,
-	mtime = 0,
-	cachedAt = Date.now(),
-	derived = false,
+	mtime: number,
+	cachedAt: number,
+	derived: boolean,
+	notUtf8: boolean,
 ): CachedFile {
 	return {
 		content,
@@ -57,6 +70,7 @@ function toCachedFile(
 		mtime,
 		cachedAt,
 		derived,
+		notUtf8,
 	};
 }
 
@@ -213,6 +227,7 @@ async function readAndCacheFile(
 	}
 
 	let content: string;
+	let notUtf8 = false;
 	const derived = isDerivedContentPath(absPath);
 
 	if (derived) {
@@ -231,6 +246,7 @@ async function readAndCacheFile(
 		}
 	} else {
 		content = buffer.toString('utf-8');
+		notUtf8 = !isUtf8(buffer);
 	}
 
 	const sizeBytes = Buffer.byteLength(content, 'utf-8');
@@ -244,7 +260,7 @@ async function readAndCacheFile(
 		sizeBytes > MAX_FILE_CACHE_BYTES
 	) {
 		deleteFromCache(absPath);
-		return toCachedFile(content, mtimeAfter, now, derived);
+		return toCachedFile(content, mtimeAfter, now, derived, notUtf8);
 	}
 
 	// If replacing an existing entry for this path, remove old size first
@@ -259,7 +275,7 @@ async function readAndCacheFile(
 		evictLRU();
 	}
 
-	const cachedFile = toCachedFile(content, mtimeAfter, now, derived);
+	const cachedFile = toCachedFile(content, mtimeAfter, now, derived, notUtf8);
 	cache.set(absPath, {
 		data: cachedFile,
 		accessOrder: ++accessCounter,
