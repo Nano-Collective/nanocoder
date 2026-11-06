@@ -521,6 +521,13 @@ test('sofya template: is listed as a remote HTTP template', t => {
 	t.is(template!.transportType, 'http');
 });
 
+test('sofya template: saved config uses the picker description', t => {
+	const template = MCP_TEMPLATES.find(t => t.id === 'sofya');
+	t.truthy(template);
+	const config = template!.buildConfig({serverName: 'sofya', apiKey: 'k'});
+	t.is(config.description, template!.description);
+});
+
 test('sofya template: builds HTTP config with a bearer token', t => {
 	const template = MCP_TEMPLATES.find(t => t.id === 'sofya');
 	t.truthy(template);

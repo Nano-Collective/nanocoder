@@ -165,6 +165,9 @@ function headerTokenValidator(value: string): string | undefined {
 
 const GITHUB_REMOTE_URL = 'https://api.githubcopilot.com/mcp/';
 
+const SOFYA_DESCRIPTION =
+	'Sofya web search, fetch, extract and research MCP server';
+
 export const MCP_TEMPLATES: McpTemplate[] = [
 	{
 		id: 'filesystem',
@@ -453,8 +456,7 @@ export const MCP_TEMPLATES: McpTemplate[] = [
 	{
 		id: 'sofya',
 		name: 'Sofya',
-		description:
-			'Sofya web search, page fetch, content extraction and cited research MCP server',
+		description: SOFYA_DESCRIPTION,
 		command: '',
 		fields: [
 			{
@@ -475,7 +477,7 @@ export const MCP_TEMPLATES: McpTemplate[] = [
 			name: answers.serverName || 'sofya',
 			transport: 'http' as McpTransportType,
 			url: 'https://sofya.co/mcp',
-			description: 'Sofya web search, fetch, extract and research MCP server',
+			description: SOFYA_DESCRIPTION,
 			tags: ['sofya', 'search', 'web', 'research', 'http'],
 			timeout: TIMEOUT_MCP_DEFAULT_MS,
 			headers: {Authorization: `Bearer ${(answers.apiKey || '').trim()}`},
