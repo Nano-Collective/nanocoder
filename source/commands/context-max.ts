@@ -8,11 +8,11 @@ import {createStubCommand} from '@/commands/create-stub-command';
  * command handler interface.
  *
  * Usage:
- * /context-max <number>   - Set context limit (supports k/K suffix, e.g. 128k)
+ * /context-max <number>   - Set context limit (supports k/K and m/M suffixes; fractions require a suffix)
  * /context-max             - Show current effective context limit
  * /context-max --reset     - Clear session override
  */
 export const contextMaxCommand = createStubCommand(
 	'context-max',
-	'Set maximum context length for this session (e.g. /context-max 128k, --reset to clear)',
+	'Set maximum context length for this session (e.g. /context-max 128k or /context-max 1m, --reset to clear)',
 );

@@ -53,7 +53,7 @@ nanocoder -h
 | `--no-plain` | | Force the Ink runtime even in CI and non-TTY environments |
 | `--json` | | Emit a single structured JSON object to `stdout` on completion instead of streamed text. Requires `run` and always uses the plain runtime, even in a terminal; incompatible with `--no-plain`, `--acp`, `--vscode` and `review` |
 | `--output-format` | | Set the `stdout` format, `text` or `json`. Synonym for `--json` |
-| `--context-max` | | Set maximum context length in tokens (supports k/K suffix, e.g. `128k`) |
+| `--context-max` | | Set maximum context length in tokens (supports integer values, k/K, and m/M suffixes; fractions require a suffix) |
 | `--mode` | | Start in a specific [development mode](../features/development-modes.md) - `normal`, `auto-accept`, `yolo`, `plan`, or `architect`. Defaults to `auto-accept` for `run` mode; interactive sessions use `defaultMode` from `agents.config.json` if set, otherwise `normal`. |
 | `--trust-directory` | | Skip the first-run directory trust prompt for this run only. Valid with `run`, `nanocoder daemon start`, `nanocoder verify` and `--acp`; ignored (with a warning) in interactive mode. The trust is ephemeral - `trustedDirectories` in your preferences file is not modified. See [Directory trust](#directory-trust) |
 | `--alt-screen` | | Start in fullscreen mode: a fixed-height layout on the alternate screen buffer with in-app scrolling (enabled by default). |
@@ -188,6 +188,7 @@ nanocoder --provider openrouter --model google/gemini-3.1-flash run "analyze src
 
 # With context limit override (useful when model context isn't auto-detected)
 nanocoder --provider ollama --model llama3.1 --context-max 128k run "analyze src/app.ts"
+nanocoder --provider ollama --model llama3.1 --context-max 1m run "analyze src/app.ts"
 
 # Flags after 'run' command
 nanocoder run --provider openrouter --model anthropic/claude-sonnet-4-20250514 "refactor database module"

@@ -106,6 +106,7 @@ for (const {flag, value, property, expected} of flags) {
 				t.is(props.nonInteractivePrompt, 'analyze code');
 			});
 		}
+
 	}
 
 	test(`${flag}: similarly prefixed unknown flag stays in prompt`, t => {
@@ -141,6 +142,19 @@ for (const {flag, value, property, expected} of flags) {
 		}
 	});
 }
+
+test('--context-max: malformed value is rejected with accepted syntax', t => {
+	const result = runCli(['run', 'analyze', '--context-max', '1.5']);
+	t.not(result.status, 0);
+	t.regex(result.stderr, /8192, 128k, or 1m/);
+});
+
+test('--context-max: m suffix is accepted', t => {
+	const result = runCli(['run', 'analyze', '--context-max', '1m']);
+	t.is(result.status, 0, result.stderr);
+	const props = JSON.parse(result.stdout);
+	t.is(props.contextLimit, 1000000);
+});
 
 test('fused values preserve additional equals signs for existing validation', t => {
 	for (const flag of ['--model', '--provider', '--context-max']) {

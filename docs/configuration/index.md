@@ -103,7 +103,7 @@ Keep API keys out of version control using environment variables. Variables are 
 | Variable | Description |
 |----------|-------------|
 | `NANOCODER_CONFIG_DIR` | Override the user-level configuration directory. Project-level `agents.config.json` and `.mcp.json` still apply; the project-level `nanocoder-preferences.json` is skipped for top-level preferences |
-| `NANOCODER_CONTEXT_LIMIT` | Default context limit (tokens) used when no session override or provider `contextWindow`/`contextWindows` applies. It is checked before models.dev metadata (see [Context Limit Resolution Order](#context-limit-resolution-order)). Enables auto-compact and `/usage` to work correctly. The `--context-max` CLI flag takes priority |
+| `NANOCODER_CONTEXT_LIMIT` | Default context limit (tokens) used when no session override or provider `contextWindow`/`contextWindows` applies. Accepts integer values and k/K or m/M suffixes; fractions require a suffix. It is checked before models.dev metadata (see [Context Limit Resolution Order](#context-limit-resolution-order)). Enables auto-compact and `/usage` to work correctly. The `--context-max` CLI flag takes priority |
 | `NANOCODER_DATA_DIR` | Override the application data directory for internal data like usage statistics |
 | `NANOCODER_INSTALL_METHOD` | Override installation detection (`npm`, `homebrew`, `nix`, `unknown`) |
 | `NANOCODER_NO_UPDATE_CHECK` | Set to `1` to disable automatic update checks at startup. Running `/update` still performs an explicit check |
@@ -160,6 +160,8 @@ Nanocoder resolves a model's context limit in this order:
 6. Built-in Ollama fallback map
 
 This lets you persist context limits for unknown or local models without reapplying `/context-max` every session.
+
+Context-limit overrides accept positive integers, or decimal values with a `k`/`K` (1,000) or `m`/`M` (1,000,000) suffix. Values are rounded to whole tokens and must remain within JavaScript's safe integer range so token counts are not silently changed.
 
 ## Application Settings
 

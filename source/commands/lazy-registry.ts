@@ -59,7 +59,7 @@ export const lazyCommands: LazyCommand[] = [
 	{
 		name: 'context-max',
 		description:
-			'Set maximum context length for this session (e.g. /context-max 128k, --reset to clear)',
+			'Set maximum context length for this session (e.g. /context-max 128k or /context-max 1m, --reset to clear)',
 		load: () => import('@/commands/context-max').then(m => m.contextMaxCommand),
 	},
 	{
