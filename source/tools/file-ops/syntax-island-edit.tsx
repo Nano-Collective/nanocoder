@@ -32,6 +32,12 @@ export interface SyntaxIslandEditArgs {
 	description?: string;
 }
 
+const JS_TS_EXTENSION_PATTERN = /\.(?:[jt]sx?|[mc][jt]s)$/i;
+
+export function isSupportedIslandLanguage(filePath: string): boolean {
+	return JS_TS_EXTENSION_PATTERN.test(filePath);
+}
+
 const executeSyntaxIslandEdit = async (
 	args: SyntaxIslandEditArgs,
 ): Promise<string> => {
@@ -40,6 +46,12 @@ const executeSyntaxIslandEdit = async (
 	if (!symbol || !symbol.trim()) {
 		throw new Error(
 			'symbol cannot be empty. Provide the function, method, or component name.',
+		);
+	}
+
+	if (!isSupportedIslandLanguage(path)) {
+		throw new Error(
+			`syntax_island_edit only supports JavaScript and TypeScript files (.js, .jsx, .ts, .tsx, .mjs, .cjs, .mts, .cts). Use string_replace or diff_edit for other file types.`,
 		);
 	}
 
@@ -220,6 +232,13 @@ const syntaxIslandEditValidator = async (
 
 	const pathResult = validatePath(path);
 	if (!pathResult.valid) return pathResult;
+
+	if (!isSupportedIslandLanguage(path)) {
+		return {
+			valid: false,
+			error: `syntax_island_edit only supports JavaScript and TypeScript files (.js, .jsx, .ts, .tsx, .mjs, .cjs, .mts, .cts). Use string_replace or diff_edit for other file types.`,
+		};
+	}
 
 	const formatResult = validateEditableFormat(path);
 	if (!formatResult.valid) return formatResult;

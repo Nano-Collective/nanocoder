@@ -162,3 +162,29 @@ test('findSyntaxIsland returns error for non-existent symbol', (t) => {
 	t.false(result.found);
 	t.truthy(result.error);
 });
+
+test('findSyntaxIsland returns error with candidate lines when symbol is ambiguous', (t) => {
+	const source = `
+function duplicateName() {
+	return 1;
+}
+
+function duplicateName() {
+	return 2;
+}
+`;
+	const result = findSyntaxIsland(source, 'duplicateName');
+	t.false(result.found);
+	t.true(result.error?.includes('ambiguous'));
+	t.true(result.error?.includes('found 2 matching definitions'));
+});
+
+test('findMatchingBrace handles escaped quotes and unclosed JSX apostrophes without failing', (t) => {
+	const code = `{
+		const x = 'hello\\'world';
+		const html = "<p>Don't panic</p>";
+		return x;
+	}`;
+	const closeIndex = findMatchingBrace(code, 0);
+	t.is(closeIndex, code.length - 1);
+});

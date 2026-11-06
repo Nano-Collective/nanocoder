@@ -4,6 +4,16 @@ import type {
 	SyntaxIslandKind,
 } from '@/types/syntax-island';
 
+function isEscapedChar(str: string, index: number): boolean {
+	let backslashes = 0;
+	let j = index - 1;
+	while (j >= 0 && str[j] === '\\') {
+		backslashes++;
+		j--;
+	}
+	return backslashes % 2 === 1;
+}
+
 /**
  * Finds the index of the matching closing brace for an opening brace at `openIndex`.
  * Safely skips string literals (single, double, template) and comments (line, block).
@@ -19,7 +29,6 @@ export function findMatchingBrace(code: string, openIndex: number): number {
 	for (let i = openIndex; i < code.length; i++) {
 		const char = code[i];
 		const nextChar = code[i + 1];
-		const prevChar = i > 0 ? code[i - 1] : '';
 
 		// Handle comments
 		if (inLineComment) {
@@ -37,23 +46,27 @@ export function findMatchingBrace(code: string, openIndex: number): number {
 			continue;
 		}
 
-		// Handle strings
+		// Handle strings: terminate ' and " on newline to prevent JSX/regex leaks
 		if (inSingleQuote) {
-			if (char === "'" && prevChar !== '\\') {
+			if (char === '\n' || char === '\r') {
+				inSingleQuote = false;
+			} else if (char === "'" && !isEscapedChar(code, i)) {
 				inSingleQuote = false;
 			}
 			continue;
 		}
 
 		if (inDoubleQuote) {
-			if (char === '"' && prevChar !== '\\') {
+			if (char === '\n' || char === '\r') {
+				inDoubleQuote = false;
+			} else if (char === '"' && !isEscapedChar(code, i)) {
 				inDoubleQuote = false;
 			}
 			continue;
 		}
 
 		if (inTemplateLiteral) {
-			if (char === '`' && prevChar !== '\\') {
+			if (char === '`' && !isEscapedChar(code, i)) {
 				inTemplateLiteral = false;
 			}
 			continue;
@@ -116,7 +129,6 @@ function getIgnoredRanges(code: string): Array<{start: number; end: number}> {
 	for (let i = 0; i < code.length; i++) {
 		const char = code[i];
 		const nextChar = code[i + 1];
-		const prevChar = i > 0 ? code[i - 1] : '';
 
 		if (inLineComment) {
 			if (char === '\n') {
@@ -136,7 +148,10 @@ function getIgnoredRanges(code: string): Array<{start: number; end: number}> {
 		}
 
 		if (inSingleQuote) {
-			if (char === "'" && prevChar !== '\\') {
+			if (char === '\n' || char === '\r') {
+				ranges.push({start, end: i});
+				inSingleQuote = false;
+			} else if (char === "'" && !isEscapedChar(code, i)) {
 				ranges.push({start, end: i + 1});
 				inSingleQuote = false;
 			}
@@ -144,7 +159,10 @@ function getIgnoredRanges(code: string): Array<{start: number; end: number}> {
 		}
 
 		if (inDoubleQuote) {
-			if (char === '"' && prevChar !== '\\') {
+			if (char === '\n' || char === '\r') {
+				ranges.push({start, end: i});
+				inDoubleQuote = false;
+			} else if (char === '"' && !isEscapedChar(code, i)) {
 				ranges.push({start, end: i + 1});
 				inDoubleQuote = false;
 			}
@@ -152,7 +170,7 @@ function getIgnoredRanges(code: string): Array<{start: number; end: number}> {
 		}
 
 		if (inTemplateLiteral) {
-			if (char === '`' && prevChar !== '\\') {
+			if (char === '`' && !isEscapedChar(code, i)) {
 				ranges.push({start, end: i + 1});
 				inTemplateLiteral = false;
 			}
@@ -348,6 +366,8 @@ export function findSyntaxIsland(
 		},
 	];
 
+	const foundIslands: SyntaxIsland[] = [];
+
 	for (const {regex, kind, validateMatch} of patterns) {
 		regex.lastIndex = 0;
 		let match: RegExpExecArray | null = null;
@@ -370,6 +390,17 @@ export function findSyntaxIsland(
 
 			const openBraceOffset = match.index + match[0].length - 1;
 
+			// Skip if we already cataloged an island matching this exact body / opening brace
+			if (
+				foundIslands.some(
+					i =>
+						i.startOffset === startOffset ||
+						i.bodyStartOffset === openBraceOffset + 1,
+				)
+			) {
+				continue;
+			}
+
 			if (content[openBraceOffset] === '{') {
 				const closeBraceOffset = findMatchingBrace(content, openBraceOffset);
 				if (closeBraceOffset !== -1) {
@@ -384,7 +415,7 @@ export function findSyntaxIsland(
 					const originalBody = content.slice(bodyStartOffset, bodyEndOffset);
 					const fullContent = content.slice(startOffset, endOffset);
 
-					const island: SyntaxIsland = {
+					foundIslands.push({
 						name: trimmedName,
 						kind,
 						startOffset,
@@ -396,15 +427,25 @@ export function findSyntaxIsland(
 						signature,
 						originalBody,
 						fullContent,
-					};
-
-					return {
-						found: true,
-						island,
-					};
+					});
 				}
 			}
 		}
+	}
+
+	if (foundIslands.length === 1) {
+		return {
+			found: true,
+			island: foundIslands[0],
+		};
+	}
+
+	if (foundIslands.length > 1) {
+		const lines = foundIslands.map(i => i.startLine).join(', ');
+		return {
+			found: false,
+			error: `Symbol '${trimmedName}' is ambiguous; found ${foundIslands.length} matching definitions at line(s) ${lines}. Use string_replace or diff_edit with unique surrounding context to edit.`,
+		};
 	}
 
 	return {

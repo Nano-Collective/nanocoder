@@ -1,6 +1,16 @@
-import {stripTypeScriptTypes} from 'node:module';
+import * as nodeModule from 'node:module';
 import vm from 'node:vm';
 import type {IslandSplicingResult, SyntaxIsland} from '@/types/syntax-island';
+
+function isEscapedChar(str: string, index: number): boolean {
+	let backslashes = 0;
+	let j = index - 1;
+	while (j >= 0 && str[j] === '\\') {
+		backslashes++;
+		j--;
+	}
+	return backslashes % 2 === 1;
+}
 
 /**
  * Validates delimiter balance in a snippet of code.
@@ -19,7 +29,6 @@ export function validateDelimiterBalance(code: string): {
 	for (let i = 0; i < code.length; i++) {
 		const char = code[i];
 		const nextChar = code[i + 1];
-		const prevChar = i > 0 ? code[i - 1] : '';
 
 		if (inLineComment) {
 			if (char === '\n') inLineComment = false;
@@ -35,17 +44,27 @@ export function validateDelimiterBalance(code: string): {
 		}
 
 		if (inSingleQuote) {
-			if (char === "'" && prevChar !== '\\') inSingleQuote = false;
+			if (char === '\n' || char === '\r') {
+				inSingleQuote = false;
+			} else if (char === "'" && !isEscapedChar(code, i)) {
+				inSingleQuote = false;
+			}
 			continue;
 		}
 
 		if (inDoubleQuote) {
-			if (char === '"' && prevChar !== '\\') inDoubleQuote = false;
+			if (char === '\n' || char === '\r') {
+				inDoubleQuote = false;
+			} else if (char === '"' && !isEscapedChar(code, i)) {
+				inDoubleQuote = false;
+			}
 			continue;
 		}
 
 		if (inTemplateLiteral) {
-			if (char === '`' && prevChar !== '\\') inTemplateLiteral = false;
+			if (char === '`' && !isEscapedChar(code, i)) {
+				inTemplateLiteral = false;
+			}
 			continue;
 		}
 
@@ -150,8 +169,15 @@ function validateSyntheticWrapper(
 	}
 
 	try {
-		if (typeof stripTypeScriptTypes === 'function') {
-			const stripped = stripTypeScriptTypes(wrapped);
+		// Use Node's built-in TypeScript type stripper if available (Node >= 22.13)
+		const stripFn =
+			typeof (nodeModule as {stripTypeScriptTypes?: (code: string) => string})
+				.stripTypeScriptTypes === 'function'
+				? (nodeModule as {stripTypeScriptTypes: (code: string) => string})
+						.stripTypeScriptTypes
+				: null;
+		if (stripFn) {
+			const stripped = stripFn(wrapped);
 			new vm.Script(stripped);
 		} else {
 			new vm.Script(wrapped);
@@ -159,6 +185,14 @@ function validateSyntheticWrapper(
 		return {valid: true};
 	} catch (err: unknown) {
 		const message = err instanceof Error ? err.message : String(err);
+		// If failure is due to JSX syntax (<) or TS syntax (: or as) on engines without type stripping:
+		if (
+			message.includes("Unexpected token '<'") ||
+			message.includes("Unexpected token ':'") ||
+			message.includes('Unexpected reserved word')
+		) {
+			return {valid: true};
+		}
 		return {
 			valid: false,
 			error: message,

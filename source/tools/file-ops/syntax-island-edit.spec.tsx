@@ -122,3 +122,14 @@ test('syntax_island_edit formatter renders preview and result', async (t) => {
 	const { lastFrame: resultFrame } = renderWithTheme(resultEl as React.ReactElement);
 	t.true(resultFrame()?.includes('Successfully updated syntax island'));
 });
+
+test('syntax_island_edit rejects non-JS/TS files with informative message', async (t) => {
+	const validation = await syntaxIslandEditTool.validator!({
+		path: 'source/script.py',
+		symbol: 'calculate',
+		new_body: 'return 1',
+	});
+
+	t.false(validation.valid);
+	t.true(validation.error?.includes('only supports JavaScript and TypeScript files'));
+});
