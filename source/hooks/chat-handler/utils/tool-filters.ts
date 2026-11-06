@@ -26,9 +26,6 @@ export type PartitionedToolCalls = {
 	errorResults: ToolResult[];
 };
 
-/** Marker name the XML tool-call parser emits for a call it could not validate. */
-const XML_VALIDATION_ERROR_TOOL = '__xml_validation_error__';
-
 /**
  * The result a call with unusable arguments (`ToolCall.argumentsError`) gets
  * instead of running. Shared with the paths that run calls without this
@@ -47,10 +44,9 @@ export const invalidArgumentsResult = (toolCall: ToolCall): ToolResult => ({
  * Shared partition. The two exported wrappers differ only in the feedback text
  * they send the model for an unknown tool, so the rules for what is rejected
  * live here once: a call with no usable id or name is dropped outright (it can
- * never be paired with a result), the XML validation marker is always unknown
- * even if a tool by that name somehow resolves, a registered tool the model
- * was not offered (when `availableNames` is given) is refused, and a call
- * whose arguments could not be parsed is never run.
+ * never be paired with a result), a registered tool the model was not offered
+ * (when `availableNames` is given) is refused, and a call whose arguments could
+ * not be parsed is never run.
  */
 const partitionToolCalls = (
 	toolCalls: ToolCall[],
@@ -69,11 +65,7 @@ const partitionToolCalls = (
 			continue;
 		}
 
-		const isUnknown =
-			toolCall.function.name === XML_VALIDATION_ERROR_TOOL ||
-			(!!toolManager && !toolManager.hasTool(toolCall.function.name));
-
-		if (isUnknown) {
+		if (toolManager && !toolManager.hasTool(toolCall.function.name)) {
 			rejectedToolCalls.push(toolCall);
 			errorResults.push(describeUnknown(toolCall));
 			continue;

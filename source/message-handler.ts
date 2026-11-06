@@ -56,12 +56,6 @@ export async function processToolUse(
 	toolCall: ToolCall,
 	options?: ToolExecutionContext,
 ): Promise<ToolResult> {
-	// Handle XML validation errors by throwing (will be caught and returned as error ToolResult)
-	if (toolCall.function.name === '__xml_validation_error__') {
-		const args = toolCall.function.arguments as {error: string};
-		throw new Error(args.error);
-	}
-
 	// Unparsable arguments arrive as `{}`. The conversation loops reject these
 	// calls before they get here; this keeps any other caller from running the
 	// tool with that placeholder.
@@ -69,18 +63,18 @@ export async function processToolUse(
 		return invalidArgumentsResult(toolCall);
 	}
 
-	if (!toolRegistryGetter) {
-		throw new Error('Tool registry not initialized');
-	}
-
-	const toolRegistry =
-		options?.toolManager?.getToolRegistry() ?? toolRegistryGetter();
-	const handler = toolRegistry[toolCall.function.name];
-	if (!handler) {
-		throw new Error(`Unknown tool: ${toolCall.function.name}`);
-	}
-
 	try {
+		if (!toolRegistryGetter) {
+			throw new Error('Tool registry not initialized');
+		}
+
+		const toolRegistry =
+			options?.toolManager?.getToolRegistry() ?? toolRegistryGetter();
+		const handler = toolRegistry[toolCall.function.name];
+		if (!handler) {
+			throw new Error(`Unknown tool: ${toolCall.function.name}`);
+		}
+
 		// Parse arguments - use strict mode to throw error on parse failure
 		// Strict mode is required here to catch malformed arguments before tool execution
 		const parsedArgs = parseToolArguments<Record<string, unknown>>(
@@ -165,9 +159,9 @@ export async function processToolUse(
 			...(failed ? {isError: true} : {}),
 		};
 	} catch (error) {
-		// Convert exceptions (including validation failures thrown by the
-		// validated handler, and argument-parsing failures above) into
-		// content the model can see and correct. `isError: true` lets callers
+		// Convert exceptions (including an unknown tool, validation failures
+		// thrown by the validated handler, and argument-parsing failures above)
+		// into content the model can see and correct. `isError: true` lets callers
 		// building telemetry/logs (e.g. the `--json` headless report) tell
 		// this apart from a normal result without re-parsing `content`.
 		//

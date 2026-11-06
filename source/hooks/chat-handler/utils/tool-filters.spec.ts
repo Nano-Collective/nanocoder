@@ -149,7 +149,7 @@ const managerWith = (knownTools: string[]) =>
 		hasTool: (name: string) => knownTools.includes(name),
 	}) as unknown as ToolManager;
 
-test('partitionUnknownToolCalls - treats the XML validation marker as unknown', t => {
+test('partitionUnknownToolCalls - a call literally named __xml_validation_error__ is an ordinary unknown tool', t => {
 	const {validToolCalls, rejectedToolCalls, errorResults} =
 		partitionUnknownToolCalls(
 			[
@@ -157,7 +157,7 @@ test('partitionUnknownToolCalls - treats the XML validation marker as unknown', 
 				{id: 'call_2', function: {name: '__xml_validation_error__', arguments: {}}},
 				{id: 'call_3', function: {name: 'ghost_tool', arguments: {}}},
 			],
-			managerWith(['known_tool', '__xml_validation_error__']),
+			managerWith(['known_tool']),
 		);
 
 	t.deepEqual(
