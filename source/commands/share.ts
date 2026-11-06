@@ -6,6 +6,7 @@ import {
 import {renderShareHtml} from '@/commands/share-html';
 import {
 	buildSharePayload,
+	firstUserRequest,
 	serializeSharePayload,
 } from '@/commands/share-payload';
 import {getAppConfig} from '@/config/index';
@@ -93,14 +94,15 @@ export const shareCommand: Command = {
 			);
 		}
 
-		// The generated name is a slug of the first prompt, so build it from the
-		// redacted payload: a key pasted into that prompt must not land in the
-		// filename.
+		// The generated name is a slug of the first request, the same turn the
+		// page title shows. It is built from the redacted payload, so a key
+		// pasted into that prompt does not end up in the filename.
 		const userProvided = parsed.filename !== undefined;
+		const request = firstUserRequest(payload.messages);
 		const requestedFilename =
 			parsed.filename ??
 			generateExportFilename(
-				payload.messages.map(({role, content}) => ({role, content})),
+				request ? [{role: 'user', content: request.content}] : [],
 			).replace(/\.md$/i, parsed.json ? '.json' : '.html');
 
 		// Same rules as /export: resolve against the session cwd, and keep the

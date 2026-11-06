@@ -1,9 +1,10 @@
 import {createHash} from 'node:crypto';
-import type {
-	JsonValue,
-	SharedMessage,
-	SharedToolCall,
-	SharePayload,
+import {
+	firstUserRequest,
+	type JsonValue,
+	type SharedMessage,
+	type SharedToolCall,
+	type SharePayload,
 } from '@/commands/share-payload';
 
 /**
@@ -285,11 +286,8 @@ function pairToolResults(messages: readonly SharedMessage[]): {
 }
 
 function sessionTitle(messages: readonly SharedMessage[]): string {
-	const prompt = messages.find(
-		message => message.role === 'user' && !message.displayOnly,
-	);
-	const firstLine = prompt?.content
-		.split('\n')
+	const firstLine = firstUserRequest(messages)
+		?.content.split('\n')
 		.map(line => line.trim())
 		.find(Boolean);
 	return firstLine ? truncate(firstLine, 100) : '';

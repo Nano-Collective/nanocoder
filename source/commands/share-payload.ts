@@ -1,3 +1,7 @@
+import {isApprovedPlanMessage} from '@/artifacts/approved-plan';
+import {isInternalWalkthroughMessage} from '@/artifacts/walkthrough-lifecycle';
+import {BASH_OUTPUT_PREFIX} from '@/constants';
+import {isAutoDiagnosticsMessage} from '@/hooks/chat-handler/conversation/auto-diagnostics';
 import type {Message} from '@/types/core';
 import {REDACTED, redactSecrets} from '@/verify/redact-secrets';
 
@@ -195,6 +199,30 @@ export function buildSharePayload(
 		},
 		redactionCount,
 	};
+}
+
+/**
+ * The message that says what the session was about: the first user turn the
+ * user actually wrote. Both the generated filename and the page title come
+ * from it, so they always describe the same turn. Skipped:
+ * - display-only notices (errors, cancellations, an ACP slash command);
+ * - the turns nanocoder sends as `role: 'user'` itself: an approved plan, the
+ *   internal walkthrough request, post-edit diagnostics and `!bash` output.
+ *   They are protocol, not requests, and session titles skip them too.
+ */
+export function firstUserRequest(
+	messages: readonly SharedMessage[],
+): SharedMessage | undefined {
+	return messages.find(message => {
+		if (message.role !== 'user' || message.displayOnly) return false;
+		const asMessage: Message = {role: 'user', content: message.content};
+		return !(
+			isApprovedPlanMessage(asMessage) ||
+			isInternalWalkthroughMessage(asMessage) ||
+			isAutoDiagnosticsMessage(asMessage) ||
+			message.content.startsWith(BASH_OUTPUT_PREFIX)
+		);
+	});
 }
 
 export function serializeSharePayload(payload: SharePayload): string {

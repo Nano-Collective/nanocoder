@@ -5,6 +5,7 @@ import test from 'ava';
 import type React from 'react';
 import {getCommandHelpDetails} from '@/commands/help-utils';
 import {getAppConfig} from '@/config/index';
+import {BASH_OUTPUT_PREFIX} from '@/constants';
 import {
 	resetSessionCwd,
 	setProjectRoot,
@@ -100,6 +101,26 @@ test('a generated name is built from the redacted prompt', async t => {
 		[{role: 'user', content: 'use sk-aaaaaaaaaaaaaaaaaaaaaaaa now'}],
 	);
 	t.regex(files[0] ?? '', /^use-redacted-now-/);
+});
+
+test('the generated name and the page title both come from the first request', async t => {
+	// `!bash` output and a display-only notice are role 'user' too, but they
+	// are not what the session was about.
+	const {files} = await share(
+		[],
+		[
+			{
+				role: 'user',
+				content: `${BASH_OUTPUT_PREFIX}\n\`\`\`\n$ ls\nREADME.md\n\`\`\``,
+			},
+			{role: 'user', content: 'Unknown command: /foo', displayOnly: true},
+			...conversation,
+		],
+	);
+
+	t.regex(files[0] ?? '', /^fix-the-login-bug-\d{4}-\d{2}-\d{2}\.html$/);
+	const html = await fs.readFile(path.join(root, files[0] ?? ''), 'utf8');
+	t.true(html.includes('<title>Fix the login bug · Nanocoder session</title>'));
 });
 
 test('API keys written into the provider config are redacted', async t => {

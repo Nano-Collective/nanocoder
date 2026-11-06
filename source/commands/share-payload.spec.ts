@@ -1,6 +1,14 @@
 import test from 'ava';
 import type {Message} from '@/types/index';
-import {buildSharePayload, serializeSharePayload} from './share-payload';
+import {isApprovedPlanMessage} from '@/artifacts/approved-plan';
+import {isInternalWalkthroughMessage} from '@/artifacts/walkthrough-lifecycle';
+import {BASH_OUTPUT_PREFIX} from '@/constants';
+import {isAutoDiagnosticsMessage} from '@/hooks/chat-handler/conversation/auto-diagnostics';
+import {
+	buildSharePayload,
+	firstUserRequest,
+	serializeSharePayload,
+} from './share-payload';
 
 console.log('\nshare-payload.spec.ts');
 
@@ -207,4 +215,46 @@ test('redact: false keeps the session as it is', t => {
 	t.false(payload.redacted);
 	t.is(payload.messages[0]?.content, `My key is ${SECRET}`);
 	t.is(redactionCount, 0);
+});
+
+// The turns nanocoder itself sends as role 'user', built the way the app
+// builds them. Each is checked against its own predicate, so a change to one
+// of their prefixes breaks this test instead of silently naming a share.
+const protocolTurns: Message[] = [
+	{role: 'user', content: `${BASH_OUTPUT_PREFIX}\n\`\`\`\n$ ls\nREADME.md\n\`\`\``},
+	{role: 'user', content: '<approved_plan>\nDo it.\n</approved_plan>'},
+	{
+		role: 'user',
+		content: '<nanocoder-internal-walkthrough>\nWrite the walkthrough.',
+	},
+	{
+		role: 'user',
+		content:
+			'Automatic diagnostics after the recent edits found issues.\nsrc/a.ts: 1 error',
+	},
+	{role: 'user', content: 'Unknown command: /foo', displayOnly: true},
+];
+
+test('the protocol turn fixtures match the app predicates', t => {
+	t.true(protocolTurns[0]?.content.startsWith(BASH_OUTPUT_PREFIX));
+	t.true(isApprovedPlanMessage(protocolTurns[1] as Message));
+	t.true(isInternalWalkthroughMessage(protocolTurns[2] as Message));
+	t.true(isAutoDiagnosticsMessage(protocolTurns[3] as Message));
+});
+
+test('firstUserRequest skips protocol turns and notices', t => {
+	const {payload} = build([
+		...protocolTurns,
+		{role: 'assistant', content: 'Ready.'},
+		{role: 'user', content: 'Fix the login bug'},
+		{role: 'user', content: 'Then add a test'},
+	]);
+
+	t.is(firstUserRequest(payload.messages)?.content, 'Fix the login bug');
+});
+
+test('firstUserRequest is undefined when no turn is a request', t => {
+	const {payload} = build([...protocolTurns, {role: 'assistant', content: 'Ok.'}]);
+
+	t.is(firstUserRequest(payload.messages), undefined);
 });
