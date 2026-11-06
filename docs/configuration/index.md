@@ -20,7 +20,7 @@ To enable autocompletion and inline validation, add the `$schema` key at the top
 }
 ```
 
-The schema only describes keys the loader actually reads from `agents.config.json`. Settings read from `nanocoder-preferences.json` (`notifications`, `sessions`, `paste`) are deliberately not advertised on this schema, and neither are MCP servers, which live in `.mcp.json` (see [MCP Configuration](mcp-configuration.md)).
+The schema only describes keys the loader actually reads from `agents.config.json`. Settings read from `nanocoder-preferences.json` (`notifications`, `sessions`, `paste`, `ui` such as `maxFps`, `ciWatch` and `voice`) are deliberately not advertised on this schema, and neither are MCP servers, which live in `.mcp.json` (see [MCP Configuration](mcp-configuration.md)).
 
 You can also wire it up without the `$schema` key:
 
@@ -109,7 +109,7 @@ Keep API keys out of version control using environment variables. Variables are 
 | `NANOCODER_NO_UPDATE_CHECK` | Set to `1` to disable automatic update checks at startup. Running `/update` still performs an explicit check |
 | `NANOCODER_DEFAULT_SHUTDOWN_TIMEOUT` | Graceful shutdown timeout in milliseconds (default: 5000) |
 | `NANOCODER_MAX_TURNS` | Maximum LLM turns for headless runs (`--plain` and ACP). Overrides `nanocoder.headless.maxTurns`; default 200. See [Headless](#headless) |
-| `NANOCODER_TRUST_DIRECTORY` | Set to `1` to trust the working directory for a `--plain` run or `nanocoder daemon start`, and save it to `trustedDirectories` for later runs. See [Getting Started](../getting-started/index.md) |
+| `NANOCODER_TRUST_DIRECTORY` | Set to `1` to trust the working directory and save it to `trustedDirectories` for later runs. Honoured by the interactive TUI, `run` (Ink and `--plain`), `nanocoder daemon start`, `nanocoder verify` and `--acp`. Must come from your shell: a project `.env` cannot set it. See [Directory trust](../getting-started/index.md#directory-trust) |
 | `NANOCODER_SKILLS_INDEX` | URL or local path of the skills index used by `nanocoder skills add` (same as `--index`). See [Skills](../features/skills.md) |
 | `NANOCODER_DOCTOR_PROBE` | Set to `0` to stop `/doctor` from probing local provider ports |
 
@@ -309,7 +309,7 @@ Caps on how many times the conversation loop auto-retries a failing pattern with
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `maxRepeatedToolCalls` | number | `3` | Pause threshold for consecutive identical tool calls (minimum 2). The check fires when the same call (or set of calls) is emitted for the Nth consecutive turn, before that call runs - so the default of 3 executes the repeated call twice and pauses on the third emission. In an interactive session you are asked whether to continue - useful when the repetition is legitimate, such as polling a long-running job - or stop. `--plain` and other non-interactive runs stop with a clear error. Calls to unknown tools count toward the streak too, so a model stuck on a nonexistent tool hits the same cap. |
+| `maxRepeatedToolCalls` | number | `3` | Pause threshold for consecutive identical tool calls (minimum 2). The check fires when the same call (or set of calls) is emitted for the Nth consecutive turn, before that call runs - so the default of 3 executes the repeated call twice and pauses on the third emission. In an interactive session you are asked whether to continue - useful when the repetition is legitimate, such as polling a long-running job - or stop. `--plain` and other non-interactive runs stop with a clear error. Calls to unknown tools, and calls whose arguments aren't valid JSON (for example cut off at the output-token limit), count toward the streak too, so a model stuck on a bad call hits the same cap. Such calls aren't run. |
 | `maxEmptyTurns` | number | `2` | Consecutive empty assistant turns that are auto-nudged before giving up (minimum 0). The interactive loop additionally compacts the context and retries once before stopping; the `--plain` runtime stops directly after the nudges. |
 | `maxMalformedRetries` | number | `2` | Malformed self-correction retries allowed for text-parsed tool calls before the loop gives up (minimum 0). Applies to the XML fallback path in both runtimes. The interactive loop also parses tool-call text from native-tool models that emit it instead of native calls, so the cap covers that case there; the `--plain` runtime only parses text on the XML fallback path. |
 | `maxTruncatedTurns` | number | `2` | Consecutive turns cut off at the provider's output-token limit that are asked to continue before the loop accepts what it has (minimum 0). `--plain` runtime only. A truncated turn carries no tool calls, so without this the loop reads the fragment as a finished answer - see the note below. |
@@ -466,6 +466,27 @@ Each entry takes `match` (required; globs relative to the project root, same dia
 Formatters run after a successful `write_file`, `string_replace` or `diff_edit` (in the main agent and in subagents), in config order, and before any `post-tool-use` hooks, so a hook that commits or lints sees the formatted file. Built-in auto-commit runs after both formatters and hooks. If a formatter changes the file, the tool result tells the model to re-read it before its next edit. A formatter that fails or times out is logged without failing the write; any partial changes it made remain on disk and are reported to the model. Files outside the project root are never formatted.
 
 Formatters are project-local shell commands, so like hooks they are gated by the directory-trust prompt. Like other `nanocoder.*` blocks, a project `formatters` list replaces the global one rather than merging with it.
+
+### LSP Servers
+
+Nanocoder auto-discovers common language servers installed on your machine and uses them for diagnostics and formatting. Use `nanocoder.lspServers` to add a server it does not find, or to choose which one handles a language:
+
+```json
+{
+  "nanocoder": {
+    "lspServers": [
+      {
+        "name": "typescript",
+        "command": "typescript-language-server",
+        "args": ["--stdio"],
+        "languages": ["ts", "tsx", "js", "jsx"]
+      }
+    ]
+  }
+}
+```
+
+Each entry needs `name`, `command` and `languages` (file extensions without the leading dot), plus optional `args` and `env`. Entries missing a required field are skipped. Configured servers take priority: auto-discovered servers are only started for languages no configured server covers. Like other `nanocoder.*` blocks, a project `lspServers` list replaces the global one. Project LSP servers are commands that run on your machine, so they are part of the directory trust fingerprint (see [Preferences](preferences.md)).
 
 ### Custom System Prompt
 

@@ -15,7 +15,7 @@ sidebar_order: 27
 	"name": "API Route",
 	"baseUrl": "https://global.api-route.com/v1",
 	"apiKey": "${API_ROUTE_API_KEY}",
-	"models": ["gpt-5.5"]
+	"models": ["gpt-6.1-sol"]
 }
 ```
 
@@ -23,6 +23,6 @@ sidebar_order: 27
 
 1. Create an account and an API key at [API Route](https://www.api-route.com/).
 2. Enter the key in the `/settings providers` wizard. For a manual configuration, set `API_ROUTE_API_KEY` in your environment and reference it with `${API_ROUTE_API_KEY}` as shown above. Nanocoder resolves that reference; it does not read the variable automatically.
-3. Select the exact model ID from the [model catalog](https://www.api-route.com/pricing). The example uses `gpt-5.5`.
+3. Select the exact model ID from the [model catalog](https://www.api-route.com/pricing). The example uses `gpt-6.1-sol`.
 
 The wizard can fetch available models from the API Route endpoint after you provide a key.

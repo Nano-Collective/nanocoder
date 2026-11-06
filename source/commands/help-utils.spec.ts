@@ -36,17 +36,34 @@ test('getCommandHelpDetails exposes usage, options, aliases, and examples', t =>
 	const details = getCommandHelpDetails(command('tasks'));
 
 	t.is(details.category, 'Session & Workflow');
-	t.is(details.usage, '/tasks [add <title>|remove|rm <number>|clear]');
+	t.is(
+		details.usage,
+		'/tasks [list|add <title>|start <number>|done|complete <number>|remove|rm <number>|clear]',
+	);
 	t.deepEqual(details.options, [
+		'list',
 		'add <title>',
+		'start <number>',
+		'done|complete <number>',
 		'remove|rm <number>',
 		'clear',
 	]);
 	t.deepEqual(details.examples, [
 		'/tasks',
 		'/tasks add review pull request',
+		'/tasks start 1',
+		'/tasks done 1',
 		'/tasks remove 2',
 	]);
+});
+
+test('getCommandHelpDetails documents export --json and privacy inspect', t => {
+	const exportDetails = getCommandHelpDetails(command('export'));
+	t.is(exportDetails.usage, '/export [--json] [filename]');
+	t.true(exportDetails.examples?.includes('/export --json'));
+
+	const privacy = getCommandHelpDetails(command('privacy'));
+	t.is(privacy.usage, '/privacy inspect <text>');
 });
 
 test('getCommandHelpDetails documents supported command syntax', t => {

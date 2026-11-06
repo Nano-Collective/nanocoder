@@ -1297,6 +1297,39 @@ test('callTool sanitizes object arguments to strings when schema expects a strin
 	}
 });
 
+test('MCPClient.callTool: carries a server isError flag next to the unchanged text', async t => {
+	const client = new MCPClient();
+	let reply: Record<string, unknown> = {};
+
+	// @ts-ignore - Accessing private properties for testing
+	client.serverTools.set('srv', [
+		{name: 'tool', description: 't', serverName: 'srv', inputSchema: {type: 'object', properties: {}}},
+	]);
+	// @ts-ignore
+	client.clients.set('srv', {callTool: async () => reply});
+
+	reply = {content: [{type: 'text', text: 'fine'}]};
+	t.is(await client.callTool('tool', {}), 'fine', 'a clean call stays a plain string');
+
+	reply = {isError: false, content: [{type: 'text', text: 'fine'}]};
+	t.is(await client.callTool('tool', {}), 'fine', 'isError: false is not a failure');
+
+	reply = {isError: true, content: [{type: 'text', text: 'boom failure'}]};
+	t.deepEqual(await client.callTool('tool', {}), {llmContent: 'boom failure', isError: true});
+
+	reply = {isError: true, content: [{type: 'image', data: 'AA==', mimeType: 'image/png'}]};
+	t.deepEqual(await client.callTool('tool', {}), {
+		llmContent: '[image/png, 1 bytes]',
+		isError: true,
+	}, 'a non-text part keeps its placeholder text and is still flagged');
+
+	reply = {isError: true, content: []};
+	t.deepEqual(await client.callTool('tool', {}), {
+		llmContent: 'Tool executed successfully (no output)',
+		isError: true,
+	}, 'an empty failure keeps its text and is still flagged');
+});
+
 // ============================================================================
 // Regression Tests for connectToServer lifecycle (failed tool discovery)
 // ============================================================================
