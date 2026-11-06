@@ -428,6 +428,35 @@ function blockSpecs(): BlockSpec[] {
 			effective: config.nanocoderTools,
 			depth: 3,
 		},
+		{
+			path: ['nanocoder', 'hooks'],
+			file: agents,
+			effective: config.hooks,
+		},
+		{
+			path: ['nanocoder', 'formatters'],
+			file: agents,
+			effective: config.formatters,
+			leaf: true,
+		},
+		{
+			path: ['nanocoder', 'lspServers'],
+			file: agents,
+			effective: config.lspServers,
+			leaf: true,
+		},
+		{
+			path: ['nanocoder', 'sandbox'],
+			file: agents,
+			effective: config.sandbox,
+			leaf: true,
+		},
+		{
+			path: ['nanocoder', 'autoCommit'],
+			file: agents,
+			effective: config.autoCommit,
+			leaf: true,
+		},
 	];
 }
 
@@ -903,6 +932,11 @@ export function selectOverrides(
  * block), then the same two with a `nanocoder.` prefix added, then
  * case-insensitively, and finally as a substring so a bare `threshold` still
  * finds something.
+ *
+ * A `nanocoder.`-prefixed query also falls back to the same key under
+ * `preferences.`, because every other setting lives under `nanocoder.` and
+ * reaching for `nanocoder.notifications` is the natural habit — the key just
+ * happens to live at the top level of nanocoder-preferences.json.
  */
 export function findEntries(
 	config: EffectiveConfig,
@@ -912,6 +946,9 @@ export function findEntries(
 	if (query === '') return [];
 
 	const candidates = [query, `nanocoder.${query}`, `preferences.${query}`];
+	if (query.startsWith('nanocoder.')) {
+		candidates.push(`preferences.${query.slice('nanocoder.'.length)}`);
+	}
 
 	for (const candidate of candidates) {
 		const exact = config.entries.filter(entry => entry.key === candidate);

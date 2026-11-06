@@ -1,12 +1,14 @@
 import {
 	existsSync,
 	mkdirSync,
+	readFileSync,
 	realpathSync,
 	rmSync,
 	writeFileSync,
 } from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
+import {fileURLToPath} from 'node:url';
 import test from 'ava';
 import {runConfigCli} from './config-cli';
 import {
@@ -613,4 +615,115 @@ test('runConfigCli --json emits parseable output', t => {
 		t.is(threshold?.value, 80);
 		t.is(threshold?.layer, 'project');
 	});
+});
+
+test('config diff surfaces the keys that run shell commands or commit', t => {
+	// The whole point of `config diff` on a cloned repo is to see what the
+	// config files make nanocoder do — and the keys that run shell commands
+	// (hooks, formatters, sandbox) or create commits (autoCommit) were exactly
+	// the ones missing (#1692).
+	withFixture(
+		{
+			projectAgents: {
+				nanocoder: {
+					autoCommit: true,
+					formatters: [
+						{match: ['**/*.ts'], command: 'biome check --write "$FILE"'},
+					],
+					hooks: {'pre-tool-use': [{command: 'echo guard'}]},
+					sandbox: true,
+				},
+			},
+			globalAgents: {
+				nanocoder: {
+					formatters: [{match: ['**/*.go'], command: 'gofmt -w "$FILE"'}],
+				},
+			},
+		},
+		() => {
+			const diff = runConfigCli('diff');
+			t.is(diff.exitCode, 0);
+			t.regex(diff.output, /nanocoder\.autoCommit/);
+			t.regex(diff.output, /nanocoder\.sandbox/);
+			t.regex(diff.output, /nanocoder\.formatters/);
+			t.regex(diff.output, /nanocoder\.hooks\.pre-tool-use/);
+			t.regex(
+				diff.output,
+				/gofmt/,
+				'the formatter the project file discarded is reported as ignored',
+			);
+
+			const show = runConfigCli('show', ['nanocoder.hooks']);
+			t.is(show.exitCode, 0);
+			t.regex(show.output, /echo guard/);
+		},
+	);
+});
+
+test('every key the loader reads is shown by config show (schema drift)', t => {
+	// The block list in blockSpecs() is hand-written, so it silently falls
+	// behind AppConfig: `autoCommit`, `formatters`, `hooks`, `sandbox` and
+	// `lspServers` were all invisible to `config list` until #1692. Deriving
+	// the expected keys from the committed schema — the artefact that claims
+	// to describe every key the loader reads from agents.config.json — makes
+	// the next addition fail here first.
+	const schemaPath = fileURLToPath(
+		new URL('../../schemas/agents.config.schema.json', import.meta.url),
+	);
+	const schema = JSON.parse(readFileSync(schemaPath, 'utf-8')) as {
+		properties: {nanocoder: {$ref: string}};
+		definitions: Record<string, {properties: Record<string, unknown>}>;
+	};
+	const namespace = schema.properties.nanocoder.$ref.replace(
+		'#/definitions/',
+		'',
+	);
+	const schemaKeys = Object.keys(schema.definitions[namespace]?.properties ?? {});
+	t.true(schemaKeys.length > 0, 'the schema must advertise the nanocoder keys');
+
+	withFixture(
+		{
+			projectAgents: {
+				nanocoder: {
+					alwaysAllow: ['read_file'],
+					autoCommit: true,
+					autoCompact: {threshold: 80},
+					defaultMode: 'plan',
+					disabledTools: ['web_search'],
+					formatters: [{match: ['**/*.js'], command: 'echo formatted'}],
+					headless: {maxTurns: 50},
+					hooks: {'post-tool-use': [{command: 'echo hook'}]},
+					lspServers: [{name: 'ts', command: 'tsserver', languages: ['ts']}],
+					modeProviders: {plan: {provider: 'p', model: 'm'}},
+					nanocoderTools: {webSearch: {apiKey: 'test-key'}},
+					providers: [{name: 'p', models: ['m']}],
+					retries: {maxEmptyTurns: 5},
+					sandbox: true,
+					systemPrompt: {mode: 'append', content: 'extra context'},
+					tune: {enabled: false},
+				},
+			},
+			globalPreferences: {notifications: {enabled: true}},
+		},
+		() => {
+			const config = resolveEffectiveConfig();
+
+			for (const key of schemaKeys) {
+				t.true(
+					findEntries(config, `nanocoder.${key}`).length > 0,
+					`nanocoder.${key} is in schemas/agents.config.schema.json, but "config show nanocoder.${key}" finds nothing`,
+				);
+			}
+
+			// `notifications` is deliberately absent from the schema — it lives
+			// at the top level of nanocoder-preferences.json rather than under
+			// `nanocoder` in agents.config.json — but it is just as much a key
+			// the loader reads, so it must be findable under the name people
+			// reach for.
+			const notifications = findEntries(config, 'nanocoder.notifications');
+			t.is(notifications.length, 1);
+			t.is(notifications[0]?.key, 'preferences.notifications');
+			t.is((notifications[0]?.value as {enabled: boolean}).enabled, true);
+		},
+	);
 });
