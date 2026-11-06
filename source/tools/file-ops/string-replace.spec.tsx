@@ -1484,3 +1484,56 @@ test('string_replace: throws when mutation firewall blocks test deletion', async
 	t.true(content.includes('feature B'));
 });
 
+// ============================================================================
+// CRLF Line Endings
+// ============================================================================
+
+// Models send LF; a Windows checkout with core.autocrlf=true has CRLF files.
+test('string_replace: multi-line LF edit matches a CRLF file and keeps CRLF', async t => {
+	const filePath = await createTestFile('crlf.txt', 'one\r\ntwo\r\nthree\r\n');
+
+	await executeStringReplace({
+		path: filePath,
+		old_str: 'one\ntwo',
+		new_str: 'ONE\nTWO',
+	});
+
+	t.is(await readFile(filePath, 'utf-8'), 'ONE\r\nTWO\r\nthree\r\n');
+});
+
+test('string_replace: added lines in a CRLF file are written with CRLF', async t => {
+	const filePath = await createTestFile('crlf.txt', 'one\r\ntwo\r\nthree\r\n');
+
+	await executeStringReplace({
+		path: filePath,
+		old_str: 'two',
+		new_str: 'TWO\nTWO-b',
+	});
+
+	t.is(await readFile(filePath, 'utf-8'), 'one\r\nTWO\r\nTWO-b\r\nthree\r\n');
+});
+
+test('string_replace validator: accepts an LF old_str for a CRLF file', async t => {
+	await createTestFile('crlf.txt', 'one\r\ntwo\r\nthree\r\n');
+
+	if (!stringReplaceTool.validator) {
+		t.fail('Validator not defined');
+		return;
+	}
+
+	const originalCwd = process.cwd();
+	try {
+		process.chdir(testDir);
+		markFileSeen('crlf.txt');
+
+		const result = await stringReplaceTool.validator({
+			path: 'crlf.txt',
+			old_str: 'one\ntwo',
+			new_str: 'ONE\nTWO',
+		});
+
+		t.true(result.valid);
+	} finally {
+		process.chdir(originalCwd);
+	}
+});
