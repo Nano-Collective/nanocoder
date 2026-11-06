@@ -275,6 +275,7 @@ export function useAppInitialization({
 					config.mcpServers,
 					onProgress,
 					onHealthChange,
+					config.tune,
 				);
 			} catch (error) {
 				// Mark all pending servers as failed

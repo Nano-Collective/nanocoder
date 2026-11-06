@@ -1,4 +1,4 @@
-import {mkdtemp, readFile, rm, writeFile} from 'node:fs/promises';
+import {chmod, mkdtemp, readFile, rm, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
@@ -10,6 +10,10 @@ import {resolveToolApproval} from '../approval-policy.js';
 import {ThemeContext} from '../../hooks/useTheme.js';
 import {writeFileTool} from './write-file.js';
 import {clearReadTracker, markFileSeen} from '../../utils/read-tracker.js';
+import {
+	resetFirewallConfig,
+	setFirewallConfig,
+} from '../../firewall/mutation-firewall.js';
 
 // ============================================================================
 // Test Helpers
@@ -39,6 +43,7 @@ test.beforeEach(async () => {
 	testDir = await mkdtemp(join(tmpdir(), 'write-file-test-'));
 	// Read-before-overwrite state is process-global; reset between serial tests.
 	clearReadTracker();
+	resetFirewallConfig();
 });
 
 // Clean up temporary directory after each test

@@ -214,6 +214,101 @@ const executeBashStreamingFormatter = (
 	return <BashProgress executionId={executionId} command={args.command} />;
 };
 
+/**
+ * Paths where a recursive force delete means wiping the machine or the user's
+ * home rather than cleaning up a project. Anything deeper (`/tmp/build`,
+ * `~/project/node_modules`) is ordinary cleanup and stays allowed.
+ */
+const DESTRUCTIVE_RM_TARGETS = new Set(['/', '~', '$HOME', '${HOME}']);
+
+/**
+ * Flags and targets of every `rm` in a command. Argument words stop at the
+ * next command separator, so `rm -rf src && ls /` is judged on its own
+ * arguments instead of folding the rest of the line into them.
+ */
+function rmArgumentLists(command: string): string[][] {
+	const pattern = /\brm\b/gi;
+	const lists: string[][] = [];
+	let match = pattern.exec(command);
+	while (match) {
+		const rest = command.slice(match.index + match[0].length);
+		const separator = rest.search(/[;&|\n]/);
+		lists.push(
+			(separator === -1 ? rest : rest.slice(0, separator))
+				.trim()
+				.split(/\s+/)
+				.filter(Boolean)
+				// Quotes are how a path is written, not part of it: `rm -rf
+				// "$HOME"` deletes the same directory as `rm -rf $HOME`.
+				.map(word => word.replace(/['"]/g, '')),
+		);
+		match = pattern.exec(command);
+	}
+	return lists;
+}
+
+/**
+ * Whether an `rm` target names the filesystem root or the user's home. `/*`,
+ * `/.`, `/..`, `//` and `~/*` all name the same directory as `/` and `~`, so
+ * globs, empty segments, and `.`/`..` segments are resolved before comparing.
+ */
+function isDestructiveRmTarget(target: string): boolean {
+	// Anything that is not a plain name directly under `/` - `/*`, `/*/`,
+	// `/*/*`, `/.*`, `/?`, `/{etc,usr}` - expands to the root's own entries and
+	// is as destructive as naming `/`. A named path (`/tmp`, `/usr/local`) is
+	// an ordinary target and is left to the checks below.
+	if (/^\/(?!\w)/.test(target)) return true;
+
+	const withoutGlob = target.replace(/\/\*+$/, '/');
+	const resolved: string[] = [];
+	for (const segment of withoutGlob.split('/')) {
+		if (segment === '' || segment === '.') continue;
+		if (segment === '..') {
+			resolved.pop();
+			continue;
+		}
+		resolved.push(segment);
+	}
+	const base = `${withoutGlob.startsWith('/') ? '/' : ''}${resolved.join('/')}`;
+	return DESTRUCTIVE_RM_TARGETS.has(base);
+}
+
+/**
+ * Whether an `rm` argument list asks for a recursive, forced delete of one of
+ * the destructive targets. Flags are read one at a time so `-fr`, `-r -f`,
+ * `-Rf`, `--recursive --force` and `--no-preserve-root` are all understood -
+ * the single-regex check this replaced only knew the exact spelling `-rf`.
+ */
+function isDestructiveRm(words: string[]): boolean {
+	let recursive = false;
+	let forced = false;
+	let overridesRootGuard = false;
+
+	for (const word of words) {
+		if (word === '--recursive') {
+			recursive = true;
+		} else if (word === '--force') {
+			forced = true;
+		} else if (word === '--no-preserve-root') {
+			// This flag exists only to let `rm` past its own guard on `/`.
+			overridesRootGuard = true;
+		} else if (/^-[a-zA-Z]+$/.test(word)) {
+			// `rm`'s own flags are case-sensitive (`-R` is recursive, `-r` too),
+			// but the guard matches `rm` itself case-insensitively, so read the
+			// cluster the same way rather than letting `RM -RF /` through.
+			const flags = word.toLowerCase();
+			recursive = recursive || flags.includes('r');
+			forced = forced || flags.includes('f');
+		}
+	}
+
+	if (!recursive || !(forced || overridesRootGuard)) return false;
+
+	return words
+		.filter(word => !word.startsWith('-'))
+		.some(isDestructiveRmTarget);
+}
+
 const executeBashValidator = (args: {
 	command: string;
 }): Promise<{valid: true} | {valid: false; error: string}> => {
@@ -229,7 +324,6 @@ const executeBashValidator = (args: {
 
 	// Check for extremely dangerous commands
 	const dangerousPatterns = [
-		/rm\s+-rf\s+\/(?!\w)/i, // rm -rf / (but allow /path)
 		/mkfs/i, // Format filesystem
 		/dd\s+if=/i, // Direct disk write
 		// Fork bomb: a function that pipes itself into itself in the background,
@@ -239,13 +333,20 @@ const executeBashValidator = (args: {
 		/chmod\s+-R\s+000/i, // Remove all permissions recursively
 	];
 
-	for (const pattern of dangerousPatterns) {
-		if (pattern.test(command)) {
-			return Promise.resolve({
-				valid: false,
-				error: `Command contains potentially destructive operation: "${command}". This command is blocked for safety.`,
-			});
-		}
+	// A recursive force delete of `/`, `~` or `$HOME` is destructive however its
+	// flags are spelled, so it is parsed rather than pattern-matched. Backslash
+	// line continuations are joined first: `rm -rf \` with `/` on the next line
+	// is one command, so the target has to stay attached to its flags.
+	const parseable = command.replace(/\\\r?\n/g, ' ');
+	const isDestructive =
+		rmArgumentLists(parseable).some(isDestructiveRm) ||
+		dangerousPatterns.some(pattern => pattern.test(command));
+
+	if (isDestructive) {
+		return Promise.resolve({
+			valid: false,
+			error: `Command contains potentially destructive operation: "${command}". This command is blocked for safety.`,
+		});
 	}
 
 	return Promise.resolve({valid: true});

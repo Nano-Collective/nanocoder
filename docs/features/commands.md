@@ -21,6 +21,7 @@ Type `/` in the chat input to see available commands. All commands start with `/
 | `/tasks` | Manage task list for tracking complex work (see [Task Management](task-management.md)) |
 | `/model-database` | Browse coding models from OpenRouter (searchable, filterable by open/proprietary). Enter copies the highlighted model's ID to the clipboard and, when the active provider is OpenRouter, also switches the session to that model |
 | `/settings` | Interactive settings menu. Accepts a tab name to jump straight there: `/settings providers`, `/settings mcp`, `/settings appearance`, `/settings input`, `/settings behavior`, `/settings advanced` |
+| `/firewall` | Inspect and configure the negative-space mutation firewall. Subcommands: `status`, `enable`, `disable`, `mode <strict\|lenient\|disabled>`, `toggle <any\|tests\|exports>`, `protect <pattern>`, `unprotect <pattern>`, `reset` |
 | `/mcp` | Show connected MCP servers and their tools |
 | `/commands` | List custom commands. Subcommands: `show <name>`, `create <name>` (see [Custom Commands](custom-commands.md)) |
 | `/tools` | List available tools grouped by source (built-in, MCP, custom). Subcommand: `create <name>` (see [Custom Tools](custom-tools.md)) |
@@ -211,7 +212,8 @@ The emitted object looks like:
     "inputTokens": 4520,
     "outputTokens": 850,
     "totalTokens": 5370
-  }
+  },
+  "warnings": []
 }
 ```
 
@@ -223,6 +225,7 @@ The emitted object looks like:
 - `steps` — how many times the model was called during the run, including retried turns. One step can make zero or several tool calls, so this is not the same as the length of `toolCalls`. `0` when the run stopped before calling the model
 - `filesChanged` - deduplicated list of file paths touched by file-mutating tools (`write_file`, `string_replace`, `diff_edit`, `lsp_format_document`)
 - `usage` — provider-reported token counts summed across every turn of the run. Omitted entirely when the provider reports no token telemetry (common with local models), so an absent block means "unknown", never "zero". When a provider reports input and output counts but no total, `totalTokens` is derived as their sum.
+- `warnings` — array containing configuration, hook, formatter, plugin, and runtime error/warning messages (the same diagnostic messages streamed to stderr)
 
 A few more fields appear conditionally: `message` (the error text, when `kind` is `"error"`), and, when `kind` is `"tool-approval-required"`, `toolNames` (the tools awaiting approval) and `autoAcceptWouldRun` (whether `--mode auto-accept` would have run every blocked call; when false, only `--mode yolo` or `alwaysAllow` unblocks it).
 
