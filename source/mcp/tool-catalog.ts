@@ -3,16 +3,15 @@ import type {MCPTool, MCPToolCatalogEntry} from '@/types/mcp';
 /**
  * Sanitizes catalog tool names and descriptions to mitigate prompt injection
  * and ensure compact display in the prompt:
- * - Collapses newlines, carriage returns, tabs, and multiple spaces into a single space
+ * - Collapses whitespace (spaces, newlines, tabs, vertical tabs, Unicode separators) into a single space
  * - Strips HTML tags and markdown delimiters (`*_#~)
  * - Truncates to a maximum of 120 characters, appending '...' when truncated
  */
 export function sanitizeCatalogText(text: string): string {
 	if (!text) return '';
 	let sanitized = text
-		.replace(/[\r\n\t]+/g, ' ')
 		.replace(/[<>`*_#~]/g, '')
-		.replace(/\s{2,}/g, ' ')
+		.replace(/\s+/g, ' ')
 		.trim();
 	if (sanitized.length > 120) {
 		sanitized = `${sanitized.slice(0, 117)}...`;
@@ -23,19 +22,26 @@ export function sanitizeCatalogText(text: string): string {
 /**
  * Manages an index of available MCP tools for on-demand lazy discovery.
  * Prevents hydrating large JSON schemas into the prompt up-front.
+ * Supports layering over a parent catalog for ACP sessions so a session's
+ * disconnect or schema loading does not wipe or corrupt the parent catalog.
  */
 export class MCPToolCatalog {
 	private entries: Map<string, MCPToolCatalogEntry> = new Map();
+	private readonly parent?: MCPToolCatalog;
+
+	constructor(parent?: MCPToolCatalog) {
+		this.parent = parent;
+	}
 
 	/**
 	 * Registers an MCP tool into the catalog.
 	 */
 	add(serverName: string, tool: MCPTool, isLoaded = false): void {
-		const name = tool.name.replace(/[\r\n\t`]+/g, '').trim();
+		const name = tool.name.replace(/[\s`]+/g, '').trim();
 		const description = sanitizeCatalogText(
 			tool.description?.trim() || 'No description provided',
 		);
-		const cleanServerName = serverName.replace(/[\r\n\t`]+/g, '').trim();
+		const cleanServerName = serverName.replace(/[\s`]+/g, '').trim();
 		this.entries.set(name, {
 			name,
 			serverName: cleanServerName,
@@ -47,24 +53,34 @@ export class MCPToolCatalog {
 	}
 
 	/**
-	 * Retrieves an entry from the catalog by tool name.
+	 * Retrieves an entry from the catalog by tool name, falling back to parent catalog.
 	 */
 	get(name: string): MCPToolCatalogEntry | undefined {
-		return this.entries.get(name);
+		return this.entries.get(name) ?? this.parent?.get(name);
 	}
 
 	/**
-	 * Checks if a tool name exists in the catalog.
+	 * Checks if a tool name exists in the catalog or parent catalog.
 	 */
 	has(name: string): boolean {
-		return this.entries.has(name);
+		return this.entries.has(name) || (this.parent?.has(name) ?? false);
 	}
 
 	/**
-	 * Returns all catalog entries.
+	 * Returns all catalog entries, combining parent's and this layer's entries.
 	 */
 	getAll(): MCPToolCatalogEntry[] {
-		return Array.from(this.entries.values());
+		if (!this.parent) {
+			return Array.from(this.entries.values());
+		}
+		const merged = new Map<string, MCPToolCatalogEntry>();
+		for (const entry of this.parent.getAll()) {
+			merged.set(entry.name, entry);
+		}
+		for (const entry of this.entries.values()) {
+			merged.set(entry.name, entry);
+		}
+		return Array.from(merged.values());
 	}
 
 	/**
@@ -85,23 +101,29 @@ export class MCPToolCatalog {
 	 * Checks whether a tool is currently loaded.
 	 */
 	isLoaded(name: string): boolean {
-		return this.entries.get(name)?.isLoaded ?? false;
+		return this.get(name)?.isLoaded ?? false;
 	}
 
 	/**
 	 * Marks a tool as loaded in the catalog.
+	 * If the tool exists only in the parent catalog, shadows it locally so parent remains untouched.
 	 */
 	markLoaded(name: string): boolean {
-		const entry = this.entries.get(name);
-		if (entry) {
-			entry.isLoaded = true;
+		const local = this.entries.get(name);
+		if (local) {
+			local.isLoaded = true;
+			return true;
+		}
+		const parentEntry = this.parent?.get(name);
+		if (parentEntry) {
+			this.entries.set(name, {...parentEntry, isLoaded: true});
 			return true;
 		}
 		return false;
 	}
 
 	/**
-	 * Removes all tools belonging to a specific server (e.g. on disconnect or unhealthy).
+	 * Removes all tools belonging to a specific server in this catalog layer.
 	 */
 	removeServerTools(serverName: string): string[] {
 		const removed: string[] = [];
@@ -115,17 +137,17 @@ export class MCPToolCatalog {
 	}
 
 	/**
-	 * Clears the catalog.
+	 * Clears this layer's catalog entries without modifying the parent catalog.
 	 */
 	clear(): void {
 		this.entries.clear();
 	}
 
 	/**
-	 * Total number of catalog entries.
+	 * Total number of catalog entries visible.
 	 */
 	get size(): number {
-		return this.entries.size;
+		return this.getAll().length;
 	}
 
 	/**

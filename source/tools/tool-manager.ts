@@ -9,6 +9,7 @@ import {CustomToolLoader} from '@/custom-tools/loader';
 import type {MCPClient} from '@/mcp/mcp-client';
 import {MCPToolCatalog} from '@/mcp/tool-catalog';
 import {getAllToolExports} from '@/tools/index';
+import {createLoadToolSchemaTool} from '@/tools/mcp/load-tool-schema';
 import {getToolsForProfile, resolveToolProfile} from '@/tools/tool-profiles';
 import {ToolRegistry} from '@/tools/tool-registry';
 import type {TuneConfig} from '@/types/config';
@@ -29,16 +30,6 @@ import type {MCPHealthChange} from '@/types/mcp';
 import {getLogger} from '@/utils/logging';
 import {logWarning} from '@/utils/message-queue';
 import {getShutdownManager} from '@/utils/shutdown';
-
-let activeToolManager: ToolManager | null = null;
-
-export function setActiveToolManager(manager: ToolManager | null): void {
-	activeToolManager = manager;
-}
-
-export function getActiveToolManager(): ToolManager | null {
-	return activeToolManager;
-}
 
 /**
  * Filter knob for tool access methods. Default behavior hides scoped
@@ -167,14 +158,13 @@ export class ToolManager {
 	constructor(parent?: ToolManager) {
 		this.parent = parent;
 		this.mcpShutdownName = parent ? `mcp-client:${randomUUID()}` : 'mcp-client';
+		this.mcpCatalog = new MCPToolCatalog(parent?.mcpCatalog);
 		if (parent) {
 			this.registry = new ToolRegistry(parent.registry);
 			this.customTools = parent.customTools;
-			this.mcpCatalog = parent.mcpCatalog;
 			return;
 		}
 		this.registry = ToolRegistry.fromToolExports(getAllToolExports());
-		setActiveToolManager(this);
 
 		// Remove web_search if no Brave Search API key is configured
 		if (!getBraveSearchApiKey()) {
@@ -302,7 +292,10 @@ export class ToolManager {
 				this.mcpCatalog.add(tool.serverName, tool, !useDiscovery);
 			}
 
-			if (!useDiscovery) {
+			if (useDiscovery) {
+				this.registry.registerToolExport(createLoadToolSchemaTool(this));
+			} else {
+				this.registry.unregister('load_tool_schema');
 				this.registerMcpTools(mcpToolEntries);
 			}
 
@@ -660,6 +653,7 @@ export class ToolManager {
 		this.mcpHealthUnsubscribe?.();
 		this.mcpHealthUnsubscribe = null;
 		this.mcpCatalog.clear();
+		this.registry.unregister('load_tool_schema');
 		if (this.mcpClient) {
 			const mcpTools = this.mcpClient.getNativeToolsRegistry();
 			const mcpToolNames = Object.keys(mcpTools);

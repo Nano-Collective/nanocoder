@@ -1563,6 +1563,53 @@ test('mcp discovery keeps deferred tools in catalog until dynamically loaded', a
 	// Disconnect clears catalog
 	await manager.disconnectMCP();
 	t.is(catalog.size, 0);
+	t.false(manager.hasTool('load_tool_schema'));
+});
+
+test('forSession - ending a session does not wipe the shared base catalog', async t => {
+	const base = new ToolManager();
+	const mockTools = [
+		{
+			name: 'base_tool_1',
+			tool: {description: 'Base Tool 1', parameters: {type: 'object'}, execute: async () => '1'},
+			handler: async () => '1',
+			approval: 'always',
+		},
+		{
+			name: 'base_tool_2',
+			tool: {description: 'Base Tool 2', parameters: {type: 'object'}, execute: async () => '2'},
+			handler: async () => '2',
+			approval: 'always',
+		},
+	];
+
+	(base as any).createMCPClient = async () => ({
+		connectToServers: async () => [{serverName: 'shared-server', success: true, toolCount: 2}],
+		getToolEntries: () => mockTools,
+		getToolMapping: () => new Map(mockTools.map(t => [t.name, {serverName: 'shared-server', originalName: t.name, readOnly: false}])),
+		getNativeToolsRegistry: () => Object.fromEntries(mockTools.map(t => [t.name, t.tool])),
+		onHealthChange: () => () => {},
+		disconnect: async () => {},
+	});
+
+	await base.initializeMCP([{name: 'shared-server', transport: 'stdio'}], undefined, undefined, {mcpDiscovery: 'always'});
+
+	t.is(base.getMcpCatalog().size, 2);
+	t.true(base.hasTool('load_tool_schema'), 'discovery registered load_tool_schema on base');
+
+	const session = base.forSession();
+	t.is(session.getMcpCatalog().size, 2, 'session inherits parent catalog entries');
+
+	await session.disconnectMCP();
+
+	t.is(base.getMcpCatalog().size, 2, 'base catalog must retain all entries after session disconnect');
+	t.true(base.getMcpCatalog().has('base_tool_1'));
+	t.true(base.getMcpCatalog().has('base_tool_2'));
+});
+
+test('ToolManager - load_tool_schema is not registered when no MCP servers or discovery disabled', async t => {
+	const manager = new ToolManager();
+	t.false(manager.hasTool('load_tool_schema'), 'must not register load_tool_schema by default');
 });
 
 test('ToolManager on-demand discovery obeys tuneConfig.mcpDiscovery === "always" for < 8 tools', async t => {

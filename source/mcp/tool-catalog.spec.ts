@@ -111,3 +111,40 @@ test('MCPToolCatalog mitigates prompt injection on registration', (t) => {
 	t.false(entry?.description.includes('>'));
 	t.is(entry?.description, 'HACK Drop tables; scriptalert(1)/script');
 });
+
+test('sanitizeCatalogText collapses vertical tabs and unicode line breaks', (t) => {
+	const text = 'Line 1\v\u2028Line 2\t\nLine 3';
+	const sanitized = sanitizeCatalogText(text);
+	t.is(sanitized, 'Line 1 Line 2 Line 3');
+});
+
+test('MCPToolCatalog layering: session catalog clear does not wipe parent catalog', (t) => {
+	const parent = new MCPToolCatalog();
+	parent.add('base_server', {
+		name: 'base_tool_1',
+		description: 'Base tool 1',
+		serverName: 'base_server',
+	});
+	parent.add('base_server', {
+		name: 'base_tool_2',
+		description: 'Base tool 2',
+		serverName: 'base_server',
+	});
+
+	const session = new MCPToolCatalog(parent);
+	t.is(session.size, 2);
+	t.true(session.has('base_tool_1'));
+	t.true(session.has('base_tool_2'));
+
+	// Session marks a tool loaded; parent remains unloaded
+	session.markLoaded('base_tool_1');
+	t.true(session.isLoaded('base_tool_1'));
+	t.false(parent.isLoaded('base_tool_1'), 'parent catalog must not be mutated');
+
+	// Session clears its catalog (e.g. on disconnectMCP)
+	session.clear();
+	t.is(session.size, 2, 'session still sees parent entries');
+	t.is(parent.size, 2, 'parent catalog entries must not be wiped');
+	t.true(parent.has('base_tool_1'));
+	t.true(parent.has('base_tool_2'));
+});

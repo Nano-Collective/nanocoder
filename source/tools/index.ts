@@ -12,7 +12,6 @@ import {getGitTools} from '@/tools/git';
 import {listDirectoryTool} from '@/tools/list-directory';
 import {formatDocumentTool} from '@/tools/lsp-format-document';
 import {getDiagnosticsTool} from '@/tools/lsp-get-diagnostics';
-import {loadToolSchemaTool} from '@/tools/mcp/load-tool-schema';
 import {readFileTool} from '@/tools/read-file';
 import {searchFileContentsTool} from '@/tools/search-file-contents';
 import {checkSkillTool} from '@/tools/skill-check';
@@ -50,8 +49,6 @@ const staticTools: NanocoderToolExport[] = [
 	writeWalkthroughTool,
 	// Skill authoring linter
 	checkSkillTool,
-	// On-demand MCP tool discovery
-	loadToolSchemaTool,
 ];
 
 // Conditionally available tools (based on system capabilities).
