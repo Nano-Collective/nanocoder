@@ -76,6 +76,13 @@ function isEnoent(error: unknown): boolean {
 	return error instanceof Error && 'code' in error && error.code === 'ENOENT';
 }
 
+// Windows paths are case-insensitive, and process.cwd() keeps whatever case
+// the shell started with, so `c:\proj` and `C:\Proj` must match.
+function workingDirectoryKey(dir: string): string {
+	const resolved = path.resolve(dir); // nosemgrep
+	return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+}
+
 function toSessionMetadata(session: Session): SessionMetadata {
 	return {
 		id: session.id,
@@ -387,9 +394,9 @@ export class SessionManager {
 	}): Promise<SessionMetadata[]> {
 		const sessions = await this.readIndex();
 		if (options?.workingDirectory) {
-			const normalized = path.normalize(options.workingDirectory);
+			const key = workingDirectoryKey(options.workingDirectory);
 			return sessions.filter(
-				s => path.normalize(s.workingDirectory) === normalized,
+				s => workingDirectoryKey(s.workingDirectory) === key,
 			);
 		}
 		return sessions;
