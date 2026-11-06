@@ -56,6 +56,10 @@ export class ChatWebviewProvider
 	private readonly _queue = new PromptQueue();
 
 	private readonly _settingsManager: SettingsManager;
+	private _isResumingSession = false;
+	private _targetResumingSessionId?: string;
+	private _resumedSessionUpdates: any[] = [];
+	private _resumedArtifactsMeta: unknown = undefined;
 
 	constructor(
 		private readonly _extensionUri: vscode.Uri,
@@ -66,6 +70,23 @@ export class ChatWebviewProvider
 		this._settingsManager = new SettingsManager(this._outputChannel);
 		// Listen for session updates from ACP
 		this._acpClient.onSessionUpdate = (update: any) => {
+			const updateSessionId = update?.sessionId ?? update?.update?.sessionId;
+			const currentSessionId = this._acpClient.sessionId;
+			const isCurrentSessionUpdate = Boolean(
+				updateSessionId && currentSessionId && updateSessionId === currentSessionId
+			);
+
+			// Only buffer replay updates matching the target resumed session.
+			// Live updates from the current active/streaming session must stream through.
+			if (this._isResumingSession) {
+				const isTargetReplay = Boolean(
+					this._targetResumingSessionId && updateSessionId === this._targetResumingSessionId
+				);
+				if (isTargetReplay || (!updateSessionId && !isCurrentSessionUpdate)) {
+					this._resumedSessionUpdates.push(update);
+					return;
+				}
+			}
 			this._planReview.observeSessionUpdate(update);
 			if (this._artifacts.observeSessionUpdate(update)) {
 				this.postArtifacts();
@@ -78,6 +99,10 @@ export class ChatWebviewProvider
 		};
 
 		this._acpClient.onSessionArtifacts = (meta: unknown) => {
+			if (this._isResumingSession) {
+				this._resumedArtifactsMeta = meta;
+				return;
+			}
 			this._artifacts.replaceFromMeta(meta);
 			this.postArtifacts();
 		};
@@ -372,16 +397,7 @@ export class ChatWebviewProvider
 						this._broadcastSessions();
 						break;
 					case 'resumeSession':
-						this._outputChannel.appendLine(`[Webview] User resumed session: ${message.sessionId}`);
-						this._planReview.reset();
-						this._artifacts.reset();
-						void this._diffManager.clearPendingChanges();
-						this.postArtifacts();
-						this._discardQueuedPrompts('resume session');
-						this.postMessage({type: 'clear', isLoading: true});
-						this._acpClient.resumeSession(message.sessionId).finally(() => {
-							this.postMessage({type: 'sessionLoaded'});
-						});
+						await this.resumeSession(message.sessionId);
 						break;
 					case 'deleteSession':
 						this._outputChannel.appendLine(`[Webview] User deleted session: ${message.sessionId}`);
@@ -543,6 +559,70 @@ export class ChatWebviewProvider
 				type: 'connectionStatus',
 				status: 'error',
 				message: `Failed to initialize session: ${error}`,
+			});
+		}
+	}
+
+	public async resumeSession(sessionId: string): Promise<boolean> {
+		if (this._isResumingSession) {
+			this._outputChannel.appendLine('[Webview] Resume already in progress, ignoring request.');
+			return false;
+		}
+
+		this._outputChannel.appendLine(`[Webview] User resumed session: ${sessionId}`);
+		this._isResumingSession = true;
+		this._targetResumingSessionId = sessionId;
+		this._resumedSessionUpdates = [];
+		this._resumedArtifactsMeta = undefined;
+
+		this.postMessage({
+			type: 'sessionResuming',
+			isResuming: true,
+			sessionId,
+		});
+
+		try {
+			const success = await this._acpClient.resumeSession(sessionId);
+			if (success) {
+				this._planReview.reset();
+				void this._diffManager.clearPendingChanges();
+				if (this._resumedArtifactsMeta !== undefined) {
+					this._artifacts.replaceFromMeta(this._resumedArtifactsMeta);
+				} else {
+					this._artifacts.reset();
+				}
+				this.postArtifacts();
+				this._discardQueuedPrompts('resume session');
+				this.postMessage({type: 'clear', isLoading: true});
+
+				for (const update of this._resumedSessionUpdates) {
+					this._planReview.observeSessionUpdate(update);
+					if (this._artifacts.observeSessionUpdate(update)) {
+						this.postArtifacts();
+					}
+					this.handleDiffs(update);
+					this.postMessage({
+						type: 'acpUpdate',
+						update,
+					});
+				}
+				this.postMessage({type: 'sessionLoaded'});
+				return true;
+			} else {
+				this._outputChannel.appendLine(
+					`[Webview] Resume failed for session ${sessionId}; preserving current transcript.`,
+				);
+				return false;
+			}
+		} finally {
+			this._isResumingSession = false;
+			this._targetResumingSessionId = undefined;
+			this._resumedSessionUpdates = [];
+			this._resumedArtifactsMeta = undefined;
+			this.postMessage({
+				type: 'sessionResuming',
+				isResuming: false,
+				sessionId,
 			});
 		}
 	}
