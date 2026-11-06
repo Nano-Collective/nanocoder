@@ -10,6 +10,10 @@
  */
 
 import {openLLMSignInHint} from '@/ai-sdk-client/error-handling/error-parser.js';
+import {
+	isOpenLLMProvider,
+	openLLMUnreachableHint,
+} from '@/ai-sdk-client/error-handling/openllm-hints.js';
 import {formatError} from '@/utils/error-formatter';
 
 export interface FetchedModel {
@@ -138,6 +142,10 @@ export async function fetchModels(
 	} catch (err) {
 		if (err instanceof Error && err.name === 'AbortError') {
 			return {success: false, models: [], error: 'Connection timed out'};
+		}
+		const causeCode = (err as {cause?: {code?: unknown}})?.cause?.code;
+		if (causeCode === 'ECONNREFUSED' && isOpenLLMProvider(undefined, baseUrl)) {
+			return {success: false, models: [], error: openLLMUnreachableHint()};
 		}
 		return {
 			success: false,

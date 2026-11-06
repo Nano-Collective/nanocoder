@@ -1,5 +1,6 @@
 import {APICallError} from 'ai';
 import {extractRootError} from './error-extractor.js';
+import {isOpenLLMProvider, openLLMUnreachableHint} from './openllm-hints.js';
 
 interface APIErrorContext {
 	providerName?: string;
@@ -340,6 +341,12 @@ function parseAPIErrorInternal(
 		lowerMessage.includes('network error') ||
 		lowerMessage.includes('getaddrinfo')
 	) {
+		if (
+			networkCode === 'ECONNREFUSED' &&
+			isOpenLLMProvider(context?.providerName, context?.baseUrl)
+		) {
+			return openLLMUnreachableHint();
+		}
 		const hint = networkCode
 			? NETWORK_ERROR_HINTS[networkCode]
 			: 'Check that the model server is running and reachable.';

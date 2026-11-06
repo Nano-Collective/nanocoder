@@ -312,3 +312,29 @@ test('parseAPIError extracts first line from multiline errors', t => {
 	const result = parseAPIError(error);
 	t.is(result, 'First line');
 });
+
+test('parseAPIError gives an OpenLLM hint when the daemon refuses the connection', t => {
+	const error = new TypeError('fetch failed', {
+		cause: Object.assign(new Error('connect ECONNREFUSED 127.0.0.1:8787'), {
+			code: 'ECONNREFUSED',
+		}),
+	});
+	const result = parseAPIError(error, {
+		providerName: 'OpenLLM',
+		baseUrl: 'http://127.0.0.1:8787/v1',
+	});
+	t.true(result.startsWith('OpenLLM is not'));
+});
+
+test('parseAPIError keeps the generic connection hint for other providers', t => {
+	const error = new TypeError('fetch failed', {
+		cause: Object.assign(new Error('connect ECONNREFUSED 127.0.0.1:11434'), {
+			code: 'ECONNREFUSED',
+		}),
+	});
+	const result = parseAPIError(error, {
+		providerName: 'Ollama',
+		baseUrl: 'http://localhost:11434/v1',
+	});
+	t.true(result.startsWith('Connection failed'));
+});

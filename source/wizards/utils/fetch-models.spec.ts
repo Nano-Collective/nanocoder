@@ -104,3 +104,25 @@ test.serial('fetchModels keeps generic 401 message for other providers', async t
 	}
 });
 
+
+test.serial('fetchModels gives an OpenLLM hint when the daemon refuses the connection', async t => {
+	const originalFetch = globalThis.fetch;
+	globalThis.fetch = (async () => {
+		throw new TypeError('fetch failed', {
+			cause: Object.assign(new Error('connect ECONNREFUSED 127.0.0.1:8787'), {
+				code: 'ECONNREFUSED',
+			}),
+		});
+	}) as typeof fetch;
+
+	try {
+		const result = await fetchModels(
+			'http://127.0.0.1:8787/v1',
+			'openai-compatible',
+		);
+		t.false(result.success);
+		t.true(result.error?.startsWith('OpenLLM is not'));
+	} finally {
+		globalThis.fetch = originalFetch;
+	}
+});
