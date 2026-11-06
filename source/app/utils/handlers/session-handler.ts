@@ -83,7 +83,9 @@ export async function handleResumeCommand(
 			return true;
 		}
 
-		onResumeSession(result.session);
+		// Awaited so the command only completes once the client has switched to
+		// the session's provider and model; a queued prompt waits for it.
+		await onResumeSession(result.session);
 	} catch (error) {
 		onAddToChatQueue(
 			errorMsg(

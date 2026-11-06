@@ -34,7 +34,7 @@ export interface MessageSubmissionOptions {
 		currentMessageCount: number,
 	) => void;
 	onEnterSessionSelectorMode?: (showAll?: boolean) => void;
-	onResumeSession?: (session: Session) => void;
+	onResumeSession?: (session: Session) => void | Promise<void>;
 	onShowStatus: () => void;
 	onHandleChatMessage: (
 		message: string,
