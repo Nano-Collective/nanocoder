@@ -1,4 +1,5 @@
 import {CACHE_MODELS_EXPIRATION_MS} from '@/constants';
+import {filterMiniMaxModels} from '@/models/minimax-models';
 import {ModelEntry} from '@/types/index';
 import {logError} from '@/utils/message-queue';
 
@@ -303,13 +304,15 @@ export async function fetchModels(): Promise<ModelEntry[]> {
 	// Sort by created date (newest first)
 	models.sort((a, b) => (b.created || 0) - (a.created || 0));
 
+	const currentModels = filterMiniMaxModels(models, OPENROUTER_API);
+
 	// Update cache
 	modelCache = {
-		models,
+		models: currentModels,
 		timestamp: Date.now(),
 	};
 
-	return models;
+	return currentModels;
 }
 
 /**

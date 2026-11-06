@@ -728,6 +728,16 @@ test('minimax-coding template: sets sdkProvider to anthropic with minimax baseUr
 	t.deepEqual(config.models, ['MiniMax-M3']);
 });
 
+test('MiniMax template preserves explicitly saved legacy and custom model IDs', t => {
+	const template = PROVIDER_TEMPLATES.find(item => item.id === 'minimax-coding');
+	const config = template!.buildConfig({
+		apiKey: 'offline-test-key',
+		model: 'MiniMax-M2.7,custom-deployment',
+		providerName: 'My MiniMax',
+	});
+	t.deepEqual(config.models, ['MiniMax-M2.7', 'custom-deployment']);
+});
+
 test('no template id matches an sdkProvider value used by a different template', t => {
 	// This guards against the edit-lookup bug where matching by sdkProvider
 	// would resolve to the wrong template (e.g. MiniMax -> Anthropic Claude)
