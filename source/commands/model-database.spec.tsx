@@ -1,3 +1,4 @@
+import {readFileSync} from 'node:fs';
 import test from 'ava';
 import clipboard from 'clipboardy';
 import React from 'react';
@@ -108,6 +109,23 @@ test('modelDatabaseCommand: handler returns React element', async t => {
 	const result = await modelDatabaseCommand.handler([], [], {});
 	t.truthy(result);
 	t.true(React.isValidElement(result));
+});
+
+// Regression for #1775: modal-selectors.tsx imports this module at startup, so
+// a static `clipboardy` import would drag execa/get-stream/human-signals and
+// (via clipboard-image -> run-jxa -> macos-version) semver into the boot graph
+// for every session. The import must stay inside the copy handler.
+test('modelDatabaseCommand: clipboardy is imported lazily, not at module load', t => {
+	const source = readFileSync(
+		new URL('./model-database.tsx', import.meta.url),
+		'utf8',
+	);
+
+	t.false(
+		/^\s*import\s.*from\s+['"]clipboardy['"]/m.test(source),
+		'clipboardy must not be statically imported (see #1775)',
+	);
+	t.regex(source, /import\(\s*['"]clipboardy['"]\s*\)/);
 });
 
 // ============================================================================
