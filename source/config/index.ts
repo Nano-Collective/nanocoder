@@ -1,4 +1,4 @@
-import {existsSync, readFileSync} from 'fs';
+import {existsSync, readFileSync, statSync} from 'fs';
 import {join} from 'path';
 import {type CliMode, VALID_MODES} from '@/app/types';
 import {substituteEnvVars} from '@/config/env-substitution';
@@ -25,6 +25,7 @@ import {
 	MAX_TRUNCATED_TURNS,
 } from '@/constants';
 import {HOOK_EVENTS} from '@/types/config';
+import type {FirewallConfig} from '@/types/firewall';
 import type {
 	AppConfig,
 	AutoCompactConfig,
@@ -62,6 +63,37 @@ if (dotenvWarning) {
 	process.stderr.write(`${dotenvWarning}\n`);
 }
 
+type ConfigFileCacheEntry = {
+	mtimeMs: number;
+	size: number;
+	data: unknown;
+};
+
+const configFileCache = new Map<string, ConfigFileCacheEntry>();
+
+function readCachedConfigFile(configPath: string): unknown {
+	const stats = statSync(configPath);
+	const cached = configFileCache.get(configPath);
+
+	if (
+		cached &&
+		cached.mtimeMs === stats.mtimeMs &&
+		cached.size === stats.size
+	) {
+		return structuredClone(cached.data);
+	}
+
+	const data: unknown = JSON.parse(readFileSync(configPath, 'utf-8'));
+
+	configFileCache.set(configPath, {
+		mtimeMs: stats.mtimeMs,
+		size: stats.size,
+		data: structuredClone(data),
+	});
+
+	return data;
+}
+
 /**
  * Read a JSON config file and hand the parsed contents to `extract`. Returns
  * null when the file is missing, unparseable, or `extract` rejects it. The
@@ -78,7 +110,7 @@ function tryLoadConfig<T>(
 	}
 
 	try {
-		const config = JSON.parse(readFileSync(configPath, 'utf-8'));
+		const config = readCachedConfigFile(configPath);
 		return extract(config);
 	} catch (error) {
 		logError(
@@ -385,6 +417,18 @@ function loadAutoCommitConfig(): boolean {
 			}
 			return null;
 		}) ?? false
+	);
+}
+
+function loadFirewallConfig(): Partial<FirewallConfig> | undefined {
+	return (
+		loadHierarchicalConfig('agents.config.json', 'firewall', config => {
+			const fw = config.nanocoder?.firewall;
+			if (fw && typeof fw === 'object') {
+				return fw;
+			}
+			return null;
+		}) ?? undefined
 	);
 }
 
@@ -840,6 +884,8 @@ function loadAppConfig(): AppConfig {
 
 	const autoCommit = loadAutoCommitConfig();
 
+	const firewall = loadFirewallConfig();
+
 	// Load user-defined LSP servers (auto-discovery still runs alongside)
 	const lspServers = loadLspServersConfig();
 
@@ -865,6 +911,7 @@ function loadAppConfig(): AppConfig {
 		tune,
 		sandbox,
 		autoCommit,
+		firewall,
 	};
 }
 
@@ -928,12 +975,13 @@ export function getRetryLimits(): RetryLimitsConfig {
 
 // Function to reload the app configuration (useful after config file changes)
 export function reloadAppConfig(): void {
+	configFileCache.clear();
 	_appConfig = loadAppConfig();
 	_configGeneration++;
 }
 
-// Function to clear the cached app configuration (useful for testing)
 export function clearAppConfig(): void {
+	configFileCache.clear();
 	_appConfig = null;
 	_configGeneration++;
 }

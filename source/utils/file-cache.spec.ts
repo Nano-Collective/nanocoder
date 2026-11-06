@@ -534,6 +534,36 @@ test('getCachedFileContent - marks plain text content as not derived', async t =
 	}
 });
 
+test('getCachedFileContent - flags a file that is not valid UTF-8 (#1854)', async t => {
+	const tempDir = await createTempDir();
+	try {
+		const filePath = join(tempDir, 'legacy.txt');
+		// "café" in Latin-1: a lone E9 byte, which UTF-8 decoding turns into U+FFFD.
+		await writeFile(filePath, Buffer.from('caf\xe9\nold\n', 'latin1'));
+
+		const result = await getCachedFileContent(filePath);
+
+		t.true(result.notUtf8);
+		t.is(result.content, 'caf�\nold\n');
+	} finally {
+		await cleanupTempDir(tempDir);
+	}
+});
+
+test('getCachedFileContent - does not flag UTF-8 with non-ASCII text (#1854)', async t => {
+	const tempDir = await createTempDir();
+	try {
+		const filePath = join(tempDir, 'utf8.txt');
+		await writeFile(filePath, '﻿café ✓ 日本\n', 'utf-8');
+
+		const result = await getCachedFileContent(filePath);
+
+		t.false(result.notUtf8);
+	} finally {
+		await cleanupTempDir(tempDir);
+	}
+});
+
 test('getCachedFileContent - document extension check is case-insensitive', async t => {
 	const tempDir = await createTempDir();
 	try {
@@ -570,6 +600,31 @@ test.serial(
 			const result2 = await getCachedFileContent(filePath);
 			t.not(result1, result2);
 			t.is(getCacheSize(), 0);
+		} finally {
+			await cleanupTempDir(tempDir);
+		}
+	},
+);
+
+test.serial(
+	'getCachedFileContent - flags an oversized file that is not valid UTF-8, without caching it (#1854)',
+	async t => {
+		const tempDir = await createTempDir();
+		try {
+			// Over the single-file limit, so it takes the path that returns
+			// without caching. The Latin-1 E9 at the end is not valid UTF-8.
+			const filePath = join(tempDir, 'oversized-legacy.txt');
+			const filler = 'X'.repeat(MAX_CACHEABLE_FILE_SIZE_BYTES + 1024);
+			await writeFile(filePath, Buffer.from(`${filler}\ncaf\xe9\n`, 'latin1'));
+			const utf8Path = join(tempDir, 'oversized-utf8.txt');
+			await writeFile(utf8Path, `${filler}\ncafé\n`, 'utf-8');
+
+			const legacy = await getCachedFileContent(filePath);
+			const utf8 = await getCachedFileContent(utf8Path);
+
+			t.is(getCacheSize(), 0, 'both files take the uncached path');
+			t.true(legacy.notUtf8);
+			t.false(utf8.notUtf8);
 		} finally {
 			await cleanupTempDir(tempDir);
 		}
