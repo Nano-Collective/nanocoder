@@ -643,3 +643,27 @@ test('ChatWebviewProvider - _initializeSessionIfReady safely falls back when res
 	);
 	t.true(messages.some(m => m.type === 'connectionStatus' && m.status === 'connected'));
 });
+
+test('ChatWebviewProvider - _initializeSessionIfReady skips restart fallback when manual resume is already in progress', async (t) => {
+	const {provider, acpClient, getPostedMessages, resetPostedMessages} = makeStubs();
+	(provider as any)._isWebviewReady = true;
+	(acpClient as any).isHandshakeComplete = true;
+	acpClient.lastActiveSessionId = 'session-prior';
+	(provider as any)._isResumingSession = true;
+
+	resetPostedMessages();
+	await (provider as any)._initializeSessionIfReady();
+
+	const messages = getPostedMessages();
+	t.false(
+		messages.some(
+			m =>
+				m.type === 'appendMessage' &&
+				typeof m.content === 'string' &&
+				m.content.includes('restarted in a fresh session'),
+		),
+		'must not post fresh session restart announcement when manual resume is in progress',
+	);
+	t.false(messages.some(m => m.type === 'clear'), 'must not clear webview transcript');
+	t.true(messages.some(m => m.type === 'connectionStatus' && m.status === 'connected'));
+});

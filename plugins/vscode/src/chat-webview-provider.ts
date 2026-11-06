@@ -540,6 +540,13 @@ export class ChatWebviewProvider
 			});
 			return;
 		}
+		if (this._isResumingSession) {
+			this._outputChannel.appendLine(
+				'[Extension] Resume already in progress on ready; skipping restart fallback.',
+			);
+			this.postMessage({type: 'connectionStatus', status: 'connected'});
+			return;
+		}
 		this._isInitializingSession = true;
 		try {
 			const cwd = resolveExtensionCwd();
