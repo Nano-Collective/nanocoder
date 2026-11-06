@@ -22,7 +22,7 @@ sidebar_order: 31
 ## Setup
 
 1. [Create a PopNow API key](https://popnow.ai/api/console/keys)
-2. Set `POPNOW_API_KEY`, or paste the key into the wizard
+2. Paste the key into the wizard, or set `POPNOW_API_KEY` in your environment and reference it with `${POPNOW_API_KEY}`. Nanocoder resolves that reference; it does not read the variable automatically
 
 ## Models
 
