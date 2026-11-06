@@ -15,7 +15,6 @@ tools:
   - string_replace
   - git_add
   - git_commit
-  - execute_bash
   - git_pr
 ---
 
@@ -47,10 +46,10 @@ Keep it concise and cite specifics. This is advisory only.
 
 ## At `auto-fix` or `full-commit` trust
 
-You are running inside an isolated checkout dedicated to this fix attempt — nothing else depends on this working tree, so edit and run commands freely here. After diagnosing the root cause (as above):
+You are running inside an isolated checkout dedicated to this fix attempt — nothing else depends on this working tree, so edit freely here. You have no shell: you cannot run tests or builds. After diagnosing the root cause (as above):
 
 1. Implement the smallest change that fixes the failure. Don't refactor unrelated code or "improve" things beyond what's needed to make CI pass again.
-2. Verify your fix before committing: find the project's actual test/build command (check `package.json` scripts, CI workflow files, or `CLAUDE.md`/`README.md` — don't guess a generic command) and run it via `execute_bash`. If it still fails, keep iterating rather than committing a broken fix.
+2. Check your fix by reading, since you cannot run anything: re-read the changed code and the failing test or step, use `lsp_get_diagnostics` on edited files, and search for other callers your change affects. CI re-runs on the draft PR or push the harness makes, and that run is the real verification.
 3. Commit with `git_add` + `git_commit`, using a message in the form `fix(ci): <what was wrong>` and a body that references the workflow and run (e.g. `Fixes ${workflowName} failure in run #${runId}`).
 4. **Still never** call `git_pr` with `create`, `comment`, or `review` yourself, at either trust level — publishing (opening a draft PR at `auto-fix`, or pushing directly at `full-commit`) is always done by the harness after you finish, exactly like at `comment-only`. Attempting these calls will simply be denied.
-5. If you cannot find or verify a real fix, do not commit a guess — return the same diagnosis-only output described under `comment-only` above instead. An uncommitted, accurate diagnosis is more useful than an unverified commit.
+5. If you cannot find a fix you are confident in from the log and the code, do not commit a guess — return the same diagnosis-only output described under `comment-only` above instead. An uncommitted, accurate diagnosis is more useful than an unverified commit.

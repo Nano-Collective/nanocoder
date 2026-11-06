@@ -1,9 +1,12 @@
+import {statSync} from 'node:fs';
 import path from 'node:path';
 import {existsSync, mkdirSync, readFileSync} from 'fs';
 import type {TitleShape} from '@/components/ui/styled-title';
-import {getClosestConfigFile} from '@/config/index';
-import {getConfigPath} from '@/config/paths';
-import {describeProjectTrust} from '@/config/project-trust';
+import {getClosestConfigFile, getConfigPath} from '@/config/paths';
+import {
+	describeProjectTrust,
+	TRUST_FINGERPRINT_VERSION,
+} from '@/config/project-trust';
 import {
 	DEFAULT_MEMORY_LIMIT,
 	DEFAULT_TOKEN_BUDGET,
@@ -16,17 +19,37 @@ import {
 import type {
 	CiWatchConfig,
 	NotificationsConfig,
+	TrustedDirectoryRecord,
 	TuneConfig,
 } from '@/types/config';
 import type {UserPreferences} from '@/types/index';
 import type {NanocoderShape, ThemePreset} from '@/types/ui';
 import {atomicWriteFileSync} from '@/utils/atomic-write';
-import {logError} from '@/utils/message-queue';
+import {log} from '@/utils/logging';
 
 let PREFERENCES_PATH: string | null = null;
 let CACHED_CONFIG_DIR: string | undefined = undefined;
 let cachedVoicePreference: import('@/types/config').VoiceConfig | undefined;
+const PREFERENCES_STAT_INTERVAL_MS = 1000;
 
+type PreferencesCache = {
+	path: string;
+	version: number;
+	mtimeMs: number | null;
+	globalMtimeMs: number | null;
+	lastCheckedAt: number;
+	data: UserPreferences;
+};
+
+let preferencesCache: PreferencesCache | null = null;
+
+function getFileMtime(filePath: string): number | null {
+	try {
+		return statSync(filePath).mtimeMs;
+	} catch {
+		return null;
+	}
+}
 function getPreferencesPath(): string {
 	// Re-compute path if NANOCODER_CONFIG_DIR has changed (important for tests)
 	const currentConfigDir = process.env.NANOCODER_CONFIG_DIR;
@@ -43,6 +66,7 @@ export function resetPreferencesCache(): void {
 	PREFERENCES_PATH = null;
 	CACHED_CONFIG_DIR = undefined;
 	cachedVoicePreference = undefined;
+	preferencesCache = null;
 }
 
 // Trust is only ever read from, and written to, the global preferences file.
@@ -74,7 +98,7 @@ function readGlobalOnlyPreferences(): Partial<UserPreferences> | undefined {
 	try {
 		return JSON.parse(readFileSync(globalPath, 'utf-8')) as UserPreferences;
 	} catch (error) {
-		logError(`Failed to load global preferences: ${String(error)}`);
+		log.error(`Failed to load global preferences: ${String(error)}`);
 		return undefined;
 	}
 }
@@ -95,25 +119,108 @@ function writeGlobalOnlyPreferences(values: Partial<UserPreferences>): void {
 	);
 }
 
+/**
+ * The preferences kept only in the global file, read without opening a project
+ * preferences file in the current folder. For a caller that must not depend on
+ * what the folder contains, such as `nanocoder trust`: a project file that is
+ * unreadable or malformed cannot hide the trust list.
+ */
+export function loadGlobalOnlyPreferences(): UserPreferences {
+	const globalPrefs = readGlobalOnlyPreferences();
+	const values: Record<string, unknown> = {};
+	for (const key of GLOBAL_ONLY_KEYS) {
+		if (globalPrefs?.[key] !== undefined) values[key] = globalPrefs[key];
+	}
+	return values as UserPreferences;
+}
+
+/**
+ * Writes global-only keys to the global file and nothing else: a project
+ * preferences file in the current folder is neither read nor rewritten, so
+ * saving does not depend on the folder being writable. Returns `false` when
+ * the write failed.
+ */
+export function saveGlobalOnlyPreferences(
+	values: Partial<Pick<UserPreferences, (typeof GLOBAL_ONLY_KEYS)[number]>>,
+): boolean {
+	try {
+		writeGlobalOnlyPreferences(values);
+	} catch (error) {
+		log.error(`Failed to save global preferences: ${String(error)}`);
+		return false;
+	}
+
+	notifyPreferencesChanged();
+	return true;
+}
+
 export function loadPreferences(): UserPreferences {
 	try {
 		const preferencesPath = getPreferencesPath();
+		const version = getPreferencesVersion();
+		const now = Date.now();
+		const cache = preferencesCache;
+
+		// Internal writes invalidate immediately. Unchanged preferences
+		// avoid filesystem I/O until the next scheduled metadata check.
+		if (
+			cache &&
+			cache.path === preferencesPath &&
+			cache.version === version &&
+			now - cache.lastCheckedAt >= 0 &&
+			now - cache.lastCheckedAt < PREFERENCES_STAT_INTERVAL_MS
+		) {
+			return structuredClone(cache.data);
+		}
+
+		const mtimeMs = getFileMtime(preferencesPath);
+		const isProject = isProjectPreferencesPath(preferencesPath);
+		const globalMtimeMs = isProject
+			? getFileMtime(getGlobalPreferencesPath())
+			: null;
+
+		if (
+			cache &&
+			cache.path === preferencesPath &&
+			cache.version === version &&
+			mtimeMs !== null &&
+			cache.mtimeMs === mtimeMs &&
+			cache.globalMtimeMs === globalMtimeMs
+		) {
+			cache.lastCheckedAt = now;
+			return structuredClone(cache.data);
+		}
+
 		const data = JSON.parse(
 			readFileSync(preferencesPath, 'utf-8'),
 		) as UserPreferences;
-		if (isProjectPreferencesPath(preferencesPath)) {
+
+		if (isProject) {
 			const globalPrefs = readGlobalOnlyPreferences();
 			const mutable = data as Record<string, unknown>;
+
 			for (const key of GLOBAL_ONLY_KEYS) {
 				const value = globalPrefs?.[key];
+
 				if (value === undefined) delete mutable[key];
 				else mutable[key] = value;
 			}
 		}
+
+		preferencesCache = {
+			path: preferencesPath,
+			version,
+			mtimeMs,
+			globalMtimeMs,
+			lastCheckedAt: now,
+			data: structuredClone(data),
+		};
+
 		return data;
 	} catch (error) {
-		logError(`Failed to load preferences: ${String(error)}`);
+		log.error(`Failed to load preferences: ${String(error)}`);
 	}
+
 	return {};
 }
 
@@ -141,6 +248,18 @@ export function subscribeToPreferences(listener: () => void): () => void {
  */
 export function getPreferencesVersion(): number {
 	return preferencesVersion;
+}
+
+/**
+ * Invalidate cached preference data after a successful write and notify
+ * subscribers that the preference snapshot changed.
+ */
+export function notifyPreferencesChanged(): void {
+	preferencesCache = null;
+	preferencesVersion++;
+	for (const listener of preferencesListeners) {
+		listener();
+	}
 }
 
 // Caches a derived preference, keyed on NANOCODER_CONFIG_DIR and getPreferencesVersion()
@@ -185,15 +304,12 @@ export function savePreferences(preferences: UserPreferences): boolean {
 			);
 		}
 	} catch (error) {
-		logError(`Failed to save preferences: ${String(error)}`);
+		log.error(`Failed to save preferences: ${String(error)}`);
 		return false;
 	}
 
-	preferencesVersion++;
 	cachedVoicePreference = preferences.voice;
-	for (const listener of preferencesListeners) {
-		listener();
-	}
+	notifyPreferencesChanged();
 	return true;
 }
 
@@ -205,6 +321,11 @@ function trustPath(entry: unknown): string | null {
 		if (typeof entryPath === 'string') return entryPath;
 	}
 	return null;
+}
+
+/** Records saved before fingerprints were versioned are version 1. */
+function isCurrentFingerprintVersion(entry: TrustedDirectoryRecord): boolean {
+	return (entry.fingerprintVersion ?? 1) === TRUST_FINGERPRINT_VERSION;
 }
 
 /**
@@ -225,6 +346,7 @@ export function isDirectoryTrusted(
 			typeof entry === 'object' &&
 			entryPath !== null &&
 			path.resolve(entryPath) === resolved && // nosemgrep
+			isCurrentFingerprintVersion(entry) &&
 			entry.fingerprint === fingerprint
 		);
 	});
@@ -232,7 +354,8 @@ export function isDirectoryTrusted(
 
 /**
  * Why a folder with a trust entry is asked again: its fingerprint changed,
- * or the entry is a bare path saved before fingerprints existed.
+ * or the entry can't be compared (a bare path saved before fingerprints
+ * existed, or a fingerprint from another version).
  */
 export type TrustRecheck = 'changed' | 'upgrade';
 
@@ -246,7 +369,9 @@ export function trustRecheck(
 	for (const entry of preferences.trustedDirectories ?? []) {
 		const entryPath = trustPath(entry);
 		if (entryPath === null || path.resolve(entryPath) !== resolved) continue; // nosemgrep
-		if (typeof entry !== 'string') return 'changed';
+		if (typeof entry !== 'string') {
+			return isCurrentFingerprintVersion(entry) ? 'changed' : 'upgrade';
+		}
 		recheck = 'upgrade';
 	}
 	return recheck;
@@ -294,7 +419,11 @@ export function grantDirectoryTrust(
 			return entryPath === null || path.resolve(entryPath) !== resolved; // nosemgrep
 		},
 	);
-	trustedDirectories.push({path: resolved, fingerprint});
+	trustedDirectories.push({
+		path: resolved,
+		fingerprint,
+		fingerprintVersion: TRUST_FINGERPRINT_VERSION,
+	});
 	return {...preferences, trustedDirectories};
 }
 

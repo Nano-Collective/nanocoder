@@ -89,29 +89,67 @@ async function fetchLatestVersion(): Promise<string | null> {
 }
 
 /**
- * Update the last update check timestamp in preferences
+ * Record a successful check: its time, and the latest version it found so
+ * a throttled launch can still show the update banner.
  */
-function updateLastCheckTime(): void {
+function recordSuccessfulCheck(latestVersion: string): void {
 	const preferences = loadPreferences();
 	preferences.lastUpdateCheck = Date.now();
+	preferences.lastUpdateCheckLatestVersion = latestVersion;
 	savePreferences(preferences);
 }
 
 /**
  * Automatic checks run at most once every 24 hours after a successful check.
  * Future timestamps are ignored so a clock change cannot disable checks.
+ * Returns the latest version that check recorded (if any), or `null` when
+ * there is no recent successful check.
  */
-function hasRecentSuccessfulCheck(): boolean {
-	const lastUpdateCheck = loadPreferences().lastUpdateCheck;
+function getRecentSuccessfulCheck(): {latestVersion?: string} | null {
+	const {lastUpdateCheck, lastUpdateCheckLatestVersion} = loadPreferences();
 	const now = Date.now();
 
-	return (
+	const isRecent =
 		typeof lastUpdateCheck === 'number' &&
 		Number.isFinite(lastUpdateCheck) &&
 		lastUpdateCheck > 0 &&
 		lastUpdateCheck <= now &&
-		now - lastUpdateCheck < UPDATE_CHECK_INTERVAL_MS
-	);
+		now - lastUpdateCheck < UPDATE_CHECK_INTERVAL_MS;
+	if (!isRecent) return null;
+
+	return typeof lastUpdateCheckLatestVersion === 'string' &&
+		lastUpdateCheckLatestVersion.length > 0
+		? {latestVersion: lastUpdateCheckLatestVersion}
+		: {};
+}
+
+function getUpdateDetails(): {command?: string; message?: string} {
+	switch (detectInstallationMethod()) {
+		case 'npm':
+			return {command: UPDATE_COMMANDS.NPM};
+		case 'homebrew':
+			return {command: UPDATE_COMMANDS.HOMEBREW};
+		case 'nix':
+			return {message: UPDATE_MESSAGES.NIX};
+		default:
+			// For 'unknown' fallback to a general message (do not attempt to run a command)
+			return {message: UPDATE_MESSAGES.UNKNOWN};
+	}
+}
+
+function buildUpdateInfo(
+	currentVersion: string,
+	latestVersion: string,
+): UpdateInfo {
+	const hasUpdate = isNewerVersion(currentVersion, latestVersion);
+	const updateDetails = hasUpdate ? getUpdateDetails() : {};
+	return {
+		hasUpdate,
+		currentVersion,
+		latestVersion,
+		updateCommand: updateDetails.command,
+		updateMessage: updateDetails.message,
+	};
 }
 
 /**
@@ -129,20 +167,25 @@ export async function checkForUpdates(
 		return {hasUpdate: false, currentVersion};
 	}
 
-	if (
-		!options.force &&
-		(process.env.NANOCODER_NO_UPDATE_CHECK === '1' ||
-			hasRecentSuccessfulCheck())
-	) {
-		return {hasUpdate: false, currentVersion};
+	if (!options.force) {
+		if (process.env.NANOCODER_NO_UPDATE_CHECK === '1') {
+			return {hasUpdate: false, currentVersion};
+		}
+		const recentCheck = getRecentSuccessfulCheck();
+		if (recentCheck) {
+			// Throttled: no network call, but an update the last check found
+			// is still pending until the user installs it, so keep reporting
+			// it rather than hiding the banner for the rest of the window.
+			const cached = recentCheck.latestVersion;
+			if (cached && isNewerVersion(currentVersion, cached)) {
+				return buildUpdateInfo(currentVersion, cached);
+			}
+			return {hasUpdate: false, currentVersion};
+		}
 	}
 
 	try {
 		const latestVersion = await fetchLatestVersion();
-		if (latestVersion !== null) {
-			updateLastCheckTime();
-		}
-
 		if (!latestVersion) {
 			return {
 				hasUpdate: false,
@@ -150,42 +193,8 @@ export async function checkForUpdates(
 			};
 		}
 
-		const hasUpdate = isNewerVersion(currentVersion, latestVersion);
-
-		function getUpdateDetails(hasUpdate: boolean): {
-			command?: string;
-			message?: string;
-		} {
-			if (!hasUpdate) {
-				return {};
-			}
-
-			const method = detectInstallationMethod();
-
-			// Use constants defined at top of file for maintainability
-
-			switch (method) {
-				case 'npm':
-					return {command: UPDATE_COMMANDS.NPM};
-				case 'homebrew':
-					return {command: UPDATE_COMMANDS.HOMEBREW};
-				case 'nix':
-					return {message: UPDATE_MESSAGES.NIX};
-				default:
-					// For 'unknown' fallback to a general message (do not attempt to run a command)
-					return {message: UPDATE_MESSAGES.UNKNOWN};
-			}
-		}
-
-		const updateDetails = getUpdateDetails(hasUpdate);
-
-		return {
-			hasUpdate,
-			currentVersion,
-			latestVersion,
-			updateCommand: updateDetails.command,
-			updateMessage: updateDetails.message,
-		};
+		recordSuccessfulCheck(latestVersion);
+		return buildUpdateInfo(currentVersion, latestVersion);
 	} catch (error) {
 		const errorMessage = formatError(error);
 		getLogger().error({error: errorMessage}, 'Update check failed');

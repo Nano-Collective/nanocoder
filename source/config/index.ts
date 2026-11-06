@@ -1,5 +1,4 @@
-import {config as loadEnv} from 'dotenv';
-import {existsSync, mkdirSync, readFileSync, writeFileSync} from 'fs';
+import {existsSync, readFileSync, statSync} from 'fs';
 import {join} from 'path';
 import {type CliMode, VALID_MODES} from '@/app/types';
 import {substituteEnvVars} from '@/config/env-substitution';
@@ -13,6 +12,7 @@ import {
 	getNotificationsPreference,
 	loadPreferences,
 } from '@/config/preferences';
+import {ignoredDotenvWarning, loadProjectDotenv} from '@/config/project-dotenv';
 import {
 	DEFAULT_SESSION_CONFIG,
 	normalizeSessionConfig,
@@ -25,6 +25,7 @@ import {
 	MAX_TRUNCATED_TURNS,
 } from '@/constants';
 import {HOOK_EVENTS} from '@/types/config';
+import type {FirewallConfig} from '@/types/firewall';
 import type {
 	AppConfig,
 	AutoCompactConfig,
@@ -51,84 +52,46 @@ import {logError, logWarning} from '@/utils/message-queue';
 import {DEFAULT_SINGLE_LINE_PASTE_THRESHOLD} from '@/utils/paste-utils';
 import {isTrustLevel} from '@/verify/trust';
 
+export {confDirMap, getClosestConfigFile} from '@/config/paths';
 export {DEFAULT_SESSION_CONFIG} from '@/config/session-config';
 
-// Load .env file from working directory (shell environment takes precedence)
-// Suppress dotenv console output by temporarily redirecting stdout
-const envPath = join(process.cwd(), '.env');
-if (existsSync(envPath)) {
-	const originalWrite = process.stdout.write.bind(process.stdout);
-	process.stdout.write = () => true;
-	try {
-		loadEnv({path: envPath});
-	} finally {
-		process.stdout.write = originalWrite;
-	}
+// Load .env file from working directory (shell environment takes precedence).
+// Trust-related keys are dropped: this runs before the trust check.
+const dotenvResult = loadProjectDotenv(process.cwd());
+const dotenvWarning = ignoredDotenvWarning(dotenvResult.ignored);
+if (dotenvWarning) {
+	process.stderr.write(`${dotenvWarning}\n`);
 }
 
-// Hold a map of what config files are where
-export const confDirMap: Record<string, string> = {};
+type ConfigFileCacheEntry = {
+	mtimeMs: number;
+	size: number;
+	data: unknown;
+};
 
-// Find the closest config file for the requested configuration file
-export function getClosestConfigFile(fileName: string): string {
-	try {
-		const configDir = getConfigPath();
+const configFileCache = new Map<string, ConfigFileCacheEntry>();
 
-		// If NANOCODER_CONFIG_DIR is explicitly set, skip cwd and home checks
-		// and use only the config directory (important for tests and explicit overrides)
-		const isExplicitConfigDir = Boolean(process.env.NANOCODER_CONFIG_DIR);
+function readCachedConfigFile(configPath: string): unknown {
+	const stats = statSync(configPath);
+	const cached = configFileCache.get(configPath);
 
-		if (!isExplicitConfigDir) {
-			// First, lets check for a working directory config
-			const cwdPath = join(process.cwd(), fileName); // nosemgrep
-			if (existsSync(cwdPath)) {
-				// nosemgrep
-				confDirMap[fileName] = cwdPath; // nosemgrep
-
-				return cwdPath; // nosemgrep
-			}
-		}
-
-		// Last, lets look for an user level config.
-
-		// If the file doesn't exist, create it
-		const configPath = join(configDir, fileName); // nosemgrep
-		if (!existsSync(configPath)) {
-			// nosemgrep
-			createDefaultConfFile(configDir, fileName);
-		}
-
-		confDirMap[fileName] = configPath; // nosemgrep
-
-		return configPath; // nosemgrep
-	} catch (error) {
-		logError(`Failed to load ${fileName}: ${String(error)}`);
+	if (
+		cached &&
+		cached.mtimeMs === stats.mtimeMs &&
+		cached.size === stats.size
+	) {
+		return structuredClone(cached.data);
 	}
 
-	// The code should never hit this, but it makes the TS compiler happy.
-	return fileName;
-}
+	const data: unknown = JSON.parse(readFileSync(configPath, 'utf-8'));
 
-function createDefaultConfFile(filePath: string, fileName: string): void {
-	try {
-		// If we cant find any, lets assume this is the first user run, create the
-		// correct file and direct the user to configure them correctly,
-		const configFilePath = join(filePath, fileName); // nosemgrep
-		if (!existsSync(configFilePath)) {
-			// nosemgrep
-			// Maybe add a better sample config?
-			const sampleConfig = {};
+	configFileCache.set(configPath, {
+		mtimeMs: stats.mtimeMs,
+		size: stats.size,
+		data: structuredClone(data),
+	});
 
-			mkdirSync(filePath, {recursive: true});
-			writeFileSync(
-				configFilePath, // nosemgrep
-				JSON.stringify(sampleConfig, null, 2),
-				'utf-8',
-			);
-		}
-	} catch (error) {
-		logError(`Failed to write ${filePath}: ${String(error)}`);
-	}
+	return data;
 }
 
 /**
@@ -147,7 +110,7 @@ function tryLoadConfig<T>(
 	}
 
 	try {
-		const config = JSON.parse(readFileSync(configPath, 'utf-8'));
+		const config = readCachedConfigFile(configPath);
 		return extract(config);
 	} catch (error) {
 		logError(
@@ -454,6 +417,18 @@ function loadAutoCommitConfig(): boolean {
 			}
 			return null;
 		}) ?? false
+	);
+}
+
+function loadFirewallConfig(): Partial<FirewallConfig> | undefined {
+	return (
+		loadHierarchicalConfig('agents.config.json', 'firewall', config => {
+			const fw = config.nanocoder?.firewall;
+			if (fw && typeof fw === 'object') {
+				return fw;
+			}
+			return null;
+		}) ?? undefined
 	);
 }
 
@@ -909,6 +884,8 @@ function loadAppConfig(): AppConfig {
 
 	const autoCommit = loadAutoCommitConfig();
 
+	const firewall = loadFirewallConfig();
+
 	// Load user-defined LSP servers (auto-discovery still runs alongside)
 	const lspServers = loadLspServersConfig();
 
@@ -934,6 +911,7 @@ function loadAppConfig(): AppConfig {
 		tune,
 		sandbox,
 		autoCommit,
+		firewall,
 	};
 }
 
@@ -997,12 +975,13 @@ export function getRetryLimits(): RetryLimitsConfig {
 
 // Function to reload the app configuration (useful after config file changes)
 export function reloadAppConfig(): void {
+	configFileCache.clear();
 	_appConfig = loadAppConfig();
 	_configGeneration++;
 }
 
-// Function to clear the cached app configuration (useful for testing)
 export function clearAppConfig(): void {
+	configFileCache.clear();
 	_appConfig = null;
 	_configGeneration++;
 }

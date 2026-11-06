@@ -299,10 +299,18 @@ test.serial(
 			const {lastFrame, unmount} = renderWithTheme(<>{components}</>);
 			const output = lastFrame();
 			t.truthy(output);
-			// Branch label sits on a line by itself, separated from the
-			// provider/model line by a newline. Strip ANSI so color codes
-			// (present when CI forces color) don't break the adjacency match.
-			t.regex(stripAnsi(output!), /test-model[^\n]*\n\S+.*\s+·\s+\S+/);
+			// Branch label sits below the provider/model line, not beside it.
+			// Strip ANSI so color codes (present when CI forces color) don't
+			// break the match. The workspace path can itself wrap in a deep
+			// checkout, so look for the ' · branch' on any later line rather
+			// than on the very next one.
+			const lines = stripAnsi(output!).split('\n');
+			const modelLine = lines.findIndex(line => line.includes('test-model'));
+			t.true(modelLine >= 0);
+			t.regex(lines[modelLine] ?? '', /test-model\s*$/);
+			t.true(
+				lines.slice(modelLine + 1).some(line => /\S\s+·\s+\S/.test(line)),
+			);
 			unmount();
 		} finally {
 			process.stdout.columns = originalColumns;

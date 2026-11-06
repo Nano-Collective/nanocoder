@@ -1,4 +1,5 @@
 import type {CustomCommandLoader} from '@/custom-commands/loader';
+import {invalidArgumentsResult} from '@/hooks/chat-handler/utils/tool-filters';
 import {maybeAutoCommit} from '@/services/auto-commit';
 import {formatWrittenFile} from '@/services/formatters';
 import {
@@ -61,11 +62,19 @@ export async function processToolUse(
 		throw new Error(args.error);
 	}
 
+	// Unparsable arguments arrive as `{}`. The conversation loops reject these
+	// calls before they get here; this keeps any other caller from running the
+	// tool with that placeholder.
+	if (toolCall.argumentsError !== undefined) {
+		return invalidArgumentsResult(toolCall);
+	}
+
 	if (!toolRegistryGetter) {
 		throw new Error('Tool registry not initialized');
 	}
 
-	const toolRegistry = toolRegistryGetter();
+	const toolRegistry =
+		options?.toolManager?.getToolRegistry() ?? toolRegistryGetter();
 	const handler = toolRegistry[toolCall.function.name];
 	if (!handler) {
 		throw new Error(`Unknown tool: ${toolCall.function.name}`);

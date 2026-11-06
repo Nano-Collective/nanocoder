@@ -3,7 +3,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { type ExecutionContext } from "ava";
 import { clearAppConfig, reloadAppConfig } from "@/config/index";
-import { describeProjectTrust } from "@/config/project-trust";
+import {
+	describeProjectTrust,
+	TRUST_FINGERPRINT_VERSION,
+} from "@/config/project-trust";
 import {
 	clearPendingHookContext,
 	resetSessionStartHooks,
@@ -14,7 +17,8 @@ import { setProjectRoot } from "@/services/session-cwd";
 import type { HooksConfig } from "@/types/config";
 import { TOOL_APPROVAL_REQUIRED_KIND } from "@/constants";
 import type { ToolManager } from "@/tools/tool-manager";
-import type { LLMClient } from "@/types/core";
+import type { DevelopmentMode, LLMClient } from "@/types/core";
+import { logError, logWarning } from "@/utils/message-queue";
 import { ShutdownManager } from "@/utils/shutdown";
 import type { PlainConversationOutcome } from "./conversation.js";
 import { runPlainShell } from "./shell.js";
@@ -438,7 +442,7 @@ test.serial(
 );
 
 test.serial(
-	"--json tool-approval-required outcome emits exit code 2 and toolNames",
+	"--json tool-approval-required outcome emits exit code 2, toolNames and autoAcceptWouldRun",
 	async (t) => {
 		const shutdown: CapturedShutdown = { code: null };
 		const stdout = capturingStdout();
@@ -453,6 +457,7 @@ test.serial(
 					runPlainConversation: makeFakeRunPlainConversation({
 						kind: TOOL_APPROVAL_REQUIRED_KIND,
 						toolNames: ["risky_tool"],
+						autoAcceptWouldRun: false,
 						finalText: "",
 						reasoning: null,
 						steps: 1,
@@ -469,6 +474,7 @@ test.serial(
 		t.is(report.kind, TOOL_APPROVAL_REQUIRED_KIND);
 		t.is(report.exitCode, 2);
 		t.deepEqual(report.toolNames, ["risky_tool"]);
+		t.is(report.autoAcceptWouldRun, false);
 		t.is(shutdown.code, 2);
 	},
 );
@@ -718,6 +724,7 @@ test.serial(
 			{
 				path: process.cwd(),
 				fingerprint: describeProjectTrust(process.cwd()).fingerprint,
+				fingerprintVersion: TRUST_FINGERPRINT_VERSION,
 			},
 		]);
 	},
@@ -919,39 +926,87 @@ test.serial(
 	},
 );
 
+async function runTextApprovalRequired(
+	developmentMode: DevelopmentMode,
+	toolNames: string[],
+	autoAcceptWouldRun: boolean,
+): Promise<{ stderr: string; code: number | null }> {
+	const shutdown: CapturedShutdown = { code: null };
+	const stdout = capturingStdout();
+	const stderr = capturingStderr();
+	try {
+		await runPlainShell({
+			prompt: "do the thing",
+			developmentMode,
+			trustDirectory: true,
+			outputFormat: "text",
+			deps: baseDeps({
+				initializePlain: makeFakeInitializePlain(),
+				runPlainConversation: makeFakeRunPlainConversation({
+					kind: TOOL_APPROVAL_REQUIRED_KIND,
+					toolNames,
+					autoAcceptWouldRun,
+					finalText: "",
+					reasoning: null,
+					steps: 1,
+					toolCalls: [],
+				}),
+				getShutdownManager: makeFakeShutdownManager(shutdown),
+			}),
+		});
+	} finally {
+		stdout.restore();
+		stderr.restore();
+	}
+	return { stderr: stderr.get(), code: shutdown.code };
+}
+
 test.serial(
 	"text tool-approval-required outcome writes guidance to stderr with exit code 2",
 	async (t) => {
-		const shutdown: CapturedShutdown = { code: null };
-		const stdout = capturingStdout();
-		const stderr = capturingStderr();
-		try {
-			await runPlainShell({
-				prompt: "do the thing",
-				developmentMode: "auto-accept",
-				trustDirectory: true,
-				outputFormat: "text",
-				deps: baseDeps({
-					initializePlain: makeFakeInitializePlain(),
-					runPlainConversation: makeFakeRunPlainConversation({
-						kind: TOOL_APPROVAL_REQUIRED_KIND,
-						toolNames: ["risky_tool"],
-						finalText: "",
-						reasoning: null,
-						steps: 1,
-						toolCalls: [],
-					}),
-					getShutdownManager: makeFakeShutdownManager(shutdown),
-				}),
-			});
-		} finally {
-			stdout.restore();
-			stderr.restore();
-		}
+		const { stderr, code } = await runTextApprovalRequired(
+			"normal",
+			["risky_tool"],
+			true,
+		);
 
-		t.regex(stderr.get(), /Tool approval required for: risky_tool/);
-		t.regex(stderr.get(), /auto-accept|yolo/);
-		t.is(shutdown.code, 2);
+		t.regex(stderr, /Tool approval required for: risky_tool/);
+		t.regex(stderr, /--mode auto-accept or --mode yolo/);
+		t.is(code, 2);
+	},
+);
+
+test.serial(
+	"text tool-approval-required in auto-accept does not suggest --mode auto-accept",
+	async (t) => {
+		const { stderr, code } = await runTextApprovalRequired(
+			"auto-accept",
+			["execute_bash"],
+			false,
+		);
+
+		t.regex(stderr, /Tool approval required for: execute_bash/);
+		t.false(stderr.includes("--mode auto-accept"));
+		t.regex(stderr, /--mode yolo/);
+		t.is(code, 2);
+	},
+);
+
+test.serial(
+	"text tool-approval-required shows alwaysAllow nested under nanocoder",
+	async (t) => {
+		const { stderr } = await runTextApprovalRequired(
+			"auto-accept",
+			["execute_bash", "file_op", "execute_bash"],
+			false,
+		);
+
+		t.true(
+			stderr.includes(
+				'{"nanocoder": {"alwaysAllow": ["execute_bash", "file_op"]}}',
+			),
+		);
+		t.regex(stderr, /Tool approval required for: execute_bash, file_op\./);
 	},
 );
 
@@ -1380,5 +1435,157 @@ test.serial(
 		);
 		t.is(run.exitCode, 1);
 		t.is(run.sessionEnd, "end", "session-end must run on the error path");
+	},
+);
+
+test.serial("plain shell initializes with the run's development mode", async (t) => {
+	const stdout = capturingStdout();
+	let initOptions: { developmentMode?: string } | undefined;
+	try {
+		await runPlainShell({
+			prompt: "do the thing",
+			developmentMode: "plan",
+			trustDirectory: true,
+			outputFormat: "json",
+			deps: baseDeps({
+				initializePlain: async (options) => {
+					initOptions = options;
+					return makeFakeInitializePlain()();
+				},
+				runPlainConversation: async () => ({
+					kind: "success",
+					finalText: "done",
+					reasoning: null,
+					steps: 1,
+					toolCalls: [],
+				}),
+				getShutdownManager: makeFakeShutdownManager({ code: null }),
+			}),
+		});
+	} finally {
+		stdout.restore();
+	}
+
+	// Subagents are built from this, so a plan-mode run can't hand them
+	// the editing tools its own agent is not offered.
+	t.is(initOptions?.developmentMode, "plan");
+});
+
+test.serial(
+	"plain shell captures logWarning and logError to stderr and includes warnings in json report",
+	async (t) => {
+		const stdout = capturingStdout();
+		const stderr = capturingStderr();
+		try {
+			await runPlainShell({
+				prompt: "test warning capture",
+				developmentMode: "yolo",
+				trustDirectory: true,
+				outputFormat: "json",
+				deps: baseDeps({
+					initializePlain: async () => {
+						logWarning("Invalid hooks config: unknown lifecycle event 'post-tool-uze'.");
+						logWarning("Invalid formatters config: entries need a 'command' string.");
+						logError("Plugin bad.mjs failed to load: boom from plugin");
+						return {
+							client: FAKE_CLIENT,
+							toolManager: FAKE_TOOL_MANAGER,
+							provider: "fake-provider",
+							model: "fake-model",
+						};
+					},
+					runPlainConversation: async () => ({
+						kind: "success",
+						finalText: "done",
+						reasoning: null,
+						steps: 1,
+						toolCalls: [],
+					}),
+				}),
+			});
+		} finally {
+			stdout.restore();
+			stderr.restore();
+		}
+
+		const stderrOutput = stderr.get();
+		t.true(stderrOutput.includes("unknown lifecycle event 'post-tool-uze'"));
+		t.true(stderrOutput.includes("entries need a 'command' string"));
+		t.true(stderrOutput.includes("Plugin bad.mjs failed to load: boom from plugin"));
+
+		const jsonOutput = JSON.parse(stdout.get());
+		t.is(jsonOutput.kind, "success");
+		t.truthy(jsonOutput.warnings);
+		t.is(jsonOutput.warnings.length, 3);
+		t.true(jsonOutput.warnings[0].includes("unknown lifecycle event 'post-tool-uze'"));
+		t.true(jsonOutput.warnings[1].includes("entries need a 'command' string"));
+		t.true(jsonOutput.warnings[2].includes("Plugin bad.mjs failed to load: boom from plugin"));
+	},
+);
+
+test.serial(
+	"plain shell includes collected warnings in prompt-gate-blocked json report",
+	async (t) => {
+		const previousCwd = process.cwd();
+		const previousConfigDir = process.env.NANOCODER_CONFIG_DIR;
+		mkdirSync(HOOK_DIR, { recursive: true });
+		process.env.NANOCODER_CONFIG_DIR = join(HOOK_DIR, "no-global-config");
+		process.chdir(HOOK_DIR);
+		setProjectRoot(HOOK_DIR);
+		clearPendingHookContext();
+		resetSessionStartHooks();
+
+		const stdout = capturingStdout();
+		const stderr = capturingStderr();
+		try {
+			withPlainHooks({
+				"user-prompt-submit": [
+					{
+						name: "veto-guard",
+						command: hookNode("console.log('prompt rejected by policy');process.exit(1)"),
+					},
+				],
+			});
+			await runPlainShell({
+				prompt: "blocked prompt",
+				developmentMode: "yolo",
+				trustDirectory: true,
+				outputFormat: "json",
+				deps: baseDeps({
+					initializePlain: async () => {
+						logWarning("Some startup warning");
+						return {
+							client: FAKE_CLIENT,
+							toolManager: FAKE_TOOL_MANAGER,
+							provider: "fake-provider",
+							model: "fake-model",
+						};
+					},
+				}),
+			});
+		} finally {
+			stdout.restore();
+			stderr.restore();
+			process.chdir(previousCwd);
+			if (previousConfigDir === undefined) {
+				delete process.env.NANOCODER_CONFIG_DIR;
+			} else {
+				process.env.NANOCODER_CONFIG_DIR = previousConfigDir;
+			}
+			setProjectRoot(previousCwd);
+			clearAppConfig();
+			clearPendingHookContext();
+			resetSessionStartHooks();
+		}
+
+		const stderrOutput = stderr.get();
+		t.true(stderrOutput.includes("Some startup warning"));
+
+		const jsonOutput = JSON.parse(stdout.get());
+		t.is(jsonOutput.kind, "error");
+		t.truthy(jsonOutput.warnings);
+		t.is(jsonOutput.warnings.length, 1);
+		t.is(jsonOutput.warnings[0], "Some startup warning");
+		t.true(jsonOutput.message.includes("prompt rejected by policy"));
 	},
 );

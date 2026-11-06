@@ -33,6 +33,7 @@ import {
 	isTrustLevel,
 } from '@/verify/trust';
 import {startDaemon} from './daemon';
+import {prepareDaemonSession} from './entry-setup';
 
 // The daemon's own `verify-ci-investigator` subagent must be pinned to a
 // trust-level tool allowlist at execution time rather than trusting its
@@ -89,6 +90,10 @@ async function main(): Promise<void> {
 	if (notificationsConfig) {
 		setNotificationsConfig(notificationsConfig);
 	}
+
+	// Plugins (trusted: the start command's gate already ran) and the
+	// auto-commit message client, as the TUI and --plain set them up.
+	await prepareDaemonSession(client);
 
 	const toolManager = new ToolManager();
 
@@ -159,17 +164,22 @@ async function main(): Promise<void> {
 	// Connect the project's MCP servers so triggered runs can use MCP tools,
 	// as the TUI and --plain do. A server that fails to connect is logged and
 	// skipped rather than taking the daemon down.
-	const {mcpServers} = getAppConfig();
+	const {mcpServers, tune} = getAppConfig();
 	if (mcpServers && mcpServers.length > 0) {
 		validateProjectConfigSecurity(mcpServers);
 		try {
-			await toolManager.initializeMCP(mcpServers, result => {
-				if (!result.success) {
-					console.error(
-						`MCP server failed: ${result.serverName} (${result.error})`,
-					);
-				}
-			});
+			await toolManager.initializeMCP(
+				mcpServers,
+				result => {
+					if (!result.success) {
+						console.error(
+							`MCP server failed: ${result.serverName} (${result.error})`,
+						);
+					}
+				},
+				undefined,
+				tune,
+			);
 		} catch (err) {
 			console.error(`MCP initialization error: ${formatError(err)}`);
 		}
