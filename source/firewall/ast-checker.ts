@@ -94,7 +94,11 @@ interface AnyOccurrence {
 	text: string;
 }
 
-function extractAnyAnchor(line: string, matchIndex: number, matchText: string): string {
+function extractAnyAnchor(
+	line: string,
+	matchIndex: number,
+	matchText: string,
+): string {
 	const before = line.slice(0, matchIndex).trim();
 	// Check if there is an identifier preceding ': any' or 'as any'
 	const idMatch = /([a-zA-Z0-9_$]+)\s*[:=]?\s*$/.exec(before);
@@ -122,7 +126,11 @@ function findAnyOccurrencesLexical(code: string): AnyOccurrence[] {
 		const line = lines[i];
 		let match = anyPattern.exec(line);
 		while (match !== null) {
-			const anchor = extractAnyAnchor(origLines[i] ?? '', match.index, match[0]);
+			const anchor = extractAnyAnchor(
+				origLines[i] ?? '',
+				match.index,
+				match[0],
+			);
 			occurrences.push({
 				line: i + 1,
 				anchor,
@@ -171,7 +179,9 @@ export function detectAnyTypeInjections(
 	// If total count did not increase and no net-new identifiers were annotated with 'any',
 	// permit the edit (e.g. modifying other expressions on an existing line with 'any').
 	if (newAnys.length <= oldAnys.length) {
-		const hasNetNewIdentifiers = newlyInjected.some(a => !oldAnchorCounts.has(a.anchor));
+		const hasNetNewIdentifiers = newlyInjected.some(
+			a => !oldAnchorCounts.has(a.anchor),
+		);
 		if (!hasNetNewIdentifiers) {
 			return [];
 		}
