@@ -12,8 +12,8 @@ export function formatCompactTokenCount(tokens: number): string {
 	if (!Number.isFinite(tokens) || tokens <= 0) {
 		return '0';
 	}
-	// Units switch at the rounding points, so 999.6 is "1k" rather than "1000"
-	// and 999,600 is "1M" rather than "1000k".
+	// Switch to the next unit where the current one would round up to 1000
+	// (999.5 and 999,500), so 999.6 is "1k" and 999,600 is "1M".
 	if (tokens < 999.5) {
 		return String(Math.round(tokens));
 	}
