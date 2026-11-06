@@ -42,6 +42,36 @@ const INIT_FLAGS_WITHOUT_VALUES = [
 	'-h',
 ] as const;
 
+/** The options a scan accepts. */
+interface FlagSet {
+	readonly withValues: readonly string[];
+	readonly withoutValues: readonly string[];
+}
+
+/** Flags whose value may legitimately start with `-` (a negative number). */
+const NEGATIVE_VALUE_FLAGS = new Set(['--context-max', '--vscode-port']);
+
+const GLOBAL_FLAGS: FlagSet = {
+	withValues: [...FLAGS_WITH_VALUES],
+	withoutValues: [...FLAGS_WITHOUT_VALUES],
+};
+
+/**
+ * `nanocoder review` accepts the `run` flags — exactly the list
+ * `review-cli.ts` filters its positionals with, so the scan and the parser
+ * cannot drift apart.
+ */
+const REVIEW_FLAGS: FlagSet = {
+	withValues: RUN_FLAGS_WITH_VALUES,
+	withoutValues: RUN_FLAGS_STANDALONE,
+};
+
+/** `init` only honours its own options; global flags are not valid here. */
+const INIT_FLAGS: FlagSet = {
+	withValues: INIT_FLAGS_WITH_VALUES,
+	withoutValues: INIT_FLAGS_WITHOUT_VALUES,
+};
+
 function editDistance(left: string, right: string): number {
 	const row = Array.from({length: right.length + 1}, (_, index) => index);
 	for (let i = 1; i <= left.length; i++) {
@@ -138,20 +168,23 @@ interface ScannedArgs {
 	error?: string;
 }
 
-/** Extra options a subcommand adds on top of the global set. */
-interface SubcommandFlags {
-	withValues?: readonly string[];
-	withoutValues?: readonly string[];
-}
-
 /**
  * Whether `value` can be the value of the preceding option. A negative number
- * counts, so `--context-max -5` reaches value validation and reports an
- * invalid value instead of being read as an unknown `-5` flag.
+ * counts only for the numeric flags (`--context-max -5`), so it reaches value
+ * validation instead of being read as an unknown `-5` flag, while free-form
+ * flags such as `--provider` keep rejecting it.
  */
-function isValueToken(value: string | undefined): boolean {
-	if (!value || value === 'run') return false;
-	return !value.startsWith('-') || /^-\d/.test(value);
+function isValueToken(
+	value: string | undefined,
+	allowNegativeNumber: boolean,
+): boolean {
+	if (value === undefined || value === 'run') return false;
+	// An explicitly empty argument is still this flag's value: consuming it
+	// lets the flag's own validation report the empty value instead of the
+	// scanner mistaking it for a command or positional.
+	if (value === '') return true;
+	if (!value.startsWith('-')) return true;
+	return allowNegativeNumber && /^-\d/.test(value);
 }
 
 /** Walk `args[start..end)`, skipping known options and their values. */
@@ -159,25 +192,23 @@ function scanArgs(
 	args: string[],
 	start: number,
 	end: number,
-	subcommand: SubcommandFlags = {},
+	flags: FlagSet = GLOBAL_FLAGS,
 ): ScannedArgs {
-	const withValues = [...FLAGS_WITH_VALUES, ...(subcommand.withValues ?? [])];
-	const withoutValues = [
-		...FLAGS_WITHOUT_VALUES,
-		...(subcommand.withoutValues ?? []),
-	];
 	const positionals: number[] = [];
 	for (let i = start; i < end; i++) {
 		const arg = args[i];
-		if (withValues.includes(arg)) {
-			if (isValueToken(args[i + 1])) i++;
+		if (flags.withValues.includes(arg)) {
+			if (isValueToken(args[i + 1], NEGATIVE_VALUE_FLAGS.has(arg))) i++;
 			continue;
 		}
-		if (withValues.some(flag => arg.startsWith(`${flag}=`))) {
+		if (flags.withValues.some(flag => arg.startsWith(`${flag}=`))) {
 			continue;
 		}
-		if (withoutValues.includes(arg)) {
-			if ((arg === '--resume' || arg === '-r') && isValueToken(args[i + 1])) {
+		if (flags.withoutValues.includes(arg)) {
+			if (
+				(arg === '--resume' || arg === '-r') &&
+				isValueToken(args[i + 1], false)
+			) {
 				i++;
 			}
 			continue;
@@ -185,7 +216,10 @@ function scanArgs(
 		if (arg.startsWith('-')) {
 			return {
 				positionals,
-				error: unknownOptionError(arg, withValues.concat(withoutValues)),
+				error: unknownOptionError(arg, [
+					...flags.withValues,
+					...flags.withoutValues,
+				]),
 			};
 		}
 		positionals.push(i);
@@ -226,15 +260,14 @@ export function parseWorktreeArgs(
 }
 
 /**
- * Reject misspelled options for `nanocoder init`. `init` has its own fast path
- * in `cli.tsx` that runs before the global scan, so it calls this directly;
- * sharing the scanner keeps both entry points reporting the same errors.
+ * Reject options `nanocoder init` does not honour. `init` has its own fast
+ * path in `cli.tsx` that runs before the global scan, so it calls this
+ * directly with its own flag set: a global flag such as `--provider` is just
+ * as unsupported here as a misspelled one, and accepting it would silently
+ * ignore it — the bug this validation exists to prevent.
  */
 export function validateInitArgs(args: string[]): string | undefined {
-	const {error} = scanArgs(args, 1, args.length, {
-		withValues: INIT_FLAGS_WITH_VALUES,
-		withoutValues: INIT_FLAGS_WITHOUT_VALUES,
-	});
+	const {error} = scanArgs(args, 1, args.length, INIT_FLAGS);
 	return error;
 }
 
@@ -244,12 +277,13 @@ export function validateInitArgs(args: string[]): string | undefined {
  * text, where option-looking tokens may be part of the user's request.
  */
 export function validateCliArgs(args: string[]): string | undefined {
-	if (args[0] === 'init') return validateInitArgs(args);
-
 	if (args[0] === 'review') {
-		// Only global options are valid after `review`. Scanning them here stops
-		// `review --bogus main` from being reported as an extra review target.
-		return scanArgs(args, 1, args.length).error;
+		// `init` is not handled here: it has its own fast path in `cli.tsx`
+		// that exits before this function is reached, and it validates through
+		// `validateInitArgs`. Scanning `review` with the same flag list its
+		// parser uses stops `review --bogus main` from being reported as an
+		// extra review target.
+		return scanArgs(args, 1, args.length, REVIEW_FLAGS).error;
 	}
 
 	if (args[0] === 'worktree') {

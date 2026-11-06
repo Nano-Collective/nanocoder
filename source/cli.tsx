@@ -388,19 +388,24 @@ async function main(): Promise<void> {
 	const portArgIndex = args.findIndex(
 		arg => arg === '--vscode-port' || arg.startsWith('--vscode-port='),
 	);
-	const portValue =
-		portArgIndex === -1
-			? undefined
-			: args[portArgIndex].startsWith('--vscode-port=')
-				? args[portArgIndex].slice('--vscode-port='.length)
-				: args[portArgIndex + 1];
-	if (portValue) {
+	if (portArgIndex !== -1) {
+		const value = args[portArgIndex].startsWith('--vscode-port=')
+			? args[portArgIndex].slice('--vscode-port='.length)
+			: args[portArgIndex + 1];
+		// The flag is present, so a value is required. An explicitly empty or
+		// missing value must fail instead of quietly asking for a random port.
+		if (value === undefined || value === '') {
+			console.error(
+				'--vscode-port requires a value. Use an integer between 1 and 65535.',
+			);
+			process.exit(1);
+		}
 		// Strict integer: a numeric prefix like `8080abc` or an out-of-range
-		// value must be reported, not silently rounded down or ignored.
-		const port = /^\d+$/.test(portValue) ? Number(portValue) : Number.NaN;
+		// value must be reported, not silently rounded down.
+		const port = /^\d+$/.test(value) ? Number(value) : Number.NaN;
 		if (!Number.isInteger(port) || port < 1 || port > 65535) {
 			console.error(
-				`Invalid --vscode-port value: "${portValue}". Use an integer between 1 and 65535.`,
+				`Invalid --vscode-port value: "${value}". Use an integer between 1 and 65535.`,
 			);
 			process.exit(1);
 		}

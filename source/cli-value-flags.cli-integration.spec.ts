@@ -118,16 +118,6 @@ for (const {flag, value, property, expected} of flags) {
 		t.is(props.nonInteractivePrompt, `analyze ${unknown} code`);
 	});
 
-	test(`${flag}: missing and empty values retain unset behavior`, t => {
-		for (const option of [[flag], [flag, ''], [`${flag}=`]]) {
-			const result = runCli(['run', 'analyze code', ...option]);
-			t.is(result.status, 0, result.stderr);
-			const props = JSON.parse(result.stdout);
-			t.is(props[property], undefined);
-			t.is(props.nonInteractivePrompt, 'analyze code');
-		}
-	});
-
 	test(`${flag}: first occurrence wins across both forms`, t => {
 		for (const firstFused of [false, true]) {
 			for (const secondFused of [false, true]) {
@@ -142,6 +132,56 @@ for (const {flag, value, property, expected} of flags) {
 		}
 	});
 }
+
+const nonPortFlags = flags.filter(({flag}) => flag !== '--vscode-port');
+
+test('missing and empty values of non-port flags retain unset behavior', t => {
+	for (const {flag, property} of nonPortFlags) {
+		for (const option of [[flag], [flag, ''], [`${flag}=`]]) {
+			const result = runCli(['run', 'analyze code', ...option]);
+			t.is(result.status, 0, result.stderr);
+			const props = JSON.parse(result.stdout);
+			t.is(props[property], undefined);
+			t.is(props.nonInteractivePrompt, 'analyze code');
+		}
+	}
+});
+
+test('--vscode-port rejects missing and empty values', t => {
+	for (const option of [
+		['--vscode-port'],
+		['--vscode-port', ''],
+		['--vscode-port='],
+	]) {
+		const result = runCli(['run', 'analyze code', ...option]);
+		t.is(result.status, 1, option.join(' '));
+		t.true(result.stderr.includes('--vscode-port'), result.stderr);
+	}
+
+	// The shared scan runs before `run` too: an empty argument there is this
+	// flag's value, not an unknown command.
+	const beforeRun = runCli(['--vscode-port', '', 'run', 'hello']);
+	t.is(beforeRun.status, 1, beforeRun.stderr);
+	t.true(
+		beforeRun.stderr.includes('--vscode-port requires a value'),
+		beforeRun.stderr,
+	);
+});
+
+test('--vscode-port rejects a negative value given before run', t => {
+	const result = runCli(['--vscode-port', '-1', 'run', 'hello']);
+	t.is(result.status, 1);
+	t.true(
+		result.stderr.includes('Invalid --vscode-port value: "-1"'),
+		result.stderr,
+	);
+});
+
+test('a negative number is not accepted as the value of --provider', t => {
+	const result = runCli(['--provider', '-5', 'run', 'hello']);
+	t.is(result.status, 1);
+	t.true(result.stderr.includes('Unknown option "-5"'), result.stderr);
+});
 
 test('fused values preserve additional equals signs for existing validation', t => {
 	for (const flag of ['--model', '--provider', '--context-max']) {

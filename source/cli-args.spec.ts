@@ -66,28 +66,59 @@ test('review rejects unknown options instead of calling them extra targets', t =
 		validateCliArgs(['review', 'main', '--mdoe', 'plan']),
 		'Unknown option "--mdoe". Did you mean "--mode"?',
 	);
+	// `--resume` is a top-level flag, not a `run`/`review` flag: the scan and
+	// review-cli's positional parser must agree, so it is reported here rather
+	// than becoming an "extra argument".
+	t.is(
+		validateCliArgs(['review', '--resume', 'last', 'main']),
+		'Unknown option "--resume". Run "nanocoder --help" to see available options.',
+	);
 	t.is(validateCliArgs(['review', 'main', '--json']), undefined);
 });
 
-test('init rejects unknown options and accepts its own flags', t => {
+test('init rejects unknown and unsupported options, accepting its own', t => {
 	t.is(
-		validateCliArgs(['init', '--bogus', '--preset', 'rust']),
+		validateInitArgs(['init', '--bogus', '--preset', 'rust']),
 		'Unknown option "--bogus". Run "nanocoder --help" to see available options.',
+	);
+	// Global flags are not honoured by `init`, so accepting them would ignore
+	// them silently — the same symptom as an unknown option.
+	t.is(
+		validateInitArgs(['init', '--provider', 'ollama', '--preset', 'rust']),
+		'Unknown option "--provider". Run "nanocoder --help" to see available options.',
+	);
+	t.is(
+		validateInitArgs(['init', '--json']),
+		'Unknown option "--json". Run "nanocoder --help" to see available options.',
 	);
 	t.is(
 		validateInitArgs(['init', '--presett', 'rust']),
 		'Unknown option "--presett". Did you mean "--preset"?',
 	);
 	t.is(
-		validateCliArgs(['init', '--preset', 'rust', '--force', '--lean']),
+		validateInitArgs(['init', '--preset', 'rust', '--force', '--lean']),
 		undefined,
 	);
 	t.is(validateInitArgs(['init', '--help']), undefined);
 });
 
-test('a negative number is an option value, not an unknown flag', t => {
+test('a negative number is only an option value for the numeric flags', t => {
 	t.is(validateCliArgs(['--context-max', '-5', 'run', 'do a task']), undefined);
 	t.is(validateCliArgs(['--vscode-port', '-1', 'run', 'do a task']), undefined);
+	// Free-form values keep the stricter unknown-option detection.
+	t.is(
+		validateCliArgs(['--provider', '-5', 'run', 'do a task']),
+		'Unknown option "-5". Did you mean "-c"?',
+	);
+	t.is(
+		validateCliArgs(['--model', '-5', 'run', 'do a task']),
+		'Unknown option "-5". Did you mean "-c"?',
+	);
+});
+
+test('an explicitly empty option value is consumed, not read as a command', t => {
+	t.is(validateCliArgs(['--vscode-port', '', 'run', 'hello']), undefined);
+	t.is(validateCliArgs(['--mode', '', 'run', 'hello']), undefined);
 });
 
 test('suggests the login subcommand for codex and copilot', t => {
