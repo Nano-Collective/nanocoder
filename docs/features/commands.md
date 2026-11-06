@@ -211,7 +211,8 @@ The emitted object looks like:
     "inputTokens": 4520,
     "outputTokens": 850,
     "totalTokens": 5370
-  }
+  },
+  "warnings": []
 }
 ```
 
@@ -223,6 +224,7 @@ The emitted object looks like:
 - `steps` — how many times the model was called during the run, including retried turns. One step can make zero or several tool calls, so this is not the same as the length of `toolCalls`. `0` when the run stopped before calling the model
 - `filesChanged` - deduplicated list of file paths touched by file-mutating tools (`write_file`, `string_replace`, `diff_edit`, `lsp_format_document`)
 - `usage` — provider-reported token counts summed across every turn of the run. Omitted entirely when the provider reports no token telemetry (common with local models), so an absent block means "unknown", never "zero". When a provider reports input and output counts but no total, `totalTokens` is derived as their sum.
+- `warnings` — array containing configuration, hook, formatter, plugin, and runtime error/warning messages (the same diagnostic messages streamed to stderr)
 
 A few more fields appear conditionally: `message` (the error text, when `kind` is `"error"`), and, when `kind` is `"tool-approval-required"`, `toolNames` (the tools awaiting approval) and `autoAcceptWouldRun` (whether `--mode auto-accept` would have run every blocked call; when false, only `--mode yolo` or `alwaysAllow` unblocks it).
 
