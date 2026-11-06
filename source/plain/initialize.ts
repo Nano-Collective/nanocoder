@@ -25,7 +25,7 @@ import {
 import {getSubagentLoader} from '@/subagents/subagent-loader';
 import {setAgentToolExecutor, setAvailableAgentNames} from '@/tools/agent-tool';
 import {ToolManager} from '@/tools/tool-manager';
-import type {LLMClient, MCPInitResult} from '@/types/index';
+import type {DevelopmentMode, LLMClient, MCPInitResult} from '@/types/index';
 import {setAvailableSubagents} from '@/utils/prompt-processor';
 
 export interface PlainInitResult {
@@ -39,6 +39,8 @@ export interface PlainInitResult {
 export interface PlainInitOptions {
 	cliProvider?: string;
 	cliModel?: string;
+	/** The run's mode, so its subagents are offered what the main agent is. */
+	developmentMode?: DevelopmentMode;
 }
 
 /**
@@ -122,7 +124,7 @@ export async function initializePlain(
 		toolManager,
 		client,
 		process.cwd(),
-		'normal',
+		options.developmentMode ?? 'normal',
 		recordSubagentApiCallForStats,
 	);
 	setAgentToolExecutor(subagentExecutor);

@@ -1,7 +1,6 @@
 import {constants, existsSync} from 'node:fs';
 import {access, readFile, writeFile} from 'node:fs/promises';
 import {dirname, resolve} from 'node:path';
-import {highlight} from 'cli-highlight';
 import {Box, Text} from 'ink';
 import React from 'react';
 import ToolMessage, {CappedLines} from '@/components/tool-message';
@@ -14,6 +13,7 @@ import {jsonSchema, tool} from '@/types/core';
 import {truncateAnsi} from '@/utils/ansi-truncate';
 import {formatError} from '@/utils/error-formatter';
 import {getCachedFileContent, invalidateCache} from '@/utils/file-cache';
+import {highlight} from '@/utils/highlighter';
 import {normalizeIndentation} from '@/utils/indentation-normalizer';
 import {collapseUnchangedLines, computeLineDiff} from '@/utils/inline-diff';
 import {validateEditableFormat, validatePath} from '@/utils/path-validators';

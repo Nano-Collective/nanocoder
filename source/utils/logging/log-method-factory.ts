@@ -108,19 +108,14 @@ export function createLogMethod<T = unknown>(
 				}
 			}
 		} catch (error) {
-			// Fallback to console if logger method fails
-			const fallbackLevel = level === 'trace' ? 'log' : level;
-			const consoleMethod = console[fallbackLevel as keyof Console] as (
-				...args: unknown[]
-			) => void;
-			if (typeof consoleMethod === 'function') {
-				consoleMethod('Logger method failed:', {
-					level,
-					error: error instanceof Error ? error.message : String(error),
-					message: msgOrObj,
-					args,
-				});
-			}
+			// Report on stderr: stdout carries `--json` results and ACP's
+			// JSON-RPC stream, and console.log/info/debug would write there.
+			console.error('Logger method failed:', {
+				level,
+				error: error instanceof Error ? error.message : String(error),
+				message: msgOrObj,
+				args,
+			});
 		}
 	};
 

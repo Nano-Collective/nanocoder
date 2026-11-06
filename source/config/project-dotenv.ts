@@ -12,6 +12,8 @@ import {parse} from 'dotenv';
 export const PROTECTED_ENV_KEYS: readonly string[] = [
 	'NANOCODER_TRUST_DIRECTORY',
 	'NANOCODER_CONFIG_DIR',
+	'XDG_CONFIG_HOME',
+	'APPDATA',
 	'NANOCODER_MCPSERVERS',
 	'NANOCODER_MCPSERVERS_FILE',
 	'NANOCODER_CI_TRUST_LEVEL',
@@ -20,7 +22,7 @@ export const PROTECTED_ENV_KEYS: readonly string[] = [
 export interface ProjectDotenvResult {
 	/** Keys copied into the environment from the `.env`. */
 	injected: string[];
-	/** Protected keys the `.env` set and that were dropped. */
+	/** Protected keys the `.env` set, not set in the shell, and dropped. */
 	ignored: string[];
 }
 
@@ -45,11 +47,14 @@ export function loadProjectDotenv(
 	}
 
 	for (const [key, value] of Object.entries(parsed)) {
+		// The shell wins for every key, so a value already set there was never
+		// going to come from the .env: only a protected key the shell leaves
+		// unset is actually being dropped, and only that is worth a warning.
+		if (Object.hasOwn(env, key)) continue;
 		if (PROTECTED_ENV_KEYS.includes(key)) {
 			result.ignored.push(key);
 			continue;
 		}
-		if (Object.hasOwn(env, key)) continue;
 		env[key] = value;
 		result.injected.push(key);
 	}

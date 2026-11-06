@@ -8,9 +8,11 @@ import ToolMessage from '@/components/tool-message';
 import {TIMEOUT_LSP_DIAGNOSTICS_MS} from '@/constants';
 import {ThemeContext} from '@/hooks/useTheme';
 import {DiagnosticSeverity, getLSPManager} from '@/lsp/index';
+import {getProjectRoot, getSafeSessionCwd} from '@/services/session-cwd';
 import type {NanocoderToolExport, ToolExecuteResult} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
+import {isValidFilePath, resolveFilePath} from '@/utils/path-validation';
 import {type DiagnosticInfo, getVSCodeServer} from '@/vscode/index';
 
 interface GetDiagnosticsArgs {
@@ -373,8 +375,27 @@ const getDiagnosticsValidator = async (
 		return {valid: true};
 	}
 
+	// Same project boundary as read_file: the language server is handed the
+	// file's contents, so a path outside the project must not reach it.
+	const cwd = getSafeSessionCwd();
+	const root = getProjectRoot();
+	if (!isValidFilePath(args.path, root)) {
+		return {
+			valid: false,
+			error: `Invalid file path: "${args.path}". Path must be within the project directory.`,
+		};
+	}
+	let absPath: string;
+	try {
+		absPath = resolveFilePath(args.path, cwd, root);
+	} catch (error) {
+		return {
+			valid: false,
+			error: `Path validation failed: ${formatError(error)}`,
+		};
+	}
+
 	// Validate that the file exists
-	const absPath = resolvePath(args.path);
 
 	try {
 		await access(absPath, constants.F_OK);
