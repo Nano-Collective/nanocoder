@@ -1319,9 +1319,9 @@ test('MCPClient.callTool: carries a server isError flag next to the unchanged te
 
 	reply = {isError: true, content: [{type: 'image', data: 'AA==', mimeType: 'image/png'}]};
 	t.deepEqual(await client.callTool('tool', {}), {
-		llmContent: JSON.stringify({type: 'image', data: 'AA==', mimeType: 'image/png'}),
+		llmContent: '[image/png, 1 bytes]',
 		isError: true,
-	}, 'a non-text first part keeps its JSON text and is still flagged');
+	}, 'a non-text part keeps its placeholder text and is still flagged');
 
 	reply = {isError: true, content: []};
 	t.deepEqual(await client.callTool('tool', {}), {
@@ -2777,4 +2777,31 @@ test('getToolNameConflicts is empty when tool names are unique', t => {
 	internal.serverTools.set('alpha', [{name: 'a', serverName: 'alpha'}]);
 	internal.serverTools.set('beta', [{name: 'b', serverName: 'beta'}]);
 	t.deepEqual(client.getToolNameConflicts(), []);
+});
+
+// ============================================================================
+// Tests for tool result content
+// ============================================================================
+
+test('MCPClient.executeToolCall: joins every text block and summarises media', async t => {
+	const client = new MCPClient();
+	const callWith = (content: unknown[]) =>
+		(client as any).executeToolCall({callTool: async () => ({content})}, 'x', {});
+
+	t.is(
+		await callWith([
+			{type: 'text', text: 'BLOCK-ONE'},
+			{type: 'text', text: 'BLOCK-TWO'},
+			{type: 'text', text: 'BLOCK-THREE'},
+		]),
+		'BLOCK-ONE\nBLOCK-TWO\nBLOCK-THREE',
+	);
+	t.is(
+		await callWith([
+			{type: 'image', data: 'AAAA', mimeType: 'image/png'},
+			{type: 'text', text: 'CAPTION'},
+		]),
+		'[image/png, 3 bytes]\nCAPTION',
+	);
+	t.is(await callWith([]), 'Tool executed successfully (no output)');
 });
