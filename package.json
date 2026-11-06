@@ -30,7 +30,7 @@
 	"type": "module",
 	"packageManager": "pnpm@11.0.9",
 	"engines": {
-		"node": ">=22"
+		"node": ">=22.12"
 	},
 	"scripts": {
 		"build": "pnpm --filter @nanocollective/nanocoder-voice build && tsc && tsc-alias && node scripts/post-build.js",

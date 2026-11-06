@@ -37,7 +37,7 @@ Browse our open issues. If you find an unassigned issue you'd like to work on, c
 
 ### Prerequisites
 
-- Node.js 22+
+- Node.js 22.12+
 - pnpm (managed via Corepack — see below)
 - Git
 
