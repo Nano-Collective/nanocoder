@@ -174,6 +174,19 @@ test('partitionUnknownToolCalls - a call literally named __xml_validation_error_
 	);
 });
 
+test('partitionUnknownToolCalls - a tool registered as __xml_validation_error__ is not forced to unknown', t => {
+	const {validToolCalls, rejectedToolCalls} = partitionUnknownToolCalls(
+		[{id: 'call_1', function: {name: '__xml_validation_error__', arguments: {}}}],
+		managerWith(['__xml_validation_error__']),
+	);
+
+	t.deepEqual(
+		validToolCalls.map(c => c.id),
+		['call_1'],
+	);
+	t.deepEqual(rejectedToolCalls, []);
+});
+
 test('partitionUnknownToolCalls - refuses a registered tool the model was not offered', t => {
 	const toolCalls: ToolCall[] = [
 		{id: 'call_1', function: {name: 'read_file', arguments: {}}},

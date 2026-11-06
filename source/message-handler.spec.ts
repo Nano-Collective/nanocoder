@@ -100,6 +100,19 @@ test('processToolUse - returns an error result when the registry is not initiali
 	t.true(result.isError);
 });
 
+test('processToolUse - a call carrying its own tool manager does not need the process-wide registry', async t => {
+	setToolRegistryGetter(null as unknown as () => Record<string, ToolHandler>);
+	const sessionTools = {
+		getToolRegistry: () => ({session_only: async () => 'from the session'}),
+	} as unknown as ToolManager;
+
+	const result = await processToolUse(createMockToolCall('session_only', {}), {
+		toolManager: sessionTools,
+	});
+
+	t.is(result.content, 'from the session');
+});
+
 test('processToolUse - returns an error result for an unknown tool', async t => {
 	setToolRegistryGetter(
 		createMockToolRegistry({

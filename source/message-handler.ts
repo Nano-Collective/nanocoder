@@ -64,12 +64,12 @@ export async function processToolUse(
 	}
 
 	try {
-		if (!toolRegistryGetter) {
+		const toolRegistry =
+			options?.toolManager?.getToolRegistry() ?? toolRegistryGetter?.();
+		if (!toolRegistry) {
 			throw new Error('Tool registry not initialized');
 		}
 
-		const toolRegistry =
-			options?.toolManager?.getToolRegistry() ?? toolRegistryGetter();
 		const handler = toolRegistry[toolCall.function.name];
 		if (!handler) {
 			throw new Error(`Unknown tool: ${toolCall.function.name}`);
