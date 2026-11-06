@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'ava';
 import {isLockAbandoned} from '@/utils/exclusive-file-lock';
-import {appendRelevantProjectContextWithCount} from './project-context.js';
+import {buildProjectContextSection} from './project-context.js';
 import {SemanticMemoryManager} from './semantic-memory-manager.js';
 
 async function createTempDir(): Promise<string> {
@@ -534,12 +534,11 @@ test('recalled project context warns about a memory whose file changed after it 
 	await manager.addMemory({
 		content: 'src/auth.ts refreshes the auth token before retrying.',
 	});
-	const recall = () =>
-		appendRelevantProjectContextWithCount('base prompt', 'auth token', manager);
+	const recall = () => buildProjectContextSection('auth token', manager);
 
 	t.is(
-		(await recall()).systemPrompt,
-		'base prompt\n\n## Project Context\n\n```\n- src/auth.ts refreshes the auth token before retrying.\n```',
+		(await recall()).content,
+		'## Project Context\n\n```\n- src/auth.ts refreshes the auth token before retrying.\n```',
 	);
 
 	await writeFiles(repo, {
@@ -548,8 +547,8 @@ test('recalled project context warns about a memory whose file changed after it 
 	const commit = git(repo, 'rev-parse', '--short=7', 'HEAD');
 
 	t.is(
-		(await recall()).systemPrompt,
-		`base prompt\n\n## Project Context\n\n\`\`\`\n- [WARNING: recorded at ${commit}, src/auth.ts has changed since. Verify before trusting.] src/auth.ts refreshes the auth token before retrying.\n\`\`\``,
+		(await recall()).content,
+		`## Project Context\n\n\`\`\`\n- [WARNING: recorded at ${commit}, src/auth.ts has changed since. Verify before trusting.] src/auth.ts refreshes the auth token before retrying.\n\`\`\``,
 	);
 });
 

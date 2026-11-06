@@ -11,7 +11,7 @@ import {getProjectContextPreferences} from '@/config/preferences';
 import {invalidArgumentsResult} from '@/hooks/chat-handler/utils/tool-filters';
 import {computeToolCallSignature} from '@/hooks/chat-handler/utils/tool-signature';
 import {
-	appendRelevantProjectContextWithCount,
+	buildProjectContextSection,
 	type MemoryFinder,
 	type ProjectContextOptions,
 } from '@/memory/project-context';
@@ -65,6 +65,7 @@ import {
 import {parseToolArguments} from '@/utils/tool-args-parser';
 import {toolErrorToContent} from '@/utils/tool-validation';
 import {truncateToolResult} from '@/utils/truncate-tool-result';
+import {appendTurnContext} from '@/utils/turn-context';
 import {isGitPrCallAllowed, type TrustLevel} from '@/verify/trust';
 import {getSubagentLoader} from './subagent-loader.js';
 import type {
@@ -342,8 +343,10 @@ export class SubagentExecutor {
 				sessionDisabled,
 			);
 			const filteredTools = this.filterTools(config, mode, sessionDisabled);
-			const recalled = await appendRelevantProjectContextWithCount(
-				context.systemMessage,
+			// Recalled memories ride at the end of the task message rather than
+			// in the system prompt, keeping the subagent's system block
+			// byte-stable across its steps for KV-cache reuse (#1574).
+			const recalled = await buildProjectContextSection(
 				this.buildTaskPrompt(task),
 				this.memoryFinder,
 				{
@@ -353,8 +356,17 @@ export class SubagentExecutor {
 			);
 
 			const messages: Message[] = [
-				{role: 'system', content: recalled.systemPrompt},
-				...context.initialMessages,
+				{role: 'system', content: context.systemMessage},
+				// The task prompt is the first message, and the query the recall
+				// was made for, so the context belongs on it.
+				...context.initialMessages.map((message, index) =>
+					index === 0
+						? {
+								...message,
+								content: appendTurnContext(message.content, [recalled.content]),
+							}
+						: message,
+				),
 			];
 
 			// Get the client for this subagent — either a new one for a

@@ -4,6 +4,7 @@ import React from 'react';
 import {themes} from '../config/themes';
 import {ThemeContext} from '../hooks/useTheme';
 import type {Message} from '../types/core';
+import {appendTurnContext} from '../utils/turn-context';
 import {resetKeyGeneratorForTests} from './key-generator';
 import {buildSessionHistoryComponents} from './session-history-renderer';
 
@@ -152,4 +153,23 @@ test('renders assistant reasoning collapsed', t => {
 	t.regex(output, /Thought/);
 	// Collapsed: the reasoning body itself is not shown.
 	t.notRegex(output, /secret approach/);
+});
+
+test('replays the user prompt without its per-turn context block', t => {
+	// The block is harness-authored, not something the user typed, but it stays
+	// in the stored message so a resumed session re-sends the identical bytes
+	// and keeps the cached prefix warm (#1574).
+	const output = renderHistory([
+		{
+			role: 'user',
+			content: appendTurnContext('fix the parser bug', [
+				'## Project Context\n\n```\n- Parser uses a hand-rolled lexer.\n```',
+			]),
+		},
+		{role: 'assistant', content: 'On it.'},
+	]);
+
+	t.regex(output, /fix the parser bug/);
+	t.notRegex(output, /turn-context|Project Context|hand-rolled lexer/);
+	t.regex(output, /On it/);
 });
