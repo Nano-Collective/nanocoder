@@ -15,9 +15,11 @@ import {
 import type { ToolManager } from "@/tools/tool-manager";
 import type {
 	AISDKCoreTool,
+	DevelopmentMode,
 	LLMChatResponse,
 	LLMClient,
 	Message,
+	ToolApprovalPolicy,
 	ToolCall,
 	ToolEntry,
 	ToolHandler,
@@ -64,14 +66,17 @@ function makeFakeClient(options: FakeClientOptions): LLMClient {
 
 interface FakeToolManagerOptions {
 	knownTools?: Set<string>;
-	needsApprovalByName?: Record<string, boolean>;
+	/** What the mode offers the model; defaults to every known tool. */
+	offeredTools?: Set<string>;
+	needsApprovalByName?: Record<string, ToolApprovalPolicy>;
 }
 
 function makeFakeToolManager(opts: FakeToolManagerOptions = {}): ToolManager {
 	const known = opts.knownTools ?? new Set<string>();
+	const offered = opts.offeredTools ?? known;
 	const approvals = opts.needsApprovalByName ?? {};
 	return {
-		getAvailableToolNames: () => Array.from(known),
+		getAvailableToolNames: () => Array.from(offered),
 		getFilteredTools: () => {
 			const filtered: Record<string, AISDKCoreTool> = {};
 			for (const name of known) {
@@ -271,6 +276,73 @@ test("returns tool-approval-required when a tool needs approval and mode is not 
 	t.is(outcome.steps, 1);
 	if (outcome.kind === TOOL_APPROVAL_REQUIRED_KIND) {
 		t.deepEqual(outcome.toolNames, ["risky_tool"]);
+		t.false(outcome.autoAcceptWouldRun);
+	}
+});
+
+// Mirrors the real policies: file edits are waived in auto-accept, bash is not.
+const waivedInAutoAccept: ToolApprovalPolicy = (_args, mode) =>
+	mode !== "auto-accept";
+const neverWaived: ToolApprovalPolicy = () => true;
+
+async function runBlockedTurn(
+	developmentMode: DevelopmentMode,
+	toolNames: string[],
+) {
+	const toolCalls: ToolCall[] = toolNames.map((name, index) => ({
+		id: `call-${index}`,
+		function: { name, arguments: {} },
+	}));
+	const client = makeFakeClient({
+		responses: [
+			{
+				choices: [
+					{
+						message: {
+							role: "assistant",
+							content: "",
+							tool_calls: toolCalls,
+						},
+					},
+				],
+			},
+		],
+	});
+	const toolManager = makeFakeToolManager({
+		knownTools: new Set(["edit_tool", "bash_tool"]),
+		needsApprovalByName: {
+			edit_tool: waivedInAutoAccept,
+			bash_tool: neverWaived,
+		},
+	});
+
+	return runPlainConversation({
+		client,
+		toolManager,
+		systemMessage: SYSTEM,
+		initialMessages: [USER],
+		developmentMode,
+		nonInteractiveAlwaysAllow: [],
+		abortSignal: new AbortController().signal,
+	});
+}
+
+test("autoAcceptWouldRun is true when auto-accept would run every blocked call", async (t) => {
+	const outcome = await runBlockedTurn("normal", ["edit_tool"]);
+
+	t.is(outcome.kind, TOOL_APPROVAL_REQUIRED_KIND);
+	if (outcome.kind === TOOL_APPROVAL_REQUIRED_KIND) {
+		t.true(outcome.autoAcceptWouldRun);
+	}
+});
+
+test("autoAcceptWouldRun is false when auto-accept would still ask for a call", async (t) => {
+	const outcome = await runBlockedTurn("normal", ["edit_tool", "bash_tool"]);
+
+	t.is(outcome.kind, TOOL_APPROVAL_REQUIRED_KIND);
+	if (outcome.kind === TOOL_APPROVAL_REQUIRED_KIND) {
+		t.deepEqual(outcome.toolNames, ["edit_tool", "bash_tool"]);
+		t.false(outcome.autoAcceptWouldRun);
 	}
 });
 
@@ -650,6 +722,67 @@ test("unknown tool is logged with an error and no result, and is flagged as an e
 	t.is(logged.result, null);
 	t.truthy(logged.error);
 	t.regex(String(logged.error), /unknown tool/i);
+});
+
+test.serial("a registered tool the mode did not offer is refused, not run", async (t) => {
+	// write_file is registered but not offered; in yolo nothing else would
+	// stop it, so this pins the offered list reaching the partition.
+	let wrote = false;
+	setToolRegistryGetter(() => ({
+		write_file: (async () => {
+			wrote = true;
+			return "written";
+		}) as ToolHandler,
+	}));
+	const client = makeFakeClient({
+		responses: [
+			{
+				choices: [
+					{
+						message: {
+							role: "assistant",
+							content: "",
+							tool_calls: [
+								{
+									id: "call-1",
+									function: {
+										name: "write_file",
+										arguments: { path: "x.ts", content: "hi" },
+									},
+								},
+							],
+						},
+					},
+				],
+			},
+			{
+				choices: [{ message: { role: "assistant", content: "recovered" } }],
+			},
+		],
+	});
+	const toolManager = makeFakeToolManager({
+		knownTools: new Set(["read_file", "write_file"]),
+		offeredTools: new Set(["read_file"]),
+	});
+
+	const outcome = await runPlainConversation({
+		client,
+		toolManager,
+		systemMessage: SYSTEM,
+		initialMessages: [USER],
+		developmentMode: "yolo",
+		nonInteractiveAlwaysAllow: [],
+		abortSignal: new AbortController().signal,
+	});
+
+	t.is(outcome.kind, "success");
+	t.false(wrote);
+	t.is(outcome.toolCalls.length, 1);
+	t.is(outcome.toolCalls[0].result, null);
+	t.regex(
+		String(outcome.toolCalls[0].error),
+		/not available in the current mode/,
+	);
 });
 
 test("aborted signal short-circuits with an error outcome", async (t) => {

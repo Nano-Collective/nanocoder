@@ -30,6 +30,8 @@ import {
 	drainPendingHookContext,
 } from '@/services/lifecycle-hooks';
 import {resetPreferencesCache} from '@/config/preferences';
+import type {Session} from '@/session/session-manager';
+import {sessionManager} from '@/session/session-manager';
 import {readFileTool} from '@/tools/read-file';
 import {clearReadTracker} from '@/utils/read-tracker';
 import {writeFileSync} from 'fs';
@@ -60,6 +62,7 @@ interface ProbeOverrides {
 		filesChanged: string[];
 		filesMissing: string[];
 	} | null;
+	handleModelSelect?: () => Promise<boolean>;
 }
 
 let captured: AppHandlers | null = null;
@@ -85,8 +88,6 @@ function makeProps(overrides: ProbeOverrides) {
 	const setShowAllSessions = spy<[boolean]>();
 	const setCurrentSessionId = spy<[string | null]>();
 	const setSessionName = spy<[string]>();
-	const setCurrentProvider = spy<[string]>();
-	const setCurrentModel = spy<[string]>();
 	const setLiveTaskList = spy<[unknown]>();
 	const setPlanReviewState = spy<
 	    [{show: boolean; originalMessage: string} | null]
@@ -114,7 +115,7 @@ function makeProps(overrides: ProbeOverrides) {
 	const enterSchedulerMode = spy<[]>();
 	const handleChatMessage = spy<[string, (string | undefined)?]>();
 	const dismissActiveEditor = spy<[]>();
-	const handleModelSelect = spy<[string, string, boolean?]>();
+	const handleModelSelect = spy<[string, string, boolean?, Message[]?]>();
 
 	const baseProps = {
 		messages: overrides.messages ?? [],
@@ -144,8 +145,6 @@ function makeProps(overrides: ProbeOverrides) {
 		setShowAllSessions,
 		setCurrentSessionId,
 		setSessionName,
-		setCurrentProvider,
-		setCurrentModel,
 		setLiveTaskList,
 		setPlanReviewState,
 		setArchitectReviewState,
@@ -170,8 +169,14 @@ function makeProps(overrides: ProbeOverrides) {
 		dismissActiveEditor: () => dismissActiveEditor(),
 		developmentMode: overrides.developmentMode ?? 'normal',
 		architectReviewState: overrides.architectReviewState ?? null,
-		handleModelSelect: async (provider: string, model: string, isProgrammatic?: boolean) => {
-			handleModelSelect(provider, model, isProgrammatic);
+		handleModelSelect: async (
+			provider: string,
+			model: string,
+			isProgrammatic?: boolean,
+			history?: Message[],
+		) => {
+			handleModelSelect(provider, model, isProgrammatic, history);
+			return (await overrides.handleModelSelect?.()) ?? true;
 		},
 	};
 
@@ -939,4 +944,87 @@ test.serial('applySession makes the next read_file return the file', async t => 
 		clearReadTracker();
 		rmSync(dir, {recursive: true, force: true});
 	}
+});
+
+const otherProviderSession = {
+	id: '33333333-3333-4333-8333-333333333333',
+	title: 'Session on another provider',
+	messages: [
+		{role: 'user', content: 'earlier question'},
+		{role: 'assistant', content: 'earlier answer'},
+	],
+	provider: 'other-provider',
+	model: 'other-model',
+} as unknown as Session;
+
+async function withStoredSession(session: Session, run: () => Promise<void>) {
+	const {initialize, listSessions, loadSession} = sessionManager;
+	sessionManager.initialize = async () => {};
+	sessionManager.listSessions = async () => [];
+	sessionManager.loadSession = async id => (id === session.id ? session : null);
+	try {
+		await run();
+	} finally {
+		Object.assign(sessionManager, {initialize, listSessions, loadSession});
+	}
+}
+
+test.serial('the session picker switches the client to the resumed session', async t => {
+	await withStoredSession(otherProviderSession, async () => {
+		let appliedBeforeSwitch = false;
+		const {handlers, spies} = setup({
+			handleModelSelect: async () => {
+				appliedBeforeSwitch = spies.updateMessages.calls.length === 1;
+				return true;
+			},
+		});
+
+		await handlers.handleSessionSelect(otherProviderSession.id);
+
+		t.deepEqual(spies.updateMessages.calls, [[otherProviderSession.messages]]);
+		t.deepEqual(spies.handleModelSelect.calls, [
+			['other-provider', 'other-model', true, otherProviderSession.messages],
+		]);
+		t.true(appliedBeforeSwitch, 'the conversation is applied before the switch');
+	});
+});
+
+test.serial('/resume <id> switches the client before the command completes', async t => {
+	await withStoredSession(otherProviderSession, async () => {
+		let finishSwitch!: (switched: boolean) => void;
+		const {handlers, spies} = setup({
+			handleModelSelect: () =>
+				new Promise<boolean>(resolve => {
+					finishSwitch = resolve;
+				}),
+		});
+
+		const submitted = handlers.handleMessageSubmit(
+			`/resume ${otherProviderSession.id}`,
+		);
+		for (let i = 0; i < 50 && spies.handleModelSelect.calls.length === 0; i++) {
+			await new Promise(resolve => setImmediate(resolve));
+		}
+
+		t.deepEqual(spies.handleModelSelect.calls, [
+			['other-provider', 'other-model', true, otherProviderSession.messages],
+		]);
+		// A queued prompt starts on completion, so it must wait for the new client.
+		t.deepEqual(spies.setIsConversationComplete.calls, [[false]]);
+
+		finishSwitch(true);
+		await submitted;
+		t.deepEqual(spies.setIsConversationComplete.calls, [[false], [true]]);
+	});
+});
+
+test.serial('resuming still loads the conversation when the switch fails', async t => {
+	await withStoredSession(otherProviderSession, async () => {
+		const {handlers, spies} = setup({handleModelSelect: async () => false});
+
+		await handlers.handleSessionSelect(otherProviderSession.id);
+
+		t.deepEqual(spies.updateMessages.calls, [[otherProviderSession.messages]]);
+		t.deepEqual(spies.setCurrentSessionId.calls, [[otherProviderSession.id]]);
+	});
 });

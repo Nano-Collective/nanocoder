@@ -3,8 +3,8 @@ import {existsSync, unlinkSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import React from 'react';
+import type {VoiceState} from '@/components/development-mode-indicator';
 import {ErrorMessage, InfoMessage} from '@/components/message-box';
-import type {VoiceState} from '@/components/voice-status-bar';
 import {getVoicePreference} from '@/config/preferences';
 import {
 	synthesizeCloudSpeech,
@@ -263,6 +263,7 @@ export function useVoice({
 						hasEmittedDeclinedSessionNoticeRef.current = true;
 						addToChatQueueRef.current(
 							React.createElement(InfoMessage, {
+								hideBox: true,
 								key: generateKey('voice-dep-declined'),
 								message:
 									'Voice mode dependencies missing. Installation declined for this session.',
@@ -285,6 +286,7 @@ export function useVoice({
 					setDeclinedVoiceInstallForSession(true);
 					addToChatQueueRef.current(
 						React.createElement(InfoMessage, {
+							hideBox: true,
 							key: generateKey('voice-dep-declined'),
 							message: 'Voice dependency installation cancelled.',
 						}),
@@ -296,6 +298,7 @@ export function useVoice({
 			} catch (err) {
 				addToChatQueueRef.current(
 					React.createElement(ErrorMessage, {
+						hideBox: true,
 						key: generateKey('voice-dep-error'),
 						message: `Voice dependency setup failed: ${err instanceof Error ? err.message : String(err)}`,
 					}),
@@ -444,6 +447,7 @@ export function useVoice({
 							if (vadAbortController.signal.aborted) throw cloudErr;
 							addToChatQueueRef.current(
 								React.createElement(InfoMessage, {
+									hideBox: true,
 									key: generateKey('voice-cloud-stt-fallback'),
 									message: `Cloud STT fallback to local (${cloudErr instanceof Error ? cloudErr.message : String(cloudErr)})`,
 								}),
@@ -462,6 +466,7 @@ export function useVoice({
 					if (isBlankAudio(transcribed)) {
 						addToChatQueueRef.current(
 							React.createElement(InfoMessage, {
+								hideBox: true,
 								key: generateKey('voice-vad-no-speech'),
 								message: 'No speech detected.',
 							}),
@@ -494,6 +499,7 @@ export function useVoice({
 						lastVadErrorRef.current = {message: errorMsg, timestamp: now};
 						addToChatQueueRef.current(
 							React.createElement(ErrorMessage, {
+								hideBox: true,
 								key: generateKey('voice-vad-error'),
 								message: errorMsg,
 							}),
@@ -521,6 +527,7 @@ export function useVoice({
 					lastVadErrorRef.current = {message: errorMsg, timestamp: now};
 					addToChatQueueRef.current(
 						React.createElement(ErrorMessage, {
+							hideBox: true,
 							key: generateKey('voice-vad-engine-error'),
 							message: errorMsg,
 						}),
@@ -562,6 +569,7 @@ export function useVoice({
 		if (!handsFreeBlockedByYolo) return;
 		addToChatQueueRef.current(
 			React.createElement(InfoMessage, {
+				hideBox: true,
 				key: generateKey('voice-hands-free-yolo'),
 				message: HANDS_FREE_YOLO_NOTICE,
 			}),
@@ -613,6 +621,7 @@ export function useVoice({
 					if (ttsAbortController.signal.aborted) throw cloudErr;
 					addToChatQueueRef.current(
 						React.createElement(InfoMessage, {
+							hideBox: true,
 							key: generateKey('voice-cloud-tts-fallback'),
 							message: `Cloud TTS fallback to local (${cloudErr instanceof Error ? cloudErr.message : String(cloudErr)})`,
 						}),
@@ -649,6 +658,7 @@ export function useVoice({
 				}
 				addToChatQueueRef.current(
 					React.createElement(ErrorMessage, {
+						hideBox: true,
 						key: generateKey('voice-audio-error'),
 						message: 'Failed to synthesize or play speech response.',
 					}),
@@ -713,6 +723,7 @@ export function useVoice({
 		} catch (_error) {
 			addToChatQueueRef.current(
 				React.createElement(ErrorMessage, {
+					hideBox: true,
 					key: generateKey('voice-error'),
 					message:
 						'Voice plugin not available. Please ensure @nanocollective/nanocoder-voice is installed.',
@@ -779,6 +790,7 @@ export function useVoice({
 					if (processingAbortController.signal.aborted) throw cloudErr;
 					addToChatQueueRef.current(
 						React.createElement(InfoMessage, {
+							hideBox: true,
 							key: generateKey('voice-cloud-stt-fallback'),
 							message: `Cloud STT fallback to local (${cloudErr instanceof Error ? cloudErr.message : String(cloudErr)})`,
 						}),
@@ -797,6 +809,7 @@ export function useVoice({
 			if (isBlankAudio(transcribedText)) {
 				addToChatQueueRef.current(
 					React.createElement(InfoMessage, {
+						hideBox: true,
 						key: generateKey('voice-info'),
 						message: 'No speech detected.',
 					}),
@@ -835,6 +848,7 @@ export function useVoice({
 
 			addToChatQueueRef.current(
 				React.createElement(ErrorMessage, {
+					hideBox: true,
 					key: generateKey('voice-error'),
 					message: `Voice pipeline error: ${error instanceof Error ? error.message : String(error)}`,
 				}),

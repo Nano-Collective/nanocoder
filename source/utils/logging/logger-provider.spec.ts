@@ -1,8 +1,24 @@
+import {mkdtempSync, readdirSync, readFileSync, rmSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 import test from 'ava';
 
 // Implementation imports
 import {LoggerProvider, loggerProvider} from './logger-provider.js';
 import type {LoggerConfig} from './types.js';
+
+// Specs below run with NODE_ENV unset, which wires in the real file logger;
+// keep its files out of the user's log directory.
+const logDir = mkdtempSync(join(tmpdir(), 'logger-provider-'));
+const savedLogDir = process.env.NANOCODER_LOG_DIR;
+test.before(() => {
+	process.env.NANOCODER_LOG_DIR = logDir;
+});
+test.after.always(() => {
+	if (savedLogDir === undefined) delete process.env.NANOCODER_LOG_DIR;
+	else process.env.NANOCODER_LOG_DIR = savedLogDir;
+	rmSync(logDir, {recursive: true, force: true});
+});
 
 test.beforeEach(() => {
 	// Reset the singleton instance before each test
@@ -130,9 +146,9 @@ test('isLevelEnabled checks log level', t => {
 
 	t.true(provider.isLevelEnabled('warn'), 'Should enable warn level');
 	t.true(provider.isLevelEnabled('error'), 'Should enable error level');
-	t.true(provider.isLevelEnabled('info'), 'Should enable info level');
 	t.true(provider.isLevelEnabled('fatal'), 'Should enable fatal level');
-	t.true(provider.isLevelEnabled('debug'), 'Should enable debug level');
+	t.false(provider.isLevelEnabled('info'), 'Should not enable info level');
+	t.false(provider.isLevelEnabled('debug'), 'Should not enable debug level');
 });
 
 test('reset clears all state', t => {
@@ -189,17 +205,14 @@ test('createDefaultConfig handles environments correctly', t => {
 		t.fail('Development config should not be null');
 	}
 
-	// Test production environment
-	// Note: The fallback logger uses 'silent' to avoid console spam.
-	// Once the real pino logger loads asynchronously, it will use 'info' from config.ts.
-	// This test runs synchronously, so it sees the fallback config.
+	// Test production environment: the real file logger at 'info'.
 	process.env.NODE_ENV = 'production';
 	delete process.env.NANOCODER_LOG_LEVEL;
 	provider.reset();
 	const prodLogger = provider.initializeLogger();
 	const prodConfig = provider.getLoggerConfig();
 	if (prodConfig) {
-		t.is(prodConfig.level, 'silent');
+		t.is(prodConfig.level, 'info');
 		t.false(prodConfig.pretty);
 	} else {
 		t.fail('Production config should not be null');
@@ -356,3 +369,92 @@ test.serial(
 		}
 	},
 );
+
+test.serial('warn and error from getLogger() reach the log file', async t => {
+	const provider = LoggerProvider.getInstance();
+	process.env.NODE_ENV = 'production';
+	provider.reset();
+	for (const f of readdirSync(logDir)) rmSync(join(logDir, f));
+
+	const logger = provider.getLogger();
+	logger.info('provider-info-line');
+	logger.warn('provider-warn-line');
+	logger.error('provider-error-line');
+
+	// The file destination opens and writes asynchronously.
+	let content = '';
+	for (let i = 0; i < 100 && !content.includes('provider-error-line'); i++) {
+		await new Promise(resolve => setTimeout(resolve, 20));
+		const files = readdirSync(logDir);
+		content = files[0] ? readFileSync(join(logDir, files[0]), 'utf8') : '';
+	}
+	await provider.end();
+	provider.reset();
+
+	t.is(readdirSync(logDir).length, 1);
+	t.regex(content, /"level":"WARN".*provider-warn-line/);
+	t.regex(content, /"level":"ERROR".*provider-error-line/);
+});
+
+function captureStdout(run: () => void): string {
+	const original = process.stdout.write;
+	let written = '';
+	process.stdout.write = ((chunk: string | Uint8Array) => {
+		written += String(chunk);
+		return true;
+	}) as typeof process.stdout.write;
+	try {
+		run();
+	} finally {
+		process.stdout.write = original;
+	}
+	return written;
+}
+
+test.serial('NANOCODER_LOG_LEVEL never writes logs to stdout', t => {
+	const provider = LoggerProvider.getInstance();
+	process.env.NODE_ENV = 'production';
+	process.env.NANOCODER_LOG_LEVEL = 'debug';
+	provider.reset();
+	const written = captureStdout(() => {
+		const logger = provider.getLogger();
+		logger.debug('stdout-debug-line');
+		logger.info('stdout-info-line');
+		logger.warn('stdout-warn-line');
+		logger.flushSync();
+	});
+	provider.reset();
+	t.is(written, '');
+});
+
+test.serial('the console fallback logger writes to stderr, not stdout', t => {
+	const provider = LoggerProvider.getInstance();
+	const originalBun = (globalThis as Record<string, unknown>).Bun;
+	(globalThis as Record<string, unknown>).Bun = {version: '1.0.0'};
+	process.env.NANOCODER_LOG_LEVEL = 'debug';
+	const originalErr = process.stderr.write;
+	let errWritten = '';
+	process.stderr.write = ((chunk: string | Uint8Array) => {
+		errWritten += String(chunk);
+		return true;
+	}) as typeof process.stderr.write;
+	try {
+		provider.reset();
+		const written = captureStdout(() => {
+			const logger = provider.getLogger();
+			logger.info('fallback-info-line');
+			logger.debug('fallback-debug-line');
+		});
+		t.is(written, '');
+	} finally {
+		process.stderr.write = originalErr;
+		if (originalBun === undefined) {
+			delete (globalThis as Record<string, unknown>).Bun;
+		} else {
+			(globalThis as Record<string, unknown>).Bun = originalBun;
+		}
+		provider.reset();
+	}
+	t.regex(errWritten, /fallback-info-line/);
+	t.regex(errWritten, /fallback-debug-line/);
+});

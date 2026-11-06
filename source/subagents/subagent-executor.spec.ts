@@ -744,6 +744,53 @@ test.serial('a call with unparsable arguments is neither approved nor run', asyn
 	);
 });
 
+test.serial('unparsable arguments for a tool the subagent may not use are refused as not available', async t => {
+	// Fixing the JSON would not make write_file usable by `explore`, so the
+	// model must be told the tool is not available, not that its JSON broke.
+	let wrote = false;
+	const toolManager = createMockToolManager({
+		write_file: {
+			handler: async () => {
+				wrote = true;
+				return 'written';
+			},
+			readOnly: false,
+		},
+	});
+	const sent: Message[][] = [];
+	const client = createMockClient(
+		[
+			{
+				content: '',
+				tool_calls: [
+					{
+						id: 'tc-bad',
+						function: {name: 'write_file', arguments: {}},
+						argumentsError: 'not valid JSON: Unexpected end of JSON input',
+					},
+				],
+			} as never,
+			{content: 'Done'},
+		],
+		messages => sent.push([...messages]),
+	);
+
+	const executor = new SubagentExecutor(toolManager, client);
+	const result = await executor.execute({
+		subagent_type: 'explore',
+		description: 'Broken call to a tool it may not use',
+	});
+
+	t.true(result.success);
+	t.false(wrote);
+	const toolResult = String(
+		sent.at(-1)?.find(m => m.role === 'tool' && m.tool_call_id === 'tc-bad')
+			?.content,
+	);
+	t.regex(toolResult, /not available to this subagent/);
+	t.notRegex(toolResult, /Invalid arguments/);
+});
+
 // --- Agent-loop retry limits (nanocoder.retries) — issue #897 ---
 
 const repeatedCallResponse = (name = 'read_file') => ({

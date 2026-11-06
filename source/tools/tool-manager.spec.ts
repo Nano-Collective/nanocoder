@@ -159,6 +159,9 @@ test('initializeMCP - unregisters tools when a server becomes unhealthy', async 
 		async connectToServers() {
 			return [{serverName: 'health-server', success: true, toolCount: 1}];
 		},
+		getToolNameConflicts() {
+			return [];
+		},
 		getToolEntries() {
 			return [
 				{
@@ -209,6 +212,9 @@ test('ToolManager re-registers MCP tools when server recovers to connected state
 		},
 		async connectToServers() {
 			return [{serverName: 'health-server', success: true, toolCount: 1}];
+		},
+		getToolNameConflicts() {
+			return [];
 		},
 		getToolEntries(_serverName?: string) {
 			return [
@@ -1367,6 +1373,7 @@ function fakeMcpClient(toolName: string, serverName = 'session-server') {
 		getNativeToolsRegistry: () => ({[toolName]: {}}),
 		getToolMapping: () =>
 			new Map([[toolName, {serverName, originalName: toolName, readOnly: true}]]),
+		getToolNameConflicts: () => [],
 		disconnect: async () => {},
 	};
 }

@@ -8,6 +8,10 @@ import type {ToolCall, ToolResult} from '@/types/core';
  * Handles:
  * - Empty tool calls (missing id or function name)
  * - Tools that don't exist in the tool manager
+ * - Tools that exist but were not offered to the model this turn (hidden by the
+ *   mode, tune profile or disabled list). The offered list only narrows what
+ *   the model sees; without this check a model that names a hidden tool anyway
+ *   would reach approval, where `alwaysAllow` and yolo skip the prompt.
  * - Calls whose arguments were not a JSON object (`ToolCall.argumentsError`)
  *
  * `rejectedToolCalls` holds the calls that produced `errorResults`, paired 1:1
@@ -44,12 +48,14 @@ export const invalidArgumentsResult = (toolCall: ToolCall): ToolResult => ({
  * they send the model for an unknown tool, so the rules for what is rejected
  * live here once: a call with no usable id or name is dropped outright (it can
  * never be paired with a result), the XML validation marker is always unknown
- * even if a tool by that name somehow resolves, and a call whose arguments
- * could not be parsed is never run.
+ * even if a tool by that name somehow resolves, a registered tool the model
+ * was not offered (when `availableNames` is given) is refused, and a call
+ * whose arguments could not be parsed is never run.
  */
 const partitionToolCalls = (
 	toolCalls: ToolCall[],
 	toolManager: ToolManager | null,
+	availableNames: readonly string[] | undefined,
 	describeUnknown: (toolCall: ToolCall) => ToolResult,
 ): PartitionedToolCalls => {
 	const validToolCalls: ToolCall[] = [];
@@ -73,6 +79,24 @@ const partitionToolCalls = (
 			continue;
 		}
 
+		// Checked before the arguments: fixing the JSON would not make a tool
+		// the model was not offered usable, so this is the reason it needs.
+		if (
+			toolManager &&
+			availableNames &&
+			!availableNames.includes(toolCall.function.name)
+		) {
+			rejectedToolCalls.push(toolCall);
+			errorResults.push({
+				tool_call_id: toolCall.id,
+				role: 'tool' as const,
+				name: toolCall.function.name,
+				content: `The tool "${toolCall.function.name}" is not available in the current mode. Use only the tools you were given.`,
+				isError: true,
+			});
+			continue;
+		}
+
 		if (toolCall.argumentsError !== undefined) {
 			rejectedToolCalls.push(toolCall);
 			errorResults.push(invalidArgumentsResult(toolCall));
@@ -88,8 +112,9 @@ const partitionToolCalls = (
 export const filterValidToolCalls = (
 	toolCalls: ToolCall[],
 	toolManager: ToolManager | null,
+	availableNames?: readonly string[],
 ): PartitionedToolCalls =>
-	partitionToolCalls(toolCalls, toolManager, toolCall => {
+	partitionToolCalls(toolCalls, toolManager, availableNames, toolCall => {
 		// Listing the valid tool names gives small models a concrete recovery
 		// target instead of leaving them to re-guess the same wrong name.
 		const available = toolManager?.getToolNames?.() ?? [];
@@ -114,8 +139,9 @@ export const filterValidToolCalls = (
 export const partitionUnknownToolCalls = (
 	toolCalls: ToolCall[],
 	toolManager: ToolManager,
+	availableNames?: readonly string[],
 ): PartitionedToolCalls =>
-	partitionToolCalls(toolCalls, toolManager, toolCall => ({
+	partitionToolCalls(toolCalls, toolManager, availableNames, toolCall => ({
 		tool_call_id: toolCall.id,
 		role: 'tool' as const,
 		name: toolCall.function.name,

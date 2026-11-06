@@ -174,6 +174,51 @@ test('partitionUnknownToolCalls - treats the XML validation marker as unknown', 
 	);
 });
 
+test('partitionUnknownToolCalls - refuses a registered tool the model was not offered', t => {
+	const toolCalls: ToolCall[] = [
+		{id: 'call_1', function: {name: 'read_file', arguments: {}}},
+		{id: 'call_2', function: {name: 'write_file', arguments: {}}},
+	];
+	const manager = managerWith(['read_file', 'write_file']);
+
+	const {validToolCalls, rejectedToolCalls, errorResults} =
+		partitionUnknownToolCalls(toolCalls, manager, ['read_file']);
+
+	t.deepEqual(
+		validToolCalls.map(c => c.id),
+		['call_1'],
+	);
+	t.deepEqual(
+		rejectedToolCalls.map(c => c.id),
+		['call_2'],
+	);
+	t.is(errorResults[0].tool_call_id, 'call_2');
+	t.true(errorResults[0].content.includes('not available in the current mode'));
+	t.true(errorResults[0].isError);
+});
+
+test('filterValidToolCalls - refuses a registered tool the model was not offered', t => {
+	const manager = managerWith(['read_file', 'write_file']);
+
+	const {validToolCalls, errorResults} = filterValidToolCalls(
+		[{id: 'call_1', function: {name: 'write_file', arguments: {}}}],
+		manager,
+		['read_file'],
+	);
+
+	t.is(validToolCalls.length, 0);
+	t.true(errorResults[0].content.includes('not available in the current mode'));
+});
+
+test('filterValidToolCalls - without an offered list every registered tool is valid', t => {
+	const {validToolCalls} = filterValidToolCalls(
+		[{id: 'call_1', function: {name: 'write_file', arguments: {}}}],
+		managerWith(['write_file']),
+	);
+
+	t.is(validToolCalls.length, 1);
+});
+
 test('buildAbandonedTurnMessages - every emitted call has a matching result', t => {
 	// The invariant: a result whose tool_call is missing from the assistant
 	// message is orphaned and pruned before the request goes out.
@@ -266,6 +311,28 @@ test('partitionUnknownToolCalls - an unknown tool is reported as unknown even wi
 		['Unknown tool: ghost_tool'],
 	);
 });
+
+for (const [label, partition] of [
+	['filterValidToolCalls', filterValidToolCalls],
+	['partitionUnknownToolCalls', partitionUnknownToolCalls],
+] as const) {
+	test(`${label} - a tool the model was not offered is refused for that, even with unparsable arguments`, t => {
+		// Fixing the JSON would not make write_file usable in this mode.
+		const {rejectedToolCalls, errorResults} = partition(
+			[{...unparsableCall, function: {name: 'write_file', arguments: {}}}],
+			managerWith(['read_file', 'write_file']),
+			['read_file'],
+		);
+
+		t.deepEqual(
+			rejectedToolCalls.map(c => c.id),
+			['call_bad'],
+		);
+		t.is(errorResults.length, 1);
+		t.regex(errorResults[0].content, /not available in the current mode/);
+		t.notRegex(errorResults[0].content, /Invalid arguments/);
+	});
+}
 
 test('buildAbandonedTurnMessages - a call with unparsable arguments abandons the turn', t => {
 	const partition = partitionUnknownToolCalls(

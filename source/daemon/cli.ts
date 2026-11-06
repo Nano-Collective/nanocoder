@@ -138,13 +138,14 @@ async function defaultConfirmFullCommitTrust(
 	}
 }
 
-const CONFIG_AUTO_FIX_WARNING = (projectRoot: string) => `
+export const CONFIG_AUTO_FIX_WARNING = (projectRoot: string) => `
 Warning: agents.config.json sets verify.trustLevel to auto-fix for:
   ${projectRoot}
 
 At this trust level, when CI watch detects a failure, the daemon runs an
-agent that edits files and runs shell commands with no confirmation,
-steered by the failed CI log, then opens a draft PR with its fix.
+agent that edits files and commits them with no confirmation, steered by
+the failed CI log, then opens a draft PR with its fix. The agent has no
+shell; the CI run on the draft PR verifies the fix.
 
 The level came from a config file, not from --trust on this command, so it
 needs your confirmation. Pass --trust auto-fix to skip this prompt.
@@ -253,6 +254,18 @@ export async function runDaemonCli(
 	command: DaemonCliCommand,
 	opts: DaemonCliOptions,
 ): Promise<DaemonCliResult> {
+	// `--help` must never fall through to the action: `daemon install --help`
+	// would otherwise install the auto-start unit.
+	const args = opts.args ?? [];
+	if (args.includes('--help') || args.includes('-h')) {
+		return {
+			exitCode: 0,
+			output:
+				command === 'start'
+					? START_USAGE
+					: `Usage: nanocoder daemon ${command}`,
+		};
+	}
 	switch (command) {
 		case 'start':
 			return start(opts);

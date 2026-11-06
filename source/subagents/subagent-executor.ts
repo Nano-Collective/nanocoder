@@ -1030,13 +1030,6 @@ export class SubagentExecutor {
 			return finish({content: 'Error: Execution was cancelled'}, true);
 		}
 
-		// Unparsable arguments arrive as `{}`: answer the call with the parse
-		// error rather than run the tool (or ask to approve it) with that
-		// placeholder.
-		if (toolCall.argumentsError !== undefined) {
-			return finish({content: invalidArgumentsResult(toolCall).content}, true);
-		}
-
 		// Enforce the allow-list at the execution boundary, not just when
 		// choosing which tools to offer. `getToolHandler` resolves a handler for
 		// every *registered* tool, so a subagent that names a filtered tool
@@ -1066,6 +1059,15 @@ export class SubagentExecutor {
 		const toolHandler = this.toolManager.getToolHandler(toolName);
 		if (!toolHandler) {
 			return finish({content: `Error: Tool '${toolName}' not found`}, true);
+		}
+
+		// Unparsable arguments arrive as `{}`: answer the call with the parse
+		// error rather than run the tool (or ask to approve it) with that
+		// placeholder. Checked after the allow-list and handler, so a tool the
+		// subagent cannot use is refused for that reason (fixing the JSON would
+		// not help), and before anything below reads the placeholder arguments.
+		if (toolCall.argumentsError !== undefined) {
+			return finish({content: invalidArgumentsResult(toolCall).content}, true);
 		}
 
 		// A trust-gated run (verify, daemon CI) must never post to GitHub itself:

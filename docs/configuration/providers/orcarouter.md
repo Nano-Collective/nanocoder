@@ -15,7 +15,7 @@ sidebar_order: 19
 	"name": "OrcaRouter",
 	"baseUrl": "https://api.orcarouter.ai/v1",
 	"apiKey": "${ORCAROUTER_API_KEY}",
-	"models": ["openai/gpt-5.5"]
+	"models": ["openai/gpt-6.1-sol"]
 }
 ```
 
@@ -25,7 +25,7 @@ sidebar_order: 19
 2. Generate an API key from the [console](https://www.orcarouter.ai/console)
 3. Browse available models in the [model list](https://www.orcarouter.ai/models)
 
-Model names follow the `provider/model-name` format, e.g. `openai/gpt-5.5` or `anthropic/claude-sonnet-5`.
+Model names follow the `provider/model-name` format, e.g. `openai/gpt-6.1-sol` or `anthropic/claude-sonnet-5.5`.
 
 ## Fetching Available Models
 

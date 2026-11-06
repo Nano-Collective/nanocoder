@@ -44,7 +44,7 @@ The provider is detected by name: any provider entry called `openrouter`, in any
 			"name": "OpenRouter",
 			"baseUrl": "https://openrouter.ai/api/v1",
 			"apiKey": "${OPENROUTER_API_KEY}",
-			"models": ["anthropic/claude-4.5-sonnet"],
+			"models": ["anthropic/claude-sonnet-5.5"],
 			"openrouter": {
 				"provider": {"sort": "price", "allow_fallbacks": true},
 				"reasoning": {"effort": "high"},
@@ -153,7 +153,7 @@ The OpenRouter plugin pipeline replaces the legacy top-level `transforms` field.
 ```json
 {
 	"openrouter": {
-		"models": ["anthropic/claude-3.5-sonnet", "openai/gpt-4o"]
+		"models": ["anthropic/claude-sonnet-5.5", "openai/gpt-6.1-sol"]
 	}
 }
 ```
