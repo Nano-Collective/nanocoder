@@ -54,7 +54,7 @@ test('keeps the /compat path for the Opper models endpoint', t => {
 	);
 });
 
-test('fetchModels surfaces OpenLLM unsigned-in 401 hint', async t => {
+test.serial('fetchModels surfaces OpenLLM unsigned-in 401 hint', async t => {
 	const originalFetch = globalThis.fetch;
 	globalThis.fetch = (async () =>
 		new Response(
@@ -83,7 +83,7 @@ test('fetchModels surfaces OpenLLM unsigned-in 401 hint', async t => {
 	}
 });
 
-test('fetchModels keeps generic 401 message for other providers', async t => {
+test.serial('fetchModels keeps generic 401 message for other providers', async t => {
 	const originalFetch = globalThis.fetch;
 	globalThis.fetch = (async () =>
 		new Response(JSON.stringify({error: {message: 'Invalid API key'}}), {

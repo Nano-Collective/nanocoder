@@ -84,6 +84,18 @@ test('parseAPIError surfaces OpenLLM hint from status-in-message 401', t => {
 	);
 });
 
+test('parseAPIError surfaces OpenLLM hint from a multi-line status-in-message 401', t => {
+	const result = parseAPIError(
+		new Error(
+			'401 Unauthorized: [openllm] API key required.\nRun `openllm login` in a terminal to sign in.',
+		),
+	);
+	t.is(
+		result,
+		'OpenLLM is not signed in. Run `openllm login` in a terminal, then try again.',
+	);
+});
+
 test('parseAPIError handles APICallError with 404 status', t => {
 	const error = new APICallError({
 		message: 'Not found',

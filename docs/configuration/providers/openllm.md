@@ -1,7 +1,7 @@
 ---
 title: "OpenLLM"
 description: "Configure OpenLLM as a local AI gateway for Nanocoder"
-sidebar_order: 31
+sidebar_order: 8
 ---
 
 # OpenLLM

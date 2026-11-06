@@ -258,7 +258,7 @@ function parseAPIErrorInternal(
 			case '400':
 				return `Bad request: ${cleanMessage}`;
 			case '401':
-				return formatUnauthorizedMessage(cleanMessage);
+				return formatUnauthorizedMessage(errorMessage);
 			case '403':
 				return 'Access forbidden: Check your API permissions';
 			case '404':

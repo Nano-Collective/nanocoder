@@ -32,6 +32,7 @@ Run on your machine, typically no API key required.
 - [vLLM](vllm.md) - High-throughput serving engine
 - [LocalAI](localai.md) - OpenAI-compatible local API
 - [llama-swap](llama-swap.md) - Model multiplexer for llama.cpp
+- [OpenLLM](openllm.md) - Local gateway for your subscription accounts and API keys, served through one OpenAI-compatible endpoint
 
 ## Cloud Providers (OpenAI-Compatible)
 
@@ -42,7 +43,6 @@ Hosted services using the OpenAI-compatible API format.
 - [OrcaRouter](orcarouter.md) - OpenAI-compatible LLM router for multiple AI providers
 - [Cheaper Inference](cheaper-inference.md) - OpenAI-compatible gateway for models from multiple AI providers
 - [API Route](api-route.md) - OpenAI-compatible gateway for models from multiple AI providers
-- [OpenLLM](openllm.md) - Local gateway for your subscription accounts and API keys, served through one OpenAI-compatible endpoint
 - [FutureInfra](futureinfra.md) - OpenAI-compatible AI API router for models from multiple AI providers
 - [Opper](opper.md) - EU-hosted OpenAI-compatible gateway for models from multiple AI providers
 - [Together AI](together.md) - Fast inference for open-source models with OpenAI-compatible API
