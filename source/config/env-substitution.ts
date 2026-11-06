@@ -6,16 +6,20 @@ function expandEnvVar(str: string): string {
 		return str;
 	}
 
-	const regex = /\$\{([A-Z_][A-Z0-9_]*)(?::-(.*?))?\}|\$([A-Z_][A-Z0-9_]*)/g;
+	const regex = /\$\$|\$\{([A-Z_][A-Z0-9_]*)(?::-(.*?))?\}|\$([A-Z_][A-Z0-9_]*)/g;
 
 	return str.replace(
 		regex,
 		(
-			_match: string,
+			match: string,
 			bracedVarName: string | undefined,
 			defaultValue: string | undefined,
 			unbracedVarName: string | undefined,
 		) => {
+			if (match === '$$') {
+				return '$';
+			}
+
 			const varName = bracedVarName || unbracedVarName;
 			if (!varName) return '';
 
@@ -55,6 +59,7 @@ export function substituteEnvVars<T>(value: T): T {
 	if (typeof value === 'object') {
 		const result: Record<string, unknown> = {};
 		for (const [key, val] of Object.entries(value)) {
+			if (key === '__proto__') continue;
 			result[key] = substituteEnvVars(val);
 		}
 

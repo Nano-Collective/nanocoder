@@ -258,3 +258,41 @@ test('substituteEnvVars - complex config object', t => {
 	delete process.env.PORT;
 	delete process.env.USER;
 });
+
+// ============================================================================
+// Escaped Dollar Tests ($$)
+// ============================================================================
+
+test('substituteEnvVars - supports $$ escape sequence for literal $', t => {
+	const result = substituteEnvVars('pa$$WORD');
+	t.is(result, 'pa$WORD');
+});
+
+test('substituteEnvVars - preserves literal $ in secrets and api keys', t => {
+	const result = substituteEnvVars('sk-$$ECRET-key');
+	t.is(result, 'sk-$ECRET-key');
+});
+
+test('substituteEnvVars - preserves $$ in args and strings', t => {
+	const result = substituteEnvVars('price $$USD 5');
+	t.is(result, 'price $USD 5');
+});
+
+test('substituteEnvVars - handles $$ with valid env var substitution', t => {
+	process.env.TEST_FOO = 'bar';
+	const result = substituteEnvVars('$$TEST_FOO is $TEST_FOO');
+	t.is(result, '$TEST_FOO is bar');
+	delete process.env.TEST_FOO;
+});
+
+test('substituteEnvVars - handles consecutive $$ escapes', t => {
+	const result = substituteEnvVars('$$$$');
+	t.is(result, '$$');
+});
+
+test('substituteEnvVars - prevents prototype pollution with __proto__ key', t => {
+	const malicious = JSON.parse('{"__proto__": {"polluted": true}, "valid": "data"}');
+	const result = substituteEnvVars(malicious) as Record<string, unknown>;
+	t.is(result.valid, 'data');
+	t.is(({} as Record<string, unknown>).polluted, undefined);
+});
