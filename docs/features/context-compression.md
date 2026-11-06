@@ -33,6 +33,16 @@ Use the `/compact` command to manually compress your conversation history:
 /compact --restore    # Restore from pre-compression backup
 ```
 
+`/compact` also takes one-shot [inline overrides](commands.md#inline-overrides) that apply to that command only:
+
+```bash
+/compact ?threshold=80        # Compact only if usage is at or above 80%, otherwise report usage and skip
+/compact ?preview             # Same as --preview
+/compact ?context-max=200k    # Measure usage against a 200k limit for this command
+```
+
+`?threshold` accepts 50-95; other values are ignored and the command runs ungated.
+
 ### Strategy Flags
 
 | Strategy | Flag | Description |
@@ -201,7 +211,7 @@ Check that:
 
 ### LLM compaction always falls back to mechanical
 
-If you see "LLM summary unavailable - falling back to mechanical compaction." every time, the summariser call is failing. Check:
+If you see "LLM summary unavailable - falling back to mechanical compaction." after `/compact`, or an auto-compact notice reading "Context at N% capacity - auto-compacting (summary degraded: LLM call failed)...", every time, the summariser call is failing. Check:
 
 1. The active provider/model is reachable and responding
 2. The model's context window is large enough to fit the compressible segment (the summariser call sends the older messages as a transcript)

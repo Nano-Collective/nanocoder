@@ -11,6 +11,13 @@ import path from 'node:path';
 import {HOOK_EVENTS, type HookEvent} from '@/types/config';
 import {parseYamlObject, splitFrontmatter} from '@/utils/frontmatter';
 
+/**
+ * Bump when `describeProjectTrust` changes what it fingerprints. A trust entry
+ * from another version holds a fingerprint that can't be compared with this
+ * one, so it reads as needing re-approval rather than as a changed folder.
+ */
+export const TRUST_FINGERPRINT_VERSION = 1;
+
 export interface ProjectTrustSurface {
 	plugins: number;
 	sessionStartHooks: number;

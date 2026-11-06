@@ -2,6 +2,7 @@ import {Box, Text} from 'ink';
 import Spinner from 'ink-spinner';
 import React, {useMemo} from 'react';
 import CancellingIndicator from '@/components/cancelling-indicator';
+import type {VoiceIndicatorInfo} from '@/components/development-mode-indicator';
 import QuestionPrompt from '@/components/question-prompt';
 import {TaskListDisplay} from '@/components/task-list-display';
 import ToolConfirmation from '@/components/tool-confirmation';
@@ -106,6 +107,7 @@ export interface ChatInputProps {
 	 */
 	fullscreen?: boolean;
 	isSaving?: boolean;
+	voice?: VoiceIndicatorInfo | null;
 	/** Follow-up command offered in the empty prompt after a turn. */
 	suggestedCommand?: string | null;
 	onDismissSuggestion?: () => void;
@@ -166,6 +168,7 @@ export function ChatInput({
 	onDismissActiveEditor,
 	fullscreen = false,
 	isSaving,
+	voice,
 	suggestedCommand,
 	onDismissSuggestion,
 }: ChatInputProps): React.ReactElement {
@@ -301,6 +304,7 @@ export function ChatInput({
 					activeEditor={activeEditor}
 					onDismissActiveEditor={onDismissActiveEditor}
 					isSaving={isSaving}
+					voice={voice}
 					suggestedCommand={suggestedCommand}
 					onDismissSuggestion={onDismissSuggestion}
 				/>

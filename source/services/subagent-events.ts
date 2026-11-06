@@ -130,3 +130,77 @@ export function resetSubagentProgress(): void {
 	subagentProgress.tokenCount = 0;
 	subagentProgress.toolHistory.length = 0;
 }
+
+/** Lifecycle of one subagent run, for clients that show each run on its own. */
+export interface SubagentRunEvent {
+	/** Stable for the life of the run. */
+	childRunId: string;
+	/** The run that started this one; empty for a child of the root turn. */
+	parentRunId: string;
+	sessionId?: string;
+	/** The parent's `agent` tool call that started this run, when known. */
+	toolCallId?: string;
+	name: string;
+	status: 'started' | 'progress' | 'completed' | 'failed' | 'cancelled';
+	tokenCount?: number;
+	toolCallCount?: number;
+	lastTool?: string;
+	/** Final output, on `completed`. */
+	result?: string;
+	/** Why the run ended, on `failed` and `cancelled`. */
+	error?: string;
+}
+
+const runListeners = new Set<(event: SubagentRunEvent) => void>();
+
+/** Listen for run events; returns the unsubscribe function. */
+export function onSubagentRunEvent(
+	listener: (event: SubagentRunEvent) => void,
+): () => void {
+	runListeners.add(listener);
+	return () => {
+		runListeners.delete(listener);
+	};
+}
+
+export function emitSubagentRunEvent(event: SubagentRunEvent): void {
+	for (const listener of runListeners) {
+		try {
+			listener(event);
+		} catch {
+			// A listener must never be able to break the run it is watching.
+		}
+	}
+}
+
+/** Runs that can be cancelled one at a time, by run ID. */
+const cancellableRuns = new Map<
+	string,
+	{sessionId?: string; cancel: () => void}
+>();
+
+/** Make a run cancellable; returns the function that forgets it. */
+export function registerSubagentRun(
+	childRunId: string,
+	sessionId: string | undefined,
+	cancel: () => void,
+): () => void {
+	cancellableRuns.set(childRunId, {sessionId, cancel});
+	return () => {
+		cancellableRuns.delete(childRunId);
+	};
+}
+
+/**
+ * Cancel one running subagent without touching its siblings or the turn. A run
+ * of another session is left alone. False when there is no such live run.
+ */
+export function cancelSubagentRun(
+	sessionId: string,
+	childRunId: string,
+): boolean {
+	const run = cancellableRuns.get(childRunId);
+	if (!run || run.sessionId !== sessionId) return false;
+	run.cancel();
+	return true;
+}

@@ -18,8 +18,9 @@ nanocoder verify --pr 861 --post-review    # also post it as a PR comment
 
 ## What it does
 
-1. Confirms the local working tree is checked out to the PR's head branch
-   (via `gh`). If it isn't, `verify` fails fast with the exact `gh pr
+1. Confirms the local working tree is at the PR's head commit (via `gh`,
+   comparing commit SHAs, so a stale local copy of the branch also fails).
+   If it isn't, `verify` fails fast with the exact `gh pr
    checkout <n>` command to run first — it never checks out branches on
    your behalf, since this is meant to be a read-only tool.
 2. Runs a semgrep scan (`--config auto`) scoped to the PR's changed files
@@ -60,7 +61,7 @@ example in CI). Only do this for PRs you are willing to run: once trusted,
 | Flag | Description |
 |------|-------------|
 | `--pr <n>` | Required. The PR number to review. |
-| `--post-review` | Post the review as a PR comment instead of printing it. |
+| `--post-review` | Also post the review as a PR comment. The review is still printed. If posting fails, `verify` prints the review anyway and exits with code 2. |
 | `--trust-directory` | Run in an untrusted directory for this run only. |
 | `--provider <name>` | Override the LLM provider for this run. |
 | `--model <name>` | Override the model for this run. |
@@ -68,7 +69,7 @@ example in CI). Only do this for PRs you are willing to run: once trusted,
 ## Requirements
 
 - `gh` CLI installed and authenticated.
-- The PR's head branch checked out locally (`verify` checks this and tells
+- The PR's head commit checked out locally (`verify` checks this and tells
   you the exact command if it isn't).
 - [semgrep](https://semgrep.dev/) installed to get static-analysis findings
   — optional; `verify` degrades gracefully and notes it was skipped if

@@ -305,6 +305,7 @@ export interface WebviewMessageResolveTool {
 export interface WebviewMessageShowDiff {
 	type: 'showDiff';
 	toolCallId: string;
+	filePath?: string;
 }
 
 

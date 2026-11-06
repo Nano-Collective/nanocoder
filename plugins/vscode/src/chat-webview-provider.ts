@@ -12,7 +12,11 @@ import {PlanReviewController} from './plan-review-controller';
 import { SettingsData, SettingsManager } from './settings-manager';
 import { searchMentions, MentionSearchDeps } from './mention-search';
 import { resolveExtensionCwd, resolveProjectCwd } from './workspace-utils';
-import { readCappedFile, readCappedDirectory } from './context-attachment';
+import {
+	findOpenDocumentText,
+	readAttachedFile,
+	readCappedDirectory,
+} from './context-attachment';
 import { PromptQueue, type QueuedPrompt } from './prompt-queue';
 import { PROVIDER_TEMPLATES, TemplateField } from '../../../source/wizards/templates/provider-templates';
 
@@ -108,6 +112,7 @@ export class ChatWebviewProvider
 		};
 
 		this._acpClient.onConnectionReady = () => {
+			void this._diffManager.clearPendingChanges();
 			this._initializeSessionIfReady();
 		};
 	}
@@ -117,9 +122,11 @@ export class ChatWebviewProvider
 		if (update?.content && Array.isArray(update.content)) {
 			for (const block of update.content) {
 				if (block.type === 'diff' && block.path) {
+					const toolCallId = update.toolCallId || payload.toolCallId;
+					const id = toolCallId ? `${toolCallId}_${path.normalize(block.path)}` : block.path;
 					this._diffManager.addPendingChange({
 						type: 'file_change',
-						id: update.toolCallId || payload.toolCallId || block.path, // fallback id
+						id,
 						filePath: block.path,
 						originalContent: block.oldText || '',
 						newContent: block.newText || '',
@@ -204,6 +211,7 @@ export class ChatWebviewProvider
 	public resetSessionState(): void {
 		this._planReview.reset();
 		this._artifacts.reset();
+		void this._diffManager.clearPendingChanges();
 		this.postArtifacts();
 	}
 
@@ -289,7 +297,13 @@ export class ChatWebviewProvider
 
 		webviewView.webview.onDidReceiveMessage(
 			async (message: WebviewToExtensionMessage) => {
-				switch (message.type) {
+				await this._handleWebviewMessage(message);
+			},
+		);
+	}
+
+	private async _handleWebviewMessage(message: WebviewToExtensionMessage): Promise<void> {
+		switch (message.type) {
 					case 'ready':
 						this._outputChannel.appendLine('[Webview] Chat shell is ready.');
 						this._isWebviewReady = true;
@@ -326,7 +340,9 @@ export class ChatWebviewProvider
 						break;
 					case 'showDiff':
 						this._outputChannel.appendLine(`[Webview] User requested to see diff for: ${message.toolCallId}`);
-						this._diffManager.showDiff(message.toolCallId);
+						void this._diffManager.showDiff(message.toolCallId, {
+							filePath: message.filePath,
+						});
 						break;
 
 					case 'setMode':
@@ -346,15 +362,11 @@ export class ChatWebviewProvider
 						break;
 					case 'setProvider':
 						this._outputChannel.appendLine(`[Webview] User selected provider: ${message.provider}`);
-						this._acpClient.setSessionProvider(message.provider).then(() => {
-							vscode.window.showInformationMessage(`Nanocoder: Provider switched to ${message.provider}`);
-						});
+						void this._switchProvider(message.provider);
 						break;
 					case 'setModel':
 						this._outputChannel.appendLine(`[Webview] User selected model: ${message.model}`);
-						this._acpClient.setSessionModel(message.model).then(() => {
-							vscode.window.showInformationMessage(`Nanocoder: Model switched to ${message.model}`);
-						});
+						void this._switchModel(message.model);
 						break;
 					case 'listSessions':
 						this._broadcastSessions();
@@ -363,6 +375,7 @@ export class ChatWebviewProvider
 						this._outputChannel.appendLine(`[Webview] User resumed session: ${message.sessionId}`);
 						this._planReview.reset();
 						this._artifacts.reset();
+						void this._diffManager.clearPendingChanges();
 						this.postArtifacts();
 						this._discardQueuedPrompts('resume session');
 						this.postMessage({type: 'clear', isLoading: true});
@@ -463,8 +476,6 @@ export class ChatWebviewProvider
 						void this._handleAddProvider(message.provider);
 						break;
 				}
-			}
-		);
 	}
 
 	public postMessage(message: ExtensionToWebviewMessage) {
@@ -813,7 +824,9 @@ export class ChatWebviewProvider
 						// Capped rather than a bare readFileSync: `@` makes attaching
 						// a lockfile or a minified bundle one keystroke, and an
 						// uncapped read would silently eat the whole context window.
-						const content = readCappedFile(filePath);
+						const content = readAttachedFile(filePath, attached =>
+							findOpenDocumentText(attached, vscode.workspace.textDocuments),
+						);
 						if (content === null) {
 							this._outputChannel.appendLine(`[Context] Skipped unreadable or binary file ${filePath}`);
 							return `<!-- skipped ${filePath}: unreadable or binary -->`;
@@ -828,6 +841,33 @@ export class ChatWebviewProvider
 				}
 			},
 		);
+	}
+
+	/** Only claim a switch the agent confirmed; otherwise say why it failed. */
+	private async _switchProvider(provider: string): Promise<void> {
+		const result = await this._acpClient.setSessionProvider(provider);
+		if (result.ok) {
+			vscode.window.showInformationMessage(`Nanocoder: Provider switched to ${provider}`);
+		} else {
+			vscode.window.showErrorMessage(
+				`Nanocoder: Could not switch provider to ${provider}: ${result.error}`,
+			);
+		}
+	}
+
+	private async _switchModel(model: string): Promise<void> {
+		const result = await this._acpClient.setSessionModel(model);
+		if (!result.ok) {
+			vscode.window.showErrorMessage(
+				`Nanocoder: Could not switch model to ${model}: ${result.error}`,
+			);
+		} else if (result.persistError) {
+			vscode.window.showWarningMessage(
+				`Nanocoder: Model switched to ${model} for this session, but it could not be saved as your default: ${result.persistError}`,
+			);
+		} else {
+			vscode.window.showInformationMessage(`Nanocoder: Model switched to ${model}`);
+		}
 	}
 
 	private _handleSubmit(id: string | undefined, text: string, images?: { data: string, mimeType: string }[]) {
@@ -1028,6 +1068,10 @@ export class ChatWebviewProvider
 			.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'chat-panel.css'))
 			.with({query: `v=${assetVersion('chat-panel.css')}`});
 		const markedUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'marked.min.js'));
+		const highlightUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'highlight.min.js'));
+		const markdownHighlightUri = webview
+			.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'markdown-highlight.js'))
+			.with({query: `v=${assetVersion('markdown-highlight.js')}`});
 		const mentionUtilsUri = webview
 			.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'mention-utils.js'))
 			.with({query: `v=${assetVersion('mention-utils.js')}`});
@@ -1044,6 +1088,8 @@ export class ChatWebviewProvider
 		html = html.replace(/\{\{styleUri\}\}/g, styleUri.toString());
 		html = html.replace(/\{\{scriptUri\}\}/g, scriptUri.toString());
 		html = html.replace(/\{\{markedUri\}\}/g, markedUri.toString());
+		html = html.replace(/\{\{highlightUri\}\}/g, highlightUri.toString());
+		html = html.replace(/\{\{markdownHighlightUri\}\}/g, markdownHighlightUri.toString());
 		html = html.replace(/\{\{mentionUtilsUri\}\}/g, mentionUtilsUri.toString());
 		html = html.replace(/\{\{uriUtilsUri\}\}/g, uriUtilsUri.toString());
 		html = html.replace(/\{\{slashCommandUtilsUri\}\}/g, slashCommandUtilsUri.toString());

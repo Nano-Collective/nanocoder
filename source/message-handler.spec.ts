@@ -133,6 +133,33 @@ test('processToolUse - throws on unknown tool', async t => {
 	});
 });
 
+test('processToolUse - refuses a call whose arguments could not be parsed', async t => {
+	// Such a call carries `{}` in place of its arguments. A tool that can run
+	// with no arguments (git_status, list_directory) must not run on it.
+	let ran = false;
+	setToolRegistryGetter(
+		createMockToolRegistry({
+			git_status: async () => {
+				ran = true;
+				return 'clean';
+			},
+		}),
+	);
+
+	const result = await processToolUse({
+		...createMockToolCall('git_status', {}),
+		argumentsError: 'not valid JSON: Unexpected end of JSON input',
+	});
+
+	t.false(ran);
+	t.true(result.isError);
+	t.is(result.tool_call_id, 'test-call-id');
+	t.regex(
+		result.content,
+		/^Invalid arguments for tool "git_status": not valid JSON: Unexpected end of JSON input\. The call was not run\./,
+	);
+});
+
 // Test processToolUse - successful execution
 test('processToolUse - executes tool successfully with object arguments', async t => {
 	const mockHandler: ToolHandler = async (args: {path: string}) => {
@@ -686,4 +713,24 @@ test('processToolUse - handles empty string return value', async t => {
 	const result: ToolResult = await processToolUse(toolCall);
 
 	t.is(result.content, '');
+});
+
+test('processToolUse - runs a tool from the tool manager the call carries, not the process-wide set', async t => {
+	setToolRegistryGetter(createMockToolRegistry({shared: async () => 'shared'}));
+	const sessionTools = {
+		getToolRegistry: () => ({session_only: async () => 'from the session'}),
+	} as unknown as ToolManager;
+
+	const result = await processToolUse(createMockToolCall('session_only', {}), {
+		toolManager: sessionTools,
+	});
+	t.is(result.content, 'from the session');
+
+	// The process-wide set is not consulted for that call, so a tool only it has is unknown.
+	await t.throwsAsync(
+		processToolUse(createMockToolCall('shared', {}), {toolManager: sessionTools}),
+		{message: 'Unknown tool: shared'},
+	);
+	// And a call that carries none still uses it.
+	t.is((await processToolUse(createMockToolCall('shared', {}))).content, 'shared');
 });

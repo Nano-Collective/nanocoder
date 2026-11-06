@@ -130,6 +130,70 @@ test('AcpProcessManager - start() is a no-op when disposed', async (t) => {
 	t.false(launchCalled, 'start() on a disposed manager must not invoke launch()');
 });
 
+test('AcpProcessManager - ensureStarted() launches once, however often it is called', async (t) => {
+	const manager = makeManagerWithRealStart(new AcpStateManager());
+	let launchCount = 0;
+	(manager as any).launch = async () => {
+		launchCount++;
+	};
+
+	const first = manager.ensureStarted();
+	const second = manager.ensureStarted();
+	await Promise.all([first, second]);
+	// The first launch has finished, which is when start() alone would spawn again.
+	await manager.ensureStarted();
+
+	t.is(launchCount, 1, 'only the first call may spawn the agent process');
+});
+
+test('AcpProcessManager - ensureStarted() resolves with the launch it joined', async (t) => {
+	const manager = makeManagerWithRealStart(new AcpStateManager());
+	let releaseLaunch!: () => void;
+	(manager as any).launch = () =>
+		new Promise<void>(resolve => {
+			releaseLaunch = resolve;
+		});
+
+	let joinedResolved = false;
+	void manager.ensureStarted();
+	const joined = manager.ensureStarted().then(() => {
+		joinedResolved = true;
+	});
+	await Promise.resolve();
+	t.false(joinedResolved, 'a caller joining an in-flight launch waits for it');
+
+	releaseLaunch();
+	await joined;
+	t.true(joinedResolved);
+});
+
+test('AcpProcessManager - ensureStarted() is a no-op once start() has run', async (t) => {
+	const manager = makeManagerWithRealStart(new AcpStateManager());
+	let launchCount = 0;
+	(manager as any).launch = async () => {
+		launchCount++;
+	};
+
+	// e.g. "Restart Agent Process" before the chat view was ever opened.
+	await manager.start();
+	await manager.ensureStarted();
+
+	t.is(launchCount, 1);
+});
+
+test('AcpProcessManager - ensureStarted() does nothing on a disposed manager', async (t) => {
+	const manager = makeManagerWithRealStart(new AcpStateManager());
+	let launchCount = 0;
+	(manager as any).launch = async () => {
+		launchCount++;
+	};
+
+	manager.dispose();
+	await manager.ensureStarted();
+
+	t.is(launchCount, 0);
+});
+
 test('AcpProcessManager - overlapping start() calls coalesce into one launch', async (t) => {
 	const stateManager = new AcpStateManager();
 	const manager = makeManagerWithRealStart(stateManager);
