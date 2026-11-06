@@ -150,7 +150,14 @@ export async function appendRelevantProjectContextWithCount(
 
 	try {
 		const {getVramAllocator} = await import('@/vram/vram-allocator');
-		await getVramAllocator().transitionPhase('retrieval');
+		await getVramAllocator()
+			.transitionPhase('retrieval')
+			.catch(() => {});
+	} catch {
+		// Non-blocking phase transition failure must never impede memory retrieval
+	}
+
+	try {
 		const memories = await memoryFinder.findRelevantMemories(
 			query,
 			options.memoryLimit ?? DEFAULT_MEMORY_LIMIT,

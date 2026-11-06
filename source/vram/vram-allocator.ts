@@ -10,43 +10,72 @@ import {VRAM_DEFAULTS} from '@/types/vram';
 /**
  * Resolves the connection settings (baseURL, apiKey, headers) for communicating
  * with Ollama. Checks the explicit override first, then looks up the provider
- * configuration from agents.config.json by provider name, model name, or Ollama type.
- * Defaults to unauthenticated http://127.0.0.1:11434.
+ * configuration from agents.config.json. Requires the resolved provider to be
+ * an Ollama provider (type === 'ollama' or name containing 'ollama') to prevent
+ * leaking API keys or dispatching keep_alive requests to third-party endpoints.
  */
 export function resolveOllamaConnection(
 	provider?: string,
 	model?: string,
 	backendUrlOverride?: string,
-): {baseURL: string; apiKey?: string; headers?: Record<string, string>} {
+): {baseURL: string; apiKey?: string; headers?: Record<string, string>} | null {
 	if (backendUrlOverride) {
 		return {baseURL: backendUrlOverride};
 	}
 
 	try {
 		const providers = getAppConfig().providers ?? [];
-		let matched = providers.find(
-			p => provider && p.name.toLowerCase() === provider.toLowerCase(),
-		);
-		if (!matched && model) {
-			const modelLower = model.toLowerCase().trim();
-			matched = providers.find(p =>
-				p.models?.some(m => m.toLowerCase().trim() === modelLower),
+		if (provider) {
+			const matched = providers.find(
+				p => p.name.toLowerCase() === provider.toLowerCase(),
 			);
+			if (matched) {
+				const isOllama =
+					(typeof matched.type === 'string' &&
+						matched.type.toLowerCase() === 'ollama') ||
+					matched.name.toLowerCase().includes('ollama');
+				if (!isOllama) {
+					return null;
+				}
+				return {
+					baseURL: matched.baseUrl || 'http://127.0.0.1:11434',
+					apiKey: matched.apiKey,
+				};
+			}
 		}
-		if (!matched) {
-			matched = providers.find(p => p.name?.toLowerCase().includes('ollama'));
+
+		if (model) {
+			const modelLower = model.toLowerCase().trim();
+			const matched = providers.find(
+				p =>
+					((typeof p.type === 'string' && p.type.toLowerCase() === 'ollama') ||
+						p.name.toLowerCase().includes('ollama')) &&
+					p.models?.some(m => m.toLowerCase().trim() === modelLower),
+			);
+			if (matched) {
+				return {
+					baseURL: matched.baseUrl || 'http://127.0.0.1:11434',
+					apiKey: matched.apiKey,
+				};
+			}
 		}
-		if (matched) {
+
+		const defaultOllama = providers.find(
+			p =>
+				(typeof p.type === 'string' && p.type.toLowerCase() === 'ollama') ||
+				p.name.toLowerCase().includes('ollama'),
+		);
+		if (defaultOllama) {
 			return {
-				baseURL: matched.baseUrl || 'http://127.0.0.1:11434',
-				apiKey: matched.apiKey,
+				baseURL: defaultOllama.baseUrl || 'http://127.0.0.1:11434',
+				apiKey: defaultOllama.apiKey,
 			};
 		}
 	} catch {
-		// Fall back to default
+		// Fall through
 	}
 
-	return {baseURL: 'http://127.0.0.1:11434'};
+	return null;
 }
 
 export class VramAllocator {
@@ -205,6 +234,9 @@ export class VramAllocator {
 		const provider =
 			typeof options === 'object' ? options?.provider : undefined;
 		const conn = resolveOllamaConnection(provider, model, backendUrl);
+		if (!conn) {
+			return false;
+		}
 
 		return await dispatchOllamaKeepAlive(model, 0, conn);
 	}
@@ -226,6 +258,9 @@ export class VramAllocator {
 		const provider =
 			typeof options === 'object' ? options?.provider : undefined;
 		const conn = resolveOllamaConnection(provider, model, backendUrl);
+		if (!conn) {
+			return false;
+		}
 
 		return await dispatchOllamaKeepAlive(model, `${durationMinutes}m`, conn);
 	}
@@ -271,7 +306,7 @@ export async function dispatchOllamaKeepAlive(
 
 	try {
 		const controller = new AbortController();
-		const timeoutId = setTimeout(() => controller.abort(), 1000);
+		const timeoutId = setTimeout(() => controller.abort(), 200);
 
 		const response = await fetch(endpoint, {
 			method: 'POST',

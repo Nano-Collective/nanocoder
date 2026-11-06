@@ -5,11 +5,12 @@ import {
 	VramAllocator,
 } from './vram-allocator';
 
-test('VramAllocator initializes with default balanced strategy and idle phase', t => {
+test('VramAllocator initializes with default disabled strategy and idle phase', t => {
 	const allocator = new VramAllocator();
 	t.is(allocator.getCurrentPhase(), 'idle');
-	t.is(allocator.getConfig().strategy, 'balanced');
-	t.true(allocator.getConfig().unloadOnExecution);
+	t.is(allocator.getConfig().strategy, 'disabled');
+	t.false(allocator.getConfig().enabled);
+	t.false(allocator.getConfig().unloadOnExecution);
 });
 
 test('VramAllocator tracks registered model roles', t => {
@@ -24,7 +25,11 @@ test('VramAllocator tracks registered model roles', t => {
 });
 
 test('VramAllocator phase transitions update current phase and residency', async t => {
-	const allocator = new VramAllocator({strategy: 'balanced'});
+	const allocator = new VramAllocator({
+		enabled: true,
+		strategy: 'balanced',
+		unloadOnExecution: true,
+	});
 	allocator.registerModel('deepseek-coder:33b', 'coder');
 	allocator.registerModel('nomic-embed-text', 'embedder');
 
@@ -81,17 +86,17 @@ test('VramAllocator respects disabled strategy', async t => {
 	t.true(allocator.getResidencyStates()[0].isLoaded);
 });
 
-test('resolveOllamaConnection falls back to default 127.0.0.1:11434', t => {
-	const conn = resolveOllamaConnection(undefined, 'unknown-model');
-	t.is(conn.baseURL, 'http://127.0.0.1:11434');
-	t.is(conn.apiKey, undefined);
-
+test('resolveOllamaConnection resolves valid Ollama endpoints or overrides and filters non-Ollama', t => {
 	const customOverride = resolveOllamaConnection(
 		undefined,
 		undefined,
 		'http://remote-ollama:11434',
 	);
-	t.is(customOverride.baseURL, 'http://remote-ollama:11434');
+	t.is(customOverride?.baseURL, 'http://remote-ollama:11434');
+
+	// Non-Ollama provider returns null to prevent accidental requests / credential leakage
+	const nonOllama = resolveOllamaConnection('non-existent-or-cloud-provider');
+	t.is(nonOllama, null);
 });
 
 test.serial('dispatchOllamaKeepAlive formats URL and payload correctly', async t => {

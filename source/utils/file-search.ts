@@ -196,10 +196,10 @@ function matchTokens(text: string, tokens: GlobToken[]): boolean {
 }
 
 // Bounds total tokens, not entry count - one entry can hold up to MAX_BRACE_EXPANSIONS arrays.
-/** Exported for direct unit testing only. */
+/** @internal Exported for direct unit testing only. */
 export const GLOB_TOKEN_CACHE_MAX_TOKENS = 1_000_000;
 
-/** Exported for direct unit testing only. */
+/** @internal Exported for direct unit testing only. */
 export const globTokenCache = new LRUCache<string, GlobToken[][]>({
 	maxSize: GLOB_TOKEN_CACHE_MAX_TOKENS,
 	sizeCalculation: tokenized =>

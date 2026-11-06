@@ -25,8 +25,8 @@ export interface VramConfig {
 }
 
 export const VRAM_DEFAULTS: VramConfig = {
-	enabled: true,
-	strategy: 'balanced',
-	unloadOnExecution: true,
+	enabled: false,
+	strategy: 'disabled',
+	unloadOnExecution: false,
 	keepAliveMinutes: 5,
 };
