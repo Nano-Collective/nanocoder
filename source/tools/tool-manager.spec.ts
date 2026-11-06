@@ -4,8 +4,10 @@ import type {
 } from '@/types/index';
 import type {MCPClient} from '@/mcp/mcp-client';
 import test from 'ava';
+import {setGlobalMessageQueue} from '@/utils/message-queue';
 import {getShutdownManager} from '@/utils/shutdown';
-import {ToolManager} from './tool-manager';
+import {resolveToolApproval} from './approval-policy';
+import {describeSkippedMCPTools, ToolManager} from './tool-manager';
 import {getToolsForProfile} from './tool-profiles';
 
 console.log('\ntool-manager.spec.ts');
@@ -254,6 +256,284 @@ test('ToolManager re-registers MCP tools when server recovers to connected state
 
 	healthListener?.({serverName: 'health-server', status: 'connected'});
 	t.true(manager.getToolNames().includes(toolName));
+});
+
+// ============================================================================
+// MCP tools named like a built-in (#1853)
+// ============================================================================
+
+// Connected servers, each offering its tools, none annotated read-only. Like
+// the real client's entries, they run without a prompt in auto-accept, and a
+// name more than one server offers routes to the server listed last.
+function fakeMCPServers(toolsByServer: Record<string, string[]>) {
+	let healthListener:
+		| ((change: {serverName: string; status: 'unhealthy' | 'connected'}) => void)
+		| undefined;
+	const serverTools = Object.entries(toolsByServer);
+	const client = {
+		onHealthChange(listener: typeof healthListener) {
+			healthListener = listener;
+			return () => {};
+		},
+		async connectToServers() {
+			return serverTools.map(([serverName, tools]) => ({
+				serverName,
+				success: true,
+				toolCount: tools.length,
+			}));
+		},
+		getToolEntries(forServerName?: string) {
+			return serverTools
+				.filter(([serverName]) => !forServerName || serverName === forServerName)
+				.flatMap(([serverName, tools]) =>
+					tools.map(name => ({
+						name,
+						tool: {
+							description: `[MCP:${serverName}] ${name}`,
+							execute: async () => 'mcp',
+						} as never,
+						handler: async () => 'mcp',
+						approval: (_args: unknown, mode: string) => mode !== 'auto-accept',
+					})),
+				);
+		},
+		getNativeToolsRegistry() {
+			return Object.fromEntries(
+				serverTools.flatMap(([, tools]) => tools.map(name => [name, {}])),
+			);
+		},
+		getToolMapping() {
+			return new Map(
+				serverTools.flatMap(([serverName, tools]) =>
+					tools.map(name => [
+						name,
+						{serverName, originalName: name, readOnly: false},
+					]),
+				),
+			);
+		},
+		getToolNameConflicts() {
+			const owners = new Map<string, string[]>();
+			for (const [serverName, tools] of serverTools) {
+				for (const name of tools) {
+					owners.set(name, [...(owners.get(name) ?? []), serverName]);
+				}
+			}
+			return [...owners]
+				.filter(([, servers]) => servers.length > 1)
+				.map(([tool, servers]) => ({tool, servers, active: servers.at(-1)}));
+		},
+		disconnect: async () => {},
+	};
+	return {
+		manager: new HealthSeamToolManager(client),
+		servers: serverTools.map(([name]) => ({
+			name,
+			transport: 'http' as const,
+			url: 'http://localhost/mcp',
+		})),
+		setHealth: (serverName: string, status: 'unhealthy' | 'connected') =>
+			healthListener?.({serverName, status}),
+	};
+}
+
+function fakeMCPServer(serverName: string, tools: string[]) {
+	const fake = fakeMCPServers({[serverName]: tools});
+	return {
+		...fake,
+		setHealth: (status: 'unhealthy' | 'connected') =>
+			fake.setHealth(serverName, status),
+	};
+}
+
+/** Run `fn` with chat warnings captured, and return their text. */
+async function captureChatWarnings(fn: () => Promise<unknown>) {
+	const warnings: string[] = [];
+	setGlobalMessageQueue(component => {
+		const message = (component as {props?: {message?: unknown}}).props
+			?.message;
+		if (typeof message === 'string') warnings.push(message);
+	});
+	try {
+		await fn();
+	} finally {
+		setGlobalMessageQueue(() => {});
+	}
+	return warnings;
+}
+
+test('initializeMCP - skips an MCP tool named like a built-in and keeps the built-in', async t => {
+	const {manager, servers} = fakeMCPServer('fs', ['write_file', 'fs_stat']);
+	const builtIn = manager.getToolEntry('write_file');
+	t.truthy(builtIn);
+
+	const results = await manager.initializeMCP(servers);
+
+	t.is(manager.getToolEntry('write_file'), builtIn, 'built-in entry untouched');
+	t.deepEqual(results[0].skippedTools, ['write_file']);
+	t.false(manager.getMCPToolInfo('write_file').isMCPTool);
+	t.true(manager.hasTool('fs_stat'), 'non-colliding MCP tool still registers');
+	t.deepEqual(manager.getMCPToolInfo('fs_stat'), {
+		isMCPTool: true,
+		serverName: 'fs',
+	});
+});
+
+test('initializeMCP - leaves skippedTools unset when nothing collides', async t => {
+	const {manager, servers} = fakeMCPServer('fs', ['fs_stat']);
+
+	const results = await manager.initializeMCP(servers);
+
+	t.is(results[0].skippedTools, undefined);
+});
+
+test('initializeMCP - skips an MCP tool named like a skill tool', async t => {
+	const {manager, servers} = fakeMCPServer('fs', ['team_tool']);
+	manager.registerSkillTool({
+		name: 'team_tool',
+		tool: {description: 'skill tool'} as never,
+		handler: async () => 'skill',
+		ownerSkill: 'team',
+	});
+	const skillEntry = manager.getToolEntry('team_tool');
+
+	const results = await manager.initializeMCP(servers);
+
+	t.is(manager.getToolEntry('team_tool'), skillEntry);
+	t.deepEqual(results[0].skippedTools, ['team_tool']);
+});
+
+test('an unhealthy MCP server removes only its own tools, not a built-in it shadowed', async t => {
+	const {manager, servers, setHealth} = fakeMCPServer('fs', [
+		'list_directory',
+		'echo_tool',
+	]);
+	const builtIn = manager.getToolEntry('list_directory');
+	await manager.initializeMCP(servers);
+
+	setHealth('unhealthy');
+
+	t.is(manager.getToolEntry('list_directory'), builtIn);
+	t.false(manager.hasTool('echo_tool'));
+});
+
+test('an MCP server recovering to connected does not replace a built-in', async t => {
+	const {manager, servers, setHealth} = fakeMCPServer('fs', [
+		'list_directory',
+		'echo_tool',
+	]);
+	const builtIn = manager.getToolEntry('list_directory');
+	await manager.initializeMCP(servers);
+
+	setHealth('unhealthy');
+	setHealth('connected');
+
+	t.is(manager.getToolEntry('list_directory'), builtIn);
+	t.true(manager.hasTool('echo_tool'), 'its own tool comes back');
+});
+
+test('disconnectMCP removes only MCP tools, not a built-in it shadowed', async t => {
+	const {manager, servers} = fakeMCPServer('fs', ['list_directory', 'echo_tool']);
+	const builtIn = manager.getToolEntry('list_directory');
+	await manager.initializeMCP(servers);
+
+	await manager.disconnectMCP();
+
+	t.is(manager.getToolEntry('list_directory'), builtIn);
+	t.false(manager.hasTool('echo_tool'));
+});
+
+test('git_commit still needs approval in auto-accept when an MCP server offers git_commit', async t => {
+	const {manager, servers} = fakeMCPServer('git', ['git_commit']);
+	await manager.initializeMCP(servers);
+
+	const needsApproval = await resolveToolApproval(
+		'git_commit',
+		manager.getToolEntry('git_commit'),
+		{message: 'm'},
+		{mode: 'auto-accept'},
+	);
+
+	t.true(needsApproval);
+});
+
+test('plan mode keeps a built-in that an unannotated MCP tool is named like', async t => {
+	const {manager, servers} = fakeMCPServer('fs', ['list_directory']);
+	await manager.initializeMCP(servers);
+
+	const planTools = manager.getAvailableToolNames(undefined, 'plan', []);
+
+	t.true(planTools.includes('list_directory'));
+});
+
+test('describeSkippedMCPTools - names the server and the skipped tools', t => {
+	t.is(describeSkippedMCPTools({serverName: 'fs', success: true}), null);
+	t.is(
+		describeSkippedMCPTools({
+			serverName: 'fs',
+			success: true,
+			skippedTools: ['write_file', 'list_directory'],
+		}),
+		'MCP server "fs" offers tools that a built-in or custom tool already uses, so they were skipped: write_file, list_directory',
+	);
+});
+
+test.serial('initializeMCP - warns about a tool name two MCP servers share when nothing is skipped', async t => {
+	const {manager, servers} = fakeMCPServers({alpha: ['echo'], beta: ['echo']});
+	let results: MCPInitResult[] = [];
+
+	const warnings = await captureChatWarnings(async () => {
+		results = await manager.initializeMCP(servers);
+	});
+
+	t.deepEqual(warnings, [
+		'MCP servers expose the same tool names, so only one server handles each: "echo" (alpha, beta; calls go to beta).',
+	]);
+	t.deepEqual(
+		results.map(result => result.skippedTools),
+		[undefined, undefined],
+	);
+});
+
+test.serial('initializeMCP - warns about both a tool skipped for a built-in and a name two MCP servers share', async t => {
+	const {manager, servers} = fakeMCPServers({
+		alpha: ['write_file', 'echo'],
+		beta: ['echo'],
+	});
+	let results: MCPInitResult[] = [];
+
+	const warnings = await captureChatWarnings(async () => {
+		results = await manager.initializeMCP(servers);
+	});
+
+	t.deepEqual(warnings, [
+		'MCP servers expose the same tool names, so only one server handles each: "echo" (alpha, beta; calls go to beta).',
+	]);
+	t.deepEqual(results.map(describeSkippedMCPTools), [
+		'MCP server "alpha" offers tools that a built-in or custom tool already uses, so they were skipped: write_file',
+		null,
+	]);
+});
+
+test.serial('initializeMCP - a built-in name two MCP servers share is skipped for both, not reported as routed to one', async t => {
+	const {manager, servers} = fakeMCPServers({
+		alpha: ['read_file'],
+		beta: ['read_file'],
+	});
+	const builtIn = manager.getToolEntry('read_file');
+	let results: MCPInitResult[] = [];
+
+	const warnings = await captureChatWarnings(async () => {
+		results = await manager.initializeMCP(servers);
+	});
+
+	t.is(manager.getToolEntry('read_file'), builtIn);
+	// Calls go to the built-in, so naming a server they "go to" would be wrong.
+	t.deepEqual(warnings, []);
+	t.deepEqual(
+		results.map(result => result.skippedTools),
+		[['read_file'], ['read_file']],
+	);
 });
 
 // ============================================================================
@@ -924,21 +1204,19 @@ test('plan mode hides every mutating built-in tool except its safe interaction a
 // MODE_EXCLUDED_TOOLS. They used to fall straight through the plan/headless
 // filter, leaving mutating MCP tools reachable in plan mode. Plan now gates
 // them on the server's read-only annotation; headless leaves them alone.
-test('plan mode hides MCP tools unless the server annotates them read-only', t => {
-	const manager = new ToolManager();
-
-	// Mirror initializeMCP: entries land in the same registry as built-ins with
-	// no readOnly flag (the server's hint stays on the tool mapping, out of
-	// reach of isReadOnly), and the manager keeps the client that owns it.
+test('plan mode hides MCP tools unless the server annotates them read-only', async t => {
+	// Entries land in the same registry as built-ins with no readOnly flag (the
+	// server's hint stays on the tool mapping, out of reach of isReadOnly), and
+	// the manager keeps the client that owns it.
 	const mcpEntry = (name: string) => ({
 		name,
 		tool: {description: name, execute: async () => 'ok'} as never,
 		handler: async () => 'ok',
 	});
-	for (const entry of [mcpEntry('create_issue'), mcpEntry('search_docs')]) {
-		manager.registerSkillTool(entry);
-	}
-	(manager as any).mcpClient = {
+	const manager = new HealthSeamToolManager({
+		onHealthChange: () => () => {},
+		connectToServers: async () => [{serverName: 'gh', success: true}],
+		getToolEntries: () => [mcpEntry('create_issue'), mcpEntry('search_docs')],
 		getToolMapping: () =>
 			new Map([
 				[
@@ -950,7 +1228,12 @@ test('plan mode hides MCP tools unless the server annotates them read-only', t =
 					{serverName: 'gh', originalName: 'search_docs', readOnly: true},
 				],
 			]),
-	};
+		getToolNameConflicts: () => [],
+		disconnect: async () => {},
+	});
+	await manager.initializeMCP([
+		{name: 'gh', transport: 'http', url: 'http://localhost/mcp'},
+	]);
 
 	// The annotation gates plan-mode availability and nothing else: neither
 	// tool is read-only as far as checkpointing or parallel batching is
@@ -1506,4 +1789,15 @@ test('forSession - a session MCP tool never replaces a tool that already exists'
 	t.true(session.isReadOnly('read_file'));
 	await session.disconnectMCP();
 	t.true(base.hasTool('read_file'));
+});
+
+test('forSession - a skipped session MCP tool is reported and does not relabel the existing tool', async t => {
+	const base = new QueuedClientToolManager([fakeMcpClient('read_file')]);
+	const session = base.forSession();
+	const results = await session.initializeMCP([SESSION_SERVER]);
+
+	t.deepEqual(results[0]?.skippedTools, ['read_file']);
+	// The session's server maps read_file, but the session never registered it.
+	t.deepEqual(session.getMCPToolInfo('read_file'), {isMCPTool: false});
+	await session.disconnectMCP();
 });

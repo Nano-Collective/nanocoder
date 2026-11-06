@@ -116,6 +116,17 @@ export function filterToolNamesForMode(
 }
 
 /**
+ * The startup warning for an MCP server whose tools were skipped because a
+ * built-in or custom tool already has the name, or null when none were.
+ */
+export function describeSkippedMCPTools(result: MCPInitResult): string | null {
+	if (!result.skippedTools || result.skippedTools.length === 0) {
+		return null;
+	}
+	return `MCP server "${result.serverName}" offers tools that a built-in or custom tool already uses, so they were skipped: ${result.skippedTools.join(', ')}`;
+}
+
+/**
  * Session-artifact tools. These write to the *parent session's* artifact
  * directory, so a subagent calling one would silently overwrite the plan,
  * task list, or walkthrough the user is about to act on. Subagents converse
@@ -136,6 +147,11 @@ export class ToolManager {
 	private registry: ToolRegistry;
 	private mcpClient: MCPClient | null = null;
 	private mcpHealthUnsubscribe: (() => void) | null = null;
+	// Names the MCP client currently holds in the registry. The registry is a
+	// plain name-keyed map, so an MCP tool named like a built-in would replace
+	// it, and removing MCP tools by name would then delete the built-in. Only
+	// names in this set are ever registered over or removed on MCP's behalf.
+	private mcpToolNames = new Set<string>();
 	private customTools = new Map<
 		string,
 		{
@@ -202,18 +218,18 @@ export class ToolManager {
 				onHealthChange && this.mcpClient.onHealthChange(onHealthChange),
 				this.mcpClient.onHealthChange(change => {
 					if (change.status === 'unhealthy') {
-						const toolNames = Object.keys(
-							this.mcpClient?.getNativeToolsRegistry() || {},
-						).filter(
+						const toolNames = [...this.mcpToolNames].filter(
 							name =>
 								this.mcpClient?.getToolMapping().get(name)?.serverName ===
 								change.serverName,
 						);
-						this.registry.unregisterMany(toolNames);
+						this.unregisterMCPTools(toolNames);
 					} else if (change.status === 'connected') {
-						const entries =
-							this.mcpClient?.getToolEntries(change.serverName) || [];
-						this.registerMcpTools(entries);
+						// A name skipped at startup is skipped again here; it was
+						// already reported then.
+						this.registerMCPEntries(
+							this.mcpClient?.getToolEntries(change.serverName) || [],
+						);
 					}
 				}),
 			].filter((unsubscribe): unsubscribe is () => void => !!unsubscribe);
@@ -234,11 +250,17 @@ export class ToolManager {
 				onProgress,
 			);
 
-			this.registerMcpTools(this.mcpClient.getToolEntries());
+			const mcpClient = this.mcpClient;
+			const skipped = new Set(
+				this.registerMCPEntries(mcpClient.getToolEntries()),
+			);
 
 			// Tools are keyed by name, so a name two servers share silently
-			// reaches only one of them. Say which.
-			const conflicts = this.mcpClient.getToolNameConflicts();
+			// reaches only one of them. Say which. A name that was skipped
+			// reaches neither server, so it is left to the skipped-tools warning.
+			const conflicts = mcpClient
+				.getToolNameConflicts()
+				.filter(conflict => !skipped.has(conflict.tool));
 			if (conflicts.length > 0) {
 				const lines = conflicts
 					.slice(0, 5)
@@ -250,31 +272,72 @@ export class ToolManager {
 					conflicts.length > 5 ? ` and ${conflicts.length - 5} more` : '';
 				const message = `MCP servers expose the same tool names, so only one server handles each: ${lines.join('; ')}${more}.`;
 				// An ACP session's manager has no TUI to show a chat warning;
-				// log it there, as registerMcpTools does for its own collisions.
+				// log it there, as registerMCPEntries does for its own skips.
 				if (this.parent) getLogger().warn(message);
 				else logWarning(message);
 			}
 
-			return results;
+			if (skipped.size === 0) {
+				return results;
+			}
+
+			// Every server offering a skipped name is told, not only the one the
+			// name would have been routed to.
+			return results.map(result => {
+				const skippedTools = mcpClient
+					.getToolEntries(result.serverName)
+					.map(entry => entry.name)
+					.filter(name => skipped.has(name));
+				return skippedTools.length > 0 ? {...result, skippedTools} : result;
+			});
 		}
 		return [];
 	}
 
 	/**
-	 * Register a server's tools. A session's manager never takes a name its
-	 * parent already offers: the existing tool wins and the new one is skipped.
+	 * Register MCP tool entries, except where a tool the MCP client did not
+	 * register already has the name: a built-in, custom or skill tool, or, in
+	 * a session's manager, anything the parent offers (the layered registry
+	 * reads the parent's tools). That tool keeps its handler, schema and
+	 * approval policy, and the MCP tool is skipped, the same way a colliding
+	 * custom tool is. Returns the skipped names.
 	 */
-	private registerMcpTools(entries: ToolEntry[]): void {
-		const free = entries.filter(entry => {
-			const taken = this.parent?.hasTool(entry.name);
-			if (taken) {
+	private registerMCPEntries(entries: ToolEntry[]): string[] {
+		const skipped: string[] = [];
+		for (const entry of entries) {
+			if (
+				this.registry.hasTool(entry.name) &&
+				!this.mcpToolNames.has(entry.name)
+			) {
 				getLogger().warn(
 					`MCP tool "${entry.name}" skipped: a tool with that name already exists`,
 				);
+				skipped.push(entry.name);
+				continue;
 			}
-			return !taken;
-		});
-		this.registry.registerMany(free);
+			this.registry.register(entry);
+			this.mcpToolNames.add(entry.name);
+		}
+		return skipped;
+	}
+
+	/** Unregister MCP tools, ignoring any name the MCP client does not hold. */
+	private unregisterMCPTools(names: string[]): void {
+		for (const name of names) {
+			if (this.mcpToolNames.delete(name)) {
+				this.registry.unregister(name);
+			}
+		}
+	}
+
+	/**
+	 * This manager's own MCP mapping for a tool, or undefined when its MCP
+	 * client did not register it.
+	 */
+	private getRegisteredMCPMapping(name: string) {
+		return this.mcpToolNames.has(name)
+			? this.mcpClient?.getToolMapping().get(name)
+			: undefined;
 	}
 
 	protected async createMCPClient(): Promise<MCPClient> {
@@ -395,10 +458,8 @@ export class ToolManager {
 	}
 
 	private mcpReadOnly(name: string): boolean | undefined {
-		return (
-			this.mcpClient?.getToolMapping().get(name)?.readOnly ??
-			this.parent?.mcpReadOnly(name)
-		);
+		const mapping = this.getRegisteredMCPMapping(name);
+		return mapping ? mapping.readOnly : this.parent?.mcpReadOnly(name);
 	}
 
 	/**
@@ -556,7 +617,7 @@ export class ToolManager {
 	}
 
 	getMCPToolInfo(toolName: string): {isMCPTool: boolean; serverName?: string} {
-		const mapping = this.mcpClient?.getToolMapping().get(toolName);
+		const mapping = this.getRegisteredMCPMapping(toolName);
 
 		if (mapping) {
 			return {
@@ -572,10 +633,7 @@ export class ToolManager {
 		this.mcpHealthUnsubscribe?.();
 		this.mcpHealthUnsubscribe = null;
 		if (this.mcpClient) {
-			const mcpTools = this.mcpClient.getNativeToolsRegistry();
-			const mcpToolNames = Object.keys(mcpTools);
-
-			this.registry.unregisterMany(mcpToolNames);
+			this.unregisterMCPTools([...this.mcpToolNames]);
 			await this.mcpClient.disconnect();
 
 			this.mcpClient = null;
