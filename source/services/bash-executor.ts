@@ -269,6 +269,9 @@ export class BashExecutor extends EventEmitter {
 				cwd,
 				detached: true,
 				env: childEnv,
+				// Close stdin so commands that wait for input get EOF and fail fast
+				// instead of hanging until the timeout.
+				stdio: ['ignore', 'pipe', 'pipe'],
 			});
 		}
 

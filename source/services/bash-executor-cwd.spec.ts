@@ -47,3 +47,16 @@ test.serial('a failed cd leaves the session cwd untouched', async t => {
 		rmSync(base, {recursive: true, force: true});
 	}
 });
+
+test.serial('a command that reads stdin gets EOF instead of hanging', async t => {
+	if (platform === 'win32') {
+		t.pass('stdin handling is checked on unix only');
+		return;
+	}
+	const result = await Promise.race([
+		run('cat; echo done'),
+		new Promise<'hung'>(resolve => setTimeout(() => resolve('hung'), 5000)),
+	]);
+	t.not(result, 'hung', 'cat returned instead of waiting on an open stdin pipe');
+	if (result !== 'hung') t.regex(result.fullOutput, /done/);
+});
