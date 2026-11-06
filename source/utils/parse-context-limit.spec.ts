@@ -13,6 +13,22 @@ test('parseContextLimit - K suffix uppercase', t => {
 	t.is(parseContextLimit('128K'), 128000);
 });
 
+test('parseContextLimit - m suffix lowercase', t => {
+	t.is(parseContextLimit('1m'), 1000000);
+});
+
+test('parseContextLimit - M suffix uppercase', t => {
+	t.is(parseContextLimit('1M'), 1000000);
+});
+
+test('parseContextLimit - fractional m value', t => {
+	t.is(parseContextLimit('1.5m'), 1500000);
+});
+
+test('parseContextLimit - large m value', t => {
+	t.is(parseContextLimit('128m'), 128000000);
+});
+
 test('parseContextLimit - fractional k value', t => {
 	t.is(parseContextLimit('4.5k'), 4500);
 });
@@ -42,7 +58,7 @@ test('parseContextLimit - large value with k suffix', t => {
 });
 
 test('parseContextLimit - decimal without k suffix', t => {
-	t.is(parseContextLimit('1024.5'), 1025);
+	t.is(parseContextLimit('1024.5'), null);
 });
 
 test('parseContextLimit - rejects trailing junk after k suffix', t => {
@@ -94,7 +110,47 @@ test('parseContextLimit - value that overflows only after k scaling returns null
 	t.is(parseContextLimit('9'.repeat(308) + 'k'), null);
 });
 
-test('parseContextLimit - smallest values that round to a positive limit', t => {
-	t.is(parseContextLimit('0.5'), 1);
+test('parseContextLimit - smallest suffixed values that round to a positive limit', t => {
 	t.is(parseContextLimit('1.5k'), 1500);
+});
+
+test('parseContextLimit - fractional values require a suffix', t => {
+	t.is(parseContextLimit('1.5'), null);
+	t.is(parseContextLimit('0.5'), null);
+	t.is(parseContextLimit('1.5k'), 1500);
+	t.is(parseContextLimit('1.5m'), 1500000);
+});
+
+test('parseContextLimit - accepts whitespace around valid values', t => {
+	t.is(parseContextLimit(' 1m '), 1000000);
+	t.is(parseContextLimit('\t1.5K\n'), 1500);
+});
+
+test('parseContextLimit - rejects unsafe and overflowing values', t => {
+	t.is(parseContextLimit('9007199254740991'), Number.MAX_SAFE_INTEGER);
+	t.is(parseContextLimit('9007199254740992'), null);
+	t.is(parseContextLimit('9007199254740991k'), null);
+	t.is(parseContextLimit('9007199254.740991m'), null);
+	t.is(parseContextLimit('0.0001k'), null);
+	t.is(parseContextLimit('9'.repeat(400)), null);
+});
+
+test('parseContextLimit - rejects unsupported and malformed suffixes', t => {
+	for (const value of [
+		'',
+		'abc',
+		'1b',
+		'1kk',
+		'1kg',
+		'128abc',
+		'1e5',
+		'.5k',
+		'1.',
+		'128 k',
+		'1 024',
+		'1,000',
+		'1_000',
+	]) {
+		t.is(parseContextLimit(value), null, value);
+	}
 });
