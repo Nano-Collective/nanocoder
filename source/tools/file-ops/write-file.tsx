@@ -1,12 +1,15 @@
 import {constants, existsSync} from 'node:fs';
 import {access, readFile, writeFile} from 'node:fs/promises';
 import {dirname, resolve} from 'node:path';
-import {highlight} from 'cli-highlight';
 import {Box, Text} from 'ink';
 import React from 'react';
 import ToolMessage, {CappedLines} from '@/components/tool-message';
 import {getSyntaxTheme} from '@/config/themes';
 import {DEFAULT_TERMINAL_COLUMNS} from '@/constants';
+import {
+	evaluateMutationEnvelope,
+	getFirewallConfig,
+} from '@/firewall/mutation-firewall';
 import {ThemeContext} from '@/hooks/useTheme';
 import {getSafeSessionCwd} from '@/services/session-cwd';
 import type {NanocoderToolExport} from '@/types/core';
@@ -14,6 +17,7 @@ import {jsonSchema, tool} from '@/types/core';
 import {truncateAnsi} from '@/utils/ansi-truncate';
 import {formatError} from '@/utils/error-formatter';
 import {getCachedFileContent, invalidateCache} from '@/utils/file-cache';
+import {highlight} from '@/utils/highlighter';
 import {normalizeIndentation} from '@/utils/indentation-normalizer';
 import {collapseUnchangedLines, computeLineDiff} from '@/utils/inline-diff';
 import {validateEditableFormat, validatePath} from '@/utils/path-validators';
@@ -66,6 +70,34 @@ const executeWriteFile = async (args: {
 	// Type guard: ensure content is string for write operation
 	// Storage is safe (fs.writeFile ensures string-only), but we need to convert for safety
 	const contentStr = ensureString(args.content);
+	let originalContent = '';
+	if (fileExists) {
+		const cached = previousContentCache.get(absPath);
+		if (cached !== null && cached !== undefined) {
+			originalContent = cached;
+		} else {
+			try {
+				originalContent = await readFile(absPath, 'utf-8');
+				previousContentCache.set(absPath, originalContent);
+			} catch (readError) {
+				const fwConfig = getFirewallConfig();
+				if (fwConfig.enabled && fwConfig.mode !== 'disabled') {
+					throw new Error(
+						`[Mutation Firewall] Blocked mutation: failed to read existing file '${args.path}' for validation: ${formatError(readError)}`,
+					);
+				}
+			}
+		}
+	}
+
+	const firewallResult = evaluateMutationEnvelope(
+		args.path,
+		originalContent,
+		contentStr,
+	);
+	if (!firewallResult.allowed) {
+		throw new Error(firewallResult.summary ?? 'Mutation blocked by firewall');
+	}
 
 	await writeFile(absPath, contentStr, 'utf-8');
 

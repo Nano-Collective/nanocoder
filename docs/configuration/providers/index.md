@@ -110,7 +110,7 @@ The case that bites: `@ai-sdk/anthropic` derives the ceiling from the model id a
         "sdkProvider": "anthropic",
         "baseUrl": "https://api.minimax.io/anthropic/v1",
         "apiKey": "${MINIMAX_API_KEY}",
-        "models": ["minimax-m3"],
+        "models": ["MiniMax-M3"],
         "maxOutputTokens": 32000
       }
     ]

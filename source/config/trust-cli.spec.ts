@@ -3,6 +3,7 @@ import {
 	chmodSync,
 	mkdirSync,
 	mkdtempSync,
+	realpathSync,
 	readFileSync,
 	rmSync,
 	statSync,
@@ -18,8 +19,14 @@ import {runTrustCli} from '@/config/trust-cli';
 
 console.log('\ntrust-cli.spec.ts');
 
-const configDir = mkdtempSync(join(tmpdir(), 'nanocoder-trust-cli-config-'));
-const project = mkdtempSync(join(tmpdir(), 'nanocoder-trust-cli-project-'));
+// realpath: on macOS tmpdir() is under the /var -> /private/var symlink, and
+// the CLI checks process.cwd(), which reports the resolved path.
+const configDir = realpathSync(
+	mkdtempSync(join(tmpdir(), 'nanocoder-trust-cli-config-')),
+);
+const project = realpathSync(
+	mkdtempSync(join(tmpdir(), 'nanocoder-trust-cli-project-')),
+);
 mkdirSync(join(project, '.nanocoder', 'plugins'), {recursive: true});
 writeFileSync(join(project, '.nanocoder', 'plugins', 'a.mjs'), 'export {};');
 

@@ -83,6 +83,11 @@ export type PlainConversationOutcome =
 	| {
 			kind: 'tool-approval-required';
 			toolNames: string[];
+			/**
+			 * Whether `--mode auto-accept` would have run every blocked call
+			 * without asking. Always false when the run is already in auto-accept.
+			 */
+			autoAcceptWouldRun: boolean;
 			finalText: string;
 			reasoning: string | null;
 			toolCalls: ToolCallLog[];
@@ -512,9 +517,9 @@ async function runPlainConversationBody(
 			toolManager,
 			availableNames,
 		);
-		const {validToolCalls, unknownToolCalls, errorResults} = partition;
-		// errorResults is paired 1:1 with unknownToolCalls, in the same order.
-		for (const [index, toolCall] of unknownToolCalls.entries()) {
+		const {validToolCalls, rejectedToolCalls, errorResults} = partition;
+		// errorResults is paired 1:1 with rejectedToolCalls, in the same order.
+		for (const [index, toolCall] of rejectedToolCalls.entries()) {
 			toolCallsLog.push({
 				name: toolCall.function.name,
 				arguments: toolCall.function.arguments || {},
@@ -577,10 +582,11 @@ async function runPlainConversationBody(
 		}
 
 		if (errorResults.length > 0) {
-			// Unknown-tool turns count toward the repeated-call streak, so a model
-			// stuck calling a nonexistent tool trips the same cap instead of
-			// draining tokens until maxTurns. The signature covers every call the
-			// model emitted this turn, valid and unknown alike.
+			// Turns with a rejected call (an unknown tool, or arguments that could
+			// not be parsed) count toward the repeated-call streak, so a model
+			// stuck on a bad call trips the same cap instead of draining tokens
+			// until maxTurns. The signature covers every call the model emitted
+			// this turn, valid and rejected alike.
 			const stopped = trackRepeatedToolCalls(allToolCalls);
 			if (stopped) {
 				return stopped;
@@ -710,7 +716,7 @@ async function runPlainConversationBody(
 			return stopped;
 		}
 
-		const toolsNeedingApproval: string[] = [];
+		const toolsNeedingApproval: ToolCall[] = [];
 		const toolsToExecute: ToolCall[] = [];
 		for (const toolCall of validToolCalls) {
 			// Approval (including the yolo bypass) is resolved centrally.
@@ -721,7 +727,7 @@ async function runPlainConversationBody(
 				developmentMode,
 			);
 			if (needsApproval) {
-				toolsNeedingApproval.push(toolCall.function.name);
+				toolsNeedingApproval.push(toolCall);
 			} else {
 				toolsToExecute.push(toolCall);
 			}
@@ -730,7 +736,13 @@ async function runPlainConversationBody(
 		if (toolsNeedingApproval.length > 0) {
 			return {
 				kind: TOOL_APPROVAL_REQUIRED_KIND,
-				toolNames: toolsNeedingApproval,
+				toolNames: toolsNeedingApproval.map(tc => tc.function.name),
+				autoAcceptWouldRun: await evaluateAutoAcceptWouldRun(
+					toolsNeedingApproval,
+					toolManager,
+					nonInteractiveAlwaysAllow,
+					developmentMode,
+				),
 				finalText: accumulatedFinalText,
 				reasoning: accumulatedReasoning || null,
 				toolCalls: toolCallsLog,
@@ -811,4 +823,26 @@ async function evaluateNeedsApproval(
 		toolCall.function.arguments,
 		{mode, alwaysAllow: nonInteractiveAlwaysAllow},
 	);
+}
+
+// Decided per call rather than per tool name because auto-accept still asks
+// for some calls of tools it otherwise waives (a file_op delete, for one), so
+// the name alone can't say whether suggesting it would change the result.
+async function evaluateAutoAcceptWouldRun(
+	blockedToolCalls: ToolCall[],
+	toolManager: ToolManager,
+	nonInteractiveAlwaysAllow: string[],
+	mode: DevelopmentMode,
+): Promise<boolean> {
+	if (mode === 'auto-accept') return false;
+	for (const toolCall of blockedToolCalls) {
+		const needsApproval = await evaluateNeedsApproval(
+			toolCall,
+			toolManager,
+			nonInteractiveAlwaysAllow,
+			'auto-accept',
+		);
+		if (needsApproval) return false;
+	}
+	return true;
 }

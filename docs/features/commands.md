@@ -12,7 +12,7 @@ Type `/` in the chat input to see available commands. All commands start with `/
 
 | Command | Description |
 |---------|-------------|
-| `/help` | Show available commands |
+| `/help [command]` | Show available commands by category. `/help <command>` shows that command's usage, options, subcommands, aliases and examples |
 | `/init` | Initialize the project with intelligent analysis and create `AGENTS.md`. Use `/init --preset <react\|nextjs\|rust>` for bundled stack guidance, ignore patterns, and a `/check` command skill; `/init --force` regenerates `AGENTS.md`, and `/init --lean` skips merging `CLAUDE.md` |
 | `/setup-config` | Open a configuration file in your `$EDITOR` (lists project and global config files) |
 | `/clear` | Clear chat history |
@@ -21,6 +21,7 @@ Type `/` in the chat input to see available commands. All commands start with `/
 | `/tasks` | Manage task list for tracking complex work (see [Task Management](task-management.md)) |
 | `/model-database` | Browse coding models from OpenRouter (searchable, filterable by open/proprietary). Enter copies the highlighted model's ID to the clipboard and, when the active provider is OpenRouter, also switches the session to that model |
 | `/settings` | Interactive settings menu. Accepts a tab name to jump straight there: `/settings providers`, `/settings mcp`, `/settings appearance`, `/settings input`, `/settings behavior`, `/settings advanced` |
+| `/firewall` | Inspect and configure the negative-space mutation firewall. Subcommands: `status`, `enable`, `disable`, `mode <strict\|lenient\|disabled>`, `toggle <any\|tests\|exports>`, `protect <pattern>`, `unprotect <pattern>`, `reset` |
 | `/mcp` | Show connected MCP servers and their tools |
 | `/commands` | List custom commands. Subcommands: `show <name>`, `create <name>` (see [Custom Commands](custom-commands.md)) |
 | `/tools` | List available tools grouped by source (built-in, MCP, custom). Subcommand: `create <name>` (see [Custom Tools](custom-tools.md)) |
@@ -55,15 +56,16 @@ Type `/` in the chat input to see available commands. All commands start with `/
 | `/credits` | Show project contributors and dependencies |
 | `/copilot-login [providerName]` | Log in to GitHub Copilot via device flow. Saves credentials for the named provider, "GitHub Copilot" by default |
 | `/codex-login` | Log in to ChatGPT/Codex via device flow. Saves credentials for the "ChatGPT" provider |
-| `/voice` | Configure Voice Mode (`/voice [hands-free|ptt|stt <local|cloud>|tts <local|cloud>|status|mode <push-to-talk|hands-free>]`) |
+| `/voice` | Configure [Voice Mode](voice-mode.md) (`/voice [on\|off\|hands-free\|ptt\|stt <local\|cloud>\|tts <local\|cloud>\|status\|mode <push-to-talk\|hands-free>]`) |
 
 ## Voice Mode
 
-Nanocoder includes a local-first Realtime Voice Mode supporting push-to-talk, hands-free voice activity detection (VAD), barge-in interruption, and optional cloud STT/TTS.
+Nanocoder includes a local-first Realtime Voice Mode supporting push-to-talk, hands-free voice activity detection (VAD), barge-in interruption, and optional cloud STT/TTS. See [Voice Mode](voice-mode.md) for setup, the audio tools it installs, and its preferences.
 
 | Command | Description |
 |---------|-------------|
 | `/voice` | Toggle voice mode on/off |
+| `/voice on` / `/voice off` | Turn voice mode on or off explicitly |
 | `/voice ptt` or `/voice push-to-talk` | Switch to push-to-talk mode (use `Ctrl+G` to record/submit) |
 | `/voice hands-free` | Switch to hands-free mode (automatic VAD speech detection) |
 | `/voice stt [local\|cloud]` | Configure speech-to-text backend (local Whisper or opt-in cloud) |
@@ -210,7 +212,8 @@ The emitted object looks like:
     "inputTokens": 4520,
     "outputTokens": 850,
     "totalTokens": 5370
-  }
+  },
+  "warnings": []
 }
 ```
 
@@ -220,9 +223,10 @@ The emitted object looks like:
 - `reasoning` — accumulated reasoning/thinking content, or `null` if the model didn't emit any
 - `toolCalls` — every tool call made during the run, each with its arguments and either a `result` or an `error` (never both)
 - `steps` — how many times the model was called during the run, including retried turns. One step can make zero or several tool calls, so this is not the same as the length of `toolCalls`. `0` when the run stopped before calling the model
-- `filesChanged` — deduplicated list of file paths touched by file-mutating tools (`write_file`, `string_replace`, `diff_edit`)
+- `filesChanged` - deduplicated list of file paths touched by file-mutating tools (`write_file`, `string_replace`, `diff_edit`, `lsp_format_document`)
 - `usage` — provider-reported token counts summed across every turn of the run. Omitted entirely when the provider reports no token telemetry (common with local models), so an absent block means "unknown", never "zero". When a provider reports input and output counts but no total, `totalTokens` is derived as their sum.
+- `warnings` — array containing configuration, hook, formatter, plugin, and runtime error/warning messages (the same diagnostic messages streamed to stderr)
 
-Two more fields appear conditionally: `message` (the error text, when `kind` is `"error"`) and `toolNames` (the tools awaiting approval, when `kind` is `"tool-approval-required"`).
+A few more fields appear conditionally: `message` (the error text, when `kind` is `"error"`), and, when `kind` is `"tool-approval-required"`, `toolNames` (the tools awaiting approval) and `autoAcceptWouldRun` (whether `--mode auto-accept` would have run every blocked call; when false, only `--mode yolo` or `alwaysAllow` unblocks it).
 
 On error (e.g. an untrusted workspace directory, a provider request that fails with an HTTP error or a dropped connection, the turn limit being hit without a final answer, or an agent-loop [retry limit](../configuration/index.md#retry-limits) being hit), `kind` is `"error"` and the object still includes whatever `toolCalls` were captured before the failure, so partial progress isn't silently dropped.

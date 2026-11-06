@@ -28,6 +28,7 @@ import type {
 	MCPServer,
 	MCPTool,
 	MCPToolInputSchema,
+	StructuredToolOutput,
 	Tool,
 	ToolApprovalPolicy,
 	ToolParameterSchema,
@@ -163,6 +164,30 @@ export class MCPClient {
 		const code = (error as {code?: number}).code;
 		// JSON-RPC MethodNotFound (-32601) means the server received the ping and responded
 		return code === -32601;
+	}
+
+	/**
+	 * Remote (HTTP / WebSocket) transports can lose their session without the
+	 * transport ever closing, so ping-based recovery may never succeed. Stdio
+	 * servers keep the old behaviour: their transport closes when the child
+	 * exits, which already triggers a reconnect.
+	 */
+	private isRemoteServer(serverName: string): boolean {
+		const transport = this.serverConfigs.get(serverName)?.transport;
+		return transport !== undefined && transport !== 'stdio';
+	}
+
+	/**
+	 * A Streamable HTTP server answers 404 for a session it no longer knows,
+	 * typically because it restarted. The MCP spec says the client must start
+	 * a new session; pinging with the old session id can never succeed.
+	 */
+	private isSessionGoneResponse(serverName: string, error: unknown): boolean {
+		if (!this.isRemoteServer(serverName)) return false;
+		if (!error || typeof error !== 'object') return false;
+		if ((error as {code?: unknown}).code === 404) return true;
+		const message = (error as {message?: unknown}).message;
+		return typeof message === 'string' && /session not found/i.test(message);
 	}
 
 	private async restoreServerHealth(
@@ -465,20 +490,42 @@ export class MCPClient {
 					const currentFailures =
 						(this.healthFailureCounts.get(serverName) ?? 0) + 1;
 					this.healthFailureCounts.set(serverName, currentFailures);
+					const status = this.health.get(serverName);
+					const sessionGone = this.isSessionGoneResponse(serverName, error);
 					// One missed ping is not enough to pull a server's tools
 					// mid-turn; require two in a row. A pending ping can also
 					// reject after an intentional disconnect, hence the status check.
+					// A lost session is final, so it does not wait for a second miss.
 					if (
-						currentFailures >= 2 &&
-						this.health.get(serverName) === 'connected' &&
+						(currentFailures >= 2 || sessionGone) &&
+						status === 'connected' &&
 						isCurrent()
 					) {
 						this.markServerUnhealthy(serverName, error);
 					}
+					// A remote server whose recovery ping failed, or whose session is
+					// gone, may have restarted: the old session will never answer
+					// again and HTTP never fires onclose. Rebuild the connection
+					// through the reconnect loop instead of pinging on.
+					if (
+						(sessionGone || status === 'unhealthy') &&
+						this.isRemoteServer(serverName) &&
+						this.health.get(serverName) === 'unhealthy' &&
+						isCurrent() &&
+						!this.closing.has(serverName)
+					) {
+						this.clearHealthTimer(serverName);
+						this.healthFailureCounts.delete(serverName);
+						this.scheduleReconnect(serverName);
+					}
 				}
 			} finally {
 				this.healthChecksInFlight.delete(serverName);
-				if (!this.closing.has(serverName)) {
+				if (
+					!this.closing.has(serverName) &&
+					// Handed to the reconnect loop: the new client runs its own checks.
+					!this.reconnectTimers.has(serverName)
+				) {
 					const failureCount = this.healthFailureCounts.get(serverName) ?? 0;
 					scheduleNext(MCPClient.backoffDelay(interval, failureCount));
 				}
@@ -704,6 +751,15 @@ export class MCPClient {
 				this.serverConfigs.set(normalizedServer.name, normalizedServer);
 				this.serverTools.set(normalizedServer.name, tools);
 				this.toolMappingCache = null;
+				const shadowed = this.getToolNameConflicts().filter(conflict =>
+					conflict.servers.includes(normalizedServer.name),
+				);
+				if (shadowed.length > 0) {
+					this.logger.warn('MCP tool names shared by more than one server', {
+						serverName: normalizedServer.name,
+						conflicts: shadowed,
+					});
+				}
 				this.serverResources.set(normalizedServer.name, resources);
 				this.serverPrompts.set(normalizedServer.name, prompts);
 				this.setServerHealth(normalizedServer.name, 'connected');
@@ -895,6 +951,33 @@ export class MCPClient {
 	}
 
 	/**
+	 * Tool names exposed by more than one connected server. Tools are keyed by
+	 * name, so only one of them is callable: the server connected last (later
+	 * in `serverTools` order) handles every call to that name.
+	 */
+	getToolNameConflicts(): Array<{
+		tool: string;
+		servers: string[];
+		active: string;
+	}> {
+		const owners = new Map<string, string[]>();
+		for (const [serverName, serverTools] of this.serverTools.entries()) {
+			for (const mcpTool of serverTools) {
+				const list = owners.get(mcpTool.name) ?? [];
+				list.push(serverName);
+				owners.set(mcpTool.name, list);
+			}
+		}
+		const conflicts: Array<{tool: string; servers: string[]; active: string}> =
+			[];
+		for (const [tool, servers] of owners) {
+			if (servers.length < 2) continue;
+			conflicts.push({tool, servers, active: servers[servers.length - 1]});
+		}
+		return conflicts;
+	}
+
+	/**
 	 * Get all MCP tools as AI SDK native CoreTool format
 	 * Converts MCP tool schemas to AI SDK's tool() format
 	 */
@@ -915,10 +998,11 @@ export class MCPClient {
 					),
 					execute: async (input, _options) => {
 						// dynamicTool passes 'input' as unknown, validate at runtime
-						return await this.callTool(
+						const output = await this.callTool(
 							toolName,
 							input as Record<string, unknown>,
 						);
+						return typeof output === 'string' ? output : output.llmContent;
 					},
 				});
 
@@ -985,13 +1069,17 @@ export class MCPClient {
 	getToolEntries(forServerName?: string): Array<{
 		name: string;
 		tool: AISDKCoreTool;
-		handler: (args: Record<string, unknown>) => Promise<string>;
+		handler: (
+			args: Record<string, unknown>,
+		) => Promise<string | StructuredToolOutput>;
 		approval: ToolApprovalPolicy;
 	}> {
 		const entries: Array<{
 			name: string;
 			tool: AISDKCoreTool;
-			handler: (args: Record<string, unknown>) => Promise<string>;
+			handler: (
+				args: Record<string, unknown>,
+			) => Promise<string | StructuredToolOutput>;
 			approval: ToolApprovalPolicy;
 		}> = [];
 
@@ -1020,9 +1108,12 @@ export class MCPClient {
 						undefined,
 						getToolJsonSchema(coreTool),
 						// The wrapper types its result as the generic
-						// ToolExecuteResult union; MCP handlers always resolve a
-						// string, so the narrower entry signature is safe here.
-					) as (args: Record<string, unknown>) => Promise<string>;
+						// ToolExecuteResult union; MCP handlers only resolve a string
+						// or a structured failure, so the narrower entry signature is
+						// safe here.
+					) as (
+						args: Record<string, unknown>,
+					) => Promise<string | StructuredToolOutput>;
 
 					// MCP tools take the same mode posture as built-in tools:
 					//   - auto-accept and headless both run unattended — headless is
@@ -1083,7 +1174,7 @@ export class MCPClient {
 	async callTool(
 		toolName: string,
 		args: Record<string, unknown>,
-	): Promise<string> {
+	): Promise<string | StructuredToolOutput> {
 		// First, try to find which server has this tool
 		const toolMapping = this.getToolMapping();
 		const mapping = toolMapping.get(toolName);
@@ -1136,7 +1227,7 @@ export class MCPClient {
 		client: Client,
 		toolName: string,
 		args: Record<string, unknown>,
-	): Promise<string> {
+	): Promise<string | StructuredToolOutput> {
 		const correlationId = generateCorrelationId();
 		const metrics = startMetrics();
 
@@ -1163,6 +1254,12 @@ export class MCPClient {
 					correlationId,
 				});
 
+				// A server reports a failed call with `isError: true` and the reason
+				// in `content`. The text stays exactly what it was; the flag rides
+				// alongside it so processToolUse can mark the call failed.
+				const output = (text: string): string | StructuredToolOutput =>
+					result.isError === true ? {llmContent: text, isError: true} : text;
+
 				// Convert result content to string
 				if (
 					result.content &&
@@ -1184,7 +1281,7 @@ export class MCPClient {
 							correlationId,
 						});
 
-						return responseText;
+						return output(responseText);
 					}
 					const jsonResponse = JSON.stringify(content);
 
@@ -1196,7 +1293,7 @@ export class MCPClient {
 						correlationId,
 					});
 
-					return jsonResponse;
+					return output(jsonResponse);
 				}
 
 				const finalMetrics = endMetrics(metrics);
@@ -1206,7 +1303,7 @@ export class MCPClient {
 					correlationId,
 				});
 
-				return 'Tool executed successfully (no output)';
+				return output('Tool executed successfully (no output)');
 			} catch (error) {
 				const errorMessage = formatError(error);
 				const errorName = error instanceof Error ? error.name : 'Unknown';

@@ -3,6 +3,7 @@ import {access, writeFile} from 'node:fs/promises';
 import {resolve} from 'node:path';
 import React from 'react';
 import {getColors} from '@/config/index';
+import {evaluateMutationEnvelope} from '@/firewall/mutation-firewall';
 import {getSafeSessionCwd} from '@/services/session-cwd';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
@@ -11,7 +12,11 @@ import {formatError} from '@/utils/error-formatter';
 import {getCachedFileContent, invalidateCache} from '@/utils/file-cache';
 import {toFileLineEndings} from '@/utils/line-endings';
 import {replaceFirstLiteral} from '@/utils/literal-replace';
-import {validateEditableFormat, validatePath} from '@/utils/path-validators';
+import {
+	validateEditableEncoding,
+	validateEditableFormat,
+	validatePath,
+} from '@/utils/path-validators';
 import {
 	forgetReadContent,
 	hasSeenFile,
@@ -85,6 +90,10 @@ const executeStringReplace = async (
 
 	const absPath = resolve(getSafeSessionCwd(), path);
 	const cached = await getCachedFileContent(absPath);
+	const encodingResult = validateEditableEncoding(path, cached);
+	if (!encodingResult.valid) {
+		throw new Error(encodingResult.error);
+	}
 	const fileContent = cached.content;
 	const old_str = toFileLineEndings(fileContent, args.old_str);
 	const new_str = toFileLineEndings(fileContent, args.new_str);
@@ -107,6 +116,15 @@ const executeStringReplace = async (
 	}
 
 	const newContent = replaceFirstLiteral(fileContent, old_str, new_str);
+	const firewallResult = evaluateMutationEnvelope(
+		path,
+		fileContent,
+		newContent,
+	);
+	if (!firewallResult.allowed) {
+		throw new Error(firewallResult.summary ?? 'Mutation blocked by firewall');
+	}
+
 	await writeFile(absPath, newContent, 'utf-8');
 	invalidateCache(absPath);
 	// The model now knows the file's current contents, so a follow-up edit is
@@ -265,6 +283,8 @@ const stringReplaceValidator = async (
 
 	try {
 		const cached = await getCachedFileContent(absPath);
+		const encodingResult = validateEditableEncoding(path, cached);
+		if (!encodingResult.valid) return encodingResult;
 		const fileContent = cached.content;
 		const occurrences =
 			fileContent.split(toFileLineEndings(fileContent, old_str)).length - 1;

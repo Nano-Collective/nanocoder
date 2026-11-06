@@ -684,6 +684,113 @@ test.serial('handles unknown tool calls', async t => {
 	t.is(result.output, 'Handled missing tool');
 });
 
+test.serial('a call with unparsable arguments is neither approved nor run', async t => {
+	// Such a call carries `{}` in place of its arguments (see
+	// convertAISDKToolCall). git_status would run on that, so the model gets
+	// the parse error instead.
+	let ran = false;
+	let approvalRequested = false;
+	const toolManager = createMockToolManager({
+		git_status: {
+			handler: async () => {
+				ran = true;
+				return 'clean';
+			},
+			readOnly: false,
+			needsApproval: true,
+		},
+	});
+	setGlobalToolApprovalHandler(async () => {
+		approvalRequested = true;
+		return true;
+	});
+	const sent: Message[][] = [];
+	const client = createMockClient(
+		[
+			{
+				content: '',
+				tool_calls: [
+					{
+						id: 'tc-bad',
+						function: {name: 'git_status', arguments: {}},
+						argumentsError: 'not valid JSON: Unexpected end of JSON input',
+					},
+				],
+			} as never,
+			{content: 'Done'},
+		],
+		messages => sent.push([...messages]),
+	);
+
+	try {
+		const executor = new SubagentExecutor(toolManager, client);
+		const result = await executor.execute({
+			subagent_type: 'explore',
+			description: 'Broken call',
+		});
+		t.true(result.success);
+	} finally {
+		setGlobalToolApprovalHandler(async () => true);
+	}
+
+	t.false(ran);
+	t.false(approvalRequested);
+	const toolResult = sent
+		.at(-1)
+		?.find(m => m.role === 'tool' && m.tool_call_id === 'tc-bad');
+	t.regex(
+		String(toolResult?.content),
+		/^Invalid arguments for tool "git_status": not valid JSON: Unexpected end of JSON input\./,
+	);
+});
+
+test.serial('unparsable arguments for a tool the subagent may not use are refused as not available', async t => {
+	// Fixing the JSON would not make write_file usable by `explore`, so the
+	// model must be told the tool is not available, not that its JSON broke.
+	let wrote = false;
+	const toolManager = createMockToolManager({
+		write_file: {
+			handler: async () => {
+				wrote = true;
+				return 'written';
+			},
+			readOnly: false,
+		},
+	});
+	const sent: Message[][] = [];
+	const client = createMockClient(
+		[
+			{
+				content: '',
+				tool_calls: [
+					{
+						id: 'tc-bad',
+						function: {name: 'write_file', arguments: {}},
+						argumentsError: 'not valid JSON: Unexpected end of JSON input',
+					},
+				],
+			} as never,
+			{content: 'Done'},
+		],
+		messages => sent.push([...messages]),
+	);
+
+	const executor = new SubagentExecutor(toolManager, client);
+	const result = await executor.execute({
+		subagent_type: 'explore',
+		description: 'Broken call to a tool it may not use',
+	});
+
+	t.true(result.success);
+	t.false(wrote);
+	const toolResult = String(
+		sent.at(-1)?.find(m => m.role === 'tool' && m.tool_call_id === 'tc-bad')
+			?.content,
+	);
+	t.regex(toolResult, /not available to this subagent/);
+	t.notRegex(toolResult, /Invalid arguments/);
+});
+
 // --- Agent-loop retry limits (nanocoder.retries) — issue #897 ---
 
 const repeatedCallResponse = (name = 'read_file') => ({
@@ -777,6 +884,48 @@ test.serial('repeated unknown-tool calls trip the retry cap', async t => {
 
 	t.false(result.success);
 	t.regex(result.error || '', /repeated the same tool call 3 times/i);
+});
+
+test.serial('repeated calls with unparsable arguments trip the retry cap', async t => {
+	// Different broken text each turn still reads as the same call: the
+	// arguments are `{}` in every one.
+	let ran = false;
+	const toolManager = createMockToolManager({
+		read_file: {
+			handler: async () => {
+				ran = true;
+				return 'content';
+			},
+			readOnly: true,
+		},
+	});
+	const brokenCall = (position: number) =>
+		({
+			content: '',
+			tool_calls: [
+				{
+					id: `tc-bad-${position}`,
+					function: {name: 'read_file', arguments: {}},
+					argumentsError: `not valid JSON: Unterminated string in JSON at position ${position}`,
+				},
+			],
+		}) as never;
+	const client = createMockClient([
+		brokenCall(20),
+		brokenCall(31),
+		brokenCall(44),
+		{content: 'never reached'},
+	]);
+	const executor = new SubagentExecutor(toolManager, client);
+
+	const result = await executor.execute({
+		subagent_type: 'explore',
+		description: 'Loop on broken arguments',
+	});
+
+	t.false(result.success);
+	t.regex(result.error || '', /repeated the same tool call 3 times/i);
+	t.false(ran);
 });
 
 test.serial('retry cap honors a custom configured maxRepeatedToolCalls', async t => {
@@ -2659,6 +2808,46 @@ test.serial('a bridge sees a call refused before it runs, settled as failed', as
 	t.true(events[1].startsWith('end agent-1:tc1 failed'));
 	t.is(events[2], 'begin agent-1:tc2');
 	t.true(events[3].startsWith('end agent-1:tc2 failed'));
+});
+
+test.serial('a bridge sees a call with unparsable arguments, refused and settled as failed', async t => {
+	let ran = false;
+	const toolManager = createMockToolManager({
+		read_file: {
+			handler: async () => {
+				ran = true;
+				return 'content';
+			},
+			readOnly: true,
+		},
+	});
+	const {bridge, events} = createRecordingBridge();
+	const executor = new SubagentExecutor(
+		toolManager,
+		createMockClient([
+			{
+				content: '',
+				tool_calls: [
+					{
+						id: 'tc1',
+						function: {name: 'read_file', arguments: {}},
+						argumentsError: 'not valid JSON: Unexpected end of JSON input',
+					},
+				],
+			} as never,
+			{content: 'Done'},
+		]),
+	);
+
+	await runExploreWithBridge(toolManager, [], bridge, executor);
+
+	t.false(ran);
+	t.is(events.length, 2);
+	t.is(events[0], 'begin agent-1:tc1');
+	t.regex(
+		events[1],
+		/^end agent-1:tc1 failed Invalid arguments for tool "read_file": not valid JSON/,
+	);
 });
 
 test.serial('a subagent is limited to the tools of the bridge session mode', async t => {
