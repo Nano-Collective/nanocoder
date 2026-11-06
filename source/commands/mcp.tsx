@@ -7,6 +7,7 @@ import {getToolManager} from '@/message-handler';
 import {generateKey} from '@/session/key-generator';
 import {ToolManager} from '@/tools/tool-manager';
 import type {Command} from '@/types/index';
+import {redactUrlSecrets} from '@/utils/url-utils';
 
 // Helper function to get transport icons
 function getTransportIcon(transportType: string): string {
@@ -129,7 +130,9 @@ export function MCP({toolManager}: MCPProps) {
 									</Text>
 
 									{serverInfo?.url && (
-										<Text color={colors.info}>URL: {serverInfo.url}</Text>
+										<Text color={colors.info}>
+											URL: {redactUrlSecrets(serverInfo.url)}
+										</Text>
 									)}
 
 									{serverInfo?.description && (

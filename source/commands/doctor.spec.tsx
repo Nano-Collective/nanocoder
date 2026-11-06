@@ -177,6 +177,50 @@ test('Doctor reports providers without leaking api keys', async t => {
 	t.notRegex(output, /apiKey/);
 });
 
+test('Doctor redacts credentials and tokens embedded in provider and MCP URLs', async t => {
+	const report = await collectDoctorReport(
+		createDependencies({
+			getProviders: () => [
+				{
+					name: 'ProxyProvider',
+					type: 'openai',
+					models: ['model-1'],
+					config: {
+						baseURL:
+							'https://user:sk-test-LEAKCHECK123@proxy.example.com/v1?key=QUERYKEY-LEAKCHECK',
+					},
+				},
+			],
+			getToolManager: () =>
+				({
+					getConnectedServers: () => ['zapier-like'],
+					getServerTools: () => [],
+					getServerInfo: () => ({
+						name: 'zapier-like',
+						transport: 'http',
+						connected: true,
+						url: 'https://mcp.example.com/api/mcp/s/PATHTOKEN-LEAKCHECK/mcp?api_key=APIKEY-LEAKCHECK',
+					}),
+				}) as never,
+		}),
+	);
+
+	const {lastFrame} = renderWithTheme(<Doctor report={report} />);
+	const rawOutput = lastFrame()!;
+	const normalized = rawOutput.replace(/[│\n\r]/g, '');
+
+	t.notRegex(normalized, /sk-test-LEAKCHECK123/);
+	t.notRegex(normalized, /QUERYKEY-LEAKCHECK/);
+	t.notRegex(normalized, /PATHTOKEN-LEAKCHECK/);
+	t.notRegex(normalized, /APIKEY-LEAKCHECK/);
+
+	t.regex(normalized, /https:\/\/proxy\.example\.com\/v1/);
+	t.regex(
+		normalized,
+		/https:\/\/mcp\.example\.com\/api\/mcp\/s\/<redacted>\/mcp/,
+	);
+});
+
 test('Doctor reports LSP MCP and daemon details', async t => {
 	const report = await collectDoctorReport(createDependencies());
 
