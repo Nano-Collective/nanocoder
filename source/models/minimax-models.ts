@@ -12,7 +12,7 @@ export function filterMiniMaxModels<T extends {id: string}>(
 
 	let current: string[];
 	let textModel: RegExp;
-	if (['api.minimax.io', 'api.minimax.cn'].includes(url.hostname)) {
+	if (['api.minimax.io', 'api.minimaxi.com'].includes(url.hostname)) {
 		current = ['MiniMax-M3.1-Flash', 'MiniMax-M3'];
 		textModel = /^(?:minimax-(?:m\d|(?:text|vl)-01|01)|abab)/i;
 	} else if (url.hostname === 'openrouter.ai') {

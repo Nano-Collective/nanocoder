@@ -20,7 +20,7 @@ sidebar_order: 24
 }
 ```
 
-The `sdkProvider: "anthropic"` field selects MiniMax's Anthropic-compatible message format. New configurations list MiniMax-M3.1-Flash first, with MiniMax-M3 as an alternative. The China endpoint is `https://api.minimax.cn/anthropic/v1`.
+The `sdkProvider: "anthropic"` field selects MiniMax's Anthropic-compatible message format. New configurations list MiniMax-M3.1-Flash first, with MiniMax-M3 as an alternative. The China endpoint is `https://api.minimaxi.com/anthropic/v1`.
 
 [MiniMax M Plan](https://platform.minimax.io/docs/m-plan/other-tools) documents MiniMax-M3.1-Flash with a Subscription Key. Choose models supported by your account; the example does not imply M3 subscription entitlement.
 

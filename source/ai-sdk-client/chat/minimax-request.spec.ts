@@ -66,7 +66,7 @@ async function captureRequest(
 	}
 }
 
-for (const host of ['api.minimax.io', 'api.minimax.cn']) {
+for (const host of ['api.minimax.io', 'api.minimaxi.com']) {
 	for (const sdkProvider of ['anthropic', 'openai-compatible'] as const) {
 		for (const model of ['MiniMax-M3.1-Flash', 'MiniMax-M3', 'MiniMax-M2.7']) {
 			test.serial(`${host} ${sdkProvider} sends ${model} unchanged`, async t => {

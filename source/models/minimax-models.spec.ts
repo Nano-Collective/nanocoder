@@ -3,7 +3,7 @@ import {filterMiniMaxModels} from './minimax-models';
 
 const models = (ids: string[]) => ids.map(id => ({id, name: id, metadata: 42}));
 
-for (const host of ['api.minimax.io', 'api.minimax.cn']) {
+for (const host of ['api.minimax.io', 'api.minimaxi.com']) {
 	test(`discovery on ${host} prefers Flash and preserves media`, t => {
 		const input = models([
 			'MiniMax-M3',
