@@ -34,7 +34,7 @@ export interface SyntaxIslandEditArgs {
 
 const JS_TS_EXTENSION_PATTERN = /\.(?:[jt]sx?|[mc][jt]s)$/i;
 
-export function isSupportedIslandLanguage(filePath: string): boolean {
+function isSupportedIslandLanguage(filePath: string): boolean {
 	return JS_TS_EXTENSION_PATTERN.test(filePath);
 }
 
