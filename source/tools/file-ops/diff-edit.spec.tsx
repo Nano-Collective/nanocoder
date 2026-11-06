@@ -4,10 +4,15 @@ import test from 'ava';
 import {render} from 'ink-testing-library';
 import React from 'react';
 import {themes} from '../../config/themes.js';
+import {MAX_CACHEABLE_FILE_SIZE_BYTES} from '../../constants.js';
 import {ThemeContext} from '../../hooks/useTheme.js';
 import {resolveToolApproval} from '../approval-policy.js';
 import {clearReadTracker, markFileSeen} from '../../utils/read-tracker.js';
 import {diffEditTool, parseDiffEditBlocks} from './diff-edit.js';
+import {
+	resetFirewallConfig,
+	setFirewallConfig,
+} from '../../firewall/mutation-firewall.js';
 
 console.log(`\ndiff-edit.spec.tsx - ${React.version}`);
 
@@ -30,6 +35,7 @@ let testDir: string;
 test.beforeEach(async () => {
 	testDir = await mkdtemp(join(process.cwd(), '.diff-edit-test-'));
 	clearReadTracker();
+	resetFirewallConfig();
 });
 
 test.afterEach(async () => {
@@ -424,6 +430,78 @@ test('diff_edit validator refuses a .docx path', async t => {
 	}
 });
 
+// #1854: the whole file is written back as UTF-8, so a file that isn't valid
+// UTF-8 would have every undecodable byte rewritten as U+FFFD.
+// "café" then the edited line, in Latin-1: the é is a lone E9 byte.
+const LATIN1_BYTES = Buffer.from('caf\xe9\nconst oldValue = 1;\n', 'latin1');
+
+test('diff_edit refuses a Latin-1 file and leaves every byte unchanged', async t => {
+	const filePath = join(testDir, 'legacy.js');
+	await writeFile(filePath, LATIN1_BYTES);
+
+	await t.throwsAsync(
+		executeDiffEdit({path: projectRelativePath(filePath), diff: sampleDiff}),
+		{message: /not valid UTF-8/},
+	);
+
+	t.deepEqual(await readFile(filePath), LATIN1_BYTES);
+});
+
+test('diff_edit refuses a Latin-1 file too large for the file cache', async t => {
+	// Over the cache's single-file limit, so the read is never cached.
+	const bytes = Buffer.concat([
+		Buffer.alloc(MAX_CACHEABLE_FILE_SIZE_BYTES + 1024, 'x'),
+		Buffer.from('\n', 'latin1'),
+		LATIN1_BYTES,
+	]);
+	const filePath = join(testDir, 'large-legacy.js');
+	await writeFile(filePath, bytes);
+
+	await t.throwsAsync(
+		executeDiffEdit({path: projectRelativePath(filePath), diff: sampleDiff}),
+		{message: /not valid UTF-8/},
+	);
+
+	// Buffer.equals, not deepEqual: AVA's deep diff is slow on megabytes.
+	t.true((await readFile(filePath)).equals(bytes), 'bytes unchanged');
+});
+
+test('diff_edit validator refuses a Latin-1 file', async t => {
+	const validator = diffEditTool.validator;
+	if (!validator) {
+		t.fail('diff_edit validator not defined');
+		return;
+	}
+
+	const filePath = join(testDir, 'legacy.js');
+	await writeFile(filePath, LATIN1_BYTES);
+	markFileSeen(filePath);
+
+	const result = await validator({
+		path: projectRelativePath(filePath),
+		diff: sampleDiff,
+	});
+
+	t.false(result.valid);
+	if (!result.valid) {
+		t.regex(result.error, /not valid UTF-8/);
+	}
+});
+
+test('diff_edit edits a UTF-8 file with non-ASCII text and keeps other lines byte for byte', async t => {
+	const filePath = await createTestFile(
+		'utf8.js',
+		'// café ✓ 日本\nconst oldValue = 1;\n',
+	);
+
+	await executeDiffEdit({path: projectRelativePath(filePath), diff: sampleDiff});
+
+	t.deepEqual(
+		await readFile(filePath),
+		Buffer.from('// café ✓ 日本\nconst newValue = 2;\n', 'utf-8'),
+	);
+});
+
 test('diff_edit writes $ substitution tokens literally', async t => {
 	const filePath = await createTestFile(
 		'dollars.sh',
@@ -498,4 +576,34 @@ test('diff_edit formatter does not render description when omitted', async t => 
 	const output = lastFrame();
 	t.truthy(output);
 	t.notRegex(output!, /Description:/);
+});
+
+test('diff_edit: throws when mutation firewall blocks test deletion', async t => {
+	setFirewallConfig({mode: 'strict', enabled: true});
+	const filePath = await createTestFile(
+		'math.spec.ts',
+		"test('adds numbers', () => {});\ntest('multiplies numbers', () => {});\n",
+	);
+	markFileSeen(filePath);
+	const relPath = projectRelativePath(filePath);
+
+	const diff = `<<<<<<< SEARCH
+test('adds numbers', () => {});
+test('multiplies numbers', () => {});
+=======
+test('adds numbers', () => {});
+>>>>>>> REPLACE`;
+
+	await t.throwsAsync(
+		async () => {
+			await executeDiffEdit({
+				path: relPath,
+				diff,
+			});
+		},
+		{message: /\[Mutation Firewall\] Blocked mutation/},
+	);
+
+	const content = await readFile(filePath, 'utf-8');
+	t.true(content.includes('multiplies numbers'));
 });
