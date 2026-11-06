@@ -594,6 +594,8 @@ The firewall is opt-in and disabled by default (`mode: "disabled"`).
 
 Use `/firewall` in chat to inspect or modify session overrides at runtime.
 
+> **Operational boundaries:** The mutation firewall validates mutation tools (`write_file`, `string_replace`, `diff_edit`). Non-content file operations via `file_op` (`delete_file`, `move_file`) and automatic document formatting via `lsp_format_document` bypass the mutation firewall.
+
 ## Ignoring Files
 
 Nanocoder already respects your `.gitignore`, so `node_modules`, `dist` and friends stay out of the way. But some files are tracked in git and still not worth spending context on: lockfiles, generated fixtures, vendored bundles, big snapshot files.

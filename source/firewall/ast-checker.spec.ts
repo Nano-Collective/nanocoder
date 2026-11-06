@@ -294,3 +294,27 @@ test('detectAnyTypeInjections does not hide any after URLs in string literals', 
 	t.true(violations[0].message.includes("Injected 1 explicit 'any'"));
 });
 
+test('detectAnyTypeInjections permits modifying other parts of an existing line containing any', (t) => {
+	const oldCode = `const x: any = foo();\nconst other = 123;\n`;
+	const newCode = `const x: any = bar();\nconst other = 123;\n`;
+	const violations = detectAnyTypeInjections('source/edit-line.ts', oldCode, newCode);
+	t.is(violations.length, 0, 'modifying rhs expression on an existing any line must not be flagged');
+});
+
+test('detectAnyTypeInjections terminates single/double quotes at newline avoiding JSX apostrophe leaks', (t) => {
+	const oldCode = `
+		export function Banner() {
+			return <p>Don't panic</p>;
+		}
+	`;
+	const newCode = `
+		export function Banner() {
+			return <p>Don't panic</p>;
+		}
+		const leaked: any = 42;
+	`;
+	const violations = detectAnyTypeInjections('source/banner.tsx', oldCode, newCode);
+	t.is(violations.length, 1, 'injected any must be detected even after a line with a JSX apostrophe');
+	t.true(violations[0].message.includes("Injected 1 explicit 'any'"));
+});
+

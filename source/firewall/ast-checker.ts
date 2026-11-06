@@ -52,6 +52,10 @@ function stripCommentsAndStrings(code: string): string {
 					i += 2;
 					continue;
 				}
+				// Single and double quotes cannot span across newlines (prevents stray apostrophes e.g. in JSX or regexes from swallowing lines)
+				if (quote !== '`' && (code[i] === '\n' || code[i] === '\r')) {
+					break;
+				}
 				if (code[i] === quote) {
 					result += ' ';
 					i++;
@@ -90,6 +94,21 @@ interface AnyOccurrence {
 	text: string;
 }
 
+function extractAnyAnchor(line: string, matchIndex: number, matchText: string): string {
+	const before = line.slice(0, matchIndex).trim();
+	// Check if there is an identifier preceding ': any' or 'as any'
+	const idMatch = /([a-zA-Z0-9_$]+)\s*[:=]?\s*$/.exec(before);
+	if (idMatch && idMatch[1]) {
+		return `${idMatch[1]}:${matchText.trim()}`;
+	}
+	// Check if there is a variable declaration on this line
+	const varMatch = /(?:const|let|var)\s+([a-zA-Z0-9_$]+)/.exec(line);
+	if (varMatch && varMatch[1]) {
+		return `${varMatch[1]}:${matchText.trim()}`;
+	}
+	return matchText.trim();
+}
+
 function findAnyOccurrencesLexical(code: string): AnyOccurrence[] {
 	const cleaned = stripCommentsAndStrings(code);
 	const lines = cleaned.split('\n');
@@ -103,10 +122,10 @@ function findAnyOccurrencesLexical(code: string): AnyOccurrence[] {
 		const line = lines[i];
 		let match = anyPattern.exec(line);
 		while (match !== null) {
-			const originalSnippet = (origLines[i] ?? '').replace(/\s+/g, ' ').trim();
+			const anchor = extractAnyAnchor(origLines[i] ?? '', match.index, match[0]);
 			occurrences.push({
 				line: i + 1,
-				anchor: originalSnippet || `any:${match[0]}`,
+				anchor,
 				text: match[0],
 			});
 			match = anyPattern.exec(line);
@@ -147,6 +166,15 @@ export function detectAnyTypeInjections(
 			newlyInjected.push(a);
 		}
 		newAnchorCounts.set(a.anchor, seen + 1);
+	}
+
+	// If total count did not increase and no net-new identifiers were annotated with 'any',
+	// permit the edit (e.g. modifying other expressions on an existing line with 'any').
+	if (newAnys.length <= oldAnys.length) {
+		const hasNetNewIdentifiers = newlyInjected.some(a => !oldAnchorCounts.has(a.anchor));
+		if (!hasNetNewIdentifiers) {
+			return [];
+		}
 	}
 
 	if (newlyInjected.length > 0) {
