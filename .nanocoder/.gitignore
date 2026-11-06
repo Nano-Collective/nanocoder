@@ -1,3 +1,4 @@
 /checkpoints/
 /timeline/
 /daemon.*
+/ci-watch-state.json*
