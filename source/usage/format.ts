@@ -12,10 +12,12 @@ export function formatCompactTokenCount(tokens: number): string {
 	if (!Number.isFinite(tokens) || tokens <= 0) {
 		return '0';
 	}
-	if (tokens < 1000) {
+	// Units switch at the rounding points, so 999.6 is "1k" rather than "1000"
+	// and 999,600 is "1M" rather than "1000k".
+	if (tokens < 999.5) {
 		return String(Math.round(tokens));
 	}
-	if (tokens < 1_000_000) {
+	if (tokens < 999_500) {
 		return `${trimTrailingZero(tokens / 1000)}k`;
 	}
 	return `${trimTrailingZero(tokens / 1_000_000)}M`;

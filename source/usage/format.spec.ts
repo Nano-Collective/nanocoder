@@ -37,6 +37,16 @@ test('formatCompactTokenCount renders millions', t => {
 	t.is(formatCompactTokenCount(120_000_000), '120M');
 });
 
+test('formatCompactTokenCount rolls over to the next unit at the rounding point', t => {
+	t.is(formatCompactTokenCount(999.4), '999');
+	t.is(formatCompactTokenCount(999.5), '1k');
+	t.is(formatCompactTokenCount(999.6), '1k');
+	t.is(formatCompactTokenCount(999_499), '999k');
+	t.is(formatCompactTokenCount(999_500), '1M');
+	t.is(formatCompactTokenCount(999_600), '1M');
+	t.is(formatCompactTokenCount(999_999), '1M');
+});
+
 test('formatCompactTokenCount handles invalid input', t => {
 	t.is(formatCompactTokenCount(0), '0');
 	t.is(formatCompactTokenCount(-5), '0');
