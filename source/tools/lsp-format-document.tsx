@@ -11,8 +11,8 @@ import {getProjectRoot, getSafeSessionCwd} from '@/services/session-cwd';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
-import {invalidateCache} from '@/utils/file-cache';
-import {validatePath} from '@/utils/path-validators';
+import {getCachedFileContent, invalidateCache} from '@/utils/file-cache';
+import {validateEditableEncoding, validatePath} from '@/utils/path-validators';
 import {markFileSeen} from '@/utils/read-tracker';
 import {createFileToolApproval} from '@/utils/tool-approval';
 
@@ -283,6 +283,18 @@ export async function formatFileWithLsp(
 		return `Language server for ${displayPath} does not support document formatting.`;
 	}
 
+	// The edits are applied to the file decoded as UTF-8 and the whole file is
+	// written back as UTF-8, so in a file that isn't valid UTF-8 every byte that
+	// didn't decode would become U+FFFD, outside the edits too. Refuse it, as
+	// string_replace and diff_edit do, before asking the server for edits.
+	const encodingResult = validateEditableEncoding(
+		displayPath,
+		await getCachedFileContent(absPath),
+	);
+	if (!encodingResult.valid) {
+		throw new Error(encodingResult.error);
+	}
+
 	const formatOptions = await resolveFormatOptions(absPath, options);
 	const edits = await manager.formatDocument(absPath, formatOptions);
 	if (edits.length === 0) {
@@ -430,7 +442,10 @@ const formatDocumentValidator = async (
 
 	try {
 		await access(absPath, constants.F_OK);
-		return {valid: true};
+		return validateEditableEncoding(
+			args.path,
+			await getCachedFileContent(absPath),
+		);
 	} catch (error: unknown) {
 		if (
 			error &&
