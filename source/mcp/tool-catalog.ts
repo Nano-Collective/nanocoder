@@ -1,6 +1,27 @@
 import type {MCPTool, MCPToolCatalogEntry} from '@/types/mcp';
 
 /**
+ * Sanitizes catalog tool names and descriptions to mitigate prompt injection
+ * and ensure compact display in the prompt:
+ * - Collapses newlines, carriage returns, tabs, and multiple spaces into a single space
+ * - Strips HTML tags and markdown delimiters (`*_#~)
+ * - Truncates to a maximum of 120 characters, appending '...' when truncated
+ */
+export function sanitizeCatalogText(text: string): string {
+	if (!text) return '';
+	let sanitized = text
+		.replace(/[\r\n\t]+/g, ' ')
+		.replace(/<[^>]*>/g, '')
+		.replace(/[`*_#~]/g, '')
+		.replace(/\s{2,}/g, ' ')
+		.trim();
+	if (sanitized.length > 120) {
+		sanitized = `${sanitized.slice(0, 117)}...`;
+	}
+	return sanitized;
+}
+
+/**
  * Manages an index of available MCP tools for on-demand lazy discovery.
  * Prevents hydrating large JSON schemas into the prompt up-front.
  */
@@ -11,13 +32,14 @@ export class MCPToolCatalog {
 	 * Registers an MCP tool into the catalog.
 	 */
 	add(serverName: string, tool: MCPTool, isLoaded = false): void {
-		let description = tool.description?.trim() || 'No description provided';
-		if (description.length > 120) {
-			description = `${description.slice(0, 117)}...`;
-		}
-		this.entries.set(tool.name, {
-			name: tool.name,
-			serverName,
+		const name = tool.name.replace(/[\r\n\t`]+/g, '').trim();
+		const description = sanitizeCatalogText(
+			tool.description?.trim() || 'No description provided',
+		);
+		const cleanServerName = serverName.replace(/[\r\n\t`]+/g, '').trim();
+		this.entries.set(name, {
+			name,
+			serverName: cleanServerName,
 			description,
 			readOnly: tool.readOnly === true,
 			isLoaded,
