@@ -3,7 +3,10 @@ import Spinner from 'ink-spinner';
 import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import stringWidth from 'string-width';
 import {commandRegistry} from '@/commands';
-import {DevelopmentModeIndicator} from '@/components/development-mode-indicator';
+import {
+	DevelopmentModeIndicator,
+	type VoiceIndicatorInfo,
+} from '@/components/development-mode-indicator';
 import {HelpRow} from '@/components/json-viewer/json-viewer';
 import TextInput, {
 	type TextInputHandle,
@@ -219,6 +222,7 @@ interface ChatProps {
 	onSubmittedDraft?: (draft: SubmittedInputDraft) => void;
 	restoreSubmittedDraft?: RestoredInputDraft | null;
 	isSaving?: boolean;
+	voice?: VoiceIndicatorInfo | null; // Voice mode state for the mode line
 	suggestedCommand?: string | null; // Follow-up command shown in the empty prompt; Tab inserts it, Esc dismisses it
 	onDismissSuggestion?: () => void;
 	/**
@@ -257,6 +261,7 @@ export default function UserInput({
 	onSubmittedDraft,
 	restoreSubmittedDraft = null,
 	isSaving,
+	voice,
 	suggestedCommand = null,
 	onDismissSuggestion,
 	fullscreen = false,
@@ -1485,6 +1490,7 @@ export default function UserInput({
 					currentModel={currentModel}
 					taskInfo={taskInfo}
 					isSaving={isSaving}
+					voice={voice}
 				/>
 			</Box>
 		);
@@ -1728,6 +1734,7 @@ export default function UserInput({
 					activeEditor={activeEditor}
 					taskInfo={taskInfo}
 					isSaving={isSaving}
+					voice={voice}
 				/>
 			</Box>
 		</>

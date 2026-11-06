@@ -8,8 +8,8 @@ import {
 	unlinkSync,
 } from 'node:fs';
 import https from 'node:https';
-import {homedir} from 'node:os';
-import {join} from 'node:path';
+import {cpus, homedir} from 'node:os';
+import {delimiter, join} from 'node:path';
 import {platform} from 'node:process';
 
 export interface DependencyCheckResult {
@@ -34,6 +34,89 @@ export interface InstallDependenciesOptions {
 	onProgress?: (step: string, percent: number) => void;
 	execRunner?: ExecFunction;
 	downloadFn?: DownloadFunction;
+	/** Decides which tools are already installed. Defaults to running them. */
+	commandChecker?: CommandChecker;
+	/** Homebrew details for the macOS branch. Detected when omitted. */
+	brewEnvironment?: BrewEnvironment;
+}
+
+export interface BrewEnvironment {
+	/** The `brew` executable to run. */
+	brewPath: string;
+	/** Whether this is an Apple silicon Mac. */
+	appleSilicon: boolean;
+}
+
+const NATIVE_BREW = '/opt/homebrew/bin/brew';
+const INTEL_BREW_PREFIX = '/usr/local';
+
+/**
+ * Which Homebrew to use. On Apple silicon a native install in /opt/homebrew
+ * wins over an Intel one in /usr/local even when that comes first on PATH:
+ * the Intel build runs under Rosetta and has no prebuilt packages there.
+ */
+export function detectBrewEnvironment(): BrewEnvironment {
+	const appleSilicon = /^Apple/i.test(cpus()[0]?.model ?? '');
+	if (appleSilicon && existsSync(NATIVE_BREW)) {
+		return {brewPath: NATIVE_BREW, appleSilicon};
+	}
+	for (const dir of (process.env.PATH ?? '').split(delimiter)) {
+		if (dir && existsSync(join(dir, 'brew'))) {
+			return {brewPath: join(dir, 'brew'), appleSilicon};
+		}
+	}
+	return {brewPath: 'brew', appleSilicon};
+}
+
+/**
+ * A short, actionable reason for a failed `brew install`, instead of
+ * Homebrew's full output, which is mostly unrelated warnings. Ends with the
+ * command to rerun for the full output.
+ */
+export function explainBrewFailure(
+	output: string,
+	formulae: string[],
+	env: BrewEnvironment,
+): string {
+	const rerun = `To see Homebrew's full output, run: brew install ${formulae.join(' ')}`;
+	const intelBrewOnAppleSilicon =
+		env.appleSilicon && env.brewPath.startsWith(`${INTEL_BREW_PREFIX}/`);
+	if (intelBrewOnAppleSilicon || /Tier 3/i.test(output)) {
+		const why = intelBrewOnAppleSilicon
+			? 'Homebrew in /usr/local is the Intel build, running under Rosetta on this Apple silicon Mac.'
+			: 'Homebrew reports an unsupported (Tier 3) setup.';
+		return [
+			`Homebrew could not install ${formulae.join(' and ')}. ${why} It has no prebuilt packages for that setup, so it tried to compile them and failed.`,
+			'Install native Homebrew in /opt/homebrew (https://brew.sh), or update Xcode and the Command Line Tools, then run /voice again.',
+			rerun,
+		].join('\n');
+	}
+	if (
+		/Xcode .*is (outdated|too old)/i.test(output) ||
+		/Command Line Tools .*(outdated|release is available|too old)/i.test(output)
+	) {
+		return [
+			`Homebrew needs a newer Xcode or Command Line Tools to compile ${formulae.join(' and ')}.`,
+			'Update them in Software Update (Xcode from the App Store), then run /voice again.',
+			rerun,
+		].join('\n');
+	}
+	const errors = output
+		.split(/\r?\n/)
+		.map(line => line.trim())
+		.filter(line => line.startsWith('Error:'))
+		.slice(0, 3);
+	const reason =
+		errors.length > 0
+			? errors.join('\n')
+			: output.split(/\r?\n/).filter(Boolean).slice(-3).join('\n');
+	return [
+		`Homebrew could not install ${formulae.join(' and ')}.`,
+		reason,
+		rerun,
+	]
+		.filter(Boolean)
+		.join('\n');
 }
 
 export type CommandChecker = (cmd: string, args?: string[]) => Promise<boolean>;
@@ -131,51 +214,58 @@ async function ensureWhisperModel(
 }
 
 /**
+ * Whether a tool runs, from PATH or from voice-bin (where the installer puts
+ * its own copies). For whisper, older install names count too.
+ */
+async function isCommandAvailable(
+	cmd: string,
+	defaultArgs: string[],
+	check: CommandChecker,
+): Promise<boolean> {
+	const binDir = getVoiceBinDir();
+	const winExt = platform === 'win32' ? '.exe' : '';
+	if (await check(cmd, defaultArgs)) return true;
+
+	const localBin = join(binDir, `${cmd}${winExt}`);
+	if (existsSync(localBin)) {
+		return check(localBin, defaultArgs);
+	}
+
+	if (cmd === 'whisper-cli') {
+		const fallback1 = join(binDir, `whisper-cpp${winExt}`);
+		const fallback2 = join(binDir, `whisper${winExt}`);
+		if (existsSync(fallback1) && (await check(fallback1, defaultArgs)))
+			return true;
+		if (existsSync(fallback2) && (await check(fallback2, defaultArgs)))
+			return true;
+	}
+
+	return false;
+}
+
+/**
  * Checks whether sox, whisper-cli/whisper.cpp, and piper are available on the system or in voice-bin.
  */
 export async function checkDependenciesInstalled(
 	customCheck?: CommandChecker,
 ): Promise<DependencyCheckResult> {
 	const check = customCheck || defaultCheckCommand;
-	const binDir = getVoiceBinDir();
 
 	const recCmd = process.env.REC_CMD || (platform === 'win32' ? 'sox' : 'rec');
 	const whisperCmd = process.env.WHISPER_CMD || 'whisper-cli';
 	const piperCmd = process.env.PIPER_CMD || 'piper';
 
-	const winExt = platform === 'win32' ? '.exe' : '';
-
-	const checkBinary = async (
-		cmd: string,
-		defaultArgs: string[],
-	): Promise<boolean> => {
-		const okSystem = await check(cmd, defaultArgs);
-		if (okSystem) return true;
-
-		const localBin = join(binDir, `${cmd}${winExt}`);
-		if (existsSync(localBin)) {
-			return check(localBin, defaultArgs);
-		}
-
-		if (cmd === 'whisper-cli') {
-			const fallback1 = join(binDir, `whisper-cpp${winExt}`);
-			const fallback2 = join(binDir, `whisper${winExt}`);
-			if (existsSync(fallback1) && (await check(fallback1, defaultArgs)))
-				return true;
-			if (existsSync(fallback2) && (await check(fallback2, defaultArgs)))
-				return true;
-		}
-
-		return false;
-	};
-
 	const [soxOk, whisperBinOk, piperOk] = await Promise.all([
-		checkBinary(recCmd, platform === 'win32' ? ['--version'] : ['--help']),
-		checkBinary(whisperCmd, ['--help']),
-		checkBinary(piperCmd, ['--help']),
+		isCommandAvailable(
+			recCmd,
+			platform === 'win32' ? ['--version'] : ['--help'],
+			check,
+		),
+		isCommandAvailable(whisperCmd, ['--help'], check),
+		isCommandAvailable(piperCmd, ['--help'], check),
 	]);
 
-	// whisper-cli is useless without its model: Homebrew's whisper-cpp ships
+	// whisper-cli is useless without its model: Homebrew's whisper.cpp ships
 	// no model, so a present binary alone must not count as installed.
 	const whisperOk = whisperBinOk && existsSync(getWhisperModelPath());
 
@@ -375,15 +465,34 @@ export async function installDependencies(
 	}
 
 	if (platform === 'darwin') {
-		onProgress?.('Installing sox and whisper-cpp via Homebrew...', 30);
-		try {
-			await run('brew', ['install', 'sox', 'whisper-cpp']);
-			onProgress?.('Homebrew packages installed successfully.', 50);
-		} catch (err) {
-			throw new Error(
-				'macOS installation failed: ' +
-					(err instanceof Error ? err.message : String(err)),
-			);
+		// Only ask Homebrew for what is missing: a working sox or whisper-cli
+		// already on the system needs no install (and no compile).
+		const check = options.commandChecker ?? defaultCheckCommand;
+		const recCmd = process.env.REC_CMD || 'rec';
+		const whisperCmd = process.env.WHISPER_CMD || 'whisper-cli';
+		const [haveSox, haveWhisper] = await Promise.all([
+			isCommandAvailable(recCmd, ['--help'], check),
+			isCommandAvailable(whisperCmd, ['--help'], check),
+		]);
+		const formulae = [
+			...(haveSox ? [] : ['sox']),
+			...(haveWhisper ? [] : ['whisper.cpp']),
+		];
+		if (formulae.length > 0) {
+			const brew = options.brewEnvironment ?? detectBrewEnvironment();
+			onProgress?.(`Installing ${formulae.join(' and ')} via Homebrew...`, 30);
+			try {
+				await run(brew.brewPath, ['install', ...formulae]);
+				onProgress?.('Homebrew packages installed successfully.', 50);
+			} catch (err) {
+				throw new Error(
+					explainBrewFailure(
+						err instanceof Error ? err.message : String(err),
+						formulae,
+						brew,
+					),
+				);
+			}
 		}
 
 		// The Whisper model is what speech-to-text needs, so fetch it on its own
