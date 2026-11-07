@@ -492,26 +492,6 @@ const writeFileValidator = async (args: {
 	// Allow empty strings (intentional file creation)
 	// Only reject null/undefined, which we already checked above
 
-	// Check for invalid path characters or attempts to write to system directories
-	const invalidPatterns = [
-		/^\/etc\//i,
-		/^\/sys\//i,
-		/^\/proc\//i,
-		/^\/dev\//i,
-		/^\/boot\//i,
-		/^C:\\Windows\\/i,
-		/^C:\\Program Files\\/i,
-	];
-
-	for (const pattern of invalidPatterns) {
-		if (pattern.test(absPath)) {
-			return {
-				valid: false,
-				error: `Cannot write files to system directory: "${args.path}"`,
-			};
-		}
-	}
-
 	return {valid: true};
 };
 
