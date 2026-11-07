@@ -12,6 +12,7 @@ import {jsonSchema, tool} from '@/types/core';
 import {EditRecoveryError} from '@/utils/edit-recovery';
 import {formatError} from '@/utils/error-formatter';
 import {getCachedFileContent, invalidateCache} from '@/utils/file-cache';
+import {fitEditToLineEndings} from '@/utils/line-endings';
 import {replaceFirstLiteral} from '@/utils/literal-replace';
 import {
 	validateEditableEncoding,
@@ -188,6 +189,20 @@ function applyBlocks(fileContent: string, blocks: DiffEditBlock[]): string {
 	return newContent;
 }
 
+function fitBlocksToLineEndings(
+	fileContent: string,
+	blocks: DiffEditBlock[],
+): DiffEditBlock[] {
+	return blocks.map(block => {
+		const fitted = fitEditToLineEndings(
+			fileContent,
+			block.search,
+			block.replace,
+		);
+		return {search: fitted.oldStr, replace: fitted.newStr};
+	});
+}
+
 function formatUpdatedFileContext(
 	originalContent: string,
 	updatedContent: string,
@@ -282,9 +297,10 @@ const executeDiffEdit = async (args: DiffEditArgs): Promise<string> => {
 		throw new Error(encodingResult.error);
 	}
 	const fileContent = cached.content;
+	const fittedBlocks = fitBlocksToLineEndings(fileContent, blocks);
 
-	validateBlocks(fileContent, blocks, path);
-	const newContent = applyBlocks(fileContent, blocks);
+	validateBlocks(fileContent, fittedBlocks, path);
+	const newContent = applyBlocks(fileContent, fittedBlocks);
 
 	const firewallResult = evaluateMutationEnvelope(
 		path,
@@ -300,9 +316,9 @@ const executeDiffEdit = async (args: DiffEditArgs): Promise<string> => {
 	markFileSeen(absPath);
 	forgetReadContent(absPath);
 
-	const blockLabel = blocks.length === 1 ? 'block' : 'blocks';
+	const blockLabel = fittedBlocks.length === 1 ? 'block' : 'blocks';
 	return capDiffEditResult(
-		`Successfully applied ${blocks.length} diff ${blockLabel}.${formatUpdatedFileContext(fileContent, newContent, blocks)}`,
+		`Successfully applied ${fittedBlocks.length} diff ${blockLabel}.${formatUpdatedFileContext(fileContent, newContent, fittedBlocks)}`,
 	);
 };
 
@@ -423,8 +439,9 @@ const diffEditFormatter = async (
 			const blocks = parseDiffEditBlocks(args.diff);
 			const cached = await getCachedFileContent(absPath);
 			const fileContent = cached.content;
-			validateBlocks(fileContent, blocks, args.path);
-			const newContent = applyBlocks(fileContent, blocks);
+			const fittedBlocks = fitBlocksToLineEndings(fileContent, blocks);
+			validateBlocks(fileContent, fittedBlocks, args.path);
+			const newContent = applyBlocks(fileContent, fittedBlocks);
 			const changeId = sendFileChangeToVSCode(
 				absPath,
 				fileContent,
@@ -499,7 +516,8 @@ const diffEditValidator = async (
 		const cached = await getCachedFileContent(absPath);
 		const encodingResult = validateEditableEncoding(args.path, cached);
 		if (!encodingResult.valid) return encodingResult;
-		validateBlocks(cached.content, blocks, args.path);
+		const fittedBlocks = fitBlocksToLineEndings(cached.content, blocks);
+		validateBlocks(cached.content, fittedBlocks, args.path);
 	} catch (error) {
 		return {
 			valid: false,
