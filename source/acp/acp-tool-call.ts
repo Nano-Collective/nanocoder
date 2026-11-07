@@ -36,6 +36,7 @@ const TOOL_KINDS: Record<string, ToolKind> = {
 	string_replace: 'edit',
 	write_file: 'edit',
 	diff_edit: 'edit',
+	syntax_island_edit: 'edit',
 	execute_bash: 'execute',
 	fetch_url: 'fetch',
 	web_search: 'fetch',

@@ -397,6 +397,7 @@ export async function runPlainShell(
 			'write_file',
 			'string_replace',
 			'diff_edit',
+			'syntax_island_edit',
 			'lsp_format_document',
 		];
 		const filesChangedSet = new Set<string>();
