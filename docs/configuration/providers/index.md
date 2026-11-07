@@ -186,6 +186,7 @@ API keys and other config values support environment variable substitution:
 - `$VAR_NAME` - simple variable reference
 - `${VAR_NAME}` - braced reference
 - `${VAR_NAME:-default}` - reference with default value
+- `$$` - escape for a literal `$` (e.g. `pa$$WORD` or `$$VAR_NAME`)
 
 ```json
 {
