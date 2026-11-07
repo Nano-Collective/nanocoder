@@ -238,6 +238,12 @@ export const lazyCommands: LazyCommand[] = [
 		load: () => import('@/commands/macros').then(m => m.macrosCommand),
 	},
 	{
+		name: 'vram',
+		description:
+			'Manage phase-aware GPU memory & model residency (subcommands: unload, mode)',
+		load: () => import('@/commands/vram').then(m => m.vramCommand),
+	},
+	{
 		name: 'schedule',
 		description:
 			'List cron-triggered skills (single-file frontmatter + bundle skill.yaml). Read-only - edit the source file to change.',

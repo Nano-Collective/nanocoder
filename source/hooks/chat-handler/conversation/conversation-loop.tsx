@@ -63,6 +63,7 @@ import {
 } from '@/utils/tool-cancellation';
 import {signalToolConfirm} from '@/utils/tool-confirm-queue';
 import {displayCompactCountsSummary} from '@/utils/tool-result-display';
+import {getVramAllocator} from '@/vram/vram-allocator';
 import {closeAllDiffsInVSCode} from '@/vscode/index';
 import {
 	buildAbandonedTurnMessages,
@@ -412,6 +413,11 @@ export const processAssistantResponse = async (
 	const sessionConfig = getAppConfig().sessions;
 	const maxMessages = sessionConfig?.maxMessages ?? 1000;
 	const cappedMessages = capMessagesForModel(messages, maxMessages);
+
+	await getVramAllocator().transitionPhase('generation', {
+		model: currentModel,
+		provider: currentProvider,
+	});
 
 	const result = await client.chat(
 		[systemMessage, ...cappedMessages],
@@ -1485,6 +1491,10 @@ export const processAssistantResponse = async (
 		await flushAll();
 
 		setIsGenerating(false);
+		await getVramAllocator().transitionPhase('idle', {
+			model: currentModel,
+			provider: currentProvider,
+		});
 		addToChatQueue(
 			<InfoMessage
 				key={generateKey('completion-time')}
