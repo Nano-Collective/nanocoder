@@ -578,6 +578,34 @@ test('diff_edit formatter does not render description when omitted', async t => 
 	t.notRegex(output!, /Description:/);
 });
 
+// #1993: models send LF, so a multi-line SEARCH block must still match a
+// CRLF file and write the replacement back with CRLF endings.
+test('diff_edit: multi-line LF edit matches a CRLF file', async t => {
+	const filePath = await createTestFile('crlf.txt', 'one\r\ntwo\r\nthree\r\n');
+
+	const result = await executeDiffEdit({
+		path: filePath,
+		diff: diffBlock('one\ntwo', 'ONE\nTWO'),
+	});
+
+	t.is(await readFile(filePath, 'utf-8'), 'ONE\r\nTWO\r\nthree\r\n');
+	t.regex(result, /Successfully applied 1 diff block/);
+});
+
+test('diff_edit: LF edit only matching an LF region of a mixed file is applied as sent', async t => {
+	const filePath = await createTestFile(
+		'mixed.txt',
+		'a\r\nb\r\nc\r\nd\r\nx\ny\n',
+	);
+
+	await executeDiffEdit({
+		path: filePath,
+		diff: diffBlock('x\ny', 'X\nY'),
+	});
+
+	t.is(await readFile(filePath, 'utf-8'), 'a\r\nb\r\nc\r\nd\r\nX\nY\n');
+});
+
 test('diff_edit: throws when mutation firewall blocks test deletion', async t => {
 	setFirewallConfig({mode: 'strict', enabled: true});
 	const filePath = await createTestFile(
