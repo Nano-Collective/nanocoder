@@ -46,7 +46,7 @@
 		"test:lint": "biome lint .",
 		"test:lint:fix": "biome check --write --unsafe .",
 		"test:knip": "knip",
-		"test:audit": "pnpm audit --audit-level=high --ignore-unfixable",
+		"test:audit": "pnpm audit --audit-level=high",
 		"audit": "pnpm audit",
 		"test:security": "semgrep scan --config auto --error",
 		"test:agent-eval": "tsx benchmarks/agent/run.ts",
