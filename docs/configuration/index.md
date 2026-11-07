@@ -562,6 +562,40 @@ Brave's free tier includes 2,000 queries per month. [Get an API key here](https:
 
 The `apiKey` field supports environment variable substitution (`$VAR`, `${VAR}`, `${VAR:-default}`), so you can keep the actual key in your environment rather than in the config file.
 
+### Mutation Firewall
+
+The negative-space mutation firewall mechanically validates proposed file modifications before disk writes occur (`write_file`, `string_replace`, `diff_edit`). It prevents accidental destruction of tests, unintended stripping of exported API contracts, and injection of loose `any` types.
+
+The firewall is opt-in and disabled by default (`mode: "disabled"`).
+
+```json
+{
+  "nanocoder": {
+    "firewall": {
+      "enabled": true,
+      "mode": "strict",
+      "protectedPatterns": ["package.json", "pnpm-lock.yaml", ".github/workflows/**"],
+      "blockAnyTypes": true,
+      "protectTestCases": true,
+      "preserveExportSignatures": true
+    }
+  }
+}
+```
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `enabled` | boolean | `false` | Whether the firewall is active. |
+| `mode` | `"disabled"` \| `"lenient"` \| `"strict"` | `"disabled"` | In `strict` mode, violating mutations are blocked with an error. In `lenient` mode, warnings are logged while allowing writes. |
+| `protectedPatterns` | string[] | `[]` | Gitignore-style glob patterns for paths forbidden from modification by tools. |
+| `blockAnyTypes` | boolean | `true` | Prohibits introducing explicit `any` type annotations into previously typed code. |
+| `protectTestCases` | boolean | `true` | Prevents deletion of existing unit test cases in test files. |
+| `preserveExportSignatures` | boolean | `true` | Prevents breaking or removing exported functions, interfaces, types, and classes. |
+
+Use `/firewall` in chat to inspect or modify session overrides at runtime.
+
+> **Operational boundaries:** The mutation firewall validates mutation tools (`write_file`, `string_replace`, `diff_edit`). Non-content file operations via `file_op` (`delete_file`, `move_file`) and automatic document formatting via `lsp_format_document` bypass the mutation firewall.
+
 ## Ignoring Files
 
 Nanocoder already respects your `.gitignore`, so `node_modules`, `dist` and friends stay out of the way. But some files are tracked in git and still not worth spending context on: lockfiles, generated fixtures, vendored bundles, big snapshot files.
