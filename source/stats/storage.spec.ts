@@ -14,6 +14,8 @@ import {
 	recordUserPrompt,
 	resetStatsLedger,
 	STATS_SHUTDOWN_HANDLER_NAME,
+	flushStatsLedgerAsync,
+	getStatsLedgerCached,
 } from './record';
 import {
 	LEGACY_STATS_FILE_NAME,
@@ -325,7 +327,7 @@ test('recordApiCallForStats prices cached input at cache rates', async t => {
 	t.is(loaded.totalCost, 2.91);
 });
 
-test('finalizeStatsForExit persists dirty ledger when debounce is cancelled', t => {
+test('finalizeStatsForExit persists dirty ledger when debounce is cancelled', async t => {
 	const filePath = getStatsFilePath();
 	recordTokenUsage({
 		provider: 'OpenRouter',
@@ -337,7 +339,7 @@ test('finalizeStatsForExit persists dirty ledger when debounce is cancelled', t 
 	_cancelPendingFlushForTests();
 	t.false(fs.existsSync(filePath));
 
-	finalizeStatsForExit();
+	await finalizeStatsForExit();
 
 	t.true(fs.existsSync(filePath));
 	_resetStatsRecorderForTests();
@@ -358,7 +360,7 @@ test('ensureStatsFlushOnShutdown is idempotent and flush handler persists dirty 
 	_cancelPendingFlushForTests();
 
 	// Invoke the same work the ShutdownManager handler performs.
-	finalizeStatsForExit();
+	await finalizeStatsForExit();
 
 	_resetStatsRecorderForTests();
 	const loaded = readStatsLedger();
@@ -534,4 +536,115 @@ test('readStatsLedger reads without probing existsSync on the stats files', t =>
 	}
 
 	t.is(probes, 0);
+});
+
+test('async flush persists to disk without blocking, merging with the file', async t => {
+	recordUserPrompt('OpenRouter', 'gpt-5', '2026-08-25');
+	await flushStatsLedgerAsync();
+
+	t.is(readStatsLedger().daily[0]?.byPair[makePairKey('OpenRouter', 'gpt-5')]?.prompts, 1);
+});
+
+test('a reset during an async flush is not undone by it', async t => {
+	recordTokenUsage({
+		provider: 'OpenRouter',
+		model: 'gpt-5',
+		tokens: 500,
+		dateKey: '2026-08-25',
+	});
+	const flush = flushStatsLedgerAsync();
+	resetStatsLedger();
+	await flush;
+
+	t.false(fs.existsSync(getStatsFilePath()));
+	t.is(readStatsLedger().totalTokens, 0);
+});
+
+test('finalizeStatsForExit waits for an async flush and saves what was recorded during it', async t => {
+	recordUserPrompt('OpenRouter', 'gpt-5', '2026-08-25');
+	void flushStatsLedgerAsync();
+	recordUserPrompt('OpenRouter', 'gpt-5', '2026-08-25');
+	await finalizeStatsForExit();
+
+	_resetStatsRecorderForTests();
+	t.is(readStatsLedger().daily[0]?.byPair[makePairKey('OpenRouter', 'gpt-5')]?.prompts, 2);
+});
+
+test('a second async flush joins the one already running', t => {
+	recordUserPrompt('OpenRouter', 'gpt-5', '2026-08-25');
+	const first = flushStatsLedgerAsync();
+	const second = flushStatsLedgerAsync();
+	t.is(first, second);
+	return first;
+});
+
+test('a failed async write keeps the batch so a later flush persists it', async t => {
+	const blocker = `${getStatsFilePath()}.${process.pid}.async.tmp`;
+	fs.mkdirSync(blocker, {recursive: true});
+	recordUserPrompt('OpenRouter', 'gpt-5', '2026-08-25');
+	await flushStatsLedgerAsync();
+	t.false(fs.existsSync(getStatsFilePath()));
+
+	fs.rmdirSync(blocker);
+	await flushStatsLedgerAsync();
+	t.is(readStatsLedger().daily[0]?.byPair[makePairKey('OpenRouter', 'gpt-5')]?.prompts, 1);
+});
+
+async function withHookDuringAsyncWrite(
+	hook: () => void,
+	run: () => Promise<void>,
+): Promise<void> {
+	const promises = fs.promises;
+	const originalWriteFile = promises.writeFile;
+	promises.writeFile = (async (
+		...args: Parameters<typeof originalWriteFile>
+	) => {
+		hook();
+		return originalWriteFile(...args);
+	}) as typeof originalWriteFile;
+	try {
+		await run();
+	} finally {
+		promises.writeFile = originalWriteFile;
+	}
+}
+
+test('async flush keeps a prompt recorded while the write is in flight', async t => {
+	const pair = makePairKey('OpenRouter', 'gpt-5');
+	recordUserPrompt('OpenRouter', 'gpt-5', '2026-08-25');
+	await withHookDuringAsyncWrite(
+		() => recordUserPrompt('OpenRouter', 'gpt-5', '2026-08-25'),
+		() => flushStatsLedgerAsync(),
+	);
+
+	t.is(getStatsLedgerCached().daily[0]?.byPair[pair]?.prompts, 2);
+	await finalizeStatsForExit();
+	t.is(readStatsLedger().daily[0]?.byPair[pair]?.prompts, 2);
+});
+
+test('flushStatsLedgerSync mid-write (e.g. /stats) neither loses nor double-counts data', async t => {
+	recordTokenUsage({
+		provider: 'OpenRouter',
+		model: 'gpt-5',
+		tokens: 100,
+		dateKey: '2026-08-25',
+	});
+	await withHookDuringAsyncWrite(
+		() => {
+			
+			recordTokenUsage({
+				provider: 'OpenRouter',
+				model: 'gpt-5',
+				tokens: 50,
+				dateKey: '2026-08-25',
+			});
+			flushStatsLedgerSync();
+			
+			t.is(getStatsLedgerCached().totalTokens, 150);
+		},
+		() => flushStatsLedgerAsync(),
+	);
+
+	await finalizeStatsForExit();
+	t.is(readStatsLedger().totalTokens, 150);
 });

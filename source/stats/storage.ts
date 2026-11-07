@@ -224,6 +224,13 @@ function readFileIfExists(filePath: string): string | null {
 	}
 }
 
+function needsSchemaMigration(parsed: unknown): boolean {
+	return (
+		isRecord(parsed) &&
+		(parsed.version !== STATS_LEDGER_VERSION || !Array.isArray(parsed.monthly))
+	);
+}
+
 export function readStatsLedger(): StatsLedger {
 	try {
 		const currentPath = getStatsFilePath();
@@ -246,11 +253,7 @@ export function readStatsLedger(): StatsLedger {
 
 		const parsed = JSON.parse(content) as unknown;
 		const ledger = normalizeLedger(parsed);
-		const needsSchemaMigration =
-			isRecord(parsed) &&
-			(parsed.version !== STATS_LEDGER_VERSION ||
-				!Array.isArray(parsed.monthly));
-		if (isLegacy || needsSchemaMigration) {
+		if (isLegacy || needsSchemaMigration(parsed)) {
 			// Write the validated, current-schema ledger before removing the old
 			// filename. If writing fails, the source file remains recoverable.
 			if (writeStatsLedger(ledger)) {
@@ -293,6 +296,69 @@ export function writeStatsLedger(ledger: StatsLedger): boolean {
 		logWarning('Failed to write stats ledger:', true, {
 			context: {error: formatError(error)},
 		});
+		return false;
+	}
+}
+
+async function readFileIfExistsAsync(filePath: string): Promise<string | null> {
+	try {
+		return await fs.promises.readFile(filePath, 'utf-8');
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+			return null;
+		}
+		throw error;
+	}
+}
+
+export async function readStatsLedgerAsync(): Promise<StatsLedger> {
+	try {
+		let content = await readFileIfExistsAsync(getStatsFilePath());
+		let isLegacy = false;
+		if (content === null) {
+			content = await readFileIfExistsAsync(getLegacyStatsFilePath());
+			isLegacy = content !== null;
+		}
+		if (content === null) {
+			return createEmptyLedger();
+		}
+		const parsed = JSON.parse(content) as unknown;
+		if (isLegacy || needsSchemaMigration(parsed)) {
+			return readStatsLedger();
+		}
+		return normalizeLedger(parsed);
+	} catch (error) {
+		logWarning('Failed to read stats ledger:', true, {context: {error}});
+		return createEmptyLedger();
+	}
+}
+
+export async function writeStatsLedgerAsync(
+	ledger: StatsLedger,
+	shouldCommit: () => boolean = () => true,
+): Promise<boolean> {
+	const tmpPath = `${getStatsFilePath()}.${process.pid}.async.tmp`;
+
+	try {
+		await fs.promises.mkdir(getAppDataPath(), {recursive: true});
+		ledger.version = STATS_LEDGER_VERSION;
+		ledger.lastUpdated = Date.now();
+		await fs.promises.writeFile(
+			tmpPath,
+			JSON.stringify(ledger, null, 2),
+			'utf-8',
+		);
+		if (!shouldCommit()) {
+			await fs.promises.rm(tmpPath, {force: true});
+			return false;
+		}
+		await fs.promises.rename(tmpPath, getStatsFilePath());
+		return true;
+	} catch (error) {
+		logWarning('Failed to write stats ledger:', true, {
+			context: {error: formatError(error)},
+		});
+		await fs.promises.rm(tmpPath, {force: true}).catch(() => undefined);
 		return false;
 	}
 }
