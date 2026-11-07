@@ -22,19 +22,15 @@ export function toLineEnding(text: string, ending: LineEnding): string {
  * Fit whole-file content to the line endings of the file it replaces.
  *
  * Models send LF, so writing their content over a CRLF file would turn every
- * line into LF. When the existing file is mostly CRLF and `content` has no
- * CRLF of its own, `content` is converted to CRLF. New files (`existing` is
- * null) and content that already contains CRLF are left as sent.
+ * line into LF. When the existing file is mostly CRLF, every line break in
+ * `content` is written as CRLF, including in content that mixes both. New
+ * files (`existing` is null) and LF files get `content` as sent.
  */
 export function fitContentToLineEndings(
 	existing: string | null,
 	content: string,
 ): string {
-	if (
-		existing === null ||
-		content.includes('\r\n') ||
-		detectLineEnding(existing) === '\n'
-	) {
+	if (existing === null || detectLineEnding(existing) === '\n') {
 		return content;
 	}
 	return toLineEnding(content, '\r\n');
