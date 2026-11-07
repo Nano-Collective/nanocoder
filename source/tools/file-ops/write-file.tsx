@@ -20,6 +20,7 @@ import {
 	collapseUnchangedLines,
 	computeLineDiff,
 } from '@/tools/file-ops/inline-diff';
+import {fitContentToLineEndings} from '@/tools/file-ops/line-endings';
 import {
 	validateEditableEncoding,
 	validateEditableFormat,
@@ -111,14 +112,20 @@ const executeWriteFile = async (args: {
 		}
 	}
 
+	// Keep a CRLF file CRLF when the model sends LF content.
+	const content = fitContentToLineEndings(
+		fileExists ? originalContent : null,
+		contentStr,
+	);
+
 	const firewallResult = evaluateMutationEnvelope(
 		args.path,
 		originalContent,
-		contentStr,
+		content,
 	);
 	const firewallWarning = enforceFirewall(firewallResult);
 
-	await writeFile(absPath, contentStr, 'utf-8');
+	await writeFile(absPath, content, 'utf-8');
 
 	// Invalidate cache after write
 	invalidateCache(absPath);
@@ -206,7 +213,12 @@ const WriteFileFormatter = React.memo(
 		}
 		const {colors} = themeContext;
 		const path = args.path || args.file_path || 'unknown';
-		const newContent = ensureString(args.content);
+		// Show the content as it lands on disk, so a CRLF file is not shown
+		// as every line changed.
+		const newContent = fitContentToLineEndings(
+			previousContent,
+			ensureString(args.content),
+		);
 		const lineCount = newContent.split('\n').length;
 		const charCount = newContent.length;
 		const ext = path.split('.').pop()?.toLowerCase() ?? '';
@@ -436,7 +448,10 @@ const writeFileFormatter = async (
 
 	// Send diff to VS Code during preview phase (before execution)
 	if (result === undefined && isVSCodeConnected()) {
-		const content = args.content || '';
+		const content = fitContentToLineEndings(
+			previousContent,
+			args.content || '',
+		);
 
 		const changeId = sendFileChangeToVSCode(
 			absPath,
