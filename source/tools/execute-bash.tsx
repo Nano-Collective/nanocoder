@@ -218,6 +218,12 @@ const executeBashStreamingFormatter = (
 
 /** The user's home directory in the POSIX-style form used by shell commands. */
 const HOME_DIR = homedir().replace(/\\/g, '/');
+const HOME_PARENT = dirname(HOME_DIR);
+// On Windows the home directory's parent is a user directory, but one more
+// `..` lands on the drive root (`C:/`), which is as destructive as `/`.
+const HOME_DRIVE_ROOT = /^[A-Za-z]:/.test(HOME_DIR)
+	? `${HOME_DIR.slice(0, 2)}/`
+	: null;
 
 /**
  * Resolve an `rm` target to the absolute path it names. Home references are
@@ -227,8 +233,17 @@ const HOME_DIR = homedir().replace(/\\/g, '/');
  */
 function resolveRmTarget(target: string): string {
 	const expanded = target
-		.replace(/^~(?=\/|$)/, HOME_DIR)
-		.replace(/\$\{HOME\}|\$HOME(?![A-Za-z0-9_])/g, HOME_DIR);
+		// `~` is the current user's home and `~user` is that account's home. An
+		// arbitrary user's home cannot be looked up portably, so assume they
+		// live beside the current user (the standard `/home` or `/Users`
+		// layout). `~user/..` then resolves to the shared parent and is caught
+		// like `~/..`.
+		.replace(/^~([^/]*)(?=\/|$)/, (_, user: string) =>
+			user ? `${HOME_PARENT}/${user}` : HOME_DIR,
+		)
+		// Use replacer functions rather than replacement strings so a home
+		// directory containing `$` is not interpreted as `$&`/`$1`.
+		.replace(/\$\{HOME\}|\$HOME(?![A-Za-z0-9_])/g, () => HOME_DIR);
 	const withoutGlob = expanded.replace(/\/\*+$/, '/');
 	const absolute =
 		withoutGlob.startsWith('/') || /^[A-Za-z]:\//.test(withoutGlob);
@@ -254,12 +269,6 @@ function resolveRmTarget(target: string): string {
  * locations are covered; `/home` and `/Users` cover the standard layouts even
  * when the command names a user that does not exist on this machine.
  */
-const HOME_PARENT = dirname(HOME_DIR);
-// On Windows the home directory's parent is a user directory, but one more
-// `..` lands on the drive root (`C:/`), which is as destructive as `/`.
-const HOME_DRIVE_ROOT = /^[A-Za-z]:/.test(HOME_DIR)
-	? `${HOME_DIR.slice(0, 2)}/`
-	: null;
 const DESTRUCTIVE_RM_TARGETS = new Set(
 	['/', '/home', '/Users', HOME_DIR, HOME_PARENT]
 		.concat(HOME_DRIVE_ROOT ? [HOME_DRIVE_ROOT] : [])
@@ -293,10 +302,11 @@ function rmArgumentLists(command: string): string[][] {
 }
 
 /**
- * Whether an `rm` target names the filesystem root, the user's home, or the
- * directory that holds every user's home. `/*`, `/.`, `/..`, `//`, `~/..` and
- * `$HOME/..` all name one of those after resolution, so globs, home references,
- * empty segments, and `.`/`..` segments are resolved before comparing.
+ * Whether an `rm` target names the filesystem root, the user's home, another
+ * account's home, or the directory that holds every user's home. `/*`, `/.`,
+ * `/..`, `//`, `~/..`, `~user/..` and `$HOME/..` all name one of those after
+ * resolution, so globs, home references, empty segments, and `.`/`..` segments
+ * are resolved before comparing.
  */
 function isDestructiveRmTarget(target: string): boolean {
 	// Anything that is not a plain name directly under `/` - `/*`, `/*/`,
@@ -305,7 +315,17 @@ function isDestructiveRmTarget(target: string): boolean {
 	// an ordinary target and is left to the checks below.
 	if (/^\/(?!\w)/.test(target)) return true;
 
-	return DESTRUCTIVE_RM_TARGETS.has(resolveRmTarget(target));
+	const resolved = resolveRmTarget(target);
+	if (DESTRUCTIVE_RM_TARGETS.has(resolved)) return true;
+
+	// A bare `~user` and `~user/project/..` name that account's home, which is
+	// the directory `resolveRmTarget` assumed above. The shell only expands
+	// `~user` when the account exists; refusing the literal name otherwise is
+	// the safe reading for a delete guard.
+	const namedUser = /^~([^/]+)/.exec(target)?.[1];
+	return namedUser
+		? resolved === resolveRmTarget(`${HOME_PARENT}/${namedUser}`)
+		: false;
 }
 
 /**
