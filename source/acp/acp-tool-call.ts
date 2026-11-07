@@ -7,7 +7,10 @@ import type {
 } from '@agentclientprotocol/sdk';
 import {getSafeSessionCwd} from '@/services/session-cwd';
 import type {ToolCall} from '@/types/core';
-import {fitEditToLineEndings} from '@/utils/line-endings';
+import {
+	fitContentToLineEndings,
+	fitEditToLineEndings,
+} from '@/utils/line-endings';
 import {replaceFirstLiteral} from '@/utils/literal-replace';
 
 // A bash `cd` moves the session cwd and leaves process.cwd() at the launch dir.
@@ -256,5 +259,11 @@ async function buildWriteFileDiff(
 		oldText = null; // New file.
 	}
 
-	return {type: 'diff', path: absPath, oldText, newText};
+	// Match the file's line endings the same way the tool does.
+	return {
+		type: 'diff',
+		path: absPath,
+		oldText,
+		newText: fitContentToLineEndings(oldText, newText),
+	};
 }
