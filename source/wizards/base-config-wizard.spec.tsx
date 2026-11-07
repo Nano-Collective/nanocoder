@@ -1,4 +1,13 @@
-import {existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync} from 'node:fs';
+import {
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	readdirSync,
+	rmSync,
+	statSync,
+	writeFileSync,
+} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
@@ -369,6 +378,73 @@ test.serial(
 
 		const output = lastFrame()!;
 		t.regex(output, /entries: openai,anthropic/);
+	},
+);
+
+test.serial(
+	'saving a new config creates it owner-only and leaves no temp file behind',
+	async t => {
+		if (process.platform === 'win32') {
+			t.pass('skipped: POSIX file modes are not meaningful on Windows');
+			return;
+		}
+		const testDir = join(
+			tmpdir(),
+			`nanocoder-wizard-test-mode-${Date.now()}`,
+		);
+		mkdirSync(testDir, {recursive: true});
+		t.teardown(() => rmSync(testDir, {recursive: true, force: true}));
+
+		const configFileName = 'agents.config.json';
+		const configPath = join(testDir, configFileName);
+		const settle = () => new Promise(r => setTimeout(r, 100));
+
+		const {lastFrame, stdin} = renderWithTheme(
+			<BaseConfigWizard<FakeItems>
+				title="Title"
+				focusId="mode-wizard"
+				configFileName={configFileName}
+				initialItems={{entries: []}}
+				parseConfig={() => ({entries: []})}
+				buildConfig={items => ({entries: items.entries})}
+				hasItems={items => items.entries.length > 0}
+				renderConfigureStep={({onComplete}) => {
+					setTimeout(() => onComplete({entries: ['saved']}), 10);
+					return <></>;
+				}}
+				renderSummaryItems={noopRenderSummary}
+				projectDir={testDir}
+				onComplete={() => {}}
+			/>,
+		);
+
+		// The location step lists "Global user config" first; move down to
+		// "Current project directory" and select it.
+		stdin.write('\u001B[B');
+		await settle();
+		stdin.write('\r');
+		await settle();
+
+		// A project-scoped config holds keys in the repo, so the summary warns.
+		t.regex(lastFrame()!, /inside your project/);
+
+		// Summary step: Enter saves.
+		stdin.write('\r');
+		await settle();
+
+		t.true(existsSync(configPath), 'Expected the config file to be written');
+		t.deepEqual(JSON.parse(readFileSync(configPath, 'utf-8')), {
+			entries: ['saved'],
+		});
+		t.is(
+			statSync(configPath).mode & 0o777,
+			0o600,
+			'A config file holding API keys must be created owner-only',
+		);
+		t.false(
+			readdirSync(testDir).some(name => name.endsWith('.tmp')),
+			'Atomic write must not leave a temp file behind',
+		);
 	},
 );
 

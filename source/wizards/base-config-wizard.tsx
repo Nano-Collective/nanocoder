@@ -1,12 +1,6 @@
 import {spawnSync} from 'node:child_process';
-import {
-	existsSync,
-	mkdirSync,
-	readFileSync,
-	unlinkSync,
-	writeFileSync,
-} from 'node:fs';
-import {dirname, join} from 'node:path';
+import {existsSync, readFileSync, unlinkSync} from 'node:fs';
+import {join} from 'node:path';
 import {Box, Text, useFocus, useInput} from 'ink';
 import Spinner from 'ink-spinner';
 import React, {useCallback, useEffect, useState} from 'react';
@@ -15,6 +9,7 @@ import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {getColors} from '@/config/index';
 import {getConfigPath} from '@/config/paths';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
+import {atomicWritePrivateJson} from '@/utils/atomic-write';
 import {formatError} from '@/utils/error-formatter';
 import {logError, logInfo} from '@/utils/message-queue';
 import {type ConfigLocation, LocationStep} from './steps/location-step';
@@ -92,6 +87,7 @@ export function BaseConfigWizard<T>({
 	const colors = getColors();
 	const [step, setStep] = useState<BaseWizardStep>('location');
 	const [configPath, setConfigPath] = useState('');
+	const [isProjectConfig, setIsProjectConfig] = useState(false);
 	const [items, setItems] = useState<T>(initialItems);
 	const [error, setError] = useState<string | null>(null);
 	const [configCorrupted, setConfigCorrupted] = useState(false);
@@ -150,17 +146,17 @@ export function BaseConfigWizard<T>({
 			);
 		}
 		const config = buildConfig(data);
-		const configDir = dirname(configPath);
-		if (!existsSync(configDir)) {
-			mkdirSync(configDir, {recursive: true});
-		}
-		writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
+		// Config files can contain plaintext API keys and bearer tokens, so new
+		// files are created owner-only (0600) and existing modes are preserved.
+		// Atomic so an interrupted save cannot truncate the file.
+		atomicWritePrivateJson(configPath, config);
 	};
 
 	const handleLocationComplete = (location: ConfigLocation) => {
 		const baseDir = location === 'project' ? projectDir : getConfigPath();
 		const nextPath = join(baseDir, configFileName);
 		setConfigPath(nextPath);
+		setIsProjectConfig(location === 'project');
 		// Synchronous load before the configure step mounts — see
 		// loadExistingConfig for why deferring this loses existing entries.
 		loadExistingConfig(nextPath);
@@ -312,6 +308,14 @@ export function BaseConfigWizard<T>({
 							<Text color={colors.secondary}>Config file:</Text>
 							<Text color={colors.success}>{configPath}</Text>
 						</Box>
+						{isProjectConfig && (
+							<Box marginBottom={1}>
+								<Text color={colors.warning}>
+									This file lives inside your project. Add it to .gitignore and
+									avoid committing API keys — prefer $VAR references.
+								</Text>
+							</Box>
+						)}
 						{renderSummaryItems(items)}
 						<Box marginTop={1} flexDirection="column">
 							<Text color={colors.secondary}>• Enter: Save configuration</Text>

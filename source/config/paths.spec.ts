@@ -1,6 +1,8 @@
+import {existsSync, mkdtempSync, rmSync, statSync} from 'fs';
+import {tmpdir} from 'os';
 import * as path from 'path';
 import test from 'ava';
-import {getAppDataPath, getConfigPath} from './paths';
+import {getAppDataPath, getClosestConfigFile, getConfigPath} from './paths';
 
 // These tests intentionally lock in the public contract for Nanocoder's
 // configuration and data directories. Do not change expected values
@@ -240,6 +242,28 @@ test.serial(
 			},
 			getConfigPath,
 			path.join('/home/test', '.config', 'nanocoder'),
+		);
+	},
+);
+
+test.serial(
+	'getClosestConfigFile creates a new config file owner-only',
+	t => {
+		if (ORIGINAL_PLATFORM === 'win32') {
+			t.pass('skipped: POSIX file modes are not meaningful on Windows');
+			return;
+		}
+		const configDir = mkdtempSync(path.join(tmpdir(), 'nanocoder-paths-mode-'));
+		t.teardown(() => rmSync(configDir, {recursive: true, force: true}));
+		process.env.NANOCODER_CONFIG_DIR = configDir;
+
+		const configPath = getClosestConfigFile('fresh-mode.json');
+
+		t.true(existsSync(configPath), 'Config file should be created');
+		t.is(
+			statSync(configPath).mode & 0o777,
+			0o600,
+			'A fresh config file may hold credentials and must be owner-only',
 		);
 	},
 );
