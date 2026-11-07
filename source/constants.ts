@@ -191,6 +191,12 @@ export const CACHE_FILE_LIST_TTL_MS = 5000;
 // === FETCH URL ===
 export const MAX_URL_CONTENT_BYTES = 100_000; // ~100 KB
 
+// === CLI RUN ===
+// Most piped stdin `nanocoder run` will read into the prompt. Matches the
+// fetch_url cap: ~25k tokens, enough for a large diff or test log without
+// one pipe filling a small local model's context window.
+export const MAX_STDIN_PROMPT_BYTES = 100_000; // ~100 KB
+
 // === AI SDK ===
 export const MAX_TOOL_STEPS = 10;
 // Default for `nanocoder.retries.maxEmptyTurns` (see source/config/index.ts):

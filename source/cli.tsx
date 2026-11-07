@@ -12,7 +12,12 @@
 // pulled in via dynamic `await import()` only when the app actually boots.
 import {readFileSync} from 'node:fs';
 import nodeModule from 'node:module';
-import {parseRunPrompt} from './run-prompt-args.js';
+import {
+	composePromptWithStdin,
+	parseRunPrompt,
+	readStdinText,
+	STDIN_PROMPT_FILE,
+} from './run-prompt-args.js';
 
 // Enable V8 compile cache (Node 22.8+). After the first run, Node caches
 // bytecode for every module on disk so subsequent launches skip parsing
@@ -284,6 +289,7 @@ Options:
   --prompt-file       Read the run prompt from a file instead of the command
                       line. Necessary for large prompts: Linux caps a single
                       argument at 128 KiB and execve fails with E2BIG.
+                      Use "-" to read the prompt from stdin.
   --trust-directory   Skip the first-run directory trust prompt for this run only.
                       Valid with "run", "daemon start", "verify" and --acp. Does not
                       modify the preferences file.
@@ -321,6 +327,7 @@ Examples:
   nanocoder --mode plan
   nanocoder --trust-directory run "analyze src/app.ts"
   nanocoder --plain run "summarize README.md"
+  git diff | nanocoder run "write a commit message"
   nanocoder --plain --json run "summarize README.md" | jq .finalText
   nanocoder review main
   nanocoder review feature/auth
@@ -567,11 +574,51 @@ async function main(): Promise<void> {
 			console.error('--prompt-file only applies to `nanocoder run`.');
 			process.exit(1);
 		}
+		if (promptFile !== STDIN_PROMPT_FILE) {
+			try {
+				nonInteractivePrompt = readFileSync(promptFile, 'utf8');
+			} catch (error) {
+				console.error(
+					`Could not read --prompt-file "${promptFile}": ${
+						error instanceof Error ? error.message : String(error)
+					}`,
+				);
+				process.exit(1);
+			}
+		}
+	}
+
+	// Piped stdin: `git diff | nanocoder run "write a commit message"`.
+	//
+	// Without this the pipe was never read and the model answered without
+	// ever seeing it, with no error to say so. Resolved here, with the rest
+	// of the prompt and before the runtime is chosen, so the plain shell and
+	// the Ink path both get the finished prompt.
+	//
+	// `--prompt-file -` names stdin as the prompt itself, so it replaces a
+	// positional prompt just as a real file does. Any other pipe is appended
+	// to the prompt, or is the prompt when there is none.
+	const promptFromStdin = promptFile === STDIN_PROMPT_FILE;
+	let stdinPiped = false;
+	if (isRunCommand && promptFromStdin && process.stdin.isTTY) {
+		console.error(
+			'`--prompt-file -` reads the prompt from stdin, but stdin is a terminal. Pipe something in, e.g. `git diff | nanocoder run --prompt-file -`.',
+		);
+		process.exit(1);
+	}
+	if (isRunCommand && !process.stdin.isTTY) {
+		const {MAX_STDIN_PROMPT_BYTES} = await import('./constants.js');
 		try {
-			nonInteractivePrompt = readFileSync(promptFile, 'utf8');
+			const piped = await readStdinText(process.stdin, MAX_STDIN_PROMPT_BYTES);
+			stdinPiped = piped.trim().length > 0;
+			nonInteractivePrompt = composePromptWithStdin(
+				promptFromStdin ? undefined : nonInteractivePrompt,
+				piped,
+				MAX_STDIN_PROMPT_BYTES,
+			);
 		} catch (error) {
 			console.error(
-				`Could not read --prompt-file "${promptFile}": ${
+				`Could not read stdin: ${
 					error instanceof Error ? error.message : String(error)
 				}`,
 			);
@@ -613,7 +660,7 @@ async function main(): Promise<void> {
 	// --plain or a non-TTY crashed on raw-mode stdin instead of explaining.
 	if (isRunCommand && !nonInteractivePrompt?.trim()) {
 		console.error(
-			'`nanocoder run` needs a prompt. Try: nanocoder run "your task" or nanocoder run --prompt-file <path>',
+			'`nanocoder run` needs a prompt. Try: nanocoder run "your task", nanocoder run --prompt-file <path>, or pipe one in: echo "your task" | nanocoder run',
 		);
 		process.exit(1);
 	}
@@ -711,7 +758,8 @@ async function main(): Promise<void> {
 		isRunCommand &&
 		!noPlainRequested &&
 		!vscodeMode &&
-		(!process.stdout.isTTY || ciDetected);
+		// Piped input has consumed stdin, which the Ink runtime needs for keys.
+		(!process.stdout.isTTY || ciDetected || stdinPiped);
 	// --json is a plain-shell protocol: the Ink runtime has no JSON output, so
 	// honouring the flag means taking the plain path even in a real terminal.
 	if (outputFormat === 'json' && isRunCommand && noPlainRequested) {
