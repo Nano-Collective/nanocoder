@@ -417,7 +417,7 @@ Turn off individual tools globally with the top-level `disabledTools` array. Lis
 
 Names match the registered tool ids (`read_file`, `write_file`, `string_replace`, `execute_bash`, `web_search`, `fetch_url`, `agent`, etc.). [MCP](mcp-configuration.md) tools follow the same naming as in their server config.
 
-`fetch_url` always refuses internal addresses, in every mode (including yolo and `alwaysAllow`): loopback, private ranges (RFC 1918, CGNAT, link-local and their IPv6 equivalents), `localhost` and `*.localhost`, and cloud metadata hosts such as `169.254.169.254` and `metadata.google.internal`. Every redirect hop is checked the same way.
+`fetch_url` always refuses internal addresses, in every mode (including yolo and `alwaysAllow`): loopback, private ranges (RFC 1918, CGNAT, link-local and their IPv6 equivalents), reserved, multicast and broadcast IPv4 ranges, IPv6 addresses that embed any of these (IPv4-mapped, IPv4-compatible, IPv4-translated, NAT64 and 6to4), `localhost` and `*.localhost`, and cloud metadata hosts such as `169.254.169.254` and `metadata.google.internal`. Every redirect hop is checked the same way.
 
 An [ACP](../features/acp.md) client can add to this list for a single session, without touching your config. Resolution: project-level `agents.config.json` wins over the global config. The list is layered on top of `/tune` profiles and mode exclusions — if `nano` profile would otherwise expose `read_file`, listing it in `disabledTools` removes it. Subagents respect the global list even if their own `tools` allow-list includes the disabled name.
 
@@ -563,6 +563,40 @@ Brave's free tier includes 2,000 queries per month. [Get an API key here](https:
 ```
 
 The `apiKey` field supports environment variable substitution (`$VAR`, `${VAR}`, `${VAR:-default}`), so you can keep the actual key in your environment rather than in the config file.
+
+### Mutation Firewall
+
+The negative-space mutation firewall mechanically validates proposed file modifications before disk writes occur (`write_file`, `string_replace`, `diff_edit`). It prevents accidental destruction of tests, unintended stripping of exported API contracts, and injection of loose `any` types.
+
+The firewall is opt-in and disabled by default (`mode: "disabled"`).
+
+```json
+{
+  "nanocoder": {
+    "firewall": {
+      "enabled": true,
+      "mode": "strict",
+      "protectedPatterns": ["package.json", "pnpm-lock.yaml", ".github/workflows/**"],
+      "blockAnyTypes": true,
+      "protectTestCases": true,
+      "preserveExportSignatures": true
+    }
+  }
+}
+```
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `enabled` | boolean | `false` | Whether the firewall is active. |
+| `mode` | `"disabled"` \| `"lenient"` \| `"strict"` | `"disabled"` | In `strict` mode, violating mutations are blocked with an error. In `lenient` mode, warnings are logged while allowing writes. |
+| `protectedPatterns` | string[] | `[]` | Gitignore-style glob patterns for paths forbidden from modification by tools. |
+| `blockAnyTypes` | boolean | `true` | Prohibits introducing explicit `any` type annotations into previously typed code. |
+| `protectTestCases` | boolean | `true` | Prevents deletion of existing unit test cases in test files. |
+| `preserveExportSignatures` | boolean | `true` | Prevents breaking or removing exported functions, interfaces, types, and classes. |
+
+Use `/firewall` in chat to inspect or modify session overrides at runtime.
+
+> **Operational boundaries:** The mutation firewall validates mutation tools (`write_file`, `string_replace`, `diff_edit`). Non-content file operations via `file_op` (`delete_file`, `move_file`) and automatic document formatting via `lsp_format_document` bypass the mutation firewall.
 
 ## Ignoring Files
 

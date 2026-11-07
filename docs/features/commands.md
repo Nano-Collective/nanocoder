@@ -21,6 +21,7 @@ Type `/` in the chat input to see available commands. All commands start with `/
 | `/tasks` | Manage task list for tracking complex work (see [Task Management](task-management.md)) |
 | `/model-database` | Browse coding models from OpenRouter (searchable, filterable by open/proprietary). Enter copies the highlighted model's ID to the clipboard and, when the active provider is OpenRouter, also switches the session to that model |
 | `/settings` | Interactive settings menu. Accepts a tab name to jump straight there: `/settings providers`, `/settings mcp`, `/settings appearance`, `/settings input`, `/settings behavior`, `/settings advanced` |
+| `/firewall` | Inspect and configure the negative-space mutation firewall. Subcommands: `status`, `enable`, `disable`, `mode <strict\|lenient\|disabled>`, `toggle <any\|tests\|exports>`, `protect <pattern>`, `unprotect <pattern>`, `reset` |
 | `/mcp` | Show connected MCP servers and their tools |
 | `/commands` | List custom commands. Subcommands: `show <name>`, `create <name>` (see [Custom Commands](custom-commands.md)) |
 | `/tools` | List available tools grouped by source (built-in, MCP, custom). Subcommand: `create <name>` (see [Custom Tools](custom-tools.md)) |
@@ -30,10 +31,11 @@ Type `/` in the chat input to see available commands. All commands start with `/
 | `/context-max` | Set maximum context length for the current session (supports positive integer or decimal values, k/K and m/M suffixes), or inspect the resolved context source. `/context-max --reset` clears the session override. Also available as `--context-max` CLI flag |
 | `/exit` | Exit the application (alias: `/quit`) |
 | `/export` | Export the current session to a markdown file, or to JSON with `/export --json` or a `.json` filename (see [Exporting a Session](#exporting-a-session)) |
+| `/share` | Write the current session to a single, self-contained HTML page you can open in any browser or send to someone, with secrets redacted. `/share --json` writes the same content as deterministic JSON (see [Sharing a Session](#sharing-a-session)) |
 | `/copy` | Copy the last assistant response to the system clipboard. Use `/copy code` to copy just the last fenced code block from the last response |
 | `/expand [n]` | Print tool result `n` in full. Long tool output is cut to 20 lines with a `/expand n` hint; run `/expand` without a number to list recent results |
 | `/commit` | Generate a Conventional Commit message from staged Git changes. Add `--copy` (or `-c`) to also copy the message to the system clipboard. A spinner shows while the model is working |
-| `/review` | One-shot, diff-only review of the current branch or one target. Usage: `/review [quick] [<branch-or-PR-number-or-GitHub-PR-URL>]` (e.g. `/review`, `/review main`, `/review quick 42`, `/review https://github.com/owner/repo/pull/42`). Bare PR numbers are resolved across configured GitHub remotes and their fork parents; ambiguous numbers require a full PR URL |
+| `/review` | One-shot, diff-only review of the current branch or one target. Usage: `/review [quick] [<branch-or-PR-number-or-GitHub-PR-URL>]` (e.g. `/review`, `/review main`, `/review quick 42`, `/review https://github.com/owner/repo/pull/42`). Bare PR numbers are resolved across configured GitHub remotes and their fork parents; ambiguous numbers require a full PR URL. See [review foundation and rollout](review.md) for staged behavior |
 | `/doctor` | Show environment health report for bug reports |
 | `/update` | Update Nanocoder to the latest version |
 | `/usage` | Get current model context usage visually. Accepts `?context-max=<n>` to preview usage against a different limit (see [Inline Overrides](#inline-overrides)) |
@@ -87,6 +89,24 @@ Hands-free mode is paused in yolo mode, so ambient speech cannot trigger unconfi
 ```
 
 JSON exports keep full message content and session metadata, for replay or evaluation. The file is written relative to the current directory and must stay inside the project: `~` is not expanded, `..` segments are refused, and absolute paths outside the project root are rejected. A generated filename gets a numeric suffix rather than overwriting an earlier export; a filename you type overwrites an existing file.
+
+### Sharing a Session
+
+```bash
+/share                          # HTML page, filename generated from your first prompt and the date
+/share notes/debug-session.html # HTML page, your filename
+/share --json                   # the same content as deterministic JSON
+/share run.json                 # a .json filename also selects JSON
+/share --no-redact              # keep secrets in (read the file before you send it)
+```
+
+`/share` writes one HTML file that shows the conversation in order: your prompts, the assistant's replies and reasoning, and each tool call with its arguments and result (collapsed until you click it). Nothing is uploaded. The page is static: it runs no JavaScript and its Content-Security-Policy blocks every network request, so it is safe to open from an email or a chat attachment and works offline.
+
+What is left out: the system prompt, and image data (an attached image is noted by its type only).
+
+Secrets are redacted by default: common token formats (GitHub, OpenAI/Anthropic-style `sk-` keys, AWS access key IDs, Slack tokens, private key blocks), the values of environment variables whose names contain `TOKEN`, `KEY`, `SECRET` or `PASSWORD`, and the `apiKey` of every configured provider. The message says how many were redacted. Only those known shapes are caught, and file paths, file contents and command output are kept as they are, so read the page before you send it.
+
+`--json` writes the same content as JSON: no timestamps, a fixed key order and sorted tool-argument keys, so sharing the same session twice gives the same bytes and two shares diff cleanly. File paths follow the same rules as `/export`: relative to the current directory, inside the project, a generated name never overwrites an earlier file, and a name you type does.
 
 ## Special Input Syntax
 These shortcuts work directly in the chat input — no `/` prefix needed.
@@ -211,7 +231,8 @@ The emitted object looks like:
     "inputTokens": 4520,
     "outputTokens": 850,
     "totalTokens": 5370
-  }
+  },
+  "warnings": []
 }
 ```
 
@@ -223,6 +244,7 @@ The emitted object looks like:
 - `steps` — how many times the model was called during the run, including retried turns. One step can make zero or several tool calls, so this is not the same as the length of `toolCalls`. `0` when the run stopped before calling the model
 - `filesChanged` - deduplicated list of file paths touched by file-mutating tools (`write_file`, `string_replace`, `diff_edit`, `lsp_format_document`)
 - `usage` — provider-reported token counts summed across every turn of the run. Omitted entirely when the provider reports no token telemetry (common with local models), so an absent block means "unknown", never "zero". When a provider reports input and output counts but no total, `totalTokens` is derived as their sum.
+- `warnings` — array containing configuration, hook, formatter, plugin, and runtime error/warning messages (the same diagnostic messages streamed to stderr)
 
 A few more fields appear conditionally: `message` (the error text, when `kind` is `"error"`), and, when `kind` is `"tool-approval-required"`, `toolNames` (the tools awaiting approval) and `autoAcceptWouldRun` (whether `--mode auto-accept` would have run every blocked call; when false, only `--mode yolo` or `alwaysAllow` unblocks it).
 

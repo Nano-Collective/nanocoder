@@ -138,6 +138,12 @@ export const lazyCommands: LazyCommand[] = [
 		load: () => import('@/commands/export').then(m => m.exportCommand),
 	},
 	{
+		name: 'share',
+		description:
+			'Write the session to a self-contained HTML page you can share, with secrets redacted (--json for JSON, --no-redact to keep secrets)',
+		load: () => import('@/commands/share').then(m => m.shareCommand),
+	},
+	{
 		name: 'update',
 		description: 'Update Nanocoder to the latest version',
 		load: () => import('@/commands/update').then(m => m.updateCommand),
@@ -277,5 +283,11 @@ export const lazyCommands: LazyCommand[] = [
 		name: 'voice',
 		description: 'Toggle voice mode and configure voice settings',
 		load: () => import('@/commands/voice').then(m => m.voiceCommand),
+	},
+	{
+		name: 'firewall',
+		description:
+			'Configure negative-space mutation firewall. Subcommands: status, mode <strict|lenient|disabled>, toggle <any|tests|exports>, protect <pattern>, unprotect <pattern>, reset',
+		load: () => import('@/commands/firewall').then(m => m.firewallCommand),
 	},
 ];

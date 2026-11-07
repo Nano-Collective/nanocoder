@@ -36,6 +36,8 @@ interface InteractiveAppProps {
 	appHandlers: AppHandlers;
 	vscodeServer: ReturnType<typeof useVSCodeServer>;
 	staticComponents: React.ReactNode[];
+	welcomeModulesPending?: boolean;
+	hasConversationMessages?: boolean;
 	liveComponent: React.ReactNode;
 	pendingSubagentApproval: PendingToolApproval | null;
 	handleSubagentToolApproval: (confirmed: boolean) => void;
@@ -76,6 +78,8 @@ export function InteractiveApp({
 	appHandlers,
 	vscodeServer,
 	staticComponents,
+	welcomeModulesPending = false,
+	hasConversationMessages = true,
 	liveComponent,
 	pendingSubagentApproval,
 	handleSubagentToolApproval,
@@ -515,6 +519,8 @@ export function InteractiveApp({
 				<ChatHistory
 					startChat={appState.startChat}
 					staticComponents={staticComponents}
+					welcomeModulesPending={welcomeModulesPending}
+					hasConversationMessages={hasConversationMessages}
 					queuedComponents={appState.chatComponents}
 					liveComponent={liveComponent}
 					renderLastQueuedComponentLive={recallableSubmittedDraft}

@@ -11,6 +11,10 @@ export interface ChatHistoryProps {
 	startChat: boolean;
 	/** Static components that are frozen at the top (welcome, status) */
 	staticComponents: React.ReactNode[];
+	/** Defer the transcript until the expected welcome banner is ready to commit. */
+	welcomeModulesPending?: boolean;
+	/** Whether the conversation has model messages; empty queues may contain startup notices. */
+	hasConversationMessages?: boolean;
 	/** Dynamic components added during the chat session */
 	queuedComponents: React.ReactNode[];
 	/** Live component rendered below the transcript (streaming updates) */
@@ -52,6 +56,8 @@ export interface ChatHistoryProps {
 export const ChatHistory = React.memo(function ChatHistory({
 	startChat,
 	staticComponents,
+	welcomeModulesPending = false,
+	hasConversationMessages = true,
 	queuedComponents,
 	liveComponent,
 	renderLastQueuedComponentLive,
@@ -151,7 +157,9 @@ export const ChatHistory = React.memo(function ChatHistory({
 		typeof banner === 'object' &&
 		'key' in banner &&
 		(banner as {key: unknown}).key === 'welcome';
-	const showBanner = isWelcomeBanner ? isWelcomeOnly : true;
+	const showBanner = isWelcomeBanner
+		? isWelcomeOnly || (!hasConversationMessages && !liveComponent)
+		: true;
 	const frozenComponents = React.useMemo(() => {
 		if (fullscreen) return staticComponents.slice(1);
 		if (isFreshInline) return [];
@@ -203,7 +211,7 @@ export const ChatHistory = React.memo(function ChatHistory({
 				</Box>
 			)}
 
-			{startChat && <ChatQueue {...chatQueueProps} />}
+			{startChat && !welcomeModulesPending && <ChatQueue {...chatQueueProps} />}
 
 			{liveComponent && (
 				// Inline: the live component sits below the absolutely-positioned

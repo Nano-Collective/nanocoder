@@ -944,12 +944,6 @@ export const processAssistantResponse = async (
 		};
 
 		for (const toolCall of validToolCalls) {
-			// The XML-fallback synthetic error isn't a real tool, so treat it as
-			// auto (it surfaces as an error result). Real argument validation
-			// lives in the tool handler (single source of truth).
-			const validationFailed =
-				toolCall.function.name === '__xml_validation_error__';
-
 			// Lifecycle gate, ahead of the approval decision. Every execution path
 			// gates again at its own boundary, but only here is it in front of the
 			// confirmation prompt — so a "never touch .env" hook refuses the call
@@ -961,34 +955,30 @@ export const processAssistantResponse = async (
 			const parsedArgs = parseToolArguments<Record<string, unknown>>(
 				toolCall.function.arguments,
 			);
-			if (!validationFailed) {
-				const gate = await runPreToolUseGate(toolCall, parsedArgs);
-				if (gate.blocked) {
-					refuseToolCall(
-						toolCall,
-						gate.reason ?? 'Blocked by a pre-tool-use hook.',
-					);
-					continue;
-				}
+			const gate = await runPreToolUseGate(toolCall, parsedArgs);
+			if (gate.blocked) {
+				refuseToolCall(
+					toolCall,
+					gate.reason ?? 'Blocked by a pre-tool-use hook.',
+				);
+				continue;
 			}
 
 			const toolEntry = toolManager?.getToolEntry(toolCall.function.name);
-			const needsApproval =
-				!validationFailed &&
-				(await resolveToolApproval(
-					toolCall.function.name,
-					toolEntry,
-					toolCall.function.arguments,
-					{
-						// Prefer the live ref so a mode switch made while this turn's
-						// tools are still executing takes effect on the next call.
-						mode: developmentModeRef?.current ?? developmentMode,
-						// The top-level alwaysAllow list applies in interactive
-						// sessions too; plan mode stays safe because a call to a tool
-						// its mode excludes is refused before it gets here.
-						alwaysAllow: getAppConfig().alwaysAllow ?? [],
-					},
-				));
+			const needsApproval = await resolveToolApproval(
+				toolCall.function.name,
+				toolEntry,
+				toolCall.function.arguments,
+				{
+					// Prefer the live ref so a mode switch made while this turn's
+					// tools are still executing takes effect on the next call.
+					mode: developmentModeRef?.current ?? developmentMode,
+					// The top-level alwaysAllow list applies in interactive
+					// sessions too; plan mode stays safe because a call to a tool
+					// its mode excludes is refused before it gets here.
+					alwaysAllow: getAppConfig().alwaysAllow ?? [],
+				},
+			);
 
 			if (needsApproval) {
 				const vote = await consultPluginPermission(
@@ -1101,8 +1091,6 @@ export const processAssistantResponse = async (
 					signal: controller.signal,
 					executionContext: {sessionId, workingDirectory},
 					beforeExecute: async toolCall => {
-						if (toolCall.function.name === '__xml_validation_error__')
-							return true;
 						// A mode switch since this batch was classified can hide the
 						// tool; alwaysAllow must not run it under the new mode.
 						const notOffered = notOfferedReason(toolCall);

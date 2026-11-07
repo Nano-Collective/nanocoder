@@ -16,12 +16,20 @@ import {
 import {stringReplaceDisplayPath} from './string-replace-preview.js';
 import {stringReplaceTool} from './string-replace.js';
 import {clearReadTracker, markFileSeen} from '../../utils/read-tracker.js';
+import {
+	resetFirewallConfig,
+	setFirewallConfig,
+} from '../../firewall/mutation-firewall.js';
 import {readFileTool} from '../read-file.js';
 import {buildMinimalPdf} from '../../test-utils/minimal-pdf.js';
 
 // ============================================================================
 // Test Helpers
 // ============================================================================
+
+// biome-ignore lint/suspicious/noControlCharactersInRegex: stripping terminal styling before text-only assertions.
+const ANSI_RE = /\x1b\[[0-9;]*m/g;
+const stripAnsi = (value: string) => value.replace(ANSI_RE, '');
 
 console.log(`\nstring-replace.spec.tsx – ${React.version}`);
 
@@ -48,6 +56,7 @@ test.beforeEach(async () => {
 	// Read-before-edit state is process-global; reset it between serial tests
 	// so a file "seen" by one test can't authorize an edit in another.
 	clearReadTracker();
+	resetFirewallConfig();
 });
 
 // Clean up temporary directory after each test
@@ -1454,5 +1463,121 @@ test('string_replace: formatter does not render description when omitted', async
 	const output = lastFrame();
 	t.truthy(output);
 	t.notRegex(output!, /Description:/);
+});
+
+
+// ============================================================================
+// CRLF files (#1930)
+// ============================================================================
+
+test('string_replace: multi-line LF edit matches a CRLF file', async t => {
+	const filePath = await createTestFile('a.txt', 'one\r\ntwo\r\nthree\r\n');
+
+	const result = await executeStringReplace({
+		path: filePath,
+		old_str: 'one\ntwo',
+		new_str: 'ONE\nTWO',
+	});
+
+	t.is(await readFile(filePath, 'utf-8'), 'ONE\r\nTWO\r\nthree\r\n');
+	t.true(result.includes('Successfully replaced content at lines 1-2'));
+});
+
+test('string_replace: added lines in a CRLF file keep CRLF', async t => {
+	const filePath = await createTestFile('b.txt', 'one\r\ntwo\r\nthree\r\n');
+
+	await executeStringReplace({
+		path: filePath,
+		old_str: 'two',
+		new_str: 'TWO\nTWO-b',
+	});
+
+	t.is(await readFile(filePath, 'utf-8'), 'one\r\nTWO\r\nTWO-b\r\nthree\r\n');
+});
+
+test('string_replace validator: accepts an LF edit for a CRLF file', async t => {
+	await createTestFile('test.txt', 'one\r\ntwo\r\nthree\r\n');
+
+	if (!stringReplaceTool.validator) {
+		t.fail('Validator not defined');
+		return;
+	}
+
+	const originalCwd = process.cwd();
+	try {
+		process.chdir(testDir);
+		markFileSeen('test.txt');
+
+		const result = await stringReplaceTool.validator({
+			path: 'test.txt',
+			old_str: 'one\ntwo',
+			new_str: 'ONE\nTWO',
+		});
+
+		t.true(result.valid);
+	} finally {
+		process.chdir(originalCwd);
+	}
+});
+
+test('string_replace formatter: previews an LF edit for a CRLF file', async t => {
+	const filePath = await createTestFile('test.ts', 'one\r\ntwo\r\nthree\r\n');
+
+	if (!stringReplaceTool.formatter) {
+		t.fail('Formatter not defined');
+		return;
+	}
+
+	const preview = await stringReplaceTool.formatter({
+		path: filePath,
+		old_str: 'one\ntwo',
+		new_str: 'ONE\nTWO',
+	});
+	const {lastFrame} = render(<TestThemeProvider>{preview}</TestThemeProvider>);
+
+	t.false(lastFrame()?.includes('Content not found') ?? true);
+	t.true(lastFrame()?.includes('ONE') ?? false);
+});
+
+test('string_replace formatter: result shows the edit line in a mixed-ending file', async t => {
+	const filePath = await createTestFile(
+		'mixed.txt',
+		'a\r\nb\r\nc\r\nd\r\nx\ny\n',
+	);
+	const args = {path: filePath, old_str: 'x\ny', new_str: 'X\nY'};
+
+	const result = await executeStringReplace(args);
+	t.is(await readFile(filePath, 'utf-8'), 'a\r\nb\r\nc\r\nd\r\nX\nY\n');
+
+	if (!stringReplaceTool.formatter) {
+		t.fail('Formatter not defined');
+		return;
+	}
+	const element = await stringReplaceTool.formatter(args, result);
+	const {lastFrame} = render(<TestThemeProvider>{element}</TestThemeProvider>);
+	t.true(stripAnsi(lastFrame() ?? '').includes('Location: lines 5-6'));
+});
+
+test('string_replace: throws when mutation firewall blocks test deletion', async t => {
+	setFirewallConfig({mode: 'strict', enabled: true});
+	const filePath = await createTestFile(
+		'feature.spec.ts',
+		"test('feature A', () => {});\ntest('feature B', () => {});\n",
+	);
+	markFileSeen(filePath);
+
+	await t.throwsAsync(
+		async () => {
+			await executeStringReplace({
+				path: filePath,
+				old_str: "test('feature B', () => {});\n",
+				new_str: '',
+			});
+		},
+		{message: /\[Mutation Firewall\] Blocked mutation/},
+	);
+
+	const content = await readFile(filePath, 'utf-8');
+	t.true(content.includes('feature B'));
 });
 
