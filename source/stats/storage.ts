@@ -7,7 +7,6 @@
  */
 
 import * as fs from 'node:fs';
-import {readFileSync} from 'node:fs';
 import * as path from 'node:path';
 import {getAppDataPath} from '@/config/paths';
 import {formatError} from '@/utils/error-formatter';
@@ -216,7 +215,7 @@ function normalizeLedger(raw: unknown): StatsLedger {
 
 function readFileIfExists(filePath: string): string | null {
 	try {
-		return readFileSync(filePath, 'utf-8');
+		return fs.readFileSync(filePath, 'utf-8');
 	} catch (error) {
 		if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
 			return null;

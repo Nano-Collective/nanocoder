@@ -506,7 +506,6 @@ test('readStatsLedger reads without probing existsSync on the stats files', t =>
 		path.dirname(canonicalPath),
 		LEGACY_STATS_FILE_NAME,
 	);
-	
 	const cjsFs = createRequire(import.meta.url)('node:fs') as typeof fs;
 	const originalExistsSync = cjsFs.existsSync;
 	let probes = 0;
@@ -522,8 +521,6 @@ test('readStatsLedger reads without probing existsSync on the stats files', t =>
 	try {
 
 		readStatsLedger();
-
-		
 		fs.mkdirSync(path.dirname(legacyPath), {recursive: true});
 		const legacy = createEmptyLedger(1_700_000_000_000);
 		fs.writeFileSync(legacyPath, JSON.stringify(legacy), 'utf8');
