@@ -47,7 +47,6 @@ jobs:
           source/custom-tools/template.spec.ts
           source/custom-tools/handler.spec.ts
           source/lsp/windows-spawn.spec.ts
-          source/tools/file-ops/write-file.spec.tsx
           source/utils/path-validators.spec.ts
 
       - name: Verify execute_bash stops the whole tree

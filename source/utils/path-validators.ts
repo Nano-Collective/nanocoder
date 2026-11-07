@@ -107,13 +107,20 @@ export function validateEditableEncoding(
 
 /**
  * Validates a source + destination path pair (copy/move): checks format and
- * project boundary for both. The system-directory write guard applies only to
- * the destination — the source is read, not written, so copying from a system
- * directory is not blocked by this guard (containment still applies).
+ * project boundary for both. The system-directory write guard applies to the
+ * destination for all operations, and to the source when the operation is a
+ * move (since rename() removes the file from its directory, making the
+ * source directory a write target). For copy operations the source is read
+ * only and is not guarded.
+ *
+ * @param source - The source file path.
+ * @param destination - The destination file path.
+ * @param isMove - True when the operation is a move (source is also a write target).
  */
 export function validatePathPair(
 	source: string,
 	destination: string,
+	isMove: boolean = false,
 ): ValidationResult {
 	const cwd = getSessionCwd();
 	const root = getProjectRoot();
@@ -147,6 +154,15 @@ export function validatePathPair(
 		return {
 			valid: false,
 			error: `⚒ Cannot write files to system directory: "${destination}"`,
+		};
+	}
+
+	// When moving, the source directory is also a write target (rename removes
+	// the file from its original location), so guard it too.
+	if (isMove && isInSystemDirectory(resolveFilePath(source, cwd, root))) {
+		return {
+			valid: false,
+			error: `⚒ Cannot move file from system directory: "${source}"`,
 		};
 	}
 

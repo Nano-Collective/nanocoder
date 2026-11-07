@@ -194,7 +194,53 @@ test.serial(
 			resetSessionCwd();
 		}
 	},
-);
+)
+
+test.serial(
+	'validatePathPair rejects a move source from a system directory under a filesystem root',
+	t => {
+		if (process.platform === 'win32') {
+			t.pass('POSIX-only system directories');
+			return;
+		}
+
+		const fsRoot = parsePath(process.cwd()).root;
+		setProjectRoot(fsRoot);
+		setSessionCwd(fsRoot);
+		try {
+			// Moving from a system directory is a write to that directory,
+			// so it must be rejected.
+			const result = validatePathPair('/etc/passwd', '/tmp/moved.txt', true);
+			t.false(result.valid);
+			if (!result.valid) {
+				t.true(result.error.includes('system directory'));
+			}
+		} finally {
+			resetSessionCwd();
+		}
+	},
+)
+
+test.serial(
+	'validatePathPair allows a copy source from a system directory under a filesystem root',
+	t => {
+		if (process.platform === 'win32') {
+			t.pass('POSIX-only system directories');
+			return;
+		}
+
+		const fsRoot = parsePath(process.cwd()).root;
+		setProjectRoot(fsRoot);
+		setSessionCwd(fsRoot);
+		try {
+			// Copy only reads from the source; the destination is what matters.
+			const result = validatePathPair('/etc/passwd', '/tmp/copied.txt', false);
+			t.deepEqual(result, {valid: true});
+		} finally {
+			resetSessionCwd();
+		}
+	},
+)
 
 test.serial(
 	'validatePath rejects a Windows system directory when the project root is a drive root',
