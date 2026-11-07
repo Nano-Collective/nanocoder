@@ -149,7 +149,7 @@ const managerWith = (knownTools: string[]) =>
 		hasTool: (name: string) => knownTools.includes(name),
 	}) as unknown as ToolManager;
 
-test('partitionUnknownToolCalls - treats the XML validation marker as unknown', t => {
+test('partitionUnknownToolCalls - a call literally named __xml_validation_error__ is an ordinary unknown tool', t => {
 	const {validToolCalls, rejectedToolCalls, errorResults} =
 		partitionUnknownToolCalls(
 			[
@@ -157,7 +157,7 @@ test('partitionUnknownToolCalls - treats the XML validation marker as unknown', 
 				{id: 'call_2', function: {name: '__xml_validation_error__', arguments: {}}},
 				{id: 'call_3', function: {name: 'ghost_tool', arguments: {}}},
 			],
-			managerWith(['known_tool', '__xml_validation_error__']),
+			managerWith(['known_tool']),
 		);
 
 	t.deepEqual(
@@ -172,6 +172,19 @@ test('partitionUnknownToolCalls - treats the XML validation marker as unknown', 
 		errorResults.map(r => r.content),
 		['Unknown tool: __xml_validation_error__', 'Unknown tool: ghost_tool'],
 	);
+});
+
+test('partitionUnknownToolCalls - a tool registered as __xml_validation_error__ is not forced to unknown', t => {
+	const {validToolCalls, rejectedToolCalls} = partitionUnknownToolCalls(
+		[{id: 'call_1', function: {name: '__xml_validation_error__', arguments: {}}}],
+		managerWith(['__xml_validation_error__']),
+	);
+
+	t.deepEqual(
+		validToolCalls.map(c => c.id),
+		['call_1'],
+	);
+	t.deepEqual(rejectedToolCalls, []);
 });
 
 test('partitionUnknownToolCalls - refuses a registered tool the model was not offered', t => {

@@ -33,6 +33,7 @@ import {
 import {getThemeColors} from '@/config/themes';
 import {PrivacyContext} from '@/context/privacy-context';
 import {useChatHandler} from '@/hooks/chat-handler';
+import {loadBannerModules} from '@/hooks/use-banner-modules';
 import {useAppHandlers} from '@/hooks/useAppHandlers';
 import {useAppInitialization} from '@/hooks/useAppInitialization';
 import {useAppState} from '@/hooks/useAppState';
@@ -655,6 +656,33 @@ export default function App({
 		developmentMode: initialDevelopmentMode,
 	});
 
+	// Prepare the banner before committing it to Ink's <Static>.
+	// Static items cannot repaint after their first render.
+	const shouldShowWelcome = showWelcome && !nonInteractiveMode;
+	const [welcomeModulesSettled, setWelcomeModulesSettled] =
+		React.useState(false);
+	const welcomeModulesPending = shouldShowWelcome && !welcomeModulesSettled;
+
+	React.useEffect(() => {
+		if (!shouldShowWelcome) return;
+
+		let active = true;
+
+		void loadBannerModules().then(
+			() => {
+				if (active) setWelcomeModulesSettled(true);
+			},
+			() => {
+				// On failure, allow the plain-text fallback to render.
+				if (active) setWelcomeModulesSettled(true);
+			},
+		);
+
+		return () => {
+			active = false;
+		};
+	}, [shouldShowWelcome]);
+
 	// Memoize static components. We pin the run-mode header to the
 	// initial development mode so it never changes during the run — the
 	// boot line represents what the agent *started* under, not a live
@@ -683,8 +711,12 @@ export default function App({
 	}
 	const {startChat} = appState;
 	const staticComponents = React.useMemo(() => {
+		if (welcomeModulesPending) {
+			return [];
+		}
+
 		return createStaticComponents({
-			shouldShowWelcome: showWelcome && !nonInteractiveMode,
+			shouldShowWelcome,
 			currentProvider: startChat ? (bootIdentity.current?.provider ?? '') : '',
 			currentModel: startChat ? (bootIdentity.current?.model ?? '') : '',
 			nonInteractiveMode,
@@ -692,7 +724,8 @@ export default function App({
 			availableRows: welcomeRows,
 		});
 	}, [
-		showWelcome,
+		shouldShowWelcome,
+		welcomeModulesPending,
 		nonInteractiveMode,
 		initialDevelopmentMode,
 		welcomeRows,
@@ -857,6 +890,8 @@ export default function App({
 							appHandlers={appHandlers}
 							vscodeServer={vscodeServer}
 							staticComponents={staticComponents}
+							welcomeModulesPending={welcomeModulesPending}
+							hasConversationMessages={appState.messages.length > 0}
 							clearKey={conversationId}
 							liveComponent={liveComponent}
 							pendingSubagentApproval={pendingSubagentApproval}
