@@ -1,6 +1,4 @@
 import {Box, Text} from 'ink';
-import BigText from 'ink-big-text';
-import Gradient from 'ink-gradient';
 import {memo, useState, useSyncExternalStore} from 'react';
 import stringWidth from 'string-width';
 import {
@@ -8,6 +6,7 @@ import {
 	getPreferencesVersion,
 	subscribeToPreferences,
 } from '@/config/preferences';
+import {useBannerModules} from '@/hooks/use-banner-modules';
 import {useResponsiveTerminal, useTerminalRows} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {
@@ -151,6 +150,11 @@ export default memo(function WelcomeMessage({
 		}
 	}
 
+	const bannerModules = useBannerModules(logoText !== null);
+
+	const StyledBigText = bannerModules?.BigText;
+	const StyledGradient = bannerModules?.Gradient;
+
 	// Each menu row is a single line this wide: label, gap, key. A menu is only
 	// offered when that line fits the width too, or its rows wrap apart.
 	const menuWidth = (items: Array<[string, string]>) =>
@@ -219,9 +223,15 @@ export default memo(function WelcomeMessage({
 		>
 			{logoText && (
 				<Box justifyContent={justify} width={termW}>
-					<Gradient colors={[colors.primary, colors.tool]}>
-						<BigText text={logoText} font={logoFont} />
-					</Gradient>
+					{StyledGradient && StyledBigText ? (
+						<StyledGradient colors={[colors.primary, colors.tool]}>
+							<StyledBigText text={logoText} font={logoFont} />
+						</StyledGradient>
+					) : (
+						<Text bold color={colors.primary}>
+							{logoText}
+						</Text>
+					)}
 				</Box>
 			)}
 
