@@ -1,9 +1,8 @@
 import {StdioClientTransport} from '@modelcontextprotocol/sdk/client/stdio.js';
 import {StreamableHTTPClientTransport} from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import {WebSocketClientTransport} from '@modelcontextprotocol/sdk/client/websocket.js';
-import {execFileSync} from 'child_process';
-import {accessSync, constants as fsConstants} from 'fs';
 import type {MCPServer, MCPTransportType} from '../types/mcp.js';
+import {commandExists} from '../utils/command-exists.js';
 
 /**
  * Installation instructions for common MCP server dependencies
@@ -35,33 +34,6 @@ Or use a version manager like pyenv.`,
 Install Python from: https://python.org/downloads/
 Or use a version manager like pyenv.`,
 };
-
-/**
- * Checks if a command exists in the system PATH or as an executable path.
- * Uses execFileSync with separate arguments to prevent shell injection.
- * Handles both PATH lookups and direct path references (./bin/cmd, /usr/bin/cmd).
- */
-function commandExists(command: string): boolean {
-	// Check if command is a path (contains path separators)
-	if (command.includes('/') || command.includes('\\')) {
-		try {
-			// Check if file exists and is executable
-			accessSync(command, fsConstants.X_OK);
-			return true;
-		} catch {
-			return false;
-		}
-	}
-
-	// PATH lookup using which/where
-	try {
-		const checkCmd = process.platform === 'win32' ? 'where' : 'which';
-		execFileSync(checkCmd, [command], {stdio: 'ignore'});
-		return true;
-	} catch {
-		return false;
-	}
-}
 
 /**
  * Gets installation hint for a missing command
