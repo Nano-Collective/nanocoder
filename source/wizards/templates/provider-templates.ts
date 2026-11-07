@@ -459,6 +459,13 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 		apiKeyPrompt: 'API Key (from https://platform.opper.ai)',
 		modelDefault: 'claude-sonnet-4-6',
 	}),
+	apiKeyTemplate({
+		id: 'standardcompute',
+		name: 'Standard Compute',
+		baseUrl: 'https://api.stdcmpt.com/v1',
+		apiKeyPrompt: 'API Key (from https://standardcompute.com/dashboard/api-keys)',
+		modelDefault: 'standardcompute',
+	}),
 	{
 		id: 'openai',
 		name: 'OpenAI',
