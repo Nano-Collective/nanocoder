@@ -39,7 +39,7 @@ function ipv4InCidr(ip: number, base: number, prefix: number): boolean {
 	return (ip & mask) === (base & mask);
 }
 
-function isPrivateOrLocalIpv4(ip: number): boolean {
+function isNonPublicIpv4(ip: number): boolean {
 	return (
 		ipv4InCidr(ip, 0x00000000, 8) || // 0.0.0.0/8
 		ipv4InCidr(ip, 0x0a000000, 8) || // 10.0.0.0/8
@@ -47,18 +47,55 @@ function isPrivateOrLocalIpv4(ip: number): boolean {
 		ipv4InCidr(ip, 0x7f000000, 8) || // 127.0.0.0/8
 		ipv4InCidr(ip, 0xa9fe0000, 16) || // 169.254.0.0/16
 		ipv4InCidr(ip, 0xac100000, 12) || // 172.16.0.0/12
-		ipv4InCidr(ip, 0xc0a80000, 16) // 192.168.0.0/16
+		ipv4InCidr(ip, 0xc0000000, 24) || // 192.0.0.0/24 IETF protocol assignments
+		ipv4InCidr(ip, 0xc0a80000, 16) || // 192.168.0.0/16
+		ipv4InCidr(ip, 0xc6120000, 15) || // 198.18.0.0/15 benchmarking
+		ipv4InCidr(ip, 0xe0000000, 4) || // 224.0.0.0/4 multicast
+		ipv4InCidr(ip, 0xf0000000, 4) // 240.0.0.0/4 reserved, incl. 255.255.255.255
 	);
 }
 
-function ipv4FromMappedIpv6(host: string): number | null {
-	const dotted = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/i.exec(host);
-	if (dotted?.[1]) return parseIpv4(dotted[1]);
-	const hex = /^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/i.exec(host);
-	if (!hex?.[1] || !hex[2]) return null;
-	const hi = Number.parseInt(hex[1], 16);
-	const lo = Number.parseInt(hex[2], 16);
-	return ((hi << 16) | lo) >>> 0;
+/** The eight 16-bit groups of an IPv6 address, or null if `host` is not one. */
+function parseIpv6(host: string): number[] | null {
+	// Resolver output can carry a zone (`fe80::1%eth0`); URL hostnames cannot.
+	let text = host.replace(/%.*$/, '');
+	if (isIP(text) !== 6) return null;
+	// A dotted IPv4 tail (`::ffff:127.0.0.1`) stands for the last two groups.
+	const dotted = /(\d+\.\d+\.\d+\.\d+)$/.exec(text);
+	if (dotted?.[1]) {
+		const v4 = parseIpv4(dotted[1]);
+		if (v4 === null) return null;
+		text = `${text.slice(0, dotted.index)}${(v4 >>> 16).toString(16)}:${(v4 & 0xffff).toString(16)}`;
+	}
+	const [head = '', tail] = text.split('::');
+	const left = head ? head.split(':') : [];
+	const right = tail ? tail.split(':') : [];
+	const zeros =
+		tail === undefined ? [] : Array(8 - left.length - right.length).fill('0');
+	return [...left, ...zeros, ...right].map(group => Number.parseInt(group, 16));
+}
+
+/**
+ * The IPv4 address an IPv6 address carries, for the formats that embed one. A
+ * connection to them can reach that IPv4 host through a NAT64 gateway, a 6to4
+ * relay, or a stack that still honours IPv4-compatible addresses (#1942).
+ */
+function ipv4FromIpv6(groups: number[]): number | null {
+	const [a, b, c, d, e, f, g, h] = groups;
+	const low32 = ((g << 16) | h) >>> 0;
+	if (a === 0 && b === 0 && c === 0 && d === 0) {
+		// ::/96 IPv4-compatible and ::ffff:0:0/96 IPv4-mapped
+		if (e === 0 && (f === 0 || f === 0xffff)) return low32;
+		// ::ffff:0:0:0/96 IPv4-translated
+		if (e === 0xffff && f === 0) return low32;
+	}
+	// 64:ff9b::/96 NAT64 well-known prefix only; other RFC 6052 prefixes are not decoded
+	if (a === 0x64 && b === 0xff9b && c === 0 && d === 0 && e === 0 && f === 0) {
+		return low32;
+	}
+	// 2002::/16 6to4: the IPv4 address follows the prefix
+	if (a === 0x2002) return ((b << 16) | c) >>> 0;
+	return null;
 }
 
 function isBlockedIpv6(host: string): boolean {
@@ -88,8 +125,9 @@ export function isBlockedFetchHost(hostname: string): boolean {
 	if (host.endsWith('.localhost')) return true;
 
 	const bare = host.replace(/^\[|\]$/g, '');
-	const v4 = parseIpv4(bare) ?? ipv4FromMappedIpv6(bare);
-	if (v4 !== null) return isPrivateOrLocalIpv4(v4);
+	const v6 = parseIpv6(bare);
+	const v4 = parseIpv4(bare) ?? (v6 ? ipv4FromIpv6(v6) : null);
+	if (v4 !== null) return isNonPublicIpv4(v4);
 	return isBlockedIpv6(bare);
 }
 
