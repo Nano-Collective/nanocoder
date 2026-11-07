@@ -57,8 +57,8 @@ test('parseContextLimit - large value with k suffix', t => {
 	t.is(parseContextLimit('256k'), 256000);
 });
 
-test('parseContextLimit - decimal without k suffix', t => {
-	t.is(parseContextLimit('1024.5'), null);
+test('parseContextLimit - decimal without suffix rounds to whole tokens', t => {
+	t.is(parseContextLimit('1024.5'), 1025);
 });
 
 test('parseContextLimit - rejects trailing junk after k suffix', t => {
@@ -114,9 +114,9 @@ test('parseContextLimit - smallest suffixed values that round to a positive limi
 	t.is(parseContextLimit('1.5k'), 1500);
 });
 
-test('parseContextLimit - fractional values require a suffix', t => {
-	t.is(parseContextLimit('1.5'), null);
-	t.is(parseContextLimit('0.5'), null);
+test('parseContextLimit - fractional values round without a suffix', t => {
+	t.is(parseContextLimit('1.5'), 2);
+	t.is(parseContextLimit('0.5'), 1);
 	t.is(parseContextLimit('1.5k'), 1500);
 	t.is(parseContextLimit('1.5m'), 1500000);
 });

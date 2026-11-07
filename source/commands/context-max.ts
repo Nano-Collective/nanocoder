@@ -8,7 +8,7 @@ import {createStubCommand} from '@/commands/create-stub-command';
  * command handler interface.
  *
  * Usage:
- * /context-max <number>   - Set context limit (supports k/K and m/M suffixes; fractions require a suffix)
+ * /context-max <number>   - Set context limit (supports positive integer or decimal values, k/K and m/M suffixes)
  * /context-max             - Show current effective context limit
  * /context-max --reset     - Clear session override
  */

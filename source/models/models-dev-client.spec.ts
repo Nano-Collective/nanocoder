@@ -362,6 +362,20 @@ test('getModelContextLimit - env variable accepts m suffix', async t => {
 	}
 });
 
+test('getModelContextLimit - env variable accepts k suffix', async t => {
+	const saved = process.env.NANOCODER_CONTEXT_LIMIT;
+	process.env.NANOCODER_CONTEXT_LIMIT = '128k';
+	try {
+		const limit = await getModelContextLimit('unknown-model-12345');
+		t.is(limit, 128000);
+	} finally {
+		delete process.env.NANOCODER_CONTEXT_LIMIT;
+		if (saved !== undefined) {
+			process.env.NANOCODER_CONTEXT_LIMIT = saved;
+		}
+	}
+});
+
 test('getModelContextLimit - session override takes priority over env variable', async t => {
 	process.env.NANOCODER_CONTEXT_LIMIT = '32000';
 	setSessionContextLimit(8192);

@@ -14,18 +14,10 @@ export function parseContextLimit(value: string): number | null {
 	}
 
 	const [, integerPart, fractionalPart, suffix] = match;
-	if (fractionalPart !== undefined && suffix === undefined) {
-		return null;
-	}
-
 	const parsed = Number(
 		`${integerPart}${fractionalPart ? `.${fractionalPart}` : ''}`,
 	);
 	if (!Number.isFinite(parsed)) {
-		return null;
-	}
-
-	if (suffix === undefined && !Number.isSafeInteger(parsed)) {
 		return null;
 	}
 
