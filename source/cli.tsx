@@ -180,10 +180,19 @@ Examples:
 		process.exit(0);
 	}
 
-	const [{parseInitArguments}, initializer] = await Promise.all([
-		import('@/init/init-args'),
-		import('@/init/initializer'),
-	]);
+	const [{validateInitArgs}, {parseInitArguments}, initializer] =
+		await Promise.all([
+			import('./cli-args.js'),
+			import('@/init/init-args'),
+			import('@/init/initializer'),
+		]);
+	// This fast path runs before the shared top-level scan in this file, so
+	// `nanocoder init --bogus` must be rejected here instead of being ignored.
+	const initArgsError = validateInitArgs(args);
+	if (initArgsError) {
+		console.error(initArgsError);
+		process.exit(1);
+	}
 	try {
 		const options = parseInitArguments(args.slice(1));
 		const result = initializer.initializeProject({
@@ -383,17 +392,28 @@ async function main(): Promise<void> {
 	const portArgIndex = args.findIndex(
 		arg => arg === '--vscode-port' || arg.startsWith('--vscode-port='),
 	);
-	const portValue =
-		portArgIndex === -1
-			? undefined
-			: args[portArgIndex].startsWith('--vscode-port=')
-				? args[portArgIndex].slice('--vscode-port='.length)
-				: args[portArgIndex + 1];
-	if (portValue) {
-		const port = parseInt(portValue, 10);
-		if (!isNaN(port) && port > 0 && port < 65536) {
-			vscodePort = port;
+	if (portArgIndex !== -1) {
+		const value = args[portArgIndex].startsWith('--vscode-port=')
+			? args[portArgIndex].slice('--vscode-port='.length)
+			: args[portArgIndex + 1];
+		// The flag is present, so a value is required. An explicitly empty or
+		// missing value must fail instead of quietly asking for a random port.
+		if (value === undefined || value === '') {
+			console.error(
+				'--vscode-port requires a value. Use an integer between 1 and 65535.',
+			);
+			process.exit(1);
 		}
+		// Strict integer: a numeric prefix like `8080abc` or an out-of-range
+		// value must be reported, not silently rounded down.
+		const port = /^\d+$/.test(value) ? Number(value) : Number.NaN;
+		if (!Number.isInteger(port) || port < 1 || port > 65535) {
+			console.error(
+				`Invalid --vscode-port value: "${value}". Use an integer between 1 and 65535.`,
+			);
+			process.exit(1);
+		}
+		vscodePort = port;
 	}
 
 	// Extract --provider if specified — validate against allowlist pattern
