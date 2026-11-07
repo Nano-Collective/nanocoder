@@ -51,6 +51,19 @@ test('does not validate free-form prompt tokens after run', t => {
 test('accepts review targets and resume session identifiers', t => {
 	t.is(validateCliArgs(['review', 'main']), undefined);
 	t.is(validateCliArgs(['--resume', 'last']), undefined);
+	t.is(validateCliArgs(['review', '--plain', 'main']), undefined);
+});
+
+test('review rejects unknown options', t => {
+	t.is(
+		validateCliArgs(['review', '--bogus', 'main']),
+		'Unknown option "--bogus". Run "nanocoder --help" to see available options.',
+	);
+});
+
+test('a leading-dash number is read as the value of the preceding option', t => {
+	t.is(validateCliArgs(['--context-max', '-5']), undefined);
+	t.is(validateCliArgs(['--vscode-port=-1']), undefined);
 });
 
 test('suggests the login subcommand for codex and copilot', t => {

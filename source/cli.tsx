@@ -390,9 +390,14 @@ async function main(): Promise<void> {
 				? args[portArgIndex].slice('--vscode-port='.length)
 				: args[portArgIndex + 1];
 	if (portValue) {
-		const port = parseInt(portValue, 10);
-		if (!isNaN(port) && port > 0 && port < 65536) {
+		const port = /^\d+$/.test(portValue) ? Number(portValue) : NaN;
+		if (port >= 1 && port <= 65535) {
 			vscodePort = port;
+		} else {
+			console.error(
+				`Invalid --vscode-port value: "${portValue}". Use a port number from 1 to 65535.`,
+			);
+			process.exit(1);
 		}
 	}
 
