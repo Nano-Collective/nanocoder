@@ -482,6 +482,24 @@ for (const command of [
 	'rm -rf ~',
 	'rm -rf ~/',
 	'rm -rf ~/*',
+	// `~/..` is the directory that holds every user's home, not a project
+	// directory, and `..` can be stacked past it. The `$HOME` spellings and
+	// the real home path are the same directory written another way.
+	'rm -rf ~/..',
+	'rm -rf ~/../..',
+	'rm -rf $HOME/..',
+	'rm -rf ${HOME}/..',
+	'rm -rf "$HOME/.."',
+	'rm -rf $HOME/../..',
+	'rm -rf /home/user/..',
+	'rm -rf /home/user/../..',
+	'rm -rf /Users/alice/..',
+	// The parents themselves hold every account, so naming them directly is
+	// just as destructive.
+	'rm -rf /home',
+	'rm -rf /home/*',
+	'rm -rf /Users',
+	'rm -rf /Users/*',
 	'rm -rf $HOME',
 	'rm -rf "$HOME"',
 	'rm -rf "${HOME}/"',
@@ -501,12 +519,17 @@ for (const command of [
 // The guard blocks the target, not every mention of `rm`: ordinary cleanups,
 // plain deletes, and recursive deletes below the home directory stay allowed.
 for (const command of [
+	'rm -rf /tmp',
 	'rm -rf /tmp/nanocoder-build',
 	'rm -rf /tmp/*',
 	'rm -rf ./dist',
 	'rm -rf node_modules',
+	'rm -rf ~/project',
 	'rm -rf ~/project/node_modules',
+	'rm -rf $HOME/project',
 	'rm -rf $HOME/project/.cache',
+	'rm -rf /home/user/project',
+	'rm -rf /Users/alice/project',
 	'rm -rf "/tmp/build dir"',
 	'rm -rf .',
 	'rm -rf ./',
