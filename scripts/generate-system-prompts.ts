@@ -6,23 +6,24 @@
  * Uses the real tool definitions and formatters — never goes stale.
  */
 
-import {existsSync, mkdirSync, writeFileSync} from 'fs';
+import {existsSync, mkdirSync, readdirSync, rmSync, writeFileSync} from 'fs';
 import {dirname, join} from 'path';
 import {fileURLToPath} from 'url';
 import {formatToolsForPrompt} from '@/ai-sdk-client/tools/tool-prompt-formatter';
 import {getAllToolExports} from '@/tools/index';
+import {MODE_EXCLUDED_TOOLS} from '@/tools/tool-manager';
 import {getToolsForProfile} from '@/tools/tool-profiles';
 import {ToolRegistry} from '@/tools/tool-registry';
 import type {ToolProfile, TuneConfig} from '@/types/config';
 import type {AISDKCoreTool, DevelopmentMode} from '@/types/core';
-import {buildSystemPrompt} from '@/utils/prompt-builder';
+import {buildSystemPrompt, loadSection} from '@/utils/prompt-builder';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const outputDir = join(__dirname, '../.generated-prompts');
 
-// Build a real ToolRegistry from actual tool exports
-const registry = ToolRegistry.fromToolExports(getAllToolExports());
+// Built inside main() so setup failures hit the error handler too
+let registry: ToolRegistry;
 
 interface Variant {
 	name: string;
@@ -30,33 +31,6 @@ interface Variant {
 	profile: ToolProfile;
 	toolsDisabled?: boolean;
 }
-
-// Mode exclusions (mirrored from tool-manager.ts)
-const MODE_EXCLUDED_TOOLS: Record<DevelopmentMode, string[]> = {
-	normal: [],
-	'auto-accept': [],
-	plan: [
-		'write_file',
-		'string_replace',
-		'delete_file',
-		'move_file',
-		'copy_file',
-		'create_directory',
-		'execute_bash',
-		'create_task',
-		'update_task',
-		'delete_task',
-		'list_tasks',
-		'git_add',
-		'git_commit',
-		'git_push',
-		'git_pull',
-		'git_branch',
-		'git_stash',
-		'git_reset',
-	],
-	scheduler: ['ask_user'],
-};
 
 function getAvailableNames(
 	mode: DevelopmentMode,
@@ -69,6 +43,16 @@ function getAvailableNames(
 		if (profileTools.length > 0) {
 			names = profileTools;
 		}
+	}
+
+	// Mirror ToolManager.getAvailableToolNames: plan mode keeps write_plan
+	// even when a slim profile filtered it out.
+	if (
+		mode === 'plan' &&
+		registry.hasTool('write_plan') &&
+		!names.includes('write_plan')
+	) {
+		names = [...names, 'write_plan'];
 	}
 
 	const excluded = MODE_EXCLUDED_TOOLS[mode];
@@ -97,7 +81,7 @@ function buildFullPrompt(v: Variant): string {
 
 	// For XML fallback variants, append real tool definitions
 	if (v.toolsDisabled) {
-		const nativeTools = registry.getNativeToolsWithoutExecute();
+		const nativeTools = registry.getNativeTools();
 		const nameSet = new Set(availableNames);
 		const filteredTools: Record<string, AISDKCoreTool> = {};
 		for (const [name, tool] of Object.entries(nativeTools)) {
@@ -116,143 +100,126 @@ function buildFullPrompt(v: Variant): string {
 	return prompt;
 }
 
-// Define variants: 3 profiles × 4 modes × 2 tool modes = 24 variants
-const variants: Variant[] = [
-	// Native tool calling
-	{name: 'full-normal', mode: 'normal', profile: 'full'},
-	{name: 'full-auto-accept', mode: 'auto-accept', profile: 'full'},
-	{name: 'full-plan', mode: 'plan', profile: 'full'},
-	{name: 'full-scheduler', mode: 'scheduler', profile: 'full'},
-	{name: 'minimal-normal', mode: 'normal', profile: 'minimal'},
-	{name: 'minimal-auto-accept', mode: 'auto-accept', profile: 'minimal'},
-	{name: 'minimal-plan', mode: 'plan', profile: 'minimal'},
-	{name: 'minimal-scheduler', mode: 'scheduler', profile: 'minimal'},
-	{name: 'nano-normal', mode: 'normal', profile: 'nano'},
-	{name: 'nano-auto-accept', mode: 'auto-accept', profile: 'nano'},
-	{name: 'nano-plan', mode: 'plan', profile: 'nano'},
-	{name: 'nano-scheduler', mode: 'scheduler', profile: 'nano'},
-
-	// XML fallback
-	{
-		name: 'full-normal-xml',
-		mode: 'normal',
-		profile: 'full',
-		toolsDisabled: true,
-	},
-	{
-		name: 'full-auto-accept-xml',
-		mode: 'auto-accept',
-		profile: 'full',
-		toolsDisabled: true,
-	},
-	{name: 'full-plan-xml', mode: 'plan', profile: 'full', toolsDisabled: true},
-	{
-		name: 'full-scheduler-xml',
-		mode: 'scheduler',
-		profile: 'full',
-		toolsDisabled: true,
-	},
-	{
-		name: 'minimal-normal-xml',
-		mode: 'normal',
-		profile: 'minimal',
-		toolsDisabled: true,
-	},
-	{
-		name: 'minimal-auto-accept-xml',
-		mode: 'auto-accept',
-		profile: 'minimal',
-		toolsDisabled: true,
-	},
-	{
-		name: 'minimal-plan-xml',
-		mode: 'plan',
-		profile: 'minimal',
-		toolsDisabled: true,
-	},
-	{
-		name: 'minimal-scheduler-xml',
-		mode: 'scheduler',
-		profile: 'minimal',
-		toolsDisabled: true,
-	},
-	{
-		name: 'nano-normal-xml',
-		mode: 'normal',
-		profile: 'nano',
-		toolsDisabled: true,
-	},
-	{
-		name: 'nano-auto-accept-xml',
-		mode: 'auto-accept',
-		profile: 'nano',
-		toolsDisabled: true,
-	},
-	{name: 'nano-plan-xml', mode: 'plan', profile: 'nano', toolsDisabled: true},
-	{
-		name: 'nano-scheduler-xml',
-		mode: 'scheduler',
-		profile: 'nano',
-		toolsDisabled: true,
-	},
-];
-
-// Generate
-if (!existsSync(outputDir)) {
-	mkdirSync(outputDir, {recursive: true});
+// Same section name prompt-builder loads for this variant
+function taskApproachSection(v: Variant, names: string[]): string {
+	const nano = v.profile === 'nano';
+	const suffix =
+		v.mode === 'plan' && !names.includes('write_plan')
+			? '-plan-readonly'
+			: `-${v.mode}`;
+	return `task-approach${nano ? '-nano' : ''}${suffix}`;
 }
 
-console.log(`Generating ${variants.length} system prompt variants...\n`);
-
-interface GeneratedPrompt {
-	filename: string;
-	lines: number;
-	words: number;
-	chars: number;
-	label: string;
+function buildVariants(): Variant[] {
+	// 3 profiles × 6 modes × 2 tool modes = 36 variants
+	const modes = Object.keys(MODE_EXCLUDED_TOOLS) as DevelopmentMode[];
+	const profiles: ToolProfile[] = ['full', 'minimal', 'nano'];
+	const variants: Variant[] = [];
+	for (const toolsDisabled of [false, true]) {
+		for (const profile of profiles) {
+			for (const mode of modes) {
+				variants.push({
+					name: `${profile}-${mode}${toolsDisabled ? '-xml' : ''}`,
+					mode,
+					profile,
+					...(toolsDisabled ? {toolsDisabled} : {}),
+				});
+			}
+		}
+	}
+	return variants;
 }
 
-const results: GeneratedPrompt[] = [];
+function main(): void {
+	registry = ToolRegistry.fromToolExports(getAllToolExports());
+	const variants = buildVariants();
 
-for (const v of variants) {
-	const prompt = buildFullPrompt(v);
-	const filename = `${v.name}.md`;
-	writeFileSync(join(outputDir, filename), prompt);
+	// Clear stale output from earlier runs (e.g. removed modes)
+	if (existsSync(outputDir)) {
+		for (const file of readdirSync(outputDir)) {
+			if (file.endsWith('.md')) rmSync(join(outputDir, file));
+		}
+	} else {
+		mkdirSync(outputDir, {recursive: true});
+	}
 
-	results.push({
-		filename,
-		lines: prompt.split('\n').length,
-		words: prompt.split(/\s+/).length,
-		chars: prompt.length,
-		label: [
-			`mode:${v.mode}`,
-			`profile:${v.profile}`,
-			v.toolsDisabled ? 'xml-fallback' : '',
-		]
-			.filter(Boolean)
-			.join(', '),
-	});
+	console.log(`Generating ${variants.length} system prompt variants...\n`);
+
+	interface GeneratedPrompt {
+		filename: string;
+		lines: number;
+		words: number;
+		chars: number;
+		label: string;
+	}
+
+	const results: GeneratedPrompt[] = [];
+	const missingSections: string[] = [];
+
+	for (const v of variants) {
+		const prompt = buildFullPrompt(v);
+		// The app also builds these prompts without the section, so mirror it,
+		// but flag the gap instead of hiding it.
+		const section = taskApproachSection(
+			v,
+			getAvailableNames(v.mode, v.profile),
+		);
+		if (!loadSection(section)) {
+			missingSections.push(`${v.name} (no ${section}.md)`);
+		}
+		const filename = `${v.name}.md`;
+		writeFileSync(join(outputDir, filename), prompt);
+
+		results.push({
+			filename,
+			lines: prompt.split('\n').length,
+			words: prompt.split(/\s+/).length,
+			chars: prompt.length,
+			label: [
+				`mode:${v.mode}`,
+				`profile:${v.profile}`,
+				v.toolsDisabled ? 'xml-fallback' : '',
+			]
+				.filter(Boolean)
+				.join(', '),
+		});
+	}
+
+	// Sort by size (smallest first)
+	results.sort((a, b) => a.chars - b.chars);
+
+	const summary: string[] = [];
+	for (const r of results) {
+		const tokens = Math.ceil(r.chars / 4);
+		const line = `  ${r.filename.padEnd(35)} ${String(r.lines).padStart(4)} lines  ${String(r.words).padStart(5)} words  ${String(r.chars).padStart(6)} chars  ~${String(tokens).padStart(5)} tokens  (${r.label})`;
+		summary.push(line);
+		console.log(line);
+	}
+
+	// Write index
+	const index = `# Generated System Prompts (sorted by size)
+
+	Generated: ${new Date().toISOString()}
+
+	${summary.join('\n')}
+	`;
+	writeFileSync(join(outputDir, 'INDEX.md'), index);
+
+	if (missingSections.length > 0) {
+		console.warn(
+			`\nWARNING: ${missingSections.length} variants have no task-approach section (same as the app today):`,
+		);
+		for (const m of missingSections) console.warn(`  ${m}`);
+	}
+
+	console.log(`\nOutput: .generated-prompts/`);
+	console.log(`Index:  .generated-prompts/INDEX.md`);
 }
 
-// Sort by size (smallest first)
-results.sort((a, b) => a.chars - b.chars);
-
-const summary: string[] = [];
-for (const r of results) {
-	const tokens = Math.ceil(r.chars / 4);
-	const line = `  ${r.filename.padEnd(35)} ${String(r.lines).padStart(4)} lines  ${String(r.words).padStart(5)} words  ${String(r.chars).padStart(6)} chars  ~${String(tokens).padStart(5)} tokens  (${r.label})`;
-	summary.push(line);
-	console.log(line);
+try {
+	main();
+} catch (error) {
+	console.error('Failed to generate system prompts:');
+	console.error(error);
+	process.exit(1);
 }
-
-// Write index
-const index = `# Generated System Prompts (sorted by size)
-
-Generated: ${new Date().toISOString()}
-
-${summary.join('\n')}
-`;
-writeFileSync(join(outputDir, 'INDEX.md'), index);
-
-console.log(`\nOutput: .generated-prompts/`);
-console.log(`Index:  .generated-prompts/INDEX.md`);
