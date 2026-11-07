@@ -1,6 +1,7 @@
 import test from 'ava';
 import React from 'react';
 import {handleContextMaxCommand} from './context-max-handler.js';
+import {getSessionContextLimit, resetSessionContextLimit} from '@/models';
 import type {MessageSubmissionOptions} from '@/types';
 
 function createOptions(overrides: Partial<MessageSubmissionOptions> = {}): MessageSubmissionOptions {
@@ -89,4 +90,25 @@ test('handleContextMaxCommand uses provider config for context resolution', asyn
 	const message = getMessageText(queued);
 	t.true(message.includes('65,536'));
 	t.true(message.includes('provider model config'));
+});
+
+test('handleContextMaxCommand accepts m suffix', async t => {
+	let queued: React.ReactNode = null;
+	resetSessionContextLimit();
+	try {
+		const handled = await handleContextMaxCommand(
+			['context-max', '1m'],
+			createOptions({
+				onAddToChatQueue: node => {
+					queued = node;
+				},
+			}),
+		);
+
+		t.true(handled);
+		t.is(getSessionContextLimit(), 1000000);
+		t.true(getMessageText(queued).includes('1,000,000'));
+	} finally {
+		resetSessionContextLimit();
+	}
 });

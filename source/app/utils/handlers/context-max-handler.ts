@@ -43,7 +43,7 @@ export async function handleContextMaxCommand(
 		if (limit === null) {
 			onAddToChatQueue(
 				errorMsg(
-					'Invalid context limit. Use a positive number, e.g. /context-max 8192 or /context-max 128k',
+					'Invalid context limit. Use a positive number, e.g. /context-max 8192, /context-max 128k, or /context-max 1m',
 					'context-max-error',
 				),
 			);
@@ -87,7 +87,7 @@ export async function handleContextMaxCommand(
 	} else {
 		onAddToChatQueue(
 			infoMsg(
-				'Context limit: Unknown. Use /context-max <number> to set one.',
+				'Context limit: Unknown. Use /context-max <number>[k|m] to set one.',
 				'context-max-info',
 			),
 		);
