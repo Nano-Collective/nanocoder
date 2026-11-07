@@ -1,4 +1,3 @@
-import clipboard from 'clipboardy';
 import {Box, Text, useFocus, useInput} from 'ink';
 import {Tab, Tabs} from 'ink-tab';
 import React, {useEffect, useState} from 'react';
@@ -18,6 +17,20 @@ import {errorMsg, successMsg} from '@/utils/message-factory';
 import {addToMessageQueue} from '@/utils/message-queue';
 
 type TabType = 'latest' | 'open' | 'proprietary';
+
+/**
+ * Copy text to the system clipboard, loading `clipboardy` on first use.
+ *
+ * `clipboardy` drags in `execa`, `get-stream`, `human-signals` and (through
+ * `clipboard-image` -> `run-jxa` -> `macos-version`) `semver`, even on Linux
+ * and Windows. `modal-selectors.tsx` imports this module at startup, so a
+ * top-level import would pull that whole chain into the boot graph for a copy
+ * action most sessions never trigger. Import it inside the handler instead.
+ */
+async function copyToClipboard(text: string): Promise<void> {
+	const {default: clipboard} = await import('clipboardy');
+	await clipboard.write(text);
+}
 
 interface ModelDatabaseDisplayProps {
 	onCancel?: () => void;
@@ -127,11 +140,10 @@ function ModelDatabaseDisplay({
 				// live provider name with strict equality, so a
 				// differently-cased configured name (e.g. "OpenRouter")
 				// would otherwise be misdetected as a provider change.
-				void clipboard.write(model.id).catch(reportClipboardError);
+				void copyToClipboard(model.id).catch(reportClipboardError);
 				void onModelSelect?.(switchProvider, model.id);
 			} else {
-				void clipboard
-					.write(model.id)
+				void copyToClipboard(model.id)
 					.then(() => {
 						addToMessageQueue(
 							successMsg(
