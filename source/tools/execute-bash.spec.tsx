@@ -5,7 +5,7 @@ import {
 	rmSync,
 	writeFileSync,
 } from 'node:fs';
-import {tmpdir} from 'node:os';
+import {homedir, tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
 import {render} from 'ink-testing-library';
@@ -553,6 +553,7 @@ for (const command of [
 // through. These are the variants from the issue, plus the spellings the old
 // regex happened to catch (`/*/*`, `/.*`, `/?`) which the parser still has to
 // refuse.
+const testHome = homedir().replace(/\\/g, '/');
 for (const command of [
 	'rm -rf /',
 	'rm -fr /',
@@ -580,10 +581,20 @@ for (const command of [
 	// the real home path are the same directory written another way.
 	'rm -rf ~/..',
 	'rm -rf ~/../..',
+	// `~user` is another account's home. `..` past it is the same shared
+	// parent as `~/..`, and the bare form is that account's home.
+	'rm -rf ~root',
+	'rm -rf ~root/',
+	'rm -rf ~root/..',
+	'rm -rf ~root/project/..',
 	'rm -rf $HOME/..',
 	'rm -rf ${HOME}/..',
 	'rm -rf "$HOME/.."',
 	'rm -rf $HOME/../..',
+	// The real home directory and its parent, not just the `~`/`$HOME`
+	// spellings, so this asserts the `os.homedir()` derivation itself.
+	`rm -rf "${testHome}"`,
+	`rm -rf "${testHome}/.."`,
 	'rm -rf /home/user/..',
 	'rm -rf /home/user/../..',
 	'rm -rf /Users/alice/..',
@@ -619,6 +630,7 @@ for (const command of [
 	'rm -rf node_modules',
 	'rm -rf ~/project',
 	'rm -rf ~/project/node_modules',
+	`rm -rf "${testHome}/project"`,
 	'rm -rf $HOME/project',
 	'rm -rf $HOME/project/.cache',
 	'rm -rf /home/user/project',
