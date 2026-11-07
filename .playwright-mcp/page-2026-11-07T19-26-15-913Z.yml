@@ -1,0 +1,639 @@
+- generic [ref=f1e2]:
+  - generic [ref=f1e3]:
+    - link "Skip to content" [ref=f1e4] [cursor=pointer]:
+      - /url: "#start-of-content"
+    - banner [ref=f1e9]:
+      - heading "Navigation Menu" [level=2] [ref=f1e10]
+      - generic [ref=f1e11]:
+        - link "Homepage" [ref=f1e14] [cursor=pointer]:
+          - /url: /
+        - generic [ref=f1e17]:
+          - navigation "Global" [ref=f1e18]:
+            - list [ref=f1e19]:
+              - listitem [ref=f1e20]:
+                - button "Products" [ref=f1e22] [cursor=pointer]
+              - listitem [ref=f1e25]:
+                - button "Developers" [ref=f1e27] [cursor=pointer]
+              - listitem [ref=f1e30]:
+                - button "Businesses" [ref=f1e32] [cursor=pointer]
+              - listitem [ref=f1e35]:
+                - button "Resources" [ref=f1e37] [cursor=pointer]
+              - listitem [ref=f1e40]:
+                - link "Pricing" [ref=f1e41] [cursor=pointer]:
+                  - /url: https://github.com/pricing
+          - generic [ref=f1e42]:
+            - button "Search or jump to, type / to search" [ref=f1e44] [cursor=pointer]
+            - generic [ref=f1e50]:
+              - link "Sign in" [ref=f1e52] [cursor=pointer]:
+                - /url: /login?return_to=https%3A%2F%2Fgithub.com%2FNano-Collective%2Fnanocoder%2Fpull%2F1985
+              - link "Sign up" [ref=f1e55] [cursor=pointer]:
+                - /url: /signup?ref_cta=Sign+up&ref_loc=header+logged+out&ref_page=%2F%3Cuser-name%3E%2F%3Crepo-name%3E%2Fvoltron%2Fpull_requests_fragments%2Fpull_request_layout&source=header-repo&source_repo=Nano-Collective%2Fnanocoder
+              - button "Appearance settings" [ref=f1e58] [cursor=pointer]
+  - main [ref=f1e65]:
+    - generic "Global navigation menu" [ref=f1e68]:
+      - navigation "Breadcrumbs" [ref=f1e71]:
+        - list [ref=f1e72]:
+          - listitem [ref=f1e73]:
+            - link "Nano-Collective" [ref=f1e74] [cursor=pointer]:
+              - /url: /Nano-Collective
+          - listitem [ref=f1e76]:
+            - link "nanocoder" [ref=f1e77] [cursor=pointer]:
+              - /url: /Nano-Collective/nanocoder
+      - heading "Repository navigation" [level=2] [ref=f1e80]
+      - navigation "Repository" [ref=f1e81]:
+        - list [ref=f1e82]:
+          - listitem [ref=f1e83]:
+            - link "Code" [ref=f1e84] [cursor=pointer]:
+              - /url: /Nano-Collective/nanocoder
+          - listitem [ref=f1e89]:
+            - link "Issues (137)" [ref=f1e90] [cursor=pointer]:
+              - /url: /Nano-Collective/nanocoder/issues
+              - generic [ref=f1e95]: Issues
+              - generic [ref=f1e96]:
+                - generic [aria-hidden] [ref=f1e97]: "137"
+                - generic [ref=f1e98]: (137)
+          - listitem [ref=f1e99]:
+            - link "Pull requests (92)" [ref=f1e100] [cursor=pointer]:
+              - /url: /Nano-Collective/nanocoder/pulls
+              - generic [ref=f1e104]: Pull requests
+              - generic [ref=f1e105]:
+                - generic [aria-hidden] [ref=f1e106]: "92"
+                - generic [ref=f1e107]: (92)
+          - listitem [ref=f1e108]:
+            - link "Actions" [ref=f1e109] [cursor=pointer]:
+              - /url: /Nano-Collective/nanocoder/actions
+          - listitem [ref=f1e114]:
+            - link "Projects" [ref=f1e115] [cursor=pointer]:
+              - /url: /Nano-Collective/nanocoder/projects
+          - listitem [ref=f1e120]:
+            - link "Security and quality" [ref=f1e121] [cursor=pointer]:
+              - /url: /Nano-Collective/nanocoder/security
+          - listitem [ref=f1e126]:
+            - link "Insights" [ref=f1e127] [cursor=pointer]:
+              - /url: /Nano-Collective/nanocoder/pulse
+    - generic [ref=f1e138]:
+      - generic [ref=f1e142]:
+        - generic [ref=f1e144]:
+          - 'heading "feat: support million-token context limit suffixes - #1985" [level=1] [ref=f1e145]':
+            - text: "feat: support million-token context limit suffixes"
+            - generic [ref=f1e146]: "- #1985"
+          - generic [aria-hidden] [ref=f1e148]: "#1985"
+        - generic [ref=f1e150]:
+          - generic [ref=f1e152]:
+            - img "Pull request" [ref=f1e153]
+            - text: Open
+          - generic [ref=f1e156]:
+            - link "KunjMaheshwari" [ref=f1e157] [cursor=pointer]:
+              - /url: /KunjMaheshwari
+            - text: wants to merge 3 commits into
+            - generic [ref=f1e158]:
+              - link "Nano-Collective:main" [ref=f1e159] [cursor=pointer]:
+                - /url: /Nano-Collective/nanocoder/tree/main
+              - generic [ref=f1e160]: from
+              - generic [ref=f1e161]:
+                - link "KunjMaheshwari:fix/context-max-m-suffix" [ref=f1e162] [cursor=pointer]:
+                  - /url: /KunjMaheshwari/nanocoder/tree/fix/context-max-m-suffix
+                - button "Copy head branch name to clipboard" [ref=f1e163] [cursor=pointer]
+        - navigation "Pull request navigation" [ref=f1e171]:
+          - generic [ref=f1e172]:
+            - link "Conversation" [ref=f1e173] [cursor=pointer]:
+              - /url: /Nano-Collective/nanocoder/pull/1985
+            - link "Commits (3)" [ref=f1e176] [cursor=pointer]:
+              - /url: /Nano-Collective/nanocoder/pull/1985/commits
+              - text: Commits
+              - generic [aria-hidden] [ref=f1e179]: "3"
+              - generic [ref=f1e180]: (3)
+            - link "Checks" [ref=f1e181] [cursor=pointer]:
+              - /url: /Nano-Collective/nanocoder/pull/1985/checks
+            - link "Files changed" [ref=f1e184] [cursor=pointer]:
+              - /url: /Nano-Collective/nanocoder/pull/1985/files
+      - generic [ref=f1e191]:
+        - generic [ref=f1e193]:
+          - heading "Conversation" [level=2] [ref=f1e194]
+          - generic [ref=f1e195]:
+            - generic [ref=f1e196]:
+              - generic [ref=f1e198]:
+                - link [ref=f1e199] [cursor=pointer]:
+                  - /url: /KunjMaheshwari
+                  - img "@KunjMaheshwari" [ref=f1e200]
+                - generic [ref=f1e202]:
+                  - generic [ref=f1e203]:
+                    - heading "KunjMaheshwari commented Nov 6, 2026yesterday •" [level=3] [ref=f1e204]:
+                      - generic [ref=f1e205]:
+                        - strong [ref=f1e206]:
+                          - link "KunjMaheshwari" [ref=f1e207] [cursor=pointer]:
+                            - /url: /KunjMaheshwari
+                        - text: commented
+                        - link "Nov 6, 2026yesterday" [ref=f1e208] [cursor=pointer]:
+                          - /url: "#issue-6241125522"
+                        - generic [ref=f1e209]:
+                          - generic [ref=f1e210]: •
+                          - group [ref=f1e211]:
+                            - button "edited" [ref=f1e212] [cursor=pointer]
+                    - group [ref=f1e218]:
+                      - button [ref=f1e219] [cursor=pointer]:
+                        - img "Show options" [ref=f1e222]
+                  - generic [ref=f1e227]:
+                    - paragraph [ref=f1e228]: Description
+                    - paragraph [ref=f1e229]: Adds support for million-token context windows through the m/M suffix in --context-max and /context-max.
+                    - paragraph [ref=f1e230]: This allows users to configure large context windows using intuitive values such as 1m instead of 1000k.
+                    - paragraph [ref=f1e231]: Type of Change
+                    - list [ref=f1e232]:
+                      - listitem [ref=f1e233]: Bug fix
+                      - listitem [ref=f1e234]: New feature
+                      - listitem [ref=f1e235]: Breaking change
+                      - listitem [ref=f1e236]: Documentation update
+                    - paragraph [ref=f1e237]: Changeset
+                    - list [ref=f1e238]:
+                      - listitem [ref=f1e239]: Added a changeset describing this change.
+                    - paragraph [ref=f1e240]: Implementation Details
+                    - list [ref=f1e241]:
+                      - listitem [ref=f1e242]: Added support for m and M suffixes (1,000,000 multiplier).
+                      - listitem [ref=f1e243]: Preserved existing k and K suffix support.
+                      - listitem [ref=f1e244]: Added support for fractional suffixed values such as 1.5m and 1.5k.
+                      - listitem [ref=f1e245]: Rejected bare fractional values without a suffix.
+                      - listitem [ref=f1e246]: Added validation for overflow and unsafe integer values.
+                      - listitem [ref=f1e247]: Applied consistent parsing across CLI arguments, slash commands, inline overrides, and environment configuration.
+                      - listitem [ref=f1e248]: Updated error messages, command help, completions, and documentation.
+                      - listitem [ref=f1e249]: Added regression tests for valid and invalid inputs.
+                    - paragraph [ref=f1e250]: Testing
+                    - list [ref=f1e251]:
+                      - listitem [ref=f1e252]: Parser unit tests
+                      - listitem [ref=f1e253]: Inline override tests
+                      - listitem [ref=f1e254]: Context-max handler tests
+                      - listitem [ref=f1e255]: Environment configuration tests
+                      - listitem [ref=f1e256]: TypeScript type checking
+                      - listitem [ref=f1e257]: Targeted formatting checks
+                      - listitem [ref=f1e258]: Build
+                      - listitem [ref=f1e259]: Git diff whitespace validation
+                    - paragraph [ref=f1e260]: "Known limitation: Successful CLI integration tests remain affected by an existing React duplicate-key/runtime issue. The malformed CLI input validation test passes."
+                    - paragraph [ref=f1e261]: Related Issue
+                    - paragraph [ref=f1e262]:
+                      - text: Closes
+                      - link "#1977" [ref=f1e263] [cursor=pointer]:
+                        - /url: https://github.com/Nano-Collective/nanocoder/issues/1977
+              - generic [ref=f1e264]:
+                - generic [ref=f1e275]:
+                  - link [ref=f1e278] [cursor=pointer]:
+                    - /url: /KunjMaheshwari
+                    - img "@KunjMaheshwari" [ref=f1e279]
+                  - code [ref=f1e281]:
+                    - 'link "feat: support million-token context limit suffixes" [ref=f1e282] [cursor=pointer]':
+                      - /url: /Nano-Collective/nanocoder/pull/1985/commits/6a8048ea3fe9d2afa8fb5b01a977bfd5f07f425e
+                  - code [ref=f1e290]:
+                    - link "6a8048e" [ref=f1e291] [cursor=pointer]:
+                      - /url: /Nano-Collective/nanocoder/pull/1985/commits/6a8048ea3fe9d2afa8fb5b01a977bfd5f07f425e
+                - generic [ref=f1e292]:
+                  - generic [ref=f1e298]:
+                    - link [ref=f1e300] [cursor=pointer]:
+                      - /url: /KunjMaheshwari
+                      - img "@KunjMaheshwari" [ref=f1e301]
+                    - generic [ref=f1e303]:
+                      - link "KunjMaheshwari" [ref=f1e304] [cursor=pointer]:
+                        - /url: /KunjMaheshwari
+                      - text: requested review from
+                      - link "addyCooks" [ref=f1e305] [cursor=pointer]:
+                        - /url: /addyCooks
+                      - text: ","
+                      - link "akramcodez" [ref=f1e306] [cursor=pointer]:
+                        - /url: /akramcodez
+                      - text: and
+                      - link "will-lamerton" [ref=f1e307] [cursor=pointer]:
+                        - /url: /will-lamerton
+                      - text: as
+                      - link "code owners" [ref=f1e308] [cursor=pointer]:
+                        - /url: /Nano-Collective/nanocoder/blob/497b3923549a815b99bd14f9ae82616699ff3c6a/.github/CODEOWNERS#L10
+                      - link "November 6, 2026 10:36yesterday" [ref=f1e309] [cursor=pointer]:
+                        - /url: "#event-35338598579"
+                  - generic [ref=f1e314]:
+                    - link [ref=f1e315] [cursor=pointer]:
+                      - /url: /apps/github-actions
+                      - img "@github-actions" [ref=f1e316]
+                    - link "github-actions" [ref=f1e317] [cursor=pointer]:
+                      - /url: /apps/github-actions
+                    - generic [ref=f1e318]: Bot
+                    - text: added
+                    - link "area:tui" [ref=f1e319] [cursor=pointer]:
+                      - /url: /Nano-Collective/nanocoder/issues?q=state%3Aopen%20label%3Aarea%3Atui
+                    - link "area:docs" [ref=f1e320] [cursor=pointer]:
+                      - /url: /Nano-Collective/nanocoder/issues?q=state%3Aopen%20label%3Aarea%3Adocs
+                    - text: labels
+                    - link "Nov 6, 2026yesterday" [ref=f1e321] [cursor=pointer]:
+                      - /url: "#event-35338614038"
+                - generic [ref=f1e323]:
+                  - link [ref=f1e325] [cursor=pointer]:
+                    - /url: /KunjMaheshwari
+                    - img "@KunjMaheshwari" [ref=f1e326]
+                  - generic [ref=f1e328]:
+                    - generic [ref=f1e329]:
+                      - heading [level=3] [ref=f1e330]:
+                        - generic [ref=f1e331]:
+                          - strong [ref=f1e332]:
+                            - link "KunjMaheshwari" [ref=f1e333] [cursor=pointer]:
+                              - /url: /KunjMaheshwari
+                          - text: commented
+                          - link "Nov 6, 2026yesterday" [ref=f1e334] [cursor=pointer]:
+                            - /url: "#issuecomment-6682926069"
+                      - generic [ref=f1e335]:
+                        - group [ref=f1e337]:
+                          - button [ref=f1e338] [cursor=pointer]:
+                            - img "Show options" [ref=f1e341]
+                        - generic "This user is the author of this pull request." [ref=f1e344]: Author
+                    - table [ref=f1e348]:
+                      - rowgroup [ref=f1e349]:
+                        - row [ref=f1e350]:
+                          - cell [ref=f1e351]:
+                            - paragraph [ref=f1e352]: Hi maintainers! 👋
+                            - paragraph [ref=f1e353]:
+                              - text: I’ve implemented the changes requested in
+                              - link "#1977" [ref=f1e354] [cursor=pointer]:
+                                - /url: https://github.com/Nano-Collective/nanocoder/issues/1977
+                              - text: ", including support for m/M suffixes, improved numeric validation, updated error messages, documentation, and regression tests."
+                            - paragraph [ref=f1e355]: The relevant unit tests, type checks, and build pass locally.
+                            - paragraph [ref=f1e356]: "One known limitation: successful CLI integration tests are currently affected by an existing React duplicate-key/runtime issue."
+                            - paragraph [ref=f1e357]: The PR is ready for review. I’d appreciate any feedback or suggestions for improvement.
+                            - paragraph [ref=f1e358]: Thanks for your time!
+                - generic [ref=f1e360]:
+                  - link [ref=f1e362] [cursor=pointer]:
+                    - /url: /apps/github-actions
+                    - img "@github-actions" [ref=f1e363]
+                  - generic [ref=f1e365]:
+                    - generic [ref=f1e366]:
+                      - heading "github-actions Bot commented Nov 6, 2026yesterday" [level=3] [ref=f1e367]:
+                        - generic [ref=f1e368]:
+                          - strong [ref=f1e369]:
+                            - link "github-actions" [ref=f1e370] [cursor=pointer]:
+                              - /url: /apps/github-actions
+                            - generic [ref=f1e371]: Bot
+                          - text: commented
+                          - link "Nov 6, 2026yesterday" [ref=f1e372] [cursor=pointer]:
+                            - /url: "#issuecomment-6682927445"
+                      - generic [ref=f1e373]:
+                        - group [ref=f1e375]:
+                          - button [ref=f1e376] [cursor=pointer]:
+                            - img "Show options" [ref=f1e379]
+                        - generic "This user has previously committed to the nanocoder repository." [ref=f1e382]: Contributor
+                    - table [ref=f1e386]:
+                      - rowgroup [ref=f1e387]:
+                        - row [ref=f1e388]:
+                          - cell [ref=f1e389]:
+                            - 'heading "nc-review: comments — 3 important, 2 nits" [level=3] [ref=f1e390]'
+                            - paragraph [ref=f1e391]:
+                              - link "@KunjMaheshwari" [ref=f1e392] [cursor=pointer]:
+                                - /url: https://github.com/KunjMaheshwari
+                              - text: — a few things worth a look, none blocking.
+                            - paragraph [ref=f1e393]:
+                              - text: The PR adds
+                              - code [ref=f1e394]: m
+                              - text: /
+                              - code [ref=f1e395]: M
+                              - text: (and fractional) suffixes to context-limit overrides by generalising
+                              - code [ref=f1e396]: parseContextLimit
+                              - text: ", routing the"
+                              - code [ref=f1e397]: NANOCODER_CONTEXT_LIMIT
+                              - text: env var through it (which also fixes a silent truncation bug), and threading the new syntax through the CLI flag, the
+                              - code [ref=f1e398]: /context-max
+                              - text: command, the
+                              - code [ref=f1e399]: "?context-max="
+                              - text: inline override, the help text, the completion spec and the docs. The parsing logic itself is sound and the test coverage for the new suffix is real, but the change also silently narrows accepted input (bare fractional limits are now rejected) which reverses a deliberately pinned decision and is not surfaced in the PR description, and the changeset is filed as
+                              - code [ref=f1e400]: patch
+                              - text: even though this is a user-facing feature plus a behaviour change.
+                            - paragraph [ref=f1e401]:
+                              - strong [ref=f1e402]:
+                                - text: 🟠 important ·
+                                - code [ref=f1e403]: changeset
+                                - text: ·
+                                - code [ref=f1e404]: .changeset/context-limit-suffixes.md:2
+                            - paragraph [ref=f1e405]:
+                              - text: This is filed as
+                              - code [ref=f1e406]: patch
+                              - text: ", but"
+                              - code [ref=f1e407]: CONTRIBUTING.md
+                              - text: "defines the bump types explicitly:"
+                            - blockquote [ref=f1e408]:
+                              - list [ref=f1e409]:
+                                - listitem [ref=f1e410]:
+                                  - strong [ref=f1e411]: Patch
+                                  - text: — bug fixes only, no behavior changes
+                                - listitem [ref=f1e412]:
+                                  - strong [ref=f1e413]: Minor
+                                  - text: — new features, backwards-compatible
+                                - listitem [ref=f1e414]:
+                                  - strong [ref=f1e415]: Major
+                                  - text: — breaking changes
+                            - paragraph [ref=f1e416]:
+                              - text: This PR adds a new user-facing capability (
+                              - code [ref=f1e417]: m
+                              - text: /
+                              - code [ref=f1e418]: M
+                              - text: suffixes on
+                              - code [ref=f1e419]: "--context-max"
+                              - text: ","
+                              - code [ref=f1e420]: /context-max
+                              - text: ","
+                              - code [ref=f1e421]: "?context-max="
+                              - text: and
+                              - code [ref=f1e422]: NANOCODER_CONTEXT_LIMIT
+                              - text: )
+                              - strong [ref=f1e423]: and
+                              - text: changes behaviour (bare fractional limits are now rejected). That is a
+                              - code [ref=f1e424]: minor
+                              - text: at minimum; the other feature changesets in
+                              - code [ref=f1e425]: .changeset/
+                              - text: (
+                              - code [ref=f1e426]: mutation-firewall.md
+                              - text: ","
+                              - code [ref=f1e427]: vscode-lazy-acp-activation.md
+                              - text: ) are already
+                              - code [ref=f1e428]: minor
+                              - text: . Shipping a new capability under a patch bump makes the 1.32.x release notes read as if nothing was added, and the repo has an explicit
+                              - code [ref=f1e429]: help_hash
+                              - text: /release-note discipline that this under-sells.
+                            - paragraph [ref=f1e430]:
+                              - strong [ref=f1e431]:
+                                - text: 🟠 important ·
+                                - code [ref=f1e432]: correctness
+                                - text: ·
+                                - code [ref=f1e433]: source/utils/parse-context-limit.ts
+                            - paragraph [ref=f1e434]: Rejecting bare fractional limits is a public-contract narrowing that rides along with the feature and is not called out anywhere a reviewer would look.
+                            - paragraph [ref=f1e435]:
+                              - text: "On"
+                              - code [ref=f1e436]: main
+                              - text: ","
+                              - code [ref=f1e437]: parseContextLimit('1024.5')
+                              - text: →
+                              - code [ref=f1e438]: "1025"
+                              - text: and
+                              - code [ref=f1e439]: parseContextLimit('0.5')
+                              - text: →
+                              - code [ref=f1e440]: "1"
+                              - text: ", so"
+                              - code [ref=f1e441]: nanocoder --context-max 1024.5
+                              - text: exited 0 and set a limit. With this diff it returns
+                              - code [ref=f1e442]: "null"
+                              - text: ", so the same command now exits 1 with"
+                              - code [ref=f1e443]: Invalid --context-max value
+                              - text: ", and"
+                              - code [ref=f1e444]: /context-max 1024.5
+                              - text: turns into an error message instead of a limit.
+                            - paragraph [ref=f1e445]:
+                              - text: "This reverses a decision the maintainers made on purpose: the base spec pins"
+                              - code [ref=f1e446]: parseContextLimit('0.5') === 1
+                              - text: under the name
+                              - emphasis [ref=f1e447]: "\"smallest values that round to a positive limit\""
+                              - text: ", and the sibling changeset"
+                              - code [ref=f1e448]: .changeset/context-limit-zero-infinity.md
+                              - text: says they rejected only values that become 0 or Infinity while deliberately keeping values that round to a positive limit.
+                            - paragraph [ref=f1e449]:
+                              - text: The new behaviour is defensible (rejecting an ambiguous token count is arguably better than silently rounding it), but it needs to be a stated decision rather than a side effect of the regex rewrite. Either say so explicitly in the PR description and the changeset, or keep bare fractions working and scope the change to the
+                              - code [ref=f1e450]: m
+                              - text: suffix.
+                            - paragraph [ref=f1e451]:
+                              - strong [ref=f1e452]:
+                                - text: 🟠 important ·
+                                - code [ref=f1e453]: tests
+                                - text: ·
+                                - code [ref=f1e454]: source/models/models-dev-client.spec.ts:351
+                            - paragraph [ref=f1e455]:
+                              - text: The env-var path is where this PR fixes a real 1000x bug, but the new test only pins the
+                              - emphasis [ref=f1e456]: new
+                              - text: suffix, not the broken one.
+                            - paragraph [ref=f1e457]:
+                              - text: "On"
+                              - code [ref=f1e458]: main
+                              - text: the env var was read with
+                              - code [ref=f1e459]: Number.parseInt(envLimit, 10)
+                              - text: ", so"
+                              - code [ref=f1e460]: NANOCODER_CONTEXT_LIMIT=128k
+                              - text: resolved to
+                              - strong [ref=f1e461]: "128"
+                              - text: tokens — a user asking for 128k got a 128-token window. The diff replaces this with
+                              - code [ref=f1e462]: parseContextLimit(envLimit)
+                              - text: ", which correctly yields 128000, but the only new test is"
+                              - code [ref=f1e463]: "'1.5m'"
+                              - text: → 1500000. Nothing pins
+                              - code [ref=f1e464]: NANOCODER_CONTEXT_LIMIT=128k
+                              - text: "→ 128000, so the actual regression-guard for the fix is missing: a future change back to"
+                              - code [ref=f1e465]: parseInt
+                              - text: would keep the suite green.
+                            - paragraph [ref=f1e466]:
+                              - text: Adding one case alongside the
+                              - code [ref=f1e467]: m
+                              - text: "test closes this:"
+                            - generic [ref=f1e468]:
+                              - generic [ref=f1e469]: "test('getModelContextLimit - env variable accepts the k suffix', async t => { process.env.NANOCODER_CONTEXT_LIMIT = '128k'; t.is(await getModelContextLimit('unknown-model-12345'), 128000); });"
+                              - button "Copy code to clipboard" [ref=f1e471] [cursor=pointer]
+                            - paragraph [ref=f1e475]:
+                              - strong [ref=f1e476]:
+                                - text: ⚪ nit ·
+                                - code [ref=f1e477]: completeness
+                                - text: ·
+                                - code [ref=f1e478]: docs/configuration/index.md:164
+                            - paragraph [ref=f1e479]:
+                              - text: The new paragraph —
+                              - emphasis [ref=f1e480]:
+                                - text: "\"Context-limit overrides accept positive integers, or decimal values with a"
+                                - code [ref=f1e481]: k
+                                - text: /
+                                - code [ref=f1e482]: K
+                                - text: (1,000) or
+                                - code [ref=f1e483]: m
+                                - text: /
+                                - code [ref=f1e484]: M
+                                - text: (1,000,000) suffix"
+                              - text: — is placed at the end of the
+                              - strong [ref=f1e485]: Context Limit Resolution Order
+                              - text: section, whose list includes items 2 and 3 (
+                              - code [ref=f1e486]: contextWindows[model]
+                              - text: and
+                              - code [ref=f1e487]: contextWindow
+                              - text: in
+                              - code [ref=f1e488]: agents.config.json
+                              - text: ). Those two are schema-validated JSON
+                              - strong [ref=f1e489]: numbers
+                              - text: (
+                              - code [ref=f1e490]: source/types/config.ts
+                              - text: ":"
+                              - code [ref=f1e491]: "contextWindow?: number"
+                              - text: ), so
+                              - code [ref=f1e492]: "\"128k\""
+                              - text: is rejected by the config schema outright —
+                              - code [ref=f1e493]: source/config/config-schema.spec.ts
+                              - text: even asserts
+                              - code [ref=f1e494]: contextWindows
+                              - text: must map to numbers.
+                            - paragraph [ref=f1e495]:
+                              - text: As written, a reader can reasonably infer that
+                              - code [ref=f1e496]: contextWindow
+                              - text: accepts a suffixed string. Scope the sentence to the string-valued inputs (
+                              - code [ref=f1e497]: /context-max
+                              - text: ","
+                              - code [ref=f1e498]: "--context-max"
+                              - text: ","
+                              - code [ref=f1e499]: "?context-max="
+                              - text: ","
+                              - code [ref=f1e500]: NANOCODER_CONTEXT_LIMIT
+                              - text: ) and say that the
+                              - code [ref=f1e501]: agents.config.json
+                              - text: fields stay plain numbers.
+                            - paragraph [ref=f1e502]:
+                              - strong [ref=f1e503]:
+                                - text: ⚪ nit ·
+                                - code [ref=f1e504]: contributing
+                            - paragraph [ref=f1e505]:
+                              - text: The PR description is still the unmodified template — every checkbox is unchecked and the body reads
+                              - emphasis [ref=f1e506]: "\"Brief description of what this PR does\""
+                              - text: . That is how the bare-fraction rejection above (a CLI behaviour change) ended up invisible to reviewers, since the only place it is mentioned is one clause of the changeset body. Filling in the description with what changed, which inputs are now rejected, and the bump level would make this PR reviewable at a glance.
+                            - separator [ref=f1e507]
+                            - paragraph [ref=f1e508]:
+                              - subscript [ref=f1e509]: 🔴 blocking · 🟠 a reviewer would ask for a change · ⚪ optional
+                            - paragraph [ref=f1e510]:
+                              - subscript [ref=f1e511]:
+                                - text: Automated code review — correctness, security, design, tests, plus duplicates and scope. A human still decides; this is not a substitute for review and is not exhaustive. The required status checks separately cover lint, formatting, types, unused dependencies, the test suite and the build. This bot never merges. Maintainers can rerun with
+                                - code [ref=f1e512]: /re-review
+                                - text: .
+                - generic [ref=f1e518]:
+                  - link [ref=f1e519] [cursor=pointer]:
+                    - /url: /apps/github-actions
+                    - img "@github-actions" [ref=f1e520]
+                  - link "github-actions" [ref=f1e521] [cursor=pointer]:
+                    - /url: /apps/github-actions
+                  - generic [ref=f1e522]: Bot
+                  - text: added the
+                  - link "agent:comments" [ref=f1e523] [cursor=pointer]:
+                    - /url: /Nano-Collective/nanocoder/issues?q=state%3Aopen%20label%3Aagent%3Acomments
+                  - text: label
+                  - link "Nov 6, 2026yesterday" [ref=f1e524] [cursor=pointer]:
+                    - /url: "#event-35338841023"
+                - generic [ref=f1e526]:
+                  - generic [ref=f1e531]:
+                    - link "KunjMaheshwari" [ref=f1e532] [cursor=pointer]:
+                      - /url: /KunjMaheshwari
+                    - text: added 2 commits
+                    - link "November 7, 2026 18:056 hours ago" [ref=f1e533] [cursor=pointer]:
+                      - /url: "#commits-pushed-278996f"
+                  - generic [ref=f1e534]:
+                    - generic [ref=f1e542]:
+                      - link [ref=f1e545] [cursor=pointer]:
+                        - /url: /KunjMaheshwari
+                        - img "@KunjMaheshwari" [ref=f1e546]
+                      - code [ref=f1e548]:
+                        - 'link "fix: address context limit review feedback" [ref=f1e549] [cursor=pointer]':
+                          - /url: /Nano-Collective/nanocoder/pull/1985/commits/278996f99e054a358b9923c62d538fa8d42037ee
+                      - code [ref=f1e557]:
+                        - link "278996f" [ref=f1e558] [cursor=pointer]:
+                          - /url: /Nano-Collective/nanocoder/pull/1985/commits/278996f99e054a358b9923c62d538fa8d42037ee
+                    - generic [ref=f1e566]:
+                      - link [ref=f1e569] [cursor=pointer]:
+                        - /url: /KunjMaheshwari
+                        - img "@KunjMaheshwari" [ref=f1e570]
+                      - code [ref=f1e572]:
+                        - link "Merge remote-tracking branch 'origin/main' into fix/context-max-m-suffix" [ref=f1e573] [cursor=pointer]:
+                          - /url: /Nano-Collective/nanocoder/pull/1985/commits/2663bd52028acbde6258e93e6678990446cb3df2
+                      - code [ref=f1e581]:
+                        - link "2663bd5" [ref=f1e582] [cursor=pointer]:
+                          - /url: /Nano-Collective/nanocoder/pull/1985/commits/2663bd52028acbde6258e93e6678990446cb3df2
+            - generic [ref=f1e586]:
+              - link "Sign up for free" [ref=f1e587] [cursor=pointer]:
+                - /url: /join?source=comment-repo
+              - strong [ref=f1e588]: to join this conversation on GitHub
+              - text: . Already have an account?
+              - link "Sign in to comment" [ref=f1e589] [cursor=pointer]:
+                - /url: /login?return_to=https%3A%2F%2Fgithub.com%2FNano-Collective%2Fnanocoder%2Fpull%2F1985
+        - generic [ref=f1e593]:
+          - form "Select reviewers" [ref=f1e595]:
+            - heading "Reviewers" [level=3] [ref=f1e596]
+            - generic [ref=f1e597]:
+              - generic [ref=f1e598]:
+                - generic [ref=f1e599]:
+                  - link [ref=f1e600] [cursor=pointer]:
+                    - /url: /will-lamerton
+                    - img "@will-lamerton" [ref=f1e601]
+                  - link "will-lamerton" [ref=f1e602] [cursor=pointer]:
+                    - /url: /will-lamerton
+                - button "Awaiting requested review from will-lamerton" [ref=f1e603] [cursor=pointer]
+                - button "will-lamerton is a code owner" [ref=f1e607] [cursor=pointer]
+              - generic [ref=f1e611]:
+                - generic [ref=f1e612]:
+                  - link [ref=f1e613] [cursor=pointer]:
+                    - /url: /akramcodez
+                    - img "@akramcodez" [ref=f1e614]
+                  - link "akramcodez" [ref=f1e615] [cursor=pointer]:
+                    - /url: /akramcodez
+                - button "Awaiting requested review from akramcodez" [ref=f1e616] [cursor=pointer]
+                - button "akramcodez is a code owner" [ref=f1e620] [cursor=pointer]
+              - generic [ref=f1e624]:
+                - generic [ref=f1e625]:
+                  - link [ref=f1e626] [cursor=pointer]:
+                    - /url: /addyCooks
+                    - img "@addyCooks" [ref=f1e627]
+                  - link "addyCooks" [ref=f1e628] [cursor=pointer]:
+                    - /url: /addyCooks
+                - button "Awaiting requested review from addyCooks" [ref=f1e629] [cursor=pointer]
+                - button "addyCooks is a code owner" [ref=f1e633] [cursor=pointer]
+              - paragraph [ref=f1e637]: At least 1 approving review is required to merge this pull request.
+          - form "Select assignees" [ref=f1e639]:
+            - heading "Assignees" [level=3] [ref=f1e640]
+            - text: No one assigned
+          - generic [ref=f1e641]:
+            - heading "Labels" [level=3] [ref=f1e642]
+            - generic [ref=f1e643]:
+              - link "agent:comments" [ref=f1e644] [cursor=pointer]:
+                - /url: /Nano-Collective/nanocoder/issues?q=state%3Aopen%20label%3Aagent%3Acomments
+              - link "area:docs" [ref=f1e646] [cursor=pointer]:
+                - /url: /Nano-Collective/nanocoder/issues?q=state%3Aopen%20label%3Aarea%3Adocs
+              - link "area:tui" [ref=f1e648] [cursor=pointer]:
+                - /url: /Nano-Collective/nanocoder/issues?q=state%3Aopen%20label%3Aarea%3Atui
+          - form "Select projects" [ref=f1e651]:
+            - heading "Projects" [level=3] [ref=f1e652]
+            - text: None yet
+          - form "Select milestones" [ref=f1e654]:
+            - heading "Milestone" [level=3] [ref=f1e655]
+            - text: No milestone
+          - form "Link issues" [ref=f1e661]:
+            - heading "Development" [level=3] [ref=f1e662]
+            - paragraph [ref=f1e663]: Successfully merging this pull request may close these issues.
+            - link [ref=f1e665] [cursor=pointer]:
+              - /url: https://github.com/Nano-Collective/nanocoder/issues/1977
+              - img "Open issue" [ref=f1e666]
+              - text: "[Feature] Accept an m suffix in --context-max and /context-max (1m)"
+          - generic [ref=f1e670]:
+            - heading "1 participant" [level=3] [ref=f1e671]
+            - link [ref=f1e673] [cursor=pointer]:
+              - /url: /KunjMaheshwari
+              - img "@KunjMaheshwari" [ref=f1e674]
+  - contentinfo [ref=f1e675]:
+    - heading "Footer" [level=2] [ref=f1e676]
+    - generic [ref=f1e677]:
+      - generic [ref=f1e678]:
+        - link "GitHub Homepage" [ref=f1e679] [cursor=pointer]:
+          - /url: https://github.com
+        - generic [ref=f1e682]: © 2026 GitHub, Inc.
+      - navigation "Footer" [ref=f1e683]:
+        - heading "Footer navigation" [level=3] [ref=f1e684]
+        - list "Footer navigation" [ref=f1e685]:
+          - listitem [ref=f1e686]:
+            - link "Terms" [ref=f1e687] [cursor=pointer]:
+              - /url: https://docs.github.com/site-policy/github-terms/github-terms-of-service
+          - listitem [ref=f1e688]:
+            - link "Privacy" [ref=f1e689] [cursor=pointer]:
+              - /url: https://docs.github.com/site-policy/privacy-policies/github-privacy-statement
+          - listitem [ref=f1e690]:
+            - link "Security" [ref=f1e691] [cursor=pointer]:
+              - /url: https://github.com/security
+          - listitem [ref=f1e692]:
+            - link "Status" [ref=f1e693] [cursor=pointer]:
+              - /url: https://www.githubstatus.com/
+          - listitem [ref=f1e694]:
+            - link "Community" [ref=f1e695] [cursor=pointer]:
+              - /url: https://github.community/
+          - listitem [ref=f1e696]:
+            - link "Docs" [ref=f1e697] [cursor=pointer]:
+              - /url: https://docs.github.com/
+          - listitem [ref=f1e698]:
+            - link "Contact" [ref=f1e699] [cursor=pointer]:
+              - /url: https://support.github.com?tags=dotcom-footer
+          - listitem [ref=f1e700]:
+            - button "Manage cookies" [ref=f1e702] [cursor=pointer]
+          - listitem [ref=f1e703]:
+            - button "Do not share my personal information" [ref=f1e705] [cursor=pointer]
