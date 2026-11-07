@@ -27,6 +27,10 @@ import {buildMinimalPdf} from '../../test-utils/minimal-pdf.js';
 // Test Helpers
 // ============================================================================
 
+// biome-ignore lint/suspicious/noControlCharactersInRegex: stripping terminal styling before text-only assertions.
+const ANSI_RE = /\x1b\[[0-9;]*m/g;
+const stripAnsi = (value: string) => value.replace(ANSI_RE, '');
+
 console.log(`\nstring-replace.spec.tsx – ${React.version}`);
 
 // Create a mock theme provider for tests
@@ -1551,7 +1555,7 @@ test('string_replace formatter: result shows the edit line in a mixed-ending fil
 	}
 	const element = await stringReplaceTool.formatter(args, result);
 	const {lastFrame} = render(<TestThemeProvider>{element}</TestThemeProvider>);
-	t.true(lastFrame()?.includes('Location: lines 5-6') ?? false);
+	t.true(stripAnsi(lastFrame() ?? '').includes('Location: lines 5-6'));
 });
 
 test('string_replace: throws when mutation firewall blocks test deletion', async t => {
