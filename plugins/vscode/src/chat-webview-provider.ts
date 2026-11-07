@@ -1197,6 +1197,10 @@ export class ChatWebviewProvider
 		const markdownHighlightUri = webview
 			.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'markdown-highlight.js'))
 			.with({query: `v=${assetVersion('markdown-highlight.js')}`});
+		const purifyUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'purify.min.js'));
+		const markdownUtilsUri = webview
+			.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'markdown-utils.js'))
+			.with({query: `v=${assetVersion('markdown-utils.js')}`});
 		const mentionUtilsUri = webview
 			.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'mention-utils.js'))
 			.with({query: `v=${assetVersion('mention-utils.js')}`});
@@ -1215,6 +1219,8 @@ export class ChatWebviewProvider
 		html = html.replace(/\{\{markedUri\}\}/g, markedUri.toString());
 		html = html.replace(/\{\{highlightUri\}\}/g, highlightUri.toString());
 		html = html.replace(/\{\{markdownHighlightUri\}\}/g, markdownHighlightUri.toString());
+		html = html.replace(/\{\{purifyUri\}\}/g, purifyUri.toString());
+		html = html.replace(/\{\{markdownUtilsUri\}\}/g, markdownUtilsUri.toString());
 		html = html.replace(/\{\{mentionUtilsUri\}\}/g, mentionUtilsUri.toString());
 		html = html.replace(/\{\{uriUtilsUri\}\}/g, uriUtilsUri.toString());
 		html = html.replace(/\{\{slashCommandUtilsUri\}\}/g, slashCommandUtilsUri.toString());

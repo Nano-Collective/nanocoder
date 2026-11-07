@@ -18,6 +18,10 @@ const mediaUrl = (filename: string) =>
 // table is destructured at the top level, so a missing one throws before a
 // single element is built. chat-panel.html loads them ahead of the panel; this
 // list mirrors that order.
+const MARKDOWN_UTILS_SOURCE = readFileSync(
+	mediaUrl('markdown-utils.js'),
+	'utf8',
+);
 const MENTION_UTILS_SOURCE = readFileSync(mediaUrl('mention-utils.js'), 'utf8');
 const URI_UTILS_SOURCE = readFileSync(mediaUrl('uri-utils.js'), 'utf8');
 const SLASH_COMMAND_UTILS_SOURCE = readFileSync(
@@ -294,7 +298,16 @@ export function findById(root: StubElement, id: string): StubElement | null {
 	return null;
 }
 
-export function createPanel(options: {marked?: boolean} = {}) {
+export function createPanel(
+	options: {
+		marked?: boolean;
+		/**
+		 * Stands in for DOMPurify.sanitize when `marked` is set. Defaults to
+		 * identity; `false` leaves DOMPurify out, as if purify.min.js failed to load.
+		 */
+		sanitize?: ((html: string) => string) | false;
+	} = {},
+) {
 	const clock = {now: 1_700_000_000_000};
 
 	class FakeDate extends Date {
@@ -398,10 +411,19 @@ export function createPanel(options: {marked?: boolean} = {}) {
 	};
 	if (options.marked) {
 		sandbox.marked = {parse: (value: string) => `<md>${value}</md>`};
+		if (options.sanitize !== false) {
+			const sanitize = options.sanitize ?? ((html: string) => html);
+			sandbox.DOMPurify = {
+				isSupported: true,
+				addHook: () => {},
+				sanitize: (html: string) => sanitize(html),
+			};
+		}
 	}
 
 	sandbox.globalThis = sandbox;
 	createContext(sandbox);
+	runInContext(MARKDOWN_UTILS_SOURCE, sandbox);
 	runInContext(MENTION_UTILS_SOURCE, sandbox);
 	runInContext(URI_UTILS_SOURCE, sandbox);
 	runInContext(SLASH_COMMAND_UTILS_SOURCE, sandbox);

@@ -6,7 +6,7 @@
 		Use a content security policy to only allow loading styles from our extension directory,
 		and only allow scripts that have a specific nonce.
 	-->
-	<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src 'self' data: https: vscode-webview-resource:; style-src {{cspSource}} 'unsafe-inline'; script-src 'nonce-{{nonce}}';">
+	<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src 'self' data: vscode-webview-resource:; style-src {{cspSource}} 'unsafe-inline'; script-src 'nonce-{{nonce}}';">
 	<meta name="viewport" content="width=device-width, initial-scale=1.0">
 	<link href="{{styleUri}}" rel="stylesheet">
 	<title>Nanocoder Chat</title>
@@ -442,6 +442,9 @@
 	<script nonce="{{nonce}}" src="{{highlightUri}}"></script>
 	<!-- Hooks highlight.js into marked; same ordering requirement. -->
 	<script nonce="{{nonce}}" src="{{markdownHighlightUri}}"></script>
+	<!-- Sanitizer for marked output; markdown-utils.js needs both. -->
+	<script nonce="{{nonce}}" src="{{purifyUri}}"></script>
+	<script nonce="{{nonce}}" src="{{markdownUtilsUri}}"></script>
 	<!-- Pure @-mention helpers; must load before chat-panel.js reads them. -->
 	<script nonce="{{nonce}}" src="{{mentionUtilsUri}}"></script>
 	<!-- Pure drop-payload helpers; same ordering requirement. -->
