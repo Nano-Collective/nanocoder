@@ -9,6 +9,7 @@ import {getConfigPath} from '@/config/paths';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import type {Command} from '@/types/commands';
+import {atomicWritePrivateJson} from '@/utils/atomic-write';
 import {formatError} from '@/utils/error-formatter';
 
 interface ConfigOption {
@@ -89,7 +90,9 @@ function ensureFileExists(filePath: string): void {
 	}
 	if (!existsSync(filePath)) {
 		if (filePath.endsWith('.json')) {
-			writeFileSync(filePath, '{}\n', 'utf-8');
+			// agents.config.json / .mcp.json can hold plaintext API keys, so a
+			// file created here must be owner-only like the wizard's writes.
+			atomicWritePrivateJson(filePath, {});
 		} else {
 			writeFileSync(filePath, '', 'utf-8');
 		}
