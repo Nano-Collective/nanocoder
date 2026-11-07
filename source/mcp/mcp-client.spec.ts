@@ -1297,6 +1297,45 @@ test('callTool sanitizes object arguments to strings when schema expects a strin
 	}
 });
 
+test('MCPClient.callTool: carries a server isError flag next to the unchanged text', async t => {
+	const client = new MCPClient();
+	let reply: Record<string, unknown> = {};
+
+	// @ts-ignore - Accessing private properties for testing
+	client.serverTools.set('srv', [
+		{name: 'tool', description: 't', serverName: 'srv', inputSchema: {type: 'object', properties: {}}},
+	]);
+	// @ts-ignore
+	client.clients.set('srv', {callTool: async () => reply});
+
+	reply = {content: [{type: 'text', text: 'fine'}]};
+	t.is(await client.callTool('tool', {}), 'fine', 'a clean call stays a plain string');
+
+	reply = {isError: false, content: [{type: 'text', text: 'fine'}]};
+	t.is(await client.callTool('tool', {}), 'fine', 'isError: false is not a failure');
+
+	reply = {isError: true, content: [{type: 'text', text: 'boom failure'}]};
+	t.deepEqual(await client.callTool('tool', {}), {llmContent: 'boom failure', isError: true});
+
+	reply = {isError: true, content: [{type: 'image', data: 'AA==', mimeType: 'image/png'}]};
+	t.deepEqual(await client.callTool('tool', {}), {
+		llmContent: '[image/png, 1 bytes]',
+		isError: true,
+	}, 'a non-text block is summarised and still flagged');
+
+	reply = {isError: true, content: [{type: 'text', text: 'boom failure'}, {type: 'image', data: 'AA==', mimeType: 'image/png'}]};
+	t.deepEqual(await client.callTool('tool', {}), {
+		llmContent: 'boom failure\n[image/png, 1 bytes]',
+		isError: true,
+	}, 'every block of a failed call is kept and the call is still flagged');
+
+	reply = {isError: true, content: []};
+	t.deepEqual(await client.callTool('tool', {}), {
+		llmContent: 'Tool executed successfully (no output)',
+		isError: true,
+	}, 'an empty failure keeps its text and is still flagged');
+});
+
 // ============================================================================
 // Regression Tests for connectToServer lifecycle (failed tool discovery)
 // ============================================================================
@@ -1408,7 +1447,7 @@ test('MCPClient health check marks a server unhealthy and removes its tools', as
 		},
 	});
 	const serverName = 'health-server';
-	(client as any).clients.set(serverName, {close: async () => {}});
+	(client as any).clients.set(serverName, (client as any).injected);
 	(client as any).serverConfigs.set(serverName, {
 		name: serverName,
 		transport: 'http',
@@ -1428,7 +1467,7 @@ test('MCPClient health check marks a server unhealthy and removes its tools', as
 	await new Promise<void>(resolve => {
 		const deadline = Date.now() + 1000;
 		const waitForPing = () => {
-			if (pingCalls > 0 || Date.now() >= deadline) {
+			if (pingCalls >= 2 || Date.now() >= deadline) {
 				resolve();
 				return;
 			}
@@ -1437,7 +1476,7 @@ test('MCPClient health check marks a server unhealthy and removes its tools', as
 		waitForPing();
 	});
 
-	t.true(pingCalls > 0);
+	t.true(pingCalls >= 2, 'two consecutive failures are needed');
 	t.false(client.isServerConnected(serverName));
 	t.deepEqual(client.getServerTools(serverName), []);
 	t.is(client.getServerInfo(serverName)?.health, 'unhealthy');
@@ -1631,8 +1670,12 @@ test('MCPClient health check applies exponential backoff on consecutive failures
 		check();
 	});
 
-	t.is(client.getServerInfo(serverName)?.health, 'unhealthy');
-	t.is((client as any).healthFailureCounts.get(serverName), 1);
+	t.is(
+		client.getServerInfo(serverName)?.health,
+		'connected',
+		'a single missed ping does not mark the server unhealthy',
+	);
+	t.is(client.getServerTools(serverName).length, 1);
 
 	// Wait for second failure -> failure count = 2
 	await new Promise<void>(resolve => {
@@ -1646,6 +1689,8 @@ test('MCPClient health check applies exponential backoff on consecutive failures
 		check();
 	});
 	t.is((client as any).healthFailureCounts.get(serverName), 2);
+	t.is(client.getServerInfo(serverName)?.health, 'unhealthy');
+	t.deepEqual(client.getServerTools(serverName), []);
 
 	// Now allow ping to succeed -> should recover and reset failure count
 	pingShouldFail = false;
@@ -1675,7 +1720,7 @@ test('MCPClient transport close marks a server unhealthy immediately', t => {
 	};
 	const client = new SeamMCPClient({ping: async () => {}});
 	const serverName = 'closed-server';
-	(client as any).clients.set(serverName, {close: async () => {}});
+	(client as any).clients.set(serverName, (client as any).injected);
 	(client as any).serverConfigs.set(serverName, {
 		name: serverName,
 		transport: 'stdio',
@@ -1697,11 +1742,13 @@ test('MCPClient transport close marks a server unhealthy immediately', t => {
 	t.false(client.isServerConnected(serverName));
 	t.is(client.getServerInfo(serverName)?.health, 'unhealthy');
 	t.deepEqual(client.getServerTools(serverName), []);
-	clearTimeout((client as any).healthTimers.get(serverName));
+	t.is((client as any).healthTimers.size, 0, 'pings stop after a close');
+	t.true((client as any).reconnectTimers.has(serverName));
+	(client as any).clearReconnect(serverName);
 });
 
 for (const pingFails of [false, true]) {
-	test(`MCPClient transport error ${pingFails ? 'removes tools after a failed ping' : 'preserves tools when the server responds'}`, async t => {
+	test(`MCPClient transport error ${pingFails ? 'counts a failed ping without removing tools' : 'preserves tools when the server responds'}`, async t => {
 		let transport: any;
 		let previousErrorCalls = 0;
 		let pingCalls = 0;
@@ -1731,8 +1778,10 @@ for (const pingFails of [false, true]) {
 		};
 		const client = new SeamMCPClient(sdkClient);
 		try {
-			await client.connectToServer({...httpServer, healthCheckInterval: 0});
-			t.is((client as any).healthTimers.size, 0);
+			await client.connectToServer({
+				...httpServer,
+				healthCheckInterval: 60_000,
+			});
 			transport.onerror(new Error('recoverable SSE interruption'));
 			transport.onerror(new Error('another transport error'));
 			await Promise.resolve();
@@ -1743,8 +1792,13 @@ for (const pingFails of [false, true]) {
 			t.is(client.getServerTools(httpServer.name).length, 1);
 			finishPing();
 			await new Promise(resolve => setImmediate(resolve));
-			t.is(client.isServerConnected(httpServer.name), !pingFails);
-			t.is(client.getServerTools(httpServer.name).length, pingFails ? 0 : 1);
+			// One failed ping is not enough to drop the server's tools.
+			t.true(client.isServerConnected(httpServer.name));
+			t.is(client.getServerTools(httpServer.name).length, 1);
+			t.is(
+				(client as any).healthFailureCounts.get(httpServer.name),
+				pingFails ? 1 : undefined,
+			);
 		} finally {
 			finishPing();
 			await client.disconnect();
@@ -1773,7 +1827,7 @@ test('MCPClient does not emit unhealthy after disconnecting with a pending ping'
 	});
 	const changes: unknown[] = [];
 	client.onHealthChange(change => changes.push(change));
-	await client.connectToServer({...httpServer, healthCheckInterval: 0});
+	await client.connectToServer({...httpServer, healthCheckInterval: 60_000});
 	transport.onerror(new Error('temporary error'));
 	await Promise.resolve();
 	await client.disconnect();
@@ -1782,6 +1836,325 @@ test('MCPClient does not emit unhealthy after disconnecting with a pending ping'
 	t.deepEqual(changes, []);
 	t.deepEqual(client.getServerNames(), []);
 	t.is((client as any).health.size, 0);
+});
+
+const waitFor = async (condition: () => boolean, timeoutMs = 2000) => {
+	const deadline = Date.now() + timeoutMs;
+	while (!condition()) {
+		if (Date.now() >= deadline) throw new Error('waitFor timed out');
+		await new Promise(resolve => setTimeout(resolve, 5));
+	}
+};
+
+// Hands out a fresh SDK client per connect, as the real createClient() does.
+class QueueMCPClient extends MCPClient {
+	created: any[] = [];
+	constructor(private readonly make: (index: number) => any) {
+		super();
+	}
+	protected createClient(): any {
+		const sdkClient = this.make(this.created.length);
+		this.created.push(sdkClient);
+		return sdkClient;
+	}
+}
+
+const makeSdkClient = (options: {connectError?: Error; gate?: Promise<void>} = {}) => {
+	const sdkClient: any = {
+		transport: undefined as any,
+		closed: false,
+		async connect(transport: any) {
+			sdkClient.transport = transport;
+			await options.gate;
+			if (options.connectError) throw options.connectError;
+		},
+		async listTools() {
+			return {tools: [{name: 'reco_tool', inputSchema: {type: 'object'}}]};
+		},
+		getServerCapabilities: () => undefined,
+		async ping() {
+			if (sdkClient.closed) throw new Error('Not connected');
+		},
+		async close() {
+			sdkClient.closed = true;
+		},
+	};
+	return sdkClient;
+};
+
+test('MCPClient health check with interval 0 does not ping on transport errors', async t => {
+	let pingCalls = 0;
+	let transport: any;
+	const client = new SeamMCPClient({
+		async connect(value: any) {
+			transport = value;
+		},
+		async listTools() {
+			return {tools: [{name: 'quiet_tool', inputSchema: {type: 'object'}}]};
+		},
+		getServerCapabilities: () => undefined,
+		async ping() {
+			pingCalls++;
+			throw new Error('ping failed');
+		},
+		async close() {},
+	});
+	try {
+		await client.connectToServer({...httpServer, healthCheckInterval: 0});
+		t.is((client as any).healthTimers.size, 0);
+		transport.onerror(new Error('transport error'));
+		transport.onerror(new Error('transport error'));
+		await new Promise(resolve => setImmediate(resolve));
+		t.is(pingCalls, 0);
+		t.true(client.isServerConnected(httpServer.name));
+		t.is(client.getServerTools(httpServer.name).length, 1);
+	} finally {
+		await client.disconnect();
+	}
+});
+
+test('MCPClient health check skips pings while a tool call is in flight', async t => {
+	let pingCalls = 0;
+	let finishCall!: () => void;
+	const callGate = new Promise<void>(resolve => {
+		finishCall = resolve;
+	});
+	const client = new SeamMCPClient({
+		async connect() {},
+		async listTools() {
+			return {tools: [{name: 'slow_tool', inputSchema: {type: 'object'}}]};
+		},
+		getServerCapabilities: () => undefined,
+		async ping() {
+			pingCalls++;
+			// A ping queued behind the slow call would time out.
+			throw new Error('Request timed out');
+		},
+		async callTool() {
+			await callGate;
+			return {content: [{type: 'text', text: 'done'}]};
+		},
+		async close() {},
+	});
+	try {
+		await client.connectToServer({...httpServer, healthCheckInterval: 10});
+		const pending = client.callTool('slow_tool', {});
+		await new Promise(resolve => setTimeout(resolve, 80));
+		t.is(pingCalls, 0, 'no ping while the call is in flight');
+		t.true(client.isServerConnected(httpServer.name));
+		t.is(client.getServerTools(httpServer.name).length, 1);
+		finishCall();
+		t.is(await pending, 'done');
+		t.is((client as any).inFlightRequests.size, 0);
+		await waitFor(() => pingCalls > 0);
+	} finally {
+		finishCall();
+		await client.disconnect();
+	}
+});
+
+test('MCPClient reconnects after the transport closes and restores tools once', async t => {
+	const client = new QueueMCPClient(() => makeSdkClient());
+	const changes: Array<{status: string}> = [];
+	client.onHealthChange(change => changes.push(change));
+	try {
+		await client.connectToServer({...httpServer, healthCheckInterval: 10});
+		const first = client.created[0];
+		first.closed = true;
+		first.transport.onclose();
+
+		t.false(client.isServerConnected(httpServer.name));
+		t.deepEqual(client.getServerTools(httpServer.name), []);
+
+		await waitFor(() => client.isServerConnected(httpServer.name));
+		t.is(client.created.length, 2);
+		t.is((client as any).clients.get(httpServer.name), client.created[1]);
+		t.deepEqual(
+			client.getServerTools(httpServer.name).map(tool => tool.name),
+			['reco_tool'],
+		);
+		t.is(Object.keys(client.getNativeToolsRegistry()).length, 1);
+		t.deepEqual(
+			changes.map(change => change.status),
+			['unhealthy', 'connected'],
+		);
+		t.is((client as any).reconnectAttempts.size, 0);
+
+		// A late event from the replaced client must not affect the new one.
+		first.transport.onclose();
+		t.true(client.isServerConnected(httpServer.name));
+	} finally {
+		await client.disconnect();
+	}
+});
+
+test('MCPClient retries a failed reconnect with backoff', async t => {
+	const client = new QueueMCPClient(index =>
+		makeSdkClient(
+			index === 1 ? {connectError: new Error('spawn failed')} : undefined,
+		),
+	);
+	try {
+		await client.connectToServer({...httpServer, healthCheckInterval: 10});
+		client.created[0].closed = true;
+		client.created[0].transport.onclose();
+		await waitFor(() => client.created.length === 2);
+		await waitFor(() => (client as any).reconnectAttempts.get(httpServer.name) === 1);
+		t.false(client.isServerConnected(httpServer.name));
+		await waitFor(() => client.isServerConnected(httpServer.name));
+		t.is(client.created.length, 3);
+		t.true(client.created[1].closed, 'the failed attempt is cleaned up');
+	} finally {
+		await client.disconnect();
+	}
+});
+
+test('MCPClient disconnect cancels a pending reconnect', async t => {
+	const client = new QueueMCPClient(() => makeSdkClient());
+	await client.connectToServer({...httpServer, healthCheckInterval: 30});
+	client.created[0].closed = true;
+	client.created[0].transport.onclose();
+	t.is((client as any).reconnectTimers.size, 1);
+	await client.disconnect();
+	t.is((client as any).reconnectTimers.size, 0);
+	await new Promise(resolve => setTimeout(resolve, 80));
+	t.is(client.created.length, 1, 'no reconnect after disconnect');
+	t.deepEqual(client.getServerNames(), []);
+});
+
+test('MCPClient drops a reconnect that completes after disconnect', async t => {
+	let openGate!: () => void;
+	const gate = new Promise<void>(resolve => {
+		openGate = resolve;
+	});
+	const client = new QueueMCPClient(index =>
+		makeSdkClient(index === 1 ? {gate} : undefined),
+	);
+	await client.connectToServer({...httpServer, healthCheckInterval: 10});
+	client.created[0].closed = true;
+	client.created[0].transport.onclose();
+	await waitFor(() => client.created.length === 2);
+	await client.disconnect();
+	openGate();
+	await waitFor(() => client.created[1].closed);
+	t.deepEqual(client.getServerNames(), []);
+	t.is((client as any).healthTimers.size, 0);
+	t.is((client as any).reconnectTimers.size, 0);
+});
+
+// What the SDK's StreamableHTTPClientTransport throws when a restarted
+// server no longer knows the client's session id.
+const sessionNotFoundError = () => {
+	const error = new Error(
+		'Streamable HTTP error: Error POSTing to endpoint: {"jsonrpc":"2.0","error":{"code":-32001,"message":"Session not found"},"id":null}',
+	);
+	(error as any).code = 404;
+	return error;
+};
+
+// A server whose first client's session dies on `kill()`; every later client
+// (a fresh session) is healthy, as with a real server restart.
+const makeRestartingServer = () => {
+	const state = {down: false, restarted: false};
+	const make = (index: number) => {
+		const sdkClient: any = makeSdkClient();
+		sdkClient.ping = async () => {
+			if (index > 0) return;
+			if (state.restarted) throw sessionNotFoundError();
+			if (state.down) throw new TypeError('fetch failed');
+		};
+		const connect = sdkClient.connect;
+		sdkClient.connect = async (transport: any) => {
+			if (state.down && !state.restarted) throw new TypeError('fetch failed');
+			await connect(transport);
+		};
+		return sdkClient;
+	};
+	return {state, make};
+};
+
+test('MCPClient reconnects a restarted HTTP server whose session is gone', async t => {
+	const server = makeRestartingServer();
+	const client = new QueueMCPClient(server.make);
+	const changes: Array<{status: string}> = [];
+	client.onHealthChange(change => changes.push(change));
+	try {
+		await client.connectToServer({...httpServer, healthCheckInterval: 10});
+		server.state.restarted = true;
+
+		await waitFor(() => client.created.length === 2);
+		await waitFor(() => client.isServerConnected(httpServer.name));
+		t.is((client as any).clients.get(httpServer.name), client.created[1]);
+		t.true(client.created[0].closed, 'the stale client is closed');
+		t.deepEqual(
+			client.getServerTools(httpServer.name).map(tool => tool.name),
+			['reco_tool'],
+		);
+		t.is(Object.keys(client.getNativeToolsRegistry()).length, 1);
+		t.deepEqual(
+			changes.map(change => change.status),
+			['unhealthy', 'connected'],
+		);
+
+		// The new session stays healthy and no further clients are created.
+		await new Promise(resolve => setTimeout(resolve, 60));
+		t.is(client.created.length, 2);
+		t.true(client.isServerConnected(httpServer.name));
+	} finally {
+		await client.disconnect();
+	}
+});
+
+test('MCPClient reconnects an HTTP server that went down and came back', async t => {
+	const server = makeRestartingServer();
+	const client = new QueueMCPClient(server.make);
+	try {
+		await client.connectToServer({...httpServer, healthCheckInterval: 10});
+		server.state.down = true;
+		await waitFor(() => !client.isServerConnected(httpServer.name));
+		// While down, recovery goes through reconnect attempts, which fail.
+		await waitFor(() => client.created.length >= 2);
+		t.false(client.isServerConnected(httpServer.name));
+
+		server.state.restarted = true;
+		await waitFor(() => client.isServerConnected(httpServer.name), 3000);
+		const current = (client as any).clients.get(httpServer.name);
+		t.not(current, client.created[0]);
+		t.is(client.getServerTools(httpServer.name).length, 1);
+		t.is((client as any).reconnectAttempts.size, 0);
+		t.is((client as any).reconnectTimers.size, 0);
+	} finally {
+		await client.disconnect();
+	}
+});
+
+test('MCPClient keeps pinging an unhealthy stdio server instead of reconnecting', async t => {
+	let pingCalls = 0;
+	const client = new QueueMCPClient(() => {
+		const sdkClient: any = makeSdkClient();
+		sdkClient.ping = async () => {
+			pingCalls++;
+			throw sessionNotFoundError();
+		};
+		return sdkClient;
+	});
+	const serverName = 'stdio-server';
+	const sdkClient = (client as any).createClient();
+	(client as any).clients.set(serverName, sdkClient);
+	(client as any).serverConfigs.set(serverName, {
+		name: serverName,
+		transport: 'stdio',
+		command: 'true',
+	});
+	(client as any).health.set(serverName, 'unhealthy');
+	(client as any).startHealthChecks(serverName, sdkClient, {}, 5);
+	try {
+		await waitFor(() => pingCalls >= 3);
+		t.is((client as any).reconnectTimers.size, 0);
+		t.is(client.created.length, 1);
+	} finally {
+		await (client as any).forgetServer(serverName);
+	}
 });
 
 test('MCPClient rejects calls to an unhealthy server clearly', async t => {
@@ -2382,4 +2755,113 @@ test('MCPClient.disconnect: clears resources and prompts', async t => {
 	t.is(client.getServerPrompts('mock').length, 0);
 	t.is(client.getAllResources().length, 0);
 	t.is(client.getAllPrompts().length, 0);
+});
+
+test('getToolNameConflicts names tools two servers share and which one handles them', t => {
+	const client = new MCPClient();
+	const internal = client as unknown as {
+		serverTools: Map<string, Array<{name: string; serverName: string}>>;
+	};
+	internal.serverTools.set('alpha', [
+		{name: 'echo', serverName: 'alpha'},
+		{name: 'only-alpha', serverName: 'alpha'},
+	]);
+	internal.serverTools.set('beta', [{name: 'echo', serverName: 'beta'}]);
+
+	t.deepEqual(client.getToolNameConflicts(), [
+		{tool: 'echo', servers: ['alpha', 'beta'], active: 'beta'},
+	]);
+	// The reported winner is the one calls are actually routed to.
+	t.is(client.getToolMapping().get('echo')?.serverName, 'beta');
+});
+
+test('getToolNameConflicts is empty when tool names are unique', t => {
+	const client = new MCPClient();
+	const internal = client as unknown as {
+		serverTools: Map<string, Array<{name: string; serverName: string}>>;
+	};
+	internal.serverTools.set('alpha', [{name: 'a', serverName: 'alpha'}]);
+	internal.serverTools.set('beta', [{name: 'b', serverName: 'beta'}]);
+	t.deepEqual(client.getToolNameConflicts(), []);
+});
+
+// ============================================================================
+// Tests for MCPClient - tool result content blocks
+// ============================================================================
+
+const contentClient = (content: unknown[]) =>
+	new SeamMCPClient({
+		async connect() {},
+		async listTools() {
+			return {tools: [{name: 'blocks_tool', inputSchema: {type: 'object'}}]};
+		},
+		getServerCapabilities: () => undefined,
+		async callTool() {
+			return {content};
+		},
+		async close() {},
+	});
+
+const callWithContent = async (content: unknown[]) => {
+	const client = contentClient(content);
+	try {
+		await client.connectToServer(httpServer);
+		return await client.callTool('blocks_tool', {});
+	} finally {
+		await client.disconnect();
+	}
+};
+
+test('MCPClient.callTool: joins every text block', async t => {
+	const out = await callWithContent([
+		{type: 'text', text: 'BLOCK-ONE'},
+		{type: 'text', text: 'BLOCK-TWO'},
+		{type: 'text', text: 'BLOCK-THREE'},
+	]);
+	t.is(out, 'BLOCK-ONE\nBLOCK-TWO\nBLOCK-THREE');
+});
+
+test('MCPClient.callTool: summarises image and audio blocks and keeps later text', async t => {
+	const out = await callWithContent([
+		{type: 'image', data: 'AAAA', mimeType: 'image/png'},
+		{type: 'text', text: 'CAPTION'},
+		{type: 'audio', data: 'AAAAAA==', mimeType: 'audio/wav'},
+	]);
+	t.is(out, '[image/png, 3 bytes]\nCAPTION\n[audio/wav, 4 bytes]');
+	t.false(out.includes('AAAA'));
+});
+
+test('MCPClient.callTool: keeps embedded text resources and summarises blob resources', async t => {
+	const out = await callWithContent([
+		{
+			type: 'resource',
+			resource: {uri: 'file:///a.txt', mimeType: 'text/plain', text: 'hello'},
+		},
+		{
+			type: 'resource',
+			resource: {uri: 'file:///b.bin', mimeType: 'application/zip', blob: 'AAA='},
+		},
+		{type: 'resource_link', uri: 'file:///c.md', name: 'c.md'},
+	]);
+	t.is(
+		out,
+		'[resource file:///a.txt]\nhello\n[resource file:///b.bin, application/zip, 2 bytes]\n[resource link: file:///c.md]',
+	);
+});
+
+test('MCPClient.callTool: keeps unknown blocks as JSON', async t => {
+	const out = await callWithContent([{type: 'custom', value: 1}]);
+	t.is(out, '{"type":"custom","value":1}');
+});
+
+test('MCPClient.callTool: keeps the no output message for empty content', async t => {
+	t.is(await callWithContent([]), 'Tool executed successfully (no output)');
+});
+
+test('MCPClient.callTool: measures data URL and wrapped base64 by decoded size', async t => {
+	const out = await callWithContent([
+		{type: 'image', data: 'data:image/png;base64,AAA=', mimeType: 'image/png'},
+		{type: 'audio', data: 'AAAA\nAAAA', mimeType: 'audio/wav'},
+	]);
+	t.is(out, '[image/png, 2 bytes]\n[audio/wav, 6 bytes]');
 });

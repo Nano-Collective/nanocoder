@@ -18,7 +18,7 @@ The Nanocoder VS Code extension provides a native sidebar chat powered by the Ag
 - **Code Lenses**: `Explain Code` and `Generate Tests` links above every function, method, constructor and class.
 - **Sessions**: Start a new chat, browse previous sessions, and resume, rename or delete them - conversations persist to disk across restarts.
 - **Slash Commands**: `/help`, `/clear`, `/copy`, the `/test`, `/explain` and `/doc` prompt templates, and your custom commands from `.nanocoder/commands` work directly in the chat. Typing `/` at the start of a line opens an autocomplete menu.
-- **Copy & Retry**: Each assistant response has copy and retry buttons, and a keybinding grabs the last code block.
+- **Copy & Retry**: Each assistant response has copy and retry buttons, and a keybinding grabs the last code block while the chat view has focus.
 - **Live Subagent Progress**: Delegated agent runs show live token usage and tool activity on their card while they work.
 - **Agent Action List**: Tool calls are announced before the batch runs, so you can see queued work rather than only what has finished.
 - **Task Checklist**: When the AI plans work with the task tool, a live checklist card shows each task's status and overall progress.
@@ -61,9 +61,9 @@ nanocoder --vscode
 
 ## Using the Sidebar Chat
 
-1. **Open the chat**: Click the Nanocoder icon in the Activity Bar. The extension spawns `nanocoder --acp` in the background and connects automatically - your project's `agents.config.json` (or your global config) is picked up as usual.
+1. **Open the chat**: Click the Nanocoder icon in the Activity Bar. The extension spawns `nanocoder --acp` in the background and connects automatically - your project's `agents.config.json` (or your global config) is picked up as usual. The CLI is not started until you open the chat, so VS Code windows where you don't use Nanocoder never run it; the `Explain Code` / `Generate Tests` lenses and the status bar item are still there as soon as the window opens. If the workspace is not trusted in VS Code (Restricted Mode), the extension does not pass `--trust-directory`, so the CLI only runs there if you have already trusted the folder with Nanocoder. In a folder Nanocoder has never trusted, or one whose trusted setup has changed since, the CLI refuses to start and the status bar shows **Failed** (see [Troubleshooting](#troubleshooting)).
 
-2. **Chat**: Responses stream in as they generate. Everything the agent does to answer - its thoughts, tool calls, edit cards and task plan - is collected, in order, into one collapsible work summary per turn. The reply text stays outside it, so the answer is never hidden. The header reads "Working..." while the turn runs, then "Worked for", "Stopped after" or "Failed after" plus the duration, and the summary folds away when the turn ends (unless you opened or closed it yourself). It reopens automatically when a tool inside it needs your approval.
+2. **Chat**: Responses stream in as they generate, with a blinking cursor at the end of the text still being written. Code blocks are syntax-highlighted as soon as the fence opens, in colours that follow your light or dark VS Code theme. Everything the agent does to answer - its thoughts, tool calls, edit cards and task plan - is collected, in order, into one collapsible work summary per turn. The reply text stays outside it, so the answer is never hidden. The header reads "Working..." while the turn runs, then "Worked for", "Stopped after" or "Failed after" plus the duration, and the summary folds away when the turn ends (unless you opened or closed it yourself). It reopens automatically when a tool inside it needs your approval.
 
 3. **Tool activity**: Inside the work summary, consecutive tool calls group into an activity card; file edits get their own card - click it to open the change in VS Code's diff viewer.
 
@@ -109,7 +109,7 @@ There are three ways to attach files, folders and images to a message:
 - **Drag-and-drop**: drag files or folders from the Explorer straight onto the composer.
 - **The `+` menu**: all upload actions live under a single `+` button next to the composer.
 
-Attached files are read with a cap of 100 KB each; attached folders list up to 200 entries. Binary files are detected and skipped.
+Attached files are sent with a cap of 100 KB each. For a file open in an editor, its current editor text is sent, including unsaved changes; otherwise the file is read from disk. Attached folders list up to 200 entries. Binary files are detected and skipped.
 
 Images can be uploaded through the `+` menu or pasted directly into the composer, and are sent to the model as a multimodal message. Your provider and model must support image input.
 
@@ -138,11 +138,11 @@ Typing `/` at the start of a line opens an autocomplete menu of `/test`, `/expla
 
 - Each assistant response has a clipboard button in its footer that copies the response's raw markdown. User messages have no copy button.
 - The retry button next to it sends the same prompt again: the old response is removed from the chat and the conversation is truncated back to that prompt, so the model does not see the discarded answer. Retry is unavailable while a turn is running.
-- `Cmd+Alt+Shift+C` (`Ctrl+Alt+Shift+C` on Windows/Linux) copies the last code block from the previous assistant response, the same as typing `/copy code`.
+- `Cmd+Alt+Shift+C` (`Ctrl+Alt+Shift+C` on Windows/Linux) copies the last code block from the previous assistant response, the same as typing `/copy code`. The shortcut only works while the Nanocoder chat view has focus.
 
 ### Sessions
 
-- **New Chat**: the `+` icon in the view title bar starts a fresh conversation.
+- **New Chat**: the `+` icon in the view title bar starts a fresh conversation. The conversation you leave is closed in the agent (`session/close`) so it stops holding memory; it stays in session history and can be resumed.
 - **History**: the clock icon lists previous sessions (persisted to disk, newest first). Click a session to resume it - the full thread replays, including thinking sections and completed tool cards - or use the trash icon to delete it.
 - **Rename**: sessions can be renamed from the History view. Names must be 100 characters or less. A manually set name is preserved when the session is reopened, including from the terminal CLI, and is never overwritten by an auto-generated title.
 - Switching to another sidebar view (Explorer, Search, ...) and back keeps your transcript intact.
@@ -208,6 +208,8 @@ Access these commands via the Command Palette (`Cmd+Shift+P` / `Ctrl+Shift+P`):
 | Cancel the current turn    | `Escape`          | `Escape`           |
 | Copy the last code block   | `Cmd+Alt+Shift+C` | `Ctrl+Alt+Shift+C` |
 
+The copy shortcut is bound only while the Nanocoder chat view has focus.
+
 ## Legacy Companion Mode
 
 Before the sidebar chat, the extension paired with a Nanocoder session running in a terminal (`nanocoder --vscode`, or `/ide` from within a session) over a local WebSocket. That mode is still available - it is now opt-in via `nanocoder.autoConnect` - and is useful if you prefer the terminal TUI:
@@ -215,7 +217,7 @@ Before the sidebar chat, the extension paired with a Nanocoder session running i
 - **Diff previews**: file changes proposed in the terminal session open automatically in VS Code's diff viewer (controlled by `nanocoder.showDiffPreview`); you approve or reject in the CLI.
 - **Active editor context**: the file you focus - and any selected lines - appears as a `⊡ In App.tsx` pill on the status line under the terminal input and is attached to your next message. Dismiss it with `/clear`, double-`Esc` at the empty input, or by focusing a non-file tab.
 - **Diagnostics sharing**: LSP errors and warnings are shared with the CLI for context.
-- **Status bar**: `$(plug) Nanocoder` (click to connect), `$(check) Nanocoder` (connected), `$(sync~spin) Connecting...`.
+- **Status bar**: `$(plug) Nanocoder` (click to connect), `$(check) Nanocoder` (connected), `$(sync~spin) Connecting...`. These are the companion's texts; the sidebar chat uses its own status bar item (see [Troubleshooting](#troubleshooting)).
 
 The sidebar chat and companion mode are separate conversations - the GUI does not see what a terminal session is doing.
 
@@ -229,6 +231,14 @@ If the discovery file isn't readable from VS Code - for example when the CLI run
 
 **Sidebar chat won't connect?**
 
+- Check the Nanocoder status bar item. Its states are:
+  - `Nanocoder` with a check mark: connected. Click to restart the CLI process.
+  - `Nanocoder: Starting` and `Nanocoder: Reconnecting`: the CLI is starting, or restarting automatically after a crash. Clicking does nothing.
+  - `Nanocoder: Failed`: the CLI could not be started. Click to open the output logs and recovery options.
+  - `Nanocoder: Update CLI`: the installed CLI is too old for this extension. Update it, then click to restart.
+  - `Nanocoder: Not installed`: the CLI was not found. Install it, then click to retry.
+  - `Nanocoder: Disconnected`: the agent process is stopped. Click to restart it.
+- **Failed in an untrusted folder.** The extension never passes `--trust-directory`, so in a folder Nanocoder has not trusted (or whose trusted setup has changed) the CLI exits with code 3 and the item shows Failed. Run `nanocoder` once in that folder in a terminal and accept the trust prompt, or run `nanocoder trust --status` there and then `nanocoder trust --grant <fingerprint>`, then restart the agent.
 - Check the Nanocoder output channel (`View > Output > Nanocoder`) - the ACP handshake, CLI discovery, and any `[CLI stderr]` errors are logged there, and the crash dialog includes the last error line.
 - Ensure the `nanocoder` CLI is installed and on your PATH (or set `nanocoder.cliPath`). If `cliPath` points to a missing file, the extension logs a warning and falls back to normal discovery.
 - The extension resolves your login shell's PATH before spawning, so version managers like nvm work even when VS Code is launched from the Dock. If the CLI crashes at startup, check that `node --version` in a terminal meets the minimum required by Nanocoder.

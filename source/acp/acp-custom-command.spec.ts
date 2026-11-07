@@ -1,6 +1,6 @@
 import test from 'ava';
 import type {CustomCommand} from '@/types/index';
-import {acpCustomCommandText} from './acp-custom-command';
+import {acpCustomCommandText, builtinCommandReply} from './acp-custom-command';
 
 function review(content: string, parameters?: string[]): CustomCommand {
 	return {
@@ -61,4 +61,18 @@ test('an omitted ACP argument uses the parameter default', t => {
 	);
 	t.true(text.includes('Diff against origin/main.'));
 	t.false(text.includes('{{base}}'));
+});
+
+test('VS Code /model and /provider replies point at the composer controls', t => {
+	const model = builtinCommandReply('model', true, []);
+	const provider = builtinCommandReply('provider', true, []);
+	t.true(model?.includes('model picker'));
+	t.true(provider?.includes('Configuration popover'));
+	t.false(model?.includes('chat header'));
+	t.false(provider?.includes('chat header'));
+	t.is(builtinCommandReply('model', false, []), "Use your client's model selector.");
+	t.is(
+		builtinCommandReply('provider', false, []),
+		"Use your client's provider selector.",
+	);
 });

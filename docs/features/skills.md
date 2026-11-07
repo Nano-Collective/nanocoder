@@ -212,13 +212,15 @@ the daemon's job.
 ```
 nanocoder daemon start      # spawn the per-project daemon detached
 nanocoder daemon stop       # SIGTERM the daemon, wait for lockfile cleanup
-nanocoder daemon status     # report running / not running, PID, uptime
+nanocoder daemon status     # running / not running, PID, uptime, socket, CI trust level
 nanocoder daemon logs       # tail .nanocoder/daemon.log (last 64KB)
 nanocoder daemon install    # install per-user auto-start
 nanocoder daemon uninstall  # remove the auto-start unit
 ```
 
-`daemon start` refuses to start in a directory you haven't trusted, because triggered runs execute tools without confirmation. Trust the directory by running `nanocoder` interactively there once, pass `--trust-directory` to bypass the check for that one start (not saved), or set `NANOCODER_TRUST_DIRECTORY=1` to trust it and save that for future runs.
+`daemon start` refuses to start in a directory you haven't trusted, because triggered runs execute tools without confirmation. Trust the directory by running `nanocoder` interactively there once, pass `--trust-directory` to bypass the check for that one start (not saved), or set `NANOCODER_TRUST_DIRECTORY=1` to trust it and save that for future runs. `NANOCODER_TRUST_DIRECTORY` only counts when it comes from your shell environment; a project `.env` cannot set it. To trust a folder without starting a session, run `nanocoder trust --status` to see what it will run and its fingerprint, then `nanocoder trust --grant <fingerprint>`.
+
+Trust is tied to a fingerprint of what the folder will run, and that fingerprint covers every skill, agent and command with a `subscribe:` block. Adding, removing or editing a subscription (including installing a bundle with subscriptions via `nanocoder skills add`) changes the fingerprint, so the next `daemon start` is refused with "changed since you trusted it" until you trust the folder again with one of the methods above. Starting with a different `--trust` level while a daemon is already running does not apply it; see [Verify](verify.md).
 
 `daemon install` is not gated: it only writes the auto-start unit, and the
 gate applies when the daemon actually boots. Installing in an untrusted
@@ -255,10 +257,16 @@ falls back to `SIGTERM` only if the daemon is unreachable, so stops are
 graceful on Windows too where `SIGTERM` would otherwise be force-kill.
 
 Internally, the daemon runs every triggered agent or command in
-**`headless`** mode (no foreground prompts, no `ask_user`, no `agent`,
-and only tools that never need approval). The
-`confirm: true` opt-in below switches a specific subscription to plan
-mode instead.
+**`headless`** mode. Headless runs have no foreground prompts, and they
+remove only `ask_user`, `agent` and `write_plan` from the tool list.
+Custom tools are offered only when they declare `approval: never`.
+Everything else runs **unattended, without confirmation**: built-in tools
+such as `execute_bash`, `write_file`, `string_replace` and `git_commit`,
+and every tool from every enabled MCP server. Setting `"enabled": false`
+on an MCP server is the only way to keep its tools out of headless runs.
+Scope triggered skills carefully, and use `confirm: true` (above) to run
+a subscription in plan mode instead when it should not change anything
+on its own.
 
 Triggered runs are subagent runs, so the
 [`maxRepeatedToolCalls`](../configuration/index.md#retry-limits) cap
@@ -387,8 +395,10 @@ Skills load from three levels, highest priority first:
 - **personal / global** - the same layout under your platform config dir
   (`~/.config/nanocoder/` on Linux, `~/Library/Preferences/nanocoder/` on
   macOS, or `$NANOCODER_CONFIG_DIR`). Available in every repo on the machine.
-- **built-in** - shipped with nanocoder. Today that is only the
-  `explore` subagent; no built-in bundles ship yet.
+- **built-in** - shipped with nanocoder. Today that is three subagents:
+  `explore`, plus `verify-pr-review` and `verify-ci-investigator`, which
+  [Verify](verify.md) and the daemon's CI watch use. No built-in bundles
+  ship yet.
 
 A project skill shadows a personal one of the same name, which shadows a
 built-in. To reuse a skill you wrote in one repo everywhere, move it up a

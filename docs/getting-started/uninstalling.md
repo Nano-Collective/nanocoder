@@ -62,7 +62,7 @@ If it persists, you may have multiple installations. Run `which nanocoder` again
 
 Nanocoder keeps three kinds of files outside your projects. Remove whichever you no longer want.
 
-**Configuration** (`agents.config.json`, `nanocoder-preferences.json`, personal commands, tools, agents and skills, provider login credentials):
+**Configuration** (`agents.config.json`, `nanocoder-preferences.json`, personal commands, tools, agents and skills, provider login credentials, and the `voice-bin` folder holding [voice mode](../features/voice-mode.md)'s downloaded Whisper model, Piper binaries and Piper voice):
 
 ```bash
 # macOS
@@ -107,7 +107,12 @@ If you set `NANOCODER_CONFIG_DIR`, `NANOCODER_DATA_DIR` or `NANOCODER_LOG_DIR`, 
 **Per-project files** (in each project directory):
 
 ```bash
-rm -rf .nanocoder/   # project commands, tools, agents, skills, checkpoints
+rm -rf .nanocoder/   # project commands, tools, agents, skills, plugins, checkpoints
 ```
 
 A project may also contain `agents.config.json`, `nanocoder-preferences.json` and `.mcp.json`. Check before deleting them: they are often committed to the repository, and `.mcp.json` is a shared convention that other tools (such as Claude Code) also read, so removing it can break those tools.
+
+**Tools installed for optional features.** These live outside Nanocoder's own folders and may be used by other programs, so remove them only if nothing else needs them:
+
+- The Chromium build used by the [browser tool](../features/browser.md), if you installed it with `npx playwright-core install chromium`. It is in Playwright's shared cache: `~/Library/Caches/ms-playwright/` (macOS), `~/.cache/ms-playwright/` (Linux) or `%LOCALAPPDATA%\ms-playwright` (Windows), alongside any browsers other Playwright projects downloaded.
+- Packages `/voice` installed system-wide: `sox` and `whisper.cpp` via Homebrew on macOS (`brew uninstall sox whisper.cpp`), or `sox` via `apt-get` on Linux (`sudo apt remove sox`).

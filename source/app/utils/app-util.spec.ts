@@ -1350,10 +1350,10 @@ function queuedText(node: React.ReactNode): string {
 }
 
 test.serial('inline overrides - unknown ?keys warn and reach the handler unchanged', async t => {
-	// Regression: an unrecognised `?key=value` token must neither vanish
-	// silently nor pollute the override stores. The dispatcher forwards it
-	// verbatim (so `/context-max` reports its usual "invalid limit" error
-	// for the `?bogus=1` positional) and queues one warning naming the key.
+	// Regression: an unrecognised `?key=value` token on a command that
+	// supports overrides must neither vanish silently nor pollute the
+	// override stores. The dispatcher forwards it verbatim and queues one
+	// warning naming the key.
 	const texts: string[] = [];
 	const options = createResumeTestOptions({
 		onAddToChatQueue: node => {
@@ -1361,16 +1361,44 @@ test.serial('inline overrides - unknown ?keys warn and reach the handler unchang
 		},
 	});
 
-	await handleMessageSubmission('/context-max ?bogus=1', options);
+	await handleMessageSubmission('/usage ?bogus=1', options);
 
 	t.true(
 		texts.some(text => text.includes('?bogus')),
 		`expected an unknown-override warning naming ?bogus, got: ${JSON.stringify(texts)}`,
 	);
+});
+
+test.serial('inline overrides - commands outside the allowlist get their ?tokens untouched', async t => {
+	// Regression: free-text commands (`/remember ?important use tabs`,
+	// `/tasks add check ?preview`) had `?word` tokens reordered or expanded
+	// into flags. Only override-aware commands parse them now: /context-max
+	// receives `?context-max=200k` as its literal argument (so it reports
+	// its normal invalid-limit error), no override is applied, and no
+	// unknown-override warning is queued.
+	const {getSessionContextLimit, resetSessionContextLimit} = await import(
+		'@/models/index.js'
+	);
+	resetSessionContextLimit();
+	const texts: string[] = [];
+	let limitDuringCall: number | null | undefined;
+	const options = createResumeTestOptions({
+		onAddToChatQueue: node => {
+			limitDuringCall = getSessionContextLimit();
+			texts.push(queuedText(node));
+		},
+	});
+
+	await handleMessageSubmission('/context-max ?context-max=200k', options);
+
 	t.true(
 		texts.some(text => text.includes('Invalid context limit')),
 		`expected the handler's normal invalid-limit error, got: ${JSON.stringify(texts)}`,
 	);
+	t.false(texts.some(text => text.includes('Unknown inline override')));
+	t.is(limitDuringCall, null);
+	t.is(getSessionContextLimit(), null);
+	resetSessionContextLimit();
 });
 
 test.serial('inline overrides - dispatcher applies a ?context-max override and restores the prior value', async t => {

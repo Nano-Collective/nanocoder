@@ -26,6 +26,7 @@ export async function requestToolPermission(
 	conn: AgentSideConnection,
 	meta?: AcpToolCallMeta,
 	abortSignal?: AbortSignal,
+	requestMeta?: Record<string, unknown>,
 ): Promise<'approved' | 'denied' | 'cancelled'> {
 	const toolCallUpdate: ToolCallUpdate = {
 		toolCallId: toolCall.id,
@@ -41,6 +42,7 @@ export async function requestToolPermission(
 		sessionId: session.sessionId,
 		options: [ALLOW_OPTION, DENY_OPTION],
 		toolCall: toolCallUpdate,
+		...(requestMeta ? {_meta: requestMeta} : {}),
 	});
 
 	let response: RequestPermissionResponse;

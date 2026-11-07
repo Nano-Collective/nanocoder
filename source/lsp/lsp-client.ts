@@ -4,6 +4,7 @@
  */
 
 import {EventEmitter} from 'node:events';
+import {pathToFileURL} from 'node:url';
 import type {ChildProcess} from 'child_process';
 import spawn from 'cross-spawn';
 import {createChildLogger} from '@/utils/logging';
@@ -423,7 +424,7 @@ export class LSPClient extends EventEmitter {
 	private async initialize(): Promise<InitializeResult> {
 		const params: InitializeParams = {
 			processId: process.pid,
-			rootUri: this.config.rootUri || `file://${process.cwd()}`,
+			rootUri: this.config.rootUri || pathToFileURL(process.cwd()).href,
 			capabilities: {
 				textDocument: {
 					synchronization: {

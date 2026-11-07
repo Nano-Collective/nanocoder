@@ -22,6 +22,7 @@ import type {ToolManager} from '@/tools/tool-manager';
 import type {TuneConfig} from '@/types/config';
 import type {
 	DevelopmentMode,
+	LLMChatResponse,
 	LLMClient,
 	Message,
 	ModeOverrides,
@@ -29,6 +30,7 @@ import type {
 	ToolResult,
 } from '@/types/core';
 import {maybeAutoCompact} from '@/utils/auto-compact';
+import {formatError} from '@/utils/error-formatter';
 import {capMessagesForModel} from '@/utils/message-capping';
 
 export interface ToolCallLog {
@@ -81,6 +83,11 @@ export type PlainConversationOutcome =
 	| {
 			kind: 'tool-approval-required';
 			toolNames: string[];
+			/**
+			 * Whether `--mode auto-accept` would have run every blocked call
+			 * without asking. Always false when the run is already in auto-accept.
+			 */
+			autoAcceptWouldRun: boolean;
 			finalText: string;
 			reasoning: string | null;
 			toolCalls: ToolCallLog[];
@@ -321,37 +328,58 @@ async function runPlainConversationBody(
 			? [{role: 'user', content: FINAL_TURN_INSTRUCTION}]
 			: [];
 
-		const result = await client.chat(
-			[systemMessage, ...cappedMessages, ...finalTurnNotice],
-			tools,
-			{
-				onReasoningToken: (token: string) => {
-					streamedReasoning += token;
-					accumulatedReasoning += token;
-					if (!isJson) {
-						if (!reasoningPrinted) {
-							reasoningPrinted = true;
-							write(color('gray', '> '));
+		let result: LLMChatResponse;
+		try {
+			result = await client.chat(
+				[systemMessage, ...cappedMessages, ...finalTurnNotice],
+				tools,
+				{
+					onReasoningToken: (token: string) => {
+						streamedReasoning += token;
+						accumulatedReasoning += token;
+						if (!isJson) {
+							if (!reasoningPrinted) {
+								reasoningPrinted = true;
+								write(color('gray', '> '));
+							}
+							write(color('gray', token));
 						}
-						write(color('gray', token));
-					}
+					},
+					onToken: (token: string) => {
+						accumulatedFinalText += token;
+						if (!isJson) {
+							if (reasoningPrinted && !contentStarted) {
+								writeLine();
+							}
+							if (!contentStarted) {
+								contentStarted = true;
+							}
+							write(token);
+						}
+					},
 				},
-				onToken: (token: string) => {
-					accumulatedFinalText += token;
-					if (!isJson) {
-						if (reasoningPrinted && !contentStarted) {
-							writeLine();
-						}
-						if (!contentStarted) {
-							contentStarted = true;
-						}
-						write(token);
-					}
-				},
-			},
-			abortSignal,
-			modeOverrides,
-		);
+				abortSignal,
+				modeOverrides,
+			);
+		} catch (error) {
+			// An HTTP error or dropped connection rejects here. Return it as an
+			// `error` outcome so the caller still prints its report (with the
+			// tool calls that already ran) and exits through graceful shutdown.
+			// The failed request was still a model call, so it counts as a step.
+			steps++;
+			if (!isJson && (reasoningPrinted || contentStarted)) {
+				writeLine();
+			}
+			return {
+				kind: 'error',
+				message: abortSignal.aborted ? 'Aborted' : formatError(error),
+				finalText: accumulatedFinalText,
+				reasoning: accumulatedReasoning || null,
+				toolCalls: toolCallsLog,
+				steps,
+				usage: getUsage(),
+			};
+		}
 		steps++;
 
 		// The client always returns a `usage` object, but every field inside it is
@@ -484,10 +512,14 @@ async function runPlainConversationBody(
 		];
 		const cleanedContent = xmlParse.cleanedContent;
 
-		const partition = partitionUnknownToolCalls(allToolCalls, toolManager);
-		const {validToolCalls, unknownToolCalls, errorResults} = partition;
-		// errorResults is paired 1:1 with unknownToolCalls, in the same order.
-		for (const [index, toolCall] of unknownToolCalls.entries()) {
+		const partition = partitionUnknownToolCalls(
+			allToolCalls,
+			toolManager,
+			availableNames,
+		);
+		const {validToolCalls, rejectedToolCalls, errorResults} = partition;
+		// errorResults is paired 1:1 with rejectedToolCalls, in the same order.
+		for (const [index, toolCall] of rejectedToolCalls.entries()) {
 			toolCallsLog.push({
 				name: toolCall.function.name,
 				arguments: toolCall.function.arguments || {},
@@ -550,10 +582,11 @@ async function runPlainConversationBody(
 		}
 
 		if (errorResults.length > 0) {
-			// Unknown-tool turns count toward the repeated-call streak, so a model
-			// stuck calling a nonexistent tool trips the same cap instead of
-			// draining tokens until maxTurns. The signature covers every call the
-			// model emitted this turn, valid and unknown alike.
+			// Turns with a rejected call (an unknown tool, or arguments that could
+			// not be parsed) count toward the repeated-call streak, so a model
+			// stuck on a bad call trips the same cap instead of draining tokens
+			// until maxTurns. The signature covers every call the model emitted
+			// this turn, valid and rejected alike.
 			const stopped = trackRepeatedToolCalls(allToolCalls);
 			if (stopped) {
 				return stopped;
@@ -683,7 +716,7 @@ async function runPlainConversationBody(
 			return stopped;
 		}
 
-		const toolsNeedingApproval: string[] = [];
+		const toolsNeedingApproval: ToolCall[] = [];
 		const toolsToExecute: ToolCall[] = [];
 		for (const toolCall of validToolCalls) {
 			// Approval (including the yolo bypass) is resolved centrally.
@@ -694,7 +727,7 @@ async function runPlainConversationBody(
 				developmentMode,
 			);
 			if (needsApproval) {
-				toolsNeedingApproval.push(toolCall.function.name);
+				toolsNeedingApproval.push(toolCall);
 			} else {
 				toolsToExecute.push(toolCall);
 			}
@@ -703,7 +736,13 @@ async function runPlainConversationBody(
 		if (toolsNeedingApproval.length > 0) {
 			return {
 				kind: TOOL_APPROVAL_REQUIRED_KIND,
-				toolNames: toolsNeedingApproval,
+				toolNames: toolsNeedingApproval.map(tc => tc.function.name),
+				autoAcceptWouldRun: await evaluateAutoAcceptWouldRun(
+					toolsNeedingApproval,
+					toolManager,
+					nonInteractiveAlwaysAllow,
+					developmentMode,
+				),
 				finalText: accumulatedFinalText,
 				reasoning: accumulatedReasoning || null,
 				toolCalls: toolCallsLog,
@@ -784,4 +823,26 @@ async function evaluateNeedsApproval(
 		toolCall.function.arguments,
 		{mode, alwaysAllow: nonInteractiveAlwaysAllow},
 	);
+}
+
+// Decided per call rather than per tool name because auto-accept still asks
+// for some calls of tools it otherwise waives (a file_op delete, for one), so
+// the name alone can't say whether suggesting it would change the result.
+async function evaluateAutoAcceptWouldRun(
+	blockedToolCalls: ToolCall[],
+	toolManager: ToolManager,
+	nonInteractiveAlwaysAllow: string[],
+	mode: DevelopmentMode,
+): Promise<boolean> {
+	if (mode === 'auto-accept') return false;
+	for (const toolCall of blockedToolCalls) {
+		const needsApproval = await evaluateNeedsApproval(
+			toolCall,
+			toolManager,
+			nonInteractiveAlwaysAllow,
+			'auto-accept',
+		);
+		if (needsApproval) return false;
+	}
+	return true;
 }

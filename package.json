@@ -1,7 +1,7 @@
 {
 	"name": "@nanocollective/nanocoder",
 	"main": "dist/cli.js",
-	"version": "1.31.0",
+	"version": "1.32.0",
 	"description": "An open coding agent for your terminal, built by a community collective rather than a company. Bring your own model, keep your code on your machine, and owe nothing to anyone.",
 	"keywords": [
 		"cli",
@@ -33,7 +33,7 @@
 		"node": ">=22"
 	},
 	"scripts": {
-		"build": "pnpm --filter @nanocollective/nanocoder-voice build && tsc && tsc-alias && mkdir -p dist/voice && cp plugins/voice/dist/*.js plugins/voice/dist/*.d.ts dist/voice/ && cp source/commands/contributors.json dist/commands/contributors.json && chmod +x dist/cli.js",
+		"build": "pnpm --filter @nanocollective/nanocoder-voice build && tsc && tsc-alias && node scripts/post-build.js",
 		"build:credits": "./scripts/generate-credits.sh",
 		"dev": "tsc --watch",
 		"start": "node dist/cli.js",
@@ -57,7 +57,7 @@
 		"changeset:version": "changeset version && node scripts/normalize-changelog.js",
 		"format": "biome check --write .",
 		"format:check": "biome check .",
-		"build:vscode": "cd plugins/vscode && pnpm run build && mkdir -p ../../assets && pnpm exec vsce package --allow-missing-repository --skip-license --no-dependencies -o ../../assets/nanocoder-vscode.vsix",
+		"build:vscode": "cd plugins/vscode && pnpm run build && node -e \"require('node:fs').mkdirSync('../../assets',{recursive:true})\" && pnpm exec vsce package --allow-missing-repository --skip-license --no-dependencies -o ../../assets/nanocoder-vscode.vsix",
 		"prepublishOnly": "pnpm run build && pnpm run build:vscode",
 		"generate:schema": "tsx scripts/generate-config-schema.ts",
 		"generate:system-prompts": "tsx scripts/generate-system-prompts.ts",
@@ -80,7 +80,7 @@
 		"@ai-sdk/openai": "^3.0.71",
 		"@ai-sdk/openai-compatible": "2.0.51",
 		"@anthropic-ai/tokenizer": "^0.0.4",
-		"@modelcontextprotocol/sdk": "^1.26.0",
+		"@modelcontextprotocol/sdk": "^1.32.2",
 		"@nanocollective/get-md": "^1.6.0",
 		"@nanocollective/prompt-scrub": "^1.0.1",
 		"@vscode/ripgrep": "^1.18.0",
@@ -109,7 +109,7 @@
 		"react": "^19.0.0",
 		"string-width": "^8.2.2",
 		"tiktoken": "^1.0.22",
-		"undici": "^8.5.0",
+		"undici": "^8.12.3",
 		"wrap-ansi": "^10.0.0",
 		"ws": "^8.18.0",
 		"xdg-basedir": "^5.1.0",

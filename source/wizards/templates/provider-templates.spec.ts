@@ -529,7 +529,7 @@ test('requesty template: uses default provider name and model default', t => {
 	t.truthy(template);
 
 	const modelField = template!.fields.find(f => f.name === 'model');
-	t.is(modelField?.default, 'openai/gpt-4o-mini');
+	t.is(modelField?.default, 'openai/gpt-6.1-sol');
 
 	const config = template!.buildConfig({
 		providerName: '',
@@ -565,7 +565,7 @@ test('orcarouter template: uses default provider name and model default', t => {
 	t.truthy(template);
 
 	const modelField = template!.fields.find(f => f.name === 'model');
-	t.is(modelField?.default, 'openai/gpt-5.5');
+	t.is(modelField?.default, 'openai/gpt-6.1-sol');
 
 	const config = template!.buildConfig({
 		providerName: '',
@@ -630,7 +630,7 @@ test('api-route template: uses default provider name and model', t => {
 	t.truthy(template);
 
 	const modelField = template!.fields.find(f => f.name === 'model');
-	t.is(modelField?.default, 'gpt-5.5');
+	t.is(modelField?.default, 'gpt-6.1-sol');
 	t.is(template!.buildConfig({providerName: '', apiKey: 'test-key', model: 'gpt-5.5'}).name, 'API Route');
 });
 
@@ -659,7 +659,7 @@ test('futureinfra template: uses default provider name and model default', t => 
 	t.truthy(template);
 
 	const modelField = template!.fields.find(f => f.name === 'model');
-	t.is(modelField?.default, 'openai/gpt-4o-mini');
+	t.is(modelField?.default, 'openai/gpt-6.1-sol');
 
 	const config = template!.buildConfig({
 		providerName: '',
@@ -668,6 +668,39 @@ test('futureinfra template: uses default provider name and model default', t => 
 	});
 
 	t.is(config.name, 'FutureInfra');
+});
+
+test('opper template: sets baseUrl, default model, and parses models', t => {
+	const template = PROVIDER_TEMPLATES.find(t => t.id === 'opper');
+	t.truthy(template);
+
+	const config = template!.buildConfig({
+		providerName: 'Opper',
+		apiKey: 'test-key',
+		model: 'claude-sonnet-4-6, gpt-5.5',
+	});
+
+	t.is(config.name, 'Opper');
+	t.is(config.baseUrl, 'https://api.opper.ai/v3/compat');
+	t.is(config.apiKey, 'test-key');
+	t.is(config.sdkProvider, undefined);
+	t.deepEqual(config.models, ['claude-sonnet-4-6', 'gpt-5.5']);
+});
+
+test('opper template: uses default provider name and model default', t => {
+	const template = PROVIDER_TEMPLATES.find(t => t.id === 'opper');
+	t.truthy(template);
+
+	const modelField = template!.fields.find(f => f.name === 'model');
+	t.is(modelField?.default, 'claude-sonnet-4-6');
+
+	const config = template!.buildConfig({
+		providerName: '',
+		apiKey: 'test-key',
+		model: 'claude-sonnet-4-6',
+	});
+
+	t.is(config.name, 'Opper');
 });
 
 // ============================================================================
@@ -681,7 +714,7 @@ test('minimax-coding template: sets sdkProvider to anthropic with minimax baseUr
 	t.truthy(template);
 
 	const modelField = template!.fields.find(f => f.name === 'model');
-	t.is(modelField?.default, 'MiniMax-M3,MiniMax-M2.7');
+	t.is(modelField?.default, 'MiniMax-M3.1-Flash,MiniMax-M3');
 
 	const config = template!.buildConfig({
 		apiKey: 'test-key',
@@ -767,7 +800,7 @@ test('thesean template: sets sdkProvider to anthropic with thesean baseUrl', t =
 	t.truthy(template);
 
 	const modelField = template!.fields.find(f => f.name === 'model');
-	t.is(modelField?.default, 'ship-like/claude-opus-4-8');
+	t.is(modelField?.default, 'ship-like/claude-opus-5-5');
 
 	const config = template!.buildConfig({
 		apiKey: 'test-key',
@@ -786,20 +819,20 @@ test('thesean template: sets sdkProvider to anthropic with thesean baseUrl', t =
 
 test('major providers have correct default models', t => {
 	const expectedDefaults: Record<string, string> = {
-		'ollama': 'llama4',
-		'gemini': 'gemini-3.6-flash',
-		'openrouter': 'anthropic/claude-sonnet-5',
-		'openai': 'gpt-5.6-sol',
-		'anthropic': 'claude-sonnet-5',
+		'ollama': 'qwen3.8',
+		'gemini': 'gemini-3.8-flash',
+		'openrouter': 'anthropic/claude-sonnet-5.5',
+		'openai': 'gpt-6.1-sol',
+		'anthropic': 'claude-sonnet-5-5',
 		'mistral': 'mistral-large-latest',
-		'z-ai': 'glm-5.2',
-		'z-ai-coding': 'glm-5.2',
+		'z-ai': 'glm-5.3',
+		'z-ai-coding': 'glm-5.3',
 		'github-models': 'openai/gpt-5.6-sol',
-		'chatgpt-codex': 'gpt-5.3-codex',
-		'github-copilot': 'gpt-5.6-sol',
-		'poe': 'gpt-5.6-sol',
-		'atlas-cloud': 'openai/gpt-5.6-sol',
-		'together': 'deepseek-ai/DeepSeek-V4-Pro',
+		'chatgpt-codex': 'gpt-6.1-sol',
+		'github-copilot': 'gpt-6.1-sol',
+		'poe': 'claude-sonnet-5.5',
+		'atlas-cloud': 'openai/gpt-6.1-sol',
+		'together': 'deepseek-ai/DeepSeek-V4-Pro-0813',
 	};
 
 	for (const [providerId, expectedModel] of Object.entries(expectedDefaults)) {

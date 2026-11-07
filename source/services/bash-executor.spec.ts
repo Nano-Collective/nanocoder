@@ -1,8 +1,11 @@
-import test from 'ava';
-import {mkdtempSync, readFileSync, writeFileSync} from 'node:fs';
+import test, {type ExecutionContext} from 'ava';
+import {execFileSync, spawn} from 'node:child_process';
+import {mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
+import {fileURLToPath} from 'node:url';
 import { BashExecutor } from './bash-executor';
+import {resetSessionCwd, setSessionCwd} from './session-cwd';
 
 console.log(`\nbash-executor.spec.ts`);
 
@@ -614,35 +617,27 @@ test('cancel() on a detached process kills a spawned child (process-group assert
 	);
 });
 
-test('cancel() kills a background child after the shell leader has exited', async t => {
+test('stopAll kills a background child after the shell leader has exited', async t => {
 	if (process.platform === 'win32') {
 		t.pass('Skipped on Windows - no process groups');
 		return;
 	}
 
 	const executor = createExecutor();
-	// No `wait`: the wrapping shell exits straight away, but the backgrounded
-	// child keeps the output pipe open, so the execution is still active.
-	const {promise, executionId} = executor.execute('sleep 30 & echo PID:$!');
-
-	let childPid: number | undefined;
-	for (let tick = 0; tick < 30 && !childPid; tick++) {
-		await new Promise(resolve => setTimeout(resolve, 100));
-		const match = executor.getState(executionId)?.fullOutput.match(/PID:(\d+)/);
-		if (match) childPid = Number(match[1]);
-	}
+	// No `wait`: the wrapping shell exits straight away while the backgrounded
+	// child keeps the output pipe open. The command completes when the shell
+	// exits and the child is left running in the leader-less group.
+	const result = await executor.execute('sleep 30 & echo PID:$!').promise;
+	const childPid = Number(result.fullOutput.match(/PID:(\d+)/)?.[1]);
 	t.truthy(childPid, 'Should have captured the background child PID');
-	// Let the shell leader exit before cancelling.
-	await new Promise(resolve => setTimeout(resolve, 200));
-	t.true(isLiveProcess(childPid!), 'Child should be alive before cancel');
+	t.true(isLiveProcess(childPid), 'Child should be alive after the result');
 
-	t.true(executor.cancel(executionId));
-	await promise;
+	await executor.stopAll();
 	await new Promise(resolve => setTimeout(resolve, 300));
 
 	t.false(
-		isLiveProcess(childPid!),
-		'cancel must reach the process group even when its leader is gone',
+		isLiveProcess(childPid),
+		'shutdown must reach the process group even when its leader is gone',
 	);
 });
 
@@ -655,13 +650,10 @@ test('cancel - SIGKILL fallback terminates processes that ignore SIGTERM', async
 	);
 
 	// Wait for process to spawn and capture its output
-	await new Promise(resolve => setTimeout(resolve, 300));
-	const state = executor.getState(executionId);
-	t.truthy(state);
-	const match = state?.fullOutput.match(/PID:(\d+)/);
-	t.truthy(match, 'Should have captured the child PID');
-	const childPid = match ? Number(match[1]) : undefined;
+	const childPid = await childPidOf(executor, executionId);
+	t.truthy(childPid, 'Should have captured the child PID');
 
+	const start = Date.now();
 	const cancelled = executor.cancel(executionId);
 	t.true(cancelled, 'cancel() should return true for active execution');
 
@@ -670,28 +662,10 @@ test('cancel - SIGKILL fallback terminates processes that ignore SIGTERM', async
 	t.is(result.error, 'Cancelled by user');
 
 	if (childPid && process.platform !== 'win32') {
-		// Immediately after cancel(), the process should still be alive because it ignores SIGTERM
-		let isAliveBefore = false;
-		try {
-			process.kill(childPid, 0);
-			isAliveBefore = true;
-		} catch {
-			isAliveBefore = false;
-		}
-		t.true(isAliveBefore, 'Process should still be alive immediately after SIGTERM since it traps SIGTERM');
-
-		// Wait past the 2000ms SIGKILL timeout
-		await new Promise(resolve => setTimeout(resolve, 2300));
-
-		// Now process MUST be dead via SIGKILL
-		let isAliveAfter = false;
-		try {
-			process.kill(childPid, 0);
-			isAliveAfter = true;
-		} catch {
-			isAliveAfter = false;
-		}
-		t.false(isAliveAfter, 'Process must be killed by SIGKILL fallback after 2 seconds');
+		// The result waits for the SIGKILL fallback, so by the time it arrives
+		// the process that ignored SIGTERM is already gone.
+		t.true(Date.now() - start >= 1900, 'Result should wait for the SIGKILL fallback');
+		t.false(isLiveProcess(childPid), 'Process must be gone once the cancel is reported');
 	}
 });
 
@@ -749,6 +723,70 @@ test('cancel - SIGKILL fires even when proc.killed is true from SIGTERM fallback
 
 	await promise;
 });
+
+// cmd.exe parses its command line itself, so Node's default argv quoting turns
+// every inner `"` into `\"` and mangles the command (#1663). These need a real
+// cmd.exe, so they only run on Windows.
+const cmdQuotingTest = process.platform === 'win32' ? test : test.skip;
+
+/* c8 ignore start -- the callbacks run in the Windows CI job */
+async function runInCwd(command: string, cwd?: string) {
+	if (cwd) setSessionCwd(cwd);
+	try {
+		return await createExecutor().execute(command).promise;
+	} finally {
+		resetSessionCwd();
+	}
+}
+
+function makeRepo(t: ExecutionContext): string {
+	const repo = mkdtempSync(join(tmpdir(), 'nc-quote-'));
+	t.teardown(() => rmSync(repo, {recursive: true, force: true}));
+	for (const args of [
+		['init', '-q'],
+		['config', 'user.name', 'Test'],
+		['config', 'user.email', 'test@example.com'],
+	]) {
+		execFileSync('git', args, {cwd: repo});
+	}
+	return repo;
+}
+
+cmdQuotingTest('cmd.exe quoting - echo keeps its quotes', async t => {
+	const result = await runInCwd('echo "hello world"');
+	t.is(result.fullOutput.trim(), '"hello world"');
+});
+
+// Previously exited 0 with no output at all.
+cmdQuotingTest('cmd.exe quoting - node -e runs its script', async t => {
+	const result = await runInCwd('node -e "console.log(1+1)"');
+	t.is(result.fullOutput.trim(), '2');
+});
+
+cmdQuotingTest('cmd.exe quoting - git commit takes a multi-word message', async t => {
+	const repo = makeRepo(t);
+	const result = await runInCwd('git commit --allow-empty -m "fix the bug"', repo);
+	t.is(result.exitCode, 0, result.stderr);
+	const subject = execFileSync('git', ['log', '-1', '--format=%s'], {
+		cwd: repo,
+		encoding: 'utf8',
+	});
+	t.is(subject.trim(), 'fix the bug');
+});
+
+cmdQuotingTest('cmd.exe quoting - git log keeps its quoted format', async t => {
+	const repo = makeRepo(t);
+	execFileSync('git', ['commit', '--allow-empty', '-m', 'fix the bug'], {cwd: repo});
+	const result = await runInCwd('git log -1 --format="%h %s"', repo);
+	t.is(result.exitCode, 0, result.stderr);
+	t.regex(result.fullOutput.trim(), /^[0-9a-f]+ fix the bug$/);
+});
+
+cmdQuotingTest('cmd.exe quoting - & still chains commands', async t => {
+	const result = await runInCwd('echo a & echo b');
+	t.deepEqual(result.fullOutput.trim().split(/\s*\r?\n/), ['a', 'b']);
+});
+/* c8 ignore stop */
 
 // Also run on Windows CI, where the shell is `cmd /c` and only taskkill /T
 // reaches the program it started. A script file, because cmd.exe mangles the
@@ -811,4 +849,253 @@ test('tree kill: a timeout stops the program the shell started', async t => {
 
 	t.is(result.error, 'Command timed out after 1500ms');
 	t.true(await isGoneWithin(childPid!, 5000), 'child node process must not survive the timeout');
+});
+
+// #1833: nothing a command started may outlive the report that it timed out
+// or was cancelled, or nanocoder's own exit. These need process groups.
+const IGNORES_SIGTERM = `trap '' TERM; echo PID:$$; while :; do sleep 0.2; done`;
+// Exits at once and leaves `sleep` running in its process group.
+const LEAVES_A_JOB = 'sleep 60 > /dev/null 2>&1 & echo PID:$$';
+
+// On Linux, zombies don't count: they can stay unreaped for good when pid 1
+// doesn't reap orphans, as in some containers.
+function isGroupAlive(pgid: number): boolean {
+	try {
+		process.kill(-pgid, 0);
+	} catch {
+		return false;
+	}
+	if (process.platform !== 'linux') return true;
+	return readdirSync('/proc').some(pid => {
+		if (!/^\d+$/.test(pid)) return false;
+		try {
+			const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
+			const [state, , pgrp] = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
+			return state !== 'Z' && Number(pgrp) === pgid;
+		} catch {
+			return false;
+		}
+	});
+}
+
+// If an assertion fails first, don't leave a loop that ignores SIGTERM behind.
+function killGroupsOnTeardown(t: ExecutionContext, pgids: number[]): void {
+	t.teardown(() => {
+		for (const pgid of pgids) {
+			if (isGroupAlive(pgid)) process.kill(-pgid, 'SIGKILL');
+		}
+	});
+}
+
+const posixOnly = process.platform === 'win32' ? test.skip : test;
+
+posixOnly('timeout is reported only once a group that ignores SIGTERM is gone', async t => {
+	const executor = createExecutor();
+	const {executionId, promise} = executor.execute(IGNORES_SIGTERM, {timeoutMs: 500});
+	const pgid = await childPidOf(executor, executionId);
+	t.truthy(pgid, 'Should have captured the shell PID');
+	killGroupsOnTeardown(t, [pgid!]);
+
+	const result = await promise;
+
+	t.is(result.error, 'Command timed out after 500ms');
+	t.false(isGroupAlive(pgid!), 'no process of the command may outlive the timeout result');
+});
+
+posixOnly('cancel is reported only once a group that ignores SIGTERM is gone', async t => {
+	const executor = createExecutor();
+	const {executionId, promise} = executor.execute(IGNORES_SIGTERM);
+	const pgid = await childPidOf(executor, executionId);
+	t.truthy(pgid, 'Should have captured the shell PID');
+	killGroupsOnTeardown(t, [pgid!]);
+
+	t.true(executor.cancel(executionId));
+	const result = await promise;
+
+	t.is(result.error, 'Cancelled by user');
+	t.false(isGroupAlive(pgid!), 'no process of the command may outlive the cancel result');
+});
+
+posixOnly('stopAll stops running commands and jobs a finished command left behind', async t => {
+	const executor = createExecutor();
+	const running = executor.execute(IGNORES_SIGTERM);
+	const runningPgid = await childPidOf(executor, running.executionId);
+	t.truthy(runningPgid, 'Should have captured the shell PID');
+	const finished = await executor.execute(LEAVES_A_JOB).promise;
+	const leftoverPgid = Number(finished.fullOutput.match(/PID:(\d+)/)?.[1]);
+	killGroupsOnTeardown(t, [runningPgid!, leftoverPgid]);
+	t.is(finished.exitCode, 0);
+	t.true(isGroupAlive(leftoverPgid), 'the background job should still be running');
+
+	await executor.stopAll();
+
+	t.false(isGroupAlive(runningPgid!), 'the running command must be gone');
+	t.false(isGroupAlive(leftoverPgid), 'the background job must be gone');
+	t.is((await running.promise).error, 'Cancelled by user');
+});
+
+posixOnly('killAll SIGKILLs running commands and leftover jobs without waiting', async t => {
+	const executor = createExecutor();
+	const running = executor.execute(IGNORES_SIGTERM);
+	const runningPgid = await childPidOf(executor, running.executionId);
+	t.truthy(runningPgid, 'Should have captured the shell PID');
+	const finished = await executor.execute(LEAVES_A_JOB).promise;
+	const leftoverPgid = Number(finished.fullOutput.match(/PID:(\d+)/)?.[1]);
+	killGroupsOnTeardown(t, [runningPgid!, leftoverPgid]);
+
+	executor.killAll();
+	await running.promise;
+
+	t.true(await isGoneWithin(runningPgid!, 1000), 'the running command must be gone');
+	t.true(await isGoneWithin(leftoverPgid, 1000), 'the background job must be gone');
+});
+
+// Runs the real singleton in its own process, then stops that process the way
+// a closed terminal, `kill`, or a forced quit would.
+const SHUTDOWN_WORKER = `
+const [executorUrl, mode] = process.argv.slice(2);
+const {bashExecutor} = await import(executorUrl);
+const running = bashExecutor.execute(${JSON.stringify(IGNORES_SIGTERM)});
+const finished = await bashExecutor.execute(${JSON.stringify(LEAVES_A_JOB)}).promise;
+let runningPgid;
+while (!runningPgid) {
+	await new Promise(resolve => setTimeout(resolve, 50));
+	runningPgid = bashExecutor.getState(running.executionId)?.fullOutput.match(/PID:(\\d+)/)?.[1];
+}
+const leftoverPgid = finished.fullOutput.match(/PID:(\\d+)/)[1];
+console.log('READY ' + runningPgid + ' ' + leftoverPgid);
+// Exit only when told to, so the test can see both groups running first.
+if (mode === 'exit') process.stdin.once('data', () => process.exit(0));
+else setInterval(() => {}, 1000);
+`;
+
+async function stopWorker(
+	t: ExecutionContext,
+	how: 'SIGTERM' | 'SIGHUP' | 'exit',
+): Promise<{code: number | null; pgids: number[]}> {
+	const dir = mkdtempSync(join(tmpdir(), 'nc-bash-shutdown-'));
+	t.teardown(() => rmSync(dir, {recursive: true, force: true}));
+	const workerPath = join(dir, 'worker.mjs');
+	writeFileSync(workerPath, SHUTDOWN_WORKER);
+
+	const child = spawn(
+		process.execPath,
+		[
+			'--import',
+			import.meta.resolve('tsx'),
+			workerPath,
+			new URL('./bash-executor.ts', import.meta.url).href,
+			how,
+		],
+		{
+			cwd: dir,
+			env: {
+				...process.env,
+				NANOCODER_CONFIG_DIR: dir,
+				NANOCODER_LOG_DISABLE_FILE: 'true',
+				TSX_TSCONFIG_PATH: fileURLToPath(
+					new URL('../../tsconfig.json', import.meta.url),
+				),
+			},
+			stdio: ['pipe', 'pipe', 'pipe'],
+		},
+	);
+	let stdout = '';
+	let stderr = '';
+	child.stderr.on('data', chunk => {
+		stderr += String(chunk);
+	});
+	const exited = new Promise<number | null>(resolve => {
+		child.on('exit', code => resolve(code));
+	});
+	const pgids = await new Promise<number[]>((resolve, reject) => {
+		child.stdout.on('data', chunk => {
+			stdout += String(chunk);
+			const ready = stdout.match(/READY (\d+) (\d+)/);
+			if (ready) resolve([Number(ready[1]), Number(ready[2])]);
+		});
+		void exited.then(code =>
+			reject(new Error(`worker exited (${code}) before READY: ${stderr}`)),
+		);
+	});
+	killGroupsOnTeardown(t, pgids);
+	t.true(pgids.every(isGroupAlive), 'both groups should be running before the worker stops');
+
+	if (how === 'exit') child.stdin.write('go\n');
+	else child.kill(how);
+	return {code: await exited, pgids};
+}
+
+for (const signal of ['SIGTERM', 'SIGHUP'] as const) {
+	posixOnly(`${signal} to nanocoder stops its commands and leftover jobs before it exits`, async t => {
+		t.timeout(30_000);
+		const {code, pgids} = await stopWorker(t, signal);
+
+		t.is(code, 0, 'a graceful shutdown exits 0');
+		for (const pgid of pgids) {
+			t.false(isGroupAlive(pgid), `group ${pgid} must be gone by the time nanocoder has exited`);
+		}
+	});
+}
+
+posixOnly('a forced exit SIGKILLs commands and leftover jobs that are still running', async t => {
+	t.timeout(30_000);
+	const {code, pgids} = await stopWorker(t, 'exit');
+
+	t.is(code, 0);
+	for (const pgid of pgids) {
+		t.true(await isGoneWithin(pgid, 1000), `group ${pgid} must not outlive nanocoder`);
+	}
+});
+
+// A job backgrounded without redirection inherits the command's stdout and
+// holds the pipe open for its whole life. The result must not wait for it.
+posixOnly('a background job holding stdout open does not block the result', async t => {
+	const executor = createExecutor();
+	const started = Date.now();
+	const result = await executor.execute('sleep 20 & echo PID:$$; echo done').promise;
+	const elapsed = Date.now() - started;
+	const pgid = Number(result.fullOutput.match(/PID:(\d+)/)?.[1]);
+	killGroupsOnTeardown(t, [pgid]);
+
+	t.true(elapsed < 3000, `expected the result within 3s, took ${elapsed}ms`);
+	t.is(result.exitCode, 0);
+	t.regex(result.fullOutput, /done/);
+	t.true(isGroupAlive(pgid), 'the background job must keep running');
+
+	// Still tracked, so shutdown cleanup reaches it.
+	await executor.stopAll();
+	t.false(isGroupAlive(pgid), 'stopAll must stop the background job');
+});
+
+posixOnly('a background job still writing after the result is not killed by a closed pipe', async t => {
+	const executor = createExecutor();
+	const result = await executor.execute(
+		'(sleep 0.5; while :; do echo tick; sleep 0.1; done) & echo PID:$$',
+	).promise;
+	const pgid = Number(result.fullOutput.match(/PID:(\d+)/)?.[1]);
+	killGroupsOnTeardown(t, [pgid]);
+	t.is(result.exitCode, 0);
+
+	await new Promise(resolve => setTimeout(resolve, 1200));
+	t.true(isGroupAlive(pgid), 'the job must survive writing to its stdout');
+	t.false(result.fullOutput.includes('tick'), 'output after the result is not collected');
+	await executor.stopAll();
+});
+
+test('large output from a fast command is captured in full', async t => {
+	const executor = createExecutor();
+	const result = await executor.execute('seq 1 200000').promise;
+	const lines = result.fullOutput.trimEnd().split('\n');
+	t.is(lines.length, 200000);
+	t.is(lines[0], '1');
+	t.is(lines.at(-1), '200000');
+	t.is(result.exitCode, 0);
+});
+
+test('exit code is reported when the shell exits without a close', async t => {
+	const executor = createExecutor();
+	const result = await executor.execute('sleep 5 & exit 3').promise;
+	t.is(result.exitCode, 3);
+	await executor.stopAll();
 });

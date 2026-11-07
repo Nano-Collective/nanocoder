@@ -2,13 +2,15 @@ import type {
 	AgentSideConnection,
 	ClientCapabilities,
 } from '@agentclientprotocol/sdk';
+import {mergeDisabledTools} from '@/acp/acp-capabilities';
+import {getAppConfig} from '@/config/index';
 import {SemanticMemoryManager} from '@/memory/semantic-memory-manager';
 import {
 	createSessionCwdScope,
 	type SessionCwdScope,
 } from '@/services/session-cwd';
 import {TimelineManager} from '@/services/timeline-manager';
-import type {DevelopmentMode, Message} from '@/types/core';
+import type {DevelopmentMode, LLMClient, Message} from '@/types/core';
 
 export class AcpSession {
 	readonly sessionId: string;
@@ -29,10 +31,31 @@ export class AcpSession {
 	baseSystemMessage?: Message;
 	abortController = new AbortController();
 	developmentMode: DevelopmentMode;
+	/** Tools the client turned off for this session. Not persisted: the client sends them on every new, load and resume. */
+	disabledTools: string[] = [];
 	/** True while a prompt turn is being processed. Overlapping calls wait on acquireTurn(). */
 	turnActive = false;
+	/** Set by session/close. Queued prompts check it before they start. */
+	closed = false;
 	/** URI of the file currently focused in the editor client (e.g. VS Code). */
 	activeFile?: string;
+	/**
+	 * Provider, model and client this session talks to. They start from the
+	 * process default and change only through this session; a client is never
+	 * re-pointed at another model, so sessions that began on the same one do not
+	 * follow each other.
+	 */
+	provider = '';
+	model = '';
+	client?: LLMClient;
+	/** The model changed mid-turn: the prompt is rebuilt before the next turn. */
+	promptStale = false;
+	/**
+	 * Tune's aggressive-compact preset for this session's provider, set when its
+	 * prompt is built. Kept here, not in the process-wide preset, so one session
+	 * switching provider does not change when another session compacts.
+	 */
+	aggressiveCompact = false;
 	private memoryFinder?: SemanticMemoryManager;
 
 	constructor(options: {
@@ -51,12 +74,29 @@ export class AcpSession {
 		this.cwdScope = createSessionCwdScope(options.cwd);
 	}
 
+	/**
+	 * What this session does not offer or run: the user's disabledTools plus the
+	 * client's. With `isKnown`, the client's names that are not known tools are
+	 * left out, which is the list to report back as in effect.
+	 */
+	effectiveDisabledTools(isKnown?: (name: string) => boolean): string[] {
+		const requested = isKnown
+			? this.disabledTools.filter(isKnown)
+			: this.disabledTools;
+		return mergeDisabledTools(getAppConfig().disabledTools, requested);
+	}
+
 	getMemoryFinder(): SemanticMemoryManager {
 		return (this.memoryFinder ??= new SemanticMemoryManager({cwd: this.cwd}));
 	}
 
 	cancel(): void {
 		this.abortController.abort();
+	}
+
+	close(): void {
+		this.closed = true;
+		this.cancel();
 	}
 
 	beginTurn(): void {

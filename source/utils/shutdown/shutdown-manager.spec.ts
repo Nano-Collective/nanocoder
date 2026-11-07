@@ -264,6 +264,62 @@ test.serial('gracefulShutdown passes exit code', async (t) => {
 	t.is(exitCalled, 42);
 });
 
+test.serial(
+	'a failure requested during a clean shutdown in flight sets the exit code',
+	async (t) => {
+		const manager = getShutdownManager();
+		let release: () => void = () => undefined;
+		manager.register({
+			name: 'slow',
+			priority: 10,
+			handler: () =>
+				new Promise<void>((resolve) => {
+					release = resolve;
+				}),
+		});
+
+		// A signal starts a clean shutdown; while its handlers run, the work it
+		// interrupted reports a failure. A later 0 does not clear it, and the
+		// first failure wins over a later one.
+		const inFlight = manager.gracefulShutdown(0);
+		await manager.gracefulShutdown(1);
+		await manager.gracefulShutdown(0);
+		await manager.gracefulShutdown(2);
+		t.is(exitCalled, null);
+
+		release();
+		await inFlight;
+		t.is(exitCalled, 1);
+	},
+);
+
+test.serial(
+	'an unhandled error during a clean shutdown in flight does not change the exit code',
+	async (t) => {
+		const manager = getShutdownManager();
+		let release: () => void = () => undefined;
+		manager.register({
+			name: 'slow',
+			priority: 10,
+			handler: () =>
+				new Promise<void>((resolve) => {
+					release = resolve;
+				}),
+		});
+
+		const inFlight = manager.gracefulShutdown(0);
+		// What a teardown rejection reaches: the bound process listeners.
+		// biome-ignore lint/suspicious/noExplicitAny: reaching the private listeners
+		const listeners = manager as any;
+		listeners.boundUncaughtException(new Error('teardown'));
+		listeners.boundUnhandledRejection(new Error('teardown'), Promise.resolve());
+
+		release();
+		await inFlight;
+		t.is(exitCalled, 0);
+	},
+);
+
 test.serial('uses NANOCODER_DEFAULT_SHUTDOWN_TIMEOUT env var', (t) => {
 	const originalEnv = process.env.NANOCODER_DEFAULT_SHUTDOWN_TIMEOUT;
 
@@ -283,6 +339,9 @@ test.serial('programmatic timeoutMs takes priority over env var', (t) => {
 	t.is(manager['timeoutMs'], 15000);
 
 	process.env.NANOCODER_DEFAULT_SHUTDOWN_TIMEOUT = originalEnv ?? '';
+	// Not the singleton, so resetShutdownManager() won't remove its signal
+	// handlers; a later test that emits a signal would trigger it too.
+	manager.reset();
 });
 
 test.serial('invalid env var falls back to default', (t) => {
@@ -295,4 +354,38 @@ test.serial('invalid env var falls back to default', (t) => {
 
 	process.env.NANOCODER_DEFAULT_SHUTDOWN_TIMEOUT = originalEnv ?? '';
 	resetShutdownManager();
+});
+
+test.serial('SIGHUP runs a graceful shutdown, and a second hangup does not cut it short', async (t) => {
+	const manager = getShutdownManager();
+	let runs = 0;
+	let finished = false;
+	manager.register({
+		name: 'slow-drain',
+		priority: 10,
+		async handler() {
+			runs++;
+			await new Promise(resolve => setTimeout(resolve, 50));
+			finished = true;
+		},
+	});
+
+	process.emit('SIGHUP');
+	// A closed terminal often delivers two. With no listener left, the second
+	// would kill the process before the handlers finish.
+	t.true(process.listenerCount('SIGHUP') > 0, 'still listening after the first SIGHUP');
+	process.emit('SIGHUP');
+	await new Promise(resolve => setTimeout(resolve, 200));
+
+	t.is(runs, 1);
+	t.true(finished);
+	t.is(exitCalled, 0);
+});
+
+test.serial('reset removes the SIGHUP listener', (t) => {
+	const before = process.listenerCount('SIGHUP');
+	getShutdownManager();
+	t.is(process.listenerCount('SIGHUP'), before + 1);
+	resetShutdownManager();
+	t.is(process.listenerCount('SIGHUP'), before);
 });

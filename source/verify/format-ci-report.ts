@@ -1,3 +1,5 @@
+import {redactSecrets} from './redact-secrets';
+
 export interface FormatCiReportInput {
 	runId: number;
 	workflowName: string;
@@ -15,7 +17,8 @@ export interface FormatCiReportInput {
  * re-derived from the LLM's own text) with the investigator subagent's
  * narrative diagnosis into a single report body, mirroring
  * `format-review.ts`'s split between deterministic and model-generated
- * content.
+ * content. The whole body goes through `redactSecrets`: the diagnosis is
+ * written from attacker-controllable CI logs and is posted publicly.
  */
 export function formatCiReport(input: FormatCiReportInput): string {
 	const {runId, workflowName, branch, url, subagentOutput, fixApplied} = input;
@@ -24,7 +27,7 @@ export function formatCiReport(input: FormatCiReportInput): string {
 		? '*Generated automatically by the Nanocoder daemon — a fix was implemented, committed, and published as described above. Review before merging.*'
 		: '*Generated automatically by the Nanocoder daemon — advisory diagnosis, no auto-fix applied.*';
 
-	return [
+	const body = [
 		`## Nanocoder CI Investigation — "${workflowName}" failed on \`${branch}\``,
 		'',
 		`Run: [#${runId}](${url})`,
@@ -34,4 +37,5 @@ export function formatCiReport(input: FormatCiReportInput): string {
 		'---',
 		footer,
 	].join('\n');
+	return redactSecrets(body);
 }

@@ -184,9 +184,11 @@ export function runSemgrepProcess(
 	spawnFn: SpawnFn = spawn,
 ): Promise<string> {
 	return new Promise((resolve, reject) => {
+		// `--` ends option parsing: `paths` are a PR's changed files, so a
+		// file named e.g. `--output=...` must stay a path, not become a flag.
 		const proc = spawnFn(
 			'semgrep',
-			['scan', '--config', 'auto', '--json', ...paths],
+			['scan', '--config', 'auto', '--json', '--', ...paths],
 			{cwd},
 		);
 		let stdout = '';
