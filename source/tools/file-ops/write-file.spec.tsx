@@ -982,13 +982,22 @@ test('write_file: keeps CRLF line endings when overwriting a CRLF file', async t
 	t.is(content, 'one\r\ntwo\r\nthree\r\n');
 });
 
-test('write_file: writes content that has its own CRLF as sent', async t => {
-	const filePath = await createTestFile('crlf-sent.txt', 'one\r\ntwo\r\n');
+test('write_file: converts mixed content for a CRLF file', async t => {
+	const filePath = await createTestFile('crlf-mixed.txt', 'one\r\ntwo\r\n');
 
-	await executeWriteFile({path: filePath, content: 'one\r\ntwo\n'});
+	await executeWriteFile({path: filePath, content: 'one\r\ntwo\nthree\n'});
 
 	const content = await readFile(filePath, 'utf-8');
-	t.is(content, 'one\r\ntwo\n');
+	t.is(content, 'one\r\ntwo\r\nthree\r\n');
+});
+
+test('write_file: writes CRLF content to an LF file as sent', async t => {
+	const filePath = await createTestFile('lf.txt', 'one\ntwo\n');
+
+	await executeWriteFile({path: filePath, content: 'one\r\ntwo\r\n'});
+
+	const content = await readFile(filePath, 'utf-8');
+	t.is(content, 'one\r\ntwo\r\n');
 });
 
 test('write_file: writes a new file with the line endings it was given', async t => {

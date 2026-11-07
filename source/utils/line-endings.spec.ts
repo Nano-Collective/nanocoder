@@ -59,7 +59,10 @@ test('fitContentToLineEndings: leaves new files and LF files unchanged', t => {
 	t.is(fitContentToLineEndings('a\r\nb\n', 'x\ny\n'), 'x\ny\n');
 });
 
-test('fitContentToLineEndings: keeps content that has its own CRLF', t => {
-	t.is(fitContentToLineEndings('a\r\nb\r\n', 'x\r\ny\n'), 'x\r\ny\n');
+test('fitContentToLineEndings: converts mixed content for a CRLF file', t => {
+	t.is(fitContentToLineEndings('a\r\nb\r\n', 'x\r\ny\nz\n'), 'x\r\ny\r\nz\r\n');
+});
+
+test('fitContentToLineEndings: keeps CRLF content for an LF file as sent', t => {
 	t.is(fitContentToLineEndings('a\nb\n', 'x\r\ny\r\n'), 'x\r\ny\r\n');
 });
