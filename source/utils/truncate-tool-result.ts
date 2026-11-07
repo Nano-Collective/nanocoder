@@ -73,6 +73,25 @@ function snapOutsideToken(
 }
 
 /**
+ * A cut must not fall between the two UTF-16 code units of a surrogate pair
+ * (astral characters such as emoji), which would leave a lone surrogate.
+ * If `index` splits a pair, move it to the pair's start (`bias: 'before'`) or
+ * end (`bias: 'after'`).
+ */
+function snapOutsideSurrogatePair(
+	content: string,
+	index: number,
+	bias: 'before' | 'after',
+): number {
+	if (index <= 0 || index >= content.length) return index;
+	const isHigh = (code: number) => code >= 0xd800 && code <= 0xdbff;
+	const isLow = (code: number) => code >= 0xdc00 && code <= 0xdfff;
+	if (!isHigh(content.charCodeAt(index - 1))) return index;
+	if (!isLow(content.charCodeAt(index))) return index;
+	return bias === 'before' ? index - 1 : index + 1;
+}
+
+/**
  * Bound text returned by a tool before it is added to model context.
  *
  * Keeping the tail is important for compiler, test-runner, and command output,
@@ -92,16 +111,24 @@ export function truncateToolResult(
 	const headLength = Math.floor(contentBudget * HEAD_SHARE);
 	const tailLength = contentBudget - headLength;
 
-	const headEnd = snapOutsideToken(
+	const headEnd = snapOutsideSurrogatePair(
 		content,
-		snapOutsidePlaceholder(content, headLength, 'before'),
+		snapOutsideToken(
+			content,
+			snapOutsidePlaceholder(content, headLength, 'before'),
+			'before',
+		),
 		'before',
 	);
 	const tailStart = Math.max(
 		headEnd,
-		snapOutsideToken(
+		snapOutsideSurrogatePair(
 			content,
-			snapOutsidePlaceholder(content, content.length - tailLength, 'after'),
+			snapOutsideToken(
+				content,
+				snapOutsidePlaceholder(content, content.length - tailLength, 'after'),
+				'after',
+			),
 			'after',
 		),
 	);
