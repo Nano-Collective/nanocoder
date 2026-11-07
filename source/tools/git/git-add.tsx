@@ -36,7 +36,11 @@ const executeGitAdd = async (args: GitAddInput): Promise<string> => {
 		} else if (args.update) {
 			gitArgs.push('-u');
 		} else if (args.files && args.files.length > 0) {
-			gitArgs.push(...args.files);
+			// `--` closes the option list: a file called `-weird.txt` is staged
+			// instead of being read as a switch, and an entry like `--force`
+			// cannot widen the staging set to ignored files. `git_diff` and
+			// `git_log` already do this.
+			gitArgs.push('--', ...args.files);
 		} else {
 			// Default to staging all changes
 			gitArgs.push('-A');
