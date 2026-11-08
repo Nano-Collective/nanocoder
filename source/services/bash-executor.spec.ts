@@ -4,6 +4,7 @@ import {mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync} from 'nod
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
+import {BASH_BACKGROUND_MAX_RETAINED_JOBS} from '@/constants';
 import { BashExecutor } from './bash-executor';
 import {resetSessionCwd, setSessionCwd} from './session-cwd';
 
@@ -798,6 +799,15 @@ writeFileSync(
 );
 const LONG_RUNNING_NODE = `node ${SLEEPER}`;
 
+// Prints once immediately, then keeps printing so a test can tell one read
+// from the next.
+const CHATTY = join(mkdtempSync(join(tmpdir(), 'nc-chatty-')), 'chatty.js');
+writeFileSync(
+	CHATTY,
+	"let i = 0; console.log('PID:' + process.pid + ' tick ' + i); setInterval(() => console.log('tick ' + (++i)), 100);\n",
+);
+const CHATTY_NODE = `node ${CHATTY}`;
+
 async function childPidOf(
 	executor: BashExecutor,
 	executionId: string,
@@ -949,6 +959,113 @@ posixOnly('killAll SIGKILLs running commands and leftover jobs without waiting',
 	t.true(await isGoneWithin(runningPgid!, 1000), 'the running command must be gone');
 	t.true(await isGoneWithin(leftoverPgid, 1000), 'the background job must be gone');
 });
+
+// ============================================================================
+// Background jobs
+// ============================================================================
+
+test('background execute keeps running and readJobOutput reports it', async t => {
+	const executor = createExecutor();
+	const {executionId} = executor.execute(LONG_RUNNING_NODE, {background: true});
+	const childPid = await childPidOf(executor, executionId);
+	t.truthy(childPid, 'Should have captured the child PID');
+
+	const first = executor.readJobOutput(executionId);
+	t.truthy(first);
+	t.false(first!.isComplete);
+	t.is(first!.exitCode, null);
+	t.true(first!.output.includes(`PID:${childPid}`));
+
+	await executor.killJob(executionId);
+
+	const final = executor.readJobOutput(executionId);
+	t.truthy(final);
+	t.true(final!.isComplete);
+	t.is(final!.error, 'Killed by user');
+	t.true(await isGoneWithin(childPid!, 5000), 'the job must be gone after killJob');
+});
+
+test('readJobOutput only returns output produced since the previous read', async t => {
+	const executor = createExecutor();
+	const {executionId} = executor.execute(CHATTY_NODE, {background: true});
+	t.truthy(await childPidOf(executor, executionId));
+
+	const first = executor.readJobOutput(executionId)!;
+	t.true(first.output.includes('tick 0'));
+
+	await new Promise(resolve => setTimeout(resolve, 300));
+	const second = executor.readJobOutput(executionId)!;
+	t.false(second.output.includes('tick 0'));
+	t.true(second.output.includes('tick'));
+
+	await executor.killJob(executionId);
+});
+
+test('background execute ignores the turn AbortSignal', async t => {
+	const executor = createExecutor();
+	const controller = new AbortController();
+	const {executionId} = executor.execute(LONG_RUNNING_NODE, {
+		background: true,
+		signal: controller.signal,
+	});
+	const childPid = await childPidOf(executor, executionId);
+	t.truthy(childPid);
+
+	controller.abort();
+	await new Promise(resolve => setTimeout(resolve, 300));
+
+	t.true(isLiveProcess(childPid!), 'aborting the turn must not stop the job');
+	t.false(executor.getState(executionId)!.isComplete);
+
+	await executor.killJob(executionId);
+});
+
+test('stopSessionJobs kills only the jobs owned by that session', async t => {
+	const executor = createExecutor();
+	const owned = executor.execute(LONG_RUNNING_NODE, {
+		background: true,
+		sessionId: 'session-a',
+	});
+	const other = executor.execute(LONG_RUNNING_NODE, {
+		background: true,
+		sessionId: 'session-b',
+	});
+	const ownedPid = await childPidOf(executor, owned.executionId);
+	const otherPid = await childPidOf(executor, other.executionId);
+	t.truthy(ownedPid);
+	t.truthy(otherPid);
+
+	await executor.stopSessionJobs('session-a');
+
+	t.true(await isGoneWithin(ownedPid!, 5000), 'the session job must be gone');
+	t.true(isLiveProcess(otherPid!), 'another session job must keep running');
+
+	await executor.killJob(other.executionId);
+});
+
+test('completed background jobs are pruned past the retained cap', async t => {
+	const executor = createExecutor();
+	const ids: string[] = [];
+
+	for (let i = 0; i < BASH_BACKGROUND_MAX_RETAINED_JOBS + 2; i++) {
+		const {executionId, promise} = executor.execute('echo done', {
+			background: true,
+		});
+		ids.push(executionId);
+		await promise;
+	}
+
+	t.is(
+		executor.readJobOutput(ids[0]),
+		undefined,
+		'the oldest completed job must be dropped',
+	);
+	t.truthy(
+		executor.readJobOutput(ids[ids.length - 1]),
+		'the newest completed job must still be readable',
+	);
+});
+
 
 // Runs the real singleton in its own process, then stops that process the way
 // a closed terminal, `kill`, or a forced quit would.

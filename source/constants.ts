@@ -171,6 +171,13 @@ export const INTERVAL_BASH_PROGRESS_MS = 500;
 export const BASH_OUTPUT_PREVIEW_LENGTH = 150;
 export const TIMEOUT_BASH_DEFAULT_MS = 120_000;
 export const BASH_MAX_OUTPUT_BYTES = 5 * 1024 * 1024;
+// How long execute_bash waits for a background job's first output before
+// returning the job id. Long enough for a server to print its startup banner,
+// short enough that the model is not blocked.
+export const BASH_BACKGROUND_START_DELAY_MS = 1000;
+// Completed background jobs are kept so their last output can still be read.
+// Past this many, the oldest completed jobs are dropped.
+export const BASH_BACKGROUND_MAX_RETAINED_JOBS = 20;
 
 // === FILE SCANNER ===
 export const MAX_FILES_TO_SCAN = 1000;
