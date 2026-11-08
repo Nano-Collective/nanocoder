@@ -107,6 +107,37 @@ test('redactUrlSecrets preserves standard short path segments', t => {
 	t.is(redactUrlSecrets(raw), 'https://openrouter.ai/api/v1/chat/completions');
 });
 
+test('redactUrlSecrets does not over-redact token endpoints or tokenizer paths', t => {
+	t.is(
+		redactUrlSecrets('https://proxy.example.com/v1/tokenizer/encode'),
+		'https://proxy.example.com/v1/tokenizer/encode',
+	);
+	t.is(
+		redactUrlSecrets('https://proxy.example.com/v1/tokens'),
+		'https://proxy.example.com/v1/tokens',
+	);
+});
+
+test('redactUrlSecrets preserves Azure deployment names and model identifiers', t => {
+	t.is(
+		redactUrlSecrets(
+			'https://my-resource.openai.azure.com/openai/deployments/gpt-4o-mini-deployment/chat/completions',
+		),
+		'https://my-resource.openai.azure.com/openai/deployments/gpt-4o-mini-deployment/chat/completions',
+	);
+});
+
+test('redactUrlSecrets masks short webhook tokens and high-entropy segments', t => {
+	t.is(
+		redactUrlSecrets('https://api.example.com/hooks/abc123XYZ789'),
+		'https://api.example.com/hooks/<redacted>',
+	);
+	t.is(
+		redactUrlSecrets('https://api.example.com/webhooks/webhookToken12345'),
+		'https://api.example.com/webhooks/<redacted>',
+	);
+});
+
 test('redactUrlSecrets handles empty and nullish values gracefully', t => {
 	t.is(redactUrlSecrets(undefined), undefined);
 	t.is(redactUrlSecrets(null), undefined);

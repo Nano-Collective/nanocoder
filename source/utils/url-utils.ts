@@ -28,17 +28,131 @@ export function isLocalURL(url: string): boolean {
 	);
 }
 
+const SAFE_API_SEGMENTS = new Set([
+	'api',
+	'v1',
+	'v2',
+	'v3',
+	'v4',
+	'v1beta',
+	'chat',
+	'completions',
+	'embeddings',
+	'models',
+	'deployments',
+	'messages',
+	'threads',
+	'runs',
+	'audio',
+	'transcriptions',
+	'speech',
+	'images',
+	'generations',
+	'files',
+	'fine_tuning',
+	'batches',
+	'moderations',
+	'tokenizer',
+	'tokens',
+	'encode',
+	'decode',
+	'auth',
+	'oauth',
+	'token',
+	'mcp',
+	'sse',
+	'ws',
+	'health',
+	'status',
+	'info',
+	'version',
+	'ping',
+	'ready',
+	'hooks',
+	'webhook',
+	'webhooks',
+	'services',
+	'openai',
+	'anthropic',
+	'azure',
+	'google',
+]);
+
+const SECRET_CONTAINER_SEGMENTS = new Set([
+	'hooks',
+	'hook',
+	'webhook',
+	'webhooks',
+	'services',
+	's',
+	'secret',
+	'secrets',
+]);
+
+const TOKEN_PREFIX_REGEX =
+	/^(sk-[a-zA-Z0-9_-]+|ghp_[a-zA-Z0-9]+|gho_[a-zA-Z0-9]+|pat-[a-zA-Z0-9_-]+|key-[a-zA-Z0-9_-]+|token[-_][a-zA-Z0-9_-]+|sec[-_][a-zA-Z0-9_-]+)$/i;
+const UUID_REGEX =
+	/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const HEX_HASH_REGEX = /^[0-9a-fA-F]{24,}$/;
+
+function isModelOrDeploymentName(segment: string): boolean {
+	const lower = segment.toLowerCase();
+	if (
+		lower.endsWith('-deployment') ||
+		lower.endsWith('_deployment') ||
+		lower.endsWith('-model') ||
+		lower.endsWith('_model')
+	) {
+		return true;
+	}
+	return /^(gpt|claude|llama|gemini|mistral|deepseek|qwen|phi|command|whisper|dall-e|text-embedding)/i.test(
+		lower,
+	);
+}
+
+function isOpaqueToken(segment: string, prevSegment: string): boolean {
+	if (!segment) {
+		return false;
+	}
+	const lower = segment.toLowerCase();
+	if (SAFE_API_SEGMENTS.has(lower)) {
+		return false;
+	}
+	if (TOKEN_PREFIX_REGEX.test(segment)) {
+		return true;
+	}
+	if (UUID_REGEX.test(segment) || HEX_HASH_REGEX.test(segment)) {
+		return true;
+	}
+	if (prevSegment && SECRET_CONTAINER_SEGMENTS.has(prevSegment.toLowerCase())) {
+		return true;
+	}
+	// Mixed-case alphanumeric opaque string (e.g. webhook secret token like abc123XYZ789)
+	if (
+		/[a-z]/.test(segment) &&
+		/[A-Z]/.test(segment) &&
+		/\d/.test(segment) &&
+		segment.length >= 10 &&
+		!segment.includes('-') &&
+		!segment.includes('.')
+	) {
+		return true;
+	}
+	if (segment.length >= 24 && !isModelOrDeploymentName(segment)) {
+		return true;
+	}
+	return false;
+}
+
 /**
- * Masks long path segments (typically session tokens, API keys, UUIDs, or hashes)
- * or segments with token-like prefixes.
+ * Masks opaque token path segments, sensitive prefix tokens, or webhook secrets,
+ * while preserving valid API endpoints, model IDs, and Azure deployment names.
  */
 function maskPathSegments(pathname: string): string {
 	const segments = pathname.split('/');
-	const sanitizedSegments = segments.map(segment => {
-		if (!segment) {
-			return segment;
-		}
-		if (segment.length >= 16 || /^(sk-|ghp_|token|key-|pat-)/i.test(segment)) {
+	const sanitizedSegments = segments.map((segment, index) => {
+		const prev = index > 0 ? segments[index - 1] : '';
+		if (isOpaqueToken(segment, prev)) {
 			return '<redacted>';
 		}
 		return segment;
