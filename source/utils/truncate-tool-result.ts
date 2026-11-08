@@ -73,6 +73,32 @@ function snapOutsideToken(
 }
 
 /**
+ * Ensure a cut index does not land in the middle of a UTF-16 surrogate pair.
+ * Astral characters (emoji, some CJK, etc.) are encoded as high + low surrogate
+ * code units. Slicing between them produces a lone surrogate, which is invalid
+ * Unicode text.
+ *
+ * Both directions push the cut into the elided middle so the result never grows
+ * past the caller's budget.
+ */
+function snapOutsideSurrogate(
+	content: string,
+	index: number,
+	bias: 'before' | 'after',
+): number {
+	if (index <= 0 || index >= content.length) return index;
+	// A high surrogate is in the range \uD800-\uDBFF; a low surrogate is \uDC00-\uDFFF.
+	const prev = content.charCodeAt(index - 1);
+	const curr = content.charCodeAt(index);
+	const isHigh = (c: number) => c >= 0xd800 && c <= 0xdbff;
+	const isLow = (c: number) => c >= 0xdc00 && c <= 0xdfff;
+	if (isHigh(prev) && isLow(curr)) {
+		return bias === 'before' ? index - 1 : index + 1;
+	}
+	return index;
+}
+
+/**
  * Bound text returned by a tool before it is added to model context.
  *
  * Keeping the tail is important for compiler, test-runner, and command output,
@@ -92,16 +118,24 @@ export function truncateToolResult(
 	const headLength = Math.floor(contentBudget * HEAD_SHARE);
 	const tailLength = contentBudget - headLength;
 
-	const headEnd = snapOutsideToken(
+	const headEnd = snapOutsideSurrogate(
 		content,
-		snapOutsidePlaceholder(content, headLength, 'before'),
+		snapOutsideToken(
+			content,
+			snapOutsidePlaceholder(content, headLength, 'before'),
+			'before',
+		),
 		'before',
 	);
 	const tailStart = Math.max(
 		headEnd,
-		snapOutsideToken(
+		snapOutsideSurrogate(
 			content,
-			snapOutsidePlaceholder(content, content.length - tailLength, 'after'),
+			snapOutsideToken(
+				content,
+				snapOutsidePlaceholder(content, content.length - tailLength, 'after'),
+				'after',
+			),
 			'after',
 		),
 	);
