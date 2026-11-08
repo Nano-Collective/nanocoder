@@ -864,7 +864,7 @@ test('getAvailableToolNames - returns all tools when tune disabled', t => {
 test('getAvailableToolNames - filters to minimal profile', t => {
 	const manager = new ToolManager();
 	const result = manager.getAvailableToolNames({enabled: true, toolProfile: 'minimal', aggressiveCompact: false});
-	t.deepEqual(result, ['read_file', 'write_file', 'string_replace', 'execute_bash', 'find_files', 'search_file_contents', 'list_directory', 'agent']);
+	t.deepEqual(result, ['read_file', 'write_file', 'string_replace', 'execute_bash', 'bash_output', 'kill_bash', 'find_files', 'search_file_contents', 'list_directory', 'agent']);
 });
 
 test('getAvailableToolNames - full profile returns all minus mode exclusions', t => {
@@ -888,6 +888,8 @@ test('getAvailableToolNames - plan mode excludes mutation tools', t => {
 	t.false(result.includes('create_directory'));
 	// Shell
 	t.false(result.includes('execute_bash'));
+	t.false(result.includes('bash_output'));
+	t.false(result.includes('kill_bash'));
 	// Git mutators (read-only git tools should still be present)
 	t.false(result.includes('git_commit'));
 	t.false(result.includes('git_add'));
@@ -1041,6 +1043,8 @@ test('getAvailableToolNames - disabledTools intersects with minimal profile', t 
 		'read_file',
 		'write_file',
 		'string_replace',
+		'bash_output',
+		'kill_bash',
 		'find_files',
 		'search_file_contents',
 		'list_directory',

@@ -53,6 +53,9 @@ const MODE_EXCLUDED_TOOLS: Record<DevelopmentMode, string[]> = {
 		'file_op',
 		'lsp_format_document',
 		'execute_bash',
+		// Background job tools only make sense alongside execute_bash.
+		'bash_output',
+		'kill_bash',
 		'browser',
 		// No task tool — plan mode produces the plan itself
 		'write_tasks',
