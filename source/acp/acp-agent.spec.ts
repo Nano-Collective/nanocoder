@@ -2,6 +2,7 @@ import {randomUUID} from 'node:crypto';
 import {
 	existsSync,
 	mkdirSync,
+	mkdtempSync,
 	readFileSync,
 	rmSync,
 	writeFileSync,
@@ -24,6 +25,7 @@ import {registerSubagentRun} from '@/services/subagent-events';
 import {resolveAutoCompactSettings} from '@/utils/auto-compact';
 import {getLogger} from '@/utils/logging';
 import {SemanticMemoryManager} from '@/memory/semantic-memory-manager';
+import {PlanStore} from '@/plans/storage';
 import {readFileTool} from '@/tools/read-file';
 import {ToolManager} from '@/tools/tool-manager';
 import type {Message} from '@/types/core';
@@ -2358,6 +2360,59 @@ test('AcpAgent.prompt - recalls relevant project memories scoped to the session 
 	t.true(capturedSystemPrompts[0]?.includes('## Project Context'));
 	t.true(capturedSystemPrompts[0]?.includes('Auth uses Clerk'));
 	t.false(capturedSystemPrompts[1]?.includes('## Project Context'));
+});
+
+test('AcpAgent.prompt - injects the active plan graph from the session cwd', async t => {
+	const projectRoot = mkdtempSync(join(tmpdir(), 'nanocoder-acp-plan-'));
+	try {
+		const store = new PlanStore(projectRoot);
+		await store.createPlan({
+			title: 'Auth refactor',
+			nodes: [
+				{id: 'db', title: 'Set up database'},
+				{
+					id: 'api',
+					title: 'Build API',
+					dependsOn: ['db'],
+					agent: 'general',
+				},
+			],
+		});
+
+		const capturedSystemPrompts: string[] = [];
+		const conn = createMockConn();
+		const initContext = createMockInitContext();
+		initContext.client = {
+			...initContext.client,
+			chat: async (messages: Array<{content: string}>) => {
+				capturedSystemPrompts.push(messages[0]?.content ?? '');
+				return {choices: [{message: {content: 'Test response'}}]};
+			},
+		} as any;
+		const agent = new AcpAgent(initContext, conn);
+		const session = await agent.newSession({cwd: projectRoot});
+
+		try {
+			await agent.prompt({
+				sessionId: session.sessionId,
+				prompt: [{type: 'text', text: 'continue the plan'}],
+			});
+			await agent.prompt({
+				sessionId: session.sessionId,
+				prompt: [{type: 'text', text: 'keep going'}],
+			});
+		} finally {
+			await agent.deleteSession({sessionId: session.sessionId});
+		}
+
+		t.true(capturedSystemPrompts[0]?.includes('ACTIVE PLAN (persisted)'));
+		t.true(capturedSystemPrompts[0]?.includes('auth-refactor'));
+		t.true(capturedSystemPrompts[0]?.includes('db'));
+		// The graph is re-read on every turn; the first prompt does not consume it.
+		t.true(capturedSystemPrompts[1]?.includes('ACTIVE PLAN (persisted)'));
+	} finally {
+		rmSync(projectRoot, {recursive: true, force: true});
+	}
 });
 
 test('AcpAgent.extMethod - retryTurn truncates the retried turn from session messages', async t => {

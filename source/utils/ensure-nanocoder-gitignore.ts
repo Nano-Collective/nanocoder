@@ -4,6 +4,7 @@ import {logWarning} from './message-queue';
 
 const RUNTIME_ENTRIES = [
 	'/checkpoints/',
+	'/plans/',
 	'/timeline/',
 	'/daemon.*',
 	// The daemon's CI watcher state, plus its atomic-write temp siblings.
