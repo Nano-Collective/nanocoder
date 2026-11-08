@@ -146,6 +146,24 @@ test('buildToolCallMeta - execute_bash includes the command in the title', async
 	t.true(meta.title.includes('pnpm run build'));
 });
 
+test('buildToolCallMeta - bash_output is a read and includes the job id', async t => {
+	const meta = await buildToolCallMeta(
+		makeCall('bash_output', {job_id: 'job-123'}),
+	);
+	t.is(meta.kind, 'read');
+	t.is(meta.locations.length, 0);
+	t.is(meta.title, 'bash_output: job-123');
+});
+
+test('buildToolCallMeta - kill_bash is an execute and includes the job id', async t => {
+	const meta = await buildToolCallMeta(
+		makeCall('kill_bash', {job_id: 'job-123'}),
+	);
+	t.is(meta.kind, 'execute');
+	t.is(meta.locations.length, 0);
+	t.is(meta.title, 'kill_bash: job-123');
+});
+
 test('buildToolCallMeta - string_replace produces whole-file diff for unique match', async t => {
 	const dir = mkdtempSync(join(tmpdir(), 'acp-tc-'));
 	const file = join(dir, 'a.ts');
