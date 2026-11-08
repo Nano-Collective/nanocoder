@@ -15,6 +15,7 @@ import {platform} from 'node:process';
 
 import {getAppConfig} from '@/config/index';
 import {
+	BASH_BACKGROUND_MAX_RETAINED_JOBS,
 	BASH_OUTPUT_PREVIEW_LENGTH,
 	INTERVAL_BASH_PROGRESS_MS,
 	TIMEOUT_BASH_DEFAULT_MS,
@@ -150,6 +151,32 @@ export interface BashExecutionState {
 	error: string | null;
 }
 
+/**
+ * One read from a background job. `output` and `stderr` are only the text
+ * produced since the previous read, so a long-running server does not resend
+ * its whole log on every `bash_output` call.
+ */
+export interface BashJobOutput {
+	jobId: string;
+	command: string;
+	output: string;
+	stderr: string;
+	isComplete: boolean;
+	exitCode: number | null;
+	error: string | null;
+}
+
+interface BackgroundJob {
+	state: BashExecutionState;
+	/** Absent when the spawn was refused before a process existed. */
+	process?: ChildProcess;
+	promise: Promise<BashExecutionState>;
+	/** Character offsets already returned by readJobOutput(). */
+	readStdout: number;
+	readStderr: number;
+	sessionId?: string;
+}
+
 interface ExecutionEntry {
 	state: BashExecutionState;
 	process: ChildProcess;
@@ -166,6 +193,10 @@ interface ExecutionEntry {
 
 export class BashExecutor extends EventEmitter {
 	private executions = new Map<string, ExecutionEntry>();
+	// Background jobs. A running job is also in `executions`, so stopAll() and
+	// killAll() reach it; completed jobs stay here until their output is read
+	// or the retained-job cap drops them.
+	private jobs = new Map<string, BackgroundJob>();
 	// Process groups that outlive their execution entry: a cancelled command
 	// still being stopped, and jobs a finished command left behind (`cmd &`).
 	// stopAll() and killAll() reach these too.
@@ -178,12 +209,24 @@ export class BashExecutor extends EventEmitter {
 
 	execute(
 		command: string,
-		options?: {timeoutMs?: number; signal?: AbortSignal},
+		options?: {
+			timeoutMs?: number;
+			signal?: AbortSignal;
+			/**
+			 * Keep the command running after the tool returns. No timeout is
+			 * applied, the turn's AbortSignal is ignored, and the job is tracked
+			 * until it exits or is killed so `bash_output`/`kill_bash` can reach it.
+			 */
+			background?: boolean;
+			/** Session that owns the job, so closing the session can stop it. */
+			sessionId?: string;
+		},
 	): {
 		executionId: string;
 		promise: Promise<BashExecutionState>;
 	} {
 		const executionId = randomUUID();
+		const background = options?.background === true;
 
 		const state: BashExecutionState = {
 			executionId,
@@ -264,6 +307,16 @@ export class BashExecutor extends EventEmitter {
 				releaseProtected?.();
 				state.isComplete = true;
 				state.error = planned.error;
+				if (background) {
+					this.jobs.set(executionId, {
+						state,
+						promise: Promise.resolve({...state}),
+						readStdout: 0,
+						readStderr: 0,
+						sessionId: options?.sessionId,
+					});
+					this.pruneJobs();
+				}
 				this.emit('start', {...state});
 				this.emit('complete', {...state});
 				return {executionId, promise: Promise.resolve({...state})};
@@ -365,7 +418,9 @@ export class BashExecutor extends EventEmitter {
 				process: proc,
 				intervalId,
 				resolve,
-				signal: options?.signal,
+				// A background job is meant to outlive the turn that started it,
+				// so the turn's AbortSignal must not tear it down.
+				signal: background ? undefined : options?.signal,
 				cwdCaptureFile,
 				jailTmp,
 				cleanupJailTmp,
@@ -373,22 +428,24 @@ export class BashExecutor extends EventEmitter {
 			};
 
 			const ms = options?.timeoutMs ?? TIMEOUT_BASH_DEFAULT_MS;
-			if (ms > 0) {
+			// Background jobs have no timeout: a dev server or watcher is
+			// supposed to keep running until kill_bash or shutdown.
+			if (!background && ms > 0) {
 				entry.timeoutId = setTimeout(() => {
 					this.cancel(executionId, `Command timed out after ${ms}ms`);
 				}, ms);
 				entry.timeoutId.unref();
 			}
 
-			if (options?.signal) {
+			if (entry.signal) {
 				entry.abortListener = () => {
 					this.cancel(executionId, 'Cancelled via AbortSignal');
 				};
 
-				options.signal.addEventListener('abort', entry.abortListener, {
+				entry.signal.addEventListener('abort', entry.abortListener, {
 					once: true,
 				});
-				if (options.signal.aborted) {
+				if (entry.signal.aborted) {
 					process.nextTick(entry.abortListener);
 				}
 			}
@@ -426,6 +483,7 @@ export class BashExecutor extends EventEmitter {
 				state.exitCode = code;
 				this.emit('complete', {...state});
 				this.executions.delete(executionId);
+				this.pruneJobs();
 				resolve({...state});
 			};
 
@@ -473,9 +531,22 @@ export class BashExecutor extends EventEmitter {
 				state.error = error.message;
 				this.emit('complete', {...state});
 				this.executions.delete(executionId);
+				this.pruneJobs();
 				resolve({...state}); // Resolve with error state instead of rejecting
 			});
 		});
+
+		if (background) {
+			this.jobs.set(executionId, {
+				state,
+				process: proc,
+				promise,
+				readStdout: 0,
+				readStderr: 0,
+				sessionId: options?.sessionId,
+			});
+			this.pruneJobs();
+		}
 
 		// Emit initial state
 		this.emit('start', {...state});
@@ -522,8 +593,77 @@ export class BashExecutor extends EventEmitter {
 
 			// Resolve the promise with the cancelled state
 			execution.resolve({...execution.state});
+			this.pruneJobs();
 		});
 		return true;
+	}
+
+	/**
+	 * Read the output a background job has produced since the previous read.
+	 * The cursor advances, so a second call only returns new text. Returns
+	 * undefined for an unknown or already-pruned job.
+	 */
+	readJobOutput(jobId: string): BashJobOutput | undefined {
+		const job = this.jobs.get(jobId);
+		if (!job) return undefined;
+		const {state} = job;
+		const output = state.fullOutput.slice(job.readStdout);
+		const stderr = state.stderr.slice(job.readStderr);
+		job.readStdout = state.fullOutput.length;
+		job.readStderr = state.stderr.length;
+		return {
+			jobId,
+			command: state.command,
+			output,
+			stderr,
+			isComplete: state.isComplete,
+			exitCode: state.exitCode,
+			error: state.error,
+		};
+	}
+
+	/**
+	 * Stop a background job and wait until its process group is gone. The job
+	 * record is kept so a final `bash_output` still returns what it printed.
+	 */
+	async killJob(jobId: string): Promise<BashJobOutput | undefined> {
+		const job = this.jobs.get(jobId);
+		if (!job) return undefined;
+
+		if (!job.state.isComplete) {
+			const cancelled = this.cancel(jobId, 'Killed by user');
+			if (cancelled) await job.promise;
+		}
+
+		return {
+			jobId,
+			command: job.state.command,
+			output: '',
+			stderr: '',
+			isComplete: job.state.isComplete,
+			exitCode: job.state.exitCode,
+			error: job.state.error,
+		};
+	}
+
+	/** Stop every background job owned by a session, e.g. when it closes. */
+	async stopSessionJobs(sessionId: string): Promise<void> {
+		const owned = [...this.jobs.entries()]
+			.filter(([, job]) => job.sessionId === sessionId)
+			.map(([id]) => id);
+		await Promise.all(owned.map(id => this.killJob(id)));
+	}
+
+	/**
+	 * Drop the oldest completed jobs once the retained-job cap is exceeded.
+	 * Running jobs are never dropped; they are still in `executions`.
+	 */
+	private pruneJobs(): void {
+		if (this.jobs.size <= BASH_BACKGROUND_MAX_RETAINED_JOBS) return;
+		for (const [id, job] of this.jobs) {
+			if (this.jobs.size <= BASH_BACKGROUND_MAX_RETAINED_JOBS) break;
+			if (job.state.isComplete) this.jobs.delete(id);
+		}
 	}
 
 	/**
@@ -673,7 +813,11 @@ export class BashExecutor extends EventEmitter {
 
 	getState(executionId: string): BashExecutionState | undefined {
 		const execution = this.executions.get(executionId);
-		return execution ? {...execution.state} : undefined;
+		if (execution) return {...execution.state};
+		// A completed background job is no longer an active execution, but its
+		// final state is still worth showing.
+		const job = this.jobs.get(executionId);
+		return job ? {...job.state} : undefined;
 	}
 
 	hasActiveExecutions(): boolean {
