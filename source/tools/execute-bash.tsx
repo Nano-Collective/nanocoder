@@ -14,7 +14,7 @@ import {
 	type RerunCommand,
 } from '@/tools/bash-failure-capsule';
 import {truncateToolResult} from '@/tools/runtime/truncate-tool-result';
-import {formatBackgroundStart, readBackgroundStart} from '@/tools/bash-jobs';
+import {formatBackgroundStart, startBackgroundJob} from '@/tools/bash-jobs';
 import type {NanocoderToolExport, StructuredToolOutput} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 
@@ -123,20 +123,18 @@ const executeExecuteBash = async (
 	options?: {abortSignal?: AbortSignal; sessionId?: string},
 ): Promise<StructuredToolOutput> => {
 	if (args.run_in_background) {
-		const {executionId} = bashExecutor.execute(args.command, {
-			background: true,
+		const {job, error} = await startBackgroundJob(args.command, {
 			sessionId: options?.sessionId,
 		});
-		const job = await readBackgroundStart(executionId);
-		if (!job) {
+		if (error || !job) {
 			return {
-				llmContent: `Error: background job ${executionId} could not be started.`,
+				llmContent: error ?? `Error: background job could not be started.`,
 				isError: true,
 			};
 		}
 		return {
 			llmContent: formatBackgroundStart(job),
-			isError: job.error !== null && job.isComplete && job.exitCode === null,
+			isError: false,
 		};
 	}
 

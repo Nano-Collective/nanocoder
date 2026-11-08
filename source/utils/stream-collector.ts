@@ -19,8 +19,14 @@ export type StreamCollector = {
  *
  * `collect` is a `data` listener that appends at most `BASH_MAX_OUTPUT_BYTES`
  * and then appends `marker` exactly once. Each collector owns its own budget,
- * so one stream's volume can't eat the other's: a stdout flood can never
- * silently swallow the stderr that explains why the command failed.
+ * so one stream's volume can never silently swallow the stderr that explains
+ * why the command failed.
+ *
+ * With `keepLatest` (background jobs) the collector instead keeps the most
+ * recent output: once the budget is exceeded it drops the head of the buffer
+ * in whole characters and keeps the tail, so a chatty dev server or watcher
+ * keeps producing readable output instead of freezing at the cap. The marker
+ * is appended once, at the moment the first trim happens.
  *
  * The marker is appended inline rather than tracked as a flag so it rides at
  * the end of its own section and survives a later tail-keeping truncation.
@@ -34,13 +40,36 @@ export type StreamCollector = {
 export function makeStreamCollector(
 	append: (text: string) => void,
 	marker: string,
+	options?: {keepLatest?: boolean},
 ): StreamCollector {
 	let bytes = 0;
 	let truncated = false;
+	let tail = '';
+	let emitted = '';
 	const decoder = new StringDecoder('utf8');
 
-	return {
-		collect: (data: Buffer) => {
+	const deliverText = (text: string): void => {
+		if (!text) return;
+		tail += text;
+		if (Buffer.byteLength(tail, 'utf8') > BASH_MAX_OUTPUT_BYTES) {
+			while (Buffer.byteLength(tail, 'utf8') > BASH_MAX_OUTPUT_BYTES) {
+				const codePoint = tail.codePointAt(0) ?? 1;
+				tail = tail.slice(codePoint > 0xffff ? 2 : 1);
+			}
+			if (!truncated) {
+				truncated = true;
+				append(marker);
+			}
+		}
+		if (tail.length > emitted.length) {
+			append(tail.slice(emitted.length));
+			emitted = tail;
+		}
+		bytes = Buffer.byteLength(tail, 'utf8');
+	};
+
+	const deliver = (data: Buffer): void => {
+		if (!options?.keepLatest) {
 			if (bytes < BASH_MAX_OUTPUT_BYTES) {
 				const remaining = BASH_MAX_OUTPUT_BYTES - bytes;
 				const limitedChunk = data.subarray(0, remaining);
@@ -51,14 +80,27 @@ export function makeStreamCollector(
 				truncated = true;
 				append(marker);
 			}
+			return;
+		}
+		deliverText(decoder.write(data));
+	};
+
+	return {
+		collect: data => {
+			deliver(data);
 		},
 		flush: () => {
-			// On a truncated stream the held-back bytes are the leading half of
-			// the character the cap cut in two. Emitting them would park a stray
-			// U+FFFD after the marker, so they are dropped on purpose.
-			if (truncated) return;
 			const rest = decoder.end();
-			if (rest) append(rest);
+			if (!rest) return;
+			if (!options?.keepLatest) {
+				// On a truncated stream the held-back bytes are the leading half of
+				// the character the cap cut in two. Emitting them would park a stray
+				// U+FFFD after the marker, so they are dropped on purpose.
+				if (truncated) return;
+				append(rest);
+				return;
+			}
+			deliverText(rest);
 		},
 	};
 }

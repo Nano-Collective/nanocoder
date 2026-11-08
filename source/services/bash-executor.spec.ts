@@ -1020,6 +1020,14 @@ test('background execute ignores the turn AbortSignal', async t => {
 	await executor.killJob(executionId);
 });
 
+test('isBackgroundJob reports whether an execution is a background job', async t => {
+	const executor = createExecutor();
+	const {executionId} = executor.execute(LONG_RUNNING_NODE, {background: true});
+	t.true(executor.isBackgroundJob(executionId));
+	t.false(executor.isBackgroundJob('missing-id'));
+	await executor.killJob(executionId);
+});
+
 test('stopSessionJobs kills only the jobs owned by that session', async t => {
 	const executor = createExecutor();
 	const owned = executor.execute(LONG_RUNNING_NODE, {
