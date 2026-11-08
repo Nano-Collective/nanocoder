@@ -367,12 +367,21 @@ export class BashExecutor extends EventEmitter {
 			}
 		};
 
-		const stdoutCollector = makeStreamCollector(text => {
-			state.fullOutput += text;
-		}, STDOUT_TRUNCATION_NOTICE);
-		const stderrCollector = makeStreamCollector(text => {
-			state.stderr += text;
-		}, STDERR_TRUNCATION_NOTICE);
+		const backgroundKeepLatest = background ? {keepLatest: true} : undefined;
+		const stdoutCollector = makeStreamCollector(
+			text => {
+				state.fullOutput += text;
+			},
+			STDOUT_TRUNCATION_NOTICE,
+			backgroundKeepLatest,
+		);
+		const stderrCollector = makeStreamCollector(
+			text => {
+				state.stderr += text;
+			},
+			STDERR_TRUNCATION_NOTICE,
+			backgroundKeepLatest,
+		);
 
 		// Both streams are finished (or past their drain grace period) when the
 		// command completes, so release whatever the decoders were holding back
@@ -822,6 +831,16 @@ export class BashExecutor extends EventEmitter {
 
 	hasActiveExecutions(): boolean {
 		return this.executions.size > 0;
+	}
+
+	/**
+	 * Whether the execution is a background job. Background jobs stay in the
+	 * active-execution map while running (so the shutdown machinery can reach
+	 * them), but the TUI's Escape handler must not cancel them: they are meant
+	 * to outlive the turn that started them.
+	 */
+	isBackgroundJob(executionId: string): boolean {
+		return this.jobs.has(executionId);
 	}
 
 	getActiveExecutionIds(): string[] {

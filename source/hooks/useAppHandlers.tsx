@@ -255,8 +255,13 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 		() => async () => {
 			const baseClear = createClearMessagesHandler(updateMessages, client);
 			await baseClear();
-			setChatComponents([]);
-			setCurrentSessionId(null);
+			// Background jobs belong to the session being cleared; stop them so
+			// they do not linger under a session id that no longer exists.
+			if (props.currentSessionId) {
+				await bashExecutor.stopSessionJobs(props.currentSessionId);
+			}
+			props.setChatComponents([]);
+			props.setCurrentSessionId(null);
 			// Reset the key-generator session ID so keys in the new conversation
 			// are not prefixed with the cleared session's ID. A fresh random ID
 			// will be lazily generated on the next generateKey() call.
@@ -284,6 +289,9 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 		// regardless of execution path.
 		const activeBashIds = bashExecutor.getActiveExecutionIds();
 		for (const id of activeBashIds) {
+			// Background jobs are meant to outlive the turn that started them,
+			// so a user escape only cancels foreground operations.
+			if (bashExecutor.isBackgroundJob(id)) continue;
 			bashExecutor.cancel(id);
 		}
 

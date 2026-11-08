@@ -9,6 +9,7 @@ import {
 	formatBackgroundStart,
 	formatKillResult,
 	readBackgroundStart,
+	startBackgroundJob,
 } from '@/tools/bash-jobs';
 import {executeBashTool} from '@/tools/execute-bash';
 import {killBashTool} from '@/tools/kill-bash';
@@ -90,9 +91,18 @@ test('formatBackgroundOutput reports how a job was stopped', t => {
 });
 
 test('formatKillResult says the job has been stopped', t => {
-	const text = formatKillResult(makeJob({isComplete: true, error: 'Killed by user'}));
+	const text = formatKillResult(
+		makeJob({isComplete: true, error: 'Killed by user'}),
+	);
 	t.true(text.includes('JOB_ID: job-1'));
 	t.true(text.includes('The background job has been stopped.'));
+});
+
+test('formatKillResult says the job had already exited when it was not killed', t => {
+	const text = formatKillResult(
+		makeJob({isComplete: true, exitCode: 0, error: null}),
+	);
+	t.true(text.includes('The background job had already exited before it could be stopped.'));
 });
 
 test('execute_bash run_in_background returns a job id', async t => {
@@ -107,6 +117,12 @@ test('execute_bash run_in_background returns a job id', async t => {
 	t.truthy(bashExecutor.readJobOutput(jobId!));
 
 	await bashExecutor.killJob(jobId!);
+});
+
+test('startBackgroundJob reports a background job that exited non-zero as failed', async t => {
+	const {job, error} = await startBackgroundJob('exit 3');
+	t.falsy(job);
+	t.truthy(error);
 });
 
 test('bash_output returns output for a running job', async t => {
