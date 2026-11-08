@@ -1,10 +1,11 @@
 import React from 'react';
 import BashProgress from '@/components/bash-progress';
-import type {BashExecutionState} from '@/services/bash-executor';
+import {type BashExecutionState, bashExecutor} from '@/services/bash-executor';
 import {
 	appendPostToolUseOutput,
 	runPreToolUseGate,
 } from '@/services/lifecycle-hooks';
+import {formatBackgroundStart, readBackgroundStart} from '@/tools/bash-jobs';
 import {
 	bashRunFailed,
 	distillBashResultForLLM,
@@ -44,6 +45,7 @@ export async function runStreamingBashTool(
 	setLiveComponent: (component: React.ReactNode) => void,
 	keyPrefix: string,
 	signal?: AbortSignal,
+	sessionId?: string,
 ): Promise<StreamingBashRun> {
 	const parsedArgs = parseToolArguments(toolCall.function.arguments);
 
@@ -95,6 +97,38 @@ export async function runStreamingBashTool(
 	}
 
 	const commandStr = parsedArgs.command as string;
+
+	// A background job returns as soon as it has a job id and its first output.
+	// It is not tied to this turn's AbortSignal, and no live BashProgress is
+	// mounted: the process is expected to outlive the tool call.
+	if (parsedArgs.run_in_background === true) {
+		const {executionId} = bashExecutor.execute(commandStr, {
+			background: true,
+			sessionId,
+		});
+		const job = await readBackgroundStart(executionId);
+		setLiveComponent(null);
+		const content = job
+			? formatBackgroundStart(job)
+			: `Error: background job ${executionId} could not be started.`;
+		return {
+			toolCall,
+			result: {
+				tool_call_id: toolCall.id,
+				role: 'tool' as const,
+				name: toolCall.function.name,
+				content: await appendPostToolUseOutput(
+					toolCall.function.name,
+					parsedArgs,
+					content,
+				),
+				isError:
+					!job ||
+					(job.error !== null && job.isComplete && job.exitCode === null),
+			},
+		};
+	}
+
 	const {executionId, promise} = executeBashCommand(commandStr, {signal});
 	setLiveComponent(
 		<BashProgress

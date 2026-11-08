@@ -478,6 +478,7 @@ export async function runToolTurn(
 				processToolWithContext,
 				setLiveComponent,
 				signal,
+				sessionId,
 			);
 			turnResults.push(execution.result);
 			if (!execution.result.isError) {
