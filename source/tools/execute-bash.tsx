@@ -14,6 +14,7 @@ import {
 	type RerunCommand,
 } from '@/tools/bash-failure-capsule';
 import {truncateToolResult} from '@/tools/runtime/truncate-tool-result';
+import {formatBackgroundStart, readBackgroundStart} from '@/tools/bash-jobs';
 import type {NanocoderToolExport, StructuredToolOutput} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 
@@ -26,7 +27,12 @@ import {jsonSchema, tool} from '@/types/core';
  */
 export function executeBashCommand(
 	command: string,
-	options?: {timeoutMs?: number; signal?: AbortSignal},
+	options?: {
+		timeoutMs?: number;
+		signal?: AbortSignal;
+		background?: boolean;
+		sessionId?: string;
+	},
 ): {
 	executionId: string;
 	promise: Promise<BashExecutionState>;
@@ -109,12 +115,31 @@ export async function distillBashResultForLLM(
 interface ExecuteBashArgs {
 	command: string;
 	description?: string;
+	run_in_background?: boolean;
 }
 
 const executeExecuteBash = async (
-	args: {command: string},
-	options?: {abortSignal?: AbortSignal},
+	args: {command: string; run_in_background?: boolean},
+	options?: {abortSignal?: AbortSignal; sessionId?: string},
 ): Promise<StructuredToolOutput> => {
+	if (args.run_in_background) {
+		const {executionId} = bashExecutor.execute(args.command, {
+			background: true,
+			sessionId: options?.sessionId,
+		});
+		const job = await readBackgroundStart(executionId);
+		if (!job) {
+			return {
+				llmContent: `Error: background job ${executionId} could not be started.`,
+				isError: true,
+			};
+		}
+		return {
+			llmContent: formatBackgroundStart(job),
+			isError: job.error !== null && job.isComplete && job.exitCode === null,
+		};
+	}
+
 	const {promise} = bashExecutor.execute(args.command, {
 		signal: options?.abortSignal,
 	});
@@ -135,7 +160,7 @@ const executeExecuteBash = async (
 
 const executeBashCoreTool = tool({
 	description:
-		'Execute a bash command in the working directory. Returns stdout, stderr, and exit code. Commands time out after 2 minutes by default. Use for: running builds, tests, installing packages, git operations not covered by git tools, or any shell command.',
+		'Execute a bash command in the working directory. Returns stdout, stderr, and exit code. Commands time out after 2 minutes by default. Use for: running builds, tests, installing packages, git operations not covered by git tools, or any shell command. Set run_in_background for a long-running process (dev server, watcher, database); it returns a job id immediately, then use bash_output to read new output and kill_bash to stop it.',
 	inputSchema: jsonSchema<ExecuteBashArgs>({
 		type: 'object',
 		properties: {
@@ -147,6 +172,11 @@ const executeBashCoreTool = tool({
 				type: 'string',
 				description:
 					'Optional brief summary of the intent or purpose of this command.',
+			},
+			run_in_background: {
+				type: 'boolean',
+				description:
+					'Run the command as a background job and return its job id immediately. Use for dev servers, watchers and other processes that do not exit. Read new output with bash_output and stop it with kill_bash.',
 			},
 		},
 		required: ['command'],
@@ -162,9 +192,11 @@ const executeBashCoreTool = tool({
 function ExecuteBashFormatterComponent({
 	command,
 	description,
+	runInBackground,
 }: {
 	command: string;
 	description?: string;
+	runInBackground?: boolean;
 }): React.ReactElement {
 	const boxWidth = useTerminalWidth();
 	const {colors} = useTheme();
@@ -172,6 +204,12 @@ function ExecuteBashFormatterComponent({
 	return (
 		<Box flexDirection="column" marginBottom={1} width={boxWidth}>
 			<Text color={colors.tool}>⚒ execute_bash</Text>
+			{runInBackground && (
+				<Box>
+					<Text color={colors.secondary}>Mode:</Text>
+					<Text color={colors.text}> background</Text>
+				</Box>
+			)}
 			{description && (
 				<Box flexDirection="column">
 					<Text color={colors.secondary}>Description:</Text>
@@ -199,6 +237,7 @@ const executeBashFormatter = (args: ExecuteBashArgs): React.ReactElement => {
 		<ExecuteBashFormatterComponent
 			command={args.command}
 			description={args.description}
+			runInBackground={args.run_in_background}
 		/>
 	);
 };
