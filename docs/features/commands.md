@@ -28,7 +28,7 @@ Type `/` in the chat input to see available commands. All commands start with `/
 | `/agents` | List subagents. `/agents show <name>` for details, `/agents copy <name>` to customize, `/agents create <name>` to scaffold a new one (see [Subagents](subagents.md)) |
 | `/checkpoint` | Save and restore file snapshots. Subcommands: `create`/`save [name]` (name optional, auto-generated when omitted), `list`/`ls`, `load`/`restore`, `delete`/`remove`/`rm`, `help` (see [Checkpointing](checkpointing.md)) |
 | `/compact` | Compress message history to reduce context usage. Flags include `--llm`, `--mechanical`, `--default`, `--conservative`, `--aggressive`, `--preview` and `--restore`; `--strategy`, `--threshold`, `--auto-on` and `--auto-off` only change session settings (see [Context Compression](context-compression.md)) |
-| `/context-max` | Set maximum context length for the current session (e.g. `/context-max 128k`), or inspect the resolved context source. `/context-max --reset` clears the session override. Also available as `--context-max` CLI flag |
+| `/context-max` | Set maximum context length for the current session (supports positive integer or decimal values, k/K and m/M suffixes), or inspect the resolved context source. `/context-max --reset` clears the session override. Also available as `--context-max` CLI flag |
 | `/exit` | Exit the application (alias: `/quit`) |
 | `/export` | Export the current session to a markdown file, or to JSON with `/export --json` or a `.json` filename (see [Exporting a Session](#exporting-a-session)) |
 | `/share` | Write the current session to a single, self-contained HTML page you can open in any browser or send to someone, with secrets redacted. `/share --json` writes the same content as deterministic JSON (see [Sharing a Session](#sharing-a-session)) |
@@ -150,7 +150,7 @@ The `!` prefix runs a command in your shell and includes the output as context f
 
 Supported keys:
 
-- `?context-max=<n>` - context limit for this command (accepts `k` suffixes, e.g. `128k`)
+- `?context-max=<n>` - context limit for this command (accepts positive integer or decimal values, k/K and m/M suffixes, e.g. `128k` or `1m`)
 - `?threshold=<50-95>` - on `/compact`, skip compaction when usage is below this percentage
 - `?auto-compact=<on|off>` - auto-compact enabled state for this command
 - `?preview`, `?llm`, `?mechanical`, `?aggressive`, `?conservative` - shorthand for the matching `/compact` flag

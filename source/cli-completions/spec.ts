@@ -136,7 +136,7 @@ export const COMPLETION_FLAGS: readonly CompletionFlag[] = [
 		takesValue: true,
 		valueName: 'limit',
 		description:
-			'Set maximum context length in tokens (supports k/K suffix, e.g. 128k)',
+			'Set maximum context length in tokens (supports k/K and m/M suffixes, e.g. 128k or 1m)',
 	},
 	{
 		name: 'mode',

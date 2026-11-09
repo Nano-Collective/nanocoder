@@ -8,6 +8,7 @@ import {TIMEOUT_HTTP_BODY_MS, TIMEOUT_HTTP_HEADERS_MS} from '@/constants';
 import type {AIProviderConfig, ProviderConfig} from '@/types/config';
 import {formatError} from '@/utils/error-formatter';
 import {getLogger} from '@/utils/logging';
+import {parseContextLimit} from '@/utils/parse-context-limit';
 import {createSessionOverride} from '@/utils/session-override';
 import {readCache, writeCache} from './models-cache.js';
 import type {
@@ -454,8 +455,8 @@ export async function resolveModelContextLimit(
 		// Check environment variable fallback
 		const envLimit = process.env.NANOCODER_CONTEXT_LIMIT;
 		if (envLimit) {
-			const parsed = Number.parseInt(envLimit, 10);
-			if (!Number.isNaN(parsed) && parsed > 0) {
+			const parsed = parseContextLimit(envLimit);
+			if (parsed !== null) {
 				return {limit: parsed, source: 'env'};
 			}
 		}
