@@ -184,7 +184,7 @@ test('a negative number is not accepted as the value of --provider', t => {
 });
 
 test('--context-max: malformed value is rejected with accepted syntax', t => {
-	const result = runCli(['run', 'analyze', '--context-max', '1.5']);
+	const result = runCli(['run', 'analyze', '--context-max', '1.5x']);
 	t.not(result.status, 0);
 	t.regex(result.stderr, /8192, 128k, or 1m/);
 });
