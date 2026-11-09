@@ -2,22 +2,73 @@ import {randomUUID} from 'node:crypto';
 import {
 	linkSync,
 	mkdirSync,
+	readlinkSync,
+	realpathSync,
 	renameSync,
+	statSync,
 	unlinkSync,
 	writeFileSync,
 } from 'node:fs';
 import {rename, unlink, writeFile} from 'node:fs/promises';
-import {dirname} from 'node:path';
+import {dirname, isAbsolute, resolve} from 'node:path';
+
+/** Owner-only permissions for files that may hold credentials. */
+const PRIVATE_FILE_MODE = 0o600;
+
+interface WriteTarget {
+	/** Real file to write to, with symlinks resolved when possible. */
+	path: string;
+	/** Mode of the existing file, if it already exists. */
+	mode?: number;
+}
+
+/**
+ * Resolve where an atomic write should land: the real file behind a symlink (a
+ * renamed-over link would be replaced by a plain file and leave its target
+ * stale), and the mode of the existing file. A dangling symlink is followed to
+ * the path it points at so the write can create that target.
+ */
+function resolveWriteTarget(filePath: string): WriteTarget {
+	let targetPath = filePath;
+	try {
+		targetPath = realpathSync(filePath);
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') {
+			try {
+				const link = readlinkSync(filePath);
+				targetPath = isAbsolute(link) ? link : resolve(dirname(filePath), link);
+			} catch {
+				// Not a symlink (or not there yet): write the path as given.
+			}
+		}
+	}
+	try {
+		return {path: targetPath, mode: statSync(targetPath).mode & 0o777};
+	} catch {
+		return {path: targetPath};
+	}
+}
 
 /**
  * Write data to disk via a temp file + atomic rename, so a crash mid-write can
  * never leave a truncated file at the target path. Callers are responsible for
  * ensuring the parent directory exists.
  */
-export function atomicWriteFileSync(filePath: string, data: string): void {
+export function atomicWriteFileSync(
+	filePath: string,
+	data: string,
+	options?: {mode?: number},
+): void {
 	const tmpPath = `${filePath}.${randomUUID()}.tmp`;
 	try {
-		writeFileSync(tmpPath, data, 'utf-8');
+		if (options?.mode === undefined) {
+			writeFileSync(tmpPath, data, 'utf-8');
+		} else {
+			writeFileSync(tmpPath, data, {
+				encoding: 'utf-8',
+				mode: options.mode,
+			});
+		}
 		renameSync(tmpPath, filePath);
 	} catch (error) {
 		try {
@@ -54,12 +105,31 @@ export async function atomicWriteFile(
 
 /**
  * Ensure a file's parent directory exists, then atomically write pretty-printed
- * JSON. Convenience wrapper for config files that may not exist yet.
+ * JSON. Follows symlinks so a dotfiles-managed config keeps its link, and
+ * keeps an existing file's mode unless `options.mode` overrides it.
  */
-export function atomicWriteJson(filePath: string, data: unknown): void {
-	const dir = dirname(filePath);
-	mkdirSync(dir, {recursive: true});
-	atomicWriteFileSync(filePath, `${JSON.stringify(data, null, 2)}\n`);
+export function atomicWriteJson(
+	filePath: string,
+	data: unknown,
+	options?: {mode?: number},
+): void {
+	const target = resolveWriteTarget(filePath);
+	mkdirSync(dirname(target.path), {recursive: true});
+	atomicWriteFileSync(target.path, `${JSON.stringify(data, null, 2)}\n`, {
+		mode: options?.mode ?? target.mode,
+	});
+}
+
+/**
+ * Atomically write a config file that may contain credentials. New files are
+ * created owner-only (0600); an existing file keeps its current mode. Symlinks
+ * are followed like {@link atomicWriteJson}, so the real file is updated.
+ */
+export function atomicWritePrivateJson(filePath: string, data: unknown): void {
+	const target = resolveWriteTarget(filePath);
+	atomicWriteJson(target.path, data, {
+		mode: target.mode ?? PRIVATE_FILE_MODE,
+	});
 }
 
 /**

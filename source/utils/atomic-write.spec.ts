@@ -1,7 +1,14 @@
 import * as path from 'path';
 import test from 'ava';
 import * as fs from 'fs/promises';
-import {atomicWriteFile, publishFileNoClobber, setLinkSyncForTests} from './atomic-write';
+import {
+	atomicWriteFile,
+	atomicWriteFileSync,
+	atomicWriteJson,
+	atomicWritePrivateJson,
+	publishFileNoClobber,
+	setLinkSyncForTests,
+} from './atomic-write';
 
 async function createTempDir(): Promise<string> {
 	const tempDir = path.join(
@@ -60,6 +67,117 @@ test.serial('atomicWriteFile honours the requested file mode', async t => {
 
 		const stats = await fs.stat(filePath);
 		t.is(stats.mode & 0o777, 0o600);
+	} finally {
+		await cleanupTempDir(tempDir);
+	}
+});
+
+test.serial('atomicWriteFileSync honours the requested file mode', async t => {
+	if (process.platform === 'win32') {
+		t.pass('skipped: POSIX file modes are not meaningful on Windows');
+		return;
+	}
+	const tempDir = await createTempDir();
+	try {
+		const filePath = path.join(tempDir, 'restricted-sync.txt');
+		atomicWriteFileSync(filePath, 'secret', {mode: 0o600});
+
+		const stats = await fs.stat(filePath);
+		t.is(stats.mode & 0o777, 0o600);
+	} finally {
+		await cleanupTempDir(tempDir);
+	}
+});
+
+test.serial('atomicWritePrivateJson creates a new file owner-only', async t => {
+	if (process.platform === 'win32') {
+		t.pass('skipped: POSIX file modes are not meaningful on Windows');
+		return;
+	}
+	const tempDir = await createTempDir();
+	try {
+		const filePath = path.join(tempDir, 'nested', 'config.json');
+		atomicWritePrivateJson(filePath, {apiKey: 'sk-test'});
+
+		t.deepEqual(JSON.parse(await fs.readFile(filePath, 'utf-8')), {
+			apiKey: 'sk-test',
+		});
+		const stats = await fs.stat(filePath);
+		t.is(stats.mode & 0o777, 0o600);
+	} finally {
+		await cleanupTempDir(tempDir);
+	}
+});
+
+test.serial('atomicWritePrivateJson preserves the mode of an existing file', async t => {
+	if (process.platform === 'win32') {
+		t.pass('skipped: POSIX file modes are not meaningful on Windows');
+		return;
+	}
+	const tempDir = await createTempDir();
+	try {
+		const filePath = path.join(tempDir, 'existing.json');
+		await fs.writeFile(filePath, '{}', 'utf-8');
+		await fs.chmod(filePath, 0o640);
+
+		atomicWritePrivateJson(filePath, {updated: true});
+
+		t.deepEqual(JSON.parse(await fs.readFile(filePath, 'utf-8')), {
+			updated: true,
+		});
+		const stats = await fs.stat(filePath);
+		t.is(stats.mode & 0o777, 0o640);
+	} finally {
+		await cleanupTempDir(tempDir);
+	}
+});
+
+test.serial('atomicWriteJson follows a symlinked config file', async t => {
+	if (process.platform === 'win32') {
+		t.pass('skipped: symlink creation is not reliable on Windows CI');
+		return;
+	}
+	const tempDir = await createTempDir();
+	try {
+		const realPath = path.join(tempDir, 'dotfiles', 'agents.config.json');
+		const linkPath = path.join(tempDir, 'agents.config.json');
+		await fs.mkdir(path.dirname(realPath), {recursive: true});
+		await fs.writeFile(realPath, '{}', 'utf-8');
+		await fs.chmod(realPath, 0o640);
+		await fs.symlink(realPath, linkPath);
+
+		atomicWritePrivateJson(linkPath, {apiKey: 'sk-test'});
+
+		t.true((await fs.lstat(linkPath)).isSymbolicLink());
+		t.deepEqual(JSON.parse(await fs.readFile(realPath, 'utf-8')), {
+			apiKey: 'sk-test',
+		});
+		const stats = await fs.stat(realPath);
+		t.is(stats.mode & 0o777, 0o640);
+	} finally {
+		await cleanupTempDir(tempDir);
+	}
+});
+
+test.serial('atomicWritePrivateJson writes through a dangling symlink', async t => {
+	if (process.platform === 'win32') {
+		t.pass('skipped: symlink creation is not reliable on Windows CI');
+		return;
+	}
+	const tempDir = await createTempDir();
+	try {
+		const targetPath = path.join(tempDir, 'dotfiles', 'agents.config.json');
+		const linkPath = path.join(tempDir, 'agents.config.json');
+		await fs.mkdir(path.dirname(targetPath), {recursive: true});
+		await fs.symlink(targetPath, linkPath);
+
+		atomicWritePrivateJson(linkPath, {apiKey: 'sk-test'});
+
+		t.true((await fs.lstat(linkPath)).isSymbolicLink());
+		t.deepEqual(JSON.parse(await fs.readFile(targetPath, 'utf-8')), {
+			apiKey: 'sk-test',
+		});
+		t.is((await fs.stat(targetPath)).mode & 0o777, 0o600);
 	} finally {
 		await cleanupTempDir(tempDir);
 	}
