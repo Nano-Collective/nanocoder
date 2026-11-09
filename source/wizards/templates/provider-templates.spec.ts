@@ -703,6 +703,42 @@ test('opper template: uses default provider name and model default', t => {
 	t.is(config.name, 'Opper');
 });
 
+test('standardcompute template: sets baseUrl, default model, and parses models', t => {
+	const template = PROVIDER_TEMPLATES.find(t => t.id === 'standardcompute');
+	t.truthy(template);
+
+	const config = template!.buildConfig({
+		providerName: 'Standard Compute',
+		apiKey: 'test-key',
+		model: 'standardcompute, anthropic/claude-sonnet-5.5',
+	});
+
+	t.is(config.name, 'Standard Compute');
+	t.is(config.baseUrl, 'https://api.stdcmpt.com/v1');
+	t.is(config.apiKey, 'test-key');
+	t.is(config.sdkProvider, undefined);
+	t.deepEqual(config.models, [
+		'standardcompute',
+		'anthropic/claude-sonnet-5.5',
+	]);
+});
+
+test('standardcompute template: uses default provider name and model default', t => {
+	const template = PROVIDER_TEMPLATES.find(t => t.id === 'standardcompute');
+	t.truthy(template);
+
+	const modelField = template!.fields.find(f => f.name === 'model');
+	t.is(modelField?.default, 'standardcompute');
+
+	const config = template!.buildConfig({
+		providerName: '',
+		apiKey: 'test-key',
+		model: 'standardcompute',
+	});
+
+	t.is(config.name, 'Standard Compute');
+});
+
 // ============================================================================
 // Tests for template ID vs sdkProvider collision prevention
 // Providers that use sdkProvider: 'anthropic' (like MiniMax, Kimi) must not
