@@ -53,10 +53,14 @@ test.serial('a command that reads stdin gets EOF instead of hanging', async t =>
 		t.pass('stdin handling is checked on unix only');
 		return;
 	}
+	let timer: NodeJS.Timeout | undefined;
 	const result = await Promise.race([
 		run('cat; echo done'),
-		new Promise<'hung'>(resolve => setTimeout(() => resolve('hung'), 5000)),
+		new Promise<'hung'>(resolve => {
+			timer = setTimeout(() => resolve('hung'), 5000);
+		}),
 	]);
+	clearTimeout(timer);
 	t.not(result, 'hung', 'cat returned instead of waiting on an open stdin pipe');
 	if (result !== 'hung') t.regex(result.fullOutput, /done/);
 });

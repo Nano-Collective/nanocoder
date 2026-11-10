@@ -261,6 +261,8 @@ export class BashExecutor extends EventEmitter {
 			proc = spawn(shell, shellArgs(shell, command), {
 				cwd,
 				windowsVerbatimArguments: true,
+				// Close stdin so commands that wait for input get EOF.
+				stdio: ['ignore', 'pipe', 'pipe'],
 			});
 		} else {
 			// codeql[js/shell-command-built-from-environment] -c script uses $NC_CWD_FILE; path is env, not argv

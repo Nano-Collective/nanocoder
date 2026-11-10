@@ -223,8 +223,12 @@ export function spawnPlanned(
 	// codeql[js/shell-command-constructed-from-input]
 	const proc = spawn(bin, plan.args, {
 		...spawnOpts,
-		// fd 3 carries bwrap's --info-fd report.
-		stdio: plan.bin === 'bwrap' ? ['pipe', 'pipe', 'pipe', 'pipe'] : 'pipe',
+		// stdin is closed so commands that wait for input get EOF. fd 3 carries
+		// bwrap's --info-fd report.
+		stdio:
+			plan.bin === 'bwrap'
+				? ['ignore', 'pipe', 'pipe', 'pipe']
+				: ['ignore', 'pipe', 'pipe'],
 	});
 	if (plan.bin === 'bwrap') {
 		let info = '';
