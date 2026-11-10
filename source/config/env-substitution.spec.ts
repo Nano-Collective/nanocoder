@@ -295,6 +295,11 @@ test('substituteEnvVars - supports $$ escape in default values', t => {
 	t.is(result, 'pa$WORD');
 });
 
+test('substituteEnvVars - preserves $VAR in default values without expanding', t => {
+	const result = substituteEnvVars('${MISSING_VAR:-literal $NOT_EXPANDED}');
+	t.is(result, 'literal $NOT_EXPANDED');
+});
+
 test('substituteEnvVars - prevents prototype pollution with __proto__ key', t => {
 	const malicious = JSON.parse('{"__proto__": {"polluted": true}, "valid": "data"}');
 	const result = substituteEnvVars(malicious) as Record<string, unknown>;

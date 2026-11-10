@@ -6,7 +6,8 @@ function expandEnvVar(str: string): string {
 		return str;
 	}
 
-	const regex = /\$\$|\$\{([A-Z_][A-Z0-9_]*)(?::-(.*?))?\}|\$([A-Z_][A-Z0-9_]*)/g;
+	const regex =
+		/\$\$|\$\{([A-Z_][A-Z0-9_]*)(?::-(.*?))?\}|\$([A-Z_][A-Z0-9_]*)/g;
 
 	return str.replace(
 		regex,
@@ -30,7 +31,7 @@ function expandEnvVar(str: string): string {
 			}
 
 			if (defaultValue !== undefined) {
-				return expandEnvVar(defaultValue);
+				return defaultValue.replace(/\$\$/g, '$');
 			}
 
 			logError(
@@ -59,6 +60,7 @@ export function substituteEnvVars<T>(value: T): T {
 	if (typeof value === 'object') {
 		const result: Record<string, unknown> = {};
 		for (const [key, val] of Object.entries(value)) {
+			// Skip __proto__ to prevent prototype pollution when parsing user JSON
 			if (key === '__proto__') continue;
 			result[key] = substituteEnvVars(val);
 		}
