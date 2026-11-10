@@ -51,6 +51,7 @@ import type {
 	ToolCall,
 	ToolExecutionContext,
 } from '@/types/core';
+import {noteAgentsMdAccessForTool} from '@/utils/agents-md';
 import {maybeAutoCompact} from '@/utils/auto-compact';
 import {formatError} from '@/utils/error-formatter';
 import {capMessagesForModel} from '@/utils/message-capping';
@@ -1175,6 +1176,9 @@ export class SubagentExecutor {
 					'isError' in result &&
 					!!result.isError) ||
 				content.startsWith('Error');
+			if (!failed) {
+				noteAgentsMdAccessForTool(toolName, parsedArgs);
+			}
 			const formatted = failed
 				? truncated
 				: await formatWrittenFile(toolName, parsedArgs, truncated);

@@ -29,9 +29,11 @@ import type {
 	ToolCall,
 	ToolResult,
 } from '@/types/core';
+import {appendAgentsMd, resetAgentsMdTracker} from '@/utils/agents-md';
 import {maybeAutoCompact} from '@/utils/auto-compact';
 import {formatError} from '@/utils/error-formatter';
 import {capMessagesForModel} from '@/utils/message-capping';
+import {shouldIncludeAgentsMd} from '@/utils/prompt-builder';
 
 export interface ToolCallLog {
 	name: string;
@@ -193,6 +195,10 @@ async function runPlainConversationBody(
 
 	const isJson = outputFormat === 'json';
 
+	// Each plain run is its own conversation; do not carry nested AGENTS.md
+	// files from a previous run in the same process.
+	resetAgentsMdTracker();
+
 	let messages = initialMessages;
 	const walkthroughLifecycle = createWalkthroughLifecycle(initialMessages);
 	let accumulatedFinalText = '';
@@ -328,10 +334,25 @@ async function runPlainConversationBody(
 			? [{role: 'user', content: FINAL_TURN_INSTRUCTION}]
 			: [];
 
+		// Pick up nested AGENTS.md files discovered by tools earlier in this
+		// run. The base system message only carries the user-level and
+		// project-root files.
+		const agentsMdPrompt = shouldIncludeAgentsMd(
+			tune,
+			model,
+			getAppConfig().systemPrompt,
+		)
+			? appendAgentsMd(systemMessage.content, {includeBase: false})
+			: systemMessage.content;
+		const effectiveSystemMessage: Message =
+			agentsMdPrompt === systemMessage.content
+				? systemMessage
+				: {...systemMessage, content: agentsMdPrompt};
+
 		let result: LLMChatResponse;
 		try {
 			result = await client.chat(
-				[systemMessage, ...cappedMessages, ...finalTurnNotice],
+				[effectiveSystemMessage, ...cappedMessages, ...finalTurnNotice],
 				tools,
 				{
 					onReasoningToken: (token: string) => {

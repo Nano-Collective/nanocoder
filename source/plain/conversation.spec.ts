@@ -1,4 +1,7 @@
 import test from "ava";
+import {mkdirSync, mkdtempSync, rmSync, writeFileSync} from "node:fs";
+import {tmpdir} from "node:os";
+import {join} from "node:path";
 import { dropOrphanedToolResults } from "@/ai-sdk-client/converters/message-converter";
 import { getAppConfig, reloadAppConfig } from "@/config/index";
 import { TOOL_APPROVAL_REQUIRED_KIND } from "@/constants";
@@ -7,6 +10,12 @@ import {
 	resetSessionContextLimit,
 	setSessionContextLimit,
 } from "@/models/models-dev-client.js";
+import {
+	resetSessionCwd,
+	setProjectRoot,
+	setSessionCwd,
+} from "@/services/session-cwd.js";
+import {resetAgentsMdTracker} from "@/utils/agents-md.js";
 import {
 	resetAutoCompactSession,
 	setAutoCompactStrategy,
@@ -2586,5 +2595,98 @@ test.serial(
 
 		t.is(outcome.kind, "success");
 		t.is(calls.length, 1);
+	},
+);
+
+test.serial(
+	"applies nested AGENTS.md discovered during the run to the next request",
+	async (t) => {
+		const root = mkdtempSync(join(tmpdir(), "agents-plain-"));
+		const configDir = mkdtempSync(join(tmpdir(), "agents-plain-config-"));
+		const originalConfigDir = process.env.NANOCODER_CONFIG_DIR;
+		try {
+			process.env.NANOCODER_CONFIG_DIR = configDir;
+			reloadAppConfig();
+			writeFileSync(join(root, "AGENTS.md"), "ROOT RULES");
+			mkdirSync(join(root, "packages", "api"), {recursive: true});
+			writeFileSync(
+				join(root, "packages", "api", "AGENTS.md"),
+				"API RULES",
+			);
+			setProjectRoot(root);
+			setSessionCwd(root);
+
+			const calls: RecordedCall[] = [];
+			const client = makeRecordingClient(
+				[
+					{
+						choices: [
+							{
+								message: {
+									role: "assistant",
+									content: "",
+									tool_calls: [
+										{
+											id: "call-1",
+											function: {
+												name: "read_file",
+												arguments: {
+													path: "packages/api/src/handler.ts",
+												},
+											},
+										},
+									],
+								},
+							},
+						],
+					},
+					{
+						choices: [
+							{message: {role: "assistant", content: "done"}},
+						],
+					},
+				],
+				calls,
+			);
+			setToolRegistryGetter(() => ({
+				read_file: (async () => "file contents") as ToolHandler,
+			}));
+			const toolManager = makeFakeToolManager({
+				knownTools: new Set(["read_file"]),
+			});
+
+			const outcome = await runPlainConversation({
+				client,
+				toolManager,
+				systemMessage: SYSTEM,
+				initialMessages: [USER],
+				developmentMode: "auto-accept",
+				nonInteractiveAlwaysAllow: [],
+				abortSignal: new AbortController().signal,
+			});
+
+			t.is(outcome.kind, "success");
+			t.is(calls.length, 2);
+			const firstSystem = calls[0].messages.find(
+				message => message.role === "system",
+			);
+			const secondSystem = calls[1].messages.find(
+				message => message.role === "system",
+			);
+			t.false(firstSystem?.content.includes("API RULES"));
+			t.true(secondSystem?.content.includes("API RULES"));
+			t.false(secondSystem?.content.includes("ROOT RULES"));
+		} finally {
+			if (originalConfigDir === undefined) {
+				delete process.env.NANOCODER_CONFIG_DIR;
+			} else {
+				process.env.NANOCODER_CONFIG_DIR = originalConfigDir;
+			}
+			reloadAppConfig();
+			resetSessionCwd();
+			resetAgentsMdTracker();
+			rmSync(root, {recursive: true, force: true});
+			rmSync(configDir, {recursive: true, force: true});
+		}
 	},
 );

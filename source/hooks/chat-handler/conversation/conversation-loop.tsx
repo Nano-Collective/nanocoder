@@ -42,6 +42,7 @@ import type {
 	ToolResult,
 } from '@/types/core';
 import {buildResponseUsageBounded} from '@/usage/response-usage';
+import {appendAgentsMd} from '@/utils/agents-md';
 import {maybeAutoCompact} from '@/utils/auto-compact';
 import {buildCompletionNote} from '@/utils/completion-note';
 import {formatError} from '@/utils/error-formatter';
@@ -50,7 +51,11 @@ import {capMessagesForModel} from '@/utils/message-capping';
 import {compressMessages} from '@/utils/message-compression';
 import {infoMsg} from '@/utils/message-factory';
 import {logWarning} from '@/utils/message-queue';
-import {getLastBuiltPrompt} from '@/utils/prompt-builder';
+import {
+	getLastBuiltPrompt,
+	setLastBuiltPrompt,
+	shouldIncludeAgentsMd,
+} from '@/utils/prompt-builder';
 import {signalQuestion} from '@/utils/question-queue';
 import {bumpReadContentGeneration} from '@/utils/read-tracker';
 import {markRunFailed} from '@/utils/run-outcome';
@@ -413,8 +418,26 @@ export const processAssistantResponse = async (
 	const maxMessages = sessionConfig?.maxMessages ?? 1000;
 	const cappedMessages = capMessagesForModel(messages, maxMessages);
 
+	// Append AGENTS.md files the agent has discovered in subdirectories since
+	// this turn began. Computed per model call (not once per turn) so a read in
+	// `packages/api` brings that package's rules into the very next request.
+	const agentsMdPrompt = shouldIncludeAgentsMd(
+		tune,
+		currentModel,
+		getAppConfig().systemPrompt,
+	)
+		? appendAgentsMd(systemMessage.content, {includeBase: false})
+		: systemMessage.content;
+	const effectiveSystemMessage: Message =
+		agentsMdPrompt === systemMessage.content
+			? systemMessage
+			: {...systemMessage, content: agentsMdPrompt};
+	if (agentsMdPrompt !== systemMessage.content) {
+		setLastBuiltPrompt(agentsMdPrompt);
+	}
+
 	const result = await client.chat(
-		[systemMessage, ...cappedMessages],
+		[effectiveSystemMessage, ...cappedMessages],
 		tools,
 		{
 			onToken: (token: string) => {

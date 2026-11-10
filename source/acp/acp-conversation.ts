@@ -50,6 +50,7 @@ import type {
 } from '@/types/core';
 import {formatCompactTokenCount} from '@/usage/format';
 import {buildResponseUsage} from '@/usage/response-usage';
+import {appendAgentsMd} from '@/utils/agents-md';
 import {maybeAutoCompact} from '@/utils/auto-compact';
 import {capMessagesForModel} from '@/utils/message-capping';
 import {
@@ -376,10 +377,21 @@ async function runTurn(
 			},
 		};
 
-		const systemMessage = session.systemMessage;
-		if (!systemMessage) {
+		const baseSystemMessage = session.systemMessage;
+		if (!baseSystemMessage) {
 			return withTurnUsage({stopReason: 'end_turn'});
 		}
+
+		// Pick up nested AGENTS.md files this session discovered while working
+		// in project subdirectories. The session's own tracker keeps concurrent
+		// editor sessions isolated.
+		const agentsMdPrompt = session.includeAgentsMd
+			? appendAgentsMd(baseSystemMessage.content, {includeBase: false})
+			: baseSystemMessage.content;
+		const systemMessage: Message =
+			agentsMdPrompt === baseSystemMessage.content
+				? baseSystemMessage
+				: {...baseSystemMessage, content: agentsMdPrompt};
 
 		const sessionConfig = getAppConfig().sessions;
 		const maxMessages = sessionConfig?.maxMessages ?? 1000;

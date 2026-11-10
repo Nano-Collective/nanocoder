@@ -15,6 +15,10 @@ import {fileOpTool} from '@/tools/file-ops/file-op.js';
 import {ToolRegistry} from '@/tools/tool-registry.js';
 import type {HooksConfig} from '@/types/config';
 import {resetShutdownManager} from '@/utils/shutdown/shutdown-manager.js';
+import {
+	noteAgentsMdAccess,
+	resetAgentsMdTracker,
+} from '@/utils/agents-md.js';
 import {processAssistantResponse, resetFallbackNotice, resetLastTurnHadReasoning} from './conversation-loop.js';
 import type {
 	ApiUsageSnapshot,
@@ -3504,3 +3508,50 @@ for (const [listed, expectedPrompts] of [
 		},
 	);
 }
+
+test.serial('processAssistantResponse - appends nested AGENTS.md discovered since the turn began', async t => {
+	const root = mkdtempSync(join(tmpdir(), 'agents-tui-'));
+	const configDir = mkdtempSync(join(tmpdir(), 'agents-tui-config-'));
+	const originalConfigDir = process.env.NANOCODER_CONFIG_DIR;
+	try {
+		process.env.NANOCODER_CONFIG_DIR = configDir;
+		clearAppConfig();
+		writeFileSync(join(root, 'AGENTS.md'), 'ROOT RULES');
+		mkdirSync(join(root, 'packages', 'api'), {recursive: true});
+		writeFileSync(join(root, 'packages', 'api', 'AGENTS.md'), 'API RULES');
+		setProjectRoot(root);
+		setSessionCwd(root);
+		noteAgentsMdAccess('packages/api/src/handler.ts');
+
+		let sentMessages: Message[] = [];
+		const client = {
+			chat: async (messages: Message[]) => {
+				sentMessages = messages;
+				return {
+					choices: [{message: {role: 'assistant', content: 'done'}}],
+					toolsDisabled: false,
+				};
+			},
+		};
+
+		await processAssistantResponse(
+			createDefaultParams({client}) as never,
+		);
+
+		const systemMessage = sentMessages.find(message => message.role === 'system');
+		t.truthy(systemMessage);
+		t.true(systemMessage?.content.includes('API RULES'));
+		t.false(systemMessage?.content.includes('ROOT RULES'));
+	} finally {
+		if (originalConfigDir === undefined) {
+			delete process.env.NANOCODER_CONFIG_DIR;
+		} else {
+			process.env.NANOCODER_CONFIG_DIR = originalConfigDir;
+		}
+		clearAppConfig();
+		resetSessionCwd();
+		resetAgentsMdTracker();
+		rmSync(root, {recursive: true, force: true});
+		rmSync(configDir, {recursive: true, force: true});
+	}
+});

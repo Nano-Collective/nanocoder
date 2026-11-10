@@ -12,15 +12,31 @@ import {
 	getLastBuiltPrompt,
 	resetSectionCache,
 	setLastBuiltPrompt,
+	shouldIncludeAgentsMd,
 } from './prompt-builder.js';
 import type {SystemPromptConfig, TuneConfig} from '@/types/config';
 import {TUNE_DEFAULTS} from '@/types/config';
 
 console.log('\nprompt-builder.spec.ts');
 
-// Reset section cache between tests to ensure clean state
+const originalConfigDir = process.env.NANOCODER_CONFIG_DIR;
+let testConfigDir: string;
+
+// Reset section cache and keep the user-level config directory hermetic so a
+// developer's real AGENTS.md cannot change these assertions.
 test.beforeEach(() => {
 	resetSectionCache();
+	testConfigDir = mkdtempSync(join(tmpdir(), 'nc-prompt-config-'));
+	process.env.NANOCODER_CONFIG_DIR = testConfigDir;
+});
+
+test.afterEach(() => {
+	rmSync(testConfigDir, {recursive: true, force: true});
+	if (originalConfigDir === undefined) {
+		delete process.env.NANOCODER_CONFIG_DIR;
+	} else {
+		process.env.NANOCODER_CONFIG_DIR = originalConfigDir;
+	}
 });
 
 const ALL_TOOLS = [
@@ -446,6 +462,62 @@ test('buildSystemPrompt - non-nano with includeAgentsMd=false omits AGENTS.md', 
 });
 
 // ============================================================================
+// shouldIncludeAgentsMd — gating shared with the conversation loops
+// ============================================================================
+
+test('shouldIncludeAgentsMd - includeAgentsMd=false disables every layer', t => {
+	t.false(
+		shouldIncludeAgentsMd(
+			{...TUNE_DEFAULTS, includeAgentsMd: false},
+			'gpt-4o',
+		),
+	);
+});
+
+test('shouldIncludeAgentsMd - nano profile is off by default', t => {
+	t.false(shouldIncludeAgentsMd(TUNE_NANO, 'gpt-4o'));
+});
+
+test('shouldIncludeAgentsMd - auto resolves to nano and is off', t => {
+	t.false(
+		shouldIncludeAgentsMd({...TUNE_DEFAULTS, toolProfile: 'auto'}, 'llama3.2:1b'),
+	);
+});
+
+test('shouldIncludeAgentsMd - auto resolving to full keeps AGENTS.md', t => {
+	t.true(
+		shouldIncludeAgentsMd({...TUNE_DEFAULTS, toolProfile: 'auto'}, 'gpt-4o'),
+	);
+});
+
+test('shouldIncludeAgentsMd - a resolved replace override disables AGENTS.md', t => {
+	t.false(
+		shouldIncludeAgentsMd(TUNE_DEFAULTS, 'gpt-4o', {
+			mode: 'replace',
+			content: 'custom prompt',
+		}),
+	);
+});
+
+test('shouldIncludeAgentsMd - append override keeps AGENTS.md', t => {
+	t.true(
+		shouldIncludeAgentsMd(TUNE_DEFAULTS, 'gpt-4o', {
+			mode: 'append',
+			content: 'custom prompt',
+		}),
+	);
+});
+
+test('shouldIncludeAgentsMd - unreadable replace file falls back to AGENTS.md', t => {
+	t.true(
+		shouldIncludeAgentsMd(TUNE_DEFAULTS, 'gpt-4o', {
+			mode: 'replace',
+			file: join(testConfigDir, 'missing-prompt.md'),
+		}),
+	);
+});
+
+// ============================================================================
 // buildSystemPrompt — ACP session working directory (#1707)
 // ============================================================================
 
@@ -471,6 +543,27 @@ test('buildSystemPrompt - appends the session project AGENTS.md inside a session
 			buildSystemPrompt('normal', tune, NANO_TOOLS),
 		);
 		t.true(result.includes('SESSION PROJECT GUIDANCE'));
+	} finally {
+		rmSync(dir, {recursive: true, force: true});
+	}
+});
+
+test('buildSystemPrompt - layers user-level AGENTS.md before the project root', t => {
+	const dir = mkdtempSync(join(tmpdir(), 'nc-prompt-layered-'));
+	try {
+		writeFileSync(join(testConfigDir, 'AGENTS.md'), 'USER LEVEL GUIDANCE');
+		writeFileSync(join(dir, 'AGENTS.md'), 'PROJECT ROOT GUIDANCE');
+		const tune: TuneConfig = {...TUNE_NANO, includeAgentsMd: true};
+		const result = runInSessionCwdScope(createSessionCwdScope(dir), () =>
+			buildSystemPrompt('normal', tune, NANO_TOOLS),
+		);
+
+		t.true(result.includes('USER LEVEL GUIDANCE'));
+		t.true(result.includes('PROJECT ROOT GUIDANCE'));
+		t.true(
+			result.indexOf('USER LEVEL GUIDANCE') <
+				result.indexOf('PROJECT ROOT GUIDANCE'),
+		);
 	} finally {
 		rmSync(dir, {recursive: true, force: true});
 	}

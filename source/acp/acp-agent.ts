@@ -84,7 +84,11 @@ import type {ToolManager} from '@/tools/tool-manager';
 import {getTuneToolMode} from '@/types/config';
 import type {LLMClient} from '@/types/core';
 import {getLogger} from '@/utils/logging';
-import {buildSystemPrompt, setLastBuiltPrompt} from '@/utils/prompt-builder';
+import {
+	buildSystemPrompt,
+	setLastBuiltPrompt,
+	shouldIncludeAgentsMd,
+} from '@/utils/prompt-builder';
 
 const logger = getLogger();
 
@@ -1370,6 +1374,11 @@ export class AcpAgent implements Agent {
 		);
 		setLastBuiltPrompt(systemContent);
 
+		session.includeAgentsMd = shouldIncludeAgentsMd(
+			tune,
+			model,
+			getAppConfig().systemPrompt,
+		);
 		session.baseSystemMessage = {role: 'system', content: systemContent};
 		session.systemMessage = session.baseSystemMessage;
 	}
