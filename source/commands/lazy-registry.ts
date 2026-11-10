@@ -113,7 +113,8 @@ export const lazyCommands: LazyCommand[] = [
 	},
 	{
 		name: 'mcp',
-		description: 'Show connected MCP servers and their tools',
+		description:
+			'Show connected MCP servers and their tools; "login"/"logout <server>" for OAuth servers',
 		load: () => import('@/commands/mcp').then(m => m.mcpCommand),
 	},
 	{

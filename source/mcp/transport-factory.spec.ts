@@ -46,6 +46,44 @@ test('TransportFactory.createTransport: creates http transport', t => {
 	t.truthy(transport);
 });
 
+test('TransportFactory.createTransport: http transport accepts an OAuth provider', t => {
+	const server: MCPServer = {
+		name: 'test-http-oauth',
+		transport: 'http',
+		url: 'https://example.com/mcp',
+		headers: {'X-Custom': 'yes'},
+	};
+	const authProvider = {
+		redirectUrl: undefined,
+		clientMetadata: {redirect_uris: []},
+		clientInformation: () => undefined,
+		tokens: () => undefined,
+		saveTokens: () => {},
+		redirectToAuthorization: () => {},
+		saveCodeVerifier: () => {},
+		codeVerifier: () => 'v',
+	};
+
+	const transport = TransportFactory.createTransport(server, {authProvider});
+
+	t.truthy(transport);
+	// Non-http transports ignore the option rather than failing.
+	t.truthy(
+		TransportFactory.createTransport(
+			{name: 'ws', transport: 'websocket', url: 'ws://localhost:3000/mcp'},
+			{authProvider},
+		),
+	);
+});
+
+test('TransportFactory.getTransportTips: http tips mention /mcp login', t => {
+	t.true(
+		TransportFactory.getTransportTips('http').some(tip =>
+			tip.includes('/mcp login'),
+		),
+	);
+});
+
 test('TransportFactory.createTransport: throws error for unsupported transport', t => {
 	const server = {
 		name: 'test-unsupported',
