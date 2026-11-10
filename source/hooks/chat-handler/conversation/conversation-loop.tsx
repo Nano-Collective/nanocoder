@@ -26,7 +26,7 @@ import {
 	stripEmbeddedToolCallText,
 	stripThinkTags,
 } from '@/tool-calling/index';
-import {resolveToolApproval} from '@/tools/approval-policy';
+import {resolveToolPermission} from '@/tools/approval-policy';
 import {loadTasks} from '@/tools/tasks/storage';
 import type {Task} from '@/tools/tasks/types';
 import type {ToolManager} from '@/tools/tool-manager';
@@ -965,7 +965,7 @@ export const processAssistantResponse = async (
 			}
 
 			const toolEntry = toolManager?.getToolEntry(toolCall.function.name);
-			const needsApproval = await resolveToolApproval(
+			const permission = await resolveToolPermission(
 				toolCall.function.name,
 				toolEntry,
 				toolCall.function.arguments,
@@ -977,10 +977,19 @@ export const processAssistantResponse = async (
 					// sessions too; plan mode stays safe because a call to a tool
 					// its mode excludes is refused before it gets here.
 					alwaysAllow: getAppConfig().alwaysAllow ?? [],
+					permissions: getAppConfig().permissions,
 				},
 			);
 
-			if (needsApproval) {
+			if (permission.decision === 'deny') {
+				refuseToolCall(
+					toolCall,
+					permission.reason ?? 'Denied by nanocoder.permissions.',
+				);
+				continue;
+			}
+
+			if (permission.decision === 'ask') {
 				const vote = await consultPluginPermission(
 					toolCall.function.name,
 					parsedArgs,
@@ -1097,16 +1106,23 @@ export const processAssistantResponse = async (
 						if (notOffered) {
 							return stopBatchAt(toolCall, notOffered);
 						}
-						const needsApproval = await resolveToolApproval(
+						const permission = await resolveToolPermission(
 							toolCall.function.name,
 							toolManager?.getToolEntry(toolCall.function.name),
 							toolCall.function.arguments,
 							{
 								mode: developmentModeRef?.current ?? developmentMode,
 								alwaysAllow: getAppConfig().alwaysAllow ?? [],
+								permissions: getAppConfig().permissions,
 							},
 						);
-						if (!needsApproval) return true;
+						if (permission.decision === 'allow') return true;
+						if (permission.decision === 'deny') {
+							return stopBatchAt(
+								toolCall,
+								permission.reason ?? 'Denied by nanocoder.permissions.',
+							);
+						}
 						const vote = await consultPluginPermission(
 							toolCall.function.name,
 							parseToolArguments<Record<string, unknown>>(

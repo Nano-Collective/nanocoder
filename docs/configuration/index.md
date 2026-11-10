@@ -401,6 +401,33 @@ Allow specific tools to run without confirmation, even in normal development mod
 }
 ```
 
+### Command Permissions
+
+`nanocoder.permissions` narrows or widens approval per tool call. It is finer-grained than `alwaysAllow`: instead of trusting a whole tool, you can allow or deny specific shell commands.
+
+```json
+{
+  "nanocoder": {
+    "permissions": {
+      "allow": ["execute_bash(git status)", "execute_bash(git diff *)", "read_file"],
+      "deny": ["execute_bash(rm -rf *)", "execute_bash(curl *)"]
+    }
+  }
+}
+```
+
+Rules are either a bare tool name (`read_file`) or `tool(pattern)` (`execute_bash(git status)`). In a pattern, `*` matches any run of characters and every other character is literal; the pattern must match the **whole** command. An `execute_bash` line is split on `;`, newlines, `&&`, `||`, and `|`, respecting quotes, and an allow rule only skips the prompt when it covers **every** simple command in the line. A deny rule matches when the whole line or any one of its commands matches.
+
+Precedence (first match wins):
+
+1. A matching `deny` rule refuses the call. This happens before the approval prompt, before `alwaysAllow`, and before every development mode — including `yolo` and headless runs. A deny cannot be approved by hand.
+2. A matching `allow` rule runs the call without a prompt.
+3. `alwaysAllow`, then the development mode, then the tool's own approval policy.
+
+Rules do not bypass the built-in safety checks: a command still runs through `execute_bash`'s validator (for example, catastrophic `rm` targets and fork bombs remain blocked) even when an allow rule matches.
+
+The splitter refuses to reason about constructs that can hide another command — command or process substitution, subshells, braces, redirections, and background `&`. An allow rule never covers such a line, so it falls back to the normal prompt; a deny rule can still match the raw line. A malformed rule is ignored rather than applied with a different meaning.
+
 ### Disabling Tools
 
 Turn off individual tools globally with the top-level `disabledTools` array. Listed tools are filtered out everywhere the model could ask for them — chat, [subagents](../features/subagents.md), and every [`/tune` profile](../features/tune.md). The model is told they don't exist, so it won't try to call them.

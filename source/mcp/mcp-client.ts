@@ -1179,7 +1179,7 @@ export class MCPClient {
 					// alwaysAllow — set by the user, not the server — stays the only
 					// way to skip a normal-mode prompt, exactly as
 					// docs/configuration/mcp-configuration.md describes.
-					// (Yolo is bypassed centrally by resolveToolApproval.)
+					// (Yolo is bypassed centrally by resolveToolPermission.)
 					//
 					// For the same reason the hint is not copied onto the entry as
 					// `readOnly`: that field feeds ToolManager.isReadOnly, which

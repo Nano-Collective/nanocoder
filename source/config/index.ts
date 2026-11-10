@@ -41,6 +41,7 @@ import type {
 	ModeProviderConfig,
 	NotificationsConfig,
 	PasteConfig,
+	PermissionsConfig,
 	ProviderConfig,
 	RetryLimitsConfig,
 	SystemPromptConfig,
@@ -460,6 +461,42 @@ function loadDisabledToolsConfig(): string[] | undefined {
 	);
 }
 
+/**
+ * Load command-level allow/deny rules from `nanocoder.permissions`.
+ *
+ * Each list is filtered to strings; malformed entries are dropped by the rule
+ * parser later rather than failing the whole config. Returns undefined when
+ * neither list is present so the permission resolver can skip the work.
+ */
+function loadPermissionsConfig(): PermissionsConfig | undefined {
+	return (
+		loadHierarchicalConfig('agents.config.json', 'permissions', config => {
+			const permissions = config.nanocoder?.permissions;
+			if (!permissions || typeof permissions !== 'object') {
+				return null;
+			}
+
+			const sanitize = (value: unknown): string[] | undefined =>
+				Array.isArray(value)
+					? value.filter(
+							(item: unknown): item is string => typeof item === 'string',
+						)
+					: undefined;
+
+			const allow = sanitize(permissions.allow);
+			const deny = sanitize(permissions.deny);
+			if (allow === undefined && deny === undefined) {
+				return null;
+			}
+
+			const result: PermissionsConfig = {};
+			if (allow !== undefined) result.allow = allow;
+			if (deny !== undefined) result.deny = deny;
+			return result;
+		}) ?? undefined
+	);
+}
+
 // User-defined LSP servers. Entries without a name, command or languages list
 // are dropped rather than handed to the LSP manager half-formed.
 function loadLspServersConfig(): AppConfig['lspServers'] {
@@ -858,6 +895,9 @@ function loadAppConfig(): AppConfig {
 	// Load top-level disabledTools (filtered out of every tool-availability path)
 	const disabledTools = loadDisabledToolsConfig();
 
+	// Load command-level allow/deny rules for tool execution
+	const permissions = loadPermissionsConfig();
+
 	// Load custom system prompt override
 	const systemPrompt = loadSystemPromptConfig();
 
@@ -901,6 +941,7 @@ function loadAppConfig(): AppConfig {
 		nanocoderTools,
 		alwaysAllow,
 		disabledTools,
+		permissions,
 		systemPrompt,
 		hooks,
 		formatters,

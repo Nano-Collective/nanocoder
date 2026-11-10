@@ -3504,3 +3504,185 @@ for (const [listed, expectedPrompts] of [
 		},
 	);
 }
+
+// ============================================================================
+// Command-level permissions in interactive sessions
+//
+// A deny rule is a refusal, not a prompt: it has to be checked before the
+// confirmation handler, and it still applies in yolo. An allow rule is the
+// opposite - it skips the prompt but only for the commands it names.
+// ============================================================================
+
+function enterPermissionFixture(permissions: {
+	allow?: string[];
+	deny?: string[];
+}): () => void {
+	const leave = enterHookFixture();
+	writeFileSync(
+		join(HOOK_GATE_DIR, 'agents.config.json'),
+		JSON.stringify({nanocoder: {permissions}}),
+		'utf-8',
+	);
+	reloadAppConfig();
+	return leave;
+}
+
+test.serial(
+	'a permissions.deny rule refuses a command before the approval prompt',
+	async t => {
+		const leave = enterPermissionFixture({deny: ['execute_bash(git push *)']});
+		let confirmPrompts = 0;
+		let executes = 0;
+		let chatCalls = 0;
+		const setMessagesCalls: Message[][] = [];
+
+		try {
+			setGlobalToolConfirmHandler(async () => {
+				confirmPrompts++;
+				return true;
+			});
+			setToolRegistryGetter(() => ({
+				execute_bash: async () => {
+					executes++;
+					return 'Tool executed';
+				},
+			}));
+
+			const mockClient = createMockClient({content: '', toolCalls: []});
+			mockClient.chat = async () => {
+				chatCalls++;
+				if (chatCalls === 1) {
+					return {
+						choices: [
+							{
+								message: {
+									role: 'assistant',
+									content: '',
+									tool_calls: [
+										{
+											id: 'call_1',
+											function: {
+												name: 'execute_bash',
+												arguments: JSON.stringify({command: 'git push --force'}),
+											},
+										},
+									],
+								},
+							},
+						],
+						toolsDisabled: false,
+					} as never;
+				}
+				return {
+					choices: [{message: {role: 'assistant', content: 'done'}}],
+					toolsDisabled: false,
+				} as never;
+			};
+
+			await processAssistantResponse(
+				createDefaultParams({
+					client: mockClient,
+					toolManager: {
+						...createMockToolManager({
+							tools: ['execute_bash'],
+							needsApproval: true,
+						}),
+						getToolFormatter: () => undefined,
+					} as never,
+					// Deny must win over yolo.
+					developmentMode: 'yolo' as const,
+					nonInteractiveMode: false,
+					setMessages: (m: Message[]) => setMessagesCalls.push(m),
+				}) as never,
+			);
+		} finally {
+			setGlobalToolConfirmHandler(async () => true);
+			leave();
+		}
+
+		t.is(confirmPrompts, 0, 'a denied command must not reach the prompt');
+		t.is(executes, 0, 'a denied command must not run');
+		const toolResults = setMessagesCalls
+			.flat()
+			.filter(m => m.role === 'tool')
+			.map(m => String(m.content));
+		t.true(
+			toolResults.some(c => c.includes('denied by nanocoder.permissions')),
+			`the deny reason should reach the model, got: ${toolResults.join(' | ')}`,
+		);
+	},
+);
+
+test.serial(
+	'a permissions.allow rule runs a command without the approval prompt',
+	async t => {
+		const leave = enterPermissionFixture({allow: ['execute_bash(git status)']});
+		let confirmPrompts = 0;
+		let executes = 0;
+		let chatCalls = 0;
+
+		try {
+			setGlobalToolConfirmHandler(async () => {
+				confirmPrompts++;
+				return false;
+			});
+			setToolRegistryGetter(() => ({
+				execute_bash: async () => {
+					executes++;
+					return 'Tool executed';
+				},
+			}));
+
+			const mockClient = createMockClient({content: '', toolCalls: []});
+			mockClient.chat = async () => {
+				chatCalls++;
+				if (chatCalls === 1) {
+					return {
+						choices: [
+							{
+								message: {
+									role: 'assistant',
+									content: '',
+									tool_calls: [
+										{
+											id: 'call_1',
+											function: {
+												name: 'execute_bash',
+												arguments: JSON.stringify({command: 'git status'}),
+											},
+										},
+									],
+								},
+							},
+						],
+						toolsDisabled: false,
+					} as never;
+				}
+				return {
+					choices: [{message: {role: 'assistant', content: 'done'}}],
+					toolsDisabled: false,
+				} as never;
+			};
+
+			await processAssistantResponse(
+				createDefaultParams({
+					client: mockClient,
+					toolManager: {
+						...createMockToolManager({
+							tools: ['execute_bash'],
+							needsApproval: true,
+						}),
+						getToolFormatter: () => undefined,
+					} as never,
+					nonInteractiveMode: false,
+				}) as never,
+			);
+		} finally {
+			setGlobalToolConfirmHandler(async () => true);
+			leave();
+		}
+
+		t.is(confirmPrompts, 0, 'an allowed command must skip the prompt');
+		t.is(executes, 1, 'an allowed command must still run');
+	},
+);

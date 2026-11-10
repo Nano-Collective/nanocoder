@@ -439,6 +439,134 @@ test("alwaysAllow list bypasses needsApproval", async (t) => {
 	t.is(outcome.kind, "success");
 });
 
+test("permissions.deny refuses the tool even in yolo mode", async (t) => {
+	const toolCall: ToolCall = {
+		id: "call-1",
+		function: {name: "risky_tool", arguments: {}},
+	};
+	const client = makeFakeClient({
+		responses: [
+			{
+				choices: [
+					{
+						message: {
+							role: "assistant",
+							content: "",
+							tool_calls: [toolCall],
+						},
+					},
+				],
+			},
+			{
+				choices: [{message: {role: "assistant", content: "done"}}],
+			},
+		],
+	});
+	const toolManager = makeFakeToolManager({
+		knownTools: new Set(["risky_tool"]),
+		needsApprovalByName: {risky_tool: true},
+	});
+	let handlerCalls = 0;
+	setToolRegistryGetter(() => ({
+		risky_tool: (async () => {
+			handlerCalls++;
+			return "ok";
+		}) as ToolHandler,
+	}));
+
+	const config = getAppConfig();
+	const previous = config.permissions;
+	config.permissions = {deny: ["risky_tool"]};
+	try {
+		const outcome = await runPlainConversation({
+			client,
+			toolManager,
+			systemMessage: SYSTEM,
+			initialMessages: [USER],
+			developmentMode: "yolo",
+			nonInteractiveAlwaysAllow: ["risky_tool"],
+			abortSignal: new AbortController().signal,
+		});
+		t.is(outcome.kind, "success");
+	} finally {
+		config.permissions = previous;
+	}
+
+	t.is(handlerCalls, 0);
+});
+
+test("a denied call does not stop an allowed call in the same turn", async (t) => {
+	const safeCall: ToolCall = {
+		id: "call-safe",
+		function: {name: "safe_tool", arguments: {}},
+	};
+	const riskyCall: ToolCall = {
+		id: "call-risky",
+		function: {name: "risky_tool", arguments: {}},
+	};
+	const client = makeFakeClient({
+		responses: [
+			{
+				choices: [
+					{
+						message: {
+							role: "assistant",
+							content: "",
+							tool_calls: [safeCall, riskyCall],
+						},
+					},
+				],
+			},
+			{
+				choices: [{message: {role: "assistant", content: "done"}}],
+			},
+		],
+	});
+	const toolManager = makeFakeToolManager({
+		knownTools: new Set(["safe_tool", "risky_tool"]),
+		needsApprovalByName: {safe_tool: false, risky_tool: true},
+	});
+	let safeCalls = 0;
+	let riskyCalls = 0;
+	setToolRegistryGetter(() => ({
+		safe_tool: (async () => {
+			safeCalls++;
+			return "ok";
+		}) as ToolHandler,
+		risky_tool: (async () => {
+			riskyCalls++;
+			return "ok";
+		}) as ToolHandler,
+	}));
+
+	const config = getAppConfig();
+	const previous = config.permissions;
+	config.permissions = {deny: ["risky_tool"]};
+	try {
+		const outcome = await runPlainConversation({
+			client,
+			toolManager,
+			systemMessage: SYSTEM,
+			initialMessages: [USER],
+			developmentMode: "yolo",
+			nonInteractiveAlwaysAllow: [],
+			abortSignal: new AbortController().signal,
+		});
+		t.is(outcome.kind, "success");
+		t.deepEqual(
+			outcome.toolCalls.map(call => call.name),
+			["safe_tool", "risky_tool"],
+		);
+		t.is(outcome.toolCalls[0].result, "ok");
+		t.regex(String(outcome.toolCalls[1].error), /denied by nanocoder\.permissions/);
+	} finally {
+		config.permissions = previous;
+	}
+
+	t.is(safeCalls, 1);
+	t.is(riskyCalls, 0);
+});
+
 test("forwards the plain session context to artifact tools", async (t) => {
 	const toolCall: ToolCall = {
 		id: "call-artifact",

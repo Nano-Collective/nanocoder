@@ -100,6 +100,10 @@ test('all documented nanocoder fields are accepted together', t => {
 			],
 			alwaysAllow: ['execute_bash'],
 			disabledTools: ['web_search'],
+			permissions: {
+				allow: ['execute_bash(git status)', 'read_file'],
+				deny: ['execute_bash(rm *)'],
+			},
 			systemPrompt: {mode: 'append', content: 'Be terse.'},
 			tune: {toolProfile: 'minimal', toolMode: 'xml'},
 			modeProviders: {plan: {provider: 'OpenRouter', model: 'gpt-4o'}},
@@ -460,6 +464,45 @@ test('root-level and nanocoder providers may be combined', t => {
 });
 
 // ---------------------------------------------------------------------------
+// permissions
+// ---------------------------------------------------------------------------
+
+test('permissions accepts allow and deny rule lists', t => {
+	assertValid(t, 'permissions both lists', {
+		nanocoder: {
+			permissions: {
+				allow: ['execute_bash(git status)', 'read_file'],
+				deny: ['execute_bash(rm -rf *)'],
+			},
+		},
+	});
+	assertValid(t, 'permissions allow only', {
+		nanocoder: {permissions: {allow: ['execute_bash']}},
+	});
+	assertValid(t, 'permissions deny only', {
+		nanocoder: {permissions: {deny: ['execute_bash']}},
+	});
+});
+
+test('permissions rules must be strings', t => {
+	assertInvalid(t, 'permissions non-string allow', {
+		nanocoder: {permissions: {allow: [42]}},
+	});
+	assertInvalid(t, 'permissions non-string deny', {
+		nanocoder: {permissions: {deny: ['execute_bash', false]}},
+	});
+});
+
+test('permissions rejects unknown keys and non-object forms', t => {
+	assertInvalid(t, 'permissions bogus key', {
+		nanocoder: {permissions: {bogus: []}},
+	});
+	assertInvalid(t, 'permissions string form', {
+		nanocoder: {permissions: 'execute_bash'},
+	});
+});
+
+// ---------------------------------------------------------------------------
 // structural integrity against the type
 // ---------------------------------------------------------------------------
 
@@ -484,6 +527,7 @@ test('DiskNanocoderConfig exposes every on-disk key', t => {
 		'lspServers',
 		'alwaysAllow',
 		'disabledTools',
+		'permissions',
 		'systemPrompt',
 		'nanocoderTools',
 		'modeProviders',

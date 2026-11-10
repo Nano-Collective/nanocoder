@@ -17,7 +17,10 @@ import {computeToolCallSignature} from '@/hooks/chat-handler/utils/tool-signatur
 import {processToolUse} from '@/message-handler';
 import {color, write, writeError, writeLine, writeStatus} from '@/plain/writer';
 import {parseToolCalls} from '@/tool-calling/index';
-import {resolveToolApproval} from '@/tools/approval-policy';
+import {
+	resolveToolPermission,
+	type ToolPermissionResult,
+} from '@/tools/approval-policy';
 import type {ToolManager} from '@/tools/tool-manager';
 import type {TuneConfig} from '@/types/config';
 import type {
@@ -717,19 +720,26 @@ async function runPlainConversationBody(
 		}
 
 		const toolsNeedingApproval: ToolCall[] = [];
-		const toolsToExecute: ToolCall[] = [];
+		const deniedToolResults: ToolResult[] = [];
 		for (const toolCall of validToolCalls) {
-			// Approval (including the yolo bypass) is resolved centrally.
-			const needsApproval = await evaluateNeedsApproval(
+			// Approval (including the yolo bypass and command permissions) is
+			// resolved centrally.
+			const permission = await evaluateToolPermission(
 				toolCall,
 				toolManager,
 				nonInteractiveAlwaysAllow,
 				developmentMode,
 			);
-			if (needsApproval) {
+			if (permission.decision === 'deny') {
+				deniedToolResults.push({
+					tool_call_id: toolCall.id,
+					role: 'tool',
+					name: toolCall.function.name,
+					content: `Error: ${permission.reason ?? 'Denied by nanocoder.permissions.'}`,
+					isError: true,
+				});
+			} else if (permission.decision === 'ask') {
 				toolsNeedingApproval.push(toolCall);
-			} else {
-				toolsToExecute.push(toolCall);
 			}
 		}
 
@@ -751,8 +761,28 @@ async function runPlainConversationBody(
 			};
 		}
 
+		// A denied call is a refusal, not a reason to stop: its error goes back
+		// to the model alongside the results of any allowed calls, so it can
+		// pick another command. Every tool call still gets exactly one result.
 		const toolResults: ToolResult[] = [];
-		for (const toolCall of toolsToExecute) {
+		for (const toolCall of validToolCalls) {
+			const denied = deniedToolResults.find(
+				result => result.tool_call_id === toolCall.id,
+			);
+			if (denied) {
+				toolResults.push(denied);
+				toolCallsLog.push({
+					name: toolCall.function.name,
+					arguments: toolCall.function.arguments || {},
+					result: null,
+					error: String(denied.content),
+				});
+				if (!isJson) {
+					writeError(String(denied.content));
+				}
+				continue;
+			}
+
 			if (!isJson) {
 				writeStatus(`tool: ${toolCall.function.name}`);
 			}
@@ -810,18 +840,22 @@ async function runPlainConversationBody(
 	};
 }
 
-async function evaluateNeedsApproval(
+async function evaluateToolPermission(
 	toolCall: ToolCall,
 	toolManager: ToolManager,
 	nonInteractiveAlwaysAllow: string[],
 	mode: DevelopmentMode,
-): Promise<boolean> {
+): Promise<ToolPermissionResult> {
 	const toolEntry = toolManager.getToolEntry(toolCall.function.name);
-	return resolveToolApproval(
+	return resolveToolPermission(
 		toolCall.function.name,
 		toolEntry,
 		toolCall.function.arguments,
-		{mode, alwaysAllow: nonInteractiveAlwaysAllow},
+		{
+			mode,
+			alwaysAllow: nonInteractiveAlwaysAllow,
+			permissions: getAppConfig().permissions,
+		},
 	);
 }
 
@@ -836,13 +870,13 @@ async function evaluateAutoAcceptWouldRun(
 ): Promise<boolean> {
 	if (mode === 'auto-accept') return false;
 	for (const toolCall of blockedToolCalls) {
-		const needsApproval = await evaluateNeedsApproval(
+		const permission = await evaluateToolPermission(
 			toolCall,
 			toolManager,
 			nonInteractiveAlwaysAllow,
 			'auto-accept',
 		);
-		if (needsApproval) return false;
+		if (permission.decision !== 'allow') return false;
 	}
 	return true;
 }

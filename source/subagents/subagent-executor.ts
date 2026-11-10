@@ -39,7 +39,10 @@ import {
 	updateSubagentSessionMessages,
 	updateSubagentSessionStreaming,
 } from '@/services/subagent-session-store';
-import {resolveToolApproval} from '@/tools/approval-policy';
+import {
+	resolveToolPermission,
+	type ToolPermissionResult,
+} from '@/tools/approval-policy';
 import {SESSION_ARTIFACT_TOOLS, type ToolManager} from '@/tools/tool-manager';
 import type {
 	AISDKCoreTool,
@@ -970,19 +973,21 @@ export class SubagentExecutor {
 	}
 
 	/**
-	 * Check if a tool needs user approval.
-	 * Uses the same logic as the main conversation loop.
+	 * Resolve the permission decision for a tool call.
+	 * Uses the same logic as the main conversation loop, including command-level
+	 * allow/deny rules. A deny is a hard refusal and cannot be approved by hand.
 	 */
-	private async needsApprovalForTool(
+	private async permissionForTool(
 		toolName: string,
 		rawArguments: unknown,
 		alwaysAllow?: string[],
 		mode: DevelopmentMode = this.currentMode(),
-	): Promise<boolean> {
+	): Promise<ToolPermissionResult> {
 		const toolEntry = this.toolManager.getToolEntry(toolName);
-		return resolveToolApproval(toolName, toolEntry, rawArguments, {
+		return resolveToolPermission(toolName, toolEntry, rawArguments, {
 			mode,
 			alwaysAllow: alwaysAllow ?? getAppConfig().alwaysAllow ?? [],
+			permissions: getAppConfig().permissions,
 		});
 	}
 
@@ -1096,16 +1101,25 @@ export class SubagentExecutor {
 			return finish({content: `Error: ${gate.reason}`}, true);
 		}
 
-		// Check if this tool needs user approval. A bridge supplies its own
-		// session's mode: the executor is shared, so its mode can't be right for
-		// every session at once.
-		const needsApproval = await this.needsApprovalForTool(
+		// A bridge supplies its own session's mode: the executor is shared, so
+		// its mode can't be right for every session at once. A deny rule is
+		// checked before the prompt, alwaysAllow, and every mode, so it refuses
+		// even in yolo.
+		const permission = await this.permissionForTool(
 			toolName,
 			rawArguments,
 			alwaysAllow,
 			bridge?.getMode(),
 		);
-		if (needsApproval) {
+		if (permission.decision === 'deny') {
+			return finish(
+				{
+					content: `Error: ${permission.reason ?? 'Denied by nanocoder.permissions.'}`,
+				},
+				true,
+			);
+		}
+		if (permission.decision === 'ask') {
 			const vote = await consultPluginPermission(toolName, parsedArgs);
 			if (vote.decision === 'deny') {
 				return finish({content: `Error: ${vote.reason}`}, true);

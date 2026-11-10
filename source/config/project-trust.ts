@@ -45,7 +45,8 @@ export interface ProjectTrustSurface {
  * formatters, LSP servers, project MCP servers, custom tools, and the skills, agents,
  * and commands the daemon triggers on its own. Also the `.env` it loads, the
  * project settings that relax confirmations (`alwaysAllow`, `defaultMode`,
- * `sandbox`, `verify.trustLevel`), and project provider `baseUrl`s. The
+ * `sandbox`, `verify.trustLevel`, `permissions`), and project provider
+ * `baseUrl`s. The
  * fingerprint covers those files, so a later edit is visible even when the
  * counts stay the same. Each part adds a line only when present, so a folder
  * without them keeps the fingerprint it had before they were covered.
@@ -218,8 +219,9 @@ function listEnvFile(root: string, lines: string[]): boolean {
 }
 
 /**
- * Project settings that run tools without asking or loosen how they run.
- * Each is fingerprinted by value, so turning one on later is a change.
+ * Project settings that run tools without asking, loosen how they run, or
+ * change which commands are pre-approved or hard-denied. Each is fingerprinted
+ * by value, so turning one on later is a change.
  */
 function listPermissionSettings(
 	config: ProjectConfig | undefined,
@@ -238,6 +240,7 @@ function listPermissionSettings(
 				? (nanocoder.verify as {trustLevel?: unknown}).trustLevel
 				: undefined,
 		],
+		['permissions', nanocoder.permissions],
 	];
 	let count = 0;
 	for (const [name, value] of settings) {
@@ -456,6 +459,7 @@ interface ProjectConfig {
 		sandbox?: unknown;
 		verify?: unknown;
 		providers?: unknown;
+		permissions?: unknown;
 	};
 	providers?: unknown;
 }

@@ -1449,17 +1449,20 @@ test('mode resolver overrides the static parentMode and is read live', async t =
 	let mode: 'normal' | 'yolo' = 'yolo';
 	executor.setModeResolver(() => mode);
 
-	const needsApproval = (name: string) =>
+	const permission = (name: string) =>
 		(executor as unknown as {
-			needsApprovalForTool: (n: string, a: unknown) => Promise<boolean>;
-		}).needsApprovalForTool(name, {});
+			permissionForTool: (
+				n: string,
+				a: unknown,
+			) => Promise<{decision: 'allow' | 'ask' | 'deny'}>;
+		}).permissionForTool(name, {});
 
 	// yolo -> no approval, even though parentMode is 'normal'.
-	t.false(await needsApproval('execute_bash'));
+	t.is((await permission('execute_bash')).decision, 'allow');
 
 	// Flip the live source (simulating a mid-run switch) -> next check honors it.
 	mode = 'normal';
-	t.true(await needsApproval('execute_bash'));
+	t.is((await permission('execute_bash')).decision, 'ask');
 });
 
 // ============================================================================
@@ -1469,32 +1472,35 @@ test('mode resolver overrides the static parentMode and is read live', async t =
 // headless mode since no approval-queue handler is ever registered there).
 // ============================================================================
 
-test.serial('needsApprovalForTool: alwaysAllow bypasses an unconditional approval:true policy', async t => {
+test.serial('permissionForTool: alwaysAllow bypasses an unconditional approval:true policy', async t => {
 	const toolManager = createMockToolManager({
 		git_commit: {handler: async () => 'committed', readOnly: false, needsApproval: true},
 	});
 	const client = createMockClient([]);
 	const executor = new SubagentExecutor(toolManager, client, process.cwd(), 'headless');
 
-	const needsApproval = (alwaysAllow?: string[]) =>
+	const permission = (alwaysAllow?: string[]) =>
 		(executor as unknown as {
-			needsApprovalForTool: (
+			permissionForTool: (
 				n: string,
 				a: unknown,
 				alwaysAllow?: string[],
-			) => Promise<boolean>;
-		}).needsApprovalForTool('git_commit', {}, alwaysAllow);
+			) => Promise<{decision: 'allow' | 'ask' | 'deny'}>;
+		}).permissionForTool('git_commit', {}, alwaysAllow);
 
-	t.true(
-		await needsApproval(undefined),
+	t.is(
+		(await permission(undefined)).decision,
+		'ask',
 		'without alwaysAllow, git_commit still requires approval even in headless mode',
 	);
-	t.false(
-		await needsApproval(['git_commit']),
+	t.is(
+		(await permission(['git_commit'])).decision,
+		'allow',
 		'alwaysAllow including git_commit bypasses its approval:true policy',
 	);
-	t.true(
-		await needsApproval(['some_other_tool']),
+	t.is(
+		(await permission(['some_other_tool'])).decision,
+		'ask',
 		'alwaysAllow not including git_commit does not bypass it',
 	);
 });
@@ -1618,24 +1624,26 @@ test.serial('execute(): an explicit alwaysAllow replaces the project config alwa
 			process.cwd(),
 			'headless',
 		);
-		const needsApproval = (alwaysAllow?: string[]) =>
+		const permission = (alwaysAllow?: string[]) =>
 			(executor as unknown as {
-				needsApprovalForTool: (
+				permissionForTool: (
 					n: string,
 					a: unknown,
 					alwaysAllow?: string[],
-				) => Promise<boolean>;
-			}).needsApprovalForTool('git_pr', {}, alwaysAllow);
+				) => Promise<{decision: 'allow' | 'ask' | 'deny'}>;
+			}).permissionForTool('git_pr', {}, alwaysAllow);
 
-		t.false(
-			await needsApproval(undefined),
+		t.is(
+			(await permission(undefined)).decision,
+			'allow',
 			'with no override the project config still applies',
 		);
-		t.true(
-			await needsApproval([]),
+		t.is(
+			(await permission([])).decision,
+			'ask',
 			'an explicit override must not inherit the project config',
 		);
-		t.false(await needsApproval(['git_pr']));
+		t.is((await permission(['git_pr'])).decision, 'allow');
 	} finally {
 		leave();
 	}
@@ -1653,11 +1661,14 @@ test('without a resolver, approval falls back to the static parentMode', async t
 		'yolo',
 	);
 
-	const needsApproval = (executor as unknown as {
-		needsApprovalForTool: (n: string, a: unknown) => Promise<boolean>;
-	}).needsApprovalForTool('execute_bash', {});
+	const permission = (executor as unknown as {
+		permissionForTool: (
+			n: string,
+			a: unknown,
+		) => Promise<{decision: 'allow' | 'ask' | 'deny'}>;
+	}).permissionForTool('execute_bash', {});
 
-	t.false(await needsApproval);
+	t.is((await permission).decision, 'allow');
 });
 
 test.serial('subagents never receive the session-artifact tools', async t => {
@@ -1762,6 +1773,56 @@ test.serial('a subagent cannot execute a tool outside its allow-list', async t =
 	t.true(result.success);
 	t.false(wrote, 'a read-only subagent must not be able to write files');
 	t.regex(toolResult, /not available to this subagent/);
+});
+
+test.serial('permissions.deny refuses a subagent tool call', async t => {
+	let reads = 0;
+	const toolManager = createMockToolManager({
+		read_file: {
+			handler: async () => {
+				reads++;
+				return 'contents';
+			},
+			readOnly: true,
+		},
+	});
+	let toolResult = '';
+	const client = createMockClient(
+		[
+			{
+				content: '',
+				tool_calls: [
+					{
+						id: 'denied',
+						function: {name: 'read_file', arguments: '{"path":"x.ts"}'},
+					},
+				],
+			},
+			{content: 'done'},
+		],
+		messages => {
+			const result = messages.find(message => message.role === 'tool');
+			if (result) toolResult = result.content;
+		},
+	);
+	// yolo would run it unattended; the deny rule still wins.
+	const executor = new SubagentExecutor(toolManager, client, process.cwd(), 'yolo');
+
+	const config = getAppConfig();
+	const previous = config.permissions;
+	config.permissions = {deny: ['read_file']};
+	try {
+		const result = await executor.execute({
+			subagent_type: 'explore',
+			description: 'Try to read a file',
+		});
+		t.true(result.success);
+	} finally {
+		config.permissions = previous;
+	}
+
+	t.is(reads, 0, 'a denied tool must not run');
+	t.regex(toolResult, /denied/);
 });
 
 test.serial('injects relevant project memories into the subagent system prompt', async t => {
