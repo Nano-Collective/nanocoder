@@ -27,6 +27,7 @@ import {SemanticMemoryManager} from '@/memory/semantic-memory-manager';
 import {readFileTool} from '@/tools/read-file';
 import {ToolManager} from '@/tools/tool-manager';
 import type {Message} from '@/types/core';
+import {appendTurnContext} from '@/utils/turn-context';
 import {
 	clearReadTracker,
 	matchReadContent,
@@ -2334,12 +2335,14 @@ test('AcpAgent.prompt - recalls relevant project memories scoped to the session 
 	});
 
 	const capturedSystemPrompts: string[] = [];
+	const capturedUserMessages: string[] = [];
 	const conn = createMockConn();
 	const initContext = createMockInitContext();
 	initContext.client = {
 		...initContext.client,
 		chat: async (messages: Array<{content: string}>) => {
 			capturedSystemPrompts.push(messages[0]?.content ?? '');
+			capturedUserMessages.push(messages.at(-1)?.content ?? '');
 			return {choices: [{message: {content: 'Test response'}}]};
 		},
 	} as any;
@@ -2355,9 +2358,13 @@ test('AcpAgent.prompt - recalls relevant project memories scoped to the session 
 		prompt: [{type: 'text', text: 'unrelated question about docs'}],
 	});
 
-	t.true(capturedSystemPrompts[0]?.includes('## Project Context'));
-	t.true(capturedSystemPrompts[0]?.includes('Auth uses Clerk'));
-	t.false(capturedSystemPrompts[1]?.includes('## Project Context'));
+	// The recall rides in the user turn, so the system prompt is byte-identical
+	// across turns and the cached prefix survives (#1574).
+	t.is(capturedSystemPrompts[0], capturedSystemPrompts[1]);
+	t.false(capturedSystemPrompts[0]?.includes('## Project Context'));
+	t.true(capturedUserMessages[0]?.includes('## Project Context'));
+	t.true(capturedUserMessages[0]?.includes('Auth uses Clerk'));
+	t.false(capturedUserMessages[1]?.includes('## Project Context'));
 });
 
 test('AcpAgent.extMethod - retryTurn truncates the retried turn from session messages', async t => {
@@ -2415,6 +2422,34 @@ test('AcpAgent.extMethod - retryTurn uses an exact prompt match and never picks 
 	t.true(result.ok);
 	t.is(session.messages.length, 2);
 	t.is(session.messages[1].content, 'r1');
+});
+
+test('AcpAgent.extMethod - retryTurn matches a turn carrying per-turn context', async t => {
+	const {agent} = createAgent();
+	const created = await agent.newSession({cwd: '/tmp', mcpServers: []});
+	const session = (agent as any).sessions.get(created.sessionId);
+	session.messages = [
+		{
+			role: 'user',
+			content: appendTurnContext('first prompt', [
+				'## Project Context\n\n```\n- Auth uses Clerk.\n```',
+			]),
+		},
+		{role: 'assistant', content: 'r1'},
+		{role: 'user', content: appendTurnContext('second prompt', [])},
+		{role: 'assistant', content: 'r2'},
+	];
+
+	// The client only ever saw "first prompt", so retrying it must truncate at
+	// that turn. Without stripping the context block the exact match misses and
+	// the fallback retries the LAST user turn, losing the wrong messages.
+	const result = await agent.extMethod('retryTurn', {
+		sessionId: created.sessionId,
+		promptText: 'first prompt',
+	});
+
+	t.true(result.ok);
+	t.is(session.messages.length, 0);
 });
 
 test('AcpAgent.extMethod - retryTurn drops timeline checkpoints from the retried turn', async t => {

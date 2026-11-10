@@ -1764,13 +1764,15 @@ test.serial('a subagent cannot execute a tool outside its allow-list', async t =
 	t.regex(toolResult, /not available to this subagent/);
 });
 
-test.serial('injects relevant project memories into the subagent system prompt', async t => {
+test.serial('injects relevant project memories into the subagent task message', async t => {
 	const toolManager = createMockToolManager();
 	const client = createMockClient([{content: 'Here are the results'}]);
 	let systemPrompt = '';
+	let taskMessage = '';
 	const originalChat = client.chat.bind(client);
 	client.chat = async (messages: Message[], tools, callbacks, signal, modeOverrides) => {
 		systemPrompt = String(messages[0]?.content ?? '');
+		taskMessage = String(messages[1]?.content ?? '');
 		return originalChat(messages, tools, callbacks, signal, modeOverrides);
 	};
 
@@ -1796,8 +1798,12 @@ test.serial('injects relevant project memories into the subagent system prompt',
 	});
 
 	t.true(result.success);
-	t.true(systemPrompt.includes('## Project Context'));
-	t.true(systemPrompt.includes('Auth flow uses Clerk and avoids middleware.'));
+	// The recall rides on the task message so the subagent's system block stays
+	// byte-stable across its steps (#1574).
+	t.false(systemPrompt.includes('## Project Context'));
+	t.true(taskMessage.startsWith('Task: Refactor Clerk auth'));
+	t.true(taskMessage.includes('## Project Context'));
+	t.true(taskMessage.includes('Auth flow uses Clerk and avoids middleware.'));
 });
 
 test.serial('skips subagent memory recall when semantic memory is disabled', async t => {
