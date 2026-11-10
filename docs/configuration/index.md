@@ -51,6 +51,8 @@ How the layers combine depends on the setting:
 
 > **Note:** `NANOCODER_CONFIG_DIR` replaces the platform-specific user-level directory above. It does not turn off the project layer for `agents.config.json` or `.mcp.json`: a project file in the working directory still applies. It does skip the project-level `nanocoder-preferences.json` for top-level preferences (see [Preferences](preferences.md) for the exceptions).
 
+`AGENTS.md` uses the same user-level directory: an `AGENTS.md` there applies to every project, the project-root file applies to that repository, and nested `AGENTS.md` files are picked up from subdirectories the AI works in. See [Include AGENTS.md](../features/tune.md#include-agents-md) for ordering and size limits.
+
 If no user-level `agents.config.json` or `nanocoder-preferences.json` exists yet, Nanocoder creates an empty (`{}`) one in the user-level directory the first time it resolves that file.
 
 > **Tip:** Use `/setup-config` to list all available configuration files and open any of them in your `$EDITOR`.
@@ -532,12 +534,12 @@ Use `"mode": "append"` to keep the built-in prompt and add your text at the end:
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `mode` | string | `"replace"` | `"replace"` overrides the built-in prompt entirely (no system info, no AGENTS.md). `"append"` adds your content after the built-in prompt. |
+| `mode` | string | `"replace"` | `"replace"` overrides the built-in prompt entirely (no system info, no AGENTS.md layers). `"append"` adds your content after the built-in prompt. |
 | `content` | string | — | Inline prompt text. Takes priority over `file` if both are set. |
 | `file` | string | — | Path to a markdown/text file containing the prompt. Resolved relative to the working directory if not absolute. |
 
 **Notes:**
-- In `replace` mode, the built-in `## SYSTEM INFORMATION` section and AGENTS.md auto-append are skipped — include them yourself if you need them.
+- In `replace` mode, the built-in `## SYSTEM INFORMATION` section and every AGENTS.md layer (user-level, project root, and nested) are skipped — include them yourself if you need them.
 - Tool definitions are still injected into the prompt for providers that don't support native tool calling. Tool availability is controlled separately via `disabledTools` and `/tune`.
 - If the file can't be read, Nanocoder logs a warning and falls back to the built-in prompt.
 - Project-level `agents.config.json` wins over the global config.

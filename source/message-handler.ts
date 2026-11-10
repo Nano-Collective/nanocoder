@@ -13,6 +13,7 @@ import type {
 	ToolHandler,
 	ToolResult,
 } from '@/types/index';
+import {noteAgentsMdAccessForTool} from '@/utils/agents-md';
 import {parseToolArguments} from '@/utils/tool-args-parser';
 import {toolErrorToContent} from '@/utils/tool-validation';
 import {truncateToolResult} from '@/utils/truncate-tool-result';
@@ -118,6 +119,12 @@ export async function processToolUse(
 			result !== null &&
 			'isError' in result &&
 			result.isError === true;
+		// A successful read/edit means the agent is now working in this
+		// directory; remember any AGENTS.md above it so the next model call can
+		// carry the nested rules.
+		if (!failed) {
+			noteAgentsMdAccessForTool(toolCall.function.name, parsedArgs);
+		}
 		// Formatters run on a successful write only, and before post-tool-use
 		// so its hooks see the formatted file.
 		const content =

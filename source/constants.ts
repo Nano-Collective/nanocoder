@@ -155,6 +155,9 @@ export const TRUNCATION_OUTPUT_LIMIT = 2000;
 // The cap is intentionally higher than the Bash preview limit so normal file
 // reads and search results remain useful while unbounded tools stay bounded.
 export const MAX_TOOL_RESULT_CHARS = 20_000;
+// Per-file cap for AGENTS.md content loaded into the system prompt. A nested
+// rules file can otherwise eat a small model's context on first read.
+export const MAX_AGENTS_MD_FILE_CHARS = 32_000;
 export const TRUNCATION_DESCRIPTION_LENGTH = 100;
 // Rows of tool output shown in the transcript; `/expand <n>` prints the rest.
 export const TOOL_OUTPUT_DISPLAY_LINES = 20;

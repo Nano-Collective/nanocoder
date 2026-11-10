@@ -29,6 +29,8 @@ export class AcpSession {
 	messages: Message[] = [];
 	systemMessage?: Message;
 	baseSystemMessage?: Message;
+	/** Whether the base prompt carries AGENTS.md; gates request-time nested appends. */
+	includeAgentsMd = true;
 	abortController = new AbortController();
 	developmentMode: DevelopmentMode;
 	/** Tools the client turned off for this session. Not persisted: the client sends them on every new, load and resume. */

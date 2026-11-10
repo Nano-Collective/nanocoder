@@ -31,7 +31,7 @@ Controls which tools the AI has access to.
 | **auto** (default) | Resolves to `full`, `minimal`, or `nano` from the active model id | Cloud/unknown models get `full`; models up to 15B parameters get a reduced profile automatically |
 | **full** | All registered tools including MCP servers | No filtering applied |
 | **minimal** | 8 core tools: `read_file`, `write_file`, `string_replace`, `execute_bash`, `find_files`, `search_file_contents`, `list_directory`, `agent` | Slim prompt and single-tool enforcement enabled automatically |
-| **nano** | 5 core tools: `read_file`, `diff_edit`, `write_file`, `execute_bash`, `search_file_contents` | Ultra-slim prompt, single-tool enforcement, AGENTS.md omitted by default |
+| **nano** | 5 core tools: `read_file`, `diff_edit`, `write_file`, `execute_bash`, `search_file_contents` | Ultra-slim prompt, single-tool enforcement, all AGENTS.md layers omitted by default |
 
 The **auto** profile is the default. It keeps the full tool surface for cloud models and model ids with no size hint, resolves models up to 15B parameters to `minimal`, and resolves models up to 4B parameters to `nano`. The status bar shows the resolved profile, for example `tune: minimal (auto)`.
 
@@ -59,19 +59,25 @@ The **nano** profile is designed for the smallest models or low-end hardware run
 - Drops the `CORE PRINCIPLES` and `CODING PRACTICES` prompt sections.
 - Uses shortened `TASK APPROACH`, `FILE OPERATIONS`, `CONSTRAINTS` sections (≤4 lines each).
 - Replaces the verbose `SYSTEM INFORMATION` block with a single-line `## SYSTEM` line.
-- Omits `AGENTS.md` from the system prompt by default (override with the **Include AGENTS.md** toggle).
+- Omits every `AGENTS.md` layer from the system prompt by default (override with the **Include AGENTS.md** toggle).
 
 Together these reduce the system prompt from ~500–700 tokens (`minimal`) to roughly ~150–250 tokens (`nano`), leaving more of the context window for actual work.
 
 ### Include AGENTS.md
 
-Toggles whether `AGENTS.md` from the project root is appended to the system prompt.
+Toggles whether the layered `AGENTS.md` content is appended to the system prompt. When on, Nanocoder loads:
+
+1. `<config dir>/AGENTS.md` for machine-wide rules, so guidance follows you across projects. This respects `NANOCODER_CONFIG_DIR`.
+2. The project-root `AGENTS.md`.
+3. Nested `AGENTS.md` files from directories the AI reads or edits during the session. A file appears only after the AI touches its directory, and files are ordered shallow to deep so the closest file wins on conflicts.
 
 - Defaults **ON** for `full` and `minimal` profiles (preserves prior behaviour).
 - Defaults **OFF** for the `nano` profile, including when `auto` resolves to `nano` for the active model.
 - Can be flipped explicitly per session, persisted via preferences, or pinned in `agents.config.json` via `tune.includeAgentsMd`.
+- Turns off every layer together. `systemPrompt.mode: "replace"` also skips them, because it replaces the built-in prompt entirely.
+- Caps each file at 32,000 characters. A truncated file includes a visible note describing how much was omitted.
 
-Disabling this is useful on tiny models that get crowded out by long project guidelines.
+Disabling this is useful on tiny models that get crowded out by long guidelines.
 
 ### Aggressive Compact
 

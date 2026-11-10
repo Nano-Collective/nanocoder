@@ -24,12 +24,28 @@ let sessionCwd: string | null = null;
 export interface SessionCwdScope {
 	projectRoot: string;
 	sessionCwd: string | null;
+	/** Nested AGENTS.md files this session has discovered, kept per session. */
+	agentsMdPaths: Set<string>;
 }
 
 const sessionScope = new AsyncLocalStorage<SessionCwdScope>();
 
 export function createSessionCwdScope(projectRoot: string): SessionCwdScope {
-	return {projectRoot: resolve(projectRoot), sessionCwd: null};
+	return {
+		projectRoot: resolve(projectRoot),
+		sessionCwd: null,
+		agentsMdPaths: new Set<string>(),
+	};
+}
+
+/**
+ * The active session's cwd scope, or undefined outside one (the TUI and plain
+ * shell use the process-wide values). Callers that keep per-session state, such
+ * as the nested AGENTS.md tracker, use this so concurrent ACP sessions do not
+ * share it.
+ */
+export function getSessionCwdScope(): SessionCwdScope | undefined {
+	return sessionScope.getStore();
 }
 
 export function runInSessionCwdScope<T>(

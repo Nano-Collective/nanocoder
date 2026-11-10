@@ -18,9 +18,24 @@ import {TUNE_DEFAULTS} from '@/types/config';
 
 console.log('\nprompt-builder.spec.ts');
 
-// Reset section cache between tests to ensure clean state
+const originalConfigDir = process.env.NANOCODER_CONFIG_DIR;
+let testConfigDir: string;
+
+// Reset section cache and keep the user-level config directory hermetic so a
+// developer's real AGENTS.md cannot change these assertions.
 test.beforeEach(() => {
 	resetSectionCache();
+	testConfigDir = mkdtempSync(join(tmpdir(), 'nc-prompt-config-'));
+	process.env.NANOCODER_CONFIG_DIR = testConfigDir;
+});
+
+test.afterEach(() => {
+	rmSync(testConfigDir, {recursive: true, force: true});
+	if (originalConfigDir === undefined) {
+		delete process.env.NANOCODER_CONFIG_DIR;
+	} else {
+		process.env.NANOCODER_CONFIG_DIR = originalConfigDir;
+	}
 });
 
 const ALL_TOOLS = [
@@ -471,6 +486,27 @@ test('buildSystemPrompt - appends the session project AGENTS.md inside a session
 			buildSystemPrompt('normal', tune, NANO_TOOLS),
 		);
 		t.true(result.includes('SESSION PROJECT GUIDANCE'));
+	} finally {
+		rmSync(dir, {recursive: true, force: true});
+	}
+});
+
+test('buildSystemPrompt - layers user-level AGENTS.md before the project root', t => {
+	const dir = mkdtempSync(join(tmpdir(), 'nc-prompt-layered-'));
+	try {
+		writeFileSync(join(testConfigDir, 'AGENTS.md'), 'USER LEVEL GUIDANCE');
+		writeFileSync(join(dir, 'AGENTS.md'), 'PROJECT ROOT GUIDANCE');
+		const tune: TuneConfig = {...TUNE_NANO, includeAgentsMd: true};
+		const result = runInSessionCwdScope(createSessionCwdScope(dir), () =>
+			buildSystemPrompt('normal', tune, NANO_TOOLS),
+		);
+
+		t.true(result.includes('USER LEVEL GUIDANCE'));
+		t.true(result.includes('PROJECT ROOT GUIDANCE'));
+		t.true(
+			result.indexOf('USER LEVEL GUIDANCE') <
+				result.indexOf('PROJECT ROOT GUIDANCE'),
+		);
 	} finally {
 		rmSync(dir, {recursive: true, force: true});
 	}

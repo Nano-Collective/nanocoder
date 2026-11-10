@@ -16,6 +16,7 @@ import {processToolUse} from '@/message-handler';
 import {generateKey} from '@/session/key-generator';
 import {getTuneToolMode} from '@/types/config';
 import type {ImageAttachment, Message} from '@/types/core';
+import {resetAgentsMdTracker} from '@/utils/agents-md';
 import {MessageBuilder} from '@/utils/message-builder';
 import {infoMsg} from '@/utils/message-factory';
 import {buildSystemPrompt, setLastBuiltPrompt} from '@/utils/prompt-builder';
@@ -237,6 +238,7 @@ export function useChatHandler({
 	React.useEffect(() => {
 		if (messages.length === 0) {
 			conversationStateManager.current.reset();
+			resetAgentsMdTracker();
 			if (privacySessionMapRef) {
 				privacySessionMapRef.current = {};
 			}

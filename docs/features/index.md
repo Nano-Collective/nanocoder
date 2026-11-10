@@ -175,7 +175,7 @@ The AI also has a task tool and will proactively create and update tasks when wo
 
 Run `/init` or `nanocoder init` to analyze your project and generate an `AGENTS.md` file — a project-specific prompt that gives the AI context about your codebase, conventions, and tooling. Use `--preset react`, `--preset nextjs`, or `--preset rust` to add bundled stack guidance, a `.nanocoderignore`, and a `/check` command skill. Use `/init --force` to regenerate `AGENTS.md`; existing preset files are preserved.
 
-The `AGENTS.md` file is automatically loaded every session, so the AI always knows how your project works.
+`AGENTS.md` is loaded in layers. `<config dir>/AGENTS.md` applies machine-wide rules to every project (it follows `NANOCODER_CONFIG_DIR`), the project-root file describes the repository, and nested `AGENTS.md` files are picked up from directories the AI actually reads or edits during the session. Files are ordered from broadest to closest, so a nested file wins when rules conflict. Each file is capped at 32,000 characters with a visible truncation note. All layers are controlled together by the [Tune](tune.md#include-agents-md) **Include AGENTS.md** setting.
 
 ### Skills: the unified extension model
 

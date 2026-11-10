@@ -1,4 +1,7 @@
 import test from 'ava';
+import {mkdtempSync, mkdirSync, rmSync, writeFileSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 import type {ToolCall, ToolHandler, ToolResult} from '@/types/index';
 import type {ToolManager} from '@/tools/tool-manager';
 import {
@@ -9,6 +12,15 @@ import {
 } from './message-handler';
 import {MAX_TOOL_RESULT_CHARS} from '@/constants';
 import {executeBashTool} from '@/tools/execute-bash';
+import {
+	resetSessionCwd,
+	setProjectRoot,
+	setSessionCwd,
+} from '@/services/session-cwd';
+import {
+	getDiscoveredAgentsMdPaths,
+	resetAgentsMdTracker,
+} from '@/utils/agents-md';
 
 console.log(`\nmessage-handler.spec.ts`);
 
@@ -741,4 +753,67 @@ test('processToolUse - runs a tool from the tool manager the call carries, not t
 	t.true(unknown.isError);
 	// And a call that carries none still uses it.
 	t.is((await processToolUse(createMockToolCall('shared', {}))).content, 'shared');
+});
+
+// A successful file tool is how the agent announces which directory it is
+// working in, so processToolUse must feed that into the nested AGENTS.md tracker.
+test('processToolUse - records nested AGENTS.md after a successful file tool', async t => {
+	const root = mkdtempSync(join(tmpdir(), 'nc-message-agents-'));
+	const apiDir = join(root, 'packages', 'api');
+	try {
+		mkdirSync(apiDir, {recursive: true});
+		writeFileSync(join(apiDir, 'AGENTS.md'), 'API RULES');
+		setProjectRoot(root);
+		setSessionCwd(root);
+		resetAgentsMdTracker();
+
+		setToolRegistryGetter(
+			createMockToolRegistry({
+				read_file: async () => 'file contents',
+			}),
+		);
+
+		await processToolUse(
+			createMockToolCall('read_file', {
+				path: 'packages/api/src/handler.ts',
+			}),
+		);
+
+		t.deepEqual(getDiscoveredAgentsMdPaths(), [join(apiDir, 'AGENTS.md')]);
+	} finally {
+		resetAgentsMdTracker();
+		resetSessionCwd();
+		rmSync(root, {recursive: true, force: true});
+	}
+});
+
+test('processToolUse - does not record AGENTS.md when the tool reports failure', async t => {
+	const root = mkdtempSync(join(tmpdir(), 'nc-message-agents-fail-'));
+	const apiDir = join(root, 'packages', 'api');
+	try {
+		mkdirSync(apiDir, {recursive: true});
+		writeFileSync(join(apiDir, 'AGENTS.md'), 'API RULES');
+		setProjectRoot(root);
+		setSessionCwd(root);
+		resetAgentsMdTracker();
+
+		setToolRegistryGetter(
+			createMockToolRegistry({
+				read_file: async () =>
+					({llmContent: 'missing', isError: true}) as unknown as string,
+			}),
+		);
+
+		await processToolUse(
+			createMockToolCall('read_file', {
+				path: 'packages/api/src/handler.ts',
+			}),
+		);
+
+		t.deepEqual(getDiscoveredAgentsMdPaths(), []);
+	} finally {
+		resetAgentsMdTracker();
+		resetSessionCwd();
+		rmSync(root, {recursive: true, force: true});
+	}
 });
