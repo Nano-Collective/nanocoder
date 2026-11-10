@@ -634,6 +634,40 @@ test('api-route template: uses default provider name and model', t => {
 	t.is(template!.buildConfig({providerName: '', apiKey: 'test-key', model: 'gpt-5.5'}).name, 'API Route');
 });
 
+test('openllm template: sets local baseUrl, no API key, and parses models', t => {
+	const template = PROVIDER_TEMPLATES.find(t => t.id === 'openllm');
+	t.truthy(template);
+	t.falsy(template!.fields.find(f => f.name === 'apiKey'));
+
+	const config = template!.buildConfig({
+		providerName: 'OpenLLM',
+		baseUrl: '',
+		model: 'ultra, plus, lite',
+	});
+
+	t.is(config.name, 'OpenLLM');
+	t.is(config.baseUrl, 'http://127.0.0.1:8787/v1');
+	t.is(config.apiKey, undefined);
+	t.is(config.sdkProvider, undefined);
+	t.deepEqual(config.models, ['ultra', 'plus', 'lite']);
+});
+
+test('openllm template: uses default provider name and model default', t => {
+	const template = PROVIDER_TEMPLATES.find(t => t.id === 'openllm');
+	t.truthy(template);
+
+	const modelField = template!.fields.find(f => f.name === 'model');
+	t.is(modelField?.default, 'ultra');
+
+	const config = template!.buildConfig({
+		providerName: '',
+		baseUrl: '',
+		model: 'ultra',
+	});
+
+	t.is(config.name, 'OpenLLM');
+});
+
 test('futureinfra template: sets baseUrl, default model, and parses models', t => {
 	const template = PROVIDER_TEMPLATES.find(t => t.id === 'futureinfra');
 	t.truthy(template);

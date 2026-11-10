@@ -32,6 +32,7 @@ Run on your machine, typically no API key required.
 - [vLLM](vllm.md) - High-throughput serving engine
 - [LocalAI](localai.md) - OpenAI-compatible local API
 - [llama-swap](llama-swap.md) - Model multiplexer for llama.cpp
+- [OpenLLM](openllm.md) - Router for your API keys, OAuth subscriptions and local models, local first with cloud access
 
 ## Cloud Providers (OpenAI-Compatible)
 
