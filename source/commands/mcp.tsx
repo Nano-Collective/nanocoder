@@ -238,8 +238,10 @@ export class MCPLoginFlow {
 		return this.state;
 	}
 
+	/** Subscribe to state changes; the current state is delivered at once. */
 	subscribe(listener: (state: LoginState) => void): () => void {
 		this.listeners.add(listener);
+		listener(this.state);
 		return () => this.listeners.delete(listener);
 	}
 

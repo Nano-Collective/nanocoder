@@ -1,4 +1,5 @@
 import test from 'ava';
+import {createHash} from 'node:crypto';
 import * as fs from 'node:fs';
 import * as http from 'node:http';
 import * as os from 'node:os';
@@ -13,7 +14,10 @@ console.log(`\nmcp-client-oauth.spec.ts`);
 /**
  * A tiny OAuth-protected Streamable HTTP MCP server: without a Bearer token it
  * answers 401 with a resource-metadata challenge, serves authorization server
- * metadata and dynamic client registration, issues tokens on /token, and once
+ * metadata and dynamic client registration, records the authorization request
+ * on /authorize and redirects back with a one-time code, issues tokens on
+ * /token only when the code, client_id, redirect_uri and PKCE verifier match
+ * that request, and once
  * a valid token is presented it answers the MCP initialize / tools/list
  * requests with plain JSON responses.
  */
@@ -24,6 +28,15 @@ interface MockServer {
 	registrations: number;
 	tokenRequests: Array<Record<string, string>>;
 	authorizedCalls: number;
+	authorizeRequests: Array<Record<string, string>>;
+	tokenRejections: string[];
+	/** When set, /mcp answers 500 regardless of the token. */
+	failMcp: boolean;
+}
+
+/** Base64url SHA-256, the S256 PKCE transform. */
+function s256(verifier: string): string {
+	return createHash('sha256').update(verifier).digest('base64url');
 }
 
 function readBody(req: http.IncomingMessage): Promise<string> {
@@ -50,7 +63,13 @@ async function startMockServer(): Promise<MockServer> {
 		registrations: 0,
 		tokenRequests: [],
 		authorizedCalls: 0,
+		authorizeRequests: [],
+		tokenRejections: [],
+		failMcp: false,
 	};
+	// Issued authorization codes and the request each one answered.
+	const issuedCodes = new Map<string, Record<string, string>>();
+	let codeCounter = 0;
 	const server = http.createServer(async (req, res) => {
 		const url = new URL(req.url ?? '/', state.origin);
 		if (url.pathname === '/.well-known/oauth-protected-resource') {
@@ -83,12 +102,47 @@ async function startMockServer(): Promise<MockServer> {
 				token_endpoint_auth_method: 'none',
 			});
 		}
+		if (url.pathname === '/authorize' && req.method === 'GET') {
+			const params = Object.fromEntries(url.searchParams.entries());
+			state.authorizeRequests.push(params);
+			if (
+				params.response_type !== 'code' ||
+				params.client_id !== 'mock-client' ||
+				params.code_challenge_method !== 'S256' ||
+				!params.code_challenge ||
+				!params.state ||
+				!/^http:\/\/127\.0\.0\.1:\d+\/callback$/.test(params.redirect_uri ?? '')
+			) {
+				return json(res, 400, {error: 'invalid_request'});
+			}
+			const code = `code-${++codeCounter}`;
+			issuedCodes.set(code, params);
+			const redirect = new URL(params.redirect_uri);
+			redirect.searchParams.set('code', code);
+			redirect.searchParams.set('state', params.state);
+			res.writeHead(302, {Location: redirect.toString()});
+			res.end();
+			return;
+		}
 		if (url.pathname === '/token' && req.method === 'POST') {
 			const params = Object.fromEntries(
 				new URLSearchParams(await readBody(req)).entries(),
 			);
 			state.tokenRequests.push(params);
-			if (params.grant_type === 'authorization_code' && params.code === 'good-code') {
+			if (params.grant_type === 'authorization_code') {
+				const authorize = issuedCodes.get(params.code ?? '');
+				issuedCodes.delete(params.code ?? '');
+				let rejection: string | undefined;
+				if (!authorize) rejection = 'unknown or reused code';
+				else if (params.client_id !== authorize.client_id) rejection = 'client_id mismatch';
+				else if (params.redirect_uri !== authorize.redirect_uri) rejection = 'redirect_uri mismatch';
+				else if (!params.code_verifier || s256(params.code_verifier) !== authorize.code_challenge) {
+					rejection = 'PKCE verifier does not match the challenge';
+				}
+				if (rejection) {
+					state.tokenRejections.push(rejection);
+					return json(res, 400, {error: 'invalid_grant', error_description: rejection});
+				}
 				return json(res, 200, {
 					access_token: 'access-1',
 					token_type: 'Bearer',
@@ -99,6 +153,11 @@ async function startMockServer(): Promise<MockServer> {
 			return json(res, 400, {error: 'invalid_grant'});
 		}
 		if (url.pathname === '/mcp') {
+			if (state.failMcp) {
+				res.writeHead(500, {'Content-Type': 'text/plain'});
+				res.end('internal error');
+				return;
+			}
 			const authorization = req.headers.authorization;
 			if (authorization !== 'Bearer access-1') {
 				res.writeHead(401, {
@@ -179,6 +238,23 @@ async function startMockServer(): Promise<MockServer> {
 	return state;
 }
 
+/**
+ * Act as the user's browser: open the authorization URL on the mock, which
+ * redirects to the loopback callback with the issued code and echoed state,
+ * and follow that redirect.
+ */
+function simulateBrowser(authorizationUrl: URL): void {
+	http
+		.get(authorizationUrl, res => {
+			res.resume();
+			const location = res.headers.location;
+			if (res.statusCode === 302 && location) {
+				http.get(location, callback => callback.resume()).on('error', () => {});
+			}
+		})
+		.on('error', () => {});
+}
+
 let testConfigDir: string;
 let originalConfigDir: string | undefined;
 
@@ -243,12 +319,7 @@ test.serial('login completes the browser flow, stores tokens and connects', asyn
 			openBrowser: false,
 			onAuthorizationUrl: url => {
 				authorizationUrl = url;
-				// Simulate the user finishing the sign-in: the authorization server
-				// redirects the browser back to the loopback URL with code+state.
-				const redirect = new URL(url.searchParams.get('redirect_uri') ?? '');
-				redirect.searchParams.set('code', 'good-code');
-				redirect.searchParams.set('state', url.searchParams.get('state') ?? '');
-				http.get(redirect, res => res.resume()).on('error', () => {});
+				simulateBrowser(url);
 			},
 		});
 		await login;
@@ -260,10 +331,17 @@ test.serial('login completes the browser flow, stores tokens and connects', asyn
 		t.is(authorizationUrl?.searchParams.get('code_challenge_method'), 'S256');
 		t.regex(authorizationUrl?.searchParams.get('redirect_uri') ?? '', /^http:\/\/127\.0\.0\.1:\d+\/callback$/);
 
-		// Token exchange used PKCE and the registered public client.
+		// The authorization server saw the request the client built, and the
+		// token exchange matched it: same client and redirect_uri, and a PKCE
+		// verifier that hashes to the recorded challenge.
+		t.is(mock.authorizeRequests.length, 1);
+		t.is(mock.authorizeRequests[0].state, authorizationUrl?.searchParams.get('state'));
 		const exchange = mock.tokenRequests.find(r => r.grant_type === 'authorization_code');
 		t.truthy(exchange?.code_verifier);
+		t.is(s256(exchange?.code_verifier ?? ''), mock.authorizeRequests[0].code_challenge);
+		t.is(exchange?.redirect_uri, mock.authorizeRequests[0].redirect_uri);
 		t.is(exchange?.client_id, 'mock-client');
+		t.deepEqual(mock.tokenRejections, []);
 		t.is(mock.registrations, 1);
 
 		// Tokens persisted owner-only; server connected and its tools listed.
@@ -300,6 +378,49 @@ test.serial('login completes the browser flow, stores tokens and connects', asyn
 	} finally {
 		await client.disconnect();
 		await mock.close();
+	}
+});
+
+test.serial('login recovers a configured server that failed for a non-auth reason', async t => {
+	const mock = await startMockServer();
+	mock.failMcp = true;
+	const client = new MCPClient();
+	try {
+		const results = await client.connectToServers([
+			{name: 'flaky', transport: 'http', url: mock.mcpUrl, healthCheckInterval: 0},
+		]);
+		t.false(results[0].success);
+		t.deepEqual(client.getAuthRequiredServers(), []);
+		t.deepEqual(client.getServerNames(), []);
+
+		mock.failMcp = false;
+		await client.loginToServer('flaky', {openBrowser: false, onAuthorizationUrl: simulateBrowser});
+		t.true(client.isServerConnected('flaky'));
+		t.deepEqual(client.getServerTools('flaky').map(tool => tool.name), ['whoami']);
+	} finally {
+		await client.disconnect();
+		await mock.close();
+	}
+});
+
+test.serial('logout refuses a server without stored OAuth credentials', async t => {
+	const client = new MCPClient();
+	try {
+		await client.connectToServers([
+			{
+				name: 'static',
+				transport: 'http',
+				url: 'http://127.0.0.1:1/mcp',
+				headers: {Authorization: 'Bearer static'},
+				healthCheckInterval: 0,
+			},
+		]);
+		await t.throwsAsync(() => client.logoutFromServer('static'), {
+			message: /no stored OAuth credentials/,
+		});
+		t.deepEqual(client.getAuthRequiredServers(), []);
+	} finally {
+		await client.disconnect();
 	}
 });
 

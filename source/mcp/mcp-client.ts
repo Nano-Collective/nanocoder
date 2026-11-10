@@ -149,6 +149,12 @@ export class MCPClient {
 	 * the URL even though the server is not connected.
 	 */
 	private authRequired: Map<string, MCPServer> = new Map();
+	/**
+	 * Every server a connection was attempted for, connected or not, keyed by
+	 * name. Lets `/mcp login <name>` recover a configured server whose first
+	 * connection failed for a reason other than authentication.
+	 */
+	private configuredServers: Map<string, MCPServer> = new Map();
 	private logger = getLogger();
 
 	private isToolAutoApproved(toolName: string, serverName: string): boolean {
@@ -636,6 +642,7 @@ export class MCPClient {
 		return await withNewCorrelationContext(async () => {
 			// Normalize server configuration for backward compatibility
 			const normalizedServer = this.normalizeServerConfig(server);
+			this.configuredServers.set(normalizedServer.name, normalizedServer);
 
 			this.logger.info('Connecting to MCP server', {
 				serverName: normalizedServer.name,
@@ -1754,6 +1761,7 @@ export class MCPClient {
 			this.inFlightRequests.clear();
 			this.closing.clear();
 			this.authRequired.clear();
+			this.configuredServers.clear();
 			this.isConnected = false;
 
 			this.logger.info('MCP client disconnection completed', {
@@ -1784,12 +1792,14 @@ export class MCPClient {
 	}
 
 	/**
-	 * Resolve a server config by name, whether it is connected or waiting for
-	 * authentication.
+	 * Resolve a server config by name, whether it is connected, waiting for
+	 * authentication, or configured but failed to connect.
 	 */
 	private findServerConfig(serverName: string): MCPServer | undefined {
 		return (
-			this.serverConfigs.get(serverName) ?? this.authRequired.get(serverName)
+			this.serverConfigs.get(serverName) ??
+			this.authRequired.get(serverName) ??
+			this.configuredServers.get(serverName)
 		);
 	}
 
@@ -1898,6 +1908,14 @@ export class MCPClient {
 		const hadCredentials =
 			provider.tokens() !== undefined ||
 			provider.clientInformation() !== undefined;
+		if (!hadCredentials) {
+			// Nothing to sign out of (e.g. a server authenticated with static
+			// `headers`). Leave its connection alone: OAuth login could not
+			// bring it back.
+			throw new Error(
+				`MCP server "${serverName}" has no stored OAuth credentials; nothing to sign out of.`,
+			);
+		}
 		provider.invalidateCredentials('all');
 
 		await this.dropServer(serverName, 'Signed out');

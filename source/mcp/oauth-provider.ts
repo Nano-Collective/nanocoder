@@ -116,26 +116,48 @@ function errorHtml(message: string): string {
 }
 
 /**
+ * The command that opens `href` in the default browser on `platform`, or
+ * undefined when the URL must not be handed to an opener at all.
+ *
+ * The authorization URL comes from server-supplied metadata, so it is
+ * untrusted: only http(s) URLs are opened, and on Windows the URL never goes
+ * through cmd.exe, whose parser treats `&` (present in every authorization
+ * URL) as a command separator. `rundll32 url.dll,FileProtocolHandler` takes
+ * the URL as a single argument and hands it to the default browser.
+ */
+export function browserOpenCommand(
+	href: string,
+	platform: NodeJS.Platform = process.platform,
+): {command: string; args: string[]} | undefined {
+	let protocol: string;
+	try {
+		protocol = new URL(href).protocol;
+	} catch {
+		return undefined;
+	}
+	if (protocol !== 'https:' && protocol !== 'http:') {
+		return undefined;
+	}
+	if (platform === 'darwin') {
+		return {command: 'open', args: [href]};
+	}
+	if (platform === 'win32') {
+		return {command: 'rundll32', args: ['url.dll,FileProtocolHandler', href]};
+	}
+	return {command: 'xdg-open', args: [href]};
+}
+
+/**
  * Best-effort: open `url` in the default browser. Failures are swallowed; the
  * URL is always shown to the user as well.
  */
 function openInBrowser(url: URL): void {
-	const href = url.toString();
-	let command: string;
-	let args: string[];
-	if (process.platform === 'darwin') {
-		command = 'open';
-		args = [href];
-	} else if (process.platform === 'win32') {
-		// `start` is a cmd builtin; the empty string is the window title.
-		command = 'cmd';
-		args = ['/c', 'start', '', href];
-	} else {
-		command = 'xdg-open';
-		args = [href];
+	const opener = browserOpenCommand(url.toString());
+	if (!opener) {
+		return;
 	}
 	try {
-		const child = spawn(command, args, {
+		const child = spawn(opener.command, opener.args, {
 			detached: true,
 			stdio: 'ignore',
 		});

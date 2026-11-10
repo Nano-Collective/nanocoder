@@ -6,6 +6,7 @@ import * as path from 'node:path';
 import {UnauthorizedError} from '@modelcontextprotocol/sdk/client/auth.js';
 import {loadMCPOAuthCredential} from '../config/mcp-oauth-credentials.js';
 import {
+	browserOpenCommand,
 	MCPAuthRequiredError,
 	MCPOAuthProvider,
 	isAuthRequiredError,
@@ -212,4 +213,28 @@ test('isAuthRequiredError recognizes SDK and local auth errors', t => {
 	t.false(isAuthRequiredError(new Error('connection refused')));
 	t.false(isAuthRequiredError('string'));
 	t.false(isAuthRequiredError(null));
+});
+
+test('browserOpenCommand passes the full URL to the opener unmodified', t => {
+	const href =
+		'https://auth.example.com/authorize?response_type=code&client_id=c&state=s&code_challenge=x&redirect_uri=http%3A%2F%2F127.0.0.1%3A1234%2Fcallback';
+	t.deepEqual(browserOpenCommand(href, 'darwin'), {
+		command: 'open',
+		args: [href],
+	});
+	t.deepEqual(browserOpenCommand(href, 'linux'), {
+		command: 'xdg-open',
+		args: [href],
+	});
+	// Windows must not go through cmd.exe, which splits the command at `&`.
+	const windows = browserOpenCommand(href, 'win32');
+	t.is(windows?.command, 'rundll32');
+	t.deepEqual(windows?.args, ['url.dll,FileProtocolHandler', href]);
+	t.false(windows?.args.includes('/c'));
+});
+
+test('browserOpenCommand refuses non-http(s) URLs', t => {
+	t.is(browserOpenCommand('file:///etc/passwd', 'linux'), undefined);
+	t.is(browserOpenCommand('javascript:alert(1)', 'darwin'), undefined);
+	t.is(browserOpenCommand('not a url', 'win32'), undefined);
 });

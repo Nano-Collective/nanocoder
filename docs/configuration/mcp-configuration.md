@@ -197,7 +197,9 @@ again when the refresh token expires or is revoked, or after:
 /mcp logout <server-name>
 ```
 
-which deletes the stored tokens and disconnects the server. No `headers` entry
+which deletes the stored tokens and disconnects the server. Logout only
+applies to servers with stored OAuth credentials; servers that use static
+`headers` are left connected. No `headers` entry
 is needed for OAuth servers; if you set an `Authorization` header as well, it
 is sent until the server rejects it, after which the OAuth flow takes over.
 

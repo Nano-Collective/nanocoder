@@ -160,7 +160,7 @@ test('/mcp logout reports success and failure', async t => {
 	failedRender.unmount();
 });
 
-test('MCPLoginFlow notifies subscribers in order', async t => {
+test('MCPLoginFlow delivers the current state, then updates in order', async t => {
 	const seen: string[] = [];
 	const flow = new MCPLoginFlow('srv', async onUrl => {
 		await wait(1);
@@ -168,6 +168,6 @@ test('MCPLoginFlow notifies subscribers in order', async t => {
 	});
 	flow.subscribe(state => seen.push(state.status));
 	await wait(20);
-	t.deepEqual(seen, ['visit', 'done']);
+	t.deepEqual(seen, ['starting', 'visit', 'done']);
 	t.is(flow.getState().authorizationUrl, 'https://a.example/x');
 });
