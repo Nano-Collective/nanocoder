@@ -256,6 +256,69 @@ test('ToolManager re-registers MCP tools when server recovers to connected state
 	t.true(manager.getToolNames().includes(toolName));
 });
 
+test('ToolManager keeps a recovered MCP server in the catalog in discovery mode', async t => {
+	let healthListener:
+		| ((change: {serverName: string; status: 'unhealthy' | 'connected'}) => void)
+		| undefined;
+	const toolName = 'mcp_discovery_server_tool';
+	const fakeClient = {
+		onHealthChange(listener: typeof healthListener) {
+			healthListener = listener;
+			return () => {};
+		},
+		async connectToServers() {
+			return [{serverName: 'discovery-server', success: true, toolCount: 1}];
+		},
+		getToolNameConflicts() {
+			return [];
+		},
+		getToolEntries(_serverName?: string) {
+			return [
+				{
+					name: toolName,
+					tool: {description: 'discovery tool', execute: async () => 'ok'} as never,
+					handler: async () => 'ok',
+				},
+			];
+		},
+		getNativeToolsRegistry() {
+			return {[toolName]: {}};
+		},
+		getToolMapping() {
+			return new Map([
+				[
+					toolName,
+					{
+						serverName: 'discovery-server',
+						originalName: 'discovery_tool',
+						readOnly: true,
+					},
+				],
+			]);
+		},
+		disconnect: async () => {},
+	};
+	const manager = new HealthSeamToolManager(fakeClient);
+
+	await manager.initializeMCP(
+		[{name: 'discovery-server', transport: 'http', url: 'http://localhost/mcp'}],
+		undefined,
+		undefined,
+		{mcpDiscovery: 'always'},
+	);
+	t.true(manager.getMcpCatalog().has(toolName));
+	t.false(manager.getToolNames().includes(toolName));
+
+	healthListener?.({serverName: 'discovery-server', status: 'unhealthy'});
+	t.false(manager.getMcpCatalog().has(toolName));
+
+	// Back in the catalog for load_tool_schema, still not eagerly registered.
+	healthListener?.({serverName: 'discovery-server', status: 'connected'});
+	t.true(manager.getMcpCatalog().has(toolName));
+	t.false(manager.getMcpCatalog().isLoaded(toolName));
+	t.false(manager.getToolNames().includes(toolName));
+});
+
 // ============================================================================
 // Tool Access Tests
 // ============================================================================

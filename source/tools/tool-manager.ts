@@ -149,6 +149,8 @@ export class ToolManager {
 		}
 	>();
 	private mcpCatalog: MCPToolCatalog = new MCPToolCatalog();
+	/** Whether MCP tools are offered on demand via `load_tool_schema`. */
+	private mcpUseDiscovery = false;
 
 	/** The manager this one is layered over; set only for a session's manager. */
 	private readonly parent?: ToolManager;
@@ -245,9 +247,7 @@ export class ToolManager {
 						this.registry.unregisterMany(toolNames);
 						this.mcpCatalog.removeServerTools(change.serverName);
 					} else if (change.status === 'connected') {
-						const entries =
-							this.mcpClient?.getToolEntries(change.serverName) || [];
-						this.registerMcpTools(entries);
+						this.addServerMcpTools(change.serverName);
 					}
 				}),
 			].filter((unsubscribe): unsubscribe is () => void => !!unsubscribe);
@@ -275,6 +275,7 @@ export class ToolManager {
 				tuneConfig?.mcpDiscovery === 'always' ||
 				(tuneConfig?.mcpDiscovery !== 'disabled' && mcpToolEntries.length >= 8);
 
+			this.mcpUseDiscovery = useDiscovery;
 			this.mcpCatalog.clear();
 			const discoveredTools: MCPTool[] =
 				typeof this.mcpClient.getAllDiscoveredTools === 'function'
@@ -324,6 +325,34 @@ export class ToolManager {
 			return results;
 		}
 		return [];
+	}
+
+	/**
+	 * Add one server's tools after it (re)connects: always to the catalog,
+	 * and to the registry only when tools are not loaded on demand, matching
+	 * what initializeMCP does for the initial set.
+	 */
+	private addServerMcpTools(serverName: string): void {
+		const client = this.mcpClient;
+		if (!client) return;
+		const entries = client.getToolEntries(serverName);
+		const mapping = client.getToolMapping();
+		const tools: MCPTool[] =
+			typeof client.getAllDiscoveredTools === 'function'
+				? client
+						.getAllDiscoveredTools()
+						.filter(tool => tool.serverName === serverName)
+				: entries.map(e => ({
+						name: e.name,
+						serverName,
+						readOnly: mapping.get(e.name)?.readOnly,
+					}));
+		for (const tool of tools) {
+			this.mcpCatalog.add(serverName, tool, !this.mcpUseDiscovery);
+		}
+		if (!this.mcpUseDiscovery) {
+			this.registerMcpTools(entries);
+		}
 	}
 
 	/**
@@ -653,6 +682,7 @@ export class ToolManager {
 		this.mcpHealthUnsubscribe?.();
 		this.mcpHealthUnsubscribe = null;
 		this.mcpCatalog.clear();
+		this.mcpUseDiscovery = false;
 		this.registry.unregister('load_tool_schema');
 		if (this.mcpClient) {
 			const mcpTools = this.mcpClient.getNativeToolsRegistry();
@@ -700,6 +730,38 @@ export class ToolManager {
 
 	getMCPClient() {
 		return this.mcpClient;
+	}
+
+	/** HTTP servers that need `/mcp login <name>` before they can connect. */
+	getAuthRequiredMCPServers(): string[] {
+		return this.mcpClient?.getAuthRequiredServers() || [];
+	}
+
+	/**
+	 * Run the browser OAuth login for an HTTP MCP server, connect to it and
+	 * register its tools. `onAuthorizationUrl` receives the URL to show the
+	 * user in case the browser did not open.
+	 */
+	async loginToMCPServer(
+		serverName: string,
+		onAuthorizationUrl?: (url: URL) => void,
+	): Promise<void> {
+		if (!this.mcpClient) {
+			throw new Error(
+				'No MCP servers are configured. Add the server to agents.config.json first.',
+			);
+		}
+		await this.mcpClient.loginToServer(serverName, {onAuthorizationUrl});
+		// A first connection emits no health change, so add the tools here.
+		this.addServerMcpTools(serverName);
+	}
+
+	/** Forget stored OAuth tokens for an HTTP MCP server and disconnect it. */
+	async logoutFromMCPServer(serverName: string): Promise<void> {
+		if (!this.mcpClient) {
+			throw new Error('No MCP servers are configured.');
+		}
+		await this.mcpClient.logoutFromServer(serverName);
 	}
 
 	onMCPHealthChange(listener: (change: MCPHealthChange) => void): () => void {

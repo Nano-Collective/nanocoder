@@ -171,6 +171,47 @@ Connects to remote servers using the MCP StreamableHTTP protocol.
 }
 ```
 
+#### OAuth login for remote servers
+
+Many hosted MCP servers protect their endpoint with OAuth instead of a static
+API key. When an `http` server answers with an OAuth challenge, Nanocoder does
+not fail silently: the server is listed under **Authentication required** in
+`/mcp`, and you sign in once with:
+
+```
+/mcp login <server-name>
+```
+
+Nanocoder discovers the authorization server, registers itself as a client
+when the server supports dynamic registration, opens your browser (the URL is
+also printed in case it does not open), and receives the authorization code on
+a loopback redirect (`http://127.0.0.1:<random port>/callback`). The flow uses
+PKCE and a public client, so no client secret is stored.
+
+Tokens are saved per server URL in `mcp-oauth-credentials.json` inside your
+Nanocoder config directory with owner-only permissions (`0600`), never in the
+project. They are refreshed automatically on later starts, so you only sign in
+again when the refresh token expires or is revoked, or after:
+
+```
+/mcp logout <server-name>
+```
+
+which deletes the stored tokens and disconnects the server. Logout only
+applies to servers with stored OAuth credentials; servers that use static
+`headers` are left connected. No `headers` entry
+is needed for OAuth servers; if you set an `Authorization` header as well, it
+is sent until the server rejects it, after which the OAuth flow takes over.
+
+```json
+{
+  "notion": {
+    "transport": "http",
+    "url": "https://mcp.notion.com/mcp"
+  }
+}
+```
+
 ### websocket
 
 Connects to remote servers via persistent WebSocket connections.
@@ -302,6 +343,8 @@ Run `/settings mcp` for interactive configuration with:
 **Remote servers (HTTP/WebSocket):**
 - _Connection failed_ — Verify the URL is accessible. Test with `curl` for HTTP servers.
 - _Authentication errors_ — For HTTP, use `headers` with a Bearer token or API key. Ensure env vars are set.
+- _Authentication required_ — The server uses OAuth. Run `/mcp login <server-name>` and finish the sign-in in your browser; `/mcp logout <server-name>` clears a bad token. See [OAuth login for remote servers](#oauth-login-for-remote-servers).
+- _Browser did not open_ — Copy the URL printed by `/mcp login` into any browser on the same machine; the redirect goes to `127.0.0.1`, so the browser must run where Nanocoder runs (use SSH port forwarding otherwise).
 
 **General:**
 - _Transport type mismatch_ — Ensure `transport` matches your server (`stdio` for local commands, `http`/`websocket` for remote URLs).
