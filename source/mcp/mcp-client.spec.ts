@@ -1319,9 +1319,15 @@ test('MCPClient.callTool: carries a server isError flag next to the unchanged te
 
 	reply = {isError: true, content: [{type: 'image', data: 'AA==', mimeType: 'image/png'}]};
 	t.deepEqual(await client.callTool('tool', {}), {
-		llmContent: JSON.stringify({type: 'image', data: 'AA==', mimeType: 'image/png'}),
+		llmContent: '[image/png, 1 bytes]',
 		isError: true,
-	}, 'a non-text first part keeps its JSON text and is still flagged');
+	}, 'a non-text block is summarised and still flagged');
+
+	reply = {isError: true, content: [{type: 'text', text: 'boom failure'}, {type: 'image', data: 'AA==', mimeType: 'image/png'}]};
+	t.deepEqual(await client.callTool('tool', {}), {
+		llmContent: 'boom failure\n[image/png, 1 bytes]',
+		isError: true,
+	}, 'every block of a failed call is kept and the call is still flagged');
 
 	reply = {isError: true, content: []};
 	t.deepEqual(await client.callTool('tool', {}), {
@@ -2777,4 +2783,85 @@ test('getToolNameConflicts is empty when tool names are unique', t => {
 	internal.serverTools.set('alpha', [{name: 'a', serverName: 'alpha'}]);
 	internal.serverTools.set('beta', [{name: 'b', serverName: 'beta'}]);
 	t.deepEqual(client.getToolNameConflicts(), []);
+});
+
+// ============================================================================
+// Tests for MCPClient - tool result content blocks
+// ============================================================================
+
+const contentClient = (content: unknown[]) =>
+	new SeamMCPClient({
+		async connect() {},
+		async listTools() {
+			return {tools: [{name: 'blocks_tool', inputSchema: {type: 'object'}}]};
+		},
+		getServerCapabilities: () => undefined,
+		async callTool() {
+			return {content};
+		},
+		async close() {},
+	});
+
+const callWithContent = async (content: unknown[]) => {
+	const client = contentClient(content);
+	try {
+		await client.connectToServer(httpServer);
+		return await client.callTool('blocks_tool', {});
+	} finally {
+		await client.disconnect();
+	}
+};
+
+test('MCPClient.callTool: joins every text block', async t => {
+	const out = await callWithContent([
+		{type: 'text', text: 'BLOCK-ONE'},
+		{type: 'text', text: 'BLOCK-TWO'},
+		{type: 'text', text: 'BLOCK-THREE'},
+	]);
+	t.is(out, 'BLOCK-ONE\nBLOCK-TWO\nBLOCK-THREE');
+});
+
+test('MCPClient.callTool: summarises image and audio blocks and keeps later text', async t => {
+	const out = await callWithContent([
+		{type: 'image', data: 'AAAA', mimeType: 'image/png'},
+		{type: 'text', text: 'CAPTION'},
+		{type: 'audio', data: 'AAAAAA==', mimeType: 'audio/wav'},
+	]);
+	t.is(out, '[image/png, 3 bytes]\nCAPTION\n[audio/wav, 4 bytes]');
+	t.false(out.includes('AAAA'));
+});
+
+test('MCPClient.callTool: keeps embedded text resources and summarises blob resources', async t => {
+	const out = await callWithContent([
+		{
+			type: 'resource',
+			resource: {uri: 'file:///a.txt', mimeType: 'text/plain', text: 'hello'},
+		},
+		{
+			type: 'resource',
+			resource: {uri: 'file:///b.bin', mimeType: 'application/zip', blob: 'AAA='},
+		},
+		{type: 'resource_link', uri: 'file:///c.md', name: 'c.md'},
+	]);
+	t.is(
+		out,
+		'[resource file:///a.txt]\nhello\n[resource file:///b.bin, application/zip, 2 bytes]\n[resource link: file:///c.md]',
+	);
+});
+
+test('MCPClient.callTool: keeps unknown blocks as JSON', async t => {
+	const out = await callWithContent([{type: 'custom', value: 1}]);
+	t.is(out, '{"type":"custom","value":1}');
+});
+
+test('MCPClient.callTool: keeps the no output message for empty content', async t => {
+	t.is(await callWithContent([]), 'Tool executed successfully (no output)');
+});
+
+test('MCPClient.callTool: measures data URL and wrapped base64 by decoded size', async t => {
+	const out = await callWithContent([
+		{type: 'image', data: 'data:image/png;base64,AAA=', mimeType: 'image/png'},
+		{type: 'audio', data: 'AAAA\nAAAA', mimeType: 'audio/wav'},
+	]);
+	t.is(out, '[image/png, 2 bytes]\n[audio/wav, 6 bytes]');
 });

@@ -8,7 +8,7 @@ sidebar_order: 11
 
 This page covers the main chat input and common interactive views. Some specialised screens may show additional inline controls.
 
-Press `?` in an empty prompt to open an in-app overlay listing the main shortcuts; press `?` or Esc to close it.
+Press `?` in an empty prompt to open an in-app overlay listing the main shortcuts; press `?` or Esc to close it. On a short terminal the overlay shows as many shortcuts as fit; scroll the rest with Up/Down or PgUp/PgDn.
 
 ## Submitting & Multi-line Input
 
