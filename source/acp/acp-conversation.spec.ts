@@ -14,6 +14,7 @@ import test from 'ava';
 import type {AgentSideConnection} from '@agentclientprotocol/sdk';
 import {AcpSession} from '@/acp/acp-session';
 import {runAcpConversation} from '@/acp/acp-conversation';
+import {getAppConfig} from '@/config/index';
 import {MCPClient} from '@/mcp/mcp-client';
 import {
 	getSessionCwd,
@@ -1603,6 +1604,80 @@ test('runAcpConversation - yolo mode skips permission request', async t => {
 	});
 
 	t.false(permissionRequested);
+});
+
+// ============================================================================
+// Command permissions
+// ============================================================================
+
+test('runAcpConversation - permissions.deny refuses the call without asking', async t => {
+	const {conn} = createMockConn();
+	let permissionRequested = false;
+	(conn as any).requestPermission = async () => {
+		permissionRequested = true;
+		return {outcome: {outcome: 'selected', optionId: 'allow'}};
+	};
+
+	// yolo + alwaysAllow would both run it; the deny rule must still win.
+	const session = createMockSession(conn, {devMode: 'yolo'});
+	const toolManager = {
+		...createMockToolManager(),
+		hasTool: () => true,
+		getToolEntry: () => ({approval: true}),
+	};
+
+	let handlerCalls = 0;
+	setToolRegistryGetter(() => ({
+		dangerous_tool: async () => {
+			handlerCalls++;
+			return 'Result';
+		},
+	}));
+
+	const config = getAppConfig();
+	const previous = config.permissions;
+	config.permissions = {deny: ['dangerous_tool']};
+	try {
+		let callCount = 0;
+		const client = {
+			chat: async () => {
+				callCount++;
+				if (callCount === 1) {
+					return {
+						choices: [
+							{
+								message: {
+									content: '',
+									tool_calls: [
+										createMockToolCall('dangerous_tool', {}, 'call-1'),
+									],
+								},
+							},
+						],
+					};
+				}
+
+				return {choices: [{message: {content: 'Done'}}]};
+			},
+		} as unknown as LLMClient;
+
+		await runAcpConversation({
+			session,
+			client,
+			toolManager: toolManager as any,
+			conn,
+			nonInteractiveAlwaysAllow: ['dangerous_tool'],
+		});
+	} finally {
+		config.permissions = previous;
+	}
+
+	t.false(permissionRequested);
+	t.is(handlerCalls, 0);
+	const toolResults = session.messages.filter(
+		(message: any) => message.role === 'tool',
+	) as any[];
+	t.true(toolResults[0].content.includes('denied'));
 });
 
 // ============================================================================

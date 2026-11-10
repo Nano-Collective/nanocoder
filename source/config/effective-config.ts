@@ -407,6 +407,11 @@ function blockSpecs(): BlockSpec[] {
 			leaf: true,
 		},
 		{
+			path: ['nanocoder', 'permissions'],
+			file: agents,
+			effective: config.permissions,
+		},
+		{
 			path: ['nanocoder', 'systemPrompt'],
 			file: agents,
 			effective: config.systemPrompt,

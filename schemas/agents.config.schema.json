@@ -129,6 +129,10 @@
 					"type": "object",
 					"additionalProperties": false
 				},
+				"permissions": {
+					"$ref": "#/definitions/PermissionsConfig",
+					"description": "Command-level allow/deny rules for tool approval."
+				},
 				"providers": {
 					"description": "AI provider configurations (all OpenAI-compatible).",
 					"items": {
@@ -626,6 +630,27 @@
 				"toolProfile": {
 					"enum": ["auto", "full", "minimal", "nano"],
 					"type": "string"
+				}
+			},
+			"type": "object",
+			"additionalProperties": false
+		},
+		"PermissionsConfig": {
+			"description": "Command-level allow/deny rules for tool approval.\n\nEach entry is either a tool name (`execute_bash`) or, for tools with a\ncommand argument, a `tool(pattern)` rule (`execute_bash(git status)`).\n`*` in a pattern matches any sequence of characters, and the pattern has to\nmatch the whole simple command. Allow rules only skip the prompt when every\nsimple command in a line matches; deny rules match when any simple command\ndoes. Deny wins over allow and applies in every development mode.",
+			"properties": {
+				"allow": {
+					"description": "Rules that skip the approval prompt when they match.",
+					"items": {
+						"type": "string"
+					},
+					"type": "array"
+				},
+				"deny": {
+					"description": "Rules that deny the tool call when they match.",
+					"items": {
+						"type": "string"
+					},
+					"type": "array"
 				}
 			},
 			"type": "object",

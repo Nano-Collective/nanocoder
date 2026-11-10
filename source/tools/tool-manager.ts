@@ -494,7 +494,7 @@ export class ToolManager {
 	// All accessors return execute-stripped AI SDK tool definitions: the SDK
 	// never auto-executes, so the model only ever needs schemas/descriptions.
 	// Execution runs through the registry handler (see getToolHandler), which
-	// validates. Approval is decided separately by `resolveToolApproval`.
+	// validates. Approval is decided separately by `resolveToolPermission`.
 	// =========================================================================
 
 	getAllTools(opts?: ToolVisibilityOptions): Record<string, AISDKCoreTool> {

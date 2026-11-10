@@ -348,6 +348,23 @@ export type DiskModeProviders = Partial<
 >;
 
 /**
+ * Command-level allow/deny rules for tool approval.
+ *
+ * Each entry is either a tool name (`execute_bash`) or, for tools with a
+ * command argument, a `tool(pattern)` rule (`execute_bash(git status)`).
+ * `*` in a pattern matches any sequence of characters, and the pattern has to
+ * match the whole simple command. Allow rules only skip the prompt when every
+ * simple command in a line matches; deny rules match when any simple command
+ * does. Deny wins over allow and applies in every development mode.
+ */
+export interface PermissionsConfig {
+	/** Rules that skip the approval prompt when they match. */
+	allow?: string[];
+	/** Rules that deny the tool call when they match. */
+	deny?: string[];
+}
+
+/**
  * On-disk representation of the `nanocoder` namespace in agents.config.json.
  *
  * Every field is optional — the loader applies sensible defaults for each one.
@@ -361,6 +378,8 @@ export interface DiskNanocoderConfig {
 	providers?: ProviderConfig[];
 	/** Default conversation mode when none is specified. */
 	defaultMode?: DiskDefaultMode;
+	/** Command-level allow/deny rules for tool approval. */
+	permissions?: PermissionsConfig;
 	/** Automatic context compression when usage exceeds threshold. All fields have defaults. */
 	autoCompact?: Partial<AutoCompactConfig>;
 	/** Model mode defaults (tool profile, tool mode, model parameters). */
@@ -455,6 +474,10 @@ export interface AppConfig {
 
 	// Tools that can run automatically in non-interactive mode
 	alwaysAllow?: string[];
+
+	// Command-level allow/deny rules for tool approval. Deny wins over allow,
+	// and both apply in every development mode (yolo and headless included).
+	permissions?: PermissionsConfig;
 
 	// Tools that are unavailable to the model — filtered out of every code
 	// path that asks "which tools can I use?" (chat, subagents, tune profiles).

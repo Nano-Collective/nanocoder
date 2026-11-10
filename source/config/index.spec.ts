@@ -1440,6 +1440,118 @@ test.serial('non-boolean autoCommit is treated as off', async t => {
 });
 
 // ============================================================================
+// permissions
+// ============================================================================
+
+test.serial('permissions loads allow and deny rules from project config', async t => {
+	const originalCwd = process.cwd();
+	const originalEnv = process.env.NANOCODER_CONFIG_DIR;
+	const dir = join(sandboxConfigTestDir, 'permissions');
+	mkdirSync(dir, {recursive: true});
+	writeFileSync(
+		join(dir, 'agents.config.json'),
+		JSON.stringify({
+			nanocoder: {
+				permissions: {
+					allow: ['execute_bash(git status)', 'read_file'],
+					deny: ['execute_bash(rm *)'],
+				},
+			},
+		}),
+		'utf-8',
+	);
+	try {
+		process.chdir(dir);
+		process.env.NANOCODER_CONFIG_DIR = join(dir, 'no-global');
+		const {reloadAppConfig: reload, getAppConfig} = await import('./index.js');
+		reload();
+		t.deepEqual(getAppConfig().permissions, {
+			allow: ['execute_bash(git status)', 'read_file'],
+			deny: ['execute_bash(rm *)'],
+		});
+	} finally {
+		process.chdir(originalCwd);
+		if (originalEnv !== undefined) {
+			process.env.NANOCODER_CONFIG_DIR = originalEnv;
+		} else {
+			delete process.env.NANOCODER_CONFIG_DIR;
+		}
+	}
+});
+
+test.serial('permissions drops non-string rules and ignores a malformed block', async t => {
+	const originalCwd = process.cwd();
+	const originalEnv = process.env.NANOCODER_CONFIG_DIR;
+	const dir = join(sandboxConfigTestDir, 'permissions-sanitize');
+	mkdirSync(dir, {recursive: true});
+	try {
+		process.chdir(dir);
+		process.env.NANOCODER_CONFIG_DIR = join(dir, 'no-global');
+		const {reloadAppConfig: reload, getAppConfig} = await import('./index.js');
+
+		writeFileSync(
+			join(dir, 'agents.config.json'),
+			JSON.stringify({
+				nanocoder: {
+					permissions: {allow: ['read_file', 42, null], deny: 'execute_bash'},
+				},
+			}),
+			'utf-8',
+		);
+		reload();
+		t.deepEqual(getAppConfig().permissions, {allow: ['read_file']});
+
+		writeFileSync(
+			join(dir, 'agents.config.json'),
+			JSON.stringify({nanocoder: {permissions: 'execute_bash'}}),
+			'utf-8',
+		);
+		reload();
+		t.is(getAppConfig().permissions, undefined);
+	} finally {
+		process.chdir(originalCwd);
+		if (originalEnv !== undefined) {
+			process.env.NANOCODER_CONFIG_DIR = originalEnv;
+		} else {
+			delete process.env.NANOCODER_CONFIG_DIR;
+		}
+	}
+});
+
+test.serial('project permissions win over the global config', async t => {
+	const originalCwd = process.cwd();
+	const originalEnv = process.env.NANOCODER_CONFIG_DIR;
+	const projectDir = join(sandboxConfigTestDir, 'permissions-project');
+	const globalDir = join(sandboxConfigTestDir, 'permissions-global');
+	mkdirSync(projectDir, {recursive: true});
+	mkdirSync(globalDir, {recursive: true});
+	writeFileSync(
+		join(projectDir, 'agents.config.json'),
+		JSON.stringify({nanocoder: {permissions: {allow: ['read_file']}}}),
+		'utf-8',
+	);
+	writeFileSync(
+		join(globalDir, 'agents.config.json'),
+		JSON.stringify({nanocoder: {permissions: {allow: ['write_file']}}}),
+		'utf-8',
+	);
+	try {
+		process.chdir(projectDir);
+		process.env.NANOCODER_CONFIG_DIR = globalDir;
+		const {reloadAppConfig: reload, getAppConfig} = await import('./index.js');
+		reload();
+		t.deepEqual(getAppConfig().permissions, {allow: ['read_file']});
+	} finally {
+		process.chdir(originalCwd);
+		if (originalEnv !== undefined) {
+			process.env.NANOCODER_CONFIG_DIR = originalEnv;
+		} else {
+			delete process.env.NANOCODER_CONFIG_DIR;
+		}
+	}
+});
+
+// ============================================================================
 // lspServers
 // ============================================================================
 

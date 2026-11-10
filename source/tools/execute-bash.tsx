@@ -360,7 +360,7 @@ export const executeBashTool: NanocoderToolExport = {
 	validator: executeBashValidator,
 	// High risk: bash always requires approval unless explicitly always-allowed
 	// or in headless mode. Even auto-accept still prompts for bash. (Yolo is
-	// bypassed centrally by resolveToolApproval.)
+	// bypassed centrally by resolveToolPermission.)
 	approval: (_args, mode) => {
 		if (isNanocoderToolAlwaysAllowed('execute_bash')) return false;
 		if (mode === 'headless') return false;

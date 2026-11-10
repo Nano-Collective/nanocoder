@@ -287,7 +287,7 @@ export async function handleChat(
 
 			// These tools have `execute` stripped, so the SDK never auto-runs
 			// them - it emits the tool call and stops, and our loop decides
-			// approval/execution (see resolveToolApproval).
+			// approval/execution (see resolveToolPermission).
 			// stopWhen controls when the tool loop stops (max MAX_TOOL_STEPS steps)
 
 			// Provider-specific request extras (Codex Responses API fields,
