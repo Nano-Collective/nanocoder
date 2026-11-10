@@ -5,6 +5,7 @@ import {getBraveSearchApiKey} from '@/config/nanocoder-tools-config';
 import {
 	DEFAULT_WEB_SEARCH_RESULTS,
 	MAX_WEB_SEARCH_QUERY_LENGTH,
+	MAX_WEB_SEARCH_RESULTS,
 	TIMEOUT_WEB_SEARCH_MS,
 } from '@/constants';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
@@ -30,6 +31,18 @@ interface BraveSearchResponse {
 	};
 }
 
+const normalizeWebSearchMaxResults = (value: unknown): number => {
+	if (value === undefined) {
+		return DEFAULT_WEB_SEARCH_RESULTS;
+	}
+
+	if (typeof value !== 'number' || !Number.isFinite(value)) {
+		throw new Error('max_results must be a finite number');
+	}
+
+	return Math.min(MAX_WEB_SEARCH_RESULTS, Math.max(1, Math.trunc(value)));
+};
+
 export const executeWebSearch = async (
 	args: SearchArgs,
 	apiKeyOverride?: string,
@@ -41,7 +54,7 @@ export const executeWebSearch = async (
 		);
 	}
 
-	const maxResults = args.max_results ?? DEFAULT_WEB_SEARCH_RESULTS;
+	const maxResults = normalizeWebSearchMaxResults(args.max_results);
 	const encodedQuery = encodeURIComponent(args.query);
 
 	try {
@@ -118,7 +131,7 @@ const webSearchCoreTool = tool({
 			max_results: {
 				type: 'number',
 				description:
-					'Maximum number of search results to return (default: 10).',
+					'Maximum number of search results to return (default: 10). Fractional values are truncated and the limit is clamped to the 1-20 range the Brave API accepts.',
 			},
 		},
 		required: ['query'],
@@ -189,7 +202,7 @@ export const webSearchFormatter = (
 	return (
 		<WebSearchFormatterComponent
 			query={args.query || 'unknown'}
-			maxResults={args.max_results ?? DEFAULT_WEB_SEARCH_RESULTS}
+			maxResults={normalizeWebSearchMaxResults(args.max_results)}
 			result={result}
 		/>
 	);
@@ -213,6 +226,15 @@ export const webSearchValidator = (
 		return Promise.resolve({
 			valid: false,
 			error: `Search query is too long (${query.length} characters). Maximum length is ${MAX_WEB_SEARCH_QUERY_LENGTH} characters.`,
+		});
+	}
+
+	try {
+		normalizeWebSearchMaxResults(args.max_results);
+	} catch (error: unknown) {
+		return Promise.resolve({
+			valid: false,
+			error: error instanceof Error ? error.message : 'Invalid max_results',
 		});
 	}
 

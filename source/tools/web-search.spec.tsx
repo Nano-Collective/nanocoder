@@ -17,15 +17,11 @@ let webSearchValidator: any;
 let webSearchFormatter: any;
 
 test.before(async () => {
-	try {
-		const module = await import('./web-search.js');
-		webSearchTool = module.webSearchTool;
-		executeWebSearch = module.executeWebSearch;
-		webSearchValidator = module.webSearchValidator;
-		webSearchFormatter = module.webSearchFormatter;
-	} catch (error) {
-		console.warn('Failed to load web-search module:', error);
-	}
+	const module = await import('./web-search.js');
+	webSearchTool = module.webSearchTool;
+	executeWebSearch = module.executeWebSearch;
+	webSearchValidator = module.webSearchValidator;
+	webSearchFormatter = module.webSearchFormatter;
 });
 
 // Mock ThemeProvider for testing
@@ -783,3 +779,108 @@ test('executeWebSearch handles missing web field in response', async t => {
 		globalThis.fetch = originalFetch;
 	}
 });
+
+
+// ============================================================================
+// max_results normalization regressions (#2010)
+// ============================================================================
+
+const countCases = [
+	[50, 20],
+	[0, 1],
+	[-3, 1],
+	[2.5, 2],
+	[3, 3],
+	[undefined, 10],
+	[1, 1],
+	[20, 20],
+] as const;
+
+for (const [value, expected] of countCases) {
+	test.serial(`web_search normalizes max_results=${value} to count=${expected}`, async t => {
+		const args =
+			value === undefined
+				? {query: 'test'}
+				: {query: 'test', max_results: value};
+		let capturedUrl = '';
+		let fetchCalls = 0;
+		const originalFetch = globalThis.fetch;
+
+		globalThis.fetch = (async (url: any) => {
+			fetchCalls++;
+			capturedUrl = url.toString();
+			return {
+				ok: true,
+				status: 200,
+				json: async () => ({
+					web: {results: [{title: 'Example', url: 'https://example.com'}]},
+				}),
+			} as any;
+		}) as any;
+
+		try {
+			t.deepEqual(await webSearchValidator(args), {valid: true});
+			const result = await executeWebSearch(args, 'test-key');
+
+			t.is(fetchCalls, 1);
+			t.is(new URL(capturedUrl).searchParams.get('count'), String(expected));
+
+			const view = render(
+				<MockThemeProvider>
+					{webSearchFormatter(args, result)}
+				</MockThemeProvider>,
+			);
+			t.teardown(() => view.unmount());
+			t.regex(view.lastFrame() ?? '', new RegExp(`1 / ${expected} results`));
+		} finally {
+			globalThis.fetch = originalFetch;
+		}
+	});
+}
+
+const invalidCases = [
+	['NaN', Number.NaN],
+	['Infinity', Number.POSITIVE_INFINITY],
+	['-Infinity', Number.NEGATIVE_INFINITY],
+	['string-number', '3'],
+	['string-invalid', 'invalid'],
+	['null', null],
+	['true', true],
+	['object', {}],
+	['array', []],
+] as const;
+
+for (const [label, value] of invalidCases) {
+	test.serial(`web_search rejects non-finite or non-numeric max_results (${label})`, async t => {
+		const args = {query: 'test', max_results: value as any};
+		let fetchCalls = 0;
+		const originalFetch = globalThis.fetch;
+
+		globalThis.fetch = (async () => {
+			fetchCalls++;
+			return {
+				ok: true,
+				status: 200,
+				json: async () => ({web: {results: []}}),
+			} as any;
+		}) as any;
+
+		try {
+			const validation = await webSearchValidator(args);
+			t.false(validation.valid);
+			t.regex(
+				(validation as {error: string}).error,
+				/max_results must be a finite number/,
+			);
+
+			await t.throwsAsync(
+				async () => await executeWebSearch(args, 'test-key'),
+				{message: /max_results must be a finite number/},
+			);
+
+			t.is(fetchCalls, 0);
+		} finally {
+			globalThis.fetch = originalFetch;
+		}
+	});
+}
