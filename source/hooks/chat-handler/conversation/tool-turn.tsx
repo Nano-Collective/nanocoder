@@ -16,7 +16,7 @@ import {CheckpointManager} from '@/services/checkpoint-manager';
 import {recordToolOutcome} from '@/services/completion-ledger';
 import {runPreToolUseGate} from '@/services/lifecycle-hooks';
 import {getProjectRoot} from '@/services/session-cwd';
-import {resolveToolApproval} from '@/tools/approval-policy';
+import {resolveToolPermission} from '@/tools/approval-policy';
 import {isFileMutationTool} from '@/tools/runtime/tool-approval';
 import {parseToolArguments} from '@/tools/runtime/tool-args-parser';
 import {
@@ -213,7 +213,7 @@ export async function runToolTurn(
 		}
 
 		const toolEntry = toolManager?.getToolEntry(toolCall.function.name);
-		const needsApproval = await resolveToolApproval(
+		const permission = await resolveToolPermission(
 			toolCall.function.name,
 			toolEntry,
 			toolCall.function.arguments,
@@ -225,10 +225,21 @@ export async function runToolTurn(
 				// sessions too; plan mode stays safe because a call to a tool
 				// its mode excludes is refused before it gets here.
 				alwaysAllow: getAppConfig().alwaysAllow ?? [],
+				permissions: getAppConfig().permissions,
 			},
 		);
 
-		if (needsApproval) {
+		// A deny rule is a hard refusal: it is checked before the prompt,
+		// alwaysAllow, and every mode, so it cannot be approved by hand.
+		if (permission.decision === 'deny') {
+			refuseToolCall(
+				toolCall,
+				permission.reason ?? 'Denied by nanocoder.permissions.',
+			);
+			continue;
+		}
+
+		if (permission.decision === 'ask') {
 			const vote = await consultPluginPermission(
 				toolCall.function.name,
 				parsedArgs,
@@ -349,16 +360,23 @@ export async function runToolTurn(
 					if (notOffered) {
 						return stopBatchAt(toolCall, notOffered);
 					}
-					const needsApproval = await resolveToolApproval(
+					const permission = await resolveToolPermission(
 						toolCall.function.name,
 						toolManager?.getToolEntry(toolCall.function.name),
 						toolCall.function.arguments,
 						{
 							mode: developmentModeRef?.current ?? developmentMode,
 							alwaysAllow: getAppConfig().alwaysAllow ?? [],
+							permissions: getAppConfig().permissions,
 						},
 					);
-					if (!needsApproval) return true;
+					if (permission.decision === 'deny') {
+						return stopBatchAt(
+							toolCall,
+							permission.reason ?? 'Denied by nanocoder.permissions.',
+						);
+					}
+					if (permission.decision === 'allow') return true;
 					const vote = await consultPluginPermission(
 						toolCall.function.name,
 						parseToolArguments<Record<string, unknown>>(

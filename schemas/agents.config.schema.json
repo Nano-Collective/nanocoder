@@ -148,6 +148,10 @@
 					"type": "object",
 					"additionalProperties": false
 				},
+				"permissions": {
+					"$ref": "#/definitions/PermissionsConfig",
+					"description": "Command-level allow/deny rules for tool approval."
+				},
 				"profiles": {
 					"$ref": "#/definitions/DiskProfilesConfig",
 					"description": "Named configuration profiles that bundle provider, model, mode, and section overrides."
@@ -314,6 +318,10 @@
 					},
 					"type": "object",
 					"additionalProperties": false
+				},
+				"permissions": {
+					"$ref": "#/definitions/PermissionsConfig",
+					"description": "Command-level allow/deny rules for tool approval."
 				},
 				"provider": {
 					"description": "Active provider to use for this profile.",
@@ -827,6 +835,27 @@
 				"toolProfile": {
 					"enum": ["auto", "full", "minimal", "nano"],
 					"type": "string"
+				}
+			},
+			"type": "object",
+			"additionalProperties": false
+		},
+		"PermissionsConfig": {
+			"description": "Command-level allow/deny rules for tool approval.\n\nEach entry is either a tool name (`execute_bash`) or, for tools with a\ncommand argument, a `tool(pattern)` rule (`execute_bash(git status)`).\n`*` in a pattern matches any sequence of characters, and the pattern has to\nmatch the whole command text. Allow rules only skip the prompt when every\nsimple command in a line matches; deny rules match the whole line and each\nsimple command, and also look past common wrappers and `sh -c` strings.\nDeny wins over allow and applies in every development mode.",
+			"properties": {
+				"allow": {
+					"description": "Rules that skip the approval prompt when they match.",
+					"items": {
+						"type": "string"
+					},
+					"type": "array"
+				},
+				"deny": {
+					"description": "Rules that deny the tool call when they match.",
+					"items": {
+						"type": "string"
+					},
+					"type": "array"
 				}
 			},
 			"type": "object",

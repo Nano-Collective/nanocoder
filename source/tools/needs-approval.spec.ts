@@ -1,6 +1,6 @@
 import test from 'ava';
 import type {DevelopmentMode, NanocoderToolExport} from '../types/core.js';
-import {resolveToolApproval} from './approval-policy.js';
+import {resolveToolApproval, resolveToolPermission} from './approval-policy.js';
 import {browserTool} from './browser.js';
 import {executeBashTool} from './execute-bash.js';
 import {fetchUrlTool} from './fetch-url.js';
@@ -400,4 +400,120 @@ test('yolo mode bypasses approval for high-risk dynamic tools', async t => {
 
 test('unknown tool (no entry) requires approval', async t => {
 	t.true(await resolveToolApproval('mystery_tool', undefined, {}, {mode: 'normal'}));
+});
+
+// ============================================================================
+// Command-level permissions (nanocoder.permissions)
+// ============================================================================
+
+test('permissions.allow skips the prompt for a matching command', async t => {
+	const decision = await resolveToolPermission(
+		executeBashTool.name,
+		executeBashTool,
+		{command: 'git status'},
+		{
+			mode: 'normal',
+			permissions: {allow: ['execute_bash(git status)']},
+		},
+	);
+	t.is(decision.decision, 'allow');
+});
+
+test('permissions.allow does not cover an uncovered compound command', async t => {
+	const decision = await resolveToolPermission(
+		executeBashTool.name,
+		executeBashTool,
+		{command: 'git status && rm -rf x'},
+		{
+			mode: 'normal',
+			permissions: {allow: ['execute_bash(git status)']},
+		},
+	);
+	t.is(decision.decision, 'ask');
+});
+
+test('permissions.deny refuses the call with a reason', async t => {
+	const decision = await resolveToolPermission(
+		executeBashTool.name,
+		executeBashTool,
+		{command: 'rm -rf /'},
+		{
+			mode: 'normal',
+			permissions: {deny: ['execute_bash(rm *)']},
+		},
+	);
+	t.is(decision.decision, 'deny');
+	t.true(decision.reason?.includes('nanocoder.permissions.deny'));
+});
+
+test('permissions.deny wins over alwaysAllow', async t => {
+	const decision = await resolveToolPermission(
+		executeBashTool.name,
+		executeBashTool,
+		{command: 'rm -rf /'},
+		{
+			mode: 'normal',
+			alwaysAllow: ['execute_bash'],
+			permissions: {deny: ['execute_bash(rm *)']},
+		},
+	);
+	t.is(decision.decision, 'deny');
+});
+
+test('permissions.deny wins over yolo mode', async t => {
+	const decision = await resolveToolPermission(
+		executeBashTool.name,
+		executeBashTool,
+		{command: 'rm -rf /'},
+		{
+			mode: 'yolo',
+			permissions: {deny: ['execute_bash(rm *)']},
+		},
+	);
+	t.is(decision.decision, 'deny');
+});
+
+test('permissions.deny wins over headless mode', async t => {
+	const decision = await resolveToolPermission(
+		executeBashTool.name,
+		executeBashTool,
+		{command: 'rm -rf /'},
+		{
+			mode: 'headless',
+			permissions: {deny: ['execute_bash(rm *)']},
+		},
+	);
+	t.is(decision.decision, 'deny');
+});
+
+test('permissions.allow wins over a tool approval policy', async t => {
+	const decision = await resolveToolPermission(
+		'git_commit',
+		{approval: true},
+		{},
+		{mode: 'normal', permissions: {allow: ['git_commit']}},
+	);
+	t.is(decision.decision, 'allow');
+});
+
+test('a bare deny rule refuses non-command tools', async t => {
+	const decision = await resolveToolPermission(
+		writeFileTool.name,
+		writeFileTool,
+		{path: 'test.txt', content: 'test'},
+		{mode: 'normal', permissions: {deny: ['write_file']}},
+	);
+	t.is(decision.decision, 'deny');
+});
+
+test('resolveToolApproval treats a denied call as needing approval', async t => {
+	// Compatibility wrapper: callers with no refusal path must not run it.
+	t.true(
+		await resolveToolApproval(
+			executeBashTool.name,
+			executeBashTool,
+			{command: 'rm -rf /'},
+			{mode: 'normal', permissions: {deny: ['execute_bash(rm *)']}},
+		),
+	);
 });
