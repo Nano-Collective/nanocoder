@@ -1,4 +1,4 @@
-import {extname} from 'node:path';
+import path, {extname} from 'node:path';
 import {getProjectRoot, getSessionCwd} from '@/services/session-cwd';
 import {isDerivedContentPath} from '@/utils/derived-content';
 import {formatError} from '@/utils/error-formatter';
@@ -6,6 +6,36 @@ import type {CachedFile} from '@/utils/file-cache';
 import {isValidFilePath, resolveFilePath} from '@/utils/path-validation';
 
 type ValidationResult = {valid: true} | {valid: false; error: string};
+
+/**
+ * Directories no file mutation may touch. Containment normally rejects them as
+ * "outside the project", but when the project root is itself a filesystem root
+ * (`/`, or a drive root in a container — see #1240) every absolute path is
+ * contained, so the boundary alone cannot protect these. The check used to live
+ * only in write_file; keeping it here covers every mutating file tool
+ * (write_file, string_replace, diff_edit, file_op). See #1941.
+ */
+const SYSTEM_DIRECTORIES =
+	process.platform === 'win32'
+		? ['C:\\Windows', 'C:\\Program Files']
+		: ['/etc', '/sys', '/proc', '/dev', '/boot'];
+
+/**
+ * True when the resolved path is a system directory or sits inside one. Takes
+ * the absolute path, not the raw argument, so a relative path that resolves
+ * into a system directory under a root-mounted project is caught too.
+ */
+function isInSystemDirectory(absPath: string): boolean {
+	// Windows paths compare case-insensitively; POSIX paths do not.
+	const fold = (value: string) =>
+		process.platform === 'win32' ? value.toLowerCase() : value;
+	const target = fold(path.resolve(absPath));
+	return SYSTEM_DIRECTORIES.some(directory => {
+		const guarded = fold(path.resolve(directory));
+		// The separator stops a sibling with a shared prefix (`/etcetera` for `/etc`).
+		return target === guarded || target.startsWith(guarded + path.sep);
+	});
+}
 
 /**
  * Validates a single file path: checks format and project boundary.
@@ -20,13 +50,21 @@ export function validatePath(path: string): ValidationResult {
 		};
 	}
 
+	let resolved: string;
 	try {
-		resolveFilePath(path, cwd, root);
+		resolved = resolveFilePath(path, cwd, root);
 	} catch (error) {
 		const errorMessage = formatError(error);
 		return {
 			valid: false,
 			error: `⚒ Path validation failed: ${errorMessage}`,
+		};
+	}
+
+	if (isInSystemDirectory(resolved)) {
+		return {
+			valid: false,
+			error: `⚒ Cannot write files to system directory: "${path}"`,
 		};
 	}
 
@@ -68,11 +106,21 @@ export function validateEditableEncoding(
 }
 
 /**
- * Validates a source + destination path pair: checks format and project boundary for both.
+ * Validates a source + destination path pair (copy/move): checks format and
+ * project boundary for both. The system-directory write guard applies to the
+ * destination for all operations, and to the source when the operation is a
+ * move (since rename() removes the file from its directory, making the
+ * source directory a write target). For copy operations the source is read
+ * only and is not guarded.
+ *
+ * @param source - The source file path.
+ * @param destination - The destination file path.
+ * @param isMove - True when the operation is a move (source is also a write target).
  */
 export function validatePathPair(
 	source: string,
 	destination: string,
+	isMove: boolean = false,
 ): ValidationResult {
 	const cwd = getSessionCwd();
 	const root = getProjectRoot();
@@ -90,14 +138,31 @@ export function validatePathPair(
 		};
 	}
 
+	let resolvedDestination: string;
 	try {
 		resolveFilePath(source, cwd, root);
-		resolveFilePath(destination, cwd, root);
+		resolvedDestination = resolveFilePath(destination, cwd, root);
 	} catch (error) {
 		const errorMessage = formatError(error);
 		return {
 			valid: false,
 			error: `⚒ Path validation failed: ${errorMessage}`,
+		};
+	}
+
+	if (isInSystemDirectory(resolvedDestination)) {
+		return {
+			valid: false,
+			error: `⚒ Cannot write files to system directory: "${destination}"`,
+		};
+	}
+
+	// When moving, the source directory is also a write target (rename removes
+	// the file from its original location), so guard it too.
+	if (isMove && isInSystemDirectory(resolveFilePath(source, cwd, root))) {
+		return {
+			valid: false,
+			error: `⚒ Cannot move file from system directory: "${source}"`,
 		};
 	}
 

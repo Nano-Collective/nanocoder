@@ -1,4 +1,10 @@
+import {parse as parsePath} from 'node:path';
 import test from 'ava';
+import {
+	resetSessionCwd,
+	setProjectRoot,
+	setSessionCwd,
+} from '@/services/session-cwd';
 import {
 	validateEditableEncoding,
 	validatePath,
@@ -76,3 +82,184 @@ test('validateEditableEncoding refuses a file that is not valid UTF-8 (#1854)', 
 		t.regex(result.error, /Do not retry/);
 	}
 });
+
+// System-directory guard
+//
+// When the project root is a filesystem root, containment accepts every
+// absolute path, so these paths are only rejected by the shared guard.
+
+test.serial(
+	'validatePath rejects a POSIX system directory when the project root is /',
+	t => {
+		if (process.platform === 'win32') {
+			t.pass('POSIX-only system directories');
+			return;
+		}
+
+		const fsRoot = parsePath(process.cwd()).root;
+		setProjectRoot(fsRoot);
+		setSessionCwd(fsRoot);
+		try {
+			const result = validatePath('/etc/passwd');
+			t.false(result.valid);
+			if (!result.valid) {
+				t.true(result.error.includes('system directory'));
+			}
+		} finally {
+			resetSessionCwd();
+		}
+	},
+);
+
+test.serial(
+	'validatePath rejects a relative path that resolves into a system directory',
+	t => {
+		if (process.platform === 'win32') {
+			t.pass('POSIX-only system directories');
+			return;
+		}
+
+		const fsRoot = parsePath(process.cwd()).root;
+		setProjectRoot(fsRoot);
+		setSessionCwd(fsRoot);
+		try {
+			const result = validatePath('etc/passwd');
+			t.false(result.valid);
+			if (!result.valid) {
+				t.true(result.error.includes('system directory'));
+			}
+		} finally {
+			resetSessionCwd();
+		}
+	},
+);
+
+test.serial('validatePath allows a sibling whose name shares a system prefix', t => {
+	if (process.platform === 'win32') {
+		t.pass('POSIX-only system directories');
+		return;
+	}
+
+	const fsRoot = parsePath(process.cwd()).root;
+	setProjectRoot(fsRoot);
+	setSessionCwd(fsRoot);
+	try {
+		const result = validatePath('/etcetera/notes.txt');
+		t.deepEqual(result, {valid: true});
+	} finally {
+		resetSessionCwd();
+	}
+});
+
+test.serial(
+	'validatePathPair rejects a system-directory destination under a filesystem root',
+	t => {
+		if (process.platform === 'win32') {
+			t.pass('POSIX-only system directories');
+			return;
+		}
+
+		const fsRoot = parsePath(process.cwd()).root;
+		setProjectRoot(fsRoot);
+		setSessionCwd(fsRoot);
+		try {
+			const result = validatePathPair('tmp/source.txt', '/etc/passwd');
+			t.false(result.valid);
+			if (!result.valid) {
+				t.true(result.error.includes('system directory'));
+			}
+		} finally {
+			resetSessionCwd();
+		}
+	},
+);
+
+test.serial(
+	'validatePathPair allows a system-directory source (read) under a filesystem root',
+	t => {
+		if (process.platform === 'win32') {
+			t.pass('POSIX-only system directories');
+			return;
+		}
+
+		const fsRoot = parsePath(process.cwd()).root;
+		setProjectRoot(fsRoot);
+		setSessionCwd(fsRoot);
+		try {
+			// Source is only read during copy/move, so the system-directory
+			// write guard must not reject it. Destination is a normal path.
+			const result = validatePathPair('/etc/passwd', '/tmp/copied.txt');
+			t.deepEqual(result, {valid: true});
+		} finally {
+			resetSessionCwd();
+		}
+	},
+)
+
+test.serial(
+	'validatePathPair rejects a move source from a system directory under a filesystem root',
+	t => {
+		if (process.platform === 'win32') {
+			t.pass('POSIX-only system directories');
+			return;
+		}
+
+		const fsRoot = parsePath(process.cwd()).root;
+		setProjectRoot(fsRoot);
+		setSessionCwd(fsRoot);
+		try {
+			// Moving from a system directory is a write to that directory,
+			// so it must be rejected.
+			const result = validatePathPair('/etc/passwd', '/tmp/moved.txt', true);
+			t.false(result.valid);
+			if (!result.valid) {
+				t.true(result.error.includes('system directory'));
+			}
+		} finally {
+			resetSessionCwd();
+		}
+	},
+)
+
+test.serial(
+	'validatePathPair allows a copy source from a system directory under a filesystem root',
+	t => {
+		if (process.platform === 'win32') {
+			t.pass('POSIX-only system directories');
+			return;
+		}
+
+		const fsRoot = parsePath(process.cwd()).root;
+		setProjectRoot(fsRoot);
+		setSessionCwd(fsRoot);
+		try {
+			// Copy only reads from the source; the destination is what matters.
+			const result = validatePathPair('/etc/passwd', '/tmp/copied.txt', false);
+			t.deepEqual(result, {valid: true});
+		} finally {
+			resetSessionCwd();
+		}
+	},
+)
+
+test.serial(
+	'validatePath rejects a Windows system directory when the project root is a drive root',
+	t => {
+		if (process.platform !== 'win32') {
+			t.pass('Windows-only system directories');
+			return;
+		}
+
+		setProjectRoot('C:\\');
+		setSessionCwd('C:\\');
+		try {
+			const result = validatePath('C:\\Windows\\System32\\test.exe');
+			t.false(result.valid);
+			if (!result.valid) {
+				t.true(result.error.includes('system directory'));
+			}
+		} finally {
+			resetSessionCwd();
+		}
+	},
+);
