@@ -7,6 +7,8 @@ import {
 	DEFAULT_WEB_SEARCH_RESULTS,
 	MAX_WEB_SEARCH_QUERY_LENGTH,
 } from '../constants';
+import {getToolJsonSchema} from '../utils/schema-validate';
+import {withValidation} from '../utils/tool-validation';
 
 console.log('\nweb-search.spec.tsx');
 
@@ -794,57 +796,83 @@ const countCases = [
 	[undefined, 10],
 	[1, 1],
 	[20, 20],
+	['3', 3],
+	['10', 10],
+	[null, 10],
+	['50', 20],
+	['0', 1],
+	['-3', 1],
+	['2.5', 2],
+	['  5  ', 5],
+	['0x10', 16],
+	['1e2', 20],
 ] as const;
 
 for (const [value, expected] of countCases) {
-	test.serial(`web_search normalizes max_results=${value} to count=${expected}`, async t => {
-		const args =
-			value === undefined
-				? {query: 'test'}
-				: {query: 'test', max_results: value};
-		let capturedUrl = '';
-		let fetchCalls = 0;
-		const originalFetch = globalThis.fetch;
+	test.serial(
+		`web_search normalizes max_results=${JSON.stringify(value)} to count=${expected}`,
+		async t => {
+			const args =
+				value === undefined
+					? {query: 'test'}
+					: {query: 'test', max_results: value as any};
+			let capturedUrl = '';
+			let fetchCalls = 0;
+			const originalFetch = globalThis.fetch;
 
-		globalThis.fetch = (async (url: any) => {
-			fetchCalls++;
-			capturedUrl = url.toString();
-			return {
-				ok: true,
-				status: 200,
-				json: async () => ({
-					web: {results: [{title: 'Example', url: 'https://example.com'}]},
-				}),
-			} as any;
-		}) as any;
+			globalThis.fetch = (async (url: any) => {
+				fetchCalls++;
+				capturedUrl = url.toString();
+				return {
+					ok: true,
+					status: 200,
+					json: async () => ({
+						web: {results: [{title: 'Example', url: 'https://example.com'}]},
+					}),
+				} as any;
+			}) as any;
 
-		try {
-			t.deepEqual(await webSearchValidator(args), {valid: true});
-			const result = await executeWebSearch(args, 'test-key');
+			try {
+				t.deepEqual(await webSearchValidator(args), {valid: true});
 
-			t.is(fetchCalls, 1);
-			t.is(new URL(capturedUrl).searchParams.get('count'), String(expected));
+				const schema = getToolJsonSchema(webSearchTool.tool);
+				t.truthy(schema);
+				const executeValidated = withValidation(
+					(input: any) => executeWebSearch(input, 'test-key'),
+					webSearchValidator,
+					schema,
+				);
+				const result = await executeValidated(args);
 
-			const view = render(
-				<MockThemeProvider>
-					{webSearchFormatter(args, result)}
-				</MockThemeProvider>,
-			);
-			t.teardown(() => view.unmount());
-			t.regex(view.lastFrame() ?? '', new RegExp(`1 / ${expected} results`));
-		} finally {
-			globalThis.fetch = originalFetch;
-		}
-	});
+				t.is(fetchCalls, 1);
+				t.is(new URL(capturedUrl).searchParams.get('count'), String(expected));
+
+				const view = render(
+					<MockThemeProvider>
+						{webSearchFormatter(args, result)}
+					</MockThemeProvider>,
+				);
+				t.teardown(() => view.unmount());
+				t.regex(view.lastFrame() ?? '', new RegExp(`1 / ${expected} results`));
+			} finally {
+				globalThis.fetch = originalFetch;
+			}
+		},
+	);
 }
 
 const invalidCases = [
 	['NaN', Number.NaN],
 	['Infinity', Number.POSITIVE_INFINITY],
 	['-Infinity', Number.NEGATIVE_INFINITY],
-	['string-number', '3'],
 	['string-invalid', 'invalid'],
-	['null', null],
+	['string-empty', ''],
+	['string-whitespace', ' \t\n '],
+	['string-partial', '3abc'],
+	['string-NaN', 'NaN'],
+	['string-Infinity', 'Infinity'],
+	['string-negative-Infinity', '-Infinity'],
+	['string-overflow', '1e309'],
 	['true', true],
 	['object', {}],
 	['array', []],
@@ -868,14 +896,17 @@ for (const [label, value] of invalidCases) {
 		try {
 			const validation = await webSearchValidator(args);
 			t.false(validation.valid);
-			t.regex(
+			t.is(
 				(validation as {error: string}).error,
-				/max_results must be a finite number/,
+				'max_results must be a finite number or a non-empty numeric string (clamped to 1-20)',
 			);
 
 			await t.throwsAsync(
 				async () => await executeWebSearch(args, 'test-key'),
-				{message: /max_results must be a finite number/},
+				{
+					message:
+						'max_results must be a finite number or a non-empty numeric string (clamped to 1-20)',
+				},
 			);
 
 			t.is(fetchCalls, 0);

@@ -16,7 +16,7 @@ import {estimateTokens} from '@/utils/token-calculator';
 
 interface SearchArgs {
 	query: string;
-	max_results?: number;
+	max_results?: number | null;
 }
 
 interface BraveSearchResult {
@@ -32,15 +32,20 @@ interface BraveSearchResponse {
 }
 
 const normalizeWebSearchMaxResults = (value: unknown): number => {
-	if (value === undefined) {
+	if (value === undefined || value === null) {
 		return DEFAULT_WEB_SEARCH_RESULTS;
 	}
 
-	if (typeof value !== 'number' || !Number.isFinite(value)) {
-		throw new Error('max_results must be a finite number');
+	const normalized =
+		typeof value === 'string' && value.trim() !== '' ? Number(value) : value;
+
+	if (typeof normalized !== 'number' || !Number.isFinite(normalized)) {
+		throw new Error(
+			`max_results must be a finite number or a non-empty numeric string (clamped to 1-${MAX_WEB_SEARCH_RESULTS})`,
+		);
 	}
 
-	return Math.min(MAX_WEB_SEARCH_RESULTS, Math.max(1, Math.trunc(value)));
+	return Math.min(MAX_WEB_SEARCH_RESULTS, Math.max(1, Math.trunc(normalized)));
 };
 
 export const executeWebSearch = async (
@@ -129,9 +134,9 @@ const webSearchCoreTool = tool({
 				description: 'The search query.',
 			},
 			max_results: {
-				type: 'number',
+				type: ['number', 'null'],
 				description:
-					'Maximum number of search results to return (default: 10). Fractional values are truncated and the limit is clamped to the 1-20 range the Brave API accepts.',
+					'Maximum number of search results to return (default: 10). Fractional values are truncated and the limit is clamped to the 1-20 range the Brave API accepts. Numeric strings are accepted and null uses the default.',
 			},
 		},
 		required: ['query'],
