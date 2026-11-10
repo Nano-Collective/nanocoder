@@ -16,6 +16,7 @@ console.log('\nclient-factory.spec.ts');
 // Store originals for restoration
 const originalFetch = globalThis.fetch;
 const originalCwd = process.cwd;
+const originalConfigDir = process.env.NANOCODER_CONFIG_DIR;
 
 // Create a temporary test directory
 const testDir = join(tmpdir(), `nanocoder-client-factory-test-${Date.now()}`);
@@ -75,6 +76,11 @@ test.afterEach(() => {
 	globalThis.fetch = originalFetch;
 	// Restore original cwd
 	process.cwd = originalCwd;
+	if (originalConfigDir === undefined) {
+		delete process.env.NANOCODER_CONFIG_DIR;
+	} else {
+		process.env.NANOCODER_CONFIG_DIR = originalConfigDir;
+	}
 });
 
 test.after.always(() => {
@@ -220,6 +226,20 @@ test('ConfigurationError: cwdPath property is optional', t => {
 	t.is(error3.cwdPath, undefined);
 });
 
+test('ConfigurationError: unreadableError property is optional and captured', t => {
+	const error1 = new ConfigurationError('Test', '/path');
+	const error2 = new ConfigurationError(
+		'unreadable: /path: JSON syntax error',
+		'/path',
+		'/cwd',
+		false,
+		'unreadable: /path: JSON syntax error',
+	);
+
+	t.is(error1.unreadableError, undefined);
+	t.is(error2.unreadableError, 'unreadable: /path: JSON syntax error');
+});
+
 // ============================================================================
 // createLLMClient - No Configuration Tests
 // ============================================================================
@@ -280,6 +300,79 @@ test.serial(
 
 		t.is(error.message, 'No providers configured in agents.config.json');
 		t.true(error.isEmptyConfig);
+	},
+);
+
+test.serial(
+	'createLLMClient: attaches unreadableError with file path when agents.config.json has invalid JSON syntax',
+	async t => {
+		const invalidDir = join(testDir, 'invalid-json-test');
+		mkdirSync(invalidDir, {recursive: true});
+
+		const filePath = join(invalidDir, 'agents.config.json');
+		writeFileSync(
+			filePath,
+			'{\n  "nanocoder": {\n    "providers": [\n  }\n}',
+		);
+
+		process.cwd = () => invalidDir;
+		clearAppConfig();
+		reloadAppConfig();
+
+		const error = await t.throwsAsync(createLLMClient(), {
+			instanceOf: ConfigurationError,
+		});
+
+		t.truthy(error.unreadableError);
+		t.true(error.unreadableError?.startsWith('unreadable: '));
+		t.true(error.unreadableError?.includes(filePath));
+		t.true(error.message.includes('unreadable: '));
+		t.true(error.message.includes(filePath));
+	},
+);
+
+test.serial(
+	'createLLMClient: captures unreadableError from global config when project config has no providers but global config has invalid JSON syntax',
+	async t => {
+		const projectDir = join(testDir, 'valid-empty-project-test');
+		const globalDir = join(testDir, 'broken-global-test');
+		mkdirSync(projectDir, {recursive: true});
+		mkdirSync(globalDir, {recursive: true});
+
+		writeFileSync(
+			join(projectDir, 'agents.config.json'),
+			'{\n  "nanocoder": {\n    "providers": []\n  }\n}',
+		);
+
+		const brokenGlobalPath = join(globalDir, 'agents.config.json');
+		writeFileSync(
+			brokenGlobalPath,
+			'{\n  "nanocoder": {\n    "providers": [\n  }\n}',
+		);
+
+		const previousConfigDir = process.env.NANOCODER_CONFIG_DIR;
+		process.env.NANOCODER_CONFIG_DIR = globalDir;
+		process.cwd = () => projectDir;
+		clearAppConfig();
+		reloadAppConfig();
+
+		try {
+			const error = await t.throwsAsync(createLLMClient(), {
+				instanceOf: ConfigurationError,
+			});
+
+			t.truthy(error.unreadableError);
+			t.true(error.unreadableError?.startsWith('unreadable: '));
+			t.true(error.unreadableError?.includes(brokenGlobalPath));
+			t.true(error.message.includes('unreadable: '));
+			t.true(error.message.includes(brokenGlobalPath));
+		} finally {
+			if (previousConfigDir === undefined) {
+				delete process.env.NANOCODER_CONFIG_DIR;
+			} else {
+				process.env.NANOCODER_CONFIG_DIR = previousConfigDir;
+			}
+		}
 	},
 );
 
@@ -743,25 +836,13 @@ test.serial(
 );
 
 test.serial(
-	'createLLMClient: falls back when requested provider fails',
+	'createLLMClient: falls back when a non-strict requested provider fails',
 	async t => {
-		// Mock fetch: fail first call, succeed second
-		let callCount = 0;
-		globalThis.fetch = (async () => {
-			callCount++;
-			if (callCount === 1) {
-				throw new TypeError('Failed to fetch');
-			}
-			return {
-				ok: true,
-				status: 200,
-				statusText: 'OK',
-			} as Response;
-		}) as typeof fetch;
-
+		const failingProvider = 'TestProviderWithoutStoredCopilotCredential';
 		// Create config with multiple providers
 		const configDir = join(testDir, 'requested-fallback-test');
 		mkdirSync(configDir, {recursive: true});
+		process.env.NANOCODER_CONFIG_DIR = join(configDir, 'credentials');
 
 		createTestConfig(
 			{
@@ -773,8 +854,9 @@ test.serial(
 							models: ['model1'],
 						},
 						{
-							name: 'Provider2',
-							baseUrl: 'http://localhost:9000/v1',
+							name: failingProvider,
+							baseUrl: 'https://api.example.com/v1',
+							sdkProvider: 'github-copilot',
 							models: ['model2'],
 						},
 					],
@@ -790,12 +872,56 @@ test.serial(
 		reloadAppConfig();
 
 		// Request Provider2, which will fail, then fallback to Provider1
-		const result = await createLLMClient('Provider2');
+		const result = await createLLMClient(failingProvider);
 
 		t.truthy(result);
 		t.truthy(result.client);
-		// Should fallback to Provider1
-		t.truthy(result.actualProvider); // Actual provider name may vary based on default config
+		t.is(result.actualProvider, 'Provider1');
+	},
+);
+
+test.serial(
+	'createLLMClient: does not fall back when provider selection is strict',
+	async t => {
+		const failingProvider = 'TestProviderWithoutStoredCopilotCredential';
+		const configDir = join(testDir, 'strict-requested-provider-test');
+		mkdirSync(configDir, {recursive: true});
+		process.env.NANOCODER_CONFIG_DIR = join(configDir, 'credentials');
+		createTestConfig(
+			{
+				nanocoder: {
+					providers: [
+						{
+							name: 'Provider1',
+							baseUrl: 'http://localhost:8000/v1',
+							models: ['model1'],
+						},
+						{
+							name: failingProvider,
+							baseUrl: 'https://api.example.com/v1',
+							sdkProvider: 'github-copilot',
+							models: ['model2'],
+						},
+					],
+				},
+			},
+			configDir,
+		);
+		process.cwd = () => configDir;
+		clearAppConfig();
+		reloadAppConfig();
+
+		const error = await t.throwsAsync(
+			createLLMClient(failingProvider, undefined, undefined, {
+				strictProvider: true,
+			}),
+		);
+
+		t.true(
+			error.message.includes(
+				`Explicitly requested provider '${failingProvider}' failed`,
+			),
+		);
 	},
 );
 

@@ -1,9 +1,12 @@
+import {statSync} from 'node:fs';
 import path from 'node:path';
 import {existsSync, mkdirSync, readFileSync} from 'fs';
 import type {TitleShape} from '@/components/ui/styled-title';
-import {getClosestConfigFile} from '@/config/index';
-import {getConfigPath} from '@/config/paths';
-import {describeProjectTrust} from '@/config/project-trust';
+import {getClosestConfigFile, getConfigPath} from '@/config/paths';
+import {
+	describeProjectTrust,
+	TRUST_FINGERPRINT_VERSION,
+} from '@/config/project-trust';
 import {
 	DEFAULT_MEMORY_LIMIT,
 	DEFAULT_TOKEN_BUDGET,
@@ -13,16 +16,40 @@ import {
 	MIN_TOKEN_BUDGET,
 	type ProjectContextOptions,
 } from '@/memory/project-context';
-import type {TuneConfig} from '@/types/config';
-import type {TrustedDirectoryRecord, UserPreferences} from '@/types/index';
+import type {
+	CiWatchConfig,
+	NotificationsConfig,
+	TrustedDirectoryRecord,
+	TuneConfig,
+} from '@/types/config';
+import type {UserPreferences} from '@/types/index';
 import type {NanocoderShape, ThemePreset} from '@/types/ui';
 import {atomicWriteFileSync} from '@/utils/atomic-write';
-import {logError} from '@/utils/message-queue';
+import {log} from '@/utils/logging';
 
 let PREFERENCES_PATH: string | null = null;
 let CACHED_CONFIG_DIR: string | undefined = undefined;
 let cachedVoicePreference: import('@/types/config').VoiceConfig | undefined;
+const PREFERENCES_STAT_INTERVAL_MS = 1000;
 
+type PreferencesCache = {
+	path: string;
+	version: number;
+	mtimeMs: number | null;
+	globalMtimeMs: number | null;
+	lastCheckedAt: number;
+	data: UserPreferences;
+};
+
+let preferencesCache: PreferencesCache | null = null;
+
+function getFileMtime(filePath: string): number | null {
+	try {
+		return statSync(filePath).mtimeMs;
+	} catch {
+		return null;
+	}
+}
 function getPreferencesPath(): string {
 	// Re-compute path if NANOCODER_CONFIG_DIR has changed (important for tests)
 	const currentConfigDir = process.env.NANOCODER_CONFIG_DIR;
@@ -39,6 +66,7 @@ export function resetPreferencesCache(): void {
 	PREFERENCES_PATH = null;
 	CACHED_CONFIG_DIR = undefined;
 	cachedVoicePreference = undefined;
+	preferencesCache = null;
 }
 
 // Trust is only ever read from, and written to, the global preferences file.
@@ -55,53 +83,144 @@ function isProjectPreferencesPath(preferencesPath: string): boolean {
 	);
 }
 
-function readGlobalTrustedDirectories():
-	| Array<string | TrustedDirectoryRecord>
-	| undefined {
+// Keys that are personal, security-sensitive decisions. They live only in the
+// global file: a committed project file must not be able to pre-confirm the
+// `--trust full-commit` warning or switch on background CI polling.
+const GLOBAL_ONLY_KEYS = [
+	'trustedDirectories',
+	'fullCommitConfirmedProjects',
+	'ciWatch',
+] as const satisfies ReadonlyArray<keyof UserPreferences>;
+
+function readGlobalOnlyPreferences(): Partial<UserPreferences> | undefined {
 	const globalPath = getGlobalPreferencesPath();
 	if (!existsSync(globalPath)) return undefined;
 	try {
-		const data = JSON.parse(
-			readFileSync(globalPath, 'utf-8'),
-		) as UserPreferences;
-		return data.trustedDirectories;
+		return JSON.parse(readFileSync(globalPath, 'utf-8')) as UserPreferences;
 	} catch (error) {
-		logError(`Failed to load global preferences: ${String(error)}`);
+		log.error(`Failed to load global preferences: ${String(error)}`);
 		return undefined;
 	}
 }
 
-function writeGlobalTrustedDirectories(
-	trustedDirectories: Array<string | TrustedDirectoryRecord>,
-): void {
+function writeGlobalOnlyPreferences(values: Partial<UserPreferences>): void {
 	const globalPath = getGlobalPreferencesPath();
-	let data: UserPreferences = {};
+	let data: Record<string, unknown> = {};
 	if (existsSync(globalPath)) {
-		data = JSON.parse(readFileSync(globalPath, 'utf-8')) as UserPreferences;
+		data = JSON.parse(readFileSync(globalPath, 'utf-8')) as Record<
+			string,
+			unknown
+		>;
 	}
-	data.trustedDirectories = trustedDirectories;
 	mkdirSync(path.dirname(globalPath), {recursive: true});
-	atomicWriteFileSync(globalPath, JSON.stringify(data, null, 2));
+	atomicWriteFileSync(
+		globalPath,
+		JSON.stringify({...data, ...values}, null, 2),
+	);
+}
+
+/**
+ * The preferences kept only in the global file, read without opening a project
+ * preferences file in the current folder. For a caller that must not depend on
+ * what the folder contains, such as `nanocoder trust`: a project file that is
+ * unreadable or malformed cannot hide the trust list.
+ */
+export function loadGlobalOnlyPreferences(): UserPreferences {
+	const globalPrefs = readGlobalOnlyPreferences();
+	const values: Record<string, unknown> = {};
+	for (const key of GLOBAL_ONLY_KEYS) {
+		if (globalPrefs?.[key] !== undefined) values[key] = globalPrefs[key];
+	}
+	return values as UserPreferences;
+}
+
+/**
+ * Writes global-only keys to the global file and nothing else: a project
+ * preferences file in the current folder is neither read nor rewritten, so
+ * saving does not depend on the folder being writable. Returns `false` when
+ * the write failed.
+ */
+export function saveGlobalOnlyPreferences(
+	values: Partial<Pick<UserPreferences, (typeof GLOBAL_ONLY_KEYS)[number]>>,
+): boolean {
+	try {
+		writeGlobalOnlyPreferences(values);
+	} catch (error) {
+		log.error(`Failed to save global preferences: ${String(error)}`);
+		return false;
+	}
+
+	notifyPreferencesChanged();
+	return true;
 }
 
 export function loadPreferences(): UserPreferences {
 	try {
 		const preferencesPath = getPreferencesPath();
+		const version = getPreferencesVersion();
+		const now = Date.now();
+		const cache = preferencesCache;
+
+		// Internal writes invalidate immediately. Unchanged preferences
+		// avoid filesystem I/O until the next scheduled metadata check.
+		if (
+			cache &&
+			cache.path === preferencesPath &&
+			cache.version === version &&
+			now - cache.lastCheckedAt >= 0 &&
+			now - cache.lastCheckedAt < PREFERENCES_STAT_INTERVAL_MS
+		) {
+			return structuredClone(cache.data);
+		}
+
+		const mtimeMs = getFileMtime(preferencesPath);
+		const isProject = isProjectPreferencesPath(preferencesPath);
+		const globalMtimeMs = isProject
+			? getFileMtime(getGlobalPreferencesPath())
+			: null;
+
+		if (
+			cache &&
+			cache.path === preferencesPath &&
+			cache.version === version &&
+			mtimeMs !== null &&
+			cache.mtimeMs === mtimeMs &&
+			cache.globalMtimeMs === globalMtimeMs
+		) {
+			cache.lastCheckedAt = now;
+			return structuredClone(cache.data);
+		}
+
 		const data = JSON.parse(
 			readFileSync(preferencesPath, 'utf-8'),
 		) as UserPreferences;
-		if (isProjectPreferencesPath(preferencesPath)) {
-			const trustedDirectories = readGlobalTrustedDirectories();
-			if (trustedDirectories === undefined) {
-				delete data.trustedDirectories;
-			} else {
-				data.trustedDirectories = trustedDirectories;
+
+		if (isProject) {
+			const globalPrefs = readGlobalOnlyPreferences();
+			const mutable = data as Record<string, unknown>;
+
+			for (const key of GLOBAL_ONLY_KEYS) {
+				const value = globalPrefs?.[key];
+
+				if (value === undefined) delete mutable[key];
+				else mutable[key] = value;
 			}
 		}
+
+		preferencesCache = {
+			path: preferencesPath,
+			version,
+			mtimeMs,
+			globalMtimeMs,
+			lastCheckedAt: now,
+			data: structuredClone(data),
+		};
+
 		return data;
 	} catch (error) {
-		logError(`Failed to load preferences: ${String(error)}`);
+		log.error(`Failed to load preferences: ${String(error)}`);
 	}
+
 	return {};
 }
 
@@ -131,6 +250,18 @@ export function getPreferencesVersion(): number {
 	return preferencesVersion;
 }
 
+/**
+ * Invalidate cached preference data after a successful write and notify
+ * subscribers that the preference snapshot changed.
+ */
+export function notifyPreferencesChanged(): void {
+	preferencesCache = null;
+	preferencesVersion++;
+	for (const listener of preferencesListeners) {
+		listener();
+	}
+}
+
 // Caches a derived preference, keyed on NANOCODER_CONFIG_DIR and getPreferencesVersion()
 // (bumped on every write), so the value never goes stale after a settings change.
 function cachedPreference<T>(read: (prefs: UserPreferences) => T): () => T {
@@ -145,14 +276,26 @@ function cachedPreference<T>(read: (prefs: UserPreferences) => T): () => T {
 	};
 }
 
-export function savePreferences(preferences: UserPreferences): void {
+/**
+ * Writes the preferences file. Returns `false` when the write failed — the
+ * error is logged here rather than thrown, so callers that must know whether
+ * the value actually reached disk (the trust gate, whose message claims a
+ * persisted entry) have a signal to branch on.
+ */
+export function savePreferences(preferences: UserPreferences): boolean {
 	try {
 		const preferencesPath = getPreferencesPath();
 		if (isProjectPreferencesPath(preferencesPath)) {
-			const {trustedDirectories, ...rest} = preferences;
+			const rest: Record<string, unknown> = {...preferences};
+			const globalValues: Record<string, unknown> = {};
+			for (const key of GLOBAL_ONLY_KEYS) {
+				delete rest[key];
+				if (preferences[key] !== undefined)
+					globalValues[key] = preferences[key];
+			}
 			atomicWriteFileSync(preferencesPath, JSON.stringify(rest, null, 2));
-			if (trustedDirectories !== undefined) {
-				writeGlobalTrustedDirectories(trustedDirectories);
+			if (Object.keys(globalValues).length > 0) {
+				writeGlobalOnlyPreferences(globalValues as Partial<UserPreferences>);
 			}
 		} else {
 			atomicWriteFileSync(
@@ -161,15 +304,13 @@ export function savePreferences(preferences: UserPreferences): void {
 			);
 		}
 	} catch (error) {
-		logError(`Failed to save preferences: ${String(error)}`);
-		return;
+		log.error(`Failed to save preferences: ${String(error)}`);
+		return false;
 	}
 
-	preferencesVersion++;
 	cachedVoicePreference = preferences.voice;
-	for (const listener of preferencesListeners) {
-		listener();
-	}
+	notifyPreferencesChanged();
+	return true;
 }
 
 /** The path a trust entry names, or null for a hand-edited entry with none. */
@@ -180,6 +321,11 @@ function trustPath(entry: unknown): string | null {
 		if (typeof entryPath === 'string') return entryPath;
 	}
 	return null;
+}
+
+/** Records saved before fingerprints were versioned are version 1. */
+function isCurrentFingerprintVersion(entry: TrustedDirectoryRecord): boolean {
+	return (entry.fingerprintVersion ?? 1) === TRUST_FINGERPRINT_VERSION;
 }
 
 /**
@@ -200,6 +346,7 @@ export function isDirectoryTrusted(
 			typeof entry === 'object' &&
 			entryPath !== null &&
 			path.resolve(entryPath) === resolved && // nosemgrep
+			isCurrentFingerprintVersion(entry) &&
 			entry.fingerprint === fingerprint
 		);
 	});
@@ -207,7 +354,8 @@ export function isDirectoryTrusted(
 
 /**
  * Why a folder with a trust entry is asked again: its fingerprint changed,
- * or the entry is a bare path saved before fingerprints existed.
+ * or the entry can't be compared (a bare path saved before fingerprints
+ * existed, or a fingerprint from another version).
  */
 export type TrustRecheck = 'changed' | 'upgrade';
 
@@ -221,7 +369,9 @@ export function trustRecheck(
 	for (const entry of preferences.trustedDirectories ?? []) {
 		const entryPath = trustPath(entry);
 		if (entryPath === null || path.resolve(entryPath) !== resolved) continue; // nosemgrep
-		if (typeof entry !== 'string') return 'changed';
+		if (typeof entry !== 'string') {
+			return isCurrentFingerprintVersion(entry) ? 'changed' : 'upgrade';
+		}
 		recheck = 'upgrade';
 	}
 	return recheck;
@@ -232,6 +382,24 @@ export function untrustedReason(recheck: TrustRecheck | null | undefined) {
 	if (recheck === 'changed') return 'changed since you trusted it';
 	if (recheck === 'upgrade') return 'needs re-approval after the upgrade';
 	return 'is not trusted';
+}
+
+/**
+ * Refusal for non-interactive entry points (`--plain`, `verify`). The two
+ * bypasses last different lengths of time - the flag covers one run, the
+ * variable saves the directory to `trustedDirectories` - so the message
+ * names which is which. Shared by the text and `--json` outputs.
+ */
+export function untrustedDirectoryMessage(
+	cwd: string,
+	recheck?: TrustRecheck | null,
+): string {
+	return (
+		`Directory ${cwd} ${untrustedReason(recheck)}` +
+		`. Pass --trust-directory to bypass the ` +
+		`disclaimer for this run only, or set NANOCODER_TRUST_DIRECTORY=1 to ` +
+		`trust this directory permanently.`
+	);
 }
 
 /**
@@ -251,21 +419,38 @@ export function grantDirectoryTrust(
 			return entryPath === null || path.resolve(entryPath) !== resolved; // nosemgrep
 		},
 	);
-	trustedDirectories.push({path: resolved, fingerprint});
+	trustedDirectories.push({
+		path: resolved,
+		fingerprint,
+		fingerprintVersion: TRUST_FINGERPRINT_VERSION,
+	});
 	return {...preferences, trustedDirectories};
 }
 
 export interface DirectoryTrustResult {
 	trusted: boolean;
-	/** True if this call persisted a new trust entry (env-var bypass only). */
+	/**
+	 * True if this call persisted a new trust entry (env-var bypass only).
+	 * Stays false when the write failed, so callers never announce a trust
+	 * the next boot would not see.
+	 */
 	persisted: boolean;
+	/**
+	 * True when the env-var bypass granted trust for this run but the write
+	 * did not land. `persisted === false` alone cannot say this: the one-shot
+	 * `bypass` argument and an already-recorded directory both leave it false
+	 * without anything having gone wrong. Callers warn on this flag so a
+	 * failed write is not silent.
+	 */
+	persistFailed?: boolean;
 	/** Set when refusing a folder that has a trust entry. */
 	recheck?: TrustRecheck | null;
 }
 
 export interface DirectoryTrustDeps {
 	loadPreferences: typeof loadPreferences;
-	savePreferences: typeof savePreferences;
+	/** Savers may report failure (`false`); anything else counts as written. */
+	savePreferences: (preferences: UserPreferences) => boolean | void;
 }
 
 /**
@@ -293,8 +478,17 @@ export function ensureDirectoryTrust(
 	}
 
 	if (process.env.NANOCODER_TRUST_DIRECTORY === '1') {
-		deps.savePreferences(grantDirectoryTrust(preferences, directory));
-		return {trusted: true, persisted: true};
+		// `savePreferences` swallows write errors and reports them as `false`.
+		// Propagate that instead of unconditionally claiming a persisted trust:
+		// the callers print "Marked ... as trusted" on `persisted`, and on a
+		// failed write the daemon's own gate would then refuse a directory the
+		// user was just told was trusted. Savers that report nothing (test
+		// doubles, older injections) keep the previous behaviour.
+		const saved = deps.savePreferences(
+			grantDirectoryTrust(preferences, directory),
+		);
+		const persisted = saved !== false;
+		return {trusted: true, persisted, persistFailed: !persisted};
 	}
 
 	return {
@@ -302,6 +496,21 @@ export function ensureDirectoryTrust(
 		persisted: false,
 		recheck: trustRecheck(directory, preferences),
 	};
+}
+
+/**
+ * `ensureDirectoryTrust` for entry points that just refuse: the message to
+ * print when `directory` is not trusted, or null when it is.
+ */
+export function directoryTrustRefusal(
+	directory: string,
+	bypass: boolean,
+	deps?: DirectoryTrustDeps,
+): string | null {
+	const trust = ensureDirectoryTrust(directory, bypass, deps);
+	return trust.trusted
+		? null
+		: untrustedDirectoryMessage(path.resolve(directory), trust.recheck); // nosemgrep
 }
 
 export function updateLastUsed(provider: string, model: string): void {
@@ -360,9 +569,7 @@ export function saveTune(config: TuneConfig): void {
 /**
  * Get the notifications config from the preferences file.
  */
-export function getNotificationsPreference():
-	| import('@/types/config').NotificationsConfig
-	| undefined {
+export function getNotificationsPreference(): NotificationsConfig | undefined {
 	const preferences = loadPreferences();
 	return preferences.notifications;
 }
@@ -371,11 +578,21 @@ export function getNotificationsPreference():
  * Save the notifications config to the preferences file.
  */
 export function updateNotificationsPreference(
-	config: import('@/types/config').NotificationsConfig,
+	config: NotificationsConfig,
 ): void {
 	const preferences = loadPreferences();
 	preferences.notifications = config;
 	savePreferences(preferences);
+}
+
+/**
+ * Get the CI-watch config from the preferences file. Set by hand-editing
+ * the preferences file for now — no `/settings` UI wizard yet (that's a
+ * natural follow-up once the feature has seen real-world use).
+ */
+export function getCiWatchPreference(): CiWatchConfig | undefined {
+	const preferences = loadPreferences();
+	return preferences.ciWatch;
 }
 
 /**
@@ -404,6 +621,49 @@ export function updatePasteThreshold(threshold: number): void {
 		preferences.nanocoder.paste.singleLineThreshold = Math.round(threshold);
 	}
 	savePreferences(preferences);
+}
+
+/** Ink's default rendering frame rate when maxFps is not configured. */
+export const DEFAULT_MAX_FPS = 30;
+/** Minimum allowable frame rate limit for Ink's maxFps (1 frame per second). */
+export const MIN_MAX_FPS = 1;
+/** Maximum allowable frame rate limit for Ink's maxFps (60 frames per second). */
+export const MAX_MAX_FPS = 60;
+
+/**
+ * Validate Ink's maxFps preference.
+ * Must be an integer between MIN_MAX_FPS (1) and MAX_MAX_FPS (60) inclusive.
+ */
+export function isValidMaxFps(value: unknown): value is number {
+	return (
+		typeof value === 'number' &&
+		Number.isInteger(value) &&
+		value >= MIN_MAX_FPS &&
+		value <= MAX_MAX_FPS
+	);
+}
+
+/**
+ * Get the configured maxFps preference if valid, or undefined if unset or invalid.
+ * Reads the namespaced `nanocoder.ui.maxFps` preference.
+ */
+export function getUiMaxFps(
+	preferences = loadPreferences(),
+): number | undefined {
+	const value = preferences.nanocoder?.ui?.maxFps;
+	if (isValidMaxFps(value)) {
+		return value;
+	}
+	return undefined;
+}
+
+/**
+ * Get the effective maximum TUI frame rate for Ink rendering.
+ * Returns the validated integer from preferences (1-60), or preserves
+ * the default of 30 FPS when not configured or when an invalid value is rejected.
+ */
+export function getMaxFps(preferences = loadPreferences()): number {
+	return getUiMaxFps(preferences) ?? DEFAULT_MAX_FPS;
 }
 
 /**

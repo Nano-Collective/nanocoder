@@ -84,6 +84,7 @@ export function createErrorInfo(
 
 	// Determine error type and extract information
 	if (error instanceof Error) {
+		const validationError = isValidationError(error);
 		const errorInfo: ErrorInfo = {
 			message: error.message,
 			name: error.name,
@@ -91,9 +92,9 @@ export function createErrorInfo(
 			type: 'Error',
 			originalType: error.constructor.name,
 			hasStack: !!error.stack,
-			isNetworkError: isNetworkError(error),
-			isTimeoutError: isTimeoutError(error),
-			isValidationError: isValidationError(error),
+			isNetworkError: isNetworkError(error, validationError),
+			isTimeoutError: isTimeoutError(error, validationError),
+			isValidationError: validationError,
 			timestamp,
 			correlationId: effectiveCorrelationId,
 			context,
@@ -139,33 +140,41 @@ export function createErrorInfo(
 /**
  * Check if error is a network-related error
  */
-function isNetworkError(error: Error): boolean {
+function isNetworkError(error: Error, isValidation: boolean): boolean {
 	const errorCode = (error as NodeJS.ErrnoException).code;
 
-	return (
+	if (
 		error.name === 'NetworkError' ||
 		error.name === 'FetchError' ||
 		errorCode === 'ECONNREFUSED' ||
 		errorCode === 'ENOTFOUND' ||
 		errorCode === 'ECONNRESET' ||
-		errorCode === 'ETIMEDOUT' ||
-		error.message.includes('network') ||
-		error.message.includes('fetch') ||
-		error.message.includes('connection')
+		errorCode === 'ETIMEDOUT'
+	) {
+		return true;
+	}
+
+	return (
+		!isValidation &&
+		(error.message.includes('network') ||
+			error.message.includes('fetch') ||
+			error.message.includes('connection'))
 	);
 }
 
 /**
  * Check if error is a timeout error
  */
-function isTimeoutError(error: Error): boolean {
+function isTimeoutError(error: Error, isValidation: boolean): boolean {
 	const errorCode = (error as NodeJS.ErrnoException).code;
 
+	if (error.name === 'TimeoutError' || errorCode === 'ETIMEDOUT') {
+		return true;
+	}
+
 	return (
-		error.name === 'TimeoutError' ||
-		errorCode === 'ETIMEDOUT' ||
-		error.message.includes('timeout') ||
-		error.message.includes('timed out')
+		!isValidation &&
+		(error.message.includes('timeout') || error.message.includes('timed out'))
 	);
 }
 

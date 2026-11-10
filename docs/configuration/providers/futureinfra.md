@@ -15,7 +15,7 @@ sidebar_order: 27
 	"name": "FutureInfra",
 	"baseUrl": "https://futureinfra.ai/v1/ai",
 	"apiKey": "${FUTUREINFRA_API_KEY}",
-	"models": ["openai/gpt-4o-mini"]
+	"models": ["openai/gpt-6.1-sol"]
 }
 ```
 
@@ -30,10 +30,10 @@ See the [FutureInfra AI docs](https://futureinfra.ai/ai/) and the [general docs]
 
 Model names use the `provider/model` form and are passed through to the router unchanged, for example:
 
-- `openai/gpt-4o-mini`
-- `openai/gpt-4o`
-- `anthropic/claude-sonnet-4`
-- `google/gemini-2.5-flash`
+- `openai/gpt-6.1-sol`
+- `openai/gpt-6-luna`
+- `anthropic/claude-sonnet-5.5`
+- `google/gemini-3.8-flash`
 - `deepseek/deepseek-chat`
 
 The current catalog is available at `https://futureinfra.ai/v1/ai/models`. Enter the model IDs you want in the wizard's model field, separated by commas.

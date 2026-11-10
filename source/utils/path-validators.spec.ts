@@ -1,5 +1,9 @@
 import test from 'ava';
-import {validatePath, validatePathPair} from './path-validators';
+import {
+	validateEditableEncoding,
+	validatePath,
+	validatePathPair,
+} from './path-validators';
 
 // validatePath
 
@@ -54,5 +58,21 @@ test('validatePathPair rejects both invalid paths with source error first', t =>
 	t.false(result.valid);
 	if (!result.valid) {
 		t.true(result.error.includes('source path'));
+	}
+});
+
+test('validateEditableEncoding accepts a file that is valid UTF-8', t => {
+	t.deepEqual(validateEditableEncoding('notes.txt', {notUtf8: false}), {
+		valid: true,
+	});
+});
+
+test('validateEditableEncoding refuses a file that is not valid UTF-8 (#1854)', t => {
+	const result = validateEditableEncoding('legacy.txt', {notUtf8: true});
+	t.false(result.valid);
+	if (!result.valid) {
+		t.true(result.error.includes('"legacy.txt"'));
+		t.regex(result.error, /not valid UTF-8/);
+		t.regex(result.error, /Do not retry/);
 	}
 });

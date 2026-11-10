@@ -3,11 +3,9 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'ava';
+import {isLockAbandoned} from '@/utils/exclusive-file-lock';
 import {appendRelevantProjectContextWithCount} from './project-context.js';
-import {
-	isLockAbandoned,
-	SemanticMemoryManager,
-} from './semantic-memory-manager.js';
+import {SemanticMemoryManager} from './semantic-memory-manager.js';
 
 async function createTempDir(): Promise<string> {
 	return fs.mkdtemp(path.join(os.tmpdir(), 'nanocoder-memory-'));

@@ -7,10 +7,10 @@ import type {SettingsTabId} from '@/app/components/settings-constants';
 import {artifactManager} from '@/artifacts/artifact-manager';
 import ArchitectReviewPrompt from '@/components/architect-review-prompt';
 import {SessionArtifactLinks} from '@/components/artifact-links-display';
+import type {VoiceIndicatorInfo} from '@/components/development-mode-indicator';
 import {FileExplorer} from '@/components/file-explorer';
 import {IdeSelector} from '@/components/ide-selector';
 import PlanReviewPrompt from '@/components/plan-review-prompt';
-import {VoiceStatusBar} from '@/components/voice-status-bar';
 import {getVoicePreference, subscribeToPreferences} from '@/config/preferences';
 import type {useChatHandler} from '@/hooks/chat-handler';
 import {lastTurnEditedFiles} from '@/hooks/chat-handler/conversation/auto-diagnostics';
@@ -18,7 +18,6 @@ import type {AppHandlers} from '@/hooks/useAppHandlers';
 import type {useAppState} from '@/hooks/useAppState';
 import type {useModeHandlers} from '@/hooks/useModeHandlers';
 import {useTerminalRows} from '@/hooks/useTerminalWidth';
-import {useTheme} from '@/hooks/useTheme';
 import {UIStateProvider} from '@/hooks/useUIState';
 import type {useUserMessageQueue} from '@/hooks/useUserMessageQueue';
 import {useVoice} from '@/hooks/useVoice';
@@ -37,6 +36,8 @@ interface InteractiveAppProps {
 	appHandlers: AppHandlers;
 	vscodeServer: ReturnType<typeof useVSCodeServer>;
 	staticComponents: React.ReactNode[];
+	welcomeModulesPending?: boolean;
+	hasConversationMessages?: boolean;
 	liveComponent: React.ReactNode;
 	pendingSubagentApproval: PendingToolApproval | null;
 	handleSubagentToolApproval: (confirmed: boolean) => void;
@@ -77,6 +78,8 @@ export function InteractiveApp({
 	appHandlers,
 	vscodeServer,
 	staticComponents,
+	welcomeModulesPending = false,
+	hasConversationMessages = true,
 	liveComponent,
 	pendingSubagentApproval,
 	handleSubagentToolApproval,
@@ -117,7 +120,6 @@ export function InteractiveApp({
 	const drainInProgressRef = React.useRef(false);
 	const lastFailedDrainIdRef = React.useRef<string | null>(null);
 	const [drainAttempt, setDrainAttempt] = React.useState(0);
-	const {currentTheme} = useTheme();
 	const voiceInputAllowed =
 		!appState.activeMode &&
 		!appState.isToolConfirmationMode &&
@@ -157,6 +159,28 @@ export function InteractiveApp({
 		currentProvider: appState.currentProvider,
 		currentModel: appState.currentModel,
 	});
+
+	// Voice state for the mode line under the composer. Memoised so the
+	// memo()'d indicator only re-renders when the state or hint changes.
+	const voiceIndicator = React.useMemo<VoiceIndicatorInfo | null>(
+		() =>
+			voicePref.enabled
+				? {
+						state: voiceState,
+						idleHint:
+							voiceUnavailableReason ??
+							(voicePref.activationMode === 'hands-free'
+								? 'waiting for speech'
+								: 'Ctrl+G to talk'),
+					}
+				: null,
+		[
+			voicePref.enabled,
+			voicePref.activationMode,
+			voiceState,
+			voiceUnavailableReason,
+		],
+	);
 
 	const handleToggleCompactDisplay = () => {
 		const expanding = appState.compactToolDisplay;
@@ -468,6 +492,10 @@ export function InteractiveApp({
 	// with Static + native scrollback.
 	const fullscreen = altScreenActive;
 	const terminalRows = useTerminalRows();
+	// UserInput's `?` overlay takes over PgUp/PgDn and sizes itself as if it
+	// had the footer to itself, so the transcript stops paging and the rows
+	// around the composer hide while it is open.
+	const [shortcutsOverlayOpen, setShortcutsOverlayOpen] = React.useState(false);
 	const artifactRefreshKey = `${appState.isConversationComplete}:${
 		appState.planReviewState?.show ?? false
 	}:${appState.liveTaskList?.map(task => `${task.id}:${task.status}`).join(',') ?? ''}`;
@@ -495,6 +523,8 @@ export function InteractiveApp({
 				<ChatHistory
 					startChat={appState.startChat}
 					staticComponents={staticComponents}
+					welcomeModulesPending={welcomeModulesPending}
+					hasConversationMessages={hasConversationMessages}
 					queuedComponents={appState.chatComponents}
 					liveComponent={liveComponent}
 					renderLastQueuedComponentLive={recallableSubmittedDraft}
@@ -503,7 +533,8 @@ export function InteractiveApp({
 					scrollActive={
 						!showModalSelectors &&
 						!appState.isExplorerMode &&
-						!appState.isIdeSelectionMode
+						!appState.isIdeSelectionMode &&
+						!shortcutsOverlayOpen
 					}
 				/>
 
@@ -696,39 +727,30 @@ export function InteractiveApp({
 								currentModel={appState.currentModel}
 								fullscreen={fullscreen}
 								isSaving={isSaving}
+								voice={voiceIndicator}
 								suggestedCommand={suggestedCommand}
 								onDismissSuggestion={() => setSuggestedCommand(null)}
+								shortcutsOverlayOpen={shortcutsOverlayOpen}
+								onShortcutsOverlayChange={setShortcutsOverlayOpen}
 							/>
 						)}
 
 					{/* Artifact shortcuts sit below the input alongside the mode
 				    indicator — everything ambient lives under the composer. The
 				    marginLeft mirrors ChatInput's own offset so the row lines up
-				    with the mode line rather than sitting one column in. */}
-					<Box marginLeft={fullscreen ? 0 : -1}>
+				    with the mode line rather than sitting one column in. Hidden,
+				    not unmounted, under the shortcuts overlay so closing it does
+				    not refetch the links. */}
+					<Box
+						marginLeft={fullscreen ? 0 : -1}
+						display={shortcutsOverlayOpen ? 'none' : 'flex'}
+					>
 						<SessionArtifactLinks
 							sessionId={appState.currentSessionId}
 							refreshKey={artifactRefreshKey}
 						/>
 					</Box>
 				</Box>
-
-				{appState.startChat &&
-					appState.activeMode === null &&
-					!appState.isSettingsMode &&
-					!appState.planReviewState?.show &&
-					voicePref.enabled && (
-						<VoiceStatusBar
-							state={voiceState}
-							theme={currentTheme}
-							idleHint={
-								voiceUnavailableReason ??
-								(voicePref.activationMode === 'hands-free'
-									? 'Waiting for speech'
-									: 'Press Ctrl+G to talk')
-							}
-						/>
-					)}
 			</Box>
 		</UIStateProvider>
 	);

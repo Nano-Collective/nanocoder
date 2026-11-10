@@ -15,10 +15,10 @@ import {
 	describeCheckpointGaps,
 	validateCheckpointName,
 } from '@/utils/checkpoint-utils';
+import {ensureNanocoderGitignore} from '@/utils/ensure-nanocoder-gitignore';
 import {formatError} from '@/utils/error-formatter';
 import {logWarning} from '@/utils/message-queue';
 import {FileSnapshotService} from './file-snapshot';
-
 /**
  * Service for managing conversation checkpoints.
  * Checkpoints are stored in .nanocoder/checkpoints/ within the workspace root.
@@ -40,6 +40,8 @@ export class CheckpointManager {
 	 * Initialize the checkpoints directory
 	 */
 	private async ensureCheckpointsDir(): Promise<void> {
+		await ensureNanocoderGitignore(this.workspaceRoot);
+
 		if (!existsSync(this.checkpointsDir)) {
 			await fs.mkdir(this.checkpointsDir, {recursive: true});
 		}

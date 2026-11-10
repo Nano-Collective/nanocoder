@@ -1,16 +1,19 @@
 import {Box, Text, useFocus, useInput} from 'ink';
 import Spinner from 'ink-spinner';
 import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
+import stringWidth from 'string-width';
 import {commandRegistry} from '@/commands';
-import {DevelopmentModeIndicator} from '@/components/development-mode-indicator';
-import {HelpRow} from '@/components/json-viewer/json-viewer';
+import {
+	DevelopmentModeIndicator,
+	type VoiceIndicatorInfo,
+} from '@/components/development-mode-indicator';
 import TextInput, {
 	type TextInputHandle,
 	useRawInput,
 } from '@/components/text-input';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {useInputState} from '@/hooks/useInputState';
-import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
+import {useResponsiveTerminal, useTerminalRows} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {useUIStateContext} from '@/hooks/useUIState';
 import type {
@@ -132,8 +135,8 @@ async function getMCPResourceCompletions(partialPath: string): Promise<
 }
 
 // Legend for the `?` overlay. Keep in sync with the bindings handled below,
-// in TextInput (readline keys) and in App (Ctrl+S, Ctrl+C).
-const KEYBOARD_SHORTCUTS: Array<[keybind: string, label: string]> = [
+// in TextInput (readline keys) and in App (Ctrl+S, Ctrl+C, Ctrl+G).
+export const KEYBOARD_SHORTCUTS: Array<[keybind: string, label: string]> = [
 	['Enter', 'Submit prompt'],
 	['Ctrl+J / Opt+Enter', 'New line'],
 	['↑ / ↓', 'Prompt history'],
@@ -145,16 +148,50 @@ const KEYBOARD_SHORTCUTS: Array<[keybind: string, label: string]> = [
 	['Ctrl+V / Ctrl+X', 'Attach clipboard image / remove last image'],
 	['Shift+Tab', 'Cycle development mode'],
 	['Ctrl+O', 'Toggle compact tool output'],
-	['Ctrl+R', 'Toggle reasoning traces'],
+	['Ctrl+N', 'Toggle reasoning traces'],
+	['Ctrl+R', 'Reverse search prompt history'],
 	['Ctrl+T', 'Collapse / expand task list'],
 	['Ctrl+S', 'Attach / cycle running subagents'],
+	['Ctrl+G', 'Voice push-to-talk (when /voice is on)'],
 	['Esc', 'Cancel response'],
 	['Ctrl+C', 'Exit'],
 	['?', 'Toggle this overlay (in an empty prompt)'],
 ];
 
+// Rows around the shortcut list that must stay on screen so the close hint
+// and the lower border are never pushed below a short terminal: the overlay's
+// title row, borders and padding (5), the blank row and hint row under the
+// list (2), the status row (1), the app frame's padding (2), and one spare
+// row, because Ink repaints the whole inline transcript on every render once
+// a frame is as tall as the terminal. The parent hides the rest of the footer
+// while the overlay is open; see onShortcutsOverlayChange.
+export const SHORTCUTS_OVERHEAD_ROWS = 11;
+
 // Prompt box width floor: keeps narrow terminals legible.
 const PROMPT_WIDTH_MIN = 40;
+// Columns a queued-message row loses inside the prompt box: the rounded
+// border (2), paddingX (2), and the '▸ '/'  ' selection marker (2).
+const QUEUED_ROW_OVERHEAD = 6;
+
+export function findReverseMatch(
+	history: InputState[],
+	query: string,
+	startIndex: number,
+): {index: number; match: InputState} | null {
+	if (history.length === 0) return null;
+	const queryLower = query.toLowerCase();
+	const start = Math.min(startIndex, history.length - 1);
+	for (let i = start; i >= 0; i--) {
+		const displayValue = history[i]?.displayValue;
+		if (
+			typeof displayValue === 'string' &&
+			displayValue.toLowerCase().includes(queryLower)
+		) {
+			return {index: i, match: history[i]};
+		}
+	}
+	return null;
+}
 
 interface ChatProps {
 	onSubmit?: (
@@ -170,7 +207,7 @@ interface ChatProps {
 	disabled?: boolean; // Disable input when AI is processing
 	isBusy?: boolean; // True when in-flight work is cancellable; Escape is owned by the global handler, so it must not clear the input
 	onToggleMode?: () => void; // Callback when user presses shift+tab to toggle development mode
-	onToggleReasoningExpanded?: () => void; // Callback when user presses ctrl+r to toggle expanded reasoning traces
+	onToggleReasoningExpanded?: () => void; // Callback when user presses ctrl+n to toggle expanded reasoning traces
 	onToggleCompactDisplay?: () => void; // Callback when user presses ctrl+o to toggle compact tool display
 	onToggleTaskList?: () => void; // Callback when user presses ctrl+t to collapse/expand the live task list
 	compactToolDisplay?: boolean; // Current compact display state
@@ -193,6 +230,7 @@ interface ChatProps {
 	onSubmittedDraft?: (draft: SubmittedInputDraft) => void;
 	restoreSubmittedDraft?: RestoredInputDraft | null;
 	isSaving?: boolean;
+	voice?: VoiceIndicatorInfo | null; // Voice mode state for the mode line
 	suggestedCommand?: string | null; // Follow-up command shown in the empty prompt; Tab inserts it, Esc dismisses it
 	onDismissSuggestion?: () => void;
 	/**
@@ -201,6 +239,12 @@ interface ChatProps {
 	 * one column less to fill.
 	 */
 	fullscreen?: boolean;
+	/**
+	 * Fires when the `?` shortcuts overlay opens or closes. The overlay sizes
+	 * itself as if it had the footer to itself and takes over PgUp/PgDn, so
+	 * the parent hides its other footer rows and pauses its own scrolling.
+	 */
+	onShortcutsOverlayChange?: (open: boolean) => void;
 }
 
 export default function UserInput({
@@ -231,9 +275,11 @@ export default function UserInput({
 	onSubmittedDraft,
 	restoreSubmittedDraft = null,
 	isSaving,
+	voice,
 	suggestedCommand = null,
 	onDismissSuggestion,
 	fullscreen = false,
+	onShortcutsOverlayChange,
 }: ChatProps) {
 	const {isFocused, focus} = useFocus({autoFocus: !disabled, id: 'user-input'});
 	const effectiveFocus = forceFocus || isFocused;
@@ -295,6 +341,17 @@ export default function UserInput({
 	const [showShortcuts, setShowShortcuts] = useState(false);
 	const lastRestoredDraftIdRef = useRef<number | null>(null);
 
+	// Reverse prompt search state (Ctrl+R / bck-i-search)
+	const [isReverseSearchMode, setIsReverseSearchMode] = useState(false);
+	const [reverseSearchQuery, setReverseSearchQuery] = useState('');
+	const [reverseSearchIndex, setReverseSearchIndex] = useState(-1);
+	const [reverseSearchMatch, setReverseSearchMatch] =
+		useState<InputState | null>(null);
+	const reverseSearchDraftRef = useRef<InputState>({
+		displayValue: '',
+		placeholderContent: {},
+	});
+
 	const {
 		input,
 		historyIndex,
@@ -319,6 +376,54 @@ export default function UserInput({
 	const setShortcutsOpen = (open: boolean) => {
 		showShortcutsRef.current = open;
 		setShowShortcuts(open);
+		if (open) setShortcutsScroll(0);
+		onShortcutsOverlayChange?.(open);
+	};
+	// A tool confirmation or question prompt can replace this component while
+	// the overlay is open. Report it closed then, or the parent keeps its
+	// footer hidden and its scrolling paused with no overlay on screen.
+	const onShortcutsOverlayChangeRef = useRef(onShortcutsOverlayChange);
+	onShortcutsOverlayChangeRef.current = onShortcutsOverlayChange;
+	useEffect(
+		() => () => {
+			if (showShortcutsRef.current) {
+				onShortcutsOverlayChangeRef.current?.(false);
+			}
+		},
+		[],
+	);
+
+	// The overlay shows a window of the legend sized to the terminal height.
+	// The clamp is recomputed every render, so shrinking the terminal while
+	// the overlay is open keeps the window inside the list.
+	const terminalRows = useTerminalRows();
+	const [shortcutsScroll, setShortcutsScroll] = useState(0);
+	const shortcutsVisibleCount = Math.max(
+		1,
+		Math.min(KEYBOARD_SHORTCUTS.length, terminalRows - SHORTCUTS_OVERHEAD_ROWS),
+	);
+	const shortcutsMaxStart = KEYBOARD_SHORTCUTS.length - shortcutsVisibleCount;
+	const shortcutsStart = Math.min(shortcutsScroll, shortcutsMaxStart);
+	// Keep the clamp from a taller terminal, so shrinking it again keeps the
+	// same top row instead of jumping back to the older, deeper offset.
+	useEffect(() => {
+		if (shortcutsScroll > shortcutsMaxStart) {
+			setShortcutsScroll(shortcutsMaxStart);
+		}
+	}, [shortcutsScroll, shortcutsMaxStart]);
+	const shortcutsWindowRef = useRef({
+		maxStart: shortcutsMaxStart,
+		pageSize: shortcutsVisibleCount,
+	});
+	shortcutsWindowRef.current = {
+		maxStart: shortcutsMaxStart,
+		pageSize: shortcutsVisibleCount,
+	};
+	const scrollShortcuts = (delta: number) => {
+		const {maxStart} = shortcutsWindowRef.current;
+		setShortcutsScroll(prev =>
+			Math.max(0, Math.min(Math.min(prev, maxStart) + delta, maxStart)),
+		);
 	};
 
 	const {
@@ -953,18 +1058,37 @@ export default function UserInput({
 	const rawInputRef = useRawInput();
 
 	useInput((inputChar, key) => {
+		// Ink's App resets the active focus id on every Escape, and TextInput only
+		// accepts keys while focused. Every Escape that leaves the composer on
+		// screen (dismissing a suggestion, closing the legend or a menu, arming
+		// the clear hint, or a no-op on an empty prompt) must reclaim focus, or
+		// typing goes dead until something else refocuses it. Queued after Ink's
+		// reset in the same batch, so this update wins.
+		if (key.escape && !disabled) {
+			focus('user-input');
+		}
+
 		// `?` in an empty prompt toggles the shortcuts overlay, which swallows
-		// every other key until `?` or Escape closes it.
+		// every other key until `?` or Escape closes it. ↑/↓ and PgUp/PgDn
+		// scroll the legend when it is taller than the terminal allows.
+		// Reverse search owns the keyboard: its query is empty at first, so
+		// without the guard typing `?` there would open the overlay instead.
 		if (
 			inputChar === '?' &&
 			!disabled &&
+			!isReverseSearchMode &&
 			(showShortcutsRef.current || inputRef.current === '')
 		) {
 			setShortcutsOpen(!showShortcutsRef.current);
 			return;
 		}
 		if (showShortcutsRef.current) {
+			const {pageSize} = shortcutsWindowRef.current;
 			if (key.escape) setShortcutsOpen(false);
+			else if (key.upArrow) scrollShortcuts(-1);
+			else if (key.downArrow) scrollShortcuts(1);
+			else if (key.pageUp) scrollShortcuts(-pageSize);
+			else if (key.pageDown) scrollShortcuts(pageSize);
 			return;
 		}
 
@@ -988,8 +1112,9 @@ export default function UserInput({
 			return;
 		}
 
-		// Handle ctrl+r to toggle expanded reasoning traces (always available)
-		if (key.ctrl && inputChar === 'r' && onToggleReasoningExpanded) {
+		// Handle ctrl+n to toggle expanded reasoning traces (always available;
+		// ctrl+g is voice push-to-talk and ctrl+r is reverse history search)
+		if (key.ctrl && inputChar === 'n' && onToggleReasoningExpanded) {
 			onToggleReasoningExpanded();
 			return;
 		}
@@ -1011,6 +1136,127 @@ export default function UserInput({
 
 		// Block all other input when disabled
 		if (disabled) {
+			return;
+		}
+
+		// Reverse prompt search mode (Ctrl+R / bck-i-search)
+		if (isReverseSearchMode) {
+			// Ctrl+C is deliberately not handled here: App.tsx's global handler
+			// exits the app on it, so it can't double as "cancel search".
+			if (key.escape) {
+				// Cancel search, restore draft
+				setInputState(reverseSearchDraftRef.current);
+				setIsReverseSearchMode(false);
+				setReverseSearchQuery('');
+				setReverseSearchIndex(-1);
+				setReverseSearchMatch(null);
+				setTextInputKey(prev => prev + 1);
+				focus('user-input');
+				return;
+			}
+
+			if (key.return) {
+				// Accept match and exit search mode
+				if (reverseSearchMatch) {
+					setInputState(reverseSearchMatch);
+				}
+				setIsReverseSearchMode(false);
+				setReverseSearchQuery('');
+				setReverseSearchIndex(-1);
+				setReverseSearchMatch(null);
+				setTextInputKey(prev => prev + 1);
+				focus('user-input');
+				return;
+			}
+
+			if (key.ctrl && inputChar === 'r') {
+				// Cycle to next older match with current query (stop at oldest)
+				const history = promptHistory.getHistory();
+				if (history.length > 0 && reverseSearchIndex > 0) {
+					const olderMatch = findReverseMatch(
+						history,
+						reverseSearchQuery,
+						reverseSearchIndex - 1,
+					);
+					if (olderMatch) {
+						setReverseSearchIndex(olderMatch.index);
+						setReverseSearchMatch(olderMatch.match);
+					}
+				}
+				return;
+			}
+
+			if (key.backspace || key.delete) {
+				const history = promptHistory.getHistory();
+				const nextQuery = reverseSearchQuery.slice(0, -1);
+				setReverseSearchQuery(nextQuery);
+				const matchResult = findReverseMatch(
+					history,
+					nextQuery,
+					history.length - 1,
+				);
+				if (matchResult) {
+					setReverseSearchIndex(matchResult.index);
+					setReverseSearchMatch(matchResult.match);
+				} else {
+					setReverseSearchIndex(-1);
+					setReverseSearchMatch(null);
+				}
+				return;
+			}
+
+			// Ignore other control/meta combinations while in search mode
+			if (key.ctrl || key.meta) {
+				return;
+			}
+
+			// Handle regular text typing into search query
+			if (
+				inputChar &&
+				!key.upArrow &&
+				!key.downArrow &&
+				!key.leftArrow &&
+				!key.rightArrow &&
+				!key.tab
+			) {
+				const history = promptHistory.getHistory();
+				const nextQuery = reverseSearchQuery + inputChar;
+				setReverseSearchQuery(nextQuery);
+				const matchResult = findReverseMatch(
+					history,
+					nextQuery,
+					history.length - 1,
+				);
+				if (matchResult) {
+					setReverseSearchIndex(matchResult.index);
+					setReverseSearchMatch(matchResult.match);
+				} else {
+					setReverseSearchIndex(-1);
+					setReverseSearchMatch(null);
+				}
+				return;
+			}
+
+			return;
+		}
+
+		// Handle ctrl+r to enter reverse prompt search
+		if (key.ctrl && inputChar === 'r') {
+			const history = promptHistory.getHistory();
+			reverseSearchDraftRef.current = currentState;
+			setIsReverseSearchMode(true);
+			setReverseSearchQuery('');
+			setShowCompletions(false);
+			setIsFileAutocompleteMode(false);
+			setShowClearMessage(false);
+			const initialMatch = findReverseMatch(history, '', history.length - 1);
+			if (initialMatch) {
+				setReverseSearchIndex(initialMatch.index);
+				setReverseSearchMatch(initialMatch.match);
+			} else {
+				setReverseSearchIndex(-1);
+				setReverseSearchMatch(null);
+			}
 			return;
 		}
 
@@ -1251,12 +1497,23 @@ export default function UserInput({
 				? ` (${message.images.length} image${message.images.length === 1 ? '' : 's'})`
 				: '';
 		const singleLine = message.displayValue.replace(/\s+/g, ' ').trim();
-		// Truncate against the true terminal width like tool result rows do, not
-		// boxWidth (which floors at 40 and would overflow narrow terminals). The
-		// overhead covers the box border + padding (2), the '▸ '/'  ' marker (2),
-		// and a right-edge safety margin.
-		const maxLength = Math.max(8, actualWidth - imageSuffix.length - 6);
-		const text = truncate(singleLine, maxLength);
+		// Budget against the prompt box the row actually renders in, not the
+		// terminal: the box is promptWidth wide, minus its border (2) and
+		// paddingX (2), minus the '▸ '/'  ' marker (2). Anything wider wraps.
+		const maxLength = Math.max(
+			8,
+			promptWidth - QUEUED_ROW_OVERHEAD - stringWidth(imageSuffix),
+		);
+		// cli-truncate can overshoot by a column when the cut falls inside a
+		// double-width character, so re-truncate until it really fits.
+		let text = truncate(singleLine, maxLength);
+		for (
+			let budget = maxLength - 1;
+			stringWidth(text) > maxLength && budget > 0;
+			budget--
+		) {
+			text = truncate(singleLine, budget);
+		}
 		return `${text}${imageSuffix}`;
 	};
 	const commandCompletionWindow = useMemo(
@@ -1302,6 +1559,7 @@ export default function UserInput({
 					currentModel={currentModel}
 					taskInfo={taskInfo}
 					isSaving={isSaving}
+					voice={voice}
 				/>
 			</Box>
 		);
@@ -1331,16 +1589,26 @@ export default function UserInput({
 						marginTop={1}
 						flexDirection="column"
 					>
-						{KEYBOARD_SHORTCUTS.map(([keybind, label]) => (
-							<HelpRow
-								key={keybind}
-								keybind={keybind}
-								label={label}
-								colors={colors}
-							/>
+						{KEYBOARD_SHORTCUTS.slice(
+							shortcutsStart,
+							shortcutsStart + shortcutsVisibleCount,
+						).map(([keybind, label]) => (
+							// One row per shortcut: a wrapped label would add rows the
+							// height budget above does not count.
+							<Text key={keybind} wrap="truncate-end">
+								<Text color={colors.primary} bold>
+									{keybind}
+								</Text>
+								<Text color={colors.text}> — {label}</Text>
+							</Text>
 						))}
 						<Box marginTop={1}>
-							<Text color={colors.secondary}>Press ? or Esc to close</Text>
+							{/* The close hint leads so truncation drops the position first. */}
+							<Text color={colors.secondary} wrap="truncate-end">
+								{shortcutsMaxStart > 0
+									? `? or Esc to close · ↑/↓ scroll · ${shortcutsStart + 1}-${shortcutsStart + shortcutsVisibleCount} of ${KEYBOARD_SHORTCUTS.length}`
+									: 'Press ? or Esc to close'}
+							</Text>
 						</Box>
 					</TitledBoxWithPreferences>
 				)}
@@ -1355,28 +1623,66 @@ export default function UserInput({
 					borderColor={isBashMode ? colors.tool : colors.primary}
 				>
 					{/* Input row */}
-					<Box>
-						{input.length === 0 && (
-							<Text color={isBashMode ? colors.tool : textColor}>{'>'} </Text>
-						)}
-						<TextInput
-							ref={textInputRef}
-							key={textInputKey}
-							value={input}
-							onChange={handleInputChange}
-							onEdgeArrow={handleHistoryNavigation}
-							onSubmit={handleSubmit}
-							onEnter={handleSubmit}
-							placeholder={
-								suggestedCommand
-									? `Try ${suggestedCommand} · Tab to insert · Esc to dismiss`
-									: 'Ask anything...'
-							}
-							focus={effectiveFocus}
-							wrapWidth={inputWrapWidth}
-							handleEnter={false}
-						/>
-					</Box>
+					{isReverseSearchMode ? (
+						<Box flexDirection="column">
+							<Box>
+								<Text
+									color={
+										reverseSearchMatch || reverseSearchQuery === ''
+											? colors.info
+											: colors.error
+									}
+									bold
+								>
+									{reverseSearchMatch || reverseSearchQuery === ''
+										? '(reverse-i-search)`'
+										: '(failed reverse-i-search)`'}
+								</Text>
+								<Text color={colors.primary} bold>
+									{reverseSearchQuery}
+								</Text>
+								<Text
+									color={
+										reverseSearchMatch || reverseSearchQuery === ''
+											? colors.info
+											: colors.error
+									}
+									bold
+								>
+									{"': "}
+								</Text>
+								<Text color={reverseSearchMatch ? textColor : colors.secondary}>
+									{reverseSearchMatch ? reverseSearchMatch.displayValue : ''}
+								</Text>
+							</Box>
+							<Text color={colors.secondary}>
+								Enter: select · Esc: cancel · Ctrl+R: cycle older
+							</Text>
+						</Box>
+					) : (
+						<Box>
+							{input.length === 0 && (
+								<Text color={isBashMode ? colors.tool : textColor}>{'>'} </Text>
+							)}
+							<TextInput
+								ref={textInputRef}
+								key={textInputKey}
+								value={input}
+								onChange={handleInputChange}
+								onEdgeArrow={handleHistoryNavigation}
+								onSubmit={handleSubmit}
+								onEnter={handleSubmit}
+								placeholder={
+									suggestedCommand
+										? `Try ${suggestedCommand} · Tab to insert · Esc to dismiss`
+										: 'Ask anything...'
+								}
+								focus={effectiveFocus}
+								wrapWidth={inputWrapWidth}
+								handleEnter={false}
+							/>
+						</Box>
+					)}
 
 					{showClearMessage && (
 						<Text color={colors.secondary}>Press escape again to clear</Text>
@@ -1478,7 +1784,8 @@ export default function UserInput({
 				</Box>
 			</Box>
 
-			{attachments.length > 0 && (
+			{/* Part of the composer, so it hides with the input box. */}
+			{!showShortcuts && attachments.length > 0 && (
 				<Box marginTop={1}>
 					<Text color={colors.info}>
 						{attachments
@@ -1507,6 +1814,7 @@ export default function UserInput({
 					activeEditor={activeEditor}
 					taskInfo={taskInfo}
 					isSaving={isSaving}
+					voice={voice}
 				/>
 			</Box>
 		</>

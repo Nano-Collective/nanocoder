@@ -46,7 +46,7 @@ test('copyCommand has correct name and description', t => {
 	t.is(copyCommand.name, 'copy');
 	t.is(
 		copyCommand.description,
-		'Copy the last assistant response to the clipboard',
+		'Copy the last assistant response to the clipboard (/copy [code] for the last code block)',
 	);
 });
 
@@ -205,8 +205,7 @@ test('copyCommand warns when multiple arguments are provided', async t => {
         const {lastFrame} = renderWithTheme(result as React.ReactElement);
         const output = lastFrame() || '';
 
-        t.true(output.includes('Unknown option "code"'));
-        t.true(output.includes('Usage: /copy [code]'));
+        t.true(output.includes('Too many arguments. Usage: /copy [code]'));
         t.is(lastWritten, null);
 });
 

@@ -1,18 +1,19 @@
-import {resolve} from 'node:path';
-import {highlight} from 'cli-highlight';
+import {isAbsolute, relative, resolve} from 'node:path';
 import {Box, Text} from 'ink';
 import React from 'react';
 import ToolMessage, {CappedLines} from '@/components/tool-message';
 import {getColors} from '@/config/index';
 import {getSyntaxTheme} from '@/config/themes';
 import {DEFAULT_TERMINAL_COLUMNS} from '@/constants';
-import {getSafeSessionCwd} from '@/services/session-cwd';
+import {getProjectRoot, getSafeSessionCwd} from '@/services/session-cwd';
 import type {Colors} from '@/types/index';
 import {truncateAnsi} from '@/utils/ansi-truncate';
 import {formatError} from '@/utils/error-formatter';
 import {getCachedFileContent} from '@/utils/file-cache';
+import {highlight} from '@/utils/highlighter';
 import {normalizeIndentation} from '@/utils/indentation-normalizer';
 import {areLinesSimilar, computeInlineDiff} from '@/utils/inline-diff';
+import {fitEditToLineEndings} from '@/utils/line-endings';
 import {getLanguageFromExtension} from '@/utils/programming-language-helper';
 
 interface StringReplaceArgs {
@@ -20,6 +21,19 @@ interface StringReplaceArgs {
 	old_str: string;
 	new_str: string;
 	description?: string;
+}
+
+/**
+ * The file the preview describes, as the user should see it. A relative
+ * `path` resolves against the session cwd, which a bash `cd` moves, so show
+ * it relative to the project root (or absolute outside it) instead of
+ * echoing the argument.
+ */
+export function stringReplaceDisplayPath(path: string): string {
+	const absPath = resolve(getSafeSessionCwd(), path);
+	const fromRoot = relative(getProjectRoot(), absPath);
+	if (fromRoot === '') return absPath;
+	return fromRoot.startsWith('..') || isAbsolute(fromRoot) ? absPath : fromRoot;
 }
 
 /** Truncate a plain line to fit terminal width */
@@ -34,18 +48,33 @@ export async function formatStringReplacePreview(
 	colors?: Colors,
 ): Promise<React.ReactElement> {
 	const themeColors = colors || getColors();
-	const {path, old_str, new_str} = args;
+	const {path} = args;
 
 	const terminalWidth = process.stdout.columns || DEFAULT_TERMINAL_COLUMNS;
 	const lineNumPrefixWidth = 8;
 	const availableWidth = Math.max(terminalWidth - lineNumPrefixWidth - 2, 20);
 
 	const isResult = result !== undefined;
+	const displayPath = stringReplaceDisplayPath(path);
 
 	try {
 		const absPath = resolve(getSafeSessionCwd(), path);
 		const cached = await getCachedFileContent(absPath);
 		const fileContent = cached.content;
+		const fitted = fitEditToLineEndings(
+			fileContent,
+			args.old_str,
+			args.new_str,
+		);
+		// After the write the file no longer holds old_str, so the fit cannot
+		// tell an edit kept as sent (LF region of a mixed file). Use the text
+		// that is actually in the file.
+		const keptAsSent =
+			isResult &&
+			!fileContent.includes(fitted.newStr) &&
+			fileContent.includes(args.new_str);
+		const old_str = keptAsSent ? args.old_str : fitted.oldStr;
+		const new_str = keptAsSent ? args.new_str : fitted.newStr;
 		const ext = path.split('.').pop()?.toLowerCase() ?? '';
 		const language = getLanguageFromExtension(ext);
 
@@ -62,7 +91,7 @@ export async function formatStringReplacePreview(
 								<Box>
 									<Text color={themeColors.secondary}>Path: </Text>
 									<Text wrap="truncate-end" color={themeColors.primary}>
-										{path}
+										{displayPath}
 									</Text>
 								</Box>
 								<Box flexDirection="column" marginTop={1}>
@@ -87,7 +116,7 @@ export async function formatStringReplacePreview(
 								<Box>
 									<Text color={themeColors.secondary}>Path: </Text>
 									<Text wrap="truncate-end" color={themeColors.primary}>
-										{path}
+										{displayPath}
 									</Text>
 								</Box>
 								<Box flexDirection="column" marginTop={1}>
@@ -377,7 +406,7 @@ export async function formatStringReplacePreview(
 						<Box>
 							<Text color={themeColors.secondary}>Path: </Text>
 							<Text wrap="truncate-end" color={themeColors.primary}>
-								{path}
+								{displayPath}
 							</Text>
 						</Box>
 						<Box>
@@ -420,7 +449,7 @@ export async function formatStringReplacePreview(
 						<Box>
 							<Text color={themeColors.secondary}>Path: </Text>
 							<Text wrap="truncate-end" color={themeColors.primary}>
-								{path}
+								{displayPath}
 							</Text>
 						</Box>
 						<Box>

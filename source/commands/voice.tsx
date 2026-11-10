@@ -86,6 +86,7 @@ export const voiceCommand: Command = {
 
 		if (isError) {
 			return React.createElement(ErrorMessage, {
+				hideBox: true,
 				key: generateKey('voice-command-error'),
 				message: messageText,
 			});
@@ -107,6 +108,7 @@ export const voiceCommand: Command = {
 		}
 
 		return React.createElement(InfoMessage, {
+			hideBox: true,
 			key: generateKey('voice-command-info'),
 			message: messageText,
 		});

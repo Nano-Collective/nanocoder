@@ -1,3 +1,4 @@
+import {pathToFileURL} from 'node:url';
 import React, {useEffect, useRef} from 'react';
 import {ConfigurationError, createLLMClient} from '@/client-factory';
 import {commandRegistry} from '@/commands';
@@ -133,6 +134,7 @@ export function useAppInitialization({
 		preferredProvider?: string,
 		preferredModel?: string,
 		isProgrammatic: boolean = false,
+		strictProvider: boolean = false,
 	): Promise<LLMClient | null> => {
 		// Lint provider configs before instantiation so typos and misplaced
 		// blocks surface as warnings in the chat queue, without a box —
@@ -151,6 +153,8 @@ export function useAppInitialization({
 		const {client, actualProvider} = await createLLMClient(
 			preferredProvider,
 			preferredModel,
+			undefined,
+			{strictProvider},
 		);
 		setClient(client);
 		setCurrentProvider(actualProvider);
@@ -271,6 +275,7 @@ export function useAppInitialization({
 					config.mcpServers,
 					onProgress,
 					onHealthChange,
+					config.tune,
 				);
 			} catch (error) {
 				// Mark all pending servers as failed
@@ -298,7 +303,7 @@ export function useAppInitialization({
 	const initializeLSPServers = async () => {
 		const lspConfig = getAppConfig();
 		const lspManager = await getLSPManager({
-			rootUri: `file://${process.cwd()}`,
+			rootUri: pathToFileURL(process.cwd()).href,
 			autoDiscover: true,
 			// Use custom servers from config if provided
 			servers: lspConfig.lspServers?.map(server => ({
@@ -429,7 +434,12 @@ export function useAppInitialization({
 				);
 			}
 			const model = cliModel || modeConfig?.model || undefined;
-			const client = await initializeClient(provider, model, isProgrammatic);
+			const client = await initializeClient(
+				provider,
+				model,
+				isProgrammatic,
+				Boolean(cliProvider),
+			);
 
 			// Create and initialize the SubagentExecutor if client was successfully created
 			if (client) {

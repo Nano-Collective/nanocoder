@@ -1,7 +1,13 @@
 import test from 'ava';
 import {createAnthropic} from '@ai-sdk/anthropic';
 import {createOpenAI} from '@ai-sdk/openai';
-import {jsonSchema, NoSuchToolError, streamText, tool} from 'ai';
+import {
+	InvalidToolInputError,
+	jsonSchema,
+	NoSuchToolError,
+	streamText,
+	tool,
+} from 'ai';
 import type {
 	AIProviderConfig,
 	AISDKCoreTool,
@@ -9,8 +15,9 @@ import type {
 	StreamCallbacks,
 } from '@/types/index';
 import type {LanguageModel} from 'ai';
-import {handleChat, stopOnUnknownTool} from './chat-handler.js';
+import {handleChat, stopOnInvalidToolCall} from './chat-handler.js';
 import type {ChatHandlerParams} from './chat-handler.js';
+import {PrefixTracker} from './prefix-tracker.js';
 import {rehydrateResponse} from './privacy.js';
 
 // Note: This file contains basic structure tests
@@ -978,6 +985,41 @@ test('handleChat keeps the system string for non-anthropic providers', async t =
 	t.is(prompt[prompt.length - 1]?.providerOptions, undefined);
 });
 
+test('handleChat records each request with the prefix tracker', async t => {
+	const tracker = new PrefixTracker();
+	const send = (messages: Message[]) =>
+		handleChat({
+			model: capturingModel({}),
+			currentModel: 'test-model',
+			providerConfig: {
+				name: 'TestProvider',
+				type: 'openai',
+				models: ['test-model'],
+				config: {baseURL: 'https://api.test.com'},
+			},
+			messages,
+			tools: {},
+			callbacks: {},
+			maxRetries: 0,
+			prefixTracker: tracker,
+		});
+	const system: Message = {role: 'system', content: 'sys'};
+	await send([system, {role: 'user', content: 'hello'}]);
+	await send([
+		system,
+		{role: 'user', content: 'hello'},
+		{role: 'assistant', content: 'hi'},
+		{role: 'user', content: 'more'},
+	]);
+
+	// A third request that drops the first message must diverge at index 0,
+	// which proves both earlier requests were recorded in send order.
+	t.deepEqual(
+		await tracker.record('sys', undefined, [{role: 'user', content: 'more'}]),
+		{kind: 'history-changed', index: 0, previousMessages: 3},
+	);
+});
+
 // --- Output-token ceiling ---
 //
 // @ai-sdk/anthropic derives max_tokens from the model id and falls back to
@@ -1052,9 +1094,9 @@ test('the v4 spelling maxTokens does not reach the provider', async t => {
 	);
 });
 
-// A stuck model calling a nonexistent tool must reach the conversation loop's
-// repeated-call cap, not loop inside one SDK call.
-test('stopOnUnknownTool stops on a call to a tool that does not exist', t => {
+// A stuck model sending an invalid call must reach the conversation loop's
+// retry limits, not loop inside one SDK call.
+test('stopOnInvalidToolCall stops on a call to a tool that does not exist', t => {
 	const unknown = {
 		type: 'tool-call',
 		toolCallId: 'c1',
@@ -1072,18 +1114,36 @@ test('stopOnUnknownTool stops on a call to a tool that does not exist', t => {
 	};
 	const steps = (toolCalls: unknown[]) =>
 		({steps: [{toolCalls}]}) as unknown as Parameters<
-			typeof stopOnUnknownTool
+			typeof stopOnInvalidToolCall
 		>[0];
 
-	t.true(stopOnUnknownTool(steps([unknown])) as boolean);
-	t.false(stopOnUnknownTool(steps([valid])) as boolean);
-	// An unparsable call to a real tool is not this condition's concern.
-	t.false(
-		stopOnUnknownTool(
-			steps([{...unknown, toolName: 'read_file', error: new Error('bad json')}]),
-		) as boolean,
-	);
-	t.false(stopOnUnknownTool({steps: []} as never) as boolean);
+	t.true(stopOnInvalidToolCall(steps([unknown])) as boolean);
+	t.false(stopOnInvalidToolCall(steps([valid])) as boolean);
+	t.true(stopOnInvalidToolCall(steps([valid, unknown])) as boolean);
+	t.false(stopOnInvalidToolCall({steps: []} as never) as boolean);
+});
+
+test('stopOnInvalidToolCall stops on an unparsable call to a real tool', t => {
+	// The shape the SDK gives a call to a real tool whose arguments do not
+	// parse: the raw text as `input` and an InvalidToolInputError.
+	const unparsable = {
+		type: 'tool-call',
+		toolCallId: 'c1',
+		toolName: 'read_file',
+		input: '{"path": "hello.txt"',
+		dynamic: true,
+		invalid: true,
+		error: new InvalidToolInputError({
+			toolName: 'read_file',
+			toolInput: '{"path": "hello.txt"',
+			cause: new SyntaxError('bad json'),
+		}),
+	};
+	const steps = {steps: [{toolCalls: [unparsable]}]} as unknown as Parameters<
+		typeof stopOnInvalidToolCall
+	>[0];
+
+	t.true(stopOnInvalidToolCall(steps) as boolean);
 });
 
 test('openai-compatible: a tool screenshot reaches the request body as an image_url part', async t => {
@@ -1145,4 +1205,221 @@ test('openai-compatible: a tool screenshot reaches the request body as an image_
 			},
 		],
 	});
+});
+
+const screenshotHistory = (): Message[] => [
+	{role: 'user', content: 'check the page'},
+	{
+		role: 'assistant',
+		content: '',
+		tool_calls: [{id: 'call_shot', function: {name: 'browser', arguments: {}}}],
+	},
+	{
+		role: 'tool',
+		content: 'Screenshot of http://localhost:3000/',
+		tool_call_id: 'call_shot',
+		name: 'browser',
+		images: [{data: 'SCREENSHOT_B64', mediaType: 'image/jpeg'}],
+	},
+];
+
+async function chatWithLocalServer(
+	modelId: string,
+	respond: (body: string, call: number) => Response,
+) {
+	const {createOpenAICompatible} = await import('@ai-sdk/openai-compatible');
+	const bodies: string[] = [];
+	const model = createOpenAICompatible({
+		name: 'llama.cpp',
+		baseURL: 'http://localhost:8080/v1',
+		fetch: async (_input, init) => {
+			const body = String(init?.body);
+			bodies.push(body);
+			return respond(body, bodies.length);
+		},
+	})(modelId);
+	const run = () =>
+		handleChat({
+			model,
+			currentModel: modelId,
+			providerConfig: {
+				name: 'llama.cpp',
+				type: 'openai',
+				models: [modelId],
+				config: {baseURL: 'http://localhost:8080/v1'},
+			},
+			messages: screenshotHistory(),
+			tools: {},
+			callbacks: {},
+			maxRetries: 0,
+		});
+	return {bodies, run};
+}
+
+const imageRefusal = () =>
+	new Response(
+		JSON.stringify({
+			error: {
+				message:
+					'image input is not supported - hint: if this is unexpected, you may need to provide the mmproj',
+			},
+		}),
+		{status: 500, headers: {'content-type': 'application/json'}},
+	);
+
+const sseReply = (text: string) =>
+	new Response(
+		[
+			`data: ${JSON.stringify({id: '1', choices: [{index: 0, delta: {role: 'assistant', content: text}}]})}`,
+			`data: ${JSON.stringify({id: '1', choices: [{index: 0, delta: {}, finish_reason: 'stop'}]})}`,
+			'data: [DONE]',
+			'',
+		].join('\n\n'),
+		{status: 200, headers: {'content-type': 'text/event-stream'}},
+	);
+
+test.serial('a text-only local model that refuses a screenshot is retried without it and remembered', async t => {
+	const {bodies, run} = await chatWithLocalServer(
+		'local-text-only-refuses-images',
+		body => (body.includes('SCREENSHOT_B64') ? imageRefusal() : sseReply('ok')),
+	);
+
+	const first = await run();
+	t.is(first.choices[0]?.message.content, 'ok');
+	t.is(bodies.length, 2);
+	t.true(bodies[0]?.includes('SCREENSHOT_B64'));
+	t.false(bodies[1]?.includes('SCREENSHOT_B64'));
+	t.true(bodies[1]?.includes('Image not sent'));
+
+	// The next turn omits the image up front instead of failing again.
+	await run();
+	t.is(bodies.length, 3);
+	t.false(bodies[2]?.includes('SCREENSHOT_B64'));
+});
+
+test.serial('an unrelated server error is not retried without images', async t => {
+	const {bodies, run} = await chatWithLocalServer(
+		'local-model-unrelated-error',
+		() =>
+			new Response(JSON.stringify({error: {message: 'out of memory'}}), {
+				status: 500,
+				headers: {'content-type': 'application/json'},
+			}),
+	);
+	await t.throwsAsync(run());
+	t.is(bodies.length, 1);
+});
+
+// --- Invalid tool calls end the step ---
+//
+// A model that always answers with the same tool call, as a stuck model does.
+// Every request is counted: before the fix, an unparsable call to a real tool
+// made the SDK answer it with an automatic error and run another step, up to
+// MAX_TOOL_STEPS requests inside one chat() call, none of them visible to the
+// conversation loop's steps, usage or retry limits.
+
+const sseToolCall = (
+	name: string,
+	args: string,
+	finishReason: 'tool_calls' | 'length',
+) =>
+	new Response(
+		[
+			`data: ${JSON.stringify({id: '1', choices: [{index: 0, delta: {role: 'assistant', tool_calls: [{index: 0, id: 'call_1', type: 'function', function: {name, arguments: args}}]}}]})}`,
+			`data: ${JSON.stringify({id: '1', choices: [{index: 0, delta: {}, finish_reason: finishReason}], usage: {prompt_tokens: 10, completion_tokens: 5, total_tokens: 15}})}`,
+			'data: [DONE]',
+			'',
+		].join('\n\n'),
+		{status: 200, headers: {'content-type': 'text/event-stream'}},
+	);
+
+async function chatWithRepeatedToolCall(
+	name: string,
+	args: string,
+	finishReason: 'tool_calls' | 'length' = 'tool_calls',
+) {
+	const {createOpenAICompatible} = await import('@ai-sdk/openai-compatible');
+	let requests = 0;
+	const model = createOpenAICompatible({
+		name: 'scripted',
+		baseURL: 'http://localhost:8080/v1',
+		fetch: async () => {
+			requests++;
+			return sseToolCall(name, args, finishReason);
+		},
+	})('scripted-model');
+	const response = await handleChat({
+		model,
+		currentModel: 'scripted-model',
+		providerConfig: {
+			name: 'scripted',
+			type: 'openai',
+			models: ['scripted-model'],
+			config: {baseURL: 'http://localhost:8080/v1'},
+		},
+		messages: [{role: 'user', content: 'read hello.txt'}],
+		tools: {
+			read_file: tool({
+				description: 'read a file',
+				inputSchema: jsonSchema({
+					type: 'object',
+					properties: {path: {type: 'string'}},
+				}),
+			}),
+			write_file: tool({
+				description: 'write a file',
+				inputSchema: jsonSchema({
+					type: 'object',
+					properties: {path: {type: 'string'}, content: {type: 'string'}},
+				}),
+			}),
+		},
+		callbacks: {},
+		maxRetries: 0,
+	});
+	return {requests, response};
+}
+
+test.serial('an unparsable call to a real tool comes back after one request', async t => {
+	const {requests, response} = await chatWithRepeatedToolCall(
+		'read_file',
+		'{"path": "hello.txt"',
+	);
+
+	t.is(requests, 1);
+	// The usage is that one request's, so nothing the provider served is
+	// missing from it.
+	t.is(response.usage?.totalTokens, 15);
+	const [call] = response.choices[0]?.message.tool_calls ?? [];
+	t.is(call?.function.name, 'read_file');
+	// The raw text is not passed on as the arguments: it would be executed as
+	// the arguments and replayed to the provider double-encoded.
+	t.deepEqual(call?.function.arguments, {});
+	t.regex(call?.argumentsError ?? '', /^not valid JSON: /);
+});
+
+test.serial('a call cut off at the output-token limit comes back after one request', async t => {
+	const {requests, response} = await chatWithRepeatedToolCall(
+		'write_file',
+		'{"path": "notes.md", "content": "# Notes\\n\\nThe first line of a long fi',
+		'length',
+	);
+
+	t.is(requests, 1);
+	t.is(response.finishReason, 'length');
+	const [call] = response.choices[0]?.message.tool_calls ?? [];
+	t.deepEqual(call?.function.arguments, {});
+	t.regex(call?.argumentsError ?? '', /^not valid JSON: /);
+});
+
+test.serial('a valid call still comes back after one request with its arguments', async t => {
+	const {requests, response} = await chatWithRepeatedToolCall(
+		'read_file',
+		'{"path": "hello.txt"}',
+	);
+
+	t.is(requests, 1);
+	const [call] = response.choices[0]?.message.tool_calls ?? [];
+	t.deepEqual(call?.function.arguments, {path: 'hello.txt'});
+	t.is(call?.argumentsError, undefined);
 });

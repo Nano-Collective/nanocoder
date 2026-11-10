@@ -1,6 +1,8 @@
 import type {TitleShape} from '@/components/ui/styled-title';
 import type {DevelopmentMode} from '@/types/core';
+import type {FirewallConfig} from '@/types/firewall';
 import type {NanocoderShape, ThemePreset} from '@/types/ui';
+import type {TrustLevel} from '@/verify/trust';
 
 // Supported AI SDK provider packages
 export type SdkProvider =
@@ -182,13 +184,51 @@ export interface NotificationsConfig {
 		questionPrompt?: boolean;
 		generationComplete?: boolean;
 		triggeredRunComplete?: boolean;
+		ciFailureDetected?: boolean;
+		ciInvestigationComplete?: boolean;
 	};
 	customMessages?: {
 		toolConfirmation?: {title: string; message: string};
 		questionPrompt?: {title: string; message: string};
 		generationComplete?: {title: string; message: string};
 		triggeredRunComplete?: {title: string; message: string};
+		ciFailureDetected?: {title: string; message: string};
+		ciInvestigationComplete?: {title: string; message: string};
 	};
+}
+
+/**
+ * Background CI-watch configuration. Governs whether the per-project daemon
+ * polls GitHub Actions for check-run failures on the currently checked-out
+ * branch and automatically runs the `verify-ci-investigator` subagent when
+ * one is found. Opt-in (`enabled` defaults to false) since this is a new
+ * always-on-network, GitHub-API-rate-limit-consuming background feature,
+ * unlike file-watching/cron which have no such external cost.
+ */
+export interface CiWatchConfig {
+	enabled: boolean;
+	/** Base poll interval in ms. Defaults to 30_000. */
+	pollIntervalMs?: number;
+	/** Backoff cap in ms for consecutive `gh` errors. Defaults to 300_000. */
+	maxPollIntervalMs?: number;
+}
+
+/**
+ * Project-level (`agents.config.json`) verify/CI-watch policy — trust level
+ * and poll cadence. Unlike `CiWatchConfig.enabled` (a personal, per-machine
+ * opt-in to background GitHub polling, kept in preferences), trust level
+ * and cadence are security/policy decisions appropriate to commit and
+ * review with the rest of the project, so they live here instead. When
+ * set, `pollIntervalMs`/`maxPollIntervalMs` here override the
+ * preferences-backed `CiWatchConfig` values of the same name — see
+ * `loadCiWatchConfig` in `source/config/index.ts`.
+ */
+export interface VerifyConfig {
+	/** Trust level for daemon-triggered CI investigation/auto-fix. Undefined
+	 * defers to the `--trust` CLI flag, then 'comment-only'. */
+	trustLevel?: TrustLevel;
+	pollIntervalMs?: number;
+	maxPollIntervalMs?: number;
 }
 
 /**
@@ -373,6 +413,8 @@ export interface DiskNanocoderConfig {
 	sandbox?: boolean;
 	/** Commit each successful agent file edit (only that file) with a generated Conventional Commit message. Off by default. */
 	autoCommit?: boolean;
+	/** Negative-space mutation firewall. Off by default. */
+	firewall?: Partial<FirewallConfig>;
 }
 
 /**
@@ -448,6 +490,12 @@ export interface AppConfig {
 	// Desktop notification configuration
 	notifications?: NotificationsConfig;
 
+	// Background CI-watch configuration (daemon-side)
+	ciWatch?: CiWatchConfig;
+
+	// Project-level verify/CI-watch policy: trust level, poll cadence overrides
+	verify?: VerifyConfig;
+
 	// Model mode defaults (global)
 	tune?: Partial<TuneConfig>;
 
@@ -485,6 +533,9 @@ export interface AppConfig {
 
 	// Agent-loop retry limits (interactive conversation loop)
 	retries?: RetryLimitsConfig;
+
+	// Negative-space mutation firewall
+	firewall?: Partial<FirewallConfig>;
 }
 
 // MCP Server configuration with source tracking
@@ -647,6 +698,8 @@ export interface TuneConfig {
 	// when undefined to preserve historical behaviour.
 	includeAgentsMd?: boolean;
 	modelParameters?: ModelParameters;
+	// On-demand MCP tool discovery to preserve context windows ('auto' | 'always' | 'disabled')
+	mcpDiscovery?: 'auto' | 'always' | 'disabled';
 }
 
 /**
@@ -680,6 +733,16 @@ export interface VoiceConfig {
 export interface TrustedDirectoryRecord {
 	path: string;
 	fingerprint: string;
+	/** `TRUST_FINGERPRINT_VERSION` when saved. Records without one are version 1. */
+	fingerprintVersion?: number;
+}
+
+export interface UiPreferences {
+	/**
+	 * Maximum frames per second for Ink TUI rendering.
+	 * Accepted integer values from 1 through 60. Defaults to 30.
+	 */
+	maxFps?: number;
 }
 
 export interface UserPreferences {
@@ -689,6 +752,11 @@ export interface UserPreferences {
 		[key in string]?: string;
 	};
 	lastUpdateCheck?: number;
+	/**
+	 * Latest published version seen by the last successful update check, so
+	 * the update banner keeps showing during the 24h throttle window.
+	 */
+	lastUpdateCheckLatestVersion?: string;
 	selectedTheme?: ThemePreset;
 	/**
 	 * Theme whose palette colours syntax highlighting in code blocks, diffs, and
@@ -706,8 +774,9 @@ export interface UserPreferences {
 	nanocoderShape?: NanocoderShape;
 	tune?: TuneConfig;
 	notifications?: NotificationsConfig;
+	ciWatch?: CiWatchConfig;
 	/**
-	 * Namespaced settings (sessions, paste) read from nanocoder-preferences.json
+	 * Namespaced settings (sessions, paste, ui) read from nanocoder-preferences.json
 	 * by the loaders. Kept under `nanocoder` to match the on-disk shape the
 	 * `loadSessionConfig` / `loadPasteConfig` loaders read.
 	 */
@@ -724,6 +793,7 @@ export interface UserPreferences {
 			titleProvider?: string;
 		};
 		paste?: PasteConfig;
+		ui?: UiPreferences;
 	};
 	reasoningExpanded?: boolean;
 	compactToolDisplay?: boolean;
@@ -751,6 +821,14 @@ export interface UserPreferences {
 	 * content. Also switchable per-run with the --no-alt-screen flag.
 	 */
 	alternateScreen?: boolean;
+	/**
+	 * Absolute project-root paths for which the one-time `--trust
+	 * full-commit` security warning has already been shown and confirmed.
+	 * Mirrors `trustedDirectories`'s shape/semantics: a list of
+	 * already-confirmed targets, not a single global flag, since a user may
+	 * run the daemon against several projects with different trust postures.
+	 */
+	fullCommitConfirmedProjects?: string[];
 	/**
 	 * Mouse reporting in alternate screen mode. true (default): the mouse wheel
 	 * scrolls the chat viewport, and text selection needs Shift+drag (Option+drag

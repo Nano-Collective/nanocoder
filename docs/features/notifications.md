@@ -84,8 +84,12 @@ Notification preferences are stored in `nanocoder-preferences.json` under the to
 | `events.toolConfirmation` | boolean | `true` | Notify when a tool needs approval |
 | `events.questionPrompt` | boolean | `true` | Notify when the AI asks a question |
 | `events.generationComplete` | boolean | `true` | Notify when a response is ready |
-| `events.triggeredRunComplete` | boolean | `true` | Notify when a daemon-triggered skill run finishes |
+| `events.triggeredRunComplete` | boolean | `true` | Notify when a daemon-triggered skill run (file-watch, cron, CI watch) finishes |
+| `events.ciFailureDetected` | boolean | `true` | Notify as soon as CI watch detects a failing run, before investigation starts |
+| `events.ciInvestigationComplete` | boolean | `true` | Notify when the automated CI-failure investigation finishes |
 | `customMessages.<event>` | object | — | Override the default title and message for an event |
+
+The last three fire only from the per-project daemon (`nanocoder daemon start`) — see [Scheduler](./scheduler.md) and CI Watch configuration in [Preferences](../configuration/preferences.md#ci-watch-configuration).
 
 Events you leave out of `events` keep their default of `true`, so `{"notifications": {"enabled": true}}` is enough to turn every event on.
 

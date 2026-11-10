@@ -7,6 +7,7 @@ import type {CustomToolMetadata} from '@/types/custom-tools';
 import type {ToolHandler} from '@/types/index';
 import {isRealPathInside} from '@/utils/path-validation';
 import {signalProcessTree} from '@/utils/process-tree';
+import {isWindowsCmd, shellArgs} from '@/utils/shell-args';
 import {
 	makeStreamCollector,
 	STDERR_TRUNCATION_NOTICE,
@@ -262,18 +263,6 @@ export function expandVars(value: string): string {
 		if (v !== undefined) return v;
 		return def ?? '';
 	});
-}
-
-/** cmd.exe: disable AutoRun/delayed expansion, then run one wrapped command. */
-export function shellArgs(shell: string, script: string): string[] {
-	return isWindowsCmd(shell)
-		? ['/d', '/v:off', '/s', '/c', `"${script}"`]
-		: ['-c', script];
-}
-
-function isWindowsCmd(shell: string): boolean {
-	const name = shell.replaceAll('\\', '/').split('/').pop() ?? '';
-	return /^cmd(\.exe)?$/i.test(name);
 }
 
 function pickShell(configured: string | undefined): string {

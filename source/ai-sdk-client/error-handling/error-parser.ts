@@ -1,6 +1,86 @@
 import {APICallError} from 'ai';
 import {extractRootError} from './error-extractor.js';
 
+interface APIErrorContext {
+	providerName?: string;
+	baseUrl?: string;
+}
+
+const NETWORK_ERROR_HINTS: Record<string, string> = {
+	ECONNREFUSED:
+		'Connection refused. Is the model server running and listening on this port?',
+	ENOTFOUND:
+		'Hostname could not be resolved. Check the hostname and DNS settings.',
+	EAI_AGAIN:
+		'DNS lookup temporarily failed. Check your network connection and retry.',
+	ECONNRESET: 'Connection was reset. Check the server and network connection.',
+	ETIMEDOUT: 'Connection timed out. Check whether the server is reachable.',
+};
+
+function getNetworkErrorCode(error: unknown): string | undefined {
+	const visited = new Set<unknown>();
+	let current: unknown = error;
+
+	while (current && typeof current === 'object' && !visited.has(current)) {
+		visited.add(current);
+
+		const candidate = current as {
+			code?: unknown;
+			cause?: unknown;
+			message?: unknown;
+		};
+
+		if (
+			typeof candidate.code === 'string' &&
+			Object.hasOwn(NETWORK_ERROR_HINTS, candidate.code)
+		) {
+			return candidate.code;
+		}
+
+		if (typeof candidate.message === 'string') {
+			const message = candidate.message;
+			const code = Object.keys(NETWORK_ERROR_HINTS).find(value =>
+				message.includes(value),
+			);
+
+			if (code) return code;
+		}
+
+		current = candidate.cause;
+	}
+
+	return undefined;
+}
+
+function safeProviderUrl(baseUrl?: string): string {
+	if (!baseUrl?.trim()) return '(not configured)';
+
+	try {
+		const url = new URL(baseUrl);
+		if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+			return '(invalid URL)';
+		}
+		url.username = '';
+		url.password = '';
+		url.search = '';
+		url.hash = '';
+		return url.toString();
+	} catch {
+		// Do not echo malformed URLs: they may contain credentials.
+		return '(invalid URL)';
+	}
+}
+
+function providerDetails(context?: APIErrorContext): string {
+	const provider = `provider "${context?.providerName ?? 'unknown'}"`;
+	const url = safeProviderUrl(context?.baseUrl);
+
+	if (url === '(not configured)' || url === '(invalid URL)') {
+		return `${provider} (baseUrl: ${url})`;
+	}
+
+	return `${provider} at ${url}`;
+}
 /**
  * Last-resort serializer for errors whose .message ended up as the literal
  * string "[object Object]" because something upstream stringified an object
@@ -27,8 +107,11 @@ function describeError(error: Error): string {
  * Parses API errors into user-friendly messages.
  * Exported for testing purposes.
  */
-export function parseAPIError(error: unknown): string {
-	const result = parseAPIErrorInternal(error);
+export function parseAPIError(
+	error: unknown,
+	context?: APIErrorContext,
+): string {
+	const result = parseAPIErrorInternal(error, context);
 	// Final safety net: if our user-facing string still contains "[object Object]"
 	// then some upstream Error.message was already a stringified object. Replace
 	// with a structured dump so the real payload is visible.
@@ -41,7 +124,10 @@ export function parseAPIError(error: unknown): string {
 	return result;
 }
 
-function parseAPIErrorInternal(error: unknown): string {
+function parseAPIErrorInternal(
+	error: unknown,
+	context?: APIErrorContext,
+): string {
 	// First extract the root error from any wrappers
 	const rootError = extractRootError(error);
 
@@ -120,6 +206,21 @@ function parseAPIErrorInternal(error: unknown): string {
 	const errorMessage = rootError.message;
 	const lowerMessage = errorMessage.toLowerCase();
 
+	// Node.js may include credentials and query parameters in this error.
+	// Never return the raw message because it can contain secrets.
+	if (
+		lowerMessage.includes(
+			'request cannot be constructed from a url that includes credentials',
+		)
+	) {
+		return (
+			`Invalid provider URL for ${providerDetails(context)}. ` +
+			'URLs containing embedded credentials are not supported. ' +
+			'Remove the username and password from baseUrl and configure ' +
+			'authentication separately.'
+		);
+	}
+
 	// Extract status code and clean message from common error patterns FIRST
 	// This ensures HTTP status codes are properly parsed before falling through
 	// to more generic pattern matching (like Ollama-specific errors)
@@ -184,6 +285,14 @@ function parseAPIErrorInternal(error: unknown): string {
 		lowerMessage.includes('und_err_headers_timeout') ||
 		lowerMessage.includes('headers timeout error')
 	) {
+		if (getNetworkErrorCode(error) === 'ETIMEDOUT') {
+			return (
+				`Connection failed: Could not reach ${providerDetails(context)} ` +
+				`(ETIMEDOUT). ${NETWORK_ERROR_HINTS.ETIMEDOUT} ` +
+				'Check baseUrl in your provider configuration.'
+			);
+		}
+
 		if (
 			lowerMessage.includes('und_err_headers_timeout') ||
 			lowerMessage.includes('headers timeout error')
@@ -198,19 +307,48 @@ function parseAPIErrorInternal(error: unknown): string {
 		return 'Request timed out: The model took too long to respond';
 	}
 
-	// Handle network errors
+	// Handle network failures and nested transport error causes.
+	const networkCode =
+		getNetworkErrorCode(error) ?? getNetworkErrorCode(rootError);
 	if (
-		errorMessage.includes('ECONNREFUSED') ||
-		errorMessage.includes('ECONNRESET') ||
-		errorMessage.includes('ENOTFOUND') ||
-		errorMessage.includes('EAI_AGAIN') ||
-		errorMessage.includes('connect ETIMEDOUT') ||
+		networkCode ||
 		lowerMessage.includes('failed to fetch') ||
 		lowerMessage.includes('fetch failed') ||
 		lowerMessage.includes('network error') ||
 		lowerMessage.includes('getaddrinfo')
 	) {
-		return 'Connection failed: Unable to reach the model server';
+		const hint = networkCode
+			? NETWORK_ERROR_HINTS[networkCode]
+			: 'Check that the model server is running and reachable.';
+		const cause = networkCode ? ` (${networkCode})` : '';
+		return (
+			`Connection failed: Could not reach ${providerDetails(context)}` +
+			`${cause}. ${hint} Check baseUrl in your provider configuration.`
+		);
+	}
+
+	// Explain malformed URLs instead of showing raw Node.js errors.
+	const isInvalidUrl =
+		lowerMessage.includes('invalid url') ||
+		lowerMessage.includes('bad port') ||
+		lowerMessage.includes('unknown scheme') ||
+		lowerMessage.includes('invalid protocol') ||
+		lowerMessage.includes('unsupported protocol');
+
+	if (isInvalidUrl) {
+		const baseUrl = context?.baseUrl;
+		let hint: string;
+
+		if (!baseUrl?.trim() || /^\$\{[^}]+\}$/.test(baseUrl.trim())) {
+			hint =
+				'The baseUrl is missing or unresolved. Check your environment variables and provider configuration.';
+		} else if (!/^https?:\/\//i.test(baseUrl)) {
+			hint = 'The baseUrl must start with http:// or https://.';
+		} else {
+			hint = 'Check the baseUrl syntax, hostname, port, and protocol.';
+		}
+
+		return `Invalid provider URL for ${providerDetails(context)}. ${hint}`;
 	}
 
 	// Handle context length errors
