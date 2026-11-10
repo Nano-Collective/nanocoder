@@ -604,6 +604,41 @@ test('diff_edit validator: accepts an LF block for a CRLF file', async t => {
 	t.deepEqual(result, {valid: true});
 });
 
+test('diff_edit validator: a missed block on a CRLF file still gives usable recovery evidence', async t => {
+	const validator = diffEditTool.validator;
+	if (!validator) {
+		t.fail('diff_edit validator not defined');
+		return;
+	}
+	const original = 'function run() {\r\n\tstart();\r\n}\r\n';
+	const filePath = await createTestFile('d.ts', original);
+	markFileSeen(filePath);
+	const replace = 'function run() {\n\tfinish();\n}';
+
+	const result = await validator({
+		path: projectRelativePath(filePath),
+		diff: diffBlock('function run() {\n  start();\n}', replace),
+	});
+
+	t.false(result.valid);
+	if (result.valid) return;
+	const recovery = JSON.parse(
+		result.error.split('Edit recovery evidence (JSON):\n')[1],
+	);
+	t.is(recovery.status, 'candidate_found');
+	const actualText: string = recovery.candidates[0].actualText;
+
+	await executeDiffEdit({
+		path: filePath,
+		diff: diffBlock(actualText, replace),
+	});
+
+	t.is(
+		await readFile(filePath, 'utf-8'),
+		'function run() {\r\n\tfinish();\r\n}\r\n',
+	);
+});
+
 test('diff_edit formatter renders description when provided', async t => {
 	const formatter = diffEditTool.formatter;
 	if (!formatter) {
