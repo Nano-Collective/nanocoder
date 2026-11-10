@@ -13,6 +13,7 @@ import {getCachedFileContent} from '@/utils/file-cache';
 import {highlight} from '@/utils/highlighter';
 import {normalizeIndentation} from '@/utils/indentation-normalizer';
 import {areLinesSimilar, computeInlineDiff} from '@/utils/inline-diff';
+import {fitEditToLineEndings} from '@/utils/line-endings';
 import {getLanguageFromExtension} from '@/utils/programming-language-helper';
 
 interface StringReplaceArgs {
@@ -47,7 +48,7 @@ export async function formatStringReplacePreview(
 	colors?: Colors,
 ): Promise<React.ReactElement> {
 	const themeColors = colors || getColors();
-	const {path, old_str, new_str} = args;
+	const {path} = args;
 
 	const terminalWidth = process.stdout.columns || DEFAULT_TERMINAL_COLUMNS;
 	const lineNumPrefixWidth = 8;
@@ -60,6 +61,20 @@ export async function formatStringReplacePreview(
 		const absPath = resolve(getSafeSessionCwd(), path);
 		const cached = await getCachedFileContent(absPath);
 		const fileContent = cached.content;
+		const fitted = fitEditToLineEndings(
+			fileContent,
+			args.old_str,
+			args.new_str,
+		);
+		// After the write the file no longer holds old_str, so the fit cannot
+		// tell an edit kept as sent (LF region of a mixed file). Use the text
+		// that is actually in the file.
+		const keptAsSent =
+			isResult &&
+			!fileContent.includes(fitted.newStr) &&
+			fileContent.includes(args.new_str);
+		const old_str = keptAsSent ? args.old_str : fitted.oldStr;
+		const new_str = keptAsSent ? args.new_str : fitted.newStr;
 		const ext = path.split('.').pop()?.toLowerCase() ?? '';
 		const language = getLanguageFromExtension(ext);
 

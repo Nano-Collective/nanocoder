@@ -1355,6 +1355,8 @@ export class AcpAgent implements Agent {
 				toolsDisabled,
 				getAppConfig().systemPrompt,
 				model,
+				undefined,
+				toolManager,
 			),
 		);
 		const toolsForPrompt = toolsDisabled

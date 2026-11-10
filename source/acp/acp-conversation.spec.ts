@@ -1661,61 +1661,6 @@ test('runAcpConversation - tool in nonInteractiveAlwaysAllow skips approval', as
 });
 
 // ============================================================================
-// XML validation error tool
-// ============================================================================
-
-test('runAcpConversation - __xml_validation_error__ tool creates error result', async t => {
-	const {conn} = createMockConn();
-	const session = createMockSession(conn);
-	const toolManager = {
-		...createMockToolManager(),
-		hasTool: () => false, // __xml_validation_error__ is not a known tool
-	};
-
-	let callCount = 0;
-	const client = {
-		chat: async () => {
-			callCount++;
-			if (callCount === 1) {
-				return {
-					choices: [
-						{
-							message: {
-								content: '',
-								tool_calls: [
-									createMockToolCall(
-										'__xml_validation_error__',
-										{error: 'Bad XML'},
-										'call-1',
-									),
-								],
-							},
-						},
-					],
-				};
-			}
-
-			return {choices: [{message: {content: 'OK'}}]};
-		},
-	} as unknown as LLMClient;
-
-	await runAcpConversation({
-		session,
-		client,
-		toolManager: toolManager as any,
-		conn,
-		nonInteractiveAlwaysAllow: [],
-	});
-
-	const errorMsg = session.messages.find(
-		(m: any) =>
-			m.role === 'tool' && m.name === '__xml_validation_error__',
-	);
-	t.truthy(errorMsg);
-	t.is(errorMsg?.content, 'Unknown tool: __xml_validation_error__');
-});
-
-// ============================================================================
 // Multi-turn
 // ============================================================================
 

@@ -699,3 +699,34 @@ test.serial('professional tone defaults to the preference when unset', t => {
 	t.false(buildWithProfessionalTone(false).includes('## TONE'));
 	t.true(buildWithProfessionalTone(true).includes('## TONE'));
 });
+
+test('buildSystemPrompt - includes MCP catalog section when load_tool_schema is active and toolManager provided', t => {
+	const mockManager = {
+		getMcpCatalog: () => ({
+			formatCatalogSection: () => '### Available On-Demand MCP Tools (Catalog)\n- `db_query`',
+		}),
+	} as any;
+
+	const withManager = buildSystemPrompt(
+		'normal',
+		undefined,
+		[...ALL_TOOLS, 'load_tool_schema'],
+		false,
+		undefined,
+		undefined,
+		false,
+		mockManager,
+	);
+	t.true(withManager.includes('### Available On-Demand MCP Tools (Catalog)'));
+
+	const withoutManager = buildSystemPrompt(
+		'normal',
+		undefined,
+		[...ALL_TOOLS, 'load_tool_schema'],
+		false,
+		undefined,
+		undefined,
+		false,
+	);
+	t.false(withoutManager.includes('### Available On-Demand MCP Tools (Catalog)'));
+});

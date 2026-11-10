@@ -415,7 +415,7 @@ Turn off individual tools globally with the top-level `disabledTools` array. Lis
 
 Names match the registered tool ids (`read_file`, `write_file`, `string_replace`, `execute_bash`, `web_search`, `fetch_url`, `agent`, etc.). [MCP](mcp-configuration.md) tools follow the same naming as in their server config.
 
-`fetch_url` always refuses internal addresses, in every mode (including yolo and `alwaysAllow`): loopback, private ranges (RFC 1918, CGNAT, link-local and their IPv6 equivalents), `localhost` and `*.localhost`, and cloud metadata hosts such as `169.254.169.254` and `metadata.google.internal`. Every redirect hop is checked the same way.
+`fetch_url` always refuses internal addresses, in every mode (including yolo and `alwaysAllow`): loopback, private ranges (RFC 1918, CGNAT, link-local and their IPv6 equivalents), reserved, multicast and broadcast IPv4 ranges, IPv6 addresses that embed any of these (IPv4-mapped, IPv4-compatible, IPv4-translated, NAT64 and 6to4), `localhost` and `*.localhost`, and cloud metadata hosts such as `169.254.169.254` and `metadata.google.internal`. Every redirect hop is checked the same way.
 
 An [ACP](../features/acp.md) client can add to this list for a single session, without touching your config. Resolution: project-level `agents.config.json` wins over the global config. The list is layered on top of `/tune` profiles and mode exclusions — if `nano` profile would otherwise expose `read_file`, listing it in `disabledTools` removes it. Subagents respect the global list even if their own `tools` allow-list includes the disabled name.
 

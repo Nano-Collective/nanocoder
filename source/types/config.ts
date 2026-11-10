@@ -698,6 +698,8 @@ export interface TuneConfig {
 	// when undefined to preserve historical behaviour.
 	includeAgentsMd?: boolean;
 	modelParameters?: ModelParameters;
+	// On-demand MCP tool discovery to preserve context windows ('auto' | 'always' | 'disabled')
+	mcpDiscovery?: 'auto' | 'always' | 'disabled';
 }
 
 /**

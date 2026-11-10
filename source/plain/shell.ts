@@ -216,6 +216,8 @@ export async function runPlainShell(
 		toolsDisabled,
 		getAppConfig().systemPrompt,
 		model,
+		undefined,
+		toolManager,
 	);
 	const toolsForPrompt = toolsDisabled
 		? toolManager.getFilteredTools(availableNames)

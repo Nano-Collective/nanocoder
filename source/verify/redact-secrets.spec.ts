@@ -57,3 +57,17 @@ test('leaves ordinary text alone', t => {
 	const text = '### Summary\nThe test `sk-foo` failed at src/a.ts:12 (task-key).';
 	t.is(redactSecrets(text, EMPTY_ENV), text);
 });
+
+test('redacts extra literal values, longest first with env values', t => {
+	const env = {MY_API_KEY: 'abcdefgh'};
+	t.is(
+		redactSecrets('k=config-key-abcdefgh-123 e=abcdefgh', env, [
+			'config-key-abcdefgh-123',
+		]),
+		'k=[REDACTED] e=[REDACTED]',
+	);
+});
+
+test('ignores extra literal values shorter than 8 characters', t => {
+	t.is(redactSecrets('the abc test', EMPTY_ENV, ['abc', '']), 'the abc test');
+});

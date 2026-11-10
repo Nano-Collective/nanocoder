@@ -37,6 +37,7 @@ const CATEGORY_COMMANDS: Record<HelpCategory, readonly string[]> = {
 		'resume',
 		'retry',
 		'schedule',
+		'share',
 		'tasks',
 	],
 	'Model & Configuration': [
@@ -217,6 +218,16 @@ const COMMAND_HELP_OVERRIDES: Record<string, CommandHelpOverrides> = {
 		usage: '/settings [tab]',
 		options: SETTINGS_TAB_IDS,
 		examples: ['/settings', '/settings providers'],
+	},
+	share: {
+		usage: '/share [--json] [--no-redact] [filename]',
+		options: ['--json', '--no-redact'],
+		examples: [
+			'/share',
+			'/share notes/debug-session.html',
+			'/share --json',
+			'/share --no-redact',
+		],
 	},
 	skills: {
 		usage:
