@@ -1,5 +1,5 @@
 import {existsSync, readFileSync, statSync} from 'node:fs';
-import {dirname, isAbsolute, join, resolve, sep} from 'node:path';
+import {dirname, isAbsolute, join, relative, resolve, sep} from 'node:path';
 import {getConfigPath} from '@/config/paths';
 import {MAX_AGENTS_MD_FILE_CHARS} from '@/constants';
 import {
@@ -7,6 +7,7 @@ import {
 	getSafeSessionCwd,
 	getSessionCwdScope,
 } from '@/services/session-cwd';
+import {loadGitignore} from '@/utils/gitignore-loader';
 import {isPathInside} from '@/utils/path-validation';
 
 const AGENTS_MD_FILENAME = 'AGENTS.md';
@@ -48,6 +49,11 @@ export interface AppendAgentsMdOptions {
 	 * cacheable; request-time callers opt into the nested layer.
 	 */
 	includeNested?: boolean;
+	/**
+	 * Include the user-level and project-root files. Request-time callers set
+	 * this to false because the base system prompt already carries them.
+	 */
+	includeBase?: boolean;
 }
 
 function getDiscoveredPaths(): Set<string> {
@@ -110,13 +116,19 @@ function pathKey(filePath: string): string {
  * conflicts. Duplicate paths (NANOCODER_CONFIG_DIR inside the project) collapse
  * to their first occurrence.
  */
-function getAgentsMdPaths(includeNested: boolean): string[] {
+function getAgentsMdPaths(
+	includeNested: boolean,
+	includeBase: boolean,
+): string[] {
 	const root = resolve(getProjectRoot());
-	const rootAgentsPath = join(root, AGENTS_MD_FILENAME);
-	const candidates = [
-		join(getConfigPath(), AGENTS_MD_FILENAME),
-		rootAgentsPath,
-	];
+	const candidates: string[] = [];
+
+	if (includeBase) {
+		candidates.push(
+			join(getConfigPath(), AGENTS_MD_FILENAME),
+			join(root, AGENTS_MD_FILENAME),
+		);
+	}
 
 	if (includeNested) {
 		const nested = getDiscoveredAgentsMdPaths()
@@ -148,9 +160,10 @@ export function appendAgentsMd(
 	options: AppendAgentsMdOptions = {},
 ): string {
 	const includeNested = options.includeNested ?? true;
+	const includeBase = options.includeBase ?? true;
 	const blocks: string[] = [];
 
-	for (const filePath of getAgentsMdPaths(includeNested)) {
+	for (const filePath of getAgentsMdPaths(includeNested, includeBase)) {
 		const file = readAgentsMdFile(filePath);
 		if (!file) continue;
 
@@ -172,10 +185,27 @@ export function appendAgentsMd(
 }
 
 /**
+ * Path relative to the project root in the POSIX form the `ignore` package
+ * expects, or null when the path is outside the project.
+ */
+function toProjectRelative(root: string, absolutePath: string): string | null {
+	const rel = relative(root, absolutePath);
+	if (!rel || rel.startsWith('..') || isAbsolute(rel)) {
+		return null;
+	}
+	return rel.split(sep).join('/');
+}
+
+/**
  * Record the AGENTS.md files that govern `targetPath` once the agent touches
  * it. Every ancestor from the file's directory up to (but not including) the
  * project root is collected, because a monorepo may put rules at several
  * levels. Paths outside the project are ignored.
+ *
+ * Candidates are filtered through the same ignore rules as the file-search
+ * tools: an AGENTS.md in node_modules, a build directory, or a path hidden by
+ * `.gitignore`/`.nanocoderignore` must not be injected into the system prompt
+ * as project instructions.
  */
 export function noteAgentsMdAccess(targetPath: string): void {
 	const root = resolve(getProjectRoot());
@@ -197,12 +227,23 @@ export function noteAgentsMdAccess(targetPath: string): void {
 		return;
 	}
 
+	const projectIgnore = loadGitignore(root, {nanocoderIgnore: true});
 	const discovered = getDiscoveredPaths();
 	let directory = start;
 	while (isPathInside(directory, root) && resolve(directory) !== root) {
-		const candidate = join(directory, AGENTS_MD_FILENAME);
-		if (existsSync(candidate)) {
-			discovered.add(resolve(candidate));
+		const relativeDir = toProjectRelative(root, directory);
+		const dirIgnored =
+			relativeDir !== null && projectIgnore.ignores(`${relativeDir}/`);
+		if (!dirIgnored) {
+			const candidate = join(directory, AGENTS_MD_FILENAME);
+			const relativeCandidate = toProjectRelative(root, candidate);
+			if (
+				relativeCandidate &&
+				!projectIgnore.ignores(relativeCandidate) &&
+				existsSync(candidate)
+			) {
+				discovered.add(resolve(candidate));
+			}
 		}
 
 		const parent = dirname(directory);
@@ -212,9 +253,9 @@ export function noteAgentsMdAccess(targetPath: string): void {
 }
 
 /**
- * Record AGENTS.md for a tool call's path arguments. Called from
- * `processToolUse`, the single chokepoint every frontend (TUI, plain, ACP,
- * subagents) executes tools through.
+ * Record AGENTS.md for a tool call's path arguments. The TUI, plain shell and
+ * ACP execute tools through `processToolUse`, which calls this. Subagents run
+ * their own loop and call it directly after a successful tool.
  */
 export function noteAgentsMdAccessForTool(
 	toolName: string,

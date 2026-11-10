@@ -12,6 +12,7 @@ import {
 	getLastBuiltPrompt,
 	resetSectionCache,
 	setLastBuiltPrompt,
+	shouldIncludeAgentsMd,
 } from './prompt-builder.js';
 import type {SystemPromptConfig, TuneConfig} from '@/types/config';
 import {TUNE_DEFAULTS} from '@/types/config';
@@ -458,6 +459,62 @@ test('buildSystemPrompt - non-nano with includeAgentsMd=false omits AGENTS.md', 
 	};
 	const result = buildSystemPrompt('normal', tune, NANO_TOOLS);
 	t.false(result.includes('Additional Context'));
+});
+
+// ============================================================================
+// shouldIncludeAgentsMd — gating shared with the conversation loops
+// ============================================================================
+
+test('shouldIncludeAgentsMd - includeAgentsMd=false disables every layer', t => {
+	t.false(
+		shouldIncludeAgentsMd(
+			{...TUNE_DEFAULTS, includeAgentsMd: false},
+			'gpt-4o',
+		),
+	);
+});
+
+test('shouldIncludeAgentsMd - nano profile is off by default', t => {
+	t.false(shouldIncludeAgentsMd(TUNE_NANO, 'gpt-4o'));
+});
+
+test('shouldIncludeAgentsMd - auto resolves to nano and is off', t => {
+	t.false(
+		shouldIncludeAgentsMd({...TUNE_DEFAULTS, toolProfile: 'auto'}, 'llama3.2:1b'),
+	);
+});
+
+test('shouldIncludeAgentsMd - auto resolving to full keeps AGENTS.md', t => {
+	t.true(
+		shouldIncludeAgentsMd({...TUNE_DEFAULTS, toolProfile: 'auto'}, 'gpt-4o'),
+	);
+});
+
+test('shouldIncludeAgentsMd - a resolved replace override disables AGENTS.md', t => {
+	t.false(
+		shouldIncludeAgentsMd(TUNE_DEFAULTS, 'gpt-4o', {
+			mode: 'replace',
+			content: 'custom prompt',
+		}),
+	);
+});
+
+test('shouldIncludeAgentsMd - append override keeps AGENTS.md', t => {
+	t.true(
+		shouldIncludeAgentsMd(TUNE_DEFAULTS, 'gpt-4o', {
+			mode: 'append',
+			content: 'custom prompt',
+		}),
+	);
+});
+
+test('shouldIncludeAgentsMd - unreadable replace file falls back to AGENTS.md', t => {
+	t.true(
+		shouldIncludeAgentsMd(TUNE_DEFAULTS, 'gpt-4o', {
+			mode: 'replace',
+			file: join(testConfigDir, 'missing-prompt.md'),
+		}),
+	);
 });
 
 // ============================================================================

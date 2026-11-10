@@ -18,8 +18,13 @@ import {
 } from '@/models/index';
 import {SubagentLoader, getSubagentLoader} from './subagent-loader.js';
 import type {MemoryFinder} from '@/memory/project-context';
-import {setProjectRoot} from '@/services/session-cwd';
+import {
+	resetSessionCwd,
+	setProjectRoot,
+	setSessionCwd,
+} from '@/services/session-cwd';
 import {loadPlugins, resetPluginsForTests} from '@/plugins/host';
+import {getDiscoveredAgentsMdPaths, resetAgentsMdTracker} from '@/utils/agents-md';
 import {filterToolNamesForMode, type ToolManager} from '@/tools/tool-manager';
 import type {HooksConfig} from '@/types/config';
 import type {
@@ -363,6 +368,54 @@ test.serial('executes tool calls and returns final response', async t => {
 
 	t.true(result.success);
 	t.is(result.output, 'Found the file with 100 lines');
+});
+
+test.serial('records nested AGENTS.md when a subagent reads under it', async t => {
+	const root = mkdtempSync(join(tmpdir(), 'agents-subagent-'));
+	try {
+		mkdirSync(join(root, 'packages', 'api'), {recursive: true});
+		writeFileSync(
+			join(root, 'packages', 'api', 'AGENTS.md'),
+			'API RULES',
+		);
+		setProjectRoot(root);
+		setSessionCwd(root);
+		resetAgentsMdTracker();
+
+		const toolManager = createMockToolManager({
+			read_file: {handler: async () => 'file contents', readOnly: true},
+		});
+		const client = createMockClient([
+			{
+				content: '',
+				tool_calls: [
+					{
+						id: 'tc-agents',
+						function: {
+							name: 'read_file',
+							arguments: '{"path":"packages/api/file.ts"}',
+						},
+					},
+				],
+			},
+			{content: 'done'},
+		]);
+		const executor = new SubagentExecutor(toolManager, client);
+
+		const result = await executor.execute({
+			subagent_type: 'explore',
+			description: 'Read packages/api/file.ts',
+		});
+
+		t.true(result.success);
+		t.deepEqual(getDiscoveredAgentsMdPaths(), [
+			join(root, 'packages', 'api', 'AGENTS.md'),
+		]);
+	} finally {
+		resetAgentsMdTracker();
+		resetSessionCwd();
+		rmSync(root, {recursive: true, force: true});
+	}
 });
 
 test.serial('toolOverride replaces the effective tool list beyond what frontmatter declares', async t => {

@@ -386,7 +386,7 @@ async function runTurn(
 		// in project subdirectories. The session's own tracker keeps concurrent
 		// editor sessions isolated.
 		const agentsMdPrompt = session.includeAgentsMd
-			? appendAgentsMd(baseSystemMessage.content)
+			? appendAgentsMd(baseSystemMessage.content, {includeBase: false})
 			: baseSystemMessage.content;
 		const systemMessage: Message =
 			agentsMdPrompt === baseSystemMessage.content

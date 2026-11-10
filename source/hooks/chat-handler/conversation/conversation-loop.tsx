@@ -426,7 +426,7 @@ export const processAssistantResponse = async (
 		currentModel,
 		getAppConfig().systemPrompt,
 	)
-		? appendAgentsMd(systemMessage.content)
+		? appendAgentsMd(systemMessage.content, {includeBase: false})
 		: systemMessage.content;
 	const effectiveSystemMessage: Message =
 		agentsMdPrompt === systemMessage.content

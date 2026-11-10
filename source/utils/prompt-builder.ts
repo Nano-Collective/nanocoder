@@ -124,20 +124,33 @@ Current Date: ${dateStr}`;
  *
  * Shared with the conversation loops so they can append nested files at request
  * time only when the base prompt would also have included AGENTS.md. The nano
- * profile and `tune.includeAgentsMd` turn every layer off together, and
- * `systemPrompt.mode: "replace"` bypasses the built-in prompt entirely.
+ * profile and `tune.includeAgentsMd` turn every layer off together, and a
+ * replace-mode override that actually resolved bypasses the built-in prompt
+ * (and therefore every AGENTS.md layer) entirely.
  */
 export function shouldIncludeAgentsMd(
 	tuneConfig: TuneConfig | undefined,
 	model?: string,
 	systemPromptOverride?: SystemPromptConfig,
 ): boolean {
-	if (
-		systemPromptOverride &&
-		(systemPromptOverride.content !== undefined ||
-			systemPromptOverride.file !== undefined) &&
-		(systemPromptOverride.mode ?? 'replace') === 'replace'
-	) {
+	return shouldIncludeAgentsMdForPrompt(
+		tuneConfig,
+		model,
+		systemPromptOverride,
+		systemPromptOverride
+			? resolveSystemPromptOverride(systemPromptOverride)
+			: null,
+	);
+}
+
+function shouldIncludeAgentsMdForPrompt(
+	tuneConfig: TuneConfig | undefined,
+	model: string | undefined,
+	systemPromptOverride: SystemPromptConfig | undefined,
+	overrideContent: string | null,
+): boolean {
+	const overrideMode = systemPromptOverride?.mode ?? 'replace';
+	if (overrideContent !== null && overrideMode === 'replace') {
 		return false;
 	}
 
@@ -378,7 +391,14 @@ ${getSubagentDescriptions()}`;
 	// Nested files are added at request time by the conversation loops, so this
 	// base prompt stays stable and cacheable.
 	let prompt = sections.filter(Boolean).join('\n\n');
-	if (shouldIncludeAgentsMd(tune, model, systemPromptOverride)) {
+	if (
+		shouldIncludeAgentsMdForPrompt(
+			tune,
+			model,
+			systemPromptOverride,
+			overrideContent,
+		)
+	) {
 		prompt = appendAgentsMd(prompt, {includeNested: false});
 	}
 

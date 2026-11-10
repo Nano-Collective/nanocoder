@@ -90,6 +90,33 @@ test('appendAgentsMd - base prompt excludes nested files', t => {
 	}
 });
 
+test('appendAgentsMd - request-time mode adds only nested files', t => {
+	const root = makeTempDir('agents-request');
+	const configDir = makeTempDir('agents-config');
+	try {
+		write(join(configDir, 'AGENTS.md'), 'USER LEVEL RULES');
+		write(join(root, 'AGENTS.md'), 'ROOT RULES');
+		write(join(root, 'packages', 'api', 'AGENTS.md'), 'API RULES');
+		process.env.NANOCODER_CONFIG_DIR = configDir;
+		setProjectRoot(root);
+		setSessionCwd(root);
+		noteAgentsMdAccess('packages/api/src/handler.ts');
+
+		const result = appendAgentsMd('BASE PROMPT', {
+			includeBase: false,
+			includeNested: true,
+		});
+
+		t.true(result.startsWith('BASE PROMPT\n\nAdditional Context...'));
+		t.false(result.includes('USER LEVEL RULES'));
+		t.false(result.includes('ROOT RULES'));
+		t.true(result.includes('API RULES'));
+	} finally {
+		rmSync(root, {recursive: true, force: true});
+		rmSync(configDir, {recursive: true, force: true});
+	}
+});
+
 test('appendAgentsMd - nested files are ordered shallow to deep', t => {
 	const root = makeTempDir('agents-nested');
 	const configDir = makeTempDir('agents-config');
@@ -278,6 +305,54 @@ test('noteAgentsMdAccessForTool - ignores non-string path arguments', t => {
 		noteAgentsMdAccessForTool('read_file', {path: '   '});
 
 		t.deepEqual(getDiscoveredAgentsMdPaths(), []);
+	} finally {
+		rmSync(root, {recursive: true, force: true});
+	}
+});
+
+test('noteAgentsMdAccess - skips default ignored directories', t => {
+	const root = makeTempDir('agents-ignored-defaults');
+	try {
+		write(
+			join(root, 'node_modules', 'pkg', 'AGENTS.md'),
+			'DEPENDENCY RULES',
+		);
+		write(join(root, 'dist', 'AGENTS.md'), 'BUILD RULES');
+		write(join(root, '.git', 'AGENTS.md'), 'VCS RULES');
+		setProjectRoot(root);
+		setSessionCwd(root);
+
+		noteAgentsMdAccess('node_modules/pkg/index.js');
+		noteAgentsMdAccess('dist/bundle.js');
+		noteAgentsMdAccess('.git/hooks/pre-commit');
+
+		t.deepEqual(getDiscoveredAgentsMdPaths(), []);
+	} finally {
+		rmSync(root, {recursive: true, force: true});
+	}
+});
+
+test('noteAgentsMdAccess - respects .nanocoderignore and .gitignore', t => {
+	const root = makeTempDir('agents-ignored-patterns');
+	try {
+		write(join(root, '.nanocoderignore'), 'packages/hidden\n');
+		write(join(root, '.gitignore'), 'packages/generated\n');
+		write(join(root, 'packages', 'hidden', 'AGENTS.md'), 'HIDDEN RULES');
+		write(
+			join(root, 'packages', 'generated', 'AGENTS.md'),
+			'GENERATED RULES',
+		);
+		write(join(root, 'packages', 'visible', 'AGENTS.md'), 'VISIBLE RULES');
+		setProjectRoot(root);
+		setSessionCwd(root);
+
+		noteAgentsMdAccess('packages/hidden/file.ts');
+		noteAgentsMdAccess('packages/generated/file.ts');
+		noteAgentsMdAccess('packages/visible/file.ts');
+
+		t.deepEqual(getDiscoveredAgentsMdPaths(), [
+			join(root, 'packages', 'visible', 'AGENTS.md'),
+		]);
 	} finally {
 		rmSync(root, {recursive: true, force: true});
 	}

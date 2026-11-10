@@ -18,9 +18,14 @@ import {MCPClient} from '@/mcp/mcp-client';
 import {
 	getSessionCwd,
 	resetSessionCwd,
+	runInSessionCwdScope,
 	setProjectRoot,
 	setSessionCwd,
 } from '@/services/session-cwd';
+import {
+	noteAgentsMdAccess,
+	resetAgentsMdTracker,
+} from '@/utils/agents-md';
 import {executeBashTool} from '@/tools/execute-bash';
 import {fileOpTool} from '@/tools/file-ops/file-op';
 import {writeFileTool} from '@/tools/file-ops/write-file';
@@ -190,6 +195,51 @@ test('runAcpConversation - returns end_turn when no system message', async t => 
 	});
 
 	t.is(result.stopReason, 'end_turn');
+});
+
+test('runAcpConversation - appends nested AGENTS.md discovered in the session', async t => {
+	const root = mkdtempSync(join(tmpdir(), 'agents-acp-'));
+	try {
+		writeFileSync(join(root, 'AGENTS.md'), 'ROOT RULES');
+		mkdirSync(join(root, 'packages', 'api'), {recursive: true});
+		writeFileSync(join(root, 'packages', 'api', 'AGENTS.md'), 'API RULES');
+
+		const {conn} = createMockConn();
+		const session = createMockSession(conn, {cwd: root});
+		runInSessionCwdScope(session.cwdScope, () =>
+			noteAgentsMdAccess('packages/api/src/handler.ts'),
+		);
+
+		let sentMessages: Message[] = [];
+		const client = {
+			chat: async (messages: Message[]) => {
+				sentMessages = messages;
+				return {
+					choices: [{message: {role: 'assistant', content: 'done'}}],
+					toolsDisabled: false,
+				};
+			},
+		} as unknown as LLMClient;
+
+		const result = await runAcpConversation({
+			session,
+			client,
+			toolManager: createMockToolManager() as any,
+			conn,
+			nonInteractiveAlwaysAllow: [],
+		});
+
+		t.is(result.stopReason, 'end_turn');
+		const systemMessage = sentMessages.find(
+			message => message.role === 'system',
+		);
+		t.truthy(systemMessage);
+		t.true(systemMessage?.content.includes('API RULES'));
+		t.false(systemMessage?.content.includes('ROOT RULES'));
+	} finally {
+		resetAgentsMdTracker();
+		rmSync(root, {recursive: true, force: true});
+	}
 });
 
 // ============================================================================
