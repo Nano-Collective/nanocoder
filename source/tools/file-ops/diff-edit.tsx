@@ -11,6 +11,7 @@ import {
 import {ThemeContext} from '@/hooks/useTheme';
 import {getSafeSessionCwd} from '@/services/session-cwd';
 import {EditRecoveryError} from '@/tools/file-ops/edit-recovery';
+import {fitEditToLineEndings} from '@/tools/file-ops/line-endings';
 import {replaceFirstLiteral} from '@/tools/file-ops/literal-replace';
 import {
 	validateEditableEncoding,
@@ -132,6 +133,24 @@ export function parseDiffEditBlocks(diff: string): DiffEditBlock[] {
 	}
 
 	return blocks;
+}
+
+/**
+ * Fit every block to the file's line endings, so LF blocks from the model
+ * match a CRLF file and replacement lines are written as CRLF.
+ */
+function fitBlocksToLineEndings(
+	fileContent: string,
+	blocks: DiffEditBlock[],
+): DiffEditBlock[] {
+	return blocks.map(block => {
+		const {oldStr, newStr} = fitEditToLineEndings(
+			fileContent,
+			block.search,
+			block.replace,
+		);
+		return {search: oldStr, replace: newStr};
+	});
 }
 
 function countOccurrences(content: string, search: string): number {
@@ -278,13 +297,14 @@ const executeDiffEdit = async (args: DiffEditArgs): Promise<string> => {
 	}
 
 	const absPath = resolve(getSafeSessionCwd(), path);
-	const blocks = parseDiffEditBlocks(diff);
+	const parsedBlocks = parseDiffEditBlocks(diff);
 	const cached = await getCachedFileContent(absPath);
 	const encodingResult = validateEditableEncoding(path, cached);
 	if (!encodingResult.valid) {
 		throw new Error(encodingResult.error);
 	}
 	const fileContent = cached.content;
+	const blocks = fitBlocksToLineEndings(fileContent, parsedBlocks);
 
 	validateBlocks(fileContent, blocks, path);
 	const newContent = applyBlocks(fileContent, blocks);
@@ -423,9 +443,12 @@ const diffEditFormatter = async (
 
 	if (result === undefined && isVSCodeConnected()) {
 		try {
-			const blocks = parseDiffEditBlocks(args.diff);
 			const cached = await getCachedFileContent(absPath);
 			const fileContent = cached.content;
+			const blocks = fitBlocksToLineEndings(
+				fileContent,
+				parseDiffEditBlocks(args.diff),
+			);
 			validateBlocks(fileContent, blocks, args.path);
 			const newContent = applyBlocks(fileContent, blocks);
 			const changeId = sendFileChangeToVSCode(
@@ -502,7 +525,11 @@ const diffEditValidator = async (
 		const cached = await getCachedFileContent(absPath);
 		const encodingResult = validateEditableEncoding(args.path, cached);
 		if (!encodingResult.valid) return encodingResult;
-		validateBlocks(cached.content, blocks, args.path);
+		validateBlocks(
+			cached.content,
+			fitBlocksToLineEndings(cached.content, blocks),
+			args.path,
+		);
 	} catch (error) {
 		return {
 			valid: false,
