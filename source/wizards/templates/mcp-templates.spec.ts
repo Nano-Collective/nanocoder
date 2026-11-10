@@ -305,6 +305,40 @@ test('context7 template: builds correct HTTP config', t => {
 	t.deepEqual(config.tags, ['remote', 'context', 'information', 'http']);
 });
 
+test('cohesivity template: builds keyless HTTP config', t => {
+	const template = MCP_TEMPLATES.find(t => t.id === 'cohesivity');
+	t.truthy(template);
+
+	const config = template!.buildConfig({});
+
+	t.is(config.name, 'cohesivity');
+	t.is(config.transport, 'http');
+	t.is(config.url, 'https://cohesivity.ai/mcp');
+	t.is(config.timeout, 30000);
+	t.is(config.headers, undefined);
+	t.is(config.env, undefined);
+	t.is(config.alwaysAllow, undefined);
+	t.deepEqual(config.tags, [
+		'remote',
+		'cohesivity',
+		'backend',
+		'database',
+		'http',
+	]);
+});
+
+test('cohesivity template: stamps templateId so edits resolve under a custom name', t => {
+	const template = MCP_TEMPLATES.find(t => t.id === 'cohesivity');
+	t.truthy(template);
+
+	const config = template!.buildConfig({serverName: 'cohesivity-work'});
+
+	t.is(config.name, 'cohesivity-work');
+	t.is(config.url, 'https://cohesivity.ai/mcp');
+	t.is(config.templateId, 'cohesivity');
+	t.is(resolveMcpTemplateId(config), 'cohesivity');
+});
+
 test('github-remote template: builds correct HTTP config with headers', t => {
 	const template = MCP_TEMPLATES.find(t => t.id === 'github-remote');
 	t.truthy(template);
@@ -728,7 +762,12 @@ test('resolveMcpTemplateId: returns undefined for unmatched servers', t => {
 });
 
 test('remote templates: have no required fields', t => {
-	const remoteTemplates = ['deepwiki', 'context7', 'github-remote'];
+	const remoteTemplates = [
+		'deepwiki',
+		'context7',
+		'cohesivity',
+		'github-remote',
+	];
 
 	for (const templateId of remoteTemplates) {
 		const template = MCP_TEMPLATES.find(t => t.id === templateId);

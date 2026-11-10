@@ -450,6 +450,15 @@ export const MCP_TEMPLATES: McpTemplate[] = [
 		category: 'remote',
 		transportType: 'http',
 	},
+	remoteHttpTemplate({
+		id: 'cohesivity',
+		name: 'Cohesivity',
+		description:
+			'Backend for your project: hosting, Postgres, auth, storage and more, no API keys or signups required.',
+		defaultServerName: 'cohesivity',
+		defaultUrl: 'https://cohesivity.ai/mcp',
+		tags: ['remote', 'cohesivity', 'backend', 'database', 'http'],
+	}),
 	{
 		id: 'gitlab',
 		name: 'GitLab',
