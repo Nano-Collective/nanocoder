@@ -152,7 +152,11 @@ const fileOpValidator = async (
 		};
 	}
 
-	const pairResult = validatePathPair(args.path, args.destination);
+	const pairResult = validatePathPair(
+		args.path,
+		args.destination,
+		args.operation === 'move',
+	);
 	if (!pairResult.valid) return pairResult;
 
 	const srcAbsPath = resolve(getSafeSessionCwd(), args.path);

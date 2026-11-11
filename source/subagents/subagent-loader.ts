@@ -49,6 +49,13 @@ export class SubagentLoader {
 	private initialized = false;
 
 	/**
+	 * Built-in definitions only, loaded independently of `cache` so no
+	 * user/project file or external registration can shadow them. See
+	 * {@link getBuiltInSubagent}.
+	 */
+	private builtInCache: Map<string, SubagentConfigWithSource> | null = null;
+
+	/**
 	 * Per-file parse / load errors collected during initialize(). Drained by
 	 * bootstrap so the daemon can surface them in its log (the message-queue
 	 * `logError` path only reaches the TUI's chat queue).
@@ -147,6 +154,31 @@ export class SubagentLoader {
 	}
 
 	/**
+	 * Get a built-in subagent by name, ignoring any user-level, project-level
+	 * or externally registered definition with the same name. Trust-gated
+	 * runs (`verify-pr-review`, `verify-ci-investigator`) resolve through
+	 * here: they read attacker-controlled input from the very checkout that
+	 * would otherwise supply the override, so a PR adding
+	 * `.nanocoder/agents/verify-pr-review.md` could replace its own reviewer.
+	 * @param name - The subagent name
+	 * @returns The built-in config or null if there is no such built-in
+	 */
+	async getBuiltInSubagent(
+		name: string,
+	): Promise<SubagentConfigWithSource | null> {
+		if (!this.builtInCache) {
+			const builtIns = await this.loadFromDirectory(getBuiltInAgentsDir(), 0);
+			const cache = new Map<string, SubagentConfigWithSource>();
+			for (const config of builtIns) {
+				config.source.isBuiltIn = true;
+				cache.set(config.name, config);
+			}
+			this.builtInCache = cache;
+		}
+		return this.builtInCache.get(name) || null;
+	}
+
+	/**
 	 * List all available subagents.
 	 * @returns Array of all available subagent configs
 	 */
@@ -177,6 +209,7 @@ export class SubagentLoader {
 	 */
 	async reload(): Promise<void> {
 		this.cache.clear();
+		this.builtInCache = null;
 		this.initialized = false;
 		this.loadErrors = [];
 		await this.initialize();

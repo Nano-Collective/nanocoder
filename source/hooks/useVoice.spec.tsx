@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import React from 'react';
 import { render } from 'ink-testing-library';
 import { useVoice, UseVoiceProps, VoicePlugin } from './useVoice.js';
-import type { VoiceState } from '@/components/voice-status-bar';
+import type { VoiceState } from '@/components/development-mode-indicator';
 import { getVoicePreference, updateVoicePreference } from '@/config/preferences';
 import type { LLMClient } from '@/types/core';
 import { setDeclinedVoiceInstallForSession } from '@/utils/voice-install-queue';

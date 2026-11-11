@@ -52,6 +52,7 @@ import {infoMsg} from '@/utils/message-factory';
 import {logWarning} from '@/utils/message-queue';
 import {getLastBuiltPrompt} from '@/utils/prompt-builder';
 import {signalQuestion} from '@/utils/question-queue';
+import {bumpReadContentGeneration} from '@/utils/read-tracker';
 import {markRunFailed} from '@/utils/run-outcome';
 import {calculateTokens} from '@/utils/token-calculator';
 import {getFileMutationPaths} from '@/utils/tool-approval';
@@ -359,6 +360,23 @@ export const processAssistantResponse = async (
 			currentModel,
 		) ?? [];
 	const tools = toolManager ? toolManager.getFilteredTools(availableNames) : {};
+	// What the mode offers right now. Shift+Tab can change the mode while a turn
+	// is running, so a call is checked against this rather than the list above,
+	// which is only what this request offered.
+	const liveAvailableNames = () =>
+		toolManager?.getAvailableToolNames(
+			tune,
+			developmentModeRef?.current ?? developmentMode,
+			undefined,
+			currentModel,
+		);
+	// Why `toolCall` can't run now, or undefined when the mode still offers it.
+	const notOfferedReason = (toolCall: ToolCall) => {
+		const offered = liveAvailableNames();
+		return offered && !offered.includes(toolCall.function.name)
+			? `The tool "${toolCall.function.name}" is not available in the current mode.`
+			: undefined;
+	};
 
 	let streamedContent = '';
 	let streamedReasoning = '';
@@ -592,7 +610,11 @@ export const processAssistantResponse = async (
 		);
 	}
 
-	const partition = filterValidToolCalls(allToolCalls, toolManager);
+	const partition = filterValidToolCalls(
+		allToolCalls,
+		toolManager,
+		liveAvailableNames(),
+	);
 	const {validToolCalls, errorResults} = partition;
 	const {emittedToolCalls, resultsForAbandonedTurn} =
 		buildAbandonedTurnMessages(partition);
@@ -797,16 +819,21 @@ export const processAssistantResponse = async (
 		}
 	};
 
-	// Handle error results for non-existent tools
+	// Handle error results for rejected calls: non-existent tools, and calls
+	// whose arguments could not be parsed
 	if (errorResults.length > 0) {
 		// Show the user a concise notice. The full recovery hint (including the
-		// list of available tools) lives in error.content and is sent to the
+		// list of available tools) lives in the error result and is sent to the
 		// MODEL via addToolResults below — it would be noise in the chat.
-		for (const error of errorResults) {
+		for (const toolCall of partition.rejectedToolCalls) {
 			addToChatQueue(
 				<ErrorMessage
-					key={generateKey(`unknown-tool-${error.tool_call_id}`)}
-					message={`Model called an unavailable tool ("${error.name}") — asking it to retry with a valid tool.`}
+					key={generateKey(`rejected-tool-${toolCall.id}`)}
+					message={
+						toolCall.argumentsError === undefined
+							? `Model called an unavailable tool ("${toolCall.function.name}") — asking it to retry with a valid tool.`
+							: `Model sent invalid arguments for "${toolCall.function.name}" (${toolCall.argumentsError}) — asking it to retry.`
+					}
 					hideBox={true}
 				/>,
 			);
@@ -818,10 +845,10 @@ export const processAssistantResponse = async (
 		const updatedMessagesWithError = errorBuilder.build();
 		setMessages(updatedMessagesWithError);
 
-		// Unknown-tool turns count toward the repeated-call streak, so a model
-		// stuck calling a nonexistent tool cannot recurse unbounded. The error
-		// and aborted results above are already paired in history, so a stop
-		// here keeps the 1:1 tool-call/result mapping intact.
+		// Rejected-call turns count toward the repeated-call streak, so a model
+		// stuck on a nonexistent tool or unparsable arguments cannot recurse
+		// unbounded. The error and aborted results above are already paired in
+		// history, so a stop here keeps the 1:1 tool-call/result mapping intact.
 		if (currentRepeatedCount >= maxRepeatedToolCalls) {
 			const continueAnyway = await promptContinueRepeatedCalls();
 			if (!continueAnyway) {
@@ -897,12 +924,6 @@ export const processAssistantResponse = async (
 		};
 
 		for (const toolCall of validToolCalls) {
-			// The XML-fallback synthetic error isn't a real tool, so treat it as
-			// auto (it surfaces as an error result). Real argument validation
-			// lives in the tool handler (single source of truth).
-			const validationFailed =
-				toolCall.function.name === '__xml_validation_error__';
-
 			// Lifecycle gate, ahead of the approval decision. Every execution path
 			// gates again at its own boundary, but only here is it in front of the
 			// confirmation prompt — so a "never touch .env" hook refuses the call
@@ -914,34 +935,30 @@ export const processAssistantResponse = async (
 			const parsedArgs = parseToolArguments<Record<string, unknown>>(
 				toolCall.function.arguments,
 			);
-			if (!validationFailed) {
-				const gate = await runPreToolUseGate(toolCall, parsedArgs);
-				if (gate.blocked) {
-					refuseToolCall(
-						toolCall,
-						gate.reason ?? 'Blocked by a pre-tool-use hook.',
-					);
-					continue;
-				}
+			const gate = await runPreToolUseGate(toolCall, parsedArgs);
+			if (gate.blocked) {
+				refuseToolCall(
+					toolCall,
+					gate.reason ?? 'Blocked by a pre-tool-use hook.',
+				);
+				continue;
 			}
 
 			const toolEntry = toolManager?.getToolEntry(toolCall.function.name);
-			const needsApproval =
-				!validationFailed &&
-				(await resolveToolApproval(
-					toolCall.function.name,
-					toolEntry,
-					toolCall.function.arguments,
-					{
-						// Prefer the live ref so a mode switch made while this turn's
-						// tools are still executing takes effect on the next call.
-						mode: developmentModeRef?.current ?? developmentMode,
-						// The top-level alwaysAllow list applies in interactive
-						// sessions too; plan mode stays safe because its excluded
-						// tools are never offered in the first place.
-						alwaysAllow: getAppConfig().alwaysAllow ?? [],
-					},
-				));
+			const needsApproval = await resolveToolApproval(
+				toolCall.function.name,
+				toolEntry,
+				toolCall.function.arguments,
+				{
+					// Prefer the live ref so a mode switch made while this turn's
+					// tools are still executing takes effect on the next call.
+					mode: developmentModeRef?.current ?? developmentMode,
+					// The top-level alwaysAllow list applies in interactive
+					// sessions too; plan mode stays safe because a call to a tool
+					// its mode excludes is refused before it gets here.
+					alwaysAllow: getAppConfig().alwaysAllow ?? [],
+				},
+			);
 
 			if (needsApproval) {
 				const vote = await consultPluginPermission(
@@ -983,6 +1000,18 @@ export const processAssistantResponse = async (
 		};
 
 		const turnResults: ToolResult[] = [...blockedResults];
+
+		// Refuse `toolCall` and cancel the rest of the auto batch behind it.
+		const stopBatchAt = (toolCall: ToolCall, reason: string) => {
+			refuseToolCall(toolCall, reason);
+			turnResults.push(
+				blockedResults[blockedResults.length - 1],
+				...createCancellationResults(
+					autoTools.slice(autoTools.indexOf(toolCall) + 1),
+				),
+			);
+			return false;
+		};
 
 		const inArchitectMode =
 			developmentModeRef?.current === 'architect' ||
@@ -1042,8 +1071,12 @@ export const processAssistantResponse = async (
 					signal: controller.signal,
 					executionContext: {sessionId, workingDirectory},
 					beforeExecute: async toolCall => {
-						if (toolCall.function.name === '__xml_validation_error__')
-							return true;
+						// A mode switch since this batch was classified can hide the
+						// tool; alwaysAllow must not run it under the new mode.
+						const notOffered = notOfferedReason(toolCall);
+						if (notOffered) {
+							return stopBatchAt(toolCall, notOffered);
+						}
 						const needsApproval = await resolveToolApproval(
 							toolCall.function.name,
 							toolManager?.getToolEntry(toolCall.function.name),
@@ -1061,14 +1094,7 @@ export const processAssistantResponse = async (
 							),
 						);
 						if (vote.decision === 'deny') {
-							refuseToolCall(toolCall, vote.reason);
-							turnResults.push(
-								blockedResults[blockedResults.length - 1],
-								...createCancellationResults(
-									autoTools.slice(autoTools.indexOf(toolCall) + 1),
-								),
-							);
-							return false;
+							return stopBatchAt(toolCall, vote.reason);
 						}
 						confirmTools.unshift(
 							...autoTools.slice(autoTools.indexOf(toolCall)),
@@ -1140,6 +1166,13 @@ export const processAssistantResponse = async (
 
 			for (let i = 0; i < confirmTools.length; i++) {
 				const toolCall = confirmTools[i];
+				// Don't ask about a tool a mode switch has since hidden.
+				const notOffered = notOfferedReason(toolCall);
+				if (notOffered) {
+					refuseToolCall(toolCall, notOffered);
+					turnResults.push(blockedResults[blockedResults.length - 1]);
+					continue;
+				}
 				// Escape answers the prompt directly, but a turn aborted any
 				// other way must also release it - otherwise the loop stays
 				// parked here and the confirmation for a dead turn stays on
@@ -1277,6 +1310,11 @@ export const processAssistantResponse = async (
 					const compressedUser = result.compressedMessages.filter(
 						m => m.role !== 'system',
 					);
+					// Aggressive compression truncates old read_file bodies, so a
+					// repeat read must return the content again, not the
+					// "unchanged since last read" stub. Same as /compact and
+					// auto-compact.
+					bumpReadContentGeneration();
 					setMessages(compressedUser);
 
 					addToChatQueue(

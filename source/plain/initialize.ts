@@ -25,7 +25,7 @@ import {
 import {getSubagentLoader} from '@/subagents/subagent-loader';
 import {setAgentToolExecutor, setAvailableAgentNames} from '@/tools/agent-tool';
 import {ToolManager} from '@/tools/tool-manager';
-import type {LLMClient, MCPInitResult} from '@/types/index';
+import type {DevelopmentMode, LLMClient, MCPInitResult} from '@/types/index';
 import {setAvailableSubagents} from '@/utils/prompt-processor';
 
 export interface PlainInitResult {
@@ -39,6 +39,8 @@ export interface PlainInitResult {
 export interface PlainInitOptions {
 	cliProvider?: string;
 	cliModel?: string;
+	/** The run's mode, so its subagents are offered what the main agent is. */
+	developmentMode?: DevelopmentMode;
 }
 
 /**
@@ -78,11 +80,19 @@ export async function initializePlain(
 	let client: LLMClient;
 	let actualProvider: string;
 	try {
-		const result = await createLLMClient(preferredProvider, preferredModel);
+		const result = await createLLMClient(
+			preferredProvider,
+			preferredModel,
+			undefined,
+			{strictProvider: Boolean(options.cliProvider)},
+		);
 		client = result.client;
 		actualProvider = result.actualProvider;
 	} catch (error) {
 		if (error instanceof ConfigurationError) {
+			if (error.unreadableError) {
+				throw new Error(error.unreadableError);
+			}
 			throw new Error(
 				error.isEmptyConfig || error.message.includes('No providers configured')
 					? 'No providers configured. Run nanocoder interactively to set them up.'
@@ -117,7 +127,7 @@ export async function initializePlain(
 		toolManager,
 		client,
 		process.cwd(),
-		'normal',
+		options.developmentMode ?? 'normal',
 		recordSubagentApiCallForStats,
 	);
 	setAgentToolExecutor(subagentExecutor);
@@ -188,7 +198,12 @@ async function initializeMCP(toolManager: ToolManager): Promise<void> {
 	};
 
 	try {
-		await toolManager.initializeMCP(config.mcpServers, onProgress);
+		await toolManager.initializeMCP(
+			config.mcpServers,
+			onProgress,
+			undefined,
+			config.tune,
+		);
 	} catch (error) {
 		writeStatus(`MCP initialization error: ${String(error)}`);
 	}

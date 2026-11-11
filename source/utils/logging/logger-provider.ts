@@ -3,16 +3,23 @@
  * This file provides centralized logger management without circular dependencies
  */
 
+import {Console} from 'node:console';
 import nodeProcess from 'node:process';
+import {createConfig} from './config.js';
 import {createLogMethods} from './log-method-factory.js';
+import {createPinoLogger} from './pino-logger.js';
 import type {Logger, LoggerConfig, LogLevel} from './types.js';
+
+const stderrConsole = new Console({
+	stdout: nodeProcess.stderr,
+	stderr: nodeProcess.stderr,
+});
 
 export class LoggerProvider {
 	private static instance: LoggerProvider | null = null;
 	private _logger: Logger | null = null;
 	private _config: LoggerConfig | null = null;
 	private _fallbackInitialized = false;
-	private _realDependenciesLoaded = false;
 
 	// Lazy-loaded dependencies
 	private _createPinoLogger:
@@ -45,142 +52,33 @@ export class LoggerProvider {
 	}
 
 	/**
-	 * Initialize lazy-loaded dependencies to avoid circular imports
+	 * Pick the logger implementation for this process.
+	 *
+	 * The real Pino file logger is wired in synchronously. It used to be
+	 * loaded with a dynamic import, but the first `getLogger()` call always
+	 * happened before that import resolved, so the cached logger stayed the
+	 * console fallback for the life of the process: nothing reached the log
+	 * file, and `NANOCODER_LOG_LEVEL` printed to stdout instead (breaking
+	 * `--json` output and ACP's JSON-RPC stream).
 	 */
 	private ensureDependenciesLoaded() {
 		if (this._fallbackInitialized) {
 			return;
 		}
-
-		// For now, use fallback logger synchronously to avoid circular dependencies
-		// The real Pino logger will be loaded asynchronously when needed
-		this._createPinoLogger = () => this.createFallbackLogger();
-		this._createConfig = (config?: Partial<LoggerConfig>) =>
-			this.createFallbackConfig(config);
 		this._fallbackInitialized = true;
 
-		// Skip loading real Pino dependencies if running under Bun
-		// Bun's worker threads are incompatible with Pino's transport API (pino/file)
-		// which uses thread-stream and real-require packages
-		if (LoggerProvider.isBunRuntime()) {
-			if (nodeProcess.env.NODE_ENV === 'development') {
-				// Use console directly since this._config is not yet set,
-				// so createFallbackLogger() would default to 'silent' level
-				console.info(
-					'[LOGGER_PROVIDER] Bun runtime detected - using fallback logger (Pino transport incompatible)',
-				);
-			}
+		// Bun's worker threads are incompatible with Pino's transport API, and
+		// under NODE_ENV=test every spec that logs would otherwise write into
+		// the user's real log directory. Both keep the stderr fallback logger.
+		if (LoggerProvider.isBunRuntime() || nodeProcess.env.NODE_ENV === 'test') {
+			this._createPinoLogger = () => this.createFallbackLogger();
+			this._createConfig = (config?: Partial<LoggerConfig>) =>
+				this.createFallbackConfig(config);
 			return;
 		}
 
-		// Asynchronously load the real dependencies and replace the fallback
-		this.loadRealDependencies().catch(error => {
-			try {
-				const fallbackLogger = this.createFallbackLogger();
-				fallbackLogger.error(
-					'[LOGGER_PROVIDER] Failed to load real dependencies',
-					{
-						error: this.formatErrorForLogging(error),
-						fallback: true,
-						source: 'logger-provider',
-						timestamp: new Date().toISOString(),
-					},
-				);
-			} catch (fallbackError) {
-				// Absolute fallback to console if everything else fails
-				console.error(
-					'[LOGGER_PROVIDER] Critical failure - fallback logger failed:',
-					fallbackError,
-					'Original error:',
-					error,
-				);
-			}
-		});
-	}
-
-	/**
-	 * Asynchronously load real Pino dependencies
-	 * Uses dynamic imports to avoid circular dependency issues
-	 */
-	private async loadRealDependencies() {
-		// Skip if already loaded to prevent duplicate loading
-		if (this._realDependenciesLoaded) {
-			// Only log in development mode to avoid noise for end users
-			if (nodeProcess.env.NODE_ENV === 'development') {
-				this.createFallbackLogger().debug('Real dependencies already loaded', {
-					source: 'logger-provider',
-					status: 'already-loaded',
-				});
-			}
-			return;
-		}
-
-		const startTime = Date.now();
-		// Only log in development mode to avoid noise for end users
-		if (nodeProcess.env.NODE_ENV === 'development') {
-			this.createFallbackLogger().info('Loading real Pino dependencies', {
-				source: 'logger-provider',
-				method: 'dynamic-import',
-				status: 'starting',
-			});
-		}
-
-		try {
-			// Load dependencies dynamically to avoid circular imports
-			// Using Promise.all for parallel loading to improve performance
-			const [pinoLogger, configModule] = await Promise.all([
-				import('./pino-logger.js'),
-				import('./config.js'),
-			]);
-
-			// Verify imports were successful
-			if (!pinoLogger?.createPinoLogger || !configModule?.createConfig) {
-				throw new Error('Dynamic imports returned invalid modules');
-			}
-
-			this._createPinoLogger = pinoLogger.createPinoLogger;
-			this._createConfig = configModule.createConfig;
-			this._realDependenciesLoaded = true;
-
-			// Don't reinitialize existing logger to avoid breaking ongoing operations
-			// The real Pino logger will be used for new logger instances created after this point
-
-			// Only log in development mode
-			if (nodeProcess.env.NODE_ENV === 'development') {
-				this.createFallbackLogger().info(
-					'Real dependencies loaded successfully',
-					{
-						source: 'logger-provider',
-						status: 'success',
-						duration: Date.now() - startTime,
-						modules: ['pino-logger', 'config'],
-					},
-				);
-			}
-		} catch (error) {
-			try {
-				const fallbackLogger = this.createFallbackLogger();
-				fallbackLogger.error(
-					'[LOGGER_PROVIDER] Failed to load real dependencies',
-					{
-						error: this.formatErrorForLogging(error),
-						fallback: true,
-						source: 'logger-provider',
-						status: 'load-failed',
-						duration: Date.now() - startTime,
-					},
-				);
-			} catch (fallbackError) {
-				// Absolute fallback to console if everything else fails
-				console.error(
-					'[LOGGER_PROVIDER] Critical failure - fallback logger failed:',
-					fallbackError,
-					'Original error:',
-					error,
-				);
-			}
-			// Keep the fallback logger
-		}
+		this._createPinoLogger = createPinoLogger;
+		this._createConfig = createConfig;
 	}
 
 	/**
@@ -246,7 +144,9 @@ export class LoggerProvider {
 			};
 		}
 
-		const fallbackConsole = console; // Use console as the logger
+		// stderr only: stdout carries `--json` results and ACP's JSON-RPC
+		// stream, and console.info/debug would write there.
+		const fallbackConsole = stderrConsole;
 
 		// Create all log methods using the factory
 		const logMethods = createLogMethods(fallbackConsole, {
@@ -327,21 +227,6 @@ export class LoggerProvider {
 	}
 
 	/**
-	 * Format error for structured logging
-	 */
-	private formatErrorForLogging(error: unknown): object {
-		if (error instanceof Error) {
-			return {
-				message: error.message,
-				stack: error.stack,
-				name: error.name,
-				cause: error.cause,
-			};
-		}
-		return {value: error};
-	}
-
-	/**
 	 * Check if a log level is enabled
 	 */
 	public isLevelEnabled(level: LogLevel): boolean {
@@ -356,7 +241,6 @@ export class LoggerProvider {
 		this._logger = null;
 		this._config = null;
 		this._fallbackInitialized = false;
-		this._realDependenciesLoaded = false;
 		this._createPinoLogger = null;
 		this._createConfig = null;
 	}

@@ -43,20 +43,10 @@ export function getDefaultLogDirectory(): string {
 function createDevelopmentConfig(): EnhancedLoggerConfig {
 	return {
 		level: (nodeProcess.env.NANOCODER_LOG_LEVEL as LogLevel) || 'debug',
-		destination: String(nodeProcess.stdout.fd),
 		pretty: true,
 		redact: ['apiKey', 'token', 'password', 'secret'],
 		correlation: true,
 		serialize: false,
-		target: 'pino-pretty',
-		options: {
-			translateTime: 'HH:MM:ss Z',
-			ignore: 'pid,hostname',
-			messageFormat: undefined,
-			customPrettifiers: {},
-			levelFirst: false,
-			singleLine: false,
-		},
 	};
 }
 

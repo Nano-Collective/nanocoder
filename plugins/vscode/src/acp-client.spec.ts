@@ -1,5 +1,6 @@
 import test from 'ava';
 import * as vscode from 'vscode';
+import {isVsCodeClient} from '../../../source/acp/acp-capabilities';
 import { NanocoderAcpClient } from './acp-client';
 import { AcpStateManager } from './acp-state';
 
@@ -92,6 +93,84 @@ test('NanocoderAcpClient - newChat clears pending permissions', async (t) => {
 	const result = await requestPromise;
 	t.is((result as any).outcome.outcome, 'cancelled');
 	t.false(client.hasPendingPermissions(), 'Abandoning the chat abandons its approval prompts');
+});
+
+async function makeHandshakenClient(
+	agentCapabilities: unknown,
+	closeSession: (params: {sessionId: string}) => Promise<unknown>,
+	extMethod?: (method: string, params: unknown) => Promise<unknown>,
+) {
+	const lines: string[] = [];
+	const client = new NanocoderAcpClient(
+		{appendLine: (line: string) => lines.push(line)} as any,
+		new AcpStateManager(),
+	);
+	client.setConnection({
+		initialize: async () => ({agentInfo: {version: '1.32.0'}, agentCapabilities}),
+		closeSession,
+		extMethod,
+	} as any);
+	await client.initializeHandshake();
+	(client as any)._sessionId = 'session-old';
+	return {client, lines};
+}
+
+test('NanocoderAcpClient - newChat closes the old session when the agent supports it', async (t) => {
+	const closed: string[] = [];
+	const {client} = await makeHandshakenClient(
+		{sessionCapabilities: {close: {}}},
+		async ({sessionId}) => {
+			closed.push(sessionId);
+			return {};
+		},
+	);
+
+	client.newChat();
+
+	t.deepEqual(closed, ['session-old']);
+	t.is((client as any)._sessionId, undefined);
+});
+
+test('NanocoderAcpClient - newChat does not send session/close without the capability', async (t) => {
+	let calls = 0;
+	const {client} = await makeHandshakenClient({}, async () => {
+		calls++;
+		return {};
+	});
+
+	client.newChat();
+
+	t.is(calls, 0);
+});
+
+test('NanocoderAcpClient - newChat logs a failed session/close instead of throwing', async (t) => {
+	const {client, lines} = await makeHandshakenClient(
+		{sessionCapabilities: {close: {}}},
+		async () => {
+			throw new Error('agent gone');
+		},
+	);
+
+	t.notThrows(() => client.newChat());
+	await new Promise(resolve => setImmediate(resolve));
+
+	t.true(lines.some(line => line.includes('Failed to close session session-old: Error: agent gone')));
+});
+
+test('NanocoderAcpClient - newChat with no session sends no session/close', async (t) => {
+	let calls = 0;
+	const {client} = await makeHandshakenClient(
+		{sessionCapabilities: {close: {}}},
+		async () => {
+			calls++;
+			return {};
+		},
+	);
+	(client as any)._sessionId = undefined;
+
+	client.newChat();
+
+	t.is(calls, 0);
 });
 
 test('NanocoderAcpClient - a cancelled prompt does not raise an error toast', async (t) => {
@@ -264,4 +343,424 @@ test('NanocoderAcpClient - handshake is incomplete until initialize succeeds', a
 
 	client.setConnection({initialize: async () => ({agentInfo: {version: '1.29.0'}})} as any);
 	t.false(client.isHandshakeComplete, 'A new connection must re-handshake');
+});
+
+test('NanocoderAcpClient - the handshake identifies it as the client the agent treats as VS Code', async (t) => {
+	let clientInfo: {name: string} | undefined;
+	const client = new NanocoderAcpClient({appendLine: () => {}} as any, new AcpStateManager());
+	client.setConnection({
+		initialize: async (params: {clientInfo?: {name: string}}) => {
+			clientInfo = params.clientInfo;
+			return {agentInfo: {version: '1.29.0'}};
+		},
+	} as any);
+
+	await client.initializeHandshake();
+
+	t.true(isVsCodeClient(clientInfo));
+});
+
+/**
+ * A connection whose newSession() calls stay pending until released, in call
+ * order, so a test can act (New Chat, resume, reconnect) while one is in flight.
+ * Records every setSessionMode call so a test can see which session it hit.
+ */
+function makeSlowSessionConnection() {
+	const releases: Array<(sessionId: string) => void> = [];
+	const modeCalls: string[] = [];
+	const connection = {
+		newSession: () =>
+			new Promise<any>(resolve => {
+				releases.push(sessionId =>
+					resolve({
+						sessionId,
+						modes: {
+							currentModeId: 'normal',
+							availableModes: [{id: 'normal'}, {id: 'auto-accept'}],
+						},
+						_meta: {sessionId},
+					}),
+				);
+			}),
+		setSessionMode: async ({sessionId}: {sessionId: string}) => {
+			modeCalls.push(sessionId);
+		},
+		resumeSession: async () => ({}),
+	};
+	return {connection, releases, modeCalls};
+}
+
+function makeConnectedClient(connection: unknown) {
+	const client = new NanocoderAcpClient(
+		{appendLine: () => {}} as any,
+		new AcpStateManager(),
+	);
+	client.setConnection(connection as any);
+	(client as any)._handshakeComplete = true;
+	return client;
+}
+
+/** Let pending promise callbacks run. */
+const settle = () => new Promise(resolve => setImmediate(resolve));
+
+test('NanocoderAcpClient - New Chat during session creation discards the abandoned session', async (t) => {
+	const {connection, releases, modeCalls} = makeSlowSessionConnection();
+	const client = makeConnectedClient(connection);
+	const artifacts: unknown[] = [];
+	client.onSessionArtifacts = meta => artifacts.push(meta);
+
+	const pending = client.getOrCreateSession('/cwd');
+	client.newChat();
+
+	releases[0]?.('session-abandoned');
+	await settle();
+	t.is(releases.length, 2, 'the caller waiting across New Chat asks for a fresh session');
+	releases[1]?.('session-fresh');
+
+	t.is(await pending, 'session-fresh');
+	t.is((client as any)._sessionId, 'session-fresh');
+	t.false(
+		modeCalls.includes('session-abandoned'),
+		'the abandoned session must not be configured after New Chat',
+	);
+	t.false(
+		artifacts.some(meta => (meta as any)?.sessionId === 'session-abandoned'),
+		"the abandoned session's artifacts must not reach the UI",
+	);
+});
+
+test('NanocoderAcpClient - a session request after New Chat does not join the abandoned creation', async (t) => {
+	const {connection, releases} = makeSlowSessionConnection();
+	const client = makeConnectedClient(connection);
+
+	const beforeNewChat = client.getOrCreateSession('/cwd');
+	client.newChat();
+	const afterNewChat = client.getOrCreateSession('/cwd');
+
+	t.is(releases.length, 2, 'a request after New Chat starts its own newSession');
+	releases[0]?.('session-abandoned');
+	releases[1]?.('session-fresh');
+
+	t.deepEqual(await Promise.all([beforeNewChat, afterNewChat]), [
+		'session-fresh',
+		'session-fresh',
+	]);
+	t.is(releases.length, 2, 'both callers share the one fresh session');
+});
+
+test('NanocoderAcpClient - a creation still in flight when the process reconnects is discarded', async (t) => {
+	const {connection, releases} = makeSlowSessionConnection();
+	const client = makeConnectedClient(connection);
+
+	const pending = client.getOrCreateSession('/cwd');
+	client.setConnection(makeSlowSessionConnection().connection as any);
+	releases[0]?.('session-from-dead-process');
+
+	t.is(await pending, undefined, 'the new process re-creates its session after the handshake');
+	t.is((client as any)._sessionId, undefined);
+});
+
+test('NanocoderAcpClient - a creation still in flight does not overwrite a resumed session', async (t) => {
+	const {connection, releases} = makeSlowSessionConnection();
+	const client = makeConnectedClient(connection);
+
+	const pending = client.getOrCreateSession('/cwd');
+	await client.resumeSession('session-resumed');
+	releases[0]?.('session-created');
+
+	t.is(await pending, 'session-resumed');
+	t.is((client as any)._sessionId, 'session-resumed');
+});
+
+function recordExtCalls() {
+	const calls: Array<{method: string; params: unknown}> = [];
+	const extMethod = async (method: string, params: unknown) => {
+		calls.push({method, params});
+		return {};
+	};
+	return {calls, extMethod};
+}
+
+async function renameAndRetry(agentCapabilities: unknown) {
+	const {calls, extMethod} = recordExtCalls();
+	const {client} = await makeHandshakenClient(
+		agentCapabilities,
+		async () => ({}),
+		extMethod,
+	);
+	await client.renameSession('session-old', 'New title');
+	await client.retryTurn('again');
+	return {client, calls};
+}
+
+test('NanocoderAcpClient - rename and retry use the extension names the agent advertises', async (t) => {
+	const {calls} = await renameAndRetry({
+		_meta: {
+			nanocoder: {
+				extMethods: ['_nanocoder/renameSession', '_nanocoder/retryTurn'],
+			},
+		},
+	});
+
+	t.deepEqual(
+		calls.map((call) => call.method),
+		['_nanocoder/renameSession', '_nanocoder/retryTurn'],
+	);
+	t.deepEqual(calls[0].params, {sessionId: 'session-old', title: 'New title'});
+});
+
+test('NanocoderAcpClient - rename and retry fall back to the bare names for an agent that advertises none', async (t) => {
+	for (const agentCapabilities of [
+		{},
+		{_meta: {nanocoder: {}}},
+		{_meta: {nanocoder: {extMethods: 'x'}}},
+	]) {
+		const {calls} = await renameAndRetry(agentCapabilities);
+
+		t.deepEqual(
+			calls.map((call) => call.method),
+			['renameSession', 'retryTurn'],
+		);
+	}
+});
+
+test('NanocoderAcpClient - each extension method resolves on its own against what the agent advertises', async (t) => {
+	const {calls} = await renameAndRetry({
+		_meta: {nanocoder: {extMethods: ['_nanocoder/renameSession']}},
+	});
+
+	t.deepEqual(
+		calls.map((call) => call.method),
+		['_nanocoder/renameSession', 'retryTurn'],
+	);
+});
+
+// ── provider / model switching ─────────────────────────────
+
+/** Swap the `nanocoder` settings' `update` for the length of one test. */
+function stubSettingsUpdate(
+	t: import('ava').ExecutionContext,
+	update: (key: string, value: unknown) => Promise<void>,
+) {
+	const original = vscode.workspace.getConfiguration;
+	// Saving the model setting only calls `update`.
+	(vscode.workspace as any).getConfiguration = () => ({update});
+	t.teardown(() => {
+		(vscode.workspace as any).getConfiguration = original;
+	});
+}
+
+test('NanocoderAcpClient - switching provider or model reports failure when not connected', async t => {
+	const client = new NanocoderAcpClient({appendLine: () => {}} as any, new AcpStateManager());
+
+	t.deepEqual(await client.setSessionProvider('ollama'), {
+		ok: false,
+		error: 'not connected to the Nanocoder agent',
+	});
+	t.deepEqual(await client.setSessionModel('qwen'), {
+		ok: false,
+		error: 'not connected to the Nanocoder agent',
+	});
+
+	client.setConnection({} as any);
+	t.deepEqual(await client.setSessionProvider('ollama'), {
+		ok: false,
+		error: 'no active session',
+	});
+});
+
+test('NanocoderAcpClient - a provider switch the backend rejects is reported as failed', async t => {
+	const client = makeClient({
+		setSessionConfigOption: () => Promise.reject(new Error('Connection closed')),
+	});
+	client.currentProvider = 'openrouter';
+
+	t.deepEqual(await client.setSessionProvider('ollama'), {
+		ok: false,
+		error: 'Connection closed',
+	});
+	t.is(client.currentProvider, 'openrouter', 'the local state must not claim the switch');
+});
+
+test('NanocoderAcpClient - a confirmed provider switch is reported as ok', async t => {
+	const client = makeClient({setSessionConfigOption: async () => ({})});
+
+	t.deepEqual(await client.setSessionProvider('ollama'), {ok: true});
+	t.is(client.currentProvider, 'ollama');
+});
+
+test('NanocoderAcpClient - a model switch the backend rejects is not saved as the default', async t => {
+	const saved: unknown[] = [];
+	stubSettingsUpdate(t, async (key, value) => {
+		saved.push([key, value]);
+	});
+	const client = makeClient({
+		setSessionConfigOption: () => Promise.reject(new Error('unknown model')),
+	});
+
+	t.deepEqual(await client.setSessionModel('qwen'), {ok: false, error: 'unknown model'});
+	t.deepEqual(saved, []);
+});
+
+test('NanocoderAcpClient - a model switch that cannot be saved still reports the switch', async t => {
+	stubSettingsUpdate(t, () => Promise.reject(new Error('settings.json is read-only')));
+	const client = makeClient({setSessionConfigOption: async () => ({})});
+
+	t.deepEqual(await client.setSessionModel('qwen'), {
+		ok: true,
+		persistError: 'settings.json is read-only',
+	});
+	t.is(client.currentModel, 'qwen', 'the session did switch');
+});
+
+test('NanocoderAcpClient - a confirmed and saved model switch is reported as ok', async t => {
+	const saved: unknown[] = [];
+	stubSettingsUpdate(t, async (key, value) => {
+		saved.push([key, value]);
+	});
+	const client = makeClient({setSessionConfigOption: async () => ({})});
+
+	t.deepEqual(await client.setSessionModel('qwen'), {ok: true});
+	t.deepEqual(saved, [['model', 'qwen']]);
+});
+
+// ── applying the nanocoder.model setting ───────────────────
+
+/** Set `nanocoder.model` and collect the messages shown during one test. */
+function useModelSetting(t: import('ava').ExecutionContext, model: string) {
+	(vscode as any).__test.configuration = (
+		_section: string,
+		key: string,
+		fallback: unknown,
+	) => (key === 'model' ? model : fallback);
+	t.teardown(() => (vscode as any).__test.reset());
+	return () => (vscode as any).__test.shownMessages as {kind: string; message: string}[];
+}
+
+/** A connection whose new sessions start on `llama`, with `qwen` also available. */
+function sessionConnection(setSessionConfigOption: () => Promise<unknown>) {
+	return {
+		newSession: async () => ({
+			sessionId: 'session-new',
+			configOptions: [
+				{id: 'model', currentValue: 'llama', options: [{value: 'llama'}, {value: 'qwen'}]},
+			],
+		}),
+		setSessionConfigOption,
+	};
+}
+
+test('NanocoderAcpClient - a default model the new session rejects is reported', async t => {
+	const shown = useModelSetting(t, 'qwen');
+	const client = makeConnectedClient(
+		sessionConnection(() => Promise.reject(new Error('model is not loaded'))),
+	);
+
+	t.is(await client.getOrCreateSession('/cwd'), 'session-new');
+	t.is(client.currentModel, 'llama');
+	t.deepEqual(shown(), [
+		{
+			kind: 'warning',
+			message: 'Nanocoder: Could not switch to model qwen from your settings: model is not loaded',
+		},
+	]);
+});
+
+test('NanocoderAcpClient - a default model the new session accepts shows nothing', async t => {
+	const shown = useModelSetting(t, 'qwen');
+	const client = makeConnectedClient(sessionConnection(async () => ({})));
+
+	await client.getOrCreateSession('/cwd');
+
+	t.is(client.currentModel, 'qwen');
+	t.deepEqual(shown(), []);
+});
+
+/** Construct a client and capture its settings-change listener. */
+function clientWithSettingsListener(t: import('ava').ExecutionContext, connection: unknown) {
+	let listener: ((event: {affectsConfiguration(key: string): boolean}) => void) | undefined;
+	const original = vscode.workspace.onDidChangeConfiguration;
+	(vscode.workspace as any).onDidChangeConfiguration = (callback: typeof listener) => {
+		listener = callback;
+		return {dispose: () => {}};
+	};
+	t.teardown(() => {
+		(vscode.workspace as any).onDidChangeConfiguration = original;
+	});
+	const client = makeClient(connection);
+	client.currentModel = 'llama';
+	const changeModelSetting = () =>
+		listener?.({affectsConfiguration: key => key === 'nanocoder.model'});
+	return {client, changeModelSetting};
+}
+
+test('NanocoderAcpClient - a model setting change the agent rejects is reported', async t => {
+	const shown = useModelSetting(t, 'qwen');
+	const {changeModelSetting} = clientWithSettingsListener(t, {
+		setSessionConfigOption: () => Promise.reject(new Error('Connection closed')),
+	});
+
+	changeModelSetting();
+	await settle();
+
+	t.deepEqual(shown(), [
+		{
+			kind: 'warning',
+			message: 'Nanocoder: Could not switch to model qwen from your settings: Connection closed',
+		},
+	]);
+});
+
+test('NanocoderAcpClient - a model setting change without a session waits for the next one', async t => {
+	const shown = useModelSetting(t, 'qwen');
+	let calls = 0;
+	const {client, changeModelSetting} = clientWithSettingsListener(t, {
+		setSessionConfigOption: async () => {
+			calls++;
+			return {};
+		},
+	});
+	(client as any)._sessionId = undefined;
+
+	changeModelSetting();
+	await settle();
+
+	t.is(calls, 0);
+	t.deepEqual(shown(), []);
+});
+
+test('NanocoderAcpClient - failed resumeSession retains existing _sessionId and returns false', async (t) => {
+	const originalShowError = vscode.window.showErrorMessage;
+	(vscode.window as any).showErrorMessage = () => Promise.resolve(undefined);
+	t.teardown(() => {
+		(vscode.window as any).showErrorMessage = originalShowError;
+	});
+
+	const outputChannel = {appendLine: () => {}} as any;
+	const stateManager = new AcpStateManager();
+	const client = new NanocoderAcpClient(outputChannel, stateManager);
+	client.setConnection({
+		resumeSession: () => Promise.reject(new Error('session corrupted')),
+	} as any);
+	(client as any)._sessionId = 'session-active';
+
+	const ok = await client.resumeSession('session-bogus');
+	t.false(ok);
+	t.is(client.sessionId, 'session-active', 'must retain existing session id on failure');
+});
+
+test('NanocoderAcpClient - tracks lastActiveSessionId across reconnects and clears on newChat', async (t) => {
+	const outputChannel = {appendLine: () => {}} as any;
+	const stateManager = new AcpStateManager();
+	const client = new NanocoderAcpClient(outputChannel, stateManager);
+
+	client.setConnection({} as any);
+	(client as any)._sessionId = 'session-123';
+
+	client.setConnection({} as any);
+	t.is(client.sessionId, undefined, 'sessionId is cleared on reconnect');
+	t.is(client.lastActiveSessionId, 'session-123', 'lastActiveSessionId captures prior session');
+
+	client.newChat();
+	t.is(client.lastActiveSessionId, undefined, 'newChat clears lastActiveSessionId');
 });

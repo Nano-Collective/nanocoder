@@ -50,6 +50,10 @@
 					},
 					"type": "array"
 				},
+				"firewall": {
+					"$ref": "#/definitions/FirewallConfig",
+					"description": "Negative-space mutation firewall. Off by default."
+				},
 				"formatters": {
 					"description": "Code formatters run on files the agent writes (write_file,\nstring_replace, diff_edit), before the `post-tool-use` hooks fire.",
 					"items": {
@@ -488,6 +492,34 @@
 			"type": "object",
 			"additionalProperties": false
 		},
+		"FirewallConfig": {
+			"properties": {
+				"blockAnyTypes": {
+					"type": "boolean"
+				},
+				"enabled": {
+					"type": "boolean"
+				},
+				"mode": {
+					"enum": ["disabled", "lenient", "strict"],
+					"type": "string"
+				},
+				"preserveExportSignatures": {
+					"type": "boolean"
+				},
+				"protectTestCases": {
+					"type": "boolean"
+				},
+				"protectedPatterns": {
+					"items": {
+						"type": "string"
+					},
+					"type": "array"
+				}
+			},
+			"type": "object",
+			"additionalProperties": false
+		},
 		"HooksConfig": {
 			"properties": {
 				"post-tool-use": {
@@ -591,6 +623,10 @@
 				},
 				"includeAgentsMd": {
 					"type": "boolean"
+				},
+				"mcpDiscovery": {
+					"enum": ["always", "auto", "disabled"],
+					"type": "string"
 				},
 				"modelParameters": {
 					"$ref": "#/definitions/ModelParameters"

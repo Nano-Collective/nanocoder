@@ -54,6 +54,34 @@ function cronEvent(cron: string): Event {
 	return {kind: 'schedule.cron', payload: {cron}, at: Date.now()};
 }
 
+function ciJobFailedSub(
+	id: string,
+	overrides: Partial<Subscription> = {},
+): Subscription {
+	return {
+		id,
+		kind: 'ci.job.failed',
+		target: {kind: 'agent', name: 'verify-ci-investigator'},
+		source: 'manifest',
+		ownerSkill: 'builtin',
+		...overrides,
+	} as Subscription;
+}
+
+function ciJobFailedEvent(branch: string): Event {
+	return {
+		kind: 'ci.job.failed',
+		payload: {
+			runId: 1,
+			workflowName: 'CI',
+			branch,
+			headSha: 'abc123',
+			url: 'https://example.com/run/1',
+		},
+		at: Date.now(),
+	};
+}
+
 test('subscribe + emit dispatches matching subscription', async t => {
 	const d = makeDispatcher();
 	const router = new EventRouter(d);
@@ -147,6 +175,26 @@ test('listByKind returns the registered subscriptions for that kind only', t => 
 	t.is(router.listByKind('schedule.cron').length, 1);
 });
 
+test('ci.job.failed with no filter dispatches for any branch', async t => {
+	const d = makeDispatcher();
+	const router = new EventRouter(d);
+	router.subscribe(ciJobFailedSub('s1'));
+
+	await router.emit(ciJobFailedEvent('main'));
+	t.is(d.calls.length, 1);
+});
+
+test('ci.job.failed branches filter glob-matches the payload branch', async t => {
+	const d = makeDispatcher();
+	const router = new EventRouter(d);
+	router.subscribe(ciJobFailedSub('s1', {filter: {branches: ['release/**']}}));
+
+	await router.emit(ciJobFailedEvent('feature-x'));
+	t.is(d.calls.length, 0);
+	await router.emit(ciJobFailedEvent('release/1.0'));
+	t.is(d.calls.length, 1);
+});
+
 test('matchesFilter on kind mismatch returns false', t => {
 	const sub = fileChangedSub('a');
 	const event = cronEvent('* * * * *');
@@ -192,6 +240,53 @@ test('matchGlob: basic patterns', t => {
 	t.false(matchGlob('src/*.ts', 'src/deep/file.ts'));
 	t.true(matchGlob('file.txt', 'file.txt'));
 	t.false(matchGlob('file.txt', 'other.txt'));
+});
+
+test('matchGlob: globstar slash preserves filename and directory boundaries', t => {
+	const cases: Array<[string, string, boolean]> = [
+		['**/foo.ts', 'foo.ts', true],
+		['**/foo.ts', 'a/foo.ts', true],
+		['**/foo.ts', 'a/b/foo.ts', true],
+		['**/foo.ts', 'barfoo.ts', false],
+		['**/foo.ts', 'a/barfoo.ts', false],
+		['**/package.json', 'mypackage.json', false],
+		['src/**/x.ts', 'src/x.ts', true],
+		['src/**/x.ts', 'src/a/x.ts', true],
+		['src/**/x.ts', 'src/a/b/x.ts', true],
+		['src/**/x.ts', 'src/abx.ts', false],
+		['src/**/x.ts', 'src/a/abx.ts', false],
+		['**/foo.ts', 'a\\foo.ts', true],
+		['**/foo.ts', 'a\\barfoo.ts', false],
+		['src\\**\\x.ts', 'src\\abx.ts', false],
+		['**/{foo,bar}.ts', 'a/foo.ts', true],
+		['**/{foo,bar}.ts', 'a/notfoo.ts', false],
+		['docs/**/', 'docs/a.md', true],
+		['docs/**/', 'docs/deep/sub/file.md', true],
+		['docs/**/', 'src/a.md', false],
+		['**/', 'foo.ts', true],
+		['docs\\**\\', 'docs\\a.md', true],
+		['docs/**', 'docs/deep/sub/file.md', true],
+		['*a**a', 'a/a', true],
+	];
+	for (const [pattern, path, expected] of cases) {
+		t.is(matchGlob(pattern, path), expected, `${pattern} vs ${path}`);
+	}
+});
+
+test('file.changed globstar filter ignores look-alike filenames', async t => {
+	const d = makeDispatcher();
+	const router = new EventRouter(d);
+	router.subscribe(fileChangedSub('exact-name', {filter: {paths: ['**/foo.ts']}}));
+
+	await router.emit(fileEvent('barfoo.ts'));
+	await router.emit(fileEvent('a/barfoo.ts'));
+	t.is(d.calls.length, 0);
+	await router.emit(fileEvent('foo.ts'));
+	await router.emit(fileEvent('a/foo.ts'));
+	t.deepEqual(d.calls.map(call => call.event.payload), [
+		{file: 'foo.ts', eventKind: 'change'},
+		{file: 'a/foo.ts', eventKind: 'change'},
+	]);
 });
 
 // Chokidar reports the platform separator, so on Windows a `/`-authored

@@ -3,14 +3,20 @@ import {access, writeFile} from 'node:fs/promises';
 import {resolve} from 'node:path';
 import React from 'react';
 import {getColors} from '@/config/index';
+import {evaluateMutationEnvelope} from '@/firewall/mutation-firewall';
 import {getSafeSessionCwd} from '@/services/session-cwd';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 import {EditRecoveryError} from '@/utils/edit-recovery';
 import {formatError} from '@/utils/error-formatter';
 import {getCachedFileContent, invalidateCache} from '@/utils/file-cache';
+import {fitEditToLineEndings} from '@/utils/line-endings';
 import {replaceFirstLiteral} from '@/utils/literal-replace';
-import {validateEditableFormat, validatePath} from '@/utils/path-validators';
+import {
+	validateEditableEncoding,
+	validateEditableFormat,
+	validatePath,
+} from '@/utils/path-validators';
 import {
 	forgetReadContent,
 	hasSeenFile,
@@ -69,9 +75,9 @@ function formatUpdatedFileContext(
 const executeStringReplace = async (
 	args: StringReplaceArgs,
 ): Promise<string> => {
-	const {path, old_str, new_str} = args;
+	const {path} = args;
 
-	if (!old_str || old_str.length === 0) {
+	if (!args.old_str || args.old_str.length === 0) {
 		throw new Error(
 			'old_str cannot be empty. Provide the exact content to find and replace.',
 		);
@@ -84,7 +90,16 @@ const executeStringReplace = async (
 
 	const absPath = resolve(getSafeSessionCwd(), path);
 	const cached = await getCachedFileContent(absPath);
+	const encodingResult = validateEditableEncoding(path, cached);
+	if (!encodingResult.valid) {
+		throw new Error(encodingResult.error);
+	}
 	const fileContent = cached.content;
+	const {oldStr: old_str, newStr: new_str} = fitEditToLineEndings(
+		fileContent,
+		args.old_str,
+		args.new_str,
+	);
 
 	const occurrences = fileContent.split(old_str).length - 1;
 
@@ -104,6 +119,15 @@ const executeStringReplace = async (
 	}
 
 	const newContent = replaceFirstLiteral(fileContent, old_str, new_str);
+	const firewallResult = evaluateMutationEnvelope(
+		path,
+		fileContent,
+		newContent,
+	);
+	if (!firewallResult.allowed) {
+		throw new Error(firewallResult.summary ?? 'Mutation blocked by firewall');
+	}
+
 	await writeFile(absPath, newContent, 'utf-8');
 	invalidateCache(absPath);
 	// The model now knows the file's current contents, so a follow-up edit is
@@ -180,10 +204,15 @@ const stringReplaceFormatter = async (
 		try {
 			const cached = await getCachedFileContent(absPath);
 			const fileContent = cached.content;
+			const fitted = fitEditToLineEndings(fileContent, old_str, new_str);
 
-			const occurrences = fileContent.split(old_str).length - 1;
+			const occurrences = fileContent.split(fitted.oldStr).length - 1;
 			if (occurrences === 1) {
-				const newContent = replaceFirstLiteral(fileContent, old_str, new_str);
+				const newContent = replaceFirstLiteral(
+					fileContent,
+					fitted.oldStr,
+					fitted.newStr,
+				);
 
 				const changeId = sendFileChangeToVSCode(
 					absPath,
@@ -260,8 +289,11 @@ const stringReplaceValidator = async (
 
 	try {
 		const cached = await getCachedFileContent(absPath);
+		const encodingResult = validateEditableEncoding(path, cached);
+		if (!encodingResult.valid) return encodingResult;
 		const fileContent = cached.content;
-		const occurrences = fileContent.split(old_str).length - 1;
+		const {oldStr} = fitEditToLineEndings(fileContent, old_str, args.new_str);
+		const occurrences = fileContent.split(oldStr).length - 1;
 
 		if (occurrences === 0) {
 			return {
@@ -270,7 +302,7 @@ const stringReplaceValidator = async (
 					'Content not found in file. The file may have changed since you last read it.',
 					path,
 					fileContent,
-					old_str,
+					oldStr,
 				).message,
 			};
 		}

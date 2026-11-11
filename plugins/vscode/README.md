@@ -6,7 +6,7 @@ The extension provides a native sidebar chat powered by the Agent Client Protoco
 
 ## Features
 
-- **Native Sidebar Chat**: Streams responses with collapsible thinking sections, live tool-activity cards, and inline tool approvals
+- **Native Sidebar Chat**: Streams responses with syntax-highlighted code blocks as they arrive, a blinking cursor while the agent writes, collapsible thinking sections, live tool-activity cards, and inline tool approvals
 - **Provider, Model & Mode Switching**: Dropdowns in the chat header; switching provider refreshes the model list automatically
 - **Sessions**: New Chat, session history with resume and delete, persisted to disk across restarts
 - **Slash Commands**: `/help`, `/clear`, and custom commands from `.nanocoder/commands`
@@ -87,7 +87,7 @@ Or from the repo root: `pnpm run build:vscode` builds and packages to `assets/na
 
 ### Sidebar Chat
 
-1. Click the Nanocoder icon in the Activity Bar. The extension spawns `nanocoder --acp` in the background and connects automatically - your project's `agents.config.json` (or global config) is used.
+1. Click the Nanocoder icon in the Activity Bar. The extension spawns `nanocoder --acp` in the background and connects automatically - your project's `agents.config.json` (or global config) is used. The CLI is not started until you open the chat.
 2. Chat. Responses stream in; thinking appears in a collapsible section.
 3. Read-only tools group into an activity card; file edits get their own card - click it to open VS Code's diff viewer.
 4. In modes that require confirmation, tool cards show Approve / Deny inline. Questions from the AI (`ask_user`) show the full question with one button per answer.
@@ -111,6 +111,9 @@ Access via Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`):
 | -------------------------------------- | --------------------------------------------------------- |
 | `Nanocoder: New Chat`                  | Start a fresh conversation (also the `+` view title icon) |
 | `Nanocoder: View Session History`      | Toggle the session history list (also the clock icon)     |
+| `Nanocoder: Settings`                  | Toggle the chat settings panel (also the third view title icon) |
+| `Nanocoder: Cancel Current Response`   | Stop the running turn, like the Stop button               |
+| `Nanocoder: Copy Last Code Block`      | Copy the last code block in the chat (`Ctrl+Alt+Shift+C` / `Cmd+Alt+Shift+C` while the chat view is focused) |
 | `Nanocoder: Open Configuration`        | Open the project `agents.config.json`, or the global one if the project has none |
 | `Nanocoder: Restart Nanocoder Agent Process` | Restart the background `nanocoder --acp` process |
 | `Nanocoder: Connect to Nanocoder`      | Connect the legacy companion to a running terminal CLI    |
@@ -124,17 +127,23 @@ Configure the extension in VS Code settings (`Ctrl+,` / `Cmd+,`):
 | Setting                     | Default       | Description                                                          |
 | --------------------------- | ------------- | -------------------------------------------------------------------- |
 | `nanocoder.cliPath`         | (empty)       | Absolute path to the nanocoder CLI. If empty, uses the global install |
-| `nanocoder.cwd`             | (empty)       | Working directory for the CLI. Defaults to the workspace root         |
+| `nanocoder.cwd`             | (empty)       | Working directory for the CLI, new sessions, settings and `@` mention search. Defaults to the workspace root, and takes priority over it when set. With no folder open, sessions use your home directory and `@` search finds no files |
 | `nanocoder.mode`            | `auto-accept` | Operating mode for the assistant                                      |
 | `nanocoder.model`           | (empty)       | Model for Nanocoder sessions (set via the model dropdown)             |
 | `nanocoder.showDiffPreview` | `true`        | Show diff preview before applying file changes                        |
 | `nanocoder.codeLens`        | `true`        | Show Explain Code / Generate Tests lenses above functions and classes  |
+| `nanocoder.showTokenUsage`  | `false`       | Show token usage and estimated cost below chat responses              |
 | `nanocoder.autoConnect`     | `false`       | Auto-connect the legacy WebSocket companion on startup                |
-| `nanocoder.serverPort`      | `51820`       | WebSocket port for the legacy companion mode                          |
+| `nanocoder.serverPort`      | `51820`       | Fallback WebSocket port for the legacy companion, used only when the discovery file is missing or stale (e.g. the CLI runs on a remote host over SSH) |
+| `nanocoder.serverToken`     | (empty)       | Bearer token for the legacy companion. Normally read from the discovery file; set it by hand only when that file is unreachable, copying it from `vscode-server.json` in the nanocoder config directory on the CLI's host |
 
 ## Legacy Companion Mode
 
-The original integration pairs the extension with a Nanocoder session running in a terminal (`nanocoder --vscode`) over a local WebSocket (port 51820 by default). It is opt-in via `nanocoder.autoConnect` and useful if you prefer the terminal TUI:
+The original integration pairs the extension with a Nanocoder session running in a terminal (`nanocoder --vscode`) over a local WebSocket. It is opt-in via `nanocoder.autoConnect` and useful if you prefer the terminal TUI.
+
+The CLI binds an ephemeral port (or the one passed with `--vscode-port`) and writes the port and a per-session bearer token to a discovery file, `vscode-server.json` in the nanocoder config directory. The extension reads that file to connect. `nanocoder.serverPort` (default 51820) and `nanocoder.serverToken` are only fallbacks for when the file cannot be read, such as a CLI on a remote host over SSH.
+
+Companion mode provides:
 
 - Diff previews for changes proposed in the terminal session (approve/reject in the CLI)
 - Active-editor context: the focused file and selection appear as a pill on the CLI status line and attach to your next message
@@ -171,7 +180,8 @@ The companion communicates via JSON messages over WebSocket:
 ### Companion mode not connecting?
 
 - Ensure Nanocoder is running with the `--vscode` flag
-- Verify port 51820 (or `nanocoder.serverPort`) is not blocked or in use
+- Check that the CLI wrote its discovery file (`vscode-server.json` in the nanocoder config directory). The bound port is also recorded in the Nanocoder log file
+- For a remote CLI, forward the port the CLI bound (pin it with `--vscode-port`) and set `nanocoder.serverPort` and `nanocoder.serverToken` to match
 - Click the status bar item to reconnect after restarting the CLI
 
 ## License

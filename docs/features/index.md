@@ -24,7 +24,7 @@ Each response ends with a small grey footer showing what that turn cost:
 Tokens: 4.2k | ~$0.01
 ```
 
-The token count is whatever the provider reported for that response, and the cost is an estimate priced from [models.dev](https://models.dev). Providers that report no token telemetry (common with local models) get no footer at all, and the cost segment is omitted when no pricing is available — so a missing number means "unknown", never "zero". For a breakdown of your whole context window rather than a single response, use `/usage`.
+The token count is whatever the provider reported for that response, and the cost is an estimate priced from [models.dev](https://models.dev). Providers that report no token telemetry (common with local models) get no footer at all, and the cost segment is omitted when no pricing is available — so a missing number means "unknown", never "zero". When the provider reports prompt-cache hits, a middle segment such as `3.1k cached (74%)` shows how many input tokens were served from cache. For a breakdown of your whole context window rather than a single response, use `/usage`.
 
 ### Giving the AI Context
 
@@ -89,7 +89,7 @@ When the AI wants to edit a file, run a command, or perform any action, it uses 
 | Mode | Behaviour | Best For |
 |------|-----------|----------|
 | **Normal** (default) | Confirm each tool that can change something; read-only tools run directly | Unfamiliar codebases, sensitive operations |
-| **Auto-Accept** | Most tools execute immediately; bash, `git_commit`, `git_pr` create, and `approval: always` custom tools still prompt | Trusted tasks, faster iteration |
+| **Auto-Accept** | Most tools execute immediately; bash, `browser`, `git_commit`, `git_pr` create/comment/review, and `approval: always` custom tools still prompt | Trusted tasks, faster iteration |
 | **Yolo** | Every tool executes immediately with no prompt | Zero interruptions, full trust |
 | **Plan** | Read-only tools run; every mutation tool is removed, and the AI writes a plan for you to approve | Exploring and planning before any change |
 | **Architect** | File edits run without a prompt, then you keep or revert the whole turn | Multi-file changes you want to judge as a whole |
@@ -196,7 +196,7 @@ These are the kinds of members a skill can contain. Each page covers its primiti
 - **[Custom Commands](custom-commands.md)** — reusable prompts invoked as `/command`. Support parameters, aliases, auto-injection, namespacing.
 - **[Subagents](subagents.md)** — specialized AI agents the main agent can delegate to. Isolated context, filtered tools, optionally a different model.
 - **[Custom Tools](custom-tools.md)** — model-callable shell scripts with declared input schemas and approval policy.
-- **Event subscriptions** — cron and `file.changed` triggers that fire skill members through the per-project daemon. See [Skills → Event subscriptions](skills.md#event-subscriptions).
+- **Event subscriptions** - cron, `file.changed` and `ci.job.failed` triggers that fire skill members through the per-project daemon. See [Skills → Event subscriptions](skills.md#event-subscriptions).
 
 ### Lifecycle Hooks
 
@@ -211,6 +211,17 @@ Where skills bring an AI to something that changed, **[lifecycle hooks](hooks.md
 ```
 
 A `pre-tool-use` hook that exits non-zero denies the tool call and tells the model why, which makes rules like "never touch `.env`" enforceable rather than merely requested. A `turn-end` hook runs once the model has finished, sees the files the prompt changed in `NANOCODER_FILES_CHANGED`, and can hand a failed check back to the model for one more pass.
+
+### Plugins
+
+For logic that is easier to write in JavaScript than in a shell command, drop an `.mjs` file in `.nanocoder/plugins/`. An [in-process plugin](hooks.md#in-process-plugins) can block a tool call, add text to a tool result, deny a permission prompt, append context to your prompt, or observe compaction. Plugins only load in a directory you have trusted.
+
+### Formatters and Auto-Commit
+
+Two settings in `agents.config.json` act on every file the agent writes:
+
+- **[Formatters](../configuration/index.md#formatters)** (`nanocoder.formatters`) run tools such as Prettier, Biome or gofmt on matching files after each write, and tell the model when the file changed so its next edit starts from what is on disk.
+- **[Auto-commit](../configuration/index.md#auto-commit)** (`nanocoder.autoCommit`) commits each successful file edit on its own, with a message the model writes from the diff. It is off by default.
 
 ### File Explorer
 
@@ -246,6 +257,14 @@ nanocoder --acp
 
 When a language server is connected (`/lsp` lists them), the AI can read diagnostics with `lsp_get_diagnostics` and format a file with `lsp_format_document`, which formats through the language server, honours `.editorconfig` indent settings, and writes the result to disk. Formatting is a file edit, so it follows the same approval rules as other edits.
 
+### Browser
+
+The built-in [`browser` tool](browser.md) drives a headless Chromium page: the model can open a URL (including a local dev server), click, type, and take screenshots that vision models can see. Chromium is installed separately with the command the tool prints the first time it is missing. It asks for approval in every mode except yolo.
+
+### Voice Mode
+
+Run `/voice` to talk to Nanocoder instead of typing. [Voice mode](voice-mode.md) supports push-to-talk on **Ctrl+G** or hands-free speech detection, uses local Whisper and Piper by default, and installs its audio tools on first use.
+
 ### MCP Servers
 
 Extend Nanocoder's capabilities by connecting [MCP (Model Context Protocol) servers](../configuration/mcp-configuration.md). MCP servers add new tools the AI can use — from database queries to API calls to custom integrations.
@@ -263,7 +282,7 @@ Extend Nanocoder's capabilities by connecting [MCP (Model Context Protocol) serv
 | [Custom Commands](custom-commands.md) | Reusable AI prompts as markdown files (a kind of skill member) |
 | [Subagents](subagents.md) | Specialized AI agents with isolated context (a kind of skill member) |
 | [Custom Tools](custom-tools.md) | Model-callable shell scripts (a kind of skill member) |
-| [Lifecycle Hooks](hooks.md) | Shell commands run at fixed points in the agent loop, able to veto a tool call |
+| [Lifecycle Hooks](hooks.md) | Shell commands run at fixed points in the agent loop, able to veto a tool call, plus in-process JavaScript plugins |
 | [Scheduler](scheduler.md) | Migration pointer — cron triggers are now [skill subscriptions](skills.md#event-subscriptions) |
 | [Commands Reference](commands.md) | All slash commands and special input syntax |
 | [Development Modes](development-modes.md) | Normal, auto-accept, yolo, plan, and architect modes |
@@ -280,5 +299,9 @@ Extend Nanocoder's capabilities by connecting [MCP (Model Context Protocol) serv
 | [Tune](tune.md) | Runtime model tuning for tool profiles, parameters, and compaction |
 | [Desktop Notifications](notifications.md) | Get notified when Nanocoder needs your attention |
 | [Keyboard Shortcuts](keyboard-shortcuts.md) | Complete keyboard shortcut reference |
+| [Verify](verify.md) | Headless, read-only PR review from the command line (`nanocoder verify --pr <n>`) |
 | [Shell Completions](shell-completions.md) | Tab completion for the `nanocoder` CLI in bash, zsh and fish |
 | [Tool Output Conventions](tool-output-conventions.md) | What the file tools return to the model after reads and edits |
+| [Edit Recovery](edit-recovery.md) | The evidence an edit tool returns when its search text does not match the file |
+| [Browser Tool](browser.md) | Headless Chromium the model can navigate, click, type into and screenshot |
+| [Voice Mode](voice-mode.md) | Push-to-talk or hands-free speech input and spoken replies |

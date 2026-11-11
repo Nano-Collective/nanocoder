@@ -19,6 +19,28 @@ export const TIMEOUT_UPDATE_CHECK_MS = 10_000;
 export const TIMEOUT_SOCKET_DEFAULT_MS = 120_000;
 export const TIMEOUT_SOCKET_LOCAL_DEFAULT_MS = 600_000; // 10 minutes for local models (Ollama, etc.)
 export const TIMEOUT_LSP_DIAGNOSTICS_MS = 5000;
+// gh run view --log/--log-failed can be slow and the log itself huge; bound
+// the fetch so a hung request doesn't hang the tool call indefinitely.
+export const TIMEOUT_GH_LOG_MS = 60_000;
+// Bound for quick `gh pr view`/`gh pr diff --name-only` metadata calls (used
+// by `nanocoder verify`, a headless/unattended command) — shorter than
+// TIMEOUT_GH_LOG_MS since these return small JSON/text payloads and should
+// never legitimately take long; a hang here (auth prompt, network stall)
+// should fail fast rather than block an unattended caller indefinitely.
+export const TIMEOUT_GH_METADATA_MS = 30_000;
+// Bound for `git push` (daemon auto-fix/full-commit): a network op that
+// should never legitimately hang for an unattended background caller.
+export const TIMEOUT_GIT_PUSH_MS = 60_000;
+// `semgrep scan --config auto` can fetch/update its rule registry on first
+// run, which is slower than a typical local scan.
+export const TIMEOUT_SEMGREP_MS = 120_000;
+// Ceiling for the daemon's auto-fix/full-commit one-shot fix subprocess
+// (investigate + edit files + run tests/build + commit). Generous since it
+// covers a full LLM-driven edit-and-verify loop, but bounded because
+// BackpressureDispatcher's per-subscription in-flight cap would otherwise
+// let one runaway attempt block all future ci.job.failed triggers for the
+// builtin CI investigator.
+export const TIMEOUT_CI_FIX_RUNNER_MS = 900_000; // 15 minutes
 // Ceiling on the pricing lookup for the per-response usage footer: past
 // this the message renders with token counts only rather than holding the
 // streaming-to-static swap hostage to a cold models.dev fetch.
@@ -34,6 +56,8 @@ export const PASTE_LARGE_CONTENT_THRESHOLD_CHARS = 150;
 export const CACHE_FILE_TTL_MS = 5000;
 export const CACHE_MODELS_EXPIRATION_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 export const MAX_FILE_READ_RETRIES = 3;
+export const MAX_FILE_CACHE_BYTES = 32 * 1024 * 1024; // 32 MB total cache budget
+export const MAX_CACHEABLE_FILE_SIZE_BYTES = 4 * 1024 * 1024; // 4 MB max size for an individual cached file
 
 // === SESSION NAMES ===
 export const MAX_SESSION_NAME_LENGTH = 100;
@@ -96,7 +120,8 @@ export const TIPS = [
 	'Press Shift+Tab to cycle between development modes.',
 	'Press Ctrl+O to toggle compact tool output.',
 	'Run /expand to see one tool result in full.',
-	'Press Ctrl+R to toggle expanded reasoning traces.',
+	'Press Ctrl+N to toggle expanded reasoning traces.',
+	'Press Ctrl+R to reverse search prompt history.',
 	'Use @ followed by a file path to add that file to context.',
 	'Use /explorer to browse project files and add them to context.',
 	'Run /checkpoint create before a risky refactor so you can restore it later.',

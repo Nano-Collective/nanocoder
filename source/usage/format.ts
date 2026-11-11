@@ -12,10 +12,11 @@ export function formatCompactTokenCount(tokens: number): string {
 	if (!Number.isFinite(tokens) || tokens <= 0) {
 		return '0';
 	}
-	if (tokens < 1000) {
+	// Thresholds sit at the rounding point so 999_600 shows as 1M, not 1000k.
+	if (tokens < 999.5) {
 		return String(Math.round(tokens));
 	}
-	if (tokens < 1_000_000) {
+	if (tokens < 999_500) {
 		return `${trimTrailingZero(tokens / 1000)}k`;
 	}
 	return `${trimTrailingZero(tokens / 1_000_000)}M`;
@@ -81,6 +82,27 @@ export function getTotalTokens(usage: ResponseUsage): number | null {
 }
 
 /**
+ * Share of the prompt served from the provider's prefix cache, 0-1. Input
+ * tokens are inclusive of cache reads (see priceTokens), so the ratio is
+ * reads over input. Returns null when either count is missing or the report
+ * is inconsistent, rather than showing a misleading percentage.
+ */
+export function getCacheHitRate(usage: ResponseUsage): number | null {
+	const input = usage.inputTokens;
+	const cacheRead = usage.cacheReadTokens;
+	if (
+		!Number.isFinite(input) ||
+		!Number.isFinite(cacheRead) ||
+		(input as number) <= 0 ||
+		(cacheRead as number) < 0 ||
+		(cacheRead as number) > (input as number)
+	) {
+		return null;
+	}
+	return (cacheRead as number) / (input as number);
+}
+
+/**
  * Build the indicator string for a response, e.g. `Tokens: 4.2k | ~$0.01`
  * or `Tokens: 812` when no pricing is available. Returns null when the
  * usage report carries no usable token counts.
@@ -93,7 +115,11 @@ export function formatUsageIndicator(usage: ResponseUsage): string | null {
 	const parts = [`Tokens: ${formatCompactTokenCount(total)}`];
 	const cacheRead = usage.cacheReadTokens;
 	if (Number.isFinite(cacheRead) && (cacheRead as number) > 0) {
-		parts.push(`${formatCompactTokenCount(cacheRead as number)} cached`);
+		const hitRate = getCacheHitRate(usage);
+		parts.push(
+			`${formatCompactTokenCount(cacheRead as number)} cached` +
+				(hitRate === null ? '' : ` (${Math.round(hitRate * 100)}%)`),
+		);
 	}
 	const cost = usage.cost != null ? formatCost(usage.cost) : null;
 	if (cost) {

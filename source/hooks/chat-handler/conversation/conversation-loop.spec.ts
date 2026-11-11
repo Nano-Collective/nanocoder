@@ -1,4 +1,4 @@
-import {mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
+import {existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
@@ -179,6 +179,102 @@ for (const scenario of [
 		}
 	});
 }
+
+// Shift+Tab can switch to plan mode at any point in a turn. The tool list the
+// model was offered is a snapshot, so a call it already made must be checked
+// against the mode as it is now, even when alwaysAllow would skip the prompt.
+const runMidTurnSwitch = async (
+	flipAt: 'response' | 'executed' | 'prompt',
+	mode: 'yolo' | 'auto-accept',
+	operations: Array<{operation: 'copy' | 'delete'; path: string; destination?: string}>,
+) => {
+	const cwd = mkdtempSync(join(tmpdir(), 'mode-switch-'));
+	const configDir = process.env.NANOCODER_CONFIG_DIR;
+	process.env.NANOCODER_CONFIG_DIR = cwd;
+	writeFileSync(join(cwd, 'agents.config.json'), JSON.stringify({nanocoder: {
+		alwaysAllow: mode === 'yolo' ? ['file_op'] : [],
+	}}));
+	setProjectRoot(cwd);
+	setSessionCwd(cwd);
+	reloadAppConfig();
+	writeFileSync(join(cwd, 'first.txt'), 'first file');
+	writeFileSync(join(cwd, 'second.txt'), 'second file');
+	const registry = ToolRegistry.fromToolExports([fileOpTool]);
+	setToolRegistryGetter(() => registry.getHandlers());
+	let prompts = 0;
+	setGlobalToolConfirmHandler(async () => {
+		prompts++;
+		return true;
+	});
+	const modeRef = {current: mode as string};
+	let calls = 0;
+	const client = {chat: async () => {
+		calls++;
+		if (calls === 1 && flipAt === 'response') modeRef.current = 'plan';
+		return {choices: [{message: calls === 1 ? {
+			role: 'assistant', content: '', tool_calls: operations.map((args, index) => ({
+				id: `op-${index}`, function: {name: 'file_op', arguments: JSON.stringify(args)},
+			})),
+		} : {role: 'assistant', content: 'done'}}]};
+	}};
+	try {
+		await processAssistantResponse(createDefaultParams({
+			client,
+			toolManager: {
+				...createMockToolManager({tools: ['file_op']}),
+				getAvailableToolNames: (_tune: unknown, current: string) =>
+					current === 'plan' ? ['read_file'] : ['file_op'],
+				getToolEntry: (name: string) => registry.getEntry(name),
+				getToolFormatter: () => undefined,
+			},
+			developmentMode: mode,
+			developmentModeRef: modeRef,
+			setIsGenerating: (generating: boolean) => {
+				if (flipAt === 'prompt' && !generating) modeRef.current = 'plan';
+			},
+			conversationStateManager: {current: {
+				updateAssistantMessage: () => {},
+				updateAfterToolExecution: () => {
+					if (flipAt === 'executed') modeRef.current = 'plan';
+				},
+			}},
+		}) as never);
+		return {cwd, prompts, exists: (name: string) => existsSync(join(cwd, name))};
+	} finally {
+		if (configDir === undefined) delete process.env.NANOCODER_CONFIG_DIR;
+		else process.env.NANOCODER_CONFIG_DIR = configDir;
+		clearAppConfig();
+		setGlobalToolConfirmHandler(async () => true);
+		resetSessionCwd();
+	}
+};
+
+test.serial('a switch to plan while the model answers refuses a call alwaysAllow would skip the prompt for', async t => {
+	const run = await runMidTurnSwitch('response', 'yolo', [
+		{operation: 'copy', path: 'first.txt', destination: 'target.txt'},
+	]);
+	t.false(run.exists('target.txt'));
+	rmSync(run.cwd, {recursive: true, force: true});
+});
+
+test.serial('a switch to plan between two tools of a batch stops the second one', async t => {
+	const run = await runMidTurnSwitch('executed', 'yolo', [
+		{operation: 'copy', path: 'first.txt', destination: 'one.txt'},
+		{operation: 'copy', path: 'second.txt', destination: 'two.txt'},
+	]);
+	t.true(run.exists('one.txt'), 'the call before the switch ran');
+	t.false(run.exists('two.txt'), 'the call after the switch did not');
+	rmSync(run.cwd, {recursive: true, force: true});
+});
+
+test.serial('a switch to plan before a confirmation prompt means the tool is not asked about', async t => {
+	const run = await runMidTurnSwitch('prompt', 'auto-accept', [
+		{operation: 'delete', path: 'first.txt'},
+	]);
+	t.is(run.prompts, 0);
+	t.true(run.exists('first.txt'));
+	rmSync(run.cwd, {recursive: true, force: true});
+});
 
 // Mock parseToolCalls function - imported from tool-parsing
 const mockParseToolCalls = (result: {
@@ -1297,6 +1393,43 @@ test.serial('processAssistantResponse - compact-and-retry adds nudge message to 
 		// Compression threw — still valid as long as it didn't crash
 		t.pass('Compression did not succeed; force-compact fell through gracefully');
 	}
+});
+
+test.serial('processAssistantResponse - compact-and-retry invalidates read_file stubs', async t => {
+	const {clearReadTracker, matchReadContent, rememberReadContent} = await import(
+		'@/utils/read-tracker.js'
+	);
+	clearReadTracker();
+	const stats = {mtimeMs: 1, size: 10};
+	rememberReadContent('/tmp/compact-retry/app.ts', stats, 3);
+
+	const messagesSetCalls: Message[][] = [];
+	const longContent = 'Verbose conversation content that exceeds thresholds for mechanical compression. '.repeat(30);
+	const params = createDefaultParams({
+		client: {
+			chat: async (): Promise<LLMChatResponse> => ({
+				choices: [{message: {role: 'assistant', content: '', tool_calls: undefined}}],
+				toolsDisabled: false,
+			}),
+		},
+		messages: [
+			{role: 'user', content: longContent},
+			{role: 'assistant', content: 'Prior response.'},
+		],
+		setMessages: (msgs: Message[]) => messagesSetCalls.push(msgs),
+		addToChatQueue: () => {},
+	});
+
+	await processAssistantResponse(params);
+
+	t.true(
+		messagesSetCalls.some(msgs =>
+			msgs.some(m => m.role === 'user' && m.content.includes('Context has been compacted')),
+		),
+		'compact-and-retry should have run',
+	);
+	t.is(matchReadContent('/tmp/compact-retry/app.ts', stats), undefined);
+	clearReadTracker();
 });
 
 test.serial('processAssistantResponse - MAX_COMPACT_RETRIES constant limits retry cycles', async t => {
@@ -2440,6 +2573,84 @@ test.serial('repeated-tool-call limit pauses and stops when the user declines', 
 			c.props.message.includes('repeated the same tool call 3 times in a row'),
 	);
 	t.truthy(stopMessage, 'Should queue the loop-detected ErrorMessage');
+});
+
+test.serial('a call with unparsable arguments is answered with the error and counts toward the limit', async t => {
+	// What the client returns for a call whose arguments could not be parsed
+	// (see convertAISDKToolCall): `{}` in their place, and the parse error.
+	let chatCallCount = 0;
+	let confirmPrompts = 0;
+	let questionCount = 0;
+	const queuedComponents: any[] = [];
+	const savedMessages: Message[][] = [];
+	setGlobalToolConfirmHandler(async () => {
+		confirmPrompts++;
+		return true;
+	});
+	setGlobalQuestionHandler(async question => {
+		questionCount += 1;
+		return question.options[0];
+	});
+
+	try {
+		await withRetryLimits({maxRepeatedToolCalls: 3}, async () => {
+			await processAssistantResponse(
+				createDefaultParams({
+					client: {
+						chat: async (): Promise<LLMChatResponse> => {
+							chatCallCount++;
+							return {
+								choices: [
+									{
+										message: {
+											role: 'assistant',
+											content: '',
+											tool_calls: [
+												{
+													id: 'call_bad',
+													function: {name: 'read_file', arguments: {}},
+													argumentsError:
+														'not valid JSON: Unexpected end of JSON input',
+												},
+											],
+										},
+									},
+								],
+								toolsDisabled: false,
+							};
+						},
+					},
+					toolManager: createMockToolManager({
+						tools: ['read_file'],
+						needsApproval: true,
+					}),
+					addToChatQueue: (component: any) => queuedComponents.push(component),
+					setMessages: (messages: Message[]) => savedMessages.push(messages),
+				}),
+			);
+		});
+	} finally {
+		setGlobalToolConfirmHandler(async () => true);
+	}
+
+	// One model request per turn, and the third identical turn trips the limit.
+	t.is(chatCallCount, 3);
+	t.is(questionCount, 1);
+	t.is(confirmPrompts, 0, 'the user is never asked to approve a broken call');
+	t.truthy(
+		queuedComponents.find(
+			(c: any) =>
+				c.props?.message ===
+				'Model sent invalid arguments for "read_file" (not valid JSON: Unexpected end of JSON input) — asking it to retry.',
+		),
+	);
+	const result = savedMessages
+		.at(-1)
+		?.find(m => m.role === 'tool' && m.tool_call_id === 'call_bad');
+	t.regex(
+		String(result?.content),
+		/^Invalid arguments for tool "read_file": not valid JSON: Unexpected end of JSON input\. The call was not run\./,
+	);
 });
 
 test.serial('repeated-tool-call limit grants another window when the user continues', async t => {

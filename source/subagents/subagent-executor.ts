@@ -8,6 +8,7 @@
 import {createLLMClient} from '@/client-factory';
 import {getAppConfig, getRetryLimits} from '@/config/index';
 import {getProjectContextPreferences} from '@/config/preferences';
+import {invalidArgumentsResult} from '@/hooks/chat-handler/utils/tool-filters';
 import {computeToolCallSignature} from '@/hooks/chat-handler/utils/tool-signature';
 import {
 	appendRelevantProjectContextWithCount,
@@ -25,7 +26,10 @@ import {
 } from '@/services/lifecycle-hooks';
 import {
 	appendSubagentTool,
+	emitSubagentRunEvent,
 	getSubagentProgress,
+	registerSubagentRun,
+	type SubagentRunEvent,
 	subagentProgress,
 	updateSubagentProgress,
 	updateSubagentProgressById,
@@ -55,10 +59,14 @@ import {
 	clearReadContentScope,
 	runWithReadContentScope,
 } from '@/utils/read-tracker';
-import {signalToolApproval} from '@/utils/tool-approval-queue';
+import {
+	getSubagentToolBridge,
+	signalToolApproval,
+} from '@/utils/tool-approval-queue';
 import {parseToolArguments} from '@/utils/tool-args-parser';
 import {toolErrorToContent} from '@/utils/tool-validation';
 import {truncateToolResult} from '@/utils/truncate-tool-result';
+import {isGitPrCallAllowed, type TrustLevel} from '@/verify/trust';
 import {getSubagentLoader} from './subagent-loader.js';
 import type {
 	SubagentConfigWithSource,
@@ -66,6 +74,12 @@ import type {
 	SubagentResult,
 	SubagentTask,
 } from './types.js';
+
+/** Reports a run's lifecycle; the run's identity is already filled in. */
+type SubagentRunEmitter = (
+	status: SubagentRunEvent['status'],
+	fields?: Partial<SubagentRunEvent>,
+) => void;
 
 /** Maximum recursion depth for subagent delegation */
 const MAX_SUBAGENT_DEPTH = 2;
@@ -196,6 +210,27 @@ export class SubagentExecutor {
 	 * @param agentId - Optional unique ID for concurrent progress tracking.
 	 *                  When provided, progress is written to the agent-specific
 	 *                  slot in the progress map instead of the global singleton.
+	 * @param toolOverride - Optional runtime narrowing of the subagent's
+	 *                  `tools`/`disallowedTools`, applied on top of whatever
+	 *                  the loaded config (frontmatter) declares. Lets a
+	 *                  caller enforce a trust-level allowlist (see
+	 *                  `source/verify/trust.ts`) without needing a second,
+	 *                  hand-maintained tool list in the subagent's own file.
+	 *                  `alwaysAllow` additionally skips the approval prompt
+	 *                  for the named tools (see `resolveToolApproval`'s
+	 *                  `ctx.alwaysAllow`) — for tools whose `approval` policy
+	 *                  isn't mode-aware and would otherwise be silently
+	 *                  auto-denied in headless mode (no approval-queue
+	 *                  handler is ever registered there). When given, it
+	 *                  replaces the user/project `alwaysAllow` config rather
+	 *                  than adding to it, so a checked-out repo's own config
+	 *                  can't pre-approve tools for a trust-gated run.
+	 *                  `trustLevel` makes every `git_pr` call be checked
+	 *                  against that level's allowed actions before approval,
+	 *                  and resolves the subagent from built-in definitions
+	 *                  only: a trust-gated run reads attacker-controlled
+	 *                  input, and a project-level agent of the same name
+	 *                  would let that input's own checkout replace it.
 	 */
 	async execute(
 		task: SubagentTask,
@@ -203,7 +238,27 @@ export class SubagentExecutor {
 		depth = 0,
 		agentId?: string,
 		executionContext?: Omit<ToolExecutionContext, 'abortSignal'>,
+		toolOverride?: {
+			tools?: string[];
+			disallowedTools?: string[];
+			alwaysAllow?: string[];
+			trustLevel?: TrustLevel;
+		},
 	): Promise<SubagentResult> {
+		// A subagent started from an ACP session works with that session's tools,
+		// MCP servers included. Same executor in every other respect.
+		const sessionTools = executionContext?.toolManager;
+		if (sessionTools && sessionTools !== this.toolManager) {
+			return this.withToolManager(sessionTools).execute(
+				task,
+				signal,
+				depth,
+				agentId,
+				executionContext,
+				toolOverride,
+			);
+		}
+
 		const startTime = Date.now();
 
 		if (depth >= MAX_SUBAGENT_DEPTH) {
@@ -216,11 +271,32 @@ export class SubagentExecutor {
 			};
 		}
 
+		// Each run sits under the turn's signal with its own controller, so a
+		// client can cancel one child without ending the turn, while cancelling
+		// the turn still reaches every child.
+		const childAbort = new AbortController();
+		let cancelledByClient = false;
+		const abortChild = () => childAbort.abort();
+		if (signal?.aborted) {
+			abortChild();
+		} else {
+			signal?.addEventListener('abort', abortChild, {once: true});
+		}
+		const unregisterRun = agentId
+			? registerSubagentRun(agentId, executionContext?.sessionId, () => {
+					cancelledByClient = true;
+					abortChild();
+				})
+			: undefined;
+		let emitRun: SubagentRunEmitter | undefined;
+
 		try {
 			const loader = getSubagentLoader(this.projectRoot);
-			const config = await loader.getSubagent(task.subagent_type);
+			const loadedConfig = toolOverride?.trustLevel
+				? await loader.getBuiltInSubagent(task.subagent_type)
+				: await loader.getSubagent(task.subagent_type);
 
-			if (!config) {
+			if (!loadedConfig) {
 				return {
 					subagentName: task.subagent_type,
 					output: '',
@@ -230,8 +306,43 @@ export class SubagentExecutor {
 				};
 			}
 
-			const context = this.createSubagentContext(config, task);
-			const filteredTools = this.filterTools(config);
+			const config: SubagentConfigWithSource = toolOverride
+				? {
+						...loadedConfig,
+						tools: toolOverride.tools ?? loadedConfig.tools,
+						disallowedTools:
+							toolOverride.disallowedTools ?? loadedConfig.disallowedTools,
+						trustLevel: toolOverride.trustLevel,
+					}
+				: loadedConfig;
+
+			emitRun = agentId
+				? (status, fields) =>
+						emitSubagentRunEvent({
+							childRunId: agentId,
+							parentRunId: executionContext?.subagentRunId ?? '',
+							sessionId: executionContext?.sessionId,
+							toolCallId: executionContext?.toolCallId,
+							name: config.name,
+							status,
+							...fields,
+						})
+				: undefined;
+			emitRun?.('started');
+
+			// An ACP session's mode, and the tools it turned off, not the shared
+			// executor's, decide which tools its subagents are offered, as they do
+			// for the top-level agent.
+			const bridge = getSubagentToolBridge(executionContext?.sessionId);
+			const mode = bridge?.getMode() ?? this.currentMode();
+			const sessionDisabled = bridge?.getDisabledTools?.() ?? [];
+			const context = this.createSubagentContext(
+				config,
+				task,
+				mode,
+				sessionDisabled,
+			);
+			const filteredTools = this.filterTools(config, mode, sessionDisabled);
 			const recalled = await appendRelevantProjectContextWithCount(
 				context.systemMessage,
 				this.buildTaskPrompt(task),
@@ -251,9 +362,12 @@ export class SubagentExecutor {
 			// different provider, or the parent client with model switching.
 			// When agentId is set (concurrent mode), always create a new client
 			// for non-inherit models to avoid mutating the shared parent.
+			// The session's own client when it has one (an ACP session that picked a
+			// model), so the subagent inherits that model and not the startup one.
 			const {client, restoreParent} = await this.prepareClient(
 				config,
 				!!agentId,
+				bridge?.getClient?.() ?? this.parentClient,
 			);
 			const pendingUsageWrites: Promise<void>[] = [];
 			const recordUsage = (call: ApiCallRecord): void => {
@@ -281,10 +395,12 @@ export class SubagentExecutor {
 							messages,
 							filteredTools,
 							config,
-							signal,
+							childAbort.signal,
 							agentId,
 							executionContext,
 							recordUsage,
+							toolOverride?.alwaysAllow,
+							emitRun,
 						),
 				);
 
@@ -294,6 +410,7 @@ export class SubagentExecutor {
 					? getSubagentProgress(agentId).tokenCount
 					: subagentProgress.tokenCount;
 
+				emitRun?.('completed', {tokenCount: finalTokenCount, result: output});
 				succeeded = true;
 				return {
 					subagentName: config.name,
@@ -322,6 +439,12 @@ export class SubagentExecutor {
 				restoreParent();
 			}
 		} catch (error) {
+			const message = cancelledByClient
+				? 'Subagent was cancelled'
+				: formatError(error);
+			emitRun?.(childAbort.signal.aborted ? 'cancelled' : 'failed', {
+				error: message,
+			});
 			return {
 				subagentName: task.subagent_type,
 				// A loop stop still returns whatever the subagent produced before
@@ -330,15 +453,25 @@ export class SubagentExecutor {
 				output:
 					error instanceof SubagentLoopStopError ? error.partialOutput : '',
 				success: false,
-				error: formatError(error),
+				error: message,
 				executionTimeMs: Date.now() - startTime,
 			};
+		} finally {
+			signal?.removeEventListener('abort', abortChild);
+			unregisterRun?.();
 		}
+	}
+
+	/** This executor, resolving tools from `toolManager` instead. */
+	private withToolManager(toolManager: ToolManager): SubagentExecutor {
+		return Object.assign(Object.create(this), {toolManager});
 	}
 
 	private createSubagentContext(
 		config: SubagentConfigWithSource,
 		task: SubagentTask,
+		mode: DevelopmentMode,
+		sessionDisabled: readonly string[],
 	): SubagentContext {
 		const initialMessages = [
 			{
@@ -347,7 +480,11 @@ export class SubagentExecutor {
 			},
 		];
 
-		const availableTools = this.getAvailableToolNames(config);
+		const availableTools = this.getAvailableToolNames(
+			config,
+			mode,
+			sessionDisabled,
+		);
 
 		return {
 			availableTools,
@@ -370,7 +507,11 @@ export class SubagentExecutor {
 		return prompt;
 	}
 
-	private getAvailableToolNames(config: SubagentConfigWithSource): string[] {
+	private getAvailableToolNames(
+		config: SubagentConfigWithSource,
+		mode: DevelopmentMode = this.currentMode(),
+		sessionDisabled: readonly string[] = [],
+	): string[] {
 		const allTools = Object.keys(
 			this.toolManager.getAllTools({forSkill: config.ownerSkill}),
 		);
@@ -394,10 +535,13 @@ export class SubagentExecutor {
 			);
 		}
 
-		// Honor the global disabledTools list — applies to subagents too.
-		const globalDisabled = getAppConfig().disabledTools;
-		if (globalDisabled && globalDisabled.length > 0) {
-			const disabledSet = new Set(globalDisabled);
+		// Honor the user's disabledTools list, and the session's own, which
+		// applies to subagents too.
+		const disabledSet = new Set([
+			...(getAppConfig().disabledTools ?? []),
+			...sessionDisabled,
+		]);
+		if (disabledSet.size > 0) {
 			available = available.filter(name => !disabledSet.has(name));
 		}
 
@@ -409,10 +553,7 @@ export class SubagentExecutor {
 		// could propose write_file or execute_bash, and a headless
 		// (daemon-triggered) run would be offered ask_user and tools that
 		// need an approval nobody is there to give.
-		available = this.toolManager.filterToolNamesForMode(
-			available,
-			this.currentMode(),
-		);
+		available = this.toolManager.filterToolNamesForMode(available, mode);
 
 		// Always exclude the session-artifact tools. Subagents run with the
 		// parent's session id, so `getAllTools()` (which applies no development
@@ -431,11 +572,17 @@ export class SubagentExecutor {
 	 */
 	private filterTools(
 		config: SubagentConfigWithSource,
+		mode: DevelopmentMode,
+		sessionDisabled: readonly string[],
 	): Record<string, AISDKCoreTool> {
 		const allTools = this.toolManager.getAllTools({
 			forSkill: config.ownerSkill,
 		});
-		const availableNames = this.getAvailableToolNames(config);
+		const availableNames = this.getAvailableToolNames(
+			config,
+			mode,
+			sessionDisabled,
+		);
 
 		const filtered: Record<string, AISDKCoreTool> = {} as Record<
 			string,
@@ -460,10 +607,13 @@ export class SubagentExecutor {
 	 *
 	 * @param concurrent - When true, creates a new client instead of mutating
 	 *                     the parent client's model (safe for parallel execution).
+	 * @param parent - The client the subagent inherits from: the executor's own,
+	 *                 or the calling session's.
 	 */
 	private async prepareClient(
 		config: SubagentConfigWithSource,
 		concurrent = false,
+		parent: LLMClient = this.parentClient,
 	): Promise<{
 		client: LLMClient;
 		restoreParent: () => void;
@@ -472,13 +622,13 @@ export class SubagentExecutor {
 			typeof config.contextWindow === 'number'
 				? config.contextWindow
 				: undefined;
-		const parentProviderConfig = this.parentClient.getProviderConfig();
+		const parentProviderConfig = parent.getProviderConfig();
 		const targetProvider = config.provider ?? parentProviderConfig.name;
 		const targetModel =
 			config.model && config.model !== 'inherit'
 				? config.model
 				: targetProvider === parentProviderConfig.name
-					? this.parentClient.getCurrentModel()
+					? parent.getCurrentModel()
 					: undefined;
 
 		if (requestedContextWindow) {
@@ -509,23 +659,23 @@ export class SubagentExecutor {
 				return {client, restoreParent: () => {}};
 			}
 
-			const availableModels = await this.parentClient.getAvailableModels();
+			const availableModels = await parent.getAvailableModels();
 			if (!availableModels.includes(config.model)) {
 				throw new Error(
 					`Model '${config.model}' is not available. Configured models: ${availableModels.join(', ')}`,
 				);
 			}
 
-			const originalModel = this.parentClient.getCurrentModel();
-			this.parentClient.setModel(config.model);
+			const originalModel = parent.getCurrentModel();
+			parent.setModel(config.model);
 			return {
-				client: this.parentClient,
-				restoreParent: () => this.parentClient.setModel(originalModel),
+				client: parent,
+				restoreParent: () => parent.setModel(originalModel),
 			};
 		}
 
 		// Inherit everything
-		return {client: this.parentClient, restoreParent: () => {}};
+		return {client: parent, restoreParent: () => {}};
 	}
 
 	/**
@@ -543,8 +693,11 @@ export class SubagentExecutor {
 		agentId?: string,
 		executionContext?: Omit<ToolExecutionContext, 'abortSignal'>,
 		onApiCallComplete?: SubagentApiCallHandler,
+		alwaysAllow?: string[],
+		emitRun?: SubagentRunEmitter,
 	): Promise<string> {
 		let iterations = 0;
+		let lastTool: string | undefined;
 		let totalToolCalls = 0;
 		let totalTokens = 0;
 
@@ -594,6 +747,16 @@ export class SubagentExecutor {
 				updateSubagentProgressById(agentId, event);
 			} else {
 				updateSubagentProgress(event);
+			}
+
+			// The first call is the run starting, which `started` already says.
+			if (iterations > 0 && (status === 'running' || status === 'tool_call')) {
+				lastTool = currentTool ?? lastTool;
+				emitRun?.('progress', {
+					tokenCount: totalTokens,
+					toolCallCount: totalToolCalls,
+					lastTool,
+				});
 			}
 		};
 
@@ -785,10 +948,15 @@ export class SubagentExecutor {
 						this.executeToolCall(
 							toolName,
 							toolCall.function.arguments,
-							toolCall.id,
+							// Scoped to this subagent: the model names its own calls
+							// (`call_1`), so two subagents would otherwise share ids on
+							// the client.
+							agentId ? `${agentId}:${toolCall.id}` : toolCall.id,
 							config,
 							signal,
-							executionContext,
+							{...executionContext, subagentRunId: agentId},
+							alwaysAllow,
+							toolCall.argumentsError,
 						),
 				);
 
@@ -822,11 +990,13 @@ export class SubagentExecutor {
 	private async needsApprovalForTool(
 		toolName: string,
 		rawArguments: unknown,
+		alwaysAllow?: string[],
+		mode: DevelopmentMode = this.currentMode(),
 	): Promise<boolean> {
 		const toolEntry = this.toolManager.getToolEntry(toolName);
 		return resolveToolApproval(toolName, toolEntry, rawArguments, {
-			mode: this.currentMode(),
-			alwaysAllow: getAppConfig().alwaysAllow ?? [],
+			mode,
+			alwaysAllow: alwaysAllow ?? getAppConfig().alwaysAllow ?? [],
 		});
 	}
 
@@ -840,31 +1010,9 @@ export class SubagentExecutor {
 		config: SubagentConfigWithSource,
 		signal?: AbortSignal,
 		executionContext?: Omit<ToolExecutionContext, 'abortSignal'>,
+		alwaysAllow?: string[],
+		argumentsError?: string,
 	): Promise<{content: string; images?: Message['images']}> {
-		if (signal?.aborted) {
-			return {content: 'Error: Execution was cancelled'};
-		}
-
-		// Enforce the allow-list at the execution boundary, not just when
-		// choosing which tools to offer. `getToolHandler` resolves a handler for
-		// every *registered* tool, so a subagent that names a filtered tool
-		// anyway — hallucinated, or coaxed there by its own prompt — would
-		// otherwise run it. That let a read-only agent like `explore` write
-		// files, and let any subagent overwrite the parent session's plan, task
-		// list, or walkthrough (subagents run with the parent's session id).
-		if (!this.getAvailableToolNames(config).includes(toolName)) {
-			return {
-				content:
-					`Error: Tool '${toolName}' is not available to this subagent. ` +
-					'Use only the tools listed in your instructions.',
-			};
-		}
-
-		const toolHandler = this.toolManager.getToolHandler(toolName);
-		if (!toolHandler) {
-			return {content: `Error: Tool '${toolName}' not found`};
-		}
-
 		// One ToolCall object for this call, shared by the approval prompt and
 		// the lifecycle gate so runPreToolUseGate can key its once-per-call
 		// suppression on it.
@@ -876,7 +1024,81 @@ export class SubagentExecutor {
 				name: toolName,
 				arguments: parsedArgs,
 			},
+			...(argumentsError !== undefined ? {argumentsError} : {}),
 		};
+
+		// A client that takes subagent tool calls (ACP) sees every call, not just
+		// the ones needing approval, and each ends with its real outcome. That
+		// includes a call refused below, so a hallucinated tool leaves a trace.
+		const bridge = getSubagentToolBridge(executionContext?.sessionId);
+		await bridge?.begin(toolCall, config.name);
+		const finish = async (
+			result: {content: string; images?: Message['images']},
+			failed: boolean,
+		) => {
+			await bridge?.end(toolCall, {content: result.content, failed});
+			return result;
+		};
+
+		if (signal?.aborted) {
+			return finish({content: 'Error: Execution was cancelled'}, true);
+		}
+
+		// Enforce the allow-list at the execution boundary, not just when
+		// choosing which tools to offer. `getToolHandler` resolves a handler for
+		// every *registered* tool, so a subagent that names a filtered tool
+		// anyway — hallucinated, or coaxed there by its own prompt — would
+		// otherwise run it. That let a read-only agent like `explore` write
+		// files, and let any subagent overwrite the parent session's plan, task
+		// list, or walkthrough (subagents run with the parent's session id).
+		// Checked against the session's mode as it is now, so a switch to plan
+		// mid-run stops a subagent writing.
+		if (
+			!this.getAvailableToolNames(
+				config,
+				bridge?.getMode(),
+				bridge?.getDisabledTools?.(),
+			).includes(toolName)
+		) {
+			return finish(
+				{
+					content:
+						`Error: Tool '${toolName}' is not available to this subagent. ` +
+						'Use only the tools listed in your instructions.',
+				},
+				true,
+			);
+		}
+
+		const toolHandler = this.toolManager.getToolHandler(toolName);
+		if (!toolHandler) {
+			return finish({content: `Error: Tool '${toolName}' not found`}, true);
+		}
+
+		// Unparsable arguments arrive as `{}`: answer the call with the parse
+		// error rather than run the tool (or ask to approve it) with that
+		// placeholder. Checked after the allow-list and handler, so a tool the
+		// subagent cannot use is refused for that reason (fixing the JSON would
+		// not help), and before anything below reads the placeholder arguments.
+		if (toolCall.argumentsError !== undefined) {
+			return finish({content: invalidArgumentsResult(toolCall).content}, true);
+		}
+
+		// A trust-gated run (verify, daemon CI) must never post to GitHub itself:
+		// the harness does that. Enforced here rather than relying on the
+		// approval prompt, which `alwaysAllow` or yolo mode would skip.
+		if (
+			toolName === 'git_pr' &&
+			config.trustLevel &&
+			!isGitPrCallAllowed(config.trustLevel, parsedArgs)
+		) {
+			return finish(
+				{
+					content: `Error: this git_pr action is not permitted at trust level '${config.trustLevel}'. Posting to GitHub is done by the harness.`,
+				},
+				true,
+			);
+		}
 
 		// Subagents run their own loop rather than going through processToolUse,
 		// so the lifecycle gate has to be applied here too — a policy hook must
@@ -885,18 +1107,22 @@ export class SubagentExecutor {
 		// approve something that is about to be refused anyway.
 		const gate = await runPreToolUseGate(toolCall, parsedArgs);
 		if (gate.blocked) {
-			return {content: `Error: ${gate.reason}`};
+			return finish({content: `Error: ${gate.reason}`}, true);
 		}
 
-		// Check if this tool needs user approval
+		// Check if this tool needs user approval. A bridge supplies its own
+		// session's mode: the executor is shared, so its mode can't be right for
+		// every session at once.
 		const needsApproval = await this.needsApprovalForTool(
 			toolName,
 			rawArguments,
+			alwaysAllow,
+			bridge?.getMode(),
 		);
 		if (needsApproval) {
 			const vote = await consultPluginPermission(toolName, parsedArgs);
 			if (vote.decision === 'deny') {
-				return {content: `Error: ${vote.reason}`};
+				return finish({content: `Error: ${vote.reason}`}, true);
 			}
 
 			// Pass the turn's signal: without it this await is the one place a
@@ -904,22 +1130,39 @@ export class SubagentExecutor {
 			// them and joins with `Promise.allSettled`, so one subagent parked
 			// on an unanswerable approval kept the whole turn open. On abort
 			// the queue settles this with a denial.
-			const approved = await signalToolApproval(
-				{
-					toolCall,
-					subagentName: config.name,
-				},
-				signal,
-			);
+			const decision = bridge
+				? await bridge.approve(
+						toolCall,
+						signal,
+						executionContext?.subagentRunId,
+					)
+				: (await signalToolApproval(
+							{
+								toolCall,
+								subagentName: config.name,
+							},
+							signal,
+						))
+					? 'approved'
+					: 'denied';
 
-			if (!approved) {
-				return {content: 'Tool execution was denied by the user.'};
+			if (decision !== 'approved') {
+				return finish(
+					{
+						content:
+							decision === 'cancelled'
+								? 'Tool execution was cancelled by the user.'
+								: 'Tool execution was denied by the user.',
+					},
+					true,
+				);
 			}
 		}
 
 		try {
 			const result = await toolHandler(parsedArgs, {
 				...executionContext,
+				toolCallId,
 				abortSignal: signal,
 			});
 			// Subagents converse in text, so collapse structured output to its
@@ -938,8 +1181,14 @@ export class SubagentExecutor {
 			// Formatters run on a successful write, before post-tool-use, as in
 			// processToolUse.
 			const truncated = truncateToolResult(content);
+			// Failure is either a structured isError or, for the many tools that
+			// return plain text, an "Error..." message - as the top-level ACP path
+			// reads it.
 			const failed =
-				typeof result !== 'string' && 'isError' in result && result.isError;
+				(typeof result !== 'string' &&
+					'isError' in result &&
+					!!result.isError) ||
+				content.startsWith('Error');
 			const formatted = failed
 				? truncated
 				: await formatWrittenFile(toolName, parsedArgs, truncated);
@@ -952,23 +1201,29 @@ export class SubagentExecutor {
 			const commitNote = failed
 				? null
 				: await maybeAutoCommit(toolName, parsedArgs);
-			return {
-				content: commitNote ? `${withHooks}\n\n${commitNote}` : withHooks,
-				...(images && images.length > 0 ? {images} : {}),
-			};
+			return finish(
+				{
+					content: commitNote ? `${withHooks}\n\n${commitNote}` : withHooks,
+					...(images && images.length > 0 ? {images} : {}),
+				},
+				failed,
+			);
 		} catch (error) {
 			// Handler validation failures surface here too (the handler is
 			// validated), formatted with any structured detail. post-tool-use
 			// still fires: a failed delegated call is exactly what an audit-log
 			// hook needs to see, and dropping it would make this surface disagree
 			// with processToolUse.
-			return {
-				content: await appendPostToolUseOutput(
-					toolName,
-					parsedArgs,
-					truncateToolResult(toolErrorToContent(error)),
-				),
-			};
+			return finish(
+				{
+					content: await appendPostToolUseOutput(
+						toolName,
+						parsedArgs,
+						truncateToolResult(toolErrorToContent(error)),
+					),
+				},
+				true,
+			);
 		}
 	}
 }

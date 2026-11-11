@@ -1,4 +1,4 @@
-import cp from 'node:child_process';
+import crossSpawn from 'cross-spawn';
 
 /**
  * Records audio from the default system microphone.
@@ -34,7 +34,7 @@ export async function recordAudio(
 			args.push('trim', '0', (durationMs / 1000).toString());
 		}
 
-		const proc = cp.spawn(command, args, {stdio: 'ignore'});
+		const proc = crossSpawn.spawn(command, args, {stdio: 'ignore'});
 
 		let timeoutId: NodeJS.Timeout | undefined;
 		if (durationMs) {
