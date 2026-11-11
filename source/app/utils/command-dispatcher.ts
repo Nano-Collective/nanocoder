@@ -21,7 +21,6 @@ import {
 	parseInlineOverrides,
 } from '@/utils/inline-overrides';
 import {infoMsg, warningMsg} from '@/utils/message-factory';
-import {handleCheckpointLoad} from './handlers/checkpoint-load-handler';
 import {handleCompactCommand} from './handlers/compact-handler';
 import {handleContextMaxCommand} from './handlers/context-max-handler';
 import {
@@ -33,8 +32,6 @@ import {
 } from './handlers/create-handler';
 import {handleLoginCommand} from './handlers/login-handler';
 import {handleMCPPromptCommand} from './handlers/mcp-prompt-handler';
-import {handleRetryCommand} from './handlers/retry-handler';
-import {handleResumeCommand} from './handlers/session-handler';
 import {handleStatsCommand} from './handlers/stats-handler';
 
 /**
@@ -82,11 +79,15 @@ async function handleCustomCommand(
  */
 function createCommandContext(
 	commandParts: string[],
+	argText: string,
 	options: MessageSubmissionOptions,
 ): CommandContext {
 	return {
 		args: options.commandArgs ?? commandParts.slice(1),
+		argText,
 		messages: options.messages,
+		provider: options.provider,
+		model: options.model,
 		addToChatQueue: options.onAddToChatQueue,
 		clearMessages: options.onClearMessages,
 		notifyCleared: () => options.onClearCounterIncrement?.(),
@@ -98,14 +99,21 @@ function createCommandContext(
 		enterExplorerMode: options.onEnterExplorerMode,
 		enterIdeSelectionMode: options.onEnterIdeSelectionMode,
 		enterTune: options.onEnterTune,
+		enterCheckpointLoadMode: options.onEnterCheckpointLoadMode,
+		enterSessionSelectorMode: options.onEnterSessionSelectorMode,
+		resumeSession: options.onResumeSession,
+		switchModel: options.onSwitchModel,
+		submitChatMessage: (message, displayValue) =>
+			options.onHandleChatMessage(message, displayValue),
 	};
 }
 
 /** Hand the prompt back the way the stateful command asked. */
 function completeCommand(
-	completion: CommandCompletion,
+	completion: Exclude<CommandCompletion, {show: unknown}>,
 	options: MessageSubmissionOptions,
 ): void {
+	if (completion === 'handed-off') return;
 	if (completion === 'done-after-render') {
 		setTimeout(() => options.onCommandComplete?.(), DELAY_COMMAND_COMPLETE_MS);
 		return;
@@ -160,7 +168,11 @@ async function runRegisteredCommand(
 		const loaded = await commandRegistry.load(commandName);
 		if (loaded && isStatefulCommand(loaded)) {
 			completion = await loaded.run(
-				createCommandContext(commandParts, options),
+				createCommandContext(
+					commandParts,
+					message.slice(commandName.length + 2),
+					options,
+				),
 			);
 		} else {
 			const totalTokens = messages.reduce(
@@ -187,7 +199,9 @@ async function runRegisteredCommand(
 		}
 	}
 
-	if (completion) {
+	if (typeof completion === 'object') {
+		result = completion.show;
+	} else if (completion) {
 		completeCommand(completion, options);
 		return;
 	}
@@ -392,19 +406,6 @@ async function routeSlashCommand(
 	if (await handleAgentCopy(commandParts, options)) return;
 	if (await handleToolCreate(commandParts, options)) return;
 	if (await handleSkillsCreate(commandParts, options)) return;
-	if (await handleCheckpointLoad(commandParts, options)) return;
-	// Stateful handlers that replay or resume chat flow live alongside each other.
-	if (await handleResumeCommand(commandParts, options)) return;
-	if (
-		await handleRetryCommand(
-			[
-				commandName,
-				...parseCustomCommandArgs(cleanedMessage.slice(commandName.length + 2)),
-			],
-			options,
-		)
-	)
-		return;
 	if (handleLoginCommand(commandParts, options)) return;
 	if (handleStatsCommand(commandParts, options)) return;
 

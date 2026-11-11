@@ -51,8 +51,15 @@ export interface Command<T = React.ReactElement | void>
 export interface CommandContext {
 	/** Arguments after the command name. */
 	args: string[];
+	/**
+	 * Everything after the command name, untouched (VS Code context included),
+	 * for commands that parse quoted arguments or must see the raw split.
+	 */
+	argText: string;
 	/** The conversation as it stood when the command was submitted. */
 	messages: Message[];
+	provider: string;
+	model: string;
 	addToChatQueue: (component: React.ReactNode) => void;
 	/** Clear the transcript, the model context and per-conversation caches. */
 	clearMessages: () => Promise<void>;
@@ -69,6 +76,21 @@ export interface CommandContext {
 	enterExplorerMode: () => void;
 	enterIdeSelectionMode: () => void;
 	enterTune: () => void;
+	/** Opens the checkpoint picker; the picker completes the command. */
+	enterCheckpointLoadMode: (
+		checkpoints: import('@/types/checkpoint').CheckpointListItem[],
+		currentMessageCount: number,
+	) => void;
+	/** Missing where sessions are unavailable. */
+	enterSessionSelectorMode?: (showAll?: boolean) => void;
+	/** Missing where sessions are unavailable. */
+	resumeSession?: (
+		session: import('@/session/session-manager').Session,
+	) => void | Promise<void>;
+	/** Missing where model switching is unavailable. */
+	switchModel?: (provider: string, model: string) => Promise<boolean>;
+	/** Send a prompt to the model as a new chat turn. */
+	submitChatMessage: (message: string, displayValue?: string) => Promise<void>;
 }
 
 /**
@@ -76,8 +98,16 @@ export interface CommandContext {
  * - `done`: ready for input now.
  * - `done-after-render`: ready once the output it queued has rendered. The
  *   dispatcher holds completion for `DELAY_COMMAND_COMPLETE_MS`.
+ * - `handed-off`: something the command started (a chat turn, a picker) now
+ *   owns the prompt and signals completion itself.
+ * - `{show}`: output to queue, handled exactly like a read-only command's
+ *   result, for commands that only sometimes need app state.
  */
-export type CommandCompletion = 'done' | 'done-after-render';
+export type CommandCompletion =
+	| 'done'
+	| 'done-after-render'
+	| 'handed-off'
+	| {show: React.ReactElement | string | void};
 
 /**
  * A command that changes app state (clears the chat, renames the session,
