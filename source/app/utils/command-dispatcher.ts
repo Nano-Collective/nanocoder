@@ -21,8 +21,6 @@ import {
 	parseInlineOverrides,
 } from '@/utils/inline-overrides';
 import {infoMsg, warningMsg} from '@/utils/message-factory';
-import {handleCompactCommand} from './handlers/compact-handler';
-import {handleContextMaxCommand} from './handlers/context-max-handler';
 import {
 	handleAgentCopy,
 	handleAgentCreate,
@@ -79,13 +77,18 @@ function createCommandContext(
 	commandParts: string[],
 	argText: string,
 	options: MessageSubmissionOptions,
+	onceThreshold: number | undefined,
 ): CommandContext {
 	return {
 		args: options.commandArgs ?? commandParts.slice(1),
 		argText,
 		messages: options.messages,
+		setMessages: options.setMessages,
 		provider: options.provider,
 		model: options.model,
+		client: options.client,
+		providerConfig: options.providerConfig,
+		onceThreshold,
 		addToChatQueue: options.onAddToChatQueue,
 		setLiveComponent: options.setLiveComponent,
 		setLiveComponentCapturesInput: options.setLiveComponentCapturesInput,
@@ -135,6 +138,7 @@ async function runRegisteredCommand(
 	message: string,
 	commandParts: string[],
 	options: MessageSubmissionOptions,
+	onceThreshold?: number,
 ): Promise<void> {
 	const {
 		onAddToChatQueue,
@@ -178,6 +182,7 @@ async function runRegisteredCommand(
 					commandParts,
 					message.slice(commandName.length + 2),
 					options,
+					onceThreshold,
 				),
 			);
 		} else {
@@ -405,13 +410,16 @@ async function routeSlashCommand(
 	options: MessageSubmissionOptions,
 	onceThreshold?: number,
 ): Promise<void> {
-	if (await handleCompactCommand(commandParts, options, onceThreshold)) return;
-	if (await handleContextMaxCommand(commandParts, options)) return;
 	if (await handleCommandCreate(commandParts, options)) return;
 	if (await handleAgentCreate(commandParts, options)) return;
 	if (await handleAgentCopy(commandParts, options)) return;
 	if (await handleToolCreate(commandParts, options)) return;
 	if (await handleSkillsCreate(commandParts, options)) return;
 
-	await runRegisteredCommand(cleanedMessage, commandParts, options);
+	await runRegisteredCommand(
+		cleanedMessage,
+		commandParts,
+		options,
+		onceThreshold,
+	);
 }

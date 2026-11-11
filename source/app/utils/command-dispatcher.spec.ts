@@ -7,6 +7,8 @@ import {commandRegistry} from '@/commands';
 import {runCheckpointSubcommand} from '@/commands/checkpoint';
 import {lazyCommands} from '@/commands/lazy-registry';
 import {DELAY_COMMAND_COMPLETE_MS} from '@/constants';
+import {getSessionContextLimit, resetSessionContextLimit} from '@/models/index';
+import {resetAutoCompactSession} from '@/utils/auto-compact';
 import type {
 	CommandContext,
 	Message,
@@ -496,6 +498,44 @@ test.serial('/login without a known target shows its usage like a read-only comm
 	t.false(completed);
 	await wait(DELAY_COMMAND_COMPLETE_MS + 25);
 	t.true(completed);
+});
+
+test.serial('/context-max sets the session limit and completes after render', async t => {
+	let completed = 0;
+	try {
+		await dispatchSlashCommand(
+			'/context-max 64k',
+			createOptions({onCommandComplete: () => completed++}),
+		);
+		t.is(getSessionContextLimit(), 64_000);
+		t.is(completed, 0);
+		await wait(DELAY_COMMAND_COMPLETE_MS + 25);
+		t.is(completed, 1);
+	} finally {
+		resetSessionContextLimit();
+	}
+});
+
+test.serial('/compact completes at once with nothing to compact, after render otherwise', async t => {
+	const queued: React.ReactNode[] = [];
+	let completed = 0;
+	const options = createOptions({
+		onAddToChatQueue: node => queued.push(node),
+		onCommandComplete: () => completed++,
+	});
+	try {
+		await dispatchSlashCommand('/compact', options);
+		t.true(queuedText(queued[0]).includes('No messages to compact'));
+		t.is(completed, 1);
+
+		await dispatchSlashCommand('/compact --auto-off', options);
+		t.true(queuedText(queued[1]).includes('Auto-compact disabled'));
+		t.is(completed, 1);
+		await wait(DELAY_COMMAND_COMPLETE_MS + 25);
+		t.is(completed, 2);
+	} finally {
+		resetAutoCompactSession();
+	}
 });
 
 test.serial('/custom-commands is the old name of /commands', async t => {

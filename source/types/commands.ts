@@ -58,8 +58,17 @@ export interface CommandContext {
 	argText: string;
 	/** The conversation as it stood when the command was submitted. */
 	messages: Message[];
+	/** Replace the conversation (compaction, restore). */
+	setMessages: (messages: Message[]) => void;
 	provider: string;
 	model: string;
+	client: import('@/types/core').LLMClient | null;
+	providerConfig: import('@/types/config').AIProviderConfig | null;
+	/**
+	 * The `?threshold=` value typed on this invocation, for commands that
+	 * read once-scoped overrides. Unset otherwise.
+	 */
+	onceThreshold?: number;
 	addToChatQueue: (component: React.ReactNode) => void;
 	/** The single live slot under the transcript (`null` clears it). */
 	setLiveComponent: (component: React.ReactNode) => void;

@@ -17,7 +17,7 @@
  * during slash-command dispatch is `context-max` on `/usage` (which reads
  * `getSessionContextLimit()` inside its awaited handler). `threshold` is
  * additionally observed by `/compact` via an explicit once-threshold gate
- * (see `handleCompactCommand`'s `onceThreshold` parameter): when present,
+ * (see `CommandContext.onceThreshold`, read by `/compact`): when present,
  * manual compaction is skipped with an informational message if current
  * usage sits below the threshold, mirroring the automatic path's gate.
  * `auto-compact` is applied through the same session-override plumbing and
