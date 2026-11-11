@@ -11,7 +11,7 @@ import {
 	isGitPrCallAllowed,
 	isTrustLevel,
 	resolveTrustLevel,
-} from './trust';
+} from './trust-level';
 
 console.log('\ntrust.spec.ts – Trust Levels');
 

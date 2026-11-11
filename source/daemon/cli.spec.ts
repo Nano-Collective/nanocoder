@@ -580,7 +580,7 @@ test.serial(
 function successfulLaunchDaemon(projectRoot: string) {
 	const calls: Array<{projectRoot: string; trustLevel: string}> = [];
 	return {
-		launch: (root: string, trustLevel: import('@/verify/trust').TrustLevel) => {
+		launch: (root: string, trustLevel: import('@/verify/trust-level').TrustLevel) => {
 			calls.push({projectRoot: root, trustLevel});
 			void writeLockfile({
 				pid: process.pid,

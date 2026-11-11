@@ -70,7 +70,7 @@ import {
 import {parseToolArguments} from '@/utils/tool-args-parser';
 import {toolErrorToContent} from '@/utils/tool-validation';
 import {truncateToolResult} from '@/utils/truncate-tool-result';
-import {isGitPrCallAllowed, type TrustLevel} from '@/verify/trust';
+import {isGitPrCallAllowed, type TrustLevel} from '@/verify/trust-level';
 import {getSubagentLoader} from './subagent-loader.js';
 import type {
 	SubagentConfigWithSource,
@@ -237,7 +237,7 @@ export class SubagentExecutor {
 	 *                  `tools`/`disallowedTools`, applied on top of whatever
 	 *                  the loaded config (frontmatter) declares. Lets a
 	 *                  caller enforce a trust-level allowlist (see
-	 *                  `source/verify/trust.ts`) without needing a second,
+	 *                  `source/verify/trust-level.ts`) without needing a second,
 	 *                  hand-maintained tool list in the subagent's own file.
 	 *                  `alwaysAllow` additionally skips the approval prompt
 	 *                  for the named tools (see `resolveToolApproval`'s

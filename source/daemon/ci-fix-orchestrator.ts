@@ -28,7 +28,7 @@ import type {SubagentResult, SubagentTask} from '@/subagents/types';
 import {createDraftPr, execGh, execGit} from '@/tools/git/utils';
 import {formatError} from '@/utils/error-formatter';
 import {redactSecrets} from '@/verify/redact-secrets';
-import type {TrustLevel} from '@/verify/trust';
+import type {TrustLevel} from '@/verify/trust-level';
 import {findRestrictedChanges} from './ci-fix-path-guard';
 import {
 	type CiFixWorktree,
