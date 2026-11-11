@@ -303,6 +303,11 @@ export interface ModeOverrides {
 		Record<string, string>
 	>;
 	privacyEnabled?: boolean;
+	/**
+	 * Tune's tool mode is XML or JSON: the caller's system prompt carries the
+	 * tool definitions as text, so native tools must not be sent as well.
+	 */
+	nativeToolsDisabled?: boolean;
 }
 
 export interface LLMClient {

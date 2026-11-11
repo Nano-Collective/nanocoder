@@ -31,7 +31,7 @@ import {loadTasks} from '@/tools/tasks/storage';
 import type {Task} from '@/tools/tasks/types';
 import type {ToolManager} from '@/tools/tool-manager';
 import {isSingleToolProfile} from '@/tools/tool-profiles';
-import type {TuneConfig} from '@/types/config';
+import {getTuneToolMode, type TuneConfig} from '@/types/config';
 import type {
 	ApiCallRecord,
 	ApiUsageSnapshot,
@@ -365,6 +365,7 @@ export const processAssistantResponse = async (
 		modelParameters,
 		privacySessionMapRef,
 		privacyEnabled,
+		nativeToolsDisabled: getTuneToolMode(tune) !== 'native',
 	};
 
 	// Get effective tools — ToolManager is the single authority for

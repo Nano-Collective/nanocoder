@@ -57,6 +57,12 @@ export class AcpSession {
 	 */
 	aggressiveCompact = false;
 	/**
+	 * Tune's tool mode for this session is XML or JSON, set when its prompt is
+	 * built: the prompt carries the tool definitions, so the request must not
+	 * send native tools too.
+	 */
+	nativeToolsDisabled = false;
+	/**
 	 * Output of this session's `session-start` hooks, until the first prompt
 	 * that goes to the model takes it. Kept per session, not in the hook
 	 * service's process-wide buffer, since one ACP process hosts many chats.

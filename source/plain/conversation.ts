@@ -24,7 +24,7 @@ import {color, write, writeError, writeLine, writeStatus} from '@/plain/writer';
 import {parseToolCalls} from '@/tool-calling/index';
 import {resolveToolApproval} from '@/tools/approval-policy';
 import type {ToolManager} from '@/tools/tool-manager';
-import type {TuneConfig} from '@/types/config';
+import {getTuneToolMode, type TuneConfig} from '@/types/config';
 import type {
 	DevelopmentMode,
 	LLMChatResponse,
@@ -277,6 +277,7 @@ async function runPlainConversationBody(
 		const modeOverrides: ModeOverrides = {
 			nonInteractiveMode: true,
 			nonInteractiveAlwaysAllow,
+			nativeToolsDisabled: getTuneToolMode(tune) !== 'native',
 		};
 
 		let streamedReasoning = '';

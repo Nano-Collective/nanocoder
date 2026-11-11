@@ -12,6 +12,7 @@ import type {
 	AIProviderConfig,
 	AISDKCoreTool,
 	Message,
+	ModeOverrides,
 	StreamCallbacks,
 } from '@/types/index';
 import type {LanguageModel} from 'ai';
@@ -1447,10 +1448,11 @@ async function chatWithToolRejectingServer(
 			return respond(body);
 		},
 	})(modelId);
-	const run = () =>
+	const run = (modeOverrides?: ModeOverrides) =>
 		handleChat({
 			model,
 			currentModel: modelId,
+			modeOverrides,
 			providerConfig: {
 				name: 'ollama',
 				type: 'openai',
@@ -1508,6 +1510,29 @@ test.serial('a model that rejects native tools is retried with XML tool definiti
 	t.is(bodies.length, 3);
 	t.falsy(bodies[2]?.tools);
 	t.true(systemPrompt(bodies[2]).includes('## AVAILABLE TOOLS'));
+});
+
+test.serial("tune's XML/JSON tool mode keeps native tools off the request", async t => {
+	// The caller already appended the tool definitions to the system prompt
+	// for tune's text tool mode. Sending native tools alongside them gives the
+	// model two contradictory ways to call tools.
+	const {bodies, run, systemPrompt} = await chatWithToolRejectingServer(
+		'model-on-tune-xml-mode',
+		() => sseReply('<read_file><path>hello.txt</path></read_file>'),
+	);
+
+	const result = await run({
+		nonInteractiveMode: false,
+		nonInteractiveAlwaysAllow: [],
+		nativeToolsDisabled: true,
+	});
+	t.true(result.toolsDisabled, 'the loop parses tool calls from text');
+	t.is(bodies.length, 1);
+	t.falsy(bodies[0]?.tools);
+	t.false(
+		systemPrompt(bodies[0]).includes('## AVAILABLE TOOLS'),
+		'definitions are not appended a second time',
+	);
 });
 
 test.serial('a tool-pairing error in the history is surfaced, not retried without tools', async t => {

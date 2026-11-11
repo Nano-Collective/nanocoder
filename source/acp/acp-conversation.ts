@@ -430,6 +430,7 @@ async function runTurn(
 		const modeOverrides: ModeOverrides = {
 			nonInteractiveMode: true,
 			nonInteractiveAlwaysAllow,
+			nativeToolsDisabled: session.nativeToolsDisabled,
 		};
 
 		let streamedReasoning = '';

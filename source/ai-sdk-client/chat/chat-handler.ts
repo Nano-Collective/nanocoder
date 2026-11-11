@@ -145,11 +145,14 @@ export async function handleChat(
 		throw new Error('Operation was cancelled');
 	}
 
-	// Tools disabled by config are handled upstream: the caller's system
-	// prompt already carries the XML tool definitions. Tools disabled because
-	// the model rejected them (now, or earlier this session) are not, so this
-	// handler adds the definitions itself.
+	// Tools disabled by config (provider config, or tune's XML/JSON tool mode)
+	// are handled upstream: the caller's system prompt already carries the
+	// tool definitions as text. Tools disabled because the model rejected them
+	// (now, or earlier this session) are not, so this handler adds the
+	// definitions itself.
+	const disabledByTune = modeOverrides?.nativeToolsDisabled === true;
 	const disabledByConfig =
+		disabledByTune ||
 		providerConfig.disableTools ||
 		(providerConfig.disableToolModels?.includes(currentModel) ?? false);
 	const disabledByRejection =
@@ -168,9 +171,11 @@ export async function handleChat(
 			model: currentModel,
 			reason: disabledByRejection
 				? 'model rejected native tools'
-				: providerConfig.disableTools
-					? 'provider configuration'
-					: 'model configuration',
+				: disabledByTune
+					? 'tune tool mode'
+					: providerConfig.disableTools
+						? 'provider configuration'
+						: 'model configuration',
 			correlationId,
 		});
 	}
