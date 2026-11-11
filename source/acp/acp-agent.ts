@@ -532,28 +532,45 @@ export class AcpAgent implements Agent {
 	async closeSession(
 		params: CloseSessionRequest,
 	): Promise<CloseSessionResponse> {
-		const session = this.sessions.get(params.sessionId);
-		if (!session) {
-			return {};
-		}
 		logger.info(`ACP closeSession: session=${params.sessionId}`);
+		await this.evictSession(params.sessionId, async session => {
+			await session.timeline.dispose();
+		});
+		return {};
+	}
+
+	/**
+	 * Takes a live session out of service: cancels its turn, drops it from the
+	 * map, and waits for the turn (and any prompts queued behind it, which bail
+	 * out on `closed`) to give up the turn lock. `whileIdle` then runs with the
+	 * lock held, followed by releasing the session's MCP servers, which the
+	 * turn may still have been calling.
+	 *
+	 * Every path that retires a session goes through here. A turn left running
+	 * would save the session to disk from its finally after a delete, bringing
+	 * it back, or keep writing checkpoints after its timeline lock is gone.
+	 * Returns false when no live session had this id.
+	 */
+	private async evictSession(
+		sessionId: string,
+		whileIdle: (session: AcpSession) => Promise<void>,
+	): Promise<boolean> {
+		const session = this.sessions.get(sessionId);
+		if (!session) {
+			return false;
+		}
 		session.close();
-		this.sessions.delete(params.sessionId);
-		clearAcpReadStubs(params.sessionId);
-		// close() only signals the running turn to stop. Wait for it (and any
-		// prompts queued behind it, which bail out on `closed`) to give up the
-		// turn lock before releasing the timeline lock, so a checkpoint the
-		// turn is still writing never lands after the lock is gone.
+		this.sessions.delete(sessionId);
+		clearAcpReadStubs(sessionId);
 		const ticket = session.acquireTurn();
 		await ticket.ready;
 		try {
-			await session.timeline.dispose();
-			// After the turn is over: it may still have been calling these tools.
-			await this.releaseMcpServers(params.sessionId);
+			await whileIdle(session);
+			await this.releaseMcpServers(sessionId);
 		} finally {
 			session.releaseTurn();
 		}
-		return {};
+		return true;
 	}
 
 	async setSessionMode(
@@ -760,10 +777,11 @@ export class AcpAgent implements Agent {
 		params: DeleteSessionRequest,
 	): Promise<DeleteSessionResponse> {
 		await sessionManager.initialize();
-		const existing = this.sessions.get(params.sessionId);
-		if (existing) {
-			await existing.timeline.clear();
-		} else {
+		// The turn's own save to disk lands before the delete below, not after.
+		const evicted = await this.evictSession(params.sessionId, async session => {
+			await session.timeline.clear();
+		});
+		if (!evicted) {
 			const persisted = await sessionManager.loadSession(params.sessionId);
 			if (persisted) {
 				await new TimelineManager(
@@ -771,12 +789,10 @@ export class AcpAgent implements Agent {
 					params.sessionId,
 				).clear();
 			}
+			clearAcpReadStubs(params.sessionId);
+			await this.releaseMcpServers(params.sessionId);
 		}
 		await sessionManager.deleteSession(params.sessionId);
-		// Evict from in-memory map if present
-		this.sessions.delete(params.sessionId);
-		clearAcpReadStubs(params.sessionId);
-		await this.releaseMcpServers(params.sessionId);
 		logger.info(`ACP deleteSession: ${params.sessionId}`);
 		return {};
 	}
@@ -785,14 +801,22 @@ export class AcpAgent implements Agent {
 		params: ResumeSessionRequest,
 	): Promise<ResumeSessionResponse> {
 		await sessionManager.initialize();
+		if (!(await sessionManager.loadSession(params.sessionId))) {
+			throw new Error(`Session not found on disk: ${params.sessionId}`);
+		}
+
+		// Retire any live copy first, so one id never has two sessions running,
+		// and read the history after its turn has saved its last messages.
+		const evicted = await this.evictSession(params.sessionId, async session => {
+			await session.timeline.dispose();
+		});
+		if (!evicted) {
+			await this.releaseMcpServers(params.sessionId);
+		}
 		const persisted = await sessionManager.loadSession(params.sessionId);
 		if (!persisted) {
 			throw new Error(`Session not found on disk: ${params.sessionId}`);
 		}
-
-		// Evict any stale in-memory session first
-		this.sessions.delete(params.sessionId);
-		await this.releaseMcpServers(params.sessionId);
 		const session = this.registerSession(
 			params.sessionId,
 			persisted.workingDirectory,

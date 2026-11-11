@@ -1642,6 +1642,78 @@ test('AcpAgent.closeSession - releases the timeline lock only after the cancelle
 	t.false(acpSession.turnActive);
 });
 
+const startGatedTurn = async () => {
+	const context = createMockInitContext();
+	let chatCalls = 0;
+	let releaseChat!: () => void;
+	const chatGate = new Promise<void>(resolve => {
+		releaseChat = resolve;
+	});
+	(context.client as any).chat = async () => {
+		chatCalls++;
+		// The first turn completes, so the session is on disk.
+		if (chatCalls > 1) await chatGate;
+		return {choices: [{message: {content: 'Test response'}}]};
+	};
+	const agent = new AcpAgent(context, createMockConn());
+	const session = await agent.newSession({cwd: '/tmp'});
+	await agent.prompt({
+		sessionId: session.sessionId,
+		prompt: [{type: 'text', text: 'first'}],
+	});
+	const live = (agent as any).sessions.get(session.sessionId);
+	const turn = agent.prompt({
+		sessionId: session.sessionId,
+		prompt: [{type: 'text', text: 'second'}],
+	});
+	while (chatCalls === 1) {
+		await new Promise(resolve => setImmediate(resolve));
+	}
+	return {agent, sessionId: session.sessionId, live, turn, releaseChat};
+};
+
+test.serial('AcpAgent.deleteSession - a delete during a turn is not undone by the turn saving', async t => {
+	const {agent, sessionId, live, turn, releaseChat} = await startGatedTurn();
+
+	const deleting = agent.deleteSession({sessionId});
+	for (let i = 0; i < 200 && !live.closed; i++) {
+		await new Promise(resolve => setTimeout(resolve, 5));
+	}
+	t.true(live.closed, 'the running turn is told to stop');
+	releaseChat();
+	await turn.catch(() => {});
+	await deleting;
+
+	t.is(await sessionManager.loadSession(sessionId), null);
+	t.false((agent as any).sessions.has(sessionId));
+});
+
+test.serial('AcpAgent.resumeSession - a resume during a turn leaves one live session for the id', async t => {
+	const {agent, sessionId, live, turn, releaseChat} = await startGatedTurn();
+
+	const resuming = agent.resumeSession({sessionId, cwd: '/tmp'});
+	// Reading the session from disk comes first, so give it real time.
+	for (let i = 0; i < 200 && !live.closed; i++) {
+		await new Promise(resolve => setTimeout(resolve, 5));
+	}
+	t.true(live.closed, 'the old copy is retired, not left running');
+	t.true(live.turnActive, 'and the resume waits for its turn to end');
+	releaseChat();
+	await turn.catch(() => {});
+	await resuming;
+
+	const resumed = (agent as any).sessions.get(sessionId);
+	t.not(resumed, live);
+	t.false(live.turnActive);
+	// The old turn's last save is what the resumed copy starts from.
+	t.deepEqual(
+		resumed.messages.map((m: Message) => m.content),
+		live.messages.map((m: Message) => m.content),
+	);
+	t.true(resumed.messages.some((m: Message) => m.content === 'second'));
+	await agent.deleteSession({sessionId});
+});
+
 test('AcpAgent.closeSession - clears the session read stubs', async t => {
 	const {agent} = createAgent();
 	const session = await agent.newSession({cwd: '/tmp'});
