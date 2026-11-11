@@ -3750,3 +3750,46 @@ test.serial('compact-and-retry keeps the turn controller, a single history write
 	);
 	compressionBackup.clearBackup();
 });
+
+test.serial('auto-compact gates on the capped history the request sends, not the full history', async t => {
+	setupAutoCompactTestEnv();
+	setAutoCompactStrategy('mechanical');
+	// Large enough for the capped view, far too small for the full history.
+	setSessionContextLimit(2000);
+	const config = getAppConfig();
+	const originalSessions = config.sessions;
+	config.sessions = {...originalSessions, maxMessages: 2} as typeof config.sessions;
+
+	// Old rows the cap already drops from every request.
+	const oldVerboseContent = 'old context sentence. '.repeat(400);
+	const history: Message[] = [
+		{role: 'user', content: oldVerboseContent},
+		{role: 'assistant', content: oldVerboseContent},
+		{role: 'user', content: 'Recent request'},
+	];
+	const snapshots: Message[][] = [];
+	const notices: unknown[] = [];
+
+	try {
+		await processAssistantResponse(
+			createDefaultParams({
+				client: createMockClient({content: 'Done.'}),
+				messages: history,
+				currentProvider: 'openai',
+				currentModel: 'gpt-4',
+				setMessages: (msgs: Message[]) => snapshots.push(msgs),
+				addToChatQueue: (component: any) => notices.push(component),
+			}) as never,
+		);
+	} finally {
+		config.sessions = originalSessions;
+	}
+
+	const compactNotice = notices.find(
+		(c: any) => c?.props?.message && String(c.props.message).includes('compact'),
+	);
+	t.falsy(compactNotice, 'the request was well under the limit, so nothing compacts');
+	// The full history (old rows included) is kept, plus the reply.
+	t.is(snapshots.at(-1)?.length, history.length + 1);
+	t.is(snapshots.at(-1)?.[0]?.content, oldVerboseContent);
+});

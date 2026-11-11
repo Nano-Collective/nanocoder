@@ -357,22 +357,13 @@ export const processAssistantResponse = async (
 	const nonInteractiveAlwaysAllow = nonInteractiveMode
 		? (getAppConfig().alwaysAllow ?? [])
 		: [];
-	const modeOverrides: ModeOverrides | undefined =
-		nonInteractiveMode || modelParameters
-			? {
-					nonInteractiveMode,
-					nonInteractiveAlwaysAllow,
-					modelParameters,
-					privacySessionMapRef,
-					privacyEnabled,
-				}
-			: {
-					nonInteractiveMode: false,
-					nonInteractiveAlwaysAllow: [],
-					modelParameters,
-					privacySessionMapRef,
-					privacyEnabled,
-				};
+	const modeOverrides: ModeOverrides = {
+		nonInteractiveMode,
+		nonInteractiveAlwaysAllow,
+		modelParameters,
+		privacySessionMapRef,
+		privacyEnabled,
+	};
 
 	// Get effective tools — ToolManager is the single authority for
 	// availability (mode + profile filtering) and approval policy
@@ -677,39 +668,44 @@ export const processAssistantResponse = async (
 
 	// Check for auto-compact after messages are updated
 	// Note: This is awaited to prevent race conditions where setMessages(compressed)
-	// could overwrite newer state updates that happen while compression is in progress
+	// could overwrite newer state updates that happen while compression is in progress.
+	// maybeAutoCompact never throws: a failed compaction leaves history as is.
+	//
+	// Gate on the same capped view the next request sends, as `run`/--plain and
+	// subagents do, so the threshold is not measured against rows the cap
+	// already drops from the request.
 	let compactionOccurred = false;
-	try {
-		const beforeCompact = updatedMessages;
-		updatedMessages = await maybeAutoCompact(
-			updatedMessages,
-			systemMessage,
-			client,
-			// Native tool definitions occupy context out-of-band. Pass them so
-			// the gate matches the ctx% indicator; under XML/JSON fallback they
-			// already live inside systemMessage, so pass nothing to avoid
-			// double-counting.
-			result.toolsDisabled ? undefined : tools,
-			{
-				signal: controller.signal,
-				onNotify: notification => {
-					addToChatQueue(infoMsg(notification, 'auto-compact-notification'));
-				},
-				// The TUI tracks the active provider/model in app state; use those
-				// rather than re-deriving them from the client, which may lag a
-				// pending switch.
-				provider: currentProvider,
-				model: currentModel,
+	const compactGateInput = capMessagesForModel(updatedMessages, maxMessages);
+	const compacted = await maybeAutoCompact(
+		compactGateInput,
+		systemMessage,
+		client,
+		// Native tool definitions occupy context out-of-band. Pass them so
+		// the gate matches the ctx% indicator; under XML/JSON fallback they
+		// already live inside systemMessage, so pass nothing to avoid
+		// double-counting.
+		result.toolsDisabled ? undefined : tools,
+		{
+			signal: controller.signal,
+			onNotify: notification => {
+				addToChatQueue(infoMsg(notification, 'auto-compact-notification'));
 			},
-		);
+			// The TUI tracks the active provider/model in app state; use those
+			// rather than re-deriving them from the client, which may lag a
+			// pending switch.
+			provider: currentProvider,
+			model: currentModel,
+		},
+	);
 
-		if (updatedMessages !== beforeCompact) {
-			setMessages(updatedMessages);
-			setTokenCount(0);
-			compactionOccurred = true;
-		}
-	} catch (_error) {
-		// Silently fail auto-compact, don't interrupt the conversation
+	// Only adopt the result when compaction actually ran. Otherwise
+	// maybeAutoCompact hands back the capped view it was given, and taking it
+	// would discard history the cap only meant to hide from one request.
+	if (compacted !== compactGateInput) {
+		updatedMessages = compacted;
+		setMessages(updatedMessages);
+		setTokenCount(0);
+		compactionOccurred = true;
 	}
 
 	// Escape while the reply was finishing or while compaction ran: don't go
