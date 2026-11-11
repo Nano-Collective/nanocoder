@@ -126,7 +126,8 @@ export async function initializePlain(
 	const subagentExecutor = new SubagentExecutor(
 		toolManager,
 		client,
-		process.cwd(),
+		// No fixed root: an ACP session's subagents load from its own folder.
+		undefined,
 		options.developmentMode ?? 'normal',
 		recordSubagentApiCallForStats,
 	);

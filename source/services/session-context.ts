@@ -22,12 +22,23 @@ export interface SessionContext {
 	projectRoot: string;
 	/** Where a bash `cd` moved the session; null until one does. */
 	sessionCwd: string | null;
+	/**
+	 * The session's id, handed to lifecycle hooks as NANOCODER_SESSION_ID.
+	 * Unset until the session is registered.
+	 */
+	sessionId?: string;
+	/** Storage behind every `defineSessionValue` for this session. */
+	readonly values: Map<symbol, unknown>;
 }
 
 const sessionContextStore = new AsyncLocalStorage<SessionContext>();
 
 export function createSessionContext(projectRoot: string): SessionContext {
-	return {projectRoot: resolve(projectRoot), sessionCwd: null};
+	return {
+		projectRoot: resolve(projectRoot),
+		sessionCwd: null,
+		values: new Map(),
+	};
 }
 
 export function runInSessionContext<T>(
@@ -47,4 +58,39 @@ export function getActiveSessionContext(): SessionContext | undefined {
  */
 export function getConfigRoot(): string {
 	return sessionContextStore.getStore()?.projectRoot ?? process.cwd();
+}
+
+// Values set outside any session context: the one session of the TUI,
+// `--plain` and the daemon.
+const processValues = new Map<symbol, unknown>();
+
+function activeValues(): Map<symbol, unknown> {
+	return sessionContextStore.getStore()?.values ?? processValues;
+}
+
+/**
+ * One value that belongs to the session, such as a `/compact` override or the
+ * last prompt built. Null until set. Read and written in the active session's
+ * context, or process-wide outside one, so a session never sees another's.
+ * `normalize` runs on every set, so callers can clamp or reject (to null).
+ */
+export interface SessionValue<T> {
+	get(): T | null;
+	set(value: T | null): void;
+	reset(): void;
+}
+
+export function defineSessionValue<T>(
+	normalize: (value: T | null) => T | null = value => value,
+): SessionValue<T> {
+	const key = Symbol('session-value');
+	return {
+		get: () => (activeValues().get(key) as T | undefined) ?? null,
+		set(value) {
+			activeValues().set(key, normalize(value));
+		},
+		reset() {
+			activeValues().delete(key);
+		},
+	};
 }

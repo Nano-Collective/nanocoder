@@ -18,6 +18,10 @@ import {
 } from '@/models/index';
 import {SubagentLoader, getSubagentLoader} from './subagent-loader.js';
 import type {MemoryFinder} from '@/memory/project-context';
+import {
+	createSessionContext,
+	runInSessionContext,
+} from '@/services/session-context';
 import {setProjectRoot} from '@/services/session-cwd';
 import {loadPlugins, resetPluginsForTests} from '@/plugins/host';
 import {filterToolNamesForMode, type ToolManager} from '@/tools/tool-manager';
@@ -151,6 +155,21 @@ test.before(async () => {
 
 	// Auto-approve all tool calls in tests (mirrors auto-accept mode)
 	setGlobalToolApprovalHandler(async () => true);
+});
+
+test.serial('an executor with no fixed root uses the active session folder', t => {
+	const toolManager = createMockToolManager();
+	const client = createMockClient([]);
+	const follows = new SubagentExecutor(toolManager, client);
+	const fixed = new SubagentExecutor(toolManager, client, '/tmp/fixed-root');
+	const session = createSessionContext('/tmp/session-root');
+
+	runInSessionContext(session, () => {
+		t.is(follows['projectRoot'], session.projectRoot);
+		t.is(fixed['projectRoot'], '/tmp/fixed-root');
+		t.is(follows['memoryFinder'], follows['memoryFinder']);
+	});
+	t.not(follows['projectRoot'], session.projectRoot);
 });
 
 test.serial('executes a simple task without tool calls', async t => {

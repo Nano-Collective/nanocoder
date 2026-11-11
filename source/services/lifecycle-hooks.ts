@@ -6,6 +6,7 @@ import {StringDecoder} from 'node:string_decoder';
 import {getAppConfig} from '@/config/index';
 import {matchGlob, toPosixPath} from '@/events/event-router';
 import {runPluginHooks} from '@/plugins/host';
+import {getActiveSessionContext} from '@/services/session-context';
 import {getProjectRoot, getSafeSessionCwd} from '@/services/session-cwd';
 import {getKeyGeneratorSessionId} from '@/session/key-generator';
 import type {HookDefinition, HookEvent} from '@/types/config';
@@ -358,9 +359,11 @@ function buildEnv(
 		// Where the agent's shell currently is, which a `cd` in execute_bash
 		// moves. Hooks that need to act on the model's location read this.
 		NANOCODER_SESSION_CWD: getSafeSessionCwd(),
-		// The process-wide session id — stable for the life of the session and
-		// rebased by /clear and /resume, so a hook can key a log or a cache on it.
-		NANOCODER_SESSION_ID: getKeyGeneratorSessionId(),
+		// The session id — stable for the life of the session and rebased by
+		// /clear and /resume, so a hook can key a log or a cache on it. In ACP
+		// it is the id of the session the hook runs for.
+		NANOCODER_SESSION_ID:
+			getActiveSessionContext()?.sessionId ?? getKeyGeneratorSessionId(),
 	};
 
 	if (context.toolName) env.NANOCODER_TOOL_NAME = context.toolName;

@@ -11,6 +11,10 @@ import {join} from 'node:path';
 import test from 'ava';
 import {clearAppConfig, reloadAppConfig} from '@/config/index';
 import {processToolUse, setToolRegistryGetter} from '@/message-handler';
+import {
+	createSessionContext,
+	runInSessionContext,
+} from '@/services/session-context';
 import {setProjectRoot, setSessionCwd} from '@/services/session-cwd';
 import type {HooksConfig} from '@/types/config';
 import type {ToolCall} from '@/types/core';
@@ -434,6 +438,24 @@ test.serial('every hook gets the session id and working directory', async t => {
 	const outcome = await runLifecycleHooks('session-end');
 
 	t.is(outcome.output, 'present present');
+});
+
+test.serial('a hook run for a session gets that session id', async t => {
+	withHooks({
+		'session-end': [
+			{command: node('console.log(process.env.NANOCODER_SESSION_ID)')},
+		],
+	});
+	const run = (sessionId: string) => {
+		const context = createSessionContext(testDir);
+		context.sessionId = sessionId;
+		return runInSessionContext(context, () => runLifecycleHooks('session-end'));
+	};
+
+	const [a, b] = await Promise.all([run('session-a'), run('session-b')]);
+
+	t.is(a.output, 'session-a');
+	t.is(b.output, 'session-b');
 });
 
 test.serial('execute_bash exposes its command as NANOCODER_COMMAND', async t => {
