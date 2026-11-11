@@ -3689,3 +3689,64 @@ for (const scenario of [
 		t.is(completions, 1);
 	});
 }
+
+test.serial('compact-and-retry keeps the turn controller, a single history write and a restore point', async t => {
+	const {compressionBackup} = await import('@/utils/compression-backup.js');
+	compressionBackup.clearBackup();
+	const signals: (AbortSignal | undefined)[] = [];
+	const messageSnapshots: Message[][] = [];
+	const longContent =
+		'Verbose conversation content that exceeds thresholds for mechanical compression. '.repeat(30);
+	const history: Message[] = [
+		{role: 'user', content: longContent},
+		{role: 'assistant', content: 'Prior response.'},
+		{role: 'user', content: 'Continue'},
+	];
+	let created = 0;
+
+	await withRetryLimits({maxEmptyTurns: 0}, async () => {
+		await processAssistantResponse(
+			createDefaultParams({
+				client: {
+					chat: async (
+						_messages: Message[],
+						_tools: unknown,
+						_callbacks: unknown,
+						signal?: AbortSignal,
+					): Promise<LLMChatResponse> => {
+						signals.push(signal);
+						return {
+							choices: [{message: {role: 'assistant', content: ''}}],
+							toolsDisabled: false,
+						};
+					},
+				},
+				messages: history,
+				// The prop is stale (null) on the first call, as in the app.
+				abortController: null,
+				setAbortController: (next: AbortController | null) => {
+					if (next) created++;
+				},
+				setMessages: (msgs: Message[]) => messageSnapshots.push(msgs),
+			}) as never,
+		);
+	});
+
+	t.is(signals.length, 2, 'the initial turn plus one compact-and-retry');
+	t.is(created, 1, 'the retry must reuse the turn controller');
+	t.is(signals[1], signals[0]);
+
+	// The empty turns add nothing to history, so the compaction is the only
+	// write: the compressed history together with its nudge, in one update.
+	t.is(messageSnapshots.length, 1);
+	t.is(
+		messageSnapshots[0]?.at(-1)?.content,
+		'Context has been compacted. Please continue with the task.',
+	);
+	t.deepEqual(
+		compressionBackup.getBackup()?.map(m => m.content),
+		history.map(m => m.content),
+		'/compact --restore must be able to undo this compaction',
+	);
+	compressionBackup.clearBackup();
+});
