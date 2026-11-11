@@ -622,14 +622,15 @@ export class ToolManager {
 		return this.registry.getStreamingFormatter(toolName);
 	}
 
+	/**
+	 * Whether a call can skip a checkpoint and join a parallel batch. An
+	 * unloaded on-demand MCP tool is not read-only here: its catalog flag is
+	 * the server's own readOnlyHint, which must not decide either (see the
+	 * approval comment in MCPClient.getToolEntries). Once loaded, its registry
+	 * entry carries no readOnly flag either, so the answer doesn't change.
+	 */
 	isReadOnly(toolName: string): boolean {
-		if (this.registry.hasTool(toolName)) {
-			return this.registry.getEntry(toolName)?.readOnly === true;
-		}
-		if (this.mcpCatalog.has(toolName)) {
-			return this.mcpCatalog.get(toolName)?.readOnly === true;
-		}
-		return false;
+		return this.registry.getEntry(toolName)?.readOnly === true;
 	}
 
 	hasTool(toolName: string): boolean {
