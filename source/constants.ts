@@ -50,6 +50,11 @@ export const PASTE_CHUNK_BASE_WINDOW_MS = 500;
 export const PASTE_CHUNK_MAX_WINDOW_MS = 2000;
 export const PASTE_RAPID_DETECTION_MS = 50;
 export const PASTE_LARGE_CONTENT_THRESHOLD_CHARS = 150;
+/**
+ * Default threshold for single-line paste handling.
+ * Pastes <= this character limit are inserted directly without placeholders.
+ */
+export const DEFAULT_SINGLE_LINE_PASTE_THRESHOLD = 800;
 
 // === CACHE CONFIGURATION ===
 export const CACHE_FILE_TTL_MS = 5000;

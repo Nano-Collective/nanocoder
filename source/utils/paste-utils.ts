@@ -1,4 +1,5 @@
 import {getAppConfig} from '../config';
+import {DEFAULT_SINGLE_LINE_PASTE_THRESHOLD} from '../constants';
 import {
 	InputState,
 	PastePlaceholderContent,
@@ -6,12 +7,6 @@ import {
 	PlaceholderType,
 } from '../types/hooks';
 import {allocatePlaceholderId} from './placeholders';
-
-/**
- * Default threshold for single-line paste handling.
- * Pastes <= this character limit are inserted directly without placeholders.
- */
-export const DEFAULT_SINGLE_LINE_PASTE_THRESHOLD = 800;
 
 const LINE_BREAK = /\r\n|\r|\n/;
 

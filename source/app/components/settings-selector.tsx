@@ -27,6 +27,7 @@ import {
 	updateShowUsageFooter,
 } from '@/config/preferences';
 import {getThemeColors, themes} from '@/config/themes';
+import {DEFAULT_SINGLE_LINE_PASTE_THRESHOLD} from '@/constants';
 import {useBannerModules} from '@/hooks/use-banner-modules';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
@@ -38,7 +39,6 @@ import {
 	type ThemePreset,
 } from '@/types/ui';
 import {setNotificationsConfig} from '@/utils/notifications';
-import {DEFAULT_SINGLE_LINE_PASTE_THRESHOLD} from '@/utils/paste-utils';
 import type {SettingsTabId} from './settings-constants';
 
 /**
