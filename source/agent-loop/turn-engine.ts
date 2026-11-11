@@ -41,8 +41,13 @@
  *                         for one turn's valid calls. May stop the run.
  * - `onFinalAnswer`       a content-only turn: finish, or append messages
  *                         (a walkthrough nudge, say) and keep going.
- * - `onToolCallsEmitted`  a turn's tool calls, before anything is recorded.
+ * - `onAssistantTurn`     a parsed turn (text and tool calls), before
+ *                         anything is recorded: render it.
  * - `onTurnRecorded`      the turn is in history and compaction has run.
+ * - `emptyTurnNudge` / `onEmptyTurnsExhausted` / `onRepeatedToolCalls`
+ *                         let a frontend word a nudge, recover from the
+ *                         empty-turn cap, or ask whether to go past the
+ *                         repeated-call cap (the interactive TUI does).
  * - `on*Retry` / ...      notifications for status lines.
  *
  * `TurnEnginePolicy` switches engine behaviour off for a frontend that
@@ -63,7 +68,11 @@ import {
 	buildAbandonedTurnMessages,
 	type PartitionedToolCalls,
 } from '@/hooks/chat-handler/utils/tool-filters';
-import {parseToolCalls} from '@/tool-calling/index';
+import {
+	parseToolCalls,
+	stripEmbeddedToolCallText,
+	stripThinkTags,
+} from '@/tool-calling/index';
 import type {RetryLimitsConfig} from '@/types/config';
 import type {
 	AISDKCoreTool,
@@ -115,15 +124,32 @@ export interface ModelCallSink {
 	end?(): void;
 }
 
+/**
+ * `messages` are recorded right after `results`, in the same history write
+ * (a follow-up such as an auto-diagnostics note).
+ */
 export type ToolExecutionOutcome<S> =
-	| {kind: 'continue'; results: ToolResult[]}
+	| {kind: 'continue'; results: ToolResult[]; messages?: Message[]}
 	/** End the run. `results` (if any) are recorded in history first. */
-	| {kind: 'stop'; payload: S; results?: ToolResult[]};
+	| {kind: 'stop'; payload: S; results?: ToolResult[]; messages?: Message[]};
 
 export type FinalAnswerDecision =
 	| {kind: 'finish'}
-	/** Append `messages` and run another turn. */
-	| {kind: 'continue'; messages: Message[]};
+	/**
+	 * Append `messages` and run another turn. `resetRetryGuards` starts every
+	 * retry streak again, for a frontend that treats the nudge as a fresh
+	 * start.
+	 */
+	| {kind: 'continue'; messages: Message[]; resetRetryGuards?: boolean};
+
+export interface RepeatedToolCallsInfo {
+	/** The stop message for a run with nobody to ask. */
+	message: string;
+	/** Consecutive identical turns, across windows already granted. */
+	total: number;
+	/** Valid calls this turn that will not run if the answer is stop. */
+	unrunToolCalls: ToolCall[];
+}
 
 export interface FinalAnswerContext extends TurnContext {
 	content: string;
@@ -153,26 +179,72 @@ export interface TurnEngineAdapter<S> {
 		context: FinalAnswerContext,
 	): Promise<FinalAnswerDecision> | FinalAnswerDecision;
 	/** Called before a malformed turn is retried. */
-	onMalformedRetry?(info: {error: string; attempt: number}): void;
-	/** Every call the model emitted this turn, before anything is recorded. */
-	onToolCallsEmitted?(toolCalls: ToolCall[]): void;
+	onMalformedRetry?(info: {
+		error: string;
+		examples: string;
+		attempt: number;
+	}): void;
 	/**
-	 * The turn's assistant message is in history and compaction has run,
-	 * before the abort check and before any tool runs.
+	 * A parsed turn: its text (tool-call markup removed) and every call the
+	 * model emitted, before anything is recorded.
 	 */
-	onTurnRecorded?(): void;
+	onAssistantTurn?(turn: {
+		content: string;
+		toolCalls: ToolCall[];
+	}): void | Promise<void>;
+	/**
+	 * The turn's assistant message (if one was recorded) is in history and
+	 * compaction has run, before the abort check and before any tool runs.
+	 */
+	onTurnRecorded?(turn: {assistantMessage?: Message; compacted: boolean}): void;
 	/** Calls rejected as unknown or unusable, before anything else is done. */
 	onRejectedToolCalls?(partition: PartitionedToolCalls): void;
-	onEmptyRetry?(attempt: number): void;
+	/** The nudge sent after an empty turn. Defaults to `EMPTY_TURN_NUDGE`. */
+	emptyTurnNudge?(history: Message[]): string;
+	onEmptyRetry?(attempt: number, nudge: string): void;
+	/**
+	 * The empty-turn cap was hit. Return a replacement history (compacted,
+	 * with its own nudge) to reset the retry guards and try again, or nothing
+	 * to stop.
+	 */
+	onEmptyTurnsExhausted?(): Promise<Message[] | undefined>;
+	/**
+	 * The repeated-call cap was hit. `continue` grants another window of
+	 * `maxRepeatedToolCalls` and carries on; without this hook the run stops.
+	 */
+	onRepeatedToolCalls?(
+		info: RepeatedToolCallsInfo,
+	): Promise<'continue' | 'stop'>;
 	onTruncatedRetry?(attempt: number): void;
 	/** The truncated-turn cap was hit; the fragment stands as the answer. */
 	onTruncatedGiveUp?(message: string): void;
 }
 
-/** Engine behaviour a frontend can switch off. Everything defaults to on. */
+/** Engine behaviour a frontend can change. Defaults are the headless loop. */
 export interface TurnEnginePolicy {
-	/** Parse XML/JSON tool calls out of text on the fallback path. */
-	parseTextToolCalls?: boolean;
+	/**
+	 * When to parse XML/JSON tool calls out of text: `fallback` (default) only
+	 * on the no-native-tools path; `whenever-no-native` also when a native
+	 * turn came back with no native calls (models that regress to text), and
+	 * strips echoed tool-call text from a turn that has native calls; `off`
+	 * never.
+	 */
+	textToolCalls?: 'off' | 'fallback' | 'whenever-no-native';
+	/** Drop `<think>` blocks a provider streamed as plain text. */
+	stripThinkTags?: boolean;
+	/** Keep only the first N tool calls of a turn (single-tool profiles). */
+	maxToolCallsPerTurn?: number;
+	/**
+	 * Which calls the repeated-call streak is keyed on: `all` (default) every
+	 * call emitted, or `emitted`, leaving out calls with no id or name that
+	 * never reach history.
+	 */
+	repeatSignature?: 'all' | 'emitted';
+	/**
+	 * Check the signal before each turn and after tools run (default). Off
+	 * for a frontend whose client call raises the abort itself.
+	 */
+	abortBetweenTurns?: boolean;
 	/** Nudge, then stop, on turns with no text and no tool calls. */
 	emptyTurnGuard?: boolean;
 	/** Ask the model to continue a turn cut off at its output limit. */
@@ -219,7 +291,11 @@ export async function runTurnEngine<S>(
 ): Promise<TurnEngineResult<S>> {
 	const {client, signal, maxTurns, retryLimits, adapter} = options;
 	const {
-		parseTextToolCalls = true,
+		textToolCalls = 'fallback',
+		stripThinkTags: stripThink = false,
+		maxToolCallsPerTurn,
+		repeatSignature = 'all',
+		abortBetweenTurns = true,
 		emptyTurnGuard = true,
 		truncatedTurnGuard = true,
 		repeatedToolCallGuard = true,
@@ -232,11 +308,26 @@ export async function runTurnEngine<S>(
 		modelCalls,
 	});
 	const append = (...messages: Message[]) => {
+		if (messages.length === 0) return;
 		history.set([...history.get(), ...messages]);
+	};
+	// Whether to go on past the repeated-call cap.
+	const continuePastRepeat = async (
+		message: string,
+		unrunToolCalls: ToolCall[],
+	): Promise<boolean> => {
+		const decision = await adapter.onRepeatedToolCalls?.({
+			message,
+			total: guards.repeatedToolCallTotal(),
+			unrunToolCalls,
+		});
+		if (decision !== 'continue') return false;
+		guards.grantRepeatWindow();
+		return true;
 	};
 
 	for (let turn = 0; turn < maxTurns; turn++) {
-		if (signal.aborted) {
+		if (abortBetweenTurns && signal.aborted) {
 			return stop({kind: 'aborted'});
 		}
 
@@ -287,15 +378,29 @@ export async function runTurnEngine<S>(
 		}
 
 		const message = result.choices[0].message;
-		const fullContent = message.content || '';
-		const parsed =
-			parseTextToolCalls && result.toolsDisabled && !finalTurn
-				? parseToolCalls(fullContent)
-				: {
-						success: true as const,
-						toolCalls: [],
-						cleanedContent: fullContent,
-					};
+		const nativeToolCalls = message.tool_calls || [];
+		const fullContent = stripThink
+			? stripThinkTags(message.content || '')
+			: message.content || '';
+		const unparsed = (cleanedContent: string) => ({
+			success: true as const,
+			toolCalls: [],
+			cleanedContent,
+		});
+		let parsed: ReturnType<typeof parseToolCalls>;
+		if (textToolCalls === 'off' || finalTurn) {
+			parsed = unparsed(fullContent);
+		} else if (result.toolsDisabled) {
+			parsed = parseToolCalls(fullContent);
+		} else if (textToolCalls === 'fallback') {
+			parsed = unparsed(fullContent);
+		} else if (nativeToolCalls.length > 0) {
+			// Trust the native calls, but drop any tool-call text the model
+			// echoed alongside them so it does not leak into history.
+			parsed = unparsed(stripEmbeddedToolCallText(fullContent));
+		} else {
+			parsed = parseToolCalls(fullContent);
+		}
 
 		if (!parsed.success) {
 			const verdict = guards.malformed();
@@ -309,6 +414,7 @@ export async function runTurnEngine<S>(
 			}
 			adapter.onMalformedRetry?.({
 				error: parsed.error,
+				examples: parsed.examples,
 				attempt: verdict.attempt,
 			});
 			append(
@@ -321,14 +427,15 @@ export async function runTurnEngine<S>(
 			continue;
 		}
 
-		const allToolCalls: ToolCall[] = [
-			...(message.tool_calls || []),
-			...parsed.toolCalls,
-		];
-		const content = parsed.cleanedContent;
-		if (allToolCalls.length > 0) {
-			adapter.onToolCallsEmitted?.(allToolCalls);
+		let allToolCalls: ToolCall[] = [...nativeToolCalls, ...parsed.toolCalls];
+		if (
+			maxToolCallsPerTurn !== undefined &&
+			allToolCalls.length > maxToolCallsPerTurn
+		) {
+			allToolCalls = allToolCalls.slice(0, maxToolCallsPerTurn);
 		}
+		const content = parsed.cleanedContent;
+		await adapter.onAssistantTurn?.({content, toolCalls: allToolCalls});
 
 		const partition = adapter.partitionToolCalls(allToolCalls, prepared);
 		const {validToolCalls, errorResults} = partition;
@@ -337,16 +444,20 @@ export async function runTurnEngine<S>(
 		}
 		const {emittedToolCalls, resultsForAbandonedTurn} =
 			buildAbandonedTurnMessages(partition);
+		const signatureCalls =
+			repeatSignature === 'emitted' ? emittedToolCalls : allToolCalls;
 
 		// A fully-empty assistant message (no text, no tool calls) is left out:
 		// providers reject one, and the empty-turn nudge below re-asks without it.
+		let assistantMessage: Message | undefined;
 		if (content.trim() || emittedToolCalls.length > 0) {
-			append({
+			assistantMessage = {
 				role: 'assistant',
 				content,
 				tool_calls: emittedToolCalls.length > 0 ? emittedToolCalls : undefined,
 				reasoning: sink.reasoning(),
-			});
+			};
+			append(assistantMessage);
 		}
 
 		// Gate on the same view the next turn will send, so the threshold is not
@@ -362,10 +473,11 @@ export async function runTurnEngine<S>(
 		// Only adopt the result when compaction actually ran — otherwise
 		// maybeAutoCompact returns the capped view it was handed, and taking it
 		// would discard history the cap only meant to hide from one request.
-		if (compacted !== compactGateInput) {
+		const compactionRan = compacted !== compactGateInput;
+		if (compactionRan) {
 			history.set(compacted);
 		}
-		adapter.onTurnRecorded?.();
+		adapter.onTurnRecorded?.({assistantMessage, compacted: compactionRan});
 		if (signal.aborted) {
 			return stop({kind: 'aborted'});
 		}
@@ -376,10 +488,10 @@ export async function runTurnEngine<S>(
 			// stuck on a bad call trips the same cap instead of draining tokens
 			// until maxTurns. The signature covers every call the model emitted.
 			const repeated = repeatedToolCallGuard
-				? guards.toolCalls(allToolCalls)
+				? guards.toolCalls(signatureCalls)
 				: null;
 			append(...resultsForAbandonedTurn);
-			if (repeated) {
+			if (repeated && !(await continuePastRepeat(repeated, []))) {
 				return stop({
 					kind: 'guard-stop',
 					guard: 'repeated-tool-calls',
@@ -394,6 +506,12 @@ export async function runTurnEngine<S>(
 			if (emptyTurnGuard && !content.trim()) {
 				const verdict = guards.empty();
 				if (verdict.action === 'stop') {
+					const replacement = await adapter.onEmptyTurnsExhausted?.();
+					if (replacement) {
+						history.set(replacement);
+						guards.reset();
+						continue;
+					}
 					return stop({
 						kind: 'guard-stop',
 						guard: 'empty',
@@ -401,8 +519,10 @@ export async function runTurnEngine<S>(
 						unrunToolCalls: [],
 					});
 				}
-				adapter.onEmptyRetry?.(verdict.attempt);
-				append({role: 'user', content: EMPTY_TURN_NUDGE});
+				const nudge =
+					adapter.emptyTurnNudge?.(history.get()) ?? EMPTY_TURN_NUDGE;
+				adapter.onEmptyRetry?.(verdict.attempt, nudge);
+				append({role: 'user', content: nudge});
 				continue;
 			}
 
@@ -432,6 +552,9 @@ export async function runTurnEngine<S>(
 				prepared,
 			})) ?? {kind: 'finish'};
 			if (decision.kind === 'continue') {
+				if (decision.resetRetryGuards) {
+					guards.reset();
+				}
 				append(...decision.messages);
 				continue;
 			}
@@ -443,9 +566,9 @@ export async function runTurnEngine<S>(
 		// rejected-call branch above, so a turn mixing a valid call with an
 		// unknown one does not break the streak.
 		const repeated = repeatedToolCallGuard
-			? guards.toolCalls(allToolCalls)
+			? guards.toolCalls(signatureCalls)
 			: null;
-		if (repeated) {
+		if (repeated && !(await continuePastRepeat(repeated, validToolCalls))) {
 			return stop({
 				kind: 'guard-stop',
 				guard: 'repeated-tool-calls',
@@ -455,17 +578,14 @@ export async function runTurnEngine<S>(
 		}
 
 		const execution = await adapter.executeTools(validToolCalls, context);
+		append(...(execution.results ?? []), ...(execution.messages ?? []));
 		if (execution.kind === 'stop') {
-			if (execution.results?.length) {
-				append(...execution.results);
-			}
 			return stop({kind: 'adapter-stop', payload: execution.payload});
 		}
-		append(...execution.results);
 
 		// End the run here when cancelled: without this the loop would issue
 		// another model request before the top-of-turn check runs.
-		if (signal.aborted) {
+		if (abortBetweenTurns && signal.aborted) {
 			return stop({kind: 'aborted'});
 		}
 	}

@@ -49,10 +49,14 @@ export function createHeadlessRetryGuards(limits: RetryLimitsConfig) {
 	let truncatedTurnCount = 0;
 	let lastToolSignature = '';
 	let repeatedToolCallCount = 0;
+	// The whole consecutive-repeat streak, which a granted window does not
+	// reset, so a message about it reports the true count.
+	let repeatedToolCallTotal = 0;
 
 	const resetToolStreak = () => {
 		lastToolSignature = '';
 		repeatedToolCallCount = 0;
+		repeatedToolCallTotal = 0;
 	};
 
 	return {
@@ -64,10 +68,9 @@ export function createHeadlessRetryGuards(limits: RetryLimitsConfig) {
 		 */
 		toolCalls(turnToolCalls: ToolCall[]): string | null {
 			const signature = computeToolCallSignature(turnToolCalls);
-			const repeated =
-				signature && signature === lastToolSignature
-					? repeatedToolCallCount + 1
-					: 1;
+			const isRepeat = Boolean(signature) && signature === lastToolSignature;
+			const repeated = isRepeat ? repeatedToolCallCount + 1 : 1;
+			repeatedToolCallTotal = isRepeat ? repeatedToolCallTotal + 1 : 1;
 			if (repeated >= maxRepeatedToolCalls) {
 				return `Model repeated the same tool call ${repeated} times in a row without making progress — stopping to avoid a loop (nanocoder.retries.maxRepeatedToolCalls = ${maxRepeatedToolCalls}).`;
 			}
@@ -76,6 +79,31 @@ export function createHeadlessRetryGuards(limits: RetryLimitsConfig) {
 			emptyTurnCount = 0;
 			malformedRetryCount = 0;
 			return null;
+		},
+
+		/** Consecutive identical tool-call turns so far, across granted windows. */
+		repeatedToolCallTotal(): number {
+			return repeatedToolCallTotal;
+		},
+
+		/**
+		 * Someone chose to let a repeated call through at the cap (the
+		 * interactive prompt). The streak's window starts again, so the next
+		 * `maxRepeatedToolCalls` identical calls are allowed before asking again;
+		 * the total keeps counting.
+		 */
+		grantRepeatWindow(): void {
+			repeatedToolCallCount = 0;
+			emptyTurnCount = 0;
+			malformedRetryCount = 0;
+		},
+
+		/** Start every streak again, as after a compaction or a fresh nudge. */
+		reset(): void {
+			emptyTurnCount = 0;
+			malformedRetryCount = 0;
+			truncatedTurnCount = 0;
+			resetToolStreak();
 		},
 
 		/** A turn whose text tool calls could not be parsed. */
