@@ -1491,6 +1491,97 @@ test.serial(
 	},
 );
 
+test.serial(
+	"ignores non-finite usage fields instead of poisoning the totals",
+	async (t) => {
+		// NaN and Infinity are broken reports, not counts: a NaN total would
+		// make every later sum NaN, and an Infinity input would read as
+		// unbounded spend in the --json report.
+		const reply = (usage: Record<string, number>) => ({
+			choices: [
+				{ message: { role: "assistant" as const, content: "" } },
+			],
+			usage,
+		});
+		const toolCall: ToolCall = {
+			id: "call-1",
+			function: { name: "safe_tool", arguments: {} },
+		};
+		const client = makeFakeClient({
+			responses: [
+				{
+					...reply({
+						inputTokens: Number.NaN,
+						outputTokens: 10,
+						totalTokens: Number.NaN,
+					}),
+					choices: [
+						{
+							message: {
+								role: "assistant",
+								content: "",
+								tool_calls: [toolCall],
+							},
+						},
+					],
+				},
+				{
+					...reply({ inputTokens: 100, outputTokens: Number.POSITIVE_INFINITY }),
+					choices: [{ message: { role: "assistant", content: "done" } }],
+				},
+			],
+		});
+		setToolRegistryGetter(() => ({ safe_tool: async () => "ok" }));
+		const toolManager = makeFakeToolManager({
+			knownTools: new Set(["safe_tool"]),
+		});
+
+		const outcome = await runPlainConversation({
+			client,
+			toolManager,
+			systemMessage: SYSTEM,
+			initialMessages: [USER],
+			developmentMode: "auto-accept",
+			nonInteractiveAlwaysAllow: [],
+			abortSignal: new AbortController().signal,
+		});
+
+		t.is(outcome.kind, "success");
+		t.deepEqual(outcome.usage, {
+			inputTokens: 100,
+			outputTokens: 10,
+			totalTokens: 110,
+		});
+	},
+);
+
+test.serial(
+	"omits usage when the provider reports only non-finite fields",
+	async (t) => {
+		const client = makeFakeClient({
+			responses: [
+				{
+					choices: [{ message: { role: "assistant", content: "done" } }],
+					usage: { inputTokens: Number.NaN, totalTokens: Number.NaN },
+				},
+			],
+		});
+
+		const outcome = await runPlainConversation({
+			client,
+			toolManager: makeFakeToolManager(),
+			systemMessage: SYSTEM,
+			initialMessages: [USER],
+			developmentMode: "auto-accept",
+			nonInteractiveAlwaysAllow: [],
+			abortSignal: new AbortController().signal,
+		});
+
+		t.is(outcome.kind, "success");
+		t.is(outcome.usage, undefined);
+	},
+);
+
 // --- Agent-loop retry limits (nanocoder.retries) — issue #897 ---
 
 function repeatingToolResponse(): Partial<LLMChatResponse> {
