@@ -3793,3 +3793,64 @@ test.serial('auto-compact gates on the capped history the request sends, not the
 	t.is(snapshots.at(-1)?.length, history.length + 1);
 	t.is(snapshots.at(-1)?.[0]?.content, oldVerboseContent);
 });
+
+test.serial('a thinking turn does not indent tool summaries for a later non-thinking conversation', async t => {
+	resetLastTurnHadReasoning();
+	// A conversation with a thinking model.
+	await processAssistantResponse(
+		createDefaultParams({
+			client: createMockClient({content: 'Thought it through.', reasoning: 'Hmm.'}),
+		}) as never,
+	);
+
+	// Then a non-thinking model runs a tool and answers.
+	setToolRegistryGetter(() => ({some_tool: async () => 'ok'}));
+	const queued: any[] = [];
+	const compactToolCountsRef = {current: {} as Record<string, number>};
+	let calls = 0;
+	try {
+		await processAssistantResponse(
+			createDefaultParams({
+				client: {
+					chat: async (): Promise<LLMChatResponse> => {
+						calls++;
+						return {
+							choices: [
+								{
+									message:
+										calls === 1
+											? {
+													role: 'assistant',
+													content: '',
+													tool_calls: [
+														{id: 'call_1', function: {name: 'some_tool', arguments: '{}'}},
+													],
+												}
+											: {role: 'assistant', content: 'Done.'},
+								},
+							],
+							toolsDisabled: false,
+						};
+					},
+				},
+				toolManager: {
+					...createMockToolManager({tools: ['some_tool'], needsApproval: false}),
+					getToolFormatter: () => undefined,
+				},
+				developmentMode: 'yolo' as const,
+				compactToolDisplayRef: {current: true},
+				compactToolCountsRef,
+				onSetCompactToolCounts: () => {},
+				addToChatQueue: (component: any) => queued.push(component),
+			}) as never,
+		);
+	} finally {
+		setToolRegistryGetter(() => ({}));
+	}
+
+	const summary = queued.find((c: any) =>
+		String(c?.key).includes('tool-compact-summary'),
+	);
+	t.truthy(summary, 'the tool run is summarised');
+	t.is(summary?.props.marginLeft, 0, 'no Thought to group under, so render flat');
+});

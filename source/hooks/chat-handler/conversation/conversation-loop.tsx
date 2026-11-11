@@ -214,7 +214,9 @@ export const resetFallbackNotice = () => {
 // Tracks whether the most recently emitted turn contained reasoning. Used by
 // the next flushCompactCounts call to decide whether the summary should be
 // indented (grouping beneath its Thought) or rendered flat (non-thinking
-// models, where there is no Thought to group under).
+// models, where there is no Thought to group under). Set on every turn, so
+// one thinking turn does not indent every summary for the rest of the
+// process (e.g. after switching to a non-thinking model).
 let lastTurnHadReasoning = false;
 
 /** Reset the reasoning-grouping flag (for testing). */
@@ -596,8 +598,8 @@ export const processAssistantResponse = async (
 				expand={reasoningExpandedRef?.current ?? false}
 			/>,
 		);
-		lastTurnHadReasoning = true;
 	}
+	lastTurnHadReasoning = Boolean(fullReasoning);
 	if (cleanedContent.trim()) {
 		// Provider-reported tokens + estimated cost for this API call, shown
 		// as the footer of the message. The lookup is bounded: token counts
