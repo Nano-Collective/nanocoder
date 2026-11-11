@@ -395,6 +395,56 @@ test.serial('handler follows a redirect reported only on HEAD', async t => {
 	}
 });
 
+test.serial(
+	'handler snaps truncation boundary outside surrogate pairs when content exceeds limit',
+	async t => {
+		if (!fetchUrlTool) {
+			t.pass('Skipping test - fetch-url module not available');
+			return;
+		}
+
+		const loneSurrogatePattern =
+			/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+
+		const originalFetch = globalThis.fetch;
+		// 'AB' shifts the 2-code-unit emoji sequence so MAX_URL_CONTENT_BYTES (100,000)
+		// falls right between the high and low surrogate of an emoji in converted markdown.
+		const emojiBody = `<html><body><p>AB${'😀'.repeat(60_000)}</p></body></html>`;
+
+		globalThis.fetch = async (_input, init) => {
+			const method = (init?.method as string | undefined) ?? 'GET';
+			if (method === 'HEAD') {
+				return new Response(null, {
+					status: 200,
+					headers: {'content-type': 'text/html'},
+				});
+			}
+
+			return new Response(emojiBody, {
+				status: 200,
+				headers: {'content-type': 'text/html'},
+			});
+		};
+
+		try {
+			const result = await fetchUrlTool.tool.execute!(
+				{url: 'https://public.example.test/astral'},
+				{toolCallId: 'test', messages: []},
+			);
+			t.regex(result, /\[Content truncated - original size was \d+ characters\]/);
+			t.false(
+				loneSurrogatePattern.test(result),
+				'Truncated result must not contain lone surrogates',
+			);
+			const truncatedPart = result.split('\n\n[Content truncated')[0]!;
+			t.is(truncatedPart.length, 99_999);
+			t.true(truncatedPart.endsWith('😀'));
+		} finally {
+			globalThis.fetch = originalFetch;
+		}
+	},
+);
+
 test('validator accepts valid HTTP URLs', async t => {
 	if (!fetchUrlTool) {
 		t.pass('Skipping test - fetch-url module not available');

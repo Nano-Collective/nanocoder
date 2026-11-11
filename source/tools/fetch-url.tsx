@@ -11,6 +11,7 @@ import {jsonSchema, tool} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
 import {withPreservedProcess} from '@/utils/preserve-process';
 import {calculateTokens} from '@/utils/token-calculator';
+import {snapOutsideSurrogate} from '@/utils/truncate-tool-result';
 
 interface FetchArgs {
 	url: string;
@@ -119,7 +120,12 @@ const executeFetchUrl = async (args: FetchArgs): Promise<string> => {
 
 		// Limit content size to prevent context overflow
 		if (content.length > MAX_URL_CONTENT_BYTES) {
-			const truncated = content.substring(0, MAX_URL_CONTENT_BYTES);
+			const cut = snapOutsideSurrogate(
+				content,
+				MAX_URL_CONTENT_BYTES,
+				'before',
+			);
+			const truncated = content.substring(0, cut);
 			return `${truncated}\n\n[Content truncated - original size was ${content.length} characters]`;
 		}
 
