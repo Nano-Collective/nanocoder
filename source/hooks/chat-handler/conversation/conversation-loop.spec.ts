@@ -319,95 +319,322 @@ const createDefaultParams = (overrides = {}) => ({
 	...overrides,
 });
 
+// A client that answers each request with the next scripted reply and keeps
+// the history it was sent, so a test can assert what the model saw.
+const scriptedClient = (
+	replies: Array<{
+		content?: string;
+		toolCalls?: ToolCall[];
+		toolsDisabled?: boolean;
+	}>,
+) => {
+	const requests: Message[][] = [];
+	return {
+		requests,
+		client: {
+			chat: async (messages: Message[]): Promise<LLMChatResponse> => {
+				requests.push(messages);
+				const reply = replies[requests.length - 1] ?? {content: 'done'};
+				return {
+					choices: [
+						{
+							message: {
+								role: 'assistant',
+								content: reply.content ?? '',
+								tool_calls: reply.toolCalls,
+							},
+						},
+					],
+					toolsDisabled: reply.toolsDisabled ?? false,
+				};
+			},
+		},
+	};
+};
+
+const toolCall = (name: string, id = `call_${name}`): ToolCall => ({
+	id,
+	function: {name, arguments: '{}'},
+});
+
+// The `message` prop of every chat-queue item, for asserting what the user saw.
+const queuedMessages = (queue: unknown[]) =>
+	queue.map(item => String((item as {props?: {message?: unknown}})?.props?.message ?? ''));
+
 // ============================================================================
-// Malformed Tool Recovery Tests (lines 127-169)
+// Malformed Tool Recovery Tests
 // ============================================================================
 
 test.serial('processAssistantResponse - handles malformed tool call recovery', async t => {
-	// This test simulates the parseToolCalls returning success: false
-	// The function should display an error and recurse with corrected messages
+	// '[tool_use: name]' is a shape the text parser rejects as malformed.
+	const {client, requests} = scriptedClient([
+		{content: '[tool_use: read_file]', toolsDisabled: true},
+		{content: 'Recovered answer'},
+	]);
+	const queue: unknown[] = [];
+	let completions = 0;
+	await processAssistantResponse(
+		createDefaultParams({
+			client,
+			toolManager: createMockToolManager({tools: ['read_file']}),
+			addToChatQueue: (item: unknown) => queue.push(item),
+			onConversationComplete: () => {
+				completions++;
+			},
+		}),
+	);
 
-	// Note: Since parseToolCalls is an internal import, we can't easily mock it
-	// This test documents the expected behavior but would require refactoring
-	// to make parseToolCalls injectable for proper testing
-
-	t.pass('Malformed tool recovery requires injectable parseToolCalls');
+	t.is(requests.length, 2, 'the malformed turn is retried once');
+	const [assistant, nudge] = requests[1].slice(-2);
+	t.deepEqual(assistant, {role: 'assistant', content: '[tool_use: read_file]'});
+	t.is(nudge.role, 'user');
+	t.regex(String(nudge.content), /malformed tool call/);
+	t.true(
+		queuedMessages(queue).some(
+			message => message.length > 0 && String(nudge.content).includes(message),
+		),
+		'the parse error the model is sent is also shown to the user',
+	);
+	t.is(completions, 1);
 });
 
 // ============================================================================
-// Unknown Tool Handling Tests (lines 236-261)
+// Unknown Tool Handling Tests
 // ============================================================================
 
 test.serial('processAssistantResponse - handles unknown tool errors', async t => {
-	// This requires mocking filterValidToolCalls to return error results
-	// The function should display errors and recurse with error context
+	let ran = false;
+	setToolRegistryGetter(() => ({
+		nope: async () => {
+			ran = true;
+			return 'should not run';
+		},
+	}));
+	const {client, requests} = scriptedClient([
+		{toolCalls: [toolCall('nope')]},
+		{content: 'Sorry, done.'},
+	]);
+	const queue: unknown[] = [];
+	try {
+		await processAssistantResponse(
+			createDefaultParams({
+				client,
+				toolManager: createMockToolManager({tools: ['read_file']}),
+				addToChatQueue: (item: unknown) => queue.push(item),
+			}),
+		);
+	} finally {
+		setToolRegistryGetter(() => ({}));
+	}
 
-	t.pass('Unknown tool handling requires injectable filterValidToolCalls');
+	t.false(ran, 'an unknown tool never runs');
+	t.is(requests.length, 2, 'the model is asked to retry with a valid tool');
+	const result = requests[1][requests[1].length - 1];
+	t.is(result.role, 'tool');
+	t.is(result.tool_call_id, 'call_nope');
+	t.regex(String(result.content), /nope/);
+	t.true(
+		queuedMessages(queue).some(message => message.includes('unavailable tool ("nope")')),
+		'the user sees a concise notice',
+	);
 });
 
 // ============================================================================
-// Plan Mode Blocking Tests (lines 265-310)
+// Plan Mode Blocking Tests
 // ============================================================================
 
 test.serial('processAssistantResponse - blocks file modification tools in plan mode', async t => {
-	// This test would require:
-	// 1. Mock client.chat() to return file modification tool calls
-	// 2. Set developmentMode to 'plan'
-	// 3. Verify error messages are displayed
-	// 4. Verify recursion with error results
+	let wrote = false;
+	setToolRegistryGetter(() => ({
+		write_file: async () => {
+			wrote = true;
+			return 'written';
+		},
+	}));
+	const {client, requests} = scriptedClient([
+		{toolCalls: [toolCall('write_file')]},
+		{content: 'Here is the plan instead.'},
+	]);
+	try {
+		await processAssistantResponse(
+			createDefaultParams({
+				client,
+				toolManager: {
+					...createMockToolManager({
+						tools: ['read_file', 'write_file'],
+						needsApproval: false,
+					}),
+					// Plan mode does not offer write_file, though it is registered.
+					getAvailableToolNames: () => ['read_file'],
+				},
+				developmentMode: 'plan' as const,
+			}),
+		);
+	} finally {
+		setToolRegistryGetter(() => ({}));
+	}
 
-	t.pass('Plan mode blocking requires injectable dependencies');
+	t.false(wrote, 'a mutating tool plan mode did not offer never runs');
+	const result = requests[1][requests[1].length - 1];
+	t.is(result.role, 'tool');
+	t.regex(String(result.content), /not available in the current mode/);
 });
 
 // ============================================================================
-// Tool Categorization Tests (lines 314-391)
+// Tool Categorization Tests
 // ============================================================================
 
 test.serial('processAssistantResponse - categorizes tools by needsApproval', async t => {
-	// This test requires:
-	// 1. Mock client.chat() to return multiple tool calls
-	// 2. Mock toolManager.getToolEntry() to return different needsApproval values
-	// 3. Verify tools are correctly separated into confirmation vs direct execution
+	const ran: string[] = [];
+	setToolRegistryGetter(() => ({
+		auto_tool: async () => {
+			ran.push('auto_tool');
+			return 'auto done';
+		},
+		guarded_tool: async () => {
+			ran.push('guarded_tool');
+			return 'guarded done';
+		},
+	}));
+	const prompted: string[] = [];
+	setGlobalToolConfirmHandler(async (request: {toolCall: ToolCall}) => {
+		prompted.push(request.toolCall.function.name);
+		return true;
+	});
+	const {client} = scriptedClient([
+		{toolCalls: [toolCall('auto_tool'), toolCall('guarded_tool')]},
+		{content: 'Both done.'},
+	]);
+	try {
+		await processAssistantResponse(
+			createDefaultParams({
+				client,
+				toolManager: {
+					...createMockToolManager({tools: ['auto_tool', 'guarded_tool']}),
+					getToolFormatter: () => undefined,
+					getToolEntry: (name: string) => ({
+						name,
+						approval: name === 'guarded_tool',
+					}),
+				},
+			}),
+		);
+	} finally {
+		setToolRegistryGetter(() => ({}));
+		setGlobalToolConfirmHandler(async () => true);
+	}
 
-	t.pass('Tool categorization requires injectable toolManager');
+	t.deepEqual(prompted, ['guarded_tool'], 'only the tool needing approval asks');
+	t.deepEqual(ran, ['auto_tool', 'guarded_tool']);
 });
 
 // ============================================================================
-// Direct Execution Tests (lines 394-418)
+// Direct Execution Tests
 // ============================================================================
 
 test.serial('processAssistantResponse - executes tools directly when no approval needed', async t => {
-	// This test requires:
-	// 1. Mock client.chat() to return tool calls with needsApproval: false
-	// 2. Mock executeToolsDirectly to return results
-	// 3. Verify recursion with tool results
+	let ran = 0;
+	setToolRegistryGetter(() => ({
+		safe_tool: async () => {
+			ran++;
+			return 'safe output';
+		},
+	}));
+	let prompts = 0;
+	setGlobalToolConfirmHandler(async () => {
+		prompts++;
+		return true;
+	});
+	const {client, requests} = scriptedClient([
+		{toolCalls: [toolCall('safe_tool')]},
+		{content: 'All done.'},
+	]);
+	let completions = 0;
+	try {
+		await processAssistantResponse(
+			createDefaultParams({
+				client,
+				toolManager: {
+					...createMockToolManager({
+						tools: ['safe_tool'],
+						needsApproval: false,
+					}),
+					getToolFormatter: () => undefined,
+				},
+				onConversationComplete: () => {
+					completions++;
+				},
+			}),
+		);
+	} finally {
+		setToolRegistryGetter(() => ({}));
+		setGlobalToolConfirmHandler(async () => true);
+	}
 
-	t.pass('Direct execution requires injectable executeToolsDirectly');
+	t.is(ran, 1);
+	t.is(prompts, 0, 'no confirmation for a tool that needs none');
+	const result = requests[1][requests[1].length - 1];
+	t.is(result.role, 'tool');
+	t.is(result.tool_call_id, 'call_safe_tool');
+	t.regex(String(result.content), /safe output/);
+	t.is(completions, 1);
 });
 
 // ============================================================================
-// Non-Interactive Exit Tests (lines 422-453)
+// Non-Interactive Exit Tests
 // ============================================================================
 
 test.serial('processAssistantResponse - exits in non-interactive mode when approval needed', async t => {
-	let conversationCompleteCalled = false;
-	const addToChatQueue = () => {};
-	const setMessages = () => {};
-
-	const params = createDefaultParams({
-		developmentMode: 'normal',
-		nonInteractiveMode: true,
-		onConversationComplete: () => {
-			conversationCompleteCalled = true;
+	let ran = false;
+	setToolRegistryGetter(() => ({
+		guarded_tool: async () => {
+			ran = true;
+			return 'should not run';
 		},
-		addToChatQueue,
-		setMessages,
+	}));
+	let prompts = 0;
+	setGlobalToolConfirmHandler(async () => {
+		prompts++;
+		return true;
 	});
+	const {client, requests} = scriptedClient([
+		{toolCalls: [toolCall('guarded_tool')]},
+	]);
+	const snapshots: Message[][] = [];
+	const generating: boolean[] = [];
+	let completions = 0;
+	try {
+		await processAssistantResponse(
+			createDefaultParams({
+				client,
+				toolManager: createMockToolManager({
+					tools: ['guarded_tool'],
+					needsApproval: true,
+				}),
+				nonInteractiveMode: true,
+				setMessages: (messages: Message[]) => snapshots.push(messages),
+				setIsGenerating: (value: boolean) => generating.push(value),
+				onConversationComplete: () => {
+					completions++;
+				},
+			}),
+		);
+	} finally {
+		setToolRegistryGetter(() => ({}));
+		setGlobalToolConfirmHandler(async () => true);
+	}
 
-	// Create a mock client that returns a tool requiring approval
-	// (We can't easily test this without injectable dependencies)
-
-	t.pass('Non-interactive exit requires proper mock setup');
+	t.false(ran);
+	t.is(prompts, 0, 'nobody is asked in a non-interactive run');
+	t.is(requests.length, 1, 'the run exits instead of re-prompting');
+	t.is(completions, 1);
+	t.is(generating[generating.length - 1], false);
+	const final = snapshots[snapshots.length - 1];
+	const result = final.find(
+		m => m.role === 'tool' && m.tool_call_id === 'call_guarded_tool',
+	);
+	t.truthy(result, 'the blocked call still gets a result');
+	t.regex(String(final[final.length - 1].content), /^Tool approval required for: guarded_tool/);
 });
 
 test.serial('processAssistantResponse - marks the non-interactive approval notice display-only', async t => {
@@ -1569,21 +1796,102 @@ test.serial('processAssistantResponse - nudges once for an approved plan without
 test.serial('processAssistantResponse - calls onConversationComplete when done', async t => {
 	let conversationCompleteCalled = false;
 
+	const generating: boolean[] = [];
+	let chatCalls = 0;
+	const client = createMockClient({
+		content: 'Here is my response!',
+		toolCalls: undefined,
+	});
 	const params = createDefaultParams({
 		onConversationComplete: () => {
 			conversationCompleteCalled = true;
 		},
-		// Mock client to return content with no tool calls
-		client: createMockClient({
-			content: 'Here is my response!',
-			toolCalls: undefined,
-		}),
+		setIsGenerating: (value: boolean) => generating.push(value),
+		client: {
+			chat: async () => {
+				chatCalls++;
+				return client.chat();
+			},
+		},
 	});
 
-	// This would complete the conversation without errors
-	// if all dependencies are properly mocked
+	await processAssistantResponse(params);
 
-	t.pass('Conversation complete requires proper mock setup');
+	t.true(conversationCompleteCalled);
+	t.is(chatCalls, 1);
+	t.is(generating[generating.length - 1], false, 'generation ends');
+});
+
+// #2048: declining a confirmation ends the turn. Every call the decline
+// skipped is paired with a cancellation result, the model is not asked
+// again, and completion is signalled exactly once so queued messages drain.
+test.serial('#2048 a declined confirmation records cancellations and signals completion once', async t => {
+	const ran: string[] = [];
+	setToolRegistryGetter(() => ({
+		first_tool: async () => {
+			ran.push('first_tool');
+			return 'first';
+		},
+		second_tool: async () => {
+			ran.push('second_tool');
+			return 'second';
+		},
+	}));
+	setGlobalToolConfirmHandler(async () => false);
+	const snapshots: Message[][] = [];
+	const queue: unknown[] = [];
+	let completions = 0;
+	let chatCalls = 0;
+	try {
+		await processAssistantResponse(
+			createDefaultParams({
+				client: {
+					chat: async (): Promise<LLMChatResponse> => {
+						chatCalls++;
+						return {
+							choices: [
+								{
+									message: {
+										role: 'assistant',
+										content: '',
+										tool_calls: [
+											{id: 'call_first', function: {name: 'first_tool', arguments: '{}'}},
+											{id: 'call_second', function: {name: 'second_tool', arguments: '{}'}},
+										],
+									},
+								},
+							],
+							toolsDisabled: false,
+						};
+					},
+				},
+				toolManager: createMockToolManager({
+					tools: ['first_tool', 'second_tool'],
+					needsApproval: true,
+				}),
+				setMessages: (messages: Message[]) => snapshots.push(messages),
+				addToChatQueue: (item: unknown) => queue.push(item),
+				onConversationComplete: () => {
+					completions++;
+				},
+			}),
+		);
+	} finally {
+		setToolRegistryGetter(() => ({}));
+		setGlobalToolConfirmHandler(async () => true);
+	}
+
+	t.deepEqual(ran, [], 'nothing declined runs');
+	t.is(chatCalls, 1, 'a decline does not re-prompt the model');
+	t.is(completions, 1);
+	const final = snapshots[snapshots.length - 1];
+	for (const id of ['call_first', 'call_second']) {
+		const result = final.find(m => m.role === 'tool' && m.tool_call_id === id);
+		t.regex(String(result?.content), /cancelled/i, `${id} is paired with a cancellation`);
+	}
+	t.true(
+		queuedMessages(queue).includes('Tool execution cancelled by user.'),
+	);
 });
 
 // ============================================================================
