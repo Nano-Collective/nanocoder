@@ -310,3 +310,65 @@ export function validateCliArgs(args: string[]): string | undefined {
 	const end = runCommandIndex === -1 ? args.length : runCommandIndex;
 	return validateTopLevelArgs(args, end);
 }
+
+/** Stdout formats that carry machine-readable output instead of human text. */
+export type MachineOutputFormat = 'text' | 'json' | 'stream-json';
+
+export interface MachineOutputGuardInput {
+	outputFormat: MachineOutputFormat;
+	/** True for `run` (and for `review`, which sets it too — see cli.tsx). */
+	nonInteractiveMode: boolean;
+	isRunCommand: boolean;
+	isReviewCommand: boolean;
+	vscodeMode: boolean;
+	noPlainRequested: boolean;
+	acpMode: boolean;
+}
+
+export interface MachineOutputGuardErrors {
+	/** `--output-format` without `run`. */
+	runOnly?: string;
+	/** `--output-format` with `--vscode`. */
+	vscode?: string;
+	/** `--output-format` with `review`. */
+	review?: string;
+	/** `--output-format` with `--no-plain`. */
+	noPlain?: string;
+	/** `--output-format` with `--acp`. */
+	acp?: string;
+}
+
+/**
+ * The five exclusive-stdout-protocol guards for the machine-output formats
+ * (`--json` / `--output-format stream-json`), each as the message cli.tsx
+ * prints before exiting. One function so the messages live exactly once:
+ * cli.tsx reads one field at each guard's site — the sites keep their order
+ * among the --plain / review-TTY checks between them — and cli.spec.ts
+ * asserts on this function directly instead of a hand-written copy that
+ * can drift from the real guards.
+ */
+export function resolveMachineOutputErrors(
+	input: MachineOutputGuardInput,
+): MachineOutputGuardErrors {
+	const errors: MachineOutputGuardErrors = {};
+	const {outputFormat} = input;
+	if (outputFormat !== 'json' && outputFormat !== 'stream-json') {
+		return errors;
+	}
+	if (!input.nonInteractiveMode) {
+		errors.runOnly = `Error: --output-format ${outputFormat} can only be used with the 'run' command.`;
+	}
+	if (input.vscodeMode) {
+		errors.vscode = `Error: --output-format ${outputFormat} cannot be combined with --vscode.`;
+	}
+	if (input.isReviewCommand) {
+		errors.review = `Error: --output-format ${outputFormat} cannot be used with \`nanocoder review\`. Review output is displayed in the interactive terminal.`;
+	}
+	if (input.isRunCommand && input.noPlainRequested) {
+		errors.noPlain = `Error: --output-format ${outputFormat} needs the plain shell and cannot be combined with --no-plain.`;
+	}
+	if (input.acpMode) {
+		errors.acp = `Error: --output-format ${outputFormat} cannot be combined with --acp.`;
+	}
+	return errors;
+}

@@ -2,6 +2,11 @@ import test from 'ava';
 import {readFileSync} from 'node:fs';
 import {parseReviewCliArgs} from './commands/review-cli.js';
 import {
+	resolveMachineOutputErrors,
+	type MachineOutputGuardErrors,
+	type MachineOutputGuardInput,
+} from './cli-args.js';
+import {
 	KNOWN_RUN_FLAGS,
 	parseRunPrompt,
 	RUN_FLAGS_STANDALONE,
@@ -700,82 +705,121 @@ test('CLI parsing: errors on empty --profile=', t => {
 	t.is(result.error, '--profile requires a profile name.');
 });
 
-// Review guard tests — mirrors the guards in cli.tsx
-function resolveReviewGuards(opts: {
-	args: string[];
-	stdoutIsTTY: boolean;
-	outputFormat: string;
-}): {ttyError: boolean; jsonError: boolean; collisionError: boolean} {
-	const {args, stdoutIsTTY, outputFormat} = opts;
-	const isRunCommand = args.indexOf('run') !== -1;
-	const isReviewCommand = args[0] === 'review';
-	const ttyError = isReviewCommand && !stdoutIsTTY;
-	const jsonError = isReviewCommand && outputFormat === 'json';
-	const collisionError = isRunCommand && isReviewCommand;
-	return {ttyError, jsonError, collisionError};
+// Machine-output guard tests — the real guards, not a copy of them.
+// resolveMachineOutputErrors is the helper cli.tsx calls, so a guard added
+// there is covered the moment it is added.
+function machineOutputErrors(
+	outputFormat: 'text' | 'json' | 'stream-json',
+	overrides: Partial<MachineOutputGuardInput> = {},
+): MachineOutputGuardErrors {
+	return resolveMachineOutputErrors({
+		outputFormat,
+		nonInteractiveMode: true,
+		isRunCommand: true,
+		isReviewCommand: false,
+		vscodeMode: false,
+		noPlainRequested: false,
+		acpMode: false,
+		...overrides,
+	});
+}
+
+test('machine-output guard: run-only rejects both formats without run', t => {
+	t.truthy(machineOutputErrors('json', {nonInteractiveMode: false}).runOnly);
+	t.truthy(
+		machineOutputErrors('stream-json', {nonInteractiveMode: false}).runOnly,
+	);
+	t.is(machineOutputErrors('json').runOnly, undefined);
+	t.is(
+		machineOutputErrors('text', {nonInteractiveMode: false}).runOnly,
+		undefined,
+	);
+});
+
+test('machine-output guard: --vscode rejects both formats', t => {
+	t.truthy(machineOutputErrors('json', {vscodeMode: true}).vscode);
+	t.truthy(machineOutputErrors('stream-json', {vscodeMode: true}).vscode);
+	t.is(machineOutputErrors('json').vscode, undefined);
+});
+
+test('machine-output guard: review rejects both formats', t => {
+	// review sets nonInteractiveMode in cli.tsx, so runOnly stays silent.
+	t.truthy(machineOutputErrors('json', {isReviewCommand: true}).review);
+	t.truthy(
+		machineOutputErrors('stream-json', {isReviewCommand: true}).review,
+	);
+	t.is(machineOutputErrors('json').review, undefined);
+});
+
+test('machine-output guard: --no-plain rejects both formats with run', t => {
+	t.truthy(machineOutputErrors('json', {noPlainRequested: true}).noPlain);
+	t.truthy(
+		machineOutputErrors('stream-json', {noPlainRequested: true}).noPlain,
+	);
+	t.is(
+		machineOutputErrors('json', {
+			noPlainRequested: true,
+			isRunCommand: false,
+		}).noPlain,
+		undefined,
+	);
+});
+
+test('machine-output guard: --acp rejects both formats', t => {
+	t.truthy(machineOutputErrors('json', {acpMode: true}).acp);
+	t.truthy(machineOutputErrors('stream-json', {acpMode: true}).acp);
+	t.is(machineOutputErrors('json').acp, undefined);
+});
+
+test('machine-output guard: text output is never guarded', t => {
+	t.deepEqual(
+		machineOutputErrors('text', {
+			nonInteractiveMode: false,
+			vscodeMode: true,
+			isReviewCommand: true,
+			noPlainRequested: true,
+			acpMode: true,
+		}),
+		{},
+	);
+});
+
+test('machine-output guard: a plain json run passes', t => {
+	t.deepEqual(machineOutputErrors('json'), {});
+	t.deepEqual(machineOutputErrors('stream-json'), {});
+});
+
+// The run/review collision and review-TTY guards live in cli.tsx's main()
+// and cannot run in-process; these pin the inputs they read — the real
+// review parser — rather than a copy of the guards themselves.
+function isReviewCommand(args: string[]): boolean {
+	return args[0] === 'review' && parseReviewCliArgs(args).isReviewCommand;
 }
 
 test('review guard: errors when stdout is not a TTY', t => {
-	const {ttyError} = resolveReviewGuards({
-		args: ['review', 'main'],
-		stdoutIsTTY: false,
-		outputFormat: 'text',
-	});
-	t.true(ttyError);
+	// cli.tsx gates on `isReviewCommand && !process.stdout.isTTY`. AVA runs
+	// specs with stdout piped, so the TTY half holds here, exactly as it
+	// does for a piped `nanocoder review` invocation.
+	t.true(isReviewCommand(['review', 'main']) && !process.stdout.isTTY);
 });
 
-test('review guard: passes on a TTY', t => {
-	const {ttyError} = resolveReviewGuards({
-		args: ['review', 'main'],
-		stdoutIsTTY: true,
-		outputFormat: 'text',
-	});
-	t.false(ttyError);
-});
-
-test('review guard: --json is rejected with review', t => {
-	const {jsonError} = resolveReviewGuards({
-		args: ['review', 'main'],
-		stdoutIsTTY: true,
-		outputFormat: 'json',
-	});
-	t.true(jsonError);
-});
-
-test('review guard: --json is not rejected with run', t => {
-	const {jsonError} = resolveReviewGuards({
-		args: ['run', 'hello'],
-		stdoutIsTTY: true,
-		outputFormat: 'json',
-	});
-	t.false(jsonError);
+test('review guard: review detection is what the TTY check reads', t => {
+	t.true(isReviewCommand(['review', 'main']));
+	t.false(isReviewCommand(['run', 'hello']));
 });
 
 test('review guard: run and review collision is detected', t => {
-	const {collisionError} = resolveReviewGuards({
-		args: ['review', 'run'],
-		stdoutIsTTY: true,
-		outputFormat: 'text',
-	});
-	t.true(collisionError);
+	const args = ['review', 'run'];
+	t.true(args.includes('run') && isReviewCommand(args));
 });
 
 test('review guard: review alone has no collision', t => {
-	const {collisionError} = resolveReviewGuards({
-		args: ['review', 'main'],
-		stdoutIsTTY: true,
-		outputFormat: 'text',
-	});
-	t.false(collisionError);
+	const args = ['review', 'main'];
+	t.false(args.includes('run') && isReviewCommand(args));
 });
 
 test('review guard: run alone has no collision', t => {
-	const {collisionError} = resolveReviewGuards({
-		args: ['run', 'hello'],
-		stdoutIsTTY: true,
-		outputFormat: 'text',
-	});
-	t.false(collisionError);
+	t.false(isReviewCommand(['run', 'hello']));
 });
 
 test('every flag the parser knows is stripped from the review target', t => {

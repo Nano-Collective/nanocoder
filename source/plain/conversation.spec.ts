@@ -28,6 +28,7 @@ import type {
 } from "@/types/core";
 import "@/tools/file-ops/write-file";
 import { runPlainConversation } from "./conversation.js";
+import type { StreamJsonEvent } from "./stream-json.js";
 
 // Suppress ANSI in test output so tokens streamed to stdout stay readable.
 process.env.NO_COLOR = "1";
@@ -35,6 +36,9 @@ process.env.NO_COLOR = "1";
 interface FakeClientOptions {
 	// An Error entry makes that call reject, the way a provider failure does.
 	responses: Array<Partial<LLMChatResponse> | Error>;
+	// Tokens delivered through the streaming callbacks for each call, in
+	// order — lets stream-json tests observe assistant_text deltas.
+	streamTokens?: string[][];
 }
 
 function makeFakeClient(options: FakeClientOptions): LLMClient {
@@ -47,8 +51,13 @@ function makeFakeClient(options: FakeClientOptions): LLMClient {
 		getProviderConfig: () => ({}) as never,
 		clearContext: async () => undefined,
 		getTimeout: () => undefined,
-		chat: async () => {
-			const partial = options.responses[callIndex++];
+		chat: async (_messages, _tools, callbacks) => {
+			const partial = options.responses[callIndex];
+			const tokens = options.streamTokens?.[callIndex] ?? [];
+			callIndex++;
+			for (const token of tokens) {
+				callbacks?.onToken?.(token);
+			}
 			if (!partial) {
 				throw new Error("FakeClient ran out of canned responses");
 			}
@@ -2859,4 +2868,241 @@ test.serial("verify: a run that edited nothing is not held up", async (t) => {
 
 	t.is(calls, 1);
 	if (outcome.kind === "success") t.is(outcome.finalText, "Just an answer.");
+});
+
+// --- --output-format stream-json events ---
+
+test("stream-json emits assistant_text deltas and per-turn usage", async (t) => {
+	const client = makeFakeClient({
+		responses: [
+			{
+				choices: [{ message: { role: "assistant", content: "hello world" } }],
+				usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
+			},
+		],
+		streamTokens: [["hello ", "world"]],
+	});
+	const toolManager = makeFakeToolManager();
+	const events: StreamJsonEvent[] = [];
+
+	const outcome = await runPlainConversation({
+		client,
+		toolManager,
+		systemMessage: SYSTEM,
+		initialMessages: [USER],
+		developmentMode: "auto-accept",
+		nonInteractiveAlwaysAllow: [],
+		abortSignal: new AbortController().signal,
+		outputFormat: "stream-json",
+		onStreamJsonEvent: (event) => {
+			events.push(event);
+		},
+	});
+
+	t.is(outcome.kind, "success");
+	t.deepEqual(events, [
+		{ type: "assistant_text", turn: 1, delta: "hello " },
+		{ type: "assistant_text", turn: 1, delta: "world" },
+		{
+			type: "usage",
+			turn: 1,
+			inputTokens: 10,
+			outputTokens: 5,
+			totalTokens: 15,
+		},
+	]);
+});
+
+test("stream-json emits tool_call and tool_result for an executed tool", async (t) => {
+	const toolCall: ToolCall = {
+		id: "call-1",
+		function: { name: "safe_tool", arguments: { path: "a.txt" } },
+	};
+	const client = makeFakeClient({
+		responses: [
+			{
+				choices: [
+					{
+						message: {
+							role: "assistant",
+							content: "",
+							tool_calls: [toolCall],
+						},
+					},
+				],
+			},
+			{
+				choices: [{ message: { role: "assistant", content: "all done" } }],
+			},
+		],
+	});
+	const toolManager = makeFakeToolManager({
+		knownTools: new Set(["safe_tool"]),
+		needsApprovalByName: { safe_tool: false },
+	});
+	setToolRegistryGetter(() => ({
+		safe_tool: (async () => "tool-output") as ToolHandler,
+	}));
+	const events: StreamJsonEvent[] = [];
+
+	const outcome = await runPlainConversation({
+		client,
+		toolManager,
+		systemMessage: SYSTEM,
+		initialMessages: [USER],
+		developmentMode: "auto-accept",
+		nonInteractiveAlwaysAllow: [],
+		abortSignal: new AbortController().signal,
+		outputFormat: "stream-json",
+		onStreamJsonEvent: (event) => {
+			events.push(event);
+		},
+	});
+
+	t.is(outcome.kind, "success");
+	t.deepEqual(events, [
+		{
+			type: "tool_call",
+			turn: 1,
+			name: "safe_tool",
+			arguments: { path: "a.txt" },
+		},
+		{
+			type: "tool_result",
+			turn: 1,
+			name: "safe_tool",
+			isError: false,
+			content: "tool-output",
+		},
+	]);
+});
+
+test("stream-json emits an error tool_result for an unknown tool", async (t) => {
+	const toolCall: ToolCall = {
+		id: "call-1",
+		function: { name: "nope_tool", arguments: {} },
+	};
+	const client = makeFakeClient({
+		responses: [
+			{
+				choices: [
+					{
+						message: {
+							role: "assistant",
+							content: "",
+							tool_calls: [toolCall],
+						},
+					},
+				],
+			},
+			{
+				choices: [{ message: { role: "assistant", content: "done" } }],
+			},
+		],
+	});
+	const toolManager = makeFakeToolManager();
+	const events: StreamJsonEvent[] = [];
+
+	const outcome = await runPlainConversation({
+		client,
+		toolManager,
+		systemMessage: SYSTEM,
+		initialMessages: [USER],
+		developmentMode: "auto-accept",
+		nonInteractiveAlwaysAllow: [],
+		abortSignal: new AbortController().signal,
+		outputFormat: "stream-json",
+		onStreamJsonEvent: (event) => {
+			events.push(event);
+		},
+	});
+
+	t.is(outcome.kind, "success");
+	t.is(events.length, 2);
+	t.is(events[0]?.type, "tool_call");
+	if (events[0]?.type === "tool_call") {
+		t.is(events[0].name, "nope_tool");
+	}
+	t.is(events[1]?.type, "tool_result");
+	if (events[1]?.type === "tool_result") {
+		t.true(events[1].isError);
+		t.truthy(events[1].content);
+	}
+});
+
+test("json mode emits no stream-json events even with a sink attached", async (t) => {
+	const client = makeFakeClient({
+		responses: [
+			{
+				choices: [{ message: { role: "assistant", content: "hello" } }],
+				usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+			},
+		],
+		streamTokens: [["hello"]],
+	});
+	const toolManager = makeFakeToolManager();
+	const events: StreamJsonEvent[] = [];
+
+	const outcome = await runPlainConversation({
+		client,
+		toolManager,
+		systemMessage: SYSTEM,
+		initialMessages: [USER],
+		developmentMode: "auto-accept",
+		nonInteractiveAlwaysAllow: [],
+		abortSignal: new AbortController().signal,
+		outputFormat: "json",
+		onStreamJsonEvent: (event) => {
+			events.push(event);
+		},
+	});
+
+	t.is(outcome.kind, "success");
+	t.deepEqual(events, []);
+});
+
+test("stream-json marks a malformed turn discarded with turn_reset", async (t) => {
+	// The first turn streams text, then its tool call fails to parse; the
+	// retry streams under the next turn number, and the final report holds
+	// only the recovered answer — never the discarded turn's text.
+	const client = makeFakeClient({
+		responses: [
+			{
+				choices: [
+					{ message: { role: "assistant", content: "[tool_use: safe_tool]" } },
+				],
+				toolsDisabled: true,
+			},
+			{
+				choices: [{ message: { role: "assistant", content: "recovered" } }],
+			},
+		],
+		streamTokens: [["partial "], ["recovered"]],
+	});
+	const toolManager = makeFakeToolManager({
+		knownTools: new Set(["safe_tool"]),
+	});
+	const events: StreamJsonEvent[] = [];
+
+	const outcome = await runPlainConversation({
+		client,
+		toolManager,
+		systemMessage: SYSTEM,
+		initialMessages: [USER],
+		developmentMode: "auto-accept",
+		nonInteractiveAlwaysAllow: [],
+		abortSignal: new AbortController().signal,
+		outputFormat: "stream-json",
+		onStreamJsonEvent: (event) => {
+			events.push(event);
+		},
+	});
+
+	t.is(outcome.kind, "success");
+	if (outcome.kind === "success") t.is(outcome.finalText, "recovered");
+	t.deepEqual(events, [
+		{ type: "assistant_text", turn: 1, delta: "partial " },
+		{ type: "turn_reset", turn: 1, reason: "malformed_tool_call" },
+		{ type: "assistant_text", turn: 2, delta: "recovered" },
+	]);
 });

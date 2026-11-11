@@ -12,6 +12,10 @@ import {
 import {TOOL_APPROVAL_REQUIRED_KIND} from '@/constants';
 import {partitionUnknownToolCalls} from '@/hooks/chat-handler/utils/tool-filters';
 import {processToolUse} from '@/message-handler';
+import {
+	type StreamJsonEventSink,
+	truncateStreamJsonToolResult,
+} from '@/plain/stream-json';
 import {color, write, writeError, writeLine, writeStatus} from '@/plain/writer';
 import {
 	formatVerificationSummary,
@@ -48,9 +52,18 @@ export interface RunPlainConversationOptions {
 	abortSignal: AbortSignal;
 	tune?: TuneConfig;
 	model?: string;
-	outputFormat?: 'text' | 'json';
+	outputFormat?: 'text' | 'json' | 'stream-json';
 	sessionId?: string;
 	workingDirectory?: string;
+	/**
+	 * Receives one event per line of the `--output-format stream-json`
+	 * stream (assistant text deltas, tool calls/results, per-turn usage,
+	 * and a `turn_reset` when a malformed turn's streamed text is discarded).
+	 * Only called when `outputFormat` is `'stream-json'`; the plain shell
+	 * passes a sink that writes NDJSON to stdout. Kept optional so existing
+	 * callers (and their tests) need no change.
+	 */
+	onStreamJsonEvent?: StreamJsonEventSink;
 	/**
 	 * Force a walkthrough after approved-plan work. Off by default: the plain
 	 * shell's artifact directory is ephemeral, so a forced walkthrough there
@@ -174,9 +187,19 @@ async function runPlainConversationBody(
 		sessionId,
 		workingDirectory = process.cwd(),
 		enforceWalkthrough = false,
+		onStreamJsonEvent,
 	} = options;
 
 	const isJson = outputFormat === 'json';
+	const isStreamJson = outputFormat === 'stream-json';
+	// Text streaming writes to stdout, which is machine-only in the JSON
+	// modes; stream-json replaces them with NDJSON events instead.
+	const isMachineOutput = isJson || isStreamJson;
+
+	// 1-based model round-trip, matching `steps` in the final report: the
+	// engine calls beginModelCall once per request, retries included, so
+	// this counts the same calls `modelCalls` does.
+	let modelCallCount = 0;
 
 	let messages = initialMessages;
 	const walkthroughLifecycle = createWalkthroughLifecycle(initialMessages);
@@ -258,6 +281,17 @@ async function runPlainConversationBody(
 		} catch {
 			// Stats must never fail the plain loop.
 		}
+		if (isStreamJson) {
+			onStreamJsonEvent?.({
+				type: 'usage',
+				turn: modelCallCount,
+				inputTokens: inputTokens ?? 0,
+				outputTokens: outputTokens ?? 0,
+				totalTokens: turnTotal,
+				...(cacheReadTokens !== null ? {cacheReadTokens} : {}),
+				...(cacheWriteTokens !== null ? {cacheWriteTokens} : {}),
+			});
+		}
 	};
 
 	const maxTurns =
@@ -309,6 +343,7 @@ async function runPlainConversationBody(
 				};
 			},
 			beginModelCall: () => {
+				modelCallCount++;
 				let streamedReasoning = '';
 				let reasoningPrinted = false;
 				let contentStarted = false;
@@ -319,7 +354,7 @@ async function runPlainConversationBody(
 						onReasoningToken: (token: string) => {
 							streamedReasoning += token;
 							accumulatedReasoning += token;
-							if (!isJson) {
+							if (!isMachineOutput) {
 								if (!reasoningPrinted) {
 									reasoningPrinted = true;
 									write(color('gray', '> '));
@@ -329,7 +364,14 @@ async function runPlainConversationBody(
 						},
 						onToken: (token: string) => {
 							accumulatedFinalText += token;
-							if (!isJson) {
+							if (isStreamJson) {
+								onStreamJsonEvent?.({
+									type: 'assistant_text',
+									turn: modelCallCount,
+									delta: token,
+								});
+							}
+							if (!isMachineOutput) {
 								if (reasoningPrinted && !contentStarted) {
 									writeLine();
 								}
@@ -342,7 +384,7 @@ async function runPlainConversationBody(
 					},
 					reasoning: () => streamedReasoning || undefined,
 					end: () => {
-						if (!isJson && (reasoningPrinted || contentStarted)) {
+						if (!isMachineOutput && (reasoningPrinted || contentStarted)) {
 							writeLine();
 						}
 					},
@@ -364,38 +406,65 @@ async function runPlainConversationBody(
 						result: null,
 						error: errorResults[index].content,
 					});
+					if (isStreamJson) {
+						onStreamJsonEvent?.({
+							type: 'tool_call',
+							turn: modelCallCount,
+							name: toolCall.function.name,
+							arguments: toolCall.function.arguments || {},
+						});
+						onStreamJsonEvent?.({
+							type: 'tool_result',
+							turn: modelCallCount,
+							name: toolCall.function.name,
+							isError: true,
+							content: truncateStreamJsonToolResult(
+								errorResults[index].content,
+							),
+						});
+					}
 				}
 			},
 			compactOptions: () => ({
-				onNotify: isJson
+				onNotify: isMachineOutput
 					? undefined
 					: message => writeStatus(message.split('\n')[0] ?? message),
 			}),
 			onMalformedRetry: ({error, attempt}) => {
 				accumulatedFinalText = finalTextBeforeTurn;
 				accumulatedReasoning = reasoningBeforeTurn;
-				if (!isJson) {
+				if (isStreamJson) {
+					// The turn's streamed text was already emitted as
+					// assistant_text deltas; consumers must drop them — the
+					// final report never contains the discarded turn.
+					onStreamJsonEvent?.({
+						type: 'turn_reset',
+						turn: modelCallCount,
+						reason: 'malformed_tool_call',
+					});
+				}
+				if (!isMachineOutput) {
 					writeError(
 						`Malformed tool call: ${error} — asking the model to retry (${attempt}/${maxMalformedRetries}).`,
 					);
 				}
 			},
 			onEmptyRetry: attempt => {
-				if (!isJson) {
+				if (!isMachineOutput) {
 					// Count attempts, not nudges, so the denominator matches the
 					// "no output after N attempts" stop message.
 					writeStatus(`empty response — retry ${attempt}/${maxEmptyTurns + 1}`);
 				}
 			},
 			onTruncatedRetry: attempt => {
-				if (!isJson) {
+				if (!isMachineOutput) {
 					writeStatus(
 						`response truncated at the output limit — continuing ${attempt}/${maxTruncatedTurns}`,
 					);
 				}
 			},
 			onTruncatedGiveUp: message => {
-				if (!isJson) {
+				if (!isMachineOutput) {
 					writeStatus(message);
 				}
 			},
@@ -423,7 +492,7 @@ async function runPlainConversationBody(
 					? null
 					: takeEvidenceRejection(walkthroughLifecycle.ledger);
 				if (evidenceRejection) {
-					if (!isJson) {
+					if (!isMachineOutput) {
 						writeStatus(
 							'edits are not verified yet - asking for the required checks',
 						);
@@ -470,8 +539,16 @@ async function runPlainConversationBody(
 
 				const toolResults: ToolResult[] = [];
 				for (const toolCall of toolsToExecute) {
-					if (!isJson) {
+					if (!isMachineOutput) {
 						writeStatus(`tool: ${toolCall.function.name}`);
+					}
+					if (isStreamJson) {
+						onStreamJsonEvent?.({
+							type: 'tool_call',
+							turn: modelCallCount,
+							name: toolCall.function.name,
+							arguments: toolCall.function.arguments || {},
+						});
 					}
 
 					const toolResult = await processToolUse(toolCall, {
@@ -502,6 +579,15 @@ async function runPlainConversationBody(
 						result: toolResult.isError ? null : contentStr,
 						error: toolResult.isError ? contentStr : null,
 					});
+					if (isStreamJson) {
+						onStreamJsonEvent?.({
+							type: 'tool_result',
+							turn: modelCallCount,
+							name: toolCall.function.name,
+							isError: toolResult.isError ?? false,
+							content: truncateStreamJsonToolResult(contentStr),
+						});
+					}
 				}
 				return {kind: 'continue', results: toolResults};
 			},
@@ -531,7 +617,7 @@ async function runPlainConversationBody(
 				walkthroughLifecycle.ledger,
 			);
 			// The answer was already streamed to stdout; the proof follows it.
-			if (verification && !isJson) {
+			if (verification && !isMachineOutput) {
 				writeLine();
 				writeLine(verification);
 			}

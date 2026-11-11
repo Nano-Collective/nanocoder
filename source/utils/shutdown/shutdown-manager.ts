@@ -135,6 +135,21 @@ export class ShutdownManager {
 
 		await Promise.race([shutdownPromise, timeoutPromise]);
 
+		// process.exit() discards buffered stdout when piped: a final NDJSON
+		// line (or the --json report) written just before shutdown can be
+		// lost, tail included. Drain both streams first, reusing the
+		// empty-write flush cli.tsx uses for the storage fast path — but
+		// only when bytes are actually buffered: the write callback never
+		// fires for a replaced stdout.write (tests stub it), so awaiting it
+		// unconditionally would hang shutdown there.
+		const drain = (stream: NodeJS.WriteStream): Promise<void> =>
+			stream.writableLength > 0
+				? new Promise<void>(resolve => {
+						stream.write('', 'utf8', () => resolve());
+					})
+				: Promise.resolve();
+		await Promise.all([drain(nodeProcess.stdout), drain(nodeProcess.stderr)]);
+
 		nodeProcess.exit(this.exitCode);
 	}
 
