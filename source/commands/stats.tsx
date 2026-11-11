@@ -2,7 +2,7 @@
  * /stats command — lifetime usage metrics (distinct from /usage context view).
  *
  * Interactive UI (←/→ range switching, matching Settings tabs) is mounted as a
- * live component from `app-util.ts` so keyboard focus is not stolen by the chat
+ * live component from `app/utils/handlers/stats-handler.ts` so keyboard focus is not stolen by the chat
  * composer. This module exports the stub for the lazy registry plus helpers
  * used by that live-mount path and by tests.
  */

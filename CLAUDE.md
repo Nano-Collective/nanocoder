@@ -47,7 +47,7 @@ Nanocoder is a React-based CLI coding agent built with Ink.js that provides loca
 ### Key Directories
 
 - `source/hooks/` - React hooks: `useAppState` (central state), `useModeHandlers`, `useAppHandlers` (orchestrator), plus `chat-handler/useChatHandler` (LLM interaction) with the conversation loop and tool executor in `chat-handler/conversation/`
-- `source/app/` - `App.tsx` plus app-internal helpers (`utils/app-util.ts`, `utils/conversation-state.ts`, prompt sections, orchestration hooks in `app/hooks/`)
+- `source/app/` - `App.tsx` plus app-internal helpers (`utils/app-util.ts`, `utils/command-dispatcher.ts`, `utils/conversation-state.ts`, prompt sections, orchestration hooks in `app/hooks/`)
 - `source/ai-sdk-client/` - Wrapper over Vercel AI SDK: chat handler, providers, converters, tool helpers, error handling
 - `source/tools/` - Built-in tools (file ops, bash, search, web fetch). Registered in `source/tools/tool-manager.ts`; file editors are `string_replace`, `diff_edit` and `write_file` (in `source/tools/file-ops/`)
 - `source/components/` - Ink UI components
@@ -65,7 +65,7 @@ Nanocoder is a React-based CLI coding agent built with Ink.js that provides loca
 - `source/lsp/` - Language server client integration
 - `source/wizards/` - Interactive setup flows (config, MCP, providers)
 - `source/plain/` - Non-Ink CLI shell used by `--plain`
-- `source/agent-loop/` - Shared, Ink-free agent turn engine (`runTurnEngine`): one iterative loop owning the model call, text tool-call parsing, retry guards, auto-compaction and turn limits. Frontends plug in through an adapter; `--plain` runs on it, and the ACP, subagent and TUI loops are moving onto it
+- `source/agent-loop/` - Shared, Ink-free agent turn engine (`runTurnEngine`): one iterative loop owning the model call, text tool-call parsing, retry guards, auto-compaction and turn limits. Frontends plug in through an adapter; `--plain` and ACP run on it, and the subagent and TUI loops are moving onto it
 - `source/skills/` - Unified skill primitive: loaders (bundle + flat-dir adapter), manifest parser, frontmatter `subscribe:` parser, registrar that fans members into the existing command / subagent / tool registries, dispatcher for triggered runs
 - `source/events/` - Event router, file watcher source (chokidar), cron source (croner), backpressure (per-subscription concurrency cap + 500ms trailing debounce on `file.changed`)
 - `source/daemon/` - Per-project daemon process: lockfile, Unix-socket IPC server / TUI client, CLI surface (`nanocoder daemon <start|stop|status|logs|install|uninstall>`), launchd plist + systemd user unit installers, background CI watch
@@ -105,9 +105,15 @@ Two execution paths exist: native tool calling (preferred, via AI SDK) and an XM
 
 ### Command System
 
-Slash commands live in `source/commands/` and are lazy-loaded via `source/commands/lazy-registry.ts`. To add a new command: create the command file exporting a `Command` object (name, description, handler), then add an entry to `lazyCommands` in the registry. Commands return React elements for Ink rendering. Some commands (clear, model, provider, etc.) need app state and are intercepted as "special commands" in `source/app/utils/app-util.ts`.
+Slash commands live in `source/commands/` and are lazy-loaded via `source/commands/lazy-registry.ts`. To add a new command: create the command file, then add an entry to `lazyCommands` in the registry. Every slash command is resolved by `dispatchSlashCommand` in `source/app/utils/command-dispatcher.ts`, in this order: custom commands, MCP prompts, old names from `source/commands/aliases.ts`, inline `?key=value` overrides, then the registry.
 
-A command that does slow work before returning (LLM round-trip, network) should declare `progressLabel`. `handleBuiltInCommand` then holds a `CommandProgress` spinner in the live slot for the duration, so the UI is not silent while the handler runs. Set it on both the module's `Command` object and its `lazyCommands` entry - the spinner has to render before `load()` resolves, so it cannot be read off the lazily-imported module.
+A command module exports one of two shapes (`source/types/commands.ts`):
+- **`Command`** (`handler`): reads its args, the messages and some metadata, and returns a React element or string to show.
+- **`StatefulCommand`** (`run`): changes app state. It receives a typed `CommandContext` (args plus the setters and services it may use) and returns a `CommandCompletion` saying when the prompt is handed back (`done`, or `done-after-render` once queued output has rendered). If a command needs app state the context lacks, add it to `CommandContext` and to `createCommandContext` in the dispatcher.
+
+Some older stateful commands (model, settings, checkpoint load, stats, login, compact, ...) are still stubs whose logic lives in the handlers under `source/app/utils/handlers/`, run by the dispatcher before the registry. They are being moved to `StatefulCommand`; do not add new ones there.
+
+A command that does slow work before returning (LLM round-trip, network) should declare `progressLabel`. The dispatcher then holds a `CommandProgress` spinner in the live slot for the duration, so the UI is not silent while the command runs. Set it on both the module's command object and its `lazyCommands` entry - the spinner has to render before `load()` resolves, so it cannot be read off the lazily-imported module.
 
 ### Custom Tools
 

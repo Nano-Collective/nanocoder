@@ -4,9 +4,9 @@ import {tmpdir} from 'os';
 import {join} from 'path';
 import {resetPreferencesCache} from '@/config/preferences';
 import {
-	createSessionCwdScope,
-	runInSessionCwdScope,
-} from '@/services/session-cwd';
+	createSessionContext,
+	runInSessionContext,
+} from '@/services/session-context';
 import {
 	buildSystemPrompt,
 	getLastBuiltPrompt,
@@ -452,7 +452,7 @@ test('buildSystemPrompt - non-nano with includeAgentsMd=false omits AGENTS.md', 
 test('buildSystemPrompt - reports the session cwd inside a session scope', t => {
 	const dir = mkdtempSync(join(tmpdir(), 'nc-prompt-cwd-'));
 	try {
-		const result = runInSessionCwdScope(createSessionCwdScope(dir), () =>
+		const result = runInSessionContext(createSessionContext(dir), () =>
 			buildSystemPrompt('normal', TUNE_DEFAULTS, NANO_TOOLS),
 		);
 		t.true(result.includes(`Current Working Directory: ${dir}`));
@@ -467,7 +467,7 @@ test('buildSystemPrompt - appends the session project AGENTS.md inside a session
 	try {
 		writeFileSync(join(dir, 'AGENTS.md'), 'SESSION PROJECT GUIDANCE');
 		const tune: TuneConfig = {...TUNE_NANO, includeAgentsMd: true};
-		const result = runInSessionCwdScope(createSessionCwdScope(dir), () =>
+		const result = runInSessionContext(createSessionContext(dir), () =>
 			buildSystemPrompt('normal', tune, NANO_TOOLS),
 		);
 		t.true(result.includes('SESSION PROJECT GUIDANCE'));

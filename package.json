@@ -160,6 +160,9 @@
 			"!source/**/*-helpers.ts",
 			"!source/**/test-helpers.ts"
 		],
+		"require": [
+			"./source/test-utils/isolated-models-cache.ts"
+		],
 		"workerThreads": false,
 		"serial": true,
 		"environmentVariables": {
