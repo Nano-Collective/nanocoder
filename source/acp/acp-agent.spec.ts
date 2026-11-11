@@ -14,11 +14,8 @@ import {artifactManager} from '@/artifacts/artifact-manager';
 import {AcpAgent} from '@/acp/acp-agent';
 import type {AcpInitContext} from '@/acp/acp-types';
 import {clearAppConfig, getAppConfig} from '@/config';
-import {
-	grantDirectoryTrust,
-	loadPreferences,
-	savePreferences,
-} from '@/config/preferences';
+import {loadPreferences, savePreferences} from '@/config/preferences';
+import {grantDirectoryTrust} from '@/config/trust/directory-trust';
 import {
 	setToolRegistryGetter,
 	setToolManagerGetter,

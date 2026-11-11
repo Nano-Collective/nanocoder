@@ -161,7 +161,9 @@ const defaultDeps: VerifyCliDeps = {
 	// Lazy import: config/preferences pulls in most of the config stack, which
 	// the argument-error fast paths above shouldn't pay for.
 	checkTrust: async (directory, bypass) => {
-		const {directoryTrustRefusal} = await import('@/config/preferences');
+		const {directoryTrustRefusal} = await import(
+			'@/config/trust/directory-trust'
+		);
 		return directoryTrustRefusal(directory, bypass);
 	},
 	initializePlain: async opts => {

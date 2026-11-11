@@ -6,7 +6,7 @@ import { clearAppConfig, reloadAppConfig } from "@/config/index";
 import {
 	describeProjectTrust,
 	TRUST_FINGERPRINT_VERSION,
-} from "@/config/project-trust";
+} from "@/config/trust/project-trust";
 import {
 	clearPendingHookContext,
 	resetSessionStartHooks,

@@ -14,8 +14,8 @@ import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import test from 'ava';
 import {loadPreferences, resetPreferencesCache} from '@/config/preferences';
-import {describeProjectTrust} from '@/config/project-trust';
-import {runTrustCli} from '@/config/trust-cli';
+import {describeProjectTrust} from '@/config/trust/project-trust';
+import {runTrustCli} from '@/config/trust/trust-cli';
 
 console.log('\ntrust-cli.spec.ts');
 
@@ -127,7 +127,7 @@ test("does not load the folder's .env into the environment", t => {
 				...process.env,
 				NANOCODER_CONFIG_DIR: configDir,
 				TSX_TSCONFIG_PATH: fileURLToPath(
-					new URL('../../tsconfig.json', import.meta.url),
+					new URL('../../../tsconfig.json', import.meta.url),
 				),
 			},
 		},
@@ -149,7 +149,7 @@ const runFresh = (
 	const merged: NodeJS.ProcessEnv = {
 		...process.env,
 		TSX_TSCONFIG_PATH: fileURLToPath(
-			new URL('../../tsconfig.json', import.meta.url),
+			new URL('../../../tsconfig.json', import.meta.url),
 		),
 		...env,
 	};
@@ -233,7 +233,7 @@ test('--grant writes only the global preferences file and leaves a read-only fol
 	};
 	const script = `
 		const {runTrustCli} = await import(${JSON.stringify(import.meta.resolve('./trust-cli.ts'))});
-		const {getConfigPath} = await import(${JSON.stringify(import.meta.resolve('./paths.ts'))});
+		const {getConfigPath} = await import(${JSON.stringify(import.meta.resolve('../paths.ts'))});
 		const {mkdirSync, writeFileSync} = await import('node:fs');
 		const {join} = await import('node:path');
 		const configPath = getConfigPath();

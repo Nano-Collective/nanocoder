@@ -70,12 +70,14 @@ import {isInternalWalkthroughMessage} from '@/artifacts/walkthrough-lifecycle';
 import {createLLMClient} from '@/client-factory';
 import {getAppConfig} from '@/config/index';
 import {
-	ensureDirectoryTrust,
 	getProjectContextPreferences,
 	loadPreferences,
-	untrustedReason,
 	updateLastUsed,
 } from '@/config/preferences';
+import {
+	ensureDirectoryTrust,
+	untrustedReason,
+} from '@/config/trust/directory-trust';
 import {resolveTune} from '@/config/tune';
 import {appendRelevantProjectContextWithCount} from '@/memory/project-context';
 import {withTrustedProjectPlugins} from '@/plugins/host';

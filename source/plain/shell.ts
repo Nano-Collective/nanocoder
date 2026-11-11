@@ -7,12 +7,14 @@ import {
 } from '@/artifacts/artifact-manager';
 import {getAppConfig} from '@/config/index';
 import {
-	ensureDirectoryTrust,
 	loadPreferences,
 	resolveProjectContextPreferences,
 	savePreferences,
-	untrustedDirectoryMessage,
 } from '@/config/preferences';
+import {
+	ensureDirectoryTrust,
+	untrustedDirectoryMessage,
+} from '@/config/trust/directory-trust';
 import {resolveTune} from '@/config/tune';
 import {
 	TOOL_APPROVAL_REQUIRED_KIND,

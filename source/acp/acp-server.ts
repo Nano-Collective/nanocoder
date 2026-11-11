@@ -1,7 +1,7 @@
 import {AgentSideConnection, ndJsonStream} from '@agentclientprotocol/sdk';
 import {AcpAgent} from '@/acp/acp-agent';
 import type {AcpInitContext} from '@/acp/acp-types';
-import {directoryTrustRefusal} from '@/config/preferences';
+import {directoryTrustRefusal} from '@/config/trust/directory-trust';
 import {initializePlain} from '@/plain/initialize';
 import {SESSION_END_HOOK_HANDLER} from '@/services/lifecycle-hooks';
 import type {DevelopmentMode} from '@/types/index';
