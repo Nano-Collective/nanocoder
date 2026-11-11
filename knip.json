@@ -12,10 +12,7 @@
 		"taskkill"
 	],
 	"ignore": [
-		"source/utils/message-queue.tsx",
-		"source/vscode/**/*.ts",
 		"plugins/**/*",
-		"scripts/fetch-models.js",
 		".husky/**",
 		".github/**",
 		"benchmarks/count-loader.mjs",

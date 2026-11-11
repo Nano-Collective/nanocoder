@@ -117,7 +117,7 @@ function queryAll(root: StubElement, selector: string): StubElement[] {
 	return found;
 }
 
-export function createElement(tagName: string): StubElement {
+function createElement(tagName: string): StubElement {
 	const classes = new Set<string>();
 	const attributes = new Map<string, string>();
 	// Registered handlers, so a test can drive a real listener rather than only
@@ -285,7 +285,7 @@ export function createElement(tagName: string): StubElement {
 	return element;
 }
 
-export function findById(root: StubElement, id: string): StubElement | null {
+function findById(root: StubElement, id: string): StubElement | null {
 	for (const child of root.children) {
 		if (child.id === id) return child;
 		const found = findById(child, id);
