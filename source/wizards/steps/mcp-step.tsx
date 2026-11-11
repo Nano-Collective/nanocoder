@@ -267,9 +267,9 @@ export function McpStep({
 								.map(([key, value]) => `${key}=${value}`)
 								.join('\n');
 						} else if (field.name === 'apiKey') {
-							// Try env first, then a bearer Authorization header
-							// or an X-API-Key header. `you` and `serply` use
-							// `apiKey`. `github-remote` uses `githubToken`.
+							// Try env first, then a bearer Authorization header.
+							// `you` uses `apiKey`. `github-remote` uses
+							// `githubToken`.
 							const apiKeyEntry = server.env
 								? Object.entries(server.env).find(
 										([key]) => key.includes('API_KEY') || key.includes('TOKEN'),
@@ -281,8 +281,6 @@ export function McpStep({
 								answers.apiKey = server.headers.Authorization.slice(
 									'Bearer '.length,
 								);
-							} else if (server.headers?.['X-API-Key']) {
-								answers.apiKey = server.headers['X-API-Key'];
 							}
 						} else if (
 							field.name === 'githubToken' &&
