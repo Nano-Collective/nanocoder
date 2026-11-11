@@ -954,20 +954,25 @@ export class AcpAgent implements Agent {
 	): Promise<ResumeSessionResponse> {
 		await sessionManager.initialize();
 		const saved = await sessionManager.loadSession(params.sessionId);
-		if (!saved) {
+		// A session is written to disk once it has something to keep, so one
+		// resumed straight after session/new exists only in memory.
+		const live = this.sessions.get(params.sessionId);
+		const workingDirectory = saved?.workingDirectory ?? live?.cwd;
+		if (workingDirectory === undefined) {
 			throw new Error(`Session not found on disk: ${params.sessionId}`);
 		}
 		// Refused before anything is retired: a live copy keeps running.
-		this.assertDirectoryTrusted(saved.workingDirectory);
-		const context = createSessionContext(saved.workingDirectory);
+		this.assertDirectoryTrusted(workingDirectory);
+		const context = createSessionContext(workingDirectory);
 		return runInSessionContext(context, () =>
-			this.reopenSession(params, context),
+			this.reopenSession(params, context, live),
 		);
 	}
 
 	private async reopenSession(
 		params: ResumeSessionRequest,
 		context: SessionContext,
+		live: AcpSession | undefined,
 	): Promise<ResumeSessionResponse> {
 		// Retire any live copy first, so one id never has two sessions running,
 		// and read the history after its turn has saved its last messages.
@@ -977,7 +982,16 @@ export class AcpAgent implements Agent {
 		if (!evicted) {
 			await this.releaseMcpServers(params.sessionId);
 		}
-		const persisted = await sessionManager.loadSession(params.sessionId);
+		// Its turn saves on the way out, so the disk is read after the eviction.
+		// Still nothing there: the live copy had nothing worth saving, and is
+		// resumed as it was.
+		const persisted =
+			(await sessionManager.loadSession(params.sessionId)) ??
+			(live && {
+				workingDirectory: live.cwd,
+				messages: live.messages,
+				...this.savedModelOf(live),
+			});
 		if (!persisted) {
 			throw new Error(`Session not found on disk: ${params.sessionId}`);
 		}

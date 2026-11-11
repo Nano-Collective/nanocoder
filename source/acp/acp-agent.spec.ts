@@ -3682,3 +3682,31 @@ test.serial('AcpAgent - a session in another folder reads that project\'s config
 		rmSync(projectDir, {recursive: true, force: true});
 	}
 });
+
+test.serial('AcpAgent.resumeSession - a session resumed straight after session/new is found', async t => {
+	const {agent} = createAgent();
+	await sessionManager.initialize();
+	const created = await agent.newSession({cwd: testConfigDir});
+	// Nothing worth saving yet, so the session exists only in memory.
+	t.falsy(await sessionManager.readSession(created.sessionId));
+
+	const resumed = await agent.resumeSession({
+		sessionId: created.sessionId,
+		cwd: testConfigDir,
+	});
+	t.truthy(resumed.modes);
+	const session = agent['sessions'].get(created.sessionId);
+	t.truthy(session);
+	t.is(session?.cwd, testConfigDir);
+	t.is(agent['sessions'].size, 1);
+
+	await agent.deleteSession({sessionId: created.sessionId});
+});
+
+test.serial('AcpAgent.resumeSession - an id that is neither live nor on disk is still not found', async t => {
+	const {agent} = createAgent();
+	await t.throwsAsync(
+		agent.resumeSession({sessionId: randomUUID(), cwd: testConfigDir}),
+		{message: /Session not found on disk/},
+	);
+});
