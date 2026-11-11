@@ -300,7 +300,7 @@ Options:
                       works directly, but the wheel no longer scrolls chat history.
   --json              Output execution results as a single well-formed JSON object to stdout.
                       Only valid with the "run" command. Always uses the plain runtime.
-  --output-format     Specify stdout format ('text' or 'json'). Synonym for --json.
+  --output-format     Specify stdout format ('text', 'json' or 'stream-json'). Synonym for --json.
   --acp               Run as an ACP (Agent Client Protocol) server for editor integration.
                       Communicates via JSON-RPC over stdin/stdout. Refuses an untrusted
                       directory unless --trust-directory is passed.
@@ -346,8 +346,10 @@ if (cliArgsError) {
 }
 
 // Validate output format value to prevent injection
-function isValidOutputFormat(value: unknown): value is 'text' | 'json' {
-	return value === 'text' || value === 'json';
+function isValidOutputFormat(
+	value: unknown,
+): value is 'text' | 'json' | 'stream-json' {
+	return value === 'text' || value === 'json' || value === 'stream-json';
 }
 
 async function main(): Promise<void> {
@@ -506,7 +508,7 @@ async function main(): Promise<void> {
 	}
 
 	// Extract --json or --output-format json. Accept spaced and fused formats.
-	let outputFormat: 'text' | 'json' = 'text';
+	let outputFormat: 'text' | 'json' | 'stream-json' = 'text';
 	for (let i = 0; i < args.length; i++) {
 		const arg = args[i];
 		if (arg === '--json') {
@@ -516,7 +518,7 @@ async function main(): Promise<void> {
 			const value = args[i + 1];
 			if (!isValidOutputFormat(value)) {
 				console.error(
-					`Invalid --output-format value: "${value}". Must be 'text' or 'json'.`,
+					`Invalid --output-format value: "${value}". Must be 'text', 'json' or 'stream-json'.`,
 				);
 				process.exit(1);
 			}
@@ -526,7 +528,7 @@ async function main(): Promise<void> {
 			const rawValue = arg.slice('--output-format='.length);
 			if (!isValidOutputFormat(rawValue)) {
 				console.error(
-					`Invalid --output-format value: "${rawValue}". Must be 'text' or 'json'.`,
+					`Invalid --output-format value: "${rawValue}". Must be 'text', 'json' or 'stream-json'.`,
 				);
 				process.exit(1);
 			}
@@ -534,6 +536,13 @@ async function main(): Promise<void> {
 			break;
 		}
 	}
+
+	// 'json' prints one report at the end; 'stream-json' streams NDJSON
+	// events to stdout plus that same report as the final `result` event.
+	// Both are machine-only stdout protocols, so they share every guard
+	// below that --json used to carry alone.
+	const isMachineOutputFormat =
+		outputFormat === 'json' || outputFormat === 'stream-json';
 
 	// Check for non-interactive mode (run command). The filtering lives in
 	// ./run-prompt-args so it exists exactly once — a hand-written copy of it
@@ -648,9 +657,12 @@ async function main(): Promise<void> {
 		process.exit(1);
 	}
 
-	// Validate execution constraints for --json rules
-	if (outputFormat === 'json' && !nonInteractiveMode) {
-		console.error("Error: --json can only be used with the 'run' command.");
+	// Validate execution constraints for the machine-output formats
+	// (--json / --output-format stream-json)
+	if (isMachineOutputFormat && !nonInteractiveMode) {
+		console.error(
+			`Error: --output-format ${outputFormat} can only be used with the 'run' command.`,
+		);
 		process.exit(1);
 	}
 
@@ -686,14 +698,16 @@ async function main(): Promise<void> {
 	}
 
 	// Enforce exclusive stdout protocol constraints
-	if (outputFormat === 'json' && vscodeMode) {
-		console.error('Error: --json cannot be combined with --vscode.');
+	if (isMachineOutputFormat && vscodeMode) {
+		console.error(
+			`Error: --output-format ${outputFormat} cannot be combined with --vscode.`,
+		);
 		process.exit(1);
 	}
 
-	if (outputFormat === 'json' && isReviewCommand) {
+	if (isMachineOutputFormat && isReviewCommand) {
 		console.error(
-			'Error: --json cannot be used with `nanocoder review`. Review output is displayed in the interactive terminal.',
+			`Error: --output-format ${outputFormat} cannot be used with \`nanocoder review\`. Review output is displayed in the interactive terminal.`,
 		);
 		process.exit(1);
 	}
@@ -714,13 +728,13 @@ async function main(): Promise<void> {
 		(!process.stdout.isTTY || ciDetected);
 	// --json is a plain-shell protocol: the Ink runtime has no JSON output, so
 	// honouring the flag means taking the plain path even in a real terminal.
-	if (outputFormat === 'json' && isRunCommand && noPlainRequested) {
+	if (isMachineOutputFormat && isRunCommand && noPlainRequested) {
 		console.error(
-			'Error: --json needs the plain shell and cannot be combined with --no-plain.',
+			`Error: --output-format ${outputFormat} needs the plain shell and cannot be combined with --no-plain.`,
 		);
 		process.exit(1);
 	}
-	const plainForJson = outputFormat === 'json' && isRunCommand;
+	const plainForJson = isMachineOutputFormat && isRunCommand;
 	const plainMode = plainRequested || plainAuto || plainForJson;
 
 	// Hard-error when `review` lands in a non-interactive context (piped
@@ -736,8 +750,10 @@ async function main(): Promise<void> {
 	// --acp: Agent Client Protocol server mode for editor integration
 	const acpMode = args.includes('--acp');
 
-	if (outputFormat === 'json' && acpMode) {
-		console.error('Error: --json cannot be combined with --acp.');
+	if (isMachineOutputFormat && acpMode) {
+		console.error(
+			`Error: --output-format ${outputFormat} cannot be combined with --acp.`,
+		);
 		process.exit(1);
 	}
 

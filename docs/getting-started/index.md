@@ -52,7 +52,7 @@ nanocoder -h
 | `--plain` | | Use the lightweight, Ink-free runtime for non-interactive runs. Requires `run`; auto-enables in CI and non-TTY environments |
 | `--no-plain` | | Force the Ink runtime even in CI and non-TTY environments |
 | `--json` | | Emit a single structured JSON object to `stdout` on completion instead of streamed text. Requires `run` and always uses the plain runtime, even in a terminal; incompatible with `--no-plain`, `--acp`, `--vscode` and `review` |
-| `--output-format` | | Set the `stdout` format, `text` or `json`. Synonym for `--json` |
+| `--output-format` | | Set the `stdout` format, `text`, `json` or `stream-json` (one JSON event per line, ending with a `result` event). Synonym for `--json` |
 | `--context-max` | | Set maximum context length in tokens (supports k/K suffix, e.g. `128k`) |
 | `--mode` | | Start in a specific [development mode](../features/development-modes.md) - `normal`, `auto-accept`, `yolo`, `plan`, or `architect`. Defaults to `auto-accept` for `run` mode; interactive sessions use `defaultMode` from `agents.config.json` if set, otherwise `normal`. |
 | `--trust-directory` | | Skip the first-run directory trust prompt for this run only. Valid with `run`, `nanocoder daemon start`, `nanocoder verify` and `--acp`; ignored (with a warning) in interactive mode. The trust is ephemeral - `trustedDirectories` in your preferences file is not modified. See [Directory trust](#directory-trust) |

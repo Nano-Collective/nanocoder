@@ -205,6 +205,20 @@ With `--json` set, all human-readable output — boot banners, streamed tokens, 
 nanocoder --plain --json run "refactor the auth module" | jq .finalText
 ```
 
+For live progress, pass `--output-format stream-json` instead: it emits one
+JSON object per line on `stdout` as the run happens — `session_start`,
+`assistant_text` deltas, `tool_call` / `tool_result`, per-response `usage` —
+and ends with a `result` event carrying the same object `--json` prints.
+Human-readable output goes to `stderr` in both modes, so `stdout` stays
+machine-only and a run killed by a timeout still leaves every event it had
+already emitted:
+
+```bash
+nanocoder --plain --output-format stream-json run "refactor the auth module" | while read -r line; do
+  echo "$line" | jq -r 'select(.type == "tool_call") | .name'
+done
+```
+
 `--json` requires `run` and is incompatible with `--acp` and `--vscode` — combining them exits with an error before the session starts.
 
 #### Output Shape

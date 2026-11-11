@@ -198,8 +198,9 @@ export const COMPLETION_FLAGS: readonly CompletionFlag[] = [
 		name: 'output-format',
 		takesValue: true,
 		valueName: 'format',
-		values: ['text', 'json'],
-		description: "Specify stdout format ('text' or 'json', run mode only)",
+		values: ['text', 'json', 'stream-json'],
+		description:
+			"Specify stdout format ('text', 'json' or 'stream-json', run mode only)",
 	},
 	{
 		name: 'acp',
