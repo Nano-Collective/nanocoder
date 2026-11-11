@@ -4,7 +4,7 @@ import {ChatHistory} from '@/app/components/chat-history';
 import {ChatInput} from '@/app/components/chat-input';
 import {ModalSelectors} from '@/app/components/modal-selectors';
 import type {SettingsTabId} from '@/app/components/settings-constants';
-import {canSubmitPrompt, canSubmitVoicePrompt} from '@/app/utils/prompt-gate';
+import {resolveInputOwnership} from '@/app/utils/input-owner';
 import {artifactManager} from '@/artifacts/artifact-manager';
 import ArchitectReviewPrompt from '@/components/architect-review-prompt';
 import {SessionArtifactLinks} from '@/components/artifact-links-display';
@@ -121,19 +121,35 @@ export function InteractiveApp({
 	const drainInProgressRef = React.useRef(false);
 	const lastFailedDrainIdRef = React.useRef<string | null>(null);
 	const [drainAttempt, setDrainAttempt] = React.useState(0);
-	// Typed and voice input share one gate, so voice can't submit a turn
-	// behind a modal the composer is hidden for.
-	const composerAvailable = canSubmitPrompt(appState);
-	const voiceInputAllowed = canSubmitVoicePrompt({
-		...appState,
-		hasPendingSubagentApproval: pendingSubagentApproval !== null,
-		hasPendingToolConfirmation: pendingToolConfirmation !== null,
-	});
 	const agentBusy =
 		appState.isCancelling ||
 		chatHandler.isGenerating ||
 		appState.isToolExecuting ||
 		appState.abortController !== null;
+	// One resolution of who owns input. The composer gate, the voice gate, the
+	// Escape-cancel gate, the queue drain and transcript scrolling all read it,
+	// so voice can't submit a turn behind a modal the composer is hidden for.
+	const {
+		composerAvailable,
+		voiceInputAllowed,
+		showModalSelectors,
+		transcriptScrollable,
+		cancellable,
+		queueDrainBlocked,
+	} = resolveInputOwnership({
+		startChat: appState.startChat,
+		activeMode: appState.activeMode,
+		isSettingsMode: appState.isSettingsMode,
+		planReviewState: appState.planReviewState,
+		architectReviewState: appState.architectReviewState,
+		liveComponentCapturesInput: appState.liveComponentCapturesInput,
+		isToolConfirmationMode: appState.isToolConfirmationMode,
+		isQuestionMode: appState.isQuestionMode,
+		hasPendingSubagentApproval: pendingSubagentApproval !== null,
+		hasPendingToolConfirmation: pendingToolConfirmation !== null,
+		agentBusy,
+		hasPendingPlanProceed: appState.pendingPlanProceed !== null,
+	});
 
 	// Load voice preferences reactively for useVoice via preference store subscription
 	const [voicePref, setVoicePref] = React.useState(() => getVoicePreference());
@@ -228,12 +244,6 @@ export function InteractiveApp({
 		});
 	}, [appState.isConversationComplete, appState.messages]);
 
-	const showModalSelectors =
-		(appState.activeMode !== null &&
-			appState.activeMode !== 'explorer' &&
-			appState.activeMode !== 'ideSelection') ||
-		appState.isSettingsMode;
-
 	// Show the plan review bar when the chat handler signals that a turn which
 	// STARTED in plan mode ran to completion uninterrupted (planTurnCompleted).
 	// Consuming this explicit one-shot signal — rather than inferring from
@@ -253,7 +263,6 @@ export function InteractiveApp({
 		appState.planReviewState,
 		appState.setPlanTurnCompleted,
 		appState.setPlanReviewState,
-		appState,
 	]);
 
 	// Proceed: once the mode switch to 'normal' (triggered by handlePlanProceed)
@@ -272,40 +281,12 @@ export function InteractiveApp({
 		appState.developmentMode,
 		appState.setPendingPlanProceed,
 		appHandlers.handleMessageSubmit,
-		appState,
 	]);
 
-	// Whether there is in-flight work that Escape should immediately cancel.
-	// Decision states (tool confirmation, question prompt, subagent approval)
-	// own their own Escape handling and must NOT be hijacked into a generation
-	// abort, so they are excluded here.
-	const cancellable =
-		!appState.isToolConfirmationMode &&
-		!appState.isQuestionMode &&
-		pendingSubagentApproval === null &&
-		pendingToolConfirmation === null &&
-		(appState.isCancelling ||
-			chatHandler.isGenerating ||
-			appState.isToolExecuting ||
-			appState.abortController !== null) &&
-		!appState.liveComponentCapturesInput;
-
 	// Drain queued prompts only after the previous turn is fully idle and all
-	// modal modes have closed. Command handlers and conversation completion can
-	// both signal completion, so keeping the drain here makes it idempotent and
-	// prevents nested or duplicate turns.
-	const queueDrainBlocked =
-		appState.isCancelling ||
-		chatHandler.isGenerating ||
-		appState.isToolExecuting ||
-		appState.abortController !== null ||
-		appState.isToolConfirmationMode ||
-		appState.isQuestionMode ||
-		pendingSubagentApproval !== null ||
-		pendingToolConfirmation !== null ||
-		appState.planReviewState?.show === true ||
-		appState.architectReviewState?.show === true ||
-		appState.pendingPlanProceed !== null;
+	// modal modes have closed (queueDrainBlocked). Command handlers and
+	// conversation completion can both signal completion, so keeping the drain
+	// here makes it idempotent and prevents nested or duplicate turns.
 	const queuedMessageCount = userMessageQueue.queuedMessages.length;
 	const queuedMessageId = userMessageQueue.queuedMessages[0]?.id;
 
@@ -315,8 +296,6 @@ export function InteractiveApp({
 		void drainAttempt;
 		if (
 			queueDrainBlocked ||
-			appState.activeMode !== null ||
-			appState.isSettingsMode ||
 			!appState.client ||
 			!appState.toolManager ||
 			!appState.isConversationComplete ||
@@ -371,10 +350,8 @@ export function InteractiveApp({
 			if (!started) drainInProgressRef.current = false;
 		};
 	}, [
-		appState.activeMode,
 		appState.client,
 		appState.isConversationComplete,
-		appState.isSettingsMode,
 		appState.toolManager,
 		queueDrainBlocked,
 		handleUserSubmit,
@@ -533,12 +510,7 @@ export function InteractiveApp({
 					renderLastQueuedComponentLive={recallableSubmittedDraft}
 					clearKey={clearKey}
 					fullscreen={fullscreen}
-					scrollActive={
-						!showModalSelectors &&
-						!appState.isExplorerMode &&
-						!appState.isIdeSelectionMode &&
-						!shortcutsOverlayOpen
-					}
+					scrollActive={transcriptScrollable && !shortcutsOverlayOpen}
 				/>
 
 				{/* Footer: modals, input. flexShrink=0 so the chat viewport above

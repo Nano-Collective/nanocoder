@@ -22,11 +22,25 @@ const defaultInstaller: ExtensionInstaller = {
 	installExtension,
 };
 
+type TimerHandle = ReturnType<typeof setTimeout>;
+
+interface SkipTimers {
+	setTimeout: (callback: () => void, delay: number) => TimerHandle;
+	clearTimeout: (handle: TimerHandle) => void;
+}
+
+const defaultTimers: SkipTimers = {
+	setTimeout: (callback, delay) => setTimeout(callback, delay),
+	clearTimeout: handle => clearTimeout(handle),
+};
+
 interface VSCodeExtensionPromptProps {
 	onComplete: () => void;
 	onSkip: () => void;
 	/** Overrides the editor CLI calls; for tests. */
 	installer?: ExtensionInstaller;
+	/** Overrides the auto-skip timer; for tests. */
+	timers?: SkipTimers;
 }
 
 type PromptState =
@@ -51,6 +65,7 @@ export function VSCodeExtensionPrompt({
 	onComplete,
 	onSkip,
 	installer = defaultInstaller,
+	timers = defaultTimers,
 }: VSCodeExtensionPromptProps) {
 	const [state, setState] = useState<PromptState>('checking');
 	const [statuses, setStatuses] = useState<VSCodeStatus[]>([]);
@@ -113,10 +128,10 @@ export function VSCodeExtensionPrompt({
 	// onSkip on a prompt the parent has already moved past.
 	useEffect(() => {
 		if (state === 'no-cli' || state === 'error') {
-			const timer = setTimeout(onSkip, TIMEOUT_VSCODE_EXTENSION_SKIP_MS);
-			return () => clearTimeout(timer);
+			const timer = timers.setTimeout(onSkip, TIMEOUT_VSCODE_EXTENSION_SKIP_MS);
+			return () => timers.clearTimeout(timer);
 		}
-	}, [state, onSkip]);
+	}, [state, onSkip, timers]);
 
 	const availableMissing = statuses.filter(s => !s.extensionInstalled);
 

@@ -523,7 +523,7 @@ function loaderReadKeys(): Map<string, Set<string>> {
 	const blocks = loaderSource
 		.split(/loadHierarchicalConfig\(/)
 		.slice(1)
-		.filter(block => /^\s*'agents\.config\.json'/.test(block));
+		.filter(block => /^\s*cwd,\s*'agents\.config\.json'/.test(block));
 	const keys = new Map<string, Set<string>>();
 	for (const block of blocks) {
 		for (const match of block.matchAll(

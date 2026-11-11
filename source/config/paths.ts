@@ -1,6 +1,7 @@
 import {existsSync, mkdirSync, writeFileSync} from 'fs';
 import {homedir} from 'os';
 import {join} from 'path';
+import {getConfigRoot} from '@/services/session-context';
 import {log} from '@/utils/logging';
 
 export function getAppDataPath(): string {
@@ -60,7 +61,10 @@ export function getConfigPath(): string {
 export const confDirMap: Record<string, string> = {};
 
 // Find the closest config file for the requested configuration file
-export function getClosestConfigFile(fileName: string): string {
+export function getClosestConfigFile(
+	fileName: string,
+	cwd: string = getConfigRoot(),
+): string {
 	try {
 		const configDir = getConfigPath();
 
@@ -69,8 +73,9 @@ export function getClosestConfigFile(fileName: string): string {
 		const isExplicitConfigDir = Boolean(process.env.NANOCODER_CONFIG_DIR);
 
 		if (!isExplicitConfigDir) {
-			// First, lets check for a working directory config
-			const cwdPath = join(process.cwd(), fileName); // nosemgrep
+			// First, lets check for a working directory config (the active session's
+			// folder in a multi-session process)
+			const cwdPath = join(cwd, fileName); // nosemgrep
 			if (existsSync(cwdPath)) {
 				// nosemgrep
 				confDirMap[fileName] = cwdPath; // nosemgrep

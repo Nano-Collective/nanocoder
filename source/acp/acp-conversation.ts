@@ -39,7 +39,7 @@ import {
 	consultPluginPermission,
 	withTrustedProjectPlugins,
 } from '@/plugins/host';
-import {runInSessionCwdScope} from '@/services/session-cwd';
+import {runInSessionContext} from '@/services/session-context';
 import {
 	onSubagentRunEvent,
 	type SubagentRunEvent,
@@ -224,7 +224,7 @@ export async function runAcpConversation(
 		// Each ACP session runs in its own working directory (#1707), and one
 		// editor process can host several chats. A read_file stub only makes
 		// sense in the chat whose history holds the earlier read.
-		return await runInSessionCwdScope(options.session.cwdScope, () =>
+		return await runInSessionContext(options.session.context, () =>
 			runWithReadContentScope(acpReadScope(options.session.sessionId), () =>
 				withTrustedProjectPlugins(options.session.cwd, () => runTurn(options)),
 			),

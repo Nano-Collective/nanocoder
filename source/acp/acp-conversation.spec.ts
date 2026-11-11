@@ -2549,7 +2549,6 @@ test('runAcpConversation - captures a timeline checkpoint for write_file', async
 
 test.serial('runAcpConversation - auto-commit writes its message with the session\'s client', async t => {
 	const {execSync} = await import('node:child_process');
-	const {getAppConfig} = await import('@/config/index');
 	const {setAutoCommitClient} = await import('@/services/auto-commit');
 	const {COMMIT_SYSTEM_PROMPT} = await import('@/tools/git/commit-prompt');
 	const cwd = realpathSync(
@@ -2563,9 +2562,13 @@ test.serial('runAcpConversation - auto-commit writes its message with the sessio
 	git('config commit.gpgsign false');
 	git('config core.hooksPath .no-hooks');
 	writeFileSync(join(cwd, 'base.txt'), 'base\n');
-	git('add base.txt');
+	// Turned on in the session's own folder, which is the config it reads.
+	writeFileSync(
+		join(cwd, 'agents.config.json'),
+		JSON.stringify({nanocoder: {autoCommit: true}}),
+	);
+	git('add base.txt agents.config.json');
 	git('commit -q -m baseline');
-	getAppConfig().autoCommit = true;
 	// Another session picked its model last: before, its client wrote every
 	// session's commit messages.
 	setAutoCommitClient({
@@ -2574,7 +2577,6 @@ test.serial('runAcpConversation - auto-commit writes its message with the sessio
 		}),
 	} as unknown as LLMClient);
 	t.teardown(() => {
-		getAppConfig().autoCommit = false;
 		setAutoCommitClient(null);
 		rmSync(cwd, {recursive: true, force: true});
 	});
