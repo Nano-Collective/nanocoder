@@ -49,6 +49,8 @@ import {
 	getPrivacyPreference,
 	updatePrivacyPreference,
 	getMouseReporting,
+	updateAlternateScreen,
+	getAlternateScreen,
 	updateMouseReporting,
 	updateShowAgentBashOutput,
 	updateShowUsageFooter,
@@ -2882,3 +2884,40 @@ test.serial('cached preference getter stays on the filesystem-free hot path', t 
 		rmSync(dir, {recursive: true, force: true});
 	}
 });
+
+// Every boolean preference: its default when unset, and that a write is read
+// back from the file under its own key.
+const booleanPreferences: Array<{
+	key: keyof UserPreferences;
+	get: () => boolean;
+	set: (value: boolean) => void;
+	unset: boolean;
+}> = [
+	{key: 'reasoningExpanded', get: getReasoningExpanded, set: updateReasoningExpanded, unset: false},
+	{key: 'compactToolDisplay', get: getCompactToolDisplay, set: updateCompactToolDisplay, unset: true},
+	{key: 'showUsageFooter', get: getShowUsageFooter, set: updateShowUsageFooter, unset: true},
+	{key: 'enablePromptScrubbing', get: getPrivacyPreference, set: updatePrivacyPreference, unset: false},
+	{key: 'alternateScreen', get: getAlternateScreen, set: updateAlternateScreen, unset: true},
+	{key: 'mouseReporting', get: getMouseReporting, set: updateMouseReporting, unset: true},
+	{key: 'professionalTone', get: getProfessionalTone, set: updateProfessionalTone, unset: false},
+	{key: 'showAgentBashOutput', get: getShowAgentBashOutput, set: updateShowAgentBashOutput, unset: false},
+];
+
+for (const {key, get, set, unset} of booleanPreferences) {
+	test.serial(`${key}: defaults to ${unset} and round-trips through the file`, t => {
+		const preferencesPath = getTestPreferencesPath();
+		rmSync(preferencesPath, {force: true});
+		resetPreferencesCache();
+		try {
+			t.is(get(), unset);
+			set(!unset);
+			t.is(get(), !unset);
+			t.is(JSON.parse(readFileSync(preferencesPath, 'utf-8'))[key], !unset);
+			set(unset);
+			t.is(get(), unset);
+		} finally {
+			rmSync(preferencesPath, {force: true});
+			resetPreferencesCache();
+		}
+	});
+}
