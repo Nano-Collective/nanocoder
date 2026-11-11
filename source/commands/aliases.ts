@@ -20,6 +20,7 @@ export const COMMAND_ALIASES: readonly CommandAlias[] = [
 	{name: 'copilot-login', target: 'login', args: ['copilot']},
 	{name: 'model-database', target: 'model', args: ['browse']},
 	{name: 'schedule', target: 'skills', args: ['schedule']},
+	{name: 'custom-commands', target: 'commands'},
 	{name: 'sessions', target: 'resume'},
 	{name: 'history', target: 'resume'},
 ];
