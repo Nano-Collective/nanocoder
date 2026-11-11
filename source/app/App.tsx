@@ -495,7 +495,11 @@ export default function App({
 				})();
 			}
 		},
-		[appState],
+		[
+			appState.setActiveMode,
+			appState.setIsVscodeEnabled,
+			appState.addToChatQueue,
+		],
 	);
 
 	// Show confirmation once VS Code server is ready with its port
@@ -519,7 +523,11 @@ export default function App({
 				/>,
 			);
 		}
-	}, [vscodeServer.actualPort, appState]);
+	}, [
+		vscodeServer.actualPort,
+		appState.isVscodeEnabled,
+		appState.addToChatQueue,
+	]);
 
 	// The WebSocket companion is deprecated in favour of the ACP-based
 	// extension. Warn the first time it is enabled, by the flag or by /ide.
@@ -535,7 +543,7 @@ export default function App({
 				hideBox={true}
 			/>,
 		);
-	}, [effectiveVscodeEnabled, appState, logger]);
+	}, [effectiveVscodeEnabled, appState.addToChatQueue, logger]);
 
 	// Setup session autosave
 	const {isSaving, renameSession} = useSessionAutosave({

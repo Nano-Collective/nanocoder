@@ -263,7 +263,6 @@ export function InteractiveApp({
 		appState.planReviewState,
 		appState.setPlanTurnCompleted,
 		appState.setPlanReviewState,
-		appState,
 	]);
 
 	// Proceed: once the mode switch to 'normal' (triggered by handlePlanProceed)
@@ -282,7 +281,6 @@ export function InteractiveApp({
 		appState.developmentMode,
 		appState.setPendingPlanProceed,
 		appHandlers.handleMessageSubmit,
-		appState,
 	]);
 
 	// Drain queued prompts only after the previous turn is fully idle and all
