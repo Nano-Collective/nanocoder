@@ -2,8 +2,8 @@ import {Box, Text} from 'ink';
 import Spinner from 'ink-spinner';
 import React, {useMemo} from 'react';
 import CancellingIndicator from '@/components/cancelling-indicator';
-import type {VoiceIndicatorInfo} from '@/components/development-mode-indicator';
 import QuestionPrompt from '@/components/question-prompt';
+import type {VoiceIndicatorInfo} from '@/components/status-bar';
 import {TaskListDisplay} from '@/components/task-list-display';
 import ToolConfirmation from '@/components/tool-confirmation';
 import ToolExecutionIndicator from '@/components/tool-execution-indicator';
@@ -191,7 +191,7 @@ export function ChatInput({
 	const footerPadding = fullscreen ? 2 : 0;
 	const showLivePanels = !shortcutsOverlayOpen;
 
-	// Memoised: DevelopmentModeIndicator is memo()'d, so handing it a fresh
+	// Memoised: StatusBar is memo()'d, so handing it a fresh
 	// object on every keystroke would re-render it for nothing.
 	const taskInfo = useMemo<TaskIndicatorInfo | null>(() => {
 		if (!liveTaskList || liveTaskList.length === 0) return null;

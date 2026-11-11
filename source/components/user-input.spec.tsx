@@ -2870,7 +2870,7 @@ test('the ? legend lists the non-Ctrl bindings users asked about', t => {
 // Files that show a key hint on screen. Each must write keys the way the
 // legend does (`Ctrl+X`), not as `ctrl-x` or `Ctrl-x`.
 const KEY_HINT_SOURCES = [
-	'./development-mode-indicator.tsx',
+	'./status-bar.tsx',
 	'./user-input.tsx',
 	'./composer/attachment-pills.tsx',
 	'./composer/command-completion-list.tsx',

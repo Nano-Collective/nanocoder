@@ -7,7 +7,7 @@ import type {ActiveMode} from '@/hooks/useAppState';
 import type {CheckpointListItem, TuneConfig} from '@/types';
 import {ProviderWizard} from '@/wizards/provider-wizard';
 import type {SettingsTabId} from './settings-constants';
-import {SettingsSelector} from './settings-tabs';
+import {SettingsSelector} from './settings-selector';
 import {TuneSelector} from './tune-selector';
 
 export interface ModalSelectorsProps {

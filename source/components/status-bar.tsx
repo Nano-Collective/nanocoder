@@ -42,7 +42,7 @@ function voiceStateLabel(state: VoiceState): string {
 	}
 }
 
-interface DevelopmentModeIndicatorProps {
+interface StatusBarProps {
 	developmentMode: DevelopmentMode;
 	colors: ReturnType<typeof useTheme>['colors'];
 	contextPercentUsed: number | null;
@@ -79,7 +79,7 @@ function getContextColor(
  * Shows the current development mode (normal/auto-accept/plan/scheduler) and instructions
  * Always visible to help users understand the current mode
  */
-export const DevelopmentModeIndicator = React.memo(
+export const StatusBar = React.memo(
 	({
 		developmentMode,
 		colors,
@@ -93,7 +93,7 @@ export const DevelopmentModeIndicator = React.memo(
 		isSaving,
 		voice,
 		indentColumns = 0,
-	}: DevelopmentModeIndicatorProps) => {
+	}: StatusBarProps) => {
 		const {isNarrow, actualWidth, truncate} = useResponsiveTerminal();
 		const budgetWidth = Math.max(0, actualWidth - indentColumns);
 		const modeLabel = isNarrow
@@ -428,4 +428,4 @@ export const DevelopmentModeIndicator = React.memo(
 	},
 );
 
-DevelopmentModeIndicator.displayName = 'DevelopmentModeIndicator';
+StatusBar.displayName = 'StatusBar';

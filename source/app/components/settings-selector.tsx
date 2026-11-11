@@ -1,1159 +1,912 @@
+import chalk from 'chalk';
 import {Box, Text, useInput} from 'ink';
-import {type ReactNode, useMemo, useState} from 'react';
-import {StyledSelectInput} from '@/components/ui/styled-select-input';
-import type {TitleShape} from '@/components/ui/styled-title';
-import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
+import type {ReactElement} from 'react';
+import {useEffect, useMemo, useRef, useState} from 'react';
+import {StyledTitle} from '@/components/ui/styled-title';
+import {getAppConfig, loadDefaultMode, reloadAppConfig} from '@/config/index';
 import {
-	getCompactToolDisplay,
+	getAlternateScreen,
+	getMouseReporting,
 	getNanocoderShape,
 	getNotificationsPreference,
 	getPasteThreshold,
 	getPrivacyPreference,
+	getProfessionalTone,
 	getProjectContextPreferences,
 	getReasoningExpanded,
-	getShowAgentBashOutput,
-	getShowUsageFooter,
-	updateCompactToolDisplay,
-	updateNanocoderShape,
-	updateNotificationsPreference,
-	updatePasteThreshold,
-	updatePrivacyPreference,
-	updateReasoningExpanded,
-	updateSelectedTheme,
-	updateSemanticMemoryEnabled,
-	updateSemanticMemoryLimit,
-	updateSemanticMemoryTokenBudget,
-	updateShowAgentBashOutput,
-	updateShowUsageFooter,
+	updateAlternateScreen,
+	updateMouseReporting,
+	updateProfessionalTone,
 } from '@/config/preferences';
-import {getThemeColors, themes} from '@/config/themes';
 import {DEFAULT_SINGLE_LINE_PASTE_THRESHOLD} from '@/constants';
-import {useBannerModules} from '@/hooks/use-banner-modules';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {useTitleShape} from '@/hooks/useTitleShape';
-import type {NotificationsConfig} from '@/types/config';
+import {DEFAULT_NANOCODER_SHAPE} from '@/types/ui';
+import {fuzzyScore} from '@/utils/fuzzy-matching';
+import {SettingsAutoCompactPanel} from './settings-auto-compact';
+import {SETTINGS_TAB_IDS, type SettingsTabId} from './settings-constants';
+import {SettingsDefaultModePanel} from './settings-default-mode';
+import {SettingsEnvironmentPanel} from './settings-environment';
+import {SettingsJsonConfigPanel} from './settings-json-config';
+import {SettingsMcpListPanel} from './settings-mcp-list';
+import type {
+	ManagedSettingsPanel,
+	SettingsSelectorProps,
+} from './settings-panels';
 import {
-	DEFAULT_NANOCODER_SHAPE,
-	type NanocoderShape,
-	type ThemePreset,
-} from '@/types/ui';
-import {setNotificationsConfig} from '@/utils/notifications';
-import type {SettingsTabId} from './settings-constants';
+	SettingsDisplayPanel,
+	SettingsNanocoderShapePanel,
+	SettingsNotificationsPanel,
+	SettingsPasteThresholdPanel,
+	SettingsPrivacyPanel,
+	SettingsSemanticMemoryPanel,
+	SettingsThemePanel,
+	SettingsTitleShapePanel,
+} from './settings-panels';
+import {SettingsProvidersListPanel} from './settings-providers-list';
+import {SettingsReasoningTracesPanel} from './settings-reasoning-traces';
+import {SettingsSessionsPanel} from './settings-sessions';
+import {SettingsToolApprovalPanel} from './settings-tool-approval';
+import {SettingsWebSearchPanel} from './settings-web-search';
 
 /**
- * The set of "managed" settings panels: preserved full-featured sub-UIs that
- * the tabbed Settings dialog (`settings-tabs.tsx`) opens in place of the old
- * top-level menu. `main`/`done` no longer exist as panel states — the tab
- * dialog's own list/header modes replace them.
+ * Tab categories are our own settings, grouped for browsability — not the
+ * Status/Config/Usage read-only surfaces (those live at /status and /usage).
+ * Every existing preference must be reachable from exactly one of these
+ * its tabs.
  */
-export type ManagedSettingsPanel =
-	| 'theme'
-	| 'title-shape'
-	| 'nanocoder-shape'
-	| 'paste-threshold'
-	| 'notifications'
-	| 'display-settings'
-	| 'privacy'
-	| 'semantic-memory'
-	| 'json-config'
-	| 'web-search'
-	| 'providers-config'
-	| 'mcp-config'
-	| 'default-mode'
-	| 'reasoning-traces'
-	| 'auto-compact'
-	| 'sessions'
-	| 'tool-approval'
-	| 'environment';
 
-export interface SettingsSelectorProps {
-	onCancel: () => void;
-	/** Close settings and launch the tune wizard (app-level mode switch). */
-	onLaunchTune?: () => void;
-	/** Close settings and launch the IDE-connection wizard. */
-	onLaunchIde?: () => void;
-	/**
-	 * Rebuild the live MCP connections after the MCP panel edits config. Without
-	 * this, servers added here only take effect on the next launch.
-	 */
-	onMcpChanged?: () => void | Promise<void>;
-	/**
-	 * Rebuild the client for the current provider/model after the Providers panel
-	 * edits config, without clearing messages or resetting to default provider.
-	 */
-	onProvidersChanged?: () => void | Promise<void>;
-	/**
-	 * The tab to open initially. Defaults to 'appearance' if not specified.
-	 */
-	initialTab?: SettingsTabId;
-	/**
-	 * Called when the active tab changes, so the parent can track it for
-	 * returning after launching wizards.
-	 */
-	onTabChange?: (tab: SettingsTabId) => void;
+interface TabDefinition {
+	id: SettingsTabId;
+	label: string;
 }
 
-function ThemePreviewMessage({
-	accentColor,
-	baseColor,
-	children,
-	compact = false,
+/**
+ * Labels for each tab. Keyed by `SettingsTabId`, so adding an id to
+ * settings-constants.ts without a label here is a compile error.
+ */
+const TAB_LABELS: Record<SettingsTabId, string> = {
+	appearance: 'Appearance',
+	input: 'Input',
+	behavior: 'Behavior',
+	providers: 'Providers',
+	mcp: 'MCP',
+	advanced: 'Advanced',
+};
+
+const TABS: TabDefinition[] = SETTINGS_TAB_IDS.map(id => ({
+	id,
+	label: TAB_LABELS[id],
+}));
+
+type SettingRow =
+	| {
+			kind: 'boolean';
+			id: string;
+			label: string;
+			value: boolean;
+			onToggle: () => void;
+	  }
+	| {
+			kind: 'number';
+			id: string;
+			label: string;
+			value: number;
+			panel: ManagedSettingsPanel;
+	  }
+	| {
+			kind: 'managed';
+			id: string;
+			label: string;
+			value: string;
+			panel: ManagedSettingsPanel;
+	  }
+	| {
+			// Launches an app-level flow (e.g. the tune / IDE wizards) rather than
+			// opening an in-settings panel.
+			kind: 'action';
+			id: string;
+			label: string;
+			value: string;
+			onAction: () => void;
+	  };
+
+const MAX_VISIBLE_ROWS = 4;
+const SEARCH_PLACEHOLDER = 'Search settings…';
+
+interface RowActions {
+	onLaunchTune?: () => void;
+	onLaunchIde?: () => void;
+}
+
+function buildRowsForTab(
+	tabId: SettingsTabId,
+	currentTheme: string,
+	currentTitleShape: string,
+	actions: RowActions = {},
+): SettingRow[] {
+	switch (tabId) {
+		case 'appearance': {
+			return [
+				{
+					kind: 'managed',
+					id: 'theme',
+					label: 'Theme',
+					value: currentTheme,
+					panel: 'theme',
+				},
+				{
+					kind: 'managed',
+					id: 'title-shape',
+					label: 'Title Shape',
+					value: currentTitleShape,
+					panel: 'title-shape',
+				},
+				{
+					kind: 'managed',
+					id: 'nanocoder-shape',
+					label: 'Nanocoder Shape',
+					value: getNanocoderShape() ?? DEFAULT_NANOCODER_SHAPE,
+					panel: 'nanocoder-shape',
+				},
+				{
+					kind: 'boolean',
+					id: 'alternate-screen',
+					label: 'Alternate Screen',
+					value: getAlternateScreen(),
+					onToggle: () => updateAlternateScreen(!getAlternateScreen()),
+				},
+				{
+					kind: 'boolean',
+					id: 'mouse-reporting',
+					label: 'Mouse Wheel Reporting',
+					value: getMouseReporting(),
+					onToggle: () => updateMouseReporting(!getMouseReporting()),
+				},
+			];
+		}
+		case 'input': {
+			const pasteThreshold =
+				getPasteThreshold() ?? DEFAULT_SINGLE_LINE_PASTE_THRESHOLD;
+			const notifications = getNotificationsPreference();
+			return [
+				{
+					kind: 'number',
+					id: 'paste-threshold',
+					label: 'Paste Threshold',
+					value: pasteThreshold,
+					panel: 'paste-threshold',
+				},
+				{
+					kind: 'managed',
+					id: 'notifications',
+					label: 'Notifications',
+					value: notifications?.enabled ? 'on' : 'off',
+					panel: 'notifications',
+				},
+			];
+		}
+		case 'behavior':
+			return [
+				{
+					kind: 'managed',
+					id: 'display-settings',
+					label: 'Tool Results and Thinking',
+					value: 'configure',
+					panel: 'display-settings',
+				},
+				{
+					kind: 'managed',
+					id: 'reasoning-traces',
+					label: 'Reasoning Traces',
+					value: getReasoningExpanded() ? 'expanded' : 'collapsed',
+					panel: 'reasoning-traces',
+				},
+				{
+					kind: 'boolean',
+					id: 'professional-tone',
+					label: 'Professional Tone',
+					value: getProfessionalTone(),
+					onToggle: () => updateProfessionalTone(!getProfessionalTone()),
+				},
+				{
+					kind: 'managed',
+					id: 'default-mode',
+					label: 'Default Mode',
+					value: loadDefaultMode() ?? 'normal',
+					panel: 'default-mode',
+				},
+				{
+					kind: 'managed',
+					id: 'auto-compact',
+					label: 'Auto-Compact',
+					value: getAppConfig().autoCompact?.enabled === false ? 'off' : 'on',
+					panel: 'auto-compact',
+				},
+				{
+					kind: 'managed',
+					id: 'sessions',
+					label: 'Sessions',
+					value:
+						getAppConfig().sessions?.autoSave === false ? 'manual' : 'auto',
+					panel: 'sessions',
+				},
+			];
+		case 'providers':
+			return [
+				{
+					kind: 'managed',
+					id: 'providers-config',
+					label: 'Configure Providers',
+					value: `${getAppConfig().providers?.length ?? 0} configured`,
+					panel: 'providers-config',
+				},
+				{
+					kind: 'managed',
+					id: 'web-search',
+					label: 'Web Search',
+					value: getAppConfig().nanocoderTools?.webSearch?.apiKey
+						? 'configured'
+						: 'not set',
+					panel: 'web-search',
+				},
+				{
+					kind: 'managed',
+					id: 'tool-approval',
+					label: 'Tool Auto-Approval',
+					value: `${getAppConfig().alwaysAllow?.length ?? 0} tools`,
+					panel: 'tool-approval',
+				},
+			];
+		case 'mcp':
+			return [
+				{
+					kind: 'managed',
+					id: 'mcp-config',
+					label: 'Configure MCP Servers',
+					value: `${getAppConfig().mcpServers?.length ?? 0} configured`,
+					panel: 'mcp-config',
+				},
+			];
+		case 'advanced': {
+			const rows: SettingRow[] = [
+				{
+					kind: 'managed',
+					id: 'semantic-memory',
+					label: 'Semantic Memory',
+					value: getProjectContextPreferences().semanticMemoryEnabled
+						? 'on'
+						: 'off',
+					panel: 'semantic-memory',
+				},
+				{
+					kind: 'managed',
+					id: 'privacy',
+					label: 'Privacy',
+					value: getPrivacyPreference() ? 'on' : 'off',
+					panel: 'privacy',
+				},
+				{
+					kind: 'managed',
+					id: 'json-config',
+					label: 'Edit Config Files',
+					value: 'agents.config.json',
+					panel: 'json-config',
+				},
+				{
+					kind: 'managed',
+					id: 'environment',
+					label: 'Environment',
+					value: 'view',
+					panel: 'environment',
+				},
+			];
+			if (actions.onLaunchTune) {
+				rows.push({
+					kind: 'action',
+					id: 'tune',
+					label: 'Tune Model',
+					value: 'model params',
+					onAction: actions.onLaunchTune,
+				});
+			}
+			if (actions.onLaunchIde) {
+				rows.push({
+					kind: 'action',
+					id: 'connect-ide',
+					label: 'Connect IDE',
+					value: 'wizard',
+					onAction: actions.onLaunchIde,
+				});
+			}
+			return rows;
+		}
+	}
+}
+
+/**
+ * Pure row filter, shared between the render-time `filteredRows` memo and
+ * the `handleKey` replay path — the replay reads this from `queryRef`
+ * (synchronous) instead of the `query` state (async), see the coalesced-
+ * chunk gotcha on `queryRef` below.
+ *
+ * Ranked like upstream PR 684's "Filter:" box: score each row against both
+ * its label and id with `fuzzyScore` (exact=1000 > startsWith=850 >
+ * contains=700 > subsequence), keep only score > 0, sort descending with an
+ * alphabetical tie-break. Empty query is a no-op — natural tab order.
+ */
+function filterRows(rows: SettingRow[], query: string): SettingRow[] {
+	const q = query.trim();
+	if (!q) return rows;
+	return rows
+		.map(row => ({
+			row,
+			score: Math.max(fuzzyScore(row.label, q), fuzzyScore(row.id, q)),
+		}))
+		.filter(({score}) => score > 0)
+		.sort((a, b) => {
+			if (b.score !== a.score) return b.score - a.score;
+			return a.row.label.localeCompare(b.row.label);
+		})
+		.map(({row}) => row);
+}
+
+/**
+ * Builds the flat row list for the active tab from the preferences getters.
+ * `version` is a manual refresh trigger — bump it after any mutation this
+ * hook can't otherwise observe (a managed sub-panel writes preferences.json
+ * directly, outside this component's React state).
+ */
+function useTabRows(
+	tabId: SettingsTabId,
+	version: number,
+	actions: RowActions,
+): SettingRow[] {
+	const {currentTheme} = useTheme();
+	const {currentTitleShape} = useTitleShape();
+
+	// biome-ignore lint/correctness/useExhaustiveDependencies: version deliberately drives a full recompute — see doc comment above.
+	return useMemo(
+		() =>
+			buildRowsForTab(
+				tabId,
+				currentTheme,
+				currentTitleShape ?? 'pill',
+				actions,
+			),
+		[version, tabId, currentTheme, currentTitleShape],
+	);
+}
+
+function SettingRowLine({
+	row,
+	selected,
+	labelWidth,
+	isNarrow,
 }: {
-	accentColor: string;
-	baseColor: string;
-	children: ReactNode;
-	compact?: boolean;
+	row: SettingRow;
+	selected: boolean;
+	labelWidth: number;
+	isNarrow: boolean;
 }) {
+	const {colors} = useTheme();
+	const valueText =
+		row.kind === 'boolean' ? (row.value ? 'true' : 'false') : String(row.value);
+	const rowColor = selected ? colors.info : colors.text;
+
+	return (
+		<Box flexDirection="row">
+			<Text color={rowColor}>{selected ? '> ' : '  '}</Text>
+			<Box width={labelWidth}>
+				<Text color={rowColor} wrap={isNarrow ? 'truncate' : undefined}>
+					{row.label}
+				</Text>
+			</Box>
+			<Text color={colors.secondary} wrap={isNarrow ? 'truncate' : undefined}>
+				{valueText}
+			</Text>
+		</Box>
+	);
+}
+
+function renderManagedPanel(
+	panel: ManagedSettingsPanel,
+	onBack: () => void,
+	onMcpChanged?: () => void | Promise<void>,
+	onProvidersChanged?: () => void | Promise<void>,
+): ReactElement {
+	switch (panel) {
+		case 'theme':
+			return <SettingsThemePanel onBack={onBack} onCancel={onBack} />;
+		case 'title-shape':
+			return <SettingsTitleShapePanel onBack={onBack} onCancel={onBack} />;
+		case 'nanocoder-shape':
+			return <SettingsNanocoderShapePanel onBack={onBack} onCancel={onBack} />;
+		case 'paste-threshold':
+			return <SettingsPasteThresholdPanel onBack={onBack} onCancel={onBack} />;
+		case 'notifications':
+			return <SettingsNotificationsPanel onBack={onBack} onCancel={onBack} />;
+		case 'display-settings':
+			return <SettingsDisplayPanel onBack={onBack} onCancel={onBack} />;
+		case 'semantic-memory':
+			return <SettingsSemanticMemoryPanel onBack={onBack} onCancel={onBack} />;
+		case 'privacy':
+			return <SettingsPrivacyPanel onBack={onBack} onCancel={onBack} />;
+		case 'json-config':
+			return <SettingsJsonConfigPanel onBack={onBack} onCancel={onBack} />;
+		case 'web-search':
+			return <SettingsWebSearchPanel onBack={onBack} onCancel={onBack} />;
+		case 'default-mode':
+			return <SettingsDefaultModePanel onBack={onBack} onCancel={onBack} />;
+		case 'reasoning-traces':
+			return <SettingsReasoningTracesPanel onBack={onBack} onCancel={onBack} />;
+		case 'auto-compact':
+			return <SettingsAutoCompactPanel onBack={onBack} onCancel={onBack} />;
+		case 'sessions':
+			return <SettingsSessionsPanel onBack={onBack} onCancel={onBack} />;
+		case 'tool-approval':
+			return <SettingsToolApprovalPanel onBack={onBack} onCancel={onBack} />;
+		case 'environment':
+			return <SettingsEnvironmentPanel onBack={onBack} onCancel={onBack} />;
+		case 'providers-config':
+			return (
+				<SettingsProvidersListPanel
+					onBack={onBack}
+					onCancel={onBack}
+					onProvidersChanged={onProvidersChanged}
+				/>
+			);
+		case 'mcp-config':
+			return (
+				<SettingsMcpListPanel
+					onBack={onBack}
+					onCancel={onBack}
+					onMcpChanged={onMcpChanged}
+				/>
+			);
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Tab shell: outer panel — tab bar, search box, rows, scroll indicator,
+// footer hints. Two bordered boxes are on screen while the row list is
+// showing: this outer panel, and the search box nested inside it (styled
+// after openclaude's SearchBox — see the search box's own comment below).
+// When a managed sub-panel is open, it replaces this entire return value
+// (its own TitledBoxWithPreferences is the only border on screen at that
+// point) — the tab bar and this frame (including the search box) are not
+// rendered underneath it.
+// ---------------------------------------------------------------------------
+
+type TabFocus = 'header' | 'search' | 'list';
+
+function TabBar({
+	activeTab,
+	headerFocused,
+}: {
+	activeTab: SettingsTabId;
+	headerFocused: boolean;
+}) {
+	const {colors} = useTheme();
+	const {currentTitleShape} = useTitleShape();
+	const {isNarrow} = useResponsiveTerminal();
+	const shape = currentTitleShape ?? 'pill';
+
+	return (
+		// wrap: the strip overflowed the panel border on narrow terminals, spilling
+		// the active pill's cap glyph outside the frame. The "Settings" prefix is
+		// redundant with the panel title, so it's the first thing to go.
+		<Box
+			key={`${activeTab}-${headerFocused}`}
+			flexDirection="row"
+			flexWrap="wrap"
+			gap={1}
+			marginBottom={1}
+		>
+			{!isNarrow && (
+				<Text bold color={colors.primary}>
+					Settings
+				</Text>
+			)}
+			{TABS.map(tab => {
+				const isActive = tab.id === activeTab;
+				if (isActive) {
+					return (
+						<StyledTitle
+							key={tab.id}
+							title={tab.label}
+							shape={shape}
+							borderColor={headerFocused ? colors.primary : colors.secondary}
+							textColor={colors.base}
+						/>
+					);
+				}
+				return <Text key={tab.id}> {tab.label} </Text>;
+			})}
+		</Box>
+	);
+}
+
+export function SettingsSelector({
+	onCancel,
+	onLaunchTune,
+	onLaunchIde,
+	onMcpChanged,
+	onProvidersChanged,
+	initialTab,
+	onTabChange,
+}: SettingsSelectorProps) {
+	const {colors} = useTheme();
+	const {boxWidth, isNarrow} = useResponsiveTerminal();
+
+	const [activeTab, setActiveTabState] = useState<SettingsTabId>(
+		initialTab ?? 'appearance',
+	);
+
+	// The only sanctioned way to change tabs: keeps the parent's tracked tab in
+	// step so returning from Tune/IDE lands back where the user was. Nothing
+	// should call setActiveTabState directly.
+	const updateActiveTab = (tab: SettingsTabId) => {
+		setActiveTabState(tab);
+		onTabChange?.(tab);
+	};
+	const [focus, setFocus] = useState<TabFocus>('header');
+	const [openPanel, setOpenPanel] = useState<ManagedSettingsPanel | null>(null);
+
+	const [version, setVersion] = useState(0);
+	const [query, setQuery] = useState('');
+	const [selectedIndex, setSelectedIndex] = useState(0);
+	const [scrollOffset, setScrollOffset] = useState(0);
+
+	// Ink delivers every keypress event parsed out of one stdin chunk
+	// synchronously in the same tick (see ink's `App.handleReadable`), so a
+	// down-arrow immediately followed by typed characters (a very ordinary
+	// "press down then type" burst, not just paste) can arrive as two
+	// separate `useInput` calls before React re-renders between them. The
+	// `focus` state read via closure in the second call would still be
+	// 'header', silently dropping the keystrokes into the header branch's
+	// no-op path. Mirror `focus` into a ref that's written synchronously
+	// wherever the state is, and branch on the ref inside the handler so the
+	// second event in the same batch sees the first event's transition.
+	const focusRef = useRef<TabFocus>(focus);
+	const updateFocus = (next: TabFocus) => {
+		focusRef.current = next;
+		setFocus(next);
+	};
+
+	// Same gotcha as focusRef, applied to the search query and selection
+	// index: the coalesced-chunk replay in the useInput wrapper below can
+	// fire a typed segment (which calls setQuery) immediately followed by
+	// one or more synthetic Enter replays in the SAME synchronous batch. The
+	// `filteredRows`/`clampedIndex` below are derived from `query`/
+	// `selectedIndex` STATE, which hasn't re-rendered yet when the replayed
+	// Enters run — so activateRow would read a stale, unfiltered row list
+	// (e.g. always index 0) instead of the just-typed filter. Mirror both
+	// into refs written synchronously wherever the state is, and have
+	// `handleKey` derive its effective rows/index from the refs (via
+	// `filterRows`, the same pure helper the render-time memo below uses)
+	// instead of closing over the state-derived `filteredRows`/`clampedIndex`.
+	const queryRef = useRef(query);
+	const updateQuery = (next: string) => {
+		queryRef.current = next;
+		setQuery(next);
+	};
+	const selectedIndexRef = useRef(selectedIndex);
+
+	// Switching tabs resets the per-tab search/selection/scroll state and
+	// returns focus to the header — the search box always filters within
+	// the currently active tab only.
+	// biome-ignore lint/correctness/useExhaustiveDependencies: activeTab is the trigger, not read in the body — resets per-tab state whenever the active tab changes.
+	useEffect(() => {
+		updateQuery('');
+		selectedIndexRef.current = 0;
+		setSelectedIndex(0);
+		setScrollOffset(0);
+		updateFocus('header');
+	}, [activeTab]);
+
+	const allRows = useTabRows(activeTab, version, {onLaunchTune, onLaunchIde});
+	const filteredRows = useMemo(
+		() => filterRows(allRows, query),
+		[allRows, query],
+	);
+
+	const clampedIndex = Math.min(
+		selectedIndex,
+		Math.max(0, filteredRows.length - 1),
+	);
+
+	// `rowsLength` is passed explicitly by the caller (handleKey) rather than
+	// closed over, so a replayed call can pass the ref-derived effective
+	// rows length instead of the stale state-derived `filteredRows.length`.
+	const moveSelection = (nextIndex: number, rowsLength: number) => {
+		const clamped = Math.max(0, Math.min(nextIndex, rowsLength - 1));
+		selectedIndexRef.current = clamped;
+		setSelectedIndex(clamped);
+		setScrollOffset(prevOffset => {
+			if (clamped < prevOffset) return clamped;
+			if (clamped >= prevOffset + MAX_VISIBLE_ROWS) {
+				return clamped - MAX_VISIBLE_ROWS + 1;
+			}
+			return prevOffset;
+		});
+	};
+
+	const goToTab = (direction: 1 | -1) => {
+		const idx = TABS.findIndex(t => t.id === activeTab);
+		const next = TABS[(idx + direction + TABS.length) % TABS.length];
+		if (next) updateActiveTab(next.id);
+	};
+
+	const activateRow = (row: SettingRow) => {
+		if (row.kind === 'boolean') {
+			row.onToggle();
+			setVersion(v => v + 1);
+			return;
+		}
+		if (row.kind === 'action') {
+			row.onAction();
+			return;
+		}
+		setOpenPanel(row.panel);
+	};
+
+	// Handles ONE logical keypress (a real key.return, or a synthetic one
+	// replayed from a coalesced chunk — see the useInput wrapper below).
+	// Reads/branches on focusRef so replayed events in the same synchronous
+	// batch see each other's transitions, exactly like the down-arrow +
+	// fast-typing case this pattern already handles.
+	const handleKey = (
+		input: string,
+		key: Parameters<Parameters<typeof useInput>[0]>[1],
+	) => {
+		if (openPanel) {
+			// The preserved sub-panel owns input while it's open.
+			return;
+		}
+
+		if (focusRef.current === 'header') {
+			if (key.escape) {
+				onCancel();
+				return;
+			}
+			if (key.leftArrow) {
+				goToTab(-1);
+				return;
+			}
+			if (key.rightArrow) {
+				goToTab(1);
+				return;
+			}
+			if (key.downArrow) {
+				updateFocus('search');
+			}
+			return;
+		}
+
+		if (focusRef.current === 'search') {
+			if (key.escape) {
+				if (queryRef.current.length > 0) {
+					updateQuery('');
+				} else {
+					updateFocus('header');
+				}
+				return;
+			}
+			if (key.upArrow) {
+				updateFocus('header');
+				return;
+			}
+			if (key.ctrl && input === 'u') {
+				// Readline idiom: Ctrl+U clears from cursor to start of line — our
+				// cursor is always at the end, so this clears the whole query.
+				updateQuery('');
+				return;
+			}
+			if (key.downArrow || key.return) {
+				const effectiveRows = filterRows(allRows, queryRef.current);
+				if (effectiveRows.length > 0) {
+					updateFocus('list');
+					moveSelection(0, effectiveRows.length);
+				}
+				return;
+			}
+			if (key.backspace || key.delete) {
+				updateQuery(queryRef.current.slice(0, -1));
+				return;
+			}
+			if (input && !key.ctrl && !key.meta) {
+				updateQuery(queryRef.current + input);
+			}
+			return;
+		}
+
+		// focus === 'list'
+		const effectiveRows = filterRows(allRows, queryRef.current);
+		const effectiveClampedIndex = Math.min(
+			selectedIndexRef.current,
+			Math.max(0, effectiveRows.length - 1),
+		);
+
+		if (key.escape || input === '/') {
+			updateFocus('search');
+			return;
+		}
+		if (key.upArrow) {
+			if (effectiveClampedIndex === 0) {
+				updateFocus('search');
+			} else {
+				moveSelection(effectiveClampedIndex - 1, effectiveRows.length);
+			}
+			return;
+		}
+		if (key.downArrow) {
+			moveSelection(effectiveClampedIndex + 1, effectiveRows.length);
+			return;
+		}
+		if (key.return || input === ' ') {
+			const row = effectiveRows[effectiveClampedIndex];
+			if (row) activateRow(row);
+		}
+	};
+
+	useInput(
+		(input, key) => {
+			// Ink coalesces a run of plain characters immediately followed by
+			// one or more Enters — arriving from a real terminal in a single
+			// stdin chunk (fast typing capped off with Enter, or a fast
+			// double-Enter) — into ONE keypress event: `key.return` is false
+			// and `input` is the whole run including the literal `\r`
+			// character(s) (e.g. "theme\r" or "theme\r\r", even bare "\r\r").
+			// Handled naively, that string falls through to the search box's
+			// printable-text branch and gets appended to the query verbatim —
+			// the Enter is swallowed, never reaching the select/activate
+			// branches at all. Split the run on `\r` and replay each piece
+			// through `handleKey` as its own logical keypress: the typed text
+			// first, then a synthetic `key.return` event per `\r`. Each
+			// replayed call reads/writes `focusRef` synchronously, so a
+			// replayed Enter that transitions search -> list is immediately
+			// visible to the next replayed Enter in the same batch — the same
+			// mechanism that already keeps down-arrow + fast-typing in sync.
+			if (!key.return && input.includes('\r')) {
+				const segments = input.split('\r');
+				segments.forEach((segment, i) => {
+					if (segment) handleKey(segment, {...key, return: false});
+					if (i < segments.length - 1) handleKey('', {...key, return: true});
+				});
+				return;
+			}
+			handleKey(input, key);
+		},
+		{isActive: true},
+	);
+
+	if (openPanel) {
+		const onBack = () => {
+			// getAppConfig() is module-cached, so a panel (or a wizard it launched)
+			// that wrote to disk leaves the cache stale and the row values below
+			// would recompute from pre-edit data.
+			reloadAppConfig();
+			setVersion(v => v + 1);
+			setOpenPanel(null);
+		};
+		return renderManagedPanel(
+			openPanel,
+			onBack,
+			onMcpChanged,
+			onProvidersChanged,
+		);
+	}
+
+	const width = isNarrow ? '100%' : boxWidth;
+	const labelWidth = Math.min(44, Math.max(18, Math.floor(boxWidth * 0.5)));
+	const visibleRows = filteredRows.slice(
+		scrollOffset,
+		scrollOffset + MAX_VISIBLE_ROWS,
+	);
+	const moreAbove = scrollOffset;
+	const moreBelow = Math.max(
+		0,
+		filteredRows.length - scrollOffset - MAX_VISIBLE_ROWS,
+	);
+
+	const footerHint =
+		focus === 'header'
+			? '←/→ tabs · ↓ enter · Esc close'
+			: focus === 'search'
+				? 'Type to filter · Enter/↓ select · ^U clear · ↑ tabs · Esc clear'
+				: 'Enter change · / search · Esc back';
+
 	return (
 		<Box
 			flexDirection="column"
-			backgroundColor={baseColor}
-			paddingX={2}
-			paddingY={compact ? 0 : 1}
-			borderStyle="bold"
-			borderLeft={true}
-			borderRight={false}
-			borderTop={false}
-			borderBottom={false}
-			borderLeftColor={accentColor}
-		>
-			{children}
-		</Box>
-	);
-}
-
-function ThemeMiniPreview({
-	colors,
-	compact = false,
-}: {
-	colors: ReturnType<typeof useTheme>['colors'];
-	compact?: boolean;
-}) {
-	return (
-		<Box flexDirection="column">
-			<Box flexDirection="column" marginBottom={compact ? 0 : 1}>
-				<Box marginBottom={1}>
-					<Text color={colors.primary} bold>
-						You:
-					</Text>
-				</Box>
-				<ThemePreviewMessage
-					accentColor={colors.primary}
-					baseColor={colors.base}
-					compact={compact}
-				>
-					<Text color={colors.text}>
-						Refactor this function and show the diff.
-					</Text>
-				</ThemePreviewMessage>
-			</Box>
-
-			<Box flexDirection="column" marginBottom={compact ? 0 : 1}>
-				<Box marginBottom={1}>
-					<Text color={colors.info} bold>
-						Nanocoder:
-					</Text>
-				</Box>
-
-				<ThemePreviewMessage
-					accentColor={colors.secondary}
-					baseColor={colors.base}
-					compact={compact}
-				>
-					<Text color={colors.text}>
-						I'll inspect the file and make a safe change.
-					</Text>
-				</ThemePreviewMessage>
-			</Box>
-
-			<Box flexDirection="column" marginBottom={compact ? 0 : 1}>
-				<Text color={colors.tool}>⚒ read_file source/app.tsx</Text>
-				<Text color={colors.success}>⚒ Completed successfully</Text>
-				{!compact && (
-					<Text color={colors.warning}>
-						⚠ Review generated changes before commit
-					</Text>
-				)}
-			</Box>
-
-			<Box flexDirection="column" marginTop={compact ? 0 : 1}>
-				<Box>
-					<Text color={colors.secondary}>1 </Text>
-					<Text
-						bold
-						underline
-						backgroundColor={colors.diffRemoved}
-						color={colors.diffRemovedText}
-					>
-						- return theme;
-					</Text>
-				</Box>
-				<Box>
-					<Text color={colors.secondary}>2 </Text>
-					<Text
-						bold
-						underline
-						backgroundColor={colors.diffAdded}
-						color={colors.diffAddedText}
-					>
-						+ return formatTheme(theme);
-					</Text>
-				</Box>
-			</Box>
-		</Box>
-	);
-}
-
-// Theme settings panel
-export function SettingsThemePanel({
-	onBack,
-	onCancel,
-}: {
-	onBack: () => void;
-	onCancel: () => void;
-}) {
-	const {boxWidth, isNarrow} = useResponsiveTerminal();
-	const {currentTheme, setCurrentTheme} = useTheme();
-	const [originalTheme] = useState(currentTheme);
-
-	const themeList = Object.values(themes);
-	const [currentIndex, setCurrentIndex] = useState(() => {
-		const index = themeList.findIndex(theme => theme.name === currentTheme);
-		return index >= 0 ? index : 0;
-	});
-
-	// Preview theme is the one being browsed (for UI only)
-	const previewTheme = themeList[currentIndex];
-	// Get the colors for the preview theme
-	const previewColors = getThemeColors(previewTheme.name as ThemePreset);
-
-	useInput((input, key) => {
-		if (key.escape) {
-			onCancel();
-		}
-		if (key.shift && key.tab) {
-			onBack();
-		}
-		if (key.upArrow) {
-			setCurrentIndex(prev => (prev > 0 ? prev - 1 : themeList.length - 1));
-		}
-		if (key.downArrow) {
-			setCurrentIndex(prev => (prev < themeList.length - 1 ? prev + 1 : 0));
-		}
-		if (key.return) {
-			// Only save to preferences on Enter
-			setCurrentTheme(previewTheme.name as ThemePreset);
-			updateSelectedTheme(previewTheme.name as ThemePreset);
-			onBack();
-		}
-	});
-
-	const themeName = `${previewTheme.displayName} [${
-		currentIndex + 1
-	}/${themeList.length}]`;
-	const isCurrentTheme = previewTheme.name === originalTheme;
-
-	// Narrow terminal: simplified layout
-	if (isNarrow) {
-		return (
-			<TitledBoxWithPreferences
-				title="Theme"
-				width="100%"
-				borderColor={previewColors.primary}
-				paddingX={2}
-				paddingY={1}
-				flexDirection="column"
-				marginBottom={1}
-			>
-				<Text color={previewColors.primary}>
-					{isCurrentTheme ? '* ' : ''}
-					{themeName}
-				</Text>
-				<ThemeMiniPreview colors={previewColors} compact />
-				<Box marginBottom={1}></Box>
-				<Text color={previewColors.secondary}>
-					↑↓ navigate · Enter select · Esc back
-				</Text>
-			</TitledBoxWithPreferences>
-		);
-	}
-
-	return (
-		<TitledBoxWithPreferences
-			title="Theme"
-			width={boxWidth}
-			borderColor={previewColors.primary}
-			paddingX={2}
-			paddingY={1}
-			flexDirection="column"
-			marginBottom={1}
-		>
-			<Text color={previewColors.primary} bold>
-				{isCurrentTheme ? '* ' : ''}
-				{themeName}
-			</Text>
-			<Box marginBottom={1}>
-				<Text color={previewColors.secondary}>
-					↑↓ navigate · Enter apply · Shift+Tab back · Esc back
-				</Text>
-			</Box>
-
-			<ThemeMiniPreview colors={previewColors} />
-		</TitledBoxWithPreferences>
-	);
-}
-
-// Title Shape settings panel
-export function SettingsTitleShapePanel({
-	onBack,
-	onCancel,
-}: {
-	onBack: () => void;
-	onCancel: () => void;
-}) {
-	const {boxWidth, isNarrow} = useResponsiveTerminal();
-	const {colors} = useTheme();
-	const {currentTitleShape, setCurrentTitleShape, commitTitleShape} =
-		useTitleShape();
-	const [originalShape] = useState<TitleShape>(currentTitleShape);
-
-	useInput((_, key) => {
-		if (key.escape) {
-			// Esc/Shift+Tab = cancel. Navigation only previews via
-			// setCurrentTitleShape (in-memory, never persisted), so revert the
-			// in-memory preview back to the shape the panel was opened with
-			// before navigating away. Nothing is written to disk on cancel.
-			setCurrentTitleShape(originalShape);
-			onCancel();
-		}
-		if (key.shift && key.tab) {
-			setCurrentTitleShape(originalShape);
-			onBack();
-		}
-	});
-
-	const shapeOptions: {label: string; value: TitleShape}[] = isNarrow
-		? [
-				{label: 'Pill', value: 'pill'},
-				{label: 'Rounded', value: 'rounded'},
-				{label: 'Square', value: 'square'},
-				{label: 'Double', value: 'double'},
-				{label: 'Arrow Left', value: 'arrow-left'},
-				{label: 'Arrow Right', value: 'arrow-right'},
-				{label: 'Arrow Double', value: 'arrow-double'},
-				{label: 'Angled Box', value: 'angled-box'},
-				{label: 'PL Angled', value: 'powerline-angled'},
-				{label: 'PL Angled Thin', value: 'powerline-angled-thin'},
-				{label: 'PL Block', value: 'powerline-block'},
-				{label: 'PL Block Alt', value: 'powerline-block-alt'},
-				{label: 'PL Curved', value: 'powerline-curved'},
-				{label: 'PL Curved Thin', value: 'powerline-curved-thin'},
-				{label: 'PL Flame', value: 'powerline-flame'},
-				{label: 'PL Flame Thin', value: 'powerline-flame-thin'},
-				{label: 'PL Graph', value: 'powerline-graph'},
-				{label: 'PL Ribbon', value: 'powerline-ribbon'},
-				{label: 'PL Segment', value: 'powerline-segment'},
-				{label: 'PL Segment Thin', value: 'powerline-segment-thin'},
-			]
-		: [
-				{label: 'Pill :- Demo Title', value: 'pill'},
-				{label: 'Rounded :- ╭ Demo Title ╮', value: 'rounded'},
-				{label: 'Square :- ┌ Demo Title ┐', value: 'square'},
-				{label: 'Double :- ╔ Demo Title ╗', value: 'double'},
-				{label: 'Arrow Left :- ← Demo Title →', value: 'arrow-left'},
-				{label: 'Arrow Right :- → Demo Title ←', value: 'arrow-right'},
-				{label: 'Arrow Double :- « Demo Title »', value: 'arrow-double'},
-				{label: 'Angled Box :- ╱ Demo Title ╲', value: 'angled-box'},
-				{
-					label: 'Powerline Angled (Nerd Fonts)',
-					value: 'powerline-angled',
-				},
-				{
-					label: 'Powerline Angled Thin (Nerd Fonts)',
-					value: 'powerline-angled-thin',
-				},
-				{
-					label: 'Powerline Block (Nerd Fonts)',
-					value: 'powerline-block',
-				},
-				{
-					label: 'Powerline Block Alt (Nerd Fonts)',
-					value: 'powerline-block-alt',
-				},
-				{
-					label: 'Powerline Curved (Nerd Fonts)',
-					value: 'powerline-curved',
-				},
-				{
-					label: 'Powerline Curved Thin (Nerd Fonts)',
-					value: 'powerline-curved-thin',
-				},
-				{
-					label: 'Powerline Flame (Nerd Fonts)',
-					value: 'powerline-flame',
-				},
-				{
-					label: 'Powerline Flame Thin (Nerd Fonts)',
-					value: 'powerline-flame-thin',
-				},
-				{
-					label: 'Powerline Graph (Nerd Fonts)',
-					value: 'powerline-graph',
-				},
-				{
-					label: 'Powerline Ribbon (Nerd Fonts)',
-					value: 'powerline-ribbon',
-				},
-				{
-					label: 'Powerline Segment (Nerd Fonts)',
-					value: 'powerline-segment',
-				},
-				{
-					label: 'Powerline Segment Thin (Nerd Fonts)',
-					value: 'powerline-segment-thin',
-				},
-			];
-
-	const initialIndex = useMemo(() => {
-		const index = shapeOptions.findIndex(
-			option => option.value === originalShape,
-		);
-		return index >= 0 ? index : 0;
-	}, [originalShape, shapeOptions]);
-
-	const handleSelect = (item: {label: string; value: TitleShape}) => {
-		// Only commit (persist to disk) on an explicit Enter.
-		commitTitleShape(item.value);
-		onBack();
-	};
-
-	const handleHighlight = (item: {label: string; value: TitleShape}) => {
-		// Preview only — updates the in-memory app title live but does NOT
-		// persist. Canceling (Esc/Shift+Tab) reverts this with no disk write.
-		setCurrentTitleShape(item.value);
-	};
-
-	// Narrow terminal: use TitledBoxWithPreferences to preview shape changes
-	if (isNarrow) {
-		return (
-			<TitledBoxWithPreferences
-				title="Title Shapes"
-				width="100%"
-				borderColor={colors.primary}
-				paddingX={2}
-				paddingY={1}
-				flexDirection="column"
-				marginBottom={1}
-			>
-				<StyledSelectInput
-					items={shapeOptions}
-					initialIndex={initialIndex}
-					onSelect={handleSelect}
-					onHighlight={handleHighlight}
-				/>
-				<Box marginBottom={1}></Box>
-				<Text color={colors.secondary}>
-					Enter to apply · Shift+Tab back · Esc back
-				</Text>
-			</TitledBoxWithPreferences>
-		);
-	}
-
-	return (
-		<TitledBoxWithPreferences
-			title="Choose your title shape"
-			width={boxWidth}
+			borderStyle="round"
 			borderColor={colors.primary}
-			paddingX={2}
+			paddingX={isNarrow ? 1 : 2}
 			paddingY={1}
-			flexDirection="column"
+			width={width}
 			marginBottom={1}
 		>
-			<Box marginBottom={1}>
-				<Text color={colors.secondary}>
-					Enter to apply · Shift+Tab back · Esc back
-				</Text>
-			</Box>
+			<TabBar activeTab={activeTab} headerFocused={focus === 'header'} />
 
-			<StyledSelectInput
-				items={shapeOptions}
-				initialIndex={initialIndex}
-				onSelect={handleSelect}
-				onHighlight={handleHighlight}
-			/>
-		</TitledBoxWithPreferences>
-	);
-}
-
-// Nanocoder Shape settings panel
-export function SettingsNanocoderShapePanel({
-	onBack,
-	onCancel,
-}: {
-	onBack: () => void;
-	onCancel: () => void;
-}) {
-	const {boxWidth, isNarrow} = useResponsiveTerminal();
-	const {colors} = useTheme();
-
-	const savedShape = getNanocoderShape();
-	const initialShape: NanocoderShape = savedShape ?? DEFAULT_NANOCODER_SHAPE;
-	const [originalShape] = useState<NanocoderShape>(initialShape);
-	const [previewShape, setPreviewShape] =
-		useState<NanocoderShape>(initialShape);
-
-	useInput((_, key) => {
-		if (key.escape) {
-			onCancel();
-		}
-		if (key.shift && key.tab) {
-			onBack();
-		}
-	});
-
-	const shapeOptions: {label: string; value: NanocoderShape}[] = useMemo(
-		() => [
-			{label: 'Block (default)', value: 'block'},
-			{label: 'Tiny', value: 'tiny'},
-			{label: 'Simple', value: 'simple'},
-			{label: 'Simple Block', value: 'simpleBlock'},
-			{label: 'Slick', value: 'slick'},
-			{label: 'Grid', value: 'grid'},
-			{label: 'Pallet', value: 'pallet'},
-			{label: 'Shade', value: 'shade'},
-			{label: '3D', value: '3d'},
-			{label: 'Simple 3D', value: 'simple3d'},
-			{label: 'Chrome', value: 'chrome'},
-			{label: 'Huge', value: 'huge'},
-		],
-		[],
-	);
-
-	const initialIndex = useMemo(() => {
-		const index = shapeOptions.findIndex(
-			option => option.value === originalShape,
-		);
-		return index >= 0 ? index : 0;
-	}, [originalShape, shapeOptions]);
-
-	const handleSelect = (item: {label: string; value: NanocoderShape}) => {
-		updateNanocoderShape(item.value);
-		onBack();
-	};
-
-	const handleHighlight = (item: {label: string; value: NanocoderShape}) => {
-		setPreviewShape(item.value);
-	};
-
-	const displayText = isNarrow ? 'NC' : 'Nanocoder';
-	const bannerModules = useBannerModules();
-	const BigText = bannerModules?.BigText;
-	const Gradient = bannerModules?.Gradient;
-
-	// Narrow terminal: simplified layout with BigText outside box
-	if (isNarrow) {
-		return (
-			<>
-				{Gradient && BigText ? (
-					<Gradient colors={[colors.primary, colors.tool]}>
-						<BigText text={displayText} font={previewShape} />
-					</Gradient>
+			{/*
+			 * Search box: rounded-border row matching openclaude's SearchBox
+			 * (src/components/SearchBox.tsx) — magnifier prefix, border color
+			 * keyed on focus (focused: colors.info, undimmed; unfocused:
+			 * colors.secondary, dimmed via borderDimColor, mirroring
+			 * openclaude's `borderColor={isFocused ? "suggestion" : undefined}` /
+			 * `borderDimColor={!isFocused}`). No explicit width: like
+			 * openclaude's SearchBox, this Box relies on the parent column
+			 * flex container's default `alignItems: stretch` to fill the full
+			 * interior width — the row list below is a sibling Box with its
+			 * own independent width, unaffected by this border/padding.
+			 */}
+			<Box
+				flexShrink={0}
+				borderStyle="round"
+				borderColor={focus === 'search' ? colors.info : colors.secondary}
+				borderDimColor={focus !== 'search'}
+				paddingX={1}
+			>
+				<Text color={colors.secondary}>{'⌕ '}</Text>
+				{focus === 'search' ? (
+					<Text>
+						{query.length === 0
+							? // Empty query: the placeholder itself carries the cursor —
+								// its first character renders inverse-video, mirroring
+								// text-input.tsx's `renderedPlaceholder` idiom exactly.
+								chalk.inverse(SEARCH_PLACEHOLDER[0]) +
+								chalk.hex(colors.info)(SEARCH_PLACEHOLDER.slice(1)) +
+								' '
+							: // Non-empty query: HTML-placeholder semantics — the
+								// placeholder text disappears entirely once typing
+								// starts (matches openclaude's SearchBox and this
+								// file's own text-input.tsx placeholder idiom). The
+								// cursor is always at the end (this row has no
+								// interior cursor movement), so append an
+								// inverse-video space — text-input.tsx's
+								// `cursorOffset === value.length` end-of-value cursor.
+								query + chalk.inverse(' ')}
+					</Text>
 				) : (
-					<Text color={colors.primary} bold>
-						{displayText}
+					<>
+						{query.length === 0 ? (
+							<Text color={colors.secondary}>{SEARCH_PLACEHOLDER} </Text>
+						) : (
+							<Text color={colors.text}>{query}</Text>
+						)}
+					</>
+				)}
+			</Box>
+			<Box marginTop={1} flexDirection="column">
+				{moreAbove > 0 && (
+					<Text color={colors.secondary} dimColor>
+						↑ {moreAbove} more above
 					</Text>
 				)}
-				<TitledBoxWithPreferences
-					title="Nanocoder Shape"
-					width="100%"
-					borderColor={colors.primary}
-					paddingX={2}
-					paddingY={1}
-					flexDirection="column"
-					marginBottom={1}
-				>
-					<StyledSelectInput
-						items={shapeOptions}
-						initialIndex={initialIndex}
-						onSelect={handleSelect}
-						onHighlight={handleHighlight}
+				{visibleRows.length === 0 && (
+					<Text color={colors.secondary}>No settings match "{query}"</Text>
+				)}
+				{visibleRows.map((row, i) => (
+					<SettingRowLine
+						key={row.id}
+						row={row}
+						selected={focus === 'list' && scrollOffset + i === clampedIndex}
+						labelWidth={labelWidth}
+						isNarrow={isNarrow}
 					/>
-					<Box marginBottom={1}></Box>
-					<Text color={colors.secondary}>
-						Enter to apply · Shift+Tab back · Esc back
-					</Text>
-				</TitledBoxWithPreferences>
-			</>
-		);
-	}
-
-	return (
-		<>
-			<Box marginBottom={1}>
-				{Gradient && BigText ? (
-					<Gradient colors={[colors.primary, colors.tool]}>
-						<BigText text={displayText} font={previewShape} />
-					</Gradient>
-				) : (
-					<Text color={colors.primary} bold>
-						{displayText}
+				))}
+				{moreBelow > 0 && (
+					<Text color={colors.secondary} dimColor>
+						↓ {moreBelow} more below
 					</Text>
 				)}
 			</Box>
 
-			<TitledBoxWithPreferences
-				title="Choose your branding style"
-				width={boxWidth}
-				borderColor={colors.primary}
-				paddingX={2}
-				paddingY={1}
-				flexDirection="column"
-				marginBottom={1}
-			>
-				<Box marginBottom={1}>
-					<Text color={colors.secondary}>
-						Enter to apply · Shift+Tab back · Esc back
-					</Text>
-				</Box>
-
-				<StyledSelectInput
-					items={shapeOptions}
-					initialIndex={initialIndex}
-					onSelect={handleSelect}
-					onHighlight={handleHighlight}
-				/>
-			</TitledBoxWithPreferences>
-		</>
-	);
-}
-
-// Paste Threshold settings panel
-export function SettingsPasteThresholdPanel({
-	onBack,
-	onCancel,
-}: {
-	onBack: () => void;
-	onCancel: () => void;
-}) {
-	const {boxWidth, isNarrow} = useResponsiveTerminal();
-	const {colors} = useTheme();
-
-	const currentThreshold =
-		getPasteThreshold() ?? DEFAULT_SINGLE_LINE_PASTE_THRESHOLD;
-
-	const thresholdOptions = useMemo(
-		() => [
-			{label: '200', value: 200},
-			{label: '400', value: 400},
-			{label: '600', value: 600},
-			{label: `800 (default)`, value: 800},
-			{label: '1000', value: 1000},
-			{label: '1500', value: 1500},
-			{label: '2000', value: 2000},
-			{label: '5000', value: 5000},
-		],
-		[],
-	);
-
-	const initialIndex = useMemo(() => {
-		const index = thresholdOptions.findIndex(
-			option => option.value === currentThreshold,
-		);
-		return index >= 0 ? index : 3; // default to 800
-	}, [currentThreshold, thresholdOptions]);
-
-	useInput((_, key) => {
-		if (key.escape) {
-			onCancel();
-		}
-		if (key.shift && key.tab) {
-			onBack();
-		}
-	});
-
-	const handleSelect = (item: {label: string; value: number}) => {
-		updatePasteThreshold(item.value);
-		onBack();
-	};
-
-	const title = isNarrow
-		? 'Paste Threshold'
-		: 'Set paste threshold (characters)';
-
-	return (
-		<TitledBoxWithPreferences
-			title={title}
-			width={isNarrow ? '100%' : boxWidth}
-			borderColor={colors.primary}
-			paddingX={2}
-			paddingY={1}
-			flexDirection="column"
-			marginBottom={1}
-		>
-			{!isNarrow && (
-				<Box marginBottom={1}>
-					<Text color={colors.secondary}>
-						Single-line pastes above this limit become placeholders. Current:{' '}
-						{currentThreshold} chars
-					</Text>
-				</Box>
-			)}
-			{isNarrow && (
-				<Text color={colors.secondary}>Current: {currentThreshold}</Text>
-			)}
-			<StyledSelectInput
-				items={thresholdOptions.map(opt => ({
-					label:
-						opt.value === currentThreshold
-							? isNarrow
-								? `${opt.label} *`
-								: `${opt.label} (current)`
-							: opt.label,
-					value: opt.value,
-				}))}
-				initialIndex={initialIndex}
-				onSelect={handleSelect}
-			/>
-			<Box marginTop={isNarrow ? 0 : 1}>
-				<Text color={colors.secondary}>
-					Enter to apply · Shift+Tab back · Esc back
-				</Text>
-			</Box>
-		</TitledBoxWithPreferences>
-	);
-}
-
-// Notifications settings panel
-export function SettingsNotificationsPanel({
-	onBack,
-	onCancel,
-}: {
-	onBack: () => void;
-	onCancel: () => void;
-}) {
-	const {boxWidth, isNarrow} = useResponsiveTerminal();
-	const {colors} = useTheme();
-
-	const saved = getNotificationsPreference();
-	const [config, setConfig] = useState<NotificationsConfig>(
-		saved ?? {
-			enabled: false,
-			sound: false,
-			bell: false,
-			events: {
-				toolConfirmation: true,
-				questionPrompt: true,
-				generationComplete: true,
-				triggeredRunComplete: true,
-			},
-		},
-	);
-
-	useInput((_, key) => {
-		if (key.escape) {
-			onCancel();
-		}
-		if (key.shift && key.tab) {
-			onBack();
-		}
-	});
-
-	type ToggleKey =
-		| 'enabled'
-		| 'sound'
-		| 'bell'
-		| 'toolConfirmation'
-		| 'questionPrompt'
-		| 'generationComplete'
-		| 'triggeredRunComplete';
-
-	const items: {label: string; value: ToggleKey}[] = useMemo(() => {
-		const isOn = (val: boolean | undefined) => (val ? 'ON' : 'OFF');
-		return [
-			{
-				label: `Notifications: ${isOn(config.enabled)}`,
-				value: 'enabled' as ToggleKey,
-			},
-			{
-				label: `  Sound: ${isOn(config.sound)}`,
-				value: 'sound' as ToggleKey,
-			},
-			{
-				label: `  Terminal Bell: ${isOn(config.bell)}`,
-				value: 'bell' as ToggleKey,
-			},
-			{
-				label: `  Tool Confirmation: ${isOn(config.events?.toolConfirmation)}`,
-				value: 'toolConfirmation' as ToggleKey,
-			},
-			{
-				label: `  Question Prompt: ${isOn(config.events?.questionPrompt)}`,
-				value: 'questionPrompt' as ToggleKey,
-			},
-			{
-				label: `  Generation Complete: ${isOn(config.events?.generationComplete)}`,
-				value: 'generationComplete' as ToggleKey,
-			},
-			{
-				label: `  Triggered Run Complete: ${isOn(
-					config.events?.triggeredRunComplete,
-				)}`,
-				value: 'triggeredRunComplete' as ToggleKey,
-			},
-		];
-	}, [config]);
-
-	const handleSelect = (item: {label: string; value: ToggleKey}) => {
-		const next = {...config};
-		if (item.value === 'enabled') {
-			next.enabled = !next.enabled;
-		} else if (item.value === 'sound') {
-			next.sound = !next.sound;
-		} else if (item.value === 'bell') {
-			next.bell = !next.bell;
-		} else {
-			next.events = {...next.events, [item.value]: !next.events?.[item.value]};
-		}
-		setConfig(next);
-		updateNotificationsPreference(next);
-		setNotificationsConfig(next);
-	};
-
-	const title = isNarrow ? 'Notifications' : 'Desktop Notifications';
-
-	return (
-		<TitledBoxWithPreferences
-			title={title}
-			width={isNarrow ? '100%' : boxWidth}
-			borderColor={colors.primary}
-			paddingX={2}
-			paddingY={1}
-			flexDirection="column"
-			marginBottom={1}
-		>
-			{!isNarrow && (
-				<Box marginBottom={1}>
-					<Text color={colors.secondary}>
-						Enter to toggle · Shift+Tab back · Esc back
-					</Text>
-				</Box>
-			)}
-			<StyledSelectInput items={items} onSelect={handleSelect} />
-			{isNarrow && (
-				<Box marginTop={0}>
-					<Text color={colors.secondary}>
-						Enter to apply · Shift+Tab back · Esc back
-					</Text>
-				</Box>
-			)}
-		</TitledBoxWithPreferences>
-	);
-}
-
-// Display settings panel
-export function SettingsDisplayPanel({
-	onBack,
-	onCancel,
-}: {
-	onBack: () => void;
-	onCancel: () => void;
-}) {
-	const {boxWidth, isNarrow} = useResponsiveTerminal();
-	const {colors} = useTheme();
-
-	const currentReasoningExpanded = getReasoningExpanded();
-	const currentCompactToolDisplay = getCompactToolDisplay();
-	const currentShowAgentBashOutput = getShowAgentBashOutput();
-	const currentShowUsageFooter = getShowUsageFooter();
-
-	useInput((_, key) => {
-		if (key.escape) {
-			onCancel();
-		}
-		if (key.shift && key.tab) {
-			onBack();
-		}
-	});
-
-	type ToggleKey =
-		| 'reasoningExpanded'
-		| 'compactToolDisplay'
-		| 'showAgentBashOutput'
-		| 'showUsageFooter';
-
-	const items: {label: string; value: ToggleKey}[] = useMemo(() => {
-		const isOn = (val: boolean | undefined) => (val ? 'ON' : 'OFF');
-		return [
-			{
-				label: `Show Thinking by default: ${isOn(currentReasoningExpanded)}`,
-				value: 'reasoningExpanded' as ToggleKey,
-			},
-			{
-				// compactToolDisplay=true means results are COMPACT, so
-				// expansion is on exactly when the preference is false.
-				label: `Expand Tool Results by default: ${isOn(!currentCompactToolDisplay)}`,
-				value: 'compactToolDisplay' as ToggleKey,
-			},
-			{
-				// Show the command output on bash tool cards the agent runs,
-				// compact or not.
-				label: `Agent Bash Output: ${isOn(currentShowAgentBashOutput)}`,
-				value: 'showAgentBashOutput' as ToggleKey,
-			},
-			{
-				label: `Usage & Cost Footer: ${isOn(currentShowUsageFooter)}`,
-				value: 'showUsageFooter' as ToggleKey,
-			},
-		];
-	}, [
-		currentReasoningExpanded,
-		currentCompactToolDisplay,
-		currentShowAgentBashOutput,
-		currentShowUsageFooter,
-	]);
-
-	const handleSelect = (item: {label: string; value: ToggleKey}) => {
-		if (item.value === 'reasoningExpanded') {
-			const newValue = !currentReasoningExpanded;
-			updateReasoningExpanded(newValue);
-		} else if (item.value === 'compactToolDisplay') {
-			const newValue = !currentCompactToolDisplay;
-			updateCompactToolDisplay(newValue);
-		} else if (item.value === 'showAgentBashOutput') {
-			// Applies to the next bash card, no restart needed - read from
-			// preferences when the card renders.
-			updateShowAgentBashOutput(!currentShowAgentBashOutput);
-		} else if (item.value === 'showUsageFooter') {
-			// Applies to the next response, no restart needed - the footer is
-			// read from preferences per message.
-			updateShowUsageFooter(!currentShowUsageFooter);
-		}
-		onBack();
-	};
-
-	const title = isNarrow ? 'Display' : 'Display Settings';
-
-	return (
-		<TitledBoxWithPreferences
-			title={title}
-			width={isNarrow ? '100%' : boxWidth}
-			borderColor={colors.primary}
-			paddingX={2}
-			paddingY={1}
-			flexDirection="column"
-			marginBottom={1}
-		>
-			{!isNarrow && (
-				<Box marginBottom={1}>
-					<Text color={colors.secondary}>
-						Enter to toggle · Shift+Tab back · Esc back
-					</Text>
-				</Box>
-			)}
-			<StyledSelectInput items={items} onSelect={handleSelect} />
-			{isNarrow && (
-				<Box marginTop={0}>
-					<Text color={colors.secondary}>
-						Enter to apply · Shift+Tab back · Esc back
-					</Text>
-				</Box>
-			)}
-		</TitledBoxWithPreferences>
-	);
-}
-
-// Privacy settings panel
-export function SettingsPrivacyPanel({
-	onBack,
-	onCancel,
-}: {
-	onBack: () => void;
-	onCancel: () => void;
-}) {
-	const {boxWidth, isNarrow} = useResponsiveTerminal();
-	const {colors} = useTheme();
-
-	const [enabled, setEnabled] = useState(getPrivacyPreference());
-
-	useInput((_, key) => {
-		if (key.escape) {
-			onCancel();
-		}
-		if (key.shift && key.tab) {
-			onBack();
-		}
-	});
-
-	const items = useMemo(() => {
-		return [
-			{
-				label: `Prompt Scrubbing: ${enabled ? 'ON' : 'OFF'}`,
-				value: 'toggle',
-			},
-		];
-	}, [enabled]);
-
-	const handleSelect = () => {
-		const next = !enabled;
-		setEnabled(next);
-		updatePrivacyPreference(next);
-	};
-
-	const title = isNarrow ? 'Privacy' : 'Privacy Settings';
-
-	return (
-		<TitledBoxWithPreferences
-			title={title}
-			width={isNarrow ? '100%' : boxWidth}
-			borderColor={colors.primary}
-			paddingX={2}
-			paddingY={1}
-			flexDirection="column"
-			marginBottom={1}
-		>
-			{!isNarrow && (
-				<Box marginBottom={1}>
-					<Text color={colors.secondary}>
-						Enter to toggle · Shift+Tab back · Esc back
-					</Text>
-				</Box>
-			)}
-
-			<Box marginBottom={1}>
-				<Text color={colors.warning}>
-					Prompt Scrubbing removes sensitive identifiers before sending prompts
-					to cloud providers. This improves privacy but does not guarantee
-					semantic anonymity.
-				</Text>
-			</Box>
-
-			<StyledSelectInput items={items} onSelect={handleSelect} />
-
 			<Box marginTop={1}>
-				<Text color={colors.secondary}>Enter to apply · Esc back</Text>
+				<Text color={colors.secondary}>{footerHint}</Text>
 			</Box>
-		</TitledBoxWithPreferences>
-	);
-}
-
-/** Presets cycled by the Advanced panel. Any value in range can still be set
- * directly in nanocoder-preferences.json; these are just the common choices. */
-const TOKEN_BUDGET_PRESETS = [120, 240, 480, 960];
-const MEMORY_LIMIT_PRESETS = [3, 5, 8, 12];
-
-/** Next preset after `current`, wrapping. Falls to the first when `current`
- * is a hand-edited value that isn't in the list. */
-function cyclePreset(presets: number[], current: number): number {
-	const index = presets.indexOf(current);
-	return presets[(index + 1) % presets.length] ?? presets[0] ?? current;
-}
-
-// Semantic memory settings panel
-export function SettingsSemanticMemoryPanel({
-	onBack,
-	onCancel,
-}: {
-	onBack: () => void;
-	onCancel: () => void;
-}) {
-	const {boxWidth, isNarrow} = useResponsiveTerminal();
-	const {colors} = useTheme();
-
-	const initialContextPreferences = getProjectContextPreferences();
-	const [semanticMemoryEnabled, setSemanticMemoryEnabled] = useState(
-		initialContextPreferences.semanticMemoryEnabled,
-	);
-	const [tokenBudget, setTokenBudget] = useState(
-		initialContextPreferences.tokenBudget,
-	);
-	const [memoryLimit, setMemoryLimit] = useState(
-		initialContextPreferences.memoryLimit,
-	);
-
-	useInput((_, key) => {
-		if (key.escape) {
-			onCancel();
-		}
-		if (key.shift && key.tab) {
-			onBack();
-		}
-	});
-
-	const items = useMemo(() => {
-		return [
-			{
-				label: `Semantic Memory: ${semanticMemoryEnabled ? 'ON' : 'OFF'}`,
-				value: 'semantic-memory',
-			},
-			{
-				label: `Memory Token Budget: ${tokenBudget}`,
-				value: 'semantic-memory-token-budget',
-			},
-			{
-				label: `Memories Per Prompt: ${memoryLimit}`,
-				value: 'semantic-memory-limit',
-			},
-		];
-	}, [semanticMemoryEnabled, tokenBudget, memoryLimit]);
-
-	const handleSelect = (item: {value: string}) => {
-		switch (item.value) {
-			case 'semantic-memory': {
-				const next = !semanticMemoryEnabled;
-				setSemanticMemoryEnabled(next);
-				updateSemanticMemoryEnabled(next);
-				break;
-			}
-			case 'semantic-memory-token-budget': {
-				const next = cyclePreset(TOKEN_BUDGET_PRESETS, tokenBudget);
-				setTokenBudget(next);
-				updateSemanticMemoryTokenBudget(next);
-				break;
-			}
-			case 'semantic-memory-limit': {
-				const next = cyclePreset(MEMORY_LIMIT_PRESETS, memoryLimit);
-				setMemoryLimit(next);
-				updateSemanticMemoryLimit(next);
-				break;
-			}
-		}
-	};
-
-	const title = isNarrow ? 'Memory' : 'Semantic Memory';
-
-	return (
-		<TitledBoxWithPreferences
-			title={title}
-			width={isNarrow ? '100%' : boxWidth}
-			borderColor={colors.primary}
-			paddingX={2}
-			paddingY={1}
-			flexDirection="column"
-			marginBottom={1}
-		>
-			{!isNarrow && (
-				<Box marginBottom={1}>
-					<Text color={colors.secondary}>
-						Enter to toggle · Shift+Tab back · Esc back
-					</Text>
-				</Box>
-			)}
-
-			<Box marginBottom={1}>
-				<Text color={colors.warning}>
-					Semantic Memory recalls saved project context and injects it into
-					future prompts. Turn it off for stateless agent behavior. The budget
-					and per-prompt count bound how much of the context window it may
-					consume - lower them on small local models.
-				</Text>
-			</Box>
-
-			<StyledSelectInput items={items} onSelect={handleSelect} />
-
-			<Box marginTop={1}>
-				<Text color={colors.secondary}>Enter to apply · Esc back</Text>
-			</Box>
-		</TitledBoxWithPreferences>
+		</Box>
 	);
 }

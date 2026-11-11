@@ -18,10 +18,7 @@ import {usePromptHistoryNavigation} from '@/components/composer/usePromptHistory
 import {useQueuedMessageSelection} from '@/components/composer/useQueuedMessageSelection';
 import {useReverseSearch} from '@/components/composer/useReverseSearch';
 import {useShortcutsOverlay} from '@/components/composer/useShortcutsOverlay';
-import {
-	DevelopmentModeIndicator,
-	type VoiceIndicatorInfo,
-} from '@/components/development-mode-indicator';
+import {StatusBar, type VoiceIndicatorInfo} from '@/components/status-bar';
 import TextInput, {
 	type TextInputHandle,
 	useRawInput,
@@ -82,7 +79,7 @@ interface ChatProps {
 	currentModel?: string; // Active model id — resolves the 'auto' tune profile for display
 	activeEditor?: ActiveEditorState | null; // VS Code active file + optional selection
 	onDismissActiveEditor?: () => void; // Dismiss the active editor pill on clear/escape
-	taskInfo?: TaskIndicatorInfo | null; // Task badge status for DevelopmentModeIndicator
+	taskInfo?: TaskIndicatorInfo | null; // Task badge status for StatusBar
 	forceFocus?: boolean; // Force focus for testing (bypasses useFocus)
 	/**
 	 * Centre the prompt box in the terminal. Inline mode turns this off: the
@@ -724,7 +721,7 @@ export default function UserInput({
 						</Text>
 					)}
 				</Text>
-				<DevelopmentModeIndicator
+				<StatusBar
 					developmentMode={developmentMode}
 					colors={colors}
 					contextPercentUsed={contextPercentUsed ?? null}
@@ -848,7 +845,7 @@ export default function UserInput({
 			step to the right of the box's left border, so it aligns cleanly under
 			the input box content whether the box is centred or flush left. */}
 			<Box marginLeft={indicatorIndent}>
-				<DevelopmentModeIndicator
+				<StatusBar
 					// Must match the wrapper's marginLeft: the indicator budgets its
 					// segments against the width left after this indent, and
 					// overflowing it lets Ink cut the row mid-word.
