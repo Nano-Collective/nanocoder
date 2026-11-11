@@ -96,7 +96,7 @@ const resolveSafeRedirects = async (url: string): Promise<string> => {
 };
 
 /**
- * Converted pages kept briefly so paging through one does not fetch and
+ * Converted pages kept briefly so paging through one does not download and
  * convert it again for every chunk.
  *
  * The markdown for a URL does not change between the calls that page through
@@ -104,6 +104,10 @@ const resolveSafeRedirects = async (url: string): Promise<string> => {
  * HTML-to-markdown pass. Short and small on purpose - a stale page is worse
  * than a refetch, and a handful of large pages is already real memory.
  * A `Map` iterates in insertion order, so the first key is the oldest.
+ *
+ * The markdown is the only thing kept. Every call still walks the redirect
+ * chain and validates each hop, so the cache can never be the reason an
+ * address gets through that a fresh call would have refused.
  */
 const URL_CACHE_TTL_MS = 90_000;
 const URL_CACHE_MAX_ENTRIES = 5;
@@ -210,22 +214,21 @@ const windowContent = (content: string, args: FetchArgs): string => {
 
 const executeFetchUrl = async (args: FetchArgs): Promise<string> => {
 	try {
-		const cached = getCachedMarkdown(args.url);
+		// Every call walks the redirect chain, and each hop of that walk runs
+		// through the validator, which does the text checks and the DNS lookup.
+		// A cached page skips the download and the conversion, never this: a
+		// name that has since started resolving somewhere internal, or a
+		// redirect that now points there, has to be refused as readily on the
+		// tenth call as on the first.
+		const safeUrl = await resolveSafeRedirects(args.url);
+
+		// Keyed by where the redirects actually landed, not by what was asked
+		// for, so a chain that now ends somewhere else converts that page
+		// instead of handing back the one it used to reach.
+		const cached = getCachedMarkdown(safeUrl);
 		if (cached !== undefined) {
-			// A page just read is being paged through. The redirect walk and the
-			// conversion are skipped, but the address is still checked: it costs
-			// a lookup, not a download, and every call keeps going through the
-			// same guard.
-			const validation = await fetchUrlValidator({url: args.url});
-			if (!validation.valid) {
-				throw new Error(validation.error);
-			}
 			return windowContent(cached, args);
 		}
-
-		// The first hop of this walk runs the URL through the validator, which
-		// does the text checks and the DNS lookup.
-		const safeUrl = await resolveSafeRedirects(args.url);
 
 		// Use get-md to convert URL to LLM-friendly markdown (lazy import
 		// so the ~100-module HTML-parsing graph only loads when the tool
@@ -245,7 +248,7 @@ const executeFetchUrl = async (args: FetchArgs): Promise<string> => {
 			throw new Error('No content returned from URL');
 		}
 
-		cacheMarkdown(args.url, content);
+		cacheMarkdown(safeUrl, content);
 
 		// Limit content size to prevent context overflow; the rest stays
 		// reachable through start_index.

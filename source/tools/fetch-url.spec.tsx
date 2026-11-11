@@ -763,7 +763,7 @@ const callFetchUrl = async (args: {
 	await fetchUrlTool.tool.execute!(args, {toolCallId: 'test', messages: []});
 
 test.serial(
-	'a long page is returned in windows that join back into the whole page',
+	'windows join back into the whole page with no gap and no overlap',
 	async t => {
 		if (!fetchUrlTool) {
 			t.pass('Skipping test - fetch-url module not available');
@@ -826,6 +826,8 @@ test.serial('the truncation note names the window and the next start_index', asy
 		const result = await callFetchUrl({url: 'https://pages.example.test/note'});
 		const note = result.match(NOTE);
 		t.truthy(note, result.slice(-200));
+		// The formatter finds the note by this prefix, so it has to stay.
+		t.true(result.includes('[Content truncated'));
 		t.is(Number(note![1]), 0);
 		t.is(Number(note![2]), PAGE_LIMIT);
 		t.is(Number(note![4]), PAGE_LIMIT);
@@ -1001,13 +1003,15 @@ test.serial('paging the same URL converts the page once', async t => {
 	try {
 		const url = 'https://pages.example.test/cache-hit';
 		await callFetchUrl({url});
-		const afterFirst = {...server.requests};
-		t.is(afterFirst.get, 1);
+		t.is(server.requests.get, 1);
+		const probesAfterFirst = server.requests.head;
 
 		const second = await callFetchUrl({url, start_index: PAGE_LIMIT});
 		t.true(second.includes('entry-'));
-		// No probe and no download for the second chunk.
-		t.deepEqual(server.requests, afterFirst);
+		// The page is not downloaded or converted again...
+		t.is(server.requests.get, 1);
+		// ...but its address is still walked and checked, which is a HEAD.
+		t.true(server.requests.head > probesAfterFirst);
 	} finally {
 		server.restore();
 	}
@@ -1086,6 +1090,7 @@ test.serial('a cached page is still checked against the address guard', async t 
 		await t.throwsAsync(() => callFetchUrl({url, start_index: 10}), {
 			message: /internal\/private network/,
 		});
+		// Refused on the address alone, before anything was requested.
 		t.deepEqual(server.requests, afterFirst);
 	} finally {
 		hostResolver.resolve = originalResolve;
@@ -1143,4 +1148,94 @@ test('the schema offers start_index and max_length without requiring them', t =>
 	t.is(schema.properties.start_index?.type, 'number');
 	t.is(schema.properties.max_length?.type, 'number');
 	t.deepEqual(schema.required, ['url']);
+});
+
+test.serial(
+	'a cached page is refused once its redirect points somewhere internal',
+	async t => {
+		if (!fetchUrlTool) {
+			t.pass('Skipping test - fetch-url module not available');
+			return;
+		}
+
+		const originalFetch = globalThis.fetch;
+		let redirectTo = 'https://pages.example.test/public-target';
+		globalThis.fetch = async (input, init) => {
+			const url = String(input);
+			if (url === 'https://pages.example.test/entry') {
+				return new Response(null, {
+					status: 302,
+					headers: {location: redirectTo},
+				});
+			}
+			if ((init?.method as string | undefined) === 'HEAD') {
+				return new Response(null, {status: 200});
+			}
+			return new Response(longPageHtml(500), {
+				status: 200,
+				headers: {'content-type': 'text/html'},
+			});
+		};
+
+		try {
+			const url = 'https://pages.example.test/entry';
+			const first = await callFetchUrl({url});
+			t.true(first.includes('entry-'));
+
+			// Same URL, but the chain now ends at a private address. The page it
+			// used to reach is cached; that must not matter.
+			redirectTo = 'http://127.0.0.1:8080/internal';
+			await t.throwsAsync(() => callFetchUrl({url, start_index: 10}), {
+				message: /internal\/private network/,
+			});
+		} finally {
+			globalThis.fetch = originalFetch;
+		}
+	},
+);
+
+test.serial('the cache belongs to the address the redirects reached', async t => {
+	if (!fetchUrlTool) {
+		t.pass('Skipping test - fetch-url module not available');
+		return;
+	}
+
+	const originalFetch = globalThis.fetch;
+	let redirectTo = 'https://pages.example.test/first-target';
+	let conversions = 0;
+	globalThis.fetch = async (input, init) => {
+		const url = String(input);
+		if (url === 'https://pages.example.test/moving') {
+			return new Response(null, {
+				status: 302,
+				headers: {location: redirectTo},
+			});
+		}
+		if ((init?.method as string | undefined) === 'HEAD') {
+			return new Response(null, {status: 200});
+		}
+		conversions++;
+		return new Response(`<html><body><h1>page at ${url}</h1></body></html>`, {
+			status: 200,
+			headers: {'content-type': 'text/html'},
+		});
+	};
+
+	try {
+		const url = 'https://pages.example.test/moving';
+		t.regex(await callFetchUrl({url}), /first-target/);
+		t.is(conversions, 1);
+
+		// Reading it again serves the cached conversion.
+		t.regex(await callFetchUrl({url}), /first-target/);
+		t.is(conversions, 1);
+
+		// The chain now ends somewhere else, so that page is fetched instead of
+		// the one the cache holds for the old destination.
+		redirectTo = 'https://pages.example.test/second-target';
+		t.regex(await callFetchUrl({url}), /second-target/);
+		t.is(conversions, 2);
+	} finally {
+		globalThis.fetch = originalFetch;
+	}
 });
