@@ -74,6 +74,8 @@ import {
 } from '@/config/preferences';
 import {resolveTune} from '@/config/tune';
 import {appendRelevantProjectContextWithCount} from '@/memory/project-context';
+import {withTrustedProjectPlugins} from '@/plugins/host';
+import {type HookContext, runLifecycleHooks} from '@/services/lifecycle-hooks';
 import {runInSessionCwdScope} from '@/services/session-cwd';
 import {cancelSubagentRun} from '@/services/subagent-events';
 import {TimelineManager} from '@/services/timeline-manager';
@@ -378,6 +380,46 @@ export class AcpAgent implements Agent {
 				}
 			}
 
+			// user-prompt-submit gates what goes to the model as the user's own
+			// words, as in the TUI: a custom slash command is left alone.
+			const isCommand =
+				trimmedUserText.startsWith('/') &&
+				!trimmedUserText.split(/\s+/)[0].substring(1).includes('/');
+			if (!isCommand) {
+				const gate = await this.runSessionHooks(session, 'user-prompt-submit', {
+					prompt: userText,
+				});
+				if (gate.blocked) {
+					const reason = gate.reason ?? 'Prompt blocked by a hook.';
+					// Neither the prompt nor the reason ever reaches the model.
+					session.messages = [
+						...session.messages,
+						{role: 'user', content: userText, displayOnly: true},
+						{role: 'assistant', content: reason, displayOnly: true},
+					];
+					this.conn.sessionUpdate({
+						sessionId: params.sessionId,
+						update: {
+							sessionUpdate: 'agent_message_chunk',
+							content: {type: 'text', text: reason},
+						},
+					});
+					return {stopReason: 'refusal'};
+				}
+				// Whatever session-start left for this session, plus this hook's
+				// own stdout.
+				const startOutput = session.startHookOutput
+					? await session.startHookOutput
+					: '';
+				session.startHookOutput = null;
+				const hookContext = [startOutput, gate.output]
+					.filter(Boolean)
+					.join('\n\n');
+				if (hookContext) {
+					contextualUserText = `<hook-context>\n${hookContext}\n</hook-context>\n\n${contextualUserText}`;
+				}
+			}
+
 			if (session.activeFile) {
 				contextualUserText = `[Active file: ${session.activeFile}]\n\n${contextualUserText}`;
 			}
@@ -577,7 +619,45 @@ export class AcpAgent implements Agent {
 		} finally {
 			session.releaseTurn();
 		}
+		// Close, delete and a resume that replaces the live copy all end it.
+		await this.endSession(session);
 		return true;
+	}
+
+	/**
+	 * Runs `session-end` for every session still open, for a shutdown. The
+	 * hooks of each are bounded by their own short default timeout, and run
+	 * side by side so a few open chats still fit the shutdown budget.
+	 */
+	async endAllSessions(): Promise<void> {
+		const open = [...this.sessions.values()];
+		this.sessions.clear();
+		await Promise.all(open.map(session => this.endSession(session)));
+	}
+
+	/** Runs `session-end` for a session that is going away. Never throws. */
+	private async endSession(session: AcpSession): Promise<void> {
+		await this.runSessionHooks(session, 'session-end').catch(error => {
+			logger.warn(
+				`ACP session ${session.sessionId}: session-end hooks failed: ${String(error)}`,
+			);
+		});
+	}
+
+	/**
+	 * Lifecycle hooks for one session run where its turns run: in its working
+	 * directory, with its project's trusted plugins.
+	 */
+	private runSessionHooks(
+		session: AcpSession,
+		event: 'session-start' | 'user-prompt-submit' | 'session-end',
+		context: HookContext = {},
+	) {
+		return runInSessionCwdScope(session.cwdScope, () =>
+			withTrustedProjectPlugins(session.cwd, () =>
+				runLifecycleHooks(event, context),
+			),
+		);
 	}
 
 	async setSessionMode(
@@ -1166,6 +1246,16 @@ export class AcpAgent implements Agent {
 		session.client = this.initContext.client;
 		this.sessions.set(sessionId, session);
 		this.buildSystemPromptForSession(session);
+		// Not awaited: a slow hook must not hold up session/new. The first prompt
+		// waits for it, so its output still reaches the model on that prompt.
+		session.startHookOutput = this.runSessionHooks(session, 'session-start')
+			.then(({output}) => output)
+			.catch(error => {
+				logger.warn(
+					`ACP session ${sessionId}: session-start hooks failed: ${String(error)}`,
+				);
+				return '';
+			});
 		return session;
 	}
 
