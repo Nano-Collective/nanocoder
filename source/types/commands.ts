@@ -28,19 +28,22 @@ export interface Command<T = React.ReactElement | void>
 	handler: (
 		args: string[],
 		messages: Message[],
-		metadata: {
-			provider: string;
-			model: string;
-			tokens: number;
-			getMessageTokens: (message: Message) => number;
-			client?: import('@/types/core').LLMClient | null;
-			tune?: import('@/types/config').TuneConfig;
-			developmentMode?: import('@/types/core').DevelopmentMode;
-			lastApiUsage?: ApiUsageSnapshot | null;
-			apiCallHistory?: ApiCallRecord[];
-			sessionId?: string;
-		},
+		metadata: CommandHandlerMetadata,
 	) => Promise<T>;
+}
+
+/** What a read-only command's `handler` gets besides its args and messages. */
+export interface CommandHandlerMetadata {
+	provider: string;
+	model: string;
+	tokens: number;
+	getMessageTokens: (message: Message) => number;
+	client?: import('@/types/core').LLMClient | null;
+	tune?: import('@/types/config').TuneConfig;
+	developmentMode?: import('@/types/core').DevelopmentMode;
+	lastApiUsage?: ApiUsageSnapshot | null;
+	apiCallHistory?: ApiCallRecord[];
+	sessionId?: string;
 }
 
 /**
@@ -56,6 +59,14 @@ export interface CommandContext {
 	 * for commands that parse quoted arguments or must see the raw split.
 	 */
 	argText: string;
+	/** `argText` split on whitespace: the args a read-only handler would get. */
+	rawArgs: string[];
+	/**
+	 * What a read-only `handler` receives, for a stateful command that shows
+	 * a read-only view for some subcommands. Computed on call (it counts
+	 * tokens across the conversation).
+	 */
+	handlerMetadata: () => CommandHandlerMetadata;
 	/** The conversation as it stood when the command was submitted. */
 	messages: Message[];
 	/** Replace the conversation (compaction, restore). */

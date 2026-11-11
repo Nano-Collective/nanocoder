@@ -1,5 +1,6 @@
 import {Box, Text} from 'ink';
 import React from 'react';
+import {createCommandFile} from '@/commands/create-scaffold';
 import {InfoField} from '@/components/ui/info-field';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {formatParameterUsage} from '@/custom-commands/executor';
@@ -8,7 +9,7 @@ import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {getCommandLoader} from '@/message-handler';
 import {generateKey} from '@/session/key-generator';
-import type {Command, CustomCommand} from '@/types/index';
+import type {Command, CustomCommand, StatefulCommand} from '@/types/index';
 import {infoMsg} from '@/utils/message-factory';
 
 interface CustomCommandsProps {
@@ -262,7 +263,8 @@ function CommandDetail({command}: {command: CustomCommand}) {
 	);
 }
 
-export const commandsCommand: Command = {
+/** The read-only part of /commands: every subcommand that only shows something. */
+export const commandsView: Command = {
 	name: 'commands',
 	description: 'List custom commands. Subcommands: show <name>, create <name>',
 	handler: (args: string[]) => {
@@ -316,5 +318,27 @@ export const commandsCommand: Command = {
 				commands: commands,
 			}),
 		);
+	},
+};
+
+/**
+ * /commands. `create` write files and may start a design
+ * conversation, so they run with app state; everything else is `commandsView`.
+ */
+export const commandsCommand: StatefulCommand = {
+	name: commandsView.name,
+	description: commandsView.description,
+	run: async context => {
+		const [sub, name] = context.rawArgs;
+		if (sub === 'create') {
+			return createCommandFile(name, context);
+		}
+		return {
+			show: await commandsView.handler(
+				context.rawArgs,
+				context.messages,
+				context.handlerMetadata(),
+			),
+		};
 	},
 };

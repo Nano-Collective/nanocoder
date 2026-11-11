@@ -7,6 +7,7 @@
 
 import {Box, Text} from 'ink';
 import React from 'react';
+import {copyAgentToProject, createAgentFile} from '@/commands/create-scaffold';
 import {InfoField} from '@/components/ui/info-field';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
@@ -15,7 +16,7 @@ import {parseMarkdown} from '@/markdown-parser/index';
 import {generateKey} from '@/session/key-generator';
 import {getSubagentLoader} from '@/subagents/subagent-loader';
 import type {SubagentConfigWithSource} from '@/subagents/types';
-import type {Command} from '@/types/index';
+import type {Command, StatefulCommand} from '@/types/index';
 import {errorMsg} from '@/utils/message-factory';
 import {wrapWithTrimmedContinuations} from '@/utils/text-wrapping';
 
@@ -156,7 +157,8 @@ function AgentDetail({agent}: AgentDetailProps) {
 	);
 }
 
-export const agentsCommand: Command = {
+/** The read-only part of /agents: every subcommand that only shows something. */
+const agentsView: Command = {
 	name: 'agents',
 	description:
 		'List subagents. /agents show <name> for details, /agents copy <name> to customize, /agents create <name> to scaffold one',
@@ -192,5 +194,30 @@ export const agentsCommand: Command = {
 			key: generateKey('agents'),
 			subagents: formatted,
 		});
+	},
+};
+
+/**
+ * /agents. `create` and `copy` write files and may start a design
+ * conversation, so they run with app state; everything else is `agentsView`.
+ */
+export const agentsCommand: StatefulCommand = {
+	name: agentsView.name,
+	description: agentsView.description,
+	run: async context => {
+		const [sub, name] = context.rawArgs;
+		if (sub === 'create') {
+			return createAgentFile(name, context);
+		}
+		if (sub === 'copy') {
+			return copyAgentToProject(name, context);
+		}
+		return {
+			show: await agentsView.handler(
+				context.rawArgs,
+				context.messages,
+				context.handlerMetadata(),
+			),
+		};
 	},
 };

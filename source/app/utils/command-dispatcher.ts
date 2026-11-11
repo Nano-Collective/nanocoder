@@ -9,6 +9,7 @@ import {generateKey} from '@/session/key-generator';
 import {
 	type CommandCompletion,
 	type CommandContext,
+	type CommandHandlerMetadata,
 	isStatefulCommand,
 	type MessageSubmissionOptions,
 } from '@/types/index';
@@ -21,13 +22,6 @@ import {
 	parseInlineOverrides,
 } from '@/utils/inline-overrides';
 import {infoMsg, warningMsg} from '@/utils/message-factory';
-import {
-	handleAgentCopy,
-	handleAgentCreate,
-	handleCommandCreate,
-	handleSkillsCreate,
-	handleToolCreate,
-} from './handlers/create-handler';
 import {handleMCPPromptCommand} from './handlers/mcp-prompt-handler';
 
 /**
@@ -68,6 +62,27 @@ async function handleCustomCommand(
 	return true;
 }
 
+/** What a read-only command's `handler` receives besides args and messages. */
+function buildHandlerMetadata(
+	options: MessageSubmissionOptions,
+): CommandHandlerMetadata {
+	return {
+		provider: options.provider,
+		model: options.model,
+		tokens: options.messages.reduce(
+			(sum, msg) => sum + options.getMessageTokens(msg),
+			0,
+		),
+		getMessageTokens: options.getMessageTokens,
+		client: options.client,
+		tune: options.tune,
+		developmentMode: options.developmentMode,
+		lastApiUsage: options.lastApiUsage,
+		apiCallHistory: options.apiCallHistory,
+		sessionId: options.sessionId,
+	};
+}
+
 /**
  * The app state a stateful command can reach. `args` follows the old special
  * commands: the submission's `commandArgs` (VS Code context stripped) when
@@ -82,6 +97,8 @@ function createCommandContext(
 	return {
 		args: options.commandArgs ?? commandParts.slice(1),
 		argText,
+		rawArgs: argText.trim() ? argText.trim().split(/\s+/) : [],
+		handlerMetadata: () => buildHandlerMetadata(options),
 		messages: options.messages,
 		setMessages: options.setMessages,
 		provider: options.provider,
@@ -140,14 +157,8 @@ async function runRegisteredCommand(
 	options: MessageSubmissionOptions,
 	onceThreshold?: number,
 ): Promise<void> {
-	const {
-		onAddToChatQueue,
-		onCommandComplete,
-		setLiveComponent,
-		messages,
-		lastApiUsage,
-		apiCallHistory,
-	} = options;
+	const {onAddToChatQueue, onCommandComplete, setLiveComponent, messages} =
+		options;
 
 	// Commands that declare a progressLabel do slow work (LLM round-trip,
 	// network) before returning their result component. Hold a spinner in the
@@ -186,23 +197,11 @@ async function runRegisteredCommand(
 				),
 			);
 		} else {
-			const totalTokens = messages.reduce(
-				(sum, msg) => sum + options.getMessageTokens(msg),
-				0,
+			result = await commandRegistry.execute(
+				message.slice(1),
+				messages,
+				buildHandlerMetadata(options),
 			);
-
-			result = await commandRegistry.execute(message.slice(1), messages, {
-				provider: options.provider,
-				model: options.model,
-				tokens: totalTokens,
-				getMessageTokens: options.getMessageTokens,
-				client: options.client,
-				tune: options.tune,
-				developmentMode: options.developmentMode,
-				lastApiUsage,
-				apiCallHistory,
-				sessionId: options.sessionId,
-			});
 		}
 	} finally {
 		if (progressLabel) {
@@ -255,8 +254,7 @@ async function runRegisteredCommand(
  *    aliases are rewritten to their target
  * 4. Inline `?key=value` overrides, for the commands that read them
  * 5. Built-in commands from the registry. A `StatefulCommand` gets a
- *    `CommandContext`; the rest still pass through the older stateful
- *    handlers in `./handlers/` first, which are being moved over.
+ *    `CommandContext`; a read-only `Command` gets its handler arguments.
  */
 export async function dispatchSlashCommand(
 	message: string,
@@ -337,7 +335,7 @@ async function handleRegisteredSlashCommand(
 	// `/remember` or `/tasks add` - receives its args untouched, so a
 	// literal `?word` is never reordered, expanded into a flag or warned on.
 	if (!INLINE_OVERRIDE_COMMANDS.has(commandName)) {
-		await routeSlashCommand(commandName, rawParts, message, options);
+		await runRegisteredCommand(message, rawParts, options);
 		return;
 	}
 
@@ -377,10 +375,9 @@ async function handleRegisteredSlashCommand(
 			);
 		}
 
-		await routeSlashCommand(
-			commandName,
-			[commandName, ...positional, ...passthrough, ...expandedFlags],
+		await runRegisteredCommand(
 			cleanedMessage,
+			[commandName, ...positional, ...passthrough, ...expandedFlags],
 			options,
 			onceThreshold,
 		);
@@ -398,28 +395,3 @@ const INLINE_OVERRIDE_COMMANDS: ReadonlySet<string> = new Set([
 	'compact',
 	'usage',
 ]);
-
-/**
- * Route a parsed slash command through the stateful handlers, falling back
- * to the built-in command registry.
- */
-async function routeSlashCommand(
-	commandName: string,
-	commandParts: string[],
-	cleanedMessage: string,
-	options: MessageSubmissionOptions,
-	onceThreshold?: number,
-): Promise<void> {
-	if (await handleCommandCreate(commandParts, options)) return;
-	if (await handleAgentCreate(commandParts, options)) return;
-	if (await handleAgentCopy(commandParts, options)) return;
-	if (await handleToolCreate(commandParts, options)) return;
-	if (await handleSkillsCreate(commandParts, options)) return;
-
-	await runRegisteredCommand(
-		cleanedMessage,
-		commandParts,
-		options,
-		onceThreshold,
-	);
-}
