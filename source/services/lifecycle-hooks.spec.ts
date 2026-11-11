@@ -227,6 +227,53 @@ test.serial('a root-anchored matchPaths matches an absolute path', async t => {
 	t.is(outsideRoot.output, '');
 });
 
+test.serial('matchPaths matches a ./-prefixed path', async t => {
+	withHooks({
+		'pre-tool-use': [{matchPaths: ['src/**'], command: node('process.exit(2)')}],
+	});
+
+	const outcome = await runLifecycleHooks('pre-tool-use', {
+		toolName: 'write_file',
+		toolArgs: {path: './src/a.ts'},
+	});
+
+	t.true(outcome.blocked, 'the same file as src/a.ts must hit the same veto');
+});
+
+test.serial(
+	'matchPaths resolves a relative path against the session cwd',
+	async t => {
+		const src = join(testDir, 'src');
+		mkdirSync(src, {recursive: true});
+		// The configured root keeps the tmpdir spelling while the session cwd is
+		// physical, as `pwd -P` reports it after `cd src` (on macOS /var is a
+		// symlink to /private/var, so the two spellings differ).
+		setProjectRoot(testDir);
+		setSessionCwd(join(realpathSync(testDir), 'src'));
+		try {
+			withHooks({
+				'pre-tool-use': [
+					{matchPaths: ['src/**'], command: node('process.exit(2)')},
+				],
+			});
+
+			const inSrc = await runLifecycleHooks('pre-tool-use', {
+				toolName: 'write_file',
+				toolArgs: {path: 'a.ts'},
+			});
+			const backAtRoot = await runLifecycleHooks('pre-tool-use', {
+				toolName: 'write_file',
+				toolArgs: {path: join(testDir, 'other', 'a.ts')},
+			});
+
+			t.true(inSrc.blocked, '`a.ts` after `cd src` is src/a.ts');
+			t.false(backAtRoot.blocked);
+		} finally {
+			setSessionCwd(testDir);
+		}
+	},
+);
+
 test.serial('matchPaths excludes a tool that acted on no file', async t => {
 	// A hook scoped to files is asking a question `execute_bash` cannot answer,
 	// so it must not fire — unlike a missing matchTools, which widens.

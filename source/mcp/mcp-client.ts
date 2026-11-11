@@ -1166,9 +1166,15 @@ export class MCPClient {
 					) => Promise<string | StructuredToolOutput>;
 
 					// MCP tools take the same mode posture as built-in tools:
-					//   - auto-accept and headless both run unattended — headless is
-					//     daemon-driven, so there is no foreground prompt to answer
-					//     (mirrors createFileToolApproval in @/utils/tool-approval);
+					//   - headless runs unattended — it is daemon-driven, so there is
+					//     no foreground prompt to answer (execute_bash runs there
+					//     too); `"enabled": false` is the server-level opt-out;
+					//   - auto-accept runs server-annotated readers and alwaysAllow-ed
+					//     tools, and prompts for the rest. An MCP tool can be as
+					//     capable as execute_bash (shell, database and deploy
+					//     servers), and auto-accept still prompts for bash, so an
+					//     arbitrary MCP tool must not skip what bash cannot. The
+					//     readOnlyHint gets the same trust plan mode gives it;
 					//   - plan inspects without side effects, so a server's
 					//     alwaysAllow entry must not short-circuit it; only a
 					//     server-annotated reader is safe to run there;
@@ -1188,8 +1194,9 @@ export class MCPClient {
 					const readOnly = mcpTool.readOnly === true;
 					const isAutoApproved = this.isToolAutoApproved(toolName, serverName);
 					const approval: ToolApprovalPolicy = (_args, mode) => {
-						if (mode === 'auto-accept' || mode === 'headless') return false;
+						if (mode === 'headless') return false;
 						if (mode === 'plan') return !readOnly;
+						if (mode === 'auto-accept') return !(readOnly || isAutoApproved);
 						return !isAutoApproved;
 					};
 

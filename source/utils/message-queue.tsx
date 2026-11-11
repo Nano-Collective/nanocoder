@@ -2,10 +2,8 @@ import React from 'react';
 import {
 	ErrorMessage,
 	InfoMessage,
-	SuccessMessage,
 	WarningMessage,
 } from '@/components/message-box';
-import {TIMEOUT_MESSAGE_PROCESSING_MS} from '@/constants';
 import {generateKey} from '@/session/key-generator';
 import type {MessageType} from '@/types/index';
 import {createErrorInfo} from '@/utils/error-formatter';
@@ -57,44 +55,6 @@ export function setGlobalMessageQueue(
 	globalAddToChatQueue = addToChatQueue;
 }
 
-// Enhanced message metadata for tracking and debugging
-export interface MessageMetadata {
-	id: string;
-	type: MessageType;
-	timestamp: string;
-	correlationId?: string;
-	duration?: number;
-	source?: string;
-	context?: Record<string, unknown>;
-	performanceMetrics?: {
-		duration: number;
-		memoryDelta: number;
-	};
-}
-
-// Message queue statistics for monitoring
-export interface MessageQueueStats {
-	totalMessages: number;
-	messagesByType: Record<MessageType, number>;
-	averageRenderTime: number;
-	lastMessageTime: string;
-	errorsLogged: number;
-}
-
-// Global message statistics
-let messageStats: MessageQueueStats = {
-	totalMessages: 0,
-	messagesByType: {
-		info: 0,
-		success: 0,
-		warning: 0,
-		error: 0,
-	},
-	averageRenderTime: 0,
-	lastMessageTime: '',
-	errorsLogged: 0,
-};
-
 // Add a React component directly to the queue
 export function addToMessageQueue(component: React.ReactNode) {
 	if (!globalAddToChatQueue) {
@@ -118,27 +78,21 @@ function addTypedMessage(
 ) {
 	const correlationId = options?.correlationId || generateCorrelationId();
 	const metrics = startMetrics();
-	const timestamp = new Date().toISOString();
 
 	return withNewCorrelationContext(() => {
 		// Log the message to structured logging system
-		logger[
-			type === 'error'
-				? 'error'
-				: type === 'warning'
-					? 'warn'
-					: type === 'success'
-						? 'info'
-						: 'info'
-		](`Message queued: ${type.toUpperCase()}`, {
-			messageType: type,
-			message: message.substring(0, 200), // Truncate long messages for logs
-			hideBox,
-			source: options?.source || 'unknown',
-			context: options?.context,
-			correlationId,
-			hasGlobalQueue: !!globalAddToChatQueue,
-		});
+		logger[type === 'error' ? 'error' : type === 'warning' ? 'warn' : 'info'](
+			`Message queued: ${type.toUpperCase()}`,
+			{
+				messageType: type,
+				message: message.substring(0, 200), // Truncate long messages for logs
+				hideBox,
+				source: options?.source || 'unknown',
+				context: options?.context,
+				correlationId,
+				hasGlobalQueue: !!globalAddToChatQueue,
+			},
+		);
 
 		// Log error details if provided
 		if (options?.error && type === 'error') {
@@ -151,14 +105,6 @@ function addTypedMessage(
 				errorInfo,
 				correlationId,
 			});
-		}
-
-		// Update statistics
-		messageStats.totalMessages++;
-		messageStats.messagesByType[type]++;
-		messageStats.lastMessageTime = timestamp;
-		if (type === 'error') {
-			messageStats.errorsLogged++;
 		}
 
 		if (globalMessageQueueSink) {
@@ -207,11 +153,6 @@ function addTypedMessage(
 			case 'error':
 				component = (
 					<ErrorMessage key={key} message={message} hideBox={hideBox} />
-				);
-				break;
-			case 'success':
-				component = (
-					<SuccessMessage key={key} message={message} hideBox={hideBox} />
 				);
 				break;
 			case 'warning':
@@ -275,201 +216,4 @@ function makeLogFn(type: MessageType, defaultSource: string) {
 
 export const logInfo = makeLogFn('info', 'logInfo');
 export const logError = makeLogFn('error', 'logError');
-export const logSuccess = makeLogFn('success', 'logSuccess');
 export const logWarning = makeLogFn('warning', 'logWarning');
-
-// Specialized logging functions for common scenarios
-export function logApiCall(
-	method: string,
-	url: string,
-	statusCode: number,
-	duration: number,
-	options?: {
-		requestSize?: number;
-		responseSize?: number;
-		correlationId?: string;
-	},
-) {
-	const correlationId = options?.correlationId || generateCorrelationId();
-
-	withNewCorrelationContext(() => {
-		if (statusCode >= 400) {
-			logError(`API ${method} ${url} failed (${statusCode})`, false, {
-				source: 'api-call',
-				correlationId,
-				context: {
-					method,
-					url,
-					statusCode,
-					duration: `${duration}ms`,
-					requestSize: options?.requestSize,
-					responseSize: options?.responseSize,
-				},
-			});
-		} else {
-			logInfo(`API ${method} ${url} completed (${statusCode})`, true, {
-				source: 'api-call',
-				correlationId,
-				context: {
-					method,
-					url,
-					statusCode,
-					duration: `${duration}ms`,
-					requestSize: options?.requestSize,
-					responseSize: options?.responseSize,
-				},
-			});
-		}
-	}, correlationId);
-}
-
-export function logToolExecution(
-	toolName: string,
-	status: 'started' | 'completed' | 'failed',
-	duration?: number,
-	options?: {
-		correlationId?: string;
-		error?: unknown;
-		// biome-ignore lint/suspicious/noExplicitAny: Dynamic format args
-		context?: Record<string, any>;
-	},
-) {
-	const correlationId = options?.correlationId || generateCorrelationId();
-	const context = {
-		toolName,
-		status,
-		duration: duration ? `${duration}ms` : undefined,
-		...options?.context,
-	};
-
-	switch (status) {
-		case 'started':
-			logInfo(`Tool execution started: ${toolName}`, true, {
-				source: 'tool-execution',
-				correlationId,
-				context,
-			});
-			break;
-		case 'completed':
-			logSuccess(`Tool execution completed: ${toolName}`, true, {
-				source: 'tool-execution',
-				correlationId,
-				context,
-			});
-			break;
-		case 'failed':
-			logError(`Tool execution failed: ${toolName}`, false, {
-				source: 'tool-execution',
-				correlationId,
-				context,
-				error: options?.error,
-			});
-			break;
-	}
-}
-
-export function logUserAction(
-	action: string,
-	// biome-ignore lint/suspicious/noExplicitAny: Dynamic details type
-	details?: Record<string, any>,
-	options?: {
-		correlationId?: string;
-	},
-) {
-	logInfo(`User action: ${action}`, true, {
-		source: 'user-action',
-		correlationId: options?.correlationId,
-		context: {
-			action,
-			...details,
-		},
-	});
-}
-
-// Get current message queue statistics
-export function getMessageQueueStats(): MessageQueueStats {
-	return {...messageStats};
-}
-
-// Reset message queue statistics
-export function resetMessageQueueStats() {
-	messageStats = {
-		totalMessages: 0,
-		messagesByType: {
-			info: 0,
-			success: 0,
-			warning: 0,
-			error: 0,
-		},
-		averageRenderTime: 0,
-		lastMessageTime: '',
-		errorsLogged: 0,
-	};
-
-	logger.info('Message queue statistics reset', {
-		correlationId: generateCorrelationId(),
-	});
-}
-
-// Log current message queue statistics
-export function logMessageQueueStats() {
-	logger.info('Message queue statistics', {
-		stats: messageStats,
-		correlationId: generateCorrelationId(),
-	});
-}
-
-// Enhanced message queue health check
-export function checkMessageQueueHealth(): {
-	isHealthy: boolean;
-	issues: string[];
-	stats: MessageQueueStats;
-} {
-	const issues: string[] = [];
-
-	// Check if queue is initialized
-	if (!globalAddToChatQueue) {
-		issues.push('Global message queue not initialized');
-	}
-
-	// Check error rate
-	const errorRate =
-		messageStats.totalMessages > 0
-			? (messageStats.errorsLogged / messageStats.totalMessages) * 100
-			: 0;
-
-	if (errorRate > 20) {
-		// More than 20% errors is concerning
-		issues.push(`High error rate: ${errorRate.toFixed(1)}%`);
-	}
-
-	// Check if messages are being processed
-	if (messageStats.lastMessageTime) {
-		const lastMessageAge =
-			Date.now() - new Date(messageStats.lastMessageTime).getTime();
-
-		if (
-			lastMessageAge > TIMEOUT_MESSAGE_PROCESSING_MS &&
-			messageStats.totalMessages > 0
-		) {
-			issues.push(
-				`No messages for ${Math.round(lastMessageAge / 60000)} minutes`,
-			);
-		}
-	}
-
-	const isHealthy = issues.length === 0;
-
-	logger.debug('Message queue health check', {
-		isHealthy,
-		issues,
-		stats: messageStats,
-		correlationId: generateCorrelationId(),
-	});
-
-	return {
-		isHealthy,
-		issues,
-		stats: messageStats,
-	};
-}

@@ -50,7 +50,11 @@ import {
 	parseDisabledTools,
 } from '@/acp/acp-capabilities';
 import {acpContentToUserMessage} from '@/acp/acp-content';
-import {clearAcpReadStubs, runAcpConversation} from '@/acp/acp-conversation';
+import {
+	clearAcpReadStubs,
+	runAcpConversation,
+	settleUnansweredToolCalls,
+} from '@/acp/acp-conversation';
 import {
 	acpCustomCommandText,
 	builtinCommandReply,
@@ -70,7 +74,6 @@ import {
 } from '@/config/preferences';
 import {resolveTune} from '@/config/tune';
 import {appendRelevantProjectContextWithCount} from '@/memory/project-context';
-import {setAutoCommitClient} from '@/services/auto-commit';
 import {runInSessionCwdScope} from '@/services/session-cwd';
 import {cancelSubagentRun} from '@/services/subagent-events';
 import {TimelineManager} from '@/services/timeline-manager';
@@ -428,16 +431,27 @@ export class AcpAgent implements Agent {
 				previousAssistant,
 				turnDurationMs,
 			);
-			turnSucceeded = true;
+			// A turn cancelled part way through returns rather than throws. It is
+			// still not a clean turn, so it must not be titled from.
+			turnSucceeded = response.stopReason !== 'cancelled';
 			return response;
 		} catch (error) {
 			const errorMsg = error instanceof Error ? error.message : String(error);
+			// The turn keeps what it already did; only a batch it was part way
+			// through needs closing off.
+			session.messages = settleUnansweredToolCalls(session.messages);
 
 			// A user-initiated cancellation isn't a failure: surface it inline in
 			// the chat and resolve cleanly instead of rejecting the ACP `prompt`
 			// call, otherwise the VS Code client's catch handler shows a
 			// "RequestError: Internal error" toast on top of the cancel notice.
-			if (errorMsg === 'Operation was cancelled') {
+			//
+			// Told by the turn's own signal, which session/cancel and close
+			// abort, not by the error's wording: whatever threw once the user
+			// stopped the turn (a tool, compaction, a dropped client write) is
+			// the cancellation, and a timeout that happens to say "cancelled"
+			// is not.
+			if (session.abortController.signal.aborted) {
 				const cancelNotice = '\n\n_Cancelled by user._\n';
 				this.conn.sessionUpdate({
 					sessionId: params.sessionId,
@@ -525,28 +539,45 @@ export class AcpAgent implements Agent {
 	async closeSession(
 		params: CloseSessionRequest,
 	): Promise<CloseSessionResponse> {
-		const session = this.sessions.get(params.sessionId);
-		if (!session) {
-			return {};
-		}
 		logger.info(`ACP closeSession: session=${params.sessionId}`);
+		await this.evictSession(params.sessionId, async session => {
+			await session.timeline.dispose();
+		});
+		return {};
+	}
+
+	/**
+	 * Takes a live session out of service: cancels its turn, drops it from the
+	 * map, and waits for the turn (and any prompts queued behind it, which bail
+	 * out on `closed`) to give up the turn lock. `whileIdle` then runs with the
+	 * lock held, followed by releasing the session's MCP servers, which the
+	 * turn may still have been calling.
+	 *
+	 * Every path that retires a session goes through here. A turn left running
+	 * would save the session to disk from its finally after a delete, bringing
+	 * it back, or keep writing checkpoints after its timeline lock is gone.
+	 * Returns false when no live session had this id.
+	 */
+	private async evictSession(
+		sessionId: string,
+		whileIdle: (session: AcpSession) => Promise<void>,
+	): Promise<boolean> {
+		const session = this.sessions.get(sessionId);
+		if (!session) {
+			return false;
+		}
 		session.close();
-		this.sessions.delete(params.sessionId);
-		clearAcpReadStubs(params.sessionId);
-		// close() only signals the running turn to stop. Wait for it (and any
-		// prompts queued behind it, which bail out on `closed`) to give up the
-		// turn lock before releasing the timeline lock, so a checkpoint the
-		// turn is still writing never lands after the lock is gone.
+		this.sessions.delete(sessionId);
+		clearAcpReadStubs(sessionId);
 		const ticket = session.acquireTurn();
 		await ticket.ready;
 		try {
-			await session.timeline.dispose();
-			// After the turn is over: it may still have been calling these tools.
-			await this.releaseMcpServers(params.sessionId);
+			await whileIdle(session);
+			await this.releaseMcpServers(sessionId);
 		} finally {
 			session.releaseTurn();
 		}
-		return {};
+		return true;
 	}
 
 	async setSessionMode(
@@ -660,9 +691,10 @@ export class AcpAgent implements Agent {
 
 	/**
 	 * Moves one session to a provider, model and client of its own. The choice
-	 * also becomes what sessions created from now on start with, and what the
-	 * user's last-used selection and auto-commit follow, as it did when the
-	 * selection was process-wide.
+	 * also becomes what sessions created from now on start with, and the user's
+	 * last-used selection. Auto-commit in this session writes its messages with
+	 * the session's client, which each turn passes to its tool calls, so it no
+	 * longer follows whichever session picked a model last.
 	 */
 	private selectModel(
 		session: AcpSession,
@@ -676,7 +708,6 @@ export class AcpAgent implements Agent {
 		this.initContext.provider = provider;
 		this.initContext.model = model;
 		this.initContext.client = client;
-		setAutoCommitClient(client);
 		// A provider with no model is not a selection worth remembering.
 		if (model) {
 			updateLastUsed(provider, model);
@@ -704,6 +735,11 @@ export class AcpAgent implements Agent {
 		saved: {provider: string; model: string},
 	): Promise<{provider: string; model: string} | undefined> {
 		if (saved.provider === session.provider && saved.model === session.model) {
+			return undefined;
+		}
+		// Saved with no model to name (a provider that lists none): nothing to
+		// go back to, so the session stays on the default without a fallback.
+		if (!saved.provider || !saved.model) {
 			return undefined;
 		}
 		try {
@@ -753,10 +789,11 @@ export class AcpAgent implements Agent {
 		params: DeleteSessionRequest,
 	): Promise<DeleteSessionResponse> {
 		await sessionManager.initialize();
-		const existing = this.sessions.get(params.sessionId);
-		if (existing) {
-			await existing.timeline.clear();
-		} else {
+		// The turn's own save to disk lands before the delete below, not after.
+		const evicted = await this.evictSession(params.sessionId, async session => {
+			await session.timeline.clear();
+		});
+		if (!evicted) {
 			const persisted = await sessionManager.loadSession(params.sessionId);
 			if (persisted) {
 				await new TimelineManager(
@@ -764,12 +801,10 @@ export class AcpAgent implements Agent {
 					params.sessionId,
 				).clear();
 			}
+			clearAcpReadStubs(params.sessionId);
+			await this.releaseMcpServers(params.sessionId);
 		}
 		await sessionManager.deleteSession(params.sessionId);
-		// Evict from in-memory map if present
-		this.sessions.delete(params.sessionId);
-		clearAcpReadStubs(params.sessionId);
-		await this.releaseMcpServers(params.sessionId);
 		logger.info(`ACP deleteSession: ${params.sessionId}`);
 		return {};
 	}
@@ -778,14 +813,22 @@ export class AcpAgent implements Agent {
 		params: ResumeSessionRequest,
 	): Promise<ResumeSessionResponse> {
 		await sessionManager.initialize();
+		if (!(await sessionManager.loadSession(params.sessionId))) {
+			throw new Error(`Session not found on disk: ${params.sessionId}`);
+		}
+
+		// Retire any live copy first, so one id never has two sessions running,
+		// and read the history after its turn has saved its last messages.
+		const evicted = await this.evictSession(params.sessionId, async session => {
+			await session.timeline.dispose();
+		});
+		if (!evicted) {
+			await this.releaseMcpServers(params.sessionId);
+		}
 		const persisted = await sessionManager.loadSession(params.sessionId);
 		if (!persisted) {
 			throw new Error(`Session not found on disk: ${params.sessionId}`);
 		}
-
-		// Evict any stale in-memory session first
-		this.sessions.delete(params.sessionId);
-		await this.releaseMcpServers(params.sessionId);
 		const session = this.registerSession(
 			params.sessionId,
 			persisted.workingDirectory,
@@ -1374,6 +1417,19 @@ export class AcpAgent implements Agent {
 		session.systemMessage = session.baseSystemMessage;
 	}
 
+	/**
+	 * What a saved session records as its provider and model: the session's
+	 * own, else what its client says, never a made-up default. An invented
+	 * pair would be restored on resume as if the user had picked it.
+	 */
+	private savedModelOf(session: AcpSession): {provider: string; model: string} {
+		const client = this.clientFor(session);
+		return {
+			provider: session.provider || client.getProviderConfig().name || '',
+			model: session.model || client.getCurrentModel() || '',
+		};
+	}
+
 	private async saveAcpSessionToDisk(session: AcpSession): Promise<void> {
 		try {
 			// First, see if it already exists to preserve createdAt/title
@@ -1394,6 +1450,7 @@ export class AcpAgent implements Agent {
 			if (saveableMessages.length === 0) {
 				if (existingSession) {
 					await sessionManager.saveSession({
+						...this.savedModelOf(session),
 						id: session.sessionId,
 						title: existingSession.title || 'New Session',
 						titleManuallySet: existingSession.titleManuallySet,
@@ -1402,8 +1459,6 @@ export class AcpAgent implements Agent {
 						createdAt: existingSession.createdAt || timestamp,
 						lastAccessedAt: timestamp,
 						messageCount: 0,
-						provider: session.provider || 'openai',
-						model: session.model || 'gpt-4o',
 						workingDirectory: session.cwd,
 						messages: [],
 					});
@@ -1424,6 +1479,7 @@ export class AcpAgent implements Agent {
 			}
 
 			await sessionManager.saveSession({
+				...this.savedModelOf(session),
 				id: session.sessionId,
 				title,
 				titleManuallySet: existingSession?.titleManuallySet,
@@ -1432,8 +1488,6 @@ export class AcpAgent implements Agent {
 				createdAt: existingSession?.createdAt || timestamp,
 				lastAccessedAt: timestamp,
 				messageCount: saveableMessages.length,
-				provider: session.provider || 'openai',
-				model: session.model || 'gpt-4o',
 				workingDirectory: session.cwd,
 				messages: session.messages.map(m => {
 					if (m.role === 'user' && typeof m.content === 'string') {

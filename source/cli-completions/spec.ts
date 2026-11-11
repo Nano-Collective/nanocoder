@@ -210,7 +210,7 @@ export const COMPLETION_FLAGS: readonly CompletionFlag[] = [
 	{
 		name: 'vscode',
 		takesValue: false,
-		description: 'Run in VS Code mode',
+		description: 'Start the legacy VS Code companion (deprecated)',
 	},
 	{
 		name: 'vscode-port',

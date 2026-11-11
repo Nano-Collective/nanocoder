@@ -318,3 +318,54 @@ test('matchGlob: patterns authored with Windows separators', t => {
 	t.true(matchGlob('docs\\**', 'docs\\guide.md'));
 	t.false(matchGlob('docs\\*.md', 'docs/deep/guide.md'));
 });
+
+// A dispatch resolves only when its triggered run ends, so subscriptions on
+// one event must start together, not wait for each other.
+test('emit starts every matching subscription without waiting for the others', async t => {
+	const started: string[] = [];
+	let release: () => void = () => {};
+	const blocked = new Promise<void>(resolve => {
+		release = resolve;
+	});
+	const router = new EventRouter({
+		dispatch: async sub => {
+			started.push(sub.id);
+			if (sub.id === 'slow') await blocked;
+		},
+	});
+	router.subscribe(cronSub('slow', '0 9 * * *'));
+	router.subscribe(cronSub('fast', '0 9 * * *'));
+
+	const done = router.emit(cronEvent('0 9 * * *'));
+	await new Promise(resolve => setImmediate(resolve));
+	t.deepEqual(started, ['slow', 'fast']);
+	release();
+	await done;
+});
+
+test('one failing subscription neither skips the others nor rejects emit', async t => {
+	const dispatched: string[] = [];
+	const errors: Array<{id: string; message: string}> = [];
+	const router = new EventRouter(
+		{
+			dispatch(sub) {
+				dispatched.push(sub.id);
+				if (sub.id === 'throws') throw new Error('sync boom');
+				if (sub.id === 'rejects') return Promise.reject(new Error('async boom'));
+			},
+		},
+		(sub, _event, error) => {
+			errors.push({id: sub.id, message: (error as Error).message});
+		},
+	);
+	router.subscribe(cronSub('throws', '* * * * *'));
+	router.subscribe(cronSub('rejects', '* * * * *'));
+	router.subscribe(cronSub('ok', '* * * * *'));
+
+	await t.notThrowsAsync(router.emit(cronEvent('* * * * *')));
+	t.deepEqual(dispatched, ['throws', 'rejects', 'ok']);
+	t.deepEqual(errors, [
+		{id: 'throws', message: 'sync boom'},
+		{id: 'rejects', message: 'async boom'},
+	]);
+});

@@ -141,6 +141,8 @@ Configure the extension in VS Code settings (`Ctrl+,` / `Cmd+,`):
 
 The original integration pairs the extension with a Nanocoder session running in a terminal (`nanocoder --vscode`) over a local WebSocket. It is opt-in via `nanocoder.autoConnect` and useful if you prefer the terminal TUI.
 
+**Deprecated:** the companion duplicates the sidebar chat, which runs `nanocoder --acp` itself, and will be removed in a future release. Nanocoder warns the first time it is enabled in a session.
+
 The CLI binds an ephemeral port (or the one passed with `--vscode-port`) and writes the port and a per-session bearer token to a discovery file, `vscode-server.json` in the nanocoder config directory. The extension reads that file to connect. `nanocoder.serverPort` (default 51820) and `nanocoder.serverToken` are only fallbacks for when the file cannot be read, such as a CLI on a remote host over SSH.
 
 Companion mode provides:

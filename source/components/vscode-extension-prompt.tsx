@@ -10,9 +10,23 @@ import {
 	type VSCodeStatus,
 } from '@/vscode/extension-installer';
 
+interface ExtensionInstaller {
+	isVSCodeCliAvailable: typeof isVSCodeCliAvailable;
+	getExtensionStatus: typeof getExtensionStatus;
+	installExtension: typeof installExtension;
+}
+
+const defaultInstaller: ExtensionInstaller = {
+	isVSCodeCliAvailable,
+	getExtensionStatus,
+	installExtension,
+};
+
 interface VSCodeExtensionPromptProps {
 	onComplete: () => void;
 	onSkip: () => void;
+	/** Overrides the editor CLI calls; for tests. */
+	installer?: ExtensionInstaller;
 }
 
 type PromptState =
@@ -36,6 +50,7 @@ enum InstallOption {
 export function VSCodeExtensionPrompt({
 	onComplete,
 	onSkip,
+	installer = defaultInstaller,
 }: VSCodeExtensionPromptProps) {
 	const [state, setState] = useState<PromptState>('checking');
 	const [statuses, setStatuses] = useState<VSCodeStatus[]>([]);
@@ -47,13 +62,13 @@ export function VSCodeExtensionPrompt({
 	// Check status on mount
 	useEffect(() => {
 		async function check() {
-			const available = await isVSCodeCliAvailable();
+			const available = await installer.isVSCodeCliAvailable();
 			if (!available) {
 				setState('no-cli');
 				return;
 			}
 
-			const currentStatuses = await getExtensionStatus();
+			const currentStatuses = await installer.getExtensionStatus();
 			setStatuses(currentStatuses);
 
 			const missing = currentStatuses.filter(s => !s.extensionInstalled);
@@ -68,23 +83,19 @@ export function VSCodeExtensionPrompt({
 		if (state === 'checking') {
 			void check();
 		}
-	}, [state, onComplete]);
+	}, [state, onComplete, installer]);
 
 	const handleInstall = React.useCallback(
 		async (clis?: string[]) => {
 			setState('installing');
-			const result = await installExtension(clis);
+			const result = await installer.installExtension(clis);
 
 			setMessage(result.message);
-			if (result.success) {
-				setState('success');
-			} else {
-				setState('error');
-				// Auto-continue after showing error
-				setTimeout(onSkip, TIMEOUT_VSCODE_EXTENSION_SKIP_MS);
-			}
+			// A failure auto-continues from the effect below, which cancels the
+			// timer if the prompt unmounts first.
+			setState(result.success ? 'success' : 'error');
 		},
-		[onSkip],
+		[installer],
 	);
 
 	// Handle Enter key press in success state
@@ -97,9 +108,11 @@ export function VSCodeExtensionPrompt({
 		{isActive: state === 'success'},
 	);
 
-	// Handle no-cli case - auto-skip after showing message
+	// No editor CLI, or the install failed: show the message, then auto-skip.
+	// The cleanup matters: a timer left running after unmount would call
+	// onSkip on a prompt the parent has already moved past.
 	useEffect(() => {
-		if (state === 'no-cli') {
+		if (state === 'no-cli' || state === 'error') {
 			const timer = setTimeout(onSkip, TIMEOUT_VSCODE_EXTENSION_SKIP_MS);
 			return () => clearTimeout(timer);
 		}

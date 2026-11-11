@@ -13,7 +13,10 @@ import {join} from 'node:path';
 import test from 'ava';
 import type {AgentSideConnection} from '@agentclientprotocol/sdk';
 import {AcpSession} from '@/acp/acp-session';
-import {runAcpConversation} from '@/acp/acp-conversation';
+import {
+	runAcpConversation,
+	settleUnansweredToolCalls,
+} from '@/acp/acp-conversation';
 import {MCPClient} from '@/mcp/mcp-client';
 import {
 	getSessionCwd,
@@ -1738,6 +1741,155 @@ test('runAcpConversation - handles multi-turn conversation with tool calls', asy
 	t.is(toolMsgs[1].content, 'Content of /b.txt');
 });
 
+test('runAcpConversation - a model error on a later round-trip keeps the earlier ones in history', async t => {
+	const {conn} = createMockConn();
+	const session = createMockSession(conn, {
+		devMode: 'yolo',
+		messages: [{role: 'user', content: 'edit the file'}],
+	});
+	const toolManager = {
+		...createMockToolManager(),
+		hasTool: () => true,
+		getToolEntry: () => ({approval: false}),
+	};
+	setToolRegistryGetter(() => ({
+		read_file: async (args: any) => `Content of ${args.path}`,
+	}));
+
+	let callCount = 0;
+	const client = {
+		chat: async () => {
+			callCount++;
+			if (callCount === 1) {
+				return {
+					choices: [
+						{
+							message: {
+								content: 'Reading first',
+								tool_calls: [
+									createMockToolCall('read_file', {path: '/a.txt'}, 'call-1'),
+								],
+							},
+						},
+					],
+				};
+			}
+			throw new Error('provider exploded');
+		},
+	} as unknown as LLMClient;
+
+	await t.throwsAsync(
+		runAcpConversation({
+			session,
+			client,
+			toolManager: toolManager as any,
+			conn,
+			nonInteractiveAlwaysAllow: [],
+		}),
+		{message: 'provider exploded'},
+	);
+
+	t.deepEqual(
+		session.messages.map(m => m.role),
+		['user', 'assistant', 'tool'],
+	);
+	t.is(session.messages[2].content, 'Content of /a.txt');
+});
+
+test('runAcpConversation - a throw part way through a batch keeps the assistant call in history', async t => {
+	const {conn: baseConn} = createMockConn();
+	// The client connection dies while the second call's card is sent.
+	let toolCallUpdates = 0;
+	const conn = {
+		...baseConn,
+		sessionUpdate: async (update: any) => {
+			if (update.update.sessionUpdate === 'tool_call_update') {
+				toolCallUpdates++;
+				if (toolCallUpdates === 4) throw new Error('connection closed');
+			}
+		},
+	} as unknown as AgentSideConnection;
+	const session = createMockSession(conn, {
+		devMode: 'yolo',
+		messages: [{role: 'user', content: 'read both'}],
+	});
+	const toolManager = {
+		...createMockToolManager(),
+		hasTool: () => true,
+		getToolEntry: () => ({approval: false}),
+	};
+	setToolRegistryGetter(() => ({
+		read_file: async (args: any) => `Content of ${args.path}`,
+	}));
+	const client = {
+		chat: async () => ({
+			choices: [
+				{
+					message: {
+						content: '',
+						tool_calls: [
+							createMockToolCall('read_file', {path: '/a.txt'}, 'call-a'),
+							createMockToolCall('read_file', {path: '/b.txt'}, 'call-b'),
+						],
+					},
+				},
+			],
+		}),
+	} as unknown as LLMClient;
+
+	await t.throwsAsync(
+		runAcpConversation({
+			session,
+			client,
+			toolManager: toolManager as any,
+			conn,
+			nonInteractiveAlwaysAllow: [],
+		}),
+		{message: 'connection closed'},
+	);
+
+	const assistant = session.messages[1];
+	t.is(assistant.role, 'assistant');
+	t.deepEqual(
+		assistant.tool_calls?.map(call => call.id),
+		['call-a', 'call-b'],
+	);
+	// Closing the batch off is the caller's job; see settleUnansweredToolCalls.
+	const settled = settleUnansweredToolCalls(session.messages);
+	t.deepEqual(
+		settled.slice(2).map(m => [m.role, m.tool_call_id]),
+		[
+			['tool', 'call-a'],
+			['tool', 'call-b'],
+		],
+	);
+});
+
+test('settleUnansweredToolCalls - answers only the calls with no result yet', t => {
+	const messages: Message[] = [
+		{role: 'user', content: 'go'},
+		{
+			role: 'assistant',
+			content: '',
+			tool_calls: [
+				createMockToolCall('read_file', {}, 'done'),
+				createMockToolCall('read_file', {}, 'open'),
+			],
+		},
+		{role: 'tool', tool_call_id: 'done', name: 'read_file', content: 'ok'},
+	];
+	const settled = settleUnansweredToolCalls(messages);
+	t.is(settled.length, 4);
+	t.is(settled[3].tool_call_id, 'open');
+	t.regex(String(settled[3].content), /^Error:/);
+	// Nothing to do once every call has a result.
+	t.is(settleUnansweredToolCalls(settled), settled);
+	t.is(
+		settleUnansweredToolCalls([{role: 'user', content: 'hi'}]).length,
+		1,
+	);
+});
+
 // ============================================================================
 // XML-parsed tool calls (toolsDisabled path)
 // ============================================================================
@@ -2184,6 +2336,89 @@ test('runAcpConversation - captures a timeline checkpoint for write_file', async
 	t.is(entries[0].toolName, 'write_file');
 	t.is(entries[0].toolCallId, 'call-write');
 	t.is(entries[0].truncateToMessageIndex, 0);
+});
+
+test.serial('runAcpConversation - auto-commit writes its message with the session\'s client', async t => {
+	const {execSync} = await import('node:child_process');
+	const {getAppConfig} = await import('@/config/index');
+	const {setAutoCommitClient} = await import('@/services/auto-commit');
+	const {COMMIT_SYSTEM_PROMPT} = await import('@/tools/git/commit-prompt');
+	const cwd = realpathSync(
+		mkdtempSync(join(tmpdir(), 'nanocoder-acp-autocommit-')),
+	);
+	const git = (command: string) =>
+		execSync(`git ${command}`, {cwd, encoding: 'utf8'}).trimEnd();
+	git('init -q -b main');
+	git('config user.email test@example.com');
+	git('config user.name Test');
+	git('config commit.gpgsign false');
+	git('config core.hooksPath .no-hooks');
+	writeFileSync(join(cwd, 'base.txt'), 'base\n');
+	git('add base.txt');
+	git('commit -q -m baseline');
+	getAppConfig().autoCommit = true;
+	// Another session picked its model last: before, its client wrote every
+	// session's commit messages.
+	setAutoCommitClient({
+		chat: async () => ({
+			choices: [{message: {content: 'chore: another session'}}],
+		}),
+	} as unknown as LLMClient);
+	t.teardown(() => {
+		getAppConfig().autoCommit = false;
+		setAutoCommitClient(null);
+		rmSync(cwd, {recursive: true, force: true});
+	});
+
+	const {conn} = createMockConn();
+	const session = createMockSession(conn, {devMode: 'yolo', cwd});
+	setToolRegistryGetter(() => ({
+		write_file: async (args: any) => {
+			writeFileSync(join(cwd, args.path), args.content);
+			return `Wrote ${args.path}`;
+		},
+	}));
+	let turns = 0;
+	const client = {
+		chat: async (messages: Message[]) => {
+			if (messages[0]?.content === COMMIT_SYSTEM_PROMPT) {
+				return {choices: [{message: {content: 'feat: this session'}}]};
+			}
+			turns++;
+			return turns === 1
+				? {
+						choices: [
+							{
+								message: {
+									content: '',
+									tool_calls: [
+										createMockToolCall('write_file', {
+											path: 'a.ts',
+											content: 'export const a = 1;\n',
+										}),
+									],
+								},
+							},
+						],
+					}
+				: {choices: [{message: {content: 'done'}}]};
+		},
+		getCurrentModel: () => 'test-model',
+	} as unknown as LLMClient;
+
+	await runAcpConversation({
+		session,
+		client,
+		toolManager: {
+			...createMockToolManager(),
+			hasTool: () => true,
+			getToolEntry: () => ({approval: false}),
+		} as any,
+		conn,
+		nonInteractiveAlwaysAllow: [],
+	});
+
+	t.is(git('log -1 --format=%s'), 'feat: this session');
 });
 
 test('runAcpConversation - does not capture a timeline checkpoint for read_file', async t => {
@@ -3636,6 +3871,66 @@ test.serial('runAcpConversation - sends the sub-agent run to the client, tied to
 		t.is(params.parentRunId, '');
 	}
 	t.is(notifications.at(-1)?.params.result, 'found it');
+});
+
+test.serial('runAcpConversation - the agent card title shows this session\'s run, never another\'s', async t => {
+	const {updateSubagentProgressById, removeSubagentProgress} = await import(
+		'@/services/subagent-events'
+	);
+	setToolRegistryGetter(() => ({
+		agent: async (_args: any, options: any) => {
+			// A run of another chat in the same process, in the shared progress
+			// map. Before, a 1.5s poller over that map put it on this card.
+			updateSubagentProgressById('intruder-run', {
+				subagentName: 'intruder',
+				status: 'running',
+				toolCallCount: 4,
+				turnCount: 2,
+				tokenCount: 99_000,
+			});
+			await new Promise(resolve => setTimeout(resolve, 1700));
+			const base = {
+				childRunId: 'own-run',
+				parentRunId: '',
+				sessionId: options.sessionId,
+				toolCallId: options.toolCallId,
+				name: 'explore',
+			};
+			emitSubagentRunEvent({...base, status: 'started'});
+			emitSubagentRunEvent({
+				...base,
+				status: 'progress',
+				tokenCount: 1200,
+				toolCallCount: 2,
+				lastTool: 'read_file',
+			});
+			emitSubagentRunEvent({...base, status: 'completed', result: 'ok'});
+			return 'ok';
+		},
+	}));
+	t.teardown(() => removeSubagentProgress('intruder-run'));
+	const {conn, updates} = createMockConn();
+	const session = createMockSession(conn, {devMode: 'yolo'});
+
+	await runAgentTurn(conn, session, 'titled');
+
+	const titles = updates
+		.filter(
+			u =>
+				u.update?.sessionUpdate === 'tool_call_update' &&
+				u.update.toolCallId === 'agent-call-titled' &&
+				u.update.title,
+		)
+		.map(u => u.update.title);
+	t.false(titles.some(title => title.includes('intruder')));
+	t.true(titles.includes('explore • 1.2k tokens • 2 tools (read_file)'));
+	// The progress title lands before the card is settled.
+	const card = updates.filter(
+		u =>
+			u.update?.sessionUpdate === 'tool_call_update' &&
+			u.update.toolCallId === 'agent-call-titled',
+	);
+	t.is(card.at(-1)?.update.status, 'completed');
 });
 
 test.serial('runAcpConversation - two sessions with sub-agents do not see each other\'s runs', async t => {

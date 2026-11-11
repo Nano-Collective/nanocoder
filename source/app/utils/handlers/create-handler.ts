@@ -386,7 +386,7 @@ kubectl get pods -n {{ namespace }} -o wide
 1. **\`name:\` is snake_case.** Hyphens fail validation. \`k8s_list_pods\` ✓, \`k8s-list-pods\` ✗.
 2. **\`parameters:\` is a mapping**, not a list. Don't write \`- name: namespace\\n  type: ...\` (OpenAPI shape, wrong here).
 3. **\`approval: never\`** for read-only ops only. If the tool can write, delete, or call a remote API that changes state, use \`destructive\` (or \`always\` if you want a prompt every time).
-4. **Shell-quoted substitution is safe by default.** \`echo "{{ name }}"\` is fine even if \`name\` contains spaces or shell metacharacters - don't add your own escaping.
+4. **Placeholders go bare, never inside quotes.** Values are already shell-quoted, so write \`echo {{ name }}\`, not \`echo "{{ name }}"\` or \`echo '{{ name }}'\`, and don't add your own escaping. A placeholder inside quotes, a \`#\` comment, \`\${...}\` or a here-document is rejected when the tool loads. If you need the value inside a string, assign it first: \`name={{ name }}; echo "Hello $name"\`.
 5. **Use \`write_file\`** to author the file. Do not inline the markdown in chat.
 
 Now: ask me what this tool should do, then design it.`;

@@ -983,6 +983,37 @@ test.serial('AcpAgent.resumeSession - falls back to the default when the saved m
 	});
 });
 
+test.serial('AcpAgent - a session with no provider or model of its own saves its client\'s, never a made-up default', async t => {
+	const context = createMockInitContext();
+	context.provider = '';
+	context.model = '';
+	const agent = new AcpAgent(context, createMockConn());
+	const {sessionId} = await agent.newSession({cwd: '/tmp'});
+	await agent.prompt({sessionId, prompt: [{type: 'text', text: 'hi'}]});
+
+	const saved = await sessionManager.loadSession(sessionId);
+	t.is(saved?.provider, 'test-provider');
+	t.is(saved?.model, 'test-model');
+	await agent.deleteSession({sessionId});
+});
+
+test.serial('AcpAgent.resumeSession - a session saved with no model restores nothing and reports no fallback', async t => {
+	const {agent} = createAgent();
+	await sessionManager.initialize();
+	const saved = await sessionManager.createSession({
+		title: 'Saved',
+		messageCount: 1,
+		provider: '',
+		model: '',
+		workingDirectory: '/tmp',
+		messages: [{role: 'user', content: 'hi'}],
+	});
+	const resumed = await agent.resumeSession({sessionId: saved.id, cwd: '/tmp'});
+	t.is(resumed._meta?.['nanocoder/modelFallback'], undefined);
+	t.is(optionValue(resumed.configOptions, 'provider'), 'test-provider');
+	await agent.deleteSession({sessionId: saved.id});
+});
+
 test.serial('AcpAgent.resumeSession - a session saved on the default model needs no client of its own', async t => {
 	const {agent} = createAgent();
 	await sessionManager.initialize();
@@ -1036,6 +1067,53 @@ test('AcpAgent.prompt - propagates API errors cleanly', async t => {
 	t.true(notice.displayOnly, 'the error notice must never reach the model');
 });
 
+test('AcpAgent.prompt - an error on a later round-trip keeps the earlier ones, on disk too', async t => {
+	const {agent} = createAgent();
+	let calls = 0;
+	agent['initContext'].client.chat = async () => {
+		calls++;
+		if (calls === 1) {
+			return {
+				choices: [
+					{
+						message: {
+							content: 'looking',
+							tool_calls: [
+								{id: 'call-1', function: {name: 'lookup', arguments: {}}},
+							],
+						},
+					},
+				],
+			};
+		}
+		throw new Error('RequestError: Internal error (500)');
+	};
+
+	const created = await agent.newSession({cwd: '/tmp'});
+	await t.throwsAsync(
+		() =>
+			agent.prompt({
+				sessionId: created.sessionId,
+				prompt: [{type: 'text', text: 'go'}],
+			}),
+		{message: /RequestError/},
+	);
+
+	const expected = ['user', 'assistant', 'tool', 'assistant'];
+	const live = agent['sessions'].get(created.sessionId)!.messages;
+	t.deepEqual(
+		live.map((m: Message) => m.role),
+		expected,
+	);
+	t.is(live[1].tool_calls?.[0]?.id, 'call-1');
+	t.true(live[3].displayOnly);
+	const saved = await sessionManager.loadSession(created.sessionId);
+	t.deepEqual(
+		saved?.messages.map(m => m.role),
+		expected,
+	);
+});
+
 test('AcpAgent.prompt - resolves cleanly on user cancellation instead of throwing', async t => {
 	const {agent, conn} = createAgent();
 
@@ -1044,12 +1122,30 @@ test('AcpAgent.prompt - resolves cleanly on user cancellation instead of throwin
 		updates.push(u);
 	};
 
-	// Mirrors what chat-handler.ts throws when the abort signal fires mid-stream
-	agent['initContext'].client.chat = async () => {
-		throw new Error('Operation was cancelled');
-	};
-
 	const session = await agent.newSession({cwd: '/tmp'});
+	// Cancelled while the tool card is being sent, and the write fails with
+	// an error that says nothing about cancelling.
+	agent['initContext'].client.chat = async () => ({
+		choices: [
+			{
+				message: {
+					content: '',
+					tool_calls: [
+						{id: 'call-1', function: {name: 'lookup', arguments: {}}},
+					],
+				},
+			},
+		],
+	});
+	agent['initContext'].toolManager.hasTool = () => true;
+	agent['initContext'].toolManager.getAvailableToolNames = () => ['lookup'];
+	conn.sessionUpdate = async (u: any) => {
+		if (u.update?.sessionUpdate === 'tool_call') {
+			await agent.cancel({sessionId: session.sessionId});
+			throw new Error('write EPIPE');
+		}
+		updates.push(u);
+	};
 
 	const result = await agent.prompt({
 		sessionId: session.sessionId,
@@ -1595,6 +1691,78 @@ test('AcpAgent.closeSession - releases the timeline lock only after the cancelle
 	t.false(acpSession.turnActive);
 });
 
+const startGatedTurn = async () => {
+	const context = createMockInitContext();
+	let chatCalls = 0;
+	let releaseChat!: () => void;
+	const chatGate = new Promise<void>(resolve => {
+		releaseChat = resolve;
+	});
+	(context.client as any).chat = async () => {
+		chatCalls++;
+		// The first turn completes, so the session is on disk.
+		if (chatCalls > 1) await chatGate;
+		return {choices: [{message: {content: 'Test response'}}]};
+	};
+	const agent = new AcpAgent(context, createMockConn());
+	const session = await agent.newSession({cwd: '/tmp'});
+	await agent.prompt({
+		sessionId: session.sessionId,
+		prompt: [{type: 'text', text: 'first'}],
+	});
+	const live = (agent as any).sessions.get(session.sessionId);
+	const turn = agent.prompt({
+		sessionId: session.sessionId,
+		prompt: [{type: 'text', text: 'second'}],
+	});
+	while (chatCalls === 1) {
+		await new Promise(resolve => setImmediate(resolve));
+	}
+	return {agent, sessionId: session.sessionId, live, turn, releaseChat};
+};
+
+test.serial('AcpAgent.deleteSession - a delete during a turn is not undone by the turn saving', async t => {
+	const {agent, sessionId, live, turn, releaseChat} = await startGatedTurn();
+
+	const deleting = agent.deleteSession({sessionId});
+	for (let i = 0; i < 200 && !live.closed; i++) {
+		await new Promise(resolve => setTimeout(resolve, 5));
+	}
+	t.true(live.closed, 'the running turn is told to stop');
+	releaseChat();
+	await turn.catch(() => {});
+	await deleting;
+
+	t.is(await sessionManager.loadSession(sessionId), null);
+	t.false((agent as any).sessions.has(sessionId));
+});
+
+test.serial('AcpAgent.resumeSession - a resume during a turn leaves one live session for the id', async t => {
+	const {agent, sessionId, live, turn, releaseChat} = await startGatedTurn();
+
+	const resuming = agent.resumeSession({sessionId, cwd: '/tmp'});
+	// Reading the session from disk comes first, so give it real time.
+	for (let i = 0; i < 200 && !live.closed; i++) {
+		await new Promise(resolve => setTimeout(resolve, 5));
+	}
+	t.true(live.closed, 'the old copy is retired, not left running');
+	t.true(live.turnActive, 'and the resume waits for its turn to end');
+	releaseChat();
+	await turn.catch(() => {});
+	await resuming;
+
+	const resumed = (agent as any).sessions.get(sessionId);
+	t.not(resumed, live);
+	t.false(live.turnActive);
+	// The old turn's last save is what the resumed copy starts from.
+	t.deepEqual(
+		resumed.messages.map((m: Message) => m.content),
+		live.messages.map((m: Message) => m.content),
+	);
+	t.true(resumed.messages.some((m: Message) => m.content === 'second'));
+	await agent.deleteSession({sessionId});
+});
+
 test('AcpAgent.closeSession - clears the session read stubs', async t => {
 	const {agent} = createAgent();
 	const session = await agent.newSession({cwd: '/tmp'});
@@ -2044,23 +2212,44 @@ test('AcpAgent.prompt - a cancelled turn does not generate a title', async t => 
 	const {agent} = createAgent();
 
 	let chatCalls = 0;
+	const session = await agent.newSession({cwd: '/tmp'});
+	// What chat-handler.ts throws when the abort signal fires mid-stream.
 	agent['initContext'].client.chat = async () => {
 		chatCalls++;
+		await agent.cancel({sessionId: session.sessionId});
 		throw new Error('Operation was cancelled');
 	};
-
-	const session = await agent.newSession({cwd: '/tmp'});
-	await agent.prompt({
+	const result = await agent.prompt({
 		sessionId: session.sessionId,
 		prompt: [{type: 'text', text: 'fix this'}],
 	});
 	await agent['pendingTitleGeneration'];
+	t.is(result.stopReason, 'cancelled');
 
 	// The cancel path early-returns from inside catch, which still runs the
 	// finally. Reaching the finally must not be mistaken for a clean turn.
 	t.is(chatCalls, 1);
 	const stored = await sessionManager.readSession(session.sessionId);
 	t.not(stored?.titleGenerated, true);
+});
+
+test('AcpAgent.prompt - an error that only says it was cancelled is still an error', async t => {
+	const {agent} = createAgent();
+	// Nobody cancelled: an internal abort (a timeout) surfaces with the same
+	// wording, and the user should see it as the failure it is.
+	agent['initContext'].client.chat = async () => {
+		throw new Error('Operation was cancelled');
+	};
+	const session = await agent.newSession({cwd: '/tmp'});
+	await t.throwsAsync(
+		agent.prompt({
+			sessionId: session.sessionId,
+			prompt: [{type: 'text', text: 'fix this'}],
+		}),
+		{message: 'Operation was cancelled'},
+	);
+	const live = agent['sessions'].get(session.sessionId)!;
+	t.is(live.messages.at(-1)?.outcome, 'failed');
 });
 
 test('AcpAgent.prompt - an errored turn does not generate a title', async t => {

@@ -387,8 +387,9 @@ export interface DiskNanocoderConfig {
 	systemPrompt?: SystemPromptConfig;
 	/**
 	 * Shell commands run at fixed points in the agent loop, keyed by lifecycle
-	 * event. Project-local, so this carries the same code-execution weight as
-	 * `mcpServers` above.
+	 * event. A project-local file can set these, so they carry the same
+	 * code-execution weight as project MCP servers (`.mcp.json`) and are
+	 * gated behind directory trust.
 	 */
 	hooks?: HooksConfig;
 	/**
@@ -415,6 +416,11 @@ export interface DiskNanocoderConfig {
 	autoCommit?: boolean;
 	/** Negative-space mutation firewall. Off by default. */
 	firewall?: Partial<FirewallConfig>;
+	/**
+	 * Project-level verify policy: CI-watch trust level and poll cadence.
+	 * Read by `loadVerifyConfig()`.
+	 */
+	verify?: VerifyConfig;
 }
 
 /**

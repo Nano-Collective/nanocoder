@@ -27,7 +27,7 @@ The modes differ along two axes: whether each tool call is gated, and whether an
 | Mode | Per-tool approval | Reaches disk | Review point |
 |------|------------------|--------------|--------------|
 | **Normal** | Every tool that can change something | Yes | Before each call |
-| **Auto-accept** | Bash, `browser`, `git_commit`, `git_pr` create/comment/review, `file_op` deletes and overwrites, and custom tools with `approval: always` | Yes | Before risky calls |
+| **Auto-accept** | Bash, `browser`, `git_commit`, `git_pr` create/comment/review, `file_op` deletes and overwrites, MCP tools (unless the server marks them read-only or lists them in `alwaysAllow`), and custom tools with `approval: always` | Yes | Before risky calls |
 | **Yolo** | None | Yes | None |
 | **Plan** | N/A - cannot mutate | No | The plan, before any work |
 | **Architect** | Bash, `browser`, MCP tools and custom tools with `approval: always` (`file_op` is covered by the checkpoint; `git_commit` and `git_pr` are removed) | Yes | The whole turn, after it runs |
@@ -56,7 +56,8 @@ Automatically accepts and executes most tool calls without confirmation. Some hi
 - Significantly faster for iterative workflows
 - All tool execution results are still displayed — you can see what happened
 - The AI can chain multiple actions without waiting for approval
-- Still prompts: `execute_bash`, `browser`, `git_commit`, `git_pr` when it creates, comments on or reviews a pull request, `file_op` when it deletes a file or when a move or copy would overwrite an existing file, and custom tools declared `approval: always`. File edits, `git_add`, MCP tools, and custom tools with `approval: destructive` run without a prompt
+- Still prompts: `execute_bash`, `browser`, `git_commit`, `git_pr` when it creates, comments on or reviews a pull request, `file_op` when it deletes a file or when a move or copy would overwrite an existing file, MCP tools, and custom tools declared `approval: always`. File edits, `git_add`, and custom tools with `approval: destructive` run without a prompt
+- An MCP tool runs without a prompt only when its server annotates it read-only (`readOnlyHint`) or lists it in the server's [`alwaysAllow`](../configuration/mcp-configuration.md#auto-approve-tools). A server can expose a tool as capable as a shell, so the rest ask first, the same as `execute_bash`
 - A delete or an overwrite shows no diff and cannot be undone, so `file_op` asks first, the same as `rm` through `execute_bash`. Creating directories, and moving or copying to a path that does not exist yet, still run without a prompt
 
 **When to use:** Tasks you trust the AI to handle — code generation, refactoring well-understood code, running tests, or when you want to step back and let the AI work through a problem.
@@ -109,7 +110,7 @@ The following are **excluded**: the file mutation tools (`write_file`, `string_r
 
 Subagents started with `agent` in plan mode get the same exclusions, so delegating work does not open a path to a mutation.
 
-MCP tools follow the same rule. An MCP tool is available in plan mode only when its server annotates it read-only (`readOnlyHint` in the tool's MCP annotations); anything unannotated is treated as a possible mutation and hidden. A server's [`alwaysAllow`](../configuration/mcp-configuration.md#auto-approve-tools) list does not override this — it applies in normal mode only.
+MCP tools follow the same rule. An MCP tool is available in plan mode only when its server annotates it read-only (`readOnlyHint` in the tool's MCP annotations); anything unannotated is treated as a possible mutation and hidden. A server's [`alwaysAllow`](../configuration/mcp-configuration.md#auto-approve-tools) list does not override this — it applies in normal and auto-accept modes only.
 
 ### The Plan → Review → Execute Workflow
 

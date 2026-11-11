@@ -272,7 +272,7 @@ Commands:
 Options:
   -v, --version       Show version number
   -h, --help          Show help
-  --vscode            Run in VS Code mode
+  --vscode            Start the legacy VS Code companion (deprecated)
   --vscode-port       Specify VS Code port
   --provider          Specify AI provider (must be configured in agents.config.json).
                       Quote names with spaces: --provider "GitHub Copilot"

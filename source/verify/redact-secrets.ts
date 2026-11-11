@@ -23,6 +23,15 @@ const SECRET_PATTERNS: readonly RegExp[] = [
 	/\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/g,
 	// Slack bot/user/app tokens.
 	/\bxox[abposr]-[A-Za-z0-9-]{10,}/g,
+	// Google API keys: AIza plus exactly 35 key characters.
+	/\bAIza[0-9A-Za-z_-]{35}(?![0-9A-Za-z_-])/g,
+	// GitLab personal, deploy, runner, trigger and service-account tokens.
+	/\bgl(?:pat|dt|rt|ptt|soat)-[0-9A-Za-z_-]{20,}/g,
+	// Stripe secret and restricted keys, live and test.
+	/\b(?:sk|rk)_(?:live|test)_[0-9A-Za-z]{16,}/g,
+	// JWTs: base64url header and payload that both decode to a JSON object
+	// (`{"` encodes as `eyJ`), plus a signature.
+	/\beyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g,
 ];
 
 const SECRET_ENV_NAME = /TOKEN|KEY|SECRET|PASSWORD/i;

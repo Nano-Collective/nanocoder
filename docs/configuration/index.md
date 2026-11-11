@@ -96,7 +96,14 @@ variable is the point of the output and the reference is not itself a secret.
 
 ## Environment Variables
 
-Keep API keys out of version control using environment variables. Variables are loaded from shell environment (`.bashrc`, `.zshrc`) or `.env` file in your working directory. Shell variables win over `.env` values. A project `.env` cannot set `NANOCODER_TRUST_DIRECTORY`, `NANOCODER_CONFIG_DIR`, `XDG_CONFIG_HOME`, `APPDATA`, `NANOCODER_MCPSERVERS`, `NANOCODER_MCPSERVERS_FILE`, or `NANOCODER_CI_TRUST_LEVEL`, since it is loaded before the directory trust check; set those in your shell instead.
+Keep API keys out of version control using environment variables. Variables are loaded from shell environment (`.bashrc`, `.zshrc`) or `.env` file in your working directory. Shell variables win over `.env` values. A project `.env` is loaded before the directory trust check, so it cannot set variables that would act before you trust the folder; set those in your shell instead. It cannot set:
+
+- any `NANOCODER_*` variable except `NANOCODER_LOG_LEVEL`, `NANOCODER_CONTEXT_LIMIT`, `NANOCODER_MAX_TURNS` and `NANOCODER_NO_UPDATE_CHECK`
+- variables that make child processes run code at start-up (`NODE_OPTIONS`, `NODE_PATH`, `BASH_ENV`, `ENV`, `ZDOTDIR`, `PROMPT_COMMAND`, `SHELLOPTS`, `BASHOPTS`, `PS4`, `IFS`, `PYTHONPATH`, `PYTHONSTARTUP`, `PERL5OPT`, `PERL5LIB`, `RUBYOPT`, `RUBYLIB`, and anything starting `LD_`, `DYLD_`, `GIT_`, `npm_config_` or `pnpm_config_`)
+- `PATH`, `SHELL`, `EDITOR`, `VISUAL`, `PAGER`, `HOME`, `APPDATA`, `LOCALAPPDATA`, `USERPROFILE` and the `XDG_*` directories
+- TLS and proxy settings (`NODE_TLS_REJECT_UNAUTHORIZED`, `NODE_EXTRA_CA_CERTS`, `SSL_CERT_FILE`, `SSL_CERT_DIR`, `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, `NO_PROXY`)
+
+Names are matched case-insensitively. A key that is skipped is reported in a warning at startup.
 
 ### General
 
@@ -262,13 +269,17 @@ File tools already refuse paths outside the project. `execute_bash` and `!comman
 
 When on:
 
-- **macOS** — `sandbox-exec` (deprecated by Apple, still present): no network; writes allowed in the project root, a per-command temp dir (`TMPDIR`), the Darwin user temp dir (bare `mktemp` ignores `TMPDIR`), and `/tmp` / `/private/tmp`. Reads are not restricted (`allow default`), so `cat ~/.ssh/id_rsa` still works and stdout still reaches the model.
-- **Linux** — `bwrap` from `PATH` (bubblewrap): no network; `--ro-bind / /` plus a writable bind of the project and a per-command temp dir, plus `--tmpfs /tmp`. Same read caveat as macOS. If `bwrap` is missing, or present but cannot create a user namespace (`--unshare-net`), the tool returns an error and does **not** fall through to unsandboxed bash.
+- **macOS** — `sandbox-exec` (deprecated by Apple, still present): no network; writes allowed in the project root, a per-command temp dir (`TMPDIR`), the Darwin user temp dir (bare `mktemp` ignores `TMPDIR`), and `/tmp` / `/private/tmp`. Apple Events and LaunchServices are denied, so `open` and `osascript` cannot start apps outside the jail. Reads are not restricted (`allow default`), so `cat ~/.ssh/id_rsa` still works and stdout still reaches the model. Other system services reachable over Mach IPC are not filtered.
+- **Linux** — `bwrap` from `PATH` (bubblewrap): no network; `--ro-bind / /` plus a writable bind of the project and a per-command temp dir, plus `--tmpfs /tmp`. The per-user runtime dir (`/run/user/<uid>`: session D-Bus, systemd user manager, rootless Docker/Podman) is hidden, and the Docker, Podman and system D-Bus sockets under `/run` are masked. Same read caveat as macOS. If `bwrap` is missing, or present but cannot create a user namespace (`--unshare-net`), the tool returns an error and does **not** fall through to unsandboxed bash.
 - **Windows** — not supported in this version. The tool returns an error if the flag is on.
 
-This is not a secrets boundary. Network is blocked, writes outside the project and the jail temp dir are blocked, but the command can still read the rest of the filesystem and print it into the conversation.
+Inside the project, `.git`, `.nanocoder/`, `agents.config.json` and `.mcp.json` stay read-only, and can't be created if missing. Git runs hooks and config-named programs (such as `core.fsmonitor`) from `.git`, and nanocoder loads plugins, tools, lifecycle hooks and MCP server commands from the others, all outside the jail. So `git add`, `git commit`, `git checkout` and similar fail inside sandboxed `execute_bash`; use the git tools, which run outside it and ask for approval. On Linux a missing entry is covered by an empty placeholder that bwrap creates in the project and nanocoder removes once the command, and anything it left running in the background, has exited.
+
+This is not a full confinement or a secrets boundary. Network is blocked and writes outside the project and the jail temp dir are blocked, but the command can still read the rest of the filesystem and print it into the conversation, and it can still reach any host service that listens on a socket or IPC endpoint not listed above. A program that detaches into a new session (`setsid`) and outlives its command can create the protected entries on Linux once the placeholders are removed.
 
 Timeouts and cancel are unchanged. This does not sandbox custom tools or MCP.
+
+Commands also get a trimmed environment. With or without the sandbox, `execute_bash` and `!command` never see nanocoder's own credentials: any variable whose value is a configured provider `apiKey` or `nanocoderTools.webSearch.apiKey` (so the variable an `apiKey: "$VAR"` reference reads from), and `NANOCODER_PROVIDERS`. Keys shorter than 16 characters, such as `"ollama"`, are treated as placeholders and left alone. With the sandbox on, the well-known provider variables (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `OPENROUTER_API_KEY` and similar) are removed as well. Anything else, such as `GH_TOKEN` for `gh`, is passed through. If a project script needs the same key nanocoder uses, export it under another name in the command.
 
 ### Auto-commit
 
@@ -361,7 +372,7 @@ Set the initial development mode for all new interactive sessions. Without this 
 | Value | Description |
 |-------|-------------|
 | `"normal"` | Standard mode - tools that change things prompt for approval; read-only tools run directly |
-| `"auto-accept"` | Semi-automatic - read-only and safe tools auto-run; bash, file deletes and overwrites, and tools marked as always needing approval still prompt |
+| `"auto-accept"` | Semi-automatic - read-only and safe tools auto-run; bash, file deletes and overwrites, MCP tools the server does not mark read-only (unless in its `alwaysAllow`), and tools marked as always needing approval still prompt |
 | `"yolo"` | Fully automatic — no confirmations at all |
 | `"plan"` | Read-only exploration mode — only read/search/list tools available |
 | `"architect"` | Plan-then-build mode. See [Development Modes](../features/development-modes.md) |

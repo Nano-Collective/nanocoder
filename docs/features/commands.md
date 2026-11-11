@@ -21,7 +21,7 @@ Type `/` in the chat input to see available commands. All commands start with `/
 | `/tasks` | Manage task list for tracking complex work (see [Task Management](task-management.md)) |
 | `/model-database` | Browse coding models from OpenRouter (searchable, filterable by open/proprietary). Enter copies the highlighted model's ID to the clipboard and, when the active provider is OpenRouter, also switches the session to that model |
 | `/settings` | Interactive settings menu. Accepts a tab name to jump straight there: `/settings providers`, `/settings mcp`, `/settings appearance`, `/settings input`, `/settings behavior`, `/settings advanced` |
-| `/firewall` | Inspect and configure the negative-space mutation firewall. Subcommands: `status`, `enable`, `disable`, `mode <strict\|lenient\|disabled>`, `toggle <any\|tests\|exports>`, `protect <pattern>`, `unprotect <pattern>`, `reset` |
+| `/firewall` | Guard file edits made by the model: in `strict` mode block, in `lenient` mode only warn about, edits that delete existing tests, change exported signatures, add explicit `any` types, or touch protected paths. Off by default. Subcommands: `status`, `enable` (same as `mode strict`), `disable` (same as `mode disabled`), `mode <strict\|lenient\|disabled>`, `toggle <any\|tests\|exports>`, `protect <pattern>`, `unprotect <pattern>`, `reset`. Changes last for the session; set defaults under `nanocoder.firewall` (see [Mutation Firewall](../configuration/index.md#mutation-firewall)) |
 | `/mcp` | Show connected MCP servers and their tools |
 | `/commands` | List custom commands. Subcommands: `show <name>`, `create <name>` (see [Custom Commands](custom-commands.md)) |
 | `/tools` | List available tools grouped by source (built-in, MCP, custom). Subcommand: `create <name>` (see [Custom Tools](custom-tools.md)) |
@@ -35,7 +35,7 @@ Type `/` in the chat input to see available commands. All commands start with `/
 | `/copy` | Copy the last assistant response to the system clipboard. Use `/copy code` to copy just the last fenced code block from the last response |
 | `/expand [n]` | Print tool result `n` in full. Long tool output is cut to 20 lines with a `/expand n` hint; run `/expand` without a number to list recent results |
 | `/commit` | Generate a Conventional Commit message from staged Git changes. Add `--copy` (or `-c`) to also copy the message to the system clipboard. A spinner shows while the model is working |
-| `/review` | One-shot, diff-only review of the current branch or one target. Usage: `/review [quick] [<branch-or-PR-number-or-GitHub-PR-URL>]` (e.g. `/review`, `/review main`, `/review quick 42`, `/review https://github.com/owner/repo/pull/42`). Bare PR numbers are resolved across configured GitHub remotes and their fork parents; ambiguous numbers require a full PR URL. See [review foundation and rollout](review.md) for staged behavior |
+| `/review` | One-shot, diff-only review of the current branch or one target. Usage: `/review [quick] [<branch-or-PR-number-or-GitHub-PR-URL>]` (e.g. `/review`, `/review main`, `/review quick 42`, `/review https://github.com/owner/repo/pull/42`). Bare PR numbers are resolved across configured GitHub remotes and their fork parents; ambiguous numbers require a full PR URL. See [code review](review.md) |
 | `/doctor` | Show environment health report for bug reports |
 | `/update` | Update Nanocoder to the latest version |
 | `/usage` | Get current model context usage visually. Accepts `?context-max=<n>` to preview usage against a different limit (see [Inline Overrides](#inline-overrides)) |

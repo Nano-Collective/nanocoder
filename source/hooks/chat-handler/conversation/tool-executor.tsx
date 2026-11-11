@@ -4,7 +4,6 @@ import AgentProgress, {MultiAgentProgress} from '@/components/agent-progress';
 import BashProgress from '@/components/bash-progress';
 import {ErrorMessage} from '@/components/message-box';
 import {getShowAgentBashOutput} from '@/config/preferences';
-import {getSequenceTracker} from '@/macros/sequence-tracker';
 import type {BashExecutionState} from '@/services/bash-executor';
 import {
 	clearAllSubagentProgress,
@@ -88,7 +87,6 @@ export interface ToolDisplayOptions {
 	onCompactToolCount?: (toolName: string) => void;
 	onLiveTaskUpdate?: (tasks?: Task[]) => void;
 	nonInteractiveMode?: boolean;
-	isParallelBatch?: boolean;
 }
 
 /**
@@ -142,33 +140,6 @@ export const displayExecutedTool = async (
 		toolCall,
 		result.content,
 	);
-
-	try {
-		const tracker = getSequenceTracker();
-		const isReadOnly = toolManager?.isReadOnly(result.name) ?? false;
-		const isError = isToolResultError(result);
-
-		if (!isReadOnly || isError) {
-			tracker.breakChain();
-		} else {
-			const parsedArgs = parseToolArguments(toolCall.function.arguments);
-			const inputArgs =
-				typeof parsedArgs === 'object' && parsedArgs !== null
-					? (parsedArgs as Record<string, unknown>)
-					: {};
-
-			tracker.recordExecution({
-				toolName: result.name,
-				inputArgs,
-				success: true,
-				readOnly: true,
-				parallelBatch: options?.isParallelBatch,
-				timestamp: Date.now(),
-			});
-		}
-	} catch {
-		// Non-fatal tracking fallback
-	}
 
 	const expandId = recordExpandableToolResult(toolCall, result, bashState);
 
@@ -513,7 +484,12 @@ const executeAgentBatch = async (
  * Other tools are executed sequentially to preserve ordering.
  * Results are displayed in the original input order.
  *
- * @returns Array of tool results from executed tools
+ * Stops before the next tool once `options.signal` is aborted, so an Escape
+ * during one tool of an auto-approved batch does not let the rest run.
+ *
+ * @returns Results for the tools that ran, in input order. When the batch
+ * stops early (abort, or `beforeExecute` declining) this is a prefix of the
+ * input and the caller must pair the remaining tool calls with results.
  */
 export const executeToolsDirectly = async (
 	toolsToExecuteDirectly: ToolCall[],
@@ -556,6 +532,9 @@ export const executeToolsDirectly = async (
 	const directResults: ToolResult[] = [];
 
 	for (const {group, type} of groups) {
+		if (options?.signal?.aborted) {
+			return directResults;
+		}
 		for (const toolCall of group) {
 			if (options?.beforeExecute && !(await options.beforeExecute(toolCall))) {
 				return directResults;
@@ -591,11 +570,6 @@ export const executeToolsDirectly = async (
 					result.content,
 				);
 			}
-			try {
-				getSequenceTracker().breakChain();
-			} catch {
-				// Non-fatal tracking fallback
-			}
 			continue;
 		}
 
@@ -608,6 +582,8 @@ export const executeToolsDirectly = async (
 			// Sequential execution for non-parallelizable tools (or single-item groups)
 			executions = [];
 			for (const toolCall of group) {
+				// Escape during the previous tool: don't start the next one.
+				if (options?.signal?.aborted) break;
 				executions.push(
 					await executeApprovedTool(
 						toolCall,
@@ -620,11 +596,6 @@ export const executeToolsDirectly = async (
 			}
 		}
 
-		const isParallelBatch = type === 'readOnly' && group.length > 1;
-		const displayOpts = isParallelBatch
-			? {...options, isParallelBatch: true}
-			: options;
-
 		// Display results in order
 		for (const execution of executions) {
 			directResults.push(execution.result);
@@ -633,7 +604,7 @@ export const executeToolsDirectly = async (
 				toolManager,
 				addToChatQueue,
 				conversationStateManager,
-				displayOpts,
+				options,
 			);
 		}
 	}

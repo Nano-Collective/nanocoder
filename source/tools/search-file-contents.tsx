@@ -1,4 +1,3 @@
-import path from 'node:path';
 import {Box, Text} from 'ink';
 import React from 'react';
 import ToolMessage from '@/components/tool-message';
@@ -17,7 +16,7 @@ import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
 import {searchProjectContents} from '@/utils/file-search';
-import {isPathInside, isValidFilePath} from '@/utils/path-validation';
+import {isValidFilePath, resolveFilePath} from '@/utils/path-validation';
 import {calculateTokens} from '@/utils/token-calculator';
 
 const MAX_CONTEXT_LINES = 10;
@@ -50,15 +49,18 @@ const executeSearchFileContents = async (
 	// Validate and resolve search path if provided. Resolve relative to the
 	// session cwd, but bound containment to the project root so an absolute
 	// in-project path (e.g. the workspace root) is not rejected once the shell
-	// has `cd`-ed into a subdir.
+	// has `cd`-ed into a subdir. Containment must be symlink-aware: ripgrep
+	// follows a symlink named on its command line even without --follow, so a
+	// lexically in-project `link -> ~` would grep the home directory.
 	const root = getProjectRoot();
 	let searchPath: string | undefined;
 	if (args.path) {
 		if (!isValidFilePath(args.path, root)) {
 			return `Error: Invalid path "${args.path}"`;
 		}
-		searchPath = path.resolve(cwd, args.path);
-		if (!isPathInside(searchPath, root)) {
+		try {
+			searchPath = resolveFilePath(args.path, cwd, root);
+		} catch {
 			return `Error: Path escapes project directory: ${args.path}`;
 		}
 	}

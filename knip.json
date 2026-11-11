@@ -1,5 +1,20 @@
 {
 	"$schema": "https://unpkg.com/knip@5/schema.json",
+	"workspaces": {
+		".": {
+			"entry": [
+				"scripts/**/*.{js,ts}!",
+				"benchmarks/{measure,report}.ts!",
+				"benchmarks/agent/{run,harness}.ts!",
+				"source/vscode/cli-path-discovery.ts!"
+			],
+			"project": [
+				"**/*.{js,mjs,cjs,jsx,ts,tsx,mts,cts}!",
+				"!source/test-utils/**!",
+				"!source/vscode/chat-panel-harness.ts!"
+			]
+		}
+	},
 	"ignoreDependencies": ["lint-staged"],
 	"ignoreBinaries": [
 		"vsce",
@@ -12,10 +27,7 @@
 		"taskkill"
 	],
 	"ignore": [
-		"source/utils/message-queue.tsx",
-		"source/vscode/**/*.ts",
 		"plugins/**/*",
-		"scripts/fetch-models.js",
 		".husky/**",
 		".github/**",
 		"benchmarks/count-loader.mjs",

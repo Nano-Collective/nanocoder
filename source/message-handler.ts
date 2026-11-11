@@ -14,6 +14,7 @@ import type {
 	ToolResult,
 } from '@/types/index';
 import {parseToolArguments} from '@/utils/tool-args-parser';
+import {createCancellationResults} from '@/utils/tool-cancellation';
 import {toolErrorToContent} from '@/utils/tool-validation';
 import {truncateToolResult} from '@/utils/truncate-tool-result';
 
@@ -61,6 +62,12 @@ export async function processToolUse(
 	// tool with that placeholder.
 	if (toolCall.argumentsError !== undefined) {
 		return invalidArgumentsResult(toolCall);
+	}
+
+	// A cancelled turn must not start another tool. Callers that run a batch
+	// check between tools too; this covers any that don't.
+	if (options?.abortSignal?.aborted) {
+		return {...createCancellationResults([toolCall])[0], isError: true};
 	}
 
 	try {
@@ -140,7 +147,11 @@ export async function processToolUse(
 		// file lands in the same commit instead of being left behind.
 		const commitNote = failed
 			? null
-			: await maybeAutoCommit(toolCall.function.name, parsedArgs);
+			: await maybeAutoCommit(
+					toolCall.function.name,
+					parsedArgs,
+					options?.client,
+				);
 
 		return {
 			tool_call_id: toolCall.id,

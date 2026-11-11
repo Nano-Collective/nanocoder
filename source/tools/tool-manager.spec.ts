@@ -4,6 +4,10 @@ import type {
 } from '@/types/index';
 import type {MCPClient} from '@/mcp/mcp-client';
 import test from 'ava';
+import {
+	filterValidToolCalls,
+	partitionUnknownToolCalls,
+} from '@/hooks/chat-handler/utils/tool-filters';
 import {getShutdownManager} from '@/utils/shutdown';
 import {ToolManager} from './tool-manager';
 import {getToolsForProfile} from './tool-profiles';
@@ -1697,5 +1701,144 @@ test('ToolManager on-demand discovery obeys tuneConfig.mcpDiscovery === "disable
 	t.true(manager.hasTool('mcp_tool_1'));
 	t.true(manager.hasTool('mcp_tool_10'));
 
+	await manager.disconnectMCP();
+});
+
+// ============================================================================
+// On-demand discovery survives a server outage
+// ============================================================================
+
+/**
+ * A ten-tool server whose health listener the test drives. Ten tools puts
+ * initializeMCP in discovery mode by default.
+ */
+function outageFixture() {
+	let healthListener:
+		| ((change: {serverName: string; status: 'unhealthy' | 'connected'}) => void)
+		| undefined;
+	const mockTools: any[] = [];
+	for (let i = 1; i <= 10; i++) {
+		mockTools.push({
+			name: `mcp_tool_${i}`,
+			tool: {
+				description: `MCP Tool ${i}`,
+				parameters: {type: 'object'},
+				execute: async () => `result ${i}`,
+			},
+			handler: async () => `result ${i}`,
+			approval: true,
+		});
+	}
+	const fakeClient = {
+		onHealthChange(listener: typeof healthListener) {
+			healthListener = listener;
+			return () => {};
+		},
+		async connectToServers() {
+			return [{serverName: 'flaky-server', success: true, toolCount: 10}];
+		},
+		getToolNameConflicts: () => [],
+		getToolEntries: () => mockTools,
+		getToolMapping: () =>
+			new Map(
+				mockTools.map(t => [
+					t.name,
+					{serverName: 'flaky-server', originalName: t.name, readOnly: false},
+				]),
+			),
+		getNativeToolsRegistry: () =>
+			Object.fromEntries(mockTools.map(t => [t.name, t.tool])),
+		disconnect: async () => {},
+	};
+	const manager = new HealthSeamToolManager(fakeClient);
+	return {
+		manager,
+		emit: (status: 'unhealthy' | 'connected') =>
+			healthListener?.({serverName: 'flaky-server', status}),
+	};
+}
+
+const mcpToolNames = (manager: ToolManager) =>
+	manager.getToolNames().filter(name => name.startsWith('mcp_tool_'));
+
+test('discovery mode: a recovered server goes back to the catalog, not every schema', async t => {
+	const {manager, emit} = outageFixture();
+	await manager.initializeMCP([{name: 'flaky-server', transport: 'stdio'}]);
+	t.true(manager.hasTool('load_tool_schema'));
+	t.true(manager.loadMcpTool('mcp_tool_1'));
+	t.deepEqual(mcpToolNames(manager), ['mcp_tool_1']);
+
+	emit('unhealthy');
+	t.deepEqual(mcpToolNames(manager), []);
+	t.is(manager.getMcpCatalog().size, 0);
+
+	emit('connected');
+	t.deepEqual(
+		mcpToolNames(manager),
+		['mcp_tool_1'],
+		'only the schema the model had loaded comes back',
+	);
+	const catalog = manager.getMcpCatalog();
+	t.is(catalog.size, 10, 'the server is listed in the catalog again');
+	t.is(catalog.getUnloaded().length, 9);
+	t.true(catalog.isLoaded('mcp_tool_1'));
+
+	// The rest still load on demand.
+	t.true(manager.loadMcpTool('mcp_tool_2'));
+	t.true(manager.hasTool('mcp_tool_2'));
+	await manager.disconnectMCP();
+});
+
+test('without discovery a recovered server registers every tool and refills the catalog', async t => {
+	const {manager, emit} = outageFixture();
+	await manager.initializeMCP(
+		[{name: 'flaky-server', transport: 'stdio'}],
+		undefined,
+		undefined,
+		{mcpDiscovery: 'disabled'},
+	);
+	t.is(mcpToolNames(manager).length, 10);
+
+	emit('unhealthy');
+	emit('connected');
+	t.is(mcpToolNames(manager).length, 10);
+	t.is(manager.getMcpCatalog().size, 10);
+	t.is(manager.getMcpCatalog().getUnloaded().length, 0);
+	await manager.disconnectMCP();
+});
+
+test('a call to an unloaded on-demand MCP tool says to call load_tool_schema first', async t => {
+	const {manager} = outageFixture();
+	await manager.initializeMCP([{name: 'flaky-server', transport: 'stdio'}]);
+	t.true(manager.isUnloadedMcpTool('mcp_tool_3'));
+	t.false(manager.isUnloadedMcpTool('read_file'), 'a built-in is not an MCP tool');
+
+	const call = {
+		id: 'call_1',
+		function: {name: 'mcp_tool_3', arguments: {}},
+	};
+	const offered = manager.getAvailableToolNames(undefined, 'normal', []);
+	for (const partition of [
+		filterValidToolCalls([call], manager, offered),
+		partitionUnknownToolCalls([call], manager, offered),
+	]) {
+		t.is(partition.validToolCalls.length, 0);
+		t.is(partition.rejectedToolCalls.length, 1);
+		const content = String(partition.errorResults[0]?.content);
+		t.true(content.includes('load_tool_schema'), content);
+		t.false(content.includes('does not exist'), content);
+		t.false(content.includes('not available in the current mode'), content);
+	}
+
+	// Once loaded, the same call is valid.
+	t.true(manager.loadMcpTool('mcp_tool_3'));
+	t.is(
+		filterValidToolCalls(
+			[call],
+			manager,
+			manager.getAvailableToolNames(undefined, 'normal', []),
+		).validToolCalls.length,
+		1,
+	);
 	await manager.disconnectMCP();
 });

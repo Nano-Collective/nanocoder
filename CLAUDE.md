@@ -21,7 +21,7 @@ pnpm run test:types                             # TypeScript checking only
 pnpm run test:format                            # Biome format check
 pnpm run test:lint                              # Biome lint check
 pnpm run test:lint:fix                          # Auto-fix lint/format issues
-pnpm run test:knip                              # Unused code detection
+pnpm run test:knip                              # Unused code detection, plus a production pass that flags files only specs import
 pnpm run test:benchmark                         # Run model benchmarks
 pnpm run test:agent-eval                        # Agent evaluation harness (steps/tokens/cost per task; needs a model, not part of test:all)
 
@@ -57,7 +57,7 @@ Nanocoder is a React-based CLI coding agent built with Ink.js that provides loca
 - `source/mcp/` - Model Context Protocol server integration
 - `source/tool-calling/` - XML/text tool-call parsers for the fallback path (non-native-tool models)
 - `source/services/` - Checkpoint manager, bash executor, file snapshots, lifecycle hooks (user shell commands run at fixed points in the agent loop)
-- `source/usage/` - Token/cost usage: breakdown calculator, per-response usage + cost builder (provider-reported tokens priced via models.dev), compact formatters for the per-response indicator, session usage storage
+- `source/usage/` - Token/cost usage: breakdown calculator, per-response usage + cost builder (provider-reported tokens priced via models.dev), compact formatters for the per-response indicator, context-window percentage from provider-reported usage. Lifetime usage history lives in `source/stats/`
 - `source/session/` - Chat session persistence (autosave / resume)
 - `source/schedule/` - Cron expression helpers (validate, next run, human-readable labels) used by `/schedule` and skill cron subscriptions
 - `source/subagents/` - Subagent executor (delegated agent runs)
@@ -110,7 +110,7 @@ A command that does slow work before returning (LLM round-trip, network) should 
 
 ### Custom Tools
 
-File-based tools live in `source/custom-tools/`. `CustomToolLoader` discovers `.md` files in `.nanocoder/tools/` (project) and `~/.config/nanocoder/tools/` (personal, via `getConfigPath()`); project tools shadow personal ones by `name`. Each file's YAML frontmatter declares the schema; `schema-builder.ts` synthesizes both the AI SDK `inputSchema` and a `ToolValidator`. `template.ts` renders the script body with `{{ name }}` and `{{# section }}` placeholders, shell-quoting all substitutions. `handler.ts` spawns the shell with timeout + env/cwd resolution. `build-tool.ts` glues everything into a `ToolEntry`, then `ToolManager.initializeCustomTools()` registers them into the same registry as built-ins and MCP tools - downstream code (`/tools`, subagents, mode filtering) sees them through the unified registry. Mode policy for custom tools lives in `ToolManager.getAvailableToolNames`: plan mode requires `approval=never && read_only=true`, headless mode requires `approval=never`.
+File-based tools live in `source/custom-tools/`. `CustomToolLoader` discovers `.md` files in `.nanocoder/tools/` (project) and `~/.config/nanocoder/tools/` (personal, via `getConfigPath()`); project tools shadow personal ones by `name`. Each file's YAML frontmatter declares the schema; `schema-builder.ts` synthesizes both the AI SDK `inputSchema` and a `ToolValidator`. `template.ts` renders the script body with `{{ name }}` and `{{# section }}` placeholders, shell-quoting all substitutions of declared parameters; `findUnsafePlaceholder` rejects (at parse time and again in the handler) a body that puts a placeholder where that quoting doesn't hold (inside quotes, comments, here-docs). `handler.ts` spawns the shell with timeout + env/cwd resolution. `build-tool.ts` glues everything into a `ToolEntry`, then `ToolManager.initializeCustomTools()` registers them into the same registry as built-ins and MCP tools - downstream code (`/tools`, subagents, mode filtering) sees them through the unified registry. Mode policy for custom tools lives in `ToolManager.getAvailableToolNames`: plan mode requires `approval=never && read_only=true`, headless mode requires `approval=never`.
 
 ### Configuration Resolution Order
 
@@ -162,7 +162,7 @@ Cloud STT sends microphone audio to the configured OpenAI endpoint only after ex
 
 Five user-facing modes (Shift+Tab cycles them in this order during chat):
 - **normal**: Confirm each tool before execution
-- **auto-accept**: Automatically execute most tools (bash and destructive git still prompt)
+- **auto-accept**: Automatically execute most tools (bash, destructive git, and MCP tools that are neither read-only nor `alwaysAllow`-ed still prompt)
 - **yolo**: Automatically execute every tool without exception
 - **plan**: Show tool calls but don't execute
 - **architect**: Like auto-accept for file edits, then review the whole turn's result with a one-keypress checkpoint undo
