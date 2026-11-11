@@ -289,8 +289,19 @@ async function reachInstallError() {
 		/>,
 	);
 	await waitFor(() => (rendered.lastFrame() ?? '').includes('Install the extension now?'));
-	rendered.stdin.write('\r');
-	await waitFor(() => (rendered.lastFrame() ?? '').includes('install failed'));
+	// Ink subscribes the select's input listener in an effect that runs after
+	// the first frame, so under load an Enter written as soon as the prompt
+	// renders can arrive before anyone is listening and be dropped. Re-send it
+	// (throttled) for as long as the prompt is still on screen.
+	let lastEnter = 0;
+	await waitFor(() => {
+		const frame = rendered.lastFrame() ?? '';
+		if (frame.includes('Install the extension now?') && Date.now() - lastEnter >= 100) {
+			lastEnter = Date.now();
+			rendered.stdin.write('\r');
+		}
+		return frame.includes('install failed');
+	});
 	return {rendered, skipped: () => skipped};
 }
 
