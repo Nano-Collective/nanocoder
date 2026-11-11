@@ -18,7 +18,7 @@ import {
 } from '@/constants';
 import {consultPluginPermission} from '@/plugins/host';
 import {CheckpointManager} from '@/services/checkpoint-manager';
-import {runPreToolUseGate} from '@/services/lifecycle-hooks';
+import {runLifecycleHooks, runPreToolUseGate} from '@/services/lifecycle-hooks';
 import {getProjectRoot} from '@/services/session-cwd';
 import {generateKey} from '@/session/key-generator';
 import {
@@ -44,13 +44,13 @@ import type {
 import {buildResponseUsageBounded} from '@/usage/response-usage';
 import {maybeAutoCompact} from '@/utils/auto-compact';
 import {buildCompletionNote} from '@/utils/completion-note';
+import {compressionBackup} from '@/utils/compression-backup';
 import {formatError} from '@/utils/error-formatter';
 import {MessageBuilder} from '@/utils/message-builder';
 import {capMessagesForModel} from '@/utils/message-capping';
 import {compressMessages} from '@/utils/message-compression';
 import {infoMsg} from '@/utils/message-factory';
 import {logWarning} from '@/utils/message-queue';
-import {getLastBuiltPrompt} from '@/utils/prompt-builder';
 import {signalQuestion} from '@/utils/question-queue';
 import {bumpReadContentGeneration} from '@/utils/read-tracker';
 import {markRunFailed} from '@/utils/run-outcome';
@@ -1342,9 +1342,17 @@ export const processAssistantResponse = async (
 				try {
 					const {createTokenizer} = await import('@/tokenization/index');
 					const tokenizer = createTokenizer(currentProvider, currentModel);
-					const systemPrompt = getLastBuiltPrompt();
-					const sysMsg: Message = {role: 'system', content: systemPrompt};
-					const allForCompress = [sysMsg, ...updatedMessages];
+					// Same observe-only hook and /compact restore point as
+					// auto-compact and /compact, so this compaction is not the one
+					// a pre-compact archive hook or a restore never sees.
+					await runLifecycleHooks('pre-compact', {
+						messageCount: updatedMessages.length,
+					});
+					compressionBackup.storeBackup(updatedMessages);
+					// The system message this turn was sent with, not the
+					// process-wide last-built prompt, so the compressor measures
+					// and preserves what the model actually sees.
+					const allForCompress = [systemMessage, ...updatedMessages];
 					const result = compressMessages(allForCompress, tokenizer, {
 						mode: 'aggressive',
 					});
@@ -1358,7 +1366,6 @@ export const processAssistantResponse = async (
 					// "unchanged since last read" stub. Same as /compact and
 					// auto-compact.
 					bumpReadContentGeneration();
-					setMessages(compressedUser);
 
 					addToChatQueue(
 						<InfoMessage
@@ -1380,6 +1387,10 @@ export const processAssistantResponse = async (
 
 					await processAssistantResponse({
 						...params,
+						// Carry this turn's controller, as every other recursion
+						// does: params.abortController may be a stale null, which
+						// would mint a controller Escape never reaches.
+						abortController: controller,
 						messages: messagesAfterCompact,
 						conversationStartTime: startTime,
 						emptyTurnCount: 0,
