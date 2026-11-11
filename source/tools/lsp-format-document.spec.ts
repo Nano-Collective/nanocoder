@@ -344,6 +344,71 @@ test('formatFileWithLsp: no-op when applied edits leave content unchanged', asyn
 	t.is(await readFile(filePath, 'utf-8'), 'same\n');
 });
 
+// The file from #1867: line 1 is "café" in Latin-1 (a single E9 byte), line 2
+// is what the language server's one edit replaces.
+const LATIN1_FILE = Buffer.from([0x63, 0x61, 0x66, 0xe9, 0x0a, ...Buffer.from('old\n')]);
+const REPLACE_OLD_ON_LINE_2 = [edit(1, 0, 1, 3, 'new')];
+
+test('formatFileWithLsp: refuses a file that is not valid UTF-8 and leaves its bytes alone', async t => {
+	const dir = await mkdtemp(join(tmpdir(), 'nc-fmt-'));
+	t.teardown(async () => {
+		await rm(dir, {recursive: true, force: true});
+	});
+	const filePath = join(dir, 'legacy.legacy');
+	await writeFile(filePath, LATIN1_FILE);
+
+	const serverCalls: string[] = [];
+	const error = await t.throwsAsync(
+		formatFileWithLsp(
+			filePath,
+			'legacy.legacy',
+			mockManager({
+				openDocument: async () => {
+					serverCalls.push('openDocument');
+					return true;
+				},
+				formatDocument: async () => {
+					serverCalls.push('formatDocument');
+					return REPLACE_OLD_ON_LINE_2;
+				},
+				updateDocument: () => {
+					serverCalls.push('updateDocument');
+					return true;
+				},
+			}),
+		),
+	);
+
+	t.regex(error?.message ?? '', /Cannot edit "legacy\.legacy": it is not valid UTF-8/);
+	// Every byte stays, including the E9 on line 1 that U+FFFD used to replace.
+	t.deepEqual(await readFile(filePath), LATIN1_FILE);
+	// Refused before the language server is asked for edits, so nothing is
+	// formatted or written and the server's copy is never updated.
+	t.deepEqual(serverCalls, ['openDocument']);
+});
+
+test('formatFileWithLsp: still formats a UTF-8 file with non-ASCII text', async t => {
+	const dir = await mkdtemp(join(tmpdir(), 'nc-fmt-'));
+	t.teardown(async () => {
+		await rm(dir, {recursive: true, force: true});
+	});
+	const filePath = join(dir, 'legacy.legacy');
+	await writeFile(filePath, 'café\nold\n', 'utf-8');
+
+	const message = await formatFileWithLsp(
+		filePath,
+		'legacy.legacy',
+		mockManager({formatDocument: async () => REPLACE_OLD_ON_LINE_2}),
+	);
+
+	t.is(message, 'Formatted legacy.legacy (1 edit applied).');
+	// Line 1 keeps its UTF-8 bytes (C3 A9); only line 2 changes.
+	t.deepEqual(
+		await readFile(filePath),
+		Buffer.from([0x63, 0x61, 0x66, 0xc3, 0xa9, ...Buffer.from('\nnew\n')]),
+	);
+});
+
 // ============================================================================
 // Tool metadata / schema / formatter / validator
 // ============================================================================
@@ -407,6 +472,23 @@ test('lsp_format_document validator: rejects nonexistent file', async t => {
 	t.false(result?.valid);
 	if (result && !result.valid) {
 		t.regex(result.error, /does not exist/i);
+	}
+});
+
+test('lsp_format_document validator: refuses a file that is not valid UTF-8', async t => {
+	const dir = await mkdtemp(join(tmpdir(), 'nc-fmt-val-'));
+	t.teardown(async () => {
+		resetSessionCwd();
+		await rm(dir, {recursive: true, force: true});
+	});
+	await writeFile(join(dir, 'legacy.legacy'), LATIN1_FILE);
+	setProjectRoot(dir);
+	setSessionCwd(dir);
+
+	const result = await formatDocumentTool.validator?.({path: 'legacy.legacy'});
+	t.false(result?.valid);
+	if (result && !result.valid) {
+		t.regex(result.error, /Cannot edit "legacy\.legacy": it is not valid UTF-8/);
 	}
 });
 
