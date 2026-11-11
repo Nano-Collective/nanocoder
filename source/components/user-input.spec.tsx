@@ -12,11 +12,9 @@ import {TitleShapeContext} from '../hooks/useTitleShape';
 import {UIStateProvider, useUIStateContext} from '../hooks/useUIState';
 import {clearFileListCache} from '../utils/file-autocomplete';
 import {pasteEvents} from '../utils/terminal-paste';
-import UserInput, {
-	findReverseMatch,
-	KEYBOARD_SHORTCUTS,
-	SHORTCUTS_OVERHEAD_ROWS,
-} from './user-input';
+import {KEYBOARD_SHORTCUTS} from './composer/keymap';
+import {SHORTCUTS_OVERHEAD_ROWS} from './composer/useShortcutsOverlay';
+import UserInput, {findReverseMatch} from './user-input';
 import {getClosestConfigFile} from '../config/index';
 import {promptHistory} from '../prompt-history';
 
@@ -2822,10 +2820,11 @@ test('UserInput leaves Ctrl+G alone so voice push-to-talk keeps working', async 
 // --- The `?` legend covers every bound key ---
 
 // Ctrl+<letter> bindings handled by the composer and the app around it. A new
-// `key.ctrl && input === 'x'` check in one of these files without a legend
-// row fails here.
+// `key.ctrl && input === 'x'` check, or a `ctrl('x')` binding in the
+// composer keymap, without a legend row fails here.
 const LEGEND_SOURCES = [
 	'./user-input.tsx',
+	'./composer/keymap.ts',
 	'../app/App.tsx',
 	'../app/sections/interactive-app.tsx',
 ];
@@ -2835,10 +2834,10 @@ test('every Ctrl binding in the composer and app is in the ? legend', t => {
 	const bound = new Set<string>();
 	for (const file of LEGEND_SOURCES) {
 		const code = readFileSync(new URL(file, import.meta.url), 'utf8');
-		for (const [, letter] of code.matchAll(
-			/key\.ctrl && (?:inputChar|input) === '([a-z])'/g,
+		for (const [, direct, viaKeymap] of code.matchAll(
+			/key\.ctrl && (?:inputChar|input) === '([a-z])'|\bctrl\('([a-z])'\)/g,
 		)) {
-			bound.add(letter!);
+			bound.add((direct ?? viaKeymap)!);
 		}
 	}
 
@@ -2849,6 +2848,13 @@ test('every Ctrl binding in the composer and app is in the ? legend', t => {
 			`Ctrl+${letter.toUpperCase()} is bound but missing from KEYBOARD_SHORTCUTS`,
 		);
 	}
+});
+
+test('the composer dispatches its Ctrl bindings through the keymap', t => {
+	// A raw check in user-input.tsx would bypass COMPOSER_BINDINGS, which is
+	// what generates the legend and its coverage checks.
+	const code = readFileSync(new URL('./user-input.tsx', import.meta.url), 'utf8');
+	t.notRegex(code, /key\.ctrl && inputChar === '[a-z]'/);
 });
 
 test('the ? legend lists the non-Ctrl bindings users asked about', t => {
