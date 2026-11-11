@@ -7,7 +7,7 @@ import type {
 	FirewallEvaluationResult,
 	FirewallViolation,
 } from '@/types/firewall';
-import {FIREWALL_DEFAULTS} from '@/types/firewall';
+import {FIREWALL_DEFAULTS, resolveFirewallConfig} from '@/types/firewall';
 import {logWarning} from '@/utils/message-queue';
 import {
 	detectAnyTypeInjections,
@@ -17,21 +17,7 @@ import {
 
 function resolveInitialConfig(): FirewallConfig {
 	try {
-		const appConfig = getAppConfig();
-		if (appConfig.firewall) {
-			const fw = appConfig.firewall;
-			const enabled = fw.enabled ?? (fw.mode ? fw.mode !== 'disabled' : false);
-			const mode = fw.mode ?? (enabled ? 'strict' : 'disabled');
-			return {
-				...FIREWALL_DEFAULTS,
-				...fw,
-				enabled,
-				mode,
-				protectedPatterns: fw.protectedPatterns
-					? [...fw.protectedPatterns]
-					: [],
-			};
-		}
+		return resolveFirewallConfig(getAppConfig().firewall);
 	} catch {
 		// AppConfig may not be loaded yet
 	}
