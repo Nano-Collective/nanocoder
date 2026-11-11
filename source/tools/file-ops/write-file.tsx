@@ -7,6 +7,7 @@ import ToolMessage, {CappedLines} from '@/components/tool-message';
 import {getSyntaxTheme} from '@/config/themes';
 import {DEFAULT_TERMINAL_COLUMNS} from '@/constants';
 import {
+	enforceFirewall,
 	evaluateMutationEnvelope,
 	getFirewallConfig,
 } from '@/firewall/mutation-firewall';
@@ -108,9 +109,7 @@ const executeWriteFile = async (args: {
 		originalContent,
 		contentStr,
 	);
-	if (!firewallResult.allowed) {
-		throw new Error(firewallResult.summary ?? 'Mutation blocked by firewall');
-	}
+	const firewallWarning = enforceFirewall(firewallResult);
 
 	await writeFile(absPath, contentStr, 'utf-8');
 
@@ -130,7 +129,7 @@ const executeWriteFile = async (args: {
 	const estimatedTokens = calculateTokens(actualContent);
 
 	const action = fileExists ? 'overwritten' : 'written';
-	return `File ${action} successfully (${lineCount} lines, ${charCount} characters, ~${estimatedTokens} tokens).`;
+	return `File ${action} successfully (${lineCount} lines, ${charCount} characters, ~${estimatedTokens} tokens).${firewallWarning}`;
 };
 
 const writeFileCoreTool = tool({

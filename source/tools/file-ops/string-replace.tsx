@@ -3,7 +3,10 @@ import {access, writeFile} from 'node:fs/promises';
 import {resolve} from 'node:path';
 import React from 'react';
 import {getColors} from '@/config/index';
-import {evaluateMutationEnvelope} from '@/firewall/mutation-firewall';
+import {
+	enforceFirewall,
+	evaluateMutationEnvelope,
+} from '@/firewall/mutation-firewall';
 import {getSafeSessionCwd} from '@/services/session-cwd';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
@@ -124,9 +127,7 @@ const executeStringReplace = async (
 		fileContent,
 		newContent,
 	);
-	if (!firewallResult.allowed) {
-		throw new Error(firewallResult.summary ?? 'Mutation blocked by firewall');
-	}
+	const firewallWarning = enforceFirewall(firewallResult);
 
 	await writeFile(absPath, newContent, 'utf-8');
 	invalidateCache(absPath);
@@ -153,7 +154,7 @@ const executeStringReplace = async (
 			? `line ${startLine}`
 			: `lines ${startLine}-${newEndLine}`;
 
-	return `Successfully replaced content at ${rangeDesc} (now ${newRangeDesc}).${formatUpdatedFileContext(newContent, startLine, newEndLine)}`;
+	return `Successfully replaced content at ${rangeDesc} (now ${newRangeDesc}).${formatUpdatedFileContext(newContent, startLine, newEndLine)}${firewallWarning}`;
 };
 
 const stringReplaceCoreTool = tool({
