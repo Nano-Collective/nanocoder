@@ -2,6 +2,7 @@ import {Box, Text, useFocus, useInput} from 'ink';
 import Spinner from 'ink-spinner';
 import {useCallback, useEffect, useRef, useState} from 'react';
 import stringWidth from 'string-width';
+import {AttachmentPills} from '@/components/composer/attachment-pills';
 import {CommandCompletionList} from '@/components/composer/command-completion-list';
 import {FileMentionList} from '@/components/composer/file-mention-list';
 import {isComposerKey} from '@/components/composer/keymap';
@@ -9,6 +10,10 @@ import {ReverseSearchPrompt} from '@/components/composer/reverse-search-prompt';
 import {ShortcutsOverlay} from '@/components/composer/shortcuts-overlay';
 import {useCommandCompletions} from '@/components/composer/useCommandCompletions';
 import {useFileMentions} from '@/components/composer/useFileMentions';
+import {
+	collectDroppedImages,
+	useImageAttachments,
+} from '@/components/composer/useImageAttachments';
 import {useReverseSearch} from '@/components/composer/useReverseSearch';
 import {useShortcutsOverlay} from '@/components/composer/useShortcutsOverlay';
 import {
@@ -40,11 +45,6 @@ import type {
 	RestoredInputDraft,
 	SubmittedInputDraft,
 } from '@/types/hooks';
-import {
-	extractImageReferences,
-	readClipboardImage,
-	readImageFile,
-} from '@/utils/clipboard-image';
 import {isNewlineKey} from '@/utils/newline-key';
 import {assemblePrompt} from '@/utils/prompt-processor';
 import {pasteEvents} from '@/utils/terminal-paste';
@@ -186,7 +186,8 @@ export default function UserInput({
 	});
 	const [selectedQueuedIndex, setSelectedQueuedIndex] = useState(-1);
 	// Pending image attachments sent with the next submitted message.
-	const [attachments, setAttachments] = useState<ImageAttachment[]>([]);
+	const images = useImageAttachments();
+	const {attachments} = images;
 	const lastRestoredDraftIdRef = useRef<number | null>(null);
 
 	// Reverse prompt search (Ctrl+R / bck-i-search)
@@ -275,12 +276,18 @@ export default function UserInput({
 				...restoreSubmittedDraft.inputState.placeholderContent,
 			},
 		});
-		setAttachments([...restoreSubmittedDraft.attachments]);
+		images.replace([...restoreSubmittedDraft.attachments]);
 		resetUIState();
 		promptHistory.resetIndex();
 		setTextInputKey(prev => prev + 1);
 		focus('user-input');
-	}, [restoreSubmittedDraft, setInputState, resetUIState, focus]);
+	}, [
+		restoreSubmittedDraft,
+		setInputState,
+		resetUIState,
+		focus,
+		images.replace,
+	]);
 
 	useEffect(() => {
 		if (queuedMessages.length === 0) {
@@ -332,13 +339,6 @@ export default function UserInput({
 
 	// Helper functions
 
-	// Attach an image to the pending message. We never gate on a model-capability
-	// heuristic here: if the model can't see images it will say so or error, which
-	// is clearer than an over-cautious warning on every attach.
-	const attachImage = useCallback((image: ImageAttachment) => {
-		setAttachments(prev => [...prev, image]);
-	}, []);
-
 	// Handle form submission
 	const handleSubmit = useCallback(() => {
 		if (!onSubmit && !onQueueMessage) return;
@@ -346,31 +346,16 @@ export default function UserInput({
 		// The ref, not the render-time currentState: Enter can arrive in the
 		// same stdin batch as a paste, before this component re-renders with it.
 		const latestState = currentStateRef.current;
-		let images = attachments;
-		let assembled = assemblePrompt(latestState);
-		let display = latestState.displayValue;
-
-		// Image file paths the user typed, pasted, or dragged into the terminal
-		// (often quoted, mixed in with prose) become attachments; the literal
-		// path in the message text is replaced with an `[Image #N]` placeholder,
-		// numbered after any attachments already added via Ctrl+V.
-		const {text: cleanedAssembled, paths} = extractImageReferences(
-			assembled,
-			attachments.length,
+		const dropped = collectDroppedImages(
+			attachments,
+			assemblePrompt(latestState),
+			latestState.displayValue,
 		);
-		if (paths.length > 0) {
-			const dropped = paths
-				.map(readImageFile)
-				.filter((img): img is ImageAttachment => img !== null);
-			if (dropped.length > 0) {
-				images = [...attachments, ...dropped];
-				assembled = cleanedAssembled;
-				display = extractImageReferences(display, attachments.length).text;
-			}
-		}
+		const {assembled, display} = dropped;
+		const outgoing = dropped.images;
 
 		// Nothing to send: no text and no attachments.
-		if (!assembled.trim() && images.length === 0) return;
+		if (!assembled.trim() && outgoing.length === 0) return;
 
 		const inputStateForHistory: InputState = {
 			displayValue: latestState.displayValue,
@@ -382,12 +367,12 @@ export default function UserInput({
 			onQueueMessage({
 				message: assembled,
 				displayValue: display,
-				images: images.length > 0 ? images : undefined,
+				images: outgoing.length > 0 ? outgoing : undefined,
 				inputState: inputStateForHistory,
 			});
 			resetInput();
 			resetUIState();
-			setAttachments([]);
+			images.clear();
 			promptHistory.resetIndex();
 			setSelectedQueuedIndex(-1);
 			return;
@@ -399,13 +384,13 @@ export default function UserInput({
 		promptHistory.addPrompt(inputStateForHistory);
 		onSubmittedDraft?.({
 			inputState: inputStateForHistory,
-			attachments: images,
+			attachments: outgoing,
 		});
-		onSubmit(assembled, display, images.length > 0 ? images : undefined);
+		onSubmit(assembled, display, outgoing.length > 0 ? outgoing : undefined);
 		onDismissSuggestion?.();
 		resetInput();
 		resetUIState();
-		setAttachments([]);
+		images.clear();
 		promptHistory.resetIndex();
 		setSelectedQueuedIndex(-1);
 	}, [
@@ -418,6 +403,7 @@ export default function UserInput({
 		isBusy,
 		onSubmittedDraft,
 		onDismissSuggestion,
+		images.clear,
 	]);
 
 	// Handle escape key logic
@@ -438,7 +424,7 @@ export default function UserInput({
 		if (showClearMessage) {
 			resetInput();
 			resetUIState();
-			setAttachments([]);
+			images.clear();
 			onDismissActiveEditor?.();
 			focus('user-input');
 		} else if (input || attachments.length > 0 || activeEditor) {
@@ -462,6 +448,7 @@ export default function UserInput({
 		onDismissActiveEditor,
 		setShowClearMessage,
 		focus,
+		images.clear,
 	]);
 
 	// History navigation
@@ -594,7 +581,7 @@ export default function UserInput({
 				placeholderContent: {},
 			},
 		);
-		setAttachments(queuedMessage.images ?? []);
+		images.replace(queuedMessage.images ?? []);
 		onRemoveQueuedMessage?.(queuedMessage.id);
 		setSelectedQueuedIndex(-1);
 		setTextInputKey(prev => prev + 1);
@@ -605,6 +592,7 @@ export default function UserInput({
 		queuedMessages,
 		setInputState,
 		onRemoveQueuedMessage,
+		images.replace,
 	]);
 
 	const removeSelectedQueuedMessage = useCallback(() => {
@@ -735,22 +723,13 @@ export default function UserInput({
 			return;
 		}
 
-		// Ctrl+V: pull an image off the system clipboard as an attachment.
-		// Text pasted into the terminal arrives as a bracketed paste on stdin
-		// (cli.tsx enables DECSET 2004 and routes payloads to pasteEvents),
-		// never as a Ctrl+V keypress, so this binding is free to mean
-		// "paste image".
+		// Ctrl+V / Ctrl+X: attach the clipboard image / drop the last one.
 		if (isComposerKey('attachClipboardImage', inputChar, key)) {
-			const image = readClipboardImage();
-			if (image) {
-				attachImage(image);
-			}
+			images.attachFromClipboard();
 			return;
 		}
-
-		// Ctrl+X: drop the most recently added image attachment.
 		if (isComposerKey('removeLastImage', inputChar, key)) {
-			setAttachments(prev => prev.slice(0, -1));
+			images.removeLast();
 			return;
 		}
 
@@ -1048,14 +1027,7 @@ export default function UserInput({
 
 			{/* Part of the composer, so it hides with the input box. */}
 			{!showShortcuts && attachments.length > 0 && (
-				<Box marginTop={1}>
-					<Text color={colors.info}>
-						{attachments
-							.map((img, i) => `[image #${i + 1}: ${img.source ?? 'image'}]`)
-							.join(' ')}
-					</Text>
-					<Text color={colors.secondary}> · ctrl-x remove last</Text>
-				</Box>
+				<AttachmentPills attachments={attachments} />
 			)}
 			{/* Development mode indicator - always visible. The indent puts it one
 			step to the right of the box's left border, so it aligns cleanly under
