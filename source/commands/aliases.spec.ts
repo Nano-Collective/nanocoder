@@ -29,6 +29,8 @@ test('every old command name is still an alias', t => {
 		'copilot-login',
 		'model-database',
 		'schedule',
+		'sessions',
+		'history',
 	]) {
 		t.truthy(findCommandAlias(name), `/${name} no longer resolves`);
 	}
@@ -120,6 +122,8 @@ test('/help <old name> opens the command it now runs', t => {
 	t.is(findHelpCommand(commands, 'codex-login')?.name, 'login');
 	t.is(findHelpCommand(commands, 'model-database')?.name, 'model');
 	t.is(findHelpCommand(commands, 'schedule')?.name, 'skills');
+	t.is(findHelpCommand(commands, 'sessions')?.name, 'resume');
+	t.is(findHelpCommand(commands, 'history')?.name, 'resume');
 });
 
 test('a command help page lists the old names that run it', t => {

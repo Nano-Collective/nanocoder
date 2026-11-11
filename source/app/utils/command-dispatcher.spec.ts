@@ -279,6 +279,53 @@ test.serial('a project command named like a retired command still wins', async t
 	t.false(opened);
 });
 
+test.serial('built-in names match in any case', async t => {
+	const calls: string[] = [];
+	const options = createOptions({
+		onShowStatus: () => calls.push('status'),
+		onEnterSettingsMode: tab => calls.push(`settings:${tab ?? ''}`),
+		onEnterModelDatabaseMode: () => calls.push('model-database'),
+	});
+	await dispatchSlashCommand('/STATUS', options);
+	await dispatchSlashCommand('/Setup-MCP', options);
+	await dispatchSlashCommand('/Model-Database', {...options, commandArgs: []});
+	t.deepEqual(calls, ['status', 'settings:mcp', 'model-database']);
+});
+
+test.serial('/sessions and /history open the session picker through the alias table', async t => {
+	for (const message of ['/sessions', '/History --all']) {
+		const showAll: Array<boolean | undefined> = [];
+		await dispatchSlashCommand(
+			message,
+			createOptions({
+				onEnterSessionSelectorMode: all => showAll.push(all),
+				onResumeSession: () => {},
+			}),
+		);
+		t.deepEqual(showAll, [message.includes('--all') ? true : undefined], message);
+	}
+});
+
+test.serial('a project command keeps matching its exact name', async t => {
+	let status = 0;
+	let completed = false;
+	const customCommandCache = new Map([
+		['Status', {name: 'Status', fullName: 'Status'}],
+	]) as unknown as MessageSubmissionOptions['customCommandCache'];
+	const options = createOptions({
+		customCommandCache,
+		onShowStatus: () => status++,
+		onCommandComplete: () => {
+			completed = true;
+		},
+	});
+	await dispatchSlashCommand('/Status', options);
+	t.is(status, 0, 'the project command wins for its own spelling');
+	t.true(completed);
+	await dispatchSlashCommand('/STATUS', options);
+	t.is(status, 1, 'any other spelling is the built-in');
+});
+
 test.serial('read-only commands still render through their handler', async t => {
 	const queued: React.ReactNode[] = [];
 	await dispatchSlashCommand(

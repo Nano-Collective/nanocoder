@@ -1,11 +1,8 @@
 /**
- * Old command names that were folded into another command. Each one keeps
+ * Old or alternative names for another command. Each one keeps
  * working (the dispatcher rewrites it to its target before routing), but is
  * not registered as a command of its own, so it stays out of `/help` and the
  * slash menu. `/help <old name>` still finds the command it now points to.
- *
- * `/resume`'s `/sessions` and `/history` predate this table and are routed by
- * the resume handler directly.
  */
 export interface CommandAlias {
 	/** The old command name, without the leading slash. */
@@ -23,6 +20,8 @@ export const COMMAND_ALIASES: readonly CommandAlias[] = [
 	{name: 'copilot-login', target: 'login', args: ['copilot']},
 	{name: 'model-database', target: 'model', args: ['browse']},
 	{name: 'schedule', target: 'skills', args: ['schedule']},
+	{name: 'sessions', target: 'resume'},
+	{name: 'history', target: 'resume'},
 ];
 
 const ALIASES_BY_NAME = new Map(

@@ -2,6 +2,7 @@ import {randomUUID} from 'node:crypto';
 import type {AgentSideConnection} from '@agentclientprotocol/sdk';
 import test from 'ava';
 import {runAcpConversation} from '@/acp/acp-conversation';
+import {NO_RESPONSE_MESSAGE} from '@/agent-loop/turn-engine';
 import {AcpSession} from '@/acp/acp-session';
 import {reloadAppConfig} from '@/config/index';
 import {
@@ -39,6 +40,8 @@ type Reply = Partial<LLMChatResponse>;
 
 interface Observation {
 	end: 'completed' | 'stopped' | 'cancelled';
+	/** Why a run that did not complete stopped, as the frontend reports it. */
+	failure?: string;
 	/** History sent on each model call, system message excluded. */
 	requests: Message[][];
 	/** Tool names offered on each model call. */
@@ -133,6 +136,7 @@ const plainRunner: Runner = async scenario => {
 		abortSignal: controller.signal,
 		outputFormat: 'json',
 	});
+	if (outcome.kind === 'error') observation.failure = outcome.message;
 	observation.end =
 		outcome.kind === 'success'
 			? 'completed'
@@ -159,13 +163,21 @@ const acpRunner: Runner = async scenario => {
 	session.systemMessage = {role: 'system', content: 'sys'};
 	session.messages = [{role: 'user', content: 'go'}];
 	if (scenario.abortBeforeStart) session.abortController.abort();
-	const response = await runAcpConversation({
-		session,
-		client: makeClient(scenario.replies, observation),
-		toolManager: makeToolManager(),
-		conn,
-		nonInteractiveAlwaysAllow: [],
-	});
+	let response: Awaited<ReturnType<typeof runAcpConversation>>;
+	try {
+		response = await runAcpConversation({
+			session,
+			client: makeClient(scenario.replies, observation),
+			toolManager: makeToolManager(),
+			conn,
+			nonInteractiveAlwaysAllow: [],
+		});
+	} catch (error) {
+		// A failed prompt request reaches the client as an error response.
+		observation.end = 'stopped';
+		observation.failure = (error as Error).message;
+		return observation;
+	}
 	// A run stopped by a guard ends with a display-only notice in history.
 	const last = session.messages[session.messages.length - 1];
 	observation.end =
@@ -193,6 +205,7 @@ const subagentRunner: Runner = async scenario => {
 		undefined,
 		{tools: TOOLS},
 	);
+	observation.failure = result.error;
 	observation.end = result.success
 		? 'completed'
 		: result.error === 'Aborted'
@@ -291,6 +304,13 @@ for (const {name, run, guarded, unknownToolResult} of frontends) {
 			t.is(result?.tool_call_id, 'call-probe');
 		},
 	);
+
+	test.serial(`[${name}] a reply with no choices is an error`, async t => {
+		const seen = await run({replies: [{choices: []}]});
+		t.is(seen.end, 'stopped');
+		t.is(seen.failure, NO_RESPONSE_MESSAGE);
+		t.is(seen.requests.length, 1);
+	});
 
 	test.serial(`[${name}] nudges an empty turn, then recovers`, async t => {
 		const seen = await run({replies: [text(''), text('done')]});
