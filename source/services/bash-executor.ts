@@ -28,6 +28,7 @@ import {
 	STDOUT_TRUNCATION_NOTICE,
 } from '@/utils/stream-collector';
 import {
+	acquireProtectedMounts,
 	planBashSpawn,
 	resolveJailRoot,
 	sandboxedCommandGroup,
@@ -159,6 +160,7 @@ interface ExecutionEntry {
 	cwdCaptureFile?: string;
 	jailTmp?: string;
 	cleanupJailTmp?: () => void;
+	releaseProtected?: () => void;
 }
 
 export class BashExecutor extends EventEmitter {
@@ -169,6 +171,9 @@ export class BashExecutor extends EventEmitter {
 	private stopping = new Map<ChildProcess, Promise<void>>();
 	private leftovers = new Set<ChildProcess>();
 	private leftoverPrune?: NodeJS.Timeout;
+	// Run once a leftover group is gone: the jail's placeholder mounts must
+	// outlive every process that could still write through them.
+	private leftoverCleanups = new Map<ChildProcess, () => void>();
 
 	execute(
 		command: string,
@@ -233,6 +238,13 @@ export class BashExecutor extends EventEmitter {
 			}
 		};
 
+		// bwrap only; seatbelt protects these paths by name.
+		const guard =
+			sandbox && platform === 'linux'
+				? acquireProtectedMounts(projectRoot)
+				: undefined;
+		const releaseProtected = guard?.release;
+
 		let proc: ChildProcess;
 		if (sandbox) {
 			const planned = planBashSpawn({
@@ -244,9 +256,11 @@ export class BashExecutor extends EventEmitter {
 				projectRoot,
 				tmpDir: jailTmp,
 				hostTmp: resolveJailRoot(tmpdir()),
+				protectedMounts: guard?.mounts,
 			});
 			if ('error' in planned) {
 				cleanupJailTmp();
+				releaseProtected?.();
 				state.isComplete = true;
 				state.error = planned.error;
 				this.emit('start', {...state});
@@ -348,6 +362,7 @@ export class BashExecutor extends EventEmitter {
 				cwdCaptureFile,
 				jailTmp,
 				cleanupJailTmp,
+				releaseProtected,
 			};
 
 			const ms = options?.timeoutMs ?? TIMEOUT_BASH_DEFAULT_MS;
@@ -399,7 +414,7 @@ export class BashExecutor extends EventEmitter {
 				applyCapturedCwd();
 				cleanupJailTmp();
 				clearInterval(intervalId);
-				this.trackLeftovers(proc);
+				this.trackLeftovers(proc, releaseProtected);
 				state.isComplete = true;
 				state.exitCode = code;
 				this.emit('complete', {...state});
@@ -446,6 +461,7 @@ export class BashExecutor extends EventEmitter {
 				applyCapturedCwd();
 				cleanupJailTmp();
 				clearInterval(intervalId);
+				this.trackLeftovers(proc, releaseProtected);
 				state.isComplete = true;
 				state.error = error.message;
 				this.emit('complete', {...state});
@@ -492,6 +508,7 @@ export class BashExecutor extends EventEmitter {
 				}
 			}
 			execution.cleanupJailTmp?.();
+			execution.releaseProtected?.();
 			execution.state.isComplete = true;
 			execution.state.error = reason;
 			this.emit('complete', {...execution.state});
@@ -512,7 +529,9 @@ export class BashExecutor extends EventEmitter {
 			this.cancel(id);
 		}
 		for (const proc of this.leftovers) {
-			void this.stop(proc);
+			const cleanup = this.leftoverCleanups.get(proc);
+			this.leftoverCleanups.delete(proc);
+			void this.stop(proc).then(cleanup);
 		}
 		this.leftovers.clear();
 		await Promise.all(this.stopping.values());
@@ -532,6 +551,9 @@ export class BashExecutor extends EventEmitter {
 		for (const proc of procs) {
 			if (isGroupAlive(proc)) signalGroups(proc, 'SIGKILL');
 		}
+		for (const entry of this.executions.values()) entry.releaseProtected?.();
+		for (const cleanup of this.leftoverCleanups.values()) cleanup();
+		this.leftoverCleanups.clear();
 	}
 
 	private stop(proc: ChildProcess): Promise<void> {
@@ -550,13 +572,20 @@ export class BashExecutor extends EventEmitter {
 	 * Dead groups are pruned every second: once its last member exits, the
 	 * group id can be reused by an unrelated process.
 	 */
-	private trackLeftovers(proc: ChildProcess): void {
-		if (!isGroupRunning(proc)) return;
+	private trackLeftovers(proc: ChildProcess, onGone?: () => void): void {
+		if (!isGroupRunning(proc)) {
+			onGone?.();
+			return;
+		}
 		this.leftovers.add(proc);
+		if (onGone) this.leftoverCleanups.set(proc, onGone);
 		if (this.leftoverPrune) return;
 		this.leftoverPrune = setInterval(() => {
 			for (const leftover of this.leftovers) {
-				if (!isGroupRunning(leftover)) this.leftovers.delete(leftover);
+				if (isGroupRunning(leftover)) continue;
+				this.leftovers.delete(leftover);
+				this.leftoverCleanups.get(leftover)?.();
+				this.leftoverCleanups.delete(leftover);
 			}
 			if (this.leftovers.size === 0) {
 				clearInterval(this.leftoverPrune);

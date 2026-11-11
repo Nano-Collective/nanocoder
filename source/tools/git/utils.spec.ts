@@ -5,6 +5,7 @@
 import {execFileSync, execSync} from 'node:child_process';
 import {
 	chmodSync,
+	existsSync,
 	mkdirSync,
 	mkdtempSync,
 	realpathSync,
@@ -22,6 +23,7 @@ import {
 	parseGitStatus,
 	execGit,
 	execGitBuffer,
+	execGitReadOnly,
 	isGitAvailable,
 	isGhAvailable,
 	resetBinaryAvailabilityCacheForTests,
@@ -340,6 +342,39 @@ test('execGit runs in the session project inside a session scope', async t => {
 			execGit(['rev-parse', '--show-toplevel']),
 		);
 		t.is(realpathSync(topLevel.trim()), dir);
+	} finally {
+		rmSync(dir, {recursive: true, force: true});
+	}
+});
+
+// Read-only git backs tools that run without approval, so a repo whose
+// config names a core.fsmonitor hook must not get it executed.
+test('execGitReadOnly does not run a core.fsmonitor hook from repo config', async t => {
+	if (process.platform === 'win32') {
+		t.pass();
+		return;
+	}
+	const dir = realpathSync(mkdtempSync(join(tmpdir(), 'nanocoder-git-fsmon-')));
+	try {
+		execSync('git init -q', {cwd: dir});
+		const marker = join(dir, 'fsmonitor-ran');
+		const hook = join(dir, 'hook.sh');
+		writeFileSync(hook, `#!/bin/sh\ntouch '${marker}'\nexit 1\n`);
+		chmodSync(hook, 0o755);
+		execFileSync('git', ['-C', dir, 'config', 'core.fsmonitor', hook]);
+		writeFileSync(join(dir, 'file.txt'), 'x');
+		const scope = createSessionCwdScope(dir);
+
+		await runInSessionCwdScope(scope, () =>
+			execGitReadOnly(['status', '--porcelain']),
+		);
+		t.false(existsSync(marker));
+
+		// Sanity: the same call without the override does run it.
+		await runInSessionCwdScope(scope, () =>
+			execGit(['status', '--porcelain']),
+		).catch(() => undefined);
+		t.true(existsSync(marker));
 	} finally {
 		rmSync(dir, {recursive: true, force: true});
 	}
