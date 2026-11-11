@@ -173,6 +173,26 @@ test.serial('skips unsupported extensions and files above the byte cap', async t
 	}
 });
 
+test.serial('measures the byte cap in bytes, not characters', async t => {
+	// 40 three-byte characters: 120 bytes on disk but only 40 UTF-16 units, so
+	// a check on the decoded string length let it through.
+	const wide = '\u4e2d'.repeat(40);
+	const root = createRepo({
+		'wide.ts': `export function wideSymbol() {}\n// ${wide}\n`,
+		'small.ts': 'export function smallSymbol() {}\n',
+	});
+
+	try {
+		const map = await buildRepoMap(root, {maxFileBytes: 100});
+		t.deepEqual(
+			map.files.map(file => file.path),
+			['small.ts'],
+		);
+	} finally {
+		cleanup(root);
+	}
+});
+
 test.serial('stops scanning at maxFiles and reports truncation', async t => {
 	const root = createRepo({
 		'a.ts': 'export function aSymbol() {}\n',
