@@ -6,7 +6,7 @@ import { clearAppConfig, reloadAppConfig } from "@/config/index";
 import {
 	describeProjectTrust,
 	TRUST_FINGERPRINT_VERSION,
-} from "@/config/project-trust";
+} from "@/config/trust/project-trust";
 import {
 	clearPendingHookContext,
 	resetSessionStartHooks,
@@ -18,6 +18,7 @@ import type { HooksConfig } from "@/types/config";
 import { TOOL_APPROVAL_REQUIRED_KIND } from "@/constants";
 import type { ToolManager } from "@/tools/tool-manager";
 import type { DevelopmentMode, LLMClient } from "@/types/core";
+import { logError, logWarning } from "@/utils/message-queue";
 import { ShutdownManager } from "@/utils/shutdown";
 import type { PlainConversationOutcome } from "./conversation.js";
 import { runPlainShell } from "./shell.js";
@@ -479,7 +480,7 @@ test.serial(
 );
 
 test.serial(
-	"filesChanged collects paths only from mutating tool calls, deduped",
+	"filesChanged collects paths only from successful mutating tool calls, deduped",
 	async (t) => {
 		const shutdown: CapturedShutdown = { code: null };
 		const stdout = capturingStdout();
@@ -525,15 +526,31 @@ test.serial(
 								error: null,
 							},
 							{
-								// Mutating tool that failed: still logs result/error
-								// pass-through, but contributes no file since the call
-								// itself errored before any path-bearing args mattered
-								// for this assertion (failure handling is covered by
-								// the isError tests in conversation.spec.ts).
+								// Mutating tool that failed: its result/error still pass
+								// through, but it changed nothing, so no file.
 								name: "string_replace",
 								arguments: { path: "/repo/d.ts" },
 								result: null,
 								error: "failed to apply patch",
+							},
+							{
+								// file_op is a file tool too: a move changes both ends.
+								name: "file_op",
+								arguments: {
+									operation: "move",
+									path: "/repo/e.ts",
+									destination: "/repo/f.ts",
+								},
+								result: "File moved",
+								error: null,
+							},
+							{
+								// A relative path above the cwd the tool accepted is
+								// still a changed file, not dropped.
+								name: "write_file",
+								arguments: { path: "../sibling/g.ts" },
+								result: "ok",
+								error: null,
 							},
 						],
 					}),
@@ -548,9 +565,15 @@ test.serial(
 		t.is(report.kind, "success");
 		t.deepEqual(
 			new Set(report.filesChanged),
-			new Set(["/repo/a.ts", "/repo/b.ts", "/repo/d.ts"]),
+			new Set([
+				"/repo/a.ts",
+				"/repo/b.ts",
+				"/repo/e.ts",
+				"/repo/f.ts",
+				"../sibling/g.ts",
+			]),
 		);
-		t.is(report.filesChanged.length, 3);
+		t.is(report.filesChanged.length, 5);
 
 		const failedCall = report.toolCalls.find(
 			(tc: { name: string }) => tc.name === "string_replace",
@@ -1469,3 +1492,122 @@ test.serial("plain shell initializes with the run's development mode", async (t)
 	// the editing tools its own agent is not offered.
 	t.is(initOptions?.developmentMode, "plan");
 });
+
+test.serial(
+	"plain shell captures logWarning and logError to stderr and includes warnings in json report",
+	async (t) => {
+		const stdout = capturingStdout();
+		const stderr = capturingStderr();
+		try {
+			await runPlainShell({
+				prompt: "test warning capture",
+				developmentMode: "yolo",
+				trustDirectory: true,
+				outputFormat: "json",
+				deps: baseDeps({
+					initializePlain: async () => {
+						logWarning("Invalid hooks config: unknown lifecycle event 'post-tool-uze'.");
+						logWarning("Invalid formatters config: entries need a 'command' string.");
+						logError("Plugin bad.mjs failed to load: boom from plugin");
+						return {
+							client: FAKE_CLIENT,
+							toolManager: FAKE_TOOL_MANAGER,
+							provider: "fake-provider",
+							model: "fake-model",
+						};
+					},
+					runPlainConversation: async () => ({
+						kind: "success",
+						finalText: "done",
+						reasoning: null,
+						steps: 1,
+						toolCalls: [],
+					}),
+				}),
+			});
+		} finally {
+			stdout.restore();
+			stderr.restore();
+		}
+
+		const stderrOutput = stderr.get();
+		t.true(stderrOutput.includes("unknown lifecycle event 'post-tool-uze'"));
+		t.true(stderrOutput.includes("entries need a 'command' string"));
+		t.true(stderrOutput.includes("Plugin bad.mjs failed to load: boom from plugin"));
+
+		const jsonOutput = JSON.parse(stdout.get());
+		t.is(jsonOutput.kind, "success");
+		t.truthy(jsonOutput.warnings);
+		t.is(jsonOutput.warnings.length, 3);
+		t.true(jsonOutput.warnings[0].includes("unknown lifecycle event 'post-tool-uze'"));
+		t.true(jsonOutput.warnings[1].includes("entries need a 'command' string"));
+		t.true(jsonOutput.warnings[2].includes("Plugin bad.mjs failed to load: boom from plugin"));
+	},
+);
+
+test.serial(
+	"plain shell includes collected warnings in prompt-gate-blocked json report",
+	async (t) => {
+		const previousCwd = process.cwd();
+		const previousConfigDir = process.env.NANOCODER_CONFIG_DIR;
+		mkdirSync(HOOK_DIR, { recursive: true });
+		process.env.NANOCODER_CONFIG_DIR = join(HOOK_DIR, "no-global-config");
+		process.chdir(HOOK_DIR);
+		setProjectRoot(HOOK_DIR);
+		clearPendingHookContext();
+		resetSessionStartHooks();
+
+		const stdout = capturingStdout();
+		const stderr = capturingStderr();
+		try {
+			withPlainHooks({
+				"user-prompt-submit": [
+					{
+						name: "veto-guard",
+						command: hookNode("console.log('prompt rejected by policy');process.exit(1)"),
+					},
+				],
+			});
+			await runPlainShell({
+				prompt: "blocked prompt",
+				developmentMode: "yolo",
+				trustDirectory: true,
+				outputFormat: "json",
+				deps: baseDeps({
+					initializePlain: async () => {
+						logWarning("Some startup warning");
+						return {
+							client: FAKE_CLIENT,
+							toolManager: FAKE_TOOL_MANAGER,
+							provider: "fake-provider",
+							model: "fake-model",
+						};
+					},
+				}),
+			});
+		} finally {
+			stdout.restore();
+			stderr.restore();
+			process.chdir(previousCwd);
+			if (previousConfigDir === undefined) {
+				delete process.env.NANOCODER_CONFIG_DIR;
+			} else {
+				process.env.NANOCODER_CONFIG_DIR = previousConfigDir;
+			}
+			setProjectRoot(previousCwd);
+			clearAppConfig();
+			clearPendingHookContext();
+			resetSessionStartHooks();
+		}
+
+		const stderrOutput = stderr.get();
+		t.true(stderrOutput.includes("Some startup warning"));
+
+		const jsonOutput = JSON.parse(stdout.get());
+		t.is(jsonOutput.kind, "error");
+		t.truthy(jsonOutput.warnings);
+		t.is(jsonOutput.warnings.length, 1);
+		t.is(jsonOutput.warnings[0], "Some startup warning");
+		t.true(jsonOutput.message.includes("prompt rejected by policy"));
+	},
+);

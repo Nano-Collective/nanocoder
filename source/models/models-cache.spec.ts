@@ -1,7 +1,7 @@
 import test from 'ava';
 import { unlink, writeFile, readFile, mkdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { isAbsolute, join } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
 import type { CachedModelsData } from './models-types.js';
 import {
@@ -260,5 +260,7 @@ test('actual cache path does not contain literal ~', async t => {
 	const cachePath = join(cacheBase, 'nanocoder', 'models.json');
 
 	t.false(cachePath.includes('~'), `Cache path must not contain literal ~: ${cachePath}`);
-	t.true(cachePath.startsWith(homedir()), `Cache path must be under home directory: ${cachePath}`);
+	// The suite points XDG_CACHE_HOME at a temp dir (test-utils/isolated-models-cache),
+	// so assert the path is fully expanded rather than that it sits under $HOME.
+	t.true(isAbsolute(cachePath), `Cache path must be absolute: ${cachePath}`);
 });

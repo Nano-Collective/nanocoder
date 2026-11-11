@@ -18,12 +18,12 @@ import {
 	updateMouseReporting,
 	updateProfessionalTone,
 } from '@/config/preferences';
+import {DEFAULT_SINGLE_LINE_PASTE_THRESHOLD} from '@/constants';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {useTitleShape} from '@/hooks/useTitleShape';
 import {DEFAULT_NANOCODER_SHAPE} from '@/types/ui';
 import {fuzzyScore} from '@/utils/fuzzy-matching';
-import {DEFAULT_SINGLE_LINE_PASTE_THRESHOLD} from '@/utils/paste-utils';
 import {SettingsAutoCompactPanel} from './settings-auto-compact';
 import {SETTINGS_TAB_IDS, type SettingsTabId} from './settings-constants';
 import {SettingsDefaultModePanel} from './settings-default-mode';

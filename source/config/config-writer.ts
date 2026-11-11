@@ -1,8 +1,10 @@
 import {existsSync, readFileSync} from 'node:fs';
+import path from 'node:path';
 import {getClosestConfigFile} from '@/config/index';
+import {notifyPreferencesChanged} from '@/config/preferences';
 import type {UserPreferences} from '@/types/config';
 import {atomicWriteJson} from '@/utils/atomic-write';
-import {logError} from '@/utils/message-queue';
+import {logError} from '@/utils/message-queue-core';
 
 /**
  * Reads the active agents.config.json, merges the given partial update into the
@@ -92,6 +94,9 @@ export function updatePreferencesNestedValue<
  */
 export function writeConfigFileAtomic(filePath: string, data: unknown): void {
 	atomicWriteJson(filePath, data);
+	if (path.basename(filePath) === 'nanocoder-preferences.json') {
+		notifyPreferencesChanged();
+	}
 }
 
 function readConfigObject(

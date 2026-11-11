@@ -3,7 +3,7 @@ import {parseSubscribeBlockOrWarn} from '@/skills/parse-subscribe';
 import type {CustomCommandMetadata, ParsedCustomCommand} from '@/types/index';
 import type {SkillTrigger} from '@/types/skills';
 import {parseYamlObject, splitFrontmatter} from '@/utils/frontmatter';
-import {logError} from '@/utils/message-queue';
+import {logError} from '@/utils/message-queue-core';
 
 /**
  * Set of frontmatter keys that are always parsed as arrays

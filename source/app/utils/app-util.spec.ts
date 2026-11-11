@@ -1526,3 +1526,109 @@ test.serial('inline overrides - /compact ?threshold proceeds at or above the thr
 	resetAutoCompactSession();
 	resetSessionContextLimit();
 });
+
+// --- Old command names (source/commands/aliases.ts) keep working ---
+
+function createAliasTestOptions(): {
+	options: MessageSubmissionOptions;
+	calls: string[];
+	queued: React.ReactNode[];
+	live: React.ReactNode[];
+} {
+	const calls: string[] = [];
+	const queued: React.ReactNode[] = [];
+	const live: React.ReactNode[] = [];
+	const options = {
+		...createSettingsTestOptions({onAddToChatQueue: node => queued.push(node)}),
+		onEnterModelSelectionMode: () => calls.push('model-selection'),
+		onEnterModelDatabaseMode: () => calls.push('model-database'),
+		setLiveComponent: (node: React.ReactNode) => live.push(node),
+	} as MessageSubmissionOptions;
+	return {options, calls, queued, live};
+}
+
+async function settle(): Promise<void> {
+	await new Promise(resolve => setTimeout(resolve, 0));
+}
+
+test.serial('alias - /model-database opens the model browser', async t => {
+	const {options, calls} = createAliasTestOptions();
+	await handleMessageSubmission('/model-database', options);
+	t.deepEqual(calls, ['model-database']);
+});
+
+test.serial('alias - /model browse opens the model browser, /model the picker', async t => {
+	const browse = createAliasTestOptions();
+	await handleMessageSubmission('/model browse', {
+		...browse.options,
+		commandArgs: ['browse'],
+	});
+	t.deepEqual(browse.calls, ['model-database']);
+
+	const plain = createAliasTestOptions();
+	await handleMessageSubmission('/model', plain.options);
+	t.deepEqual(plain.calls, ['model-selection']);
+});
+
+for (const [message, componentName, provider] of [
+	['/codex-login', 'CodexLogin', 'ChatGPT'],
+	['/login codex', 'CodexLogin', 'ChatGPT'],
+	['/copilot-login', 'CopilotLogin', 'GitHub Copilot'],
+	['/copilot-login Work Copilot', 'CopilotLogin', 'Work Copilot'],
+	['/login copilot', 'CopilotLogin', 'GitHub Copilot'],
+] as const) {
+	test.serial(`alias - ${message} starts the ${componentName} device flow`, async t => {
+		const {options, live} = createAliasTestOptions();
+		await handleMessageSubmission(message, options);
+		const element = live[0] as React.ReactElement<{providerName: string}>;
+		t.true(React.isValidElement(element));
+		t.is((element.type as {name?: string}).name, componentName);
+		t.is(element.props.providerName, provider);
+	});
+}
+
+test.serial('alias - /login without a target shows usage', async t => {
+	const {options, queued, live} = createAliasTestOptions();
+	await handleMessageSubmission('/login', options);
+	await settle();
+	t.is(live.length, 0);
+	t.true(queued.some(node => queuedText(node).includes('/login <codex|copilot>')));
+});
+
+test.serial('alias - /remember runs /memory add', async t => {
+	const {options, queued} = createAliasTestOptions();
+	// No text, so nothing is written: the usage message proves the routing.
+	await handleMessageSubmission('/remember', options);
+	await settle();
+	t.true(
+		queued.some(node => queuedText(node).includes('Usage: /memory add')),
+		JSON.stringify(queued.map(queuedText)),
+	);
+});
+
+test.serial('alias - /schedule runs /skills schedule', async t => {
+	const {options, queued} = createAliasTestOptions();
+	await handleMessageSubmission('/schedule extra', options);
+	await settle();
+	t.true(
+		queued.some(node => queuedText(node).includes('Usage: /skills schedule')),
+		JSON.stringify(queued.map(queuedText)),
+	);
+});
+
+test.serial('alias - a project command named like an old alias still wins', async t => {
+	let completed = false;
+	const {options} = createAliasTestOptions();
+	const customCommandCache = new Map([
+		['remember', {name: 'remember', fullName: 'remember'}],
+	]) as unknown as MessageSubmissionOptions['customCommandCache'];
+	await handleMessageSubmission('/remember', {
+		...options,
+		customCommandCache,
+		onCommandComplete: () => {
+			completed = true;
+		},
+		onAddToChatQueue: () => t.fail('the built-in /memory add should not run'),
+	});
+	t.true(completed);
+});

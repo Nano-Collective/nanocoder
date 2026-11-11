@@ -901,12 +901,14 @@ test.serial(
 );
 
 test.serial(
-	'executeToolsDirectly - aborted signal surfaces as agent error result',
+	'executeToolsDirectly - an already-cancelled turn does not start a subagent',
 	async t => {
 		const {setAgentToolExecutor} = await import('@/tools/agent-tool');
+		let started = false;
 
 		setAgentToolExecutor({
 			execute: async (_task: unknown, signal?: AbortSignal) => {
+				started = true;
 				if (signal?.aborted) {
 					return {
 						subagentName: 'fake',
@@ -949,11 +951,9 @@ test.serial(
 			{compactDisplay: true, signal: controller.signal},
 		);
 
-		t.is(results.length, 1);
-		t.true(
-			results[0].content.includes('Aborted'),
-			`expected 'Aborted' in content, got: ${results[0].content}`,
-		);
+		// The caller pairs the unstarted call with a cancellation result.
+		t.is(results.length, 0);
+		t.false(started);
 	},
 );
 
@@ -1131,15 +1131,12 @@ test.serial(
 				{compactDisplay: true, signal: controller.signal},
 			);
 
-			t.is(results.length, 2);
-			t.true(results[0].content.includes('Aborted mid-flight'));
-			t.true(results[1].content.includes('Aborted mid-flight'));
+			// Already cancelled: nothing starts, and the caller pairs the
+			// tool calls with cancellation results.
+			t.is(results.length, 0);
 		}
 
-		t.is(receivedSignals.length, 10);
-		for (const sig of receivedSignals) {
-			t.truthy(sig, 'AbortSignal must be threaded into read-only tool handler');
-		}
+		t.is(receivedSignals.length, 0, 'no handler runs once the turn is cancelled');
 
 		// Restore default mock tool handler registry
 		setToolRegistryGetter(createMockToolRegistry);
@@ -1207,5 +1204,54 @@ test.serial(
 		t.true(results[0].content.includes('Aborted mid-flight'));
 
 		setToolRegistryGetter(createMockToolRegistry);
+	},
+);
+
+
+
+test.serial(
+	'executeToolsDirectly - escape during one sequential tool stops the rest of the batch',
+	async t => {
+		const controller = new AbortController();
+		const ran: string[] = [];
+		setToolRegistryGetter(() => ({
+			slow_bash: (async () => {
+				ran.push('slow_bash');
+				// The user presses Escape while this tool runs.
+				controller.abort();
+				return 'bash done';
+			}) as any,
+			write_tool: (async () => {
+				ran.push('write_tool');
+				return 'written';
+			}) as any,
+			edit_tool: (async () => {
+				ran.push('edit_tool');
+				return 'edited';
+			}) as any,
+		}));
+
+		try {
+			const results = await executeToolsDirectly(
+				[
+					{id: 'b1', function: {name: 'slow_bash', arguments: '{}'}},
+					{id: 'w1', function: {name: 'write_tool', arguments: '{}'}},
+					{id: 'e1', function: {name: 'edit_tool', arguments: '{}'}},
+				],
+				createMockToolManager() as any,
+				createMockConversationStateManager() as any,
+				() => {},
+				{compactDisplay: true, signal: controller.signal},
+			);
+
+			t.deepEqual(ran, ['slow_bash'], 'tools after the cancel must not run');
+			t.deepEqual(
+				results.map(r => r.tool_call_id),
+				['b1'],
+				'only the tool that ran has a result',
+			);
+		} finally {
+			setToolRegistryGetter(createMockToolRegistry);
+		}
 	},
 );

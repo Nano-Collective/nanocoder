@@ -1,6 +1,4 @@
 import {Box, Text, useInput} from 'ink';
-import BigText from 'ink-big-text';
-import Gradient from 'ink-gradient';
 import {type ReactNode, useMemo, useState} from 'react';
 import {StyledSelectInput} from '@/components/ui/styled-select-input';
 import type {TitleShape} from '@/components/ui/styled-title';
@@ -29,6 +27,8 @@ import {
 	updateShowUsageFooter,
 } from '@/config/preferences';
 import {getThemeColors, themes} from '@/config/themes';
+import {DEFAULT_SINGLE_LINE_PASTE_THRESHOLD} from '@/constants';
+import {useBannerModules} from '@/hooks/use-banner-modules';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {useTitleShape} from '@/hooks/useTitleShape';
@@ -39,7 +39,6 @@ import {
 	type ThemePreset,
 } from '@/types/ui';
 import {setNotificationsConfig} from '@/utils/notifications';
-import {DEFAULT_SINGLE_LINE_PASTE_THRESHOLD} from '@/utils/paste-utils';
 import type {SettingsTabId} from './settings-constants';
 
 /**
@@ -548,14 +547,23 @@ export function SettingsNanocoderShapePanel({
 	};
 
 	const displayText = isNarrow ? 'NC' : 'Nanocoder';
+	const bannerModules = useBannerModules();
+	const BigText = bannerModules?.BigText;
+	const Gradient = bannerModules?.Gradient;
 
 	// Narrow terminal: simplified layout with BigText outside box
 	if (isNarrow) {
 		return (
 			<>
-				<Gradient colors={[colors.primary, colors.tool]}>
-					<BigText text={displayText} font={previewShape} />
-				</Gradient>
+				{Gradient && BigText ? (
+					<Gradient colors={[colors.primary, colors.tool]}>
+						<BigText text={displayText} font={previewShape} />
+					</Gradient>
+				) : (
+					<Text color={colors.primary} bold>
+						{displayText}
+					</Text>
+				)}
 				<TitledBoxWithPreferences
 					title="Nanocoder Shape"
 					width="100%"
@@ -583,9 +591,15 @@ export function SettingsNanocoderShapePanel({
 	return (
 		<>
 			<Box marginBottom={1}>
-				<Gradient colors={[colors.primary, colors.tool]}>
-					<BigText text={displayText} font={previewShape} />
-				</Gradient>
+				{Gradient && BigText ? (
+					<Gradient colors={[colors.primary, colors.tool]}>
+						<BigText text={displayText} font={previewShape} />
+					</Gradient>
+				) : (
+					<Text color={colors.primary} bold>
+						{displayText}
+					</Text>
+				)}
 			</Box>
 
 			<TitledBoxWithPreferences

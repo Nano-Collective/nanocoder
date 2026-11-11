@@ -1,6 +1,6 @@
 import {CACHE_MODELS_EXPIRATION_MS} from '@/constants';
 import {ModelEntry} from '@/types/index';
-import {logError} from '@/utils/message-queue';
+import {logError} from '@/utils/message-queue-core';
 
 // Cache for fetched model data
 interface ModelCache {

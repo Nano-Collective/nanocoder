@@ -3,7 +3,9 @@ import {homedir, platform, release} from 'os';
 import {basename, dirname, isAbsolute, join, normalize, resolve} from 'path';
 import {fileURLToPath} from 'url';
 import {getProfessionalTone} from '@/config/preferences';
+import {defineSessionValue} from '@/services/session-context';
 import {getProjectRoot} from '@/services/session-cwd';
+import type {ToolManager} from '@/tools/tool-manager';
 import {isNanoProfile, isSingleToolProfile} from '@/tools/tool-profiles';
 import type {SystemPromptConfig, TuneConfig} from '@/types/config';
 import {TUNE_DEFAULTS} from '@/types/config';
@@ -49,7 +51,8 @@ export function resetSectionCache(): void {
 // Cache the last-built system prompt so token-counting callers
 // (e.g. /status, /usage, /compact) can access it without needing
 // developmentMode/tune/tools as arguments.
-let lastBuiltPrompt: string | null = null;
+// Per session, so an ACP session never counts another session.s prompt.
+const lastBuiltPrompt = defineSessionValue<string>();
 
 /**
  * Get the last system prompt produced by buildSystemPrompt().
@@ -57,7 +60,8 @@ let lastBuiltPrompt: string | null = null;
  */
 export function getLastBuiltPrompt(): string {
 	return (
-		lastBuiltPrompt ?? 'You are Nanocoder, a terminal-based AI coding agent.'
+		lastBuiltPrompt.get() ??
+		'You are Nanocoder, a terminal-based AI coding agent.'
 	);
 }
 
@@ -66,7 +70,7 @@ export function getLastBuiltPrompt(): string {
  * Ensures token-counting callers see the full prompt the model receives.
  */
 export function setLastBuiltPrompt(prompt: string): void {
-	lastBuiltPrompt = prompt;
+	lastBuiltPrompt.set(prompt);
 }
 
 function generateSystemInfo(slim = false): string {
@@ -198,6 +202,7 @@ export function buildSystemPrompt(
 	systemPromptOverride?: SystemPromptConfig,
 	model?: string,
 	professionalTone: boolean = getProfessionalTone(),
+	toolManager?: ToolManager,
 ): string {
 	const overrideContent = systemPromptOverride
 		? resolveSystemPromptOverride(systemPromptOverride)
@@ -205,7 +210,7 @@ export function buildSystemPrompt(
 	const overrideMode = systemPromptOverride?.mode ?? 'replace';
 
 	if (overrideContent !== null && overrideMode === 'replace') {
-		lastBuiltPrompt = overrideContent;
+		lastBuiltPrompt.set(overrideContent);
 		return overrideContent;
 	}
 
@@ -328,6 +333,16 @@ ${getSubagentDescriptions()}`;
 		sections.push(subagentInfo);
 	}
 
+	// On-demand MCP Tool Catalog — only when load_tool_schema is available and catalog has unloaded tools
+	if (toolSet.has('load_tool_schema') && toolManager) {
+		const mcpCatalogSection = toolManager
+			.getMcpCatalog()
+			.formatCatalogSection();
+		if (mcpCatalogSection) {
+			sections.push(mcpCatalogSection);
+		}
+	}
+
 	// Professional ("boring") tone — user preference, opt-in. Placed last among
 	// the static sections so it overrides the register of anything above it.
 	// Nano gets the shortened variant, like every other section under nano.
@@ -354,7 +369,7 @@ ${getSubagentDescriptions()}`;
 	}
 
 	// Cache for token-counting callers that don't have access to the inputs
-	lastBuiltPrompt = prompt;
+	lastBuiltPrompt.set(prompt);
 
 	return prompt;
 }

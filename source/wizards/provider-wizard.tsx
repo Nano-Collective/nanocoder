@@ -100,12 +100,12 @@ function ProviderCompleteExtras({items}: {items: ProviderWizardState}) {
 				<Box marginBottom={1} flexDirection="column">
 					{copilotProviders.length > 0 && (
 						<Text color={colors.primary}>
-							Run /copilot-login to auth with Copilot.
+							Run /login copilot to auth with Copilot.
 						</Text>
 					)}
 					{codexProviders.length > 0 && (
 						<Text color={colors.primary}>
-							Run /codex-login to auth with ChatGPT/Codex.
+							Run /login codex to auth with ChatGPT/Codex.
 						</Text>
 					)}
 				</Box>

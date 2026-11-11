@@ -1,3 +1,4 @@
+import {pathToFileURL} from 'node:url';
 import React, {useEffect, useRef} from 'react';
 import {ConfigurationError, createLLMClient} from '@/client-factory';
 import {commandRegistry} from '@/commands';
@@ -274,6 +275,7 @@ export function useAppInitialization({
 					config.mcpServers,
 					onProgress,
 					onHealthChange,
+					config.tune,
 				);
 			} catch (error) {
 				// Mark all pending servers as failed
@@ -302,7 +304,7 @@ export function useAppInitialization({
 		const lspConfig = getAppConfig();
 		const autoDiscover = lspConfig.lsp?.autoDiscover !== false;
 		const lspManager = await getLSPManager({
-			rootUri: `file://${process.cwd()}`,
+			rootUri: pathToFileURL(process.cwd()).href,
 			autoDiscover,
 			// Use custom servers from config if provided
 			servers: lspConfig.lspServers?.map(server => ({

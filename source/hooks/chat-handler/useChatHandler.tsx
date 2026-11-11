@@ -81,7 +81,6 @@ export function useChatHandler({
 	currentModel,
 	setIsCancelling,
 	addToChatQueue,
-	abortController,
 	setAbortController,
 	developmentMode = 'normal',
 	developmentModeRef,
@@ -168,6 +167,7 @@ export function useChatHandler({
 			getAppConfig().systemPrompt,
 			currentModel,
 			getProfessionalTone(),
+			toolManager,
 		);
 
 		const tools = toolsDisabled
@@ -254,6 +254,13 @@ export function useChatHandler({
 				created: boolean;
 				name?: string;
 			},
+			// The turn's controller, passed by the caller that created it. Reading
+			// the `abortController` prop here instead would see the value from the
+			// render this callback was memoised in - usually null, since the
+			// caller's setAbortController has not re-rendered yet - and the loop
+			// would mint a second controller that the caller's abort checks never
+			// see.
+			turnController?: AbortController,
 		) => {
 			if (!client) return;
 
@@ -263,7 +270,7 @@ export function useChatHandler({
 					messages: msgs,
 					client,
 					toolManager,
-					abortController,
+					abortController: turnController ?? null,
 					setAbortController,
 					setIsGenerating,
 					setStreamingReasoning,
@@ -317,7 +324,6 @@ export function useChatHandler({
 		[
 			client,
 			toolManager,
-			abortController,
 			setAbortController,
 			setMessages,
 			addToChatQueue,
@@ -407,7 +413,9 @@ export function useChatHandler({
 			conversationStateManager.current.initializeState(message);
 		}
 
-		// Create abort controller for cancellation
+		// Create abort controller for cancellation. This is the turn's only
+		// controller: it is handed to the conversation loop explicitly, so the
+		// one Escape aborts (app state) is the one the checks below read.
 		const controller = new AbortController();
 		setAbortController(controller);
 
@@ -474,6 +482,7 @@ export function useChatHandler({
 					finalAssistantText = content;
 				},
 				architectCheckpointState,
+				controller,
 			);
 
 			if (

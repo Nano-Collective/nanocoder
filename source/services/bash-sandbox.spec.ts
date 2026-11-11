@@ -1,9 +1,21 @@
-import {chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync} from 'node:fs';
+import {
+	chmodSync,
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	realpathSync,
+	rmSync,
+	symlinkSync,
+	writeFileSync,
+} from 'node:fs';
+import {createServer} from 'node:net';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {platform} from 'node:process';
 import test from 'ava';
 import {
+	acquireProtectedMounts,
+	existingSockets,
 	findBwrap,
 	macSandboxProfile,
 	planBashSpawn,
@@ -175,5 +187,133 @@ test('findBwrap walks PATH', t => {
 		}
 	} finally {
 		rmSync(dir, {recursive: true, force: true});
+	}
+});
+
+// Writes to these run code outside the jail: git config and hooks the next
+// time nanocoder's git tools run, nanocoder's own config on its next start.
+test('macSandboxProfile keeps git and nanocoder config read-only inside the project', t => {
+	const profile = macSandboxProfile('/Users/me/proj', ['/tmp/jail']);
+	const readOnly = profile.slice(profile.lastIndexOf('(deny file-write*'));
+	for (const entry of ['.git', '.nanocoder', 'agents.config.json', '.mcp.json']) {
+		t.true(readOnly.includes(`(subpath "/Users/me/proj/${entry}")`), entry);
+	}
+	t.true(profile.includes('(deny appleevent-send)'));
+	t.true(profile.includes('com.apple.coreservices.launchservicesd'));
+});
+
+function bwrapPlanArgs(
+	protectedMounts: Parameters<typeof planBashSpawn>[0]['protectedMounts'],
+): string[] {
+	const plan = planBashSpawn({
+		platform: 'linux',
+		sandbox: true,
+		command: 'echo hi',
+		spawnCommand: 'echo hi',
+		cwd: '/tmp/proj',
+		projectRoot: '/tmp/proj',
+		tmpDir: '/tmp/jail',
+		bwrapPath: '/usr/bin/bwrap',
+		protectedMounts,
+		hostMasks: {
+			runtimeDir: '/run/user/1000',
+			sockets: ['/run/docker.sock', '/run/dbus/system_bus_socket'],
+		},
+	});
+	if ('error' in plan) throw new Error(plan.error);
+	return plan.args;
+}
+
+test('planBashSpawn on linux mounts protected entries read-only over the project bind', t => {
+	const args = bwrapPlanArgs([
+		{path: '/tmp/proj/.git'},
+		{path: '/tmp/proj/.nanocoder', placeholder: 'dir'},
+		{path: '/tmp/proj/.mcp.json', placeholder: 'file'},
+	]);
+	const roBind = args.indexOf('/tmp/proj/.git') - 1;
+	t.is(args[roBind], '--ro-bind');
+	t.true(roBind > args.indexOf('/tmp/jail'), 'must come after the writable binds');
+	const joined = args.join(' ');
+	t.true(
+		joined.includes(
+			'--tmpfs /tmp/proj/.nanocoder --remount-ro /tmp/proj/.nanocoder',
+		),
+	);
+	t.true(joined.includes('--ro-bind /dev/null /tmp/proj/.mcp.json'));
+});
+
+test('planBashSpawn on linux hides the user runtime dir and host daemon sockets', t => {
+	const args = bwrapPlanArgs([]).join(' ');
+	t.true(args.includes('--tmpfs /run/user/1000'));
+	t.true(args.includes('--ro-bind /dev/null /run/docker.sock'));
+	t.true(args.includes('--ro-bind /dev/null /run/dbus/system_bus_socket'));
+});
+
+// /var/run is a symlink to /run on most distributions, and bwrap cannot mount
+// over a path that only resolves through one ("Can't create file at
+// /var/run/docker.sock").
+test('existingSockets resolves symlinked parents, dedupes and skips non-sockets', async t => {
+	if (platform === 'win32') {
+		t.pass();
+		return;
+	}
+	const dir = realpathSync(mkdtempSync(join(tmpdir(), 'nc-sock-')));
+	const server = createServer();
+	try {
+		const run = join(dir, 'run');
+		mkdirSync(run);
+		symlinkSync(run, join(dir, 'var-run'));
+		const socket = join(run, 'd.sock');
+		await new Promise<void>(resolve => server.listen(socket, resolve));
+		writeFileSync(join(run, 'plain'), '');
+		t.deepEqual(
+			existingSockets([
+				socket,
+				join(dir, 'var-run', 'd.sock'),
+				join(run, 'plain'),
+				join(run, 'missing.sock'),
+			]),
+			[socket],
+		);
+	} finally {
+		server.close();
+		rmSync(dir, {recursive: true, force: true});
+	}
+});
+
+test('acquireProtectedMounts places missing entries and removes them after the last holder', t => {
+	const root = mkdtempSync(join(tmpdir(), 'nc-protect-'));
+	try {
+		mkdirSync(join(root, '.git'));
+		const first = acquireProtectedMounts(root);
+		t.deepEqual(first.mounts, [
+			{path: join(root, '.git')},
+			{path: join(root, '.nanocoder'), placeholder: 'dir'},
+			{path: join(root, 'agents.config.json'), placeholder: 'file'},
+			{path: join(root, '.mcp.json'), placeholder: 'file'},
+		]);
+		// bwrap creates the mount points on the host.
+		mkdirSync(join(root, '.nanocoder'));
+		writeFileSync(join(root, '.mcp.json'), '');
+		writeFileSync(join(root, 'agents.config.json'), '');
+
+		// A second jail must mount them again, not treat them as real entries.
+		const second = acquireProtectedMounts(root);
+		t.is(second.mounts[1]?.placeholder, 'dir');
+		t.is(second.mounts[3]?.placeholder, 'file');
+
+		first.release();
+		first.release();
+		t.true(existsSync(join(root, '.mcp.json')), 'still held by the second jail');
+
+		// Something on the host wrote real config meanwhile: keep it.
+		writeFileSync(join(root, 'agents.config.json'), '{}');
+		second.release();
+		t.false(existsSync(join(root, '.nanocoder')));
+		t.false(existsSync(join(root, '.mcp.json')));
+		t.true(existsSync(join(root, 'agents.config.json')));
+		t.true(existsSync(join(root, '.git')));
+	} finally {
+		rmSync(root, {recursive: true, force: true});
 	}
 });

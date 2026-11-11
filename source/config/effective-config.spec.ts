@@ -221,6 +221,42 @@ test('a field that exists only in a losing layer is still reported', t => {
 	);
 });
 
+test('firewall and verify settings are reported with their origin', t => {
+	// Both blocks are read from agents.config.json — the firewall gates every
+	// file edit and `verify.trustLevel` decides whether the daemon may push
+	// fixes — but neither appeared in `config list/show/diff`.
+	withFixture(
+		{
+			projectAgents: {
+				nanocoder: {
+					firewall: {mode: 'strict', protectedPatterns: ['*.lock']},
+					verify: {trustLevel: 'comment-only', pollIntervalMs: 60_000},
+				},
+			},
+		},
+		paths => {
+			const config = resolveEffectiveConfig();
+			const origin = join(paths.project, 'agents.config.json');
+
+			const enabled = entry(config, 'nanocoder.firewall.enabled');
+			t.is(enabled?.value, true, 'derived from mode, as the firewall does');
+			t.is(enabled?.layer, 'default');
+			t.is(entry(config, 'nanocoder.firewall.mode')?.origin, origin);
+			t.deepEqual(entry(config, 'nanocoder.firewall.protectedPatterns')?.value, [
+				'*.lock',
+			]);
+			t.is(entry(config, 'nanocoder.firewall.blockAnyTypes')?.value, true);
+
+			const trust = entry(config, 'nanocoder.verify.trustLevel');
+			t.is(trust?.value, 'comment-only');
+			t.is(trust?.origin, origin);
+			t.is(entry(config, 'nanocoder.verify.pollIntervalMs')?.value, 60_000);
+
+			t.regex(runConfigCli('diff').output, /nanocoder\.verify\.trustLevel/);
+		},
+	);
+});
+
 test('the effective value is the clamped one the app will actually use', t => {
 	withFixture(
 		{projectAgents: {nanocoder: {autoCompact: {threshold: 200}}}},

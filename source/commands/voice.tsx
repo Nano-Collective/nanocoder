@@ -8,7 +8,7 @@ import type {Command} from '@/types/index';
 export const voiceCommand: Command = {
 	name: 'voice',
 	description:
-		'Configure voice mode (/voice [hands-free|ptt|stt <local|cloud>|tts <local|cloud>|status|mode <push-to-talk|hands-free>])',
+		'Turn voice mode on or off and configure it (/voice [on|off|status|hands-free|ptt|stt <local|cloud>|tts <local|cloud>])',
 	handler: async args => {
 		const currentConfig = getVoicePreference();
 		const updatedConfig = {...currentConfig};
@@ -86,6 +86,7 @@ export const voiceCommand: Command = {
 
 		if (isError) {
 			return React.createElement(ErrorMessage, {
+				hideBox: true,
 				key: generateKey('voice-command-error'),
 				message: messageText,
 			});
@@ -107,6 +108,7 @@ export const voiceCommand: Command = {
 		}
 
 		return React.createElement(InfoMessage, {
+			hideBox: true,
 			key: generateKey('voice-command-info'),
 			message: messageText,
 		});

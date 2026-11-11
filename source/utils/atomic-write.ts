@@ -14,10 +14,21 @@ import {dirname} from 'node:path';
  * never leave a truncated file at the target path. Callers are responsible for
  * ensuring the parent directory exists.
  */
-export function atomicWriteFileSync(filePath: string, data: string): void {
+export function atomicWriteFileSync(
+	filePath: string,
+	data: string,
+	options?: {mode?: number},
+): void {
 	const tmpPath = `${filePath}.${randomUUID()}.tmp`;
 	try {
-		writeFileSync(tmpPath, data, 'utf-8');
+		if (options?.mode === undefined) {
+			writeFileSync(tmpPath, data, 'utf-8');
+		} else {
+			writeFileSync(tmpPath, data, {
+				encoding: 'utf-8',
+				mode: options.mode,
+			});
+		}
 		renameSync(tmpPath, filePath);
 	} catch (error) {
 		try {

@@ -12,7 +12,7 @@ import {
 import {InteractiveApp} from '@/app/sections/interactive-app';
 import type {AppProps} from '@/app/types';
 import AssistantReasoning from '@/components/assistant-reasoning';
-import {SuccessMessage} from '@/components/message-box';
+import {SuccessMessage, WarningMessage} from '@/components/message-box';
 import SecurityDisclaimer from '@/components/security-disclaimer';
 import StreamingMessage from '@/components/streaming-message';
 import StreamingReasoning from '@/components/streaming-reasoning';
@@ -24,10 +24,16 @@ import {
 } from '@/components/vscode-extension-prompt';
 import WelcomeMessage from '@/components/welcome-message';
 import {getAppConfig, loadDefaultMode} from '@/config/index';
-import {getPrivacyPreference, updateSelectedTheme} from '@/config/preferences';
+import {
+	getPreferencesVersion,
+	getPrivacyPreference,
+	subscribeToPreferences,
+	updateSelectedTheme,
+} from '@/config/preferences';
 import {getThemeColors} from '@/config/themes';
 import {PrivacyContext} from '@/context/privacy-context';
 import {useChatHandler} from '@/hooks/chat-handler';
+import {loadBannerModules} from '@/hooks/use-banner-modules';
 import {useAppHandlers} from '@/hooks/useAppHandlers';
 import {useAppInitialization} from '@/hooks/useAppInitialization';
 import {useAppState} from '@/hooks/useAppState';
@@ -53,6 +59,7 @@ import {createPinoLogger} from '@/utils/logging/pino-logger';
 import {setGlobalMessageQueue} from '@/utils/message-queue';
 import {setNotificationsConfig} from '@/utils/notifications';
 import {getShutdownManager} from '@/utils/shutdown';
+import {takeLegacyVscodeDeprecationNotice} from '@/vscode/deprecation';
 import {isExtensionInstalled} from '@/vscode/extension-installer';
 
 // Rows the interactive frame keeps for itself in fullscreen: the root box's
@@ -91,6 +98,15 @@ export default function App({
 
 	// Use extracted hooks
 	const appState = useAppState(initialDevelopmentMode);
+	const preferencesVersion = React.useSyncExternalStore(
+		subscribeToPreferences,
+		getPreferencesVersion,
+	);
+
+	const privacyEnabled = React.useMemo(() => {
+		void preferencesVersion;
+		return getPrivacyPreference();
+	}, [preferencesVersion]);
 	const userMessageQueue = useUserMessageQueue();
 	const {exit} = useApp();
 	const {isTrusted, handleConfirmTrust, isTrustLoading, isTrustedError} =
@@ -347,7 +363,7 @@ export default function App({
 		tune: appState.tune,
 		subagentsReady: appState.subagentsReady,
 		privacySessionMapRef: appState.privacySessionMapRef,
-		privacyEnabled: getPrivacyPreference(),
+		privacyEnabled,
 		ensureCurrentSessionId: appState.ensureCurrentSessionId,
 	});
 
@@ -479,7 +495,11 @@ export default function App({
 				})();
 			}
 		},
-		[appState],
+		[
+			appState.setActiveMode,
+			appState.setIsVscodeEnabled,
+			appState.addToChatQueue,
+		],
 	);
 
 	// Show confirmation once VS Code server is ready with its port
@@ -503,7 +523,27 @@ export default function App({
 				/>,
 			);
 		}
-	}, [vscodeServer.actualPort, appState]);
+	}, [
+		vscodeServer.actualPort,
+		appState.isVscodeEnabled,
+		appState.addToChatQueue,
+	]);
+
+	// The WebSocket companion is deprecated in favour of the ACP-based
+	// extension. Warn the first time it is enabled, by the flag or by /ide.
+	React.useEffect(() => {
+		if (!effectiveVscodeEnabled) return;
+		const notice = takeLegacyVscodeDeprecationNotice();
+		if (!notice) return;
+		logger.warn(notice);
+		appState.addToChatQueue(
+			<WarningMessage
+				key={generateKey('vscode-companion-deprecated')}
+				message={notice}
+				hideBox={true}
+			/>,
+		);
+	}, [effectiveVscodeEnabled, appState.addToChatQueue, logger]);
 
 	// Setup session autosave
 	const {isSaving, renameSession} = useSessionAutosave({
@@ -567,8 +607,6 @@ export default function App({
 		setShowAllSessions: appState.setShowAllSessions,
 		setCurrentSessionId: appState.setCurrentSessionId,
 		setSessionName: handleRenameSession,
-		setCurrentProvider: appState.setCurrentProvider,
-		setCurrentModel: appState.setCurrentModel,
 		setLiveTaskList: appState.setLiveTaskList,
 		setPlanReviewState: appState.setPlanReviewState,
 		setArchitectReviewState: appState.setArchitectReviewState,
@@ -591,12 +629,14 @@ export default function App({
 	});
 
 	// Apply a session resolved by cli.tsx from --continue/--resume <id> (or open
-	// the picker for a bare --resume), once on mount. Reuses the exact same
-	// applySession path as the in-app /resume command so messages, provider,
-	// model, sessionId, key-generator reseed, and scrollback replay all stay
-	// in sync. Guarded by a ref (not an empty dep array) so a re-render before
-	// the effect fires — e.g. from the vscode-prompt-dispatcher bind above —
-	// can't apply it twice.
+	// the picker for a bare --resume), once on mount. Reuses the same
+	// applySession path as the in-app /resume command so messages, sessionId,
+	// key-generator reseed, and scrollback replay all stay in sync. Provider
+	// and model come from init, which creates the client after this runs; the
+	// in-app /resume switches the client itself (resumeSession), which would
+	// race init here. Guarded by a ref (not an empty dep array) so a re-render
+	// before the effect fires — e.g. from the vscode-prompt-dispatcher bind
+	// above — can't apply it twice.
 	const startupSessionAppliedRef = React.useRef(false);
 	// biome-ignore lint/correctness/useExhaustiveDependencies: startup-only effect, guarded by the ref above
 	React.useEffect(() => {
@@ -641,6 +681,33 @@ export default function App({
 		developmentMode: initialDevelopmentMode,
 	});
 
+	// Prepare the banner before committing it to Ink's <Static>.
+	// Static items cannot repaint after their first render.
+	const shouldShowWelcome = showWelcome && !nonInteractiveMode;
+	const [welcomeModulesSettled, setWelcomeModulesSettled] =
+		React.useState(false);
+	const welcomeModulesPending = shouldShowWelcome && !welcomeModulesSettled;
+
+	React.useEffect(() => {
+		if (!shouldShowWelcome) return;
+
+		let active = true;
+
+		void loadBannerModules().then(
+			() => {
+				if (active) setWelcomeModulesSettled(true);
+			},
+			() => {
+				// On failure, allow the plain-text fallback to render.
+				if (active) setWelcomeModulesSettled(true);
+			},
+		);
+
+		return () => {
+			active = false;
+		};
+	}, [shouldShowWelcome]);
+
 	// Memoize static components. We pin the run-mode header to the
 	// initial development mode so it never changes during the run — the
 	// boot line represents what the agent *started* under, not a live
@@ -669,8 +736,12 @@ export default function App({
 	}
 	const {startChat} = appState;
 	const staticComponents = React.useMemo(() => {
+		if (welcomeModulesPending) {
+			return [];
+		}
+
 		return createStaticComponents({
-			shouldShowWelcome: showWelcome && !nonInteractiveMode,
+			shouldShowWelcome,
 			currentProvider: startChat ? (bootIdentity.current?.provider ?? '') : '',
 			currentModel: startChat ? (bootIdentity.current?.model ?? '') : '',
 			nonInteractiveMode,
@@ -678,7 +749,8 @@ export default function App({
 			availableRows: welcomeRows,
 		});
 	}, [
-		showWelcome,
+		shouldShowWelcome,
+		welcomeModulesPending,
 		nonInteractiveMode,
 		initialDevelopmentMode,
 		welcomeRows,
@@ -823,7 +895,7 @@ export default function App({
 			<TitleShapeContext.Provider value={titleShapeContextValue}>
 				<PrivacyContext.Provider
 					value={{
-						privacyEnabled: getPrivacyPreference(),
+						privacyEnabled,
 						privacySessionMapRef: appState.privacySessionMapRef,
 					}}
 				>
@@ -843,6 +915,8 @@ export default function App({
 							appHandlers={appHandlers}
 							vscodeServer={vscodeServer}
 							staticComponents={staticComponents}
+							welcomeModulesPending={welcomeModulesPending}
+							hasConversationMessages={appState.messages.length > 0}
 							clearKey={conversationId}
 							liveComponent={liveComponent}
 							pendingSubagentApproval={pendingSubagentApproval}

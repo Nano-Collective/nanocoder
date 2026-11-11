@@ -5,7 +5,8 @@ import test from 'ava';
 import {runAcpConversation} from '@/acp/acp-conversation';
 import {AcpSession} from '@/acp/acp-session';
 import {clearAppConfig, reloadAppConfig} from '@/config/index';
-import {describeProjectTrust} from '@/config/project-trust';
+import {resetPreferencesCache} from '@/config/preferences';
+import {describeProjectTrust} from '@/config/trust/project-trust';
 import {
 	appendPostToolUseOutput,
 	runLifecycleHooks,
@@ -92,6 +93,7 @@ test.after.always(() => {
 });
 
 test.beforeEach(() => {
+	resetPreferencesCache();
 	resetPluginsForTests();
 });
 
@@ -298,6 +300,7 @@ test.serial(
 			JSON.stringify({trustedDirectories: [trustedRecord(root)]}),
 			'utf-8',
 		);
+		resetPreferencesCache();
 		resetPluginsForTests();
 
 		await loadTrustedProjectPlugins();

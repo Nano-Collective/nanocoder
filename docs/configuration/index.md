@@ -20,7 +20,7 @@ To enable autocompletion and inline validation, add the `$schema` key at the top
 }
 ```
 
-The schema only describes keys the loader actually reads from `agents.config.json`. Settings read from `nanocoder-preferences.json` (`notifications`, `sessions`, `paste`) are deliberately not advertised on this schema, and neither are MCP servers, which live in `.mcp.json` (see [MCP Configuration](mcp-configuration.md)).
+The schema only describes keys the loader actually reads from `agents.config.json`. Settings read from `nanocoder-preferences.json` (`notifications`, `sessions`, `paste`, `ui` such as `maxFps`, `ciWatch` and `voice`) are deliberately not advertised on this schema, and neither are MCP servers, which live in `.mcp.json` (see [MCP Configuration](mcp-configuration.md)).
 
 You can also wire it up without the `$schema` key:
 
@@ -96,7 +96,14 @@ variable is the point of the output and the reference is not itself a secret.
 
 ## Environment Variables
 
-Keep API keys out of version control using environment variables. Variables are loaded from shell environment (`.bashrc`, `.zshrc`) or `.env` file in your working directory. Shell variables win over `.env` values. A project `.env` cannot set `NANOCODER_TRUST_DIRECTORY`, `NANOCODER_CONFIG_DIR`, `XDG_CONFIG_HOME`, `APPDATA`, `NANOCODER_MCPSERVERS`, `NANOCODER_MCPSERVERS_FILE`, or `NANOCODER_CI_TRUST_LEVEL`, since it is loaded before the directory trust check; set those in your shell instead.
+Keep API keys out of version control using environment variables. Variables are loaded from shell environment (`.bashrc`, `.zshrc`) or `.env` file in your working directory. Shell variables win over `.env` values. A project `.env` is loaded before the directory trust check, so it cannot set variables that would act before you trust the folder; set those in your shell instead. It cannot set:
+
+- any `NANOCODER_*` variable except `NANOCODER_LOG_LEVEL`, `NANOCODER_CONTEXT_LIMIT`, `NANOCODER_MAX_TURNS` and `NANOCODER_NO_UPDATE_CHECK`
+- variables that make child processes run code at start-up (`NODE_OPTIONS`, `NODE_PATH`, `BASH_ENV`, `ENV`, `ZDOTDIR`, `PROMPT_COMMAND`, `SHELLOPTS`, `BASHOPTS`, `PS4`, `IFS`, `PYTHONPATH`, `PYTHONSTARTUP`, `PERL5OPT`, `PERL5LIB`, `RUBYOPT`, `RUBYLIB`, and anything starting `LD_`, `DYLD_`, `GIT_`, `npm_config_` or `pnpm_config_`)
+- `PATH`, `SHELL`, `EDITOR`, `VISUAL`, `PAGER`, `HOME`, `APPDATA`, `LOCALAPPDATA`, `USERPROFILE` and the `XDG_*` directories
+- TLS and proxy settings (`NODE_TLS_REJECT_UNAUTHORIZED`, `NODE_EXTRA_CA_CERTS`, `SSL_CERT_FILE`, `SSL_CERT_DIR`, `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, `NO_PROXY`)
+
+Names are matched case-insensitively. A key that is skipped is reported in a warning at startup.
 
 ### General
 
@@ -109,7 +116,7 @@ Keep API keys out of version control using environment variables. Variables are 
 | `NANOCODER_NO_UPDATE_CHECK` | Set to `1` to disable automatic update checks at startup. Running `/update` still performs an explicit check |
 | `NANOCODER_DEFAULT_SHUTDOWN_TIMEOUT` | Graceful shutdown timeout in milliseconds (default: 5000) |
 | `NANOCODER_MAX_TURNS` | Maximum LLM turns for headless runs (`--plain` and ACP). Overrides `nanocoder.headless.maxTurns`; default 200. See [Headless](#headless) |
-| `NANOCODER_TRUST_DIRECTORY` | Set to `1` to trust the working directory for a `--plain` run or `nanocoder daemon start`, and save it to `trustedDirectories` for later runs. See [Getting Started](../getting-started/index.md) |
+| `NANOCODER_TRUST_DIRECTORY` | Set to `1` to trust the working directory and save it to `trustedDirectories` for later runs. Honoured by the interactive TUI, `run` (Ink and `--plain`), `nanocoder daemon start`, `nanocoder verify` and `--acp`. Must come from your shell: a project `.env` cannot set it. See [Directory trust](../getting-started/index.md#directory-trust) |
 | `NANOCODER_SKILLS_INDEX` | URL or local path of the skills index used by `nanocoder skills add` (same as `--index`). See [Skills](../features/skills.md) |
 | `NANOCODER_DOCTOR_PROBE` | Set to `0` to stop `/doctor` from probing local provider ports |
 
@@ -288,13 +295,17 @@ File tools already refuse paths outside the project. `execute_bash` and `!comman
 
 When on:
 
-- **macOS** — `sandbox-exec` (deprecated by Apple, still present): no network; writes allowed in the project root, a per-command temp dir (`TMPDIR`), the Darwin user temp dir (bare `mktemp` ignores `TMPDIR`), and `/tmp` / `/private/tmp`. Reads are not restricted (`allow default`), so `cat ~/.ssh/id_rsa` still works and stdout still reaches the model.
-- **Linux** — `bwrap` from `PATH` (bubblewrap): no network; `--ro-bind / /` plus a writable bind of the project and a per-command temp dir, plus `--tmpfs /tmp`. Same read caveat as macOS. If `bwrap` is missing, or present but cannot create a user namespace (`--unshare-net`), the tool returns an error and does **not** fall through to unsandboxed bash.
+- **macOS** — `sandbox-exec` (deprecated by Apple, still present): no network; writes allowed in the project root, a per-command temp dir (`TMPDIR`), the Darwin user temp dir (bare `mktemp` ignores `TMPDIR`), and `/tmp` / `/private/tmp`. Apple Events and LaunchServices are denied, so `open` and `osascript` cannot start apps outside the jail. Reads are not restricted (`allow default`), so `cat ~/.ssh/id_rsa` still works and stdout still reaches the model. Other system services reachable over Mach IPC are not filtered.
+- **Linux** — `bwrap` from `PATH` (bubblewrap): no network; `--ro-bind / /` plus a writable bind of the project and a per-command temp dir, plus `--tmpfs /tmp`. The per-user runtime dir (`/run/user/<uid>`: session D-Bus, systemd user manager, rootless Docker/Podman) is hidden, and the Docker, Podman and system D-Bus sockets under `/run` are masked. Same read caveat as macOS. If `bwrap` is missing, or present but cannot create a user namespace (`--unshare-net`), the tool returns an error and does **not** fall through to unsandboxed bash.
 - **Windows** — not supported in this version. The tool returns an error if the flag is on.
 
-This is not a secrets boundary. Network is blocked, writes outside the project and the jail temp dir are blocked, but the command can still read the rest of the filesystem and print it into the conversation.
+Inside the project, `.git`, `.nanocoder/`, `agents.config.json` and `.mcp.json` stay read-only, and can't be created if missing. Git runs hooks and config-named programs (such as `core.fsmonitor`) from `.git`, and nanocoder loads plugins, tools, lifecycle hooks and MCP server commands from the others, all outside the jail. So `git add`, `git commit`, `git checkout` and similar fail inside sandboxed `execute_bash`; use the git tools, which run outside it and ask for approval. On Linux a missing entry is covered by an empty placeholder that bwrap creates in the project and nanocoder removes once the command, and anything it left running in the background, has exited.
+
+This is not a full confinement or a secrets boundary. Network is blocked and writes outside the project and the jail temp dir are blocked, but the command can still read the rest of the filesystem and print it into the conversation, and it can still reach any host service that listens on a socket or IPC endpoint not listed above. A program that detaches into a new session (`setsid`) and outlives its command can create the protected entries on Linux once the placeholders are removed.
 
 Timeouts and cancel are unchanged. This does not sandbox custom tools or MCP.
+
+Commands also get a trimmed environment. With or without the sandbox, `execute_bash` and `!command` never see nanocoder's own credentials: any variable whose value is a configured provider `apiKey` or `nanocoderTools.webSearch.apiKey` (so the variable an `apiKey: "$VAR"` reference reads from), and `NANOCODER_PROVIDERS`. Keys shorter than 16 characters, such as `"ollama"`, are treated as placeholders and left alone. With the sandbox on, the well-known provider variables (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `OPENROUTER_API_KEY` and similar) are removed as well. Anything else, such as `GH_TOKEN` for `gh`, is passed through. If a project script needs the same key nanocoder uses, export it under another name in the command.
 
 ### Auto-commit
 
@@ -335,7 +346,7 @@ Caps on how many times the conversation loop auto-retries a failing pattern with
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `maxRepeatedToolCalls` | number | `3` | Pause threshold for consecutive identical tool calls (minimum 2). The check fires when the same call (or set of calls) is emitted for the Nth consecutive turn, before that call runs - so the default of 3 executes the repeated call twice and pauses on the third emission. In an interactive session you are asked whether to continue - useful when the repetition is legitimate, such as polling a long-running job - or stop. `--plain` and other non-interactive runs stop with a clear error. Calls to unknown tools count toward the streak too, so a model stuck on a nonexistent tool hits the same cap. |
+| `maxRepeatedToolCalls` | number | `3` | Pause threshold for consecutive identical tool calls (minimum 2). The check fires when the same call (or set of calls) is emitted for the Nth consecutive turn, before that call runs - so the default of 3 executes the repeated call twice and pauses on the third emission. In an interactive session you are asked whether to continue - useful when the repetition is legitimate, such as polling a long-running job - or stop. `--plain` and other non-interactive runs stop with a clear error. Calls to unknown tools, and calls whose arguments aren't valid JSON (for example cut off at the output-token limit), count toward the streak too, so a model stuck on a bad call hits the same cap. Such calls aren't run. |
 | `maxEmptyTurns` | number | `2` | Consecutive empty assistant turns that are auto-nudged before giving up (minimum 0). The interactive loop additionally compacts the context and retries once before stopping; the `--plain` runtime stops directly after the nudges. |
 | `maxMalformedRetries` | number | `2` | Malformed self-correction retries allowed for text-parsed tool calls before the loop gives up (minimum 0). Applies to the XML fallback path in both runtimes. The interactive loop also parses tool-call text from native-tool models that emit it instead of native calls, so the cap covers that case there; the `--plain` runtime only parses text on the XML fallback path. |
 | `maxTruncatedTurns` | number | `2` | Consecutive turns cut off at the provider's output-token limit that are asked to continue before the loop accepts what it has (minimum 0). `--plain` runtime only. A truncated turn carries no tool calls, so without this the loop reads the fragment as a finished answer - see the note below. |
@@ -387,7 +398,7 @@ Set the initial development mode for all new interactive sessions. Without this 
 | Value | Description |
 |-------|-------------|
 | `"normal"` | Standard mode - tools that change things prompt for approval; read-only tools run directly |
-| `"auto-accept"` | Semi-automatic - read-only and safe tools auto-run; bash, file deletes and overwrites, and tools marked as always needing approval still prompt |
+| `"auto-accept"` | Semi-automatic - read-only and safe tools auto-run; bash, file deletes and overwrites, MCP tools the server does not mark read-only (unless in its `alwaysAllow`), and tools marked as always needing approval still prompt |
 | `"yolo"` | Fully automatic — no confirmations at all |
 | `"plan"` | Read-only exploration mode — only read/search/list tools available |
 | `"architect"` | Plan-then-build mode. See [Development Modes](../features/development-modes.md) |
@@ -441,7 +452,7 @@ Turn off individual tools globally with the top-level `disabledTools` array. Lis
 
 Names match the registered tool ids (`read_file`, `write_file`, `string_replace`, `execute_bash`, `web_search`, `fetch_url`, `agent`, etc.). [MCP](mcp-configuration.md) tools follow the same naming as in their server config.
 
-`fetch_url` always refuses internal addresses, in every mode (including yolo and `alwaysAllow`): loopback, private ranges (RFC 1918, CGNAT, link-local and their IPv6 equivalents), `localhost` and `*.localhost`, and cloud metadata hosts such as `169.254.169.254` and `metadata.google.internal`. Every redirect hop is checked the same way.
+`fetch_url` always refuses internal addresses, in every mode (including yolo and `alwaysAllow`): loopback, private ranges (RFC 1918, CGNAT, link-local and their IPv6 equivalents), reserved, multicast and broadcast IPv4 ranges, IPv6 addresses that embed any of these (IPv4-mapped, IPv4-compatible, IPv4-translated, NAT64 and 6to4), `localhost` and `*.localhost`, and cloud metadata hosts such as `169.254.169.254` and `metadata.google.internal`. Every redirect hop is checked the same way.
 
 An [ACP](../features/acp.md) client can add to this list for a single session, without touching your config. Resolution: project-level `agents.config.json` wins over the global config. The list is layered on top of `/tune` profiles and mode exclusions — if `nano` profile would otherwise expose `read_file`, listing it in `disabledTools` removes it. Subagents respect the global list even if their own `tools` allow-list includes the disabled name.
 
@@ -492,6 +503,27 @@ Each entry takes `match` (required; globs relative to the project root, same dia
 Formatters run after a successful `write_file`, `string_replace` or `diff_edit` (in the main agent and in subagents), in config order, and before any `post-tool-use` hooks, so a hook that commits or lints sees the formatted file. Built-in auto-commit runs after both formatters and hooks. If a formatter changes the file, the tool result tells the model to re-read it before its next edit. A formatter that fails or times out is logged without failing the write; any partial changes it made remain on disk and are reported to the model. Files outside the project root are never formatted.
 
 Formatters are project-local shell commands, so like hooks they are gated by the directory-trust prompt. Like other `nanocoder.*` blocks, a project `formatters` list replaces the global one rather than merging with it.
+
+### LSP Servers
+
+Nanocoder auto-discovers common language servers installed on your machine and uses them for diagnostics and formatting. Use `nanocoder.lspServers` to add a server it does not find, or to choose which one handles a language:
+
+```json
+{
+  "nanocoder": {
+    "lspServers": [
+      {
+        "name": "typescript",
+        "command": "typescript-language-server",
+        "args": ["--stdio"],
+        "languages": ["ts", "tsx", "js", "jsx"]
+      }
+    ]
+  }
+}
+```
+
+Each entry needs `name`, `command` and `languages` (file extensions without the leading dot), plus optional `args` and `env`. Entries missing a required field are skipped. Configured servers take priority: auto-discovered servers are only started for languages no configured server covers. Like other `nanocoder.*` blocks, a project `lspServers` list replaces the global one. Project LSP servers are commands that run on your machine, so they are part of the directory trust fingerprint (see [Preferences](preferences.md)).
 
 ### Custom System Prompt
 
@@ -566,6 +598,40 @@ Brave's free tier includes 2,000 queries per month. [Get an API key here](https:
 ```
 
 The `apiKey` field supports environment variable substitution (`$VAR`, `${VAR}`, `${VAR:-default}`), so you can keep the actual key in your environment rather than in the config file.
+
+### Mutation Firewall
+
+The negative-space mutation firewall mechanically validates proposed file modifications before disk writes occur (`write_file`, `string_replace`, `diff_edit`, and the `delete`, `move` and `copy` operations of `file_op`). It prevents accidental destruction of tests, unintended stripping of exported API contracts, and injection of loose `any` types.
+
+The firewall is opt-in and disabled by default (`mode: "disabled"`).
+
+```json
+{
+  "nanocoder": {
+    "firewall": {
+      "enabled": true,
+      "mode": "strict",
+      "protectedPatterns": ["package.json", "pnpm-lock.yaml", ".github/workflows/**"],
+      "blockAnyTypes": true,
+      "protectTestCases": true,
+      "preserveExportSignatures": true
+    }
+  }
+}
+```
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `enabled` | boolean | `false` | Whether the firewall is active. |
+| `mode` | `"disabled"` \| `"lenient"` \| `"strict"` | `"disabled"` | In `strict` mode, a violating mutation is refused and the tool returns the violations as its error. In `lenient` mode the change is applied, the violations are appended to the tool result so the model sees them, and a warning is shown in the chat. |
+| `protectedPatterns` | string[] | `[]` | Gitignore-style glob patterns for paths forbidden from modification by tools. Patterns are matched relative to the project root, like a root `.gitignore`; a relative tool path is resolved against the session's working directory first, so the rules hold after a `cd` in bash. |
+| `blockAnyTypes` | boolean | `true` | Prohibits introducing explicit `any` type annotations into previously typed code. |
+| `protectTestCases` | boolean | `true` | Prevents deletion of existing unit test cases in test files. |
+| `preserveExportSignatures` | boolean | `true` | Prevents breaking or removing exported functions, interfaces, types, and classes. |
+
+Use `/firewall` in chat to inspect or modify session overrides at runtime.
+
+> **Operational boundaries:** The content rules (`blockAnyTypes`, `protectTestCases`, `preserveExportSignatures`) apply to `write_file`, `string_replace` and `diff_edit`. `file_op` carries no new content, so only `protectedPatterns` applies to it: a `delete` or `move` of a protected file, and a `move` or `copy` onto one, count as modifying it; copying a protected file somewhere else does not. Document formatting via `lsp_format_document`, configured `formatters`, and `execute_bash` bypass the mutation firewall.
 
 ## Ignoring Files
 

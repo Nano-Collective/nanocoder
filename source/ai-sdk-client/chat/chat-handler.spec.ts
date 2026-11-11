@@ -1,15 +1,22 @@
 import test from 'ava';
 import {createAnthropic} from '@ai-sdk/anthropic';
 import {createOpenAI} from '@ai-sdk/openai';
-import {jsonSchema, NoSuchToolError, streamText, tool} from 'ai';
+import {
+	InvalidToolInputError,
+	jsonSchema,
+	NoSuchToolError,
+	streamText,
+	tool,
+} from 'ai';
 import type {
 	AIProviderConfig,
 	AISDKCoreTool,
 	Message,
+	ModeOverrides,
 	StreamCallbacks,
 } from '@/types/index';
 import type {LanguageModel} from 'ai';
-import {handleChat, stopOnUnknownTool} from './chat-handler.js';
+import {handleChat, stopOnInvalidToolCall} from './chat-handler.js';
 import type {ChatHandlerParams} from './chat-handler.js';
 import {PrefixTracker} from './prefix-tracker.js';
 import {rehydrateResponse} from './privacy.js';
@@ -1088,9 +1095,9 @@ test('the v4 spelling maxTokens does not reach the provider', async t => {
 	);
 });
 
-// A stuck model calling a nonexistent tool must reach the conversation loop's
-// repeated-call cap, not loop inside one SDK call.
-test('stopOnUnknownTool stops on a call to a tool that does not exist', t => {
+// A stuck model sending an invalid call must reach the conversation loop's
+// retry limits, not loop inside one SDK call.
+test('stopOnInvalidToolCall stops on a call to a tool that does not exist', t => {
 	const unknown = {
 		type: 'tool-call',
 		toolCallId: 'c1',
@@ -1108,18 +1115,36 @@ test('stopOnUnknownTool stops on a call to a tool that does not exist', t => {
 	};
 	const steps = (toolCalls: unknown[]) =>
 		({steps: [{toolCalls}]}) as unknown as Parameters<
-			typeof stopOnUnknownTool
+			typeof stopOnInvalidToolCall
 		>[0];
 
-	t.true(stopOnUnknownTool(steps([unknown])) as boolean);
-	t.false(stopOnUnknownTool(steps([valid])) as boolean);
-	// An unparsable call to a real tool is not this condition's concern.
-	t.false(
-		stopOnUnknownTool(
-			steps([{...unknown, toolName: 'read_file', error: new Error('bad json')}]),
-		) as boolean,
-	);
-	t.false(stopOnUnknownTool({steps: []} as never) as boolean);
+	t.true(stopOnInvalidToolCall(steps([unknown])) as boolean);
+	t.false(stopOnInvalidToolCall(steps([valid])) as boolean);
+	t.true(stopOnInvalidToolCall(steps([valid, unknown])) as boolean);
+	t.false(stopOnInvalidToolCall({steps: []} as never) as boolean);
+});
+
+test('stopOnInvalidToolCall stops on an unparsable call to a real tool', t => {
+	// The shape the SDK gives a call to a real tool whose arguments do not
+	// parse: the raw text as `input` and an InvalidToolInputError.
+	const unparsable = {
+		type: 'tool-call',
+		toolCallId: 'c1',
+		toolName: 'read_file',
+		input: '{"path": "hello.txt"',
+		dynamic: true,
+		invalid: true,
+		error: new InvalidToolInputError({
+			toolName: 'read_file',
+			toolInput: '{"path": "hello.txt"',
+			cause: new SyntaxError('bad json'),
+		}),
+	};
+	const steps = {steps: [{toolCalls: [unparsable]}]} as unknown as Parameters<
+		typeof stopOnInvalidToolCall
+	>[0];
+
+	t.true(stopOnInvalidToolCall(steps) as boolean);
 });
 
 test('openai-compatible: a tool screenshot reaches the request body as an image_url part', async t => {
@@ -1284,4 +1309,243 @@ test.serial('an unrelated server error is not retried without images', async t =
 	);
 	await t.throwsAsync(run());
 	t.is(bodies.length, 1);
+});
+
+// --- Invalid tool calls end the step ---
+//
+// A model that always answers with the same tool call, as a stuck model does.
+// Every request is counted: before the fix, an unparsable call to a real tool
+// made the SDK answer it with an automatic error and run another step, up to
+// MAX_TOOL_STEPS requests inside one chat() call, none of them visible to the
+// conversation loop's steps, usage or retry limits.
+
+const sseToolCall = (
+	name: string,
+	args: string,
+	finishReason: 'tool_calls' | 'length',
+) =>
+	new Response(
+		[
+			`data: ${JSON.stringify({id: '1', choices: [{index: 0, delta: {role: 'assistant', tool_calls: [{index: 0, id: 'call_1', type: 'function', function: {name, arguments: args}}]}}]})}`,
+			`data: ${JSON.stringify({id: '1', choices: [{index: 0, delta: {}, finish_reason: finishReason}], usage: {prompt_tokens: 10, completion_tokens: 5, total_tokens: 15}})}`,
+			'data: [DONE]',
+			'',
+		].join('\n\n'),
+		{status: 200, headers: {'content-type': 'text/event-stream'}},
+	);
+
+async function chatWithRepeatedToolCall(
+	name: string,
+	args: string,
+	finishReason: 'tool_calls' | 'length' = 'tool_calls',
+) {
+	const {createOpenAICompatible} = await import('@ai-sdk/openai-compatible');
+	let requests = 0;
+	const model = createOpenAICompatible({
+		name: 'scripted',
+		baseURL: 'http://localhost:8080/v1',
+		fetch: async () => {
+			requests++;
+			return sseToolCall(name, args, finishReason);
+		},
+	})('scripted-model');
+	const response = await handleChat({
+		model,
+		currentModel: 'scripted-model',
+		providerConfig: {
+			name: 'scripted',
+			type: 'openai',
+			models: ['scripted-model'],
+			config: {baseURL: 'http://localhost:8080/v1'},
+		},
+		messages: [{role: 'user', content: 'read hello.txt'}],
+		tools: {
+			read_file: tool({
+				description: 'read a file',
+				inputSchema: jsonSchema({
+					type: 'object',
+					properties: {path: {type: 'string'}},
+				}),
+			}),
+			write_file: tool({
+				description: 'write a file',
+				inputSchema: jsonSchema({
+					type: 'object',
+					properties: {path: {type: 'string'}, content: {type: 'string'}},
+				}),
+			}),
+		},
+		callbacks: {},
+		maxRetries: 0,
+	});
+	return {requests, response};
+}
+
+test.serial('an unparsable call to a real tool comes back after one request', async t => {
+	const {requests, response} = await chatWithRepeatedToolCall(
+		'read_file',
+		'{"path": "hello.txt"',
+	);
+
+	t.is(requests, 1);
+	// The usage is that one request's, so nothing the provider served is
+	// missing from it.
+	t.is(response.usage?.totalTokens, 15);
+	const [call] = response.choices[0]?.message.tool_calls ?? [];
+	t.is(call?.function.name, 'read_file');
+	// The raw text is not passed on as the arguments: it would be executed as
+	// the arguments and replayed to the provider double-encoded.
+	t.deepEqual(call?.function.arguments, {});
+	t.regex(call?.argumentsError ?? '', /^not valid JSON: /);
+});
+
+test.serial('a call cut off at the output-token limit comes back after one request', async t => {
+	const {requests, response} = await chatWithRepeatedToolCall(
+		'write_file',
+		'{"path": "notes.md", "content": "# Notes\\n\\nThe first line of a long fi',
+		'length',
+	);
+
+	t.is(requests, 1);
+	t.is(response.finishReason, 'length');
+	const [call] = response.choices[0]?.message.tool_calls ?? [];
+	t.deepEqual(call?.function.arguments, {});
+	t.regex(call?.argumentsError ?? '', /^not valid JSON: /);
+});
+
+test.serial('a valid call still comes back after one request with its arguments', async t => {
+	const {requests, response} = await chatWithRepeatedToolCall(
+		'read_file',
+		'{"path": "hello.txt"}',
+	);
+
+	t.is(requests, 1);
+	const [call] = response.choices[0]?.message.tool_calls ?? [];
+	t.deepEqual(call?.function.arguments, {path: 'hello.txt'});
+	t.is(call?.argumentsError, undefined);
+});
+
+// --- Models that reject native tools ---
+
+const badRequest = (message: string) =>
+	new Response(JSON.stringify({error: {message}}), {
+		status: 400,
+		headers: {'content-type': 'application/json'},
+	});
+
+async function chatWithToolRejectingServer(
+	modelId: string,
+	respond: (body: Record<string, unknown>) => Response,
+) {
+	const {createOpenAICompatible} = await import('@ai-sdk/openai-compatible');
+	const bodies: Record<string, unknown>[] = [];
+	const model = createOpenAICompatible({
+		name: 'ollama',
+		baseURL: 'http://localhost:11434/v1',
+		fetch: async (_input, init) => {
+			const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+			bodies.push(body);
+			return respond(body);
+		},
+	})(modelId);
+	const run = (modeOverrides?: ModeOverrides) =>
+		handleChat({
+			model,
+			currentModel: modelId,
+			modeOverrides,
+			providerConfig: {
+				name: 'ollama',
+				type: 'openai',
+				models: [modelId],
+				config: {baseURL: 'http://localhost:11434/v1'},
+			},
+			messages: [
+				{role: 'system', content: 'You are a coding agent.'},
+				{role: 'user', content: 'read hello.txt'},
+			],
+			tools: {
+				read_file: tool({
+					description: 'read a file',
+					inputSchema: jsonSchema({
+						type: 'object',
+						properties: {path: {type: 'string'}},
+					}),
+				}),
+			},
+			callbacks: {},
+			maxRetries: 0,
+		});
+	const systemPrompt = (body: Record<string, unknown> | undefined) => {
+		const messages = (body?.messages ?? []) as Array<{
+			role: string;
+			content: string;
+		}>;
+		return messages.find(m => m.role === 'system')?.content ?? '';
+	};
+	return {bodies, run, systemPrompt};
+}
+
+test.serial('a model that rejects native tools is retried with XML tool definitions and remembered', async t => {
+	const {bodies, run, systemPrompt} = await chatWithToolRejectingServer(
+		'local-model-without-tools',
+		body =>
+			body.tools
+				? badRequest('registry.ollama.ai/library/local-model does not support tools')
+				: sseReply('<read_file><path>hello.txt</path></read_file>'),
+	);
+
+	const first = await run();
+	t.true(first.toolsDisabled);
+	t.is(bodies.length, 2);
+	t.truthy(bodies[0]?.tools);
+	t.falsy(bodies[1]?.tools);
+	// The retry says how to call tools in text, and which tools exist.
+	t.false(systemPrompt(bodies[0]).includes('## AVAILABLE TOOLS'));
+	t.true(systemPrompt(bodies[1]).includes('## AVAILABLE TOOLS'));
+	t.true(systemPrompt(bodies[1]).includes('read_file'));
+
+	// The next turn goes straight to the fallback instead of failing again.
+	const second = await run();
+	t.true(second.toolsDisabled);
+	t.is(bodies.length, 3);
+	t.falsy(bodies[2]?.tools);
+	t.true(systemPrompt(bodies[2]).includes('## AVAILABLE TOOLS'));
+});
+
+test.serial("tune's XML/JSON tool mode keeps native tools off the request", async t => {
+	// The caller already appended the tool definitions to the system prompt
+	// for tune's text tool mode. Sending native tools alongside them gives the
+	// model two contradictory ways to call tools.
+	const {bodies, run, systemPrompt} = await chatWithToolRejectingServer(
+		'model-on-tune-xml-mode',
+		() => sseReply('<read_file><path>hello.txt</path></read_file>'),
+	);
+
+	const result = await run({
+		nonInteractiveMode: false,
+		nonInteractiveAlwaysAllow: [],
+		nativeToolsDisabled: true,
+	});
+	t.true(result.toolsDisabled, 'the loop parses tool calls from text');
+	t.is(bodies.length, 1);
+	t.falsy(bodies[0]?.tools);
+	t.false(
+		systemPrompt(bodies[0]).includes('## AVAILABLE TOOLS'),
+		'definitions are not appended a second time',
+	);
+});
+
+test.serial('a tool-pairing error in the history is surfaced, not retried without tools', async t => {
+	const {bodies, run} = await chatWithToolRejectingServer(
+		'model-with-broken-history',
+		() =>
+			badRequest(
+				"Invalid parameter: messages with role 'tool' must be a response to a preceeding message with 'tool_calls'.",
+			),
+	);
+
+	const error = await t.throwsAsync(run());
+	t.regex(error?.message ?? '', /must be a response to a preceeding message/);
+	t.is(bodies.length, 1);
+	t.truthy(bodies[0]?.tools);
 });

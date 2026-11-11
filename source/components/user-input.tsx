@@ -1,14 +1,19 @@
 import {Box, Text, useFocus, useInput} from 'ink';
 import Spinner from 'ink-spinner';
 import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
+import stringWidth from 'string-width';
 import {commandRegistry} from '@/commands';
-import {DevelopmentModeIndicator} from '@/components/development-mode-indicator';
-import {HelpRow} from '@/components/json-viewer/json-viewer';
+import {isComposerKey} from '@/components/composer/keymap';
+import {ShortcutsOverlay} from '@/components/composer/shortcuts-overlay';
+import {useShortcutsOverlay} from '@/components/composer/useShortcutsOverlay';
+import {
+	DevelopmentModeIndicator,
+	type VoiceIndicatorInfo,
+} from '@/components/development-mode-indicator';
 import TextInput, {
 	type TextInputHandle,
 	useRawInput,
 } from '@/components/text-input';
-import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {useInputState} from '@/hooks/useInputState';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
@@ -131,32 +136,11 @@ async function getMCPResourceCompletions(partialPath: string): Promise<
 		.filter(c => c.score > 0);
 }
 
-// Legend for the `?` overlay. Keep in sync with the bindings handled below,
-// in TextInput (readline keys) and in App (Ctrl+S, Ctrl+C, Ctrl+G).
-const KEYBOARD_SHORTCUTS: Array<[keybind: string, label: string]> = [
-	['Enter', 'Submit prompt'],
-	['Ctrl+J / Opt+Enter', 'New line'],
-	['↑ / ↓', 'Prompt history'],
-	['Tab', 'Accept suggestion / insert suggested command'],
-	['Ctrl+A / Ctrl+E', 'Move to start / end of line'],
-	['Ctrl+W', 'Delete previous word'],
-	['Ctrl+U / Ctrl+K', 'Delete to start / end of line'],
-	['Esc Esc', 'Clear input (one Esc dismisses a suggested command)'],
-	['Ctrl+V / Ctrl+X', 'Attach clipboard image / remove last image'],
-	['Shift+Tab', 'Cycle development mode'],
-	['Ctrl+O', 'Toggle compact tool output'],
-	['Ctrl+N', 'Toggle reasoning traces'],
-	['Ctrl+R', 'Reverse search prompt history'],
-	['Ctrl+T', 'Collapse / expand task list'],
-	['Ctrl+S', 'Attach / cycle running subagents'],
-	['Ctrl+G', 'Voice push-to-talk (when /voice is on)'],
-	['Esc', 'Cancel response'],
-	['Ctrl+C', 'Exit'],
-	['?', 'Toggle this overlay (in an empty prompt)'],
-];
-
 // Prompt box width floor: keeps narrow terminals legible.
 const PROMPT_WIDTH_MIN = 40;
+// Columns a queued-message row loses inside the prompt box: the rounded
+// border (2), paddingX (2), and the '▸ '/'  ' selection marker (2).
+const QUEUED_ROW_OVERHEAD = 6;
 
 export function findReverseMatch(
 	history: InputState[],
@@ -215,6 +199,7 @@ interface ChatProps {
 	onSubmittedDraft?: (draft: SubmittedInputDraft) => void;
 	restoreSubmittedDraft?: RestoredInputDraft | null;
 	isSaving?: boolean;
+	voice?: VoiceIndicatorInfo | null; // Voice mode state for the mode line
 	suggestedCommand?: string | null; // Follow-up command shown in the empty prompt; Tab inserts it, Esc dismisses it
 	onDismissSuggestion?: () => void;
 	/**
@@ -223,6 +208,12 @@ interface ChatProps {
 	 * one column less to fill.
 	 */
 	fullscreen?: boolean;
+	/**
+	 * Fires when the `?` shortcuts overlay opens or closes. The overlay sizes
+	 * itself as if it had the footer to itself and takes over PgUp/PgDn, so
+	 * the parent hides its other footer rows and pauses its own scrolling.
+	 */
+	onShortcutsOverlayChange?: (open: boolean) => void;
 }
 
 export default function UserInput({
@@ -253,9 +244,11 @@ export default function UserInput({
 	onSubmittedDraft,
 	restoreSubmittedDraft = null,
 	isSaving,
+	voice,
 	suggestedCommand = null,
 	onDismissSuggestion,
 	fullscreen = false,
+	onShortcutsOverlayChange,
 }: ChatProps) {
 	const {isFocused, focus} = useFocus({autoFocus: !disabled, id: 'user-input'});
 	const effectiveFocus = forceFocus || isFocused;
@@ -314,7 +307,6 @@ export default function UserInput({
 	const [selectedQueuedIndex, setSelectedQueuedIndex] = useState(-1);
 	// Pending image attachments sent with the next submitted message.
 	const [attachments, setAttachments] = useState<ImageAttachment[]>([]);
-	const [showShortcuts, setShowShortcuts] = useState(false);
 	const lastRestoredDraftIdRef = useRef<number | null>(null);
 
 	// Reverse prompt search state (Ctrl+R / bck-i-search)
@@ -346,13 +338,11 @@ export default function UserInput({
 
 	// Read through refs in key handlers: both our useInput and TextInput's see
 	// every keystroke, and either handler can still hold a render-old closure.
-	const showShortcutsRef = useRef(false);
 	const inputRef = useRef(input);
 	inputRef.current = input;
-	const setShortcutsOpen = (open: boolean) => {
-		showShortcutsRef.current = open;
-		setShowShortcuts(open);
-	};
+	const shortcuts = useShortcutsOverlay(onShortcutsOverlayChange);
+	const showShortcuts = shortcuts.isOpen;
+	const isShortcutsOpenNow = shortcuts.isOpenNow;
 
 	const {
 		showClearMessage,
@@ -898,11 +888,11 @@ export default function UserInput({
 		(value: string) => {
 			// Nothing reaches the prompt while the shortcuts overlay is open, and a
 			// lone `?` in an empty prompt is the overlay toggle (see useInput).
-			if (showShortcutsRef.current || value === '?') return;
+			if (isShortcutsOpenNow() || value === '?') return;
 			inputFromHistoryRef.current = false;
 			updateInput(value);
 		},
-		[updateInput],
+		[updateInput, isShortcutsOpenNow],
 	);
 
 	const handleQueueNavigation = useCallback(
@@ -986,21 +976,32 @@ export default function UserInput({
 	const rawInputRef = useRawInput();
 
 	useInput((inputChar, key) => {
+		// Ink's App resets the active focus id on every Escape, and TextInput only
+		// accepts keys while focused. Every Escape that leaves the composer on
+		// screen (dismissing a suggestion, closing the legend or a menu, arming
+		// the clear hint, or a no-op on an empty prompt) must reclaim focus, or
+		// typing goes dead until something else refocuses it. Queued after Ink's
+		// reset in the same batch, so this update wins.
+		if (key.escape && !disabled) {
+			focus('user-input');
+		}
+
 		// `?` in an empty prompt toggles the shortcuts overlay, which swallows
-		// every other key until `?` or Escape closes it.
+		// every other key until `?` or Escape closes it. ↑/↓ and PgUp/PgDn
+		// scroll the legend when it is taller than the terminal allows.
 		// Reverse search owns the keyboard: its query is empty at first, so
 		// without the guard typing `?` there would open the overlay instead.
 		if (
-			inputChar === '?' &&
+			isComposerKey('toggleShortcuts', inputChar, key) &&
 			!disabled &&
 			!isReverseSearchMode &&
-			(showShortcutsRef.current || inputRef.current === '')
+			(isShortcutsOpenNow() || inputRef.current === '')
 		) {
-			setShortcutsOpen(!showShortcutsRef.current);
+			shortcuts.setOpen(!isShortcutsOpenNow());
 			return;
 		}
-		if (showShortcutsRef.current) {
-			if (key.escape) setShortcutsOpen(false);
+		if (isShortcutsOpenNow()) {
+			shortcuts.handleKey(key);
 			return;
 		}
 
@@ -1013,20 +1014,26 @@ export default function UserInput({
 		}
 
 		// Handle shift+tab to toggle development mode (always available)
-		if (key.tab && key.shift && onToggleMode) {
+		if (isComposerKey('toggleMode', inputChar, key) && onToggleMode) {
 			onToggleMode();
 			return;
 		}
 
 		// Handle ctrl+o to toggle compact tool display (always available)
-		if (key.ctrl && inputChar === 'o' && onToggleCompactDisplay) {
+		if (
+			isComposerKey('toggleCompactDisplay', inputChar, key) &&
+			onToggleCompactDisplay
+		) {
 			onToggleCompactDisplay();
 			return;
 		}
 
 		// Handle ctrl+n to toggle expanded reasoning traces (always available;
 		// ctrl+g is voice push-to-talk and ctrl+r is reverse history search)
-		if (key.ctrl && inputChar === 'n' && onToggleReasoningExpanded) {
+		if (
+			isComposerKey('toggleReasoningExpanded', inputChar, key) &&
+			onToggleReasoningExpanded
+		) {
 			onToggleReasoningExpanded();
 			return;
 		}
@@ -1034,7 +1041,7 @@ export default function UserInput({
 		// Handle ctrl+t to collapse/expand the live task list (always available -
 		// this sits above the disabled guard so it still works while the agent
 		// is working, which is when the task list is on screen)
-		if (key.ctrl && inputChar === 't' && onToggleTaskList) {
+		if (isComposerKey('toggleTaskList', inputChar, key) && onToggleTaskList) {
 			onToggleTaskList();
 			return;
 		}
@@ -1081,7 +1088,7 @@ export default function UserInput({
 				return;
 			}
 
-			if (key.ctrl && inputChar === 'r') {
+			if (isComposerKey('reverseSearch', inputChar, key)) {
 				// Cycle to next older match with current query (stop at oldest)
 				const history = promptHistory.getHistory();
 				if (history.length > 0 && reverseSearchIndex > 0) {
@@ -1153,7 +1160,7 @@ export default function UserInput({
 		}
 
 		// Handle ctrl+r to enter reverse prompt search
-		if (key.ctrl && inputChar === 'r') {
+		if (isComposerKey('reverseSearch', inputChar, key)) {
 			const history = promptHistory.getHistory();
 			reverseSearchDraftRef.current = currentState;
 			setIsReverseSearchMode(true);
@@ -1177,7 +1184,7 @@ export default function UserInput({
 		// (cli.tsx enables DECSET 2004 and routes payloads to pasteEvents),
 		// never as a Ctrl+V keypress, so this binding is free to mean
 		// "paste image".
-		if (key.ctrl && inputChar === 'v') {
+		if (isComposerKey('attachClipboardImage', inputChar, key)) {
 			const image = readClipboardImage();
 			if (image) {
 				attachImage(image);
@@ -1186,7 +1193,7 @@ export default function UserInput({
 		}
 
 		// Ctrl+X: drop the most recently added image attachment.
-		if (key.ctrl && inputChar === 'x') {
+		if (isComposerKey('removeLastImage', inputChar, key)) {
 			setAttachments(prev => prev.slice(0, -1));
 			return;
 		}
@@ -1200,11 +1207,11 @@ export default function UserInput({
 		// down the whole subtree on every undo/redo. TextInput's own value-sync
 		// effect already clamps the cursor to a valid offset when the value
 		// changes, so undoing keeps the caret roughly where it was.
-		if (key.ctrl && inputChar === 'z') {
+		if (isComposerKey('undo', inputChar, key)) {
 			undo();
 			return;
 		}
-		if (key.ctrl && inputChar === 'y') {
+		if (isComposerKey('redo', inputChar, key)) {
 			redo();
 			return;
 		}
@@ -1409,12 +1416,23 @@ export default function UserInput({
 				? ` (${message.images.length} image${message.images.length === 1 ? '' : 's'})`
 				: '';
 		const singleLine = message.displayValue.replace(/\s+/g, ' ').trim();
-		// Truncate against the true terminal width like tool result rows do, not
-		// boxWidth (which floors at 40 and would overflow narrow terminals). The
-		// overhead covers the box border + padding (2), the '▸ '/'  ' marker (2),
-		// and a right-edge safety margin.
-		const maxLength = Math.max(8, actualWidth - imageSuffix.length - 6);
-		const text = truncate(singleLine, maxLength);
+		// Budget against the prompt box the row actually renders in, not the
+		// terminal: the box is promptWidth wide, minus its border (2) and
+		// paddingX (2), minus the '▸ '/'  ' marker (2). Anything wider wraps.
+		const maxLength = Math.max(
+			8,
+			promptWidth - QUEUED_ROW_OVERHEAD - stringWidth(imageSuffix),
+		);
+		// cli-truncate can overshoot by a column when the cut falls inside a
+		// double-width character, so re-truncate until it really fits.
+		let text = truncate(singleLine, maxLength);
+		for (
+			let budget = maxLength - 1;
+			stringWidth(text) > maxLength && budget > 0;
+			budget--
+		) {
+			text = truncate(singleLine, budget);
+		}
 		return `${text}${imageSuffix}`;
 	};
 	const commandCompletionWindow = useMemo(
@@ -1460,6 +1478,7 @@ export default function UserInput({
 					currentModel={currentModel}
 					taskInfo={taskInfo}
 					isSaving={isSaving}
+					voice={voice}
 				/>
 			</Box>
 		);
@@ -1480,27 +1499,7 @@ export default function UserInput({
 					</Box>
 				)}
 				{showShortcuts && (
-					<TitledBoxWithPreferences
-						title="Keyboard Shortcuts"
-						width={promptWidth}
-						borderColor={colors.primary}
-						paddingX={2}
-						paddingY={1}
-						marginTop={1}
-						flexDirection="column"
-					>
-						{KEYBOARD_SHORTCUTS.map(([keybind, label]) => (
-							<HelpRow
-								key={keybind}
-								keybind={keybind}
-								label={label}
-								colors={colors}
-							/>
-						))}
-						<Box marginTop={1}>
-							<Text color={colors.secondary}>Press ? or Esc to close</Text>
-						</Box>
-					</TitledBoxWithPreferences>
+					<ShortcutsOverlay width={promptWidth} view={shortcuts.view} />
 				)}
 				<Box
 					display={showShortcuts ? 'none' : 'flex'}
@@ -1674,7 +1673,8 @@ export default function UserInput({
 				</Box>
 			</Box>
 
-			{attachments.length > 0 && (
+			{/* Part of the composer, so it hides with the input box. */}
+			{!showShortcuts && attachments.length > 0 && (
 				<Box marginTop={1}>
 					<Text color={colors.info}>
 						{attachments
@@ -1703,6 +1703,7 @@ export default function UserInput({
 					activeEditor={activeEditor}
 					taskInfo={taskInfo}
 					isSaving={isSaving}
+					voice={voice}
 				/>
 			</Box>
 		</>

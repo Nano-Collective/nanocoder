@@ -4,9 +4,9 @@ import {tmpdir} from 'os';
 import {join} from 'path';
 import {resetPreferencesCache} from '@/config/preferences';
 import {
-	createSessionCwdScope,
-	runInSessionCwdScope,
-} from '@/services/session-cwd';
+	createSessionContext,
+	runInSessionContext,
+} from '@/services/session-context';
 import {
 	buildSystemPrompt,
 	getLastBuiltPrompt,
@@ -452,7 +452,7 @@ test('buildSystemPrompt - non-nano with includeAgentsMd=false omits AGENTS.md', 
 test('buildSystemPrompt - reports the session cwd inside a session scope', t => {
 	const dir = mkdtempSync(join(tmpdir(), 'nc-prompt-cwd-'));
 	try {
-		const result = runInSessionCwdScope(createSessionCwdScope(dir), () =>
+		const result = runInSessionContext(createSessionContext(dir), () =>
 			buildSystemPrompt('normal', TUNE_DEFAULTS, NANO_TOOLS),
 		);
 		t.true(result.includes(`Current Working Directory: ${dir}`));
@@ -467,7 +467,7 @@ test('buildSystemPrompt - appends the session project AGENTS.md inside a session
 	try {
 		writeFileSync(join(dir, 'AGENTS.md'), 'SESSION PROJECT GUIDANCE');
 		const tune: TuneConfig = {...TUNE_NANO, includeAgentsMd: true};
-		const result = runInSessionCwdScope(createSessionCwdScope(dir), () =>
+		const result = runInSessionContext(createSessionContext(dir), () =>
 			buildSystemPrompt('normal', tune, NANO_TOOLS),
 		);
 		t.true(result.includes('SESSION PROJECT GUIDANCE'));
@@ -698,4 +698,35 @@ test('nano professional tone section is smaller than the full one', t => {
 test.serial('professional tone defaults to the preference when unset', t => {
 	t.false(buildWithProfessionalTone(false).includes('## TONE'));
 	t.true(buildWithProfessionalTone(true).includes('## TONE'));
+});
+
+test('buildSystemPrompt - includes MCP catalog section when load_tool_schema is active and toolManager provided', t => {
+	const mockManager = {
+		getMcpCatalog: () => ({
+			formatCatalogSection: () => '### Available On-Demand MCP Tools (Catalog)\n- `db_query`',
+		}),
+	} as any;
+
+	const withManager = buildSystemPrompt(
+		'normal',
+		undefined,
+		[...ALL_TOOLS, 'load_tool_schema'],
+		false,
+		undefined,
+		undefined,
+		false,
+		mockManager,
+	);
+	t.true(withManager.includes('### Available On-Demand MCP Tools (Catalog)'));
+
+	const withoutManager = buildSystemPrompt(
+		'normal',
+		undefined,
+		[...ALL_TOOLS, 'load_tool_schema'],
+		false,
+		undefined,
+		undefined,
+		false,
+	);
+	t.false(withoutManager.includes('### Available On-Demand MCP Tools (Catalog)'));
 });

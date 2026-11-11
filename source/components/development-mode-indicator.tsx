@@ -19,6 +19,29 @@ import {
 } from '@/types/core';
 import type {ActiveEditorState} from '@/vscode/vscode-server';
 
+export type VoiceState = 'idle' | 'listening' | 'processing' | 'speaking';
+
+/** Voice mode as the mode line shows it. Absent when voice mode is off. */
+export interface VoiceIndicatorInfo {
+	state: VoiceState;
+	/** Shown after the idle label when there is room, e.g. "Ctrl+G to talk". */
+	idleHint?: string;
+}
+
+/** Short label per state; the idle hint is appended separately. */
+function voiceStateLabel(state: VoiceState): string {
+	switch (state) {
+		case 'listening':
+			return '● listening';
+		case 'processing':
+			return 'transcribing…';
+		case 'speaking':
+			return 'speaking';
+		default:
+			return 'voice';
+	}
+}
+
 interface DevelopmentModeIndicatorProps {
 	developmentMode: DevelopmentMode;
 	colors: ReturnType<typeof useTheme>['colors'];
@@ -32,6 +55,7 @@ interface DevelopmentModeIndicatorProps {
 	activeEditor?: ActiveEditorState | null;
 	taskInfo?: TaskIndicatorInfo | null;
 	isSaving?: boolean;
+	voice?: VoiceIndicatorInfo | null;
 	/**
 	 * Columns the caller's own wrapper indents this row by. The width budget
 	 * below must exclude them: budgeting against the full terminal width
@@ -67,6 +91,7 @@ export const DevelopmentModeIndicator = React.memo(
 		activeEditor,
 		taskInfo,
 		isSaving,
+		voice,
 		indentColumns = 0,
 	}: DevelopmentModeIndicatorProps) => {
 		const {isNarrow, actualWidth, truncate} = useResponsiveTerminal();
@@ -89,7 +114,7 @@ export const DevelopmentModeIndicator = React.memo(
 
 		// Two forms of the task badge. The base form is the progress readout,
 		// which only exists while the list is collapsed and is the sole trace of
-		// it on screen, so it always renders. The Ctrl-t key hint on top of that
+		// it on screen, so it always renders. The Ctrl+T key hint on top of that
 		// is a help string: worth showing when there is room, first to go when
 		// there isn't (see the drop order below). When the list is expanded there
 		// is no progress to report, so only the hint form exists.
@@ -98,14 +123,14 @@ export const DevelopmentModeIndicator = React.memo(
 				return {taskLabelBase: '', taskLabelWithHint: ''};
 			}
 			if (!taskInfo.isHidden) {
-				return {taskLabelBase: '', taskLabelWithHint: 'Tasks (hide Ctrl-t)'};
+				return {taskLabelBase: '', taskLabelWithHint: 'Tasks (hide Ctrl+T)'};
 			}
 			const inFlight = taskInfo.inProgressCount > 0 ? '~' : '';
 			const unread = taskInfo.hasUnread ? '*' : '';
 			const progress = `${inFlight}${taskInfo.completedCount}/${taskInfo.totalCount}${unread}`;
 			return {
 				taskLabelBase: `Tasks (${progress})`,
-				taskLabelWithHint: `Tasks (${progress} Ctrl-t)`,
+				taskLabelWithHint: `Tasks (${progress} Ctrl+T)`,
 			};
 		})();
 
@@ -121,171 +146,199 @@ export const DevelopmentModeIndicator = React.memo(
 		// share whatever room is left, each truncating with an ellipsis; if both
 		// fit fully neither truncates; if both overflow they split the remaining
 		// space evenly.
-		// The Ctrl-t hint, the saving indicator, the line-range suffix and
+		// The Ctrl+T hint, the saving indicator, the line-range suffix and
 		// the (Shift+Tab to cycle) hint are optional — drop them when otherwise
-		// the row would wrap. The Ctrl-t hint drops first, then the saving
-		// indicator, then the line-range suffix, then the shift hint.
-		const {sessionLabel, editorLabel, showShiftHint, taskLabel, showSaving} =
-			(() => {
-				const editorFileName = activeEditor?.fileName;
-				const hasSelection =
-					!!activeEditor?.selection &&
-					!!activeEditor.startLine &&
-					!!activeEditor.endLine;
-				const editorPrefix = editorFileName
-					? hasSelection
-						? '⊡ '
-						: '⊡ In '
+		// the row would wrap. The voice idle hint drops first, then the Ctrl+T
+		// hint, then the saving indicator, then the line-range suffix, then the
+		// shift hint. The voice state label itself always renders.
+		const {
+			sessionLabel,
+			editorLabel,
+			showShiftHint,
+			taskLabel,
+			showSaving,
+			voiceHintLabel,
+		} = (() => {
+			const editorFileName = activeEditor?.fileName;
+			const hasSelection =
+				!!activeEditor?.selection &&
+				!!activeEditor.startLine &&
+				!!activeEditor.endLine;
+			const editorPrefix = editorFileName
+				? hasSelection
+					? '⊡ '
+					: '⊡ In '
+				: '';
+			const editorSuffixFull =
+				editorFileName && hasSelection
+					? ` (L${activeEditor.startLine}-${activeEditor.endLine})`
 					: '';
-				const editorSuffixFull =
-					editorFileName && hasSelection
-						? ` (L${activeEditor.startLine}-${activeEditor.endLine})`
-						: '';
 
-				const shiftHintFull =
-					developmentMode !== 'headless' ? ' (Shift+Tab to cycle)' : '';
-				const tuneSegment = tuneLabel ? ` · ${tuneLabel}` : '';
-				const taskBaseSegment = taskLabelBase ? ` · ${taskLabelBase}` : '';
-				const taskHintSegment = taskLabelWithHint
-					? ` · ${taskLabelWithHint}`
+			const shiftHintFull =
+				developmentMode !== 'headless' ? ' (Shift+Tab to cycle)' : '';
+			const tuneSegment = tuneLabel ? ` · ${tuneLabel}` : '';
+			const taskBaseSegment = taskLabelBase ? ` · ${taskLabelBase}` : '';
+			const taskHintSegment = taskLabelWithHint
+				? ` · ${taskLabelWithHint}`
+				: '';
+			// Cost of upgrading the badge from its base form to the key-hint
+			// form. With the list expanded there is no base form, so this is the
+			// price of the whole segment.
+			const taskHintExtraFull = taskHintSegment.length - taskBaseSegment.length;
+			// Voice: the state label always renders while voice mode is on; the
+			// idle hint is a help string and the first thing to go.
+			const voiceSegment = voice ? ` · ${voiceStateLabel(voice.state)}` : '';
+			const voiceHintFull =
+				voice?.state === 'idle' && voice.idleHint ? ` (${voice.idleHint})` : '';
+			const savingSegment = isSaving ? ' · saving' : '';
+			const savingExtraFull = savingSegment.length;
+			const ctxSegment =
+				contextPercentUsed !== null
+					? ` · ctx: ${ctxPrefix}${contextPercentUsed}%`
 					: '';
-				// Cost of upgrading the badge from its base form to the key-hint
-				// form. With the list expanded there is no base form, so this is the
-				// price of the whole segment.
-				const taskHintExtraFull =
-					taskHintSegment.length - taskBaseSegment.length;
-				const savingSegment = isSaving ? ' · saving' : '';
-				const savingExtraFull = savingSegment.length;
-				const ctxSegment =
-					contextPercentUsed !== null
-						? ` · ctx: ${ctxPrefix}${contextPercentUsed}%`
-						: '';
-				const sessionSeparator = sessionName ? ' · ' : '';
-				const editorSeparator = editorFileName ? ' · ' : '';
+			const sessionSeparator = sessionName ? ' · ' : '';
+			const editorSeparator = editorFileName ? ' · ' : '';
 
-				const minLen = 6;
-				const minSessionLen = sessionName ? minLen : 0;
-				const minEditorLen = editorFileName ? minLen : 0;
+			const minLen = 6;
+			const minSessionLen = sessionName ? minLen : 0;
+			const minEditorLen = editorFileName ? minLen : 0;
 
-				// Width consumed by parts that always render.
-				const requiredWidth =
-					modeLabel.length +
-					tuneSegment.length +
-					taskBaseSegment.length +
-					ctxSegment.length +
-					sessionSeparator.length +
-					editorSeparator.length +
-					editorPrefix.length +
-					minSessionLen +
-					minEditorLen;
+			// Width consumed by parts that always render.
+			const requiredWidth =
+				modeLabel.length +
+				tuneSegment.length +
+				taskBaseSegment.length +
+				ctxSegment.length +
+				voiceSegment.length +
+				sessionSeparator.length +
+				editorSeparator.length +
+				editorPrefix.length +
+				minSessionLen +
+				minEditorLen;
 
-				// Decide which optional segments fit. Drop the Ctrl-t hint first,
-				// then the saving indicator, then the suffix, then the shift hint,
-				// until the row fits within budgetWidth. The hints are measured
-				// against the names at full length, not their truncation floor:
-				// a help string must give way before the session name or file
-				// name it sits next to gets cut.
-				const namesWidth =
-					requiredWidth -
-					minSessionLen -
-					minEditorLen +
-					(sessionName?.length ?? 0) +
-					(editorFileName?.length ?? 0);
-				let editorSuffix = editorSuffixFull;
-				let shiftHint = shiftHintFull;
-				let taskHintExtra = taskHintExtraFull;
-				let savingExtra = savingExtraFull;
+			// Decide which optional segments fit. Drop the Ctrl+T hint first,
+			// then the saving indicator, then the suffix, then the shift hint,
+			// until the row fits within budgetWidth. The hints are measured
+			// against the names at full length, not their truncation floor:
+			// a help string must give way before the session name or file
+			// name it sits next to gets cut.
+			const namesWidth =
+				requiredWidth -
+				minSessionLen -
+				minEditorLen +
+				(sessionName?.length ?? 0) +
+				(editorFileName?.length ?? 0);
+			// The voice hint goes before anything else: drop it whenever the
+			// rest of the row, hints included, would not fit beside it.
+			const voiceHint =
+				namesWidth +
+					voiceHintFull.length +
+					taskHintExtraFull +
+					savingExtraFull +
+					editorSuffixFull.length +
+					shiftHintFull.length +
+					1 >
+				budgetWidth
+					? ''
+					: voiceHintFull;
+			let editorSuffix = editorSuffixFull;
+			let shiftHint = shiftHintFull;
+			let taskHintExtra = taskHintExtraFull;
+			let savingExtra = savingExtraFull;
+			if (
+				namesWidth +
+					taskHintExtra +
+					savingExtra +
+					editorSuffix.length +
+					shiftHint.length +
+					1 >
+				budgetWidth
+			) {
+				taskHintExtra = 0;
 				if (
 					namesWidth +
-						taskHintExtra +
 						savingExtra +
 						editorSuffix.length +
 						shiftHint.length +
 						1 >
 					budgetWidth
 				) {
-					taskHintExtra = 0;
+					savingExtra = 0;
 					if (
-						namesWidth +
-							savingExtra +
-							editorSuffix.length +
-							shiftHint.length +
-							1 >
+						namesWidth + editorSuffix.length + shiftHint.length + 1 >
 						budgetWidth
 					) {
-						savingExtra = 0;
-						if (
-							namesWidth + editorSuffix.length + shiftHint.length + 1 >
-							budgetWidth
-						) {
-							editorSuffix = '';
-							if (namesWidth + shiftHint.length + 1 > budgetWidth) {
-								shiftHint = '';
-							}
+						editorSuffix = '';
+						if (namesWidth + shiftHint.length + 1 > budgetWidth) {
+							shiftHint = '';
 						}
 					}
 				}
+			}
 
-				const fixedWidth =
-					modeLabel.length +
-					shiftHint.length +
-					tuneSegment.length +
-					taskBaseSegment.length +
-					taskHintExtra +
-					savingExtra +
-					ctxSegment.length +
-					sessionSeparator.length +
-					editorSeparator.length +
-					editorPrefix.length +
-					editorSuffix.length;
+			const fixedWidth =
+				modeLabel.length +
+				shiftHint.length +
+				tuneSegment.length +
+				taskBaseSegment.length +
+				taskHintExtra +
+				savingExtra +
+				ctxSegment.length +
+				voiceSegment.length +
+				voiceHint.length +
+				sessionSeparator.length +
+				editorSeparator.length +
+				editorPrefix.length +
+				editorSuffix.length;
 
-				const remaining = Math.max(0, budgetWidth - fixedWidth - 1);
+			const remaining = Math.max(0, budgetWidth - fixedWidth - 1);
 
-				let sessionMax = 0;
-				let filenameMax = 0;
-				if (sessionName && editorFileName) {
-					const sessionNeed = sessionName.length;
-					const filenameNeed = editorFileName.length;
-					if (sessionNeed + filenameNeed <= remaining) {
+			let sessionMax = 0;
+			let filenameMax = 0;
+			if (sessionName && editorFileName) {
+				const sessionNeed = sessionName.length;
+				const filenameNeed = editorFileName.length;
+				if (sessionNeed + filenameNeed <= remaining) {
+					sessionMax = sessionNeed;
+					filenameMax = filenameNeed;
+				} else {
+					const half = Math.floor(remaining / 2);
+					if (sessionNeed <= half) {
 						sessionMax = sessionNeed;
+						filenameMax = remaining - sessionMax;
+					} else if (filenameNeed <= half) {
 						filenameMax = filenameNeed;
+						sessionMax = remaining - filenameMax;
 					} else {
-						const half = Math.floor(remaining / 2);
-						if (sessionNeed <= half) {
-							sessionMax = sessionNeed;
-							filenameMax = remaining - sessionMax;
-						} else if (filenameNeed <= half) {
-							filenameMax = filenameNeed;
-							sessionMax = remaining - filenameMax;
-						} else {
-							sessionMax = half;
-							filenameMax = remaining - half;
-						}
+						sessionMax = half;
+						filenameMax = remaining - half;
 					}
-				} else if (sessionName) {
-					sessionMax = remaining;
-				} else if (editorFileName) {
-					filenameMax = remaining;
 				}
+			} else if (sessionName) {
+				sessionMax = remaining;
+			} else if (editorFileName) {
+				filenameMax = remaining;
+			}
 
-				const session = sessionName
-					? truncate(sessionName, Math.max(minLen, sessionMax))
-					: null;
-				const editor = editorFileName
-					? `${editorPrefix}${truncate(
-							editorFileName,
-							Math.max(minLen, filenameMax),
-						)}${editorSuffix}`
-					: null;
+			const session = sessionName
+				? truncate(sessionName, Math.max(minLen, sessionMax))
+				: null;
+			const editor = editorFileName
+				? `${editorPrefix}${truncate(
+						editorFileName,
+						Math.max(minLen, filenameMax),
+					)}${editorSuffix}`
+				: null;
 
-				return {
-					sessionLabel: session,
-					editorLabel: editor,
-					showShiftHint: shiftHint.length > 0,
-					taskLabel: taskHintExtra > 0 ? taskLabelWithHint : taskLabelBase,
-					showSaving: savingExtra > 0,
-				};
-			})();
+			return {
+				sessionLabel: session,
+				editorLabel: editor,
+				showShiftHint: shiftHint.length > 0,
+				taskLabel: taskHintExtra > 0 ? taskLabelWithHint : taskLabelBase,
+				showSaving: savingExtra > 0,
+				voiceHintLabel: voiceHint,
+			};
+		})();
 
 		return (
 			<Box>
@@ -341,6 +394,27 @@ export const DevelopmentModeIndicator = React.memo(
 							ctx: {ctxPrefix}
 							{contextPercentUsed}%
 						</Text>
+					</>
+				)}
+				{voice && (
+					<>
+						<Text color={colors.secondary}> · </Text>
+						<Text
+							color={
+								voice.state === 'listening'
+									? colors.error
+									: voice.state === 'processing'
+										? colors.warning
+										: voice.state === 'speaking'
+											? colors.success
+											: colors.secondary
+							}
+						>
+							{voiceStateLabel(voice.state)}
+						</Text>
+						{voiceHintLabel && (
+							<Text color={colors.secondary}>{voiceHintLabel}</Text>
+						)}
 					</>
 				)}
 				{editorLabel && (

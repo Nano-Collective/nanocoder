@@ -1,6 +1,7 @@
 import type {ApiCallRecord, ApiUsageSnapshot, Message} from '@/types/core';
 
-export interface Command<T = React.ReactElement | void> {
+/** What every command declares, whichever way it runs. */
+interface CommandMetadata {
 	name: string;
 	description: string;
 	/**
@@ -11,6 +12,19 @@ export interface Command<T = React.ReactElement | void> {
 	progressLabel?: string;
 	/** Echo the submitted slash command into chat before showing its result. */
 	echoInvocation?: boolean;
+	/**
+	 * Leave the command out of the `/help` list. It still runs, completes in
+	 * the slash menu, and has its own `/help <name>` page.
+	 */
+	hidden?: boolean;
+}
+
+/**
+ * A command that only reads what it is given and returns something to show:
+ * a React element, a string, or nothing.
+ */
+export interface Command<T = React.ReactElement | void>
+	extends CommandMetadata {
 	handler: (
 		args: string[],
 		messages: Message[],
@@ -30,9 +44,62 @@ export interface Command<T = React.ReactElement | void> {
 }
 
 /**
+ * The app state a stateful command may use. The dispatcher builds it from the
+ * submission options; it holds only what commands actually need, so grow it
+ * when a command needs something new rather than reaching for the options.
+ */
+export interface CommandContext {
+	/** Arguments after the command name. */
+	args: string[];
+	/** The conversation as it stood when the command was submitted. */
+	messages: Message[];
+	addToChatQueue: (component: React.ReactNode) => void;
+	/** Clear the transcript, the model context and per-conversation caches. */
+	clearMessages: () => Promise<void>;
+	/** Tell the app a conversation was cleared (remounts the transcript). */
+	notifyCleared: () => void;
+	renameSession: (name: string) => void;
+	showStatus: () => void;
+	enterModelSelectionMode: () => void;
+	/** The models.dev browser (`/model browse`). */
+	enterModelDatabaseMode: () => void;
+	enterSettingsMode: (
+		tab?: import('@/app/components/settings-constants').SettingsTabId,
+	) => void;
+	enterExplorerMode: () => void;
+	enterIdeSelectionMode: () => void;
+	enterTune: () => void;
+}
+
+/**
+ * How a stateful command hands the prompt back to the user.
+ * - `done`: ready for input now.
+ * - `done-after-render`: ready once the output it queued has rendered. The
+ *   dispatcher holds completion for `DELAY_COMMAND_COMPLETE_MS`.
+ */
+export type CommandCompletion = 'done' | 'done-after-render';
+
+/**
+ * A command that changes app state (clears the chat, renames the session,
+ * opens a mode). It is dispatched with a `CommandContext` and reports when it
+ * is finished by what it returns.
+ */
+export interface StatefulCommand extends CommandMetadata {
+	run: (context: CommandContext) => Promise<CommandCompletion>;
+}
+
+export type AnyCommand = Command | StatefulCommand;
+
+export function isStatefulCommand(
+	command: AnyCommand,
+): command is StatefulCommand {
+	return 'run' in command;
+}
+
+/**
  * A slash command registered without eagerly importing its module. The
  * `load()` thunk is invoked only when the command is first executed, which
- * keeps the ~31 built-in command modules out of startup. Metadata (name,
+ * keeps the built-in command modules out of startup. Metadata (name,
  * description) must be duplicated here so the command picker can render
  * without triggering the lazy load.
  */
@@ -47,7 +114,9 @@ export interface LazyCommand {
 	progressLabel?: string;
 	/** Mirrors `Command.echoInvocation` without loading the command module. */
 	echoInvocation?: boolean;
-	load: () => Promise<Command>;
+	/** Mirrors `Command.hidden`, so `/help` can filter without a load. */
+	hidden?: boolean;
+	load: () => Promise<AnyCommand>;
 }
 
 export interface ParsedCommand {

@@ -460,7 +460,7 @@ test('DevelopmentModeIndicator fits 80 columns inside an indented wrapper', t =>
 	}
 });
 
-test('DevelopmentModeIndicator shows Tasks (~2/5 Ctrl-t) when collapsed with in-progress tasks', t => {
+test('DevelopmentModeIndicator shows Tasks (~2/5 Ctrl+T) when collapsed with in-progress tasks', t => {
 	const output = renderWithWidth(
 		<DevelopmentModeIndicator
 			developmentMode="normal"
@@ -475,10 +475,10 @@ test('DevelopmentModeIndicator shows Tasks (~2/5 Ctrl-t) when collapsed with in-
 			}}
 		/>,
 	);
-	t.regex(output, /Tasks \(~2\/5 Ctrl-t\)/);
+	t.regex(output, /Tasks \(~2\/5 Ctrl\+T\)/);
 });
 
-test('DevelopmentModeIndicator shows Tasks (2/5 Ctrl-t) when collapsed with no in-progress tasks', t => {
+test('DevelopmentModeIndicator shows Tasks (2/5 Ctrl+T) when collapsed with no in-progress tasks', t => {
 	const output = renderWithWidth(
 		<DevelopmentModeIndicator
 			developmentMode="normal"
@@ -493,10 +493,10 @@ test('DevelopmentModeIndicator shows Tasks (2/5 Ctrl-t) when collapsed with no i
 			}}
 		/>,
 	);
-	t.regex(output, /Tasks \(2\/5 Ctrl-t\)/);
+	t.regex(output, /Tasks \(2\/5 Ctrl\+T\)/);
 });
 
-test('DevelopmentModeIndicator shows Tasks (~2/5* Ctrl-t) when collapsed with in-progress and unread updates', t => {
+test('DevelopmentModeIndicator shows Tasks (~2/5* Ctrl+T) when collapsed with in-progress and unread updates', t => {
 	const output = renderWithWidth(
 		<DevelopmentModeIndicator
 			developmentMode="normal"
@@ -511,10 +511,10 @@ test('DevelopmentModeIndicator shows Tasks (~2/5* Ctrl-t) when collapsed with in
 			}}
 		/>,
 	);
-	t.regex(output, /Tasks \(~2\/5\* Ctrl-t\)/);
+	t.regex(output, /Tasks \(~2\/5\* Ctrl\+T\)/);
 });
 
-test('DevelopmentModeIndicator shows Tasks (hide Ctrl-t) when expanded on a wide terminal', t => {
+test('DevelopmentModeIndicator shows Tasks (hide Ctrl+T) when expanded on a wide terminal', t => {
 	const output = renderWithWidth(
 		<DevelopmentModeIndicator
 			developmentMode="normal"
@@ -529,7 +529,7 @@ test('DevelopmentModeIndicator shows Tasks (hide Ctrl-t) when expanded on a wide
 			}}
 		/>,
 	);
-	t.regex(output, /Tasks \(hide Ctrl-t\)/);
+	t.regex(output, /Tasks \(hide Ctrl\+T\)/);
 });
 
 test('DevelopmentModeIndicator does not show task badge when totalCount is 0 or taskInfo is null', t => {
@@ -606,7 +606,7 @@ test('collapsed task badge keeps its progress readout and drops only the key hin
 	);
 	// Progress survives - it is the only trace of the collapsed list on screen.
 	t.regex(output, /Tasks \(~2\/5\*\)/);
-	t.notRegex(output, /Ctrl-t/);
+	t.notRegex(output, /Ctrl\+T/);
 	t.regex(output, /ctx: 42%/);
 });
 
@@ -626,7 +626,7 @@ test('collapsed task badge keeps the key hint when there is room for it', t => {
 		/>,
 		60,
 	);
-	t.regex(output, /Tasks \(2\/5 Ctrl-t\)/);
+	t.regex(output, /Tasks \(2\/5 Ctrl\+T\)/);
 });
 
 // ============================================================================
@@ -751,4 +751,74 @@ test('shift hint is not offered in headless mode', t => {
 
 	t.regex(output, /headless mode on/);
 	t.notRegex(output, /Shift\+Tab/);
+});
+
+// ============================================================================
+// Voice segment
+// ============================================================================
+
+test('voice segment is absent when voice mode is off', t => {
+	const {lastFrame} = render(
+		<DevelopmentModeIndicator
+			developmentMode="normal"
+			colors={mockColors}
+			contextPercentUsed={1}
+			voice={null}
+		/>,
+	);
+	t.notRegex(stripAnsi(lastFrame()!), /voice|listening|Ctrl\+G/);
+});
+
+test('voice segment shows the idle label and its hint on the mode line', t => {
+	const {lastFrame} = render(
+		<DevelopmentModeIndicator
+			developmentMode="normal"
+			colors={mockColors}
+			contextPercentUsed={1}
+			voice={{state: 'idle', idleHint: 'Ctrl+G to talk'}}
+		/>,
+	);
+	const output = stripAnsi(lastFrame()!);
+	t.regex(output, /ctx: ~1% · voice \(Ctrl\+G to talk\)/);
+	t.is(output.split('\n').length, 1, 'stays on the one mode line');
+});
+
+test('voice segment shows each active state without the idle hint', t => {
+	const cases = [
+		['listening', /· ● listening/],
+		['processing', /· transcribing…/],
+		['speaking', /· speaking/],
+	] as const;
+	for (const [state, expected] of cases) {
+		const {lastFrame} = render(
+			<DevelopmentModeIndicator
+				developmentMode="normal"
+				colors={mockColors}
+				contextPercentUsed={1}
+				voice={{state, idleHint: 'Ctrl+G to talk'}}
+			/>,
+		);
+		const output = stripAnsi(lastFrame()!);
+		t.regex(output, expected, state);
+		t.notRegex(output, /Ctrl\+G/, state);
+	}
+});
+
+test('a tight row drops the voice hint first and keeps the voice label', t => {
+	// The width budget is the terminal width (80 when stdout is not a TTY)
+	// minus the indent: 68 columns fits the shift hint and the voice label
+	// (57) but not the voice hint on top (74).
+	const {lastFrame} = render(
+		<DevelopmentModeIndicator
+			developmentMode="normal"
+			colors={mockColors}
+			contextPercentUsed={1}
+			indentColumns={12}
+			voice={{state: 'idle', idleHint: 'Ctrl+G to talk'}}
+		/>,
+	);
+	const output = stripAnsi(lastFrame()!);
+	t.regex(output, /· voice/);
+	t.notRegex(output, /Ctrl\+G to talk/);
+	t.regex(output, /Shift\+Tab to cycle/, 'the voice hint gives way before the shift hint');
 });

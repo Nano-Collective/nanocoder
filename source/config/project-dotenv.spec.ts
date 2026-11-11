@@ -4,8 +4,8 @@ import {join} from 'node:path';
 import test from 'ava';
 import {
 	ignoredDotenvWarning,
+	isProtectedEnvKey,
 	loadProjectDotenv,
-	PROTECTED_ENV_KEYS,
 } from './project-dotenv';
 
 function withDotenv(content: string | null, fn: (dir: string) => void) {
@@ -28,28 +28,87 @@ test('copies ordinary keys and leaves shell values alone', t => {
 	});
 });
 
-test('a project .env cannot set trust, config dir, or MCP variables', t => {
-	const content = PROTECTED_ENV_KEYS.map(key => `${key}=1`).join('\n');
+// Keys a cloned repo must not be able to set before the user trusts it.
+const MUST_BE_PROTECTED = [
+	// Trust, and where the trust record is read from and written to.
+	'NANOCODER_TRUST_DIRECTORY',
+	'NANOCODER_CONFIG_DIR',
+	'XDG_CONFIG_HOME',
+	'APPDATA',
+	'NANOCODER_CI_TRUST_LEVEL',
+	// Servers and providers started or contacted before trust.
+	'NANOCODER_MCPSERVERS',
+	'NANOCODER_MCPSERVERS_FILE',
+	'NANOCODER_PROVIDERS',
+	'NANOCODER_PROVIDERS_FILE',
+	// Where sessions, logs and checkpoints are written.
+	'NANOCODER_DATA_DIR',
+	'NANOCODER_LOG_DIR',
+	'NANOCODER_LOG_DISABLE_FILE',
+	// A NANOCODER_* variable added later is protected by default.
+	'NANOCODER_SOMETHING_NEW',
+	// Code injected into every child process (MCP servers, hooks, bash, git).
+	'NODE_OPTIONS',
+	'BASH_ENV',
+	'ENV',
+	'LD_PRELOAD',
+	'DYLD_INSERT_LIBRARIES',
+	'PATH',
+	'GIT_CONFIG_COUNT',
+	'GIT_CONFIG_KEY_0',
+	'GIT_CONFIG_VALUE_0',
+	'GIT_CONFIG_GLOBAL',
+	'GIT_SSH_COMMAND',
+	'npm_config_script_shell',
+	// Where traffic goes and whether TLS is checked.
+	'HTTPS_PROXY',
+	'https_proxy',
+	'NODE_TLS_REJECT_UNAUTHORIZED',
+];
+
+test('a project .env cannot set trust, config, data, server or process-start variables', t => {
+	const content = MUST_BE_PROTECTED.map(key => `${key}=1`).join('\n');
 	withDotenv(`${content}\nOTHER=x\n`, dir => {
 		const env: NodeJS.ProcessEnv = {};
 		const result = loadProjectDotenv(dir, env);
-		for (const key of PROTECTED_ENV_KEYS) {
+		for (const key of MUST_BE_PROTECTED) {
 			t.is(env[key], undefined, key);
+			t.true(isProtectedEnvKey(key), key);
 		}
 		t.is(env.OTHER, 'x');
-		t.deepEqual(result.ignored, [...PROTECTED_ENV_KEYS]);
-		t.true(PROTECTED_ENV_KEYS.includes('NANOCODER_TRUST_DIRECTORY'));
-		// Where the trust record is read from and written to.
-		t.true(PROTECTED_ENV_KEYS.includes('XDG_CONFIG_HOME'));
-		t.true(PROTECTED_ENV_KEYS.includes('APPDATA'));
+		t.deepEqual(result.ignored, MUST_BE_PROTECTED);
+		t.deepEqual(result.injected, ['OTHER']);
+	});
+});
+
+test('ordinary keys and the NANOCODER_* tuning allowlist still load', t => {
+	const allowed = [
+		'OPENROUTER_API_KEY',
+		'DATABASE_URL',
+		'NODE_ENV',
+		'GITHUB_TOKEN',
+		'MY_GIT_HOST',
+		'NANOCODER_LOG_LEVEL',
+		'NANOCODER_CONTEXT_LIMIT',
+		'NANOCODER_MAX_TURNS',
+		'NANOCODER_NO_UPDATE_CHECK',
+	];
+	withDotenv(allowed.map(key => `${key}=1`).join('\n'), dir => {
+		const env: NodeJS.ProcessEnv = {};
+		const result = loadProjectDotenv(dir, env);
+		t.deepEqual(result.injected, allowed);
+		t.deepEqual(result.ignored, []);
 	});
 });
 
 test('protected keys from the real environment are kept', t => {
 	withDotenv('NANOCODER_TRUST_DIRECTORY=0\n', dir => {
 		const env: NodeJS.ProcessEnv = {NANOCODER_TRUST_DIRECTORY: '1'};
-		loadProjectDotenv(dir, env);
+		const result = loadProjectDotenv(dir, env);
 		t.is(env.NANOCODER_TRUST_DIRECTORY, '1');
+		// The shell's value wins anyway, so nothing was dropped and the user
+		// should not be warned about the .env.
+		t.deepEqual(result.ignored, []);
 	});
 });
 

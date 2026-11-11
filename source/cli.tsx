@@ -78,10 +78,12 @@ if (args[0] === 'daemon') {
 	] as const;
 	type DaemonSub = (typeof valid)[number];
 	if (!sub || !(valid as readonly string[]).includes(sub)) {
-		console.error(
-			'Usage: nanocoder daemon <start|stop|status|logs|install|uninstall>',
-		);
-		process.exit(sub ? 1 : 0);
+		const help = !sub || sub === '--help' || sub === '-h';
+		const usage =
+			'Usage: nanocoder daemon <start|stop|status|logs|install|uninstall>';
+		if (help) console.log(usage);
+		else console.error(usage);
+		process.exit(help ? 0 : 1);
 	}
 	const {runDaemonCli} = await import('@/daemon/cli');
 	const result = await runDaemonCli(sub as DaemonSub, {
@@ -109,9 +111,11 @@ if (args[0] === 'verify') {
 // installer (no Ink, no providers, no tool registry).
 if (args[0] === 'skills') {
 	const {runSkillsCli, SKILLS_CLI_USAGE} = await import('@/skills/install');
-	if (args[1] !== 'add') {
-		console.error(SKILLS_CLI_USAGE);
-		process.exit(args[1] ? 1 : 0);
+	if (args[1] !== 'add' || args.includes('--help') || args.includes('-h')) {
+		const help = !args[1] || args.includes('--help') || args.includes('-h');
+		if (help) console.log(SKILLS_CLI_USAGE);
+		else console.error(SKILLS_CLI_USAGE);
+		process.exit(help ? 0 : 1);
 	}
 	const result = await runSkillsCli({
 		projectRoot: process.cwd(),
@@ -143,7 +147,7 @@ if (args[0] === 'config') {
 // (trust-cli.spec.ts checks this), which is why preferences.ts logs through
 // @/utils/logging and not the Ink message queue.
 if (args[0] === 'trust') {
-	const {runTrustCli} = await import('@/config/trust-cli');
+	const {runTrustCli} = await import('@/config/trust/trust-cli');
 	const result = runTrustCli(args.slice(1));
 	if (result.exitCode === 0) {
 		console.log(result.output);
@@ -268,7 +272,7 @@ Commands:
 Options:
   -v, --version       Show version number
   -h, --help          Show help
-  --vscode            Run in VS Code mode
+  --vscode            Start the legacy VS Code companion (deprecated)
   --vscode-port       Specify VS Code port
   --provider          Specify AI provider (must be configured in agents.config.json).
                       Quote names with spaces: --provider "GitHub Copilot"

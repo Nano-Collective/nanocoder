@@ -18,7 +18,7 @@ import {
 } from '@/constants';
 import {consultPluginPermission} from '@/plugins/host';
 import {CheckpointManager} from '@/services/checkpoint-manager';
-import {runPreToolUseGate} from '@/services/lifecycle-hooks';
+import {runLifecycleHooks, runPreToolUseGate} from '@/services/lifecycle-hooks';
 import {getProjectRoot} from '@/services/session-cwd';
 import {generateKey} from '@/session/key-generator';
 import {
@@ -31,7 +31,7 @@ import {loadTasks} from '@/tools/tasks/storage';
 import type {Task} from '@/tools/tasks/types';
 import type {ToolManager} from '@/tools/tool-manager';
 import {isSingleToolProfile} from '@/tools/tool-profiles';
-import type {TuneConfig} from '@/types/config';
+import {getTuneToolMode, type TuneConfig} from '@/types/config';
 import type {
 	ApiCallRecord,
 	ApiUsageSnapshot,
@@ -44,13 +44,13 @@ import type {
 import {buildResponseUsageBounded} from '@/usage/response-usage';
 import {maybeAutoCompact} from '@/utils/auto-compact';
 import {buildCompletionNote} from '@/utils/completion-note';
+import {compressionBackup} from '@/utils/compression-backup';
 import {formatError} from '@/utils/error-formatter';
 import {MessageBuilder} from '@/utils/message-builder';
 import {capMessagesForModel} from '@/utils/message-capping';
 import {compressMessages} from '@/utils/message-compression';
 import {infoMsg} from '@/utils/message-factory';
 import {logWarning} from '@/utils/message-queue';
-import {getLastBuiltPrompt} from '@/utils/prompt-builder';
 import {signalQuestion} from '@/utils/question-queue';
 import {bumpReadContentGeneration} from '@/utils/read-tracker';
 import {markRunFailed} from '@/utils/run-outcome';
@@ -214,7 +214,9 @@ export const resetFallbackNotice = () => {
 // Tracks whether the most recently emitted turn contained reasoning. Used by
 // the next flushCompactCounts call to decide whether the summary should be
 // indented (grouping beneath its Thought) or rendered flat (non-thinking
-// models, where there is no Thought to group under).
+// models, where there is no Thought to group under). Set on every turn, so
+// one thinking turn does not indent every summary for the rest of the
+// process (e.g. after switching to a non-thinking model).
 let lastTurnHadReasoning = false;
 
 /** Reset the reasoning-grouping flag (for testing). */
@@ -357,22 +359,14 @@ export const processAssistantResponse = async (
 	const nonInteractiveAlwaysAllow = nonInteractiveMode
 		? (getAppConfig().alwaysAllow ?? [])
 		: [];
-	const modeOverrides: ModeOverrides | undefined =
-		nonInteractiveMode || modelParameters
-			? {
-					nonInteractiveMode,
-					nonInteractiveAlwaysAllow,
-					modelParameters,
-					privacySessionMapRef,
-					privacyEnabled,
-				}
-			: {
-					nonInteractiveMode: false,
-					nonInteractiveAlwaysAllow: [],
-					modelParameters,
-					privacySessionMapRef,
-					privacyEnabled,
-				};
+	const modeOverrides: ModeOverrides = {
+		nonInteractiveMode,
+		nonInteractiveAlwaysAllow,
+		modelParameters,
+		privacySessionMapRef,
+		privacyEnabled,
+		nativeToolsDisabled: getTuneToolMode(tune) !== 'native',
+	};
 
 	// Get effective tools — ToolManager is the single authority for
 	// availability (mode + profile filtering) and approval policy
@@ -605,8 +599,8 @@ export const processAssistantResponse = async (
 				expand={reasoningExpandedRef?.current ?? false}
 			/>,
 		);
-		lastTurnHadReasoning = true;
 	}
+	lastTurnHadReasoning = Boolean(fullReasoning);
 	if (cleanedContent.trim()) {
 		// Provider-reported tokens + estimated cost for this API call, shown
 		// as the footer of the message. The lookup is bounded: token counts
@@ -677,39 +671,57 @@ export const processAssistantResponse = async (
 
 	// Check for auto-compact after messages are updated
 	// Note: This is awaited to prevent race conditions where setMessages(compressed)
-	// could overwrite newer state updates that happen while compression is in progress
+	// could overwrite newer state updates that happen while compression is in progress.
+	// maybeAutoCompact never throws: a failed compaction leaves history as is.
+	//
+	// Gate on the same capped view the next request sends, as `run`/--plain and
+	// subagents do, so the threshold is not measured against rows the cap
+	// already drops from the request.
 	let compactionOccurred = false;
-	try {
-		const beforeCompact = updatedMessages;
-		updatedMessages = await maybeAutoCompact(
-			updatedMessages,
-			systemMessage,
-			client,
-			// Native tool definitions occupy context out-of-band. Pass them so
-			// the gate matches the ctx% indicator; under XML/JSON fallback they
-			// already live inside systemMessage, so pass nothing to avoid
-			// double-counting.
-			result.toolsDisabled ? undefined : tools,
-			{
-				signal: controller.signal,
-				onNotify: notification => {
-					addToChatQueue(infoMsg(notification, 'auto-compact-notification'));
-				},
-				// The TUI tracks the active provider/model in app state; use those
-				// rather than re-deriving them from the client, which may lag a
-				// pending switch.
-				provider: currentProvider,
-				model: currentModel,
+	const compactGateInput = capMessagesForModel(updatedMessages, maxMessages);
+	const compacted = await maybeAutoCompact(
+		compactGateInput,
+		systemMessage,
+		client,
+		// Native tool definitions occupy context out-of-band. Pass them so
+		// the gate matches the ctx% indicator; under XML/JSON fallback they
+		// already live inside systemMessage, so pass nothing to avoid
+		// double-counting.
+		result.toolsDisabled ? undefined : tools,
+		{
+			signal: controller.signal,
+			onNotify: notification => {
+				addToChatQueue(infoMsg(notification, 'auto-compact-notification'));
 			},
-		);
+			// The TUI tracks the active provider/model in app state; use those
+			// rather than re-deriving them from the client, which may lag a
+			// pending switch.
+			provider: currentProvider,
+			model: currentModel,
+		},
+	);
 
-		if (updatedMessages !== beforeCompact) {
-			setMessages(updatedMessages);
-			setTokenCount(0);
-			compactionOccurred = true;
+	// Only adopt the result when compaction actually ran. Otherwise
+	// maybeAutoCompact hands back the capped view it was given, and taking it
+	// would discard history the cap only meant to hide from one request.
+	if (compacted !== compactGateInput) {
+		updatedMessages = compacted;
+		setMessages(updatedMessages);
+		setTokenCount(0);
+		compactionOccurred = true;
+	}
+
+	// Escape while the reply was finishing or while compaction ran: don't go
+	// on to execute this turn's tool calls. Pair them with cancellation
+	// results so the saved history keeps the 1:1 tool_call/result mapping,
+	// then unwind the same way an abort during the LLM call does.
+	if (controller.signal.aborted) {
+		if (emittedToolCalls.length > 0) {
+			const abortBuilder = new MessageBuilder(updatedMessages);
+			abortBuilder.addToolResults(createCancellationResults(emittedToolCalls));
+			setMessages(abortBuilder.build());
 		}
-	} catch (_error) {
-		// Silently fail auto-compact, don't interrupt the conversation
+		throw new Error('Operation was cancelled');
 	}
 
 	// Record the API-reported usage for the context indicator. The snapshot is
@@ -841,16 +853,21 @@ export const processAssistantResponse = async (
 		}
 	};
 
-	// Handle error results for non-existent tools
+	// Handle error results for rejected calls: non-existent tools, and calls
+	// whose arguments could not be parsed
 	if (errorResults.length > 0) {
 		// Show the user a concise notice. The full recovery hint (including the
-		// list of available tools) lives in error.content and is sent to the
+		// list of available tools) lives in the error result and is sent to the
 		// MODEL via addToolResults below — it would be noise in the chat.
-		for (const error of errorResults) {
+		for (const toolCall of partition.rejectedToolCalls) {
 			addToChatQueue(
 				<ErrorMessage
-					key={generateKey(`unknown-tool-${error.tool_call_id}`)}
-					message={`Model called an unavailable tool ("${error.name}") — asking it to retry with a valid tool.`}
+					key={generateKey(`rejected-tool-${toolCall.id}`)}
+					message={
+						toolCall.argumentsError === undefined
+							? `Model called an unavailable tool ("${toolCall.function.name}") — asking it to retry with a valid tool.`
+							: `Model sent invalid arguments for "${toolCall.function.name}" (${toolCall.argumentsError}) — asking it to retry.`
+					}
 					hideBox={true}
 				/>,
 			);
@@ -862,10 +879,10 @@ export const processAssistantResponse = async (
 		const updatedMessagesWithError = errorBuilder.build();
 		setMessages(updatedMessagesWithError);
 
-		// Unknown-tool turns count toward the repeated-call streak, so a model
-		// stuck calling a nonexistent tool cannot recurse unbounded. The error
-		// and aborted results above are already paired in history, so a stop
-		// here keeps the 1:1 tool-call/result mapping intact.
+		// Rejected-call turns count toward the repeated-call streak, so a model
+		// stuck on a nonexistent tool or unparsable arguments cannot recurse
+		// unbounded. The error and aborted results above are already paired in
+		// history, so a stop here keeps the 1:1 tool-call/result mapping intact.
 		if (currentRepeatedCount >= maxRepeatedToolCalls) {
 			const continueAnyway = await promptContinueRepeatedCalls();
 			if (!continueAnyway) {
@@ -939,12 +956,6 @@ export const processAssistantResponse = async (
 		};
 
 		for (const toolCall of validToolCalls) {
-			// The XML-fallback synthetic error isn't a real tool, so treat it as
-			// auto (it surfaces as an error result). Real argument validation
-			// lives in the tool handler (single source of truth).
-			const validationFailed =
-				toolCall.function.name === '__xml_validation_error__';
-
 			// Lifecycle gate, ahead of the approval decision. Every execution path
 			// gates again at its own boundary, but only here is it in front of the
 			// confirmation prompt — so a "never touch .env" hook refuses the call
@@ -956,34 +967,30 @@ export const processAssistantResponse = async (
 			const parsedArgs = parseToolArguments<Record<string, unknown>>(
 				toolCall.function.arguments,
 			);
-			if (!validationFailed) {
-				const gate = await runPreToolUseGate(toolCall, parsedArgs);
-				if (gate.blocked) {
-					refuseToolCall(
-						toolCall,
-						gate.reason ?? 'Blocked by a pre-tool-use hook.',
-					);
-					continue;
-				}
+			const gate = await runPreToolUseGate(toolCall, parsedArgs);
+			if (gate.blocked) {
+				refuseToolCall(
+					toolCall,
+					gate.reason ?? 'Blocked by a pre-tool-use hook.',
+				);
+				continue;
 			}
 
 			const toolEntry = toolManager?.getToolEntry(toolCall.function.name);
-			const needsApproval =
-				!validationFailed &&
-				(await resolveToolApproval(
-					toolCall.function.name,
-					toolEntry,
-					toolCall.function.arguments,
-					{
-						// Prefer the live ref so a mode switch made while this turn's
-						// tools are still executing takes effect on the next call.
-						mode: developmentModeRef?.current ?? developmentMode,
-						// The top-level alwaysAllow list applies in interactive
-						// sessions too; plan mode stays safe because a call to a tool
-						// its mode excludes is refused before it gets here.
-						alwaysAllow: getAppConfig().alwaysAllow ?? [],
-					},
-				));
+			const needsApproval = await resolveToolApproval(
+				toolCall.function.name,
+				toolEntry,
+				toolCall.function.arguments,
+				{
+					// Prefer the live ref so a mode switch made while this turn's
+					// tools are still executing takes effect on the next call.
+					mode: developmentModeRef?.current ?? developmentMode,
+					// The top-level alwaysAllow list applies in interactive
+					// sessions too; plan mode stays safe because a call to a tool
+					// its mode excludes is refused before it gets here.
+					alwaysAllow: getAppConfig().alwaysAllow ?? [],
+				},
+			);
 
 			if (needsApproval) {
 				const vote = await consultPluginPermission(
@@ -1025,9 +1032,13 @@ export const processAssistantResponse = async (
 		};
 
 		const turnResults: ToolResult[] = [...blockedResults];
+		// Set when beforeExecute stops the auto batch, which then accounts for
+		// the tools behind it itself (cancelled, or moved to confirmTools).
+		let batchStoppedByGate = false;
 
 		// Refuse `toolCall` and cancel the rest of the auto batch behind it.
 		const stopBatchAt = (toolCall: ToolCall, reason: string) => {
+			batchStoppedByGate = true;
 			refuseToolCall(toolCall, reason);
 			turnResults.push(
 				blockedResults[blockedResults.length - 1],
@@ -1096,8 +1107,6 @@ export const processAssistantResponse = async (
 					signal: controller.signal,
 					executionContext: {sessionId, workingDirectory},
 					beforeExecute: async toolCall => {
-						if (toolCall.function.name === '__xml_validation_error__')
-							return true;
 						// A mode switch since this batch was classified can hide the
 						// tool; alwaysAllow must not run it under the new mode.
 						const notOffered = notOfferedReason(toolCall);
@@ -1123,6 +1132,7 @@ export const processAssistantResponse = async (
 						if (vote.decision === 'deny') {
 							return stopBatchAt(toolCall, vote.reason);
 						}
+						batchStoppedByGate = true;
 						confirmTools.unshift(
 							...autoTools.slice(autoTools.indexOf(toolCall)),
 						);
@@ -1139,6 +1149,13 @@ export const processAssistantResponse = async (
 						observeSuccessfulLifecycleTool(walkthroughLifecycle, toolCall);
 					}
 				}
+			}
+			// The batch stopped short on an abort: the tools it never started
+			// still need a result each to pair with their tool call.
+			if (!batchStoppedByGate && directResults.length < autoTools.length) {
+				turnResults.push(
+					...createCancellationResults(autoTools.slice(directResults.length)),
+				);
 			}
 		}
 
@@ -1203,7 +1220,9 @@ export const processAssistantResponse = async (
 				// screen. An abort settles this as "declined".
 				const approved = await signalToolConfirm({toolCall}, controller.signal);
 
-				if (!approved) {
+				// Approved, but the turn was cancelled while the prompt was up:
+				// treat it like a decline rather than running the tool.
+				if (!approved || controller.signal.aborted) {
 					// Close any VS Code diff previews the formatter opened for the
 					// declined tools (the approve path self-closes post-execution).
 					closeAllDiffsInVSCode();
@@ -1221,6 +1240,10 @@ export const processAssistantResponse = async (
 					const builder = new MessageBuilder(updatedMessages);
 					builder.addToolResults(turnResults);
 					setMessages(builder.build());
+					// The turn ends here, so say so: without this the app stays
+					// "mid-conversation" and never drains messages queued while
+					// the prompt was up.
+					onConversationComplete?.();
 					return;
 				}
 
@@ -1318,9 +1341,17 @@ export const processAssistantResponse = async (
 				try {
 					const {createTokenizer} = await import('@/tokenization/index');
 					const tokenizer = createTokenizer(currentProvider, currentModel);
-					const systemPrompt = getLastBuiltPrompt();
-					const sysMsg: Message = {role: 'system', content: systemPrompt};
-					const allForCompress = [sysMsg, ...updatedMessages];
+					// Same observe-only hook and /compact restore point as
+					// auto-compact and /compact, so this compaction is not the one
+					// a pre-compact archive hook or a restore never sees.
+					await runLifecycleHooks('pre-compact', {
+						messageCount: updatedMessages.length,
+					});
+					compressionBackup.storeBackup(updatedMessages);
+					// The system message this turn was sent with, not the
+					// process-wide last-built prompt, so the compressor measures
+					// and preserves what the model actually sees.
+					const allForCompress = [systemMessage, ...updatedMessages];
 					const result = compressMessages(allForCompress, tokenizer, {
 						mode: 'aggressive',
 					});
@@ -1334,7 +1365,6 @@ export const processAssistantResponse = async (
 					// "unchanged since last read" stub. Same as /compact and
 					// auto-compact.
 					bumpReadContentGeneration();
-					setMessages(compressedUser);
 
 					addToChatQueue(
 						<InfoMessage
@@ -1356,6 +1386,10 @@ export const processAssistantResponse = async (
 
 					await processAssistantResponse({
 						...params,
+						// Carry this turn's controller, as every other recursion
+						// does: params.abortController may be a stale null, which
+						// would mint a controller Escape never reaches.
+						abortController: controller,
 						messages: messagesAfterCompact,
 						conversationStartTime: startTime,
 						emptyTurnCount: 0,

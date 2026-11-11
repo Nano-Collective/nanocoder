@@ -147,22 +147,6 @@ function remoteHttpTemplate(opts: {
 	};
 }
 
-/**
- * Reject a credential that cannot be sent as a single HTTP header token:
- * anything outside printable ASCII, so no spaces, line breaks or control
- * characters inside it (the wizard trims the ends). The error message never
- * echoes the value.
- */
-function headerTokenValidator(value: string): string | undefined {
-	for (const char of value) {
-		const code = char.codePointAt(0) ?? 0;
-		if (code <= 0x20 || code >= 0x7f) {
-			return 'API key must not contain spaces, line breaks or control characters';
-		}
-	}
-	return undefined;
-}
-
 const GITHUB_REMOTE_URL = 'https://api.githubcopilot.com/mcp/';
 
 export const MCP_TEMPLATES: McpTemplate[] = [
@@ -373,84 +357,6 @@ export const MCP_TEMPLATES: McpTemplate[] = [
 		transportType: 'http',
 	},
 	{
-		id: 'serply',
-		name: 'Serply',
-		description:
-			'Serply Google, Bing, News, Scholar, Maps, Jobs and Amazon search plus URL scraping MCP server',
-		command: '',
-		fields: [
-			{
-				name: 'serverName',
-				prompt: 'Server name',
-				required: true,
-				default: 'serply',
-			},
-			{
-				name: 'apiKey',
-				prompt: 'Serply API key (from https://serply.io)',
-				required: true,
-				sensitive: true,
-			},
-		],
-		buildConfig: answers => ({
-			name: answers.serverName || 'serply',
-			transport: 'http' as McpTransportType,
-			url: 'https://api.serply.io/mcp',
-			description: 'Serply web search and URL scraping MCP server',
-			tags: ['serply', 'search', 'web', 'scrape', 'http'],
-			timeout: TIMEOUT_MCP_DEFAULT_MS,
-			// Serply authenticates with an X-API-Key header, not a bearer token.
-			headers: {'X-API-Key': (answers.apiKey || '').trim()},
-			templateId: 'serply',
-		}),
-		category: 'remote',
-		transportType: 'http',
-	},
-	{
-		id: 'fxmacrodata',
-		name: 'FXMacroData',
-		description:
-			'FXMacroData macroeconomic releases, central bank rates, release calendars and FX data MCP server (leave the API key empty for the keyless USD tier)',
-		command: '',
-		fields: [
-			{
-				name: 'serverName',
-				prompt: 'Server name',
-				required: true,
-				default: 'fxmacrodata',
-			},
-			{
-				name: 'apiKey',
-				prompt:
-					'FXMacroData API key (optional, leave empty for the keyless USD tier)',
-				required: false,
-				sensitive: true,
-				validator: headerTokenValidator,
-			},
-		],
-		buildConfig: answers => {
-			const apiKey = answers.apiKey?.trim();
-			const config: McpServerConfig = {
-				name: answers.serverName || 'fxmacrodata',
-				transport: 'http' as McpTransportType,
-				url: 'https://mcp.fxmacrodata.com',
-				description:
-					'FXMacroData macroeconomic, central bank and FX data MCP server',
-				tags: ['fxmacrodata', 'finance', 'macro', 'forex', 'http'],
-				timeout: TIMEOUT_MCP_DEFAULT_MS,
-				templateId: 'fxmacrodata',
-			};
-			// Keyless works for the free USD tier. A placeholder or empty bearer
-			// token is rejected with a 401, so only send the header for a real key.
-			if (apiKey) {
-				config.headers = {Authorization: `Bearer ${apiKey}`};
-			}
-			return config;
-		},
-		category: 'remote',
-		transportType: 'http',
-	},
-	{
 		id: 'gitlab',
 		name: 'GitLab',
 		description: 'GitLab MCP server for repository management and operations',
@@ -582,6 +488,12 @@ export const MCP_TEMPLATES: McpTemplate[] = [
 				required: false,
 			},
 			{
+				name: 'headers',
+				prompt:
+					'HTTP headers (Name: value, one per line, for http transport, optional)',
+				required: false,
+			},
+			{
 				name: 'command',
 				prompt: 'Command (for stdio transport)',
 				required: false,
@@ -624,6 +536,18 @@ export const MCP_TEMPLATES: McpTemplate[] = [
 				}
 				config.url = answers.url;
 				config.timeout = TIMEOUT_MCP_DEFAULT_MS;
+				// Only the http transport sends headers (transport-factory),
+				// so they are not written for websocket servers.
+				if (transport === 'http' && answers.headers) {
+					const headers: Record<string, string> = {};
+					for (const line of answers.headers.split('\n')) {
+						const separator = line.indexOf(':');
+						if (separator <= 0) continue;
+						const name = line.slice(0, separator).trim();
+						if (name) headers[name] = line.slice(separator + 1).trim();
+					}
+					if (Object.keys(headers).length > 0) config.headers = headers;
+				}
 			}
 
 			if (answers.envVars) {
@@ -652,8 +576,8 @@ export const MCP_TEMPLATES: McpTemplate[] = [
  * Resolution order:
  * 1. `templateId` — stamped by the wizard when the config is built. This
  *    survives a custom `serverName` (e.g. `you-paid`, `gh-work`). Name
- *    matching misses those and would fall through to `custom`, whose
- *    buildConfig never writes headers — silently dropping the bearer token.
+ *    matching misses those and would fall through to `custom`, which would
+ *    rebuild the server from its generic fields instead of the template's.
  * 2. `url` — `https://api.githubcopilot.com/mcp/` is `github-remote`. Configs
  *    saved before that stamp have no `templateId`, and their tags say
  *    `github` (the stdio template), so this is what keeps the bearer header.
