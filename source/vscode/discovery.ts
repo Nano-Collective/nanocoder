@@ -36,7 +36,7 @@ import {homedir} from 'node:os';
 import {dirname, join} from 'node:path';
 
 /** Filename written under the user's nanocoder config directory. */
-export const VSCODE_DISCOVERY_FILENAME = 'vscode-server.json';
+const VSCODE_DISCOVERY_FILENAME = 'vscode-server.json';
 
 /** Schema version written into the discovery file. Bump on breaking changes. */
 export const VSCODE_DISCOVERY_VERSION = 1;

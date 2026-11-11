@@ -12,7 +12,6 @@ export const TIMEOUT_OUTPUT_FLUSH_MS = 1000;
 export const TIMEOUT_EXECUTION_MAX_MS = 300_000; // 5 minutes
 export const TIMEOUT_WEB_SEARCH_MS = 10_000;
 export const TIMEOUT_VSCODE_EXTENSION_SKIP_MS = 3000;
-export const TIMEOUT_MESSAGE_PROCESSING_MS = 5 * 60 * 1000; // 5 minutes
 export const TIMEOUT_HTTP_HEADERS_MS = 10_000;
 export const TIMEOUT_HTTP_BODY_MS = 30_000;
 export const TIMEOUT_UPDATE_CHECK_MS = 10_000;
