@@ -3,7 +3,7 @@ import {basename, join} from 'node:path';
 import {getConfigPath} from '@/config/paths';
 import {parseCommandFile} from '@/custom-commands/parser';
 import type {CommandResource, CustomCommand} from '@/types/index';
-import {logError, logWarning} from '@/utils/message-queue';
+import {logError, logWarning} from '@/utils/message-queue-core';
 
 const RESOURCES_DIR = 'resources';
 const RELEVANCE_THRESHOLD = 5;

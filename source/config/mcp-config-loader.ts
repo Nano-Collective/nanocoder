@@ -3,7 +3,7 @@ import {join} from 'path';
 import {substituteEnvVars} from '@/config/env-substitution';
 import {getConfigPath} from '@/config/paths';
 import type {MCPServerConfig, ProviderConfig} from '@/types/config';
-import {logError} from '@/utils/message-queue';
+import {logError} from '@/utils/message-queue-core';
 
 // Simplified configuration source types
 export type ConfigSource = 'project' | 'global' | 'env';
