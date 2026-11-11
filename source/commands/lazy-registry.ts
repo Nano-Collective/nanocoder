@@ -287,7 +287,7 @@ export const lazyCommands: LazyCommand[] = [
 	{
 		name: 'firewall',
 		description:
-			'Configure negative-space mutation firewall. Subcommands: status, mode <strict|lenient|disabled>, toggle <any|tests|exports>, protect <pattern>, unprotect <pattern>, reset',
+			'Guard file edits: block (strict) or warn about (lenient) edits that delete tests, change exported signatures, add `any` types or touch protected paths. Subcommands: status, enable, disable, mode, toggle, protect, unprotect, reset',
 		load: () => import('@/commands/firewall').then(m => m.firewallCommand),
 	},
 ];
