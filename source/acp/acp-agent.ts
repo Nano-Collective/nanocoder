@@ -61,6 +61,7 @@ import {
 	acpCustomCommandText,
 	builtinCommandReply,
 } from '@/acp/acp-custom-command';
+import {type FolderTools, loadFolderTools} from '@/acp/acp-folder-tools';
 import {AcpSession} from '@/acp/acp-session';
 import {resolveTruncationPoint} from '@/acp/acp-timeline';
 import type {AcpInitContext} from '@/acp/acp-types';
@@ -141,6 +142,13 @@ export class AcpAgent implements Agent {
 	 * session uses the shared set in `initContext`.
 	 */
 	private sessionToolManagers = new Map<string, ToolManager>();
+	/**
+	 * Tools and commands of the project folders sessions run in other than the
+	 * launch folder, by folder, set up on first use and shared by its sessions.
+	 */
+	private folderTools = new Map<string, Promise<FolderTools>>();
+	/** The folder tools each session in such a folder uses. */
+	private sessionFolders = new Map<string, FolderTools>();
 
 	constructor(
 		initContext: AcpInitContext,
@@ -199,6 +207,7 @@ export class AcpAgent implements Agent {
 			parseDisabledTools(params._meta),
 			context,
 		);
+		await this.attachFolderTools(session);
 		await this.applyMcpServers(session, params.mcpServers);
 
 		await sessionManager.initialize();
@@ -206,7 +215,7 @@ export class AcpAgent implements Agent {
 
 		// Emit available slash commands
 		const availableCommands = (
-			this.initContext.customCommandLoader?.getAllCommands() || []
+			this.baseToolsFor(sessionId).customCommandLoader?.getAllCommands() || []
 		).map(c => ({
 			name: `/${c.fullName}`,
 			description: c.metadata.description || '',
@@ -273,6 +282,7 @@ export class AcpAgent implements Agent {
 		logger.info(
 			`ACP loadSession: ${params.sessionId} cwd=${params.cwd} restored=${Boolean(existing)}`,
 		);
+		await this.attachFolderTools(session);
 		await this.applyMcpServers(session, params.mcpServers);
 
 		// Replay history so the client can rebuild the thread.
@@ -363,8 +373,9 @@ export class AcpAgent implements Agent {
 				// If the 'command name' contains a slash, it's likely a file path (e.g. /home/user/file.ts)
 				// not a slash command. Skip command interception.
 				if (!commandName.includes('/')) {
-					const command =
-						this.initContext.customCommandLoader?.getCommand(commandName);
+					const command = this.baseToolsFor(
+						session.sessionId,
+					).customCommandLoader?.getCommand(commandName);
 
 					if (command) {
 						contextualUserText = acpCustomCommandText(
@@ -413,7 +424,9 @@ export class AcpAgent implements Agent {
 						const reply = builtinCommandReply(
 							commandName,
 							isVsCodeClient(this.clientInfo),
-							this.initContext.customCommandLoader?.getAllCommands() ?? [],
+							this.baseToolsFor(
+								session.sessionId,
+							).customCommandLoader?.getAllCommands() ?? [],
 						);
 						if (reply) {
 							return sendBuiltinReply(reply);
@@ -503,7 +516,9 @@ export class AcpAgent implements Agent {
 			const nonInteractiveAlwaysAllow = config.alwaysAllow ?? [];
 
 			// The model is offered the tools its calls will run against.
-			const sessionTools = this.sessionToolManagers.get(session.sessionId);
+			const sessionTools =
+				this.sessionToolManagers.get(session.sessionId) ??
+				this.sessionFolders.get(session.sessionId)?.toolManager;
 			const response = await runAcpConversation({
 				session,
 				client: this.clientFor(session),
@@ -656,6 +671,7 @@ export class AcpAgent implements Agent {
 		}
 		session.close();
 		this.sessions.delete(sessionId);
+		this.sessionFolders.delete(sessionId);
 		clearAcpReadStubs(sessionId);
 		const ticket = session.acquireTurn();
 		await ticket.ready;
@@ -679,6 +695,19 @@ export class AcpAgent implements Agent {
 		const open = [...this.sessions.values()];
 		this.sessions.clear();
 		await Promise.all(open.map(session => this.endSession(session)));
+		// The MCP servers of the other folders sessions ran in.
+		const folders = [...this.folderTools.values()];
+		this.folderTools.clear();
+		this.sessionFolders.clear();
+		await Promise.all(
+			folders.map(async tools => {
+				try {
+					await (await tools).toolManager.disconnectMCP();
+				} catch (error) {
+					logger.warn(`ACP folder MCP disconnect failed: ${String(error)}`);
+				}
+			}),
+		);
 	}
 
 	/** Runs `session-end` for a session that is going away. Never throws. */
@@ -1003,6 +1032,7 @@ export class AcpAgent implements Agent {
 			parseDisabledTools(params._meta),
 			context,
 		);
+		await this.attachFolderTools(session);
 		await this.applyMcpServers(session, params.mcpServers);
 		session.messages = persisted.messages;
 		clearAcpReadStubs(params.sessionId);
@@ -1278,9 +1308,41 @@ export class AcpAgent implements Agent {
 		return session;
 	}
 
+	/** The tools and commands a session starts from: its folder's, or the launch folder's. */
+	private baseToolsFor(sessionId: string): FolderTools {
+		return (
+			this.sessionFolders.get(sessionId) ?? {
+				toolManager: this.initContext.toolManager,
+				customCommandLoader: this.initContext.customCommandLoader,
+			}
+		);
+	}
+
+	/**
+	 * Gives a session in a folder other than the launch folder that folder's
+	 * tools, commands, skills and MCP servers, set up the first time a session
+	 * opens there. Runs in the session's context, so they come from its config.
+	 */
+	private async attachFolderTools(session: AcpSession): Promise<void> {
+		const {launchDirectory} = this.initContext;
+		if (launchDirectory === undefined) return;
+		const root = path.resolve(session.cwd);
+		if (root === path.resolve(launchDirectory)) return;
+
+		let tools = this.folderTools.get(root);
+		if (!tools) {
+			tools = loadFolderTools(root);
+			this.folderTools.set(root, tools);
+		}
+		this.sessionFolders.set(session.sessionId, await tools);
+		// The prompt lists the tools the session has.
+		this.buildSystemPromptForSession(session);
+	}
+
 	private toolManagerFor(sessionId: string): ToolManager {
 		return (
-			this.sessionToolManagers.get(sessionId) ?? this.initContext.toolManager
+			this.sessionToolManagers.get(sessionId) ??
+			this.baseToolsFor(sessionId).toolManager
 		);
 	}
 
@@ -1305,7 +1367,9 @@ export class AcpAgent implements Agent {
 		if (servers.length === 0) {
 			await this.releaseMcpServers(session.sessionId);
 		} else {
-			const manager = existing ?? this.initContext.toolManager.forSession();
+			const manager =
+				existing ??
+				this.baseToolsFor(session.sessionId).toolManager.forSession();
 			this.sessionToolManagers.set(session.sessionId, manager);
 			try {
 				await manager.initializeMCP(servers, result => {

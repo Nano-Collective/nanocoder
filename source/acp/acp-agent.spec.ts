@@ -3735,3 +3735,60 @@ test.serial('AcpAgent.resumeSession - an id that is neither live nor on disk is 
 		{message: /Session not found on disk/},
 	);
 });
+
+test.serial('AcpAgent - a session in another project gets that project\'s commands and MCP servers', async t => {
+	const other = freshDir('folder-tools');
+	const before = loadPreferences();
+	const updates: any[] = [];
+	const conn = createMockConn();
+	conn.sessionUpdate = async (update: any) => {
+		updates.push(update);
+	};
+	const context = createMockInitContext();
+	context.launchDirectory = testConfigDir;
+	context.toolManager = new ToolManager();
+	const agent = new AcpAgent(context, conn);
+	try {
+		mkdirSync(join(other, '.nanocoder', 'commands'), {recursive: true});
+		writeFileSync(
+			join(other, '.nanocoder', 'commands', 'folder-hello.md'),
+			'---\ndescription: Says hello from the folder\n---\nSay hello.\n',
+		);
+		writeFileSync(
+			join(other, '.mcp.json'),
+			JSON.stringify({
+				mcpServers: {
+					'folder-server': {
+						transport: 'stdio',
+						command: process.execPath,
+						args: ['--input-type=module', '-e', FIXTURE_SERVER],
+						env: {FIXTURE_TOOL: 'folder_tool'},
+					},
+				},
+			}),
+		);
+		savePreferences(grantDirectoryTrust(loadPreferences(), other));
+
+		const inOther = await agent.newSession({cwd: other});
+		const inLaunch = await agent.newSession({cwd: testConfigDir});
+		const commandsOf = (sessionId: string) =>
+			updates
+				.filter(
+					u =>
+						u.sessionId === sessionId &&
+						u.update.sessionUpdate === 'available_commands_update',
+				)
+				.flatMap(u => u.update.availableCommands.map((c: any) => c.name));
+		const toolsOf = (sessionId: string): ToolManager =>
+			(agent as any).toolManagerFor(sessionId);
+
+		t.true(commandsOf(inOther.sessionId).includes('/folder-hello'));
+		t.false(commandsOf(inLaunch.sessionId).includes('/folder-hello'));
+		t.true(toolsOf(inOther.sessionId).hasTool('folder_tool'));
+		t.false(toolsOf(inLaunch.sessionId).hasTool('folder_tool'));
+	} finally {
+		await agent.endAllSessions();
+		savePreferences(before);
+		rmSync(other, {recursive: true, force: true});
+	}
+});
