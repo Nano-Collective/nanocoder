@@ -1,4 +1,4 @@
-import {readFile} from 'node:fs/promises';
+import {readFile, stat} from 'node:fs/promises';
 import {extname} from 'node:path';
 import {walkProjectEntries} from '@/utils/file-search';
 import {calculateTokens} from '@/utils/token-calculator';
@@ -326,13 +326,16 @@ async function scanFiles(
 				return true;
 			}
 
+			// Size check from stat, before reading: a large generated or vendored
+			// file would otherwise be read whole only to be thrown away.
 			let source: string;
 			try {
+				const {size} = await stat(entry.absolutePath);
+				if (size > maxFileBytes) {
+					return false;
+				}
 				source = await readFile(entry.absolutePath, 'utf-8');
 			} catch {
-				return false;
-			}
-			if (source.length > maxFileBytes) {
 				return false;
 			}
 
