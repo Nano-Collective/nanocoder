@@ -10,10 +10,15 @@ import {
 } from '@/config/index';
 import {TOOL_APPROVAL_REQUIRED_KIND} from '@/constants';
 import {
+	createHeadlessRetryGuards,
+	EMPTY_TURN_NUDGE,
+	malformedToolCallNudge,
+	TRUNCATED_TURN_INSTRUCTION,
+} from '@/hooks/chat-handler/utils/headless-retry-guards';
+import {
 	buildAbandonedTurnMessages,
 	partitionUnknownToolCalls,
 } from '@/hooks/chat-handler/utils/tool-filters';
-import {computeToolCallSignature} from '@/hooks/chat-handler/utils/tool-signature';
 import {processToolUse} from '@/message-handler';
 import {color, write, writeError, writeLine, writeStatus} from '@/plain/writer';
 import {parseToolCalls} from '@/tool-calling/index';
@@ -111,18 +116,6 @@ const FINAL_TURN_INSTRUCTION =
 	'You have reached the maximum number of tool-execution turns for this run. ' +
 	'Do not call any more tools. Produce your final answer now using only the ' +
 	'information you already have.';
-
-// Sent after a turn the provider truncated at its output-token limit. The
-// partial reply is already in the history above this, so the model can see
-// where it was cut off. The explicit steer away from re-explaining exists
-// because the commonest way to spend a whole output budget without finishing
-// is narrating analysis that was only ever meant to end in a tool call.
-const TRUNCATED_TURN_INSTRUCTION =
-	'Your previous reply was cut off at the output-token limit before it ' +
-	'finished. Continue from exactly where it stopped. Do not repeat or ' +
-	'summarise what you already wrote, and keep any remaining explanation ' +
-	'brief. If the task requires a tool call to be complete, make that call ' +
-	'now rather than describing what it would do.';
 
 /**
  * Headless conversation loop. Streams assistant text to stdout, runs tools
@@ -229,20 +222,9 @@ async function runPlainConversationBody(
 	// Agent-loop retry limits (`nanocoder.retries`): the same caps the
 	// interactive loop applies. There is nobody to ask in a plain run, so
 	// hitting any of them hard-stops with a clear error instead of pausing.
-	const {
-		maxRepeatedToolCalls,
-		maxEmptyTurns,
-		maxMalformedRetries,
-		maxTruncatedTurns,
-	} = getRetryLimits();
-
-	// Consecutive-failure streaks. Each kind of failing turn increments its own
-	// counter and resets the others; any healthy turn resets all of them.
-	let emptyTurnCount = 0;
-	let malformedRetryCount = 0;
-	let truncatedTurnCount = 0;
-	let lastToolSignature = '';
-	let repeatedToolCallCount = 0;
+	const retryLimits = getRetryLimits();
+	const {maxEmptyTurns, maxMalformedRetries, maxTruncatedTurns} = retryLimits;
+	const guards = createHeadlessRetryGuards(retryLimits);
 
 	// Count this turn's tool-call signature against the repeated-call streak.
 	// Returns the hard-stop outcome when the cap is hit, null otherwise. Called
@@ -251,31 +233,20 @@ async function runPlainConversationBody(
 	const trackRepeatedToolCalls = (
 		turnToolCalls: ToolCall[],
 	): PlainConversationOutcome | null => {
-		const currentToolSignature = computeToolCallSignature(turnToolCalls);
-		const currentRepeatedCount =
-			currentToolSignature && currentToolSignature === lastToolSignature
-				? repeatedToolCallCount + 1
-				: 1;
-		if (currentRepeatedCount >= maxRepeatedToolCalls) {
-			// No writeError here: the caller prints every `error` outcome's
-			// message once (source/plain/shell.ts), and --json reports it in the
-			// report instead.
-			const message = `Model repeated the same tool call ${currentRepeatedCount} times in a row without making progress — stopping to avoid a loop (nanocoder.retries.maxRepeatedToolCalls = ${maxRepeatedToolCalls}).`;
-			return {
-				kind: 'error',
-				message,
-				finalText: accumulatedFinalText,
-				reasoning: accumulatedReasoning || null,
-				toolCalls: toolCallsLog,
-				steps,
-				usage: getUsage(),
-			};
-		}
-		lastToolSignature = currentToolSignature;
-		repeatedToolCallCount = currentRepeatedCount;
-		emptyTurnCount = 0;
-		malformedRetryCount = 0;
-		return null;
+		const message = guards.toolCalls(turnToolCalls);
+		if (!message) return null;
+		// No writeError here: the caller prints every `error` outcome's
+		// message once (source/plain/shell.ts), and --json reports it in the
+		// report instead.
+		return {
+			kind: 'error',
+			message,
+			finalText: accumulatedFinalText,
+			reasoning: accumulatedReasoning || null,
+			toolCalls: toolCallsLog,
+			steps,
+			usage: getUsage(),
+		};
 	};
 
 	for (let turn = 0; turn < maxTurns; turn++) {
@@ -471,12 +442,12 @@ async function runPlainConversationBody(
 			// Same self-correction loop the interactive runtime runs: feed the
 			// parse error back to the model, capped so a model stuck producing
 			// bad tool calls cannot drain tokens unbounded.
-			if (malformedRetryCount >= maxMalformedRetries) {
+			const verdict = guards.malformed();
+			if (verdict.action === 'stop') {
 				// The caller prints the `error` outcome message; see above.
-				const message = `Model produced malformed tool calls ${maxMalformedRetries + 1} time${maxMalformedRetries === 0 ? '' : 's'} in a row and cannot self-correct — stopping (nanocoder.retries.maxMalformedRetries = ${maxMalformedRetries}).`;
 				return {
 					kind: 'error',
-					message,
+					message: verdict.message,
 					finalText: accumulatedFinalText,
 					reasoning: accumulatedReasoning || null,
 					toolCalls: toolCallsLog,
@@ -484,15 +455,11 @@ async function runPlainConversationBody(
 					usage: getUsage(),
 				};
 			}
-			malformedRetryCount += 1;
-			emptyTurnCount = 0;
-			lastToolSignature = '';
-			repeatedToolCallCount = 0;
 			accumulatedFinalText = finalTextBeforeTurn;
 			accumulatedReasoning = reasoningBeforeTurn;
 			if (!isJson) {
 				writeError(
-					`Malformed tool call: ${xmlParse.error} — asking the model to retry (${malformedRetryCount}/${maxMalformedRetries}).`,
+					`Malformed tool call: ${xmlParse.error} — asking the model to retry (${verdict.attempt}/${maxMalformedRetries}).`,
 				);
 			}
 			messages = [
@@ -500,7 +467,7 @@ async function runPlainConversationBody(
 				{role: 'assistant', content: fullContent},
 				{
 					role: 'user',
-					content: `Your previous response contained a malformed tool call. ${xmlParse.error}\n\n${xmlParse.examples}\n\nPlease try again using the correct format.`,
+					content: malformedToolCallNudge(xmlParse.error, xmlParse.examples),
 				},
 			];
 			continue;
@@ -599,13 +566,12 @@ async function runPlainConversationBody(
 			if (!cleanedContent.trim()) {
 				// Nudge through consecutive empty turns up to the cap, mirroring
 				// the interactive loop, then stop so a silent model cannot spin.
-				if (emptyTurnCount >= maxEmptyTurns) {
-					const attempts = maxEmptyTurns + 1;
+				const verdict = guards.empty();
+				if (verdict.action === 'stop') {
 					// The caller prints the `error` outcome message; see above.
-					const message = `Model produced no output after ${attempts} attempt${attempts === 1 ? '' : 's'} — stopping (nanocoder.retries.maxEmptyTurns = ${maxEmptyTurns}).`;
 					return {
 						kind: 'error',
-						message,
+						message: verdict.message,
 						finalText: accumulatedFinalText,
 						reasoning: accumulatedReasoning || null,
 						toolCalls: toolCallsLog,
@@ -613,21 +579,14 @@ async function runPlainConversationBody(
 						usage: getUsage(),
 					};
 				}
-				emptyTurnCount += 1;
-				malformedRetryCount = 0;
-				lastToolSignature = '';
-				repeatedToolCallCount = 0;
 				if (!isJson) {
 					// Count attempts, not nudges, so the denominator matches the
 					// "no output after N attempts" stop message below.
 					writeStatus(
-						`empty response — retry ${emptyTurnCount}/${maxEmptyTurns + 1}`,
+						`empty response — retry ${verdict.attempt}/${maxEmptyTurns + 1}`,
 					);
 				}
-				messages = [
-					...messages,
-					{role: 'user', content: 'Please continue with the task.'},
-				];
+				messages = [...messages, {role: 'user', content: EMPTY_TURN_NUDGE}];
 				continue;
 			}
 			// A turn the provider cut off at its output-token limit is a fragment,
@@ -648,15 +607,11 @@ async function runPlainConversationBody(
 			// asked for a wrap-up: there is no turn left to continue into, so
 			// returning the fragment beats burning the last one.
 			if (result.finishReason === 'length' && !finalTurn) {
-				if (truncatedTurnCount < maxTruncatedTurns) {
-					truncatedTurnCount += 1;
-					emptyTurnCount = 0;
-					malformedRetryCount = 0;
-					lastToolSignature = '';
-					repeatedToolCallCount = 0;
+				const verdict = guards.truncated();
+				if (verdict.action === 'retry') {
 					if (!isJson) {
 						writeStatus(
-							`response truncated at the output limit — continuing ${truncatedTurnCount}/${maxTruncatedTurns}`,
+							`response truncated at the output limit — continuing ${verdict.attempt}/${maxTruncatedTurns}`,
 						);
 					}
 					// The truncated reply is already in `messages` — the
@@ -669,9 +624,7 @@ async function runPlainConversationBody(
 					continue;
 				}
 				if (!isJson) {
-					writeStatus(
-						`response truncated at the output limit after ${maxTruncatedTurns} continuation${maxTruncatedTurns === 1 ? '' : 's'} — stopping`,
-					);
+					writeStatus(verdict.message);
 				}
 			}
 
