@@ -15,6 +15,11 @@ import {AcpAgent} from '@/acp/acp-agent';
 import type {AcpInitContext} from '@/acp/acp-types';
 import {clearAppConfig, getAppConfig} from '@/config';
 import {
+	grantDirectoryTrust,
+	loadPreferences,
+	savePreferences,
+} from '@/config/preferences';
+import {
 	setToolRegistryGetter,
 	setToolManagerGetter,
 } from '@/message-handler';
@@ -3559,4 +3564,86 @@ test.serial('AcpAgent - session-end hooks run when a session closes and at shutd
 		},
 	);
 	rmSync(marker, {force: true});
+});
+
+// ============================================================================
+// Directory trust for session cwds
+// ============================================================================
+
+const trustAgent = (launchDirectory: string) => {
+	const context = createMockInitContext();
+	context.launchDirectory = launchDirectory;
+	return new AcpAgent(context, createMockConn());
+};
+
+const freshDir = (label: string) => {
+	const dir = join(tmpdir(), `nanocoder-acp-trust-${label}-${randomUUID()}`);
+	mkdirSync(dir, {recursive: true});
+	return dir;
+};
+
+test.serial('AcpAgent - a session in an untrusted folder is refused with the trust-required error', async t => {
+	const launch = freshDir('launch');
+	const other = freshDir('other');
+	try {
+		const agent = trustAgent(launch);
+		const error = await t.throwsAsync(agent.newSession({cwd: other}));
+		t.is((error as any).code, -32003);
+		t.deepEqual((error as any).data, {
+			'nanocoder/trustRequired': {cwd: other, status: 'not-trusted'},
+		});
+		t.regex(error!.message, /nanocoder trust --status/);
+
+		// The folder the server was started in passed the server's own check.
+		await t.notThrowsAsync(agent.newSession({cwd: launch}));
+	} finally {
+		rmSync(launch, {recursive: true, force: true});
+		rmSync(other, {recursive: true, force: true});
+	}
+});
+
+test.serial('AcpAgent - a session in a trusted folder starts', async t => {
+	const launch = freshDir('launch');
+	const other = freshDir('trusted');
+	const before = loadPreferences();
+	try {
+		savePreferences(grantDirectoryTrust(loadPreferences(), other));
+		const agent = trustAgent(launch);
+		const {sessionId} = await agent.newSession({cwd: other});
+		t.truthy(sessionId);
+	} finally {
+		savePreferences(before);
+		rmSync(launch, {recursive: true, force: true});
+		rmSync(other, {recursive: true, force: true});
+	}
+});
+
+test.serial('AcpAgent - load and resume refuse a saved session whose folder is not trusted', async t => {
+	const launch = freshDir('launch');
+	const other = freshDir('saved');
+	const before = loadPreferences();
+	try {
+		// Saved while the folder was trusted, then trust is withdrawn.
+		savePreferences(grantDirectoryTrust(loadPreferences(), other));
+		const writer = trustAgent(launch);
+		const {sessionId} = await writer.newSession({cwd: other});
+		await writer.prompt({sessionId, prompt: [{type: 'text', text: 'hi'}]});
+		savePreferences(before);
+
+		const agent = trustAgent(launch);
+		const loadError = await t.throwsAsync(
+			agent.loadSession({sessionId, cwd: other, mcpServers: []}),
+		);
+		t.is((loadError as any).code, -32003);
+		const resumeError = await t.throwsAsync(
+			agent.resumeSession({sessionId, cwd: launch}),
+		);
+		t.is((resumeError as any).code, -32003);
+		t.false((agent as any).sessions.has(sessionId));
+		await writer.deleteSession({sessionId});
+	} finally {
+		savePreferences(before);
+		rmSync(launch, {recursive: true, force: true});
+		rmSync(other, {recursive: true, force: true});
+	}
 });

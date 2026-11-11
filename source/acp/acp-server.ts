@@ -53,6 +53,7 @@ export async function runAcpServer(
 				cliModel: options.cliModel,
 			})),
 			initialMode: options.mode,
+			launchDirectory: process.cwd(),
 		};
 	} catch (error) {
 		const msg = `ACP initialization failed: ${error instanceof Error ? error.message : String(error)}`;
