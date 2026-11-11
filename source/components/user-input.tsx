@@ -1,11 +1,11 @@
 import {Box, Text, useFocus, useInput} from 'ink';
 import Spinner from 'ink-spinner';
 import {useCallback, useEffect, useRef, useState} from 'react';
-import stringWidth from 'string-width';
 import {AttachmentPills} from '@/components/composer/attachment-pills';
 import {CommandCompletionList} from '@/components/composer/command-completion-list';
 import {FileMentionList} from '@/components/composer/file-mention-list';
 import {isComposerKey} from '@/components/composer/keymap';
+import {QueuedMessageList} from '@/components/composer/queued-message-list';
 import {ReverseSearchPrompt} from '@/components/composer/reverse-search-prompt';
 import {ShortcutsOverlay} from '@/components/composer/shortcuts-overlay';
 import {useCommandCompletions} from '@/components/composer/useCommandCompletions';
@@ -14,6 +14,7 @@ import {
 	collectDroppedImages,
 	useImageAttachments,
 } from '@/components/composer/useImageAttachments';
+import {useQueuedMessageSelection} from '@/components/composer/useQueuedMessageSelection';
 import {useReverseSearch} from '@/components/composer/useReverseSearch';
 import {useShortcutsOverlay} from '@/components/composer/useShortcutsOverlay';
 import {
@@ -53,9 +54,6 @@ import type {ActiveEditorState} from '@/vscode/vscode-server';
 
 // Prompt box width floor: keeps narrow terminals legible.
 const PROMPT_WIDTH_MIN = 40;
-// Columns a queued-message row loses inside the prompt box: the rounded
-// border (2), paddingX (2), and the '▸ '/'  ' selection marker (2).
-const QUEUED_ROW_OVERHEAD = 6;
 
 interface ChatProps {
 	onSubmit?: (
@@ -184,7 +182,6 @@ export default function UserInput({
 		displayValue: '',
 		placeholderContent: {},
 	});
-	const [selectedQueuedIndex, setSelectedQueuedIndex] = useState(-1);
 	// Pending image attachments sent with the next submitted message.
 	const images = useImageAttachments();
 	const {attachments} = images;
@@ -289,17 +286,6 @@ export default function UserInput({
 		images.replace,
 	]);
 
-	useEffect(() => {
-		if (queuedMessages.length === 0) {
-			setSelectedQueuedIndex(-1);
-			return;
-		}
-
-		setSelectedQueuedIndex(index =>
-			index >= queuedMessages.length ? queuedMessages.length - 1 : index,
-		);
-	}, [queuedMessages.length]);
-
 	// When in-flight work ends, reclaim focus so the cursor returns and the user
 	// can type right away. Focus can be dropped mid-turn (e.g. an interstitial
 	// tool-confirmation prompt unmounts the input), and useFocus autoFocus only
@@ -316,6 +302,27 @@ export default function UserInput({
 		() => setTextInputKey(prev => prev + 1),
 		[],
 	);
+	// Picking, editing and removing queued messages from an empty prompt.
+	const loadQueuedForEditing = useCallback(
+		(message: QueuedUserMessage) => {
+			setInputState(
+				message.inputState ?? {
+					displayValue: message.displayValue,
+					placeholderContent: {},
+				},
+			);
+			images.replace(message.images ?? []);
+			remountTextInput();
+		},
+		[setInputState, images.replace, remountTextInput],
+	);
+
+	const queue = useQueuedMessageSelection({
+		queuedMessages,
+		input,
+		onRemoveQueuedMessage,
+		onLoadForEditing: loadQueuedForEditing,
+	});
 	// `@` file / MCP-resource mentions and the explorer's file handoff.
 	const mentions = useFileMentions({
 		input,
@@ -374,7 +381,7 @@ export default function UserInput({
 			resetUIState();
 			images.clear();
 			promptHistory.resetIndex();
-			setSelectedQueuedIndex(-1);
+			queue.resetSelection();
 			return;
 		}
 
@@ -392,7 +399,7 @@ export default function UserInput({
 		resetUIState();
 		images.clear();
 		promptHistory.resetIndex();
-		setSelectedQueuedIndex(-1);
+		queue.resetSelection();
 	}, [
 		attachments,
 		onSubmit,
@@ -404,6 +411,7 @@ export default function UserInput({
 		onSubmittedDraft,
 		onDismissSuggestion,
 		images.clear,
+		queue.resetSelection,
 	]);
 
 	// Handle escape key logic
@@ -537,85 +545,6 @@ export default function UserInput({
 		[updateInput, isShortcutsOpenNow],
 	);
 
-	const handleQueueNavigation = useCallback(
-		(direction: 'up' | 'down') => {
-			if (input.length > 0 || queuedMessages.length === 0) {
-				return false;
-			}
-
-			if (direction === 'up') {
-				// At the input (-1) there's nothing above the queue, so let the press
-				// fall through to history navigation. From the first queued item, step
-				// back up to the input.
-				if (selectedQueuedIndex < 0) {
-					return false;
-				}
-				setSelectedQueuedIndex(selectedQueuedIndex - 1);
-				return true;
-			}
-
-			// Down enters the queue from the input, then walks toward the last item
-			// and stops there (no wrap-around).
-			if (selectedQueuedIndex >= queuedMessages.length - 1) {
-				return selectedQueuedIndex >= 0;
-			}
-			setSelectedQueuedIndex(selectedQueuedIndex + 1);
-			return true;
-		},
-		[input.length, queuedMessages.length, selectedQueuedIndex],
-	);
-
-	const loadSelectedQueuedMessage = useCallback(() => {
-		if (
-			input.length > 0 ||
-			selectedQueuedIndex < 0 ||
-			selectedQueuedIndex >= queuedMessages.length
-		) {
-			return false;
-		}
-
-		const queuedMessage = queuedMessages[selectedQueuedIndex];
-		setInputState(
-			queuedMessage.inputState ?? {
-				displayValue: queuedMessage.displayValue,
-				placeholderContent: {},
-			},
-		);
-		images.replace(queuedMessage.images ?? []);
-		onRemoveQueuedMessage?.(queuedMessage.id);
-		setSelectedQueuedIndex(-1);
-		setTextInputKey(prev => prev + 1);
-		return true;
-	}, [
-		input.length,
-		selectedQueuedIndex,
-		queuedMessages,
-		setInputState,
-		onRemoveQueuedMessage,
-		images.replace,
-	]);
-
-	const removeSelectedQueuedMessage = useCallback(() => {
-		if (
-			input.length > 0 ||
-			selectedQueuedIndex < 0 ||
-			selectedQueuedIndex >= queuedMessages.length
-		) {
-			return false;
-		}
-
-		onRemoveQueuedMessage?.(queuedMessages[selectedQueuedIndex].id);
-		setSelectedQueuedIndex(index =>
-			index >= queuedMessages.length - 1 ? queuedMessages.length - 2 : index,
-		);
-		return true;
-	}, [
-		input.length,
-		selectedQueuedIndex,
-		queuedMessages,
-		onRemoveQueuedMessage,
-	]);
-
 	const rawInputRef = useRawInput();
 
 	useInput((inputChar, key) => {
@@ -690,9 +619,9 @@ export default function UserInput({
 		}
 
 		// Delete/Backspace removes the highlighted queued message. Safe to bind
-		// bare: removeSelectedQueuedMessage no-ops unless a queued item is selected
-		// and the input is empty, so normal backspace-to-edit still falls through.
-		if ((key.delete || key.backspace) && removeSelectedQueuedMessage()) {
+		// bare: removeSelected no-ops unless a queued item is selected and the
+		// input is empty, so normal backspace-to-edit still falls through.
+		if ((key.delete || key.backspace) && queue.removeSelected()) {
 			return;
 		}
 
@@ -809,7 +738,7 @@ export default function UserInput({
 
 		// Handle Enter to submit (fallthrough - if completion handler didn't return)
 		if (key.return && !key.shift) {
-			if (loadSelectedQueuedMessage()) {
+			if (queue.loadSelected()) {
 				return;
 			}
 			handleSubmit();
@@ -829,7 +758,7 @@ export default function UserInput({
 			if (commands.moveSelection('up')) {
 				return;
 			}
-			if (handleQueueNavigation('up')) {
+			if (queue.navigate('up')) {
 				return;
 			}
 			handleHistoryNavigation('up');
@@ -848,7 +777,7 @@ export default function UserInput({
 			if (commands.moveSelection('down')) {
 				return;
 			}
-			if (handleQueueNavigation('down')) {
+			if (queue.navigate('down')) {
 				return;
 			}
 			handleHistoryNavigation('down');
@@ -857,31 +786,6 @@ export default function UserInput({
 	});
 
 	const textColor = disabled || !input ? colors.secondary : colors.primary;
-	const formatQueuedMessage = (message: QueuedUserMessage) => {
-		const imageSuffix =
-			message.images && message.images.length > 0
-				? ` (${message.images.length} image${message.images.length === 1 ? '' : 's'})`
-				: '';
-		const singleLine = message.displayValue.replace(/\s+/g, ' ').trim();
-		// Budget against the prompt box the row actually renders in, not the
-		// terminal: the box is promptWidth wide, minus its border (2) and
-		// paddingX (2), minus the '▸ '/'  ' marker (2). Anything wider wraps.
-		const maxLength = Math.max(
-			8,
-			promptWidth - QUEUED_ROW_OVERHEAD - stringWidth(imageSuffix),
-		);
-		// cli-truncate can overshoot by a column when the cut falls inside a
-		// double-width character, so re-truncate until it really fits.
-		let text = truncate(singleLine, maxLength);
-		for (
-			let budget = maxLength - 1;
-			stringWidth(text) > maxLength && budget > 0;
-			budget--
-		) {
-			text = truncate(singleLine, budget);
-		}
-		return `${text}${imageSuffix}`;
-	};
 
 	// When disabled, show minimal UI to avoid cluttering the screen
 	if (disabled) {
@@ -989,24 +893,12 @@ export default function UserInput({
 						/>
 					)}
 					{queuedMessages.length > 0 && (
-						<Box flexDirection="column" marginTop={1}>
-							<Text color={colors.secondary}>
-								Queued messages (↑/↓ select, Enter edit, Del remove):
-							</Text>
-							{queuedMessages.map((message, index) => {
-								const isSelected = index === selectedQueuedIndex;
-								return (
-									<Text
-										key={message.id}
-										color={isSelected ? colors.info : colors.primary}
-										bold={isSelected}
-									>
-										{isSelected ? '▸ ' : '  '}
-										{formatQueuedMessage(message)}
-									</Text>
-								);
-							})}
-						</Box>
+						<QueuedMessageList
+							messages={queuedMessages}
+							selectedIndex={queue.selectedIndex}
+							promptWidth={promptWidth}
+							truncate={truncate}
+						/>
 					)}
 					{isBusy && (
 						<Box marginTop={1}>
