@@ -1,4 +1,4 @@
-import {mkdtempSync, rmSync} from 'node:fs';
+import {existsSync, mkdtempSync, rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
@@ -535,6 +535,45 @@ test.serial('/compact completes at once with nothing to compact, after render ot
 		t.is(completed, 2);
 	} finally {
 		resetAutoCompactSession();
+	}
+});
+
+test.serial('/custom-commands is the old name of /commands', async t => {
+	const originalCwd = process.cwd();
+	const workspace = mkdtempSync(join(tmpdir(), 'dispatcher-custom-commands-'));
+	process.chdir(workspace);
+	try {
+		const listed: React.ReactNode[] = [];
+		await dispatchSlashCommand(
+			'/custom-commands',
+			createOptions({onAddToChatQueue: node => listed.push(node)}),
+		);
+		await wait(0);
+		const viaCommands: React.ReactNode[] = [];
+		await dispatchSlashCommand(
+			'/commands',
+			createOptions({onAddToChatQueue: node => viaCommands.push(node)}),
+		);
+		await wait(0);
+		t.is(
+			(listed[0] as React.ReactElement).type,
+			(viaCommands[0] as React.ReactElement).type,
+		);
+
+		const prompts: string[] = [];
+		await dispatchSlashCommand(
+			'/custom-commands create review-code',
+			createOptions({
+				onHandleChatMessage: async message => {
+					prompts.push(message);
+				},
+			}),
+		);
+		t.true(existsSync(join(workspace, '.nanocoder', 'commands', 'review-code.md')));
+		t.is(prompts.length, 1);
+	} finally {
+		process.chdir(originalCwd);
+		rmSync(workspace, {recursive: true, force: true});
 	}
 });
 

@@ -247,7 +247,7 @@ test('with the guards and text parsing off, any content-only reply finishes', as
 		},
 		{
 			policy: {
-				parseTextToolCalls: false,
+				textToolCalls: 'off',
 				emptyTurnGuard: false,
 				truncatedTurnGuard: false,
 				repeatedToolCallGuard: false,
@@ -273,11 +273,11 @@ test('the repeated-call guard can be switched off', async t => {
 	t.deepEqual(await run(), {kind: 'completed', modelCalls: 4});
 });
 
-test('onToolCallsEmitted runs before the turn is recorded, onTurnRecorded after', async t => {
+test('onAssistantTurn runs before the turn is recorded, onTurnRecorded after', async t => {
 	const seen: Array<[string, number]> = [];
 	const {run, history} = setup([call('a'), text('done')], {
-		onToolCallsEmitted: calls => {
-			seen.push([`emitted:${calls.length}`, history().length]);
+		onAssistantTurn: ({toolCalls}) => {
+			seen.push([`emitted:${toolCalls.length}`, history().length]);
 		},
 		onTurnRecorded: () => {
 			seen.push(['recorded', history().length]);
@@ -287,15 +287,277 @@ test('onToolCallsEmitted runs before the turn is recorded, onTurnRecorded after'
 	t.deepEqual(seen, [
 		['emitted:1', 1],
 		['recorded', 2],
+		['emitted:0', 3],
 		['recorded', 4],
 	]);
 });
 
 test('a throw from an adapter hook ends the run with that error', async t => {
 	const {run} = setup([call('a')], {
-		onToolCallsEmitted: () => {
+		onAssistantTurn: () => {
 			throw new Error('stuck');
 		},
 	});
 	await t.throwsAsync(run(), {message: 'stuck'});
+});
+
+// --- Options and hooks the interactive TUI needs ---
+
+const XML_PROBE = '<probe>\n  <id>x</id>\n</probe>';
+
+const executedIds = (history: Message[]) =>
+	history.filter(m => m.role === 'tool').map(m => m.tool_call_id);
+
+test('fallback parsing leaves text tool calls on a native turn alone', async t => {
+	const {run, history} = setup([text(XML_PROBE)]);
+	t.deepEqual(await run(), {kind: 'completed', modelCalls: 1});
+	t.deepEqual(executedIds(history()), []);
+});
+
+test('whenever-no-native parses text tool calls on a native turn', async t => {
+	const {run, history} = setup(
+		[text(XML_PROBE), text('done')],
+		{},
+		{policy: {textToolCalls: 'whenever-no-native'}},
+	);
+	t.deepEqual(await run(), {kind: 'completed', modelCalls: 2});
+	const assistant = history().find(m => m.role === 'assistant');
+	t.is(assistant?.tool_calls?.[0]?.function.name, 'probe');
+	t.is(executedIds(history()).length, 1);
+});
+
+test('whenever-no-native strips tool-call text echoed beside native calls', async t => {
+	const echoed: Reply = {
+		choices: [
+			{
+				message: {
+					role: 'assistant',
+					content: `Reading it.\n${XML_PROBE}`,
+					tool_calls: [{id: 'a', function: {name: 'probe', arguments: {}}}],
+				},
+			},
+		],
+	};
+	const {run, history} = setup(
+		[echoed, text('done')],
+		{},
+		{policy: {textToolCalls: 'whenever-no-native'}},
+	);
+	await run();
+	const assistant = history().find(m => m.role === 'assistant');
+	t.is(String(assistant?.content).trim(), 'Reading it.');
+	t.deepEqual(executedIds(history()), ['a']);
+});
+
+test('stripThinkTags drops think blocks from the recorded text', async t => {
+	const answers: string[] = [];
+	const {run} = setup(
+		[text('<think>pondering</think>The answer.')],
+		{
+			onFinalAnswer: ({content}) => {
+				answers.push(content);
+				return {kind: 'finish'};
+			},
+		},
+		{policy: {stripThinkTags: true}},
+	);
+	await run();
+	t.deepEqual(answers, ['The answer.']);
+});
+
+test('maxToolCallsPerTurn keeps only the first calls', async t => {
+	const twoCalls: Reply = {
+		choices: [
+			{
+				message: {
+					role: 'assistant',
+					content: '',
+					tool_calls: [
+						{id: 'a', function: {name: 'probe', arguments: {}}},
+						{id: 'b', function: {name: 'probe', arguments: {}}},
+					],
+				},
+			},
+		],
+	};
+	const {run, history} = setup(
+		[twoCalls, text('done')],
+		{},
+		{policy: {maxToolCallsPerTurn: 1}},
+	);
+	await run();
+	t.deepEqual(executedIds(history()), ['a']);
+});
+
+test('repeatSignature emitted ignores calls that never reach history', async t => {
+	// A call with no id is dropped by the partition. Keyed on every emitted
+	// call it breaks the streak; keyed on the recorded calls it does not.
+	const withStray: Reply = {
+		choices: [
+			{
+				message: {
+					role: 'assistant',
+					content: '',
+					tool_calls: [
+						{id: 'a', function: {name: 'probe', arguments: {id: 'a'}}},
+						{id: '', function: {name: 'probe', arguments: {}}},
+					],
+				},
+			},
+		],
+	};
+	const replies = () => [call('a'), withStray, call('a'), text('done')];
+
+	const all = await setup(replies()).run();
+	t.is(all.kind, 'completed');
+
+	const emitted = await setup(
+		replies(),
+		{},
+		{policy: {repeatSignature: 'emitted'}},
+	).run();
+	t.is(emitted.kind, 'guard-stop');
+});
+
+test('with abortBetweenTurns off, the model call raises the abort', async t => {
+	const controller = new AbortController();
+	controller.abort();
+	const {run, requests} = setup(
+		[new Error('This operation was aborted')],
+		{},
+		{signal: controller.signal, policy: {abortBetweenTurns: false}},
+	);
+	const result = await run();
+	t.is(requests.length, 1);
+	t.is(result.kind, 'aborted');
+	if (result.kind === 'aborted') {
+		t.is((result.error as Error).message, 'This operation was aborted');
+	}
+});
+
+test('emptyTurnNudge words the nudge, and onEmptyRetry is told it', async t => {
+	const retries: Array<[number, string]> = [];
+	const {run, requests} = setup([text(''), text('done')], {
+		emptyTurnNudge: history => `nudge after ${history.length}`,
+		onEmptyRetry: (attempt, nudge) => {
+			retries.push([attempt, nudge]);
+		},
+	});
+	await run();
+	t.deepEqual(retries, [[1, 'nudge after 1']]);
+	t.deepEqual(requests[1].at(-1), {role: 'user', content: 'nudge after 1'});
+});
+
+test('onEmptyTurnsExhausted can replace history and reset the guards', async t => {
+	let exhausted = 0;
+	const {run, history} = setup(
+		// Default maxEmptyTurns = 2: three empties hit the cap, the replacement
+		// history buys another three.
+		[text(''), text(''), text(''), text(''), text(''), text('done')],
+		{
+			onEmptyTurnsExhausted: async () => {
+				exhausted++;
+				return exhausted === 1
+					? [{role: 'user', content: 'compacted, carry on'}]
+					: undefined;
+			},
+		},
+	);
+	t.deepEqual(await run(), {kind: 'completed', modelCalls: 6});
+	t.is(exhausted, 1);
+	t.is(history()[0].content, 'compacted, carry on');
+});
+
+test('onEmptyTurnsExhausted returning nothing stops at the cap', async t => {
+	const {run} = setup([text(''), text(''), text('')], {
+		onEmptyTurnsExhausted: async () => undefined,
+	});
+	const result = await run();
+	t.is(result.kind, 'guard-stop');
+	if (result.kind === 'guard-stop') t.is(result.guard, 'empty');
+});
+
+test('onRepeatedToolCalls continue grants a fresh window and counts the total', async t => {
+	const asked: Array<{total: number; unrun: string[]}> = [];
+	const {run, history} = setup(
+		[call('a'), call('a'), call('a'), call('a'), call('a'), call('a')],
+		{
+			onRepeatedToolCalls: async info => {
+				asked.push({
+					total: info.total,
+					unrun: info.unrunToolCalls.map(c => c.id),
+				});
+				return asked.length === 1 ? 'continue' : 'stop';
+			},
+		},
+	);
+	const result = await run();
+	t.is(result.kind, 'guard-stop');
+	// Asked at the 3rd identical turn, then again 3 turns later (the 6th).
+	t.deepEqual(asked, [
+		{total: 3, unrun: ['a']},
+		{total: 6, unrun: ['a']},
+	]);
+	// The granted 3rd call ran, and so did the 4th and 5th.
+	t.is(executedIds(history()).length, 5);
+});
+
+test('a final-answer continue can reset the retry guards', async t => {
+	const replies = () => [
+		call('a'),
+		call('a'),
+		text('summary'),
+		call('a'),
+		text('done'),
+	];
+	const onFinalAnswer =
+		(resetRetryGuards: boolean) =>
+		({content}: {content: string}) =>
+			content === 'summary'
+				? {
+						kind: 'continue' as const,
+						messages: [{role: 'user' as const, content: 'one more'}],
+						resetRetryGuards,
+					}
+				: {kind: 'finish' as const};
+
+	const kept = await setup(replies(), {onFinalAnswer: onFinalAnswer(false)}).run();
+	t.is(kept.kind, 'guard-stop', 'the streak survives a plain nudge');
+
+	const reset = await setup(replies(), {onFinalAnswer: onFinalAnswer(true)}).run();
+	t.is(reset.kind, 'completed');
+});
+
+test('tool outcome messages are recorded right after the results, in one write', async t => {
+	let messages: Message[] = [{role: 'user', content: 'go'}];
+	const writes: string[][] = [];
+	const {run} = setup([call('a'), text('done')], {
+		history: {
+			get: () => messages,
+			set: next => {
+				writes.push(next.slice(messages.length).map(m => m.role));
+				messages = next;
+			},
+		},
+		executeTools: async calls => ({
+			kind: 'continue',
+			results: calls.map(resultFor),
+			messages: [{role: 'user', content: 'diagnostics'}],
+		}),
+	});
+	await run();
+	t.deepEqual(writes, [['assistant'], ['tool', 'user'], ['assistant']]);
+	t.is(messages[3].content, 'diagnostics');
+});
+
+test('onTurnRecorded is told the recorded assistant message', async t => {
+	const recorded: Array<{content?: string; compacted: boolean}> = [];
+	const {run} = setup([text('')], {
+		onTurnRecorded: ({assistantMessage, compacted}) => {
+			recorded.push({content: assistantMessage?.content, compacted});
+		},
+	}, {policy: {emptyTurnGuard: false}});
+	await run();
+	// An empty turn records nothing.
+	t.deepEqual(recorded, [{content: undefined, compacted: false}]);
 });

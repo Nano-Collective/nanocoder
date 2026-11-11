@@ -876,7 +876,7 @@ export class SubagentExecutor {
 					rejectedToolCalls: [],
 					errorResults: [],
 				}),
-				onToolCallsEmitted: toolCalls => {
+				onAssistantTurn: ({toolCalls}) => {
 					// Count tokens from tool call arguments
 					for (const tc of toolCalls) {
 						const argStr =
