@@ -74,7 +74,7 @@
 				},
 				"hooks": {
 					"$ref": "#/definitions/HooksConfig",
-					"description": "Shell commands run at fixed points in the agent loop, keyed by lifecycle\nevent. Project-local, so this carries the same code-execution weight as\n`mcpServers` above."
+					"description": "Shell commands run at fixed points in the agent loop, keyed by lifecycle\nevent. A project-local file can set these, so they carry the same\ncode-execution weight as project MCP servers (`.mcp.json`) and are\ngated behind directory trust."
 				},
 				"lspServers": {
 					"description": "LSP server configurations (optional — auto-discovery enabled by default).",
@@ -151,6 +151,10 @@
 				"tune": {
 					"$ref": "#/definitions/TuneConfig",
 					"description": "Model mode defaults (tool profile, tool mode, model parameters)."
+				},
+				"verify": {
+					"$ref": "#/definitions/VerifyConfig",
+					"description": "Project-level verify policy: CI-watch trust level and poll cadence.\nRead by `loadVerifyConfig()`."
 				}
 			},
 			"type": "object",
@@ -749,6 +753,24 @@
 				},
 				"mode": {
 					"enum": ["append", "replace"],
+					"type": "string"
+				}
+			},
+			"type": "object",
+			"additionalProperties": false
+		},
+		"VerifyConfig": {
+			"description": "Project-level (`agents.config.json`) verify/CI-watch policy — trust level\nand poll cadence. Unlike `CiWatchConfig.enabled` (a personal, per-machine\nopt-in to background GitHub polling, kept in preferences), trust level\nand cadence are security/policy decisions appropriate to commit and\nreview with the rest of the project, so they live here instead. When\nset, `pollIntervalMs`/`maxPollIntervalMs` here override the\npreferences-backed `CiWatchConfig` values of the same name — see\n`loadCiWatchConfig` in `source/config/index.ts`.",
+			"properties": {
+				"maxPollIntervalMs": {
+					"type": "number"
+				},
+				"pollIntervalMs": {
+					"type": "number"
+				},
+				"trustLevel": {
+					"description": "Trust level for daemon-triggered CI investigation/auto-fix. Undefined\ndefers to the `--trust` CLI flag, then 'comment-only'.",
+					"enum": ["auto-fix", "comment-only", "full-commit"],
 					"type": "string"
 				}
 			},
