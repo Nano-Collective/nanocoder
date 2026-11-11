@@ -3,7 +3,7 @@ import {createStubCommand} from '@/commands/create-stub-command';
 /**
  * The /context-max command sets the maximum context length for the current session.
  *
- * Note: The actual command logic is handled in app-util.ts handleContextMaxCommand()
+ * Note: The actual command logic is handled in app/utils/handlers/context-max-handler.ts
  * because it requires access to app state that isn't available through the standard
  * command handler interface.
  *

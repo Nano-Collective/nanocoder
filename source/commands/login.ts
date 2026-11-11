@@ -9,7 +9,7 @@ export const loginCommand: Command = {
 	description:
 		'Log in to ChatGPT/Codex or GitHub Copilot with a device code (/login codex, /login copilot)',
 	handler: async () => {
-		// `/login codex|copilot` is intercepted in app-util.ts and rendered as a
+		// `/login codex|copilot` is intercepted by the command dispatcher and rendered as a
 		// live device-flow component. Reaching this handler means the target
 		// was missing or unknown.
 		return infoMsg(LOGIN_USAGE, 'login-usage');
