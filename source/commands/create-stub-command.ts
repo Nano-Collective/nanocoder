@@ -2,7 +2,7 @@ import React from 'react';
 import type {Command} from '@/types/commands';
 
 /**
- * Creates a stub command that is handled specially elsewhere (app.tsx / app-util.ts).
+ * Creates a stub command that is handled by a handler in app/utils/handlers/.
  * The handler returns an empty fragment — actual logic lives in the app layer
  * where full state context is available.
  */
