@@ -3,11 +3,35 @@ import { unlink, writeFile, readFile, mkdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
-import type { CachedModelsData } from './models-types.js';
+import type { CachedModelsData, ModelsIndex } from './models-types.js';
 import {
+	MODELS_CACHE_VERSION,
 	readCache,
 	writeCache,
 } from './models-cache.js';
+import { buildModelsIndex } from './models-index.js';
+
+// A small but valid index, in the format the cache stores
+function sampleIndex(...ids: string[]): ModelsIndex {
+	return buildModelsIndex({
+		provider: {
+			id: 'provider',
+			name: 'Provider',
+			env: [],
+			models: Object.fromEntries(
+				ids.map(id => [
+					id,
+					{
+						id,
+						name: id,
+						limit: { context: 8192, output: 4096 },
+						cost: { input: 1, output: 2 },
+					} as any,
+				]),
+			),
+		},
+	});
+}
 
 // Get the actual cache file path that will be used
 // We need to import dynamically to get the actual path at runtime
@@ -62,7 +86,8 @@ test('readCache returns null when cache file does not exist', async t => {
 
 test('readCache returns valid cached data', async t => {
 	const mockData: CachedModelsData = {
-		data: { models: [] } as any,
+		version: MODELS_CACHE_VERSION,
+		data: sampleIndex('model-a', 'model-b'),
 		fetchedAt: Date.now() - 1000,
 		expiresAt: Date.now() + 1000000, // Not expired
 	};
@@ -87,7 +112,8 @@ test('readCache returns valid cached data', async t => {
 
 test('readCache returns null when cache is expired', async t => {
 	const expiredData: CachedModelsData = {
-		data: { models: [] } as any,
+		version: MODELS_CACHE_VERSION,
+		data: sampleIndex('model-a'),
 		fetchedAt: Date.now() - 1000000,
 		expiresAt: Date.now() - 1000, // Expired
 	};
@@ -123,12 +149,55 @@ test('readCache returns null on JSON parse error', async t => {
 	t.is(result, null);
 });
 
+async function writeRawCacheFile(contents: unknown): Promise<void> {
+	await mkdir(join(actualCachePath, '..'), { recursive: true });
+	await writeFile(actualCachePath, JSON.stringify(contents), 'utf-8');
+}
+
+test('readCache ignores the old full-database format (no version)', async t => {
+	// What older versions wrote: { data: <providers keyed by id>, ... }
+	await writeRawCacheFile({
+		data: {
+			openai: { id: 'openai', name: 'OpenAI', env: [], models: {} },
+		},
+		fetchedAt: Date.now() - 1000,
+		expiresAt: Date.now() + 1000000,
+	});
+
+	t.is(await readCache(), null);
+});
+
+test('readCache ignores a cache with a different version', async t => {
+	await writeRawCacheFile({
+		version: MODELS_CACHE_VERSION + 1,
+		data: sampleIndex('model-a'),
+		fetchedAt: Date.now() - 1000,
+		expiresAt: Date.now() + 1000000,
+	});
+
+	t.is(await readCache(), null);
+});
+
+test('readCache ignores a current-version cache with malformed data', async t => {
+	const truncated = sampleIndex('model-a', 'model-b');
+	truncated.costOutput.pop();
+
+	await writeRawCacheFile({
+		version: MODELS_CACHE_VERSION,
+		data: truncated,
+		fetchedAt: Date.now() - 1000,
+		expiresAt: Date.now() + 1000000,
+	});
+
+	t.is(await readCache(), null);
+});
+
 // ============================================================================
 // Tests for writeCache
 // ============================================================================
 
 test('writeCache writes cache data correctly', async t => {
-	const mockData = { models: [{ id: 'test-model' }] } as any;
+	const mockData = sampleIndex('test-model');
 
 	await writeCache(mockData);
 
@@ -140,14 +209,22 @@ test('writeCache writes cache data correctly', async t => {
 	const content = await readFile(actualCachePath, 'utf-8');
 	const writtenData = JSON.parse(content) as CachedModelsData;
 
+	t.is(writtenData.version, MODELS_CACHE_VERSION);
 	t.truthy(writtenData.data);
 	t.truthy(writtenData.fetchedAt);
 	t.truthy(writtenData.expiresAt);
 	t.true(writtenData.expiresAt > Date.now());
 });
 
+test('writeCache writes minified JSON', async t => {
+	await writeCache(sampleIndex('model-a', 'model-b'));
+
+	const content = await readFile(actualCachePath, 'utf-8');
+	t.false(content.includes('\n'));
+});
+
 test('writeCache creates directory if it does not exist', async t => {
-	const mockData = { models: [] } as any;
+	const mockData = sampleIndex();
 
 	// This should not throw even if directory doesn't exist
 	await t.notThrowsAsync(async () => {
@@ -163,7 +240,7 @@ test('writeCache creates directory if it does not exist', async t => {
 // ============================================================================
 
 test('cache expiration is calculated correctly', async t => {
-	const mockData = { models: [] } as any;
+	const mockData = sampleIndex();
 	const now = Date.now();
 
 	await writeCache(mockData);
@@ -180,12 +257,7 @@ test('cache expiration is calculated correctly', async t => {
 });
 
 test('readCache and writeCache round-trip correctly', async t => {
-	const originalData = {
-		models: [
-			{ id: 'model1', name: 'Test Model 1' },
-			{ id: 'model2', name: 'Test Model 2' },
-		],
-	} as any;
+	const originalData = sampleIndex('model1', 'model2');
 
 	// Write the cache
 	await writeCache(originalData);
@@ -199,11 +271,11 @@ test('readCache and writeCache round-trip correctly', async t => {
 
 test('writeCache overwrites existing cache', async t => {
 	// Write first cache
-	const firstData = { models: [{ id: 'model1' }] } as any;
+	const firstData = sampleIndex('model1');
 	await writeCache(firstData);
 
 	// Write second cache (should overwrite)
-	const secondData = { models: [{ id: 'model2' }, { id: 'model3' }] } as any;
+	const secondData = sampleIndex('model2', 'model3');
 	await writeCache(secondData);
 
 	// Read back

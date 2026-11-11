@@ -10,11 +10,16 @@ import {formatError} from '@/utils/error-formatter';
 import {getLogger} from '@/utils/logging';
 import {createSessionOverride} from '@/utils/session-override';
 import {readCache, writeCache} from './models-cache.js';
+import {
+	buildModelsIndex,
+	findIndexedModelById,
+	findIndexedModelByName,
+	indexedModelAcceptsImages,
+} from './models-index.js';
 import type {
 	ModelInfo,
 	ModelsDevDatabase,
-	ModelsDevModel,
-	ModelsDevProvider,
+	ModelsIndex,
 } from './models-types.js';
 
 const MODELS_DEV_API_URL = 'https://models.dev/api.json';
@@ -143,10 +148,10 @@ function getOllamaFallbackContextLimit(modelName: string): number | null {
 }
 
 /**
- * Fetch models data from models.dev API
+ * Fetch models data from models.dev API and reduce it to the compact index.
  * Falls back to cache if API is unavailable
  */
-async function fetchModelsData(): Promise<ModelsDevDatabase | null> {
+async function fetchModelsData(): Promise<ModelsIndex | null> {
 	try {
 		const response = await request(MODELS_DEV_API_URL, {
 			method: 'GET',
@@ -161,12 +166,15 @@ async function fetchModelsData(): Promise<ModelsDevDatabase | null> {
 		}
 
 		const body = await response.body.json();
-		const data = body as ModelsDevDatabase;
+
+		// Only the compact index is cached and kept: the raw ~10MB database is
+		// garbage as soon as this function returns.
+		const index = buildModelsIndex(body as ModelsDevDatabase);
 
 		// Cache the successful response
-		await writeCache(data);
+		await writeCache(index);
 
-		return data;
+		return index;
 	} catch (error) {
 		const logger = getLogger();
 		logger.warn({error: formatError(error)}, 'Failed to fetch from models.dev');
@@ -183,19 +191,19 @@ async function fetchModelsData(): Promise<ModelsDevDatabase | null> {
 }
 
 /**
- * In-process memo of the parsed models.dev database. The payload is ~3.5MB,
- * so re-reading and JSON.parsing it from disk on every lookup costs ~13ms a
- * call — and the per-response usage indicator made that a per-message tax.
- * The in-flight promise is shared so concurrent lookups don't stampede, and
- * negative results (no cache, fetch failed) are memoized too: an offline
- * session pays the fetch timeout once per process, not once per response.
+ * In-process memo of the models.dev index. The cache file is parsed once per
+ * process, and what stays in memory is the compact index, not the ~10MB
+ * database it was built from. The in-flight promise is shared so concurrent
+ * lookups don't stampede, and negative results (no cache, fetch failed) are
+ * memoized too: an offline session pays the fetch timeout once per process,
+ * not once per response.
  */
-let modelsDataMemo: Promise<ModelsDevDatabase | null> | null = null;
+let modelsDataMemo: Promise<ModelsIndex | null> | null = null;
 
 /**
- * Get models data, preferring cache if valid
+ * Get the models index, preferring cache if valid
  */
-function getModelsData(): Promise<ModelsDevDatabase | null> {
+function getModelsData(): Promise<ModelsIndex | null> {
 	if (!modelsDataMemo) {
 		modelsDataMemo = (async () => {
 			// Try cache first
@@ -212,68 +220,31 @@ function getModelsData(): Promise<ModelsDevDatabase | null> {
 }
 
 /**
- * Project a models.dev model + its provider into our ModelInfo shape.
+ * Per-name lookup memos. A name that isn't on models.dev (every local Ollama
+ * tag) scans the whole index, and the same names are looked up again for
+ * compaction and usage reports, so results are cached for the process,
+ * including misses.
  */
-function createModelInfo(
-	model: ModelsDevModel,
-	provider: ModelsDevProvider,
-): ModelInfo {
-	return {
-		id: model.id,
-		name: model.name,
-		provider: provider.name,
-		contextLimit: model.limit?.context ?? null,
-		outputLimit: model.limit?.output ?? null,
-		supportsToolCalls: model.tool_call ?? false,
-		cost: {
-			input: model.cost?.input ?? 0,
-			output: model.cost?.output ?? 0,
-			// Left undefined rather than zeroed when models.dev omits them:
-			// pricing falls back to the input rate, and a 0 would price cache
-			// hits as free.
-			...(model.cost?.cache_read != null
-				? {cache_read: model.cost.cache_read}
-				: {}),
-			...(model.cost?.cache_write != null
-				? {cache_write: model.cost.cache_write}
-				: {}),
-		},
-	};
-}
+const modelByIdMemo = new Map<string, ModelInfo | null>();
+const modelByNameMemo = new Map<string, ModelInfo | null>();
 
 /**
  * Find a model by ID across all providers
- * Returns the model info and provider name
  */
 async function findModelById(modelId: string): Promise<ModelInfo | null> {
-	const data = await getModelsData();
-	if (!data) {
+	const memoized = modelByIdMemo.get(modelId);
+	if (memoized !== undefined) {
+		return memoized;
+	}
+
+	const index = await getModelsData();
+	if (!index) {
 		return null;
 	}
 
-	let bestMatch: ModelInfo | null = null;
-
-	// Search through all providers, picking the match with highest context limit
-	for (const [_providerId, provider] of Object.entries(data)) {
-		// Skip malformed provider entries
-		if (!provider || typeof provider !== 'object' || !provider.models) {
-			continue;
-		}
-		const model = provider.models[modelId];
-		if (model) {
-			const contextLimit = model.limit?.context ?? null;
-			if (
-				!bestMatch ||
-				(contextLimit !== null &&
-					(bestMatch.contextLimit === null ||
-						contextLimit > bestMatch.contextLimit))
-			) {
-				bestMatch = createModelInfo(model, provider);
-			}
-		}
-	}
-
-	return bestMatch;
+	const found = findIndexedModelById(index, modelId);
+	modelByIdMemo.set(modelId, found);
+	return found;
 }
 
 /**
@@ -281,67 +252,19 @@ async function findModelById(modelId: string): Promise<ModelInfo | null> {
  * Useful for local models where exact ID might not match
  */
 async function findModelByName(modelName: string): Promise<ModelInfo | null> {
-	// Empty string matches everything with .includes(), so return null early
-	if (!modelName) {
+	const memoized = modelByNameMemo.get(modelName);
+	if (memoized !== undefined) {
+		return memoized;
+	}
+
+	const index = await getModelsData();
+	if (!index) {
 		return null;
 	}
 
-	const data = await getModelsData();
-	if (!data) {
-		return null;
-	}
-
-	const lowerName = modelName.toLowerCase();
-
-	let bestMatch: ModelInfo | null = null;
-	let bestScore = 0;
-
-	// Search through all providers with scored matching
-	for (const [_providerId, provider] of Object.entries(data)) {
-		// Skip malformed provider entries
-		if (!provider || typeof provider !== 'object' || !provider.models) {
-			continue;
-		}
-		for (const [_modelId, model] of Object.entries(provider.models)) {
-			// Skip malformed model entries
-			if (!model || typeof model !== 'object') {
-				continue;
-			}
-
-			const modelIdLower = model.id?.toLowerCase() ?? '';
-			const modelNameLower = model.name?.toLowerCase() ?? '';
-
-			let score = 0;
-
-			// Exact ID match → return immediately
-			if (modelIdLower === lowerName) {
-				return createModelInfo(model, provider);
-			}
-
-			// ID starts with search term → high score
-			if (modelIdLower.startsWith(lowerName)) {
-				score = 3;
-			}
-			// Name starts with search term → medium score
-			else if (modelNameLower.startsWith(lowerName)) {
-				score = 2;
-			}
-			// ID or Name contains search term → low score
-			else if (
-				modelIdLower.includes(lowerName) ||
-				modelNameLower.includes(lowerName)
-			) {
-				score = 1;
-			}
-
-			if (score > bestScore) {
-				bestScore = score;
-				bestMatch = createModelInfo(model, provider);
-			}
-		}
-	}
-
-	return bestMatch;
+	const found = findIndexedModelByName(index, modelName);
+	modelByNameMemo.set(modelName, found);
+	return found;
 }
 
 /**
@@ -517,20 +440,13 @@ export async function getModelContextLimit(
 export async function getModelAcceptsImages(
 	modelId: string,
 ): Promise<boolean | null> {
-	let listed = false;
 	try {
-		const data = await getModelsData();
-		for (const provider of Object.values(data ?? {})) {
-			const input = provider?.models?.[modelId]?.modalities?.input;
-			if (input?.includes('image')) {
-				return true;
-			}
-			listed ||= !!input;
-		}
+		const index = await getModelsData();
+		return index ? indexedModelAcceptsImages(index, modelId) : null;
 	} catch {
 		// Lookup failure is the same as an unlisted model.
+		return null;
 	}
-	return listed ? false : null;
 }
 
 /**
