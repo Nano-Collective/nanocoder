@@ -12,7 +12,7 @@ import {
 import {InteractiveApp} from '@/app/sections/interactive-app';
 import type {AppProps} from '@/app/types';
 import AssistantReasoning from '@/components/assistant-reasoning';
-import {SuccessMessage} from '@/components/message-box';
+import {SuccessMessage, WarningMessage} from '@/components/message-box';
 import SecurityDisclaimer from '@/components/security-disclaimer';
 import StreamingMessage from '@/components/streaming-message';
 import StreamingReasoning from '@/components/streaming-reasoning';
@@ -59,6 +59,7 @@ import {createPinoLogger} from '@/utils/logging/pino-logger';
 import {setGlobalMessageQueue} from '@/utils/message-queue';
 import {setNotificationsConfig} from '@/utils/notifications';
 import {getShutdownManager} from '@/utils/shutdown';
+import {takeLegacyVscodeDeprecationNotice} from '@/vscode/deprecation';
 import {isExtensionInstalled} from '@/vscode/extension-installer';
 
 // Rows the interactive frame keeps for itself in fullscreen: the root box's
@@ -519,6 +520,22 @@ export default function App({
 			);
 		}
 	}, [vscodeServer.actualPort, appState]);
+
+	// The WebSocket companion is deprecated in favour of the ACP-based
+	// extension. Warn the first time it is enabled, by the flag or by /ide.
+	React.useEffect(() => {
+		if (!effectiveVscodeEnabled) return;
+		const notice = takeLegacyVscodeDeprecationNotice();
+		if (!notice) return;
+		logger.warn(notice);
+		appState.addToChatQueue(
+			<WarningMessage
+				key={generateKey('vscode-companion-deprecated')}
+				message={notice}
+				hideBox={true}
+			/>,
+		);
+	}, [effectiveVscodeEnabled, appState, logger]);
 
 	// Setup session autosave
 	const {isSaving, renameSession} = useSessionAutosave({
