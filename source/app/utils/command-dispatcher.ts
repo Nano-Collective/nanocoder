@@ -264,8 +264,13 @@ export async function dispatchSlashCommand(
 		return;
 	}
 
+	// Built-in names, aliases and retired names match in any case (`/Resume`).
+	// Custom commands and MCP prompts above still match exactly.
+	const builtInName = commandName.toLowerCase();
+	const normalized = `/${builtInName}${message.slice(commandName.length + 1)}`;
+
 	// Retired names (/setup-providers, ...) say where they moved, then run it.
-	const retired = findRetiredCommand(commandName);
+	const retired = findRetiredCommand(builtInName);
 	if (retired) {
 		options.onAddToChatQueue(
 			infoMsg(retired.notice, `${retired.name}-retired`),
@@ -281,9 +286,9 @@ export async function dispatchSlashCommand(
 	// the command they were folded into. Done after the custom-command and MCP
 	// checks so a project command that shares an old name still wins, as it
 	// did before the rename.
-	const expanded = expandCommandAlias(message);
-	if (expanded === message) {
-		await handleRegisteredSlashCommand(message, options);
+	const expanded = expandCommandAlias(normalized);
+	if (expanded === normalized) {
+		await handleRegisteredSlashCommand(normalized, options);
 		return;
 	}
 	await handleRegisteredSlashCommand(expanded, {
