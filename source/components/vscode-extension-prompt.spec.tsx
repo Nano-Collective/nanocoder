@@ -289,8 +289,15 @@ async function reachInstallError() {
 		/>,
 	);
 	await waitFor(() => (rendered.lastFrame() ?? '').includes('Install the extension now?'));
-	rendered.stdin.write('\r');
-	await waitFor(() => (rendered.lastFrame() ?? '').includes('install failed'));
+	// The select list subscribes to stdin in an effect that can run after the
+	// prompt's first frame, so a single Enter can land before anyone listens.
+	// Keep pressing until the prompt moves on; nothing else on this path reads
+	// input, so the extra presses are ignored.
+	await waitFor(() => {
+		const frame = rendered.lastFrame() ?? '';
+		if (frame.includes('Install the extension now?')) rendered.stdin.write('\r');
+		return frame.includes('install failed');
+	});
 	return {rendered, skipped: () => skipped};
 }
 
