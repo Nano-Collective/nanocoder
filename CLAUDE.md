@@ -162,7 +162,7 @@ Cloud STT sends microphone audio to the configured OpenAI endpoint only after ex
 
 Five user-facing modes (Shift+Tab cycles them in this order during chat):
 - **normal**: Confirm each tool before execution
-- **auto-accept**: Automatically execute most tools (bash and destructive git still prompt)
+- **auto-accept**: Automatically execute most tools (bash, destructive git, and MCP tools that are neither read-only nor `alwaysAllow`-ed still prompt)
 - **yolo**: Automatically execute every tool without exception
 - **plan**: Show tool calls but don't execute
 - **architect**: Like auto-accept for file edits, then review the whole turn's result with a one-keypress checkpoint undo
