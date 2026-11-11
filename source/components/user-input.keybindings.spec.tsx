@@ -10,7 +10,8 @@ import {ThemeContext} from '../hooks/useTheme';
 import {TitleShapeContext} from '../hooks/useTitleShape';
 import {UIStateProvider} from '../hooks/useUIState';
 import {promptHistory} from '../prompt-history';
-import UserInput, {KEYBOARD_SHORTCUTS} from './user-input';
+import {KEYBOARD_SHORTCUTS} from './composer/keymap';
+import UserInput from './user-input';
 
 // Characterisation of every row in the `?` legend, pinned through the real
 // composer before user-input.tsx is split into hooks. Each legend row must be

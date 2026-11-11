@@ -4,10 +4,8 @@ import React from 'react';
 import {DELAY_COMMAND_COMPLETE_MS} from '@/constants';
 import {useUserMessageQueue} from '@/hooks/useUserMessageQueue';
 import stripAnsi from 'strip-ansi';
-import {
-	KEYBOARD_SHORTCUTS,
-	SHORTCUTS_OVERHEAD_ROWS,
-} from '@/components/user-input';
+import {KEYBOARD_SHORTCUTS} from '@/components/composer/keymap';
+import {SHORTCUTS_OVERHEAD_ROWS} from '@/components/composer/useShortcutsOverlay';
 import type {Task} from '@/tools/tasks/types';
 import type {Message} from '@/types';
 import {renderWithTheme} from '../../test-utils/render-with-theme.js';

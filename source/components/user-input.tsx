@@ -3,6 +3,9 @@ import Spinner from 'ink-spinner';
 import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import stringWidth from 'string-width';
 import {commandRegistry} from '@/commands';
+import {isComposerKey} from '@/components/composer/keymap';
+import {ShortcutsOverlay} from '@/components/composer/shortcuts-overlay';
+import {useShortcutsOverlay} from '@/components/composer/useShortcutsOverlay';
 import {
 	DevelopmentModeIndicator,
 	type VoiceIndicatorInfo,
@@ -11,9 +14,8 @@ import TextInput, {
 	type TextInputHandle,
 	useRawInput,
 } from '@/components/text-input';
-import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {useInputState} from '@/hooks/useInputState';
-import {useResponsiveTerminal, useTerminalRows} from '@/hooks/useTerminalWidth';
+import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {useUIStateContext} from '@/hooks/useUIState';
 import type {
@@ -133,46 +135,6 @@ async function getMCPResourceCompletions(partialPath: string): Promise<
 		}))
 		.filter(c => c.score > 0);
 }
-
-// Legend for the `?` overlay. Keep in sync with the bindings handled below,
-// in TextInput (readline keys), in App (Ctrl+S, Ctrl+C), in InteractiveApp
-// (Ctrl+G, Esc to cancel/recall) and in ChatHistory (PgUp/PgDn, wheel).
-// Write keys as `Ctrl+X`, the same notation the status line uses;
-// user-input.spec.tsx checks every Ctrl binding in those files is listed here.
-export const KEYBOARD_SHORTCUTS: Array<[keybind: string, label: string]> = [
-	['Enter', 'Submit prompt'],
-	['Ctrl+J / Opt+Enter', 'New line'],
-	['↑ / ↓', 'Prompt history'],
-	['Tab', 'Accept suggestion / insert suggested command'],
-	['Ctrl+A / Ctrl+E', 'Move to start / end of line'],
-	['Ctrl+← / Ctrl+→', 'Move back / forward one word'],
-	['Ctrl+W', 'Delete previous word'],
-	['Ctrl+U / Ctrl+K', 'Delete to start / end of line'],
-	['Ctrl+Z / Ctrl+Y', 'Undo / redo the last edit'],
-	['Esc Esc', 'Clear input (one Esc dismisses a suggested command)'],
-	['Ctrl+V / Ctrl+X', 'Attach clipboard image / remove last image'],
-	['↓ then Enter / Delete', 'Pick a queued message, then edit it / remove it'],
-	['Shift+Tab', 'Cycle development mode'],
-	['Ctrl+O', 'Toggle compact tool output'],
-	['Ctrl+N', 'Toggle reasoning traces'],
-	['Ctrl+R', 'Reverse search prompt history'],
-	['Ctrl+T', 'Collapse / expand task list'],
-	['Ctrl+S', 'Attach / cycle running subagents'],
-	['Ctrl+G', 'Voice push-to-talk (when /voice is on)'],
-	['Esc', 'Cancel response (before it starts: back to your prompt)'],
-	['PgUp / PgDn / wheel', 'Scroll the transcript (fullscreen)'],
-	['Ctrl+C', 'Exit'],
-	['?', 'Toggle this overlay (in an empty prompt)'],
-];
-
-// Rows around the shortcut list that must stay on screen so the close hint
-// and the lower border are never pushed below a short terminal: the overlay's
-// title row, borders and padding (5), the blank row and hint row under the
-// list (2), the status row (1), the app frame's padding (2), and one spare
-// row, because Ink repaints the whole inline transcript on every render once
-// a frame is as tall as the terminal. The parent hides the rest of the footer
-// while the overlay is open; see onShortcutsOverlayChange.
-export const SHORTCUTS_OVERHEAD_ROWS = 11;
 
 // Prompt box width floor: keeps narrow terminals legible.
 const PROMPT_WIDTH_MIN = 40;
@@ -345,7 +307,6 @@ export default function UserInput({
 	const [selectedQueuedIndex, setSelectedQueuedIndex] = useState(-1);
 	// Pending image attachments sent with the next submitted message.
 	const [attachments, setAttachments] = useState<ImageAttachment[]>([]);
-	const [showShortcuts, setShowShortcuts] = useState(false);
 	const lastRestoredDraftIdRef = useRef<number | null>(null);
 
 	// Reverse prompt search state (Ctrl+R / bck-i-search)
@@ -377,61 +338,11 @@ export default function UserInput({
 
 	// Read through refs in key handlers: both our useInput and TextInput's see
 	// every keystroke, and either handler can still hold a render-old closure.
-	const showShortcutsRef = useRef(false);
 	const inputRef = useRef(input);
 	inputRef.current = input;
-	const setShortcutsOpen = (open: boolean) => {
-		showShortcutsRef.current = open;
-		setShowShortcuts(open);
-		if (open) setShortcutsScroll(0);
-		onShortcutsOverlayChange?.(open);
-	};
-	// A tool confirmation or question prompt can replace this component while
-	// the overlay is open. Report it closed then, or the parent keeps its
-	// footer hidden and its scrolling paused with no overlay on screen.
-	const onShortcutsOverlayChangeRef = useRef(onShortcutsOverlayChange);
-	onShortcutsOverlayChangeRef.current = onShortcutsOverlayChange;
-	useEffect(
-		() => () => {
-			if (showShortcutsRef.current) {
-				onShortcutsOverlayChangeRef.current?.(false);
-			}
-		},
-		[],
-	);
-
-	// The overlay shows a window of the legend sized to the terminal height.
-	// The clamp is recomputed every render, so shrinking the terminal while
-	// the overlay is open keeps the window inside the list.
-	const terminalRows = useTerminalRows();
-	const [shortcutsScroll, setShortcutsScroll] = useState(0);
-	const shortcutsVisibleCount = Math.max(
-		1,
-		Math.min(KEYBOARD_SHORTCUTS.length, terminalRows - SHORTCUTS_OVERHEAD_ROWS),
-	);
-	const shortcutsMaxStart = KEYBOARD_SHORTCUTS.length - shortcutsVisibleCount;
-	const shortcutsStart = Math.min(shortcutsScroll, shortcutsMaxStart);
-	// Keep the clamp from a taller terminal, so shrinking it again keeps the
-	// same top row instead of jumping back to the older, deeper offset.
-	useEffect(() => {
-		if (shortcutsScroll > shortcutsMaxStart) {
-			setShortcutsScroll(shortcutsMaxStart);
-		}
-	}, [shortcutsScroll, shortcutsMaxStart]);
-	const shortcutsWindowRef = useRef({
-		maxStart: shortcutsMaxStart,
-		pageSize: shortcutsVisibleCount,
-	});
-	shortcutsWindowRef.current = {
-		maxStart: shortcutsMaxStart,
-		pageSize: shortcutsVisibleCount,
-	};
-	const scrollShortcuts = (delta: number) => {
-		const {maxStart} = shortcutsWindowRef.current;
-		setShortcutsScroll(prev =>
-			Math.max(0, Math.min(Math.min(prev, maxStart) + delta, maxStart)),
-		);
-	};
+	const shortcuts = useShortcutsOverlay(onShortcutsOverlayChange);
+	const showShortcuts = shortcuts.isOpen;
+	const isShortcutsOpenNow = shortcuts.isOpenNow;
 
 	const {
 		showClearMessage,
@@ -977,11 +888,11 @@ export default function UserInput({
 		(value: string) => {
 			// Nothing reaches the prompt while the shortcuts overlay is open, and a
 			// lone `?` in an empty prompt is the overlay toggle (see useInput).
-			if (showShortcutsRef.current || value === '?') return;
+			if (isShortcutsOpenNow() || value === '?') return;
 			inputFromHistoryRef.current = false;
 			updateInput(value);
 		},
-		[updateInput],
+		[updateInput, isShortcutsOpenNow],
 	);
 
 	const handleQueueNavigation = useCallback(
@@ -1081,21 +992,16 @@ export default function UserInput({
 		// Reverse search owns the keyboard: its query is empty at first, so
 		// without the guard typing `?` there would open the overlay instead.
 		if (
-			inputChar === '?' &&
+			isComposerKey('toggleShortcuts', inputChar, key) &&
 			!disabled &&
 			!isReverseSearchMode &&
-			(showShortcutsRef.current || inputRef.current === '')
+			(isShortcutsOpenNow() || inputRef.current === '')
 		) {
-			setShortcutsOpen(!showShortcutsRef.current);
+			shortcuts.setOpen(!isShortcutsOpenNow());
 			return;
 		}
-		if (showShortcutsRef.current) {
-			const {pageSize} = shortcutsWindowRef.current;
-			if (key.escape) setShortcutsOpen(false);
-			else if (key.upArrow) scrollShortcuts(-1);
-			else if (key.downArrow) scrollShortcuts(1);
-			else if (key.pageUp) scrollShortcuts(-pageSize);
-			else if (key.pageDown) scrollShortcuts(pageSize);
+		if (isShortcutsOpenNow()) {
+			shortcuts.handleKey(key);
 			return;
 		}
 
@@ -1108,20 +1014,26 @@ export default function UserInput({
 		}
 
 		// Handle shift+tab to toggle development mode (always available)
-		if (key.tab && key.shift && onToggleMode) {
+		if (isComposerKey('toggleMode', inputChar, key) && onToggleMode) {
 			onToggleMode();
 			return;
 		}
 
 		// Handle ctrl+o to toggle compact tool display (always available)
-		if (key.ctrl && inputChar === 'o' && onToggleCompactDisplay) {
+		if (
+			isComposerKey('toggleCompactDisplay', inputChar, key) &&
+			onToggleCompactDisplay
+		) {
 			onToggleCompactDisplay();
 			return;
 		}
 
 		// Handle ctrl+n to toggle expanded reasoning traces (always available;
 		// ctrl+g is voice push-to-talk and ctrl+r is reverse history search)
-		if (key.ctrl && inputChar === 'n' && onToggleReasoningExpanded) {
+		if (
+			isComposerKey('toggleReasoningExpanded', inputChar, key) &&
+			onToggleReasoningExpanded
+		) {
 			onToggleReasoningExpanded();
 			return;
 		}
@@ -1129,7 +1041,7 @@ export default function UserInput({
 		// Handle ctrl+t to collapse/expand the live task list (always available -
 		// this sits above the disabled guard so it still works while the agent
 		// is working, which is when the task list is on screen)
-		if (key.ctrl && inputChar === 't' && onToggleTaskList) {
+		if (isComposerKey('toggleTaskList', inputChar, key) && onToggleTaskList) {
 			onToggleTaskList();
 			return;
 		}
@@ -1176,7 +1088,7 @@ export default function UserInput({
 				return;
 			}
 
-			if (key.ctrl && inputChar === 'r') {
+			if (isComposerKey('reverseSearch', inputChar, key)) {
 				// Cycle to next older match with current query (stop at oldest)
 				const history = promptHistory.getHistory();
 				if (history.length > 0 && reverseSearchIndex > 0) {
@@ -1248,7 +1160,7 @@ export default function UserInput({
 		}
 
 		// Handle ctrl+r to enter reverse prompt search
-		if (key.ctrl && inputChar === 'r') {
+		if (isComposerKey('reverseSearch', inputChar, key)) {
 			const history = promptHistory.getHistory();
 			reverseSearchDraftRef.current = currentState;
 			setIsReverseSearchMode(true);
@@ -1272,7 +1184,7 @@ export default function UserInput({
 		// (cli.tsx enables DECSET 2004 and routes payloads to pasteEvents),
 		// never as a Ctrl+V keypress, so this binding is free to mean
 		// "paste image".
-		if (key.ctrl && inputChar === 'v') {
+		if (isComposerKey('attachClipboardImage', inputChar, key)) {
 			const image = readClipboardImage();
 			if (image) {
 				attachImage(image);
@@ -1281,7 +1193,7 @@ export default function UserInput({
 		}
 
 		// Ctrl+X: drop the most recently added image attachment.
-		if (key.ctrl && inputChar === 'x') {
+		if (isComposerKey('removeLastImage', inputChar, key)) {
 			setAttachments(prev => prev.slice(0, -1));
 			return;
 		}
@@ -1295,11 +1207,11 @@ export default function UserInput({
 		// down the whole subtree on every undo/redo. TextInput's own value-sync
 		// effect already clamps the cursor to a valid offset when the value
 		// changes, so undoing keeps the caret roughly where it was.
-		if (key.ctrl && inputChar === 'z') {
+		if (isComposerKey('undo', inputChar, key)) {
 			undo();
 			return;
 		}
-		if (key.ctrl && inputChar === 'y') {
+		if (isComposerKey('redo', inputChar, key)) {
 			redo();
 			return;
 		}
@@ -1587,37 +1499,7 @@ export default function UserInput({
 					</Box>
 				)}
 				{showShortcuts && (
-					<TitledBoxWithPreferences
-						title="Keyboard Shortcuts"
-						width={promptWidth}
-						borderColor={colors.primary}
-						paddingX={2}
-						paddingY={1}
-						marginTop={1}
-						flexDirection="column"
-					>
-						{KEYBOARD_SHORTCUTS.slice(
-							shortcutsStart,
-							shortcutsStart + shortcutsVisibleCount,
-						).map(([keybind, label]) => (
-							// One row per shortcut: a wrapped label would add rows the
-							// height budget above does not count.
-							<Text key={keybind} wrap="truncate-end">
-								<Text color={colors.primary} bold>
-									{keybind}
-								</Text>
-								<Text color={colors.text}> — {label}</Text>
-							</Text>
-						))}
-						<Box marginTop={1}>
-							{/* The close hint leads so truncation drops the position first. */}
-							<Text color={colors.secondary} wrap="truncate-end">
-								{shortcutsMaxStart > 0
-									? `? or Esc to close · ↑/↓ scroll · ${shortcutsStart + 1}-${shortcutsStart + shortcutsVisibleCount} of ${KEYBOARD_SHORTCUTS.length}`
-									: 'Press ? or Esc to close'}
-							</Text>
-						</Box>
-					</TitledBoxWithPreferences>
+					<ShortcutsOverlay width={promptWidth} view={shortcuts.view} />
 				)}
 				<Box
 					display={showShortcuts ? 'none' : 'flex'}
