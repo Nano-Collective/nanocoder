@@ -44,6 +44,17 @@ export interface HookContext {
 	toolResult?: string;
 	prompt?: string;
 	messageCount?: number;
+	/**
+	 * Paths the turn actually mutated, in the order they were first touched,
+	 * as the model passed them. Only successful file-mutation tool calls
+	 * contribute, so a refused or failed write never appears here. `turn-end`
+	 * only.
+	 */
+	filesChanged?: string[];
+	/** Name of the subagent that finished. `subagent-end` only. */
+	subagentName?: string;
+	/** Whether the subagent's delegated run completed without error. */
+	subagentSuccess?: boolean;
 }
 
 export interface HookOutcome {
@@ -357,6 +368,18 @@ function buildEnv(
 	if (context.prompt !== undefined) env.NANOCODER_PROMPT = context.prompt;
 	if (context.messageCount !== undefined) {
 		env.NANOCODER_MESSAGE_COUNT = String(context.messageCount);
+	}
+	if (context.filesChanged) {
+		// Newline-separated, so a hook can `while read -r f` without a JSON
+		// parser. Empty means "the turn changed no files"; the variable is
+		// still set so a hook can tell that apart from "not a turn-end event".
+		env.NANOCODER_FILES_CHANGED = context.filesChanged.join('\n');
+	}
+	if (context.subagentName !== undefined) {
+		env.NANOCODER_SUBAGENT_NAME = context.subagentName;
+	}
+	if (context.subagentSuccess !== undefined) {
+		env.NANOCODER_SUBAGENT_SUCCESS = context.subagentSuccess ? 'true' : 'false';
 	}
 
 	return env;

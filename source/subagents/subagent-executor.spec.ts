@@ -2,6 +2,7 @@ import {execSync} from 'node:child_process';
 import {
 	mkdirSync,
 	mkdtempSync,
+	readFileSync,
 	realpathSync,
 	rmSync,
 	writeFileSync,
@@ -1911,6 +1912,66 @@ test.serial('post-tool-use fires when a subagent tool throws', async t => {
 		content.includes('audited'),
 		'an audit-log hook must see the failed delegated call too',
 	);
+});
+
+test.serial('subagent-end sees the delegated run and its success', async t => {
+	const outputFile = join(SUBAGENT_HOOK_DIR, 'subagent-end-ok.txt');
+	const leave = enterSubagentHookFixture({
+		'subagent-end': [
+			{
+				command: subagentHookNode(
+					"require('node:fs').writeFileSync(process.env.NANOCODER_SUBAGENT_TEST_OUT,[process.env.NANOCODER_HOOK_EVENT,process.env.NANOCODER_SUBAGENT_NAME,process.env.NANOCODER_SUBAGENT_SUCCESS].join('|'))",
+				),
+			},
+		],
+	});
+	let result: Awaited<ReturnType<SubagentExecutor['execute']>>;
+	try {
+		process.env.NANOCODER_SUBAGENT_TEST_OUT = outputFile;
+		result = await new SubagentExecutor(
+			createMockToolManager({}),
+			createMockClient([{content: 'Done.'}]),
+		).execute({subagent_type: 'explore', description: 'Say done'});
+	} finally {
+		delete process.env.NANOCODER_SUBAGENT_TEST_OUT;
+		leave();
+	}
+
+	t.true(result.success, result.error);
+	t.is(readFileSync(outputFile, 'utf-8'), 'subagent-end|explore|true');
+});
+
+test.serial('subagent-end reports a failed delegated run', async t => {
+	const outputFile = join(SUBAGENT_HOOK_DIR, 'subagent-end-fail.txt');
+	const client = createMockClient([{content: 'Done.'}]);
+	client.chat = async () => {
+		throw new Error('provider exploded');
+	};
+
+	const leave = enterSubagentHookFixture({
+		'subagent-end': [
+			{
+				command: subagentHookNode(
+					"require('node:fs').writeFileSync(process.env.NANOCODER_SUBAGENT_TEST_OUT,[process.env.NANOCODER_SUBAGENT_NAME,process.env.NANOCODER_SUBAGENT_SUCCESS].join('|'))",
+				),
+			},
+		],
+	});
+	let result: Awaited<ReturnType<SubagentExecutor['execute']>>;
+	try {
+		process.env.NANOCODER_SUBAGENT_TEST_OUT = outputFile;
+		result = await new SubagentExecutor(
+			createMockToolManager({}),
+			client,
+		).execute({subagent_type: 'explore', description: 'Explode'});
+	} finally {
+		delete process.env.NANOCODER_SUBAGENT_TEST_OUT;
+		leave();
+	}
+
+	t.false(result.success);
+	t.regex(result.error || '', /provider exploded/);
+	t.is(readFileSync(outputFile, 'utf-8'), 'explore|false');
 });
 
 test.serial(

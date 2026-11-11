@@ -3293,3 +3293,191 @@ for (const [listed, expectedPrompts] of [
 		},
 	);
 }
+
+// ============================================================================
+// turn-end lifecycle hook
+//
+// `turn-end` fires once per user prompt, after the final assistant message.
+// It reports the files the prompt actually changed, and a failing hook is
+// handed back to the model as a new user turn instead of ending the prompt.
+// ============================================================================
+
+test.serial(
+	'a passing turn-end hook sees the files the prompt changed',
+	async t => {
+		const leave = enterHookFixture();
+		const queued: any[] = [];
+		let chatCalls = 0;
+
+		try {
+			withLoopHooks({
+				'turn-end': [
+					{
+						command: hookNode(
+							"console.log(JSON.stringify([process.env.NANOCODER_MESSAGE_COUNT,process.env.NANOCODER_FILES_CHANGED]))",
+						),
+					},
+				],
+			});
+
+			// file_op resolves relative paths against the session cwd, not the
+			// process cwd the hook fixture changed into.
+			setSessionCwd(HOOK_GATE_DIR);
+			writeFileSync(join(HOOK_GATE_DIR, 'source.txt'), 'first file');
+			const registry = ToolRegistry.fromToolExports([fileOpTool]);
+			setToolRegistryGetter(() => registry.getHandlers());
+
+			const mockClient = createMockClient({content: '', toolCalls: []});
+			mockClient.chat = async () => {
+				chatCalls++;
+				if (chatCalls === 1) {
+					return {
+						choices: [
+							{
+								message: {
+									role: 'assistant',
+									content: '',
+									tool_calls: [
+										{
+											id: 'copy-1',
+											function: {
+												name: 'file_op',
+												arguments: {
+													operation: 'copy',
+													path: 'source.txt',
+													destination: 'target.txt',
+												},
+											},
+										},
+									],
+								},
+							},
+						],
+						toolsDisabled: false,
+					} as never;
+				}
+				return {
+					choices: [{message: {role: 'assistant', content: 'done'}}],
+					toolsDisabled: false,
+				} as never;
+			};
+
+			await processAssistantResponse(
+				createDefaultParams({
+					client: mockClient,
+					toolManager: {
+						...createMockToolManager({
+							tools: ['file_op'],
+							needsApproval: false,
+						}),
+						getToolEntry: (name: string) => registry.getEntry(name),
+						getToolFormatter: () => undefined,
+					} as never,
+					developmentMode: 'auto-accept' as const,
+					addToChatQueue: (component: any) => queued.push(component),
+				}) as never,
+			);
+		} finally {
+			setToolRegistryGetter(() => ({}));
+			resetSessionCwd();
+			leave();
+		}
+
+		t.is(chatCalls, 2, 'a passing hook must not spend an extra model turn');
+		t.is(
+			readFileSync(join(HOOK_GATE_DIR, 'target.txt'), 'utf8'),
+			'first file',
+			'the tool call should have copied the file before turn-end fired',
+		);
+
+		const hookMessage = queued.find(
+			(component: any) =>
+				typeof component.props?.message === 'string' &&
+				component.props.message.includes('source.txt'),
+		);
+		t.truthy(hookMessage, 'the hook output should be shown to the user');
+
+		const [messageCount, filesChanged] = JSON.parse(hookMessage.props.message);
+		t.true(Number(messageCount) > 0, 'message count should be a number');
+		t.deepEqual(
+			String(filesChanged).split('\n').sort(),
+			['source.txt', 'target.txt'],
+			'both the source and destination of the copy are reported',
+		);
+	},
+);
+
+test.serial(
+	'a failing turn-end hook is fed back to the model and capped',
+	async t => {
+		const leave = enterHookFixture();
+		const queued: any[] = [];
+		const setMessagesCalls: Message[][] = [];
+		let chatCalls = 0;
+
+		try {
+			withLoopHooks({
+				'turn-end': [
+					{
+						name: 'tests',
+						command: hookNode(
+							"console.log('2 tests failed');process.exit(1)",
+						),
+					},
+				],
+			});
+
+			const mockClient = createMockClient({content: '', toolCalls: []});
+			mockClient.chat = async () => {
+				chatCalls++;
+				return {
+					choices: [
+						{message: {role: 'assistant', content: `attempt ${chatCalls}`}},
+					],
+					toolsDisabled: false,
+				} as never;
+			};
+
+			await withRetryLimits({maxMalformedRetries: 1}, async () => {
+				await processAssistantResponse(
+					createDefaultParams({
+						client: mockClient,
+						toolManager: createMockToolManager({tools: []}) as never,
+						addToChatQueue: (component: any) => queued.push(component),
+						setMessages: (messages: Message[]) => setMessagesCalls.push(messages),
+					}) as never,
+				);
+			});
+		} finally {
+			leave();
+		}
+
+		t.is(chatCalls, 2, 'one continuation, then the retry cap stops the loop');
+
+		// The feedback lands in the array handed to setMessages just before the
+		// continuation, and is still present in every later snapshot because it
+		// is part of history. Assert on the first snapshot that carries it.
+		const firstFeedbackSnapshot = setMessagesCalls.find(snapshot =>
+			snapshot.some(
+				message =>
+					message.role === 'user' &&
+					String(message.content).includes('<hook-output event="turn-end"'),
+			),
+		);
+		t.truthy(firstFeedbackSnapshot, 'the failure should be handed back to the model');
+		const feedback = firstFeedbackSnapshot!.filter(
+			message =>
+				message.role === 'user' &&
+				String(message.content).includes('<hook-output event="turn-end"'),
+		);
+		t.is(feedback.length, 1, 'exactly one feedback turn per failure');
+		t.true(String(feedback[0].content).includes('2 tests failed'));
+
+		const giveUp = queued.find(
+			(component: any) =>
+				typeof component.props?.message === 'string' &&
+				component.props.message.includes('turn-end hook failed'),
+		);
+		t.truthy(giveUp, 'exhausting the cap should surface a stop message');
+	},
+);

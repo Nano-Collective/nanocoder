@@ -373,6 +373,84 @@ test.serial('hook context reaches the command as NANOCODER_* env vars', async t 
 	);
 });
 
+test.serial('turn-end exposes the message count and changed files', async t => {
+	withHooks({
+		'turn-end': [
+			{
+				command: node(
+					"console.log(JSON.stringify([process.env.NANOCODER_MESSAGE_COUNT,process.env.NANOCODER_FILES_CHANGED]))",
+				),
+			},
+		],
+	});
+
+	const outcome = await runLifecycleHooks('turn-end', {
+		messageCount: 12,
+		filesChanged: ['src/a.ts', 'src/b.ts'],
+	});
+
+	t.is(outcome.output, JSON.stringify(['12', 'src/a.ts\nsrc/b.ts']));
+});
+
+test.serial('turn-end with no changed files still sets the variable', async t => {
+	withHooks({
+		'turn-end': [
+			{
+				command: node(
+					"console.log(JSON.stringify(process.env.NANOCODER_FILES_CHANGED))",
+				),
+			},
+		],
+	});
+
+	const outcome = await runLifecycleHooks('turn-end', {
+		messageCount: 2,
+		filesChanged: [],
+	});
+
+	t.is(outcome.output, JSON.stringify(''));
+});
+
+test.serial(
+	'a failing turn-end is observe-only and reports its output',
+	async t => {
+		withHooks({
+			'turn-end': [
+				{
+					name: 'tests',
+					command: node("console.log('2 tests failed');process.exit(1)"),
+				},
+			],
+		});
+
+		const outcome = await runLifecycleHooks('turn-end', {messageCount: 3});
+
+		// Not a veto: the turn is over. The caller decides to hand the failure
+		// back to the model, which is why it must land in `failures`.
+		t.false(outcome.blocked);
+		t.deepEqual(outcome.failures, [{exitCode: 1, output: '2 tests failed'}]);
+	},
+);
+
+test.serial('subagent-end exposes the name and success flag', async t => {
+	withHooks({
+		'subagent-end': [
+			{
+				command: node(
+					"console.log([process.env.NANOCODER_SUBAGENT_NAME,process.env.NANOCODER_SUBAGENT_SUCCESS].join('|'))",
+				),
+			},
+		],
+	});
+
+	const outcome = await runLifecycleHooks('subagent-end', {
+		subagentName: 'explore',
+		subagentSuccess: false,
+	});
+
+	t.is(outcome.output, 'explore|false');
+});
+
 test.serial('every hook gets the session id and working directory', async t => {
 	withHooks({
 		'session-end': [
@@ -994,9 +1072,10 @@ test.serial(
 // group was signalled once and never escalated, leaving the runaway process
 // tree the detached spawn exists to prevent. POSIX only - on Windows the
 // reap is `taskkill /F`, which is already unconditional.
-const posixTest = process.platform === 'win32' ? test.skip : test;
+const posixSerial =
+	process.platform === 'win32' ? test.serial.skip : test.serial;
 
-posixTest.serial(
+posixSerial(
 	'a hook that ignores SIGTERM is escalated to SIGKILL',
 	async t => {
 		const pidFile = join(testDir, `sigterm-trap-${Date.now()}.pid`);

@@ -6,7 +6,7 @@ sidebar_order: 15
 
 # Lifecycle Hooks
 
-A hook is a shell command Nanocoder runs at a defined point in the agent loop: before or after a tool executes, when a session starts or ends, when you submit a prompt, or just before context compaction.
+A hook is a shell command Nanocoder runs at a defined point in the agent loop: before or after a tool executes, when a session starts or ends, when you submit a prompt, just before context compaction, or when a turn or a subagent finishes.
 
 Hooks are deterministic and free. No model is involved, no tokens are spent, and they fire every time — rather than when the model remembers to.
 
@@ -97,7 +97,7 @@ The patterns use the same dialect as [skill subscriptions](skills.md#event-subsc
 
 Two behaviours are worth knowing:
 
-- **A hook scoped by path does not fire for tools that touch no file.** `matchPaths` is a question about a file, so `execute_bash` — which has none — is excluded rather than waved through. This is the opposite of an omitted `matchTools`, which widens to every tool. Events with no file at all (`session-start`, `session-end`, `user-prompt-submit`, `pre-compact`) ignore `matchPaths` entirely.
+- **A hook scoped by path does not fire for tools that touch no file.** `matchPaths` is a question about a file, so `execute_bash` — which has none — is excluded rather than waved through. This is the opposite of an omitted `matchTools`, which widens to every tool. Events with no file at all (`session-start`, `session-end`, `user-prompt-submit`, `pre-compact`, `turn-end`, `subagent-end`) ignore `matchPaths` entirely.
 - **Absolute paths are also matched relative to the project root.** The model chooses whether to write `src/a.ts` or `/home/you/proj/src/a.ts` for the same edit, so a root-anchored pattern like `src/**` matches both spellings. Patterns starting with `**/` already match either way.
 
 **Project config wins outright — hooks are not merged.** Like the rest of `agents.config.json`, the nearest `hooks` block replaces the one above it rather than combining with it. A project that defines any hook at all disables *every* global hook, including a global `pre-tool-use` policy. If you rely on a global rule, repeat it in the projects that define their own hooks.
@@ -112,6 +112,8 @@ Two behaviours are worth knowing:
 | `pre-tool-use` | Before a tool executes, ahead of any approval prompt | **yes** |
 | `post-tool-use` | After a tool returns, **including when it fails** | no |
 | `pre-compact` | Before context compaction, automatic or `/compact` | no |
+| `turn-end` | After the final assistant message of a prompt | no — a failure reopens the turn |
+| `subagent-end` | When a delegated subagent run finishes | no |
 
 `user-prompt-submit` fires for chat prompts only. A slash command (`/compact`) and a `!` bash passthrough (`!ls`) are local actions that never reach the model, and prefixing either one would break the routing that recognises it. Neither fires the hook, and neither consumes buffered context — it stays queued for the next prompt that actually goes to the model. Leading whitespace makes no difference: `  /compact` is still a slash command.
 
@@ -123,6 +125,8 @@ Surfaces:
 - `post-tool-use` fires for every call that produces a result, successful or not — a handler that threw, a validation failure, malformed arguments. An audit-log hook therefore sees the failures too, which is usually the point. A call refused by `pre-tool-use` is the one exception: it never ran, so `post-tool-use` does not fire for it.
 - `session-start`, `session-end`, and `user-prompt-submit` fire in the interactive TUI and in `run` / `--plain`. In `run`, the prompt on the command line is the submitted prompt, and a veto exits 1 before any model call. ACP sessions are driven by the editor and fire the tool hooks only.
 - `pre-compact` fires for automatic compaction and for `/compact`.
+- `turn-end` fires in the interactive TUI and in `run` / `--plain`, once per prompt, after the model has stopped calling tools and produced its final message. It does not fire in ACP, and it does not fire inside a subagent — a delegated run is not a user prompt. `subagent-end` covers that case instead.
+- `subagent-end` fires once for every delegated subagent run that actually starts, in every surface, whether the run returns or throws. A subagent that never gets past client or tool setup does not fire it.
 
 ### `session-end` runs on a shutdown budget
 
@@ -146,7 +150,12 @@ Each hook is run with the relevant context in its environment. Nothing is passed
 | `NANOCODER_COMMAND` | `execute_bash` | The shell command the model wants to run |
 | `NANOCODER_TOOL_RESULT` | `post-tool-use` | The tool's result (truncated to 16k characters) |
 | `NANOCODER_PROMPT` | `user-prompt-submit` | The submitted prompt |
-| `NANOCODER_MESSAGE_COUNT` | `pre-compact` | Messages in the conversation |
+| `NANOCODER_MESSAGE_COUNT` | `pre-compact`, `turn-end` | Messages in the conversation at the point the event fires |
+| `NANOCODER_FILES_CHANGED` | `turn-end` | Newline-separated paths the prompt changed, as the model passed them. Empty when it changed none; still set, so a hook can tell that apart from a non-`turn-end` event |
+| `NANOCODER_SUBAGENT_NAME` | `subagent-end` | The subagent that finished, e.g. `explore` |
+| `NANOCODER_SUBAGENT_SUCCESS` | `subagent-end` | `true` if the delegated run completed, `false` if it failed |
+
+`NANOCODER_FILES_CHANGED` tracks the file tools (`write_file`, `string_replace`, `diff_edit`, `file_op`, `lsp_format_document`, and custom tools that register through the same approval helper). A file edited by a shell command is not counted, because the agent has no reliable way to see it.
 
 Hook commands are **not** env-substituted when the config is read, so `$NANOCODER_FILE` in your `command` reaches the shell intact.
 
@@ -184,7 +193,7 @@ The gate is also applied again at each execution boundary (`processToolUse`, the
 
 The first veto ends the chain — later hooks on that event don't run.
 
-Only a deliberate non-zero exit blocks. A hook that hangs past its `timeout` is killed, logged, and skipped, so a broken script degrades to "no hook" instead of wedging the agent. On the other events a non-zero exit is logged and the remaining hooks still run; on `post-tool-use` the failing hook's output is also handed to the model (see below).
+Only a deliberate non-zero exit blocks. A hook that hangs past its `timeout` is killed, logged, and skipped, so a broken script degrades to "no hook" instead of wedging the agent. On the other events a non-zero exit is logged and the remaining hooks still run; on `post-tool-use` the failing hook's output is also handed to the model, and on `turn-end` it reopens the turn (see below).
 
 Killing a hook kills what it started. The command runs under a shell, so signalling that shell alone would leave the grandchildren of a compound command (`a && b`, a pipeline) running after the agent has moved on. Hooks are spawned into their own process group on POSIX and reaped with `taskkill /T` on Windows, so the whole tree goes.
 
@@ -194,6 +203,8 @@ Anything a hook prints on stdout is put in front of the model:
 
 - `post-tool-use` stdout is appended to that tool's result inside a `<hook-output>` block, so a formatter's complaint lands on the same turn. A `post-tool-use` hook that exits non-zero is forwarded too, stdout and stderr both, in a block tagged with its exit code (`<hook-output event="post-tool-use" exit="1">`), so a failing linter or test run reaches the model instead of only your screen. The tool call itself still counts as a success. The combined result is re-capped afterwards, so a chatty hook cannot push a tool result past the usual truncation limit; failures go last, where the cut keeps them.
 - `session-start` and `user-prompt-submit` stdout is buffered and prepended to your next prompt inside a `<hook-context>` block. Your transcript still shows what you typed. `/clear` drops anything undelivered.
+- `turn-end` stdout from a **passing** hook is shown to you as a status line, not sent to the model: the turn is already over, so there is nothing to correct. A **failing** `turn-end` is different. Its output (stdout, or stderr if stdout is empty) is handed back to the model as a new user turn inside `<hook-output event="turn-end" exit="N">`, the same envelope `post-tool-use` uses, so the model can fix what the hook complained about — a failed test suite, an unformatted file, a broken build. The loop then continues with that feedback. This is capped by [`nanocoder.retries.maxMalformedRetries`](../configuration/index.md#retry-limits) (default 2): after that many continuations the turn stops with an error instead of looping forever. If you want a `turn-end` hook to report without reopening the turn, have it print its finding and exit 0 — the output is still shown to you.
+- `subagent-end` is observe-only. Its output is logged; it is not injected into the parent conversation.
 
 A hook that prints nothing injects nothing.
 

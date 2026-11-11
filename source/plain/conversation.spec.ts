@@ -1,3 +1,6 @@
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "ava";
 import { dropOrphanedToolResults } from "@/ai-sdk-client/converters/message-converter";
 import { getAppConfig, reloadAppConfig } from "@/config/index";
@@ -22,6 +25,7 @@ import type {
 	ToolEntry,
 	ToolHandler,
 } from "@/types/core";
+import { createFileToolApproval } from "@/utils/tool-approval";
 import { runPlainConversation } from "./conversation.js";
 
 // Suppress ANSI in test output so tokens streamed to stdout stay readable.
@@ -2218,5 +2222,150 @@ test.serial(
 
 		t.is(outcome.kind, "success");
 		t.is(calls.length, 1);
+	},
+);
+
+// --- turn-end lifecycle hook ---
+
+test.serial(
+	"a passing turn-end hook sees the files the prompt changed",
+	async (t) => {
+		const dir = mkdtempSync(join(tmpdir(), "nanocoder-plain-turn-end-"));
+		const outFile = join(dir, "hook-output.txt");
+		const previousHooks = getAppConfig().hooks;
+		const previousOut = process.env.NANOCODER_TEST_HOOK_OUT;
+		process.env.NANOCODER_TEST_HOOK_OUT = outFile;
+		getAppConfig().hooks = {
+			"turn-end": [
+				{
+					command: `node -e "require('node:fs').writeFileSync(process.env.NANOCODER_TEST_HOOK_OUT, [process.env.NANOCODER_MESSAGE_COUNT, process.env.NANOCODER_FILES_CHANGED].join('|'))"`,
+				},
+			],
+		};
+		// Registering through createFileToolApproval is what makes the shared
+		// mutation registry treat the tool as a file writer.
+		createFileToolApproval("mutator");
+
+		try {
+			const calls: RecordedCall[] = [];
+			const client = makeRecordingClient(
+				[
+					{
+						choices: [
+							{
+								message: {
+									role: "assistant",
+									content: "",
+									tool_calls: [
+										{
+											id: "call-1",
+											function: {
+												name: "mutator",
+												arguments: { path: "src/a.ts" },
+											},
+										},
+									],
+								},
+							},
+						],
+					},
+					{
+						choices: [{ message: { role: "assistant", content: "done" } }],
+					},
+				],
+				calls,
+			);
+			const toolManager = makeFakeToolManager({
+				knownTools: new Set(["mutator"]),
+				needsApprovalByName: { mutator: false },
+			});
+			setToolRegistryGetter(() => ({
+				mutator: (async () => "written") as ToolHandler,
+			}));
+
+			const outcome = await runPlainConversation({
+				client,
+				toolManager,
+				systemMessage: SYSTEM,
+				initialMessages: [USER],
+				developmentMode: "auto-accept",
+				nonInteractiveAlwaysAllow: [],
+				abortSignal: new AbortController().signal,
+			});
+
+			t.is(outcome.kind, "success");
+			t.is(calls.length, 2, "a passing hook must not spend an extra turn");
+
+			const [messageCount, filesChanged] = readFileSync(outFile, "utf8").split(
+				"|",
+			);
+			t.true(Number(messageCount) > 0);
+			t.is(filesChanged, "src/a.ts");
+		} finally {
+			getAppConfig().hooks = previousHooks;
+			if (previousOut === undefined) {
+				delete process.env.NANOCODER_TEST_HOOK_OUT;
+			} else {
+				process.env.NANOCODER_TEST_HOOK_OUT = previousOut;
+			}
+			rmSync(dir, { recursive: true, force: true });
+		}
+	},
+);
+
+test.serial(
+	"a failing turn-end hook is handed back to the model and capped",
+	async (t) => {
+		const previousHooks = getAppConfig().hooks;
+		getAppConfig().hooks = {
+			"turn-end": [
+				{
+					name: "tests",
+					command: `node -e "console.log('2 tests failed');process.exit(1)"`,
+				},
+			],
+		};
+
+		try {
+			const calls: RecordedCall[] = [];
+			const client = makeRecordingClient(
+				[
+					{ choices: [{ message: { role: "assistant", content: "first" } }] },
+					{ choices: [{ message: { role: "assistant", content: "second" } }] },
+				],
+				calls,
+			);
+			const toolManager = makeFakeToolManager();
+
+			await withRetryLimit("maxMalformedRetries", 1, async () => {
+				const outcome = await runPlainConversation({
+					client,
+					toolManager,
+					systemMessage: SYSTEM,
+					initialMessages: [USER],
+					developmentMode: "auto-accept",
+					nonInteractiveAlwaysAllow: [],
+					abortSignal: new AbortController().signal,
+				});
+
+				t.is(outcome.kind, "error");
+				if (outcome.kind === "error") {
+					t.regex(outcome.message, /turn-end hook failed 2 times/);
+				}
+				t.is(calls.length, 2, "one continuation, then the retry cap");
+
+				const feedback = calls[1].messages.find(
+					(message) =>
+						message.role === "user" &&
+						String(message.content).includes(
+							'<hook-output event="turn-end"',
+						),
+				);
+				t.truthy(feedback, "the failure should reach the model");
+				t.true(String(feedback?.content).includes("2 tests failed"));
+			});
+		} finally {
+			getAppConfig().hooks = previousHooks;
+		}
 	},
 );

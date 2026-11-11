@@ -16,6 +16,7 @@ import {
 import {computeToolCallSignature} from '@/hooks/chat-handler/utils/tool-signature';
 import {processToolUse} from '@/message-handler';
 import {color, write, writeError, writeLine, writeStatus} from '@/plain/writer';
+import {runLifecycleHooks} from '@/services/lifecycle-hooks';
 import {parseToolCalls} from '@/tool-calling/index';
 import {resolveToolApproval} from '@/tools/approval-policy';
 import type {ToolManager} from '@/tools/tool-manager';
@@ -30,6 +31,7 @@ import type {
 } from '@/types/core';
 import {maybeAutoCompact} from '@/utils/auto-compact';
 import {capMessagesForModel} from '@/utils/message-capping';
+import {getFileMutationPaths} from '@/utils/tool-approval';
 
 export interface ToolCallLog {
 	name: string;
@@ -236,6 +238,12 @@ async function runPlainConversationBody(
 	let truncatedTurnCount = 0;
 	let lastToolSignature = '';
 	let repeatedToolCallCount = 0;
+
+	// `turn-end` bookkeeping for this run: paths mutated by successful tool
+	// calls, and how many times a failing hook has already been handed back to
+	// the model. A plain run is one prompt, so one set of both.
+	const filesChanged = new Set<string>();
+	let turnEndRetryCount = 0;
 
 	// Count this turn's tool-call signature against the repeated-call streak.
 	// Returns the hard-stop outcome when the cap is hit, null otherwise. Called
@@ -658,6 +666,74 @@ async function runPlainConversationBody(
 				messages = [...messages, walkthroughFallback];
 				continue;
 			}
+
+			// `turn-end` runs once the model has stopped calling tools and
+			// produced its final text. A passing hook's stdout is a status line
+			// for the user; a failing one is fed back as a user turn, capped so a
+			// hook that always fails cannot spin to maxTurns.
+			const turnEnd = await runLifecycleHooks('turn-end', {
+				messageCount: messages.length,
+				filesChanged: [...filesChanged],
+			});
+			if (turnEnd.output && !isJson) {
+				writeStatus(turnEnd.output);
+			}
+			if (turnEnd.failures.length > 0) {
+				if (!isJson) {
+					for (const failure of turnEnd.failures) {
+						writeError(
+							`turn-end hook exited ${failure.exitCode}${
+								failure.output ? `:\n${failure.output}` : '.'
+							}`,
+						);
+					}
+				}
+				const feedback = turnEnd.failures
+					.map(
+						failure =>
+							`<hook-output event="turn-end" exit="${failure.exitCode}">\n${
+								failure.output || '(no output)'
+							}\n</hook-output>`,
+					)
+					.join('\n\n');
+
+				if (turnEndRetryCount >= maxMalformedRetries) {
+					// The caller prints the `error` outcome message; see above.
+					const message = `A turn-end hook failed ${turnEndRetryCount + 1} time${
+						turnEndRetryCount === 0 ? '' : 's'
+					} in a row and the model could not resolve it — stopping (nanocoder.retries.maxMalformedRetries = ${maxMalformedRetries}).`;
+					return {
+						kind: 'error',
+						message,
+						finalText: accumulatedFinalText,
+						reasoning: accumulatedReasoning || null,
+						toolCalls: toolCallsLog,
+						steps,
+						usage: getUsage(),
+					};
+				}
+
+				turnEndRetryCount += 1;
+				emptyTurnCount = 0;
+				malformedRetryCount = 0;
+				truncatedTurnCount = 0;
+				lastToolSignature = '';
+				repeatedToolCallCount = 0;
+				if (!isJson) {
+					writeError(
+						`turn-end hook reported a problem — asking the model to address it (${turnEndRetryCount}/${maxMalformedRetries}).`,
+					);
+				}
+				messages = [
+					...messages,
+					{
+						role: 'user',
+						content: `A turn-end hook reported a problem after your last message. Address it, then give your final answer.\n\n${feedback}`,
+					},
+				];
+				continue;
+			}
+
 			return {
 				kind: 'success',
 				finalText: finalTextBeforeWalkthroughNudge ?? accumulatedFinalText,
@@ -726,6 +802,9 @@ async function runPlainConversationBody(
 			toolResults.push(toolResult);
 			if (!toolResult.isError) {
 				observeSuccessfulLifecycleTool(walkthroughLifecycle, toolCall);
+				for (const path of getFileMutationPaths([toolCall])) {
+					filesChanged.add(path);
+				}
 			}
 
 			const contentStr = toolResult.content

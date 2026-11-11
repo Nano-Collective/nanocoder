@@ -20,6 +20,7 @@ import {maybeAutoCommit} from '@/services/auto-commit';
 import {formatWrittenFile} from '@/services/formatters';
 import {
 	appendPostToolUseOutput,
+	runLifecycleHooks,
 	runPreToolUseGate,
 } from '@/services/lifecycle-hooks';
 import {
@@ -270,6 +271,7 @@ export class SubagentExecutor {
 				}
 			};
 
+			let succeeded = false;
 			try {
 				const output = await runWithReadContentScope(
 					agentId ?? 'subagent',
@@ -292,6 +294,7 @@ export class SubagentExecutor {
 					? getSubagentProgress(agentId).tokenCount
 					: subagentProgress.tokenCount;
 
+				succeeded = true;
 				return {
 					subagentName: config.name,
 					output,
@@ -301,6 +304,17 @@ export class SubagentExecutor {
 				};
 			} finally {
 				await Promise.allSettled(pendingUsageWrites);
+				// `subagent-end` is observe-only, so it fires once per run that
+				// actually started, whether it finished or threw. Wrapped so a
+				// broken hook can never turn a completed subagent into a failure.
+				try {
+					await runLifecycleHooks('subagent-end', {
+						subagentName: config.name,
+						subagentSuccess: succeeded,
+					});
+				} catch {
+					// A lifecycle hook must never fail the delegated run.
+				}
 				if (agentId) {
 					cleanupSubagentSession(agentId);
 					clearReadContentScope(agentId);
