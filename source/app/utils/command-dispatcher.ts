@@ -30,9 +30,7 @@ import {
 	handleSkillsCreate,
 	handleToolCreate,
 } from './handlers/create-handler';
-import {handleLoginCommand} from './handlers/login-handler';
 import {handleMCPPromptCommand} from './handlers/mcp-prompt-handler';
-import {handleStatsCommand} from './handlers/stats-handler';
 
 /**
  * Handles custom user-defined commands.
@@ -89,6 +87,9 @@ function createCommandContext(
 		provider: options.provider,
 		model: options.model,
 		addToChatQueue: options.onAddToChatQueue,
+		setLiveComponent: options.setLiveComponent,
+		setLiveComponentCapturesInput: options.setLiveComponentCapturesInput,
+		setIsToolExecuting: options.setIsToolExecuting,
 		clearMessages: options.onClearMessages,
 		notifyCleared: () => options.onClearCounterIncrement?.(),
 		renameSession: options.onRenameSession,
@@ -114,6 +115,11 @@ function completeCommand(
 	options: MessageSubmissionOptions,
 ): void {
 	if (completion === 'handed-off') return;
+	if (typeof completion === 'object') {
+		const complete = () => options.onCommandComplete?.();
+		void completion.until.then(complete, complete);
+		return;
+	}
 	if (completion === 'done-after-render') {
 		setTimeout(() => options.onCommandComplete?.(), DELAY_COMMAND_COMPLETE_MS);
 		return;
@@ -199,7 +205,7 @@ async function runRegisteredCommand(
 		}
 	}
 
-	if (typeof completion === 'object') {
+	if (completion && typeof completion === 'object' && 'show' in completion) {
 		result = completion.show;
 	} else if (completion) {
 		completeCommand(completion, options);
@@ -406,8 +412,6 @@ async function routeSlashCommand(
 	if (await handleAgentCopy(commandParts, options)) return;
 	if (await handleToolCreate(commandParts, options)) return;
 	if (await handleSkillsCreate(commandParts, options)) return;
-	if (handleLoginCommand(commandParts, options)) return;
-	if (handleStatsCommand(commandParts, options)) return;
 
 	await runRegisteredCommand(cleanedMessage, commandParts, options);
 }
