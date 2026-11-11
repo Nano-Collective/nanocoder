@@ -35,8 +35,13 @@ import {mkdir, readFile, rename, unlink, writeFile} from 'node:fs/promises';
 import {homedir} from 'node:os';
 import {dirname, join} from 'node:path';
 
-/** Filename written under the user's nanocoder config directory. */
-const VSCODE_DISCOVERY_FILENAME = 'vscode-server.json';
+/**
+ * Filename written under the user's nanocoder config directory. Re-exported
+ * to the VS Code extension by plugins/vscode/src/discovery.ts, which knip does
+ * not scan, so the export is tagged to keep it.
+ * @public
+ */
+export const VSCODE_DISCOVERY_FILENAME = 'vscode-server.json';
 
 /** Schema version written into the discovery file. Bump on breaking changes. */
 export const VSCODE_DISCOVERY_VERSION = 1;
