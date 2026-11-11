@@ -61,6 +61,11 @@ export interface CommandContext {
 	provider: string;
 	model: string;
 	addToChatQueue: (component: React.ReactNode) => void;
+	/** The single live slot under the transcript (`null` clears it). */
+	setLiveComponent: (component: React.ReactNode) => void;
+	/** Give the live component the keyboard instead of the chat composer. */
+	setLiveComponentCapturesInput: (value: boolean) => void;
+	setIsToolExecuting: (value: boolean) => void;
 	/** Clear the transcript, the model context and per-conversation caches. */
 	clearMessages: () => Promise<void>;
 	/** Tell the app a conversation was cleared (remounts the transcript). */
@@ -102,12 +107,15 @@ export interface CommandContext {
  *   owns the prompt and signals completion itself.
  * - `{show}`: output to queue, handled exactly like a read-only command's
  *   result, for commands that only sometimes need app state.
+ * - `{until}`: still running in a live component; the prompt is handed back
+ *   when the promise settles. The dispatcher returns without waiting for it.
  */
 export type CommandCompletion =
 	| 'done'
 	| 'done-after-render'
 	| 'handed-off'
-	| {show: React.ReactElement | string | void};
+	| {show: React.ReactElement | string | void}
+	| {until: Promise<void>};
 
 /**
  * A command that changes app state (clears the chat, renames the session,

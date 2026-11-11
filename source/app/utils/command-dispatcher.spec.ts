@@ -417,6 +417,87 @@ test.serial('other /checkpoint subcommands show their output like a read-only co
 	t.true(completed);
 });
 
+test.serial('/stats completes only when its live card closes', async t => {
+	let live: React.ReactNode = null;
+	const capture: boolean[] = [];
+	let completed = 0;
+	await dispatchSlashCommand(
+		'/stats 3m',
+		createOptions({
+			setLiveComponent: node => {
+				live = node;
+			},
+			setLiveComponentCapturesInput: value => capture.push(value),
+			onCommandComplete: () => completed++,
+		}),
+	);
+	await wait(DELAY_COMMAND_COMPLETE_MS + 25);
+	t.is(completed, 0, 'the card is still open');
+	t.deepEqual(capture, [true]);
+
+	(live as React.ReactElement<{onClose: () => void}>).props.onClose();
+	await wait(0);
+	t.is(live, null);
+	t.deepEqual(capture, [true, false]);
+	t.is(completed, 1);
+});
+
+test.serial('/login copilot completes when the device flow finishes', async t => {
+	let live: React.ReactNode = null;
+	const executing: boolean[] = [];
+	const queued: React.ReactNode[] = [];
+	let completed = 0;
+	await dispatchSlashCommand(
+		'/login COPILOT Work Copilot',
+		createOptions({
+			setLiveComponent: node => {
+				live = node;
+			},
+			setIsToolExecuting: value => executing.push(value),
+			onAddToChatQueue: node => queued.push(node),
+			onCommandComplete: () => completed++,
+		}),
+	);
+	const element = live as React.ReactElement<{
+		providerName: string;
+		onDone: (result: {success: boolean; error?: string}) => void;
+	}>;
+	t.is(element.props.providerName, 'Work Copilot');
+	t.deepEqual(executing, [true]);
+	t.is(completed, 0);
+
+	element.props.onDone({success: false, error: 'denied'});
+	await wait(0);
+	t.is(live, null);
+	t.deepEqual(executing, [true, false]);
+	t.is(queuedText(queued[0]), 'denied');
+	t.is(completed, 1);
+});
+
+test.serial('/login without a known target shows its usage like a read-only command', async t => {
+	const queued: React.ReactNode[] = [];
+	let live = false;
+	let completed = false;
+	await dispatchSlashCommand(
+		'/login github',
+		createOptions({
+			setLiveComponent: () => {
+				live = true;
+			},
+			onAddToChatQueue: node => queued.push(node),
+			onCommandComplete: () => {
+				completed = true;
+			},
+		}),
+	);
+	await wait(0);
+	t.false(live);
+	t.true(queuedText(queued[0]).startsWith('Usage: /login <codex|copilot>'));
+	t.false(completed);
+	await wait(DELAY_COMMAND_COMPLETE_MS + 25);
+	t.true(completed);
+});
+
 test.serial('read-only commands still render through their handler', async t => {
 	const queued: React.ReactNode[] = [];
 	await dispatchSlashCommand(
