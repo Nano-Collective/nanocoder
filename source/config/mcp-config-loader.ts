@@ -2,6 +2,7 @@ import {existsSync, readFileSync} from 'fs';
 import {join} from 'path';
 import {substituteEnvVars} from '@/config/env-substitution';
 import {getConfigPath} from '@/config/paths';
+import {getConfigRoot} from '@/services/session-context';
 import type {MCPServerConfig, ProviderConfig} from '@/types/config';
 import {logError} from '@/utils/message-queue-core';
 
@@ -87,8 +88,10 @@ function mapAndSubstituteServer(
 /**
  * Load project-level MCP configuration from .mcp.json
  */
-export function loadProjectMCPConfig(): MCPServerWithSource[] {
-	const configPath = join(process.cwd(), '.mcp.json');
+export function loadProjectMCPConfig(
+	cwd: string = getConfigRoot(),
+): MCPServerWithSource[] {
+	const configPath = join(cwd, '.mcp.json'); // nosemgrep
 
 	if (!existsSync(configPath)) {
 		return [];
@@ -176,8 +179,10 @@ export function mergeMCPConfigs(
 /**
  * Load all MCP configurations with proper hierarchy and merging
  */
-export function loadAllMCPConfigs(): MCPServerWithSource[] {
-	const projectServers = loadProjectMCPConfig();
+export function loadAllMCPConfigs(
+	cwd: string = getConfigRoot(),
+): MCPServerWithSource[] {
+	const projectServers = loadProjectMCPConfig(cwd);
 	// Skip loading global servers in test environment to allow test isolation
 	const globalServers =
 		process.env.NODE_ENV === 'test' ? [] : loadGlobalMCPConfig();
@@ -234,8 +239,10 @@ function loadEnvMCPConfigs(): MCPServerWithSource[] {
  * Load provider configurations from all available levels (project and global)
  * This mirrors the approach used for MCP servers to support hierarchical loading
  */
-export function loadAllProviderConfigs(): ProviderConfig[] {
-	const projectProviders = loadProjectProviderConfigs();
+export function loadAllProviderConfigs(
+	cwd: string = getConfigRoot(),
+): ProviderConfig[] {
+	const projectProviders = loadProjectProviderConfigs(cwd);
 	// Skip loading global providers in test environment to allow test isolation
 	const globalProviders =
 		process.env.NODE_ENV === 'test' ? [] : loadGlobalProviderConfigs();
@@ -265,9 +272,9 @@ export function loadAllProviderConfigs(): ProviderConfig[] {
 /**
  * Load provider configurations from project-level files
  */
-function loadProjectProviderConfigs(): ProviderConfig[] {
+function loadProjectProviderConfigs(cwd: string): ProviderConfig[] {
 	// Try to find provider configs in project-level config files
-	const configPath = join(process.cwd(), 'agents.config.json');
+	const configPath = join(cwd, 'agents.config.json'); // nosemgrep
 
 	if (existsSync(configPath)) {
 		try {

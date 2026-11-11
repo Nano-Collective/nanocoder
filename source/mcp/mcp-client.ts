@@ -15,7 +15,6 @@ type LifecycleTransport = ClientTransport & {
 	onerror?: (error: Error) => void;
 };
 
-import {dynamicTool} from 'ai';
 import type {
 	AISDKCoreTool,
 	MCPHealthChange,
@@ -27,13 +26,9 @@ import type {
 	MCPResourceContent,
 	MCPServer,
 	MCPTool,
-	MCPToolInputSchema,
 	StructuredToolOutput,
 	Tool,
-	ToolApprovalPolicy,
-	ToolParameterSchema,
 } from '@/types/index';
-import {jsonSchema} from '@/types/index';
 import {
 	generateCorrelationId,
 	getLogger,
@@ -45,60 +40,27 @@ import {
 	startMetrics,
 } from '@/utils/logging/performance.js';
 import {getSafeMemory} from '@/utils/logging/safe-process.js';
-import {getToolJsonSchema} from '@/utils/schema-validate';
-import {withValidation} from '@/utils/tool-validation';
-import {ensureString, isPlainObject} from '@/utils/type-helpers';
+import {
+	buildToolMapping,
+	findToolNameConflicts,
+	type MCPToolMapping,
+	type MCPToolNameConflict,
+	toMCPPrompt,
+	toMCPResource,
+	toMCPTool,
+	toPromptResult,
+	toResourceContents,
+} from './server-catalog.js';
+import {
+	coerceStringArguments,
+	createValidatedHandler,
+	type MCPToolEntry,
+	toFunctionTool,
+	toNativeTool,
+} from './tool-adapter.js';
+import {createMCPToolApproval, isToolAutoApproved} from './tool-approval.js';
+import {formatToolResultContent} from './tool-result-format.js';
 import {TransportFactory} from './transport-factory.js';
-
-// Decoded size of base64 data, without decoding it. Tolerates a data URL
-// prefix and line breaks, which some servers send against the spec.
-function base64ByteLength(data: string): number {
-	const base64 = data.replace(/^data:[^,]*,/, '').replace(/\s/g, '');
-	const padding = base64.endsWith('==') ? 2 : base64.endsWith('=') ? 1 : 0;
-	return Math.max(0, Math.floor((base64.length * 3) / 4) - padding);
-}
-
-// Text for one MCP content block. Binary data is summarised, not dumped,
-// so base64 never reaches the model as text.
-function formatContentBlock(block: unknown): string {
-	if (!isPlainObject(block)) {
-		return JSON.stringify(block);
-	}
-	switch (block.type) {
-		case 'text':
-			return ensureString(block.text);
-		case 'image':
-		case 'audio': {
-			const data = ensureString(block.data);
-			const mimeType = ensureString(block.mimeType) || block.type;
-			return `[${mimeType}, ${base64ByteLength(data)} bytes]`;
-		}
-		case 'resource': {
-			const resource = isPlainObject(block.resource) ? block.resource : {};
-			if (typeof resource.text === 'string') {
-				// Keep the URI so texts from different resources stay apart.
-				return `[resource ${ensureString(resource.uri)}]\n${resource.text}`;
-			}
-			const parts = [`resource ${ensureString(resource.uri)}`];
-			if (typeof resource.mimeType === 'string') {
-				parts.push(resource.mimeType);
-			}
-			if (typeof resource.blob === 'string') {
-				parts.push(`${base64ByteLength(resource.blob)} bytes`);
-			}
-			return `[${parts.join(', ')}]`;
-		}
-		case 'resource_link':
-			return `[resource link: ${ensureString(block.uri)}]`;
-		default:
-			return JSON.stringify(block);
-	}
-}
-
-// Join every content block of a tool result, in order.
-function formatToolResultContent(content: unknown[]): string {
-	return content.map(formatContentBlock).join('\n');
-}
 
 export class MCPClient {
 	private clients: Map<string, Client> = new Map();
@@ -110,10 +72,7 @@ export class MCPClient {
 	 * runtime — so rebuilding the Map each time is pure waste. Invalidated
 	 * wherever serverTools changes (connect, disconnect).
 	 */
-	private toolMappingCache: Map<
-		string,
-		{serverName: string; originalName: string; readOnly: boolean}
-	> | null = null;
+	private toolMappingCache: MCPToolMapping | null = null;
 	private serverResources: Map<string, MCPResource[]> = new Map();
 	private serverPrompts: Map<string, MCPPrompt[]> = new Map();
 	private serverConfigs: Map<string, MCPServer> = new Map();
@@ -137,15 +96,6 @@ export class MCPClient {
 	 */
 	private lifecycleEpoch = 0;
 	private logger = getLogger();
-
-	private isToolAutoApproved(toolName: string, serverName: string): boolean {
-		const serverConfig = this.serverConfigs.get(serverName);
-		if (!serverConfig?.alwaysAllow) {
-			return false;
-		}
-
-		return serverConfig.alwaysAllow.includes(toolName);
-	}
 
 	constructor() {
 		this.logger.debug('MCP client initialized');
@@ -249,15 +199,9 @@ export class MCPClient {
 		try {
 			// Re-discover tools from this server
 			const toolsResult = await client.listTools();
-			const tools: MCPTool[] = toolsResult.tools.map(tool => ({
-				name: tool.name,
-				description: tool.description || undefined,
-				inputSchema: isPlainObject(tool.inputSchema)
-					? (tool.inputSchema as MCPToolInputSchema)
-					: undefined,
-				serverName,
-				readOnly: tool.annotations?.readOnlyHint === true,
-			}));
+			const tools: MCPTool[] = toolsResult.tools.map(tool =>
+				toMCPTool(tool, serverName),
+			);
 			this.serverTools.set(serverName, tools);
 
 			// Re-discover resources if declared
@@ -266,13 +210,7 @@ export class MCPClient {
 				try {
 					const resourcesResult = await client.listResources();
 					const resources: MCPResource[] = resourcesResult.resources.map(
-						resource => ({
-							uri: resource.uri,
-							name: resource.name,
-							description: resource.description || undefined,
-							mimeType: resource.mimeType || undefined,
-							serverName,
-						}),
+						resource => toMCPResource(resource, serverName),
 					);
 					this.serverResources.set(serverName, resources);
 				} catch (error) {
@@ -287,16 +225,9 @@ export class MCPClient {
 			if (capabilities?.prompts) {
 				try {
 					const promptsResult = await client.listPrompts();
-					const prompts: MCPPrompt[] = promptsResult.prompts.map(prompt => ({
-						name: prompt.name,
-						description: prompt.description || undefined,
-						arguments: prompt.arguments?.map(arg => ({
-							name: arg.name,
-							description: arg.description || undefined,
-							required: arg.required || false,
-						})),
-						serverName,
-					}));
+					const prompts: MCPPrompt[] = promptsResult.prompts.map(prompt =>
+						toMCPPrompt(prompt, serverName),
+					);
 					this.serverPrompts.set(serverName, prompts);
 				} catch (error) {
 					this.logger.warn('MCP prompts/list failed on recovery', {
@@ -703,17 +634,9 @@ export class MCPClient {
 				// the server so a failed tools/list doesn't leave it visible as
 				// connected — the maps are populated only once discovery succeeds.
 				const toolsResult = await client.listTools(undefined, connectOptions);
-				const tools: MCPTool[] = toolsResult.tools.map(tool => ({
-					name: tool.name,
-					description: tool.description || undefined,
-					// MCP SDK types inputSchema as Record<string, object>; validate at protocol boundary
-					// before trusting the shape as JSONSchema7
-					inputSchema: isPlainObject(tool.inputSchema)
-						? (tool.inputSchema as MCPToolInputSchema)
-						: undefined,
-					serverName: normalizedServer.name,
-					readOnly: tool.annotations?.readOnlyHint === true,
-				}));
+				const tools: MCPTool[] = toolsResult.tools.map(tool =>
+					toMCPTool(tool, normalizedServer.name),
+				);
 
 				// Discovery is gated on the server's declared capabilities (available
 				// on the Client only after connect() completes the handshake) rather
@@ -727,13 +650,9 @@ export class MCPClient {
 				if (capabilities?.resources) {
 					try {
 						const resourcesResult = await client.listResources();
-						resources = resourcesResult.resources.map(resource => ({
-							uri: resource.uri,
-							name: resource.name,
-							description: resource.description || undefined,
-							mimeType: resource.mimeType || undefined,
-							serverName: normalizedServer.name,
-						}));
+						resources = resourcesResult.resources.map(resource =>
+							toMCPResource(resource, normalizedServer.name),
+						);
 						this.logger.debug('MCP resources discovered', {
 							serverName: normalizedServer.name,
 							resourceCount: resources.length,
@@ -763,16 +682,9 @@ export class MCPClient {
 				if (capabilities?.prompts) {
 					try {
 						const promptsResult = await client.listPrompts();
-						prompts = promptsResult.prompts.map(prompt => ({
-							name: prompt.name,
-							description: prompt.description || undefined,
-							arguments: prompt.arguments?.map(arg => ({
-								name: arg.name,
-								description: arg.description || undefined,
-								required: arg.required || false,
-							})),
-							serverName: normalizedServer.name,
-						}));
+						prompts = promptsResult.prompts.map(prompt =>
+							toMCPPrompt(prompt, normalizedServer.name),
+						);
 						this.logger.debug('MCP prompts discovered', {
 							serverName: normalizedServer.name,
 							promptCount: prompts.length,
@@ -972,28 +884,7 @@ export class MCPClient {
 			});
 
 			for (const mcpTool of serverTools) {
-				// Convert MCP tool to nanocoder Tool format
-				// Use the original tool name for better model compatibility
-				const schema = mcpTool.inputSchema;
-
-				const tool: Tool = {
-					type: 'function',
-					function: {
-						name: mcpTool.name,
-						description: mcpTool.description
-							? `[MCP:${serverName}] ${mcpTool.description}`
-							: `MCP tool from ${serverName}`,
-						parameters: {
-							type: 'object',
-							properties: (schema?.properties || {}) as Record<
-								string,
-								ToolParameterSchema
-							>,
-							required: schema?.required || [],
-						},
-					},
-				};
-				tools.push(tool);
+				tools.push(toFunctionTool(serverName, mcpTool));
 			}
 		}
 
@@ -1005,26 +896,8 @@ export class MCPClient {
 	 * name, so only one of them is callable: the server connected last (later
 	 * in `serverTools` order) handles every call to that name.
 	 */
-	getToolNameConflicts(): Array<{
-		tool: string;
-		servers: string[];
-		active: string;
-	}> {
-		const owners = new Map<string, string[]>();
-		for (const [serverName, serverTools] of this.serverTools.entries()) {
-			for (const mcpTool of serverTools) {
-				const list = owners.get(mcpTool.name) ?? [];
-				list.push(serverName);
-				owners.set(mcpTool.name, list);
-			}
-		}
-		const conflicts: Array<{tool: string; servers: string[]; active: string}> =
-			[];
-		for (const [tool, servers] of owners) {
-			if (servers.length < 2) continue;
-			conflicts.push({tool, servers, active: servers[servers.length - 1]});
-		}
-		return conflicts;
+	getToolNameConflicts(): MCPToolNameConflict[] {
+		return findToolNameConflicts(this.serverTools);
 	}
 
 	/**
@@ -1036,27 +909,10 @@ export class MCPClient {
 
 		for (const [serverName, serverTools] of this.serverTools.entries()) {
 			for (const mcpTool of serverTools) {
-				// dynamicTool is more explicit about unknown types compared to tool()
-				// MCP schemas come from external servers and are not known at compile time
 				const toolName = mcpTool.name;
-				const coreTool = dynamicTool({
-					description: mcpTool.description
-						? `[MCP:${serverName}] ${mcpTool.description}`
-						: `MCP tool from ${serverName}`,
-					inputSchema: jsonSchema<Record<string, unknown>>(
-						mcpTool.inputSchema || {type: 'object'},
-					),
-					execute: async (input, _options) => {
-						// dynamicTool passes 'input' as unknown, validate at runtime
-						const output = await this.callTool(
-							toolName,
-							input as Record<string, unknown>,
-						);
-						return typeof output === 'string' ? output : output.llmContent;
-					},
-				});
-
-				nativeTools[mcpTool.name] = coreTool;
+				nativeTools[toolName] = toNativeTool(serverName, mcpTool, input =>
+					this.callTool(toolName, input),
+				);
 			}
 		}
 
@@ -1080,58 +936,24 @@ export class MCPClient {
 	 * All callers only look tools up (`get`/`has`); mutating it would corrupt
 	 * the cache for everyone else until the next connect/disconnect.
 	 */
-	getToolMapping(): Map<
-		string,
-		{serverName: string; originalName: string; readOnly: boolean}
-	> {
+	getToolMapping(): MCPToolMapping {
 		if (this.toolMappingCache) {
 			return this.toolMappingCache;
 		}
 
-		const mapping = new Map<
-			string,
-			{serverName: string; originalName: string; readOnly: boolean}
-		>();
-
-		for (const [serverName, serverTools] of this.serverTools.entries()) {
-			for (const mcpTool of serverTools) {
-				mapping.set(mcpTool.name, {
-					serverName,
-					originalName: mcpTool.name,
-					readOnly: mcpTool.readOnly === true,
-				});
-			}
-		}
-
+		const mapping = buildToolMapping(this.serverTools);
 		this.toolMappingCache = mapping;
 		return mapping;
 	}
 
 	/**
-	 * Get all MCP tools as entries with handlers for easy registration
-	 * Each entry contains the native AI SDK tool and its handler function
-	 *
-	 * the AI SDK tool definition and the corresponding handler function.
-	 * This enables cleaner integration with ToolManager.
-	 *
-	 * @returns Array of tool entries with name, AI SDK tool, and handler function
+	 * Get all MCP tools as entries with handlers for easy registration.
+	 * Each entry carries the AI SDK tool definition, its validated handler
+	 * and its approval policy (see createMCPToolApproval), so ToolManager can
+	 * register it like any other tool.
 	 */
-	getToolEntries(forServerName?: string): Array<{
-		name: string;
-		tool: AISDKCoreTool;
-		handler: (
-			args: Record<string, unknown>,
-		) => Promise<string | StructuredToolOutput>;
-		approval: ToolApprovalPolicy;
-	}> {
-		const entries: Array<{
-			name: string;
-			tool: AISDKCoreTool;
-			handler: (
-				args: Record<string, unknown>,
-			) => Promise<string | StructuredToolOutput>;
-			approval: ToolApprovalPolicy;
-		}> = [];
+	getToolEntries(forServerName?: string): MCPToolEntry[] {
+		const entries: MCPToolEntry[] = [];
 
 		// Get native tools once to avoid redundant calls
 		const nativeTools = this.getNativeToolsRegistry();
@@ -1145,60 +967,16 @@ export class MCPClient {
 				const coreTool = nativeTools[toolName];
 
 				if (coreTool) {
-					// Run the same lenient schema type-check the approval prompt
-					// renders (tool-confirmation → getToolJsonSchema), so a
-					// malformed call is rejected locally — it never reaches the
-					// server, and approving a "wrong type" call no longer silently
-					// skips the schema gate. No per-tool validator exists for MCP;
-					// the server remains the authority on value constraints.
-					const handler = withValidation(
-						async (args: Record<string, unknown>) => {
-							return this.callTool(toolName, args);
-						},
-						undefined,
-						getToolJsonSchema(coreTool),
-						// The wrapper types its result as the generic
-						// ToolExecuteResult union; MCP handlers only resolve a string
-						// or a structured failure, so the narrower entry signature is
-						// safe here.
-					) as (
-						args: Record<string, unknown>,
-					) => Promise<string | StructuredToolOutput>;
-
-					// MCP tools take the same mode posture as built-in tools:
-					//   - headless runs unattended — it is daemon-driven, so there is
-					//     no foreground prompt to answer (execute_bash runs there
-					//     too); `"enabled": false` is the server-level opt-out;
-					//   - auto-accept runs server-annotated readers and alwaysAllow-ed
-					//     tools, and prompts for the rest. An MCP tool can be as
-					//     capable as execute_bash (shell, database and deploy
-					//     servers), and auto-accept still prompts for bash, so an
-					//     arbitrary MCP tool must not skip what bash cannot. The
-					//     readOnlyHint gets the same trust plan mode gives it;
-					//   - plan inspects without side effects, so a server's
-					//     alwaysAllow entry must not short-circuit it; only a
-					//     server-annotated reader is safe to run there;
-					//   - normal prompts unless alwaysAllow covers the tool.
-					// readOnly deliberately does NOT skip approval in normal mode:
-					// `readOnlyHint` is a hint supplied by the very server being
-					// gated, so it must not be able to silence its own prompt.
-					// alwaysAllow — set by the user, not the server — stays the only
-					// way to skip a normal-mode prompt, exactly as
-					// docs/configuration/mcp-configuration.md describes.
-					// (Yolo is bypassed centrally by resolveToolApproval.)
-					//
-					// For the same reason the hint is not copied onto the entry as
-					// `readOnly`: that field feeds ToolManager.isReadOnly, which
-					// gates ACP checkpoint capture and parallel batching. It stays
-					// on getToolMapping(), which only plan-mode filtering reads.
-					const readOnly = mcpTool.readOnly === true;
-					const isAutoApproved = this.isToolAutoApproved(toolName, serverName);
-					const approval: ToolApprovalPolicy = (_args, mode) => {
-						if (mode === 'headless') return false;
-						if (mode === 'plan') return !readOnly;
-						if (mode === 'auto-accept') return !(readOnly || isAutoApproved);
-						return !isAutoApproved;
-					};
+					const handler = createValidatedHandler(coreTool, args =>
+						this.callTool(toolName, args),
+					);
+					const approval = createMCPToolApproval({
+						readOnly: mcpTool.readOnly === true,
+						autoApproved: isToolAutoApproved(
+							this.serverConfigs.get(serverName),
+							toolName,
+						),
+					});
 
 					entries.push({
 						name: toolName,
@@ -1255,25 +1033,7 @@ export class MCPClient {
 		// Sanitize arguments: If schema expects a string but we got an object, ensureString it.
 		const serverTools = this.serverTools.get(mapping.serverName) || [];
 		const toolDef = serverTools.find(t => t.name === mapping.originalName);
-		const sanitizedArgs = {...args};
-
-		if (toolDef?.inputSchema) {
-			const schema = toolDef.inputSchema;
-			if (schema.properties) {
-				for (const [key, value] of Object.entries(args)) {
-					const propSchema = schema.properties[key];
-					// Only coerce if the schema explicitly demands a string and we have an object
-					if (
-						typeof propSchema === 'object' &&
-						propSchema?.type === 'string' &&
-						typeof value === 'object' &&
-						value !== null
-					) {
-						sanitizedArgs[key] = ensureString(value);
-					}
-				}
-			}
-		}
+		const sanitizedArgs = coerceStringArguments(toolDef, args);
 
 		return this.trackInFlight(mapping.serverName, () =>
 			this.executeToolCall(client, mapping.originalName, sanitizedArgs),
@@ -1478,26 +1238,7 @@ export class MCPClient {
 					client.readResource({uri}),
 				);
 
-				// Text vs. blob content is NOT distinguished by a `type` field in
-				// the MCP schema — TextResourceContents carries a `text` property,
-				// BlobResourceContents carries a `blob` property, and neither
-				// declares the other. Discriminate on which key is present.
-				const contents: MCPResourceContent[] = (result.contents ?? []).map(
-					c => {
-						const block = c as {
-							uri: string;
-							mimeType?: string;
-							text?: string;
-							blob?: string;
-						};
-						return {
-							uri: block.uri,
-							mimeType: block.mimeType,
-							text: 'text' in block ? block.text : undefined,
-							blob: 'blob' in block ? block.blob : undefined,
-						};
-					},
-				);
+				const contents = toResourceContents(result.contents);
 
 				const finalMetrics = endMetrics(metrics);
 				this.logger.info('MCP resource read completed', {
@@ -1609,33 +1350,7 @@ export class MCPClient {
 					correlationId,
 				});
 
-				return {
-					description: result.description,
-					messages: result.messages.map(
-						(msg: {
-							role: string;
-							content:
-								| {
-										type: string;
-										text?: string;
-										data?: string;
-										mimeType?: string;
-								  }
-								| string;
-						}) => ({
-							role: msg.role as 'user' | 'assistant',
-							content:
-								typeof msg.content === 'string'
-									? {type: 'text' as const, text: msg.content}
-									: {
-											type: msg.content.type as 'text' | 'image' | 'resource',
-											text: msg.content.text,
-											data: msg.content.data,
-											mimeType: msg.content.mimeType,
-										},
-						}),
-					),
-				};
+				return toPromptResult(result);
 			} catch (error) {
 				const errorMessage = formatError(error);
 				const errorName = error instanceof Error ? error.name : 'Unknown';

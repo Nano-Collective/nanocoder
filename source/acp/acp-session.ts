@@ -6,9 +6,9 @@ import {mergeDisabledTools} from '@/acp/acp-capabilities';
 import {getAppConfig} from '@/config/index';
 import {SemanticMemoryManager} from '@/memory/semantic-memory-manager';
 import {
-	createSessionCwdScope,
-	type SessionCwdScope,
-} from '@/services/session-cwd';
+	createSessionContext,
+	type SessionContext,
+} from '@/services/session-context';
 import {TimelineManager} from '@/services/timeline-manager';
 import type {DevelopmentMode, LLMClient, Message} from '@/types/core';
 
@@ -19,12 +19,12 @@ export class AcpSession {
 	readonly clientCapabilities?: ClientCapabilities;
 	readonly timeline: TimelineManager;
 	/**
-	 * Where this session's tools run: `cwd` from the client, moved by a bash
-	 * `cd`. Turns run inside it, so relative paths, bash, the path boundary and
-	 * the system prompt follow the session, not the directory the agent was
-	 * spawned in.
+	 * Where this session runs: `cwd` from the client, moved by a bash `cd`. Its
+	 * requests and turns run inside it, so relative paths, bash, the path
+	 * boundary, the system prompt and the project config (agents.config.json,
+	 * .mcp.json) follow the session, not the directory the agent was spawned in.
 	 */
-	readonly cwdScope: SessionCwdScope;
+	readonly context: SessionContext;
 
 	messages: Message[] = [];
 	systemMessage?: Message;
@@ -70,6 +70,7 @@ export class AcpSession {
 		conn: AgentSideConnection;
 		clientCapabilities?: ClientCapabilities;
 		initialMode?: DevelopmentMode;
+		context?: SessionContext;
 	}) {
 		this.sessionId = options.sessionId;
 		this.cwd = options.cwd;
@@ -77,7 +78,7 @@ export class AcpSession {
 		this.clientCapabilities = options.clientCapabilities;
 		this.developmentMode = options.initialMode ?? 'auto-accept';
 		this.timeline = new TimelineManager(options.cwd, options.sessionId);
-		this.cwdScope = createSessionCwdScope(options.cwd);
+		this.context = options.context ?? createSessionContext(options.cwd);
 	}
 
 	/**
