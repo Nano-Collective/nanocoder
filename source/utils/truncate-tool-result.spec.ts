@@ -66,3 +66,20 @@ test('does not cut through a whitespace-delimited token (a secret stays whole or
 		}
 	}
 });
+
+test('never splits a surrogate pair (emoji / astral characters)', t => {
+	const lone = (s: string) =>
+		/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(
+			s,
+		);
+
+	// Long runs of emoji with no whitespace so the token snap cannot rescue the cut.
+	for (let len = 3000; len < 3040; len++) {
+		const content = '\u{1F600}'.repeat(len);
+		for (const max of [1000, 1001, 2000, 2001, 2500]) {
+			const result = truncateToolResult(content, max);
+			t.false(lone(result), `len=${len} max=${max}`);
+			t.true(result.length <= max);
+		}
+	}
+});
