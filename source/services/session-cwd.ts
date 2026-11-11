@@ -1,7 +1,7 @@
 import {existsSync, statSync} from 'node:fs';
 import {resolve} from 'node:path';
 import {getActiveSessionContext} from '@/services/session-context';
-import {isPathInside} from '@/utils/path-validation';
+import {isPathInside, isRealPathInside} from '@/utils/path-validation';
 
 // Shared "where am I" for bash and every file tool. Without it, a `cd` in one
 // bash subshell never reaches the next command or the file tools — so a
@@ -59,10 +59,12 @@ export function setSessionCwd(dir: string): void {
 // session cwd outside the project; the pathless search tools use this as their
 // default root so they never glob/grep outside the project. Relative paths still
 // resolve against the true session cwd — only the default search root is clamped.
+// After a `cd` the session cwd is physical (`pwd -P`) while the root may have
+// been opened through a symlink, so a lexical miss is re-checked on realpaths.
 export function getContainedSessionCwd(): string {
 	const cwd = getSafeSessionCwd();
 	const root = getProjectRoot();
-	return isPathInside(cwd, root) ? cwd : root;
+	return isPathInside(cwd, root) || isRealPathInside(cwd, root) ? cwd : root;
 }
 
 // Guards against a `cd`-ed-into dir being deleted mid-session (torn-down
