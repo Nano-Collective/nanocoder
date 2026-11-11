@@ -162,6 +162,8 @@ export const TRUNCATION_DESCRIPTION_LENGTH = 100;
 export const TOOL_OUTPUT_DISPLAY_LINES = 20;
 
 // === DELAYS ===
+// How long a slash command that queued output waits before completing; see
+// `completeCommand` in source/app/utils/command-dispatcher.ts for why.
 export const DELAY_COMMAND_COMPLETE_MS = 100;
 
 // === BASH EXECUTION ===

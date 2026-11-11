@@ -25,20 +25,20 @@ import {infoMsg, warningMsg} from '@/utils/message-factory';
 import {handleMCPPromptCommand} from './handlers/mcp-prompt-handler';
 
 /**
- * Handles custom user-defined commands.
- * Returns true if a custom command was found and handled.
+ * Runs a custom user-defined command (`.nanocoder/commands/`, skill bundles):
+ * its rendered body becomes the next chat turn, which completes it. Returns
+ * `undefined` when no custom command has this name.
  */
-async function handleCustomCommand(
+async function runCustomCommand(
 	message: string,
 	commandName: string,
 	options: MessageSubmissionOptions,
-): Promise<boolean> {
+): Promise<CommandCompletion | undefined> {
 	const {
 		customCommandCache,
 		customCommandLoader,
 		customCommandExecutor,
 		onHandleChatMessage,
-		onCommandComplete,
 	} = options;
 
 	const customCommand =
@@ -46,20 +46,18 @@ async function handleCustomCommand(
 		customCommandLoader?.getCommand(commandName);
 
 	if (!customCommand) {
-		return false;
+		return undefined;
 	}
 
 	const processedPrompt = customCommandExecutor
 		? expandCustomCommandPrompt(customCommand, message, customCommandExecutor)
 		: undefined;
 
-	if (processedPrompt) {
-		await onHandleChatMessage(processedPrompt);
-	} else {
-		onCommandComplete?.();
+	if (!processedPrompt) {
+		return 'done';
 	}
-
-	return true;
+	await onHandleChatMessage(processedPrompt);
+	return 'handed-off';
 }
 
 /** What a read-only command's `handler` receives besides args and messages. */
@@ -129,13 +127,31 @@ function createCommandContext(
 	};
 }
 
-/** Hand the prompt back the way the stateful command asked. */
+/**
+ * Hand the prompt back the way the command asked. Every slash command
+ * completes through here.
+ *
+ * `done-after-render` still waits `DELAY_COMMAND_COMPLETE_MS` (100 ms).
+ * Completion is what lets a non-interactive run (`nanocoder run "/cmd"`)
+ * exit, and the output a command queues reaches the screen through React
+ * state and Ink's next frame, neither of which reports back when it is
+ * drawn. Completing at once could exit before that frame, losing the
+ * output. The delay has done this job since cabbf0059. Replacing it needs
+ * a "rendered" signal from the TUI; until then it stays, in this one place.
+ */
 function completeCommand(
-	completion: Exclude<CommandCompletion, {show: unknown}>,
+	completion: CommandCompletion,
 	options: MessageSubmissionOptions,
 ): void {
 	if (completion === 'handed-off') return;
 	if (typeof completion === 'object') {
+		if ('show' in completion) {
+			completeCommand(
+				showResult(completion.show, options.onAddToChatQueue),
+				options,
+			);
+			return;
+		}
 		const complete = () => options.onCommandComplete?.();
 		void completion.until.then(complete, complete);
 		return;
@@ -157,8 +173,7 @@ async function runRegisteredCommand(
 	options: MessageSubmissionOptions,
 	onceThreshold?: number,
 ): Promise<void> {
-	const {onAddToChatQueue, onCommandComplete, setLiveComponent, messages} =
-		options;
+	const {onAddToChatQueue, setLiveComponent, messages} = options;
 
 	// Commands that declare a progressLabel do slow work (LLM round-trip,
 	// network) before returning their result component. Hold a spinner in the
@@ -209,39 +224,27 @@ async function runRegisteredCommand(
 		}
 	}
 
-	if (completion && typeof completion === 'object' && 'show' in completion) {
-		result = completion.show;
-	} else if (completion) {
-		completeCommand(completion, options);
-		return;
-	}
+	completeCommand(completion ?? showResult(result, onAddToChatQueue), options);
+}
 
-	if (!result) {
-		onCommandComplete?.();
-		return;
-	}
-
+/**
+ * Queue what a read-only command (or a stateful one's `{show}`) returned,
+ * and say how the command completes. Queued on a microtask so a result
+ * produced during a render cannot update the app mid-render.
+ */
+function showResult(
+	result: React.ReactNode | string | void,
+	addToChatQueue: (component: React.ReactNode) => void,
+): CommandCompletion {
 	if (React.isValidElement(result)) {
-		queueMicrotask(() => {
-			onAddToChatQueue(result);
-		});
-		setTimeout(() => {
-			onCommandComplete?.();
-		}, DELAY_COMMAND_COMPLETE_MS);
-		return;
+		queueMicrotask(() => addToChatQueue(result));
+		return 'done-after-render';
 	}
-
 	if (typeof result === 'string' && result.trim()) {
-		queueMicrotask(() => {
-			onAddToChatQueue(infoMsg(result, 'command-result'));
-		});
-		setTimeout(() => {
-			onCommandComplete?.();
-		}, DELAY_COMMAND_COMPLETE_MS);
-		return;
+		queueMicrotask(() => addToChatQueue(infoMsg(result, 'command-result')));
+		return 'done-after-render';
 	}
-
-	onCommandComplete?.();
+	return 'done';
 }
 
 /**
@@ -262,7 +265,9 @@ export async function dispatchSlashCommand(
 ): Promise<void> {
 	const commandName = message.slice(1).split(/\s+/)[0];
 
-	if (await handleCustomCommand(message, commandName, options)) {
+	const custom = await runCustomCommand(message, commandName, options);
+	if (custom) {
+		completeCommand(custom, options);
 		return;
 	}
 
@@ -273,17 +278,17 @@ export async function dispatchSlashCommand(
 	// prompts, whose entire set only exists at runtime and changes as MCP
 	// servers connect/disconnect, and whose "load" is an RPC (getPrompt) to a
 	// live server, not a module import. Intercepting here instead mirrors how
-	// handleCustomCommand (checked just above) already dispatches the other
+	// runCustomCommand (checked just above) already dispatches the other
 	// runtime-discovered command source - project `.nanocoder/commands/` files.
 	// Both runtime-discovered sources bypass `?key=value` parsing below and
 	// receive the raw message, so free-text `?word` tokens are never stripped.
-	if (
-		await handleMCPPromptCommand(
-			commandName,
-			parseCustomCommandArgs(message.slice(commandName.length + 2)),
-			options,
-		)
-	) {
+	const mcpPrompt = await handleMCPPromptCommand(
+		commandName,
+		parseCustomCommandArgs(message.slice(commandName.length + 2)),
+		options,
+	);
+	if (mcpPrompt) {
+		completeCommand(mcpPrompt, options);
 		return;
 	}
 

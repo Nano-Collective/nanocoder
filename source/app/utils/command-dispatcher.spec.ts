@@ -6,6 +6,7 @@ import React from 'react';
 import {commandRegistry} from '@/commands';
 import {runCheckpointSubcommand} from '@/commands/checkpoint';
 import {lazyCommands} from '@/commands/lazy-registry';
+import {setToolManagerGetter} from '@/message-handler';
 import {DELAY_COMMAND_COMPLETE_MS} from '@/constants';
 import {getSessionContextLimit, resetSessionContextLimit} from '@/models/index';
 import {resetAutoCompactSession} from '@/utils/auto-compact';
@@ -605,6 +606,55 @@ test.serial('create subcommands scaffold a file and hand off to the design conve
 	} finally {
 		process.chdir(originalCwd);
 		rmSync(workspace, {recursive: true, force: true});
+	}
+});
+
+test.serial('MCP prompts and custom commands complete through the dispatcher', async t => {
+	const prompts = [
+		{name: 'review', serverName: 'gh', arguments: [{name: 'repo', required: true}]},
+		{name: 'greet', serverName: 'docs', arguments: []},
+	];
+	setToolManagerGetter(
+		() =>
+			({
+				getMCPClient: () => ({
+					getAllPrompts: () => prompts,
+					getPrompt: async () => ({
+						messages: [{role: 'user', content: {type: 'text', text: 'hi'}}],
+					}),
+				}),
+			}) as never,
+	);
+	try {
+		let completed = 0;
+		const sent: string[] = [];
+		const options = createOptions({
+			onCommandComplete: () => completed++,
+			onHandleChatMessage: async message => {
+				sent.push(message);
+			},
+		});
+
+		// A reported error completes after its message renders.
+		await dispatchSlashCommand('/mcp:gh:review', options);
+		t.is(completed, 0);
+		await wait(DELAY_COMMAND_COMPLETE_MS + 25);
+		t.is(completed, 1);
+
+		// A prompt that becomes a chat turn leaves completion to that turn.
+		await dispatchSlashCommand('/mcp:docs:greet', options);
+		await wait(DELAY_COMMAND_COMPLETE_MS + 25);
+		t.deepEqual(sent, ['hi']);
+		t.is(completed, 1);
+
+		// A custom command that renders nothing completes at once.
+		const customCommandCache = new Map([
+			['empty', {name: 'empty', fullName: 'empty'}],
+		]) as unknown as MessageSubmissionOptions['customCommandCache'];
+		await dispatchSlashCommand('/empty', {...options, customCommandCache});
+		t.is(completed, 2);
+	} finally {
+		setToolManagerGetter(() => null);
 	}
 });
 
