@@ -1,5 +1,5 @@
 /**
- * /schedule — read-only view of cron subscriptions declared across all
+ * /skills schedule (formerly /schedule) — read-only view of cron subscriptions declared across all
  * loaded skills.
  *
  * The legacy `.nanocoder/schedules.json`-backed scheduler was replaced by
@@ -101,7 +101,7 @@ export const scheduleCommand: Command = {
 	handler: async args => {
 		if (args.length > 0) {
 			return infoMsg(
-				"Usage: /schedule\n\nMutations happen by editing a command's frontmatter `subscribe:` block, or a bundle's `skill.yaml`. See docs.",
+				"Usage: /skills schedule\n\nMutations happen by editing a command's frontmatter `subscribe:` block, or a bundle's `skill.yaml`. See docs.",
 				'schedule',
 			);
 		}

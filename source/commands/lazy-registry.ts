@@ -12,6 +12,9 @@
  * `help-utils.ts`. The name, description, `progressLabel` and
  * `echoInvocation` must match the module's own; `lazy-registry.spec.ts`
  * loads every module and fails if they drift.
+ *
+ * **When renaming or folding a command into another:** drop its entry here and
+ * add the old name to `aliases.ts`, so it keeps working without being listed.
  */
 import type {LazyCommand} from '@/types/commands';
 
@@ -27,11 +30,6 @@ export const lazyCommands: LazyCommand[] = [
 		load: () => import('@/commands/exit').then(m => m.exitCommand),
 	},
 	{
-		name: 'quit',
-		description: 'Quit the application',
-		load: () => import('@/commands/exit').then(m => m.quitCommand),
-	},
-	{
 		name: 'clear',
 		description: 'Clear the chat history, model context, and tasks',
 		load: () => import('@/commands/clear').then(m => m.clearCommand),
@@ -43,20 +41,10 @@ export const lazyCommands: LazyCommand[] = [
 		load: () => import('@/commands/compact').then(m => m.compactCommand),
 	},
 	{
-		name: 'codex-login',
+		name: 'login',
 		description:
-			'Log in to ChatGPT/Codex (device flow). Saves credentials for the "ChatGPT" provider.',
-		load: () =>
-			import('@/commands/codex-login-command').then(m => m.codexLoginCommand),
-	},
-	{
-		name: 'copilot-login',
-		description:
-			'Log in to GitHub Copilot (device flow). Saves credentials for the "GitHub Copilot" provider.',
-		load: () =>
-			import('@/commands/copilot-login-command').then(
-				m => m.copilotLoginCommand,
-			),
+			'Log in to ChatGPT/Codex or GitHub Copilot with a device code (/login codex, /login copilot)',
+		load: () => import('@/commands/login').then(m => m.loginCommand),
 	},
 	{
 		name: 'context-max',
@@ -98,7 +86,8 @@ export const lazyCommands: LazyCommand[] = [
 	},
 	{
 		name: 'model',
-		description: 'Select a model from any configured provider',
+		description:
+			"Select a model from any configured provider (/model browse to search OpenRouter's model list)",
 		load: () => import('@/commands/model').then(m => m.modelCommand),
 	},
 	{
@@ -151,19 +140,14 @@ export const lazyCommands: LazyCommand[] = [
 		load: () => import('@/commands/update').then(m => m.updateCommand),
 	},
 	{
-		name: 'model-database',
-		description: 'Browse coding models from OpenRouter',
-		load: () =>
-			import('@/commands/model-database').then(m => m.modelDatabaseCommand),
-	},
-	{
 		name: 'status',
 		description: 'Display current status (provider, model, theme)',
 		load: () => import('@/commands/status').then(m => m.statusCommand),
 	},
 	{
 		name: 'setup-config',
-		description: 'Open a configuration file in your editor',
+		description:
+			'Open a config file (agents.config.json, .mcp.json, preferences) in $EDITOR',
 		load: () =>
 			import('@/commands/setup-config').then(m => m.setupConfigCommand),
 	},
@@ -181,6 +165,7 @@ export const lazyCommands: LazyCommand[] = [
 	{
 		name: 'tip',
 		description: 'Show a random Nanocoder usage tip',
+		hidden: true,
 		load: () => import('@/commands/tip').then(m => m.tipCommand),
 	},
 	{
@@ -207,11 +192,6 @@ export const lazyCommands: LazyCommand[] = [
 		load: () => import('@/commands/retry').then(m => m.retryCommand),
 	},
 	{
-		name: 'remember',
-		description: 'Save a durable project memory',
-		load: () => import('@/commands/remember').then(m => m.rememberCommand),
-	},
-	{
 		name: 'memory',
 		description: 'Manage project memories',
 		load: () => import('@/commands/memory').then(m => m.memoryCommand),
@@ -234,12 +214,6 @@ export const lazyCommands: LazyCommand[] = [
 		load: () => import('@/commands/tune').then(m => m.tuneCommand),
 	},
 	{
-		name: 'schedule',
-		description:
-			'List cron-triggered skills (single-file frontmatter + bundle skill.yaml). Read-only - edit the source file to change.',
-		load: () => import('@/commands/schedule').then(m => m.scheduleCommand),
-	},
-	{
 		name: 'agents',
 		description:
 			'List subagents. /agents show <name> for details, /agents copy <name> to customize, /agents create <name> to scaffold one',
@@ -248,6 +222,7 @@ export const lazyCommands: LazyCommand[] = [
 	{
 		name: 'credits',
 		description: 'Show project contributors and dependencies',
+		hidden: true,
 		load: () => import('@/commands/credits').then(m => m.creditsCommand),
 	},
 	{
@@ -259,7 +234,7 @@ export const lazyCommands: LazyCommand[] = [
 	{
 		name: 'skills',
 		description:
-			'List loaded skills. Subcommands: show <name>, create <name>, check <name>, promote <name>, demote <name>.',
+			'List loaded skills. Subcommands: show <name>, create <name>, check <name>, promote <name>, demote <name>, schedule.',
 		load: () => import('@/commands/skills').then(m => m.skillsCommand),
 	},
 	{
@@ -273,6 +248,7 @@ export const lazyCommands: LazyCommand[] = [
 		name: 'privacy',
 		description:
 			'Inspect what the prompt scrubber would remove from some text (/privacy inspect <text>)',
+		hidden: true,
 		load: () => import('@/commands/privacy').then(m => m.privacyCommand),
 	},
 	{

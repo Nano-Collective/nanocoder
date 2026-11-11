@@ -11,6 +11,7 @@
 
 import {Box, Text} from 'ink';
 import React from 'react';
+import {scheduleCommand} from '@/commands/schedule';
 import {InfoField} from '@/components/ui/info-field';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
@@ -305,8 +306,13 @@ async function handlePromotion(direction: PromoteDirection, args: string[]) {
 export const skillsCommand: Command = {
 	name: 'skills',
 	description:
-		'List loaded skills. Subcommands: show <name>, create <name>, check <name>, promote <name>, demote <name>.',
-	handler: async (args, _messages, _metadata) => {
+		'List loaded skills. Subcommands: show <name>, create <name>, check <name>, promote <name>, demote <name>, schedule.',
+	handler: async (args, messages, metadata) => {
+		if (args[0] === 'schedule') {
+			// Formerly the top-level /schedule, which still expands to this.
+			return scheduleCommand.handler(args.slice(1), messages, metadata);
+		}
+
 		if (args[0] === 'promote' || args[0] === 'demote') {
 			return handlePromotion(args[0], args);
 		}

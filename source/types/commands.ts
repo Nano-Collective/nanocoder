@@ -11,6 +11,11 @@ export interface Command<T = React.ReactElement | void> {
 	progressLabel?: string;
 	/** Echo the submitted slash command into chat before showing its result. */
 	echoInvocation?: boolean;
+	/**
+	 * Leave the command out of the `/help` list. It still runs, completes in
+	 * the slash menu, and has its own `/help <name>` page.
+	 */
+	hidden?: boolean;
 	handler: (
 		args: string[],
 		messages: Message[],
@@ -47,6 +52,8 @@ export interface LazyCommand {
 	progressLabel?: string;
 	/** Mirrors `Command.echoInvocation` without loading the command module. */
 	echoInvocation?: boolean;
+	/** Mirrors `Command.hidden`, so `/help` can filter without a load. */
+	hidden?: boolean;
 	load: () => Promise<Command>;
 }
 

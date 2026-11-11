@@ -1,4 +1,5 @@
 import React from 'react';
+import {findCommandAlias} from '@/commands/aliases';
 import type {Command, LazyCommand, Message} from '@/types/index';
 import {fuzzyScore} from '@/utils/fuzzy-matching';
 import {errorMsg} from '@/utils/message-factory';
@@ -39,6 +40,7 @@ class CommandRegistry {
 			description: entry.description,
 			progressLabel: entry.progressLabel,
 			echoInvocation: entry.echoInvocation,
+			hidden: entry.hidden,
 			handler: async (args, messages, metadata) => {
 				if (!resolved) {
 					resolved = await entry.load();
@@ -68,6 +70,15 @@ class CommandRegistry {
 
 	getCompletions(prefix: string): string[] {
 		const commandNames = [...this.commands.keys(), ...this.lazyEntries.keys()];
+
+		// Old command names (see `aliases.ts`) are never offered while typing,
+		// but one typed out in full completes to itself. Without that, Enter
+		// on a fully typed `/quit` would accept whatever fuzzy match the menu
+		// had highlighted instead of submitting it.
+		const alias = findCommandAlias(prefix);
+		if (alias && !commandNames.includes(alias.name)) {
+			commandNames.push(alias.name);
+		}
 
 		// No prefix: return all commands alphabetically
 		if (!prefix) {
