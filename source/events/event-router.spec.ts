@@ -369,3 +369,28 @@ test('one failing subscription neither skips the others nor rejects emit', async
 		{id: 'rejects', message: 'async boom'},
 	]);
 });
+
+// matchGlob runs on the shared utils/glob-match engine.
+
+test('matchGlob keeps a trailing **/ meaning "anything under this directory"', t => {
+	t.true(matchGlob('docs/**/', 'docs/a.md'));
+	t.true(matchGlob('docs/**/', 'docs/sub/a.md'));
+	t.false(matchGlob('docs/**/', 'src/a.md'));
+	t.true(matchGlob('**/', 'a/b/c.ts'));
+});
+
+test('matchGlob stays fast on a pattern that makes a backtracking regex hang', t => {
+	const start = Date.now();
+	t.false(matchGlob(`${'*a'.repeat(25)}b`, 'a'.repeat(2000)));
+	t.false(matchGlob('**/**/**/**/**/**/x', `${'a/'.repeat(200)}y`));
+	t.true(Date.now() - start < 200);
+});
+
+test('matchGlob matches nothing for a pattern the matcher refuses, instead of throwing', t => {
+	t.false(matchGlob('a'.repeat(1001), 'a'.repeat(1001)));
+	t.false(matchGlob('{a,b}'.repeat(10), 'a'.repeat(10)));
+});
+
+test('matchGlob trims whitespace around brace alternatives', t => {
+	t.true(matchGlob('src/*.{ts, tsx}', 'src/a.tsx'));
+});

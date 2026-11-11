@@ -6,13 +6,12 @@ import test from 'ava';
 
 import {
 	findMatchingPaths,
-	GLOB_TOKEN_CACHE_MAX_TOKENS,
-	globTokenCache,
 	matchesGlob,
 	searchProjectContents,
 	SearchTimeoutError,
 	walkProjectEntries,
 } from './file-search';
+import {GLOB_TOKEN_CACHE_MAX_TOKENS, globTokenCache} from './glob-match';
 
 function createTempDir(name: string): string {
 	return join(tmpdir(), `nanocoder-${name}-${process.pid}-${Date.now()}`);
