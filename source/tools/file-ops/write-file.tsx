@@ -20,7 +20,11 @@ import {getCachedFileContent, invalidateCache} from '@/utils/file-cache';
 import {highlight} from '@/utils/highlighter';
 import {normalizeIndentation} from '@/utils/indentation-normalizer';
 import {collapseUnchangedLines, computeLineDiff} from '@/utils/inline-diff';
-import {validateEditableFormat, validatePath} from '@/utils/path-validators';
+import {
+	validateEditableEncoding,
+	validateEditableFormat,
+	validatePath,
+} from '@/utils/path-validators';
 import {getLanguageFromExtension} from '@/utils/programming-language-helper';
 import {
 	forgetReadContent,
@@ -57,11 +61,20 @@ const executeWriteFile = async (args: {
 	const fileExists = existsSync(absPath);
 
 	if (fileExists) {
+		let cached: Awaited<ReturnType<typeof getCachedFileContent>> | undefined;
 		try {
-			const cached = await getCachedFileContent(absPath);
-			previousContentCache.set(absPath, cached.content);
+			cached = await getCachedFileContent(absPath);
 		} catch {
-			previousContentCache.set(absPath, null);
+			// Unreadable: no diff, and no encoding to check.
+		}
+		previousContentCache.set(absPath, cached?.content ?? null);
+		// The model saw this file decoded as UTF-8, so a rewrite carries U+FFFD
+		// for every byte that didn't decode, the same loss the edit tools refuse.
+		if (cached) {
+			const encodingResult = validateEditableEncoding(args.path, cached);
+			if (!encodingResult.valid) {
+				throw new Error(encodingResult.error);
+			}
 		}
 	} else {
 		previousContentCache.set(absPath, null);
@@ -487,6 +500,17 @@ const writeFileValidator = async (args: {
 			valid: false,
 			error: `"${args.path}" already exists and you have not read it this session. Call read_file on it first — if the file is over 300 lines, specify start_line and end_line to read its actual content, not just metadata — so you don't discard existing content, then retry. For small changes, prefer string_replace over a full overwrite.`,
 		};
+	}
+
+	// Overwriting a legacy-encoded file: see executeWriteFile.
+	if (existsSync(absPath)) {
+		try {
+			const cached = await getCachedFileContent(absPath);
+			const encodingResult = validateEditableEncoding(args.path, cached);
+			if (!encodingResult.valid) return encodingResult;
+		} catch {
+			// Unreadable files surface their own error at execute time.
+		}
 	}
 
 	// Allow empty strings (intentional file creation)
