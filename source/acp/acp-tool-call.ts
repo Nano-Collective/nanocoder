@@ -9,6 +9,7 @@ import {getSafeSessionCwd} from '@/services/session-cwd';
 import type {ToolCall} from '@/types/core';
 import {fitEditToLineEndings} from '@/utils/line-endings';
 import {replaceFirstLiteral} from '@/utils/literal-replace';
+import {truncateText} from '@/utils/truncate-text';
 
 // A bash `cd` moves the session cwd and leaves process.cwd() at the launch dir.
 function resolveToolPath(path: string): string {
@@ -185,8 +186,7 @@ function asString(value: unknown): string | undefined {
 }
 
 function truncate(text: string, max: number): string {
-	const firstLine = text.split('\n', 1)[0];
-	return firstLine.length > max ? `${firstLine.slice(0, max - 1)}…` : firstLine;
+	return truncateText(text.split('\n', 1)[0], max, {unit: 'code-units'});
 }
 
 function extractPath(args: Record<string, unknown>): string | undefined {

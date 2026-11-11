@@ -11,6 +11,7 @@ import {useTheme} from '@/hooks/useTheme';
 import {generateKey} from '@/session/key-generator';
 import type {Message, ToolCall} from '@/types/core';
 import {parseToolArguments} from '@/utils/tool-args-parser';
+import {truncateText} from '@/utils/truncate-text';
 
 /**
  * Cap on how many trailing messages are replayed into scrollback on resume.
@@ -24,8 +25,9 @@ const MAX_REPLAYED_MESSAGES = 60;
 const MAX_DESCRIPTOR_LENGTH = 80;
 
 function truncate(value: string, max = MAX_DESCRIPTOR_LENGTH): string {
-	const single = value.replace(/\s+/g, ' ').trim();
-	return single.length > max ? `${single.slice(0, max - 1)}…` : single;
+	return truncateText(value.replace(/\s+/g, ' ').trim(), max, {
+		unit: 'code-units',
+	});
 }
 
 /**

@@ -15,6 +15,7 @@ import {normalizeIndentation} from '@/utils/indentation-normalizer';
 import {areLinesSimilar, computeInlineDiff} from '@/utils/inline-diff';
 import {fitEditToLineEndings} from '@/utils/line-endings';
 import {getLanguageFromExtension} from '@/utils/programming-language-helper';
+import {truncateText} from '@/utils/truncate-text';
 
 interface StringReplaceArgs {
 	path: string;
@@ -37,10 +38,8 @@ export function stringReplaceDisplayPath(path: string): string {
 }
 
 /** Truncate a plain line to fit terminal width */
-const truncateLine = (line: string, maxWidth: number): string => {
-	if (line.length <= maxWidth) return line;
-	return line.slice(0, maxWidth - 1) + '…';
-};
+const truncateLine = (line: string, maxWidth: number): string =>
+	truncateText(line, maxWidth, {unit: 'code-units'});
 
 export async function formatStringReplacePreview(
 	args: StringReplaceArgs,
