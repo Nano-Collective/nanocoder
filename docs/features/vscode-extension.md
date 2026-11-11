@@ -25,7 +25,7 @@ The Nanocoder VS Code extension provides a native sidebar chat powered by the Ag
 - **Queued Follow-ups**: Type a follow-up while a turn is still running and it waits in line instead of being rejected. Queued messages show a Queued badge and run in order as the agent frees up.
 - **Cancellation**: The Stop button or the Escape key ends the whole turn - the current tool is aborted and any queued tools are skipped.
 - **Configuration Management**: The `Nanocoder: Open Configuration` command opens your `agents.config.json` - the project-level file if there is one, otherwise the global one.
-- **Legacy Companion Mode**: The original WebSocket companion for terminal CLI sessions is still available, now opt-in.
+- **Legacy Companion Mode**: The original WebSocket companion for terminal CLI sessions is still available, now opt-in. It is deprecated and will be removed in a future release (see [Legacy Companion Mode](#legacy-companion-mode)).
 
 ## Installation
 
@@ -36,6 +36,8 @@ Run Nanocoder with the `--vscode` flag and it will prompt you to install the bun
 ```bash
 nanocoder --vscode
 ```
+
+`--vscode` also starts the deprecated legacy companion (see below), so after the extension is installed you can drop the flag: the sidebar chat starts its own agent. Manual installation works without it.
 
 ### Manual Installation
 
@@ -211,6 +213,8 @@ Access these commands via the Command Palette (`Cmd+Shift+P` / `Ctrl+Shift+P`):
 The copy shortcut is bound only while the Nanocoder chat view has focus.
 
 ## Legacy Companion Mode
+
+> **Deprecated.** The WebSocket companion (`nanocoder --vscode`, `/ide`, `--vscode-port`, and the extension's `nanocoder.autoConnect`, Connect, Disconnect and Start Nanocoder CLI commands) duplicates the sidebar chat, which runs `nanocoder --acp` itself. It will be removed in a future release, and Nanocoder prints a warning the first time it is enabled in a session. Use the [sidebar chat](#using-the-sidebar-chat) instead.
 
 Before the sidebar chat, the extension paired with a Nanocoder session running in a terminal (`nanocoder --vscode`, or `/ide` from within a session) over a local WebSocket. That mode is still available - it is now opt-in via `nanocoder.autoConnect` - and is useful if you prefer the terminal TUI:
 
