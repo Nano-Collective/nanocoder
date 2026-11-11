@@ -784,8 +784,8 @@ test.serial(
 					parts.push(result);
 					break;
 				}
-				// The note describes exactly the window just returned and points
-				// at the very next character.
+				// The note describes the window just returned, and points at the
+				// character right after it.
 				const [, from, to, size, next] = note;
 				const body = result.slice(0, note.index);
 				t.is(Number(from), start);
@@ -801,9 +801,8 @@ test.serial(
 			const whole = parts.join('');
 			t.is(whole.length, total);
 			// Nothing lost or repeated at a seam: every entry appears once, in order.
-			// (The converter's front matter repeats the first entry, so look at
-			// the last 7000: a window that dropped or repeated text at a seam
-			// would shift this sequence.)
+			// The converter's front matter repeats the first entry, so compare
+			// the last 7000: a seam that dropped or repeated text shifts these.
 			const ids = (whole.match(/entry-\d{6}/g) ?? []).slice(-7000);
 			t.deepEqual(
 				ids,
@@ -1008,9 +1007,8 @@ test.serial('paging the same URL converts the page once', async t => {
 
 		const second = await callFetchUrl({url, start_index: PAGE_LIMIT});
 		t.true(second.includes('entry-'));
-		// The page is not downloaded or converted again...
+		// The conversion is saved; the address walk is not.
 		t.is(server.requests.get, 1);
-		// ...but its address is still walked and checked, which is a HEAD.
 		t.true(server.requests.head > probesAfterFirst);
 	} finally {
 		server.restore();
@@ -1182,8 +1180,8 @@ test.serial(
 			const first = await callFetchUrl({url});
 			t.true(first.includes('entry-'));
 
-			// Same URL, but the chain now ends at a private address. The page it
-			// used to reach is cached; that must not matter.
+			// Same URL, but the chain now ends at a private address. The page
+			// it used to reach is cached; that must not matter.
 			redirectTo = 'http://127.0.0.1:8080/internal';
 			await t.throwsAsync(() => callFetchUrl({url, start_index: 10}), {
 				message: /internal\/private network/,
@@ -1230,8 +1228,8 @@ test.serial('the cache belongs to the address the redirects reached', async t =>
 		t.regex(await callFetchUrl({url}), /first-target/);
 		t.is(conversions, 1);
 
-		// The chain now ends somewhere else, so that page is fetched instead of
-		// the one the cache holds for the old destination.
+		// The chain now ends elsewhere, so that page is fetched instead of the
+		// one cached for the old destination.
 		redirectTo = 'https://pages.example.test/second-target';
 		t.regex(await callFetchUrl({url}), /second-target/);
 		t.is(conversions, 2);

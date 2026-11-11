@@ -97,13 +97,8 @@ const resolveSafeRedirects = async (url: string): Promise<string> => {
 
 /**
  * Converted pages kept briefly so paging through one does not download and
- * convert it again for every chunk.
- *
- * The markdown for a URL does not change between the calls that page through
- * it, and converting is the expensive part: a network round trip plus the
- * HTML-to-markdown pass. Short and small on purpose - a stale page is worse
- * than a refetch, and a handful of large pages is already real memory.
- * A `Map` iterates in insertion order, so the first key is the oldest.
+ * convert it again for every chunk. Short and small on purpose: a stale page
+ * is worse than a refetch.
  *
  * The markdown is the only thing kept. Every call still walks the redirect
  * chain and validates each hop, so the cache can never be the reason an
@@ -127,7 +122,8 @@ const getCachedMarkdown = (url: string): string | undefined => {
 };
 
 const cacheMarkdown = (url: string, markdown: string): void => {
-	// Re-insert so a refreshed page counts as the newest entry.
+	// Re-inserting makes a refreshed page the newest entry: a Map iterates in
+	// insertion order, so the first key is the one to evict.
 	urlMarkdownCache.delete(url);
 	urlMarkdownCache.set(url, {
 		markdown,
@@ -142,9 +138,8 @@ const cacheMarkdown = (url: string, markdown: string): void => {
 
 /**
  * A model's number, forced into `[min, max]`. Anything that is not a finite
- * number (a string it forgot to unquote aside) falls back to `fallback`
- * rather than failing the call: the arguments only choose a window, and a
- * usable window is better than an error the model cannot act on.
+ * number falls back rather than failing the call: these arguments only choose
+ * a window, and a usable window beats an error the model cannot act on.
  */
 const clampInteger = (
 	value: unknown,
@@ -167,18 +162,14 @@ const isLowSurrogate = (code: number): boolean =>
  * The part of `content` the caller asked for, with a note saying how to get
  * the next part when there is one.
  *
- * Offsets count UTF-16 units, like `length` everywhere else in this file, but
- * neither edge is allowed to land inside a surrogate pair: a lone half
- * renders as a replacement character, and the model would be handed text that
- * is not in the page. The start moves back to include the pair it fell in the
- * middle of, and the end stops short of a pair it would have cut. The next
- * `start_index` is the exact end of this window, so consecutive windows
- * neither overlap nor leave a gap.
+ * Offsets count UTF-16 units, but neither edge may land inside a surrogate
+ * pair: a lone half renders as a replacement character, so the model would be
+ * handed text that is not in the page. The next `start_index` is the exact end
+ * of this window, so consecutive windows neither overlap nor leave a gap.
  */
 const windowContent = (content: string, args: FetchArgs): string => {
 	const total = content.length;
-	// Zero or less is not a window: it means the same as leaving it out,
-	// not "one character at a time".
+	// Zero means the same as leaving it out, not "one character at a time".
 	const requestedLength = clampInteger(
 		args.max_length,
 		0,
@@ -214,17 +205,13 @@ const windowContent = (content: string, args: FetchArgs): string => {
 
 const executeFetchUrl = async (args: FetchArgs): Promise<string> => {
 	try {
-		// Every call walks the redirect chain, and each hop of that walk runs
-		// through the validator, which does the text checks and the DNS lookup.
-		// A cached page skips the download and the conversion, never this: a
-		// name that has since started resolving somewhere internal, or a
-		// redirect that now points there, has to be refused as readily on the
-		// tenth call as on the first.
+		// Walked and validated on every call, cache hit or not: a name that has
+		// since started resolving somewhere internal, or a redirect that now
+		// points there, must be refused on the tenth call as on the first.
 		const safeUrl = await resolveSafeRedirects(args.url);
 
-		// Keyed by where the redirects actually landed, not by what was asked
-		// for, so a chain that now ends somewhere else converts that page
-		// instead of handing back the one it used to reach.
+		// Keyed by where the redirects landed, so a chain that now ends
+		// elsewhere converts that page instead of the one it used to reach.
 		const cached = getCachedMarkdown(safeUrl);
 		if (cached !== undefined) {
 			return windowContent(cached, args);
@@ -250,8 +237,6 @@ const executeFetchUrl = async (args: FetchArgs): Promise<string> => {
 
 		cacheMarkdown(safeUrl, content);
 
-		// Limit content size to prevent context overflow; the rest stays
-		// reachable through start_index.
 		return windowContent(content, args);
 	} catch (error: unknown) {
 		const message = formatError(error);
