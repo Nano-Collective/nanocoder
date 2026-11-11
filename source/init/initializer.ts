@@ -4,6 +4,7 @@ import {AgentsTemplateGenerator} from '@/init/agents-template-generator';
 import {ExistingRulesExtractor} from '@/init/existing-rules-extractor';
 import {applyPresetToAnalysis, resolvePreset} from '@/init/preset-registry';
 import {type ProjectAnalysis, ProjectAnalyzer} from '@/init/project-analyzer';
+import {relativeEscapesRoot} from '@/utils/path-validation';
 
 export interface InitializeProjectOptions {
 	projectPath: string;
@@ -32,7 +33,10 @@ function resolvePresetPath(projectPath: string, relativePath: string): string {
 	const projectRoot = resolve(projectPath);
 	const destination = resolve(projectRoot, relativePath);
 	const relativeDestination = relative(projectRoot, destination);
-	if (relativeDestination.startsWith('..') || isAbsolute(relativeDestination)) {
+	if (
+		relativeEscapesRoot(relativeDestination) ||
+		isAbsolute(relativeDestination)
+	) {
 		throw new Error(`Invalid preset file path: ${relativePath}`);
 	}
 	return destination;

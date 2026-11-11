@@ -17,6 +17,7 @@ import {
 	isValidSession,
 	isValidSessionMetadata,
 } from '@/session/session-validation';
+import {relativeEscapesRoot} from '@/utils/path-validation';
 
 export interface StorageFinding {
 	code: string;
@@ -206,7 +207,7 @@ async function checkSnapshotFile(
 		throw new Error('Unsafe file snapshot path');
 	const resolved = path.resolve(root, relativePath);
 	const relative = path.relative(root, resolved);
-	if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) {
+	if (!relative || relativeEscapesRoot(relative) || path.isAbsolute(relative)) {
 		throw new Error('Unsafe file snapshot path');
 	}
 	if (!(await fs.lstat(root)).isDirectory()) {
@@ -587,7 +588,7 @@ async function scanCheckpoints(root: string): Promise<StorageSection> {
 				if (
 					path.isAbsolute(relativePath) ||
 					!relative ||
-					relative.startsWith('..') ||
+					relativeEscapesRoot(relative) ||
 					path.isAbsolute(relative)
 				) {
 					item.status = 'error';

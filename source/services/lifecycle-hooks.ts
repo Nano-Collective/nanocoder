@@ -1,6 +1,6 @@
 import {type ChildProcess, spawn} from 'node:child_process';
 import {realpathSync} from 'node:fs';
-import {isAbsolute, relative, resolve, sep} from 'node:path';
+import {isAbsolute, relative, resolve} from 'node:path';
 import {StringDecoder} from 'node:string_decoder';
 
 import {getAppConfig} from '@/config/index';
@@ -12,6 +12,7 @@ import {getKeyGeneratorSessionId} from '@/session/key-generator';
 import type {HookDefinition, HookEvent} from '@/types/config';
 import type {ToolCall} from '@/types/core';
 import {logError} from '@/utils/message-queue';
+import {relativeEscapesRoot} from '@/utils/path-validation';
 import {signalProcessTree} from '@/utils/process-tree';
 import {truncateToolResult} from '@/utils/truncate-tool-result';
 
@@ -301,8 +302,7 @@ function matchesAnyPath(patterns: string[], filePath: string): boolean {
 		// back an absolute path.
 		if (
 			relativePath &&
-			relativePath !== '..' &&
-			!relativePath.startsWith(`..${sep}`) &&
+			!relativeEscapesRoot(relativePath) &&
 			!isAbsolute(relativePath)
 		) {
 			candidates.push(toPosixPath(relativePath));

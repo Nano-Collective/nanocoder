@@ -8,6 +8,7 @@ import {formatError} from '@/utils/error-formatter';
 import {loadGitignore} from '@/utils/gitignore-loader';
 import {getLogger} from '@/utils/logging';
 import {logWarning} from '@/utils/message-queue';
+import {relativeEscapesRoot} from '@/utils/path-validation';
 
 /**
  * Nanocoder's own runtime state under `.nanocoder/`. Unless a repo gitignores
@@ -60,7 +61,7 @@ export class FileSnapshotService {
 	 */
 	private isInsideWorkspace(absolutePath: string): boolean {
 		const relative = path.relative(this.workspaceRoot, absolutePath);
-		return !relative.startsWith('..') && !path.isAbsolute(relative);
+		return !relativeEscapesRoot(relative) && !path.isAbsolute(relative);
 	}
 
 	/**
