@@ -2,7 +2,7 @@ import {existsSync, mkdirSync, writeFileSync} from 'fs';
 import {homedir} from 'os';
 import {join} from 'path';
 import {getConfigRoot} from '@/services/session-context';
-import {log} from '@/utils/logging';
+import {getLogger} from '@/utils/logging';
 
 export function getAppDataPath(): string {
 	// Allow explicit override via environment variable
@@ -97,7 +97,7 @@ export function getClosestConfigFile(
 
 		return configPath; // nosemgrep
 	} catch (error) {
-		log.error(`Failed to load ${fileName}: ${String(error)}`);
+		getLogger().error(`Failed to load ${fileName}: ${String(error)}`);
 	}
 
 	// The code should never hit this, but it makes the TS compiler happy.
@@ -122,6 +122,6 @@ function createDefaultConfFile(filePath: string, fileName: string): void {
 			);
 		}
 	} catch (error) {
-		log.error(`Failed to write ${filePath}: ${String(error)}`);
+		getLogger().error(`Failed to write ${filePath}: ${String(error)}`);
 	}
 }

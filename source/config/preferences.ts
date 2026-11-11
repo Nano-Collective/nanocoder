@@ -20,7 +20,7 @@ import type {
 import type {UserPreferences} from '@/types/index';
 import type {NanocoderShape, ThemePreset} from '@/types/ui';
 import {atomicWriteFileSync} from '@/utils/atomic-write';
-import {log} from '@/utils/logging';
+import {getLogger} from '@/utils/logging';
 
 let PREFERENCES_PATH: string | null = null;
 let CACHED_CONFIG_DIR: string | undefined = undefined;
@@ -93,7 +93,7 @@ function readGlobalOnlyPreferences(): Partial<UserPreferences> | undefined {
 	try {
 		return JSON.parse(readFileSync(globalPath, 'utf-8')) as UserPreferences;
 	} catch (error) {
-		log.error(`Failed to load global preferences: ${String(error)}`);
+		getLogger().error(`Failed to load global preferences: ${String(error)}`);
 		return undefined;
 	}
 }
@@ -141,7 +141,7 @@ export function saveGlobalOnlyPreferences(
 	try {
 		writeGlobalOnlyPreferences(values);
 	} catch (error) {
-		log.error(`Failed to save global preferences: ${String(error)}`);
+		getLogger().error(`Failed to save global preferences: ${String(error)}`);
 		return false;
 	}
 
@@ -213,7 +213,7 @@ export function loadPreferences(): UserPreferences {
 
 		return data;
 	} catch (error) {
-		log.error(`Failed to load preferences: ${String(error)}`);
+		getLogger().error(`Failed to load preferences: ${String(error)}`);
 	}
 
 	return {};
@@ -299,7 +299,7 @@ export function savePreferences(preferences: UserPreferences): boolean {
 			);
 		}
 	} catch (error) {
-		log.error(`Failed to save preferences: ${String(error)}`);
+		getLogger().error(`Failed to save preferences: ${String(error)}`);
 		return false;
 	}
 
