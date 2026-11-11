@@ -27,7 +27,7 @@ import type {
 	ToolResult,
 } from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
-import {logWarning} from '@/utils/message-queue';
+import {notifyWarning} from '@/utils/message-queue';
 import {isFileMutationTool} from '@/utils/tool-approval';
 import {parseToolArguments} from '@/utils/tool-args-parser';
 import {
@@ -318,7 +318,7 @@ export async function runToolTurn(
 					);
 				}
 			} catch (error) {
-				logWarning('Could not checkpoint architect turn', true, {
+				notifyWarning('Could not checkpoint architect turn', true, {
 					context: {
 						error: formatError(error),
 						paths: mutationPaths.join(', '),
