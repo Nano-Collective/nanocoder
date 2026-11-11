@@ -822,6 +822,7 @@ async function runTurn(
 				workingDirectory: session.cwd,
 				...(options.sessionTools && {toolManager: options.sessionTools}),
 				toolCallId: toolCall.id,
+				client,
 			});
 			await finishTimelineCapture(session, timelineCapture);
 			isPolling = false;

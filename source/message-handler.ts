@@ -147,7 +147,11 @@ export async function processToolUse(
 		// file lands in the same commit instead of being left behind.
 		const commitNote = failed
 			? null
-			: await maybeAutoCommit(toolCall.function.name, parsedArgs);
+			: await maybeAutoCommit(
+					toolCall.function.name,
+					parsedArgs,
+					options?.client,
+				);
 
 		return {
 			tool_call_id: toolCall.id,

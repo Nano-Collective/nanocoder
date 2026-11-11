@@ -141,6 +141,12 @@ export interface ToolExecutionContext {
 	toolCallId?: string;
 	/** Set for a subagent's own tool calls: the run executing them. */
 	subagentRunId?: string;
+	/**
+	 * The client the call's turn runs on, when it is not the process-wide one:
+	 * an ACP session that picked its own model. Auto-commit writes its message
+	 * with it.
+	 */
+	client?: LLMClient;
 }
 
 export type ToolHandler = (

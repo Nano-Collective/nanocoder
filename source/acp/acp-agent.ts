@@ -74,7 +74,6 @@ import {
 } from '@/config/preferences';
 import {resolveTune} from '@/config/tune';
 import {appendRelevantProjectContextWithCount} from '@/memory/project-context';
-import {setAutoCommitClient} from '@/services/auto-commit';
 import {runInSessionCwdScope} from '@/services/session-cwd';
 import {cancelSubagentRun} from '@/services/subagent-events';
 import {TimelineManager} from '@/services/timeline-manager';
@@ -684,9 +683,10 @@ export class AcpAgent implements Agent {
 
 	/**
 	 * Moves one session to a provider, model and client of its own. The choice
-	 * also becomes what sessions created from now on start with, and what the
-	 * user's last-used selection and auto-commit follow, as it did when the
-	 * selection was process-wide.
+	 * also becomes what sessions created from now on start with, and the user's
+	 * last-used selection. Auto-commit in this session writes its messages with
+	 * the session's client, which each turn passes to its tool calls, so it no
+	 * longer follows whichever session picked a model last.
 	 */
 	private selectModel(
 		session: AcpSession,
@@ -700,7 +700,6 @@ export class AcpAgent implements Agent {
 		this.initContext.provider = provider;
 		this.initContext.model = model;
 		this.initContext.client = client;
-		setAutoCommitClient(client);
 		// A provider with no model is not a selection worth remembering.
 		if (model) {
 			updateLastUsed(provider, model);
@@ -728,6 +727,11 @@ export class AcpAgent implements Agent {
 		saved: {provider: string; model: string},
 	): Promise<{provider: string; model: string} | undefined> {
 		if (saved.provider === session.provider && saved.model === session.model) {
+			return undefined;
+		}
+		// Saved with no model to name (a provider that lists none): nothing to
+		// go back to, so the session stays on the default without a fallback.
+		if (!saved.provider || !saved.model) {
 			return undefined;
 		}
 		try {
@@ -1405,6 +1409,19 @@ export class AcpAgent implements Agent {
 		session.systemMessage = session.baseSystemMessage;
 	}
 
+	/**
+	 * What a saved session records as its provider and model: the session's
+	 * own, else what its client says, never a made-up default. An invented
+	 * pair would be restored on resume as if the user had picked it.
+	 */
+	private savedModelOf(session: AcpSession): {provider: string; model: string} {
+		const client = this.clientFor(session);
+		return {
+			provider: session.provider || client.getProviderConfig().name || '',
+			model: session.model || client.getCurrentModel() || '',
+		};
+	}
+
 	private async saveAcpSessionToDisk(session: AcpSession): Promise<void> {
 		try {
 			// First, see if it already exists to preserve createdAt/title
@@ -1425,6 +1442,7 @@ export class AcpAgent implements Agent {
 			if (saveableMessages.length === 0) {
 				if (existingSession) {
 					await sessionManager.saveSession({
+						...this.savedModelOf(session),
 						id: session.sessionId,
 						title: existingSession.title || 'New Session',
 						titleManuallySet: existingSession.titleManuallySet,
@@ -1433,8 +1451,6 @@ export class AcpAgent implements Agent {
 						createdAt: existingSession.createdAt || timestamp,
 						lastAccessedAt: timestamp,
 						messageCount: 0,
-						provider: session.provider || 'openai',
-						model: session.model || 'gpt-4o',
 						workingDirectory: session.cwd,
 						messages: [],
 					});
@@ -1455,6 +1471,7 @@ export class AcpAgent implements Agent {
 			}
 
 			await sessionManager.saveSession({
+				...this.savedModelOf(session),
 				id: session.sessionId,
 				title,
 				titleManuallySet: existingSession?.titleManuallySet,
@@ -1463,8 +1480,6 @@ export class AcpAgent implements Agent {
 				createdAt: existingSession?.createdAt || timestamp,
 				lastAccessedAt: timestamp,
 				messageCount: saveableMessages.length,
-				provider: session.provider || 'openai',
-				model: session.model || 'gpt-4o',
 				workingDirectory: session.cwd,
 				messages: session.messages.map(m => {
 					if (m.role === 'user' && typeof m.content === 'string') {

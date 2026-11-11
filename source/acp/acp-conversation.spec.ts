@@ -2338,6 +2338,89 @@ test('runAcpConversation - captures a timeline checkpoint for write_file', async
 	t.is(entries[0].truncateToMessageIndex, 0);
 });
 
+test.serial('runAcpConversation - auto-commit writes its message with the session\'s client', async t => {
+	const {execSync} = await import('node:child_process');
+	const {getAppConfig} = await import('@/config/index');
+	const {setAutoCommitClient} = await import('@/services/auto-commit');
+	const {COMMIT_SYSTEM_PROMPT} = await import('@/tools/git/commit-prompt');
+	const cwd = realpathSync(
+		mkdtempSync(join(tmpdir(), 'nanocoder-acp-autocommit-')),
+	);
+	const git = (command: string) =>
+		execSync(`git ${command}`, {cwd, encoding: 'utf8'}).trimEnd();
+	git('init -q -b main');
+	git('config user.email test@example.com');
+	git('config user.name Test');
+	git('config commit.gpgsign false');
+	git('config core.hooksPath .no-hooks');
+	writeFileSync(join(cwd, 'base.txt'), 'base\n');
+	git('add base.txt');
+	git('commit -q -m baseline');
+	getAppConfig().autoCommit = true;
+	// Another session picked its model last: before, its client wrote every
+	// session's commit messages.
+	setAutoCommitClient({
+		chat: async () => ({
+			choices: [{message: {content: 'chore: another session'}}],
+		}),
+	} as unknown as LLMClient);
+	t.teardown(() => {
+		getAppConfig().autoCommit = false;
+		setAutoCommitClient(null);
+		rmSync(cwd, {recursive: true, force: true});
+	});
+
+	const {conn} = createMockConn();
+	const session = createMockSession(conn, {devMode: 'yolo', cwd});
+	setToolRegistryGetter(() => ({
+		write_file: async (args: any) => {
+			writeFileSync(join(cwd, args.path), args.content);
+			return `Wrote ${args.path}`;
+		},
+	}));
+	let turns = 0;
+	const client = {
+		chat: async (messages: Message[]) => {
+			if (messages[0]?.content === COMMIT_SYSTEM_PROMPT) {
+				return {choices: [{message: {content: 'feat: this session'}}]};
+			}
+			turns++;
+			return turns === 1
+				? {
+						choices: [
+							{
+								message: {
+									content: '',
+									tool_calls: [
+										createMockToolCall('write_file', {
+											path: 'a.ts',
+											content: 'export const a = 1;\n',
+										}),
+									],
+								},
+							},
+						],
+					}
+				: {choices: [{message: {content: 'done'}}]};
+		},
+		getCurrentModel: () => 'test-model',
+	} as unknown as LLMClient;
+
+	await runAcpConversation({
+		session,
+		client,
+		toolManager: {
+			...createMockToolManager(),
+			hasTool: () => true,
+			getToolEntry: () => ({approval: false}),
+		} as any,
+		conn,
+		nonInteractiveAlwaysAllow: [],
+	});
+
+	t.is(git('log -1 --format=%s'), 'feat: this session');
+});
+
 test('runAcpConversation - does not capture a timeline checkpoint for read_file', async t => {
 	const {conn} = createMockConn();
 	const session = createMockSession(conn, {devMode: 'yolo'});
