@@ -5,6 +5,7 @@
 
 import {encoding_for_model, get_encoding, type TiktokenModel} from 'tiktoken';
 import type {Message} from '@/types/core';
+import {estimateTokens} from '@/utils/token-calculator';
 import type {Tokenizer} from '../../types/tokenization';
 
 /**
@@ -29,7 +30,7 @@ export class OpenAITokenizer implements Tokenizer {
 			const tokens = this.encoding.encode(text);
 			return tokens.length;
 		} catch {
-			return Math.ceil(text.length / 4);
+			return estimateTokens(text);
 		}
 	}
 

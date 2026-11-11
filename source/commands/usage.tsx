@@ -26,6 +26,7 @@ import {
 } from '@/usage/calculator';
 import {calculateUsageCost} from '@/usage/response-usage';
 import {buildSystemPrompt, getLastBuiltPrompt} from '@/utils/prompt-builder';
+import {estimateTokens} from '@/utils/token-calculator';
 
 export const usageCommand: Command = {
 	name: 'usage',
@@ -60,11 +61,9 @@ export const usageCommand: Command = {
 		} catch {
 			// Fallback to a simple tokenizer if creation fails
 			tokenizer = {
-				encode: (text: string) => Math.ceil((text || '').length / 4),
+				encode: (text: string) => estimateTokens(text || ''),
 				countTokens: (message: Message) =>
-					Math.ceil(
-						((message.content || '') + (message.role || '')).length / 4,
-					),
+					estimateTokens((message.content || '') + (message.role || '')),
 				getName: () => 'fallback',
 			};
 			tokenizerName = 'fallback (error)';
@@ -144,9 +143,7 @@ export const usageCommand: Command = {
 						: 0;
 				} catch {
 					// Fallback to simple estimation if tokenization fails
-					return Math.ceil(
-						((message.content || '') + (message.role || '')).length / 4,
-					);
+					return estimateTokens((message.content || '') + (message.role || ''));
 				}
 			},
 		);

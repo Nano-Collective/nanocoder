@@ -10,7 +10,7 @@ import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
 import {withPreservedProcess} from '@/utils/preserve-process';
-import {calculateTokens} from '@/utils/token-calculator';
+import {estimateTokens} from '@/utils/token-calculator';
 
 interface FetchArgs {
 	url: string;
@@ -166,7 +166,7 @@ function FetchUrlFormatterComponent({
 	let wasTruncated = false;
 
 	if (result) {
-		estimatedTokens = calculateTokens(result);
+		estimatedTokens = estimateTokens(result);
 		wasTruncated = result.includes('[Content truncated');
 	}
 

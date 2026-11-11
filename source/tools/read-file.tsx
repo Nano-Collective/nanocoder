@@ -24,7 +24,7 @@ import {
 	READ_STUB_MARKER,
 	rememberReadContent,
 } from '@/utils/read-tracker';
-import {calculateTokens} from '@/utils/token-calculator';
+import {estimateTokens} from '@/utils/token-calculator';
 
 function formatReadStub(path: string, lineCount: number, size: number): string {
 	return `[file: ${path} — ${READ_STUB_MARKER} (${lineCount} lines, ${size} bytes). pass start_line/end_line to read the body again.]`;
@@ -71,7 +71,7 @@ const executeReadFile = async (args: {
 					const content = cached.content;
 
 					output += `Lines: ${cached.totalLines}\n`;
-					output += `Estimated Tokens: ~${calculateTokens(content)}\n`;
+					output += `Estimated Tokens: ~${estimateTokens(content)}\n`;
 
 					// Detect file type from extension
 					const fileType = getFileType(absPath);
@@ -376,7 +376,7 @@ const readFileFormatter = async (
 			const readLines = readEndLine - startLine + 1;
 			const isPartialRead = startLine > 1 || readEndLine < totalLines;
 
-			const tokens = isMetadataOnly ? 0 : result ? calculateTokens(result) : 0;
+			const tokens = isMetadataOnly ? 0 : result ? estimateTokens(result) : 0;
 
 			fileInfo = {
 				totalLines,

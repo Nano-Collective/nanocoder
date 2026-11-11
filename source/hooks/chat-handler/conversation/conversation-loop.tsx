@@ -54,7 +54,7 @@ import {logWarning} from '@/utils/message-queue';
 import {signalQuestion} from '@/utils/question-queue';
 import {bumpReadContentGeneration} from '@/utils/read-tracker';
 import {markRunFailed} from '@/utils/run-outcome';
-import {calculateTokens} from '@/utils/token-calculator';
+import {estimateTokens} from '@/utils/token-calculator';
 import {isFileMutationTool} from '@/utils/tool-approval';
 import {parseToolArguments} from '@/utils/tool-args-parser';
 import {
@@ -417,7 +417,7 @@ export const processAssistantResponse = async (
 				// Feed the in-flight reply into the context-usage estimate so the
 				// `~%` indicator climbs as the model writes, instead of only
 				// stepping up once the finished message is committed to history.
-				setTokenCount(calculateTokens(streamedContent));
+				setTokenCount(estimateTokens(streamedContent));
 			},
 			onReasoningToken: (token: string) => {
 				streamedReasoning += token;

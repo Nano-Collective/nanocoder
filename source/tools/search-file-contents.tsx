@@ -17,7 +17,7 @@ import {jsonSchema, tool} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
 import {searchProjectContents} from '@/utils/file-search';
 import {isValidFilePath, resolveFilePath} from '@/utils/path-validation';
-import {calculateTokens} from '@/utils/token-calculator';
+import {estimateTokens} from '@/utils/token-calculator';
 
 const MAX_CONTEXT_LINES = 10;
 
@@ -207,7 +207,7 @@ const SearchFileContentsFormatter = React.memo(
 		);
 
 		// Calculate tokens
-		const tokens = result ? calculateTokens(result) : 0;
+		const tokens = result ? estimateTokens(result) : 0;
 
 		const messageContent = (
 			<Box flexDirection="column">
