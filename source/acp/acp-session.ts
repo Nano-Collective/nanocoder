@@ -79,6 +79,7 @@ export class AcpSession {
 		this.developmentMode = options.initialMode ?? 'auto-accept';
 		this.timeline = new TimelineManager(options.cwd, options.sessionId);
 		this.context = options.context ?? createSessionContext(options.cwd);
+		this.context.sessionId = options.sessionId;
 	}
 
 	/**

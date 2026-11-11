@@ -23,6 +23,7 @@ import {
 	appendPostToolUseOutput,
 	runPreToolUseGate,
 } from '@/services/lifecycle-hooks';
+import {getProjectRoot} from '@/services/session-cwd';
 import {
 	appendSubagentTool,
 	emitSubagentRunEvent,
@@ -142,7 +143,7 @@ class SubagentLoopStopError extends Error {
 export class SubagentExecutor {
 	private toolManager: ToolManager;
 	private parentClient: LLMClient;
-	private projectRoot: string;
+	private fixedProjectRoot?: string;
 	private parentMode: DevelopmentMode;
 	private onApiCallComplete?: SubagentApiCallHandler;
 	/**
@@ -154,29 +155,47 @@ export class SubagentExecutor {
 	 * that don't supply a resolver (plain shell, tests).
 	 */
 	private modeResolver?: () => DevelopmentMode;
-	private memoryFinder: MemoryFinder;
+	private fixedMemoryFinder?: MemoryFinder;
+	private memoryFinders = new Map<string, MemoryFinder>();
 	private projectContextOptions?: ProjectContextOptions;
 
+	/**
+	 * `projectRoot` left out means the active session's project root, read on
+	 * each run, so one executor serves ACP sessions in different folders.
+	 */
 	constructor(
 		toolManager: ToolManager,
 		parentClient: LLMClient,
-		projectRoot: string = process.cwd(),
+		projectRoot?: string,
 		parentMode: DevelopmentMode = 'normal',
 		optionsOrHandler: SubagentExecutorOptions | SubagentApiCallHandler = {},
 	) {
 		this.toolManager = toolManager;
 		this.parentClient = parentClient;
-		this.projectRoot = projectRoot;
+		this.fixedProjectRoot = projectRoot;
 		this.parentMode = parentMode;
 		const options =
 			typeof optionsOrHandler === 'function'
 				? {onApiCallComplete: optionsOrHandler}
 				: optionsOrHandler;
 		this.onApiCallComplete = options.onApiCallComplete;
-		this.memoryFinder =
-			options.memoryFinder ??
-			new SemanticMemoryManager({cwd: this.projectRoot});
+		this.fixedMemoryFinder = options.memoryFinder;
 		this.projectContextOptions = options.projectContextOptions;
+	}
+
+	private get projectRoot(): string {
+		return this.fixedProjectRoot ?? getProjectRoot();
+	}
+
+	private get memoryFinder(): MemoryFinder {
+		if (this.fixedMemoryFinder) return this.fixedMemoryFinder;
+		const root = this.projectRoot;
+		let finder = this.memoryFinders.get(root);
+		if (!finder) {
+			finder = new SemanticMemoryManager({cwd: root});
+			this.memoryFinders.set(root, finder);
+		}
+		return finder;
 	}
 
 	/**

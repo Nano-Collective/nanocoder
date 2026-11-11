@@ -34,6 +34,7 @@ import {
 	cancelSubagentRun,
 	emitSubagentRunEvent,
 } from '@/services/subagent-events';
+import {runInSessionContext} from '@/services/session-context';
 import {SubagentExecutor} from '@/subagents/subagent-executor';
 import {getSubagentLoader} from '@/subagents/subagent-loader';
 import {agentTool, setAgentToolExecutor} from '@/tools/agent-tool';
@@ -2774,12 +2775,6 @@ test('runAcpConversation - checkpoints of one prompt share a turn id across mode
 test.serial(
 	'runAcpConversation - compacts history before the next model turn when over the token threshold',
 	async t => {
-		resetAutoCompactSession();
-		resetSessionContextLimit();
-		setSessionContextLimit(100);
-		setAutoCompactStrategy('mechanical');
-		setAutoCompactThreshold(50);
-
 		const filler = 'old context sentence. '.repeat(60);
 		const {conn} = createMockConn();
 		const session = createMockSession(conn, {
@@ -2789,6 +2784,12 @@ test.serial(
 				{role: 'assistant', content: 'ack'},
 				{role: 'user', content: 'call the tool'},
 			],
+		});
+		// The overrides belong to the session, so they are set in its context.
+		runInSessionContext(session.context, () => {
+			setSessionContextLimit(100);
+			setAutoCompactStrategy('mechanical');
+			setAutoCompactThreshold(50);
 		});
 		const toolManager = {
 			...createMockToolManager(),
@@ -2852,8 +2853,10 @@ test.serial(
 				'compaction must keep the recent turn, not empty the history',
 			);
 		} finally {
-			resetAutoCompactSession();
-			resetSessionContextLimit();
+			runInSessionContext(session.context, () => {
+				resetAutoCompactSession();
+				resetSessionContextLimit();
+			});
 		}
 	},
 );
