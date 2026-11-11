@@ -70,6 +70,7 @@ import {isInternalWalkthroughMessage} from '@/artifacts/walkthrough-lifecycle';
 import {createLLMClient} from '@/client-factory';
 import {getAppConfig} from '@/config/index';
 import {
+	getLastUsedModel,
 	getProjectContextPreferences,
 	loadPreferences,
 	updateLastUsed,
@@ -79,12 +80,14 @@ import {
 	untrustedReason,
 } from '@/config/trust/directory-trust';
 import {resolveTune} from '@/config/tune';
+import {resolveStartupProvider} from '@/hooks/startup-provider';
 import {appendRelevantProjectContextWithCount} from '@/memory/project-context';
 import {withTrustedProjectPlugins} from '@/plugins/host';
 import {type HookContext, runLifecycleHooks} from '@/services/lifecycle-hooks';
 import {
 	createSessionContext,
 	runInSessionContext,
+	runOutsideSessionContext,
 	type SessionContext,
 } from '@/services/session-context';
 import {cancelSubagentRun} from '@/services/subagent-events';
@@ -199,6 +202,7 @@ export class AcpAgent implements Agent {
 			parseDisabledTools(params._meta),
 			context,
 		);
+		await this.startOnFolderDefault(session);
 		await this.applyMcpServers(session, params.mcpServers);
 
 		await sessionManager.initialize();
@@ -261,6 +265,7 @@ export class AcpAgent implements Agent {
 				parseDisabledTools(params._meta),
 				context,
 			);
+			await this.startOnFolderDefault(session);
 			clearAcpReadStubs(params.sessionId);
 			session.messages = persisted.messages;
 			modelFallback = await this.restoreSavedModel(session, persisted);
@@ -1003,6 +1008,7 @@ export class AcpAgent implements Agent {
 			parseDisabledTools(params._meta),
 			context,
 		);
+		await this.startOnFolderDefault(session);
 		await this.applyMcpServers(session, params.mcpServers);
 		session.messages = persisted.messages;
 		clearAcpReadStubs(params.sessionId);
@@ -1374,6 +1380,60 @@ export class AcpAgent implements Agent {
 				return '';
 			});
 		return session;
+	}
+
+	/**
+	 * A session in another project starts on the provider nanocoder started in
+	 * that folder would pick, not on the launch folder's: the launch folder's
+	 * provider may not be configured there, or be configured differently. Runs
+	 * in the session's context, so `getAppConfig()` is the folder's config. The
+	 * process default is kept when the folder configures that same provider
+	 * the same way, and when the folder's choice cannot be reached.
+	 */
+	private async startOnFolderDefault(session: AcpSession): Promise<void> {
+		const {launchDirectory} = this.initContext;
+		if (launchDirectory === undefined) return;
+		if (path.resolve(session.cwd) === path.resolve(launchDirectory)) return;
+
+		const folderProviders = getAppConfig().providers ?? [];
+		const launchProviders = runOutsideSessionContext(
+			() => getAppConfig().providers ?? [],
+		);
+		const sameAsLaunch = (name: string) => {
+			const folder = folderProviders.find(p => p.name === name);
+			const launch = launchProviders.find(p => p.name === name);
+			return (
+				folder !== undefined &&
+				launch !== undefined &&
+				JSON.stringify(folder) === JSON.stringify(launch)
+			);
+		};
+		if (sameAsLaunch(session.provider)) return;
+
+		const {provider} = resolveStartupProvider(
+			undefined,
+			undefined,
+			loadPreferences().lastProvider,
+			folderProviders.map(p => p.name),
+		);
+		try {
+			const {client, actualProvider} = await createLLMClient(provider);
+			const lastUsed = getLastUsedModel(actualProvider);
+			if (lastUsed && (await client.getAvailableModels()).includes(lastUsed)) {
+				client.setModel(lastUsed);
+			}
+			session.provider = actualProvider;
+			session.model = client.getCurrentModel();
+			session.client = client;
+			this.buildSystemPromptForSession(session);
+			logger.info(
+				`ACP session ${session.sessionId} starts on ${session.provider}/${session.model} from ${session.cwd}`,
+			);
+		} catch (error) {
+			logger.warn(
+				`ACP session ${session.sessionId} stays on ${session.provider}/${session.model}: no provider of ${session.cwd} could be used (${error instanceof Error ? error.message : String(error)})`,
+			);
+		}
 	}
 
 	/**
