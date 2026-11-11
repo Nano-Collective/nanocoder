@@ -484,7 +484,12 @@ const executeAgentBatch = async (
  * Other tools are executed sequentially to preserve ordering.
  * Results are displayed in the original input order.
  *
- * @returns Array of tool results from executed tools
+ * Stops before the next tool once `options.signal` is aborted, so an Escape
+ * during one tool of an auto-approved batch does not let the rest run.
+ *
+ * @returns Results for the tools that ran, in input order. When the batch
+ * stops early (abort, or `beforeExecute` declining) this is a prefix of the
+ * input and the caller must pair the remaining tool calls with results.
  */
 export const executeToolsDirectly = async (
 	toolsToExecuteDirectly: ToolCall[],
@@ -527,6 +532,9 @@ export const executeToolsDirectly = async (
 	const directResults: ToolResult[] = [];
 
 	for (const {group, type} of groups) {
+		if (options?.signal?.aborted) {
+			return directResults;
+		}
 		for (const toolCall of group) {
 			if (options?.beforeExecute && !(await options.beforeExecute(toolCall))) {
 				return directResults;
@@ -574,6 +582,8 @@ export const executeToolsDirectly = async (
 			// Sequential execution for non-parallelizable tools (or single-item groups)
 			executions = [];
 			for (const toolCall of group) {
+				// Escape during the previous tool: don't start the next one.
+				if (options?.signal?.aborted) break;
 				executions.push(
 					await executeApprovedTool(
 						toolCall,
