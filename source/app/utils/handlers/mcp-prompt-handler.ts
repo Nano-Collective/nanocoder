@@ -1,7 +1,6 @@
-import {DELAY_COMMAND_COMPLETE_MS} from '@/constants';
 import {getToolManager} from '@/message-handler';
 import type {Message} from '@/types/core';
-import type {MessageSubmissionOptions} from '@/types/index';
+import type {CommandCompletion, MessageSubmissionOptions} from '@/types/index';
 import {errorMsg, warningMsg} from '@/utils/message-factory';
 
 /**
@@ -11,30 +10,26 @@ import {errorMsg, warningMsg} from '@/utils/message-factory';
  * feeds the result to the model as the next chat turn, the same way a
  * custom command's rendered body does.
  *
- * Returns true if `commandName` matched a connected server's prompt (handled
- * either way, success or reported error).
+ * Returns how the command completes when `commandName` matched a connected
+ * server's prompt (success or reported error), or `undefined` when it is not
+ * an MCP prompt.
  */
 export async function handleMCPPromptCommand(
 	commandName: string,
 	args: string[],
 	options: MessageSubmissionOptions,
-): Promise<boolean> {
-	const {
-		onAddToChatQueue,
-		onCommandComplete,
-		onHandleChatMessage,
-		messages,
-		setMessages,
-	} = options;
+): Promise<CommandCompletion | undefined> {
+	const {onAddToChatQueue, onHandleChatMessage, messages, setMessages} =
+		options;
 
 	const toolManager = getToolManager();
 	const mcpClient = toolManager?.getMCPClient();
-	if (!mcpClient) return false;
+	if (!mcpClient) return undefined;
 
 	const prompt = mcpClient
 		.getAllPrompts()
 		.find(p => `mcp:${p.serverName}:${p.name}` === commandName);
-	if (!prompt) return false;
+	if (!prompt) return undefined;
 
 	const declaredArgs = prompt.arguments ?? [];
 	const promptArgs: Record<string, string> = {};
@@ -55,8 +50,7 @@ export async function handleMCPPromptCommand(
 				'mcp-prompt-error',
 			),
 		);
-		setTimeout(() => onCommandComplete?.(), DELAY_COMMAND_COMPLETE_MS);
-		return true;
+		return 'done-after-render';
 	}
 
 	// Args are filled in positionally, in the order the server declares them
@@ -95,8 +89,7 @@ export async function handleMCPPromptCommand(
 					'mcp-prompt-error',
 				),
 			);
-			setTimeout(() => onCommandComplete?.(), DELAY_COMMAND_COMPLETE_MS);
-			return true;
+			return 'done-after-render';
 		}
 
 		const last = textEntries[textEntries.length - 1];
@@ -114,17 +107,18 @@ export async function handleMCPPromptCommand(
 				undefined,
 				priorMessages.length > 0 ? priorMessages : undefined,
 			);
-		} else {
-			// The prompt doesn't end on a user turn - e.g. it seeds a scripted
-			// assistant reply with nothing left to respond to. There is no
-			// "next chat message" to submit, so append every turn as inert
-			// history instead of fabricating a user message out of it.
-			setMessages([
-				...messages,
-				...textEntries.map(m => ({role: m.role, content: m.text}) as Message),
-			]);
-			onCommandComplete?.();
+			// The chat turn completes the command.
+			return 'handed-off';
 		}
+		// The prompt doesn't end on a user turn - e.g. it seeds a scripted
+		// assistant reply with nothing left to respond to. There is no
+		// "next chat message" to submit, so append every turn as inert
+		// history instead of fabricating a user message out of it.
+		setMessages([
+			...messages,
+			...textEntries.map(m => ({role: m.role, content: m.text}) as Message),
+		]);
+		return 'done';
 	} catch (error) {
 		onAddToChatQueue(
 			errorMsg(
@@ -134,10 +128,8 @@ export async function handleMCPPromptCommand(
 				'mcp-prompt-error',
 			),
 		);
-		setTimeout(() => onCommandComplete?.(), DELAY_COMMAND_COMPLETE_MS);
+		return 'done-after-render';
 	}
-
-	return true;
 }
 
 /** Text content passes through; non-text blocks get a short, honest note. */
