@@ -16,7 +16,7 @@ export function AttachmentPills({
 					.map((img, i) => `[image #${i + 1}: ${img.source ?? 'image'}]`)
 					.join(' ')}
 			</Text>
-			<Text color={colors.secondary}> · ctrl-x remove last</Text>
+			<Text color={colors.secondary}> · Ctrl+X remove last</Text>
 		</Box>
 	);
 }
