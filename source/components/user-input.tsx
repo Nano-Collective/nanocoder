@@ -14,6 +14,7 @@ import {
 	collectDroppedImages,
 	useImageAttachments,
 } from '@/components/composer/useImageAttachments';
+import {usePromptHistoryNavigation} from '@/components/composer/usePromptHistoryNavigation';
 import {useQueuedMessageSelection} from '@/components/composer/useQueuedMessageSelection';
 import {useReverseSearch} from '@/components/composer/useReverseSearch';
 import {useShortcutsOverlay} from '@/components/composer/useShortcutsOverlay';
@@ -172,16 +173,6 @@ export default function UserInput({
 	// caret position before the splice and put it back after. Without this the
 	// pasted text would always land at the end of the value.
 	const textInputRef = useRef<TextInputHandle>(null);
-	// True while the current input came from history navigation (↑/↓), not typing.
-	// A recalled `/command` must NOT auto-open the suggestion menu — otherwise the
-	// menu captures ↑/↓ and history navigation is blocked. Cleared on any keystroke
-	// so editing the recalled command surfaces suggestions again.
-	const inputFromHistoryRef = useRef(false);
-	// Store the full InputState draft when starting history navigation, so it can be restored
-	const savedDraftRef = useRef<InputState>({
-		displayValue: '',
-		placeholderContent: {},
-	});
 	// Pending image attachments sent with the next submitted message.
 	const images = useImageAttachments();
 	const {attachments} = images;
@@ -219,11 +210,6 @@ export default function UserInput({
 
 	// Check if we're in bash mode (input starts with !)
 	const isBashMode = input.trim().startsWith('!');
-
-	// Load history on mount
-	useEffect(() => {
-		void promptHistory.loadHistory();
-	}, []);
 
 	// Real pastes, as reported by the terminal via bracketed paste. The
 	// payload is lifted off stdin before Ink's keypress parser sees it, so
@@ -302,6 +288,16 @@ export default function UserInput({
 		() => setTextInputKey(prev => prev + 1),
 		[],
 	);
+	// ↑/↓ through prompt history, and whether the input was recalled from it.
+	const history = usePromptHistoryNavigation({
+		input,
+		currentState,
+		historyIndex,
+		setHistoryIndex,
+		setOriginalInput,
+		setInputState,
+		onInputReplaced: remountTextInput,
+	});
 	// Picking, editing and removing queued messages from an empty prompt.
 	const loadQueuedForEditing = useCallback(
 		(message: QueuedUserMessage) => {
@@ -339,7 +335,7 @@ export default function UserInput({
 		latestStateRef: currentStateRef,
 		customCommands,
 		isMentionActive: isFileAutocompleteMode,
-		inputFromHistoryRef,
+		inputFromHistoryRef: history.inputFromHistoryRef,
 		setInputState,
 		onInputReplaced: remountTextInput,
 	});
@@ -459,79 +455,6 @@ export default function UserInput({
 		images.clear,
 	]);
 
-	// History navigation
-	const handleHistoryNavigation = useCallback(
-		(direction: 'up' | 'down') => {
-			const history = promptHistory.getHistory();
-			if (history.length === 0) return;
-
-			// This value is being recalled, not typed — suppress the auto-show so a
-			// recalled `/command` doesn't hijack ↑/↓ from further history navigation.
-			inputFromHistoryRef.current = true;
-
-			if (direction === 'up') {
-				if (historyIndex === -1) {
-					// Save the full current state before starting navigation
-					savedDraftRef.current = currentState;
-					setOriginalInput(input);
-					setHistoryIndex(history.length - 1);
-					setInputState(history[history.length - 1]);
-					setTextInputKey(prev => prev + 1);
-				} else if (historyIndex > 0) {
-					const newIndex = historyIndex - 1;
-					setHistoryIndex(newIndex);
-					setInputState(history[newIndex]);
-					setTextInputKey(prev => prev + 1);
-				} else if (historyIndex === 0) {
-					// At first history item, restore saved draft
-					setHistoryIndex(-2);
-					setInputState(savedDraftRef.current);
-					setTextInputKey(prev => prev + 1);
-				} else if (historyIndex === -2) {
-					// At draft, cycle back to last history item
-					savedDraftRef.current = currentState;
-					setHistoryIndex(history.length - 1);
-					setInputState(history[history.length - 1]);
-					setTextInputKey(prev => prev + 1);
-				}
-			} else {
-				if (historyIndex === -1) {
-					// Save draft, go to draft cycling state (visually a no-op)
-					savedDraftRef.current = currentState;
-					setOriginalInput(input);
-					setHistoryIndex(-2);
-					setInputState(savedDraftRef.current);
-					setTextInputKey(prev => prev + 1);
-				} else if (historyIndex === -2) {
-					// At draft, cycle to first history item
-					savedDraftRef.current = currentState;
-					setHistoryIndex(0);
-					setInputState(history[0]);
-					setTextInputKey(prev => prev + 1);
-				} else if (historyIndex >= 0 && historyIndex < history.length - 1) {
-					// Move forward in history
-					const newIndex = historyIndex + 1;
-					setHistoryIndex(newIndex);
-					setInputState(history[newIndex]);
-					setTextInputKey(prev => prev + 1);
-				} else if (historyIndex === history.length - 1) {
-					// At last history item, restore saved draft
-					setHistoryIndex(-2);
-					setInputState(savedDraftRef.current);
-					setTextInputKey(prev => prev + 1);
-				}
-			}
-		},
-		[
-			historyIndex,
-			input,
-			currentState,
-			setHistoryIndex,
-			setOriginalInput,
-			setInputState,
-		],
-	);
-
 	// Any keystroke means the user is composing, not navigating — re-enable the
 	// auto-show so editing a recalled command surfaces suggestions again.
 	const handleInputChange = useCallback(
@@ -539,10 +462,10 @@ export default function UserInput({
 			// Nothing reaches the prompt while the shortcuts overlay is open, and a
 			// lone `?` in an empty prompt is the overlay toggle (see useInput).
 			if (isShortcutsOpenNow() || value === '?') return;
-			inputFromHistoryRef.current = false;
+			history.markTyped();
 			updateInput(value);
 		},
-		[updateInput, isShortcutsOpenNow],
+		[updateInput, isShortcutsOpenNow, history.markTyped],
 	);
 
 	const rawInputRef = useRawInput();
@@ -761,7 +684,7 @@ export default function UserInput({
 			if (queue.navigate('up')) {
 				return;
 			}
-			handleHistoryNavigation('up');
+			history.navigate('up');
 			return;
 		}
 
@@ -780,7 +703,7 @@ export default function UserInput({
 			if (queue.navigate('down')) {
 				return;
 			}
-			handleHistoryNavigation('down');
+			history.navigate('down');
 			return;
 		}
 	});
@@ -861,7 +784,7 @@ export default function UserInput({
 								key={textInputKey}
 								value={input}
 								onChange={handleInputChange}
-								onEdgeArrow={handleHistoryNavigation}
+								onEdgeArrow={history.navigate}
 								onSubmit={handleSubmit}
 								onEnter={handleSubmit}
 								placeholder={
