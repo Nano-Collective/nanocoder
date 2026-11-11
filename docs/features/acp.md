@@ -187,6 +187,8 @@ Run these in the project folder. Neither loads the folder's config, `.env` or an
 
 Each trust entry records which fingerprint version it was saved with. An entry from another version reads as `needs-re-approval` instead of `changed`.
 
+A session's `cwd` is checked too. `session/new`, `session/load` and `session/resume` for a folder other than the one `nanocoder --acp` started in fail unless that folder is trusted on its own. The error has code `-32003` and `data["nanocoder/trustRequired"]` = `{cwd, status}` (status as in `trust --status`), so a client can run the two commands above in that folder and retry.
+
 ## Troubleshooting
 
 **Nanocoder doesn't appear / the thread fails to start**

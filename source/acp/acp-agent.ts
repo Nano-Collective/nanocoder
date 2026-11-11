@@ -1,3 +1,4 @@
+import path from 'node:path';
 import type {
 	Agent,
 	AgentSideConnection,
@@ -40,6 +41,7 @@ import {
 	ACP_EXT_METHODS,
 	ACP_EXT_PREFIX,
 	ACP_SESSION_TITLE_NOTIFICATION,
+	ACP_TRUST_REQUIRED_ERROR_CODE,
 	acpMcpServersToConfig,
 	acpModeToDevelopmentMode,
 	developmentModeToAcpMode,
@@ -68,8 +70,10 @@ import {isInternalWalkthroughMessage} from '@/artifacts/walkthrough-lifecycle';
 import {createLLMClient} from '@/client-factory';
 import {getAppConfig} from '@/config/index';
 import {
+	ensureDirectoryTrust,
 	getProjectContextPreferences,
 	loadPreferences,
+	untrustedReason,
 	updateLastUsed,
 } from '@/config/preferences';
 import {resolveTune} from '@/config/tune';
@@ -166,6 +170,7 @@ export class AcpAgent implements Agent {
 	}
 
 	async newSession(params: NewSessionRequest): Promise<NewSessionResponse> {
+		this.assertDirectoryTrusted(params.cwd);
 		const sessionId = crypto.randomUUID();
 		logger.info(`ACP newSession: ${sessionId} cwd=${params.cwd}`);
 
@@ -218,6 +223,7 @@ export class AcpAgent implements Agent {
 				// Same error as resumeSession so clients can tell a missing session apart.
 				throw new Error(`Session not found on disk: ${params.sessionId}`);
 			}
+			this.assertDirectoryTrusted(params.cwd);
 			session = this.registerSession(
 				params.sessionId,
 				params.cwd,
@@ -893,9 +899,12 @@ export class AcpAgent implements Agent {
 		params: ResumeSessionRequest,
 	): Promise<ResumeSessionResponse> {
 		await sessionManager.initialize();
-		if (!(await sessionManager.loadSession(params.sessionId))) {
+		const saved = await sessionManager.loadSession(params.sessionId);
+		if (!saved) {
 			throw new Error(`Session not found on disk: ${params.sessionId}`);
 		}
+		// Refused before anything is retired: a live copy keeps running.
+		this.assertDirectoryTrusted(saved.workingDirectory);
 
 		// Retire any live copy first, so one id never has two sessions running,
 		// and read the history after its turn has saved its last messages.
@@ -1153,6 +1162,32 @@ export class AcpAgent implements Agent {
 		_params: AuthenticateRequest,
 	): Promise<AuthenticateResponse> {
 		return {};
+	}
+
+	/**
+	 * A session's tools, bash and AGENTS.md all come from its own `cwd`, and
+	 * its project plugins load from there. The server checked only the folder
+	 * it was started in, so any other folder must be trusted on its own.
+	 */
+	private assertDirectoryTrusted(cwd: string): void {
+		const {launchDirectory} = this.initContext;
+		if (launchDirectory === undefined) return;
+		const resolved = path.resolve(cwd);
+		if (resolved === path.resolve(launchDirectory)) return;
+		const trust = ensureDirectoryTrust(resolved, false);
+		if (trust.trusted) return;
+		const status =
+			trust.recheck === 'changed'
+				? 'changed'
+				: trust.recheck === 'upgrade'
+					? 'needs-re-approval'
+					: 'not-trusted';
+		logger.warn(`ACP session refused: ${resolved} is ${status}`);
+		throw new RequestError(
+			ACP_TRUST_REQUIRED_ERROR_CODE,
+			`Directory ${resolved} ${untrustedReason(trust.recheck)}. Trust it by running nanocoder there once, or with "nanocoder trust --status" and "nanocoder trust --grant <fingerprint>" in that folder.`,
+			{'nanocoder/trustRequired': {cwd: resolved, status}},
+		);
 	}
 
 	private requireSession(sessionId: string): AcpSession {
