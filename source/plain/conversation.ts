@@ -366,11 +366,11 @@ async function runPlainConversationBody(
 					});
 				}
 			},
-			compactOptions: {
+			compactOptions: () => ({
 				onNotify: isJson
 					? undefined
 					: message => writeStatus(message.split('\n')[0] ?? message),
-			},
+			}),
 			onMalformedRetry: ({error, attempt}) => {
 				accumulatedFinalText = finalTextBeforeTurn;
 				accumulatedReasoning = reasoningBeforeTurn;
