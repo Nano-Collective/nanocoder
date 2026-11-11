@@ -12,6 +12,8 @@ export enum ACPStatus {
 	Failed = 'Failed',
 	VersionMismatch = 'VersionMismatch',
 	CliMissing = 'CliMissing',
+	/** The CLI refused to start because the folder is not trusted (exit code 3). */
+	Untrusted = 'Untrusted',
 }
 
 /** Optional extra context for a status, rendered where it matters (tooltip, dialogs). */
@@ -19,7 +21,7 @@ export interface AcpStatusDetail {
 	/** Restarting: which retry is pending, e.g. `2` of `5` in `Reconnecting (2/5)`. */
 	attempt?: number;
 	totalAttempts?: number;
-	/** Failed / VersionMismatch / CliMissing: human-readable cause for tooltips and dialogs. */
+	/** Failed / VersionMismatch / CliMissing / Untrusted: human-readable cause for tooltips and dialogs. */
 	reason?: string;
 }
 
