@@ -3634,3 +3634,58 @@ test.serial('escape while the reply finishes does not execute its tool calls', a
 	);
 	t.regex(String(paired?.content), /cancelled by the user/i);
 });
+
+// Declining a tool ends the turn. The app only drains messages the user
+// queued while the prompt was up once the loop reports completion.
+for (const scenario of [
+	{label: 'the user declines', abort: false},
+	{label: 'an abort settles the prompt', abort: true},
+] as const) {
+	test.serial(`a declined tool signals conversation completion when ${scenario.label}`, async t => {
+		const controller = new AbortController();
+		setGlobalToolConfirmHandler(async () => {
+			if (scenario.abort) controller.abort();
+			return false;
+		});
+		let completions = 0;
+		let chatCalls = 0;
+		const params = createDefaultParams({
+			client: {
+				chat: async (): Promise<LLMChatResponse> => {
+					chatCalls++;
+					return {
+						choices: [
+							{
+								message: {
+									role: 'assistant',
+									content: '',
+									tool_calls: [
+										{id: 'call_guarded', function: {name: 'guarded_tool', arguments: '{}'}},
+									],
+								},
+							},
+						],
+						toolsDisabled: false,
+					};
+				},
+			},
+			toolManager: createMockToolManager({
+				tools: ['guarded_tool'],
+				needsApproval: true,
+			}),
+			abortController: controller,
+			onConversationComplete: () => {
+				completions++;
+			},
+		});
+
+		try {
+			await processAssistantResponse(params);
+		} finally {
+			setGlobalToolConfirmHandler(async () => true);
+		}
+
+		t.is(chatCalls, 1, 'a decline does not re-prompt the model');
+		t.is(completions, 1);
+	});
+}
