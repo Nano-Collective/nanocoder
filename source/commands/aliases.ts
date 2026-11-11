@@ -52,3 +52,35 @@ export function expandCommandAlias(message: string): string {
 	const prefix = [alias.target, ...(alias.args ?? [])].join(' ');
 	return `/${prefix}${match[2]}`;
 }
+
+/**
+ * Old names whose replacement is a different kind of command, so a silent
+ * rewrite would confuse: each runs its target with `args` (the user's own
+ * arguments are dropped) after a notice saying where it moved. Unlike
+ * `COMMAND_ALIASES`, these never complete in the slash menu and `/help` does
+ * not resolve them.
+ */
+interface RetiredCommand {
+	name: string;
+	target: string;
+	args: readonly string[];
+	notice: string;
+}
+
+function retiredSetupCommand(name: string, tab: string): RetiredCommand {
+	return {
+		name,
+		target: 'settings',
+		args: [tab],
+		notice: `/${name} has moved to /settings — opening the ${tab} tab. Use /settings ${tab} next time.`,
+	};
+}
+
+const RETIRED_COMMANDS: readonly RetiredCommand[] = [
+	retiredSetupCommand('setup-providers', 'providers'),
+	retiredSetupCommand('setup-mcp', 'mcp'),
+];
+
+export function findRetiredCommand(name: string): RetiredCommand | undefined {
+	return RETIRED_COMMANDS.find(command => command.name === name);
+}

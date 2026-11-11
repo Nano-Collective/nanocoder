@@ -111,7 +111,7 @@ A command module exports one of two shapes (`source/types/commands.ts`):
 - **`Command`** (`handler`): reads its args, the messages and some metadata, and returns a React element or string to show.
 - **`StatefulCommand`** (`run`): changes app state. It receives a typed `CommandContext` (args plus the setters and services it may use) and returns a `CommandCompletion` saying when the prompt is handed back (`done`, or `done-after-render` once queued output has rendered). If a command needs app state the context lacks, add it to `CommandContext` and to `createCommandContext` in the dispatcher.
 
-Some older stateful commands (model, settings, checkpoint load, stats, login, compact, ...) are still stubs whose logic lives in the handlers under `source/app/utils/handlers/`, run by the dispatcher before the registry. They are being moved to `StatefulCommand`; do not add new ones there.
+Some older stateful commands (checkpoint load, resume, retry, stats, login, compact, context-max, the `create` subcommands) are still stubs whose logic lives in the handlers under `source/app/utils/handlers/`, run by the dispatcher before the registry. They are being moved to `StatefulCommand`; do not add new ones there.
 
 A command that does slow work before returning (LLM round-trip, network) should declare `progressLabel`. The dispatcher then holds a `CommandProgress` spinner in the live slot for the duration, so the UI is not silent while the command runs. Set it on both the module's command object and its `lazyCommands` entry - the spinner has to render before `load()` resolves, so it cannot be read off the lazily-imported module.
 

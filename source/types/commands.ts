@@ -60,6 +60,15 @@ export interface CommandContext {
 	notifyCleared: () => void;
 	renameSession: (name: string) => void;
 	showStatus: () => void;
+	enterModelSelectionMode: () => void;
+	/** The models.dev browser (`/model browse`). */
+	enterModelDatabaseMode: () => void;
+	enterSettingsMode: (
+		tab?: import('@/app/components/settings-constants').SettingsTabId,
+	) => void;
+	enterExplorerMode: () => void;
+	enterIdeSelectionMode: () => void;
+	enterTune: () => void;
 }
 
 /**

@@ -1,3 +1,10 @@
-import {createStubCommand} from '@/commands/create-stub-command';
+import type {StatefulCommand} from '@/types/index';
 
-export const ideCommand = createStubCommand('ide', 'Connect to an IDE');
+export const ideCommand: StatefulCommand = {
+	name: 'ide',
+	description: 'Connect to an IDE',
+	run: async context => {
+		context.enterIdeSelectionMode();
+		return 'done';
+	},
+};
