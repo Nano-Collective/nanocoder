@@ -5,6 +5,7 @@ import {
 	createClearMessagesHandler,
 	handleMessageSubmission,
 } from '@/app/utils/app-util';
+import {stripVSCodeContext} from '@/app/utils/vscode-context';
 import {createApprovedPlanMessage} from '@/artifacts/approved-plan';
 import {
 	ErrorMessage,
@@ -904,11 +905,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 			const trimmedMessage = message.trim();
 			const isSlashCommand = trimmedMessage.startsWith('/');
 			const commandArgs = isSlashCommand
-				? trimmedMessage
-						.replace(
-							/\n\n\[@[^\]]+\]<!--vscode-context-->[\s\S]*?<!--\/vscode-context-->\s*$/,
-							'',
-						)
+				? stripVSCodeContext(trimmedMessage)
 						.slice(1)
 						.trim()
 						.split(/\s+/)
