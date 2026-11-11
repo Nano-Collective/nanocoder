@@ -11,6 +11,7 @@ import * as path from 'node:path';
 import {getAppDataPath} from '@/config/paths';
 import {formatError} from '@/utils/error-formatter';
 import {logInfo, logWarning} from '@/utils/message-queue';
+import {isObject} from '@/utils/type-helpers';
 import {toLocalDateKey, toMonthKey} from './date-utils';
 import type {DailyStats, MonthlyStats, PairUsage, StatsLedger} from './types';
 import {
@@ -78,17 +79,13 @@ export function createEmptyLedger(now = Date.now()): StatsLedger {
 	return createEmptyLedgerBase(now);
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
 function nonNegativeNumber(value: unknown): number {
 	const number = Number(value);
 	return Number.isFinite(number) && number >= 0 ? number : 0;
 }
 
 function normalizePair(raw: unknown): PairUsage {
-	if (!isRecord(raw)) {
+	if (!isObject(raw)) {
 		return {tokens: 0, prompts: 0, cost: 0};
 	}
 	return {
@@ -100,12 +97,12 @@ function normalizePair(raw: unknown): PairUsage {
 
 function normalizeDaily(raw: unknown): DailyStats | null {
 	if (
-		!isRecord(raw) ||
+		!isObject(raw) ||
 		typeof raw.date !== 'string' ||
 		!isValidDateKey(raw.date)
 	)
 		return null;
-	const byPairRaw = isRecord(raw.byPair) ? raw.byPair : {};
+	const byPairRaw = isObject(raw.byPair) ? raw.byPair : {};
 	const byPair: Record<string, PairUsage> = {};
 	for (const [k, v] of Object.entries(byPairRaw)) {
 		byPair[k] = normalizePair(v);
@@ -122,12 +119,12 @@ function normalizeDaily(raw: unknown): DailyStats | null {
 
 function normalizeMonthly(raw: unknown): MonthlyStats | null {
 	if (
-		!isRecord(raw) ||
+		!isObject(raw) ||
 		typeof raw.month !== 'string' ||
 		!isValidMonthKey(raw.month)
 	)
 		return null;
-	const byPairRaw = isRecord(raw.byPair) ? raw.byPair : {};
+	const byPairRaw = isObject(raw.byPair) ? raw.byPair : {};
 	const byPair: Record<string, PairUsage> = {};
 	for (const [k, v] of Object.entries(byPairRaw)) {
 		byPair[k] = normalizePair(v);
@@ -172,7 +169,7 @@ function deriveMonthly(daily: DailyStats[]): MonthlyStats[] {
 }
 
 function normalizeLedger(raw: unknown): StatsLedger {
-	if (!isRecord(raw)) {
+	if (!isObject(raw)) {
 		return createEmptyLedger();
 	}
 	const rawVersion = raw.version === undefined ? 1 : Number(raw.version);
@@ -247,7 +244,7 @@ export function readStatsLedger(): StatsLedger {
 		const parsed = JSON.parse(content) as unknown;
 		const ledger = normalizeLedger(parsed);
 		const needsSchemaMigration =
-			isRecord(parsed) &&
+			isObject(parsed) &&
 			(parsed.version !== STATS_LEDGER_VERSION ||
 				!Array.isArray(parsed.monthly));
 		if (isLegacy || needsSchemaMigration) {

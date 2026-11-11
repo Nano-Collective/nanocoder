@@ -5,6 +5,7 @@ import path from 'node:path';
 import {promisify} from 'node:util';
 import {getAppDataPath} from '@/config/paths';
 import {withExclusiveLock} from '@/utils/exclusive-file-lock';
+import {isObject} from '@/utils/type-helpers';
 
 const execFileAsync = promisify(execFile);
 
@@ -64,12 +65,8 @@ function enqueueByKey<T>(key: string, operation: () => Promise<T>): Promise<T> {
 	return result;
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
 function isSemanticMemory(value: unknown): value is SemanticMemory {
-	if (!isRecord(value)) return false;
+	if (!isObject(value)) return false;
 	return (
 		typeof value.id === 'string' &&
 		typeof value.content === 'string' &&
@@ -93,13 +90,13 @@ function isSafeRelativePath(file: string): boolean {
 }
 
 function isMemoryGitSnapshot(value: unknown): value is MemoryGitSnapshot {
-	if (!isRecord(value) || typeof value.commit !== 'string') return false;
+	if (!isObject(value) || typeof value.commit !== 'string') return false;
 	if (value.branch !== undefined && typeof value.branch !== 'string') {
 		return false;
 	}
 	const {files} = value;
 	return (
-		isRecord(files) &&
+		isObject(files) &&
 		Object.entries(files).every(
 			([file, hash]) => typeof hash === 'string' && isSafeRelativePath(file),
 		)
