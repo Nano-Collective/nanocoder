@@ -1,17 +1,13 @@
+import {
+	fileMutationPaths,
+	isFileMutatingTool,
+} from '@/tools/file-ops/file-mutating-tools';
 import type {ToolManager} from '@/tools/tool-manager';
 import type {Message, ToolCall} from '@/types/core';
 import type {TimelineEntryMeta} from '@/types/timeline';
 import {formatError} from '@/utils/error-formatter';
 import {logWarning} from '@/utils/message-queue';
 import type {AcpSession} from './acp-session';
-
-const FILE_ARG_TOOLS = new Set([
-	'write_file',
-	'string_replace',
-	'diff_edit',
-	'lsp_format_document',
-	'file_op',
-]);
 
 /**
  * Tools that are not read-only but touch no workspace file, so there is
@@ -38,33 +34,10 @@ export function extractTimelineTargets(
 	toolName: string,
 	args: Record<string, unknown>,
 ): string[] | 'opaque' {
-	if (!FILE_ARG_TOOLS.has(toolName)) {
+	if (!isFileMutatingTool(toolName)) {
 		return 'opaque';
 	}
-
-	const paths: string[] = [];
-	if (typeof args.path === 'string' && args.path.length > 0) {
-		paths.push(args.path);
-	}
-	if (typeof args.file_path === 'string' && args.file_path.length > 0) {
-		paths.push(args.file_path);
-	}
-
-	if (toolName === 'file_op') {
-		const operation = args.operation;
-		if (operation === 'mkdir') {
-			return [];
-		}
-		if (
-			(operation === 'move' || operation === 'copy') &&
-			typeof args.destination === 'string' &&
-			args.destination.length > 0
-		) {
-			paths.push(args.destination);
-		}
-	}
-
-	return paths;
+	return fileMutationPaths(toolName, args);
 }
 
 /**
