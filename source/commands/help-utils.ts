@@ -231,7 +231,6 @@ const COMMAND_HELP_OVERRIDES: Record<string, CommandHelpOverrides> = {
 	},
 	resume: {
 		usage: '/resume',
-		aliases: ['sessions', 'history'],
 		examples: ['/resume'],
 	},
 	review: {
@@ -339,7 +338,6 @@ const CATEGORY_BY_COMMAND = new Map<string, HelpCategory>(
  */
 function getCommandAliases(commandName: string): string[] {
 	return [
-		...(COMMAND_HELP_OVERRIDES[commandName]?.aliases ?? []),
 		...getAliasesFor(commandName).map(alias =>
 			alias.args?.length
 				? `${alias.name} (= /${alias.target} ${alias.args.join(' ')})`
@@ -381,14 +379,9 @@ export function findHelpCommand(
 		return commands.find(command => command.name === alias.target);
 	}
 
-	return commands.find(command => {
-		if (command.name.toLowerCase() === normalizedName) return true;
-		return (
-			COMMAND_HELP_OVERRIDES[command.name]?.aliases?.some(
-				alias => alias.toLowerCase() === normalizedName,
-			) ?? false
-		);
-	});
+	return commands.find(
+		command => command.name.toLowerCase() === normalizedName,
+	);
 }
 
 export interface HelpCommandGroup {
