@@ -13,7 +13,10 @@ import {join} from 'node:path';
 import test from 'ava';
 import type {AgentSideConnection} from '@agentclientprotocol/sdk';
 import {AcpSession} from '@/acp/acp-session';
-import {runAcpConversation} from '@/acp/acp-conversation';
+import {
+	runAcpConversation,
+	settleUnansweredToolCalls,
+} from '@/acp/acp-conversation';
 import {MCPClient} from '@/mcp/mcp-client';
 import {
 	getSessionCwd,
@@ -1736,6 +1739,155 @@ test('runAcpConversation - handles multi-turn conversation with tool calls', asy
 	t.is(toolMsgs.length, 2);
 	t.is(toolMsgs[0].content, 'Content of /a.txt');
 	t.is(toolMsgs[1].content, 'Content of /b.txt');
+});
+
+test('runAcpConversation - a model error on a later round-trip keeps the earlier ones in history', async t => {
+	const {conn} = createMockConn();
+	const session = createMockSession(conn, {
+		devMode: 'yolo',
+		messages: [{role: 'user', content: 'edit the file'}],
+	});
+	const toolManager = {
+		...createMockToolManager(),
+		hasTool: () => true,
+		getToolEntry: () => ({approval: false}),
+	};
+	setToolRegistryGetter(() => ({
+		read_file: async (args: any) => `Content of ${args.path}`,
+	}));
+
+	let callCount = 0;
+	const client = {
+		chat: async () => {
+			callCount++;
+			if (callCount === 1) {
+				return {
+					choices: [
+						{
+							message: {
+								content: 'Reading first',
+								tool_calls: [
+									createMockToolCall('read_file', {path: '/a.txt'}, 'call-1'),
+								],
+							},
+						},
+					],
+				};
+			}
+			throw new Error('provider exploded');
+		},
+	} as unknown as LLMClient;
+
+	await t.throwsAsync(
+		runAcpConversation({
+			session,
+			client,
+			toolManager: toolManager as any,
+			conn,
+			nonInteractiveAlwaysAllow: [],
+		}),
+		{message: 'provider exploded'},
+	);
+
+	t.deepEqual(
+		session.messages.map(m => m.role),
+		['user', 'assistant', 'tool'],
+	);
+	t.is(session.messages[2].content, 'Content of /a.txt');
+});
+
+test('runAcpConversation - a throw part way through a batch keeps the assistant call in history', async t => {
+	const {conn: baseConn} = createMockConn();
+	// The client connection dies while the second call's card is sent.
+	let toolCallUpdates = 0;
+	const conn = {
+		...baseConn,
+		sessionUpdate: async (update: any) => {
+			if (update.update.sessionUpdate === 'tool_call_update') {
+				toolCallUpdates++;
+				if (toolCallUpdates === 4) throw new Error('connection closed');
+			}
+		},
+	} as unknown as AgentSideConnection;
+	const session = createMockSession(conn, {
+		devMode: 'yolo',
+		messages: [{role: 'user', content: 'read both'}],
+	});
+	const toolManager = {
+		...createMockToolManager(),
+		hasTool: () => true,
+		getToolEntry: () => ({approval: false}),
+	};
+	setToolRegistryGetter(() => ({
+		read_file: async (args: any) => `Content of ${args.path}`,
+	}));
+	const client = {
+		chat: async () => ({
+			choices: [
+				{
+					message: {
+						content: '',
+						tool_calls: [
+							createMockToolCall('read_file', {path: '/a.txt'}, 'call-a'),
+							createMockToolCall('read_file', {path: '/b.txt'}, 'call-b'),
+						],
+					},
+				},
+			],
+		}),
+	} as unknown as LLMClient;
+
+	await t.throwsAsync(
+		runAcpConversation({
+			session,
+			client,
+			toolManager: toolManager as any,
+			conn,
+			nonInteractiveAlwaysAllow: [],
+		}),
+		{message: 'connection closed'},
+	);
+
+	const assistant = session.messages[1];
+	t.is(assistant.role, 'assistant');
+	t.deepEqual(
+		assistant.tool_calls?.map(call => call.id),
+		['call-a', 'call-b'],
+	);
+	// Closing the batch off is the caller's job; see settleUnansweredToolCalls.
+	const settled = settleUnansweredToolCalls(session.messages);
+	t.deepEqual(
+		settled.slice(2).map(m => [m.role, m.tool_call_id]),
+		[
+			['tool', 'call-a'],
+			['tool', 'call-b'],
+		],
+	);
+});
+
+test('settleUnansweredToolCalls - answers only the calls with no result yet', t => {
+	const messages: Message[] = [
+		{role: 'user', content: 'go'},
+		{
+			role: 'assistant',
+			content: '',
+			tool_calls: [
+				createMockToolCall('read_file', {}, 'done'),
+				createMockToolCall('read_file', {}, 'open'),
+			],
+		},
+		{role: 'tool', tool_call_id: 'done', name: 'read_file', content: 'ok'},
+	];
+	const settled = settleUnansweredToolCalls(messages);
+	t.is(settled.length, 4);
+	t.is(settled[3].tool_call_id, 'open');
+	t.regex(String(settled[3].content), /^Error:/);
+	// Nothing to do once every call has a result.
+	t.is(settleUnansweredToolCalls(settled), settled);
+	t.is(
+		settleUnansweredToolCalls([{role: 'user', content: 'hi'}]).length,
+		1,
+	);
 });
 
 // ============================================================================

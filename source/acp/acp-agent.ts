@@ -50,7 +50,11 @@ import {
 	parseDisabledTools,
 } from '@/acp/acp-capabilities';
 import {acpContentToUserMessage} from '@/acp/acp-content';
-import {clearAcpReadStubs, runAcpConversation} from '@/acp/acp-conversation';
+import {
+	clearAcpReadStubs,
+	runAcpConversation,
+	settleUnansweredToolCalls,
+} from '@/acp/acp-conversation';
 import {
 	acpCustomCommandText,
 	builtinCommandReply,
@@ -432,6 +436,9 @@ export class AcpAgent implements Agent {
 			return response;
 		} catch (error) {
 			const errorMsg = error instanceof Error ? error.message : String(error);
+			// The turn keeps what it already did; only a batch it was part way
+			// through needs closing off.
+			session.messages = settleUnansweredToolCalls(session.messages);
 
 			// A user-initiated cancellation isn't a failure: surface it inline in
 			// the chat and resolve cleanly instead of rejecting the ACP `prompt`

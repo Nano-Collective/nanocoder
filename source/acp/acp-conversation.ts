@@ -221,6 +221,33 @@ export function clearAcpReadStubs(sessionId: string): void {
 
 const SUBAGENT_TOOL_CALL_PREFIX = 'subagent:';
 
+/**
+ * Give every tool call of the latest assistant message a result, for a turn
+ * that threw part way through its batch. History keeps the round-trips that
+ * ran, and a stored tool call with no result would have the provider reject
+ * every later prompt of the session.
+ */
+export function settleUnansweredToolCalls(messages: Message[]): Message[] {
+	let index = messages.length - 1;
+	while (index >= 0 && messages[index].role === 'tool') index--;
+	const calls = index >= 0 ? (messages[index].tool_calls ?? []) : [];
+	const answered = new Set(
+		messages.slice(index + 1).map(message => message.tool_call_id),
+	);
+	const unanswered = calls.filter(call => !answered.has(call.id));
+	if (unanswered.length === 0) return messages;
+	return [
+		...messages,
+		...unanswered.map(call => ({
+			role: 'tool' as const,
+			tool_call_id: call.id,
+			name: call.function.name,
+			content:
+				'Error: the turn ended before the result of this tool call was recorded.',
+		})),
+	];
+}
+
 async function runTurn(
 	options: RunAcpConversationOptions,
 ): Promise<PromptResponse> {
@@ -233,8 +260,11 @@ async function runTurn(
 	// a client cannot use that to tell which tool calls belong to one turn.
 	const turnId = crypto.randomUUID();
 
-	let messages = session.messages;
-	const walkthroughLifecycle = createWalkthroughLifecycle(messages);
+	// The turn writes straight to the session's history rather than a copy it
+	// stores on the way out, so a throw part way through a prompt keeps the
+	// round-trips that already ran. Those may have edited files, and the
+	// timeline's checkpoints point at message indices inside them.
+	const walkthroughLifecycle = createWalkthroughLifecycle(session.messages);
 	let wrotePlan = false;
 
 	// Provider-reported usage accumulated across this prompt's model calls,
@@ -317,7 +347,6 @@ async function runTurn(
 
 	for (let turn = 0; turn < maxTurns; turn++) {
 		if (abortController.signal.aborted) {
-			session.messages = messages;
 			return withTurnUsage({stopReason: 'cancelled'});
 		}
 
@@ -383,7 +412,7 @@ async function runTurn(
 
 		const sessionConfig = getAppConfig().sessions;
 		const maxMessages = sessionConfig?.maxMessages ?? 1000;
-		const cappedMessages = capMessagesForModel(messages, maxMessages);
+		const cappedMessages = capMessagesForModel(session.messages, maxMessages);
 
 		const finalTurnNotice: Message[] = finalTurn
 			? [{role: 'user', content: FINAL_TURN_INSTRUCTION}]
@@ -400,7 +429,6 @@ async function runTurn(
 			);
 		} catch (error) {
 			if (abortController.signal.aborted) {
-				session.messages = messages;
 				return withTurnUsage({stopReason: 'cancelled'});
 			}
 			throw error;
@@ -436,8 +464,8 @@ async function runTurn(
 		const {emittedToolCalls, resultsForAbandonedTurn} =
 			buildAbandonedTurnMessages(partition);
 
-		messages = [
-			...messages,
+		session.messages = [
+			...session.messages,
 			{
 				role: 'assistant',
 				content: cleanedContent,
@@ -447,7 +475,7 @@ async function runTurn(
 		];
 		// Gate on the same view the next turn will send, so the threshold is not
 		// measured against rows the cap already drops from the request.
-		const compactGateInput = capMessagesForModel(messages, maxMessages);
+		const compactGateInput = capMessagesForModel(session.messages, maxMessages);
 		const compacted = await maybeAutoCompact(
 			compactGateInput,
 			systemMessage,
@@ -462,15 +490,14 @@ async function runTurn(
 		// maybeAutoCompact returns the capped view it was handed, and taking it
 		// would discard history the cap only meant to hide from one request.
 		if (compacted !== compactGateInput) {
-			messages = compacted;
+			session.messages = compacted;
 		}
 		if (abortController.signal.aborted) {
-			session.messages = messages;
 			return withTurnUsage({stopReason: 'cancelled'});
 		}
 
 		if (errorResults.length > 0) {
-			messages = [...messages, ...resultsForAbandonedTurn];
+			session.messages = [...session.messages, ...resultsForAbandonedTurn];
 			continue;
 		}
 
@@ -499,10 +526,10 @@ async function runTurn(
 					conn,
 					fallbackCall,
 				);
-				messages = [
-					...messages.slice(0, -1),
+				session.messages = [
+					...session.messages.slice(0, -1),
 					{
-						...messages[messages.length - 1],
+						...session.messages[session.messages.length - 1],
 						tool_calls: [fallbackCall],
 					},
 					fallbackResult,
@@ -517,10 +544,9 @@ async function runTurn(
 						availableNames.includes('write_walkthrough'),
 					);
 			if (fallback) {
-				messages = [...messages, fallback];
+				session.messages = [...session.messages, fallback];
 				continue;
 			}
-			session.messages = messages;
 			return withTurnUsage({stopReason: 'end_turn'});
 		}
 
@@ -709,7 +735,7 @@ async function runTurn(
 					toolResults.push(
 						...createCancellationResults(validToolCalls.slice(index)),
 					);
-					session.messages = [...messages, ...toolResults];
+					session.messages = [...session.messages, ...toolResults];
 					return withTurnUsage({stopReason: 'cancelled'});
 				}
 
@@ -738,7 +764,7 @@ async function runTurn(
 				session,
 				toolManager,
 				toolCall,
-				messages,
+				session.messages,
 				meta.title,
 				turnId,
 			);
@@ -829,17 +855,15 @@ async function runTurn(
 			}
 		}
 
-		messages = [...messages, ...toolResults];
+		session.messages = [...session.messages, ...toolResults];
 
 		// End the turn here when cancelled - without this the loop would issue
 		// another LLM request before the top-of-turn abort check runs.
 		if (abortController.signal.aborted) {
-			session.messages = messages;
 			return withTurnUsage({stopReason: 'cancelled'});
 		}
 	}
 
-	session.messages = messages;
 	return withTurnUsage({stopReason: 'max_turn_requests'});
 }
 
