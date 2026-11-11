@@ -431,7 +431,9 @@ export class AcpAgent implements Agent {
 				previousAssistant,
 				turnDurationMs,
 			);
-			turnSucceeded = true;
+			// A turn cancelled part way through returns rather than throws. It is
+			// still not a clean turn, so it must not be titled from.
+			turnSucceeded = response.stopReason !== 'cancelled';
 			return response;
 		} catch (error) {
 			const errorMsg = error instanceof Error ? error.message : String(error);
@@ -443,7 +445,13 @@ export class AcpAgent implements Agent {
 			// the chat and resolve cleanly instead of rejecting the ACP `prompt`
 			// call, otherwise the VS Code client's catch handler shows a
 			// "RequestError: Internal error" toast on top of the cancel notice.
-			if (errorMsg === 'Operation was cancelled') {
+			//
+			// Told by the turn's own signal, which session/cancel and close
+			// abort, not by the error's wording: whatever threw once the user
+			// stopped the turn (a tool, compaction, a dropped client write) is
+			// the cancellation, and a timeout that happens to say "cancelled"
+			// is not.
+			if (session.abortController.signal.aborted) {
 				const cancelNotice = '\n\n_Cancelled by user._\n';
 				this.conn.sessionUpdate({
 					sessionId: params.sessionId,
