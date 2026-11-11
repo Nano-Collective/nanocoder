@@ -1,5 +1,5 @@
 import test from 'ava';
-import {createPanel, type StubElement} from '@/vscode/chat-panel-harness';
+import {createPanel, type StubElement} from './chat-panel-harness';
 
 console.log('\nchat-panel-turn-footer.spec.ts');
 
@@ -338,7 +338,7 @@ test('clicking Retry button sends retryMessage with prompt to extension host', t
 
 	const retryMsg = panel.sent.find((m: any) => m.type === 'retryMessage');
 	t.truthy(retryMsg, 'should have sent retryMessage');
-	t.is(retryMsg.text, 'Explain quantum computing');
+	t.is(retryMsg?.text, 'Explain quantum computing');
 });
 
 test('clicking Retry on an older response retries that specific turn prompt', t => {
@@ -509,7 +509,7 @@ test('clicking Retry on an image-only turn resubmits the images, not nothing', t
 
 	const retryMsgs = panel.sent.filter((m: any) => m.type === 'retryMessage');
 	t.is(retryMsgs.length, retryMsgsBefore + 1);
-	t.deepEqual(retryMsgs.at(-1).images, images);
+	t.deepEqual(retryMsgs.at(-1)?.images, images);
 });
 
 test('footer is hidden while processing and revealed when finished', t => {

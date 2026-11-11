@@ -1,5 +1,5 @@
 import test from 'ava';
-import {createPanel, type StubElement} from '@/vscode/chat-panel-harness';
+import {createPanel, type StubElement} from './chat-panel-harness';
 
 console.log('\nchat-panel-tool-aggregation.spec.ts');
 

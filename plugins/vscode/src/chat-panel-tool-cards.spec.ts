@@ -1,7 +1,7 @@
 import {readFileSync} from 'node:fs';
 import {fileURLToPath} from 'node:url';
 import test from 'ava';
-import {createPanel, type StubElement} from '@/vscode/chat-panel-harness';
+import {createPanel, type StubElement} from './chat-panel-harness';
 
 console.log('\nchat-panel-tool-cards.spec.ts');
 
@@ -787,7 +787,7 @@ const editFiles = (panel: any, count: number) => {
 test('the chip row is capped and scrolls instead of growing the composer', t => {
 	const html = readFileSync(
 		fileURLToPath(
-			new URL('../../plugins/vscode/media/chat-panel.html', import.meta.url),
+			new URL('../media/chat-panel.html', import.meta.url),
 		),
 		'utf8',
 	);
