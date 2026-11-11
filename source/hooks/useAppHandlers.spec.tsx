@@ -1036,3 +1036,28 @@ test.serial('resuming still loads the conversation when the switch fails', async
 		t.deepEqual(spies.setCurrentSessionId.calls, [[otherProviderSession.id]]);
 	});
 });
+
+// App rebuilds the props object on every render. The handlers, and the
+// object holding them, must only change when a value they use changes.
+test('the handlers keep their identity when only the props object is rebuilt', t => {
+	const {props} = makeProps({});
+	let latest: AppHandlers | null = null;
+	function Probe({extra}: {extra: Record<string, unknown>}) {
+		latest = useAppHandlers({...props, ...extra} as never);
+		return null;
+	}
+
+	const instance = render(<Probe extra={{}} />);
+	const first = latest!;
+	instance.rerender(<Probe extra={{}} />);
+	t.is(latest, first, 'same object for an identical set of values');
+
+	instance.rerender(<Probe extra={{abortController: new AbortController()}} />);
+	t.not(latest, first);
+	t.not(latest!.handleCancel, first.handleCancel, 'handleCancel reads it');
+	t.is(
+		latest!.handlePlanModify,
+		first.handlePlanModify,
+		'handlers that do not read it are untouched',
+	);
+});

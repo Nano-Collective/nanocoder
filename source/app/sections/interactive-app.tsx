@@ -422,7 +422,7 @@ export function InteractiveApp({
 		});
 		setSubmittedDraft(null);
 	}, [
-		appHandlers,
+		appHandlers.handleCancel,
 		altScreenActive,
 		appState.messages,
 		appState.updateMessages,
