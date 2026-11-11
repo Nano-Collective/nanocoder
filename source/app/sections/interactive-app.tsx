@@ -4,6 +4,7 @@ import {ChatHistory} from '@/app/components/chat-history';
 import {ChatInput} from '@/app/components/chat-input';
 import {ModalSelectors} from '@/app/components/modal-selectors';
 import type {SettingsTabId} from '@/app/components/settings-constants';
+import {canSubmitPrompt, canSubmitVoicePrompt} from '@/app/utils/prompt-gate';
 import {artifactManager} from '@/artifacts/artifact-manager';
 import ArchitectReviewPrompt from '@/components/architect-review-prompt';
 import {SessionArtifactLinks} from '@/components/artifact-links-display';
@@ -120,12 +121,14 @@ export function InteractiveApp({
 	const drainInProgressRef = React.useRef(false);
 	const lastFailedDrainIdRef = React.useRef<string | null>(null);
 	const [drainAttempt, setDrainAttempt] = React.useState(0);
-	const voiceInputAllowed =
-		!appState.activeMode &&
-		!appState.isToolConfirmationMode &&
-		!appState.isQuestionMode &&
-		pendingSubagentApproval === null &&
-		pendingToolConfirmation === null;
+	// Typed and voice input share one gate, so voice can't submit a turn
+	// behind a modal the composer is hidden for.
+	const composerAvailable = canSubmitPrompt(appState);
+	const voiceInputAllowed = canSubmitVoicePrompt({
+		...appState,
+		hasPendingSubagentApproval: pendingSubagentApproval !== null,
+		hasPendingToolConfirmation: pendingToolConfirmation !== null,
+	});
 	const agentBusy =
 		appState.isCancelling ||
 		chatHandler.isGenerating ||
@@ -672,68 +675,58 @@ export function InteractiveApp({
 						</Box>
 					)}
 
-					{appState.startChat &&
-						appState.activeMode === null &&
-						!appState.isSettingsMode &&
-						!appState.planReviewState?.show &&
-						// The architect gate runs its own useInput. Leaving the composer
-						// mounted alongside it gave every keystroke two live consumers,
-						// and let the user submit a new turn straight past the gate with
-						// the checkpoint still open.
-						!appState.architectReviewState?.show &&
-						// Hide the composer only while a live component explicitly captures input.
-						!appState.liveComponentCapturesInput && (
-							<ChatInput
-								isCancelling={appState.isCancelling}
-								isToolExecuting={appState.isToolExecuting}
-								isQuestionMode={appState.isQuestionMode}
-								pendingToolCalls={appState.pendingToolCalls}
-								currentToolIndex={appState.currentToolIndex}
-								pendingQuestion={appState.pendingQuestion}
-								onQuestionAnswer={handleQuestionAnswer}
-								mcpInitialized={appState.mcpInitialized}
-								client={appState.client}
-								customCommands={Array.from(appState.customCommandCache.keys())}
-								inputDisabled={false}
-								onSubmittedDraft={handleSubmittedDraft}
-								restoreSubmittedDraft={restoredDraft}
-								queuedMessages={userMessageQueue.queuedMessages}
-								onQueueMessage={userMessageQueue.enqueueMessage}
-								onRemoveQueuedMessage={userMessageQueue.removeMessage}
-								isBusy={cancellable}
-								developmentMode={appState.developmentMode}
-								contextPercentUsed={appState.contextPercentUsed}
-								contextSource={appState.contextSource}
-								sessionName={appState.sessionName || undefined}
-								compactToolCounts={appState.compactToolCounts}
-								compactToolDisplay={appState.compactToolDisplay}
-								liveTaskList={appState.liveTaskList}
-								showTaskList={appState.showTaskList}
-								taskListHasUnread={appState.taskListHasUnread}
-								onToggleTaskList={appState.toggleTaskList}
-								onToggleCompactDisplay={handleToggleCompactDisplay}
-								pendingSubagentApproval={pendingSubagentApproval}
-								onSubagentToolApproval={handleSubagentToolApproval}
-								pendingToolConfirmation={pendingToolConfirmation}
-								pendingVoiceInstall={pendingVoiceInstall}
-								onVoiceInstallConfirm={onVoiceInstallConfirm}
-								onToolConfirmation={handleToolConfirmation}
-								onSubmit={handleUserSubmit}
-								activeEditor={vscodeServer.activeEditor}
-								onDismissActiveEditor={vscodeServer.dismissActiveEditor}
-								onToggleMode={appHandlers.handleToggleDevelopmentMode}
-								onToggleReasoningExpanded={handleToggleReasoningExpanded}
-								tune={appState.tune}
-								currentModel={appState.currentModel}
-								fullscreen={fullscreen}
-								isSaving={isSaving}
-								voice={voiceIndicator}
-								suggestedCommand={suggestedCommand}
-								onDismissSuggestion={() => setSuggestedCommand(null)}
-								shortcutsOverlayOpen={shortcutsOverlayOpen}
-								onShortcutsOverlayChange={setShortcutsOverlayOpen}
-							/>
-						)}
+					{composerAvailable && (
+						<ChatInput
+							isCancelling={appState.isCancelling}
+							isToolExecuting={appState.isToolExecuting}
+							isQuestionMode={appState.isQuestionMode}
+							pendingToolCalls={appState.pendingToolCalls}
+							currentToolIndex={appState.currentToolIndex}
+							pendingQuestion={appState.pendingQuestion}
+							onQuestionAnswer={handleQuestionAnswer}
+							mcpInitialized={appState.mcpInitialized}
+							client={appState.client}
+							customCommands={Array.from(appState.customCommandCache.keys())}
+							inputDisabled={false}
+							onSubmittedDraft={handleSubmittedDraft}
+							restoreSubmittedDraft={restoredDraft}
+							queuedMessages={userMessageQueue.queuedMessages}
+							onQueueMessage={userMessageQueue.enqueueMessage}
+							onRemoveQueuedMessage={userMessageQueue.removeMessage}
+							isBusy={cancellable}
+							developmentMode={appState.developmentMode}
+							contextPercentUsed={appState.contextPercentUsed}
+							contextSource={appState.contextSource}
+							sessionName={appState.sessionName || undefined}
+							compactToolCounts={appState.compactToolCounts}
+							compactToolDisplay={appState.compactToolDisplay}
+							liveTaskList={appState.liveTaskList}
+							showTaskList={appState.showTaskList}
+							taskListHasUnread={appState.taskListHasUnread}
+							onToggleTaskList={appState.toggleTaskList}
+							onToggleCompactDisplay={handleToggleCompactDisplay}
+							pendingSubagentApproval={pendingSubagentApproval}
+							onSubagentToolApproval={handleSubagentToolApproval}
+							pendingToolConfirmation={pendingToolConfirmation}
+							pendingVoiceInstall={pendingVoiceInstall}
+							onVoiceInstallConfirm={onVoiceInstallConfirm}
+							onToolConfirmation={handleToolConfirmation}
+							onSubmit={handleUserSubmit}
+							activeEditor={vscodeServer.activeEditor}
+							onDismissActiveEditor={vscodeServer.dismissActiveEditor}
+							onToggleMode={appHandlers.handleToggleDevelopmentMode}
+							onToggleReasoningExpanded={handleToggleReasoningExpanded}
+							tune={appState.tune}
+							currentModel={appState.currentModel}
+							fullscreen={fullscreen}
+							isSaving={isSaving}
+							voice={voiceIndicator}
+							suggestedCommand={suggestedCommand}
+							onDismissSuggestion={() => setSuggestedCommand(null)}
+							shortcutsOverlayOpen={shortcutsOverlayOpen}
+							onShortcutsOverlayChange={setShortcutsOverlayOpen}
+						/>
+					)}
 
 					{/* Artifact shortcuts sit below the input alongside the mode
 				    indicator — everything ambient lives under the composer. The
