@@ -34,6 +34,7 @@ import {
 } from '@/utils/read-tracker';
 import {estimateTokens} from '@/utils/token-calculator';
 import {createFileToolApproval} from '@/utils/tool-approval';
+import {truncateText} from '@/utils/truncate-text';
 import {ensureString} from '@/utils/type-helpers';
 import {
 	closeDiffInVSCode,
@@ -172,10 +173,8 @@ interface WriteFileArgs {
 }
 
 /** Truncate a plain (non-highlighted) line to fit terminal width */
-const truncateLine = (line: string, maxWidth: number): string => {
-	if (line.length <= maxWidth) return line;
-	return line.slice(0, maxWidth - 1) + '…';
-};
+const truncateLine = (line: string, maxWidth: number): string =>
+	truncateText(line, maxWidth, {unit: 'code-units'});
 
 // Create a component that will re-render when theme changes
 const WriteFileFormatter = React.memo(
