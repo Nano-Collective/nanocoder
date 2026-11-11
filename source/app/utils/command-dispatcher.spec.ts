@@ -190,6 +190,95 @@ test.serial('a stateful command that throws still releases its spinner', async t
 	t.is(live[1], null);
 });
 
+for (const [message, mode] of [
+	['/model', 'model-selection'],
+	['/model browse', 'model-database'],
+	['/model-database', 'model-database'],
+	['/explorer', 'explorer'],
+	['/ide', 'ide'],
+	['/tune', 'tune'],
+	['/settings', 'settings:'],
+	['/settings MCP', 'settings:mcp'],
+] as const) {
+	test.serial(`${message} opens ${mode} and completes at once`, async t => {
+		const calls: string[] = [];
+		await dispatchSlashCommand(
+			message,
+			createOptions({
+				commandArgs: message.slice(1).split(/\s+/).slice(1),
+				onEnterModelSelectionMode: () => calls.push('model-selection'),
+				onEnterModelDatabaseMode: () => calls.push('model-database'),
+				onEnterExplorerMode: () => calls.push('explorer'),
+				onEnterIdeSelectionMode: () => calls.push('ide'),
+				onEnterTune: () => calls.push('tune'),
+				onEnterSettingsMode: tab => calls.push(`settings:${tab ?? ''}`),
+				onCommandComplete: () => calls.push('complete'),
+			}),
+		);
+		t.deepEqual(calls, [mode, 'complete']);
+	});
+}
+
+test.serial('/settings with an unknown tab errors and completes after render', async t => {
+	const queued: React.ReactNode[] = [];
+	let opened = false;
+	let completed = false;
+	await dispatchSlashCommand(
+		'/settings nope',
+		createOptions({
+			commandArgs: ['nope'],
+			onAddToChatQueue: node => queued.push(node),
+			onEnterSettingsMode: () => {
+				opened = true;
+			},
+			onCommandComplete: () => {
+				completed = true;
+			},
+		}),
+	);
+	t.false(opened);
+	t.true(queuedText(queued[0]).includes('Unknown settings tab: "nope"'));
+	t.false(completed);
+	await wait(DELAY_COMMAND_COMPLETE_MS + 25);
+	t.true(completed);
+});
+
+test.serial('a retired name says where it moved, then opens the tab and ignores its own args', async t => {
+	const calls: string[] = [];
+	const queued: React.ReactNode[] = [];
+	await dispatchSlashCommand(
+		'/setup-providers extra',
+		createOptions({
+			commandArgs: ['extra'],
+			onAddToChatQueue: node => queued.push(node),
+			onEnterSettingsMode: tab => calls.push(`settings:${tab ?? ''}`),
+			onCommandComplete: () => calls.push('complete'),
+		}),
+	);
+	t.deepEqual(calls, ['settings:providers', 'complete']);
+	t.is(
+		queuedText(queued[0]),
+		'/setup-providers has moved to /settings — opening the providers tab. Use /settings providers next time.',
+	);
+});
+
+test.serial('a project command named like a retired command still wins', async t => {
+	let opened = false;
+	const customCommandCache = new Map([
+		['setup-mcp', {name: 'setup-mcp', fullName: 'setup-mcp'}],
+	]) as unknown as MessageSubmissionOptions['customCommandCache'];
+	await dispatchSlashCommand(
+		'/setup-mcp',
+		createOptions({
+			customCommandCache,
+			onEnterSettingsMode: () => {
+				opened = true;
+			},
+		}),
+	);
+	t.false(opened);
+});
+
 test.serial('read-only commands still render through their handler', async t => {
 	const queued: React.ReactNode[] = [];
 	await dispatchSlashCommand(

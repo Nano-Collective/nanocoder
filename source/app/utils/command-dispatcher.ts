@@ -1,6 +1,6 @@
 import React from 'react';
 import {commandRegistry} from '@/commands';
-import {expandCommandAlias} from '@/commands/aliases';
+import {expandCommandAlias, findRetiredCommand} from '@/commands/aliases';
 import CommandProgress from '@/components/command-progress';
 import {DELAY_COMMAND_COMPLETE_MS} from '@/constants';
 import {parseCustomCommandArgs} from '@/custom-commands/args';
@@ -21,6 +21,7 @@ import {
 	parseInlineOverrides,
 } from '@/utils/inline-overrides';
 import {infoMsg, warningMsg} from '@/utils/message-factory';
+import {handleCheckpointLoad} from './handlers/checkpoint-load-handler';
 import {handleCompactCommand} from './handlers/compact-handler';
 import {handleContextMaxCommand} from './handlers/context-max-handler';
 import {
@@ -34,10 +35,6 @@ import {handleLoginCommand} from './handlers/login-handler';
 import {handleMCPPromptCommand} from './handlers/mcp-prompt-handler';
 import {handleRetryCommand} from './handlers/retry-handler';
 import {handleResumeCommand} from './handlers/session-handler';
-import {
-	handleCheckpointLoad,
-	handleSpecialCommand,
-} from './handlers/special-command-handler';
 import {handleStatsCommand} from './handlers/stats-handler';
 
 /**
@@ -95,6 +92,12 @@ function createCommandContext(
 		notifyCleared: () => options.onClearCounterIncrement?.(),
 		renameSession: options.onRenameSession,
 		showStatus: options.onShowStatus,
+		enterModelSelectionMode: options.onEnterModelSelectionMode,
+		enterModelDatabaseMode: options.onEnterModelDatabaseMode,
+		enterSettingsMode: options.onEnterSettingsMode,
+		enterExplorerMode: options.onEnterExplorerMode,
+		enterIdeSelectionMode: options.onEnterIdeSelectionMode,
+		enterTune: options.onEnterTune,
 	};
 }
 
@@ -223,7 +226,8 @@ async function runRegisteredCommand(
  *
  * 1. Custom commands (`.nanocoder/commands/`, skill bundles)
  * 2. MCP prompts
- * 3. Old command names (`aliases.ts`), rewritten to their target
+ * 3. Old command names (`aliases.ts`): retired ones forward with a notice,
+ *    aliases are rewritten to their target
  * 4. Inline `?key=value` overrides, for the commands that read them
  * 5. Built-in commands from the registry. A `StatefulCommand` gets a
  *    `CommandContext`; the rest still pass through the older stateful
@@ -257,6 +261,19 @@ export async function dispatchSlashCommand(
 			options,
 		)
 	) {
+		return;
+	}
+
+	// Retired names (/setup-providers, ...) say where they moved, then run it.
+	const retired = findRetiredCommand(commandName);
+	if (retired) {
+		options.onAddToChatQueue(
+			infoMsg(retired.notice, `${retired.name}-retired`),
+		);
+		await handleRegisteredSlashCommand(
+			`/${[retired.target, ...retired.args].join(' ')}`,
+			{...options, commandArgs: [...retired.args]},
+		);
 		return;
 	}
 
@@ -370,7 +387,6 @@ async function routeSlashCommand(
 	if (await handleAgentCopy(commandParts, options)) return;
 	if (await handleToolCreate(commandParts, options)) return;
 	if (await handleSkillsCreate(commandParts, options)) return;
-	if (await handleSpecialCommand(commandName, options)) return;
 	if (await handleCheckpointLoad(commandParts, options)) return;
 	// Stateful handlers that replay or resume chat flow live alongside each other.
 	if (await handleResumeCommand(commandParts, options)) return;
