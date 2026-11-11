@@ -86,6 +86,12 @@ const FINAL_TURN_INSTRUCTION =
 	'Do not call any more tools. Produce your final answer now using only the ' +
 	'information you already have.';
 
+/**
+ * What every frontend reports when the provider returns no choices at all:
+ * an error, not a finished turn with an empty answer.
+ */
+export const NO_RESPONSE_MESSAGE = 'No response received from model';
+
 export interface TurnContext {
 	/** Zero-based iteration index. */
 	turn: number;

@@ -3792,3 +3792,40 @@ test.serial('AcpAgent - a session in another project gets that project\'s comman
 		rmSync(other, {recursive: true, force: true});
 	}
 });
+
+test.serial('AcpAgent - a session in another project starts on that project\'s provider', async t => {
+	await withProviders(async () => {
+		const other = freshDir('provider');
+		const before = loadPreferences();
+		try {
+			writeFileSync(
+				join(other, 'agents.config.json'),
+				JSON.stringify({
+					nanocoder: {
+						providers: [
+							{
+								name: 'folder-provider',
+								baseUrl: 'http://localhost:1/v1',
+								models: ['folder-model'],
+							},
+						],
+					},
+				}),
+			);
+			savePreferences(grantDirectoryTrust(loadPreferences(), other));
+			const agent = trustAgent(testConfigDir);
+
+			const inOther = await agent.newSession({cwd: other});
+			t.is(optionValue(inOther.configOptions, 'provider'), 'folder-provider');
+			t.is(optionValue(inOther.configOptions, 'model'), 'folder-model');
+
+			// The launch folder, and the process default, are unchanged.
+			const inLaunch = await agent.newSession({cwd: testConfigDir});
+			t.is(optionValue(inLaunch.configOptions, 'provider'), 'test-provider');
+			t.is(agent['initContext'].provider, 'test-provider');
+		} finally {
+			savePreferences(before);
+			rmSync(other, {recursive: true, force: true});
+		}
+	});
+});

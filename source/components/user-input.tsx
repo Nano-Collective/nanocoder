@@ -4,7 +4,9 @@ import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import stringWidth from 'string-width';
 import {commandRegistry} from '@/commands';
 import {isComposerKey} from '@/components/composer/keymap';
+import {ReverseSearchPrompt} from '@/components/composer/reverse-search-prompt';
 import {ShortcutsOverlay} from '@/components/composer/shortcuts-overlay';
+import {useReverseSearch} from '@/components/composer/useReverseSearch';
 import {useShortcutsOverlay} from '@/components/composer/useShortcutsOverlay';
 import {
 	DevelopmentModeIndicator,
@@ -141,26 +143,6 @@ const PROMPT_WIDTH_MIN = 40;
 // Columns a queued-message row loses inside the prompt box: the rounded
 // border (2), paddingX (2), and the '▸ '/'  ' selection marker (2).
 const QUEUED_ROW_OVERHEAD = 6;
-
-export function findReverseMatch(
-	history: InputState[],
-	query: string,
-	startIndex: number,
-): {index: number; match: InputState} | null {
-	if (history.length === 0) return null;
-	const queryLower = query.toLowerCase();
-	const start = Math.min(startIndex, history.length - 1);
-	for (let i = start; i >= 0; i--) {
-		const displayValue = history[i]?.displayValue;
-		if (
-			typeof displayValue === 'string' &&
-			displayValue.toLowerCase().includes(queryLower)
-		) {
-			return {index: i, match: history[i]};
-		}
-	}
-	return null;
-}
 
 interface ChatProps {
 	onSubmit?: (
@@ -309,16 +291,9 @@ export default function UserInput({
 	const [attachments, setAttachments] = useState<ImageAttachment[]>([]);
 	const lastRestoredDraftIdRef = useRef<number | null>(null);
 
-	// Reverse prompt search state (Ctrl+R / bck-i-search)
-	const [isReverseSearchMode, setIsReverseSearchMode] = useState(false);
-	const [reverseSearchQuery, setReverseSearchQuery] = useState('');
-	const [reverseSearchIndex, setReverseSearchIndex] = useState(-1);
-	const [reverseSearchMatch, setReverseSearchMatch] =
-		useState<InputState | null>(null);
-	const reverseSearchDraftRef = useRef<InputState>({
-		displayValue: '',
-		placeholderContent: {},
-	});
+	// Reverse prompt search (Ctrl+R / bck-i-search)
+	const reverseSearch = useReverseSearch();
+	const isReverseSearchMode = reverseSearch.isActive;
 
 	const {
 		input,
@@ -1060,122 +1035,23 @@ export default function UserInput({
 
 		// Reverse prompt search mode (Ctrl+R / bck-i-search)
 		if (isReverseSearchMode) {
-			// Ctrl+C is deliberately not handled here: App.tsx's global handler
-			// exits the app on it, so it can't double as "cancel search".
-			if (key.escape) {
-				// Cancel search, restore draft
-				setInputState(reverseSearchDraftRef.current);
-				setIsReverseSearchMode(false);
-				setReverseSearchQuery('');
-				setReverseSearchIndex(-1);
-				setReverseSearchMatch(null);
+			const exit = reverseSearch.handleKey(inputChar, key);
+			if (exit) {
+				if (exit.restore) {
+					setInputState(exit.restore);
+				}
 				setTextInputKey(prev => prev + 1);
 				focus('user-input');
-				return;
 			}
-
-			if (key.return) {
-				// Accept match and exit search mode
-				if (reverseSearchMatch) {
-					setInputState(reverseSearchMatch);
-				}
-				setIsReverseSearchMode(false);
-				setReverseSearchQuery('');
-				setReverseSearchIndex(-1);
-				setReverseSearchMatch(null);
-				setTextInputKey(prev => prev + 1);
-				focus('user-input');
-				return;
-			}
-
-			if (isComposerKey('reverseSearch', inputChar, key)) {
-				// Cycle to next older match with current query (stop at oldest)
-				const history = promptHistory.getHistory();
-				if (history.length > 0 && reverseSearchIndex > 0) {
-					const olderMatch = findReverseMatch(
-						history,
-						reverseSearchQuery,
-						reverseSearchIndex - 1,
-					);
-					if (olderMatch) {
-						setReverseSearchIndex(olderMatch.index);
-						setReverseSearchMatch(olderMatch.match);
-					}
-				}
-				return;
-			}
-
-			if (key.backspace || key.delete) {
-				const history = promptHistory.getHistory();
-				const nextQuery = reverseSearchQuery.slice(0, -1);
-				setReverseSearchQuery(nextQuery);
-				const matchResult = findReverseMatch(
-					history,
-					nextQuery,
-					history.length - 1,
-				);
-				if (matchResult) {
-					setReverseSearchIndex(matchResult.index);
-					setReverseSearchMatch(matchResult.match);
-				} else {
-					setReverseSearchIndex(-1);
-					setReverseSearchMatch(null);
-				}
-				return;
-			}
-
-			// Ignore other control/meta combinations while in search mode
-			if (key.ctrl || key.meta) {
-				return;
-			}
-
-			// Handle regular text typing into search query
-			if (
-				inputChar &&
-				!key.upArrow &&
-				!key.downArrow &&
-				!key.leftArrow &&
-				!key.rightArrow &&
-				!key.tab
-			) {
-				const history = promptHistory.getHistory();
-				const nextQuery = reverseSearchQuery + inputChar;
-				setReverseSearchQuery(nextQuery);
-				const matchResult = findReverseMatch(
-					history,
-					nextQuery,
-					history.length - 1,
-				);
-				if (matchResult) {
-					setReverseSearchIndex(matchResult.index);
-					setReverseSearchMatch(matchResult.match);
-				} else {
-					setReverseSearchIndex(-1);
-					setReverseSearchMatch(null);
-				}
-				return;
-			}
-
 			return;
 		}
 
 		// Handle ctrl+r to enter reverse prompt search
 		if (isComposerKey('reverseSearch', inputChar, key)) {
-			const history = promptHistory.getHistory();
-			reverseSearchDraftRef.current = currentState;
-			setIsReverseSearchMode(true);
-			setReverseSearchQuery('');
+			reverseSearch.start(currentState);
 			setShowCompletions(false);
 			setIsFileAutocompleteMode(false);
 			setShowClearMessage(false);
-			const initialMatch = findReverseMatch(history, '', history.length - 1);
-			if (initialMatch) {
-				setReverseSearchIndex(initialMatch.index);
-				setReverseSearchMatch(initialMatch.match);
-			} else {
-				setReverseSearchIndex(-1);
-				setReverseSearchMatch(null);
-			}
 			return;
 		}
 
@@ -1513,41 +1389,11 @@ export default function UserInput({
 				>
 					{/* Input row */}
 					{isReverseSearchMode ? (
-						<Box flexDirection="column">
-							<Box>
-								<Text
-									color={
-										reverseSearchMatch || reverseSearchQuery === ''
-											? colors.info
-											: colors.error
-									}
-									bold
-								>
-									{reverseSearchMatch || reverseSearchQuery === ''
-										? '(reverse-i-search)`'
-										: '(failed reverse-i-search)`'}
-								</Text>
-								<Text color={colors.primary} bold>
-									{reverseSearchQuery}
-								</Text>
-								<Text
-									color={
-										reverseSearchMatch || reverseSearchQuery === ''
-											? colors.info
-											: colors.error
-									}
-									bold
-								>
-									{"': "}
-								</Text>
-								<Text color={reverseSearchMatch ? textColor : colors.secondary}>
-									{reverseSearchMatch ? reverseSearchMatch.displayValue : ''}
-								</Text>
-							</Box>
-							<Text color={colors.secondary}>
-								Enter: select · Esc: cancel · Ctrl+R: cycle older
-							</Text>
-						</Box>
+						<ReverseSearchPrompt
+							query={reverseSearch.query}
+							match={reverseSearch.match}
+							matchColor={textColor}
+						/>
 					) : (
 						<Box>
 							{input.length === 0 && (

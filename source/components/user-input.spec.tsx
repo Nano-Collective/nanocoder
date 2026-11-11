@@ -14,7 +14,8 @@ import {clearFileListCache} from '../utils/file-autocomplete';
 import {pasteEvents} from '../utils/terminal-paste';
 import {KEYBOARD_SHORTCUTS} from './composer/keymap';
 import {SHORTCUTS_OVERHEAD_ROWS} from './composer/useShortcutsOverlay';
-import UserInput, {findReverseMatch} from './user-input';
+import {findReverseMatch} from './composer/useReverseSearch';
+import UserInput from './user-input';
 import {getClosestConfigFile} from '../config/index';
 import {promptHistory} from '../prompt-history';
 
