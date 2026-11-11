@@ -561,3 +561,48 @@ test('onTurnRecorded is told the recorded assistant message', async t => {
 	// An empty turn records nothing.
 	t.deepEqual(recorded, [{content: undefined, compacted: false}]);
 });
+
+test('toolResultMessages shapes every tool result written to history', async t => {
+	const unknown: Reply = {
+		choices: [
+			{
+				message: {
+					role: 'assistant',
+					content: '',
+					tool_calls: [{id: 'x', function: {name: 'nope', arguments: {}}}],
+				},
+			},
+		],
+	};
+	const {run, history} = setup([call('a'), unknown, text('done')], {
+		toolResultMessages: results =>
+			results.map(result => ({
+				role: 'tool' as const,
+				content: `shaped: ${result.content}`,
+				tool_call_id: result.tool_call_id,
+				name: result.name,
+			})),
+	});
+	await run();
+	const tools = history().filter(m => m.role === 'tool');
+	t.deepEqual(
+		tools.map(m => m.content),
+		['shaped: ok', 'shaped: Unknown tool: nope'],
+	);
+});
+
+test('onEmptyRetry is awaited before the nudge is recorded', async t => {
+	const order: string[] = [];
+	let historyAtRetry = -1;
+	const {run, history} = setup([text(''), text('done')], {
+		onEmptyRetry: async () => {
+			await new Promise(resolve => setTimeout(resolve, 5));
+			historyAtRetry = history().length;
+			order.push('retry');
+		},
+	});
+	await run();
+	t.deepEqual(order, ['retry']);
+	t.is(historyAtRetry, 1);
+	t.is(history()[1].role, 'user');
+});

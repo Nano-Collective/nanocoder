@@ -1,10 +1,14 @@
 import React from 'react';
+import {
+	NO_RESPONSE_MESSAGE,
+	runTurnEngine,
+	type ToolExecutionOutcome,
+} from '@/agent-loop/turn-engine';
 import type {ConversationStateManager} from '@/app/utils/conversation-state';
 import {
 	createWalkthroughLifecycle,
 	observeSuccessfulLifecycleTool,
 	takeWalkthroughFallback,
-	type WalkthroughLifecycle,
 } from '@/artifacts/walkthrough-lifecycle';
 import AssistantMessage from '@/components/assistant-message';
 import AssistantReasoning from '@/components/assistant-reasoning';
@@ -21,11 +25,6 @@ import {CheckpointManager} from '@/services/checkpoint-manager';
 import {runLifecycleHooks, runPreToolUseGate} from '@/services/lifecycle-hooks';
 import {getProjectRoot} from '@/services/session-cwd';
 import {generateKey} from '@/session/key-generator';
-import {
-	parseToolCalls,
-	stripEmbeddedToolCallText,
-	stripThinkTags,
-} from '@/tool-calling/index';
 import {resolveToolApproval} from '@/tools/approval-policy';
 import {loadTasks} from '@/tools/tasks/storage';
 import type {Task} from '@/tools/tasks/types';
@@ -35,6 +34,7 @@ import {getTuneToolMode, type TuneConfig} from '@/types/config';
 import type {
 	ApiCallRecord,
 	ApiUsageSnapshot,
+	LLMChatResponse,
 	LLMClient,
 	Message,
 	ModeOverrides,
@@ -42,12 +42,10 @@ import type {
 	ToolResult,
 } from '@/types/core';
 import {buildResponseUsageBounded} from '@/usage/response-usage';
-import {maybeAutoCompact} from '@/utils/auto-compact';
 import {buildCompletionNote} from '@/utils/completion-note';
 import {compressionBackup} from '@/utils/compression-backup';
 import {formatError} from '@/utils/error-formatter';
 import {MessageBuilder} from '@/utils/message-builder';
-import {capMessagesForModel} from '@/utils/message-capping';
 import {compressMessages} from '@/utils/message-compression';
 import {infoMsg} from '@/utils/message-factory';
 import {logWarning} from '@/utils/message-queue';
@@ -64,11 +62,7 @@ import {
 import {signalToolConfirm} from '@/utils/tool-confirm-queue';
 import {displayCompactCountsSummary} from '@/utils/tool-result-display';
 import {closeAllDiffsInVSCode} from '@/vscode/index';
-import {
-	buildAbandonedTurnMessages,
-	filterValidToolCalls,
-} from '../utils/tool-filters';
-import {computeToolCallSignature} from '../utils/tool-signature';
+import {filterValidToolCalls} from '../utils/tool-filters';
 import {buildAutoDiagnosticsMessage} from './auto-diagnostics';
 import {
 	displayExecutedTool,
@@ -175,32 +169,6 @@ interface ProcessAssistantResponseParams {
 	onPrivacyEvent?: (scrubbedDelta: number) => void;
 	onToolExecuted?: (toolName: string) => void;
 	onFinalAssistantText?: (content: string) => void;
-	// Number of consecutive empty assistant turns that have already been
-	// nudged in this loop. The empty-response branch increments and
-	// recurses; every other recursion site resets to 0.
-	emptyTurnCount?: number;
-	// Number of consecutive malformed tool-call self-correction recursions
-	// that have already happened, on any text-parsed path (XML fallback or a
-	// native response that emitted tool-call text). The malformed branch
-	// increments and recurses; every other recursion site resets to 0.
-	malformedRetryCount?: number;
-	// Number of compact-and-retry cycles attempted after exhausting empty-turn
-	// nudges. Once MAX_COMPACT_RETRIES is reached we surface the error.
-	compactRetryCount?: number;
-	// Signature of the tool call(s) executed on the immediately preceding turn.
-	// Used to detect an identical-call loop. The tool-execution continuation
-	// threads it forward; every other recursion site resets it to undefined.
-	lastToolSignature?: string;
-	// How many consecutive turns have emitted the same tool-call signature
-	// within the current window. Reaching the configured repeated-call limit
-	// pauses to ask the user (interactive) or stops with an actionable error
-	// (non-interactive). Resets to 0 when the user grants another window.
-	repeatedToolCallCount?: number;
-	// How many consecutive turns have emitted the same tool-call signature in
-	// total, across every window the user granted. Never reset by a granted
-	// continuation, so user-facing counts report the true repetition streak.
-	repeatedToolCallTotal?: number;
-	walkthroughLifecycle?: WalkthroughLifecycle;
 }
 
 // Module-level flag: show XML fallback notice only once per process lifetime.
@@ -224,14 +192,19 @@ export const resetLastTurnHadReasoning = () => {
 	lastTurnHadReasoning = false;
 };
 
+// How a run ended early from tool execution.
+type TuiStop = 'approval-unavailable' | 'declined' | 'nothing-ran';
+
 /**
  * Main conversation loop that processes assistant responses and handles tool calls.
- * This function orchestrates the entire conversation flow including:
- * - Streaming responses from the LLM
- * - Parsing and validating tool calls
- * - Executing or requesting confirmation for tools
- * - Handling errors and self-correction
- * - Managing the conversation state
+ *
+ * Runs on the shared turn engine (`source/agent-loop/turn-engine.ts`), one
+ * iteration per model round-trip, with the interactive behaviours switched on
+ * through its policy and hooks: text tool calls parsed whenever a turn has no
+ * native ones, `<think>` stripping, the single-tool tune profile, the
+ * repeated-call "continue anyway?" prompt, context-aware empty-turn nudges
+ * and compact-and-retry. This adapter owns everything the user sees:
+ * streaming, the chat queue, confirmations and tool execution.
  */
 export const processAssistantResponse = async (
 	params: ProcessAssistantResponseParams,
@@ -267,12 +240,6 @@ export const processAssistantResponse = async (
 		tune,
 		developmentMode,
 		developmentModeRef,
-		emptyTurnCount = 0,
-		malformedRetryCount = 0,
-		compactRetryCount = 0,
-		lastToolSignature,
-		repeatedToolCallCount = 0,
-		repeatedToolCallTotal = 0,
 		privacySessionMapRef,
 		privacyEnabled = false,
 		onPrivacyEvent,
@@ -280,15 +247,15 @@ export const processAssistantResponse = async (
 		sessionId,
 		workingDirectory,
 	} = params;
-	const walkthroughLifecycle =
-		params.walkthroughLifecycle ?? createWalkthroughLifecycle(messages);
+	const walkthroughLifecycle = createWalkthroughLifecycle(messages);
 
 	const startTime = conversationStartTime ?? Date.now();
 
 	// Agent-loop retry limits: configurable via `nanocoder.retries` in
 	// agents.config.json, falling back to the historical hardcoded caps.
+	const retryLimits = getRetryLimits();
 	const {maxRepeatedToolCalls, maxEmptyTurns, maxMalformedRetries} =
-		getRetryLimits();
+		retryLimits;
 
 	// Helper to flush live task list to the static chat queue
 	const flushLiveTaskList = async () => {
@@ -307,7 +274,8 @@ export const processAssistantResponse = async (
 		onSetLiveTaskList(null);
 	};
 
-	// Track whether any task tools were executed in this conversation turn
+	// Whether any task tools were executed in this model turn. Reset at the
+	// start of every turn.
 	let hasLiveTaskUpdates = false;
 
 	// Helper to flush accumulated compact counts to the static chat queue.
@@ -337,50 +305,21 @@ export const processAssistantResponse = async (
 		}
 	};
 
-	// Ensure we have an abort controller for this request
+	// One controller for the whole run, created once: every model call and
+	// tool in it shares this signal, so a single cancel reaches all of them.
 	let controller = abortController;
 	if (!controller) {
 		controller = new AbortController();
 		setAbortController(controller);
 	}
-
-	// Use streaming with callbacks
-	setIsGenerating(true);
-	setStreamingContent('');
-	setStreamingReasoning('');
-	setTokenCount(0);
-	// Drop any prior empty-response retry counter from the live area so the
-	// streaming UI for this turn renders unobstructed. The counter is only
-	// meant to be visible briefly between calls on consecutive empties.
-	setLiveComponent?.(null);
+	const signal = controller.signal;
 
 	// Build mode overrides for non-interactive mode and tune settings
 	const modelParameters = tune?.enabled ? tune.modelParameters : undefined;
-	const nonInteractiveAlwaysAllow = nonInteractiveMode
-		? (getAppConfig().alwaysAllow ?? [])
-		: [];
-	const modeOverrides: ModeOverrides = {
-		nonInteractiveMode,
-		nonInteractiveAlwaysAllow,
-		modelParameters,
-		privacySessionMapRef,
-		privacyEnabled,
-		nativeToolsDisabled: getTuneToolMode(tune) !== 'native',
-	};
 
-	// Get effective tools — ToolManager is the single authority for
-	// availability (mode + profile filtering) and approval policy
-	const availableNames =
-		toolManager?.getAvailableToolNames(
-			tune,
-			developmentMode,
-			undefined,
-			currentModel,
-		) ?? [];
-	const tools = toolManager ? toolManager.getFilteredTools(availableNames) : {};
 	// What the mode offers right now. Shift+Tab can change the mode while a turn
-	// is running, so a call is checked against this rather than the list above,
-	// which is only what this request offered.
+	// is running, so a call is checked against this rather than the list the
+	// request offered.
 	const liveAvailableNames = () =>
 		toolManager?.getAvailableToolNames(
 			tune,
@@ -396,407 +335,39 @@ export const processAssistantResponse = async (
 			: undefined;
 	};
 
-	let streamedContent = '';
-	let streamedReasoning = '';
-
-	// Apply maxMessages cap: limit how many history messages are sent to the
-	// model. This is a model-context concern only - the full history is always
-	// written to disk by useSessionAutosave. The system message is prepended
-	// outside the slice and is never counted against the limit.
-	const sessionConfig = getAppConfig().sessions;
-	const maxMessages = sessionConfig?.maxMessages ?? 1000;
-	const cappedMessages = capMessagesForModel(messages, maxMessages);
-
-	const result = await client.chat(
-		[systemMessage, ...cappedMessages],
-		tools,
-		{
-			onToken: (token: string) => {
-				streamedContent += token;
-				setStreamingContent(streamedContent);
-				// Feed the in-flight reply into the context-usage estimate so the
-				// `~%` indicator climbs as the model writes, instead of only
-				// stepping up once the finished message is committed to history.
-				setTokenCount(estimateTokens(streamedContent));
-			},
-			onReasoningToken: (token: string) => {
-				streamedReasoning += token;
-				setStreamingReasoning(streamedReasoning);
-			},
-			onPrivacyEvent,
-		},
-		controller.signal,
-		modeOverrides,
-	);
-
-	if (!result || !result.choices || result.choices.length === 0) {
-		throw new Error('No response received from model');
-	}
-
-	const message = result.choices[0].message;
-	const toolCalls = message.tool_calls || null;
-	// Strip <think> tags unconditionally. Providers that emit reasoning via the
-	// SDK protocol (Anthropic, OpenAI o-series, Ollama with thinking) never put
-	// these in text, so this is a no-op for them. Providers that stream <think>
-	// as raw text (generic OpenAI-compat serving GLM/Kimi/Qwen) would otherwise
-	// leak the tokens into the assistant message and conversation history.
-	const fullContent = stripThinkTags(message.content || '');
-	const fullReasoning = message.reasoning;
-
-	// Tool extraction is layered:
-	//   - XML fallback path (toolsDisabled): parse text for XML/JSON tool calls.
-	//   - Native path with native tool calls: trust the SDK protocol, but strip
-	//     any echoed XML/JSON tool-call text from the message ("Ghost Echo")
-	//     so it doesn't leak into the UI or conversation history.
-	//   - Native path with NO native tool calls: still parse text for XML/JSON
-	//     tool calls. Open-weights models marketed as native-tool-capable
-	//     sometimes regress and emit text-based tool calls instead. Without
-	//     this fallback the agent stalls. Malformed shapes return success:false
-	//     and feed the existing self-correction loop.
-	const hasNativeToolCalls = !!toolCalls && toolCalls.length > 0;
-	let parseResult: ReturnType<typeof parseToolCalls>;
-	if (result.toolsDisabled) {
-		parseResult = parseToolCalls(fullContent);
-	} else if (hasNativeToolCalls) {
-		parseResult = {
-			success: true as const,
-			toolCalls: [],
-			cleanedContent: stripEmbeddedToolCallText(fullContent),
-		};
-	} else {
-		parseResult = parseToolCalls(fullContent);
-	}
-
-	// Notify the user once per session when the XML fallback path is active
-	if (result.toolsDisabled && !hasShownFallbackNotice) {
-		hasShownFallbackNotice = true;
-		addToChatQueue(
-			<InfoMessage
-				key={generateKey('xml-fallback-notice')}
-				message="Model does not support native tool calling. Using XML fallback."
-				hideBox={true}
-			/>,
-		);
-	}
-
-	// Check for malformed tool calls and send error back to model for
-	// self-correction. Reachable from any text-parsed path: the XML fallback,
-	// and native responses that emit tool-call text instead of native calls.
-	if (!parseResult.success) {
-		// Cap malformed-retry recursion. Without this, a model stuck producing
-		// bad XML loops forever, appending two messages per iteration, until
-		// Node's heap exhausts.
-		if (malformedRetryCount >= maxMalformedRetries) {
-			await flushAll();
-			markRunFailed('malformed-tool-giveup');
-			addToChatQueue(
-				<ErrorMessage
-					key={generateKey('malformed-tool-giveup')}
-					message={`Model produced malformed tool calls ${maxMalformedRetries + 1} time${maxMalformedRetries === 0 ? '' : 's'} in a row and cannot self-correct. Try rephrasing the request or switching models.`}
-					hideBox={true}
-				/>,
-			);
-			setIsGenerating(false);
-			if (onConversationComplete) {
-				onConversationComplete();
-			}
-			return;
-		}
-
-		const errorContent = `${parseResult.error}\n\n${parseResult.examples}`;
-
-		// Display error to user
-		addToChatQueue(
-			<ErrorMessage
-				key={generateKey('malformed-tool')}
-				message={errorContent}
-				hideBox={true}
-			/>,
-		);
-
-		// Create assistant message with the malformed content (so model knows what it said)
-		const assistantMsgWithError: Message = {
-			role: 'assistant',
-			content: fullContent,
-		};
-
-		// Create a user message with the error feedback for the model
-		const errorFeedbackMessage: Message = {
-			role: 'user',
-			content: `Your previous response contained a malformed tool call. ${errorContent}\n\nPlease try again using the correct format.`,
-		};
-
-		// Update messages and continue conversation loop for self-correction
-		const malformedBuilder = new MessageBuilder(messages);
-		malformedBuilder
-			.addAssistantMessage(assistantMsgWithError)
-			.addMessage(errorFeedbackMessage);
-		const updatedMessagesWithError = malformedBuilder.build();
-		setMessages(updatedMessagesWithError);
-
-		// Continue the main conversation loop with error message as context
-		await processAssistantResponse({
-			...params,
-			abortController: controller,
-			messages: updatedMessagesWithError,
-			conversationStartTime: startTime,
-			emptyTurnCount: 0,
-			malformedRetryCount: malformedRetryCount + 1,
-			lastToolSignature: undefined,
-			repeatedToolCallCount: 0,
-			repeatedToolCallTotal: 0,
-			walkthroughLifecycle,
-		});
-		return;
-	}
-
-	const parsedToolCalls = parseResult.toolCalls;
-	const cleanedContent = parseResult.cleanedContent;
-
-	// Combine native tool calls with any parsed from content (XML fallback path)
-	// Native and parsed are mutually exclusive: native comes from tool-calling models,
-	// parsed comes from non-tool-calling models using XML in text
-	let allToolCalls = [...(toolCalls || []), ...parsedToolCalls];
-
-	// Single-tool enforcement: truncate to first tool call
-	// Active when tune profile implies single-tool (e.g. minimal profile)
+	// Single-tool enforcement: active when the tune profile implies a single
+	// tool per turn (e.g. the minimal profile).
 	const enforceSingleTool =
 		tune?.enabled && isSingleToolProfile(tune.toolProfile, currentModel);
-	if (enforceSingleTool && allToolCalls.length > 1) {
-		allToolCalls = allToolCalls.slice(0, 1);
-	}
 
-	// Clear streaming content and add static message in one go so the
-	// live StreamingMessage disappears at the same time the static
-	// AssistantMessage appears, avoiding a visual jump.
-	setStreamingContent('');
-	setStreamingReasoning('');
-	// The reply is about to be committed to history (counted by
-	// calculateTokenBreakdown). Drop the in-flight streaming estimate so the
-	// context-usage figure doesn't count this turn's text twice.
-	setTokenCount(0);
-
-	// Flush accumulated compact counts ONLY when this turn emits narrative
-	// text — a natural break in a run of tool calls. Reasoning alone does NOT
-	// break the run: thinking models emit reasoning on every turn, and agentic
-	// flows often run one tool per turn, so flushing on reasoning would stack
-	// "Ran 1 command" / "Wrote 1 file" lines instead of combining them.
-	// Letting counts accumulate across reasoning-only turns means the summary
-	// combines (e.g. "Made 4 edits" instead of four stacked "Made 1 edit"
-	// boxes). Residual counts are flushed at end of conversation / before
-	// confirmation below.
-	if (cleanedContent.trim()) {
-		await flushAll();
-	}
-	if (fullReasoning) {
-		// Despite reasoning stream typically finishing before text stream,
-		// reasoning is still added to chat queue here to give correct
-		// message order with regards to tool calling
-		addToChatQueue(
-			<AssistantReasoning
-				key={generateKey('assistant')}
-				reasoning={fullReasoning}
-				expand={reasoningExpandedRef?.current ?? false}
-			/>,
-		);
-	}
-	lastTurnHadReasoning = Boolean(fullReasoning);
-	if (cleanedContent.trim()) {
-		// Provider-reported tokens + estimated cost for this API call, shown
-		// as the footer of the message. The lookup is bounded: token counts
-		// are known synchronously and always render; the cost segment joins
-		// only if (memoized) pricing resolves within the ceiling, so a cold
-		// or offline models.dev fetch can never hold up the message swap.
-		// Skipped entirely when the footer is off, so the pricing lookup
-		// never runs for users who opted out.
-		// Read per message rather than snapshotting at launch, so toggling the
-		// setting mid-session takes effect on the very next response.
-		const showUsageFooter = getShowUsageFooter();
-		const responseUsage = showUsageFooter
-			? await buildResponseUsageBounded(result.usage, currentModel)
-			: undefined;
-		addToChatQueue(
-			<AssistantMessage
-				key={generateKey('assistant')}
-				message={cleanedContent}
-				model={currentModel}
-				usage={responseUsage}
-				showUsageFooter={showUsageFooter}
-			/>,
-		);
-	}
-
-	const partition = filterValidToolCalls(
-		allToolCalls,
-		toolManager,
-		liveAvailableNames(),
-	);
-	const {validToolCalls, errorResults} = partition;
-	const {emittedToolCalls, resultsForAbandonedTurn} =
-		buildAbandonedTurnMessages(partition);
-
-	// Add assistant message to conversation history only if it has content or tool_calls
-	// Empty assistant messages cause API errors: "Assistant message must have either content or tool_calls"
-	const assistantMsg: Message = {
-		role: 'assistant',
-		content: cleanedContent,
-		tool_calls: emittedToolCalls.length > 0 ? emittedToolCalls : undefined,
-		reasoning: fullReasoning,
+	// The conversation as this run writes it. Every write goes to app state.
+	let history = messages;
+	const setHistory = (next: Message[]) => {
+		history = next;
+		setMessages(next);
 	};
+	const toolResultMessages = (results: ToolResult[]) =>
+		new MessageBuilder([]).addToolResults(results).build();
 
-	const hasValidAssistantMessage =
-		cleanedContent.trim() || emittedToolCalls.length > 0;
+	// Per-turn state, reset when a turn starts.
+	let turnStartMessages = messages;
+	let availableNames: string[] = [];
+	let streamedContent = '';
+	let streamedReasoning = '';
+	let fullReasoning: string | undefined;
+	let turnUsage: LLMChatResponse['usage'];
+	let rejectedToolCalls: ToolCall[] = [];
+	let recordedToolCalls: ToolCall[] = [];
 
-	// Build updated messages array using MessageBuilder
-	const builder = new MessageBuilder(messages);
-
-	// Add the final assistant message if it has content or tool calls
-	if (hasValidAssistantMessage) {
-		builder.addAssistantMessage(assistantMsg);
-
-		// Update conversation state with assistant message
-		conversationStateManager.current.updateAssistantMessage(assistantMsg);
-	}
-
-	// Build the final messages array. `let` (not const) because auto-compact
-	// below may replace it with the compressed array — downstream tool-result
-	// builders and recursive calls must use the compressed messages, otherwise
-	// compression is silently undone the moment we recurse.
-	let updatedMessages = builder.build();
-
-	// Update messages state once with all changes
-	if (hasValidAssistantMessage) {
-		setMessages(updatedMessages);
-	}
-
-	// Check for auto-compact after messages are updated
-	// Note: This is awaited to prevent race conditions where setMessages(compressed)
-	// could overwrite newer state updates that happen while compression is in progress.
-	// maybeAutoCompact never throws: a failed compaction leaves history as is.
-	//
-	// Gate on the same capped view the next request sends, as `run`/--plain and
-	// subagents do, so the threshold is not measured against rows the cap
-	// already drops from the request.
-	let compactionOccurred = false;
-	const compactGateInput = capMessagesForModel(updatedMessages, maxMessages);
-	const compacted = await maybeAutoCompact(
-		compactGateInput,
-		systemMessage,
-		client,
-		// Native tool definitions occupy context out-of-band. Pass them so
-		// the gate matches the ctx% indicator; under XML/JSON fallback they
-		// already live inside systemMessage, so pass nothing to avoid
-		// double-counting.
-		result.toolsDisabled ? undefined : tools,
-		{
-			signal: controller.signal,
-			onNotify: notification => {
-				addToChatQueue(infoMsg(notification, 'auto-compact-notification'));
-			},
-			// The TUI tracks the active provider/model in app state; use those
-			// rather than re-deriving them from the client, which may lag a
-			// pending switch.
-			provider: currentProvider,
-			model: currentModel,
-		},
-	);
-
-	// Only adopt the result when compaction actually ran. Otherwise
-	// maybeAutoCompact hands back the capped view it was given, and taking it
-	// would discard history the cap only meant to hide from one request.
-	if (compacted !== compactGateInput) {
-		updatedMessages = compacted;
-		setMessages(updatedMessages);
-		setTokenCount(0);
-		compactionOccurred = true;
-	}
-
-	// Escape while the reply was finishing or while compaction ran: don't go
-	// on to execute this turn's tool calls. Pair them with cancellation
-	// results so the saved history keeps the 1:1 tool_call/result mapping,
-	// then unwind the same way an abort during the LLM call does.
-	if (controller.signal.aborted) {
-		if (emittedToolCalls.length > 0) {
-			const abortBuilder = new MessageBuilder(updatedMessages);
-			abortBuilder.addToolResults(createCancellationResults(emittedToolCalls));
-			setMessages(abortBuilder.build());
-		}
-		throw new Error('Operation was cancelled');
-	}
-
-	// Record the API-reported usage for the context indicator. The snapshot is
-	// keyed to the post-response message count so the indicator can fall back
-	// to estimation once newer messages make it stale. After compaction the
-	// reported usage describes the pre-compaction context, so clear it (null)
-	// and let estimation recompute against the compressed history.
-	if (setLastApiUsage) {
-		const usage = result.usage;
-		// Store the snapshot when the provider reported any usable token field
-		// (input, output, or a lump-sum total). The indicator decides how to use
-		// it; a non-finite or wholly-empty report is treated as "no usage".
-		const hasReportedUsage =
-			!compactionOccurred &&
-			!!usage &&
-			(Number.isFinite(usage.inputTokens) ||
-				Number.isFinite(usage.outputTokens) ||
-				Number.isFinite(usage.totalTokens) ||
-				Number.isFinite(usage.cacheReadTokens) ||
-				Number.isFinite(usage.cacheWriteTokens));
-		setLastApiUsage(
-			hasReportedUsage
-				? {...usage, atMessageCount: updatedMessages.length}
-				: null,
-		);
-
-		// Record a per-call history entry for session cost tracking
-		if (onApiCallComplete && hasReportedUsage) {
-			onApiCallComplete({
-				provider: currentProvider,
-				model: currentModel,
-				inputTokens: usage.inputTokens,
-				outputTokens: usage.outputTokens,
-				totalTokens: usage.totalTokens,
-				cacheReadTokens: usage.cacheReadTokens,
-				cacheWriteTokens: usage.cacheWriteTokens,
-				timestamp: Date.now(),
-			});
-		}
-	}
-
-	// Clear streaming content (but don't set isGenerating=false yet —
-	// we may still need to execute tools and recurse)
-	setStreamingContent('');
-	setStreamingReasoning('');
-
-	// This turn's repeated-call streak, computed over every call the model
-	// emitted — unknown tools included, so a model stuck calling a nonexistent
-	// tool trips the same cap as one re-running a real call.
-	//
-	// Keyed on emittedToolCalls rather than allToolCalls: filterValidToolCalls
-	// silently discards calls with no id or no name, and those never reach the
-	// model's history. Including them would let a stray empty call break an
-	// otherwise identical streak (`[A]` then `[A, <empty>]` reads as a change).
-	const currentToolSignature = computeToolCallSignature(emittedToolCalls);
-	const currentRepeatedCount =
-		currentToolSignature && currentToolSignature === lastToolSignature
-			? repeatedToolCallCount + 1
-			: 1;
-	// Streak carried into the recursive continuation below. Reset to 0 when
-	// the user grants another window at the limit prompt, so the re-prompt
-	// cadence stays one full window rather than firing every turn.
-	let repeatedCountForNextTurn = currentRepeatedCount;
-	// True consecutive-repeat streak, never reset by a granted window, so
-	// user-facing counts don't restart at the limit after each continue.
-	const currentRepeatedTotal =
-		currentToolSignature && currentToolSignature === lastToolSignature
-			? repeatedToolCallTotal + 1
-			: 1;
+	// Per-run state.
+	let compactRetryCount = 0;
+	let repeatedToolCallTotal = 0;
+	let finalContent = '';
 
 	// When the repeated-call streak hits the cap: pause and ask in an
 	// interactive session (the repetition may be legitimate, e.g. polling a
 	// long-running job, and the user is the only one who can tell). Headless
 	// and non-interactive runs have nobody to ask, so they never continue.
-	// Returns true when the user granted another window.
 	const promptContinueRepeatedCalls = async (): Promise<boolean> => {
 		const liveMode = developmentModeRef?.current ?? developmentMode;
 		await flushAll();
@@ -811,20 +382,18 @@ export const processAssistantResponse = async (
 		// question nobody is left to answer.
 		const answer = await signalQuestion(
 			{
-				question: `The model has repeated the same tool call ${currentRepeatedTotal} times in a row without making progress. It may be stuck in a loop that drains tokens. Continue anyway?`,
+				question: `The model has repeated the same tool call ${repeatedToolCallTotal} times in a row without making progress. It may be stuck in a loop that drains tokens. Continue anyway?`,
 				options: [stopOption, continueOption],
 				allowFreeform: false,
 				questionType: 'confirmation',
 			},
-			controller.signal,
+			signal,
 		);
 		if (answer !== continueOption) {
 			return false;
 		}
-		// User granted another window: reset the streak so the next
-		// maxRepeatedToolCalls identical calls prompt again instead of
-		// stopping, then let the caller resume this turn.
-		repeatedCountForNextTurn = 0;
+		// The engine grants another window, so the next maxRepeatedToolCalls
+		// identical calls prompt again instead of stopping.
 		setIsGenerating(true);
 		addToChatQueue(
 			<InfoMessage
@@ -843,7 +412,7 @@ export const processAssistantResponse = async (
 		addToChatQueue(
 			<ErrorMessage
 				key={generateKey('tool-loop-detected')}
-				message={`Model repeated the same tool call ${currentRepeatedTotal} times in a row without making progress — stopping to avoid a loop. Try rephrasing the request, breaking it into smaller steps, or switching models.`}
+				message={`Model repeated the same tool call ${repeatedToolCallTotal} times in a row without making progress — stopping to avoid a loop. Try rephrasing the request, breaking it into smaller steps, or switching models.`}
 				hideBox={true}
 			/>,
 		);
@@ -853,82 +422,12 @@ export const processAssistantResponse = async (
 		}
 	};
 
-	// Handle error results for rejected calls: non-existent tools, and calls
-	// whose arguments could not be parsed
-	if (errorResults.length > 0) {
-		// Show the user a concise notice. The full recovery hint (including the
-		// list of available tools) lives in the error result and is sent to the
-		// MODEL via addToolResults below — it would be noise in the chat.
-		for (const toolCall of partition.rejectedToolCalls) {
-			addToChatQueue(
-				<ErrorMessage
-					key={generateKey(`rejected-tool-${toolCall.id}`)}
-					message={
-						toolCall.argumentsError === undefined
-							? `Model called an unavailable tool ("${toolCall.function.name}") — asking it to retry with a valid tool.`
-							: `Model sent invalid arguments for "${toolCall.function.name}" (${toolCall.argumentsError}) — asking it to retry.`
-					}
-					hideBox={true}
-				/>,
-			);
-		}
-
-		// Send error results back to model for self-correction
-		const errorBuilder = new MessageBuilder(updatedMessages);
-		errorBuilder.addToolResults(resultsForAbandonedTurn);
-		const updatedMessagesWithError = errorBuilder.build();
-		setMessages(updatedMessagesWithError);
-
-		// Rejected-call turns count toward the repeated-call streak, so a model
-		// stuck on a nonexistent tool or unparsable arguments cannot recurse
-		// unbounded. The error and aborted results above are already paired in
-		// history, so a stop here keeps the 1:1 tool-call/result mapping intact.
-		if (currentRepeatedCount >= maxRepeatedToolCalls) {
-			const continueAnyway = await promptContinueRepeatedCalls();
-			if (!continueAnyway) {
-				stopForRepeatedCalls();
-				return;
-			}
-		}
-
-		// Continue the main conversation loop with error messages as context
-		await processAssistantResponse({
-			...params,
-			abortController: controller,
-			messages: updatedMessagesWithError,
-			conversationStartTime: startTime,
-			emptyTurnCount: 0,
-			malformedRetryCount: 0,
-			lastToolSignature: currentToolSignature,
-			repeatedToolCallCount: repeatedCountForNextTurn,
-			repeatedToolCallTotal: currentRepeatedTotal,
-			walkthroughLifecycle,
-		});
-		return;
-	}
-
-	// Handle tool calls if present - this continues the loop
-	if (validToolCalls && validToolCalls.length > 0) {
-		// Loop detection: if the model re-issues the exact same tool call(s) it
-		// made last turn, it is almost certainly stuck (a small model re-running
-		// an identical failing command, or repeatedly reading the same file).
-		// The streak is computed above (shared with the unknown-tool branch);
-		// once the cap is hit, pause and ask — or stop with an actionable error
-		// when there is nobody to ask.
-		if (currentRepeatedCount >= maxRepeatedToolCalls) {
-			const continueAnyway = await promptContinueRepeatedCalls();
-			if (!continueAnyway) {
-				// Keep the AI SDK's 1:1 tool-call/result mapping intact: the assistant
-				// message with these tool_calls is already in history, so pair each
-				// with a cancellation result before stopping.
-				const loopBuilder = new MessageBuilder(updatedMessages);
-				loopBuilder.addToolResults(createCancellationResults(validToolCalls));
-				setMessages(loopBuilder.build());
-				stopForRepeatedCalls();
-				return;
-			}
-		}
-
+	// One turn's valid tool calls: hook and plugin gates, approval routing,
+	// the auto-approved batch, then interactive confirmation. Returns the
+	// results to record, or stops the run (approval unavailable, declined).
+	const executeTools = async (
+		validToolCalls: ToolCall[],
+	): Promise<ToolExecutionOutcome<TuiStop>> => {
 		// The SDK never auto-executes tools (execute is stripped). We evaluate
 		// needsApproval ourselves, then run every tool through one routine that
 		// gates each call: auto-approved tools execute immediately, the rest
@@ -1068,7 +567,7 @@ export const processAssistantResponse = async (
 					if (!architectCheckpointState.created) {
 						const checkpointMetadata = await checkpointManager.saveCheckpoint(
 							`architect-${new Date().toISOString().replace(/[:.]/g, '-')}`,
-							messages,
+							turnStartMessages,
 							currentProvider,
 							currentModel,
 							mutationPaths,
@@ -1104,7 +603,7 @@ export const processAssistantResponse = async (
 				{
 					...displayOptions,
 					setLiveComponent,
-					signal: controller.signal,
+					signal: signal,
 					executionContext: {sessionId, workingDirectory},
 					beforeExecute: async toolCall => {
 						// A mode switch since this batch was classified can hide the
@@ -1171,23 +670,18 @@ export const processAssistantResponse = async (
 					hideBox={true}
 				/>,
 			);
-			const builder = new MessageBuilder(updatedMessages);
 			// The assistant message already announces confirmTools' tool_calls;
 			// pair each with a result so the saved history keeps the
 			// provider-required 1:1 call/result mapping.
-			builder.addToolResults([
-				...turnResults,
-				...createApprovalUnavailableResults(confirmTools),
-			]);
-			builder.addMessage({
-				role: 'assistant',
-				content: errorMsg,
-				displayOnly: true,
-			});
-			setMessages(builder.build());
-			setIsGenerating(false);
-			onConversationComplete?.();
-			return;
+			return {
+				kind: 'stop',
+				payload: 'approval-unavailable',
+				results: [
+					...turnResults,
+					...createApprovalUnavailableResults(confirmTools),
+				],
+				messages: [{role: 'assistant', content: errorMsg, displayOnly: true}],
+			};
 		}
 
 		// 3) Interactive confirmation: gate each remaining tool, execute on
@@ -1200,7 +694,7 @@ export const processAssistantResponse = async (
 			const {processToolUse} = await import('@/message-handler');
 			const processToolWithContext = (toolCall: ToolCall) =>
 				processToolUse(toolCall, {
-					abortSignal: controller.signal,
+					abortSignal: signal,
 					sessionId,
 					workingDirectory,
 				});
@@ -1218,11 +712,11 @@ export const processAssistantResponse = async (
 				// other way must also release it - otherwise the loop stays
 				// parked here and the confirmation for a dead turn stays on
 				// screen. An abort settles this as "declined".
-				const approved = await signalToolConfirm({toolCall}, controller.signal);
+				const approved = await signalToolConfirm({toolCall}, signal);
 
 				// Approved, but the turn was cancelled while the prompt was up:
 				// treat it like a decline rather than running the tool.
-				if (!approved || controller.signal.aborted) {
+				if (!approved || signal.aborted) {
 					// Close any VS Code diff previews the formatter opened for the
 					// declined tools (the approve path self-closes post-execution).
 					closeAllDiffsInVSCode();
@@ -1237,14 +731,7 @@ export const processAssistantResponse = async (
 							hideBox={true}
 						/>,
 					);
-					const builder = new MessageBuilder(updatedMessages);
-					builder.addToolResults(turnResults);
-					setMessages(builder.build());
-					// The turn ends here, so say so: without this the app stays
-					// "mid-conversation" and never drains messages queued while
-					// the prompt was up.
-					onConversationComplete?.();
-					return;
+					return {kind: 'stop', payload: 'declined', results: turnResults};
 				}
 
 				// Approved: execute + display through the same primitives the auto
@@ -1256,7 +743,7 @@ export const processAssistantResponse = async (
 					toolManager,
 					processToolWithContext,
 					setLiveComponent,
-					controller.signal,
+					signal,
 				);
 				turnResults.push(execution.result);
 				if (!execution.result.isError) {
@@ -1276,7 +763,7 @@ export const processAssistantResponse = async (
 				// path), surfacing as "Interrupted by user.". Cancel the tools we
 				// never reached so the saved history keeps the provider-required
 				// 1:1 tool_call/result pairing.
-				if (controller.signal.aborted) {
+				if (signal.aborted) {
 					turnResults.push(
 						...createCancellationResults(confirmTools.slice(i + 1)),
 					);
@@ -1286,78 +773,366 @@ export const processAssistantResponse = async (
 		}
 
 		// 4) Feed all results back to the model and continue the loop.
-		if (turnResults.length > 0) {
-			let autoDiagnosticsMessage: Message | null = null;
-			if (availableNames.includes('lsp_get_diagnostics')) {
-				const {processToolUse} = await import('@/message-handler');
-				autoDiagnosticsMessage = await buildAutoDiagnosticsMessage(
-					validToolCalls,
-					turnResults,
-					processToolUse,
-				);
-			}
-			const builder = new MessageBuilder(updatedMessages);
-			builder.addToolResults(turnResults);
-			if (autoDiagnosticsMessage) {
-				builder.addMessage(autoDiagnosticsMessage);
-			}
-			const nextMessages = builder.build();
-			setMessages(nextMessages);
-			await processAssistantResponse({
-				...params,
-				// Carry the resolved controller forward. params.abortController can
-				// be a stale (often null) closure value, which would make this
-				// continuation mint a brand-new controller — so a cancel that
-				// aborted THIS turn's controller wouldn't stop the next LLM call
-				// ("Cancelling…" with no effect until a second press).
-				abortController: controller,
-				messages: nextMessages,
-				conversationStartTime: startTime,
-				emptyTurnCount: 0,
-				malformedRetryCount: 0,
-				lastToolSignature: currentToolSignature,
-				repeatedToolCallCount: repeatedCountForNextTurn,
-				repeatedToolCallTotal: currentRepeatedTotal,
-				walkthroughLifecycle,
-			});
-			return;
+		if (turnResults.length === 0) {
+			return {kind: 'stop', payload: 'nothing-ran'};
 		}
-	}
+		let autoDiagnosticsMessage: Message | null = null;
+		if (availableNames.includes('lsp_get_diagnostics')) {
+			const {processToolUse} = await import('@/message-handler');
+			autoDiagnosticsMessage = await buildAutoDiagnosticsMessage(
+				validToolCalls,
+				turnResults,
+				processToolUse,
+			);
+		}
+		return {
+			kind: 'continue',
+			results: turnResults,
+			messages: autoDiagnosticsMessage ? [autoDiagnosticsMessage] : [],
+		};
+	};
 
-	// If no tool calls, the conversation naturally ends here
-	// BUT: if there's ALSO no content, that's likely an error - the model should have said something
-	// Auto-reprompt to help the model continue
-	if (validToolCalls.length === 0 && !cleanedContent.trim()) {
-		// Cap consecutive empty turns. Without this, a model that keeps
-		// returning nothing (common with GPT-5 reasoning that exhausts the
-		// token budget on thinking) would loop forever.
-		if (emptyTurnCount >= maxEmptyTurns) {
-			setLiveComponent?.(null);
-			// If we still have compact-and-retry budget, mechanically compress
-			// the context and nudge the model to continue instead of giving up
-			// immediately. This handles the common case where the model is
-			// exhausting its token budget on reasoning.
-			if (compactRetryCount < MAX_COMPACT_RETRIES) {
+	const result = await runTurnEngine<TuiStop>({
+		client,
+		signal,
+		// No turn ceiling: the user is there to stop a run.
+		maxTurns: Number.POSITIVE_INFINITY,
+		retryLimits,
+		policy: {
+			// Open-weights models marketed as native-tool-capable sometimes
+			// regress and emit text-based tool calls instead. Without this
+			// fallback the agent stalls.
+			textToolCalls: 'whenever-no-native',
+			// Providers that emit reasoning via the SDK protocol never put
+			// <think> in text, so this is a no-op for them. Providers that
+			// stream it as raw text would otherwise leak it into history.
+			stripThinkTags: true,
+			maxToolCallsPerTurn: enforceSingleTool ? 1 : undefined,
+			// filterValidToolCalls discards calls with no id or name, and those
+			// never reach the model's history. Including them would let a stray
+			// empty call break an otherwise identical streak.
+			repeatSignature: 'emitted',
+			// The client raises the abort on the next request; only the check
+			// after compaction (which records cancellation results) runs here.
+			abortBetweenTurns: false,
+			truncatedTurnGuard: false,
+		},
+		adapter: {
+			history: {get: () => history, set: setHistory},
+			getSystemMessage: () => systemMessage,
+			prepareTurn: () => {
+				turnStartMessages = history;
+				hasLiveTaskUpdates = false;
+				streamedContent = '';
+				streamedReasoning = '';
+				fullReasoning = undefined;
+				turnUsage = undefined;
+				rejectedToolCalls = [];
+				recordedToolCalls = [];
+
+				// Use streaming with callbacks
+				setIsGenerating(true);
+				setStreamingContent('');
+				setStreamingReasoning('');
+				setTokenCount(0);
+				// Drop any prior empty-response retry counter from the live area so
+				// the streaming UI for this turn renders unobstructed. The counter
+				// is only meant to be visible briefly between calls on consecutive
+				// empties.
+				setLiveComponent?.(null);
+
+				const nonInteractiveAlwaysAllow = nonInteractiveMode
+					? (getAppConfig().alwaysAllow ?? [])
+					: [];
+				const modeOverrides: ModeOverrides = {
+					nonInteractiveMode,
+					nonInteractiveAlwaysAllow,
+					modelParameters,
+					privacySessionMapRef,
+					privacyEnabled,
+					nativeToolsDisabled: getTuneToolMode(tune) !== 'native',
+				};
+
+				// Get effective tools — ToolManager is the single authority for
+				// availability (mode + profile filtering) and approval policy
+				availableNames =
+					toolManager?.getAvailableToolNames(
+						tune,
+						developmentMode,
+						undefined,
+						currentModel,
+					) ?? [];
+				const tools = toolManager
+					? toolManager.getFilteredTools(availableNames)
+					: {};
+				return {tools, availableNames, modeOverrides};
+			},
+			beginModelCall: () => ({
+				callbacks: {
+					onToken: (token: string) => {
+						streamedContent += token;
+						setStreamingContent(streamedContent);
+						// Feed the in-flight reply into the context-usage estimate so
+						// the `~%` indicator climbs as the model writes, instead of
+						// only stepping up once the finished message is committed.
+						setTokenCount(estimateTokens(streamedContent));
+					},
+					onReasoningToken: (token: string) => {
+						streamedReasoning += token;
+						setStreamingReasoning(streamedReasoning);
+					},
+					onPrivacyEvent,
+				},
+				reasoning: () => fullReasoning,
+			}),
+			onModelResponse: response => {
+				if (!response?.choices?.length) return;
+				fullReasoning = response.choices[0].message.reasoning;
+				turnUsage = response.usage;
+				// Notify the user once per session when the XML fallback path is
+				// active
+				if (response.toolsDisabled && !hasShownFallbackNotice) {
+					hasShownFallbackNotice = true;
+					addToChatQueue(
+						<InfoMessage
+							key={generateKey('xml-fallback-notice')}
+							message="Model does not support native tool calling. Using XML fallback."
+							hideBox={true}
+						/>,
+					);
+				}
+			},
+			onMalformedRetry: ({error, examples}) => {
+				// Display error to user; the engine sends it back to the model for
+				// self-correction.
+				addToChatQueue(
+					<ErrorMessage
+						key={generateKey('malformed-tool')}
+						message={`${error}\n\n${examples}`}
+						hideBox={true}
+					/>,
+				);
+			},
+			onAssistantTurn: async ({content}) => {
+				// Clear streaming content and add static message in one go so the
+				// live StreamingMessage disappears at the same time the static
+				// AssistantMessage appears, avoiding a visual jump.
+				setStreamingContent('');
+				setStreamingReasoning('');
+				// The reply is about to be committed to history (counted by
+				// calculateTokenBreakdown). Drop the in-flight streaming estimate
+				// so the context-usage figure doesn't count this turn's text twice.
+				setTokenCount(0);
+
+				// Flush accumulated compact counts ONLY when this turn emits
+				// narrative text — a natural break in a run of tool calls.
+				// Reasoning alone does NOT break the run: thinking models emit
+				// reasoning on every turn, and agentic flows often run one tool per
+				// turn, so flushing on reasoning would stack "Ran 1 command" /
+				// "Wrote 1 file" lines instead of combining them. Residual counts
+				// are flushed at end of conversation / before confirmation.
+				if (content.trim()) {
+					await flushAll();
+				}
+				if (fullReasoning) {
+					// Despite reasoning stream typically finishing before text
+					// stream, reasoning is still added to chat queue here to give
+					// correct message order with regards to tool calling
+					addToChatQueue(
+						<AssistantReasoning
+							key={generateKey('assistant')}
+							reasoning={fullReasoning}
+							expand={reasoningExpandedRef?.current ?? false}
+						/>,
+					);
+				}
+				lastTurnHadReasoning = Boolean(fullReasoning);
+				if (content.trim()) {
+					// Provider-reported tokens + estimated cost for this API call,
+					// shown as the footer of the message. The lookup is bounded:
+					// token counts are known synchronously and always render; the
+					// cost segment joins only if (memoized) pricing resolves within
+					// the ceiling, so a cold or offline models.dev fetch can never
+					// hold up the message swap. Skipped entirely when the footer is
+					// off. Read per message so toggling the setting mid-session
+					// takes effect on the very next response.
+					const showUsageFooter = getShowUsageFooter();
+					const responseUsage = showUsageFooter
+						? await buildResponseUsageBounded(turnUsage, currentModel)
+						: undefined;
+					addToChatQueue(
+						<AssistantMessage
+							key={generateKey('assistant')}
+							message={content}
+							model={currentModel}
+							usage={responseUsage}
+							showUsageFooter={showUsageFooter}
+						/>,
+					);
+				}
+			},
+			partitionToolCalls: toolCalls =>
+				filterValidToolCalls(toolCalls, toolManager, liveAvailableNames()),
+			onRejectedToolCalls: partition => {
+				rejectedToolCalls = partition.rejectedToolCalls;
+			},
+			toolResultMessages,
+			compactOptions: () => ({
+				onNotify: notification => {
+					addToChatQueue(infoMsg(notification, 'auto-compact-notification'));
+				},
+				// The TUI tracks the active provider/model in app state; use those
+				// rather than re-deriving them from the client, which may lag a
+				// pending switch.
+				provider: currentProvider,
+				model: currentModel,
+			}),
+			onTurnRecorded: ({assistantMessage, compacted}) => {
+				if (assistantMessage) {
+					conversationStateManager.current.updateAssistantMessage(
+						assistantMessage,
+					);
+					recordedToolCalls = assistantMessage.tool_calls ?? [];
+				}
+				if (compacted) {
+					setTokenCount(0);
+				}
+				// Cancelled while the reply was finishing or while compaction ran:
+				// the run unwinds next, with nothing more recorded.
+				if (signal.aborted) {
+					return;
+				}
+
+				// Record the API-reported usage for the context indicator. The
+				// snapshot is keyed to the post-response message count so the
+				// indicator can fall back to estimation once newer messages make
+				// it stale. After compaction the reported usage describes the
+				// pre-compaction context, so clear it (null) and let estimation
+				// recompute against the compressed history.
+				if (setLastApiUsage) {
+					const usage = turnUsage;
+					// Store the snapshot when the provider reported any usable token
+					// field (input, output, or a lump-sum total). The indicator
+					// decides how to use it; a non-finite or wholly-empty report is
+					// treated as "no usage".
+					const hasReportedUsage =
+						!compacted &&
+						!!usage &&
+						(Number.isFinite(usage.inputTokens) ||
+							Number.isFinite(usage.outputTokens) ||
+							Number.isFinite(usage.totalTokens) ||
+							Number.isFinite(usage.cacheReadTokens) ||
+							Number.isFinite(usage.cacheWriteTokens));
+					setLastApiUsage(
+						hasReportedUsage && usage
+							? {...usage, atMessageCount: history.length}
+							: null,
+					);
+
+					// Record a per-call history entry for session cost tracking
+					if (onApiCallComplete && hasReportedUsage && usage) {
+						onApiCallComplete({
+							provider: currentProvider,
+							model: currentModel,
+							inputTokens: usage.inputTokens,
+							outputTokens: usage.outputTokens,
+							totalTokens: usage.totalTokens,
+							cacheReadTokens: usage.cacheReadTokens,
+							cacheWriteTokens: usage.cacheWriteTokens,
+							timestamp: Date.now(),
+						});
+					}
+				}
+
+				// Clear streaming content (but don't set isGenerating=false yet —
+				// we may still need to execute tools and continue)
+				setStreamingContent('');
+				setStreamingReasoning('');
+
+				// Show the user a concise notice for each rejected call (an
+				// unavailable tool, or arguments that could not be parsed). The
+				// full recovery hint (including the list of available tools)
+				// lives in the error result the engine sends the MODEL — it would
+				// be noise in the chat.
+				for (const toolCall of rejectedToolCalls) {
+					addToChatQueue(
+						<ErrorMessage
+							key={generateKey(`rejected-tool-${toolCall.id}`)}
+							message={
+								toolCall.argumentsError === undefined
+									? `Model called an unavailable tool ("${toolCall.function.name}") — asking it to retry with a valid tool.`
+									: `Model sent invalid arguments for "${toolCall.function.name}" (${toolCall.argumentsError}) — asking it to retry.`
+							}
+							hideBox={true}
+						/>,
+					);
+				}
+			},
+			onRepeatedToolCalls: async ({total}) => {
+				repeatedToolCallTotal = total;
+				return (await promptContinueRepeatedCalls()) ? 'continue' : 'stop';
+			},
+			// Pick a nudge that matches the failure mode. A reasoning-only turn
+			// gets a different prompt than a totally silent one — telling the
+			// model "you produced reasoning but no answer" is more actionable
+			// than a generic "continue".
+			emptyTurnNudge: currentHistory => {
+				const lastMessage = currentHistory[currentHistory.length - 1];
+				if (fullReasoning && fullReasoning.trim()) {
+					return 'You produced reasoning but no final response. Please provide your answer based on your reasoning above.';
+				}
+				if (lastMessage?.role === 'tool') {
+					return 'Please provide a summary or response based on the tool results above.';
+				}
+				return 'Please continue with the task.';
+			},
+			onEmptyRetry: async (attempt, nudge) => {
+				// Coalesce auto-nudge notices into a single live counter that
+				// updates in place between turns instead of stacking N
+				// InfoMessages in scrollback. It is cleared when the next turn
+				// starts so the streaming UI for the retry is unobstructed.
+				const total = maxEmptyTurns + 1;
+				setLiveComponent?.(
+					<InfoMessage
+						key="auto-continue-counter"
+						message={`Empty response — retry ${attempt}/${total}: "${nudge}"`}
+						hideBox={true}
+					/>,
+				);
+
+				// Lock any live task panel from the prior turn into scrollback so
+				// the next turn's UI starts clean.
+				await flushAll();
+			},
+			// Out of nudges (common with GPT-5 reasoning that exhausts the token
+			// budget on thinking). If there is compact-and-retry budget left,
+			// mechanically compress the context and nudge the model to continue
+			// instead of giving up immediately.
+			onEmptyTurnsExhausted: async () => {
+				setLiveComponent?.(null);
+				if (compactRetryCount >= MAX_COMPACT_RETRIES) {
+					return undefined;
+				}
 				try {
 					const {createTokenizer} = await import('@/tokenization/index');
 					const tokenizer = createTokenizer(currentProvider, currentModel);
 					// Same observe-only hook and /compact restore point as
-					// auto-compact and /compact, so this compaction is not the one
-					// a pre-compact archive hook or a restore never sees.
+					// auto-compact and /compact, so this compaction is not the one a
+					// pre-compact archive hook or a restore never sees.
 					await runLifecycleHooks('pre-compact', {
-						messageCount: updatedMessages.length,
+						messageCount: history.length,
 					});
-					compressionBackup.storeBackup(updatedMessages);
+					compressionBackup.storeBackup(history);
 					// The system message this turn was sent with, not the
-					// process-wide last-built prompt, so the compressor measures
-					// and preserves what the model actually sees.
-					const allForCompress = [systemMessage, ...updatedMessages];
-					const result = compressMessages(allForCompress, tokenizer, {
+					// process-wide last-built prompt, so the compressor measures and
+					// preserves what the model actually sees.
+					const allForCompress = [systemMessage, ...history];
+					const compression = compressMessages(allForCompress, tokenizer, {
 						mode: 'aggressive',
 					});
 					if (tokenizer.free) tokenizer.free();
 
-					const compressedUser = result.compressedMessages.filter(
+					const compressedUser = compression.compressedMessages.filter(
 						m => m.role !== 'system',
 					);
 					// Aggressive compression truncates old read_file bodies, so a
@@ -1369,7 +1144,7 @@ export const processAssistantResponse = async (
 					addToChatQueue(
 						<InfoMessage
 							key={generateKey('auto-compact-retry')}
-							message={`Context too large — auto-compacted (${Math.round(result.reductionPercentage)}% reduction). Retrying…`}
+							message={`Context too large — auto-compacted (${Math.round(compression.reductionPercentage)}% reduction). Retrying…`}
 							hideBox={true}
 						/>,
 					);
@@ -1381,159 +1156,139 @@ export const processAssistantResponse = async (
 					};
 					const retryBuilder = new MessageBuilder(compressedUser);
 					retryBuilder.addMessage(retryNudge);
-					const messagesAfterCompact = retryBuilder.build();
-					setMessages(messagesAfterCompact);
-
-					await processAssistantResponse({
-						...params,
-						// Carry this turn's controller, as every other recursion
-						// does: params.abortController may be a stale null, which
-						// would mint a controller Escape never reaches.
-						abortController: controller,
-						messages: messagesAfterCompact,
-						conversationStartTime: startTime,
-						emptyTurnCount: 0,
-						malformedRetryCount: 0,
-						compactRetryCount: compactRetryCount + 1,
-						lastToolSignature: undefined,
-						repeatedToolCallCount: 0,
-						repeatedToolCallTotal: 0,
-						walkthroughLifecycle,
-					});
-					return;
+					compactRetryCount++;
+					return retryBuilder.build();
 				} catch (_err) {
-					// Compression failed — fall through to give-up below
+					// Compression failed — give up below
+					return undefined;
 				}
-			}
+			},
+			onFinalAnswer: async ({content}) => {
+				// Never spend an extra model turn on a walkthrough the user just
+				// cancelled out of.
+				const walkthroughFallback = signal.aborted
+					? null
+					: takeWalkthroughFallback(
+							walkthroughLifecycle,
+							availableNames.includes('write_walkthrough'),
+						);
+				if (walkthroughFallback) {
+					setHistory([...history, walkthroughFallback]);
+					// Lock the prior turn's live task panel into scrollback before
+					// the nudge turn starts.
+					await flushAll();
+					return {kind: 'continue', messages: [], resetRetryGuards: true};
+				}
+				finalContent = content;
+				return {kind: 'finish'};
+			},
+			executeTools,
+		},
+	});
 
+	switch (result.kind) {
+		case 'completed':
+			// Flush any residual compact counts and task updates from turns that
+			// didn't emit reasoning so they persist in scrollback at the end.
+			params.onFinalAssistantText?.(finalContent);
 			await flushAll();
-			// Exhausted all retries (nudges + compact-and-retry cycles)
-			markRunFailed('empty-response-giveup');
+
+			setIsGenerating(false);
 			addToChatQueue(
-				<ErrorMessage
-					key={generateKey('empty-response-giveup')}
-					message={`Model produced no output after ${maxEmptyTurns + 1 + compactRetryCount} attempts. The model may be exhausting its token budget on reasoning, or the request may have been refused. Try rephrasing, lowering reasoning effort, or switching models.`}
+				<InfoMessage
+					key={generateKey('completion-time')}
+					message={buildCompletionNote(startTime)}
 					hideBox={true}
+					marginBottom={2}
 				/>,
 			);
-			setIsGenerating(false);
-			if (onConversationComplete) {
-				onConversationComplete();
+			onConversationComplete?.();
+			return;
+		case 'aborted':
+			// The model call raised the abort: unwind with its error.
+			if (result.error !== undefined) {
+				throw result.error;
+			}
+			// Escape while the reply was finishing or while compaction ran: don't
+			// go on to execute this turn's tool calls. Pair them with
+			// cancellation results so the saved history keeps the 1:1
+			// tool_call/result mapping, then unwind the same way an abort during
+			// the LLM call does.
+			if (recordedToolCalls.length > 0) {
+				setHistory([
+					...history,
+					...toolResultMessages(createCancellationResults(recordedToolCalls)),
+				]);
+			}
+			throw new Error('Operation was cancelled');
+		case 'model-error':
+			throw result.error;
+		case 'no-response':
+			throw new Error(NO_RESPONSE_MESSAGE);
+		case 'guard-stop':
+			if (result.guard === 'malformed') {
+				// Cap malformed-retry turns. Without this, a model stuck producing
+				// bad XML loops forever.
+				await flushAll();
+				markRunFailed('malformed-tool-giveup');
+				addToChatQueue(
+					<ErrorMessage
+						key={generateKey('malformed-tool-giveup')}
+						message={`Model produced malformed tool calls ${maxMalformedRetries + 1} time${maxMalformedRetries === 0 ? '' : 's'} in a row and cannot self-correct. Try rephrasing the request or switching models.`}
+						hideBox={true}
+					/>,
+				);
+				setIsGenerating(false);
+				if (onConversationComplete) {
+					onConversationComplete();
+				}
+				return;
+			}
+			if (result.guard === 'empty') {
+				await flushAll();
+				// Exhausted all retries (nudges + compact-and-retry cycles)
+				markRunFailed('empty-response-giveup');
+				addToChatQueue(
+					<ErrorMessage
+						key={generateKey('empty-response-giveup')}
+						message={`Model produced no output after ${maxEmptyTurns + 1 + compactRetryCount} attempts. The model may be exhausting its token budget on reasoning, or the request may have been refused. Try rephrasing, lowering reasoning effort, or switching models.`}
+						hideBox={true}
+					/>,
+				);
+				setIsGenerating(false);
+				if (onConversationComplete) {
+					onConversationComplete();
+				}
+				return;
+			}
+			// Keep the AI SDK's 1:1 tool-call/result mapping intact: the
+			// assistant message with these tool_calls is already in history, so
+			// pair each with a cancellation result before stopping.
+			if (result.unrunToolCalls.length > 0) {
+				setHistory([
+					...history,
+					...toolResultMessages(
+						createCancellationResults(result.unrunToolCalls),
+					),
+				]);
+			}
+			stopForRepeatedCalls();
+			return;
+		case 'adapter-stop':
+			if (result.payload === 'approval-unavailable') {
+				setIsGenerating(false);
+				onConversationComplete?.();
+			} else if (result.payload === 'declined') {
+				// The turn ends here, so say so: without this the app stays
+				// "mid-conversation" and never drains messages queued while the
+				// prompt was up.
+				onConversationComplete?.();
 			}
 			return;
-		}
-
-		// Check if we just executed tools (updatedMessages should have tool results)
-		const lastMessage = updatedMessages[updatedMessages.length - 1];
-		const hasRecentToolResults = lastMessage?.role === 'tool';
-
-		// Pick a nudge that matches the failure mode. A reasoning-only turn
-		// gets a different prompt than a totally silent one — telling the
-		// model "you produced reasoning but no answer" is more actionable
-		// than a generic "continue".
-		let nudgeContent: string;
-		if (fullReasoning && fullReasoning.trim()) {
-			nudgeContent =
-				'You produced reasoning but no final response. Please provide your answer based on your reasoning above.';
-		} else if (hasRecentToolResults) {
-			nudgeContent =
-				'Please provide a summary or response based on the tool results above.';
-		} else {
-			nudgeContent = 'Please continue with the task.';
-		}
-
-		const nudgeMessage: Message = {
-			role: 'user',
-			content: nudgeContent,
-		};
-
-		// Coalesce auto-nudge notices into a single live counter that
-		// updates in place between turns instead of stacking N
-		// InfoMessages in scrollback. The counter is visible briefly
-		// between the empty turn and the next streaming response, then
-		// gets cleared at the top of processAssistantResponse so the
-		// streaming UI for the retry is unobstructed.
-		const attempt = emptyTurnCount + 1;
-		const total = maxEmptyTurns + 1;
-		setLiveComponent?.(
-			<InfoMessage
-				key="auto-continue-counter"
-				message={`Empty response — retry ${attempt}/${total}: "${nudgeContent}"`}
-				hideBox={true}
-			/>,
-		);
-
-		// Lock any live task panel from the prior turn into scrollback so
-		// the next turn's UI starts clean — same pattern as the give-up,
-		// confirmation-flow, and natural-end branches.
-		await flushAll();
-
-		// Don't include the empty assistantMsg - it would cause API error
-		// "Assistant message must have either content or tool_calls"
-		const nudgeBuilder = new MessageBuilder(updatedMessages);
-		nudgeBuilder.addMessage(nudgeMessage);
-		const updatedMessagesWithNudge = nudgeBuilder.build();
-		setMessages(updatedMessagesWithNudge);
-
-		// Continue the conversation loop with the nudge
-		await processAssistantResponse({
-			...params,
-			abortController: controller,
-			messages: updatedMessagesWithNudge,
-			conversationStartTime: startTime,
-			emptyTurnCount: emptyTurnCount + 1,
-			malformedRetryCount: 0,
-			lastToolSignature: undefined,
-			repeatedToolCallCount: 0,
-			repeatedToolCallTotal: 0,
-			walkthroughLifecycle,
-		});
-		return;
-	}
-
-	if (validToolCalls.length === 0 && cleanedContent.trim()) {
-		// Never spend an extra model turn on a walkthrough the user just
-		// cancelled out of.
-		const walkthroughFallback = controller.signal.aborted
-			? null
-			: takeWalkthroughFallback(
-					walkthroughLifecycle,
-					availableNames.includes('write_walkthrough'),
-				);
-		if (walkthroughFallback) {
-			const messagesWithFallback = [...updatedMessages, walkthroughFallback];
-			setMessages(messagesWithFallback);
-			// Lock the prior turn's live task panel into scrollback before the
-			// nudge turn starts, same as every other recursion site here.
-			await flushAll();
-			await processAssistantResponse({
-				...params,
-				abortController: controller,
-				messages: messagesWithFallback,
-				conversationStartTime: startTime,
-				emptyTurnCount: 0,
-				malformedRetryCount: 0,
-				lastToolSignature: undefined,
-				repeatedToolCallCount: 0,
-				walkthroughLifecycle,
-			});
+		case 'no-system-message':
+		case 'max-turns':
+			// Unreachable: the system message is required and there is no
+			// turn ceiling.
 			return;
-		}
-
-		// Flush any residual compact counts and task updates from turns that
-		// didn't emit reasoning so they persist in scrollback at conversation end.
-		params.onFinalAssistantText?.(cleanedContent);
-		await flushAll();
-
-		setIsGenerating(false);
-		addToChatQueue(
-			<InfoMessage
-				key={generateKey('completion-time')}
-				message={buildCompletionNote(startTime)}
-				hideBox={true}
-				marginBottom={2}
-			/>,
-		);
-		onConversationComplete?.();
 	}
 };
