@@ -63,3 +63,50 @@ test('truncated continues up to the cap across the run', t => {
 	guards.toolCalls([call('/a')]);
 	t.is(guards.truncated().action, 'stop');
 });
+
+test('repeatedToolCallTotal counts the streak and resets when the call changes', t => {
+	const guards = createHeadlessRetryGuards(limits);
+	guards.toolCalls([call('/a')]);
+	guards.toolCalls([call('/a')]);
+	t.is(guards.repeatedToolCallTotal(), 2);
+	guards.toolCalls([call('/b')]);
+	t.is(guards.repeatedToolCallTotal(), 1);
+});
+
+test('grantRepeatWindow allows another full window but keeps the total', t => {
+	const guards = createHeadlessRetryGuards(limits);
+	guards.toolCalls([call('/a')]);
+	guards.toolCalls([call('/a')]);
+	t.truthy(guards.toolCalls([call('/a')]));
+	guards.grantRepeatWindow();
+	t.is(guards.toolCalls([call('/a')]), null);
+	t.is(guards.toolCalls([call('/a')]), null);
+	t.truthy(guards.toolCalls([call('/a')]));
+	t.is(guards.repeatedToolCallTotal(), 6);
+});
+
+test('grantRepeatWindow also clears the empty and malformed streaks', t => {
+	const guards = createHeadlessRetryGuards(limits);
+	guards.empty();
+	guards.malformed();
+	guards.grantRepeatWindow();
+	t.is(guards.empty().action, 'retry');
+	guards.grantRepeatWindow();
+	t.is(guards.malformed().action, 'retry');
+});
+
+test('reset starts every streak again', t => {
+	const guards = createHeadlessRetryGuards(limits);
+	guards.toolCalls([call('/a')]);
+	guards.toolCalls([call('/a')]);
+	guards.reset();
+	t.is(guards.repeatedToolCallTotal(), 0);
+	t.is(guards.toolCalls([call('/a')]), null);
+	t.is(guards.toolCalls([call('/a')]), null);
+	guards.empty();
+	guards.reset();
+	t.is(guards.empty().action, 'retry');
+	guards.truncated();
+	guards.reset();
+	t.is(guards.truncated().action, 'retry');
+});
