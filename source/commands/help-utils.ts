@@ -57,7 +57,9 @@ const CATEGORY_COMMANDS: Record<HelpCategory, readonly string[]> = {
 		'agents',
 		'commit',
 		'explorer',
+		'firewall',
 		'ide',
+		'macros',
 		'mcp',
 		'memory',
 		'remember',
@@ -87,6 +89,25 @@ const COMMAND_HELP_OVERRIDES: Record<string, CommandHelpOverrides> = {
 		usage: '/agents [show <name>|copy <name>|create <name>]',
 		options: ['show <name>', 'copy <name>', 'create <name>'],
 		examples: ['/agents', '/agents show explore', '/agents copy explore'],
+	},
+	firewall: {
+		usage:
+			'/firewall [status|enable|disable|mode <strict|lenient|disabled>|toggle <any|tests|exports>|protect <pattern>|unprotect <pattern>|reset]',
+		options: [
+			'status',
+			'enable|disable',
+			'mode <strict|lenient|disabled>',
+			'toggle <any|tests|exports>',
+			'protect <pattern>',
+			'unprotect <pattern>',
+			'reset',
+		],
+		examples: [
+			'/firewall',
+			'/firewall mode lenient',
+			'/firewall protect src/api/**',
+			'/firewall toggle tests',
+		],
 	},
 	help: {
 		category: 'System & Diagnostics',

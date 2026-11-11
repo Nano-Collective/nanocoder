@@ -32,7 +32,7 @@ export interface Command<T = React.ReactElement | void> {
 /**
  * A slash command registered without eagerly importing its module. The
  * `load()` thunk is invoked only when the command is first executed, which
- * keeps the ~31 built-in command modules out of startup. Metadata (name,
+ * keeps the built-in command modules out of startup. Metadata (name,
  * description) must be duplicated here so the command picker can render
  * without triggering the lazy load.
  */

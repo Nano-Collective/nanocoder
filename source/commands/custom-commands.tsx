@@ -263,7 +263,7 @@ function CommandDetail({command}: {command: CustomCommand}) {
 }
 
 export const commandsCommand: Command = {
-	name: 'custom-commands',
+	name: 'commands',
 	description: 'List custom commands. Subcommands: show <name>, create <name>',
 	handler: (args: string[]) => {
 		// Prefer the app's shared loader so bundle-registered commands are
