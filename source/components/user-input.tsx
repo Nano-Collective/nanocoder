@@ -1,13 +1,13 @@
 import {Box, Text, useFocus, useInput} from 'ink';
 import Spinner from 'ink-spinner';
-import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
+import {useCallback, useEffect, useRef, useState} from 'react';
 import stringWidth from 'string-width';
-import {commandRegistry} from '@/commands';
-import {completionWindow} from '@/components/composer/completion-window';
+import {CommandCompletionList} from '@/components/composer/command-completion-list';
 import {FileMentionList} from '@/components/composer/file-mention-list';
 import {isComposerKey} from '@/components/composer/keymap';
 import {ReverseSearchPrompt} from '@/components/composer/reverse-search-prompt';
 import {ShortcutsOverlay} from '@/components/composer/shortcuts-overlay';
+import {useCommandCompletions} from '@/components/composer/useCommandCompletions';
 import {useFileMentions} from '@/components/composer/useFileMentions';
 import {useReverseSearch} from '@/components/composer/useReverseSearch';
 import {useShortcutsOverlay} from '@/components/composer/useShortcutsOverlay';
@@ -27,7 +27,6 @@ import type {
 	QueuedUserMessage,
 	UserMessageQueueDraft,
 } from '@/hooks/useUserMessageQueue';
-import {getToolManager} from '@/message-handler';
 import {promptHistory} from '@/prompt-history';
 import type {TuneConfig} from '@/types/config';
 import type {
@@ -41,7 +40,6 @@ import type {
 	RestoredInputDraft,
 	SubmittedInputDraft,
 } from '@/types/hooks';
-import {Completion} from '@/types/index';
 import {
 	extractImageReferences,
 	readClipboardImage,
@@ -52,8 +50,6 @@ import {assemblePrompt} from '@/utils/prompt-processor';
 import {pasteEvents} from '@/utils/terminal-paste';
 import {getVisualLineSegments} from '@/utils/text-wrapping';
 import type {ActiveEditorState} from '@/vscode/vscode-server';
-
-const MAX_COMMAND_COMPLETION_ROWS = 10;
 
 // Prompt box width floor: keeps narrow terminals legible.
 const PROMPT_WIDTH_MIN = 40;
@@ -178,10 +174,6 @@ export default function UserInput({
 	// caret position before the splice and put it back after. Without this the
 	// pasted text would always land at the end of the value.
 	const textInputRef = useRef<TextInputHandle>(null);
-	const completionJustSelectedRef = useRef(false);
-	// Input value for which the completion menu was closed, by Escape or by
-	// selecting a completion, so it doesn't re-open until the user types more.
-	const dismissedForInputRef = useRef<string | null>(null);
 	// True while the current input came from history navigation (↑/↓), not typing.
 	// A recalled `/command` must NOT auto-open the suggestion menu — otherwise the
 	// menu captures ↑/↓ and history navigation is blocked. Cleared on any keystroke
@@ -225,17 +217,7 @@ export default function UserInput({
 	const showShortcuts = shortcuts.isOpen;
 	const isShortcutsOpenNow = shortcuts.isOpenNow;
 
-	const {
-		showClearMessage,
-		showCompletions,
-		completions,
-		selectedCompletionIndex,
-		setShowClearMessage,
-		setShowCompletions,
-		setCompletions,
-		setSelectedCompletionIndex,
-		resetUIState,
-	} = uiState;
+	const {showClearMessage, setShowClearMessage, resetUIState} = uiState;
 
 	// Check if we're in bash mode (input starts with !)
 	const isBashMode = input.trim().startsWith('!');
@@ -336,99 +318,17 @@ export default function UserInput({
 	});
 	const isFileAutocompleteMode = mentions.isActive;
 
-	// Command completions for a given input value. Shared by the memo below
-	// and the Enter gate, which can run ahead of a re-render (see there).
-	const getCommandCompletions = useCallback(
-		(value: string): Completion[] => {
-			if (!value.trim().startsWith('/') || isFileAutocompleteMode) {
-				return [];
-			}
-
-			// Once the user types a space, they're entering arguments for the
-			// command (e.g. `/model gpt-4`). Stop offering completions so Enter
-			// submits the command-with-args instead of selecting a completion and
-			// dropping everything after the command name.
-			if (value.slice(1).includes(' ')) {
-				return [];
-			}
-
-			const commandPrefix = value.slice(1).split(' ')[0];
-
-			const builtInCompletions = commandRegistry.getCompletions(commandPrefix);
-			const mcpPromptNames = (
-				getToolManager()?.getMCPClient()?.getAllPrompts() ?? []
-			).map(p => `mcp:${p.serverName}:${p.name}`);
-			const customCompletions = [...customCommands, ...mcpPromptNames]
-				.filter(cmd => {
-					// Include all when no prefix, otherwise filter by prefix
-					return (
-						!commandPrefix ||
-						cmd.toLowerCase().includes(commandPrefix.toLowerCase())
-					);
-				})
-				.sort((a, b) => a.localeCompare(b));
-
-			return [
-				...builtInCompletions.map(cmd => ({name: cmd, isCustom: false})),
-				...customCompletions.map(cmd => ({name: cmd, isCustom: true})),
-			] as Completion[];
-		},
-		[isFileAutocompleteMode, customCommands],
-	);
-
-	// Calculate command completions using useMemo to prevent flashing
-	const commandCompletions = useMemo(
-		() => getCommandCompletions(input),
-		[getCommandCompletions, input],
-	);
-
-	// The menu opens whenever completions exist, unless it was closed for this
-	// exact input or the input was recalled from history (keep ↑/↓ free to
-	// navigate).
-	const isMenuSuppressedFor = useCallback(
-		(value: string) =>
-			inputFromHistoryRef.current || dismissedForInputRef.current === value,
-		[],
-	);
-
-	// Update UI state for command completions
-	useEffect(() => {
-		// This run can still carry the pre-selection input: selecting sets
-		// `input` and closes the menu together, and the run that the close
-		// schedules gets here first. `dismissedForInputRef` is set at the
-		// selection itself for that reason - reading `input` here would record
-		// the fragment and let the menu re-open on the completed command.
-		if (completionJustSelectedRef.current) {
-			completionJustSelectedRef.current = false;
-			return;
-		}
-		if (commandCompletions.length > 0) {
-			setCompletions(commandCompletions);
-			// Show the menu as soon as completions exist (typing `/`), not only on Tab.
-			if (!isMenuSuppressedFor(input)) {
-				setShowCompletions(true);
-			}
-			setSelectedCompletionIndex(prev =>
-				prev >= commandCompletions.length
-					? commandCompletions.length - 1
-					: prev < 0
-						? 0
-						: prev,
-			);
-		} else if (showCompletions) {
-			setCompletions([]);
-			setShowCompletions(false);
-			setSelectedCompletionIndex(-1);
-		}
-	}, [
+	// Slash-command completion menu.
+	const commands = useCommandCompletions({
 		input,
-		commandCompletions,
-		showCompletions,
-		setCompletions,
-		setShowCompletions,
-		setSelectedCompletionIndex,
-		isMenuSuppressedFor,
-	]);
+		currentState,
+		latestStateRef: currentStateRef,
+		customCommands,
+		isMentionActive: isFileAutocompleteMode,
+		inputFromHistoryRef,
+		setInputState,
+		onInputReplaced: remountTextInput,
+	});
 
 	// Helper functions
 
@@ -522,10 +422,8 @@ export default function UserInput({
 
 	// Handle escape key logic
 	const handleEscape = useCallback(() => {
-		if (showCompletions) {
-			setShowCompletions(false);
-			setSelectedCompletionIndex(-1);
-			dismissedForInputRef.current = input;
+		if (commands.isOpen) {
+			commands.dismiss();
 			return;
 		}
 		if (isFileAutocompleteMode) {
@@ -552,14 +450,13 @@ export default function UserInput({
 		input,
 		attachments,
 		activeEditor,
-		showCompletions,
+		commands.isOpen,
+		commands.dismiss,
 		isFileAutocompleteMode,
 		mentions.dismiss,
 		suggestedCommand,
 		onDismissSuggestion,
 		showClearMessage,
-		setShowCompletions,
-		setSelectedCompletionIndex,
 		resetInput,
 		resetUIState,
 		onDismissActiveEditor,
@@ -832,7 +729,7 @@ export default function UserInput({
 		// Handle ctrl+r to enter reverse prompt search
 		if (isComposerKey('reverseSearch', inputChar, key)) {
 			reverseSearch.start(currentState);
-			setShowCompletions(false);
+			commands.hide();
 			mentions.dismiss();
 			setShowClearMessage(false);
 			return;
@@ -886,7 +783,7 @@ export default function UserInput({
 			// Tab in an empty prompt inserts the suggested command, without
 			// popping the completion menu over it.
 			if (suggestedCommand && input === '') {
-				completionJustSelectedRef.current = true;
+				commands.suppressNextAutoShow();
 				setInputState({displayValue: suggestedCommand, placeholderContent: {}});
 				setTextInputKey(prev => prev + 1);
 				onDismissSuggestion?.();
@@ -899,44 +796,8 @@ export default function UserInput({
 				return;
 			}
 
-			// Command completion - use pre-calculated commandCompletions
-			if (input.startsWith('/')) {
-				// Tab selects the highlighted suggestion when the menu is open. #696 made
-				// completion Tab-triggered, but that often failed to render the menu
-				// (especially in alt-screen); show-on-`/` + Tab-to-select is more reliable.
-				if (showCompletions && completions.length > 0) {
-					const selected =
-						completions[
-							selectedCompletionIndex >= 0 ? selectedCompletionIndex : 0
-						];
-					const completedText = `/${selected.name}`;
-					completionJustSelectedRef.current = true;
-					dismissedForInputRef.current = completedText;
-					setInputState({
-						displayValue: completedText,
-						placeholderContent: {},
-					});
-					setShowCompletions(false);
-					setSelectedCompletionIndex(-1);
-					setTextInputKey(prev => prev + 1);
-					return;
-				}
-				if (commandCompletions.length === 1) {
-					// Auto-complete when there's exactly one match
-					const completion = commandCompletions[0];
-					const completedText = `/${completion.name}`;
-					// Use setInputState to bypass paste detection for autocomplete
-					setInputState({
-						displayValue: completedText,
-						placeholderContent: currentState.placeholderContent,
-					});
-					setTextInputKey(prev => prev + 1);
-				} else if (commandCompletions.length > 1) {
-					// Show completions when there are multiple matches
-					setCompletions(commandCompletions);
-					setShowCompletions(true);
-					setSelectedCompletionIndex(0);
-				}
+			// Command completion
+			if (commands.handleTab()) {
 				return;
 			}
 		}
@@ -961,49 +822,10 @@ export default function UserInput({
 			return;
 		}
 
-		// Handle Enter to select completion. The effect above opens the menu a
-		// commit after the keystroke that changed `input`, so an Enter landing in
-		// between still sees it closed and would submit the raw command fragment.
-		// When the menu state says closed, fall back to the memoized completions
-		// the effect is about to show.
-		//
-		// Decide on the latest input, not the render-time one: Enter can arrive
-		// in the same stdin batch as the keys before it, ahead of a re-render,
-		// and handleSubmit submits the latest input - so a gate that looked at
-		// the stale `input` would let a fresh command fragment through.
-		const latestInput = currentStateRef.current.displayValue;
-		const isStale = latestInput !== input;
-		const menuItems =
-			!isStale &&
-			showCompletions &&
-			completions.length > 0 &&
-			selectedCompletionIndex >= 0
-				? completions
-				: isMenuSuppressedFor(latestInput)
-					? []
-					: isStale
-						? getCommandCompletions(latestInput)
-						: commandCompletions;
-		if (key.return && !key.shift && menuItems.length > 0) {
-			const selected =
-				menuItems[
-					Math.min(Math.max(selectedCompletionIndex, 0), menuItems.length - 1)
-				];
-			const completedText = `/${selected.name}`;
-			// Already typed in full, so there is nothing to complete: fall
-			// through and submit instead of needing a second Enter.
-			if (completedText !== latestInput) {
-				completionJustSelectedRef.current = true;
-				dismissedForInputRef.current = completedText;
-				setInputState({
-					displayValue: completedText,
-					placeholderContent: {},
-				});
-				setShowCompletions(false);
-				setSelectedCompletionIndex(-1);
-				setTextInputKey(prev => prev + 1);
-				return;
-			}
+		// Enter on a command still being typed completes it rather than
+		// submitting the fragment (see completeOnEnter).
+		if (key.return && !key.shift && commands.completeOnEnter()) {
+			return;
 		}
 
 		// Handle Enter to submit (fallthrough - if completion handler didn't return)
@@ -1025,10 +847,7 @@ export default function UserInput({
 				return;
 			}
 			// Command completion navigation takes priority over history
-			if (showCompletions && completions.length > 0) {
-				setSelectedCompletionIndex(prev =>
-					prev > 0 ? prev - 1 : completions.length - 1,
-				);
+			if (commands.moveSelection('up')) {
 				return;
 			}
 			if (handleQueueNavigation('up')) {
@@ -1047,10 +866,7 @@ export default function UserInput({
 				return;
 			}
 			// Command completion navigation takes priority over history
-			if (showCompletions && completions.length > 0) {
-				setSelectedCompletionIndex(prev =>
-					prev < completions.length - 1 ? prev + 1 : 0,
-				);
+			if (commands.moveSelection('down')) {
 				return;
 			}
 			if (handleQueueNavigation('down')) {
@@ -1087,15 +903,6 @@ export default function UserInput({
 		}
 		return `${text}${imageSuffix}`;
 	};
-	const commandCompletionWindow = useMemo(
-		() =>
-			completionWindow(
-				completions,
-				selectedCompletionIndex,
-				MAX_COMMAND_COMPLETION_ROWS,
-			),
-		[completions, selectedCompletionIndex],
-	);
 
 	// When disabled, show minimal UI to avoid cluttering the screen
 	if (disabled) {
@@ -1190,35 +997,11 @@ export default function UserInput({
 						<Text color={colors.secondary}>Press escape again to clear</Text>
 					)}
 
-					{showCompletions && completions.length > 0 && (
-						<Box flexDirection="column" marginTop={1}>
-							<Text color={colors.secondary}>Available commands:</Text>
-							{commandCompletionWindow.items.map((completion, index) => {
-								const completionIndex = commandCompletionWindow.start + index;
-								const isSelected = completionIndex === selectedCompletionIndex;
-								return (
-									<Text
-										key={`${completion.isCustom ? 'custom' : 'built-in'}-${completion.name}`}
-										color={
-											isSelected
-												? colors.info
-												: completion.isCustom
-													? colors.info
-													: colors.primary
-										}
-										bold={isSelected}
-									>
-										{isSelected ? '▸ ' : '  '}/{completion.name}
-									</Text>
-								);
-							})}
-							{completions.length > MAX_COMMAND_COMPLETION_ROWS && (
-								<Text color={colors.secondary}>
-									Showing {commandCompletionWindow.start + 1}-
-									{commandCompletionWindow.end} of {completions.length}
-								</Text>
-							)}
-						</Box>
+					{commands.isOpen && commands.items.length > 0 && (
+						<CommandCompletionList
+							completions={commands.items}
+							selectedIndex={commands.selectedIndex}
+						/>
 					)}
 					{isFileAutocompleteMode && mentions.completions.length > 0 && (
 						<FileMentionList
