@@ -31,9 +31,8 @@ import {
 } from '@/plugins/host';
 import {runInSessionCwdScope} from '@/services/session-cwd';
 import {
-	getAllSubagentProgress,
 	onSubagentRunEvent,
-	type SubagentEvent,
+	type SubagentRunEvent,
 } from '@/services/subagent-events';
 import {parseToolCalls} from '@/tool-calling/index';
 import {resolveToolApproval} from '@/tools/approval-policy';
@@ -193,6 +192,23 @@ export async function runAcpConversation(
 		sentSubagentEvents = sentSubagentEvents
 			.then(() => options.conn.notify(ACP_SUBAGENT_NOTIFICATION, {...event}))
 			.catch(() => {});
+		// Clients that ignore the notification still see the run's progress, in
+		// the title of the agent call that started it. Sent as the event
+		// arrives rather than queued behind the notifications, so it can never
+		// land after the call's own completed update.
+		if (event.status === 'progress' && !event.parentRunId && event.toolCallId) {
+			void options.conn
+				.sessionUpdate({
+					sessionId: options.session.sessionId,
+					update: {
+						sessionUpdate: 'tool_call_update',
+						toolCallId: event.toolCallId,
+						status: 'in_progress',
+						title: subagentProgressTitle(event),
+					},
+				})
+				.catch(() => {});
+		}
 	});
 	try {
 		// Each ACP session runs in its own working directory (#1707), and one
@@ -208,6 +224,14 @@ export async function runAcpConversation(
 		await sentSubagentEvents;
 		unregisterBridge();
 	}
+}
+
+function subagentProgressTitle(event: SubagentRunEvent): string {
+	const tokens = formatCompactTokenCount(event.tokenCount ?? 0);
+	const toolCalls = event.toolCallCount ?? 0;
+	return toolCalls > 0
+		? `${event.name || 'agent'} • ${tokens} tokens • ${toolCalls} tools${event.lastTool ? ` (${event.lastTool})` : ''}`
+		: `${event.name || 'agent'} • ${tokens} tokens • thinking...`;
 }
 
 function acpReadScope(sessionId: string): string {
@@ -743,53 +767,6 @@ async function runTurn(
 				turnId,
 			);
 
-			let pollInterval: ReturnType<typeof setInterval> | null = null;
-			let isPolling = true;
-			if (toolCall.function.name === 'agent') {
-				// Progress entries are never removed from the map, so snapshot the
-				// keys that exist before this call starts and ignore them while
-				// polling - otherwise a finished agent from an earlier turn wins the
-				// max-token scan and the card shows stale numbers.
-				const preexisting = new Set(getAllSubagentProgress().keys());
-				pollInterval = setInterval(async () => {
-					if (!isPolling) return;
-					// agentId is a randomUUID() internal to the executor — not in args.
-					// Poll agents started by this call and pick the most active one.
-					let best: SubagentEvent | null = null;
-					for (const [id, prog] of getAllSubagentProgress()) {
-						if (preexisting.has(id)) continue;
-						if (!best || prog.tokenCount > best.tokenCount) {
-							best = prog;
-						}
-					}
-
-					if (best) {
-						const tokens = formatCompactTokenCount(best.tokenCount);
-						const lastTool =
-							best.toolHistory.length > 0
-								? best.toolHistory[best.toolHistory.length - 1]
-								: '';
-
-						let title = `${best.subagentName || 'agent'} • ${tokens} tokens`;
-						if (best.toolCallCount > 0) {
-							title += ` • ${best.toolCallCount} tools${lastTool ? ` (${lastTool})` : ''}`;
-						} else {
-							title += ` • thinking...`;
-						}
-
-						if (!isPolling) return;
-						await emitToolCallUpdate(
-							session,
-							conn,
-							toolCall,
-							'in_progress',
-							undefined,
-							title,
-						);
-					}
-				}, 1500);
-			}
-
 			const toolResult = await processToolUse(toolCall, {
 				abortSignal: abortController.signal,
 				sessionId: session.sessionId,
@@ -798,8 +775,6 @@ async function runTurn(
 				toolCallId: toolCall.id,
 			});
 			await finishTimelineCapture(session, timelineCapture);
-			isPolling = false;
-			if (pollInterval) clearInterval(pollInterval);
 
 			// isError covers failures whose text doesn't start with "Error": a
 			// validation failure, or a command that exited non-zero.
