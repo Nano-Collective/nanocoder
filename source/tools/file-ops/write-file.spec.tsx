@@ -1194,6 +1194,61 @@ test('write_file: fails closed when existing file cannot be read and leaves disk
 	t.is(content, 'secret original content');
 });
 
+// ============================================================================
+// Encoding Guard Tests
+// ============================================================================
+
+// "café" then "old", in Latin-1: the é is a lone E9 byte, not valid UTF-8.
+const LATIN1_BYTES = Buffer.from('caf\xe9\nold\n', 'latin1');
+
+test('write_file: refuses to overwrite a Latin-1 file and leaves every byte unchanged', async t => {
+	const filePath = join(testDir, 'legacy.txt');
+	await writeFile(filePath, LATIN1_BYTES);
+
+	// What the model saw: the é decoded to U+FFFD.
+	await t.throwsAsync(
+		executeWriteFile({path: filePath, content: 'caf�\nnew\n'}),
+		{message: /not valid UTF-8/},
+	);
+
+	t.deepEqual(await readFile(filePath), LATIN1_BYTES);
+});
+
+test('write_file validator: refuses to overwrite a Latin-1 file', async t => {
+	await writeFile(join(testDir, 'legacy.txt'), LATIN1_BYTES);
+
+	if (!writeFileTool.validator) {
+		t.fail('Validator not defined');
+		return;
+	}
+
+	const originalCwd = process.cwd();
+	try {
+		process.chdir(testDir);
+		markFileSeen('legacy.txt');
+
+		const result = await writeFileTool.validator({
+			path: 'legacy.txt',
+			content: 'caf�\nnew\n',
+		});
+
+		t.false(result.valid);
+		if (!result.valid) {
+			t.regex(result.error, /not valid UTF-8/);
+		}
+	} finally {
+		process.chdir(originalCwd);
+	}
+});
+
+test('write_file: still overwrites a UTF-8 file with non-ASCII text', async t => {
+	const filePath = await createTestFile('utf8.txt', 'café\nold\n');
+
+	await executeWriteFile({path: filePath, content: 'café\nnew\n'});
+
+	t.is(await readFile(filePath, 'utf-8'), 'café\nnew\n');
+});
+
 test('write_file: genuinely new file write succeeds without read failure', async t => {
 	const filePath = join(testDir, 'new-file.txt');
 	const output = await executeWriteFile({
