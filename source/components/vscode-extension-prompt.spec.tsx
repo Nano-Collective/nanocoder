@@ -1,6 +1,7 @@
 import test from 'ava';
 import {renderWithTheme as render} from '@/test-utils/render-with-theme';
 import React from 'react';
+import {TIMEOUT_VSCODE_EXTENSION_SKIP_MS} from '@/constants';
 import {
 	VSCodeExtensionPrompt,
 	shouldPromptExtensionInstall,
@@ -248,4 +249,66 @@ test('VSCodeExtensionPrompt re-renders without crashing', t => {
 	});
 
 	t.truthy(lastFrame());
+});
+
+// ============================================================================
+// Failed install auto-skip timer
+// ============================================================================
+
+function failingInstaller() {
+	return {
+		isVSCodeCliAvailable: async () => true,
+		getExtensionStatus: async () => [
+			{cli: 'code', available: true, extensionInstalled: false},
+		],
+		installExtension: async () => ({
+			success: false,
+			message: 'install failed',
+			results: [{cli: 'code', success: false}],
+		}),
+	};
+}
+
+async function waitFor(check: () => boolean, timeoutMs = 2000) {
+	const start = Date.now();
+	while (!check()) {
+		if (Date.now() - start > timeoutMs) throw new Error('timed out');
+		await new Promise(resolve => setTimeout(resolve, 10));
+	}
+}
+
+async function reachInstallError() {
+	let skipped = 0;
+	const rendered = render(
+		<VSCodeExtensionPrompt
+			onComplete={() => {}}
+			onSkip={() => {
+				skipped++;
+			}}
+			installer={failingInstaller()}
+		/>,
+	);
+	await waitFor(() => (rendered.lastFrame() ?? '').includes('Install the extension now?'));
+	rendered.stdin.write('\r');
+	await waitFor(() => (rendered.lastFrame() ?? '').includes('install failed'));
+	return {rendered, skipped: () => skipped};
+}
+
+test.serial('a failed install auto-skips after the delay', async t => {
+	const {rendered, skipped} = await reachInstallError();
+	t.is(skipped(), 0);
+	await new Promise(resolve =>
+		setTimeout(resolve, TIMEOUT_VSCODE_EXTENSION_SKIP_MS + 200),
+	);
+	t.is(skipped(), 1);
+	rendered.unmount();
+});
+
+test.serial('a failed install does not call onSkip after unmount', async t => {
+	const {rendered, skipped} = await reachInstallError();
+	rendered.unmount();
+	await new Promise(resolve =>
+		setTimeout(resolve, TIMEOUT_VSCODE_EXTENSION_SKIP_MS + 200),
+	);
+	t.is(skipped(), 0);
 });
