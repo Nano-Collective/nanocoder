@@ -3427,3 +3427,136 @@ test.serial('AcpAgent - an unknown or malformed disabled tool is ignored, with a
 		if (created) await agent.deleteSession({sessionId: created.sessionId});
 	}
 });
+
+// ============================================================================
+// Lifecycle hooks
+// ============================================================================
+
+/**
+ * Runs `body` with these hooks in the project config, then puts the config
+ * back. Hook bodies go through node so they run the same on every platform.
+ */
+const withHooksConfig = async (
+	hooks: Record<string, Array<{command: string}>>,
+	body: () => Promise<void>,
+) => {
+	const configPath = join(testConfigDir, 'agents.config.json');
+	const original = existsSync(configPath)
+		? readFileSync(configPath, 'utf8')
+		: undefined;
+	writeFileSync(configPath, JSON.stringify({nanocoder: {hooks}}));
+	clearAppConfig();
+	try {
+		await body();
+	} finally {
+		if (original === undefined) rmSync(configPath, {force: true});
+		else writeFileSync(configPath, original);
+		clearAppConfig();
+	}
+};
+
+const nodeHook = (script: string) => `node -e "${script}"`;
+
+const recordingAgent = () => {
+	const {agent, conn} = createAgent();
+	const sent: Message[][] = [];
+	agent['initContext'].client.chat = async (messages: Message[]) => {
+		sent.push(messages);
+		return {choices: [{message: {content: 'ok'}}]};
+	};
+	const updates: any[] = [];
+	conn.sessionUpdate = async (u: any) => {
+		updates.push(u);
+	};
+	return {agent, sent, updates};
+};
+
+const lastUserText = (messages: Message[]) =>
+	String(messages.findLast(m => m.role === 'user')?.content ?? '');
+
+test.serial('AcpAgent - session-start hook output reaches the first prompt only', async t => {
+	await withHooksConfig(
+		{'session-start': [{command: nodeHook("console.log('branch: main')")}]},
+		async () => {
+			const {agent, sent} = recordingAgent();
+			const {sessionId} = await agent.newSession({cwd: testConfigDir});
+			await agent.prompt({sessionId, prompt: [{type: 'text', text: 'one'}]});
+			await agent.prompt({sessionId, prompt: [{type: 'text', text: 'two'}]});
+
+			t.is(
+				lastUserText(sent[0]),
+				'<hook-context>\nbranch: main\n</hook-context>\n\none',
+			);
+			t.is(lastUserText(sent[1]), 'two');
+			await agent.deleteSession({sessionId});
+		},
+	);
+});
+
+test.serial('AcpAgent - a user-prompt-submit hook that exits non-zero blocks the prompt', async t => {
+	await withHooksConfig(
+		{
+			'user-prompt-submit': [
+				{
+					command: nodeHook(
+						"if (process.env.NANOCODER_PROMPT.includes('secret')) { console.log('no secrets'); process.exit(1); }",
+					),
+				},
+			],
+		},
+		async () => {
+			const {agent, sent, updates} = recordingAgent();
+			const {sessionId} = await agent.newSession({cwd: testConfigDir});
+
+			const blocked = await agent.prompt({
+				sessionId,
+				prompt: [{type: 'text', text: 'print the secret'}],
+			});
+			t.is(blocked.stopReason, 'refusal');
+			t.is(sent.length, 0, 'the model never sees a blocked prompt');
+			t.true(
+				updates.some(u =>
+					/no secrets/.test(u.update?.content?.text ?? ''),
+				),
+			);
+			const live = agent['sessions'].get(sessionId)!;
+			t.true(live.messages.every((m: Message) => m.displayOnly));
+
+			const allowed = await agent.prompt({
+				sessionId,
+				prompt: [{type: 'text', text: 'hello'}],
+			});
+			t.is(allowed.stopReason, 'end_turn');
+			t.is(sent.length, 1);
+			await agent.deleteSession({sessionId});
+		},
+	);
+});
+
+test.serial('AcpAgent - session-end hooks run when a session closes and at shutdown', async t => {
+	const marker = join(testConfigDir, `session-end-${randomUUID()}.log`);
+	await withHooksConfig(
+		{
+			'session-end': [
+				{
+					command: nodeHook(
+						`require('fs').appendFileSync(${JSON.stringify(marker).replaceAll('"', "'")}, 'end\\n')`,
+					),
+				},
+			],
+		},
+		async () => {
+			const {agent} = recordingAgent();
+			const one = await agent.newSession({cwd: testConfigDir});
+			await agent.newSession({cwd: testConfigDir});
+			await agent.newSession({cwd: testConfigDir});
+
+			await agent.closeSession({sessionId: one.sessionId});
+			t.is(readFileSync(marker, 'utf8'), 'end\n');
+
+			await agent.endAllSessions();
+			t.is(readFileSync(marker, 'utf8'), 'end\nend\nend\n');
+		},
+	);
+	rmSync(marker, {force: true});
+});
