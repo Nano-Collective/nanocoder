@@ -35,6 +35,12 @@ import {sessionManager} from '@/session/session-manager';
 import {readFileTool} from '@/tools/read-file';
 import {clearReadTracker} from '@/utils/read-tracker';
 import {writeFileSync} from 'fs';
+import {commandRegistry} from '@/commands';
+import {lazyCommands} from '@/commands/lazy-registry';
+
+// The app registers built-in commands at init; slash commands that reach the
+// registry (such as /resume) need them here too.
+commandRegistry.registerLazy(lazyCommands);
 
 console.log('\nuseAppHandlers.spec.tsx');
 
@@ -1002,8 +1008,10 @@ test.serial('/resume <id> switches the client before the command completes', asy
 		const submitted = handlers.handleMessageSubmit(
 			`/resume ${otherProviderSession.id}`,
 		);
-		for (let i = 0; i < 50 && spies.handleModelSelect.calls.length === 0; i++) {
-			await new Promise(resolve => setImmediate(resolve));
+		// /resume loads its command module first, which is real I/O, so poll on
+		// a timer rather than a fixed number of event-loop turns.
+		for (let i = 0; i < 400 && spies.handleModelSelect.calls.length === 0; i++) {
+			await new Promise(resolve => setTimeout(resolve, 5));
 		}
 
 		t.deepEqual(spies.handleModelSelect.calls, [

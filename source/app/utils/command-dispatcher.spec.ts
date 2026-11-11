@@ -1,6 +1,10 @@
+import {mkdtempSync, rmSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 import test from 'ava';
 import React from 'react';
 import {commandRegistry} from '@/commands';
+import {runCheckpointSubcommand} from '@/commands/checkpoint';
 import {lazyCommands} from '@/commands/lazy-registry';
 import {DELAY_COMMAND_COMPLETE_MS} from '@/constants';
 import type {
@@ -324,6 +328,93 @@ test.serial('a project command keeps matching its exact name', async t => {
 	t.true(completed);
 	await dispatchSlashCommand('/STATUS', options);
 	t.is(status, 1, 'any other spelling is the built-in');
+});
+
+test.serial('/retry hands off to the chat turn and does not complete itself', async t => {
+	const submitted: string[] = [];
+	let completed = 0;
+	await dispatchSlashCommand(
+		'/retry',
+		createOptions({
+			messages: [{role: 'user', content: 'retry me'}],
+			onHandleChatMessage: async message => {
+				submitted.push(message);
+			},
+			onCommandComplete: () => completed++,
+		}),
+	);
+	await wait(DELAY_COMMAND_COMPLETE_MS + 25);
+	t.deepEqual(submitted, ['retry me']);
+	t.is(completed, 0, 'the retried turn signals completion, not the command');
+});
+
+test.serial('/retry keeps a quoted --model value whole', async t => {
+	const switches: string[] = [];
+	await dispatchSlashCommand(
+		'/retry --model "my model" --provider local',
+		createOptions({
+			messages: [{role: 'user', content: 'again'}],
+			onSwitchModel: async (provider, model) => {
+				switches.push(`${provider}/${model}`);
+				return true;
+			},
+		}),
+	);
+	t.deepEqual(switches, ['local/my model']);
+});
+
+test.serial('/checkpoint load picks from a list, or says there is none', async t => {
+	const originalCwd = process.cwd();
+	const workspace = mkdtempSync(join(tmpdir(), 'dispatcher-checkpoint-'));
+	process.chdir(workspace);
+	try {
+		const queued: React.ReactNode[] = [];
+		let completed = 0;
+		const picked: number[] = [];
+		const messages: Message[] = [{role: 'user', content: 'hi'}];
+		const options = createOptions({
+			messages,
+			onAddToChatQueue: node => queued.push(node),
+			onCommandComplete: () => completed++,
+			onEnterCheckpointLoadMode: (checkpoints, count) =>
+				picked.push(checkpoints.length, count),
+		});
+
+		await dispatchSlashCommand('/checkpoint load', options);
+		t.true(queuedText(queued[0]).includes('No checkpoints available'));
+		t.is(completed, 1);
+
+		await runCheckpointSubcommand(['create', 'first'], messages, {
+			provider: 'test',
+			model: 'test',
+		});
+		await dispatchSlashCommand('/checkpoint restore', options);
+		t.deepEqual(picked, [1, 1]);
+		await wait(DELAY_COMMAND_COMPLETE_MS + 25);
+		t.is(completed, 1, 'the picker completes the command, not the dispatcher');
+	} finally {
+		process.chdir(originalCwd);
+		rmSync(workspace, {recursive: true, force: true});
+	}
+});
+
+test.serial('other /checkpoint subcommands show their output like a read-only command', async t => {
+	const queued: React.ReactNode[] = [];
+	let completed = false;
+	await dispatchSlashCommand(
+		'/checkpoint help',
+		createOptions({
+			onAddToChatQueue: node => queued.push(node),
+			onCommandComplete: () => {
+				completed = true;
+			},
+		}),
+	);
+	await wait(0);
+	t.true(React.isValidElement(queued[0]));
+	t.false(completed);
+	await wait(DELAY_COMMAND_COMPLETE_MS + 25);
+	t.true(completed);
 });
 
 test.serial('read-only commands still render through their handler', async t => {
