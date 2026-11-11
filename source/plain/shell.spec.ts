@@ -1589,3 +1589,86 @@ test.serial(
 		t.true(jsonOutput.message.includes("prompt rejected by policy"));
 	},
 );
+
+test.serial("stream-json writes NDJSON events and a result event to stdout", async (t) => {
+	const shutdown: CapturedShutdown = { code: null };
+	const stdout = capturingStdout();
+	try {
+		await runPlainShell({
+			prompt: "do the thing",
+			developmentMode: "yolo",
+			trustDirectory: true,
+			outputFormat: "stream-json",
+			deps: baseDeps({
+				initializePlain: makeFakeInitializePlain(),
+				runPlainConversation: async (options) => {
+					// The conversation loop streams events through this sink;
+					// the fake emits one so the shell wiring is exercised.
+					options.onStreamJsonEvent?.({
+						type: "assistant_text",
+						turn: 1,
+						delta: "hello",
+					});
+					return {
+						kind: "success",
+						finalText: "hello",
+						reasoning: null,
+						steps: 1,
+						toolCalls: [],
+					};
+				},
+				getShutdownManager: makeFakeShutdownManager(shutdown),
+			}),
+		});
+	} finally {
+		stdout.restore();
+	}
+
+	const lines = stdout.get().trim().split("\n");
+	t.is(lines.length, 3);
+	const events = lines.map((line) => JSON.parse(line));
+	t.is(events[0].type, "session_start");
+	t.regex(events[0].sessionId, /^[0-9a-f-]{36}$/);
+	t.is(events[0].provider, "fake-provider");
+	t.is(events[0].model, "fake-model");
+	t.deepEqual(events[1], {
+		type: "assistant_text",
+		turn: 1,
+		delta: "hello",
+	});
+	t.is(events[2].type, "result");
+	t.is(events[2].kind, "success");
+	t.is(events[2].exitCode, 0);
+	t.is(events[2].finalText, "hello");
+	t.is(shutdown.code, 0);
+});
+
+test.serial("stream-json reports an init error as a result event", async (t) => {
+	const shutdown: CapturedShutdown = { code: null };
+	const stdout = capturingStdout();
+	try {
+		await runPlainShell({
+			prompt: "do the thing",
+			developmentMode: "yolo",
+			trustDirectory: true,
+			outputFormat: "stream-json",
+			deps: baseDeps({
+				initializePlain: async () => {
+					throw new Error("boom");
+				},
+				getShutdownManager: makeFakeShutdownManager(shutdown),
+			}),
+		});
+	} finally {
+		stdout.restore();
+	}
+
+	const lines = stdout.get().trim().split("\n");
+	t.is(lines.length, 1);
+	const event = JSON.parse(lines[0]);
+	t.is(event.type, "result");
+	t.is(event.kind, "error");
+	t.is(event.exitCode, 1);
+	t.true(event.message.includes("boom"));
+	t.is(shutdown.code, 1);
+});

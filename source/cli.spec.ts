@@ -648,7 +648,10 @@ function resolveReviewGuards(opts: {
 	const isRunCommand = args.indexOf('run') !== -1;
 	const isReviewCommand = args[0] === 'review';
 	const ttyError = isReviewCommand && !stdoutIsTTY;
-	const jsonError = isReviewCommand && outputFormat === 'json';
+	// Mirrors cli.tsx: both machine-output formats are rejected with review.
+	const isMachineOutputFormat =
+		outputFormat === 'json' || outputFormat === 'stream-json';
+	const jsonError = isReviewCommand && isMachineOutputFormat;
 	const collisionError = isRunCommand && isReviewCommand;
 	return {ttyError, jsonError, collisionError};
 }
@@ -685,6 +688,24 @@ test('review guard: --json is not rejected with run', t => {
 		args: ['run', 'hello'],
 		stdoutIsTTY: true,
 		outputFormat: 'json',
+	});
+	t.false(jsonError);
+});
+
+test('review guard: --output-format stream-json is rejected with review', t => {
+	const {jsonError} = resolveReviewGuards({
+		args: ['review', 'main'],
+		stdoutIsTTY: true,
+		outputFormat: 'stream-json',
+	});
+	t.true(jsonError);
+});
+
+test('review guard: --output-format stream-json is not rejected with run', t => {
+	const {jsonError} = resolveReviewGuards({
+		args: ['run', 'hello'],
+		stdoutIsTTY: true,
+		outputFormat: 'stream-json',
 	});
 	t.false(jsonError);
 });

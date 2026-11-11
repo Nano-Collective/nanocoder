@@ -46,7 +46,7 @@ The scripts cover the most common parts of the command line:
 
 - **Subcommands** - `init`, `run`, `review`, `worktree`, `verify`, `skills`, `storage`, `daemon`, `config`, `trust`, `codex`, `copilot`, `completion`, plus their nested arguments (`daemon start|stop|status|logs|install|uninstall`, `config list|show|diff`, `skills add`, `trust --status|--grant <fingerprint>|--json`, `codex|copilot login`, and the shell names for `completion`).
 - **Flags** - the main top-level options (`--provider`, `--model`, `--mode`, `--context-max`, `--json`, `--output-format`, `--plain`, `--alt-screen`, `--acp`, `--vscode`, `--vscode-port`, `--trust-directory`, `--prompt-file`, `--mouse`, and their `--no-` forms where they exist), including short forms (`-c`, `-r`, `-h`, `-v`).
-- **Known flag values** — `--mode normal|auto-accept|yolo|plan|architect` and `--output-format text|json` offer their closed sets of values.
+- **Known flag values** — `--mode normal|auto-accept|yolo|plan|architect` and `--output-format text|json|stream-json` offer their closed sets of values.
 
 Some of the CLI is not covered yet: most subcommand-specific options, such as `init`'s `--preset` and `--lean`, `verify`'s `--pr` and `--post-review`, and `storage`'s `--format`. `trust` is the exception: its `--status`, `--grant` and `--json` flags do complete. These still work when typed in full; they just won't tab-complete. Run `nanocoder --help` for the complete list.
 

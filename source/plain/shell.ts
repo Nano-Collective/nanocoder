@@ -26,6 +26,10 @@ import {
 } from '@/plain/conversation';
 import {initializePlain} from '@/plain/initialize';
 import {
+	createStdoutStreamJsonSink,
+	type StreamJsonEvent,
+} from '@/plain/stream-json';
+import {
 	color,
 	writeBoot,
 	writeError,
@@ -54,7 +58,7 @@ export interface RunPlainShellOptions {
 	cliProvider?: string;
 	cliModel?: string;
 	trustDirectory: boolean;
-	outputFormat: 'text' | 'json';
+	outputFormat: 'text' | 'json' | 'stream-json';
 	/**
 	 * Injectable seams for testing. Each defaults to the real implementation,
 	 * so production call sites never need to pass this. Mirrors the pattern
@@ -117,6 +121,23 @@ export async function runPlainShell(
 	const deps: RunPlainShellDeps = {...defaultDeps, ...options.deps};
 
 	const isJson = outputFormat === 'json';
+	const isStreamJson = outputFormat === 'stream-json';
+	// --json prints one report at the end; stream-json additionally streams
+	// NDJSON events to stdout while the run is in progress. Both share the
+	// report shape, so one helper emits whichever the format asks for.
+	const streamJsonSink = isStreamJson
+		? createStdoutStreamJsonSink()
+		: undefined;
+	// The --json report and the stream-json `result` event carry the same
+	// fields; one helper emits whichever the format asks for.
+	type JsonReport = Omit<Extract<StreamJsonEvent, {type: 'result'}>, 'type'>;
+	const emitReport = (report: JsonReport): void => {
+		if (isJson) {
+			emitJsonReport(report);
+		} else if (isStreamJson) {
+			streamJsonSink?.({type: 'result', ...report});
+		}
+	};
 	const collectedWarnings: string[] = [];
 	setMessageQueueSink((type, message) => {
 		if (type === 'error') {
@@ -142,8 +163,8 @@ export async function runPlainShell(
 			path.resolve(process.cwd()),
 			trust.recheck,
 		);
-		if (isJson) {
-			emitJsonReport({
+		if (isJson || isStreamJson) {
+			emitReport({
 				kind: 'error',
 				exitCode: 1,
 				finalText: '',
@@ -167,8 +188,8 @@ export async function runPlainShell(
 		init = await deps.initializePlain({cliProvider, cliModel, developmentMode});
 	} catch (error) {
 		const formattedErr = formatError(error);
-		if (isJson) {
-			emitJsonReport({
+		if (isJson || isStreamJson) {
+			emitReport({
 				kind: 'error',
 				exitCode: 1,
 				finalText: '',
@@ -262,8 +283,8 @@ export async function runPlainShell(
 	const promptGate = await runLifecycleHooks('user-prompt-submit', {prompt});
 	if (promptGate.blocked) {
 		const message = promptGate.reason ?? 'Prompt blocked by a hook.';
-		if (isJson) {
-			emitJsonReport({
+		if (isJson || isStreamJson) {
+			emitReport({
 				kind: 'error',
 				exitCode: 1,
 				finalText: '',
@@ -348,12 +369,20 @@ export async function runPlainShell(
 
 	const nonInteractiveAlwaysAllow = getAppConfig().alwaysAllow ?? [];
 
-	if (!isJson) {
+	if (!isJson && !isStreamJson) {
 		writeLine();
 	}
 
 	let outcome: PlainConversationOutcome;
 	try {
+		if (isStreamJson) {
+			streamJsonSink?.({
+				type: 'session_start',
+				sessionId,
+				provider,
+				model,
+			});
+		}
 		conversationPromise = deps.runPlainConversation({
 			client,
 			toolManager,
@@ -367,6 +396,7 @@ export async function runPlainShell(
 			outputFormat,
 			sessionId,
 			workingDirectory: process.cwd(),
+			onStreamJsonEvent: streamJsonSink,
 		});
 		outcome = await conversationPromise;
 	} catch (error) {
@@ -386,7 +416,7 @@ export async function runPlainShell(
 		await cleanupArtifacts();
 	}
 
-	if (isJson) {
+	if (isJson || isStreamJson) {
 		const exitCode =
 			outcome.kind === 'success' ? 0 : outcome.kind === 'error' ? 1 : 2;
 
@@ -439,7 +469,7 @@ export async function runPlainShell(
 			}),
 		};
 
-		emitJsonReport(report);
+		emitReport(report);
 
 		markReported();
 		setMessageQueueSink(null);
