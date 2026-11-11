@@ -29,10 +29,7 @@ import type {
 // loop. Each runner reduces its frontend's outcome to the same observation,
 // so a guard or retry that one loop gets and another does not fails here
 // instead of drifting silently. Frontends join as they move onto the shared
-// turn engine (source/agent-loop/turn-engine.ts). A frontend that runs with
-// some engine behaviour switched off says so in its runner, and the scenario
-// asserts what it does instead, so the gap is written down rather than
-// skipped.
+// turn engine (source/agent-loop/turn-engine.ts).
 
 process.env.NO_COLOR = '1';
 
@@ -217,12 +214,6 @@ const subagentRunner: Runner = async scenario => {
 interface FrontendUnderTest {
 	name: string;
 	run: Runner;
-	/**
-	 * Runs with the engine's retry guards, text tool-call parsing and turn
-	 * ceiling. Subagents do not yet: a content-only reply of any kind ends
-	 * the run, and only their own repeated-call check applies.
-	 */
-	guarded: boolean;
 	/** The result an unknown tool gets. */
 	unknownToolResult: RegExp;
 }
@@ -231,19 +222,16 @@ const frontends: FrontendUnderTest[] = [
 	{
 		name: 'plain',
 		run: plainRunner,
-		guarded: true,
 		unknownToolResult: /^Unknown tool: nope$/,
 	},
 	{
 		name: 'acp',
 		run: acpRunner,
-		guarded: true,
 		unknownToolResult: /^Unknown tool: nope$/,
 	},
 	{
 		name: 'subagent',
 		run: subagentRunner,
-		guarded: false,
 		unknownToolResult: /'nope' is not available to this subagent/,
 	},
 ];
@@ -283,7 +271,7 @@ test.afterEach.always(() => {
 	reloadAppConfig();
 });
 
-for (const {name, run, guarded, unknownToolResult} of frontends) {
+for (const {name, run, unknownToolResult} of frontends) {
 	test.serial(`[${name}] a content-only reply ends the run`, async t => {
 		const seen = await run({replies: [text('done')]});
 		t.is(seen.end, 'completed');
@@ -315,11 +303,6 @@ for (const {name, run, guarded, unknownToolResult} of frontends) {
 	test.serial(`[${name}] nudges an empty turn, then recovers`, async t => {
 		const seen = await run({replies: [text(''), text('done')]});
 		t.is(seen.end, 'completed');
-		if (!guarded) {
-			// The empty reply is the answer.
-			t.is(seen.requests.length, 1);
-			return;
-		}
 		t.deepEqual(lastOf(seen.requests[1]), {
 			role: 'user',
 			content: EMPTY_TURN_NUDGE,
@@ -331,11 +314,6 @@ for (const {name, run, guarded, unknownToolResult} of frontends) {
 	test.serial(`[${name}] stops after the empty-turn cap`, async t => {
 		// Default maxEmptyTurns = 2: the first empty reply plus two nudges.
 		const seen = await run({replies: [text(''), text(''), text('')]});
-		if (!guarded) {
-			t.is(seen.end, 'completed');
-			t.is(seen.requests.length, 1);
-			return;
-		}
 		t.is(seen.end, 'stopped');
 		t.is(seen.requests.length, 3);
 	});
@@ -350,11 +328,6 @@ for (const {name, run, guarded, unknownToolResult} of frontends) {
 				],
 			});
 			t.is(seen.end, 'completed');
-			if (!guarded) {
-				// The text is not parsed, so it stands as the answer.
-				t.is(seen.requests.length, 1);
-				return;
-			}
 			const [assistant, nudge] = seen.requests[1].slice(-2);
 			t.deepEqual(assistant, {
 				role: 'assistant',
@@ -396,10 +369,6 @@ for (const {name, run, guarded, unknownToolResult} of frontends) {
 			replies: [{...text('half a'), finishReason: 'length'}, text('done')],
 		});
 		t.is(seen.end, 'completed');
-		if (!guarded) {
-			t.is(seen.requests.length, 1);
-			return;
-		}
 		const [fragment, nudge] = seen.requests[1].slice(-2);
 		t.is(fragment.content, 'half a');
 		t.deepEqual(nudge, {role: 'user', content: TRUNCATED_TURN_INSTRUCTION});
@@ -419,11 +388,6 @@ for (const {name, run, guarded, unknownToolResult} of frontends) {
 			const seen = await run({replies: [call('probe'), text('done')]});
 			t.is(seen.end, 'completed');
 			t.deepEqual(seen.executed, ['probe']);
-			if (!guarded) {
-				// No turn ceiling: the second turn still offers tools.
-				t.deepEqual(seen.offered, [TOOLS, TOOLS]);
-				return;
-			}
 			t.deepEqual(seen.offered, [TOOLS, []]);
 			t.regex(
 				String(lastOf(seen.requests[1])?.content),

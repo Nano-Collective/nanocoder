@@ -157,11 +157,17 @@ A project-level agent with the same `name` as a built-in or user-level agent ove
 
 ## Loop Protection
 
-A subagent that re-issues the identical tool call(s) on consecutive turns is stopped by the same [`maxRepeatedToolCalls`](../configuration/index.md#retry-limits) cap the main agent uses (default 3). There is nobody to ask inside a delegated run, so it never pauses: the run fails with an error naming the setting. Calls to nonexistent tools, and calls whose arguments aren't valid JSON, count toward the streak too, so a subagent stuck on a tool it doesn't have, or on a call it can't get right, hits the same cap.
+Subagents run on the same agent loop as `--plain` and ACP, with the same [retry limits](../configuration/index.md#retry-limits). There is nobody to ask inside a delegated run, so none of them pauses: hitting one fails the run with an error naming the setting.
+
+- **Repeated calls** (`maxRepeatedToolCalls`, default 3): a subagent that re-issues the identical tool call(s) on consecutive turns is stopped before the repeat that hits the cap runs. Calls to nonexistent tools, and calls whose arguments aren't valid JSON, count toward the streak too.
+- **Empty turns** (`maxEmptyTurns`): a turn with no text and no tool calls is nudged to continue, then the run stops.
+- **Malformed tool calls** (`maxMalformedRetries`): a model on the XML/JSON fallback path that writes an unparseable tool call is shown the error and asked to retry.
+- **Truncated turns** (`maxTruncatedTurns`): a reply cut off at the provider's output-token limit is asked to continue rather than returned as the answer.
+- **Turn ceiling** ([`headless.subagentMaxTurns`](../configuration/index.md#headless), default the headless `maxTurns`, 200): the last allowed turn offers no tools and asks for a final answer. A subagent that still calls tools on that turn stops with an error.
 
 Whatever the subagent produced before it got stuck is still handed to the main agent under a `Partial output produced before stopping:` heading, so useful work isn't discarded along with the failure.
 
-The other retry limits don't apply to subagents: their loop ends on its own when a turn comes back with no tool calls (so `maxEmptyTurns` is moot), they don't use text-parsed tool calls (so `maxMalformedRetries` is too), and `maxTruncatedTurns` is specific to the `--plain` loop. There is also no turn ceiling: apart from the repeated-call cap, a subagent runs until it stops calling tools or the main agent's run is cancelled.
+A provider reply with no content at all (no choices) fails the run as an error rather than returning an empty answer.
 
 ## Context Limits
 

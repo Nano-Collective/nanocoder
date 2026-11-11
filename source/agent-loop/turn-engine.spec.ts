@@ -251,14 +251,12 @@ test('with the guards and text parsing off, any content-only reply finishes', as
 				emptyTurnGuard: false,
 				truncatedTurnGuard: false,
 				repeatedToolCallGuard: false,
-				recordToolFreeTurns: false,
 			},
 		},
 	);
 	t.deepEqual(await run(), {kind: 'completed', modelCalls: 1});
 	t.deepEqual(answers, ['[tool_use: probe]']);
-	// A tool-free turn is not recorded when recordToolFreeTurns is off.
-	t.is(history().length, 1);
+	t.is(history().at(-1)?.content, '[tool_use: probe]');
 });
 
 test('an empty reply finishes when the empty-turn guard is off', async t => {
