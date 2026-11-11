@@ -8,7 +8,7 @@ import type {
 	FirewallViolation,
 } from '@/types/firewall';
 import {FIREWALL_DEFAULTS, resolveFirewallConfig} from '@/types/firewall';
-import {logWarning} from '@/utils/message-queue';
+import {notifyWarning} from '@/utils/message-queue';
 import {
 	detectAnyTypeInjections,
 	detectDeletedTestBlocks,
@@ -271,6 +271,6 @@ export function enforceFirewall(result: FirewallEvaluationResult): string {
 		throw new Error(result.summary ?? 'Mutation blocked by firewall');
 	}
 	if (!result.summary) return '';
-	logWarning(result.summary, true, {source: 'mutation-firewall'});
+	notifyWarning(result.summary, true, {source: 'mutation-firewall'});
 	return `\n\n${result.summary}`;
 }

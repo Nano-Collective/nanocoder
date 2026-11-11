@@ -18,7 +18,7 @@ import type { HooksConfig } from "@/types/config";
 import { TOOL_APPROVAL_REQUIRED_KIND } from "@/constants";
 import type { ToolManager } from "@/tools/tool-manager";
 import type { DevelopmentMode, LLMClient } from "@/types/core";
-import { logError, logWarning } from "@/utils/message-queue";
+import { notifyError, notifyWarning } from "@/utils/message-queue";
 import { ShutdownManager } from "@/utils/shutdown";
 import type { PlainConversationOutcome } from "./conversation.js";
 import { runPlainShell } from "./shell.js";
@@ -1494,7 +1494,7 @@ test.serial("plain shell initializes with the run's development mode", async (t)
 });
 
 test.serial(
-	"plain shell captures logWarning and logError to stderr and includes warnings in json report",
+	"plain shell captures notifyWarning and notifyError to stderr and includes warnings in json report",
 	async (t) => {
 		const stdout = capturingStdout();
 		const stderr = capturingStderr();
@@ -1506,9 +1506,9 @@ test.serial(
 				outputFormat: "json",
 				deps: baseDeps({
 					initializePlain: async () => {
-						logWarning("Invalid hooks config: unknown lifecycle event 'post-tool-uze'.");
-						logWarning("Invalid formatters config: entries need a 'command' string.");
-						logError("Plugin bad.mjs failed to load: boom from plugin");
+						notifyWarning("Invalid hooks config: unknown lifecycle event 'post-tool-uze'.");
+						notifyWarning("Invalid formatters config: entries need a 'command' string.");
+						notifyError("Plugin bad.mjs failed to load: boom from plugin");
 						return {
 							client: FAKE_CLIENT,
 							toolManager: FAKE_TOOL_MANAGER,
@@ -1575,7 +1575,7 @@ test.serial(
 				outputFormat: "json",
 				deps: baseDeps({
 					initializePlain: async () => {
-						logWarning("Some startup warning");
+						notifyWarning("Some startup warning");
 						return {
 							client: FAKE_CLIENT,
 							toolManager: FAKE_TOOL_MANAGER,

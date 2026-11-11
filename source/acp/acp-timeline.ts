@@ -6,7 +6,7 @@ import type {ToolManager} from '@/tools/tool-manager';
 import type {Message, ToolCall} from '@/types/core';
 import type {TimelineEntryMeta} from '@/types/timeline';
 import {formatError} from '@/utils/error-formatter';
-import {logWarning} from '@/utils/message-queue';
+import {notifyWarning} from '@/utils/message-queue';
 import type {AcpSession} from './acp-session';
 
 /**
@@ -130,7 +130,7 @@ export async function beginTimelineCapture(
 			// and throw away the user's uncommitted work on revert. No
 			// checkpoint is safer than a wrong one.
 			if (scan.truncated) {
-				logWarning(
+				notifyWarning(
 					'Skipping action timeline checkpoint: too many modified files',
 					true,
 					{context: {toolName, fileCount: scan.files.length}},
@@ -153,7 +153,7 @@ export async function beginTimelineCapture(
 		const entry = await session.timeline.capture({...meta, files});
 		return {mode: 'direct', entry};
 	} catch (error) {
-		logWarning('Failed to capture action timeline checkpoint', true, {
+		notifyWarning('Failed to capture action timeline checkpoint', true, {
 			context: {toolName, error: formatError(error)},
 		});
 		return null;
@@ -197,7 +197,7 @@ export async function finishTimelineCapture(
 			files: context.files,
 		});
 	} catch (error) {
-		logWarning('Failed to finalize action timeline checkpoint', true, {
+		notifyWarning('Failed to finalize action timeline checkpoint', true, {
 			context: {toolName: context.toolName, error: formatError(error)},
 		});
 		return null;

@@ -17,7 +17,7 @@ import {
 } from '@/utils/checkpoint-utils';
 import {ensureNanocoderGitignore} from '@/utils/ensure-nanocoder-gitignore';
 import {formatError} from '@/utils/error-formatter';
-import {logWarning} from '@/utils/message-queue';
+import {notifyWarning} from '@/utils/message-queue';
 import {FileSnapshotService} from './file-snapshot';
 /**
  * Service for managing conversation checkpoints.
@@ -332,7 +332,7 @@ export class CheckpointManager {
 
 				fileSnapshots.set(relativePath, content);
 			} catch (error) {
-				logWarning('Could not load file snapshot', true, {
+				notifyWarning('Could not load file snapshot', true, {
 					context: {
 						relativePath,
 						error: formatError(error),
@@ -383,7 +383,7 @@ export class CheckpointManager {
 						}
 					}
 				} catch (error) {
-					logWarning('Could not read checkpoint', true, {
+					notifyWarning('Could not read checkpoint', true, {
 						context: {
 							checkpointName: entry,
 							error: formatError(error),
@@ -551,7 +551,7 @@ export class CheckpointManager {
 			}
 		} catch (error) {
 			// If we can't read the directory, just return 0
-			logWarning('Could not calculate directory size', true, {
+			notifyWarning('Could not calculate directory size', true, {
 				context: {
 					dirPath,
 					error: formatError(error),

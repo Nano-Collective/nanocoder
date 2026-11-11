@@ -86,7 +86,7 @@ Nanocoder is a React-based CLI coding agent built with Ink.js that provides loca
 
 ### State Management Pattern
 
-All state lives in `source/hooks/useAppState.tsx`. Other hooks (`useChatHandler`, `useModeHandlers`) receive state and setters from it. `source/app/App.tsx` orchestrates them via `useAppHandlers`. Global `source/utils/message-queue.tsx` lets deep components push chat messages without prop-drilling. Non-UI modules import the `log*` helpers from `source/utils/message-queue-core.ts` instead, which has no React/Ink imports, so the CLI fast paths stay Ink-free (`source/config/no-ink-fast-paths.spec.ts` enforces this).
+All state lives in `source/hooks/useAppState.tsx`. Other hooks (`useChatHandler`, `useModeHandlers`) receive state and setters from it. `source/app/App.tsx` orchestrates them via `useAppHandlers`. Global `source/utils/message-queue.tsx` lets deep components push chat messages without prop-drilling. Non-UI modules import the `notify*` helpers from `source/utils/message-queue-core.ts` instead, which has no React/Ink imports, so the CLI fast paths stay Ink-free (`source/config/no-ink-fast-paths.spec.ts` enforces this).
 
 ### Tool System
 

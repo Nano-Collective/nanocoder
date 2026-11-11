@@ -4,9 +4,9 @@ import {getLogger} from './logging';
 import {ErrorMessage, InfoMessage, WarningMessage} from '@/components/message-box';
 import {
 	addToMessageQueue,
-	logError,
-	logInfo,
-	logWarning,
+	notifyError,
+	notifyInfo,
+	notifyWarning,
 	setGlobalMessageQueue,
 	setMessageQueueSink,
 } from './message-queue';
@@ -72,23 +72,23 @@ test.serial('addToMessageQueue is a no-op when no queue is registered', t => {
 	t.is(queue.calls.length, 1);
 });
 
-test.serial('logInfo dispatches an InfoMessage component to the queue', t => {
+test.serial('notifyInfo dispatches an InfoMessage component to the queue', t => {
 	const queue = spy<[React.ReactNode]>();
 	setGlobalMessageQueue(queue);
 
-	logInfo('hello info');
+	notifyInfo('hello info');
 
 	t.deepEqual(queuedTypes(queue), [InfoMessage]);
 	t.is(queuedProps(queue, 0).message, 'hello info');
 	t.true(queuedProps(queue, 0).hideBox);
 });
 
-test.serial('logError and logWarning dispatch their own components', t => {
+test.serial('notifyError and notifyWarning dispatch their own components', t => {
 	const queue = spy<[React.ReactNode]>();
 	setGlobalMessageQueue(queue);
 
-	logError('boom', false);
-	logWarning('careful');
+	notifyError('boom', false);
+	notifyWarning('careful');
 
 	t.deepEqual(queuedTypes(queue), [ErrorMessage, WarningMessage]);
 	t.false(queuedProps(queue, 0).hideBox);
@@ -101,8 +101,8 @@ test.serial('the sink receives each message with its type and source', t => {
 	setMessageQueueSink(sink);
 
 	try {
-		logInfo('from custom source', true, {source: 'my-module'});
-		logError('error from custom source', false, {error: new Error('cause')});
+		notifyInfo('from custom source', true, {source: 'my-module'});
+		notifyError('error from custom source', false, {error: new Error('cause')});
 	} finally {
 		setMessageQueueSink(null);
 	}
@@ -115,7 +115,7 @@ test.serial('the sink receives each message with its type and source', t => {
 		]),
 		[
 			['info', 'from custom source', 'my-module'],
-			['error', 'error from custom source', 'logError'],
+			['error', 'error from custom source', 'notifyError'],
 		],
 	);
 	t.is(queue.calls.length, 2);

@@ -11,7 +11,7 @@ import {getProjectRoot, getSafeSessionCwd} from '@/services/session-cwd';
 import {getKeyGeneratorSessionId} from '@/session/key-generator';
 import type {HookDefinition, HookEvent} from '@/types/config';
 import type {ToolCall} from '@/types/core';
-import {logError} from '@/utils/message-queue';
+import {notifyError} from '@/utils/message-queue';
 import {signalProcessTree} from '@/utils/process-tree';
 import {truncateToolResult} from '@/utils/truncate-tool-result';
 
@@ -723,7 +723,7 @@ async function runShellHooks(
 		const label = hookLabel(hook);
 
 		if (run.failure) {
-			logError(`Hook "${label}" (${event}) ${run.failure} — skipping.`);
+			notifyError(`Hook "${label}" (${event}) ${run.failure} — skipping.`);
 			continue;
 		}
 
@@ -739,7 +739,7 @@ async function runShellHooks(
 					failures,
 				};
 			}
-			logError(
+			notifyError(
 				`Hook "${label}" (${event}) exited ${run.exitCode}${
 					detail ? `: ${detail}` : ''
 				}`,

@@ -20,7 +20,7 @@ import type {
 	ScheduleCronTrigger,
 	SkillTrigger,
 } from '@/types/skills';
-import {logError} from '@/utils/message-queue-core';
+import {notifyError} from '@/utils/message-queue-core';
 
 const FILE_EVENT_KINDS: ReadonlySet<FileChangeEventKind> = new Set([
 	'add',
@@ -66,7 +66,7 @@ export function parseSubscribeBlockOrWarn(
 		return parseSubscribeBlock(raw);
 	} catch (err) {
 		if (err instanceof SubscribeParseError) {
-			logError(
+			notifyError(
 				`Invalid subscribe block in ${filePath}: ${err.message}. Loaded without triggers.`,
 			);
 			return undefined;

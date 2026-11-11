@@ -3,7 +3,7 @@ import {existsSync} from 'fs';
 import {basename, dirname, join} from 'path';
 import {fileURLToPath} from 'url';
 import type {NotificationsConfig} from '@/types/config';
-import {logInfo} from '@/utils/message-queue';
+import {notifyInfo} from '@/utils/message-queue';
 
 export type NotificationEvent =
 	| 'toolConfirmation'
@@ -150,7 +150,7 @@ function sendDarwin(title: string, message: string): void {
 	// Hint once that terminal-notifier gives a better experience
 	if (!_terminalNotifierHinted) {
 		_terminalNotifierHinted = true;
-		logInfo(
+		notifyInfo(
 			'Install terminal-notifier for better notifications: brew install terminal-notifier',
 		);
 	}

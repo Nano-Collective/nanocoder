@@ -4,7 +4,7 @@ import {substituteEnvVars} from '@/config/env-substitution';
 import {getConfigPath} from '@/config/paths';
 import {getConfigRoot} from '@/services/session-context';
 import type {MCPServerConfig, ProviderConfig} from '@/types/config';
-import {logError} from '@/utils/message-queue-core';
+import {notifyError} from '@/utils/message-queue-core';
 
 // Simplified configuration source types
 export type ConfigSource = 'project' | 'global' | 'env';
@@ -109,7 +109,9 @@ export function loadProjectMCPConfig(
 			);
 		}
 	} catch (error) {
-		logError(`Failed to load MCP config from ${configPath}: ${String(error)}`);
+		notifyError(
+			`Failed to load MCP config from ${configPath}: ${String(error)}`,
+		);
 	}
 
 	return [];
@@ -136,7 +138,9 @@ export function loadGlobalMCPConfig(): MCPServerWithSource[] {
 			return mcpServers.map(server => mapAndSubstituteServer(server, 'global'));
 		}
 	} catch (error) {
-		logError(`Failed to load MCP config from ${configPath}: ${String(error)}`);
+		notifyError(
+			`Failed to load MCP config from ${configPath}: ${String(error)}`,
+		);
 	}
 
 	return [];
@@ -202,7 +206,7 @@ function loadEnvMCPConfigs(): MCPServerWithSource[] {
 			try {
 				rawData = readFileSync(process.env.NANOCODER_MCPSERVERS_FILE, 'utf-8');
 			} catch (error) {
-				logError(
+				notifyError(
 					`Failed to read NANOCODER_MCPSERVERS_FILE at ${process.env.NANOCODER_MCPSERVERS_FILE}: ${String(error)}`,
 				);
 			}
@@ -229,7 +233,9 @@ function loadEnvMCPConfigs(): MCPServerWithSource[] {
 			return servers.map(server => mapAndSubstituteServer(server, 'env'));
 		}
 	} catch (error) {
-		logError(`Failed to parse MCP configs from environment: ${String(error)}`);
+		notifyError(
+			`Failed to parse MCP configs from environment: ${String(error)}`,
+		);
 	}
 
 	return [];
@@ -293,7 +299,7 @@ function loadProjectProviderConfigs(cwd: string): ProviderConfig[] {
 				return processedProviders;
 			}
 		} catch (error) {
-			logError(
+			notifyError(
 				`Failed to load project provider config from ${configPath}: ${String(error)}`,
 			);
 		}
@@ -335,7 +341,7 @@ function loadProviderConfigFromFile(filePath: string): ProviderConfig[] {
 			return processedProviders;
 		}
 	} catch (error) {
-		logError(
+		notifyError(
 			`Failed to load provider config from ${filePath}: ${String(error)}`,
 		);
 	}
@@ -354,7 +360,7 @@ function loadEnvProviderConfigs(): ProviderConfig[] {
 			try {
 				rawData = readFileSync(process.env.NANOCODER_PROVIDERS_FILE, 'utf-8');
 			} catch (error) {
-				logError(
+				notifyError(
 					`Failed to read NANOCODER_PROVIDERS_FILE at ${process.env.NANOCODER_PROVIDERS_FILE}: ${String(error)}`,
 				);
 			}
@@ -377,7 +383,7 @@ function loadEnvProviderConfigs(): ProviderConfig[] {
 			return substituteEnvVars(config.providers);
 		}
 	} catch (error) {
-		logError(
+		notifyError(
 			`Failed to parse provider configs from environment: ${String(error)}`,
 		);
 	}

@@ -18,7 +18,7 @@ import type {
 import {atomicWriteFile} from '@/utils/atomic-write';
 import {ensureNanocoderGitignore} from '@/utils/ensure-nanocoder-gitignore';
 import {formatError} from '@/utils/error-formatter';
-import {logWarning} from '@/utils/message-queue';
+import {notifyWarning} from '@/utils/message-queue';
 import {FileSnapshotService} from './file-snapshot';
 import {
 	acquireTimelineLock,
@@ -122,7 +122,7 @@ export class TimelineManager {
 			});
 			this.lockHeld = acquired;
 		} catch (error) {
-			logWarning('Could not acquire timeline session lock', true, {
+			notifyWarning('Could not acquire timeline session lock', true, {
 				context: {
 					sessionId: this.sessionId,
 					error: formatError(error),
@@ -143,7 +143,7 @@ export class TimelineManager {
 		try {
 			await releaseTimelineLock(this.timelineDir);
 		} catch (error) {
-			logWarning('Could not release timeline session lock', true, {
+			notifyWarning('Could not release timeline session lock', true, {
 				context: {
 					sessionId: this.sessionId,
 					error: formatError(error),
@@ -229,7 +229,7 @@ export class TimelineManager {
 			for (const [relative, snapshot] of captured) {
 				// Checked as bytes, before the decode - see isProbablyBinary.
 				if (isProbablyBinary(snapshot)) {
-					logWarning('Skipping binary file in action timeline', true, {
+					notifyWarning('Skipping binary file in action timeline', true, {
 						context: {relativePath: relative},
 					});
 					continue;
@@ -288,7 +288,7 @@ export class TimelineManager {
 		// The index is user-writable JSON on disk, and `entry.id` becomes part of
 		// a path below. Only an id this manager could have generated may do that.
 		if (!ENTRY_ID_PATTERN.test(entry.id)) {
-			logWarning('Ignoring unsafe checkpoint id in timeline index', true, {
+			notifyWarning('Ignoring unsafe checkpoint id in timeline index', true, {
 				context: {checkpointId: entry.id},
 			});
 			return {
@@ -480,7 +480,7 @@ export class TimelineManager {
 			// normalisation that happened at capture time.
 			const relativePath = this.toRelativePath(indexedPath);
 			if (!relativePath || relativePath !== indexedPath) {
-				logWarning('Ignoring unsafe path in timeline index', true, {
+				notifyWarning('Ignoring unsafe path in timeline index', true, {
 					context: {relativePath: indexedPath},
 				});
 				continue;
@@ -491,7 +491,7 @@ export class TimelineManager {
 					await this.fileSnapshotService.deleteFile(relativePath);
 					restored.push(relativePath);
 				} catch (error) {
-					logWarning('Could not delete created timeline file', true, {
+					notifyWarning('Could not delete created timeline file', true, {
 						context: {
 							relativePath,
 							error: formatError(error),
@@ -507,7 +507,7 @@ export class TimelineManager {
 
 				snapshots.set(relativePath, content);
 			} catch (error) {
-				logWarning('Could not load timeline file snapshot', true, {
+				notifyWarning('Could not load timeline file snapshot', true, {
 					context: {
 						relativePath,
 						error: formatError(error),
@@ -688,7 +688,7 @@ export class TimelineManager {
 			this.index = parsed;
 			return this.index;
 		} catch (error) {
-			logWarning('Could not read timeline index, starting empty', true, {
+			notifyWarning('Could not read timeline index, starting empty', true, {
 				context: {
 					error: formatError(error),
 				},

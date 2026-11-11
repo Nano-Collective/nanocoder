@@ -16,7 +16,7 @@ import {getColors} from '@/config/index';
 import {getConfigPath} from '@/config/paths';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
 import {formatError} from '@/utils/error-formatter';
-import {logError, logInfo} from '@/utils/message-queue';
+import {notifyError, notifyInfo} from '@/utils/message-queue';
 import {type ConfigLocation, LocationStep} from './steps/location-step';
 
 export type BaseWizardStep =
@@ -114,7 +114,7 @@ export function BaseConfigWizard<T>({
 						setItems(parseConfig(raw));
 						setConfigCorrupted(false);
 					} catch (err) {
-						logError('Failed to load configuration', true, {
+						notifyError('Failed to load configuration', true, {
 							context: {configPath: path},
 							error: formatError(err),
 						});
@@ -127,7 +127,7 @@ export function BaseConfigWizard<T>({
 					}
 				}
 			} catch (err) {
-				logError('Failed to load existing configuration', true, {
+				notifyError('Failed to load existing configuration', true, {
 					context: {configPath: path},
 					error: formatError(err),
 				});
@@ -192,7 +192,7 @@ export function BaseConfigWizard<T>({
 		try {
 			if (existsSync(configPath)) {
 				unlinkSync(configPath);
-				logInfo(`Deleted configuration file: ${configPath}`);
+				notifyInfo(`Deleted configuration file: ${configPath}`);
 			}
 			setConfigCorrupted(false);
 			setError(null);

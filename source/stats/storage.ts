@@ -10,7 +10,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import {getAppDataPath} from '@/config/paths';
 import {formatError} from '@/utils/error-formatter';
-import {logInfo, logWarning} from '@/utils/message-queue';
+import {notifyInfo, notifyWarning} from '@/utils/message-queue';
 import {isObject} from '@/utils/type-helpers';
 import {toLocalDateKey, toMonthKey} from './date-utils';
 import type {DailyStats, MonthlyStats, PairUsage, StatsLedger} from './types';
@@ -254,9 +254,9 @@ export function readStatsLedger(): StatsLedger {
 				if (isLegacy) {
 					try {
 						fs.unlinkSync(filePath);
-						logInfo(`Migrated stats ledger to: ${getStatsFilePath()}`);
+						notifyInfo(`Migrated stats ledger to: ${getStatsFilePath()}`);
 					} catch (error) {
-						logWarning(
+						notifyWarning(
 							'Migrated stats ledger but could not remove legacy file:',
 							true,
 							{
@@ -265,13 +265,13 @@ export function readStatsLedger(): StatsLedger {
 						);
 					}
 				} else {
-					logInfo('Migrated stats ledger to the current schema.');
+					notifyInfo('Migrated stats ledger to the current schema.');
 				}
 			}
 		}
 		return ledger;
 	} catch (error) {
-		logWarning('Failed to read stats ledger:', true, {context: {error}});
+		notifyWarning('Failed to read stats ledger:', true, {context: {error}});
 		return createEmptyLedger();
 	}
 }
@@ -287,7 +287,7 @@ export function writeStatsLedger(ledger: StatsLedger): boolean {
 		fs.renameSync(tmpPath, filePath);
 		return true;
 	} catch (error) {
-		logWarning('Failed to write stats ledger:', true, {
+		notifyWarning('Failed to write stats ledger:', true, {
 			context: {error: formatError(error)},
 		});
 		return false;
@@ -301,7 +301,7 @@ export function clearStatsLedger(): void {
 				fs.unlinkSync(filePath);
 			}
 		} catch (error) {
-			logWarning('Failed to clear stats ledger:', true, {
+			notifyWarning('Failed to clear stats ledger:', true, {
 				context: {error: formatError(error)},
 			});
 		}
