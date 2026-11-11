@@ -201,7 +201,13 @@ export interface TurnEngineAdapter<S> {
 	onRejectedToolCalls?(partition: PartitionedToolCalls): void;
 	/** The nudge sent after an empty turn. Defaults to `EMPTY_TURN_NUDGE`. */
 	emptyTurnNudge?(history: Message[]): string;
-	onEmptyRetry?(attempt: number, nudge: string): void;
+	onEmptyRetry?(attempt: number, nudge: string): void | Promise<void>;
+	/**
+	 * How tool results are written to history. Defaults to the results as
+	 * they are; the TUI writes them through its MessageBuilder (truncation,
+	 * structured content).
+	 */
+	toolResultMessages?(results: ToolResult[]): Message[];
 	/**
 	 * The empty-turn cap was hit. Return a replacement history (compacted,
 	 * with its own nudge) to reset the retry guards and try again, or nothing
@@ -307,6 +313,10 @@ export async function runTurnEngine<S>(
 		...result,
 		modelCalls,
 	});
+	const resultMessages = (results: ToolResult[]): Message[] =>
+		results.length === 0
+			? []
+			: (adapter.toolResultMessages?.(results) ?? results);
 	const append = (...messages: Message[]) => {
 		if (messages.length === 0) return;
 		history.set([...history.get(), ...messages]);
@@ -490,7 +500,7 @@ export async function runTurnEngine<S>(
 			const repeated = repeatedToolCallGuard
 				? guards.toolCalls(signatureCalls)
 				: null;
-			append(...resultsForAbandonedTurn);
+			append(...resultMessages(resultsForAbandonedTurn));
 			if (repeated && !(await continuePastRepeat(repeated, []))) {
 				return stop({
 					kind: 'guard-stop',
@@ -521,7 +531,7 @@ export async function runTurnEngine<S>(
 				}
 				const nudge =
 					adapter.emptyTurnNudge?.(history.get()) ?? EMPTY_TURN_NUDGE;
-				adapter.onEmptyRetry?.(verdict.attempt, nudge);
+				await adapter.onEmptyRetry?.(verdict.attempt, nudge);
 				append({role: 'user', content: nudge});
 				continue;
 			}
@@ -578,7 +588,10 @@ export async function runTurnEngine<S>(
 		}
 
 		const execution = await adapter.executeTools(validToolCalls, context);
-		append(...(execution.results ?? []), ...(execution.messages ?? []));
+		append(
+			...resultMessages(execution.results ?? []),
+			...(execution.messages ?? []),
+		);
 		if (execution.kind === 'stop') {
 			return stop({kind: 'adapter-stop', payload: execution.payload});
 		}
