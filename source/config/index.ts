@@ -12,7 +12,6 @@ import {
 	getNotificationsPreference,
 	loadPreferences,
 } from '@/config/preferences';
-import {ignoredDotenvWarning, loadProjectDotenv} from '@/config/project-dotenv';
 import {
 	DEFAULT_SESSION_CONFIG,
 	normalizeSessionConfig,
@@ -58,14 +57,6 @@ import {isTrustLevel} from '@/verify/trust';
 
 export {confDirMap, getClosestConfigFile} from '@/config/paths';
 export {DEFAULT_SESSION_CONFIG} from '@/config/session-config';
-
-// Load .env file from working directory (shell environment takes precedence).
-// Trust-related keys are dropped: this runs before the trust check.
-const dotenvResult = loadProjectDotenv(process.cwd());
-const dotenvWarning = ignoredDotenvWarning(dotenvResult.ignored);
-if (dotenvWarning) {
-	process.stderr.write(`${dotenvWarning}\n`);
-}
 
 type ConfigFileCacheEntry = {
 	mtimeMs: number;
