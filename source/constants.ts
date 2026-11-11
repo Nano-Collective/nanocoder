@@ -77,8 +77,6 @@ export const MAX_TIMELINE_SESSION_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 export const MAX_FIND_FILES_RESULTS = 100;
 export const MAX_SEARCH_RESULTS = 100;
 export const MAX_PROMPT_HISTORY_SIZE = 100;
-export const MAX_USAGE_SESSIONS = 100;
-export const MAX_DAILY_AGGREGATES = 30;
 export const MAX_WEB_SEARCH_QUERY_LENGTH = 500;
 
 // === DEFAULTS ===
