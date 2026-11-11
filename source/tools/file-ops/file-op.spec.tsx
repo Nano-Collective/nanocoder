@@ -6,7 +6,11 @@ import {render} from 'ink-testing-library';
 import React from 'react';
 import {themes} from '../../config/themes.js';
 import {ThemeContext} from '../../hooks/useTheme.js';
-import {resetSessionCwd, setSessionCwd} from '../../services/session-cwd.js';
+import {
+	resetSessionCwd,
+	setProjectRoot,
+	setSessionCwd,
+} from '../../services/session-cwd.js';
 import type {DevelopmentMode} from '../../types/core.js';
 import {resolveToolApproval} from '../approval-policy.js';
 import {fileOpTool} from './file-op.js';
@@ -151,6 +155,29 @@ test('file_op approval: a dangling symlink at the destination counts as existing
 		),
 	);
 });
+
+(process.platform === 'win32' ? test.skip : test)(
+	'file_op validator: copy onto a dangling symlink that points outside is rejected',
+	async t => {
+		const outside = await mkdtemp(join(tmpdir(), 'file-op-outside-'));
+		try {
+			setProjectRoot(workspace);
+			// copyFile follows a dangling destination link and creates its target.
+			await symlink(join(outside, 'authorized_keys'), join(workspace, 'notes.md'));
+			const result = await fileOpTool.validator?.({
+				operation: 'copy',
+				path: 'greet.py',
+				destination: 'notes.md',
+			});
+			t.false(result?.valid);
+			if (result && !result.valid) {
+				t.regex(result.error, /escapes project directory via symlink/);
+			}
+		} finally {
+			await rm(outside, {recursive: true, force: true});
+		}
+	},
+);
 
 test('file_op approval: mkdir runs in auto-accept', async t => {
 	t.false(await needsApproval({operation: 'mkdir', path: 'src'}, 'auto-accept'));
