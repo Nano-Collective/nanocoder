@@ -267,7 +267,7 @@ Whether CI-watch investigations can auto-fix a failure — and how aggressively 
 
 - **`comment-only`** (default) — investigates and diagnoses a CI failure, posting the diagnosis as a PR comment. Never mutates anything.
 - **`auto-fix`** — additionally implements and commits a fix in an isolated `git clone`, then pushes a new branch and opens a **draft PR** for human review. The original failing branch is never touched directly.
-- **`full-commit`** — pushes the fix **directly to the failing branch**, with no draft PR and no review step. `daemon start --trust full-commit` shows a one-time security warning per project before starting; subsequent starts for the same project skip it.
+- **`full-commit`** — pushes the fix **directly to the failing branch**, with no draft PR and no review step. `daemon start --trust full-commit` shows a one-time security warning per project before starting; subsequent starts for the same project skip it. Some fixes are never pushed unattended. If a fix changes `.github/`, any `.git*` file, git hook setups (`.husky/`, `.githooks/`, `lefthook.yml`, `.pre-commit-config.yaml`), lockfiles, a `package.json`'s scripts or dependencies, `.nanocoder/`, `agents.config.json` or `.mcp.json`, the daemon pushes nothing and reports the diagnosis with an error naming those files.
 
 When you restart Nanocoder, it automatically restores your last provider, model, theme, shape, paste threshold, and notification preferences.
 
