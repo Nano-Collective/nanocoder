@@ -147,7 +147,7 @@ if (args[0] === 'config') {
 // (trust-cli.spec.ts checks this), which is why preferences.ts logs through
 // @/utils/logging and not the Ink message queue.
 if (args[0] === 'trust') {
-	const {runTrustCli} = await import('@/config/trust-cli');
+	const {runTrustCli} = await import('@/config/trust/trust-cli');
 	const result = runTrustCli(args.slice(1));
 	if (result.exitCode === 0) {
 		console.log(result.output);

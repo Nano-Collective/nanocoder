@@ -8,13 +8,15 @@
  */
 
 import {
-	grantDirectoryTrust,
-	isDirectoryTrusted,
 	loadGlobalOnlyPreferences,
 	saveGlobalOnlyPreferences,
-	trustRecheck,
 } from '@/config/preferences';
-import {describeProjectTrust} from '@/config/project-trust';
+import {
+	grantDirectoryTrust,
+	isDirectoryTrusted,
+	trustRecheck,
+} from '@/config/trust/directory-trust';
+import {describeProjectTrust} from '@/config/trust/project-trust';
 
 interface TrustCliResult {
 	exitCode: 0 | 1;

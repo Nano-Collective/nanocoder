@@ -23,7 +23,10 @@ import {dirname, join, resolve} from 'node:path';
 import {createInterface} from 'node:readline/promises';
 import {fileURLToPath} from 'node:url';
 import {getAppConfig} from '@/config/index';
-import {ensureDirectoryTrust, untrustedReason} from '@/config/preferences';
+import {
+	ensureDirectoryTrust,
+	untrustedReason,
+} from '@/config/trust/directory-trust';
 import {ensureNanocoderGitignore} from '@/utils/ensure-nanocoder-gitignore';
 import {formatError} from '@/utils/error-formatter';
 import {isTrustLevel, resolveTrustLevel, type TrustLevel} from '@/verify/trust';

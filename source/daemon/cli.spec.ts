@@ -5,14 +5,9 @@ import {mkdir, mkdtemp, rm, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
-import {
-	ensureDirectoryTrust,
-	isDirectoryTrusted,
-	loadPreferences,
-	resetPreferencesCache,
-	savePreferences,
-} from '@/config/preferences';
-import {describeProjectTrust} from '@/config/project-trust';
+import {loadPreferences, resetPreferencesCache, savePreferences} from '@/config/preferences';
+import {ensureDirectoryTrust, isDirectoryTrusted} from '@/config/trust/directory-trust';
+import {describeProjectTrust} from '@/config/trust/project-trust';
 import {CONFIG_AUTO_FIX_WARNING, runDaemonCli} from './cli';
 import {
 	getLockfilePath,

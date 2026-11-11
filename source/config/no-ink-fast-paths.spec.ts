@@ -33,7 +33,7 @@ process.stdout.write(JSON.stringify({count: loaded.size, ui}));
 const FAST_PATH_MODULES = [
 	'source/config/index.ts',
 	'source/config/config-cli.ts',
-	'source/config/trust-cli.ts',
+	'source/config/trust/trust-cli.ts',
 	'source/daemon/cli.ts',
 	'source/verify/cli.ts',
 	'source/init/initializer.ts',
