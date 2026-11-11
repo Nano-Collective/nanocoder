@@ -2,7 +2,7 @@ import {existsSync} from 'node:fs';
 import {dirname, isAbsolute, relative, resolve} from 'node:path';
 
 import {getAppConfig} from '@/config/index';
-import {resolveFilePath} from '@/services/lifecycle-hooks';
+import {getToolFileArg} from '@/services/lifecycle-hooks';
 import {getSafeSessionCwd} from '@/services/session-cwd';
 import {COMMIT_SYSTEM_PROMPT} from '@/tools/git/commit-prompt';
 import {execGit, truncateDiff} from '@/tools/git/utils';
@@ -82,7 +82,7 @@ export async function maybeAutoCommit(
 	if (!getAppConfig().autoCommit || !AUTO_COMMIT_TOOLS.has(toolName)) {
 		return null;
 	}
-	const filePath = resolveFilePath(toolArgs);
+	const filePath = getToolFileArg(toolArgs);
 	if (!filePath) return null;
 
 	// Resolved the same way the file tools resolve it.
