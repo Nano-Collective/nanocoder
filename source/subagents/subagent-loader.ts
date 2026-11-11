@@ -13,7 +13,7 @@ import {fileURLToPath} from 'node:url';
 import {getConfigPath} from '@/config/paths';
 import {getActiveSessionContext} from '@/services/session-context';
 import {formatError} from '@/utils/error-formatter';
-import {logError, logWarning} from '@/utils/message-queue-core';
+import {notifyError, notifyWarning} from '@/utils/message-queue-core';
 import type {SubagentConfigWithSource, SubagentLoadPriority} from './types.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -59,7 +59,7 @@ export class SubagentLoader {
 	/**
 	 * Per-file parse / load errors collected during initialize(). Drained by
 	 * bootstrap so the daemon can surface them in its log (the message-queue
-	 * `logError` path only reaches the TUI's chat queue).
+	 * `notifyError` path only reaches the TUI's chat queue).
 	 */
 	private loadErrors: SubagentLoadError[] = [];
 
@@ -99,7 +99,7 @@ export class SubagentLoader {
 		for (const config of userAgents) {
 			const existing = this.cache.get(config.name);
 			if (existing?.source.isBuiltIn) {
-				logWarning(`User agent '${config.name}' overrides built-in agent`);
+				notifyWarning(`User agent '${config.name}' overrides built-in agent`);
 			}
 			this.cache.set(config.name, config);
 		}
@@ -114,7 +114,9 @@ export class SubagentLoader {
 			const existing = this.cache.get(config.name);
 			if (existing) {
 				const source = existing.source.isBuiltIn ? 'built-in' : 'user';
-				logWarning(`Project agent '${config.name}' overrides ${source} agent`);
+				notifyWarning(
+					`Project agent '${config.name}' overrides ${source} agent`,
+				);
 			}
 			this.cache.set(config.name, config);
 		}
@@ -294,7 +296,7 @@ export class SubagentLoader {
 			} catch (error) {
 				const message = formatError(error);
 				this.loadErrors.push({filePath, message});
-				logError(`Failed to load agent from ${filePath}: ${message}`);
+				notifyError(`Failed to load agent from ${filePath}: ${message}`);
 			}
 		}
 

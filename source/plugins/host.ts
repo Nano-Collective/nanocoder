@@ -9,7 +9,7 @@ import type {NanocoderPlugin, PluginHooks} from '@/sdk/plugin';
 import type {HookContext, HookOutcome} from '@/services/lifecycle-hooks';
 import {getProjectRoot} from '@/services/session-cwd';
 import type {HookEvent} from '@/types/config';
-import {logError} from '@/utils/message-queue';
+import {notifyError} from '@/utils/message-queue';
 import {isPlainObject} from '@/utils/type-helpers';
 
 type PluginEvent = keyof PluginHooks;
@@ -65,7 +65,7 @@ function isProjectTrusted(projectRoot: string): boolean {
 	try {
 		return isDirectoryTrusted(projectRoot, loadPreferences());
 	} catch (error) {
-		logError(`Could not read directory trust: ${errorMessage(error)}`);
+		notifyError(`Could not read directory trust: ${errorMessage(error)}`);
 		return false;
 	}
 }
@@ -124,7 +124,7 @@ async function importPlugins(root: string, state: PluginState): Promise<void> {
 			.sort();
 	} catch (error) {
 		if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-			logError(`Could not read plugins in ${dir}: ${errorMessage(error)}`);
+			notifyError(`Could not read plugins in ${dir}: ${errorMessage(error)}`);
 		}
 		return;
 	}
@@ -137,11 +137,11 @@ async function importPlugins(root: string, state: PluginState): Promise<void> {
 				pluginLoadTimeoutMs,
 			);
 		} catch (error) {
-			logError(`Plugin ${file} failed to load: ${errorMessage(error)}`);
+			notifyError(`Plugin ${file} failed to load: ${errorMessage(error)}`);
 			continue;
 		}
 		if (mod === TIMED_OUT) {
-			logError(
+			notifyError(
 				`Plugin ${file} did not finish loading within ${pluginLoadTimeoutMs / 1000}s and was skipped.`,
 			);
 			continue;
@@ -150,12 +150,12 @@ async function importPlugins(root: string, state: PluginState): Promise<void> {
 
 		const problem = validatePlugin(exported);
 		if (problem) {
-			logError(`Plugin ${file} skipped: ${problem}.`);
+			notifyError(`Plugin ${file} skipped: ${problem}.`);
 			continue;
 		}
 		const plugin = exported as NanocoderPlugin;
 		if (state.plugins.some(loaded => loaded.name === plugin.name)) {
-			logError(
+			notifyError(
 				`Plugin ${file} skipped: name "${plugin.name}" is already loaded.`,
 			);
 			continue;
@@ -184,7 +184,7 @@ function errorMessage(error: unknown): string {
 }
 
 function logBadReturn(plugin: NanocoderPlugin, event: string): void {
-	logError(
+	notifyError(
 		`Plugin "${plugin.name}" (${event}) returned an unexpected value, skipping.`,
 	);
 }
@@ -209,7 +209,7 @@ async function invoke(
 			}),
 		]);
 	} catch (error) {
-		logError(
+		notifyError(
 			`Plugin "${plugin.name}" (${event}) ${errorMessage(error)}, skipping.`,
 		);
 		return FAILED;
@@ -314,7 +314,7 @@ export async function consultPluginPermission(
 			return {decision: 'deny', reason: vote.reason.trim()};
 		}
 		if (!isPlainObject(vote) || vote.decision !== 'defer') {
-			logError(
+			notifyError(
 				`Plugin "${plugin.name}" (permission.asked) returned an invalid vote, treating as defer.`,
 			);
 		}

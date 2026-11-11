@@ -7,7 +7,7 @@ import type {CaptureResult} from '@/types/checkpoint';
 import {formatError} from '@/utils/error-formatter';
 import {loadGitignore} from '@/utils/gitignore-loader';
 import {getLogger} from '@/utils/logging';
-import {logWarning} from '@/utils/message-queue';
+import {notifyWarning} from '@/utils/message-queue';
 
 /**
  * Nanocoder's own runtime state under `.nanocoder/`. Unless a repo gitignores
@@ -93,9 +93,13 @@ export class FileSnapshotService {
 					path: normalizedPath,
 					reason: 'Outside the workspace',
 				});
-				logWarning('Refusing to capture a file outside the workspace', true, {
-					context: {filePath},
-				});
+				notifyWarning(
+					'Refusing to capture a file outside the workspace',
+					true,
+					{
+						context: {filePath},
+					},
+				);
 				continue;
 			}
 
@@ -120,7 +124,7 @@ export class FileSnapshotService {
 						path: normalizedPath,
 						reason,
 					});
-					logWarning('Could not capture file', true, {
+					notifyWarning('Could not capture file', true, {
 						context: {
 							filePath,
 							error: reason,
@@ -281,7 +285,7 @@ export class FileSnapshotService {
 			);
 
 			if (filtered.length > MAX_CHECKPOINT_FILES) {
-				logWarning(
+				notifyWarning(
 					'Too many modified files detected, limiting to maximum',
 					true,
 					{
@@ -306,7 +310,7 @@ export class FileSnapshotService {
 				available: true,
 			};
 		} catch {
-			logWarning('Git not available for file tracking', true, {
+			notifyWarning('Git not available for file tracking', true, {
 				context: {
 					workspaceRoot: this.workspaceRoot,
 				},

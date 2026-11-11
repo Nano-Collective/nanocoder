@@ -215,6 +215,6 @@ function makeLogFn(type: MessageType, defaultSource: string) {
 	};
 }
 
-export const logInfo = makeLogFn('info', 'logInfo');
-export const logError = makeLogFn('error', 'logError');
-export const logWarning = makeLogFn('warning', 'logWarning');
+export const notifyInfo = makeLogFn('info', 'notifyInfo');
+export const notifyError = makeLogFn('error', 'notifyError');
+export const notifyWarning = makeLogFn('warning', 'notifyWarning');

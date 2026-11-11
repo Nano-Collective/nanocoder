@@ -1,6 +1,6 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import {logWarning} from '@/utils/message-queue-core';
+import {notifyWarning} from '@/utils/message-queue-core';
 
 const RUNTIME_ENTRIES = [
 	'/checkpoints/',
@@ -74,7 +74,7 @@ export async function ensureNanocoderGitignore(
 
 		await current;
 	} catch (error) {
-		logWarning(
+		notifyWarning(
 			`Could not update .nanocoder/.gitignore. Runtime files may be staged by Git: ${String(error)}`,
 		);
 	}

@@ -48,7 +48,7 @@ import {formatError} from '@/utils/error-formatter';
 import {MessageBuilder} from '@/utils/message-builder';
 import {compressMessages} from '@/utils/message-compression';
 import {infoMsg} from '@/utils/message-factory';
-import {logWarning} from '@/utils/message-queue';
+import {notifyWarning} from '@/utils/message-queue';
 import {signalQuestion} from '@/utils/question-queue';
 import {bumpReadContentGeneration} from '@/utils/read-tracker';
 import {markRunFailed} from '@/utils/run-outcome';
@@ -582,7 +582,7 @@ export const processAssistantResponse = async (
 						);
 					}
 				} catch (error) {
-					logWarning('Could not checkpoint architect turn', true, {
+					notifyWarning('Could not checkpoint architect turn', true, {
 						context: {
 							error: formatError(error),
 							paths: mutationPaths.join(', '),

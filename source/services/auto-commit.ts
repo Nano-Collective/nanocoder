@@ -8,7 +8,7 @@ import {COMMIT_SYSTEM_PROMPT} from '@/tools/git/commit-prompt';
 import {execGit, truncateDiff} from '@/tools/git/utils';
 import type {LLMClient, Message} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
-import {logInfo, logWarning} from '@/utils/message-queue';
+import {notifyInfo, notifyWarning} from '@/utils/message-queue';
 
 /** Tools whose successful run leaves a file edit worth committing. */
 const AUTO_COMMIT_TOOLS: ReadonlySet<string> = new Set([
@@ -97,7 +97,7 @@ export async function maybeAutoCommit(
 	try {
 		return await enqueue(() => commitFile(absPath, client));
 	} catch (error) {
-		logWarning(`Auto-commit skipped: ${formatError(error)}`);
+		notifyWarning(`Auto-commit skipped: ${formatError(error)}`);
 		return null;
 	}
 }
@@ -139,7 +139,7 @@ async function commitFile(
 	}
 
 	if (await isOperationInProgress(git, root)) {
-		logWarning(
+		notifyWarning(
 			`Auto-commit skipped for ${pathspec}: a merge, rebase, cherry-pick or revert is in progress.`,
 		);
 		return null;
@@ -147,7 +147,7 @@ async function commitFile(
 	if (await isDetachedHead(git)) {
 		if (!warnedDetachedHeadRoots.has(root)) {
 			warnedDetachedHeadRoots.add(root);
-			logWarning(
+			notifyWarning(
 				`Auto-commit skipped for ${pathspec}: HEAD is detached or could not be verified. Check out a branch to keep agent commits reachable.`,
 			);
 		}
@@ -183,7 +183,7 @@ async function commitFile(
 				await git('reset', '-q', '--', pathspec);
 			}
 		} catch (error) {
-			logWarning(
+			notifyWarning(
 				`Failed to restore git index for ${pathspec}: ${formatError(error)}`,
 			);
 		}
@@ -218,7 +218,7 @@ async function commitFile(
 
 		const hash = output.match(/\[[^\]]*?([a-f0-9]{7,})\]/)?.[1] ?? '';
 		const subject = message.split('\n')[0];
-		logInfo(
+		notifyInfo(
 			`Auto-committed ${pathspec}${hash ? ` (${hash})` : ''}: ${subject}`,
 		);
 		return formatCommitNote(hash, subject);
@@ -313,7 +313,7 @@ async function generateMessage(
 		);
 		return cleanMessage(response?.choices?.[0]?.message?.content) || fallback;
 	} catch (error) {
-		logWarning(
+		notifyWarning(
 			`Auto-commit message generation failed (${formatError(error)}); using "${fallback}".`,
 		);
 		return fallback;

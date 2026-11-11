@@ -52,7 +52,7 @@ import type {
 	VerifyConfig,
 } from '@/types/index';
 import {clampThreshold} from '@/utils/message-compression';
-import {logError, logWarning} from '@/utils/message-queue-core';
+import {notifyError, notifyWarning} from '@/utils/message-queue-core';
 import {isTrustLevel} from '@/verify/trust-level';
 
 export {confDirMap, getClosestConfigFile} from '@/config/paths';
@@ -108,7 +108,7 @@ function tryLoadConfig<T>(
 		const config = readCachedConfigFile(configPath);
 		return extract(config);
 	} catch (error) {
-		logError(
+		notifyError(
 			`Failed to load ${label} config from ${configPath}: ${String(error)}`,
 		);
 	}
@@ -428,7 +428,7 @@ function loadSandboxConfig(cwd: string): boolean {
 			if (value === true) return true;
 			if (value === false) return false;
 			if (value !== undefined) {
-				logWarning(
+				notifyWarning(
 					`nanocoder.sandbox must be true or false (got ${JSON.stringify(value)}); treating as off`,
 				);
 				return false;
@@ -445,7 +445,7 @@ function loadAutoCommitConfig(cwd: string): boolean {
 			if (value === true) return true;
 			if (value === false) return false;
 			if (value !== undefined) {
-				logWarning(
+				notifyWarning(
 					`nanocoder.autoCommit must be true or false (got ${JSON.stringify(value)}); treating as off`,
 				);
 				return false;
@@ -602,7 +602,7 @@ function parseHookDefinition(raw: unknown): HookDefinition | null {
 		if (matchTools.length > 0) {
 			definition.matchTools = matchTools;
 		} else {
-			logWarning(
+			notifyWarning(
 				`Hook "${command}" has an empty matchTools list, so it runs for every tool. Remove matchTools to make that explicit, or list the tools to scope it.`,
 			);
 		}
@@ -620,7 +620,7 @@ function parseHookDefinition(raw: unknown): HookDefinition | null {
 		if (matchPaths.length > 0) {
 			definition.matchPaths = matchPaths;
 		} else {
-			logWarning(
+			notifyWarning(
 				`Hook "${command}" has an empty matchPaths list, so it is not scoped by path.`,
 			);
 		}
@@ -648,11 +648,13 @@ function loadHooksConfig(cwd: string): HooksConfig | undefined {
 			const result: HooksConfig = {};
 			for (const [event, entries] of Object.entries(hooks)) {
 				if (!(HOOK_EVENTS as readonly string[]).includes(event)) {
-					logError(`Invalid hooks config: unknown lifecycle event '${event}'.`);
+					notifyError(
+						`Invalid hooks config: unknown lifecycle event '${event}'.`,
+					);
 					continue;
 				}
 				if (!Array.isArray(entries)) {
-					logError(`Invalid hooks config: '${event}' must be an array.`);
+					notifyError(`Invalid hooks config: '${event}' must be an array.`);
 					continue;
 				}
 
@@ -660,7 +662,7 @@ function loadHooksConfig(cwd: string): HooksConfig | undefined {
 					.map(parseHookDefinition)
 					.filter((hook): hook is HookDefinition => hook !== null);
 				if (parsed.length !== entries.length) {
-					logError(
+					notifyError(
 						`Invalid hooks config: '${event}' has entries without a 'command' string.`,
 					);
 				}
@@ -720,7 +722,7 @@ function loadFormattersConfig(cwd: string): FormatterDefinition[] | undefined {
 					(formatter): formatter is FormatterDefinition => formatter !== null,
 				);
 			if (parsed.length !== formatters.length) {
-				logError(
+				notifyError(
 					"Invalid formatters config: entries need a 'command' string and a non-empty 'match' glob list.",
 				);
 			}
@@ -755,7 +757,9 @@ function loadModeProvidersConfig(
 
 				for (const [mode, config] of Object.entries(modeProviders)) {
 					if (!(VALID_MODES as readonly string[]).includes(mode)) {
-						logError(`Invalid modeProviders config: unknown mode '${mode}'.`);
+						notifyError(
+							`Invalid modeProviders config: unknown mode '${mode}'.`,
+						);
 						continue;
 					}
 
@@ -773,7 +777,7 @@ function loadModeProvidersConfig(
 							: undefined;
 
 					if (!providerName || !modelName) {
-						logError(
+						notifyError(
 							`Invalid modeProviders config for mode '${mode}': missing provider or model string.`,
 						);
 						continue;
@@ -783,7 +787,7 @@ function loadModeProvidersConfig(
 						p => p.name.toLowerCase() === providerName.toLowerCase(),
 					);
 					if (!matchedProvider) {
-						logError(
+						notifyError(
 							`Invalid modeProviders config for mode '${mode}': provider '${providerName}' not found in configured providers.`,
 						);
 						continue;
@@ -793,7 +797,7 @@ function loadModeProvidersConfig(
 						matchedProvider.models.length > 0 &&
 						!matchedProvider.models.includes(modelName)
 					) {
-						logError(
+						notifyError(
 							`Invalid modeProviders config for mode '${mode}': model '${modelName}' not found in models for provider '${matchedProvider.name}'.`,
 						);
 						continue;

@@ -1,7 +1,7 @@
 import test from 'ava';
 import {substituteEnvVars} from './env-substitution';
 
-// Mock logError to avoid console noise during tests
+// Mock notifyError to avoid console noise during tests
 const originalConsoleError = console.error;
 test.before(() => {
 	console.error = () => {};

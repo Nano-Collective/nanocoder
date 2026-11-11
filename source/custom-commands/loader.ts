@@ -3,7 +3,7 @@ import {basename, join} from 'node:path';
 import {getConfigPath} from '@/config/paths';
 import {parseCommandFile} from '@/custom-commands/parser';
 import type {CommandResource, CustomCommand} from '@/types/index';
-import {logError, logWarning} from '@/utils/message-queue-core';
+import {notifyError, notifyWarning} from '@/utils/message-queue-core';
 
 const RESOURCES_DIR = 'resources';
 const RELEVANCE_THRESHOLD = 5;
@@ -91,7 +91,9 @@ export class CustomCommandLoader {
 		try {
 			entries = readdirSync(dir);
 		} catch (error) {
-			logWarning(`Failed to read command directory ${dir}: ${String(error)}`);
+			notifyWarning(
+				`Failed to read command directory ${dir}: ${String(error)}`,
+			);
 			return;
 		}
 
@@ -125,7 +127,7 @@ export class CustomCommandLoader {
 		}
 
 		if (failedEntries > 0) {
-			logWarning(
+			notifyWarning(
 				`Failed to inspect ${failedEntries} file(s) in command directory ${dir}`,
 			);
 		}
@@ -188,7 +190,7 @@ export class CustomCommandLoader {
 				}
 			}
 		} catch (error) {
-			logError(
+			notifyError(
 				`Failed to load custom command from ${filePath}: ${String(error)}`,
 			);
 		}
@@ -207,7 +209,7 @@ export class CustomCommandLoader {
 		try {
 			entries = readdirSync(resourcesDir);
 		} catch (error) {
-			logWarning(
+			notifyWarning(
 				`Failed to read resources directory ${resourcesDir}: ${String(error)}`,
 			);
 			return [];
@@ -248,7 +250,7 @@ export class CustomCommandLoader {
 		}
 
 		if (failedResources > 0) {
-			logWarning(
+			notifyWarning(
 				`Failed to inspect ${failedResources} resource(s) in directory ${resourcesDir}`,
 			);
 		}

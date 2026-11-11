@@ -28,7 +28,7 @@ import type {
 } from '@/types/index';
 import type {MCPHealthChange} from '@/types/mcp';
 import {getLogger} from '@/utils/logging';
-import {logWarning} from '@/utils/message-queue';
+import {notifyWarning} from '@/utils/message-queue';
 import {getShutdownManager} from '@/utils/shutdown';
 
 /**
@@ -338,7 +338,7 @@ export class ToolManager {
 				// An ACP session's manager has no TUI to show a chat warning;
 				// log it there, as registerMcpTools does for its own collisions.
 				if (this.parent) getLogger().warn(message);
-				else logWarning(message);
+				else notifyWarning(message);
 			}
 
 			return results;
