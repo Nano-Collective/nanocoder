@@ -308,6 +308,35 @@ test('runAcpConversation - returns end_turn when LLM responds with text only', a
 	t.is(session.messages[0].content, 'Hello! I can help you.');
 });
 
+test("runAcpConversation - a session on tune's XML tool mode asks the client not to send native tools", async t => {
+	const {conn} = createMockConn();
+	const session = createMockSession(conn);
+	session.nativeToolsDisabled = true;
+	const seen: any[] = [];
+	const client = {
+		chat: async (
+			_msgs: any,
+			_tools: any,
+			_callbacks: any,
+			_signal: any,
+			modeOverrides: any,
+		) => {
+			seen.push(modeOverrides);
+			return {choices: [{message: {content: 'done'}}]};
+		},
+	} as unknown as LLMClient;
+
+	await runAcpConversation({
+		session,
+		client,
+		toolManager: createMockToolManager() as any,
+		conn,
+		nonInteractiveAlwaysAllow: [],
+	});
+
+	t.is(seen[0]?.nativeToolsDisabled, true);
+});
+
 // ============================================================================
 // Streaming callbacks
 // ============================================================================

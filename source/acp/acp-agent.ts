@@ -1568,6 +1568,7 @@ export class AcpAgent implements Agent {
 		// one would change when every other session compacts, mid-turn included.
 		session.aggressiveCompact = Boolean(tune.enabled && tune.aggressiveCompact);
 		const tuneToolMode = getTuneToolMode(tune);
+		session.nativeToolsDisabled = tuneToolMode !== 'native';
 		const toolsDisabled =
 			tuneToolMode !== 'native' || isToolCallingDisabled(provider, model);
 		const fallbackToolFormat: 'xml' | 'json' =

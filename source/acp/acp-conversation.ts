@@ -420,6 +420,7 @@ async function runTurn(
 					modeOverrides: {
 						nonInteractiveMode: true,
 						nonInteractiveAlwaysAllow,
+						nativeToolsDisabled: session.nativeToolsDisabled,
 					},
 				};
 			},

@@ -13,12 +13,14 @@ import {
 	setAutoCompactThreshold,
 } from "@/utils/auto-compact.js";
 import type { ToolManager } from "@/tools/tool-manager";
+import { TUNE_DEFAULTS } from "@/types/config";
 import type {
 	AISDKCoreTool,
 	DevelopmentMode,
 	LLMChatResponse,
 	LLMClient,
 	Message,
+	ModeOverrides,
 	ToolApprovalPolicy,
 	ToolCall,
 	ToolEntry,
@@ -128,6 +130,33 @@ test("returns success when model emits content and no tool calls", async (t) => 
 
 	t.is(outcome.kind, "success");
 	t.is(outcome.steps, 1);
+});
+
+test("tune's XML tool mode asks the client not to send native tools", async (t) => {
+	const seen: Array<ModeOverrides | undefined> = [];
+	const client: LLMClient = {
+		...makeFakeClient({ responses: [] }),
+		chat: async (_messages, _tools, _callbacks, _signal, modeOverrides) => {
+			seen.push(modeOverrides);
+			return {
+				choices: [{ message: { role: "assistant", content: "done" } }],
+			};
+		},
+	};
+
+	const outcome = await runPlainConversation({
+		client,
+		toolManager: makeFakeToolManager(),
+		systemMessage: SYSTEM,
+		initialMessages: [USER],
+		developmentMode: "auto-accept",
+		nonInteractiveAlwaysAllow: [],
+		abortSignal: new AbortController().signal,
+		tune: { ...TUNE_DEFAULTS, enabled: true, toolMode: "xml" },
+	});
+
+	t.is(outcome.kind, "success");
+	t.is(seen[0]?.nativeToolsDisabled, true);
 });
 
 test("nudges through empty responses up to the cap, then returns error", async (t) => {

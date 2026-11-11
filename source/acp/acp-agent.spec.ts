@@ -846,6 +846,34 @@ test.serial('AcpAgent.setSessionConfigOption - one session\'s tune does not chan
 	);
 });
 
+test.serial("AcpAgent - a provider whose tune picks XML tool mode keeps native tools off that session's requests", async t => {
+	await withProviders(
+		async () => {
+			const {agent} = createAgent();
+			const created = await agent.newSession({cwd: testConfigDir});
+			const session = agent['sessions'].get(created.sessionId)!;
+			t.false(session.nativeToolsDisabled);
+
+			await agent.setSessionConfigOption({
+				sessionId: created.sessionId,
+				configId: 'provider',
+				value: 'xml-provider',
+			});
+			// The prompt now carries the tool definitions as text, so the
+			// request must not send native tools alongside them.
+			t.true(session.nativeToolsDisabled);
+		},
+		[
+			{
+				name: 'xml-provider',
+				baseUrl: 'http://localhost:1/v1',
+				models: ['xml-model'],
+				tune: {enabled: true, toolMode: 'xml'},
+			},
+		],
+	);
+});
+
 test.serial('AcpAgent.setSessionConfigOption - a provider that lists no models leaves the session with no model, not the old one', async t => {
 	await withProviders(
 		async () => {
