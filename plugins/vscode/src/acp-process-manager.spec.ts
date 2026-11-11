@@ -367,11 +367,13 @@ function stubErrors(t: ExecutionContext) {
 	return shown;
 }
 
+const FINGERPRINT = '3f'.repeat(32);
+
 const notTrustedReport = JSON.stringify({
 	path: '/work/project',
 	status: 'not-trusted',
 	summary: 'Runs 1 MCP server (.mcp.json).',
-	fingerprint: 'abc123',
+	fingerprint: FINGERPRINT,
 });
 
 /** Let the prompt chain's queued promise callbacks run. */
@@ -383,9 +385,9 @@ test('AcpProcessManager - exit code 3 stops retrying and asks for trust instead'
 	(manager as any).lastStderr = '[nanocoder] Directory /work/project is not trusted.\n';
 	const warnings = stubWarnings(t, () => undefined);
 	const errors = stubErrors(t);
-	const cliCalls: string[][] = [];
-	(manager as any).runTrustCli = async (args: string[]) => {
-		cliCalls.push(args);
+	const cliCalls: unknown[] = [];
+	(manager as any).runTrustCli = async (command: {kind: string}) => {
+		cliCalls.push(command);
 		return {code: 0, stdout: notTrustedReport, stderr: ''};
 	};
 
@@ -395,7 +397,7 @@ test('AcpProcessManager - exit code 3 stops retrying and asks for trust instead'
 	t.is(stateManager.status, ACPStatus.Untrusted);
 	t.is((manager as any).retryTimer, null, 'no restart is scheduled');
 	t.is((manager as any).retryCount, 0);
-	t.deepEqual(cliCalls, [['trust', '--status', '--json']]);
+	t.deepEqual(cliCalls, [{kind: 'status'}]);
 	t.is(warnings.length, 1);
 	t.regex(warnings[0].message, /\/work\/project is not a trusted folder/);
 	t.deepEqual(warnings[0].items[0], {modal: true, detail: 'Runs 1 MCP server (.mcp.json).'});
@@ -406,10 +408,10 @@ test('AcpProcessManager - exit code 3 stops retrying and asks for trust instead'
 test('AcpProcessManager - Trust Folder grants the fingerprint shown and starts again', async (t) => {
 	const manager = makeManager(new AcpStateManager());
 	stubWarnings(t, () => 'Trust Folder');
-	const cliCalls: string[][] = [];
-	(manager as any).runTrustCli = async (args: string[]) => {
-		cliCalls.push(args);
-		return args[1] === '--status'
+	const cliCalls: unknown[] = [];
+	(manager as any).runTrustCli = async (command: {kind: string}) => {
+		cliCalls.push(command);
+		return command.kind === 'status'
 			? {code: 0, stdout: notTrustedReport, stderr: ''}
 			: {code: 0, stdout: 'Trusted /work/project.', stderr: ''};
 	};
@@ -421,7 +423,7 @@ test('AcpProcessManager - Trust Folder grants the fingerprint shown and starts a
 	(manager as any).handleCrash(3);
 	await settle();
 
-	t.deepEqual(cliCalls, [['trust', '--status', '--json'], ['trust', '--grant', 'abc123']]);
+	t.deepEqual(cliCalls, [{kind: 'status'}, {kind: 'grant', fingerprint: FINGERPRINT}]);
 	t.is(starts, 1);
 	manager.dispose();
 });
@@ -431,8 +433,8 @@ test('AcpProcessManager - a failed grant is reported and does not restart', asyn
 	const manager = makeManager(stateManager);
 	stubWarnings(t, () => 'Trust Folder');
 	const errors = stubErrors(t);
-	(manager as any).runTrustCli = async (args: string[]) =>
-		args[1] === '--status'
+	(manager as any).runTrustCli = async (command: {kind: string}) =>
+		command.kind === 'status'
 			? {code: 0, stdout: notTrustedReport, stderr: ''}
 			: {code: 1, stdout: 'Not trusted: /work/project changed since that fingerprint was taken.', stderr: ''};
 	let starts = 0;
@@ -461,6 +463,16 @@ test('AcpProcessManager - an unreadable trust status falls back to an actionable
 	t.is(warnings.length, 1);
 	t.regex(warnings[0].message, /not trusted/);
 	t.deepEqual(warnings[0].items, ['Manage Workspace Trust', 'Show Logs']);
+	manager.dispose();
+});
+
+test('AcpProcessManager - a fingerprint that is not a SHA-256 digest is never passed to the CLI', async (t) => {
+	const manager = makeManager(new AcpStateManager());
+	(manager as any).launchContext = {cliPath: '/nonexistent/nanocoder', env: {}, cwd: undefined};
+
+	for (const fingerprint of ['abc123', '--help', `${FINGERPRINT} --x`, `${FINGERPRINT}\n`]) {
+		t.is(await (manager as any).runTrustCli({kind: 'grant', fingerprint}), null, fingerprint);
+	}
 	manager.dispose();
 });
 
@@ -520,13 +532,18 @@ test.serial('AcpProcessManager - a real CLI that exits 3 is not retried, even th
 
 	const stateManager = new AcpStateManager();
 	const outputChannel = {appendLine: () => {}, append: () => {}, show: () => {}} as any;
+	let manager!: AcpProcessManager;
 	const acpClient = {
 		setConnection: () => {},
-		// The stream closes before the exit is observed, so the handshake fails first.
-		initializeHandshake: async () => false,
+		// Like the real handshake: it fails when the CLI closes stdout, which
+		// happens before its exit is observed.
+		initializeHandshake: () =>
+			new Promise<boolean>(resolve => {
+				(manager as any).childProcess.stdout.once('end', () => resolve(false));
+			}),
 		dispose: () => {},
 	} as any as NanocoderAcpClient;
-	const manager = new AcpProcessManager(outputChannel, stateManager, acpClient);
+	manager = new AcpProcessManager(outputChannel, stateManager, acpClient);
 	// Count every start after the first: a crash retry or the post-grant restart.
 	let restarts = 0;
 	const realStart = manager.start.bind(manager);
@@ -544,7 +561,7 @@ test.serial('AcpProcessManager - a real CLI that exits 3 is not retried, even th
 
 	t.is(stateManager.status, ACPStatus.Untrusted);
 	t.is((manager as any).retryCount, 0, 'the refusal was never counted as a crash');
-	t.is(readFileSync(grantLog, 'utf8'), 'abc123');
+	t.is(readFileSync(grantLog, 'utf8'), FINGERPRINT);
 	t.is(restarts, 1, 'starts once more, after trust is granted');
 	t.deepEqual(errors, []);
 });

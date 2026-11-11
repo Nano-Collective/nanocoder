@@ -31,6 +31,25 @@ interface CliLaunchContext {
 	cwd: string | undefined;
 }
 
+/** The two `nanocoder trust` invocations the extension makes. */
+type TrustCommand = {kind: 'status'} | {kind: 'grant'; fingerprint: string};
+
+/** `describeProjectTrust` fingerprints are SHA-256 hex digests. */
+const TRUST_FINGERPRINT_PATTERN = /^[0-9a-f]{64}$/;
+
+/**
+ * Argument list for a trust command: fixed flags, plus a fingerprint only when
+ * it has the digest's exact shape. The fingerprint is read back from the
+ * CLI's own output, but it still reaches a child process, so anything else is
+ * refused rather than passed on.
+ */
+function trustCliArgs(command: TrustCommand): string[] | null {
+	if (command.kind === 'status') return ['trust', '--status', '--json'];
+	return TRUST_FINGERPRINT_PATTERN.test(command.fingerprint)
+		? ['trust', '--grant', command.fingerprint]
+		: null;
+}
+
 interface CliRunResult {
 	code: number | null;
 	stdout: string;
@@ -414,7 +433,7 @@ export class AcpProcessManager {
 		}
 		if (action !== 'Trust Folder') return;
 
-		const granted = await this.runTrustCli(['trust', '--grant', report.fingerprint]);
+		const granted = await this.runTrustCli({kind: 'grant', fingerprint: report.fingerprint});
 		if (this.isDisposed) return;
 		if (granted?.code === 0) {
 			this.outputChannel.appendLine(`Trusted ${folder}. Starting ACP process.`);
@@ -428,7 +447,7 @@ export class AcpProcessManager {
 	}
 
 	private async readTrustStatus(): Promise<TrustStatusReport | null> {
-		const result = await this.runTrustCli(['trust', '--status', '--json']);
+		const result = await this.runTrustCli({kind: 'status'});
 		if (!result || result.code !== 0) return null;
 		return parseTrustStatus(result.stdout);
 	}
@@ -436,11 +455,15 @@ export class AcpProcessManager {
 	/**
 	 * Run a `nanocoder trust` subcommand with the same binary, env and cwd as
 	 * the refused launch, so it inspects the same folder and trust list.
-	 * Resolves null when there was no launch or the CLI could not be spawned.
+	 * Never goes through a shell: a CLI that can only be launched via one (a
+	 * Windows .cmd shim with no resolvable script) gets the fallback message
+	 * instead. Resolves null when there was no launch, the command was refused,
+	 * or the CLI could not be spawned.
 	 */
-	private runTrustCli(args: string[]): Promise<CliRunResult | null> {
+	private runTrustCli(command: TrustCommand): Promise<CliRunResult | null> {
 		const context = this.launchContext;
-		if (!context) return Promise.resolve(null);
+		const args = trustCliArgs(command);
+		if (!context || !args) return Promise.resolve(null);
 		return new Promise(resolve => {
 			let plan;
 			try {
@@ -450,7 +473,15 @@ export class AcpProcessManager {
 				resolve(null);
 				return;
 			}
-			const child = cp.spawn(plan.command, plan.args, {shell: plan.shell, env: context.env, cwd: context.cwd});
+			if (plan.shell) {
+				this.outputChannel.appendLine(`Not running nanocoder ${args.join(' ')}: the CLI at ${context.cliPath} can only be launched through a shell.`);
+				resolve(null);
+				return;
+			}
+			// No shell, an argument array, and args from trustCliArgs: fixed flags
+			// plus a fingerprint that matched the SHA-256 hex pattern. The command
+			// is the CLI the extension already launched for --acp.
+			const child = cp.spawn(plan.command, plan.args, {shell: false, env: context.env, cwd: context.cwd}); // nosemgrep: javascript.lang.security.detect-child-process.detect-child-process
 			let stdout = '';
 			let stderr = '';
 			child.stdout?.on('data', data => {
