@@ -658,6 +658,35 @@ test.serial('MCP prompts and custom commands complete through the dispatcher', a
 	}
 });
 
+// What useVSCodePromptHandling appends when an editor selection is attached.
+const VSCODE_CONTEXT =
+	'\n\n[@app.ts (lines 1-2)]<!--vscode-context-->\n```\nconst a = 1;\n```<!--/vscode-context-->';
+
+test.serial('an attached VS Code selection is not part of a command\'s raw args', async t => {
+	await dispatchSlashCommand(
+		`/dispatcher-probe one "two three"${VSCODE_CONTEXT}`,
+		createOptions(),
+	);
+	t.is(lastContext?.argText, 'one "two three"');
+	t.deepEqual(lastContext?.rawArgs, ['one', '"two', 'three"']);
+	t.deepEqual(lastContext?.args, ['one', '"two', 'three"']);
+});
+
+test.serial('/resume with an attached selection opens the picker instead of resuming it as an id', async t => {
+	const opened: Array<boolean | undefined> = [];
+	const queued: React.ReactNode[] = [];
+	await dispatchSlashCommand(
+		`/resume${VSCODE_CONTEXT}`,
+		createOptions({
+			onEnterSessionSelectorMode: all => opened.push(all),
+			onResumeSession: () => {},
+			onAddToChatQueue: node => queued.push(node),
+		}),
+	);
+	t.deepEqual(opened, [undefined]);
+	t.is(queued.length, 0, 'no "session not found" error');
+});
+
 test.serial('read-only commands still render through their handler', async t => {
 	const queued: React.ReactNode[] = [];
 	await dispatchSlashCommand(

@@ -23,6 +23,7 @@ import {
 } from '@/utils/inline-overrides';
 import {infoMsg, warningMsg} from '@/utils/message-factory';
 import {handleMCPPromptCommand} from './handlers/mcp-prompt-handler';
+import {stripVSCodeContext} from './vscode-context';
 
 /**
  * Runs a custom user-defined command (`.nanocoder/commands/`, skill bundles):
@@ -83,8 +84,8 @@ function buildHandlerMetadata(
 
 /**
  * The app state a stateful command can reach. `args` follows the old special
- * commands: the submission's `commandArgs` (VS Code context stripped) when
- * set, the split message otherwise.
+ * commands: the submission's `commandArgs` when set, the split message
+ * otherwise. Both, like `argText` and `rawArgs`, exclude the VS Code context.
  */
 function createCommandContext(
 	commandParts: string[],
@@ -293,9 +294,12 @@ export async function dispatchSlashCommand(
 	}
 
 	// Built-in names, aliases and retired names match in any case (`/Resume`).
-	// Custom commands and MCP prompts above still match exactly.
+	// Custom commands and MCP prompts above still match exactly. The VS Code
+	// editor selection appended to the prompt is not an argument of a
+	// built-in, so it is dropped here, matching the `commandArgs` that
+	// useAppHandlers strips (custom commands and MCP prompts keep it).
 	const builtInName = commandName.toLowerCase();
-	const normalized = `/${builtInName}${message.slice(commandName.length + 1)}`;
+	const normalized = `/${builtInName}${stripVSCodeContext(message).slice(commandName.length + 1)}`;
 
 	// Retired names (/setup-providers, ...) say where they moved, then run it.
 	const retired = findRetiredCommand(builtInName);
