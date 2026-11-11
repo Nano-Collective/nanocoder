@@ -235,8 +235,11 @@ export interface VerifyConfig {
  * Points in the agent lifecycle a user-defined shell command can be attached
  * to. `pre-tool-use` and `user-prompt-submit` are the vetoing points: a
  * non-zero exit denies the tool call (or the prompt) and its stdout is handed
- * back to the model as the reason. The rest are observe-only — a non-zero exit
- * there is logged, and the remaining hooks still run.
+ * back to the model as the reason. `turn-end` is not a veto, but a non-zero
+ * exit hands the hook output back to the model as a new user turn so it can
+ * address the failure; the loop caps how many times that can happen. The rest
+ * are observe-only — a non-zero exit there is logged, and the remaining hooks
+ * still run.
  */
 export const HOOK_EVENTS = [
 	'session-start',
@@ -245,6 +248,8 @@ export const HOOK_EVENTS = [
 	'pre-tool-use',
 	'post-tool-use',
 	'pre-compact',
+	'turn-end',
+	'subagent-end',
 ] as const;
 
 export type HookEvent = (typeof HOOK_EVENTS)[number];

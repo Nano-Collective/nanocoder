@@ -200,7 +200,7 @@ These are the kinds of members a skill can contain. Each page covers its primiti
 
 ### Lifecycle Hooks
 
-Where skills bring an AI to something that changed, **[lifecycle hooks](hooks.md)** run your own shell command at a fixed point in the agent loop — before or after a tool, on session start/end, on prompt submit, before compaction. No model, no tokens, and they fire every time:
+Where skills bring an AI to something that changed, **[lifecycle hooks](hooks.md)** run your own shell command at a fixed point in the agent loop — before or after a tool, on session start/end, on prompt submit, before compaction, when a turn ends, or when a subagent finishes. No model, no tokens, and they fire every time:
 
 ```json
 {"nanocoder": {"hooks": {
@@ -210,7 +210,7 @@ Where skills bring an AI to something that changed, **[lifecycle hooks](hooks.md
 }}}
 ```
 
-A `pre-tool-use` hook that exits non-zero denies the tool call and tells the model why, which makes rules like "never touch `.env`" enforceable rather than merely requested.
+A `pre-tool-use` hook that exits non-zero denies the tool call and tells the model why, which makes rules like "never touch `.env`" enforceable rather than merely requested. A `turn-end` hook runs once the model has finished, sees the files the prompt changed in `NANOCODER_FILES_CHANGED`, and can hand a failed check back to the model for one more pass.
 
 ### Plugins
 

@@ -18,7 +18,7 @@ import {
 } from '@/constants';
 import {consultPluginPermission} from '@/plugins/host';
 import {CheckpointManager} from '@/services/checkpoint-manager';
-import {runPreToolUseGate} from '@/services/lifecycle-hooks';
+import {runLifecycleHooks, runPreToolUseGate} from '@/services/lifecycle-hooks';
 import {getProjectRoot} from '@/services/session-cwd';
 import {generateKey} from '@/session/key-generator';
 import {
@@ -55,7 +55,7 @@ import {signalQuestion} from '@/utils/question-queue';
 import {bumpReadContentGeneration} from '@/utils/read-tracker';
 import {markRunFailed} from '@/utils/run-outcome';
 import {calculateTokens} from '@/utils/token-calculator';
-import {isFileMutationTool} from '@/utils/tool-approval';
+import {getFileMutationPaths} from '@/utils/tool-approval';
 import {parseToolArguments} from '@/utils/tool-args-parser';
 import {
 	createApprovalUnavailableResults,
@@ -79,44 +79,6 @@ import {
 interface ArchitectCheckpointState {
 	created: boolean;
 	name?: string;
-}
-
-/**
- * Paths an architect turn is about to mutate, so they can be checkpointed
- * before the tools run.
- *
- * Membership comes from `isFileMutationTool`, the same registry that decides
- * architect waives approval. A hardcoded list here would drift from that one
- * and leave newly added mutators auto-executing outside the checkpoint.
- *
- * `path` and `destination` cover every file tool's argument shape today; a
- * mutator carrying neither contributes nothing rather than throwing, which
- * only costs the turn a revert for that one file.
- */
-function getArchitectMutationPaths(toolCalls: ToolCall[]): string[] {
-	const paths = new Set<string>();
-
-	for (const toolCall of toolCalls) {
-		if (!isFileMutationTool(toolCall.function.name)) {
-			continue;
-		}
-
-		const args = toolCall.function.arguments as {
-			path?: string;
-			destination?: string;
-		};
-
-		// Both, not either: a move mutates its source and its destination.
-		if (args.path) {
-			paths.add(args.path);
-		}
-
-		if (args.destination) {
-			paths.add(args.destination);
-		}
-	}
-
-	return [...paths];
 }
 
 interface ProcessAssistantResponseParams {
@@ -200,6 +162,14 @@ interface ProcessAssistantResponseParams {
 	// total, across every window the user granted. Never reset by a granted
 	// continuation, so user-facing counts report the true repetition streak.
 	repeatedToolCallTotal?: number;
+	// Paths mutated by successful tool calls since the current user prompt
+	// began, for `turn-end` hooks. Threaded through every recursion so a turn
+	// that spans many tool round-trips still reports the whole prompt's edits.
+	turnFilesChanged?: Set<string>;
+	// Number of `turn-end` hook failures already handed back to the model in
+	// this user prompt. Capped by `nanocoder.retries.maxMalformedRetries`, so a
+	// hook that fails on every attempt cannot loop forever.
+	turnEndRetryCount?: number;
 	walkthroughLifecycle?: WalkthroughLifecycle;
 }
 
@@ -277,9 +247,15 @@ export const processAssistantResponse = async (
 		onToolExecuted,
 		sessionId,
 		workingDirectory,
+		turnFilesChanged: inheritedTurnFilesChanged,
+		turnEndRetryCount = 0,
 	} = params;
 	const walkthroughLifecycle =
 		params.walkthroughLifecycle ?? createWalkthroughLifecycle(messages);
+
+	// Shared with every recursion below, so edits from an earlier tool
+	// round-trip in this prompt are still reported at the natural end.
+	const turnFilesChanged = inheritedTurnFilesChanged ?? new Set<string>();
 
 	const startTime = conversationStartTime ?? Date.now();
 
@@ -548,6 +524,8 @@ export const processAssistantResponse = async (
 			conversationStartTime: startTime,
 			emptyTurnCount: 0,
 			malformedRetryCount: malformedRetryCount + 1,
+			turnFilesChanged,
+			turnEndRetryCount,
 			lastToolSignature: undefined,
 			repeatedToolCallCount: 0,
 			repeatedToolCallTotal: 0,
@@ -887,6 +865,8 @@ export const processAssistantResponse = async (
 			conversationStartTime: startTime,
 			emptyTurnCount: 0,
 			malformedRetryCount: 0,
+			turnFilesChanged,
+			turnEndRetryCount,
 			lastToolSignature: currentToolSignature,
 			repeatedToolCallCount: repeatedCountForNextTurn,
 			repeatedToolCallTotal: currentRepeatedTotal,
@@ -1038,7 +1018,7 @@ export const processAssistantResponse = async (
 			developmentMode === 'architect';
 
 		if (inArchitectMode && architectCheckpointState) {
-			const mutationPaths = getArchitectMutationPaths(autoTools);
+			const mutationPaths = getFileMutationPaths(autoTools);
 
 			if (mutationPaths.length > 0) {
 				// A failure here must not take the turn down with it: the tools
@@ -1130,6 +1110,9 @@ export const processAssistantResponse = async (
 					const toolCall = autoTools[index];
 					if (toolCall) {
 						observeSuccessfulLifecycleTool(walkthroughLifecycle, toolCall);
+						for (const path of getFileMutationPaths([toolCall])) {
+							turnFilesChanged.add(path);
+						}
 					}
 				}
 			}
@@ -1232,6 +1215,9 @@ export const processAssistantResponse = async (
 				if (!execution.result.isError) {
 					onToolExecuted?.(execution.result.name);
 					observeSuccessfulLifecycleTool(walkthroughLifecycle, toolCall);
+					for (const path of getFileMutationPaths([toolCall])) {
+						turnFilesChanged.add(path);
+					}
 				}
 				await displayExecutedTool(
 					execution,
@@ -1285,6 +1271,8 @@ export const processAssistantResponse = async (
 				conversationStartTime: startTime,
 				emptyTurnCount: 0,
 				malformedRetryCount: 0,
+				turnFilesChanged,
+				turnEndRetryCount,
 				lastToolSignature: currentToolSignature,
 				repeatedToolCallCount: repeatedCountForNextTurn,
 				repeatedToolCallTotal: currentRepeatedTotal,
@@ -1354,6 +1342,8 @@ export const processAssistantResponse = async (
 						emptyTurnCount: 0,
 						malformedRetryCount: 0,
 						compactRetryCount: compactRetryCount + 1,
+						turnFilesChanged,
+						turnEndRetryCount,
 						lastToolSignature: undefined,
 						repeatedToolCallCount: 0,
 						repeatedToolCallTotal: 0,
@@ -1442,6 +1432,8 @@ export const processAssistantResponse = async (
 			conversationStartTime: startTime,
 			emptyTurnCount: emptyTurnCount + 1,
 			malformedRetryCount: 0,
+			turnFilesChanged,
+			turnEndRetryCount,
 			lastToolSignature: undefined,
 			repeatedToolCallCount: 0,
 			repeatedToolCallTotal: 0,
@@ -1472,8 +1464,95 @@ export const processAssistantResponse = async (
 				conversationStartTime: startTime,
 				emptyTurnCount: 0,
 				malformedRetryCount: 0,
+				turnFilesChanged,
+				turnEndRetryCount,
 				lastToolSignature: undefined,
 				repeatedToolCallCount: 0,
+				walkthroughLifecycle,
+			});
+			return;
+		}
+
+		// `turn-end` runs once per user prompt, after the final assistant
+		// message. A passing hook's stdout is a summary for the user (e.g. a
+		// test run's tail); it is deliberately not spent on a model turn. A
+		// failing hook is different: the output is what the model most needs
+		// to act on, so it is handed back as a new user turn and the loop
+		// continues, capped like the other self-correction retries.
+		const turnEnd = await runLifecycleHooks('turn-end', {
+			messageCount: updatedMessages.length,
+			filesChanged: [...turnFilesChanged],
+		});
+		if (turnEnd.output) {
+			addToChatQueue(
+				<InfoMessage
+					key={generateKey('turn-end-hook')}
+					message={turnEnd.output}
+					hideBox={true}
+				/>,
+			);
+		}
+
+		if (turnEnd.failures.length > 0) {
+			for (const failure of turnEnd.failures) {
+				addToChatQueue(
+					<ErrorMessage
+						key={generateKey('turn-end-hook-failure')}
+						message={`turn-end hook exited ${failure.exitCode}${
+							failure.output ? `:\n${failure.output}` : '.'
+						}`}
+						hideBox={true}
+					/>,
+				);
+			}
+
+			if (turnEndRetryCount >= maxMalformedRetries) {
+				await flushAll();
+				markRunFailed('turn-end-hook-giveup');
+				addToChatQueue(
+					<ErrorMessage
+						key={generateKey('turn-end-hook-giveup')}
+						message={`The turn-end hook failed ${turnEndRetryCount + 1} time${
+							turnEndRetryCount === 0 ? '' : 's'
+						} in a row and the model could not resolve it — stopping (nanocoder.retries.maxMalformedRetries = ${maxMalformedRetries}).`}
+						hideBox={true}
+					/>,
+				);
+				setIsGenerating(false);
+				onConversationComplete?.();
+				return;
+			}
+
+			// Same envelope as post-tool-use, so a hook that emits
+			// machine-readable output is parsed identically on both events.
+			const feedback = turnEnd.failures
+				.map(
+					failure =>
+						`<hook-output event="turn-end" exit="${failure.exitCode}">\n${
+							failure.output || '(no output)'
+						}\n</hook-output>`,
+				)
+				.join('\n\n');
+			const turnEndBuilder = new MessageBuilder(updatedMessages);
+			turnEndBuilder.addMessage({
+				role: 'user',
+				content: `A turn-end hook reported a problem after your last message. Address it, then give your final answer.\n\n${feedback}`,
+			});
+			const messagesWithTurnEndFeedback = turnEndBuilder.build();
+			setMessages(messagesWithTurnEndFeedback);
+			await flushAll();
+			await processAssistantResponse({
+				...params,
+				abortController: controller,
+				messages: messagesWithTurnEndFeedback,
+				conversationStartTime: startTime,
+				emptyTurnCount: 0,
+				malformedRetryCount: 0,
+				turnFilesChanged,
+				turnEndRetryCount: turnEndRetryCount + 1,
+				lastToolSignature: undefined,
+				repeatedToolCallCount: 0,
+				repeatedToolCallTotal: 0,
 				walkthroughLifecycle,
 			});
 			return;

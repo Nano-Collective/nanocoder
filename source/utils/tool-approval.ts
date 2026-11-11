@@ -1,5 +1,5 @@
 import {isNanocoderToolAlwaysAllowed} from '@/config/nanocoder-tools-config';
-import type {DevelopmentMode} from '@/types/core';
+import type {DevelopmentMode, ToolCall} from '@/types/core';
 
 /**
  * Every tool whose approval runs through `createFileToolApproval`, which is
@@ -23,6 +23,45 @@ const fileMutationToolNames = new Set<string>();
  */
 export function isFileMutationTool(toolName: string): boolean {
 	return fileMutationToolNames.has(toolName);
+}
+
+/**
+ * Paths the given tool calls will mutate, or did mutate when passed the calls
+ * that already succeeded.
+ *
+ * Architect mode checkpoints these before the tools run, and the `turn-end`
+ * hook reports them after the turn. Membership comes from
+ * `isFileMutationTool`, the same registry that decides architect waives
+ * approval; a hardcoded list here would drift from that one and leave newly
+ * added mutators outside both the checkpoint and the hook's file list.
+ *
+ * `path` and `destination` cover every file tool's argument shape today; a
+ * mutator carrying neither contributes nothing rather than throwing.
+ */
+export function getFileMutationPaths(toolCalls: ToolCall[]): string[] {
+	const paths = new Set<string>();
+
+	for (const toolCall of toolCalls) {
+		if (!isFileMutationTool(toolCall.function.name)) {
+			continue;
+		}
+
+		const args = toolCall.function.arguments as {
+			path?: string;
+			destination?: string;
+		};
+
+		// Both, not either: a move mutates its source and its destination.
+		if (args.path) {
+			paths.add(args.path);
+		}
+
+		if (args.destination) {
+			paths.add(args.destination);
+		}
+	}
+
+	return [...paths];
 }
 
 interface FileToolApprovalOptions<Args> {

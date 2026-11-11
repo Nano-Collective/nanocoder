@@ -358,6 +358,8 @@ test('hooks event list matches HOOK_EVENTS', t => {
 		'pre-tool-use',
 		'session-end',
 		'session-start',
+		'subagent-end',
+		'turn-end',
 		'user-prompt-submit',
 	]);
 });

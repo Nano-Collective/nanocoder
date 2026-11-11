@@ -552,6 +552,18 @@
 					},
 					"type": "array"
 				},
+				"subagent-end": {
+					"items": {
+						"$ref": "#/definitions/HookDefinition"
+					},
+					"type": "array"
+				},
+				"turn-end": {
+					"items": {
+						"$ref": "#/definitions/HookDefinition"
+					},
+					"type": "array"
+				},
 				"user-prompt-submit": {
 					"items": {
 						"$ref": "#/definitions/HookDefinition"
