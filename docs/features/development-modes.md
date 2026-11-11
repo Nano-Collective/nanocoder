@@ -68,7 +68,7 @@ Automatically accepts and executes **every** tool call without a confirmation pr
 
 - No tool confirmation prompts at all — everything runs immediately
 - Bash commands, commits, and pull requests are all auto-accepted
-- `execute_bash` still refuses a small set of catastrophic commands in every mode (for example `rm -rf /`, `mkfs`, `dd if=`, and fork bombs); those are blocked outright rather than prompted
+- `execute_bash` still refuses a small set of catastrophic commands in every mode (for example `rm -rf /`, `mkfs`, `dd if=`, and fork bombs); those are blocked outright rather than prompted. This catches accidents, not a determined attempt: it matches the command text, ignores quoted arguments (so `grep "dd if=" build.log` runs), and is easy to get around, so it is not a security boundary
 - The status bar turns red to make it clear you're in yolo mode
 - One safeguard remains: if the model repeats the identical tool call too many times in a row, Nanocoder pauses and asks whether to continue, so a stuck loop cannot drain tokens unattended. See [Retry Limits](../configuration/index.md#retry-limits)
 
