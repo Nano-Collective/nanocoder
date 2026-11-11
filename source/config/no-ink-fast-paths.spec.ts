@@ -6,7 +6,7 @@ import test from 'ava';
 
 /*
  * The CLI fast paths (`nanocoder config`, `trust`, `daemon`, `verify`,
- * `init`, `completion`) promise never to load Ink. A single transitive import
+ * `skills`, `init`, `completion`) promise never to load Ink. A single transitive import
  * of a component, such as a config loader logging through the Ink-backed
  * message queue, silently breaks that and makes every one of them pay for the
  * whole TUI stack. Import each entry module in a fresh process and record
@@ -38,6 +38,8 @@ const FAST_PATH_MODULES = [
 	'source/verify/cli.ts',
 	'source/init/initializer.ts',
 	'source/cli-completions/cli.ts',
+	'source/skills/install.ts',
+	'source/skills/check.ts',
 ];
 
 const hasRegisterHooks =

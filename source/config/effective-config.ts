@@ -42,6 +42,7 @@ import {
 import {loadAllMCPConfigs} from '@/config/mcp-config-loader';
 import {getConfigPath} from '@/config/paths';
 import {loadPreferences} from '@/config/preferences';
+import {FIREWALL_DEFAULTS, resolveFirewallConfig} from '@/types/firewall';
 
 /**
  * Where a value came from, in ascending precedence. `default` is a built-in
@@ -381,6 +382,17 @@ function blockSpecs(): BlockSpec[] {
 			file: agents,
 			effective: config.retries,
 			defaults: DEFAULT_RETRY_LIMITS as unknown as Record<string, unknown>,
+		},
+		{
+			path: ['nanocoder', 'firewall'],
+			file: agents,
+			effective: resolveFirewallConfig(config.firewall),
+			defaults: FIREWALL_DEFAULTS as unknown as Record<string, unknown>,
+		},
+		{
+			path: ['nanocoder', 'verify'],
+			file: agents,
+			effective: config.verify,
 		},
 		{
 			path: ['nanocoder', 'paste'],

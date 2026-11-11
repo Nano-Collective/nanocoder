@@ -2,7 +2,7 @@ import type {Command} from '@/types/commands';
 
 /**
  * Resume command registration for /help listing.
- * Actual handling is done in app-util.ts (handleResumeCommand) which
+ * Actual handling is done in app/utils/handlers/session-handler.ts which
  * intercepts /resume, /sessions, and /history before the registry runs.
  */
 export const resumeCommand: Command = {

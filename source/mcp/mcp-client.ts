@@ -10,11 +10,6 @@ type ClientTransport =
 	| WebSocketClientTransport
 	| StreamableHTTPClientTransport;
 
-type LifecycleTransport = ClientTransport & {
-	onclose?: () => void;
-	onerror?: (error: Error) => void;
-};
-
 import type {
 	AISDKCoreTool,
 	MCPHealthChange,
@@ -40,6 +35,11 @@ import {
 	startMetrics,
 } from '@/utils/logging/performance.js';
 import {getSafeMemory} from '@/utils/logging/safe-process.js';
+import {
+	type HealthTimers,
+	type LifecycleTransport,
+	MCPHealthMonitor,
+} from './health-monitor.js';
 import {
 	buildToolMapping,
 	findToolNameConflicts,
@@ -77,18 +77,7 @@ export class MCPClient {
 	private serverPrompts: Map<string, MCPPrompt[]> = new Map();
 	private serverConfigs: Map<string, MCPServer> = new Map();
 	private isConnected: boolean = false;
-	private health: Map<string, MCPHealthStatus> = new Map();
-	private healthErrors: Map<string, string> = new Map();
-	private healthTimers: Map<string, ReturnType<typeof setTimeout>> = new Map();
-	private healthFailureCounts: Map<string, number> = new Map();
-	private healthChecksInFlight = new Set<string>();
-	private healthListeners = new Set<(change: MCPHealthChange) => void>();
 	private closing = new Set<string>();
-	/** Tool calls / resource reads currently awaiting a response, per server. */
-	private inFlightRequests = new Map<string, number>();
-	private reconnectTimers: Map<string, ReturnType<typeof setTimeout>> =
-		new Map();
-	private reconnectAttempts = new Map<string, number>();
 	/**
 	 * Bumped by disconnect(). A reconnect that was already awaiting
 	 * connectToServer() when the client shut down compares epochs and tears
@@ -96,8 +85,28 @@ export class MCPClient {
 	 */
 	private lifecycleEpoch = 0;
 	private logger = getLogger();
+	/** Health status, pings and reconnect backoff for every server. */
+	private readonly healthMonitor: MCPHealthMonitor;
 
-	constructor() {
+	/**
+	 * @param options.timers Timer functions for health checks and reconnect
+	 *   backoff; tests pass a fake clock.
+	 */
+	constructor(options: {timers?: HealthTimers} = {}) {
+		this.healthMonitor = new MCPHealthMonitor(
+			{
+				isClosing: serverName => this.closing.has(serverName),
+				getClient: serverName => this.clients.get(serverName),
+				getConfig: serverName => this.serverConfigs.get(serverName),
+				clearCatalog: serverName => this.clearServerCatalog(serverName),
+				rediscover: (serverName, client) =>
+					this.rediscoverServer(serverName, client),
+				reconnect: config => this.connectToServer(config),
+				forget: serverName => this.forgetServer(serverName),
+				lifecycleEpoch: () => this.lifecycleEpoch,
+			},
+			options.timers,
+		);
 		this.logger.debug('MCP client initialized');
 	}
 
@@ -126,268 +135,75 @@ export class MCPClient {
 	}
 
 	onHealthChange(listener: (change: MCPHealthChange) => void): () => void {
-		this.healthListeners.add(listener);
-		return () => this.healthListeners.delete(listener);
+		return this.healthMonitor.onChange(listener);
 	}
 
-	private emitHealthChange(change: MCPHealthChange): void {
-		for (const listener of this.healthListeners) listener(change);
-	}
-
-	private setServerHealth(
-		serverName: string,
-		status: MCPHealthStatus,
-		error?: unknown,
-	): void {
-		const errorMessage = error ? formatError(error) : undefined;
-		const previousStatus = this.health.get(serverName);
-		const previousError = this.healthErrors.get(serverName);
-		this.health.set(serverName, status);
-		if (errorMessage) this.healthErrors.set(serverName, errorMessage);
-		else this.healthErrors.delete(serverName);
-		if (previousStatus === undefined && status === 'connected') return;
-		if (previousStatus === status && previousError === errorMessage) return;
-		this.emitHealthChange({serverName, status, error: errorMessage});
-	}
-
-	private markServerUnhealthy(serverName: string, error?: unknown): void {
-		if (this.closing.has(serverName)) return;
-		this.setServerHealth(serverName, 'unhealthy', error);
+	/** An unhealthy server offers nothing until it recovers. */
+	private clearServerCatalog(serverName: string): void {
 		this.serverTools.set(serverName, []);
 		this.serverResources.set(serverName, []);
 		this.serverPrompts.set(serverName, []);
 		this.toolMappingCache = null;
 	}
 
-	private isLivenessResponse(error: unknown): boolean {
-		if (!error || typeof error !== 'object') return false;
-		const code = (error as {code?: number}).code;
-		// JSON-RPC MethodNotFound (-32601) means the server received the ping and responded
-		return code === -32601;
-	}
-
 	/**
-	 * Remote (HTTP / WebSocket) transports can lose their session without the
-	 * transport ever closing, so ping-based recovery may never succeed. Stdio
-	 * servers keep the old behaviour: their transport closes when the child
-	 * exits, which already triggers a reconnect.
+	 * Re-list tools, and the resources and prompts the server declares, on a
+	 * client that answered again. Rejects if tools/list fails; a failed
+	 * resources/prompts list only logs.
 	 */
-	private isRemoteServer(serverName: string): boolean {
-		const transport = this.serverConfigs.get(serverName)?.transport;
-		return transport !== undefined && transport !== 'stdio';
-	}
-
-	/**
-	 * A Streamable HTTP server answers 404 for a session it no longer knows,
-	 * typically because it restarted. The MCP spec says the client must start
-	 * a new session; pinging with the old session id can never succeed.
-	 */
-	private isSessionGoneResponse(serverName: string, error: unknown): boolean {
-		if (!this.isRemoteServer(serverName)) return false;
-		if (!error || typeof error !== 'object') return false;
-		if ((error as {code?: unknown}).code === 404) return true;
-		const message = (error as {message?: unknown}).message;
-		return typeof message === 'string' && /session not found/i.test(message);
-	}
-
-	private async restoreServerHealth(
+	private async rediscoverServer(
 		serverName: string,
 		client: Client,
-	): Promise<void> {
-		if (this.closing.has(serverName)) return;
-
-		try {
-			// Re-discover tools from this server
-			const toolsResult = await client.listTools();
-			const tools: MCPTool[] = toolsResult.tools.map(tool =>
-				toMCPTool(tool, serverName),
-			);
-			this.serverTools.set(serverName, tools);
-
-			// Re-discover resources if declared
-			const capabilities = client.getServerCapabilities();
-			if (capabilities?.resources) {
-				try {
-					const resourcesResult = await client.listResources();
-					const resources: MCPResource[] = resourcesResult.resources.map(
-						resource => toMCPResource(resource, serverName),
-					);
-					this.serverResources.set(serverName, resources);
-				} catch (error) {
-					this.logger.warn('MCP resources/list failed on recovery', {
-						serverName,
-						error: formatError(error),
-					});
-				}
-			}
-
-			// Re-discover prompts if declared
-			if (capabilities?.prompts) {
-				try {
-					const promptsResult = await client.listPrompts();
-					const prompts: MCPPrompt[] = promptsResult.prompts.map(prompt =>
-						toMCPPrompt(prompt, serverName),
-					);
-					this.serverPrompts.set(serverName, prompts);
-				} catch (error) {
-					this.logger.warn('MCP prompts/list failed on recovery', {
-						serverName,
-						error: formatError(error),
-					});
-				}
-			}
-
-			this.toolMappingCache = null;
-			this.setServerHealth(serverName, 'connected');
-			this.logger.info(
-				`MCP server "${serverName}" recovered and restored tools`,
-				{
-					serverName,
-					toolCount: tools.length,
-				},
-			);
-		} catch (error) {
-			this.logger.warn(
-				`Failed to rediscover tools for recovered MCP server "${serverName}"`,
-				{
-					serverName,
-					error: formatError(error),
-				},
-			);
-		}
-	}
-
-	/**
-	 * Base delay for a server's health checks and reconnect attempts. Backoff
-	 * multiplies this, so a server with periodic checks disabled
-	 * (`healthCheckInterval: 0`) still reconnects on the default cadence.
-	 */
-	private getHealthBaseDelay(serverName: string): number {
-		const interval = this.serverConfigs.get(serverName)?.healthCheckInterval;
-		return typeof interval === 'number' && interval > 0 ? interval : 30_000;
-	}
-
-	private static backoffDelay(base: number, failures: number): number {
-		const multiplier = failures > 0 ? Math.min(2 ** (failures - 1), 8) : 1;
-		return Math.min(base * multiplier, 300_000);
-	}
-
-	private async trackInFlight<T>(
-		serverName: string,
-		request: () => Promise<T>,
-	): Promise<T> {
-		this.inFlightRequests.set(
-			serverName,
-			(this.inFlightRequests.get(serverName) ?? 0) + 1,
+	): Promise<number> {
+		// Re-discover tools from this server
+		const toolsResult = await client.listTools();
+		const tools: MCPTool[] = toolsResult.tools.map(tool =>
+			toMCPTool(tool, serverName),
 		);
-		try {
-			return await request();
-		} finally {
-			const remaining = (this.inFlightRequests.get(serverName) ?? 1) - 1;
-			if (remaining > 0) this.inFlightRequests.set(serverName, remaining);
-			else this.inFlightRequests.delete(serverName);
-		}
-	}
+		this.serverTools.set(serverName, tools);
 
-	private clearHealthTimer(serverName: string): void {
-		const timer = this.healthTimers.get(serverName);
-		if (timer) clearTimeout(timer);
-		this.healthTimers.delete(serverName);
-	}
-
-	private clearReconnect(serverName: string): void {
-		const timer = this.reconnectTimers.get(serverName);
-		if (timer) clearTimeout(timer);
-		this.reconnectTimers.delete(serverName);
-		this.reconnectAttempts.delete(serverName);
-	}
-
-	/**
-	 * After a transport closes the SDK client drops its transport for good:
-	 * every later ping fails with "Not connected", so ping-based recovery can
-	 * never succeed. Rebuild the connection from the stored config instead,
-	 * backing off exponentially between attempts.
-	 */
-	private scheduleReconnect(serverName: string): void {
-		if (
-			this.closing.has(serverName) ||
-			this.reconnectTimers.has(serverName) ||
-			!this.serverConfigs.has(serverName)
-		) {
-			return;
-		}
-		const attempts = this.reconnectAttempts.get(serverName) ?? 0;
-		const delay = MCPClient.backoffDelay(
-			this.getHealthBaseDelay(serverName),
-			attempts + 1,
-		);
-		const timer = setTimeout(
-			() => void this.attemptReconnect(serverName),
-			delay,
-		);
-		if (typeof timer === 'object' && 'unref' in timer) timer.unref();
-		this.reconnectTimers.set(serverName, timer);
-	}
-
-	private async attemptReconnect(serverName: string): Promise<void> {
-		this.reconnectTimers.delete(serverName);
-		const config = this.serverConfigs.get(serverName);
-		if (
-			!config ||
-			this.closing.has(serverName) ||
-			this.health.get(serverName) !== 'unhealthy'
-		) {
-			this.reconnectAttempts.delete(serverName);
-			return;
-		}
-		const epoch = this.lifecycleEpoch;
-		const previousClient = this.clients.get(serverName);
-		try {
-			await this.connectToServer(config);
-		} catch (error) {
-			if (epoch !== this.lifecycleEpoch || this.closing.has(serverName)) {
-				return;
-			}
-			this.reconnectAttempts.set(
-				serverName,
-				(this.reconnectAttempts.get(serverName) ?? 0) + 1,
-			);
-			this.logger.warn(`MCP server "${serverName}" reconnect failed`, {
-				serverName,
-				attempt: this.reconnectAttempts.get(serverName),
-				error: formatError(error),
-			});
-			this.scheduleReconnect(serverName);
-			return;
-		}
-
-		if (epoch !== this.lifecycleEpoch) {
-			// disconnect() ran while we were connecting: undo this connection.
-			await this.forgetServer(serverName);
-			return;
-		}
-
-		this.reconnectAttempts.delete(serverName);
-		this.logger.info(`MCP server "${serverName}" reconnected`, {serverName});
-		// The old client's transport is already gone; closing it just releases
-		// anything the SDK still holds. Its handlers ignore events now that it
-		// is no longer the registered client.
-		if (previousClient && previousClient !== this.clients.get(serverName)) {
-			previousClient.close().catch(error => {
-				this.logger.debug('Error closing replaced MCP client', {
+		// Re-discover resources if declared
+		const capabilities = client.getServerCapabilities();
+		if (capabilities?.resources) {
+			try {
+				const resourcesResult = await client.listResources();
+				const resources: MCPResource[] = resourcesResult.resources.map(
+					resource => toMCPResource(resource, serverName),
+				);
+				this.serverResources.set(serverName, resources);
+			} catch (error) {
+				this.logger.warn('MCP resources/list failed on recovery', {
 					serverName,
 					error: formatError(error),
 				});
-			});
+			}
 		}
+
+		// Re-discover prompts if declared
+		if (capabilities?.prompts) {
+			try {
+				const promptsResult = await client.listPrompts();
+				const prompts: MCPPrompt[] = promptsResult.prompts.map(prompt =>
+					toMCPPrompt(prompt, serverName),
+				);
+				this.serverPrompts.set(serverName, prompts);
+			} catch (error) {
+				this.logger.warn('MCP prompts/list failed on recovery', {
+					serverName,
+					error: formatError(error),
+				});
+			}
+		}
+
+		this.toolMappingCache = null;
+		return tools.length;
 	}
 
 	/** Close and drop one server's connection and all of its state. */
 	private async forgetServer(serverName: string): Promise<void> {
 		const client = this.clients.get(serverName);
 		this.closing.add(serverName);
-		this.clearHealthTimer(serverName);
-		this.clearReconnect(serverName);
+		this.healthMonitor.stop(serverName);
 		try {
 			await client?.close();
 		} catch (error) {
@@ -402,149 +218,9 @@ export class MCPClient {
 		this.serverResources.delete(serverName);
 		this.serverPrompts.delete(serverName);
 		this.serverConfigs.delete(serverName);
-		this.health.delete(serverName);
-		this.healthErrors.delete(serverName);
-		this.healthFailureCounts.delete(serverName);
-		this.healthChecksInFlight.delete(serverName);
+		this.healthMonitor.forget(serverName);
 		this.toolMappingCache = null;
 		this.closing.delete(serverName);
-	}
-
-	private startHealthChecks(
-		serverName: string,
-		client: Client,
-		transport: LifecycleTransport,
-		interval: number,
-		pingOptions?: {timeout: number},
-	): void {
-		// Events from a client that has since been replaced by a reconnect (or
-		// dropped entirely) must not touch the current connection's state.
-		const isCurrent = () =>
-			!this.clients.has(serverName) || this.clients.get(serverName) === client;
-		const scheduleNext = (delay: number) => {
-			if (
-				this.closing.has(serverName) ||
-				interval <= 0 ||
-				typeof client.ping !== 'function' ||
-				!isCurrent()
-			) {
-				return;
-			}
-			this.clearHealthTimer(serverName);
-			const timer = setTimeout(() => void check(), delay);
-			if (typeof timer === 'object' && 'unref' in timer) timer.unref();
-			this.healthTimers.set(serverName, timer);
-		};
-		const check = async () => {
-			const currentStatus = this.health.get(serverName);
-			if (
-				this.closing.has(serverName) ||
-				!isCurrent() ||
-				(currentStatus !== 'connected' && currentStatus !== 'unhealthy') ||
-				this.healthChecksInFlight.has(serverName) ||
-				this.reconnectTimers.has(serverName) ||
-				typeof client.ping !== 'function'
-			) {
-				return;
-			}
-			// A long-running tool call or resource read occupies the server; a
-			// ping queued behind it can time out even though the server is
-			// fine. A request in flight on a live transport counts as alive.
-			if ((this.inFlightRequests.get(serverName) ?? 0) > 0) {
-				scheduleNext(interval);
-				return;
-			}
-			this.healthChecksInFlight.add(serverName);
-			try {
-				await client.ping(pingOptions ?? {timeout: 10_000});
-				if (this.health.get(serverName) === 'unhealthy') {
-					await this.restoreServerHealth(serverName, client);
-				}
-				this.healthFailureCounts.delete(serverName);
-			} catch (error) {
-				if (this.isLivenessResponse(error)) {
-					if (this.health.get(serverName) === 'unhealthy') {
-						await this.restoreServerHealth(serverName, client);
-					}
-					this.healthFailureCounts.delete(serverName);
-				} else {
-					const currentFailures =
-						(this.healthFailureCounts.get(serverName) ?? 0) + 1;
-					this.healthFailureCounts.set(serverName, currentFailures);
-					const status = this.health.get(serverName);
-					const sessionGone = this.isSessionGoneResponse(serverName, error);
-					// One missed ping is not enough to pull a server's tools
-					// mid-turn; require two in a row. A pending ping can also
-					// reject after an intentional disconnect, hence the status check.
-					// A lost session is final, so it does not wait for a second miss.
-					if (
-						(currentFailures >= 2 || sessionGone) &&
-						status === 'connected' &&
-						isCurrent()
-					) {
-						this.markServerUnhealthy(serverName, error);
-					}
-					// A remote server whose recovery ping failed, or whose session is
-					// gone, may have restarted: the old session will never answer
-					// again and HTTP never fires onclose. Rebuild the connection
-					// through the reconnect loop instead of pinging on.
-					if (
-						(sessionGone || status === 'unhealthy') &&
-						this.isRemoteServer(serverName) &&
-						this.health.get(serverName) === 'unhealthy' &&
-						isCurrent() &&
-						!this.closing.has(serverName)
-					) {
-						this.clearHealthTimer(serverName);
-						this.healthFailureCounts.delete(serverName);
-						this.scheduleReconnect(serverName);
-					}
-				}
-			} finally {
-				this.healthChecksInFlight.delete(serverName);
-				if (
-					!this.closing.has(serverName) &&
-					// Handed to the reconnect loop: the new client runs its own checks.
-					!this.reconnectTimers.has(serverName)
-				) {
-					const failureCount = this.healthFailureCounts.get(serverName) ?? 0;
-					scheduleNext(MCPClient.backoffDelay(interval, failureCount));
-				}
-			}
-		};
-		const previousOnClose = transport.onclose;
-		const previousOnError = transport.onerror;
-		transport.onclose = () => {
-			try {
-				previousOnClose?.();
-			} finally {
-				if (!this.closing.has(serverName) && isCurrent()) {
-					this.markServerUnhealthy(
-						serverName,
-						new Error('MCP transport closed'),
-					);
-					// Pings against a closed transport can never succeed; hand the
-					// server over to the reconnect loop.
-					this.clearHealthTimer(serverName);
-					this.healthFailureCounts.delete(serverName);
-					this.scheduleReconnect(serverName);
-				}
-			}
-		};
-		transport.onerror = error => {
-			try {
-				previousOnError?.(error);
-			} finally {
-				// HTTP/SSE errors can be recoverable; let the SDK handle the error
-				// before confirming liveness with a bounded ping. Deferring also
-				// prevents a ping's own transport error from starting another ping.
-				// With health checks disabled there is nothing to schedule a
-				// recovery ping, so do not ping (and risk marking unhealthy) here.
-				if (interval > 0) void Promise.resolve().then(check);
-			}
-		};
-		if (interval <= 0 || typeof client.ping !== 'function') return;
-		scheduleNext(interval);
 	}
 
 	async connectToServer(server: MCPServer): Promise<void> {
@@ -724,9 +400,9 @@ export class MCPClient {
 				}
 				this.serverResources.set(normalizedServer.name, resources);
 				this.serverPrompts.set(normalizedServer.name, prompts);
-				this.setServerHealth(normalizedServer.name, 'connected');
+				this.healthMonitor.setStatus(normalizedServer.name, 'connected');
 				const healthInterval = normalizedServer.healthCheckInterval ?? 30_000;
-				this.startHealthChecks(
+				this.healthMonitor.watch(
 					normalizedServer.name,
 					client,
 					transport as LifecycleTransport,
@@ -996,10 +672,10 @@ export class MCPClient {
 		if (!client) {
 			throw new Error(`No MCP client connected for server: ${serverName}`);
 		}
-		if (this.health.get(serverName) === 'unhealthy') {
+		if (this.healthMonitor.getStatus(serverName) === 'unhealthy') {
 			throw new Error(
 				`MCP server is unhealthy: ${serverName}: ${
-					this.healthErrors.get(serverName) || 'health check failed'
+					this.healthMonitor.getError(serverName) || 'health check failed'
 				}`,
 			);
 		}
@@ -1021,7 +697,7 @@ export class MCPClient {
 				const serverName = parts[1];
 				const originalToolName = parts.slice(2).join('_');
 				const fallbackClient = this.getHealthyClient(serverName);
-				return this.trackInFlight(serverName, () =>
+				return this.healthMonitor.trackInFlight(serverName, () =>
 					this.executeToolCall(fallbackClient, originalToolName, args),
 				);
 			}
@@ -1035,7 +711,7 @@ export class MCPClient {
 		const toolDef = serverTools.find(t => t.name === mapping.originalName);
 		const sanitizedArgs = coerceStringArguments(toolDef, args);
 
-		return this.trackInFlight(mapping.serverName, () =>
+		return this.healthMonitor.trackInFlight(mapping.serverName, () =>
 			this.executeToolCall(client, mapping.originalName, sanitizedArgs),
 		);
 	}
@@ -1160,9 +836,9 @@ export class MCPClient {
 			toolCount: tools.length,
 			resourceCount: resources.length,
 			promptCount: prompts.length,
-			connected: this.health.get(serverName) !== 'unhealthy',
-			health: this.health.get(serverName) || 'connected',
-			healthError: this.healthErrors.get(serverName),
+			connected: this.healthMonitor.getStatus(serverName) !== 'unhealthy',
+			health: this.healthMonitor.getStatus(serverName) || 'connected',
+			healthError: this.healthMonitor.getError(serverName),
 			description: serverConfig.description,
 			tags: serverConfig.tags,
 			autoApprovedCommands: serverConfig.alwaysAllow,
@@ -1234,7 +910,7 @@ export class MCPClient {
 			const client = this.getHealthyClient(serverName);
 
 			try {
-				const result = await this.trackInFlight(serverName, () =>
+				const result = await this.healthMonitor.trackInFlight(serverName, () =>
 					client.readResource({uri}),
 				);
 
@@ -1393,10 +1069,8 @@ export class MCPClient {
 
 			for (const [serverName, client] of this.clients.entries()) {
 				this.closing.add(serverName);
-				this.clearHealthTimer(serverName);
-				this.clearReconnect(serverName);
-				this.healthFailureCounts.delete(serverName);
-				this.healthChecksInFlight.delete(serverName);
+				this.healthMonitor.stop(serverName);
+				this.healthMonitor.clearCheckState(serverName);
 				try {
 					await client.close();
 					successfulDisconnections++;
@@ -1427,10 +1101,7 @@ export class MCPClient {
 			this.serverResources.clear();
 			this.serverPrompts.clear();
 			this.serverConfigs.clear();
-			this.health.clear();
-			this.healthErrors.clear();
-			this.healthChecksInFlight.clear();
-			this.inFlightRequests.clear();
+			this.healthMonitor.reset();
 			this.closing.clear();
 			this.isConnected = false;
 
@@ -1445,7 +1116,7 @@ export class MCPClient {
 
 	getConnectedServers(): string[] {
 		return Array.from(this.clients.keys()).filter(
-			serverName => this.health.get(serverName) !== 'unhealthy',
+			serverName => this.healthMonitor.getStatus(serverName) !== 'unhealthy',
 		);
 	}
 
@@ -1456,7 +1127,7 @@ export class MCPClient {
 	isServerConnected(serverName: string): boolean {
 		return (
 			this.clients.has(serverName) &&
-			this.health.get(serverName) !== 'unhealthy'
+			this.healthMonitor.getStatus(serverName) !== 'unhealthy'
 		);
 	}
 
