@@ -70,7 +70,7 @@ function makeProps(o: Overrides = {}) {
 	const noop = () => {};
 	const noopAsync = async () => {};
 
-	const appState = {
+	const baseAppState = {
 		client: o.client ?? null,
 		toolManager: o.toolManager ?? null,
 		messages: o.messages ?? [],
@@ -125,6 +125,21 @@ function makeProps(o: Overrides = {}) {
 		setChatComponents: o.setChatComponents ?? noop,
 		setIsCancelling: o.setIsCancelling ?? noop,
 		setAbortController: o.setAbortController ?? noop,
+	};
+	// As in useAppState, the input surfaces are also exposed as one value,
+	// which resolveInputOwnership reads.
+	const appState = {
+		...baseAppState,
+		inputSurfaces: {
+			activeMode: baseAppState.activeMode,
+			isSettingsMode: baseAppState.isSettingsMode,
+			settingsActiveTab: undefined,
+			planReviewState: baseAppState.planReviewState,
+			architectReviewState: baseAppState.architectReviewState,
+			isToolConfirmationMode: baseAppState.isToolConfirmationMode,
+			isQuestionMode: baseAppState.isQuestionMode,
+			liveComponentCapturesInput: baseAppState.liveComponentCapturesInput,
+		},
 	};
 
 	return {
