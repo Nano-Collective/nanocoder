@@ -1036,6 +1036,53 @@ test('AcpAgent.prompt - propagates API errors cleanly', async t => {
 	t.true(notice.displayOnly, 'the error notice must never reach the model');
 });
 
+test('AcpAgent.prompt - an error on a later round-trip keeps the earlier ones, on disk too', async t => {
+	const {agent} = createAgent();
+	let calls = 0;
+	agent['initContext'].client.chat = async () => {
+		calls++;
+		if (calls === 1) {
+			return {
+				choices: [
+					{
+						message: {
+							content: 'looking',
+							tool_calls: [
+								{id: 'call-1', function: {name: 'lookup', arguments: {}}},
+							],
+						},
+					},
+				],
+			};
+		}
+		throw new Error('RequestError: Internal error (500)');
+	};
+
+	const created = await agent.newSession({cwd: '/tmp'});
+	await t.throwsAsync(
+		() =>
+			agent.prompt({
+				sessionId: created.sessionId,
+				prompt: [{type: 'text', text: 'go'}],
+			}),
+		{message: /RequestError/},
+	);
+
+	const expected = ['user', 'assistant', 'tool', 'assistant'];
+	const live = agent['sessions'].get(created.sessionId)!.messages;
+	t.deepEqual(
+		live.map((m: Message) => m.role),
+		expected,
+	);
+	t.is(live[1].tool_calls?.[0]?.id, 'call-1');
+	t.true(live[3].displayOnly);
+	const saved = await sessionManager.loadSession(created.sessionId);
+	t.deepEqual(
+		saved?.messages.map(m => m.role),
+		expected,
+	);
+});
+
 test('AcpAgent.prompt - resolves cleanly on user cancellation instead of throwing', async t => {
 	const {agent, conn} = createAgent();
 
