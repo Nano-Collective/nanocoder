@@ -6,7 +6,7 @@ import { clearAppConfig, reloadAppConfig } from "@/config/index";
 import {
 	describeProjectTrust,
 	TRUST_FINGERPRINT_VERSION,
-} from "@/config/project-trust";
+} from "@/config/trust/project-trust";
 import {
 	clearPendingHookContext,
 	resetSessionStartHooks,
@@ -480,7 +480,7 @@ test.serial(
 );
 
 test.serial(
-	"filesChanged collects paths only from mutating tool calls, deduped",
+	"filesChanged collects paths only from successful mutating tool calls, deduped",
 	async (t) => {
 		const shutdown: CapturedShutdown = { code: null };
 		const stdout = capturingStdout();
@@ -526,15 +526,31 @@ test.serial(
 								error: null,
 							},
 							{
-								// Mutating tool that failed: still logs result/error
-								// pass-through, but contributes no file since the call
-								// itself errored before any path-bearing args mattered
-								// for this assertion (failure handling is covered by
-								// the isError tests in conversation.spec.ts).
+								// Mutating tool that failed: its result/error still pass
+								// through, but it changed nothing, so no file.
 								name: "string_replace",
 								arguments: { path: "/repo/d.ts" },
 								result: null,
 								error: "failed to apply patch",
+							},
+							{
+								// file_op is a file tool too: a move changes both ends.
+								name: "file_op",
+								arguments: {
+									operation: "move",
+									path: "/repo/e.ts",
+									destination: "/repo/f.ts",
+								},
+								result: "File moved",
+								error: null,
+							},
+							{
+								// A relative path above the cwd the tool accepted is
+								// still a changed file, not dropped.
+								name: "write_file",
+								arguments: { path: "../sibling/g.ts" },
+								result: "ok",
+								error: null,
 							},
 						],
 					}),
@@ -549,9 +565,15 @@ test.serial(
 		t.is(report.kind, "success");
 		t.deepEqual(
 			new Set(report.filesChanged),
-			new Set(["/repo/a.ts", "/repo/b.ts", "/repo/d.ts"]),
+			new Set([
+				"/repo/a.ts",
+				"/repo/b.ts",
+				"/repo/e.ts",
+				"/repo/f.ts",
+				"../sibling/g.ts",
+			]),
 		);
-		t.is(report.filesChanged.length, 3);
+		t.is(report.filesChanged.length, 5);
 
 		const failedCall = report.toolCalls.find(
 			(tc: { name: string }) => tc.name === "string_replace",

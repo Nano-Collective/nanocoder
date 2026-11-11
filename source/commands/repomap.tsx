@@ -8,6 +8,7 @@ import {
 	DEFAULT_REPO_MAP_TOKENS,
 	type RepoMap,
 } from '@/repo-map/index';
+import {getProjectRoot} from '@/services/session-cwd';
 import {generateKey} from '@/session/key-generator';
 import type {Command} from '@/types/index';
 import {errorMsg} from '@/utils/message-factory';
@@ -96,7 +97,9 @@ export const repomapCommand: Command = {
 		}
 
 		try {
-			const map = await buildRepoMap(process.cwd(), {maxTokens});
+			// The project root, not process.cwd(): in an ACP session the process
+			// cwd is wherever the editor spawned the agent.
+			const map = await buildRepoMap(getProjectRoot(), {maxTokens});
 			return React.createElement(RepoMapView, {
 				key: generateKey('repomap'),
 				map,

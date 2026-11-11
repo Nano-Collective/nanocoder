@@ -1102,3 +1102,120 @@ test('useChatHandler - does not accumulate project context across turns', async 
 	t.false(sentSystemPrompts[1]?.includes('## Project Context'));
 	rendered.unmount();
 });
+
+// Escape aborts whichever controller app state holds, i.e. the last one handed
+// to setAbortController. The prop the hook receives stays null here, as it
+// does in the real app until the submit's setAbortController re-renders.
+const createCancellableProps = () => {
+	const controllers: AbortController[] = [];
+	const pressEscape = () => {
+		controllers[controllers.length - 1]?.abort();
+	};
+	return {
+		controllers,
+		pressEscape,
+		setAbortController: (controller: AbortController | null) => {
+			if (controller) controllers.push(controller);
+		},
+	};
+};
+
+test('useChatHandler - Escape during a plan turn stops the plan review', async t => {
+	let planComplete = 0;
+	let hookResult: ChatHandlerReturn | null = null;
+	const cancel = createCancellableProps();
+	const client: LLMClient = {
+		...createMockClient(),
+		chat: async (_messages, _tools, callbacks) => {
+			// The user presses Escape while the reply streams; the provider
+			// still returns what it had.
+			cancel.pressEscape();
+			callbacks.onFinish?.();
+			return {
+				choices: [
+					{message: {role: 'assistant' as const, content: '# Plan\n\n1. Build it.'}},
+				],
+			};
+		},
+	};
+	let planWrites = 0;
+	setToolRegistryGetter(() => ({
+		write_plan: async () => {
+			planWrites++;
+			return 'Plan saved';
+		},
+	}));
+
+	try {
+		render(
+			<TestHookComponent
+				{...createMockProps({
+					client,
+					toolManager: {
+						...createMockToolManager(),
+						getAvailableToolNames: () => ['write_plan'],
+					} as NonNullable<UseChatHandlerProps['toolManager']>,
+					developmentMode: 'plan',
+					setAbortController: cancel.setAbortController,
+					onPlanTurnComplete: () => {
+						planComplete++;
+					},
+				})}
+				onResult={result => {
+					hookResult = result;
+				}}
+			/>,
+		);
+
+		await waitForCondition(() => hookResult !== null);
+		await hookResult!.handleChatMessage('make a plan');
+
+		t.is(cancel.controllers.length, 1, 'one controller per turn');
+		t.is(planWrites, 0, 'a cancelled turn must not persist a fallback plan');
+		t.is(planComplete, 0, 'a cancelled turn must not offer plan review');
+	} finally {
+		setToolRegistryGetter(() => ({}));
+	}
+});
+
+test('useChatHandler - Escape during memory recall stops the model call', async t => {
+	let hookResult: ChatHandlerReturn | null = null;
+	let chatSignal: AbortSignal | undefined;
+	const cancel = createCancellableProps();
+	const client: LLMClient = {
+		...createMockClient(),
+		chat: async (_messages, _tools, callbacks, signal) => {
+			chatSignal = signal;
+			callbacks.onFinish?.();
+			return {
+				choices: [{message: {role: 'assistant' as const, content: 'ok'}}],
+			};
+		},
+	};
+
+	const rendered = render(
+		<TestHookComponent
+			{...createMockProps({
+				client,
+				toolManager: createMockToolManager(),
+				setAbortController: cancel.setAbortController,
+				memoryFinder: {
+					findRelevantMemories: async () => {
+						cancel.pressEscape();
+						return [];
+					},
+				},
+			})}
+			onResult={result => {
+				hookResult = result;
+			}}
+		/>,
+	);
+
+	await waitForCondition(() => hookResult !== null);
+	await hookResult!.handleChatMessage('refactor auth');
+
+	t.is(cancel.controllers.length, 1, 'one controller per turn');
+	t.true(chatSignal?.aborted, 'the model call must see the cancel');
+	rendered.unmount();
+});

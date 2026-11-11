@@ -1,12 +1,11 @@
 import path from 'path';
 import {useCallback, useState} from 'react';
+import {loadPreferences, savePreferences} from '@/config/preferences';
 import {
 	ensureDirectoryTrust,
 	grantDirectoryTrust,
 	isDirectoryTrusted,
-	loadPreferences,
-	savePreferences,
-} from '@/config/preferences';
+} from '@/config/trust/directory-trust';
 import {formatError} from '@/utils/error-formatter';
 import {logError, logInfo, logWarning} from '@/utils/message-queue';
 

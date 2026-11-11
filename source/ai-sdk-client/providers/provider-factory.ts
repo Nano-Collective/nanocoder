@@ -30,7 +30,6 @@ import {
 import type {AIProviderConfig} from '@/types/index';
 import {getLogger} from '@/utils/logging';
 import {isOpenRouterProvider} from './openrouter.js';
-import {isOrcaRouterProvider} from './orcarouter.js';
 import {isRequestyProvider} from './requesty.js';
 
 /**
@@ -583,13 +582,6 @@ export async function createProvider(
 	// Requesty (https://requesty.ai) is an OpenAI-compatible router and uses
 	// the same app-attribution headers as OpenRouter.
 	if (isRequestyProvider(providerConfig.name)) {
-		headers['HTTP-Referer'] = 'https://github.com/Nano-Collective/nanocoder';
-		headers['X-Title'] = 'Nanocoder';
-	}
-
-	// OrcaRouter (https://www.orcarouter.ai) is an OpenAI-compatible router and
-	// uses the same app-attribution headers as OpenRouter.
-	if (isOrcaRouterProvider(providerConfig.name)) {
 		headers['HTTP-Referer'] = 'https://github.com/Nano-Collective/nanocoder';
 		headers['X-Title'] = 'Nanocoder';
 	}

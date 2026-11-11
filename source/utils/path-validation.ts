@@ -1,4 +1,4 @@
-import {existsSync, realpathSync} from 'node:fs';
+import {lstatSync, readlinkSync, realpathSync} from 'node:fs';
 import path from 'node:path';
 
 /**
@@ -88,10 +88,14 @@ export function isValidFilePath(
 		}
 		const root = path.resolve(containmentRoot);
 		const abs = path.resolve(filePath);
-		return (
-			isPathInside(abs, root) ||
-			isPathInside(realResolvedPrefix(abs), realResolvedPrefix(root))
-		);
+		if (isPathInside(abs, root)) {
+			return true;
+		}
+		try {
+			return isPathInside(realResolvedPrefix(abs), realResolvedPrefix(root));
+		} catch {
+			return false; // symlink loop
+		}
 	}
 
 	// A relative path must not start with a separator
@@ -155,6 +159,7 @@ export function resolveFilePath(
 	// since the project root itself may sit under a symlink such as
 	// /tmp -> /private/tmp on macOS). The real-path check is authoritative:
 	// the other spelling of the root is the same directory and must pass.
+	// A symlink loop throws here, which rejects the path.
 	const realRoot = realResolvedPrefix(normalizedRoot);
 	const realTarget = realResolvedPrefix(absolutePath);
 
@@ -239,25 +244,68 @@ export function isRealPathInside(target: string, root: string): boolean {
  * Resolve symlinks for the portion of `target` that exists on disk, then
  * re-append any not-yet-created trailing segments. This lets us symlink-check
  * paths for files that don't exist yet (e.g. a new file passed to write_file)
- * while still resolving any symlinked ancestor directories. Non-existent
- * segments cannot themselves be symlinks, so appending them lexically is safe.
+ * while still resolving any symlinked ancestor directories.
+ *
+ * The path is walked one component at a time with `lstat`, following each
+ * symlink by hand the way the kernel does, including links whose target does
+ * not exist yet. An earlier version found the existing prefix with
+ * `existsSync`, which follows symlinks: a dangling link (`notes.md ->
+ * ~/.ssh/authorized_keys`) read as "not on disk", its name was re-appended
+ * lexically, containment passed, and a write through it landed outside the
+ * project. `..` in a link target is applied to the real directory reached so
+ * far, not folded lexically, because `a/..` means the parent of where `a`
+ * really points.
+ *
+ * Once a component does not exist, nothing below it can be a symlink, so the
+ * rest is appended lexically. Throws on a symlink loop: there is no real path,
+ * and falling back to the lexical one would let containment pass.
  */
 function realResolvedPrefix(target: string): string {
-	let existing = target;
-	const tail: string[] = [];
-	while (!existsSync(existing)) {
-		const parent = path.dirname(existing);
-		if (parent === existing) break; // reached the filesystem root
-		tail.unshift(path.basename(existing));
-		existing = parent;
+	const absolute = path.resolve(target);
+	const {root} = path.parse(absolute);
+	const pending = splitSegments(absolute.slice(root.length));
+	let real = root;
+	let hops = 0;
+	while (pending.length > 0) {
+		const segment = pending.shift() as string;
+		if (segment === '' || segment === '.') continue;
+		if (segment === '..') {
+			real = path.dirname(real);
+			continue;
+		}
+		const next = path.join(real, segment);
+		let isLink: boolean;
+		try {
+			isLink = lstatSync(next).isSymbolicLink();
+		} catch {
+			// Missing (or not inspectable): fail safe to the lexical remainder so
+			// the caller's lexical containment check stays authoritative.
+			return path.join(next, ...pending);
+		}
+		if (!isLink) {
+			real = next;
+			continue;
+		}
+		hops += 1;
+		if (hops > MAX_SYMLINK_HOPS) {
+			throw new Error(`Too many levels of symbolic links: ${target}`);
+		}
+		const linkTarget = readlinkSync(next);
+		if (path.isAbsolute(linkTarget)) {
+			const linkRoot = path.parse(linkTarget).root;
+			real = linkRoot;
+			pending.unshift(...splitSegments(linkTarget.slice(linkRoot.length)));
+		} else {
+			// Relative targets resolve against the link's own directory: `real`.
+			pending.unshift(...splitSegments(linkTarget));
+		}
 	}
-	let real: string;
-	try {
-		real = realpathSync(existing);
-	} catch {
-		// Fail safe: if we can't resolve, fall back to the lexical path so the
-		// caller's lexical containment check remains authoritative.
-		real = existing;
-	}
-	return tail.length > 0 ? path.join(real, ...tail) : real;
+	return real;
+}
+
+// Matches Linux's MAXSYMLINKS.
+const MAX_SYMLINK_HOPS = 40;
+
+function splitSegments(p: string): string[] {
+	return p.split(path.sep === '\\' ? /[\\/]/ : '/');
 }

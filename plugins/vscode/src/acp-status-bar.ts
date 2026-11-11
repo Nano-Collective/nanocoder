@@ -65,6 +65,12 @@ export function describeAcpStatus(
 				tooltip: 'The Nanocoder CLI was not found. Install it (npm i -g @nanocollective/nanocoder), then click to retry.',
 				command: 'nanocoder.restartAcp',
 			};
+		case ACPStatus.Untrusted:
+			return {
+				text: '$(shield) Nanocoder: Folder not trusted',
+				tooltip: 'The Nanocoder CLI will not start in a folder you have not trusted. Click to review and trust it.',
+				command: 'nanocoder.restartAcp',
+			};
 		case ACPStatus.Disconnected:
 		default:
 			return {

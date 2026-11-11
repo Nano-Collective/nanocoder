@@ -14,13 +14,13 @@ Type `/` in the chat input to see available commands. All commands start with `/
 |---------|-------------|
 | `/help [command]` | Show available commands by category. `/help <command>` shows that command's usage, options, subcommands, aliases and examples |
 | `/init` | Initialize the project with intelligent analysis and create `AGENTS.md`. Use `/init --preset <react\|nextjs\|rust>` for bundled stack guidance, ignore patterns, and a `/check` command skill; `/init --force` regenerates `AGENTS.md`, and `/init --lean` skips merging `CLAUDE.md` |
-| `/setup-config` | Open a configuration file in your `$EDITOR` (lists project and global config files) |
+| `/setup-config` | Open a config file (`agents.config.json`, `.mcp.json`, preferences) in your `$EDITOR`; lists the project and global copies to pick from |
 | `/clear` | Clear chat history |
-| `/model` | Switch between available models from any configured provider |
+| `/model [browse]` | Switch between available models from any configured provider. `/model browse` opens the OpenRouter model browser (searchable, filterable by open/proprietary): Enter copies the highlighted model's ID to the clipboard and, when the active provider is OpenRouter, also switches the session to that model |
 | `/status` | Display current status (CWD, provider, model, theme, available updates, AGENTS setup) |
 | `/tasks` | Manage task list for tracking complex work (see [Task Management](task-management.md)) |
-| `/model-database` | Browse coding models from OpenRouter (searchable, filterable by open/proprietary). Enter copies the highlighted model's ID to the clipboard and, when the active provider is OpenRouter, also switches the session to that model |
 | `/settings` | Interactive settings menu. Accepts a tab name to jump straight there: `/settings providers`, `/settings mcp`, `/settings appearance`, `/settings input`, `/settings behavior`, `/settings advanced` |
+| `/firewall` | Guard file edits made by the model: in `strict` mode block, in `lenient` mode only warn about, edits that delete existing tests, change exported signatures, add explicit `any` types, or touch protected paths. Off by default. Subcommands: `status`, `enable` (same as `mode strict`), `disable` (same as `mode disabled`), `mode <strict\|lenient\|disabled>`, `toggle <any\|tests\|exports>`, `protect <pattern>`, `unprotect <pattern>`, `reset`. Changes last for the session; set defaults under `nanocoder.firewall` (see [Mutation Firewall](../configuration/index.md#mutation-firewall)) |
 | `/mcp` | Show connected MCP servers and their tools |
 | `/commands` | List custom commands. Subcommands: `show <name>`, `create <name>` (see [Custom Commands](custom-commands.md)) |
 | `/tools` | List available tools grouped by source (built-in, MCP, custom). Subcommand: `create <name>` (see [Custom Tools](custom-tools.md)) |
@@ -28,12 +28,13 @@ Type `/` in the chat input to see available commands. All commands start with `/
 | `/checkpoint` | Save and restore file snapshots. Subcommands: `create`/`save [name]` (name optional, auto-generated when omitted), `list`/`ls`, `load`/`restore`, `delete`/`remove`/`rm`, `help` (see [Checkpointing](checkpointing.md)) |
 | `/compact` | Compress message history to reduce context usage. Flags include `--llm`, `--mechanical`, `--default`, `--conservative`, `--aggressive`, `--preview` and `--restore`; `--strategy`, `--threshold`, `--auto-on` and `--auto-off` only change session settings (see [Context Compression](context-compression.md)) |
 | `/context-max` | Set maximum context length for the current session (e.g. `/context-max 128k`), or inspect the resolved context source. `/context-max --reset` clears the session override. Also available as `--context-max` CLI flag |
-| `/exit` | Exit the application (alias: `/quit`) |
+| `/exit` | Exit the application |
 | `/export` | Export the current session to a markdown file, or to JSON with `/export --json` or a `.json` filename (see [Exporting a Session](#exporting-a-session)) |
+| `/share` | Write the current session to a single, self-contained HTML page you can open in any browser or send to someone, with secrets redacted. `/share --json` writes the same content as deterministic JSON (see [Sharing a Session](#sharing-a-session)) |
 | `/copy` | Copy the last assistant response to the system clipboard. Use `/copy code` to copy just the last fenced code block from the last response |
 | `/expand [n]` | Print tool result `n` in full. Long tool output is cut to 20 lines with a `/expand n` hint; run `/expand` without a number to list recent results |
 | `/commit` | Generate a Conventional Commit message from staged Git changes. Add `--copy` (or `-c`) to also copy the message to the system clipboard. A spinner shows while the model is working |
-| `/review` | One-shot, diff-only review of the current branch or one target. Usage: `/review [quick] [<branch-or-PR-number-or-GitHub-PR-URL>]` (e.g. `/review`, `/review main`, `/review quick 42`, `/review https://github.com/owner/repo/pull/42`). Bare PR numbers are resolved across configured GitHub remotes and their fork parents; ambiguous numbers require a full PR URL |
+| `/review` | One-shot, diff-only review of the current branch or one target. Usage: `/review [quick] [<branch-or-PR-number-or-GitHub-PR-URL>]` (e.g. `/review`, `/review main`, `/review quick 42`, `/review https://github.com/owner/repo/pull/42`). Bare PR numbers are resolved across configured GitHub remotes and their fork parents; ambiguous numbers require a full PR URL. See [code review](review.md) |
 | `/doctor` | Show environment health report for bug reports |
 | `/update` | Update Nanocoder to the latest version |
 | `/usage` | Get current model context usage visually. Accepts `?context-max=<n>` to preview usage against a different limit (see [Inline Overrides](#inline-overrides)) |
@@ -41,21 +42,33 @@ Type `/` in the chat input to see available commands. All commands start with `/
 | `/tip [text]` | Show a random usage tip, shortcut, or slash command; pass text to pick from tips mentioning it |
 | `/lsp` | List connected LSP servers |
 | `/repomap` | Show a PageRank-ordered map of the codebase - the most-referenced files and the symbols they define. Use `/repomap --tokens <n>` to widen the map beyond its default 1024-token budget |
-| `/schedule` | Read-only view of cron subscriptions declared by skills (see [Skills → Event subscriptions](skills.md#event-subscriptions)) |
-| `/skills` | List and inspect loaded skills. Subcommands: `show <name>`, `create <name>` (scaffold a bundle with AI assistance), `check <name>` (validate a bundle), `promote <name>` (copy a project skill to your personal config) and `demote <name>` (copy a personal skill into the project); `promote`/`demote` accept `--force` and `--move` (see [Skills](skills.md)) |
+| `/skills` | List and inspect loaded skills. Subcommands: `show <name>`, `create <name>` (scaffold a bundle with AI assistance), `check <name>` (validate a bundle), `promote <name>` (copy a project skill to your personal config) and `demote <name>` (copy a personal skill into the project); `promote`/`demote` accept `--force` and `--move`. `/skills schedule` is a read-only view of the cron subscriptions skills declare (see [Skills → Event subscriptions](skills.md#event-subscriptions)) |
 | `/resume` | Resume a previous chat session (aliases: `/sessions`, `/history`). Also available at launch via the `--resume`/`--continue` CLI flags. See [Session Management](session-management.md) |
 | `/retry` | Re-run the last user turn. Use `/retry --model <id>` or `/retry --provider <name> --model <id>` to switch models first |
 | `/rename` | Rename the current session. Name must be non-empty and 100 characters or less. See [Session Management](session-management.md) |
 | `/explorer` | Interactive file browser to navigate, preview, and select files for context |
 | `/tune` | Configure runtime model behaviour — tool profiles, compaction, native tools, model parameters (see [Tune](tune.md)) |
 | `/ide` | Connect to an IDE for live integration (e.g., VS Code diff previews) |
-| `/remember` | Save a durable project memory (see [Semantic Memory](semantic-memory.md)) |
-| `/memory` | List, delete, propose, and accept project memories (see [Semantic Memory](semantic-memory.md)) |
+| `/memory` | List, add, delete, propose, and accept project memories. `/memory add [--category <name>] <text>` saves one directly (see [Semantic Memory](semantic-memory.md)) |
 | `/privacy` | Inspect what the prompt scrubber would remove from some text: `/privacy inspect <text>`. Scrubbing itself is switched on with the [`enablePromptScrubbing`](../configuration/preferences.md#what-gets-saved-automatically) preference (`/settings` → **Advanced** → **Privacy**) |
 | `/credits` | Show project contributors and dependencies |
-| `/copilot-login [providerName]` | Log in to GitHub Copilot via device flow. Saves credentials for the named provider, "GitHub Copilot" by default |
-| `/codex-login` | Log in to ChatGPT/Codex via device flow. Saves credentials for the "ChatGPT" provider |
+| `/login <codex\|copilot> [providerName]` | Log in via device flow. `/login codex` saves credentials for the "ChatGPT" provider and `/login copilot` for "GitHub Copilot", unless you name another provider |
 | `/voice` | Configure [Voice Mode](voice-mode.md) (`/voice [on\|off\|hands-free\|ptt\|stt <local\|cloud>\|tts <local\|cloud>\|status\|mode <push-to-talk\|hands-free>]`) |
+
+`/tip`, `/privacy` and `/credits` work as listed but are left out of the `/help` overview; `/help <command>` still shows their details.
+
+### Renamed Commands
+
+These older names were folded into other commands. They still work exactly as before, but are no longer listed in `/help` or offered as completions. `/help <old name>` opens the help for the command it now runs.
+
+| Old name | Now |
+|----------|-----|
+| `/quit` | `/exit` |
+| `/remember <text>` | `/memory add <text>` |
+| `/codex-login [provider]` | `/login codex [provider]` |
+| `/copilot-login [provider]` | `/login copilot [provider]` |
+| `/model-database` | `/model browse` |
+| `/schedule` | `/skills schedule` |
 
 ## Voice Mode
 
@@ -87,6 +100,24 @@ Hands-free mode is paused in yolo mode, so ambient speech cannot trigger unconfi
 ```
 
 JSON exports keep full message content and session metadata, for replay or evaluation. The file is written relative to the current directory and must stay inside the project: `~` is not expanded, `..` segments are refused, and absolute paths outside the project root are rejected. A generated filename gets a numeric suffix rather than overwriting an earlier export; a filename you type overwrites an existing file.
+
+### Sharing a Session
+
+```bash
+/share                          # HTML page, filename generated from your first prompt and the date
+/share notes/debug-session.html # HTML page, your filename
+/share --json                   # the same content as deterministic JSON
+/share run.json                 # a .json filename also selects JSON
+/share --no-redact              # keep secrets in (read the file before you send it)
+```
+
+`/share` writes one HTML file that shows the conversation in order: your prompts, the assistant's replies and reasoning, and each tool call with its arguments and result (collapsed until you click it). Nothing is uploaded. The page is static: it runs no JavaScript and its Content-Security-Policy blocks every network request, so it is safe to open from an email or a chat attachment and works offline.
+
+What is left out: the system prompt, and image data (an attached image is noted by its type only).
+
+Secrets are redacted by default: common token formats (GitHub, OpenAI/Anthropic-style `sk-` keys, AWS access key IDs, Slack tokens, private key blocks), the values of environment variables whose names contain `TOKEN`, `KEY`, `SECRET` or `PASSWORD`, and the `apiKey` of every configured provider. The message says how many were redacted. Only those known shapes are caught, and file paths, file contents and command output are kept as they are, so read the page before you send it.
+
+`--json` writes the same content as JSON: no timestamps, a fixed key order and sorted tool-argument keys, so sharing the same session twice gives the same bytes and two shares diff cleanly. File paths follow the same rules as `/export`: relative to the current directory, inside the project, a generated name never overwrites an earlier file, and a name you type does.
 
 ## Special Input Syntax
 These shortcuts work directly in the chat input — no `/` prefix needed.
@@ -135,7 +166,7 @@ Supported keys:
 - `?auto-compact=<on|off>` - auto-compact enabled state for this command
 - `?preview`, `?llm`, `?mechanical`, `?aggressive`, `?conservative` - shorthand for the matching `/compact` flag
 
-Unknown keys are passed to the command unchanged and trigger a warning. Other commands do not parse `?` tokens, so text like `/remember ?important use tabs` is kept exactly as typed. To change a setting for the whole session, use the regular flags instead (for example `/compact --auto-on` or `/context-max 128k`).
+Unknown keys are passed to the command unchanged and trigger a warning. Other commands do not parse `?` tokens, so text like `/memory add ?important use tabs` is kept exactly as typed. To change a setting for the whole session, use the regular flags instead (for example `/compact --auto-on` or `/context-max 128k`).
 
 ## Non-Interactive Mode
 

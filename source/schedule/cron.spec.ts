@@ -107,6 +107,22 @@ test('formatCronHuman formats daily pattern', t => {
 	t.is(formatCronHuman('5 0 * * *'), 'daily at 0:05');
 });
 
+test('formatCronHuman lists each time for comma-separated minutes or hours', t => {
+	t.is(formatCronHuman('0,30 9 * * *'), 'daily at 9:00, 9:30');
+	t.is(formatCronHuman('0 9,17 * * *'), 'daily at 9:00, 17:00');
+	t.is(formatCronHuman('0 9,17 * * 1-5'), 'Mon-Fri at 9:00, 17:00');
+	t.is(formatCronHuman('15,45 6 1 * *'), 'monthly on day 1 at 6:15, 6:45');
+});
+
+test('formatCronHuman returns the raw expression for minute or hour ranges it cannot read as a time', t => {
+	// "daily at 9-17:00" would be wrong: this fires at the top of every hour 9 to 17.
+	t.is(formatCronHuman('0 9-17 * * *'), '0 9-17 * * *');
+	t.is(formatCronHuman('0-5 9 * * *'), '0-5 9 * * *');
+	t.is(formatCronHuman('0 9 * * MON'), 'Mon at 9:00');
+	// Too many combinations to list.
+	t.is(formatCronHuman('0,15,30,45 9,17 * * *'), '0,15,30,45 9,17 * * *');
+});
+
 test('formatCronHuman formats weekly pattern with day names', t => {
 	t.is(formatCronHuman('0 9 * * MON'), 'Mon at 9:00');
 	t.is(formatCronHuman('0 9 * * 1'), 'Mon at 9:00');

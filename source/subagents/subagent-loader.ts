@@ -11,8 +11,9 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {getConfigPath} from '@/config/paths';
+import {getActiveSessionContext} from '@/services/session-context';
 import {formatError} from '@/utils/error-formatter';
-import {logError, logWarning} from '@/utils/message-queue';
+import {logError, logWarning} from '@/utils/message-queue-core';
 import type {SubagentConfigWithSource, SubagentLoadPriority} from './types.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -308,17 +309,30 @@ export class SubagentLoader {
 let globalLoader: SubagentLoader | null = null;
 
 /**
- * Get the global SubagentLoader instance.
- * @param projectRoot - Optional project root (uses cwd if not provided)
- * @returns The singleton SubagentLoader instance
+ * Loaders of every project root asked for, so one process serving sessions in
+ * several folders (ACP) keeps each folder's loader, with the skill-bundle
+ * subagents registered into it, instead of replacing it on every switch.
+ */
+const loadersByRoot = new Map<string, SubagentLoader>();
+
+/**
+ * Get the SubagentLoader of a project root.
+ * @param projectRoot - Optional project root. Without one: the active
+ *   session's folder inside a session context, else the loader last asked for
+ *   (created on the cwd if there is none yet).
+ * @returns The loader for that root, the same instance on every call
  */
 export function getSubagentLoader(projectRoot?: string): SubagentLoader {
-	if (
-		!globalLoader ||
-		(projectRoot && globalLoader.getProjectRoot() !== projectRoot)
-	) {
-		globalLoader = new SubagentLoader(projectRoot);
+	const root = projectRoot ?? getActiveSessionContext()?.projectRoot;
+	if (!root) {
+		globalLoader ??= remember(new SubagentLoader());
+		return globalLoader;
 	}
-
+	globalLoader = loadersByRoot.get(root) ?? remember(new SubagentLoader(root));
 	return globalLoader;
+}
+
+function remember(loader: SubagentLoader): SubagentLoader {
+	loadersByRoot.set(loader.getProjectRoot(), loader);
+	return loader;
 }

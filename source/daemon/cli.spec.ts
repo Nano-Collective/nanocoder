@@ -5,14 +5,9 @@ import {mkdir, mkdtemp, rm, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
-import {
-	ensureDirectoryTrust,
-	isDirectoryTrusted,
-	loadPreferences,
-	resetPreferencesCache,
-	savePreferences,
-} from '@/config/preferences';
-import {describeProjectTrust} from '@/config/project-trust';
+import {loadPreferences, resetPreferencesCache, savePreferences} from '@/config/preferences';
+import {ensureDirectoryTrust, isDirectoryTrusted} from '@/config/trust/directory-trust';
+import {describeProjectTrust} from '@/config/trust/project-trust';
 import {CONFIG_AUTO_FIX_WARNING, runDaemonCli} from './cli';
 import {
 	getLockfilePath,
@@ -585,7 +580,7 @@ test.serial(
 function successfulLaunchDaemon(projectRoot: string) {
 	const calls: Array<{projectRoot: string; trustLevel: string}> = [];
 	return {
-		launch: (root: string, trustLevel: import('@/verify/trust').TrustLevel) => {
+		launch: (root: string, trustLevel: import('@/verify/trust-level').TrustLevel) => {
 			calls.push({projectRoot: root, trustLevel});
 			void writeLockfile({
 				pid: process.pid,

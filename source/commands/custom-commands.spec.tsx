@@ -10,7 +10,7 @@ void React; // JSX runtime requires React in scope
 // ============================================================================
 
 test('commandsCommand has correct name', t => {
-	t.is(commandsCommand.name, 'custom-commands');
+	t.is(commandsCommand.name, 'commands');
 });
 
 test('commandsCommand has a description', t => {

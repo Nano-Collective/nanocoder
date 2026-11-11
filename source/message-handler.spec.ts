@@ -89,48 +89,55 @@ test('getToolManager - returns tool manager from getter', t => {
 	t.is(result, mockManager);
 });
 
-// Test processToolUse - XML validation errors
-test('processToolUse - throws on __xml_validation_error__', async t => {
-	setToolRegistryGetter(createMockToolRegistry({}));
+// Test processToolUse - failures before the handler runs
+test('processToolUse - returns an error result when the registry is not initialized', async t => {
+	setToolRegistryGetter(null as unknown as () => Record<string, ToolHandler>);
 
-	const toolCall = createMockToolCall('__xml_validation_error__', {
-		error: 'Invalid XML format',
-	});
+	const result = await processToolUse(createMockToolCall('anyTool', {}));
 
-	await t.throwsAsync(processToolUse(toolCall), {
-		message: 'Invalid XML format',
-	});
+	t.is(result.tool_call_id, 'test-call-id');
+	t.is(result.content, 'Error: Tool registry not initialized');
+	t.true(result.isError);
 });
 
-test('processToolUse - throws on __xml_validation_error__ with custom message', async t => {
-	setToolRegistryGetter(createMockToolRegistry({}));
+test('processToolUse - a call carrying its own tool manager does not need the process-wide registry', async t => {
+	setToolRegistryGetter(null as unknown as () => Record<string, ToolHandler>);
+	const sessionTools = {
+		getToolRegistry: () => ({session_only: async () => 'from the session'}),
+	} as unknown as ToolManager;
 
-	const toolCall = createMockToolCall('__xml_validation_error__', {
-		error: 'Missing closing tag',
+	const result = await processToolUse(createMockToolCall('session_only', {}), {
+		toolManager: sessionTools,
 	});
 
-	await t.throwsAsync(processToolUse(toolCall), {
-		message: 'Missing closing tag',
-	});
+	t.is(result.content, 'from the session');
 });
 
-// Note: Testing uninitialized registry state is not feasible without module-level access
-// The setToolRegistryGetter must be called before processToolUse, which is enforced by the
-// application architecture. The beforeEach hook ensures proper initialization for all tests.
-
-// Test processToolUse - unknown tool
-test('processToolUse - throws on unknown tool', async t => {
+test('processToolUse - returns an error result for an unknown tool', async t => {
 	setToolRegistryGetter(
 		createMockToolRegistry({
 			knownTool: async () => 'result',
 		}),
 	);
 
-	const toolCall = createMockToolCall('unknownTool', {});
+	const result = await processToolUse(createMockToolCall('unknownTool', {}));
 
-	await t.throwsAsync(processToolUse(toolCall), {
-		message: 'Unknown tool: unknownTool',
-	});
+	t.is(result.tool_call_id, 'test-call-id');
+	t.is(result.content, 'Error: Unknown tool: unknownTool');
+	t.true(result.isError);
+});
+
+test('processToolUse - a call literally named __xml_validation_error__ is an ordinary unknown tool', async t => {
+	setToolRegistryGetter(createMockToolRegistry({}));
+
+	const result = await processToolUse(
+		createMockToolCall('__xml_validation_error__', {
+			error: 'Invalid XML format',
+		}),
+	);
+
+	t.is(result.content, 'Error: Unknown tool: __xml_validation_error__');
+	t.true(result.isError);
 });
 
 test('processToolUse - refuses a call whose arguments could not be parsed', async t => {
@@ -727,10 +734,33 @@ test('processToolUse - runs a tool from the tool manager the call carries, not t
 	t.is(result.content, 'from the session');
 
 	// The process-wide set is not consulted for that call, so a tool only it has is unknown.
-	await t.throwsAsync(
-		processToolUse(createMockToolCall('shared', {}), {toolManager: sessionTools}),
-		{message: 'Unknown tool: shared'},
-	);
+	const unknown = await processToolUse(createMockToolCall('shared', {}), {
+		toolManager: sessionTools,
+	});
+	t.is(unknown.content, 'Error: Unknown tool: shared');
+	t.true(unknown.isError);
 	// And a call that carries none still uses it.
 	t.is((await processToolUse(createMockToolCall('shared', {}))).content, 'shared');
+});
+
+test('processToolUse - does not run a tool once the turn is cancelled', async t => {
+	let ran = false;
+	setToolRegistryGetter(() => ({
+		write_file: async () => {
+			ran = true;
+			return 'written';
+		},
+	}));
+	const controller = new AbortController();
+	controller.abort();
+
+	const result = await processToolUse(
+		{id: 'call-1', function: {name: 'write_file', arguments: {}}},
+		{abortSignal: controller.signal},
+	);
+
+	t.false(ran);
+	t.is(result.tool_call_id, 'call-1');
+	t.true(result.isError);
+	t.regex(String(result.content), /cancelled by the user/i);
 });

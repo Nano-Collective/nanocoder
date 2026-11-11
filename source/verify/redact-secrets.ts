@@ -9,7 +9,7 @@
  * net, not a guarantee: anything it does not recognise passes through.
  */
 
-const REDACTED = '[REDACTED]';
+export const REDACTED = '[REDACTED]';
 
 const SECRET_PATTERNS: readonly RegExp[] = [
 	// PEM private key blocks (RSA, EC, OPENSSH, PGP, plain).
@@ -23,31 +23,54 @@ const SECRET_PATTERNS: readonly RegExp[] = [
 	/\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/g,
 	// Slack bot/user/app tokens.
 	/\bxox[abposr]-[A-Za-z0-9-]{10,}/g,
+	// Google API keys: AIza plus exactly 35 key characters.
+	/\bAIza[0-9A-Za-z_-]{35}(?![0-9A-Za-z_-])/g,
+	// GitLab personal, deploy, runner, trigger and service-account tokens.
+	/\bgl(?:pat|dt|rt|ptt|soat)-[0-9A-Za-z_-]{20,}/g,
+	// Stripe secret and restricted keys, live and test.
+	/\b(?:sk|rk)_(?:live|test)_[0-9A-Za-z]{16,}/g,
+	// JWTs: base64url header and payload that both decode to a JSON object
+	// (`{"` encodes as `eyJ`), plus a signature.
+	/\beyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g,
 ];
 
 const SECRET_ENV_NAME = /TOKEN|KEY|SECRET|PASSWORD/i;
 const MIN_ENV_SECRET_LENGTH = 8;
 
 /**
- * Values of env vars whose names look secret, longest first so a value that
- * contains another is masked whole.
+ * Values of env vars whose names look secret, plus any extra literal values
+ * the caller already knows are secret, longest first so a value that contains
+ * another is masked whole.
  */
-function secretEnvValues(env: NodeJS.ProcessEnv): string[] {
+function secretLiteralValues(
+	env: NodeJS.ProcessEnv,
+	extraValues: readonly string[],
+): string[] {
 	const values = new Set<string>();
 	for (const [name, value] of Object.entries(env)) {
 		if (!value || value.length < MIN_ENV_SECRET_LENGTH) continue;
 		if (!SECRET_ENV_NAME.test(name)) continue;
 		values.add(value);
 	}
+	for (const value of extraValues) {
+		if (value.length >= MIN_ENV_SECRET_LENGTH) values.add(value);
+	}
 	return [...values].sort((a, b) => b.length - a.length);
 }
 
+/**
+ * `extraValues` are masked literally, alongside the secret-looking env values,
+ * for secrets that do not live in the environment (for example an API key
+ * written straight into agents.config.json). Values shorter than 8 characters
+ * are ignored, as for env values, so a short one cannot mask ordinary text.
+ */
 export function redactSecrets(
 	text: string,
 	env: NodeJS.ProcessEnv = process.env,
+	extraValues: readonly string[] = [],
 ): string {
 	let result = text;
-	for (const value of secretEnvValues(env)) {
+	for (const value of secretLiteralValues(env, extraValues)) {
 		result = result.replaceAll(value, REDACTED);
 	}
 	for (const pattern of SECRET_PATTERNS) {

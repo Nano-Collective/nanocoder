@@ -18,6 +18,10 @@ import {
 } from '@/models/index';
 import {SubagentLoader, getSubagentLoader} from './subagent-loader.js';
 import type {MemoryFinder} from '@/memory/project-context';
+import {
+	createSessionContext,
+	runInSessionContext,
+} from '@/services/session-context';
 import {setProjectRoot} from '@/services/session-cwd';
 import {loadPlugins, resetPluginsForTests} from '@/plugins/host';
 import {filterToolNamesForMode, type ToolManager} from '@/tools/tool-manager';
@@ -151,6 +155,21 @@ test.before(async () => {
 
 	// Auto-approve all tool calls in tests (mirrors auto-accept mode)
 	setGlobalToolApprovalHandler(async () => true);
+});
+
+test.serial('an executor with no fixed root uses the active session folder', t => {
+	const toolManager = createMockToolManager();
+	const client = createMockClient([]);
+	const follows = new SubagentExecutor(toolManager, client);
+	const fixed = new SubagentExecutor(toolManager, client, '/tmp/fixed-root');
+	const session = createSessionContext('/tmp/session-root');
+
+	runInSessionContext(session, () => {
+		t.is(follows['projectRoot'], session.projectRoot);
+		t.is(fixed['projectRoot'], '/tmp/fixed-root');
+		t.is(follows['memoryFinder'], follows['memoryFinder']);
+	});
+	t.not(follows['projectRoot'], session.projectRoot);
 });
 
 test.serial('executes a simple task without tool calls', async t => {
@@ -3424,4 +3443,76 @@ test.serial('a subagent started with a session\'s tool manager uses that session
 	});
 	t.true(plain.success);
 	t.deepEqual(calls, ['session']);
+});
+
+// --- Turn engine guards and turn ceiling for subagents ---
+
+test.serial('a subagent that keeps calling tools stops at its turn limit', async t => {
+	const original = getAppConfig().headless;
+	getAppConfig().headless = {maxTurns: 200, subagentMaxTurns: 2};
+	const toolManager = createMockToolManager({
+		read_file: {handler: async () => 'contents', readOnly: true},
+	});
+	const offered: number[] = [];
+	const responses = [
+		{
+			content: 'Reading the first file.',
+			tool_calls: [
+				{id: 'tc-1', function: {name: 'read_file', arguments: '{"path":"a"}'}},
+			],
+		},
+		// The final turn offers no tools, but the model calls one anyway.
+		{
+			content: '',
+			tool_calls: [
+				{id: 'tc-2', function: {name: 'read_file', arguments: '{"path":"b"}'}},
+			],
+		},
+	];
+	let index = 0;
+	const client = {
+		...createMockClient([]),
+		chat: async (_messages: Message[], tools: Record<string, unknown>) => {
+			offered.push(Object.keys(tools).length);
+			return {
+				choices: [{message: responses[index++]}],
+				toolsDisabled: false,
+			} as unknown as LLMChatResponse;
+		},
+	} as unknown as LLMClient;
+
+	try {
+		const result = await new SubagentExecutor(toolManager, client).execute({
+			subagent_type: 'explore',
+			description: 'Read everything',
+		});
+		t.false(result.success);
+		t.regex(result.error || '', /turn limit \(2\)/);
+		t.regex(result.error || '', /subagentMaxTurns/);
+		t.is(result.output, 'Reading the first file.');
+		t.true(offered[0] > 0);
+		t.is(offered[1], 0, 'the last allowed turn offers no tools');
+	} finally {
+		getAppConfig().headless = original;
+	}
+});
+
+test.serial('a subagent nudges an empty reply instead of returning it', async t => {
+	const sent: Message[][] = [];
+	const client = createMockClient(
+		[{content: ''}, {content: 'Found it.'}],
+		messages => sent.push(messages),
+	);
+	const result = await new SubagentExecutor(
+		createMockToolManager(),
+		client,
+	).execute({subagent_type: 'explore', description: 'Look around'});
+
+	t.true(result.success);
+	t.is(result.output, 'Found it.');
+	t.is(sent.length, 2);
+	t.deepEqual(sent[1].at(-1), {
+		role: 'user',
+		content: 'Please continue with the task.',
+	});
 });

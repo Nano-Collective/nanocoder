@@ -2,7 +2,7 @@ import {existsSync, mkdirSync, readFileSync, rmSync, writeFileSync,statSync,utim
 import {tmpdir} from 'os';
 import {join} from 'path';
 import test from 'ava';
-import {clearAppConfig, confDirMap, getClosestConfigFile, loadDefaultMode, reloadAppConfig} from './index';
+import {clearAppConfig, confDirMap, getClosestConfigFile, getSubagentMaxTurns, loadDefaultMode, reloadAppConfig} from './index';
 import {resolveTune} from './tune';
 
 type AppConfig = ReturnType<typeof import('./index.js').getAppConfig>;
@@ -574,6 +574,48 @@ test.serial('headless maxTurns ignores invalid env var', async t => {
 		'not-a-number',
 		headless => {
 			t.is(headless?.maxTurns, 500);
+		},
+	);
+});
+
+test.serial('subagent turn limit follows maxTurns when not configured', async t => {
+	await withHeadlessConfig(
+		'headless-subagent-default',
+		{nanocoder: {headless: {maxTurns: 300}}},
+		undefined,
+		() => {
+			t.is(getSubagentMaxTurns(), 300);
+		},
+	);
+	// NANOCODER_MAX_TURNS reaches subagents through maxTurns.
+	await withHeadlessConfig(
+		'headless-subagent-env',
+		{nanocoder: {}},
+		'42',
+		() => {
+			t.is(getSubagentMaxTurns(), 42);
+		},
+	);
+});
+
+test.serial('subagentMaxTurns loads from config, clamped to at least 1', async t => {
+	await withHeadlessConfig(
+		'headless-subagent-config',
+		{nanocoder: {headless: {subagentMaxTurns: 75}}},
+		'42',
+		(headless, fallback) => {
+			// The env var overrides maxTurns only, not an explicit subagent limit.
+			t.is(headless?.maxTurns, 42);
+			t.is(getSubagentMaxTurns(), 75);
+			t.not(fallback, 75);
+		},
+	);
+	await withHeadlessConfig(
+		'headless-subagent-clamp',
+		{nanocoder: {headless: {subagentMaxTurns: 0}}},
+		undefined,
+		() => {
+			t.is(getSubagentMaxTurns(), 1);
 		},
 	);
 });
@@ -1607,7 +1649,6 @@ test.serial(
 	},
 );
 
-
 test.serial('reloadAppConfig invalidates cached agents config', t => {
 	const dir = join(
 		tmpdir(),
@@ -1708,3 +1749,31 @@ test.serial('agents config cache detects external file modifications', t => {
 		rmSync(dir, {recursive: true, force: true});
 	}
 });
+
+test.serial(
+	'loadAppConfig reads nanocoder.firewall from agents.config.json',
+	async t => {
+		await withVerifyConfig(
+			'firewall-config',
+			{
+				nanocoder: {
+					firewall: {
+						enabled: true,
+						mode: 'strict',
+						protectedPatterns: ['src/**/*.test.ts'],
+						rules: {
+							blockAnyTypeInjection: false,
+						},
+					},
+				},
+			},
+			{},
+			appConfig => {
+				t.is(appConfig.firewall?.enabled, true);
+				t.is(appConfig.firewall?.mode, 'strict');
+				t.deepEqual(appConfig.firewall?.protectedPatterns, ['src/**/*.test.ts']);
+				t.is(appConfig.firewall?.rules?.blockAnyTypeInjection, false);
+			},
+		);
+	},
+);

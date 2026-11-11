@@ -3,16 +3,22 @@ import Spinner from 'ink-spinner';
 import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import stringWidth from 'string-width';
 import {commandRegistry} from '@/commands';
+import {completionWindow} from '@/components/composer/completion-window';
+import {FileMentionList} from '@/components/composer/file-mention-list';
+import {isComposerKey} from '@/components/composer/keymap';
+import {ReverseSearchPrompt} from '@/components/composer/reverse-search-prompt';
+import {ShortcutsOverlay} from '@/components/composer/shortcuts-overlay';
+import {useFileMentions} from '@/components/composer/useFileMentions';
+import {useReverseSearch} from '@/components/composer/useReverseSearch';
+import {useShortcutsOverlay} from '@/components/composer/useShortcutsOverlay';
 import {
 	DevelopmentModeIndicator,
 	type VoiceIndicatorInfo,
 } from '@/components/development-mode-indicator';
-import {HelpRow} from '@/components/json-viewer/json-viewer';
 import TextInput, {
 	type TextInputHandle,
 	useRawInput,
 } from '@/components/text-input';
-import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {useInputState} from '@/hooks/useInputState';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
@@ -41,149 +47,19 @@ import {
 	readClipboardImage,
 	readImageFile,
 } from '@/utils/clipboard-image';
-import {
-	getCurrentFileMention,
-	getFileCompletions,
-} from '@/utils/file-autocomplete';
-import {handleFileMention} from '@/utils/file-mention-handler';
-import {fuzzyScoreFilePath} from '@/utils/fuzzy-matching';
 import {isNewlineKey} from '@/utils/newline-key';
 import {assemblePrompt} from '@/utils/prompt-processor';
-import {handleResourceMention} from '@/utils/resource-mention-handler';
 import {pasteEvents} from '@/utils/terminal-paste';
 import {getVisualLineSegments} from '@/utils/text-wrapping';
 import type {ActiveEditorState} from '@/vscode/vscode-server';
 
 const MAX_COMMAND_COMPLETION_ROWS = 10;
-const MAX_FILE_COMPLETION_ROWS = 5;
-
-// The rows of a completion list to render: all of them when they fit,
-// otherwise a window kept around the selected row so it never scrolls
-// out of view.
-function completionWindow<T>(
-	items: T[],
-	selectedIndex: number,
-	maxRows: number,
-): {start: number; end: number; items: T[]} {
-	if (items.length <= maxRows) {
-		return {start: 0, end: items.length, items};
-	}
-
-	const centeredStart =
-		(selectedIndex >= 0 ? selectedIndex : 0) - Math.floor(maxRows / 2);
-	const start = Math.min(Math.max(centeredStart, 0), items.length - maxRows);
-	const end = start + maxRows;
-
-	return {start, end, items: items.slice(start, end)};
-}
-
-// An MCP resource shares the file-mention `@` trigger and completion list,
-// distinguished from a filesystem path by this prefix so `handleFileSelection`
-// knows which resolver to call. `resource.uri` can itself contain colons
-// (e.g. `file:///…`), so the prefix only wraps the leading `serverName` and
-// is split off with a bounded split rather than a plain `:` join/parse.
-const MCP_RESOURCE_PATH_PREFIX = 'mcp-resource:';
-
-function encodeMCPResourcePath(serverName: string, uri: string): string {
-	return `${MCP_RESOURCE_PATH_PREFIX}${serverName}:${uri}`;
-}
-
-function decodeMCPResourcePath(
-	path: string,
-): {serverName: string; uri: string} | null {
-	if (!path.startsWith(MCP_RESOURCE_PATH_PREFIX)) return null;
-	const rest = path.slice(MCP_RESOURCE_PATH_PREFIX.length);
-	const separatorIndex = rest.indexOf(':');
-	if (separatorIndex === -1) return null;
-	return {
-		serverName: rest.slice(0, separatorIndex),
-		uri: rest.slice(separatorIndex + 1),
-	};
-}
-
-/**
- * MCP resources from every connected server, scored against the partial
- * `@mention` the same way local files are, and merged into the same
- * completion list. Mirrors `getFileCompletions`'s shape and score-based
- * filtering so the two sources sort together without special-casing.
- */
-async function getMCPResourceCompletions(partialPath: string): Promise<
-	Array<{
-		path: string;
-		displayPath: string;
-		resourceName: string;
-		score: number;
-		isDirectory: boolean;
-	}>
-> {
-	const mcpClient = getToolManager()?.getMCPClient();
-	if (!mcpClient) return [];
-
-	return mcpClient
-		.getAllResources()
-		.map(resource => ({
-			path: encodeMCPResourcePath(resource.serverName, resource.uri),
-			// displayPath is for the completion list UI only — it must never be
-			// used as the resourceName passed to handleResourceMention, or the
-			// "(serverName)" suffix it carries gets stamped a second time by the
-			// assembled prompt header (see prompt-processor.ts's RESOURCE case).
-			displayPath: `${resource.name} (${resource.serverName})`,
-			resourceName: resource.name,
-			score: fuzzyScoreFilePath(resource.name, partialPath),
-			isDirectory: false,
-		}))
-		.filter(c => c.score > 0);
-}
-
-// Legend for the `?` overlay. Keep in sync with the bindings handled below,
-// in TextInput (readline keys) and in App (Ctrl+S, Ctrl+C, Ctrl+G).
-const KEYBOARD_SHORTCUTS: Array<[keybind: string, label: string]> = [
-	['Enter', 'Submit prompt'],
-	['Ctrl+J / Opt+Enter', 'New line'],
-	['↑ / ↓', 'Prompt history'],
-	['Tab', 'Accept suggestion / insert suggested command'],
-	['Ctrl+A / Ctrl+E', 'Move to start / end of line'],
-	['Ctrl+W', 'Delete previous word'],
-	['Ctrl+U / Ctrl+K', 'Delete to start / end of line'],
-	['Esc Esc', 'Clear input (one Esc dismisses a suggested command)'],
-	['Ctrl+V / Ctrl+X', 'Attach clipboard image / remove last image'],
-	['Shift+Tab', 'Cycle development mode'],
-	['Ctrl+O', 'Toggle compact tool output'],
-	['Ctrl+N', 'Toggle reasoning traces'],
-	['Ctrl+R', 'Reverse search prompt history'],
-	['Ctrl+T', 'Collapse / expand task list'],
-	['Ctrl+S', 'Attach / cycle running subagents'],
-	['Ctrl+G', 'Voice push-to-talk (when /voice is on)'],
-	['Esc', 'Cancel response'],
-	['Ctrl+C', 'Exit'],
-	['?', 'Toggle this overlay (in an empty prompt)'],
-];
 
 // Prompt box width floor: keeps narrow terminals legible.
 const PROMPT_WIDTH_MIN = 40;
 // Columns a queued-message row loses inside the prompt box: the rounded
 // border (2), paddingX (2), and the '▸ '/'  ' selection marker (2).
 const QUEUED_ROW_OVERHEAD = 6;
-
-export function findReverseMatch(
-	history: InputState[],
-	query: string,
-	startIndex: number,
-): {index: number; match: InputState} | null {
-	if (history.length === 0) return null;
-	const queryLower = query.toLowerCase();
-	const start = Math.min(startIndex, history.length - 1);
-	for (let i = start; i >= 0; i--) {
-		const displayValue = history[i]?.displayValue;
-		if (
-			typeof displayValue === 'string' &&
-			displayValue.toLowerCase().includes(queryLower)
-		) {
-			return {index: i, match: history[i]};
-		}
-	}
-	return null;
-}
 
 interface ChatProps {
 	onSubmit?: (
@@ -231,6 +107,12 @@ interface ChatProps {
 	 * one column less to fill.
 	 */
 	fullscreen?: boolean;
+	/**
+	 * Fires when the `?` shortcuts overlay opens or closes. The overlay sizes
+	 * itself as if it had the footer to itself and takes over PgUp/PgDn, so
+	 * the parent hides its other footer rows and pauses its own scrolling.
+	 */
+	onShortcutsOverlayChange?: (open: boolean) => void;
 }
 
 export default function UserInput({
@@ -265,6 +147,7 @@ export default function UserInput({
 	suggestedCommand = null,
 	onDismissSuggestion,
 	fullscreen = false,
+	onShortcutsOverlayChange,
 }: ChatProps) {
 	const {isFocused, focus} = useFocus({autoFocus: !disabled, id: 'user-input'});
 	const effectiveFocus = forceFocus || isFocused;
@@ -309,33 +192,14 @@ export default function UserInput({
 		displayValue: '',
 		placeholderContent: {},
 	});
-	// File autocomplete state
-	const [isFileAutocompleteMode, setIsFileAutocompleteMode] = useState(false);
-	const [fileCompletions, setFileCompletions] = useState<
-		Array<{
-			path: string;
-			displayPath: string;
-			resourceName?: string;
-			score: number;
-		}>
-	>([]);
-	const [selectedFileIndex, setSelectedFileIndex] = useState(0);
 	const [selectedQueuedIndex, setSelectedQueuedIndex] = useState(-1);
 	// Pending image attachments sent with the next submitted message.
 	const [attachments, setAttachments] = useState<ImageAttachment[]>([]);
-	const [showShortcuts, setShowShortcuts] = useState(false);
 	const lastRestoredDraftIdRef = useRef<number | null>(null);
 
-	// Reverse prompt search state (Ctrl+R / bck-i-search)
-	const [isReverseSearchMode, setIsReverseSearchMode] = useState(false);
-	const [reverseSearchQuery, setReverseSearchQuery] = useState('');
-	const [reverseSearchIndex, setReverseSearchIndex] = useState(-1);
-	const [reverseSearchMatch, setReverseSearchMatch] =
-		useState<InputState | null>(null);
-	const reverseSearchDraftRef = useRef<InputState>({
-		displayValue: '',
-		placeholderContent: {},
-	});
+	// Reverse prompt search (Ctrl+R / bck-i-search)
+	const reverseSearch = useReverseSearch();
+	const isReverseSearchMode = reverseSearch.isActive;
 
 	const {
 		input,
@@ -355,24 +219,20 @@ export default function UserInput({
 
 	// Read through refs in key handlers: both our useInput and TextInput's see
 	// every keystroke, and either handler can still hold a render-old closure.
-	const showShortcutsRef = useRef(false);
 	const inputRef = useRef(input);
 	inputRef.current = input;
-	const setShortcutsOpen = (open: boolean) => {
-		showShortcutsRef.current = open;
-		setShowShortcuts(open);
-	};
+	const shortcuts = useShortcutsOverlay(onShortcutsOverlayChange);
+	const showShortcuts = shortcuts.isOpen;
+	const isShortcutsOpenNow = shortcuts.isOpenNow;
 
 	const {
 		showClearMessage,
 		showCompletions,
 		completions,
-		pendingFileMentions,
 		selectedCompletionIndex,
 		setShowClearMessage,
 		setShowCompletions,
 		setCompletions,
-		setPendingFileMentions,
 		setSelectedCompletionIndex,
 		resetUIState,
 	} = uiState;
@@ -463,77 +323,18 @@ export default function UserInput({
 		wasBusyRef.current = isBusy;
 	}, [isBusy, disabled, focus]);
 
-	// Consume pending file mentions from explorer and insert into input
-	// Properly attach files by calling handleFileMention for each
-	useEffect(() => {
-		if (pendingFileMentions.length === 0) return;
-
-		const attachFiles = async () => {
-			let state = currentState;
-			let displayValue = state.displayValue;
-
-			for (const filePath of pendingFileMentions) {
-				// Create a temporary mention text to replace
-				const mentionText = `@${filePath}`;
-				// Add the mention to display value first
-				displayValue = displayValue
-					? `${displayValue} ${mentionText}`
-					: mentionText;
-
-				// Handle the file mention to create placeholder
-				const result = await handleFileMention(
-					filePath,
-					displayValue,
-					state.placeholderContent,
-					mentionText,
-				);
-
-				if (result) {
-					state = result;
-					displayValue = result.displayValue;
-				}
-			}
-
-			setInputState(state);
-			setTextInputKey(prev => prev + 1);
-			setPendingFileMentions([]);
-		};
-
-		void attachFiles();
-	}, [
-		pendingFileMentions,
+	const remountTextInput = useCallback(
+		() => setTextInputKey(prev => prev + 1),
+		[],
+	);
+	// `@` file / MCP-resource mentions and the explorer's file handoff.
+	const mentions = useFileMentions({
+		input,
 		currentState,
 		setInputState,
-		setPendingFileMentions,
-	]);
-
-	// Trigger file autocomplete when input changes
-	useEffect(() => {
-		const runFileAutocomplete = async () => {
-			const mention = getCurrentFileMention(input, input.length);
-
-			if (mention) {
-				setIsFileAutocompleteMode(true);
-				const cwd = process.cwd();
-				const [completions, resourceCompletions] = await Promise.all([
-					getFileCompletions(mention.mention, cwd),
-					getMCPResourceCompletions(mention.mention),
-				]);
-				setFileCompletions(
-					[...completions, ...resourceCompletions]
-						.sort((a, b) => b.score - a.score)
-						.slice(0, 20),
-				);
-				setSelectedFileIndex(0); // Reset selection when completions change
-			} else {
-				setIsFileAutocompleteMode(false);
-				setFileCompletions([]);
-				setSelectedFileIndex(0);
-			}
-		};
-
-		void runFileAutocomplete();
-	}, [input]);
+		onInputReplaced: remountTextInput,
+	});
+	const isFileAutocompleteMode = mentions.isActive;
 
 	// Command completions for a given input value. Shared by the memo below
 	// and the Enter gate, which can run ahead of a re-render (see there).
@@ -630,68 +431,6 @@ export default function UserInput({
 	]);
 
 	// Helper functions
-
-	// Handle file mention selection (Tab key in file autocomplete mode)
-	const handleFileSelection = useCallback(async () => {
-		if (!isFileAutocompleteMode || fileCompletions.length === 0) {
-			return false;
-		}
-
-		const mention = getCurrentFileMention(input, input.length);
-		if (!mention) {
-			return false;
-		}
-
-		// Select the currently highlighted file
-		const selectedPath = fileCompletions[selectedFileIndex]?.path;
-		if (!selectedPath) {
-			return false;
-		}
-
-		// Extract the original mention text (the @... part we're replacing)
-		const mentionText = input.substring(mention.startIndex, mention.endIndex);
-
-		// Handle the mention to create a placeholder. An MCP resource and a
-		// filesystem file share this completion list and are resolved by
-		// different readers, distinguished by the encoded path's prefix.
-		const decoded = decodeMCPResourcePath(selectedPath);
-		const mcpClient = decoded ? getToolManager()?.getMCPClient() : undefined;
-		const result =
-			decoded && mcpClient
-				? await handleResourceMention(
-						mcpClient,
-						decoded.serverName,
-						decoded.uri,
-						fileCompletions[selectedFileIndex]?.resourceName ?? decoded.uri,
-						currentState.displayValue,
-						currentState.placeholderContent,
-						mentionText,
-					)
-				: await handleFileMention(
-						selectedPath,
-						currentState.displayValue,
-						currentState.placeholderContent,
-						mentionText,
-					);
-
-		if (result) {
-			setInputState(result);
-			setIsFileAutocompleteMode(false);
-			setFileCompletions([]);
-			setSelectedFileIndex(0);
-			setTextInputKey(prev => prev + 1);
-			return true;
-		}
-
-		return false;
-	}, [
-		isFileAutocompleteMode,
-		fileCompletions,
-		selectedFileIndex,
-		input,
-		currentState,
-		setInputState,
-	]);
 
 	// Attach an image to the pending message. We never gate on a model-capability
 	// heuristic here: if the model can't see images it will say so or error, which
@@ -790,8 +529,7 @@ export default function UserInput({
 			return;
 		}
 		if (isFileAutocompleteMode) {
-			setIsFileAutocompleteMode(false);
-			setFileCompletions([]);
+			mentions.dismiss();
 			return;
 		}
 		// Esc in an empty prompt dismisses the suggested command first.
@@ -816,6 +554,7 @@ export default function UserInput({
 		activeEditor,
 		showCompletions,
 		isFileAutocompleteMode,
+		mentions.dismiss,
 		suggestedCommand,
 		onDismissSuggestion,
 		showClearMessage,
@@ -907,11 +646,11 @@ export default function UserInput({
 		(value: string) => {
 			// Nothing reaches the prompt while the shortcuts overlay is open, and a
 			// lone `?` in an empty prompt is the overlay toggle (see useInput).
-			if (showShortcutsRef.current || value === '?') return;
+			if (isShortcutsOpenNow() || value === '?') return;
 			inputFromHistoryRef.current = false;
 			updateInput(value);
 		},
-		[updateInput],
+		[updateInput, isShortcutsOpenNow],
 	);
 
 	const handleQueueNavigation = useCallback(
@@ -1006,20 +745,21 @@ export default function UserInput({
 		}
 
 		// `?` in an empty prompt toggles the shortcuts overlay, which swallows
-		// every other key until `?` or Escape closes it.
+		// every other key until `?` or Escape closes it. ↑/↓ and PgUp/PgDn
+		// scroll the legend when it is taller than the terminal allows.
 		// Reverse search owns the keyboard: its query is empty at first, so
 		// without the guard typing `?` there would open the overlay instead.
 		if (
-			inputChar === '?' &&
+			isComposerKey('toggleShortcuts', inputChar, key) &&
 			!disabled &&
 			!isReverseSearchMode &&
-			(showShortcutsRef.current || inputRef.current === '')
+			(isShortcutsOpenNow() || inputRef.current === '')
 		) {
-			setShortcutsOpen(!showShortcutsRef.current);
+			shortcuts.setOpen(!isShortcutsOpenNow());
 			return;
 		}
-		if (showShortcutsRef.current) {
-			if (key.escape) setShortcutsOpen(false);
+		if (isShortcutsOpenNow()) {
+			shortcuts.handleKey(key);
 			return;
 		}
 
@@ -1032,20 +772,26 @@ export default function UserInput({
 		}
 
 		// Handle shift+tab to toggle development mode (always available)
-		if (key.tab && key.shift && onToggleMode) {
+		if (isComposerKey('toggleMode', inputChar, key) && onToggleMode) {
 			onToggleMode();
 			return;
 		}
 
 		// Handle ctrl+o to toggle compact tool display (always available)
-		if (key.ctrl && inputChar === 'o' && onToggleCompactDisplay) {
+		if (
+			isComposerKey('toggleCompactDisplay', inputChar, key) &&
+			onToggleCompactDisplay
+		) {
 			onToggleCompactDisplay();
 			return;
 		}
 
 		// Handle ctrl+n to toggle expanded reasoning traces (always available;
 		// ctrl+g is voice push-to-talk and ctrl+r is reverse history search)
-		if (key.ctrl && inputChar === 'n' && onToggleReasoningExpanded) {
+		if (
+			isComposerKey('toggleReasoningExpanded', inputChar, key) &&
+			onToggleReasoningExpanded
+		) {
 			onToggleReasoningExpanded();
 			return;
 		}
@@ -1053,7 +799,7 @@ export default function UserInput({
 		// Handle ctrl+t to collapse/expand the live task list (always available -
 		// this sits above the disabled guard so it still works while the agent
 		// is working, which is when the task list is on screen)
-		if (key.ctrl && inputChar === 't' && onToggleTaskList) {
+		if (isComposerKey('toggleTaskList', inputChar, key) && onToggleTaskList) {
 			onToggleTaskList();
 			return;
 		}
@@ -1072,122 +818,23 @@ export default function UserInput({
 
 		// Reverse prompt search mode (Ctrl+R / bck-i-search)
 		if (isReverseSearchMode) {
-			// Ctrl+C is deliberately not handled here: App.tsx's global handler
-			// exits the app on it, so it can't double as "cancel search".
-			if (key.escape) {
-				// Cancel search, restore draft
-				setInputState(reverseSearchDraftRef.current);
-				setIsReverseSearchMode(false);
-				setReverseSearchQuery('');
-				setReverseSearchIndex(-1);
-				setReverseSearchMatch(null);
+			const exit = reverseSearch.handleKey(inputChar, key);
+			if (exit) {
+				if (exit.restore) {
+					setInputState(exit.restore);
+				}
 				setTextInputKey(prev => prev + 1);
 				focus('user-input');
-				return;
 			}
-
-			if (key.return) {
-				// Accept match and exit search mode
-				if (reverseSearchMatch) {
-					setInputState(reverseSearchMatch);
-				}
-				setIsReverseSearchMode(false);
-				setReverseSearchQuery('');
-				setReverseSearchIndex(-1);
-				setReverseSearchMatch(null);
-				setTextInputKey(prev => prev + 1);
-				focus('user-input');
-				return;
-			}
-
-			if (key.ctrl && inputChar === 'r') {
-				// Cycle to next older match with current query (stop at oldest)
-				const history = promptHistory.getHistory();
-				if (history.length > 0 && reverseSearchIndex > 0) {
-					const olderMatch = findReverseMatch(
-						history,
-						reverseSearchQuery,
-						reverseSearchIndex - 1,
-					);
-					if (olderMatch) {
-						setReverseSearchIndex(olderMatch.index);
-						setReverseSearchMatch(olderMatch.match);
-					}
-				}
-				return;
-			}
-
-			if (key.backspace || key.delete) {
-				const history = promptHistory.getHistory();
-				const nextQuery = reverseSearchQuery.slice(0, -1);
-				setReverseSearchQuery(nextQuery);
-				const matchResult = findReverseMatch(
-					history,
-					nextQuery,
-					history.length - 1,
-				);
-				if (matchResult) {
-					setReverseSearchIndex(matchResult.index);
-					setReverseSearchMatch(matchResult.match);
-				} else {
-					setReverseSearchIndex(-1);
-					setReverseSearchMatch(null);
-				}
-				return;
-			}
-
-			// Ignore other control/meta combinations while in search mode
-			if (key.ctrl || key.meta) {
-				return;
-			}
-
-			// Handle regular text typing into search query
-			if (
-				inputChar &&
-				!key.upArrow &&
-				!key.downArrow &&
-				!key.leftArrow &&
-				!key.rightArrow &&
-				!key.tab
-			) {
-				const history = promptHistory.getHistory();
-				const nextQuery = reverseSearchQuery + inputChar;
-				setReverseSearchQuery(nextQuery);
-				const matchResult = findReverseMatch(
-					history,
-					nextQuery,
-					history.length - 1,
-				);
-				if (matchResult) {
-					setReverseSearchIndex(matchResult.index);
-					setReverseSearchMatch(matchResult.match);
-				} else {
-					setReverseSearchIndex(-1);
-					setReverseSearchMatch(null);
-				}
-				return;
-			}
-
 			return;
 		}
 
 		// Handle ctrl+r to enter reverse prompt search
-		if (key.ctrl && inputChar === 'r') {
-			const history = promptHistory.getHistory();
-			reverseSearchDraftRef.current = currentState;
-			setIsReverseSearchMode(true);
-			setReverseSearchQuery('');
+		if (isComposerKey('reverseSearch', inputChar, key)) {
+			reverseSearch.start(currentState);
 			setShowCompletions(false);
-			setIsFileAutocompleteMode(false);
+			mentions.dismiss();
 			setShowClearMessage(false);
-			const initialMatch = findReverseMatch(history, '', history.length - 1);
-			if (initialMatch) {
-				setReverseSearchIndex(initialMatch.index);
-				setReverseSearchMatch(initialMatch.match);
-			} else {
-				setReverseSearchIndex(-1);
-				setReverseSearchMatch(null);
-			}
 			return;
 		}
 
@@ -1196,7 +843,7 @@ export default function UserInput({
 		// (cli.tsx enables DECSET 2004 and routes payloads to pasteEvents),
 		// never as a Ctrl+V keypress, so this binding is free to mean
 		// "paste image".
-		if (key.ctrl && inputChar === 'v') {
+		if (isComposerKey('attachClipboardImage', inputChar, key)) {
 			const image = readClipboardImage();
 			if (image) {
 				attachImage(image);
@@ -1205,7 +852,7 @@ export default function UserInput({
 		}
 
 		// Ctrl+X: drop the most recently added image attachment.
-		if (key.ctrl && inputChar === 'x') {
+		if (isComposerKey('removeLastImage', inputChar, key)) {
 			setAttachments(prev => prev.slice(0, -1));
 			return;
 		}
@@ -1219,11 +866,11 @@ export default function UserInput({
 		// down the whole subtree on every undo/redo. TextInput's own value-sync
 		// effect already clamps the cursor to a valid offset when the value
 		// changes, so undoing keeps the caret roughly where it was.
-		if (key.ctrl && inputChar === 'z') {
+		if (isComposerKey('undo', inputChar, key)) {
 			undo();
 			return;
 		}
-		if (key.ctrl && inputChar === 'y') {
+		if (isComposerKey('redo', inputChar, key)) {
 			redo();
 			return;
 		}
@@ -1248,7 +895,7 @@ export default function UserInput({
 
 			// File autocomplete takes priority
 			if (isFileAutocompleteMode) {
-				void handleFileSelection();
+				void mentions.selectCurrent();
 				return;
 			}
 
@@ -1296,8 +943,7 @@ export default function UserInput({
 
 		// Space exits file autocomplete mode
 		if (inputChar === ' ' && isFileAutocompleteMode) {
-			setIsFileAutocompleteMode(false);
-			setFileCompletions([]);
+			mentions.dismiss();
 		}
 
 		// Clear clear message on other input
@@ -1375,10 +1021,7 @@ export default function UserInput({
 			// navigate lines — let TextInput handle it
 			if (getVisualLineSegments(input, inputWrapWidth).length > 1) return;
 			// File autocomplete navigation takes priority
-			if (isFileAutocompleteMode && fileCompletions.length > 0) {
-				setSelectedFileIndex(prev =>
-					prev > 0 ? prev - 1 : fileCompletions.length - 1,
-				);
+			if (mentions.moveSelection('up')) {
 				return;
 			}
 			// Command completion navigation takes priority over history
@@ -1400,10 +1043,7 @@ export default function UserInput({
 			// navigate lines — let TextInput handle it
 			if (getVisualLineSegments(input, inputWrapWidth).length > 1) return;
 			// File autocomplete navigation takes priority
-			if (isFileAutocompleteMode && fileCompletions.length > 0) {
-				setSelectedFileIndex(prev =>
-					prev < fileCompletions.length - 1 ? prev + 1 : 0,
-				);
+			if (mentions.moveSelection('down')) {
 				return;
 			}
 			// Command completion navigation takes priority over history
@@ -1456,15 +1096,6 @@ export default function UserInput({
 			),
 		[completions, selectedCompletionIndex],
 	);
-	const fileCompletionWindow = useMemo(
-		() =>
-			completionWindow(
-				fileCompletions,
-				selectedFileIndex,
-				MAX_FILE_COMPLETION_ROWS,
-			),
-		[fileCompletions, selectedFileIndex],
-	);
 
 	// When disabled, show minimal UI to avoid cluttering the screen
 	if (disabled) {
@@ -1511,27 +1142,7 @@ export default function UserInput({
 					</Box>
 				)}
 				{showShortcuts && (
-					<TitledBoxWithPreferences
-						title="Keyboard Shortcuts"
-						width={promptWidth}
-						borderColor={colors.primary}
-						paddingX={2}
-						paddingY={1}
-						marginTop={1}
-						flexDirection="column"
-					>
-						{KEYBOARD_SHORTCUTS.map(([keybind, label]) => (
-							<HelpRow
-								key={keybind}
-								keybind={keybind}
-								label={label}
-								colors={colors}
-							/>
-						))}
-						<Box marginTop={1}>
-							<Text color={colors.secondary}>Press ? or Esc to close</Text>
-						</Box>
-					</TitledBoxWithPreferences>
+					<ShortcutsOverlay width={promptWidth} view={shortcuts.view} />
 				)}
 				<Box
 					display={showShortcuts ? 'none' : 'flex'}
@@ -1545,41 +1156,11 @@ export default function UserInput({
 				>
 					{/* Input row */}
 					{isReverseSearchMode ? (
-						<Box flexDirection="column">
-							<Box>
-								<Text
-									color={
-										reverseSearchMatch || reverseSearchQuery === ''
-											? colors.info
-											: colors.error
-									}
-									bold
-								>
-									{reverseSearchMatch || reverseSearchQuery === ''
-										? '(reverse-i-search)`'
-										: '(failed reverse-i-search)`'}
-								</Text>
-								<Text color={colors.primary} bold>
-									{reverseSearchQuery}
-								</Text>
-								<Text
-									color={
-										reverseSearchMatch || reverseSearchQuery === ''
-											? colors.info
-											: colors.error
-									}
-									bold
-								>
-									{"': "}
-								</Text>
-								<Text color={reverseSearchMatch ? textColor : colors.secondary}>
-									{reverseSearchMatch ? reverseSearchMatch.displayValue : ''}
-								</Text>
-							</Box>
-							<Text color={colors.secondary}>
-								Enter: select · Esc: cancel · Ctrl+R: cycle older
-							</Text>
-						</Box>
+						<ReverseSearchPrompt
+							query={reverseSearch.query}
+							match={reverseSearch.match}
+							matchColor={textColor}
+						/>
 					) : (
 						<Box>
 							{input.length === 0 && (
@@ -1639,34 +1220,11 @@ export default function UserInput({
 							)}
 						</Box>
 					)}
-					{isFileAutocompleteMode && fileCompletions.length > 0 && (
-						<Box flexDirection="column" marginTop={1}>
-							<Text color={colors.secondary}>
-								File suggestions (↑/↓ to navigate, Tab to select):
-							</Text>
-							{fileCompletionWindow.items.map((file, index) => {
-								const isSelected =
-									fileCompletionWindow.start + index === selectedFileIndex;
-								return (
-									<Text
-										key={file.path}
-										color={isSelected ? colors.info : colors.primary}
-										bold={isSelected}
-									>
-										{isSelected ? '▸ ' : '  '}
-										{decodeMCPResourcePath(file.path)
-											? file.displayPath
-											: file.path}
-									</Text>
-								);
-							})}
-							{fileCompletions.length > MAX_FILE_COMPLETION_ROWS && (
-								<Text color={colors.secondary}>
-									Showing {fileCompletionWindow.start + 1}-
-									{fileCompletionWindow.end} of {fileCompletions.length}
-								</Text>
-							)}
-						</Box>
+					{isFileAutocompleteMode && mentions.completions.length > 0 && (
+						<FileMentionList
+							completions={mentions.completions}
+							selectedIndex={mentions.selectedIndex}
+						/>
 					)}
 					{queuedMessages.length > 0 && (
 						<Box flexDirection="column" marginTop={1}>
@@ -1705,7 +1263,8 @@ export default function UserInput({
 				</Box>
 			</Box>
 
-			{attachments.length > 0 && (
+			{/* Part of the composer, so it hides with the input box. */}
+			{!showShortcuts && attachments.length > 0 && (
 				<Box marginTop={1}>
 					<Text color={colors.info}>
 						{attachments

@@ -3504,3 +3504,353 @@ for (const [listed, expectedPrompts] of [
 		},
 	);
 }
+
+test.serial('escape during an auto-approved tool stops the rest of the batch', async t => {
+	const controller = new AbortController();
+	const messageSnapshots: Message[][] = [];
+	const ran: string[] = [];
+	setToolRegistryGetter(() => ({
+		slow_bash: async () => {
+			ran.push('slow_bash');
+			controller.abort();
+			return 'bash done';
+		},
+		write_tool: async () => {
+			ran.push('write_tool');
+			return 'written';
+		},
+	}));
+
+	let chatCallCount = 0;
+	const params = createDefaultParams({
+		client: {
+			chat: async (): Promise<LLMChatResponse> => {
+				chatCallCount += 1;
+				if (chatCallCount > 1) {
+					throw new Error('Operation was cancelled');
+				}
+				return {
+					choices: [
+						{
+							message: {
+								role: 'assistant',
+								content: '',
+								tool_calls: [
+									{id: 'call_bash', function: {name: 'slow_bash', arguments: '{}'}},
+									{id: 'call_write', function: {name: 'write_tool', arguments: '{}'}},
+								],
+							},
+						},
+					],
+					toolsDisabled: false,
+				};
+			},
+		},
+		toolManager: {
+			...createMockToolManager({
+				tools: ['slow_bash', 'write_tool'],
+				needsApproval: false,
+			}),
+			getToolFormatter: () => undefined,
+		},
+		developmentMode: 'yolo' as const,
+		abortController: controller,
+		setMessages: (msgs: Message[]) => messageSnapshots.push(msgs),
+	});
+
+	try {
+		await t.throwsAsync(processAssistantResponse(params), {
+			message: 'Operation was cancelled',
+		});
+	} finally {
+		setToolRegistryGetter(() => ({}));
+	}
+
+	t.deepEqual(ran, ['slow_bash'], 'the tool queued behind the cancel must not run');
+	const latest = messageSnapshots[messageSnapshots.length - 1];
+	const skipped = latest.find(
+		m => m.role === 'tool' && m.tool_call_id === 'call_write',
+	);
+	t.regex(String(skipped?.content), /cancelled by the user/i);
+	t.truthy(
+		latest.find(m => m.role === 'tool' && m.tool_call_id === 'call_bash'),
+	);
+});
+
+test.serial('escape while the reply finishes does not execute its tool calls', async t => {
+	const controller = new AbortController();
+	const messageSnapshots: Message[][] = [];
+	let ran = false;
+	setToolRegistryGetter(() => ({
+		write_tool: async () => {
+			ran = true;
+			return 'written';
+		},
+	}));
+
+	const params = createDefaultParams({
+		client: {
+			// The provider returns a complete reply even though the user pressed
+			// Escape before it finished.
+			chat: async (): Promise<LLMChatResponse> => {
+				controller.abort();
+				return {
+					choices: [
+						{
+							message: {
+								role: 'assistant',
+								content: '',
+								tool_calls: [
+									{id: 'call_write', function: {name: 'write_tool', arguments: '{}'}},
+								],
+							},
+						},
+					],
+					toolsDisabled: false,
+				};
+			},
+		},
+		toolManager: createMockToolManager({
+			tools: ['write_tool'],
+			needsApproval: false,
+		}),
+		developmentMode: 'yolo' as const,
+		abortController: controller,
+		setMessages: (msgs: Message[]) => messageSnapshots.push(msgs),
+	});
+
+	try {
+		await t.throwsAsync(processAssistantResponse(params), {
+			message: 'Operation was cancelled',
+		});
+	} finally {
+		setToolRegistryGetter(() => ({}));
+	}
+
+	t.false(ran);
+	const latest = messageSnapshots[messageSnapshots.length - 1];
+	const paired = latest.find(
+		m => m.role === 'tool' && m.tool_call_id === 'call_write',
+	);
+	t.regex(String(paired?.content), /cancelled by the user/i);
+});
+
+// Declining a tool ends the turn. The app only drains messages the user
+// queued while the prompt was up once the loop reports completion.
+for (const scenario of [
+	{label: 'the user declines', abort: false},
+	{label: 'an abort settles the prompt', abort: true},
+] as const) {
+	test.serial(`a declined tool signals conversation completion when ${scenario.label}`, async t => {
+		const controller = new AbortController();
+		setGlobalToolConfirmHandler(async () => {
+			if (scenario.abort) controller.abort();
+			return false;
+		});
+		let completions = 0;
+		let chatCalls = 0;
+		const params = createDefaultParams({
+			client: {
+				chat: async (): Promise<LLMChatResponse> => {
+					chatCalls++;
+					return {
+						choices: [
+							{
+								message: {
+									role: 'assistant',
+									content: '',
+									tool_calls: [
+										{id: 'call_guarded', function: {name: 'guarded_tool', arguments: '{}'}},
+									],
+								},
+							},
+						],
+						toolsDisabled: false,
+					};
+				},
+			},
+			toolManager: createMockToolManager({
+				tools: ['guarded_tool'],
+				needsApproval: true,
+			}),
+			abortController: controller,
+			onConversationComplete: () => {
+				completions++;
+			},
+		});
+
+		try {
+			await processAssistantResponse(params);
+		} finally {
+			setGlobalToolConfirmHandler(async () => true);
+		}
+
+		t.is(chatCalls, 1, 'a decline does not re-prompt the model');
+		t.is(completions, 1);
+	});
+}
+
+test.serial('compact-and-retry keeps the turn controller, a single history write and a restore point', async t => {
+	const {compressionBackup} = await import('@/utils/compression-backup.js');
+	compressionBackup.clearBackup();
+	const signals: (AbortSignal | undefined)[] = [];
+	const messageSnapshots: Message[][] = [];
+	const longContent =
+		'Verbose conversation content that exceeds thresholds for mechanical compression. '.repeat(30);
+	const history: Message[] = [
+		{role: 'user', content: longContent},
+		{role: 'assistant', content: 'Prior response.'},
+		{role: 'user', content: 'Continue'},
+	];
+	let created = 0;
+
+	await withRetryLimits({maxEmptyTurns: 0}, async () => {
+		await processAssistantResponse(
+			createDefaultParams({
+				client: {
+					chat: async (
+						_messages: Message[],
+						_tools: unknown,
+						_callbacks: unknown,
+						signal?: AbortSignal,
+					): Promise<LLMChatResponse> => {
+						signals.push(signal);
+						return {
+							choices: [{message: {role: 'assistant', content: ''}}],
+							toolsDisabled: false,
+						};
+					},
+				},
+				messages: history,
+				// The prop is stale (null) on the first call, as in the app.
+				abortController: null,
+				setAbortController: (next: AbortController | null) => {
+					if (next) created++;
+				},
+				setMessages: (msgs: Message[]) => messageSnapshots.push(msgs),
+			}) as never,
+		);
+	});
+
+	t.is(signals.length, 2, 'the initial turn plus one compact-and-retry');
+	t.is(created, 1, 'the retry must reuse the turn controller');
+	t.is(signals[1], signals[0]);
+
+	// The empty turns add nothing to history, so the compaction is the only
+	// write: the compressed history together with its nudge, in one update.
+	t.is(messageSnapshots.length, 1);
+	t.is(
+		messageSnapshots[0]?.at(-1)?.content,
+		'Context has been compacted. Please continue with the task.',
+	);
+	t.deepEqual(
+		compressionBackup.getBackup()?.map(m => m.content),
+		history.map(m => m.content),
+		'/compact --restore must be able to undo this compaction',
+	);
+	compressionBackup.clearBackup();
+});
+
+test.serial('auto-compact gates on the capped history the request sends, not the full history', async t => {
+	setupAutoCompactTestEnv();
+	setAutoCompactStrategy('mechanical');
+	// Large enough for the capped view, far too small for the full history.
+	setSessionContextLimit(2000);
+	const config = getAppConfig();
+	const originalSessions = config.sessions;
+	config.sessions = {...originalSessions, maxMessages: 2} as typeof config.sessions;
+
+	// Old rows the cap already drops from every request.
+	const oldVerboseContent = 'old context sentence. '.repeat(400);
+	const history: Message[] = [
+		{role: 'user', content: oldVerboseContent},
+		{role: 'assistant', content: oldVerboseContent},
+		{role: 'user', content: 'Recent request'},
+	];
+	const snapshots: Message[][] = [];
+	const notices: unknown[] = [];
+
+	try {
+		await processAssistantResponse(
+			createDefaultParams({
+				client: createMockClient({content: 'Done.'}),
+				messages: history,
+				currentProvider: 'openai',
+				currentModel: 'gpt-4',
+				setMessages: (msgs: Message[]) => snapshots.push(msgs),
+				addToChatQueue: (component: any) => notices.push(component),
+			}) as never,
+		);
+	} finally {
+		config.sessions = originalSessions;
+	}
+
+	const compactNotice = notices.find(
+		(c: any) => c?.props?.message && String(c.props.message).includes('compact'),
+	);
+	t.falsy(compactNotice, 'the request was well under the limit, so nothing compacts');
+	// The full history (old rows included) is kept, plus the reply.
+	t.is(snapshots.at(-1)?.length, history.length + 1);
+	t.is(snapshots.at(-1)?.[0]?.content, oldVerboseContent);
+});
+
+test.serial('a thinking turn does not indent tool summaries for a later non-thinking conversation', async t => {
+	resetLastTurnHadReasoning();
+	// A conversation with a thinking model.
+	await processAssistantResponse(
+		createDefaultParams({
+			client: createMockClient({content: 'Thought it through.', reasoning: 'Hmm.'}),
+		}) as never,
+	);
+
+	// Then a non-thinking model runs a tool and answers.
+	setToolRegistryGetter(() => ({some_tool: async () => 'ok'}));
+	const queued: any[] = [];
+	const compactToolCountsRef = {current: {} as Record<string, number>};
+	let calls = 0;
+	try {
+		await processAssistantResponse(
+			createDefaultParams({
+				client: {
+					chat: async (): Promise<LLMChatResponse> => {
+						calls++;
+						return {
+							choices: [
+								{
+									message:
+										calls === 1
+											? {
+													role: 'assistant',
+													content: '',
+													tool_calls: [
+														{id: 'call_1', function: {name: 'some_tool', arguments: '{}'}},
+													],
+												}
+											: {role: 'assistant', content: 'Done.'},
+								},
+							],
+							toolsDisabled: false,
+						};
+					},
+				},
+				toolManager: {
+					...createMockToolManager({tools: ['some_tool'], needsApproval: false}),
+					getToolFormatter: () => undefined,
+				},
+				developmentMode: 'yolo' as const,
+				compactToolDisplayRef: {current: true},
+				compactToolCountsRef,
+				onSetCompactToolCounts: () => {},
+				addToChatQueue: (component: any) => queued.push(component),
+			}) as never,
+		);
+	} finally {
+		setToolRegistryGetter(() => ({}));
+	}
+
+	const summary = queued.find((c: any) =>
+		String(c?.key).includes('tool-compact-summary'),
+	);
+	t.truthy(summary, 'the tool run is summarised');
+	t.is(summary?.props.marginLeft, 0, 'no Thought to group under, so render flat');
+});

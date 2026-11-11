@@ -18,13 +18,48 @@ interface MemoryCommandOptions {
 	>;
 	summarizerService?: Pick<
 		SummarizerService,
-		'proposeMemoriesFromMessages' | 'acceptProposal'
+		'proposeMemoriesFromMessages' | 'acceptProposal' | 'remember'
 	>;
 	proposalStore?: ProposalStore;
 }
 
 const USAGE =
-	'Usage: /memory list | /memory delete <id> | /memory clear | /memory propose | /memory accept <n>';
+	'Usage: /memory list | /memory add [--category <name>] <text> | /memory delete <id> | /memory clear | /memory propose | /memory accept <n>';
+
+const ADD_USAGE = 'Usage: /memory add [--category <name>] <project memory>';
+
+interface ParsedAddArgs {
+	content: string;
+	category?: string;
+	error?: string;
+}
+
+/** Parses `/memory add` (and the old `/remember`) arguments. */
+function parseAddArgs(args: string[]): ParsedAddArgs {
+	let category: string | undefined;
+	const contentParts: string[] = [];
+
+	for (let index = 0; index < args.length; index++) {
+		const arg = args[index];
+		if (arg === '--category' || arg === '-c') {
+			const value = args[index + 1];
+			if (!value) {
+				return {content: '', error: ADD_USAGE};
+			}
+
+			category = value;
+			index++;
+			continue;
+		}
+
+		contentParts.push(arg);
+	}
+
+	const content = contentParts.join(' ').trim();
+	if (!content) return {content: '', error: ADD_USAGE};
+
+	return {content, category};
+}
 
 /** Length of the display id. Long enough to stay unique in a realistic pool,
  * short enough to retype without copying out of wrapped terminal output. */
@@ -206,6 +241,29 @@ export function createMemoryCommand(
 					}
 
 					return <MemoryList memories={memories} />;
+				}
+
+				if (subcommand === 'add') {
+					const parsed = parseAddArgs(args.slice(1));
+					if (parsed.error) {
+						return errorMsg(parsed.error, 'memory-error');
+					}
+
+					try {
+						const memory = await summarizerService.remember({
+							content: parsed.content,
+							category: parsed.category,
+						});
+						return successMsg(
+							`Remembered ${memory.category} memory.`,
+							'memory-add',
+						);
+					} catch (error) {
+						return errorMsg(
+							`Failed to save memory: ${formatError(error)}`,
+							'memory-error',
+						);
+					}
 				}
 
 				if (subcommand === 'delete' || subcommand === 'rm') {

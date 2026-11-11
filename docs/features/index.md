@@ -89,7 +89,7 @@ When the AI wants to edit a file, run a command, or perform any action, it uses 
 | Mode | Behaviour | Best For |
 |------|-----------|----------|
 | **Normal** (default) | Confirm each tool that can change something; read-only tools run directly | Unfamiliar codebases, sensitive operations |
-| **Auto-Accept** | Most tools execute immediately; bash, `browser`, `git_commit`, `git_pr` create/comment/review, and `approval: always` custom tools still prompt | Trusted tasks, faster iteration |
+| **Auto-Accept** | Most tools execute immediately; bash, `browser`, `git_commit`, `git_pr` create/comment/review, MCP tools not marked read-only or `alwaysAllow`-ed, and `approval: always` custom tools still prompt | Trusted tasks, faster iteration |
 | **Yolo** | Every tool executes immediately with no prompt | Zero interruptions, full trust |
 | **Plan** | Read-only tools run; every mutation tool is removed, and the AI writes a plan for you to approve | Exploring and planning before any change |
 | **Architect** | File edits run without a prompt, then you keep or revert the whole turn | Multi-file changes you want to judge as a whole |
@@ -283,7 +283,6 @@ Extend Nanocoder's capabilities by connecting [MCP (Model Context Protocol) serv
 | [Subagents](subagents.md) | Specialized AI agents with isolated context (a kind of skill member) |
 | [Custom Tools](custom-tools.md) | Model-callable shell scripts (a kind of skill member) |
 | [Lifecycle Hooks](hooks.md) | Shell commands run at fixed points in the agent loop, able to veto a tool call, plus in-process JavaScript plugins |
-| [Scheduler](scheduler.md) | Migration pointer — cron triggers are now [skill subscriptions](skills.md#event-subscriptions) |
 | [Commands Reference](commands.md) | All slash commands and special input syntax |
 | [Development Modes](development-modes.md) | Normal, auto-accept, yolo, plan, and architect modes |
 | [Context Compression](context-compression.md) | Managing token usage in long conversations |

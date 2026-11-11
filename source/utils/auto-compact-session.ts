@@ -1,6 +1,6 @@
+import {defineSessionValue} from '@/services/session-context';
 import type {CompressionMode, CompressionStrategy} from '@/types/config';
 import {clampThreshold} from './message-compression';
-import {createSessionOverride} from './session-override';
 
 export interface AutoCompactSessionOverrides {
 	enabled: boolean | null;
@@ -12,12 +12,12 @@ export interface AutoCompactSessionOverrides {
 // Session overrides for auto-compact. `threshold` is clamped to the configured range.
 
 // Internal override objects (no longer exposed)
-const enabledOverride = createSessionOverride<boolean>();
-const thresholdOverride = createSessionOverride<number>(value =>
+const enabledOverride = defineSessionValue<boolean>();
+const thresholdOverride = defineSessionValue<number>(value =>
 	value !== null ? clampThreshold(value) : null,
 );
-const modeOverride = createSessionOverride<CompressionMode>();
-const strategyOverride = createSessionOverride<CompressionStrategy>();
+const modeOverride = defineSessionValue<CompressionMode>();
+const strategyOverride = defineSessionValue<CompressionStrategy>();
 
 // Legacy object-style accessor (read by useAppHandlers + performAutoCompact)
 // and used by inline overrides parsing

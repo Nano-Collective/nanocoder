@@ -126,7 +126,8 @@ export async function initializePlain(
 	const subagentExecutor = new SubagentExecutor(
 		toolManager,
 		client,
-		process.cwd(),
+		// No fixed root: an ACP session's subagents load from its own folder.
+		undefined,
 		options.developmentMode ?? 'normal',
 		recordSubagentApiCallForStats,
 	);
@@ -198,7 +199,12 @@ async function initializeMCP(toolManager: ToolManager): Promise<void> {
 	};
 
 	try {
-		await toolManager.initializeMCP(config.mcpServers, onProgress);
+		await toolManager.initializeMCP(
+			config.mcpServers,
+			onProgress,
+			undefined,
+			config.tune,
+		);
 	} catch (error) {
 		writeStatus(`MCP initialization error: ${String(error)}`);
 	}

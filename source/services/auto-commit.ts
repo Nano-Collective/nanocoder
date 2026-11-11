@@ -2,7 +2,7 @@ import {existsSync} from 'node:fs';
 import {dirname, isAbsolute, relative, resolve} from 'node:path';
 
 import {getAppConfig} from '@/config/index';
-import {resolveFilePath} from '@/services/lifecycle-hooks';
+import {getToolFileArg} from '@/services/lifecycle-hooks';
 import {getSafeSessionCwd} from '@/services/session-cwd';
 import {COMMIT_SYSTEM_PROMPT} from '@/tools/git/commit-prompt';
 import {execGit, truncateDiff} from '@/tools/git/utils';
@@ -43,7 +43,9 @@ let activeClient: LLMClient | null = null;
 
 /**
  * Point auto-commit at the client used for commit messages. Kept in sync with
- * the session's client, so a /model or /provider switch is picked up.
+ * the session's client, so a /model or /provider switch is picked up. A caller
+ * whose session has a client of its own (ACP) passes it to maybeAutoCommit
+ * instead.
  */
 export function setAutoCommitClient(client: LLMClient | null): void {
 	activeClient = client;
@@ -74,29 +76,36 @@ function enqueue<T>(task: () => Promise<T>): Promise<T> {
  *
  * Returns a one-line note for the tool result, so the model knows a commit
  * happened, or null when nothing was committed.
+ *
+ * `client` writes the commit message when given; otherwise the one set by
+ * setAutoCommitClient does.
  */
 export async function maybeAutoCommit(
 	toolName: string,
 	toolArgs: Record<string, unknown>,
+	client?: LLMClient,
 ): Promise<string | null> {
 	if (!getAppConfig().autoCommit || !AUTO_COMMIT_TOOLS.has(toolName)) {
 		return null;
 	}
-	const filePath = resolveFilePath(toolArgs);
+	const filePath = getToolFileArg(toolArgs);
 	if (!filePath) return null;
 
 	// Resolved the same way the file tools resolve it.
 	const absPath = resolve(getSafeSessionCwd(), filePath);
 
 	try {
-		return await enqueue(() => commitFile(absPath));
+		return await enqueue(() => commitFile(absPath, client));
 	} catch (error) {
 		logWarning(`Auto-commit skipped: ${formatError(error)}`);
 		return null;
 	}
 }
 
-async function commitFile(absPath: string): Promise<string | null> {
+async function commitFile(
+	absPath: string,
+	client: LLMClient | undefined,
+): Promise<string | null> {
 	// Asking git from the file's own directory finds the repository the file
 	// is actually in, which is not always the one the session started in.
 	let root: string;
@@ -196,7 +205,7 @@ async function commitFile(absPath: string): Promise<string | null> {
 			return null;
 		}
 
-		const message = await generateMessage(diff, pathspec);
+		const message = await generateMessage(diff, pathspec, client);
 		const output = await git(
 			'commit',
 			'-m',
@@ -284,9 +293,10 @@ async function isIgnored(
 async function generateMessage(
 	diff: string,
 	pathspec: string,
+	sessionClient: LLMClient | undefined,
 ): Promise<string> {
 	const fallback = `chore: update ${pathspec}`;
-	const client = activeClient;
+	const client = sessionClient ?? activeClient;
 	if (!client) return fallback;
 
 	const messages: Message[] = [

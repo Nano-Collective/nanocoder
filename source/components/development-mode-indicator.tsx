@@ -114,7 +114,7 @@ export const DevelopmentModeIndicator = React.memo(
 
 		// Two forms of the task badge. The base form is the progress readout,
 		// which only exists while the list is collapsed and is the sole trace of
-		// it on screen, so it always renders. The Ctrl-t key hint on top of that
+		// it on screen, so it always renders. The Ctrl+T key hint on top of that
 		// is a help string: worth showing when there is room, first to go when
 		// there isn't (see the drop order below). When the list is expanded there
 		// is no progress to report, so only the hint form exists.
@@ -123,14 +123,14 @@ export const DevelopmentModeIndicator = React.memo(
 				return {taskLabelBase: '', taskLabelWithHint: ''};
 			}
 			if (!taskInfo.isHidden) {
-				return {taskLabelBase: '', taskLabelWithHint: 'Tasks (hide Ctrl-t)'};
+				return {taskLabelBase: '', taskLabelWithHint: 'Tasks (hide Ctrl+T)'};
 			}
 			const inFlight = taskInfo.inProgressCount > 0 ? '~' : '';
 			const unread = taskInfo.hasUnread ? '*' : '';
 			const progress = `${inFlight}${taskInfo.completedCount}/${taskInfo.totalCount}${unread}`;
 			return {
 				taskLabelBase: `Tasks (${progress})`,
-				taskLabelWithHint: `Tasks (${progress} Ctrl-t)`,
+				taskLabelWithHint: `Tasks (${progress} Ctrl+T)`,
 			};
 		})();
 
@@ -146,9 +146,9 @@ export const DevelopmentModeIndicator = React.memo(
 		// share whatever room is left, each truncating with an ellipsis; if both
 		// fit fully neither truncates; if both overflow they split the remaining
 		// space evenly.
-		// The Ctrl-t hint, the saving indicator, the line-range suffix and
+		// The Ctrl+T hint, the saving indicator, the line-range suffix and
 		// the (Shift+Tab to cycle) hint are optional — drop them when otherwise
-		// the row would wrap. The voice idle hint drops first, then the Ctrl-t
+		// the row would wrap. The voice idle hint drops first, then the Ctrl+T
 		// hint, then the saving indicator, then the line-range suffix, then the
 		// shift hint. The voice state label itself always renders.
 		const {
@@ -216,7 +216,7 @@ export const DevelopmentModeIndicator = React.memo(
 				minSessionLen +
 				minEditorLen;
 
-			// Decide which optional segments fit. Drop the Ctrl-t hint first,
+			// Decide which optional segments fit. Drop the Ctrl+T hint first,
 			// then the saving indicator, then the suffix, then the shift hint,
 			// until the row fits within budgetWidth. The hints are measured
 			// against the names at full length, not their truncation floor:

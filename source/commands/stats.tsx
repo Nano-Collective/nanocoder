@@ -1,23 +1,64 @@
 /**
  * /stats command — lifetime usage metrics (distinct from /usage context view).
  *
- * Interactive UI (←/→ range switching, matching Settings tabs) is mounted as a
- * live component from `app-util.ts` so keyboard focus is not stolen by the chat
- * composer. This module exports the stub for the lazy registry plus helpers
- * used by that live-mount path and by tests.
+ * The interactive card (←/→ range switching, matching Settings tabs) is
+ * mounted as a live component that captures input, so the chat composer does
+ * not swallow the keys. Closing it leaves a static snapshot in the transcript.
  */
 
 import React from 'react';
-import {createStubCommand} from '@/commands/create-stub-command';
 import {StatsDisplay} from '@/components/stats/stats-display';
 import {generateKey} from '@/session/key-generator';
-import {flushStatsLedgerSync, getStatsLedgerCached} from '@/stats/record';
+import {
+	flushStatsLedgerSync,
+	getStatsLedgerCached,
+	resetStatsLedger,
+} from '@/stats/record';
 import {STATS_RANGES, type StatsRange} from '@/stats/types';
+import type {StatefulCommand} from '@/types/index';
+import {errorMsg, infoMsg} from '@/utils/message-factory';
 
-export const statsCommand = createStubCommand(
-	'stats',
-	'Show lifetime usage stats (sessions, prompts, tokens). Ranges: 7d, 3m, all-time; ←/→ to switch; use reset to clear',
-);
+export const statsCommand: StatefulCommand = {
+	name: 'stats',
+	description:
+		'Show lifetime usage stats (sessions, prompts, tokens). Ranges: 7d, 3m, all-time; ←/→ to switch; use reset to clear',
+	run: async context => {
+		const trimmed = context.argText.trim();
+		const args = trimmed ? trimmed.split(/\s+/) : [];
+		const resetArg = args[0]?.toLowerCase();
+		if (resetArg === 'reset' || resetArg === '--reset') {
+			if (args.length !== 1) {
+				context.addToChatQueue(
+					errorMsg('Usage: /stats [7d|3m|all-time|reset]', 'stats-error'),
+				);
+				return 'done';
+			}
+			resetStatsLedger();
+			context.addToChatQueue(infoMsg('Lifetime stats reset.', 'stats-reset'));
+			return 'done';
+		}
+
+		context.setLiveComponentCapturesInput(true);
+
+		const until = new Promise<void>(resolve => {
+			const close = () => {
+				// Leave a static snapshot in the transcript, then release focus.
+				context.addToChatQueue(
+					createStatsDisplayElement({args, interactive: false}),
+				);
+				context.setLiveComponent(null);
+				context.setLiveComponentCapturesInput(false);
+				resolve();
+			};
+
+			context.setLiveComponent(
+				createStatsDisplayElement({args, interactive: true, onClose: close}),
+			);
+		});
+
+		return {until};
+	},
+};
 
 export function parseStatsRangeArg(args: string[]): StatsRange {
 	const raw = (args[0] ?? '').toLowerCase().trim();

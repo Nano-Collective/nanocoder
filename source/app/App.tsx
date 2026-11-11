@@ -12,7 +12,7 @@ import {
 import {InteractiveApp} from '@/app/sections/interactive-app';
 import type {AppProps} from '@/app/types';
 import AssistantReasoning from '@/components/assistant-reasoning';
-import {SuccessMessage} from '@/components/message-box';
+import {SuccessMessage, WarningMessage} from '@/components/message-box';
 import SecurityDisclaimer from '@/components/security-disclaimer';
 import StreamingMessage from '@/components/streaming-message';
 import StreamingReasoning from '@/components/streaming-reasoning';
@@ -33,6 +33,7 @@ import {
 import {getThemeColors} from '@/config/themes';
 import {PrivacyContext} from '@/context/privacy-context';
 import {useChatHandler} from '@/hooks/chat-handler';
+import {loadBannerModules} from '@/hooks/use-banner-modules';
 import {useAppHandlers} from '@/hooks/useAppHandlers';
 import {useAppInitialization} from '@/hooks/useAppInitialization';
 import {useAppState} from '@/hooks/useAppState';
@@ -58,6 +59,7 @@ import {createPinoLogger} from '@/utils/logging/pino-logger';
 import {setGlobalMessageQueue} from '@/utils/message-queue';
 import {setNotificationsConfig} from '@/utils/notifications';
 import {getShutdownManager} from '@/utils/shutdown';
+import {takeLegacyVscodeDeprecationNotice} from '@/vscode/deprecation';
 import {isExtensionInstalled} from '@/vscode/extension-installer';
 
 // Rows the interactive frame keeps for itself in fullscreen: the root box's
@@ -493,7 +495,11 @@ export default function App({
 				})();
 			}
 		},
-		[appState],
+		[
+			appState.setActiveMode,
+			appState.setIsVscodeEnabled,
+			appState.addToChatQueue,
+		],
 	);
 
 	// Show confirmation once VS Code server is ready with its port
@@ -517,7 +523,27 @@ export default function App({
 				/>,
 			);
 		}
-	}, [vscodeServer.actualPort, appState]);
+	}, [
+		vscodeServer.actualPort,
+		appState.isVscodeEnabled,
+		appState.addToChatQueue,
+	]);
+
+	// The WebSocket companion is deprecated in favour of the ACP-based
+	// extension. Warn the first time it is enabled, by the flag or by /ide.
+	React.useEffect(() => {
+		if (!effectiveVscodeEnabled) return;
+		const notice = takeLegacyVscodeDeprecationNotice();
+		if (!notice) return;
+		logger.warn(notice);
+		appState.addToChatQueue(
+			<WarningMessage
+				key={generateKey('vscode-companion-deprecated')}
+				message={notice}
+				hideBox={true}
+			/>,
+		);
+	}, [effectiveVscodeEnabled, appState.addToChatQueue, logger]);
 
 	// Setup session autosave
 	const {isSaving, renameSession} = useSessionAutosave({
@@ -655,6 +681,33 @@ export default function App({
 		developmentMode: initialDevelopmentMode,
 	});
 
+	// Prepare the banner before committing it to Ink's <Static>.
+	// Static items cannot repaint after their first render.
+	const shouldShowWelcome = showWelcome && !nonInteractiveMode;
+	const [welcomeModulesSettled, setWelcomeModulesSettled] =
+		React.useState(false);
+	const welcomeModulesPending = shouldShowWelcome && !welcomeModulesSettled;
+
+	React.useEffect(() => {
+		if (!shouldShowWelcome) return;
+
+		let active = true;
+
+		void loadBannerModules().then(
+			() => {
+				if (active) setWelcomeModulesSettled(true);
+			},
+			() => {
+				// On failure, allow the plain-text fallback to render.
+				if (active) setWelcomeModulesSettled(true);
+			},
+		);
+
+		return () => {
+			active = false;
+		};
+	}, [shouldShowWelcome]);
+
 	// Memoize static components. We pin the run-mode header to the
 	// initial development mode so it never changes during the run — the
 	// boot line represents what the agent *started* under, not a live
@@ -683,8 +736,12 @@ export default function App({
 	}
 	const {startChat} = appState;
 	const staticComponents = React.useMemo(() => {
+		if (welcomeModulesPending) {
+			return [];
+		}
+
 		return createStaticComponents({
-			shouldShowWelcome: showWelcome && !nonInteractiveMode,
+			shouldShowWelcome,
 			currentProvider: startChat ? (bootIdentity.current?.provider ?? '') : '',
 			currentModel: startChat ? (bootIdentity.current?.model ?? '') : '',
 			nonInteractiveMode,
@@ -692,7 +749,8 @@ export default function App({
 			availableRows: welcomeRows,
 		});
 	}, [
-		showWelcome,
+		shouldShowWelcome,
+		welcomeModulesPending,
 		nonInteractiveMode,
 		initialDevelopmentMode,
 		welcomeRows,
@@ -857,6 +915,8 @@ export default function App({
 							appHandlers={appHandlers}
 							vscodeServer={vscodeServer}
 							staticComponents={staticComponents}
+							welcomeModulesPending={welcomeModulesPending}
+							hasConversationMessages={appState.messages.length > 0}
 							clearKey={conversationId}
 							liveComponent={liveComponent}
 							pendingSubagentApproval={pendingSubagentApproval}

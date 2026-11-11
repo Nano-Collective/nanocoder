@@ -7,12 +7,14 @@ import {
 } from '@/artifacts/artifact-manager';
 import {getAppConfig} from '@/config/index';
 import {
-	ensureDirectoryTrust,
 	loadPreferences,
 	resolveProjectContextPreferences,
 	savePreferences,
-	untrustedDirectoryMessage,
 } from '@/config/preferences';
+import {
+	ensureDirectoryTrust,
+	untrustedDirectoryMessage,
+} from '@/config/trust/directory-trust';
 import {resolveTune} from '@/config/tune';
 import {
 	TOOL_APPROVAL_REQUIRED_KIND,
@@ -40,6 +42,7 @@ import {
 	SESSION_END_HOOK_HANDLER,
 	takePendingHookContext,
 } from '@/services/lifecycle-hooks';
+import {fileMutationPaths} from '@/tools/file-ops/file-mutating-tools';
 import {getTuneToolMode} from '@/types/config';
 import type {DevelopmentMode, Message} from '@/types/core';
 import {applyTuneCompaction} from '@/utils/auto-compact';
@@ -216,6 +219,8 @@ export async function runPlainShell(
 		toolsDisabled,
 		getAppConfig().systemPrompt,
 		model,
+		undefined,
+		toolManager,
 	);
 	const toolsForPrompt = toolsDisabled
 		? toolManager.getFilteredTools(availableNames)
@@ -388,22 +393,14 @@ export async function runPlainShell(
 		const exitCode =
 			outcome.kind === 'success' ? 0 : outcome.kind === 'error' ? 1 : 2;
 
-		// Must match the registered names in source/tools/file-ops/. Any name
-		// listed here that isn't a real tool silently drops its edits from
-		// `filesChanged`.
-		const mutatingTools = [
-			'write_file',
-			'string_replace',
-			'diff_edit',
-			'lsp_format_document',
-		];
 		const filesChangedSet = new Set<string>();
 
 		const formattedToolCalls = (outcome.toolCalls || []).map(tc => {
-			if (mutatingTools.includes(tc.name)) {
-				const filePath = tc.arguments?.path || tc.arguments?.file_path;
-				// Only include file paths that are strings (type-safe extraction)
-				if (typeof filePath === 'string' && isValidFilePath(filePath)) {
+			// A failed or refused call changed nothing. The paths are reported as
+			// the model gave them and the tool accepted them, `../x` included:
+			// the tool's own path checks already decided they were allowed.
+			if (tc.error === null) {
+				for (const filePath of fileMutationPaths(tc.name, tc.arguments)) {
 					filesChangedSet.add(filePath);
 				}
 			}
@@ -419,8 +416,8 @@ export async function runPlainShell(
 		const report = {
 			kind: outcome.kind,
 			exitCode,
-			finalText: sanitizeOutput(outcome.finalText || ''),
-			reasoning: outcome.reasoning ? sanitizeOutput(outcome.reasoning) : null,
+			finalText: outcome.finalText || '',
+			reasoning: outcome.reasoning || null,
 			toolCalls: formattedToolCalls,
 			steps: outcome.steps,
 			filesChanged: Array.from(filesChangedSet),
@@ -429,7 +426,7 @@ export async function runPlainShell(
 				usage: outcome.usage,
 			}),
 			...(outcome.kind === 'error' && {
-				message: sanitizeOutput(outcome.message),
+				message: outcome.message,
 			}),
 			...(outcome.kind === TOOL_APPROVAL_REQUIRED_KIND && {
 				toolNames: outcome.toolNames,
@@ -492,49 +489,6 @@ function isToolCallingDisabled(provider: string, model: string): boolean {
 	const providerConfig = config.providers?.find(p => p.name === provider);
 	if (!providerConfig) return false;
 	return providerConfig.disableToolModels?.includes(model) ?? false;
-}
-
-/**
- * Validate file paths to prevent directory traversal and injection attacks.
- * Allows absolute paths and relative paths, but rejects null bytes and
- * excessive path traversal patterns.
- */
-function isValidFilePath(filePath: string): boolean {
-	// Reject null bytes
-	if (filePath.includes('\0')) {
-		return false;
-	}
-	// Allow absolute paths and relative paths, but reject paths with
-	// excessive parent directory references (e.g., "../../../../../../etc/passwd")
-	const parts = filePath.split('/');
-	let depth = 0;
-	for (const part of parts) {
-		if (part === '..') {
-			depth--;
-			// Reject if we go above the root
-			if (depth < 0) {
-				return false;
-			}
-		} else if (part !== '.' && part !== '') {
-			depth++;
-		}
-	}
-	return true;
-}
-
-/**
- * Sanitize string output to prevent injection attacks in JSON.
- * Ensures the string doesn't contain unescaped control characters or
- * suspicious patterns that could break JSON encoding.
- */
-function sanitizeOutput(value: string): string {
-	// JSON.stringify handles escaping, but we add an extra layer to catch
-	// any unusual control characters that could be problematic
-	if (typeof value !== 'string') {
-		return '';
-	}
-	// Allow normal strings; JSON.stringify will properly escape special chars
-	return value;
 }
 
 function emitJsonReport(report: unknown): void {

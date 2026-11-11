@@ -3,12 +3,14 @@ import {readdir} from 'node:fs/promises';
 import path from 'node:path';
 import {pathToFileURL} from 'node:url';
 
-import {isDirectoryTrusted, loadPreferences} from '@/config/preferences';
+import {loadPreferences} from '@/config/preferences';
+import {isDirectoryTrusted} from '@/config/trust/directory-trust';
 import type {NanocoderPlugin, PluginHooks} from '@/sdk/plugin';
 import type {HookContext, HookOutcome} from '@/services/lifecycle-hooks';
 import {getProjectRoot} from '@/services/session-cwd';
 import type {HookEvent} from '@/types/config';
 import {logError} from '@/utils/message-queue';
+import {isPlainObject} from '@/utils/type-helpers';
 
 type PluginEvent = keyof PluginHooks;
 
@@ -160,12 +162,6 @@ async function importPlugins(root: string, state: PluginState): Promise<void> {
 		}
 		state.plugins.push(plugin);
 	}
-}
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-	if (typeof value !== 'object' || value === null) return false;
-	const proto = Object.getPrototypeOf(value);
-	return proto === Object.prototype || proto === null;
 }
 
 function validatePlugin(value: unknown): string | undefined {
