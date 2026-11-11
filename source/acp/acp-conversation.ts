@@ -9,7 +9,7 @@ import {requestUserChoice} from '@/acp/acp-question';
 import type {AcpSession} from '@/acp/acp-session';
 import {beginTimelineCapture, finishTimelineCapture} from '@/acp/acp-timeline';
 import {type AcpToolCallMeta, buildToolCallMeta} from '@/acp/acp-tool-call';
-import {runTurnEngine} from '@/agent-loop/turn-engine';
+import {NO_RESPONSE_MESSAGE, runTurnEngine} from '@/agent-loop/turn-engine';
 import type {
 	ArtifactDescriptor,
 	UserArtifactKind,
@@ -779,9 +779,12 @@ async function runTurn(
 
 	switch (result.kind) {
 		case 'completed':
-		case 'no-response':
 		case 'no-system-message':
 			return withTurnUsage({stopReason: 'end_turn'});
+		// A provider that answers with no choices failed the request, as a
+		// thrown model call does, so it is reported the same way.
+		case 'no-response':
+			throw new Error(NO_RESPONSE_MESSAGE);
 		case 'aborted':
 		case 'adapter-stop':
 			return withTurnUsage({stopReason: 'cancelled'});

@@ -5,7 +5,7 @@
  * Supports concurrent execution via unique agentId for progress isolation.
  */
 
-import {runTurnEngine} from '@/agent-loop/turn-engine';
+import {NO_RESPONSE_MESSAGE, runTurnEngine} from '@/agent-loop/turn-engine';
 import {createLLMClient} from '@/client-factory';
 import {getAppConfig, getRetryLimits} from '@/config/index';
 import {getProjectContextPreferences} from '@/config/preferences';
@@ -865,7 +865,7 @@ export class SubagentExecutor {
 						});
 					}
 
-					const responseContent = response.choices[0]?.message.content || '';
+					const responseContent = response.choices?.[0]?.message.content || '';
 					if (responseContent.trim()) {
 						assistantTranscript.push(responseContent);
 					}
@@ -978,10 +978,11 @@ export class SubagentExecutor {
 			case 'completed':
 				emitProgress('complete');
 				return finalAnswer;
-			// A reply with no choices reads as an empty answer.
+			// A reply with no choices failed the request; the parent gets an
+			// error rather than an empty answer it would read as success.
 			case 'no-response':
-				emitProgress('complete');
-				return '';
+				emitProgress('error');
+				throw new Error(NO_RESPONSE_MESSAGE);
 			case 'aborted':
 				// A request the abort cut short throws what the client threw.
 				if (result.error !== undefined) {
