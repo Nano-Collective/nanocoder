@@ -1319,3 +1319,35 @@ test('resetInput clears the ref before the next render', t => {
 	hook.updateInput('hellox');
 	t.is(hook.currentStateRef.current.displayValue, 'x');
 });
+
+// setInputState replaces the input outside of typing (history recall, a
+// completion, a restored draft). Readers that run in the same stdin batch,
+// before a re-render, read currentStateRef: it must already hold the new
+// value, or Enter submits the old input and the next key edits it.
+test('setInputState updates currentStateRef immediately', t => {
+	const {hook} = setupTest();
+	hook.updateInput('draft');
+
+	hook.setInputState({displayValue: 'recalled', placeholderContent: {}});
+	t.is(hook.currentStateRef.current.displayValue, 'recalled');
+});
+
+test('a key typed in the same batch as setInputState edits the new input', t => {
+	const {hook, instance} = setupTest();
+	hook.updateInput('draft');
+	instance.rerender(<TestComponent />);
+	const rendered = currentHook!;
+
+	// TextInput still shows "draft" and reports its edit against it.
+	rendered.setInputState({displayValue: 'recalled', placeholderContent: {}});
+	rendered.updateInput('draft!');
+	t.is(rendered.currentStateRef.current.displayValue, 'recalled!');
+});
+
+test('setInput updates currentStateRef immediately', t => {
+	const {hook} = setupTest();
+	hook.updateInput('before');
+
+	hook.setInput('after');
+	t.is(hook.currentStateRef.current.displayValue, 'after');
+});
