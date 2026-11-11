@@ -101,6 +101,25 @@ test.serial('commits the edited file with the generated message', async t => {
 	}
 });
 
+test.serial('writes the message with the client the call passes, not the process-wide one', async t => {
+	const dir = makeRepo();
+	try {
+		setAutoCommitClient(replying('chore: from the process-wide client'));
+		const file = join(dir, 'a.ts');
+		writeFileSync(file, 'export const a = 1;\n');
+
+		await maybeAutoCommit(
+			'write_file',
+			{path: file},
+			replying('feat: from the session client'),
+		);
+
+		t.is(git(dir, 'log -1 --format=%s'), 'feat: from the session client');
+	} finally {
+		rmSync(dir, {recursive: true, force: true});
+	}
+});
+
 test.serial('skips auto-commit on detached HEAD without touching the index', async t => {
 	const dir = makeRepo();
 	const messages: ReactNode[] = [];

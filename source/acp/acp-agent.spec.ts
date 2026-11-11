@@ -983,6 +983,37 @@ test.serial('AcpAgent.resumeSession - falls back to the default when the saved m
 	});
 });
 
+test.serial('AcpAgent - a session with no provider or model of its own saves its client\'s, never a made-up default', async t => {
+	const context = createMockInitContext();
+	context.provider = '';
+	context.model = '';
+	const agent = new AcpAgent(context, createMockConn());
+	const {sessionId} = await agent.newSession({cwd: '/tmp'});
+	await agent.prompt({sessionId, prompt: [{type: 'text', text: 'hi'}]});
+
+	const saved = await sessionManager.loadSession(sessionId);
+	t.is(saved?.provider, 'test-provider');
+	t.is(saved?.model, 'test-model');
+	await agent.deleteSession({sessionId});
+});
+
+test.serial('AcpAgent.resumeSession - a session saved with no model restores nothing and reports no fallback', async t => {
+	const {agent} = createAgent();
+	await sessionManager.initialize();
+	const saved = await sessionManager.createSession({
+		title: 'Saved',
+		messageCount: 1,
+		provider: '',
+		model: '',
+		workingDirectory: '/tmp',
+		messages: [{role: 'user', content: 'hi'}],
+	});
+	const resumed = await agent.resumeSession({sessionId: saved.id, cwd: '/tmp'});
+	t.is(resumed._meta?.['nanocoder/modelFallback'], undefined);
+	t.is(optionValue(resumed.configOptions, 'provider'), 'test-provider');
+	await agent.deleteSession({sessionId: saved.id});
+});
+
 test.serial('AcpAgent.resumeSession - a session saved on the default model needs no client of its own', async t => {
 	const {agent} = createAgent();
 	await sessionManager.initialize();
