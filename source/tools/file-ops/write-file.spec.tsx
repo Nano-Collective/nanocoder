@@ -1201,6 +1201,25 @@ test('write_file: throws when mutation firewall blocks test deletion', async t =
 	t.true(content.includes('old test'));
 });
 
+test('write_file: lenient firewall writes the file and reports the violation in the result', async t => {
+	setFirewallConfig({mode: 'lenient', enabled: true});
+	const filePath = await createTestFile(
+		'service.spec.ts',
+		"test('preserves behavior', () => {});\ntest('old test', () => {});\n",
+	);
+
+	const result = await executeWriteFile({
+		path: filePath,
+		content: "test('preserves behavior', () => {});\n",
+	});
+
+	t.regex(result, /^File overwritten successfully/);
+	t.regex(result, /\[Mutation Firewall\] Warning \(lenient mode/);
+	t.regex(result, /protect_test_cases/);
+	const content = await readFile(filePath, 'utf-8');
+	t.false(content.includes('old test'));
+});
+
 test('write_file: fails closed when existing file cannot be read and leaves disk untouched', async t => {
 	if (process.platform === 'win32') {
 		t.pass('Skipped on Windows: POSIX chmod 000 is not supported');

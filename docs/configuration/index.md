@@ -575,7 +575,7 @@ The `apiKey` field supports environment variable substitution (`$VAR`, `${VAR}`,
 
 ### Mutation Firewall
 
-The negative-space mutation firewall mechanically validates proposed file modifications before disk writes occur (`write_file`, `string_replace`, `diff_edit`). It prevents accidental destruction of tests, unintended stripping of exported API contracts, and injection of loose `any` types.
+The negative-space mutation firewall mechanically validates proposed file modifications before disk writes occur (`write_file`, `string_replace`, `diff_edit`, and the `delete`, `move` and `copy` operations of `file_op`). It prevents accidental destruction of tests, unintended stripping of exported API contracts, and injection of loose `any` types.
 
 The firewall is opt-in and disabled by default (`mode: "disabled"`).
 
@@ -597,15 +597,15 @@ The firewall is opt-in and disabled by default (`mode: "disabled"`).
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `enabled` | boolean | `false` | Whether the firewall is active. |
-| `mode` | `"disabled"` \| `"lenient"` \| `"strict"` | `"disabled"` | In `strict` mode, violating mutations are blocked with an error. In `lenient` mode, warnings are logged while allowing writes. |
-| `protectedPatterns` | string[] | `[]` | Gitignore-style glob patterns for paths forbidden from modification by tools. |
+| `mode` | `"disabled"` \| `"lenient"` \| `"strict"` | `"disabled"` | In `strict` mode, a violating mutation is refused and the tool returns the violations as its error. In `lenient` mode the change is applied, the violations are appended to the tool result so the model sees them, and a warning is shown in the chat. |
+| `protectedPatterns` | string[] | `[]` | Gitignore-style glob patterns for paths forbidden from modification by tools. Patterns are matched relative to the project root, like a root `.gitignore`; a relative tool path is resolved against the session's working directory first, so the rules hold after a `cd` in bash. |
 | `blockAnyTypes` | boolean | `true` | Prohibits introducing explicit `any` type annotations into previously typed code. |
 | `protectTestCases` | boolean | `true` | Prevents deletion of existing unit test cases in test files. |
 | `preserveExportSignatures` | boolean | `true` | Prevents breaking or removing exported functions, interfaces, types, and classes. |
 
 Use `/firewall` in chat to inspect or modify session overrides at runtime.
 
-> **Operational boundaries:** The mutation firewall validates mutation tools (`write_file`, `string_replace`, `diff_edit`). Non-content file operations via `file_op` (`delete_file`, `move_file`) and automatic document formatting via `lsp_format_document` bypass the mutation firewall.
+> **Operational boundaries:** The content rules (`blockAnyTypes`, `protectTestCases`, `preserveExportSignatures`) apply to `write_file`, `string_replace` and `diff_edit`. `file_op` carries no new content, so only `protectedPatterns` applies to it: a `delete` or `move` of a protected file, and a `move` or `copy` onto one, count as modifying it; copying a protected file somewhere else does not. Document formatting via `lsp_format_document`, configured `formatters`, and `execute_bash` bypass the mutation firewall.
 
 ## Ignoring Files
 

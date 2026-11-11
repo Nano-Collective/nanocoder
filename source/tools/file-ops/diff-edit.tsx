@@ -4,7 +4,10 @@ import {resolve} from 'node:path';
 import {Box, Text} from 'ink';
 import React from 'react';
 import ToolMessage, {CappedLines} from '@/components/tool-message';
-import {evaluateMutationEnvelope} from '@/firewall/mutation-firewall';
+import {
+	enforceFirewall,
+	evaluateMutationEnvelope,
+} from '@/firewall/mutation-firewall';
 import {ThemeContext} from '@/hooks/useTheme';
 import {getSafeSessionCwd} from '@/services/session-cwd';
 import type {NanocoderToolExport} from '@/types/core';
@@ -291,9 +294,7 @@ const executeDiffEdit = async (args: DiffEditArgs): Promise<string> => {
 		fileContent,
 		newContent,
 	);
-	if (!firewallResult.allowed) {
-		throw new Error(firewallResult.summary ?? 'Mutation blocked by firewall');
-	}
+	const firewallWarning = enforceFirewall(firewallResult);
 
 	await writeFile(absPath, newContent, 'utf-8');
 	invalidateCache(absPath);
@@ -301,8 +302,10 @@ const executeDiffEdit = async (args: DiffEditArgs): Promise<string> => {
 	forgetReadContent(absPath);
 
 	const blockLabel = blocks.length === 1 ? 'block' : 'blocks';
-	return capDiffEditResult(
-		`Successfully applied ${blocks.length} diff ${blockLabel}.${formatUpdatedFileContext(fileContent, newContent, blocks)}`,
+	return (
+		capDiffEditResult(
+			`Successfully applied ${blocks.length} diff ${blockLabel}.${formatUpdatedFileContext(fileContent, newContent, blocks)}`,
+		) + firewallWarning
 	);
 };
 
