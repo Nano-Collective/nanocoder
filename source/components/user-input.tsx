@@ -892,7 +892,7 @@ export default function UserInput({
 					{onToggleCompactDisplay && (
 						<Text>
 							{' '}
-							· ctrl-o {compactToolDisplay ? 'expand' : 'compact'}{' '}
+							· Ctrl+O {compactToolDisplay ? 'expand' : 'compact'}{' '}
 							{isNarrow ? '' : 'tool results'}
 						</Text>
 					)}
@@ -1015,7 +1015,7 @@ export default function UserInput({
 								{onToggleCompactDisplay && (
 									<Text>
 										{' '}
-										· ctrl-o {compactToolDisplay ? 'expand' : 'compact'}{' '}
+										· Ctrl+O {compactToolDisplay ? 'expand' : 'compact'}{' '}
 										{isNarrow ? '' : 'tool results'}
 									</Text>
 								)}

@@ -1426,7 +1426,7 @@ test('UserInput does not treat carriage return as a multiline shortcut', async t
 // Compact Tool Display Tests
 // ============================================================================
 
-test('UserInput shows ctrl-o expand hint when disabled with compact display on', t => {
+test('UserInput shows Ctrl+O expand hint when disabled with compact display on', t => {
 	const {lastFrame, unmount} = render(
 		<TestWrapper>
 			<UserInput
@@ -1439,11 +1439,11 @@ test('UserInput shows ctrl-o expand hint when disabled with compact display on',
 
 	const output = lastFrame();
 	t.truthy(output);
-	t.regex(output!, /ctrl-o.*expand/);
+	t.regex(output!, /Ctrl\+O.*expand/);
 	unmount();
 });
 
-test('UserInput shows ctrl-o compact hint when disabled with compact display off', t => {
+test('UserInput shows Ctrl+O compact hint when disabled with compact display off', t => {
 	const {lastFrame, unmount} = render(
 		<TestWrapper>
 			<UserInput
@@ -1456,11 +1456,11 @@ test('UserInput shows ctrl-o compact hint when disabled with compact display off
 
 	const output = lastFrame();
 	t.truthy(output);
-	t.regex(output!, /ctrl-o.*compact/);
+	t.regex(output!, /Ctrl\+O.*compact/);
 	unmount();
 });
 
-test('UserInput does not show ctrl-o hint when onToggleCompactDisplay is not provided', t => {
+test('UserInput does not show Ctrl+O hint when onToggleCompactDisplay is not provided', t => {
 	const {lastFrame, unmount} = render(
 		<TestWrapper>
 			<UserInput disabled={true} />
@@ -1469,7 +1469,7 @@ test('UserInput does not show ctrl-o hint when onToggleCompactDisplay is not pro
 
 	const output = lastFrame();
 	t.truthy(output);
-	t.notRegex(output!, /ctrl-o/);
+	t.notRegex(output!, /Ctrl\+O|ctrl-o/i);
 	unmount();
 });
 
@@ -2867,15 +2867,26 @@ test('the ? legend lists the non-Ctrl bindings users asked about', t => {
 	t.regex(legend, /Esc.*back to your prompt/);
 });
 
-test('the ? legend writes keys as Ctrl+X, never Ctrl-x', t => {
+// Files that show a key hint on screen. Each must write keys the way the
+// legend does (`Ctrl+X`), not as `ctrl-x` or `Ctrl-x`.
+const KEY_HINT_SOURCES = [
+	'./development-mode-indicator.tsx',
+	'./user-input.tsx',
+	'./composer/attachment-pills.tsx',
+	'./composer/command-completion-list.tsx',
+	'./composer/file-mention-list.tsx',
+	'./composer/reverse-search-prompt.tsx',
+	'./composer/shortcuts-overlay.tsx',
+];
+
+test('the ? legend and on-screen hints write keys as Ctrl+X, never Ctrl-x', t => {
 	for (const [keybind] of KEYBOARD_SHORTCUTS) {
-		t.notRegex(keybind, /Ctrl-/);
+		t.notRegex(keybind, /Ctrl-/i);
 	}
-	const indicator = readFileSync(
-		new URL('./development-mode-indicator.tsx', import.meta.url),
-		'utf8',
-	);
-	t.notRegex(indicator, /Ctrl-[a-z]/);
+	for (const file of KEY_HINT_SOURCES) {
+		const code = readFileSync(new URL(file, import.meta.url), 'utf8');
+		t.notRegex(code, /ctrl-[a-z]/i, `${file} writes a key as ctrl-x`);
+	}
 });
 
 test('every ? legend row has a unique key', t => {
