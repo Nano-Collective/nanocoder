@@ -3873,6 +3873,66 @@ test.serial('runAcpConversation - sends the sub-agent run to the client, tied to
 	t.is(notifications.at(-1)?.params.result, 'found it');
 });
 
+test.serial('runAcpConversation - the agent card title shows this session\'s run, never another\'s', async t => {
+	const {updateSubagentProgressById, removeSubagentProgress} = await import(
+		'@/services/subagent-events'
+	);
+	setToolRegistryGetter(() => ({
+		agent: async (_args: any, options: any) => {
+			// A run of another chat in the same process, in the shared progress
+			// map. Before, a 1.5s poller over that map put it on this card.
+			updateSubagentProgressById('intruder-run', {
+				subagentName: 'intruder',
+				status: 'running',
+				toolCallCount: 4,
+				turnCount: 2,
+				tokenCount: 99_000,
+			});
+			await new Promise(resolve => setTimeout(resolve, 1700));
+			const base = {
+				childRunId: 'own-run',
+				parentRunId: '',
+				sessionId: options.sessionId,
+				toolCallId: options.toolCallId,
+				name: 'explore',
+			};
+			emitSubagentRunEvent({...base, status: 'started'});
+			emitSubagentRunEvent({
+				...base,
+				status: 'progress',
+				tokenCount: 1200,
+				toolCallCount: 2,
+				lastTool: 'read_file',
+			});
+			emitSubagentRunEvent({...base, status: 'completed', result: 'ok'});
+			return 'ok';
+		},
+	}));
+	t.teardown(() => removeSubagentProgress('intruder-run'));
+	const {conn, updates} = createMockConn();
+	const session = createMockSession(conn, {devMode: 'yolo'});
+
+	await runAgentTurn(conn, session, 'titled');
+
+	const titles = updates
+		.filter(
+			u =>
+				u.update?.sessionUpdate === 'tool_call_update' &&
+				u.update.toolCallId === 'agent-call-titled' &&
+				u.update.title,
+		)
+		.map(u => u.update.title);
+	t.false(titles.some(title => title.includes('intruder')));
+	t.true(titles.includes('explore • 1.2k tokens • 2 tools (read_file)'));
+	// The progress title lands before the card is settled.
+	const card = updates.filter(
+		u =>
+			u.update?.sessionUpdate === 'tool_call_update' &&
+			u.update.toolCallId === 'agent-call-titled',
+	);
+	t.is(card.at(-1)?.update.status, 'completed');
+});
+
 test.serial('runAcpConversation - two sessions with sub-agents do not see each other\'s runs', async t => {
 	subagentRegistry();
 	const first = createNotifyingConn();
