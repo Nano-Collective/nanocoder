@@ -1,4 +1,4 @@
-import {runTurnEngine} from '@/agent-loop/turn-engine';
+import {NO_RESPONSE_MESSAGE, runTurnEngine} from '@/agent-loop/turn-engine';
 import {
 	createWalkthroughLifecycle,
 	observeSuccessfulLifecycleTool,
@@ -531,7 +531,7 @@ async function runPlainConversationBody(
 			return error(formatError(result.error));
 		case 'no-response':
 		case 'no-system-message':
-			return error('No response received from model');
+			return error(NO_RESPONSE_MESSAGE);
 		case 'guard-stop':
 			return error(result.message);
 		case 'max-turns':

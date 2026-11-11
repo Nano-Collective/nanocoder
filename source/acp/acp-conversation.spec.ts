@@ -257,20 +257,23 @@ test('runAcpConversation - returns end_turn on empty LLM response', async t => {
 	t.is(result.stopReason, 'end_turn');
 });
 
-test('runAcpConversation - returns end_turn on response with no choices', async t => {
+test('runAcpConversation - a response with no choices fails the prompt', async t => {
+	// The provider answered nothing at all: an error, as in the TUI and
+	// --plain, not a finished turn with an empty answer.
 	const {conn} = createMockConn();
 	const session = createMockSession(conn);
 	const {client} = createMockClient([{choices: []}]);
 
-	const result = await runAcpConversation({
-		session,
-		client: client,
-		toolManager: createMockToolManager() as any,
-		conn,
-		nonInteractiveAlwaysAllow: [],
-	});
-
-	t.is(result.stopReason, 'end_turn');
+	await t.throwsAsync(
+		runAcpConversation({
+			session,
+			client: client,
+			toolManager: createMockToolManager() as any,
+			conn,
+			nonInteractiveAlwaysAllow: [],
+		}),
+		{message: 'No response received from model'},
+	);
 });
 
 // ============================================================================
