@@ -3,7 +3,6 @@ import type {Dirent} from 'node:fs';
 import {lstat, readdir, readFile} from 'node:fs/promises';
 import path from 'node:path';
 import ignore from 'ignore';
-import {LRUCache} from 'lru-cache';
 
 import {BINARY_FILE_EXTENSIONS} from '@/constants';
 import {
@@ -11,6 +10,7 @@ import {
 	findNanocoderIgnoreFile,
 	loadGitignore,
 } from '@/utils/gitignore-loader';
+import {globMatches, MAX_GLOB_PATTERN_LENGTH} from '@/utils/glob-match';
 import {getLogger} from '@/utils/logging';
 import {resolveRipgrepPath} from '@/utils/ripgrep-path';
 
@@ -18,7 +18,6 @@ const MAX_CONTEXT_CONTENT_LENGTH = 1500;
 const MAX_MATCH_CONTENT_LENGTH = 300;
 const DEFAULT_SEARCH_TIMEOUT_MS = 30_000;
 const MAX_RAW_FILES_SCANNED = 50_000;
-const MAX_GLOB_PATTERN_LENGTH = 1000;
 
 export class SearchTimeoutError extends Error {
 	constructor(timeoutMs: number) {
@@ -60,182 +59,23 @@ function stripRelativePrefix(pattern: string): string {
 	return stripped === '' ? pattern : stripped;
 }
 
-const MAX_BRACE_EXPANSIONS = 64;
-
-function expandBraces(pattern: string): string[] {
-	let combinationCount = 0;
-
-	const expand = (current: string): string[] => {
-		const match = current.match(/\{([^{}]+)\}/);
-		if (!match || match.index === undefined) {
-			combinationCount++;
-			if (combinationCount > MAX_BRACE_EXPANSIONS) {
-				throw new Error(
-					`Glob pattern has too many brace-expansion combinations (max ${MAX_BRACE_EXPANSIONS}).`,
-				);
-			}
-			return [current];
-		}
-
-		const before = current.slice(0, match.index);
-		const after = current.slice(match.index + match[0].length);
-
-		return match[1]
-			.split(',')
-			.flatMap(part => expand(`${before}${part.trim()}${after}`));
-	};
-
-	return expand(pattern);
-}
-
-type GlobToken =
-	| {type: 'literal'; char: string}
-	| {type: 'slash'}
-	| {type: 'qmark'}
-	| {type: 'star'}
-	| {type: 'globstar'}
-	| {type: 'globstarSlash'};
-
-function tokenizeGlob(pattern: string): GlobToken[] {
-	const tokens: GlobToken[] = [];
-	let index = 0;
-	while (index < pattern.length) {
-		const char = pattern[index];
-		if (char === '*') {
-			if (pattern[index + 1] === '*') {
-				if (pattern[index + 2] === '/') {
-					tokens.push({type: 'globstarSlash'});
-					index += 3;
-				} else {
-					tokens.push({type: 'globstar'});
-					index += 2;
-				}
-			} else {
-				tokens.push({type: 'star'});
-				index += 1;
-			}
-			continue;
-		}
-		if (char === '?') {
-			tokens.push({type: 'qmark'});
-			index += 1;
-			continue;
-		}
-		if (char === '/') {
-			tokens.push({type: 'slash'});
-			index += 1;
-			continue;
-		}
-		tokens.push({type: 'literal', char});
-		index += 1;
-	}
-	return tokens;
-}
-
-// DP table, not a compiled regex - no backtracking, so no ReDoS.
-function matchTokens(text: string, tokens: GlobToken[]): boolean {
-	const textLength = text.length;
-	const tokenCount = tokens.length;
-
-	let previousRow = new Array<boolean>(tokenCount + 1).fill(false);
-	previousRow[0] = true;
-	for (let tokenIndex = 1; tokenIndex <= tokenCount; tokenIndex++) {
-		const token = tokens[tokenIndex - 1];
-		previousRow[tokenIndex] =
-			(token.type === 'star' ||
-				token.type === 'globstar' ||
-				token.type === 'globstarSlash') &&
-			previousRow[tokenIndex - 1];
-	}
-
-	// True once any row hits this column - globstarSlash can start from any earlier row.
-	const columnEverTrue = [...previousRow];
-
-	for (let textIndex = 1; textIndex <= textLength; textIndex++) {
-		const currentRow = new Array<boolean>(tokenCount + 1).fill(false);
-		const textChar = text[textIndex - 1];
-
-		for (let tokenIndex = 1; tokenIndex <= tokenCount; tokenIndex++) {
-			const token = tokens[tokenIndex - 1];
-			let matched: boolean;
-			switch (token.type) {
-				case 'literal':
-					matched = previousRow[tokenIndex - 1] && textChar === token.char;
-					break;
-				case 'slash':
-					matched = previousRow[tokenIndex - 1] && textChar === '/';
-					break;
-				case 'qmark':
-					matched = previousRow[tokenIndex - 1] && textChar !== '/';
-					break;
-				case 'star':
-					matched =
-						currentRow[tokenIndex - 1] ||
-						(previousRow[tokenIndex] && textChar !== '/');
-					break;
-				case 'globstar':
-					matched = currentRow[tokenIndex - 1] || previousRow[tokenIndex];
-					break;
-				case 'globstarSlash':
-					matched =
-						currentRow[tokenIndex - 1] ||
-						(textChar === '/' && columnEverTrue[tokenIndex - 1]);
-					break;
-			}
-			currentRow[tokenIndex] = matched;
-		}
-
-		previousRow = currentRow;
-		for (let tokenIndex = 0; tokenIndex <= tokenCount; tokenIndex++) {
-			columnEverTrue[tokenIndex] =
-				columnEverTrue[tokenIndex] || currentRow[tokenIndex];
-		}
-	}
-
-	return previousRow[tokenCount];
-}
-
-// Bounds total tokens, not entry count - one entry can hold up to MAX_BRACE_EXPANSIONS arrays.
-/** @internal Exported for direct unit testing only. */
-export const GLOB_TOKEN_CACHE_MAX_TOKENS = 1_000_000;
-
-/** @internal Exported for direct unit testing only. */
-export const globTokenCache = new LRUCache<string, GlobToken[][]>({
-	maxSize: GLOB_TOKEN_CACHE_MAX_TOKENS,
-	sizeCalculation: tokenized =>
-		tokenized.reduce((sum, tokens) => sum + tokens.length, 0),
-});
-
-function tokenizeExpandedPattern(pattern: string): GlobToken[][] {
-	const cached = globTokenCache.get(pattern);
-	if (cached) {
-		return cached;
-	}
-
-	if (pattern.length > MAX_GLOB_PATTERN_LENGTH) {
-		throw new Error(
-			`Glob pattern is too long (${pattern.length} chars, max ${MAX_GLOB_PATTERN_LENGTH}).`,
-		);
-	}
-
-	const normalizedPattern = stripRelativePrefix(normalizePathForMatch(pattern));
-	const tokenized = expandBraces(normalizedPattern).map(tokenizeGlob);
-
-	globTokenCache.set(pattern, tokenized);
-	return tokenized;
-}
-
 export function matchesGlob(
 	filePath: string,
 	pattern: string,
 	matchBasename = false,
 ): boolean {
+	if (pattern.length > MAX_GLOB_PATTERN_LENGTH) {
+		throw new Error(
+			`Glob pattern is too long (${pattern.length} chars, max ${MAX_GLOB_PATTERN_LENGTH}).`,
+		);
+	}
 	const normalizedPath = normalizePathForMatch(filePath);
 	const target = matchBasename
 		? path.posix.basename(normalizedPath)
 		: normalizedPath;
-	return tokenizeExpandedPattern(pattern).some(tokens =>
-		matchTokens(target, tokens),
+	return globMatches(
+		target,
+		stripRelativePrefix(normalizePathForMatch(pattern)),
 	);
 }
 

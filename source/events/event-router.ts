@@ -14,6 +14,7 @@
  */
 
 import {formatError} from '@/utils/error-formatter';
+import {globMatches} from '@/utils/glob-match';
 import type {Event, EventKind, Subscription} from './types';
 
 export interface SubscriptionDispatcher {
@@ -150,90 +151,22 @@ export function toPosixPath(path: string): string {
 	return path.split('\\').join('/');
 }
 
-// Minimal glob -> regex matcher: enough for `docs/<star><star>`,
-// `src/<star><star>/*.ts`, `<star><star>/*.md`, literal paths, `?`
-// single-character wildcards, and `{a,b}` alternation. Negation (`!`) is not
-// supported. chokidar 5 depends only on readdirp, so picomatch is no longer in
-// the tree and swapping to it would mean taking a new direct dependency.
-export function matchGlob(pattern: string, path: string): boolean {
-	const regex = globToRegex(toPosixPath(pattern));
-	return regex.test(toPosixPath(path));
-}
-
 /**
- * Whether every `{` in the pattern has a matching `}`. An unbalanced brace is
- * treated as a literal, which is what the matcher did before alternation
- * existed, rather than building a regex that would throw.
+ * Whether `path` matches a subscription, formatter or hook glob. Uses the
+ * shared matcher in utils/glob-match (`*`, `?`, `**`, `{a,b}`; no `!`
+ * negation), after normalising both sides to `/`.
+ *
+ * A pattern ending in `**` + `/` keeps its long-standing meaning here of
+ * "anything under this directory", so `docs/**` + `/` matches `docs/a.md`.
+ * A pattern the matcher refuses (too long, or too many brace combinations)
+ * matches nothing rather than throwing out of the event loop.
  */
-function hasBalancedBraces(pattern: string): boolean {
-	let depth = 0;
-	for (const ch of pattern) {
-		if (ch === '{') depth++;
-		else if (ch === '}') {
-			depth--;
-			if (depth < 0) return false;
-		}
+export function matchGlob(pattern: string, path: string): boolean {
+	let glob = toPosixPath(pattern);
+	if (glob.endsWith('**/')) glob = glob.slice(0, -1);
+	try {
+		return globMatches(toPosixPath(path), glob);
+	} catch {
+		return false;
 	}
-	return depth === 0;
-}
-
-function globToRegex(pattern: string): RegExp {
-	const alternation = hasBalancedBraces(pattern);
-	let depth = 0;
-	let out = '';
-	for (let i = 0; i < pattern.length; i++) {
-		const ch = pattern[i];
-		if (alternation && ch === '{') {
-			out += '(?:';
-			depth++;
-		} else if (alternation && ch === '}' && depth > 0) {
-			out += ')';
-			depth--;
-		} else if (alternation && ch === ',' && depth > 0) {
-			out += '|';
-		} else if (ch === '*') {
-			const next = pattern[i + 1];
-			if (next === '*') {
-				i++;
-				if (pattern[i + 1] === '/') {
-					// Interior **/ needs a directory boundary. Preserve the legacy
-					// trailing **/ behavior for file filters that already use it.
-					out += pattern[i + 2] === undefined ? '.*' : '(?:.*/)?';
-					i++;
-				} else {
-					// A trailing `**` can still span any characters, including `/`.
-					out += '.*';
-				}
-			} else {
-				// `*` matches anything except `/`
-				out += '[^/]*';
-			}
-		} else if (ch === '?') {
-			out += '[^/]';
-		} else if (
-			ch === '.' ||
-			ch === '+' ||
-			ch === '(' ||
-			ch === ')' ||
-			ch === '|' ||
-			ch === '^' ||
-			ch === '$' ||
-			ch === '{' ||
-			ch === '}' ||
-			ch === '[' ||
-			ch === ']' ||
-			ch === '\\'
-		) {
-			out += `\\${ch}`;
-		} else {
-			out += ch;
-		}
-	}
-	// `out` is built by the escape loop above: every character is either a
-	// literal escaped with `\\`, or one of the fixed substrings `[^/]`, `.*`,
-	// `[^/]*`, `(?:.*/)?`, `(?:`, `|`, `)`. There is no user-supplied raw regex syntax in
-	// `out`, and the braces were checked for balance before any group opened.
-	// The shape is bounded by the glob length, so ReDoS is not reachable.
-	// nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp
-	return new RegExp(`^${out}$`);
 }
