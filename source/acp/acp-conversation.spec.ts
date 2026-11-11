@@ -1891,6 +1891,215 @@ test('settleUnansweredToolCalls - answers only the calls with no result yet', t 
 });
 
 // ============================================================================
+// Retry guards (nanocoder.retries)
+// ============================================================================
+
+const scriptedClient = (responses: any[]) => {
+	const sent: Message[][] = [];
+	const client = {
+		chat: async (messages: Message[]) => {
+			sent.push(messages);
+			return (
+				responses[Math.min(sent.length - 1, responses.length - 1)] ?? {
+					choices: [{message: {content: 'done'}}],
+				}
+			);
+		},
+		getCurrentModel: () => 'test-model',
+	} as unknown as LLMClient;
+	return {client, sent};
+};
+
+const runGuarded = (session: AcpSession, conn: AgentSideConnection, client: LLMClient) =>
+	runAcpConversation({
+		session,
+		client,
+		toolManager: {
+			...createMockToolManager(),
+			hasTool: (name: string) => name === 'read_file',
+			getToolEntry: () => ({approval: false}),
+		} as any,
+		conn,
+		nonInteractiveAlwaysAllow: [],
+	});
+
+test('runAcpConversation - stops a model repeating the same tool call instead of running it again', async t => {
+	const {conn, updates} = createMockConn();
+	const session = createMockSession(conn, {devMode: 'yolo'});
+	let reads = 0;
+	setToolRegistryGetter(() => ({
+		read_file: async () => {
+			reads++;
+			return 'same content';
+		},
+	}));
+	const {client, sent} = scriptedClient([
+		{
+			choices: [
+				{
+					message: {
+						content: '',
+						tool_calls: [createMockToolCall('read_file', {path: '/a.txt'})],
+					},
+				},
+			],
+		},
+	]);
+
+	const result = await runGuarded(session, conn, client);
+
+	// Default maxRepeatedToolCalls = 3: the third identical call is not run.
+	t.is(result.stopReason, 'max_turn_requests');
+	t.is(sent.length, 3);
+	t.is(reads, 2);
+	t.true(
+		updates.some(u =>
+			/repeated the same tool call 3 times/.test(u.update?.content?.text ?? ''),
+		),
+	);
+	// Every stored call has a result, so the next prompt is still valid.
+	const callIds = session.messages.flatMap(m => m.tool_calls ?? []).map(c => c.id);
+	const resultIds = session.messages
+		.filter(m => m.role === 'tool')
+		.map(m => m.tool_call_id);
+	t.deepEqual(resultIds, callIds);
+	t.true(session.messages[session.messages.length - 1].displayOnly);
+});
+
+test('runAcpConversation - nudges an empty reply, then stops at the cap', async t => {
+	const {conn} = createMockConn();
+	const session = createMockSession(conn, {
+		messages: [{role: 'user', content: 'hi'}],
+	});
+	const {client, sent} = scriptedClient([{choices: [{message: {content: ''}}]}]);
+
+	const result = await runGuarded(session, conn, client);
+
+	// Default maxEmptyTurns = 2: the first try plus two nudges.
+	t.is(result.stopReason, 'end_turn');
+	t.is(sent.length, 3);
+	t.is(sent[1][sent[1].length - 1].content, 'Please continue with the task.');
+	// No empty assistant message is stored; providers reject one.
+	t.false(
+		session.messages.some(
+			m => m.role === 'assistant' && !m.displayOnly && !m.content,
+		),
+	);
+	t.regex(
+		String(session.messages[session.messages.length - 1].content),
+		/no output after 3 attempts/,
+	);
+});
+
+test('runAcpConversation - an empty reply followed by an answer ends normally', async t => {
+	const {conn} = createMockConn();
+	const session = createMockSession(conn);
+	const {client, sent} = scriptedClient([
+		{choices: [{message: {content: ''}}]},
+		{choices: [{message: {content: 'Here it is'}}]},
+	]);
+
+	const result = await runGuarded(session, conn, client);
+
+	t.is(result.stopReason, 'end_turn');
+	t.is(sent.length, 2);
+	t.is(session.messages[session.messages.length - 1].content, 'Here it is');
+});
+
+test('runAcpConversation - feeds a malformed text tool call back for a retry', async t => {
+	const {conn} = createMockConn();
+	const session = createMockSession(conn, {devMode: 'yolo'});
+	setToolRegistryGetter(() => ({
+		read_file: async (args: any) => `Content of ${args.path}`,
+	}));
+	const {client, sent} = scriptedClient([
+		{
+			toolsDisabled: true,
+			choices: [{message: {content: '[tool_use: read_file]'}}],
+		},
+		{
+			toolsDisabled: true,
+			choices: [
+				{
+					message: {
+						content: '<function=read_file>\n{"path": "/a.txt"}\n</function>',
+					},
+				},
+			],
+		},
+		{choices: [{message: {content: 'Done'}}]},
+	]);
+
+	const result = await runGuarded(session, conn, client);
+
+	t.is(result.stopReason, 'end_turn');
+	t.is(sent.length, 3);
+	t.regex(
+		String(sent[1][sent[1].length - 1].content),
+		/contained a malformed tool call/,
+	);
+	t.true(
+		session.messages.some(
+			m => m.role === 'tool' && m.content === 'Content of /a.txt',
+		),
+	);
+});
+
+test('runAcpConversation - stops retrying malformed tool calls at the cap', async t => {
+	const {conn} = createMockConn();
+	const session = createMockSession(conn);
+	const {client, sent} = scriptedClient([
+		{
+			toolsDisabled: true,
+			choices: [{message: {content: '[tool_use: read_file]'}}],
+		},
+	]);
+
+	const result = await runGuarded(session, conn, client);
+
+	// Default maxMalformedRetries = 2: the first try plus two retries.
+	t.is(result.stopReason, 'end_turn');
+	t.is(sent.length, 3);
+	t.regex(
+		String(session.messages[session.messages.length - 1].content),
+		/malformed tool calls 3 times/,
+	);
+});
+
+test('runAcpConversation - asks a reply cut off at the output limit to continue', async t => {
+	const {conn} = createMockConn();
+	const session = createMockSession(conn);
+	const {client, sent} = scriptedClient([
+		{finishReason: 'length', choices: [{message: {content: 'Half a sen'}}]},
+		{finishReason: 'stop', choices: [{message: {content: 'tence.'}}]},
+	]);
+
+	const result = await runGuarded(session, conn, client);
+
+	t.is(result.stopReason, 'end_turn');
+	t.is(sent.length, 2);
+	t.regex(
+		String(sent[1][sent[1].length - 1].content),
+		/cut off at the output-token limit/,
+	);
+	t.is(session.messages[session.messages.length - 1].content, 'tence.');
+});
+
+test('runAcpConversation - a reply that keeps truncating stands after the continuation cap', async t => {
+	const {conn} = createMockConn();
+	const session = createMockSession(conn);
+	const {client, sent} = scriptedClient([
+		{finishReason: 'length', choices: [{message: {content: 'more...'}}]},
+	]);
+
+	const result = await runGuarded(session, conn, client);
+
+	// Default maxTruncatedTurns = 2.
+	t.is(result.stopReason, 'end_turn');
+	t.is(sent.length, 3);
+});
+
+// ============================================================================
 // XML-parsed tool calls (toolsDisabled path)
 // ============================================================================
 

@@ -19,7 +19,17 @@ import {
 	observeSuccessfulLifecycleTool,
 	takeWalkthroughFallback,
 } from '@/artifacts/walkthrough-lifecycle';
-import {DEFAULT_HEADLESS_MAX_TURNS, getAppConfig} from '@/config/index';
+import {
+	DEFAULT_HEADLESS_MAX_TURNS,
+	getAppConfig,
+	getRetryLimits,
+} from '@/config/index';
+import {
+	createHeadlessRetryGuards,
+	EMPTY_TURN_NUDGE,
+	malformedToolCallNudge,
+	TRUNCATED_TURN_INSTRUCTION,
+} from '@/hooks/chat-handler/utils/headless-retry-guards';
 import {
 	buildAbandonedTurnMessages,
 	partitionUnknownToolCalls,
@@ -369,6 +379,33 @@ async function runTurn(
 	const maxTurns =
 		getAppConfig().headless?.maxTurns ?? DEFAULT_HEADLESS_MAX_TURNS;
 
+	// The `nanocoder.retries` caps the plain shell applies. Nobody is there to
+	// ask whether to carry on, so a model stuck repeating a call, answering
+	// with nothing or emitting broken tool calls is stopped well short of
+	// maxTurns instead of spending a request on every one of them.
+	const guards = createHeadlessRetryGuards(getRetryLimits());
+
+	// Ends the turn early with the reason shown in the chat. Kept in history as
+	// harness chrome, so a reloaded session shows it but the model never does.
+	const stopWithNotice = async (
+		notice: string,
+		stopReason: PromptResponse['stopReason'],
+	): Promise<PromptResponse> => {
+		const text = `\n\n_${notice}_\n`;
+		await conn.sessionUpdate({
+			sessionId: session.sessionId,
+			update: {
+				sessionUpdate: 'agent_message_chunk',
+				content: {type: 'text', text},
+			},
+		});
+		session.messages = [
+			...session.messages,
+			{role: 'assistant', content: text, displayOnly: true},
+		];
+		return withTurnUsage({stopReason});
+	};
+
 	for (let turn = 0; turn < maxTurns; turn++) {
 		if (abortController.signal.aborted) {
 			return withTurnUsage({stopReason: 'cancelled'});
@@ -474,7 +511,21 @@ async function runTurn(
 				: {success: true as const, toolCalls: [], cleanedContent: fullContent};
 
 		if (!xmlParse.success) {
-			return withTurnUsage({stopReason: 'end_turn'});
+			// Feed the parse error back so the model can correct itself, as the
+			// plain shell and the interactive loop do, up to the retry cap.
+			const verdict = guards.malformed();
+			if (verdict.action === 'stop') {
+				return stopWithNotice(verdict.message, 'end_turn');
+			}
+			session.messages = [
+				...session.messages,
+				{role: 'assistant', content: fullContent},
+				{
+					role: 'user',
+					content: malformedToolCallNudge(xmlParse.error, xmlParse.examples),
+				},
+			];
+			continue;
 		}
 
 		const allToolCalls: ToolCall[] = [
@@ -488,15 +539,22 @@ async function runTurn(
 		const {emittedToolCalls, resultsForAbandonedTurn} =
 			buildAbandonedTurnMessages(partition);
 
-		session.messages = [
-			...session.messages,
-			{
-				role: 'assistant',
-				content: cleanedContent,
-				tool_calls: emittedToolCalls.length > 0 ? emittedToolCalls : undefined,
-				reasoning: streamedReasoning.trim() ? streamedReasoning : undefined,
-			},
-		];
+		// A fully-empty assistant message (no text, no tool calls) is left out:
+		// providers reject one, and the empty-turn nudge below re-asks without it.
+		const hasAssistantPayload =
+			cleanedContent.trim().length > 0 || emittedToolCalls.length > 0;
+		if (hasAssistantPayload) {
+			session.messages = [
+				...session.messages,
+				{
+					role: 'assistant',
+					content: cleanedContent,
+					tool_calls:
+						emittedToolCalls.length > 0 ? emittedToolCalls : undefined,
+					reasoning: streamedReasoning.trim() ? streamedReasoning : undefined,
+				},
+			];
+		}
 		// Gate on the same view the next turn will send, so the threshold is not
 		// measured against rows the cap already drops from the request.
 		const compactGateInput = capMessagesForModel(session.messages, maxMessages);
@@ -521,11 +579,42 @@ async function runTurn(
 		}
 
 		if (errorResults.length > 0) {
+			// A model stuck re-emitting the same unknown tool is looping too.
+			const repeated = guards.toolCalls(allToolCalls);
 			session.messages = [...session.messages, ...resultsForAbandonedTurn];
+			if (repeated) {
+				return stopWithNotice(repeated, 'max_turn_requests');
+			}
 			continue;
 		}
 
 		if (validToolCalls.length === 0) {
+			if (!cleanedContent.trim()) {
+				const verdict = guards.empty();
+				if (verdict.action === 'stop') {
+					return stopWithNotice(verdict.message, 'end_turn');
+				}
+				session.messages = [
+					...session.messages,
+					{role: 'user', content: EMPTY_TURN_NUDGE},
+				];
+				continue;
+			}
+			// A reply cut off at the output-token limit arrives with no tool
+			// calls, which is what a finished turn looks like. Ask the model to
+			// carry on, capped; on the final turn there is nothing left to
+			// continue into, so the fragment stands.
+			if (result.finishReason === 'length' && !finalTurn) {
+				const verdict = guards.truncated();
+				if (verdict.action === 'retry') {
+					session.messages = [
+						...session.messages,
+						{role: 'user', content: TRUNCATED_TURN_INSTRUCTION},
+					];
+					continue;
+				}
+			}
+
 			if (
 				session.developmentMode === 'plan' &&
 				!wrotePlan &&
@@ -572,6 +661,24 @@ async function runTurn(
 				continue;
 			}
 			return withTurnUsage({stopReason: 'end_turn'});
+		}
+
+		// Checked before anything runs: the repeat that hits the cap is not
+		// executed.
+		const repeated = guards.toolCalls(allToolCalls);
+		if (repeated) {
+			// Every stored tool call needs a result, or the provider rejects the
+			// session's next prompt.
+			session.messages = [
+				...session.messages,
+				...validToolCalls.map(toolCall => ({
+					tool_call_id: toolCall.id,
+					role: 'tool' as const,
+					name: toolCall.function.name,
+					content: `Error: not run. ${repeated}`,
+				})),
+			];
+			return stopWithNotice(repeated, 'max_turn_requests');
 		}
 
 		const announcedBatch =
