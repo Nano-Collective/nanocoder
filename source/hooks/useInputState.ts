@@ -599,18 +599,20 @@ export function useInputState() {
 		};
 	}, []);
 
-	// Set full InputState (for history navigation)
+	// Set full InputState (history navigation, completions, restored drafts).
+	// Write the ref first, like every other writer here: Enter or a key in the
+	// same stdin batch reads it before the next render.
 	const setInputState = useCallback((newState: InputState) => {
+		currentStateRef.current = newState;
 		setCurrentState(newState);
 		pasteDetectorRef.current.updateState(newState.displayValue);
 	}, []);
 
 	// Legacy setters for compatibility
 	const setInput = useCallback((newInput: string) => {
-		setCurrentState(prev => ({
-			...prev,
-			displayValue: newInput,
-		}));
+		const nextState = {...currentStateRef.current, displayValue: newInput};
+		currentStateRef.current = nextState;
+		setCurrentState(nextState);
 		pasteDetectorRef.current.updateState(newInput);
 	}, []);
 

@@ -233,6 +233,22 @@ binding('↑ / ↓', 'a recalled prompt submits as-is on Enter', async t => {
 	t.is(await composer.submit(), 'recall me');
 });
 
+binding(
+	'↑ / ↓',
+	'Enter in the same keystroke batch as ↑ submits the recalled prompt',
+	async t => {
+		await seedPromptHistory(['recalled prompt']);
+		const composer = renderComposer();
+		t.teardown(composer.unmount);
+
+		await composer.type('my draft');
+		// ↑ and Enter arrive in one stdin read, before the composer re-renders.
+		composer.stdin.write(`${KEY.up}${KEY.enter}`);
+		await waitForCondition(() => composer.submitted.length > 0);
+		t.deepEqual(composer.submitted, ['recalled prompt']);
+	},
+);
+
 coveredBy(
 	'↑ / ↓',
 	'user-input.spec.tsx',
