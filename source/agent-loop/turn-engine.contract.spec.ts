@@ -11,6 +11,7 @@ import {
 } from '@/hooks/chat-handler/utils/headless-retry-guards';
 import {setToolManagerGetter, setToolRegistryGetter} from '@/message-handler';
 import {runPlainConversation} from '@/plain/conversation';
+import {processAssistantResponse} from '@/hooks/chat-handler/conversation/conversation-loop';
 import {SubagentExecutor} from '@/subagents/subagent-executor';
 import {getSubagentLoader} from '@/subagents/subagent-loader';
 import type {ToolManager} from '@/tools/tool-manager';
@@ -28,8 +29,10 @@ import type {
 // One set of scenarios, run through every frontend that drives the agent
 // loop. Each runner reduces its frontend's outcome to the same observation,
 // so a guard or retry that one loop gets and another does not fails here
-// instead of drifting silently. Frontends join as they move onto the shared
-// turn engine (source/agent-loop/turn-engine.ts).
+// instead of drifting silently. All four frontends run on the shared turn
+// engine (source/agent-loop/turn-engine.ts); where the interactive TUI is
+// deliberately different, its runner says so and the scenario asserts what
+// it does instead.
 
 process.env.NO_COLOR = '1';
 
@@ -62,7 +65,14 @@ function makeClient(replies: Reply[], observation: Observation): LLMClient {
 		getCurrentModel: () => 'fake-model',
 		getProviderConfig: () => ({}) as never,
 		getContextSize: () => 100_000,
-		chat: async (messages: Message[], tools: Record<string, unknown>) => {
+		chat: async (
+			messages: Message[],
+			tools: Record<string, unknown>,
+			_callbacks: unknown,
+			signal?: AbortSignal,
+		) => {
+			// A real client raises the abort instead of sending the request.
+			if (signal?.aborted) throw new Error('Operation was cancelled');
 			observation.requests.push(messages.filter(m => m.role !== 'system'));
 			observation.offered.push(Object.keys(tools));
 			const reply = replies[index++];
@@ -211,11 +221,77 @@ const subagentRunner: Runner = async scenario => {
 	return observation;
 };
 
+// The interactive loop, run non-interactively (nobody to ask) in auto-accept.
+const tuiRunner: Runner = async scenario => {
+	const observation = newObservation();
+	const controller = new AbortController();
+	if (scenario.abortBeforeStart) controller.abort();
+	const queue: unknown[] = [];
+	try {
+		await processAssistantResponse({
+			systemMessage: {role: 'system', content: 'sys'},
+			messages: [{role: 'user', content: 'go'}],
+			client: makeClient(scenario.replies, observation),
+			toolManager: makeToolManager(),
+			abortController: controller,
+			setAbortController: () => {},
+			setIsGenerating: () => {},
+			setStreamingReasoning: () => {},
+			setStreamingContent: () => {},
+			setTokenCount: () => {},
+			setMessages: () => {},
+			addToChatQueue: (item: unknown) => queue.push(item),
+			currentProvider: 'openai',
+			currentModel: 'fake-model',
+			developmentMode: 'auto-accept',
+			nonInteractiveMode: true,
+			conversationStateManager: {
+				current: {
+					updateAssistantMessage: () => {},
+					updateAfterToolExecution: () => {},
+				},
+			},
+		} as never);
+	} catch (error) {
+		// Errors, and the abort, unwind to the caller (useChatHandler).
+		observation.failure = (error as Error).message;
+		observation.end = controller.signal.aborted ? 'cancelled' : 'stopped';
+		return observation;
+	}
+	// A finished run ends with the completion note; a stopped one with the
+	// error that says why.
+	const last = queue[queue.length - 1] as
+		| {key?: unknown; props?: {message?: unknown}}
+		| undefined;
+	if (String(last?.key).includes('completion-time')) {
+		observation.end = 'completed';
+	} else {
+		observation.end = 'stopped';
+		observation.failure = String(last?.props?.message ?? '');
+	}
+	return observation;
+};
+
 interface FrontendUnderTest {
 	name: string;
 	run: Runner;
 	/** The result an unknown tool gets. */
 	unknownToolResult: RegExp;
+	/**
+	 * Headless loops cap the turns and spend the last one on a tool-free
+	 * answer. The TUI has no ceiling: the user is there to stop it.
+	 */
+	turnCeiling: boolean;
+	/**
+	 * Headless loops ask a reply cut off at the output limit to continue. The
+	 * TUI shows the fragment and hands back to the user.
+	 */
+	continuesTruncation: boolean;
+	/**
+	 * At the empty-turn cap the TUI compacts the context once and tries again
+	 * before giving up; headless loops stop.
+	 */
+	compactsAtEmptyCap: boolean;
 }
 
 const frontends: FrontendUnderTest[] = [
@@ -223,16 +299,33 @@ const frontends: FrontendUnderTest[] = [
 		name: 'plain',
 		run: plainRunner,
 		unknownToolResult: /^Unknown tool: nope$/,
+		turnCeiling: true,
+		continuesTruncation: true,
+		compactsAtEmptyCap: false,
 	},
 	{
 		name: 'acp',
 		run: acpRunner,
 		unknownToolResult: /^Unknown tool: nope$/,
+		turnCeiling: true,
+		continuesTruncation: true,
+		compactsAtEmptyCap: false,
 	},
 	{
 		name: 'subagent',
 		run: subagentRunner,
 		unknownToolResult: /'nope' is not available to this subagent/,
+		turnCeiling: true,
+		continuesTruncation: true,
+		compactsAtEmptyCap: false,
+	},
+	{
+		name: 'tui',
+		run: tuiRunner,
+		unknownToolResult: /^The tool "nope" does not exist/,
+		turnCeiling: false,
+		continuesTruncation: false,
+		compactsAtEmptyCap: true,
 	},
 ];
 
@@ -271,7 +364,14 @@ test.afterEach.always(() => {
 	reloadAppConfig();
 });
 
-for (const {name, run, unknownToolResult} of frontends) {
+for (const {
+	name,
+	run,
+	unknownToolResult,
+	turnCeiling,
+	continuesTruncation,
+	compactsAtEmptyCap,
+} of frontends) {
 	test.serial(`[${name}] a content-only reply ends the run`, async t => {
 		const seen = await run({replies: [text('done')]});
 		t.is(seen.end, 'completed');
@@ -313,8 +413,18 @@ for (const {name, run, unknownToolResult} of frontends) {
 
 	test.serial(`[${name}] stops after the empty-turn cap`, async t => {
 		// Default maxEmptyTurns = 2: the first empty reply plus two nudges.
-		const seen = await run({replies: [text(''), text(''), text('')]});
+		const seen = await run({replies: Array.from({length: 6}, () => text(''))});
 		t.is(seen.end, 'stopped');
+		if (compactsAtEmptyCap) {
+			// One compact-and-retry (MAX_COMPACT_RETRIES = 1) buys three more.
+			t.is(seen.requests.length, 6);
+			t.regex(
+				String(lastOf(seen.requests[3])?.content),
+				/Context has been compacted/,
+			);
+			t.regex(seen.failure ?? '', /no output after 4 attempts/);
+			return;
+		}
 		t.is(seen.requests.length, 3);
 	});
 
@@ -369,6 +479,10 @@ for (const {name, run, unknownToolResult} of frontends) {
 			replies: [{...text('half a'), finishReason: 'length'}, text('done')],
 		});
 		t.is(seen.end, 'completed');
+		if (!continuesTruncation) {
+			t.is(seen.requests.length, 1);
+			return;
+		}
 		const [fragment, nudge] = seen.requests[1].slice(-2);
 		t.is(fragment.content, 'half a');
 		t.deepEqual(nudge, {role: 'user', content: TRUNCATED_TURN_INSTRUCTION});
@@ -388,6 +502,10 @@ for (const {name, run, unknownToolResult} of frontends) {
 			const seen = await run({replies: [call('probe'), text('done')]});
 			t.is(seen.end, 'completed');
 			t.deepEqual(seen.executed, ['probe']);
+			if (!turnCeiling) {
+				t.deepEqual(seen.offered, [TOOLS, TOOLS]);
+				return;
+			}
 			t.deepEqual(seen.offered, [TOOLS, []]);
 			t.regex(
 				String(lastOf(seen.requests[1])?.content),
