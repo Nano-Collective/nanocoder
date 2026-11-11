@@ -3,7 +3,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
-import { ChatWebviewProvider } from './chat-webview-provider';
+import { ChatWebviewProvider, getNonce } from './chat-webview-provider';
 import { NanocoderAcpClient } from './acp-client';
 
 function makeStubs() {
@@ -666,4 +666,18 @@ test('ChatWebviewProvider - _initializeSessionIfReady skips restart fallback whe
 	);
 	t.false(messages.some(m => m.type === 'clear'), 'must not clear webview transcript');
 	t.true(messages.some(m => m.type === 'connectionStatus' && m.status === 'connected'));
+});
+
+test('getNonce - comes from a CSPRNG, not Math.random', (t) => {
+	const originalRandom = Math.random;
+	Math.random = () => 0.5;
+	t.teardown(() => {
+		Math.random = originalRandom;
+	});
+
+	const first = getNonce();
+	const second = getNonce();
+
+	t.regex(first, /^[0-9a-f]{32}$/, '128 bits, safe inside a CSP nonce and an HTML attribute');
+	t.not(first, second, 'a predictable Math.random must not make the nonce predictable');
 });
