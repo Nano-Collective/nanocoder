@@ -49,7 +49,7 @@ import type {
 	VerifyConfig,
 } from '@/types/index';
 import {clampThreshold} from '@/utils/message-compression';
-import {logError, logWarning} from '@/utils/message-queue';
+import {logError, logWarning} from '@/utils/message-queue-core';
 import {isTrustLevel} from '@/verify/trust';
 
 export {confDirMap, getClosestConfigFile} from '@/config/paths';

@@ -1,5 +1,5 @@
 import type {MCPServerConfig} from '@/types/config';
-import {logWarning} from '@/utils/message-queue';
+import {logWarning} from '@/utils/message-queue-core';
 
 /**
  * Collect MCP security findings as strings (no logging). Exported so tests

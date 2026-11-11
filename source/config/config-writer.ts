@@ -4,7 +4,7 @@ import {getClosestConfigFile} from '@/config/index';
 import {notifyPreferencesChanged} from '@/config/preferences';
 import type {UserPreferences} from '@/types/config';
 import {atomicWriteJson} from '@/utils/atomic-write';
-import {logError} from '@/utils/message-queue';
+import {logError} from '@/utils/message-queue-core';
 
 /**
  * Reads the active agents.config.json, merges the given partial update into the

@@ -20,7 +20,7 @@ import type {
 	ScheduleCronTrigger,
 	SkillTrigger,
 } from '@/types/skills';
-import {logError} from '@/utils/message-queue';
+import {logError} from '@/utils/message-queue-core';
 
 const FILE_EVENT_KINDS: ReadonlySet<FileChangeEventKind> = new Set([
 	'add',
