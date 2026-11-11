@@ -308,6 +308,48 @@ export function savePreferences(preferences: UserPreferences): boolean {
 	return true;
 }
 
+// ============================================================================
+// Preference accessors
+// ----------------------------------------------------------------------------
+// Most preferences are a single top-level key: read it (falling back to a
+// default when unset), or write it and save. `getPreference` and
+// `setPreference` do that for any key, typed by UserPreferences; boolean
+// defaults live in one table instead of being repeated in each getter.
+// Accessors with their own logic (clamping, nesting, caching) follow below.
+// ============================================================================
+
+function getPreference<K extends keyof UserPreferences>(
+	key: K,
+): UserPreferences[K] {
+	return loadPreferences()[key];
+}
+
+function setPreference<K extends keyof UserPreferences>(
+	key: K,
+	value: UserPreferences[K],
+): void {
+	const preferences = loadPreferences();
+	preferences[key] = value;
+	savePreferences(preferences);
+}
+
+/** Boolean preferences and the value each takes when unset. */
+const BOOLEAN_PREFERENCE_DEFAULTS = {
+	reasoningExpanded: false,
+	compactToolDisplay: true,
+	showUsageFooter: true,
+	enablePromptScrubbing: false,
+	alternateScreen: true,
+	mouseReporting: true,
+	professionalTone: false,
+} as const satisfies Partial<Record<keyof UserPreferences, boolean>>;
+
+type BooleanPreference = keyof typeof BOOLEAN_PREFERENCE_DEFAULTS;
+
+function getBooleanPreference(key: BooleanPreference): boolean {
+	return getPreference(key) ?? BOOLEAN_PREFERENCE_DEFAULTS[key];
+}
+
 export function updateLastUsed(provider: string, model: string): void {
 	const preferences = loadPreferences();
 	preferences.lastProvider = provider;
@@ -322,51 +364,39 @@ export function updateLastUsed(provider: string, model: string): void {
 	savePreferences(preferences);
 }
 
+export function getLastUsedModel(provider: string): string | undefined {
+	return getPreference('providerModels')?.[provider];
+}
+
 export function updateTitleShape(shape: string): void {
-	const preferences = loadPreferences();
-	preferences.titleShape = shape as TitleShape;
-	savePreferences(preferences);
+	setPreference('titleShape', shape as TitleShape);
 }
 
 export function getTitleShape(): TitleShape | undefined {
-	const preferences = loadPreferences();
-	return preferences.titleShape;
+	return getPreference('titleShape');
 }
 
 export function updateSelectedTheme(theme: string): void {
-	const preferences = loadPreferences();
-	preferences.selectedTheme = theme as ThemePreset;
-	savePreferences(preferences);
-}
-
-export function getLastUsedModel(provider: string): string | undefined {
-	const preferences = loadPreferences();
-	return preferences.providerModels?.[provider];
+	setPreference('selectedTheme', theme as ThemePreset);
 }
 
 export function updateNanocoderShape(shape: NanocoderShape): void {
-	const preferences = loadPreferences();
-	preferences.nanocoderShape = shape;
-	savePreferences(preferences);
+	setPreference('nanocoderShape', shape);
 }
 
 export function getNanocoderShape(): NanocoderShape | undefined {
-	const preferences = loadPreferences();
-	return preferences.nanocoderShape;
+	return getPreference('nanocoderShape');
 }
 
 export function saveTune(config: TuneConfig): void {
-	const preferences = loadPreferences();
-	preferences.tune = config;
-	savePreferences(preferences);
+	setPreference('tune', config);
 }
 
 /**
  * Get the notifications config from the preferences file.
  */
 export function getNotificationsPreference(): NotificationsConfig | undefined {
-	const preferences = loadPreferences();
-	return preferences.notifications;
+	return getPreference('notifications');
 }
 
 /**
@@ -375,9 +405,7 @@ export function getNotificationsPreference(): NotificationsConfig | undefined {
 export function updateNotificationsPreference(
 	config: NotificationsConfig,
 ): void {
-	const preferences = loadPreferences();
-	preferences.notifications = config;
-	savePreferences(preferences);
+	setPreference('notifications', config);
 }
 
 /**
@@ -386,8 +414,108 @@ export function updateNotificationsPreference(
  * natural follow-up once the feature has seen real-world use).
  */
 export function getCiWatchPreference(): CiWatchConfig | undefined {
-	const preferences = loadPreferences();
-	return preferences.ciWatch;
+	return getPreference('ciWatch');
+}
+
+/**
+ * Get the reasoning expanded preference. Default false.
+ */
+export function getReasoningExpanded(): boolean {
+	return getBooleanPreference('reasoningExpanded');
+}
+
+export function updateReasoningExpanded(value: boolean): void {
+	setPreference('reasoningExpanded', value);
+}
+
+/**
+ * Get the compact tool display preference. Default true.
+ */
+export function getCompactToolDisplay(): boolean {
+	return getBooleanPreference('compactToolDisplay');
+}
+
+export function updateCompactToolDisplay(value: boolean): void {
+	setPreference('compactToolDisplay', value);
+}
+
+/**
+ * Get the per-response usage footer preference. Default true.
+ */
+export function getShowUsageFooter(): boolean {
+	return getBooleanPreference('showUsageFooter');
+}
+
+export function updateShowUsageFooter(value: boolean): void {
+	setPreference('showUsageFooter', value);
+}
+
+/**
+ * Get the privacy scrubbing preference. Default false.
+ */
+export function getPrivacyPreference(): boolean {
+	return getBooleanPreference('enablePromptScrubbing');
+}
+
+export function updatePrivacyPreference(value: boolean): void {
+	setPreference('enablePromptScrubbing', value);
+}
+
+/**
+ * Get the alternate-screen (fullscreen) preference. Default true. Also
+ * settable via --alt-screen/--no-alt-screen at launch; this is the persisted
+ * default.
+ */
+export function getAlternateScreen(): boolean {
+	return getBooleanPreference('alternateScreen');
+}
+
+export function updateAlternateScreen(value: boolean): void {
+	setPreference('alternateScreen', value);
+}
+
+/**
+ * Get the mouse reporting preference. When true (default), the terminal reports
+ * wheel ticks to the app so the mouse wheel scrolls the chat viewport; text
+ * selection then needs Shift+drag (Option+drag in iTerm2). When false, the
+ * terminal does not capture the mouse at all, so native text selection
+ * (double-click, drag) works directly and the wheel does nothing.
+ */
+export function getMouseReporting(): boolean {
+	return getBooleanPreference('mouseReporting');
+}
+
+export function updateMouseReporting(value: boolean): void {
+	setPreference('mouseReporting', value);
+}
+
+/**
+ * Get the professional ("boring") tone preference. Default false. When on,
+ * progress text is strictly functional and the model is instructed to keep
+ * responses terse.
+ */
+export function getProfessionalTone(): boolean {
+	return getBooleanPreference('professionalTone');
+}
+
+export function updateProfessionalTone(value: boolean): void {
+	setPreference('professionalTone', value);
+}
+
+// Cached: re-reads only when NANOCODER_CONFIG_DIR changes or a write bumps the version.
+const cachedShowAgentBashOutput = cachedPreference(
+	prefs => prefs.showAgentBashOutput === true,
+);
+
+/**
+ * Get the agent bash output preference. Default false.
+ */
+export function getShowAgentBashOutput(): boolean {
+	return cachedShowAgentBashOutput();
+}
+
+export function updateShowAgentBashOutput(value: boolean): void {
+	setPreference('showAgentBashOutput', value);
 }
 
 /**
@@ -461,95 +589,6 @@ export function getMaxFps(preferences = loadPreferences()): number {
 	return getUiMaxFps(preferences) ?? DEFAULT_MAX_FPS;
 }
 
-/**
- * Get the reasoning expanded preference from preferences or environment
- */
-export function getReasoningExpanded(): boolean {
-	const preferences = loadPreferences();
-	return preferences.reasoningExpanded ?? false;
-}
-
-/**
- * Save the reasoning expanded preference
- */
-export function updateReasoningExpanded(value: boolean): void {
-	const preferences = loadPreferences();
-	preferences.reasoningExpanded = value;
-	savePreferences(preferences);
-}
-
-/**
- * Get the compact tool display preference from preferences or environment
- */
-export function getCompactToolDisplay(): boolean {
-	const preferences = loadPreferences();
-	return preferences.compactToolDisplay ?? true;
-}
-
-/**
- * Save the compact tool display preference
- */
-export function updateCompactToolDisplay(value: boolean): void {
-	const preferences = loadPreferences();
-	preferences.compactToolDisplay = value;
-	savePreferences(preferences);
-}
-
-// Cached: re-reads only when NANOCODER_CONFIG_DIR changes or a write bumps the version.
-const cachedShowAgentBashOutput = cachedPreference(
-	prefs => prefs.showAgentBashOutput === true,
-);
-
-/**
- * Get the agent bash output preference. Default false.
- */
-export function getShowAgentBashOutput(): boolean {
-	return cachedShowAgentBashOutput();
-}
-
-/**
- * Save the agent bash output preference
- */
-export function updateShowAgentBashOutput(value: boolean): void {
-	const preferences = loadPreferences();
-	preferences.showAgentBashOutput = value;
-	savePreferences(preferences);
-}
-
-/**
- * Get the per-response usage footer preference. On by default.
- */
-export function getShowUsageFooter(): boolean {
-	const preferences = loadPreferences();
-	return preferences.showUsageFooter ?? true;
-}
-
-/**
- * Save the per-response usage footer preference
- */
-export function updateShowUsageFooter(value: boolean): void {
-	const preferences = loadPreferences();
-	preferences.showUsageFooter = value;
-	savePreferences(preferences);
-}
-
-/**
- * Get the privacy scrubbing preference from preferences
- */
-export function getPrivacyPreference(): boolean {
-	const preferences = loadPreferences();
-	return preferences.enablePromptScrubbing ?? false;
-}
-
-/**
- * Save the privacy scrubbing preference
- */
-export function updatePrivacyPreference(value: boolean): void {
-	const preferences = loadPreferences();
-	preferences.enablePromptScrubbing = value;
-	savePreferences(preferences);
-}
-
 function clamp(value: number, min: number, max: number): number {
 	return Math.min(max, Math.max(min, Math.round(value)));
 }
@@ -602,9 +641,7 @@ export function getSemanticMemoryEnabled(): boolean {
  * Save the semantic memory preference
  */
 export function updateSemanticMemoryEnabled(value: boolean): void {
-	const preferences = loadPreferences();
-	preferences.semanticMemoryEnabled = value;
-	savePreferences(preferences);
+	setPreference('semanticMemoryEnabled', value);
 }
 
 /**
@@ -634,63 +671,6 @@ export function updateSemanticMemoryTokenBudget(value: number): void {
 }
 
 /**
- * Get the alternate-screen (fullscreen) preference. Also settable via
- * --alt-screen/--no-alt-screen at launch; this is the persisted default.
- */
-export function getAlternateScreen(): boolean {
-	const preferences = loadPreferences();
-	return preferences.alternateScreen ?? true;
-}
-
-/**
- * Save the alternate-screen preference
- */
-export function updateAlternateScreen(value: boolean): void {
-	const preferences = loadPreferences();
-	preferences.alternateScreen = value;
-	savePreferences(preferences);
-}
-
-/**
- * Get the mouse reporting preference. When true (default), the terminal reports
- * wheel ticks to the app so the mouse wheel scrolls the chat viewport; text
- * selection then needs Shift+drag (Option+drag in iTerm2). When false, the
- * terminal does not capture the mouse at all, so native text selection
- * (double-click, drag) works directly and the wheel does nothing.
- */
-export function getMouseReporting(): boolean {
-	const preferences = loadPreferences();
-	return preferences.mouseReporting ?? true;
-}
-
-/**
- * Save the mouse reporting preference
- */
-export function updateMouseReporting(value: boolean): void {
-	const preferences = loadPreferences();
-	preferences.mouseReporting = value;
-	savePreferences(preferences);
-}
-
-/**
- * Get the professional ("boring") tone preference. When on, progress text is
- * strictly functional and the model is instructed to keep responses terse.
- */
-export function getProfessionalTone(): boolean {
-	const preferences = loadPreferences();
-	return preferences.professionalTone ?? false;
-}
-
-/**
- * Save the professional tone preference
- */
-export function updateProfessionalTone(value: boolean): void {
-	const preferences = loadPreferences();
-	preferences.professionalTone = value;
-	savePreferences(preferences);
-}
-
-/**
  * Get the voice configuration from preferences
  */
 export function getVoicePreference(): import('@/types/config').VoiceConfig {
@@ -711,7 +691,5 @@ export function getVoicePreference(): import('@/types/config').VoiceConfig {
 export function updateVoicePreference(
 	config: import('@/types/config').VoiceConfig,
 ): void {
-	const preferences = loadPreferences();
-	preferences.voice = config;
-	savePreferences(preferences);
+	setPreference('voice', config);
 }
