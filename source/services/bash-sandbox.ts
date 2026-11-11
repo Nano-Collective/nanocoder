@@ -245,9 +245,31 @@ function defaultHostMasks(): HostMasks {
 	const uid = process.getuid?.();
 	const runtimeDir = uid === undefined ? undefined : `/run/user/${uid}`;
 	return {
-		runtimeDir: runtimeDir && existsSync(runtimeDir) ? runtimeDir : undefined,
-		sockets: HOST_SOCKETS.filter(socket => existsSync(socket)),
+		runtimeDir:
+			runtimeDir && existsSync(runtimeDir)
+				? resolveJailRoot(runtimeDir)
+				: undefined,
+		sockets: existingSockets(HOST_SOCKETS),
 	};
+}
+
+/**
+ * The sockets that exist, by their real path, each once. `/var/run` is a
+ * symlink to `/run` on most distributions, and bwrap cannot mount over a
+ * path that only resolves through a symlink, so both spellings collapse to
+ * the one real target.
+ */
+export function existingSockets(candidates: string[]): string[] {
+	const found = new Set<string>();
+	for (const candidate of candidates) {
+		try {
+			const real = realpathSync(candidate);
+			if (statSync(real).isSocket()) found.add(real);
+		} catch {
+			// Missing.
+		}
+	}
+	return [...found];
 }
 
 function bwrapArgs(

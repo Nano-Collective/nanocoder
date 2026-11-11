@@ -1,10 +1,21 @@
-import {chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync} from 'node:fs';
+import {
+	chmodSync,
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	realpathSync,
+	rmSync,
+	symlinkSync,
+	writeFileSync,
+} from 'node:fs';
+import {createServer} from 'node:net';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {platform} from 'node:process';
 import test from 'ava';
 import {
 	acquireProtectedMounts,
+	existingSockets,
 	findBwrap,
 	macSandboxProfile,
 	planBashSpawn,
@@ -236,6 +247,38 @@ test('planBashSpawn on linux hides the user runtime dir and host daemon sockets'
 	t.true(args.includes('--tmpfs /run/user/1000'));
 	t.true(args.includes('--ro-bind /dev/null /run/docker.sock'));
 	t.true(args.includes('--ro-bind /dev/null /run/dbus/system_bus_socket'));
+});
+
+// /var/run is a symlink to /run on most distributions, and bwrap cannot mount
+// over a path that only resolves through one ("Can't create file at
+// /var/run/docker.sock").
+test('existingSockets resolves symlinked parents, dedupes and skips non-sockets', async t => {
+	if (platform === 'win32') {
+		t.pass();
+		return;
+	}
+	const dir = realpathSync(mkdtempSync(join(tmpdir(), 'nc-sock-')));
+	const server = createServer();
+	try {
+		const run = join(dir, 'run');
+		mkdirSync(run);
+		symlinkSync(run, join(dir, 'var-run'));
+		const socket = join(run, 'd.sock');
+		await new Promise<void>(resolve => server.listen(socket, resolve));
+		writeFileSync(join(run, 'plain'), '');
+		t.deepEqual(
+			existingSockets([
+				socket,
+				join(dir, 'var-run', 'd.sock'),
+				join(run, 'plain'),
+				join(run, 'missing.sock'),
+			]),
+			[socket],
+		);
+	} finally {
+		server.close();
+		rmSync(dir, {recursive: true, force: true});
+	}
 });
 
 test('acquireProtectedMounts places missing entries and removes them after the last holder', t => {
