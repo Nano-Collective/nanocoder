@@ -3,7 +3,7 @@ import {render} from 'ink-testing-library';
 import test from 'ava';
 import React from 'react';
 import stripAnsi from 'strip-ansi';
-import {DevelopmentModeIndicator} from './development-mode-indicator';
+import {StatusBar} from './status-bar';
 
 void React; // JSX runtime requires React in scope
 
@@ -28,7 +28,7 @@ const TUNE_DEFAULTS_LIKE = {enabled: true, aggressiveCompact: false} as const;
 
 test('tune label shows nothing when tune is disabled', t => {
 	const {lastFrame} = render(
-		<DevelopmentModeIndicator
+		<StatusBar
 			developmentMode="normal"
 			colors={mockColors}
 			contextPercentUsed={null}
@@ -41,7 +41,7 @@ test('tune label shows nothing when tune is disabled', t => {
 
 test('tune label shows the explicit profile name', t => {
 	const {lastFrame} = render(
-		<DevelopmentModeIndicator
+		<StatusBar
 			developmentMode="normal"
 			colors={mockColors}
 			contextPercentUsed={null}
@@ -56,7 +56,7 @@ test('tune label shows the explicit profile name', t => {
 
 test('tune label shows resolved profile and (auto) origin for auto on a small model', t => {
 	const {lastFrame} = render(
-		<DevelopmentModeIndicator
+		<StatusBar
 			developmentMode="normal"
 			colors={mockColors}
 			contextPercentUsed={null}
@@ -69,7 +69,7 @@ test('tune label shows resolved profile and (auto) origin for auto on a small mo
 
 test('tune label resolves auto to full for cloud/unknown models', t => {
 	const {lastFrame} = render(
-		<DevelopmentModeIndicator
+		<StatusBar
 			developmentMode="normal"
 			colors={mockColors}
 			contextPercentUsed={null}
@@ -84,9 +84,9 @@ test('tune label resolves auto to full for cloud/unknown models', t => {
 // Component Rendering Tests
 // ============================================================================
 
-test('DevelopmentModeIndicator renders with normal mode', t => {
+test('StatusBar renders with normal mode', t => {
 	const {lastFrame} = render(
-		<DevelopmentModeIndicator developmentMode="normal" colors={mockColors} contextPercentUsed={null} />,
+		<StatusBar developmentMode="normal" colors={mockColors} contextPercentUsed={null} />,
 	);
 
 	const output = lastFrame();
@@ -94,9 +94,9 @@ test('DevelopmentModeIndicator renders with normal mode', t => {
 	t.regex(output!, /normal mode on/);
 });
 
-test('DevelopmentModeIndicator renders with auto-accept mode', t => {
+test('StatusBar renders with auto-accept mode', t => {
 	const {lastFrame} = render(
-		<DevelopmentModeIndicator
+		<StatusBar
 			developmentMode="auto-accept"
 			colors={mockColors}
 			contextPercentUsed={null}
@@ -108,9 +108,9 @@ test('DevelopmentModeIndicator renders with auto-accept mode', t => {
 	t.regex(output!, /auto-accept mode on/);
 });
 
-test('DevelopmentModeIndicator renders with plan mode', t => {
+test('StatusBar renders with plan mode', t => {
 	const {lastFrame} = render(
-		<DevelopmentModeIndicator developmentMode="plan" colors={mockColors} contextPercentUsed={null} />,
+		<StatusBar developmentMode="plan" colors={mockColors} contextPercentUsed={null} />,
 	);
 
 	const output = lastFrame();
@@ -118,9 +118,9 @@ test('DevelopmentModeIndicator renders with plan mode', t => {
 	t.regex(output!, /plan mode on/);
 });
 
-test('DevelopmentModeIndicator renders with yolo mode', t => {
+test('StatusBar renders with yolo mode', t => {
 	const {lastFrame} = render(
-		<DevelopmentModeIndicator developmentMode="yolo" colors={mockColors} contextPercentUsed={null} />,
+		<StatusBar developmentMode="yolo" colors={mockColors} contextPercentUsed={null} />,
 	);
 
 	const output = lastFrame();
@@ -128,9 +128,9 @@ test('DevelopmentModeIndicator renders with yolo mode', t => {
 	t.regex(output!, /yolo mode on/);
 });
 
-test('DevelopmentModeIndicator renders with headless mode', t => {
+test('StatusBar renders with headless mode', t => {
 	const {lastFrame} = render(
-		<DevelopmentModeIndicator developmentMode="headless" colors={mockColors} contextPercentUsed={null} />,
+		<StatusBar developmentMode="headless" colors={mockColors} contextPercentUsed={null} />,
 	);
 
 	const output = lastFrame();
@@ -138,9 +138,9 @@ test('DevelopmentModeIndicator renders with headless mode', t => {
 	t.regex(output!, /headless mode on/);
 });
 
-test('DevelopmentModeIndicator renders without crashing', t => {
+test('StatusBar renders without crashing', t => {
 	const {unmount} = render(
-		<DevelopmentModeIndicator developmentMode="normal" colors={mockColors} contextPercentUsed={null} />,
+		<StatusBar developmentMode="normal" colors={mockColors} contextPercentUsed={null} />,
 	);
 
 	t.notThrows(() => unmount());
@@ -150,22 +150,22 @@ test('DevelopmentModeIndicator renders without crashing', t => {
 // Props Tests
 // ============================================================================
 
-test('DevelopmentModeIndicator accepts all valid development modes', t => {
+test('StatusBar accepts all valid development modes', t => {
 	const modes = ['normal', 'auto-accept', 'yolo', 'plan', 'scheduler'] as const;
 
 	for (const mode of modes) {
 		t.notThrows(() => {
 			render(
-				<DevelopmentModeIndicator developmentMode={mode} colors={mockColors} contextPercentUsed={null} />,
+				<StatusBar developmentMode={mode} colors={mockColors} contextPercentUsed={null} />,
 			);
 		});
 	}
 });
 
-test('DevelopmentModeIndicator accepts colors object', t => {
+test('StatusBar accepts colors object', t => {
 	t.notThrows(() => {
 		render(
-			<DevelopmentModeIndicator
+			<StatusBar
 				developmentMode="normal"
 				colors={mockColors}
 				contextPercentUsed={null}
@@ -178,17 +178,17 @@ test('DevelopmentModeIndicator accepts colors object', t => {
 // Display Name Tests
 // ============================================================================
 
-test('DevelopmentModeIndicator has correct display name', t => {
-	t.is(DevelopmentModeIndicator.displayName, 'DevelopmentModeIndicator');
+test('StatusBar has correct display name', t => {
+	t.is(StatusBar.displayName, 'StatusBar');
 });
 
 // ============================================================================
 // Content Tests
 // ============================================================================
 
-test('DevelopmentModeIndicator shows mode label in bold', t => {
+test('StatusBar shows mode label in bold', t => {
 	const {lastFrame} = render(
-		<DevelopmentModeIndicator developmentMode="normal" colors={mockColors} contextPercentUsed={null} />,
+		<StatusBar developmentMode="normal" colors={mockColors} contextPercentUsed={null} />,
 	);
 
 	const output = lastFrame();
@@ -196,9 +196,9 @@ test('DevelopmentModeIndicator shows mode label in bold', t => {
 	t.regex(output!, /normal mode on/);
 });
 
-test('DevelopmentModeIndicator shows context percentage when provided', t => {
+test('StatusBar shows context percentage when provided', t => {
 	const {lastFrame} = render(
-		<DevelopmentModeIndicator developmentMode="normal" colors={mockColors} contextPercentUsed={42} />,
+		<StatusBar developmentMode="normal" colors={mockColors} contextPercentUsed={42} />,
 	);
 
 	const output = lastFrame();
@@ -207,18 +207,18 @@ test('DevelopmentModeIndicator shows context percentage when provided', t => {
 	t.regex(output!, /ctx: ~?42%/);
 });
 
-test('DevelopmentModeIndicator hides context percentage when null', t => {
+test('StatusBar hides context percentage when null', t => {
 	const {lastFrame} = render(
-		<DevelopmentModeIndicator developmentMode="normal" colors={mockColors} contextPercentUsed={null} />,
+		<StatusBar developmentMode="normal" colors={mockColors} contextPercentUsed={null} />,
 	);
 
 	const output = lastFrame();
 	t.notRegex(output!, /ctx:/);
 });
 
-test('DevelopmentModeIndicator shows API-reported context without the ~ marker', t => {
+test('StatusBar shows API-reported context without the ~ marker', t => {
 	const {lastFrame} = render(
-		<DevelopmentModeIndicator
+		<StatusBar
 			developmentMode="normal"
 			colors={mockColors}
 			contextPercentUsed={42}
@@ -231,9 +231,9 @@ test('DevelopmentModeIndicator shows API-reported context without the ~ marker',
 	t.notRegex(output!, /ctx: ~42%/);
 });
 
-test('DevelopmentModeIndicator marks estimated context with a leading ~', t => {
+test('StatusBar marks estimated context with a leading ~', t => {
 	const {lastFrame} = render(
-		<DevelopmentModeIndicator
+		<StatusBar
 			developmentMode="normal"
 			colors={mockColors}
 			contextPercentUsed={42}
@@ -245,18 +245,18 @@ test('DevelopmentModeIndicator marks estimated context with a leading ~', t => {
 	t.regex(output!, /ctx: ~42%/);
 });
 
-test('DevelopmentModeIndicator defaults to the estimate marker when source is omitted', t => {
+test('StatusBar defaults to the estimate marker when source is omitted', t => {
 	const {lastFrame} = render(
-		<DevelopmentModeIndicator developmentMode="normal" colors={mockColors} contextPercentUsed={42} />,
+		<StatusBar developmentMode="normal" colors={mockColors} contextPercentUsed={42} />,
 	);
 
 	const output = lastFrame();
 	t.regex(output!, /ctx: ~42%/);
 });
 
-test('DevelopmentModeIndicator normal mode uses correct label', t => {
+test('StatusBar normal mode uses correct label', t => {
 	const {lastFrame} = render(
-		<DevelopmentModeIndicator developmentMode="normal" colors={mockColors} contextPercentUsed={null} />,
+		<StatusBar developmentMode="normal" colors={mockColors} contextPercentUsed={null} />,
 	);
 
 	const output = lastFrame();
@@ -265,9 +265,9 @@ test('DevelopmentModeIndicator normal mode uses correct label', t => {
 	t.notRegex(output!, /plan mode on/);
 });
 
-test('DevelopmentModeIndicator auto-accept mode uses correct label', t => {
+test('StatusBar auto-accept mode uses correct label', t => {
 	const {lastFrame} = render(
-		<DevelopmentModeIndicator
+		<StatusBar
 			developmentMode="auto-accept"
 			colors={mockColors}
 			contextPercentUsed={null}
@@ -280,9 +280,9 @@ test('DevelopmentModeIndicator auto-accept mode uses correct label', t => {
 	t.notRegex(output!, /plan mode on/);
 });
 
-test('DevelopmentModeIndicator plan mode uses correct label', t => {
+test('StatusBar plan mode uses correct label', t => {
 	const {lastFrame} = render(
-		<DevelopmentModeIndicator developmentMode="plan" colors={mockColors} contextPercentUsed={null} />,
+		<StatusBar developmentMode="plan" colors={mockColors} contextPercentUsed={null} />,
 	);
 
 	const output = lastFrame();
@@ -291,9 +291,9 @@ test('DevelopmentModeIndicator plan mode uses correct label', t => {
 	t.notRegex(output!, /auto-accept mode on/);
 });
 
-test('DevelopmentModeIndicator headless mode uses correct label', t => {
+test('StatusBar headless mode uses correct label', t => {
 	const {lastFrame} = render(
-		<DevelopmentModeIndicator developmentMode="headless" colors={mockColors} contextPercentUsed={null} />,
+		<StatusBar developmentMode="headless" colors={mockColors} contextPercentUsed={null} />,
 	);
 
 	const output = lastFrame();
@@ -307,15 +307,15 @@ test('DevelopmentModeIndicator headless mode uses correct label', t => {
 // Memoization Tests
 // ============================================================================
 
-test('DevelopmentModeIndicator is memoized', t => {
+test('StatusBar is memoized', t => {
 	// React.memo components should have the same reference when props don't change
 	const firstRender = render(
-		<DevelopmentModeIndicator developmentMode="normal" colors={mockColors} contextPercentUsed={null} />,
+		<StatusBar developmentMode="normal" colors={mockColors} contextPercentUsed={null} />,
 	);
 	const firstOutput = firstRender.lastFrame();
 
 	const secondRender = render(
-		<DevelopmentModeIndicator developmentMode="normal" colors={mockColors} contextPercentUsed={null} />,
+		<StatusBar developmentMode="normal" colors={mockColors} contextPercentUsed={null} />,
 	);
 	const secondOutput = secondRender.lastFrame();
 
@@ -323,16 +323,16 @@ test('DevelopmentModeIndicator is memoized', t => {
 	t.is(firstOutput, secondOutput);
 });
 
-test('DevelopmentModeIndicator updates when developmentMode changes', t => {
+test('StatusBar updates when developmentMode changes', t => {
 	const {lastFrame, rerender} = render(
-		<DevelopmentModeIndicator developmentMode="normal" colors={mockColors} contextPercentUsed={null} />,
+		<StatusBar developmentMode="normal" colors={mockColors} contextPercentUsed={null} />,
 	);
 
 	const normalOutput = lastFrame();
 	t.regex(normalOutput!, /normal mode on/);
 
 	rerender(
-		<DevelopmentModeIndicator
+		<StatusBar
 			developmentMode="auto-accept"
 			colors={mockColors}
 			contextPercentUsed={null}
@@ -347,9 +347,9 @@ test('DevelopmentModeIndicator updates when developmentMode changes', t => {
 // Structure Tests
 // ============================================================================
 
-test('DevelopmentModeIndicator has correct structure', t => {
+test('StatusBar has correct structure', t => {
 	const {lastFrame} = render(
-		<DevelopmentModeIndicator developmentMode="normal" colors={mockColors} contextPercentUsed={25} />,
+		<StatusBar developmentMode="normal" colors={mockColors} contextPercentUsed={25} />,
 	);
 
 	const output = lastFrame();
@@ -358,9 +358,9 @@ test('DevelopmentModeIndicator has correct structure', t => {
 	t.regex(output!, /ctx: ~?25%/);
 });
 
-test('DevelopmentModeIndicator component can be unmounted', t => {
+test('StatusBar component can be unmounted', t => {
 	const {unmount} = render(
-		<DevelopmentModeIndicator developmentMode="normal" colors={mockColors} contextPercentUsed={null} />,
+		<StatusBar developmentMode="normal" colors={mockColors} contextPercentUsed={null} />,
 	);
 
 	t.notThrows(() => {
@@ -372,31 +372,31 @@ test('DevelopmentModeIndicator component can be unmounted', t => {
 // Edge Cases
 // ============================================================================
 
-test('DevelopmentModeIndicator handles rapid mode changes', t => {
+test('StatusBar handles rapid mode changes', t => {
 	const {lastFrame, rerender} = render(
-		<DevelopmentModeIndicator developmentMode="normal" colors={mockColors} contextPercentUsed={null} />,
+		<StatusBar developmentMode="normal" colors={mockColors} contextPercentUsed={null} />,
 	);
 
 	// Cycle through modes rapidly
 	rerender(
-		<DevelopmentModeIndicator
+		<StatusBar
 			developmentMode="auto-accept"
 			colors={mockColors}
 			contextPercentUsed={null}
 		/>,
 	);
 	rerender(
-		<DevelopmentModeIndicator developmentMode="plan" colors={mockColors} contextPercentUsed={null} />,
+		<StatusBar developmentMode="plan" colors={mockColors} contextPercentUsed={null} />,
 	);
 	rerender(
-		<DevelopmentModeIndicator developmentMode="normal" colors={mockColors} contextPercentUsed={null} />,
+		<StatusBar developmentMode="normal" colors={mockColors} contextPercentUsed={null} />,
 	);
 
 	const output = lastFrame();
 	t.regex(output!, /normal mode on/);
 });
 
-test('DevelopmentModeIndicator handles custom colors', t => {
+test('StatusBar handles custom colors', t => {
 	const customColors = {
 		...mockColors,
 		secondary: '#123456',
@@ -406,7 +406,7 @@ test('DevelopmentModeIndicator handles custom colors', t => {
 
 	t.notThrows(() => {
 		render(
-			<DevelopmentModeIndicator
+			<StatusBar
 				developmentMode="normal"
 				colors={customColors}
 				contextPercentUsed={null}
@@ -435,13 +435,13 @@ function renderWithWidth(
 	}
 }
 
-test('DevelopmentModeIndicator fits 80 columns inside an indented wrapper', t => {
+test('StatusBar fits 80 columns inside an indented wrapper', t => {
 	// user-input renders this row inside <Box marginLeft={3}>. Budgeting
 	// against the full terminal width overflowed by exactly those columns, and
 	// the terminal then cut the row mid-word rather than dropping a segment.
 	const output = renderWithWidth(
 		<Box marginLeft={3}>
-			<DevelopmentModeIndicator
+			<StatusBar
 				developmentMode="auto-accept"
 				colors={mockColors}
 				contextPercentUsed={42}
@@ -460,9 +460,9 @@ test('DevelopmentModeIndicator fits 80 columns inside an indented wrapper', t =>
 	}
 });
 
-test('DevelopmentModeIndicator shows Tasks (~2/5 Ctrl+T) when collapsed with in-progress tasks', t => {
+test('StatusBar shows Tasks (~2/5 Ctrl+T) when collapsed with in-progress tasks', t => {
 	const output = renderWithWidth(
-		<DevelopmentModeIndicator
+		<StatusBar
 			developmentMode="normal"
 			colors={mockColors}
 			contextPercentUsed={null}
@@ -478,9 +478,9 @@ test('DevelopmentModeIndicator shows Tasks (~2/5 Ctrl+T) when collapsed with in-
 	t.regex(output, /Tasks \(~2\/5 Ctrl\+T\)/);
 });
 
-test('DevelopmentModeIndicator shows Tasks (2/5 Ctrl+T) when collapsed with no in-progress tasks', t => {
+test('StatusBar shows Tasks (2/5 Ctrl+T) when collapsed with no in-progress tasks', t => {
 	const output = renderWithWidth(
-		<DevelopmentModeIndicator
+		<StatusBar
 			developmentMode="normal"
 			colors={mockColors}
 			contextPercentUsed={null}
@@ -496,9 +496,9 @@ test('DevelopmentModeIndicator shows Tasks (2/5 Ctrl+T) when collapsed with no i
 	t.regex(output, /Tasks \(2\/5 Ctrl\+T\)/);
 });
 
-test('DevelopmentModeIndicator shows Tasks (~2/5* Ctrl+T) when collapsed with in-progress and unread updates', t => {
+test('StatusBar shows Tasks (~2/5* Ctrl+T) when collapsed with in-progress and unread updates', t => {
 	const output = renderWithWidth(
-		<DevelopmentModeIndicator
+		<StatusBar
 			developmentMode="normal"
 			colors={mockColors}
 			contextPercentUsed={null}
@@ -514,9 +514,9 @@ test('DevelopmentModeIndicator shows Tasks (~2/5* Ctrl+T) when collapsed with in
 	t.regex(output, /Tasks \(~2\/5\* Ctrl\+T\)/);
 });
 
-test('DevelopmentModeIndicator shows Tasks (hide Ctrl+T) when expanded on a wide terminal', t => {
+test('StatusBar shows Tasks (hide Ctrl+T) when expanded on a wide terminal', t => {
 	const output = renderWithWidth(
-		<DevelopmentModeIndicator
+		<StatusBar
 			developmentMode="normal"
 			colors={mockColors}
 			contextPercentUsed={null}
@@ -532,9 +532,9 @@ test('DevelopmentModeIndicator shows Tasks (hide Ctrl+T) when expanded on a wide
 	t.regex(output, /Tasks \(hide Ctrl\+T\)/);
 });
 
-test('DevelopmentModeIndicator does not show task badge when totalCount is 0 or taskInfo is null', t => {
+test('StatusBar does not show task badge when totalCount is 0 or taskInfo is null', t => {
 	const zero = renderWithWidth(
-		<DevelopmentModeIndicator
+		<StatusBar
 			developmentMode="normal"
 			colors={mockColors}
 			contextPercentUsed={null}
@@ -550,7 +550,7 @@ test('DevelopmentModeIndicator does not show task badge when totalCount is 0 or 
 	t.notRegex(zero, /Tasks/);
 
 	const missing = renderWithWidth(
-		<DevelopmentModeIndicator
+		<StatusBar
 			developmentMode="normal"
 			colors={mockColors}
 			contextPercentUsed={null}
@@ -566,7 +566,7 @@ test('DevelopmentModeIndicator does not show task badge when totalCount is 0 or 
 
 test('expanded task badge is dropped entirely when the row is under width pressure', t => {
 	const output = renderWithWidth(
-		<DevelopmentModeIndicator
+		<StatusBar
 			developmentMode="normal"
 			colors={mockColors}
 			contextPercentUsed={42}
@@ -589,7 +589,7 @@ test('expanded task badge is dropped entirely when the row is under width pressu
 
 test('collapsed task badge keeps its progress readout and drops only the key hint under width pressure', t => {
 	const output = renderWithWidth(
-		<DevelopmentModeIndicator
+		<StatusBar
 			developmentMode="normal"
 			colors={mockColors}
 			contextPercentUsed={42}
@@ -612,7 +612,7 @@ test('collapsed task badge keeps its progress readout and drops only the key hin
 
 test('collapsed task badge keeps the key hint when there is room for it', t => {
 	const output = renderWithWidth(
-		<DevelopmentModeIndicator
+		<StatusBar
 			developmentMode="normal"
 			colors={mockColors}
 			contextPercentUsed={null}
@@ -633,9 +633,9 @@ test('collapsed task badge keeps the key hint when there is room for it', t => {
 // Auto-save indicator tests (Issue #932)
 // ============================================================================
 
-test('DevelopmentModeIndicator renders saving indicator when isSaving is true', t => {
+test('StatusBar renders saving indicator when isSaving is true', t => {
 	const output = renderWithWidth(
-		<DevelopmentModeIndicator
+		<StatusBar
 			developmentMode="normal"
 			colors={mockColors}
 			contextPercentUsed={null}
@@ -645,9 +645,9 @@ test('DevelopmentModeIndicator renders saving indicator when isSaving is true', 
 	t.regex(output, /saving/);
 });
 
-test('DevelopmentModeIndicator omits saving indicator when isSaving is false or undefined', t => {
+test('StatusBar omits saving indicator when isSaving is false or undefined', t => {
 	const falseOutput = renderWithWidth(
-		<DevelopmentModeIndicator
+		<StatusBar
 			developmentMode="normal"
 			colors={mockColors}
 			contextPercentUsed={null}
@@ -657,7 +657,7 @@ test('DevelopmentModeIndicator omits saving indicator when isSaving is false or 
 	t.notRegex(falseOutput, /saving/);
 
 	const undefOutput = renderWithWidth(
-		<DevelopmentModeIndicator
+		<StatusBar
 			developmentMode="normal"
 			colors={mockColors}
 			contextPercentUsed={null}
@@ -670,7 +670,7 @@ test('saving indicator drops under narrow width pressure without shrinking sessi
 	const fullSession = 'feature-authentication-token';
 	// Render at a tight width of 40 columns
 	const output = renderWithWidth(
-		<DevelopmentModeIndicator
+		<StatusBar
 			developmentMode="normal"
 			colors={mockColors}
 			contextPercentUsed={40}
@@ -689,7 +689,7 @@ test('saving indicator drops under narrow width pressure without shrinking sessi
 
 test('saving indicator renders when there is sufficient width', t => {
 	const output = renderWithWidth(
-		<DevelopmentModeIndicator
+		<StatusBar
 			developmentMode="normal"
 			colors={mockColors}
 			contextPercentUsed={40}
@@ -708,7 +708,7 @@ test('saving indicator renders when there is sufficient width', t => {
 test('shift hint drops before the session name is truncated', t => {
 	// 60 columns is too tight for the hint and the full session name together.
 	const output = renderWithWidth(
-		<DevelopmentModeIndicator
+		<StatusBar
 			developmentMode="normal"
 			colors={mockColors}
 			contextPercentUsed={null}
@@ -728,7 +728,7 @@ test('shift hint is shown by default on terminals with room to spare', t => {
 	// where there was room for it.
 	for (const columns of [70, 100, WIDE]) {
 		const output = renderWithWidth(
-			<DevelopmentModeIndicator
+			<StatusBar
 				developmentMode="normal"
 				colors={mockColors}
 				contextPercentUsed={null}
@@ -742,7 +742,7 @@ test('shift hint is shown by default on terminals with room to spare', t => {
 
 test('shift hint is not offered in headless mode', t => {
 	const output = renderWithWidth(
-		<DevelopmentModeIndicator
+		<StatusBar
 			developmentMode="headless"
 			colors={mockColors}
 			contextPercentUsed={null}
@@ -759,7 +759,7 @@ test('shift hint is not offered in headless mode', t => {
 
 test('voice segment is absent when voice mode is off', t => {
 	const {lastFrame} = render(
-		<DevelopmentModeIndicator
+		<StatusBar
 			developmentMode="normal"
 			colors={mockColors}
 			contextPercentUsed={1}
@@ -771,7 +771,7 @@ test('voice segment is absent when voice mode is off', t => {
 
 test('voice segment shows the idle label and its hint on the mode line', t => {
 	const {lastFrame} = render(
-		<DevelopmentModeIndicator
+		<StatusBar
 			developmentMode="normal"
 			colors={mockColors}
 			contextPercentUsed={1}
@@ -791,7 +791,7 @@ test('voice segment shows each active state without the idle hint', t => {
 	] as const;
 	for (const [state, expected] of cases) {
 		const {lastFrame} = render(
-			<DevelopmentModeIndicator
+			<StatusBar
 				developmentMode="normal"
 				colors={mockColors}
 				contextPercentUsed={1}
@@ -809,7 +809,7 @@ test('a tight row drops the voice hint first and keeps the voice label', t => {
 	// minus the indent: 68 columns fits the shift hint and the voice label
 	// (57) but not the voice hint on top (74).
 	const {lastFrame} = render(
-		<DevelopmentModeIndicator
+		<StatusBar
 			developmentMode="normal"
 			colors={mockColors}
 			contextPercentUsed={1}

@@ -3,8 +3,8 @@ import {existsSync, unlinkSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import React from 'react';
-import type {VoiceState} from '@/components/development-mode-indicator';
 import {ErrorMessage, InfoMessage} from '@/components/message-box';
+import type {VoiceState} from '@/components/status-bar';
 import {getVoicePreference} from '@/config/preferences';
 import {
 	synthesizeCloudSpeech,
