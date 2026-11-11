@@ -45,7 +45,7 @@
 		"test:types:vscode": "tsc --noEmit -p plugins/vscode/tsconfig.json",
 		"test:lint": "biome lint .",
 		"test:lint:fix": "biome check --write --unsafe .",
-		"test:knip": "knip",
+		"test:knip": "knip && knip --production --include files",
 		"test:audit": "pnpm audit --audit-level=high",
 		"audit": "pnpm audit",
 		"test:security": "semgrep scan --config auto --error",
