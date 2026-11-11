@@ -593,7 +593,7 @@ test.serial(
 
 		try {
 			const {agent} = createAgent();
-			const session = await agent.newSession({cwd: '/tmp'});
+			const session = await agent.newSession({cwd: testConfigDir});
 			const originalClient = agent['initContext'].client;
 
 			await t.throwsAsync(
@@ -685,14 +685,14 @@ const configOptionsOf = async (agent: AcpAgent, sessionId: string) =>
 test.serial('AcpAgent.setSessionConfigOption - switches the client model', async t => {
 	await withProviders(async () => {
 		const {agent} = createAgent();
-		const session = await agent.newSession({cwd: '/tmp'});
+		const session = await agent.newSession({cwd: testConfigDir});
 		const result = await agent.setSessionConfigOption({
 			sessionId: session.sessionId,
 			configId: 'model',
 			value: 'other-model',
 		});
 		t.is(optionValue(result.configOptions, 'model'), 'other-model');
-		const after = await agent.newSession({cwd: '/tmp'});
+		const after = await agent.newSession({cwd: testConfigDir});
 		t.is(optionValue(after.configOptions, 'model'), 'other-model');
 	});
 });
@@ -700,8 +700,8 @@ test.serial('AcpAgent.setSessionConfigOption - switches the client model', async
 test.serial('AcpAgent.setSessionConfigOption - one session changing model or provider leaves the other alone', async t => {
 	await withProviders(async () => {
 		const {agent} = createAgent();
-		const a = await agent.newSession({cwd: '/tmp'});
-		const b = await agent.newSession({cwd: '/tmp'});
+		const a = await agent.newSession({cwd: testConfigDir});
+		const b = await agent.newSession({cwd: testConfigDir});
 		const shared = agent['initContext'].client;
 		const sessionA = agent['sessions'].get(a.sessionId)!;
 		const sessionB = agent['sessions'].get(b.sessionId)!;
@@ -734,7 +734,7 @@ test.serial('AcpAgent.setSessionConfigOption - one session changing model or pro
 test.serial('AcpAgent.setSessionConfigOption - a model chosen during a turn applies from the next turn', async t => {
 	await withProviders(async () => {
 		const {agent} = createAgent();
-		const created = await agent.newSession({cwd: '/tmp'});
+		const created = await agent.newSession({cwd: testConfigDir});
 		const session = agent['sessions'].get(created.sessionId)!;
 		const turnClient = agent['initContext'].client;
 		const promptBefore = session.baseSystemMessage;
@@ -804,8 +804,8 @@ test.serial('AcpAgent.setSessionConfigOption - one session\'s tune does not chan
 	await withProviders(
 		async () => {
 			const {agent} = createAgent();
-			const a = await agent.newSession({cwd: '/tmp'});
-			const b = await agent.newSession({cwd: '/tmp'});
+			const a = await agent.newSession({cwd: testConfigDir});
+			const b = await agent.newSession({cwd: testConfigDir});
 			const sessionA = agent['sessions'].get(a.sessionId)!;
 			const sessionB = agent['sessions'].get(b.sessionId)!;
 			const compact = {
@@ -850,7 +850,7 @@ test.serial("AcpAgent - a provider whose tune picks XML tool mode keeps native t
 	await withProviders(
 		async () => {
 			const {agent} = createAgent();
-			const created = await agent.newSession({cwd: '/tmp'});
+			const created = await agent.newSession({cwd: testConfigDir});
 			const session = agent['sessions'].get(created.sessionId)!;
 			t.false(session.nativeToolsDisabled);
 
@@ -879,7 +879,7 @@ test.serial('AcpAgent.setSessionConfigOption - a provider that lists no models l
 		async () => {
 			const {agent} = createAgent();
 			await sessionManager.initialize();
-			const created = await agent.newSession({cwd: '/tmp'});
+			const created = await agent.newSession({cwd: testConfigDir});
 			const session = agent['sessions'].get(created.sessionId)!;
 			t.is(session.model, 'test-model');
 
@@ -923,8 +923,8 @@ test.serial('AcpAgent.prompt - each session saves its own provider and model', a
 	await withProviders(async () => {
 		const {agent} = createAgent();
 		await sessionManager.initialize();
-		const a = await agent.newSession({cwd: '/tmp'});
-		const b = await agent.newSession({cwd: '/tmp'});
+		const a = await agent.newSession({cwd: testConfigDir});
+		const b = await agent.newSession({cwd: testConfigDir});
 		await agent.setSessionConfigOption({
 			sessionId: a.sessionId,
 			configId: 'provider',
@@ -958,14 +958,14 @@ test.serial('AcpAgent - resume and load restore the model a session was saved wi
 			messageCount: 1,
 			provider: 'second-provider',
 			model: 'other-model',
-			workingDirectory: '/tmp',
+			workingDirectory: testConfigDir,
 			messages: [{role: 'user', content: 'hi'}],
 		});
 
 		const resumeAgent = createAgent().agent;
 		const resumed = await resumeAgent.resumeSession({
 			sessionId: saved.id,
-			cwd: '/tmp',
+			cwd: testConfigDir,
 		});
 		t.is(optionValue(resumed.configOptions, 'provider'), 'second-provider');
 		t.is(optionValue(resumed.configOptions, 'model'), 'other-model');
@@ -976,7 +976,7 @@ test.serial('AcpAgent - resume and load restore the model a session was saved wi
 		const loadAgent = createAgent().agent;
 		const loaded = await loadAgent.loadSession({
 			sessionId: saved.id,
-			cwd: '/tmp',
+			cwd: testConfigDir,
 			mcpServers: [],
 		});
 		t.is(optionValue(loaded.configOptions, 'provider'), 'second-provider');
@@ -1006,7 +1006,7 @@ test.serial('AcpAgent.resumeSession - falls back to the default when the saved m
 			const {agent} = createAgent();
 			const resumed = await agent.resumeSession({
 				sessionId: saved.id,
-				cwd: '/tmp',
+				cwd: testConfigDir,
 			});
 
 			t.is(optionValue(resumed.configOptions, 'provider'), 'test-provider');
@@ -2862,14 +2862,14 @@ test.serial('AcpAgent - new, load and resume report the same approval policy', a
 		getMCPToolInfo: () => ({isMCPTool: false}),
 	} as any;
 	const agent = new AcpAgent(context, createMockConn());
-	const created = await agent.newSession({cwd: '/tmp'});
+	const created = await agent.newSession({cwd: testConfigDir});
 
 	try {
 		await agent.prompt({
 			sessionId: created.sessionId,
 			prompt: [{type: 'text', text: 'Persist this session.'}],
 		});
-		const params = {sessionId: created.sessionId, cwd: '/tmp'};
+		const params = {sessionId: created.sessionId, cwd: testConfigDir};
 		const loaded = await agent.loadSession({...params, mcpServers: []});
 		const resumed = await agent.resumeSession(params);
 
@@ -3006,7 +3006,7 @@ const createMcpAgent = () => {
 	return {agent, toolManager, toolsOf};
 };
 
-const SESSION_CWD = '/tmp';
+const SESSION_CWD = testConfigDir;
 
 test.serial('AcpAgent.newSession - the client\'s MCP servers exist in that session only', async t => {
 	const {agent, toolManager, toolsOf} = createMcpAgent();
@@ -3318,7 +3318,7 @@ test.serial('AcpAgent - new, load and resume honour the client\'s disabled tools
 	config.disabledTools = ['fetch_url'];
 	const {agent, offeredWith} = createDisabledToolsAgent();
 	const meta = {[DISABLED_META]: ['browser']};
-	const created = await agent.newSession({cwd: '/tmp', _meta: meta});
+	const created = await agent.newSession({cwd: testConfigDir, _meta: meta});
 
 	try {
 		// The session's prompt was built with both lists, the user's kept.
@@ -3328,7 +3328,7 @@ test.serial('AcpAgent - new, load and resume honour the client\'s disabled tools
 			sessionId: created.sessionId,
 			prompt: [{type: 'text', text: 'Persist this session.'}],
 		});
-		const params = {sessionId: created.sessionId, cwd: '/tmp', _meta: meta};
+		const params = {sessionId: created.sessionId, cwd: testConfigDir, _meta: meta};
 		const loaded = await agent.loadSession({...params, mcpServers: []});
 		const resumed = await agent.resumeSession(params);
 
@@ -3673,5 +3673,40 @@ test.serial('AcpAgent - load and resume refuse a saved session whose folder is n
 		savePreferences(before);
 		rmSync(launch, {recursive: true, force: true});
 		rmSync(other, {recursive: true, force: true});
+	}
+});
+
+test.serial('AcpAgent - a session in another folder reads that project\'s config, not the launch directory\'s', async t => {
+	const config = getAppConfig();
+	const previous = config.alwaysAllow;
+	config.alwaysAllow = ['write_file'];
+	const projectDir = join(tmpdir(), `nanocoder-acp-project-${randomUUID()}`);
+	mkdirSync(projectDir, {recursive: true});
+	writeFileSync(
+		join(projectDir, 'agents.config.json'),
+		JSON.stringify({nanocoder: {alwaysAllow: ['read_file']}}),
+	);
+	const context = createMockInitContext();
+	context.toolManager = {
+		...context.toolManager,
+		getAvailableToolNames: () => ['read_file', 'write_file'],
+		getMCPToolInfo: () => ({isMCPTool: false}),
+	} as any;
+	const agent = new AcpAgent(context, createMockConn());
+	const inProject = await agent.newSession({cwd: projectDir});
+	const inLaunchDir = await agent.newSession({cwd: testConfigDir});
+
+	try {
+		const alwaysAllow = (response: {_meta?: Record<string, any> | null}) =>
+			response._meta?.['nanocoder/approval']?.alwaysAllow;
+		t.deepEqual(alwaysAllow(inProject), ['read_file']);
+		t.deepEqual(alwaysAllow(inLaunchDir), ['write_file']);
+		// Outside any session the launch directory's config is untouched.
+		t.deepEqual(getAppConfig().alwaysAllow, ['write_file']);
+	} finally {
+		config.alwaysAllow = previous;
+		await agent.deleteSession({sessionId: inProject.sessionId});
+		await agent.deleteSession({sessionId: inLaunchDir.sessionId});
+		rmSync(projectDir, {recursive: true, force: true});
 	}
 });

@@ -1,8 +1,26 @@
+import {existsSync, mkdtempSync, rmSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 import {renderWithTheme} from '@/test-utils/render-with-theme';
 import type {Message} from '@/types/core';
 import test from 'ava';
 import React from 'react';
 import {checkpointCommand} from './checkpoint';
+
+// The command's default CheckpointManager is rooted at process.cwd(). Run from
+// a throwaway workspace so the suite never writes checkpoints into, or appends
+// entries to the tracked .nanocoder/.gitignore of, the repo it runs in.
+const originalCwd = process.cwd();
+const workspace = mkdtempSync(join(tmpdir(), 'checkpoint-command-spec-'));
+
+test.before(() => {
+	process.chdir(workspace);
+});
+
+test.after.always(() => {
+	process.chdir(originalCwd);
+	rmSync(workspace, {recursive: true, force: true});
+});
 
 // Helper to create mock messages
 function createMockMessages(count: number): Message[] {
@@ -94,6 +112,11 @@ test('checkpointCommand list shows checkpoints', async t => {
 	const result = await checkpointCommand.handler(['list'], [], mockMetadata);
 	// Just verify it returns something (actual checkpoints depend on state)
 	t.truthy(result);
+});
+
+test('checkpointCommand keeps its runtime files in the working directory', async t => {
+	await checkpointCommand.handler(['list'], [], mockMetadata);
+	t.true(existsSync(join(workspace, '.nanocoder', '.gitignore')));
 });
 
 test('checkpointCommand list alias "ls" works', async t => {

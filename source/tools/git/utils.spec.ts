@@ -16,9 +16,9 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
 import {
-	createSessionCwdScope,
-	runInSessionCwdScope,
-} from '@/services/session-cwd';
+	createSessionContext,
+	runInSessionContext,
+} from '@/services/session-context';
 import {
 	parseGitStatus,
 	execGit,
@@ -338,7 +338,7 @@ test('execGit runs in the session project inside a session scope', async t => {
 	const dir = realpathSync(mkdtempSync(join(tmpdir(), 'nanocoder-git-scope-')));
 	try {
 		execSync('git init -q', {cwd: dir});
-		const topLevel = await runInSessionCwdScope(createSessionCwdScope(dir), () =>
+		const topLevel = await runInSessionContext(createSessionContext(dir), () =>
 			execGit(['rev-parse', '--show-toplevel']),
 		);
 		t.is(realpathSync(topLevel.trim()), dir);
@@ -363,15 +363,15 @@ test('execGitReadOnly does not run a core.fsmonitor hook from repo config', asyn
 		chmodSync(hook, 0o755);
 		execFileSync('git', ['-C', dir, 'config', 'core.fsmonitor', hook]);
 		writeFileSync(join(dir, 'file.txt'), 'x');
-		const scope = createSessionCwdScope(dir);
+		const scope = createSessionContext(dir);
 
-		await runInSessionCwdScope(scope, () =>
+		await runInSessionContext(scope, () =>
 			execGitReadOnly(['status', '--porcelain']),
 		);
 		t.false(existsSync(marker));
 
 		// Sanity: the same call without the override does run it.
-		await runInSessionCwdScope(scope, () =>
+		await runInSessionContext(scope, () =>
 			execGit(['status', '--porcelain']),
 		).catch(() => undefined);
 		t.true(existsSync(marker));
