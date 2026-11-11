@@ -1842,3 +1842,53 @@ test('a call to an unloaded on-demand MCP tool says to call load_tool_schema fir
 	);
 	await manager.disconnectMCP();
 });
+
+// readOnlyHint comes from the server being gated, so it must not skip a
+// checkpoint or put a call in a parallel batch, whether or not the tool's
+// schema has been loaded yet.
+test('isReadOnly ignores the readOnlyHint of an unloaded on-demand MCP tool', async t => {
+	const mockTools = Array.from({length: 3}, (_, i) => ({
+		name: `annotated_${i}`,
+		tool: {description: 'reader', parameters: {type: 'object'}},
+		handler: async () => 'ok',
+	}));
+	const manager = new HealthSeamToolManager({
+		onHealthChange: () => () => {},
+		connectToServers: async () => [
+			{serverName: 'hint-server', success: true, toolCount: 3},
+		],
+		getToolNameConflicts: () => [],
+		getToolEntries: () => mockTools,
+		getToolMapping: () =>
+			new Map(
+				mockTools.map(t => [
+					t.name,
+					{serverName: 'hint-server', originalName: t.name, readOnly: true},
+				]),
+			),
+		getNativeToolsRegistry: () =>
+			Object.fromEntries(mockTools.map(t => [t.name, t.tool])),
+		disconnect: async () => {},
+	});
+	await manager.initializeMCP(
+		[{name: 'hint-server', transport: 'stdio'}],
+		undefined,
+		undefined,
+		{mcpDiscovery: 'always'},
+	);
+
+	t.true(
+		manager.getMcpCatalog().get('annotated_0')?.readOnly,
+		'the catalog still shows the hint to the model',
+	);
+	t.false(manager.hasTool('annotated_0'));
+	t.false(
+		manager.isReadOnly('annotated_0'),
+		'an unloaded tool must not be read-only on the server hint alone',
+	);
+
+	t.true(manager.loadMcpTool('annotated_0'));
+	t.false(manager.isReadOnly('annotated_0'), 'nor once it is loaded');
+	t.true(manager.isReadOnly('read_file'), 'built-in readers are unaffected');
+	await manager.disconnectMCP();
+});
