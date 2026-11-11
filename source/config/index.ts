@@ -19,6 +19,7 @@ import {
 } from '@/config/session-config';
 import {defaultTheme, getThemeColors} from '@/config/themes';
 import {
+	DEFAULT_SINGLE_LINE_PASTE_THRESHOLD,
 	MAX_EMPTY_TURNS,
 	MAX_MALFORMED_RETRIES,
 	MAX_REPEATED_TOOL_CALLS,
@@ -49,7 +50,6 @@ import type {
 } from '@/types/index';
 import {clampThreshold} from '@/utils/message-compression';
 import {logError, logWarning} from '@/utils/message-queue';
-import {DEFAULT_SINGLE_LINE_PASTE_THRESHOLD} from '@/utils/paste-utils';
 import {isTrustLevel} from '@/verify/trust';
 
 export {confDirMap, getClosestConfigFile} from '@/config/paths';
@@ -341,11 +341,8 @@ function loadRetryLimitsConfig(): RetryLimitsConfig {
 }
 
 /**
- * Built-in paste defaults. A function rather than a const because
- * `@/utils/paste-utils` imports this module back, and reading
- * DEFAULT_SINGLE_LINE_PASTE_THRESHOLD at module-evaluation time hits the
- * temporal dead zone on whichever side of the cycle loads second. Deferring
- * the read to call time is what the loader below always did.
+ * Built-in paste defaults. Returns a fresh object so callers can't mutate
+ * the defaults shared with the loader.
  * @public
  */
 export function getDefaultPasteConfig(): PasteConfig {
