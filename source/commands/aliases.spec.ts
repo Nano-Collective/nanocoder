@@ -31,6 +31,7 @@ test('every old command name is still an alias', t => {
 		'schedule',
 		'sessions',
 		'history',
+		'custom-commands',
 	]) {
 		t.truthy(findCommandAlias(name), `/${name} no longer resolves`);
 	}
