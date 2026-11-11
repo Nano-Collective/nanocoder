@@ -27,6 +27,7 @@ import {
 	STDERR_TRUNCATION_NOTICE,
 	STDOUT_TRUNCATION_NOTICE,
 } from '@/utils/stream-collector';
+import {bashChildEnv} from './bash-env.js';
 import {
 	acquireProtectedMounts,
 	planBashSpawn,
@@ -220,7 +221,7 @@ export class BashExecutor extends EventEmitter {
 					// Capture path is $NC_CWD_FILE so positional args stay empty.
 					`${command}\n\n__nc_ec=$?\ncommand pwd -P > "$NC_CWD_FILE" 2>/dev/null\nexit $__nc_ec`;
 		const childEnv = {
-			...process.env,
+			...bashChildEnv(process.env, getAppConfig(), sandbox),
 			...(cwdCaptureFile ? {NC_CWD_FILE: cwdCaptureFile} : {}),
 			...(jailTmp ? {TMPDIR: jailTmp, TMP: jailTmp, TEMP: jailTmp} : {}),
 		};
@@ -274,6 +275,7 @@ export class BashExecutor extends EventEmitter {
 			const shell = process.env.ComSpec || 'cmd.exe';
 			proc = spawn(shell, shellArgs(shell, command), {
 				cwd,
+				env: childEnv,
 				windowsVerbatimArguments: true,
 			});
 		} else {
