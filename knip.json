@@ -10,8 +10,7 @@
 			],
 			"project": [
 				"**/*.{js,mjs,cjs,jsx,ts,tsx,mts,cts}!",
-				"!source/test-utils/**!",
-				"!source/vscode/chat-panel-harness.ts!"
+				"!source/test-utils/**!"
 			]
 		}
 	},
