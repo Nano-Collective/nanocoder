@@ -206,26 +206,20 @@ async function runPlainConversationBody(
 	// optional — providers that report nothing leave all three undefined, and
 	// OpenAI-compatible local servers commonly report input/output without a
 	// total. Only count a turn as reporting usage when at least one field is a
-	// real number, so the block stays absent (rather than an all-zero block
+	// finite number, so the block stays absent (rather than an all-zero block
 	// indistinguishable from a genuine zero) for providers with no telemetry.
 	const recordUsage = async (result: LLMChatResponse) => {
 		const turnUsage = result?.usage;
-		const inputTokens =
-			typeof turnUsage?.inputTokens === 'number' ? turnUsage.inputTokens : null;
-		const outputTokens =
-			typeof turnUsage?.outputTokens === 'number'
-				? turnUsage.outputTokens
-				: null;
-		const totalTokens =
-			typeof turnUsage?.totalTokens === 'number' ? turnUsage.totalTokens : null;
-		const cacheReadTokens =
-			typeof turnUsage?.cacheReadTokens === 'number'
-				? turnUsage.cacheReadTokens
-				: null;
-		const cacheWriteTokens =
-			typeof turnUsage?.cacheWriteTokens === 'number'
-				? turnUsage.cacheWriteTokens
-				: null;
+		// NaN or Infinity is a broken report, not a count: treated as missing,
+		// as the TUI, ACP and subagent loops do, so one bad field cannot turn
+		// the whole run's totals into NaN.
+		const finite = (value: number | undefined): number | null =>
+			Number.isFinite(value) ? (value as number) : null;
+		const inputTokens = finite(turnUsage?.inputTokens);
+		const outputTokens = finite(turnUsage?.outputTokens);
+		const totalTokens = finite(turnUsage?.totalTokens);
+		const cacheReadTokens = finite(turnUsage?.cacheReadTokens);
+		const cacheWriteTokens = finite(turnUsage?.cacheWriteTokens);
 
 		if (
 			inputTokens === null &&
