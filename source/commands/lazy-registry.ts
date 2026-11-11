@@ -2,14 +2,16 @@
  * Lazy registry of all built-in slash commands.
  *
  * Keeping this file flat and free of static command imports is how nanocoder
- * avoids loading all 31 command modules at startup. Each entry carries the
+ * avoids loading every command module at startup. Each entry carries the
  * command's `name` and `description` inline (duplicated from the command
  * module so the picker can render without triggering the load), plus a
  * `load()` thunk that performs the dynamic import on first invocation.
  *
  * **When adding a new command:** add an entry here AND create the command
- * file under `source/commands/`. Keep the description in sync with the
- * module's own `description` field — they should match.
+ * file under `source/commands/`, then file it under a category in
+ * `help-utils.ts`. The name, description, `progressLabel` and
+ * `echoInvocation` must match the module's own; `lazy-registry.spec.ts`
+ * loads every module and fails if they drift.
  */
 import type {LazyCommand} from '@/types/commands';
 
@@ -246,7 +248,7 @@ export const lazyCommands: LazyCommand[] = [
 	{
 		name: 'agents',
 		description:
-			'List subagents. /agents show <name> for details, /agents copy <name> to customize',
+			'List subagents. /agents show <name> for details, /agents copy <name> to customize, /agents create <name> to scaffold one',
 		load: () => import('@/commands/agents').then(m => m.agentsCommand),
 	},
 	{
@@ -276,12 +278,13 @@ export const lazyCommands: LazyCommand[] = [
 	{
 		name: 'privacy',
 		description:
-			'Inspect what the prompt scrubber will remove from your prompts',
+			'Inspect what the prompt scrubber would remove from some text (/privacy inspect <text>)',
 		load: () => import('@/commands/privacy').then(m => m.privacyCommand),
 	},
 	{
 		name: 'voice',
-		description: 'Toggle voice mode and configure voice settings',
+		description:
+			'Turn voice mode on or off and configure it (/voice [on|off|status|hands-free|ptt|stt <local|cloud>|tts <local|cloud>])',
 		load: () => import('@/commands/voice').then(m => m.voiceCommand),
 	},
 	{

@@ -14,6 +14,27 @@ import {
 	groupHelpCommands,
 } from './help-utils';
 
+/** `[what you want, what to type]` rows for the "Common Tasks" blurb. */
+const COMMON_TASKS: readonly (readonly [string, string])[] = [
+	['Ask about your codebase', 'How does the session autosave work?'],
+	['Change code', 'Add input validation to the signup handler'],
+	['Point at a file', 'Explain @src/utils/parse.ts (@ completes paths)'],
+	[
+		'Run a shell command',
+		'!npm test (the output is added to the conversation)',
+	],
+	['Use a slash command', '/commit, /review, /resume (type / to browse)'],
+	[
+		'Add your own commands',
+		'Markdown files in .nanocoder/commands/ (see /commands)',
+	],
+	['Keyboard shortcuts', 'press ? in an empty prompt'],
+	[
+		'Try a setting for one command',
+		'/usage ?context-max=200k (/compact and /usage accept ?key=value)',
+	],
+];
+
 let cachedVersion: string | null = null;
 
 function getCachedPackageVersion(): string {
@@ -67,23 +88,12 @@ function Help({
 					Common Tasks:
 				</Text>
 			</Box>
-			<Text color={colors.text}>
-				{' '}
-				• Ask questions about your codebase {'>'} How does foo.py work?
-			</Text>
-			<Text color={colors.text}> • Edit files {'>'} Update bar.ts to...</Text>
-			<Text color={colors.text}> • Fix errors {'>'} cargo build</Text>
-			<Text color={colors.text}> • Run commands {'>'} /help</Text>
-			<Text color={colors.text}> • Resume sessions {'>'} /resume</Text>
-			<Text color={colors.text}>
-				{' '}
-				• Keyboard shortcuts {'>'} press ? in an empty prompt
-			</Text>
-			<Text color={colors.text}>
-				{' '}
-				• Try a setting for one command {'>'} /usage ?context-max=200k (/compact
-				and /usage accept ?key=value)
-			</Text>
+			{COMMON_TASKS.map(([task, example]) => (
+				<Text key={task} color={colors.text}>
+					{' '}
+					• {task} {'>'} {example}
+				</Text>
+			))}
 
 			{selectedCommand ? (
 				<CommandDetails command={selectedCommand} />

@@ -626,6 +626,7 @@ export function createReviewCommand(
 		description:
 			'Review a branch or PR diff for bugs, security issues, and style violations',
 		progressLabel: 'Reviewing code',
+		echoInvocation: true,
 		handler: async (args, _messages, metadata) => {
 			const client = metadata.client;
 			if (!client) {

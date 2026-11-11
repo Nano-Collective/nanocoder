@@ -159,7 +159,7 @@ function AgentDetail({agent}: AgentDetailProps) {
 export const agentsCommand: Command = {
 	name: 'agents',
 	description:
-		'List subagents. /agents show <name> for details, /agents copy <name> to customize',
+		'List subagents. /agents show <name> for details, /agents copy <name> to customize, /agents create <name> to scaffold one',
 	handler: async (args: string[]) => {
 		const loader = getSubagentLoader();
 
