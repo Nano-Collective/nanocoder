@@ -1,5 +1,5 @@
 import '../test-utils/isolated-config-dir';
-import {mkdtempSync, rmSync, writeFileSync} from 'node:fs';
+import {mkdtempSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
@@ -1492,7 +1492,7 @@ test('UserInput renders the task badge when taskInfo is provided', t => {
 
 	const output = lastFrame();
 	t.truthy(output);
-	t.regex(output!, /Tasks \(~2\/4 Ctrl-t\)/);
+	t.regex(output!, /Tasks \(~2\/4 Ctrl\+T\)/);
 	unmount();
 });
 
@@ -1515,7 +1515,7 @@ test('UserInput renders the task badge when disabled and taskInfo is provided', 
 
 	const output = lastFrame();
 	t.truthy(output);
-	t.regex(output!, /Tasks \(~1\/3\* Ctrl-t\)/);
+	t.regex(output!, /Tasks \(~1\/3\* Ctrl\+T\)/);
 	unmount();
 });
 
@@ -2817,4 +2817,61 @@ test('UserInput leaves Ctrl+G alone so voice push-to-talk keeps working', async 
 
 	t.is(toggles, 0);
 	unmount();
+});
+
+// --- The `?` legend covers every bound key ---
+
+// Ctrl+<letter> bindings handled by the composer and the app around it. A new
+// `key.ctrl && input === 'x'` check in one of these files without a legend
+// row fails here.
+const LEGEND_SOURCES = [
+	'./user-input.tsx',
+	'../app/App.tsx',
+	'../app/sections/interactive-app.tsx',
+];
+
+test('every Ctrl binding in the composer and app is in the ? legend', t => {
+	const legend = KEYBOARD_SHORTCUTS.map(([keybind]) => keybind).join(' ');
+	const bound = new Set<string>();
+	for (const file of LEGEND_SOURCES) {
+		const code = readFileSync(new URL(file, import.meta.url), 'utf8');
+		for (const [, letter] of code.matchAll(
+			/key\.ctrl && (?:inputChar|input) === '([a-z])'/g,
+		)) {
+			bound.add(letter!);
+		}
+	}
+
+	t.true(bound.size >= 10, `only found ${bound.size} bindings`);
+	for (const letter of bound) {
+		t.true(
+			legend.includes(`Ctrl+${letter.toUpperCase()}`),
+			`Ctrl+${letter.toUpperCase()} is bound but missing from KEYBOARD_SHORTCUTS`,
+		);
+	}
+});
+
+test('the ? legend lists the non-Ctrl bindings users asked about', t => {
+	const legend = KEYBOARD_SHORTCUTS.map(row => row.join(' ')).join('\n');
+	t.regex(legend, /PgUp \/ PgDn/);
+	t.regex(legend, /wheel/);
+	t.regex(legend, /queued message/);
+	t.regex(legend, /Delete/);
+	t.regex(legend, /Esc.*back to your prompt/);
+});
+
+test('the ? legend writes keys as Ctrl+X, never Ctrl-x', t => {
+	for (const [keybind] of KEYBOARD_SHORTCUTS) {
+		t.notRegex(keybind, /Ctrl-/);
+	}
+	const indicator = readFileSync(
+		new URL('./development-mode-indicator.tsx', import.meta.url),
+		'utf8',
+	);
+	t.notRegex(indicator, /Ctrl-[a-z]/);
+});
+
+test('every ? legend row has a unique key', t => {
+	const keys = KEYBOARD_SHORTCUTS.map(([keybind]) => keybind);
+	t.is(new Set(keys).size, keys.length);
 });

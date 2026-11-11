@@ -460,7 +460,7 @@ test('DevelopmentModeIndicator fits 80 columns inside an indented wrapper', t =>
 	}
 });
 
-test('DevelopmentModeIndicator shows Tasks (~2/5 Ctrl-t) when collapsed with in-progress tasks', t => {
+test('DevelopmentModeIndicator shows Tasks (~2/5 Ctrl+T) when collapsed with in-progress tasks', t => {
 	const output = renderWithWidth(
 		<DevelopmentModeIndicator
 			developmentMode="normal"
@@ -475,10 +475,10 @@ test('DevelopmentModeIndicator shows Tasks (~2/5 Ctrl-t) when collapsed with in-
 			}}
 		/>,
 	);
-	t.regex(output, /Tasks \(~2\/5 Ctrl-t\)/);
+	t.regex(output, /Tasks \(~2\/5 Ctrl\+T\)/);
 });
 
-test('DevelopmentModeIndicator shows Tasks (2/5 Ctrl-t) when collapsed with no in-progress tasks', t => {
+test('DevelopmentModeIndicator shows Tasks (2/5 Ctrl+T) when collapsed with no in-progress tasks', t => {
 	const output = renderWithWidth(
 		<DevelopmentModeIndicator
 			developmentMode="normal"
@@ -493,10 +493,10 @@ test('DevelopmentModeIndicator shows Tasks (2/5 Ctrl-t) when collapsed with no i
 			}}
 		/>,
 	);
-	t.regex(output, /Tasks \(2\/5 Ctrl-t\)/);
+	t.regex(output, /Tasks \(2\/5 Ctrl\+T\)/);
 });
 
-test('DevelopmentModeIndicator shows Tasks (~2/5* Ctrl-t) when collapsed with in-progress and unread updates', t => {
+test('DevelopmentModeIndicator shows Tasks (~2/5* Ctrl+T) when collapsed with in-progress and unread updates', t => {
 	const output = renderWithWidth(
 		<DevelopmentModeIndicator
 			developmentMode="normal"
@@ -511,10 +511,10 @@ test('DevelopmentModeIndicator shows Tasks (~2/5* Ctrl-t) when collapsed with in
 			}}
 		/>,
 	);
-	t.regex(output, /Tasks \(~2\/5\* Ctrl-t\)/);
+	t.regex(output, /Tasks \(~2\/5\* Ctrl\+T\)/);
 });
 
-test('DevelopmentModeIndicator shows Tasks (hide Ctrl-t) when expanded on a wide terminal', t => {
+test('DevelopmentModeIndicator shows Tasks (hide Ctrl+T) when expanded on a wide terminal', t => {
 	const output = renderWithWidth(
 		<DevelopmentModeIndicator
 			developmentMode="normal"
@@ -529,7 +529,7 @@ test('DevelopmentModeIndicator shows Tasks (hide Ctrl-t) when expanded on a wide
 			}}
 		/>,
 	);
-	t.regex(output, /Tasks \(hide Ctrl-t\)/);
+	t.regex(output, /Tasks \(hide Ctrl\+T\)/);
 });
 
 test('DevelopmentModeIndicator does not show task badge when totalCount is 0 or taskInfo is null', t => {
@@ -606,7 +606,7 @@ test('collapsed task badge keeps its progress readout and drops only the key hin
 	);
 	// Progress survives - it is the only trace of the collapsed list on screen.
 	t.regex(output, /Tasks \(~2\/5\*\)/);
-	t.notRegex(output, /Ctrl-t/);
+	t.notRegex(output, /Ctrl\+T/);
 	t.regex(output, /ctx: 42%/);
 });
 
@@ -626,7 +626,7 @@ test('collapsed task badge keeps the key hint when there is room for it', t => {
 		/>,
 		60,
 	);
-	t.regex(output, /Tasks \(2\/5 Ctrl-t\)/);
+	t.regex(output, /Tasks \(2\/5 Ctrl\+T\)/);
 });
 
 // ============================================================================
