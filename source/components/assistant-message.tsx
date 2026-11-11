@@ -7,7 +7,7 @@ import {parseMarkdownParts} from '@/markdown-parser/index';
 import type {AssistantMessageProps} from '@/types/index';
 import {formatUsageIndicator} from '@/usage/format';
 import {wrapWithTrimmedContinuations} from '@/utils/text-wrapping';
-import {calculateTokens} from '@/utils/token-calculator';
+import {estimateTokens} from '@/utils/token-calculator';
 
 export function AssistantMessageBox({
 	text,
@@ -48,7 +48,7 @@ export default memo(function AssistantMessage({
 	const {colors} = useTheme();
 	const boxWidth = useTerminalWidth();
 	const nonInteractive = useNonInteractiveRender();
-	const tokens = calculateTokens(message);
+	const tokens = estimateTokens(message);
 	// Prefer the provider-reported usage (real token counts + cost); fall
 	// back to the client-side estimate of the message text when the
 	// provider reported nothing.

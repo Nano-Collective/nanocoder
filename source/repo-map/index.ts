@@ -1,7 +1,7 @@
 import {readFile, stat} from 'node:fs/promises';
 import {extname} from 'node:path';
 import {walkProjectEntries} from '@/utils/file-search';
-import {calculateTokens} from '@/utils/token-calculator';
+import {estimateTokens} from '@/utils/token-calculator';
 
 export interface RepoMapFile {
 	path: string;
@@ -473,7 +473,7 @@ export async function buildRepoMap(
 				return diff === 0 ? a.localeCompare(b) : diff;
 			})
 			.slice(0, maxSymbolsPerFile);
-		const cost = calculateTokens(`${file.path}\n${symbols.join(' ')}\n`);
+		const cost = estimateTokens(`${file.path}\n${symbols.join(' ')}\n`);
 		if (usedTokens + cost > maxTokens) {
 			budgetTruncated = true;
 			break;

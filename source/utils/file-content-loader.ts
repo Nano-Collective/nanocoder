@@ -2,6 +2,7 @@ import {readFile, stat} from 'node:fs/promises';
 import {extname, resolve} from 'node:path';
 import {BINARY_FILE_EXTENSIONS, MAX_FILE_TAG_SIZE_BYTES} from '@/constants.js';
 import {formatError} from '@/utils/error-formatter';
+import {estimateTokens} from '@/utils/token-calculator';
 
 interface FileContentResult {
 	success: boolean;
@@ -69,7 +70,7 @@ export async function loadFileContent(
 					size: fileStats.size,
 					lineCount: 0,
 					lineRange,
-					tokens: Math.ceil(metadataContent.length / 4),
+					tokens: estimateTokens(metadataContent),
 				},
 			};
 		}
@@ -95,7 +96,7 @@ export async function loadFileContent(
 					size: fileStats.size,
 					lineCount: 0,
 					lineRange,
-					tokens: Math.ceil(metadataContent.length / 4),
+					tokens: estimateTokens(metadataContent),
 				},
 			};
 		}
@@ -151,7 +152,7 @@ export async function loadFileContent(
 
 		// Calculate metadata
 		const size = content.length;
-		const tokens = Math.ceil(formattedContent.length / 4); // Rough token estimate
+		const tokens = estimateTokens(formattedContent);
 
 		return {
 			success: true,

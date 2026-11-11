@@ -59,6 +59,7 @@ import {
 	clearReadContentScope,
 	runWithReadContentScope,
 } from '@/utils/read-tracker';
+import {estimateTokens} from '@/utils/token-calculator';
 import {
 	getSubagentToolBridge,
 	signalToolApproval,
@@ -732,9 +733,6 @@ export class SubagentExecutor {
 		if (agentId) {
 			initSubagentSession(agentId, config.name, messages);
 		}
-
-		// Rough token estimate: ~4 chars per token
-		const estimateTokens = (text: string) => Math.ceil(text.length / 4);
 
 		const emitProgress = (
 			status: 'running' | 'tool_call' | 'complete' | 'error',

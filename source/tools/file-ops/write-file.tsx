@@ -32,7 +32,7 @@ import {
 	hasSeenFile,
 	markFileSeen,
 } from '@/utils/read-tracker';
-import {calculateTokens} from '@/utils/token-calculator';
+import {estimateTokens} from '@/utils/token-calculator';
 import {createFileToolApproval} from '@/utils/tool-approval';
 import {ensureString} from '@/utils/type-helpers';
 import {
@@ -126,7 +126,7 @@ const executeWriteFile = async (args: {
 	const actualContent = await readFile(absPath, 'utf-8');
 	const lineCount = actualContent.split('\n').length;
 	const charCount = actualContent.length;
-	const estimatedTokens = calculateTokens(actualContent);
+	const estimatedTokens = estimateTokens(actualContent);
 
 	const action = fileExists ? 'overwritten' : 'written';
 	return `File ${action} successfully (${lineCount} lines, ${charCount} characters, ~${estimatedTokens} tokens).${firewallWarning}`;
@@ -199,7 +199,7 @@ const WriteFileFormatter = React.memo(
 		const language = getLanguageFromExtension(ext);
 
 		// Estimate tokens (rough approximation: ~4 characters per token)
-		const estimatedTokens = calculateTokens(newContent);
+		const estimatedTokens = estimateTokens(newContent);
 
 		// Calculate available width for line content (terminal width - line number prefix - padding)
 		const terminalWidth = process.stdout.columns || DEFAULT_TERMINAL_COLUMNS;
