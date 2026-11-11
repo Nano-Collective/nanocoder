@@ -270,6 +270,8 @@ This is not a secrets boundary. Network is blocked, writes outside the project a
 
 Timeouts and cancel are unchanged. This does not sandbox custom tools or MCP.
 
+Commands also get a trimmed environment. With or without the sandbox, `execute_bash` and `!command` never see nanocoder's own credentials: any variable whose value is a configured provider `apiKey` or `nanocoderTools.webSearch.apiKey` (so the variable an `apiKey: "$VAR"` reference reads from), and `NANOCODER_PROVIDERS`. Keys shorter than 16 characters, such as `"ollama"`, are treated as placeholders and left alone. With the sandbox on, the well-known provider variables (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `OPENROUTER_API_KEY` and similar) are removed as well. Anything else, such as `GH_TOKEN` for `gh`, is passed through. If a project script needs the same key nanocoder uses, export it under another name in the command.
+
 ### Auto-commit
 
 Set `nanocoder.autoCommit` to `true` (boolean; any other value is treated as off, with a warning) to commit every successful agent file edit (`write_file`, `string_replace`, `diff_edit`) as it happens. Each edit becomes its own commit, so you can `git revert` a single agent mistake without losing the rest of the session. Default is off.
