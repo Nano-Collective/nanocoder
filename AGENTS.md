@@ -7,7 +7,7 @@ Instructions for AI coding agents working on **@nanocollective/nanocoder**. `CLA
 Nanocoder is a local-first CLI coding agent written in TypeScript. The terminal UI is React 19 rendered with Ink. It talks to many LLM providers (Ollama, OpenRouter, Anthropic, Gemini and any OpenAI-compatible API) through the Vercel AI SDK. It is not a web application.
 
 - **Package**: `@nanocollective/nanocoder`, binary `nanocoder` (`dist/cli.js`)
-- **Node**: 22 or newer (`engines` in `package.json`)
+- **Node**: 22.12 or newer (`engines` in `package.json`)
 - **Package manager**: pnpm, pinned by the `packageManager` field (use Corepack)
 
 ## Development Commands
