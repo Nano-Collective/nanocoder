@@ -1,5 +1,5 @@
 import test from 'ava';
-import {createPanel, type StubElement} from '@/vscode/chat-panel-harness';
+import {createPanel, type StubElement} from './chat-panel-harness';
 
 const titleOf = (summary: StubElement) =>
 	summary.children[0].children[0].textContent;

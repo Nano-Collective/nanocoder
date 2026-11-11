@@ -10,7 +10,7 @@ import {createPanel} from './chat-panel-harness';
 
 const PANEL_HTML = readFileSync(
 	fileURLToPath(
-		new URL('../../plugins/vscode/media/chat-panel.html', import.meta.url),
+		new URL('../media/chat-panel.html', import.meta.url),
 	),
 	'utf8',
 );

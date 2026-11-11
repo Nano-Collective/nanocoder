@@ -1,5 +1,5 @@
 import test from 'ava';
-import {createPanel} from '@/vscode/chat-panel-harness';
+import {createPanel} from './chat-panel-harness';
 
 function startTurn(panel: ReturnType<typeof createPanel>, id = 'msg-1') {
 	panel.post({type: 'promptStarted', id});

@@ -11,7 +11,7 @@ import {createContext, runInContext} from 'node:vm';
 
 const mediaUrl = (filename: string) =>
 	fileURLToPath(
-		new URL(`../../plugins/vscode/media/${filename}`, import.meta.url),
+		new URL(`../media/${filename}`, import.meta.url),
 	);
 
 // The panel reads its siblings off `globalThis` at load - the slash command
@@ -348,7 +348,9 @@ export function createPanel(options: {marked?: boolean} = {}) {
 	>();
 	const messageListeners: ((event: {data: unknown}) => void)[] = [];
 	// Everything the panel posts back to the extension host.
-	const sent: unknown[] = [];
+	// Messages are whatever shape the panel posts, so specs read fields freely.
+	// biome-ignore lint/suspicious/noExplicitAny: open-ended posted messages
+	const sent: Record<string, any>[] = [];
 	// Everything a copy button has put on the clipboard, newest last.
 	const copied: string[] = [];
 	const sandbox: Record<string, unknown> = {
@@ -383,7 +385,7 @@ export function createPanel(options: {marked?: boolean} = {}) {
 			},
 		},
 		acquireVsCodeApi: () => ({
-			postMessage: (message: unknown) => {
+			postMessage: (message: Record<string, any>) => {
 				sent.push(message);
 			},
 			getState: () => undefined,
