@@ -80,7 +80,11 @@ import {resolveTune} from '@/config/tune';
 import {appendRelevantProjectContextWithCount} from '@/memory/project-context';
 import {withTrustedProjectPlugins} from '@/plugins/host';
 import {type HookContext, runLifecycleHooks} from '@/services/lifecycle-hooks';
-import {runInSessionCwdScope} from '@/services/session-cwd';
+import {
+	createSessionContext,
+	runInSessionContext,
+	type SessionContext,
+} from '@/services/session-context';
 import {cancelSubagentRun} from '@/services/subagent-events';
 import {TimelineManager} from '@/services/timeline-manager';
 import {maybeGenerateTitle} from '@/session/maybe-generate-title';
@@ -169,8 +173,21 @@ export class AcpAgent implements Agent {
 		};
 	}
 
+	// Every request that acts on one session runs inside that session's context,
+	// so the config it reads (getAppConfig and the loaders behind it) is its own
+	// folder's, not the folder the agent was started in.
 	async newSession(params: NewSessionRequest): Promise<NewSessionResponse> {
 		this.assertDirectoryTrusted(params.cwd);
+		const context = createSessionContext(params.cwd);
+		return runInSessionContext(context, () =>
+			this.openNewSession(params, context),
+		);
+	}
+
+	private async openNewSession(
+		params: NewSessionRequest,
+		context: SessionContext,
+	): Promise<NewSessionResponse> {
 		const sessionId = crypto.randomUUID();
 		logger.info(`ACP newSession: ${sessionId} cwd=${params.cwd}`);
 
@@ -178,6 +195,7 @@ export class AcpAgent implements Agent {
 			sessionId,
 			params.cwd,
 			parseDisabledTools(params._meta),
+			context,
 		);
 		await this.applyMcpServers(session, params.mcpServers);
 
@@ -212,6 +230,17 @@ export class AcpAgent implements Agent {
 
 	async loadSession(params: LoadSessionRequest): Promise<LoadSessionResponse> {
 		const existing = this.sessions.get(params.sessionId);
+		const context = existing?.context ?? createSessionContext(params.cwd);
+		return runInSessionContext(context, () =>
+			this.openLoadedSession(params, existing, context),
+		);
+	}
+
+	private async openLoadedSession(
+		params: LoadSessionRequest,
+		existing: AcpSession | undefined,
+		context: SessionContext,
+	): Promise<LoadSessionResponse> {
 		let session = existing;
 		let modelFallback: Awaited<ReturnType<typeof this.restoreSavedModel>>;
 
@@ -228,6 +257,7 @@ export class AcpAgent implements Agent {
 				params.sessionId,
 				params.cwd,
 				parseDisabledTools(params._meta),
+				context,
 			);
 			clearAcpReadStubs(params.sessionId);
 			session.messages = persisted.messages;
@@ -263,7 +293,15 @@ export class AcpAgent implements Agent {
 		if (!session) {
 			throw new Error(`Session not found: ${params.sessionId}`);
 		}
+		return runInSessionContext(session.context, () =>
+			this.runPrompt(params, session),
+		);
+	}
 
+	private async runPrompt(
+		params: PromptRequest,
+		session: AcpSession,
+	): Promise<PromptResponse> {
 		// Wait for any in-flight turn. Rejecting overlap made the VS Code
 		// webview toast `RequestError: Internal error` whenever a follow-up
 		// was submitted mid-turn. Acquire before the first await so two
@@ -659,7 +697,7 @@ export class AcpAgent implements Agent {
 		event: 'session-start' | 'user-prompt-submit' | 'session-end',
 		context: HookContext = {},
 	) {
-		return runInSessionCwdScope(session.cwdScope, () =>
+		return runInSessionContext(session.context, () =>
 			withTrustedProjectPlugins(session.cwd, () =>
 				runLifecycleHooks(event, context),
 			),
@@ -673,7 +711,15 @@ export class AcpAgent implements Agent {
 		if (!session) {
 			throw new Error(`Session not found: ${params.sessionId}`);
 		}
+		return runInSessionContext(session.context, () =>
+			this.applySessionMode(params, session),
+		);
+	}
 
+	private async applySessionMode(
+		params: SetSessionModeRequest,
+		session: AcpSession,
+	): Promise<SetSessionModeResponse> {
 		session.developmentMode = acpModeToDevelopmentMode(params.modeId);
 		logger.info(
 			`ACP setSessionMode: session=${params.sessionId} mode=${params.modeId}`,
@@ -700,7 +746,15 @@ export class AcpAgent implements Agent {
 		if (!session) {
 			throw new Error(`Session not found: ${params.sessionId}`);
 		}
+		return runInSessionContext(session.context, () =>
+			this.applySessionConfigOption(params, session),
+		);
+	}
 
+	private async applySessionConfigOption(
+		params: SetSessionConfigOptionRequest,
+		session: AcpSession,
+	): Promise<SetSessionConfigOptionResponse> {
 		if (params.configId === 'provider') {
 			const providerId = params.value;
 			if (typeof providerId !== 'string') {
@@ -905,7 +959,16 @@ export class AcpAgent implements Agent {
 		}
 		// Refused before anything is retired: a live copy keeps running.
 		this.assertDirectoryTrusted(saved.workingDirectory);
+		const context = createSessionContext(saved.workingDirectory);
+		return runInSessionContext(context, () =>
+			this.reopenSession(params, context),
+		);
+	}
 
+	private async reopenSession(
+		params: ResumeSessionRequest,
+		context: SessionContext,
+	): Promise<ResumeSessionResponse> {
 		// Retire any live copy first, so one id never has two sessions running,
 		// and read the history after its turn has saved its last messages.
 		const evicted = await this.evictSession(params.sessionId, async session => {
@@ -922,6 +985,7 @@ export class AcpAgent implements Agent {
 			params.sessionId,
 			persisted.workingDirectory,
 			parseDisabledTools(params._meta),
+			context,
 		);
 		await this.applyMcpServers(session, params.mcpServers);
 		session.messages = persisted.messages;
@@ -1265,7 +1329,8 @@ export class AcpAgent implements Agent {
 	private registerSession(
 		sessionId: string,
 		cwd: string,
-		disabledTools: string[] = [],
+		disabledTools: string[],
+		context: SessionContext,
 	): AcpSession {
 		const session = new AcpSession({
 			sessionId,
@@ -1273,6 +1338,7 @@ export class AcpAgent implements Agent {
 			conn: this.conn,
 			clientCapabilities: this.clientCapabilities,
 			initialMode: this.initContext.initialMode,
+			context,
 		});
 		session.disabledTools = disabledTools;
 		// Pinned now, so a later selection in another session does not move it.
@@ -1515,7 +1581,7 @@ export class AcpAgent implements Agent {
 		);
 		// Inside the session's scope, so the working directory the prompt reports
 		// and the AGENTS.md it appends come from the session's `cwd`.
-		const basePrompt = runInSessionCwdScope(session.cwdScope, () =>
+		const basePrompt = runInSessionContext(session.context, () =>
 			buildSystemPrompt(
 				session.developmentMode,
 				tune,

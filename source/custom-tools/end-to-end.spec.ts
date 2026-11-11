@@ -13,6 +13,7 @@ import {mkdirSync, rmSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
+import {isValidElement} from 'react';
 import {ToolManager} from '@/tools/tool-manager';
 
 console.log('\ncustom-tools/end-to-end.spec.ts');
@@ -54,7 +55,7 @@ function writeTool(name: string, contents: string) {
 	writeFileSync(join(projectToolsDir, name), contents, 'utf-8');
 }
 
-test.serial('custom tool appears in ToolManager registry', t => {
+test.serial('custom tool appears in ToolManager registry', async t => {
 	writeTool(
 		'list_files.md',
 		`---
@@ -80,6 +81,10 @@ ls {{ dir }}`,
 	const entry = manager.getToolEntry('list_files_custom');
 	t.truthy(entry);
 	t.truthy(entry?.formatter);
+	// The formatter is loaded lazily (so skills loading stays Ink-free) but
+	// still resolves to the rendered component.
+	const preview = await entry?.formatter?.({dir: 'src'});
+	t.true(isValidElement(preview));
 	t.truthy(entry?.validator);
 	t.truthy(entry?.handler);
 	t.true(entry?.readOnly);

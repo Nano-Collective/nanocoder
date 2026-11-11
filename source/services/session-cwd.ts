@@ -1,6 +1,6 @@
-import {AsyncLocalStorage} from 'node:async_hooks';
 import {existsSync, statSync} from 'node:fs';
 import {resolve} from 'node:path';
+import {getActiveSessionContext} from '@/services/session-context';
 import {isPathInside, isRealPathInside} from '@/utils/path-validation';
 
 // Shared "where am I" for bash and every file tool. Without it, a `cd` in one
@@ -11,36 +11,13 @@ import {isPathInside, isRealPathInside} from '@/utils/path-validation';
 // behave exactly as before until a bash `cd` actually moves the shell.
 let sessionCwd: string | null = null;
 
-/**
- * The working directory of one session in a process that serves several (ACP).
- *
- * An ACP client names the session's directory in `session/new`, and the spec
- * requires it to be used however the agent was spawned. Pinning the
- * process-wide values above would let concurrent sessions overwrite each
- * other, so a turn runs inside its session's scope instead, and every getter
- * and setter below reads and writes the scope while one is active. A bash `cd`
- * therefore moves only the session that ran it.
- */
-export interface SessionCwdScope {
-	projectRoot: string;
-	sessionCwd: string | null;
-}
-
-const sessionScope = new AsyncLocalStorage<SessionCwdScope>();
-
-export function createSessionCwdScope(projectRoot: string): SessionCwdScope {
-	return {projectRoot: resolve(projectRoot), sessionCwd: null};
-}
-
-export function runInSessionCwdScope<T>(
-	scope: SessionCwdScope,
-	run: () => T,
-): T {
-	return sessionScope.run(scope, run);
-}
+// In a process that serves several sessions (ACP), a turn runs inside its
+// session's context (`session-context.ts`), and every getter and setter below
+// reads and writes that context while one is active. A bash `cd` therefore
+// moves only the session that ran it.
 
 export function getSessionCwd(): string {
-	const scope = sessionScope.getStore();
+	const scope = getActiveSessionContext();
 	if (scope) return scope.sessionCwd ?? scope.projectRoot;
 	return sessionCwd ?? process.cwd();
 }
@@ -56,7 +33,7 @@ export function getSessionCwd(): string {
 let projectRoot: string | null = null;
 
 export function getProjectRoot(): string {
-	const scope = sessionScope.getStore();
+	const scope = getActiveSessionContext();
 	if (scope) return scope.projectRoot;
 	return projectRoot ?? resolve(process.cwd());
 }
@@ -64,7 +41,7 @@ export function getProjectRoot(): string {
 export function setProjectRoot(dir: string): void {
 	const trimmed = dir.trim();
 	if (!trimmed) return;
-	const scope = sessionScope.getStore();
+	const scope = getActiveSessionContext();
 	if (scope) scope.projectRoot = resolve(trimmed);
 	else projectRoot = resolve(trimmed);
 }
@@ -73,7 +50,7 @@ export function setSessionCwd(dir: string): void {
 	const trimmed = dir.trim();
 	if (!trimmed) return;
 	// Absolute so downstream `resolve(base, rel)` is stable.
-	const scope = sessionScope.getStore();
+	const scope = getActiveSessionContext();
 	if (scope) scope.sessionCwd = resolve(trimmed);
 	else sessionCwd = resolve(trimmed);
 }
@@ -94,7 +71,7 @@ export function getContainedSessionCwd(): string {
 // worktree): unpin so bash/file tools fall back to the live process.cwd(), or
 // to the session's own directory inside a session scope.
 export function getSafeSessionCwd(): string {
-	const scope = sessionScope.getStore();
+	const scope = getActiveSessionContext();
 	if (scope) {
 		const pinned = scope.sessionCwd;
 		if (pinned !== null && isDirectory(pinned)) return pinned;

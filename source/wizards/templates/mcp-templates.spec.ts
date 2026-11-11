@@ -267,6 +267,48 @@ test('custom template: handles empty env var lines', t => {
 	});
 });
 
+// Regression: Custom MCP Server had no headers field, so editing an http
+// server whose template was removed (Serply, FXMacroData) rebuilt it without
+// its API-key header.
+test('custom template: writes http headers, one per line', t => {
+	const template = MCP_TEMPLATES.find(t => t.id === 'custom');
+	t.truthy(template);
+
+	const config = template!.buildConfig({
+		transport: 'http',
+		serverName: 'serply',
+		url: 'https://api.serply.io/mcp',
+		headers:
+			'X-API-Key: serply_key_123\n\nAuthorization: Bearer a:b\nnot a header\n',
+	});
+
+	t.is(config.transport, 'http');
+	t.deepEqual(config.headers, {
+		'X-API-Key': 'serply_key_123',
+		Authorization: 'Bearer a:b',
+	});
+});
+
+test('custom template: omits headers when none are given or transport is not http', t => {
+	const template = MCP_TEMPLATES.find(t => t.id === 'custom');
+	t.truthy(template);
+
+	const http = template!.buildConfig({
+		transport: 'http',
+		serverName: 'plain',
+		url: 'https://example.com/mcp',
+	});
+	t.is(http.headers, undefined);
+
+	const websocket = template!.buildConfig({
+		transport: 'websocket',
+		serverName: 'ws',
+		url: 'wss://example.com/mcp',
+		headers: 'X-API-Key: ignored',
+	});
+	t.is(websocket.headers, undefined);
+});
+
 // ============================================================================
 // Tests for Remote Server Templates (New Feature)
 // ============================================================================
