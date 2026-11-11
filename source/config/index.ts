@@ -53,7 +53,7 @@ import type {
 } from '@/types/index';
 import {clampThreshold} from '@/utils/message-compression';
 import {logError, logWarning} from '@/utils/message-queue-core';
-import {isTrustLevel} from '@/verify/trust';
+import {isTrustLevel} from '@/verify/trust-level';
 
 export {confDirMap, getClosestConfigFile} from '@/config/paths';
 export {DEFAULT_SESSION_CONFIG} from '@/config/session-config';

@@ -129,7 +129,7 @@ export interface SubagentConfigWithSource extends SubagentConfig {
 	 * Runtime-only, never read from a file: set by `execute()` from its
 	 * `toolOverride` so `git_pr` calls are checked against this trust level.
 	 */
-	trustLevel?: import('@/verify/trust').TrustLevel;
+	trustLevel?: import('@/verify/trust-level').TrustLevel;
 }
 
 /**

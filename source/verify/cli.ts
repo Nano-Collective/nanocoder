@@ -35,7 +35,7 @@ import {
 	getAllowedToolNames,
 	getHeadlessAutoApproveToolNames,
 	type TrustLevel,
-} from './trust';
+} from './trust-level';
 
 /** `verify` is a comment-only surface by design: the harness does the posting. */
 const VERIFY_TRUST_LEVEL: TrustLevel = 'comment-only';

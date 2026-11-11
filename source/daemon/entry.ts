@@ -32,13 +32,13 @@ import {
 	getAllowedToolNames,
 	getHeadlessAutoApproveToolNames,
 	isTrustLevel,
-} from '@/verify/trust';
+} from '@/verify/trust-level';
 import {startDaemon} from './daemon';
 import {prepareDaemonSession} from './entry-setup';
 
 // The daemon's own `verify-ci-investigator` subagent must be pinned to a
 // trust-level tool allowlist at execution time rather than trusting its
-// frontmatter `tools:` list alone — see `source/verify/trust.ts`. Mirrors
+// frontmatter `tools:` list alone — see `source/verify/trust-level.ts`. Mirrors
 // the same `toolOverride` use `verify/cli.ts` makes for `verify-pr-review`.
 // `trustLevel` makes the executor deny any `git_pr` action the level doesn't
 // allow, and `alwaysAllow` replaces the user/project config's list: it holds

@@ -29,7 +29,11 @@ import {
 } from '@/config/trust/directory-trust';
 import {ensureNanocoderGitignore} from '@/utils/ensure-nanocoder-gitignore';
 import {formatError} from '@/utils/error-formatter';
-import {isTrustLevel, resolveTrustLevel, type TrustLevel} from '@/verify/trust';
+import {
+	isTrustLevel,
+	resolveTrustLevel,
+	type TrustLevel,
+} from '@/verify/trust-level';
 import {
 	isFullCommitTrustConfirmed,
 	recordFullCommitTrustConfirmed,

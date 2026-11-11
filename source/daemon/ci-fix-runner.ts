@@ -25,7 +25,10 @@ import type {SubagentTask} from '@/subagents/types';
 import {execGit} from '@/tools/git/utils';
 import {ToolManager} from '@/tools/tool-manager';
 import {formatError} from '@/utils/error-formatter';
-import {getHeadlessAutoApproveToolNames, type TrustLevel} from '@/verify/trust';
+import {
+	getHeadlessAutoApproveToolNames,
+	type TrustLevel,
+} from '@/verify/trust-level';
 import {
 	buildRunnerTaskDescription,
 	getRunnerToolNames,
