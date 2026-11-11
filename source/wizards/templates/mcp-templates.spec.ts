@@ -512,6 +512,85 @@ test('serply template: stamps templateId so edits resolve under a custom name', 
 	t.is(resolveMcpTemplateId(config), 'serply');
 });
 
+test('sofya template: is listed as a remote HTTP template', t => {
+	const template = MCP_TEMPLATES.find(t => t.id === 'sofya');
+	t.truthy(template);
+
+	t.is(template!.name, 'Sofya');
+	t.is(template!.category, 'remote');
+	t.is(template!.transportType, 'http');
+});
+
+test('sofya template: saved config uses the picker description', t => {
+	const template = MCP_TEMPLATES.find(t => t.id === 'sofya');
+	t.truthy(template);
+	const config = template!.buildConfig({serverName: 'sofya', apiKey: 'k'});
+	t.is(config.description, template!.description);
+});
+
+test('sofya template: builds HTTP config with a bearer token', t => {
+	const template = MCP_TEMPLATES.find(t => t.id === 'sofya');
+	t.truthy(template);
+
+	const config = template!.buildConfig({
+		serverName: 'sofya',
+		apiKey: 'test-key',
+	});
+
+	t.is(config.name, 'sofya');
+	t.is(config.transport, 'http');
+	t.is(config.url, 'https://sofya.co/mcp');
+	t.is(config.timeout, 30000);
+	t.deepEqual(config.headers, {Authorization: 'Bearer test-key'});
+	t.deepEqual(config.tags, ['sofya', 'search', 'web', 'research', 'http']);
+});
+
+test('sofya template: API key field is required and sensitive', t => {
+	const template = MCP_TEMPLATES.find(t => t.id === 'sofya');
+	t.truthy(template);
+
+	const apiKeyField = template!.fields.find(f => f.name === 'apiKey');
+	t.truthy(apiKeyField);
+	t.true(apiKeyField!.required);
+	t.true(apiKeyField!.sensitive);
+});
+
+test('sofya template: defaults server name and trims the API key', t => {
+	const template = MCP_TEMPLATES.find(t => t.id === 'sofya');
+	t.truthy(template);
+
+	const config = template!.buildConfig({apiKey: '  test-key  '});
+
+	t.is(config.name, 'sofya');
+	t.deepEqual(config.headers, {Authorization: 'Bearer test-key'});
+});
+
+test('sofya template: validator rejects keys that are not a single header token', t => {
+	const template = MCP_TEMPLATES.find(t => t.id === 'sofya');
+	const validator = template!.fields.find(
+		f => f.name === 'apiKey',
+	)!.validator;
+	t.truthy(validator);
+
+	t.is(validator!('test-key'), undefined);
+	t.truthy(validator!('test key'));
+	t.truthy(validator!('test\nkey'));
+});
+
+test('sofya template: stamps templateId so edits resolve under a custom name', t => {
+	const template = MCP_TEMPLATES.find(t => t.id === 'sofya');
+	t.truthy(template);
+
+	const config = template!.buildConfig({
+		serverName: 'sofya-work',
+		apiKey: 'test-key',
+	});
+
+	t.is(config.name, 'sofya-work');
+	t.is(config.templateId, 'sofya');
+	t.is(resolveMcpTemplateId(config), 'sofya');
+});
+
 test('fxmacrodata template: is listed as a remote HTTP template', t => {
 	const template = MCP_TEMPLATES.find(t => t.id === 'fxmacrodata');
 	t.truthy(template);

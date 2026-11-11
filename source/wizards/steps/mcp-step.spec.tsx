@@ -1124,6 +1124,76 @@ test('McpStep lists FXMacroData on the remote servers tab', async t => {
 	unmount();
 });
 
+test('McpStep lists Sofya on the remote servers tab', async t => {
+	const {lastFrame, stdin, unmount} = render(
+		<McpStep onComplete={() => {}} />,
+	);
+
+	await waitTick();
+	// "Add MCP servers", then Tab over to the remote templates.
+	stdin.write('\r');
+	await waitTick();
+	stdin.write('\t');
+	await waitTick();
+
+	// Sofya sits just below the first screen of remote templates; walk the
+	// cursor down until the list scrolls it into view.
+	for (let i = 0; i < 6; i++) {
+		stdin.write('\u001B[B');
+		await waitTick();
+	}
+
+	const output = lastFrame()!;
+	t.regex(output, /Select a remote MCP server to add:/);
+	t.regex(output, /Sofya/);
+
+	unmount();
+});
+
+// Sofya requires its key and stores it as a bearer Authorization header, so
+// editing a custom-named instance must reopen the form with the key prefilled.
+test('McpStep editing a Sofya server keeps its bearer key', async t => {
+	const sofyaServers = {
+		'sofya-work': {
+			name: 'sofya-work',
+			transport: 'http' as const,
+			url: 'https://sofya.co/mcp',
+			headers: {Authorization: 'Bearer test-key'},
+			templateId: 'sofya',
+			tags: ['sofya', 'search', 'web', 'research', 'http'],
+		},
+	};
+
+	const {lastFrame, stdin, unmount} = render(
+		<McpStep
+			onComplete={() => {}}
+			existingServers={sofyaServers}
+			initialEditName="sofya-work"
+		/>,
+	);
+
+	await waitTick();
+	// Item 1 is "Edit this server".
+	stdin.write('1');
+	await waitTick();
+	t.regex(lastFrame()!, /Sofya Configuration/);
+
+	// Accept the prefilled server name, then the prefilled API key.
+	stdin.write('\r');
+	await waitTick();
+	t.regex(lastFrame()!, /Sofya API key/);
+	stdin.write('\r');
+	await waitTick();
+
+	t.notRegex(
+		lastFrame()!,
+		/This field is required/,
+		'the saved bearer key should prefill the required key field',
+	);
+
+	unmount();
+});
+
 // FXMacroData keeps the key optional (keyless covers the free USD tier) and
 // stores it as a bearer Authorization header, so edits must round-trip both a
 // saved key and no key at all.
