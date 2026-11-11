@@ -65,7 +65,7 @@ Nanocoder is a React-based CLI coding agent built with Ink.js that provides loca
 - `source/lsp/` - Language server client integration
 - `source/wizards/` - Interactive setup flows (config, MCP, providers)
 - `source/plain/` - Non-Ink CLI shell used by `--plain`
-- `source/agent-loop/` - Shared, Ink-free agent turn engine (`runTurnEngine`): one iterative loop owning the model call, text tool-call parsing, retry guards, auto-compaction and turn limits. Frontends plug in through an adapter; `--plain` and ACP run on it, and the subagent and TUI loops are moving onto it
+- `source/agent-loop/` - Shared, Ink-free agent turn engine (`runTurnEngine`): one iterative loop owning the model call, text tool-call parsing, retry guards, auto-compaction and turn limits. Frontends plug in through an adapter; `--plain`, ACP and subagents run on it (subagents with the retry guards switched off), and the TUI loop is moving onto it
 - `source/skills/` - Unified skill primitive: loaders (bundle + flat-dir adapter), manifest parser, frontmatter `subscribe:` parser, registrar that fans members into the existing command / subagent / tool registries, dispatcher for triggered runs
 - `source/events/` - Event router, file watcher source (chokidar), cron source (croner), backpressure (per-subscription concurrency cap + 500ms trailing debounce on `file.changed`)
 - `source/daemon/` - Per-project daemon process: lockfile, Unix-socket IPC server / TUI client, CLI surface (`nanocoder daemon <start|stop|status|logs|install|uninstall>`), launchd plist + systemd user unit installers, background CI watch

@@ -41,7 +41,12 @@
  *                         for one turn's valid calls. May stop the run.
  * - `onFinalAnswer`       a content-only turn: finish, or append messages
  *                         (a walkthrough nudge, say) and keep going.
+ * - `onToolCallsEmitted`  a turn's tool calls, before anything is recorded.
+ * - `onTurnRecorded`      the turn is in history and compaction has run.
  * - `on*Retry` / ...      notifications for status lines.
+ *
+ * `TurnEnginePolicy` switches engine behaviour off for a frontend that does
+ * not have it yet (subagents run without the retry guards or text parsing).
  *
  * The engine never renders and never formats a frontend's outcome. It returns
  * a `TurnEngineResult`, and each frontend maps that onto its own shape
@@ -122,7 +127,7 @@ export interface FinalAnswerContext extends TurnContext {
 export interface TurnEngineAdapter<S> {
 	history: {get(): Message[]; set(messages: Message[]): void};
 	getSystemMessage(): Message | undefined;
-	prepareTurn(context: TurnContext): PreparedTurn;
+	prepareTurn(context: TurnContext): PreparedTurn | Promise<PreparedTurn>;
 	beginModelCall(context: TurnContext): ModelCallSink;
 	onModelResponse?(response: LLMChatResponse): Promise<void> | void;
 	partitionToolCalls(
@@ -143,6 +148,13 @@ export interface TurnEngineAdapter<S> {
 	): Promise<FinalAnswerDecision> | FinalAnswerDecision;
 	/** Called before a malformed turn is retried. */
 	onMalformedRetry?(info: {error: string; attempt: number}): void;
+	/** Every call the model emitted this turn, before anything is recorded. */
+	onToolCallsEmitted?(toolCalls: ToolCall[]): void;
+	/**
+	 * The turn's assistant message is in history and compaction has run,
+	 * before the abort check and before any tool runs.
+	 */
+	onTurnRecorded?(): void;
 	/** Calls rejected as unknown or unusable, before anything else is done. */
 	onRejectedToolCalls?(partition: PartitionedToolCalls): void;
 	onEmptyRetry?(attempt: number): void;
@@ -151,18 +163,39 @@ export interface TurnEngineAdapter<S> {
 	onTruncatedGiveUp?(message: string): void;
 }
 
+/** Engine behaviour a frontend can switch off. Everything defaults to on. */
+export interface TurnEnginePolicy {
+	/** Parse XML/JSON tool calls out of text on the fallback path. */
+	parseTextToolCalls?: boolean;
+	/** Nudge, then stop, on turns with no text and no tool calls. */
+	emptyTurnGuard?: boolean;
+	/** Ask the model to continue a turn cut off at its output limit. */
+	truncatedTurnGuard?: boolean;
+	/** Stop when the same tool calls repeat `maxRepeatedToolCalls` times. */
+	repeatedToolCallGuard?: boolean;
+	/**
+	 * Record turns that emitted no tool calls in history (and gate
+	 * compaction on them). Off for a run that only returns its final answer.
+	 */
+	recordToolFreeTurns?: boolean;
+}
+
 export interface TurnEngineOptions<S> {
 	client: LLMClient;
 	signal: AbortSignal;
 	maxTurns: number;
 	retryLimits: RetryLimitsConfig;
 	adapter: TurnEngineAdapter<S>;
+	policy?: TurnEnginePolicy;
 }
 
 export type TurnEngineStop<S> =
 	| {kind: 'completed'}
-	/** Aborted between turns or during the model call. */
-	| {kind: 'aborted'}
+	/**
+	 * Aborted between turns or during the model call. `error` is what the
+	 * model call threw, when the abort surfaced that way.
+	 */
+	| {kind: 'aborted'; error?: unknown}
 	/** The model call threw while the signal was not aborted. */
 	| {kind: 'model-error'; error: unknown}
 	| {kind: 'no-response'}
@@ -184,6 +217,13 @@ export async function runTurnEngine<S>(
 	options: TurnEngineOptions<S>,
 ): Promise<TurnEngineResult<S>> {
 	const {client, signal, maxTurns, retryLimits, adapter} = options;
+	const {
+		parseTextToolCalls = true,
+		emptyTurnGuard = true,
+		truncatedTurnGuard = true,
+		repeatedToolCallGuard = true,
+		recordToolFreeTurns = true,
+	} = options.policy ?? {};
 	const {history} = adapter;
 	const guards = createHeadlessRetryGuards(retryLimits);
 	let modelCalls = 0;
@@ -202,7 +242,7 @@ export async function runTurnEngine<S>(
 
 		const context: TurnContext = {turn, finalTurn: turn === maxTurns - 1};
 		const {finalTurn} = context;
-		const prepared = adapter.prepareTurn(context);
+		const prepared = await adapter.prepareTurn(context);
 		const tools = finalTurn ? {} : prepared.tools;
 
 		const systemMessage = adapter.getSystemMessage();
@@ -233,7 +273,9 @@ export async function runTurnEngine<S>(
 			modelCalls++;
 			sink.end?.();
 			return stop(
-				signal.aborted ? {kind: 'aborted'} : {kind: 'model-error', error},
+				signal.aborted
+					? {kind: 'aborted', error}
+					: {kind: 'model-error', error},
 			);
 		}
 		modelCalls++;
@@ -247,7 +289,7 @@ export async function runTurnEngine<S>(
 		const message = result.choices[0].message;
 		const fullContent = message.content || '';
 		const parsed =
-			result.toolsDisabled && !finalTurn
+			parseTextToolCalls && result.toolsDisabled && !finalTurn
 				? parseToolCalls(fullContent)
 				: {
 						success: true as const,
@@ -284,6 +326,9 @@ export async function runTurnEngine<S>(
 			...parsed.toolCalls,
 		];
 		const content = parsed.cleanedContent;
+		if (allToolCalls.length > 0) {
+			adapter.onToolCallsEmitted?.(allToolCalls);
+		}
 
 		const partition = adapter.partitionToolCalls(allToolCalls, prepared);
 		const {validToolCalls, errorResults} = partition;
@@ -293,35 +338,39 @@ export async function runTurnEngine<S>(
 		const {emittedToolCalls, resultsForAbandonedTurn} =
 			buildAbandonedTurnMessages(partition);
 
-		// A fully-empty assistant message (no text, no tool calls) is left out:
-		// providers reject one, and the empty-turn nudge below re-asks without it.
-		if (content.trim() || emittedToolCalls.length > 0) {
-			append({
-				role: 'assistant',
-				content,
-				tool_calls: emittedToolCalls.length > 0 ? emittedToolCalls : undefined,
-				reasoning: sink.reasoning(),
-			});
-		}
+		if (recordToolFreeTurns || emittedToolCalls.length > 0) {
+			// A fully-empty assistant message (no text, no tool calls) is left out:
+			// providers reject one, and the empty-turn nudge below re-asks without it.
+			if (content.trim() || emittedToolCalls.length > 0) {
+				append({
+					role: 'assistant',
+					content,
+					tool_calls:
+						emittedToolCalls.length > 0 ? emittedToolCalls : undefined,
+					reasoning: sink.reasoning(),
+				});
+			}
 
-		// Gate on the same view the next turn will send, so the threshold is not
-		// measured against rows the cap already drops from the request.
-		const compactGateInput = capMessagesForModel(history.get(), maxMessages);
-		const compacted = await maybeAutoCompact(
-			compactGateInput,
-			systemMessage,
-			client,
-			result.toolsDisabled ? undefined : tools,
-			{...adapter.compactOptions?.(), signal},
-		);
-		// Only adopt the result when compaction actually ran — otherwise
-		// maybeAutoCompact returns the capped view it was handed, and taking it
-		// would discard history the cap only meant to hide from one request.
-		if (compacted !== compactGateInput) {
-			history.set(compacted);
-		}
-		if (signal.aborted) {
-			return stop({kind: 'aborted'});
+			// Gate on the same view the next turn will send, so the threshold is not
+			// measured against rows the cap already drops from the request.
+			const compactGateInput = capMessagesForModel(history.get(), maxMessages);
+			const compacted = await maybeAutoCompact(
+				compactGateInput,
+				systemMessage,
+				client,
+				result.toolsDisabled ? undefined : tools,
+				{...adapter.compactOptions?.(), signal},
+			);
+			// Only adopt the result when compaction actually ran — otherwise
+			// maybeAutoCompact returns the capped view it was handed, and taking it
+			// would discard history the cap only meant to hide from one request.
+			if (compacted !== compactGateInput) {
+				history.set(compacted);
+			}
+			adapter.onTurnRecorded?.();
+			if (signal.aborted) {
+				return stop({kind: 'aborted'});
+			}
 		}
 
 		if (errorResults.length > 0) {
@@ -329,7 +378,9 @@ export async function runTurnEngine<S>(
 			// not be parsed) count toward the repeated-call streak, so a model
 			// stuck on a bad call trips the same cap instead of draining tokens
 			// until maxTurns. The signature covers every call the model emitted.
-			const repeated = guards.toolCalls(allToolCalls);
+			const repeated = repeatedToolCallGuard
+				? guards.toolCalls(allToolCalls)
+				: null;
 			append(...resultsForAbandonedTurn);
 			if (repeated) {
 				return stop({
@@ -343,7 +394,7 @@ export async function runTurnEngine<S>(
 		}
 
 		if (validToolCalls.length === 0) {
-			if (!content.trim()) {
+			if (emptyTurnGuard && !content.trim()) {
 				const verdict = guards.empty();
 				if (verdict.action === 'stop') {
 					return stop({
@@ -364,7 +415,11 @@ export async function runTurnEngine<S>(
 			// prose is already in history), capped so a model that truncates
 			// every time cannot spin to maxTurns. Skipped on the final turn:
 			// there is no turn left to continue into, so the fragment stands.
-			if (result.finishReason === 'length' && !finalTurn) {
+			if (
+				truncatedTurnGuard &&
+				result.finishReason === 'length' &&
+				!finalTurn
+			) {
 				const verdict = guards.truncated();
 				if (verdict.action === 'retry') {
 					adapter.onTruncatedRetry?.(verdict.attempt);
@@ -390,7 +445,9 @@ export async function runTurnEngine<S>(
 		// the cap is not executed. Keyed on every emitted call, matching the
 		// rejected-call branch above, so a turn mixing a valid call with an
 		// unknown one does not break the streak.
-		const repeated = guards.toolCalls(allToolCalls);
+		const repeated = repeatedToolCallGuard
+			? guards.toolCalls(allToolCalls)
+			: null;
 		if (repeated) {
 			return stop({
 				kind: 'guard-stop',
