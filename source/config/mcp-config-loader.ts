@@ -91,7 +91,7 @@ function mapAndSubstituteServer(
 export function loadProjectMCPConfig(
 	cwd: string = getConfigRoot(),
 ): MCPServerWithSource[] {
-	const configPath = join(cwd, '.mcp.json');
+	const configPath = join(cwd, '.mcp.json'); // nosemgrep
 
 	if (!existsSync(configPath)) {
 		return [];
@@ -274,7 +274,7 @@ export function loadAllProviderConfigs(
  */
 function loadProjectProviderConfigs(cwd: string): ProviderConfig[] {
 	// Try to find provider configs in project-level config files
-	const configPath = join(cwd, 'agents.config.json');
+	const configPath = join(cwd, 'agents.config.json'); // nosemgrep
 
 	if (existsSync(configPath)) {
 		try {

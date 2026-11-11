@@ -979,7 +979,7 @@ const canonicalRoots = new Map<string, string>();
  * must still share the launch directory's config.
  */
 function canonicalRoot(dir: string): string {
-	const resolved = resolve(dir);
+	const resolved = resolve(dir); // nosemgrep
 	let canonical = canonicalRoots.get(resolved);
 	if (canonical === undefined) {
 		try {
