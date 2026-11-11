@@ -3,10 +3,12 @@ import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 import test from 'ava';
 import React from 'react';
-import {handleAgentCopy, handleToolCreate} from './create-handler.js';
+import type {CommandContext} from '@/types/index';
+import {agentsCommand} from './agents.js';
+import {toolsCommand} from './tools.js';
 import {SubagentLoader, getSubagentLoader} from '@/subagents/subagent-loader.js';
 
-console.log('\ncreate-handler.spec.ts');
+console.log('\ncreate-scaffold.spec.ts');
 
 // Create a temporary directory for each test
 function createTempDir(): string {
@@ -37,6 +39,25 @@ function createMockOptions(overrides: Partial<{
 	};
 }
 
+/** The context a `/agents` or `/tools` invocation gets from the dispatcher. */
+function contextFor(
+	rawArgs: string[],
+	options: ReturnType<typeof createMockOptions>['options'],
+): CommandContext {
+	return {
+		rawArgs,
+		messages: [],
+		addToChatQueue: options.onAddToChatQueue,
+		submitChatMessage: options.onHandleChatMessage,
+		handlerMetadata: () => ({
+			provider: 'test',
+			model: 'test',
+			tokens: 0,
+			getMessageTokens: () => 0,
+		}),
+	} as unknown as CommandContext;
+}
+
 // ============================================================================
 // /agents copy
 // ============================================================================
@@ -44,12 +65,9 @@ function createMockOptions(overrides: Partial<{
 test.serial('agents copy - shows error when no name provided', async t => {
 	const {options, components} = createMockOptions();
 
-	const handled = await handleAgentCopy(
-		['agents', 'copy'],
-		options as any,
-	);
+	const completion = await agentsCommand.run(contextFor(['copy'], options));
 
-	t.true(handled);
+	t.is(completion, 'done');
 	t.is(components.length, 1);
 	// Should be an ErrorMessage with usage instructions
 	const el = components[0] as React.ReactElement;
@@ -59,12 +77,9 @@ test.serial('agents copy - shows error when no name provided', async t => {
 test.serial('agents copy - shows error for non-existent agent', async t => {
 	const {options, components} = createMockOptions();
 
-	const handled = await handleAgentCopy(
-		['agents', 'copy', 'nonexistent-agent-xyz'],
-		options as any,
-	);
+	const completion = await agentsCommand.run(contextFor(['copy', 'nonexistent-agent-xyz'], options));
 
-	t.true(handled);
+	t.is(completion, 'done');
 	t.is(components.length, 1);
 	const el = components[0] as React.ReactElement;
 	t.is(el.type.name || (el.type as any).displayName, 'ErrorMessage');
@@ -80,12 +95,9 @@ test.serial('agents copy - copies built-in agent to project directory', async t 
 
 		const {options, components} = createMockOptions();
 
-		const handled = await handleAgentCopy(
-			['agents', 'copy', 'explore'],
-			options as any,
-		);
+		const completion = await agentsCommand.run(contextFor(['copy', 'explore'], options));
 
-		t.true(handled);
+		t.is(completion, 'done');
 		t.is(components.length, 1);
 
 		// Should have created the file
@@ -116,12 +128,9 @@ test.serial('agents copy - shows error if file already exists', async t => {
 
 		const {options, components} = createMockOptions();
 
-		const handled = await handleAgentCopy(
-			['agents', 'copy', 'explore'],
-			options as any,
-		);
+		const completion = await agentsCommand.run(contextFor(['copy', 'explore'], options));
 
-		t.true(handled);
+		t.is(completion, 'done');
 		t.is(components.length, 1);
 		const el = components[0] as React.ReactElement;
 		t.is(el.type.name || (el.type as any).displayName, 'ErrorMessage');
@@ -135,12 +144,13 @@ test.serial('agents copy - shows error if file already exists', async t => {
 	}
 });
 
-test.serial('agents copy - does not handle non-copy commands', async t => {
-	const {options} = createMockOptions();
+test.serial('agents - other subcommands show the read-only view without copying', async t => {
+	const {options, components} = createMockOptions();
 
-	t.false(await handleAgentCopy(['agents', 'create', 'foo'], options as any));
-	t.false(await handleAgentCopy(['agents', 'show', 'foo'], options as any));
-	t.false(await handleAgentCopy(['other', 'copy', 'foo'], options as any));
+	const completion = await agentsCommand.run(contextFor(['show', 'foo'], options));
+
+	t.true(typeof completion === 'object' && 'show' in completion);
+	t.is(components.length, 0);
 });
 
 // ============================================================================
@@ -150,12 +160,9 @@ test.serial('agents copy - does not handle non-copy commands', async t => {
 test.serial('tools create - shows error when no name provided', async t => {
 	const {options, components} = createMockOptions();
 
-	const handled = await handleToolCreate(
-		['tools', 'create'],
-		options as any,
-	);
+	const completion = await toolsCommand.run(contextFor(['create'], options));
 
-	t.true(handled);
+	t.is(completion, 'done');
 	t.is(components.length, 1);
 	const el = components[0] as React.ReactElement;
 	t.is(el.type.name || (el.type as any).displayName, 'ErrorMessage');
@@ -170,12 +177,9 @@ test.serial('tools create - creates file and asks AI for help', async t => {
 		process.chdir(tempDir);
 		const {options, components, chatMessages} = createMockOptions();
 
-		const handled = await handleToolCreate(
-			['tools', 'create', 'k8s-pods'],
-			options as any,
-		);
+		const completion = await toolsCommand.run(contextFor(['create', 'k8s-pods'], options));
 
-		t.true(handled);
+		t.is(completion, 'handed-off', 'the design conversation completes it');
 		const filePath = join(toolsDir, 'k8s-pods.md');
 		t.true(existsSync(filePath));
 
@@ -207,12 +211,9 @@ test.serial('tools create - rejects when file already exists', async t => {
 
 		const {options, components, chatMessages} = createMockOptions();
 
-		const handled = await handleToolCreate(
-			['tools', 'create', 'existing'],
-			options as any,
-		);
+		const completion = await toolsCommand.run(contextFor(['create', 'existing'], options));
 
-		t.true(handled);
+		t.is(completion, 'done');
 		t.is(components.length, 1);
 		const el = components[0] as React.ReactElement;
 		t.is(el.type.name || (el.type as any).displayName, 'ErrorMessage');
@@ -234,7 +235,7 @@ test.serial('tools create - appends .md when missing', async t => {
 	try {
 		process.chdir(tempDir);
 		const {options} = createMockOptions();
-		await handleToolCreate(['tools', 'create', 'mytool'], options as any);
+		await toolsCommand.run(contextFor(['create', 'mytool'], options));
 		t.true(existsSync(join(toolsDir, 'mytool.md')));
 	} finally {
 		process.chdir(originalCwd);
@@ -242,10 +243,13 @@ test.serial('tools create - appends .md when missing', async t => {
 	}
 });
 
-test.serial('tools create - does not handle other subcommands', async t => {
-	const {options} = createMockOptions();
+test.serial('tools - other subcommands show the read-only view', async t => {
+	const {options, components, chatMessages} = createMockOptions();
 
-	t.false(await handleToolCreate(['tools'], options as any));
-	t.false(await handleToolCreate(['tools', 'list'], options as any));
-	t.false(await handleToolCreate(['agents', 'create', 'foo'], options as any));
+	for (const rawArgs of [[], ['list']]) {
+		const completion = await toolsCommand.run(contextFor(rawArgs, options));
+		t.true(typeof completion === 'object' && 'show' in completion);
+	}
+	t.is(components.length, 0);
+	t.is(chatMessages.length, 0);
 });

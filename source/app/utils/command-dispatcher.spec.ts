@@ -577,6 +577,37 @@ test.serial('/custom-commands is the old name of /commands', async t => {
 	}
 });
 
+test.serial('create subcommands scaffold a file and hand off to the design conversation', async t => {
+	const originalCwd = process.cwd();
+	const workspace = mkdtempSync(join(tmpdir(), 'dispatcher-create-'));
+	process.chdir(workspace);
+	try {
+		const prompts: string[] = [];
+		const queued: React.ReactNode[] = [];
+		let completed = 0;
+		const options = createOptions({
+			onHandleChatMessage: async message => {
+				prompts.push(message);
+			},
+			onAddToChatQueue: node => queued.push(node),
+			onCommandComplete: () => completed++,
+		});
+
+		await dispatchSlashCommand('/agents create reviewer', options);
+		t.true(existsSync(join(workspace, '.nanocoder', 'agents', 'reviewer.md')));
+		t.is(prompts.length, 1);
+		await wait(DELAY_COMMAND_COMPLETE_MS + 25);
+		t.is(completed, 0, 'the design conversation completes the command');
+
+		await dispatchSlashCommand('/skills create', options);
+		t.true(queuedText(queued.at(-1)).includes('Usage: /skills create'));
+		t.is(completed, 1, 'a usage error completes at once');
+	} finally {
+		process.chdir(originalCwd);
+		rmSync(workspace, {recursive: true, force: true});
+	}
+});
+
 test.serial('read-only commands still render through their handler', async t => {
 	const queued: React.ReactNode[] = [];
 	await dispatchSlashCommand(

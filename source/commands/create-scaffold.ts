@@ -2,13 +2,13 @@ import {existsSync, mkdirSync, readFileSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {getSubagentLoader} from '@/subagents/subagent-loader';
 import type {SubagentConfigWithSource} from '@/subagents/types';
-import type {MessageSubmissionOptions} from '@/types/index';
+import type {CommandCompletion, CommandContext} from '@/types/index';
 import {errorMsg, successMsg} from '@/utils/message-factory';
 
 /**
  * Per-entity differences for the single-file `/<kind> create <name>` flows.
  * Everything else (arg validation, existence check, mkdir, write, success
- * message, chained AI prompt) is shared by `handleFileCreate`.
+ * message, chained AI prompt) is shared by `createScaffoldFile`.
  */
 interface FileCreateSpec {
 	/** Subdirectory under `.nanocoder/` and `generateKey`/usage prefix (e.g. 'agents'). */
@@ -31,12 +31,12 @@ interface FileCreateSpec {
  * Creates a markdown file with a frontmatter template and asks the AI to help
  * write it. Shared logic for the /<command|tool|agent> create flows.
  */
-async function handleFileCreate(
+async function createScaffoldFile(
 	fileName: string | undefined,
 	spec: FileCreateSpec,
-	options: MessageSubmissionOptions,
-): Promise<boolean> {
-	const {onAddToChatQueue, onHandleChatMessage, onCommandComplete} = options;
+	context: CommandContext,
+): Promise<CommandCompletion> {
+	const {addToChatQueue: onAddToChatQueue, submitChatMessage} = context;
 	const {entityName} = spec;
 
 	if (!fileName) {
@@ -46,8 +46,7 @@ async function handleFileCreate(
 				`${entityName}-create-error`,
 			),
 		);
-		onCommandComplete?.();
-		return true;
+		return 'done';
 	}
 
 	const safeName = fileName.endsWith('.md') ? fileName : `${fileName}.md`;
@@ -61,8 +60,7 @@ async function handleFileCreate(
 				`${entityName}-create-exists`,
 			),
 		);
-		onCommandComplete?.();
-		return true;
+		return 'done';
 	}
 
 	mkdirSync(targetDir, {recursive: true});
@@ -79,25 +77,20 @@ async function handleFileCreate(
 		),
 	);
 
-	await onHandleChatMessage(spec.aiPrompt(safeName, derivedName));
-
-	return true;
+	// The design conversation that follows completes the command.
+	await submitChatMessage(spec.aiPrompt(safeName, derivedName));
+	return 'handed-off';
 }
 
 /**
  * Handles /agents create — creates an agent definition file and prompts the AI to help write it.
- * Returns true if handled.
  */
-export async function handleAgentCreate(
-	commandParts: string[],
-	options: MessageSubmissionOptions,
-): Promise<boolean> {
-	if (commandParts[0] !== 'agents' || commandParts[1] !== 'create') {
-		return false;
-	}
-
-	return handleFileCreate(
-		commandParts[2],
+export async function createAgentFile(
+	name: string | undefined,
+	context: CommandContext,
+): Promise<CommandCompletion> {
+	return createScaffoldFile(
+		name,
 		{
 			entityName: 'agents',
 			usageExample: 'code-reviewer',
@@ -113,7 +106,7 @@ Write the system prompt that describes this agent's role, the tools it should us
 `,
 			aiPrompt: buildAgentDesignPrompt,
 		},
-		options,
+		context,
 	);
 }
 
@@ -204,19 +197,12 @@ function buildAgentMarkdown(agent: SubagentConfigWithSource): string {
 /**
  * Handles /agents copy <name> — copies an agent (including built-in) to
  * .nanocoder/agents/ so it can be customized.
- * Returns true if handled.
  */
-export async function handleAgentCopy(
-	commandParts: string[],
-	options: MessageSubmissionOptions,
-): Promise<boolean> {
-	if (commandParts[0] !== 'agents' || commandParts[1] !== 'copy') {
-		return false;
-	}
-
-	const {onAddToChatQueue, onCommandComplete} = options;
-
-	const agentName = commandParts[2];
+export async function copyAgentToProject(
+	agentName: string | undefined,
+	context: CommandContext,
+): Promise<CommandCompletion> {
+	const {addToChatQueue: onAddToChatQueue} = context;
 
 	if (!agentName) {
 		onAddToChatQueue(
@@ -225,8 +211,7 @@ export async function handleAgentCopy(
 				'agents-copy-error',
 			),
 		);
-		onCommandComplete?.();
-		return true;
+		return 'done';
 	}
 
 	const loader = getSubagentLoader();
@@ -241,8 +226,7 @@ export async function handleAgentCopy(
 				'agents-copy-notfound',
 			),
 		);
-		onCommandComplete?.();
-		return true;
+		return 'done';
 	}
 
 	const safeName = `${agentName}.md`;
@@ -256,8 +240,7 @@ export async function handleAgentCopy(
 				'agents-copy-exists',
 			),
 		);
-		onCommandComplete?.();
-		return true;
+		return 'done';
 	}
 
 	mkdirSync(targetDir, {recursive: true});
@@ -275,24 +258,19 @@ export async function handleAgentCopy(
 	// Reload so the project-level copy takes priority
 	await loader.reload();
 
-	onCommandComplete?.();
-	return true;
+	return 'done';
 }
 
 /**
  * Handles /tools create — creates a custom-tool definition file and prompts
- * the AI to help write it. Returns true if handled.
+ * the AI to help write it.
  */
-export async function handleToolCreate(
-	commandParts: string[],
-	options: MessageSubmissionOptions,
-): Promise<boolean> {
-	if (commandParts[0] !== 'tools' || commandParts[1] !== 'create') {
-		return false;
-	}
-
-	return handleFileCreate(
-		commandParts[2],
+export async function createToolFile(
+	name: string | undefined,
+	context: CommandContext,
+): Promise<CommandCompletion> {
+	return createScaffoldFile(
+		name,
 		{
 			entityName: 'tools',
 			usageExample: 'k8s-pods',
@@ -317,7 +295,7 @@ echo "TODO: replace this body with the command you want to run"
 `,
 			aiPrompt: buildToolDesignPrompt,
 		},
-		options,
+		context,
 	);
 }
 
@@ -394,7 +372,6 @@ Now: ask me what this tool should do, then design it.`;
 
 /**
  * Handles /commands create — creates the command file and prompts the AI to help write it.
- * Returns true if handled.
  */
 /**
  * Handles `/skills create <name>` — scaffolds a new bundle directory
@@ -405,16 +382,11 @@ Now: ask me what this tool should do, then design it.`;
  */
 const BUNDLE_NAME_REGEX = /^[a-z][a-z0-9-]*$/;
 
-export async function handleSkillsCreate(
-	commandParts: string[],
-	options: MessageSubmissionOptions,
-): Promise<boolean> {
-	if (commandParts[0] !== 'skills' || commandParts[1] !== 'create') {
-		return false;
-	}
-
-	const {onAddToChatQueue, onHandleChatMessage, onCommandComplete} = options;
-	const name = commandParts[2];
+export async function createSkillBundle(
+	name: string | undefined,
+	context: CommandContext,
+): Promise<CommandCompletion> {
+	const {addToChatQueue: onAddToChatQueue, submitChatMessage} = context;
 
 	if (!name) {
 		onAddToChatQueue(
@@ -423,8 +395,7 @@ export async function handleSkillsCreate(
 				'skills-create-error',
 			),
 		);
-		onCommandComplete?.();
-		return true;
+		return 'done';
 	}
 
 	if (!BUNDLE_NAME_REGEX.test(name)) {
@@ -434,8 +405,7 @@ export async function handleSkillsCreate(
 				'skills-create-invalid-name',
 			),
 		);
-		onCommandComplete?.();
-		return true;
+		return 'done';
 	}
 
 	const bundleRoot = join(process.cwd(), '.nanocoder', 'skills', name);
@@ -446,8 +416,7 @@ export async function handleSkillsCreate(
 				'skills-create-exists',
 			),
 		);
-		onCommandComplete?.();
-		return true;
+		return 'done';
 	}
 
 	mkdirSync(join(bundleRoot, 'commands'), {recursive: true});
@@ -471,9 +440,9 @@ export async function handleSkillsCreate(
 		),
 	);
 
-	await onHandleChatMessage(buildSkillBundleDesignPrompt(name));
-
-	return true;
+	// The design conversation that follows completes the command.
+	await submitChatMessage(buildSkillBundleDesignPrompt(name));
+	return 'handed-off';
 }
 
 /**
@@ -645,19 +614,12 @@ After writing all files, call the \`check_skill\` tool with \`name: ${name}\`. I
 Now: ask me what the skill should do, then design it.`;
 }
 
-export async function handleCommandCreate(
-	commandParts: string[],
-	options: MessageSubmissionOptions,
-): Promise<boolean> {
-	if (
-		(commandParts[0] !== 'commands' && commandParts[0] !== 'custom-commands') ||
-		commandParts[1] !== 'create'
-	) {
-		return false;
-	}
-
-	return handleFileCreate(
-		commandParts[2],
+export async function createCommandFile(
+	name: string | undefined,
+	context: CommandContext,
+): Promise<CommandCompletion> {
+	return createScaffoldFile(
+		name,
 		{
 			entityName: 'commands',
 			usageExample: 'review-code',
@@ -670,7 +632,7 @@ description: ${safeName.replace(/\.md$/, '')} custom command
 `,
 			aiPrompt: buildCommandDesignPrompt,
 		},
-		options,
+		context,
 	);
 }
 
