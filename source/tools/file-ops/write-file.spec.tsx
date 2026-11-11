@@ -1,4 +1,4 @@
-import {chmod, mkdtemp, readFile, rm, writeFile} from 'node:fs/promises';
+import {chmod, mkdtemp, readFile, rm, symlink, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
@@ -298,6 +298,41 @@ test('write_file validator: allows overwriting an existing file after it is read
 		process.chdir(originalCwd);
 	}
 });
+
+(process.platform === 'win32' ? test.skip : test)(
+	'write_file validator: rejects a dangling symlink that points outside the project',
+	async t => {
+		if (!writeFileTool.validator) {
+			t.fail('Validator not defined');
+			return;
+		}
+
+		const outside = await mkdtemp(join(tmpdir(), 'write-file-outside-'));
+		const originalCwd = process.cwd();
+		try {
+			// A cloned repo ships `notes.md -> <outside>/authorized_keys`. The
+			// target does not exist yet, so writing through the link creates it.
+			await symlink(
+				join(outside, 'authorized_keys'),
+				join(testDir, 'notes.md'),
+			);
+			process.chdir(testDir);
+
+			const result = await writeFileTool.validator({
+				path: 'notes.md',
+				content: 'ssh-ed25519 AAAA attacker',
+			});
+
+			t.false(result.valid);
+			if (!result.valid) {
+				t.regex(result.error, /escapes project directory via symlink/);
+			}
+		} finally {
+			process.chdir(originalCwd);
+			await rm(outside, {recursive: true, force: true});
+		}
+	},
+);
 
 test('write_file validator: rejects non-existent parent directory', async t => {
 	if (!writeFileTool.validator) {
