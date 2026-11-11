@@ -25,8 +25,7 @@ import type {
 // loop. Each runner reduces its frontend's outcome to the same observation,
 // so a guard or retry that one loop gets and another does not fails here
 // instead of drifting silently. Frontends join as they move onto the shared
-// turn engine (source/agent-loop/turn-engine.ts); ACP is covered already so
-// its migration is checked against the behaviour it has today.
+// turn engine (source/agent-loop/turn-engine.ts).
 
 process.env.NO_COLOR = '1';
 

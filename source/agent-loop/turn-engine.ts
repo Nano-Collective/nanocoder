@@ -129,8 +129,8 @@ export interface TurnEngineAdapter<S> {
 		toolCalls: ToolCall[],
 		prepared: PreparedTurn,
 	): PartitionedToolCalls;
-	/** Options for auto-compaction besides the signal. */
-	compactOptions?: Omit<
+	/** Options for auto-compaction besides the signal, read each turn. */
+	compactOptions?(): Omit<
 		NonNullable<Parameters<typeof maybeAutoCompact>[4]>,
 		'signal'
 	>;
@@ -312,7 +312,7 @@ export async function runTurnEngine<S>(
 			systemMessage,
 			client,
 			result.toolsDisabled ? undefined : tools,
-			{...adapter.compactOptions, signal},
+			{...adapter.compactOptions?.(), signal},
 		);
 		// Only adopt the result when compaction actually ran — otherwise
 		// maybeAutoCompact returns the capped view it was handed, and taking it
