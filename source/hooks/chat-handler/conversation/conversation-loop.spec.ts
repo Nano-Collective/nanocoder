@@ -3504,3 +3504,133 @@ for (const [listed, expectedPrompts] of [
 		},
 	);
 }
+
+test.serial('escape during an auto-approved tool stops the rest of the batch', async t => {
+	const controller = new AbortController();
+	const messageSnapshots: Message[][] = [];
+	const ran: string[] = [];
+	setToolRegistryGetter(() => ({
+		slow_bash: async () => {
+			ran.push('slow_bash');
+			controller.abort();
+			return 'bash done';
+		},
+		write_tool: async () => {
+			ran.push('write_tool');
+			return 'written';
+		},
+	}));
+
+	let chatCallCount = 0;
+	const params = createDefaultParams({
+		client: {
+			chat: async (): Promise<LLMChatResponse> => {
+				chatCallCount += 1;
+				if (chatCallCount > 1) {
+					throw new Error('Operation was cancelled');
+				}
+				return {
+					choices: [
+						{
+							message: {
+								role: 'assistant',
+								content: '',
+								tool_calls: [
+									{id: 'call_bash', function: {name: 'slow_bash', arguments: '{}'}},
+									{id: 'call_write', function: {name: 'write_tool', arguments: '{}'}},
+								],
+							},
+						},
+					],
+					toolsDisabled: false,
+				};
+			},
+		},
+		toolManager: {
+			...createMockToolManager({
+				tools: ['slow_bash', 'write_tool'],
+				needsApproval: false,
+			}),
+			getToolFormatter: () => undefined,
+		},
+		developmentMode: 'yolo' as const,
+		abortController: controller,
+		setMessages: (msgs: Message[]) => messageSnapshots.push(msgs),
+	});
+
+	try {
+		await t.throwsAsync(processAssistantResponse(params), {
+			message: 'Operation was cancelled',
+		});
+	} finally {
+		setToolRegistryGetter(() => ({}));
+	}
+
+	t.deepEqual(ran, ['slow_bash'], 'the tool queued behind the cancel must not run');
+	const latest = messageSnapshots[messageSnapshots.length - 1];
+	const skipped = latest.find(
+		m => m.role === 'tool' && m.tool_call_id === 'call_write',
+	);
+	t.regex(String(skipped?.content), /cancelled by the user/i);
+	t.truthy(
+		latest.find(m => m.role === 'tool' && m.tool_call_id === 'call_bash'),
+	);
+});
+
+test.serial('escape while the reply finishes does not execute its tool calls', async t => {
+	const controller = new AbortController();
+	const messageSnapshots: Message[][] = [];
+	let ran = false;
+	setToolRegistryGetter(() => ({
+		write_tool: async () => {
+			ran = true;
+			return 'written';
+		},
+	}));
+
+	const params = createDefaultParams({
+		client: {
+			// The provider returns a complete reply even though the user pressed
+			// Escape before it finished.
+			chat: async (): Promise<LLMChatResponse> => {
+				controller.abort();
+				return {
+					choices: [
+						{
+							message: {
+								role: 'assistant',
+								content: '',
+								tool_calls: [
+									{id: 'call_write', function: {name: 'write_tool', arguments: '{}'}},
+								],
+							},
+						},
+					],
+					toolsDisabled: false,
+				};
+			},
+		},
+		toolManager: createMockToolManager({
+			tools: ['write_tool'],
+			needsApproval: false,
+		}),
+		developmentMode: 'yolo' as const,
+		abortController: controller,
+		setMessages: (msgs: Message[]) => messageSnapshots.push(msgs),
+	});
+
+	try {
+		await t.throwsAsync(processAssistantResponse(params), {
+			message: 'Operation was cancelled',
+		});
+	} finally {
+		setToolRegistryGetter(() => ({}));
+	}
+
+	t.false(ran);
+	const latest = messageSnapshots[messageSnapshots.length - 1];
+	const paired = latest.find(
+		m => m.role === 'tool' && m.tool_call_id === 'call_write',
+	);
+	t.regex(String(paired?.content), /cancelled by the user/i);
+});

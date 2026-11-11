@@ -712,6 +712,19 @@ export const processAssistantResponse = async (
 		// Silently fail auto-compact, don't interrupt the conversation
 	}
 
+	// Escape while the reply was finishing or while compaction ran: don't go
+	// on to execute this turn's tool calls. Pair them with cancellation
+	// results so the saved history keeps the 1:1 tool_call/result mapping,
+	// then unwind the same way an abort during the LLM call does.
+	if (controller.signal.aborted) {
+		if (emittedToolCalls.length > 0) {
+			const abortBuilder = new MessageBuilder(updatedMessages);
+			abortBuilder.addToolResults(createCancellationResults(emittedToolCalls));
+			setMessages(abortBuilder.build());
+		}
+		throw new Error('Operation was cancelled');
+	}
+
 	// Record the API-reported usage for the context indicator. The snapshot is
 	// keyed to the post-response message count so the indicator can fall back
 	// to estimation once newer messages make it stale. After compaction the
@@ -1020,9 +1033,13 @@ export const processAssistantResponse = async (
 		};
 
 		const turnResults: ToolResult[] = [...blockedResults];
+		// Set when beforeExecute stops the auto batch, which then accounts for
+		// the tools behind it itself (cancelled, or moved to confirmTools).
+		let batchStoppedByGate = false;
 
 		// Refuse `toolCall` and cancel the rest of the auto batch behind it.
 		const stopBatchAt = (toolCall: ToolCall, reason: string) => {
+			batchStoppedByGate = true;
 			refuseToolCall(toolCall, reason);
 			turnResults.push(
 				blockedResults[blockedResults.length - 1],
@@ -1116,6 +1133,7 @@ export const processAssistantResponse = async (
 						if (vote.decision === 'deny') {
 							return stopBatchAt(toolCall, vote.reason);
 						}
+						batchStoppedByGate = true;
 						confirmTools.unshift(
 							...autoTools.slice(autoTools.indexOf(toolCall)),
 						);
@@ -1132,6 +1150,13 @@ export const processAssistantResponse = async (
 						observeSuccessfulLifecycleTool(walkthroughLifecycle, toolCall);
 					}
 				}
+			}
+			// The batch stopped short on an abort: the tools it never started
+			// still need a result each to pair with their tool call.
+			if (!batchStoppedByGate && directResults.length < autoTools.length) {
+				turnResults.push(
+					...createCancellationResults(autoTools.slice(directResults.length)),
+				);
 			}
 		}
 
@@ -1196,7 +1221,9 @@ export const processAssistantResponse = async (
 				// screen. An abort settles this as "declined".
 				const approved = await signalToolConfirm({toolCall}, controller.signal);
 
-				if (!approved) {
+				// Approved, but the turn was cancelled while the prompt was up:
+				// treat it like a decline rather than running the tool.
+				if (!approved || controller.signal.aborted) {
 					// Close any VS Code diff previews the formatter opened for the
 					// declined tools (the approve path self-closes post-execution).
 					closeAllDiffsInVSCode();
