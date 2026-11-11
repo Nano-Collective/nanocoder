@@ -17,7 +17,6 @@ import {
 } from '@/constants';
 import {parseCustomCommandArgs} from '@/custom-commands/args';
 import {expandCustomCommandPrompt} from '@/custom-commands/executor';
-import {getSequenceTracker} from '@/macros/sequence-tracker';
 import {sharedProposalStore} from '@/memory/proposal-store';
 import {CheckpointManager} from '@/services/checkpoint-manager';
 import {clearPendingHookContext} from '@/services/lifecycle-hooks';
@@ -277,11 +276,6 @@ async function handleSpecialCommand(
 		case SPECIAL_COMMANDS.CLEAR:
 			await onClearMessages();
 			sharedProposalStore.clear();
-			try {
-				getSequenceTracker().clear();
-			} catch {
-				// Non-fatal
-			}
 			options.onClearCounterIncrement?.();
 			setTimeout(() => onCommandComplete?.(), DELAY_COMMAND_COMPLETE_MS);
 			return true;
