@@ -1177,13 +1177,50 @@ test('MCPClient: headless does not require approval for an ordinary tool', async
 	);
 });
 
-test('MCPClient: auto-accept and yolo still run tools unattended', async t => {
-	const entry = mcpEntryFor('create_issue');
+// auto-accept still prompts for execute_bash, and an MCP tool can be just as
+// capable (a shell or database server), so auto-accept must not run an
+// arbitrary MCP tool without asking.
+test('MCPClient: auto-accept prompts for an ordinary tool', async t => {
+	const entry = mcpEntryFor('run_command');
 
-	t.false(
-		await resolveToolApproval('create_issue', entry, {}, {mode: 'auto-accept'}),
+	t.true(
+		await resolveToolApproval('run_command', entry, {}, {mode: 'auto-accept'}),
+		'an unannotated MCP tool must prompt in auto-accept, like execute_bash',
 	);
-	t.false(await resolveToolApproval('create_issue', entry, {}, {mode: 'yolo'}));
+	t.false(
+		await resolveToolApproval('run_command', entry, {}, {mode: 'yolo'}),
+		'yolo still runs every tool',
+	);
+});
+
+test('MCPClient: auto-accept runs alwaysAllow-ed and read-only tools', async t => {
+	t.false(
+		await resolveToolApproval(
+			'run_command',
+			mcpEntryFor('run_command', {alwaysAllow: ['run_command']}),
+			{},
+			{mode: 'auto-accept'},
+		),
+		"the server's alwaysAllow list skips the prompt in auto-accept",
+	);
+	t.false(
+		await resolveToolApproval(
+			'list_issues',
+			mcpEntryFor('list_issues', {readOnly: true}),
+			{},
+			{mode: 'auto-accept'},
+		),
+		'a server-annotated reader runs unprompted in auto-accept',
+	);
+	t.true(
+		await resolveToolApproval(
+			'run_command',
+			mcpEntryFor('run_command', {alwaysAllow: ['other_tool']}),
+			{},
+			{mode: 'auto-accept'},
+		),
+		'alwaysAllow covers only the tools it names',
+	);
 });
 
 test('MCPClient: readOnlyHint unblocks plan mode but never normal mode', async t => {
