@@ -1,4 +1,4 @@
-import {mkdirSync, mkdtempSync, rmSync} from 'node:fs';
+import {mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join, resolve} from 'node:path';
 import test from 'ava';
@@ -56,6 +56,33 @@ test.serial(
 		} finally {
 			resetSessionCwd();
 			rmSync(root, {recursive: true, force: true});
+			rmSync(outside, {recursive: true, force: true});
+		}
+	},
+);
+
+test.serial(
+	'getContainedSessionCwd keeps a physical cwd under a root opened through a symlink',
+	t => {
+		// The project is opened as `link/`, but after `cd sub` bash reports the
+		// physical path (`pwd -P`). Comparing the two spellings lexically clamped
+		// the search tools back to the root.
+		resetSessionCwd();
+		const base = realpathSync(mkdtempSync(join(tmpdir(), 'nc-link-')));
+		const real = join(base, 'real');
+		const link = join(base, 'link');
+		mkdirSync(join(real, 'sub'), {recursive: true});
+		symlinkSync(real, link, 'dir');
+		const outside = mkdtempSync(join(tmpdir(), 'nc-out-'));
+		try {
+			setProjectRoot(link);
+			setSessionCwd(join(real, 'sub'));
+			t.is(getContainedSessionCwd(), join(real, 'sub'));
+			setSessionCwd(outside);
+			t.is(getContainedSessionCwd(), link, 'outside is still clamped');
+		} finally {
+			resetSessionCwd();
+			rmSync(base, {recursive: true, force: true});
 			rmSync(outside, {recursive: true, force: true});
 		}
 	},
