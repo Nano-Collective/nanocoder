@@ -5,7 +5,8 @@
 import {existsSync, mkdirSync, openSync} from 'fs';
 import {join} from 'path';
 import pino, {type Logger as PinoLogger} from 'pino';
-import {createConfig, getDefaultLogDirectory} from './config.js';
+import {getLogPath} from '@/config/platform-dirs';
+import {createConfig} from './config.js';
 import {createLogMethods} from './log-method-factory.js';
 import {createRedactionRules, redactLogEntry} from './redaction.js';
 import type {
@@ -82,7 +83,7 @@ function createEnvironmentLogger(
 		return createEnhancedLogger(pino({...baseConfig, level: 'silent'}));
 	}
 
-	const logDir = getDefaultLogDirectory();
+	const logDir = getLogPath();
 
 	// Create single file transport logger for all environments
 	if (transportConfig.enableFile && !transportConfig.enableConsole) {

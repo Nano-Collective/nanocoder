@@ -4,6 +4,7 @@ import { existsSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
 import type { CachedModelsData } from './models-types.js';
+import { getCachePath } from '../config/platform-dirs.js';
 import {
 	readCache,
 	writeCache,
@@ -14,17 +15,7 @@ import {
 let actualCachePath: string;
 
 async function getCacheFilePath(): Promise<string> {
-	// Import dynamically to avoid module resolution issues during testing
-	const { xdgCache } = await import('xdg-basedir');
-	const path = await import('node:path');
-
-	const DEFAULT_CACHE_DIR =
-		process.platform === 'darwin'
-			? path.join(homedir(), 'Library', 'Caches')
-			: path.join(homedir(), '.cache');
-
-	const cacheBase = xdgCache || DEFAULT_CACHE_DIR;
-	return path.join(cacheBase, 'nanocoder', 'models.json');
+	return join(getCachePath(), 'models.json');
 }
 
 // ============================================================================
@@ -251,13 +242,7 @@ test('os.homedir() resolves correctly when HOME env is undefined (unlike process
 });
 
 test('actual cache path does not contain literal ~', async t => {
-	const {xdgCache} = await import('xdg-basedir');
-	const DEFAULT_CACHE_DIR =
-		process.platform === 'darwin'
-			? join(homedir(), 'Library', 'Caches')
-			: join(homedir(), '.cache');
-	const cacheBase = xdgCache || DEFAULT_CACHE_DIR;
-	const cachePath = join(cacheBase, 'nanocoder', 'models.json');
+	const cachePath = join(getCachePath(), 'models.json');
 
 	t.false(cachePath.includes('~'), `Cache path must not contain literal ~: ${cachePath}`);
 	// The suite points XDG_CACHE_HOME at a temp dir (test-utils/isolated-models-cache),
