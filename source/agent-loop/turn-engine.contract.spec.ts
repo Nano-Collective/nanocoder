@@ -10,7 +10,10 @@ import {
 } from '@/hooks/chat-handler/utils/headless-retry-guards';
 import {setToolManagerGetter, setToolRegistryGetter} from '@/message-handler';
 import {runPlainConversation} from '@/plain/conversation';
+import {SubagentExecutor} from '@/subagents/subagent-executor';
+import {getSubagentLoader} from '@/subagents/subagent-loader';
 import type {ToolManager} from '@/tools/tool-manager';
+import {setGlobalToolApprovalHandler} from '@/utils/tool-approval-queue';
 import type {
 	AISDKCoreTool,
 	LLMChatResponse,
@@ -25,7 +28,10 @@ import type {
 // loop. Each runner reduces its frontend's outcome to the same observation,
 // so a guard or retry that one loop gets and another does not fails here
 // instead of drifting silently. Frontends join as they move onto the shared
-// turn engine (source/agent-loop/turn-engine.ts).
+// turn engine (source/agent-loop/turn-engine.ts). A frontend that runs with
+// some engine behaviour switched off says so in its runner, and the scenario
+// asserts what it does instead, so the gap is written down rather than
+// skipped.
 
 process.env.NO_COLOR = '1';
 
@@ -89,11 +95,24 @@ function makeToolManager(): ToolManager {
 				: undefined,
 		getToolValidator: () => undefined,
 		isReadOnly: () => true,
+		// What the subagent executor reads.
+		getAllTools: () => Object.fromEntries(TOOLS.map(name => [name, {}])),
+		getToolHandler: (name: string) =>
+			TOOLS.includes(name) ? probeHandler : undefined,
+		filterToolNamesForMode: (names: string[]) => names,
+		getOwnerSkill: () => undefined,
+		getToolFormatter: () => undefined,
+		getStreamingFormatter: () => undefined,
 	} as unknown as ToolManager;
 }
 
 // The run in progress, so the tool registry can record what executed.
 let active: Observation | undefined;
+
+const probeHandler = async () => {
+	active?.executed.push('probe');
+	return 'probed';
+};
 
 const newObservation = (): Observation => {
 	active = {end: 'completed', requests: [], offered: [], executed: []};
@@ -158,9 +177,62 @@ const acpRunner: Runner = async scenario => {
 	return observation;
 };
 
-const runners: Array<[string, Runner]> = [
-	['plain', plainRunner],
-	['acp', acpRunner],
+const subagentRunner: Runner = async scenario => {
+	const observation = newObservation();
+	const controller = new AbortController();
+	if (scenario.abortBeforeStart) controller.abort();
+	const executor = new SubagentExecutor(
+		makeToolManager(),
+		makeClient(scenario.replies, observation),
+	);
+	const result = await executor.execute(
+		{subagent_type: 'explore', description: 'go'},
+		controller.signal,
+		0,
+		undefined,
+		undefined,
+		{tools: TOOLS},
+	);
+	observation.end = result.success
+		? 'completed'
+		: result.error === 'Aborted'
+			? 'cancelled'
+			: 'stopped';
+	return observation;
+};
+
+interface FrontendUnderTest {
+	name: string;
+	run: Runner;
+	/**
+	 * Runs with the engine's retry guards, text tool-call parsing and turn
+	 * ceiling. Subagents do not yet: a content-only reply of any kind ends
+	 * the run, and only their own repeated-call check applies.
+	 */
+	guarded: boolean;
+	/** The result an unknown tool gets. */
+	unknownToolResult: RegExp;
+}
+
+const frontends: FrontendUnderTest[] = [
+	{
+		name: 'plain',
+		run: plainRunner,
+		guarded: true,
+		unknownToolResult: /^Unknown tool: nope$/,
+	},
+	{
+		name: 'acp',
+		run: acpRunner,
+		guarded: true,
+		unknownToolResult: /^Unknown tool: nope$/,
+	},
+	{
+		name: 'subagent',
+		run: subagentRunner,
+		guarded: false,
+		unknownToolResult: /'nope' is not available to this subagent/,
+	},
 ];
 
 const text = (content: string): Reply => ({
@@ -180,13 +252,16 @@ const call = (name: string, id = `call-${name}`): Reply => ({
 const lastOf = (messages: Message[] | undefined) =>
 	messages?.[messages.length - 1];
 
+test.before(async () => {
+	await getSubagentLoader().initialize();
+	// A subagent asks the parent's approval handler; approve, as auto-accept.
+	setGlobalToolApprovalHandler(async () => true);
+});
+
 test.beforeEach(() => {
 	setToolManagerGetter(() => null);
 	setToolRegistryGetter(() => ({
-		probe: async () => {
-			active?.executed.push('probe');
-			return 'probed';
-		},
+		probe: probeHandler,
 	}));
 });
 
@@ -195,7 +270,7 @@ test.afterEach.always(() => {
 	reloadAppConfig();
 });
 
-for (const [name, run] of runners) {
+for (const {name, run, guarded, unknownToolResult} of frontends) {
 	test.serial(`[${name}] a content-only reply ends the run`, async t => {
 		const seen = await run({replies: [text('done')]});
 		t.is(seen.end, 'completed');
@@ -220,6 +295,11 @@ for (const [name, run] of runners) {
 	test.serial(`[${name}] nudges an empty turn, then recovers`, async t => {
 		const seen = await run({replies: [text(''), text('done')]});
 		t.is(seen.end, 'completed');
+		if (!guarded) {
+			// The empty reply is the answer.
+			t.is(seen.requests.length, 1);
+			return;
+		}
 		t.deepEqual(lastOf(seen.requests[1]), {
 			role: 'user',
 			content: EMPTY_TURN_NUDGE,
@@ -231,6 +311,11 @@ for (const [name, run] of runners) {
 	test.serial(`[${name}] stops after the empty-turn cap`, async t => {
 		// Default maxEmptyTurns = 2: the first empty reply plus two nudges.
 		const seen = await run({replies: [text(''), text(''), text('')]});
+		if (!guarded) {
+			t.is(seen.end, 'completed');
+			t.is(seen.requests.length, 1);
+			return;
+		}
 		t.is(seen.end, 'stopped');
 		t.is(seen.requests.length, 3);
 	});
@@ -245,6 +330,11 @@ for (const [name, run] of runners) {
 				],
 			});
 			t.is(seen.end, 'completed');
+			if (!guarded) {
+				// The text is not parsed, so it stands as the answer.
+				t.is(seen.requests.length, 1);
+				return;
+			}
 			const [assistant, nudge] = seen.requests[1].slice(-2);
 			t.deepEqual(assistant, {
 				role: 'assistant',
@@ -262,7 +352,7 @@ for (const [name, run] of runners) {
 			t.deepEqual(seen.executed, []);
 			const result = lastOf(seen.requests[1]);
 			t.is(result?.role, 'tool');
-			t.is(result?.content, 'Unknown tool: nope');
+			t.regex(String(result?.content), unknownToolResult);
 		},
 	);
 
@@ -286,6 +376,10 @@ for (const [name, run] of runners) {
 			replies: [{...text('half a'), finishReason: 'length'}, text('done')],
 		});
 		t.is(seen.end, 'completed');
+		if (!guarded) {
+			t.is(seen.requests.length, 1);
+			return;
+		}
 		const [fragment, nudge] = seen.requests[1].slice(-2);
 		t.is(fragment.content, 'half a');
 		t.deepEqual(nudge, {role: 'user', content: TRUNCATED_TURN_INSTRUCTION});
@@ -305,6 +399,11 @@ for (const [name, run] of runners) {
 			const seen = await run({replies: [call('probe'), text('done')]});
 			t.is(seen.end, 'completed');
 			t.deepEqual(seen.executed, ['probe']);
+			if (!guarded) {
+				// No turn ceiling: the second turn still offers tools.
+				t.deepEqual(seen.offered, [TOOLS, TOOLS]);
+				return;
+			}
 			t.deepEqual(seen.offered, [TOOLS, []]);
 			t.regex(
 				String(lastOf(seen.requests[1])?.content),

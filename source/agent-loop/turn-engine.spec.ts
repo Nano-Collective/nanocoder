@@ -136,7 +136,12 @@ test('a call that throws after an abort is reported as aborted', async t => {
 		},
 	} as unknown as LLMClient;
 	const {run} = setup([], {}, {client, signal: controller.signal});
-	t.deepEqual(await run(), {kind: 'aborted', modelCalls: 1});
+	const result = await run();
+	t.is(result.kind, 'aborted');
+	t.is(result.modelCalls, 1);
+	if (result.kind === 'aborted') {
+		t.is((result.error as Error).message, 'aborted by signal');
+	}
 });
 
 test('no system message ends the run before calling the model', async t => {
@@ -228,4 +233,71 @@ test('a rejected call is reported to the adapter before history changes', async 
 	);
 	await run();
 	t.is(historyLength, 1);
+});
+
+test('with the guards and text parsing off, any content-only reply finishes', async t => {
+	const answers: string[] = [];
+	const {run, history} = setup(
+		[{...text('[tool_use: probe]'), toolsDisabled: true}],
+		{
+			onFinalAnswer: ({content}) => {
+				answers.push(content);
+				return {kind: 'finish'};
+			},
+		},
+		{
+			policy: {
+				parseTextToolCalls: false,
+				emptyTurnGuard: false,
+				truncatedTurnGuard: false,
+				repeatedToolCallGuard: false,
+				recordToolFreeTurns: false,
+			},
+		},
+	);
+	t.deepEqual(await run(), {kind: 'completed', modelCalls: 1});
+	t.deepEqual(answers, ['[tool_use: probe]']);
+	// A tool-free turn is not recorded when recordToolFreeTurns is off.
+	t.is(history().length, 1);
+});
+
+test('an empty reply finishes when the empty-turn guard is off', async t => {
+	const {run} = setup([text('')], {}, {policy: {emptyTurnGuard: false}});
+	t.deepEqual(await run(), {kind: 'completed', modelCalls: 1});
+});
+
+test('the repeated-call guard can be switched off', async t => {
+	const {run} = setup(
+		[call('a'), call('a'), call('a'), text('done')],
+		{},
+		{policy: {repeatedToolCallGuard: false}},
+	);
+	t.deepEqual(await run(), {kind: 'completed', modelCalls: 4});
+});
+
+test('onToolCallsEmitted runs before the turn is recorded, onTurnRecorded after', async t => {
+	const seen: Array<[string, number]> = [];
+	const {run, history} = setup([call('a'), text('done')], {
+		onToolCallsEmitted: calls => {
+			seen.push([`emitted:${calls.length}`, history().length]);
+		},
+		onTurnRecorded: () => {
+			seen.push(['recorded', history().length]);
+		},
+	});
+	await run();
+	t.deepEqual(seen, [
+		['emitted:1', 1],
+		['recorded', 2],
+		['recorded', 4],
+	]);
+});
+
+test('a throw from an adapter hook ends the run with that error', async t => {
+	const {run} = setup([call('a')], {
+		onToolCallsEmitted: () => {
+			throw new Error('stuck');
+		},
+	});
+	await t.throwsAsync(run(), {message: 'stuck'});
 });
