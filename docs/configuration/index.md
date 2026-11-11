@@ -96,7 +96,14 @@ variable is the point of the output and the reference is not itself a secret.
 
 ## Environment Variables
 
-Keep API keys out of version control using environment variables. Variables are loaded from shell environment (`.bashrc`, `.zshrc`) or `.env` file in your working directory. Shell variables win over `.env` values. A project `.env` cannot set `NANOCODER_TRUST_DIRECTORY`, `NANOCODER_CONFIG_DIR`, `XDG_CONFIG_HOME`, `APPDATA`, `NANOCODER_MCPSERVERS`, `NANOCODER_MCPSERVERS_FILE`, or `NANOCODER_CI_TRUST_LEVEL`, since it is loaded before the directory trust check; set those in your shell instead.
+Keep API keys out of version control using environment variables. Variables are loaded from shell environment (`.bashrc`, `.zshrc`) or `.env` file in your working directory. Shell variables win over `.env` values. A project `.env` is loaded before the directory trust check, so it cannot set variables that would act before you trust the folder; set those in your shell instead. It cannot set:
+
+- any `NANOCODER_*` variable except `NANOCODER_LOG_LEVEL`, `NANOCODER_CONTEXT_LIMIT`, `NANOCODER_MAX_TURNS` and `NANOCODER_NO_UPDATE_CHECK`
+- variables that make child processes run code at start-up (`NODE_OPTIONS`, `NODE_PATH`, `BASH_ENV`, `ENV`, `ZDOTDIR`, `PROMPT_COMMAND`, `SHELLOPTS`, `BASHOPTS`, `PS4`, `IFS`, `PYTHONPATH`, `PYTHONSTARTUP`, `PERL5OPT`, `PERL5LIB`, `RUBYOPT`, `RUBYLIB`, and anything starting `LD_`, `DYLD_`, `GIT_`, `npm_config_` or `pnpm_config_`)
+- `PATH`, `SHELL`, `EDITOR`, `VISUAL`, `PAGER`, `HOME`, `APPDATA`, `LOCALAPPDATA`, `USERPROFILE` and the `XDG_*` directories
+- TLS and proxy settings (`NODE_TLS_REJECT_UNAUTHORIZED`, `NODE_EXTRA_CA_CERTS`, `SSL_CERT_FILE`, `SSL_CERT_DIR`, `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, `NO_PROXY`)
+
+Names are matched case-insensitively. A key that is skipped is reported in a warning at startup.
 
 ### General
 
