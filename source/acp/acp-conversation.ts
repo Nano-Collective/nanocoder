@@ -9,6 +9,7 @@ import {requestUserChoice} from '@/acp/acp-question';
 import type {AcpSession} from '@/acp/acp-session';
 import {beginTimelineCapture, finishTimelineCapture} from '@/acp/acp-timeline';
 import {type AcpToolCallMeta, buildToolCallMeta} from '@/acp/acp-tool-call';
+import {runTurnEngine} from '@/agent-loop/turn-engine';
 import type {
 	ArtifactDescriptor,
 	UserArtifactKind,
@@ -24,16 +25,7 @@ import {
 	getAppConfig,
 	getRetryLimits,
 } from '@/config/index';
-import {
-	createHeadlessRetryGuards,
-	EMPTY_TURN_NUDGE,
-	malformedToolCallNudge,
-	TRUNCATED_TURN_INSTRUCTION,
-} from '@/hooks/chat-handler/utils/headless-retry-guards';
-import {
-	buildAbandonedTurnMessages,
-	partitionUnknownToolCalls,
-} from '@/hooks/chat-handler/utils/tool-filters';
+import {partitionUnknownToolCalls} from '@/hooks/chat-handler/utils/tool-filters';
 import {processToolUse} from '@/message-handler';
 import {
 	consultPluginPermission,
@@ -44,7 +36,6 @@ import {
 	onSubagentRunEvent,
 	type SubagentRunEvent,
 } from '@/services/subagent-events';
-import {parseToolCalls} from '@/tool-calling/index';
 import {resolveToolApproval} from '@/tools/approval-policy';
 import type {ToolManager} from '@/tools/tool-manager';
 import type {
@@ -52,15 +43,11 @@ import type {
 	DevelopmentMode,
 	LLMClient,
 	Message,
-	ModeOverrides,
-	StreamCallbacks,
 	ToolCall,
 	ToolResult,
 } from '@/types/core';
 import {formatCompactTokenCount} from '@/usage/format';
 import {buildResponseUsage} from '@/usage/response-usage';
-import {maybeAutoCompact} from '@/utils/auto-compact';
-import {capMessagesForModel} from '@/utils/message-capping';
 import {
 	clearReadContentScope,
 	runWithReadContentScope,
@@ -71,13 +58,6 @@ import {
 } from '@/utils/tool-approval-queue';
 import {createCancellationResults} from '@/utils/tool-cancellation';
 import {toOptionString} from '@/utils/type-helpers';
-
-// On the last allowed turn we strip tools and inject this so the model
-// finalizes cleanly instead of stopping mid-task at the turn ceiling.
-const FINAL_TURN_INSTRUCTION =
-	'You have reached the maximum number of tool-execution turns for this run. ' +
-	'Do not call any more tools. Produce your final answer now using only the ' +
-	'information you already have.';
 
 const ARTIFACT_TOOL_KINDS: Record<string, UserArtifactKind> = {
 	write_plan: 'implementation_plan',
@@ -379,12 +359,6 @@ async function runTurn(
 	const maxTurns =
 		getAppConfig().headless?.maxTurns ?? DEFAULT_HEADLESS_MAX_TURNS;
 
-	// The `nanocoder.retries` caps the plain shell applies. Nobody is there to
-	// ask whether to carry on, so a model stuck repeating a call, answering
-	// with nothing or emitting broken tool calls is stopped well short of
-	// maxTurns instead of spending a request on every one of them.
-	const guards = createHeadlessRetryGuards(getRetryLimits());
-
 	// Ends the turn early with the reason shown in the chat. Kept in history as
 	// harness chrome, so a reloaded session shows it but the model never does.
 	const stopWithNotice = async (
@@ -406,549 +380,436 @@ async function runTurn(
 		return withTurnUsage({stopReason});
 	};
 
-	for (let turn = 0; turn < maxTurns; turn++) {
-		if (abortController.signal.aborted) {
-			return withTurnUsage({stopReason: 'cancelled'});
-		}
+	// The client's per-session disabled list as this turn's request saw it.
+	// session/set_mode can arrive at any point in a turn, so the mode is read
+	// live: when the turn starts for the tools offered, and again per call for
+	// approval.
+	let disabledTools: string[] = [];
 
-		// On the final turn, force a tool-free wrap-up so we end with an answer
-		// rather than stopping mid-task at the ceiling.
-		const finalTurn = turn === maxTurns - 1;
-
-		// session/set_mode can arrive at any point in a turn, so the mode is read
-		// live: here for the tools offered, and again per call for approval.
-		const requestMode = session.developmentMode;
-		// The client's per-session list on top of the user's own disabledTools.
-		const disabledTools = session.effectiveDisabledTools();
-		const availableNames = toolManager.getAvailableToolNames(
-			undefined,
-			requestMode,
-			disabledTools,
-		);
-		const tools = finalTurn ? {} : toolManager.getFilteredTools(availableNames);
-
-		const modeOverrides: ModeOverrides = {
-			nonInteractiveMode: true,
-			nonInteractiveAlwaysAllow,
-			nativeToolsDisabled: session.nativeToolsDisabled,
-		};
-
-		let streamedReasoning = '';
-
-		const callbacks: StreamCallbacks = {
-			onReasoningToken: (token: string) => {
-				// Leading whitespace renders to nothing but still opens a thought
-				// section, leaving a bare "Thought for 0s" bubble, so drop it.
-				// Only what's emitted is accumulated: replaySessionHistory re-sends
-				// the stored reasoning verbatim, so anything skipped here has to
-				// stay out of the message or a reloaded session renders differently
-				// from the live one.
-				const text = streamedReasoning ? token : token.trimStart();
-				if (!text) {
-					return;
-				}
-				streamedReasoning += text;
-				conn.sessionUpdate({
-					sessionId: session.sessionId,
-					update: {
-						sessionUpdate: 'agent_thought_chunk',
-						content: {type: 'text', text},
-					},
-				});
-			},
-			onToken: (token: string) => {
-				conn.sessionUpdate({
-					sessionId: session.sessionId,
-					update: {
-						sessionUpdate: 'agent_message_chunk',
-						content: {type: 'text', text: token},
-					},
-				});
-			},
-		};
-
-		const systemMessage = session.systemMessage;
-		if (!systemMessage) {
-			return withTurnUsage({stopReason: 'end_turn'});
-		}
-
-		const sessionConfig = getAppConfig().sessions;
-		const maxMessages = sessionConfig?.maxMessages ?? 1000;
-		const cappedMessages = capMessagesForModel(session.messages, maxMessages);
-
-		const finalTurnNotice: Message[] = finalTurn
-			? [{role: 'user', content: FINAL_TURN_INSTRUCTION}]
-			: [];
-
-		let result: Awaited<ReturnType<LLMClient['chat']>>;
-		try {
-			result = await client.chat(
-				[systemMessage, ...cappedMessages, ...finalTurnNotice],
-				tools,
-				callbacks,
-				abortController.signal,
-				modeOverrides,
-			);
-		} catch (error) {
-			if (abortController.signal.aborted) {
-				return withTurnUsage({stopReason: 'cancelled'});
-			}
-			throw error;
-		}
-
-		recordUsage(result?.usage);
-
-		if (!result || !result.choices || result.choices.length === 0) {
-			return withTurnUsage({stopReason: 'end_turn'});
-		}
-
-		const message = result.choices[0].message;
-		const nativeToolCalls = message.tool_calls || [];
-		const fullContent = message.content || '';
-
-		const xmlParse =
-			result.toolsDisabled && !finalTurn
-				? parseToolCalls(fullContent)
-				: {success: true as const, toolCalls: [], cleanedContent: fullContent};
-
-		if (!xmlParse.success) {
-			// Feed the parse error back so the model can correct itself, as the
-			// plain shell and the interactive loop do, up to the retry cap.
-			const verdict = guards.malformed();
-			if (verdict.action === 'stop') {
-				return stopWithNotice(verdict.message, 'end_turn');
-			}
-			session.messages = [
-				...session.messages,
-				{role: 'assistant', content: fullContent},
-				{
-					role: 'user',
-					content: malformedToolCallNudge(xmlParse.error, xmlParse.examples),
+	const result = await runTurnEngine<'cancelled'>({
+		client,
+		signal: abortController.signal,
+		maxTurns,
+		// The `nanocoder.retries` caps the plain shell applies. Nobody is there
+		// to ask whether to carry on, so a model stuck repeating a call,
+		// answering with nothing or emitting broken tool calls is stopped well
+		// short of maxTurns instead of spending a request on every one of them.
+		retryLimits: getRetryLimits(),
+		adapter: {
+			// The turn writes straight to the session's history, so a throw part
+			// way through keeps the round-trips that already ran.
+			history: {
+				get: () => session.messages,
+				set: messages => {
+					session.messages = messages;
 				},
-			];
-			continue;
-		}
-
-		const allToolCalls: ToolCall[] = [
-			...nativeToolCalls,
-			...xmlParse.toolCalls,
-		];
-		const cleanedContent = xmlParse.cleanedContent;
-
-		const partition = partitionUnknownToolCalls(allToolCalls, toolManager);
-		const {validToolCalls, errorResults} = partition;
-		const {emittedToolCalls, resultsForAbandonedTurn} =
-			buildAbandonedTurnMessages(partition);
-
-		// A fully-empty assistant message (no text, no tool calls) is left out:
-		// providers reject one, and the empty-turn nudge below re-asks without it.
-		const hasAssistantPayload =
-			cleanedContent.trim().length > 0 || emittedToolCalls.length > 0;
-		if (hasAssistantPayload) {
-			session.messages = [
-				...session.messages,
-				{
-					role: 'assistant',
-					content: cleanedContent,
-					tool_calls:
-						emittedToolCalls.length > 0 ? emittedToolCalls : undefined,
-					reasoning: streamedReasoning.trim() ? streamedReasoning : undefined,
-				},
-			];
-		}
-		// Gate on the same view the next turn will send, so the threshold is not
-		// measured against rows the cap already drops from the request.
-		const compactGateInput = capMessagesForModel(session.messages, maxMessages);
-		const compacted = await maybeAutoCompact(
-			compactGateInput,
-			systemMessage,
-			client,
-			result.toolsDisabled ? undefined : tools,
-			{
-				signal: abortController.signal,
-				aggressiveCompact: session.aggressiveCompact,
 			},
-		);
-		// Only adopt the result when compaction actually ran — otherwise
-		// maybeAutoCompact returns the capped view it was handed, and taking it
-		// would discard history the cap only meant to hide from one request.
-		if (compacted !== compactGateInput) {
-			session.messages = compacted;
-		}
-		if (abortController.signal.aborted) {
-			return withTurnUsage({stopReason: 'cancelled'});
-		}
-
-		if (errorResults.length > 0) {
-			// A model stuck re-emitting the same unknown tool is looping too.
-			const repeated = guards.toolCalls(allToolCalls);
-			session.messages = [...session.messages, ...resultsForAbandonedTurn];
-			if (repeated) {
-				return stopWithNotice(repeated, 'max_turn_requests');
-			}
-			continue;
-		}
-
-		if (validToolCalls.length === 0) {
-			if (!cleanedContent.trim()) {
-				const verdict = guards.empty();
-				if (verdict.action === 'stop') {
-					return stopWithNotice(verdict.message, 'end_turn');
-				}
-				session.messages = [
-					...session.messages,
-					{role: 'user', content: EMPTY_TURN_NUDGE},
-				];
-				continue;
-			}
-			// A reply cut off at the output-token limit arrives with no tool
-			// calls, which is what a finished turn looks like. Ask the model to
-			// carry on, capped; on the final turn there is nothing left to
-			// continue into, so the fragment stands.
-			if (result.finishReason === 'length' && !finalTurn) {
-				const verdict = guards.truncated();
-				if (verdict.action === 'retry') {
-					session.messages = [
-						...session.messages,
-						{role: 'user', content: TRUNCATED_TURN_INSTRUCTION},
-					];
-					continue;
-				}
-			}
-
-			if (
-				session.developmentMode === 'plan' &&
-				!wrotePlan &&
-				toolManager
-					.getAvailableToolNames(
-						undefined,
-						session.developmentMode,
-						disabledTools,
-					)
-					.includes('write_plan') &&
-				cleanedContent.trim().length > 0
-			) {
-				const fallbackCall: ToolCall = {
-					id: `write-plan-fallback-${session.sessionId}-${turn}`,
-					function: {
-						name: 'write_plan',
-						arguments: {content: cleanedContent},
+			getSystemMessage: () => session.systemMessage,
+			prepareTurn: () => {
+				// The client's per-session list on top of the user's own
+				// disabledTools.
+				disabledTools = session.effectiveDisabledTools();
+				const availableNames = toolManager.getAvailableToolNames(
+					undefined,
+					session.developmentMode,
+					disabledTools,
+				);
+				return {
+					tools: toolManager.getFilteredTools(availableNames),
+					availableNames,
+					modeOverrides: {
+						nonInteractiveMode: true,
+						nonInteractiveAlwaysAllow,
+						nativeToolsDisabled: session.nativeToolsDisabled,
 					},
 				};
-				const fallbackResult = await executePlanFallback(
-					session,
-					conn,
-					fallbackCall,
-				);
-				session.messages = [
-					...session.messages.slice(0, -1),
-					{
-						...session.messages[session.messages.length - 1],
-						tool_calls: [fallbackCall],
+			},
+			beginModelCall: () => {
+				let streamedReasoning = '';
+				return {
+					callbacks: {
+						onReasoningToken: (token: string) => {
+							// Leading whitespace renders to nothing but still opens a
+							// thought section, leaving a bare "Thought for 0s" bubble, so
+							// drop it. Only what's emitted is accumulated:
+							// replaySessionHistory re-sends the stored reasoning verbatim,
+							// so anything skipped here has to stay out of the message or a
+							// reloaded session renders differently from the live one.
+							const text = streamedReasoning ? token : token.trimStart();
+							if (!text) {
+								return;
+							}
+							streamedReasoning += text;
+							conn.sessionUpdate({
+								sessionId: session.sessionId,
+								update: {
+									sessionUpdate: 'agent_thought_chunk',
+									content: {type: 'text', text},
+								},
+							});
+						},
+						onToken: (token: string) => {
+							conn.sessionUpdate({
+								sessionId: session.sessionId,
+								update: {
+									sessionUpdate: 'agent_message_chunk',
+									content: {type: 'text', text: token},
+								},
+							});
+						},
 					},
-					fallbackResult,
-				];
-				wrotePlan = !fallbackResult.isError;
-			}
-
-			const fallback = finalTurn
-				? null
-				: takeWalkthroughFallback(
-						walkthroughLifecycle,
-						availableNames.includes('write_walkthrough'),
-					);
-			if (fallback) {
-				session.messages = [...session.messages, fallback];
-				continue;
-			}
-			return withTurnUsage({stopReason: 'end_turn'});
-		}
-
-		// Checked before anything runs: the repeat that hits the cap is not
-		// executed.
-		const repeated = guards.toolCalls(allToolCalls);
-		if (repeated) {
-			// Every stored tool call needs a result, or the provider rejects the
-			// session's next prompt.
-			session.messages = [
-				...session.messages,
-				...validToolCalls.map(toolCall => ({
-					tool_call_id: toolCall.id,
-					role: 'tool' as const,
-					name: toolCall.function.name,
-					content: `Error: not run. ${repeated}`,
-				})),
-			];
-			return stopWithNotice(repeated, 'max_turn_requests');
-		}
-
-		const announcedBatch =
-			validToolCalls.length > 1 && !abortController.signal.aborted;
-		if (announcedBatch) {
-			for (const toolCall of validToolCalls) {
-				// withDiff: false - the announcement drops content below, so
-				// there is no reason to read the file to build a diff first.
-				const queuedMeta = await buildToolCallMeta(toolCall, {
-					withDiff: false,
-				});
-				// Content is withheld until the call is about to run: the client
-				// enables its "open diff" affordance off this field, and a diff
-				// registered now would be stale by the time the tool executes.
-				await emitToolCall(session, conn, toolCall, 'pending', {
-					...queuedMeta,
-					content: [],
-				});
-			}
-		}
-
-		// Process tool calls
-		const toolResults: ToolResult[] = [];
-		for (let index = 0; index < validToolCalls.length; index++) {
-			const toolCall = validToolCalls[index];
-			// Stop was pressed: don't start any remaining queued tools. Record a
-			// cancelled result for each so the assistant's tool_calls keep matched
-			// results in history; the turn ends below instead of re-prompting.
-			if (abortController.signal.aborted) {
-				if (announcedBatch) {
-					await emitToolCallUpdate(
-						session,
-						conn,
-						toolCall,
-						'failed',
-						'Cancelled by user',
-					);
-				}
-				toolResults.push({
-					tool_call_id: toolCall.id,
-					role: 'tool',
-					name: toolCall.function.name,
-					content: 'Error: cancelled by user',
-				});
-				continue;
-			}
-
-			// A registered tool the session's current mode does not offer is refused
-			// even if the model names it anyway: the offered list only narrows what
-			// the model sees, and alwaysAllow would otherwise run a hidden tool
-			// unprompted (a mutating tool in plan mode). This also covers a mode
-			// switch after the request (e.g. to plan). Unknown names fall through
-			// to the unknown-tool handling.
-			const toolName = toolCall.function.name;
-			// A tool the session does not offer is refused even if the model names it
-			// anyway. The list is read live, as the mode is: session/load can replace
-			// it at any point in a turn, and a tool the client just turned off must
-			// not run on the strength of the list this request was made with.
-			const disabled = session.effectiveDisabledTools().includes(toolName);
-			if (
-				disabled ||
-				(toolManager.hasTool(toolName) &&
-					!toolManager
+					reasoning: () =>
+						streamedReasoning.trim() ? streamedReasoning : undefined,
+				};
+			},
+			onModelResponse: response => recordUsage(response?.usage),
+			partitionToolCalls: toolCalls =>
+				partitionUnknownToolCalls(toolCalls, toolManager),
+			compactOptions: () => ({aggressiveCompact: session.aggressiveCompact}),
+			onFinalAnswer: async ({content, finalTurn, turn, prepared}) => {
+				if (
+					session.developmentMode === 'plan' &&
+					!wrotePlan &&
+					toolManager
 						.getAvailableToolNames(
 							undefined,
 							session.developmentMode,
 							disabledTools,
 						)
-						.includes(toolName))
-			) {
-				const reason = disabled
-					? `Error: ${toolName} is disabled in this session`
-					: `Error: ${toolName} is not available in ${session.developmentMode} mode`;
-				// A lone call has not been announced yet; give the failed update a
-				// card to land on.
-				if (!announcedBatch) {
+						.includes('write_plan') &&
+					content.trim().length > 0
+				) {
+					const fallbackCall: ToolCall = {
+						id: `write-plan-fallback-${session.sessionId}-${turn}`,
+						function: {
+							name: 'write_plan',
+							arguments: {content},
+						},
+					};
+					const fallbackResult = await executePlanFallback(
+						session,
+						conn,
+						fallbackCall,
+					);
+					session.messages = [
+						...session.messages.slice(0, -1),
+						{
+							...session.messages[session.messages.length - 1],
+							tool_calls: [fallbackCall],
+						},
+						fallbackResult,
+					];
+					wrotePlan = !fallbackResult.isError;
+				}
+
+				const fallback = finalTurn
+					? null
+					: takeWalkthroughFallback(
+							walkthroughLifecycle,
+							prepared.availableNames.includes('write_walkthrough'),
+						);
+				return fallback
+					? {kind: 'continue', messages: [fallback]}
+					: {kind: 'finish'};
+			},
+			executeTools: async validToolCalls => {
+				const announcedBatch =
+					validToolCalls.length > 1 && !abortController.signal.aborted;
+				if (announcedBatch) {
+					for (const toolCall of validToolCalls) {
+						// withDiff: false - the announcement drops content below, so
+						// there is no reason to read the file to build a diff first.
+						const queuedMeta = await buildToolCallMeta(toolCall, {
+							withDiff: false,
+						});
+						// Content is withheld until the call is about to run: the client
+						// enables its "open diff" affordance off this field, and a diff
+						// registered now would be stale by the time the tool executes.
+						await emitToolCall(session, conn, toolCall, 'pending', {
+							...queuedMeta,
+							content: [],
+						});
+					}
+				}
+
+				// Process tool calls
+				const toolResults: ToolResult[] = [];
+				for (let index = 0; index < validToolCalls.length; index++) {
+					const toolCall = validToolCalls[index];
+					// Stop was pressed: don't start any remaining queued tools. Record a
+					// cancelled result for each so the assistant's tool_calls keep matched
+					// results in history; the turn ends below instead of re-prompting.
+					if (abortController.signal.aborted) {
+						if (announcedBatch) {
+							await emitToolCallUpdate(
+								session,
+								conn,
+								toolCall,
+								'failed',
+								'Cancelled by user',
+							);
+						}
+						toolResults.push({
+							tool_call_id: toolCall.id,
+							role: 'tool',
+							name: toolCall.function.name,
+							content: 'Error: cancelled by user',
+						});
+						continue;
+					}
+
+					// A registered tool the session's current mode does not offer is refused
+					// even if the model names it anyway: the offered list only narrows what
+					// the model sees, and alwaysAllow would otherwise run a hidden tool
+					// unprompted (a mutating tool in plan mode). This also covers a mode
+					// switch after the request (e.g. to plan). Unknown names fall through
+					// to the unknown-tool handling.
+					const toolName = toolCall.function.name;
+					// A tool the session does not offer is refused even if the model names it
+					// anyway. The list is read live, as the mode is: session/load can replace
+					// it at any point in a turn, and a tool the client just turned off must
+					// not run on the strength of the list this request was made with.
+					const disabled = session.effectiveDisabledTools().includes(toolName);
+					if (
+						disabled ||
+						(toolManager.hasTool(toolName) &&
+							!toolManager
+								.getAvailableToolNames(
+									undefined,
+									session.developmentMode,
+									disabledTools,
+								)
+								.includes(toolName))
+					) {
+						const reason = disabled
+							? `Error: ${toolName} is disabled in this session`
+							: `Error: ${toolName} is not available in ${session.developmentMode} mode`;
+						// A lone call has not been announced yet; give the failed update a
+						// card to land on.
+						if (!announcedBatch) {
+							await emitToolCall(
+								session,
+								conn,
+								toolCall,
+								'pending',
+								await buildToolCallMeta(toolCall, {withDiff: false}),
+							);
+						}
+						await emitToolCallUpdate(session, conn, toolCall, 'failed', reason);
+						toolResults.push({
+							tool_call_id: toolCall.id,
+							role: 'tool',
+							name: toolName,
+							content: reason,
+						});
+						continue;
+					}
+
+					// Enrich the call with ACP metadata (kind, file locations, and a diff
+					// for edits) so the client can render rich tool cards and previews.
+					const meta = await buildToolCallMeta(toolCall);
+
+					// Notify client about tool call. Already-announced calls get an
+					// update rather than a second tool_call: clients that append on
+					// tool_call (instead of upserting by id) would double-render it.
 					await emitToolCall(
 						session,
 						conn,
 						toolCall,
 						'pending',
-						await buildToolCallMeta(toolCall, {withDiff: false}),
+						meta,
+						announcedBatch ? 'tool_call_update' : 'tool_call',
 					);
-				}
-				await emitToolCallUpdate(session, conn, toolCall, 'failed', reason);
-				toolResults.push({
-					tool_call_id: toolCall.id,
-					role: 'tool',
-					name: toolName,
-					content: reason,
-				});
-				continue;
-			}
 
-			// Enrich the call with ACP metadata (kind, file locations, and a diff
-			// for edits) so the client can render rich tool cards and previews.
-			const meta = await buildToolCallMeta(toolCall);
+					// ask_user is interactive: instead of executing it, surface the
+					// question's options through the client and feed the choice back as
+					// the tool result. We reuse this call's id (just announced) so the
+					// permission request targets a known tool call.
+					if (toolCall.function.name === 'ask_user') {
+						const answer = await handleAskUser(
+							session,
+							conn,
+							toolCall,
+							abortController.signal,
+						);
+						toolResults.push(answer);
+						continue;
+					}
 
-			// Notify client about tool call. Already-announced calls get an
-			// update rather than a second tool_call: clients that append on
-			// tool_call (instead of upserting by id) would double-render it.
-			await emitToolCall(
-				session,
-				conn,
-				toolCall,
-				'pending',
-				meta,
-				announcedBatch ? 'tool_call_update' : 'tool_call',
-			);
-
-			// ask_user is interactive: instead of executing it, surface the
-			// question's options through the client and feed the choice back as
-			// the tool result. We reuse this call's id (just announced) so the
-			// permission request targets a known tool call.
-			if (toolCall.function.name === 'ask_user') {
-				const answer = await handleAskUser(
-					session,
-					conn,
-					toolCall,
-					abortController.signal,
-				);
-				toolResults.push(answer);
-				continue;
-			}
-
-			// Check if approval is needed. resolveToolApproval is the single
-			// authority shared with the interactive loop and plain shell - it
-			// applies yolo and the alwaysAllow list internally.
-			const needsApproval = await evaluateNeedsApproval(
-				toolCall,
-				toolManager,
-				nonInteractiveAlwaysAllow,
-				session.developmentMode,
-			);
-
-			if (needsApproval) {
-				const vote = await consultPluginPermission(
-					toolCall.function.name,
-					toolCall.function.arguments,
-				);
-				if (vote.decision === 'deny') {
-					await emitToolCallUpdate(
-						session,
-						conn,
+					// Check if approval is needed. resolveToolApproval is the single
+					// authority shared with the interactive loop and plain shell - it
+					// applies yolo and the alwaysAllow list internally.
+					const needsApproval = await evaluateNeedsApproval(
 						toolCall,
-						'failed',
-						vote.reason,
+						toolManager,
+						nonInteractiveAlwaysAllow,
+						session.developmentMode,
 					);
-					toolResults.push({
-						tool_call_id: toolCall.id,
-						role: 'tool',
-						name: toolCall.function.name,
-						content: `Tool call denied: ${vote.reason}`,
-					});
-					continue;
-				}
 
-				const permission = await requestToolPermission(
-					session,
-					toolCall,
-					conn,
-					meta,
-					abortController.signal,
-				);
-
-				if (permission === 'cancelled') {
-					await emitToolCallUpdate(
-						session,
-						conn,
-						toolCall,
-						'failed',
-						'Cancelled by user',
-					);
-					if (announcedBatch) {
-						for (const queued of validToolCalls.slice(index + 1)) {
+					if (needsApproval) {
+						const vote = await consultPluginPermission(
+							toolCall.function.name,
+							toolCall.function.arguments,
+						);
+						if (vote.decision === 'deny') {
 							await emitToolCallUpdate(
 								session,
 								conn,
-								queued,
+								toolCall,
+								'failed',
+								vote.reason,
+							);
+							toolResults.push({
+								tool_call_id: toolCall.id,
+								role: 'tool',
+								name: toolCall.function.name,
+								content: `Tool call denied: ${vote.reason}`,
+							});
+							continue;
+						}
+
+						const permission = await requestToolPermission(
+							session,
+							toolCall,
+							conn,
+							meta,
+							abortController.signal,
+						);
+
+						if (permission === 'cancelled') {
+							await emitToolCallUpdate(
+								session,
+								conn,
+								toolCall,
 								'failed',
 								'Cancelled by user',
 							);
+							if (announcedBatch) {
+								for (const queued of validToolCalls.slice(index + 1)) {
+									await emitToolCallUpdate(
+										session,
+										conn,
+										queued,
+										'failed',
+										'Cancelled by user',
+									);
+								}
+							}
+							toolResults.push(
+								...createCancellationResults(validToolCalls.slice(index)),
+							);
+							return {kind: 'stop', payload: 'cancelled', results: toolResults};
+						}
+
+						if (permission === 'denied') {
+							await emitToolCallUpdate(
+								session,
+								conn,
+								toolCall,
+								'failed',
+								'Denied by user',
+							);
+							toolResults.push({
+								tool_call_id: toolCall.id,
+								role: 'tool',
+								name: toolCall.function.name,
+								content: 'Tool call denied by user',
+							});
+							continue;
 						}
 					}
-					toolResults.push(
-						...createCancellationResults(validToolCalls.slice(index)),
-					);
-					session.messages = [...session.messages, ...toolResults];
-					return withTurnUsage({stopReason: 'cancelled'});
-				}
 
-				if (permission === 'denied') {
+					// Execute tool
+					await emitToolCallUpdate(session, conn, toolCall, 'in_progress');
+
+					const timelineCapture = await beginTimelineCapture(
+						session,
+						toolManager,
+						toolCall,
+						session.messages,
+						meta.title,
+						turnId,
+					);
+
+					const toolResult = await processToolUse(toolCall, {
+						abortSignal: abortController.signal,
+						sessionId: session.sessionId,
+						workingDirectory: session.cwd,
+						...(options.sessionTools && {toolManager: options.sessionTools}),
+						toolCallId: toolCall.id,
+						client,
+					});
+					await finishTimelineCapture(session, timelineCapture);
+
+					// isError covers failures whose text doesn't start with "Error": a
+					// validation failure, or a command that exited non-zero.
+					const status: ToolCallStatus =
+						toolResult.isError || toolResult.content.startsWith('Error')
+							? 'failed'
+							: 'completed';
 					await emitToolCallUpdate(
 						session,
 						conn,
 						toolCall,
-						'failed',
-						'Denied by user',
+						status,
+						toolResult.content,
 					);
-					toolResults.push({
-						tool_call_id: toolCall.id,
-						role: 'tool',
-						name: toolCall.function.name,
-						content: 'Tool call denied by user',
-					});
-					continue;
+					toolResults.push(toolResult);
+					if (status === 'completed') {
+						observeSuccessfulLifecycleTool(walkthroughLifecycle, toolCall);
+						if (toolCall.function.name === 'write_plan') {
+							wrotePlan = true;
+						}
+					}
+
+					// write_tasks replaces the whole task list; mirror it to the client
+					// as an ACP plan update so GUIs can render a live checklist.
+					if (
+						toolCall.function.name === 'write_tasks' &&
+						status === 'completed'
+					) {
+						await emitPlanUpdate(session, conn, toolCall);
+					}
 				}
-			}
 
-			// Execute tool
-			await emitToolCallUpdate(session, conn, toolCall, 'in_progress');
+				return {kind: 'continue', results: toolResults};
+			},
+		},
+	});
 
-			const timelineCapture = await beginTimelineCapture(
-				session,
-				toolManager,
-				toolCall,
-				session.messages,
-				meta.title,
-				turnId,
-			);
-
-			const toolResult = await processToolUse(toolCall, {
-				abortSignal: abortController.signal,
-				sessionId: session.sessionId,
-				workingDirectory: session.cwd,
-				...(options.sessionTools && {toolManager: options.sessionTools}),
-				toolCallId: toolCall.id,
-				client,
-			});
-			await finishTimelineCapture(session, timelineCapture);
-
-			// isError covers failures whose text doesn't start with "Error": a
-			// validation failure, or a command that exited non-zero.
-			const status: ToolCallStatus =
-				toolResult.isError || toolResult.content.startsWith('Error')
-					? 'failed'
-					: 'completed';
-			await emitToolCallUpdate(
-				session,
-				conn,
-				toolCall,
-				status,
-				toolResult.content,
-			);
-			toolResults.push(toolResult);
-			if (status === 'completed') {
-				observeSuccessfulLifecycleTool(walkthroughLifecycle, toolCall);
-				if (toolCall.function.name === 'write_plan') {
-					wrotePlan = true;
-				}
-			}
-
-			// write_tasks replaces the whole task list; mirror it to the client
-			// as an ACP plan update so GUIs can render a live checklist.
-			if (toolCall.function.name === 'write_tasks' && status === 'completed') {
-				await emitPlanUpdate(session, conn, toolCall);
-			}
-		}
-
-		session.messages = [...session.messages, ...toolResults];
-
-		// End the turn here when cancelled - without this the loop would issue
-		// another LLM request before the top-of-turn abort check runs.
-		if (abortController.signal.aborted) {
+	switch (result.kind) {
+		case 'completed':
+		case 'no-response':
+		case 'no-system-message':
+			return withTurnUsage({stopReason: 'end_turn'});
+		case 'aborted':
+		case 'adapter-stop':
 			return withTurnUsage({stopReason: 'cancelled'});
-		}
+		case 'model-error':
+			throw result.error;
+		case 'guard-stop':
+			// Every stored tool call needs a result, or the provider rejects the
+			// session's next prompt.
+			if (result.unrunToolCalls.length > 0) {
+				session.messages = [
+					...session.messages,
+					...result.unrunToolCalls.map(toolCall => ({
+						tool_call_id: toolCall.id,
+						role: 'tool' as const,
+						name: toolCall.function.name,
+						content: `Error: not run. ${result.message}`,
+					})),
+				];
+			}
+			return stopWithNotice(
+				result.message,
+				result.guard === 'repeated-tool-calls'
+					? 'max_turn_requests'
+					: 'end_turn',
+			);
+		case 'max-turns':
+			return withTurnUsage({stopReason: 'max_turn_requests'});
 	}
-
-	return withTurnUsage({stopReason: 'max_turn_requests'});
 }
 
 async function executePlanFallback(
