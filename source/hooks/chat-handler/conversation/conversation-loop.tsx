@@ -1241,6 +1241,10 @@ export const processAssistantResponse = async (
 					const builder = new MessageBuilder(updatedMessages);
 					builder.addToolResults(turnResults);
 					setMessages(builder.build());
+					// The turn ends here, so say so: without this the app stays
+					// "mid-conversation" and never drains messages queued while
+					// the prompt was up.
+					onConversationComplete?.();
 					return;
 				}
 
