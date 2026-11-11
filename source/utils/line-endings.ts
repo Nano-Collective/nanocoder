@@ -19,6 +19,24 @@ export function toLineEnding(text: string, ending: LineEnding): string {
 }
 
 /**
+ * Fit whole-file content to the line endings of the file it replaces.
+ *
+ * Models send LF, so writing their content over a CRLF file would turn every
+ * line into LF. When the existing file is mostly CRLF, every line break in
+ * `content` is written as CRLF, including in content that mixes both. New
+ * files (`existing` is null) and LF files get `content` as sent.
+ */
+export function fitContentToLineEndings(
+	existing: string | null,
+	content: string,
+): string {
+	if (existing === null || detectLineEnding(existing) === '\n') {
+		return content;
+	}
+	return toLineEnding(content, '\r\n');
+}
+
+/**
  * Fit an edit's search and replacement text to the file's line endings.
  *
  * Models send LF. On a CRLF file that would miss any multi-line match and
