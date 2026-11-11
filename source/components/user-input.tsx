@@ -135,17 +135,23 @@ async function getMCPResourceCompletions(partialPath: string): Promise<
 }
 
 // Legend for the `?` overlay. Keep in sync with the bindings handled below,
-// in TextInput (readline keys) and in App (Ctrl+S, Ctrl+C, Ctrl+G).
+// in TextInput (readline keys), in App (Ctrl+S, Ctrl+C), in InteractiveApp
+// (Ctrl+G, Esc to cancel/recall) and in ChatHistory (PgUp/PgDn, wheel).
+// Write keys as `Ctrl+X`, the same notation the status line uses;
+// user-input.spec.tsx checks every Ctrl binding in those files is listed here.
 export const KEYBOARD_SHORTCUTS: Array<[keybind: string, label: string]> = [
 	['Enter', 'Submit prompt'],
 	['Ctrl+J / Opt+Enter', 'New line'],
 	['↑ / ↓', 'Prompt history'],
 	['Tab', 'Accept suggestion / insert suggested command'],
 	['Ctrl+A / Ctrl+E', 'Move to start / end of line'],
+	['Ctrl+← / Ctrl+→', 'Move back / forward one word'],
 	['Ctrl+W', 'Delete previous word'],
 	['Ctrl+U / Ctrl+K', 'Delete to start / end of line'],
+	['Ctrl+Z / Ctrl+Y', 'Undo / redo the last edit'],
 	['Esc Esc', 'Clear input (one Esc dismisses a suggested command)'],
 	['Ctrl+V / Ctrl+X', 'Attach clipboard image / remove last image'],
+	['↓ then Enter / Delete', 'Pick a queued message, then edit it / remove it'],
 	['Shift+Tab', 'Cycle development mode'],
 	['Ctrl+O', 'Toggle compact tool output'],
 	['Ctrl+N', 'Toggle reasoning traces'],
@@ -153,7 +159,8 @@ export const KEYBOARD_SHORTCUTS: Array<[keybind: string, label: string]> = [
 	['Ctrl+T', 'Collapse / expand task list'],
 	['Ctrl+S', 'Attach / cycle running subagents'],
 	['Ctrl+G', 'Voice push-to-talk (when /voice is on)'],
-	['Esc', 'Cancel response'],
+	['Esc', 'Cancel response (before it starts: back to your prompt)'],
+	['PgUp / PgDn / wheel', 'Scroll the transcript (fullscreen)'],
 	['Ctrl+C', 'Exit'],
 	['?', 'Toggle this overlay (in an empty prompt)'],
 ];
