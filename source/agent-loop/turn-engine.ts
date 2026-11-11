@@ -45,8 +45,8 @@
  * - `onTurnRecorded`      the turn is in history and compaction has run.
  * - `on*Retry` / ...      notifications for status lines.
  *
- * `TurnEnginePolicy` switches engine behaviour off for a frontend that does
- * not have it yet (subagents run without the retry guards or text parsing).
+ * `TurnEnginePolicy` switches engine behaviour off for a frontend that
+ * handles it differently. Plain, ACP and subagents run with everything on.
  *
  * The engine never renders and never formats a frontend's outcome. It returns
  * a `TurnEngineResult`, and each frontend maps that onto its own shape
@@ -179,11 +179,6 @@ export interface TurnEnginePolicy {
 	truncatedTurnGuard?: boolean;
 	/** Stop when the same tool calls repeat `maxRepeatedToolCalls` times. */
 	repeatedToolCallGuard?: boolean;
-	/**
-	 * Record turns that emitted no tool calls in history (and gate
-	 * compaction on them). Off for a run that only returns its final answer.
-	 */
-	recordToolFreeTurns?: boolean;
 }
 
 export interface TurnEngineOptions<S> {
@@ -228,7 +223,6 @@ export async function runTurnEngine<S>(
 		emptyTurnGuard = true,
 		truncatedTurnGuard = true,
 		repeatedToolCallGuard = true,
-		recordToolFreeTurns = true,
 	} = options.policy ?? {};
 	const {history} = adapter;
 	const guards = createHeadlessRetryGuards(retryLimits);
@@ -344,39 +338,36 @@ export async function runTurnEngine<S>(
 		const {emittedToolCalls, resultsForAbandonedTurn} =
 			buildAbandonedTurnMessages(partition);
 
-		if (recordToolFreeTurns || emittedToolCalls.length > 0) {
-			// A fully-empty assistant message (no text, no tool calls) is left out:
-			// providers reject one, and the empty-turn nudge below re-asks without it.
-			if (content.trim() || emittedToolCalls.length > 0) {
-				append({
-					role: 'assistant',
-					content,
-					tool_calls:
-						emittedToolCalls.length > 0 ? emittedToolCalls : undefined,
-					reasoning: sink.reasoning(),
-				});
-			}
+		// A fully-empty assistant message (no text, no tool calls) is left out:
+		// providers reject one, and the empty-turn nudge below re-asks without it.
+		if (content.trim() || emittedToolCalls.length > 0) {
+			append({
+				role: 'assistant',
+				content,
+				tool_calls: emittedToolCalls.length > 0 ? emittedToolCalls : undefined,
+				reasoning: sink.reasoning(),
+			});
+		}
 
-			// Gate on the same view the next turn will send, so the threshold is not
-			// measured against rows the cap already drops from the request.
-			const compactGateInput = capMessagesForModel(history.get(), maxMessages);
-			const compacted = await maybeAutoCompact(
-				compactGateInput,
-				systemMessage,
-				client,
-				result.toolsDisabled ? undefined : tools,
-				{...adapter.compactOptions?.(), signal},
-			);
-			// Only adopt the result when compaction actually ran — otherwise
-			// maybeAutoCompact returns the capped view it was handed, and taking it
-			// would discard history the cap only meant to hide from one request.
-			if (compacted !== compactGateInput) {
-				history.set(compacted);
-			}
-			adapter.onTurnRecorded?.();
-			if (signal.aborted) {
-				return stop({kind: 'aborted'});
-			}
+		// Gate on the same view the next turn will send, so the threshold is not
+		// measured against rows the cap already drops from the request.
+		const compactGateInput = capMessagesForModel(history.get(), maxMessages);
+		const compacted = await maybeAutoCompact(
+			compactGateInput,
+			systemMessage,
+			client,
+			result.toolsDisabled ? undefined : tools,
+			{...adapter.compactOptions?.(), signal},
+		);
+		// Only adopt the result when compaction actually ran — otherwise
+		// maybeAutoCompact returns the capped view it was handed, and taking it
+		// would discard history the cap only meant to hide from one request.
+		if (compacted !== compactGateInput) {
+			history.set(compacted);
+		}
+		adapter.onTurnRecorded?.();
+		if (signal.aborted) {
+			return stop({kind: 'aborted'});
 		}
 
 		if (errorResults.length > 0) {
