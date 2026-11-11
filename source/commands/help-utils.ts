@@ -1,4 +1,5 @@
 import {SETTINGS_TAB_IDS} from '@/app/components/settings-constants';
+import {findCommandAlias, getAliasesFor} from '@/commands/aliases';
 import type {Command} from '@/types/index';
 
 export const HELP_CATEGORY_ORDER = [
@@ -36,17 +37,14 @@ const CATEGORY_COMMANDS: Record<HelpCategory, readonly string[]> = {
 		'rename',
 		'resume',
 		'retry',
-		'schedule',
 		'share',
 		'tasks',
 	],
 	'Model & Configuration': [
-		'codex-login',
 		'context-max',
-		'copilot-login',
 		'init',
+		'login',
 		'model',
-		'model-database',
 		'setup-config',
 		'settings',
 		'tune',
@@ -59,10 +57,8 @@ const CATEGORY_COMMANDS: Record<HelpCategory, readonly string[]> = {
 		'explorer',
 		'firewall',
 		'ide',
-		'macros',
 		'mcp',
 		'memory',
-		'remember',
 		'repomap',
 		'review',
 		'skills',
@@ -75,7 +71,6 @@ const CATEGORY_COMMANDS: Record<HelpCategory, readonly string[]> = {
 		'help',
 		'lsp',
 		'privacy',
-		'quit',
 		'stats',
 		'status',
 		'tip',
@@ -196,19 +191,33 @@ const COMMAND_HELP_OVERRIDES: Record<string, CommandHelpOverrides> = {
 		options: ['--preset <react|nextjs|rust>', '--force', '--lean'],
 		examples: ['/init', '/init --preset react', '/init --force --lean'],
 	},
+	login: {
+		usage: '/login <codex|copilot> [provider name]',
+		options: ['codex [provider name]', 'copilot [provider name]'],
+		examples: ['/login codex', '/login copilot', '/login copilot Work Copilot'],
+	},
 	model: {
-		usage: '/model',
-		examples: ['/model'],
+		usage: '/model [browse]',
+		options: ['browse'],
+		examples: ['/model', '/model browse'],
 	},
 	memory: {
-		usage: '/memory [list|ls|delete|rm <id>|clear|propose|accept <n>]',
-		options: ['list|ls', 'delete|rm <id>', 'clear', 'propose', 'accept <n>'],
-		examples: ['/memory', '/memory delete 12ab34cd', '/memory propose'],
-	},
-	remember: {
-		usage: '/remember [--category <name>] <memory>',
-		options: ['--category <name>'],
-		examples: ['/remember --category architecture Use TypeScript'],
+		usage:
+			'/memory [list|ls|add [--category <name>] <text>|delete|rm <id>|clear|propose|accept <n>]',
+		options: [
+			'list|ls',
+			'add [--category|-c <name>] <text>',
+			'delete|rm <id>',
+			'clear',
+			'propose',
+			'accept <n>',
+		],
+		examples: [
+			'/memory',
+			'/memory add --category architecture Use TypeScript',
+			'/memory delete 12ab34cd',
+			'/memory propose',
+		],
 	},
 	privacy: {
 		usage: '/privacy inspect <text>',
@@ -252,13 +261,14 @@ const COMMAND_HELP_OVERRIDES: Record<string, CommandHelpOverrides> = {
 	},
 	skills: {
 		usage:
-			'/skills [show|create|check|promote|demote] <name> [--force] [--move]',
+			'/skills [show|create|check|promote|demote <name> [--force] [--move]|schedule]',
 		options: [
 			'show <name>',
 			'create <name>',
 			'check <name>',
 			'promote <name> [--force] [--move]',
 			'demote <name> [--force] [--move]',
+			'schedule (list cron-triggered skills)',
 		],
 		examples: [
 			'/skills',
@@ -323,12 +333,28 @@ const CATEGORY_BY_COMMAND = new Map<string, HelpCategory>(
 	),
 );
 
+/**
+ * Old names that now run this command (see `aliases.ts`), shown on its help
+ * page. One that inserts a subcommand says so: `remember (= /memory add)`.
+ */
+function getCommandAliases(commandName: string): string[] {
+	return [
+		...(COMMAND_HELP_OVERRIDES[commandName]?.aliases ?? []),
+		...getAliasesFor(commandName).map(alias =>
+			alias.args?.length
+				? `${alias.name} (= /${alias.target} ${alias.args.join(' ')})`
+				: alias.name,
+		),
+	];
+}
+
 export function getCommandHelpDetails(command: Command): CommandHelpDetails {
 	const overrides = COMMAND_HELP_OVERRIDES[command.name];
+	const aliases = getCommandAliases(command.name);
 	return {
 		category: getCommandHelpCategory(command.name),
 		usage: overrides?.usage ?? `/${command.name}`,
-		...(overrides?.aliases ? {aliases: overrides.aliases} : {}),
+		...(aliases.length > 0 ? {aliases} : {}),
 		...(overrides?.options ? {options: overrides.options} : {}),
 		...(overrides?.examples ? {examples: overrides.examples} : {}),
 	};
@@ -348,6 +374,12 @@ export function findHelpCommand(
 ): Command | undefined {
 	const normalizedName = requestedName.trim().replace(/^\/+/, '').toLowerCase();
 	if (!normalizedName) return undefined;
+
+	// `/help remember` shows the command the old name now runs.
+	const alias = findCommandAlias(normalizedName);
+	if (alias) {
+		return commands.find(command => command.name === alias.target);
+	}
 
 	return commands.find(command => {
 		if (command.name.toLowerCase() === normalizedName) return true;
@@ -370,6 +402,7 @@ export function groupHelpCommands(
 	const grouped = new Map<HelpCategory, Command[]>();
 
 	for (const command of commands) {
+		if (command.hidden) continue;
 		const category = getCommandHelpCategory(command.name);
 		const categoryCommands = grouped.get(category) ?? [];
 		categoryCommands.push(command);

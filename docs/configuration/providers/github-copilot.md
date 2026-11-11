@@ -24,7 +24,7 @@ The `sdkProvider: "github-copilot"` field enables the GitHub Copilot authenticat
 ## Setup
 
 1. Ensure you have an active [GitHub Copilot subscription](https://github.com/features/copilot)
-2. Log in via GitHub's device OAuth flow, either inside Nanocoder with `/copilot-login [provider-name]` or from a shell with `nanocoder copilot login [provider-name]`
+2. Log in via GitHub's device OAuth flow, either inside Nanocoder with `/login copilot [provider-name]` or from a shell with `nanocoder copilot login [provider-name]`
 3. Credentials are cached locally and refreshed automatically
 
 Credentials are stored under the provider name you log in with, and looked up by the exact `name` of the provider entry. Both commands default to `GitHub Copilot`, as does the `/settings providers` wizard. If you name the provider something else, pass the same name when logging in, for example `nanocoder copilot login "Work Copilot"`.

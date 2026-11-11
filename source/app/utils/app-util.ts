@@ -5,6 +5,7 @@ import {
 } from '@/app/components/settings-constants';
 import {parseInput} from '@/command-parser';
 import {commandRegistry} from '@/commands';
+import {expandCommandAlias} from '@/commands/aliases';
 import {CodexLogin} from '@/commands/codex-login';
 import {CopilotLogin} from '@/commands/copilot-login';
 import {createStatsDisplayElement} from '@/commands/stats';
@@ -71,7 +72,6 @@ import {handleResumeCommand} from './handlers/session-handler';
 const SPECIAL_COMMANDS = {
 	CLEAR: 'clear',
 	MODEL: 'model',
-	MODEL_DATABASE: 'model-database',
 	SETTINGS: 'settings',
 	STATUS: 'status',
 	CHECKPOINT: 'checkpoint',
@@ -80,6 +80,8 @@ const SPECIAL_COMMANDS = {
 	TUNE: 'tune',
 	RENAME: 'rename',
 } as const;
+
+const MODEL_BROWSE_SUBCOMMAND = 'browse';
 
 /** Retired in favour of `/settings`; forwarded so they don't error out. */
 const RETIRED_SETUP_COMMANDS: Record<string, SettingsTabId> = {
@@ -223,9 +225,13 @@ async function handleSpecialCommand(
 
 	// Commands that just switch the app into a mode and complete share the
 	// exact same shape, so dispatch them from a table instead of the switch.
+	// `/model browse` (formerly /model-database) opens the models.dev browser
+	// instead of the configured-model picker.
 	const enterModeCommands: Record<string, () => void> = {
-		[SPECIAL_COMMANDS.MODEL]: onEnterModelSelectionMode,
-		[SPECIAL_COMMANDS.MODEL_DATABASE]: onEnterModelDatabaseMode,
+		[SPECIAL_COMMANDS.MODEL]:
+			commandArgs?.[0]?.toLowerCase() === MODEL_BROWSE_SUBCOMMAND
+				? onEnterModelDatabaseMode
+				: onEnterModelSelectionMode,
 		[SPECIAL_COMMANDS.EXPLORER]: onEnterExplorerMode,
 		[SPECIAL_COMMANDS.IDE]: options.onEnterIdeSelectionMode,
 		[SPECIAL_COMMANDS.TUNE]: options.onEnterTune,
@@ -368,58 +374,6 @@ async function handleCheckpointLoad(
 }
 
 /**
- * Handles /copilot-login as a live component.
- * Returns true if handled.
- */
-function handleCopilotLogin(
-	commandParts: string[],
-	options: MessageSubmissionOptions,
-): boolean {
-	if (commandParts[0] !== 'copilot-login') {
-		return false;
-	}
-
-	const {
-		setLiveComponent,
-		setIsToolExecuting,
-		onAddToChatQueue,
-		onCommandComplete,
-	} = options;
-
-	const providerName = commandParts[1]?.trim() || 'GitHub Copilot';
-
-	setIsToolExecuting(true);
-
-	setLiveComponent(
-		React.createElement(CopilotLogin, {
-			key: generateKey('copilot-login-live'),
-			providerName,
-			onDone: result => {
-				setLiveComponent(null);
-				setIsToolExecuting(false);
-
-				if (result.success) {
-					onAddToChatQueue(
-						successMsg(
-							`Logged in. Credentials saved for "${providerName}".`,
-							'copilot-login-done',
-						),
-					);
-				} else {
-					onAddToChatQueue(
-						errorMsg(result.error ?? 'Login failed.', 'copilot-login-error'),
-					);
-				}
-
-				onCommandComplete?.();
-			},
-		}),
-	);
-
-	return true;
-}
-
-/**
  * Handles /stats as a live component so ←/→ can switch ranges without the
  * chat composer swallowing the keys.
  * Returns true if handled.
@@ -481,17 +435,38 @@ function handleStatsCommand(
 	return true;
 }
 
+/** Device-flow login targets for `/login <target> [providerName]`. */
+const LOGIN_TARGETS = {
+	codex: {
+		component: CodexLogin,
+		defaultProvider: 'ChatGPT',
+		keyPrefix: 'codex-login',
+	},
+	copilot: {
+		component: CopilotLogin,
+		defaultProvider: 'GitHub Copilot',
+		keyPrefix: 'copilot-login',
+	},
+} as const;
+
 /**
- * Handles /codex-login as a live component.
- * Returns true if handled.
+ * Handles `/login codex|copilot [providerName]` (and the old `/codex-login`
+ * and `/copilot-login`, which expand to it) as a live component. Returns true
+ * if handled; `/login` without a known target falls through to the command's
+ * usage message.
  */
-function handleCodexLogin(
+function handleLoginCommand(
 	commandParts: string[],
 	options: MessageSubmissionOptions,
 ): boolean {
-	if (commandParts[0] !== 'codex-login') {
+	if (commandParts[0] !== 'login') {
 		return false;
 	}
+	const targetName = commandParts[1]?.toLowerCase();
+	if (targetName !== 'codex' && targetName !== 'copilot') {
+		return false;
+	}
+	const target = LOGIN_TARGETS[targetName];
 
 	const {
 		setLiveComponent,
@@ -500,13 +475,14 @@ function handleCodexLogin(
 		onCommandComplete,
 	} = options;
 
-	const providerName = commandParts[1]?.trim() || 'ChatGPT';
+	const providerName =
+		commandParts.slice(2).join(' ').trim() || target.defaultProvider;
 
 	setIsToolExecuting(true);
 
 	setLiveComponent(
-		React.createElement(CodexLogin, {
-			key: generateKey('codex-login-live'),
+		React.createElement(target.component, {
+			key: generateKey(`${target.keyPrefix}-live`),
 			providerName,
 			onDone: result => {
 				setLiveComponent(null);
@@ -516,12 +492,15 @@ function handleCodexLogin(
 					onAddToChatQueue(
 						successMsg(
 							`Logged in. Credentials saved for "${providerName}".`,
-							'codex-login-done',
+							`${target.keyPrefix}-done`,
 						),
 					);
 				} else {
 					onAddToChatQueue(
-						errorMsg(result.error ?? 'Login failed.', 'codex-login-error'),
+						errorMsg(
+							result.error ?? 'Login failed.',
+							`${target.keyPrefix}-error`,
+						),
 					);
 				}
 
@@ -659,7 +638,30 @@ async function handleSlashCommand(
 		return;
 	}
 
+	// Old command names (/quit, /remember, /codex-login, ...) are rewritten to
+	// the command they were folded into. Done after the custom-command and MCP
+	// checks so a project command that shares an old name still wins, as it
+	// did before the rename.
+	const expanded = expandCommandAlias(message);
+	if (expanded === message) {
+		await handleRegisteredSlashCommand(message, options);
+		return;
+	}
+	await handleRegisteredSlashCommand(expanded, {
+		...options,
+		commandArgs: expanded.slice(1).trim().split(/\s+/).slice(1),
+	});
+}
+
+/**
+ * Handles a slash command that resolves to a built-in (registry) command.
+ */
+async function handleRegisteredSlashCommand(
+	message: string,
+	options: MessageSubmissionOptions,
+): Promise<void> {
 	const rawParts = message.slice(1).trim().split(/\s+/);
+	const commandName = rawParts[0];
 
 	// Only commands that actually read once-scoped settings parse inline
 	// overrides. Every other command - especially free-text ones like
@@ -760,8 +762,7 @@ async function dispatchSlashCommand(
 		)
 	)
 		return;
-	if (handleCopilotLogin(commandParts, options)) return;
-	if (handleCodexLogin(commandParts, options)) return;
+	if (handleLoginCommand(commandParts, options)) return;
 	if (handleStatsCommand(commandParts, options)) return;
 
 	await handleBuiltInCommand(cleanedMessage, options);

@@ -59,7 +59,7 @@ Nanocoder is a React-based CLI coding agent built with Ink.js that provides loca
 - `source/services/` - Checkpoint manager, bash executor, file snapshots, lifecycle hooks (user shell commands run at fixed points in the agent loop)
 - `source/usage/` - Token/cost usage: breakdown calculator, per-response usage + cost builder (provider-reported tokens priced via models.dev), compact formatters for the per-response indicator, context-window percentage from provider-reported usage. Lifetime usage history lives in `source/stats/`
 - `source/session/` - Chat session persistence (autosave / resume)
-- `source/schedule/` - Cron expression helpers (validate, next run, human-readable labels) used by `/schedule` and skill cron subscriptions
+- `source/schedule/` - Cron expression helpers (validate, next run, human-readable labels) used by `/skills schedule` and skill cron subscriptions
 - `source/subagents/` - Subagent executor (delegated agent runs)
 - `source/auth/` - Copilot / Codex device-flow login
 - `source/lsp/` - Language server client integration
