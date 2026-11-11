@@ -403,6 +403,7 @@ export async function runCiAutoFixFlow(
 			projectRoot,
 			originalBranch: payload.branch,
 			runId: payload.runId,
+			headSha: payload.headSha,
 			trustLevel,
 		});
 	} catch (err) {

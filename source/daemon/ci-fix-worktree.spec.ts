@@ -23,6 +23,7 @@ function git(cwd: string, args: string[]): string {
 async function tempProjectWithFailingBranchCheckedOut(): Promise<{
 	projectRoot: string;
 	remoteDir: string;
+	headSha: string;
 }> {
 	const remoteDir = await mkdtemp(join(tmpdir(), 'ci-fix-remote-'));
 	git(remoteDir, ['init', '--bare', '--initial-branch=main']);
@@ -38,16 +39,18 @@ async function tempProjectWithFailingBranchCheckedOut(): Promise<{
 	git(projectRoot, ['push', 'origin', 'failing-branch']);
 	// Left checked out on failing-branch — the realistic case.
 
-	return {projectRoot, remoteDir};
+	const headSha = git(projectRoot, ['rev-parse', 'HEAD']).trim();
+	return {projectRoot, remoteDir, headSha};
 }
 
 test('auto-fix clones and creates a new branch, even though the failing branch is checked out at projectRoot', async t => {
-	const {projectRoot, remoteDir} = await tempProjectWithFailingBranchCheckedOut();
+	const {projectRoot, remoteDir, headSha} = await tempProjectWithFailingBranchCheckedOut();
 	try {
 		const worktree = await createCiFixWorktree({
 			projectRoot,
 			originalBranch: 'failing-branch',
 			runId: 42,
+			headSha,
 			trustLevel: 'auto-fix',
 		});
 		try {
@@ -72,7 +75,7 @@ test('auto-fix clones and creates a new branch, even though the failing branch i
 });
 
 test('full-commit clones and checks out the failing branch directly, without conflicting with projectRoot\'s own checkout', async t => {
-	const {projectRoot, remoteDir} = await tempProjectWithFailingBranchCheckedOut();
+	const {projectRoot, remoteDir, headSha} = await tempProjectWithFailingBranchCheckedOut();
 	try {
 		// projectRoot itself is already checked out on failing-branch — a
 		// `git worktree add` for the same branch would fail here; cloning
@@ -81,6 +84,7 @@ test('full-commit clones and checks out the failing branch directly, without con
 			projectRoot,
 			originalBranch: 'failing-branch',
 			runId: 42,
+			headSha,
 			trustLevel: 'full-commit',
 		});
 		try {
@@ -103,12 +107,13 @@ test('full-commit clones and checks out the failing branch directly, without con
 });
 
 test('the clone has its own independent commit history from projectRoot', async t => {
-	const {projectRoot, remoteDir} = await tempProjectWithFailingBranchCheckedOut();
+	const {projectRoot, remoteDir, headSha} = await tempProjectWithFailingBranchCheckedOut();
 	try {
 		const worktree = await createCiFixWorktree({
 			projectRoot,
 			originalBranch: 'failing-branch',
 			runId: 1,
+			headSha,
 			trustLevel: 'full-commit',
 		});
 		try {
@@ -134,12 +139,13 @@ test('the clone has its own independent commit history from projectRoot', async 
 });
 
 test('removeCiFixWorktree cleans up the clone directory and is tolerant of an already-gone directory', async t => {
-	const {projectRoot, remoteDir} = await tempProjectWithFailingBranchCheckedOut();
+	const {projectRoot, remoteDir, headSha} = await tempProjectWithFailingBranchCheckedOut();
 	try {
 		const worktree = await createCiFixWorktree({
 			projectRoot,
 			originalBranch: 'failing-branch',
 			runId: 7,
+			headSha,
 			trustLevel: 'auto-fix',
 		});
 		await removeCiFixWorktree(worktree);
@@ -147,6 +153,78 @@ test('removeCiFixWorktree cleans up the clone directory and is tolerant of an al
 
 		// Removing again (directory already gone) must not throw.
 		await t.notThrowsAsync(() => removeCiFixWorktree(worktree));
+	} finally {
+		await rm(projectRoot, {recursive: true, force: true});
+		await rm(remoteDir, {recursive: true, force: true});
+	}
+});
+
+// origin's branch moved on after the run: a fix must still answer the
+// commit that failed, never whatever the tip is now.
+async function pushNewerTip(projectRoot: string): Promise<string> {
+	git(projectRoot, ['commit', '--allow-empty', '-m', 'pushed after the run']);
+	git(projectRoot, ['push', 'origin', 'failing-branch']);
+	return git(projectRoot, ['rev-parse', 'HEAD']).trim();
+}
+
+test('auto-fix starts the fix branch at the failing commit when origin has moved on', async t => {
+	const {projectRoot, remoteDir, headSha} = await tempProjectWithFailingBranchCheckedOut();
+	try {
+		await pushNewerTip(projectRoot);
+		const worktree = await createCiFixWorktree({
+			projectRoot,
+			originalBranch: 'failing-branch',
+			runId: 3,
+			headSha,
+			trustLevel: 'auto-fix',
+		});
+		try {
+			t.is(git(worktree.path, ['rev-parse', 'HEAD']).trim(), headSha);
+		} finally {
+			await removeCiFixWorktree(worktree);
+		}
+	} finally {
+		await rm(projectRoot, {recursive: true, force: true});
+		await rm(remoteDir, {recursive: true, force: true});
+	}
+});
+
+test('full-commit refuses when origin has moved past the failing commit', async t => {
+	const {projectRoot, remoteDir, headSha} = await tempProjectWithFailingBranchCheckedOut();
+	try {
+		await pushNewerTip(projectRoot);
+		await t.throwsAsync(
+			createCiFixWorktree({
+				projectRoot,
+				originalBranch: 'failing-branch',
+				runId: 4,
+				headSha,
+				trustLevel: 'full-commit',
+			}),
+			{message: /moved past the failing commit/},
+		);
+	} finally {
+		await rm(projectRoot, {recursive: true, force: true});
+		await rm(remoteDir, {recursive: true, force: true});
+	}
+});
+
+test('auto-fix refuses a failing commit that is not on the origin branch (a fork with the same branch name)', async t => {
+	const {projectRoot, remoteDir} = await tempProjectWithFailingBranchCheckedOut();
+	try {
+		git(projectRoot, ['checkout', '--orphan', 'fork-main']);
+		git(projectRoot, ['commit', '--allow-empty', '-m', 'fork commit']);
+		const forkSha = git(projectRoot, ['rev-parse', 'HEAD']).trim();
+		await t.throwsAsync(
+			createCiFixWorktree({
+				projectRoot,
+				originalBranch: 'failing-branch',
+				runId: 5,
+				headSha: forkSha,
+				trustLevel: 'auto-fix',
+			}),
+			{message: /not on origin\/failing-branch/},
+		);
 	} finally {
 		await rm(projectRoot, {recursive: true, force: true});
 		await rm(remoteDir, {recursive: true, force: true});
