@@ -13,6 +13,7 @@
  * See `agents/2026-05-20-skills-unification-plan.md` step 8.
  */
 
+import {formatError} from '@/utils/error-formatter';
 import type {Event, EventKind, Subscription} from './types';
 
 export interface SubscriptionDispatcher {
@@ -23,7 +24,15 @@ export class EventRouter {
 	private readonly byKind: Map<EventKind, Subscription[]> = new Map();
 	private readonly byId: Map<string, Subscription> = new Map();
 
-	constructor(private readonly dispatcher: SubscriptionDispatcher) {}
+	constructor(
+		private readonly dispatcher: SubscriptionDispatcher,
+		/** Called once per subscription whose dispatch threw or rejected. */
+		private readonly onDispatchError: (
+			subscription: Subscription,
+			event: Event,
+			error: unknown,
+		) => void = logDispatchError,
+	) {}
 
 	subscribe(subscription: Subscription): void {
 		if (this.byId.has(subscription.id)) {
@@ -62,11 +71,33 @@ export class EventRouter {
 		const candidates = this.byKind.get(event.kind);
 		if (!candidates || candidates.length === 0) return;
 
+		// Every match runs at once. A dispatch resolves only when its whole
+		// triggered run ends, so awaiting them in turn made the second
+		// subscription wait out the first, and one throw skipped the rest.
+		// Per-subscription limits belong to the dispatcher (BackpressureDispatcher).
+		// emit() never rejects: sources fire it with `void`, where a rejection
+		// would be unhandled.
 		const matches = candidates.filter(sub => matchesFilter(sub, event));
-		for (const sub of matches) {
-			await this.dispatcher.dispatch(sub, event);
-		}
+		const results = await Promise.allSettled(
+			matches.map(async sub => this.dispatcher.dispatch(sub, event)),
+		);
+		results.forEach((result, i) => {
+			const sub = matches[i];
+			if (result.status === 'rejected' && sub) {
+				this.onDispatchError(sub, event, result.reason);
+			}
+		});
 	}
+}
+
+function logDispatchError(
+	subscription: Subscription,
+	event: Event,
+	error: unknown,
+): void {
+	console.error(
+		`Subscription "${subscription.id}" failed on ${event.kind}: ${formatError(error)}`,
+	);
 }
 
 export function matchesFilter(sub: Subscription, event: Event): boolean {
@@ -163,11 +194,16 @@ function globToRegex(pattern: string): RegExp {
 		} else if (ch === '*') {
 			const next = pattern[i + 1];
 			if (next === '*') {
-				// `**` matches any characters including `/`
-				out += '.*';
 				i++;
-				// Consume a trailing `/` after `**` so `docs/**` matches `docs`
-				if (pattern[i + 1] === '/') i++;
+				if (pattern[i + 1] === '/') {
+					// Interior **/ needs a directory boundary. Preserve the legacy
+					// trailing **/ behavior for file filters that already use it.
+					out += pattern[i + 2] === undefined ? '.*' : '(?:.*/)?';
+					i++;
+				} else {
+					// A trailing `**` can still span any characters, including `/`.
+					out += '.*';
+				}
 			} else {
 				// `*` matches anything except `/`
 				out += '[^/]*';
@@ -195,7 +231,7 @@ function globToRegex(pattern: string): RegExp {
 	}
 	// `out` is built by the escape loop above: every character is either a
 	// literal escaped with `\\`, or one of the fixed substrings `[^/]`, `.*`,
-	// `[^/]*`, `(?:`, `|`, `)`. There is no user-supplied raw regex syntax in
+	// `[^/]*`, `(?:.*/)?`, `(?:`, `|`, `)`. There is no user-supplied raw regex syntax in
 	// `out`, and the braces were checked for balance before any group opened.
 	// The shape is bounded by the glob length, so ReDoS is not reachable.
 	// nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp

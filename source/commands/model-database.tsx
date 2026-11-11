@@ -1,7 +1,7 @@
 import clipboard from 'clipboardy';
 import {Box, Text, useFocus, useInput} from 'ink';
 import {Tab, Tabs} from 'ink-tab';
-import React, {useEffect, useState} from 'react';
+import {useEffect, useState} from 'react';
 import {isOpenRouterProvider} from '@/ai-sdk-client/providers/openrouter';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {
@@ -13,7 +13,7 @@ import {
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {modelMatchingEngine} from '@/model-database/model-engine';
-import {Colors, Command, ModelEntry} from '@/types/index';
+import {Colors, ModelEntry} from '@/types/index';
 import {errorMsg, successMsg} from '@/utils/message-factory';
 import {addToMessageQueue} from '@/utils/message-queue';
 
@@ -214,7 +214,7 @@ function ModelDatabaseDisplay({
 	if (loading) {
 		return (
 			<TitledBoxWithPreferences
-				title="/model-database"
+				title="/model browse"
 				width={boxWidth}
 				borderColor={colors.primary}
 				paddingX={2}
@@ -228,7 +228,7 @@ function ModelDatabaseDisplay({
 	if (error) {
 		return (
 			<TitledBoxWithPreferences
-				title="/model-database"
+				title="/model browse"
 				width={boxWidth}
 				borderColor={colors.error}
 				paddingX={2}
@@ -241,7 +241,7 @@ function ModelDatabaseDisplay({
 
 	return (
 		<TitledBoxWithPreferences
-			title="/model-database"
+			title="/model browse"
 			width={boxWidth}
 			borderColor={colors.primary}
 			paddingX={2}
@@ -470,11 +470,3 @@ function ModelItem({model, colors}: {model: ModelEntry; colors: Colors}) {
 
 // Export the display component for use in app.tsx
 export {ModelDatabaseDisplay};
-
-export const modelDatabaseCommand: Command = {
-	name: 'model-database',
-	description: 'Browse coding models from OpenRouter',
-	handler: (_args: string[], _messages, _metadata) => {
-		return Promise.resolve(React.createElement(React.Fragment));
-	},
-};

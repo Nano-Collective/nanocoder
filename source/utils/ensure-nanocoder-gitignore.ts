@@ -1,6 +1,6 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import {logWarning} from './message-queue';
+import {logWarning} from '@/utils/message-queue-core';
 
 const RUNTIME_ENTRIES = [
 	'/checkpoints/',

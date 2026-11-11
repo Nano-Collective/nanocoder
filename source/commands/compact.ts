@@ -3,7 +3,7 @@ import {createStubCommand} from '@/commands/create-stub-command';
 /**
  * The /compact command compresses message history to reduce context usage.
  *
- * Note: The actual command logic is handled in app-util.ts handleCompactCommand()
+ * Note: The actual command logic is handled in app/utils/handlers/compact-handler.ts
  * because it requires access to app state (messages, setMessages, provider, model)
  * that isn't available through the standard command handler interface.
  *

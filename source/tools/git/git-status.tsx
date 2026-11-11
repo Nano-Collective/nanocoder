@@ -12,7 +12,7 @@ import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
 import {
-	execGit,
+	execGitReadOnly,
 	type FileChange,
 	formatStatusChar,
 	getAheadBehind,
@@ -60,7 +60,7 @@ async function getStatus(): Promise<GitStatusResult> {
 	const {ahead, behind} = await getAheadBehind();
 
 	// Get status
-	const statusOutput = await execGit(['status', '--porcelain']);
+	const statusOutput = await execGitReadOnly(['status', '--porcelain']);
 	const {staged, unstaged, untracked, conflicts} = parseGitStatus(statusOutput);
 
 	// Get diff stats for staged files

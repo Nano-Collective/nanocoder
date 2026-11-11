@@ -1,10 +1,12 @@
 import {type ChildProcess, spawn} from 'node:child_process';
-import {isAbsolute, relative} from 'node:path';
+import {realpathSync} from 'node:fs';
+import {isAbsolute, relative, resolve} from 'node:path';
 import {StringDecoder} from 'node:string_decoder';
 
 import {getAppConfig} from '@/config/index';
-import {matchGlob} from '@/events/event-router';
+import {matchGlob, toPosixPath} from '@/events/event-router';
 import {runPluginHooks} from '@/plugins/host';
+import {getActiveSessionContext} from '@/services/session-context';
 import {getProjectRoot, getSafeSessionCwd} from '@/services/session-cwd';
 import {getKeyGeneratorSessionId} from '@/session/key-generator';
 import type {HookDefinition, HookEvent} from '@/types/config';
@@ -273,7 +275,7 @@ function appliesTo(hook: HookDefinition, context: HookContext): boolean {
 	// Non-tool event: no file exists to match, so path scoping does not apply.
 	if (!hook.matchPaths || !toolName) return true;
 
-	const filePath = resolveFilePath(context.toolArgs);
+	const filePath = getToolFileArg(context.toolArgs);
 	if (!filePath) return false;
 
 	return matchesAnyPath(hook.matchPaths, filePath);
@@ -282,20 +284,28 @@ function appliesTo(hook: HookDefinition, context: HookContext): boolean {
 /**
  * Match a tool's file argument against a hook's globs.
  *
- * The model supplies the path and may write it either way, so an absolute path
- * is also tried relative to the project root. Without that, a root-anchored
- * pattern like `src/**` would fire or not depending on whether the model
- * happened to emit `src/a.ts` or `/home/me/proj/src/a.ts` — the same edit
- * either way. Patterns that lead with `**\/` already match both forms.
+ * Globs are project-relative, but the model writes the path however it likes:
+ * `src/a.ts`, `./src/a.ts`, an absolute path, or `a.ts` after a `cd src`. So
+ * the path is resolved the way the file tools resolve it (against the session
+ * cwd) and matched as the project-relative path, plus the absolute one for
+ * patterns written that way. Matching the raw string let a path-scoped
+ * pre-tool-use veto on `src/**` silently miss `./src/a.ts` and, after `cd src`,
+ * `a.ts`: the same file.
  */
 function matchesAnyPath(patterns: string[], filePath: string): boolean {
-	const candidates = [filePath];
-	if (isAbsolute(filePath)) {
-		const relativePath = relative(getProjectRoot(), filePath);
+	const absPath = resolve(getSafeSessionCwd(), filePath);
+	const candidates = [toPosixPath(absPath)];
+	for (const root of projectRootSpellings()) {
+		const relativePath = relative(root, absPath);
 		// Skip a path that escapes the root: `../` segments cannot usefully be
-		// matched against project-relative globs.
-		if (relativePath && !relativeEscapesRoot(relativePath)) {
-			candidates.push(relativePath);
+		// matched against project-relative globs. On Windows another drive gives
+		// back an absolute path.
+		if (
+			relativePath &&
+			!relativeEscapesRoot(relativePath) &&
+			!isAbsolute(relativePath)
+		) {
+			candidates.push(toPosixPath(relativePath));
 		}
 	}
 
@@ -305,11 +315,28 @@ function matchesAnyPath(patterns: string[], filePath: string): boolean {
 }
 
 /**
- * The file a tool acted on, when it has one. Every file tool names the
- * argument `path`; `file_path` / `filePath` are accepted because weaker models
- * emit them and the formatters already tolerate both.
+ * The project root as configured and as the filesystem spells it. The session
+ * cwd comes from `pwd -P`, so after a `cd` it is the physical path, while the
+ * root may have been opened through a symlink (`/tmp` -> `/private/tmp`).
  */
-export function resolveFilePath(
+function projectRootSpellings(): string[] {
+	const root = getProjectRoot();
+	try {
+		const real = realpathSync(root);
+		return real === root ? [root] : [root, real];
+	} catch {
+		return [root];
+	}
+}
+
+/**
+ * The file a tool acted on, when it has one, exactly as the model wrote it.
+ * Every file tool names the argument `path`; `file_path` / `filePath` are
+ * accepted because weaker models emit them and the formatters already
+ * tolerate both. Not to be confused with `resolveFilePath` in
+ * `@/utils/path-validation`, which resolves and containment-checks a path.
+ */
+export function getToolFileArg(
 	args?: Record<string, unknown>,
 ): string | undefined {
 	for (const key of ['path', 'file_path', 'filePath']) {
@@ -332,9 +359,11 @@ function buildEnv(
 		// Where the agent's shell currently is, which a `cd` in execute_bash
 		// moves. Hooks that need to act on the model's location read this.
 		NANOCODER_SESSION_CWD: getSafeSessionCwd(),
-		// The process-wide session id — stable for the life of the session and
-		// rebased by /clear and /resume, so a hook can key a log or a cache on it.
-		NANOCODER_SESSION_ID: getKeyGeneratorSessionId(),
+		// The session id — stable for the life of the session and rebased by
+		// /clear and /resume, so a hook can key a log or a cache on it. In ACP
+		// it is the id of the session the hook runs for.
+		NANOCODER_SESSION_ID:
+			getActiveSessionContext()?.sessionId ?? getKeyGeneratorSessionId(),
 	};
 
 	if (context.toolName) env.NANOCODER_TOOL_NAME = context.toolName;
@@ -344,7 +373,7 @@ function buildEnv(
 		} catch {
 			// Unserialisable args (cycles) just mean no NANOCODER_TOOL_ARGS.
 		}
-		const filePath = resolveFilePath(context.toolArgs);
+		const filePath = getToolFileArg(context.toolArgs);
 		if (filePath) env.NANOCODER_FILE = filePath;
 		const command = context.toolArgs.command;
 		if (typeof command === 'string') env.NANOCODER_COMMAND = command;

@@ -13,7 +13,11 @@ import {join} from 'node:path';
 import test from 'ava';
 import type {AgentSideConnection} from '@agentclientprotocol/sdk';
 import {AcpSession} from '@/acp/acp-session';
-import {runAcpConversation} from '@/acp/acp-conversation';
+import {
+	runAcpConversation,
+	settleUnansweredToolCalls,
+} from '@/acp/acp-conversation';
+import {MCPClient} from '@/mcp/mcp-client';
 import {
 	getSessionCwd,
 	resetSessionCwd,
@@ -30,6 +34,7 @@ import {
 	cancelSubagentRun,
 	emitSubagentRunEvent,
 } from '@/services/subagent-events';
+import {runInSessionContext} from '@/services/session-context';
 import {SubagentExecutor} from '@/subagents/subagent-executor';
 import {getSubagentLoader} from '@/subagents/subagent-loader';
 import {agentTool, setAgentToolExecutor} from '@/tools/agent-tool';
@@ -252,20 +257,23 @@ test('runAcpConversation - returns end_turn on empty LLM response', async t => {
 	t.is(result.stopReason, 'end_turn');
 });
 
-test('runAcpConversation - returns end_turn on response with no choices', async t => {
+test('runAcpConversation - a response with no choices fails the prompt', async t => {
+	// The provider answered nothing at all: an error, as in the TUI and
+	// --plain, not a finished turn with an empty answer.
 	const {conn} = createMockConn();
 	const session = createMockSession(conn);
 	const {client} = createMockClient([{choices: []}]);
 
-	const result = await runAcpConversation({
-		session,
-		client: client,
-		toolManager: createMockToolManager() as any,
-		conn,
-		nonInteractiveAlwaysAllow: [],
-	});
-
-	t.is(result.stopReason, 'end_turn');
+	await t.throwsAsync(
+		runAcpConversation({
+			session,
+			client: client,
+			toolManager: createMockToolManager() as any,
+			conn,
+			nonInteractiveAlwaysAllow: [],
+		}),
+		{message: 'No response received from model'},
+	);
 });
 
 // ============================================================================
@@ -302,6 +310,35 @@ test('runAcpConversation - returns end_turn when LLM responds with text only', a
 	t.is(session.messages.length, 1);
 	t.is(session.messages[0].role, 'assistant');
 	t.is(session.messages[0].content, 'Hello! I can help you.');
+});
+
+test("runAcpConversation - a session on tune's XML tool mode asks the client not to send native tools", async t => {
+	const {conn} = createMockConn();
+	const session = createMockSession(conn);
+	session.nativeToolsDisabled = true;
+	const seen: any[] = [];
+	const client = {
+		chat: async (
+			_msgs: any,
+			_tools: any,
+			_callbacks: any,
+			_signal: any,
+			modeOverrides: any,
+		) => {
+			seen.push(modeOverrides);
+			return {choices: [{message: {content: 'done'}}]};
+		},
+	} as unknown as LLMClient;
+
+	await runAcpConversation({
+		session,
+		client,
+		toolManager: createMockToolManager() as any,
+		conn,
+		nonInteractiveAlwaysAllow: [],
+	});
+
+	t.is(seen[0]?.nativeToolsDisabled, true);
 });
 
 // ============================================================================
@@ -1344,6 +1381,87 @@ test('runAcpConversation - marks tool as failed when it reports isError without 
 	t.is(finalUpdates[0].update.rawOutput, 'EXIT_CODE: 3\n');
 });
 
+test('runAcpConversation - an MCP result with isError is failed, a clean one completed, and the model gets the same text', async t => {
+	const {conn, updates} = createMockConn();
+	const session = createMockSession(conn, {devMode: 'yolo'});
+	const toolManager = {
+		...createMockToolManager(),
+		hasTool: () => true,
+		getToolEntry: () => ({approval: false}),
+	};
+
+	// Handlers come from a real MCPClient over a stubbed SDK client. A server
+	// reports a failed call as `isError: true` with the reason in its content.
+	const mcp = new MCPClient() as any;
+	const mcpTool = (name: string) => ({
+		name,
+		description: name,
+		serverName: 'srv',
+		inputSchema: {type: 'object', properties: {}},
+	});
+	mcp.serverTools.set('srv', [mcpTool('failing_tool'), mcpTool('safe_tool')]);
+	mcp.clients.set('srv', {
+		callTool: async ({name}: {name: string}) =>
+			name === 'failing_tool'
+				? {isError: true, content: [{type: 'text', text: 'boom failure'}]}
+				: {content: [{type: 'text', text: 'all good'}]},
+	});
+	setToolRegistryGetter(() =>
+		Object.fromEntries(
+			mcp.getToolEntries().map((e: any) => [e.name, e.handler]),
+		),
+	);
+
+	let callCount = 0;
+	const client = {
+		chat: async () => {
+			callCount++;
+			if (callCount === 1) {
+				return {
+					choices: [
+						{
+							message: {
+								content: '',
+								tool_calls: [
+									createMockToolCall('failing_tool', {}, 'call-bad'),
+									createMockToolCall('safe_tool', {}, 'call-good'),
+								],
+							},
+						},
+					],
+				};
+			}
+
+			return {choices: [{message: {content: 'done'}}]};
+		},
+	} as unknown as LLMClient;
+
+	await runAcpConversation({
+		session,
+		client,
+		toolManager: toolManager as any,
+		conn,
+		nonInteractiveAlwaysAllow: [],
+	});
+
+	const finalStatus = (id: string) =>
+		updates.find(
+			(u: any) =>
+				u.update.sessionUpdate === 'tool_call_update' &&
+				u.update.toolCallId === id &&
+				(u.update.status === 'failed' || u.update.status === 'completed'),
+		)?.update.status;
+	t.is(finalStatus('call-bad'), 'failed');
+	t.is(finalStatus('call-good'), 'completed');
+
+	// The flag is for the client; the model still gets the server's own text.
+	const toolText = (name: string) =>
+		session.messages.find((m: any) => m.role === 'tool' && m.name === name)
+			?.content;
+	t.is(toolText('failing_tool'), 'boom failure');
+	t.is(toolText('safe_tool'), 'all good');
+});
+
 // ============================================================================
 // Permission denied
 // ============================================================================
@@ -1579,61 +1697,6 @@ test('runAcpConversation - tool in nonInteractiveAlwaysAllow skips approval', as
 });
 
 // ============================================================================
-// XML validation error tool
-// ============================================================================
-
-test('runAcpConversation - __xml_validation_error__ tool creates error result', async t => {
-	const {conn} = createMockConn();
-	const session = createMockSession(conn);
-	const toolManager = {
-		...createMockToolManager(),
-		hasTool: () => false, // __xml_validation_error__ is not a known tool
-	};
-
-	let callCount = 0;
-	const client = {
-		chat: async () => {
-			callCount++;
-			if (callCount === 1) {
-				return {
-					choices: [
-						{
-							message: {
-								content: '',
-								tool_calls: [
-									createMockToolCall(
-										'__xml_validation_error__',
-										{error: 'Bad XML'},
-										'call-1',
-									),
-								],
-							},
-						},
-					],
-				};
-			}
-
-			return {choices: [{message: {content: 'OK'}}]};
-		},
-	} as unknown as LLMClient;
-
-	await runAcpConversation({
-		session,
-		client,
-		toolManager: toolManager as any,
-		conn,
-		nonInteractiveAlwaysAllow: [],
-	});
-
-	const errorMsg = session.messages.find(
-		(m: any) =>
-			m.role === 'tool' && m.name === '__xml_validation_error__',
-	);
-	t.truthy(errorMsg);
-	t.is(errorMsg?.content, 'Unknown tool: __xml_validation_error__');
-});
-
-// ============================================================================
 // Multi-turn
 // ============================================================================
 
@@ -1709,6 +1772,364 @@ test('runAcpConversation - handles multi-turn conversation with tool calls', asy
 	t.is(toolMsgs.length, 2);
 	t.is(toolMsgs[0].content, 'Content of /a.txt');
 	t.is(toolMsgs[1].content, 'Content of /b.txt');
+});
+
+test('runAcpConversation - a model error on a later round-trip keeps the earlier ones in history', async t => {
+	const {conn} = createMockConn();
+	const session = createMockSession(conn, {
+		devMode: 'yolo',
+		messages: [{role: 'user', content: 'edit the file'}],
+	});
+	const toolManager = {
+		...createMockToolManager(),
+		hasTool: () => true,
+		getToolEntry: () => ({approval: false}),
+	};
+	setToolRegistryGetter(() => ({
+		read_file: async (args: any) => `Content of ${args.path}`,
+	}));
+
+	let callCount = 0;
+	const client = {
+		chat: async () => {
+			callCount++;
+			if (callCount === 1) {
+				return {
+					choices: [
+						{
+							message: {
+								content: 'Reading first',
+								tool_calls: [
+									createMockToolCall('read_file', {path: '/a.txt'}, 'call-1'),
+								],
+							},
+						},
+					],
+				};
+			}
+			throw new Error('provider exploded');
+		},
+	} as unknown as LLMClient;
+
+	await t.throwsAsync(
+		runAcpConversation({
+			session,
+			client,
+			toolManager: toolManager as any,
+			conn,
+			nonInteractiveAlwaysAllow: [],
+		}),
+		{message: 'provider exploded'},
+	);
+
+	t.deepEqual(
+		session.messages.map(m => m.role),
+		['user', 'assistant', 'tool'],
+	);
+	t.is(session.messages[2].content, 'Content of /a.txt');
+});
+
+test('runAcpConversation - a throw part way through a batch keeps the assistant call in history', async t => {
+	const {conn: baseConn} = createMockConn();
+	// The client connection dies while the second call's card is sent.
+	let toolCallUpdates = 0;
+	const conn = {
+		...baseConn,
+		sessionUpdate: async (update: any) => {
+			if (update.update.sessionUpdate === 'tool_call_update') {
+				toolCallUpdates++;
+				if (toolCallUpdates === 4) throw new Error('connection closed');
+			}
+		},
+	} as unknown as AgentSideConnection;
+	const session = createMockSession(conn, {
+		devMode: 'yolo',
+		messages: [{role: 'user', content: 'read both'}],
+	});
+	const toolManager = {
+		...createMockToolManager(),
+		hasTool: () => true,
+		getToolEntry: () => ({approval: false}),
+	};
+	setToolRegistryGetter(() => ({
+		read_file: async (args: any) => `Content of ${args.path}`,
+	}));
+	const client = {
+		chat: async () => ({
+			choices: [
+				{
+					message: {
+						content: '',
+						tool_calls: [
+							createMockToolCall('read_file', {path: '/a.txt'}, 'call-a'),
+							createMockToolCall('read_file', {path: '/b.txt'}, 'call-b'),
+						],
+					},
+				},
+			],
+		}),
+	} as unknown as LLMClient;
+
+	await t.throwsAsync(
+		runAcpConversation({
+			session,
+			client,
+			toolManager: toolManager as any,
+			conn,
+			nonInteractiveAlwaysAllow: [],
+		}),
+		{message: 'connection closed'},
+	);
+
+	const assistant = session.messages[1];
+	t.is(assistant.role, 'assistant');
+	t.deepEqual(
+		assistant.tool_calls?.map(call => call.id),
+		['call-a', 'call-b'],
+	);
+	// Closing the batch off is the caller's job; see settleUnansweredToolCalls.
+	const settled = settleUnansweredToolCalls(session.messages);
+	t.deepEqual(
+		settled.slice(2).map(m => [m.role, m.tool_call_id]),
+		[
+			['tool', 'call-a'],
+			['tool', 'call-b'],
+		],
+	);
+});
+
+test('settleUnansweredToolCalls - answers only the calls with no result yet', t => {
+	const messages: Message[] = [
+		{role: 'user', content: 'go'},
+		{
+			role: 'assistant',
+			content: '',
+			tool_calls: [
+				createMockToolCall('read_file', {}, 'done'),
+				createMockToolCall('read_file', {}, 'open'),
+			],
+		},
+		{role: 'tool', tool_call_id: 'done', name: 'read_file', content: 'ok'},
+	];
+	const settled = settleUnansweredToolCalls(messages);
+	t.is(settled.length, 4);
+	t.is(settled[3].tool_call_id, 'open');
+	t.regex(String(settled[3].content), /^Error:/);
+	// Nothing to do once every call has a result.
+	t.is(settleUnansweredToolCalls(settled), settled);
+	t.is(
+		settleUnansweredToolCalls([{role: 'user', content: 'hi'}]).length,
+		1,
+	);
+});
+
+// ============================================================================
+// Retry guards (nanocoder.retries)
+// ============================================================================
+
+const scriptedClient = (responses: any[]) => {
+	const sent: Message[][] = [];
+	const client = {
+		chat: async (messages: Message[]) => {
+			sent.push(messages);
+			return (
+				responses[Math.min(sent.length - 1, responses.length - 1)] ?? {
+					choices: [{message: {content: 'done'}}],
+				}
+			);
+		},
+		getCurrentModel: () => 'test-model',
+	} as unknown as LLMClient;
+	return {client, sent};
+};
+
+const runGuarded = (session: AcpSession, conn: AgentSideConnection, client: LLMClient) =>
+	runAcpConversation({
+		session,
+		client,
+		toolManager: {
+			...createMockToolManager(),
+			hasTool: (name: string) => name === 'read_file',
+			getToolEntry: () => ({approval: false}),
+		} as any,
+		conn,
+		nonInteractiveAlwaysAllow: [],
+	});
+
+test('runAcpConversation - stops a model repeating the same tool call instead of running it again', async t => {
+	const {conn, updates} = createMockConn();
+	const session = createMockSession(conn, {devMode: 'yolo'});
+	let reads = 0;
+	setToolRegistryGetter(() => ({
+		read_file: async () => {
+			reads++;
+			return 'same content';
+		},
+	}));
+	const {client, sent} = scriptedClient([
+		{
+			choices: [
+				{
+					message: {
+						content: '',
+						tool_calls: [createMockToolCall('read_file', {path: '/a.txt'})],
+					},
+				},
+			],
+		},
+	]);
+
+	const result = await runGuarded(session, conn, client);
+
+	// Default maxRepeatedToolCalls = 3: the third identical call is not run.
+	t.is(result.stopReason, 'max_turn_requests');
+	t.is(sent.length, 3);
+	t.is(reads, 2);
+	t.true(
+		updates.some(u =>
+			/repeated the same tool call 3 times/.test(u.update?.content?.text ?? ''),
+		),
+	);
+	// Every stored call has a result, so the next prompt is still valid.
+	const callIds = session.messages.flatMap(m => m.tool_calls ?? []).map(c => c.id);
+	const resultIds = session.messages
+		.filter(m => m.role === 'tool')
+		.map(m => m.tool_call_id);
+	t.deepEqual(resultIds, callIds);
+	t.true(session.messages[session.messages.length - 1].displayOnly);
+});
+
+test('runAcpConversation - nudges an empty reply, then stops at the cap', async t => {
+	const {conn} = createMockConn();
+	const session = createMockSession(conn, {
+		messages: [{role: 'user', content: 'hi'}],
+	});
+	const {client, sent} = scriptedClient([{choices: [{message: {content: ''}}]}]);
+
+	const result = await runGuarded(session, conn, client);
+
+	// Default maxEmptyTurns = 2: the first try plus two nudges.
+	t.is(result.stopReason, 'end_turn');
+	t.is(sent.length, 3);
+	t.is(sent[1][sent[1].length - 1].content, 'Please continue with the task.');
+	// No empty assistant message is stored; providers reject one.
+	t.false(
+		session.messages.some(
+			m => m.role === 'assistant' && !m.displayOnly && !m.content,
+		),
+	);
+	t.regex(
+		String(session.messages[session.messages.length - 1].content),
+		/no output after 3 attempts/,
+	);
+});
+
+test('runAcpConversation - an empty reply followed by an answer ends normally', async t => {
+	const {conn} = createMockConn();
+	const session = createMockSession(conn);
+	const {client, sent} = scriptedClient([
+		{choices: [{message: {content: ''}}]},
+		{choices: [{message: {content: 'Here it is'}}]},
+	]);
+
+	const result = await runGuarded(session, conn, client);
+
+	t.is(result.stopReason, 'end_turn');
+	t.is(sent.length, 2);
+	t.is(session.messages[session.messages.length - 1].content, 'Here it is');
+});
+
+test('runAcpConversation - feeds a malformed text tool call back for a retry', async t => {
+	const {conn} = createMockConn();
+	const session = createMockSession(conn, {devMode: 'yolo'});
+	setToolRegistryGetter(() => ({
+		read_file: async (args: any) => `Content of ${args.path}`,
+	}));
+	const {client, sent} = scriptedClient([
+		{
+			toolsDisabled: true,
+			choices: [{message: {content: '[tool_use: read_file]'}}],
+		},
+		{
+			toolsDisabled: true,
+			choices: [
+				{
+					message: {
+						content: '<function=read_file>\n{"path": "/a.txt"}\n</function>',
+					},
+				},
+			],
+		},
+		{choices: [{message: {content: 'Done'}}]},
+	]);
+
+	const result = await runGuarded(session, conn, client);
+
+	t.is(result.stopReason, 'end_turn');
+	t.is(sent.length, 3);
+	t.regex(
+		String(sent[1][sent[1].length - 1].content),
+		/contained a malformed tool call/,
+	);
+	t.true(
+		session.messages.some(
+			m => m.role === 'tool' && m.content === 'Content of /a.txt',
+		),
+	);
+});
+
+test('runAcpConversation - stops retrying malformed tool calls at the cap', async t => {
+	const {conn} = createMockConn();
+	const session = createMockSession(conn);
+	const {client, sent} = scriptedClient([
+		{
+			toolsDisabled: true,
+			choices: [{message: {content: '[tool_use: read_file]'}}],
+		},
+	]);
+
+	const result = await runGuarded(session, conn, client);
+
+	// Default maxMalformedRetries = 2: the first try plus two retries.
+	t.is(result.stopReason, 'end_turn');
+	t.is(sent.length, 3);
+	t.regex(
+		String(session.messages[session.messages.length - 1].content),
+		/malformed tool calls 3 times/,
+	);
+});
+
+test('runAcpConversation - asks a reply cut off at the output limit to continue', async t => {
+	const {conn} = createMockConn();
+	const session = createMockSession(conn);
+	const {client, sent} = scriptedClient([
+		{finishReason: 'length', choices: [{message: {content: 'Half a sen'}}]},
+		{finishReason: 'stop', choices: [{message: {content: 'tence.'}}]},
+	]);
+
+	const result = await runGuarded(session, conn, client);
+
+	t.is(result.stopReason, 'end_turn');
+	t.is(sent.length, 2);
+	t.regex(
+		String(sent[1][sent[1].length - 1].content),
+		/cut off at the output-token limit/,
+	);
+	t.is(session.messages[session.messages.length - 1].content, 'tence.');
+});
+
+test('runAcpConversation - a reply that keeps truncating stands after the continuation cap', async t => {
+	const {conn} = createMockConn();
+	const session = createMockSession(conn);
+	const {client, sent} = scriptedClient([
+		{finishReason: 'length', choices: [{message: {content: 'more...'}}]},
+	]);
+
+	const result = await runGuarded(session, conn, client);
+
+	// Default maxTruncatedTurns = 2.
+	t.is(result.stopReason, 'end_turn');
+	t.is(sent.length, 3);
 });
 
 // ============================================================================
@@ -2159,6 +2580,91 @@ test('runAcpConversation - captures a timeline checkpoint for write_file', async
 	t.is(entries[0].truncateToMessageIndex, 0);
 });
 
+test.serial('runAcpConversation - auto-commit writes its message with the session\'s client', async t => {
+	const {execSync} = await import('node:child_process');
+	const {setAutoCommitClient} = await import('@/services/auto-commit');
+	const {COMMIT_SYSTEM_PROMPT} = await import('@/tools/git/commit-prompt');
+	const cwd = realpathSync(
+		mkdtempSync(join(tmpdir(), 'nanocoder-acp-autocommit-')),
+	);
+	const git = (command: string) =>
+		execSync(`git ${command}`, {cwd, encoding: 'utf8'}).trimEnd();
+	git('init -q -b main');
+	git('config user.email test@example.com');
+	git('config user.name Test');
+	git('config commit.gpgsign false');
+	git('config core.hooksPath .no-hooks');
+	writeFileSync(join(cwd, 'base.txt'), 'base\n');
+	// Turned on in the session's own folder, which is the config it reads.
+	writeFileSync(
+		join(cwd, 'agents.config.json'),
+		JSON.stringify({nanocoder: {autoCommit: true}}),
+	);
+	git('add base.txt agents.config.json');
+	git('commit -q -m baseline');
+	// Another session picked its model last: before, its client wrote every
+	// session's commit messages.
+	setAutoCommitClient({
+		chat: async () => ({
+			choices: [{message: {content: 'chore: another session'}}],
+		}),
+	} as unknown as LLMClient);
+	t.teardown(() => {
+		setAutoCommitClient(null);
+		rmSync(cwd, {recursive: true, force: true});
+	});
+
+	const {conn} = createMockConn();
+	const session = createMockSession(conn, {devMode: 'yolo', cwd});
+	setToolRegistryGetter(() => ({
+		write_file: async (args: any) => {
+			writeFileSync(join(cwd, args.path), args.content);
+			return `Wrote ${args.path}`;
+		},
+	}));
+	let turns = 0;
+	const client = {
+		chat: async (messages: Message[]) => {
+			if (messages[0]?.content === COMMIT_SYSTEM_PROMPT) {
+				return {choices: [{message: {content: 'feat: this session'}}]};
+			}
+			turns++;
+			return turns === 1
+				? {
+						choices: [
+							{
+								message: {
+									content: '',
+									tool_calls: [
+										createMockToolCall('write_file', {
+											path: 'a.ts',
+											content: 'export const a = 1;\n',
+										}),
+									],
+								},
+							},
+						],
+					}
+				: {choices: [{message: {content: 'done'}}]};
+		},
+		getCurrentModel: () => 'test-model',
+	} as unknown as LLMClient;
+
+	await runAcpConversation({
+		session,
+		client,
+		toolManager: {
+			...createMockToolManager(),
+			hasTool: () => true,
+			getToolEntry: () => ({approval: false}),
+		} as any,
+		conn,
+		nonInteractiveAlwaysAllow: [],
+	});
+
+	t.is(git('log -1 --format=%s'), 'feat: this session');
+});
+
 test('runAcpConversation - does not capture a timeline checkpoint for read_file', async t => {
 	const {conn} = createMockConn();
 	const session = createMockSession(conn, {devMode: 'yolo'});
@@ -2301,12 +2807,6 @@ test('runAcpConversation - checkpoints of one prompt share a turn id across mode
 test.serial(
 	'runAcpConversation - compacts history before the next model turn when over the token threshold',
 	async t => {
-		resetAutoCompactSession();
-		resetSessionContextLimit();
-		setSessionContextLimit(100);
-		setAutoCompactStrategy('mechanical');
-		setAutoCompactThreshold(50);
-
 		const filler = 'old context sentence. '.repeat(60);
 		const {conn} = createMockConn();
 		const session = createMockSession(conn, {
@@ -2316,6 +2816,12 @@ test.serial(
 				{role: 'assistant', content: 'ack'},
 				{role: 'user', content: 'call the tool'},
 			],
+		});
+		// The overrides belong to the session, so they are set in its context.
+		runInSessionContext(session.context, () => {
+			setSessionContextLimit(100);
+			setAutoCompactStrategy('mechanical');
+			setAutoCompactThreshold(50);
 		});
 		const toolManager = {
 			...createMockToolManager(),
@@ -2379,8 +2885,10 @@ test.serial(
 				'compaction must keep the recent turn, not empty the history',
 			);
 		} finally {
-			resetAutoCompactSession();
-			resetSessionContextLimit();
+			runInSessionContext(session.context, () => {
+				resetAutoCompactSession();
+				resetSessionContextLimit();
+			});
 		}
 	},
 );
@@ -3609,6 +4117,66 @@ test.serial('runAcpConversation - sends the sub-agent run to the client, tied to
 		t.is(params.parentRunId, '');
 	}
 	t.is(notifications.at(-1)?.params.result, 'found it');
+});
+
+test.serial('runAcpConversation - the agent card title shows this session\'s run, never another\'s', async t => {
+	const {updateSubagentProgressById, removeSubagentProgress} = await import(
+		'@/services/subagent-events'
+	);
+	setToolRegistryGetter(() => ({
+		agent: async (_args: any, options: any) => {
+			// A run of another chat in the same process, in the shared progress
+			// map. Before, a 1.5s poller over that map put it on this card.
+			updateSubagentProgressById('intruder-run', {
+				subagentName: 'intruder',
+				status: 'running',
+				toolCallCount: 4,
+				turnCount: 2,
+				tokenCount: 99_000,
+			});
+			await new Promise(resolve => setTimeout(resolve, 1700));
+			const base = {
+				childRunId: 'own-run',
+				parentRunId: '',
+				sessionId: options.sessionId,
+				toolCallId: options.toolCallId,
+				name: 'explore',
+			};
+			emitSubagentRunEvent({...base, status: 'started'});
+			emitSubagentRunEvent({
+				...base,
+				status: 'progress',
+				tokenCount: 1200,
+				toolCallCount: 2,
+				lastTool: 'read_file',
+			});
+			emitSubagentRunEvent({...base, status: 'completed', result: 'ok'});
+			return 'ok';
+		},
+	}));
+	t.teardown(() => removeSubagentProgress('intruder-run'));
+	const {conn, updates} = createMockConn();
+	const session = createMockSession(conn, {devMode: 'yolo'});
+
+	await runAgentTurn(conn, session, 'titled');
+
+	const titles = updates
+		.filter(
+			u =>
+				u.update?.sessionUpdate === 'tool_call_update' &&
+				u.update.toolCallId === 'agent-call-titled' &&
+				u.update.title,
+		)
+		.map(u => u.update.title);
+	t.false(titles.some(title => title.includes('intruder')));
+	t.true(titles.includes('explore • 1.2k tokens • 2 tools (read_file)'));
+	// The progress title lands before the card is settled.
+	const card = updates.filter(
+		u =>
+			u.update?.sessionUpdate === 'tool_call_update' &&
+			u.update.toolCallId === 'agent-call-titled',
+	);
+	t.is(card.at(-1)?.update.status, 'completed');
 });
 
 test.serial('runAcpConversation - two sessions with sub-agents do not see each other\'s runs', async t => {

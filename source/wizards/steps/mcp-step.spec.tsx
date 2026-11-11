@@ -996,7 +996,7 @@ test('McpStep with initialEditName opens that server edit/delete choice', t => {
 // Regression: a custom-named instance of a template (e.g. `you-paid`) must
 // resolve back to its template when edited. Before templateId was stamped
 // onto the built config, the name lookup missed and the edit flow fell
-// through to `custom`, whose buildConfig never writes headers — silently
+// through to `custom`, whose buildConfig then never wrote headers — silently
 // dropping the saved bearer token on re-save.
 test('McpStep editing a custom-named template instance resolves its template', async t => {
 	const customNamedServers: Record<
@@ -1045,177 +1045,6 @@ test('McpStep editing a custom-named template instance resolves its template', a
 	// The label shows the template default `[you]`; the prefilled value sits
 	// in the input box.
 	t.regex(output, /you-paid/, 'server name should be prefilled in the input');
-
-	unmount();
-});
-
-// Regression: templates that store their key in an X-API-Key header (today
-// `serply`) must get the saved key back when edited. The edit flow used to
-// read only env vars and a bearer Authorization header, so the required
-// API key field came back empty and blocked a re-save.
-test('McpStep editing an X-API-Key template instance keeps its saved key', async t => {
-	const serplyServers: Record<
-		string,
-		{
-			name: string;
-			transport: 'http';
-			url: string;
-			headers: {'X-API-Key': string};
-			templateId: string;
-			tags: string[];
-		}
-	> = {
-		'serply-work': {
-			name: 'serply-work',
-			transport: 'http',
-			url: 'https://api.serply.io/mcp',
-			headers: {'X-API-Key': 'serply_test_key_123'},
-			templateId: 'serply',
-			tags: ['serply', 'search', 'web', 'scrape', 'http'],
-		},
-	};
-
-	const {lastFrame, stdin, unmount} = render(
-		<McpStep
-			onComplete={() => {}}
-			existingServers={serplyServers}
-			initialEditName="serply-work"
-		/>,
-	);
-
-	await waitTick();
-	// Item 1 is "Edit this server".
-	stdin.write('1');
-	await waitTick();
-	t.regex(lastFrame()!, /Serply Configuration/);
-
-	// Accept the prefilled server name, then the prefilled API key.
-	stdin.write('\r');
-	await waitTick();
-	t.regex(lastFrame()!, /Serply API key/);
-	stdin.write('\r');
-	await waitTick();
-
-	t.notRegex(
-		lastFrame()!,
-		/This field is required/,
-		'the saved X-API-Key value should prefill the required key field',
-	);
-
-	unmount();
-});
-
-test('McpStep lists FXMacroData on the remote servers tab', async t => {
-	const {lastFrame, stdin, unmount} = render(
-		<McpStep onComplete={() => {}} />,
-	);
-
-	await waitTick();
-	// "Add MCP servers", then Tab over to the remote templates.
-	stdin.write('\r');
-	await waitTick();
-	stdin.write('\t');
-	await waitTick();
-
-	const output = lastFrame()!;
-	t.regex(output, /Select a remote MCP server to add:/);
-	t.regex(output, /FXMacroData/);
-
-	unmount();
-});
-
-// FXMacroData keeps the key optional (keyless covers the free USD tier) and
-// stores it as a bearer Authorization header, so edits must round-trip both a
-// saved key and no key at all.
-const fxmacrodataServer = (headers?: {Authorization: string}) => ({
-	'fxmacrodata-work': {
-		name: 'fxmacrodata-work',
-		transport: 'http' as const,
-		url: 'https://mcp.fxmacrodata.com',
-		...(headers ? {headers} : {}),
-		templateId: 'fxmacrodata',
-		tags: ['fxmacrodata', 'finance', 'macro', 'forex', 'http'],
-	},
-});
-
-test('McpStep editing a keyed FXMacroData server keeps its bearer key', async t => {
-	const {lastFrame, stdin, unmount} = render(
-		<McpStep
-			onComplete={() => {}}
-			existingServers={fxmacrodataServer({Authorization: 'Bearer test-key'})}
-			initialEditName="fxmacrodata-work"
-		/>,
-	);
-
-	await waitTick();
-	// Item 1 is "Edit this server".
-	stdin.write('1');
-	await waitTick();
-	t.regex(lastFrame()!, /FXMacroData Configuration/);
-	t.notRegex(lastFrame()!, /Custom MCP Server Configuration/);
-
-	// Accept the prefilled server name; the key field opens prefilled.
-	stdin.write('\r');
-	await waitTick();
-	t.regex(lastFrame()!, /FXMacroData API key/);
-	stdin.write('\r');
-	await waitTick();
-
-	t.notRegex(lastFrame()!, /This field is required/);
-	t.notRegex(lastFrame()!, /must not contain/);
-	t.notRegex(lastFrame()!, /FXMacroData API key/);
-
-	unmount();
-});
-
-test('McpStep editing a keyless FXMacroData server accepts an empty key', async t => {
-	const {lastFrame, stdin, unmount} = render(
-		<McpStep
-			onComplete={() => {}}
-			existingServers={fxmacrodataServer()}
-			initialEditName="fxmacrodata-work"
-		/>,
-	);
-
-	await waitTick();
-	stdin.write('1');
-	await waitTick();
-	t.regex(lastFrame()!, /FXMacroData Configuration/);
-
-	stdin.write('\r');
-	await waitTick();
-	t.regex(lastFrame()!, /FXMacroData API key/);
-	stdin.write('\r');
-	await waitTick();
-
-	t.notRegex(lastFrame()!, /This field is required/);
-	t.notRegex(lastFrame()!, /FXMacroData API key/);
-
-	unmount();
-});
-
-test('McpStep rejects an FXMacroData key with a space inside it', async t => {
-	const {lastFrame, stdin, unmount} = render(
-		<McpStep
-			onComplete={() => {}}
-			existingServers={fxmacrodataServer()}
-			initialEditName="fxmacrodata-work"
-		/>,
-	);
-
-	await waitTick();
-	stdin.write('1');
-	await waitTick();
-	stdin.write('\r');
-	await waitTick();
-	stdin.write('test key');
-	await waitTick();
-	stdin.write('\r');
-	await waitTick();
-
-	const output = lastFrame()!;
-	t.regex(output, /must not contain spaces/);
-	t.regex(output, /FXMacroData API key/, 'should stay on the key field');
 
 	unmount();
 });
@@ -1337,9 +1166,11 @@ test('McpStep lets Backspace edit the environment variables field', async t => {
 		await waitFor(until);
 	};
 
-	// Edit this server, then accept the transport, name, URL, command and
-	// args fields.
+	// Edit this server, then accept the transport, name and URL fields, submit
+	// the empty headers field with Esc, and accept the command and args fields.
 	await waitFor(/Edit this server/);
+	await pressEnterUntil(/HTTP headers/);
+	await pressOnce('\u001B', /HTTP headers/, /Command \(for stdio/);
 	await pressEnterUntil(/Environment variables/);
 
 	// One key per write, as a person types. Keys this close together reach
@@ -1364,4 +1195,73 @@ test('McpStep lets Backspace edit the environment variables field', async t => {
 		await sleep(100);
 	}
 	t.deepEqual(saved['my-server']?.env, {API_KEY: 'abc123'});
+});
+
+// Regression: Serply and FXMacroData were removed from the wizard, so editing
+// a server built from either falls back to Custom MCP Server. That template
+// had no headers field and did not prefill the transport, so saving dropped
+// the API-key header (and env vars were dropped too, since multiline fields
+// started empty instead of from the saved value).
+test('McpStep editing a server from a removed template keeps its headers', async t => {
+	let saved: Record<
+		string,
+		{transport?: string; url?: string; headers?: Record<string, string>}
+	> = {};
+	const existingServers = {
+		serply: {
+			name: 'serply',
+			transport: 'http' as const,
+			url: 'https://api.serply.io/mcp',
+			headers: {'X-API-Key': 'serply_test_key_123'},
+			tags: ['serply', 'search', 'http'],
+			templateId: 'serply',
+		},
+	};
+	const {stdin, lastFrame} = render(
+		<McpStep
+			onComplete={servers => {
+				saved = servers;
+			}}
+			existingServers={existingServers}
+			initialEditName="serply"
+		/>,
+	);
+
+	const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+	const frame = () => stripAnsi(lastFrame() ?? '');
+	const waitFor = async (until: RegExp) => {
+		for (let i = 0; i < 50 && !until.test(frame()); i++) {
+			await sleep(100);
+		}
+		t.regex(frame(), until);
+	};
+	const pressEnterUntil = async (until: RegExp) => {
+		for (let i = 0; i < 20 && !until.test(frame()); i++) {
+			stdin.write('\r');
+			await sleep(250);
+		}
+		t.regex(frame(), until);
+	};
+	const pressOnce = async (key: string, screen: RegExp, until: RegExp) => {
+		await waitFor(screen);
+		await sleep(100);
+		stdin.write(key);
+		await waitFor(until);
+	};
+
+	await pressOnce('1', /Edit this server/, /Custom MCP Server Configuration/);
+	// The saved header is shown in the headers field, ready to keep.
+	await pressEnterUntil(/HTTP headers/);
+	await waitFor(/X-API-Key: serply_test_key_123/);
+	await pressOnce('\u001B', /X-API-Key/, /Command \(for stdio/);
+	await pressEnterUntil(/Environment variables/);
+	await pressOnce('\u001B', /Environment variables/, /Added: serply/);
+	await pressOnce('\u001B[A', /Added: serply/, /> Done & Save/);
+	stdin.write('\r');
+	for (let i = 0; i < 50 && !saved.serply; i++) {
+		await sleep(100);
+	}
+	t.is(saved.serply?.transport, 'http');
+	t.is(saved.serply?.url, 'https://api.serply.io/mcp');
+	t.deepEqual(saved.serply?.headers, {'X-API-Key': 'serply_test_key_123'});
 });

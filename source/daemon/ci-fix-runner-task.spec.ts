@@ -1,5 +1,5 @@
 import test from 'ava';
-import {getAllowedToolNames} from '@/verify/trust';
+import {getAllowedToolNames} from '@/verify/trust-level';
 import {
 	buildRunnerTaskDescription,
 	getRunnerToolNames,

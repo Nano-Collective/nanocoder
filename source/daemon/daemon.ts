@@ -56,7 +56,7 @@ import type {CiWatchConfig} from '@/types/config';
 import {formatError} from '@/utils/error-formatter';
 import {sendNotification} from '@/utils/notifications';
 import {formatCiReport} from '@/verify/format-ci-report';
-import {isTrustLevel} from '@/verify/trust';
+import {isTrustLevel} from '@/verify/trust-level';
 import {readCiWatchState, writeCiWatchState} from './ci-watch-state';
 import {DaemonIpcServer} from './ipc';
 import {

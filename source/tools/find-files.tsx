@@ -8,7 +8,7 @@ import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
 import {findMatchingPaths} from '@/utils/file-search';
-import {calculateTokens} from '@/utils/token-calculator';
+import {estimateTokens} from '@/utils/token-calculator';
 
 /**
  * Find files matching a glob pattern using a cross-platform Node.js traversal
@@ -109,7 +109,7 @@ const FindFilesFormatter = React.memo(
 		}
 
 		// Calculate tokens
-		const tokens = result ? calculateTokens(result) : 0;
+		const tokens = result ? estimateTokens(result) : 0;
 
 		const messageContent = (
 			<Box flexDirection="column">

@@ -1,4 +1,4 @@
-import {logError} from '@/utils/message-queue';
+import {logError} from '@/utils/message-queue-core';
 
 // Expand environment variable references in a string
 function expandEnvVar(str: string): string {

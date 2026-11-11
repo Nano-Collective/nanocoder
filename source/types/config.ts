@@ -1,7 +1,8 @@
 import type {TitleShape} from '@/components/ui/styled-title';
 import type {DevelopmentMode} from '@/types/core';
+import type {FirewallConfig} from '@/types/firewall';
 import type {NanocoderShape, ThemePreset} from '@/types/ui';
-import type {TrustLevel} from '@/verify/trust';
+import type {TrustLevel} from '@/verify/trust-level';
 
 // Supported AI SDK provider packages
 export type SdkProvider =
@@ -133,19 +134,18 @@ export interface PasteConfig {
 export interface RetryLimitsConfig {
 	// Consecutive turns emitting the identical tool call(s) before the loop
 	// pauses and asks the user whether to continue (interactive) or stops
-	// (--plain, headless, subagent runs). The check fires before the Nth
+	// (--plain, ACP, headless, subagent runs). The check fires before the Nth
 	// repeat runs, so the default of 3 executes it twice. Unknown-tool calls
 	// count toward the streak too.
 	maxRepeatedToolCalls: number;
 	// Consecutive empty assistant turns auto-nudged before the loop gives up.
 	// The interactive loop additionally compacts the context and retries once;
-	// --plain stops straight after the nudges. Not used by subagent runs,
-	// whose loop ends on its own when a turn has no tool calls.
+	// --plain, ACP and subagent runs stop straight after the nudges.
 	maxEmptyTurns: number;
 	// Malformed self-correction retries allowed for text-parsed tool calls
 	// before the loop gives up. Covers the XML fallback path in both runtimes,
 	// plus (interactive only) native responses that emit tool-call text
-	// instead of native tool calls. Not used by subagent runs.
+	// instead of native tool calls. Subagent runs apply it too.
 	maxMalformedRetries: number;
 	// Consecutive content-only turns that the provider cut off at its
 	// output-token limit (finishReason `length`) before the loop stops asking
@@ -153,7 +153,7 @@ export interface RetryLimitsConfig {
 	// carries no tool calls — so without this cap the --plain loop treats it as
 	// a finished turn and returns the fragment as a successful result.
 	// 0 restores that behaviour (accept the first truncated turn as final).
-	// Applies to the --plain/headless runtime.
+	// Applies to the --plain, ACP and subagent loops.
 	maxTruncatedTurns: number;
 }
 
@@ -364,10 +364,12 @@ export interface DiskNanocoderConfig {
 	autoCompact?: Partial<AutoCompactConfig>;
 	/** Model mode defaults (tool profile, tool mode, model parameters). */
 	tune?: Partial<TuneConfig>;
-	/** Maximum LLM turns for headless runs (--plain and ACP loops). */
+	/** Maximum LLM turns for headless runs (--plain, ACP and subagent loops). */
 	headless?: {
 		/** Maximum LLM turns before the loop forces a final, tool-free answer. */
 		maxTurns?: number;
+		/** Turn ceiling for a delegated subagent run. Defaults to `maxTurns`. */
+		subagentMaxTurns?: number;
 	};
 	/** LSP server configurations (optional — auto-discovery enabled by default). */
 	lspServers?: {
@@ -386,8 +388,9 @@ export interface DiskNanocoderConfig {
 	systemPrompt?: SystemPromptConfig;
 	/**
 	 * Shell commands run at fixed points in the agent loop, keyed by lifecycle
-	 * event. Project-local, so this carries the same code-execution weight as
-	 * `mcpServers` above.
+	 * event. A project-local file can set these, so they carry the same
+	 * code-execution weight as project MCP servers (`.mcp.json`) and are
+	 * gated behind directory trust.
 	 */
 	hooks?: HooksConfig;
 	/**
@@ -412,6 +415,13 @@ export interface DiskNanocoderConfig {
 	sandbox?: boolean;
 	/** Commit each successful agent file edit (only that file) with a generated Conventional Commit message. Off by default. */
 	autoCommit?: boolean;
+	/** Negative-space mutation firewall. Off by default. */
+	firewall?: Partial<FirewallConfig>;
+	/**
+	 * Project-level verify policy: CI-watch trust level and poll cadence.
+	 * Read by `loadVerifyConfig()`.
+	 */
+	verify?: VerifyConfig;
 }
 
 /**
@@ -516,10 +526,13 @@ export interface AppConfig {
 		titleProvider?: string;
 	};
 
-	// Headless / non-interactive conversation limits (--plain and ACP loops)
+	// Headless / non-interactive conversation limits (--plain, ACP and
+	// subagent loops)
 	headless?: {
 		// Maximum LLM turns before the loop forces a final, tool-free answer.
 		maxTurns?: number;
+		// Turn ceiling for a delegated subagent run. Unset means `maxTurns`.
+		subagentMaxTurns?: number;
 	};
 
 	// Confine execute_bash / !cmd with an OS jail (macOS sandbox-exec, Linux bwrap).
@@ -530,6 +543,9 @@ export interface AppConfig {
 
 	// Agent-loop retry limits (interactive conversation loop)
 	retries?: RetryLimitsConfig;
+
+	// Negative-space mutation firewall
+	firewall?: Partial<FirewallConfig>;
 }
 
 // MCP Server configuration with source tracking
@@ -692,6 +708,8 @@ export interface TuneConfig {
 	// when undefined to preserve historical behaviour.
 	includeAgentsMd?: boolean;
 	modelParameters?: ModelParameters;
+	// On-demand MCP tool discovery to preserve context windows ('auto' | 'always' | 'disabled')
+	mcpDiscovery?: 'auto' | 'always' | 'disabled';
 }
 
 /**

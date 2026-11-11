@@ -5,6 +5,7 @@ import test from 'ava';
 import React from 'react';
 
 import {DEFAULT_REPO_MAP_TOKENS, type RepoMap} from '@/repo-map/index';
+import {resetSessionCwd, setProjectRoot} from '@/services/session-cwd';
 import {renderWithTheme} from '@/test-utils/render-with-theme';
 import {lazyCommands} from './lazy-registry';
 import {parseRepoMapArgs, RepoMapView, repomapCommand} from './repomap';
@@ -160,4 +161,25 @@ test('repomapCommand handler renders usage for a bad argument', async t => {
 	unmount();
 	t.true(output.includes('Unknown argument: --nope'));
 	t.true(output.includes('Usage: /repomap [--tokens <n>]'));
+});
+
+test.serial('repomapCommand maps the project root, not the process cwd', async t => {
+	const root = join(tmpdir(), `nanocoder-repomap-cmd-${process.pid}-${Date.now()}`);
+	mkdirSync(root, {recursive: true});
+	writeFileSync(
+		join(root, 'project-only.ts'),
+		'export function onlyInProjectRoot() {}\n',
+	);
+	setProjectRoot(root);
+	t.teardown(() => {
+		resetSessionCwd();
+		rmSync(root, {recursive: true, force: true});
+	});
+
+	const element = await repomapCommand.handler([], [], metadata);
+	const {lastFrame, unmount} = renderWithTheme(element as React.ReactElement);
+	const output = lastFrame() ?? '';
+	unmount();
+	t.true(output.includes('project-only.ts'), output);
+	t.true(output.includes('onlyInProjectRoot'), output);
 });

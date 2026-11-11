@@ -11,7 +11,13 @@ import {useTheme} from '@/hooks/useTheme';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
-import {execGit, formatStatusChar, getDiffStats, parseGitStatus} from './utils';
+import {
+	execGit,
+	execGitReadOnly,
+	formatStatusChar,
+	getDiffStats,
+	parseGitStatus,
+} from './utils';
 
 // ============================================================================
 // Types
@@ -45,7 +51,7 @@ const executeGitAdd = async (args: GitAddInput): Promise<string> => {
 		await execGit(gitArgs);
 
 		// Get the new status to show what was staged
-		const statusOutput = await execGit(['status', '--porcelain']);
+		const statusOutput = await execGitReadOnly(['status', '--porcelain']);
 		const {staged} = parseGitStatus(statusOutput);
 
 		// Get diff stats for staged files

@@ -9,7 +9,7 @@ import {errorMsg, infoMsg} from '@/utils/message-factory';
 export const privacyCommand: Command = {
 	name: 'privacy',
 	description:
-		'Inspect what the prompt scrubber will remove from your prompts. Usage: /privacy inspect <text>',
+		'Inspect what the prompt scrubber would remove from some text (/privacy inspect <text>)',
 	handler: async (args: string[]) => {
 		if (args.length === 0) {
 			return infoMsg(

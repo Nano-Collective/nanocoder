@@ -12,7 +12,7 @@ import * as path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {getConfigPath} from '@/config/paths';
 import {formatError} from '@/utils/error-formatter';
-import {logError, logWarning} from '@/utils/message-queue';
+import {logError, logWarning} from '@/utils/message-queue-core';
 import type {SubagentConfigWithSource, SubagentLoadPriority} from './types.js';
 
 const __filename = fileURLToPath(import.meta.url);

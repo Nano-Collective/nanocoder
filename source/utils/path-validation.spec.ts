@@ -246,6 +246,94 @@ test.serial('security: rejects an in-project symlink whose target escapes', t =>
 	}
 });
 
+// A dangling symlink is followed when written through (open with O_CREAT
+// creates the target), so its target must count, not its name.
+const posixOnly = process.platform === 'win32' ? test.serial.skip : test.serial;
+
+posixOnly('security: rejects a dangling symlink whose target is outside', t => {
+	const base = mkdtempSync(join(tmpdir(), 'pathval-'));
+	try {
+		const project = join(base, 'project');
+		mkdirSync(project);
+		// The repo ships `notes.md -> <outside>/authorized_keys`, which does
+		// not exist yet. Before the fix this resolved as a new in-project file.
+		symlinkSync(join(base, 'outside', 'authorized_keys'), join(project, 'notes.md'));
+		t.throws(() => resolveFilePath('notes.md', project), {
+			message: /escapes project directory via symlink/,
+		});
+		// The same file named by its absolute path.
+		t.throws(() => resolveFilePath(join(project, 'notes.md'), project), {
+			message: /escapes project directory via symlink/,
+		});
+
+		// Relative targets and dangling directory links are followed too.
+		symlinkSync('../outside/new-dir', join(project, 'dir-link'));
+		t.throws(() => resolveFilePath('dir-link/file.txt', project), {
+			message: /escapes project directory via symlink/,
+		});
+	} finally {
+		rmSync(base, {recursive: true, force: true});
+	}
+});
+
+posixOnly('security: a dangling symlink chain is followed to its end', t => {
+	const base = mkdtempSync(join(tmpdir(), 'pathval-'));
+	try {
+		const project = join(base, 'project');
+		mkdirSync(project);
+		symlinkSync(join(base, 'outside.txt'), join(project, 'b'));
+		symlinkSync('b', join(project, 'a'));
+		t.throws(() => resolveFilePath('a', project), {
+			message: /escapes project directory via symlink/,
+		});
+	} finally {
+		rmSync(base, {recursive: true, force: true});
+	}
+});
+
+posixOnly('security: `..` in a link target applies to where the link really points', t => {
+	const base = mkdtempSync(join(tmpdir(), 'pathval-'));
+	try {
+		const project = join(base, 'project');
+		const deep = join(base, 'outside', 'deep');
+		mkdirSync(project);
+		mkdirSync(deep, {recursive: true});
+		// `inner/..` lexically folds to the project, but `inner` really points
+		// at <outside>/deep, so the kernel lands in <outside>.
+		symlinkSync(deep, join(project, 'inner'));
+		symlinkSync('inner/../pwned.txt', join(project, 'notes.md'));
+		t.throws(() => resolveFilePath('notes.md', project), {
+			message: /escapes project directory via symlink/,
+		});
+	} finally {
+		rmSync(base, {recursive: true, force: true});
+	}
+});
+
+posixOnly('security: a symlink loop is rejected', t => {
+	const base = mkdtempSync(join(tmpdir(), 'pathval-'));
+	try {
+		symlinkSync('loop-b', join(base, 'loop-a'));
+		symlinkSync('loop-a', join(base, 'loop-b'));
+		t.throws(() => resolveFilePath('loop-a', base), {
+			message: /Too many levels of symbolic links/,
+		});
+	} finally {
+		rmSync(base, {recursive: true, force: true});
+	}
+});
+
+posixOnly('security: a dangling symlink that stays inside is allowed', t => {
+	const base = mkdtempSync(join(tmpdir(), 'pathval-'));
+	try {
+		mkdirSync(join(base, 'docs'));
+		symlinkSync('docs/not-yet.md', join(base, 'notes.md'));
+		t.is(resolveFilePath('notes.md', base), join(base, 'notes.md'));
+	} finally {
+		rmSync(base, {recursive: true, force: true});
+	}
+});
+
 test.serial('security: allows an in-project symlink that stays inside', t => {
 	const base = mkdtempSync(join(tmpdir(), 'pathval-'));
 	try {

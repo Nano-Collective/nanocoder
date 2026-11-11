@@ -1,6 +1,7 @@
 import {getAppConfig} from '@/config/index';
 import {getModelContextLimit, getSessionContextLimit} from '@/models/index';
 import {runLifecycleHooks} from '@/services/lifecycle-hooks';
+import {defineSessionValue} from '@/services/session-context';
 import {createTokenizer} from '@/tokenization/index';
 import type {
 	CompressionMode,
@@ -32,7 +33,8 @@ export {
 // Tune's "Aggressive Compact" preset. It sits between the config file and the
 // user's explicit `/compact` session overrides, so turning tune on or off never
 // clobbers a threshold or mode the user set by hand.
-let tuneAggressiveCompact = false;
+// Per session: in ACP each session applies the tune of its own provider.
+const tuneAggressiveCompact = defineSessionValue<boolean>();
 
 /** Threshold used by tune's aggressive compact (the lowest supported value). */
 export const AGGRESSIVE_COMPACT_THRESHOLD =
@@ -43,7 +45,7 @@ export const AGGRESSIVE_COMPACT_THRESHOLD =
  * Call whenever the active tune changes, including at startup.
  */
 export function applyTuneCompaction(tune: TuneConfig | undefined): void {
-	tuneAggressiveCompact = Boolean(tune?.enabled && tune.aggressiveCompact);
+	tuneAggressiveCompact.set(Boolean(tune?.enabled && tune.aggressiveCompact));
 }
 
 export interface ResolvedAutoCompactSettings {
@@ -59,8 +61,8 @@ export interface ResolvedAutoCompactSettings {
  * Precedence: `/compact` session override > tune aggressive compact > config.
  *
  * `tuneAggressive` is for a caller that holds its own tune, such as an ACP
- * session on its own provider; it is used instead of the process-wide preset
- * that `applyTuneCompaction` sets, so one session's tune cannot change another's.
+ * session on its own provider; it is used instead of the preset
+ * `applyTuneCompaction` set for the active session.
  */
 export function resolveAutoCompactSettings(
 	config: {
@@ -69,7 +71,7 @@ export function resolveAutoCompactSettings(
 		mode: CompressionMode;
 		strategy?: CompressionStrategy;
 	},
-	tuneAggressive: boolean = tuneAggressiveCompact,
+	tuneAggressive: boolean = tuneAggressiveCompact.get() ?? false,
 ): ResolvedAutoCompactSettings {
 	const session = autoCompactSessionOverrides;
 	const tuneThreshold = tuneAggressive ? AGGRESSIVE_COMPACT_THRESHOLD : null;
@@ -348,5 +350,5 @@ export async function maybeAutoCompact(
 // additionally clears tune's aggressive-compact preset.
 export function resetAutoCompactSession(): void {
 	resetAutoCompactSessionOverrides();
-	tuneAggressiveCompact = false;
+	tuneAggressiveCompact.reset();
 }
