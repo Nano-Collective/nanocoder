@@ -26,7 +26,7 @@ test('ideCommand handler returns a React element', async t => {
 test('ideCommand handler returns a Fragment (stub for special handling)', async t => {
 	const result = await ideCommand.handler([]);
 	t.truthy(result);
-	// The handler returns React.Fragment since actual logic is in app-util.ts
+	// The handler returns React.Fragment since actual logic is in the special-command handler
 	if (React.isValidElement(result)) {
 		t.is(result.type, React.Fragment);
 	}
