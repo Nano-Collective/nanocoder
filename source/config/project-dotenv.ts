@@ -151,3 +151,26 @@ export function ignoredDotenvWarning(ignored: string[]): string | null {
 		' in your shell environment instead.'
 	);
 }
+
+let bootstrapped = false;
+
+/**
+ * Load the launch directory's `.env` into the process environment, once per
+ * process, warning on stderr about any protected key it dropped.
+ *
+ * Each process entry point calls this after parsing its arguments and before
+ * loading anything that reads config: the CLI before the TUI, `--plain`,
+ * `--acp` and the subcommands that load config; the daemon and the CI-fix
+ * runner before they chdir. Commands that must not read a folder's `.env`
+ * (`nanocoder trust`) simply do not call it. It used to run as a side effect
+ * of importing `config/index`, which loaded it from whatever directory the
+ * process happened to be in whenever that module was first pulled in.
+ */
+export function bootstrapProjectDotenv(cwd: string = process.cwd()): void {
+	if (bootstrapped) return;
+	bootstrapped = true;
+	const warning = ignoredDotenvWarning(loadProjectDotenv(cwd).ignored);
+	if (warning) {
+		process.stderr.write(`${warning}\n`);
+	}
+}

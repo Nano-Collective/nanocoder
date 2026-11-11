@@ -13,6 +13,7 @@
 
 import {createLLMClient} from '@/client-factory';
 import {getAppConfig} from '@/config/index';
+import {bootstrapProjectDotenv} from '@/config/project-dotenv';
 import {validateProjectConfigSecurity} from '@/config/validation';
 import {runCiAutoFixFlow} from '@/daemon/ci-fix-orchestrator';
 import {CheckpointManager} from '@/services/checkpoint-manager';
@@ -56,6 +57,9 @@ const ciInvestigatorOverride = {
 };
 
 async function main(): Promise<void> {
+	// The project .env, read from the directory the daemon was spawned in and
+	// before the chdir below, as importing config used to.
+	bootstrapProjectDotenv();
 	const projectRoot = process.env.NANOCODER_PROJECT_ROOT || process.cwd();
 
 	// Change cwd so relative paths (cron tickers, file snapshots, etc.)

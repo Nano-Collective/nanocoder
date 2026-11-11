@@ -62,10 +62,14 @@
 					"type": "array"
 				},
 				"headless": {
-					"description": "Maximum LLM turns for headless runs (--plain and ACP loops).",
+					"description": "Maximum LLM turns for headless runs (--plain, ACP and subagent loops).",
 					"properties": {
 						"maxTurns": {
 							"description": "Maximum LLM turns before the loop forces a final, tool-free answer.",
+							"type": "number"
+						},
+						"subagentMaxTurns": {
+							"description": "Turn ceiling for a delegated subagent run. Defaults to `maxTurns`.",
 							"type": "number"
 						}
 					},

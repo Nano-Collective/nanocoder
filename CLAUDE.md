@@ -65,7 +65,7 @@ Nanocoder is a React-based CLI coding agent built with Ink.js that provides loca
 - `source/lsp/` - Language server client integration
 - `source/wizards/` - Interactive setup flows (config, MCP, providers)
 - `source/plain/` - Non-Ink CLI shell used by `--plain`
-- `source/agent-loop/` - Shared, Ink-free agent turn engine (`runTurnEngine`): one iterative loop owning the model call, text tool-call parsing, retry guards, auto-compaction and turn limits. Frontends plug in through an adapter; `--plain`, ACP and subagents run on it (subagents with the retry guards switched off), and the TUI loop is moving onto it
+- `source/agent-loop/` - Shared, Ink-free agent turn engine (`runTurnEngine`): one iterative loop owning the model call, text tool-call parsing, retry guards, auto-compaction and turn limits. Frontends plug in through an adapter; `--plain`, ACP and subagents run on it, and the TUI loop is moving onto it
 - `source/skills/` - Unified skill primitive: loaders (bundle + flat-dir adapter), manifest parser, frontmatter `subscribe:` parser, registrar that fans members into the existing command / subagent / tool registries, dispatcher for triggered runs
 - `source/events/` - Event router, file watcher source (chokidar), cron source (croner), backpressure (per-subscription concurrency cap + 500ms trailing debounce on `file.changed`)
 - `source/daemon/` - Per-project daemon process: lockfile, Unix-socket IPC server / TUI client, CLI surface (`nanocoder daemon <start|stop|status|logs|install|uninstall>`), launchd plist + systemd user unit installers, background CI watch
@@ -109,9 +109,9 @@ Slash commands live in `source/commands/` and are lazy-loaded via `source/comman
 
 A command module exports one of two shapes (`source/types/commands.ts`):
 - **`Command`** (`handler`): reads its args, the messages and some metadata, and returns a React element or string to show.
-- **`StatefulCommand`** (`run`): changes app state. It receives a typed `CommandContext` (args plus the setters and services it may use) and returns a `CommandCompletion` saying when the prompt is handed back (`done`, or `done-after-render` once queued output has rendered). If a command needs app state the context lacks, add it to `CommandContext` and to `createCommandContext` in the dispatcher.
+- **`StatefulCommand`** (`run`): changes app state. It receives a typed `CommandContext` (args plus the setters and services it may use) and returns a `CommandCompletion` saying when the prompt is handed back: `done`, `done-after-render` once queued output has rendered, `handed-off` when something it started (a chat turn, a picker) completes it, or `{show}` to display output the way a `Command` does. If a command needs app state the context lacks, add it to `CommandContext` and to `createCommandContext` in the dispatcher.
 
-Some older stateful commands (checkpoint load, resume, retry, stats, login, compact, context-max, the `create` subcommands) are still stubs whose logic lives in the handlers under `source/app/utils/handlers/`, run by the dispatcher before the registry. They are being moved to `StatefulCommand`; do not add new ones there.
+Some older stateful commands (stats, login, compact, context-max, the `create` subcommands) are still stubs whose logic lives in the handlers under `source/app/utils/handlers/`, run by the dispatcher before the registry. They are being moved to `StatefulCommand`; do not add new ones there.
 
 A command that does slow work before returning (LLM round-trip, network) should declare `progressLabel`. The dispatcher then holds a `CommandProgress` spinner in the live slot for the duration, so the UI is not silent while the command runs. Set it on both the module's command object and its `lazyCommands` entry - the spinner has to render before `load()` resolves, so it cannot be read off the lazily-imported module.
 

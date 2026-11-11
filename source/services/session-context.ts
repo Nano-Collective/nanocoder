@@ -52,6 +52,11 @@ export function getActiveSessionContext(): SessionContext | undefined {
 	return sessionContextStore.getStore();
 }
 
+/** Runs `run` as code outside any session does: on the launch folder. */
+export function runOutsideSessionContext<T>(run: () => T): T {
+	return sessionContextStore.exit(run);
+}
+
 /**
  * The folder project config is read from: the active session's folder, else
  * the directory the process runs in.

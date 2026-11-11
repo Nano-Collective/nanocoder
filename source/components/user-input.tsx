@@ -3,9 +3,12 @@ import Spinner from 'ink-spinner';
 import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import stringWidth from 'string-width';
 import {commandRegistry} from '@/commands';
+import {completionWindow} from '@/components/composer/completion-window';
+import {FileMentionList} from '@/components/composer/file-mention-list';
 import {isComposerKey} from '@/components/composer/keymap';
 import {ReverseSearchPrompt} from '@/components/composer/reverse-search-prompt';
 import {ShortcutsOverlay} from '@/components/composer/shortcuts-overlay';
+import {useFileMentions} from '@/components/composer/useFileMentions';
 import {useReverseSearch} from '@/components/composer/useReverseSearch';
 import {useShortcutsOverlay} from '@/components/composer/useShortcutsOverlay';
 import {
@@ -44,99 +47,13 @@ import {
 	readClipboardImage,
 	readImageFile,
 } from '@/utils/clipboard-image';
-import {
-	getCurrentFileMention,
-	getFileCompletions,
-} from '@/utils/file-autocomplete';
-import {handleFileMention} from '@/utils/file-mention-handler';
-import {fuzzyScoreFilePath} from '@/utils/fuzzy-matching';
 import {isNewlineKey} from '@/utils/newline-key';
 import {assemblePrompt} from '@/utils/prompt-processor';
-import {handleResourceMention} from '@/utils/resource-mention-handler';
 import {pasteEvents} from '@/utils/terminal-paste';
 import {getVisualLineSegments} from '@/utils/text-wrapping';
 import type {ActiveEditorState} from '@/vscode/vscode-server';
 
 const MAX_COMMAND_COMPLETION_ROWS = 10;
-const MAX_FILE_COMPLETION_ROWS = 5;
-
-// The rows of a completion list to render: all of them when they fit,
-// otherwise a window kept around the selected row so it never scrolls
-// out of view.
-function completionWindow<T>(
-	items: T[],
-	selectedIndex: number,
-	maxRows: number,
-): {start: number; end: number; items: T[]} {
-	if (items.length <= maxRows) {
-		return {start: 0, end: items.length, items};
-	}
-
-	const centeredStart =
-		(selectedIndex >= 0 ? selectedIndex : 0) - Math.floor(maxRows / 2);
-	const start = Math.min(Math.max(centeredStart, 0), items.length - maxRows);
-	const end = start + maxRows;
-
-	return {start, end, items: items.slice(start, end)};
-}
-
-// An MCP resource shares the file-mention `@` trigger and completion list,
-// distinguished from a filesystem path by this prefix so `handleFileSelection`
-// knows which resolver to call. `resource.uri` can itself contain colons
-// (e.g. `file:///…`), so the prefix only wraps the leading `serverName` and
-// is split off with a bounded split rather than a plain `:` join/parse.
-const MCP_RESOURCE_PATH_PREFIX = 'mcp-resource:';
-
-function encodeMCPResourcePath(serverName: string, uri: string): string {
-	return `${MCP_RESOURCE_PATH_PREFIX}${serverName}:${uri}`;
-}
-
-function decodeMCPResourcePath(
-	path: string,
-): {serverName: string; uri: string} | null {
-	if (!path.startsWith(MCP_RESOURCE_PATH_PREFIX)) return null;
-	const rest = path.slice(MCP_RESOURCE_PATH_PREFIX.length);
-	const separatorIndex = rest.indexOf(':');
-	if (separatorIndex === -1) return null;
-	return {
-		serverName: rest.slice(0, separatorIndex),
-		uri: rest.slice(separatorIndex + 1),
-	};
-}
-
-/**
- * MCP resources from every connected server, scored against the partial
- * `@mention` the same way local files are, and merged into the same
- * completion list. Mirrors `getFileCompletions`'s shape and score-based
- * filtering so the two sources sort together without special-casing.
- */
-async function getMCPResourceCompletions(partialPath: string): Promise<
-	Array<{
-		path: string;
-		displayPath: string;
-		resourceName: string;
-		score: number;
-		isDirectory: boolean;
-	}>
-> {
-	const mcpClient = getToolManager()?.getMCPClient();
-	if (!mcpClient) return [];
-
-	return mcpClient
-		.getAllResources()
-		.map(resource => ({
-			path: encodeMCPResourcePath(resource.serverName, resource.uri),
-			// displayPath is for the completion list UI only — it must never be
-			// used as the resourceName passed to handleResourceMention, or the
-			// "(serverName)" suffix it carries gets stamped a second time by the
-			// assembled prompt header (see prompt-processor.ts's RESOURCE case).
-			displayPath: `${resource.name} (${resource.serverName})`,
-			resourceName: resource.name,
-			score: fuzzyScoreFilePath(resource.name, partialPath),
-			isDirectory: false,
-		}))
-		.filter(c => c.score > 0);
-}
 
 // Prompt box width floor: keeps narrow terminals legible.
 const PROMPT_WIDTH_MIN = 40;
@@ -275,17 +192,6 @@ export default function UserInput({
 		displayValue: '',
 		placeholderContent: {},
 	});
-	// File autocomplete state
-	const [isFileAutocompleteMode, setIsFileAutocompleteMode] = useState(false);
-	const [fileCompletions, setFileCompletions] = useState<
-		Array<{
-			path: string;
-			displayPath: string;
-			resourceName?: string;
-			score: number;
-		}>
-	>([]);
-	const [selectedFileIndex, setSelectedFileIndex] = useState(0);
 	const [selectedQueuedIndex, setSelectedQueuedIndex] = useState(-1);
 	// Pending image attachments sent with the next submitted message.
 	const [attachments, setAttachments] = useState<ImageAttachment[]>([]);
@@ -323,12 +229,10 @@ export default function UserInput({
 		showClearMessage,
 		showCompletions,
 		completions,
-		pendingFileMentions,
 		selectedCompletionIndex,
 		setShowClearMessage,
 		setShowCompletions,
 		setCompletions,
-		setPendingFileMentions,
 		setSelectedCompletionIndex,
 		resetUIState,
 	} = uiState;
@@ -419,77 +323,18 @@ export default function UserInput({
 		wasBusyRef.current = isBusy;
 	}, [isBusy, disabled, focus]);
 
-	// Consume pending file mentions from explorer and insert into input
-	// Properly attach files by calling handleFileMention for each
-	useEffect(() => {
-		if (pendingFileMentions.length === 0) return;
-
-		const attachFiles = async () => {
-			let state = currentState;
-			let displayValue = state.displayValue;
-
-			for (const filePath of pendingFileMentions) {
-				// Create a temporary mention text to replace
-				const mentionText = `@${filePath}`;
-				// Add the mention to display value first
-				displayValue = displayValue
-					? `${displayValue} ${mentionText}`
-					: mentionText;
-
-				// Handle the file mention to create placeholder
-				const result = await handleFileMention(
-					filePath,
-					displayValue,
-					state.placeholderContent,
-					mentionText,
-				);
-
-				if (result) {
-					state = result;
-					displayValue = result.displayValue;
-				}
-			}
-
-			setInputState(state);
-			setTextInputKey(prev => prev + 1);
-			setPendingFileMentions([]);
-		};
-
-		void attachFiles();
-	}, [
-		pendingFileMentions,
+	const remountTextInput = useCallback(
+		() => setTextInputKey(prev => prev + 1),
+		[],
+	);
+	// `@` file / MCP-resource mentions and the explorer's file handoff.
+	const mentions = useFileMentions({
+		input,
 		currentState,
 		setInputState,
-		setPendingFileMentions,
-	]);
-
-	// Trigger file autocomplete when input changes
-	useEffect(() => {
-		const runFileAutocomplete = async () => {
-			const mention = getCurrentFileMention(input, input.length);
-
-			if (mention) {
-				setIsFileAutocompleteMode(true);
-				const cwd = process.cwd();
-				const [completions, resourceCompletions] = await Promise.all([
-					getFileCompletions(mention.mention, cwd),
-					getMCPResourceCompletions(mention.mention),
-				]);
-				setFileCompletions(
-					[...completions, ...resourceCompletions]
-						.sort((a, b) => b.score - a.score)
-						.slice(0, 20),
-				);
-				setSelectedFileIndex(0); // Reset selection when completions change
-			} else {
-				setIsFileAutocompleteMode(false);
-				setFileCompletions([]);
-				setSelectedFileIndex(0);
-			}
-		};
-
-		void runFileAutocomplete();
-	}, [input]);
+		onInputReplaced: remountTextInput,
+	});
+	const isFileAutocompleteMode = mentions.isActive;
 
 	// Command completions for a given input value. Shared by the memo below
 	// and the Enter gate, which can run ahead of a re-render (see there).
@@ -586,68 +431,6 @@ export default function UserInput({
 	]);
 
 	// Helper functions
-
-	// Handle file mention selection (Tab key in file autocomplete mode)
-	const handleFileSelection = useCallback(async () => {
-		if (!isFileAutocompleteMode || fileCompletions.length === 0) {
-			return false;
-		}
-
-		const mention = getCurrentFileMention(input, input.length);
-		if (!mention) {
-			return false;
-		}
-
-		// Select the currently highlighted file
-		const selectedPath = fileCompletions[selectedFileIndex]?.path;
-		if (!selectedPath) {
-			return false;
-		}
-
-		// Extract the original mention text (the @... part we're replacing)
-		const mentionText = input.substring(mention.startIndex, mention.endIndex);
-
-		// Handle the mention to create a placeholder. An MCP resource and a
-		// filesystem file share this completion list and are resolved by
-		// different readers, distinguished by the encoded path's prefix.
-		const decoded = decodeMCPResourcePath(selectedPath);
-		const mcpClient = decoded ? getToolManager()?.getMCPClient() : undefined;
-		const result =
-			decoded && mcpClient
-				? await handleResourceMention(
-						mcpClient,
-						decoded.serverName,
-						decoded.uri,
-						fileCompletions[selectedFileIndex]?.resourceName ?? decoded.uri,
-						currentState.displayValue,
-						currentState.placeholderContent,
-						mentionText,
-					)
-				: await handleFileMention(
-						selectedPath,
-						currentState.displayValue,
-						currentState.placeholderContent,
-						mentionText,
-					);
-
-		if (result) {
-			setInputState(result);
-			setIsFileAutocompleteMode(false);
-			setFileCompletions([]);
-			setSelectedFileIndex(0);
-			setTextInputKey(prev => prev + 1);
-			return true;
-		}
-
-		return false;
-	}, [
-		isFileAutocompleteMode,
-		fileCompletions,
-		selectedFileIndex,
-		input,
-		currentState,
-		setInputState,
-	]);
 
 	// Attach an image to the pending message. We never gate on a model-capability
 	// heuristic here: if the model can't see images it will say so or error, which
@@ -746,8 +529,7 @@ export default function UserInput({
 			return;
 		}
 		if (isFileAutocompleteMode) {
-			setIsFileAutocompleteMode(false);
-			setFileCompletions([]);
+			mentions.dismiss();
 			return;
 		}
 		// Esc in an empty prompt dismisses the suggested command first.
@@ -772,6 +554,7 @@ export default function UserInput({
 		activeEditor,
 		showCompletions,
 		isFileAutocompleteMode,
+		mentions.dismiss,
 		suggestedCommand,
 		onDismissSuggestion,
 		showClearMessage,
@@ -1050,7 +833,7 @@ export default function UserInput({
 		if (isComposerKey('reverseSearch', inputChar, key)) {
 			reverseSearch.start(currentState);
 			setShowCompletions(false);
-			setIsFileAutocompleteMode(false);
+			mentions.dismiss();
 			setShowClearMessage(false);
 			return;
 		}
@@ -1112,7 +895,7 @@ export default function UserInput({
 
 			// File autocomplete takes priority
 			if (isFileAutocompleteMode) {
-				void handleFileSelection();
+				void mentions.selectCurrent();
 				return;
 			}
 
@@ -1160,8 +943,7 @@ export default function UserInput({
 
 		// Space exits file autocomplete mode
 		if (inputChar === ' ' && isFileAutocompleteMode) {
-			setIsFileAutocompleteMode(false);
-			setFileCompletions([]);
+			mentions.dismiss();
 		}
 
 		// Clear clear message on other input
@@ -1239,10 +1021,7 @@ export default function UserInput({
 			// navigate lines — let TextInput handle it
 			if (getVisualLineSegments(input, inputWrapWidth).length > 1) return;
 			// File autocomplete navigation takes priority
-			if (isFileAutocompleteMode && fileCompletions.length > 0) {
-				setSelectedFileIndex(prev =>
-					prev > 0 ? prev - 1 : fileCompletions.length - 1,
-				);
+			if (mentions.moveSelection('up')) {
 				return;
 			}
 			// Command completion navigation takes priority over history
@@ -1264,10 +1043,7 @@ export default function UserInput({
 			// navigate lines — let TextInput handle it
 			if (getVisualLineSegments(input, inputWrapWidth).length > 1) return;
 			// File autocomplete navigation takes priority
-			if (isFileAutocompleteMode && fileCompletions.length > 0) {
-				setSelectedFileIndex(prev =>
-					prev < fileCompletions.length - 1 ? prev + 1 : 0,
-				);
+			if (mentions.moveSelection('down')) {
 				return;
 			}
 			// Command completion navigation takes priority over history
@@ -1319,15 +1095,6 @@ export default function UserInput({
 				MAX_COMMAND_COMPLETION_ROWS,
 			),
 		[completions, selectedCompletionIndex],
-	);
-	const fileCompletionWindow = useMemo(
-		() =>
-			completionWindow(
-				fileCompletions,
-				selectedFileIndex,
-				MAX_FILE_COMPLETION_ROWS,
-			),
-		[fileCompletions, selectedFileIndex],
 	);
 
 	// When disabled, show minimal UI to avoid cluttering the screen
@@ -1453,34 +1220,11 @@ export default function UserInput({
 							)}
 						</Box>
 					)}
-					{isFileAutocompleteMode && fileCompletions.length > 0 && (
-						<Box flexDirection="column" marginTop={1}>
-							<Text color={colors.secondary}>
-								File suggestions (↑/↓ to navigate, Tab to select):
-							</Text>
-							{fileCompletionWindow.items.map((file, index) => {
-								const isSelected =
-									fileCompletionWindow.start + index === selectedFileIndex;
-								return (
-									<Text
-										key={file.path}
-										color={isSelected ? colors.info : colors.primary}
-										bold={isSelected}
-									>
-										{isSelected ? '▸ ' : '  '}
-										{decodeMCPResourcePath(file.path)
-											? file.displayPath
-											: file.path}
-									</Text>
-								);
-							})}
-							{fileCompletions.length > MAX_FILE_COMPLETION_ROWS && (
-								<Text color={colors.secondary}>
-									Showing {fileCompletionWindow.start + 1}-
-									{fileCompletionWindow.end} of {fileCompletions.length}
-								</Text>
-							)}
-						</Box>
+					{isFileAutocompleteMode && mentions.completions.length > 0 && (
+						<FileMentionList
+							completions={mentions.completions}
+							selectedIndex={mentions.selectedIndex}
+						/>
 					)}
 					{queuedMessages.length > 0 && (
 						<Box flexDirection="column" marginTop={1}>

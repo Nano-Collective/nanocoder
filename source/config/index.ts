@@ -12,7 +12,6 @@ import {
 	getNotificationsPreference,
 	loadPreferences,
 } from '@/config/preferences';
-import {ignoredDotenvWarning, loadProjectDotenv} from '@/config/project-dotenv';
 import {
 	DEFAULT_SESSION_CONFIG,
 	normalizeSessionConfig,
@@ -58,14 +57,6 @@ import {isTrustLevel} from '@/verify/trust';
 
 export {confDirMap, getClosestConfigFile} from '@/config/paths';
 export {DEFAULT_SESSION_CONFIG} from '@/config/session-config';
-
-// Load .env file from working directory (shell environment takes precedence).
-// Trust-related keys are dropped: this runs before the trust check.
-const dotenvResult = loadProjectDotenv(process.cwd());
-const dotenvWarning = ignoredDotenvWarning(dotenvResult.ignored);
-if (dotenvWarning) {
-	process.stderr.write(`${dotenvWarning}\n`);
-}
 
 type ConfigFileCacheEntry = {
 	mtimeMs: number;
@@ -266,27 +257,49 @@ export const DEFAULT_HEADLESS_CONFIG: NonNullable<AppConfig['headless']> = {
 
 function loadHeadlessConfig(cwd: string): AppConfig['headless'] {
 	const defaults = DEFAULT_HEADLESS_CONFIG;
+	const turnLimit = (value: unknown): number | undefined =>
+		typeof value === 'number' && Number.isFinite(value)
+			? Math.max(1, Math.round(value))
+			: undefined;
 
+	const fromFile: {maxTurns?: number; subagentMaxTurns?: number} =
+		loadHierarchicalConfig(cwd, 'agents.config.json', 'headless', config => {
+			const headless = config.nanocoder?.headless;
+			if (headless && typeof headless === 'object') {
+				return {
+					maxTurns: turnLimit(headless.maxTurns),
+					subagentMaxTurns: turnLimit(headless.subagentMaxTurns),
+				};
+			}
+			return null;
+		}) ?? {};
+
+	let maxTurns = fromFile.maxTurns ?? defaults.maxTurns;
 	const envValue = process.env['NANOCODER_MAX_TURNS'];
 	if (envValue !== undefined && envValue.trim() !== '') {
 		const parsed = Number.parseInt(envValue, 10);
 		if (Number.isFinite(parsed) && parsed >= 1) {
-			return {maxTurns: parsed};
+			maxTurns = parsed;
 		}
 	}
 
+	// Set only when configured: a subagent otherwise uses maxTurns.
+	return fromFile.subagentMaxTurns === undefined
+		? {maxTurns}
+		: {maxTurns, subagentMaxTurns: fromFile.subagentMaxTurns};
+}
+
+/**
+ * The turn ceiling for a delegated subagent run: `headless.subagentMaxTurns`
+ * when set, otherwise the headless `maxTurns` (so `NANOCODER_MAX_TURNS`
+ * applies to subagents too).
+ */
+export function getSubagentMaxTurns(): number {
+	const headless = getAppConfig().headless;
 	return (
-		loadHierarchicalConfig(cwd, 'agents.config.json', 'headless', config => {
-			const headless = config.nanocoder?.headless;
-			if (headless && typeof headless === 'object') {
-				const value = headless.maxTurns;
-				if (typeof value === 'number' && Number.isFinite(value)) {
-					return {maxTurns: Math.max(1, Math.round(value))};
-				}
-				return {...defaults};
-			}
-			return null;
-		}) ?? {...defaults}
+		headless?.subagentMaxTurns ??
+		headless?.maxTurns ??
+		DEFAULT_HEADLESS_MAX_TURNS
 	);
 }
 

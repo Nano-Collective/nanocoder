@@ -5,7 +5,7 @@ import {renderWithTheme} from '@/test-utils/render-with-theme';
 import type {Message} from '@/types/core';
 import test from 'ava';
 import React from 'react';
-import {checkpointCommand} from './checkpoint';
+import {checkpointCommand, runCheckpointSubcommand} from './checkpoint';
 
 // The command's default CheckpointManager is rooted at process.cwd(). Run from
 // a throwaway workspace so the suite never writes checkpoints into, or appends
@@ -49,13 +49,13 @@ test('checkpointCommand has description', t => {
 	t.true(checkpointCommand.description.length > 0);
 });
 
-test('checkpointCommand has handler function', t => {
-	t.is(typeof checkpointCommand.handler, 'function');
+test('checkpointCommand has a run function', t => {
+	t.is(typeof checkpointCommand.run, 'function');
 });
 
 // Help command tests
 test('checkpointCommand shows help with no arguments', async t => {
-	const result = await checkpointCommand.handler([], [], mockMetadata);
+	const result = await runCheckpointSubcommand([], [], mockMetadata);
 	const {lastFrame} = renderWithTheme(result as React.ReactElement);
 	const output = lastFrame() || '';
 
@@ -63,7 +63,7 @@ test('checkpointCommand shows help with no arguments', async t => {
 });
 
 test('checkpointCommand shows help with help argument', async t => {
-	const result = await checkpointCommand.handler(['help'], [], mockMetadata);
+	const result = await runCheckpointSubcommand(['help'], [], mockMetadata);
 	const {lastFrame} = renderWithTheme(result as React.ReactElement);
 	const output = lastFrame() || '';
 
@@ -75,7 +75,7 @@ test('checkpointCommand shows help with help argument', async t => {
 });
 
 test('checkpointCommand shows help with --help flag', async t => {
-	const result = await checkpointCommand.handler(['--help'], [], mockMetadata);
+	const result = await runCheckpointSubcommand(['--help'], [], mockMetadata);
 	const {lastFrame} = renderWithTheme(result as React.ReactElement);
 	const output = lastFrame() || '';
 
@@ -83,7 +83,7 @@ test('checkpointCommand shows help with --help flag', async t => {
 });
 
 test('checkpointCommand shows help with -h flag', async t => {
-	const result = await checkpointCommand.handler(['-h'], [], mockMetadata);
+	const result = await runCheckpointSubcommand(['-h'], [], mockMetadata);
 	const {lastFrame} = renderWithTheme(result as React.ReactElement);
 	const output = lastFrame() || '';
 
@@ -92,7 +92,7 @@ test('checkpointCommand shows help with -h flag', async t => {
 
 // Create subcommand tests
 test('checkpointCommand create warns when no messages', async t => {
-	const result = await checkpointCommand.handler(['create'], [], mockMetadata);
+	const result = await runCheckpointSubcommand(['create'], [], mockMetadata);
 	const {lastFrame} = renderWithTheme(result as React.ReactElement);
 	const output = lastFrame() || '';
 
@@ -100,7 +100,7 @@ test('checkpointCommand create warns when no messages', async t => {
 });
 
 test('checkpointCommand create alias "save" works', async t => {
-	const result = await checkpointCommand.handler(['save'], [], mockMetadata);
+	const result = await runCheckpointSubcommand(['save'], [], mockMetadata);
 	const {lastFrame} = renderWithTheme(result as React.ReactElement);
 	const output = lastFrame() || '';
 
@@ -109,25 +109,25 @@ test('checkpointCommand create alias "save" works', async t => {
 
 // List subcommand tests
 test('checkpointCommand list shows checkpoints', async t => {
-	const result = await checkpointCommand.handler(['list'], [], mockMetadata);
+	const result = await runCheckpointSubcommand(['list'], [], mockMetadata);
 	// Just verify it returns something (actual checkpoints depend on state)
 	t.truthy(result);
 });
 
 test('checkpointCommand keeps its runtime files in the working directory', async t => {
-	await checkpointCommand.handler(['list'], [], mockMetadata);
+	await runCheckpointSubcommand(['list'], [], mockMetadata);
 	t.true(existsSync(join(workspace, '.nanocoder', '.gitignore')));
 });
 
 test('checkpointCommand list alias "ls" works', async t => {
-	const result = await checkpointCommand.handler(['ls'], [], mockMetadata);
+	const result = await runCheckpointSubcommand(['ls'], [], mockMetadata);
 	t.truthy(result);
 });
 
 // Load subcommand tests
 test('checkpointCommand load with non-existent checkpoint shows error', async t => {
 	const messages = createMockMessages(2);
-	const result = await checkpointCommand.handler(
+	const result = await runCheckpointSubcommand(
 		['load', 'non-existent-checkpoint-xyz'],
 		messages,
 		mockMetadata,
@@ -140,7 +140,7 @@ test('checkpointCommand load with non-existent checkpoint shows error', async t 
 
 test('checkpointCommand load alias "restore" works', async t => {
 	const messages = createMockMessages(2);
-	const result = await checkpointCommand.handler(
+	const result = await runCheckpointSubcommand(
 		['restore', 'non-existent'],
 		messages,
 		mockMetadata,
@@ -153,7 +153,7 @@ test('checkpointCommand load alias "restore" works', async t => {
 
 // Delete subcommand tests
 test('checkpointCommand delete requires name', async t => {
-	const result = await checkpointCommand.handler(['delete'], [], mockMetadata);
+	const result = await runCheckpointSubcommand(['delete'], [], mockMetadata);
 	const {lastFrame} = renderWithTheme(result as React.ReactElement);
 	const output = lastFrame() || '';
 
@@ -161,7 +161,7 @@ test('checkpointCommand delete requires name', async t => {
 });
 
 test('checkpointCommand delete with non-existent checkpoint shows error', async t => {
-	const result = await checkpointCommand.handler(
+	const result = await runCheckpointSubcommand(
 		['delete', 'non-existent-checkpoint-xyz'],
 		[],
 		mockMetadata,
@@ -173,7 +173,7 @@ test('checkpointCommand delete with non-existent checkpoint shows error', async 
 });
 
 test('checkpointCommand delete alias "remove" works', async t => {
-	const result = await checkpointCommand.handler(
+	const result = await runCheckpointSubcommand(
 		['remove', 'non-existent'],
 		[],
 		mockMetadata,
@@ -185,7 +185,7 @@ test('checkpointCommand delete alias "remove" works', async t => {
 });
 
 test('checkpointCommand delete alias "rm" works', async t => {
-	const result = await checkpointCommand.handler(
+	const result = await runCheckpointSubcommand(
 		['rm', 'non-existent'],
 		[],
 		mockMetadata,
@@ -198,7 +198,7 @@ test('checkpointCommand delete alias "rm" works', async t => {
 
 // Unknown subcommand tests
 test('checkpointCommand shows error for unknown subcommand', async t => {
-	const result = await checkpointCommand.handler(['unknown'], [], mockMetadata);
+	const result = await runCheckpointSubcommand(['unknown'], [], mockMetadata);
 	const {lastFrame} = renderWithTheme(result as React.ReactElement);
 	const output = lastFrame() || '';
 
@@ -208,9 +208,9 @@ test('checkpointCommand shows error for unknown subcommand', async t => {
 });
 
 test('checkpointCommand handles subcommand case-insensitively', async t => {
-	const result1 = await checkpointCommand.handler(['HELP'], [], mockMetadata);
-	const result2 = await checkpointCommand.handler(['Help'], [], mockMetadata);
-	const result3 = await checkpointCommand.handler(['LIST'], [], mockMetadata);
+	const result1 = await runCheckpointSubcommand(['HELP'], [], mockMetadata);
+	const result2 = await runCheckpointSubcommand(['Help'], [], mockMetadata);
+	const result3 = await runCheckpointSubcommand(['LIST'], [], mockMetadata);
 
 	const {lastFrame: frame1} = renderWithTheme(result1 as React.ReactElement);
 	const {lastFrame: frame2} = renderWithTheme(result2 as React.ReactElement);
@@ -222,7 +222,7 @@ test('checkpointCommand handles subcommand case-insensitively', async t => {
 
 // Multiple word checkpoint name tests
 test('checkpointCommand delete handles multi-word names', async t => {
-	const result = await checkpointCommand.handler(
+	const result = await runCheckpointSubcommand(
 		['delete', 'my', 'checkpoint', 'name'],
 		[],
 		mockMetadata,
@@ -235,7 +235,7 @@ test('checkpointCommand delete handles multi-word names', async t => {
 });
 
 test('checkpointCommand load handles multi-word names', async t => {
-	const result = await checkpointCommand.handler(
+	const result = await runCheckpointSubcommand(
 		['load', 'my', 'checkpoint', 'name'],
 		[],
 		mockMetadata,
@@ -248,28 +248,28 @@ test('checkpointCommand load handles multi-word names', async t => {
 
 // Handler returns React elements
 test('checkpointCommand handler returns React element', async t => {
-	const result = await checkpointCommand.handler(['help'], [], mockMetadata);
+	const result = await runCheckpointSubcommand(['help'], [], mockMetadata);
 	t.true(React.isValidElement(result));
 });
 
 test('checkpointCommand create handler returns React element', async t => {
-	const result = await checkpointCommand.handler(['create'], [], mockMetadata);
+	const result = await runCheckpointSubcommand(['create'], [], mockMetadata);
 	t.true(React.isValidElement(result));
 });
 
 test('checkpointCommand list handler returns React element', async t => {
-	const result = await checkpointCommand.handler(['list'], [], mockMetadata);
+	const result = await runCheckpointSubcommand(['list'], [], mockMetadata);
 	t.true(React.isValidElement(result));
 });
 
 test('checkpointCommand delete handler returns React element', async t => {
-	const result = await checkpointCommand.handler(['delete'], [], mockMetadata);
+	const result = await runCheckpointSubcommand(['delete'], [], mockMetadata);
 	t.true(React.isValidElement(result));
 });
 
 // Verify help content is comprehensive
 test('checkpointCommand help includes all subcommands', async t => {
-	const result = await checkpointCommand.handler(['help'], [], mockMetadata);
+	const result = await runCheckpointSubcommand(['help'], [], mockMetadata);
 	const {lastFrame} = renderWithTheme(result as React.ReactElement);
 	const output = lastFrame() || '';
 
@@ -292,7 +292,7 @@ test('checkpointCommand help includes all subcommands', async t => {
 });
 
 test('checkpointCommand help includes examples', async t => {
-	const result = await checkpointCommand.handler(['help'], [], mockMetadata);
+	const result = await runCheckpointSubcommand(['help'], [], mockMetadata);
 	const {lastFrame} = renderWithTheme(result as React.ReactElement);
 	const output = lastFrame() || '';
 

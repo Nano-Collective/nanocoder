@@ -115,7 +115,7 @@ Names are matched case-insensitively. A key that is skipped is reported in a war
 | `NANOCODER_INSTALL_METHOD` | Override installation detection (`npm`, `homebrew`, `nix`, `unknown`) |
 | `NANOCODER_NO_UPDATE_CHECK` | Set to `1` to disable automatic update checks at startup. Running `/update` still performs an explicit check |
 | `NANOCODER_DEFAULT_SHUTDOWN_TIMEOUT` | Graceful shutdown timeout in milliseconds (default: 5000) |
-| `NANOCODER_MAX_TURNS` | Maximum LLM turns for headless runs (`--plain` and ACP). Overrides `nanocoder.headless.maxTurns`; default 200. See [Headless](#headless) |
+| `NANOCODER_MAX_TURNS` | Maximum LLM turns for headless runs (`--plain`, ACP, and subagents unless `subagentMaxTurns` is set). Overrides `nanocoder.headless.maxTurns`; default 200. See [Headless](#headless) |
 | `NANOCODER_TRUST_DIRECTORY` | Set to `1` to trust the working directory and save it to `trustedDirectories` for later runs. Honoured by the interactive TUI, `run` (Ink and `--plain`), `nanocoder daemon start`, `nanocoder verify` and `--acp`. Must come from your shell: a project `.env` cannot set it. See [Directory trust](../getting-started/index.md#directory-trust) |
 | `NANOCODER_SKILLS_INDEX` | URL or local path of the skills index used by `nanocoder skills add` (same as `--index`). See [Skills](../features/skills.md) |
 | `NANOCODER_DOCTOR_PROBE` | Set to `0` to stop `/doctor` from probing local provider ports |
@@ -261,7 +261,7 @@ This setting is stored in `nanocoder-preferences.json` (see [Preferences](prefer
 
 ### Headless
 
-Limits for non-interactive runs — the `--plain` shell (used in CI and non-TTY environments) and the ACP loop. There is no human to stop a wedged model in these runs, so the conversation loop caps the number of LLM turns.
+Limits for non-interactive runs — the `--plain` shell (used in CI and non-TTY environments), the ACP loop, and delegated [subagent](../features/subagents.md) runs. There is no human to stop a wedged model in these runs, so the conversation loop caps the number of LLM turns.
 
 When the cap is reached, the loop does **not** error out and discard work. On the final turn it strips all tools and asks the model to produce its answer using only the information it already has, so the run ends with a usable result.
 
@@ -269,7 +269,8 @@ When the cap is reached, the loop does **not** error out and discard work. On th
 {
   "nanocoder": {
     "headless": {
-      "maxTurns": 200
+      "maxTurns": 200,
+      "subagentMaxTurns": 200
     }
   }
 }
@@ -278,6 +279,7 @@ When the cap is reached, the loop does **not** error out and discard work. On th
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `maxTurns` | number | `200` | Maximum LLM turns before the loop forces a final, tool-free answer (minimum 1). Raise it for long iterative jobs; the `NANOCODER_MAX_TURNS` env var takes precedence over this setting. |
+| `subagentMaxTurns` | number | `maxTurns` | The same ceiling for each delegated subagent run (minimum 1). Unset, a subagent uses `maxTurns` (including a `NANOCODER_MAX_TURNS` override); set it to give subagents their own limit. A subagent that still calls tools on its final, tool-free turn stops with an error, and its partial output is handed to the main agent. |
 
 One turn is a single LLM response plus its batch of tool executions. The default of 200 is high enough for long iterative jobs to finish while still bounding cost and wall-clock time for an unattended run that gets stuck.
 
@@ -329,7 +331,7 @@ This produces one commit per edit. Squash them before opening a PR if you prefer
 
 ### Retry Limits
 
-Caps on how many times the conversation loop auto-retries a failing pattern without user intervention, so a stuck model cannot silently drain tokens. They apply in both runtimes: the interactive TUI loop and the `--plain` runtime used by `nanocoder run "..."` in CI and non-TTY environments (where they act within the [Headless](#headless) `maxTurns` ceiling). These are agent-loop limits — the per-provider `maxRetries` setting is unrelated and governs network request retries (see [Providers](providers/index.md)).
+Caps on how many times the conversation loop auto-retries a failing pattern without user intervention, so a stuck model cannot silently drain tokens. They apply to every agent loop: the interactive TUI, the `--plain` runtime used by `nanocoder run "..."` in CI and non-TTY environments, the ACP loop used by editor clients, and delegated [subagent](../features/subagents.md) runs. Outside the TUI they act within the [Headless](#headless) turn ceiling. These are agent-loop limits — the per-provider `maxRetries` setting is unrelated and governs network request retries (see [Providers](providers/index.md)).
 
 ```json
 {
@@ -347,9 +349,9 @@ Caps on how many times the conversation loop auto-retries a failing pattern with
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `maxRepeatedToolCalls` | number | `3` | Pause threshold for consecutive identical tool calls (minimum 2). The check fires when the same call (or set of calls) is emitted for the Nth consecutive turn, before that call runs - so the default of 3 executes the repeated call twice and pauses on the third emission. In an interactive session you are asked whether to continue - useful when the repetition is legitimate, such as polling a long-running job - or stop. `--plain` and other non-interactive runs stop with a clear error. Calls to unknown tools, and calls whose arguments aren't valid JSON (for example cut off at the output-token limit), count toward the streak too, so a model stuck on a bad call hits the same cap. Such calls aren't run. |
-| `maxEmptyTurns` | number | `2` | Consecutive empty assistant turns that are auto-nudged before giving up (minimum 0). The interactive loop additionally compacts the context and retries once before stopping; the `--plain` runtime stops directly after the nudges. |
-| `maxMalformedRetries` | number | `2` | Malformed self-correction retries allowed for text-parsed tool calls before the loop gives up (minimum 0). Applies to the XML fallback path in both runtimes. The interactive loop also parses tool-call text from native-tool models that emit it instead of native calls, so the cap covers that case there; the `--plain` runtime only parses text on the XML fallback path. |
-| `maxTruncatedTurns` | number | `2` | Consecutive turns cut off at the provider's output-token limit that are asked to continue before the loop accepts what it has (minimum 0). `--plain` runtime only. A truncated turn carries no tool calls, so without this the loop reads the fragment as a finished answer - see the note below. |
+| `maxEmptyTurns` | number | `2` | Consecutive empty assistant turns that are auto-nudged before giving up (minimum 0). The interactive loop additionally compacts the context and retries once before stopping; `--plain`, ACP and subagent runs stop directly after the nudges. |
+| `maxMalformedRetries` | number | `2` | Malformed self-correction retries allowed for text-parsed tool calls before the loop gives up (minimum 0). Applies to the XML fallback path in every loop. The interactive loop also parses tool-call text from native-tool models that emit it instead of native calls, so the cap covers that case there; `--plain`, ACP and subagent runs only parse text on the XML fallback path. |
+| `maxTruncatedTurns` | number | `2` | Consecutive turns cut off at the provider's output-token limit that are asked to continue before the loop accepts what it has (minimum 0). `--plain`, ACP and subagent runs. A truncated turn carries no tool calls, so without this the loop reads the fragment as a finished answer - see the note below. |
 
 Choosing "Continue" at the repeated-tool-call prompt runs the paused call and re-checks after `maxRepeatedToolCalls` further identical calls, so a genuinely stuck model is re-prompted rather than left looping.
 
@@ -359,7 +361,7 @@ Setting `maxEmptyTurns` or `maxMalformedRetries` to `0` disables the nudge entir
 
 > **Warning - CI polling patterns:** in `--plain` runs (`nanocoder run "..."` in CI and non-TTY environments) there is no prompt to answer, so `maxRepeatedToolCalls` is a hard stop. A workflow whose model legitimately repeats the identical command - polling a deploy, re-running the same check while waiting on an external state change - aborts with exit code `1` once the cap is hit, by default on the third consecutive identical call. Raise `nanocoder.retries.maxRepeatedToolCalls` in that project's `agents.config.json` before relying on such a polling pattern.
 
-Unlike [Headless](#headless), these limits do not cover the ACP loop (`--acp`, used by editor clients), which is bounded by `maxTurns` alone. Delegated [subagent](../features/subagents.md) runs apply `maxRepeatedToolCalls` - a stuck subagent stops with an error naming the setting, since there is nobody to ask inside a delegated run - but not the others: a subagent's loop ends on its own after an empty turn, it does not use text-parsed tool calls, and `maxTruncatedTurns` is specific to the `--plain` loop.
+In ACP and subagent runs, as in `--plain`, there is nobody to ask, so hitting any of these caps stops the run with an error naming the setting. A stopped subagent still hands the main agent whatever it produced before it got stuck.
 
 ### Paste Handling
 

@@ -7,10 +7,13 @@
 
 import {NO_RESPONSE_MESSAGE, runTurnEngine} from '@/agent-loop/turn-engine';
 import {createLLMClient} from '@/client-factory';
-import {getAppConfig, getRetryLimits} from '@/config/index';
+import {
+	getAppConfig,
+	getRetryLimits,
+	getSubagentMaxTurns,
+} from '@/config/index';
 import {getProjectContextPreferences} from '@/config/preferences';
 import {invalidArgumentsResult} from '@/hooks/chat-handler/utils/tool-filters';
-import {computeToolCallSignature} from '@/hooks/chat-handler/utils/tool-signature';
 import {
 	appendRelevantProjectContextWithCount,
 	type MemoryFinder,
@@ -122,7 +125,8 @@ export async function recordSubagentApiCallForStats(
 }
 
 /**
- * Thrown when the conversation loop stops itself (repeated-call cap). Carries
+ * Thrown when the conversation loop stops itself (a retry guard or the turn
+ * limit). Carries
  * the assistant text produced before the stop so the parent still receives the
  * work the subagent did complete instead of an empty result.
  */
@@ -709,24 +713,8 @@ export class SubagentExecutor {
 		let streamingText = '';
 		let streamingReasoning = '';
 
-		// Repeated-call cap (`nanocoder.retries.maxRepeatedToolCalls`): the same
-		// agent-loop guard the main runtimes apply. A subagent re-issuing the
-		// identical tool call(s) on consecutive turns is stuck; there is no user
-		// to ask inside a delegated run, so hitting the cap stops with an error.
-		// The signature covers every emitted call, so a subagent stuck on an
-		// unknown tool trips the cap too.
-		//
-		// Deliberately out of scope for #897: a hard turn ceiling (the plain and
-		// ACP `maxTurns` equivalent) and alternating-pattern detection, so a
-		// subagent cycling A, B, A, B... is still only bounded by the parent's
-		// abort signal. Revisit as its own change.
-		const retryLimits = getRetryLimits();
-		const {maxRepeatedToolCalls} = retryLimits;
-		let lastToolSignature = '';
-		let repeatedToolCallCount = 0;
-
-		// Assistant text from every turn so far. The repeated-call stop hands
-		// this to the parent instead of discarding the work already done.
+		// Assistant text from every turn so far. A guard stop hands this to the
+		// parent instead of discarding the work already done.
 		const assistantTranscript: string[] = [];
 
 		if (agentId) {
@@ -800,19 +788,13 @@ export class SubagentExecutor {
 		const result = await runTurnEngine<never>({
 			client,
 			signal: signal ?? new AbortController().signal,
-			// No turn ceiling: a subagent is bounded by the parent's abort signal.
-			maxTurns: Number.POSITIVE_INFINITY,
-			retryLimits,
-			// Subagents run without the engine's retry guards and text tool-call
-			// parsing for now; they keep their own repeated-call check below. A
-			// content-only reply is returned to the parent, not recorded.
-			policy: {
-				parseTextToolCalls: false,
-				emptyTurnGuard: false,
-				truncatedTurnGuard: false,
-				repeatedToolCallGuard: false,
-				recordToolFreeTurns: false,
-			},
+			// The last allowed turn offers no tools and asks for a final answer,
+			// so a subagent that keeps calling tools still hands something back.
+			maxTurns: getSubagentMaxTurns(),
+			// The `nanocoder.retries` caps the other headless loops apply: there
+			// is nobody to ask inside a delegated run, so a stuck subagent stops
+			// with an error naming the setting.
+			retryLimits: getRetryLimits(),
 			adapter: {
 				history: {
 					get: history,
@@ -897,21 +879,6 @@ export class SubagentExecutor {
 					errorResults: [],
 				}),
 				onToolCallsEmitted: toolCalls => {
-					const currentToolSignature = computeToolCallSignature(toolCalls);
-					const currentRepeatedCount =
-						currentToolSignature && currentToolSignature === lastToolSignature
-							? repeatedToolCallCount + 1
-							: 1;
-					if (currentRepeatedCount >= maxRepeatedToolCalls) {
-						emitProgress('error');
-						throw new SubagentLoopStopError(
-							`Subagent repeated the same tool call ${currentRepeatedCount} times in a row without making progress — stopping to avoid a loop (nanocoder.retries.maxRepeatedToolCalls = ${maxRepeatedToolCalls}).`,
-							assistantTranscript.join('\n\n'),
-						);
-					}
-					lastToolSignature = currentToolSignature;
-					repeatedToolCallCount = currentRepeatedCount;
-
 					// Count tokens from tool call arguments
 					for (const tc of toolCalls) {
 						const argStr =
@@ -1011,11 +978,23 @@ export class SubagentExecutor {
 				throw new Error('Aborted');
 			case 'model-error':
 				throw result.error;
-			// Unreachable with the policy above: there is no turn ceiling and no
-			// engine guard, and execute() always puts the system prompt first.
-			case 'no-system-message':
+			// A retry guard gave up (repeated calls, empty or malformed turns).
 			case 'guard-stop':
+				emitProgress('error');
+				throw new SubagentLoopStopError(
+					result.message,
+					assistantTranscript.join('\n\n'),
+				);
+			// The final, tool-free turn still came back with tool calls.
 			case 'max-turns':
+				emitProgress('error');
+				throw new SubagentLoopStopError(
+					`Subagent reached its turn limit (${result.maxTurns}) without a final answer — stopping (nanocoder.headless.subagentMaxTurns).`,
+					assistantTranscript.join('\n\n'),
+				);
+			// Unreachable: execute() always puts the system prompt first, and
+			// executeTools never stops the run.
+			case 'no-system-message':
 			case 'adapter-stop':
 				emitProgress('error');
 				throw new Error(`Subagent loop ended unexpectedly (${result.kind})`);
