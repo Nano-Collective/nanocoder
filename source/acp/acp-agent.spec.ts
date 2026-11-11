@@ -1044,12 +1044,30 @@ test('AcpAgent.prompt - resolves cleanly on user cancellation instead of throwin
 		updates.push(u);
 	};
 
-	// Mirrors what chat-handler.ts throws when the abort signal fires mid-stream
-	agent['initContext'].client.chat = async () => {
-		throw new Error('Operation was cancelled');
-	};
-
 	const session = await agent.newSession({cwd: '/tmp'});
+	// Cancelled while the tool card is being sent, and the write fails with
+	// an error that says nothing about cancelling.
+	agent['initContext'].client.chat = async () => ({
+		choices: [
+			{
+				message: {
+					content: '',
+					tool_calls: [
+						{id: 'call-1', function: {name: 'lookup', arguments: {}}},
+					],
+				},
+			},
+		],
+	});
+	agent['initContext'].toolManager.hasTool = () => true;
+	agent['initContext'].toolManager.getAvailableToolNames = () => ['lookup'];
+	conn.sessionUpdate = async (u: any) => {
+		if (u.update?.sessionUpdate === 'tool_call') {
+			await agent.cancel({sessionId: session.sessionId});
+			throw new Error('write EPIPE');
+		}
+		updates.push(u);
+	};
 
 	const result = await agent.prompt({
 		sessionId: session.sessionId,
@@ -2044,23 +2062,44 @@ test('AcpAgent.prompt - a cancelled turn does not generate a title', async t => 
 	const {agent} = createAgent();
 
 	let chatCalls = 0;
+	const session = await agent.newSession({cwd: '/tmp'});
+	// What chat-handler.ts throws when the abort signal fires mid-stream.
 	agent['initContext'].client.chat = async () => {
 		chatCalls++;
+		await agent.cancel({sessionId: session.sessionId});
 		throw new Error('Operation was cancelled');
 	};
-
-	const session = await agent.newSession({cwd: '/tmp'});
-	await agent.prompt({
+	const result = await agent.prompt({
 		sessionId: session.sessionId,
 		prompt: [{type: 'text', text: 'fix this'}],
 	});
 	await agent['pendingTitleGeneration'];
+	t.is(result.stopReason, 'cancelled');
 
 	// The cancel path early-returns from inside catch, which still runs the
 	// finally. Reaching the finally must not be mistaken for a clean turn.
 	t.is(chatCalls, 1);
 	const stored = await sessionManager.readSession(session.sessionId);
 	t.not(stored?.titleGenerated, true);
+});
+
+test('AcpAgent.prompt - an error that only says it was cancelled is still an error', async t => {
+	const {agent} = createAgent();
+	// Nobody cancelled: an internal abort (a timeout) surfaces with the same
+	// wording, and the user should see it as the failure it is.
+	agent['initContext'].client.chat = async () => {
+		throw new Error('Operation was cancelled');
+	};
+	const session = await agent.newSession({cwd: '/tmp'});
+	await t.throwsAsync(
+		agent.prompt({
+			sessionId: session.sessionId,
+			prompt: [{type: 'text', text: 'fix this'}],
+		}),
+		{message: 'Operation was cancelled'},
+	);
+	const live = agent['sessions'].get(session.sessionId)!;
+	t.is(live.messages.at(-1)?.outcome, 'failed');
 });
 
 test('AcpAgent.prompt - an errored turn does not generate a title', async t => {
