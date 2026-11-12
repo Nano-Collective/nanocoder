@@ -397,11 +397,17 @@ export async function runTurnEngine<S>(
 			toolCalls: [],
 			cleanedContent,
 		});
+		// The offered tool names turn on the broken-call checks. A reply cut off
+		// at the output limit can stop partway through a call; that is a
+		// truncated turn, not a malformed one, so it is left to the truncation
+		// handling below.
+		const offeredNames =
+			result.finishReason === 'length' ? undefined : prepared.availableNames;
 		let parsed: ReturnType<typeof parseToolCalls>;
 		if (textToolCalls === 'off' || finalTurn) {
 			parsed = unparsed(fullContent);
 		} else if (result.toolsDisabled) {
-			parsed = parseToolCalls(fullContent);
+			parsed = parseToolCalls(fullContent, offeredNames);
 		} else if (textToolCalls === 'fallback') {
 			parsed = unparsed(fullContent);
 		} else if (nativeToolCalls.length > 0) {
@@ -409,7 +415,7 @@ export async function runTurnEngine<S>(
 			// echoed alongside them so it does not leak into history.
 			parsed = unparsed(stripEmbeddedToolCallText(fullContent));
 		} else {
-			parsed = parseToolCalls(fullContent);
+			parsed = parseToolCalls(fullContent, offeredNames);
 		}
 
 		if (!parsed.success) {

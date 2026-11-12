@@ -308,6 +308,15 @@ const JSON_MALFORMED_PATTERNS: Array<{regex: RegExp; error: string}> = [
 	},
 ];
 
+// `tag` is what XMLToolCallParser left in the call: an opening tag that is
+// never closed, or a closing tag with no opening tag.
+function describeBrokenTag(toolName: string, tag: string): string {
+	if (tag.startsWith('</')) {
+		return `Invalid tool call: ${tag} inside <${toolName}> does not close any parameter`;
+	}
+	return `Invalid tool call: ${tag} inside <${toolName}> is never closed with </${tag.slice(1)}`;
+}
+
 function detectMalformedJSONToolCall(
 	content: string,
 ): {error: string; examples: string} | null {
@@ -342,8 +351,16 @@ export function stripEmbeddedToolCallText(content: unknown): string {
  * tool calls under reasoning pressure. Only runs on the XML fallback path when
  * native tool calling is disabled.
  * Type-preserving: Accepts unknown type, converts to string for processing.
+ *
+ * `toolNames` (the tools offered to the model) turns on the broken-call
+ * checks: an XML call to one of them that is never closed, or that leaves a
+ * parameter open, returns success: false instead of ending the turn as plain
+ * text or running with that argument missing.
  */
-export function parseToolCalls(content: unknown): ParseResult {
+export function parseToolCalls(
+	content: unknown,
+	toolNames?: readonly string[],
+): ParseResult {
 	// 1. Safety Coercion
 	const contentStr = ensureString(content);
 
@@ -375,10 +392,32 @@ export function parseToolCalls(content: unknown): ParseResult {
 		...jsonResult.ranges,
 	]);
 
+	// A broken call fails the whole reply, even next to calls that parsed, so
+	// the model never acts on half of what it sent.
+	const unclosed =
+		toolNames && XMLToolCallParser.findUnclosedToolCall(xmlContent, toolNames);
+	if (unclosed) {
+		return {
+			success: false,
+			error: `Incomplete tool call: <${unclosed}> is never closed with </${unclosed}>`,
+			examples: FORMAT_GUIDANCE_MESSAGE,
+		};
+	}
+
 	// 2. Try XML parser for valid tool calls (OPTIMISTIC: Success first!)
 	if (XMLToolCallParser.hasToolCalls(xmlContent)) {
 		// Parse valid XML tool calls
 		const parsedCalls = XMLToolCallParser.parseToolCalls(xmlContent);
+		const broken = parsedCalls.find(
+			call => call.brokenTag && toolNames?.includes(call.toolName),
+		);
+		if (broken?.brokenTag) {
+			return {
+				success: false,
+				error: describeBrokenTag(broken.toolName, broken.brokenTag),
+				examples: FORMAT_GUIDANCE_MESSAGE,
+			};
+		}
 		const convertedCalls = XMLToolCallParser.convertToToolCalls(parsedCalls);
 
 		if (convertedCalls.length > 0) {
