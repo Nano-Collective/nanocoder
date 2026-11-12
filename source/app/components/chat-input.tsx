@@ -15,6 +15,9 @@ import type {
 	QueuedUserMessage,
 	UserMessageQueueDraft,
 } from '@/hooks/useUserMessageQueue';
+import type {PendingQuestion} from '@/tools/runtime/question-queue';
+import type {PendingToolApproval} from '@/tools/runtime/tool-approval-queue';
+import type {PendingToolConfirmation} from '@/tools/runtime/tool-confirm-queue';
 import type {Task} from '@/tools/tasks/types';
 import type {
 	ContextSource,
@@ -25,9 +28,6 @@ import type {
 	TuneConfig,
 } from '@/types';
 import type {RestoredInputDraft, SubmittedInputDraft} from '@/types/hooks';
-import type {PendingQuestion} from '@/utils/question-queue';
-import type {PendingToolApproval} from '@/utils/tool-approval-queue';
-import type {PendingToolConfirmation} from '@/utils/tool-confirm-queue';
 import type {PendingVoiceInstall} from '@/utils/voice-install-queue';
 import type {ActiveEditorState} from '@/vscode/vscode-server';
 

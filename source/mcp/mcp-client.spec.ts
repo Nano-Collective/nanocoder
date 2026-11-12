@@ -1,6 +1,6 @@
 import test from 'ava';
 import {resolveToolApproval} from '../tools/approval-policy';
-import {ToolValidationError} from '../utils/tool-validation';
+import {ToolValidationError} from '../tools/runtime/tool-validation';
 import {FakeClock, settle} from '../test-utils/fake-clock';
 import type {HealthTimers} from './health-monitor';
 import {MCPClient} from './mcp-client';

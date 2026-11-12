@@ -15,9 +15,9 @@ import type {ActiveMode} from '@/hooks/useAppState';
 import {getToolManager} from '@/message-handler';
 import {getModelContextLimit, getSessionContextLimit} from '@/models/index';
 import {generateKey} from '@/session/key-generator';
+import {bumpReadContentGeneration} from '@/tools/runtime/read-tracker';
 import type {AIProviderConfig, TuneConfig} from '@/types/config';
 import {LLMClient, Message} from '@/types/core';
-import {bumpReadContentGeneration} from '@/utils/read-tracker';
 
 interface UseModeHandlersProps {
 	client: LLMClient | null;

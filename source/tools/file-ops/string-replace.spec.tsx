@@ -15,7 +15,7 @@ import {
 } from '../../services/session-cwd.js';
 import {stringReplaceDisplayPath} from './string-replace-preview.js';
 import {stringReplaceTool} from './string-replace.js';
-import {clearReadTracker, markFileSeen} from '../../utils/read-tracker.js';
+import {clearReadTracker, markFileSeen} from '../runtime/read-tracker.js';
 import {
 	resetFirewallConfig,
 	setFirewallConfig,

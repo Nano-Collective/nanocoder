@@ -1,7 +1,7 @@
 import {mkdtemp, rm, writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import test from 'ava';
-import {clearReadTracker} from '../utils/read-tracker.js';
+import {clearReadTracker} from './runtime/read-tracker.js';
 import {diffEditTool} from './file-ops/diff-edit.js';
 import {stringReplaceTool} from './file-ops/string-replace.js';
 import {writeFileTool} from './file-ops/write-file.js';

@@ -12,9 +12,9 @@ import {
 import {DEFAULT_TERMINAL_COLUMNS, TOOL_OUTPUT_DISPLAY_LINES} from '@/constants';
 import {calculateBoxWidth} from '@/hooks/useTerminalWidth';
 import {getToolManager} from '@/message-handler';
+import {parseToolArguments} from '@/tools/runtime/tool-args-parser';
 import type {Command} from '@/types/commands';
 import type {ToolCall} from '@/types/core';
-import {parseToolArguments} from '@/utils/tool-args-parser';
 
 const SUMMARY_ARG_KEYS = ['path', 'file_path', 'command', 'pattern', 'url'];
 

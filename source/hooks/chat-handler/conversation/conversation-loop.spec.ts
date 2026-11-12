@@ -34,8 +34,8 @@ import {
 	resetSessionContextLimit,
 	setSessionContextLimit,
 } from '@/models/models-dev-client.js';
-import {setGlobalQuestionHandler} from '@/utils/question-queue.js';
-import {setGlobalToolConfirmHandler} from '@/utils/tool-confirm-queue.js';
+import {setGlobalQuestionHandler} from '@/tools/runtime/question-queue.js';
+import {setGlobalToolConfirmHandler} from '@/tools/runtime/tool-confirm-queue.js';
 
 // The ShutdownManager singleton is created as a side effect of transitive
 // imports (via @/utils/logging). Its uncaughtException/unhandledRejection
@@ -1624,7 +1624,7 @@ test.serial('processAssistantResponse - compact-and-retry adds nudge message to 
 
 test.serial('processAssistantResponse - compact-and-retry invalidates read_file stubs', async t => {
 	const {clearReadTracker, matchReadContent, rememberReadContent} = await import(
-		'@/utils/read-tracker.js'
+		'@/tools/runtime/read-tracker.js'
 	);
 	clearReadTracker();
 	const stats = {mtimeMs: 1, size: 10};

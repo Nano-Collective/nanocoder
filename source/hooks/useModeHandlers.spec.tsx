@@ -20,7 +20,7 @@ import {
 	setSessionContextLimit,
 } from '@/models/index';
 import {readFileTool} from '@/tools/read-file';
-import {clearReadTracker} from '@/utils/read-tracker';
+import {clearReadTracker} from '@/tools/runtime/read-tracker';
 import type {LLMClient, Message} from '@/types/core';
 import type {AIProviderConfig, TuneConfig} from '@/types/config';
 import {useModeHandlers} from './useModeHandlers';

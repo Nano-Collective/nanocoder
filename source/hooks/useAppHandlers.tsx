@@ -37,6 +37,7 @@ import {
 	type GitStatusSummary,
 	getGitStatusSummarySync,
 } from '@/tools/git/utils';
+import {bumpReadContentGeneration} from '@/tools/runtime/read-tracker';
 import {loadTasks} from '@/tools/tasks/storage';
 import type {Task} from '@/tools/tasks/types';
 import type {
@@ -57,7 +58,6 @@ import {calculateTokenBreakdown} from '@/usage/calculator';
 import {describeGapsMessage} from '@/utils/checkpoint-utils';
 import {formatError} from '@/utils/error-formatter';
 import {getLogger} from '@/utils/logging';
-import {bumpReadContentGeneration} from '@/utils/read-tracker';
 
 interface UseAppHandlersProps {
 	// State

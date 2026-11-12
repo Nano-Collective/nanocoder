@@ -17,6 +17,13 @@ import {runPreToolUseGate} from '@/services/lifecycle-hooks';
 import {getProjectRoot} from '@/services/session-cwd';
 import {generateKey} from '@/session/key-generator';
 import {resolveToolApproval} from '@/tools/approval-policy';
+import {isFileMutationTool} from '@/tools/runtime/tool-approval';
+import {parseToolArguments} from '@/tools/runtime/tool-args-parser';
+import {
+	createApprovalUnavailableResults,
+	createCancellationResults,
+} from '@/tools/runtime/tool-cancellation';
+import {signalToolConfirm} from '@/tools/runtime/tool-confirm-queue';
 import {loadTasks} from '@/tools/tasks/storage';
 import type {Task} from '@/tools/tasks/types';
 import type {ToolManager} from '@/tools/tool-manager';
@@ -28,13 +35,6 @@ import type {
 } from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
 import {notifyWarning} from '@/utils/message-queue-core';
-import {isFileMutationTool} from '@/utils/tool-approval';
-import {parseToolArguments} from '@/utils/tool-args-parser';
-import {
-	createApprovalUnavailableResults,
-	createCancellationResults,
-} from '@/utils/tool-cancellation';
-import {signalToolConfirm} from '@/utils/tool-confirm-queue';
 import {closeAllDiffsInVSCode} from '@/vscode/index';
 import {buildAutoDiagnosticsMessage} from './auto-diagnostics';
 import {

@@ -1,4 +1,6 @@
 import {dynamicTool} from 'ai';
+import {getToolJsonSchema} from '@/tools/runtime/schema-validate';
+import {withValidation} from '@/tools/runtime/tool-validation';
 import type {
 	AISDKCoreTool,
 	MCPTool,
@@ -8,8 +10,6 @@ import type {
 	ToolParameterSchema,
 } from '@/types/index';
 import {jsonSchema} from '@/types/index';
-import {getToolJsonSchema} from '@/utils/schema-validate';
-import {withValidation} from '@/utils/tool-validation';
 import {ensureString} from '@/utils/type-helpers';
 
 /**

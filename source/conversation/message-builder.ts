@@ -1,5 +1,5 @@
 import type {ImageAttachment, Message, ToolResult} from '@/types/core';
-import {truncateToolResult} from '../utils/truncate-tool-result.js';
+import {truncateToolResult} from '../tools/runtime/truncate-tool-result.js';
 
 /**
  * Builder pattern for constructing message arrays.

@@ -6,9 +6,9 @@ import type {
 	ToolKind,
 } from '@agentclientprotocol/sdk';
 import {getSafeSessionCwd} from '@/services/session-cwd';
+import {fitEditToLineEndings} from '@/tools/file-ops/line-endings';
+import {replaceFirstLiteral} from '@/tools/file-ops/literal-replace';
 import type {ToolCall} from '@/types/core';
-import {fitEditToLineEndings} from '@/utils/line-endings';
-import {replaceFirstLiteral} from '@/utils/literal-replace';
 import {truncateText} from '@/utils/truncate-text';
 
 // A bash `cd` moves the session cwd and leaves process.cwd() at the launch dir.

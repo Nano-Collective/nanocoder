@@ -15,7 +15,7 @@ import {processAssistantResponse} from '@/hooks/chat-handler/conversation/conver
 import {SubagentExecutor} from '@/subagents/subagent-executor';
 import {getSubagentLoader} from '@/subagents/subagent-loader';
 import type {ToolManager} from '@/tools/tool-manager';
-import {setGlobalToolApprovalHandler} from '@/utils/tool-approval-queue';
+import {setGlobalToolApprovalHandler} from '@/tools/runtime/tool-approval-queue';
 import type {
 	AISDKCoreTool,
 	LLMChatResponse,

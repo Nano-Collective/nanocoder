@@ -2,15 +2,15 @@ import {useCallback, useEffect, useRef, useState} from 'react';
 import {
 	type PendingQuestion,
 	setGlobalQuestionHandler,
-} from '@/utils/question-queue';
+} from '@/tools/runtime/question-queue';
 import {
 	type PendingToolApproval,
 	setGlobalToolApprovalHandler,
-} from '@/utils/tool-approval-queue';
+} from '@/tools/runtime/tool-approval-queue';
 import {
 	type PendingToolConfirmation,
 	setGlobalToolConfirmHandler,
-} from '@/utils/tool-confirm-queue';
+} from '@/tools/runtime/tool-confirm-queue';
 import {
 	type PendingVoiceInstall,
 	setGlobalVoiceInstallHandler,

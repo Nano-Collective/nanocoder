@@ -1,3 +1,4 @@
+import {validateArgsAgainstSchema} from '@/tools/runtime/schema-validate';
 import type {
 	ToolExecutionContext,
 	ToolHandler,
@@ -5,7 +6,6 @@ import type {
 	ValidationErrorDetail,
 } from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
-import {validateArgsAgainstSchema} from '@/utils/schema-validate';
 
 /**
  * Thrown by a validated tool handler when its arguments fail validation.

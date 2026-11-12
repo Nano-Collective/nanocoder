@@ -7,14 +7,14 @@ import {getSyntaxTheme} from '@/config/themes';
 import {DEFAULT_TERMINAL_COLUMNS} from '@/constants';
 import {getProjectRoot, getSafeSessionCwd} from '@/services/session-cwd';
 import {areLinesSimilar, computeInlineDiff} from '@/tools/file-ops/inline-diff';
+import {fitEditToLineEndings} from '@/tools/file-ops/line-endings';
+import {getLanguageFromExtension} from '@/tools/file-ops/programming-language-helper';
 import type {Colors} from '@/types/index';
 import {truncateAnsi} from '@/utils/ansi-truncate';
 import {formatError} from '@/utils/error-formatter';
 import {getCachedFileContent} from '@/utils/file-cache';
 import {highlight} from '@/utils/highlighter';
 import {normalizeIndentation} from '@/utils/indentation-normalizer';
-import {fitEditToLineEndings} from '@/utils/line-endings';
-import {getLanguageFromExtension} from '@/utils/programming-language-helper';
 import {truncateText} from '@/utils/truncate-text';
 
 interface StringReplaceArgs {

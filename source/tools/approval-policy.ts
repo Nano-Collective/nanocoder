@@ -1,5 +1,5 @@
+import {parseToolArguments} from '@/tools/runtime/tool-args-parser';
 import type {DevelopmentMode, ToolApprovalPolicy} from '@/types/core';
-import {parseToolArguments} from '@/utils/tool-args-parser';
 
 /**
  * Context for an approval decision. `mode` is always explicit so no code path

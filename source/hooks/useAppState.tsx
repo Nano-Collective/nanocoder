@@ -26,6 +26,7 @@ import {CustomCommandLoader} from '@/custom-commands/loader';
 import {setCliSessionId} from '@/session/cli-session-context';
 import {generateKey} from '@/session/key-generator';
 import {createTokenizer} from '@/tokenization/index.js';
+import type {PendingQuestion} from '@/tools/runtime/question-queue';
 import type {Task} from '@/tools/tasks/types';
 import {ToolManager} from '@/tools/tool-manager';
 import type {CheckpointListItem} from '@/types/checkpoint';
@@ -46,7 +47,6 @@ import type {UpdateInfo} from '@/types/index';
 import type {Tokenizer} from '@/types/tokenization.js';
 import type {ThemePreset} from '@/types/ui';
 import {BoundedMap} from '@/utils/bounded-map';
-import type {PendingQuestion} from '@/utils/question-queue';
 
 export type {ActiveMode} from '@/app/utils/input-surfaces';
 

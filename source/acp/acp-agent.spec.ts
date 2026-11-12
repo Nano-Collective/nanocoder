@@ -34,7 +34,7 @@ import {
 	matchReadContent,
 	rememberReadContent,
 	runWithReadContentScope,
-} from '@/utils/read-tracker';
+} from '@/tools/runtime/read-tracker';
 
 console.log('\nacp-agent.spec.ts');
 

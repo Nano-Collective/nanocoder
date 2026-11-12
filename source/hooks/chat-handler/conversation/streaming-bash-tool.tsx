@@ -11,10 +11,10 @@ import {
 	distillBashResultForLLM,
 	executeBashCommand,
 } from '@/tools/execute-bash';
+import {parseToolArguments} from '@/tools/runtime/tool-args-parser';
+import {formatValidationError} from '@/tools/runtime/tool-validation';
 import type {ToolManager} from '@/tools/tool-manager';
 import type {ToolCall, ToolResult} from '@/types/core';
-import {parseToolArguments} from '@/utils/tool-args-parser';
-import {formatValidationError} from '@/utils/tool-validation';
 
 export interface StreamingBashRun {
 	toolCall: ToolCall;

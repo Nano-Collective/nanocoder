@@ -7,7 +7,7 @@ import {themes} from '../../config/themes.js';
 import {MAX_CACHEABLE_FILE_SIZE_BYTES} from '../../constants.js';
 import {ThemeContext} from '../../hooks/useTheme.js';
 import {resolveToolApproval} from '../approval-policy.js';
-import {clearReadTracker, markFileSeen} from '../../utils/read-tracker.js';
+import {clearReadTracker, markFileSeen} from '../runtime/read-tracker.js';
 import {diffEditTool, parseDiffEditBlocks} from './diff-edit.js';
 import {
 	resetFirewallConfig,

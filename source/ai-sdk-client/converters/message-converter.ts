@@ -7,9 +7,9 @@ import type {
 	UserContent,
 } from 'ai';
 import {filterModelFacing} from '@/conversation/message-visibility';
+import {truncateToolResult} from '@/tools/runtime/truncate-tool-result';
 import type {ImageAttachment, Message} from '@/types/index';
 import {getLogger} from '@/utils/logging';
-import {truncateToolResult} from '@/utils/truncate-tool-result';
 import type {TestableMessage} from '../types.js';
 
 /**
