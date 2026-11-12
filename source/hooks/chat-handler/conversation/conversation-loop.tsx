@@ -287,6 +287,10 @@ export const processAssistantResponse = async (
 	let streamedReasoning = '';
 	let fullReasoning: string | undefined;
 	let turnUsage: LLMChatResponse['usage'];
+	// Provider that actually answered this turn, when a fallback served it
+	// instead of the primary — usage/cost records attribute to it.
+	let turnFallbackProvider: string | undefined;
+	let turnFallbackModel: string | undefined;
 	let rejectedToolCalls: ToolCall[] = [];
 	let recordedToolCalls: ToolCall[] = [];
 
@@ -419,6 +423,8 @@ export const processAssistantResponse = async (
 				streamedReasoning = '';
 				fullReasoning = undefined;
 				turnUsage = undefined;
+				turnFallbackProvider = undefined;
+				turnFallbackModel = undefined;
 				rejectedToolCalls = [];
 				recordedToolCalls = [];
 
@@ -474,6 +480,11 @@ export const processAssistantResponse = async (
 						setStreamingReasoning(streamedReasoning);
 					},
 					onPrivacyEvent,
+					// A fallback provider answered instead of the primary:
+					// show the one-line notice naming it.
+					onNotice: message => {
+						addToChatQueue(infoMsg(message, 'provider-fallback'));
+					},
 				},
 				reasoning: () => fullReasoning,
 			}),
@@ -481,6 +492,8 @@ export const processAssistantResponse = async (
 				if (!response?.choices?.length) return;
 				fullReasoning = response.choices[0].message.reasoning;
 				turnUsage = response.usage;
+				turnFallbackProvider = response.fallbackProvider;
+				turnFallbackModel = response.fallbackModel;
 				// Notify the user once per session when the XML fallback path is
 				// active
 				if (response.toolsDisabled && !hasShownFallbackNotice) {
@@ -624,8 +637,8 @@ export const processAssistantResponse = async (
 					// Record a per-call history entry for session cost tracking
 					if (onApiCallComplete && hasReportedUsage && usage) {
 						onApiCallComplete({
-							provider: currentProvider,
-							model: currentModel,
+							provider: turnFallbackProvider ?? currentProvider,
+							model: turnFallbackModel ?? currentModel,
 							inputTokens: usage.inputTokens,
 							outputTokens: usage.outputTokens,
 							totalTokens: usage.totalTokens,

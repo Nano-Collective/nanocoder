@@ -849,8 +849,8 @@ export class SubagentExecutor {
 				onModelResponse: response => {
 					if (onApiCallComplete && hasReportedUsage(response.usage)) {
 						onApiCallComplete({
-							provider,
-							model,
+							provider: response.fallbackProvider ?? provider,
+							model: response.fallbackModel ?? model,
 							inputTokens: response.usage.inputTokens,
 							outputTokens: response.usage.outputTokens,
 							totalTokens: response.usage.totalTokens,

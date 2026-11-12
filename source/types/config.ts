@@ -25,6 +25,14 @@ export interface AIProviderConfig {
 	requestTimeout?: number;
 	socketTimeout?: number;
 	maxRetries?: number; // Maximum number of retries for failed requests (default: 2)
+	/**
+	 * Fallback providers (or `provider/model` pairs) tried in order when this
+	 * provider fails a request with a retryable error (429, 5xx, network)
+	 * after exhausting its own `maxRetries`. The first fallback that answers
+	 * serves the turn; the primary stays selected for the next turn.
+	 * Non-retryable errors (auth, invalid request) never trigger a fallback.
+	 */
+	fallback?: string[];
 	connectionPool?: {
 		idleTimeout?: number;
 		cumulativeMaxIdleTimeout?: number;
@@ -78,6 +86,15 @@ export interface ProviderConfig {
 	requestTimeout?: number;
 	socketTimeout?: number;
 	maxRetries?: number; // Maximum number of retries for failed requests (default: 2)
+	/**
+	 * Fallback providers (or `provider/model` pairs) tried in order when this
+	 * provider fails a request with a retryable error (429, 5xx, network)
+	 * after exhausting its own `maxRetries`. The first fallback that answers
+	 * serves the turn; the primary stays selected for the next turn.
+	 * Non-retryable errors (auth, invalid request) never trigger a fallback.
+	 * Example: `"fallback": ["openrouter", "ollama/llama3.1:8b"]`.
+	 */
+	fallback?: string[];
 	// Sent as the OpenAI-Organization header.
 	organizationId?: string;
 	// Legacy: older Custom Provider wizard runs wrote this, but it was never

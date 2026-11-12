@@ -1710,6 +1710,36 @@ test.serial(
 );
 
 test.serial(
+	'loadProviderConfigs carries fallback through',
+	t => {
+		const originalProviders = process.env.NANOCODER_PROVIDERS;
+		try {
+			process.env.NANOCODER_PROVIDERS = JSON.stringify({
+				providers: [
+					{
+						name: 'Primary',
+						baseUrl: 'https://api.primary.example/v1',
+						apiKey: 'test-key',
+						models: ['primary-model'],
+						fallback: ['openrouter', 'ollama/llama3.1:8b'],
+					},
+				],
+			});
+
+			const primary = loadProviderConfigs().find(p => p.name === 'Primary');
+
+			t.deepEqual(primary?.fallback, ['openrouter', 'ollama/llama3.1:8b']);
+		} finally {
+			if (originalProviders !== undefined) {
+				process.env.NANOCODER_PROVIDERS = originalProviders;
+			} else {
+				delete process.env.NANOCODER_PROVIDERS;
+			}
+		}
+	},
+);
+
+test.serial(
 	'loadProviderConfigs carries tune and turns organizationId into a header',
 	t => {
 		const originalProviders = process.env.NANOCODER_PROVIDERS;
