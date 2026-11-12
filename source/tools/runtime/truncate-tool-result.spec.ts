@@ -66,3 +66,19 @@ test('does not cut through a whitespace-delimited token (a secret stays whole or
 		}
 	}
 });
+
+
+test('never cuts a surrogate pair in half', t => {
+	const hasLoneSurrogate = (s: string) =>
+		/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(
+			s,
+		);
+	// Astral characters with no whitespace to snap to, so the raw cut index
+	// decides where the cut lands.
+	const content = '\u{1F600}'.repeat(3000);
+
+	for (const maxLength of [1000, 1001, 2000, 2001, 2500]) {
+		const result = truncateToolResult(content, maxLength);
+		t.false(hasLoneSurrogate(result), `maxLength ${maxLength}`);
+	}
+});
