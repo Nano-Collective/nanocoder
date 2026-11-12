@@ -7,7 +7,7 @@ import {runHookCommand} from '@/services/lifecycle-hooks';
 import {getProjectRoot, getSafeSessionCwd} from '@/services/session-cwd';
 import type {FormatterDefinition} from '@/types/config';
 import {invalidateCache} from '@/utils/file-cache';
-import {notifyError} from '@/utils/message-queue';
+import {notifyError} from '@/utils/message-queue-core';
 import {isPathInside} from '@/utils/path-validation';
 
 /** Ceiling on a single formatter's runtime. Overridable via `timeout`. */

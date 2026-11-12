@@ -1,8 +1,8 @@
+import {errorMsg, infoMsg} from '@/components/message-factory';
 import {resolveSession} from '@/session/resolve-session';
 import {sessionManager} from '@/session/session-manager';
 import type {StatefulCommand} from '@/types/index';
 import {formatError} from '@/utils/error-formatter';
-import {errorMsg, infoMsg} from '@/utils/message-factory';
 
 /**
  * /resume (also /sessions and /history, see `aliases.ts`). No args: show the

@@ -47,7 +47,7 @@ import {getTuneToolMode} from '@/types/config';
 import type {DevelopmentMode, Message} from '@/types/core';
 import {applyTuneCompaction} from '@/utils/auto-compact';
 import {formatError} from '@/utils/error-formatter';
-import {setMessageQueueSink} from '@/utils/message-queue';
+import {setMessageQueueSink} from '@/utils/message-queue-core';
 import {buildSystemPrompt, setLastBuiltPrompt} from '@/utils/prompt-builder';
 import {getShutdownManager} from '@/utils/shutdown';
 

@@ -18,7 +18,7 @@ import type { HooksConfig } from "@/types/config";
 import { TOOL_APPROVAL_REQUIRED_KIND } from "@/constants";
 import type { ToolManager } from "@/tools/tool-manager";
 import type { DevelopmentMode, LLMClient } from "@/types/core";
-import { notifyError, notifyWarning } from "@/utils/message-queue";
+import { notifyError, notifyWarning } from "@/components/message-queue";
 import { ShutdownManager } from "@/utils/shutdown";
 import type { PlainConversationOutcome } from "./conversation.js";
 import { runPlainShell } from "./shell.js";

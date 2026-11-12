@@ -28,7 +28,7 @@ import type {
 } from '@/types/index';
 import type {MCPHealthChange} from '@/types/mcp';
 import {getLogger} from '@/utils/logging';
-import {notifyWarning} from '@/utils/message-queue';
+import {notifyWarning} from '@/utils/message-queue-core';
 import {getShutdownManager} from '@/utils/shutdown';
 
 /**

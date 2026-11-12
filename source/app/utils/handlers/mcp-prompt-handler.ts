@@ -1,7 +1,7 @@
+import {errorMsg, warningMsg} from '@/components/message-factory';
 import {getToolManager} from '@/message-handler';
 import type {Message} from '@/types/core';
 import type {CommandCompletion, MessageSubmissionOptions} from '@/types/index';
-import {errorMsg, warningMsg} from '@/utils/message-factory';
 
 /**
  * Dispatches `/mcp:<server>:<prompt>` — an MCP prompt invoked as a slash

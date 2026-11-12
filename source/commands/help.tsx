@@ -1,12 +1,12 @@
 import {Box, Text} from 'ink';
 import React from 'react';
 import {commandRegistry} from '@/commands';
+import {errorMsg} from '@/components/message-factory';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {generateKey} from '@/session/key-generator';
 import type {Command} from '@/types/index';
-import {errorMsg} from '@/utils/message-factory';
 import {getPackageVersion} from '@/utils/package-version';
 import {
 	findHelpCommand,

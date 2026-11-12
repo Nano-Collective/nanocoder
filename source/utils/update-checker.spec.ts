@@ -10,7 +10,7 @@ import {fileURLToPath} from 'url';
 import {tmpdir} from 'os';
 import test from 'ava';
 import {resetPreferencesCache} from '@/config/preferences';
-import {setGlobalMessageQueue} from '@/utils/message-queue';
+import {setGlobalMessageQueue} from '@/components/message-queue';
 import {checkForUpdates} from './update-checker';
 
 console.log(`\nupdate-checker.spec.ts`);

@@ -14,7 +14,7 @@ import {
 } from '@/services/lifecycle-hooks';
 import {resetSessionCwd, setProjectRoot} from '@/services/session-cwd';
 import type {ToolCall} from '@/types/core';
-import {setGlobalMessageQueue} from '@/utils/message-queue';
+import {setGlobalMessageQueue} from '@/components/message-queue';
 import {
 	consultPluginPermission,
 	loadPlugins,

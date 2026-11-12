@@ -8,6 +8,8 @@ import {
 import AssistantMessage from '@/components/assistant-message';
 import AssistantReasoning from '@/components/assistant-reasoning';
 import {ErrorMessage, InfoMessage} from '@/components/message-box';
+import {infoMsg} from '@/components/message-factory';
+import {displayCompactCountsSummary} from '@/components/tool-result-display';
 import {getAppConfig, getRetryLimits} from '@/config/index';
 import {getShowUsageFooter} from '@/config/preferences';
 import {MAX_COMPACT_RETRIES} from '@/constants';
@@ -33,13 +35,11 @@ import {buildCompletionNote} from '@/utils/completion-note';
 import {compressionBackup} from '@/utils/compression-backup';
 import {MessageBuilder} from '@/utils/message-builder';
 import {compressMessages} from '@/utils/message-compression';
-import {infoMsg} from '@/utils/message-factory';
 import {signalQuestion} from '@/utils/question-queue';
 import {bumpReadContentGeneration} from '@/utils/read-tracker';
 import {markRunFailed} from '@/utils/run-outcome';
 import {estimateTokens} from '@/utils/token-calculator';
 import {createCancellationResults} from '@/utils/tool-cancellation';
-import {displayCompactCountsSummary} from '@/utils/tool-result-display';
 import {filterValidToolCalls} from '../utils/tool-filters';
 import {
 	type ArchitectCheckpointState,

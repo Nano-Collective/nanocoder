@@ -1,6 +1,7 @@
 import {Box, Text} from 'ink';
 import React from 'react';
 import {createCommandFile} from '@/commands/create-scaffold';
+import {infoMsg} from '@/components/message-factory';
 import {InfoField} from '@/components/ui/info-field';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {formatParameterUsage} from '@/custom-commands/executor';
@@ -10,7 +11,6 @@ import {useTheme} from '@/hooks/useTheme';
 import {getCommandLoader} from '@/message-handler';
 import {generateKey} from '@/session/key-generator';
 import type {Command, CustomCommand, StatefulCommand} from '@/types/index';
-import {infoMsg} from '@/utils/message-factory';
 
 interface CustomCommandsProps {
 	commands: CustomCommand[];

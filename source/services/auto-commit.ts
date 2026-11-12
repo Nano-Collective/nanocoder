@@ -8,7 +8,7 @@ import {COMMIT_SYSTEM_PROMPT} from '@/tools/git/commit-prompt';
 import {execGit, truncateDiff} from '@/tools/git/utils';
 import type {LLMClient, Message} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
-import {notifyInfo, notifyWarning} from '@/utils/message-queue';
+import {notifyInfo, notifyWarning} from '@/utils/message-queue-core';
 
 /** Tools whose successful run leaves a file edit worth committing. */
 const AUTO_COMMIT_TOOLS: ReadonlySet<string> = new Set([

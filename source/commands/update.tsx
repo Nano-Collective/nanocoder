@@ -7,7 +7,7 @@ import {
 import {getToolManager} from '@/message-handler';
 import {Command} from '@/types/index';
 import {formatError} from '@/utils/error-formatter';
-import {notifyError, notifyInfo} from '@/utils/message-queue';
+import {notifyError, notifyInfo} from '@/utils/message-queue-core';
 import {checkForUpdates} from '@/utils/update-checker';
 
 /**

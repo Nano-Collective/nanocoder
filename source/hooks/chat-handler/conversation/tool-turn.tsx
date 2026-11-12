@@ -27,7 +27,7 @@ import type {
 	ToolResult,
 } from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
-import {notifyWarning} from '@/utils/message-queue';
+import {notifyWarning} from '@/utils/message-queue-core';
 import {isFileMutationTool} from '@/utils/tool-approval';
 import {parseToolArguments} from '@/utils/tool-args-parser';
 import {

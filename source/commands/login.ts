@@ -1,9 +1,9 @@
 import React from 'react';
 import {CodexLogin} from '@/commands/codex-login';
 import {CopilotLogin} from '@/commands/copilot-login';
+import {errorMsg, infoMsg, successMsg} from '@/components/message-factory';
 import {generateKey} from '@/session/key-generator';
 import type {StatefulCommand} from '@/types/index';
-import {errorMsg, infoMsg, successMsg} from '@/utils/message-factory';
 
 const LOGIN_USAGE =
 	'Usage: /login <codex|copilot> [provider name]\n\n  /login codex    Log in to ChatGPT/Codex (saves credentials for the "ChatGPT" provider)\n  /login copilot  Log in to GitHub Copilot (saves credentials for the "GitHub Copilot" provider)';

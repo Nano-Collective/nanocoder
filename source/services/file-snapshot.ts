@@ -7,7 +7,7 @@ import type {CaptureResult} from '@/types/checkpoint';
 import {formatError} from '@/utils/error-formatter';
 import {loadGitignore} from '@/utils/gitignore-loader';
 import {getLogger} from '@/utils/logging';
-import {notifyWarning} from '@/utils/message-queue';
+import {notifyWarning} from '@/utils/message-queue-core';
 
 /**
  * Nanocoder's own runtime state under `.nanocoder/`. Unless a repo gitignores

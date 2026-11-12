@@ -1,6 +1,6 @@
+import {errorMsg} from '@/components/message-factory';
 import {parseCustomCommandArgs} from '@/custom-commands/args';
 import type {Message, StatefulCommand} from '@/types/index';
-import {errorMsg} from '@/utils/message-factory';
 
 interface RetryArgs {
 	model?: string;
