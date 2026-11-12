@@ -7,8 +7,8 @@ import {
 	DEFAULT_WEB_SEARCH_RESULTS,
 	MAX_WEB_SEARCH_QUERY_LENGTH,
 } from '../constants';
-import {getToolJsonSchema} from '../utils/schema-validate';
-import {withValidation} from '../utils/tool-validation';
+import {getToolJsonSchema} from './runtime/schema-validate';
+import {withValidation} from './runtime/tool-validation';
 
 console.log('\nweb-search.spec.tsx');
 
