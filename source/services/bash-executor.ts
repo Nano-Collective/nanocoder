@@ -44,6 +44,15 @@ import {
 const isWindows = platform === 'win32';
 
 /**
+ * The applied timeout as the model was told to ask for it: in seconds. A
+ * sub-second limit keeps its precision (`0.5 seconds`) rather than rounding
+ * to a whole second that was never applied.
+ */
+function formatTimeoutSeconds(ms: number): number {
+	return Number((ms / 1000).toFixed(3));
+}
+
+/**
  * On Unix, probe the process group rather than the leader. Every command runs
  * under a wrapping `sh`, which can exit (on SIGTERM, or on its own after
  * backgrounding a job) while descendants live on in the group. The PGID
@@ -370,7 +379,10 @@ export class BashExecutor extends EventEmitter {
 			const ms = options?.timeoutMs ?? TIMEOUT_BASH_DEFAULT_MS;
 			if (ms > 0) {
 				entry.timeoutId = setTimeout(() => {
-					this.cancel(executionId, `Command timed out after ${ms}ms`);
+					this.cancel(
+						executionId,
+						`Command timed out after ${formatTimeoutSeconds(ms)} seconds`,
+					);
 				}, ms);
 				entry.timeoutId.unref();
 			}

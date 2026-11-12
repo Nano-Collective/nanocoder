@@ -3,7 +3,11 @@ import React from 'react';
 
 import BashProgress from '@/components/bash-progress';
 import {isNanocoderToolAlwaysAllowed} from '@/config/nanocoder-tools-config';
-import {TRUNCATION_OUTPUT_LIMIT} from '@/constants';
+import {
+	TIMEOUT_BASH_DEFAULT_MS,
+	TIMEOUT_EXECUTION_MAX_MS,
+	TRUNCATION_OUTPUT_LIMIT,
+} from '@/constants';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {type BashExecutionState, bashExecutor} from '@/services/bash-executor';
@@ -16,6 +20,33 @@ import {
 import {truncateToolResult} from '@/tools/runtime/truncate-tool-result';
 import type {NanocoderToolExport, StructuredToolOutput} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
+
+/**
+ * Bounds on the per-call timeout. The default is what the executor already
+ * applies when no option is passed; the ceiling is the hard limit the rest of
+ * the app uses for a single tool execution.
+ */
+const EXECUTE_BASH_MIN_TIMEOUT_SECONDS = 1;
+const EXECUTE_BASH_MAX_TIMEOUT_SECONDS = TIMEOUT_EXECUTION_MAX_MS / 1000;
+const EXECUTE_BASH_DEFAULT_TIMEOUT_SECONDS = TIMEOUT_BASH_DEFAULT_MS / 1000;
+
+/**
+ * Millisecond timeout for a call. `timeout_seconds` is clamped rather than
+ * rejected: a model asking for 10 minutes gets the 5 minute ceiling and a
+ * model asking for 0 gets one second, and the timeout message reports the
+ * limit that was actually applied.
+ */
+export function resolveBashTimeoutMs(timeoutSeconds?: number): number {
+	if (typeof timeoutSeconds !== 'number' || !Number.isFinite(timeoutSeconds)) {
+		return TIMEOUT_BASH_DEFAULT_MS;
+	}
+	return (
+		Math.min(
+			EXECUTE_BASH_MAX_TIMEOUT_SECONDS,
+			Math.max(EXECUTE_BASH_MIN_TIMEOUT_SECONDS, Math.floor(timeoutSeconds)),
+		) * 1000
+	);
+}
 
 /**
  * Execute a bash command using the bash executor service.
@@ -109,13 +140,16 @@ export async function distillBashResultForLLM(
 interface ExecuteBashArgs {
 	command: string;
 	description?: string;
+	timeout_seconds?: number;
 }
 
 const executeExecuteBash = async (
-	args: {command: string},
+	args: {command: string; timeout_seconds?: number},
 	options?: {abortSignal?: AbortSignal},
 ): Promise<StructuredToolOutput> => {
+	const timeoutMs = resolveBashTimeoutMs(args.timeout_seconds);
 	const {promise} = bashExecutor.execute(args.command, {
+		timeoutMs,
 		signal: options?.abortSignal,
 	});
 	const result = await promise;
@@ -126,8 +160,10 @@ const executeExecuteBash = async (
 			rerun: command =>
 				options?.abortSignal?.aborted
 					? Promise.resolve(null)
-					: bashExecutor.execute(command, {signal: options?.abortSignal})
-							.promise,
+					: bashExecutor.execute(command, {
+							timeoutMs,
+							signal: options?.abortSignal,
+						}).promise,
 		}),
 		isError: bashRunFailed(result),
 	};
@@ -135,7 +171,7 @@ const executeExecuteBash = async (
 
 const executeBashCoreTool = tool({
 	description:
-		'Execute a bash command in the working directory. Returns stdout, stderr, and exit code. Commands time out after 2 minutes by default. Use for: running builds, tests, installing packages, git operations not covered by git tools, or any shell command.',
+		'Execute a bash command in the working directory. Returns stdout, stderr, and exit code. Commands time out after 2 minutes by default. Pass timeout_seconds to change that: raise it for a long build, test suite or install, or lower it for a command that should return quickly. Use for: running builds, tests, installing packages, git operations not covered by git tools, or any shell command.',
 	inputSchema: jsonSchema<ExecuteBashArgs>({
 		type: 'object',
 		properties: {
@@ -147,6 +183,13 @@ const executeBashCoreTool = tool({
 				type: 'string',
 				description:
 					'Optional brief summary of the intent or purpose of this command.',
+			},
+			timeout_seconds: {
+				type: 'integer',
+				description:
+					'Optional time limit before the command is killed, in seconds. Defaults to 120 and is clamped to the 300 second maximum; a killed command reports the limit that was applied.',
+				minimum: EXECUTE_BASH_MIN_TIMEOUT_SECONDS,
+				maximum: EXECUTE_BASH_MAX_TIMEOUT_SECONDS,
 			},
 		},
 		required: ['command'],
@@ -162,12 +205,19 @@ const executeBashCoreTool = tool({
 function ExecuteBashFormatterComponent({
 	command,
 	description,
+	timeoutSeconds,
 }: {
 	command: string;
 	description?: string;
+	timeoutSeconds?: number;
 }): React.ReactElement {
 	const boxWidth = useTerminalWidth();
 	const {colors} = useTheme();
+	const appliedTimeoutSeconds = resolveBashTimeoutMs(timeoutSeconds) / 1000;
+	// Only a non-default limit is worth a line: every other command would
+	// repeat the same 2 minutes the tool description already states.
+	const showTimeout =
+		appliedTimeoutSeconds !== EXECUTE_BASH_DEFAULT_TIMEOUT_SECONDS;
 
 	return (
 		<Box flexDirection="column" marginBottom={1} width={boxWidth}>
@@ -176,6 +226,12 @@ function ExecuteBashFormatterComponent({
 				<Box flexDirection="column">
 					<Text color={colors.secondary}>Description:</Text>
 					<Text color={colors.text}> {description}</Text>
+				</Box>
+			)}
+			{showTimeout && (
+				<Box flexDirection="column">
+					<Text color={colors.secondary}>Timeout:</Text>
+					<Text color={colors.text}> {appliedTimeoutSeconds} seconds</Text>
 				</Box>
 			)}
 			<Box flexDirection="column">
@@ -199,6 +255,7 @@ const executeBashFormatter = (args: ExecuteBashArgs): React.ReactElement => {
 		<ExecuteBashFormatterComponent
 			command={args.command}
 			description={args.description}
+			timeoutSeconds={args.timeout_seconds}
 		/>
 	);
 };

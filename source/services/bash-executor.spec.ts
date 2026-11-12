@@ -420,7 +420,11 @@ test('timeout resolves with the timeout error after timeoutMs', async t => {
 	const elapsed = Date.now() - start;
 
 	t.true(result.isComplete, 'Command should be marked complete');
-	t.is(result.error, 'Command timed out after 100ms', 'Should have the specific timeout error');
+	t.is(
+		result.error,
+		'Command timed out after 0.1 seconds',
+		'Should have the specific timeout error, in the unit timeout_seconds uses',
+	);
 	t.true(elapsed < 1000, `Command ran ${elapsed}ms — it was successfully killed early by the timeout`);
 });
 
@@ -847,7 +851,7 @@ test('tree kill: a timeout stops the program the shell started', async t => {
 
 	const result = await promise;
 
-	t.is(result.error, 'Command timed out after 1500ms');
+	t.is(result.error, 'Command timed out after 1.5 seconds');
 	t.true(await isGoneWithin(childPid!, 5000), 'child node process must not survive the timeout');
 });
 
@@ -898,7 +902,7 @@ posixOnly('timeout is reported only once a group that ignores SIGTERM is gone', 
 
 	const result = await promise;
 
-	t.is(result.error, 'Command timed out after 500ms');
+	t.is(result.error, 'Command timed out after 0.5 seconds');
 	t.false(isGroupAlive(pgid!), 'no process of the command may outlive the timeout result');
 });
 

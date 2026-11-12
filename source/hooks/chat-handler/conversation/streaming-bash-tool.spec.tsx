@@ -40,6 +40,24 @@ test('runStreamingBashTool propagates AbortSignal to underlying bash execution',
 	t.is(result.bashState!.error, 'Cancelled via AbortSignal');
 });
 
+// The interactive path starts the command itself, so it is the one place
+// timeout_seconds could be dropped without any other path noticing.
+test('runStreamingBashTool honours timeout_seconds', async t => {
+	const toolCall = {
+		id: 'call_timeout',
+		type: 'function',
+		function: {
+			name: 'execute_bash',
+			arguments: JSON.stringify({command: 'sleep 10', timeout_seconds: 1}),
+		},
+	} as any;
+
+	const run = await runStreamingBashTool(toolCall, null, () => {}, 'test');
+
+	t.is(run.bashState?.error, 'Command timed out after 1 seconds');
+	t.true(run.result.isError);
+});
+
 // A command that runs but exits non-zero is the case that used to read as a
 // success: the formatted output is ordinary stdout/stderr, so `isError` is the
 // only signal the display layer can branch on.
