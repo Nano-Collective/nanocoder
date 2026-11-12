@@ -17,7 +17,7 @@ import {
 } from '@/utils/checkpoint-utils';
 import {ensureNanocoderGitignore} from '@/utils/ensure-nanocoder-gitignore';
 import {formatError} from '@/utils/error-formatter';
-import {notifyWarning} from '@/utils/message-queue';
+import {notifyWarning} from '@/utils/message-queue-core';
 import {FileSnapshotService} from './file-snapshot';
 /**
  * Service for managing conversation checkpoints.

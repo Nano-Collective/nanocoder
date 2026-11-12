@@ -1,6 +1,6 @@
 import test from 'ava';
 import React from 'react';
-import {getLogger} from './logging';
+import {getLogger} from '../utils/logging';
 import {ErrorMessage, InfoMessage, WarningMessage} from '@/components/message-box';
 import {
 	addToMessageQueue,

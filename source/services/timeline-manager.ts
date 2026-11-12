@@ -18,7 +18,7 @@ import type {
 import {atomicWriteFile} from '@/utils/atomic-write';
 import {ensureNanocoderGitignore} from '@/utils/ensure-nanocoder-gitignore';
 import {formatError} from '@/utils/error-formatter';
-import {notifyWarning} from '@/utils/message-queue';
+import {notifyWarning} from '@/utils/message-queue-core';
 import {FileSnapshotService} from './file-snapshot';
 import {
 	acquireTimelineLock,

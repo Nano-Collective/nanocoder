@@ -16,7 +16,7 @@ import {getColors} from '@/config/index';
 import {getConfigPath} from '@/config/paths';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
 import {formatError} from '@/utils/error-formatter';
-import {notifyError, notifyInfo} from '@/utils/message-queue';
+import {notifyError, notifyInfo} from '@/utils/message-queue-core';
 import {type ConfigLocation, LocationStep} from './steps/location-step';
 
 export type BaseWizardStep =

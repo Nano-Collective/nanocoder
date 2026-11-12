@@ -1,6 +1,7 @@
 import React from 'react';
 import {appendToolDefinitionsToPrompt} from '@/ai-sdk-client/tools/system-prompt-assembler';
 import {ConversationStateManager} from '@/app/utils/conversation-state';
+import {infoMsg} from '@/components/message-factory';
 import UserMessage from '@/components/user-message';
 import {getAppConfig} from '@/config/index';
 import {
@@ -17,7 +18,6 @@ import {generateKey} from '@/session/key-generator';
 import {getTuneToolMode} from '@/types/config';
 import type {ImageAttachment, Message} from '@/types/core';
 import {MessageBuilder} from '@/utils/message-builder';
-import {infoMsg} from '@/utils/message-factory';
 import {buildSystemPrompt, setLastBuiltPrompt} from '@/utils/prompt-builder';
 import {processAssistantResponse} from './conversation/conversation-loop';
 import {createResetStreamingState} from './state/streaming-state';

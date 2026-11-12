@@ -3,7 +3,18 @@ import type {ConversationStateManager} from '@/app/utils/conversation-state';
 import AgentProgress, {MultiAgentProgress} from '@/components/agent-progress';
 import BashProgress from '@/components/bash-progress';
 import {ErrorMessage} from '@/components/message-box';
+import {
+	ALWAYS_EXPANDED_TOOLS,
+	displayToolResult,
+	isToolResultError,
+	LIVE_TASK_TOOLS,
+	recordExpandableToolResult,
+} from '@/components/tool-result-display';
 import {getShowAgentBashOutput} from '@/config/preferences';
+import {
+	runStreamingBashTool,
+	type StreamingBashRun,
+} from '@/hooks/chat-handler/conversation/streaming-bash-tool';
 import type {BashExecutionState} from '@/services/bash-executor';
 import {
 	clearAllSubagentProgress,
@@ -19,18 +30,7 @@ import type {Task} from '@/tools/tasks/types';
 import type {ToolManager} from '@/tools/tool-manager';
 import type {ToolCall, ToolExecutionContext, ToolResult} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
-import {
-	runStreamingBashTool,
-	type StreamingBashRun,
-} from '@/utils/streaming-bash-tool';
 import {parseToolArguments} from '@/utils/tool-args-parser';
-import {
-	ALWAYS_EXPANDED_TOOLS,
-	displayToolResult,
-	isToolResultError,
-	LIVE_TASK_TOOLS,
-	recordExpandableToolResult,
-} from '@/utils/tool-result-display';
 
 /**
  * Validates and executes a single tool call.

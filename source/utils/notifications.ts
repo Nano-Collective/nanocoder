@@ -3,7 +3,7 @@ import {existsSync} from 'fs';
 import {basename, dirname, join} from 'path';
 import {fileURLToPath} from 'url';
 import type {NotificationsConfig} from '@/types/config';
-import {notifyInfo} from '@/utils/message-queue';
+import {notifyInfo} from '@/utils/message-queue-core';
 
 export type NotificationEvent =
 	| 'toolConfirmation'

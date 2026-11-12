@@ -1,4 +1,5 @@
 import {Box, Text} from 'ink';
+import {errorMsg, infoMsg, successMsg} from '@/components/message-factory';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
@@ -9,7 +10,6 @@ import type {MemoryProposal} from '@/memory/summarizer-service';
 import {SummarizerService} from '@/memory/summarizer-service';
 import type {Command} from '@/types/commands';
 import {formatError} from '@/utils/error-formatter';
-import {errorMsg, infoMsg, successMsg} from '@/utils/message-factory';
 
 interface MemoryCommandOptions {
 	memoryManager?: Pick<

@@ -1,9 +1,9 @@
 import {existsSync, mkdirSync, readFileSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
+import {errorMsg, successMsg} from '@/components/message-factory';
 import {getSubagentLoader} from '@/subagents/subagent-loader';
 import type {SubagentConfigWithSource} from '@/subagents/types';
 import type {CommandCompletion, CommandContext} from '@/types/index';
-import {errorMsg, successMsg} from '@/utils/message-factory';
 
 /**
  * Per-entity differences for the single-file `/<kind> create <name>` flows.

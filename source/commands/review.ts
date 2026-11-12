@@ -3,6 +3,7 @@ import {fileURLToPath} from 'node:url';
 import React from 'react';
 import AssistantMessage from '@/components/assistant-message';
 import AssistantReasoning from '@/components/assistant-reasoning';
+import {errorMsg, infoMsg, warningMsg} from '@/components/message-factory';
 import {getShowUsageFooter} from '@/config/preferences';
 import {generateKey} from '@/session/key-generator';
 import {stripThinkTags} from '@/tool-calling/index';
@@ -20,7 +21,6 @@ import {buildResponseUsageBounded} from '@/usage/response-usage';
 import {formatError} from '@/utils/error-formatter';
 import {parseGitHubRepository} from '@/utils/github-repository';
 import {getLogger} from '@/utils/logging';
-import {errorMsg, infoMsg, warningMsg} from '@/utils/message-factory';
 import {loadSection} from '@/utils/prompt-builder';
 
 const __filename = fileURLToPath(import.meta.url);

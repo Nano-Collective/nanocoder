@@ -13,6 +13,10 @@ import {
 } from '@/firewall/mutation-firewall';
 import {ThemeContext} from '@/hooks/useTheme';
 import {getSafeSessionCwd} from '@/services/session-cwd';
+import {
+	collapseUnchangedLines,
+	computeLineDiff,
+} from '@/tools/file-ops/inline-diff';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 import {truncateAnsi} from '@/utils/ansi-truncate';
@@ -20,7 +24,6 @@ import {formatError} from '@/utils/error-formatter';
 import {getCachedFileContent, invalidateCache} from '@/utils/file-cache';
 import {highlight} from '@/utils/highlighter';
 import {normalizeIndentation} from '@/utils/indentation-normalizer';
-import {collapseUnchangedLines, computeLineDiff} from '@/utils/inline-diff';
 import {
 	validateEditableEncoding,
 	validateEditableFormat,

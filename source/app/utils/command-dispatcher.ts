@@ -2,6 +2,7 @@ import React from 'react';
 import {commandRegistry} from '@/commands';
 import {expandCommandAlias, findRetiredCommand} from '@/commands/aliases';
 import CommandProgress from '@/components/command-progress';
+import {infoMsg, warningMsg} from '@/components/message-factory';
 import {DELAY_COMMAND_COMPLETE_MS} from '@/constants';
 import {parseCustomCommandArgs} from '@/custom-commands/args';
 import {expandCustomCommandPrompt} from '@/custom-commands/executor';
@@ -21,7 +22,6 @@ import {
 	isRecognizedOverrideKey,
 	parseInlineOverrides,
 } from '@/utils/inline-overrides';
-import {infoMsg, warningMsg} from '@/utils/message-factory';
 import {handleMCPPromptCommand} from './handlers/mcp-prompt-handler';
 import {stripVSCodeContext} from './vscode-context';
 

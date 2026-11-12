@@ -1,6 +1,8 @@
 import React from 'react';
 import {parseInput} from '@/command-parser';
 import BashProgress from '@/components/bash-progress';
+import {errorMsg} from '@/components/message-factory';
+import {clearExpandableToolResults} from '@/components/tool-result-display';
 import {BASH_OUTPUT_PREFIX} from '@/constants';
 import {clearPendingHookContext} from '@/services/lifecycle-hooks';
 import {generateKey} from '@/session/key-generator';
@@ -11,9 +13,7 @@ import {
 import type {ImageAttachment, LLMClient} from '@/types/core';
 import type {Message, MessageSubmissionOptions} from '@/types/index';
 import {formatError} from '@/utils/error-formatter';
-import {errorMsg} from '@/utils/message-factory';
 import {clearReadTracker} from '@/utils/read-tracker';
-import {clearExpandableToolResults} from '@/utils/tool-result-display';
 import {dispatchSlashCommand} from './command-dispatcher';
 
 /**

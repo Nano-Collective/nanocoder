@@ -4,17 +4,17 @@
  * number it lists the recent results that can be expanded.
  */
 import cliTruncate from 'cli-truncate';
+import {infoMsg, warningMsg} from '@/components/message-factory';
+import {
+	getExpandableToolResults,
+	renderExpandedToolResult,
+} from '@/components/tool-result-display';
 import {DEFAULT_TERMINAL_COLUMNS, TOOL_OUTPUT_DISPLAY_LINES} from '@/constants';
 import {calculateBoxWidth} from '@/hooks/useTerminalWidth';
 import {getToolManager} from '@/message-handler';
 import type {Command} from '@/types/commands';
 import type {ToolCall} from '@/types/core';
-import {infoMsg, warningMsg} from '@/utils/message-factory';
 import {parseToolArguments} from '@/utils/tool-args-parser';
-import {
-	getExpandableToolResults,
-	renderExpandedToolResult,
-} from '@/utils/tool-result-display';
 
 const SUMMARY_ARG_KEYS = ['path', 'file_path', 'command', 'pattern', 'url'];
 

@@ -50,7 +50,8 @@ Nanocoder is a React-based CLI coding agent built with Ink.js that provides loca
 - `source/app/` - `App.tsx` plus app-internal helpers (`utils/app-util.ts`, `utils/command-dispatcher.ts`, `utils/conversation-state.ts`, prompt sections, orchestration hooks in `app/hooks/`)
 - `source/ai-sdk-client/` - Wrapper over Vercel AI SDK: chat handler, providers, converters, tool helpers, error handling
 - `source/tools/` - Built-in tools (file ops, bash, search, web fetch). Registered in `source/tools/tool-manager.ts`; file editors are `string_replace`, `diff_edit` and `write_file` (in `source/tools/file-ops/`)
-- `source/components/` - Ink UI components
+- `source/components/` - Ink UI components, plus the Ink-bound helpers other layers render through: `message-factory.ts` (`errorMsg`/`infoMsg`/...), `message-queue.tsx` (chat-queue renderer), `tool-result-display.tsx`
+- `source/utils/` - Framework-free helpers (logging, shutdown, error formatting, filesystem, text). Nothing here renders Ink: UI helpers live in `components/`
 - `source/config/` - Configuration loading and preferences
 - `source/commands/` - Built-in slash commands (`/model`, `/provider`, `/clear`, etc.)
 - `source/custom-commands/` - User-defined markdown commands from `.nanocoder/commands/`
@@ -86,7 +87,7 @@ Nanocoder is a React-based CLI coding agent built with Ink.js that provides loca
 
 ### State Management Pattern
 
-All state lives in `source/hooks/useAppState.tsx`. Other hooks (`useChatHandler`, `useModeHandlers`) receive state and setters from it. `source/app/App.tsx` orchestrates them via `useAppHandlers`. Global `source/utils/message-queue.tsx` lets deep components push chat messages without prop-drilling. Non-UI modules import the `notify*` helpers from `source/utils/message-queue-core.ts` instead, which has no React/Ink imports, so the CLI fast paths stay Ink-free (`source/config/no-ink-fast-paths.spec.ts` enforces this).
+All state lives in `source/hooks/useAppState.tsx`. Other hooks (`useChatHandler`, `useModeHandlers`) receive state and setters from it. `source/app/App.tsx` orchestrates them via `useAppHandlers`. The global chat queue in `source/utils/message-queue-core.ts` lets any module push chat messages (`addToMessageQueue`, the `notify*` helpers) without prop-drilling. It has no React/Ink imports, so the CLI fast paths stay Ink-free (`source/config/no-ink-fast-paths.spec.ts` enforces this); `source/components/message-queue.tsx` only adds the Ink renderer that `App.tsx` installs with `setGlobalMessageQueue`.
 
 ### Tool System
 

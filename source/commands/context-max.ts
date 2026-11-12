@@ -1,5 +1,6 @@
 import React from 'react';
 import {InfoMessage} from '@/components/message-box';
+import {errorMsg, infoMsg, successMsg} from '@/components/message-factory';
 import {
 	resetSessionContextLimit,
 	resolveModelContextLimit,
@@ -7,7 +8,6 @@ import {
 } from '@/models/index';
 import {generateKey} from '@/session/key-generator';
 import type {StatefulCommand} from '@/types/index';
-import {errorMsg, infoMsg, successMsg} from '@/utils/message-factory';
 import {parseContextLimit} from '@/utils/parse-context-limit';
 
 /**

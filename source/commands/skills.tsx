@@ -13,6 +13,12 @@ import {Box, Text} from 'ink';
 import React from 'react';
 import {createSkillBundle} from '@/commands/create-scaffold';
 import {scheduleCommand} from '@/commands/schedule';
+import {
+	errorMsg,
+	infoMsg,
+	successMsg,
+	warningMsg,
+} from '@/components/message-factory';
 import {InfoField} from '@/components/ui/info-field';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
@@ -27,12 +33,6 @@ import {
 import {findSkill, getLoadedSkills} from '@/skills/skill-registry';
 import type {Command, StatefulCommand} from '@/types/index';
 import type {Skill} from '@/types/skills';
-import {
-	errorMsg,
-	infoMsg,
-	successMsg,
-	warningMsg,
-} from '@/utils/message-factory';
 
 function memberCount(skill: Skill): string {
 	const parts: string[] = [];

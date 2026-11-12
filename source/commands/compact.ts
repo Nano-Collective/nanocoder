@@ -1,5 +1,6 @@
 import React from 'react';
 import {InfoMessage, SuccessMessage} from '@/components/message-box';
+import {errorMsg, infoMsg, successMsg} from '@/components/message-factory';
 import {getAppConfig} from '@/config/index';
 import {getModelContextLimit, getSessionContextLimit} from '@/models/index';
 import {runLifecycleHooks} from '@/services/lifecycle-hooks';
@@ -30,7 +31,6 @@ import {
 	compressMessages,
 	isThresholdInRange,
 } from '@/utils/message-compression';
-import {errorMsg, infoMsg, successMsg} from '@/utils/message-factory';
 import {getLastBuiltPrompt} from '@/utils/prompt-builder';
 import {bumpReadContentGeneration} from '@/utils/read-tracker';
 

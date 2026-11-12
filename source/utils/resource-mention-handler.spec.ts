@@ -1,7 +1,7 @@
 import test from 'ava';
 import type {MCPClient} from '../mcp/mcp-client.js';
 import {PlaceholderType} from '../types/hooks.js';
-import {setGlobalMessageQueue} from './message-queue.js';
+import {setGlobalMessageQueue} from '../components/message-queue.js';
 import {handleResourceMention} from './resource-mention-handler.js';
 
 console.log('\nresource-mention-handler.spec.ts');

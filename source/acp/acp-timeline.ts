@@ -6,7 +6,7 @@ import type {ToolManager} from '@/tools/tool-manager';
 import type {Message, ToolCall} from '@/types/core';
 import type {TimelineEntryMeta} from '@/types/timeline';
 import {formatError} from '@/utils/error-formatter';
-import {notifyWarning} from '@/utils/message-queue';
+import {notifyWarning} from '@/utils/message-queue-core';
 import type {AcpSession} from './acp-session';
 
 /**
