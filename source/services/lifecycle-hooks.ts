@@ -35,6 +35,8 @@ function defaultTimeoutFor(event: HookEvent): number {
 
 /** Cap on captured stdout/stderr so a chatty hook can't blow up context. */
 const MAX_HOOK_OUTPUT_CHARS = 16 * 1024;
+/** Keep model-supplied environment values below per-string OS launch limits. */
+const MAX_HOOK_ENV_VALUE_CHARS = 16 * 1024;
 
 /**
  * Everything a hook can be told about the moment it fired. Each populated
@@ -351,6 +353,7 @@ function buildEnv(
 	context: HookContext,
 	cwd: string,
 ): NodeJS.ProcessEnv {
+	let contextTruncated = false;
 	const env: NodeJS.ProcessEnv = {
 		...process.env,
 		NANOCODER_HOOK_EVENT: event,
@@ -369,14 +372,31 @@ function buildEnv(
 	if (context.toolName) env.NANOCODER_TOOL_NAME = context.toolName;
 	if (context.toolArgs) {
 		try {
-			env.NANOCODER_TOOL_ARGS = JSON.stringify(context.toolArgs);
+			const serializedArgs = JSON.stringify(context.toolArgs);
+			if (
+				serializedArgs !== undefined &&
+				serializedArgs.length > MAX_HOOK_ENV_VALUE_CHARS
+			) {
+				env.NANOCODER_TOOL_ARGS = '{"truncated":true}';
+				contextTruncated = true;
+			} else {
+				env.NANOCODER_TOOL_ARGS = serializedArgs;
+			}
 		} catch {
 			// Unserialisable args (cycles) just mean no NANOCODER_TOOL_ARGS.
 		}
 		const filePath = getToolFileArg(context.toolArgs);
-		if (filePath) env.NANOCODER_FILE = filePath;
+		if (filePath) {
+			contextTruncated =
+				contextTruncated || filePath.length > MAX_HOOK_ENV_VALUE_CHARS;
+			env.NANOCODER_FILE = truncateHookEnvValue(filePath);
+		}
 		const command = context.toolArgs.command;
-		if (typeof command === 'string') env.NANOCODER_COMMAND = command;
+		if (typeof command === 'string') {
+			contextTruncated =
+				contextTruncated || command.length > MAX_HOOK_ENV_VALUE_CHARS;
+			env.NANOCODER_COMMAND = truncateHookEnvValue(command);
+		}
 	}
 	if (context.toolResult !== undefined) {
 		env.NANOCODER_TOOL_RESULT = context.toolResult.slice(
@@ -384,12 +404,24 @@ function buildEnv(
 			MAX_HOOK_OUTPUT_CHARS,
 		);
 	}
-	if (context.prompt !== undefined) env.NANOCODER_PROMPT = context.prompt;
+	if (context.prompt !== undefined) {
+		contextTruncated =
+			contextTruncated || context.prompt.length > MAX_HOOK_ENV_VALUE_CHARS;
+		env.NANOCODER_PROMPT = truncateHookEnvValue(context.prompt);
+	}
 	if (context.messageCount !== undefined) {
 		env.NANOCODER_MESSAGE_COUNT = String(context.messageCount);
 	}
+	if (contextTruncated) env.NANOCODER_HOOK_CONTEXT_TRUNCATED = 'true';
 
 	return env;
+}
+
+function truncateHookEnvValue(value: string): string {
+	return sliceWholeCharacters(
+		truncateToolResult(value, MAX_HOOK_ENV_VALUE_CHARS),
+		MAX_HOOK_ENV_VALUE_CHARS,
+	);
 }
 
 export interface HookRun {
@@ -398,6 +430,8 @@ export interface HookRun {
 	stderr: string;
 	/** Set when the hook never produced a usable exit code (spawn error/timeout). */
 	failure?: string;
+	/** True when the hook process never started. */
+	failedToStart?: boolean;
 }
 
 /** Grace period between a hook's SIGTERM and the SIGKILL that follows it. */
@@ -589,6 +623,7 @@ export function runHookCommand(
 			stdout: '',
 			stderr: '',
 			failure: prepared.failure,
+			failedToStart: true,
 		});
 	}
 	const command = prepared.command;
@@ -660,7 +695,13 @@ export function runHookCommand(
 		});
 
 		proc.on('error', (error: Error) => {
-			finish({exitCode: null, stdout, stderr, failure: error.message});
+			finish({
+				exitCode: null,
+				stdout,
+				stderr,
+				failure: error.message,
+				failedToStart: true,
+			});
 		});
 		proc.on('close', (code: number | null) => {
 			// Release whatever the decoders are still holding back. Without this
@@ -677,11 +718,11 @@ export function runHookCommand(
  * Run every hook configured for `event`, in config order.
  *
  * Hooks are deterministic and model-free: they fire every time, cost no
- * tokens, and (on `pre-tool-use` / `user-prompt-submit`) can veto the action
- * by exiting non-zero. Only a real non-zero exit vetoes — a hook that times
- * out or fails to spawn is logged and skipped, so a broken script degrades to
- * "no hook" rather than wedging the agent. The first veto ends the chain; the
- * remaining hooks for that event do not run.
+ * tokens, and (on `pre-tool-use` / `user-prompt-submit`) can veto the action.
+ * A non-zero exit, a process that cannot start, or truncated context blocks a
+ * vetoing event. A timeout after start is logged and skipped so a hung script
+ * cannot wedge the agent. The first veto ends the chain; the remaining hooks
+ * for that event do not run.
  *
  * Hook commands come from project-local `agents.config.json`, the same file
  * that already configures `mcpServers`; both are gated by the directory-trust
@@ -714,15 +755,44 @@ async function runShellHooks(
 	const cwd = getProjectRoot();
 	const env = buildEnv(event, context, cwd);
 	const canVeto = VETOING_EVENTS.has(event);
+	const contextWasTruncated = env.NANOCODER_HOOK_CONTEXT_TRUNCATED === 'true';
 	const defaultTimeoutMs = defaultTimeoutFor(event);
 	const collected: string[] = [];
 	const failures: HookFailure[] = [];
+	const block = (reason: string): HookOutcome => ({
+		blocked: true,
+		reason,
+		output: collected.join('\n').trim(),
+		failures,
+	});
+	const truncationReason = (label: string) =>
+		`Blocked by hook "${label}": context exceeded ${MAX_HOOK_ENV_VALUE_CHARS} characters and was truncated.`;
 
 	for (const hook of hooks) {
 		const run = await runHookCommand(hook, env, cwd, defaultTimeoutMs);
 		const label = hookLabel(hook);
 
 		if (run.failure) {
+			if (canVeto && (run.failedToStart || contextWasTruncated)) {
+				const reason = contextWasTruncated
+					? truncationReason(label) +
+						(run.failedToStart
+							? ' The hook could not start: ' + run.failure
+							: '')
+					: 'Blocked because hook "' +
+						label +
+						'" could not start: ' +
+						run.failure +
+						'.';
+				notifyError(
+					'Hook "' +
+						label +
+						'" (' +
+						event +
+						') could not safely run — blocking action.',
+				);
+				return block(reason);
+			}
 			notifyError(`Hook "${label}" (${event}) ${run.failure} — skipping.`);
 			continue;
 		}
@@ -757,6 +827,18 @@ async function runShellHooks(
 				});
 			}
 			continue;
+		}
+
+		if (canVeto && contextWasTruncated) {
+			const reason = truncationReason(label);
+			notifyError(
+				'Hook "' +
+					label +
+					'" (' +
+					event +
+					') received truncated context — blocking action.',
+			);
+			return block(reason);
 		}
 
 		// stdout only, unlike a failure above. On a passing run stderr is mostly
