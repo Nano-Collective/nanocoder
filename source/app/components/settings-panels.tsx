@@ -1,7 +1,6 @@
 import {Box, Text, useInput} from 'ink';
 import {type ReactNode, useMemo, useState} from 'react';
 import {StyledSelectInput} from '@/components/ui/styled-select-input';
-import type {TitleShape} from '@/components/ui/styled-title';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {
 	getCompactToolDisplay,
@@ -34,6 +33,7 @@ import {useTheme} from '@/hooks/useTheme';
 import {useTitleShape} from '@/hooks/useTitleShape';
 import {setNotificationsConfig} from '@/services/notifications';
 import type {NotificationsConfig} from '@/types/config';
+import type {TitleShape} from '@/types/ui';
 import {
 	DEFAULT_NANOCODER_SHAPE,
 	type NanocoderShape,

@@ -1,8 +1,8 @@
 import type React from 'react';
 import {ErrorMessage} from '@/components/message-box';
 import {markRunFailed} from '@/conversation/run-outcome';
-import {generateKey} from '@/session/key-generator';
 import {formatError} from '@/utils/error-formatter';
+import {generateKey} from '@/utils/key-generator';
 
 /**
  * Displays an error in the chat queue with special handling for cancellation errors.

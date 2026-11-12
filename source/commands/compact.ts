@@ -23,7 +23,6 @@ import {
 import {getLastBuiltPrompt} from '@/conversation/prompt-builder';
 import {getModelContextLimit, getSessionContextLimit} from '@/models/index';
 import {runLifecycleHooks} from '@/services/lifecycle-hooks';
-import {generateKey} from '@/session/key-generator';
 import {createTokenizer} from '@/tokenization/index';
 import {bumpReadContentGeneration} from '@/tools/runtime/read-tracker';
 import type {
@@ -33,6 +32,7 @@ import type {
 } from '@/types/config';
 import type {Message, StatefulCommand} from '@/types/index';
 import {formatError} from '@/utils/error-formatter';
+import {generateKey} from '@/utils/key-generator';
 
 /**
  * Evaluate a once-scoped threshold gate against current usage. Returns the

@@ -1,7 +1,6 @@
 import {statSync} from 'node:fs';
 import path from 'node:path';
 import {existsSync, mkdirSync, readFileSync} from 'fs';
-import type {TitleShape} from '@/components/ui/styled-title';
 import {getClosestConfigFile, getConfigPath} from '@/config/paths';
 import {
 	DEFAULT_MEMORY_LIMIT,
@@ -18,7 +17,7 @@ import type {
 	TuneConfig,
 } from '@/types/config';
 import type {UserPreferences} from '@/types/index';
-import type {NanocoderShape, ThemePreset} from '@/types/ui';
+import type {NanocoderShape, ThemePreset, TitleShape} from '@/types/ui';
 import {atomicWriteFileSync} from '@/utils/fs/atomic-write';
 import {getLogger} from '@/utils/logging';
 

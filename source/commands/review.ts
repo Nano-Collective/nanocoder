@@ -6,7 +6,6 @@ import AssistantReasoning from '@/components/assistant-reasoning';
 import {errorMsg, infoMsg, warningMsg} from '@/components/message-factory';
 import {getShowUsageFooter} from '@/config/preferences';
 import {loadSection} from '@/conversation/prompt-builder';
-import {generateKey} from '@/session/key-generator';
 import {stripThinkTags} from '@/tool-calling/index';
 import {
 	execGh,
@@ -21,6 +20,7 @@ import type {Message} from '@/types/core';
 import {buildResponseUsageBounded} from '@/usage/response-usage';
 import {formatError} from '@/utils/error-formatter';
 import {parseGitHubRepository} from '@/utils/github-repository';
+import {generateKey} from '@/utils/key-generator';
 import {getLogger} from '@/utils/logging';
 
 const __filename = fileURLToPath(import.meta.url);

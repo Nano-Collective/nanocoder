@@ -29,7 +29,6 @@ import {
 	takePendingHookContext,
 } from '@/services/lifecycle-hooks';
 import {getProjectRoot} from '@/services/session-cwd';
-import {generateKey, setKeyGeneratorSessionId} from '@/session/key-generator';
 import {buildSessionHistoryComponents} from '@/session/session-history-renderer';
 import type {Session} from '@/session/session-manager';
 import {sessionManager} from '@/session/session-manager';
@@ -57,6 +56,7 @@ import type {ThemePreset} from '@/types/ui';
 import type {UpdateInfo} from '@/types/utils';
 import {calculateTokenBreakdown} from '@/usage/calculator';
 import {formatError} from '@/utils/error-formatter';
+import {generateKey, setKeyGeneratorSessionId} from '@/utils/key-generator';
 import {getLogger} from '@/utils/logging';
 
 interface UseAppHandlersProps {

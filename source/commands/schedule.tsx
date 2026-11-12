@@ -14,9 +14,9 @@ import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {formatCronHuman} from '@/schedule/cron';
-import {generateKey} from '@/session/key-generator';
 import {getLoadedSkills} from '@/skills/skill-registry';
 import type {Command} from '@/types/index';
+import {generateKey} from '@/utils/key-generator';
 
 interface CronEntry {
 	skill: string;

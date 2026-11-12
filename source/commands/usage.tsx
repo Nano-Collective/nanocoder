@@ -17,7 +17,6 @@ import {
 	getModelPricing,
 	getSessionContextLimit,
 } from '@/models/index';
-import {generateKey} from '@/session/key-generator';
 import {createTokenizer} from '@/tokenization/index';
 import type {Command} from '@/types/commands';
 import type {TuneConfig} from '@/types/config';
@@ -29,6 +28,7 @@ import {
 	calculateToolDefinitionsTokensFromDefs,
 } from '@/usage/calculator';
 import {calculateUsageCost} from '@/usage/response-usage';
+import {generateKey} from '@/utils/key-generator';
 import {estimateTokens} from '@/utils/token-calculator';
 
 export const usageCommand: Command = {

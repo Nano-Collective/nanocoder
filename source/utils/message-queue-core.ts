@@ -10,9 +10,9 @@
  * to the structured logger only, exactly as before.
  */
 import type {ReactNode} from 'react';
-import {generateKey} from '@/session/key-generator';
 import type {MessageType} from '@/types/index';
 import {createErrorInfo} from '@/utils/error-formatter';
+import {generateKey} from '@/utils/key-generator';
 // Import logging utilities with dependency injection pattern
 import {
 	generateCorrelationId,

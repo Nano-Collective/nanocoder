@@ -38,7 +38,6 @@ import {
 	SESSION_END_HOOK_HANDLER,
 } from '@/services/lifecycle-hooks';
 import {checkForUpdates} from '@/services/update-checker';
-import {generateKey} from '@/session/key-generator';
 import {sessionManager} from '@/session/session-manager';
 import {
 	recordSubagentApiCallForStats,
@@ -54,6 +53,7 @@ import {
 	MCPConnectionStatus,
 } from '@/types/core';
 import type {MCPInitResult, UpdateInfo, UserPreferences} from '@/types/index';
+import {generateKey} from '@/utils/key-generator';
 import {getShutdownManager} from '@/utils/shutdown';
 
 interface UseAppInitializationProps {

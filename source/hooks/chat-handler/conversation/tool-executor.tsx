@@ -21,7 +21,6 @@ import {
 	getSubagentProgress,
 	resetSubagentProgressById,
 } from '@/services/subagent-events';
-import {generateKey} from '@/session/key-generator';
 import {buildSubagentFailureMessage} from '@/subagents/failure-message';
 import {MAX_CONCURRENT_AGENTS} from '@/subagents/subagent-executor';
 import type {AgentToolArgs} from '@/tools/agent-tool';
@@ -31,6 +30,7 @@ import type {Task} from '@/tools/tasks/types';
 import type {ToolManager} from '@/tools/tool-manager';
 import type {ToolCall, ToolExecutionContext, ToolResult} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
+import {generateKey} from '@/utils/key-generator';
 
 /**
  * Validates and executes a single tool call.

@@ -22,7 +22,7 @@ import {
 import {
 	getKeyGeneratorSessionId,
 	setKeyGeneratorSessionId,
-} from '@/session/key-generator';
+} from '@/utils/key-generator';
 import {clearAppConfig} from '@/config/index';
 import {
 	addPendingHookContext,

@@ -5,8 +5,8 @@ import {errorMsg} from '@/components/message-factory';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
-import {generateKey} from '@/session/key-generator';
 import type {Command} from '@/types/index';
+import {generateKey} from '@/utils/key-generator';
 import {getPackageVersion} from '@/utils/package-version';
 import {
 	findHelpCommand,

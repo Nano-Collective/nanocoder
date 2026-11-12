@@ -13,7 +13,6 @@ import {
 } from '@/components/message-factory';
 import {CheckpointManager} from '@/services/checkpoint-manager';
 import {describeGapsMessage} from '@/services/checkpoint-utils';
-import {generateKey} from '@/session/key-generator';
 import type {
 	CommandCompletion,
 	CommandContext,
@@ -21,6 +20,7 @@ import type {
 	StatefulCommand,
 } from '@/types/index';
 import {formatError} from '@/utils/error-formatter';
+import {generateKey} from '@/utils/key-generator';
 import {addToMessageQueue} from '@/utils/message-queue-core';
 
 // Default checkpoint manager instance (lazy-initialized)

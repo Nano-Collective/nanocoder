@@ -9,8 +9,8 @@ import {CustomCommandLoader} from '@/custom-commands/loader';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {getCommandLoader} from '@/message-handler';
-import {generateKey} from '@/session/key-generator';
 import type {Command, CustomCommand, StatefulCommand} from '@/types/index';
+import {generateKey} from '@/utils/key-generator';
 
 interface CustomCommandsProps {
 	commands: CustomCommand[];
