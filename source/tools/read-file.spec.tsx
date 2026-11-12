@@ -713,6 +713,86 @@ test.serial(
 	},
 );
 
+test.serial(
+	'read_file validator rejects binary files with a NUL byte even with short lines',
+	async t => {
+		t.timeout(10000);
+		const testDir = join(process.cwd(), 'test-read-validate-binary-temp');
+		const originalCwd = process.cwd();
+
+		try {
+			mkdirSync(testDir, {recursive: true});
+			// PNG signature followed by short, newline-separated binary chunks:
+			// passes the long-line guard, so only the NUL check can catch it.
+			const png = Buffer.from([
+				0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00,
+				0x0d, 0x49, 0x48, 0x44, 0x52, 0x0a, 0x00, 0x01, 0x02, 0x0a,
+			]);
+			writeFileSync(join(testDir, 'image.png'), png);
+			process.chdir(testDir);
+
+			const result = await readFileTool.validator!({path: 'image.png'});
+
+			t.false(result.valid);
+			if (!result.valid) {
+				t.regex(result.error, /is a binary file/);
+				t.regex(result.error, /image\.png/);
+			}
+		} finally {
+			process.chdir(originalCwd);
+			rmSync(testDir, {recursive: true, force: true});
+		}
+	},
+);
+
+test.serial(
+	'read_file validator allows metadata_only for binary files',
+	async t => {
+		t.timeout(10000);
+		const testDir = join(
+			process.cwd(),
+			'test-read-validate-binary-metadata-temp',
+		);
+		const originalCwd = process.cwd();
+
+		try {
+			mkdirSync(testDir, {recursive: true});
+			writeFileSync(join(testDir, 'data.bin'), Buffer.from([0x00, 0x01, 0x02]));
+			process.chdir(testDir);
+
+			const result = await readFileTool.validator!({
+				path: 'data.bin',
+				metadata_only: true,
+			});
+
+			t.true(result.valid);
+		} finally {
+			process.chdir(originalCwd);
+			rmSync(testDir, {recursive: true, force: true});
+		}
+	},
+);
+
+test.serial('read_file validator still accepts ordinary text files', async t => {
+	t.timeout(10000);
+	const testDir = join(process.cwd(), 'test-read-validate-text-temp');
+	const originalCwd = process.cwd();
+
+	try {
+		mkdirSync(testDir, {recursive: true});
+		// Non-ASCII UTF-8 is text, not binary.
+		writeFileSync(join(testDir, 'notes.txt'), 'héllo wörld\n日本語\n');
+		process.chdir(testDir);
+
+		const result = await readFileTool.validator!({path: 'notes.txt'});
+
+		t.true(result.valid);
+	} finally {
+		process.chdir(originalCwd);
+		rmSync(testDir, {recursive: true, force: true});
+	}
+});
+
 // ============================================================================
 // Tests for read_file Handler - Error Handling
 // ============================================================================
