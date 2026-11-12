@@ -5,8 +5,8 @@ import type {ItemSelectorOption} from '@/components/item-selector';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
+import {formatRelativeTime} from '@/services/checkpoint-utils';
 import type {CheckpointListItem} from '@/types/checkpoint';
-import {formatRelativeTime} from '@/utils/checkpoint-utils';
 
 interface CheckpointSelectorProps {
 	checkpoints: CheckpointListItem[];

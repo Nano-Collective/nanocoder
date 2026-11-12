@@ -5,11 +5,11 @@ import {
 	PASTE_LARGE_CONTENT_THRESHOLD_CHARS,
 	PASTE_RAPID_DETECTION_MS,
 } from '@/constants';
+import {handleAtomicDeletion} from '../input/atomic-deletion';
+import {PasteDetector} from '../input/paste-detection';
+import {handlePaste, resizePasteDisplayText} from '../input/paste-utils';
+import {findPlaceholderOccurrences} from '../input/placeholders';
 import {InputState, PlaceholderType} from '../types/hooks';
-import {handleAtomicDeletion} from '../utils/atomic-deletion';
-import {PasteDetector} from '../utils/paste-detection';
-import {handlePaste, resizePasteDisplayText} from '../utils/paste-utils';
-import {findPlaceholderOccurrences} from '../utils/placeholders';
 
 // Cap both undo and redo stacks so a long composition can't grow them
 // unbounded. Every keystroke/paste pushes one entry, and each entry holds a
@@ -101,22 +101,75 @@ export function reconcileStaleEdit(
 	return latest.slice(0, start) + inserted + latest.slice(end);
 }
 
+/**
+ * The input and its edit history. One value, so every transition replaces
+ * all three together and nothing can be updated without the others.
+ */
+export interface EditorState {
+	current: InputState;
+	undo: InputState[];
+	redo: InputState[];
+}
+
+function pushCapped(stack: InputState[], entry: InputState): InputState[] {
+	return stack.length >= MAX_UNDO_STACK
+		? [...stack.slice(-(MAX_UNDO_STACK - 1)), entry]
+		: [...stack, entry];
+}
+
+/** An edit: the old input goes on the undo stack and redo is cleared. */
+export function applyEdit(state: EditorState, next: InputState): EditorState {
+	return {current: next, undo: pushCapped(state.undo, state.current), redo: []};
+}
+
+/** Step back one edit. Returns `state` itself when there is nothing to undo. */
+export function applyUndo(state: EditorState): EditorState {
+	const previous = state.undo.at(-1);
+	if (!previous) return state;
+	return {
+		current: previous,
+		undo: state.undo.slice(0, -1),
+		redo: pushCapped(state.redo, state.current),
+	};
+}
+
+/** Re-apply one undone edit. Returns `state` itself when there is none. */
+export function applyRedo(state: EditorState): EditorState {
+	const next = state.redo.at(-1);
+	if (!next) return state;
+	return {
+		current: next,
+		undo: pushCapped(state.undo, state.current),
+		redo: state.redo.slice(0, -1),
+	};
+}
+
+function emptyEditorState(): EditorState {
+	return {current: createEmptyInputState(), undo: [], redo: []};
+}
+
 export function useInputState() {
-	// Core state following the spec
-	const [currentState, setCurrentState] = useState<InputState>(
-		createEmptyInputState(),
+	// The editor state lives in one ref, the only source of truth. Callbacks
+	// read and write it synchronously, so several events in one stdin batch
+	// (Ink doesn't re-render between them) each see the previous one's
+	// result. `snapshot` is the copy React renders; commit() is the only
+	// writer and updates both together, so they can't drift apart.
+	const storeRef = useRef<EditorState>(emptyEditorState());
+	const [snapshot, setSnapshot] = useState(storeRef.current);
+	const commit = useCallback((next: EditorState) => {
+		storeRef.current = next;
+		setSnapshot(next);
+	}, []);
+	const currentState = snapshot.current;
+	// Read-only view of the latest input, ahead of a re-render.
+	const currentStateRef = useMemo<{readonly current: InputState}>(
+		() => ({
+			get current() {
+				return storeRef.current.current;
+			},
+		}),
+		[],
 	);
-
-	const [undoStack, setUndoStack] = useState<InputState[]>([]);
-	const [redoStack, setRedoStack] = useState<InputState[]>([]);
-
-	// Refs mirror the three state values that undo/redo/pushToUndoStack read.
-	// Callbacks hold refs via closures (empty deps) so that rapid consecutive
-	// calls within a single stdin batch — before React re-renders — always see
-	// the latest values, avoiding the stale-closure class of bug.
-	const currentStateRef = useRef(currentState);
-	const undoStackRef = useRef(undoStack);
-	const redoStackRef = useRef(redoStack);
 
 	// The value TextInput builds its next report from: what it was last
 	// rendered with, then each value it has reported since. Written during
@@ -138,60 +191,26 @@ export function useInputState() {
 	const lastPasteTimeRef = useRef<number>(0);
 	const lastPasteIdRef = useRef<string | null>(null);
 
-	// Keep refs in sync with React state so callbacks (which close over refs
-	// via empty deps) always see the latest values.  This avoids stale closures
-	// when multiple events arrive in the same stdin batch (Ink doesn't re-render
-	// between events).
-	useEffect(() => {
-		currentStateRef.current = currentState;
-	}, [currentState]);
-	useEffect(() => {
-		undoStackRef.current = undoStack;
-	}, [undoStack]);
-	useEffect(() => {
-		redoStackRef.current = redoStack;
-	}, [redoStack]);
-
 	// Cached line count for performance
 	const [cachedLineCount, setCachedLineCount] = useState(1);
 
-	// Helper to push current state to undo stack.
-	//
-	// Captures the previous state from currentStateRef EAGERLY (before any state
-	// is scheduled) so that multiple updateInput calls in the same stdin batch
-	// each record the right predecessor. Reading the ref lazily inside the
-	// functional updater would capture the already-advanced value at flush time.
-	// The ref is kept in lockstep by the assignment at the bottom of this
-	// function, so subsequent same-tick updateInput calls see the latest value.
-	//
-	// undoStackRef/redoStackRef are ALSO kept in lockstep here (not just in a
-	// useEffect after render), because undo()/redo() read them synchronously as
-	// their source of truth. Without this, an edit followed by an undo/redo in
-	// the same stdin batch would read the stale pre-render stacks.
-	const pushToUndoStack = useCallback((newState: InputState) => {
-		const previous = currentStateRef.current;
-		const nextUndoStack =
-			undoStackRef.current.length >= MAX_UNDO_STACK
-				? [...undoStackRef.current.slice(-(MAX_UNDO_STACK - 1)), previous]
-				: [...undoStackRef.current, previous];
-
-		undoStackRef.current = nextUndoStack;
-		redoStackRef.current = []; // Clear redo stack on new action
-		currentStateRef.current = newState;
-
-		setUndoStack(nextUndoStack);
-		setRedoStack([]); // Clear redo stack on new action
-		setCurrentState(newState);
-	}, []);
+	// Record an edit. Reads the previous input from the store at call time, so
+	// several edits in one stdin batch each record the right predecessor.
+	const pushToUndoStack = useCallback(
+		(newState: InputState) => {
+			commit(applyEdit(storeRef.current, newState));
+		},
+		[commit],
+	);
 
 	// Update input with paste detection and atomic deletion
 	//
-	// Reads state from currentStateRef (the synchronous source of truth) rather
+	// Reads state from the store (the synchronous source of truth) rather
 	// than the closure value so that a burst of updateInput calls within one
 	// stdin batch each see the newest committed state (undo/redo fix #4).
 	const updateInput = useCallback(
 		(reportedInput: string) => {
-			const currentState = currentStateRef.current;
+			const currentState = storeRef.current.current;
 			// TextInput's report may be built on a value that a paste (or undo)
 			// has since replaced; carry its edit over to the current value.
 			const newInput = reconcileStaleEdit(
@@ -421,7 +440,7 @@ export function useInputState() {
 
 			// The ref, not the render-time state: a paste can land in the same
 			// stdin batch as keys typed just before it.
-			const currentState = currentStateRef.current;
+			const currentState = storeRef.current.current;
 			const pasteResult = handlePaste(
 				pastedText,
 				currentState.displayValue,
@@ -465,72 +484,22 @@ export function useInputState() {
 		[pushToUndoStack],
 	);
 
-	// Undo function (Ctrl+_).
-	// Reads from refs via empty deps so rapid consecutive calls (e.g. two Ctrl+Z
-	// events in the same stdin batch) each see the latest stack, not the stale
-	// closure value from the last render.  Refs are the synchronous source of
-	// truth: each call computes the next stacks from refs and writes refs BEFORE
-	// scheduling state, so a second call in the same tick sees the first call's
-	// result.  No side effects inside functional updaters (React may invoke them
-	// more than once).
+	// Undo (Ctrl+Z) / redo (Ctrl+Y). Both read the store at call time, so two
+	// presses in one stdin batch each step once. Both stacks are capped at
+	// MAX_UNDO_STACK, so a long undo or redo streak can't grow the other one.
 	const undo = useCallback(() => {
-		const stack = undoStackRef.current;
-		if (stack.length > 0) {
-			const previousState = stack[stack.length - 1];
-			const nextUndoStack = stack.slice(0, -1);
-			// Mirror the undo-stack cap so unbounded Ctrl+Z cannot grow the redo
-			// stack (each entry holds a full InputState). Drop the oldest entries
-			// first, keeping the most recent MAX_UNDO_STACK states.
-			const nextRedoStack =
-				redoStackRef.current.length >= MAX_UNDO_STACK
-					? [
-							...redoStackRef.current.slice(-(MAX_UNDO_STACK - 1)),
-							currentStateRef.current,
-						]
-					: [...redoStackRef.current, currentStateRef.current];
+		const next = applyUndo(storeRef.current);
+		if (next === storeRef.current) return;
+		commit(next);
+		pasteDetectorRef.current.updateState(next.current.displayValue);
+	}, [commit]);
 
-			undoStackRef.current = nextUndoStack;
-			redoStackRef.current = nextRedoStack;
-			currentStateRef.current = previousState;
-
-			setUndoStack(nextUndoStack);
-			setRedoStack(nextRedoStack);
-			setCurrentState(previousState);
-
-			// Update paste detector state
-			pasteDetectorRef.current.updateState(previousState.displayValue);
-		}
-	}, []);
-
-	// Redo function (Ctrl+Y). Same ref-as-source-of-truth pattern as undo.
-	// Pushing back onto the undo stack obeys the same MAX_UNDO_STACK cap as
-	// undo() so that a long redo streak (after many undos) cannot grow the
-	// undo stack unbounded.
 	const redo = useCallback(() => {
-		const stack = redoStackRef.current;
-		if (stack.length > 0) {
-			const nextState = stack[stack.length - 1];
-			const nextRedoStack = stack.slice(0, -1);
-			const nextUndoStack =
-				undoStackRef.current.length >= MAX_UNDO_STACK
-					? [
-							...undoStackRef.current.slice(-(MAX_UNDO_STACK - 1)),
-							currentStateRef.current,
-						]
-					: [...undoStackRef.current, currentStateRef.current];
-
-			undoStackRef.current = nextUndoStack;
-			redoStackRef.current = nextRedoStack;
-			currentStateRef.current = nextState;
-
-			setUndoStack(nextUndoStack);
-			setRedoStack(nextRedoStack);
-			setCurrentState(nextState);
-
-			// Update paste detector state
-			pasteDetectorRef.current.updateState(nextState.displayValue);
-		}
-	}, []);
+		const next = applyRedo(storeRef.current);
+		if (next === storeRef.current) return;
+		commit(next);
+		pasteDetectorRef.current.updateState(next.current.displayValue);
+	}, [commit]);
 
 	// Delete placeholder atomically
 	const deletePlaceholder = useCallback(
@@ -571,15 +540,9 @@ export function useInputState() {
 			debounceTimerRef.current = null;
 		}
 
-		// Keep the refs in step, so a key typed before the next render builds
-		// on the empty input rather than on what was just submitted.
-		const emptyState = createEmptyInputState();
-		currentStateRef.current = emptyState;
-		undoStackRef.current = [];
-		redoStackRef.current = [];
-		setCurrentState(emptyState);
-		setUndoStack([]);
-		setRedoStack([]);
+		// Through the store, so a key typed before the next render builds on
+		// the empty input rather than on what was just submitted.
+		commit(emptyEditorState());
 		setHasLargeContent(false);
 		setOriginalInput('');
 		setHistoryIndex(-1);
@@ -587,7 +550,7 @@ export function useInputState() {
 		pasteDetectorRef.current.reset();
 		lastPasteTimeRef.current = 0;
 		lastPasteIdRef.current = null;
-	}, []);
+	}, [commit]);
 
 	// Cleanup on unmount
 	useEffect(() => {
@@ -599,20 +562,26 @@ export function useInputState() {
 		};
 	}, []);
 
-	// Set full InputState (for history navigation)
-	const setInputState = useCallback((newState: InputState) => {
-		setCurrentState(newState);
-		pasteDetectorRef.current.updateState(newState.displayValue);
-	}, []);
+	// Replace the input without recording an undo step (history navigation,
+	// completions, restored drafts). Through the store like every other
+	// writer, so Enter or a key in the same stdin batch sees the new input.
+	const setInputState = useCallback(
+		(newState: InputState) => {
+			commit({...storeRef.current, current: newState});
+			pasteDetectorRef.current.updateState(newState.displayValue);
+		},
+		[commit],
+	);
 
 	// Legacy setters for compatibility
-	const setInput = useCallback((newInput: string) => {
-		setCurrentState(prev => ({
-			...prev,
-			displayValue: newInput,
-		}));
-		pasteDetectorRef.current.updateState(newInput);
-	}, []);
+	const setInput = useCallback(
+		(newInput: string) => {
+			const store = storeRef.current;
+			commit({...store, current: {...store.current, displayValue: newInput}});
+			pasteDetectorRef.current.updateState(newInput);
+		},
+		[commit],
+	);
 
 	// Compute legacy pastedContent for backward compatibility
 	const legacyPastedContent = useMemo(() => {
@@ -632,8 +601,8 @@ export function useInputState() {
 			// Latest state, ahead of a re-render - for reads that can run in the
 			// same stdin batch as the edit that changed it (Enter after a paste).
 			currentStateRef,
-			undoStack,
-			redoStack,
+			undoStack: snapshot.undo,
+			redoStack: snapshot.redo,
 			undo,
 			redo,
 			deletePlaceholder,
@@ -655,8 +624,9 @@ export function useInputState() {
 		}),
 		[
 			currentState,
-			undoStack,
-			redoStack,
+			currentStateRef,
+			snapshot.undo,
+			snapshot.redo,
 			undo,
 			redo,
 			deletePlaceholder,

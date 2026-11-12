@@ -2,9 +2,10 @@
  * Git Utils Tests
  */
 
-import {execSync} from 'node:child_process';
+import {execFileSync, execSync} from 'node:child_process';
 import {
 	chmodSync,
+	existsSync,
 	mkdirSync,
 	mkdtempSync,
 	realpathSync,
@@ -15,12 +16,14 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
 import {
-	createSessionCwdScope,
-	runInSessionCwdScope,
-} from '@/services/session-cwd';
+	createSessionContext,
+	runInSessionContext,
+} from '@/services/session-context';
 import {
 	parseGitStatus,
 	execGit,
+	execGitBuffer,
+	execGitReadOnly,
 	isGitAvailable,
 	isGhAvailable,
 	resetBinaryAvailabilityCacheForTests,
@@ -36,6 +39,64 @@ import {
 // ============================================================================
 
 console.log('\nutils.spec.ts – Git Utilities');
+
+test('execGitBuffer preserves binary stdout and execGit honors cancellation', async t => {
+	const env = {
+		...process.env,
+		GIT_CONFIG_GLOBAL: '/dev/null',
+		GIT_CONFIG_NOSYSTEM: '1',
+		GIT_TERMINAL_PROMPT: '0',
+	};
+	const directory = mkdtempSync(join(tmpdir(), 'nanocoder-git-buffer-'));
+	const repository = join(directory, 'repo');
+	const hooks = join(repository, '.empty-hooks');
+	mkdirSync(hooks, {recursive: true});
+	t.teardown(() => rmSync(directory, {recursive: true, force: true}));
+	execFileSync('git', ['init', '--initial-branch=main', repository], {
+		stdio: 'ignore',
+		env,
+	});
+	execFileSync('git', ['-C', repository, 'config', 'user.name', 'Git test'], {env});
+	execFileSync('git', [
+		'-C',
+		repository,
+		'config',
+		'user.email',
+		'git-test@example.test',
+	], {env});
+	execFileSync('git', ['-C', repository, 'config', 'core.hooksPath', hooks], {env});
+	const contents = Buffer.concat([
+		Buffer.alloc(65_535, 0x61),
+		Buffer.from('€\0'),
+		Buffer.alloc(70_000, 0x62),
+		Buffer.from('\n'),
+	]);
+	writeFileSync(join(repository, 'binary.bin'), contents);
+	execFileSync('git', ['-C', repository, 'add', '--', 'binary.bin'], {env});
+	execFileSync('git', ['-C', repository, 'commit', '-m', 'test binary output'], {
+		stdio: 'ignore',
+		env,
+	});
+	const oid = execFileSync('git', ['-C', repository, 'rev-parse', 'HEAD'], {
+		encoding: 'utf8',
+		env,
+	}).trim();
+	const output = await execGitBuffer([
+		'-C',
+		repository,
+		'cat-file',
+		'blob',
+		`${oid}:binary.bin`,
+	]);
+	t.deepEqual(output, contents);
+
+	const controller = new AbortController();
+	controller.abort();
+	await t.throwsAsync(
+		execGit(['--version'], undefined, {signal: controller.signal}),
+		{message: 'Git command cancelled'},
+	);
+});
 
 // ============================================================================
 // Availability Check Tests
@@ -277,10 +338,43 @@ test('execGit runs in the session project inside a session scope', async t => {
 	const dir = realpathSync(mkdtempSync(join(tmpdir(), 'nanocoder-git-scope-')));
 	try {
 		execSync('git init -q', {cwd: dir});
-		const topLevel = await runInSessionCwdScope(createSessionCwdScope(dir), () =>
+		const topLevel = await runInSessionContext(createSessionContext(dir), () =>
 			execGit(['rev-parse', '--show-toplevel']),
 		);
 		t.is(realpathSync(topLevel.trim()), dir);
+	} finally {
+		rmSync(dir, {recursive: true, force: true});
+	}
+});
+
+// Read-only git backs tools that run without approval, so a repo whose
+// config names a core.fsmonitor hook must not get it executed.
+test('execGitReadOnly does not run a core.fsmonitor hook from repo config', async t => {
+	if (process.platform === 'win32') {
+		t.pass();
+		return;
+	}
+	const dir = realpathSync(mkdtempSync(join(tmpdir(), 'nanocoder-git-fsmon-')));
+	try {
+		execSync('git init -q', {cwd: dir});
+		const marker = join(dir, 'fsmonitor-ran');
+		const hook = join(dir, 'hook.sh');
+		writeFileSync(hook, `#!/bin/sh\ntouch '${marker}'\nexit 1\n`);
+		chmodSync(hook, 0o755);
+		execFileSync('git', ['-C', dir, 'config', 'core.fsmonitor', hook]);
+		writeFileSync(join(dir, 'file.txt'), 'x');
+		const scope = createSessionContext(dir);
+
+		await runInSessionContext(scope, () =>
+			execGitReadOnly(['status', '--porcelain']),
+		);
+		t.false(existsSync(marker));
+
+		// Sanity: the same call without the override does run it.
+		await runInSessionContext(scope, () =>
+			execGit(['status', '--porcelain']),
+		).catch(() => undefined);
+		t.true(existsSync(marker));
 	} finally {
 		rmSync(dir, {recursive: true, force: true});
 	}

@@ -37,6 +37,7 @@ import {
 } from '@/events/sources/github-checkrun';
 import {ScheduleEventSource} from '@/events/sources/schedule';
 import type {CiJobFailedPayload} from '@/events/types';
+import {sendNotification} from '@/services/notifications';
 import {bootSkillPipeline} from '@/skills/bootstrap';
 import {
 	type ActivityListener,
@@ -54,9 +55,8 @@ import {
 import {ToolManager} from '@/tools/tool-manager';
 import type {CiWatchConfig} from '@/types/config';
 import {formatError} from '@/utils/error-formatter';
-import {sendNotification} from '@/utils/notifications';
 import {formatCiReport} from '@/verify/format-ci-report';
-import {isTrustLevel} from '@/verify/trust';
+import {isTrustLevel} from '@/verify/trust-level';
 import {readCiWatchState, writeCiWatchState} from './ci-watch-state';
 import {DaemonIpcServer} from './ipc';
 import {

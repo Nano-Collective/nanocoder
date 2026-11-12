@@ -14,7 +14,7 @@ import {
 	isValidSessionMetadata,
 } from '@/session/session-validation';
 import type {Message} from '@/types/core';
-import {withExclusiveLock} from '@/utils/exclusive-file-lock';
+import {withExclusiveLock} from '@/utils/fs/exclusive-file-lock';
 
 export interface Session {
 	id: string;

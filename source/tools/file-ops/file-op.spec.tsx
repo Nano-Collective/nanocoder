@@ -1,4 +1,5 @@
-import {mkdtemp, rm, symlink, writeFile} from 'node:fs/promises';
+import {existsSync} from 'node:fs';
+import {mkdtemp, readFile, rm, symlink, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
@@ -6,7 +7,15 @@ import {render} from 'ink-testing-library';
 import React from 'react';
 import {themes} from '../../config/themes.js';
 import {ThemeContext} from '../../hooks/useTheme.js';
-import {resetSessionCwd, setSessionCwd} from '../../services/session-cwd.js';
+import {
+	resetFirewallConfig,
+	setFirewallConfig,
+} from '../../firewall/mutation-firewall.js';
+import {
+	resetSessionCwd,
+	setProjectRoot,
+	setSessionCwd,
+} from '../../services/session-cwd.js';
 import type {DevelopmentMode} from '../../types/core.js';
 import {resolveToolApproval} from '../approval-policy.js';
 import {fileOpTool} from './file-op.js';
@@ -152,10 +161,96 @@ test('file_op approval: a dangling symlink at the destination counts as existing
 	);
 });
 
+(process.platform === 'win32' ? test.skip : test)(
+	'file_op validator: copy onto a dangling symlink that points outside is rejected',
+	async t => {
+		const outside = await mkdtemp(join(tmpdir(), 'file-op-outside-'));
+		try {
+			setProjectRoot(workspace);
+			// copyFile follows a dangling destination link and creates its target.
+			await symlink(join(outside, 'authorized_keys'), join(workspace, 'notes.md'));
+			const result = await fileOpTool.validator?.({
+				operation: 'copy',
+				path: 'greet.py',
+				destination: 'notes.md',
+			});
+			t.false(result?.valid);
+			if (result && !result.valid) {
+				t.regex(result.error, /escapes project directory via symlink/);
+			}
+		} finally {
+			await rm(outside, {recursive: true, force: true});
+		}
+	},
+);
+
 test('file_op approval: mkdir runs in auto-accept', async t => {
 	t.false(await needsApproval({operation: 'mkdir', path: 'src'}, 'auto-accept'));
 	t.false(
 		await needsApproval({operation: 'mkdir', path: 'greet.py'}, 'auto-accept'),
 		'mkdir never replaces anything, even when the path exists',
 	);
+});
+
+// ============================================================================
+// Mutation firewall: delete, move and copy change paths too, so a protected
+// pattern has to hold for them as it does for write_file and the editors.
+// ============================================================================
+
+const runFileOp = (args: Record<string, unknown>): Promise<string> =>
+	// biome-ignore lint/suspicious/noExplicitAny: Tool internals require any
+	(fileOpTool.tool as any).execute(args, {toolCallId: 'test', messages: []});
+
+test.serial('file_op firewall: strict mode refuses to delete a protected file', async t => {
+	setProjectRoot(workspace);
+	setFirewallConfig({mode: 'strict', protectedPatterns: ['greet.py']});
+	t.teardown(() => resetFirewallConfig());
+	await t.throwsAsync(runFileOp({operation: 'delete', path: 'greet.py'}), {
+		message: /\[Mutation Firewall\] Blocked mutation/,
+	});
+	t.true(existsSync(join(workspace, 'greet.py')));
+});
+
+test.serial('file_op firewall: strict mode refuses to move a protected file away or onto one', async t => {
+	setProjectRoot(workspace);
+	setFirewallConfig({mode: 'strict', protectedPatterns: ['greet.py']});
+	t.teardown(() => resetFirewallConfig());
+	await t.throwsAsync(
+		runFileOp({operation: 'move', path: 'greet.py', destination: 'moved.py'}),
+		{message: /Blocked mutation/},
+	);
+	await t.throwsAsync(
+		runFileOp({operation: 'move', path: 'other.py', destination: 'greet.py'}),
+		{message: /Blocked mutation/},
+	);
+	t.true(existsSync(join(workspace, 'greet.py')));
+	t.true(existsSync(join(workspace, 'other.py')));
+});
+
+test.serial('file_op firewall: copy may read a protected file but not overwrite one', async t => {
+	setProjectRoot(workspace);
+	setFirewallConfig({mode: 'strict', protectedPatterns: ['greet.py']});
+	t.teardown(() => resetFirewallConfig());
+	await t.throwsAsync(
+		runFileOp({operation: 'copy', path: 'other.py', destination: 'greet.py'}),
+		{message: /Blocked mutation/},
+	);
+	t.is(await readFile(join(workspace, 'greet.py'), 'utf-8'), "print('Hello, Agent!')\n");
+	const result = await runFileOp({
+		operation: 'copy',
+		path: 'greet.py',
+		destination: 'copy.py',
+	});
+	t.regex(result, /^File copied/);
+	t.notRegex(result, /Mutation Firewall/);
+});
+
+test.serial('file_op firewall: lenient mode deletes but reports the violation', async t => {
+	setProjectRoot(workspace);
+	setFirewallConfig({mode: 'lenient', protectedPatterns: ['greet.py']});
+	t.teardown(() => resetFirewallConfig());
+	const result = await runFileOp({operation: 'delete', path: 'greet.py'});
+	t.false(existsSync(join(workspace, 'greet.py')));
+	t.regex(result, /^File deleted: greet\.py/);
+	t.regex(result, /\[Mutation Firewall\] Warning \(lenient mode/);
 });

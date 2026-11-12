@@ -50,7 +50,7 @@ If `NANOCODER_CONFIG_DIR` is set, the project-level file is skipped for top-leve
 | `syntaxTheme` | Optional. Name of the theme whose palette colours syntax highlighting, when you want code to keep a palette of its own (e.g. `"dracula"`) instead of following `selectedTheme`. Any theme name from `/settings` → **Theme** works; an unknown name falls back to `selectedTheme` |
 | `titleShape` | The title shape style (e.g., box, rounded) |
 | `nanocoderShape` | The nanocoder ASCII art shape |
-| `trustedDirectories` | Directories you've approved through the security disclaimer (user-level file only). Each entry is `{ "path": "/absolute/folder", "fingerprint": "<sha256>", "fingerprintVersion": 1 }`; an entry without a `fingerprintVersion` is version 1, and an entry from another version is asked again as needing re-approval. The fingerprint covers that folder's plugins (`.nanocoder/plugins/*.mjs`), hooks, formatters, `lspServers`, `.mcp.json`, custom tools, and skills, agents, and commands with `subscribe:` triggers. It also covers the project `.env` (by content), the `agents.config.json` settings that relax confirmations (`nanocoder.alwaysAllow`, `nanocoder.defaultMode`, `nanocoder.sandbox`, `nanocoder.verify.trustLevel`), and the `baseUrl` of each project provider. Each of these counts only when present, so a folder without them keeps the same fingerprint. It does not cover files a plugin imports or scripts a hook runs, so edits to those are not asked about. A change asks again. A plain path saved before fingerprints is asked again too, with a note that the upgrade needs re-approval. **Before downgrading to 1.31 or earlier, remove the `{ path, fingerprint }` entries from `trustedDirectories`.** Those versions throw on the object entries, which breaks the trust check for every folder, not just the fingerprinted ones. A project `.env` cannot set `NANOCODER_TRUST_DIRECTORY`, `NANOCODER_CONFIG_DIR`, `XDG_CONFIG_HOME`, `APPDATA`, `NANOCODER_MCPSERVERS`, `NANOCODER_MCPSERVERS_FILE`, or `NANOCODER_CI_TRUST_LEVEL`: it is read before the trust check, so those are ignored (with a warning) unless they come from your shell environment. |
+| `trustedDirectories` | Directories you've approved through the security disclaimer (user-level file only). Each entry is `{ "path": "/absolute/folder", "fingerprint": "<sha256>", "fingerprintVersion": 1 }`; an entry without a `fingerprintVersion` is version 1, and an entry from another version is asked again as needing re-approval. The fingerprint covers that folder's plugins (`.nanocoder/plugins/*.mjs`), hooks, formatters, `lspServers`, `.mcp.json`, custom tools, and skills, agents, and commands with `subscribe:` triggers. It also covers the project `.env` (by content), the `agents.config.json` settings that relax confirmations (`nanocoder.alwaysAllow`, `nanocoder.defaultMode`, `nanocoder.sandbox`, `nanocoder.verify.trustLevel`), and the `baseUrl` of each project provider. Each of these counts only when present, so a folder without them keeps the same fingerprint. It does not cover files a plugin imports or scripts a hook runs, so edits to those are not asked about. A change asks again. A plain path saved before fingerprints is asked again too, with a note that the upgrade needs re-approval. **Before downgrading to 1.31 or earlier, remove the `{ path, fingerprint }` entries from `trustedDirectories`.** Those versions throw on the object entries, which breaks the trust check for every folder, not just the fingerprinted ones. A project `.env` cannot set `NANOCODER_TRUST_DIRECTORY`, the config, data and log directories, MCP servers, providers, or any other `NANOCODER_*` variable outside a short tuning allowlist, nor variables that change how child processes start: it is read before the trust check, so those are ignored (with a warning) unless they come from your shell environment. See [Environment Variables](index.md#environment-variables) for the full list. Use `nanocoder trust --status` to see a folder's status and fingerprint, and `nanocoder trust --grant <fingerprint>` to trust it without starting Nanocoder there (see [Directory Trust](../getting-started/index.md#directory-trust)). |
 | `lastUpdateCheck` | Timestamp of the last successful update check. Automatic checks wait 24 hours before checking again |
 | `semanticMemoryEnabled` | Enables semantic memory across sessions. Set to `false` or use `/settings` → **Advanced** → **Semantic Memory** to keep agents stateless. |
 | `semanticMemoryTokenBudget` | Approximate token ceiling for the recalled `## Project Context` block. Default `240`, clamped to 40-4000. Adjustable from `/settings` → **Advanced**. |
@@ -192,10 +192,35 @@ Desktop notification preferences are stored under the top-level `notifications` 
 | `notifications.events.questionPrompt` | boolean | `true` | Notify when the AI asks a question |
 | `notifications.events.generationComplete` | boolean | `true` | Notify when a response is ready |
 | `notifications.events.triggeredRunComplete` | boolean | `true` | Notify when a daemon-triggered skill run finishes |
+| `notifications.events.ciFailureDetected` | boolean | `true` | Notify when the daemon's [CI watch](#ci-watch-configuration) finds a failing check on the current branch |
+| `notifications.events.ciInvestigationComplete` | boolean | `true` | Notify when the daemon finishes investigating a CI failure |
 
 Any event you leave out of `notifications.events` keeps its default of `true`, so `{"notifications": {"enabled": true}}` turns on every event.
 
 You can change these via `/settings` → **Input** → **Notifications**. See [Desktop Notifications](../features/notifications.md) for full details including platform-specific setup.
+
+### Voice
+
+[Voice mode](../features/voice-mode.md) settings are stored under the top-level `voice` key. `/voice` and its subcommands write them for you:
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `voice.enabled` | boolean | `false` | Whether voice mode is on |
+| `voice.activationMode` | `"push-to-talk"` \| `"hands-free"` | `"push-to-talk"` | Push-to-talk on `Ctrl+G`, or hands-free speech detection. Hands-free is unavailable in yolo mode |
+| `voice.sttBackend` | `"local"` \| `"cloud"` | `"local"` | Speech-to-text engine: local Whisper, or OpenAI cloud transcription (`/voice stt cloud`). Cloud only works while the current provider is named `OpenAI` (any case) and points at `https://api.openai.com`; it uses that provider's `apiKey`, or `OPENAI_API_KEY` |
+| `voice.ttsBackend` | `"local"` \| `"cloud"` | `"local"` | Text-to-speech engine: local Piper, or OpenAI cloud speech (`/voice tts cloud`), with the same provider requirement as cloud speech-to-text |
+| `voice.voiceName` | string | `alloy` | Voice name passed to cloud text-to-speech |
+
+```json
+{
+  "voice": {
+    "enabled": true,
+    "activationMode": "hands-free",
+    "sttBackend": "local",
+    "ttsBackend": "local"
+  }
+}
+```
 
 ### CI Watch Configuration
 
@@ -242,7 +267,7 @@ Whether CI-watch investigations can auto-fix a failure — and how aggressively 
 
 - **`comment-only`** (default) — investigates and diagnoses a CI failure, posting the diagnosis as a PR comment. Never mutates anything.
 - **`auto-fix`** — additionally implements and commits a fix in an isolated `git clone`, then pushes a new branch and opens a **draft PR** for human review. The original failing branch is never touched directly.
-- **`full-commit`** — pushes the fix **directly to the failing branch**, with no draft PR and no review step. `daemon start --trust full-commit` shows a one-time security warning per project before starting; subsequent starts for the same project skip it.
+- **`full-commit`** — pushes the fix **directly to the failing branch**, with no draft PR and no review step. `daemon start --trust full-commit` shows a one-time security warning per project before starting; subsequent starts for the same project skip it. Some fixes are never pushed unattended. If a fix changes `.github/`, any `.git*` file, git hook setups (`.husky/`, `.githooks/`, `lefthook.yml`, `.pre-commit-config.yaml`), lockfiles, a `package.json`'s scripts or dependencies, `.nanocoder/`, `agents.config.json` or `.mcp.json`, the daemon pushes nothing and reports the diagnosis with an error naming those files.
 
 When you restart Nanocoder, it automatically restores your last provider, model, theme, shape, paste threshold, and notification preferences.
 

@@ -5,10 +5,10 @@ import {
 	SuccessMessage,
 } from '@/components/message-box';
 import {getToolManager} from '@/message-handler';
+import {checkForUpdates} from '@/services/update-checker';
 import {Command} from '@/types/index';
 import {formatError} from '@/utils/error-formatter';
-import {logError, logInfo} from '@/utils/message-queue';
-import {checkForUpdates} from '@/utils/update-checker';
+import {notifyError, notifyInfo} from '@/utils/message-queue-core';
 
 /**
  * Determines if a command execution failed based on multiple signals.
@@ -84,7 +84,7 @@ export const updateCommand: Command = {
 	description: 'Update Nanocoder to the latest version',
 	handler: async (_args: string[]) => {
 		// Show initial checking message
-		logInfo('Checking for available updates...', true);
+		notifyInfo('Checking for available updates...', true);
 
 		try {
 			// The user explicitly requested an update check, so bypass the startup
@@ -93,7 +93,7 @@ export const updateCommand: Command = {
 
 			if (updateInfo.hasUpdate) {
 				// Show updating message
-				logInfo(
+				notifyInfo(
 					'Downloading and installing the latest Nanocoder update...',
 					true,
 				);
@@ -116,7 +116,10 @@ export const updateCommand: Command = {
 
 						// Check for command failure using multiple strategies
 						if (hasCommandFailed(result)) {
-							logError('Update command executed but returned an error', true);
+							notifyError(
+								'Update command executed but returned an error',
+								true,
+							);
 							return React.createElement(ErrorMessage, {
 								message: `Update command failed. Output: ${String(result)}`,
 								hideBox: true,
@@ -131,7 +134,10 @@ export const updateCommand: Command = {
 						});
 					} catch (err) {
 						const errorMessage = formatError(err);
-						logError(`Failed to execute update command: ${errorMessage}`, true);
+						notifyError(
+							`Failed to execute update command: ${errorMessage}`,
+							true,
+						);
 						return React.createElement(ErrorMessage, {
 							message: `Failed to execute update command: ${errorMessage}`,
 							hideBox: true,
@@ -162,7 +168,7 @@ export const updateCommand: Command = {
 			}
 		} catch (error) {
 			const errorMessage = formatError(error);
-			logError(`Failed to update Nanocoder: ${errorMessage}`, true);
+			notifyError(`Failed to update Nanocoder: ${errorMessage}`, true);
 			return React.createElement(ErrorMessage, {
 				message: `Failed to check for updates: ${errorMessage}`,
 				hideBox: true,

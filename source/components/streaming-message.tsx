@@ -4,8 +4,8 @@ import {memo, useRef} from 'react';
 import {useNonInteractiveRender} from '@/hooks/useNonInteractiveRender';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
-import {wrapWithTrimmedContinuations} from '@/utils/text-wrapping';
-import {calculateTokens} from '@/utils/token-calculator';
+import {wrapWithTrimmedContinuations} from '@/terminal/text-wrapping';
+import {estimateTokens} from '@/utils/token-calculator';
 import {AssistantMessageBox} from './assistant-message';
 
 /**
@@ -94,7 +94,7 @@ export default memo(function StreamingMessage({
 		);
 	}
 
-	const tokens = calculateTokens(message);
+	const tokens = estimateTokens(message);
 	const elapsedSec = (Date.now() - startTime) / 1000;
 	const tokPerSec = elapsedSec > 0.1 ? (tokens / elapsedSec).toFixed(1) : '—';
 

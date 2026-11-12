@@ -1,91 +1,95 @@
-import {mkdtemp, readFile, rm, writeFile} from 'node:fs/promises';
-import {join, relative} from 'node:path';
 import test from 'ava';
-import {processToolUse, setToolRegistryGetter} from '@/message-handler';
-import type {EditRecoveryPayload} from '@/utils/edit-recovery';
-import {clearReadTracker, markFileSeen} from '@/utils/read-tracker';
-import {withValidation} from '@/utils/tool-validation';
-import {diffEditTool} from './diff-edit';
-import {stringReplaceTool} from './string-replace';
+import {buildEditRecovery, EditRecoveryError} from './edit-recovery';
 
-let directory: string;
-test.beforeEach(async () => {
-	directory = await mkdtemp(join(process.cwd(), '.edit-recovery-test-'));
-	clearReadTracker();
-});
-test.afterEach.always(async () => {
-	await rm(directory, {recursive: true, force: true});
-	clearReadTracker();
-	setToolRegistryGetter(() => ({}));
+test('recovery returns original tabs and coordinates without changing input', t => {
+	const content = 'header\n\tif (ready) {\n\t\tstart();\n\t}\nfooter';
+	const result = buildEditRecovery('a.ts', content, '  if (ready) {\n    start();\n  }');
+	t.is(result.status, 'candidate_found');
+	t.is(result.candidates[0].actualText, '\tif (ready) {\n\t\tstart();\n\t}');
+	t.is(result.candidates[0].startLine, 2);
+	t.is(result.candidates[0].endLine, 4);
 });
 
-function recoveryFrom(message: string): EditRecoveryPayload {
-	return JSON.parse(message.split('Edit recovery evidence (JSON):\n')[1]);
-}
-
-test('validated string_replace returns evidence through processToolUse and exact retry succeeds', async t => {
-	const file = join(directory, 'example.ts');
-	const path = relative(process.cwd(), file);
-	const original = 'function run() {\n\n\tstart();\n}\n';
-	await writeFile(file, original);
-	markFileSeen(file);
-	const execute = stringReplaceTool.tool.execute!;
-	setToolRegistryGetter(() => ({
-		string_replace: withValidation(args => execute(args, {toolCallId: 'test', messages: []}), stringReplaceTool.validator),
-	}));
-	const failed = await processToolUse({
-		id: 'failed',
-		function: {name: 'string_replace', arguments: {path, old_str: 'function run() {\n  start();\n}', new_str: 'function run() {\n\tfinish();\n}'}},
-	});
-	t.true(failed.isError);
-	t.is(await readFile(file, 'utf8'), original);
-	const recovery = recoveryFrom(failed.content);
-	t.is(recovery.status, 'candidate_found');
-	t.is(recovery.candidates[0].actualText, original.slice(0, -1));
-	const retried = await processToolUse({
-		id: 'retry',
-		function: {name: 'string_replace', arguments: {path, old_str: recovery.candidates[0].actualText, new_str: 'function run() {\n\tfinish();\n}'}},
-	});
-	t.falsy(retried.isError);
-	t.is(await readFile(file, 'utf8'), 'function run() {\n\tfinish();\n}\n');
+test('recovery preserves missing blank lines and trailing whitespace', t => {
+	const actual = 'function run() {\n\n\tstart();  \n}';
+	const result = buildEditRecovery('a.ts', actual, 'function run() {\nstart();\n}');
+	t.is(result.candidates[0].actualText, actual);
+	t.is(result.candidates[0].matchKind, 'blank_lines');
+	t.regex(result.candidates[0].differences[0], /1 more blank/);
 });
 
-test('direct string_replace execution also supplies recovery without writing', async t => {
-	const file = join(directory, 'direct.ts');
-	const original = '\tconst first = 1;';
-	await writeFile(file, original);
-	const error = await t.throwsAsync(() => stringReplaceTool.tool.execute!({path: file, old_str: '  const first = 1;', new_str: 'wrong'}, {toolCallId: 'test', messages: []}));
-	t.is(recoveryFrom(error!.message).candidates[0].actualText, original);
-	t.is(await readFile(file, 'utf8'), original);
+test('recovery locates a block when search has an extra blank line', t => {
+	const actual = 'function run() {\nstart();\n}';
+	const result = buildEditRecovery('a.ts', actual, 'function run() {\n\nstart();\n}');
+	t.is(result.candidates[0].actualText, actual);
+	t.regex(result.candidates[0].differences[0], /1 fewer blank/);
 });
 
-test('diff_edit reports the failing block and never applies earlier valid blocks', async t => {
-	const file = join(directory, 'multiple.ts');
-	const path = relative(process.cwd(), file);
-	const original = 'const first = 1;\n\tconst second = 2;\n';
-	await writeFile(file, original);
-	markFileSeen(file);
-	const block = (search: string, replacement: string) => ['<<<<<<< SEARCH', search, '=======', replacement, '>>>>>>> REPLACE'].join('\n');
-	const diff = block('const first = 1;', 'const first = 3;') + '\n' + block('  const second = 2;', 'const second = 4;');
-	const validation = await diffEditTool.validator!({path, diff});
-	t.false(validation.valid);
-	if (validation.valid) return;
-	const recovery = recoveryFrom(validation.error);
-	t.is(recovery.blockNumber, 2);
-	t.is(recovery.candidates[0].actualText, '\tconst second = 2;');
-	await t.throwsAsync(() => diffEditTool.tool.execute!({path, diff}, {toolCallId: 'test', messages: []}), {message: /Edit recovery evidence/});
-	t.is(await readFile(file, 'utf8'), original);
-	await diffEditTool.tool.execute!({path, diff: block('const first = 1;', 'const first = 3;') + '\n' + block(recovery.candidates[0].actualText!, 'const second = 4;')}, {toolCallId: 'test', messages: []});
-	t.is(await readFile(file, 'utf8'), 'const first = 3;\nconst second = 4;\n');
+test('recovery preserves CRLF exactly', t => {
+	const result = buildEditRecovery('a.ts', 'const first = 1;\r\nconst second = 2;', 'const first = 1;\nconst second = 2;');
+	t.is(result.candidates[0].matchKind, 'line_endings');
+	t.is(result.candidates[0].actualText, 'const first = 1;\r\nconst second = 2;');
 });
 
-test('read-before-edit guard rejects unseen files without disclosing recovery', async t => {
-	const file = join(directory, 'unseen.ts');
-	await writeFile(file, '\tconst first = 1;');
-	const validation = await stringReplaceTool.validator!({path: relative(process.cwd(), file), old_str: ' const first = 1;', new_str: 'wrong'});
-	t.false(validation.valid);
-	if (!validation.valid) {
-		t.regex(validation.error, /must read/);
-		t.false(validation.error.includes('Edit recovery evidence'));
+test('fuzzy recovery requires matching anchors and reports changed code', t => {
+	const actual = 'function calculate() {\nconst value = source + 2;\nreturn value;\n}';
+	const result = buildEditRecovery('a.ts', actual, 'function calculate() {\nconst value = source + 1;\nreturn value;\n}');
+	t.is(result.status, 'candidate_found');
+	t.is(result.candidates[0].matchKind, 'fuzzy');
+	t.is(result.candidates[0].actualText, actual);
+	t.regex(result.candidates[0].differences[0], /Non-whitespace/);
+});
+
+test('recovery does not arbitrarily pick repeated targets', t => {
+	const block = '\tconst first = 1;\n\tconst second = 2;';
+	const result = buildEditRecovery('a.ts', `${block}\n\n${block}`, block.replaceAll('\t', '  '));
+	t.is(result.status, 'ambiguous');
+	t.is(result.candidates.length, 2);
+	t.deepEqual(result.candidates.map(c => c.startLine), [1, 4]);
+});
+
+test('unrelated, short and case-mismatched searches do not invent candidates', t => {
+	for (const search of ['}', 'const other = unrelated;', 'FUNCTION CALCULATE() {']) {
+		t.is(buildEditRecovery('a.ts', 'function calculate() {\nreturn result;\n}', search).status, 'no_candidate');
 	}
+});
+
+test('recovery caps large inputs and omits oversized candidate bodies', t => {
+	t.is(buildEditRecovery('a.ts', 'x'.repeat(1_000_001), 'const first = 1;').status, 'budget_exceeded');
+	t.is(buildEditRecovery('a.ts', 'const first = 1;', 'x'.repeat(8001)).status, 'budget_exceeded');
+	const actual = 'const first = 1;\n' + '\n'.repeat(80) + 'const second = 2;';
+	const result = buildEditRecovery('a.ts', actual, 'const first = 1;\nconst second = 2;');
+	t.true(result.candidates[0].truncated);
+	t.is(result.candidates[0].actualText, undefined);
+	t.regex(result.nextAction, /Read/);
+});
+
+test('serialized payload is bounded even when JSON escaping expands text', t => {
+	const actual = '\t'.repeat(2000) + 'const first = 1;';
+	const result = buildEditRecovery('a.ts', actual, ' const first = 1;');
+	t.true(JSON.stringify(result).length <= 4000);
+	t.true(result.candidates[0].truncated);
+	t.is(result.candidates[0].actualText, undefined);
+});
+
+test('error carries structured evidence with literal whitespace escaped as JSON', t => {
+	const error = new EditRecoveryError('Content not found', 'a.ts', '\tconst first = 1;', '  const first = 1;', 2);
+	t.is(error.recovery.blockNumber, 2);
+	t.regex(error.message, /No changes were written/);
+	t.deepEqual(JSON.parse(error.message.split('JSON):\n')[1]), error.recovery);
+});
+
+test('recovery preserves boundary blank lines in a suggested search', t => {
+	const actual = '\n\tconst first = 1;\n\tconst second = 2;\n';
+	const result = buildEditRecovery('a.ts', actual, '\n  const first = 1;\n  const second = 2;\n');
+	t.is(result.candidates[0].actualText, actual);
+	t.is(result.candidates[0].startLine, 1);
+	t.is(result.candidates[0].endLine, 4);
+});
+
+test('comparison limit returns an explicit fallback rather than an incomplete selection', t => {
+	const content = 'sharedValue;\n'.repeat(25_001);
+	const result = buildEditRecovery('a.ts', content, Array(5).fill('  sharedValue;').join('\n'));
+	t.is(result.status, 'budget_exceeded');
+	t.deepEqual(result.candidates, []);
 });

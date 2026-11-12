@@ -1,8 +1,8 @@
 import {FORMAT_GUIDANCE_MESSAGE} from '@/tool-calling/format-guidance';
 import {normalizeWhitespace, removeRanges} from '@/tool-calling/whitespace';
 import {XMLToolCallParser} from '@/tool-calling/xml-parser';
+import {generateToolCallId} from '@/tools/runtime/tool-call-id';
 import type {ToolCall} from '@/types/index';
-import {generateToolCallId} from '@/utils/tool-call-id';
 import {ensureString} from '@/utils/type-helpers';
 
 /**

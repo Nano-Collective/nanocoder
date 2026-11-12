@@ -46,7 +46,7 @@ let overrideCache: {
 // Naming an unknown theme is silent otherwise: the render simply looks like it
 // did before the preference was set, with nothing to say why.
 //
-// Structured logging rather than `logWarning`, on two counts. `@/utils/message-
+// Structured logging rather than `notifyWarning`, on two counts. `@/utils/message-
 // queue` reaches `@/components/message-box` -> `useTheme` -> back here, which is
 // a cycle this module is deliberately kept out of; and getSyntaxTheme is called
 // from render (the diff, write_file and file-explorer previews), where pushing

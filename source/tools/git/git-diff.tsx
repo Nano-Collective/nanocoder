@@ -11,7 +11,7 @@ import {useTheme} from '@/hooks/useTheme';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
-import {execGit, truncateDiff} from './utils';
+import {execGitReadOnly, truncateDiff} from './utils';
 
 // ============================================================================
 // Types
@@ -30,7 +30,7 @@ function buildGitDiffArgs(
 	args: GitDiffInput,
 	includeStat = Boolean(args.stat),
 ): string[] {
-	const gitArgs: string[] = ['diff'];
+	const gitArgs: string[] = ['diff', '--no-ext-diff', '--no-textconv'];
 
 	if (args.staged) {
 		gitArgs.push('--cached');
@@ -57,7 +57,7 @@ function buildGitDiffArgs(
 
 const executeGitDiff = async (args: GitDiffInput): Promise<string> => {
 	try {
-		const output = await execGit(buildGitDiffArgs(args));
+		const output = await execGitReadOnly(buildGitDiffArgs(args));
 
 		if (!output.trim()) {
 			if (args.staged) {
@@ -82,7 +82,9 @@ const executeGitDiff = async (args: GitDiffInput): Promise<string> => {
 				}
 
 				try {
-					const statOutput = await execGit(buildGitDiffArgs(args, true));
+					const statOutput = await execGitReadOnly(
+						buildGitDiffArgs(args, true),
+					);
 					return (
 						`${statOutput}\n\n` +
 						`Diff is too large to return in full (${totalLines} lines). ` +

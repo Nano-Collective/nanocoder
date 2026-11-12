@@ -2304,6 +2304,7 @@
 				} else {
 					messagesContainer.innerHTML = '';
 				}
+				setSessionResumingIndicator(false);
 				currentTurnEl = null;
 				currentTextEl = null;
 				currentTurnText = '';
@@ -2356,12 +2357,34 @@
 			case 'promptQueueCleared':
 				removeQueuedBubbles(message.ids || []);
 				break;
+	function setSessionResumingIndicator(isResuming) {
+		let indicator = document.getElementById('session-resuming-indicator');
+		if (isResuming) {
+			if (!indicator) {
+				indicator = document.createElement('div');
+				indicator.id = 'session-resuming-indicator';
+				indicator.className = 'session-resuming-indicator flex items-center justify-center gap-2 p-2 text-xs bg-vscode-dropdown-bg border-b border-vscode-border text-vscode-fg opacity-80 shrink-0 z-10';
+				indicator.innerHTML = `${ICONS.pending}<span>Resuming session...</span>`;
+				const chatView = document.getElementById('chat-view');
+				if (chatView && messagesContainer) {
+					chatView.insertBefore(indicator, messagesContainer);
+				}
+			}
+		} else if (indicator) {
+			indicator.remove();
+		}
+	}
+
 			case 'sessionLoaded':
 				finishCurrentWorkSummary(currentWorkSummary?._overrideOutcome || 'completed');
 				pendingUserMessages.clear();
 				const loader = document.getElementById('session-loader');
 				if (loader) loader.remove();
+				setSessionResumingIndicator(false);
 				scrollToBottom(true);
+				break;
+			case 'sessionResuming':
+				setSessionResumingIndicator(message.isResuming);
 				break;
 			case 'acpUpdate':
 				handleAcpUpdate(message.update);

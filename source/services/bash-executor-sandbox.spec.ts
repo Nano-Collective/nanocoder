@@ -1,4 +1,4 @@
-import {existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync} from 'node:fs';
+import {existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync} from 'node:fs';
 import {homedir, tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {platform} from 'node:process';
@@ -159,6 +159,30 @@ async function assertJail(t: ExecutionContext, label: string) {
 		t.true(
 			outside.exitCode !== 0 || Boolean(outside.stderr) || Boolean(outside.error),
 		);
+
+		// Git config and hooks run outside the jail the next time nanocoder's
+		// own git tools touch the repo; nanocoder's config files run on its next
+		// start. None of them may be writable, and missing ones not creatable.
+		mkdirSync(join(base, '.git', 'hooks'), {recursive: true});
+		writeFileSync(join(base, '.git', 'config'), '[core]\n');
+		const protectedWrites = [
+			'printf "[core]\\n\\tfsmonitor = ./x.sh\\n" >> .git/config',
+			'echo exit 0 > .git/hooks/pre-commit',
+			'mv .git .git-moved',
+			'mkdir -p .nanocoder/plugins',
+			'echo {} > agents.config.json',
+			'echo {} > .mcp.json',
+		];
+		for (const command of protectedWrites) {
+			const result = await executor.execute(command).promise;
+			t.not(result.exitCode, 0, `${label} must refuse: ${command}`);
+		}
+		t.is(readFileSync(join(base, '.git', 'config'), 'utf8'), '[core]\n');
+		t.false(existsSync(join(base, '.git', 'hooks', 'pre-commit')));
+		// bwrap's placeholder mount points are gone once the command is.
+		t.false(existsSync(join(base, '.nanocoder')));
+		t.false(existsSync(join(base, 'agents.config.json')));
+		t.false(existsSync(join(base, '.mcp.json')));
 
 		const nested = join(base, 'nested');
 		mkdirSync(nested);

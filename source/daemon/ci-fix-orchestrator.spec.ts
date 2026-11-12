@@ -74,6 +74,8 @@ function stubDeps(
 		recordAutoFixedShas: async (_root, shas) => {
 			calls.recorded.push(...shas);
 		},
+		readCloneHead: async () => 'baseline-sha',
+		findRestrictedChanges: async () => [],
 		...overrides,
 	};
 	return {deps, calls};
@@ -187,6 +189,34 @@ test('full-commit + committed pushes directly to the branch with no draft PR', a
 	t.is(calls.publishBranch[0]?.branch, FAKE_WORKTREE.branch);
 	t.is(calls.publishBranch[0]?.clonePath, FAKE_WORKTREE.path);
 	t.is(calls.createDraftPr.length, 0);
+	t.is(calls.removeWorktree, 1);
+});
+
+test('full-commit does not push a fix that touches restricted paths', async t => {
+	const checked: Array<[string, string, string]> = [];
+	const {deps, calls} = stubDeps({
+		spawnFixRunner: async () => ({
+			success: true,
+			committed: true,
+			commitShas: ['deadbeef'],
+			output: 'fixed CI by editing the workflow',
+		}),
+		findRestrictedChanges: async (clonePath, baseline, branch) => {
+			checked.push([clonePath, baseline, branch]);
+			return ['.github/workflows/ci.yml (.github/)'];
+		},
+	});
+
+	const result = await runCiAutoFixFlow(ciTask(), 'full-commit', '/repo', deps);
+
+	t.false(result.success);
+	t.falsy(result.fixApplied);
+	t.regex(result.error ?? '', /Not pushing.*\.github\/workflows\/ci\.yml/);
+	t.is(result.output, 'fixed CI by editing the workflow');
+	t.deepEqual(checked, [[FAKE_WORKTREE.path, 'baseline-sha', FAKE_WORKTREE.branch]]);
+	t.is(calls.publishBranch.length, 0);
+	t.is(calls.createDraftPr.length, 0);
+	t.deepEqual(calls.recorded, []);
 	t.is(calls.removeWorktree, 1);
 });
 

@@ -34,7 +34,7 @@ import {
 } from '@/message-handler';
 import {clearPendingHookContext} from '@/services/lifecycle-hooks';
 import {setProjectRoot, setSessionCwd} from '@/services/session-cwd';
-import {markFileSeen} from '@/utils/read-tracker';
+import {markFileSeen} from '@/tools/runtime/read-tracker';
 
 console.log(`\nfile-ops processToolUse determinism spec`);
 

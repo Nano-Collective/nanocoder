@@ -1,15 +1,14 @@
-import {Command} from '@/types/index';
+import {sharedProposalStore} from '@/memory/proposal-store';
+import type {StatefulCommand} from '@/types/index';
 
-/**
- * Clear command registration for /help display.
- * Actual handling is in app-util.ts handleSpecialCommand since it needs app state
- * (onClearMessages) to clear chat history and model context.
- */
-export const clearCommand: Command = {
+export const clearCommand: StatefulCommand = {
 	name: 'clear',
 	description: 'Clear the chat history, model context, and tasks',
-	handler: async (_args: string[]) => {
-		// Handled by handleSpecialCommand in app-util.ts
-		return undefined;
+	run: async context => {
+		await context.clearMessages();
+		// Memory proposals belong to the conversation being cleared.
+		sharedProposalStore.clear();
+		context.notifyCleared();
+		return 'done-after-render';
 	},
 };
