@@ -1,5 +1,11 @@
 import {spawnSync} from 'node:child_process';
-import {mkdtempSync, rmSync, writeFileSync} from 'node:fs';
+import {
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -105,3 +111,86 @@ test('--help documents piping and --prompt-file -', t => {
 	t.true(result.stdout.includes('Use "-" to read the prompt from stdin'));
 	t.true(result.stdout.includes('git diff | nanocoder run'));
 });
+
+// The prompt that actually reaches the model, captured through a
+// user-prompt-submit hook. Everything above tests the pieces; this tests that
+// the piped text, the wrapper and the cut note survive the whole run.
+const isWindows = process.platform === 'win32';
+
+(isWindows ? test.skip : test)(
+	'the prompt the model receives carries the stdin block and the cut note',
+	t => {
+		const dir = mkdtempSync(join(tmpdir(), 'nanocoder-stdin-e2e-'));
+		try {
+			const configDir = join(dir, 'cfg');
+			mkdirSync(configDir);
+			const capture = join(dir, 'captured.txt');
+			writeFileSync(
+				join(configDir, 'agents.config.json'),
+				JSON.stringify({
+					nanocoder: {
+						hooks: {
+							'user-prompt-submit': [
+								{command: `printf '%s' "$NANOCODER_PROMPT" > ${capture}`},
+							],
+						},
+					},
+				}),
+			);
+
+			// A provider has to exist for the run to get as far as submitting the
+			// prompt. This one cannot be reached, so the run fails right after the
+			// hook has seen the prompt - which is all this test needs.
+			const result = spawnSync(
+				process.execPath,
+				[
+					'--import=tsx',
+					cliPath,
+					'--trust-directory',
+					'--plain',
+					'run',
+					'summarize the log',
+				],
+				{
+					encoding: 'utf8',
+					timeout: 60_000,
+					input: 'x'.repeat(150_000),
+					env: {
+						...process.env,
+						NANOCODER_CONFIG_DIR: configDir,
+						NANOCODER_PROVIDERS: JSON.stringify([
+							{
+								name: 'unreachable',
+								baseUrl: 'http://127.0.0.1:1/v1',
+								apiKey: 'k',
+								models: ['m'],
+							},
+						]),
+						NODE_DISABLE_COMPILE_CACHE: '1',
+						TSX_DISABLE_CACHE: '1',
+					},
+				},
+			);
+
+			const prompt = readFileSync(capture, 'utf8');
+			t.true(
+				prompt.startsWith('summarize the log'),
+				`prompt did not start with the positional prompt: ${prompt.slice(0, 80)}`,
+			);
+			t.regex(prompt, /\n\n<stdin>\n/);
+			t.regex(prompt, /\n<\/stdin>$/);
+			t.true(
+				prompt.includes('[stdin truncated - kept the first 100000 characters]'),
+				'the cut note did not reach the model prompt',
+			);
+
+			// The piped text itself is capped, so a huge pipe cannot fill the
+			// context window.
+			const start = prompt.indexOf('<stdin>\n') + '<stdin>\n'.length;
+			const body = prompt.slice(start, prompt.indexOf('\n\n[stdin truncated'));
+			t.is(body.length, 100_000, result.stderr);
+		} finally {
+			rmSync(dir, {recursive: true, force: true});
+		}
+	},
+);

@@ -199,7 +199,10 @@ export const MAX_URL_CONTENT_BYTES = 100_000; // ~100 KB
 // Most piped stdin `nanocoder run` will read into the prompt. Matches the
 // fetch_url cap: ~25k tokens, enough for a large diff or test log without
 // one pipe filling a small local model's context window.
-export const MAX_STDIN_PROMPT_BYTES = 100_000; // ~100 KB
+//
+// Counted in characters, like MAX_URL_CONTENT_BYTES: ~100 KB of ASCII, more
+// for text that is not.
+export const MAX_STDIN_PROMPT_BYTES = 100_000;
 
 // === AI SDK ===
 export const MAX_TOOL_STEPS = 10;
