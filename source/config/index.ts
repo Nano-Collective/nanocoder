@@ -24,6 +24,7 @@ import {
 	MAX_REPEATED_TOOL_CALLS,
 	MAX_TRUNCATED_TURNS,
 } from '@/constants';
+import {clampThreshold} from '@/conversation/compaction/message-compression';
 import {
 	getActiveSessionContext,
 	getConfigRoot,
@@ -51,7 +52,6 @@ import type {
 	TuneConfig,
 	VerifyConfig,
 } from '@/types/index';
-import {clampThreshold} from '@/utils/message-compression';
 import {notifyError, notifyWarning} from '@/utils/message-queue-core';
 import {isTrustLevel} from '@/verify/trust-level';
 

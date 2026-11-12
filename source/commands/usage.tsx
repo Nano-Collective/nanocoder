@@ -7,6 +7,10 @@ import React from 'react';
 import {appendToolDefinitionsToPrompt} from '@/ai-sdk-client/tools/system-prompt-assembler';
 import {UsageDisplay} from '@/components/usage/usage-display';
 import {getAppConfig} from '@/config/index';
+import {
+	buildSystemPrompt,
+	getLastBuiltPrompt,
+} from '@/conversation/prompt-builder';
 import {getToolManager} from '@/message-handler';
 import {
 	getModelContextLimit,
@@ -25,7 +29,6 @@ import {
 	calculateToolDefinitionsTokensFromDefs,
 } from '@/usage/calculator';
 import {calculateUsageCost} from '@/usage/response-usage';
-import {buildSystemPrompt, getLastBuiltPrompt} from '@/utils/prompt-builder';
 import {estimateTokens} from '@/utils/token-calculator';
 
 export const usageCommand: Command = {

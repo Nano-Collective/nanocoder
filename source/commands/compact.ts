@@ -2,6 +2,25 @@ import React from 'react';
 import {InfoMessage, SuccessMessage} from '@/components/message-box';
 import {errorMsg, infoMsg, successMsg} from '@/components/message-factory';
 import {getAppConfig} from '@/config/index';
+import {
+	resolveAutoCompactSettings,
+	setAutoCompactEnabled,
+	setAutoCompactStrategy,
+	setAutoCompactThreshold,
+} from '@/conversation/compaction/auto-compact';
+import {compressionBackup} from '@/conversation/compaction/compression-backup';
+import {
+	formatInlineToken,
+	isRecognizedOverrideKey,
+	parseInlineOverrides,
+} from '@/conversation/compaction/inline-overrides';
+import {summariseWithLLM} from '@/conversation/compaction/llm-summariser';
+import {
+	COMPRESSION_CONSTANTS,
+	compressMessages,
+	isThresholdInRange,
+} from '@/conversation/compaction/message-compression';
+import {getLastBuiltPrompt} from '@/conversation/prompt-builder';
 import {getModelContextLimit, getSessionContextLimit} from '@/models/index';
 import {runLifecycleHooks} from '@/services/lifecycle-hooks';
 import {generateKey} from '@/session/key-generator';
@@ -12,26 +31,7 @@ import type {
 	CompressionStrategy,
 } from '@/types/config';
 import type {Message, StatefulCommand} from '@/types/index';
-import {
-	resolveAutoCompactSettings,
-	setAutoCompactEnabled,
-	setAutoCompactStrategy,
-	setAutoCompactThreshold,
-} from '@/utils/auto-compact';
-import {compressionBackup} from '@/utils/compression-backup';
 import {formatError} from '@/utils/error-formatter';
-import {
-	formatInlineToken,
-	isRecognizedOverrideKey,
-	parseInlineOverrides,
-} from '@/utils/inline-overrides';
-import {summariseWithLLM} from '@/utils/llm-summariser';
-import {
-	COMPRESSION_CONSTANTS,
-	compressMessages,
-	isThresholdInRange,
-} from '@/utils/message-compression';
-import {getLastBuiltPrompt} from '@/utils/prompt-builder';
 import {bumpReadContentGeneration} from '@/utils/read-tracker';
 
 /**

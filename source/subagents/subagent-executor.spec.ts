@@ -40,7 +40,7 @@ import {
 	setAutoCompactEnabled,
 	setAutoCompactStrategy,
 	setAutoCompactThreshold,
-} from '@/utils/auto-compact';
+} from '@/conversation/compaction/auto-compact';
 import {
 	cancelSubagentRun,
 	onSubagentRunEvent,

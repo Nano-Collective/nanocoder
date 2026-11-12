@@ -13,6 +13,7 @@ import type {Tokenizer} from '@/types/tokenization';
 import {calculateToolDefinitionsTokensFromDefs} from '@/usage/calculator';
 import {getLogger} from '@/utils/logging';
 import {bumpReadContentGeneration} from '@/utils/read-tracker';
+import {filterModelFacing} from '../message-visibility';
 import {
 	autoCompactSessionOverrides,
 	resetAutoCompactSession as resetAutoCompactSessionOverrides,
@@ -20,7 +21,6 @@ import {
 import {compressionBackup} from './compression-backup';
 import {summariseWithLLM} from './llm-summariser';
 import {COMPRESSION_CONSTANTS, compressMessages} from './message-compression';
-import {filterModelFacing} from './message-visibility';
 
 export {
 	autoCompactSessionOverrides,

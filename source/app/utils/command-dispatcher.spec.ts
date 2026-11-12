@@ -9,7 +9,7 @@ import {lazyCommands} from '@/commands/lazy-registry';
 import {setToolManagerGetter} from '@/message-handler';
 import {DELAY_COMMAND_COMPLETE_MS} from '@/constants';
 import {getSessionContextLimit, resetSessionContextLimit} from '@/models/index';
-import {resetAutoCompactSession} from '@/utils/auto-compact';
+import {resetAutoCompactSession} from '@/conversation/compaction/auto-compact';
 import type {
 	CommandContext,
 	Message,

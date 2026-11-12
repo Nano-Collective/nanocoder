@@ -11,7 +11,7 @@ import {
 	resetAutoCompactSession,
 	setAutoCompactStrategy,
 	setAutoCompactThreshold,
-} from "@/utils/auto-compact.js";
+} from "@/conversation/compaction/auto-compact.js";
 import type { ToolManager } from "@/tools/tool-manager";
 import { TUNE_DEFAULTS } from "@/types/config";
 import type {

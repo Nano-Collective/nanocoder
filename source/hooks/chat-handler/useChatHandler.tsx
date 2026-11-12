@@ -10,6 +10,11 @@ import {
 	getProjectContextPreferences,
 	subscribeToPreferences,
 } from '@/config/preferences';
+import {MessageBuilder} from '@/conversation/message-builder';
+import {
+	buildSystemPrompt,
+	setLastBuiltPrompt,
+} from '@/conversation/prompt-builder';
 import {CommandIntegration} from '@/custom-commands/command-integration';
 import {appendRelevantProjectContextWithCount} from '@/memory/project-context';
 import {SemanticMemoryManager} from '@/memory/semantic-memory-manager';
@@ -17,8 +22,6 @@ import {processToolUse} from '@/message-handler';
 import {generateKey} from '@/session/key-generator';
 import {getTuneToolMode} from '@/types/config';
 import type {ImageAttachment, Message} from '@/types/core';
-import {MessageBuilder} from '@/utils/message-builder';
-import {buildSystemPrompt, setLastBuiltPrompt} from '@/utils/prompt-builder';
 import {processAssistantResponse} from './conversation/conversation-loop';
 import {createResetStreamingState} from './state/streaming-state';
 import type {ChatHandlerReturn, UseChatHandlerProps} from './types';

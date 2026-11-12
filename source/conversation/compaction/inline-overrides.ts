@@ -164,7 +164,7 @@ export function expandOverrideArgs(
 
 /**
  * `applyOnceOverrides` writes each recognised override into the existing
- * session-override stores (see `source/utils/auto-compact-session.ts` and
+ * session-override stores (see `source/conversation/compaction/auto-compact-session.ts` and
  * `source/models/index.ts`) and returns a `restore` callback. The caller
  * MUST invoke `restore` once the command finishes - typically in a
  * `finally` block - so the override only applies to the single command
@@ -208,7 +208,7 @@ export async function applyOnceOverrides(
 	] = await Promise.all([
 		import('./auto-compact-session.js'),
 		import('@/models/index.js'),
-		import('./parse-context-limit.js'),
+		import('../../utils/parse-context-limit.js'),
 	]);
 
 	for (const {key, value} of overrides) {

@@ -1,7 +1,7 @@
 import type {LLMClient, Message} from '@/types/core';
 import type {Tokenizer} from '@/types/tokenization';
+import {isModelFacing} from '../message-visibility';
 import {COMPRESSION_CONSTANTS} from './message-compression';
-import {isModelFacing} from './message-visibility';
 
 export interface SummariseWithLLMParams {
 	messages: Message[];

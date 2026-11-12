@@ -81,6 +81,10 @@ import {
 	untrustedReason,
 } from '@/config/trust/directory-trust';
 import {resolveTune} from '@/config/tune';
+import {
+	buildSystemPrompt,
+	setLastBuiltPrompt,
+} from '@/conversation/prompt-builder';
 import {resolveStartupProvider} from '@/hooks/startup-provider';
 import {appendRelevantProjectContextWithCount} from '@/memory/project-context';
 import {withTrustedProjectPlugins} from '@/plugins/host';
@@ -103,7 +107,6 @@ import type {ToolManager} from '@/tools/tool-manager';
 import {getTuneToolMode} from '@/types/config';
 import type {LLMClient} from '@/types/core';
 import {getLogger} from '@/utils/logging';
-import {buildSystemPrompt, setLastBuiltPrompt} from '@/utils/prompt-builder';
 
 const logger = getLogger();
 
