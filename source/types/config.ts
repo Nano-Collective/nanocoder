@@ -196,6 +196,19 @@ export interface NotificationsConfig {
 }
 
 /**
+ * web_search configuration (nanocoder.nanocoderTools.webSearch). `engine`
+ * defaults to `brave`, which needs `apiKey`. `searxng` queries a SearXNG
+ * instance's JSON API at `baseUrl`; a `baseUrl` on a private or loopback
+ * address is refused unless `allowPrivateNetwork` is true.
+ */
+export interface WebSearchConfig {
+	engine?: 'brave' | 'searxng';
+	apiKey?: string;
+	baseUrl?: string;
+	allowPrivateNetwork?: boolean;
+}
+
+/**
  * Background CI-watch configuration. Governs whether the per-project daemon
  * polls GitHub Actions for check-run failures on the currently checked-out
  * branch and automatically runs the `verify-ci-investigator` subagent when
@@ -399,9 +412,7 @@ export interface DiskNanocoderConfig {
 	formatters?: FormatterConfig[];
 	/** Nanocoder-specific tool configurations. */
 	nanocoderTools?: {
-		webSearch?: {
-			apiKey?: string;
-		};
+		webSearch?: WebSearchConfig;
 	};
 	/** Per-mode provider/model overrides (e.g. use a fast model for plan mode). */
 	modeProviders?: DiskModeProviders;
@@ -482,9 +493,7 @@ export interface AppConfig {
 
 	// Nanocoder-specific tool configurations
 	nanocoderTools?: {
-		webSearch?: {
-			apiKey?: string;
-		};
+		webSearch?: WebSearchConfig;
 	};
 
 	// Auto-compact configuration

@@ -4,6 +4,7 @@ import type {ReactElement} from 'react';
 import {useEffect, useMemo, useRef, useState} from 'react';
 import {StyledTitle} from '@/components/ui/styled-title';
 import {getAppConfig, loadDefaultMode, reloadAppConfig} from '@/config/index';
+import {describeWebSearchSetting} from '@/config/nanocoder-tools-config';
 import {
 	getAlternateScreen,
 	getMouseReporting,
@@ -246,9 +247,7 @@ function buildRowsForTab(
 					kind: 'managed',
 					id: 'web-search',
 					label: 'Web Search',
-					value: getAppConfig().nanocoderTools?.webSearch?.apiKey
-						? 'configured'
-						: 'not set',
+					value: describeWebSearchSetting(),
 					panel: 'web-search',
 				},
 				{

@@ -557,9 +557,9 @@ Use `"mode": "append"` to keep the built-in prompt and add your text at the end:
 
 ### Web Search
 
-The `web_search` tool uses the [Brave Search API](https://brave.com/search/api/) and requires an API key to enable. Without a key, the tool is not registered and won't be available to the model.
+The `web_search` tool searches with the [Brave Search API](https://brave.com/search/api/) (the default) or a [SearXNG](https://docs.searxng.org/) instance, chosen by `engine`. If the engine isn't configured, the tool is not registered and won't be available to the model; `/doctor` shows which engine is in use, or what is missing.
 
-Brave's free tier includes 2,000 queries per month. [Get an API key here](https://brave.com/search/api/).
+Brave needs an API key. Its free tier includes 2,000 queries per month. [Get an API key here](https://brave.com/search/api/).
 
 ```json
 {
@@ -574,6 +574,24 @@ Brave's free tier includes 2,000 queries per month. [Get an API key here](https:
 ```
 
 The `apiKey` field supports environment variable substitution (`$VAR`, `${VAR}`, `${VAR:-default}`), so you can keep the actual key in your environment rather than in the config file.
+
+SearXNG needs no key: set `engine` to `"searxng"` and `baseUrl` to the instance. Nanocoder calls its JSON API (`/search?format=json`), which an instance only answers when `json` is listed under `search.formats` in its `settings.yml`. Public instances usually turn it off, so this is mainly for an instance you run yourself.
+
+```json
+{
+  "nanocoder": {
+    "nanocoderTools": {
+      "webSearch": {
+        "engine": "searxng",
+        "baseUrl": "http://localhost:8888",
+        "allowPrivateNetwork": true
+      }
+    }
+  }
+}
+```
+
+By default `baseUrl` must be a public address, with the same checks `fetch_url` applies. Set `allowPrivateNetwork` to `true` to use an instance on this machine or your local network, as above.
 
 ### Mutation Firewall
 

@@ -2,7 +2,11 @@ import test from 'ava';
 import {existsSync, mkdirSync, writeFileSync, rmSync} from 'node:fs';
 import {join} from 'node:path';
 import {clearAppConfig} from '@/config/index';
-import {isNanocoderToolAlwaysAllowed} from '@/config/nanocoder-tools-config';
+import {
+	describeWebSearchEngine,
+	getWebSearchStatus,
+	isNanocoderToolAlwaysAllowed,
+} from '@/config/nanocoder-tools-config';
 
 const testConfigDir = join(process.cwd(), '.test-config-nanocoder-tools');
 const testConfigPath = join(testConfigDir, 'agents.config.json');
@@ -86,3 +90,52 @@ test.serial(
 		t.false(isNanocoderToolAlwaysAllowed('execute_bash'));
 	},
 );
+
+function webSearchStatusFor(webSearch: Record<string, unknown>) {
+	setupConfig({nanocoder: {nanocoderTools: {webSearch}}});
+	process.chdir(testConfigDir);
+	clearAppConfig();
+	return getWebSearchStatus();
+}
+
+test.serial('getWebSearchStatus defaults to Brave and needs its apiKey', t => {
+	t.deepEqual(webSearchStatusFor({apiKey: ' brave-key '}), {
+		available: true,
+		settings: {
+			engine: 'brave',
+			apiKey: 'brave-key',
+			baseUrl: undefined,
+			allowPrivateNetwork: false,
+		},
+	});
+	t.deepEqual(webSearchStatusFor({apiKey: '  '}), {
+		available: false,
+		reason: 'no Brave Search API key',
+	});
+});
+
+test.serial('getWebSearchStatus uses SearXNG with a baseUrl and no key', t => {
+	const status = webSearchStatusFor({
+		engine: 'searxng',
+		baseUrl: 'http://localhost:8888',
+		allowPrivateNetwork: true,
+	});
+	t.true(status.available);
+	if (status.available) {
+		t.is(status.settings.engine, 'searxng');
+		t.true(status.settings.allowPrivateNetwork);
+		t.is(describeWebSearchEngine(status.settings), 'SearXNG (localhost:8888)');
+	}
+	t.deepEqual(webSearchStatusFor({engine: 'searxng', apiKey: 'unused'}), {
+		available: false,
+		reason: 'no SearXNG base URL',
+	});
+});
+
+test.serial('getWebSearchStatus reports an unknown engine', t => {
+	const status = webSearchStatusFor({engine: 'google', apiKey: 'k'});
+	t.false(status.available);
+	if (!status.available) {
+		t.regex(status.reason, /unknown engine "google"/);
+	}
+});
