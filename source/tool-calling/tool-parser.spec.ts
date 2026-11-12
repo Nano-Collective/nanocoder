@@ -795,6 +795,7 @@ test('parseToolCalls: reports a call that is never closed', t => {
 		'<read_file><path>/test/file.txt</path>',
 		'I will read it first.\n  <read_file>\n    <path>/test/file.txt</path>\n',
 		'<read_file><path>/test/file.txt</path></read_files>',
+		'<tool_call>\n<read_file>\n<path>/test/file.txt</path>\n',
 	]) {
 		const result = parseToolCalls(content, OFFERED);
 		t.false(result.success, content);

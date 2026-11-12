@@ -89,11 +89,14 @@ export class XMLToolCallParser {
 		content: string,
 		toolNames: readonly string[],
 	): string | undefined {
-		const names = toolNames.filter(name => /^\w+$/.test(name));
-		if (names.length === 0) return undefined;
-		const tag = `<(${names.join('|')})>`;
-		// Most replies have no such tag, so they skip the scans below.
-		if (!new RegExp(`${tag}\\s*<\\w+>`).test(content)) return undefined;
+		const offered = new Set(toolNames);
+		// Most replies have no offered tool tag followed by another tag, so
+		// they skip the scans below. The second tag is a lookahead, so in
+		// `<a><read_file><path>` the `<read_file>` is still tried.
+		const tagThenTag = content.matchAll(/<(\w+)>(?=\s*<\w+>)/g);
+		if (!Array.from(tagThenTag).some(match => offered.has(match[1]))) {
+			return undefined;
+		}
 
 		// Blank out code and the calls that parse, keeping line breaks for the
 		// line-start check below.
@@ -105,10 +108,11 @@ export class XMLToolCallParser {
 		}
 		rest = rest.replace(new RegExp(this.CODE_REGEX), blank);
 
-		const opening = new RegExp(`^[ \\t]*${tag}(?=\\s*<\\w+>)`, 'gm');
+		const opening = /^[ \t]*<(\w+)>(?=\s*<\w+>)/gm;
 		const lastClose = new Map<string, number>();
 		for (const match of rest.matchAll(opening)) {
 			const name = match[1];
+			if (!offered.has(name)) continue;
 			if (!lastClose.has(name)) {
 				lastClose.set(name, rest.lastIndexOf(`</${name}>`));
 			}
