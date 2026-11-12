@@ -1,7 +1,7 @@
 import {resolve} from 'node:path';
 import {getSafeSessionCwd} from '@/services/session-cwd';
+import {forgetReadContentRange, isReadStub} from '@/tools/runtime/read-tracker';
 import type {Message, ToolCall} from '@/types/core';
-import {forgetReadContentRange, isReadStub} from '@/utils/read-tracker';
 
 type ReadRange = {path: string; startLine?: number; endLine?: number};
 

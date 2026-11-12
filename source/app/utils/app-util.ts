@@ -10,10 +10,10 @@ import {
 	distillBashResultForLLM,
 	executeBashCommand,
 } from '@/tools/execute-bash';
+import {clearReadTracker} from '@/tools/runtime/read-tracker';
 import type {ImageAttachment, LLMClient} from '@/types/core';
 import type {Message, MessageSubmissionOptions} from '@/types/index';
 import {formatError} from '@/utils/error-formatter';
-import {clearReadTracker} from '@/utils/read-tracker';
 import {dispatchSlashCommand} from './command-dispatcher';
 
 /**

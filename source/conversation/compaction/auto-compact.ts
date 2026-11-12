@@ -3,6 +3,7 @@ import {getModelContextLimit, getSessionContextLimit} from '@/models/index';
 import {runLifecycleHooks} from '@/services/lifecycle-hooks';
 import {defineSessionValue} from '@/services/session-context';
 import {createTokenizer} from '@/tokenization/index';
+import {bumpReadContentGeneration} from '@/tools/runtime/read-tracker';
 import type {
 	CompressionMode,
 	CompressionStrategy,
@@ -12,7 +13,6 @@ import type {AISDKCoreTool, LLMClient, Message} from '@/types/core';
 import type {Tokenizer} from '@/types/tokenization';
 import {calculateToolDefinitionsTokensFromDefs} from '@/usage/calculator';
 import {getLogger} from '@/utils/logging';
-import {bumpReadContentGeneration} from '@/utils/read-tracker';
 import {filterModelFacing} from '../message-visibility';
 import {
 	autoCompactSessionOverrides,

@@ -50,14 +50,14 @@ import {
 	registerSubagentToolBridge,
 	setGlobalToolApprovalHandler,
 	type SubagentToolBridge,
-} from '@/utils/tool-approval-queue';
+} from '@/tools/runtime/tool-approval-queue';
 import {
 	clearReadTracker,
 	forgetReadContent,
 	matchReadContent,
 	rememberReadContent,
 	runWithReadContentScope,
-} from '@/utils/read-tracker';
+} from '@/tools/runtime/read-tracker';
 
 console.log('\nsubagent-executor.spec.ts');
 
@@ -602,7 +602,7 @@ test.serial('tools needing approval are surfaced via signalToolApproval', async 
 
 	// Track whether approval was requested
 	let approvalRequested = false;
-	const {setGlobalToolApprovalHandler} = await import('@/utils/tool-approval-queue.js');
+	const {setGlobalToolApprovalHandler} = await import('@/tools/runtime/tool-approval-queue.js');
 	setGlobalToolApprovalHandler(async () => {
 		approvalRequested = true;
 		return true; // Approve

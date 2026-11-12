@@ -20,6 +20,9 @@ import {MessageBuilder} from '@/conversation/message-builder';
 import {markRunFailed} from '@/conversation/run-outcome';
 import {runLifecycleHooks} from '@/services/lifecycle-hooks';
 import {generateKey} from '@/session/key-generator';
+import {signalQuestion} from '@/tools/runtime/question-queue';
+import {bumpReadContentGeneration} from '@/tools/runtime/read-tracker';
+import {createCancellationResults} from '@/tools/runtime/tool-cancellation';
 import {loadTasks} from '@/tools/tasks/storage';
 import type {Task} from '@/tools/tasks/types';
 import type {ToolManager} from '@/tools/tool-manager';
@@ -36,10 +39,7 @@ import type {
 	ToolResult,
 } from '@/types/core';
 import {buildResponseUsageBounded} from '@/usage/response-usage';
-import {signalQuestion} from '@/utils/question-queue';
-import {bumpReadContentGeneration} from '@/utils/read-tracker';
 import {estimateTokens} from '@/utils/token-calculator';
-import {createCancellationResults} from '@/utils/tool-cancellation';
 import {filterValidToolCalls} from '../utils/tool-filters';
 import {
 	type ArchitectCheckpointState,

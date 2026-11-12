@@ -37,6 +37,15 @@ import {
 	type SubagentRunEvent,
 } from '@/services/subagent-events';
 import {resolveToolApproval} from '@/tools/approval-policy';
+import {
+	clearReadContentScope,
+	runWithReadContentScope,
+} from '@/tools/runtime/read-tracker';
+import {
+	registerSubagentToolBridge,
+	type SubagentToolBridge,
+} from '@/tools/runtime/tool-approval-queue';
+import {createCancellationResults} from '@/tools/runtime/tool-cancellation';
 import type {ToolManager} from '@/tools/tool-manager';
 import type {
 	ApiUsage,
@@ -48,15 +57,6 @@ import type {
 } from '@/types/core';
 import {formatCompactTokenCount} from '@/usage/format';
 import {buildResponseUsage} from '@/usage/response-usage';
-import {
-	clearReadContentScope,
-	runWithReadContentScope,
-} from '@/utils/read-tracker';
-import {
-	registerSubagentToolBridge,
-	type SubagentToolBridge,
-} from '@/utils/tool-approval-queue';
-import {createCancellationResults} from '@/utils/tool-cancellation';
 import {toOptionString} from '@/utils/type-helpers';
 
 const ARTIFACT_TOOL_KINDS: Record<string, UserArtifactKind> = {

@@ -45,6 +45,17 @@ import {
 	updateSubagentSessionStreaming,
 } from '@/services/subagent-session-store';
 import {resolveToolApproval} from '@/tools/approval-policy';
+import {
+	clearReadContentScope,
+	runWithReadContentScope,
+} from '@/tools/runtime/read-tracker';
+import {
+	getSubagentToolBridge,
+	signalToolApproval,
+} from '@/tools/runtime/tool-approval-queue';
+import {parseToolArguments} from '@/tools/runtime/tool-args-parser';
+import {toolErrorToContent} from '@/tools/runtime/tool-validation';
+import {truncateToolResult} from '@/tools/runtime/truncate-tool-result';
 import {SESSION_ARTIFACT_TOOLS, type ToolManager} from '@/tools/tool-manager';
 import type {
 	AISDKCoreTool,
@@ -58,18 +69,7 @@ import type {
 	ToolResult,
 } from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
-import {
-	clearReadContentScope,
-	runWithReadContentScope,
-} from '@/utils/read-tracker';
 import {estimateTokens} from '@/utils/token-calculator';
-import {
-	getSubagentToolBridge,
-	signalToolApproval,
-} from '@/utils/tool-approval-queue';
-import {parseToolArguments} from '@/utils/tool-args-parser';
-import {toolErrorToContent} from '@/utils/tool-validation';
-import {truncateToolResult} from '@/utils/truncate-tool-result';
 import {isGitPrCallAllowed, type TrustLevel} from '@/verify/trust-level';
 import {getSubagentLoader} from './subagent-loader.js';
 import type {

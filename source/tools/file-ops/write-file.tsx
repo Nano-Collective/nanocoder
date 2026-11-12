@@ -17,6 +17,18 @@ import {
 	collapseUnchangedLines,
 	computeLineDiff,
 } from '@/tools/file-ops/inline-diff';
+import {
+	validateEditableEncoding,
+	validateEditableFormat,
+	validatePath,
+} from '@/tools/file-ops/path-validators';
+import {getLanguageFromExtension} from '@/tools/file-ops/programming-language-helper';
+import {
+	forgetReadContent,
+	hasSeenFile,
+	markFileSeen,
+} from '@/tools/runtime/read-tracker';
+import {createFileToolApproval} from '@/tools/runtime/tool-approval';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 import {truncateAnsi} from '@/utils/ansi-truncate';
@@ -24,19 +36,7 @@ import {formatError} from '@/utils/error-formatter';
 import {getCachedFileContent, invalidateCache} from '@/utils/file-cache';
 import {highlight} from '@/utils/highlighter';
 import {normalizeIndentation} from '@/utils/indentation-normalizer';
-import {
-	validateEditableEncoding,
-	validateEditableFormat,
-	validatePath,
-} from '@/utils/path-validators';
-import {getLanguageFromExtension} from '@/utils/programming-language-helper';
-import {
-	forgetReadContent,
-	hasSeenFile,
-	markFileSeen,
-} from '@/utils/read-tracker';
 import {estimateTokens} from '@/utils/token-calculator';
-import {createFileToolApproval} from '@/utils/tool-approval';
 import {truncateText} from '@/utils/truncate-text';
 import {ensureString} from '@/utils/type-helpers';
 import {

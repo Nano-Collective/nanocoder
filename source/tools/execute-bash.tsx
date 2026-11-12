@@ -12,10 +12,10 @@ import {
 	buildFailureCapsule,
 	type RerunCommand,
 } from '@/tools/bash-failure-capsule';
+import {truncateToolResult} from '@/tools/runtime/truncate-tool-result';
 import type {NanocoderToolExport, StructuredToolOutput} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 import {splitCommandForDisplay} from '@/utils/shell-command-display';
-import {truncateToolResult} from '@/utils/truncate-tool-result';
 
 /**
  * Execute a bash command using the bash executor service.

@@ -9,8 +9,8 @@ import {getShowUsageFooter} from '@/config/preferences';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {generateKey} from '@/session/key-generator';
+import {parseToolArguments} from '@/tools/runtime/tool-args-parser';
 import type {Message, ToolCall} from '@/types/core';
-import {parseToolArguments} from '@/utils/tool-args-parser';
 import {truncateText} from '@/utils/truncate-text';
 
 /**

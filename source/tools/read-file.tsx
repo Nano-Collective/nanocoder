@@ -12,18 +12,18 @@ import {
 } from '@/constants';
 import {ThemeContext} from '@/hooks/useTheme';
 import {getProjectRoot, getSafeSessionCwd} from '@/services/session-cwd';
+import {
+	markFileSeen,
+	matchReadContent,
+	READ_STUB_MARKER,
+	rememberReadContent,
+} from '@/tools/runtime/read-tracker';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
 import {getCachedFileContent} from '@/utils/file-cache';
 import {getFileType} from '@/utils/file-type-detector';
 import {isValidFilePath, resolveFilePath} from '@/utils/path-validation';
-import {
-	markFileSeen,
-	matchReadContent,
-	READ_STUB_MARKER,
-	rememberReadContent,
-} from '@/utils/read-tracker';
 import {estimateTokens} from '@/utils/token-calculator';
 
 function formatReadStub(path: string, lineCount: number, size: number): string {

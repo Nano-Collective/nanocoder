@@ -1,5 +1,5 @@
 import test from 'ava';
-import {replaceFirstLiteral} from '@/utils/literal-replace';
+import {replaceFirstLiteral} from '@/tools/file-ops/literal-replace';
 
 console.log('\nliteral-replace.spec.ts');
 

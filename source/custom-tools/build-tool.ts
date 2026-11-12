@@ -1,14 +1,14 @@
 import type {JSONSchema7} from 'ai';
 import {buildHandler} from '@/custom-tools/handler';
 import {buildJsonSchema, buildValidator} from '@/custom-tools/schema-builder';
+import {createFileToolApproval} from '@/tools/runtime/tool-approval';
+import {withValidation} from '@/tools/runtime/tool-validation';
 import {jsonSchema, type ToolFormatter, tool} from '@/types/core';
 import type {
 	CustomToolApprovalPolicy,
 	LoadedCustomTool,
 } from '@/types/custom-tools';
 import type {ToolApprovalPolicy, ToolEntry} from '@/types/index';
-import {createFileToolApproval} from '@/utils/tool-approval';
-import {withValidation} from '@/utils/tool-validation';
 
 /**
  * Compose a registry-ready `ToolEntry` from a loaded custom tool.

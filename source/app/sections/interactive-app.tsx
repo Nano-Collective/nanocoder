@@ -25,10 +25,10 @@ import type {useUserMessageQueue} from '@/hooks/useUserMessageQueue';
 import {useVoice} from '@/hooks/useVoice';
 import type {useVSCodeServer} from '@/hooks/useVSCodeServer';
 import {hasStagedChanges} from '@/tools/git/utils';
+import type {PendingToolApproval} from '@/tools/runtime/tool-approval-queue';
+import type {PendingToolConfirmation} from '@/tools/runtime/tool-confirm-queue';
 import type {ImageAttachment} from '@/types/core';
 import type {RestoredInputDraft, SubmittedInputDraft} from '@/types/hooks';
-import type {PendingToolApproval} from '@/utils/tool-approval-queue';
-import type {PendingToolConfirmation} from '@/utils/tool-confirm-queue';
 
 interface InteractiveAppProps {
 	appState: ReturnType<typeof useAppState>;

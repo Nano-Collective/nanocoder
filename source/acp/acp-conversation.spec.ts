@@ -29,7 +29,7 @@ import {fileOpTool} from '@/tools/file-ops/file-op';
 import {writeFileTool} from '@/tools/file-ops/write-file';
 import {readFileTool} from '@/tools/read-file';
 import {ToolRegistry} from '@/tools/tool-registry';
-import {clearReadTracker} from '@/utils/read-tracker';
+import {clearReadTracker} from '@/tools/runtime/read-tracker';
 import {
 	cancelSubagentRun,
 	emitSubagentRunEvent,
@@ -39,7 +39,7 @@ import {SubagentExecutor} from '@/subagents/subagent-executor';
 import {getSubagentLoader} from '@/subagents/subagent-loader';
 import {agentTool, setAgentToolExecutor} from '@/tools/agent-tool';
 import type {ToolManager} from '@/tools/tool-manager';
-import {getSubagentToolBridge} from '@/utils/tool-approval-queue';
+import {getSubagentToolBridge} from '@/tools/runtime/tool-approval-queue';
 import {
 	setToolRegistryGetter,
 	setToolManagerGetter,

@@ -18,7 +18,7 @@ import {
 import {setProjectRoot, setSessionCwd} from '@/services/session-cwd';
 import type {HooksConfig} from '@/types/config';
 import type {ToolCall} from '@/types/core';
-import {truncateToolResult} from '@/utils/truncate-tool-result';
+import {truncateToolResult} from '@/tools/runtime/truncate-tool-result';
 import {
 	addPendingHookContext,
 	beginSessionStartHooks,

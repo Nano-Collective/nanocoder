@@ -9,11 +9,11 @@ import {runPluginHooks} from '@/plugins/host';
 import {getActiveSessionContext} from '@/services/session-context';
 import {getProjectRoot, getSafeSessionCwd} from '@/services/session-cwd';
 import {getKeyGeneratorSessionId} from '@/session/key-generator';
+import {truncateToolResult} from '@/tools/runtime/truncate-tool-result';
 import type {HookDefinition, HookEvent} from '@/types/config';
 import type {ToolCall} from '@/types/core';
 import {notifyError} from '@/utils/message-queue-core';
 import {signalProcessTree} from '@/utils/process-tree';
-import {truncateToolResult} from '@/utils/truncate-tool-result';
 
 /** Ceiling on a single hook's runtime. Overridable per hook via `timeout`. */
 const DEFAULT_HOOK_TIMEOUT_MS = 30_000;
