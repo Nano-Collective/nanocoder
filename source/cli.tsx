@@ -925,15 +925,15 @@ async function main(): Promise<void> {
 				MOUSE_REPORTING_ON,
 				stripMouseSequences,
 				wheelEvents,
-			} = await import('@/utils/terminal-mouse');
+			} = await import('@/terminal/terminal-mouse');
 			const {
 				createPasteExtractor,
 				DISABLE_BRACKETED_PASTE,
 				ENABLE_BRACKETED_PASTE,
 				pasteEvents,
-			} = await import('@/utils/terminal-paste');
+			} = await import('@/terminal/terminal-paste');
 			const {splitControlKeypresses} = await import(
-				'@/utils/terminal-keypress'
+				'@/terminal/terminal-keypress'
 			);
 
 			// Bracketed paste in both screen modes. Without it the terminal

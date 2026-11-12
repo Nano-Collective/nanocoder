@@ -8,7 +8,7 @@ import {UIStateProvider, useUIStateContext} from '../../hooks/useUIState';
 import {setToolManagerGetter} from '../../message-handler';
 import type {ToolManager} from '../../tools/tool-manager';
 import type {InputState} from '../../types/hooks';
-import {clearFileListCache} from '../../utils/file-autocomplete';
+import {clearFileListCache} from '../../input/file-autocomplete';
 import {decodeMCPResourcePath, useFileMentions} from './useFileMentions.js';
 
 type Mentions = ReturnType<typeof useFileMentions>;

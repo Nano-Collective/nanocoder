@@ -3,8 +3,8 @@ import {TIMEOUT_UPDATE_CHECK_MS} from '@/constants';
 import type {NpmRegistryResponse, UpdateInfo} from '@/types/index';
 import {formatError} from '@/utils/error-formatter';
 import {getLogger} from '@/utils/logging';
+import {getPackageVersion, UNKNOWN_VERSION} from '../utils/package-version';
 import {detectInstallationMethod} from './installation-detector';
-import {getPackageVersion, UNKNOWN_VERSION} from './package-version';
 
 const UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
 

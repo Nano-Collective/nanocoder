@@ -4,7 +4,7 @@ import {memo, useRef} from 'react';
 import {useNonInteractiveRender} from '@/hooks/useNonInteractiveRender';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
-import {wrapWithTrimmedContinuations} from '@/utils/text-wrapping';
+import {wrapWithTrimmedContinuations} from '@/terminal/text-wrapping';
 import {estimateTokens} from '@/utils/token-calculator';
 import {AssistantMessageBox} from './assistant-message';
 

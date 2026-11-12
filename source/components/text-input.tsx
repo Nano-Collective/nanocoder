@@ -7,12 +7,12 @@ import {
 	useRef,
 	useState,
 } from 'react';
-import {isNewlineKey} from '@/utils/newline-key';
+import {isNewlineKey} from '@/terminal/newline-key';
 import {
 	getVisualLineSegments,
 	moveCursorToVisualLine,
 	wrapWithTrimmedContinuations,
-} from '@/utils/text-wrapping';
+} from '@/terminal/text-wrapping';
 
 /**
  * The raw byte sequence behind the keypress a `useInput` handler is running

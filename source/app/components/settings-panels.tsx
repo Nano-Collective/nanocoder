@@ -32,13 +32,13 @@ import {useBannerModules} from '@/hooks/use-banner-modules';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {useTitleShape} from '@/hooks/useTitleShape';
+import {setNotificationsConfig} from '@/services/notifications';
 import type {NotificationsConfig} from '@/types/config';
 import {
 	DEFAULT_NANOCODER_SHAPE,
 	type NanocoderShape,
 	type ThemePreset,
 } from '@/types/ui';
-import {setNotificationsConfig} from '@/utils/notifications';
 import type {SettingsTabId} from './settings-constants';
 
 /**

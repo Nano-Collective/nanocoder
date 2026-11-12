@@ -5,10 +5,10 @@ import {
 	SuccessMessage,
 } from '@/components/message-box';
 import {getToolManager} from '@/message-handler';
+import {checkForUpdates} from '@/services/update-checker';
 import {Command} from '@/types/index';
 import {formatError} from '@/utils/error-formatter';
 import {notifyError, notifyInfo} from '@/utils/message-queue-core';
-import {checkForUpdates} from '@/utils/update-checker';
 
 /**
  * Determines if a command execution failed based on multiple signals.

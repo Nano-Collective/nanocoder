@@ -17,8 +17,8 @@ import {parseMarkdown} from '@/markdown-parser/index';
 import {generateKey} from '@/session/key-generator';
 import {getSubagentLoader} from '@/subagents/subagent-loader';
 import type {SubagentConfigWithSource} from '@/subagents/types';
+import {wrapWithTrimmedContinuations} from '@/terminal/text-wrapping';
 import type {Command, StatefulCommand} from '@/types/index';
-import {wrapWithTrimmedContinuations} from '@/utils/text-wrapping';
 
 interface SubagentsListProps {
 	subagents: Array<{

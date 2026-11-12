@@ -8,6 +8,7 @@ import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {type BashExecutionState, bashExecutor} from '@/services/bash-executor';
 import {getSafeSessionCwd} from '@/services/session-cwd';
+import {splitCommandForDisplay} from '@/terminal/shell-command-display';
 import {
 	buildFailureCapsule,
 	type RerunCommand,
@@ -15,7 +16,6 @@ import {
 import {truncateToolResult} from '@/tools/runtime/truncate-tool-result';
 import type {NanocoderToolExport, StructuredToolOutput} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
-import {splitCommandForDisplay} from '@/utils/shell-command-display';
 
 /**
  * Execute a bash command using the bash executor service.

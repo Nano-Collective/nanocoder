@@ -17,6 +17,7 @@ import {bootstrapProjectDotenv} from '@/config/project-dotenv';
 import {validateProjectConfigSecurity} from '@/config/validation';
 import {runCiAutoFixFlow} from '@/daemon/ci-fix-orchestrator';
 import {CheckpointManager} from '@/services/checkpoint-manager';
+import {setNotificationsConfig} from '@/services/notifications';
 import type {Checkpointer} from '@/skills/dispatcher';
 import {
 	recordSubagentApiCallForStats,
@@ -26,7 +27,6 @@ import type {SubagentResult, SubagentTask} from '@/subagents/types';
 import {ToolManager} from '@/tools/tool-manager';
 import type {DevelopmentMode} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
-import {setNotificationsConfig} from '@/utils/notifications';
 import {getShutdownManager} from '@/utils/shutdown';
 import {
 	getAllowedToolNames,

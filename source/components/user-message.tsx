@@ -3,8 +3,8 @@ import {memo} from 'react';
 import {useNonInteractiveRender} from '@/hooks/useNonInteractiveRender';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
+import {wrapWithTrimmedContinuations} from '@/terminal/text-wrapping';
 import type {UserMessageProps} from '@/types/index';
-import {wrapWithTrimmedContinuations} from '@/utils/text-wrapping';
 import {estimateTokens} from '@/utils/token-calculator';
 
 // Strip VS Code context blocks from display (code is still sent to LLM)

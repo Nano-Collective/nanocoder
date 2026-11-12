@@ -23,6 +23,7 @@ import {CustomCommandLoader} from '@/custom-commands/loader';
 import {getModelContextLimit} from '@/models/index';
 import {bashExecutor} from '@/services/bash-executor';
 import {CheckpointManager} from '@/services/checkpoint-manager';
+import {describeGapsMessage} from '@/services/checkpoint-utils';
 import {
 	runLifecycleHooks,
 	takePendingHookContext,
@@ -55,7 +56,6 @@ import type {ApiCallRecord, ApiUsageSnapshot} from '@/types/core';
 import type {ThemePreset} from '@/types/ui';
 import type {UpdateInfo} from '@/types/utils';
 import {calculateTokenBreakdown} from '@/usage/calculator';
-import {describeGapsMessage} from '@/utils/checkpoint-utils';
 import {formatError} from '@/utils/error-formatter';
 import {getLogger} from '@/utils/logging';
 

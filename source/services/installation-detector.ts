@@ -1,7 +1,7 @@
 import {existsSync} from 'fs';
 import {dirname, join, sep} from 'path';
 import {fileURLToPath} from 'url';
-import {notifyWarning} from './message-queue-core';
+import {notifyWarning} from '../utils/message-queue-core';
 
 export type InstallationMethod = 'npm' | 'homebrew' | 'nix' | 'unknown';
 

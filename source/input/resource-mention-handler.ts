@@ -4,7 +4,7 @@ import {
 	PlaceholderContent,
 	PlaceholderType,
 } from '../types/hooks.js';
-import {notifyError} from './message-queue-core.js';
+import {notifyError} from '../utils/message-queue-core.js';
 import {allocatePlaceholderId} from './placeholders.js';
 
 /**

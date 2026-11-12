@@ -11,6 +11,7 @@ import {
 import {validateProjectConfigSecurity} from '@/config/validation';
 import {CustomCommandLoader} from '@/custom-commands/loader';
 import {resolveStartupProvider} from '@/hooks/startup-provider';
+import {setAvailableSubagents} from '@/input/prompt-processor';
 import {
 	setCommandLoaderGetter,
 	setToolManagerGetter,
@@ -26,7 +27,6 @@ import {getSubagentLoader} from '@/subagents/subagent-loader';
 import {setAgentToolExecutor, setAvailableAgentNames} from '@/tools/agent-tool';
 import {ToolManager} from '@/tools/tool-manager';
 import type {DevelopmentMode, LLMClient, MCPInitResult} from '@/types/index';
-import {setAvailableSubagents} from '@/utils/prompt-processor';
 
 export interface PlainInitResult {
 	client: LLMClient;
