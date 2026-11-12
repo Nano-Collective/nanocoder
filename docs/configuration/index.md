@@ -147,7 +147,7 @@ These are covered in detail on the [Logging](logging.md) page.
 
 You can reference environment variables in your configuration files using substitution syntax:
 
-**Syntax:** `$VAR_NAME`, `${VAR_NAME}`, or `${VAR_NAME:-default}`
+**Syntax:** `$VAR_NAME`, `${VAR_NAME}`, or `${VAR_NAME:-default}` (use `$$` to escape a literal `$`, e.g. `pa$$WORD`)
 
 Substitution is applied recursively to all string fields in provider and MCP server configurations — any string value can reference environment variables, not just specific fields.
 
