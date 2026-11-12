@@ -6,7 +6,7 @@ import {
 	isReadStub,
 	matchReadContent,
 	rememberReadContent,
-} from './read-tracker.js';
+} from '../utils/read-tracker.js';
 
 test('capMessagesForModel does not slice if history is within limit', t => {
 	const messages: Message[] = [

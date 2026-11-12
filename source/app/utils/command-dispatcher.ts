@@ -4,6 +4,14 @@ import {expandCommandAlias, findRetiredCommand} from '@/commands/aliases';
 import CommandProgress from '@/components/command-progress';
 import {infoMsg, warningMsg} from '@/components/message-factory';
 import {DELAY_COMMAND_COMPLETE_MS} from '@/constants';
+import {
+	applyOnceOverrides,
+	expandOverrideArgs,
+	formatInlineToken,
+	getOnceThreshold,
+	isRecognizedOverrideKey,
+	parseInlineOverrides,
+} from '@/conversation/compaction/inline-overrides';
 import {parseCustomCommandArgs} from '@/custom-commands/args';
 import {expandCustomCommandPrompt} from '@/custom-commands/executor';
 import {generateKey} from '@/session/key-generator';
@@ -14,14 +22,6 @@ import {
 	isStatefulCommand,
 	type MessageSubmissionOptions,
 } from '@/types/index';
-import {
-	applyOnceOverrides,
-	expandOverrideArgs,
-	formatInlineToken,
-	getOnceThreshold,
-	isRecognizedOverrideKey,
-	parseInlineOverrides,
-} from '@/utils/inline-overrides';
 import {handleMCPPromptCommand} from './handlers/mcp-prompt-handler';
 import {stripVSCodeContext} from './vscode-context';
 

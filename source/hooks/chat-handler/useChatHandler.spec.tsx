@@ -9,7 +9,7 @@ import {
 	updateProfessionalTone,
 } from '@/config/preferences';
 import {setToolRegistryGetter} from '@/message-handler';
-import {getLastBuiltPrompt} from '@/utils/prompt-builder';
+import {getLastBuiltPrompt} from '@/conversation/prompt-builder';
 import {getBaseSystemPrompt, useChatHandler} from './useChatHandler';
 import type {UseChatHandlerProps, ChatHandlerReturn} from './types';
 import type {LLMClient, Message} from '../../types/core';

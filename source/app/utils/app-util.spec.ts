@@ -24,12 +24,12 @@ import {
 	autoCompactSessionOverrides,
 	resetAutoCompactSession,
 	setAutoCompactThreshold,
-} from '@/utils/auto-compact';
+} from '@/conversation/compaction/auto-compact';
 import {
 	applyOnceOverrides,
 	expandOverrideArgs,
 	parseInlineOverrides,
-} from '@/utils/inline-overrides';
+} from '@/conversation/compaction/inline-overrides';
 
 // Test command parsing edge cases
 // These tests document the expected behavior of parsing patterns

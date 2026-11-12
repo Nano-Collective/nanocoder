@@ -23,7 +23,7 @@ import {
 import {convertToModelMessages} from '@/ai-sdk-client/converters/message-converter';
 import {sessionManager} from '@/session/session-manager';
 import {registerSubagentRun} from '@/services/subagent-events';
-import {resolveAutoCompactSettings} from '@/utils/auto-compact';
+import {resolveAutoCompactSettings} from '@/conversation/compaction/auto-compact';
 import {getLogger} from '@/utils/logging';
 import {SemanticMemoryManager} from '@/memory/semantic-memory-manager';
 import {readFileTool} from '@/tools/read-file';

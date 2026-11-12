@@ -58,7 +58,7 @@ import {
 	resetAutoCompactSession,
 	setAutoCompactStrategy,
 	setAutoCompactThreshold,
-} from '@/utils/auto-compact.js';
+} from '@/conversation/compaction/auto-compact.js';
 
 console.log('\nacp-conversation.spec.ts');
 

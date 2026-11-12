@@ -1,7 +1,7 @@
 import type {CompressionMode} from '@/types/config';
 import type {Message} from '@/types/core';
 import type {Tokenizer} from '@/types/tokenization';
-import {filterModelFacing, isModelFacing} from './message-visibility';
+import {filterModelFacing, isModelFacing} from '../message-visibility';
 
 /**
  * Compression configuration constants

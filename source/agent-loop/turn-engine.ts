@@ -58,6 +58,8 @@
  * (`PlainConversationOutcome`, an ACP `PromptResponse`, ...).
  */
 import {getAppConfig} from '@/config/index';
+import {maybeAutoCompact} from '@/conversation/compaction/auto-compact';
+import {capMessagesForModel} from '@/conversation/message-capping';
 import {
 	createHeadlessRetryGuards,
 	EMPTY_TURN_NUDGE,
@@ -84,8 +86,6 @@ import type {
 	ToolCall,
 	ToolResult,
 } from '@/types/core';
-import {maybeAutoCompact} from '@/utils/auto-compact';
-import {capMessagesForModel} from '@/utils/message-capping';
 
 // On the last allowed turn we strip tools and inject this so the model
 // finalizes cleanly instead of the loop bailing out with a hard error and

@@ -29,7 +29,7 @@ import {
 	setAutoCompactEnabled,
 	setAutoCompactStrategy,
 	setAutoCompactThreshold,
-} from '@/utils/auto-compact.js';
+} from '@/conversation/compaction/auto-compact.js';
 import {
 	resetSessionContextLimit,
 	setSessionContextLimit,
@@ -3999,7 +3999,7 @@ for (const scenario of [
 }
 
 test.serial('compact-and-retry keeps the turn controller, a single history write and a restore point', async t => {
-	const {compressionBackup} = await import('@/utils/compression-backup.js');
+	const {compressionBackup} = await import('@/conversation/compaction/compression-backup.js');
 	compressionBackup.clearBackup();
 	const signals: (AbortSignal | undefined)[] = [];
 	const messageSnapshots: Message[][] = [];

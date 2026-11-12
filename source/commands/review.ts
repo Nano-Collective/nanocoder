@@ -5,6 +5,7 @@ import AssistantMessage from '@/components/assistant-message';
 import AssistantReasoning from '@/components/assistant-reasoning';
 import {errorMsg, infoMsg, warningMsg} from '@/components/message-factory';
 import {getShowUsageFooter} from '@/config/preferences';
+import {loadSection} from '@/conversation/prompt-builder';
 import {generateKey} from '@/session/key-generator';
 import {stripThinkTags} from '@/tool-calling/index';
 import {
@@ -21,7 +22,6 @@ import {buildResponseUsageBounded} from '@/usage/response-usage';
 import {formatError} from '@/utils/error-formatter';
 import {parseGitHubRepository} from '@/utils/github-repository';
 import {getLogger} from '@/utils/logging';
-import {loadSection} from '@/utils/prompt-builder';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);

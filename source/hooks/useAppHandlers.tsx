@@ -16,6 +16,8 @@ import Status from '@/components/status';
 import UserMessage from '@/components/user-message';
 import {getAppConfig} from '@/config/index';
 import {loadPreferences} from '@/config/preferences';
+import {resolveAutoCompactSettings} from '@/conversation/compaction/auto-compact';
+import {getLastBuiltPrompt} from '@/conversation/prompt-builder';
 import {CustomCommandExecutor} from '@/custom-commands/executor';
 import {CustomCommandLoader} from '@/custom-commands/loader';
 import {getModelContextLimit} from '@/models/index';
@@ -52,11 +54,9 @@ import type {ApiCallRecord, ApiUsageSnapshot} from '@/types/core';
 import type {ThemePreset} from '@/types/ui';
 import type {UpdateInfo} from '@/types/utils';
 import {calculateTokenBreakdown} from '@/usage/calculator';
-import {resolveAutoCompactSettings} from '@/utils/auto-compact';
 import {describeGapsMessage} from '@/utils/checkpoint-utils';
 import {formatError} from '@/utils/error-formatter';
 import {getLogger} from '@/utils/logging';
-import {getLastBuiltPrompt} from '@/utils/prompt-builder';
 import {bumpReadContentGeneration} from '@/utils/read-tracker';
 
 interface UseAppHandlersProps {

@@ -13,6 +13,11 @@ import {displayCompactCountsSummary} from '@/components/tool-result-display';
 import {getAppConfig, getRetryLimits} from '@/config/index';
 import {getShowUsageFooter} from '@/config/preferences';
 import {MAX_COMPACT_RETRIES} from '@/constants';
+import {compressionBackup} from '@/conversation/compaction/compression-backup';
+import {compressMessages} from '@/conversation/compaction/message-compression';
+import {buildCompletionNote} from '@/conversation/completion-note';
+import {MessageBuilder} from '@/conversation/message-builder';
+import {markRunFailed} from '@/conversation/run-outcome';
 import {runLifecycleHooks} from '@/services/lifecycle-hooks';
 import {generateKey} from '@/session/key-generator';
 import {loadTasks} from '@/tools/tasks/storage';
@@ -31,13 +36,8 @@ import type {
 	ToolResult,
 } from '@/types/core';
 import {buildResponseUsageBounded} from '@/usage/response-usage';
-import {buildCompletionNote} from '@/utils/completion-note';
-import {compressionBackup} from '@/utils/compression-backup';
-import {MessageBuilder} from '@/utils/message-builder';
-import {compressMessages} from '@/utils/message-compression';
 import {signalQuestion} from '@/utils/question-queue';
 import {bumpReadContentGeneration} from '@/utils/read-tracker';
-import {markRunFailed} from '@/utils/run-outcome';
 import {estimateTokens} from '@/utils/token-calculator';
 import {createCancellationResults} from '@/utils/tool-cancellation';
 import {filterValidToolCalls} from '../utils/tool-filters';

@@ -1109,7 +1109,7 @@ test('getAvailableToolNames - disabledTools removes a bundle-form skill tool', t
 // names used for runtime execution are always identical for a given mode/tune
 // combo. This is the key invariant that prevents prompt/runtime drift.
 
-import {buildSystemPrompt} from '../utils/prompt-builder.js';
+import {buildSystemPrompt} from '../conversation/prompt-builder.js';
 import type {TuneConfig} from '@/types/config';
 import type {DevelopmentMode} from '@/types/core';
 
