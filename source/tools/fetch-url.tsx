@@ -276,6 +276,13 @@ const fetchUrlCoreTool = tool({
 	},
 });
 
+/**
+ * Group digits the same way everywhere. A bare `toLocaleString()` follows the
+ * machine's locale, so the same page reads "100,000" on one and "1,00,000" on
+ * an en-IN one.
+ */
+const formatCount = (value: number): string => value.toLocaleString('en-US');
+
 function FetchUrlFormatterComponent({
 	url,
 	result,
@@ -332,8 +339,8 @@ function FetchUrlFormatterComponent({
 					{shown && (
 						<Box>
 							<Text color={colors.warning}>
-								⚠ Showing characters {shown.start.toLocaleString()}-
-								{shown.end.toLocaleString()} of {shown.total.toLocaleString()}
+								⚠ Showing characters {formatCount(shown.start)}-
+								{formatCount(shown.end)} of {formatCount(shown.total)}
 							</Text>
 						</Box>
 					)}
