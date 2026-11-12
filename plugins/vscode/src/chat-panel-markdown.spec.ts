@@ -1,5 +1,5 @@
 import test from 'ava';
-import {createPanel, type StubElement} from '@/vscode/chat-panel-harness';
+import {createPanel, type StubElement} from './chat-panel-harness';
 
 // Marks every string that went through the sanitizer, so a test can tell a
 // sanitized render from raw marked output.
