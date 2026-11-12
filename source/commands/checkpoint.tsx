@@ -12,6 +12,7 @@ import {
 	warningMsg,
 } from '@/components/message-factory';
 import {CheckpointManager} from '@/services/checkpoint-manager';
+import {describeGapsMessage} from '@/services/checkpoint-utils';
 import {generateKey} from '@/session/key-generator';
 import type {
 	CommandCompletion,
@@ -19,7 +20,6 @@ import type {
 	Message,
 	StatefulCommand,
 } from '@/types/index';
-import {describeGapsMessage} from '@/utils/checkpoint-utils';
 import {formatError} from '@/utils/error-formatter';
 import {addToMessageQueue} from '@/utils/message-queue-core';
 

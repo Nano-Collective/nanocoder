@@ -4,9 +4,9 @@ import {useNonInteractiveRender} from '@/hooks/useNonInteractiveRender';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {parseMarkdownParts} from '@/markdown-parser/index';
+import {wrapWithTrimmedContinuations} from '@/terminal/text-wrapping';
 import type {AssistantMessageProps} from '@/types/index';
 import {formatUsageIndicator} from '@/usage/format';
-import {wrapWithTrimmedContinuations} from '@/utils/text-wrapping';
 import {estimateTokens} from '@/utils/token-calculator';
 
 export function AssistantMessageBox({

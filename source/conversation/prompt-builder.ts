@@ -3,6 +3,7 @@ import {homedir, platform, release} from 'os';
 import {basename, dirname, isAbsolute, join, normalize, resolve} from 'path';
 import {fileURLToPath} from 'url';
 import {getProfessionalTone} from '@/config/preferences';
+import {getSubagentDescriptions} from '@/input/prompt-processor';
 import {defineSessionValue} from '@/services/session-context';
 import {getProjectRoot} from '@/services/session-cwd';
 import type {ToolManager} from '@/tools/tool-manager';
@@ -11,7 +12,6 @@ import type {SystemPromptConfig, TuneConfig} from '@/types/config';
 import {TUNE_DEFAULTS} from '@/types/config';
 import type {DevelopmentMode} from '@/types/core';
 import {getLogger} from '@/utils/logging';
-import {getSubagentDescriptions} from '@/utils/prompt-processor';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);

@@ -13,6 +13,9 @@ import {
 } from '@/firewall/mutation-firewall';
 import {ThemeContext} from '@/hooks/useTheme';
 import {getSafeSessionCwd} from '@/services/session-cwd';
+import {truncateAnsi} from '@/terminal/ansi-truncate';
+import {highlight} from '@/terminal/highlighter';
+import {normalizeIndentation} from '@/terminal/indentation-normalizer';
 import {
 	collapseUnchangedLines,
 	computeLineDiff,
@@ -31,11 +34,8 @@ import {
 import {createFileToolApproval} from '@/tools/runtime/tool-approval';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
-import {truncateAnsi} from '@/utils/ansi-truncate';
 import {formatError} from '@/utils/error-formatter';
 import {getCachedFileContent, invalidateCache} from '@/utils/fs/file-cache';
-import {highlight} from '@/utils/highlighter';
-import {normalizeIndentation} from '@/utils/indentation-normalizer';
 import {estimateTokens} from '@/utils/token-calculator';
 import {truncateText} from '@/utils/truncate-text';
 import {ensureString} from '@/utils/type-helpers';

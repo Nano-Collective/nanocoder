@@ -11,6 +11,8 @@ import {
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {useUIStateContext} from '@/hooks/useUIState';
+import {highlight} from '@/terminal/highlighter';
+import {compressIndentation} from '@/terminal/indentation-normalizer';
 import type {FileExplorerProps, ViewMode} from '@/types/file-explorer';
 import {
 	buildFileTree,
@@ -18,8 +20,6 @@ import {
 	flattenTree,
 	flattenTreeAll,
 } from '@/utils/fs/file-tree';
-import {highlight} from '@/utils/highlighter';
-import {compressIndentation} from '@/utils/indentation-normalizer';
 import {getVSCodeServerSync} from '@/vscode/vscode-server';
 import {TreeItem} from './tree-item';
 import {

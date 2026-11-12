@@ -31,7 +31,11 @@ import type {
 	QueuedUserMessage,
 	UserMessageQueueDraft,
 } from '@/hooks/useUserMessageQueue';
+import {assemblePrompt} from '@/input/prompt-processor';
 import {promptHistory} from '@/prompt-history';
+import {isNewlineKey} from '@/terminal/newline-key';
+import {pasteEvents} from '@/terminal/terminal-paste';
+import {getVisualLineSegments} from '@/terminal/text-wrapping';
 import type {TuneConfig} from '@/types/config';
 import type {
 	ContextSource,
@@ -44,10 +48,6 @@ import type {
 	RestoredInputDraft,
 	SubmittedInputDraft,
 } from '@/types/hooks';
-import {isNewlineKey} from '@/utils/newline-key';
-import {assemblePrompt} from '@/utils/prompt-processor';
-import {pasteEvents} from '@/utils/terminal-paste';
-import {getVisualLineSegments} from '@/utils/text-wrapping';
 import type {ActiveEditorState} from '@/vscode/vscode-server';
 
 // Prompt box width floor: keeps narrow terminals legible.

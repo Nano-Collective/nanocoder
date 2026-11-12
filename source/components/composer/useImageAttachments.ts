@@ -1,10 +1,10 @@
 import {useCallback, useState} from 'react';
-import type {ImageAttachment} from '@/types/core';
 import {
 	extractImageReferences,
 	readClipboardImage,
 	readImageFile,
-} from '@/utils/clipboard-image';
+} from '@/input/clipboard-image';
+import type {ImageAttachment} from '@/types/core';
 
 /**
  * Turn image file paths the user typed, pasted or dragged into the prompt

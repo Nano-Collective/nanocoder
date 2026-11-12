@@ -3,7 +3,7 @@ import {
 	clearFileListCache,
 	getCurrentFileMention,
 } from './file-autocomplete.js';
-import {fuzzyScoreFilePath} from './fuzzy-matching.js';
+import {fuzzyScoreFilePath} from '../utils/fuzzy-matching.js';
 
 console.log(`\nfile-autocomplete.spec.ts`);
 

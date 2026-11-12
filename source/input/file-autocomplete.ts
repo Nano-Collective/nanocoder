@@ -1,8 +1,8 @@
 import {CACHE_FILE_LIST_TTL_MS} from '@/constants';
-import {formatError} from './error-formatter';
-import {walkProjectEntries} from './fs/file-search';
-import {fuzzyScoreFilePath} from './fuzzy-matching';
-import {getLogger} from './logging';
+import {formatError} from '../utils/error-formatter';
+import {walkProjectEntries} from '../utils/fs/file-search';
+import {fuzzyScoreFilePath} from '../utils/fuzzy-matching';
+import {getLogger} from '../utils/logging';
 
 interface FileCompletion {
 	path: string; // Relative path from cwd

@@ -2,6 +2,10 @@ import {existsSync} from 'fs';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import {TRUNCATION_DESCRIPTION_LENGTH} from '@/constants';
+import {
+	describeCheckpointGaps,
+	validateCheckpointName,
+} from '@/services/checkpoint-utils';
 import type {
 	CheckpointConversation,
 	CheckpointData,
@@ -11,10 +15,6 @@ import type {
 	CheckpointValidationResult,
 } from '@/types/checkpoint';
 import type {Message} from '@/types/core';
-import {
-	describeCheckpointGaps,
-	validateCheckpointName,
-} from '@/utils/checkpoint-utils';
 import {formatError} from '@/utils/error-formatter';
 import {ensureNanocoderGitignore} from '@/utils/fs/ensure-nanocoder-gitignore';
 import {notifyWarning} from '@/utils/message-queue-core';

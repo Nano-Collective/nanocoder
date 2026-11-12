@@ -24,6 +24,7 @@ import {TIMEOUT_OUTPUT_FLUSH_MS} from '@/constants';
 import {CustomCommandExecutor} from '@/custom-commands/executor';
 import {CustomCommandLoader} from '@/custom-commands/loader';
 import {resolveStartupProvider} from '@/hooks/startup-provider';
+import {setAvailableSubagents} from '@/input/prompt-processor';
 import {getLSPManager, type LSPInitResult} from '@/lsp/index';
 import {
 	setCommandLoaderGetter,
@@ -36,6 +37,7 @@ import {
 	runLifecycleHooks,
 	SESSION_END_HOOK_HANDLER,
 } from '@/services/lifecycle-hooks';
+import {checkForUpdates} from '@/services/update-checker';
 import {generateKey} from '@/session/key-generator';
 import {sessionManager} from '@/session/session-manager';
 import {
@@ -52,9 +54,7 @@ import {
 	MCPConnectionStatus,
 } from '@/types/core';
 import type {MCPInitResult, UpdateInfo, UserPreferences} from '@/types/index';
-import {setAvailableSubagents} from '@/utils/prompt-processor';
 import {getShutdownManager} from '@/utils/shutdown';
-import {checkForUpdates} from '@/utils/update-checker';
 
 interface UseAppInitializationProps {
 	setClient: (client: LLMClient | null) => void;
