@@ -4,7 +4,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import {promisify} from 'node:util';
 import {getAppDataPath} from '@/config/paths';
-import {withExclusiveLock} from '@/utils/exclusive-file-lock';
+import {withExclusiveLock} from '@/utils/fs/exclusive-file-lock';
 import {isObject} from '@/utils/type-helpers';
 
 const execFileAsync = promisify(execFile);

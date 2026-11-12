@@ -17,7 +17,7 @@ import {existsSync, mkdirSync} from 'node:fs';
 import {readFile, rename, unlink, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {dirname, join, posix} from 'node:path';
-import {ensureNanocoderGitignore} from '@/utils/ensure-nanocoder-gitignore';
+import {ensureNanocoderGitignore} from '@/utils/fs/ensure-nanocoder-gitignore';
 
 export interface DaemonLock {
 	pid: number;

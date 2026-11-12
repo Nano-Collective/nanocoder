@@ -1,7 +1,7 @@
 import {existsSync, statSync} from 'node:fs';
 import {resolve} from 'node:path';
 import {getActiveSessionContext} from '@/services/session-context';
-import {isPathInside, isRealPathInside} from '@/utils/path-validation';
+import {isPathInside, isRealPathInside} from '@/utils/fs/path-validation';
 
 // Shared "where am I" for bash and every file tool. Without it, a `cd` in one
 // bash subshell never reaches the next command or the file tools — so a

@@ -7,7 +7,7 @@ import {
 	CACHE_FILE_TTL_MS,
 	MAX_CACHEABLE_FILE_SIZE_BYTES,
 	MAX_FILE_CACHE_BYTES,
-} from '../constants.js';
+} from '../../constants.js';
 import {
 	clearCache,
 	getCacheSize,

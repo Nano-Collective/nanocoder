@@ -27,8 +27,8 @@ import {
 	ensureDirectoryTrust,
 	untrustedReason,
 } from '@/config/trust/directory-trust';
-import {ensureNanocoderGitignore} from '@/utils/ensure-nanocoder-gitignore';
 import {formatError} from '@/utils/error-formatter';
+import {ensureNanocoderGitignore} from '@/utils/fs/ensure-nanocoder-gitignore';
 import {
 	isTrustLevel,
 	resolveTrustLevel,

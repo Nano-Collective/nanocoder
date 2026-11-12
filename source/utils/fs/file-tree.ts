@@ -1,6 +1,6 @@
 import {lstat, readdir} from 'node:fs/promises';
 import {join, relative} from 'node:path';
-import {loadGitignore} from '@/utils/gitignore-loader';
+import {loadGitignore} from '@/utils/fs/gitignore-loader';
 
 export interface FileNode {
 	name: string;

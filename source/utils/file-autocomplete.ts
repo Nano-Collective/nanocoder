@@ -1,6 +1,6 @@
 import {CACHE_FILE_LIST_TTL_MS} from '@/constants';
 import {formatError} from './error-formatter';
-import {walkProjectEntries} from './file-search';
+import {walkProjectEntries} from './fs/file-search';
 import {fuzzyScoreFilePath} from './fuzzy-matching';
 import {getLogger} from './logging';
 

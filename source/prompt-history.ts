@@ -2,8 +2,8 @@ import fs from 'fs/promises';
 import path from 'path';
 import {getClosestConfigFile} from '@/config/index';
 import {MAX_PROMPT_HISTORY_SIZE} from '@/constants';
-import {atomicWriteFile} from '@/utils/atomic-write';
 import {formatError} from '@/utils/error-formatter';
+import {atomicWriteFile} from '@/utils/fs/atomic-write';
 import {notifyError} from '@/utils/message-queue-core';
 import type {InputState} from './types/hooks';
 

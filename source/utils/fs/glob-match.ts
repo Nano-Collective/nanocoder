@@ -1,7 +1,7 @@
 import {LRUCache} from 'lru-cache';
 
 /**
- * Glob matching shared by file discovery (utils/file-search) and event,
+ * Glob matching shared by file discovery (utils/fs/file-search) and event,
  * formatter and lifecycle-hook filters (events/event-router). Patterns are
  * brace-expanded, tokenised, and matched with a dynamic-programming table
  * rather than a compiled regex, so no pattern can make matching backtrack.

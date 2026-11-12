@@ -19,7 +19,7 @@ import type {
 } from '@/types/config';
 import type {UserPreferences} from '@/types/index';
 import type {NanocoderShape, ThemePreset} from '@/types/ui';
-import {atomicWriteFileSync} from '@/utils/atomic-write';
+import {atomicWriteFileSync} from '@/utils/fs/atomic-write';
 import {getLogger} from '@/utils/logging';
 
 let PREFERENCES_PATH: string | null = null;

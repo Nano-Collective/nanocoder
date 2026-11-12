@@ -334,7 +334,7 @@ function projectRootSpellings(): string[] {
  * Every file tool names the argument `path`; `file_path` / `filePath` are
  * accepted because weaker models emit them and the formatters already
  * tolerate both. Not to be confused with `resolveFilePath` in
- * `@/utils/path-validation`, which resolves and containment-checks a path.
+ * `@/utils/fs/path-validation`, which resolves and containment-checks a path.
  */
 export function getToolFileArg(
 	args?: Record<string, unknown>,

@@ -1,5 +1,5 @@
 import type {useTheme} from '@/hooks/useTheme';
-import type {FlatNode} from '@/utils/file-tree';
+import type {FlatNode} from '@/utils/fs/file-tree';
 
 export interface FileExplorerProps {
 	onClose: () => void;

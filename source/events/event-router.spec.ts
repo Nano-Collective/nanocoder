@@ -370,7 +370,7 @@ test('one failing subscription neither skips the others nor rejects emit', async
 	]);
 });
 
-// matchGlob runs on the shared utils/glob-match engine.
+// matchGlob runs on the shared utils/fs/glob-match engine.
 
 test('matchGlob keeps a trailing **/ meaning "anything under this directory"', t => {
 	t.true(matchGlob('docs/**/', 'docs/a.md'));

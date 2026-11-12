@@ -26,7 +26,7 @@ import {createFileToolApproval} from '@/tools/runtime/tool-approval';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
-import {getCachedFileContent, invalidateCache} from '@/utils/file-cache';
+import {getCachedFileContent, invalidateCache} from '@/utils/fs/file-cache';
 import {
 	closeDiffInVSCode,
 	isVSCodeConnected,

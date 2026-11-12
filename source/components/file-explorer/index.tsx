@@ -17,7 +17,7 @@ import {
 	type FileNode,
 	flattenTree,
 	flattenTreeAll,
-} from '@/utils/file-tree';
+} from '@/utils/fs/file-tree';
 import {highlight} from '@/utils/highlighter';
 import {compressIndentation} from '@/utils/indentation-normalizer';
 import {getVSCodeServerSync} from '@/vscode/vscode-server';
