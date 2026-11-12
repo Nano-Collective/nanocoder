@@ -14,7 +14,7 @@
  */
 
 import {formatError} from '@/utils/error-formatter';
-import {globMatches} from '@/utils/glob-match';
+import {globMatches} from '@/utils/fs/glob-match';
 import type {Event, EventKind, Subscription} from './types';
 
 export interface SubscriptionDispatcher {
@@ -153,7 +153,7 @@ export function toPosixPath(path: string): string {
 
 /**
  * Whether `path` matches a subscription, formatter or hook glob. Uses the
- * shared matcher in utils/glob-match (`*`, `?`, `**`, `{a,b}`; no `!`
+ * shared matcher in utils/fs/glob-match (`*`, `?`, `**`, `{a,b}`; no `!`
  * negation), after normalising both sides to `/`.
  *
  * A pattern ending in `**` + `/` keeps its long-standing meaning here of

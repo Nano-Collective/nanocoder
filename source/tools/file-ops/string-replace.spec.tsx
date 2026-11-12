@@ -823,7 +823,7 @@ test('string_replace validator: handles file read errors', async t => {
 	const filePath = await createTestFile('test.txt', 'content\n');
 
 	// Mock getCachedFileContent to throw an error
-	const originalCache = await import('../../utils/file-cache.js');
+	const originalCache = await import('../../utils/fs/file-cache.js');
 	const mockError = new Error('EACCES: permission denied');
 
 	// Since we can't easily mock the file cache, we'll test with an invalid path

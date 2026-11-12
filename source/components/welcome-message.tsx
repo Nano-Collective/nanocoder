@@ -14,8 +14,8 @@ import {
 	getGitStatusSummarySync,
 } from '@/tools/git/utils';
 import {DEFAULT_NANOCODER_SHAPE, type NanocoderShape} from '@/types/ui';
+import {homeRelative, truncateMiddle} from '@/utils/fs/path';
 import {getPackageVersion, UNKNOWN_VERSION} from '@/utils/package-version';
-import {homeRelative, truncateMiddle} from '@/utils/path';
 import {wrapWithTrimmedContinuations} from '@/utils/text-wrapping';
 import {getRandomTip} from '@/utils/tips';
 

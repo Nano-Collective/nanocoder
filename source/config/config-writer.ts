@@ -3,7 +3,7 @@ import path from 'node:path';
 import {getClosestConfigFile} from '@/config/index';
 import {notifyPreferencesChanged} from '@/config/preferences';
 import type {UserPreferences} from '@/types/config';
-import {atomicWriteJson} from '@/utils/atomic-write';
+import {atomicWriteJson} from '@/utils/fs/atomic-write';
 import {notifyError} from '@/utils/message-queue-core';
 
 /**

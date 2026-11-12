@@ -21,9 +21,9 @@ import {
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
-import {getCachedFileContent} from '@/utils/file-cache';
-import {getFileType} from '@/utils/file-type-detector';
-import {isValidFilePath, resolveFilePath} from '@/utils/path-validation';
+import {getCachedFileContent} from '@/utils/fs/file-cache';
+import {getFileType} from '@/utils/fs/file-type-detector';
+import {isValidFilePath, resolveFilePath} from '@/utils/fs/path-validation';
 import {estimateTokens} from '@/utils/token-calculator';
 
 function formatReadStub(path: string, lineCount: number, size: number): string {

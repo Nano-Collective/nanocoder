@@ -15,8 +15,8 @@ import {
 	describeCheckpointGaps,
 	validateCheckpointName,
 } from '@/utils/checkpoint-utils';
-import {ensureNanocoderGitignore} from '@/utils/ensure-nanocoder-gitignore';
 import {formatError} from '@/utils/error-formatter';
+import {ensureNanocoderGitignore} from '@/utils/fs/ensure-nanocoder-gitignore';
 import {notifyWarning} from '@/utils/message-queue-core';
 import {FileSnapshotService} from './file-snapshot';
 /**

@@ -51,7 +51,7 @@ Nanocoder is a React-based CLI coding agent built with Ink.js that provides loca
 - `source/ai-sdk-client/` - Wrapper over Vercel AI SDK: chat handler, providers, converters, tool helpers, error handling
 - `source/tools/` - Built-in tools (file ops, bash, search, web fetch). Registered in `source/tools/tool-manager.ts`; file editors are `string_replace`, `diff_edit` and `write_file` (in `source/tools/file-ops/`, with their helpers: edit recovery, literal replace, line endings, path validators). `source/tools/runtime/` holds the tool-call runtime every frontend shares: per-tool approval checks, the approval / confirm / question queues, argument parsing, call ids, cancellation, schema validation, result truncation and the read tracker
 - `source/components/` - Ink UI components, plus the Ink-bound helpers other layers render through: `message-factory.ts` (`errorMsg`/`infoMsg`/...), `message-queue.tsx` (chat-queue renderer), `tool-result-display.tsx`
-- `source/utils/` - Framework-free helpers (logging, shutdown, error formatting, filesystem, text). Nothing here renders Ink: UI helpers live in `components/`
+- `source/utils/` - Framework-free helpers (logging, shutdown, error formatting, text). `utils/fs/` holds the filesystem helpers: atomic writes, file locks, the file cache, gitignore loading, file search (ripgrep) and file trees, glob matching, path validation. Nothing here renders Ink: UI helpers live in `components/`
 - `source/config/` - Configuration loading and preferences
 - `source/commands/` - Built-in slash commands (`/model`, `/provider`, `/clear`, etc.)
 - `source/custom-commands/` - User-defined markdown commands from `.nanocoder/commands/`

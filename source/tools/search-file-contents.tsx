@@ -15,8 +15,8 @@ import {
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
-import {searchProjectContents} from '@/utils/file-search';
-import {isValidFilePath, resolveFilePath} from '@/utils/path-validation';
+import {searchProjectContents} from '@/utils/fs/file-search';
+import {isValidFilePath, resolveFilePath} from '@/utils/fs/path-validation';
 import {estimateTokens} from '@/utils/token-calculator';
 
 const MAX_CONTEXT_LINES = 10;

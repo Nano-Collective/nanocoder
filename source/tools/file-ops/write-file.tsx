@@ -33,7 +33,7 @@ import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 import {truncateAnsi} from '@/utils/ansi-truncate';
 import {formatError} from '@/utils/error-formatter';
-import {getCachedFileContent, invalidateCache} from '@/utils/file-cache';
+import {getCachedFileContent, invalidateCache} from '@/utils/fs/file-cache';
 import {highlight} from '@/utils/highlighter';
 import {normalizeIndentation} from '@/utils/indentation-normalizer';
 import {estimateTokens} from '@/utils/token-calculator';

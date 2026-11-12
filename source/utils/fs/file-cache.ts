@@ -6,7 +6,7 @@ import {
 	MAX_FILE_CACHE_BYTES,
 	MAX_FILE_READ_RETRIES,
 } from '@/constants';
-import {isDerivedContentPath} from '@/utils/derived-content';
+import {isDerivedContentPath} from '@/utils/fs/derived-content';
 import {withPreservedProcess} from '@/utils/preserve-process';
 
 /**

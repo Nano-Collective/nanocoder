@@ -1,6 +1,6 @@
 import {readFile, stat} from 'node:fs/promises';
 import {extname} from 'node:path';
-import {walkProjectEntries} from '@/utils/file-search';
+import {walkProjectEntries} from '@/utils/fs/file-search';
 import {estimateTokens} from '@/utils/token-calculator';
 
 export interface RepoMapFile {

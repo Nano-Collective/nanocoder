@@ -5,7 +5,7 @@ import * as path from 'path';
 import {MAX_CHECKPOINT_FILES} from '@/constants';
 import type {CaptureResult} from '@/types/checkpoint';
 import {formatError} from '@/utils/error-formatter';
-import {loadGitignore} from '@/utils/gitignore-loader';
+import {loadGitignore} from '@/utils/fs/gitignore-loader';
 import {getLogger} from '@/utils/logging';
 import {notifyWarning} from '@/utils/message-queue-core';
 

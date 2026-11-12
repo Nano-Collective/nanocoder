@@ -9,10 +9,10 @@ import {
 	DEFAULT_IGNORE_DIRS,
 	findNanocoderIgnoreFile,
 	loadGitignore,
-} from '@/utils/gitignore-loader';
-import {globMatches, MAX_GLOB_PATTERN_LENGTH} from '@/utils/glob-match';
+} from '@/utils/fs/gitignore-loader';
+import {globMatches, MAX_GLOB_PATTERN_LENGTH} from '@/utils/fs/glob-match';
+import {resolveRipgrepPath} from '@/utils/fs/ripgrep-path';
 import {getLogger} from '@/utils/logging';
-import {resolveRipgrepPath} from '@/utils/ripgrep-path';
 
 const MAX_CONTEXT_CONTENT_LENGTH = 1500;
 const MAX_MATCH_CONTENT_LENGTH = 300;

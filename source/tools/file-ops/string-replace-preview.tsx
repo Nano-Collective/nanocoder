@@ -12,7 +12,7 @@ import {getLanguageFromExtension} from '@/tools/file-ops/programming-language-he
 import type {Colors} from '@/types/index';
 import {truncateAnsi} from '@/utils/ansi-truncate';
 import {formatError} from '@/utils/error-formatter';
-import {getCachedFileContent} from '@/utils/file-cache';
+import {getCachedFileContent} from '@/utils/fs/file-cache';
 import {highlight} from '@/utils/highlighter';
 import {normalizeIndentation} from '@/utils/indentation-normalizer';
 import {truncateText} from '@/utils/truncate-text';

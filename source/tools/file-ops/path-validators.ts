@@ -1,9 +1,9 @@
 import path, {extname} from 'node:path';
 import {getProjectRoot, getSessionCwd} from '@/services/session-cwd';
-import {isDerivedContentPath} from '@/utils/derived-content';
 import {formatError} from '@/utils/error-formatter';
-import type {CachedFile} from '@/utils/file-cache';
-import {isValidFilePath, resolveFilePath} from '@/utils/path-validation';
+import {isDerivedContentPath} from '@/utils/fs/derived-content';
+import type {CachedFile} from '@/utils/fs/file-cache';
+import {isValidFilePath, resolveFilePath} from '@/utils/fs/path-validation';
 
 type ValidationResult = {valid: true} | {valid: false; error: string};
 

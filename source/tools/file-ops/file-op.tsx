@@ -11,7 +11,7 @@ import {validatePath, validatePathPair} from '@/tools/file-ops/path-validators';
 import {createFileToolApproval} from '@/tools/runtime/tool-approval';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
-import {invalidateCache} from '@/utils/file-cache';
+import {invalidateCache} from '@/utils/fs/file-cache';
 
 type FileOperation = 'delete' | 'move' | 'copy' | 'mkdir';
 

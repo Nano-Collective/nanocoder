@@ -10,7 +10,7 @@
 import {existsSync, mkdirSync, readFileSync} from 'fs';
 import {join} from 'path';
 import {getConfigPath} from '@/config/paths';
-import {atomicWriteFileSync} from '@/utils/atomic-write';
+import {atomicWriteFileSync} from '@/utils/fs/atomic-write';
 
 export interface JsonCredentialStore<T> {
 	/** Read the full store, returning {} if missing or unreadable. */

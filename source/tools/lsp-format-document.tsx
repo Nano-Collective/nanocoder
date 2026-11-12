@@ -14,7 +14,7 @@ import {createFileToolApproval} from '@/tools/runtime/tool-approval';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
-import {invalidateCache} from '@/utils/file-cache';
+import {invalidateCache} from '@/utils/fs/file-cache';
 
 interface FormatDocumentArgs {
 	path: string;
