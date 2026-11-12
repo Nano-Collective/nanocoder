@@ -1,4 +1,6 @@
+import {execFile} from 'node:child_process';
 import net from 'node:net';
+import {promisify} from 'node:util';
 import {Box, Text} from 'ink';
 import React from 'react';
 import {loadProviderConfigs} from '@/client-factory';
@@ -21,8 +23,15 @@ import {formatError} from '@/utils/error-formatter';
 import {generateKey} from '@/utils/key-generator';
 import {getPackageVersion} from '@/utils/package-version';
 import {isLocalURL} from '@/utils/url-utils';
+import {
+	type ApiCompatibility,
+	type FetchModelsResult,
+	fetchModels,
+} from '@/wizards/utils/fetch-models';
 
 const LOCAL_PROBE_TIMEOUT_MS = 500;
+const API_PROBE_TIMEOUT_MS = 3000;
+const executeFile = promisify(execFile);
 
 type Section<T> = {status: 'ok'; data: T} | {status: 'error'; error: string};
 
@@ -32,6 +41,17 @@ export interface DoctorProvider {
 	baseURL: string | null;
 	location: 'local' | 'hosted' | 'unknown';
 	reachability: 'reachable' | 'unreachable' | 'skipped' | 'not-local';
+	apiProbe?: DoctorApiProbe;
+}
+
+export interface DoctorApiProbe {
+	status: 'response' | 'http-error' | 'unreachable' | 'unsupported';
+	httpStatus?: number;
+	hint?: string;
+	models: Array<{
+		id: string;
+		status: 'available' | 'not-listed' | 'unknown';
+	}>;
 }
 
 export interface DoctorLspServer {
@@ -75,6 +95,10 @@ export interface DoctorReport {
 	mcp: Section<DoctorMcpServer[]>;
 	hooks: Section<DoctorHook[]>;
 	formatters: Section<DoctorFormatter[]>;
+	deepChecks?: {
+		nodeSupported: boolean;
+		tools: Array<{name: string; available: boolean}>;
+	};
 	daemon: Section<
 		| {state: 'running'; lock: DaemonLock; uptimeMs: number}
 		| {state: 'not-running'}
@@ -95,6 +119,110 @@ export interface DoctorDependencies {
 	probeLocalProvider: (
 		baseURL: string,
 	) => Promise<'reachable' | 'unreachable' | 'skipped'>;
+	getProviderModels: typeof fetchModels;
+	probeExecutable: (command: string) => Promise<boolean>;
+}
+
+interface DoctorOptions {
+	probe?: boolean;
+}
+
+function sanitizedUrl(value: string): string {
+	try {
+		const url = new URL(value);
+		return url.protocol === 'http:' || url.protocol === 'https:'
+			? url.origin
+			: '[configured URL]';
+	} catch {
+		return '[invalid URL]';
+	}
+}
+
+function apiCompatibility(provider: AIProviderConfig): ApiCompatibility {
+	if (provider.sdkProvider === 'anthropic') return 'anthropic';
+	if (provider.sdkProvider === 'google') return 'google';
+	if (provider.name.trim().toLowerCase() === 'ollama') return 'ollama';
+	return 'openai-compatible';
+}
+
+function httpErrorHint(status: number): string {
+	if (status === 401 || status === 403) return 'Authentication rejected';
+	if (status === 404)
+		return 'Model endpoint not found; check the base URL path';
+	if (status === 429) return 'Rate limited';
+	if (status >= 500) return 'Provider server error';
+	return 'Provider returned an HTTP error';
+}
+
+async function probeProviderApi(
+	provider: AIProviderConfig,
+	dependencies: DoctorDependencies,
+): Promise<DoctorApiProbe> {
+	const models = provider.models.map(id => ({id, status: 'unknown' as const}));
+	if (
+		provider.sdkProvider === 'chatgpt-codex' ||
+		provider.sdkProvider === 'github-copilot'
+	)
+		return {
+			status: 'unsupported',
+			hint: 'OAuth provider model listing is not supported by this probe',
+			models,
+		};
+
+	const baseURL = provider.config.baseURL;
+	if (!baseURL)
+		return {status: 'unsupported', hint: 'No base URL configured', models};
+
+	let result: FetchModelsResult;
+	try {
+		result = await dependencies.getProviderModels(
+			baseURL,
+			apiCompatibility(provider),
+			provider.config.apiKey,
+			{
+				timeoutMs: API_PROBE_TIMEOUT_MS,
+				headers: provider.config.headers,
+			},
+		);
+	} catch {
+		return {status: 'unreachable', hint: 'No HTTP response', models};
+	}
+
+	if (result.statusCode === undefined)
+		return {status: 'unreachable', hint: 'No HTTP response', models};
+	if (result.statusCode >= 400)
+		return {
+			status: 'http-error',
+			httpStatus: result.statusCode,
+			hint: httpErrorHint(result.statusCode),
+			models,
+		};
+	if (result.models.length === 0)
+		return {
+			status: 'response',
+			httpStatus: result.statusCode,
+			hint: 'API responded without a model list',
+			models,
+		};
+
+	const available = new Set(result.models.map(model => model.id));
+	return {
+		status: 'response',
+		httpStatus: result.statusCode,
+		models: provider.models.map(id => ({
+			id,
+			status: available.has(id) ? 'available' : 'not-listed',
+		})),
+	};
+}
+
+async function probeExecutable(command: string): Promise<boolean> {
+	try {
+		await executeFile(command, ['--version'], {timeout: 1000});
+		return true;
+	} catch {
+		return false;
+	}
 }
 
 async function probeLocalProvider(
@@ -160,6 +288,8 @@ function defaultDependencies(): DoctorDependencies {
 		getToolManager,
 		getDaemonLock,
 		probeLocalProvider,
+		getProviderModels: fetchModels,
+		probeExecutable,
 	};
 }
 
@@ -173,17 +303,21 @@ async function settle<T>(load: () => Promise<T> | T): Promise<Section<T>> {
 
 async function collectProviders(
 	deps: DoctorDependencies,
+	probe: boolean,
 ): Promise<DoctorProvider[]> {
 	const providers = deps.getProviders();
 
 	return Promise.all(
 		providers.map(async provider => {
-			const baseURL = provider.config.baseURL ?? null;
-			const local = baseURL ? isLocalURL(baseURL) : false;
+			const configuredBaseURL = provider.config.baseURL ?? null;
+			const baseURL = configuredBaseURL
+				? sanitizedUrl(configuredBaseURL)
+				: null;
+			const local = configuredBaseURL ? isLocalURL(configuredBaseURL) : false;
 			const reachability =
-				baseURL && local
-					? await deps.probeLocalProvider(baseURL)
-					: baseURL
+				configuredBaseURL && local
+					? await deps.probeLocalProvider(configuredBaseURL)
+					: configuredBaseURL
 						? 'not-local'
 						: 'skipped';
 
@@ -191,11 +325,27 @@ async function collectProviders(
 				name: provider.name,
 				modelCount: provider.models.length,
 				baseURL,
-				location: baseURL ? (local ? 'local' : 'hosted') : 'unknown',
+				location: configuredBaseURL ? (local ? 'local' : 'hosted') : 'unknown',
 				reachability,
+				...(probe ? {apiProbe: await probeProviderApi(provider, deps)} : {}),
 			};
 		}),
 	);
+}
+
+async function collectDeepChecks(
+	dependencies: DoctorDependencies,
+): Promise<NonNullable<DoctorReport['deepChecks']>> {
+	const majorVersion = Number.parseInt(process.versions.node, 10);
+	return {
+		nodeSupported: Number.isFinite(majorVersion) && majorVersion >= 22,
+		tools: await Promise.all(
+			['rg', 'git'].map(async name => ({
+				name,
+				available: await dependencies.probeExecutable(name),
+			})),
+		),
+	};
 }
 
 function collectMcp(toolManager: ToolManager | null): DoctorMcpServer[] {
@@ -211,7 +361,7 @@ function collectMcp(toolManager: ToolManager | null): DoctorMcpServer[] {
 			toolCount: serverTools.length,
 			resourceCount: serverInfo?.resourceCount ?? 0,
 			promptCount: serverInfo?.promptCount ?? 0,
-			url: serverInfo?.url,
+			url: serverInfo?.url ? sanitizedUrl(serverInfo.url) : undefined,
 		};
 	});
 }
@@ -262,17 +412,29 @@ function normalizeDaemon(
 
 export async function collectDoctorReport(
 	dependencies: DoctorDependencies = defaultDependencies(),
+	options: DoctorOptions = {},
 ): Promise<DoctorReport> {
-	const [nanocoder, providers, lsp, mcp, hooks, formatters, daemonLock] =
-		await Promise.all([
-			settle(() => dependencies.getVersion().then(version => ({version}))),
-			settle(() => collectProviders(dependencies)),
-			settle(() => dependencies.getLspStatus()),
-			settle(() => collectMcp(dependencies.getToolManager())),
-			settle(() => collectHooks()),
-			settle(() => collectFormatters()),
-			settle(() => dependencies.getDaemonLock()),
-		]);
+	const [
+		nanocoder,
+		providers,
+		lsp,
+		mcp,
+		hooks,
+		formatters,
+		daemonLock,
+		deepChecks,
+	] = await Promise.all([
+		settle(() => dependencies.getVersion().then(version => ({version}))),
+		settle(() => collectProviders(dependencies, options.probe === true)),
+		settle(() => dependencies.getLspStatus()),
+		settle(() => collectMcp(dependencies.getToolManager())),
+		settle(() => collectHooks()),
+		settle(() => collectFormatters()),
+		settle(() => dependencies.getDaemonLock()),
+		options.probe
+			? collectDeepChecks(dependencies)
+			: Promise.resolve(undefined),
+	]);
 
 	return {
 		system: {
@@ -286,6 +448,7 @@ export async function collectDoctorReport(
 		mcp,
 		hooks,
 		formatters,
+		...(deepChecks ? {deepChecks} : {}),
 		daemon:
 			daemonLock.status === 'ok'
 				? normalizeDaemon(daemonLock.data, dependencies.now())
@@ -353,6 +516,23 @@ export function Doctor({report}: {report: DoctorReport}) {
 				<SectionError message={report.nanocoder.error} />
 			)}
 
+			{report.deepChecks ? (
+				<>
+					<SectionTitle>Deep checks</SectionTitle>
+					<Text color={colors.text}>
+						• Node {report.system.nodeVersion}:{' '}
+						{report.deepChecks.nodeSupported
+							? 'supported'
+							: 'unsupported (requires Node 22 or newer)'}
+					</Text>
+					{report.deepChecks.tools.map(tool => (
+						<Text key={tool.name} color={colors.text}>
+							• {tool.name}: {tool.available ? 'found' : 'not found'}
+						</Text>
+					))}
+				</>
+			) : null}
+
 			<SectionTitle>Providers</SectionTitle>
 			{report.providers.status === 'error' ? (
 				<SectionError message={report.providers.error} />
@@ -365,6 +545,19 @@ export function Doctor({report}: {report: DoctorReport}) {
 						{provider.modelCount === 1 ? '' : 's'} • {provider.location}
 						{provider.baseURL ? ` • ${provider.baseURL}` : ''}
 						{provider.location === 'local' ? ` • ${provider.reachability}` : ''}
+						{provider.apiProbe ? (
+							<>
+								{' • API '}
+								{provider.apiProbe.status === 'response'
+									? `HTTP ${provider.apiProbe.httpStatus}`
+									: provider.apiProbe.status === 'http-error'
+										? `HTTP ${provider.apiProbe.httpStatus} • ${provider.apiProbe.hint}`
+										: (provider.apiProbe.hint ?? provider.apiProbe.status)}
+								{provider.apiProbe.models.map(
+									model => ` • ${model.id}: ${model.status}`,
+								)}
+							</>
+						) : null}
 					</Text>
 				))
 			)}
@@ -464,9 +657,12 @@ export function Doctor({report}: {report: DoctorReport}) {
 
 export const doctorCommand: Command = {
 	name: 'doctor',
-	description: 'Show environment health report for bug reports',
-	handler: async () => {
-		const report = await collectDoctorReport();
+	description:
+		'Show environment health report; use --probe for provider checks',
+	handler: async args => {
+		const report = await collectDoctorReport(undefined, {
+			probe: args.includes('--probe'),
+		});
 		return React.createElement(Doctor, {
 			key: generateKey('doctor'),
 			report,

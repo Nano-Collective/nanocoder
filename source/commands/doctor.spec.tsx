@@ -34,7 +34,8 @@ function createDependencies(
 				type: 'openai',
 				models: ['anthropic/claude-sonnet-4'],
 				config: {
-					baseURL: 'https://openrouter.ai/api/v1',
+					baseURL:
+						'https://user:secret@openrouter.ai/api/v1/path-secret?token=url-secret',
 					apiKey: 'secret-hosted-key',
 				},
 			},
@@ -61,6 +62,7 @@ function createDependencies(
 					transport: 'stdio',
 					connected: true,
 					description: 'Project filesystem',
+					url: 'https://user:mcp-secret@mcp.example/server/path-secret?token=mcp-token',
 				}),
 			}) as never,
 		getDaemonLock: async () => ({
@@ -70,6 +72,15 @@ function createDependencies(
 			projectRoot: '/tmp/project',
 		}),
 		probeLocalProvider: async () => 'reachable',
+		getProviderModels: async () => ({
+			success: true,
+			statusCode: 200,
+			models: [
+				{id: 'llama3', name: 'llama3'},
+				{id: 'anthropic/claude-sonnet-4', name: 'Claude'},
+			],
+		}),
+		probeExecutable: async () => true,
 		...overrides,
 	};
 }
@@ -171,10 +182,77 @@ test('Doctor reports providers without leaking api keys', async t => {
 	t.regex(output, /reachable/);
 	t.regex(output, /OpenRouter/);
 	t.regex(output, /hosted/);
-	t.regex(output, /https:\/\/openrouter\.ai\/api\/v1/);
+	t.regex(output, /https:\/\/openrouter\.ai/);
+	t.regex(output, /https:\/\/mcp\.example/);
 	t.notRegex(output, /secret-local-key/);
 	t.notRegex(output, /secret-hosted-key/);
+	t.notRegex(output, /path-secret|url-secret|mcp-secret|mcp-token/);
 	t.notRegex(output, /apiKey/);
+});
+
+test('deep provider and tool checks run only on request and report safe outcomes', async t => {
+	let providerCalls = 0;
+	const probedTools: string[] = [];
+	const dependencies = createDependencies({
+		getProviderModels: async baseURL => {
+			providerCalls++;
+			if (baseURL.includes('openrouter'))
+				return {
+					success: false,
+					statusCode: 401,
+					models: [],
+					error: 'secret-hosted-key must never be rendered',
+				};
+			return {
+				success: true,
+				statusCode: 200,
+				models: [{id: 'llama3', name: 'llama3'}],
+			};
+		},
+		probeExecutable: async command => {
+			probedTools.push(command);
+			return command === 'git';
+		},
+	});
+
+	const fast = await collectDoctorReport(dependencies);
+	t.is(fast.deepChecks, undefined);
+	t.is(providerCalls, 0);
+	t.deepEqual(probedTools, []);
+
+	const report = await collectDoctorReport(dependencies, {probe: true});
+	t.is(report.providers.status, 'ok');
+	if (report.providers.status !== 'ok') return;
+	t.deepEqual(report.deepChecks?.tools, [
+		{name: 'rg', available: false},
+		{name: 'git', available: true},
+	]);
+	t.is(report.deepChecks?.nodeSupported, true);
+	t.deepEqual(report.providers.data[0]?.apiProbe, {
+		status: 'response',
+		httpStatus: 200,
+		models: [
+			{id: 'llama3', status: 'available'},
+			{id: 'qwen', status: 'not-listed'},
+		],
+	});
+	t.deepEqual(report.providers.data[1]?.apiProbe, {
+		status: 'http-error',
+		httpStatus: 401,
+		hint: 'Authentication rejected',
+		models: [{id: 'anthropic/claude-sonnet-4', status: 'unknown'}],
+	});
+	t.is(providerCalls, 2);
+	t.deepEqual(probedTools, ['rg', 'git']);
+	const {lastFrame} = renderWithTheme(<Doctor report={report} />);
+	const output = lastFrame()!;
+	t.regex(output, /Deep checks/);
+	t.regex(output, /API/);
+	t.regex(output, /HTTP 200/);
+	t.regex(output, /Authentication rejected/);
+	t.regex(output, /llama3: available/);
+	t.regex(output, /qwen: not-listed/);
+	t.notRegex(output, /secret-hosted-key|path-secret|url-secret/);
 });
 
 test('Doctor reports LSP MCP and daemon details', async t => {
@@ -264,7 +342,7 @@ test('doctorCommand has expected shape', async t => {
 	t.is(doctorCommand.name, 'doctor');
 	t.is(
 		doctorCommand.description,
-		'Show environment health report for bug reports',
+		'Show environment health report; use --probe for provider checks',
 	);
 
 	const element = await doctorCommand.handler([], [], {});
