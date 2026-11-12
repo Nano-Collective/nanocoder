@@ -15,7 +15,6 @@ import {consultPluginPermission} from '@/plugins/host';
 import {CheckpointManager} from '@/services/checkpoint-manager';
 import {runPreToolUseGate} from '@/services/lifecycle-hooks';
 import {getProjectRoot} from '@/services/session-cwd';
-import {generateKey} from '@/session/key-generator';
 import {resolveToolApproval} from '@/tools/approval-policy';
 import {isFileMutationTool} from '@/tools/runtime/tool-approval';
 import {parseToolArguments} from '@/tools/runtime/tool-args-parser';
@@ -34,6 +33,7 @@ import type {
 	ToolResult,
 } from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
+import {generateKey} from '@/utils/key-generator';
 import {notifyWarning} from '@/utils/message-queue-core';
 import {closeAllDiffsInVSCode} from '@/vscode/index';
 import {buildAutoDiagnosticsMessage} from './auto-diagnostics';

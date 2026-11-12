@@ -23,7 +23,6 @@ import {InfoField} from '@/components/ui/info-field';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
-import {generateKey} from '@/session/key-generator';
 import {checkSkillBundle, type SkillCheckReport} from '@/skills/check';
 import {
 	applyPromotion,
@@ -33,6 +32,7 @@ import {
 import {findSkill, getLoadedSkills} from '@/skills/skill-registry';
 import type {Command, StatefulCommand} from '@/types/index';
 import type {Skill} from '@/types/skills';
+import {generateKey} from '@/utils/key-generator';
 
 function memberCount(skill: Skill): string {
 	const parts: string[] = [];

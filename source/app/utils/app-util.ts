@@ -5,7 +5,6 @@ import {errorMsg} from '@/components/message-factory';
 import {clearExpandableToolResults} from '@/components/tool-result-display';
 import {BASH_OUTPUT_PREFIX} from '@/constants';
 import {clearPendingHookContext} from '@/services/lifecycle-hooks';
-import {generateKey} from '@/session/key-generator';
 import {
 	distillBashResultForLLM,
 	executeBashCommand,
@@ -14,6 +13,7 @@ import {clearReadTracker} from '@/tools/runtime/read-tracker';
 import type {ImageAttachment, LLMClient} from '@/types/core';
 import type {Message, MessageSubmissionOptions} from '@/types/index';
 import {formatError} from '@/utils/error-formatter';
+import {generateKey} from '@/utils/key-generator';
 import {dispatchSlashCommand} from './command-dispatcher';
 
 /**

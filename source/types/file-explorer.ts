@@ -1,4 +1,4 @@
-import type {useTheme} from '@/hooks/useTheme';
+import type {Colors} from '@/types/ui';
 import type {FlatNode} from '@/utils/fs/file-tree';
 
 export interface FileExplorerProps {
@@ -12,5 +12,5 @@ export interface TreeItemProps {
 	isHighlighted: boolean;
 	isSelected: boolean;
 	selectedFiles: Set<string>;
-	colors: ReturnType<typeof useTheme>['colors'];
+	colors: Colors;
 }

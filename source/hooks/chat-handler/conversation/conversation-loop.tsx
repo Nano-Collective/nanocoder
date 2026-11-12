@@ -19,7 +19,6 @@ import {buildCompletionNote} from '@/conversation/completion-note';
 import {MessageBuilder} from '@/conversation/message-builder';
 import {markRunFailed} from '@/conversation/run-outcome';
 import {runLifecycleHooks} from '@/services/lifecycle-hooks';
-import {generateKey} from '@/session/key-generator';
 import {signalQuestion} from '@/tools/runtime/question-queue';
 import {bumpReadContentGeneration} from '@/tools/runtime/read-tracker';
 import {createCancellationResults} from '@/tools/runtime/tool-cancellation';
@@ -39,6 +38,7 @@ import type {
 	ToolResult,
 } from '@/types/core';
 import {buildResponseUsageBounded} from '@/usage/response-usage';
+import {generateKey} from '@/utils/key-generator';
 import {estimateTokens} from '@/utils/token-calculator';
 import {filterValidToolCalls} from '../utils/tool-filters';
 import {

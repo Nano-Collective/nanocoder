@@ -1,7 +1,6 @@
-import type {TitleShape} from '@/components/ui/styled-title';
 import type {DevelopmentMode} from '@/types/core';
 import type {FirewallConfig} from '@/types/firewall';
-import type {NanocoderShape, ThemePreset} from '@/types/ui';
+import type {NanocoderShape, ThemePreset, TitleShape} from '@/types/ui';
 import type {TrustLevel} from '@/verify/trust-level';
 
 // Supported AI SDK provider packages

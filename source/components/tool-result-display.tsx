@@ -5,10 +5,10 @@ import {ErrorMessage} from '@/components/message-box';
 import ToolMessage, {ToolOutputContext} from '@/components/tool-message';
 import {useTheme} from '@/hooks/useTheme';
 import type {BashExecutionState} from '@/services/bash-executor';
-import {generateKey} from '@/session/key-generator';
 import {parseToolArguments} from '@/tools/runtime/tool-args-parser';
 import type {ToolManager} from '@/tools/tool-manager';
 import type {ToolCall, ToolResult} from '@/types/index';
+import {generateKey} from '@/utils/key-generator';
 
 /**
  * Tools that should always show expanded (full formatter) output,

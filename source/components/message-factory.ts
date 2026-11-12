@@ -14,7 +14,7 @@ import {
 	SuccessMessage,
 	WarningMessage,
 } from '@/components/message-box';
-import {generateKey} from '@/session/key-generator';
+import {generateKey} from '@/utils/key-generator';
 
 type MessageComponent = (props: {
 	message: string;

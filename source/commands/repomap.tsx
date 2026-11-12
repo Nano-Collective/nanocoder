@@ -10,8 +10,8 @@ import {
 	type RepoMap,
 } from '@/repo-map/index';
 import {getProjectRoot} from '@/services/session-cwd';
-import {generateKey} from '@/session/key-generator';
 import type {Command} from '@/types/index';
+import {generateKey} from '@/utils/key-generator';
 
 const MIN_TOKENS = 64;
 const MAX_TOKENS = 32_000;

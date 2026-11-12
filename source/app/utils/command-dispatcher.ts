@@ -14,7 +14,6 @@ import {
 } from '@/conversation/compaction/inline-overrides';
 import {parseCustomCommandArgs} from '@/custom-commands/args';
 import {expandCustomCommandPrompt} from '@/custom-commands/executor';
-import {generateKey} from '@/session/key-generator';
 import {
 	type CommandCompletion,
 	type CommandContext,
@@ -22,6 +21,7 @@ import {
 	isStatefulCommand,
 	type MessageSubmissionOptions,
 } from '@/types/index';
+import {generateKey} from '@/utils/key-generator';
 import {handleMCPPromptCommand} from './handlers/mcp-prompt-handler';
 import {stripVSCodeContext} from './vscode-context';
 

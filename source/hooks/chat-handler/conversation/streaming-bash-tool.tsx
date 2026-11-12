@@ -5,7 +5,6 @@ import {
 	appendPostToolUseOutput,
 	runPreToolUseGate,
 } from '@/services/lifecycle-hooks';
-import {generateKey} from '@/session/key-generator';
 import {
 	bashRunFailed,
 	distillBashResultForLLM,
@@ -15,6 +14,7 @@ import {parseToolArguments} from '@/tools/runtime/tool-args-parser';
 import {formatValidationError} from '@/tools/runtime/tool-validation';
 import type {ToolManager} from '@/tools/tool-manager';
 import type {ToolCall, ToolResult} from '@/types/core';
+import {generateKey} from '@/utils/key-generator';
 
 export interface StreamingBashRun {
 	toolCall: ToolCall;

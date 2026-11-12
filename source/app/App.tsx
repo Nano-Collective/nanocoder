@@ -18,7 +18,6 @@ import SecurityDisclaimer from '@/components/security-disclaimer';
 import StreamingMessage from '@/components/streaming-message';
 import StreamingReasoning from '@/components/streaming-reasoning';
 import {SubagentView} from '@/components/subagent-view';
-import type {TitleShape} from '@/components/ui/styled-title';
 import {
 	shouldPromptExtensionInstall,
 	VSCodeExtensionPrompt,
@@ -55,8 +54,8 @@ import {CheckpointManager} from '@/services/checkpoint-manager';
 import {setNotificationsConfig} from '@/services/notifications';
 import {getProjectRoot} from '@/services/session-cwd';
 import {getAllSubagentProgress} from '@/services/subagent-events';
-import {generateKey} from '@/session/key-generator';
-import type {ThemePreset} from '@/types/ui';
+import type {ThemePreset, TitleShape} from '@/types/ui';
+import {generateKey} from '@/utils/key-generator';
 import {createPinoLogger} from '@/utils/logging/pino-logger';
 import {getShutdownManager} from '@/utils/shutdown';
 import {takeLegacyVscodeDeprecationNotice} from '@/vscode/deprecation';

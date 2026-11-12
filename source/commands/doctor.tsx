@@ -14,11 +14,11 @@ import {getLSPManager} from '@/lsp/lsp-manager';
 import {getToolManager} from '@/message-handler';
 import {getConfiguredFormatters} from '@/services/formatters';
 import {getConfiguredHooks} from '@/services/lifecycle-hooks';
-import {generateKey} from '@/session/key-generator';
 import type {ToolManager} from '@/tools/tool-manager';
 import {HOOK_EVENTS, type HookEvent} from '@/types/config';
 import type {AIProviderConfig, Command} from '@/types/index';
 import {formatError} from '@/utils/error-formatter';
+import {generateKey} from '@/utils/key-generator';
 import {getPackageVersion} from '@/utils/package-version';
 import {isLocalURL} from '@/utils/url-utils';
 

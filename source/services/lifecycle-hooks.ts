@@ -8,10 +8,10 @@ import {matchGlob, toPosixPath} from '@/events/event-router';
 import {runPluginHooks} from '@/plugins/host';
 import {getActiveSessionContext} from '@/services/session-context';
 import {getProjectRoot, getSafeSessionCwd} from '@/services/session-cwd';
-import {getKeyGeneratorSessionId} from '@/session/key-generator';
 import {truncateToolResult} from '@/tools/runtime/truncate-tool-result';
 import type {HookDefinition, HookEvent} from '@/types/config';
 import type {ToolCall} from '@/types/core';
+import {getKeyGeneratorSessionId} from '@/utils/key-generator';
 import {notifyError} from '@/utils/message-queue-core';
 import {signalProcessTree} from '@/utils/process-tree';
 

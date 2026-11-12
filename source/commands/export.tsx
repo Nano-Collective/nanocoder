@@ -7,13 +7,13 @@ import {
 } from '@/commands/export-path';
 import {ErrorMessage, SuccessMessage} from '@/components/message-box';
 import {getProjectRoot, getSafeSessionCwd} from '@/services/session-cwd';
-import {generateKey} from '@/session/key-generator';
 import {Command, Message} from '@/types/index';
 import {formatError} from '@/utils/error-formatter';
 import {atomicWriteFile} from '@/utils/fs/atomic-write';
 import {resolveFilePath} from '@/utils/fs/path-validation';
 import {writeUniqueFile} from '@/utils/fs/write-unique-file';
 import {generateExportFilename} from '@/utils/generate-export-filename';
+import {generateKey} from '@/utils/key-generator';
 
 const formatMessageContent = (message: Message) => {
 	let content = '';

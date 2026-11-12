@@ -14,10 +14,10 @@ import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {getToolManager} from '@/message-handler';
-import {generateKey} from '@/session/key-generator';
 import {findSkill} from '@/skills/skill-registry';
 import type {ToolManager} from '@/tools/tool-manager';
 import type {Command, StatefulCommand} from '@/types/index';
+import {generateKey} from '@/utils/key-generator';
 
 export interface GroupedTools {
 	builtin: string[];

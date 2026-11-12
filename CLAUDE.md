@@ -156,6 +156,7 @@ Bundle tools default to `tools_visibility: scoped`: hidden from the global tool 
 - **TypeScript strict mode** with `@/*` path alias mapping to `source/*`
 - **Biome** for formatting (tabs, single quotes, semicolons, trailing commas)
 - **Key lint rules**: `useExhaustiveDependencies: error`, `noUnusedVariables: error`, `noUnusedImports: error`
+- **Layering**: `utils/`, `types/` and `config/` are the bottom layer. They must not value-import `components/`, `hooks/`, `tools/`, `mcp/`, `session/` or `app/components/`. Each type-only import into those needs an allowlist entry with a reason. A value import of `app/`, `ai-sdk-client/` or `services/` needs a documented exception. `source/layering.spec.ts` enforces all of this; its failure message names the file, the import and the fix
 - **React 19** with Ink.js for CLI rendering
 
 ## Testing

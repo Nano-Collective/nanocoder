@@ -8,9 +8,9 @@ import UserMessage from '@/components/user-message';
 import {getShowUsageFooter} from '@/config/preferences';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
-import {generateKey} from '@/session/key-generator';
 import {parseToolArguments} from '@/tools/runtime/tool-args-parser';
 import type {Message, ToolCall} from '@/types/core';
+import {generateKey} from '@/utils/key-generator';
 import {truncateText} from '@/utils/truncate-text';
 
 /**

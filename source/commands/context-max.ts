@@ -6,8 +6,8 @@ import {
 	resolveModelContextLimit,
 	setSessionContextLimit,
 } from '@/models/index';
-import {generateKey} from '@/session/key-generator';
 import type {StatefulCommand} from '@/types/index';
+import {generateKey} from '@/utils/key-generator';
 import {parseContextLimit} from '@/utils/parse-context-limit';
 
 /**
