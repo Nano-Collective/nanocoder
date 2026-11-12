@@ -1,3 +1,4 @@
+import path from 'node:path';
 import type {
 	Agent,
 	AgentSideConnection,
@@ -40,6 +41,7 @@ import {
 	ACP_EXT_METHODS,
 	ACP_EXT_PREFIX,
 	ACP_SESSION_TITLE_NOTIFICATION,
+	ACP_TRUST_REQUIRED_ERROR_CODE,
 	acpMcpServersToConfig,
 	acpModeToDevelopmentMode,
 	developmentModeToAcpMode,
@@ -50,11 +52,16 @@ import {
 	parseDisabledTools,
 } from '@/acp/acp-capabilities';
 import {acpContentToUserMessage} from '@/acp/acp-content';
-import {clearAcpReadStubs, runAcpConversation} from '@/acp/acp-conversation';
+import {
+	clearAcpReadStubs,
+	runAcpConversation,
+	settleUnansweredToolCalls,
+} from '@/acp/acp-conversation';
 import {
 	acpCustomCommandText,
 	builtinCommandReply,
 } from '@/acp/acp-custom-command';
+import {type FolderTools, loadFolderTools} from '@/acp/acp-folder-tools';
 import {AcpSession} from '@/acp/acp-session';
 import {resolveTruncationPoint} from '@/acp/acp-timeline';
 import type {AcpInitContext} from '@/acp/acp-types';
@@ -64,14 +71,30 @@ import {isInternalWalkthroughMessage} from '@/artifacts/walkthrough-lifecycle';
 import {createLLMClient} from '@/client-factory';
 import {getAppConfig} from '@/config/index';
 import {
+	getLastUsedModel,
 	getProjectContextPreferences,
 	loadPreferences,
 	updateLastUsed,
 } from '@/config/preferences';
+import {
+	ensureDirectoryTrust,
+	untrustedReason,
+} from '@/config/trust/directory-trust';
 import {resolveTune} from '@/config/tune';
+import {
+	buildSystemPrompt,
+	setLastBuiltPrompt,
+} from '@/conversation/prompt-builder';
+import {resolveStartupProvider} from '@/hooks/startup-provider';
 import {appendRelevantProjectContextWithCount} from '@/memory/project-context';
-import {setAutoCommitClient} from '@/services/auto-commit';
-import {runInSessionCwdScope} from '@/services/session-cwd';
+import {withTrustedProjectPlugins} from '@/plugins/host';
+import {type HookContext, runLifecycleHooks} from '@/services/lifecycle-hooks';
+import {
+	createSessionContext,
+	runInSessionContext,
+	runOutsideSessionContext,
+	type SessionContext,
+} from '@/services/session-context';
 import {cancelSubagentRun} from '@/services/subagent-events';
 import {TimelineManager} from '@/services/timeline-manager';
 import {maybeGenerateTitle} from '@/session/maybe-generate-title';
@@ -84,7 +107,6 @@ import type {ToolManager} from '@/tools/tool-manager';
 import {getTuneToolMode} from '@/types/config';
 import type {LLMClient} from '@/types/core';
 import {getLogger} from '@/utils/logging';
-import {buildSystemPrompt, setLastBuiltPrompt} from '@/utils/prompt-builder';
 
 const logger = getLogger();
 
@@ -126,6 +148,13 @@ export class AcpAgent implements Agent {
 	 * session uses the shared set in `initContext`.
 	 */
 	private sessionToolManagers = new Map<string, ToolManager>();
+	/**
+	 * Tools and commands of the project folders sessions run in other than the
+	 * launch folder, by folder, set up on first use and shared by its sessions.
+	 */
+	private folderTools = new Map<string, Promise<FolderTools>>();
+	/** The folder tools each session in such a folder uses. */
+	private sessionFolders = new Map<string, FolderTools>();
 
 	constructor(
 		initContext: AcpInitContext,
@@ -160,7 +189,21 @@ export class AcpAgent implements Agent {
 		};
 	}
 
+	// Every request that acts on one session runs inside that session's context,
+	// so the config it reads (getAppConfig and the loaders behind it) is its own
+	// folder's, not the folder the agent was started in.
 	async newSession(params: NewSessionRequest): Promise<NewSessionResponse> {
+		this.assertDirectoryTrusted(params.cwd);
+		const context = createSessionContext(params.cwd);
+		return runInSessionContext(context, () =>
+			this.openNewSession(params, context),
+		);
+	}
+
+	private async openNewSession(
+		params: NewSessionRequest,
+		context: SessionContext,
+	): Promise<NewSessionResponse> {
 		const sessionId = crypto.randomUUID();
 		logger.info(`ACP newSession: ${sessionId} cwd=${params.cwd}`);
 
@@ -168,7 +211,10 @@ export class AcpAgent implements Agent {
 			sessionId,
 			params.cwd,
 			parseDisabledTools(params._meta),
+			context,
 		);
+		await this.startOnFolderDefault(session);
+		await this.attachFolderTools(session);
 		await this.applyMcpServers(session, params.mcpServers);
 
 		await sessionManager.initialize();
@@ -176,7 +222,7 @@ export class AcpAgent implements Agent {
 
 		// Emit available slash commands
 		const availableCommands = (
-			this.initContext.customCommandLoader?.getAllCommands() || []
+			this.baseToolsFor(sessionId).customCommandLoader?.getAllCommands() || []
 		).map(c => ({
 			name: `/${c.fullName}`,
 			description: c.metadata.description || '',
@@ -202,6 +248,17 @@ export class AcpAgent implements Agent {
 
 	async loadSession(params: LoadSessionRequest): Promise<LoadSessionResponse> {
 		const existing = this.sessions.get(params.sessionId);
+		const context = existing?.context ?? createSessionContext(params.cwd);
+		return runInSessionContext(context, () =>
+			this.openLoadedSession(params, existing, context),
+		);
+	}
+
+	private async openLoadedSession(
+		params: LoadSessionRequest,
+		existing: AcpSession | undefined,
+		context: SessionContext,
+	): Promise<LoadSessionResponse> {
 		let session = existing;
 		let modelFallback: Awaited<ReturnType<typeof this.restoreSavedModel>>;
 
@@ -213,11 +270,14 @@ export class AcpAgent implements Agent {
 				// Same error as resumeSession so clients can tell a missing session apart.
 				throw new Error(`Session not found on disk: ${params.sessionId}`);
 			}
+			this.assertDirectoryTrusted(params.cwd);
 			session = this.registerSession(
 				params.sessionId,
 				params.cwd,
 				parseDisabledTools(params._meta),
+				context,
 			);
+			await this.startOnFolderDefault(session);
 			clearAcpReadStubs(params.sessionId);
 			session.messages = persisted.messages;
 			modelFallback = await this.restoreSavedModel(session, persisted);
@@ -230,6 +290,7 @@ export class AcpAgent implements Agent {
 		logger.info(
 			`ACP loadSession: ${params.sessionId} cwd=${params.cwd} restored=${Boolean(existing)}`,
 		);
+		await this.attachFolderTools(session);
 		await this.applyMcpServers(session, params.mcpServers);
 
 		// Replay history so the client can rebuild the thread.
@@ -252,7 +313,15 @@ export class AcpAgent implements Agent {
 		if (!session) {
 			throw new Error(`Session not found: ${params.sessionId}`);
 		}
+		return runInSessionContext(session.context, () =>
+			this.runPrompt(params, session),
+		);
+	}
 
+	private async runPrompt(
+		params: PromptRequest,
+		session: AcpSession,
+	): Promise<PromptResponse> {
 		// Wait for any in-flight turn. Rejecting overlap made the VS Code
 		// webview toast `RequestError: Internal error` whenever a follow-up
 		// was submitted mid-turn. Acquire before the first await so two
@@ -312,8 +381,9 @@ export class AcpAgent implements Agent {
 				// If the 'command name' contains a slash, it's likely a file path (e.g. /home/user/file.ts)
 				// not a slash command. Skip command interception.
 				if (!commandName.includes('/')) {
-					const command =
-						this.initContext.customCommandLoader?.getCommand(commandName);
+					const command = this.baseToolsFor(
+						session.sessionId,
+					).customCommandLoader?.getCommand(commandName);
 
 					if (command) {
 						contextualUserText = acpCustomCommandText(
@@ -362,7 +432,9 @@ export class AcpAgent implements Agent {
 						const reply = builtinCommandReply(
 							commandName,
 							isVsCodeClient(this.clientInfo),
-							this.initContext.customCommandLoader?.getAllCommands() ?? [],
+							this.baseToolsFor(
+								session.sessionId,
+							).customCommandLoader?.getAllCommands() ?? [],
 						);
 						if (reply) {
 							return sendBuiltinReply(reply);
@@ -372,6 +444,46 @@ export class AcpAgent implements Agent {
 						const errorMsg = `Unrecognized slash command: \`/${commandName}\`. Type \`/help\` to see available commands.`;
 						return sendBuiltinReply(errorMsg);
 					}
+				}
+			}
+
+			// user-prompt-submit gates what goes to the model as the user's own
+			// words, as in the TUI: a custom slash command is left alone.
+			const isCommand =
+				trimmedUserText.startsWith('/') &&
+				!trimmedUserText.split(/\s+/)[0].substring(1).includes('/');
+			if (!isCommand) {
+				const gate = await this.runSessionHooks(session, 'user-prompt-submit', {
+					prompt: userText,
+				});
+				if (gate.blocked) {
+					const reason = gate.reason ?? 'Prompt blocked by a hook.';
+					// Neither the prompt nor the reason ever reaches the model.
+					session.messages = [
+						...session.messages,
+						{role: 'user', content: userText, displayOnly: true},
+						{role: 'assistant', content: reason, displayOnly: true},
+					];
+					this.conn.sessionUpdate({
+						sessionId: params.sessionId,
+						update: {
+							sessionUpdate: 'agent_message_chunk',
+							content: {type: 'text', text: reason},
+						},
+					});
+					return {stopReason: 'refusal'};
+				}
+				// Whatever session-start left for this session, plus this hook's
+				// own stdout.
+				const startOutput = session.startHookOutput
+					? await session.startHookOutput
+					: '';
+				session.startHookOutput = null;
+				const hookContext = [startOutput, gate.output]
+					.filter(Boolean)
+					.join('\n\n');
+				if (hookContext) {
+					contextualUserText = `<hook-context>\n${hookContext}\n</hook-context>\n\n${contextualUserText}`;
 				}
 			}
 
@@ -412,7 +524,9 @@ export class AcpAgent implements Agent {
 			const nonInteractiveAlwaysAllow = config.alwaysAllow ?? [];
 
 			// The model is offered the tools its calls will run against.
-			const sessionTools = this.sessionToolManagers.get(session.sessionId);
+			const sessionTools =
+				this.sessionToolManagers.get(session.sessionId) ??
+				this.sessionFolders.get(session.sessionId)?.toolManager;
 			const response = await runAcpConversation({
 				session,
 				client: this.clientFor(session),
@@ -428,16 +542,27 @@ export class AcpAgent implements Agent {
 				previousAssistant,
 				turnDurationMs,
 			);
-			turnSucceeded = true;
+			// A turn cancelled part way through returns rather than throws. It is
+			// still not a clean turn, so it must not be titled from.
+			turnSucceeded = response.stopReason !== 'cancelled';
 			return response;
 		} catch (error) {
 			const errorMsg = error instanceof Error ? error.message : String(error);
+			// The turn keeps what it already did; only a batch it was part way
+			// through needs closing off.
+			session.messages = settleUnansweredToolCalls(session.messages);
 
 			// A user-initiated cancellation isn't a failure: surface it inline in
 			// the chat and resolve cleanly instead of rejecting the ACP `prompt`
 			// call, otherwise the VS Code client's catch handler shows a
 			// "RequestError: Internal error" toast on top of the cancel notice.
-			if (errorMsg === 'Operation was cancelled') {
+			//
+			// Told by the turn's own signal, which session/cancel and close
+			// abort, not by the error's wording: whatever threw once the user
+			// stopped the turn (a tool, compaction, a dropped client write) is
+			// the cancellation, and a timeout that happens to say "cancelled"
+			// is not.
+			if (session.abortController.signal.aborted) {
 				const cancelNotice = '\n\n_Cancelled by user._\n';
 				this.conn.sessionUpdate({
 					sessionId: params.sessionId,
@@ -525,28 +650,97 @@ export class AcpAgent implements Agent {
 	async closeSession(
 		params: CloseSessionRequest,
 	): Promise<CloseSessionResponse> {
-		const session = this.sessions.get(params.sessionId);
-		if (!session) {
-			return {};
-		}
 		logger.info(`ACP closeSession: session=${params.sessionId}`);
+		await this.evictSession(params.sessionId, async session => {
+			await session.timeline.dispose();
+		});
+		return {};
+	}
+
+	/**
+	 * Takes a live session out of service: cancels its turn, drops it from the
+	 * map, and waits for the turn (and any prompts queued behind it, which bail
+	 * out on `closed`) to give up the turn lock. `whileIdle` then runs with the
+	 * lock held, followed by releasing the session's MCP servers, which the
+	 * turn may still have been calling.
+	 *
+	 * Every path that retires a session goes through here. A turn left running
+	 * would save the session to disk from its finally after a delete, bringing
+	 * it back, or keep writing checkpoints after its timeline lock is gone.
+	 * Returns false when no live session had this id.
+	 */
+	private async evictSession(
+		sessionId: string,
+		whileIdle: (session: AcpSession) => Promise<void>,
+	): Promise<boolean> {
+		const session = this.sessions.get(sessionId);
+		if (!session) {
+			return false;
+		}
 		session.close();
-		this.sessions.delete(params.sessionId);
-		clearAcpReadStubs(params.sessionId);
-		// close() only signals the running turn to stop. Wait for it (and any
-		// prompts queued behind it, which bail out on `closed`) to give up the
-		// turn lock before releasing the timeline lock, so a checkpoint the
-		// turn is still writing never lands after the lock is gone.
+		this.sessions.delete(sessionId);
+		this.sessionFolders.delete(sessionId);
+		clearAcpReadStubs(sessionId);
 		const ticket = session.acquireTurn();
 		await ticket.ready;
 		try {
-			await session.timeline.dispose();
-			// After the turn is over: it may still have been calling these tools.
-			await this.releaseMcpServers(params.sessionId);
+			await whileIdle(session);
+			await this.releaseMcpServers(sessionId);
 		} finally {
 			session.releaseTurn();
 		}
-		return {};
+		// Close, delete and a resume that replaces the live copy all end it.
+		await this.endSession(session);
+		return true;
+	}
+
+	/**
+	 * Runs `session-end` for every session still open, for a shutdown. The
+	 * hooks of each are bounded by their own short default timeout, and run
+	 * side by side so a few open chats still fit the shutdown budget.
+	 */
+	async endAllSessions(): Promise<void> {
+		const open = [...this.sessions.values()];
+		this.sessions.clear();
+		await Promise.all(open.map(session => this.endSession(session)));
+		// The MCP servers of the other folders sessions ran in.
+		const folders = [...this.folderTools.values()];
+		this.folderTools.clear();
+		this.sessionFolders.clear();
+		await Promise.all(
+			folders.map(async tools => {
+				try {
+					await (await tools).toolManager.disconnectMCP();
+				} catch (error) {
+					logger.warn(`ACP folder MCP disconnect failed: ${String(error)}`);
+				}
+			}),
+		);
+	}
+
+	/** Runs `session-end` for a session that is going away. Never throws. */
+	private async endSession(session: AcpSession): Promise<void> {
+		await this.runSessionHooks(session, 'session-end').catch(error => {
+			logger.warn(
+				`ACP session ${session.sessionId}: session-end hooks failed: ${String(error)}`,
+			);
+		});
+	}
+
+	/**
+	 * Lifecycle hooks for one session run where its turns run: in its working
+	 * directory, with its project's trusted plugins.
+	 */
+	private runSessionHooks(
+		session: AcpSession,
+		event: 'session-start' | 'user-prompt-submit' | 'session-end',
+		context: HookContext = {},
+	) {
+		return runInSessionContext(session.context, () =>
+			withTrustedProjectPlugins(session.cwd, () =>
+				runLifecycleHooks(event, context),
+			),
+		);
 	}
 
 	async setSessionMode(
@@ -556,7 +750,15 @@ export class AcpAgent implements Agent {
 		if (!session) {
 			throw new Error(`Session not found: ${params.sessionId}`);
 		}
+		return runInSessionContext(session.context, () =>
+			this.applySessionMode(params, session),
+		);
+	}
 
+	private async applySessionMode(
+		params: SetSessionModeRequest,
+		session: AcpSession,
+	): Promise<SetSessionModeResponse> {
 		session.developmentMode = acpModeToDevelopmentMode(params.modeId);
 		logger.info(
 			`ACP setSessionMode: session=${params.sessionId} mode=${params.modeId}`,
@@ -583,7 +785,15 @@ export class AcpAgent implements Agent {
 		if (!session) {
 			throw new Error(`Session not found: ${params.sessionId}`);
 		}
+		return runInSessionContext(session.context, () =>
+			this.applySessionConfigOption(params, session),
+		);
+	}
 
+	private async applySessionConfigOption(
+		params: SetSessionConfigOptionRequest,
+		session: AcpSession,
+	): Promise<SetSessionConfigOptionResponse> {
 		if (params.configId === 'provider') {
 			const providerId = params.value;
 			if (typeof providerId !== 'string') {
@@ -660,9 +870,10 @@ export class AcpAgent implements Agent {
 
 	/**
 	 * Moves one session to a provider, model and client of its own. The choice
-	 * also becomes what sessions created from now on start with, and what the
-	 * user's last-used selection and auto-commit follow, as it did when the
-	 * selection was process-wide.
+	 * also becomes what sessions created from now on start with, and the user's
+	 * last-used selection. Auto-commit in this session writes its messages with
+	 * the session's client, which each turn passes to its tool calls, so it no
+	 * longer follows whichever session picked a model last.
 	 */
 	private selectModel(
 		session: AcpSession,
@@ -676,7 +887,6 @@ export class AcpAgent implements Agent {
 		this.initContext.provider = provider;
 		this.initContext.model = model;
 		this.initContext.client = client;
-		setAutoCommitClient(client);
 		// A provider with no model is not a selection worth remembering.
 		if (model) {
 			updateLastUsed(provider, model);
@@ -704,6 +914,11 @@ export class AcpAgent implements Agent {
 		saved: {provider: string; model: string},
 	): Promise<{provider: string; model: string} | undefined> {
 		if (saved.provider === session.provider && saved.model === session.model) {
+			return undefined;
+		}
+		// Saved with no model to name (a provider that lists none): nothing to
+		// go back to, so the session stays on the default without a fallback.
+		if (!saved.provider || !saved.model) {
 			return undefined;
 		}
 		try {
@@ -753,10 +968,11 @@ export class AcpAgent implements Agent {
 		params: DeleteSessionRequest,
 	): Promise<DeleteSessionResponse> {
 		await sessionManager.initialize();
-		const existing = this.sessions.get(params.sessionId);
-		if (existing) {
-			await existing.timeline.clear();
-		} else {
+		// The turn's own save to disk lands before the delete below, not after.
+		const evicted = await this.evictSession(params.sessionId, async session => {
+			await session.timeline.clear();
+		});
+		if (!evicted) {
 			const persisted = await sessionManager.loadSession(params.sessionId);
 			if (persisted) {
 				await new TimelineManager(
@@ -764,12 +980,10 @@ export class AcpAgent implements Agent {
 					params.sessionId,
 				).clear();
 			}
+			clearAcpReadStubs(params.sessionId);
+			await this.releaseMcpServers(params.sessionId);
 		}
 		await sessionManager.deleteSession(params.sessionId);
-		// Evict from in-memory map if present
-		this.sessions.delete(params.sessionId);
-		clearAcpReadStubs(params.sessionId);
-		await this.releaseMcpServers(params.sessionId);
 		logger.info(`ACP deleteSession: ${params.sessionId}`);
 		return {};
 	}
@@ -778,19 +992,56 @@ export class AcpAgent implements Agent {
 		params: ResumeSessionRequest,
 	): Promise<ResumeSessionResponse> {
 		await sessionManager.initialize();
-		const persisted = await sessionManager.loadSession(params.sessionId);
+		const saved = await sessionManager.loadSession(params.sessionId);
+		// A session is written to disk once it has something to keep, so one
+		// resumed straight after session/new exists only in memory.
+		const live = this.sessions.get(params.sessionId);
+		const workingDirectory = saved?.workingDirectory ?? live?.cwd;
+		if (workingDirectory === undefined) {
+			throw new Error(`Session not found on disk: ${params.sessionId}`);
+		}
+		// Refused before anything is retired: a live copy keeps running.
+		this.assertDirectoryTrusted(workingDirectory);
+		const context = createSessionContext(workingDirectory);
+		return runInSessionContext(context, () =>
+			this.reopenSession(params, context, live),
+		);
+	}
+
+	private async reopenSession(
+		params: ResumeSessionRequest,
+		context: SessionContext,
+		live: AcpSession | undefined,
+	): Promise<ResumeSessionResponse> {
+		// Retire any live copy first, so one id never has two sessions running,
+		// and read the history after its turn has saved its last messages.
+		const evicted = await this.evictSession(params.sessionId, async session => {
+			await session.timeline.dispose();
+		});
+		if (!evicted) {
+			await this.releaseMcpServers(params.sessionId);
+		}
+		// Its turn saves on the way out, so the disk is read after the eviction.
+		// Still nothing there: the live copy had nothing worth saving, and is
+		// resumed as it was.
+		const persisted =
+			(await sessionManager.loadSession(params.sessionId)) ??
+			(live && {
+				workingDirectory: live.cwd,
+				messages: live.messages,
+				...this.savedModelOf(live),
+			});
 		if (!persisted) {
 			throw new Error(`Session not found on disk: ${params.sessionId}`);
 		}
-
-		// Evict any stale in-memory session first
-		this.sessions.delete(params.sessionId);
-		await this.releaseMcpServers(params.sessionId);
 		const session = this.registerSession(
 			params.sessionId,
 			persisted.workingDirectory,
 			parseDisabledTools(params._meta),
+			context,
 		);
+		await this.startOnFolderDefault(session);
+		await this.attachFolderTools(session);
 		await this.applyMcpServers(session, params.mcpServers);
 		session.messages = persisted.messages;
 		clearAcpReadStubs(params.sessionId);
@@ -1032,6 +1283,32 @@ export class AcpAgent implements Agent {
 		return {};
 	}
 
+	/**
+	 * A session's tools, bash and AGENTS.md all come from its own `cwd`, and
+	 * its project plugins load from there. The server checked only the folder
+	 * it was started in, so any other folder must be trusted on its own.
+	 */
+	private assertDirectoryTrusted(cwd: string): void {
+		const {launchDirectory} = this.initContext;
+		if (launchDirectory === undefined) return;
+		const resolved = path.resolve(cwd);
+		if (resolved === path.resolve(launchDirectory)) return;
+		const trust = ensureDirectoryTrust(resolved, false);
+		if (trust.trusted) return;
+		const status =
+			trust.recheck === 'changed'
+				? 'changed'
+				: trust.recheck === 'upgrade'
+					? 'needs-re-approval'
+					: 'not-trusted';
+		logger.warn(`ACP session refused: ${resolved} is ${status}`);
+		throw new RequestError(
+			ACP_TRUST_REQUIRED_ERROR_CODE,
+			`Directory ${resolved} ${untrustedReason(trust.recheck)}. Trust it by running nanocoder there once, or with "nanocoder trust --status" and "nanocoder trust --grant <fingerprint>" in that folder.`,
+			{'nanocoder/trustRequired': {cwd: resolved, status}},
+		);
+	}
+
 	private requireSession(sessionId: string): AcpSession {
 		const session = this.sessions.get(sessionId);
 		if (!session) {
@@ -1040,9 +1317,41 @@ export class AcpAgent implements Agent {
 		return session;
 	}
 
+	/** The tools and commands a session starts from: its folder's, or the launch folder's. */
+	private baseToolsFor(sessionId: string): FolderTools {
+		return (
+			this.sessionFolders.get(sessionId) ?? {
+				toolManager: this.initContext.toolManager,
+				customCommandLoader: this.initContext.customCommandLoader,
+			}
+		);
+	}
+
+	/**
+	 * Gives a session in a folder other than the launch folder that folder's
+	 * tools, commands, skills and MCP servers, set up the first time a session
+	 * opens there. Runs in the session's context, so they come from its config.
+	 */
+	private async attachFolderTools(session: AcpSession): Promise<void> {
+		const {launchDirectory} = this.initContext;
+		if (launchDirectory === undefined) return;
+		const root = path.resolve(session.cwd);
+		if (root === path.resolve(launchDirectory)) return;
+
+		let tools = this.folderTools.get(root);
+		if (!tools) {
+			tools = loadFolderTools(root);
+			this.folderTools.set(root, tools);
+		}
+		this.sessionFolders.set(session.sessionId, await tools);
+		// The prompt lists the tools the session has.
+		this.buildSystemPromptForSession(session);
+	}
+
 	private toolManagerFor(sessionId: string): ToolManager {
 		return (
-			this.sessionToolManagers.get(sessionId) ?? this.initContext.toolManager
+			this.sessionToolManagers.get(sessionId) ??
+			this.baseToolsFor(sessionId).toolManager
 		);
 	}
 
@@ -1067,7 +1376,9 @@ export class AcpAgent implements Agent {
 		if (servers.length === 0) {
 			await this.releaseMcpServers(session.sessionId);
 		} else {
-			const manager = existing ?? this.initContext.toolManager.forSession();
+			const manager =
+				existing ??
+				this.baseToolsFor(session.sessionId).toolManager.forSession();
 			this.sessionToolManagers.set(session.sessionId, manager);
 			try {
 				await manager.initializeMCP(servers, result => {
@@ -1107,7 +1418,8 @@ export class AcpAgent implements Agent {
 	private registerSession(
 		sessionId: string,
 		cwd: string,
-		disabledTools: string[] = [],
+		disabledTools: string[],
+		context: SessionContext,
 	): AcpSession {
 		const session = new AcpSession({
 			sessionId,
@@ -1115,6 +1427,7 @@ export class AcpAgent implements Agent {
 			conn: this.conn,
 			clientCapabilities: this.clientCapabilities,
 			initialMode: this.initContext.initialMode,
+			context,
 		});
 		session.disabledTools = disabledTools;
 		// Pinned now, so a later selection in another session does not move it.
@@ -1123,7 +1436,71 @@ export class AcpAgent implements Agent {
 		session.client = this.initContext.client;
 		this.sessions.set(sessionId, session);
 		this.buildSystemPromptForSession(session);
+		// Not awaited: a slow hook must not hold up session/new. The first prompt
+		// waits for it, so its output still reaches the model on that prompt.
+		session.startHookOutput = this.runSessionHooks(session, 'session-start')
+			.then(({output}) => output)
+			.catch(error => {
+				logger.warn(
+					`ACP session ${sessionId}: session-start hooks failed: ${String(error)}`,
+				);
+				return '';
+			});
 		return session;
+	}
+
+	/**
+	 * A session in another project starts on the provider nanocoder started in
+	 * that folder would pick, not on the launch folder's: the launch folder's
+	 * provider may not be configured there, or be configured differently. Runs
+	 * in the session's context, so `getAppConfig()` is the folder's config. The
+	 * process default is kept when the folder configures that same provider
+	 * the same way, and when the folder's choice cannot be reached.
+	 */
+	private async startOnFolderDefault(session: AcpSession): Promise<void> {
+		const {launchDirectory} = this.initContext;
+		if (launchDirectory === undefined) return;
+		if (path.resolve(session.cwd) === path.resolve(launchDirectory)) return;
+
+		const folderProviders = getAppConfig().providers ?? [];
+		const launchProviders = runOutsideSessionContext(
+			() => getAppConfig().providers ?? [],
+		);
+		const sameAsLaunch = (name: string) => {
+			const folder = folderProviders.find(p => p.name === name);
+			const launch = launchProviders.find(p => p.name === name);
+			return (
+				folder !== undefined &&
+				launch !== undefined &&
+				JSON.stringify(folder) === JSON.stringify(launch)
+			);
+		};
+		if (sameAsLaunch(session.provider)) return;
+
+		const {provider} = resolveStartupProvider(
+			undefined,
+			undefined,
+			loadPreferences().lastProvider,
+			folderProviders.map(p => p.name),
+		);
+		try {
+			const {client, actualProvider} = await createLLMClient(provider);
+			const lastUsed = getLastUsedModel(actualProvider);
+			if (lastUsed && (await client.getAvailableModels()).includes(lastUsed)) {
+				client.setModel(lastUsed);
+			}
+			session.provider = actualProvider;
+			session.model = client.getCurrentModel();
+			session.client = client;
+			this.buildSystemPromptForSession(session);
+			logger.info(
+				`ACP session ${session.sessionId} starts on ${session.provider}/${session.model} from ${session.cwd}`,
+			);
+		} catch (error) {
+			logger.warn(
+				`ACP session ${session.sessionId} stays on ${session.provider}/${session.model}: no provider of ${session.cwd} could be used (${error instanceof Error ? error.message : String(error)})`,
+			);
+		}
 	}
 
 	/**
@@ -1334,6 +1711,7 @@ export class AcpAgent implements Agent {
 		// one would change when every other session compacts, mid-turn included.
 		session.aggressiveCompact = Boolean(tune.enabled && tune.aggressiveCompact);
 		const tuneToolMode = getTuneToolMode(tune);
+		session.nativeToolsDisabled = tuneToolMode !== 'native';
 		const toolsDisabled =
 			tuneToolMode !== 'native' || isToolCallingDisabled(provider, model);
 		const fallbackToolFormat: 'xml' | 'json' =
@@ -1347,7 +1725,7 @@ export class AcpAgent implements Agent {
 		);
 		// Inside the session's scope, so the working directory the prompt reports
 		// and the AGENTS.md it appends come from the session's `cwd`.
-		const basePrompt = runInSessionCwdScope(session.cwdScope, () =>
+		const basePrompt = runInSessionContext(session.context, () =>
 			buildSystemPrompt(
 				session.developmentMode,
 				tune,
@@ -1374,6 +1752,19 @@ export class AcpAgent implements Agent {
 		session.systemMessage = session.baseSystemMessage;
 	}
 
+	/**
+	 * What a saved session records as its provider and model: the session's
+	 * own, else what its client says, never a made-up default. An invented
+	 * pair would be restored on resume as if the user had picked it.
+	 */
+	private savedModelOf(session: AcpSession): {provider: string; model: string} {
+		const client = this.clientFor(session);
+		return {
+			provider: session.provider || client.getProviderConfig().name || '',
+			model: session.model || client.getCurrentModel() || '',
+		};
+	}
+
 	private async saveAcpSessionToDisk(session: AcpSession): Promise<void> {
 		try {
 			// First, see if it already exists to preserve createdAt/title
@@ -1394,6 +1785,7 @@ export class AcpAgent implements Agent {
 			if (saveableMessages.length === 0) {
 				if (existingSession) {
 					await sessionManager.saveSession({
+						...this.savedModelOf(session),
 						id: session.sessionId,
 						title: existingSession.title || 'New Session',
 						titleManuallySet: existingSession.titleManuallySet,
@@ -1402,8 +1794,6 @@ export class AcpAgent implements Agent {
 						createdAt: existingSession.createdAt || timestamp,
 						lastAccessedAt: timestamp,
 						messageCount: 0,
-						provider: session.provider || 'openai',
-						model: session.model || 'gpt-4o',
 						workingDirectory: session.cwd,
 						messages: [],
 					});
@@ -1424,6 +1814,7 @@ export class AcpAgent implements Agent {
 			}
 
 			await sessionManager.saveSession({
+				...this.savedModelOf(session),
 				id: session.sessionId,
 				title,
 				titleManuallySet: existingSession?.titleManuallySet,
@@ -1432,8 +1823,6 @@ export class AcpAgent implements Agent {
 				createdAt: existingSession?.createdAt || timestamp,
 				lastAccessedAt: timestamp,
 				messageCount: saveableMessages.length,
-				provider: session.provider || 'openai',
-				model: session.model || 'gpt-4o',
 				workingDirectory: session.cwd,
 				messages: session.messages.map(m => {
 					if (m.role === 'user' && typeof m.content === 'string') {

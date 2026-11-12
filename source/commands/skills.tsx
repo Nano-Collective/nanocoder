@@ -11,11 +11,18 @@
 
 import {Box, Text} from 'ink';
 import React from 'react';
+import {createSkillBundle} from '@/commands/create-scaffold';
+import {scheduleCommand} from '@/commands/schedule';
+import {
+	errorMsg,
+	infoMsg,
+	successMsg,
+	warningMsg,
+} from '@/components/message-factory';
 import {InfoField} from '@/components/ui/info-field';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
-import {generateKey} from '@/session/key-generator';
 import {checkSkillBundle, type SkillCheckReport} from '@/skills/check';
 import {
 	applyPromotion,
@@ -23,14 +30,9 @@ import {
 	planPromotion,
 } from '@/skills/promote';
 import {findSkill, getLoadedSkills} from '@/skills/skill-registry';
-import type {Command} from '@/types/index';
+import type {Command, StatefulCommand} from '@/types/index';
 import type {Skill} from '@/types/skills';
-import {
-	errorMsg,
-	infoMsg,
-	successMsg,
-	warningMsg,
-} from '@/utils/message-factory';
+import {generateKey} from '@/utils/key-generator';
 
 function memberCount(skill: Skill): string {
 	const parts: string[] = [];
@@ -302,11 +304,17 @@ async function handlePromotion(direction: PromoteDirection, args: string[]) {
 	);
 }
 
-export const skillsCommand: Command = {
+/** The read-only part of /skills: every subcommand that only shows something. */
+const skillsView: Command = {
 	name: 'skills',
 	description:
-		'List loaded skills. Subcommands: show <name>, create <name>, check <name>, promote <name>, demote <name>.',
-	handler: async (args, _messages, _metadata) => {
+		'List loaded skills. Subcommands: show <name>, create <name>, check <name>, promote <name>, demote <name>, schedule.',
+	handler: async (args, messages, metadata) => {
+		if (args[0] === 'schedule') {
+			// Formerly the top-level /schedule, which still expands to this.
+			return scheduleCommand.handler(args.slice(1), messages, metadata);
+		}
+
 		if (args[0] === 'promote' || args[0] === 'demote') {
 			return handlePromotion(args[0], args);
 		}
@@ -363,5 +371,27 @@ export const skillsCommand: Command = {
 				key: generateKey('skills'),
 			}),
 		);
+	},
+};
+
+/**
+ * /skills. `create` write files and may start a design
+ * conversation, so they run with app state; everything else is `skillsView`.
+ */
+export const skillsCommand: StatefulCommand = {
+	name: skillsView.name,
+	description: skillsView.description,
+	run: async context => {
+		const [sub, name] = context.rawArgs;
+		if (sub === 'create') {
+			return createSkillBundle(name, context);
+		}
+		return {
+			show: await skillsView.handler(
+				context.rawArgs,
+				context.messages,
+				context.handlerMetadata(),
+			),
+		};
 	},
 };

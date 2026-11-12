@@ -2,7 +2,6 @@ import {Box, Text} from 'ink';
 import React from 'react';
 import {TaskListDisplay} from '@/components/task-list-display';
 import {useTheme} from '@/hooks/useTheme';
-import {generateKey} from '@/session/key-generator';
 import {
 	clearAllTasks,
 	generateTaskId,
@@ -11,6 +10,7 @@ import {
 } from '@/tools/tasks/storage';
 import type {Task} from '@/tools/tasks/types';
 import type {Command} from '@/types/index';
+import {generateKey} from '@/utils/key-generator';
 
 function TaskMessage({message, isError}: {message: string; isError?: boolean}) {
 	const {colors} = useTheme();

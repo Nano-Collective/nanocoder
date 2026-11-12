@@ -18,6 +18,7 @@
  * See `agents/2026-05-20-skills-unification-plan.md` step 11.
  */
 
+import {formatError} from '@/utils/error-formatter';
 import type {SubscriptionDispatcher} from './event-router';
 import type {Event, Subscription, SubscriptionId} from './types';
 
@@ -66,7 +67,13 @@ export class BackpressureDispatcher implements SubscriptionDispatcher {
 			const pending = this.pendingEvents.get(sub.id);
 			if (pending) {
 				this.pendingEvents.delete(sub.id);
-				void this.dispatchImmediate(pending.sub, pending.event);
+				// Runs from a timer, after emit() has returned, so nothing upstream
+				// awaits it: a rejection here would be unhandled.
+				this.dispatchImmediate(pending.sub, pending.event).catch(error => {
+					console.error(
+						`Subscription "${pending.sub.id}" failed on ${pending.event.kind}: ${formatError(error)}`,
+					);
+				});
 			}
 		}, this.options.debounceMs ?? DEFAULT_DEBOUNCE_MS);
 		this.debouncers.set(sub.id, timer);

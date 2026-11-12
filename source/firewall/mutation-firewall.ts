@@ -1,12 +1,14 @@
 import {relative, resolve} from 'node:path';
 import ignore from 'ignore';
 import {getAppConfig} from '@/config/index';
+import {getProjectRoot, getSafeSessionCwd} from '@/services/session-cwd';
 import type {
 	FirewallConfig,
 	FirewallEvaluationResult,
 	FirewallViolation,
 } from '@/types/firewall';
-import {FIREWALL_DEFAULTS} from '@/types/firewall';
+import {FIREWALL_DEFAULTS, resolveFirewallConfig} from '@/types/firewall';
+import {notifyWarning} from '@/utils/message-queue-core';
 import {
 	detectAnyTypeInjections,
 	detectDeletedTestBlocks,
@@ -15,21 +17,7 @@ import {
 
 function resolveInitialConfig(): FirewallConfig {
 	try {
-		const appConfig = getAppConfig();
-		if (appConfig.firewall) {
-			const fw = appConfig.firewall;
-			const enabled = fw.enabled ?? (fw.mode ? fw.mode !== 'disabled' : false);
-			const mode = fw.mode ?? (enabled ? 'strict' : 'disabled');
-			return {
-				...FIREWALL_DEFAULTS,
-				...fw,
-				enabled,
-				mode,
-				protectedPatterns: fw.protectedPatterns
-					? [...fw.protectedPatterns]
-					: [],
-			};
-		}
+		return resolveFirewallConfig(getAppConfig().firewall);
 	} catch {
 		// AppConfig may not be loaded yet
 	}
@@ -86,17 +74,26 @@ export function resetFirewallConfig(): FirewallConfig {
 /**
  * Checks if a file path matches any protected patterns using gitignore-style glob semantics.
  * Handles Windows paths, absolute paths, leading './', nested paths, and negated patterns.
+ *
+ * A relative `filePath` is resolved the way the file tools resolve it (against
+ * the session cwd, which a bash `cd` or an ACP session moves away from
+ * `process.cwd()`), and patterns are matched relative to the project root,
+ * like a root `.gitignore`.
  */
-export function isProtectedPath(filePath: string, patterns: string[]): boolean {
+export function isProtectedPath(
+	filePath: string,
+	patterns: string[],
+	cwd: string = getSafeSessionCwd(),
+	root: string = getProjectRoot(),
+): boolean {
 	if (!patterns || patterns.length === 0) return false;
 
 	// Normalize separators and strip leading ./
 	const normalized = filePath.replace(/\\/g, '/');
 	const clean = normalized.replace(/^\.\//, '');
 
-	// Resolve absolute paths relative to current working directory
-	const abs = resolve(clean);
-	const rel = relative(process.cwd(), abs).replace(/\\/g, '/');
+	const abs = resolve(cwd, clean);
+	const rel = relative(root, abs).replace(/\\/g, '/');
 	// Strip leading ../ references so external or parent paths still match rules
 	const targetPath = (rel.startsWith('..') ? clean : rel)
 		.replace(/^(\.\.\/)+/, '')
@@ -190,7 +187,56 @@ export function evaluateMutationEnvelope(
 		violations.push(...exportViolations);
 	}
 
-	const allowed = config.mode === 'lenient' || violations.length === 0;
+	return buildResult(config, filePath, violations);
+}
+
+/**
+ * Evaluates a `file_op` delete, move or copy. These carry no new content, so
+ * only the protected-path rule applies: deleting or moving away a protected
+ * file, or moving or copying over one, is a mutation of that path.
+ */
+export function evaluatePathMutation(
+	operation: 'delete' | 'move' | 'copy',
+	paths: {source: string; destination?: string},
+	customConfig?: Partial<FirewallConfig>,
+): FirewallEvaluationResult {
+	const config: FirewallConfig = {
+		...getFirewallConfig(),
+		...customConfig,
+	};
+
+	if (!config.enabled || config.mode === 'disabled') {
+		return {allowed: true, violations: []};
+	}
+
+	// A copy leaves its source untouched; delete and move remove it.
+	const touched: string[] = operation === 'copy' ? [] : [paths.source];
+	if (operation !== 'delete' && paths.destination) {
+		touched.push(paths.destination);
+	}
+
+	const violations: FirewallViolation[] = [];
+	for (const path of touched) {
+		if (isProtectedPath(path, config.protectedPatterns)) {
+			violations.push({
+				rule: 'protect_config_files',
+				filePath: path,
+				message: `Protected path ${operation} blocked.`,
+				details: `Path '${path}' matches firewall protected patterns (${config.protectedPatterns.join(', ')}). Manual modification or explicit firewall configuration is required.`,
+			});
+		}
+	}
+
+	return buildResult(config, touched.join(', '), violations);
+}
+
+function buildResult(
+	config: FirewallConfig,
+	filePath: string,
+	violations: FirewallViolation[],
+): FirewallEvaluationResult {
+	const lenient = config.mode === 'lenient';
+	const allowed = lenient || violations.length === 0;
 
 	let summary: string | undefined;
 	if (violations.length > 0) {
@@ -201,7 +247,9 @@ export function evaluateMutationEnvelope(
 			)
 			.join('\n');
 
-		summary = `[Mutation Firewall] Blocked mutation for '${filePath}':\n${formattedViolations}`;
+		summary = lenient
+			? `[Mutation Firewall] Warning (lenient mode, change was applied) for '${filePath}':\n${formattedViolations}`
+			: `[Mutation Firewall] Blocked mutation for '${filePath}':\n${formattedViolations}`;
 	}
 
 	return {
@@ -209,4 +257,20 @@ export function evaluateMutationEnvelope(
 		violations,
 		summary,
 	};
+}
+
+/**
+ * Throws when the firewall blocked the mutation. Otherwise returns the text
+ * a tool should append to its result: the lenient-mode warning, or '' when
+ * there were no violations. In lenient mode the warning is the only way the
+ * model and the user learn the change broke a rule, so it goes into the tool
+ * result for the model and into the chat as a warning for the user.
+ */
+export function enforceFirewall(result: FirewallEvaluationResult): string {
+	if (!result.allowed) {
+		throw new Error(result.summary ?? 'Mutation blocked by firewall');
+	}
+	if (!result.summary) return '';
+	notifyWarning(result.summary, true, {source: 'mutation-firewall'});
+	return `\n\n${result.summary}`;
 }

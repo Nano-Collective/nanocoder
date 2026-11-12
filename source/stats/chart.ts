@@ -7,6 +7,7 @@
  */
 
 import {formatCompactTokenCount} from '@/usage/format';
+import {truncateText} from '@/utils/truncate-text';
 import type {CumulativePoint} from './types';
 
 const CHART_HEIGHT = 6;
@@ -95,8 +96,8 @@ export function renderCumulativeChart(
 
 	const maxRow = Math.max(20, (options?.width ?? 48) + gutterWidth);
 	return {
-		rows: rows.map(r => truncateDisplay(r, maxRow)),
-		axis: truncateDisplay(axis, maxRow),
+		rows: rows.map(r => truncateText(r, maxRow, {ellipsis: ''})),
+		axis: truncateText(axis, maxRow, {ellipsis: ''}),
 	};
 }
 
@@ -119,7 +120,7 @@ export function formatYAxisLabel(tokens: number): string {
 	if (tokens >= 1_000_000) {
 		return `${trimOneDecimal(tokens / 1_000_000)}M`;
 	}
-	return truncateDisplay(formatted, MAX_Y_GUTTER);
+	return truncateText(formatted, MAX_Y_GUTTER, {ellipsis: ''});
 }
 
 function trimOneDecimal(value: number): string {
@@ -133,14 +134,8 @@ function displayWidth(text: string): number {
 
 function padStartDisplay(text: string, width: number): string {
 	const w = displayWidth(text);
-	if (w >= width) return truncateDisplay(text, width);
+	if (w >= width) return truncateText(text, width, {ellipsis: ''});
 	return `${' '.repeat(width - w)}${text}`;
-}
-
-function truncateDisplay(text: string, max: number): string {
-	const chars = [...text];
-	if (chars.length <= max) return text;
-	return chars.slice(0, max).join('');
 }
 
 function centerLabel(text: string, width: number): string {

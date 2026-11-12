@@ -28,7 +28,7 @@ test('lazy registry includes stats command', t => {
 test('statsCommand exports expected name and description', t => {
 	t.is(statsCommand.name, 'stats');
 	t.truthy(statsCommand.description);
-	t.is(typeof statsCommand.handler, 'function');
+	t.is(typeof statsCommand.run, 'function');
 });
 
 test('parseStatsRangeArg normalizes aliases', t => {

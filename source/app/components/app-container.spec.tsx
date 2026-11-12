@@ -1,4 +1,4 @@
-import {mkdtempSync, rmSync} from 'node:fs';
+import {mkdirSync, mkdtempSync, rmSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
@@ -287,9 +287,18 @@ test.serial(
 test.serial(
 	'createStaticComponents narrow boot summary places branch on its own line',
 	t => {
+		// The summary reads the real checkout's branch and path, so pin both:
+		// a throwaway workspace whose .git/HEAD names a known branch. Against
+		// the developer's own checkout a long branch name wrapped onto a line
+		// of its own and the assertion depended on what was checked out.
+		const dir = mkdtempSync(join(tmpdir(), 'nanocoder-boot-test-'));
+		mkdirSync(join(dir, '.git'));
+		writeFileSync(join(dir, '.git', 'HEAD'), 'ref: refs/heads/feature\n');
+		const originalCwd = process.cwd();
 		const originalColumns = process.stdout.columns;
 		process.stdout.columns = 50;
 		try {
+			process.chdir(dir);
 			const props: AppContainerProps = {
 				shouldShowWelcome: false,
 				currentProvider: 'test-provider',
@@ -301,19 +310,18 @@ test.serial(
 			t.truthy(output);
 			// Branch label sits below the provider/model line, not beside it.
 			// Strip ANSI so color codes (present when CI forces color) don't
-			// break the match. The workspace path can itself wrap in a deep
-			// checkout, so look for the ' · branch' on any later line rather
-			// than on the very next one.
+			// break the match, and join the later lines, since the temp
+			// workspace path is itself wider than 50 columns.
 			const lines = stripAnsi(output!).split('\n');
 			const modelLine = lines.findIndex(line => line.includes('test-model'));
 			t.true(modelLine >= 0);
 			t.regex(lines[modelLine] ?? '', /test-model\s*$/);
-			t.true(
-				lines.slice(modelLine + 1).some(line => /\S\s+·\s+\S/.test(line)),
-			);
+			t.regex(lines.slice(modelLine + 1).join(' '), /\S\s+·\s+feature\b/);
 			unmount();
 		} finally {
 			process.stdout.columns = originalColumns;
+			process.chdir(originalCwd);
+			rmSync(dir, {recursive: true, force: true});
 		}
 	},
 );

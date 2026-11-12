@@ -1,5 +1,5 @@
+import {infoMsg} from '@/components/message-factory';
 import type {Command} from '@/types/index';
-import {infoMsg} from '@/utils/message-factory';
 import {findTips, getRandomTip, pickTip} from '@/utils/tips';
 
 // Remembered across invocations so running /tip twice in a row does not hand

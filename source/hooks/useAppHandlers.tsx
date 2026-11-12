@@ -5,6 +5,7 @@ import {
 	createClearMessagesHandler,
 	handleMessageSubmission,
 } from '@/app/utils/app-util';
+import {stripVSCodeContext} from '@/app/utils/vscode-context';
 import {createApprovedPlanMessage} from '@/artifacts/approved-plan';
 import {
 	ErrorMessage,
@@ -15,17 +16,19 @@ import Status from '@/components/status';
 import UserMessage from '@/components/user-message';
 import {getAppConfig} from '@/config/index';
 import {loadPreferences} from '@/config/preferences';
+import {resolveAutoCompactSettings} from '@/conversation/compaction/auto-compact';
+import {getLastBuiltPrompt} from '@/conversation/prompt-builder';
 import {CustomCommandExecutor} from '@/custom-commands/executor';
 import {CustomCommandLoader} from '@/custom-commands/loader';
 import {getModelContextLimit} from '@/models/index';
 import {bashExecutor} from '@/services/bash-executor';
 import {CheckpointManager} from '@/services/checkpoint-manager';
+import {describeGapsMessage} from '@/services/checkpoint-utils';
 import {
 	runLifecycleHooks,
 	takePendingHookContext,
 } from '@/services/lifecycle-hooks';
 import {getProjectRoot} from '@/services/session-cwd';
-import {generateKey, setKeyGeneratorSessionId} from '@/session/key-generator';
 import {buildSessionHistoryComponents} from '@/session/session-history-renderer';
 import type {Session} from '@/session/session-manager';
 import {sessionManager} from '@/session/session-manager';
@@ -34,6 +37,7 @@ import {
 	type GitStatusSummary,
 	getGitStatusSummarySync,
 } from '@/tools/git/utils';
+import {bumpReadContentGeneration} from '@/tools/runtime/read-tracker';
 import {loadTasks} from '@/tools/tasks/storage';
 import type {Task} from '@/tools/tasks/types';
 import type {
@@ -51,12 +55,9 @@ import type {ApiCallRecord, ApiUsageSnapshot} from '@/types/core';
 import type {ThemePreset} from '@/types/ui';
 import type {UpdateInfo} from '@/types/utils';
 import {calculateTokenBreakdown} from '@/usage/calculator';
-import {resolveAutoCompactSettings} from '@/utils/auto-compact';
-import {describeGapsMessage} from '@/utils/checkpoint-utils';
 import {formatError} from '@/utils/error-formatter';
+import {generateKey, setKeyGeneratorSessionId} from '@/utils/key-generator';
 import {getLogger} from '@/utils/logging';
-import {getLastBuiltPrompt} from '@/utils/prompt-builder';
-import {bumpReadContentGeneration} from '@/utils/read-tracker';
 
 interface UseAppHandlersProps {
 	// State
@@ -189,6 +190,61 @@ export interface AppHandlers {
  * Consolidates all app handler setup into a single hook
  */
 export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
+	// Destructured once so each handler depends on the values it uses, not on
+	// the props object, which the caller rebuilds every render.
+	const {
+		abortController,
+		addToChatQueue,
+		apiCallHistory,
+		architectReviewState,
+		client,
+		currentModel,
+		currentProvider,
+		currentProviderConfig,
+		currentSessionId,
+		currentTheme,
+		customCommandCache,
+		customCommandExecutor,
+		customCommandLoader,
+		customCommandsCount,
+		developmentMode,
+		dismissActiveEditor,
+		ensureCurrentSessionId,
+		enterExplorerMode,
+		enterIdeSelectionMode,
+		enterModelDatabaseMode,
+		enterModelSelectionMode,
+		enterSettingsMode,
+		enterTune,
+		getMessageTokens,
+		handleChatMessage,
+		handleModelSelect,
+		lastApiUsage,
+		lspServersStatus,
+		mcpServersStatus,
+		messages,
+		onClearCounterIncrement,
+		preferencesLoaded,
+		setActiveMode,
+		setArchitectReviewState,
+		setChatComponents,
+		setCheckpointLoadData,
+		setCurrentSessionId,
+		setDevelopmentMode,
+		setIsCancelling,
+		setIsConversationComplete,
+		setIsToolExecuting,
+		setLiveComponent,
+		setLiveComponentCapturesInput,
+		setLiveTaskList,
+		setPendingPlanProceed,
+		setPlanReviewState,
+		setSessionName,
+		setShowAllSessions,
+		tune,
+		updateInfo,
+		updateMessages,
+	} = props;
 	const logger = getLogger();
 	// Last mode-switch model toast, so rapid Shift+Tab cycling doesn't stack
 	// identical lines in scrollback (the handler races ahead of prop updates).
@@ -197,26 +253,24 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 	// Clear messages handler
 	const clearMessages = React.useMemo(
 		() => async () => {
-			const baseClear = createClearMessagesHandler(
-				props.updateMessages,
-				props.client,
-			);
+			const baseClear = createClearMessagesHandler(updateMessages, client);
 			await baseClear();
-			props.setChatComponents([]);
-			props.setCurrentSessionId(null);
+			setChatComponents([]);
+			setCurrentSessionId(null);
 			// Reset the key-generator session ID so keys in the new conversation
 			// are not prefixed with the cleared session's ID. A fresh random ID
 			// will be lazily generated on the next generateKey() call.
 			setKeyGeneratorSessionId(randomBytes(4).toString('hex'));
-			props.setLiveTaskList(null);
-			props.dismissActiveEditor?.();
+			setLiveTaskList(null);
+			dismissActiveEditor?.();
 		},
 		[
-			props.updateMessages,
-			props.client,
-			props.setChatComponents,
-			props.setCurrentSessionId,
-			props,
+			updateMessages,
+			client,
+			setChatComponents,
+			setCurrentSessionId,
+			setLiveTaskList,
+			dismissActiveEditor,
 		],
 	);
 
@@ -233,31 +287,31 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 			bashExecutor.cancel(id);
 		}
 
-		if (props.abortController) {
+		if (abortController) {
 			logger.info('Cancelling current operation', {
 				operation: 'user_cancellation',
-				hasAbortController: !!props.abortController,
+				hasAbortController: !!abortController,
 				activeBashExecutions: activeBashIds.length,
 			});
 
-			props.setIsCancelling(true);
-			props.abortController.abort();
+			setIsCancelling(true);
+			abortController.abort();
 		} else if (activeBashIds.length === 0) {
 			logger.debug('Cancel requested but no active operation to cancel');
 		}
-	}, [props.abortController, props.setIsCancelling, logger, props]);
+	}, [abortController, setIsCancelling, logger]);
 
 	// Toggle development mode handler
 	const handleToggleDevelopmentMode = React.useCallback(() => {
 		// Don't allow toggling out of headless via Shift+Tab: it's a
 		// non-interactive mode entered by the daemon, not the user.
-		if (props.developmentMode === 'headless') return;
+		if (developmentMode === 'headless') return;
 
 		const modes: Array<
 			'normal' | 'auto-accept' | 'yolo' | 'plan' | 'architect'
 		> = ['normal', 'auto-accept', 'yolo', 'plan', 'architect'];
 		const currentIndex = modes.indexOf(
-			props.developmentMode as
+			developmentMode as
 				| 'normal'
 				| 'auto-accept'
 				| 'yolo'
@@ -268,13 +322,13 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 		const nextMode = modes[nextIndex];
 
 		logger.info('Development mode toggled', {
-			previousMode: props.developmentMode,
+			previousMode: developmentMode,
 			nextMode,
 			modeIndex: nextIndex,
 			totalModes: modes.length,
 		});
 
-		props.setDevelopmentMode(nextMode);
+		setDevelopmentMode(nextMode);
 
 		// Handle mode-specific provider switching
 		const config = getAppConfig();
@@ -303,8 +357,8 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 
 			if (targetProvider && targetModel) {
 				if (
-					targetProvider === props.currentProvider &&
-					targetModel === props.currentModel
+					targetProvider === currentProvider &&
+					targetModel === currentModel
 				) {
 					return;
 				}
@@ -317,7 +371,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 					nextMode === 'normal' ? null : `[${nextMode} mode → ${targetModel}]`;
 				if (modeConfig && modeToast && modeToast !== lastModeToastRef.current) {
 					lastModeToastRef.current = modeToast;
-					props.addToChatQueue(
+					addToChatQueue(
 						<SuccessMessage
 							key={generateKey('mode-model-override')}
 							message={modeToast}
@@ -326,7 +380,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 					);
 				}
 
-				await props.handleModelSelect(targetProvider, targetModel, true);
+				await handleModelSelect(targetProvider, targetModel, true);
 			}
 		})().catch(error => {
 			logger.error('Failed to switch model on mode toggle', {
@@ -334,19 +388,21 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 			});
 		});
 	}, [
-		props.developmentMode,
-		props.setDevelopmentMode,
-		props.handleModelSelect,
+		developmentMode,
+		setDevelopmentMode,
+		handleModelSelect,
 		logger,
-		props,
+		currentModel,
+		addToChatQueue,
+		currentProvider,
 	]);
 
 	// Show status handler
 	const handleShowStatus = React.useCallback(async () => {
 		logger.debug('Status display requested', {
-			currentProvider: props.currentProvider,
-			currentModel: props.currentModel,
-			currentTheme: props.currentTheme,
+			currentProvider: currentProvider,
+			currentModel: currentModel,
+			currentTheme: currentTheme,
 		});
 
 		// Calculate context usage and auto-compact info
@@ -368,14 +424,11 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 
 		try {
 			// Calculate context usage
-			const contextLimit = await getModelContextLimit(props.currentModel, {
-				providerConfig: props.client?.getProviderConfig(),
+			const contextLimit = await getModelContextLimit(currentModel, {
+				providerConfig: client?.getProviderConfig(),
 			});
-			if (contextLimit && props.messages.length > 0) {
-				const tokenizer = createTokenizer(
-					props.currentProvider,
-					props.currentModel,
-				);
+			if (contextLimit && messages.length > 0) {
+				const tokenizer = createTokenizer(currentProvider, currentModel);
 				try {
 					const systemPrompt = getLastBuiltPrompt();
 					const systemMessage: Message = {
@@ -383,9 +436,9 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 						content: systemPrompt,
 					};
 					const breakdown = calculateTokenBreakdown(
-						[systemMessage, ...props.messages],
+						[systemMessage, ...messages],
 						tokenizer,
-						props.getMessageTokens,
+						getMessageTokens,
 					);
 					const percentUsed = (breakdown.total / contextLimit) * 100;
 					contextUsage = {
@@ -430,37 +483,36 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 			logger.debug('Failed to resolve git status for /status panel', {error});
 		}
 
-		props.addToChatQueue(
+		addToChatQueue(
 			<Status
 				key={generateKey('status')}
-				provider={props.currentProvider}
-				model={props.currentModel}
-				theme={props.currentTheme}
-				updateInfo={props.updateInfo}
-				mcpServersStatus={props.mcpServersStatus}
-				lspServersStatus={props.lspServersStatus}
-				preferencesLoaded={props.preferencesLoaded}
-				customCommandsCount={props.customCommandsCount}
+				provider={currentProvider}
+				model={currentModel}
+				theme={currentTheme}
+				updateInfo={updateInfo}
+				mcpServersStatus={mcpServersStatus}
+				lspServersStatus={lspServersStatus}
+				preferencesLoaded={preferencesLoaded}
+				customCommandsCount={customCommandsCount}
 				contextUsage={contextUsage}
 				autoCompactInfo={autoCompactInfo}
 				gitStatus={gitStatus}
 			/>,
 		);
 	}, [
-		props.client,
-		props.currentProvider,
-		props.currentModel,
-		props.currentTheme,
-		props.updateInfo,
-		props.mcpServersStatus,
-		props.lspServersStatus,
-		props.preferencesLoaded,
-		props.customCommandsCount,
-		props.messages,
-		props.getMessageTokens,
-		props.addToChatQueue,
+		client,
+		currentProvider,
+		currentModel,
+		currentTheme,
+		updateInfo,
+		mcpServersStatus,
+		lspServersStatus,
+		preferencesLoaded,
+		customCommandsCount,
+		messages,
+		getMessageTokens,
+		addToChatQueue,
 		logger,
-		props,
 	]);
 
 	// Checkpoint select handler
@@ -473,12 +525,12 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 					try {
 						await manager.saveCheckpoint(
 							`backup-${new Date().toISOString().replace(/[:.]/g, '-')}`,
-							props.messages,
-							props.currentProvider,
-							props.currentModel,
+							messages,
+							currentProvider,
+							currentModel,
 						);
 					} catch (error) {
-						props.addToChatQueue(
+						addToChatQueue(
 							<WarningMessage
 								key={generateKey('backup-warning')}
 								message={`Warning: Failed to create backup: ${formatError(
@@ -496,7 +548,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 
 				const gaps = await manager.restoreFiles(checkpointData);
 
-				props.addToChatQueue(
+				addToChatQueue(
 					<SuccessMessage
 						key={generateKey('restore-success')}
 						message={`✓ Checkpoint '${checkpointName}' restored successfully`}
@@ -507,7 +559,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 				// A restore that reports only success, when the checkpoint never held
 				// every file, leaves the user believing the workspace is back.
 				if (gaps.length > 0) {
-					props.addToChatQueue(
+					addToChatQueue(
 						<WarningMessage
 							key={generateKey('restore-gaps')}
 							message={describeGapsMessage(gaps)}
@@ -516,7 +568,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 					);
 				}
 			} catch (error) {
-				props.addToChatQueue(
+				addToChatQueue(
 					<ErrorMessage
 						key={generateKey('restore-error')}
 						message={`Failed to restore checkpoint: ${formatError(error)}`}
@@ -524,43 +576,42 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 					/>,
 				);
 			} finally {
-				props.setActiveMode(null);
-				props.setCheckpointLoadData(null);
+				setActiveMode(null);
+				setCheckpointLoadData(null);
 			}
 		},
 		[
-			props.messages,
-			props.currentProvider,
-			props.currentModel,
-			props.setActiveMode,
-			props.setCheckpointLoadData,
-			props.addToChatQueue,
-			props,
+			messages,
+			currentProvider,
+			currentModel,
+			setActiveMode,
+			setCheckpointLoadData,
+			addToChatQueue,
 		],
 	);
 
 	// Checkpoint cancel handler
 	const handleCheckpointCancel = React.useCallback(() => {
-		props.setActiveMode(null);
-		props.setCheckpointLoadData(null);
-	}, [props.setActiveMode, props.setCheckpointLoadData, props]);
+		setActiveMode(null);
+		setCheckpointLoadData(null);
+	}, [setActiveMode, setCheckpointLoadData]);
 
 	// Enter checkpoint load mode handler
 	const enterCheckpointLoadMode = React.useCallback(
 		(checkpoints: CheckpointListItem[], currentMessageCount: number) => {
-			props.setCheckpointLoadData({checkpoints, currentMessageCount});
-			props.setActiveMode('checkpointLoad');
+			setCheckpointLoadData({checkpoints, currentMessageCount});
+			setActiveMode('checkpointLoad');
 		},
-		[props.setCheckpointLoadData, props.setActiveMode, props],
+		[setCheckpointLoadData, setActiveMode],
 	);
 
 	// Enter session selector mode (for /resume with no args)
 	const enterSessionSelectorMode = React.useCallback(
 		(showAll?: boolean) => {
-			props.setShowAllSessions(showAll ?? false);
-			props.setActiveMode('sessionSelector');
+			setShowAllSessions(showAll ?? false);
+			setActiveMode('sessionSelector');
 		},
-		[props.setShowAllSessions, props.setActiveMode, props],
+		[setShowAllSessions, setActiveMode],
 	);
 
 	// Load and apply a session's conversation. Provider and model are left to
@@ -569,13 +620,13 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 	// labelled, saved and priced as the resumed one.
 	const applySession = React.useCallback(
 		(session: Session) => {
-			props.updateMessages(session.messages);
+			updateMessages(session.messages);
 			// The resumed history has not seen this process's reads.
 			bumpReadContentGeneration();
-			props.setCurrentSessionId(session.id);
+			setCurrentSessionId(session.id);
 			setKeyGeneratorSessionId(session.id);
 			void loadTasks(session.id).then(tasks => {
-				props.setLiveTaskList(tasks.length > 0 ? tasks : null);
+				setLiveTaskList(tasks.length > 0 ? tasks : null);
 			});
 			// Replay the persisted conversation into scrollback so the user can see
 			// what they resumed (prompts, assistant replies, tool activity) instead
@@ -584,23 +635,23 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 				session.messages,
 				session.model,
 			)) {
-				props.addToChatQueue(component);
+				addToChatQueue(component);
 			}
-			props.addToChatQueue(
+			addToChatQueue(
 				<SuccessMessage
 					key={generateKey('resume-success')}
 					message={`Resumed session: ${session.title}`}
 					hideBox={true}
 				/>,
 			);
-			props.setActiveMode(null);
+			setActiveMode(null);
 		},
 		[
-			props.updateMessages,
-			props.setCurrentSessionId,
-			props.setActiveMode,
-			props.addToChatQueue,
-			props,
+			updateMessages,
+			setCurrentSessionId,
+			setActiveMode,
+			addToChatQueue,
+			setLiveTaskList,
 		],
 	);
 
@@ -614,14 +665,14 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 	const resumeSession = React.useCallback(
 		async (session: Session) => {
 			applySession(session);
-			await props.handleModelSelect(
+			await handleModelSelect(
 				session.provider,
 				session.model,
 				true,
 				session.messages,
 			);
 		},
-		[applySession, props.handleModelSelect, props],
+		[applySession, handleModelSelect],
 	);
 
 	const handleSessionSelect = React.useCallback(
@@ -631,32 +682,32 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 				if (session) {
 					await resumeSession(session);
 				} else {
-					props.addToChatQueue(
+					addToChatQueue(
 						<ErrorMessage
 							key={generateKey('resume-error')}
 							message="Session not found"
 							hideBox={true}
 						/>,
 					);
-					props.setActiveMode(null);
+					setActiveMode(null);
 				}
 			} catch (error) {
-				props.addToChatQueue(
+				addToChatQueue(
 					<ErrorMessage
 						key={generateKey('resume-error')}
 						message={`Failed to load session: ${formatError(error)}`}
 						hideBox={true}
 					/>,
 				);
-				props.setActiveMode(null);
+				setActiveMode(null);
 			}
 		},
-		[resumeSession, props.addToChatQueue, props.setActiveMode, props],
+		[resumeSession, addToChatQueue, setActiveMode],
 	);
 
 	const handleSessionCancel = React.useCallback(() => {
-		props.setActiveMode(null);
-	}, [props.setActiveMode, props]);
+		setActiveMode(null);
+	}, [setActiveMode]);
 
 	// Plan review action bar handlers
 	const handlePlanProceed = React.useCallback(async () => {
@@ -664,45 +715,54 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 		// unreadable plan artifact degrades to referring to the plan already in
 		// the conversation rather than leaving the user stuck on the review bar
 		// with "Yes" permanently broken.
-		const approvedPlanMessage = props.currentSessionId
-			? await createApprovedPlanMessage(props.currentSessionId)
+		const approvedPlanMessage = currentSessionId
+			? await createApprovedPlanMessage(currentSessionId)
 			: await createApprovedPlanMessage('');
 		// The effect in InteractiveApp waits for this mode change before it
 		// submits the persisted plan, preventing a stale plan-mode turn.
-		props.setPlanReviewState(null);
-		props.setDevelopmentMode('normal');
-		props.setPendingPlanProceed(approvedPlanMessage);
+		setPlanReviewState(null);
+		setDevelopmentMode('normal');
+		setPendingPlanProceed(approvedPlanMessage);
 	}, [
-		props.currentSessionId,
-		props.setPlanReviewState,
-		props.setDevelopmentMode,
-		props.setPendingPlanProceed,
-		props,
+		currentSessionId,
+		setPlanReviewState,
+		setDevelopmentMode,
+		setPendingPlanProceed,
 	]);
 
 	const handlePlanAskMore = React.useCallback(async () => {
 		// Hide the review bar and stay in plan mode; the model asks its questions
 		// and the user answers before a new plan is produced.
-		props.setIsConversationComplete(false);
-		props.setPlanReviewState(null);
-		await props.handleChatMessage(
+		setIsConversationComplete(false);
+		setPlanReviewState(null);
+		await handleChatMessage(
 			'please ask me any additional clarifying questions before proceeding',
 		);
-	}, [props.setPlanReviewState, props.handleChatMessage, props]);
+	}, [
+		setPlanReviewState,
+		handleChatMessage, // Hide the review bar and stay in plan mode; the model asks its questions
+		// and the user answers before a new plan is produced.
+		setIsConversationComplete,
+	]);
 
 	const handlePlanModify = React.useCallback(() => {
 		// Return to input without changing mode so the user can request revisions.
 		// Keep the queue blocked until that revision turn has completed.
-		props.setIsConversationComplete(false);
-		props.setPlanReviewState(null);
-		props.addToChatQueue(
+		setIsConversationComplete(false);
+		setPlanReviewState(null);
+		addToChatQueue(
 			<SuccessMessage
 				key={generateKey('plan-revision-request')}
 				message="Plan Mode remains active. Tell Nanocoder what to change."
 				hideBox={true}
 			/>,
 		);
-	}, [props.setPlanReviewState, props.addToChatQueue, props]);
+	}, [
+		setPlanReviewState,
+		addToChatQueue, // Return to input without changing mode so the user can request revisions.
+		// Keep the queue blocked until that revision turn has completed.
+		setIsConversationComplete,
+	]);
 
 	// Architect review action bar handlers
 
@@ -743,21 +803,21 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 					? ` The following files were restored to their previous contents: ${filesChanged.join(', ')}.`
 					: '';
 
-			props.updateMessages([
-				...props.messages,
+			updateMessages([
+				...messages,
 				{
 					role: 'user',
 					content: `[The changes from your previous turn were reverted and are no longer on disk.${fileList} Re-read any file before editing it - your earlier edits are gone.]`,
 				},
 			]);
 		},
-		[props.messages, props.updateMessages],
+		[messages, updateMessages],
 	);
 
 	const handleArchitectKeep = React.useCallback(async () => {
-		const reviewState = props.architectReviewState;
+		const reviewState = architectReviewState;
 
-		props.setArchitectReviewState(null);
+		setArchitectReviewState(null);
 
 		if (!reviewState?.checkpointName) {
 			return;
@@ -765,7 +825,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 
 		await releaseArchitectCheckpoint(reviewState.checkpointName);
 
-		props.addToChatQueue(
+		addToChatQueue(
 			<SuccessMessage
 				key={generateKey('architect-keep')}
 				message={`✓ Kept ${reviewState.filesChanged.length + reviewState.filesMissing.length} changed file(s)`}
@@ -773,15 +833,14 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 			/>,
 		);
 	}, [
-		props.architectReviewState,
-		props.setArchitectReviewState,
-		props.addToChatQueue,
+		architectReviewState,
+		setArchitectReviewState,
+		addToChatQueue,
 		releaseArchitectCheckpoint,
-		props,
 	]);
 
 	const handleArchitectRevert = React.useCallback(async () => {
-		const reviewState = props.architectReviewState;
+		const reviewState = architectReviewState;
 
 		if (!reviewState?.checkpointName) {
 			return;
@@ -799,11 +858,11 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 
 			await manager.restoreFiles(checkpointData);
 
-			props.setArchitectReviewState(null);
+			setArchitectReviewState(null);
 			appendArchitectRevertNotice(reviewState.filesChanged);
 			await releaseArchitectCheckpoint(reviewState.checkpointName);
 
-			props.addToChatQueue(
+			addToChatQueue(
 				<SuccessMessage
 					key={generateKey('architect-revert-success')}
 					message={`✓ Architect changes reverted successfully`}
@@ -811,7 +870,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 				/>,
 			);
 		} catch (error) {
-			props.addToChatQueue(
+			addToChatQueue(
 				<ErrorMessage
 					key={generateKey('architect-revert-error')}
 					message={`Failed to revert Architect changes: ${formatError(error)}`}
@@ -820,17 +879,16 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 			);
 		}
 	}, [
-		props.architectReviewState,
-		props.setArchitectReviewState,
-		props.addToChatQueue,
+		architectReviewState,
+		setArchitectReviewState,
+		addToChatQueue,
 		appendArchitectRevertNotice,
 		releaseArchitectCheckpoint,
-		props,
 	]);
 
 	const handleArchitectRevertAndRevise = React.useCallback(
 		async (instructions: string) => {
-			const reviewState = props.architectReviewState;
+			const reviewState = architectReviewState;
 
 			if (!reviewState?.checkpointName) {
 				return;
@@ -853,19 +911,19 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 				// the turn still reads complete, and the revise turn below starts
 				// through handleChatMessage, which never resets the flag itself. A
 				// queued prompt would otherwise drain into that gap.
-				props.setIsConversationComplete(false);
-				props.setArchitectReviewState(null);
+				setIsConversationComplete(false);
+				setArchitectReviewState(null);
 				await releaseArchitectCheckpoint(reviewState.checkpointName);
 
 				// Says reverted, not "review the changes you just made" - those
 				// changes are gone, and the old wording pointed the model at a
 				// disk state that no longer existed.
-				await props.handleChatMessage(
+				await handleChatMessage(
 					`Your previous changes were reverted and are no longer on disk. Re-read any file before editing it, then redo the work with these instructions:\n\n${instructions}`,
 					instructions,
 				);
 			} catch (error) {
-				props.addToChatQueue(
+				addToChatQueue(
 					<ErrorMessage
 						key={generateKey('architect-revise-error')}
 						message={`Failed to revert Architect changes: ${formatError(error)}`}
@@ -875,12 +933,12 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 			}
 		},
 		[
-			props.architectReviewState,
-			props.setArchitectReviewState,
-			props.setIsConversationComplete,
-			props.addToChatQueue,
+			architectReviewState,
+			setArchitectReviewState,
+			setIsConversationComplete,
+			addToChatQueue,
 			releaseArchitectCheckpoint,
-			props,
+			handleChatMessage,
 		],
 	);
 
@@ -891,9 +949,9 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 			displayValue?: string,
 			images?: ImageAttachment[],
 		) => {
-			props.ensureCurrentSessionId();
+			ensureCurrentSessionId();
 			// Reset conversation completion flag when starting a new message
-			props.setIsConversationComplete(false);
+			setIsConversationComplete(false);
 
 			// Extract command args for slash commands (used by /rename etc.).
 			// The VS Code editor pill is appended at the end of the message
@@ -904,11 +962,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 			const trimmedMessage = message.trim();
 			const isSlashCommand = trimmedMessage.startsWith('/');
 			const commandArgs = isSlashCommand
-				? trimmedMessage
-						.replace(
-							/\n\n\[@[^\]]+\]<!--vscode-context-->[\s\S]*?<!--\/vscode-context-->\s*$/,
-							'',
-						)
+				? stripVSCodeContext(trimmedMessage)
 						.slice(1)
 						.trim()
 						.split(/\s+/)
@@ -935,7 +989,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 				if (gate.blocked) {
 					// Echo the prompt first, so the denial that follows has a visible
 					// cause in the scrollback instead of appearing on its own.
-					props.addToChatQueue(
+					addToChatQueue(
 						<UserMessage
 							key={generateKey('user')}
 							message={displayValue ?? message}
@@ -943,14 +997,14 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 							imageCount={images?.length ?? 0}
 						/>,
 					);
-					props.addToChatQueue(
+					addToChatQueue(
 						<ErrorMessage
 							key={generateKey('hook-blocked-prompt')}
 							message={gate.reason ?? 'Prompt blocked by a hook.'}
 							hideBox={true}
 						/>,
 					);
-					props.setIsConversationComplete(true);
+					setIsConversationComplete(true);
 					return;
 				}
 
@@ -967,44 +1021,44 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 			await handleMessageSubmission(
 				submittedMessage,
 				{
-					customCommandCache: props.customCommandCache,
-					customCommandLoader: props.customCommandLoader,
-					customCommandExecutor: props.customCommandExecutor,
+					customCommandCache: customCommandCache,
+					customCommandLoader: customCommandLoader,
+					customCommandExecutor: customCommandExecutor,
 					onClearMessages: clearMessages,
-					onClearCounterIncrement: props.onClearCounterIncrement,
-					onRenameSession: props.setSessionName,
+					onClearCounterIncrement: onClearCounterIncrement,
+					onRenameSession: setSessionName,
 					commandArgs,
-					onEnterModelSelectionMode: props.enterModelSelectionMode,
-					onEnterModelDatabaseMode: props.enterModelDatabaseMode,
-					onEnterSettingsMode: props.enterSettingsMode,
-					onEnterExplorerMode: props.enterExplorerMode,
-					onEnterIdeSelectionMode: props.enterIdeSelectionMode,
-					onEnterTune: props.enterTune,
+					onEnterModelSelectionMode: enterModelSelectionMode,
+					onEnterModelDatabaseMode: enterModelDatabaseMode,
+					onEnterSettingsMode: enterSettingsMode,
+					onEnterExplorerMode: enterExplorerMode,
+					onEnterIdeSelectionMode: enterIdeSelectionMode,
+					onEnterTune: enterTune,
 					onEnterCheckpointLoadMode: enterCheckpointLoadMode,
 					onEnterSessionSelectorMode: enterSessionSelectorMode,
 					onResumeSession: resumeSession,
 					onShowStatus: handleShowStatus,
-					onHandleChatMessage: props.handleChatMessage,
-					onSwitchModel: props.handleModelSelect,
-					onAddToChatQueue: props.addToChatQueue,
-					setLiveComponent: props.setLiveComponent,
-					setLiveComponentCapturesInput: props.setLiveComponentCapturesInput,
-					setIsToolExecuting: props.setIsToolExecuting,
-					onCommandComplete: () => props.setIsConversationComplete(true),
-					setMessages: props.updateMessages,
-					messages: props.messages,
-					provider: props.currentProvider,
-					providerConfig: props.currentProviderConfig,
-					client: props.client,
-					model: props.currentModel,
-					theme: props.currentTheme,
-					updateInfo: props.updateInfo,
-					getMessageTokens: props.getMessageTokens,
-					tune: props.tune,
-					developmentMode: props.developmentMode,
-					lastApiUsage: props.lastApiUsage,
-					apiCallHistory: props.apiCallHistory,
-					sessionId: props.ensureCurrentSessionId(),
+					onHandleChatMessage: handleChatMessage,
+					onSwitchModel: handleModelSelect,
+					onAddToChatQueue: addToChatQueue,
+					setLiveComponent: setLiveComponent,
+					setLiveComponentCapturesInput: setLiveComponentCapturesInput,
+					setIsToolExecuting: setIsToolExecuting,
+					onCommandComplete: () => setIsConversationComplete(true),
+					setMessages: updateMessages,
+					messages: messages,
+					provider: currentProvider,
+					providerConfig: currentProviderConfig,
+					client: client,
+					model: currentModel,
+					theme: currentTheme,
+					updateInfo: updateInfo,
+					getMessageTokens: getMessageTokens,
+					tune: tune,
+					developmentMode: developmentMode,
+					lastApiUsage: lastApiUsage,
+					apiCallHistory: apiCallHistory,
+					sessionId: ensureCurrentSessionId(),
 				},
 				// Injected hook context must not reach the transcript — fall back to
 				// the raw message so the user still sees what they typed.
@@ -1013,60 +1067,88 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 			);
 		},
 		[
-			props.setIsConversationComplete,
-			props.customCommandCache,
-			props.customCommandLoader,
-			props.customCommandExecutor,
-			props.enterModelSelectionMode,
-			props.enterModelDatabaseMode,
-			props.enterSettingsMode,
-			props.enterExplorerMode,
-			props.enterIdeSelectionMode,
-			props.enterTune,
-			props.handleChatMessage,
-			props.addToChatQueue,
-			props.setLiveComponent,
-			props.setIsToolExecuting,
-			props.updateMessages,
-			props.messages,
-			props.currentProvider,
-			props.currentProviderConfig,
-			props.currentModel,
-			props.currentTheme,
-			props.updateInfo,
-			props.getMessageTokens,
-			props.tune,
-			props.developmentMode,
-			props.lastApiUsage,
-			props.apiCallHistory,
-			props.ensureCurrentSessionId,
+			setIsConversationComplete,
+			customCommandCache,
+			customCommandLoader,
+			customCommandExecutor,
+			enterModelSelectionMode,
+			enterModelDatabaseMode,
+			enterSettingsMode,
+			enterExplorerMode,
+			enterIdeSelectionMode,
+			enterTune,
+			handleChatMessage,
+			addToChatQueue,
+			setLiveComponent,
+			setIsToolExecuting,
+			updateMessages,
+			messages,
+			currentProvider,
+			currentProviderConfig,
+			currentModel,
+			currentTheme,
+			updateInfo,
+			getMessageTokens,
+			tune,
+			developmentMode,
+			lastApiUsage,
+			apiCallHistory,
+			ensureCurrentSessionId,
 			clearMessages,
 			enterCheckpointLoadMode,
 			handleShowStatus,
 			resumeSession,
 			enterSessionSelectorMode,
-			props,
+			onClearCounterIncrement,
+			setLiveComponentCapturesInput,
+			setSessionName,
+			handleModelSelect,
+			client,
 		],
 	);
 
-	return {
-		clearMessages,
-		handleCancel,
-		handleToggleDevelopmentMode,
-		handleShowStatus,
-		handleCheckpointSelect,
-		handleCheckpointCancel,
-		enterCheckpointLoadMode,
-		enterSessionSelectorMode,
-		applySession,
-		handleSessionSelect,
-		handleSessionCancel,
-		handleMessageSubmit,
-		handlePlanProceed,
-		handlePlanAskMore,
-		handlePlanModify,
-		handleArchitectKeep,
-		handleArchitectRevert,
-		handleArchitectRevertAndRevise,
-	};
+	// Memoised so dependents (effects, callbacks, memo()'d children) see a new
+	// object only when a handler changes, not on every render.
+	return React.useMemo(
+		() => ({
+			clearMessages,
+			handleCancel,
+			handleToggleDevelopmentMode,
+			handleShowStatus,
+			handleCheckpointSelect,
+			handleCheckpointCancel,
+			enterCheckpointLoadMode,
+			enterSessionSelectorMode,
+			applySession,
+			handleSessionSelect,
+			handleSessionCancel,
+			handleMessageSubmit,
+			handlePlanProceed,
+			handlePlanAskMore,
+			handlePlanModify,
+			handleArchitectKeep,
+			handleArchitectRevert,
+			handleArchitectRevertAndRevise,
+		}),
+		[
+			clearMessages,
+			handleCancel,
+			handleToggleDevelopmentMode,
+			handleShowStatus,
+			handleCheckpointSelect,
+			handleCheckpointCancel,
+			enterCheckpointLoadMode,
+			enterSessionSelectorMode,
+			applySession,
+			handleSessionSelect,
+			handleSessionCancel,
+			handleMessageSubmit,
+			handlePlanProceed,
+			handlePlanAskMore,
+			handlePlanModify,
+			handleArchitectKeep,
+			handleArchitectRevert,
+			handleArchitectRevertAndRevise,
+		],
+	);
 }

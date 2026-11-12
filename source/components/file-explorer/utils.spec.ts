@@ -1,5 +1,5 @@
 import test from 'ava';
-import type {FileNode} from '@/utils/file-tree';
+import type {FileNode} from '@/utils/fs/file-tree';
 import {
 	formatSize,
 	formatTokens,

@@ -10,12 +10,6 @@ type ClientTransport =
 	| WebSocketClientTransport
 	| StreamableHTTPClientTransport;
 
-type LifecycleTransport = ClientTransport & {
-	onclose?: () => void;
-	onerror?: (error: Error) => void;
-};
-
-import {dynamicTool} from 'ai';
 import type {
 	AISDKCoreTool,
 	MCPHealthChange,
@@ -27,13 +21,9 @@ import type {
 	MCPResourceContent,
 	MCPServer,
 	MCPTool,
-	MCPToolInputSchema,
 	StructuredToolOutput,
 	Tool,
-	ToolApprovalPolicy,
-	ToolParameterSchema,
 } from '@/types/index';
-import {jsonSchema} from '@/types/index';
 import {
 	generateCorrelationId,
 	getLogger,
@@ -45,60 +35,32 @@ import {
 	startMetrics,
 } from '@/utils/logging/performance.js';
 import {getSafeMemory} from '@/utils/logging/safe-process.js';
-import {getToolJsonSchema} from '@/utils/schema-validate';
-import {withValidation} from '@/utils/tool-validation';
-import {ensureString, isPlainObject} from '@/utils/type-helpers';
+import {
+	type HealthTimers,
+	type LifecycleTransport,
+	MCPHealthMonitor,
+} from './health-monitor.js';
+import {
+	buildToolMapping,
+	findToolNameConflicts,
+	type MCPToolMapping,
+	type MCPToolNameConflict,
+	toMCPPrompt,
+	toMCPResource,
+	toMCPTool,
+	toPromptResult,
+	toResourceContents,
+} from './server-catalog.js';
+import {
+	coerceStringArguments,
+	createValidatedHandler,
+	type MCPToolEntry,
+	toFunctionTool,
+	toNativeTool,
+} from './tool-adapter.js';
+import {createMCPToolApproval, isToolAutoApproved} from './tool-approval.js';
+import {formatToolResultContent} from './tool-result-format.js';
 import {TransportFactory} from './transport-factory.js';
-
-// Decoded size of base64 data, without decoding it. Tolerates a data URL
-// prefix and line breaks, which some servers send against the spec.
-function base64ByteLength(data: string): number {
-	const base64 = data.replace(/^data:[^,]*,/, '').replace(/\s/g, '');
-	const padding = base64.endsWith('==') ? 2 : base64.endsWith('=') ? 1 : 0;
-	return Math.max(0, Math.floor((base64.length * 3) / 4) - padding);
-}
-
-// Text for one MCP content block. Binary data is summarised, not dumped,
-// so base64 never reaches the model as text.
-function formatContentBlock(block: unknown): string {
-	if (!isPlainObject(block)) {
-		return JSON.stringify(block);
-	}
-	switch (block.type) {
-		case 'text':
-			return ensureString(block.text);
-		case 'image':
-		case 'audio': {
-			const data = ensureString(block.data);
-			const mimeType = ensureString(block.mimeType) || block.type;
-			return `[${mimeType}, ${base64ByteLength(data)} bytes]`;
-		}
-		case 'resource': {
-			const resource = isPlainObject(block.resource) ? block.resource : {};
-			if (typeof resource.text === 'string') {
-				// Keep the URI so texts from different resources stay apart.
-				return `[resource ${ensureString(resource.uri)}]\n${resource.text}`;
-			}
-			const parts = [`resource ${ensureString(resource.uri)}`];
-			if (typeof resource.mimeType === 'string') {
-				parts.push(resource.mimeType);
-			}
-			if (typeof resource.blob === 'string') {
-				parts.push(`${base64ByteLength(resource.blob)} bytes`);
-			}
-			return `[${parts.join(', ')}]`;
-		}
-		case 'resource_link':
-			return `[resource link: ${ensureString(block.uri)}]`;
-		default:
-			return JSON.stringify(block);
-	}
-}
-
-// Join every content block of a tool result, in order.
-function formatToolResultContent(content: unknown[]): string {
-	return content.map(formatContentBlock).join('\n');
-}
 
 export class MCPClient {
 	private clients: Map<string, Client> = new Map();
@@ -110,26 +72,12 @@ export class MCPClient {
 	 * runtime — so rebuilding the Map each time is pure waste. Invalidated
 	 * wherever serverTools changes (connect, disconnect).
 	 */
-	private toolMappingCache: Map<
-		string,
-		{serverName: string; originalName: string; readOnly: boolean}
-	> | null = null;
+	private toolMappingCache: MCPToolMapping | null = null;
 	private serverResources: Map<string, MCPResource[]> = new Map();
 	private serverPrompts: Map<string, MCPPrompt[]> = new Map();
 	private serverConfigs: Map<string, MCPServer> = new Map();
 	private isConnected: boolean = false;
-	private health: Map<string, MCPHealthStatus> = new Map();
-	private healthErrors: Map<string, string> = new Map();
-	private healthTimers: Map<string, ReturnType<typeof setTimeout>> = new Map();
-	private healthFailureCounts: Map<string, number> = new Map();
-	private healthChecksInFlight = new Set<string>();
-	private healthListeners = new Set<(change: MCPHealthChange) => void>();
 	private closing = new Set<string>();
-	/** Tool calls / resource reads currently awaiting a response, per server. */
-	private inFlightRequests = new Map<string, number>();
-	private reconnectTimers: Map<string, ReturnType<typeof setTimeout>> =
-		new Map();
-	private reconnectAttempts = new Map<string, number>();
 	/**
 	 * Bumped by disconnect(). A reconnect that was already awaiting
 	 * connectToServer() when the client shut down compares epochs and tears
@@ -137,17 +85,28 @@ export class MCPClient {
 	 */
 	private lifecycleEpoch = 0;
 	private logger = getLogger();
+	/** Health status, pings and reconnect backoff for every server. */
+	private readonly healthMonitor: MCPHealthMonitor;
 
-	private isToolAutoApproved(toolName: string, serverName: string): boolean {
-		const serverConfig = this.serverConfigs.get(serverName);
-		if (!serverConfig?.alwaysAllow) {
-			return false;
-		}
-
-		return serverConfig.alwaysAllow.includes(toolName);
-	}
-
-	constructor() {
+	/**
+	 * @param options.timers Timer functions for health checks and reconnect
+	 *   backoff; tests pass a fake clock.
+	 */
+	constructor(options: {timers?: HealthTimers} = {}) {
+		this.healthMonitor = new MCPHealthMonitor(
+			{
+				isClosing: serverName => this.closing.has(serverName),
+				getClient: serverName => this.clients.get(serverName),
+				getConfig: serverName => this.serverConfigs.get(serverName),
+				clearCatalog: serverName => this.clearServerCatalog(serverName),
+				rediscover: (serverName, client) =>
+					this.rediscoverServer(serverName, client),
+				reconnect: config => this.connectToServer(config),
+				forget: serverName => this.forgetServer(serverName),
+				lifecycleEpoch: () => this.lifecycleEpoch,
+			},
+			options.timers,
+		);
 		this.logger.debug('MCP client initialized');
 	}
 
@@ -176,287 +135,75 @@ export class MCPClient {
 	}
 
 	onHealthChange(listener: (change: MCPHealthChange) => void): () => void {
-		this.healthListeners.add(listener);
-		return () => this.healthListeners.delete(listener);
+		return this.healthMonitor.onChange(listener);
 	}
 
-	private emitHealthChange(change: MCPHealthChange): void {
-		for (const listener of this.healthListeners) listener(change);
-	}
-
-	private setServerHealth(
-		serverName: string,
-		status: MCPHealthStatus,
-		error?: unknown,
-	): void {
-		const errorMessage = error ? formatError(error) : undefined;
-		const previousStatus = this.health.get(serverName);
-		const previousError = this.healthErrors.get(serverName);
-		this.health.set(serverName, status);
-		if (errorMessage) this.healthErrors.set(serverName, errorMessage);
-		else this.healthErrors.delete(serverName);
-		if (previousStatus === undefined && status === 'connected') return;
-		if (previousStatus === status && previousError === errorMessage) return;
-		this.emitHealthChange({serverName, status, error: errorMessage});
-	}
-
-	private markServerUnhealthy(serverName: string, error?: unknown): void {
-		if (this.closing.has(serverName)) return;
-		this.setServerHealth(serverName, 'unhealthy', error);
+	/** An unhealthy server offers nothing until it recovers. */
+	private clearServerCatalog(serverName: string): void {
 		this.serverTools.set(serverName, []);
 		this.serverResources.set(serverName, []);
 		this.serverPrompts.set(serverName, []);
 		this.toolMappingCache = null;
 	}
 
-	private isLivenessResponse(error: unknown): boolean {
-		if (!error || typeof error !== 'object') return false;
-		const code = (error as {code?: number}).code;
-		// JSON-RPC MethodNotFound (-32601) means the server received the ping and responded
-		return code === -32601;
-	}
-
 	/**
-	 * Remote (HTTP / WebSocket) transports can lose their session without the
-	 * transport ever closing, so ping-based recovery may never succeed. Stdio
-	 * servers keep the old behaviour: their transport closes when the child
-	 * exits, which already triggers a reconnect.
+	 * Re-list tools, and the resources and prompts the server declares, on a
+	 * client that answered again. Rejects if tools/list fails; a failed
+	 * resources/prompts list only logs.
 	 */
-	private isRemoteServer(serverName: string): boolean {
-		const transport = this.serverConfigs.get(serverName)?.transport;
-		return transport !== undefined && transport !== 'stdio';
-	}
-
-	/**
-	 * A Streamable HTTP server answers 404 for a session it no longer knows,
-	 * typically because it restarted. The MCP spec says the client must start
-	 * a new session; pinging with the old session id can never succeed.
-	 */
-	private isSessionGoneResponse(serverName: string, error: unknown): boolean {
-		if (!this.isRemoteServer(serverName)) return false;
-		if (!error || typeof error !== 'object') return false;
-		if ((error as {code?: unknown}).code === 404) return true;
-		const message = (error as {message?: unknown}).message;
-		return typeof message === 'string' && /session not found/i.test(message);
-	}
-
-	private async restoreServerHealth(
+	private async rediscoverServer(
 		serverName: string,
 		client: Client,
-	): Promise<void> {
-		if (this.closing.has(serverName)) return;
-
-		try {
-			// Re-discover tools from this server
-			const toolsResult = await client.listTools();
-			const tools: MCPTool[] = toolsResult.tools.map(tool => ({
-				name: tool.name,
-				description: tool.description || undefined,
-				inputSchema: isPlainObject(tool.inputSchema)
-					? (tool.inputSchema as MCPToolInputSchema)
-					: undefined,
-				serverName,
-				readOnly: tool.annotations?.readOnlyHint === true,
-			}));
-			this.serverTools.set(serverName, tools);
-
-			// Re-discover resources if declared
-			const capabilities = client.getServerCapabilities();
-			if (capabilities?.resources) {
-				try {
-					const resourcesResult = await client.listResources();
-					const resources: MCPResource[] = resourcesResult.resources.map(
-						resource => ({
-							uri: resource.uri,
-							name: resource.name,
-							description: resource.description || undefined,
-							mimeType: resource.mimeType || undefined,
-							serverName,
-						}),
-					);
-					this.serverResources.set(serverName, resources);
-				} catch (error) {
-					this.logger.warn('MCP resources/list failed on recovery', {
-						serverName,
-						error: formatError(error),
-					});
-				}
-			}
-
-			// Re-discover prompts if declared
-			if (capabilities?.prompts) {
-				try {
-					const promptsResult = await client.listPrompts();
-					const prompts: MCPPrompt[] = promptsResult.prompts.map(prompt => ({
-						name: prompt.name,
-						description: prompt.description || undefined,
-						arguments: prompt.arguments?.map(arg => ({
-							name: arg.name,
-							description: arg.description || undefined,
-							required: arg.required || false,
-						})),
-						serverName,
-					}));
-					this.serverPrompts.set(serverName, prompts);
-				} catch (error) {
-					this.logger.warn('MCP prompts/list failed on recovery', {
-						serverName,
-						error: formatError(error),
-					});
-				}
-			}
-
-			this.toolMappingCache = null;
-			this.setServerHealth(serverName, 'connected');
-			this.logger.info(
-				`MCP server "${serverName}" recovered and restored tools`,
-				{
-					serverName,
-					toolCount: tools.length,
-				},
-			);
-		} catch (error) {
-			this.logger.warn(
-				`Failed to rediscover tools for recovered MCP server "${serverName}"`,
-				{
-					serverName,
-					error: formatError(error),
-				},
-			);
-		}
-	}
-
-	/**
-	 * Base delay for a server's health checks and reconnect attempts. Backoff
-	 * multiplies this, so a server with periodic checks disabled
-	 * (`healthCheckInterval: 0`) still reconnects on the default cadence.
-	 */
-	private getHealthBaseDelay(serverName: string): number {
-		const interval = this.serverConfigs.get(serverName)?.healthCheckInterval;
-		return typeof interval === 'number' && interval > 0 ? interval : 30_000;
-	}
-
-	private static backoffDelay(base: number, failures: number): number {
-		const multiplier = failures > 0 ? Math.min(2 ** (failures - 1), 8) : 1;
-		return Math.min(base * multiplier, 300_000);
-	}
-
-	private async trackInFlight<T>(
-		serverName: string,
-		request: () => Promise<T>,
-	): Promise<T> {
-		this.inFlightRequests.set(
-			serverName,
-			(this.inFlightRequests.get(serverName) ?? 0) + 1,
+	): Promise<number> {
+		// Re-discover tools from this server
+		const toolsResult = await client.listTools();
+		const tools: MCPTool[] = toolsResult.tools.map(tool =>
+			toMCPTool(tool, serverName),
 		);
-		try {
-			return await request();
-		} finally {
-			const remaining = (this.inFlightRequests.get(serverName) ?? 1) - 1;
-			if (remaining > 0) this.inFlightRequests.set(serverName, remaining);
-			else this.inFlightRequests.delete(serverName);
-		}
-	}
+		this.serverTools.set(serverName, tools);
 
-	private clearHealthTimer(serverName: string): void {
-		const timer = this.healthTimers.get(serverName);
-		if (timer) clearTimeout(timer);
-		this.healthTimers.delete(serverName);
-	}
-
-	private clearReconnect(serverName: string): void {
-		const timer = this.reconnectTimers.get(serverName);
-		if (timer) clearTimeout(timer);
-		this.reconnectTimers.delete(serverName);
-		this.reconnectAttempts.delete(serverName);
-	}
-
-	/**
-	 * After a transport closes the SDK client drops its transport for good:
-	 * every later ping fails with "Not connected", so ping-based recovery can
-	 * never succeed. Rebuild the connection from the stored config instead,
-	 * backing off exponentially between attempts.
-	 */
-	private scheduleReconnect(serverName: string): void {
-		if (
-			this.closing.has(serverName) ||
-			this.reconnectTimers.has(serverName) ||
-			!this.serverConfigs.has(serverName)
-		) {
-			return;
-		}
-		const attempts = this.reconnectAttempts.get(serverName) ?? 0;
-		const delay = MCPClient.backoffDelay(
-			this.getHealthBaseDelay(serverName),
-			attempts + 1,
-		);
-		const timer = setTimeout(
-			() => void this.attemptReconnect(serverName),
-			delay,
-		);
-		if (typeof timer === 'object' && 'unref' in timer) timer.unref();
-		this.reconnectTimers.set(serverName, timer);
-	}
-
-	private async attemptReconnect(serverName: string): Promise<void> {
-		this.reconnectTimers.delete(serverName);
-		const config = this.serverConfigs.get(serverName);
-		if (
-			!config ||
-			this.closing.has(serverName) ||
-			this.health.get(serverName) !== 'unhealthy'
-		) {
-			this.reconnectAttempts.delete(serverName);
-			return;
-		}
-		const epoch = this.lifecycleEpoch;
-		const previousClient = this.clients.get(serverName);
-		try {
-			await this.connectToServer(config);
-		} catch (error) {
-			if (epoch !== this.lifecycleEpoch || this.closing.has(serverName)) {
-				return;
-			}
-			this.reconnectAttempts.set(
-				serverName,
-				(this.reconnectAttempts.get(serverName) ?? 0) + 1,
-			);
-			this.logger.warn(`MCP server "${serverName}" reconnect failed`, {
-				serverName,
-				attempt: this.reconnectAttempts.get(serverName),
-				error: formatError(error),
-			});
-			this.scheduleReconnect(serverName);
-			return;
-		}
-
-		if (epoch !== this.lifecycleEpoch) {
-			// disconnect() ran while we were connecting: undo this connection.
-			await this.forgetServer(serverName);
-			return;
-		}
-
-		this.reconnectAttempts.delete(serverName);
-		this.logger.info(`MCP server "${serverName}" reconnected`, {serverName});
-		// The old client's transport is already gone; closing it just releases
-		// anything the SDK still holds. Its handlers ignore events now that it
-		// is no longer the registered client.
-		if (previousClient && previousClient !== this.clients.get(serverName)) {
-			previousClient.close().catch(error => {
-				this.logger.debug('Error closing replaced MCP client', {
+		// Re-discover resources if declared
+		const capabilities = client.getServerCapabilities();
+		if (capabilities?.resources) {
+			try {
+				const resourcesResult = await client.listResources();
+				const resources: MCPResource[] = resourcesResult.resources.map(
+					resource => toMCPResource(resource, serverName),
+				);
+				this.serverResources.set(serverName, resources);
+			} catch (error) {
+				this.logger.warn('MCP resources/list failed on recovery', {
 					serverName,
 					error: formatError(error),
 				});
-			});
+			}
 		}
+
+		// Re-discover prompts if declared
+		if (capabilities?.prompts) {
+			try {
+				const promptsResult = await client.listPrompts();
+				const prompts: MCPPrompt[] = promptsResult.prompts.map(prompt =>
+					toMCPPrompt(prompt, serverName),
+				);
+				this.serverPrompts.set(serverName, prompts);
+			} catch (error) {
+				this.logger.warn('MCP prompts/list failed on recovery', {
+					serverName,
+					error: formatError(error),
+				});
+			}
+		}
+
+		this.toolMappingCache = null;
+		return tools.length;
 	}
 
 	/** Close and drop one server's connection and all of its state. */
 	private async forgetServer(serverName: string): Promise<void> {
 		const client = this.clients.get(serverName);
 		this.closing.add(serverName);
-		this.clearHealthTimer(serverName);
-		this.clearReconnect(serverName);
+		this.healthMonitor.stop(serverName);
 		try {
 			await client?.close();
 		} catch (error) {
@@ -471,149 +218,9 @@ export class MCPClient {
 		this.serverResources.delete(serverName);
 		this.serverPrompts.delete(serverName);
 		this.serverConfigs.delete(serverName);
-		this.health.delete(serverName);
-		this.healthErrors.delete(serverName);
-		this.healthFailureCounts.delete(serverName);
-		this.healthChecksInFlight.delete(serverName);
+		this.healthMonitor.forget(serverName);
 		this.toolMappingCache = null;
 		this.closing.delete(serverName);
-	}
-
-	private startHealthChecks(
-		serverName: string,
-		client: Client,
-		transport: LifecycleTransport,
-		interval: number,
-		pingOptions?: {timeout: number},
-	): void {
-		// Events from a client that has since been replaced by a reconnect (or
-		// dropped entirely) must not touch the current connection's state.
-		const isCurrent = () =>
-			!this.clients.has(serverName) || this.clients.get(serverName) === client;
-		const scheduleNext = (delay: number) => {
-			if (
-				this.closing.has(serverName) ||
-				interval <= 0 ||
-				typeof client.ping !== 'function' ||
-				!isCurrent()
-			) {
-				return;
-			}
-			this.clearHealthTimer(serverName);
-			const timer = setTimeout(() => void check(), delay);
-			if (typeof timer === 'object' && 'unref' in timer) timer.unref();
-			this.healthTimers.set(serverName, timer);
-		};
-		const check = async () => {
-			const currentStatus = this.health.get(serverName);
-			if (
-				this.closing.has(serverName) ||
-				!isCurrent() ||
-				(currentStatus !== 'connected' && currentStatus !== 'unhealthy') ||
-				this.healthChecksInFlight.has(serverName) ||
-				this.reconnectTimers.has(serverName) ||
-				typeof client.ping !== 'function'
-			) {
-				return;
-			}
-			// A long-running tool call or resource read occupies the server; a
-			// ping queued behind it can time out even though the server is
-			// fine. A request in flight on a live transport counts as alive.
-			if ((this.inFlightRequests.get(serverName) ?? 0) > 0) {
-				scheduleNext(interval);
-				return;
-			}
-			this.healthChecksInFlight.add(serverName);
-			try {
-				await client.ping(pingOptions ?? {timeout: 10_000});
-				if (this.health.get(serverName) === 'unhealthy') {
-					await this.restoreServerHealth(serverName, client);
-				}
-				this.healthFailureCounts.delete(serverName);
-			} catch (error) {
-				if (this.isLivenessResponse(error)) {
-					if (this.health.get(serverName) === 'unhealthy') {
-						await this.restoreServerHealth(serverName, client);
-					}
-					this.healthFailureCounts.delete(serverName);
-				} else {
-					const currentFailures =
-						(this.healthFailureCounts.get(serverName) ?? 0) + 1;
-					this.healthFailureCounts.set(serverName, currentFailures);
-					const status = this.health.get(serverName);
-					const sessionGone = this.isSessionGoneResponse(serverName, error);
-					// One missed ping is not enough to pull a server's tools
-					// mid-turn; require two in a row. A pending ping can also
-					// reject after an intentional disconnect, hence the status check.
-					// A lost session is final, so it does not wait for a second miss.
-					if (
-						(currentFailures >= 2 || sessionGone) &&
-						status === 'connected' &&
-						isCurrent()
-					) {
-						this.markServerUnhealthy(serverName, error);
-					}
-					// A remote server whose recovery ping failed, or whose session is
-					// gone, may have restarted: the old session will never answer
-					// again and HTTP never fires onclose. Rebuild the connection
-					// through the reconnect loop instead of pinging on.
-					if (
-						(sessionGone || status === 'unhealthy') &&
-						this.isRemoteServer(serverName) &&
-						this.health.get(serverName) === 'unhealthy' &&
-						isCurrent() &&
-						!this.closing.has(serverName)
-					) {
-						this.clearHealthTimer(serverName);
-						this.healthFailureCounts.delete(serverName);
-						this.scheduleReconnect(serverName);
-					}
-				}
-			} finally {
-				this.healthChecksInFlight.delete(serverName);
-				if (
-					!this.closing.has(serverName) &&
-					// Handed to the reconnect loop: the new client runs its own checks.
-					!this.reconnectTimers.has(serverName)
-				) {
-					const failureCount = this.healthFailureCounts.get(serverName) ?? 0;
-					scheduleNext(MCPClient.backoffDelay(interval, failureCount));
-				}
-			}
-		};
-		const previousOnClose = transport.onclose;
-		const previousOnError = transport.onerror;
-		transport.onclose = () => {
-			try {
-				previousOnClose?.();
-			} finally {
-				if (!this.closing.has(serverName) && isCurrent()) {
-					this.markServerUnhealthy(
-						serverName,
-						new Error('MCP transport closed'),
-					);
-					// Pings against a closed transport can never succeed; hand the
-					// server over to the reconnect loop.
-					this.clearHealthTimer(serverName);
-					this.healthFailureCounts.delete(serverName);
-					this.scheduleReconnect(serverName);
-				}
-			}
-		};
-		transport.onerror = error => {
-			try {
-				previousOnError?.(error);
-			} finally {
-				// HTTP/SSE errors can be recoverable; let the SDK handle the error
-				// before confirming liveness with a bounded ping. Deferring also
-				// prevents a ping's own transport error from starting another ping.
-				// With health checks disabled there is nothing to schedule a
-				// recovery ping, so do not ping (and risk marking unhealthy) here.
-				if (interval > 0) void Promise.resolve().then(check);
-			}
-		};
-		if (interval <= 0 || typeof client.ping !== 'function') return;
-		scheduleNext(interval);
 	}
 
 	async connectToServer(server: MCPServer): Promise<void> {
@@ -703,17 +310,9 @@ export class MCPClient {
 				// the server so a failed tools/list doesn't leave it visible as
 				// connected — the maps are populated only once discovery succeeds.
 				const toolsResult = await client.listTools(undefined, connectOptions);
-				const tools: MCPTool[] = toolsResult.tools.map(tool => ({
-					name: tool.name,
-					description: tool.description || undefined,
-					// MCP SDK types inputSchema as Record<string, object>; validate at protocol boundary
-					// before trusting the shape as JSONSchema7
-					inputSchema: isPlainObject(tool.inputSchema)
-						? (tool.inputSchema as MCPToolInputSchema)
-						: undefined,
-					serverName: normalizedServer.name,
-					readOnly: tool.annotations?.readOnlyHint === true,
-				}));
+				const tools: MCPTool[] = toolsResult.tools.map(tool =>
+					toMCPTool(tool, normalizedServer.name),
+				);
 
 				// Discovery is gated on the server's declared capabilities (available
 				// on the Client only after connect() completes the handshake) rather
@@ -727,13 +326,9 @@ export class MCPClient {
 				if (capabilities?.resources) {
 					try {
 						const resourcesResult = await client.listResources();
-						resources = resourcesResult.resources.map(resource => ({
-							uri: resource.uri,
-							name: resource.name,
-							description: resource.description || undefined,
-							mimeType: resource.mimeType || undefined,
-							serverName: normalizedServer.name,
-						}));
+						resources = resourcesResult.resources.map(resource =>
+							toMCPResource(resource, normalizedServer.name),
+						);
 						this.logger.debug('MCP resources discovered', {
 							serverName: normalizedServer.name,
 							resourceCount: resources.length,
@@ -763,16 +358,9 @@ export class MCPClient {
 				if (capabilities?.prompts) {
 					try {
 						const promptsResult = await client.listPrompts();
-						prompts = promptsResult.prompts.map(prompt => ({
-							name: prompt.name,
-							description: prompt.description || undefined,
-							arguments: prompt.arguments?.map(arg => ({
-								name: arg.name,
-								description: arg.description || undefined,
-								required: arg.required || false,
-							})),
-							serverName: normalizedServer.name,
-						}));
+						prompts = promptsResult.prompts.map(prompt =>
+							toMCPPrompt(prompt, normalizedServer.name),
+						);
 						this.logger.debug('MCP prompts discovered', {
 							serverName: normalizedServer.name,
 							promptCount: prompts.length,
@@ -812,9 +400,9 @@ export class MCPClient {
 				}
 				this.serverResources.set(normalizedServer.name, resources);
 				this.serverPrompts.set(normalizedServer.name, prompts);
-				this.setServerHealth(normalizedServer.name, 'connected');
+				this.healthMonitor.setStatus(normalizedServer.name, 'connected');
 				const healthInterval = normalizedServer.healthCheckInterval ?? 30_000;
-				this.startHealthChecks(
+				this.healthMonitor.watch(
 					normalizedServer.name,
 					client,
 					transport as LifecycleTransport,
@@ -972,28 +560,7 @@ export class MCPClient {
 			});
 
 			for (const mcpTool of serverTools) {
-				// Convert MCP tool to nanocoder Tool format
-				// Use the original tool name for better model compatibility
-				const schema = mcpTool.inputSchema;
-
-				const tool: Tool = {
-					type: 'function',
-					function: {
-						name: mcpTool.name,
-						description: mcpTool.description
-							? `[MCP:${serverName}] ${mcpTool.description}`
-							: `MCP tool from ${serverName}`,
-						parameters: {
-							type: 'object',
-							properties: (schema?.properties || {}) as Record<
-								string,
-								ToolParameterSchema
-							>,
-							required: schema?.required || [],
-						},
-					},
-				};
-				tools.push(tool);
+				tools.push(toFunctionTool(serverName, mcpTool));
 			}
 		}
 
@@ -1005,26 +572,8 @@ export class MCPClient {
 	 * name, so only one of them is callable: the server connected last (later
 	 * in `serverTools` order) handles every call to that name.
 	 */
-	getToolNameConflicts(): Array<{
-		tool: string;
-		servers: string[];
-		active: string;
-	}> {
-		const owners = new Map<string, string[]>();
-		for (const [serverName, serverTools] of this.serverTools.entries()) {
-			for (const mcpTool of serverTools) {
-				const list = owners.get(mcpTool.name) ?? [];
-				list.push(serverName);
-				owners.set(mcpTool.name, list);
-			}
-		}
-		const conflicts: Array<{tool: string; servers: string[]; active: string}> =
-			[];
-		for (const [tool, servers] of owners) {
-			if (servers.length < 2) continue;
-			conflicts.push({tool, servers, active: servers[servers.length - 1]});
-		}
-		return conflicts;
+	getToolNameConflicts(): MCPToolNameConflict[] {
+		return findToolNameConflicts(this.serverTools);
 	}
 
 	/**
@@ -1036,27 +585,10 @@ export class MCPClient {
 
 		for (const [serverName, serverTools] of this.serverTools.entries()) {
 			for (const mcpTool of serverTools) {
-				// dynamicTool is more explicit about unknown types compared to tool()
-				// MCP schemas come from external servers and are not known at compile time
 				const toolName = mcpTool.name;
-				const coreTool = dynamicTool({
-					description: mcpTool.description
-						? `[MCP:${serverName}] ${mcpTool.description}`
-						: `MCP tool from ${serverName}`,
-					inputSchema: jsonSchema<Record<string, unknown>>(
-						mcpTool.inputSchema || {type: 'object'},
-					),
-					execute: async (input, _options) => {
-						// dynamicTool passes 'input' as unknown, validate at runtime
-						const output = await this.callTool(
-							toolName,
-							input as Record<string, unknown>,
-						);
-						return typeof output === 'string' ? output : output.llmContent;
-					},
-				});
-
-				nativeTools[mcpTool.name] = coreTool;
+				nativeTools[toolName] = toNativeTool(serverName, mcpTool, input =>
+					this.callTool(toolName, input),
+				);
 			}
 		}
 
@@ -1080,58 +612,24 @@ export class MCPClient {
 	 * All callers only look tools up (`get`/`has`); mutating it would corrupt
 	 * the cache for everyone else until the next connect/disconnect.
 	 */
-	getToolMapping(): Map<
-		string,
-		{serverName: string; originalName: string; readOnly: boolean}
-	> {
+	getToolMapping(): MCPToolMapping {
 		if (this.toolMappingCache) {
 			return this.toolMappingCache;
 		}
 
-		const mapping = new Map<
-			string,
-			{serverName: string; originalName: string; readOnly: boolean}
-		>();
-
-		for (const [serverName, serverTools] of this.serverTools.entries()) {
-			for (const mcpTool of serverTools) {
-				mapping.set(mcpTool.name, {
-					serverName,
-					originalName: mcpTool.name,
-					readOnly: mcpTool.readOnly === true,
-				});
-			}
-		}
-
+		const mapping = buildToolMapping(this.serverTools);
 		this.toolMappingCache = mapping;
 		return mapping;
 	}
 
 	/**
-	 * Get all MCP tools as entries with handlers for easy registration
-	 * Each entry contains the native AI SDK tool and its handler function
-	 *
-	 * the AI SDK tool definition and the corresponding handler function.
-	 * This enables cleaner integration with ToolManager.
-	 *
-	 * @returns Array of tool entries with name, AI SDK tool, and handler function
+	 * Get all MCP tools as entries with handlers for easy registration.
+	 * Each entry carries the AI SDK tool definition, its validated handler
+	 * and its approval policy (see createMCPToolApproval), so ToolManager can
+	 * register it like any other tool.
 	 */
-	getToolEntries(forServerName?: string): Array<{
-		name: string;
-		tool: AISDKCoreTool;
-		handler: (
-			args: Record<string, unknown>,
-		) => Promise<string | StructuredToolOutput>;
-		approval: ToolApprovalPolicy;
-	}> {
-		const entries: Array<{
-			name: string;
-			tool: AISDKCoreTool;
-			handler: (
-				args: Record<string, unknown>,
-			) => Promise<string | StructuredToolOutput>;
-			approval: ToolApprovalPolicy;
-		}> = [];
+	getToolEntries(forServerName?: string): MCPToolEntry[] {
+		const entries: MCPToolEntry[] = [];
 
 		// Get native tools once to avoid redundant calls
 		const nativeTools = this.getNativeToolsRegistry();
@@ -1145,53 +643,16 @@ export class MCPClient {
 				const coreTool = nativeTools[toolName];
 
 				if (coreTool) {
-					// Run the same lenient schema type-check the approval prompt
-					// renders (tool-confirmation → getToolJsonSchema), so a
-					// malformed call is rejected locally — it never reaches the
-					// server, and approving a "wrong type" call no longer silently
-					// skips the schema gate. No per-tool validator exists for MCP;
-					// the server remains the authority on value constraints.
-					const handler = withValidation(
-						async (args: Record<string, unknown>) => {
-							return this.callTool(toolName, args);
-						},
-						undefined,
-						getToolJsonSchema(coreTool),
-						// The wrapper types its result as the generic
-						// ToolExecuteResult union; MCP handlers only resolve a string
-						// or a structured failure, so the narrower entry signature is
-						// safe here.
-					) as (
-						args: Record<string, unknown>,
-					) => Promise<string | StructuredToolOutput>;
-
-					// MCP tools take the same mode posture as built-in tools:
-					//   - auto-accept and headless both run unattended — headless is
-					//     daemon-driven, so there is no foreground prompt to answer
-					//     (mirrors createFileToolApproval in @/utils/tool-approval);
-					//   - plan inspects without side effects, so a server's
-					//     alwaysAllow entry must not short-circuit it; only a
-					//     server-annotated reader is safe to run there;
-					//   - normal prompts unless alwaysAllow covers the tool.
-					// readOnly deliberately does NOT skip approval in normal mode:
-					// `readOnlyHint` is a hint supplied by the very server being
-					// gated, so it must not be able to silence its own prompt.
-					// alwaysAllow — set by the user, not the server — stays the only
-					// way to skip a normal-mode prompt, exactly as
-					// docs/configuration/mcp-configuration.md describes.
-					// (Yolo is bypassed centrally by resolveToolApproval.)
-					//
-					// For the same reason the hint is not copied onto the entry as
-					// `readOnly`: that field feeds ToolManager.isReadOnly, which
-					// gates ACP checkpoint capture and parallel batching. It stays
-					// on getToolMapping(), which only plan-mode filtering reads.
-					const readOnly = mcpTool.readOnly === true;
-					const isAutoApproved = this.isToolAutoApproved(toolName, serverName);
-					const approval: ToolApprovalPolicy = (_args, mode) => {
-						if (mode === 'auto-accept' || mode === 'headless') return false;
-						if (mode === 'plan') return !readOnly;
-						return !isAutoApproved;
-					};
+					const handler = createValidatedHandler(coreTool, args =>
+						this.callTool(toolName, args),
+					);
+					const approval = createMCPToolApproval({
+						readOnly: mcpTool.readOnly === true,
+						autoApproved: isToolAutoApproved(
+							this.serverConfigs.get(serverName),
+							toolName,
+						),
+					});
 
 					entries.push({
 						name: toolName,
@@ -1211,10 +672,10 @@ export class MCPClient {
 		if (!client) {
 			throw new Error(`No MCP client connected for server: ${serverName}`);
 		}
-		if (this.health.get(serverName) === 'unhealthy') {
+		if (this.healthMonitor.getStatus(serverName) === 'unhealthy') {
 			throw new Error(
 				`MCP server is unhealthy: ${serverName}: ${
-					this.healthErrors.get(serverName) || 'health check failed'
+					this.healthMonitor.getError(serverName) || 'health check failed'
 				}`,
 			);
 		}
@@ -1236,7 +697,7 @@ export class MCPClient {
 				const serverName = parts[1];
 				const originalToolName = parts.slice(2).join('_');
 				const fallbackClient = this.getHealthyClient(serverName);
-				return this.trackInFlight(serverName, () =>
+				return this.healthMonitor.trackInFlight(serverName, () =>
 					this.executeToolCall(fallbackClient, originalToolName, args),
 				);
 			}
@@ -1248,27 +709,9 @@ export class MCPClient {
 		// Sanitize arguments: If schema expects a string but we got an object, ensureString it.
 		const serverTools = this.serverTools.get(mapping.serverName) || [];
 		const toolDef = serverTools.find(t => t.name === mapping.originalName);
-		const sanitizedArgs = {...args};
+		const sanitizedArgs = coerceStringArguments(toolDef, args);
 
-		if (toolDef?.inputSchema) {
-			const schema = toolDef.inputSchema;
-			if (schema.properties) {
-				for (const [key, value] of Object.entries(args)) {
-					const propSchema = schema.properties[key];
-					// Only coerce if the schema explicitly demands a string and we have an object
-					if (
-						typeof propSchema === 'object' &&
-						propSchema?.type === 'string' &&
-						typeof value === 'object' &&
-						value !== null
-					) {
-						sanitizedArgs[key] = ensureString(value);
-					}
-				}
-			}
-		}
-
-		return this.trackInFlight(mapping.serverName, () =>
+		return this.healthMonitor.trackInFlight(mapping.serverName, () =>
 			this.executeToolCall(client, mapping.originalName, sanitizedArgs),
 		);
 	}
@@ -1393,9 +836,9 @@ export class MCPClient {
 			toolCount: tools.length,
 			resourceCount: resources.length,
 			promptCount: prompts.length,
-			connected: this.health.get(serverName) !== 'unhealthy',
-			health: this.health.get(serverName) || 'connected',
-			healthError: this.healthErrors.get(serverName),
+			connected: this.healthMonitor.getStatus(serverName) !== 'unhealthy',
+			health: this.healthMonitor.getStatus(serverName) || 'connected',
+			healthError: this.healthMonitor.getError(serverName),
 			description: serverConfig.description,
 			tags: serverConfig.tags,
 			autoApprovedCommands: serverConfig.alwaysAllow,
@@ -1467,30 +910,11 @@ export class MCPClient {
 			const client = this.getHealthyClient(serverName);
 
 			try {
-				const result = await this.trackInFlight(serverName, () =>
+				const result = await this.healthMonitor.trackInFlight(serverName, () =>
 					client.readResource({uri}),
 				);
 
-				// Text vs. blob content is NOT distinguished by a `type` field in
-				// the MCP schema — TextResourceContents carries a `text` property,
-				// BlobResourceContents carries a `blob` property, and neither
-				// declares the other. Discriminate on which key is present.
-				const contents: MCPResourceContent[] = (result.contents ?? []).map(
-					c => {
-						const block = c as {
-							uri: string;
-							mimeType?: string;
-							text?: string;
-							blob?: string;
-						};
-						return {
-							uri: block.uri,
-							mimeType: block.mimeType,
-							text: 'text' in block ? block.text : undefined,
-							blob: 'blob' in block ? block.blob : undefined,
-						};
-					},
-				);
+				const contents = toResourceContents(result.contents);
 
 				const finalMetrics = endMetrics(metrics);
 				this.logger.info('MCP resource read completed', {
@@ -1602,33 +1026,7 @@ export class MCPClient {
 					correlationId,
 				});
 
-				return {
-					description: result.description,
-					messages: result.messages.map(
-						(msg: {
-							role: string;
-							content:
-								| {
-										type: string;
-										text?: string;
-										data?: string;
-										mimeType?: string;
-								  }
-								| string;
-						}) => ({
-							role: msg.role as 'user' | 'assistant',
-							content:
-								typeof msg.content === 'string'
-									? {type: 'text' as const, text: msg.content}
-									: {
-											type: msg.content.type as 'text' | 'image' | 'resource',
-											text: msg.content.text,
-											data: msg.content.data,
-											mimeType: msg.content.mimeType,
-										},
-						}),
-					),
-				};
+				return toPromptResult(result);
 			} catch (error) {
 				const errorMessage = formatError(error);
 				const errorName = error instanceof Error ? error.name : 'Unknown';
@@ -1671,10 +1069,8 @@ export class MCPClient {
 
 			for (const [serverName, client] of this.clients.entries()) {
 				this.closing.add(serverName);
-				this.clearHealthTimer(serverName);
-				this.clearReconnect(serverName);
-				this.healthFailureCounts.delete(serverName);
-				this.healthChecksInFlight.delete(serverName);
+				this.healthMonitor.stop(serverName);
+				this.healthMonitor.clearCheckState(serverName);
 				try {
 					await client.close();
 					successfulDisconnections++;
@@ -1705,10 +1101,7 @@ export class MCPClient {
 			this.serverResources.clear();
 			this.serverPrompts.clear();
 			this.serverConfigs.clear();
-			this.health.clear();
-			this.healthErrors.clear();
-			this.healthChecksInFlight.clear();
-			this.inFlightRequests.clear();
+			this.healthMonitor.reset();
 			this.closing.clear();
 			this.isConnected = false;
 
@@ -1723,7 +1116,7 @@ export class MCPClient {
 
 	getConnectedServers(): string[] {
 		return Array.from(this.clients.keys()).filter(
-			serverName => this.health.get(serverName) !== 'unhealthy',
+			serverName => this.healthMonitor.getStatus(serverName) !== 'unhealthy',
 		);
 	}
 
@@ -1734,7 +1127,7 @@ export class MCPClient {
 	isServerConnected(serverName: string): boolean {
 		return (
 			this.clients.has(serverName) &&
-			this.health.get(serverName) !== 'unhealthy'
+			this.healthMonitor.getStatus(serverName) !== 'unhealthy'
 		);
 	}
 

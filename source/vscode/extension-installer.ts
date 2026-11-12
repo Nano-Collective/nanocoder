@@ -18,7 +18,7 @@ const isWindows = platform === 'win32';
  * List of supported VS Code CLI executables (including forks).
  * These are known to support the --install-extension and --list-extensions CLI flags.
  */
-export const SUPPORTED_CLIS = [
+const SUPPORTED_CLIS = [
 	'code',
 	'code-insiders',
 	'cursor',
@@ -65,9 +65,7 @@ export function getVsixPath(): string {
  * Get all available VS Code (or fork) CLIs in the PATH.
  * Uses parallel async checks with timeouts for better performance.
  */
-export async function getAvailableClis(
-	forceRefresh = false,
-): Promise<string[]> {
+async function getAvailableClis(forceRefresh = false): Promise<string[]> {
 	if (cachedAvailableClis && !forceRefresh) {
 		return cachedAvailableClis;
 	}

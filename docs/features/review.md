@@ -1,25 +1,43 @@
 ---
-title: "Review foundation"
-description: "How review target discovery and activity tracking are being staged"
+title: "Code Review"
+description: "One-shot, diff-only review of a branch or pull request with /review"
 sidebar_order: 23
 ---
 
-# Review foundation and rollout
+# Code review
 
-The review work is being delivered in stages so scope discovery and validation can be exercised before they become the default user path.
+`/review` sends a diff to the active model with a review prompt and shows the reply in the chat. It looks for bugs, security issues, and style violations. It is a deliberate v1: diff-only and one-shot, so the model does not read other files or run tools (see [#1287](https://github.com/Nano-Collective/nanocoder/issues/1287) for the planned agentic tier).
 
-## What is available in the Foundation stage
+## Usage
 
-The public `/review` and `/review quick` commands keep their existing one-shot behavior in this stage. They do not show the new coordinator activity view, start agents, or change the review target-selection flow.
+```text
+/review                                          # current branch against its base
+/review main                                     # same, when main is the default branch
+/review feature/auth                             # another branch against its base
+/review 42                                       # pull request #42 (needs the gh CLI)
+/review https://github.com/owner/repo/pull/42    # pull request by URL
+```
 
-The internal Foundation coordinator can be exercised by its integration tests. It parses explicit branch, recent-commit, working-tree, and GitHub pull-request requests; verifies candidate refs; pins commit IDs; and reads bounded file snapshots and changed-line maps without checking out remote targets. PR snapshots retain the current base tip as well as the merge-base and pinned head used for changed-line mapping. Working-tree reviews record tracked and untracked (non-ignored) changes as a Git tree through a scratch index, so the real index and files are left untouched. Untracked files that look like secrets (`.env` and `.env.*` other than `.env.example`, `.netrc`, `.npmrc`, `.aws/credentials`, `id_rsa*` and `id_ed25519*` keys, and `*.pem`, `*.key`, `*.p12`, `*.pfx`, and `*.keystore` files) are left out and listed by name in the review activity; committed files are reviewed as they are. Remote revisions are fetched into one fixed ref per source under `refs/nanocoder/review/`, which is removed after the review. It asks for clarification when candidates collide or when dirty worktree changes and branch-ahead commits coexist.
+Pass at most one target. A leading `quick` (`/review quick 42`) is accepted and runs the same one-shot review.
 
-The internal activity view is driven by the same bounded event store used by that coordinator. Its key handling is opt-in so an inline transcript panel cannot consume composer input; when focused, `d` shows safe arguments and bounded event history, and Escape requests cancellation once while a run is active. Neither key changes current public `/review` behavior.
+The same review is available outside the TUI as `nanocoder review <target>`, which needs an interactive terminal.
 
-Snapshot limits fail the resolution rather than returning a partial scope: oversized files, excessive file counts, or total content above the configured budget are not presented as a complete review.
+## Choosing the base
 
-## What comes later
+A branch review diffs the branch against the branch it would merge into:
 
-The next stage wires the verified coordinator into the default review path. Deeper review, additional finders, and headless JSON output are separate follow-on work; they are not part of this foundation.
+1. If the branch has an open pull request (found with `gh`), that pull request's base branch on the matching remote.
+2. Otherwise the default branch of the parent repository when the clone is a fork and the parent is a configured remote, then of `upstream` or `origin`.
+3. As a last resort, your local default branch, with a notice that it may be out of date.
 
-The activity summary can be serialized and safely parsed, but this stage does not persist review traces into saved sessions. Session-resume persistence is deferred to the grounded default review stage, when the coordinator is connected to a real session owner. Acceptance test for that stage: complete, fail, and cancel a review; close and resume the session; verify that the corresponding bounded, sanitized summary is still inspectable with its review identity, terminal status, and safe event history, without persisting prompts, diffs, or secrets.
+The scope line at the top of the result says which base was used. If a base ref has not been fetched yet, the notice tells you which `git fetch` to run.
+
+## Pull requests
+
+Bare PR numbers are looked up across configured GitHub remotes and their fork parents. If a number matches pull requests in more than one repository, pass the full PR URL instead. PR review requires the [gh CLI](https://cli.github.com).
+
+## Limits
+
+Diffs longer than 1,000 lines are cut to their first and last 500 lines, and the result says so. Review a smaller range when you need full coverage.
+
+A custom command named `review` replaces the built-in (see [custom commands](custom-commands.md)).

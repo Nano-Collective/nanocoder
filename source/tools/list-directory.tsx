@@ -8,9 +8,9 @@ import {getProjectRoot, getSafeSessionCwd} from '@/services/session-cwd';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
-import {loadGitignore} from '@/utils/gitignore-loader';
-import {isValidFilePath, resolveFilePath} from '@/utils/path-validation';
-import {calculateTokens} from '@/utils/token-calculator';
+import {loadGitignore} from '@/utils/fs/gitignore-loader';
+import {isValidFilePath, resolveFilePath} from '@/utils/fs/path-validation';
+import {estimateTokens} from '@/utils/token-calculator';
 
 interface ListDirectoryArgs {
 	path?: string;
@@ -345,7 +345,7 @@ const listDirectoryFormatter = (
 	// Calculate tokens from the result
 	let tokens = 0;
 	if (result) {
-		tokens = calculateTokens(result);
+		tokens = estimateTokens(result);
 	}
 
 	return <ListDirectoryFormatter args={args} result={result} tokens={tokens} />;

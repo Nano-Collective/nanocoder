@@ -2,11 +2,12 @@ import {Box, Text} from 'ink';
 import Spinner from 'ink-spinner';
 import React, {useMemo} from 'react';
 import CancellingIndicator from '@/components/cancelling-indicator';
-import type {VoiceIndicatorInfo} from '@/components/development-mode-indicator';
 import QuestionPrompt from '@/components/question-prompt';
+import type {VoiceIndicatorInfo} from '@/components/status-bar';
 import {TaskListDisplay} from '@/components/task-list-display';
 import ToolConfirmation from '@/components/tool-confirmation';
 import ToolExecutionIndicator from '@/components/tool-execution-indicator';
+import {LiveCompactCounts} from '@/components/tool-result-display';
 import UserInput from '@/components/user-input';
 import {VoiceInstallPrompt} from '@/components/voice-install-prompt';
 import {useTheme} from '@/hooks/useTheme';
@@ -14,6 +15,9 @@ import type {
 	QueuedUserMessage,
 	UserMessageQueueDraft,
 } from '@/hooks/useUserMessageQueue';
+import type {PendingQuestion} from '@/tools/runtime/question-queue';
+import type {PendingToolApproval} from '@/tools/runtime/tool-approval-queue';
+import type {PendingToolConfirmation} from '@/tools/runtime/tool-confirm-queue';
 import type {Task} from '@/tools/tasks/types';
 import type {
 	ContextSource,
@@ -24,10 +28,6 @@ import type {
 	TuneConfig,
 } from '@/types';
 import type {RestoredInputDraft, SubmittedInputDraft} from '@/types/hooks';
-import type {PendingQuestion} from '@/utils/question-queue';
-import type {PendingToolApproval} from '@/utils/tool-approval-queue';
-import type {PendingToolConfirmation} from '@/utils/tool-confirm-queue';
-import {LiveCompactCounts} from '@/utils/tool-result-display';
 import type {PendingVoiceInstall} from '@/utils/voice-install-queue';
 import type {ActiveEditorState} from '@/vscode/vscode-server';
 
@@ -111,6 +111,12 @@ export interface ChatInputProps {
 	/** Follow-up command offered in the empty prompt after a turn. */
 	suggestedCommand?: string | null;
 	onDismissSuggestion?: () => void;
+	/**
+	 * Whether UserInput's `?` shortcuts overlay is open. It sizes itself as if
+	 * it had the footer to itself, so the live panels above the prompt hide.
+	 */
+	shortcutsOverlayOpen?: boolean;
+	onShortcutsOverlayChange?: (open: boolean) => void;
 }
 
 /**
@@ -171,6 +177,8 @@ export function ChatInput({
 	voice,
 	suggestedCommand,
 	onDismissSuggestion,
+	shortcutsOverlayOpen = false,
+	onShortcutsOverlayChange,
 }: ChatInputProps): React.ReactElement {
 	const {colors} = useTheme();
 	const activeToolCall = pendingToolCalls[currentToolIndex];
@@ -181,8 +189,9 @@ export function ChatInput({
 		activeToolCall.function.name !== 'agent';
 
 	const footerPadding = fullscreen ? 2 : 0;
+	const showLivePanels = !shortcutsOverlayOpen;
 
-	// Memoised: DevelopmentModeIndicator is memo()'d, so handing it a fresh
+	// Memoised: StatusBar is memo()'d, so handing it a fresh
 	// object on every keystroke would re-render it for nothing.
 	const taskInfo = useMemo<TaskIndicatorInfo | null>(() => {
 		if (!liveTaskList || liveTaskList.length === 0) return null;
@@ -204,26 +213,31 @@ export function ChatInput({
 	return (
 		<Box flexDirection="column" marginLeft={fullscreen ? 0 : -1}>
 			{/* Live compact tool counts - running tally during auto-execution */}
-			{compactToolCounts && Object.keys(compactToolCounts).length > 0 && (
-				<Box paddingLeft={footerPadding}>
-					<LiveCompactCounts counts={compactToolCounts} />
-				</Box>
-			)}
+			{showLivePanels &&
+				compactToolCounts &&
+				Object.keys(compactToolCounts).length > 0 && (
+					<Box paddingLeft={footerPadding}>
+						<LiveCompactCounts counts={compactToolCounts} />
+					</Box>
+				)}
 
 			{/* Live task list - updates in-place below tool counts, above spinner */}
-			{showTaskList && liveTaskList && liveTaskList.length > 0 && (
-				<Box paddingLeft={footerPadding}>
-					<TaskListDisplay tasks={liveTaskList} title="Tasks" />
-				</Box>
-			)}
+			{showLivePanels &&
+				showTaskList &&
+				liveTaskList &&
+				liveTaskList.length > 0 && (
+					<Box paddingLeft={footerPadding}>
+						<TaskListDisplay tasks={liveTaskList} title="Tasks" />
+					</Box>
+				)}
 
-			{isCancelling && (
+			{showLivePanels && isCancelling && (
 				<Box paddingLeft={footerPadding}>
 					<CancellingIndicator />
 				</Box>
 			)}
 
-			{showToolExecutionIndicator && (
+			{showLivePanels && showToolExecutionIndicator && (
 				<Box paddingLeft={footerPadding}>
 					<ToolExecutionIndicator
 						toolName={activeToolCall.function.name}
@@ -307,6 +321,7 @@ export function ChatInput({
 					voice={voice}
 					suggestedCommand={suggestedCommand}
 					onDismissSuggestion={onDismissSuggestion}
+					onShortcutsOverlayChange={onShortcutsOverlayChange}
 				/>
 			) : /* Client Missing */
 			mcpInitialized && !client ? (

@@ -742,3 +742,25 @@ test('processToolUse - runs a tool from the tool manager the call carries, not t
 	// And a call that carries none still uses it.
 	t.is((await processToolUse(createMockToolCall('shared', {}))).content, 'shared');
 });
+
+test('processToolUse - does not run a tool once the turn is cancelled', async t => {
+	let ran = false;
+	setToolRegistryGetter(() => ({
+		write_file: async () => {
+			ran = true;
+			return 'written';
+		},
+	}));
+	const controller = new AbortController();
+	controller.abort();
+
+	const result = await processToolUse(
+		{id: 'call-1', function: {name: 'write_file', arguments: {}}},
+		{abortSignal: controller.signal},
+	);
+
+	t.false(ran);
+	t.is(result.tool_call_id, 'call-1');
+	t.true(result.isError);
+	t.regex(String(result.content), /cancelled by the user/i);
+});

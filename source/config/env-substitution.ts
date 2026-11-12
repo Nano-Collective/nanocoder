@@ -1,4 +1,4 @@
-import {logError} from '@/utils/message-queue';
+import {notifyError} from '@/utils/message-queue-core';
 
 // Expand environment variable references in a string
 function expandEnvVar(str: string): string {
@@ -29,7 +29,7 @@ function expandEnvVar(str: string): string {
 				return defaultValue;
 			}
 
-			logError(
+			notifyError(
 				`Environment variable ${varName} not found in config, using empty string`,
 			);
 

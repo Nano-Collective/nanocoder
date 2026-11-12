@@ -10,7 +10,7 @@ import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
 import {withPreservedProcess} from '@/utils/preserve-process';
-import {calculateTokens} from '@/utils/token-calculator';
+import {estimateTokens} from '@/utils/token-calculator';
 
 interface FetchArgs {
 	url: string;
@@ -290,7 +290,7 @@ function FetchUrlFormatterComponent({
 	let shown: {start: number; end: number; total: number} | undefined;
 
 	if (result) {
-		estimatedTokens = calculateTokens(result);
+		estimatedTokens = estimateTokens(result);
 		const note = result.match(
 			/\[Content truncated - showing characters (\d+)-(\d+) of (\d+)\./,
 		);

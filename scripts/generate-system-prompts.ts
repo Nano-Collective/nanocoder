@@ -10,12 +10,12 @@ import {existsSync, mkdirSync, writeFileSync} from 'fs';
 import {dirname, join} from 'path';
 import {fileURLToPath} from 'url';
 import {formatToolsForPrompt} from '@/ai-sdk-client/tools/tool-prompt-formatter';
+import {buildSystemPrompt} from '@/conversation/prompt-builder';
 import {getAllToolExports} from '@/tools/index';
 import {getToolsForProfile} from '@/tools/tool-profiles';
 import {ToolRegistry} from '@/tools/tool-registry';
 import type {ToolProfile, TuneConfig} from '@/types/config';
 import type {AISDKCoreTool, DevelopmentMode} from '@/types/core';
-import {buildSystemPrompt} from '@/utils/prompt-builder';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);

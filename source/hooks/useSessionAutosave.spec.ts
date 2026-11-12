@@ -33,7 +33,7 @@ import {
 	getKeyGeneratorSessionId,
 	resetKeyGeneratorForTests,
 	setKeyGeneratorSessionId,
-} from '../session/key-generator.js';
+} from '../utils/key-generator.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
