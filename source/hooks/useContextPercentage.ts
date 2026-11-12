@@ -1,4 +1,9 @@
 import {useEffect, useRef} from 'react';
+import {
+	filterModelFacing,
+	isModelFacing,
+} from '@/conversation/message-visibility';
+import {getLastBuiltPrompt} from '@/conversation/prompt-builder';
 import {getModelContextLimit} from '@/models/index';
 import type {ToolManager} from '@/tools/tool-manager';
 import type {AIProviderConfig, TuneConfig} from '@/types/config';
@@ -15,8 +20,6 @@ import {
 	calculateToolDefinitionsTokensFromDefs,
 } from '@/usage/calculator';
 import {resolveContextUsage} from '@/usage/context-source';
-import {filterModelFacing, isModelFacing} from '@/utils/message-visibility';
-import {getLastBuiltPrompt} from '@/utils/prompt-builder';
 
 interface UseContextPercentageProps {
 	currentModel: string;

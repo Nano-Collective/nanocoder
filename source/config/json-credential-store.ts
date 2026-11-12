@@ -7,15 +7,10 @@
  * logic; callers layer their own credential-shaped accessors on top.
  */
 
-import {
-	chmodSync,
-	existsSync,
-	mkdirSync,
-	readFileSync,
-	writeFileSync,
-} from 'fs';
+import {existsSync, mkdirSync, readFileSync} from 'fs';
 import {join} from 'path';
 import {getConfigPath} from '@/config/paths';
+import {atomicWriteFileSync} from '@/utils/fs/atomic-write';
 
 export interface JsonCredentialStore<T> {
 	/** Read the full store, returning {} if missing or unreadable. */
@@ -51,12 +46,13 @@ export function createJsonCredentialStore<T>(
 			if (!existsSync(dir)) {
 				mkdirSync(dir, {recursive: true});
 			}
-			const path = filePath();
-			writeFileSync(path, JSON.stringify(store, null, 2), {
-				encoding: 'utf-8',
+			// A temp file created 0600 and renamed into place: the secrets are
+			// never in a file with wider permissions (an existing file's mode
+			// would otherwise apply until a follow-up chmod), and a crash
+			// mid-write cannot truncate the store.
+			atomicWriteFileSync(filePath(), JSON.stringify(store, null, 2), {
 				mode: 0o600,
 			});
-			chmodSync(path, 0o600);
 		},
 	};
 }

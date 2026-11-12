@@ -19,7 +19,7 @@ import {StyledSelectInput} from '@/components/ui/styled-select-input';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
-import {createTerminalFileLink as createFileLink} from '@/utils/terminal-file-link';
+import {createTerminalFileLink as createFileLink} from '@/terminal/terminal-file-link';
 
 export function createTerminalFileLink(filePath: string): string {
 	return createFileLink(filePath, `Open ${basename(filePath)}`);

@@ -1,5 +1,5 @@
 import test from 'ava';
-import {generateToolCallId} from '@/utils/tool-call-id';
+import {generateToolCallId} from '@/tools/runtime/tool-call-id';
 import {
 	convertAISDKToolCall,
 	convertAISDKToolCalls,

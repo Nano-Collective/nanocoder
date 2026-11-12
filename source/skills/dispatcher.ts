@@ -90,7 +90,7 @@ export interface SkillDispatcherOptions {
 	/**
 	 * Called when an event targets a kind the dispatcher does not (yet)
 	 * support. Defaults to a no-op; production wiring routes this through
-	 * `logError` from the message queue.
+	 * `notifyError` from the message queue.
 	 */
 	onUnsupportedTarget?: UnsupportedTargetLogger;
 	/**

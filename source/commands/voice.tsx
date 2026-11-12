@@ -2,13 +2,13 @@ import React from 'react';
 import {ErrorMessage, InfoMessage} from '@/components/message-box';
 import {getVoicePreference, updateVoicePreference} from '@/config/preferences';
 import {defaultLoadPlugin} from '@/hooks/useVoice';
-import {generateKey} from '@/session/key-generator';
 import type {Command} from '@/types/index';
+import {generateKey} from '@/utils/key-generator';
 
 export const voiceCommand: Command = {
 	name: 'voice',
 	description:
-		'Configure voice mode (/voice [hands-free|ptt|stt <local|cloud>|tts <local|cloud>|status|mode <push-to-talk|hands-free>])',
+		'Turn voice mode on or off and configure it (/voice [on|off|status|hands-free|ptt|stt <local|cloud>|tts <local|cloud>])',
 	handler: async args => {
 		const currentConfig = getVoicePreference();
 		const updatedConfig = {...currentConfig};

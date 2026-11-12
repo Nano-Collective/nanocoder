@@ -2,6 +2,7 @@ import {randomUUID} from 'node:crypto';
 import {lstatSync, mkdirSync, rmSync} from 'node:fs';
 import {basename, dirname, join, resolve} from 'node:path';
 import {execGh, execGit} from '@/tools/git/utils';
+import {parseGitHubRepository} from '@/utils/github-repository';
 
 type WorktreeDependencies = {
 	execGit: (args: string[]) => Promise<string>;
@@ -27,19 +28,6 @@ function pathExists(path: string): boolean {
 		if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
 		throw error;
 	}
-}
-
-function githubRepoFromRemote(url: string): string | null {
-	const match = url
-		.trim()
-		.match(
-			/^(?:https?:\/\/github\.com\/|ssh:\/\/git@github\.com\/|git@github\.com:)([^/]+)\/([^/]+)\/?$/i,
-		);
-	if (!match) return null;
-	const name = match[2].replace(/\.git$/i, '');
-	return /^[\w.-]+$/.test(match[1]) && /^[\w.-]+$/.test(name)
-		? `${match[1]}/${name}`
-		: null;
 }
 
 function registeredBranchAtPath(output: string, path: string): string | null {
@@ -132,7 +120,7 @@ export async function createPrWorktree(
 			`Could not read the ${remote} remote: ${errorMessage(error)}`,
 		);
 	}
-	const repo = githubRepoFromRemote(remoteUrl);
+	const repo = parseGitHubRepository(remoteUrl);
 	if (!repo) {
 		throw new Error(
 			`The ${remote} remote must point to a GitHub repository containing the PR.`,

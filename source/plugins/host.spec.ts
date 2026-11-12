@@ -6,7 +6,7 @@ import {runAcpConversation} from '@/acp/acp-conversation';
 import {AcpSession} from '@/acp/acp-session';
 import {clearAppConfig, reloadAppConfig} from '@/config/index';
 import {resetPreferencesCache} from '@/config/preferences';
-import {describeProjectTrust} from '@/config/project-trust';
+import {describeProjectTrust} from '@/config/trust/project-trust';
 import {
 	appendPostToolUseOutput,
 	runLifecycleHooks,
@@ -14,7 +14,7 @@ import {
 } from '@/services/lifecycle-hooks';
 import {resetSessionCwd, setProjectRoot} from '@/services/session-cwd';
 import type {ToolCall} from '@/types/core';
-import {setGlobalMessageQueue} from '@/utils/message-queue';
+import {setGlobalMessageQueue} from '@/components/message-queue';
 import {
 	consultPluginPermission,
 	loadPlugins,

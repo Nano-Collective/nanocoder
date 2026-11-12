@@ -7,28 +7,37 @@ import ToolMessage, {CappedLines} from '@/components/tool-message';
 import {getSyntaxTheme} from '@/config/themes';
 import {DEFAULT_TERMINAL_COLUMNS} from '@/constants';
 import {
+	enforceFirewall,
 	evaluateMutationEnvelope,
 	getFirewallConfig,
 } from '@/firewall/mutation-firewall';
 import {ThemeContext} from '@/hooks/useTheme';
 import {getSafeSessionCwd} from '@/services/session-cwd';
-import type {NanocoderToolExport} from '@/types/core';
-import {jsonSchema, tool} from '@/types/core';
-import {truncateAnsi} from '@/utils/ansi-truncate';
-import {formatError} from '@/utils/error-formatter';
-import {getCachedFileContent, invalidateCache} from '@/utils/file-cache';
-import {highlight} from '@/utils/highlighter';
-import {normalizeIndentation} from '@/utils/indentation-normalizer';
-import {collapseUnchangedLines, computeLineDiff} from '@/utils/inline-diff';
-import {validateEditableFormat, validatePath} from '@/utils/path-validators';
-import {getLanguageFromExtension} from '@/utils/programming-language-helper';
+import {truncateAnsi} from '@/terminal/ansi-truncate';
+import {highlight} from '@/terminal/highlighter';
+import {normalizeIndentation} from '@/terminal/indentation-normalizer';
+import {
+	collapseUnchangedLines,
+	computeLineDiff,
+} from '@/tools/file-ops/inline-diff';
+import {
+	validateEditableEncoding,
+	validateEditableFormat,
+	validatePath,
+} from '@/tools/file-ops/path-validators';
+import {getLanguageFromExtension} from '@/tools/file-ops/programming-language-helper';
 import {
 	forgetReadContent,
 	hasSeenFile,
 	markFileSeen,
-} from '@/utils/read-tracker';
-import {calculateTokens} from '@/utils/token-calculator';
-import {createFileToolApproval} from '@/utils/tool-approval';
+} from '@/tools/runtime/read-tracker';
+import {createFileToolApproval} from '@/tools/runtime/tool-approval';
+import type {NanocoderToolExport} from '@/types/core';
+import {jsonSchema, tool} from '@/types/core';
+import {formatError} from '@/utils/error-formatter';
+import {getCachedFileContent, invalidateCache} from '@/utils/fs/file-cache';
+import {estimateTokens} from '@/utils/token-calculator';
+import {truncateText} from '@/utils/truncate-text';
 import {ensureString} from '@/utils/type-helpers';
 import {
 	closeDiffInVSCode,
@@ -57,11 +66,20 @@ const executeWriteFile = async (args: {
 	const fileExists = existsSync(absPath);
 
 	if (fileExists) {
+		let cached: Awaited<ReturnType<typeof getCachedFileContent>> | undefined;
 		try {
-			const cached = await getCachedFileContent(absPath);
-			previousContentCache.set(absPath, cached.content);
+			cached = await getCachedFileContent(absPath);
 		} catch {
-			previousContentCache.set(absPath, null);
+			// Unreadable: no diff, and no encoding to check.
+		}
+		previousContentCache.set(absPath, cached?.content ?? null);
+		// The model saw this file decoded as UTF-8, so a rewrite carries U+FFFD
+		// for every byte that didn't decode, the same loss the edit tools refuse.
+		if (cached) {
+			const encodingResult = validateEditableEncoding(args.path, cached);
+			if (!encodingResult.valid) {
+				throw new Error(encodingResult.error);
+			}
 		}
 	} else {
 		previousContentCache.set(absPath, null);
@@ -95,9 +113,7 @@ const executeWriteFile = async (args: {
 		originalContent,
 		contentStr,
 	);
-	if (!firewallResult.allowed) {
-		throw new Error(firewallResult.summary ?? 'Mutation blocked by firewall');
-	}
+	const firewallWarning = enforceFirewall(firewallResult);
 
 	await writeFile(absPath, contentStr, 'utf-8');
 
@@ -114,10 +130,10 @@ const executeWriteFile = async (args: {
 	const actualContent = await readFile(absPath, 'utf-8');
 	const lineCount = actualContent.split('\n').length;
 	const charCount = actualContent.length;
-	const estimatedTokens = calculateTokens(actualContent);
+	const estimatedTokens = estimateTokens(actualContent);
 
 	const action = fileExists ? 'overwritten' : 'written';
-	return `File ${action} successfully (${lineCount} lines, ${charCount} characters, ~${estimatedTokens} tokens).`;
+	return `File ${action} successfully (${lineCount} lines, ${charCount} characters, ~${estimatedTokens} tokens).${firewallWarning}`;
 };
 
 const writeFileCoreTool = tool({
@@ -160,10 +176,8 @@ interface WriteFileArgs {
 }
 
 /** Truncate a plain (non-highlighted) line to fit terminal width */
-const truncateLine = (line: string, maxWidth: number): string => {
-	if (line.length <= maxWidth) return line;
-	return line.slice(0, maxWidth - 1) + '…';
-};
+const truncateLine = (line: string, maxWidth: number): string =>
+	truncateText(line, maxWidth, {unit: 'code-units'});
 
 // Create a component that will re-render when theme changes
 const WriteFileFormatter = React.memo(
@@ -187,7 +201,7 @@ const WriteFileFormatter = React.memo(
 		const language = getLanguageFromExtension(ext);
 
 		// Estimate tokens (rough approximation: ~4 characters per token)
-		const estimatedTokens = calculateTokens(newContent);
+		const estimatedTokens = estimateTokens(newContent);
 
 		// Calculate available width for line content (terminal width - line number prefix - padding)
 		const terminalWidth = process.stdout.columns || DEFAULT_TERMINAL_COLUMNS;
@@ -489,28 +503,19 @@ const writeFileValidator = async (args: {
 		};
 	}
 
-	// Allow empty strings (intentional file creation)
-	// Only reject null/undefined, which we already checked above
-
-	// Check for invalid path characters or attempts to write to system directories
-	const invalidPatterns = [
-		/^\/etc\//i,
-		/^\/sys\//i,
-		/^\/proc\//i,
-		/^\/dev\//i,
-		/^\/boot\//i,
-		/^C:\\Windows\\/i,
-		/^C:\\Program Files\\/i,
-	];
-
-	for (const pattern of invalidPatterns) {
-		if (pattern.test(absPath)) {
-			return {
-				valid: false,
-				error: `Cannot write files to system directory: "${args.path}"`,
-			};
+	// Overwriting a legacy-encoded file: see executeWriteFile.
+	if (existsSync(absPath)) {
+		try {
+			const cached = await getCachedFileContent(absPath);
+			const encodingResult = validateEditableEncoding(args.path, cached);
+			if (!encodingResult.valid) return encodingResult;
+		} catch {
+			// Unreadable files surface their own error at execute time.
 		}
 	}
+
+	// Allow empty strings (intentional file creation)
+	// Only reject null/undefined, which we already checked above
 
 	return {valid: true};
 };

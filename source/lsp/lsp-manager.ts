@@ -9,7 +9,7 @@ import {extname, resolve} from 'path';
 import {fileURLToPath, pathToFileURL} from 'url';
 import {getSessionCwd} from '@/services/session-cwd';
 import {formatError} from '@/utils/error-formatter';
-import {logError, logInfo} from '@/utils/message-queue';
+import {notifyError, notifyInfo} from '@/utils/message-queue-core';
 import {getShutdownManager} from '@/utils/shutdown';
 import {LSPClient, type LSPCrashInfo, LSPServerConfig} from './lsp-client';
 import {
@@ -279,7 +279,7 @@ export class LSPManager extends EventEmitter {
 			}`,
 		);
 
-		logError(
+		notifyError(
 			`Language server "${config.name}" crashed (${status}).${
 				canRestart
 					? ' Restarting it.'
@@ -298,13 +298,13 @@ export class LSPManager extends EventEmitter {
 		}
 		if (result.success) {
 			this.markAvailable(config.languages);
-			logInfo(`Language server "${config.name}" restarted.`);
+			notifyInfo(`Language server "${config.name}" restarted.`);
 		} else {
 			this.markUnavailable(
 				config.languages,
 				`Language server "${config.name}" crashed (${status}) and could not be restarted: ${result.error}`,
 			);
-			logError(
+			notifyError(
 				`Language server "${config.name}" could not be restarted: ${result.error}`,
 			);
 		}

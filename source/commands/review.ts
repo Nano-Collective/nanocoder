@@ -3,8 +3,9 @@ import {fileURLToPath} from 'node:url';
 import React from 'react';
 import AssistantMessage from '@/components/assistant-message';
 import AssistantReasoning from '@/components/assistant-reasoning';
+import {errorMsg, infoMsg, warningMsg} from '@/components/message-factory';
 import {getShowUsageFooter} from '@/config/preferences';
-import {generateKey} from '@/session/key-generator';
+import {loadSection} from '@/conversation/prompt-builder';
 import {stripThinkTags} from '@/tool-calling/index';
 import {
 	execGh,
@@ -18,9 +19,9 @@ import type {Command} from '@/types/commands';
 import type {Message} from '@/types/core';
 import {buildResponseUsageBounded} from '@/usage/response-usage';
 import {formatError} from '@/utils/error-formatter';
+import {parseGitHubRepository} from '@/utils/github-repository';
+import {generateKey} from '@/utils/key-generator';
 import {getLogger} from '@/utils/logging';
-import {errorMsg, infoMsg, warningMsg} from '@/utils/message-factory';
-import {loadSection} from '@/utils/prompt-builder';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -157,30 +158,6 @@ function parsePullRequestUrl(value: string): PullRequestTarget | null {
 			number,
 			repository: `${match[1]}/${match[2].replace(/\.git$/i, '')}`,
 		};
-	} catch {
-		return null;
-	}
-}
-
-function parseGitHubRepository(value: string): string | null {
-	const remote = value.trim();
-	const scpMatch = remote.match(
-		/^(?:[^@/]+@)?github\.com:([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+?)(?:\.git)?\/?$/i,
-	);
-	if (scpMatch) return scpMatch[1];
-
-	try {
-		const url = new URL(remote);
-		if (
-			!['https:', 'ssh:', 'git:'].includes(url.protocol) ||
-			(url.hostname !== 'github.com' && url.hostname !== 'www.github.com')
-		) {
-			return null;
-		}
-
-		const path = url.pathname.replace(/\/+$/, '').replace(/\.git$/i, '');
-		const match = path.match(/^\/([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)$/);
-		return match?.[1] ?? null;
 	} catch {
 		return null;
 	}
@@ -626,6 +603,7 @@ export function createReviewCommand(
 		description:
 			'Review a branch or PR diff for bugs, security issues, and style violations',
 		progressLabel: 'Reviewing code',
+		echoInvocation: true,
 		handler: async (args, _messages, metadata) => {
 			const client = metadata.client;
 			if (!client) {

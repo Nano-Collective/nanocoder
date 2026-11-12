@@ -3,26 +3,29 @@ import {access, writeFile} from 'node:fs/promises';
 import {resolve} from 'node:path';
 import React from 'react';
 import {getColors} from '@/config/index';
-import {evaluateMutationEnvelope} from '@/firewall/mutation-firewall';
+import {
+	enforceFirewall,
+	evaluateMutationEnvelope,
+} from '@/firewall/mutation-firewall';
 import {getSafeSessionCwd} from '@/services/session-cwd';
-import type {NanocoderToolExport} from '@/types/core';
-import {jsonSchema, tool} from '@/types/core';
-import {EditRecoveryError} from '@/utils/edit-recovery';
-import {formatError} from '@/utils/error-formatter';
-import {getCachedFileContent, invalidateCache} from '@/utils/file-cache';
-import {fitEditToLineEndings} from '@/utils/line-endings';
-import {replaceFirstLiteral} from '@/utils/literal-replace';
+import {EditRecoveryError} from '@/tools/file-ops/edit-recovery';
+import {fitEditToLineEndings} from '@/tools/file-ops/line-endings';
+import {replaceFirstLiteral} from '@/tools/file-ops/literal-replace';
 import {
 	validateEditableEncoding,
 	validateEditableFormat,
 	validatePath,
-} from '@/utils/path-validators';
+} from '@/tools/file-ops/path-validators';
 import {
 	forgetReadContent,
 	hasSeenFile,
 	markFileSeen,
-} from '@/utils/read-tracker';
-import {createFileToolApproval} from '@/utils/tool-approval';
+} from '@/tools/runtime/read-tracker';
+import {createFileToolApproval} from '@/tools/runtime/tool-approval';
+import type {NanocoderToolExport} from '@/types/core';
+import {jsonSchema, tool} from '@/types/core';
+import {formatError} from '@/utils/error-formatter';
+import {getCachedFileContent, invalidateCache} from '@/utils/fs/file-cache';
 import {
 	closeDiffInVSCode,
 	isVSCodeConnected,
@@ -124,9 +127,7 @@ const executeStringReplace = async (
 		fileContent,
 		newContent,
 	);
-	if (!firewallResult.allowed) {
-		throw new Error(firewallResult.summary ?? 'Mutation blocked by firewall');
-	}
+	const firewallWarning = enforceFirewall(firewallResult);
 
 	await writeFile(absPath, newContent, 'utf-8');
 	invalidateCache(absPath);
@@ -153,7 +154,7 @@ const executeStringReplace = async (
 			? `line ${startLine}`
 			: `lines ${startLine}-${newEndLine}`;
 
-	return `Successfully replaced content at ${rangeDesc} (now ${newRangeDesc}).${formatUpdatedFileContext(newContent, startLine, newEndLine)}`;
+	return `Successfully replaced content at ${rangeDesc} (now ${newRangeDesc}).${formatUpdatedFileContext(newContent, startLine, newEndLine)}${firewallWarning}`;
 };
 
 const stringReplaceCoreTool = tool({

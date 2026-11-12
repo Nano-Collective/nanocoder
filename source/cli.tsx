@@ -28,6 +28,15 @@ if (typeof nodeModule.enableCompileCache === 'function') {
 
 const require = nodeModule.createRequire(import.meta.url);
 
+// Loads the launch directory's `.env` (minus the keys #2054 protects). Called
+// right before importing a path that reads config, as importing config used
+// to do as a side effect; the fast paths that never did (`trust`, `storage`,
+// `init`, ...) still never read it.
+async function loadProjectEnv(): Promise<void> {
+	const {bootstrapProjectDotenv} = await import('@/config/project-dotenv');
+	bootstrapProjectDotenv();
+}
+
 // Resolved inline rather than through `@/utils/package-version` to keep the
 // fast path import-free (see the note above). A missing or malformed
 // package.json must not throw here: this runs at module load, before any
@@ -90,6 +99,7 @@ if (args[0] === 'daemon') {
 		else console.error(usage);
 		process.exit(help ? 0 : 1);
 	}
+	await loadProjectEnv();
 	const {runDaemonCli} = await import('@/daemon/cli');
 	const result = await runDaemonCli(sub as DaemonSub, {
 		projectRoot: process.cwd(),
@@ -104,6 +114,7 @@ if (args[0] === 'daemon') {
 // PR review; pulls in the full LLM/tool/subagent stack (unlike `daemon`
 // above) but never Ink.
 if (args[0] === 'verify') {
+	await loadProjectEnv();
 	const {runVerifyCli} = await import('@/verify/cli');
 	const result = await runVerifyCli(args.slice(1), {
 		projectRoot: process.cwd(),
@@ -115,6 +126,7 @@ if (args[0] === 'verify') {
 // Handle `nanocoder skills <sub>` — fast path, only loads the skill
 // installer (no Ink, no providers, no tool registry).
 if (args[0] === 'skills') {
+	await loadProjectEnv();
 	const {runSkillsCli, SKILLS_CLI_USAGE} = await import('@/skills/install');
 	if (args[1] !== 'add' || args.includes('--help') || args.includes('-h')) {
 		const help = !args[1] || args.includes('--help') || args.includes('-h');
@@ -136,6 +148,7 @@ if (args[0] === 'skills') {
 // Handle `nanocoder config <sub>` — fast path. Resolving the effective
 // config only needs the config module graph, not Ink or the tool registry.
 if (args[0] === 'config') {
+	await loadProjectEnv();
 	const {runConfigCli} = await import('@/config/config-cli');
 	const result = runConfigCli(args[1], args.slice(2));
 	if (result.exitCode === 0) {
@@ -152,7 +165,7 @@ if (args[0] === 'config') {
 // (trust-cli.spec.ts checks this), which is why preferences.ts logs through
 // @/utils/logging and not the Ink message queue.
 if (args[0] === 'trust') {
-	const {runTrustCli} = await import('@/config/trust-cli');
+	const {runTrustCli} = await import('@/config/trust/trust-cli');
 	const result = runTrustCli(args.slice(1));
 	if (result.exitCode === 0) {
 		console.log(result.output);
@@ -277,7 +290,7 @@ Commands:
 Options:
   -v, --version       Show version number
   -h, --help          Show help
-  --vscode            Run in VS Code mode
+  --vscode            Start the legacy VS Code companion (deprecated)
   --vscode-port       Specify VS Code port
   --provider          Specify AI provider (must be configured in agents.config.json).
                       Quote names with spaces: --provider "GitHub Copilot"
@@ -841,6 +854,7 @@ async function main(): Promise<void> {
 			process.exit(1);
 		}
 	} else if (acpMode) {
+		await loadProjectEnv();
 		const {runAcpServer} = await import('@/acp/acp-server');
 		await runAcpServer({
 			cliProvider,
@@ -852,6 +866,7 @@ async function main(): Promise<void> {
 	} else if (plainMode && nonInteractivePrompt) {
 		// Headless, Ink-free path. Note: --plain is currently only valid with
 		// `run`, so we must have a non-empty prompt here.
+		await loadProjectEnv();
 		const {runPlainShell} = await import('@/plain/shell');
 		await runPlainShell({
 			prompt: nonInteractivePrompt,
@@ -864,6 +879,7 @@ async function main(): Promise<void> {
 	} else {
 		// Interactive TUI — load Ink + App only now, with React's production
 		// build (see load-tui-renderer.ts).
+		await loadProjectEnv();
 		const {loadTuiRenderer} = await import('@/app/load-tui-renderer');
 		const renderTui = await loadTuiRenderer();
 
@@ -957,15 +973,15 @@ async function main(): Promise<void> {
 				MOUSE_REPORTING_ON,
 				stripMouseSequences,
 				wheelEvents,
-			} = await import('@/utils/terminal-mouse');
+			} = await import('@/terminal/terminal-mouse');
 			const {
 				createPasteExtractor,
 				DISABLE_BRACKETED_PASTE,
 				ENABLE_BRACKETED_PASTE,
 				pasteEvents,
-			} = await import('@/utils/terminal-paste');
+			} = await import('@/terminal/terminal-paste');
 			const {splitControlKeypresses} = await import(
-				'@/utils/terminal-keypress'
+				'@/terminal/terminal-keypress'
 			);
 
 			// Bracketed paste in both screen modes. Without it the terminal

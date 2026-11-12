@@ -57,6 +57,7 @@ import {extractRootError} from '../error-handling/error-extractor.js';
 import {parseAPIError} from '../error-handling/error-parser.js';
 import {isImageSupportError} from '../error-handling/image-error-detector.js';
 import {isToolSupportError} from '../error-handling/tool-error-detector.js';
+import {appendToolDefinitionsToPrompt} from '../tools/system-prompt-assembler.js';
 import type {PrefixTracker} from './prefix-tracker.js';
 import {rehydrateResponse, scrubOutgoing} from './privacy.js';
 import {
@@ -78,6 +79,13 @@ type SDKProviderOptions = Parameters<typeof streamText>[0]['providerOptions'];
  * of failing on the same screenshot sitting in history.
  */
 const imageRejectingModels = new Set<string>();
+
+/**
+ * Provider/model pairs that rejected native tool definitions this session.
+ * Later requests go straight to the XML fallback instead of paying for the
+ * same failed request every turn. Keyed like imageRejectingModels.
+ */
+const toolRejectingModels = new Set<string>();
 
 function imageRejectionKey(
 	providerConfig: AIProviderConfig,
@@ -137,12 +145,22 @@ export async function handleChat(
 		throw new Error('Operation was cancelled');
 	}
 
-	// Check if tools should be disabled
-	const shouldDisableTools =
-		skipTools ||
+	// Tools disabled by config (provider config, or tune's XML/JSON tool mode)
+	// are handled upstream: the caller's system prompt already carries the
+	// tool definitions as text. Tools disabled because the model rejected them
+	// (now, or earlier this session) are not, so this handler adds the
+	// definitions itself.
+	const disabledByTune = modeOverrides?.nativeToolsDisabled === true;
+	const disabledByConfig =
+		disabledByTune ||
 		providerConfig.disableTools ||
-		(providerConfig.disableToolModels &&
-			providerConfig.disableToolModels.includes(currentModel));
+		(providerConfig.disableToolModels?.includes(currentModel) ?? false);
+	const disabledByRejection =
+		!disabledByConfig &&
+		(skipTools ||
+			toolRejectingModels.has(imageRejectionKey(providerConfig, currentModel)));
+	const shouldDisableTools = disabledByConfig || disabledByRejection;
+	const sendsNativeTools = !shouldDisableTools && Object.keys(tools).length > 0;
 
 	// Start performance tracking
 	const metrics = startMetrics();
@@ -151,11 +169,13 @@ export async function handleChat(
 	if (shouldDisableTools) {
 		logger.info('Tools disabled for request', {
 			model: currentModel,
-			reason: skipTools
-				? 'retry without tools'
-				: providerConfig.disableTools
-					? 'provider configuration'
-					: 'model configuration',
+			reason: disabledByRejection
+				? 'model rejected native tools'
+				: disabledByTune
+					? 'tune tool mode'
+					: providerConfig.disableTools
+						? 'provider configuration'
+						: 'model configuration',
 			correlationId,
 		});
 	}
@@ -189,22 +209,26 @@ export async function handleChat(
 		try {
 			// Tools arrive with approval policy already resolved by ToolManager.
 			// No approval mutation needed here — chat handler is a pure SDK caller.
-			const aiTools = shouldDisableTools
-				? undefined
-				: Object.keys(tools).length > 0
-					? tools
-					: undefined;
-
-			// XML tool definitions are already included in the system prompt
-			// when native tools are disabled (handled upstream in useChatHandler).
+			const aiTools = sendsNativeTools ? tools : undefined;
 
 			// AI SDK v6 wants the system prompt via the top-level `system` option
 			// rather than as a system-role entry in `messages` (it warns otherwise
 			// to discourage prompt-injection-prone patterns). Extract it here.
-			const systemContent = messages
-				.filter(m => m.role === 'system')
-				.map(m => m.content)
-				.join('\n\n');
+			//
+			// When native tools are disabled by config, the XML tool definitions
+			// are already in the system prompt (added upstream in useChatHandler).
+			// When the model rejected them, nothing upstream knows, so add them
+			// here - otherwise the model is told to use XML tool calls it has no
+			// definitions for.
+			const systemContent = appendToolDefinitionsToPrompt(
+				messages
+					.filter(m => m.role === 'system')
+					.map(m => m.content)
+					.join('\n\n'),
+				disabledByRejection,
+				'xml',
+				tools,
+			);
 			const nonSystemMessages = messages.filter(m => m.role !== 'system');
 
 			// Scrub prompts if privacy scrubbing is enabled
@@ -600,8 +624,13 @@ export async function handleChat(
 				return await handleChat(params);
 			}
 
-			// Check if error indicates tool support issue and we haven't retried
-			if (!skipTools && isToolSupportError(error)) {
+			// Check if error indicates tool support issue and we haven't retried.
+			// Only a request that actually sent native tools can have been
+			// rejected for them.
+			if (sendsNativeTools && isToolSupportError(error, streamingErrors)) {
+				toolRejectingModels.add(
+					imageRejectionKey(providerConfig, currentModel),
+				);
 				logger.warn('Tool support error detected, retrying without tools', {
 					model: currentModel,
 					error: error instanceof Error ? error.message : error,

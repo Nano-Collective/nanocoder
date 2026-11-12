@@ -4,9 +4,9 @@ import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {getToolManager} from '@/message-handler';
-import {generateKey} from '@/session/key-generator';
 import {ToolManager} from '@/tools/tool-manager';
 import type {Command} from '@/types/index';
+import {generateKey} from '@/utils/key-generator';
 
 // Helper function to get transport icons
 function getTransportIcon(transportType: string): string {

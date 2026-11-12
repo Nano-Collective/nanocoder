@@ -3,16 +3,16 @@ import {existsSync, unlinkSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import React from 'react';
-import type {VoiceState} from '@/components/development-mode-indicator';
 import {ErrorMessage, InfoMessage} from '@/components/message-box';
+import type {VoiceState} from '@/components/status-bar';
 import {getVoicePreference} from '@/config/preferences';
 import {
 	synthesizeCloudSpeech,
 	transcribeCloudAudio,
 } from '@/services/cloud-audio';
-import {generateKey} from '@/session/key-generator';
 import type {LLMClient, Message} from '@/types/core';
 import {formatForSpeech} from '@/utils/format-for-speech';
+import {generateKey} from '@/utils/key-generator';
 import {
 	hasDeclinedVoiceInstallForSession,
 	setDeclinedVoiceInstallForSession,
