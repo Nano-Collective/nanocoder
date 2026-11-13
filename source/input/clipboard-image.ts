@@ -8,7 +8,7 @@ import {getLogger} from '@/utils/logging';
 const logger = getLogger();
 
 /** Hard cap on attachment size; providers reject very large images anyway. */
-const MAX_IMAGE_BYTES = 10 * 1024 * 1024; // 10 MB
+export const MAX_IMAGE_BYTES = 10 * 1024 * 1024; // 10 MB
 
 /**
  * Image extensions the supported providers accept. Anthropic, Google, and the
