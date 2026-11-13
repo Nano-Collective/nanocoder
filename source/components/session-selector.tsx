@@ -141,9 +141,19 @@ const SessionSelector: React.FC<SessionSelectorProps> = ({
 		);
 	}
 
+	const titlesById = new Map(
+		sessions.map(session => [session.id, session.title]),
+	);
+
 	const items = sessions.map((session, index) => {
 		const prefix = `[${index + 1}] `;
-		const suffix = ` (${formatMessageCount(session.messageCount)}) - ${formatTimeAgo(session.lastAccessedAt)}`;
+		const parentTitle = session.parentId
+			? titlesById.get(session.parentId)
+			: undefined;
+		const forkSuffix = parentTitle
+			? ` · fork of ${truncate(parentTitle, 24)}`
+			: '';
+		const suffix = ` (${formatMessageCount(session.messageCount)}) - ${formatTimeAgo(session.lastAccessedAt)}${forkSuffix}`;
 		// 4 accounts for the `> ` selector indicator + margin
 		const maxTitleLength = actualWidth - prefix.length - suffix.length - 8;
 		const truncatedTitle =
