@@ -81,7 +81,8 @@ export const lazyCommands: LazyCommand[] = [
 	},
 	{
 		name: 'doctor',
-		description: 'Show environment health report for bug reports',
+		description:
+			'Show environment health report; use --probe for provider checks',
 		load: () => import('@/commands/doctor').then(m => m.doctorCommand),
 	},
 	{
