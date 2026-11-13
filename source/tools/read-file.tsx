@@ -5,6 +5,7 @@ import {Box, Text} from 'ink';
 import React from 'react';
 import ToolMessage from '@/components/tool-message';
 import {
+	BINARY_DETECTION_CHUNK_CHARS,
 	EMPTY_CONTENT_MARKER,
 	FILE_READ_PREVIEW_LINES,
 	FILE_READ_PREVIEW_THRESHOLD_LINES,
@@ -460,6 +461,20 @@ const readFileValidator = async (args: {
 		// Skip this check for metadata_only requests
 		if (!args.metadata_only) {
 			const cached = await getCachedFileContent(absPath);
+
+			// Binary files (images, archives, compiled output) decode to U+FFFD and
+			// control characters. A NUL byte in the leading chunk is the usual tell.
+			// Derived content (PDF/DOCX) is a markdown transcript, not the raw bytes.
+			if (
+				!cached.derived &&
+				cached.content.slice(0, BINARY_DETECTION_CHUNK_CHARS).includes('\0')
+			) {
+				return {
+					valid: false,
+					error: `File "${args.path}" is a binary file and cannot be read as text. Use metadata_only to inspect its size and type.`,
+				};
+			}
+
 			const allLines = cached.lines;
 			const totalLines = cached.totalLines;
 			const startLine = args.start_line ? Math.max(1, args.start_line) : 1;

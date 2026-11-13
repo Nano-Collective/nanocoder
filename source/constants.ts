@@ -106,6 +106,7 @@ export const FILE_MENTION_PREVIEW_LINES = 40;
 
 export const CHARS_PER_TOKEN_ESTIMATE = 4;
 export const MAX_LINE_LENGTH_CHARS = 10_000; // Lines longer than this are likely minified/binary
+export const BINARY_DETECTION_CHUNK_CHARS = 8_000; // A NUL byte in this leading chunk marks a file as binary (same window git uses)
 export const EMPTY_CONTENT_MARKER = '[file is empty]';
 
 // === TERMINAL AND UI ===
