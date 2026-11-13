@@ -16,6 +16,7 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import {promisify} from 'node:util';
+import {getConfigPath} from '../../source/config/paths';
 import {
 	priceTokens,
 	type TokenPricing,
@@ -115,6 +116,100 @@ export interface RunOptions {
 	getPricing?: (model: string) => Promise<TokenPricing | null>;
 	/** Where the throwaway workspace is created. Defaults to the OS temp dir. */
 	workspaceRoot?: string;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function getProviderList(config: unknown): unknown[] | undefined {
+	if (Array.isArray(config)) return config;
+	if (!isRecord(config)) return undefined;
+
+	const nested = isRecord(config.nanocoder)
+		? config.nanocoder.providers
+		: undefined;
+	if (Array.isArray(nested)) return nested;
+	return Array.isArray(config.providers) ? config.providers : undefined;
+}
+
+async function readEnvironmentProviders(): Promise<unknown[]> {
+	let source = process.env.NANOCODER_PROVIDERS;
+	if (!source && process.env.NANOCODER_PROVIDERS_FILE) {
+		try {
+			source = await fs.readFile(
+				path.resolve(process.env.NANOCODER_PROVIDERS_FILE),
+				'utf8',
+			);
+		} catch {
+			return [];
+		}
+	}
+	if (!source) return [];
+
+	try {
+		return getProviderList(JSON.parse(source)) ?? [];
+	} catch {
+		return [];
+	}
+}
+
+/**
+ * Copy just the provider block into the per-run config directory. The CLI
+ * needs provider details to construct its client, but benchmark runs must not
+ * inherit hooks, prompts, MCP servers, formatters, or preferences from the
+ * user's config.
+ */
+async function copyProviderConfig(
+	configDir: string,
+	requestedProvider?: string,
+): Promise<string | undefined> {
+	const sourcePath = path.join(getConfigPath(), 'agents.config.json');
+	let source: string | undefined;
+	try {
+		source = await fs.readFile(sourcePath, 'utf8');
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+	}
+
+	const configuredProviders = source
+		? (getProviderList(JSON.parse(source) as unknown) ?? [])
+		: [];
+	const providersByName = new Map<string, unknown>();
+	for (const provider of configuredProviders) {
+		if (isRecord(provider) && typeof provider.name === 'string') {
+			providersByName.set(provider.name, provider);
+		}
+	}
+	// Provider environment config overrides file config in Nanocoder. Fold it
+	// into the isolated file so the original config variables and file path do
+	// not escape into the benchmark child process.
+	for (const provider of await readEnvironmentProviders()) {
+		if (isRecord(provider) && typeof provider.name === 'string') {
+			providersByName.set(provider.name, provider);
+		}
+	}
+	const providers = Array.from(providersByName.values());
+	if (!providers.length) return;
+	const providersForRun = requestedProvider
+		? providers.filter(
+				provider =>
+					isRecord(provider) &&
+					typeof provider.name === 'string' &&
+					provider.name.toLowerCase() === requestedProvider.toLowerCase(),
+			)
+		: providers;
+	if (requestedProvider && !providersForRun.length) {
+		return `Requested provider "${requestedProvider}" is not configured. Add it to agents.config.json or NANOCODER_PROVIDERS(_FILE), or choose a configured provider.`;
+	}
+	if (!providersForRun.length) return undefined;
+
+	await fs.writeFile(
+		path.join(configDir, 'agents.config.json'),
+		JSON.stringify({nanocoder: {providers: providersForRun}}, null, 2),
+		{mode: 0o600},
+	);
+	return undefined;
 }
 
 /**
@@ -352,14 +447,23 @@ export async function runOnce(options: RunOptions): Promise<TaskRun> {
 		mode = 'yolo',
 		timeoutMs = DEFAULT_RUN_TIMEOUT_MS,
 	} = options;
+	const tempRoot = options.workspaceRoot ?? os.tmpdir();
 	const workspace = await fs.mkdtemp(
-		path.join(
-			options.workspaceRoot ?? os.tmpdir(),
-			`agent-eval-${fixture.name}-`,
-		),
+		path.join(tempRoot, `agent-eval-${fixture.name}-`),
 	);
+	let configDir: string | undefined;
 
 	try {
+		configDir = await fs.mkdtemp(
+			path.join(tempRoot, `agent-eval-config-${fixture.name}-`),
+		);
+		const providerConfigFailure = await copyProviderConfig(
+			configDir,
+			options.provider,
+		);
+		if (providerConfigFailure) {
+			return failedRun(fixture.name, 0, providerConfigFailure);
+		}
 		await copyFixture(fixture.dir, workspace);
 		const before = await hashTree(workspace);
 
@@ -379,12 +483,24 @@ export async function runOnce(options: RunOptions): Promise<TaskRun> {
 		let stdout = '';
 		let spawnFailure: string | undefined;
 		let processFailed = false;
+		const env = {
+			...process.env,
+			NANOCODER_CONFIG_DIR: configDir,
+			NO_COLOR: '1',
+			FORCE_COLOR: '0',
+		};
+		// MCP server environment variables are user configuration too; only
+		// provider settings were copied into this run's config above.
+		delete env.NANOCODER_MCPSERVERS;
+		delete env.NANOCODER_MCPSERVERS_FILE;
+		delete env.NANOCODER_PROVIDERS;
+		delete env.NANOCODER_PROVIDERS_FILE;
 		try {
 			const result = await execFileAsync('node', args, {
 				cwd: workspace,
 				timeout: timeoutMs,
 				maxBuffer: 64 * 1024 * 1024,
-				env: {...process.env, NO_COLOR: '1', FORCE_COLOR: '0'},
+				env,
 			});
 			stdout = result.stdout;
 		} catch (error) {
@@ -445,6 +561,7 @@ export async function runOnce(options: RunOptions): Promise<TaskRun> {
 			durationMs,
 		};
 	} finally {
+		if (configDir) await fs.rm(configDir, {recursive: true, force: true});
 		await fs.rm(workspace, {recursive: true, force: true});
 	}
 }
