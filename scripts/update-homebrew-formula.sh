@@ -44,7 +44,7 @@ echo "URL: ${NPM_URL}"
 TEMP_FILE=$(mktemp)
 trap "rm -f ${TEMP_FILE}" EXIT
 
-if ! curl -sSL "${NPM_URL}" -o "${TEMP_FILE}"; then
+if ! curl --fail -sSL "${NPM_URL}" -o "${TEMP_FILE}"; then
   echo -e "${RED}Error: Failed to download tarball from NPM${NC}"
   echo "Please verify that version ${VERSION} has been published to NPM"
   echo "Check: https://www.npmjs.com/package/${NPM_PACKAGE}"
