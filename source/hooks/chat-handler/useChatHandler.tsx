@@ -21,6 +21,7 @@ import {SemanticMemoryManager} from '@/memory/semantic-memory-manager';
 import {processToolUse} from '@/message-handler';
 import {getTuneToolMode} from '@/types/config';
 import type {ImageAttachment, Message} from '@/types/core';
+import {BudgetTracker, resolveBudgetLimits} from '@/usage/budget';
 import {generateKey} from '@/utils/key-generator';
 import {processAssistantResponse} from './conversation/conversation-loop';
 import {createResetStreamingState} from './state/streaming-state';
@@ -88,6 +89,7 @@ export function useChatHandler({
 	developmentMode = 'normal',
 	developmentModeRef,
 	nonInteractiveMode = false,
+	cliBudget,
 	onConversationComplete,
 	onPlanTurnComplete,
 	onArchitectTurnComplete,
@@ -109,6 +111,16 @@ export function useChatHandler({
 }: UseChatHandlerProps): ChatHandlerReturn {
 	// Conversation state manager for enhanced context
 	const conversationStateManager = React.useRef(new ConversationStateManager());
+
+	// Session-scoped spend/token budget tracker (`nanocoder.budget`
+	// perSessionUsd / maxTokensTotal, or the --max-budget-usd /
+	// --max-tokens-total flags for `run`). One tracker per session id so a
+	// resumed session keeps its running totals and a new session starts
+	// fresh.
+	const budgetTrackerRef = React.useRef<{
+		sessionId: string;
+		tracker: BudgetTracker;
+	} | null>(null);
 
 	const projectMemoryFinder = React.useMemo(
 		() => memoryFinder ?? new SemanticMemoryManager(),
@@ -267,6 +279,30 @@ export function useChatHandler({
 		) => {
 			if (!client) return;
 
+			// Resolve the session's budget tracker (if any limit is set).
+			// Runs use the run scope (CLI flags win); interactive sessions
+			// use the per-session settings.
+			const budgetLimits = resolveBudgetLimits({
+				cli: nonInteractiveMode ? cliBudget : undefined,
+				config: getAppConfig().budget,
+				scope: nonInteractiveMode ? 'run' : 'session',
+			});
+			let budgetTracker: BudgetTracker | undefined;
+			if (Object.keys(budgetLimits).length > 0) {
+				const trackerKey = sessionId ?? 'default';
+				const existing = budgetTrackerRef.current;
+				if (existing && existing.sessionId === trackerKey) {
+					budgetTracker = existing.tracker;
+				} else {
+					budgetTracker = new BudgetTracker(budgetLimits, currentModel);
+					budgetTrackerRef.current = {
+						sessionId: trackerKey,
+						tracker: budgetTracker,
+					};
+				}
+				budgetTracker.setModel(currentModel);
+			}
+
 			try {
 				await processAssistantResponse({
 					systemMessage,
@@ -298,6 +334,7 @@ export function useChatHandler({
 					setLiveComponent,
 					setLastApiUsage,
 					onApiCallComplete,
+					budgetTracker,
 					tune,
 					privacySessionMapRef,
 					privacyEnabled,
@@ -335,6 +372,7 @@ export function useChatHandler({
 			developmentMode,
 			developmentModeRef,
 			nonInteractiveMode,
+			cliBudget,
 			onConversationComplete,
 			reasoningExpandedRef,
 			compactToolDisplayRef,

@@ -139,6 +139,20 @@ export const COMPLETION_FLAGS: readonly CompletionFlag[] = [
 			'Set maximum context length in tokens (supports k/K suffix, e.g. 128k)',
 	},
 	{
+		name: 'max-budget-usd',
+		takesValue: true,
+		valueName: 'usd',
+		description:
+			'Stop a run cleanly once estimated spend reaches this many USD (run mode only)',
+	},
+	{
+		name: 'max-tokens-total',
+		takesValue: true,
+		valueName: 'tokens',
+		description:
+			'Stop a run cleanly once total tokens reach this number (run mode only)',
+	},
+	{
 		name: 'mode',
 		takesValue: true,
 		valueName: 'mode',

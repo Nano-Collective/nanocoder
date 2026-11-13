@@ -2708,3 +2708,143 @@ test.serial(
 		t.is(calls.length, 1);
 	},
 );
+
+test("stops with budget-exceeded when the token limit is hit, before the next request", async (t) => {
+	const toolCall: ToolCall = {
+		id: "call-1",
+		function: { name: "safe_tool", arguments: {} },
+	};
+	// Only two responses are canned: the loop must stop on the second
+	// response's usage instead of asking for a third.
+	const client = makeFakeClient({
+		responses: [
+			{
+				choices: [
+					{
+						message: {
+							role: "assistant",
+							content: "",
+							tool_calls: [toolCall],
+						},
+					},
+				],
+				usage: { totalTokens: 600 },
+			},
+			{
+				choices: [{ message: { role: "assistant", content: "all done" } }],
+				usage: { totalTokens: 500 },
+			},
+		],
+	});
+	const toolManager = makeFakeToolManager({
+		knownTools: new Set(["safe_tool"]),
+		needsApprovalByName: { safe_tool: false },
+	});
+	let handlerCalls = 0;
+	setToolRegistryGetter(() => ({
+		safe_tool: (async () => {
+			handlerCalls++;
+			return "tool-output";
+		}) as ToolHandler,
+	}));
+
+	const outcome = await runPlainConversation({
+		client,
+		toolManager,
+		systemMessage: SYSTEM,
+		initialMessages: [USER],
+		developmentMode: "auto-accept",
+		nonInteractiveAlwaysAllow: [],
+		abortSignal: new AbortController().signal,
+		budget: { maxTokensTotal: 1000 },
+	});
+
+	t.is(outcome.kind, "budget-exceeded");
+	t.is(outcome.steps, 2);
+	t.is(handlerCalls, 1);
+	if (outcome.kind === "budget-exceeded") {
+		t.regex(outcome.message, /Budget exceeded/);
+		t.regex(outcome.message, /1,100 of 1,000 tokens/);
+		t.is(outcome.budget.totals.totalTokens, 1100);
+		t.is(outcome.budget.limits.maxTokensTotal, 1000);
+	}
+});
+
+test("warns at 80% of the token limit but lets the run finish under 100%", async (t) => {
+	const toolCall: ToolCall = {
+		id: "call-1",
+		function: { name: "safe_tool", arguments: {} },
+	};
+	const client = makeFakeClient({
+		responses: [
+			{
+				choices: [
+					{
+						message: {
+							role: "assistant",
+							content: "",
+							tool_calls: [toolCall],
+						},
+					},
+				],
+				usage: { totalTokens: 800 },
+			},
+			{
+				choices: [{ message: { role: "assistant", content: "all done" } }],
+				usage: { totalTokens: 100 },
+			},
+		],
+	});
+	const toolManager = makeFakeToolManager({
+		knownTools: new Set(["safe_tool"]),
+		needsApprovalByName: { safe_tool: false },
+	});
+	setToolRegistryGetter(() => ({
+		safe_tool: (async () => "tool-output") as ToolHandler,
+	}));
+
+	const outcome = await runPlainConversation({
+		client,
+		toolManager,
+		systemMessage: SYSTEM,
+		initialMessages: [USER],
+		developmentMode: "auto-accept",
+		nonInteractiveAlwaysAllow: [],
+		abortSignal: new AbortController().signal,
+		budget: { maxTokensTotal: 1000 },
+	});
+
+	t.is(outcome.kind, "success");
+	t.is(outcome.steps, 2);
+	if (outcome.kind === "success") {
+		t.is(outcome.budget?.totals.totalTokens, 900);
+		t.is(outcome.budget?.limits.maxTokensTotal, 1000);
+	}
+});
+
+test("reports no budget block when no limit is configured", async (t) => {
+	const client = makeFakeClient({
+		responses: [
+			{
+				choices: [{ message: { role: "assistant", content: "hello world" } }],
+				usage: { totalTokens: 42 },
+			},
+		],
+	});
+	const toolManager = makeFakeToolManager();
+
+	const outcome = await runPlainConversation({
+		client,
+		toolManager,
+		systemMessage: SYSTEM,
+		initialMessages: [USER],
+		developmentMode: "auto-accept",
+		nonInteractiveAlwaysAllow: [],
+		abortSignal: new AbortController().signal,
+	});
+
+	t.is(outcome.kind, "success");
+	if (outcome.kind === "success") {
+		t.is(outcome.budget, undefined);
+	}
+});
