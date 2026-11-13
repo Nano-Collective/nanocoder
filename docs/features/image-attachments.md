@@ -34,6 +34,12 @@ Clipboard images (Ctrl+V) are listed as pending attachments just above the input
 - Attachments are cleared once the message is submitted.
 - Dragged or typed image paths are not pending attachments. They stay in your text until you submit, so remove one by deleting the path; Ctrl+X does not affect them.
 
+## Images the Model Reads
+
+Attachments are images you send. The model can also look at an image in your project on its own: when it calls `read_file` on a `.png`, `.jpg`, `.jpeg`, `.gif`, or `.webp` file, the image comes back as a picture instead of text. This lets it check a screenshot, a chart, or a design mock-up while it works.
+
+The same formats and the **10 MB** limit apply. If the model does not accept image input, the tool result says the image was not sent. For models that no listing describes (most local models), Nanocoder still tries to send the image; if the provider refuses it, the request is retried without images.
+
 ## Supported Formats
 
 PNG, JPEG, GIF, and WebP are accepted (`.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`). Each image must be **10 MB or smaller**; larger files are skipped.
