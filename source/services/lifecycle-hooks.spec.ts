@@ -402,6 +402,90 @@ test.serial('a hook naming a missing binary blocks like any non-zero exit', asyn
 	t.true(outcome.blocked);
 });
 
+test.serial('a vetoing hook that cannot start blocks the action', async t => {
+	setProjectRoot(testDir);
+	withHooks({
+		'pre-tool-use': [{command: node("console.log('should not run')")}],
+	});
+	setProjectRoot(join(testDir, 'missing-project-root'));
+
+	let outcome: Awaited<ReturnType<typeof runLifecycleHooks>>;
+	try {
+		outcome = await runLifecycleHooks('pre-tool-use', {
+			toolName: 'execute_bash',
+		});
+	} finally {
+		setProjectRoot(testDir);
+	}
+
+	t.true(outcome.blocked);
+	t.regex(outcome.reason ?? '', /could not start/);
+});
+
+test.serial('oversized tool context is bounded and blocks a vetoing hook', async t => {
+	setProjectRoot(testDir);
+	withHooks({
+		'pre-tool-use': [
+			{
+				command: node(
+					"require('node:fs').writeFileSync(process.env.NANOCODER_CWD + '/hook-context.json', JSON.stringify({args:process.env.NANOCODER_TOOL_ARGS,commandLength:process.env.NANOCODER_COMMAND.length,commandBytes:Buffer.byteLength(process.env.NANOCODER_COMMAND),fileLength:process.env.NANOCODER_FILE.length,fileBytes:Buffer.byteLength(process.env.NANOCODER_FILE),truncated:process.env.NANOCODER_HOOK_CONTEXT_TRUNCATED}))",
+				),
+			},
+		],
+	});
+
+	const outcome = await runLifecycleHooks('pre-tool-use', {
+		toolName: 'execute_bash',
+		toolArgs: {path: '€'.repeat(20_000), command: '€'.repeat(20_000)},
+	});
+	const hookContext = JSON.parse(
+		readFileSync(join(testDir, 'hook-context.json'), 'utf8'),
+	);
+
+	t.true(outcome.blocked);
+	t.regex(outcome.reason ?? '', /context exceeded 16384 characters/);
+	t.true(hookContext.commandBytes <= 64 * 1024);
+	t.true(hookContext.fileBytes <= 64 * 1024);
+	t.deepEqual(
+		{
+			args: hookContext.args,
+			commandLength: hookContext.commandLength,
+			fileLength: hookContext.fileLength,
+			truncated: hookContext.truncated,
+		},
+		{
+		args: '{"truncated":true}',
+		commandLength: 16 * 1024,
+		fileLength: 16 * 1024,
+		truncated: 'true',
+		},
+	);
+});
+
+test.serial('an oversized submitted prompt is bounded and blocks its hook', async t => {
+	setProjectRoot(testDir);
+	withHooks({
+		'user-prompt-submit': [
+			{
+				command: node(
+					"require('node:fs').writeFileSync(process.env.NANOCODER_CWD + '/hook-prompt-context.txt', process.env.NANOCODER_HOOK_CONTEXT_TRUNCATED + '|' + process.env.NANOCODER_PROMPT.length)",
+				),
+			},
+		],
+	});
+
+	const outcome = await runLifecycleHooks('user-prompt-submit', {
+		prompt: 'x'.repeat(20_000),
+	});
+
+	t.true(outcome.blocked);
+	t.regex(outcome.reason ?? '', /context exceeded 16384 characters/);
+	t.is(
+		readFileSync(join(testDir, 'hook-prompt-context.txt'), 'utf8'),
+		'true|16384',
+	);
+});
+
 test.serial('hook context reaches the command as NANOCODER_* env vars', async t => {
 	withHooks({
 		'post-tool-use': [
