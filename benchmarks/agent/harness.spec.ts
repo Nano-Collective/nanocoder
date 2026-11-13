@@ -131,6 +131,23 @@ test('loadFixtures reads every vendored task with its assertions', async t => {
 	t.true(categories.size >= 3);
 });
 
+test('loadFixtures returns fixtures in alphabetical order', async t => {
+	const dir = path.join(tempRoot, 'ordered-fixtures');
+	for (const name of ['zebra', 'alpha', 'middle']) {
+		const fixtureDir = path.join(dir, name);
+		await fs.mkdir(fixtureDir, {recursive: true});
+		await fs.writeFile(
+			path.join(fixtureDir, 'task.json'),
+			JSON.stringify({prompt: name, assertions: []}),
+		);
+	}
+
+	t.deepEqual(
+		(await loadFixtures(dir)).map(item => item.name),
+		['alpha', 'middle', 'zebra'],
+	);
+});
+
 test('hashTree changes when a fixture file changes', async t => {
 	await fs.writeFile(path.join(tempRoot, 'a.txt'), 'one');
 	const before = await hashTree(tempRoot);
@@ -392,6 +409,40 @@ test('runOnce reports a harness failure when the CLI prints nothing', async t =>
 	t.false(run.pass);
 	t.truthy(run.failure);
 	t.is(run.steps, 0);
+});
+
+test('runOnce aborts the CLI and removes its throwaway workspace', async t => {
+	const startedPath = path.join(tempRoot, 'stub-started');
+	const cliPath = await stubCli(`
+		import {writeFileSync} from 'node:fs';
+		writeFileSync(${JSON.stringify(startedPath)}, 'started');
+		setInterval(() => {}, 1000);
+	`);
+	const workspaceRoot = path.join(tempRoot, 'workspaces');
+	await fs.mkdir(workspaceRoot);
+	const controller = new AbortController();
+	const running = runOnce({
+		cliPath,
+		fixture: await fixture([{kind: 'files-unchanged'}]),
+		workspaceRoot,
+		signal: controller.signal,
+	});
+
+	let started = false;
+	for (let attempt = 0; attempt < 100; attempt++) {
+		try {
+			await fs.access(startedPath);
+			started = true;
+			break;
+		} catch {
+			await new Promise(resolve => setTimeout(resolve, 10));
+		}
+	}
+	t.true(started, 'stub CLI starts before it is aborted');
+	controller.abort();
+	const error = await t.throwsAsync(running);
+	t.is(error?.name, 'AbortError');
+	t.deepEqual(await fs.readdir(workspaceRoot), []);
 });
 
 for (const [kind, exitCode, processExit] of [
