@@ -126,6 +126,13 @@ const executeReadFile = async (args: {
 
 		const cached = await getCachedFileContent(absPath);
 		const content = cached.content;
+		const totalLines = cached.totalLines;
+
+		if (args.start_line !== undefined && args.start_line > totalLines) {
+			throw new Error(
+				`start_line ${args.start_line} exceeds file length (${totalLines} lines)`,
+			);
+		}
 
 		if (content.length === 0) {
 			// An empty file has been seen in full; allow edits/overwrites against it.
@@ -135,7 +142,6 @@ const executeReadFile = async (args: {
 		}
 
 		const lines = cached.lines;
-		const totalLines = cached.totalLines;
 
 		// Return a bounded preview only for very large files. Most files can be
 		// understood and edited after a single read; truly large files still have
