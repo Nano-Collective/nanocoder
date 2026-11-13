@@ -283,6 +283,15 @@ function compressToolResultDefault(toolName: string, content: string): string {
 		return `Tool: ${toolName}\nResult: success`;
 	}
 
+	// A body that mentions both success and failure is ambiguous: a one-line
+	// summary could misrepresent the outcome, and the leading lines alone may
+	// not contain the failure (e.g. it is reported at the end of a build log).
+	// Keep the first line plus a line that reports the failure so the summary
+	// can neither claim success nor drop the failure.
+	if (mentionsSuccessAndFailure(content)) {
+		return compressMixedToolResult(toolName, content);
+	}
+
 	// Extract key information like first line, key metrics, etc.
 	const lines = content.split('\n');
 	const firstLine = lines[0] || '';
@@ -294,6 +303,38 @@ function compressToolResultDefault(toolName: string, content: string): string {
 
 	// Fallback: truncate to first meaningful line
 	return `Tool: ${toolName}\nResult: ${firstLine.substring(0, 100)}`;
+}
+
+// Summarise a tool result that mentions both success and failure. The first
+// line and the first failure line always survive, so a failure reported past
+// the leading lines cannot be truncated away while the success line stays.
+// Each kept line is capped so a single-line body (e.g. verbose JSON) still
+// shrinks like it does in every other compression path.
+function compressMixedToolResult(toolName: string, content: string): string {
+	const lines = content.split('\n').filter(line => line.trim());
+	const kept: string[] = [];
+	if (lines.length > 0) {
+		kept.push(truncateLine(lines[0]));
+	}
+
+	const failureLine = lines.slice(1).find(line => checkForError(line));
+	if (failureLine !== undefined && failureLine !== lines[0]) {
+		kept.push(truncateLine(failureLine));
+	}
+
+	return `Tool: ${toolName}\nResult: ${kept.join('\n')}`;
+}
+
+// Cap a single line at the default truncation limit, keeping the ellipsis
+// inside that budget.
+function truncateLine(
+	line: string,
+	limit: number = COMPRESSION_CONSTANTS.DEFAULT_TRUNCATION_LIMIT,
+): string {
+	if (line.length <= limit) {
+		return line;
+	}
+	return `${line.slice(0, limit - 3)}...`;
 }
 
 // Compress tool result in conservative mode
@@ -368,21 +409,39 @@ function extractErrorInfo(content: string): {
 	return null;
 }
 
-// Check if content indicates success
+// Check if content indicates success.
+// Every pattern is anchored to the whole (trimmed) body so that a mention of
+// success buried inside a larger log — e.g. "Build completed successfully" on
+// one line and "failures: 3" on another — is never mistaken for an overall
+// success (#1633).
 function isSuccess(content: string): boolean {
+	const trimmed = content.trim();
 	const successPatterns = [
 		/^success$/i,
 		/^ok$/i,
 		/^done$/i,
-		/completed successfully/i,
-		/no errors/i,
+		/^completed successfully\.?$/i,
+		/^no errors\.?$/i,
 	];
-	return successPatterns.some(pattern => pattern.test(content));
+	return successPatterns.some(pattern => pattern.test(trimmed));
 }
 
-// Check for error in content
+// Whether the body refers to both a successful and a failed outcome, which
+// makes any single-line summary of the result unsafe
+function mentionsSuccessAndFailure(content: string): boolean {
+	const successMention = /success|completed successfully|no errors/i;
+	return successMention.test(content) && checkForError(content);
+}
+
+// Check for error in content. Negated outcome phrasing ("no errors",
+// "0 failures", "zero exceptions") describes a passing run, so remove it
+// before sniffing for failure words.
 function checkForError(content: string): boolean {
-	return /error|exception|failed|failure/i.test(content);
+	const withoutNegatedOutcomes = content.replace(
+		/\b(?:no|0|zero)\s+(?:errors?|failures?|exceptions?)\b/gi,
+		'',
+	);
+	return /error|exception|failed|failure/i.test(withoutNegatedOutcomes);
 }
 
 // Extract key information from tool result
