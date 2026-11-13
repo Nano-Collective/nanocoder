@@ -61,6 +61,18 @@ class FakeSummarizerService {
 		return messages.length === 0 ? [] : this.proposals;
 	}
 
+	async remember(input: {
+		content: string;
+		category?: string;
+	}): Promise<SemanticMemory> {
+		return {
+			id: 'remembered',
+			content: input.content,
+			category: input.category ?? 'project',
+			timestamp: '2026-08-05T00:00:00.000Z',
+		};
+	}
+
 	async acceptProposal(
 		proposal: Pick<MemoryProposal, 'content' | 'category'>,
 		sourceSessionId?: string,

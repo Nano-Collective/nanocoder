@@ -6,7 +6,7 @@ import {diffEditTool} from './file-ops/diff-edit.js';
 import {writeFileTool} from './file-ops/write-file.js';
 import {stringReplaceTool} from './file-ops/string-replace.js';
 import {readFileTool} from './read-file.js';
-import {markFileSeen} from '../utils/read-tracker.js';
+import {markFileSeen} from './runtime/read-tracker.js';
 
 // ============================================================================
 // Test Setup

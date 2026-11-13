@@ -9,7 +9,7 @@ import {ThemeContext} from '../hooks/useTheme';
 import {
 	bumpReadContentGeneration,
 	clearReadTracker,
-} from '../utils/read-tracker.js';
+} from './runtime/read-tracker.js';
 import {readFileTool} from './read-file';
 
 // ============================================================================

@@ -6,6 +6,7 @@ import {
 	type SharedToolCall,
 	type SharePayload,
 } from '@/commands/share-payload';
+import {truncateText} from '@/utils/truncate-text';
 
 /**
  * Render a `/share` payload as one self-contained, static HTML page.
@@ -69,11 +70,6 @@ const HTML_ESCAPES: Record<string, string> = {
 
 function escapeHtml(text: string): string {
 	return text.replace(/[&<>"']/g, char => HTML_ESCAPES[char] ?? char);
-}
-
-function truncate(text: string, max: number): string {
-	const chars = Array.from(text);
-	return chars.length > max ? `${chars.slice(0, max - 1).join('')}…` : text;
 }
 
 interface Segment {
@@ -145,7 +141,7 @@ function renderContent(content: string): string {
 				return renderText(segment.text);
 			}
 			const label = segment.lang
-				? `<div class="lang">${escapeHtml(truncate(segment.lang, 40))}</div>`
+				? `<div class="lang">${escapeHtml(truncateText(segment.lang, 40))}</div>`
 				: '';
 			return `<div class="code">${label}<pre><code>${escapeHtml(segment.text)}</code></pre></div>`;
 		})
@@ -184,7 +180,7 @@ function argumentPreview(args: JsonValue): string {
 	if (typeof value !== 'string') {
 		return '';
 	}
-	return truncate(value.replace(/\s+/g, ' ').trim(), 80);
+	return truncateText(value.replace(/\s+/g, ' ').trim(), 80);
 }
 
 function renderToolCall(
@@ -290,7 +286,7 @@ function sessionTitle(messages: readonly SharedMessage[]): string {
 		?.content.split('\n')
 		.map(line => line.trim())
 		.find(Boolean);
-	return firstLine ? truncate(firstLine, 100) : '';
+	return firstLine ? truncateText(firstLine, 100) : '';
 }
 
 function plural(count: number, noun: string): string {

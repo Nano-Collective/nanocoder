@@ -9,15 +9,15 @@ import {
 	firstUserRequest,
 	serializeSharePayload,
 } from '@/commands/share-payload';
+import {errorMsg, successMsg, warningMsg} from '@/components/message-factory';
 import {getAppConfig} from '@/config/index';
 import {getProjectRoot, getSafeSessionCwd} from '@/services/session-cwd';
 import type {Command} from '@/types/index';
-import {atomicWriteFile} from '@/utils/atomic-write';
 import {formatError} from '@/utils/error-formatter';
+import {atomicWriteFile} from '@/utils/fs/atomic-write';
+import {resolveFilePath} from '@/utils/fs/path-validation';
+import {writeUniqueFile} from '@/utils/fs/write-unique-file';
 import {generateExportFilename} from '@/utils/generate-export-filename';
-import {errorMsg, successMsg, warningMsg} from '@/utils/message-factory';
-import {resolveFilePath} from '@/utils/path-validation';
-import {writeUniqueFile} from '@/utils/write-unique-file';
 
 const USAGE = '/share [--json] [--no-redact] [filename]';
 

@@ -1,8 +1,8 @@
 import test from 'ava';
 import React from 'react';
 import {renderWithTheme} from '@/test-utils/render-with-theme';
-import type {FlatNode} from '@/utils/file-tree';
-import type {FileNode} from '@/utils/file-tree';
+import type {FlatNode} from '@/utils/fs/file-tree';
+import type {FileNode} from '@/utils/fs/file-tree';
 import {TreeItem} from './tree-item';
 
 console.log(`\ntree-item.spec.tsx – ${React.version}`);

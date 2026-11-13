@@ -10,7 +10,8 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import {getAppDataPath} from '@/config/paths';
 import {formatError} from '@/utils/error-formatter';
-import {logInfo, logWarning} from '@/utils/message-queue';
+import {notifyInfo, notifyWarning} from '@/utils/message-queue-core';
+import {isObject} from '@/utils/type-helpers';
 import {toLocalDateKey, toMonthKey} from './date-utils';
 import type {DailyStats, MonthlyStats, PairUsage, StatsLedger} from './types';
 import {
@@ -78,17 +79,13 @@ export function createEmptyLedger(now = Date.now()): StatsLedger {
 	return createEmptyLedgerBase(now);
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
 function nonNegativeNumber(value: unknown): number {
 	const number = Number(value);
 	return Number.isFinite(number) && number >= 0 ? number : 0;
 }
 
 function normalizePair(raw: unknown): PairUsage {
-	if (!isRecord(raw)) {
+	if (!isObject(raw)) {
 		return {tokens: 0, prompts: 0, cost: 0};
 	}
 	return {
@@ -100,12 +97,12 @@ function normalizePair(raw: unknown): PairUsage {
 
 function normalizeDaily(raw: unknown): DailyStats | null {
 	if (
-		!isRecord(raw) ||
+		!isObject(raw) ||
 		typeof raw.date !== 'string' ||
 		!isValidDateKey(raw.date)
 	)
 		return null;
-	const byPairRaw = isRecord(raw.byPair) ? raw.byPair : {};
+	const byPairRaw = isObject(raw.byPair) ? raw.byPair : {};
 	const byPair: Record<string, PairUsage> = {};
 	for (const [k, v] of Object.entries(byPairRaw)) {
 		byPair[k] = normalizePair(v);
@@ -122,12 +119,12 @@ function normalizeDaily(raw: unknown): DailyStats | null {
 
 function normalizeMonthly(raw: unknown): MonthlyStats | null {
 	if (
-		!isRecord(raw) ||
+		!isObject(raw) ||
 		typeof raw.month !== 'string' ||
 		!isValidMonthKey(raw.month)
 	)
 		return null;
-	const byPairRaw = isRecord(raw.byPair) ? raw.byPair : {};
+	const byPairRaw = isObject(raw.byPair) ? raw.byPair : {};
 	const byPair: Record<string, PairUsage> = {};
 	for (const [k, v] of Object.entries(byPairRaw)) {
 		byPair[k] = normalizePair(v);
@@ -172,7 +169,7 @@ function deriveMonthly(daily: DailyStats[]): MonthlyStats[] {
 }
 
 function normalizeLedger(raw: unknown): StatsLedger {
-	if (!isRecord(raw)) {
+	if (!isObject(raw)) {
 		return createEmptyLedger();
 	}
 	const rawVersion = raw.version === undefined ? 1 : Number(raw.version);
@@ -226,7 +223,7 @@ function readFileIfExists(filePath: string): string | null {
 
 function needsSchemaMigration(parsed: unknown): boolean {
 	return (
-		isRecord(parsed) &&
+		isObject(parsed) &&
 		(parsed.version !== STATS_LEDGER_VERSION || !Array.isArray(parsed.monthly))
 	);
 }
@@ -254,15 +251,13 @@ export function readStatsLedger(): StatsLedger {
 		const parsed = JSON.parse(content) as unknown;
 		const ledger = normalizeLedger(parsed);
 		if (isLegacy || needsSchemaMigration(parsed)) {
-			// Write the validated, current-schema ledger before removing the old
-			// filename. If writing fails, the source file remains recoverable.
 			if (writeStatsLedger(ledger)) {
 				if (isLegacy) {
 					try {
 						fs.unlinkSync(filePath);
-						logInfo(`Migrated stats ledger to: ${getStatsFilePath()}`);
+						notifyInfo(`Migrated stats ledger to: ${getStatsFilePath()}`);
 					} catch (error) {
-						logWarning(
+						notifyWarning(
 							'Migrated stats ledger but could not remove legacy file:',
 							true,
 							{
@@ -271,13 +266,13 @@ export function readStatsLedger(): StatsLedger {
 						);
 					}
 				} else {
-					logInfo('Migrated stats ledger to the current schema.');
+					notifyInfo('Migrated stats ledger to the current schema.');
 				}
 			}
 		}
 		return ledger;
 	} catch (error) {
-		logWarning('Failed to read stats ledger:', true, {context: {error}});
+		notifyWarning('Failed to read stats ledger:', true, {context: {error}});
 		return createEmptyLedger();
 	}
 }
@@ -293,7 +288,7 @@ export function writeStatsLedger(ledger: StatsLedger): boolean {
 		fs.renameSync(tmpPath, filePath);
 		return true;
 	} catch (error) {
-		logWarning('Failed to write stats ledger:', true, {
+		notifyWarning('Failed to write stats ledger:', true, {
 			context: {error: formatError(error)},
 		});
 		return false;
@@ -328,7 +323,7 @@ export async function readStatsLedgerAsync(): Promise<StatsLedger> {
 		}
 		return normalizeLedger(parsed);
 	} catch (error) {
-		logWarning('Failed to read stats ledger:', true, {context: {error}});
+		notifyWarning('Failed to read stats ledger:', true, {context: {error}});
 		return createEmptyLedger();
 	}
 }
@@ -359,7 +354,7 @@ export async function writeStatsLedgerAsync(
 		}
 		return true;
 	} catch (error) {
-		logWarning('Failed to write stats ledger:', true, {
+		notifyWarning('Failed to write stats ledger:', true, {
 			context: {error: formatError(error)},
 		});
 		await fs.promises.rm(tmpPath, {force: true}).catch(() => undefined);
@@ -374,7 +369,7 @@ export function clearStatsLedger(): void {
 				fs.unlinkSync(filePath);
 			}
 		} catch (error) {
-			logWarning('Failed to clear stats ledger:', true, {
+			notifyWarning('Failed to clear stats ledger:', true, {
 				context: {error: formatError(error)},
 			});
 		}

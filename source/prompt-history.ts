@@ -2,9 +2,9 @@ import fs from 'fs/promises';
 import path from 'path';
 import {getClosestConfigFile} from '@/config/index';
 import {MAX_PROMPT_HISTORY_SIZE} from '@/constants';
-import {atomicWriteFile} from '@/utils/atomic-write';
 import {formatError} from '@/utils/error-formatter';
-import {logError} from '@/utils/message-queue';
+import {atomicWriteFile} from '@/utils/fs/atomic-write';
+import {notifyError} from '@/utils/message-queue-core';
 import type {InputState} from './types/hooks';
 
 const ENTRY_SEPARATOR = '\n---ENTRY_SEPARATOR---\n';
@@ -150,7 +150,7 @@ export class PromptHistory {
 			// do not save: that would replace entries we never saw. Fixing the
 			// cause brings the history back on the next load.
 			this.persistenceBlocked = true;
-			logError(
+			notifyError(
 				`Prompt history could not be read, leaving it untouched and not saving it this session: ${formatError(error)}`,
 			);
 		}
@@ -192,13 +192,13 @@ export class PromptHistory {
 	 */
 	private async quarantineCorruptFile(error: unknown): Promise<void> {
 		const backupPath = await this.nextAvailableBackupPath();
-		logError(
+		notifyError(
 			`Prompt history file is corrupt, backing it up to ${backupPath}: ${formatError(error)}`,
 		);
 		try {
 			await fs.rename(this.historyFile, backupPath);
 		} catch (renameError) {
-			logError(
+			notifyError(
 				`Failed to back up corrupt prompt history: ${formatError(renameError)}`,
 			);
 		}
@@ -265,7 +265,7 @@ export class PromptHistory {
 			} catch (error) {
 				// Silently fail to avoid disrupting the user experience
 				const errorMessage = formatError(error);
-				logError(`Failed to save prompt history: ${errorMessage}`);
+				notifyError(`Failed to save prompt history: ${errorMessage}`);
 			}
 		});
 		return this.savePromise;

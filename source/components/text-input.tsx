@@ -7,12 +7,12 @@ import {
 	useRef,
 	useState,
 } from 'react';
-import {isNewlineKey} from '@/utils/newline-key';
+import {isNewlineKey} from '@/terminal/newline-key';
 import {
 	getVisualLineSegments,
 	moveCursorToVisualLine,
 	wrapWithTrimmedContinuations,
-} from '@/utils/text-wrapping';
+} from '@/terminal/text-wrapping';
 
 /**
  * The raw byte sequence behind the keypress a `useInput` handler is running
@@ -273,7 +273,9 @@ const TextInput = forwardRef<TextInputHandle, Props>(function TextInput(
 		});
 	}, [originalValue, focus, showCursor]);
 
-	// Word-jump helpers (whitespace-delimited, like readline Alt+B/F)
+	// Word-jump helpers (whitespace-delimited). Ctrl+Left lands on the start of
+	// the previous word, like readline's Alt+B; Ctrl+Right lands on the start of
+	// the next word, where readline's Alt+F would stop at the end of this one.
 	// Newlines are treated as whitespace — Ctrl+Left/Right cross line boundaries.
 	function moveToPrevWord(value: string, offset: number): number {
 		let i = offset;
@@ -435,7 +437,7 @@ const TextInput = forwardRef<TextInputHandle, Props>(function TextInput(
 						);
 					}
 				} else if (key.rightArrow) {
-					// Ctrl+Right: jump to end of next word
+					// Ctrl+Right: jump to start of next word
 					if (showCursor) {
 						nextCursorOffset = moveToNextWord(
 							originalValueRef.current,

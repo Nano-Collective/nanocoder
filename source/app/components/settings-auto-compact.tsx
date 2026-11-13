@@ -5,13 +5,13 @@ import {StyledSelectInput} from '@/components/ui/styled-select-input';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {updateConfigNestedValue} from '@/config/config-writer';
 import {getAppConfig} from '@/config/index';
-import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
-import {useTheme} from '@/hooks/useTheme';
-import type {AutoCompactConfig, CompressionMode} from '@/types/config';
 import {
 	COMPRESSION_CONSTANTS,
 	isThresholdInRange,
-} from '@/utils/message-compression';
+} from '@/conversation/compaction/message-compression';
+import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
+import {useTheme} from '@/hooks/useTheme';
+import type {AutoCompactConfig, CompressionMode} from '@/types/config';
 
 const MODE_OPTIONS: CompressionMode[] = [
 	'default',

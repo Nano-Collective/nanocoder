@@ -23,7 +23,7 @@ pnpm run test:types     # TypeScript check
 pnpm run test:format    # Biome format check
 pnpm run test:lint      # Biome lint check
 pnpm run test:lint:fix  # Auto-fix lint and format issues
-pnpm run test:knip      # Unused code detection
+pnpm run test:knip      # Unused code detection, plus a production pass that flags files only specs import
 pnpm run test:all       # Format, types, lint, AVA, knip, audit, semgrep (slow)
 
 pnpm run build:vscode   # Package the VS Code extension to assets/nanocoder-vscode.vsix

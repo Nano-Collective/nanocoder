@@ -13,6 +13,8 @@
  * See `agents/2026-05-20-skills-unification-plan.md` step 8.
  */
 
+import {formatError} from '@/utils/error-formatter';
+import {globMatches} from '@/utils/fs/glob-match';
 import type {Event, EventKind, Subscription} from './types';
 
 export interface SubscriptionDispatcher {
@@ -23,7 +25,15 @@ export class EventRouter {
 	private readonly byKind: Map<EventKind, Subscription[]> = new Map();
 	private readonly byId: Map<string, Subscription> = new Map();
 
-	constructor(private readonly dispatcher: SubscriptionDispatcher) {}
+	constructor(
+		private readonly dispatcher: SubscriptionDispatcher,
+		/** Called once per subscription whose dispatch threw or rejected. */
+		private readonly onDispatchError: (
+			subscription: Subscription,
+			event: Event,
+			error: unknown,
+		) => void = logDispatchError,
+	) {}
 
 	subscribe(subscription: Subscription): void {
 		if (this.byId.has(subscription.id)) {
@@ -62,11 +72,33 @@ export class EventRouter {
 		const candidates = this.byKind.get(event.kind);
 		if (!candidates || candidates.length === 0) return;
 
+		// Every match runs at once. A dispatch resolves only when its whole
+		// triggered run ends, so awaiting them in turn made the second
+		// subscription wait out the first, and one throw skipped the rest.
+		// Per-subscription limits belong to the dispatcher (BackpressureDispatcher).
+		// emit() never rejects: sources fire it with `void`, where a rejection
+		// would be unhandled.
 		const matches = candidates.filter(sub => matchesFilter(sub, event));
-		for (const sub of matches) {
-			await this.dispatcher.dispatch(sub, event);
-		}
+		const results = await Promise.allSettled(
+			matches.map(async sub => this.dispatcher.dispatch(sub, event)),
+		);
+		results.forEach((result, i) => {
+			const sub = matches[i];
+			if (result.status === 'rejected' && sub) {
+				this.onDispatchError(sub, event, result.reason);
+			}
+		});
 	}
+}
+
+function logDispatchError(
+	subscription: Subscription,
+	event: Event,
+	error: unknown,
+): void {
+	console.error(
+		`Subscription "${subscription.id}" failed on ${event.kind}: ${formatError(error)}`,
+	);
 }
 
 export function matchesFilter(sub: Subscription, event: Event): boolean {
@@ -119,90 +151,22 @@ export function toPosixPath(path: string): string {
 	return path.split('\\').join('/');
 }
 
-// Minimal glob -> regex matcher: enough for `docs/<star><star>`,
-// `src/<star><star>/*.ts`, `<star><star>/*.md`, literal paths, `?`
-// single-character wildcards, and `{a,b}` alternation. Negation (`!`) is not
-// supported. chokidar 5 depends only on readdirp, so picomatch is no longer in
-// the tree and swapping to it would mean taking a new direct dependency.
-export function matchGlob(pattern: string, path: string): boolean {
-	const regex = globToRegex(toPosixPath(pattern));
-	return regex.test(toPosixPath(path));
-}
-
 /**
- * Whether every `{` in the pattern has a matching `}`. An unbalanced brace is
- * treated as a literal, which is what the matcher did before alternation
- * existed, rather than building a regex that would throw.
+ * Whether `path` matches a subscription, formatter or hook glob. Uses the
+ * shared matcher in utils/fs/glob-match (`*`, `?`, `**`, `{a,b}`; no `!`
+ * negation), after normalising both sides to `/`.
+ *
+ * A pattern ending in `**` + `/` keeps its long-standing meaning here of
+ * "anything under this directory", so `docs/**` + `/` matches `docs/a.md`.
+ * A pattern the matcher refuses (too long, or too many brace combinations)
+ * matches nothing rather than throwing out of the event loop.
  */
-function hasBalancedBraces(pattern: string): boolean {
-	let depth = 0;
-	for (const ch of pattern) {
-		if (ch === '{') depth++;
-		else if (ch === '}') {
-			depth--;
-			if (depth < 0) return false;
-		}
+export function matchGlob(pattern: string, path: string): boolean {
+	let glob = toPosixPath(pattern);
+	if (glob.endsWith('**/')) glob = glob.slice(0, -1);
+	try {
+		return globMatches(toPosixPath(path), glob);
+	} catch {
+		return false;
 	}
-	return depth === 0;
-}
-
-function globToRegex(pattern: string): RegExp {
-	const alternation = hasBalancedBraces(pattern);
-	let depth = 0;
-	let out = '';
-	for (let i = 0; i < pattern.length; i++) {
-		const ch = pattern[i];
-		if (alternation && ch === '{') {
-			out += '(?:';
-			depth++;
-		} else if (alternation && ch === '}' && depth > 0) {
-			out += ')';
-			depth--;
-		} else if (alternation && ch === ',' && depth > 0) {
-			out += '|';
-		} else if (ch === '*') {
-			const next = pattern[i + 1];
-			if (next === '*') {
-				i++;
-				if (pattern[i + 1] === '/') {
-					// Interior **/ needs a directory boundary. Preserve the legacy
-					// trailing **/ behavior for file filters that already use it.
-					out += pattern[i + 2] === undefined ? '.*' : '(?:.*/)?';
-					i++;
-				} else {
-					// A trailing `**` can still span any characters, including `/`.
-					out += '.*';
-				}
-			} else {
-				// `*` matches anything except `/`
-				out += '[^/]*';
-			}
-		} else if (ch === '?') {
-			out += '[^/]';
-		} else if (
-			ch === '.' ||
-			ch === '+' ||
-			ch === '(' ||
-			ch === ')' ||
-			ch === '|' ||
-			ch === '^' ||
-			ch === '$' ||
-			ch === '{' ||
-			ch === '}' ||
-			ch === '[' ||
-			ch === ']' ||
-			ch === '\\'
-		) {
-			out += `\\${ch}`;
-		} else {
-			out += ch;
-		}
-	}
-	// `out` is built by the escape loop above: every character is either a
-	// literal escaped with `\\`, or one of the fixed substrings `[^/]`, `.*`,
-	// `[^/]*`, `(?:.*/)?`, `(?:`, `|`, `)`. There is no user-supplied raw regex syntax in
-	// `out`, and the braces were checked for balance before any group opened.
-	// The shape is bounded by the glob length, so ReDoS is not reachable.
-	// nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp
-	return new RegExp(`^${out}$`);
 }

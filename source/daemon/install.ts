@@ -27,12 +27,12 @@ import {readFile, unlink, writeFile} from 'node:fs/promises';
 import {homedir} from 'node:os';
 import {dirname, join, resolve} from 'node:path';
 import {promisify} from 'node:util';
+import {loadPreferences} from '@/config/preferences';
 import {
 	isDirectoryTrusted,
-	loadPreferences,
 	trustRecheck,
 	untrustedReason,
-} from '@/config/preferences';
+} from '@/config/trust/directory-trust';
 import {formatError} from '@/utils/error-formatter';
 
 const execFileAsync = promisify(execFile);

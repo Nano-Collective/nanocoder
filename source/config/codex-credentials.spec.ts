@@ -287,7 +287,7 @@ test.serial(
 test('getCodexNoCredentialsMessage includes provider name', t => {
 	const msg = getCodexNoCredentialsMessage('MyProvider');
 	t.truthy(msg.includes('MyProvider'));
-	t.truthy(msg.includes('/codex-login'));
+	t.truthy(msg.includes('/login codex'));
 });
 
 test('loadCodexCredential handles corrupt JSON gracefully', t => {

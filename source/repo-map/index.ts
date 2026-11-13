@@ -1,7 +1,7 @@
-import {readFile} from 'node:fs/promises';
+import {readFile, stat} from 'node:fs/promises';
 import {extname} from 'node:path';
-import {walkProjectEntries} from '@/utils/file-search';
-import {calculateTokens} from '@/utils/token-calculator';
+import {walkProjectEntries} from '@/utils/fs/file-search';
+import {estimateTokens} from '@/utils/token-calculator';
 
 export interface RepoMapFile {
 	path: string;
@@ -326,13 +326,16 @@ async function scanFiles(
 				return true;
 			}
 
+			// Size check from stat, before reading: a large generated or vendored
+			// file would otherwise be read whole only to be thrown away.
 			let source: string;
 			try {
+				const {size} = await stat(entry.absolutePath);
+				if (size > maxFileBytes) {
+					return false;
+				}
 				source = await readFile(entry.absolutePath, 'utf-8');
 			} catch {
-				return false;
-			}
-			if (source.length > maxFileBytes) {
 				return false;
 			}
 
@@ -470,7 +473,7 @@ export async function buildRepoMap(
 				return diff === 0 ? a.localeCompare(b) : diff;
 			})
 			.slice(0, maxSymbolsPerFile);
-		const cost = calculateTokens(`${file.path}\n${symbols.join(' ')}\n`);
+		const cost = estimateTokens(`${file.path}\n${symbols.join(' ')}\n`);
 		if (usedTokens + cost > maxTokens) {
 			budgetTruncated = true;
 			break;

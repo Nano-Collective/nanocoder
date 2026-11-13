@@ -13,6 +13,7 @@ import {
 	readFileSync,
 	statSync,
 } from 'node:fs';
+import {devNull} from 'node:os';
 import {delimiter, isAbsolute, join} from 'node:path';
 import {TIMEOUT_GH_METADATA_MS, TIMEOUT_GIT_PUSH_MS} from '@/constants';
 import {getProjectRoot} from '@/services/session-cwd';
@@ -450,6 +451,30 @@ export async function execGit(
 	return execProcess('git', args, 'Git', timeoutMs, options);
 }
 
+/**
+ * Config overrides for git runs that only read the repo. These back tools
+ * that run without approval, so nothing in the repo's own config may make
+ * them start a program: core.fsmonitor names a hook `git status` and `git
+ * diff` execute, and a hook directory is consulted by some read paths too.
+ * A sandboxed `execute_bash` cannot write `.git`, but a repo can arrive with
+ * this config already set.
+ */
+const READ_ONLY_GIT_CONFIG = [
+	'-c',
+	'core.fsmonitor=false',
+	'-c',
+	`core.hooksPath=${devNull}`,
+];
+
+/** execGit for commands that only read: see READ_ONLY_GIT_CONFIG. */
+export async function execGitReadOnly(
+	args: string[],
+	timeoutMs?: number,
+	options?: ExecOptions,
+): Promise<string> {
+	return execGit([...READ_ONLY_GIT_CONFIG, ...args], timeoutMs, options);
+}
+
 /** Execute git and preserve stdout bytes exactly for target file snapshots. */
 export async function execGitBuffer(
 	args: string[],
@@ -480,7 +505,7 @@ export async function execGh(
  */
 export async function hasStagedChanges(): Promise<boolean> {
 	try {
-		const diff = await execGit(['diff', '--cached', '--name-only']);
+		const diff = await execGitReadOnly(['diff', '--cached', '--name-only']);
 		return diff.trim().length > 0;
 	} catch (error) {
 		logger.debug('Failed to check for staged changes', {error});
@@ -493,8 +518,8 @@ export async function hasStagedChanges(): Promise<boolean> {
  */
 export async function isRebaseInProgress(): Promise<boolean> {
 	try {
-		await execGit(['rev-parse', '--git-path', 'rebase-merge']);
-		const result = await execGit([
+		await execGitReadOnly(['rev-parse', '--git-path', 'rebase-merge']);
+		const result = await execGitReadOnly([
 			'rev-parse',
 			'--verify',
 			'--quiet',
@@ -511,7 +536,7 @@ export async function isRebaseInProgress(): Promise<boolean> {
  */
 export async function isMergeInProgress(): Promise<boolean> {
 	try {
-		await execGit(['rev-parse', '--verify', '--quiet', 'MERGE_HEAD']);
+		await execGitReadOnly(['rev-parse', '--verify', '--quiet', 'MERGE_HEAD']);
 		return true;
 	} catch {
 		return false;
@@ -527,7 +552,7 @@ export async function isMergeInProgress(): Promise<boolean> {
  */
 export async function getCurrentBranch(): Promise<string> {
 	try {
-		return await execGit(['rev-parse', '--abbrev-ref', 'HEAD']);
+		return await execGitReadOnly(['rev-parse', '--abbrev-ref', 'HEAD']);
 	} catch (error) {
 		logger.debug('Failed to get current branch', {error});
 		return 'HEAD'; // Detached HEAD state
@@ -541,7 +566,7 @@ export async function getCurrentBranch(): Promise<string> {
  * head branch, unlike comparing branch names.
  */
 export async function getCurrentCommitSha(): Promise<string> {
-	return execGit(['rev-parse', 'HEAD']);
+	return execGitReadOnly(['rev-parse', 'HEAD']);
 }
 
 /**
@@ -678,7 +703,7 @@ export async function createDraftPr(opts: {
  */
 export async function getDefaultBranch(): Promise<string> {
 	try {
-		const remoteBranch = await execGit([
+		const remoteBranch = await execGitReadOnly([
 			'symbolic-ref',
 			'refs/remotes/origin/HEAD',
 			'--short',
@@ -691,11 +716,11 @@ export async function getDefaultBranch(): Promise<string> {
 		);
 		// Fall back to checking if main or master exists
 		try {
-			await execGit(['rev-parse', '--verify', 'main']);
+			await execGitReadOnly(['rev-parse', '--verify', 'main']);
 			return 'main';
 		} catch {
 			try {
-				await execGit(['rev-parse', '--verify', 'master']);
+				await execGitReadOnly(['rev-parse', '--verify', 'master']);
 				return 'master';
 			} catch {
 				return 'main';
@@ -709,7 +734,7 @@ export async function getDefaultBranch(): Promise<string> {
  */
 export async function getUpstreamBranch(): Promise<string | null> {
 	try {
-		return await execGit(['rev-parse', '--abbrev-ref', '@{upstream}']);
+		return await execGitReadOnly(['rev-parse', '--abbrev-ref', '@{upstream}']);
 	} catch (error) {
 		logger.debug('Failed to get upstream branch', {error});
 		return null;
@@ -727,7 +752,7 @@ export async function getAheadBehind(): Promise<{
 		const upstream = await getUpstreamBranch();
 		if (!upstream) return {ahead: 0, behind: 0};
 
-		const result = await execGit([
+		const result = await execGitReadOnly([
 			'rev-list',
 			'--left-right',
 			'--count',
@@ -796,7 +821,7 @@ export async function getCommits(
 		args.push('--');
 		if (options.file) args.push(options.file);
 
-		const output = await execGit(args);
+		const output = await execGitReadOnly(args);
 		if (!output.trim()) return [];
 
 		return output.split('\n').map(line => {
@@ -920,7 +945,7 @@ export async function getDiffStats(
 		const args = ['diff', '--numstat'];
 		if (staged) args.push('--cached');
 
-		const output = await execGit(args);
+		const output = await execGitReadOnly(args);
 		if (!output.trim()) return stats;
 
 		for (const line of output.split('\n')) {
@@ -948,7 +973,7 @@ export async function getDiffStats(
  */
 export async function getStashCount(): Promise<number> {
 	try {
-		const output = await execGit(['stash', 'list']);
+		const output = await execGitReadOnly(['stash', 'list']);
 		if (!output.trim()) return 0;
 		return output.split('\n').length;
 	} catch (error) {

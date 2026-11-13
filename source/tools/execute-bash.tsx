@@ -8,14 +8,14 @@ import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {type BashExecutionState, bashExecutor} from '@/services/bash-executor';
 import {getSafeSessionCwd} from '@/services/session-cwd';
+import {splitCommandForDisplay} from '@/terminal/shell-command-display';
 import {
 	buildFailureCapsule,
 	type RerunCommand,
 } from '@/tools/bash-failure-capsule';
+import {truncateToolResult} from '@/tools/runtime/truncate-tool-result';
 import type {NanocoderToolExport, StructuredToolOutput} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
-import {splitCommandForDisplay} from '@/utils/shell-command-display';
-import {truncateToolResult} from '@/utils/truncate-tool-result';
 
 /**
  * Execute a bash command using the bash executor service.
@@ -309,6 +309,33 @@ function isDestructiveRm(words: string[]): boolean {
 		.some(isDestructiveRmTarget);
 }
 
+/**
+ * Commands that run a quoted string as shell code, so the quoted text is what
+ * executes: `bash -c "..."`, `sh -lc '...'`, `eval "..."`, `ssh host "..."`,
+ * `xargs sh -c ...`.
+ */
+const RUNS_QUOTED_TEXT =
+	/\b(?:ba|z|k|da|fi|tc|c)?sh\s+(?:-\w+\s+)*-\w*c\b|\b(?:eval|ssh|xargs)\b/;
+
+/**
+ * The command with its quoted arguments blanked out, so `grep "dd if=" log`
+ * or `echo 'never run mkfs'` is judged on what runs rather than on the text it
+ * passes around. A quoted span in command position (`"mkfs" /dev/sda`) or
+ * after a redirect (`> "/dev/sda"`) is what runs or what gets written, so its
+ * quotes are dropped and its text kept. A command that hands a quoted string
+ * to another shell is returned unchanged.
+ */
+function withoutQuotedArguments(command: string): string {
+	if (RUNS_QUOTED_TEXT.test(command)) return command;
+	return command.replace(
+		/"(?:[^"\\]|\\.)*"|'[^']*'/g,
+		(span, offset: number) =>
+			/(?:^|[;&|(`\n>]|\bsudo)\s*$/.test(command.slice(0, offset))
+				? span.slice(1, -1)
+				: "''",
+	);
+}
+
 const executeBashValidator = (args: {
 	command: string;
 }): Promise<{valid: true} | {valid: false; error: string}> => {
@@ -322,10 +349,14 @@ const executeBashValidator = (args: {
 		});
 	}
 
-	// Check for extremely dangerous commands
+	// Refuse a few commands that are catastrophic if run by accident. This is a
+	// guard against a model's mistakes, not a security boundary: the shell has
+	// endless ways to spell any of these (variables, `$(...)`, a script written
+	// to disk first). Approval prompts and the opt-in OS sandbox are what
+	// actually constrain execute_bash.
 	const dangerousPatterns = [
-		/mkfs/i, // Format filesystem
-		/dd\s+if=/i, // Direct disk write
+		/\bmkfs\b/i, // Format filesystem
+		/\bdd\s+if=/i, // Direct disk write
 		// Fork bomb: a function that pipes itself into itself in the background,
 		// then is called, e.g. `:(){ :|:& };:` (any name, any spacing).
 		/([^\s(){};|&]+)\s*\(\)\s*\{\s*\1\s*\|\s*\1\s*&\s*\}\s*;\s*\1/,
@@ -338,9 +369,10 @@ const executeBashValidator = (args: {
 	// line continuations are joined first: `rm -rf \` with `/` on the next line
 	// is one command, so the target has to stay attached to its flags.
 	const parseable = command.replace(/\\\r?\n/g, ' ');
+	const unquoted = withoutQuotedArguments(command);
 	const isDestructive =
 		rmArgumentLists(parseable).some(isDestructiveRm) ||
-		dangerousPatterns.some(pattern => pattern.test(command));
+		dangerousPatterns.some(pattern => pattern.test(unquoted));
 
 	if (isDestructive) {
 		return Promise.resolve({

@@ -1,5 +1,5 @@
+import {generateToolCallId} from '@/tools/runtime/tool-call-id';
 import type {ToolCall} from '@/types/index';
-import {generateToolCallId} from '@/utils/tool-call-id';
 import {isPlainObject} from '@/utils/type-helpers';
 
 /**

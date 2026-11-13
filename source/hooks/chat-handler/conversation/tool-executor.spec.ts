@@ -1,14 +1,13 @@
 import test from 'ava';
 import {displayExecutedTool, executeToolsDirectly} from './tool-executor.js';
 import type {ToolCall, ToolResult} from '@/types/core';
-import {getSequenceTracker} from '@/macros/sequence-tracker';
 
 // ============================================================================
 // Test Helpers
 // ============================================================================
 
 import {setToolRegistryGetter} from '@/message-handler';
-import {ToolValidationError} from '@/utils/tool-validation';
+import {ToolValidationError} from '@/tools/runtime/tool-validation';
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -902,12 +901,14 @@ test.serial(
 );
 
 test.serial(
-	'executeToolsDirectly - aborted signal surfaces as agent error result',
+	'executeToolsDirectly - an already-cancelled turn does not start a subagent',
 	async t => {
 		const {setAgentToolExecutor} = await import('@/tools/agent-tool');
+		let started = false;
 
 		setAgentToolExecutor({
 			execute: async (_task: unknown, signal?: AbortSignal) => {
+				started = true;
 				if (signal?.aborted) {
 					return {
 						subagentName: 'fake',
@@ -950,11 +951,9 @@ test.serial(
 			{compactDisplay: true, signal: controller.signal},
 		);
 
-		t.is(results.length, 1);
-		t.true(
-			results[0].content.includes('Aborted'),
-			`expected 'Aborted' in content, got: ${results[0].content}`,
-		);
+		// The caller pairs the unstarted call with a cancellation result.
+		t.is(results.length, 0);
+		t.false(started);
 	},
 );
 
@@ -1132,15 +1131,12 @@ test.serial(
 				{compactDisplay: true, signal: controller.signal},
 			);
 
-			t.is(results.length, 2);
-			t.true(results[0].content.includes('Aborted mid-flight'));
-			t.true(results[1].content.includes('Aborted mid-flight'));
+			// Already cancelled: nothing starts, and the caller pairs the
+			// tool calls with cancellation results.
+			t.is(results.length, 0);
 		}
 
-		t.is(receivedSignals.length, 10);
-		for (const sig of receivedSignals) {
-			t.truthy(sig, 'AbortSignal must be threaded into read-only tool handler');
-		}
+		t.is(receivedSignals.length, 0, 'no handler runs once the turn is cancelled');
 
 		// Restore default mock tool handler registry
 		setToolRegistryGetter(createMockToolRegistry);
@@ -1211,110 +1207,51 @@ test.serial(
 	},
 );
 
-test.serial(
-	'executeToolsDirectly - records read-only tool executions into SequenceTracker',
-	async t => {
-		const tracker = getSequenceTracker();
-		tracker.clear();
 
-		const toolCalls: ToolCall[] = [
-			{
-				id: 'call_ro_1',
-				function: {
-					name: 'test_tool',
-					arguments: JSON.stringify({path: 'source/test.ts'}),
-				},
-			},
-		];
-
-		const mockToolManager = createMockToolManager({
-			readOnlyTools: ['test_tool'],
-		});
-
-		await executeToolsDirectly(
-			toolCalls,
-			mockToolManager as any,
-			createMockConversationStateManager() as any,
-			() => {},
-		);
-
-		const history = tracker.getHistory();
-		t.true(history.length >= 1);
-		const last = history[history.length - 1];
-		t.is(last.toolName, 'test_tool');
-		t.is((last.inputArgs as any).path, 'source/test.ts');
-		t.true(last.readOnly);
-		t.true(last.success);
-	},
-);
 
 test.serial(
-	'executeToolsDirectly - breaks chain on non-read-only tool call',
+	'executeToolsDirectly - escape during one sequential tool stops the rest of the batch',
 	async t => {
-		const tracker = getSequenceTracker();
-		tracker.clear();
+		const controller = new AbortController();
+		const ran: string[] = [];
+		setToolRegistryGetter(() => ({
+			slow_bash: (async () => {
+				ran.push('slow_bash');
+				// The user presses Escape while this tool runs.
+				controller.abort();
+				return 'bash done';
+			}) as any,
+			write_tool: (async () => {
+				ran.push('write_tool');
+				return 'written';
+			}) as any,
+			edit_tool: (async () => {
+				ran.push('edit_tool');
+				return 'edited';
+			}) as any,
+		}));
 
-		// Execute read-only tool first
-		await executeToolsDirectly(
-			[
-				{
-					id: 'call_ro',
-					function: {name: 'test_tool', arguments: '{"path": "a"}'},
-				},
-			],
-			createMockToolManager({readOnlyTools: ['test_tool']}) as any,
-			createMockConversationStateManager() as any,
-			() => {},
-		);
+		try {
+			const results = await executeToolsDirectly(
+				[
+					{id: 'b1', function: {name: 'slow_bash', arguments: '{}'}},
+					{id: 'w1', function: {name: 'write_tool', arguments: '{}'}},
+					{id: 'e1', function: {name: 'edit_tool', arguments: '{}'}},
+				],
+				createMockToolManager() as any,
+				createMockConversationStateManager() as any,
+				() => {},
+				{compactDisplay: true, signal: controller.signal},
+			);
 
-		t.is(tracker.getCurrentChain().length, 1);
-
-		// Execute non-read-only tool
-		await executeToolsDirectly(
-			[
-				{
-					id: 'call_mut',
-					function: {name: 'mutating_tool', arguments: '{"content": "b"}'},
-				},
-			],
-			createMockToolManager({readOnlyTools: []}) as any,
-			createMockConversationStateManager() as any,
-			() => {},
-		);
-
-		// Chain must be broken
-		t.is(tracker.getCurrentChain().length, 0);
+			t.deepEqual(ran, ['slow_bash'], 'tools after the cancel must not run');
+			t.deepEqual(
+				results.map(r => r.tool_call_id),
+				['b1'],
+				'only the tool that ran has a result',
+			);
+		} finally {
+			setToolRegistryGetter(createMockToolRegistry);
+		}
 	},
 );
-
-test.serial(
-	'executeToolsDirectly - tags concurrent read-only tools with parallelBatch',
-	async t => {
-		const tracker = getSequenceTracker();
-		tracker.clear();
-
-		// Two read-only tools executed together
-		await executeToolsDirectly(
-			[
-				{
-					id: 'call_ro_1',
-					function: {name: 'tool1', arguments: '{}'},
-				},
-				{
-					id: 'call_ro_2',
-					function: {name: 'tool2', arguments: '{}'},
-				},
-			],
-			createMockToolManager({readOnlyTools: ['tool1', 'tool2']}) as any,
-			createMockConversationStateManager() as any,
-			() => {},
-		);
-
-		const chain = tracker.getCurrentChain();
-		t.is(chain.length, 2);
-		t.true(chain[0].parallelBatch);
-		t.true(chain[1].parallelBatch);
-	},
-);
-
-
