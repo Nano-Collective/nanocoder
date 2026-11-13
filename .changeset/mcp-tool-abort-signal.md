@@ -2,4 +2,4 @@
 "@nanocollective/nanocoder": patch
 ---
 
-MCP tool calls now receive the prompt's abort signal so stopping an in-flight tool request cancels it.
+Tool calls now honor prompt cancellation, including MCP, URL fetch, and web search requests.
