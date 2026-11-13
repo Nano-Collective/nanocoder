@@ -7,6 +7,10 @@ import {ensureString} from '@/utils/type-helpers';
 interface ParsedToolCall {
 	toolName: string;
 	parameters: Record<string, unknown>;
+	// A tag left in the call once every complete parameter is taken out: a
+	// parameter that is never closed (`<path>`), or a closing tag that closes
+	// none (`</wrong_close>`). The call's arguments are incomplete.
+	brokenTag?: string;
 }
 
 /**
@@ -16,6 +20,8 @@ interface ParsedToolCall {
 export class XMLToolCallParser {
 	private static readonly TOOL_CALL_REGEX = /<(\w+)>(.*?)<\/\1>/gs;
 	private static readonly PARAMETER_REGEX = /<(\w+)>(.*?)<\/\1>/gs;
+	// Fenced code (an unclosed fence runs to the end) and inline code spans.
+	private static readonly CODE_REGEX = /```[\s\S]*?(?:```|$)|`[^`\n]*`/g;
 
 	/**
 	 * Extracts tool calls from text content containing XML-formatted tool calls
@@ -58,14 +64,82 @@ export class XMLToolCallParser {
 			}
 
 			const parameters = this.parseParameters(innerXml);
+			const brokenTag = this.findBrokenTag(innerXml);
 
 			toolCalls.push({
 				toolName,
 				parameters,
+				...(brokenTag ? {brokenTag} : {}),
 			});
 		}
 
 		return toolCalls;
+	}
+
+	/**
+	 * Returns the name of the first tool call that is opened but never closed,
+	 * such as `<read_file><path>a.ts</path>` with no `</read_file>`. The opening
+	 * tag must be named after one of `toolNames`, start a line and be followed
+	 * by another tag, and only the call's own tags and values may come after
+	 * it. So `<br>`, "use <read_file> next" and "use <read_file><path>x</path>
+	 * to read a file" are left alone. Code, and the calls that do parse (with
+	 * their arguments), are skipped.
+	 */
+	static findUnclosedToolCall(
+		content: string,
+		toolNames: readonly string[],
+	): string | undefined {
+		const offered = new Set(toolNames);
+		// Most replies have no offered tool tag followed by another tag, so
+		// they skip the scans below. The second tag is a lookahead, so in
+		// `<a><read_file><path>` the `<read_file>` is still tried.
+		const tagThenTag = content.matchAll(/<(\w+)>(?=\s*<\w+>)/g);
+		if (!Array.from(tagThenTag).some(match => offered.has(match[1]))) {
+			return undefined;
+		}
+
+		// Blank out code and the calls that parse, keeping line breaks for the
+		// line-start check below.
+		const blank = (text: string) => text.replace(/[^\n]/g, ' ');
+		let rest = content;
+		for (const [start, end] of this.findToolCallRanges(content)) {
+			rest =
+				rest.slice(0, start) + blank(rest.slice(start, end)) + rest.slice(end);
+		}
+		rest = rest.replace(new RegExp(this.CODE_REGEX), blank);
+
+		const opening = /^[ \t]*<(\w+)>(?=\s*<\w+>)/gm;
+		const lastClose = new Map<string, number>();
+		for (const match of rest.matchAll(opening)) {
+			const name = match[1];
+			if (!offered.has(name)) continue;
+			if (!lastClose.has(name)) {
+				lastClose.set(name, rest.lastIndexOf(`</${name}>`));
+			}
+			const closed = (lastClose.get(name) ?? -1) > match.index;
+			if (!closed && this.isCallTail(rest, match.index + match[0].length)) {
+				return name;
+			}
+		}
+		return undefined;
+	}
+
+	/**
+	 * Whether everything from `from` to the end of `content` can belong to a
+	 * call: whitespace, complete `<param>value</param>` pairs and closing tags,
+	 * then either the end or a parameter left open (its value runs to the
+	 * end). Prose there means the tag was written about, not called.
+	 */
+	private static isCallTail(content: string, from: number): boolean {
+		const piece = /\s+|<(\w+)>[\s\S]*?<\/\1>|<\/\w+>/y;
+		let at = from;
+		piece.lastIndex = at;
+		while (at < content.length && piece.exec(content)) {
+			at = piece.lastIndex;
+		}
+		const openParameter = /<\w+>/y;
+		openParameter.lastIndex = at;
+		return at === content.length || openParameter.test(content);
 	}
 
 	/**
@@ -233,6 +307,15 @@ export class XMLToolCallParser {
 		}
 
 		return parameters;
+	}
+
+	/**
+	 * Returns the first tag left in a call's inner XML once every complete
+	 * parameter is taken out, or undefined when only text is left.
+	 */
+	private static findBrokenTag(innerXml: string): string | undefined {
+		const leftover = innerXml.replace(new RegExp(this.PARAMETER_REGEX), ' ');
+		return /<\/?\w+>/.exec(leftover)?.[0];
 	}
 
 	/**
