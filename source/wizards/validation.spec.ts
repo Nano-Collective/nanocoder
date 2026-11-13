@@ -542,6 +542,10 @@ test('buildProviderConfigObject: preserves the openrouter block on disk', t => {
 			baseUrl: 'https://openrouter.ai/api/v1',
 			apiKey: 'test-key',
 			models: ['anthropic/claude-3.5-sonnet'],
+			extraBody: {
+				top_k: 20,
+				chat_template_kwargs: {enable_thinking: false},
+			},
 			openrouter: {
 				service_tier: 'flex',
 				reasoning: {effort: 'high'},
@@ -559,6 +563,10 @@ test('buildProviderConfigObject: preserves the openrouter block on disk', t => {
 		reasoning: {effort: 'high'},
 		provider: {sort: 'price', allow_fallbacks: true},
 		models: ['openai/gpt-4o'],
+	});
+	t.deepEqual(p?.extraBody, {
+		top_k: 20,
+		chat_template_kwargs: {enable_thinking: false},
 	});
 });
 
