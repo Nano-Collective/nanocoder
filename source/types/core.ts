@@ -285,6 +285,15 @@ export interface LLMChatResponse {
 	// Absent when the provider did not report one (e.g. the streamed-fallback
 	// path after a no-output error). Treat absence as "not truncated".
 	finishReason?: LLMFinishReason;
+	/**
+	 * Name of the provider that actually answered this request, set only when
+	 * a fallback provider served the turn instead of the primary. Usage and
+	 * cost records should attribute the turn to this provider (and
+	 * `fallbackModel` when set), not the primary.
+	 */
+	fallbackProvider?: string;
+	/** Model that answered, when a `provider/model` fallback entry named one. */
+	fallbackModel?: string;
 }
 
 export interface StreamCallbacks {
@@ -293,6 +302,12 @@ export interface StreamCallbacks {
 	onToolCall?: (toolCall: ToolCall) => void;
 	onFinish?: () => void;
 	onPrivacyEvent?: (scrubbedDelta: number) => void;
+	/**
+	 * One-line notice that a fallback provider answered the turn instead of
+	 * the primary. Frontends render it as an info line; unset means the
+	 * notice is dropped (the response still carries `fallbackProvider`).
+	 */
+	onNotice?: (message: string) => void;
 }
 
 export interface ModeOverrides {

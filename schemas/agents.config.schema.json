@@ -678,6 +678,13 @@
 				"disableTools": {
 					"type": "boolean"
 				},
+				"fallback": {
+					"description": "Fallback providers (or `provider/model` pairs) tried in order when this\nprovider fails a request with a retryable error (429, 5xx, network)\nafter exhausting its own `maxRetries`. The first fallback that answers\nserves the turn; the primary stays selected for the next turn.\nNon-retryable errors (auth, invalid request) never trigger a fallback.\nExample: `\"fallback\": [\"openrouter\", \"ollama/llama3.1:8b\"]`.",
+					"items": {
+						"type": "string"
+					},
+					"type": "array"
+				},
 				"headers": {
 					"$ref": "#/definitions/RecordStringString"
 				},

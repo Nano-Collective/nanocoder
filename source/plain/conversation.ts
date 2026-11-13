@@ -334,6 +334,12 @@ async function runPlainConversationBody(
 								write(token);
 							}
 						},
+						// A fallback provider answered instead of the primary.
+						onNotice: message => {
+							if (!isJson) {
+								writeStatus(message);
+							}
+						},
 					},
 					reasoning: () => streamedReasoning || undefined,
 					end: () => {
