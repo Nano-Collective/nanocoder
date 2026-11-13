@@ -80,6 +80,17 @@
 					"$ref": "#/definitions/HooksConfig",
 					"description": "Shell commands run at fixed points in the agent loop, keyed by lifecycle\nevent. A project-local file can set these, so they carry the same\ncode-execution weight as project MCP servers (`.mcp.json`) and are\ngated behind directory trust."
 				},
+				"lsp": {
+					"description": "Language server behavior. Auto-discovery is enabled by default.",
+					"properties": {
+						"autoDiscover": {
+							"description": "Disable scanning PATH for installed language servers at startup.",
+							"type": "boolean"
+						}
+					},
+					"type": "object",
+					"additionalProperties": false
+				},
 				"lspServers": {
 					"description": "LSP server configurations (optional — auto-discovery enabled by default).",
 					"items": {

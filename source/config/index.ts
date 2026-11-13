@@ -541,6 +541,25 @@ function loadLspServersConfig(cwd: string): AppConfig['lspServers'] {
 	);
 }
 
+function loadLspConfig(cwd: string): AppConfig['lsp'] {
+	const configured = loadHierarchicalConfig(
+		cwd,
+		'agents.config.json',
+		'lsp',
+		config => {
+			const autoDiscover = config.nanocoder?.lsp?.autoDiscover;
+			return typeof autoDiscover === 'boolean' ? {autoDiscover} : null;
+		},
+	);
+	const disabledByEnvironment =
+		process.env.NANOCODER_LSP?.trim().toLowerCase() === 'off';
+	return {
+		autoDiscover: disabledByEnvironment
+			? false
+			: (configured?.autoDiscover ?? true),
+	};
+}
+
 function loadSystemPromptConfig(cwd: string): SystemPromptConfig | undefined {
 	return (
 		loadHierarchicalConfig(
@@ -947,10 +966,12 @@ function loadAppConfig(cwd: string): AppConfig {
 
 	// Load user-defined LSP servers (auto-discovery still runs alongside)
 	const lspServers = loadLspServersConfig(cwd);
+	const lsp = loadLspConfig(cwd);
 
 	return {
 		providers,
 		mcpServers,
+		lsp,
 		lspServers,
 		autoCompact,
 		sessions,
