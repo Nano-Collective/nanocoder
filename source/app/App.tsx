@@ -74,6 +74,7 @@ export default function App({
 	cliProvider,
 	cliModel,
 	cliMode,
+	cliBudget,
 	trustDirectory = false,
 	altScreenActive = false,
 	initialSession,
@@ -295,6 +296,7 @@ export default function App({
 		developmentMode: appState.developmentMode,
 		developmentModeRef: appState.developmentModeRef,
 		nonInteractiveMode,
+		cliBudget,
 		onConversationComplete: () => {
 			appState.setIsConversationComplete(true);
 			appState.setCompactToolCounts(null);

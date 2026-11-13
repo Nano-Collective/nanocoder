@@ -257,6 +257,30 @@ When the cap is reached, the loop does **not** error out and discard work. On th
 
 One turn is a single LLM response plus its batch of tool executions. The default of 200 is high enough for long iterative jobs to finish while still bounding cost and wall-clock time for an unattended run that gets stuck.
 
+### Budget cap
+
+A spend and token cap for runs and sessions. Turns are a poor proxy for money, so the cap compares the running total from the usage module — provider-reported tokens, priced via models.dev — against the limit after each response.
+
+```json
+{
+  "nanocoder": {
+    "budget": {
+      "perSessionUsd": 5,
+      "perRunUsd": 2,
+      "maxTokensTotal": 100000
+    }
+  }
+}
+```
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `perSessionUsd` | number | — | Maximum estimated spend in USD for one interactive session (or daemon run). |
+| `perRunUsd` | number | — | Maximum estimated spend in USD for one `nanocoder run`. Overridable per run with `--max-budget-usd`. |
+| `maxTokensTotal` | number | — | Maximum total tokens (input + output) per run/session. Overridable per run with `--max-tokens-total`. |
+
+At 80% of a limit a warning is shown; at 100% the run stops before the next request and prints the total spent. In `--plain` mode the stop exits with code 3 (distinct from 0 success, 1 error, 2 tool-approval-required) and `--json` reports it as `kind: "budget-exceeded"` with a `budget` block. Interactive sessions ask whether to stop, continue once, or raise the limit (doubling it) and continue. Models with no price in models.dev fall back to the token limit only, and the summary says the cost is unknown instead of treating it as zero.
+
 ### OS sandbox
 
 File tools already refuse paths outside the project. `execute_bash` and `!command` did not: they spawn `sh` with your full user privileges. Set `nanocoder.sandbox` to `true` (boolean; a string like `"true"` is ignored and treated as off, with a warning) to wrap those two in an OS jail. Default is off.

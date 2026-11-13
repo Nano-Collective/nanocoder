@@ -50,6 +50,8 @@ import {
 import {fileMutationPaths} from '@/tools/file-ops/file-mutating-tools';
 import {getTuneToolMode} from '@/types/config';
 import type {DevelopmentMode, Message} from '@/types/core';
+import type {BudgetLimits} from '@/usage/budget';
+import {BUDGET_EXCEEDED_EXIT_CODE} from '@/usage/budget';
 import {formatError} from '@/utils/error-formatter';
 import {setMessageQueueSink} from '@/utils/message-queue-core';
 import {getShutdownManager} from '@/utils/shutdown';
@@ -61,6 +63,11 @@ export interface RunPlainShellOptions {
 	cliModel?: string;
 	trustDirectory: boolean;
 	outputFormat: 'text' | 'json';
+	/**
+	 * Spend/token cap for this run (usually the CLI flags). When omitted the
+	 * `nanocoder.budget` settings (`perRunUsd`, `maxTokensTotal`) apply.
+	 */
+	budget?: BudgetLimits;
 	/**
 	 * Injectable seams for testing. Each defaults to the real implementation,
 	 * so production call sites never need to pass this. Mirrors the pattern
@@ -107,6 +114,8 @@ const defaultDeps: RunPlainShellDeps = {
  * 1  initialization or generation error
  * 2  tool approval was required (matches the Ink `run` behavior in
  * `useNonInteractiveMode`)
+ * 3  spend/token budget cap reached (see `nanocoder.budget`,
+ * `--max-budget-usd`, `--max-tokens-total`)
  */
 export async function runPlainShell(
 	options: RunPlainShellOptions,
@@ -118,6 +127,7 @@ export async function runPlainShell(
 		cliModel,
 		trustDirectory,
 		outputFormat,
+		budget,
 	} = options;
 
 	const deps: RunPlainShellDeps = {...defaultDeps, ...options.deps};
@@ -373,6 +383,9 @@ export async function runPlainShell(
 			outputFormat,
 			sessionId,
 			workingDirectory: process.cwd(),
+			// CLI flags; the loop resolves them against `nanocoder.budget`
+			// (perRunUsd / maxTokensTotal) before enforcing.
+			budget,
 		});
 		outcome = await conversationPromise;
 	} catch (error) {
@@ -394,7 +407,13 @@ export async function runPlainShell(
 
 	if (isJson) {
 		const exitCode =
-			outcome.kind === 'success' ? 0 : outcome.kind === 'error' ? 1 : 2;
+			outcome.kind === 'success'
+				? 0
+				: outcome.kind === 'error'
+					? 1
+					: outcome.kind === 'budget-exceeded'
+						? BUDGET_EXCEEDED_EXIT_CODE
+						: 2;
 
 		const filesChangedSet = new Set<string>();
 
@@ -428,7 +447,10 @@ export async function runPlainShell(
 			...(outcome.usage && {
 				usage: outcome.usage,
 			}),
-			...(outcome.kind === 'error' && {
+			...(outcome.budget && {
+				budget: outcome.budget,
+			}),
+			...((outcome.kind === 'error' || outcome.kind === 'budget-exceeded') && {
 				message: outcome.message,
 			}),
 			...(outcome.kind === TOOL_APPROVAL_REQUIRED_KIND && {
@@ -457,6 +479,10 @@ export async function runPlainShell(
 				),
 			);
 			await finish(2);
+			return;
+		case 'budget-exceeded':
+			writeError(outcome.message);
+			await shutdown(BUDGET_EXCEEDED_EXIT_CODE, deps);
 			return;
 		case 'error':
 			writeError(outcome.message);

@@ -1,5 +1,6 @@
 import type {Session} from '@/session/session-manager';
 import type {DevelopmentMode} from '@/types/core';
+import type {BudgetLimits} from '@/usage/budget';
 
 /**
  * Valid user-selectable boot modes. Single source of truth — used by the
@@ -36,6 +37,12 @@ export interface AppProps {
 	 * default initial mode for both interactive and non-interactive runs.
 	 */
 	cliMode?: CliMode;
+	/**
+	 * Spend/token cap requested via `--max-budget-usd` / `--max-tokens-total`.
+	 * Honored only when `nonInteractiveMode` is true (a `run`); interactive
+	 * sessions use `nanocoder.budget` perSessionUsd instead.
+	 */
+	cliBudget?: BudgetLimits;
 	/**
 	 * Skip the first-run directory trust prompt for this run only. Honored
 	 * only when `nonInteractiveMode` is true; ignored otherwise. The trust
