@@ -648,3 +648,26 @@ test('flushStatsLedgerSync mid-write (e.g. /stats) neither loses nor double-coun
 	await finalizeStatsForExit();
 	t.is(readStatsLedger().totalTokens, 150);
 });
+
+test('a reset while the file is being moved into place is not undone', async t => {
+	recordTokenUsage({
+		provider: 'OpenRouter',
+		model: 'gpt-5',
+		tokens: 500,
+		dateKey: '2026-08-25',
+	});
+	const promises = fs.promises;
+	const originalRename = promises.rename;
+	promises.rename = (async (...args: Parameters<typeof originalRename>) => {
+		resetStatsLedger();
+		return originalRename(...args);
+	}) as typeof originalRename;
+	try {
+		await flushStatsLedgerAsync();
+	} finally {
+		promises.rename = originalRename;
+	}
+
+	t.false(fs.existsSync(getStatsFilePath()));
+	t.is(readStatsLedger().totalTokens, 0);
+});

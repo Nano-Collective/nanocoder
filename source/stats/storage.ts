@@ -353,6 +353,10 @@ export async function writeStatsLedgerAsync(
 			return false;
 		}
 		await fs.promises.rename(tmpPath, getStatsFilePath());
+		if (!shouldCommit()) {
+			await fs.promises.rm(getStatsFilePath(), {force: true});
+			return false;
+		}
 		return true;
 	} catch (error) {
 		logWarning('Failed to write stats ledger:', true, {
