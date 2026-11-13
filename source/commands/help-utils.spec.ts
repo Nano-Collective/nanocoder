@@ -73,6 +73,7 @@ test('getCommandHelpDetails documents supported command syntax', t => {
 	const compact = getCommandHelpDetails(command('compact'));
 	const init = getCommandHelpDetails(command('init'));
 	const skills = getCommandHelpDetails(command('skills'));
+	const fork = getCommandHelpDetails(command('fork'));
 
 	t.is(agents.usage, '/agents [show <name>|copy <name>|create <name>]');
 	t.true(agents.options?.includes('copy <name>'));
@@ -85,6 +86,9 @@ test('getCommandHelpDetails documents supported command syntax', t => {
 	t.deepEqual(getCommandHelpDetails(command('commands')).aliases, [
 		'custom-commands',
 	]);
+	t.is(fork.category, 'Session & Workflow');
+	t.is(fork.usage, '/fork [title]');
+	t.true(fork.examples?.includes('/fork try-the-other-approach'));
 });
 
 test('groupHelpCommands orders categories and commands deterministically', t => {

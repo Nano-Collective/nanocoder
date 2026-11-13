@@ -111,6 +111,7 @@ export interface CommandContext {
 	/** Missing where sessions are unavailable. */
 	resumeSession?: (
 		session: import('@/session/session-manager').Session,
+		action?: 'resume' | 'fork',
 	) => void | Promise<void>;
 	/** Missing where model switching is unavailable. */
 	switchModel?: (provider: string, model: string) => Promise<boolean>;

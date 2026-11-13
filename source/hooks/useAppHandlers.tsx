@@ -165,7 +165,7 @@ export interface AppHandlers {
 	) => Promise<void>;
 	handleCheckpointCancel: () => void;
 	enterSessionSelectorMode: (showAll?: boolean) => void;
-	applySession: (session: Session) => void;
+	applySession: (session: Session, action?: 'resume' | 'fork') => void;
 	handleSessionSelect: (sessionId: string) => Promise<void>;
 	handleSessionCancel: () => void;
 	enterCheckpointLoadMode: (
@@ -619,7 +619,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 	// the labels here without the client made replies from the old model get
 	// labelled, saved and priced as the resumed one.
 	const applySession = React.useCallback(
-		(session: Session) => {
+		(session: Session, action: 'resume' | 'fork' = 'resume') => {
 			updateMessages(session.messages);
 			// The resumed history has not seen this process's reads.
 			bumpReadContentGeneration();
@@ -630,17 +630,27 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 			});
 			// Replay the persisted conversation into scrollback so the user can see
 			// what they resumed (prompts, assistant replies, tool activity) instead
-			// of an empty screen with only a success line.
-			for (const component of buildSessionHistoryComponents(
-				session.messages,
-				session.model,
-			)) {
-				addToChatQueue(component);
+			// of an empty screen with only a success line. A fork continues the
+			// conversation already on screen, so replaying it would just duplicate
+			// the whole transcript above the new success line.
+			if (action === 'resume') {
+				for (const component of buildSessionHistoryComponents(
+					session.messages,
+					session.model,
+				)) {
+					addToChatQueue(component);
+				}
 			}
 			addToChatQueue(
 				<SuccessMessage
-					key={generateKey('resume-success')}
-					message={`Resumed session: ${session.title}`}
+					key={generateKey(
+						action === 'fork' ? 'fork-success' : 'resume-success',
+					)}
+					message={
+						action === 'fork'
+							? `Forked session: ${session.title}. The original stays available in /resume.`
+							: `Resumed session: ${session.title}`
+					}
 					hideBox={true}
 				/>,
 			);
@@ -663,8 +673,8 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 	// the provider is no longer configured, handleModelSelect reports it and the
 	// current client and labels stay.
 	const resumeSession = React.useCallback(
-		async (session: Session) => {
-			applySession(session);
+		async (session: Session, action: 'resume' | 'fork' = 'resume') => {
+			applySession(session, action);
 			await handleModelSelect(
 				session.provider,
 				session.model,

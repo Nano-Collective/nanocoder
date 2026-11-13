@@ -180,6 +180,12 @@ export const lazyCommands: LazyCommand[] = [
 		load: () => import('@/commands/rename').then(m => m.renameCommand),
 	},
 	{
+		name: 'fork',
+		description:
+			'Copy the current conversation into a new session (/fork [title])',
+		load: () => import('@/commands/fork').then(m => m.forkCommand),
+	},
+	{
 		name: 'resume',
 		description:
 			'List and resume previous chat sessions. Aliases: /sessions, /history',

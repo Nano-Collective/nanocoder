@@ -46,6 +46,7 @@ Type `/` in the chat input to see available commands. All commands start with `/
 | `/resume` | Resume a previous chat session (aliases: `/sessions`, `/history`). Also available at launch via the `--resume`/`--continue` CLI flags. See [Session Management](session-management.md) |
 | `/retry` | Re-run the last user turn. Use `/retry --model <id>` or `/retry --provider <name> --model <id>` to switch models first |
 | `/rename` | Rename the current session. Name must be non-empty and 100 characters or less. See [Session Management](session-management.md) |
+| `/fork` | Copy the current conversation into a new session and continue there. `/fork <title>` sets the fork's title; the original stays available in `/resume`. See [Session Management](session-management.md#forking-a-session) |
 | `/explorer` | Interactive file browser to navigate, preview, and select files for context |
 | `/tune` | Configure runtime model behaviour — tool profiles, compaction, native tools, model parameters (see [Tune](tune.md)) |
 | `/ide` | Connect to an IDE for live integration (e.g., VS Code diff previews) |

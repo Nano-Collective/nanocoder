@@ -446,3 +446,41 @@ test.serial('session-selector cancels once on Escape while the list is shown', a
 		restore();
 	}
 });
+
+// ============================================================================
+// Forked sessions
+// ============================================================================
+
+test.serial('session-selector marks a forked session with its parent', async t => {
+	const parent = makeSession('parent', 'Original thread', 4);
+	const child: SessionMetadata = {
+		...makeSession('child', 'Original thread (fork)', 4),
+		parentId: parent.id,
+	};
+	const original = sessionManager.listSessions;
+	sessionManager.listSessions = async () => [child, parent];
+	const rendered = renderWithTheme(
+		React.createElement(SessionSelector, {
+			onSelect: () => {},
+			onCancel: () => {},
+		}),
+	);
+	const frame = () => stripAnsi(rendered.lastFrame() ?? '');
+	try {
+		await waitUntil(() => frame().includes('fork of'));
+		t.regex(frame(), /fork of Original/);
+	} finally {
+		rendered.unmount();
+		sessionManager.listSessions = original;
+	}
+});
+
+test.serial('session-selector leaves unforked sessions unmarked', async t => {
+	const {frame, restore} = renderWithStubbedSessions();
+	try {
+		await waitUntil(() => frame().includes('Fix login bug'));
+		t.notRegex(frame(), /fork of/);
+	} finally {
+		restore();
+	}
+});
