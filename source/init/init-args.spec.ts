@@ -30,3 +30,14 @@ test('parseInitArguments rejects --preset without a value', t => {
 	t.true(error instanceof InitArgumentError);
 	t.regex(error.message, /Supported presets: react, nextjs, rust/);
 });
+
+test('parseInitArguments rejects unknown options', t => {
+	const error = t.throws(() =>
+		parseInitArguments(['--bogus', '--preset', 'rust']),
+	);
+	t.true(error instanceof InitArgumentError);
+	t.is(
+		error.message,
+		'Unknown option "--bogus". Run "nanocoder init --help" to see available options.',
+	);
+});
