@@ -616,6 +616,61 @@ test.serial(
 	},
 );
 
+test.serial(
+	'FileSnapshotService reports non-ASCII paths unquoted',
+	async t => {
+		const tempDir = await createTempDir();
+		try {
+			initGitRepo(tempDir);
+			await createTestFile(tempDir, 'café.txt', 'base');
+			await createTestFile(tempDir, '日本語.txt', 'base');
+			await createTestFile(tempDir, 'plain.txt', 'base');
+			await execFileAsync('git', ['add', '-A'], {cwd: tempDir});
+			await execFileAsync(
+				'git',
+				[
+					'-c',
+					'user.email=test@example.com',
+					'-c',
+					'user.name=test',
+					'-c',
+					'core.hooksPath=',
+					'commit',
+					'-m',
+					'base',
+					'--no-gpg-sign',
+					'--no-verify',
+				],
+				{cwd: tempDir},
+			);
+			await createTestFile(tempDir, 'café.txt', 'changed');
+			await createTestFile(tempDir, '日本語.txt', 'changed');
+			await createTestFile(tempDir, 'plain.txt', 'changed');
+			await createTestFile(tempDir, 'naïve-untracked.txt', 'new');
+
+			const {files, available} = new FileSnapshotService(
+				tempDir,
+			).getModifiedFilesResult();
+
+			t.true(available);
+			// git C-quotes paths outside ASCII by default, so café.txt arrives
+			// as "caf\303\251.txt" - quotes and octal escapes included. No
+			// filesystem call can open that, so the file was silently dropped
+			// from every checkpoint. The CJK name pins the 3-byte case the
+			// issue called out; the listing reads NUL-separated paths, so both
+			// arrive raw.
+			t.deepEqual(files.sort(), [
+				'café.txt',
+				'naïve-untracked.txt',
+				'plain.txt',
+				'日本語.txt',
+			]);
+		} finally {
+			await cleanupTempDir(tempDir);
+		}
+	},
+);
+
 test.serial('FileSnapshotService captures empty files', async t => {
 	const tempDir = await createTempDir();
 	try {
