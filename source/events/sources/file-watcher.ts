@@ -1,6 +1,7 @@
 import {type FSWatcher, watch} from 'chokidar';
 import {type EventRouter, toPosixPath} from '@/events/event-router';
 import type {FileChangeEventKind} from '@/types/skills';
+import {getLogger} from '@/utils/logging';
 
 export interface FileWatcherOptions {
 	root: string;
@@ -48,8 +49,22 @@ export class FileWatcherSource {
 
 		try {
 			await new Promise<void>((resolve, reject) => {
-				watcher.once('ready', () => resolve());
-				watcher.once('error', reject);
+				const onReady = () => {
+					watcher.off('error', onStartupError);
+					watcher.on('error', error => {
+						getLogger().error('File watcher error', {
+							error,
+							root: this.options.root,
+						});
+					});
+					resolve();
+				};
+				const onStartupError = (error: unknown) => {
+					watcher.off('ready', onReady);
+					reject(error);
+				};
+				watcher.once('ready', onReady);
+				watcher.once('error', onStartupError);
 			});
 			this.watcher = watcher;
 		} catch (error) {

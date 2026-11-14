@@ -1,10 +1,12 @@
 import {mkdir, mkdtemp, rm, unlink, writeFile} from 'node:fs/promises';
+import {EventEmitter} from 'node:events';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
 import {EventRouter} from '@/events/event-router';
 import type {Event, Subscription, SubscriptionDispatcher} from '@/events/types';
 import {FileWatcherSource} from './file-watcher';
+import {getLogger} from '@/utils/logging';
 
 console.log(`\nfile-watcher.spec.ts`);
 
@@ -206,6 +208,7 @@ test.serial('closes the underlying watcher if initialization fails', async t => 
     type WatchFn = typeof import('chokidar').watch;  // ← avoids importing watch itself
 
     const fakeWatcher = {
+        off: (_event: string, _callback: unknown) => fakeWatcher,
         on:   (_e: string, _cb: unknown) => fakeWatcher,
         once: (event: string, callback: (...args: unknown[]) => void) => {
             if (event === 'error') {
@@ -225,4 +228,35 @@ test.serial('closes the underlying watcher if initialization fails', async t => 
     const err = await t.throwsAsync(() => source.start());
     t.is(err?.message, 'Simulated startup failure');
     t.true(closeCalled, 'watcher.close() must be called on startup error');
+});
+
+test.serial('logs repeated runtime errors after ready and keeps emitting changes', async t => {
+	const fakeWatcher = Object.assign(new EventEmitter(), {close: async () => {}});
+	const {router, events} = captureRouter();
+	router.subscribe(fileSub('runtime-errors'));
+	const source = new FileWatcherSource(router, {
+		root: '.',
+		_watchFn: (() => fakeWatcher) as unknown as typeof import('chokidar').watch,
+	});
+	const logger = getLogger();
+	const originalError = logger.error;
+	const errors: unknown[] = [];
+	logger.error = (...args: unknown[]) => { errors.push(args); };
+	t.teardown(async () => {logger.error = originalError; await source.stop();});
+	const started = source.start();
+	fakeWatcher.emit('ready');
+	await started;
+	t.is(fakeWatcher.listenerCount('ready'), 0);
+	t.is(fakeWatcher.listenerCount('error'), 1);
+	const first = new Error('ENOSPC first');
+	const second = new Error('EMFILE second');
+	t.notThrows(() => fakeWatcher.emit('error', first));
+	t.notThrows(() => fakeWatcher.emit('error', second));
+	t.deepEqual(errors, [
+		['File watcher error', {error: first, root: '.'}],
+		['File watcher error', {error: second, root: '.'}],
+	]);
+	fakeWatcher.emit('change', 'still-watched.ts');
+	await waitFor(() => events.length === 1);
+	t.is(events[0]?.kind, 'file.changed');
 });
