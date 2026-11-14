@@ -1,13 +1,24 @@
 import {randomUUID} from 'node:crypto';
+import type {Stats} from 'node:fs';
 import {
+	constants,
 	linkSync,
 	mkdirSync,
 	renameSync,
 	unlinkSync,
 	writeFileSync,
 } from 'node:fs';
-import {rename, unlink, writeFile} from 'node:fs/promises';
-import {dirname} from 'node:path';
+import {
+	access,
+	lstat,
+	open,
+	realpath,
+	rename,
+	stat,
+	unlink,
+	writeFile,
+} from 'node:fs/promises';
+import {basename, dirname, join} from 'node:path';
 
 /**
  * Write data to disk via a temp file + atomic rename, so a crash mid-write can
@@ -59,6 +70,165 @@ export async function atomicWriteFile(
 		try {
 			await unlink(tmpPath);
 		} catch {}
+		throw error;
+	}
+}
+
+/**
+ * Rename primitive used by {@link atomicWriteUserFile}, replaceable for tests
+ * (e.g. to simulate a bind-mounted file or a cross-device move).
+ * Production code never touches this.
+ * @internal
+ */
+type RenameFn = (oldPath: string, newPath: string) => Promise<void>;
+
+let renameImpl: RenameFn = (oldPath, newPath) => rename(oldPath, newPath);
+
+/**
+ * Test seam: replace the rename primitive used by {@link atomicWriteUserFile}.
+ * Call with no arguments to restore the default.
+ * @internal
+ */
+export function setRenameForTests(impl?: RenameFn): void {
+	renameImpl = impl ?? ((oldPath, newPath) => rename(oldPath, newPath));
+}
+
+/**
+ * Errors that mean a sibling temp file cannot be created or renamed over the
+ * target (read-only directory with a writable file, bind-mounted file, file
+ * owned by someone else, filesystem without rename support), while an
+ * in-place write may still work. Errors such as ENOSPC are deliberately not
+ * here: falling back would truncate the file the temp file was protecting.
+ */
+const IN_PLACE_FALLBACK_CODES = new Set([
+	'EACCES',
+	'EPERM',
+	'EXDEV',
+	'EBUSY',
+	'ENOTSUP',
+	'EOPNOTSUPP',
+	'ENOSYS',
+]);
+
+function errorCode(error: unknown): string | undefined {
+	return (error as NodeJS.ErrnoException)?.code;
+}
+
+/**
+ * Work out which path to replace. Symlinks are resolved so the link's target
+ * is updated, as `writeFile` would, rather than the link being replaced by a
+ * regular file. Returns undefined when only an in-place write keeps the old
+ * behaviour (a dangling symlink, which `writeFile` follows to create the
+ * target).
+ */
+async function resolveUserFileTarget(
+	filePath: string,
+): Promise<string | undefined> {
+	try {
+		return await realpath(filePath);
+	} catch (error) {
+		if (errorCode(error) !== 'ENOENT') return undefined;
+	}
+	try {
+		await lstat(filePath);
+		// The path exists but cannot be resolved: a dangling symlink.
+		return undefined;
+	} catch {
+		return filePath;
+	}
+}
+
+/** Most bytes of the original name kept in a temp file name. */
+const TEMP_NAME_PREFIX_BYTES = 64;
+
+/**
+ * Temp file name for {@link atomicWriteUserFile}: hidden, recognisable, and
+ * well under the usual 255-byte name limit however long (or multibyte) the
+ * original name is.
+ */
+function userFileTempName(name: string): string {
+	let prefix = '';
+	let bytes = 0;
+	for (const char of name) {
+		bytes += Buffer.byteLength(char, 'utf-8');
+		if (bytes > TEMP_NAME_PREFIX_BYTES) break;
+		prefix += char;
+	}
+	return `.${prefix}.${randomUUID()}.tmp`;
+}
+
+/**
+ * Overwrite (or create) a file in the user's project so that a failure part
+ * way through (disk full, process killed, power loss) leaves either the old
+ * content or the new content, never a truncated file.
+ *
+ * The content goes to a temp file next to the target, is flushed to disk and
+ * then renamed over it. Unlike {@link atomicWriteFile}, this keeps what an
+ * in-place `writeFile` would have kept:
+ * - symlinks are followed, so the link's target is updated;
+ * - a file without write permission is refused with EACCES;
+ * - the file's permission bits and, where allowed, its owner are copied;
+ * - hard-linked files and non-regular files (FIFOs, devices) are written in
+ *   place, since a rename would split or replace them;
+ * - when the temp file cannot be created or renamed for permission or
+ *   filesystem reasons, it falls back to an in-place write.
+ */
+export async function atomicWriteUserFile(
+	filePath: string,
+	data: string,
+): Promise<void> {
+	const target = await resolveUserFileTarget(filePath);
+	if (target === undefined) {
+		await writeFile(filePath, data, 'utf-8');
+		return;
+	}
+
+	let existing: Stats | undefined;
+	try {
+		existing = await stat(target);
+	} catch (error) {
+		if (errorCode(error) !== 'ENOENT') {
+			await writeFile(target, data, 'utf-8');
+			return;
+		}
+	}
+	if (existing && (!existing.isFile() || existing.nlink > 1)) {
+		await writeFile(target, data, 'utf-8');
+		return;
+	}
+
+	if (existing) {
+		// A rename never needs write access to the file itself, so check it
+		// here: a read-only file is refused with EACCES, as writeFile would.
+		await access(target, constants.W_OK);
+	}
+
+	const tmpPath = join(dirname(target), userFileTempName(basename(target)));
+	try {
+		const handle = await open(tmpPath, 'wx', 0o666);
+		try {
+			await handle.writeFile(data, 'utf-8');
+			if (existing) {
+				await handle.chmod(existing.mode & 0o7777);
+				const created = await handle.stat();
+				if (created.uid !== existing.uid || created.gid !== existing.gid) {
+					await handle.chown(existing.uid, existing.gid);
+				}
+			}
+			await handle.sync();
+		} finally {
+			await handle.close();
+		}
+		await renameImpl(tmpPath, target);
+	} catch (error) {
+		try {
+			await unlink(tmpPath);
+		} catch {}
+		const code = errorCode(error);
+		if (code !== undefined && IN_PLACE_FALLBACK_CODES.has(code)) {
+			await writeFile(target, data, 'utf-8');
+			return;
+		}
 		throw error;
 	}
 }

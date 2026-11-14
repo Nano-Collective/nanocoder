@@ -1,5 +1,5 @@
 import {constants} from 'node:fs';
-import {access, writeFile} from 'node:fs/promises';
+import {access} from 'node:fs/promises';
 import {resolve} from 'node:path';
 import React from 'react';
 import {getColors} from '@/config/index';
@@ -25,6 +25,7 @@ import {createFileToolApproval} from '@/tools/runtime/tool-approval';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
+import {atomicWriteUserFile} from '@/utils/fs/atomic-write';
 import {getCachedFileContent, invalidateCache} from '@/utils/fs/file-cache';
 import {
 	closeDiffInVSCode,
@@ -129,7 +130,7 @@ const executeStringReplace = async (
 	);
 	const firewallWarning = enforceFirewall(firewallResult);
 
-	await writeFile(absPath, newContent, 'utf-8');
+	await atomicWriteUserFile(absPath, newContent);
 	invalidateCache(absPath);
 	// The model now knows the file's current contents, so a follow-up edit is
 	// not blind.
