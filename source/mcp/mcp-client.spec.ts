@@ -1650,6 +1650,74 @@ const waitFor = async (condition: () => boolean, timeoutMs = 2000) => {
 	}
 };
 
+const makeAbortAwareMCPClient = () => {
+	const receivedSignals: (AbortSignal | undefined)[] = [];
+	const client = new MCPClient();
+	// @ts-expect-error Set up a connected server without starting a transport.
+	client.serverTools.set('test-server', [
+		{
+			name: 'slow_tool',
+			description: 'A slow tool',
+			serverName: 'test-server',
+			inputSchema: {type: 'object', properties: {}},
+		},
+	]);
+	// @ts-expect-error Set up a connected server without starting a transport.
+	client.clients.set('test-server', {
+		async callTool(
+			_params: unknown,
+			_schema: unknown,
+			options?: {signal?: AbortSignal},
+		) {
+			const signal = options?.signal;
+			receivedSignals.push(signal);
+			return await new Promise((_, reject) => {
+				signal?.addEventListener('abort', () => reject(signal.reason), {
+					once: true,
+				});
+			});
+		},
+	});
+	return {client, receivedSignals};
+};
+
+test('MCP native tools forward cancellation to the MCP request', async t => {
+	const {client, receivedSignals} = makeAbortAwareMCPClient();
+	const controller = new AbortController();
+	const nativeTool = client.getNativeToolsRegistry().slow_tool;
+	const execute = nativeTool.execute;
+	t.truthy(execute);
+	if (!execute) return;
+
+	const pending = execute({}, {
+		toolCallId: 'call',
+		messages: [],
+		abortSignal: controller.signal,
+	});
+	await waitFor(() => receivedSignals.length === 1);
+	t.is(receivedSignals[0], controller.signal);
+	controller.abort();
+
+	const error = await t.throwsAsync(() => pending);
+	t.is(error, controller.signal.reason);
+});
+
+test('validated MCP handlers forward cancellation to the MCP request', async t => {
+	const {client, receivedSignals} = makeAbortAwareMCPClient();
+	const controller = new AbortController();
+	const handler = client.getToolEntries()[0]?.handler;
+	t.truthy(handler);
+	if (!handler) return;
+
+	const pending = handler({}, {abortSignal: controller.signal});
+	await waitFor(() => receivedSignals.length === 1);
+	t.is(receivedSignals[0], controller.signal);
+	controller.abort();
+
+	const error = await t.throwsAsync(() => pending);
+	t.is(error, controller.signal.reason);
+});
+
 // Hands out a fresh SDK client per connect, as the real createClient() does.
 class QueueMCPClient extends MCPClient {
 	created: any[] = [];
