@@ -1,16 +1,17 @@
-import {mkdirSync, rmSync, symlinkSync, writeFileSync} from 'node:fs';
+import {mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 import test from 'ava';
 import {render} from 'ink-testing-library';
 import React from 'react';
 import {themes} from '../config/themes';
-import {EMPTY_CONTENT_MARKER, FILE_READ_PREVIEW_LINES} from '../constants';
+import {EMPTY_CONTENT_MARKER, FILE_READ_PREVIEW_LINES, MAX_TOOL_RESULT_CHARS} from '../constants';
 import {ThemeContext} from '../hooks/useTheme';
 import {
 	bumpReadContentGeneration,
 	clearReadTracker,
 } from './runtime/read-tracker.js';
 import {readFileTool} from './read-file';
+import {truncateToolResult} from './runtime/truncate-tool-result';
 
 // ============================================================================
 // Test Helpers
@@ -20,6 +21,52 @@ console.log(`\nread-file.spec.tsx – ${React.version}`);
 
 test.beforeEach(() => {
 	clearReadTracker();
+});
+
+for (const totalLines of [600, 1600]) {
+	test.serial(`read_file character budget preserves continuation for ${totalLines} wide lines`, async t => {
+		const dir = mkdtempSync(join(process.cwd(), '.read-budget-'));
+		t.teardown(() => rmSync(dir, {recursive: true, force: true}));
+		const path = join(dir, 'wide.ts');
+		const lines = Array.from({length: totalLines}, (_, i) => `line-${i + 1}: ${'🙂'.repeat(45)}`);
+		writeFileSync(path, lines.join('\n'));
+		const read = (start_line?: number, end_line?: number) => readFileTool.tool.execute!({path, start_line, end_line}, {toolCallId: 'test', messages: []});
+		const first = await read();
+		t.true(first.length <= MAX_TOOL_RESULT_CHARS);
+		t.is(truncateToolResult(first), first);
+		t.regex(first, /\[Truncated at line/);
+		t.is(await read(), first, 'a partial read must not create a full-file stub');
+		const pages: string[] = [];
+		let page = first;
+		while (true) {
+			t.true(page.length <= MAX_TOOL_RESULT_CHARS);
+			t.is(truncateToolResult(page), page);
+			const marker = page.indexOf('\n\n[Truncated at line');
+			if (marker === -1) {pages.push(page); break;}
+			pages.push(page.slice(0, marker));
+			const next = Number(/start_line: (\d+)/.exec(page)?.[1]);
+			t.true(next > 1 && next <= totalLines);
+			page = await read(next, totalLines);
+		}
+		t.is(pages.join('\n'), lines.join('\n'));
+	});
+}
+
+test.serial('read_file character budget also bounds explicit ranges', async t => {
+	const dir = mkdtempSync(join(process.cwd(), '.read-range-budget-'));
+	t.teardown(() => rmSync(dir, {recursive: true, force: true}));
+	const path = join(dir, 'wide.ts');
+	const lines = Array.from({length: 600}, (_, i) => `${i + 1}: ${'x'.repeat(100)}`);
+	writeFileSync(path, lines.join('\n'));
+	const result = await readFileTool.tool.execute!({path, start_line: 20, end_line: 590}, {toolCallId: 'test', messages: []});
+	t.true(result.length <= MAX_TOOL_RESULT_CHARS);
+	t.true(result.startsWith(lines[19]));
+	t.regex(result, /\[Truncated at line/);
+	t.is(truncateToolResult(result), result);
+	const lastLine = /Truncated at line (\d+)/.exec(result)?.[1];
+	const element = await readFileTool.formatter!({path, start_line: 20, end_line: 590}, result);
+	const {lastFrame} = render(<TestThemeProvider>{element}</TestThemeProvider>);
+	t.regex(stripAnsi(lastFrame() ?? ''), new RegExp(`Lines:\\s+20 - ${lastLine} of 600`));
 });
 
 // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping terminal styling before text-only assertions.
