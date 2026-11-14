@@ -114,10 +114,8 @@ function isModelOrDeploymentName(
 	if (
 		lower.endsWith('-deployment') ||
 		lower.endsWith('_deployment') ||
-		lower.endsWith('deployment') ||
 		lower.endsWith('-model') ||
-		lower.endsWith('_model') ||
-		lower.endsWith('model')
+		lower.endsWith('_model')
 	) {
 		return true;
 	}
@@ -134,10 +132,7 @@ function isOpaqueToken(segment: string, prevSegment: string): boolean {
 	if (SAFE_API_SEGMENTS.has(lower)) {
 		return false;
 	}
-	// Model and deployment names should never be masked as tokens
-	if (isModelOrDeploymentName(segment, prevSegment)) {
-		return false;
-	}
+	// Check explicit secret-shaped rules first (token prefixes, UUID, hex, secret containers)
 	if (TOKEN_PREFIX_REGEX.test(segment)) {
 		return true;
 	}
@@ -145,9 +140,13 @@ function isOpaqueToken(segment: string, prevSegment: string): boolean {
 	if (UUID_REGEX.test(segment) || HEX_HASH_REGEX.test(segment)) {
 		return true;
 	}
-	// Segment following secret container path (e.g. /hooks/abc123XYZ789)
+	// Segment following secret container path (e.g. /hooks/abc123XYZ789, /mcp/s/...)
 	if (prevSegment && SECRET_CONTAINER_SEGMENTS.has(prevSegment.toLowerCase())) {
 		return true;
+	}
+	// Model and deployment allowlist applies only to generic heuristics
+	if (isModelOrDeploymentName(segment, prevSegment)) {
+		return false;
 	}
 	// Mixed-case alphanumeric opaque string (e.g. webhook secret token like abc123XYZ789)
 	if (

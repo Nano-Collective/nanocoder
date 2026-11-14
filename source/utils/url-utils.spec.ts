@@ -146,6 +146,37 @@ test('redactUrlSecrets masks 16-23 character opaque hex and alphanumeric tokens'
 	);
 });
 
+test('redactUrlSecrets masks secret-shaped segments even under models or deployments paths', t => {
+	t.is(
+		redactUrlSecrets('https://example.com/v1/models/sk-1234567890abcdef'),
+		'https://example.com/v1/models/<redacted>',
+	);
+	t.is(
+		redactUrlSecrets(
+			'https://example.com/deployments/123e4567-e89b-12d3-a456-426614174000',
+		),
+		'https://example.com/deployments/<redacted>',
+	);
+	t.is(
+		redactUrlSecrets(
+			'https://example.com/openai/deployments/sk-abcdef123456/chat',
+		),
+		'https://example.com/openai/deployments/<redacted>/chat',
+	);
+	t.is(
+		redactUrlSecrets('https://example.com/v1/model/ghp_abcdef123456'),
+		'https://example.com/v1/model/<redacted>',
+	);
+	t.is(
+		redactUrlSecrets('https://example.com/mcp/s/gptSecretToken1234'),
+		'https://example.com/mcp/s/<redacted>',
+	);
+	t.is(
+		redactUrlSecrets('https://example.com/webhooks/claudeSecretToken1234'),
+		'https://example.com/webhooks/<redacted>',
+	);
+});
+
 test('redactUrlSecrets masks short webhook tokens and high-entropy segments', t => {
 	t.is(
 		redactUrlSecrets('https://api.example.com/hooks/abc123XYZ789'),
