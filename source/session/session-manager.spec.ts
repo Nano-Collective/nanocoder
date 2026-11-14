@@ -1367,3 +1367,103 @@ test.serial('deleteSession still removes a pinned session and its artifacts', as
 	t.deepEqual(await mgr.listSessions(), []);
 	t.is(await artifacts.readArtifact(session.id, 'implementation_plan'), null);
 });
+
+// --- forkSession ---
+
+test.serial('forkSession copies messages into a new session', async t => {
+	const parent = await manager.createSession({
+		title: 'Original',
+		messageCount: 2,
+		provider: 'ollama',
+		model: 'qwen3',
+		workingDirectory: '/tmp',
+		messages: [
+			{role: 'user', content: 'hello'},
+			{role: 'assistant', content: 'hi'},
+		],
+	});
+
+	const fork = await manager.forkSession(parent.id);
+
+	t.truthy(fork);
+	t.not(fork!.id, parent.id);
+	t.is(fork!.title, 'Original (fork)');
+	t.is(fork!.parentId, parent.id);
+	t.is(fork!.messageCount, 2);
+	t.deepEqual(fork!.messages, parent.messages);
+	t.true(fork!.titleManuallySet);
+});
+
+test.serial('forkSession does not mutate the parent session', async t => {
+	const parent = await manager.createSession({
+		title: 'Original',
+		messageCount: 1,
+		provider: 'ollama',
+		model: 'qwen3',
+		workingDirectory: '/tmp',
+		messages: [{role: 'user', content: 'hello'}],
+	});
+
+	const fork = await manager.forkSession(parent.id);
+	fork!.messages.push({role: 'user', content: 'only in the fork'});
+	await manager.saveSession(fork!);
+
+	const reloadedParent = await manager.readSession(parent.id);
+	t.is(reloadedParent?.messages.length, 1);
+	t.is(reloadedParent?.messageCount, 1);
+});
+
+test.serial('forkSession accepts a custom title', async t => {
+	const parent = await manager.createSession({
+		title: 'Original',
+		messageCount: 1,
+		provider: 'ollama',
+		model: 'qwen3',
+		workingDirectory: '/tmp',
+		messages: [{role: 'user', content: 'hello'}],
+	});
+
+	const fork = await manager.forkSession(parent.id, {title: 'Try another way'});
+	t.is(fork?.title, 'Try another way');
+});
+
+test.serial('forkSession truncates an over-long title', async t => {
+	const parent = await manager.createSession({
+		title: 'x'.repeat(100),
+		messageCount: 0,
+		provider: 'ollama',
+		model: 'qwen3',
+		workingDirectory: '/tmp',
+		messages: [],
+	});
+
+	const fork = await manager.forkSession(parent.id);
+	t.is(fork?.title.length, 100);
+});
+
+test.serial('forkSession records the parent in the index', async t => {
+	const parent = await manager.createSession({
+		title: 'Original',
+		messageCount: 1,
+		provider: 'ollama',
+		model: 'qwen3',
+		workingDirectory: '/tmp',
+		messages: [{role: 'user', content: 'hello'}],
+	});
+
+	const fork = await manager.forkSession(parent.id);
+	const listed = await manager.listSessions();
+	t.is(listed.find(s => s.id === fork!.id)?.parentId, parent.id);
+
+	// A rebuilt index must keep the relationship too.
+	await writeFile(join(sessionsDir, 'sessions.json'), 'not json at all');
+	const rebuilt = await manager.listSessions();
+	t.is(rebuilt.find(s => s.id === fork!.id)?.parentId, parent.id);
+});
+
+test.serial('forkSession returns null for an unknown session', async t => {
+	t.is(
+		await manager.forkSession('11111111-1111-4111-8111-111111111111'),
+		null,
+	);
+});

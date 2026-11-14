@@ -34,6 +34,7 @@ const CATEGORY_COMMANDS: Record<HelpCategory, readonly string[]> = {
 		'copy',
 		'expand',
 		'export',
+		'fork',
 		'rename',
 		'resume',
 		'retry',
@@ -185,6 +186,10 @@ const COMMAND_HELP_OVERRIDES: Record<string, CommandHelpOverrides> = {
 			'/export --json',
 			'/export run.json',
 		],
+	},
+	fork: {
+		usage: '/fork [title]',
+		examples: ['/fork', '/fork try-the-other-approach'],
 	},
 	init: {
 		usage: '/init [--preset <react|nextjs|rust>] [--force] [--lean]',
