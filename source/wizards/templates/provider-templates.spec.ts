@@ -461,6 +461,41 @@ test('atlas-cloud template: uses default provider name when empty', t => {
 	t.is(config.name, 'Atlas Cloud');
 });
 
+test('popnow template: sets baseUrl and parses models', t => {
+	const template = PROVIDER_TEMPLATES.find(t => t.id === 'popnow');
+	t.truthy(template);
+
+	const config = template!.buildConfig({
+		providerName: 'PopNow',
+		apiKey: 'test-key',
+		model: 'deepseek/v4-flash/chat, moonshot/kimi-k3/chat',
+	});
+
+	t.is(config.name, 'PopNow');
+	t.is(config.baseUrl, 'https://api.popnow.ai/v1');
+	t.is(config.apiKey, 'test-key');
+	t.deepEqual(config.models, [
+		'deepseek/v4-flash/chat',
+		'moonshot/kimi-k3/chat',
+	]);
+});
+
+test('popnow template: uses default provider name and model default', t => {
+	const template = PROVIDER_TEMPLATES.find(t => t.id === 'popnow');
+	t.truthy(template);
+
+	const modelField = template!.fields.find(f => f.name === 'model');
+	t.is(modelField?.default, 'deepseek/v4-flash/chat');
+
+	const config = template!.buildConfig({
+		providerName: '',
+		apiKey: 'test-key',
+		model: 'deepseek/v4-flash/chat',
+	});
+
+	t.is(config.name, 'PopNow');
+});
+
 test('together template: sets baseUrl and parses models', t => {
 	const template = PROVIDER_TEMPLATES.find(t => t.id === 'together');
 	t.truthy(template);
