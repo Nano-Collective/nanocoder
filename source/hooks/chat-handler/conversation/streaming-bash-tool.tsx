@@ -9,6 +9,7 @@ import {
 	bashRunFailed,
 	distillBashResultForLLM,
 	executeBashCommand,
+	resolveBashTimeoutMs,
 } from '@/tools/execute-bash';
 import {parseToolArguments} from '@/tools/runtime/tool-args-parser';
 import {formatValidationError} from '@/tools/runtime/tool-validation';
@@ -95,7 +96,16 @@ export async function runStreamingBashTool(
 	}
 
 	const commandStr = parsedArgs.command as string;
-	const {executionId, promise} = executeBashCommand(commandStr, {signal});
+	// The interactive path runs the command itself, so the per-call limit has
+	// to be forwarded here too - otherwise timeout_seconds would be honoured in
+	// headless and ACP runs but silently ignored in the TUI.
+	const timeoutMs = resolveBashTimeoutMs(
+		parsedArgs.timeout_seconds as number | undefined,
+	);
+	const {executionId, promise} = executeBashCommand(commandStr, {
+		timeoutMs,
+		signal,
+	});
 	setLiveComponent(
 		<BashProgress
 			key={generateKey(`${keyPrefix}-${toolCall.id}`)}
@@ -111,7 +121,7 @@ export async function runStreamingBashTool(
 	const llmContent = await distillBashResultForLLM(bashState, {
 		rerun: async narrowCommand => {
 			if (signal?.aborted) return null;
-			const rerun = executeBashCommand(narrowCommand, {signal});
+			const rerun = executeBashCommand(narrowCommand, {timeoutMs, signal});
 			setLiveComponent(
 				<BashProgress
 					key={generateKey(`${keyPrefix}-${toolCall.id}-rerun`)}
