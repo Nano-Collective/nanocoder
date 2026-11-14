@@ -270,3 +270,35 @@ test('doctorCommand has expected shape', async t => {
 	const element = await doctorCommand.handler([], [], {});
 	t.true(React.isValidElement(element));
 });
+
+test('Doctor shows the web search engine, or why it is off', async t => {
+	const report = await collectDoctorReport(createDependencies());
+	t.is(report.webSearch.status, 'ok');
+
+	const configured = {
+		...report,
+		webSearch: {
+			status: 'ok' as const,
+			data: {configured: true as const, engine: 'SearXNG (localhost:8888)'},
+		},
+	};
+	t.regex(
+		renderWithTheme(<Doctor report={configured} />).lastFrame()!,
+		/Web Search[\s\S]*• SearXNG \(localhost:8888\)/,
+	);
+
+	const off = {
+		...report,
+		webSearch: {
+			status: 'ok' as const,
+			data: {
+				configured: false as const,
+				reason: 'no Brave Search API key',
+			},
+		},
+	};
+	t.regex(
+		renderWithTheme(<Doctor report={off} />).lastFrame()!,
+		/not configured \(no Brave Search API key\)/,
+	);
+});

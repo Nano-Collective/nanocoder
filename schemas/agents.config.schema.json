@@ -121,13 +121,8 @@
 					"description": "Nanocoder-specific tool configurations.",
 					"properties": {
 						"webSearch": {
-							"properties": {
-								"apiKey": {
-									"type": "string"
-								}
-							},
-							"type": "object",
-							"additionalProperties": false
+							"$ref": "#/definitions/WebSearchConfig",
+							"description": "web_search configuration (nanocoder.nanocoderTools.webSearch). `engine`\ndefaults to `brave`, which needs `apiKey`. `searxng` queries a SearXNG\ninstance's JSON API at `baseUrl`; a `baseUrl` on a private or loopback\naddress is refused unless `allowPrivateNetwork` is true."
 						}
 					},
 					"type": "object",
@@ -775,6 +770,26 @@
 				"trustLevel": {
 					"description": "Trust level for daemon-triggered CI investigation/auto-fix. Undefined\ndefers to the `--trust` CLI flag, then 'comment-only'.",
 					"enum": ["auto-fix", "comment-only", "full-commit"],
+					"type": "string"
+				}
+			},
+			"type": "object",
+			"additionalProperties": false
+		},
+		"WebSearchConfig": {
+			"description": "web_search configuration (nanocoder.nanocoderTools.webSearch). `engine`\ndefaults to `brave`, which needs `apiKey`. `searxng` queries a SearXNG\ninstance's JSON API at `baseUrl`; a `baseUrl` on a private or loopback\naddress is refused unless `allowPrivateNetwork` is true.",
+			"properties": {
+				"allowPrivateNetwork": {
+					"type": "boolean"
+				},
+				"apiKey": {
+					"type": "string"
+				},
+				"baseUrl": {
+					"type": "string"
+				},
+				"engine": {
+					"enum": ["brave", "searxng"],
 					"type": "string"
 				}
 			},

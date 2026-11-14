@@ -1,6 +1,6 @@
 import {randomUUID} from 'node:crypto';
 import {getAppConfig} from '@/config/index';
-import {getBraveSearchApiKey} from '@/config/nanocoder-tools-config';
+import {getWebSearchStatus} from '@/config/nanocoder-tools-config';
 import {buildToolEntry} from '@/custom-tools/build-tool';
 import {CustomToolLoader} from '@/custom-tools/loader';
 // Type-only import — the `MCPClient` runtime value is loaded dynamically
@@ -188,8 +188,9 @@ export class ToolManager {
 		}
 		this.registry = ToolRegistry.fromToolExports(getAllToolExports());
 
-		// Remove web_search if no Brave Search API key is configured
-		if (!getBraveSearchApiKey()) {
+		// Remove web_search if its engine is not configured (no Brave API key,
+		// or no SearXNG baseUrl)
+		if (!getWebSearchStatus().available) {
 			this.registry.unregister('web_search');
 		}
 	}

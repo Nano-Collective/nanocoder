@@ -4,6 +4,10 @@ import React from 'react';
 import {loadProviderConfigs} from '@/client-factory';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {
+	describeWebSearchEngine,
+	getWebSearchStatus,
+} from '@/config/nanocoder-tools-config';
+import {
 	type DaemonLock,
 	readLiveLockfile,
 	readLockfile,
@@ -60,6 +64,11 @@ export interface DoctorFormatter {
 	match: string[];
 }
 
+/** The web_search engine in use, or why the tool is not registered. */
+export type DoctorWebSearch =
+	| {configured: true; engine: string}
+	| {configured: false; reason: string};
+
 export interface DoctorReport {
 	system: {
 		nodeVersion: string;
@@ -75,6 +84,7 @@ export interface DoctorReport {
 	mcp: Section<DoctorMcpServer[]>;
 	hooks: Section<DoctorHook[]>;
 	formatters: Section<DoctorFormatter[]>;
+	webSearch: Section<DoctorWebSearch>;
 	daemon: Section<
 		| {state: 'running'; lock: DaemonLock; uptimeMs: number}
 		| {state: 'not-running'}
@@ -238,6 +248,14 @@ function collectFormatters(): DoctorFormatter[] {
 	}));
 }
 
+/** Names the engine only: no API key or query ever appears in the report. */
+function collectWebSearch(): DoctorWebSearch {
+	const status = getWebSearchStatus();
+	return status.available
+		? {configured: true, engine: describeWebSearchEngine(status.settings)}
+		: {configured: false, reason: status.reason};
+}
+
 function normalizeDaemon(
 	lock: DaemonLock | null,
 	now: number,
@@ -263,16 +281,25 @@ function normalizeDaemon(
 export async function collectDoctorReport(
 	dependencies: DoctorDependencies = defaultDependencies(),
 ): Promise<DoctorReport> {
-	const [nanocoder, providers, lsp, mcp, hooks, formatters, daemonLock] =
-		await Promise.all([
-			settle(() => dependencies.getVersion().then(version => ({version}))),
-			settle(() => collectProviders(dependencies)),
-			settle(() => dependencies.getLspStatus()),
-			settle(() => collectMcp(dependencies.getToolManager())),
-			settle(() => collectHooks()),
-			settle(() => collectFormatters()),
-			settle(() => dependencies.getDaemonLock()),
-		]);
+	const [
+		nanocoder,
+		providers,
+		lsp,
+		mcp,
+		hooks,
+		formatters,
+		webSearch,
+		daemonLock,
+	] = await Promise.all([
+		settle(() => dependencies.getVersion().then(version => ({version}))),
+		settle(() => collectProviders(dependencies)),
+		settle(() => dependencies.getLspStatus()),
+		settle(() => collectMcp(dependencies.getToolManager())),
+		settle(() => collectHooks()),
+		settle(() => collectFormatters()),
+		settle(() => collectWebSearch()),
+		settle(() => dependencies.getDaemonLock()),
+	]);
 
 	return {
 		system: {
@@ -286,6 +313,7 @@ export async function collectDoctorReport(
 		mcp,
 		hooks,
 		formatters,
+		webSearch,
 		daemon:
 			daemonLock.status === 'ok'
 				? normalizeDaemon(daemonLock.data, dependencies.now())
@@ -438,6 +466,17 @@ export function Doctor({report}: {report: DoctorReport}) {
 						• {formatter.label} • {formatter.match.join(', ')}
 					</Text>
 				))
+			)}
+
+			<SectionTitle>Web Search</SectionTitle>
+			{report.webSearch.status === 'error' ? (
+				<SectionError message={report.webSearch.error} />
+			) : report.webSearch.data.configured ? (
+				<Text color={colors.text}>• {report.webSearch.data.engine}</Text>
+			) : (
+				<Text color={colors.secondary}>
+					• not configured ({report.webSearch.data.reason})
+				</Text>
 			)}
 
 			<SectionTitle>Daemon</SectionTitle>

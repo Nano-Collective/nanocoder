@@ -28,6 +28,13 @@ test.before(async () => {
 	}
 });
 
+/** Settings for a Brave search with this key, as getWebSearchStatus builds them. */
+const brave = (apiKey: string | undefined) => ({
+	engine: 'brave' as const,
+	apiKey,
+	allowPrivateNetwork: false,
+});
+
 // Mock ThemeProvider for testing
 const MockThemeProvider = ({children}: {children: React.ReactNode}) => {
 	const mockTheme = {
@@ -372,9 +379,8 @@ test('executeWebSearch throws when no API key configured', async t => {
 		return;
 	}
 
-	// Pass empty string as apiKeyOverride to simulate no API key
 	await t.throwsAsync(
-		async () => await executeWebSearch({query: 'test'}, ''),
+		async () => await executeWebSearch({query: 'test'}, brave(undefined)),
 		{message: /API key not configured/},
 	);
 });
@@ -397,7 +403,7 @@ test('executeWebSearch throws on invalid API key (401)', async t => {
 
 	try {
 		await t.throwsAsync(
-			async () => await executeWebSearch({query: 'test'}, 'test-key'),
+			async () => await executeWebSearch({query: 'test'}, brave('test-key')),
 			{message: /Invalid Brave Search API key/},
 		);
 	} finally {
@@ -423,7 +429,7 @@ test('executeWebSearch throws on rate limit (429)', async t => {
 
 	try {
 		await t.throwsAsync(
-			async () => await executeWebSearch({query: 'test'}, 'test-key'),
+			async () => await executeWebSearch({query: 'test'}, brave('test-key')),
 			{message: /rate limit exceeded/},
 		);
 	} finally {
@@ -449,7 +455,7 @@ test('executeWebSearch throws on HTTP error status', async t => {
 
 	try {
 		await t.throwsAsync(
-			async () => await executeWebSearch({query: 'test'}, 'test-key'),
+			async () => await executeWebSearch({query: 'test'}, brave('test-key')),
 			{message: /HTTP 500/},
 		);
 	} finally {
@@ -472,7 +478,7 @@ test('executeWebSearch throws timeout error on timeout', async t => {
 
 	try {
 		await t.throwsAsync(
-			async () => await executeWebSearch({query: 'test'}, 'test-key'),
+			async () => await executeWebSearch({query: 'test'}, brave('test-key')),
 			{message: /timeout/i},
 		);
 	} finally {
@@ -495,7 +501,7 @@ test('executeWebSearch throws timeout error on TimeoutError', async t => {
 
 	try {
 		await t.throwsAsync(
-			async () => await executeWebSearch({query: 'test'}, 'test-key'),
+			async () => await executeWebSearch({query: 'test'}, brave('test-key')),
 			{message: /timeout/i},
 		);
 	} finally {
@@ -516,7 +522,7 @@ test('executeWebSearch throws on network error', async t => {
 
 	try {
 		await t.throwsAsync(
-			async () => await executeWebSearch({query: 'test'}, 'test-key'),
+			async () => await executeWebSearch({query: 'test'}, brave('test-key')),
 			{message: /Network error/},
 		);
 	} finally {
@@ -537,7 +543,7 @@ test('executeWebSearch handles non-Error objects in catch', async t => {
 
 	try {
 		await t.throwsAsync(
-			async () => await executeWebSearch({query: 'test'}, 'test-key'),
+			async () => await executeWebSearch({query: 'test'}, brave('test-key')),
 			{message: /Web search failed/},
 		);
 	} finally {
@@ -578,7 +584,7 @@ test('executeWebSearch parses API results correctly', async t => {
 	}) as any;
 
 	try {
-		const result = await executeWebSearch({query: 'test query'}, 'test-key');
+		const result = await executeWebSearch({query: 'test query'}, brave('test-key'));
 		t.regex(result, /# Web Search Results: "test query"/);
 		t.regex(result, /1\. Test Title 1/);
 		t.regex(result, /\*\*URL:\*\* https:\/\/example\.com\/test1/);
@@ -616,7 +622,7 @@ test('executeWebSearch handles results without descriptions', async t => {
 	}) as any;
 
 	try {
-		const result = await executeWebSearch({query: 'test'}, 'test-key');
+		const result = await executeWebSearch({query: 'test'}, brave('test-key'));
 		t.regex(result, /1\. Title Only/);
 		t.regex(result, /\*\*URL:\*\* https:\/\/example\.com/);
 	} finally {
@@ -640,7 +646,7 @@ test('executeWebSearch returns no results message for empty API response', async
 	}) as any;
 
 	try {
-		const result = await executeWebSearch({query: 'test'}, 'test-key');
+		const result = await executeWebSearch({query: 'test'}, brave('test-key'));
 		t.regex(result, /No results found/);
 	} finally {
 		globalThis.fetch = originalFetch;
@@ -665,7 +671,7 @@ test('executeWebSearch respects custom max_results', async t => {
 	}) as any;
 
 	try {
-		await executeWebSearch({query: 'test', max_results: 3}, 'test-key');
+		await executeWebSearch({query: 'test', max_results: 3}, brave('test-key'));
 		t.true(capturedUrl.includes('count=3'));
 	} finally {
 		globalThis.fetch = originalFetch;
@@ -690,7 +696,7 @@ test('executeWebSearch sends correct headers', async t => {
 	}) as any;
 
 	try {
-		await executeWebSearch({query: 'test'}, 'my-test-key');
+		await executeWebSearch({query: 'test'}, brave('my-test-key'));
 		t.is(capturedHeaders['X-Subscription-Token'], 'my-test-key');
 		t.is(capturedHeaders['Accept'], 'application/json');
 	} finally {
@@ -716,7 +722,7 @@ test('executeWebSearch encodes query properly', async t => {
 	}) as any;
 
 	try {
-		await executeWebSearch({query: 'test with spaces'}, 'test-key');
+		await executeWebSearch({query: 'test with spaces'}, brave('test-key'));
 		t.true(capturedUrl.includes('test+with+spaces') || capturedUrl.includes('test%20with%20spaces'));
 	} finally {
 		globalThis.fetch = originalFetch;
@@ -751,7 +757,7 @@ test('executeWebSearch formats markdown output correctly', async t => {
 	}) as any;
 
 	try {
-		const result = await executeWebSearch({query: 'test'}, 'test-key');
+		const result = await executeWebSearch({query: 'test'}, brave('test-key'));
 		t.regex(result, /^# Web Search Results:/);
 		t.regex(result, /^## \d+\./m);
 		t.regex(result, /\*\*URL:\*\*/);
@@ -777,9 +783,152 @@ test('executeWebSearch handles missing web field in response', async t => {
 	}) as any;
 
 	try {
-		const result = await executeWebSearch({query: 'test'}, 'test-key');
+		const result = await executeWebSearch({query: 'test'}, brave('test-key'));
 		t.regex(result, /No results found/);
 	} finally {
 		globalThis.fetch = originalFetch;
 	}
+});
+
+// ============================================================================
+// ExecuteWebSearch - SearXNG
+// ============================================================================
+
+const searxng = (baseUrl: string | undefined, allowPrivateNetwork = false) => ({
+	engine: 'searxng' as const,
+	baseUrl,
+	allowPrivateNetwork,
+});
+
+/** Run `fn` with fetch answering `body` (or `status`) and record each request. */
+async function withSearxngFetch(
+	response: {status?: number; body?: unknown},
+	fn: (requests: Array<{url: string; options: any}>) => Promise<void>,
+) {
+	const requests: Array<{url: string; options: any}> = [];
+	const originalFetch = globalThis.fetch;
+	const {hostResolver} = await import('./fetch-url-guard.js');
+	const originalResolve = hostResolver.resolve;
+	hostResolver.resolve = async () => ['93.184.216.34'];
+	globalThis.fetch = (async (url: any, options: any) => {
+		requests.push({url: url.toString(), options});
+		const status = response.status ?? 200;
+		return {
+			ok: status >= 200 && status < 300,
+			status,
+			statusText: 'status',
+			json: async () => response.body ?? {},
+		} as any;
+	}) as any;
+	try {
+		await fn(requests);
+	} finally {
+		globalThis.fetch = originalFetch;
+		hostResolver.resolve = originalResolve;
+	}
+}
+
+test.serial('executeWebSearch queries the SearXNG JSON API', async t => {
+	if (!executeWebSearch) {
+		t.pass('Skipping test - web-search module not available');
+		return;
+	}
+
+	await withSearxngFetch(
+		{
+			body: {
+				results: [
+					{title: 'One', url: 'https://example.com/1', content: 'First'},
+					{title: 'Two', url: 'https://example.com/2', content: ''},
+					{title: 'Three', url: 'https://example.com/3'},
+				],
+			},
+		},
+		async requests => {
+			const result = await executeWebSearch(
+				{query: 'node streams', max_results: 2},
+				searxng('https://search.example.com/searxng/'),
+			);
+			const url = new URL(requests[0]!.url);
+			t.is(url.origin + url.pathname, 'https://search.example.com/searxng/search');
+			t.is(url.searchParams.get('q'), 'node streams');
+			t.is(url.searchParams.get('format'), 'json');
+			t.is(requests[0]!.options.redirect, 'error');
+			t.regex(result, /# Web Search Results: "node streams"/);
+			t.regex(result, /## 1\. One\n\n\*\*URL:\*\* https:\/\/example\.com\/1\n\nFirst/);
+			t.regex(result, /## 2\. Two/);
+			t.notRegex(result, /Three/); // capped at max_results
+		},
+	);
+});
+
+test.serial('executeWebSearch keeps a SearXNG base path without a trailing slash', async t => {
+	if (!executeWebSearch) {
+		t.pass('Skipping test - web-search module not available');
+		return;
+	}
+
+	await withSearxngFetch({body: {results: []}}, async requests => {
+		const result = await executeWebSearch(
+			{query: 'x'},
+			searxng('https://search.example.com/searxng'),
+		);
+		t.true(requests[0]!.url.startsWith('https://search.example.com/searxng/search?'));
+		t.regex(result, /No results found/);
+	});
+});
+
+test.serial('executeWebSearch refuses a private SearXNG baseUrl unless allowed', async t => {
+	if (!executeWebSearch) {
+		t.pass('Skipping test - web-search module not available');
+		return;
+	}
+
+	await withSearxngFetch({body: {results: []}}, async requests => {
+		await t.throwsAsync(
+			async () =>
+				await executeWebSearch({query: 'x'}, searxng('http://localhost:8888')),
+			{message: /internal\/private network address.*allowPrivateNetwork/},
+		);
+		t.is(requests.length, 0);
+
+		await executeWebSearch({query: 'x'}, searxng('http://localhost:8888', true));
+		t.is(requests.length, 1);
+		t.true(requests[0]!.url.startsWith('http://localhost:8888/search?'));
+	});
+});
+
+test.serial('executeWebSearch explains a SearXNG 403 as the JSON format being off', async t => {
+	if (!executeWebSearch) {
+		t.pass('Skipping test - web-search module not available');
+		return;
+	}
+
+	await withSearxngFetch({status: 403}, async () => {
+		await t.throwsAsync(
+			async () =>
+				await executeWebSearch({query: 'x'}, searxng('https://search.example.com')),
+			{message: /search\.formats/},
+		);
+	});
+});
+
+test('executeWebSearch rejects a SearXNG baseUrl that is missing or not http', async t => {
+	if (!executeWebSearch) {
+		t.pass('Skipping test - web-search module not available');
+		return;
+	}
+
+	await t.throwsAsync(
+		async () => await executeWebSearch({query: 'x'}, searxng(undefined)),
+		{message: /SearXNG base URL not configured/},
+	);
+	await t.throwsAsync(
+		async () => await executeWebSearch({query: 'x'}, searxng('ftp://example.com')),
+		{message: /Only http: and https:/},
+	);
+	await t.throwsAsync(
+		async () => await executeWebSearch({query: 'x'}, searxng('not a url')),
+		{message: /Invalid SearXNG base URL/},
+	);
 });
