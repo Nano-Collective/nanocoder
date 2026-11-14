@@ -1,5 +1,5 @@
 import {constants} from 'node:fs';
-import {access, readFile, writeFile} from 'node:fs/promises';
+import {access, readFile} from 'node:fs/promises';
 import {basename, dirname, join, resolve} from 'node:path';
 import {Box, Text} from 'ink';
 import React from 'react';
@@ -14,6 +14,7 @@ import {createFileToolApproval} from '@/tools/runtime/tool-approval';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
+import {atomicWriteUserFile} from '@/utils/fs/atomic-write';
 import {invalidateCache} from '@/utils/fs/file-cache';
 
 interface FormatDocumentArgs {
@@ -296,7 +297,7 @@ export async function formatFileWithLsp(
 		return `No formatting changes needed for ${displayPath}.`;
 	}
 
-	await writeFile(absPath, formatted, 'utf-8');
+	await atomicWriteUserFile(absPath, formatted);
 	invalidateCache(absPath);
 	markFileSeen(absPath);
 	manager.updateDocument(absPath, formatted);

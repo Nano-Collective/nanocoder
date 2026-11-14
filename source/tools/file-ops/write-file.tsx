@@ -1,5 +1,5 @@
 import {constants, existsSync} from 'node:fs';
-import {access, readFile, writeFile} from 'node:fs/promises';
+import {access, readFile} from 'node:fs/promises';
 import {dirname, resolve} from 'node:path';
 import {Box, Text} from 'ink';
 import React from 'react';
@@ -35,6 +35,7 @@ import {createFileToolApproval} from '@/tools/runtime/tool-approval';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
+import {atomicWriteUserFile} from '@/utils/fs/atomic-write';
 import {getCachedFileContent, invalidateCache} from '@/utils/fs/file-cache';
 import {estimateTokens} from '@/utils/token-calculator';
 import {truncateText} from '@/utils/truncate-text';
@@ -115,7 +116,7 @@ const executeWriteFile = async (args: {
 	);
 	const firewallWarning = enforceFirewall(firewallResult);
 
-	await writeFile(absPath, contentStr, 'utf-8');
+	await atomicWriteUserFile(absPath, contentStr);
 
 	// Invalidate cache after write
 	invalidateCache(absPath);

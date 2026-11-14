@@ -1,4 +1,14 @@
-import {chmod, mkdtemp, readFile, rm, symlink, writeFile} from 'node:fs/promises';
+import {
+	chmod,
+	lstat,
+	mkdtemp,
+	readFile,
+	readdir,
+	rm,
+	stat,
+	symlink,
+	writeFile,
+} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
@@ -10,6 +20,7 @@ import {resolveToolApproval} from '../approval-policy.js';
 import {ThemeContext} from '../../hooks/useTheme.js';
 import {writeFileTool} from './write-file.js';
 import {clearReadTracker, markFileSeen} from '../runtime/read-tracker.js';
+import {setRenameForTests} from '../../utils/fs/atomic-write.js';
 import {
 	resetFirewallConfig,
 	setFirewallConfig,
@@ -1246,6 +1257,49 @@ test('write_file: fails closed when existing file cannot be read and leaves disk
 
 	const content = await readFile(filePath, 'utf-8');
 	t.is(content, 'secret original content');
+});
+
+// ============================================================================
+// Safe Overwrite Tests
+// ============================================================================
+
+test.serial('write_file: a failed save leaves the original file untouched', async t => {
+	const original = 'print("hello")\n'.repeat(100);
+	const filePath = await createTestFile('app.py', original);
+	const diskFull = new Error('ENOSPC: no space left on device') as NodeJS.ErrnoException;
+	diskFull.code = 'ENOSPC';
+	setRenameForTests(async () => {
+		throw diskFull;
+	});
+	try {
+		await t.throwsAsync(
+			executeWriteFile({path: filePath, content: 'print("bye")\n'}),
+			{message: /ENOSPC/},
+		);
+	} finally {
+		setRenameForTests();
+	}
+
+	t.is(await readFile(filePath, 'utf-8'), original);
+	t.false((await readdir(testDir)).some(name => name.endsWith('.tmp')));
+});
+
+test('write_file: overwriting keeps the executable bit and updates a symlink target', async t => {
+	if (process.platform === 'win32') {
+		t.pass('Skipped on Windows: POSIX modes and symlinks');
+		return;
+	}
+	const script = await createTestFile('run.sh', '#!/bin/sh\necho old\n');
+	await chmod(script, 0o755);
+	await executeWriteFile({path: script, content: '#!/bin/sh\necho new\n'});
+	t.is((await stat(script)).mode & 0o777, 0o755);
+
+	const target = await createTestFile('real.txt', 'old\n');
+	const link = join(testDir, 'link.txt');
+	await symlink(target, link);
+	await executeWriteFile({path: link, content: 'new\n'});
+	t.true((await lstat(link)).isSymbolicLink());
+	t.is(await readFile(target, 'utf-8'), 'new\n');
 });
 
 // ============================================================================
