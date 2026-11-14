@@ -2,7 +2,7 @@ import React from 'react';
 import {commandRegistry} from '@/commands';
 import {expandCommandAlias, findRetiredCommand} from '@/commands/aliases';
 import CommandProgress from '@/components/command-progress';
-import {infoMsg, warningMsg} from '@/components/message-factory';
+import {errorMsg, infoMsg, warningMsg} from '@/components/message-factory';
 import {DELAY_COMMAND_COMPLETE_MS} from '@/constants';
 import {
 	applyOnceOverrides,
@@ -266,6 +266,32 @@ export async function dispatchSlashCommand(
 ): Promise<void> {
 	const commandName = message.slice(1).split(/\s+/)[0];
 
+	try {
+		await dispatchResolvedCommand(message, commandName, options);
+	} catch (error) {
+		// A handler that throws must not take the app down: the rejection would
+		// reach the process-level `unhandledRejection` handler, which starts a
+		// shutdown. Report it in the chat instead and complete the turn, so the
+		// session (and a non-interactive `nanocoder run "/cmd"`) keeps going.
+		options.onAddToChatQueue(
+			errorMsg(
+				`/${commandName} failed: ${error instanceof Error ? error.message : String(error)}`,
+				`command-failed-${commandName}`,
+			),
+		);
+		completeCommand('done-after-render', options);
+	}
+}
+
+/**
+ * The resolution chain behind `dispatchSlashCommand`. Throws whatever a
+ * command throws, for `dispatchSlashCommand` to report.
+ */
+async function dispatchResolvedCommand(
+	message: string,
+	commandName: string,
+	options: MessageSubmissionOptions,
+): Promise<void> {
 	const custom = await runCustomCommand(message, commandName, options);
 	if (custom) {
 		completeCommand(custom, options);
