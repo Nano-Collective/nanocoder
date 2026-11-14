@@ -24,6 +24,8 @@ import type {
 	ToolCall,
 	ToolResult,
 } from '@/types/core';
+import type {BudgetCheck, BudgetLimits, BudgetTotals} from '@/usage/budget';
+import {BudgetTracker, resolveBudgetLimits} from '@/usage/budget';
 import {formatError} from '@/utils/error-formatter';
 
 export interface ToolCallLog {
@@ -52,6 +54,11 @@ export interface RunPlainConversationOptions {
 	 * would cost a model turn and then be deleted unread.
 	 */
 	enforceWalkthrough?: boolean;
+	/**
+	 * Spend/token cap for this run (usually the CLI flags). When omitted the
+	 * `nanocoder.budget` settings (`perRunUsd`, `maxTokensTotal`) apply.
+	 */
+	budget?: BudgetLimits;
 }
 
 export interface PlainConversationUsage {
@@ -64,6 +71,13 @@ export interface PlainConversationUsage {
 
 // `steps` counts model round-trips, including retried turns. It is not
 // `toolCalls.length`: one step can issue zero or several tool calls.
+
+/** Running budget totals reported on the outcome (only when a limit is set). */
+export interface PlainConversationBudget {
+	totals: BudgetTotals;
+	limits: BudgetLimits;
+}
+
 export type PlainConversationOutcome =
 	| {
 			kind: 'success';
@@ -72,6 +86,7 @@ export type PlainConversationOutcome =
 			toolCalls: ToolCallLog[];
 			steps: number;
 			usage?: PlainConversationUsage;
+			budget?: PlainConversationBudget;
 	  }
 	| {
 			kind: 'tool-approval-required';
@@ -86,6 +101,17 @@ export type PlainConversationOutcome =
 			toolCalls: ToolCallLog[];
 			steps: number;
 			usage?: PlainConversationUsage;
+			budget?: PlainConversationBudget;
+	  }
+	| {
+			kind: 'budget-exceeded';
+			message: string;
+			finalText: string;
+			reasoning: string | null;
+			toolCalls: ToolCallLog[];
+			steps: number;
+			usage?: PlainConversationUsage;
+			budget: PlainConversationBudget;
 	  }
 	| {
 			kind: 'error';
@@ -95,6 +121,7 @@ export type PlainConversationOutcome =
 			toolCalls: ToolCallLog[];
 			steps: number;
 			usage?: PlainConversationUsage;
+			budget?: PlainConversationBudget;
 	  };
 
 // What a run that stopped on a call needing approval reports, on top of the
@@ -118,6 +145,11 @@ interface ApprovalRequired {
  * interactive loop: consecutive identical tool calls, consecutive empty turns,
  * and malformed tool-call retries each hard-stop with a clear error once their
  * cap is hit (there is no user to ask in a plain run).
+ *
+ * A spend/token budget cap (`--max-budget-usd` / `--max-tokens-total`, or
+ * `nanocoder.budget` perRunUsd/maxTokensTotal) stops the run after the
+ * response that crosses it, before any tool runs or the next request, with a
+ * `budget-exceeded` outcome.
  */
 export async function runPlainConversation(
 	options: RunPlainConversationOptions,
@@ -258,6 +290,34 @@ async function runPlainConversationBody(
 	const maxTurns =
 		getAppConfig().headless?.maxTurns ?? DEFAULT_HEADLESS_MAX_TURNS;
 
+	// Spend/token budget cap (--max-budget-usd / --max-tokens-total, or
+	// `nanocoder.budget` perRunUsd/maxTokensTotal). Checked in onModelResponse
+	// after each response, before any tool runs or the next request is sent.
+	// At 80% warn once (stderr, so --json stdout stays clean); at 100% abort
+	// the merged engine signal, and the result mapping below turns that abort
+	// into a `budget-exceeded` outcome instead of a plain 'Aborted'.
+	const budgetTracker = new BudgetTracker(
+		resolveBudgetLimits({
+			cli: options.budget,
+			config: getAppConfig().budget,
+			scope: 'run',
+		}),
+		model ?? client.getCurrentModel(),
+	);
+	const budgetAbort = new AbortController();
+	const engineSignal = AbortSignal.any([abortSignal, budgetAbort.signal]);
+	// Holder object (not a bare `let`): TypeScript's flow analysis only sees
+	// assignments in this scope, so a `let` written inside onModelResponse
+	// would narrow to `null` at the mapping below.
+	const budgetState: {exceeded: BudgetCheck | null} = {exceeded: null};
+	const getBudget = (): PlainConversationBudget | undefined =>
+		budgetTracker.hasLimits()
+			? {
+					totals: budgetTracker.getTotals(),
+					limits: budgetTracker.getLimits(),
+				}
+			: undefined;
+
 	// Agent-loop retry limits (`nanocoder.retries`): the same caps the
 	// interactive loop applies. There is nobody to ask in a plain run, so
 	// hitting any of them hard-stops with a clear error instead of pausing.
@@ -275,7 +335,7 @@ async function runPlainConversationBody(
 
 	const result = await runTurnEngine<ApprovalRequired>({
 		client,
-		signal: abortSignal,
+		signal: engineSignal,
 		maxTurns,
 		retryLimits,
 		adapter: {
@@ -343,7 +403,29 @@ async function runPlainConversationBody(
 					},
 				};
 			},
-			onModelResponse: recordUsage,
+			onModelResponse: async result => {
+				await recordUsage(result);
+				if (!budgetTracker.hasLimits() || budgetState.exceeded) return;
+				const usage = result?.usage;
+				// NaN/Infinity fields are a broken report, not a count — same
+				// guard recordUsage uses, so one bad field cannot poison the
+				// totals.
+				const hasBudgetUsage =
+					!!usage &&
+					(Number.isFinite(usage.inputTokens) ||
+						Number.isFinite(usage.outputTokens) ||
+						Number.isFinite(usage.totalTokens) ||
+						Number.isFinite(usage.cacheReadTokens) ||
+						Number.isFinite(usage.cacheWriteTokens));
+				if (!hasBudgetUsage) return;
+				const check = await budgetTracker.recordResponse(usage);
+				if (check.status === 'warning') {
+					writeStatus(budgetTracker.formatWarningMessage(check));
+				} else if (check.status === 'exceeded') {
+					budgetState.exceeded = check;
+					budgetAbort.abort();
+				}
+			},
 			partitionToolCalls: (toolCalls, prepared) =>
 				partitionUnknownToolCalls(
 					toolCalls,
@@ -493,6 +575,7 @@ async function runPlainConversationBody(
 		toolCalls: toolCallsLog,
 		steps: result.modelCalls,
 		usage: getUsage(),
+		budget: getBudget(),
 	});
 
 	// No writeError for `error` outcomes: the caller prints every one's
@@ -502,6 +585,23 @@ async function runPlainConversationBody(
 		message,
 		...snapshot(),
 	});
+
+	// The budget check fired in onModelResponse: the engine stopped on the
+	// merged abort signal, so whatever it returned, the run ended on the cap.
+	// A genuine user abort never sets this flag, so it still lands in the
+	// 'aborted' case below as a plain 'Aborted'.
+	const budgetExceeded = budgetState.exceeded;
+	if (budgetExceeded) {
+		return {
+			...snapshot(),
+			kind: 'budget-exceeded',
+			message: budgetTracker.formatExceededMessage(budgetExceeded),
+			budget: {
+				totals: budgetExceeded.totals,
+				limits: budgetExceeded.limits,
+			},
+		};
+	}
 
 	switch (result.kind) {
 		case 'completed':

@@ -37,6 +37,8 @@ import type {
 	ToolCall,
 	ToolResult,
 } from '@/types/core';
+import type {BudgetCheck, BudgetTracker} from '@/usage/budget';
+import {formatBudgetSummary} from '@/usage/budget';
 import {buildResponseUsageBounded} from '@/usage/response-usage';
 import {generateKey} from '@/utils/key-generator';
 import {estimateTokens} from '@/utils/token-calculator';
@@ -103,6 +105,9 @@ interface ProcessAssistantResponseParams {
 	onPrivacyEvent?: (scrubbedDelta: number) => void;
 	onToolExecuted?: (toolName: string) => void;
 	onFinalAssistantText?: (content: string) => void;
+	// Spend/token budget cap tracker for this session (created by
+	// useChatHandler). When set, each response is checked against the cap.
+	budgetTracker?: BudgetTracker;
 }
 
 // Module-level flag: show XML fallback notice only once per process lifetime.
@@ -177,6 +182,7 @@ export const processAssistantResponse = async (
 		onToolExecuted,
 		sessionId,
 		workingDirectory,
+		budgetTracker,
 	} = params;
 	const walkthroughLifecycle = createWalkthroughLifecycle(messages);
 
@@ -294,6 +300,10 @@ export const processAssistantResponse = async (
 	let compactRetryCount = 0;
 	let repeatedToolCallTotal = 0;
 	let finalContent = '';
+	// Set when a response crosses the spend/token budget cap and the run must
+	// stop: the engine is aborted from onModelResponse, and the 'aborted'
+	// result below unwinds as a clean budget stop instead of a cancellation.
+	let budgetStop: BudgetCheck | null = null;
 
 	// When the repeated-call streak hits the cap: pause and ask in an
 	// interactive session (the repetition may be legitimate, e.g. polling a
@@ -477,7 +487,7 @@ export const processAssistantResponse = async (
 				},
 				reasoning: () => fullReasoning,
 			}),
-			onModelResponse: response => {
+			onModelResponse: async response => {
 				if (!response?.choices?.length) return;
 				fullReasoning = response.choices[0].message.reasoning;
 				turnUsage = response.usage;
@@ -492,6 +502,85 @@ export const processAssistantResponse = async (
 							hideBox={true}
 						/>,
 					);
+				}
+
+				// Spend/token budget cap (`nanocoder.budget` perSessionUsd /
+				// maxTokensTotal, or the --max-budget-usd / --max-tokens-total
+				// flags). Checked after each response — the raw report, not
+				// the post-compaction snapshot: the API call happened either
+				// way, so it counts toward the spend. At 80% warn once; at
+				// 100% stop in headless / non-interactive runs, or ask in
+				// interactive sessions. Aborting here stops the engine after
+				// the turn is recorded, before any tool runs.
+				if (budgetTracker?.hasLimits() && !budgetStop) {
+					const budgetUsage = response.usage;
+					const hasBudgetUsage =
+						!!budgetUsage &&
+						(Number.isFinite(budgetUsage.inputTokens) ||
+							Number.isFinite(budgetUsage.outputTokens) ||
+							Number.isFinite(budgetUsage.totalTokens) ||
+							Number.isFinite(budgetUsage.cacheReadTokens) ||
+							Number.isFinite(budgetUsage.cacheWriteTokens));
+					if (hasBudgetUsage) {
+						const budgetCheck = await budgetTracker.recordResponse(budgetUsage);
+						if (budgetCheck.status === 'warning') {
+							addToChatQueue(
+								infoMsg(
+									budgetTracker.formatWarningMessage(budgetCheck),
+									'budget-warning',
+								),
+							);
+						} else if (budgetCheck.status === 'exceeded') {
+							// Nobody to ask in headless / non-interactive runs.
+							const liveMode = developmentModeRef?.current ?? developmentMode;
+							if (nonInteractiveMode || liveMode === 'headless') {
+								budgetStop = budgetCheck;
+								controller.abort();
+								return;
+							}
+
+							// Interactive: ask whether to stop, continue once,
+							// or raise the limit and continue.
+							await flushAll();
+							setIsGenerating(false);
+							const stopOption = 'Stop here';
+							const continueOnceOption =
+								'Continue once (ask again after the next response)';
+							const raiseOption =
+								budgetCheck.exceededLimit === 'usd'
+									? `Raise the budget to $${((budgetCheck.limits.maxBudgetUsd ?? 0) * 2).toFixed(2)} and continue`
+									: `Raise the token limit to ${((budgetCheck.limits.maxTokensTotal ?? 0) * 2).toLocaleString('en-US')} tokens and continue`;
+							// Aborting settles this with the slot's error string,
+							// which is not one of the options, so a cancelled
+							// turn stops rather than hanging on a question
+							// nobody is left to answer.
+							const answer = await signalQuestion(
+								{
+									question: `${budgetTracker.formatExceededMessage(budgetCheck)} Continue?`,
+									options: [stopOption, continueOnceOption, raiseOption],
+									allowFreeform: false,
+									questionType: 'confirmation',
+								},
+								signal,
+							);
+							if (answer === raiseOption) {
+								budgetTracker.raiseLimits();
+								setIsGenerating(true);
+								addToChatQueue(
+									infoMsg(
+										`Budget limit raised — continuing with ${formatBudgetSummary(budgetTracker.getTotals(), budgetTracker.getLimits(), currentModel)}.`,
+										'budget-raised',
+									),
+								);
+							} else if (answer === continueOnceOption) {
+								budgetTracker.grantContinueOnce();
+								setIsGenerating(true);
+							} else {
+								budgetStop = budgetCheck;
+								controller.abort();
+							}
+						}
+					}
 				}
 			},
 			onMalformedRetry: ({error, examples}) => {
@@ -797,6 +886,34 @@ export const processAssistantResponse = async (
 			onConversationComplete?.();
 			return;
 		case 'aborted':
+			// Spend/token budget cap: unwind as a clean stop, not a
+			// cancellation. The turn's tool calls (if any) are paired with
+			// cancellation results first, the same as a user abort.
+			if (budgetStop) {
+				if (recordedToolCalls.length > 0) {
+					setHistory([
+						...history,
+						...toolResultMessages(createCancellationResults(recordedToolCalls)),
+					]);
+				}
+				await flushAll();
+				markRunFailed('budget-exceeded');
+				addToChatQueue(
+					<ErrorMessage
+						key={generateKey('budget-exceeded')}
+						message={
+							budgetTracker?.formatExceededMessage(budgetStop) ??
+							'Budget exceeded.'
+						}
+						hideBox={true}
+					/>,
+				);
+				setIsGenerating(false);
+				if (onConversationComplete) {
+					onConversationComplete();
+				}
+				return;
+			}
 			// The model call raised the abort: unwind with its error.
 			if (result.error !== undefined) {
 				throw result.error;

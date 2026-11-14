@@ -127,6 +127,20 @@ export interface PasteConfig {
 	singleLineThreshold: number;
 }
 
+// Spend and token budget cap for runs and sessions. Every field is optional
+// and unset means no limit. The USD limits are compared with the running
+// estimated cost from `source/usage/` (provider-reported tokens priced via
+// models.dev); a model with no price in the database enforces the token
+// limit only and reports its cost as unknown.
+export interface BudgetConfig {
+	/** Maximum estimated spend in USD for one interactive/daemon session. */
+	perSessionUsd?: number;
+	/** Maximum estimated spend in USD for one `nanocoder run`. */
+	perRunUsd?: number;
+	/** Maximum total tokens (provider-reported input + output) per run/session. */
+	maxTokensTotal?: number;
+}
+
 // Agent-loop retry limits: caps on how many times the conversation loop
 // auto-retries a failing pattern without user intervention. Distinct from the
 // per-provider `maxRetries` setting, which governs network request retries.
@@ -370,6 +384,13 @@ export interface DiskNanocoderConfig {
 		/** Turn ceiling for a delegated subagent run. Defaults to `maxTurns`. */
 		subagentMaxTurns?: number;
 	};
+	/**
+	 * Spend and token budget cap for runs and sessions. A run stops cleanly
+	 * at 100% of a limit (exit code 3 in headless mode); interactive sessions
+	 * ask whether to continue or raise the limit. Models without a price in
+	 * models.dev fall back to the token limit only.
+	 */
+	budget?: BudgetConfig;
 	/** LSP server configurations (optional — auto-discovery enabled by default). */
 	lspServers?: {
 		name: string;
@@ -533,6 +554,11 @@ export interface AppConfig {
 		// Turn ceiling for a delegated subagent run. Unset means `maxTurns`.
 		subagentMaxTurns?: number;
 	};
+
+	// Spend and token budget cap: per-run limits apply to `nanocoder run`
+	// (overridable with --max-budget-usd / --max-tokens-total), per-session
+	// limits to interactive sessions and the daemon.
+	budget?: BudgetConfig;
 
 	// Confine execute_bash / !cmd with an OS jail (macOS sandbox-exec, Linux bwrap).
 	sandbox?: boolean;

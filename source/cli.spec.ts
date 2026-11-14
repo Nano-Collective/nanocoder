@@ -742,3 +742,41 @@ test('every flag the parser knows is stripped from the review target', t => {
 		);
 	}
 });
+
+test('CLI parsing: filters out --max-budget-usd and --max-tokens-total after run command', t => {
+	const args = [
+		'run',
+		'create',
+		'a',
+		'file',
+		'--max-budget-usd',
+		'2.50',
+		'--max-tokens-total',
+		'100000',
+	];
+	const prompt = parsePrompt(args);
+
+	t.is(prompt, 'create a file');
+});
+
+test('CLI parsing: filters out fused --max-budget-usd= / --max-tokens-total= forms', t => {
+	const args = [
+		'run',
+		'--max-budget-usd=2.50',
+		'--max-tokens-total=100000',
+		'create',
+		'a',
+		'file',
+	];
+	const prompt = parsePrompt(args);
+
+	t.is(prompt, 'create a file');
+});
+
+test('CLI parsing: budget flags are registered as valued run flags', t => {
+	t.true(RUN_FLAGS_WITH_VALUES.includes('--max-budget-usd'));
+	t.true(RUN_FLAGS_WITH_VALUES.includes('--max-tokens-total'));
+	t.true(KNOWN_RUN_FLAGS.includes('--max-budget-usd'));
+	t.true(KNOWN_RUN_FLAGS.includes('--max-tokens-total'));
+	t.false(RUN_FLAGS_STANDALONE.includes('--max-budget-usd'));
+});

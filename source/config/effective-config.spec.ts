@@ -297,6 +297,26 @@ test('an environment variable outranks the config file', t => {
 	);
 });
 
+test('budget settings resolve from the project config file', t => {
+	withFixture(
+		{
+			projectAgents: {
+				nanocoder: {budget: {perRunUsd: 2, maxTokensTotal: 50000}},
+			},
+		},
+		() => {
+			const config = resolveEffectiveConfig();
+			const perRun = entry(config, 'nanocoder.budget.perRunUsd');
+			const maxTokens = entry(config, 'nanocoder.budget.maxTokensTotal');
+
+			t.is(perRun?.value, 2);
+			t.is(perRun?.layer, 'project');
+			t.is(maxTokens?.value, 50000);
+			t.is(maxTokens?.layer, 'project');
+		},
+	);
+});
+
 test('NANOCODER_CONFIG_DIR marks the project preferences file as skipped', t => {
 	withFixture(
 		{

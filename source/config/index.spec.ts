@@ -1589,6 +1589,45 @@ async function withVerifyConfig(
 	}
 }
 
+// Tests for the spend/token budget cap (nanocoder.budget)
+async function withBudgetConfig(
+	subdir: string,
+	configBody: unknown,
+	assertion: (budget: {
+		perSessionUsd?: number;
+		perRunUsd?: number;
+		maxTokensTotal?: number;
+	}) => void,
+): Promise<void> {
+	const originalCwd = process.cwd();
+	const originalConfigDir = process.env.NANOCODER_CONFIG_DIR;
+	const testSubdir = join(headlessTestDir, subdir);
+	mkdirSync(testSubdir, {recursive: true});
+
+	try {
+		writeFileSync(
+			join(testSubdir, 'agents.config.json'),
+			JSON.stringify(configBody),
+			'utf-8',
+		);
+		process.chdir(testSubdir);
+		process.env.NANOCODER_CONFIG_DIR = join(testSubdir, 'nonexistent-global');
+
+		const {reloadAppConfig: reload, getAppConfig} = await import('./index.js');
+		reload();
+		assertion(getAppConfig().budget ?? {});
+	} finally {
+		process.chdir(originalCwd);
+		if (originalConfigDir !== undefined) {
+			process.env.NANOCODER_CONFIG_DIR = originalConfigDir;
+		} else {
+			delete process.env.NANOCODER_CONFIG_DIR;
+		}
+		reloadAppConfig();
+	}
+}
+
+
 test.serial(
 	'loadAppConfig reads nanocoder.verify.trustLevel/pollIntervalMs from agents.config.json',
 	async t => {
@@ -1777,3 +1816,43 @@ test.serial(
 		);
 	},
 );
+
+test.serial('budget defaults to no limit when not configured', async t => {
+	await withBudgetConfig('budget-default', {nanocoder: {}}, budget => {
+		t.deepEqual(budget, {});
+	});
+});
+
+test.serial('budget loads from config', async t => {
+	await withBudgetConfig(
+		'budget-config',
+		{
+			nanocoder: {
+				budget: {perSessionUsd: 5, perRunUsd: 2, maxTokensTotal: 50000},
+			},
+		},
+		budget => {
+			t.is(budget.perSessionUsd, 5);
+			t.is(budget.perRunUsd, 2);
+			t.is(budget.maxTokensTotal, 50000);
+		},
+	);
+});
+
+test.serial('budget drops non-positive and non-numeric fields', async t => {
+	await withBudgetConfig(
+		'budget-invalid',
+		{
+			nanocoder: {
+				budget: {
+					perSessionUsd: 0,
+					perRunUsd: -1,
+					maxTokensTotal: '1000',
+				},
+			},
+		},
+		budget => {
+			t.deepEqual(budget, {});
+		},
+	);
+});

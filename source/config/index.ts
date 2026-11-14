@@ -34,6 +34,7 @@ import type {FirewallConfig} from '@/types/firewall';
 import type {
 	AppConfig,
 	AutoCompactConfig,
+	BudgetConfig,
 	CiWatchConfig,
 	Colors,
 	CompressionMode,
@@ -300,6 +301,36 @@ export function getSubagentMaxTurns(): number {
 		headless?.subagentMaxTurns ??
 		headless?.maxTurns ??
 		DEFAULT_HEADLESS_MAX_TURNS
+	);
+}
+
+// Default spend/token budget: no limit unless the user opts in.
+export const DEFAULT_BUDGET_CONFIG: BudgetConfig = {};
+
+// Load the spend/token budget cap from `nanocoder.budget` in
+// agents.config.json. Non-positive or non-numeric fields are dropped so a
+// typo can never disable the cap silently by other means — `resolveBudgetLimits`
+// in `source/usage/budget.ts` applies the same validation to CLI flags.
+function loadBudgetConfig(cwd: string): AppConfig['budget'] {
+	return (
+		loadHierarchicalConfig(cwd, 'agents.config.json', 'budget', config => {
+			const budget = config.nanocoder?.budget;
+			if (!budget || typeof budget !== 'object') {
+				return null;
+			}
+			const parsed: BudgetConfig = {};
+			for (const key of [
+				'perSessionUsd',
+				'perRunUsd',
+				'maxTokensTotal',
+			] as const) {
+				const value = budget[key];
+				if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
+					parsed[key] = value;
+				}
+			}
+			return parsed;
+		}) ?? {...DEFAULT_BUDGET_CONFIG}
 	);
 }
 
@@ -902,6 +933,9 @@ function loadAppConfig(cwd: string): AppConfig {
 	// Load headless conversation limits
 	const headless = loadHeadlessConfig(cwd);
 
+	// Load spend/token budget cap
+	const budget = loadBudgetConfig(cwd);
+
 	// Load agent-loop retry limits
 	const retries = loadRetryLimitsConfig(cwd);
 
@@ -955,6 +989,7 @@ function loadAppConfig(cwd: string): AppConfig {
 		autoCompact,
 		sessions,
 		headless,
+		budget,
 		retries,
 		paste,
 		nanocoderTools,
