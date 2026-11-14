@@ -30,35 +30,13 @@ function messageIndicatesToolSupport(message: string): boolean {
 		return false;
 	}
 
-	// Pattern 1: 400 Bad Request with tool-related messages
-	if (message.includes('400') && message.includes('bad request')) {
-		const toolPatterns = [
-			/tool/i,
-			/function/i,
-			/invalid.*parameter/i,
-			/unexpected.*field/i,
-			/unrecognized/i,
-		];
-
-		for (const pattern of toolPatterns) {
-			if (pattern.test(message)) {
-				return true;
-			}
-		}
-	}
-
 	// Pattern 2: Direct mentions of tool/function not supported
 	const directPatterns = [
 		/tool.*not.*support/i,
 		/function.*not.*support/i,
 		/tool.*unsupported/i,
 		/function.*unsupported/i,
-		// Ollama: "registry.ollama.ai/library/<model> does not support tools"
 		/(?:not|n't) support (?:native )?(?:tools|tool calling|function calling|functions)\b/i,
-		/invalid.*tool/i,
-		/invalid.*function/i,
-		/tool.*parameter.*invalid/i,
-		/function.*parameter.*invalid/i,
 	];
 
 	for (const pattern of directPatterns) {
