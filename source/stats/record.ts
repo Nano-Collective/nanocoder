@@ -10,15 +10,19 @@
  */
 
 import type {ModelInfo} from '@/models/models-types';
+import {notifyWarning} from '@/utils/message-queue-core';
 import {getShutdownManager} from '@/utils/shutdown';
 import {toLocalDateKey} from './date-utils';
 import {
 	applyPromptIncrement,
 	applySessionIncrement,
 	applyTokenIncrement,
+	backupStatsLedgerFile,
 	clearStatsLedger,
 	createEmptyLedger,
 	readStatsLedger,
+	readStatsLedgerResult,
+	type StatsLedgerReadResult,
 	writeStatsLedger,
 } from './storage';
 import {parsePairKey, type StatsLedger} from './types';
@@ -32,6 +36,8 @@ let flushTimer: ReturnType<typeof setTimeout> | null = null;
 let dirty = false;
 let shutdownRegistered = false;
 let resetGeneration = 0;
+/** Warn once per process about a ledger file we refuse to overwrite. */
+let blockedLedgerReported = false;
 
 /** Test/helpers: reset module state. */
 export function _resetStatsRecorderForTests(): void {
@@ -43,6 +49,7 @@ export function _resetStatsRecorderForTests(): void {
 	cached = null;
 	pending = null;
 	dirty = false;
+	blockedLedgerReported = false;
 	if (shutdownRegistered) {
 		try {
 			getShutdownManager().unregister(STATS_SHUTDOWN_HANDLER_NAME);
@@ -104,11 +111,38 @@ function scheduleFlush(): void {
 	}
 }
 
+/**
+ * An existing ledger file that is corrupt or was written by a newer Nanocoder
+ * must never be replaced: keep the data on disk, tell the user once, and leave
+ * this session's totals in memory.
+ */
+function handleBlockedLedger(read: StatsLedgerReadResult): void {
+	// Stop retrying: every flush would hit the same unreadable file.
+	dirty = false;
+	if (blockedLedgerReported) return;
+	blockedLedgerReported = true;
+	const backupPath = read.sourcePath
+		? backupStatsLedgerFile(read.sourcePath)
+		: null;
+	const reason =
+		read.blockedBy === 'unsupported-version'
+			? 'was written by a newer Nanocoder'
+			: 'could not be read';
+	notifyWarning(
+		`Stats ledger ${reason}; leaving it untouched${backupPath ? ` (backup: ${backupPath})` : ''}.`,
+	);
+}
+
 /** Force a synchronous flush (tests / shutdown). */
 export function flushStatsLedgerSync(): void {
 	if (!dirty || !pending) return;
 
-	const merged = readStatsLedger();
+	const read = readStatsLedgerResult();
+	if (!read.writable) {
+		handleBlockedLedger(read);
+		return;
+	}
+	const merged = read.ledger;
 	for (const day of pending.daily) {
 		if (day.sessions > 0) {
 			applySessionIncrement(merged, day.date, day.sessions);
@@ -160,6 +194,7 @@ export function resetStatsLedger(): void {
 	cached = null;
 	pending = null;
 	dirty = false;
+	blockedLedgerReported = false;
 	if (shutdownRegistered) {
 		try {
 			getShutdownManager().unregister(STATS_SHUTDOWN_HANDLER_NAME);

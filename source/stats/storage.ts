@@ -221,14 +221,40 @@ function readFileIfExists(filePath: string): string | null {
 	}
 }
 
-export function readStatsLedger(): StatsLedger {
+/** Why an existing ledger file must not be written over. */
+export type StatsLedgerBlockedReason = 'unreadable' | 'unsupported-version';
+
+export interface StatsLedgerReadResult {
+	ledger: StatsLedger;
+	/** False when a file exists but could not be understood; never overwrite it. */
+	writable: boolean;
+	/** Why the file is blocked, when `writable` is false. */
+	blockedBy?: StatsLedgerBlockedReason;
+	/** File that holds the unreadable data, so callers can back it up. */
+	sourcePath?: string;
+}
+
+function isNewerLedgerVersion(parsed: unknown): boolean {
+	if (!isObject(parsed) || parsed.version === undefined) return false;
+	const version = Number(parsed.version);
+	return Number.isInteger(version) && version > STATS_LEDGER_VERSION;
+}
+
+/**
+ * Read the ledger and report whether it is safe to write back over the file.
+ *
+ * A corrupt file or one saved by a newer Nanocoder is returned as a read that
+ * is not writable, with an empty ledger: the caller keeps the live totals in
+ * memory but must leave the existing file (and its data) untouched.
+ */
+export function readStatsLedgerResult(): StatsLedgerReadResult {
+	const currentPath = getStatsFilePath();
+	let filePath = currentPath;
 	try {
-		const currentPath = getStatsFilePath();
 		const legacyPath = getLegacyStatsFilePath();
 
 		let content = readFileIfExists(currentPath);
 		let isLegacy = false;
-		let filePath = currentPath;
 
 		if (content === null) {
 			content = readFileIfExists(legacyPath);
@@ -237,11 +263,19 @@ export function readStatsLedger(): StatsLedger {
 				isLegacy = true;
 				filePath = legacyPath;
 			} else {
-				return createEmptyLedger();
+				return {ledger: createEmptyLedger(), writable: true};
 			}
 		}
 
 		const parsed = JSON.parse(content) as unknown;
+		if (isNewerLedgerVersion(parsed)) {
+			return {
+				ledger: createEmptyLedger(),
+				writable: false,
+				blockedBy: 'unsupported-version',
+				sourcePath: filePath,
+			};
+		}
 		const ledger = normalizeLedger(parsed);
 		const needsSchemaMigration =
 			isObject(parsed) &&
@@ -269,10 +303,37 @@ export function readStatsLedger(): StatsLedger {
 				}
 			}
 		}
-		return ledger;
+		return {ledger, writable: true};
 	} catch (error) {
 		notifyWarning('Failed to read stats ledger:', true, {context: {error}});
-		return createEmptyLedger();
+		return {
+			ledger: createEmptyLedger(),
+			writable: false,
+			blockedBy: 'unreadable',
+			sourcePath: fs.existsSync(filePath) ? filePath : undefined,
+		};
+	}
+}
+
+/** Read the ledger without the write-safety verdict. */
+export function readStatsLedger(): StatsLedger {
+	return readStatsLedgerResult().ledger;
+}
+
+/**
+ * Copy a ledger file that must not be overwritten to `<path>.bak`.
+ * Returns the backup path, or null when the copy failed.
+ */
+export function backupStatsLedgerFile(sourcePath: string): string | null {
+	const backupPath = `${sourcePath}.bak`;
+	try {
+		fs.copyFileSync(sourcePath, backupPath);
+		return backupPath;
+	} catch (error) {
+		notifyWarning('Failed to back up stats ledger:', true, {
+			context: {error: formatError(error)},
+		});
+		return null;
 	}
 }
 
