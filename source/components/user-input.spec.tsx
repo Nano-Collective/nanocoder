@@ -2004,6 +2004,64 @@ test('UserInput windows long slash completion lists', async t => {
 	unmount();
 });
 
+test.serial('UserInput warns about an unresolved @mention, then sends it with a note', async t => {
+	const dir = mkdtempSync(join(tmpdir(), 'unresolved-mention-'));
+	writeFileSync(join(dir, 'notes.txt'), '');
+	const cwd = process.cwd();
+	process.chdir(dir);
+	clearFileListCache();
+	t.teardown(() => {
+		process.chdir(cwd);
+		clearFileListCache();
+		rmSync(dir, {recursive: true, force: true});
+	});
+
+	const submitted: string[] = [];
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput
+				forceFocus={true}
+				onSubmit={message => {
+					submitted.push(message);
+				}}
+			/>
+		</TestWrapper>,
+	);
+
+	stdin.write('read @missing.ts');
+	await waitForFrame(lastFrame, /read @missing\.ts/);
+
+	stdin.write('\r');
+	await waitForFrame(
+		lastFrame,
+		/Could not attach @missing\.ts: file not found/,
+	);
+	t.deepEqual(submitted, [], 'the first Enter must not send the message');
+
+	// Editing the prompt clears the warning instead of letting a stale one
+	// apply to the corrected text.
+	stdin.write('x');
+	await waitForCondition(
+		() => !/Could not attach @missing\.ts/.test(stripAnsi(lastFrame() ?? '')),
+	);
+
+	stdin.write('\r');
+	await waitForFrame(
+		lastFrame,
+		/Could not attach @missing\.tsx: file not found/,
+	);
+	t.deepEqual(submitted, []);
+
+	// A second Enter on the unchanged prompt sends it, with a note so the
+	// model knows the mention was not attached.
+	stdin.write('\r');
+	await waitForCondition(() => submitted.length === 1);
+	t.true(submitted[0]!.startsWith('Note: these @file mentions'));
+	t.true(submitted[0]!.includes('- @missing.tsx: file not found'));
+	t.true(submitted[0]!.includes('read @missing.tsx'));
+	unmount();
+});
+
 test('UserInput windows long file mention lists', async t => {
 	const dir = mkdtempSync(join(tmpdir(), 'file-window-'));
 	for (let i = 1; i <= 8; i++) writeFileSync(join(dir, `zzfile${i}.txt`), '');

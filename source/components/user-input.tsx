@@ -32,6 +32,12 @@ import type {
 	UserMessageQueueDraft,
 } from '@/hooks/useUserMessageQueue';
 import {assemblePrompt} from '@/input/prompt-processor';
+import {
+	buildUnresolvedMentionNote,
+	findUnresolvedFileMentions,
+	formatUnresolvedMentionWarning,
+	type UnresolvedFileMention,
+} from '@/input/unresolved-file-mentions';
 import {promptHistory} from '@/prompt-history';
 import {isNewlineKey} from '@/terminal/newline-key';
 import {getVisualLineSegments} from '@/terminal/text-wrapping';
@@ -51,6 +57,13 @@ import type {ActiveEditorState} from '@/vscode/vscode-server';
 
 // Prompt box width floor: keeps narrow terminals legible.
 const PROMPT_WIDTH_MIN = 40;
+
+interface MentionWarning {
+	/** The prompt value the warning was produced for. */
+	displayValue: string;
+	mentions: UnresolvedFileMention[];
+	text: string;
+}
 
 interface ChatProps {
 	onSubmit?: (
@@ -173,6 +186,19 @@ export default function UserInput({
 	const images = useImageAttachments();
 	const {attachments} = images;
 	const lastRestoredDraftIdRef = useRef<number | null>(null);
+	// Shown above the input when a submitted prompt contains @mentions that
+	// could not be attached. The ref mirrors it for key handlers, which can
+	// hold a render-old closure.
+	const [mentionWarning, setMentionWarning] = useState<MentionWarning | null>(
+		null,
+	);
+	const mentionWarningRef = useRef<MentionWarning | null>(null);
+	const mentionCheckInFlightRef = useRef(false);
+
+	const updateMentionWarning = useCallback((warning: MentionWarning | null) => {
+		mentionWarningRef.current = warning;
+		setMentionWarning(warning);
+	}, []);
 
 	// Reverse prompt search (Ctrl+R / bck-i-search)
 	const reverseSearch = useReverseSearch();
@@ -250,6 +276,7 @@ export default function UserInput({
 		});
 		images.replace([...restoreSubmittedDraft.attachments]);
 		resetUIState();
+		updateMentionWarning(null);
 		promptHistory.resetIndex();
 		setTextInputKey(prev => prev + 1);
 		focus('user-input');
@@ -259,6 +286,7 @@ export default function UserInput({
 		resetUIState,
 		focus,
 		images.replace,
+		updateMentionWarning,
 	]);
 
 	// When in-flight work ends, reclaim focus so the cursor returns and the user
@@ -332,7 +360,7 @@ export default function UserInput({
 	// Helper functions
 
 	// Handle form submission
-	const handleSubmit = useCallback(() => {
+	const handleSubmit = useCallback(async () => {
 		if (!onSubmit && !onQueueMessage) return;
 
 		// The ref, not the render-time currentState: Enter can arrive in the
@@ -349,6 +377,61 @@ export default function UserInput({
 		// Nothing to send: no text and no attachments.
 		if (!assembled.trim() && outgoing.length === 0) return;
 
+		// Slash commands and bash mode own their arguments; an "@" there is not
+		// a file mention, so never hold those back with a mention warning.
+		const isCommand =
+			assembled.trim().startsWith('/') || assembled.trim().startsWith('!');
+		let unresolvedMentions: UnresolvedFileMention[] = [];
+
+		if (!isCommand) {
+			const acknowledged = mentionWarningRef.current;
+			if (acknowledged?.displayValue === latestState.displayValue) {
+				// The warning is already on screen for this exact prompt: send it
+				// with a note so the model knows the files were not attached.
+				unresolvedMentions = acknowledged.mentions;
+				updateMentionWarning(null);
+			} else {
+				// Only one filesystem check at a time. A second Enter while the
+				// first is still running must not queue a duplicate submission.
+				if (mentionCheckInFlightRef.current) return;
+
+				mentionCheckInFlightRef.current = true;
+				try {
+					const unresolved = await findUnresolvedFileMentions(
+						latestState.displayValue,
+					);
+
+					// The prompt changed while the check ran; let the newer
+					// submission deal with the newer text.
+					if (
+						currentStateRef.current.displayValue !== latestState.displayValue
+					) {
+						return;
+					}
+
+					if (unresolved.length > 0) {
+						updateMentionWarning({
+							displayValue: latestState.displayValue,
+							mentions: unresolved,
+							text: formatUnresolvedMentionWarning(unresolved),
+						});
+						return;
+					}
+				} finally {
+					mentionCheckInFlightRef.current = false;
+				}
+			}
+		}
+
+		// Nothing unresolved: make sure a warning for any earlier draft does not
+		// linger once the message goes out.
+		updateMentionWarning(null);
+
+		const outgoingMessage =
+			unresolvedMentions.length > 0
+				? `${buildUnresolvedMentionNote(unresolvedMentions)}\n\n${assembled}`
+				: assembled;
+
 		const inputStateForHistory: InputState = {
 			displayValue: latestState.displayValue,
 			placeholderContent: {...latestState.placeholderContent},
@@ -357,7 +440,7 @@ export default function UserInput({
 		if (isBusy && !assembled.trim().startsWith('/') && onQueueMessage) {
 			promptHistory.addPrompt(inputStateForHistory);
 			onQueueMessage({
-				message: assembled,
+				message: outgoingMessage,
 				displayValue: display,
 				images: outgoing.length > 0 ? outgoing : undefined,
 				inputState: inputStateForHistory,
@@ -378,7 +461,11 @@ export default function UserInput({
 			inputState: inputStateForHistory,
 			attachments: outgoing,
 		});
-		onSubmit(assembled, display, outgoing.length > 0 ? outgoing : undefined);
+		onSubmit(
+			outgoingMessage,
+			display,
+			outgoing.length > 0 ? outgoing : undefined,
+		);
 		onDismissSuggestion?.();
 		resetInput();
 		resetUIState();
@@ -397,6 +484,7 @@ export default function UserInput({
 		onDismissSuggestion,
 		images.clear,
 		queue.resetSelection,
+		updateMentionWarning,
 	]);
 
 	// Handle escape key logic
@@ -418,6 +506,7 @@ export default function UserInput({
 			resetInput();
 			resetUIState();
 			images.clear();
+			updateMentionWarning(null);
 			onDismissActiveEditor?.();
 			focus('user-input');
 		} else if (input || attachments.length > 0 || activeEditor) {
@@ -442,6 +531,7 @@ export default function UserInput({
 		setShowClearMessage,
 		focus,
 		images.clear,
+		updateMentionWarning,
 	]);
 
 	// Any keystroke means the user is composing, not navigating — re-enable the
@@ -452,10 +542,23 @@ export default function UserInput({
 			// lone `?` in an empty prompt is the overlay toggle (see useInput).
 			if (isShortcutsOpenNow() || value === '?') return;
 			history.markTyped();
+			// Editing the prompt invalidates a warning about the previous text.
+			if (mentionWarningRef.current) {
+				updateMentionWarning(null);
+			}
 			updateInput(value);
 		},
-		[updateInput, isShortcutsOpenNow, history.markTyped],
+		[updateInput, isShortcutsOpenNow, history.markTyped, updateMentionWarning],
 	);
+
+	// History navigation and queued-message recall replace the input without
+	// going through handleInputChange; a warning must never outlive its text.
+	useEffect(() => {
+		const warning = mentionWarningRef.current;
+		if (warning && warning.displayValue !== currentState.displayValue) {
+			updateMentionWarning(null);
+		}
+	}, [currentState.displayValue, updateMentionWarning]);
 
 	const rawInputRef = useRawInput();
 
@@ -653,7 +756,7 @@ export default function UserInput({
 			if (queue.loadSelected()) {
 				return;
 			}
-			handleSubmit();
+			void handleSubmit();
 			return;
 		}
 
@@ -756,6 +859,11 @@ export default function UserInput({
 					borderStyle="round"
 					borderColor={isBashMode ? colors.tool : colors.primary}
 				>
+					{/* Unresolved @mention warning: above the input so the user can
+					fix the path before pressing Enter a second time to send. */}
+					{mentionWarning && (
+						<Text color={colors.warning}>{mentionWarning.text}</Text>
+					)}
 					{/* Input row */}
 					{isReverseSearchMode ? (
 						<ReverseSearchPrompt
