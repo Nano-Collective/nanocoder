@@ -949,6 +949,64 @@ test("parseToolCalls: leaves XML quoted inside another call's arguments alone", 
 	}
 });
 
+test('parseToolCalls: runs a call that holds a tag with its own name', t => {
+	// The first closing tag with the call's name belongs to the inner tag, so
+	// the call ends at the one that pairs with its opening tag.
+	for (const {content, args} of [
+		{
+			content: '<read_file><read_file>a.ts</read_file></read_file>',
+			args: {read_file: 'a.ts'},
+		},
+		{
+			content:
+				'<write_file><path>docs/tools.md</path><content>Example: <write_file><path>a.md</path></write_file></content></write_file>',
+			args: {
+				path: 'docs/tools.md',
+				content: 'Example: <write_file><path>a.md</path></write_file>',
+			},
+		},
+	]) {
+		const result = parseToolCalls(content, OFFERED);
+		t.true(result.success, content);
+		if (result.success) {
+			t.is(result.toolCalls.length, 1);
+			t.deepEqual(result.toolCalls[0].function.arguments, args);
+		}
+	}
+});
+
+test('parseToolCalls: reports the parameter left open in a call that holds a tag with its own name', t => {
+	const result = parseToolCalls(
+		'<read_file><read_file>a.ts</read_file><path>b.ts</read_file>',
+		OFFERED,
+	);
+
+	t.false(result.success);
+	if (!result.success) {
+		t.is(
+			result.error,
+			'Invalid tool call: <path> inside <read_file> is never closed with </path>',
+		);
+	}
+});
+
+test('parseToolCalls: does not join a broken call to the next call to the same tool', t => {
+	// Running the first call on to the second </read_file> would close its
+	// <path> with the second call's </path> and merge the two calls.
+	const result = parseToolCalls(
+		'<read_file><path>a.ts</wrong_close></read_file>\n<read_file><path>b.ts</path></read_file>',
+		OFFERED,
+	);
+
+	t.false(result.success);
+	if (!result.success) {
+		t.is(
+			result.error,
+			'Invalid tool call: <path> inside <read_file> is never closed with </path>',
+		);
+	}
+});
+
 test('parseToolCalls: only checks calls to the offered tools', t => {
 	// read_file isn't offered here, so its broken call is handled as before.
 	const notOffered = parseToolCalls(
