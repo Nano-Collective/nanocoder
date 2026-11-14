@@ -87,7 +87,7 @@ Or from the repo root: `pnpm run build:vscode` builds and packages to `assets/na
 
 ### Sidebar Chat
 
-1. Click the Nanocoder icon in the Activity Bar. The extension spawns `nanocoder --acp` in the background and connects automatically - your project's `agents.config.json` (or global config) is used.
+1. Click the Nanocoder icon in the Activity Bar. The extension spawns `nanocoder --acp` in the background and connects automatically - your project's `agents.config.json` (or global config) is used. The CLI is not started until you open the chat.
 2. Chat. Responses stream in; thinking appears in a collapsible section.
 3. Read-only tools group into an activity card; file edits get their own card - click it to open VS Code's diff viewer.
 4. In modes that require confirmation, tool cards show Approve / Deny inline. Questions from the AI (`ask_user`) show the full question with one button per answer.
@@ -140,6 +140,8 @@ Configure the extension in VS Code settings (`Ctrl+,` / `Cmd+,`):
 ## Legacy Companion Mode
 
 The original integration pairs the extension with a Nanocoder session running in a terminal (`nanocoder --vscode`) over a local WebSocket. It is opt-in via `nanocoder.autoConnect` and useful if you prefer the terminal TUI.
+
+**Deprecated:** the companion duplicates the sidebar chat, which runs `nanocoder --acp` itself, and will be removed in a future release. Nanocoder warns the first time it is enabled in a session.
 
 The CLI binds an ephemeral port (or the one passed with `--vscode-port`) and writes the port and a per-session bearer token to a discovery file, `vscode-server.json` in the nanocoder config directory. The extension reads that file to connect. `nanocoder.serverPort` (default 51820) and `nanocoder.serverToken` are only fallbacks for when the file cannot be read, such as a CLI on a remote host over SSH.
 

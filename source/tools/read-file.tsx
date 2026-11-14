@@ -12,19 +12,19 @@ import {
 } from '@/constants';
 import {ThemeContext} from '@/hooks/useTheme';
 import {getProjectRoot, getSafeSessionCwd} from '@/services/session-cwd';
-import type {NanocoderToolExport} from '@/types/core';
-import {jsonSchema, tool} from '@/types/core';
-import {formatError} from '@/utils/error-formatter';
-import {getCachedFileContent} from '@/utils/file-cache';
-import {getFileType} from '@/utils/file-type-detector';
-import {isValidFilePath, resolveFilePath} from '@/utils/path-validation';
 import {
 	markFileSeen,
 	matchReadContent,
 	READ_STUB_MARKER,
 	rememberReadContent,
-} from '@/utils/read-tracker';
-import {calculateTokens} from '@/utils/token-calculator';
+} from '@/tools/runtime/read-tracker';
+import type {NanocoderToolExport} from '@/types/core';
+import {jsonSchema, tool} from '@/types/core';
+import {formatError} from '@/utils/error-formatter';
+import {getCachedFileContent} from '@/utils/fs/file-cache';
+import {getFileType} from '@/utils/fs/file-type-detector';
+import {isValidFilePath, resolveFilePath} from '@/utils/fs/path-validation';
+import {estimateTokens} from '@/utils/token-calculator';
 
 function formatReadStub(path: string, lineCount: number, size: number): string {
 	return `[file: ${path} — ${READ_STUB_MARKER} (${lineCount} lines, ${size} bytes). pass start_line/end_line to read the body again.]`;
@@ -71,7 +71,7 @@ const executeReadFile = async (args: {
 					const content = cached.content;
 
 					output += `Lines: ${cached.totalLines}\n`;
-					output += `Estimated Tokens: ~${calculateTokens(content)}\n`;
+					output += `Estimated Tokens: ~${estimateTokens(content)}\n`;
 
 					// Detect file type from extension
 					const fileType = getFileType(absPath);
@@ -376,7 +376,7 @@ const readFileFormatter = async (
 			const readLines = readEndLine - startLine + 1;
 			const isPartialRead = startLine > 1 || readEndLine < totalLines;
 
-			const tokens = isMetadataOnly ? 0 : result ? calculateTokens(result) : 0;
+			const tokens = isMetadataOnly ? 0 : result ? estimateTokens(result) : 0;
 
 			fileInfo = {
 				totalLines,

@@ -82,7 +82,9 @@ test('getCommandHelpDetails documents supported command syntax', t => {
 	t.true(init.options?.includes('--preset <react|nextjs|rust>'));
 	t.true(skills.options?.includes('promote <name> [--force] [--move]'));
 	t.true(skills.examples?.includes('/skills check pr-reviewer'));
-	t.is(getCommandHelpDetails(command('commands')).aliases, undefined);
+	t.deepEqual(getCommandHelpDetails(command('commands')).aliases, [
+		'custom-commands',
+	]);
 });
 
 test('groupHelpCommands orders categories and commands deterministically', t => {

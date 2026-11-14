@@ -50,6 +50,10 @@
 					},
 					"type": "array"
 				},
+				"firewall": {
+					"$ref": "#/definitions/FirewallConfig",
+					"description": "Negative-space mutation firewall. Off by default."
+				},
 				"formatters": {
 					"description": "Code formatters run on files the agent writes (write_file,\nstring_replace, diff_edit), before the `post-tool-use` hooks fire.",
 					"items": {
@@ -58,10 +62,14 @@
 					"type": "array"
 				},
 				"headless": {
-					"description": "Maximum LLM turns for headless runs (--plain and ACP loops).",
+					"description": "Maximum LLM turns for headless runs (--plain, ACP and subagent loops).",
 					"properties": {
 						"maxTurns": {
 							"description": "Maximum LLM turns before the loop forces a final, tool-free answer.",
+							"type": "number"
+						},
+						"subagentMaxTurns": {
+							"description": "Turn ceiling for a delegated subagent run. Defaults to `maxTurns`.",
 							"type": "number"
 						}
 					},
@@ -70,7 +78,7 @@
 				},
 				"hooks": {
 					"$ref": "#/definitions/HooksConfig",
-					"description": "Shell commands run at fixed points in the agent loop, keyed by lifecycle\nevent. Project-local, so this carries the same code-execution weight as\n`mcpServers` above."
+					"description": "Shell commands run at fixed points in the agent loop, keyed by lifecycle\nevent. A project-local file can set these, so they carry the same\ncode-execution weight as project MCP servers (`.mcp.json`) and are\ngated behind directory trust."
 				},
 				"lspServers": {
 					"description": "LSP server configurations (optional — auto-discovery enabled by default).",
@@ -147,6 +155,10 @@
 				"tune": {
 					"$ref": "#/definitions/TuneConfig",
 					"description": "Model mode defaults (tool profile, tool mode, model parameters)."
+				},
+				"verify": {
+					"$ref": "#/definitions/VerifyConfig",
+					"description": "Project-level verify policy: CI-watch trust level and poll cadence.\nRead by `loadVerifyConfig()`."
 				}
 			},
 			"type": "object",
@@ -488,6 +500,34 @@
 			"type": "object",
 			"additionalProperties": false
 		},
+		"FirewallConfig": {
+			"properties": {
+				"blockAnyTypes": {
+					"type": "boolean"
+				},
+				"enabled": {
+					"type": "boolean"
+				},
+				"mode": {
+					"enum": ["disabled", "lenient", "strict"],
+					"type": "string"
+				},
+				"preserveExportSignatures": {
+					"type": "boolean"
+				},
+				"protectTestCases": {
+					"type": "boolean"
+				},
+				"protectedPatterns": {
+					"items": {
+						"type": "string"
+					},
+					"type": "array"
+				}
+			},
+			"type": "object",
+			"additionalProperties": false
+		},
 		"HooksConfig": {
 			"properties": {
 				"post-tool-use": {
@@ -579,6 +619,10 @@
 				},
 				"includeAgentsMd": {
 					"type": "boolean"
+				},
+				"mcpDiscovery": {
+					"enum": ["always", "auto", "disabled"],
+					"type": "string"
 				},
 				"modelParameters": {
 					"$ref": "#/definitions/ModelParameters"
@@ -713,6 +757,24 @@
 				},
 				"mode": {
 					"enum": ["append", "replace"],
+					"type": "string"
+				}
+			},
+			"type": "object",
+			"additionalProperties": false
+		},
+		"VerifyConfig": {
+			"description": "Project-level (`agents.config.json`) verify/CI-watch policy — trust level\nand poll cadence. Unlike `CiWatchConfig.enabled` (a personal, per-machine\nopt-in to background GitHub polling, kept in preferences), trust level\nand cadence are security/policy decisions appropriate to commit and\nreview with the rest of the project, so they live here instead. When\nset, `pollIntervalMs`/`maxPollIntervalMs` here override the\npreferences-backed `CiWatchConfig` values of the same name — see\n`loadCiWatchConfig` in `source/config/index.ts`.",
+			"properties": {
+				"maxPollIntervalMs": {
+					"type": "number"
+				},
+				"pollIntervalMs": {
+					"type": "number"
+				},
+				"trustLevel": {
+					"description": "Trust level for daemon-triggered CI investigation/auto-fix. Undefined\ndefers to the `--trust` CLI flag, then 'comment-only'.",
+					"enum": ["auto-fix", "comment-only", "full-commit"],
 					"type": "string"
 				}
 			},

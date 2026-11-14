@@ -65,6 +65,13 @@ export interface ToolCall {
 		name: string;
 		arguments: Record<string, unknown>;
 	};
+	/**
+	 * Set when the model's arguments were not a JSON object, such as text cut
+	 * off at the output-token limit. `arguments` is then `{}`, so the broken
+	 * text is never run or replayed. The call must not be run: it is answered
+	 * with this error so the model can retry.
+	 */
+	argumentsError?: string;
 }
 
 export interface ToolResult {
@@ -134,6 +141,12 @@ export interface ToolExecutionContext {
 	toolCallId?: string;
 	/** Set for a subagent's own tool calls: the run executing them. */
 	subagentRunId?: string;
+	/**
+	 * The client the call's turn runs on, when it is not the process-wide one:
+	 * an ACP session that picked its own model. Auto-commit writes its message
+	 * with it.
+	 */
+	client?: LLMClient;
 }
 
 export type ToolHandler = (
@@ -290,6 +303,11 @@ export interface ModeOverrides {
 		Record<string, string>
 	>;
 	privacyEnabled?: boolean;
+	/**
+	 * Tune's tool mode is XML or JSON: the caller's system prompt carries the
+	 * tool definitions as text, so native tools must not be sent as well.
+	 */
+	nativeToolsDisabled?: boolean;
 }
 
 export interface LLMClient {

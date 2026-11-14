@@ -5,9 +5,9 @@ import {
 } from '@/app/helpers';
 import type {NonInteractiveModeState} from '@/app/types';
 import {TIMEOUT_EXECUTION_MAX_MS, TIMEOUT_OUTPUT_FLUSH_MS} from '@/constants';
+import {getRunFailure} from '@/conversation/run-outcome';
 import type {DevelopmentMode, LLMClient} from '@/types';
 import {getLogger} from '@/utils/logging';
-import {getRunFailure} from '@/utils/run-outcome';
 import {getShutdownManager} from '@/utils/shutdown';
 
 interface UseNonInteractiveModeProps {

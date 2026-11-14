@@ -1,5 +1,5 @@
 import test from 'ava';
-import {generateToolCallId} from '@/utils/tool-call-id';
+import {generateToolCallId} from '@/tools/runtime/tool-call-id';
 import {
 	convertAISDKToolCall,
 	convertAISDKToolCalls,
@@ -40,6 +40,36 @@ test('convertAISDKToolCall generates ID when missing', t => {
 	t.true(result.id.startsWith('tool_'));
 	t.is(result.function.name, 'test_tool');
 	t.deepEqual(result.function.arguments, {arg: 'value'});
+});
+
+test('convertAISDKToolCall replaces unparsable arguments with {} and the parse error', t => {
+	// What the SDK hands back for a call it could not parse: the raw text.
+	const result = convertAISDKToolCall({
+		toolCallId: 'call_bad',
+		toolName: 'read_file',
+		input: '{"path": "hello.txt"',
+	});
+
+	t.is(result.id, 'call_bad');
+	t.is(result.function.name, 'read_file');
+	t.deepEqual(result.function.arguments, {});
+	t.regex(result.argumentsError ?? '', /^not valid JSON: /);
+	// The error names the problem without carrying the raw text along.
+	t.false((result.argumentsError ?? '').includes('hello.txt'));
+});
+
+test('convertAISDKToolCall rejects JSON that is not an object', t => {
+	for (const input of [[1, 2], 42, null, '"text"']) {
+		const result = convertAISDKToolCall({toolName: 'read_file', input});
+		t.deepEqual(result.function.arguments, {});
+		t.is(result.argumentsError, 'not a JSON object');
+	}
+});
+
+test('convertAISDKToolCall leaves valid arguments without an error', t => {
+	const result = convertAISDKToolCall({toolName: 'read_file', input: {}});
+	t.deepEqual(result.function.arguments, {});
+	t.false('argumentsError' in result);
 });
 
 test('convertAISDKToolCalls converts multiple tool calls', t => {

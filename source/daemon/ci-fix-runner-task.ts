@@ -4,7 +4,7 @@
  */
 
 import type {CiFixRunnerInput} from '@/daemon/ci-fix-runner';
-import {getAllowedToolNames} from '@/verify/trust';
+import {getAllowedToolNames} from '@/verify/trust-level';
 
 /**
  * The runner has no GitHub credentials (see `buildFixRunnerEnv` in

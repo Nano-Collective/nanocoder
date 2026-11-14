@@ -6,8 +6,10 @@ import type {
 	ToolKind,
 } from '@agentclientprotocol/sdk';
 import {getSafeSessionCwd} from '@/services/session-cwd';
+import {fitEditToLineEndings} from '@/tools/file-ops/line-endings';
+import {replaceFirstLiteral} from '@/tools/file-ops/literal-replace';
 import type {ToolCall} from '@/types/core';
-import {replaceFirstLiteral} from '@/utils/literal-replace';
+import {truncateText} from '@/utils/truncate-text';
 
 // A bash `cd` moves the session cwd and leaves process.cwd() at the launch dir.
 function resolveToolPath(path: string): string {
@@ -184,8 +186,7 @@ function asString(value: unknown): string | undefined {
 }
 
 function truncate(text: string, max: number): string {
-	const firstLine = text.split('\n', 1)[0];
-	return firstLine.length > max ? `${firstLine.slice(0, max - 1)}…` : firstLine;
+	return truncateText(text.split('\n', 1)[0], max, {unit: 'code-units'});
 }
 
 function extractPath(args: Record<string, unknown>): string | undefined {
@@ -213,19 +214,28 @@ async function buildStringReplaceDiff(
 		return {type: 'diff', path: absPath, oldText: oldStr, newText: newStr};
 	}
 
+	// Match the file's line endings the same way the tool does, so the diff
+	// is the edit that lands on disk.
+	const fitted = fitEditToLineEndings(current, oldStr, newStr);
+
 	// Only synthesize a whole-file diff when the replacement is unambiguous,
 	// mirroring the tool's own uniqueness requirement. Otherwise fall back to
 	// the hunk so the user still sees what is changing.
-	const occurrences = current.split(oldStr).length - 1;
+	const occurrences = current.split(fitted.oldStr).length - 1;
 	if (occurrences !== 1) {
-		return {type: 'diff', path: absPath, oldText: oldStr, newText: newStr};
+		return {
+			type: 'diff',
+			path: absPath,
+			oldText: fitted.oldStr,
+			newText: fitted.newStr,
+		};
 	}
 
 	return {
 		type: 'diff',
 		path: absPath,
 		oldText: current,
-		newText: replaceFirstLiteral(current, oldStr, newStr),
+		newText: replaceFirstLiteral(current, fitted.oldStr, fitted.newStr),
 	};
 }
 

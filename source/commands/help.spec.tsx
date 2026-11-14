@@ -162,3 +162,26 @@ test('helpCommand reports unknown commands', async t => {
 		'Unknown command: missing. Type /help to see available commands.',
 	);
 });
+
+test('helpCommand common tasks show real syntax, not placeholders', async t => {
+	const result = await helpCommand.handler([], messages, metadata);
+	const output = renderWithTheme(result as React.ReactElement).lastFrame()!;
+	const flat = output.replace(/\s+/g, ' ');
+
+	t.notRegex(flat, /cargo build/);
+	t.notRegex(flat, /foo\.py|bar\.ts/);
+	t.regex(flat, /!npm test/, 'mentions the ! shell prefix');
+	t.regex(flat, /@src\//, 'mentions @ file mentions');
+	t.regex(flat, /\.nanocoder\/commands\//, 'mentions custom commands');
+});
+
+test('helpCommand shows usage and subcommands for /firewall', async t => {
+	commandRegistry.register(command('firewall'));
+
+	const result = await helpCommand.handler(['firewall'], messages, metadata);
+	const output = renderWithTheme(result as React.ReactElement).lastFrame()!;
+
+	t.regex(output, /Category: Coding & Agent Tools/);
+	t.regex(output, /Usage: \/firewall \[status\|enable\|disable/);
+	t.regex(output, /• protect <pattern>/);
+});

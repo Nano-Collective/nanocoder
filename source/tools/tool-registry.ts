@@ -1,3 +1,5 @@
+import {getToolJsonSchema} from '@/tools/runtime/schema-validate';
+import {withValidation} from '@/tools/runtime/tool-validation';
 import type {
 	AISDKCoreTool,
 	NanocoderToolExport,
@@ -8,8 +10,6 @@ import type {
 	ToolHandler,
 	ToolValidator,
 } from '@/types/index';
-import {getToolJsonSchema} from '@/utils/schema-validate';
-import {withValidation} from '@/utils/tool-validation';
 
 /**
  * Helper class to encapsulate tool registry management
@@ -240,6 +240,37 @@ export class ToolRegistry {
 	}
 
 	/**
+	 * Register a complete tool entry directly from a NanocoderToolExport.
+	 */
+	registerToolExport(t: NanocoderToolExport): void {
+		const rawHandler = async (
+			// biome-ignore lint/suspicious/noExplicitAny: Dynamic typing required
+			args: any,
+			options?: ToolExecutionContext,
+		) =>
+			// biome-ignore lint/suspicious/noExplicitAny: Dynamic typing required
+			await (t.tool as any).execute(args, {
+				toolCallId: 'manual',
+				messages: [],
+				...options,
+			});
+		this.register({
+			name: t.name,
+			handler: withValidation(
+				rawHandler,
+				t.validator,
+				getToolJsonSchema(t.tool),
+			),
+			tool: t.tool,
+			formatter: t.formatter,
+			validator: t.validator,
+			streamingFormatter: t.streamingFormatter,
+			readOnly: t.readOnly,
+			approval: t.approval,
+		});
+	}
+
+	/**
 	 * Create a new registry directly from NanocoderToolExport array.
 	 * Extracts handlers from tool.execute() and builds ToolEntry objects
 	 * without intermediate map decomposition.
@@ -248,31 +279,7 @@ export class ToolRegistry {
 		const registry = new ToolRegistry();
 
 		for (const t of toolExports) {
-			const rawHandler = async (
-				// biome-ignore lint/suspicious/noExplicitAny: Dynamic typing required
-				args: any,
-				options?: ToolExecutionContext,
-			) =>
-				// biome-ignore lint/suspicious/noExplicitAny: Dynamic typing required
-				await (t.tool as any).execute(args, {
-					toolCallId: 'manual',
-					messages: [],
-					...options,
-				});
-			registry.register({
-				name: t.name,
-				handler: withValidation(
-					rawHandler,
-					t.validator,
-					getToolJsonSchema(t.tool),
-				),
-				tool: t.tool,
-				formatter: t.formatter,
-				validator: t.validator,
-				streamingFormatter: t.streamingFormatter,
-				readOnly: t.readOnly,
-				approval: t.approval,
-			});
+			registry.registerToolExport(t);
 		}
 
 		return registry;

@@ -18,13 +18,17 @@
 import {readFileSync, writeFileSync} from 'node:fs';
 import {createLLMClient} from '@/client-factory';
 import {getAppConfig} from '@/config/index';
+import {bootstrapProjectDotenv} from '@/config/project-dotenv';
 import type {CiJobFailedPayload} from '@/events/types';
 import {SubagentExecutor} from '@/subagents/subagent-executor';
 import type {SubagentTask} from '@/subagents/types';
 import {execGit} from '@/tools/git/utils';
 import {ToolManager} from '@/tools/tool-manager';
 import {formatError} from '@/utils/error-formatter';
-import {getHeadlessAutoApproveToolNames, type TrustLevel} from '@/verify/trust';
+import {
+	getHeadlessAutoApproveToolNames,
+	type TrustLevel,
+} from '@/verify/trust-level';
 import {
 	buildRunnerTaskDescription,
 	getRunnerToolNames,
@@ -59,6 +63,9 @@ function writeResultAndExit(
 }
 
 async function main(): Promise<void> {
+	// The project .env, read from the project root it was spawned in, before
+	// the chdir into the worktree, as importing config used to.
+	bootstrapProjectDotenv();
 	const inputPath = process.env.NANOCODER_CI_FIX_INPUT_PATH;
 	const resultPath = process.env.NANOCODER_CI_FIX_RESULT_PATH;
 	if (!inputPath || !resultPath) {
