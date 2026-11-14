@@ -34,7 +34,6 @@ import type {
 import {assemblePrompt} from '@/input/prompt-processor';
 import {promptHistory} from '@/prompt-history';
 import {isNewlineKey} from '@/terminal/newline-key';
-import {pasteEvents} from '@/terminal/terminal-paste';
 import {getVisualLineSegments} from '@/terminal/text-wrapping';
 import type {TuneConfig} from '@/types/config';
 import type {
@@ -211,35 +210,28 @@ export default function UserInput({
 	// Real pastes, as reported by the terminal via bracketed paste. The
 	// payload is lifted off stdin before Ink's keypress parser sees it, so
 	// a multi-line paste can no longer submit the prompt on its first
-	// newline — it arrives here whole, in one event.
-	useEffect(() => {
-		if (disabled || !effectiveFocus) {
-			return;
+	// newline — it arrives here whole, in one event. TextInput subscribes
+	// while focused and hands the payload here instead of inserting it, so
+	// long pastes can collapse into placeholders.
+	const handleTerminalPaste = (payload: string) => {
+		// Read the caret off TextInput so the splice lands where the user
+		// was editing, not at the end of the value. insertPaste returns the
+		// new cursor offset; fall back to a remount only if no cursor is
+		// available (TextInput not yet mounted).
+		const cursorOffset = textInputRef.current?.getCursorOffset();
+		const result = insertPaste(payload, cursorOffset);
+		if (result && textInputRef.current) {
+			// Hand TextInput the pasted value along with the caret: keys in the
+			// same stdin batch as the paste land before it re-renders, and
+			// must edit the pasted value, not the one it last rendered.
+			textInputRef.current.setCursorOffset(
+				result.cursorOffset,
+				currentStateRef.current.displayValue,
+			);
+		} else if (!result) {
+			setTextInputKey(prev => prev + 1);
 		}
-		const handleTerminalPaste = (payload: string) => {
-			// Read the caret off TextInput so the splice lands where the user
-			// was editing, not at the end of the value. insertPaste returns the
-			// new cursor offset; fall back to a remount only if no cursor is
-			// available (TextInput not yet mounted).
-			const cursorOffset = textInputRef.current?.getCursorOffset();
-			const result = insertPaste(payload, cursorOffset);
-			if (result && textInputRef.current) {
-				// Hand TextInput the pasted value along with the caret: keys in the
-				// same stdin batch as the paste land before it re-renders, and
-				// must edit the pasted value, not the one it last rendered.
-				textInputRef.current.setCursorOffset(
-					result.cursorOffset,
-					currentStateRef.current.displayValue,
-				);
-			} else if (!result) {
-				setTextInputKey(prev => prev + 1);
-			}
-		};
-		pasteEvents.on('paste', handleTerminalPaste);
-		return () => {
-			pasteEvents.off('paste', handleTerminalPaste);
-		};
-	}, [disabled, effectiveFocus, insertPaste, currentStateRef]);
+	};
 
 	useEffect(() => {
 		if (
@@ -789,9 +781,13 @@ export default function UserInput({
 										? `Try ${suggestedCommand} · Tab to insert · Esc to dismiss`
 										: 'Ask anything...'
 								}
-								focus={effectiveFocus}
+								// TextInput takes keys and pastes only while focused, so fold
+								// `disabled` in here rather than relying on the disabled branch
+								// above never mounting it.
+								focus={effectiveFocus && !disabled}
 								wrapWidth={inputWrapWidth}
 								handleEnter={false}
+								onPaste={handleTerminalPaste}
 							/>
 						</Box>
 					)}
