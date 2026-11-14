@@ -1319,3 +1319,66 @@ test('LSPClient - timeout ID is stored in pending request', async t => {
 	// Verify timeout was cleared
 	global.clearTimeout = originalClearTimeout;
 });
+
+test('LSPClient - a server request with a colliding id leaves our request pending', t => {
+	const client = new LSPClient(createMockConfig());
+	const requestId = 1;
+	let resolved = false;
+	let written = '';
+
+	const timeoutId = setTimeout(() => {}, 30000);
+	(client as any).pendingRequests.set(requestId, {
+		resolve: () => {
+			resolved = true;
+		},
+		reject: () => {},
+		method: 'textDocument/formatting',
+		timeoutId,
+	});
+	(client as any).process = {
+		stdin: {
+			write: (chunk: string) => {
+				written += chunk;
+			},
+		},
+	};
+
+	const serverRequest = {
+		jsonrpc: '2.0',
+		id: requestId,
+		method: 'workspace/configuration',
+		params: {items: [{section: 'python'}]},
+	};
+	const handleMessage = (client as any).handleMessage.bind(client);
+
+	handleMessage(serverRequest);
+
+	t.false(resolved);
+	t.true((client as any).pendingRequests.has(requestId));
+	clearTimeout(timeoutId);
+
+	const body = written.slice(written.indexOf('\r\n\r\n') + 4);
+	t.deepEqual(JSON.parse(body), {
+		jsonrpc: '2.0',
+		id: requestId,
+		result: [null],
+	});
+});
+
+test('LSPClient - a server request with no params still gets a reply', t => {
+	const client = new LSPClient(createMockConfig());
+	let written = '';
+	(client as any).process = {
+		stdin: {
+			write: (chunk: string) => {
+				written += chunk;
+			},
+		},
+	};
+
+	const handleMessage = (client as any).handleMessage.bind(client);
+	handleMessage({jsonrpc: '2.0', id: 7, method: 'client/registerCapability'});
+
+	const body = written.slice(written.indexOf('\r\n\r\n') + 4);
+	t.deepEqual(JSON.parse(body), {jsonrpc: '2.0', id: 7, result: null});
+});

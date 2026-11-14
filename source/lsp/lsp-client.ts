@@ -537,7 +537,9 @@ export class LSPClient extends EventEmitter {
 		this.send(notification);
 	}
 
-	private send(message: JsonRpcRequest | JsonRpcNotification): void {
+	private send(
+		message: JsonRpcRequest | JsonRpcResponse | JsonRpcNotification,
+	): void {
 		const content = JSON.stringify(message);
 		const header = `Content-Length: ${Buffer.byteLength(content)}\r\n\r\n`;
 		this.process?.stdin?.write(header + content);
@@ -573,6 +575,7 @@ export class LSPClient extends EventEmitter {
 
 			try {
 				const message = JSON.parse(content) as
+					| JsonRpcRequest
 					| JsonRpcResponse
 					| JsonRpcNotification;
 				this.handleMessage(message);
@@ -586,26 +589,54 @@ export class LSPClient extends EventEmitter {
 		}
 	}
 
-	private handleMessage(message: JsonRpcResponse | JsonRpcNotification): void {
-		// Check if it's a response
-		if ('id' in message && message.id !== null) {
-			const pending = this.pendingRequests.get(message.id);
-			if (pending) {
-				clearTimeout(pending.timeoutId);
-				this.pendingRequests.delete(message.id);
-				if (message.error) {
-					pending.reject(new Error(message.error.message));
-				} else {
-					pending.resolve(message.result);
-				}
+	private handleMessage(
+		message: JsonRpcRequest | JsonRpcResponse | JsonRpcNotification,
+	): void {
+		// A message with a method is never a response. Servers send their own
+		// requests (workspace/configuration, client/registerCapability) whose ids
+		// can collide with ours; answering here keeps our request pending.
+		if ('method' in message) {
+			if ('id' in message && message.id !== null) {
+				this.handleServerRequest(message);
+			} else {
+				this.handleNotification(message);
 			}
 			return;
 		}
 
-		// It's a notification
-		if ('method' in message) {
-			this.handleNotification(message);
+		if (message.id === null) return;
+
+		const pending = this.pendingRequests.get(message.id);
+		if (!pending) return;
+
+		clearTimeout(pending.timeoutId);
+		this.pendingRequests.delete(message.id);
+		if (message.error) {
+			pending.reject(new Error(message.error.message));
+		} else {
+			pending.resolve(message.result);
 		}
+	}
+
+	/**
+	 * Reply to a request the server sent us. We advertise no client capability
+	 * for these, so the answer is the empty result the spec allows rather than
+	 * leaving the server blocked on us.
+	 */
+	private handleServerRequest(request: JsonRpcRequest): void {
+		let result: unknown = null;
+		if (request.method === 'workspace/configuration') {
+			const params = request.params as {items?: unknown[]} | undefined;
+			const itemCount = Array.isArray(params?.items) ? params.items.length : 0;
+			result = Array.from({length: itemCount}, () => null);
+		} else if (request.method === 'workspace/applyEdit') {
+			result = {applied: false};
+		}
+		logger.debug(
+			{method: request.method, id: request.id},
+			'Answered server-initiated LSP request',
+		);
+		this.send({jsonrpc: '2.0', id: request.id, result});
 	}
 
 	private handleNotification(notification: JsonRpcNotification): void {
