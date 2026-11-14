@@ -1,6 +1,6 @@
 import {statSync} from 'node:fs';
 import path from 'node:path';
-import {existsSync, mkdirSync, readFileSync} from 'fs';
+import {copyFileSync, existsSync, mkdirSync, readFileSync} from 'fs';
 import {getClosestConfigFile, getConfigPath} from '@/config/paths';
 import {
 	DEFAULT_MEMORY_LIMIT,
@@ -44,6 +44,31 @@ function getFileMtime(filePath: string): number | null {
 		return null;
 	}
 }
+
+// A preferences file that cannot be parsed is read as `{}` and the next save
+// writes over it, losing every setting it still held (trustedDirectories
+// included). Each unreadable version is copied to `<file>.bak` once, keyed on
+// its mtime, so a later save cannot destroy the only copy of the user's data -
+// and a file that is repaired and broken again gets a fresh backup.
+const backedUpUnreadablePreferences = new Set<string>();
+
+function backupUnreadablePreferences(
+	preferencesPath: string,
+	mtimeMs: number | null,
+): string | null {
+	const backupKey = `${preferencesPath}:${mtimeMs ?? 'unknown'}`;
+	if (backedUpUnreadablePreferences.has(backupKey)) return null;
+
+	try {
+		if (!existsSync(preferencesPath)) return null;
+		const backupPath = `${preferencesPath}.bak`;
+		copyFileSync(preferencesPath, backupPath);
+		backedUpUnreadablePreferences.add(backupKey);
+		return backupPath;
+	} catch {
+		return null;
+	}
+}
 function getPreferencesPath(): string {
 	// Re-compute path if NANOCODER_CONFIG_DIR has changed (important for tests)
 	const currentConfigDir = process.env.NANOCODER_CONFIG_DIR;
@@ -61,6 +86,7 @@ export function resetPreferencesCache(): void {
 	CACHED_CONFIG_DIR = undefined;
 	cachedVoicePreference = undefined;
 	preferencesCache = null;
+	backedUpUnreadablePreferences.clear();
 }
 
 // Trust is only ever read from, and written to, the global preferences file.
@@ -149,8 +175,9 @@ export function saveGlobalOnlyPreferences(
 }
 
 export function loadPreferences(): UserPreferences {
+	let preferencesPath: string | null = null;
 	try {
-		const preferencesPath = getPreferencesPath();
+		preferencesPath = getPreferencesPath();
 		const version = getPreferencesVersion();
 		const now = Date.now();
 		const cache = preferencesCache;
@@ -213,6 +240,17 @@ export function loadPreferences(): UserPreferences {
 		return data;
 	} catch (error) {
 		getLogger().error(`Failed to load preferences: ${String(error)}`);
+		if (preferencesPath) {
+			const backupPath = backupUnreadablePreferences(
+				preferencesPath,
+				getFileMtime(preferencesPath),
+			);
+			if (backupPath) {
+				getLogger().warn(
+					`Preferences file could not be read; copied it to ${backupPath} so a later save cannot overwrite the original.`,
+				);
+			}
+		}
 	}
 
 	return {};
