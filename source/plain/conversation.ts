@@ -145,7 +145,7 @@ export async function runPlainConversation(
 		// --plain / headless runs don't lose the ledger.
 		try {
 			const {finalizeStatsForExit} = await import('@/stats/record');
-			finalizeStatsForExit();
+			await finalizeStatsForExit();
 		} catch {
 			// Stats must never fail the plain loop.
 		}
