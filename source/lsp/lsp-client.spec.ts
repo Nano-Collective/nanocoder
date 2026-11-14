@@ -635,6 +635,144 @@ test('LSPClient - handleMessage resolves pending request on success', async t =>
 	t.false((client as any).pendingRequests.has(requestId));
 });
 
+test('LSPClient - server request does not resolve a colliding pending request', t => {
+	const client = new LSPClient(createMockConfig());
+	const requestId = 1;
+	let resolvedResult: unknown;
+	let rejected = false;
+	const timeoutId = setTimeout(() => {}, 30000);
+	const pendingRequest = {
+		resolve: (result: unknown) => {
+			resolvedResult = result;
+		},
+		reject: () => {
+			rejected = true;
+		},
+		method: 'textDocument/formatting',
+		timeoutId,
+	};
+	(client as any).pendingRequests.set(requestId, pendingRequest);
+
+	const outgoingMessages: string[] = [];
+	const mockStdin = new Writable({
+		write(chunk: any, _encoding: any, callback: any) {
+			outgoingMessages.push(chunk.toString());
+			callback();
+		},
+	});
+	(client as any).process = {stdin: mockStdin};
+
+	const handleData = (client as any).handleData.bind(client);
+	const serverRequest = {
+		jsonrpc: '2.0',
+		id: requestId,
+		method: 'workspace/configuration',
+		params: {items: [{section: 'python'}]},
+	};
+	const serverRequestContent = JSON.stringify(serverRequest);
+	handleData(
+		`Content-Length: ${Buffer.byteLength(serverRequestContent)}\r\n\r\n${serverRequestContent}`,
+	);
+
+	t.is(resolvedResult, undefined);
+	t.false(rejected);
+	t.is((client as any).pendingRequests.get(requestId), pendingRequest);
+	t.deepEqual(JSON.parse(outgoingMessages[0].split('\r\n\r\n')[1]), {
+		jsonrpc: '2.0',
+		id: requestId,
+		result: [null],
+	});
+
+	const response = {
+		jsonrpc: '2.0',
+		id: requestId,
+		result: [{newText: 'formatted'}],
+	};
+	const responseContent = JSON.stringify(response);
+	handleData(
+		`Content-Length: ${Buffer.byteLength(responseContent)}\r\n\r\n${responseContent}`,
+	);
+
+	t.deepEqual(resolvedResult, response.result);
+	t.false(rejected);
+	t.false((client as any).pendingRequests.has(requestId));
+});
+
+test('LSPClient - advertises only supported workspace capabilities', async t => {
+	const rootUri = 'file:///test/workspace';
+	const client = new LSPClient(createMockConfig({rootUri}));
+	let initializeParams: any;
+	(client as any).sendRequest = async (method: string, params: unknown) => {
+		t.is(method, 'initialize');
+		initializeParams = params;
+		return {capabilities: {}};
+	};
+
+	await (client as any).initialize();
+
+	t.false('applyEdit' in initializeParams.capabilities.workspace);
+	t.false('workspaceEdit' in initializeParams.capabilities.workspace);
+	t.is(initializeParams.capabilities.workspace.workspaceFolders, true);
+	t.deepEqual(initializeParams.workspaceFolders, [
+		{uri: rootUri, name: 'workspace'},
+	]);
+});
+
+test('LSPClient - workspace/workspaceFolders returns its configured folder', t => {
+	const client = new LSPClient(
+		createMockConfig({rootUri: 'file:///test/workspace'}),
+	);
+	const outgoingMessages: string[] = [];
+	const mockStdin = new Writable({
+		write(chunk: any, _encoding: any, callback: any) {
+			outgoingMessages.push(chunk.toString());
+			callback();
+		},
+	});
+	(client as any).process = {stdin: mockStdin};
+
+	const handleMessage = (client as any).handleMessage.bind(client);
+	handleMessage({
+		jsonrpc: '2.0',
+		id: 3,
+		method: 'workspace/workspaceFolders',
+	});
+
+	t.deepEqual(JSON.parse(outgoingMessages[0].split('\r\n\r\n')[1]), {
+		jsonrpc: '2.0',
+		id: 3,
+		result: [{uri: 'file:///test/workspace', name: 'workspace'}],
+	});
+});
+
+test('LSPClient - unsupported server request returns method not found', t => {
+	const client = new LSPClient(createMockConfig());
+	const outgoingMessages: string[] = [];
+	const mockStdin = new Writable({
+		write(chunk: any, _encoding: any, callback: any) {
+			outgoingMessages.push(chunk.toString());
+			callback();
+		},
+	});
+	(client as any).process = {stdin: mockStdin};
+
+	const handleMessage = (client as any).handleMessage.bind(client);
+	handleMessage({
+		jsonrpc: '2.0',
+		id: 1,
+		method: 'unsupported/method',
+	});
+
+	t.deepEqual(JSON.parse(outgoingMessages[0].split('\r\n\r\n')[1]), {
+		jsonrpc: '2.0',
+		id: 1,
+		error: {
+			code: -32601,
+			message: 'Method not found: unsupported/method',
+		},
+	});
+});
+
 test('LSPClient - handleMessage rejects pending request on error', async t => {
 	const client = new LSPClient(createMockConfig());
 	const requestId = 1;
