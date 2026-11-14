@@ -125,6 +125,25 @@ test('redactUrlSecrets preserves Azure deployment names and model identifiers', 
 		),
 		'https://my-resource.openai.azure.com/openai/deployments/gpt-4o-mini-deployment/chat/completions',
 	);
+	t.is(
+		redactUrlSecrets('https://example.com/deployments/MyDeployment2024'),
+		'https://example.com/deployments/MyDeployment2024',
+	);
+	t.is(
+		redactUrlSecrets('https://example.com/models/Qwen3Coder30B'),
+		'https://example.com/models/Qwen3Coder30B',
+	);
+});
+
+test('redactUrlSecrets masks 16-23 character opaque hex and alphanumeric tokens', t => {
+	t.is(
+		redactUrlSecrets('https://proxy.example.com/v1/abcdef1234567890abcd'),
+		'https://proxy.example.com/v1/<redacted>',
+	);
+	t.is(
+		redactUrlSecrets('https://proxy.example.com/v1/abc123def456ghi789jk'),
+		'https://proxy.example.com/v1/<redacted>',
+	);
 });
 
 test('redactUrlSecrets masks short webhook tokens and high-entropy segments', t => {

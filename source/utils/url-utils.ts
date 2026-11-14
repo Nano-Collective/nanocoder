@@ -93,15 +93,31 @@ const TOKEN_PREFIX_REGEX =
 	/^(sk-[a-zA-Z0-9_-]+|ghp_[a-zA-Z0-9]+|gho_[a-zA-Z0-9]+|pat-[a-zA-Z0-9_-]+|key-[a-zA-Z0-9_-]+|token[-_][a-zA-Z0-9_-]+|sec[-_][a-zA-Z0-9_-]+)$/i;
 const UUID_REGEX =
 	/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const HEX_HASH_REGEX = /^[0-9a-fA-F]{24,}$/;
+const HEX_HASH_REGEX = /^[0-9a-fA-F]{16,}$/;
 
-function isModelOrDeploymentName(segment: string): boolean {
+function isModelOrDeploymentName(
+	segment: string,
+	prevSegment?: string,
+): boolean {
 	const lower = segment.toLowerCase();
+	if (prevSegment) {
+		const prevLower = prevSegment.toLowerCase();
+		if (
+			prevLower === 'models' ||
+			prevLower === 'model' ||
+			prevLower === 'deployments' ||
+			prevLower === 'deployment'
+		) {
+			return true;
+		}
+	}
 	if (
 		lower.endsWith('-deployment') ||
 		lower.endsWith('_deployment') ||
+		lower.endsWith('deployment') ||
 		lower.endsWith('-model') ||
-		lower.endsWith('_model')
+		lower.endsWith('_model') ||
+		lower.endsWith('model')
 	) {
 		return true;
 	}
@@ -118,12 +134,18 @@ function isOpaqueToken(segment: string, prevSegment: string): boolean {
 	if (SAFE_API_SEGMENTS.has(lower)) {
 		return false;
 	}
+	// Model and deployment names should never be masked as tokens
+	if (isModelOrDeploymentName(segment, prevSegment)) {
+		return false;
+	}
 	if (TOKEN_PREFIX_REGEX.test(segment)) {
 		return true;
 	}
+	// Hex hash of 16+ characters (e.g. /v1/abcdef1234567890abcd) or UUID
 	if (UUID_REGEX.test(segment) || HEX_HASH_REGEX.test(segment)) {
 		return true;
 	}
+	// Segment following secret container path (e.g. /hooks/abc123XYZ789)
 	if (prevSegment && SECRET_CONTAINER_SEGMENTS.has(prevSegment.toLowerCase())) {
 		return true;
 	}
@@ -138,7 +160,18 @@ function isOpaqueToken(segment: string, prevSegment: string): boolean {
 	) {
 		return true;
 	}
-	if (segment.length >= 24 && !isModelOrDeploymentName(segment)) {
+	// Alphanumeric opaque tokens of 16+ characters (e.g. /v1/abc123def456ghi789jk)
+	if (
+		segment.length >= 16 &&
+		/[a-zA-Z]/.test(segment) &&
+		/\d/.test(segment) &&
+		!segment.includes('-') &&
+		!segment.includes('.')
+	) {
+		return true;
+	}
+	// Generic long opaque segment
+	if (segment.length >= 24) {
 		return true;
 	}
 	return false;
