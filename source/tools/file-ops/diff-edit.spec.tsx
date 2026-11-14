@@ -84,6 +84,30 @@ function diffBlock(search: string, replace: string): string {
 
 const sampleDiff = diffBlock('const oldValue = 1;', 'const newValue = 2;');
 
+for (const eol of ['\n', '\r\n']) {
+	test(`parseDiffEditBlocks preserves marker-like content with ${JSON.stringify(eol)}`, t => {
+		const search = ['Title', '==========', 'inline ======= text'].join(eol);
+		const replace = ['New Title', '==========', 'inline >>>>>>> REPLACE text'].join(eol);
+		const diff = [searchMarker, search, separatorMarker, replace, replaceMarker].join(eol);
+		t.deepEqual(parseDiffEditBlocks(diff), [{search, replace}]);
+	});
+}
+
+test('parseDiffEditBlocks rejects inline markers', t => {
+	t.throws(() => parseDiffEditBlocks(`prefix ${sampleDiff}`), {
+		message: /Missing <<<<<<< SEARCH marker/,
+	});
+	t.throws(() => parseDiffEditBlocks(diffBlock('Title\n==========', 'New Title').replace(`\n${separatorMarker}\n`, '\n')), {
+		message: /missing ======= separator/,
+	});
+});
+
+test('diff_edit preserves long equals underlines when applying an edit', async t => {
+	const filePath = await createTestFile('heading.rst', 'Title\n==========\n\nBody\n');
+	await executeDiffEdit({path: filePath, diff: diffBlock('Title\n==========', 'New Title\n==========')});
+	t.is(await readFile(filePath, 'utf-8'), 'New Title\n==========\n\nBody\n');
+});
+
 test('diff_edit requires approval in normal mode', async t => {
 	t.true(
 		await resolveToolApproval(diffEditTool.name, diffEditTool, {
