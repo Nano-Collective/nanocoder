@@ -257,11 +257,11 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 			await baseClear();
 			// Background jobs belong to the session being cleared; stop them so
 			// they do not linger under a session id that no longer exists.
-			if (props.currentSessionId) {
-				await bashExecutor.stopSessionJobs(props.currentSessionId);
+			if (currentSessionId) {
+				await bashExecutor.stopSessionJobs(currentSessionId);
 			}
-			props.setChatComponents([]);
-			props.setCurrentSessionId(null);
+			setChatComponents([]);
+			setCurrentSessionId(null);
 			// Reset the key-generator session ID so keys in the new conversation
 			// are not prefixed with the cleared session's ID. A fresh random ID
 			// will be lazily generated on the next generateKey() call.
@@ -272,6 +272,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 		[
 			updateMessages,
 			client,
+			currentSessionId,
 			setChatComponents,
 			setCurrentSessionId,
 			setLiveTaskList,

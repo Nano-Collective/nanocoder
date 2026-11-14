@@ -3,7 +3,7 @@ import {
 	TRUNCATION_OUTPUT_LIMIT,
 } from '@/constants';
 import {type BashJobOutput, bashExecutor} from '@/services/bash-executor';
-import {truncateToolResult} from '@/utils/truncate-tool-result';
+import {truncateToolResult} from '@/tools/runtime/truncate-tool-result';
 
 /**
  * How long `execute_bash run_in_background` waits for the job's first output
