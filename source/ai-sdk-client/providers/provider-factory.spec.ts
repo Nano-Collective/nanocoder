@@ -1,4 +1,5 @@
 import test from 'ava';
+import {createServer, type ServerResponse} from 'node:http';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -499,6 +500,69 @@ test.serial('createProvider throws when github-copilot has no stored credential'
 		}
 		fs.rmSync(tmpDir, {recursive: true, force: true});
 	}
+});
+
+test('createUndiciFetch forwards a complete event before the next chunk', async t => {
+	const event = 'data: {"content":"first"}\n\n';
+	let stream: ServerResponse | undefined;
+	const server = createServer((_req, res) => {
+		stream = res;
+		res.writeHead(200, {'Content-Type': 'text/event-stream'});
+		res.write(event);
+	});
+	const agent = new Agent();
+	t.teardown(async () => {
+		stream?.end();
+		await agent.destroy();
+		await new Promise<void>(resolve => server.close(() => resolve()));
+	});
+	await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+	const address = server.address();
+	if (!address || typeof address === 'string') throw new Error('Missing port');
+	const response = await createUndiciFetch(agent)(`http://127.0.0.1:${address.port}`);
+	const reader = response.body!.getReader();
+	let received = '';
+	const firstEvent = async () => {
+		while (!received.includes('\n\n')) {
+			const {value, done} = await reader.read();
+			if (done) break;
+			received += new TextDecoder().decode(value);
+		}
+		return received;
+	};
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	try {
+		const result = await Promise.race([
+			firstEvent(),
+			new Promise<string>(resolve => {timer = setTimeout(() => resolve('event stalled'), 1000);}),
+		]);
+		t.is(result, event);
+	} finally {
+		clearTimeout(timer);
+		await reader.cancel();
+	}
+});
+
+test('createUndiciFetch repairs a DONE marker delivered one character at a time', async t => {
+	const input = 'data:  [DONE]\n\n';
+	const server = createServer(async (_req, res) => {
+		res.writeHead(200, {'Content-Type': 'text/event-stream'});
+		for (const char of input) {
+			res.write(char);
+			await new Promise(resolve => setTimeout(resolve, 2));
+		}
+		res.end();
+	});
+	const agent = new Agent();
+	t.teardown(async () => {
+		await agent.destroy();
+		await new Promise<void>(resolve => server.close(() => resolve()));
+	});
+	await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+	const address = server.address();
+	if (!address || typeof address === 'string') throw new Error('Missing port');
+	const response = await createUndiciFetch(agent)(`http://127.0.0.1:${address.port}`);
+	t.is(await response.text(), 'data: [DONE]\n\n');
 });
 
 test('createUndiciFetch patches double spaces in SSE data: [DONE]', async t => {
