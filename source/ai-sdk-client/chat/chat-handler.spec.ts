@@ -1490,7 +1490,7 @@ test.serial('a model that rejects native tools is retried with XML tool definiti
 		'local-model-without-tools',
 		body =>
 			body.tools
-				? badRequest('registry.ollama.ai/library/local-model does not support tools')
+				? badRequest('This model does not support tools')
 				: sseReply('<read_file><path>hello.txt</path></read_file>'),
 	);
 
@@ -1510,6 +1510,34 @@ test.serial('a model that rejects native tools is retried with XML tool definiti
 	t.is(bodies.length, 3);
 	t.falsy(bodies[2]?.tools);
 	t.true(systemPrompt(bodies[2]).includes('## AVAILABLE TOOLS'));
+});
+
+test.serial('an invalid tool schema is surfaced without fallback or model caching', async t => {
+	const {bodies, run, systemPrompt} = await chatWithToolRejectingServer(
+		'local-model-invalid-tool-schema',
+		() =>
+			badRequest(
+				"Invalid schema for function 'mcp_broken': 'additionalProperties' is required",
+			),
+	);
+
+	const firstError = await t.throwsAsync(run());
+	t.regex(
+		firstError?.message ?? '',
+		/Invalid schema for function 'mcp_broken': 'additionalProperties' is required/,
+	);
+	t.is(bodies.length, 1);
+	t.truthy(bodies[0]?.tools);
+	t.false(systemPrompt(bodies[0]).includes('## AVAILABLE TOOLS'));
+
+	const secondError = await t.throwsAsync(run());
+	t.regex(
+		secondError?.message ?? '',
+		/Invalid schema for function 'mcp_broken': 'additionalProperties' is required/,
+	);
+	t.is(bodies.length, 2);
+	t.truthy(bodies[1]?.tools);
+	t.false(systemPrompt(bodies[1]).includes('## AVAILABLE TOOLS'));
 });
 
 test.serial("tune's XML/JSON tool mode keeps native tools off the request", async t => {
