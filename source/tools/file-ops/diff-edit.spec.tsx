@@ -540,6 +540,105 @@ test('diff_edit keeps $ tokens literal across multiple blocks', async t => {
 	);
 });
 
+// ============================================================================
+// CRLF files (#1993)
+// ============================================================================
+
+test('diff_edit: multi-line LF block matches a CRLF file', async t => {
+	const filePath = await createTestFile('a.txt', 'one\r\ntwo\r\nthree\r\n');
+
+	const result = await executeDiffEdit({
+		path: filePath,
+		diff: diffBlock('one\ntwo', 'one\nTWO'),
+	});
+
+	t.is(await readFile(filePath, 'utf-8'), 'one\r\nTWO\r\nthree\r\n');
+	t.regex(result, /Successfully applied 1 diff block/);
+});
+
+test('diff_edit: added lines in a CRLF file keep CRLF', async t => {
+	const filePath = await createTestFile('b.txt', 'one\r\ntwo\r\nthree\r\n');
+
+	await executeDiffEdit({
+		path: filePath,
+		diff: [
+			diffBlock('one', 'ONE\nONE-b'),
+			diffBlock('two\nthree', 'TWO\nTHREE'),
+		].join('\n\n'),
+	});
+
+	t.is(
+		await readFile(filePath, 'utf-8'),
+		'ONE\r\nONE-b\r\nTWO\r\nTHREE\r\n',
+	);
+});
+
+test('diff_edit: LF block in the LF region of a mixed file is kept as sent', async t => {
+	const filePath = await createTestFile(
+		'mixed.txt',
+		'a\r\nb\r\nc\r\nd\r\nx\ny\n',
+	);
+
+	await executeDiffEdit({
+		path: filePath,
+		diff: diffBlock('x\ny', 'X\nY'),
+	});
+
+	t.is(await readFile(filePath, 'utf-8'), 'a\r\nb\r\nc\r\nd\r\nX\nY\n');
+});
+
+test('diff_edit validator: accepts an LF block for a CRLF file', async t => {
+	const validator = diffEditTool.validator;
+	if (!validator) {
+		t.fail('diff_edit validator not defined');
+		return;
+	}
+	const filePath = await createTestFile('c.txt', 'one\r\ntwo\r\nthree\r\n');
+	markFileSeen(filePath);
+
+	const result = await validator({
+		path: projectRelativePath(filePath),
+		diff: diffBlock('one\ntwo', 'one\nTWO'),
+	});
+
+	t.deepEqual(result, {valid: true});
+});
+
+test('diff_edit validator: a missed block on a CRLF file still gives usable recovery evidence', async t => {
+	const validator = diffEditTool.validator;
+	if (!validator) {
+		t.fail('diff_edit validator not defined');
+		return;
+	}
+	const original = 'function run() {\r\n\tstart();\r\n}\r\n';
+	const filePath = await createTestFile('d.ts', original);
+	markFileSeen(filePath);
+	const replace = 'function run() {\n\tfinish();\n}';
+
+	const result = await validator({
+		path: projectRelativePath(filePath),
+		diff: diffBlock('function run() {\n  start();\n}', replace),
+	});
+
+	t.false(result.valid);
+	if (result.valid) return;
+	const recovery = JSON.parse(
+		result.error.split('Edit recovery evidence (JSON):\n')[1],
+	);
+	t.is(recovery.status, 'candidate_found');
+	const actualText: string = recovery.candidates[0].actualText;
+
+	await executeDiffEdit({
+		path: filePath,
+		diff: diffBlock(actualText, replace),
+	});
+
+	t.is(
+		await readFile(filePath, 'utf-8'),
+		'function run() {\r\n\tfinish();\r\n}\r\n',
+	);
+});
+
 test('diff_edit formatter renders description when provided', async t => {
 	const formatter = diffEditTool.formatter;
 	if (!formatter) {
