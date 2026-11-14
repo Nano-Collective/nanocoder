@@ -41,7 +41,9 @@ function buildGitDiffArgs(
 	}
 
 	if (args.base) {
-		gitArgs.push(args.base);
+		// `--end-of-options` stops option parsing so the revision can never
+		// be reinterpreted as a flag (e.g. `--output=<file>`).
+		gitArgs.push('--end-of-options', args.base);
 	}
 
 	if (args.file) {
@@ -57,6 +59,14 @@ function buildGitDiffArgs(
 
 const executeGitDiff = async (args: GitDiffInput): Promise<string> => {
 	try {
+		// The base is passed to git as a positional argument, so a value
+		// starting with "-" would be parsed as an option (e.g. --output=<file>),
+		// letting a read-only tool write files. Reject it up front, mirroring
+		// the branch guard in git_log.
+		if (args.base?.startsWith('-')) {
+			return `Error: Invalid base: ${args.base}`;
+		}
+
 		const output = await execGit(buildGitDiffArgs(args));
 
 		if (!output.trim()) {
