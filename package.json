@@ -152,6 +152,7 @@
 		"files": [
 			"source/**/*.spec.ts",
 			"source/**/*.spec.tsx",
+			"scripts/**/*.spec.ts",
 			"benchmarks/**/*.spec.ts",
 			"plugins/**/*.spec.ts",
 			"plugins/**/*.spec.tsx",

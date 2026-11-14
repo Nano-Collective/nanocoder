@@ -25,26 +25,25 @@ fi
 echo -e "${YELLOW}Updating Homebrew formula to version ${VERSION}...${NC}"
 echo ""
 
-# Step 1: Update version in formula file
-echo "Step 1: Updating version number in ${FORMULA_FILE}..."
+# Step 1: Prepare the versioned tarball URL
+echo "Step 1: Preparing formula update..."
 NPM_URL="https://registry.npmjs.org/${NPM_PACKAGE}/-/nanocoder-${VERSION}.tgz"
-
-if [[ "$OSTYPE" == "darwin"* ]]; then
-  # macOS requires -i '' for in-place editing
-  sed -i '' "s|url \"https://registry.npmjs.org/${NPM_PACKAGE}/-/nanocoder-.*\.tgz\"|url \"${NPM_URL}\"|" "$FORMULA_FILE"
-else
-  # Linux
-  sed -i "s|url \"https://registry.npmjs.org/${NPM_PACKAGE}/-/nanocoder-.*\.tgz\"|url \"${NPM_URL}\"|" "$FORMULA_FILE"
-fi
 
 # Step 2: Download tarball and calculate SHA256
 echo "Step 2: Downloading tarball from NPM..."
 echo "URL: ${NPM_URL}"
 
 TEMP_FILE=$(mktemp)
-trap "rm -f ${TEMP_FILE}" EXIT
+FORMULA_TEMP=""
+cleanup() {
+  rm -f "$TEMP_FILE"
+  if [ -n "$FORMULA_TEMP" ]; then
+    rm -f "$FORMULA_TEMP"
+  fi
+}
+trap cleanup EXIT
 
-if ! curl -sSL "${NPM_URL}" -o "${TEMP_FILE}"; then
+if ! curl --fail -sSL "${NPM_URL}" -o "${TEMP_FILE}"; then
   echo -e "${RED}Error: Failed to download tarball from NPM${NC}"
   echo "Please verify that version ${VERSION} has been published to NPM"
   echo "Check: https://www.npmjs.com/package/${NPM_PACKAGE}"
@@ -72,22 +71,33 @@ fi
 echo -e "${GREEN}Found hash: ${SHA256}${NC}"
 echo ""
 
-# Step 4: Update formula with real hash
+# Step 4: Update and validate a temporary formula
 echo "Step 4: Updating formula with calculated hash..."
+FORMULA_TEMP=$(mktemp "${FORMULA_FILE}.XXXXXX")
+cp -p "$FORMULA_FILE" "$FORMULA_TEMP"
+
 if [[ "$OSTYPE" == "darwin"* ]]; then
-  sed -i '' "s/sha256 \".*\"/sha256 \"${SHA256}\"/" "$FORMULA_FILE"
+  # macOS requires -i '' for in-place editing
+  sed -i '' "s|url \"https://registry.npmjs.org/${NPM_PACKAGE}/-/nanocoder-.*\.tgz\"|url \"${NPM_URL}\"|" "$FORMULA_TEMP"
 else
-  sed -i "s/sha256 \".*\"/sha256 \"${SHA256}\"/" "$FORMULA_FILE"
+  # Linux
+  sed -i "s|url \"https://registry.npmjs.org/${NPM_PACKAGE}/-/nanocoder-.*\.tgz\"|url \"${NPM_URL}\"|" "$FORMULA_TEMP"
+fi
+if [[ "$OSTYPE" == "darwin"* ]]; then
+  sed -i '' "s/sha256 \".*\"/sha256 \"${SHA256}\"/" "$FORMULA_TEMP"
+else
+  sed -i "s/sha256 \".*\"/sha256 \"${SHA256}\"/" "$FORMULA_TEMP"
 fi
 
 # Step 5: Validate formula syntax
 echo "Step 5: Validating formula syntax..."
-if ! ruby -c "$FORMULA_FILE" > /dev/null 2>&1; then
+if ! ruby -c "$FORMULA_TEMP" > /dev/null 2>&1; then
   echo -e "${RED}✗ Formula has syntax errors${NC}"
-  ruby -c "$FORMULA_FILE"
+  ruby -c "$FORMULA_TEMP"
   exit 1
 fi
 
+mv "$FORMULA_TEMP" "$FORMULA_FILE"
 echo -e "${GREEN}✓ Formula syntax is valid${NC}"
 
 # Step 6: Audit formula (if brew is available)
