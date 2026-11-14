@@ -809,7 +809,7 @@ export class AcpAgent implements Agent {
 				providerId,
 				undefined,
 				undefined,
-				{strictProvider: true},
+				{strictProvider: true, allowEmptyModel: true},
 			);
 
 			// Keep the session's model when the new provider has it.

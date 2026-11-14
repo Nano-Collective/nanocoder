@@ -31,26 +31,26 @@ export class ConfigurationError extends Error {
 	}
 }
 
+type ClientSelectionOptions = {
+	strictProvider?: boolean;
+	/** Provider selection may leave a session without a model until one is chosen. */
+	allowEmptyModel?: boolean;
+};
+
 export async function createLLMClient(
 	provider?: string,
 	model?: string,
 	overrides?: Partial<
 		Pick<AIProviderConfig, 'contextWindow' | 'contextWindows'>
 	>,
-	options: {strictProvider?: boolean} = {},
+	options: ClientSelectionOptions = {},
 ): Promise<{client: LLMClient; actualProvider: string}> {
 	// Check if agents.config.json exists
 	const agentsJsonPath = getClosestConfigFile('agents.config.json');
 	const hasConfigFile = existsSync(agentsJsonPath);
 
 	// Use AI SDK - it handles both tool-calling and non-tool-calling models
-	return createAISDKClient(
-		provider,
-		model,
-		hasConfigFile,
-		overrides,
-		options.strictProvider,
-	);
+	return createAISDKClient(provider, model, hasConfigFile, overrides, options);
 }
 
 async function createAISDKClient(
@@ -60,7 +60,10 @@ async function createAISDKClient(
 	overrides?: Partial<
 		Pick<AIProviderConfig, 'contextWindow' | 'contextWindows'>
 	>,
-	strictProvider = false,
+	{
+		strictProvider = false,
+		allowEmptyModel = false,
+	}: ClientSelectionOptions = {},
 ): Promise<{client: LLMClient; actualProvider: string}> {
 	// Load provider configs
 	const providers = loadProviderConfigs();
@@ -146,12 +149,24 @@ async function createAISDKClient(
 			resolveProviderName(preferences.lastProvider) || providers[0].name;
 	}
 
+	const resolvedProviderConfig =
+		providers.find(p => p.name === targetProvider) || providers[0];
+	if (
+		!allowEmptyModel &&
+		!requestedModel &&
+		!resolvedProviderConfig.models[0]
+	) {
+		throw new ConfigurationError(
+			`Provider '${targetProvider}' has no models configured. Add a "models" list in ${configPath} or pass --model.`,
+			configPath,
+			cwdPath,
+			false,
+		);
+	}
+
 	// Validate model exists in the target provider's model list if specified
 	if (requestedModel) {
-		const resolvedProviderConfig =
-			providers.find(p => p.name === targetProvider) || providers[0];
 		if (
-			resolvedProviderConfig &&
 			resolvedProviderConfig.models.length > 0 &&
 			!resolvedProviderConfig.models.includes(requestedModel)
 		) {
