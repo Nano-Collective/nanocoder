@@ -13,8 +13,8 @@ import {
 	buildFailureCapsule,
 	type RerunCommand,
 } from '@/tools/bash-failure-capsule';
-import {truncateToolResult} from '@/tools/runtime/truncate-tool-result';
 import {formatBackgroundStart, startBackgroundJob} from '@/tools/bash-jobs';
+import {truncateToolResult} from '@/tools/runtime/truncate-tool-result';
 import type {NanocoderToolExport, StructuredToolOutput} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 
