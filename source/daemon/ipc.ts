@@ -115,9 +115,9 @@ export class DaemonIpcServer {
 	}
 
 	private handleLine(socket: Socket, line: string): void {
-		let req: IpcRequest;
+		let parsed: unknown;
 		try {
-			req = JSON.parse(line) as IpcRequest;
+			parsed = JSON.parse(line);
 		} catch {
 			socket.write(
 				`${JSON.stringify({
@@ -127,6 +127,21 @@ export class DaemonIpcServer {
 			);
 			return;
 		}
+
+		if (
+			!parsed ||
+			typeof parsed !== 'object' ||
+			Array.isArray(parsed) ||
+			!('id' in parsed) ||
+			typeof parsed.id !== 'number' ||
+			!Number.isFinite(parsed.id) ||
+			!('method' in parsed) ||
+			typeof parsed.method !== 'string'
+		) {
+			this.respond(socket, 0, undefined, 'invalid request');
+			return;
+		}
+		const req = parsed as IpcRequest;
 
 		try {
 			switch (req.method) {
