@@ -22,7 +22,7 @@ let fileListCache: FileListCache | null = null;
 /**
  * Get list of all files in the project (respecting gitignore)
  */
-async function getAllFiles(cwd: string): Promise<string[]> {
+export async function getAllFiles(cwd: string): Promise<string[]> {
 	// Check cache
 	const now = Date.now();
 	if (fileListCache && now - fileListCache.timestamp < CACHE_FILE_LIST_TTL_MS) {
