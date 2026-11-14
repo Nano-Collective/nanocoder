@@ -678,6 +678,9 @@
 				"disableTools": {
 					"type": "boolean"
 				},
+				"extraBody": {
+					"$ref": "#/definitions/RecordStringUnknown"
+				},
 				"headers": {
 					"$ref": "#/definitions/RecordStringString"
 				},

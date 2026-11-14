@@ -16,9 +16,12 @@ Any service that exposes an OpenAI-compatible API can be added as a custom provi
 	"baseUrl": "https://my-api.example.com/v1",
 	"apiKey": "optional-api-key",
 	"caCertPath": "/path/to/internal-ca.pem",
-	"models": ["model-name"]
+	"models": ["model-name"],
+	"extraBody": {"top_k": 40, "chat_template_kwargs": {"enable_thinking": false}}
 }
 ```
+
+`extraBody` forwards additional JSON fields to OpenAI-compatible chat endpoints. It is useful for endpoint-specific parameters that Nanocoder does not model; the active model, messages, tools, and streaming mode remain controlled by Nanocoder. Values support the same environment-variable substitution as other provider settings.
 
 ## Optional Fields
 
@@ -29,6 +32,7 @@ Custom providers support all [provider configuration fields](index.md#provider-c
 - `disableTools` - Disable tool calling for this provider
 - `disableToolModels` - Disable tool calling for specific models
 - `includeUsage` - Request streaming token usage metrics (default: `true`). Set to `false` for proxies that reject `stream_options`
+- `extraBody` - Additional request-body fields for OpenAI-compatible chat endpoints
 - `caCertPath` - Path to a PEM CA bundle for self-signed or privately issued TLS certificates
 
 ## Setup via Wizard
