@@ -141,6 +141,10 @@ const SECRET_KEY_SEGMENTS = new Set([
 	'apikey',
 	'accesskey',
 	'privatekey',
+	'key',
+	'subscription',
+	'signature',
+	'sig',
 ]);
 
 /** Whether a key names a credential. See SECRET_KEY_SEGMENTS. */
@@ -170,7 +174,19 @@ export function redactValue(
 	value: unknown,
 	keyHint = '',
 ): {value: unknown; redacted: boolean} {
-	if (isSecretKey(keyHint) && !isEnvReference(value)) {
+	return redactConfigValue(value, keyHint);
+}
+
+function redactConfigValue(
+	value: unknown,
+	keyHint: string,
+	rawValue?: unknown,
+): {value: unknown; redacted: boolean} {
+	const resolvedReference =
+		typeof rawValue === 'string' &&
+		rawValue !== value &&
+		/\$\{?[A-Za-z_]/.test(rawValue);
+	if (resolvedReference || (isSecretKey(keyHint) && !isEnvReference(value))) {
 		if (value === undefined || value === null || value === '') {
 			return {value, redacted: false};
 		}
@@ -179,8 +195,24 @@ export function redactValue(
 
 	if (Array.isArray(value)) {
 		let redacted = false;
+		let secretArgument = false;
 		const mapped = value.map(item => {
-			const result = redactValue(item, keyHint);
+			const hint = secretArgument ? 'secret' : keyHint;
+			secretArgument = false;
+			if (keyHint === 'args' && hint !== 'secret' && typeof item === 'string') {
+				const equals = item.indexOf('=');
+				const flag = equals === -1 ? item : item.slice(0, equals);
+				if (flag.startsWith('-') && isSecretKey(flag)) {
+					if (equals === -1) {
+						secretArgument = true;
+						return item;
+					}
+					const result = redactConfigValue(item.slice(equals + 1), 'secret');
+					redacted ||= result.redacted;
+					return `${flag}=${result.value}`;
+				}
+			}
+			const result = redactConfigValue(item, hint);
 			redacted ||= result.redacted;
 			return result.value;
 		});
@@ -191,11 +223,45 @@ export function redactValue(
 		let redacted = false;
 		const mapped: Record<string, unknown> = {};
 		for (const [key, item] of Object.entries(value)) {
-			const result = redactValue(item, key);
+			const raw = isObject(rawValue)
+				? rawValue[key]
+				: key === 'env'
+					? value.rawEnv
+					: key === 'headers'
+						? value.rawHeaders
+						: undefined;
+			const result = redactConfigValue(item, key, raw);
 			redacted ||= result.redacted;
 			mapped[key] = result.value;
 		}
 		return {value: redacted ? mapped : value, redacted};
+	}
+
+	if (typeof value === 'string' && /^[a-z][a-z0-9+.-]*:\/\//i.test(value)) {
+		try {
+			const url = new URL(value);
+			let redacted = false;
+			if (url.username || url.password) {
+				url.username = REDACTED;
+				url.password = '';
+				redacted = true;
+			}
+			for (const key of new Set(url.searchParams.keys())) {
+				if (isSecretKey(key)) {
+					url.searchParams.set(key, REDACTED);
+					redacted = true;
+				}
+			}
+			return {value: redacted ? url.toString() : value, redacted};
+		} catch {
+			// An invalid credential-bearing URL must not leak through diagnostics.
+			if (
+				value.includes('@') ||
+				/[?&][^=]*(?:key|token|secret|password|signature)=/i.test(value)
+			) {
+				return {value: REDACTED, redacted: true};
+			}
+		}
 	}
 
 	return {value, redacted: false};
