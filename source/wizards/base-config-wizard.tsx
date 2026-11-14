@@ -1,4 +1,3 @@
-import {spawnSync} from 'node:child_process';
 import {
 	existsSync,
 	mkdirSync,
@@ -15,6 +14,7 @@ import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {getColors} from '@/config/index';
 import {getConfigPath} from '@/config/paths';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
+import {openInEditor as launchEditor} from '@/utils/editor';
 import {formatError} from '@/utils/error-formatter';
 import {notifyError, notifyInfo} from '@/utils/message-queue-core';
 import {type ConfigLocation, LocationStep} from './steps/location-step';
@@ -64,14 +64,6 @@ export interface BaseConfigWizardProps<T> {
 	projectDir: string;
 	onComplete: (configPath: string) => void;
 	onCancel?: () => void;
-}
-
-function detectEditor(): string {
-	return (
-		process.env.EDITOR ||
-		process.env.VISUAL ||
-		(process.platform === 'win32' ? 'notepad' : 'nano')
-	);
 }
 
 export function BaseConfigWizard<T>({
@@ -213,42 +205,27 @@ export function BaseConfigWizard<T>({
 				writeConfigToDisk(items);
 			}
 
-			const editor = detectEditor();
+			launchEditor(configPath);
 
-			process.stdout.write('\x1B[?25h');
-			process.stdin.setRawMode?.(false);
-
-			const result = spawnSync(editor, [configPath], {stdio: 'inherit'});
-
-			process.stdin.setRawMode?.(true);
-			process.stdout.write('\x1B[?25l');
-
-			if (result.status === 0) {
-				if (existsSync(configPath)) {
-					try {
-						const editedContent = readFileSync(configPath, 'utf-8');
-						const editedRaw = JSON.parse(editedContent) as unknown;
-						setItems(parseConfig(editedRaw));
-						setConfigCorrupted(false);
-					} catch (parseErr) {
-						setError(
-							parseErr instanceof Error
-								? `Invalid JSON: ${parseErr.message}`
-								: 'Failed to parse edited configuration',
-						);
-						setStep('summary');
-						return;
-					}
+			if (existsSync(configPath)) {
+				try {
+					const editedContent = readFileSync(configPath, 'utf-8');
+					const editedRaw = JSON.parse(editedContent) as unknown;
+					setItems(parseConfig(editedRaw));
+					setConfigCorrupted(false);
+				} catch (parseErr) {
+					setError(
+						parseErr instanceof Error
+							? `Invalid JSON: ${parseErr.message}`
+							: 'Failed to parse edited configuration',
+					);
+					setStep('summary');
+					return;
 				}
-				setStep('summary');
-				setError(null);
-			} else {
-				setError('Editor exited with an error. Changes may not be saved.');
-				setStep('summary');
 			}
+			setStep('summary');
+			setError(null);
 		} catch (err) {
-			process.stdin.setRawMode?.(true);
-			process.stdout.write('\x1B[?25l');
 			setError(
 				err instanceof Error
 					? `Failed to open editor: ${err.message}`
