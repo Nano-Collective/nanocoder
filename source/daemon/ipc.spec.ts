@@ -1,11 +1,11 @@
 import {createConnection} from 'node:net';
-import {randomUUID} from 'node:crypto';
-import {mkdtemp, rm} from 'node:fs/promises';
+import {mkdir, mkdtemp, rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
 import type {Subscription} from '@/events/types';
 import {DaemonIpcClient, DaemonIpcServer} from './ipc';
+import {resolveSocketPath} from './lockfile';
 
 console.log(`\nipc.spec.ts`);
 
@@ -20,7 +20,8 @@ test.serial('malformed requests leave the socket usable for a valid ping', async
 		await server.stop();
 		await rm(dir, {recursive: true, force: true});
 	});
-	const invalid = [null, 42, 'ping', true, [], {}, {id: '1', method: 'ping'}, {id: 1, method: null}, {id: 1e309, method: 'ping'}];
+	const invalid = [null, 42, 'ping', true, [], {}, {id: '1', method: 'ping'}, {id: 1, method: null}].map(value => JSON.stringify(value));
+	invalid.push('{"id":1e309,"method":"ping"}');
 	const responses = await new Promise<Array<{id: number; result?: string; error?: string}>>((resolve, reject) => {
 		let buffer = '';
 		const received: Array<{id: number; result?: string; error?: string}> = [];
@@ -35,7 +36,7 @@ test.serial('malformed requests leave the socket usable for a valid ping', async
 			if (received.length === invalid.length + 1) resolve(received);
 		});
 		socket.once('connect', () => {
-			socket.write([...invalid, {id: 7, method: 'ping'}].map(value => JSON.stringify(value)).join('\n') + '\n');
+			socket.write([...invalid, JSON.stringify({id: 7, method: 'ping'})].join('\n') + '\n');
 		});
 	});
 	t.deepEqual(responses.slice(0, -1), invalid.map(() => ({id: 0, error: 'invalid request'})));
@@ -44,9 +45,8 @@ test.serial('malformed requests leave the socket usable for a valid ping', async
 
 async function makeSocketPath(): Promise<{path: string; dir: string}> {
 	const dir = await mkdtemp(join(tmpdir(), 'ipc-spec-'));
-	const path = process.platform === 'win32'
-		? `\\\\.\\pipe\\nanocoder-ipc-${randomUUID()}`
-		: join(dir, 'daemon.sock');
+	await mkdir(join(dir, '.nanocoder'));
+	const path = resolveSocketPath(dir, process.platform, tmpdir());
 	return {path, dir};
 }
 
