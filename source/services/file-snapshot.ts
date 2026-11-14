@@ -233,13 +233,22 @@ export class FileSnapshotService {
 			// the common path - HEAD exists - must cost a single spawn. Rather
 			// than probing with `git rev-parse --verify HEAD` first, ask for the
 			// diff and let the unborn case fail.
+			// git C-quotes paths containing non-ASCII bytes by default:
+			// `café.txt` comes back as `"caf\303\251.txt"`, quotes and octal
+			// escapes included. That is not a path any fs call can open, so
+			// those files were silently dropped from every checkpoint.
+			// `core.quotePath=false` makes git print the raw bytes instead.
 			let modifiedOutput = '';
 			try {
-				modifiedOutput = execFileSync('git', ['diff', '--name-only', 'HEAD'], {
-					cwd: this.workspaceRoot,
-					encoding: 'utf-8',
-					stdio: ['pipe', 'pipe', 'pipe'],
-				}).trim();
+				modifiedOutput = execFileSync(
+					'git',
+					['-c', 'core.quotePath=false', 'diff', '--name-only', 'HEAD'],
+					{
+						cwd: this.workspaceRoot,
+						encoding: 'utf-8',
+						stdio: ['pipe', 'pipe', 'pipe'],
+					},
+				).trim();
 			} catch {
 				// Unborn HEAD: nothing to diff against, but the index can still be
 				// full (`git init && git add .`, or `git checkout --orphan`, which
@@ -248,7 +257,7 @@ export class FileSnapshotService {
 				// captured rather than silently skipped.
 				modifiedOutput = execFileSync(
 					'git',
-					['diff', '--name-only', '--cached'],
+					['-c', 'core.quotePath=false', 'diff', '--name-only', '--cached'],
 					{
 						cwd: this.workspaceRoot,
 						encoding: 'utf-8',
@@ -259,7 +268,13 @@ export class FileSnapshotService {
 
 			const untrackedOutput = execFileSync(
 				'git',
-				['ls-files', '--others', '--exclude-standard'],
+				[
+					'-c',
+					'core.quotePath=false',
+					'ls-files',
+					'--others',
+					'--exclude-standard',
+				],
 				{
 					cwd: this.workspaceRoot,
 					encoding: 'utf-8',
