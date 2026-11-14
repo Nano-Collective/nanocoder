@@ -1,10 +1,15 @@
 import type {CustomCommandLoader} from '@/custom-commands/loader';
+import {invalidArgumentsResult} from '@/hooks/chat-handler/utils/tool-filters';
 import {maybeAutoCommit} from '@/services/auto-commit';
 import {formatWrittenFile} from '@/services/formatters';
 import {
 	appendPostToolUseOutput,
 	runPreToolUseGate,
 } from '@/services/lifecycle-hooks';
+import {parseToolArguments} from '@/tools/runtime/tool-args-parser';
+import {createCancellationResults} from '@/tools/runtime/tool-cancellation';
+import {toolErrorToContent} from '@/tools/runtime/tool-validation';
+import {truncateToolResult} from '@/tools/runtime/truncate-tool-result';
 import type {ToolManager} from '@/tools/tool-manager';
 import type {
 	ToolCall,
@@ -12,9 +17,6 @@ import type {
 	ToolHandler,
 	ToolResult,
 } from '@/types/index';
-import {parseToolArguments} from '@/utils/tool-args-parser';
-import {toolErrorToContent} from '@/utils/tool-validation';
-import {truncateToolResult} from '@/utils/truncate-tool-result';
 
 // This will be set by the ChatSession
 let toolRegistryGetter: (() => Record<string, ToolHandler>) | null = null;
@@ -55,23 +57,31 @@ export async function processToolUse(
 	toolCall: ToolCall,
 	options?: ToolExecutionContext,
 ): Promise<ToolResult> {
-	// Handle XML validation errors by throwing (will be caught and returned as error ToolResult)
-	if (toolCall.function.name === '__xml_validation_error__') {
-		const args = toolCall.function.arguments as {error: string};
-		throw new Error(args.error);
+	// Unparsable arguments arrive as `{}`. The conversation loops reject these
+	// calls before they get here; this keeps any other caller from running the
+	// tool with that placeholder.
+	if (toolCall.argumentsError !== undefined) {
+		return invalidArgumentsResult(toolCall);
 	}
 
-	if (!toolRegistryGetter) {
-		throw new Error('Tool registry not initialized');
-	}
-
-	const toolRegistry = toolRegistryGetter();
-	const handler = toolRegistry[toolCall.function.name];
-	if (!handler) {
-		throw new Error(`Unknown tool: ${toolCall.function.name}`);
+	// A cancelled turn must not start another tool. Callers that run a batch
+	// check between tools too; this covers any that don't.
+	if (options?.abortSignal?.aborted) {
+		return {...createCancellationResults([toolCall])[0], isError: true};
 	}
 
 	try {
+		const toolRegistry =
+			options?.toolManager?.getToolRegistry() ?? toolRegistryGetter?.();
+		if (!toolRegistry) {
+			throw new Error('Tool registry not initialized');
+		}
+
+		const handler = toolRegistry[toolCall.function.name];
+		if (!handler) {
+			throw new Error(`Unknown tool: ${toolCall.function.name}`);
+		}
+
 		// Parse arguments - use strict mode to throw error on parse failure
 		// Strict mode is required here to catch malformed arguments before tool execution
 		const parsedArgs = parseToolArguments<Record<string, unknown>>(
@@ -137,7 +147,11 @@ export async function processToolUse(
 		// file lands in the same commit instead of being left behind.
 		const commitNote = failed
 			? null
-			: await maybeAutoCommit(toolCall.function.name, parsedArgs);
+			: await maybeAutoCommit(
+					toolCall.function.name,
+					parsedArgs,
+					options?.client,
+				);
 
 		return {
 			tool_call_id: toolCall.id,
@@ -156,9 +170,9 @@ export async function processToolUse(
 			...(failed ? {isError: true} : {}),
 		};
 	} catch (error) {
-		// Convert exceptions (including validation failures thrown by the
-		// validated handler, and argument-parsing failures above) into
-		// content the model can see and correct. `isError: true` lets callers
+		// Convert exceptions (including an unknown tool, validation failures
+		// thrown by the validated handler, and argument-parsing failures above)
+		// into content the model can see and correct. `isError: true` lets callers
 		// building telemetry/logs (e.g. the `--json` headless report) tell
 		// this apart from a normal result without re-parsing `content`.
 		//

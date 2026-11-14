@@ -1,4 +1,5 @@
 import {getLogger} from '@/utils/logging';
+import {estimateTokens} from '@/utils/token-calculator';
 import type {MemoryFileChange, SemanticMemory} from './semantic-memory-manager';
 import {SemanticMemoryManager} from './semantic-memory-manager';
 
@@ -24,10 +25,6 @@ export const MIN_MEMORY_LIMIT = 1;
 export const MAX_MEMORY_LIMIT = 50;
 export const MIN_TOKEN_BUDGET = 40;
 export const MAX_TOKEN_BUDGET = 4000;
-
-function estimateTokens(value: string): number {
-	return Math.ceil(value.length / 4);
-}
 
 /**
  * Picks a fence longer than the longest backtick run in the body, the way

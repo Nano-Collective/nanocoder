@@ -1,12 +1,21 @@
 import {AgentSideConnection, ndJsonStream} from '@agentclientprotocol/sdk';
 import {AcpAgent} from '@/acp/acp-agent';
 import type {AcpInitContext} from '@/acp/acp-types';
-import {directoryTrustRefusal} from '@/config/preferences';
+import {directoryTrustRefusal} from '@/config/trust/directory-trust';
 import {initializePlain} from '@/plain/initialize';
+import {SESSION_END_HOOK_HANDLER} from '@/services/lifecycle-hooks';
+import type {DevelopmentMode} from '@/types/index';
 import {getLogger} from '@/utils/logging';
 import {getShutdownManager} from '@/utils/shutdown';
 
 const logger = getLogger();
+
+/**
+ * Exit code when startup is refused because the folder is not trusted, so a
+ * client can show a trust prompt without matching the message. Other startup
+ * failures exit 1.
+ */
+const ACP_TRUST_REFUSED_EXIT_CODE = 3;
 
 export interface RunAcpServerOptions {
 	cliProvider?: string;
@@ -14,6 +23,8 @@ export interface RunAcpServerOptions {
 	appVersion?: string;
 	/** Trust the working directory for this run only (`--trust-directory`). */
 	trustDirectory?: boolean;
+	/** Starting mode of every session (`--mode`). */
+	mode?: DevelopmentMode;
 }
 
 export async function runAcpServer(
@@ -31,15 +42,19 @@ export async function runAcpServer(
 	if (refusal) {
 		logger.error(`ACP not started: ${refusal}`);
 		process.stderr.write(`[nanocoder] ${refusal}\n`);
-		process.exit(1);
+		process.exit(ACP_TRUST_REFUSED_EXIT_CODE);
 	}
 
 	let initContext: AcpInitContext;
 	try {
-		initContext = await initializePlain({
-			cliProvider: options.cliProvider,
-			cliModel: options.cliModel,
-		});
+		initContext = {
+			...(await initializePlain({
+				cliProvider: options.cliProvider,
+				cliModel: options.cliModel,
+			})),
+			initialMode: options.mode,
+			launchDirectory: process.cwd(),
+		};
 	} catch (error) {
 		const msg = `ACP initialization failed: ${error instanceof Error ? error.message : String(error)}`;
 		logger.error(msg);
@@ -77,13 +92,23 @@ export async function runAcpServer(
 
 	const stream = ndJsonStream(output, input);
 
+	let agent: AcpAgent | undefined;
 	const conn = new AgentSideConnection((connection: AgentSideConnection) => {
-		const agent = new AcpAgent(initContext, connection, options.appVersion);
+		agent = new AcpAgent(initContext, connection, options.appVersion);
 		return agent;
 	}, stream);
 
 	// Register graceful shutdown
 	const shutdownManager = getShutdownManager();
+	// Sessions the client never closed still get their session-end hooks, on
+	// every exit path. Same handler name and priority as the TUI and `run`.
+	shutdownManager.register({
+		name: SESSION_END_HOOK_HANDLER,
+		priority: -5,
+		handler: async () => {
+			await agent?.endAllSessions();
+		},
+	});
 	const connectionClosed = conn.closed;
 
 	// Handle connection close

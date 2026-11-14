@@ -17,8 +17,9 @@
  * a worktree. A clone has its own independent object database, so checking
  * out that same branch a second time here is never a conflict. The
  * trade-off: the clone's new commits exist only in its own `.git`, so
- * publishing them (`pushBranch`) must run with this clone as its `cwd`,
- * not the daemon's project root — see `ci-fix-orchestrator.ts`.
+ * publishing fetches them back into the project repo first rather than
+ * pushing from the clone, whose config the fix run could have rewritten -
+ * see `publishFromClone` in `ci-fix-orchestrator.ts`.
  */
 
 import {mkdtempSync, rmSync} from 'node:fs';
@@ -39,6 +40,8 @@ export interface CreateCiFixWorktreeOptions {
 	projectRoot: string;
 	originalBranch: string;
 	runId: number;
+	/** The commit the failing run tested; the fix must start from it. */
+	headSha: string;
 	trustLevel: 'auto-fix' | 'full-commit';
 }
 
@@ -78,12 +81,39 @@ export async function createCiFixWorktree(
 			clonePath,
 		]);
 
+		// The clone holds origin's branch tip, which may have moved on since
+		// the run (or never contained its commit at all). A fix built on any
+		// other commit answers the wrong failure.
+		const tip = (await execGit(['-C', clonePath, 'rev-parse', 'HEAD'])).trim();
+
 		if (opts.trustLevel === 'auto-fix') {
 			const branch = fixBranchName(opts.originalBranch, opts.runId);
-			await execGit(['-C', clonePath, 'checkout', '-b', branch]);
+			if (tip !== opts.headSha) {
+				// Earlier commit of the same branch: start the fix branch there.
+				await execGit([
+					'-C',
+					clonePath,
+					'merge-base',
+					'--is-ancestor',
+					opts.headSha,
+					'HEAD',
+				]).catch(() => {
+					throw new Error(
+						`commit ${opts.headSha.slice(0, 7)} from the failing run is not on origin/${opts.originalBranch}`,
+					);
+				});
+			}
+			await execGit(['-C', clonePath, 'checkout', '-b', branch, opts.headSha]);
 			return {path: clonePath, branch, isNewBranch: true};
 		}
 
+		// full-commit pushes onto the branch itself, so it can only build on
+		// the failing commit while that is still the tip.
+		if (tip !== opts.headSha) {
+			throw new Error(
+				`origin/${opts.originalBranch} has moved past the failing commit ${opts.headSha.slice(0, 7)} (now ${tip.slice(0, 7)}); not fixing a stale run`,
+			);
+		}
 		return {path: clonePath, branch: opts.originalBranch, isNewBranch: false};
 	} catch (err) {
 		rmSync(clonePath, {recursive: true, force: true});

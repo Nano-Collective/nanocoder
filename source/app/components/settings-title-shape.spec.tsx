@@ -4,7 +4,7 @@ import React from 'react';
 import {defaultTheme, themes} from '@/config/themes';
 import {ThemeContext} from '@/hooks/useTheme';
 import {TitleShapeContext} from '@/hooks/useTitleShape';
-import {SettingsTitleShapePanel} from './settings-selector';
+import {SettingsTitleShapePanel} from './settings-panels';
 
 console.log('\nsettings-title-shape.spec.tsx');
 

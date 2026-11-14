@@ -13,9 +13,11 @@
 
 import {createLLMClient} from '@/client-factory';
 import {getAppConfig} from '@/config/index';
+import {bootstrapProjectDotenv} from '@/config/project-dotenv';
 import {validateProjectConfigSecurity} from '@/config/validation';
 import {runCiAutoFixFlow} from '@/daemon/ci-fix-orchestrator';
 import {CheckpointManager} from '@/services/checkpoint-manager';
+import {setNotificationsConfig} from '@/services/notifications';
 import type {Checkpointer} from '@/skills/dispatcher';
 import {
 	recordSubagentApiCallForStats,
@@ -25,18 +27,18 @@ import type {SubagentResult, SubagentTask} from '@/subagents/types';
 import {ToolManager} from '@/tools/tool-manager';
 import type {DevelopmentMode} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
-import {setNotificationsConfig} from '@/utils/notifications';
 import {getShutdownManager} from '@/utils/shutdown';
 import {
 	getAllowedToolNames,
 	getHeadlessAutoApproveToolNames,
 	isTrustLevel,
-} from '@/verify/trust';
+} from '@/verify/trust-level';
 import {startDaemon} from './daemon';
+import {prepareDaemonSession} from './entry-setup';
 
 // The daemon's own `verify-ci-investigator` subagent must be pinned to a
 // trust-level tool allowlist at execution time rather than trusting its
-// frontmatter `tools:` list alone — see `source/verify/trust.ts`. Mirrors
+// frontmatter `tools:` list alone — see `source/verify/trust-level.ts`. Mirrors
 // the same `toolOverride` use `verify/cli.ts` makes for `verify-pr-review`.
 // `trustLevel` makes the executor deny any `git_pr` action the level doesn't
 // allow, and `alwaysAllow` replaces the user/project config's list: it holds
@@ -55,6 +57,9 @@ const ciInvestigatorOverride = {
 };
 
 async function main(): Promise<void> {
+	// The project .env, read from the directory the daemon was spawned in and
+	// before the chdir below, as importing config used to.
+	bootstrapProjectDotenv();
 	const projectRoot = process.env.NANOCODER_PROJECT_ROOT || process.cwd();
 
 	// Change cwd so relative paths (cron tickers, file snapshots, etc.)
@@ -89,6 +94,10 @@ async function main(): Promise<void> {
 	if (notificationsConfig) {
 		setNotificationsConfig(notificationsConfig);
 	}
+
+	// Plugins (trusted: the start command's gate already ran) and the
+	// auto-commit message client, as the TUI and --plain set them up.
+	await prepareDaemonSession(client);
 
 	const toolManager = new ToolManager();
 
@@ -159,17 +168,22 @@ async function main(): Promise<void> {
 	// Connect the project's MCP servers so triggered runs can use MCP tools,
 	// as the TUI and --plain do. A server that fails to connect is logged and
 	// skipped rather than taking the daemon down.
-	const {mcpServers} = getAppConfig();
+	const {mcpServers, tune} = getAppConfig();
 	if (mcpServers && mcpServers.length > 0) {
 		validateProjectConfigSecurity(mcpServers);
 		try {
-			await toolManager.initializeMCP(mcpServers, result => {
-				if (!result.success) {
-					console.error(
-						`MCP server failed: ${result.serverName} (${result.error})`,
-					);
-				}
-			});
+			await toolManager.initializeMCP(
+				mcpServers,
+				result => {
+					if (!result.success) {
+						console.error(
+							`MCP server failed: ${result.serverName} (${result.error})`,
+						);
+					}
+				},
+				undefined,
+				tune,
+			);
 		} catch (err) {
 			console.error(`MCP initialization error: ${formatError(err)}`);
 		}

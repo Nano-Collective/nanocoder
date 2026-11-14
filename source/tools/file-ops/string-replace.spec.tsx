@@ -5,17 +5,31 @@ import test from 'ava';
 import {render} from 'ink-testing-library';
 import React from 'react';
 import {themes} from '../../config/themes.js';
+import {MAX_CACHEABLE_FILE_SIZE_BYTES} from '../../constants.js';
 import {resolveToolApproval} from '../approval-policy.js';
 import {ThemeContext} from '../../hooks/useTheme.js';
-import {resetSessionCwd, setSessionCwd} from '../../services/session-cwd.js';
+import {
+	getProjectRoot,
+	resetSessionCwd,
+	setSessionCwd,
+} from '../../services/session-cwd.js';
+import {stringReplaceDisplayPath} from './string-replace-preview.js';
 import {stringReplaceTool} from './string-replace.js';
-import {clearReadTracker, markFileSeen} from '../../utils/read-tracker.js';
+import {clearReadTracker, markFileSeen} from '../runtime/read-tracker.js';
+import {
+	resetFirewallConfig,
+	setFirewallConfig,
+} from '../../firewall/mutation-firewall.js';
 import {readFileTool} from '../read-file.js';
 import {buildMinimalPdf} from '../../test-utils/minimal-pdf.js';
 
 // ============================================================================
 // Test Helpers
 // ============================================================================
+
+// biome-ignore lint/suspicious/noControlCharactersInRegex: stripping terminal styling before text-only assertions.
+const ANSI_RE = /\x1b\[[0-9;]*m/g;
+const stripAnsi = (value: string) => value.replace(ANSI_RE, '');
 
 console.log(`\nstring-replace.spec.tsx – ${React.version}`);
 
@@ -42,6 +56,7 @@ test.beforeEach(async () => {
 	// Read-before-edit state is process-global; reset it between serial tests
 	// so a file "seen" by one test can't authorize an edit in another.
 	clearReadTracker();
+	resetFirewallConfig();
 });
 
 // Clean up temporary directory after each test
@@ -808,7 +823,7 @@ test('string_replace validator: handles file read errors', async t => {
 	const filePath = await createTestFile('test.txt', 'content\n');
 
 	// Mock getCachedFileContent to throw an error
-	const originalCache = await import('../../utils/file-cache.js');
+	const originalCache = await import('../../utils/fs/file-cache.js');
 	const mockError = new Error('EACCES: permission denied');
 
 	// Since we can't easily mock the file cache, we'll test with an invalid path
@@ -898,6 +913,26 @@ test('string_replace formatter: preview follows the session cwd', async t => {
 	} finally {
 		resetSessionCwd();
 		await rm(root, {recursive: true, force: true});
+	}
+});
+
+test('string_replace preview labels the file the session cwd resolves to', async t => {
+	// Inside the project: relative to the project root, so a `cd sub` edit of
+	// `note.txt` reads as `sub/note.txt`, not as the root's `note.txt`.
+	setSessionCwd(join(getProjectRoot(), 'source'));
+	try {
+		t.is(stringReplaceDisplayPath('note.txt'), join('source', 'note.txt'));
+	} finally {
+		resetSessionCwd();
+	}
+	// Outside the project: absolute.
+	const outside = await mkdtemp(join(tmpdir(), 'string-replace-outside-'));
+	setSessionCwd(outside);
+	try {
+		t.is(stringReplaceDisplayPath('note.txt'), join(outside, 'note.txt'));
+	} finally {
+		resetSessionCwd();
+		await rm(outside, {recursive: true, force: true});
 	}
 });
 
@@ -1257,6 +1292,115 @@ test('string_replace validator: refuses a .docx path', async t => {
 	}
 });
 
+// ============================================================================
+// Encoding Guard Tests (#1854)
+// ============================================================================
+
+// "café" then "old", in Latin-1: the é is a lone E9 byte, not valid UTF-8.
+const LATIN1_BYTES = Buffer.from('caf\xe9\nold\n', 'latin1');
+
+test('string_replace: refuses a Latin-1 file and leaves every byte unchanged', async t => {
+	const filePath = join(testDir, 'legacy.txt');
+	await writeFile(filePath, LATIN1_BYTES);
+
+	await t.throwsAsync(
+		executeStringReplace({path: filePath, old_str: 'old', new_str: 'new'}),
+		{message: /not valid UTF-8/},
+	);
+
+	t.deepEqual(await readFile(filePath), LATIN1_BYTES);
+});
+
+test('string_replace: refuses a Latin-1 file too large for the file cache', async t => {
+	// Over the cache's single-file limit, so the read is never cached.
+	const bytes = Buffer.concat([
+		Buffer.alloc(MAX_CACHEABLE_FILE_SIZE_BYTES + 1024, 'x'),
+		Buffer.from('\n', 'latin1'),
+		LATIN1_BYTES,
+	]);
+	const filePath = join(testDir, 'large-legacy.txt');
+	await writeFile(filePath, bytes);
+
+	await t.throwsAsync(
+		executeStringReplace({path: filePath, old_str: 'old', new_str: 'new'}),
+		{message: /not valid UTF-8/},
+	);
+
+	// Buffer.equals, not deepEqual: AVA's deep diff is slow on megabytes.
+	t.true((await readFile(filePath)).equals(bytes), 'bytes unchanged');
+});
+
+test('string_replace: refuses Windows-1252 and Shift-JIS files too', async t => {
+	const files = {
+		// Windows-1252 curly quotes (93, 94) around "old".
+		'cp1252.txt': Buffer.from([0x93, 0x6f, 0x6c, 0x64, 0x94, 0x0a]),
+		// "日本" in Shift-JIS, then "old".
+		'sjis.txt': Buffer.from([0x93, 0xfa, 0x96, 0x7b, 0x0a, 0x6f, 0x6c, 0x64]),
+	};
+	for (const [name, bytes] of Object.entries(files)) {
+		const filePath = join(testDir, name);
+		await writeFile(filePath, bytes);
+
+		await t.throwsAsync(
+			executeStringReplace({path: filePath, old_str: 'old', new_str: 'new'}),
+			{message: /not valid UTF-8/},
+			name,
+		);
+		t.deepEqual(await readFile(filePath), bytes, name);
+	}
+});
+
+test('string_replace validator: refuses a Latin-1 file', async t => {
+	await writeFile(join(testDir, 'legacy.txt'), LATIN1_BYTES);
+
+	if (!stringReplaceTool.validator) {
+		t.fail('Validator not defined');
+		return;
+	}
+
+	const originalCwd = process.cwd();
+	try {
+		process.chdir(testDir);
+		markFileSeen('legacy.txt');
+
+		const result = await stringReplaceTool.validator({
+			path: 'legacy.txt',
+			old_str: 'old',
+			new_str: 'new',
+		});
+
+		t.false(result.valid);
+		if (!result.valid) {
+			t.regex(result.error, /not valid UTF-8/);
+		}
+	} finally {
+		process.chdir(originalCwd);
+	}
+});
+
+test('string_replace: edits a UTF-8 file with non-ASCII text and keeps other lines byte for byte', async t => {
+	const filePath = await createTestFile('utf8.txt', 'café ✓ 日本\nold\n');
+
+	await executeStringReplace({path: filePath, old_str: 'old', new_str: 'new'});
+
+	t.deepEqual(
+		await readFile(filePath),
+		Buffer.from('café ✓ 日本\nnew\n', 'utf-8'),
+	);
+});
+
+test('string_replace: edits a UTF-8 file with a BOM and keeps the BOM', async t => {
+	const filePath = join(testDir, 'bom.txt');
+	await writeFile(filePath, Buffer.from('﻿old\n', 'utf-8'));
+
+	await executeStringReplace({path: filePath, old_str: 'old', new_str: 'new'});
+
+	t.deepEqual(
+		await readFile(filePath),
+		Buffer.from([0xef, 0xbb, 0xbf, 0x6e, 0x65, 0x77, 0x0a]),
+	);
+});
+
 test('string_replace: numbered group tokens stay literal', async t => {
 	const filePath = await createTestFile('groups.sh', 'run "old"\n');
 
@@ -1319,5 +1463,121 @@ test('string_replace: formatter does not render description when omitted', async
 	const output = lastFrame();
 	t.truthy(output);
 	t.notRegex(output!, /Description:/);
+});
+
+
+// ============================================================================
+// CRLF files (#1930)
+// ============================================================================
+
+test('string_replace: multi-line LF edit matches a CRLF file', async t => {
+	const filePath = await createTestFile('a.txt', 'one\r\ntwo\r\nthree\r\n');
+
+	const result = await executeStringReplace({
+		path: filePath,
+		old_str: 'one\ntwo',
+		new_str: 'ONE\nTWO',
+	});
+
+	t.is(await readFile(filePath, 'utf-8'), 'ONE\r\nTWO\r\nthree\r\n');
+	t.true(result.includes('Successfully replaced content at lines 1-2'));
+});
+
+test('string_replace: added lines in a CRLF file keep CRLF', async t => {
+	const filePath = await createTestFile('b.txt', 'one\r\ntwo\r\nthree\r\n');
+
+	await executeStringReplace({
+		path: filePath,
+		old_str: 'two',
+		new_str: 'TWO\nTWO-b',
+	});
+
+	t.is(await readFile(filePath, 'utf-8'), 'one\r\nTWO\r\nTWO-b\r\nthree\r\n');
+});
+
+test('string_replace validator: accepts an LF edit for a CRLF file', async t => {
+	await createTestFile('test.txt', 'one\r\ntwo\r\nthree\r\n');
+
+	if (!stringReplaceTool.validator) {
+		t.fail('Validator not defined');
+		return;
+	}
+
+	const originalCwd = process.cwd();
+	try {
+		process.chdir(testDir);
+		markFileSeen('test.txt');
+
+		const result = await stringReplaceTool.validator({
+			path: 'test.txt',
+			old_str: 'one\ntwo',
+			new_str: 'ONE\nTWO',
+		});
+
+		t.true(result.valid);
+	} finally {
+		process.chdir(originalCwd);
+	}
+});
+
+test('string_replace formatter: previews an LF edit for a CRLF file', async t => {
+	const filePath = await createTestFile('test.ts', 'one\r\ntwo\r\nthree\r\n');
+
+	if (!stringReplaceTool.formatter) {
+		t.fail('Formatter not defined');
+		return;
+	}
+
+	const preview = await stringReplaceTool.formatter({
+		path: filePath,
+		old_str: 'one\ntwo',
+		new_str: 'ONE\nTWO',
+	});
+	const {lastFrame} = render(<TestThemeProvider>{preview}</TestThemeProvider>);
+
+	t.false(lastFrame()?.includes('Content not found') ?? true);
+	t.true(lastFrame()?.includes('ONE') ?? false);
+});
+
+test('string_replace formatter: result shows the edit line in a mixed-ending file', async t => {
+	const filePath = await createTestFile(
+		'mixed.txt',
+		'a\r\nb\r\nc\r\nd\r\nx\ny\n',
+	);
+	const args = {path: filePath, old_str: 'x\ny', new_str: 'X\nY'};
+
+	const result = await executeStringReplace(args);
+	t.is(await readFile(filePath, 'utf-8'), 'a\r\nb\r\nc\r\nd\r\nX\nY\n');
+
+	if (!stringReplaceTool.formatter) {
+		t.fail('Formatter not defined');
+		return;
+	}
+	const element = await stringReplaceTool.formatter(args, result);
+	const {lastFrame} = render(<TestThemeProvider>{element}</TestThemeProvider>);
+	t.true(stripAnsi(lastFrame() ?? '').includes('Location: lines 5-6'));
+});
+
+test('string_replace: throws when mutation firewall blocks test deletion', async t => {
+	setFirewallConfig({mode: 'strict', enabled: true});
+	const filePath = await createTestFile(
+		'feature.spec.ts',
+		"test('feature A', () => {});\ntest('feature B', () => {});\n",
+	);
+	markFileSeen(filePath);
+
+	await t.throwsAsync(
+		async () => {
+			await executeStringReplace({
+				path: filePath,
+				old_str: "test('feature B', () => {});\n",
+				new_str: '',
+			});
+		},
+		{message: /\[Mutation Firewall\] Blocked mutation/},
+	);
+
+	const content = await readFile(filePath, 'utf-8');
+	t.true(content.includes('feature B'));
 });
 

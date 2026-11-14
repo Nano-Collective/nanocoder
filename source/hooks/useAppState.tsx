@@ -1,16 +1,30 @@
 import {randomUUID} from 'node:crypto';
-import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
+import React, {
+	useCallback,
+	useEffect,
+	useMemo,
+	useReducer,
+	useRef,
+	useState,
+} from 'react';
 import type {SettingsTabId} from '@/app/components/settings-constants';
-import type {TitleShape} from '@/components/ui/styled-title';
+import {
+	type ActiveMode,
+	type ArchitectReviewState,
+	initialInputSurfaces,
+	inputSurfacesReducer,
+	type PlanReviewState,
+} from '@/app/utils/input-surfaces';
 import {getAppConfig} from '@/config/index';
 import {loadPreferences} from '@/config/preferences';
 import {defaultTheme} from '@/config/themes';
 import {resolveTune} from '@/config/tune';
+import {applyTuneCompaction} from '@/conversation/compaction/auto-compact';
 import {CustomCommandExecutor} from '@/custom-commands/executor';
 import {CustomCommandLoader} from '@/custom-commands/loader';
 import {setCliSessionId} from '@/session/cli-session-context';
-import {generateKey} from '@/session/key-generator';
 import {createTokenizer} from '@/tokenization/index.js';
+import type {PendingQuestion} from '@/tools/runtime/question-queue';
 import type {Task} from '@/tools/tasks/types';
 import {ToolManager} from '@/tools/tool-manager';
 import type {CheckpointListItem} from '@/types/checkpoint';
@@ -29,27 +43,17 @@ import {
 } from '@/types/core';
 import type {UpdateInfo} from '@/types/index';
 import type {Tokenizer} from '@/types/tokenization.js';
-import type {ThemePreset} from '@/types/ui';
-import {applyTuneCompaction} from '@/utils/auto-compact';
+import type {ThemePreset, TitleShape} from '@/types/ui';
 import {BoundedMap} from '@/utils/bounded-map';
-import type {PendingQuestion} from '@/utils/question-queue';
+import {generateKey} from '@/utils/key-generator';
 
-export type ActiveMode =
-	| 'model'
-	| 'modelDatabase'
-	| 'configWizard'
-	| 'explorer'
-	| 'ideSelection'
-	| 'checkpointLoad'
-	| 'sessionSelector'
-	| 'tune'
-	| null;
+export type {ActiveMode} from '@/app/utils/input-surfaces';
 
 export function useAppState(
 	initialDevelopmentMode: DevelopmentMode = 'normal',
 ) {
 	// Initialize theme and title shape from preferences
-	const preferences = loadPreferences();
+	const [preferences] = useState(() => loadPreferences());
 	const initialTheme = preferences.selectedTheme || defaultTheme;
 	const initialTitleShape = preferences.titleShape || 'pill';
 
@@ -102,24 +106,77 @@ export function useAppState(
 	const [isCancelling, setIsCancelling] = useState<boolean>(false);
 	const [isConversationComplete, setIsConversationComplete] =
 		useState<boolean>(false);
-	const [isSettingsMode, setIsSettingsMode] = useState<boolean>(false);
-	const [settingsActiveTab, setSettingsActiveTab] = useState<
-		SettingsTabId | undefined
-	>(undefined);
 
-	// Plan review state (post-plan-generation action bar)
-	const [planReviewState, setPlanReviewState] = useState<{
-		show: boolean;
-		originalMessage: string;
-	} | null>(null);
-
-	// Architect review state (post-turn aggregate file review)
-	const [architectReviewState, setArchitectReviewState] = useState<{
-		show: boolean;
-		checkpointName: string;
-		filesChanged: string[];
-		filesMissing: string[];
-	} | null>(null);
+	// Every surface that can take the keyboard from the chat input (modes,
+	// settings, review bars, decision prompts, live capture) in one reducer, so
+	// input-owner.ts resolves ownership from a single value. The setters below
+	// keep the useState-style API the mode handlers and commands use.
+	const [inputSurfaces, dispatchInputSurfaces] = useReducer(
+		inputSurfacesReducer,
+		initialInputSurfaces,
+	);
+	const {
+		activeMode,
+		isSettingsMode,
+		settingsActiveTab,
+		planReviewState,
+		architectReviewState,
+		isToolConfirmationMode,
+		isQuestionMode,
+		liveComponentCapturesInput,
+	} = inputSurfaces;
+	const setActiveMode = useCallback(
+		(value: ActiveMode) =>
+			dispatchInputSurfaces({type: 'set', field: 'activeMode', value}),
+		[],
+	);
+	const setIsSettingsMode = useCallback(
+		(value: boolean) =>
+			dispatchInputSurfaces({type: 'set', field: 'isSettingsMode', value}),
+		[],
+	);
+	const setSettingsActiveTab = useCallback(
+		(value: SettingsTabId | undefined) =>
+			dispatchInputSurfaces({type: 'set', field: 'settingsActiveTab', value}),
+		[],
+	);
+	const setPlanReviewState = useCallback(
+		(value: PlanReviewState) =>
+			dispatchInputSurfaces({type: 'set', field: 'planReviewState', value}),
+		[],
+	);
+	const setArchitectReviewState = useCallback(
+		(value: ArchitectReviewState) =>
+			dispatchInputSurfaces({
+				type: 'set',
+				field: 'architectReviewState',
+				value,
+			}),
+		[],
+	);
+	const setIsToolConfirmationMode = useCallback(
+		(value: boolean) =>
+			dispatchInputSurfaces({
+				type: 'set',
+				field: 'isToolConfirmationMode',
+				value,
+			}),
+		[],
+	);
+	const setIsQuestionMode = useCallback(
+		(value: boolean) =>
+			dispatchInputSurfaces({type: 'set', field: 'isQuestionMode', value}),
+		[],
+	);
+	const setLiveComponentCapturesInput = useCallback(
+		(value: boolean) =>
+			dispatchInputSurfaces({
+				type: 'set',
+				field: 'liveComponentCapturesInput',
+				value,
+			}),
+		[],
+	);
 
 	// One-shot signal: set true by the chat handler when a turn that started in
 	// plan mode completes uninterrupted. The interactive UI consumes it to show
@@ -137,8 +194,6 @@ export function useAppState(
 	const [abortController, setAbortController] =
 		useState<AbortController | null>(null);
 
-	// Unified modal/mode state - replaces 11 individual boolean states
-	const [activeMode, setActiveMode] = useState<ActiveMode>(null);
 	const [isVscodeEnabled, setIsVscodeEnabled] = useState<boolean>(false);
 	const [checkpointLoadData, setCheckpointLoadData] = useState<{
 		checkpoints: CheckpointListItem[];
@@ -163,11 +218,7 @@ export function useAppState(
 		return id;
 	}, []);
 	const [sessionName, setSessionName] = useState<string>('');
-	const [isToolConfirmationMode, setIsToolConfirmationMode] =
-		useState<boolean>(false);
 	const [isToolExecuting, setIsToolExecuting] = useState<boolean>(false);
-	const [liveComponentCapturesInput, setLiveComponentCapturesInput] =
-		useState<boolean>(false);
 
 	// Flipped once subagent loading finishes so the cached system prompt
 	// can rebuild with the real agent list instead of "No subagents available."
@@ -238,7 +289,6 @@ export function useAppState(
 	}, []);
 
 	// Question mode state (ask_question tool)
-	const [isQuestionMode, setIsQuestionMode] = useState<boolean>(false);
 	const [pendingQuestion, setPendingQuestion] =
 		useState<PendingQuestion | null>(null);
 
@@ -401,142 +451,227 @@ export function useAppState(
 		setMessages(newMessages);
 	}, []);
 
-	return {
-		// State
-		client,
-		messages,
-		messageTokenCache,
-		currentModel,
-		currentProvider,
-		currentProviderConfig,
-		currentTheme,
-		currentTitleShape,
-		reasoningExpanded,
-		reasoningExpandedRef,
-		toolManager,
-		customCommandLoader,
-		customCommandExecutor,
-		customCommandCache,
-		startChat,
-		mcpInitialized,
-		updateInfo,
-		mcpServersStatus,
-		lspServersStatus,
-		preferencesLoaded,
-		customCommandsCount,
-		isCancelling,
-		isConversationComplete,
-		isSettingsMode,
-		settingsActiveTab,
-		planReviewState,
-		architectReviewState,
-		planTurnCompleted,
-		pendingPlanProceed,
-		abortController,
+	// Memoised so consumers that take the whole object (effects, callbacks,
+	// memo()'d children) only see a new identity when a value in it changes,
+	// not on every render of the app.
+	return useMemo(
+		() => ({
+			// State
+			client,
+			messages,
+			messageTokenCache,
+			currentModel,
+			currentProvider,
+			currentProviderConfig,
+			currentTheme,
+			currentTitleShape,
+			reasoningExpanded,
+			reasoningExpandedRef,
+			toolManager,
+			customCommandLoader,
+			customCommandExecutor,
+			customCommandCache,
+			startChat,
+			mcpInitialized,
+			updateInfo,
+			mcpServersStatus,
+			lspServersStatus,
+			preferencesLoaded,
+			customCommandsCount,
+			isCancelling,
+			isConversationComplete,
+			isSettingsMode,
+			settingsActiveTab,
+			planReviewState,
+			architectReviewState,
+			planTurnCompleted,
+			pendingPlanProceed,
+			abortController,
 
-		// Unified mode state
-		activeMode,
-		setActiveMode,
+			// Every input surface as one value, for resolveInputOwnership.
+			inputSurfaces,
 
-		// Derived mode booleans (read-only convenience)
-		isExplorerMode: activeMode === 'explorer',
-		isIdeSelectionMode: activeMode === 'ideSelection',
+			// Unified mode state
+			activeMode,
+			setActiveMode,
 
-		isVscodeEnabled,
-		checkpointLoadData,
-		showAllSessions,
-		currentSessionId,
-		ensureCurrentSessionId,
-		sessionName,
-		isToolConfirmationMode,
-		isToolExecuting,
-		liveComponentCapturesInput,
-		subagentsReady,
-		compactToolDisplay,
-		compactToolDisplayRef,
-		compactToolCounts,
-		compactToolCountsRef,
-		liveTaskList,
-		showTaskList,
-		taskListHasUnread,
-		toggleTaskList,
-		isQuestionMode,
-		pendingQuestion,
-		developmentMode,
-		developmentModeRef,
-		tune,
-		contextPercentUsed,
-		contextLimit,
-		contextSource,
-		lastApiUsage,
-		apiCallHistory,
-		pendingToolCalls,
-		currentToolIndex,
-		chatComponents,
-		tokenizer,
-		attachedAgentId,
+			// Derived mode booleans (read-only convenience)
+			isExplorerMode: activeMode === 'explorer',
+			isIdeSelectionMode: activeMode === 'ideSelection',
 
-		// Setters
-		setClient,
-		setMessages,
-		setCurrentModel,
-		setCurrentProvider,
-		setCurrentProviderConfig,
-		setCurrentTheme,
-		setCurrentTitleShape,
-		setReasoningExpanded,
-		setToolManager,
-		setCustomCommandLoader,
-		setCustomCommandExecutor,
-		setCustomCommandCache,
-		setStartChat,
-		setMcpInitialized,
-		setUpdateInfo,
-		setMcpServersStatus,
-		setLspServersStatus,
-		setPreferencesLoaded,
-		setCustomCommandsCount,
-		setIsCancelling,
-		setIsConversationComplete,
-		setIsSettingsMode,
-		setSettingsActiveTab,
-		setPlanReviewState,
-		setArchitectReviewState,
-		setPlanTurnCompleted,
-		setPendingPlanProceed,
-		setAbortController,
-		setIsVscodeEnabled,
-		setCheckpointLoadData,
-		setShowAllSessions,
-		setCurrentSessionId,
-		setSessionName,
-		setIsToolConfirmationMode,
-		setIsToolExecuting,
-		setLiveComponentCapturesInput,
-		setSubagentsReady,
-		setCompactToolDisplay,
-		setCompactToolCounts,
-		setLiveTaskList,
-		setIsQuestionMode,
-		setPendingQuestion,
-		setDevelopmentMode,
-		setTune,
-		setContextPercentUsed,
-		setContextLimit,
-		setContextSource,
-		setLastApiUsage,
-		setApiCallHistory,
-		setPendingToolCalls,
-		setCurrentToolIndex,
-		setChatComponents,
-		liveComponent,
-		setLiveComponent,
-		privacySessionMapRef,
-		setAttachedAgentId,
+			isVscodeEnabled,
+			checkpointLoadData,
+			showAllSessions,
+			currentSessionId,
+			ensureCurrentSessionId,
+			sessionName,
+			isToolConfirmationMode,
+			isToolExecuting,
+			liveComponentCapturesInput,
+			subagentsReady,
+			compactToolDisplay,
+			compactToolDisplayRef,
+			compactToolCounts,
+			compactToolCountsRef,
+			liveTaskList,
+			showTaskList,
+			taskListHasUnread,
+			toggleTaskList,
+			isQuestionMode,
+			pendingQuestion,
+			developmentMode,
+			developmentModeRef,
+			tune,
+			contextPercentUsed,
+			contextLimit,
+			contextSource,
+			lastApiUsage,
+			apiCallHistory,
+			pendingToolCalls,
+			currentToolIndex,
+			chatComponents,
+			tokenizer,
+			attachedAgentId,
 
-		// Utilities
-		addToChatQueue,
-		getMessageTokens,
-		updateMessages,
-	};
+			// Setters
+			setClient,
+			setMessages,
+			setCurrentModel,
+			setCurrentProvider,
+			setCurrentProviderConfig,
+			setCurrentTheme,
+			setCurrentTitleShape,
+			setReasoningExpanded,
+			setToolManager,
+			setCustomCommandLoader,
+			setCustomCommandExecutor,
+			setCustomCommandCache,
+			setStartChat,
+			setMcpInitialized,
+			setUpdateInfo,
+			setMcpServersStatus,
+			setLspServersStatus,
+			setPreferencesLoaded,
+			setCustomCommandsCount,
+			setIsCancelling,
+			setIsConversationComplete,
+			setIsSettingsMode,
+			setSettingsActiveTab,
+			setPlanReviewState,
+			setArchitectReviewState,
+			setPlanTurnCompleted,
+			setPendingPlanProceed,
+			setAbortController,
+			setIsVscodeEnabled,
+			setCheckpointLoadData,
+			setShowAllSessions,
+			setCurrentSessionId,
+			setSessionName,
+			setIsToolConfirmationMode,
+			setIsToolExecuting,
+			setLiveComponentCapturesInput,
+			setSubagentsReady,
+			setCompactToolDisplay,
+			setCompactToolCounts,
+			setLiveTaskList,
+			setIsQuestionMode,
+			setPendingQuestion,
+			setDevelopmentMode,
+			setTune,
+			setContextPercentUsed,
+			setContextLimit,
+			setContextSource,
+			setLastApiUsage,
+			setApiCallHistory,
+			setPendingToolCalls,
+			setCurrentToolIndex,
+			setChatComponents,
+			liveComponent,
+			setLiveComponent,
+			privacySessionMapRef,
+			setAttachedAgentId,
+
+			// Utilities
+			addToChatQueue,
+			getMessageTokens,
+			updateMessages,
+		}),
+		[
+			client,
+			messages,
+			messageTokenCache,
+			currentModel,
+			currentProvider,
+			currentProviderConfig,
+			currentTheme,
+			currentTitleShape,
+			reasoningExpanded,
+			toolManager,
+			customCommandLoader,
+			customCommandExecutor,
+			customCommandCache,
+			startChat,
+			mcpInitialized,
+			updateInfo,
+			mcpServersStatus,
+			lspServersStatus,
+			preferencesLoaded,
+			customCommandsCount,
+			isCancelling,
+			isConversationComplete,
+			isSettingsMode,
+			settingsActiveTab,
+			planReviewState,
+			architectReviewState,
+			planTurnCompleted,
+			pendingPlanProceed,
+			abortController,
+			activeMode,
+			isVscodeEnabled,
+			checkpointLoadData,
+			showAllSessions,
+			currentSessionId,
+			ensureCurrentSessionId,
+			sessionName,
+			isToolConfirmationMode,
+			isToolExecuting,
+			liveComponentCapturesInput,
+			subagentsReady,
+			compactToolDisplay,
+			compactToolCounts,
+			liveTaskList,
+			showTaskList,
+			taskListHasUnread,
+			toggleTaskList,
+			isQuestionMode,
+			pendingQuestion,
+			developmentMode,
+			tune,
+			contextPercentUsed,
+			contextLimit,
+			contextSource,
+			lastApiUsage,
+			apiCallHistory,
+			pendingToolCalls,
+			currentToolIndex,
+			chatComponents,
+			tokenizer,
+			attachedAgentId,
+			setCurrentSessionId,
+			setLiveTaskList,
+			liveComponent,
+			addToChatQueue,
+			getMessageTokens,
+			updateMessages,
+			setSettingsActiveTab,
+			setIsToolConfirmationMode,
+			setPlanReviewState,
+			setIsSettingsMode,
+			setActiveMode,
+			setLiveComponentCapturesInput,
+			setIsQuestionMode,
+			setArchitectReviewState,
+			inputSurfaces,
+		],
+	);
 }

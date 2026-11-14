@@ -42,7 +42,7 @@ import type {
 	SkillTrigger,
 } from '@/types/skills';
 import {formatError} from '@/utils/error-formatter';
-import {loadMdDir} from '@/utils/load-md-dir';
+import {loadMdDir} from '@/utils/fs/load-md-dir';
 
 export interface SkillLoadError {
 	bundlePath: string;

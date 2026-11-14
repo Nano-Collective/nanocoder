@@ -5,13 +5,12 @@ import test from 'ava';
 import {render} from 'ink-testing-library';
 import React from 'react';
 import {writeFileSync} from 'node:fs';
-import {describeProjectTrust} from '@/config/project-trust';
 import {
-	isDirectoryTrusted,
-	loadPreferences,
-	resetPreferencesCache,
-	savePreferences,
-} from '@/config/preferences';
+	describeProjectTrust,
+	TRUST_FINGERPRINT_VERSION,
+} from '@/config/trust/project-trust';
+import {loadPreferences, resetPreferencesCache, savePreferences} from '@/config/preferences';
+import {isDirectoryTrusted} from '@/config/trust/directory-trust';
 import {useDirectoryTrust} from './useDirectoryTrust';
 
 console.log('\nuseDirectoryTrust.spec.tsx');
@@ -115,6 +114,7 @@ test.serial(
 				{
 					path: resolve(root),
 					fingerprint: describeProjectTrust(root).fingerprint,
+					fingerprintVersion: TRUST_FINGERPRINT_VERSION,
 				},
 			]);
 		});
@@ -165,9 +165,53 @@ test.serial(
 			resetPreferencesCache();
 
 			t.deepEqual(loadPreferences().trustedDirectories, [
-				{path: resolve(root), fingerprint: shown},
+				{
+					path: resolve(root),
+					fingerprint: shown,
+					fingerprintVersion: TRUST_FINGERPRINT_VERSION,
+				},
 			]);
 			t.false(isDirectoryTrusted(root, loadPreferences()));
 		});
 	},
 );
+
+// Serial: swaps NANOCODER_CONFIG_DIR and NANOCODER_TRUST_DIRECTORY.
+test.serial(
+	'NANOCODER_TRUST_DIRECTORY=1 trusts and records the directory, like --plain and the daemon',
+	async t => {
+		await withIsolatedPreferences(async root => {
+			const previous = process.env.NANOCODER_TRUST_DIRECTORY;
+			process.env.NANOCODER_TRUST_DIRECTORY = '1';
+			try {
+				const {hook, unmount} = mountHook(root);
+				await flush();
+				t.true(hook.current?.isTrusted);
+				t.is(hook.current?.isTrustedError, null);
+				unmount();
+				resetPreferencesCache();
+				// Persisted with the current fingerprint, so it holds without the env.
+				t.true(isDirectoryTrusted(root, loadPreferences()));
+			} finally {
+				if (previous === undefined) delete process.env.NANOCODER_TRUST_DIRECTORY;
+				else process.env.NANOCODER_TRUST_DIRECTORY = previous;
+			}
+		});
+	},
+);
+
+test.serial('an untrusted directory stays untrusted without the env var', async t => {
+	await withIsolatedPreferences(async root => {
+		const previous = process.env.NANOCODER_TRUST_DIRECTORY;
+		delete process.env.NANOCODER_TRUST_DIRECTORY;
+		try {
+			const {hook, unmount} = mountHook(root);
+			await flush();
+			t.false(hook.current?.isTrusted);
+			unmount();
+		} finally {
+			if (previous !== undefined)
+				process.env.NANOCODER_TRUST_DIRECTORY = previous;
+		}
+	});
+});

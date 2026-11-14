@@ -1,15 +1,14 @@
 import type {JSONSchema7} from 'ai';
-import {makeCustomToolFormatter} from '@/custom-tools/formatter';
 import {buildHandler} from '@/custom-tools/handler';
 import {buildJsonSchema, buildValidator} from '@/custom-tools/schema-builder';
-import {jsonSchema, tool} from '@/types/core';
+import {createFileToolApproval} from '@/tools/runtime/tool-approval';
+import {withValidation} from '@/tools/runtime/tool-validation';
+import {jsonSchema, type ToolFormatter, tool} from '@/types/core';
 import type {
 	CustomToolApprovalPolicy,
 	LoadedCustomTool,
 } from '@/types/custom-tools';
 import type {ToolApprovalPolicy, ToolEntry} from '@/types/index';
-import {createFileToolApproval} from '@/utils/tool-approval';
-import {withValidation} from '@/utils/tool-validation';
 
 /**
  * Compose a registry-ready `ToolEntry` from a loaded custom tool.
@@ -25,7 +24,12 @@ export function buildToolEntry(
 	const {metadata, body} = loaded;
 	const handler = buildHandler(metadata, body, projectRoot);
 	const validator = buildValidator(metadata);
-	const formatter = makeCustomToolFormatter(metadata.name);
+	// The formatter renders an Ink component. Import it on first use so that
+	// loading skills (e.g. `nanocoder skills check`) never pulls in Ink/React.
+	const formatter: ToolFormatter = async (args, result) => {
+		const {makeCustomToolFormatter} = await import('@/custom-tools/formatter');
+		return makeCustomToolFormatter(metadata.name)(args, result);
+	};
 	const aiSdkTool = tool({
 		description: metadata.description,
 		inputSchema: jsonSchema(buildJsonSchema(metadata) as JSONSchema7),

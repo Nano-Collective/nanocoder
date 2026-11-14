@@ -13,7 +13,11 @@ import {join} from 'node:path';
 import test from 'ava';
 import type {AgentSideConnection} from '@agentclientprotocol/sdk';
 import {AcpSession} from '@/acp/acp-session';
-import {runAcpConversation} from '@/acp/acp-conversation';
+import {
+	runAcpConversation,
+	settleUnansweredToolCalls,
+} from '@/acp/acp-conversation';
+import {MCPClient} from '@/mcp/mcp-client';
 import {
 	getSessionCwd,
 	resetSessionCwd,
@@ -25,8 +29,17 @@ import {fileOpTool} from '@/tools/file-ops/file-op';
 import {writeFileTool} from '@/tools/file-ops/write-file';
 import {readFileTool} from '@/tools/read-file';
 import {ToolRegistry} from '@/tools/tool-registry';
-import {clearReadTracker} from '@/utils/read-tracker';
-import {signalToolApproval} from '@/utils/tool-approval-queue';
+import {clearReadTracker} from '@/tools/runtime/read-tracker';
+import {
+	cancelSubagentRun,
+	emitSubagentRunEvent,
+} from '@/services/subagent-events';
+import {runInSessionContext} from '@/services/session-context';
+import {SubagentExecutor} from '@/subagents/subagent-executor';
+import {getSubagentLoader} from '@/subagents/subagent-loader';
+import {agentTool, setAgentToolExecutor} from '@/tools/agent-tool';
+import type {ToolManager} from '@/tools/tool-manager';
+import {getSubagentToolBridge} from '@/tools/runtime/tool-approval-queue';
 import {
 	setToolRegistryGetter,
 	setToolManagerGetter,
@@ -35,12 +48,17 @@ import {
 	resetSessionContextLimit,
 	setSessionContextLimit,
 } from '@/models/models-dev-client.js';
-import type {LLMClient, Message, ToolCall} from '@/types/core';
+import type {
+	DevelopmentMode,
+	LLMClient,
+	Message,
+	ToolCall,
+} from '@/types/core';
 import {
 	resetAutoCompactSession,
 	setAutoCompactStrategy,
 	setAutoCompactThreshold,
-} from '@/utils/auto-compact.js';
+} from '@/conversation/compaction/auto-compact.js';
 
 console.log('\nacp-conversation.spec.ts');
 
@@ -126,7 +144,23 @@ const createMockClient = (
 };
 
 const createMockToolManager = () => ({
-	getAvailableToolNames: () => ['read_file'],
+	// What the session offers the model. A call to a registered tool outside
+	// this list is refused, so it must name every tool the tests below run.
+	getAvailableToolNames: () => [
+		'read_file',
+		'write_file',
+		'execute_bash',
+		'file_op',
+		'agent',
+		'browser',
+		'write_tasks',
+		'lookup',
+		'safe_tool',
+		'dangerous_tool',
+		'failing_tool',
+		'slow_tool',
+		'queued_tool',
+	],
 	getFilteredTools: () => ({}),
 	hasTool: (_name: string) => false,
 	getToolEntry: () => ({approval: false}),
@@ -223,20 +257,23 @@ test('runAcpConversation - returns end_turn on empty LLM response', async t => {
 	t.is(result.stopReason, 'end_turn');
 });
 
-test('runAcpConversation - returns end_turn on response with no choices', async t => {
+test('runAcpConversation - a response with no choices fails the prompt', async t => {
+	// The provider answered nothing at all: an error, as in the TUI and
+	// --plain, not a finished turn with an empty answer.
 	const {conn} = createMockConn();
 	const session = createMockSession(conn);
 	const {client} = createMockClient([{choices: []}]);
 
-	const result = await runAcpConversation({
-		session,
-		client: client,
-		toolManager: createMockToolManager() as any,
-		conn,
-		nonInteractiveAlwaysAllow: [],
-	});
-
-	t.is(result.stopReason, 'end_turn');
+	await t.throwsAsync(
+		runAcpConversation({
+			session,
+			client: client,
+			toolManager: createMockToolManager() as any,
+			conn,
+			nonInteractiveAlwaysAllow: [],
+		}),
+		{message: 'No response received from model'},
+	);
 });
 
 // ============================================================================
@@ -273,6 +310,35 @@ test('runAcpConversation - returns end_turn when LLM responds with text only', a
 	t.is(session.messages.length, 1);
 	t.is(session.messages[0].role, 'assistant');
 	t.is(session.messages[0].content, 'Hello! I can help you.');
+});
+
+test("runAcpConversation - a session on tune's XML tool mode asks the client not to send native tools", async t => {
+	const {conn} = createMockConn();
+	const session = createMockSession(conn);
+	session.nativeToolsDisabled = true;
+	const seen: any[] = [];
+	const client = {
+		chat: async (
+			_msgs: any,
+			_tools: any,
+			_callbacks: any,
+			_signal: any,
+			modeOverrides: any,
+		) => {
+			seen.push(modeOverrides);
+			return {choices: [{message: {content: 'done'}}]};
+		},
+	} as unknown as LLMClient;
+
+	await runAcpConversation({
+		session,
+		client,
+		toolManager: createMockToolManager() as any,
+		conn,
+		nonInteractiveAlwaysAllow: [],
+	});
+
+	t.is(seen[0]?.nativeToolsDisabled, true);
 });
 
 // ============================================================================
@@ -585,6 +651,7 @@ test('runAcpConversation - forwards the ACP session id to artifact tools', async
 	});
 	const toolManager = {
 		...createMockToolManager(),
+		getAvailableToolNames: () => ['write_plan'],
 		hasTool: () => true,
 		getToolEntry: () => ({approval: false}),
 	};
@@ -636,6 +703,7 @@ test('runAcpConversation - completed write_plan exposes its artifact location', 
 	});
 	const toolManager = {
 		...createMockToolManager(),
+		getAvailableToolNames: () => ['read_file', 'write_plan'],
 		hasTool: () => true,
 		getToolEntry: () => ({approval: false}),
 	};
@@ -1313,6 +1381,87 @@ test('runAcpConversation - marks tool as failed when it reports isError without 
 	t.is(finalUpdates[0].update.rawOutput, 'EXIT_CODE: 3\n');
 });
 
+test('runAcpConversation - an MCP result with isError is failed, a clean one completed, and the model gets the same text', async t => {
+	const {conn, updates} = createMockConn();
+	const session = createMockSession(conn, {devMode: 'yolo'});
+	const toolManager = {
+		...createMockToolManager(),
+		hasTool: () => true,
+		getToolEntry: () => ({approval: false}),
+	};
+
+	// Handlers come from a real MCPClient over a stubbed SDK client. A server
+	// reports a failed call as `isError: true` with the reason in its content.
+	const mcp = new MCPClient() as any;
+	const mcpTool = (name: string) => ({
+		name,
+		description: name,
+		serverName: 'srv',
+		inputSchema: {type: 'object', properties: {}},
+	});
+	mcp.serverTools.set('srv', [mcpTool('failing_tool'), mcpTool('safe_tool')]);
+	mcp.clients.set('srv', {
+		callTool: async ({name}: {name: string}) =>
+			name === 'failing_tool'
+				? {isError: true, content: [{type: 'text', text: 'boom failure'}]}
+				: {content: [{type: 'text', text: 'all good'}]},
+	});
+	setToolRegistryGetter(() =>
+		Object.fromEntries(
+			mcp.getToolEntries().map((e: any) => [e.name, e.handler]),
+		),
+	);
+
+	let callCount = 0;
+	const client = {
+		chat: async () => {
+			callCount++;
+			if (callCount === 1) {
+				return {
+					choices: [
+						{
+							message: {
+								content: '',
+								tool_calls: [
+									createMockToolCall('failing_tool', {}, 'call-bad'),
+									createMockToolCall('safe_tool', {}, 'call-good'),
+								],
+							},
+						},
+					],
+				};
+			}
+
+			return {choices: [{message: {content: 'done'}}]};
+		},
+	} as unknown as LLMClient;
+
+	await runAcpConversation({
+		session,
+		client,
+		toolManager: toolManager as any,
+		conn,
+		nonInteractiveAlwaysAllow: [],
+	});
+
+	const finalStatus = (id: string) =>
+		updates.find(
+			(u: any) =>
+				u.update.sessionUpdate === 'tool_call_update' &&
+				u.update.toolCallId === id &&
+				(u.update.status === 'failed' || u.update.status === 'completed'),
+		)?.update.status;
+	t.is(finalStatus('call-bad'), 'failed');
+	t.is(finalStatus('call-good'), 'completed');
+
+	// The flag is for the client; the model still gets the server's own text.
+	const toolText = (name: string) =>
+		session.messages.find((m: any) => m.role === 'tool' && m.name === name)
+			?.content;
+	t.is(toolText('failing_tool'), 'boom failure');
+	t.is(toolText('safe_tool'), 'all good');
+});
+
 // ============================================================================
 // Permission denied
 // ============================================================================
@@ -1548,61 +1697,6 @@ test('runAcpConversation - tool in nonInteractiveAlwaysAllow skips approval', as
 });
 
 // ============================================================================
-// XML validation error tool
-// ============================================================================
-
-test('runAcpConversation - __xml_validation_error__ tool creates error result', async t => {
-	const {conn} = createMockConn();
-	const session = createMockSession(conn);
-	const toolManager = {
-		...createMockToolManager(),
-		hasTool: () => false, // __xml_validation_error__ is not a known tool
-	};
-
-	let callCount = 0;
-	const client = {
-		chat: async () => {
-			callCount++;
-			if (callCount === 1) {
-				return {
-					choices: [
-						{
-							message: {
-								content: '',
-								tool_calls: [
-									createMockToolCall(
-										'__xml_validation_error__',
-										{error: 'Bad XML'},
-										'call-1',
-									),
-								],
-							},
-						},
-					],
-				};
-			}
-
-			return {choices: [{message: {content: 'OK'}}]};
-		},
-	} as unknown as LLMClient;
-
-	await runAcpConversation({
-		session,
-		client,
-		toolManager: toolManager as any,
-		conn,
-		nonInteractiveAlwaysAllow: [],
-	});
-
-	const errorMsg = session.messages.find(
-		(m: any) =>
-			m.role === 'tool' && m.name === '__xml_validation_error__',
-	);
-	t.truthy(errorMsg);
-	t.is(errorMsg?.content, 'Unknown tool: __xml_validation_error__');
-});
-
-// ============================================================================
 // Multi-turn
 // ============================================================================
 
@@ -1678,6 +1772,364 @@ test('runAcpConversation - handles multi-turn conversation with tool calls', asy
 	t.is(toolMsgs.length, 2);
 	t.is(toolMsgs[0].content, 'Content of /a.txt');
 	t.is(toolMsgs[1].content, 'Content of /b.txt');
+});
+
+test('runAcpConversation - a model error on a later round-trip keeps the earlier ones in history', async t => {
+	const {conn} = createMockConn();
+	const session = createMockSession(conn, {
+		devMode: 'yolo',
+		messages: [{role: 'user', content: 'edit the file'}],
+	});
+	const toolManager = {
+		...createMockToolManager(),
+		hasTool: () => true,
+		getToolEntry: () => ({approval: false}),
+	};
+	setToolRegistryGetter(() => ({
+		read_file: async (args: any) => `Content of ${args.path}`,
+	}));
+
+	let callCount = 0;
+	const client = {
+		chat: async () => {
+			callCount++;
+			if (callCount === 1) {
+				return {
+					choices: [
+						{
+							message: {
+								content: 'Reading first',
+								tool_calls: [
+									createMockToolCall('read_file', {path: '/a.txt'}, 'call-1'),
+								],
+							},
+						},
+					],
+				};
+			}
+			throw new Error('provider exploded');
+		},
+	} as unknown as LLMClient;
+
+	await t.throwsAsync(
+		runAcpConversation({
+			session,
+			client,
+			toolManager: toolManager as any,
+			conn,
+			nonInteractiveAlwaysAllow: [],
+		}),
+		{message: 'provider exploded'},
+	);
+
+	t.deepEqual(
+		session.messages.map(m => m.role),
+		['user', 'assistant', 'tool'],
+	);
+	t.is(session.messages[2].content, 'Content of /a.txt');
+});
+
+test('runAcpConversation - a throw part way through a batch keeps the assistant call in history', async t => {
+	const {conn: baseConn} = createMockConn();
+	// The client connection dies while the second call's card is sent.
+	let toolCallUpdates = 0;
+	const conn = {
+		...baseConn,
+		sessionUpdate: async (update: any) => {
+			if (update.update.sessionUpdate === 'tool_call_update') {
+				toolCallUpdates++;
+				if (toolCallUpdates === 4) throw new Error('connection closed');
+			}
+		},
+	} as unknown as AgentSideConnection;
+	const session = createMockSession(conn, {
+		devMode: 'yolo',
+		messages: [{role: 'user', content: 'read both'}],
+	});
+	const toolManager = {
+		...createMockToolManager(),
+		hasTool: () => true,
+		getToolEntry: () => ({approval: false}),
+	};
+	setToolRegistryGetter(() => ({
+		read_file: async (args: any) => `Content of ${args.path}`,
+	}));
+	const client = {
+		chat: async () => ({
+			choices: [
+				{
+					message: {
+						content: '',
+						tool_calls: [
+							createMockToolCall('read_file', {path: '/a.txt'}, 'call-a'),
+							createMockToolCall('read_file', {path: '/b.txt'}, 'call-b'),
+						],
+					},
+				},
+			],
+		}),
+	} as unknown as LLMClient;
+
+	await t.throwsAsync(
+		runAcpConversation({
+			session,
+			client,
+			toolManager: toolManager as any,
+			conn,
+			nonInteractiveAlwaysAllow: [],
+		}),
+		{message: 'connection closed'},
+	);
+
+	const assistant = session.messages[1];
+	t.is(assistant.role, 'assistant');
+	t.deepEqual(
+		assistant.tool_calls?.map(call => call.id),
+		['call-a', 'call-b'],
+	);
+	// Closing the batch off is the caller's job; see settleUnansweredToolCalls.
+	const settled = settleUnansweredToolCalls(session.messages);
+	t.deepEqual(
+		settled.slice(2).map(m => [m.role, m.tool_call_id]),
+		[
+			['tool', 'call-a'],
+			['tool', 'call-b'],
+		],
+	);
+});
+
+test('settleUnansweredToolCalls - answers only the calls with no result yet', t => {
+	const messages: Message[] = [
+		{role: 'user', content: 'go'},
+		{
+			role: 'assistant',
+			content: '',
+			tool_calls: [
+				createMockToolCall('read_file', {}, 'done'),
+				createMockToolCall('read_file', {}, 'open'),
+			],
+		},
+		{role: 'tool', tool_call_id: 'done', name: 'read_file', content: 'ok'},
+	];
+	const settled = settleUnansweredToolCalls(messages);
+	t.is(settled.length, 4);
+	t.is(settled[3].tool_call_id, 'open');
+	t.regex(String(settled[3].content), /^Error:/);
+	// Nothing to do once every call has a result.
+	t.is(settleUnansweredToolCalls(settled), settled);
+	t.is(
+		settleUnansweredToolCalls([{role: 'user', content: 'hi'}]).length,
+		1,
+	);
+});
+
+// ============================================================================
+// Retry guards (nanocoder.retries)
+// ============================================================================
+
+const scriptedClient = (responses: any[]) => {
+	const sent: Message[][] = [];
+	const client = {
+		chat: async (messages: Message[]) => {
+			sent.push(messages);
+			return (
+				responses[Math.min(sent.length - 1, responses.length - 1)] ?? {
+					choices: [{message: {content: 'done'}}],
+				}
+			);
+		},
+		getCurrentModel: () => 'test-model',
+	} as unknown as LLMClient;
+	return {client, sent};
+};
+
+const runGuarded = (session: AcpSession, conn: AgentSideConnection, client: LLMClient) =>
+	runAcpConversation({
+		session,
+		client,
+		toolManager: {
+			...createMockToolManager(),
+			hasTool: (name: string) => name === 'read_file',
+			getToolEntry: () => ({approval: false}),
+		} as any,
+		conn,
+		nonInteractiveAlwaysAllow: [],
+	});
+
+test('runAcpConversation - stops a model repeating the same tool call instead of running it again', async t => {
+	const {conn, updates} = createMockConn();
+	const session = createMockSession(conn, {devMode: 'yolo'});
+	let reads = 0;
+	setToolRegistryGetter(() => ({
+		read_file: async () => {
+			reads++;
+			return 'same content';
+		},
+	}));
+	const {client, sent} = scriptedClient([
+		{
+			choices: [
+				{
+					message: {
+						content: '',
+						tool_calls: [createMockToolCall('read_file', {path: '/a.txt'})],
+					},
+				},
+			],
+		},
+	]);
+
+	const result = await runGuarded(session, conn, client);
+
+	// Default maxRepeatedToolCalls = 3: the third identical call is not run.
+	t.is(result.stopReason, 'max_turn_requests');
+	t.is(sent.length, 3);
+	t.is(reads, 2);
+	t.true(
+		updates.some(u =>
+			/repeated the same tool call 3 times/.test(u.update?.content?.text ?? ''),
+		),
+	);
+	// Every stored call has a result, so the next prompt is still valid.
+	const callIds = session.messages.flatMap(m => m.tool_calls ?? []).map(c => c.id);
+	const resultIds = session.messages
+		.filter(m => m.role === 'tool')
+		.map(m => m.tool_call_id);
+	t.deepEqual(resultIds, callIds);
+	t.true(session.messages[session.messages.length - 1].displayOnly);
+});
+
+test('runAcpConversation - nudges an empty reply, then stops at the cap', async t => {
+	const {conn} = createMockConn();
+	const session = createMockSession(conn, {
+		messages: [{role: 'user', content: 'hi'}],
+	});
+	const {client, sent} = scriptedClient([{choices: [{message: {content: ''}}]}]);
+
+	const result = await runGuarded(session, conn, client);
+
+	// Default maxEmptyTurns = 2: the first try plus two nudges.
+	t.is(result.stopReason, 'end_turn');
+	t.is(sent.length, 3);
+	t.is(sent[1][sent[1].length - 1].content, 'Please continue with the task.');
+	// No empty assistant message is stored; providers reject one.
+	t.false(
+		session.messages.some(
+			m => m.role === 'assistant' && !m.displayOnly && !m.content,
+		),
+	);
+	t.regex(
+		String(session.messages[session.messages.length - 1].content),
+		/no output after 3 attempts/,
+	);
+});
+
+test('runAcpConversation - an empty reply followed by an answer ends normally', async t => {
+	const {conn} = createMockConn();
+	const session = createMockSession(conn);
+	const {client, sent} = scriptedClient([
+		{choices: [{message: {content: ''}}]},
+		{choices: [{message: {content: 'Here it is'}}]},
+	]);
+
+	const result = await runGuarded(session, conn, client);
+
+	t.is(result.stopReason, 'end_turn');
+	t.is(sent.length, 2);
+	t.is(session.messages[session.messages.length - 1].content, 'Here it is');
+});
+
+test('runAcpConversation - feeds a malformed text tool call back for a retry', async t => {
+	const {conn} = createMockConn();
+	const session = createMockSession(conn, {devMode: 'yolo'});
+	setToolRegistryGetter(() => ({
+		read_file: async (args: any) => `Content of ${args.path}`,
+	}));
+	const {client, sent} = scriptedClient([
+		{
+			toolsDisabled: true,
+			choices: [{message: {content: '[tool_use: read_file]'}}],
+		},
+		{
+			toolsDisabled: true,
+			choices: [
+				{
+					message: {
+						content: '<function=read_file>\n{"path": "/a.txt"}\n</function>',
+					},
+				},
+			],
+		},
+		{choices: [{message: {content: 'Done'}}]},
+	]);
+
+	const result = await runGuarded(session, conn, client);
+
+	t.is(result.stopReason, 'end_turn');
+	t.is(sent.length, 3);
+	t.regex(
+		String(sent[1][sent[1].length - 1].content),
+		/contained a malformed tool call/,
+	);
+	t.true(
+		session.messages.some(
+			m => m.role === 'tool' && m.content === 'Content of /a.txt',
+		),
+	);
+});
+
+test('runAcpConversation - stops retrying malformed tool calls at the cap', async t => {
+	const {conn} = createMockConn();
+	const session = createMockSession(conn);
+	const {client, sent} = scriptedClient([
+		{
+			toolsDisabled: true,
+			choices: [{message: {content: '[tool_use: read_file]'}}],
+		},
+	]);
+
+	const result = await runGuarded(session, conn, client);
+
+	// Default maxMalformedRetries = 2: the first try plus two retries.
+	t.is(result.stopReason, 'end_turn');
+	t.is(sent.length, 3);
+	t.regex(
+		String(session.messages[session.messages.length - 1].content),
+		/malformed tool calls 3 times/,
+	);
+});
+
+test('runAcpConversation - asks a reply cut off at the output limit to continue', async t => {
+	const {conn} = createMockConn();
+	const session = createMockSession(conn);
+	const {client, sent} = scriptedClient([
+		{finishReason: 'length', choices: [{message: {content: 'Half a sen'}}]},
+		{finishReason: 'stop', choices: [{message: {content: 'tence.'}}]},
+	]);
+
+	const result = await runGuarded(session, conn, client);
+
+	t.is(result.stopReason, 'end_turn');
+	t.is(sent.length, 2);
+	t.regex(
+		String(sent[1][sent[1].length - 1].content),
+		/cut off at the output-token limit/,
+	);
+	t.is(session.messages[session.messages.length - 1].content, 'tence.');
+});
+
+test('runAcpConversation - a reply that keeps truncating stands after the continuation cap', async t => {
+	const {conn} = createMockConn();
+	const session = createMockSession(conn);
+	const {client, sent} = scriptedClient([
+		{finishReason: 'length', choices: [{message: {content: 'more...'}}]},
+	]);
+
+	const result = await runGuarded(session, conn, client);
+
+	// Default maxTruncatedTurns = 2.
+	t.is(result.stopReason, 'end_turn');
+	t.is(sent.length, 3);
 });
 
 // ============================================================================
@@ -2128,6 +2580,91 @@ test('runAcpConversation - captures a timeline checkpoint for write_file', async
 	t.is(entries[0].truncateToMessageIndex, 0);
 });
 
+test.serial('runAcpConversation - auto-commit writes its message with the session\'s client', async t => {
+	const {execSync} = await import('node:child_process');
+	const {setAutoCommitClient} = await import('@/services/auto-commit');
+	const {COMMIT_SYSTEM_PROMPT} = await import('@/tools/git/commit-prompt');
+	const cwd = realpathSync(
+		mkdtempSync(join(tmpdir(), 'nanocoder-acp-autocommit-')),
+	);
+	const git = (command: string) =>
+		execSync(`git ${command}`, {cwd, encoding: 'utf8'}).trimEnd();
+	git('init -q -b main');
+	git('config user.email test@example.com');
+	git('config user.name Test');
+	git('config commit.gpgsign false');
+	git('config core.hooksPath .no-hooks');
+	writeFileSync(join(cwd, 'base.txt'), 'base\n');
+	// Turned on in the session's own folder, which is the config it reads.
+	writeFileSync(
+		join(cwd, 'agents.config.json'),
+		JSON.stringify({nanocoder: {autoCommit: true}}),
+	);
+	git('add base.txt agents.config.json');
+	git('commit -q -m baseline');
+	// Another session picked its model last: before, its client wrote every
+	// session's commit messages.
+	setAutoCommitClient({
+		chat: async () => ({
+			choices: [{message: {content: 'chore: another session'}}],
+		}),
+	} as unknown as LLMClient);
+	t.teardown(() => {
+		setAutoCommitClient(null);
+		rmSync(cwd, {recursive: true, force: true});
+	});
+
+	const {conn} = createMockConn();
+	const session = createMockSession(conn, {devMode: 'yolo', cwd});
+	setToolRegistryGetter(() => ({
+		write_file: async (args: any) => {
+			writeFileSync(join(cwd, args.path), args.content);
+			return `Wrote ${args.path}`;
+		},
+	}));
+	let turns = 0;
+	const client = {
+		chat: async (messages: Message[]) => {
+			if (messages[0]?.content === COMMIT_SYSTEM_PROMPT) {
+				return {choices: [{message: {content: 'feat: this session'}}]};
+			}
+			turns++;
+			return turns === 1
+				? {
+						choices: [
+							{
+								message: {
+									content: '',
+									tool_calls: [
+										createMockToolCall('write_file', {
+											path: 'a.ts',
+											content: 'export const a = 1;\n',
+										}),
+									],
+								},
+							},
+						],
+					}
+				: {choices: [{message: {content: 'done'}}]};
+		},
+		getCurrentModel: () => 'test-model',
+	} as unknown as LLMClient;
+
+	await runAcpConversation({
+		session,
+		client,
+		toolManager: {
+			...createMockToolManager(),
+			hasTool: () => true,
+			getToolEntry: () => ({approval: false}),
+		} as any,
+		conn,
+		nonInteractiveAlwaysAllow: [],
+	});
+
+	t.is(git('log -1 --format=%s'), 'feat: this session');
+});
+
 test('runAcpConversation - does not capture a timeline checkpoint for read_file', async t => {
 	const {conn} = createMockConn();
 	const session = createMockSession(conn, {devMode: 'yolo'});
@@ -2174,15 +2711,102 @@ test('runAcpConversation - does not capture a timeline checkpoint for read_file'
 	t.deepEqual(await session.timeline.list(), []);
 });
 
+test('runAcpConversation - checkpoints of one prompt share a turn id across model round-trips', async t => {
+	const {conn} = createMockConn();
+	const cwd = join(
+		tmpdir(),
+		`nanocoder-timeline-turn-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+	);
+	mkdirSync(cwd, {recursive: true});
+	t.teardown(() => rmSync(cwd, {recursive: true, force: true}));
+	writeFileSync(join(cwd, 'a.ts'), 'v0');
+
+	const session = createMockSession(conn, {devMode: 'yolo', cwd});
+	const toolManager = {
+		...createMockToolManager(),
+		hasTool: () => true,
+		isReadOnly: (name: string) => name !== 'write_file',
+	};
+
+	// Applies the edit, so each checkpoint's before-image is the previous write.
+	setToolRegistryGetter(() => ({
+		write_file: async (args: {path: string; content: string}) => {
+			writeFileSync(join(cwd, args.path), args.content);
+			return `Wrote ${args.path}`;
+		},
+	}));
+
+	// Each model round-trip edits a.ts once, then the prompt ends.
+	const scriptedClient = (contents: string[]) => {
+		let callCount = 0;
+		return {
+			chat: async () => {
+				const content = contents[callCount];
+				callCount++;
+				if (content === undefined) {
+					return {choices: [{message: {content: 'done'}}]};
+				}
+				return {
+					choices: [
+						{
+							message: {
+								content: '',
+								tool_calls: [
+									createMockToolCall(
+										'write_file',
+										{path: 'a.ts', content},
+										`call-${content}`,
+									),
+								],
+							},
+						},
+					],
+				};
+			},
+		} as unknown as LLMClient;
+	};
+	const runPrompt = (contents: string[]) =>
+		runAcpConversation({
+			session,
+			client: scriptedClient(contents),
+			toolManager: toolManager as any,
+			conn,
+			nonInteractiveAlwaysAllow: [],
+		});
+
+	await runPrompt(['v1', 'v2']);
+	await runPrompt(['v3']);
+
+	const [first, second, nextPrompt] = await session.timeline.list();
+
+	// Two round-trips of one prompt: `truncateToMessageIndex` moved on, so it
+	// cannot group them, but the turn id does.
+	t.not(first.truncateToMessageIndex, second.truncateToMessageIndex);
+	t.truthy(first.turnId);
+	t.is(first.turnId, second.turnId);
+	// The next prompt is a new turn.
+	t.truthy(nextPrompt.turnId);
+	t.not(nextPrompt.turnId, first.turnId);
+
+	// The documented baseline: the earliest checkpoint of the turn holds the
+	// file as it was before the agent touched it, not after its first edit.
+	t.deepEqual(await session.timeline.readBefore(first.id, 'a.ts'), {
+		kind: 'text',
+		content: 'v0',
+	});
+	t.deepEqual(await session.timeline.readBefore(second.id, 'a.ts'), {
+		kind: 'text',
+		content: 'v1',
+	});
+	t.deepEqual(await session.timeline.readBefore(nextPrompt.id, 'a.ts'), {
+		kind: 'text',
+		content: 'v2',
+	});
+});
+
 test.serial(
 	'runAcpConversation - compacts history before the next model turn when over the token threshold',
 	async t => {
-		resetAutoCompactSession();
-		resetSessionContextLimit();
-		setSessionContextLimit(100);
-		setAutoCompactStrategy('mechanical');
-		setAutoCompactThreshold(50);
-
 		const filler = 'old context sentence. '.repeat(60);
 		const {conn} = createMockConn();
 		const session = createMockSession(conn, {
@@ -2192,6 +2816,12 @@ test.serial(
 				{role: 'assistant', content: 'ack'},
 				{role: 'user', content: 'call the tool'},
 			],
+		});
+		// The overrides belong to the session, so they are set in its context.
+		runInSessionContext(session.context, () => {
+			setSessionContextLimit(100);
+			setAutoCompactStrategy('mechanical');
+			setAutoCompactThreshold(50);
 		});
 		const toolManager = {
 			...createMockToolManager(),
@@ -2255,30 +2885,40 @@ test.serial(
 				'compaction must keep the recent turn, not empty the history',
 			);
 		} finally {
-			resetAutoCompactSession();
-			resetSessionContextLimit();
+			runInSessionContext(session.context, () => {
+				resetAutoCompactSession();
+				resetSessionContextLimit();
+			});
 		}
 	},
 );
 
 
 // ============================================================================
-// Sub-agent tool approval (#1019)
+// Sub-agent tool calls (#1019, #1105)
 // ============================================================================
 
 /**
- * Drives signalToolApproval from inside the turn, which is the only way the
- * sub-agent executor ever reaches it. Firing it after runAcpConversation
- * returned would only pass while the handler leaked past the turn.
+ * Drives the session's sub-agent bridge from inside the turn, which is the only
+ * way the sub-agent executor ever reaches it. Firing it after runAcpConversation
+ * returned would only pass while the bridge leaked past the turn.
  */
-const approveFromInsideTurn = async (
+const callThroughBridge = async (
 	requestPermission: (p: any) => Promise<any>,
-	subagentName = 'docs',
+	{
+		ask = true,
+		outcome = {content: 'wrote it', failed: false},
+		subagentRunId,
+	}: {
+		ask?: boolean;
+		outcome?: {content: string; failed: boolean};
+		subagentRunId?: string;
+	} = {},
 ) => {
 	const updates: any[] = [];
 	const permissionRequests: any[] = [];
-	let approved: boolean | undefined;
-	let signalled = false;
+	let decision: string | undefined;
+	let called = false;
 
 	const conn = {
 		sessionUpdate: async (u: any) => {
@@ -2291,17 +2931,20 @@ const approveFromInsideTurn = async (
 	} as unknown as AgentSideConnection;
 
 	const session = createMockSession(conn);
-	// chat() is awaited by the turn, so this is a point where the handler is
-	// installed and the turn has not returned - the state the sub-agent
-	// executor signals from.
+	// chat() is awaited by the turn, so this is a point where the bridge is
+	// registered and the turn has not returned - the state the sub-agent
+	// executor calls it from.
 	const client = {
 		chat: async () => {
-			if (!signalled) {
-				signalled = true;
-				approved = await signalToolApproval({
-					toolCall: createMockToolCall('write_file', {path: 'a.txt'}, 'call-1'),
-					subagentName,
-				});
+			if (!called) {
+				called = true;
+				const bridge = getSubagentToolBridge(session.sessionId)!;
+				const toolCall = createMockToolCall('write_file', {path: 'a.txt'}, 'call-1');
+				await bridge.begin(toolCall, 'docs');
+				if (ask) {
+					decision = await bridge.approve(toolCall, undefined, subagentRunId);
+				}
+				await bridge.end(toolCall, outcome);
 			}
 			return {
 				choices: [{message: {content: 'done', tool_calls: []}}],
@@ -2325,15 +2968,16 @@ const approveFromInsideTurn = async (
 		nonInteractiveAlwaysAllow: [],
 	});
 
-	return {approved, updates, permissionRequests, session};
+	return {decision, updates, permissionRequests, session};
 };
 
-test('runAcpConversation - a sub-agent tool call reaches the client for permission', async t => {
-	const {approved, updates, permissionRequests} = await approveFromInsideTurn(
-		async () => ({outcome: {outcome: 'selected', optionId: 'allow'}}),
-	);
+const allowOnce = async () => ({outcome: {outcome: 'selected', optionId: 'allow'}});
 
-	t.true(approved);
+test('runAcpConversation - a sub-agent tool call is announced, approved and settled with its real outcome', async t => {
+	const {decision, updates, permissionRequests} =
+		await callThroughBridge(allowOnce);
+
+	t.is(decision, 'approved');
 	t.is(permissionRequests.length, 1);
 
 	// Prefixed: sub-agent ids come from the sub-agent's own model and share an
@@ -2347,74 +2991,169 @@ test('runAcpConversation - a sub-agent tool call reaches the client for permissi
 		(u: any) => u.sessionUpdate === 'tool_call' && u.toolCallId === announcedId,
 	);
 	t.is(announced.length, 1);
+	t.is(announced[0].status, 'pending');
 
-	// Settled rather than left spinning: the sub-agent layer reports no result.
+	// Settled by the tool's own result, not by the approval.
 	const terminal = updates.filter(
 		(u: any) => u.toolCallId === announcedId && u.status === 'completed',
 	);
 	t.is(terminal.length, 1);
+	t.is(terminal[0].rawOutput, 'wrote it');
 });
 
-test('runAcpConversation - a denied sub-agent tool call is reported as failed', async t => {
-	const {approved, updates, permissionRequests} = await approveFromInsideTurn(
-		async () => ({outcome: {outcome: 'selected', optionId: 'deny'}}),
-	);
+test('runAcpConversation - a sub-agent call that fails after approval is reported failed', async t => {
+	const {updates} = await callThroughBridge(allowOnce, {
+		outcome: {content: 'Error: disk full', failed: true},
+	});
 
-	t.false(approved);
-	t.is(permissionRequests.length, 1);
-	const failed = updates.filter(
-		(u: any) => u.toolCallId === 'subagent:call-1' && u.status === 'failed',
-	);
+	// Approval no longer claims success: only the tool's result settles the card.
+	const forCall = updates.filter((u: any) => u.toolCallId === 'subagent:call-1');
+	t.false(forCall.some((u: any) => u.status === 'completed'));
+	const failed = forCall.filter((u: any) => u.status === 'failed');
 	t.is(failed.length, 1);
-	t.is(failed[0].rawOutput, 'Denied by user');
+	t.is(failed[0].rawOutput, 'Error: disk full');
 });
 
-test('runAcpConversation - a cancelled sub-agent permission denies the call', async t => {
-	const {approved, updates, permissionRequests} = await approveFromInsideTurn(
-		async () => ({outcome: {outcome: 'cancelled'}}),
-	);
+test('runAcpConversation - a sub-agent call needing no approval is still announced and settled', async t => {
+	const {updates, permissionRequests} = await callThroughBridge(allowOnce, {
+		ask: false,
+	});
 
-	// t.false(approved) alone would pass with no handler installed at all,
-	// since the slot's fallback already denies. The request reaching the
-	// connection and the call being settled are the parts that need one.
-	t.false(approved);
+	t.is(permissionRequests.length, 0);
+	const forCall = updates.filter((u: any) => u.toolCallId === 'subagent:call-1');
+	t.is(forCall[0].sessionUpdate, 'tool_call');
+	t.is(forCall[forCall.length - 1].status, 'completed');
+});
+
+test('runAcpConversation - a denied sub-agent permission is reported as denied', async t => {
+	const {decision, permissionRequests} = await callThroughBridge(async () => ({
+		outcome: {outcome: 'selected', optionId: 'deny'},
+	}));
+
+	t.is(decision, 'denied');
 	t.is(permissionRequests.length, 1);
-	const failed = updates.filter(
-		(u: any) => u.toolCallId === 'subagent:call-1' && u.status === 'failed',
-	);
-	t.is(failed.length, 1);
+});
+
+test('runAcpConversation - a cancelled sub-agent permission is reported as cancelled', async t => {
+	const {decision, permissionRequests} = await callThroughBridge(async () => ({
+		outcome: {outcome: 'cancelled'},
+	}));
+
 	// Distinct from the deny path, so a client can tell a user's refusal from
 	// a turn that was torn down under it.
-	t.is(failed[0].rawOutput, 'Cancelled by user');
+	t.is(decision, 'cancelled');
+	t.is(permissionRequests.length, 1);
 });
 
 test('runAcpConversation - a transport failure denies the tool rather than aborting the sub-agent', async t => {
-	const {approved, permissionRequests} = await approveFromInsideTurn(async () => {
+	const {decision, permissionRequests} = await callThroughBridge(async () => {
 		throw new Error('connection closed');
 	});
 
-	// signalToolApproval is awaited outside the sub-agent executor's own try, so
-	// a throw here would abort the whole run instead of denying one tool.
-	t.false(approved);
+	// The bridge is awaited outside the sub-agent executor's own try, so a
+	// throw here would abort the whole run instead of denying one tool.
+	t.is(decision, 'denied');
 	t.is(permissionRequests.length, 1);
 });
 
-test('runAcpConversation - the approval handler does not outlive the turn', async t => {
-	const {permissionRequests} = await approveFromInsideTurn(async () => ({
-		outcome: {outcome: 'selected', optionId: 'allow'},
-	}));
-	t.is(permissionRequests.length, 1);
+test('runAcpConversation - the sub-agent bridge does not outlive the turn', async t => {
+	const {session} = await callThroughBridge(allowOnce);
 
-	// The slot is a module singleton shared across sessions, so a handler left
-	// installed would answer a later session's approvals with this turn's
-	// session id and abort controller.
-	const afterTurn = await signalToolApproval({
-		toolCall: createMockToolCall('write_file', {path: 'b.txt'}, 'call-2'),
-		subagentName: 'docs',
+	// A bridge left registered would keep a finished turn's session and
+	// connection reachable.
+	t.is(getSubagentToolBridge(session.sessionId), undefined);
+});
+
+test('runAcpConversation - the sub-agent bridge reports the session mode as it is now', async t => {
+	const seen: string[] = [];
+	const {conn} = createMockConn();
+	const session = createMockSession(conn, {devMode: 'normal'});
+	const client = {
+		chat: async () => {
+			const bridge = getSubagentToolBridge(session.sessionId)!;
+			seen.push(bridge.getMode());
+			// A switch made while the sub-agent is running.
+			session.developmentMode = 'yolo';
+			seen.push(bridge.getMode());
+			return {
+				choices: [{message: {content: 'done', tool_calls: []}}],
+				toolsDisabled: false,
+			};
+		},
+	} as unknown as LLMClient;
+
+	await runAcpConversation({
+		session,
+		client,
+		toolManager: {
+			getAvailableToolNames: () => [],
+			getFilteredTools: () => ({}),
+			hasTool: () => false,
+			getToolEntry: () => undefined,
+			isReadOnly: () => true,
+		} as any,
+		conn,
+		nonInteractiveAlwaysAllow: [],
 	});
 
-	t.false(afterTurn);
-	t.is(permissionRequests.length, 1);
+	t.deepEqual(seen, ['normal', 'yolo']);
+});
+
+test('runAcpConversation - overlapping sessions each answer their own sub-agent prompts', async t => {
+	const makeSession = () => {
+		const permissionRequests: any[] = [];
+		const conn = {
+			sessionUpdate: async () => {},
+			requestPermission: async (p: any) => {
+				permissionRequests.push(p);
+				return {outcome: {outcome: 'selected', optionId: 'allow'}};
+			},
+		} as unknown as AgentSideConnection;
+		return {conn, permissionRequests, session: createMockSession(conn)};
+	};
+	const a = makeSession();
+	const b = makeSession();
+
+	// Both turns wait inside chat() until both are running: the overlap the
+	// single process-wide slot answered with the later session's connection.
+	let started = 0;
+	let release!: () => void;
+	const bothRunning = new Promise<void>(resolve => {
+		release = resolve;
+	});
+	const run = (s: ReturnType<typeof makeSession>) =>
+		runAcpConversation({
+			session: s.session,
+			client: {
+				chat: async () => {
+					if (++started === 2) release();
+					await bothRunning;
+					await getSubagentToolBridge(s.session.sessionId)!.approve(
+						createMockToolCall('write_file', {path: 'a.txt'}, 'call-1'),
+					);
+					return {
+						choices: [{message: {content: 'done', tool_calls: []}}],
+						toolsDisabled: false,
+					};
+				},
+			} as unknown as LLMClient,
+			toolManager: {
+				getAvailableToolNames: () => [],
+				getFilteredTools: () => ({}),
+				hasTool: () => false,
+				getToolEntry: () => undefined,
+				isReadOnly: () => true,
+			} as any,
+			conn: s.conn,
+			nonInteractiveAlwaysAllow: [],
+		});
+
+	await Promise.all([run(a), run(b)]);
+
+	t.is(a.permissionRequests.length, 1);
+	t.is(a.permissionRequests[0].sessionId, a.session.sessionId);
+	t.is(b.permissionRequests.length, 1);
+	t.is(b.permissionRequests[0].sessionId, b.session.sessionId);
 });
 
 async function readThroughAcp(
@@ -2855,4 +3594,848 @@ test.serial('runAcpConversation - concurrent sessions keep their own working dir
 
 	t.true(firstResults[0].includes('FIRST marker'), firstResults[0]);
 	t.true(secondResults[0].includes('SECOND marker'), secondResults[0]);
+});
+
+// ============================================================================
+// session/set_mode during a turn (#1857)
+// ============================================================================
+
+// The client changes the mode at any point in a prompt, so the next model
+// request and every later approval must follow it. Each turn below flips the
+// mode while the model is "answering", which is after that request's tool list
+// was built and before its calls are approved - the window the bug lived in.
+
+const runModeSwitchTurn = async (
+	t: any,
+	devMode: DevelopmentMode,
+	turns: Array<{toolCalls: ToolCall[]; switchTo?: DevelopmentMode}>,
+	answer: 'allow' | 'deny' = 'deny',
+	onUpdate?: (update: any, session: AcpSession) => void,
+	alwaysAllow: string[] = [],
+) => {
+	const cwd = createCwdProject(t, 'MODE');
+	const permissionRequests: any[] = [];
+	const offered: string[][] = [];
+	let session: AcpSession;
+	const conn = {
+		sessionUpdate: async (u: any) => onUpdate?.(u.update, session),
+		requestPermission: async (p: any) => {
+			permissionRequests.push(p);
+			return {outcome: {outcome: 'selected', optionId: answer}};
+		},
+	} as unknown as AgentSideConnection;
+	session = createMockSession(conn, {devMode, cwd});
+
+	const registry = ToolRegistry.fromToolExports([readFileTool, writeFileTool]);
+	setToolRegistryGetter(() => registry.getHandlers());
+	const toolManager = {
+		...createMockToolManager(),
+		getAvailableToolNames: (_tune: unknown, mode: DevelopmentMode) =>
+			mode === 'plan' ? ['read_file'] : ['read_file', 'write_file'],
+		// What each model request is actually offered.
+		getFilteredTools: (names: string[]) => {
+			offered.push(names);
+			return {};
+		},
+		hasTool: (name: string) => registry.hasTool(name),
+		getToolEntry: (name: string) => registry.getEntry(name),
+		isReadOnly: (name: string) => name === 'read_file',
+	};
+
+	let requests = 0;
+	const client = {
+		chat: async () => {
+			const turn = turns[requests++];
+			if (!turn) return {choices: [{message: {content: 'done'}}]};
+			if (turn.switchTo) session.developmentMode = turn.switchTo;
+			return {choices: [{message: {content: '', tool_calls: turn.toolCalls}}]};
+		},
+	} as unknown as LLMClient;
+
+	await runAcpConversation({
+		session,
+		client,
+		toolManager: toolManager as any,
+		conn,
+		nonInteractiveAlwaysAllow: alwaysAllow,
+	});
+
+	return {cwd, permissionRequests, offered, session};
+};
+
+const writeCall = (name: string, id: string) =>
+	createMockToolCall('write_file', {path: name, content: 'x\n'}, id);
+
+test.serial('runAcpConversation - a switch from yolo to normal mid-turn prompts for the next call', async t => {
+	const {cwd, permissionRequests} = await runModeSwitchTurn(t, 'yolo', [
+		{toolCalls: [writeCall('first.txt', 'call-1')]},
+		{toolCalls: [writeCall('second.txt', 'call-2')], switchTo: 'normal'},
+	]);
+
+	t.deepEqual(
+		permissionRequests.map(p => p.toolCall.toolCallId),
+		['call-2'],
+		'only the call after the switch is asked about',
+	);
+	t.true(existsSync(join(cwd, 'first.txt')));
+	t.false(existsSync(join(cwd, 'second.txt')), 'the denied call must not run');
+});
+
+test.serial('runAcpConversation - a switch from normal to yolo mid-turn stops prompting', async t => {
+	const {cwd, permissionRequests} = await runModeSwitchTurn(
+		t,
+		'normal',
+		[
+			{toolCalls: [writeCall('first.txt', 'call-1')]},
+			{toolCalls: [writeCall('second.txt', 'call-2')], switchTo: 'yolo'},
+		],
+		'allow',
+	);
+
+	t.deepEqual(
+		permissionRequests.map(p => p.toolCall.toolCallId),
+		['call-1'],
+	);
+	t.true(existsSync(join(cwd, 'first.txt')));
+	t.true(existsSync(join(cwd, 'second.txt')));
+});
+
+test.serial('runAcpConversation - the next model request offers the tools of the new mode', async t => {
+	const {offered} = await runModeSwitchTurn(t, 'yolo', [
+		{
+			toolCalls: [createMockToolCall('read_file', {path: 'marker.txt'}, 'call-1')],
+			switchTo: 'plan',
+		},
+	]);
+
+	t.deepEqual(offered.slice(0, 2), [['read_file', 'write_file'], ['read_file']]);
+});
+
+test.serial('runAcpConversation - a call the model already returned is refused once the mode no longer offers it', async t => {
+	// The batch was chosen in yolo; the switch to plan lands after its first call.
+	const {cwd, permissionRequests, session} = await runModeSwitchTurn(
+		t,
+		'yolo',
+		[
+			{
+				toolCalls: [
+					createMockToolCall('read_file', {path: 'marker.txt'}, 'call-1'),
+					writeCall('second.txt', 'call-2'),
+				],
+			},
+		],
+		'allow',
+		(update, current) => {
+			if (update.toolCallId === 'call-1' && update.status === 'completed') {
+				current.developmentMode = 'plan';
+			}
+		},
+	);
+
+	t.is(permissionRequests.length, 0, 'refused before it is ever put to the user');
+	t.false(existsSync(join(cwd, 'second.txt')));
+	const refusal = session.messages.find(
+		(m: any) => m.role === 'tool' && m.tool_call_id === 'call-2',
+	);
+	t.true(String(refusal?.content).includes('not available in plan mode'));
+});
+
+test.serial('runAcpConversation - a tool the plan mode never offered is refused even when the client would allow it', async t => {
+	const {cwd, permissionRequests, session} = await runModeSwitchTurn(
+		t,
+		'plan',
+		[{toolCalls: [writeCall('hidden.txt', 'call-1')]}],
+		'allow',
+	);
+
+	t.is(permissionRequests.length, 0, 'never put to the user');
+	t.false(existsSync(join(cwd, 'hidden.txt')));
+	const refusal = session.messages.find(
+		(m: any) => m.role === 'tool' && m.tool_call_id === 'call-1',
+	);
+	t.true(String(refusal?.content).includes('not available in plan mode'));
+});
+
+test.serial('runAcpConversation - alwaysAllow does not run a tool the plan mode never offered', async t => {
+	const {cwd, permissionRequests} = await runModeSwitchTurn(
+		t,
+		'plan',
+		[{toolCalls: [writeCall('hidden.txt', 'call-1')]}],
+		'allow',
+		undefined,
+		['write_file'],
+	);
+
+	t.is(permissionRequests.length, 0);
+	t.false(existsSync(join(cwd, 'hidden.txt')));
+});
+
+test.serial('runAcpConversation - a lone refused call is still announced to the client as failed', async t => {
+	const updates: any[] = [];
+	const {cwd, permissionRequests} = await runModeSwitchTurn(
+		t,
+		'yolo',
+		[{toolCalls: [writeCall('only.txt', 'call-1')], switchTo: 'plan'}],
+		'allow',
+		update => updates.push(update),
+	);
+
+	t.is(permissionRequests.length, 0);
+	t.false(existsSync(join(cwd, 'only.txt')));
+	t.deepEqual(
+		updates
+			.filter(u => u.toolCallId === 'call-1')
+			.map(u => [u.sessionUpdate, u.status]),
+		[
+			['tool_call', 'pending'],
+			['tool_call_update', 'failed'],
+		],
+	);
+});
+
+test.serial('runAcpConversation - a prose plan is persisted after a switch into plan mode', async t => {
+	const {conn} = createMockConn();
+	const session = createMockSession(conn, {devMode: 'normal'});
+	const toolManager = {
+		...createMockToolManager(),
+		getAvailableToolNames: (_tune: unknown, mode: DevelopmentMode) =>
+			mode === 'plan' ? ['read_file', 'write_plan'] : ['read_file'],
+		hasTool: () => true,
+		getToolEntry: () => ({approval: false}),
+	};
+	let persistedContent: unknown;
+	setToolRegistryGetter(() => ({
+		write_plan: async (args: unknown) => {
+			persistedContent = (args as {content?: unknown}).content;
+			return 'Plan saved';
+		},
+	}));
+	const client = {
+		chat: async () => {
+			session.developmentMode = 'plan';
+			return {choices: [{message: {content: '# Plan\n\n1. Build it.'}}]};
+		},
+	} as unknown as LLMClient;
+
+	await runAcpConversation({
+		session,
+		client,
+		toolManager: toolManager as any,
+		conn,
+		nonInteractiveAlwaysAllow: [],
+	});
+
+	t.is(persistedContent, '# Plan\n\n1. Build it.');
+});
+
+test.serial('runAcpConversation - a mode switch in one session does not reach another', async t => {
+	const [switched, untouched] = await Promise.all([
+		runModeSwitchTurn(t, 'yolo', [
+			{toolCalls: [writeCall('a.txt', 'call-a')], switchTo: 'normal'},
+		]),
+		runModeSwitchTurn(t, 'yolo', [{toolCalls: [writeCall('b.txt', 'call-b')]}]),
+	]);
+
+	t.is(switched.permissionRequests.length, 1);
+	t.false(existsSync(join(switched.cwd, 'a.txt')));
+	t.is(untouched.permissionRequests.length, 0);
+	t.true(existsSync(join(untouched.cwd, 'b.txt')));
+});
+
+// ============================================================================
+// Tools the client turned off for a session
+// ============================================================================
+
+/**
+ * One turn in which the model calls `browser`. The tool manager honours the
+ * disabled list it is given, as the real one does, and the registry counts how
+ * many times the tool actually ran. With `turnOffWhileRequesting`, the client
+ * turns `browser` off (as a session/load would) after the model was offered it
+ * and before the call comes back.
+ */
+const runBrowserCallTurn = async (
+	disabledTools: string[],
+	{turnOffWhileRequesting = false} = {},
+) => {
+	const updates: any[] = [];
+	const conn = {
+		sessionUpdate: async (u: any) => {
+			updates.push(u.update);
+		},
+		requestPermission: async () => ({
+			outcome: {outcome: 'selected', optionId: 'allow'},
+		}),
+	} as unknown as AgentSideConnection;
+	const session = createMockSession(conn, {devMode: 'yolo'});
+	session.disabledTools = disabledTools;
+
+	const offered: string[][] = [];
+	let ran = 0;
+	setToolRegistryGetter(() => ({
+		browser: async () => {
+			ran++;
+			return 'page text';
+		},
+	}));
+	const toolManager = {
+		...createMockToolManager(),
+		getAvailableToolNames: (
+			_tune: unknown,
+			_mode: unknown,
+			disabled?: readonly string[],
+		) => ['read_file', 'browser'].filter(name => !disabled?.includes(name)),
+		getFilteredTools: (names: string[]) => {
+			offered.push(names);
+			return {};
+		},
+		hasTool: () => true,
+		getToolEntry: () => ({approval: false}),
+	};
+
+	let requests = 0;
+	const client = {
+		chat: async () => {
+			requests++;
+			if (requests === 1 && turnOffWhileRequesting) {
+				session.disabledTools = ['browser'];
+			}
+			return requests === 1
+				? {
+						choices: [
+							{
+								message: {
+									content: '',
+									tool_calls: [createMockToolCall('browser', {}, 'browse-1')],
+								},
+							},
+						],
+					}
+				: {choices: [{message: {content: 'done'}}]};
+		},
+	} as unknown as LLMClient;
+
+	await runAcpConversation({
+		session,
+		client,
+		toolManager: toolManager as any,
+		conn,
+		nonInteractiveAlwaysAllow: [],
+	});
+
+	const toolResult = session.messages.findLast(
+		(m: Message) => m.role === 'tool',
+	);
+	return {offered, ran, toolResult, updates, session};
+};
+
+test.serial('runAcpConversation - a tool the session turned off is not offered, and a call to it is refused', async t => {
+	const {offered, ran, toolResult, updates} = await runBrowserCallTurn([
+		'browser',
+	]);
+
+	t.deepEqual(offered[0], ['read_file']);
+	// The model named it anyway: nothing ran, and it is told why.
+	t.is(ran, 0);
+	t.is(toolResult?.content, 'Error: browser is disabled in this session');
+	const failed = updates.filter(
+		(u: any) => u.toolCallId === 'browse-1' && u.status === 'failed',
+	);
+	t.is(failed.length, 1);
+});
+
+test.serial('runAcpConversation - a tool turned off while the model is answering is refused, not run', async t => {
+	const {offered, ran, toolResult} = await runBrowserCallTurn([], {
+		turnOffWhileRequesting: true,
+	});
+
+	// It was offered, because the list was empty when the request was made.
+	t.deepEqual(offered[0], ['read_file', 'browser']);
+	t.is(ran, 0);
+	t.is(toolResult?.content, 'Error: browser is disabled in this session');
+});
+
+test.serial('runAcpConversation - another session in the same process still has the tool', async t => {
+	const off = await runBrowserCallTurn(['browser']);
+	const on = await runBrowserCallTurn([]);
+
+	t.is(off.ran, 0);
+	t.deepEqual(on.offered[0], ['read_file', 'browser']);
+	t.is(on.ran, 1);
+	t.is(on.toolResult?.content, 'page text');
+});
+
+test.serial('runAcpConversation - a session\'s subagents are told what the session turned off', async t => {
+	const {conn} = createMockConn();
+	const session = createMockSession(conn);
+	session.disabledTools = ['browser'];
+	let fromBridge: readonly string[] | undefined;
+	const client = {
+		chat: async () => {
+			fromBridge = getSubagentToolBridge(session.sessionId)?.getDisabledTools?.();
+			return {choices: [{message: {content: 'done', tool_calls: []}}]};
+		},
+	} as unknown as LLMClient;
+
+	await runAcpConversation({
+		session,
+		client,
+		toolManager: createMockToolManager() as any,
+		conn,
+		nonInteractiveAlwaysAllow: [],
+	});
+
+	t.deepEqual(fromBridge, ['browser']);
+});
+
+test.serial('runAcpConversation - a session\'s subagents get the client the turn runs on, and keep it if the session changes', async t => {
+	const {conn} = createMockConn();
+	const session = createMockSession(conn);
+	let fromBridge: unknown;
+	let fromBridgeAfterSwitch: unknown;
+	const turnClient = {
+		chat: async () => {
+			fromBridge = getSubagentToolBridge(session.sessionId)?.getClient?.();
+			// The session picks another model while this turn is running.
+			session.client = {} as unknown as LLMClient;
+			fromBridgeAfterSwitch = getSubagentToolBridge(session.sessionId)?.getClient?.();
+			return {choices: [{message: {content: 'done', tool_calls: []}}]};
+		},
+	} as unknown as LLMClient;
+
+	await runAcpConversation({
+		session,
+		client: turnClient,
+		toolManager: createMockToolManager() as any,
+		conn,
+		nonInteractiveAlwaysAllow: [],
+	});
+
+	t.is(fromBridge, turnClient);
+	// The running turn keeps its client, so its subagents do too.
+	t.is(fromBridgeAfterSwitch, turnClient);
+});
+
+// ============================================================================
+// Sub-agent lifecycle notifications
+// ============================================================================
+
+/**
+ * One turn whose `agent` call plays a sub-agent run through the event store
+ * the way the executor does, so only the ACP wiring is under test.
+ */
+const runAgentTurn = async (
+	conn: AgentSideConnection,
+	session: AcpSession,
+	runId: string,
+) => {
+	let calls = 0;
+	const client = {
+		chat: async () => {
+			calls++;
+			return calls === 1
+				? {
+						choices: [
+							{
+								message: {
+									content: '',
+									tool_calls: [
+										createMockToolCall('agent', {}, `agent-call-${runId}`),
+									],
+								},
+							},
+						],
+					}
+				: {choices: [{message: {content: 'done'}}]};
+		},
+	} as unknown as LLMClient;
+
+	await runAcpConversation({
+		session,
+		client,
+		toolManager: {...createMockToolManager(), hasTool: () => true} as any,
+		conn,
+		nonInteractiveAlwaysAllow: [],
+	});
+};
+
+const subagentRegistry = () => {
+	setToolRegistryGetter(() => ({
+		agent: async (_args: any, options: any) => {
+			const base = {
+				childRunId: `run-${options.sessionId}`,
+				parentRunId: '',
+				sessionId: options.sessionId,
+				toolCallId: options.toolCallId,
+				name: 'explore',
+			};
+			emitSubagentRunEvent({...base, status: 'started'});
+			await new Promise(resolve => setTimeout(resolve, 20));
+			emitSubagentRunEvent({...base, status: 'progress', tokenCount: 5});
+			// Another session's run, which this session must not be told about.
+			emitSubagentRunEvent({
+				...base,
+				sessionId: 'someone-else',
+				childRunId: 'run-someone-else',
+				status: 'started',
+			});
+			emitSubagentRunEvent({...base, status: 'completed', result: 'found it'});
+			return 'found it';
+		},
+	}));
+};
+
+const createNotifyingConn = () => {
+	const notifications: Array<{method: string; params: any}> = [];
+	const conn = {
+		sessionUpdate: async () => {},
+		requestPermission: async () => ({
+			outcome: {outcome: 'selected', optionId: 'allow'},
+		}),
+		notify: async (method: string, params: any) => {
+			notifications.push({method, params});
+		},
+	} as unknown as AgentSideConnection;
+	return {conn, notifications};
+};
+
+test.serial('runAcpConversation - sends the sub-agent run to the client, tied to the agent call', async t => {
+	subagentRegistry();
+	const {conn, notifications} = createNotifyingConn();
+	const session = createMockSession(conn, {devMode: 'yolo'});
+
+	await runAgentTurn(conn, session, 'one');
+
+	t.true(notifications.every(n => n.method === '_nanocoder/subagent'));
+	t.deepEqual(
+		notifications.map(n => n.params.status),
+		['started', 'progress', 'completed'],
+	);
+	for (const {params} of notifications) {
+		t.is(params.sessionId, session.sessionId);
+		t.is(params.childRunId, `run-${session.sessionId}`);
+		t.is(params.toolCallId, 'agent-call-one');
+		t.is(params.parentRunId, '');
+	}
+	t.is(notifications.at(-1)?.params.result, 'found it');
+});
+
+test.serial('runAcpConversation - the agent card title shows this session\'s run, never another\'s', async t => {
+	const {updateSubagentProgressById, removeSubagentProgress} = await import(
+		'@/services/subagent-events'
+	);
+	setToolRegistryGetter(() => ({
+		agent: async (_args: any, options: any) => {
+			// A run of another chat in the same process, in the shared progress
+			// map. Before, a 1.5s poller over that map put it on this card.
+			updateSubagentProgressById('intruder-run', {
+				subagentName: 'intruder',
+				status: 'running',
+				toolCallCount: 4,
+				turnCount: 2,
+				tokenCount: 99_000,
+			});
+			await new Promise(resolve => setTimeout(resolve, 1700));
+			const base = {
+				childRunId: 'own-run',
+				parentRunId: '',
+				sessionId: options.sessionId,
+				toolCallId: options.toolCallId,
+				name: 'explore',
+			};
+			emitSubagentRunEvent({...base, status: 'started'});
+			emitSubagentRunEvent({
+				...base,
+				status: 'progress',
+				tokenCount: 1200,
+				toolCallCount: 2,
+				lastTool: 'read_file',
+			});
+			emitSubagentRunEvent({...base, status: 'completed', result: 'ok'});
+			return 'ok';
+		},
+	}));
+	t.teardown(() => removeSubagentProgress('intruder-run'));
+	const {conn, updates} = createMockConn();
+	const session = createMockSession(conn, {devMode: 'yolo'});
+
+	await runAgentTurn(conn, session, 'titled');
+
+	const titles = updates
+		.filter(
+			u =>
+				u.update?.sessionUpdate === 'tool_call_update' &&
+				u.update.toolCallId === 'agent-call-titled' &&
+				u.update.title,
+		)
+		.map(u => u.update.title);
+	t.false(titles.some(title => title.includes('intruder')));
+	t.true(titles.includes('explore • 1.2k tokens • 2 tools (read_file)'));
+	// The progress title lands before the card is settled.
+	const card = updates.filter(
+		u =>
+			u.update?.sessionUpdate === 'tool_call_update' &&
+			u.update.toolCallId === 'agent-call-titled',
+	);
+	t.is(card.at(-1)?.update.status, 'completed');
+});
+
+test.serial('runAcpConversation - two sessions with sub-agents do not see each other\'s runs', async t => {
+	subagentRegistry();
+	const first = createNotifyingConn();
+	const second = createNotifyingConn();
+	const sessionA = createMockSession(first.conn, {devMode: 'yolo'});
+	const sessionB = createMockSession(second.conn, {devMode: 'yolo'});
+
+	await Promise.all([
+		runAgentTurn(first.conn, sessionA, 'a'),
+		runAgentTurn(second.conn, sessionB, 'b'),
+	]);
+
+	for (const [{notifications}, session] of [
+		[first, sessionA],
+		[second, sessionB],
+	] as const) {
+		t.is(notifications.length, 3);
+		t.true(notifications.every(n => n.params.sessionId === session.sessionId));
+	}
+});
+
+test.serial('runAcpConversation - a client that cannot take the notification still gets the turn', async t => {
+	subagentRegistry();
+	// The default mock connection has no notify(), so every send fails.
+	const {conn, updates} = createMockConn();
+	const session = createMockSession(conn, {devMode: 'yolo'});
+
+	await runAgentTurn(conn, session, 'quiet');
+
+	t.is(session.messages.findLast((m: Message) => m.role === 'tool')?.content, 'found it');
+	t.true(updates.length > 0);
+});
+
+test.serial('runAcpConversation - stops listening when the turn ends', async t => {
+	subagentRegistry();
+	const {conn, notifications} = createNotifyingConn();
+	const session = createMockSession(conn, {devMode: 'yolo'});
+	await runAgentTurn(conn, session, 'ended');
+	const before = notifications.length;
+
+	emitSubagentRunEvent({
+		childRunId: 'late',
+		parentRunId: '',
+		sessionId: session.sessionId,
+		name: 'explore',
+		status: 'started',
+	});
+	await new Promise(resolve => setTimeout(resolve, 20));
+
+	t.is(notifications.length, before);
+});
+
+test.serial('runAcpConversation - a sub-agent permission request names the run', async t => {
+	const {permissionRequests} = await callThroughBridge(
+		async () => ({outcome: {outcome: 'selected', optionId: 'allow'}}),
+		{subagentRunId: 'run-9'},
+	);
+
+	t.deepEqual(permissionRequests[0]._meta, {'nanocoder/childRunId': 'run-9'});
+});
+
+test.serial('runAcpConversation - a permission request without a run id carries no run meta', async t => {
+	const {permissionRequests} = await callThroughBridge(async () => ({
+		outcome: {outcome: 'selected', optionId: 'allow'},
+	}));
+
+	t.is(permissionRequests[0]._meta, undefined);
+});
+
+// ============================================================================
+// Sub-agent runs through the real agent tool and executor
+// ============================================================================
+
+const subagentToolManager = () =>
+	({
+		filterToolNamesForMode: (names: string[]) => names,
+		getOwnerSkill: () => undefined,
+		getAllTools: () => ({}),
+		getToolHandler: () => undefined,
+		getToolEntry: () => undefined,
+		isReadOnly: () => true,
+		getToolFormatter: () => undefined,
+		getStreamingFormatter: () => undefined,
+	}) as unknown as ToolManager;
+
+const startRealSubagents = async (subagentClient: LLMClient) => {
+	await getSubagentLoader().initialize();
+	setAgentToolExecutor(
+		new SubagentExecutor(subagentToolManager(), subagentClient),
+	);
+	setToolRegistryGetter(() => ({
+		agent: (args: any, options: any) => agentTool.tool.execute!(args, options),
+	}));
+};
+
+/**
+ * A turn whose model calls the `agent` tool. A sub-agent runs on the client the
+ * turn runs on, so that client also answers the sub-agent's own request (the
+ * second one) the way `subagentClient` would.
+ */
+const agentCallTurn = (
+	session: AcpSession,
+	conn: AgentSideConnection,
+	subagentClient: LLMClient,
+) => {
+	let calls = 0;
+	const client = {
+		// What the sub-agent executor reads from the client it inherits from.
+		getCurrentModel: () => subagentClient.getCurrentModel(),
+		getProviderConfig: () => subagentClient.getProviderConfig(),
+		chat: async (...args: unknown[]) => {
+			calls++;
+			if (calls === 2) {
+				return (subagentClient.chat as (...a: unknown[]) => unknown)(...args);
+			}
+			return calls === 1
+				? {
+						choices: [
+							{
+								message: {
+									content: '',
+									tool_calls: [
+										createMockToolCall(
+											'agent',
+											{subagent_type: 'explore', description: 'look'},
+											'parent-agent-call',
+										),
+									],
+								},
+							},
+						],
+					}
+				: {choices: [{message: {content: 'parent finished'}}]};
+		},
+	} as unknown as LLMClient;
+	return runAcpConversation({
+		session,
+		client,
+		toolManager: {...createMockToolManager(), hasTool: () => true} as any,
+		conn,
+		nonInteractiveAlwaysAllow: [],
+	});
+};
+
+test.serial('runAcpConversation - a real sub-agent run reaches the client from start to completed', async t => {
+	const subagentClient = {
+		chat: async () => ({choices: [{message: {content: 'child answer'}}]}),
+		getCurrentModel: () => 'm',
+		getProviderConfig: () => ({name: 'p'}),
+	} as unknown as LLMClient;
+	await startRealSubagents(subagentClient);
+	const {conn, notifications} = createNotifyingConn();
+	const session = createMockSession(conn, {devMode: 'yolo'});
+
+	const result = await agentCallTurn(session, conn, subagentClient);
+
+	t.is(result.stopReason, 'end_turn');
+	const statuses = notifications.map(n => n.params.status);
+	t.is(statuses[0], 'started');
+	t.is(statuses.at(-1), 'completed');
+	t.is(notifications.at(-1)?.params.result, 'child answer');
+	for (const {params} of notifications) {
+		t.is(params.sessionId, session.sessionId);
+		t.is(params.toolCallId, 'parent-agent-call');
+		t.is(params.name, 'explore');
+		t.is(params.parentRunId, '');
+	}
+	t.is(new Set(notifications.map(n => n.params.childRunId)).size, 1);
+});
+
+test.serial('runAcpConversation - cancelling one sub-agent lets the parent turn continue', async t => {
+	let childModelCalled = false;
+	const subagentClient = {
+		chat: (_m: unknown, _t: unknown, _c: unknown, signal?: AbortSignal) =>
+			new Promise((_resolve, reject) => {
+				childModelCalled = true;
+				// A real client rejects on a signal that is already aborted, so
+				// this must too: a cancel can land before the call is made.
+				const abort = () => reject(new Error('Aborted'));
+				if (signal?.aborted) abort();
+				else signal?.addEventListener('abort', abort);
+			}),
+		getCurrentModel: () => 'm',
+		getProviderConfig: () => ({name: 'p'}),
+	} as unknown as LLMClient;
+	await startRealSubagents(subagentClient);
+	const {conn, notifications} = createNotifyingConn();
+	const session = createMockSession(conn, {devMode: 'yolo'});
+
+	const turn = agentCallTurn(session, conn, subagentClient);
+	// What a client does: wait for the run to be announced, then cancel it by id.
+	const started = await waitFor(() =>
+		notifications.find(n => n.params.status === 'started'),
+	);
+	await waitFor(() => (childModelCalled ? true : undefined));
+	t.true(cancelSubagentRun(session.sessionId, started.params.childRunId));
+	const result = await turn;
+
+	t.is(result.stopReason, 'end_turn');
+	t.false(session.abortController.signal.aborted);
+	t.is(notifications.at(-1)?.params.status, 'cancelled');
+	// The parent was told, so it can carry on rather than wait for a result.
+	const toolResult = session.messages.findLast(
+		(m: Message) => m.role === 'tool' && m.name === 'agent',
+	);
+	t.regex(String(toolResult?.content), /Subagent was cancelled/);
+	t.is(session.messages.at(-1)?.content, 'parent finished');
+});
+
+async function waitFor<T>(find: () => T | undefined): Promise<T> {
+	for (let i = 0; i < 100; i++) {
+		const found = find();
+		if (found) return found;
+		await new Promise(resolve => setTimeout(resolve, 20));
+	}
+	throw new Error('timed out waiting');
+}
+
+test.serial('runAcpConversation - a session with its own tools runs them, and others still use the shared registry', async t => {
+	const {conn} = createMockConn();
+	const runTurn = async (sessionTools?: ToolManager) => {
+		const session = createMockSession(conn, {devMode: 'yolo'});
+		let calls = 0;
+		const client = {
+			chat: async () => {
+				calls++;
+				return calls === 1
+					? {
+							choices: [
+								{
+									message: {
+										content: '',
+										tool_calls: [createMockToolCall('lookup', {})],
+									},
+								},
+							],
+						}
+					: {choices: [{message: {content: 'done'}}]};
+			},
+		} as unknown as LLMClient;
+		await runAcpConversation({
+			session,
+			client,
+			toolManager: {...createMockToolManager(), hasTool: () => true} as any,
+			sessionTools,
+			conn,
+			nonInteractiveAlwaysAllow: [],
+		});
+		return String(
+			session.messages.findLast((m: Message) => m.role === 'tool')?.content,
+		);
+	};
+	setToolRegistryGetter(() => ({lookup: async () => 'shared registry'}));
+	const own = {
+		getToolRegistry: () => ({lookup: async () => 'session registry'}),
+	} as unknown as ToolManager;
+
+	t.is(await runTurn(own), 'session registry');
+	t.is(await runTurn(), 'shared registry');
 });

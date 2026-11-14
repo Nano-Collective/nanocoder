@@ -1,145 +1,87 @@
 # AGENTS.md
 
-AI coding agent instructions for **@nanocollective/nanocoder**
+Instructions for AI coding agents working on **@nanocollective/nanocoder**. `CLAUDE.md` has the full architecture map; this file is the short version.
 
 ## Project Overview
 
-A local-first CLI coding agent that brings the power of agentic coding tools like Claude Code and Gemini CLI to local models or controlled APIs like OpenRouter
+Nanocoder is a local-first CLI coding agent written in TypeScript. The terminal UI is React 19 rendered with Ink. It talks to many LLM providers (Ollama, OpenRouter, Anthropic, Gemini and any OpenAI-compatible API) through the Vercel AI SDK. It is not a web application.
 
-**Project Type:** React Web Application
-**Primary Language:** TypeScript (99% of codebase)
-
-## Architecture
-
-**Key Frameworks & Libraries:**
-- React (^19.0.0) - web
-
-**Project Structure:**
-- `assets/` - Static assets
-- `docs/` - Documentation
-- `source/` - Source code
-- `.github/assets/` - Static assets
-- `docs/configuration/` - Project files
-- `docs/features/` - Project files
-- `docs/getting-started/` - Project files
-- `source/ai-sdk-client/` - Project files
-- `source/app/` - Application code
-- `source/auth/` - Project files
-- `source/commands/` - Project files
-- `source/components/` - React/UI components
-- `source/config/` - Configuration files
-- `source/context/` - Project files
-- `source/custom-commands/` - Project files
-- `source/hooks/` - Project files
-- `source/init/` - Project files
-- `source/lsp/` - Project files
-- `source/markdown-parser/` - Project files
-- `source/mcp/` - Project files
-
-## Key Files
-
-**Configuration:**
-- `package.json` - Node.js dependencies and scripts
-- `plugins/vscode/package.json` - Node.js dependencies and scripts
-- `pnpm-lock.yaml` - Configuration file
-
-**Documentation:**
-- `docs/**.md`
-- `README.md`
-- `.devcontainer/README.md`
-- `.github/ISSUE_TEMPLATE/bug_report.md`
-- `.github/ISSUE_TEMPLATE/feature_request.md`
+- **Package**: `@nanocollective/nanocoder`, binary `nanocoder` (`dist/cli.js`)
+- **Node**: 22 or newer (`engines` in `package.json`)
+- **Package manager**: pnpm, pinned by the `packageManager` field (use Corepack)
 
 ## Development Commands
 
-**Build:**
 ```bash
-npm run build
+pnpm install
+pnpm run build          # Compile TypeScript to dist/ (also builds plugins/voice)
+pnpm run start          # Run the compiled CLI
+pnpm run dev            # tsc --watch (compile only; run `pnpm run start` separately)
+
+pnpm run test:ava source/path/to/file.spec.ts   # Run one spec file
+pnpm run test:types     # TypeScript check
+pnpm run test:format    # Biome format check
+pnpm run test:lint      # Biome lint check
+pnpm run test:lint:fix  # Auto-fix lint and format issues
+pnpm run test:knip      # Unused code detection, plus a production pass that flags files only specs import
+pnpm run test:all       # Format, types, lint, AVA, knip, audit, semgrep (slow)
+
+pnpm run build:vscode   # Package the VS Code extension to assets/nanocoder-vscode.vsix
 ```
 
-**Development:**
-```bash
-npm run dev
-```
+Prefer running the focused spec files for the code you changed over `test:all`.
 
-**Start:**
-```bash
-npm run start
-```
+## Entry Points
 
-## Code Style Guidelines
+- `source/cli.tsx` - CLI entry. Parses arguments, handles fast-path subcommands (`storage`, `daemon`, `verify`, `skills`, `config`, `trust`, `init`, `completion`, `--help`, `--version`) without loading Ink, then starts the ACP server, the plain shell or the TUI.
+- `source/cli-args.ts` - Top-level command list and argument validation.
+- `source/app/load-tui-renderer.ts` and `source/app/render-tui.tsx` - Load and render the Ink app.
+- `source/app/App.tsx` - Root Ink component.
+- `source/plain/shell.ts` - Non-Ink runtime for `--plain`, CI and non-TTY runs.
+- `source/acp/acp-server.ts` - Agent Client Protocol server for `nanocoder --acp`.
 
-- Use camelCase for variables and functions
-- Use PascalCase for classes and components
-- Prefer const/let over var
-- Use async/await over callbacks when possible
-- Use functional components with hooks
-- Follow React naming conventions for components
+## Key Directories
 
-## Testing
-
-**Test Files:**
-- `.nanocoder/commands/test.md`
-- `scripts/test-copilot.sh`
-- `scripts/test.sh`
-- `source/ai-sdk-client/ai-sdk-client.spec.ts`
-- `source/ai-sdk-client/chat/chat-handler.spec.ts`
-
-## Existing Project Guidelines
-
-*The following guidelines were found in existing AI configuration files:*
-
-### AI Agent Guidelines
-**From CLAUDE.md:**
-# Build and run
-pnpm run build          # Compile TypeScript to dist/ with executable permissions
-pnpm run build:credits  # Regenerate contributors.json from git history (CI/release only)
-pnpm run start          # Run the compiled application
-pnpm run dev            # Watch mode compilation (tsc --watch)
-
-# Testing (run before committing)
-pnpm run test:all       # Full suite: format, lint, types, AVA tests, knip
-
-## Project Overview
-Nanocoder is a React-based CLI coding agent built with Ink.js that provides local-first AI assistance with multiple provider support (Ollama, OpenRouter, any OpenAI-compatible API).
-
-**Entry point**: `source/cli.tsx` → Ink render of `App` from `source/app.tsx`
-
-### State Management Pattern
-All state lives in `useAppState.tsx`. Other hooks (`useChatHandler`, `useToolHandler`, `useModeHandlers`) receive state and setters from it. `App.tsx` orchestrates these hooks together. Global `message-queue.ts` allows deep components to add chat messages.
-
-### LLM Client Architecture
-`client-factory.ts` creates clients via `createLLMClient(provider?)`. Uses Vercel AI SDK with `createOpenAICompatible` for any OpenAI-compatible API. Supports streaming responses and tool calling.
+- `source/hooks/` - App state (`useAppState.tsx`), mode handling, orchestration (`useAppHandlers.tsx`) and the chat loop (`chat-handler/`)
+- `source/ai-sdk-client/` - Wrapper over the Vercel AI SDK: streaming, tool calls, providers, error handling
+- `source/tools/` - Built-in tools, registered in `source/tools/tool-manager.ts`; file editors live in `source/tools/file-ops/`
+- `source/tool-calling/` - XML/text tool-call parsers for models without native tool calling
+- `source/commands/` - Built-in slash commands, lazy-loaded via `source/commands/lazy-registry.ts`
+- `source/config/` - Config loading (`agents.config.json`, `.mcp.json`), preferences, paths, directory trust
+- `source/mcp/` - MCP client integration
+- `source/skills/`, `source/custom-commands/`, `source/custom-tools/`, `source/subagents/` - User extensions loaded from `.nanocoder/`
+- `source/plugins/` and `source/sdk/` - In-process plugin host and plugin API types
+- `source/daemon/` and `source/events/` - Per-project daemon and its file-watch and cron event sources
+- `source/services/` - Checkpoints, bash execution, lifecycle hooks, formatters, auto-commit
+- `source/components/` - Shared Ink UI components
+- `plugins/vscode/` - VS Code extension; `plugins/voice/` - optional voice plugin
+- `docs/` - User documentation
 
 ## Code Style
-- **TypeScript strict mode** with `@/*` path alias mapping to `source/*`
-- **Biome** for formatting (tabs, single quotes, semicolons, trailing commas)
-- **Key lint rules**: `useExhaustiveDependencies: error`, `noUnusedVariables: error`, `noUnusedImports: error`
-- **React 19** with Ink.js for CLI rendering
+
+- TypeScript strict mode, with the `@/*` alias mapping to `source/*`
+- Biome formatting: tabs, single quotes, semicolons, trailing commas
+- Lint rules that fail the build: `useExhaustiveDependencies`, `noUnusedVariables`, `noUnusedImports`
+- Function components and hooks for UI; no web DOM APIs (this renders to a terminal)
 
 ## Testing
-- **Framework**: AVA with tsx loader
-- **Location**: `source/**/*.spec.ts` files alongside source
-- **Serial execution**: Tests run one at a time
-- **Run single test**: `pnpm run test:ava source/path/to/file.spec.ts`
 
+- AVA with the tsx loader; specs sit next to the code as `*.spec.ts` / `*.spec.tsx`
+- Tests run serially
+- Add or update a spec alongside every behaviour change
 
-## AI Coding Assistance Notes
+## Changesets
 
-**Important Considerations:**
-- Check package.json for available scripts before running commands
-- Be aware of Node.js version requirements
-- Consider impact on bundle size when adding dependencies
-- Follow React hooks best practices
-- Consider component reusability when creating new components
-- Project has 809 files across 93 directories
-- Large codebase: Focus on specific areas when making changes
-- Check build configuration files before making structural changes
+User-facing changes need a changeset in `.changeset/`. The package name in its frontmatter must be `"@nanocollective/nanocoder"`; a bare `nanocoder` passes PR checks but breaks the release. Docs-only changes do not need one.
+
+```md
+---
+"@nanocollective/nanocoder": patch
+---
+
+One or two sentences describing the change for users.
+```
 
 ## Repository
 
-**Source:** https://github.com/Nano-Collective/nanocoder.git
-
----
-
-*This AGENTS.md file was generated by Nanocoder. Update it as your project evolves.*
+https://github.com/Nano-Collective/nanocoder

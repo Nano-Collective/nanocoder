@@ -27,12 +27,12 @@ import {readFile, unlink, writeFile} from 'node:fs/promises';
 import {homedir} from 'node:os';
 import {dirname, join, resolve} from 'node:path';
 import {promisify} from 'node:util';
+import {loadPreferences} from '@/config/preferences';
 import {
 	isDirectoryTrusted,
-	loadPreferences,
 	trustRecheck,
 	untrustedReason,
-} from '@/config/preferences';
+} from '@/config/trust/directory-trust';
 import {formatError} from '@/utils/error-formatter';
 
 const execFileAsync = promisify(execFile);
@@ -258,9 +258,10 @@ export async function installAutoStart(
 		: ` Warning: ${resolve(opts.projectRoot)} ` +
 			untrustedReason(trustRecheck(opts.projectRoot, preferences)) +
 			`, so the ` +
-			`installed service will fail to start until you run \`nanocoder\` here ` +
-			`once to accept the trust disclaimer, or pass --trust-directory to ` +
-			`\`nanocoder daemon start\`.`;
+			`installed service will fail to start until this folder is trusted. ` +
+			`Run \`nanocoder\` here once to accept the trust disclaimer, or run ` +
+			`\`NANOCODER_TRUST_DIRECTORY=1 nanocoder daemon start\` here once to ` +
+			`save trust for the service.`;
 
 	if (platform === 'darwin') {
 		const target = launchAgentPath(home, hash);
