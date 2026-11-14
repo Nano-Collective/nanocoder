@@ -39,9 +39,9 @@ test('getToolsForProfile - full profile returns empty array (no filtering)', t =
 	t.deepEqual(result, []);
 });
 
-test('getToolsForProfile - minimal profile returns 8 core tools', t => {
+test('getToolsForProfile - minimal profile returns 10 core tools', t => {
 	const result = getToolsForProfile('minimal');
-	t.deepEqual(result, ['read_file', 'write_file', 'string_replace', 'execute_bash', 'find_files', 'search_file_contents', 'list_directory', 'agent']);
+	t.deepEqual(result, ['read_file', 'write_file', 'string_replace', 'execute_bash', 'bash_output', 'kill_bash', 'find_files', 'search_file_contents', 'list_directory', 'agent']);
 });
 
 test('getToolsForProfile - minimal profile includes read_file', t => {
@@ -59,13 +59,15 @@ test('getToolsForProfile - minimal profile includes execute_bash', t => {
 	t.true(result.includes('execute_bash'));
 });
 
-test('getToolsForProfile - nano profile returns 5 core tools with diff_edit', t => {
+test('getToolsForProfile - nano profile returns 7 core tools with diff_edit', t => {
 	const result = getToolsForProfile('nano');
 	t.deepEqual(result, [
 		'read_file',
 		'diff_edit',
 		'write_file',
 		'execute_bash',
+		'bash_output',
+		'kill_bash',
 		'search_file_contents',
 	]);
 });

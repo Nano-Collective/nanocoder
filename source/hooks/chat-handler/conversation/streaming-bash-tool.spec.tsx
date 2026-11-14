@@ -1,9 +1,10 @@
-import {existsSync, mkdirSync, writeFileSync} from 'node:fs';
+import {existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
 import React from 'react';
 import {reloadAppConfig} from '@/config/index';
+import {bashExecutor} from '@/services/bash-executor';
 import {setProjectRoot} from '@/services/session-cwd';
 import type {HooksConfig} from '@/types/config';
 import {runStreamingBashTool} from './streaming-bash-tool';
@@ -76,6 +77,47 @@ test('runStreamingBashTool leaves a clean run unflagged', async t => {
 
 	t.is(run.bashState?.exitCode, 0);
 	t.falsy(run.result.isError);
+});
+
+test('runStreamingBashTool returns a background job without a live component', async t => {
+	const dir = mkdtempSync(join(tmpdir(), 'nc-stream-bg-'));
+	const script = join(dir, 'job.js');
+	writeFileSync(
+		script,
+		"console.log('started'); setInterval(() => {}, 1000);\n",
+	);
+	t.teardown(() => rmSync(dir, {recursive: true, force: true}));
+
+	const toolCall = {
+		id: 'call_bg',
+		type: 'function',
+		function: {
+			name: 'execute_bash',
+			arguments: JSON.stringify({
+				command: `node "${script}"`,
+				run_in_background: true,
+			}),
+		},
+	} as any;
+
+	let live: React.ReactNode = 'unset';
+	const run = await runStreamingBashTool(
+		toolCall,
+		null,
+		component => {
+			live = component;
+		},
+		'test',
+	);
+
+	t.is(live, null, 'no live BashProgress is mounted for a background job');
+	t.falsy(run.bashState);
+	t.false(run.result.isError);
+	t.true(run.result.content.includes('JOB_ID:'));
+
+	const jobId = run.result.content.match(/JOB_ID: (\S+)/)?.[1];
+	t.truthy(jobId);
+	await bashExecutor.killJob(jobId!);
 });
 
 // ============================================================================

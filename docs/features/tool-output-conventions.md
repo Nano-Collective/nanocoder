@@ -43,6 +43,26 @@ When an edit tool returns file content:
 
 `execute_bash` returns `EXIT_CODE`, then stderr and stdout, capped at 2000 characters. Long output keeps its head and its tail, since build and test tools print their summary at the end.
 
+### Background jobs
+
+Set `run_in_background: true` for a process that does not exit on its own — a dev server, a watcher, a database. The call returns as soon as the job has started (after roughly one second of output), and its result is a job handle rather than an exit code:
+
+```
+JOB_ID: 6f1c...
+STATUS: running
+COMMAND: pnpm dev
+Use bash_output with this job_id to read more, or kill_bash to stop it.
+STDOUT:
+  VITE v5.4.0  ready in 312 ms
+  ➜  Local:   http://localhost:5173/
+```
+
+- `bash_output` returns only the text produced since the previous read, so a chatty server does not resend its whole log. Its status line reports `running`, `exited with code N`, or how the job was stopped. The preview in the `execute_bash` result counts as the first read.
+- `kill_bash` stops the job's whole process group and waits for it to exit. Read any final output with `bash_output` before killing if you need it.
+- Background output goes through the same bounded collector as a normal command, so a job that floods stdout cannot grow memory without limit.
+- Background jobs have no timeout and ignore the turn's cancellation: they are meant to outlive the turn that started them. They are stopped by `kill_bash`, when their session closes, or when Nanocoder exits.
+- Starting a background job goes through the same approval and sandbox path as a normal `execute_bash`. Plan mode hides `execute_bash`, `bash_output` and `kill_bash` together.
+
 ### Failure capsules
 
 A failing test run is the case that cap handles worst: each failure's detail is printed in the middle of the log, between the progress lines and the summary, so it is exactly what gets cut. When a command exits non-zero and its output is over the cap, Nanocoder checks it against the formats of Jest, Vitest, Mocha, AVA and `tsc`. If one matches, the model gets a failure capsule instead of the cut log:
