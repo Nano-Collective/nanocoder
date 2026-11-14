@@ -1267,8 +1267,10 @@ test.serial(
 	'progress spinner - cleared even when the command handler throws',
 	async t => {
 		const live: React.ReactNode[] = [];
+		const queued: React.ReactNode[] = [];
 		const options = createProgressTestOptions({
 			setLiveComponent: component => live.push(component),
+			onAddToChatQueue: component => queued.push(component),
 		});
 
 		// getMessageTokens runs after the spinner is mounted, so throwing there
@@ -1281,10 +1283,17 @@ test.serial(
 			},
 		};
 
-		await t.throwsAsync(() => handleMessageSubmission('/commit', boom));
+		// The failure is reported in the chat instead of rejecting out of the
+		// submission, which would end the app through `unhandledRejection`.
+		await t.notThrowsAsync(() => handleMessageSubmission('/commit', boom));
 
 		t.is(live.length, 2);
 		t.is(live[1], null, 'a throwing handler must not strand the spinner');
+		t.is(queued.length, 1);
+		t.is(
+			(queued[0] as React.ReactElement<{message: string}>).props.message,
+			'/commit failed: boom',
+		);
 	},
 );
 
