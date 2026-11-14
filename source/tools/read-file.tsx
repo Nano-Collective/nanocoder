@@ -9,6 +9,7 @@ import {
 	FILE_READ_PREVIEW_LINES,
 	FILE_READ_PREVIEW_THRESHOLD_LINES,
 	MAX_LINE_LENGTH_CHARS,
+	MAX_TOOL_RESULT_CHARS,
 } from '@/constants';
 import {ThemeContext} from '@/hooks/useTheme';
 import {getProjectRoot, getSafeSessionCwd} from '@/services/session-cwd';
@@ -137,40 +138,52 @@ const executeReadFile = async (args: {
 		const lines = cached.lines;
 		const totalLines = cached.totalLines;
 
-		// Return a bounded preview only for very large files. Most files can be
-		// understood and edited after a single read; truly large files still have
-		// an explicit, recoverable path to the remaining content.
-		if (
+		const previewOnly =
 			args.start_line === undefined &&
 			args.end_line === undefined &&
-			totalLines > FILE_READ_PREVIEW_THRESHOLD_LINES
-		) {
-			const previewEndLine = Math.min(FILE_READ_PREVIEW_LINES, totalLines);
-			const preview = lines.slice(0, previewEndLine).join('\n');
-
-			// The model has received real content, even though the rest is omitted.
-			// Marking it seen keeps the read-before-edit guard aligned with the
-			// content that was actually returned, just like a ranged read.
-			markFileSeen(absPath);
-			rememberReadContent(
-				absPath,
-				stats,
-				totalLines,
-				args.start_line,
-				args.end_line,
-			);
-
-			return `${preview}\n\n[Truncated at line ${previewEndLine} of ${totalLines}. Use read_file with start_line: ${previewEndLine + 1} and end_line to continue.]`;
-		}
+			totalLines > FILE_READ_PREVIEW_THRESHOLD_LINES;
 
 		// Line ranges specified - read and return content
 		const startLine = args.start_line ? Math.max(1, args.start_line) : 1;
-		const endLine = args.end_line
+		let endLine = args.end_line
 			? Math.min(totalLines, args.end_line)
 			: totalLines;
+		if (previewOnly) endLine = Math.min(FILE_READ_PREVIEW_LINES, totalLines);
 
 		// Extract the lines to return
-		const linesToReturn = lines.slice(startLine - 1, endLine);
+		const linesToReturn: string[] = [];
+		const hint = (lastLine: number) =>
+			`\n\n[Truncated at line ${lastLine} of ${totalLines}. Use read_file with start_line: ${lastLine + 1} and end_line to continue.]`;
+		// Reserve room for the continuation hint so the generic result cap
+		// cannot remove content after we have recorded it as read.
+		const budget = MAX_TOOL_RESULT_CHARS - hint(endLine).length;
+		let length = 0;
+		for (let i = startLine - 1; i < endLine; i++) {
+			const nextLength =
+				length + (linesToReturn.length ? 1 : 0) + lines[i].length;
+			if (
+				nextLength > budget &&
+				!(
+					i === endLine - 1 &&
+					!previewOnly &&
+					nextLength <= MAX_TOOL_RESULT_CHARS
+				)
+			) {
+				if (linesToReturn.length === 0) {
+					throw new Error(
+						`Line ${startLine} is too long to return within read_file's output limit. Use execute_bash to inspect a smaller portion.`,
+					);
+				}
+				endLine = i;
+				break;
+			}
+			linesToReturn.push(lines[i]);
+			length = nextLength;
+		}
+		const truncated =
+			previewOnly ||
+			endLine <
+				(args.end_line ? Math.min(totalLines, args.end_line) : totalLines);
 
 		// Content (full file or an explicit range) has been returned to the model,
 		// so it has now "seen" this file for read-before-edit purposes.
@@ -179,12 +192,12 @@ const executeReadFile = async (args: {
 			absPath,
 			stats,
 			totalLines,
-			args.start_line,
-			args.end_line,
+			truncated ? startLine : args.start_line,
+			truncated ? endLine : args.end_line,
 		);
 
 		// Return content without line numbers for clean content-based editing
-		return linesToReturn.join('\n');
+		return linesToReturn.join('\n') + (truncated ? hint(endLine) : '');
 	} catch (error: unknown) {
 		// Handle file not found and other filesystem errors
 		if (
@@ -202,7 +215,7 @@ const executeReadFile = async (args: {
 
 const readFileCoreTool = tool({
 	description:
-		'Read file contents. Use this INSTEAD OF bash cat/head/tail/less commands. PROGRESSIVE DISCLOSURE: Files ≤1500 lines return content directly. Larger files return a 250-line preview with a continuation hint - use start_line/end_line to read additional sections. Use metadata_only=true for file info (size, lines, type) without reading content. Repeating the same path and line range while the file is unchanged returns a short stub; pass start_line/end_line to read the body again.',
+		'Read file contents. Use this INSTEAD OF bash cat/head/tail/less commands. PROGRESSIVE DISCLOSURE: Files ≤1500 lines return content directly when it fits the output limit. Larger files return a preview of up to 250 lines. Any truncated read includes a continuation hint - use start_line/end_line to read additional sections. Use metadata_only=true for file info (size, lines, type) without reading content. Repeating the same path and line range while the file is unchanged returns a short stub; pass start_line/end_line to read the body again.',
 	inputSchema: jsonSchema<{
 		path: string;
 		start_line?: number;
@@ -308,7 +321,7 @@ const ReadFileFormatter = React.memo(
 						<Box>
 							<Text color={colors.secondary}>Lines: </Text>
 							<Text color={colors.text}>
-								{args.start_line || 1} - {args.end_line || fileInfo.readEndLine}
+								{args.start_line || 1} - {fileInfo.readEndLine}
 								{fileInfo.isTruncated ? ` of ${fileInfo.totalLines}` : ''}
 							</Text>
 						</Box>
@@ -366,12 +379,15 @@ const readFileFormatter = async (
 			const cached = await getCachedFileContent(absPath);
 			const totalLines = cached.totalLines;
 
-			const isTruncated = result?.includes('[Truncated at line ') ?? false;
+			const truncation = result?.match(
+				/(?:^|\n)\[Truncated at line (\d+) of \d+\./,
+			);
+			const isTruncated = Boolean(truncation);
 
 			// Calculate what was actually read
 			const startLine = args.start_line || 1;
-			const readEndLine = isTruncated
-				? Math.min(FILE_READ_PREVIEW_LINES, totalLines)
+			const readEndLine = truncation
+				? Number(truncation[1])
 				: args.end_line || totalLines;
 			const readLines = readEndLine - startLine + 1;
 			const isPartialRead = startLine > 1 || readEndLine < totalLines;
