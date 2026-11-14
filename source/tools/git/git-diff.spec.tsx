@@ -3,7 +3,7 @@
  */
 
 import {execSync} from 'node:child_process';
-import {mkdtempSync, rmSync, writeFileSync} from 'node:fs';
+import {existsSync, mkdtempSync, rmSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import React from 'react';
@@ -132,6 +132,106 @@ test.serial(
 			t.false(result.includes('file-21.txt'));
 			t.regex(result, /25 files changed/);
 			t.regex(result, /Diff is too large to return in full/);
+		} finally {
+			process.chdir(originalCwd);
+			rmSync(dir, {recursive: true, force: true});
+		}
+	},
+);
+
+// ============================================================================
+// Base Validation Tests (#2199)
+// ============================================================================
+
+test.serial(
+	'git_diff rejects a base that git would parse as an option',
+	async t => {
+		const dir = mkdtempSync(join(tmpdir(), 'nanocoder-git-diff-test-'));
+		const outputFile = join(dir, 'written-by-git.txt');
+		const originalCwd = process.cwd();
+
+		try {
+			execSync('git init -q -b main', {cwd: dir});
+			execSync('git config user.email test@example.com', {cwd: dir});
+			execSync('git config user.name Test', {cwd: dir});
+
+			const file = join(dir, 'f.txt');
+			writeFileSync(file, 'baseline\n');
+			execSync('git add f.txt', {cwd: dir});
+			execSync('git commit -q -m baseline', {cwd: dir});
+			writeFileSync(file, 'modified\n');
+
+			process.chdir(dir);
+			// biome-ignore lint/suspicious/noExplicitAny: Test accesses the AI SDK execute function.
+			const execute = (gitDiffTool.tool as any).execute as (
+				args: {base?: string},
+			) => Promise<string>;
+			const result = await execute({base: `--output=${outputFile}`});
+
+			t.is(result, `Error: Invalid base: --output=${outputFile}`);
+			t.false(existsSync(outputFile));
+		} finally {
+			process.chdir(originalCwd);
+			rmSync(dir, {recursive: true, force: true});
+		}
+	},
+);
+
+test.serial('git_diff rejects --ext-diff as a base', async t => {
+	const dir = mkdtempSync(join(tmpdir(), 'nanocoder-git-diff-test-'));
+	const originalCwd = process.cwd();
+
+	try {
+		execSync('git init -q -b main', {cwd: dir});
+		execSync('git config user.email test@example.com', {cwd: dir});
+		execSync('git config user.name Test', {cwd: dir});
+
+		const file = join(dir, 'f.txt');
+		writeFileSync(file, 'baseline\n');
+		execSync('git add f.txt', {cwd: dir});
+		execSync('git commit -q -m baseline', {cwd: dir});
+		writeFileSync(file, 'modified\n');
+
+		process.chdir(dir);
+		// biome-ignore lint/suspicious/noExplicitAny: Test accesses the AI SDK execute function.
+		const execute = (gitDiffTool.tool as any).execute as (
+			args: {base?: string},
+		) => Promise<string>;
+		const result = await execute({base: '--ext-diff'});
+
+		t.is(result, 'Error: Invalid base: --ext-diff');
+	} finally {
+		process.chdir(originalCwd);
+		rmSync(dir, {recursive: true, force: true});
+	}
+});
+
+test.serial(
+	'git_diff still diffs against a legitimate base',
+	async t => {
+		const dir = mkdtempSync(join(tmpdir(), 'nanocoder-git-diff-test-'));
+		const originalCwd = process.cwd();
+
+		try {
+			execSync('git init -q -b main', {cwd: dir});
+			execSync('git config user.email test@example.com', {cwd: dir});
+			execSync('git config user.name Test', {cwd: dir});
+
+			const file = join(dir, 'f.txt');
+			writeFileSync(file, 'baseline\n');
+			execSync('git add f.txt', {cwd: dir});
+			execSync('git commit -q -m baseline', {cwd: dir});
+			writeFileSync(file, 'modified\n');
+
+			process.chdir(dir);
+			// biome-ignore lint/suspicious/noExplicitAny: Test accesses the AI SDK execute function.
+			const execute = (gitDiffTool.tool as any).execute as (
+				args: {base?: string},
+			) => Promise<string>;
+			const result = await execute({base: 'HEAD'});
+
+			t.regex(result, /diff --git a\/f\.txt b\/f\.txt/);
+			t.regex(result, /^\+modified$/m);
 		} finally {
 			process.chdir(originalCwd);
 			rmSync(dir, {recursive: true, force: true});
