@@ -95,7 +95,6 @@
 									<option value="gemini">Google Gemini</option>
 									<option value="openrouter">OpenRouter</option>
 									<option value="requesty">Requesty</option>
-									<option value="orcarouter">OrcaRouter</option>
 									<option value="openai">OpenAI</option>
 									<option value="anthropic">Anthropic Claude</option>
 									<option value="mistral">Mistral AI</option>
@@ -439,6 +438,9 @@
 			</div>
 		</div>
 	<script nonce="{{nonce}}" src="{{markedUri}}"></script>
+	<script nonce="{{nonce}}" src="{{highlightUri}}"></script>
+	<!-- Hooks highlight.js into marked; same ordering requirement. -->
+	<script nonce="{{nonce}}" src="{{markdownHighlightUri}}"></script>
 	<!-- Pure @-mention helpers; must load before chat-panel.js reads them. -->
 	<script nonce="{{nonce}}" src="{{mentionUtilsUri}}"></script>
 	<!-- Pure drop-payload helpers; same ordering requirement. -->

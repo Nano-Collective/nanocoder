@@ -314,6 +314,61 @@ test('computeStreamingTail bounds a single huge line with no newlines (#1555)', 
 	);
 });
 
+test('computeStreamingTail bounds a huge line preceded by a short line (#1691)', t => {
+	// Regression test for #1691: #1555 fixed the no-newline case, but the
+	// backward search had no lower bound, so a short line followed by one
+	// huge line snapped the start back past the whole bound and the tail
+	// became the entire message.
+	const textWidth = 80;
+	const maxLines = 12;
+	const tailCharLimit = textWidth * maxLines * 4;
+	const hugeMessage = `Intro\n${'x'.repeat(tailCharLimit * 3)}`;
+
+	const {tail, sliced} = computeStreamingTail(hugeMessage, textWidth, maxLines);
+
+	t.true(sliced, 'expected the message to be sliced');
+	t.true(
+		tail.length <= tailCharLimit,
+		`tail.length ${tail.length} must be ≤ tailCharLimit ${tailCharLimit}`,
+	);
+});
+
+test('computeStreamingTail bounds a huge line preceded by a fenced block (#1691)', t => {
+	// Same bound, reached through a realistic case: a fenced code block
+	// opened before a minified bundle or a big JSON blob.
+	const textWidth = 80;
+	const maxLines = 12;
+	const tailCharLimit = textWidth * maxLines * 4;
+	const hugeMessage = `Here is the output:\n\`\`\`json\n${'x'.repeat(tailCharLimit * 3)}`;
+
+	const {tail, sliced} = computeStreamingTail(hugeMessage, textWidth, maxLines);
+
+	t.true(sliced, 'expected the message to be sliced');
+	t.true(
+		tail.length <= tailCharLimit,
+		`tail.length ${tail.length} must be ≤ tailCharLimit ${tailCharLimit}`,
+	);
+});
+
+test('computeStreamingTail still snaps to a line boundary when one is close (#1691)', t => {
+	// The snap-back must survive the fix: when the nearest preceding newline
+	// sits within one line's width of the raw start, we still prefer the
+	// clean line boundary over a partial leading line.
+	const textWidth = 80;
+	const maxLines = 12;
+	const tailCharLimit = textWidth * maxLines * 4;
+	const hugeMessage = buildLines(5000);
+
+	const {tail, sliced} = computeStreamingTail(hugeMessage, textWidth, maxLines);
+
+	t.true(sliced, 'expected the message to be sliced');
+	t.regex(tail, /^line-\d{6}/);
+	t.true(
+		tail.length <= tailCharLimit + textWidth,
+		`tail.length ${tail.length} must stay near tailCharLimit ${tailCharLimit}`,
+	);
+});
+
 test('StreamingMessage tail slice snaps to a line boundary', t => {
 	// When the message is large enough to slice, the slice must start at a
 	// newline boundary so we never render a partial leading line.

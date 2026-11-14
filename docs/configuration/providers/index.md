@@ -39,10 +39,6 @@ Hosted services using the OpenAI-compatible API format.
 
 - [OpenRouter](openrouter.md) - Unified API for multiple AI providers
 - [Requesty](requesty.md) - OpenAI-compatible LLM router for multiple AI providers
-- [OrcaRouter](orcarouter.md) - OpenAI-compatible LLM router for multiple AI providers
-- [Cheaper Inference](cheaper-inference.md) - OpenAI-compatible gateway for models from multiple AI providers
-- [API Route](api-route.md) - OpenAI-compatible gateway for models from multiple AI providers
-- [FutureInfra](futureinfra.md) - OpenAI-compatible AI API router for models from multiple AI providers
 - [Together AI](together.md) - Fast inference for open-source models with OpenAI-compatible API
 - [Groq](groq.md) - Very fast open-weight model inference on LPU hardware
 - [OpenAI](openai.md) - GPT models via OpenAI's API
@@ -89,6 +85,7 @@ Use dedicated AI SDK packages for native API support, enabled via the `sdkProvid
 | `disableTools` | Disable tool calling for the entire provider (optional, boolean) |
 | `disableToolModels` | List of model names to disable tool calling for (optional) |
 | `promptCaching` | Set to `false` to opt out of prompt caching (optional, boolean). Only read when `sdkProvider` is `anthropic`, where it defaults to `true`; ignored on every other SDK provider. See [Anthropic](anthropic.md#prompt-caching) |
+| `includeUsage` | Whether to request streaming token usage metrics (`stream_options: { include_usage: true }`). Defaults to `true` for OpenAI-compatible providers. When left unset and an endpoint rejects `stream_options` with a 400 or 422, Nanocoder retries once without it and stops sending it for the rest of the session. Set to `false` to skip that first failed request on proxies or inference endpoints that reject `stream_options` (optional, boolean) |
 | `requestTimeout` | Fallback for `socketTimeout` in milliseconds (optional). Not a separate whole-request deadline, see [Timeouts & Connection Pooling](#timeouts--connection-pooling) |
 | `socketTimeout` | Connect, response-header and body timeout in milliseconds (default: 120,000, or 600,000 for a local `baseUrl`). Uses `requestTimeout` if not set. Set to `-1` to disable (optional) |
 | `maxRetries` | How many times a failed network request is retried (default: 2). Unrelated to the agent-loop [Retry Limits](../index.md#retry-limits), which cap how often the model may repeat itself (optional) |
@@ -109,7 +106,7 @@ The case that bites: `@ai-sdk/anthropic` derives the ceiling from the model id a
         "sdkProvider": "anthropic",
         "baseUrl": "https://api.minimax.io/anthropic/v1",
         "apiKey": "${MINIMAX_API_KEY}",
-        "models": ["minimax-m3"],
+        "models": ["MiniMax-M3"],
         "maxOutputTokens": 32000
       }
     ]
@@ -184,6 +181,7 @@ API keys and other config values support environment variable substitution:
 - `$VAR_NAME` - simple variable reference
 - `${VAR_NAME}` - braced reference
 - `${VAR_NAME:-default}` - reference with default value
+- `$$` - escape for a literal `$` (e.g. `pa$$WORD` or `$$VAR_NAME`)
 
 ```json
 {

@@ -11,7 +11,7 @@ import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
-import {calculateTokens} from '@/utils/token-calculator';
+import {estimateTokens} from '@/utils/token-calculator';
 
 interface SearchArgs {
 	query: string;
@@ -146,7 +146,7 @@ function WebSearchFormatterComponent({
 	if (result) {
 		const matches = result.match(/^## \d+\./gm);
 		resultCount = matches ? matches.length : 0;
-		estimatedTokens = calculateTokens(result);
+		estimatedTokens = estimateTokens(result);
 	}
 
 	return (

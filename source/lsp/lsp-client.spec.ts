@@ -983,6 +983,9 @@ test('LSPClient - getDiagnostics with capabilities handles errors', async t => {
 	(client as any).serverCapabilities = {
 		diagnosticProvider: {},
 	};
+	// A live server that rejects the pull request: falls back to [].
+	(client as any).initialized = true;
+	(client as any).process = {killed: false};
 
 	(client as any).sendRequest = async () => {
 		throw new Error('Not supported');
@@ -991,6 +994,22 @@ test('LSPClient - getDiagnostics with capabilities handles errors', async t => {
 	const result = await client.getDiagnostics('file:///test.ts');
 
 	t.deepEqual(result, []);
+});
+
+test('LSPClient - getDiagnostics rethrows when the server is gone', async t => {
+	const client = new LSPClient(createMockConfig());
+
+	(client as any).serverCapabilities = {
+		diagnosticProvider: {},
+	};
+	// Never started, or crashed: not ready, so the failure is not "no diagnostics".
+	(client as any).sendRequest = async () => {
+		throw new Error('LSP server "test-server" crashed (signal SIGKILL)');
+	};
+
+	await t.throwsAsync(client.getDiagnostics('file:///test.ts'), {
+		message: /crashed/,
+	});
 });
 
 // Additional edge cases

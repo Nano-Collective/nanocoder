@@ -4,20 +4,29 @@ import {resolve} from 'node:path';
 import {Box, Text} from 'ink';
 import React from 'react';
 import ToolMessage, {CappedLines} from '@/components/tool-message';
+import {
+	enforceFirewall,
+	evaluateMutationEnvelope,
+} from '@/firewall/mutation-firewall';
 import {ThemeContext} from '@/hooks/useTheme';
 import {getSafeSessionCwd} from '@/services/session-cwd';
-import type {NanocoderToolExport} from '@/types/core';
-import {jsonSchema, tool} from '@/types/core';
-import {formatError} from '@/utils/error-formatter';
-import {getCachedFileContent, invalidateCache} from '@/utils/file-cache';
-import {replaceFirstLiteral} from '@/utils/literal-replace';
-import {validateEditableFormat, validatePath} from '@/utils/path-validators';
+import {EditRecoveryError} from '@/tools/file-ops/edit-recovery';
+import {replaceFirstLiteral} from '@/tools/file-ops/literal-replace';
+import {
+	validateEditableEncoding,
+	validateEditableFormat,
+	validatePath,
+} from '@/tools/file-ops/path-validators';
 import {
 	forgetReadContent,
 	hasSeenFile,
 	markFileSeen,
-} from '@/utils/read-tracker';
-import {createFileToolApproval} from '@/utils/tool-approval';
+} from '@/tools/runtime/read-tracker';
+import {createFileToolApproval} from '@/tools/runtime/tool-approval';
+import type {NanocoderToolExport} from '@/types/core';
+import {jsonSchema, tool} from '@/types/core';
+import {formatError} from '@/utils/error-formatter';
+import {getCachedFileContent, invalidateCache} from '@/utils/fs/file-cache';
 import {
 	closeDiffInVSCode,
 	isVSCodeConnected,
@@ -129,7 +138,11 @@ function countOccurrences(content: string, search: string): number {
 	return content.split(search).length - 1;
 }
 
-function validateBlocks(fileContent: string, blocks: DiffEditBlock[]): void {
+function validateBlocks(
+	fileContent: string,
+	blocks: DiffEditBlock[],
+	path: string,
+): void {
 	const seenSearchBlocks = new Set<string>();
 
 	blocks.forEach((block, index) => {
@@ -144,8 +157,12 @@ function validateBlocks(fileContent: string, blocks: DiffEditBlock[]): void {
 		const occurrences = countOccurrences(fileContent, block.search);
 
 		if (occurrences === 0) {
-			throw new Error(
+			throw new EditRecoveryError(
 				`Search block ${blockNumber} was not found in file. The file may have changed since you last read it.`,
+				path,
+				fileContent,
+				block.search,
+				blockNumber,
 			);
 		}
 
@@ -263,10 +280,21 @@ const executeDiffEdit = async (args: DiffEditArgs): Promise<string> => {
 	const absPath = resolve(getSafeSessionCwd(), path);
 	const blocks = parseDiffEditBlocks(diff);
 	const cached = await getCachedFileContent(absPath);
+	const encodingResult = validateEditableEncoding(path, cached);
+	if (!encodingResult.valid) {
+		throw new Error(encodingResult.error);
+	}
 	const fileContent = cached.content;
 
-	validateBlocks(fileContent, blocks);
+	validateBlocks(fileContent, blocks, path);
 	const newContent = applyBlocks(fileContent, blocks);
+
+	const firewallResult = evaluateMutationEnvelope(
+		path,
+		fileContent,
+		newContent,
+	);
+	const firewallWarning = enforceFirewall(firewallResult);
 
 	await writeFile(absPath, newContent, 'utf-8');
 	invalidateCache(absPath);
@@ -274,14 +302,16 @@ const executeDiffEdit = async (args: DiffEditArgs): Promise<string> => {
 	forgetReadContent(absPath);
 
 	const blockLabel = blocks.length === 1 ? 'block' : 'blocks';
-	return capDiffEditResult(
-		`Successfully applied ${blocks.length} diff ${blockLabel}.${formatUpdatedFileContext(fileContent, newContent, blocks)}`,
+	return (
+		capDiffEditResult(
+			`Successfully applied ${blocks.length} diff ${blockLabel}.${formatUpdatedFileContext(fileContent, newContent, blocks)}`,
+		) + firewallWarning
 	);
 };
 
 const diffEditCoreTool = tool({
 	description:
-		'Apply one or more SEARCH/REPLACE edit blocks to a file. Use this for weak local models when exact string_replace arguments are hard to produce. Every SEARCH block must match the file exactly once. Format: <<<<<<< SEARCH, old content, =======, new content, >>>>>>> REPLACE. Do not wrap the diff in a markdown code fence. Successful edits return bounded context around changed regions instead of the entire file.',
+		'Apply one or more SEARCH/REPLACE edit blocks to a file. Use this for weak local models when exact string_replace arguments are hard to produce. Every SEARCH block must match the file exactly once. Format: <<<<<<< SEARCH, old content, =======, new content, >>>>>>> REPLACE. Do not wrap the diff in a markdown code fence. Successful edits return bounded context around changed regions instead of the entire file. Missing SEARCH blocks return recovery evidence: verify the candidate and retry with its exact actualText; read the indicated range if text is omitted.',
 	inputSchema: jsonSchema<DiffEditArgs>({
 		type: 'object',
 		properties: {
@@ -396,7 +426,7 @@ const diffEditFormatter = async (
 			const blocks = parseDiffEditBlocks(args.diff);
 			const cached = await getCachedFileContent(absPath);
 			const fileContent = cached.content;
-			validateBlocks(fileContent, blocks);
+			validateBlocks(fileContent, blocks, args.path);
 			const newContent = applyBlocks(fileContent, blocks);
 			const changeId = sendFileChangeToVSCode(
 				absPath,
@@ -470,7 +500,9 @@ const diffEditValidator = async (
 
 	try {
 		const cached = await getCachedFileContent(absPath);
-		validateBlocks(cached.content, blocks);
+		const encodingResult = validateEditableEncoding(args.path, cached);
+		if (!encodingResult.valid) return encodingResult;
+		validateBlocks(cached.content, blocks, args.path);
 	} catch (error) {
 		return {
 			valid: false,

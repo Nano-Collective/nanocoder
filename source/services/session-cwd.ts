@@ -1,6 +1,7 @@
 import {existsSync, statSync} from 'node:fs';
 import {resolve} from 'node:path';
-import {isPathInside} from '@/utils/path-validation';
+import {getActiveSessionContext} from '@/services/session-context';
+import {isPathInside, isRealPathInside} from '@/utils/fs/path-validation';
 
 // Shared "where am I" for bash and every file tool. Without it, a `cd` in one
 // bash subshell never reaches the next command or the file tools — so a
@@ -10,7 +11,14 @@ import {isPathInside} from '@/utils/path-validation';
 // behave exactly as before until a bash `cd` actually moves the shell.
 let sessionCwd: string | null = null;
 
+// In a process that serves several sessions (ACP), a turn runs inside its
+// session's context (`session-context.ts`), and every getter and setter below
+// reads and writes that context while one is active. A bash `cd` therefore
+// moves only the session that ran it.
+
 export function getSessionCwd(): string {
+	const scope = getActiveSessionContext();
+	if (scope) return scope.sessionCwd ?? scope.projectRoot;
 	return sessionCwd ?? process.cwd();
 }
 
@@ -25,44 +33,64 @@ export function getSessionCwd(): string {
 let projectRoot: string | null = null;
 
 export function getProjectRoot(): string {
+	const scope = getActiveSessionContext();
+	if (scope) return scope.projectRoot;
 	return projectRoot ?? resolve(process.cwd());
 }
 
 export function setProjectRoot(dir: string): void {
 	const trimmed = dir.trim();
-	if (trimmed) projectRoot = resolve(trimmed);
+	if (!trimmed) return;
+	const scope = getActiveSessionContext();
+	if (scope) scope.projectRoot = resolve(trimmed);
+	else projectRoot = resolve(trimmed);
 }
 
 export function setSessionCwd(dir: string): void {
 	const trimmed = dir.trim();
 	if (!trimmed) return;
 	// Absolute so downstream `resolve(base, rel)` is stable.
-	sessionCwd = resolve(trimmed);
+	const scope = getActiveSessionContext();
+	if (scope) scope.sessionCwd = resolve(trimmed);
+	else sessionCwd = resolve(trimmed);
 }
 
 // The session cwd clamped to the project root. A bash `cd /etc` moves the
 // session cwd outside the project; the pathless search tools use this as their
 // default root so they never glob/grep outside the project. Relative paths still
 // resolve against the true session cwd — only the default search root is clamped.
+// After a `cd` the session cwd is physical (`pwd -P`) while the root may have
+// been opened through a symlink, so a lexical miss is re-checked on realpaths.
 export function getContainedSessionCwd(): string {
 	const cwd = getSafeSessionCwd();
 	const root = getProjectRoot();
-	return isPathInside(cwd, root) ? cwd : root;
+	return isPathInside(cwd, root) || isRealPathInside(cwd, root) ? cwd : root;
 }
 
 // Guards against a `cd`-ed-into dir being deleted mid-session (torn-down
-// worktree): unpin so bash/file tools fall back to the live process.cwd().
+// worktree): unpin so bash/file tools fall back to the live process.cwd(), or
+// to the session's own directory inside a session scope.
 export function getSafeSessionCwd(): string {
-	const current = sessionCwd ?? process.cwd();
-	try {
-		if (existsSync(current) && statSync(current).isDirectory()) {
-			return current;
-		}
-	} catch {
-		// fall through to unpin
+	const scope = getActiveSessionContext();
+	if (scope) {
+		const pinned = scope.sessionCwd;
+		if (pinned !== null && isDirectory(pinned)) return pinned;
+		scope.sessionCwd = null;
+		return scope.projectRoot;
 	}
+
+	const current = sessionCwd ?? process.cwd();
+	if (isDirectory(current)) return current;
 	sessionCwd = null;
 	return process.cwd();
+}
+
+function isDirectory(dir: string): boolean {
+	try {
+		return existsSync(dir) && statSync(dir).isDirectory();
+	} catch {
+		return false;
+	}
 }
 
 // Test helper.

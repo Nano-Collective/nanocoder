@@ -10,25 +10,20 @@ import {MAX_TOOL_STEPS} from '@/constants';
 import {getModelAcceptsImages} from '@/models/models-dev-client';
 
 /**
- * Stop the SDK's step loop at a call to a tool that does not exist.
+ * Stop the SDK's step loop at an invalid tool call: one to a tool that does
+ * not exist, or one whose arguments cannot be parsed (a typo, or a call cut
+ * off at the output-token limit).
  *
  * Tools reach the SDK with `execute` stripped, so a valid call already ends
- * the step. An unknown one does not: the SDK answers it with an automatic
- * error result and runs another step, so a model stuck on a nonexistent tool
- * looped up to MAX_TOOL_STEPS times inside one chat() call, invisible to the
- * conversation loop's unknown-tool handling and its repeated-call cap
- * (`nanocoder.retries.maxRepeatedToolCalls`). Ending the step hands the call
- * back so both apply.
+ * the step. An invalid one does not: the SDK answers it with an automatic
+ * error result and runs another step, so a model stuck on a bad call looped
+ * up to MAX_TOOL_STEPS times inside one chat() call. Those requests were
+ * missing from the conversation loop's steps and usage, and its retry limits
+ * (`nanocoder.retries.maxRepeatedToolCalls`) only applied after each hidden
+ * batch. Ending the step hands the call back so the loop handles it.
  */
-export const stopOnUnknownTool: StopCondition<ToolSet> = ({steps}) =>
-	steps
-		.at(-1)
-		?.toolCalls.some(
-			call =>
-				call?.dynamic === true &&
-				call.invalid === true &&
-				NoSuchToolError.isInstance(call.error),
-		) ?? false;
+export const stopOnInvalidToolCall: StopCondition<ToolSet> = ({steps}) =>
+	steps.at(-1)?.toolCalls.some(call => call?.invalid === true) ?? false;
 
 import type {
 	AIProviderConfig,
@@ -60,7 +55,10 @@ import {
 import {convertAISDKToolCalls} from '../converters/tool-converter.js';
 import {extractRootError} from '../error-handling/error-extractor.js';
 import {parseAPIError} from '../error-handling/error-parser.js';
+import {isImageSupportError} from '../error-handling/image-error-detector.js';
 import {isToolSupportError} from '../error-handling/tool-error-detector.js';
+import {appendToolDefinitionsToPrompt} from '../tools/system-prompt-assembler.js';
+import type {PrefixTracker} from './prefix-tracker.js';
 import {rehydrateResponse, scrubOutgoing} from './privacy.js';
 import {
 	buildProviderOptions,
@@ -72,6 +70,29 @@ import {
 } from './streaming-handler.js';
 
 type SDKProviderOptions = Parameters<typeof streamText>[0]['providerOptions'];
+
+/**
+ * Provider/model pairs that rejected a request for carrying tool images this
+ * session. models.dev only knows hosted models, so a local text-only model
+ * (most Ollama / llama.cpp ids) gets images sent optimistically; once its
+ * server refuses them, every later request in the session omits them instead
+ * of failing on the same screenshot sitting in history.
+ */
+const imageRejectingModels = new Set<string>();
+
+/**
+ * Provider/model pairs that rejected native tool definitions this session.
+ * Later requests go straight to the XML fallback instead of paying for the
+ * same failed request every turn. Keyed like imageRejectingModels.
+ */
+const toolRejectingModels = new Set<string>();
+
+function imageRejectionKey(
+	providerConfig: AIProviderConfig,
+	currentModel: string,
+): string {
+	return `${providerConfig.name}\u0000${currentModel}`;
+}
 
 export interface ChatHandlerParams {
 	model: LanguageModel;
@@ -87,6 +108,8 @@ export interface ChatHandlerParams {
 	privacySessionMapRef?: React.MutableRefObject<Record<string, string>>;
 	privacyEnabled?: boolean;
 	onPrivacyEvent?: (scrubbedDelta: number) => void;
+	/** Compares each request with the previous one to log prompt-prefix breaks. */
+	prefixTracker?: PrefixTracker;
 }
 
 /**
@@ -109,21 +132,35 @@ export async function handleChat(
 		privacySessionMapRef,
 		privacyEnabled,
 		onPrivacyEvent,
+		prefixTracker,
 	} = params;
 	const logger = getLogger();
-
+	const errorContext = {
+		providerName: providerConfig.name,
+		baseUrl: providerConfig.config.baseURL,
+	};
 	// Check if already aborted before starting
 	if (signal?.aborted) {
 		logger.debug('Chat request already aborted');
 		throw new Error('Operation was cancelled');
 	}
 
-	// Check if tools should be disabled
-	const shouldDisableTools =
-		skipTools ||
+	// Tools disabled by config (provider config, or tune's XML/JSON tool mode)
+	// are handled upstream: the caller's system prompt already carries the
+	// tool definitions as text. Tools disabled because the model rejected them
+	// (now, or earlier this session) are not, so this handler adds the
+	// definitions itself.
+	const disabledByTune = modeOverrides?.nativeToolsDisabled === true;
+	const disabledByConfig =
+		disabledByTune ||
 		providerConfig.disableTools ||
-		(providerConfig.disableToolModels &&
-			providerConfig.disableToolModels.includes(currentModel));
+		(providerConfig.disableToolModels?.includes(currentModel) ?? false);
+	const disabledByRejection =
+		!disabledByConfig &&
+		(skipTools ||
+			toolRejectingModels.has(imageRejectionKey(providerConfig, currentModel)));
+	const shouldDisableTools = disabledByConfig || disabledByRejection;
+	const sendsNativeTools = !shouldDisableTools && Object.keys(tools).length > 0;
 
 	// Start performance tracking
 	const metrics = startMetrics();
@@ -132,11 +169,13 @@ export async function handleChat(
 	if (shouldDisableTools) {
 		logger.info('Tools disabled for request', {
 			model: currentModel,
-			reason: skipTools
-				? 'retry without tools'
-				: providerConfig.disableTools
-					? 'provider configuration'
-					: 'model configuration',
+			reason: disabledByRejection
+				? 'model rejected native tools'
+				: disabledByTune
+					? 'tune tool mode'
+					: providerConfig.disableTools
+						? 'provider configuration'
+						: 'model configuration',
 			correlationId,
 		});
 	}
@@ -162,27 +201,34 @@ export async function handleChat(
 	// with no `cause`; without consulting this array the catch can't tell a
 	// network failure apart from a genuine empty model turn.
 	const streamingErrors: Error[] = [];
+	// Set once the request is built: whether it carried tool images, so a
+	// rejection can be retried once with them omitted.
+	let sentToolImages = false;
 
 	return await withNewCorrelationContext(async _context => {
 		try {
 			// Tools arrive with approval policy already resolved by ToolManager.
 			// No approval mutation needed here — chat handler is a pure SDK caller.
-			const aiTools = shouldDisableTools
-				? undefined
-				: Object.keys(tools).length > 0
-					? tools
-					: undefined;
-
-			// XML tool definitions are already included in the system prompt
-			// when native tools are disabled (handled upstream in useChatHandler).
+			const aiTools = sendsNativeTools ? tools : undefined;
 
 			// AI SDK v6 wants the system prompt via the top-level `system` option
 			// rather than as a system-role entry in `messages` (it warns otherwise
 			// to discourage prompt-injection-prone patterns). Extract it here.
-			const systemContent = messages
-				.filter(m => m.role === 'system')
-				.map(m => m.content)
-				.join('\n\n');
+			//
+			// When native tools are disabled by config, the XML tool definitions
+			// are already in the system prompt (added upstream in useChatHandler).
+			// When the model rejected them, nothing upstream knows, so add them
+			// here - otherwise the model is told to use XML tool calls it has no
+			// definitions for.
+			const systemContent = appendToolDefinitionsToPrompt(
+				messages
+					.filter(m => m.role === 'system')
+					.map(m => m.content)
+					.join('\n\n'),
+				disabledByRejection,
+				'xml',
+				tools,
+			);
 			const nonSystemMessages = messages.filter(m => m.role !== 'system');
 
 			// Scrub prompts if privacy scrubbing is enabled
@@ -208,12 +254,21 @@ export async function handleChat(
 			const hasToolImages = finalNonSystemMessages.some(
 				m => m.role === 'tool' && !!m.images?.length,
 			);
-			const toolImages: ToolImageDelivery =
-				hasToolImages && (await getModelAcceptsImages(currentModel)) === false
-					? 'omit'
-					: typeof model !== 'string' && model.provider.endsWith('.chat')
-						? 'user-message'
-						: 'inline';
+			// Unknown models (null from models.dev) still get images: local
+			// vision models are common and have no listing. A refusal is caught
+			// below, retried without images and remembered for the session.
+			const omitToolImages =
+				hasToolImages &&
+				(imageRejectingModels.has(
+					imageRejectionKey(providerConfig, currentModel),
+				) ||
+					(await getModelAcceptsImages(currentModel)) === false);
+			sentToolImages = hasToolImages && !omitToolImages;
+			const toolImages: ToolImageDelivery = omitToolImages
+				? 'omit'
+				: typeof model !== 'string' && model.provider.endsWith('.chat')
+					? 'user-message'
+					: 'inline';
 			const convertedMessages = convertToModelMessages(
 				finalNonSystemMessages,
 				toolImages,
@@ -221,6 +276,31 @@ export async function handleChat(
 			const modelMessages = promptCaching
 				? withCacheBreakpoints(convertedMessages, finalSystemContent)
 				: convertedMessages;
+
+			if (prefixTracker) {
+				try {
+					// Fingerprint the logical prompt (system + tools + converted
+					// history), not `modelMessages`: the Anthropic cache breakpoints
+					// move to the newest message by design, so including them would
+					// report a break on every single turn.
+					const divergence = await prefixTracker.record(
+						finalSystemContent,
+						aiTools,
+						convertedMessages,
+					);
+					logger.debug('Prompt prefix stability', {
+						...divergence,
+						model: currentModel,
+						correlationId,
+						provider: providerConfig.name,
+					});
+				} catch (error) {
+					// Diagnostics only: never let fingerprinting fail a request.
+					logger.debug('Prompt prefix tracking failed', {
+						error: error instanceof Error ? error.message : String(error),
+					});
+				}
+			}
 
 			logger.debug('AI SDK request prepared', {
 				messageCount: modelMessages.length,
@@ -268,7 +348,7 @@ export async function handleChat(
 				tools: aiTools,
 				abortSignal: signal,
 				maxRetries,
-				stopWhen: [stepCountIs(MAX_TOOL_STEPS), stopOnUnknownTool],
+				stopWhen: [stepCountIs(MAX_TOOL_STEPS), stopOnInvalidToolCall],
 				onStepFinish: createOnStepFinishHandler(callbacks),
 				prepareStep: createPrepareStepHandler(),
 				onError: ({error}) => {
@@ -527,8 +607,30 @@ export async function handleChat(
 				throw new Error('Operation was cancelled');
 			}
 
-			// Check if error indicates tool support issue and we haven't retried
-			if (!skipTools && isToolSupportError(error)) {
+			// The model refused the tool screenshots. Checked before the tool
+			// support retry because an image rejection can also read like a
+			// generic 400. sentToolImages is false on the retry (the model is
+			// now in the set), so this runs at most once per request.
+			if (sentToolImages && isImageSupportError(error, streamingErrors)) {
+				imageRejectingModels.add(
+					imageRejectionKey(providerConfig, currentModel),
+				);
+				logger.warn('Model rejected image input, retrying without images', {
+					model: currentModel,
+					error: error instanceof Error ? error.message : error,
+					correlationId,
+					provider: providerConfig.name,
+				});
+				return await handleChat(params);
+			}
+
+			// Check if error indicates tool support issue and we haven't retried.
+			// Only a request that actually sent native tools can have been
+			// rejected for them.
+			if (sendsNativeTools && isToolSupportError(error, streamingErrors)) {
+				toolRejectingModels.add(
+					imageRejectionKey(providerConfig, currentModel),
+				);
 				logger.warn('Tool support error detected, retrying without tools', {
 					model: currentModel,
 					error: error instanceof Error ? error.message : error,
@@ -638,6 +740,7 @@ export async function handleChat(
 					if (streamingErrors.length > 0) {
 						const userMessage = parseAPIError(
 							streamingErrors[streamingErrors.length - 1],
+							errorContext,
 						);
 						throw new Error(userMessage);
 					}
@@ -670,12 +773,12 @@ export async function handleChat(
 					};
 				}
 				// There's a real error underneath, parse it
-				const userMessage = parseAPIError(rootError);
+				const userMessage = parseAPIError(rootError, errorContext);
 				throw new Error(userMessage);
 			}
 
 			// Parse any other error (including RetryError and APICallError)
-			const userMessage = parseAPIError(error);
+			const userMessage = parseAPIError(error, errorContext);
 			throw new Error(userMessage);
 		}
 	}, correlationId); // End of withNewCorrelationContext

@@ -257,3 +257,27 @@ test.serial('processToolUse does not format a structured write failure', async t
 	t.true(result.isError);
 	t.is(readFileSync(path, 'utf8'), 'untouched\n');
 });
+
+// The command form the docs show. `sh` expands `$FILE` itself; on Windows
+// cmd.exe would pass the literal text, so it is renamed to `%FILE%` (#1688).
+test.serial('a documented "$FILE" command receives the written path', async t => {
+	writeSource(
+		'fmt.cjs',
+		"const f=require('fs');const p=process.argv[2];f.writeFileSync(p,f.readFileSync(p,'utf8').toUpperCase())\n",
+	);
+	withConfig({
+		formatters: [
+			{name: 'fmt', match: ['**/*.js'], command: 'node fmt.cjs "$FILE"'},
+		],
+	});
+	const path = writeSource('a&b c.js', 'const hello = "world";\n');
+
+	const content = await formatWrittenFile(
+		'write_file',
+		{path: 'a&b c.js'},
+		'ok',
+	);
+
+	t.is(readFileSync(path, 'utf-8'), 'CONST HELLO = "WORLD";\n');
+	t.true(content.includes('a&b c.js was reformatted by fmt'));
+});

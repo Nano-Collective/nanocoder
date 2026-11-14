@@ -9,9 +9,9 @@ import {
 	initializeProject,
 	ProjectAlreadyInitializedError,
 } from '@/init/initializer';
-import {generateKey} from '@/session/key-generator';
 import {Command} from '@/types/index';
 import {formatError} from '@/utils/error-formatter';
+import {generateKey} from '@/utils/key-generator';
 
 function InitSuccess({
 	created,

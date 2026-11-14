@@ -12,7 +12,7 @@
 
 import type {FileChangeEventKind, SkillMemberRef} from '@/types/skills';
 
-export type EventKind = 'file.changed' | 'schedule.cron';
+export type EventKind = 'file.changed' | 'schedule.cron' | 'ci.job.failed';
 
 export interface FileChangedPayload {
 	file: string;
@@ -21,6 +21,16 @@ export interface FileChangedPayload {
 
 export interface ScheduleCronPayload {
 	cron: string;
+}
+
+export interface CiJobFailedPayload {
+	/** GitHub Actions run database id. */
+	runId: number;
+	workflowName: string;
+	branch: string;
+	headSha: string;
+	/** HTML URL of the run, for linking from a diagnosis/notification. */
+	url: string;
 }
 
 interface EventBase {
@@ -38,7 +48,12 @@ export interface ScheduleCronEvent extends EventBase {
 	payload: ScheduleCronPayload;
 }
 
-export type Event = FileChangedEvent | ScheduleCronEvent;
+export interface CiJobFailedEvent extends EventBase {
+	kind: 'ci.job.failed';
+	payload: CiJobFailedPayload;
+}
+
+export type Event = FileChangedEvent | ScheduleCronEvent | CiJobFailedEvent;
 
 /**
  * Convenience alias for code that wants to talk about a specific kind's
@@ -48,7 +63,9 @@ export type EventPayload<K extends EventKind> = K extends 'file.changed'
 	? FileChangedPayload
 	: K extends 'schedule.cron'
 		? ScheduleCronPayload
-		: never;
+		: K extends 'ci.job.failed'
+			? CiJobFailedPayload
+			: never;
 
 export interface FileChangedFilter {
 	paths?: string[];
@@ -57,6 +74,11 @@ export interface FileChangedFilter {
 
 export interface ScheduleCronFilter {
 	cron: string;
+}
+
+export interface CiJobFailedFilter {
+	/** Glob-matched against payload.branch. Omitted = match every branch. */
+	branches?: string[];
 }
 
 export type SubscriptionSource = 'frontmatter' | 'manifest';
@@ -83,7 +105,15 @@ export interface ScheduleCronSubscription extends SubscriptionBase {
 	filter?: ScheduleCronFilter;
 }
 
-export type Subscription = FileChangedSubscription | ScheduleCronSubscription;
+export interface CiJobFailedSubscription extends SubscriptionBase {
+	kind: 'ci.job.failed';
+	filter?: CiJobFailedFilter;
+}
+
+export type Subscription =
+	| FileChangedSubscription
+	| ScheduleCronSubscription
+	| CiJobFailedSubscription;
 
 /**
  * Trigger context propagated into a subagent task's `context` field when

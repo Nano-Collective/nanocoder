@@ -1,4 +1,4 @@
-import {mkdtemp, readFile, rm, writeFile} from 'node:fs/promises';
+import {chmod, mkdtemp, readFile, rm, symlink, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
@@ -9,7 +9,11 @@ import {themes} from '../../config/themes.js';
 import {resolveToolApproval} from '../approval-policy.js';
 import {ThemeContext} from '../../hooks/useTheme.js';
 import {writeFileTool} from './write-file.js';
-import {clearReadTracker, markFileSeen} from '../../utils/read-tracker.js';
+import {clearReadTracker, markFileSeen} from '../runtime/read-tracker.js';
+import {
+	resetFirewallConfig,
+	setFirewallConfig,
+} from '../../firewall/mutation-firewall.js';
 
 // ============================================================================
 // Test Helpers
@@ -39,6 +43,7 @@ test.beforeEach(async () => {
 	testDir = await mkdtemp(join(tmpdir(), 'write-file-test-'));
 	// Read-before-overwrite state is process-global; reset between serial tests.
 	clearReadTracker();
+	resetFirewallConfig();
 });
 
 // Clean up temporary directory after each test
@@ -294,6 +299,41 @@ test('write_file validator: allows overwriting an existing file after it is read
 	}
 });
 
+(process.platform === 'win32' ? test.skip : test)(
+	'write_file validator: rejects a dangling symlink that points outside the project',
+	async t => {
+		if (!writeFileTool.validator) {
+			t.fail('Validator not defined');
+			return;
+		}
+
+		const outside = await mkdtemp(join(tmpdir(), 'write-file-outside-'));
+		const originalCwd = process.cwd();
+		try {
+			// A cloned repo ships `notes.md -> <outside>/authorized_keys`. The
+			// target does not exist yet, so writing through the link creates it.
+			await symlink(
+				join(outside, 'authorized_keys'),
+				join(testDir, 'notes.md'),
+			);
+			process.chdir(testDir);
+
+			const result = await writeFileTool.validator({
+				path: 'notes.md',
+				content: 'ssh-ed25519 AAAA attacker',
+			});
+
+			t.false(result.valid);
+			if (!result.valid) {
+				t.regex(result.error, /escapes project directory via symlink/);
+			}
+		} finally {
+			process.chdir(originalCwd);
+			await rm(outside, {recursive: true, force: true});
+		}
+	},
+);
+
 test('write_file validator: rejects non-existent parent directory', async t => {
 	if (!writeFileTool.validator) {
 		t.fail('Validator not defined');
@@ -318,7 +358,7 @@ test('write_file validator: rejects non-existent parent directory', async t => {
 	}
 });
 
-test('write_file validator: rejects system directories', async t => {
+test('write_file validator: rejects system-like absolute paths outside the project', async t => {
 	if (!writeFileTool.validator) {
 		t.fail('Validator not defined');
 		return;
@@ -334,7 +374,7 @@ test('write_file validator: rejects system directories', async t => {
 
 		t.false(result.valid);
 		if (!result.valid) {
-			// Path validation rejects absolute paths before system directory check
+			// Containment rejects the absolute path before the system-directory guard runs.
 			t.true(result.error.includes('Invalid file path'));
 		}
 	}
@@ -499,10 +539,10 @@ test('write_file formatter: generates preview with large content', async t => {
 });
 
 // ============================================================================
-// Validator Additional System Directory Tests
+// Validator Additional Absolute Path Tests
 // ============================================================================
 
-test('write_file validator: rejects /etc directory', async t => {
+test('write_file validator: rejects /etc: an absolute path outside the project', async t => {
 	if (!writeFileTool.validator) {
 		t.fail('Validator not defined');
 		return;
@@ -515,12 +555,12 @@ test('write_file validator: rejects /etc directory', async t => {
 
 	t.false(result.valid);
 	if (!result.valid) {
-		// Path validation rejects absolute paths before system directory check
+		// Containment rejects the absolute path before the system-directory guard runs.
 		t.true(result.error.includes('Invalid file path'));
 	}
 });
 
-test('write_file validator: rejects /sys directory', async t => {
+test('write_file validator: rejects /sys: an absolute path outside the project', async t => {
 	if (!writeFileTool.validator) {
 		t.fail('Validator not defined');
 		return;
@@ -533,12 +573,12 @@ test('write_file validator: rejects /sys directory', async t => {
 
 	t.false(result.valid);
 	if (!result.valid) {
-		// Path validation rejects absolute paths before system directory check
+		// Containment rejects the absolute path before the system-directory guard runs.
 		t.true(result.error.includes('Invalid file path'));
 	}
 });
 
-test('write_file validator: rejects /proc directory', async t => {
+test('write_file validator: rejects /proc: an absolute path outside the project', async t => {
 	if (!writeFileTool.validator) {
 		t.fail('Validator not defined');
 		return;
@@ -551,12 +591,12 @@ test('write_file validator: rejects /proc directory', async t => {
 
 	t.false(result.valid);
 	if (!result.valid) {
-		// Path validation rejects absolute paths before system directory check
+		// Containment rejects the absolute path before the system-directory guard runs.
 		t.true(result.error.includes('Invalid file path'));
 	}
 });
 
-test('write_file validator: rejects /dev directory', async t => {
+test('write_file validator: rejects /dev: an absolute path outside the project', async t => {
 	if (!writeFileTool.validator) {
 		t.fail('Validator not defined');
 		return;
@@ -569,12 +609,12 @@ test('write_file validator: rejects /dev directory', async t => {
 
 	t.false(result.valid);
 	if (!result.valid) {
-		// Path validation rejects absolute paths before system directory check
+		// Containment rejects the absolute path before the system-directory guard runs.
 		t.true(result.error.includes('Invalid file path'));
 	}
 });
 
-test('write_file validator: rejects /boot directory', async t => {
+test('write_file validator: rejects /boot: an absolute path outside the project', async t => {
 	if (!writeFileTool.validator) {
 		t.fail('Validator not defined');
 		return;
@@ -587,12 +627,12 @@ test('write_file validator: rejects /boot directory', async t => {
 
 	t.false(result.valid);
 	if (!result.valid) {
-		// Path validation rejects absolute paths before system directory check
+		// Containment rejects the absolute path before the system-directory guard runs.
 		t.true(result.error.includes('Invalid file path'));
 	}
 });
 
-test('write_file validator: rejects Windows system directories', async t => {
+test('write_file validator: rejects Windows absolute paths outside the project', async t => {
 	if (!writeFileTool.validator) {
 		t.fail('Validator not defined');
 		return;
@@ -616,7 +656,8 @@ test('write_file validator: rejects Windows system directories', async t => {
 
 			t.false(result.valid);
 			if (!result.valid) {
-				t.true(result.error.includes('system directory'));
+				// Windows absolute paths are rejected by shared path validation.
+				t.true(result.error.includes('Invalid file path'));
 			}
 		}
 	} else {
@@ -1139,4 +1180,137 @@ test('write_file formatter: does not render description when omitted', async t =
 	t.regex(output, /Path:\s*config\.json/);
 });
 
+test('write_file: throws when mutation firewall blocks test deletion', async t => {
+	setFirewallConfig({mode: 'strict', enabled: true});
+	const filePath = await createTestFile(
+		'service.spec.ts',
+		"test('preserves behavior', () => {});\ntest('old test', () => {});\n",
+	);
 
+	await t.throwsAsync(
+		async () => {
+			await executeWriteFile({
+				path: filePath,
+				content: "test('preserves behavior', () => {});\n",
+			});
+		},
+		{message: /\[Mutation Firewall\] Blocked mutation/},
+	);
+
+	const content = await readFile(filePath, 'utf-8');
+	t.true(content.includes('old test'));
+});
+
+test('write_file: lenient firewall writes the file and reports the violation in the result', async t => {
+	setFirewallConfig({mode: 'lenient', enabled: true});
+	const filePath = await createTestFile(
+		'service.spec.ts',
+		"test('preserves behavior', () => {});\ntest('old test', () => {});\n",
+	);
+
+	const result = await executeWriteFile({
+		path: filePath,
+		content: "test('preserves behavior', () => {});\n",
+	});
+
+	t.regex(result, /^File overwritten successfully/);
+	t.regex(result, /\[Mutation Firewall\] Warning \(lenient mode/);
+	t.regex(result, /protect_test_cases/);
+	const content = await readFile(filePath, 'utf-8');
+	t.false(content.includes('old test'));
+});
+
+test('write_file: fails closed when existing file cannot be read and leaves disk untouched', async t => {
+	if (process.platform === 'win32') {
+		t.pass('Skipped on Windows: POSIX chmod 000 is not supported');
+		return;
+	}
+
+	setFirewallConfig({mode: 'strict', enabled: true});
+	const filePath = await createTestFile('protected.txt', 'secret original content');
+	await chmod(filePath, 0o000);
+
+	try {
+		await t.throwsAsync(
+			async () => {
+				await executeWriteFile({
+					path: filePath,
+					content: 'overwritten content',
+				});
+			},
+			{message: /\[Mutation Firewall\] Blocked mutation: failed to read existing file/},
+		);
+	} finally {
+		await chmod(filePath, 0o644);
+	}
+
+	const content = await readFile(filePath, 'utf-8');
+	t.is(content, 'secret original content');
+});
+
+// ============================================================================
+// Encoding Guard Tests
+// ============================================================================
+
+// "café" then "old", in Latin-1: the é is a lone E9 byte, not valid UTF-8.
+const LATIN1_BYTES = Buffer.from('caf\xe9\nold\n', 'latin1');
+
+test('write_file: refuses to overwrite a Latin-1 file and leaves every byte unchanged', async t => {
+	const filePath = join(testDir, 'legacy.txt');
+	await writeFile(filePath, LATIN1_BYTES);
+
+	// What the model saw: the é decoded to U+FFFD.
+	await t.throwsAsync(
+		executeWriteFile({path: filePath, content: 'caf�\nnew\n'}),
+		{message: /not valid UTF-8/},
+	);
+
+	t.deepEqual(await readFile(filePath), LATIN1_BYTES);
+});
+
+test('write_file validator: refuses to overwrite a Latin-1 file', async t => {
+	await writeFile(join(testDir, 'legacy.txt'), LATIN1_BYTES);
+
+	if (!writeFileTool.validator) {
+		t.fail('Validator not defined');
+		return;
+	}
+
+	const originalCwd = process.cwd();
+	try {
+		process.chdir(testDir);
+		markFileSeen('legacy.txt');
+
+		const result = await writeFileTool.validator({
+			path: 'legacy.txt',
+			content: 'caf�\nnew\n',
+		});
+
+		t.false(result.valid);
+		if (!result.valid) {
+			t.regex(result.error, /not valid UTF-8/);
+		}
+	} finally {
+		process.chdir(originalCwd);
+	}
+});
+
+test('write_file: still overwrites a UTF-8 file with non-ASCII text', async t => {
+	const filePath = await createTestFile('utf8.txt', 'café\nold\n');
+
+	await executeWriteFile({path: filePath, content: 'café\nnew\n'});
+
+	t.is(await readFile(filePath, 'utf-8'), 'café\nnew\n');
+});
+
+test('write_file: genuinely new file write succeeds without read failure', async t => {
+	const filePath = join(testDir, 'new-file.txt');
+	const output = await executeWriteFile({
+		path: filePath,
+		content: 'brand new content',
+	});
+
+	t.truthy(output);
+	const content = await readFile(filePath, 'utf-8');
+	t.is(content, 'brand new content');
+});

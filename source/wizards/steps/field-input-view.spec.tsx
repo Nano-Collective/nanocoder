@@ -2,7 +2,7 @@ import test from 'ava';
 import {renderWithTheme as render} from '@/test-utils/render-with-theme';
 import React from 'react';
 import stripAnsi from 'strip-ansi';
-import {pasteEvents} from '@/utils/terminal-paste';
+import {pasteEvents} from '@/terminal/terminal-paste';
 import type {TemplateField} from '../templates/provider-templates';
 import {
 	FieldInputView,

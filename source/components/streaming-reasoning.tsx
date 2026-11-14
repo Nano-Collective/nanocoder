@@ -4,8 +4,8 @@ import {memo, useRef} from 'react';
 import {useNonInteractiveRender} from '@/hooks/useNonInteractiveRender';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
-import {wrapWithTrimmedContinuations} from '@/utils/text-wrapping';
-import {calculateTokens} from '@/utils/token-calculator';
+import {wrapWithTrimmedContinuations} from '@/terminal/text-wrapping';
+import {estimateTokens} from '@/utils/token-calculator';
 import {computeStreamingTail} from './streaming-message';
 
 /**
@@ -53,7 +53,7 @@ export default memo(function StreamingReasoning({
 		displayText = (
 			lines.length > MAX_LINES ? lines.slice(-MAX_LINES) : lines
 		).join('\n');
-		tokens = calculateTokens(reasoning);
+		tokens = estimateTokens(reasoning);
 	}
 
 	const elapsedSec = (Date.now() - startTime) / 1000;
@@ -71,7 +71,7 @@ export default memo(function StreamingReasoning({
 						{'  '}~{tokens.toLocaleString()} tokens · {tokPerSec} tok/s
 					</Text>
 				) : nonInteractive ? null : (
-					<Text color={colors.secondary}>{'  '}ctrl+r to expand</Text>
+					<Text color={colors.secondary}>{'  '}ctrl+n to expand</Text>
 				)}
 			</Box>
 			{expand && (

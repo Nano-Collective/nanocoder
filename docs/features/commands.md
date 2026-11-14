@@ -12,58 +12,72 @@ Type `/` in the chat input to see available commands. All commands start with `/
 
 | Command | Description |
 |---------|-------------|
-| `/help` | Show available commands |
+| `/help [command]` | Show available commands by category. `/help <command>` shows that command's usage, options, subcommands, aliases and examples |
 | `/init` | Initialize the project with intelligent analysis and create `AGENTS.md`. Use `/init --preset <react\|nextjs\|rust>` for bundled stack guidance, ignore patterns, and a `/check` command skill; `/init --force` regenerates `AGENTS.md`, and `/init --lean` skips merging `CLAUDE.md` |
-| `/setup-config` | Open a configuration file in your `$EDITOR` (lists project and global config files) |
+| `/setup-config` | Open a config file (`agents.config.json`, `.mcp.json`, preferences) in your `$EDITOR`; lists the project and global copies to pick from |
 | `/clear` | Clear chat history |
-| `/model` | Switch between available models from any configured provider |
+| `/model [browse]` | Switch between available models from any configured provider. `/model browse` opens the OpenRouter model browser (searchable, filterable by open/proprietary): Enter copies the highlighted model's ID to the clipboard and, when the active provider is OpenRouter, also switches the session to that model |
 | `/status` | Display current status (CWD, provider, model, theme, available updates, AGENTS setup) |
 | `/tasks` | Manage task list for tracking complex work (see [Task Management](task-management.md)) |
-| `/model-database` | Browse coding models from OpenRouter (searchable, filterable by open/proprietary). Enter copies the highlighted model's ID to the clipboard and, when the active provider is OpenRouter, also switches the session to that model |
 | `/settings` | Interactive settings menu. Accepts a tab name to jump straight there: `/settings providers`, `/settings mcp`, `/settings appearance`, `/settings input`, `/settings behavior`, `/settings advanced` |
+| `/firewall` | Guard file edits made by the model: in `strict` mode block, in `lenient` mode only warn about, edits that delete existing tests, change exported signatures, add explicit `any` types, or touch protected paths. Off by default. Subcommands: `status`, `enable` (same as `mode strict`), `disable` (same as `mode disabled`), `mode <strict\|lenient\|disabled>`, `toggle <any\|tests\|exports>`, `protect <pattern>`, `unprotect <pattern>`, `reset`. Changes last for the session; set defaults under `nanocoder.firewall` (see [Mutation Firewall](../configuration/index.md#mutation-firewall)) |
 | `/mcp` | Show connected MCP servers and their tools |
 | `/commands` | List custom commands. Subcommands: `show <name>`, `create <name>` (see [Custom Commands](custom-commands.md)) |
 | `/tools` | List available tools grouped by source (built-in, MCP, custom). Subcommand: `create <name>` (see [Custom Tools](custom-tools.md)) |
 | `/agents` | List subagents. `/agents show <name>` for details, `/agents copy <name>` to customize, `/agents create <name>` to scaffold a new one (see [Subagents](subagents.md)) |
-| `/checkpoint` | Save and restore file snapshots. Subcommands: `create`/`save`, `list`/`ls`, `load`/`restore`, `delete`/`remove`/`rm`, `help` (see [Checkpointing](checkpointing.md)) |
+| `/checkpoint` | Save and restore file snapshots. Subcommands: `create`/`save [name]` (name optional, auto-generated when omitted), `list`/`ls`, `load`/`restore`, `delete`/`remove`/`rm`, `help` (see [Checkpointing](checkpointing.md)) |
 | `/compact` | Compress message history to reduce context usage. Flags include `--llm`, `--mechanical`, `--default`, `--conservative`, `--aggressive`, `--preview` and `--restore`; `--strategy`, `--threshold`, `--auto-on` and `--auto-off` only change session settings (see [Context Compression](context-compression.md)) |
 | `/context-max` | Set maximum context length for the current session (e.g. `/context-max 128k`), or inspect the resolved context source. `/context-max --reset` clears the session override. Also available as `--context-max` CLI flag |
-| `/exit` | Exit the application (alias: `/quit`) |
+| `/exit` | Exit the application |
 | `/export` | Export the current session to a markdown file, or to JSON with `/export --json` or a `.json` filename (see [Exporting a Session](#exporting-a-session)) |
+| `/share` | Write the current session to a single, self-contained HTML page you can open in any browser or send to someone, with secrets redacted. `/share --json` writes the same content as deterministic JSON (see [Sharing a Session](#sharing-a-session)) |
 | `/copy` | Copy the last assistant response to the system clipboard. Use `/copy code` to copy just the last fenced code block from the last response |
 | `/expand [n]` | Print tool result `n` in full. Long tool output is cut to 20 lines with a `/expand n` hint; run `/expand` without a number to list recent results |
 | `/commit` | Generate a Conventional Commit message from staged Git changes. Add `--copy` (or `-c`) to also copy the message to the system clipboard. A spinner shows while the model is working |
-| `/review` | Review a branch or PR diff for bugs, security issues, and style violations. Usage: `/review <branch-or-pr-number>` (e.g. `/review main`, `/review 42`) |
+| `/review` | One-shot, diff-only review of the current branch or one target. Usage: `/review [quick] [<branch-or-PR-number-or-GitHub-PR-URL>]` (e.g. `/review`, `/review main`, `/review quick 42`, `/review https://github.com/owner/repo/pull/42`). Bare PR numbers are resolved across configured GitHub remotes and their fork parents; ambiguous numbers require a full PR URL. See [code review](review.md) |
 | `/doctor` | Show environment health report for bug reports |
 | `/update` | Update Nanocoder to the latest version |
-| `/usage` | Get current model context usage visually |
+| `/usage` | Get current model context usage visually. Accepts `?context-max=<n>` to preview usage against a different limit (see [Inline Overrides](#inline-overrides)) |
 | `/stats` | Lifetime usage (sessions, prompts, tokens). Ranges: `7d` / `3m` / `all-time`, either as an argument (`/stats 7d`) or with `←`/`→` in the view; `Esc`/`Enter` to close. Use `/stats reset` to clear the ledger |
 | `/tip [text]` | Show a random usage tip, shortcut, or slash command; pass text to pick from tips mentioning it |
 | `/lsp` | List connected LSP servers |
 | `/repomap` | Show a PageRank-ordered map of the codebase - the most-referenced files and the symbols they define. Use `/repomap --tokens <n>` to widen the map beyond its default 1024-token budget |
-| `/schedule` | Read-only view of cron subscriptions declared by skills (see [Skills → Event subscriptions](skills.md#event-subscriptions)) |
-| `/skills` | List and inspect loaded skills. Subcommands: `show <name>`, `create <name>` (scaffold a bundle with AI assistance), `check <name>` (validate a bundle), `promote <name>` (copy a project skill to your personal config) and `demote <name>` (copy a personal skill into the project); `promote`/`demote` accept `--force` and `--move` (see [Skills](skills.md)) |
+| `/skills` | List and inspect loaded skills. Subcommands: `show <name>`, `create <name>` (scaffold a bundle with AI assistance), `check <name>` (validate a bundle), `promote <name>` (copy a project skill to your personal config) and `demote <name>` (copy a personal skill into the project); `promote`/`demote` accept `--force` and `--move`. `/skills schedule` is a read-only view of the cron subscriptions skills declare (see [Skills → Event subscriptions](skills.md#event-subscriptions)) |
 | `/resume` | Resume a previous chat session (aliases: `/sessions`, `/history`). Also available at launch via the `--resume`/`--continue` CLI flags. See [Session Management](session-management.md) |
 | `/retry` | Re-run the last user turn. Use `/retry --model <id>` or `/retry --provider <name> --model <id>` to switch models first |
 | `/rename` | Rename the current session. Name must be non-empty and 100 characters or less. See [Session Management](session-management.md) |
 | `/explorer` | Interactive file browser to navigate, preview, and select files for context |
 | `/tune` | Configure runtime model behaviour — tool profiles, compaction, native tools, model parameters (see [Tune](tune.md)) |
 | `/ide` | Connect to an IDE for live integration (e.g., VS Code diff previews) |
-| `/remember` | Save a durable project memory (see [Semantic Memory](semantic-memory.md)) |
-| `/memory` | List, delete, propose, and accept project memories (see [Semantic Memory](semantic-memory.md)) |
+| `/memory` | List, add, delete, propose, and accept project memories. `/memory add [--category <name>] <text>` saves one directly (see [Semantic Memory](semantic-memory.md)) |
 | `/privacy` | Inspect what the prompt scrubber would remove from some text: `/privacy inspect <text>`. Scrubbing itself is switched on with the [`enablePromptScrubbing`](../configuration/preferences.md#what-gets-saved-automatically) preference (`/settings` → **Advanced** → **Privacy**) |
 | `/credits` | Show project contributors and dependencies |
-| `/copilot-login [providerName]` | Log in to GitHub Copilot via device flow. Saves credentials for the named provider, "GitHub Copilot" by default |
-| `/codex-login` | Log in to ChatGPT/Codex via device flow. Saves credentials for the "ChatGPT" provider |
-| `/voice` | Configure Voice Mode (`/voice [hands-free|ptt|stt <local|cloud>|tts <local|cloud>|status|mode <push-to-talk|hands-free>]`) |
+| `/login <codex\|copilot> [providerName]` | Log in via device flow. `/login codex` saves credentials for the "ChatGPT" provider and `/login copilot` for "GitHub Copilot", unless you name another provider |
+| `/voice` | Configure [Voice Mode](voice-mode.md) (`/voice [on\|off\|hands-free\|ptt\|stt <local\|cloud>\|tts <local\|cloud>\|status\|mode <push-to-talk\|hands-free>]`) |
+
+`/tip`, `/privacy` and `/credits` work as listed but are left out of the `/help` overview; `/help <command>` still shows their details.
+
+### Renamed Commands
+
+These older names were folded into other commands. They still work exactly as before, but are no longer listed in `/help` or offered as completions. `/help <old name>` opens the help for the command it now runs.
+
+| Old name | Now |
+|----------|-----|
+| `/quit` | `/exit` |
+| `/remember <text>` | `/memory add <text>` |
+| `/codex-login [provider]` | `/login codex [provider]` |
+| `/copilot-login [provider]` | `/login copilot [provider]` |
+| `/model-database` | `/model browse` |
+| `/schedule` | `/skills schedule` |
 
 ## Voice Mode
 
-Nanocoder includes a local-first Realtime Voice Mode supporting push-to-talk, hands-free voice activity detection (VAD), barge-in interruption, and optional cloud STT/TTS.
+Nanocoder includes a local-first Realtime Voice Mode supporting push-to-talk, hands-free voice activity detection (VAD), barge-in interruption, and optional cloud STT/TTS. See [Voice Mode](voice-mode.md) for setup, the audio tools it installs, and its preferences.
 
 | Command | Description |
 |---------|-------------|
 | `/voice` | Toggle voice mode on/off |
+| `/voice on` / `/voice off` | Turn voice mode on or off explicitly |
 | `/voice ptt` or `/voice push-to-talk` | Switch to push-to-talk mode (use `Ctrl+G` to record/submit) |
 | `/voice hands-free` | Switch to hands-free mode (automatic VAD speech detection) |
 | `/voice stt [local\|cloud]` | Configure speech-to-text backend (local Whisper or opt-in cloud) |
@@ -86,6 +100,24 @@ Hands-free mode is paused in yolo mode, so ambient speech cannot trigger unconfi
 ```
 
 JSON exports keep full message content and session metadata, for replay or evaluation. The file is written relative to the current directory and must stay inside the project: `~` is not expanded, `..` segments are refused, and absolute paths outside the project root are rejected. A generated filename gets a numeric suffix rather than overwriting an earlier export; a filename you type overwrites an existing file.
+
+### Sharing a Session
+
+```bash
+/share                          # HTML page, filename generated from your first prompt and the date
+/share notes/debug-session.html # HTML page, your filename
+/share --json                   # the same content as deterministic JSON
+/share run.json                 # a .json filename also selects JSON
+/share --no-redact              # keep secrets in (read the file before you send it)
+```
+
+`/share` writes one HTML file that shows the conversation in order: your prompts, the assistant's replies and reasoning, and each tool call with its arguments and result (collapsed until you click it). Nothing is uploaded. The page is static: it runs no JavaScript and its Content-Security-Policy blocks every network request, so it is safe to open from an email or a chat attachment and works offline.
+
+What is left out: the system prompt, and image data (an attached image is noted by its type only).
+
+Secrets are redacted by default: common token formats (GitHub, OpenAI/Anthropic-style `sk-` keys, AWS access key IDs, Slack tokens, private key blocks), the values of environment variables whose names contain `TOKEN`, `KEY`, `SECRET` or `PASSWORD`, and the `apiKey` of every configured provider. The message says how many were redacted. Only those known shapes are caught, and file paths, file contents and command output are kept as they are, so read the page before you send it.
+
+`--json` writes the same content as JSON: no timestamps, a fixed key order and sorted tool-argument keys, so sharing the same session twice gives the same bytes and two shares diff cleanly. File paths follow the same rules as `/export`: relative to the current directory, inside the project, a generated name never overwrites an earlier file, and a name you type does.
 
 ## Special Input Syntax
 These shortcuts work directly in the chat input — no `/` prefix needed.
@@ -117,6 +149,25 @@ The `!` prefix runs a command in your shell and includes the output as context f
 !npm test -- --filter auth
 ```
 
+### Inline Overrides
+
+`/compact` and `/usage` accept `?key=value` tokens that change a setting for that one command only. The previous value is restored as soon as the command finishes, so nothing carries over to the rest of the session.
+
+```
+/usage ?context-max=200k       # Show usage as if the context limit were 200k
+/compact ?threshold=80         # Compact only if usage is at or above 80%
+/compact ?preview              # Same as /compact --preview
+```
+
+Supported keys:
+
+- `?context-max=<n>` - context limit for this command (accepts `k` suffixes, e.g. `128k`)
+- `?threshold=<50-95>` - on `/compact`, skip compaction when usage is below this percentage
+- `?auto-compact=<on|off>` - auto-compact enabled state for this command
+- `?preview`, `?llm`, `?mechanical`, `?aggressive`, `?conservative` - shorthand for the matching `/compact` flag
+
+Unknown keys are passed to the command unchanged and trigger a warning. Other commands do not parse `?` tokens, so text like `/memory add ?important use tabs` is kept exactly as typed. To change a setting for the whole session, use the regular flags instead (for example `/compact --auto-on` or `/context-max 128k`).
+
 ## Non-Interactive Mode
 
 Run Nanocoder without an interactive session for scripting and automation:
@@ -127,7 +178,7 @@ nanocoder run "Add error handling to src/api.ts"
 
 This submits the prompt and exits when complete. Useful for CI pipelines, git hooks, or chaining with other tools.
 
-Run mode renders through a dedicated minimal shell: no welcome banner, no boxed "You:" echo, no trailing token counts, no `ctrl+r to expand` hints. Assistant text streams as plain markdown, tools render chronologically as one-liners (e.g. `⚒ Read 1 file`), and a single status line below the transcript shows progress.
+Run mode renders through a dedicated minimal shell: no welcome banner, no boxed "You:" echo, no trailing token counts, no `ctrl+n to expand` hints. Assistant text streams as plain markdown, tools render chronologically as one-liners (e.g. `⚒ Read 1 file`), and a single status line below the transcript shows progress.
 
 By default, `run` uses auto-accept. Override with `--mode` to boot into a different [development mode](development-modes.md):
 
@@ -191,7 +242,8 @@ The emitted object looks like:
     "inputTokens": 4520,
     "outputTokens": 850,
     "totalTokens": 5370
-  }
+  },
+  "warnings": []
 }
 ```
 
@@ -201,9 +253,10 @@ The emitted object looks like:
 - `reasoning` — accumulated reasoning/thinking content, or `null` if the model didn't emit any
 - `toolCalls` — every tool call made during the run, each with its arguments and either a `result` or an `error` (never both)
 - `steps` — how many times the model was called during the run, including retried turns. One step can make zero or several tool calls, so this is not the same as the length of `toolCalls`. `0` when the run stopped before calling the model
-- `filesChanged` — deduplicated list of file paths touched by file-mutating tools (`write_file`, `string_replace`, `diff_edit`)
+- `filesChanged` - deduplicated list of file paths touched by file-mutating tools (`write_file`, `string_replace`, `diff_edit`, `lsp_format_document`)
 - `usage` — provider-reported token counts summed across every turn of the run. Omitted entirely when the provider reports no token telemetry (common with local models), so an absent block means "unknown", never "zero". When a provider reports input and output counts but no total, `totalTokens` is derived as their sum.
+- `warnings` — array containing configuration, hook, formatter, plugin, and runtime error/warning messages (the same diagnostic messages streamed to stderr)
 
-Two more fields appear conditionally: `message` (the error text, when `kind` is `"error"`) and `toolNames` (the tools awaiting approval, when `kind` is `"tool-approval-required"`).
+A few more fields appear conditionally: `message` (the error text, when `kind` is `"error"`), and, when `kind` is `"tool-approval-required"`, `toolNames` (the tools awaiting approval) and `autoAcceptWouldRun` (whether `--mode auto-accept` would have run every blocked call; when false, only `--mode yolo` or `alwaysAllow` unblocks it).
 
-On error (e.g. an untrusted workspace directory, the turn limit being hit without a final answer, or an agent-loop [retry limit](../configuration/index.md#retry-limits) being hit), `kind` is `"error"` and the object still includes whatever `toolCalls` were captured before the failure, so partial progress isn't silently dropped.
+On error (e.g. an untrusted workspace directory, a provider request that fails with an HTTP error or a dropped connection, the turn limit being hit without a final answer, or an agent-loop [retry limit](../configuration/index.md#retry-limits) being hit), `kind` is `"error"` and the object still includes whatever `toolCalls` were captured before the failure, so partial progress isn't silently dropped.

@@ -1,9 +1,9 @@
 import {createContext, useContext} from 'react';
-import type {TitleShape} from '@/components/ui/styled-title';
 import {
 	getTitleShape as getTitleShapeFromPrefs,
 	updateTitleShape as updateTitleShapeInPrefs,
 } from '@/config/preferences';
+import type {TitleShape} from '@/types/ui';
 
 interface TitleShapeContextType {
 	currentTitleShape: TitleShape;

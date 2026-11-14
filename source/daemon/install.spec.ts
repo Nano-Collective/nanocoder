@@ -6,6 +6,7 @@ import {
 	resetPreferencesCache,
 	savePreferences,
 } from '@/config/preferences';
+import {describeProjectTrust} from '@/config/trust/project-trust';
 import {
 	buildLaunchAgentPlist,
 	buildScheduledTaskXml,
@@ -127,7 +128,13 @@ test.serial(
 				// names both remedies so the service doesn't just fail forever
 				// with no explanation.
 				t.regex(result.message, /not trusted/);
-				t.regex(result.message, /--trust-directory/);
+				t.regex(result.message, /Run `nanocoder` here once/);
+				t.regex(
+					result.message,
+					/`NANOCODER_TRUST_DIRECTORY=1 nanocoder daemon start`/,
+				);
+				// A per-run flag never persists, so it can't fix the service.
+				t.notRegex(result.message, /--trust-directory/);
 				t.true(await isAutoStartInstalled({projectRoot: project, platform: 'linux', home}));
 			});
 		});
@@ -139,7 +146,14 @@ test.serial(
 	async t => {
 		await withIsolatedPreferences(async () => {
 			await withTempHome(async (home, project) => {
-				savePreferences({trustedDirectories: [project]});
+				savePreferences({
+					trustedDirectories: [
+						{
+							path: project,
+							fingerprint: describeProjectTrust(project).fingerprint,
+						},
+					],
+				});
 				const result = await installAutoStart({
 					projectRoot: project,
 					platform: 'linux',
@@ -147,7 +161,7 @@ test.serial(
 					loadService: false,
 				});
 				t.notRegex(result.message, /not trusted/);
-				t.notRegex(result.message, /--trust-directory/);
+				t.notRegex(result.message, /NANOCODER_TRUST_DIRECTORY/);
 			});
 		});
 	},

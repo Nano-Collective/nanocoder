@@ -60,6 +60,38 @@ test('getNextRunTime returns null for invalid expressions', t => {
 // formatCronHuman Tests
 // ============================================================================
 
+test('formatCronHuman formats step minutes as every N minutes', t => {
+	t.is(formatCronHuman('*/15 * * * *'), 'every 15 minutes');
+	t.is(formatCronHuman('*/30 * * * *'), 'every 30 minutes');
+	t.is(formatCronHuman('*/2 * * * *'), 'every 2 minutes');
+	t.is(formatCronHuman('*/1 * * * *'), 'every minute');
+});
+
+test('formatCronHuman formats step hours as every N hours', t => {
+	t.is(formatCronHuman('0 */2 * * *'), 'every 2 hours at minute 0');
+	t.is(formatCronHuman('30 */3 * * *'), 'every 3 hours at minute 30');
+});
+
+test('formatCronHuman reads a 6-field expression with a zero seconds field', t => {
+	t.is(formatCronHuman('0 0 9 * * *'), 'daily at 9:00');
+	t.is(formatCronHuman('0 */5 * * * *'), 'every 5 minutes');
+});
+
+test('formatCronHuman returns the raw expression when the seconds field is not zero', t => {
+	t.is(formatCronHuman('30 0 9 * * *'), '30 0 9 * * *');
+	t.is(formatCronHuman('*/10 * * * * *'), '*/10 * * * * *');
+	t.is(formatCronHuman('* * * * * *'), '* * * * * *');
+});
+
+test('formatCronHuman returns the raw expression for a wildcard minute with a step hour', t => {
+	t.is(formatCronHuman('* */2 * * *'), '* */2 * * *');
+});
+
+test('formatCronHuman returns raw expression for 7-field expressions with a year', t => {
+	// A trailing year field is not described: return the input unchanged
+	t.is(formatCronHuman('0 0 9 * * * 2025'), '0 0 9 * * * 2025');
+});
+
 test('formatCronHuman formats every minute', t => {
 	t.is(formatCronHuman('* * * * *'), 'every minute');
 });
@@ -73,6 +105,22 @@ test('formatCronHuman formats daily pattern', t => {
 	t.is(formatCronHuman('0 9 * * *'), 'daily at 9:00');
 	t.is(formatCronHuman('30 14 * * *'), 'daily at 14:30');
 	t.is(formatCronHuman('5 0 * * *'), 'daily at 0:05');
+});
+
+test('formatCronHuman lists each time for comma-separated minutes or hours', t => {
+	t.is(formatCronHuman('0,30 9 * * *'), 'daily at 9:00, 9:30');
+	t.is(formatCronHuman('0 9,17 * * *'), 'daily at 9:00, 17:00');
+	t.is(formatCronHuman('0 9,17 * * 1-5'), 'Mon-Fri at 9:00, 17:00');
+	t.is(formatCronHuman('15,45 6 1 * *'), 'monthly on day 1 at 6:15, 6:45');
+});
+
+test('formatCronHuman returns the raw expression for minute or hour ranges it cannot read as a time', t => {
+	// "daily at 9-17:00" would be wrong: this fires at the top of every hour 9 to 17.
+	t.is(formatCronHuman('0 9-17 * * *'), '0 9-17 * * *');
+	t.is(formatCronHuman('0-5 9 * * *'), '0-5 9 * * *');
+	t.is(formatCronHuman('0 9 * * MON'), 'Mon at 9:00');
+	// Too many combinations to list.
+	t.is(formatCronHuman('0,15,30,45 9,17 * * *'), '0,15,30,45 9,17 * * *');
 });
 
 test('formatCronHuman formats weekly pattern with day names', t => {

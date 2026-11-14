@@ -65,7 +65,12 @@ When you load a checkpoint through the interactive selector (`/checkpoint load` 
 
 ## Storage
 
-Checkpoints are stored in `.nanocoder/checkpoints/` in your project directory. Each project has its own checkpoints. Consider adding `.nanocoder/checkpoints` to your `.gitignore`. Even if you don't, checkpoints never capture the checkpoint store or the action timeline.
+Checkpoints are stored in .nanocoder/checkpoints/ in your project directory. Each project has its own checkpoints.
+Nanocoder automatically creates and maintains .nanocoder/.gitignore to exclude runtime files such as checkpoints/, timeline/, and daemon.* from Git, while keeping user configuration directories trackable.
+
+If the ignore file cannot be updated, Nanocoder logs a warning and continues operating. In that case, verify your Git ignore rules manually before committing.
+
+Even if the ignore rules cannot be updated, checkpoints never capture the checkpoint store or the action timeline.
 
 Snapshots skip anything matched by `.gitignore`, but deliberately ignore [`.nanocoderignore`](../configuration/index.md#ignoring-files). Hiding a file from the model's listings shouldn't quietly exclude it from restore, so a file in `.nanocoderignore` is still snapshotted and still reverted.
 

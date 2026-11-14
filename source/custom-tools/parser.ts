@@ -1,4 +1,6 @@
 import {readFileSync} from 'node:fs';
+import {pickShell} from '@/custom-tools/handler';
+import {findUnsafePlaceholder} from '@/custom-tools/template';
 import {parseSubscribeBlockOrWarn} from '@/skills/parse-subscribe';
 import type {
 	CustomToolApprovalPolicy,
@@ -9,6 +11,7 @@ import type {
 } from '@/types/custom-tools';
 import type {SkillTrigger} from '@/types/skills';
 import {parseYamlObject, splitFrontmatter} from '@/utils/frontmatter';
+import {isWindowsCmd} from '@/utils/shell-args';
 
 const TOOL_NAME_REGEX = /^[a-z][a-z0-9_]*$/;
 const DEFAULT_TIMEOUT_MS = 30_000;
@@ -74,6 +77,12 @@ export function parseCustomToolFile(filePath: string): ParsedCustomToolFile {
 	if (!split.body.trim()) {
 		throw new CustomToolParseError('Tool body (shell script) is empty');
 	}
+	const unsafe = findUnsafePlaceholder(
+		split.body,
+		isWindowsCmd(pickShell(metadata.shell)) ? 'cmd' : 'posix',
+		Object.keys(metadata.parameters),
+	);
+	if (unsafe) throw new CustomToolParseError(unsafe);
 
 	const subscribe: SkillTrigger[] | undefined = parseSubscribeBlockOrWarn(
 		raw.subscribe,

@@ -1,7 +1,7 @@
 import {Box, Text, useInput} from 'ink';
 import {Tab, Tabs} from 'ink-tab';
 import {useEffect, useState} from 'react';
-import TextInput from '@/components/text-input';
+import TextInput, {isBackspaceKey, useRawInput} from '@/components/text-input';
 import {StyledSelectInput} from '@/components/ui/styled-select-input';
 import {getColors} from '@/config/index';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
@@ -42,6 +42,23 @@ function findServerName(
 ): string | null {
 	if (!name) return null;
 	return Object.hasOwn(servers, name) ? name : null;
+}
+
+/** Fields entered as multiple lines (Enter adds a line, Esc submits). */
+const MULTILINE_FIELDS = new Set(['envVars', 'headers']);
+
+/**
+ * Starting buffer for a multiline field: its saved answer, so editing a
+ * server shows (and keeps) its existing env vars or headers. The buffer, not
+ * the answer, is what the field submits.
+ */
+function multilineSeed(
+	template: McpTemplate,
+	index: number,
+	answers: Record<string, string>,
+): string {
+	const name = template.fields[index]?.name;
+	return name && MULTILINE_FIELDS.has(name) ? (answers[name] ?? '') : '';
 }
 
 type Mode =
@@ -229,8 +246,8 @@ export function McpStep({
 				// Resolve the template that built this server. Prefer the stamped
 				// templateId / tags over the server name so a custom-named
 				// instance (e.g. `you-paid`) resolves back to its template
-				// instead of falling through to `custom`, whose buildConfig never
-				// writes headers and would silently drop a saved bearer token.
+				// instead of falling through to `custom`, which rebuilds it from
+				// generic fields rather than the template's own.
 				const templateId = resolveMcpTemplateId(server);
 				const template =
 					(templateId
@@ -247,8 +264,17 @@ export function McpStep({
 					for (const field of template.fields) {
 						if (field.name === 'serverName' && server.name) {
 							answers.serverName = server.name;
+						} else if (field.name === 'transport' && server.transport) {
+							answers.transport = server.transport;
 						} else if (field.name === 'url' && server.url) {
 							answers.url = server.url;
+						} else if (field.name === 'headers' && server.headers) {
+							// Custom MCP Server: servers from a removed template
+							// (Serply, FXMacroData) land here and keep their key
+							// only through this field.
+							answers.headers = Object.entries(server.headers)
+								.map(([key, value]) => `${key}: ${value}`)
+								.join('\n');
 						} else if (field.name === 'command' && server.command) {
 							answers.command = server.command;
 						} else if (field.name === 'allowedDirs' && server.args) {
@@ -267,9 +293,9 @@ export function McpStep({
 								.map(([key, value]) => `${key}=${value}`)
 								.join('\n');
 						} else if (field.name === 'apiKey') {
-							// Try env first, then a bearer Authorization header
-							// or an X-API-Key header. `you` and `serply` use
-							// `apiKey`. `github-remote` uses `githubToken`.
+							// Try env first, then a bearer Authorization header.
+							// `you` uses `apiKey`. `github-remote` uses
+							// `githubToken`.
 							const apiKeyEntry = server.env
 								? Object.entries(server.env).find(
 										([key]) => key.includes('API_KEY') || key.includes('TOKEN'),
@@ -281,8 +307,6 @@ export function McpStep({
 								answers.apiKey = server.headers.Authorization.slice(
 									'Bearer '.length,
 								);
-							} else if (server.headers?.['X-API-Key']) {
-								answers.apiKey = server.headers['X-API-Key'];
 							}
 						} else if (
 							field.name === 'githubToken' &&
@@ -295,7 +319,7 @@ export function McpStep({
 					}
 
 					beginTemplate(template, answers);
-					setMultilineBuffer('');
+					setMultilineBuffer(multilineSeed(template, 0, answers));
 					setMode('field-input');
 				}
 			}
@@ -309,7 +333,7 @@ export function McpStep({
 		if (!currentField) return;
 
 		// For multiline fields, handle differently
-		const isMultiline = currentField.name === 'envVars';
+		const isMultiline = MULTILINE_FIELDS.has(currentField.name);
 		const finalValue = isMultiline ? multilineBuffer : currentValue.trim();
 
 		// Validate required fields
@@ -338,7 +362,9 @@ export function McpStep({
 		// Move to next field or complete
 		if (currentFieldIndex < selectedTemplate.fields.length - 1) {
 			loadField(selectedTemplate, currentFieldIndex + 1, newAnswers);
-			setMultilineBuffer('');
+			setMultilineBuffer(
+				multilineSeed(selectedTemplate, currentFieldIndex + 1, newAnswers),
+			);
 		} else {
 			// Build config and add/update server
 			try {
@@ -375,6 +401,8 @@ export function McpStep({
 		})),
 	];
 
+	const rawInputRef = useRawInput();
+
 	// Handle keyboard navigation
 	useInput((input, key) => {
 		// Handle Shift+Tab for going back (but not regular Tab, let Tabs component handle it)
@@ -385,8 +413,16 @@ export function McpStep({
 					// Go back to previous field
 					if (selectedTemplate) {
 						loadField(selectedTemplate, currentFieldIndex - 1, fieldAnswers);
+						setMultilineBuffer(
+							multilineSeed(
+								selectedTemplate,
+								currentFieldIndex - 1,
+								fieldAnswers,
+							),
+						);
+					} else {
+						setMultilineBuffer('');
 					}
-					setMultilineBuffer('');
 					bumpInputKey(); // Force remount to reset cursor position
 					setError(null);
 				} else {
@@ -420,7 +456,7 @@ export function McpStep({
 
 		if (mode === 'field-input' && selectedTemplate) {
 			const currentField = selectedTemplate.fields[currentFieldIndex];
-			const isMultiline = currentField?.name === 'envVars';
+			const isMultiline = MULTILINE_FIELDS.has(currentField?.name ?? '');
 
 			if (isMultiline) {
 				// Handle multiline input. Keys can reach this handler faster
@@ -434,10 +470,7 @@ export function McpStep({
 				} else if (key.escape) {
 					// Submit multiline input on Escape
 					handleFieldSubmit();
-				} else if (
-					key.backspace ||
-					(key.delete && (key.raw === '\x7f' || key.raw === '\x1b\x7f'))
-				) {
+				} else if (isBackspaceKey(key, rawInputRef.current)) {
 					// Backspace, told apart from forward Delete the same way
 					// TextInput does. The buffer has no cursor - typing always
 					// appends - so forward Delete has nothing after it to remove.
@@ -588,7 +621,7 @@ export function McpStep({
 		const currentField = selectedTemplate.fields[currentFieldIndex];
 		if (!currentField) return null;
 
-		const isMultiline = currentField.name === 'envVars';
+		const isMultiline = MULTILINE_FIELDS.has(currentField.name);
 
 		return (
 			<Box flexDirection="column">

@@ -8,13 +8,13 @@ import {ThemeContext} from '@/hooks/useTheme';
 import {getLSPManager} from '@/lsp/index';
 import type {FormattingOptions, TextEdit} from '@/lsp/protocol';
 import {getProjectRoot, getSafeSessionCwd} from '@/services/session-cwd';
+import {validatePath} from '@/tools/file-ops/path-validators';
+import {markFileSeen} from '@/tools/runtime/read-tracker';
+import {createFileToolApproval} from '@/tools/runtime/tool-approval';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
-import {invalidateCache} from '@/utils/file-cache';
-import {validatePath} from '@/utils/path-validators';
-import {markFileSeen} from '@/utils/read-tracker';
-import {createFileToolApproval} from '@/utils/tool-approval';
+import {invalidateCache} from '@/utils/fs/file-cache';
 
 interface FormatDocumentArgs {
 	path: string;

@@ -4,9 +4,9 @@
  * `/copy code` copies just the last fenced code block from that response.
  */
 import clipboard from 'clipboardy';
+import {errorMsg, successMsg, warningMsg} from '@/components/message-factory';
 import type {Command} from '@/types/commands';
 import type {Message} from '@/types/core';
-import {errorMsg, successMsg, warningMsg} from '@/utils/message-factory';
 
 function findLastAssistantContent(messages: Message[]): string | undefined {
 	for (let i = messages.length - 1; i >= 0; i--) {
@@ -55,11 +55,16 @@ function extractCodeBlocks(markdown: string): string[] {
 
 export const copyCommand: Command = {
 	name: 'copy',
-	description: 'Copy the last assistant response to the clipboard',
+	description:
+		'Copy the last assistant response to the clipboard (/copy [code] for the last code block)',
 	handler: async (args, messages) => {
 		const argument = args[0]?.toLowerCase();
 
-		if (args.length > 1 || (args.length === 1 && argument !== 'code')) {
+		if (args.length > 1) {
+			return warningMsg('Too many arguments. Usage: /copy [code]', 'copy');
+		}
+
+		if (args.length === 1 && argument !== 'code') {
 			return warningMsg(
 				`Unknown option "${args[0]}". Usage: /copy [code]`,
 				'copy',

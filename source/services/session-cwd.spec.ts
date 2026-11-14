@@ -1,9 +1,11 @@
-import {mkdirSync, mkdtempSync, rmSync} from 'node:fs';
+import {mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join, resolve} from 'node:path';
 import test from 'ava';
+import {createSessionContext, runInSessionContext} from './session-context.js';
 import {
 	getContainedSessionCwd,
+	getProjectRoot,
 	getSafeSessionCwd,
 	getSessionCwd,
 	resetSessionCwd,
@@ -58,6 +60,33 @@ test.serial(
 	},
 );
 
+test.serial(
+	'getContainedSessionCwd keeps a physical cwd under a root opened through a symlink',
+	t => {
+		// The project is opened as `link/`, but after `cd sub` bash reports the
+		// physical path (`pwd -P`). Comparing the two spellings lexically clamped
+		// the search tools back to the root.
+		resetSessionCwd();
+		const base = realpathSync(mkdtempSync(join(tmpdir(), 'nc-link-')));
+		const real = join(base, 'real');
+		const link = join(base, 'link');
+		mkdirSync(join(real, 'sub'), {recursive: true});
+		symlinkSync(real, link, 'dir');
+		const outside = mkdtempSync(join(tmpdir(), 'nc-out-'));
+		try {
+			setProjectRoot(link);
+			setSessionCwd(join(real, 'sub'));
+			t.is(getContainedSessionCwd(), join(real, 'sub'));
+			setSessionCwd(outside);
+			t.is(getContainedSessionCwd(), link, 'outside is still clamped');
+		} finally {
+			resetSessionCwd();
+			rmSync(base, {recursive: true, force: true});
+			rmSync(outside, {recursive: true, force: true});
+		}
+	},
+);
+
 test.serial('getSafeSessionCwd recovers when the stored dir was removed', t => {
 	resetSessionCwd();
 	const dir = mkdtempSync(join(tmpdir(), 'nc-cwd-'));
@@ -65,4 +94,82 @@ test.serial('getSafeSessionCwd recovers when the stored dir was removed', t => {
 	rmSync(dir, {recursive: true, force: true}); // e.g. a torn-down worktree
 	t.is(getSafeSessionCwd(), process.cwd());
 	t.is(getSessionCwd(), process.cwd(), 'recovery also updates the stored value');
+});
+
+// ============================================================================
+// Session scopes (#1707): an ACP session's tools follow the `cwd` the client
+// named for it, not the directory the agent process was spawned in.
+// ============================================================================
+
+test.serial('a session scope supplies its own root and cwd', t => {
+	resetSessionCwd();
+	const root = mkdtempSync(join(tmpdir(), 'nc-scope-'));
+	try {
+		const scope = createSessionContext(root);
+		runInSessionContext(scope, () => {
+			t.is(getProjectRoot(), resolve(root));
+			t.is(getSessionCwd(), resolve(root));
+			t.is(getSafeSessionCwd(), resolve(root));
+		});
+		t.is(getSessionCwd(), process.cwd(), 'nothing leaks outside the scope');
+		t.is(getProjectRoot(), resolve(process.cwd()));
+	} finally {
+		rmSync(root, {recursive: true, force: true});
+	}
+});
+
+test.serial('a cd inside a scope moves only that scope, and persists', t => {
+	resetSessionCwd();
+	const root = mkdtempSync(join(tmpdir(), 'nc-scope-'));
+	const sub = join(root, 'sub');
+	mkdirSync(sub);
+	try {
+		const scope = createSessionContext(root);
+		runInSessionContext(scope, () => setSessionCwd(sub));
+		t.is(getSessionCwd(), process.cwd(), 'the process-wide cwd is untouched');
+		runInSessionContext(scope, () => {
+			t.is(getSessionCwd(), resolve(sub), 'a later turn sees the cd');
+			t.is(getProjectRoot(), resolve(root), 'the boundary does not move');
+		});
+	} finally {
+		rmSync(root, {recursive: true, force: true});
+	}
+});
+
+test.serial('concurrent scopes do not see each other', async t => {
+	resetSessionCwd();
+	const a = mkdtempSync(join(tmpdir(), 'nc-scope-a-'));
+	const b = mkdtempSync(join(tmpdir(), 'nc-scope-b-'));
+	try {
+		const seen = await Promise.all(
+			[a, b].map(dir =>
+				runInSessionContext(createSessionContext(dir), async () => {
+					await new Promise(resolveWait => setTimeout(resolveWait, 10));
+					return getSessionCwd();
+				}),
+			),
+		);
+		t.deepEqual(seen, [resolve(a), resolve(b)]);
+	} finally {
+		rmSync(a, {recursive: true, force: true});
+		rmSync(b, {recursive: true, force: true});
+	}
+});
+
+test.serial('a removed cd target falls back to the scope root, not the process cwd', t => {
+	resetSessionCwd();
+	const root = mkdtempSync(join(tmpdir(), 'nc-scope-'));
+	const sub = join(root, 'sub');
+	mkdirSync(sub);
+	try {
+		const scope = createSessionContext(root);
+		runInSessionContext(scope, () => {
+			setSessionCwd(sub);
+			rmSync(sub, {recursive: true, force: true});
+			t.is(getSafeSessionCwd(), resolve(root));
+			t.is(getSessionCwd(), resolve(root));
+		});
+	} finally {
+		rmSync(root, {recursive: true, force: true});
+	}
 });

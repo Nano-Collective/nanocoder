@@ -121,7 +121,7 @@ Surfaces:
 
 - `pre-tool-use` and `post-tool-use` fire everywhere tools run: the interactive TUI (including streamed `execute_bash`), `nanocoder run`, the `--plain` shell, ACP, and subagents.
 - `post-tool-use` fires for every call that produces a result, successful or not — a handler that threw, a validation failure, malformed arguments. An audit-log hook therefore sees the failures too, which is usually the point. A call refused by `pre-tool-use` is the one exception: it never ran, so `post-tool-use` does not fire for it.
-- `session-start`, `session-end`, and `user-prompt-submit` fire in the interactive TUI and in `run` / `--plain`. In `run`, the prompt on the command line is the submitted prompt, and a veto exits 1 before any model call. ACP sessions are driven by the editor and fire the tool hooks only.
+- `session-start`, `session-end`, and `user-prompt-submit` fire in the interactive TUI, in `run` / `--plain`, and in ACP. In `run`, the prompt on the command line is the submitted prompt, and a veto exits 1 before any model call. In ACP each editor chat is a session: `session-start` fires when the chat is created, loaded or resumed, `session-end` when the editor closes or deletes it (and at shutdown for any still open), and a `user-prompt-submit` veto ends that prompt with the stop reason `refusal` before any model call.
 - `pre-compact` fires for automatic compaction and for `/compact`.
 
 ### `session-end` runs on a shutdown budget
@@ -149,6 +149,8 @@ Each hook is run with the relevant context in its environment. Nothing is passed
 | `NANOCODER_MESSAGE_COUNT` | `pre-compact` | Messages in the conversation |
 
 Hook commands are **not** env-substituted when the config is read, so `$NANOCODER_FILE` in your `command` reaches the shell intact.
+
+On Windows the command runs through `cmd.exe`, which expands `%VAR%` rather than `$VAR`. So the examples on this page work unchanged, references to the path variables (`$NANOCODER_FILE`, `$NANOCODER_CWD`, `$NANOCODER_SESSION_CWD`, in either `$VAR` or `${VAR}` form) are rewritten to `%VAR%` before the command runs, and wrapped in double quotes when you left them unquoted. A path containing a `"` or a line break, which cmd.exe cannot quote, makes the hook fail to run rather than run with a broken command line. The free-text variables (`NANOCODER_TOOL_ARGS`, `NANOCODER_COMMAND`, `NANOCODER_TOOL_RESULT`, `NANOCODER_PROMPT`) are never rewritten, because they can contain quotes; read them from a script instead of putting them in the command line.
 
 Hooks run in config order, sequentially, **with the project root as their cwd** — not the agent's current shell directory. A hook is defined in project config, so a relative `command` like `.nanocoder/hooks/guard.sh` has to keep resolving after the model has `cd`-ed somewhere else. Read `NANOCODER_SESSION_CWD` when you want to act on where the shell actually is.
 
@@ -199,7 +201,7 @@ A hook that prints nothing injects nothing.
 
 ## In-process plugins
 
-A plugin is a JavaScript module that runs inside Nanocoder instead of as a shell command. Put one `.mjs` file directly in `.nanocoder/plugins/` at the project root. `.mjs` is required so Node loads it as ESM even when the project itself is CommonJS. Files load in filename order, and only after you have trusted the directory. The chat prompt waits for that load. A plugin runs with the same privileges as Nanocoder itself, so treat it like any other code in the repository.
+A plugin is a JavaScript module that runs inside Nanocoder instead of as a shell command. Put one `.mjs` file directly in `.nanocoder/plugins/` at the project root. `.mjs` is required so Node loads it as ESM even when the project itself is CommonJS. Files load in filename order, and only after you have trusted the directory. The chat prompt waits for that load. A file that has not finished loading after 30 seconds is skipped, and the files after it still load. A plugin runs with the same privileges as Nanocoder itself, so treat it like any other code in the repository.
 
 The default export is the plugin object. There is nothing to import at runtime. For editor type checking, point a JSDoc `@type` at the published types:
 
@@ -234,11 +236,13 @@ Shell hooks for the same event run first. If a shell hook blocks, plugins do not
 
 An editor session (ACP) has no trust prompt. It loads plugins from the session's workspace only when that directory is already in your trusted list. Plugins are isolated between workspaces, including when sessions run concurrently.
 
+Daemon-triggered runs (see [Skills](skills.md#the-daemon)) also load the project's plugins, after the daemon's trust check.
+
 This is the initial in-process plugin API. Its types ship with the CLI; a separately published, independently versioned SDK package and custom UI component APIs are not provided yet.
 
 ## Security
 
-Hooks are project-local shell commands, so `agents.config.json` in a repository is a code-execution surface — exactly like the `mcpServers` in the same file, and like `.nanocoder/tools/`. All of them are gated by the directory-trust prompt you accept the first time Nanocoder runs in a directory. Treat an untrusted repository's `agents.config.json` the way you would treat its `package.json` scripts, and use `/doctor` to see what a project has wired up.
+Hooks are project-local shell commands, so `agents.config.json` in a repository is a code-execution surface - exactly like the `mcpServers` in the same file, and like `.nanocoder/tools/`. All of them are gated by the directory-trust prompt. The prompt lists what the folder will run (plugins, hooks, formatters, MCP servers and skills with `subscribe:` triggers), and trust is tied to a fingerprint of those, so adding or changing a `hooks` entry or a plugin file asks again the next time Nanocoder starts there. Scripts a hook runs and files a plugin imports are not part of the fingerprint, so editing those does not ask again. `nanocoder trust --status` shows the same list and fingerprint without running anything. Treat an untrusted repository's `agents.config.json` the way you would treat its `package.json` scripts, and use `/doctor` to see what a project has wired up.
 
 **Hooks inherit Nanocoder's whole environment.** The `NANOCODER_*` variables are *added* to `process.env`, not a replacement for it, so a hook can read every provider API key, token, and secret the agent itself was started with. That is what makes ordinary hooks work — `git`, `biome`, and `docker` all need their usual environment — but it means a hook can exfiltrate credentials as easily as it can format a file. This is the same trust you extend to an `mcpServers` entry in the same file, which is spawned with the same environment; treat it the same way. If a hook does not need the secrets, unset them in the hook itself (`env -u ANTHROPIC_API_KEY …`) rather than assuming it cannot see them.
 

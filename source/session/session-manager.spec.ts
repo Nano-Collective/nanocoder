@@ -1,4 +1,5 @@
 import {
+	mkdir,
 	mkdtemp,
 	readFile,
 	readdir,
@@ -10,6 +11,7 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
 import {ArtifactManager} from '@/artifacts/artifact-manager';
+import {reloadAppConfig} from '@/config/index';
 import {SessionManager} from './session-manager.js';
 
 let testDir: string;
@@ -703,32 +705,85 @@ test.serial(
 // --- enforceSessionLimits ---
 
 test.serial(
-	'enforceSessionLimits deletes oldest sessions when over limit',
+	'enforceSessionLimits deletes oldest sessions and their artifacts when over limit',
 	async t => {
-		// Use a separate manager with overrideDir to avoid config interference
-		const limitDir = join(testDir, 'limit-test');
-		const limitManager = new SessionManager(limitDir);
-		await limitManager.initialize();
+		const prevConfigDir = process.env.NANOCODER_CONFIG_DIR;
+		const customConfigDir = join(testDir, 'config');
+		await mkdir(customConfigDir, {recursive: true});
+		process.env.NANOCODER_CONFIG_DIR = customConfigDir;
 
-		// Create 5 sessions with staggered timestamps
-		const ids: string[] = [];
-		for (let i = 0; i < 5; i++) {
-			const session = await limitManager.createSession({
-				title: `Session ${i}`,
-				messageCount: 0,
-				provider: 'test',
-				model: 'test',
-				workingDirectory: '/tmp',
-				messages: [],
-			});
-			ids.push(session.id);
-			// Small delay for distinct timestamps
-			await new Promise(r => setTimeout(r, 5));
+		try {
+			await writeFile(
+				join(customConfigDir, 'nanocoder-preferences.json'),
+				JSON.stringify({
+					nanocoder: {
+						sessions: {
+							maxSessions: 2,
+						},
+					},
+				}),
+				'utf-8',
+			);
+			reloadAppConfig();
+
+			const limitDir = join(testDir, 'limit-test');
+			const artifacts = new ArtifactManager(join(testDir, 'limit-artifacts'));
+			const limitManager = new SessionManager(limitDir, artifacts);
+			await limitManager.initialize();
+
+			// Create 3 sessions with staggered timestamps and write artifacts for each
+			const ids: string[] = [];
+			for (let i = 0; i < 3; i++) {
+				const session = await limitManager.createSession({
+					title: `Session ${i}`,
+					messageCount: 0,
+					provider: 'test',
+					model: 'test',
+					workingDirectory: '/tmp',
+					messages: [],
+				});
+				ids.push(session.id);
+				await artifacts.writeArtifact(
+					session.id,
+					'implementation_plan',
+					`# Plan for session ${i}\n`,
+				);
+				// Small delay for distinct timestamps
+				await new Promise(r => setTimeout(r, 10));
+			}
+
+			// Since maxSessions is 2, creating the 3rd session triggers enforceSessionLimits
+			// and trims the oldest session (ids[0])
+			const sessions = await limitManager.listSessions();
+			t.is(sessions.length, 2);
+			t.false(sessions.some(s => s.id === ids[0]));
+			t.true(sessions.some(s => s.id === ids[1]));
+			t.true(sessions.some(s => s.id === ids[2]));
+
+			// Oldest session's JSON file should be unlinked
+			const oldestFile = await limitManager.readSession(ids[0]);
+			t.is(oldestFile, null);
+
+			// Oldest session's artifact directory should be deleted
+			const oldestArtifact = await artifacts.readArtifact(
+				ids[0],
+				'implementation_plan',
+			);
+			t.is(oldestArtifact, null);
+
+			// Remaining sessions' files and artifacts should remain intact
+			t.truthy(await limitManager.readSession(ids[1]));
+			t.truthy(await limitManager.readSession(ids[2]));
+			t.truthy(await artifacts.readArtifact(ids[1], 'implementation_plan'));
+			t.truthy(await artifacts.readArtifact(ids[2], 'implementation_plan'));
+		} finally {
+			if (prevConfigDir === undefined) {
+				delete process.env.NANOCODER_CONFIG_DIR;
+			} else {
+				process.env.NANOCODER_CONFIG_DIR = prevConfigDir;
+			}
+			reloadAppConfig();
 		}
-
-		// Default maxSessions is 100, so all 5 should be present
-		const sessions = await limitManager.listSessions();
-		t.is(sessions.length, 5);
 	},
 );
 
@@ -1151,4 +1206,164 @@ test('titleManuallySet also survives an index rebuild', async t => {
 	const found = listed.find(s => s.id === session.id);
 	t.is(found?.title, 'My Own Name');
 	t.true(found?.titleManuallySet);
+});
+
+// --- pinned sessions ---
+
+const newSessionData = (title: string) => ({
+	title,
+	messageCount: 0,
+	provider: 'test',
+	model: 'test',
+	workingDirectory: '/tmp',
+	messages: [],
+});
+
+test.serial('setPinned marks and clears a session in the file and the index', async t => {
+	const session = await manager.createSession(newSessionData('Thread'));
+
+	t.truthy(await manager.setPinned(session.id, true));
+	t.true((await manager.readSession(session.id))?.pinned);
+	t.true((await manager.listSessions())[0].pinned);
+
+	// Autosave rewrites the session from what it read, so the mark rides along.
+	const read = await manager.readSession(session.id);
+	await manager.saveSession({...read!, messageCount: 3});
+	t.true((await manager.readSession(session.id))?.pinned);
+
+	await manager.setPinned(session.id, false);
+	t.is((await manager.readSession(session.id))?.pinned, undefined);
+	t.falsy((await manager.listSessions())[0].pinned);
+});
+
+test.serial('setPinned survives an index rebuild, rename and a fresh load', async t => {
+	const session = await manager.createSession(newSessionData('Thread'));
+	await manager.setPinned(session.id, true);
+	await manager.renameSession(session.id, 'Renamed');
+	t.true((await manager.loadSession(session.id))?.pinned);
+
+	await writeFile(join(sessionsDir, 'sessions.json'), 'not json at all');
+	t.true((await manager.listSessions())[0].pinned);
+});
+
+test.serial('setPinned returns null for a session that does not exist', async t => {
+	t.is(await manager.setPinned('00000000-0000-4000-8000-000000000000', true), null);
+	t.is(await manager.setPinned('../escape', true), null);
+});
+
+test.serial('setPinned gives an unpinned session a fresh retention window', async t => {
+	const session = await manager.createSession(newSessionData('Old thread'));
+	const stale = await manager.createSession(newSessionData('Never touched'));
+	await manager.setPinned(session.id, true);
+
+	// setPinned reads the session file, not the index, and rewrites the index
+	// from it. So both must be old: aging only the index would be undone by the
+	// first save and leave the refresh untested.
+	const old = new Date(Date.now() - 60 * 86_400_000).toISOString();
+	for (const id of [session.id, stale.id]) {
+		const file = join(sessionsDir, `${id}.json`);
+		const data = JSON.parse(await readFile(file, 'utf-8'));
+		data.lastAccessedAt = old;
+		await writeFile(file, JSON.stringify(data), 'utf-8');
+	}
+	const indexPath = join(sessionsDir, 'sessions.json');
+	const index = JSON.parse(await readFile(indexPath, 'utf-8'));
+	for (const entry of index) entry.lastAccessedAt = old;
+	await writeFile(indexPath, JSON.stringify(index), 'utf-8');
+
+	await manager.setPinned(session.id, false);
+
+	// A new process starting is what runs the cleanup. The unpinned session was
+	// refreshed; the one nobody touched is as old as it looks and is removed.
+	const mgr2 = new SessionManager(sessionsDir);
+	await mgr2.initialize();
+	t.deepEqual((await mgr2.listSessions()).map(s => s.id), [session.id]);
+});
+
+test.serial('cleanupOldSessions keeps a pinned session and still removes the unpinned ones', async t => {
+	const artifacts = new ArtifactManager(join(testDir, 'pinned-artifacts'));
+	const mgr = new SessionManager(sessionsDir, artifacts);
+	await mgr.initialize();
+	const pinned = await mgr.createSession(newSessionData('Pinned'));
+	const unpinned = await mgr.createSession(newSessionData('Unpinned'));
+	await mgr.setPinned(pinned.id, true);
+	await artifacts.writeArtifact(pinned.id, 'implementation_plan', '# Keep\n');
+	await artifacts.writeArtifact(unpinned.id, 'implementation_plan', '# Drop\n');
+
+	// Both sit past the 30 day default.
+	const indexPath = join(sessionsDir, 'sessions.json');
+	const index = JSON.parse(await readFile(indexPath, 'utf-8'));
+	for (const entry of index) {
+		entry.lastAccessedAt = new Date(Date.now() - 60 * 86_400_000).toISOString();
+	}
+	await writeFile(indexPath, JSON.stringify(index), 'utf-8');
+
+	// A new process starting is what runs the cleanup.
+	const restarted = new SessionManager(sessionsDir, artifacts);
+	await restarted.initialize();
+
+	t.deepEqual((await restarted.listSessions()).map(s => s.id), [pinned.id]);
+	t.truthy(await restarted.loadSession(pinned.id));
+	t.truthy(await artifacts.readArtifact(pinned.id, 'implementation_plan'));
+	t.is(await restarted.readSession(unpinned.id), null);
+	t.is(await artifacts.readArtifact(unpinned.id, 'implementation_plan'), null);
+});
+
+test.serial('enforceSessionLimits does not count or remove pinned sessions', async t => {
+	const prevConfigDir = process.env.NANOCODER_CONFIG_DIR;
+	const customConfigDir = join(testDir, 'config');
+	await mkdir(customConfigDir, {recursive: true});
+	process.env.NANOCODER_CONFIG_DIR = customConfigDir;
+
+	try {
+		await writeFile(
+			join(customConfigDir, 'nanocoder-preferences.json'),
+			JSON.stringify({nanocoder: {sessions: {maxSessions: 2, retentionDays: 7}}}),
+			'utf-8',
+		);
+		reloadAppConfig();
+
+		const mgr = new SessionManager(join(testDir, 'limit-pinned'));
+		await mgr.initialize();
+		t.deepEqual(mgr.getRetention(), {retentionDays: 7, maxSessions: 2});
+
+		const pinned = await mgr.createSession(newSessionData('Pinned'));
+		await mgr.setPinned(pinned.id, true);
+		// The oldest by access, so it would go first if it were not pinned.
+		const index = JSON.parse(await readFile(join(testDir, 'limit-pinned', 'sessions.json'), 'utf-8'));
+		index[0].lastAccessedAt = new Date(Date.now() - 86_400_000).toISOString();
+		await writeFile(join(testDir, 'limit-pinned', 'sessions.json'), JSON.stringify(index), 'utf-8');
+
+		const ids: string[] = [];
+		for (let i = 0; i < 3; i++) {
+			ids.push((await mgr.createSession(newSessionData(`Session ${i}`))).id);
+		}
+
+		// Two unpinned fit the limit of 2 next to the pinned one; the third
+		// pushed out only the oldest unpinned session.
+		const remaining = (await mgr.listSessions()).map(s => s.id).sort();
+		t.deepEqual(remaining, [pinned.id, ids[1], ids[2]].sort());
+	} finally {
+		if (prevConfigDir === undefined) {
+			delete process.env.NANOCODER_CONFIG_DIR;
+		} else {
+			process.env.NANOCODER_CONFIG_DIR = prevConfigDir;
+		}
+		reloadAppConfig();
+	}
+});
+
+test.serial('deleteSession still removes a pinned session and its artifacts', async t => {
+	const artifacts = new ArtifactManager(join(testDir, 'delete-artifacts'));
+	const mgr = new SessionManager(sessionsDir, artifacts);
+	await mgr.initialize();
+	const session = await mgr.createSession(newSessionData('Pinned'));
+	await mgr.setPinned(session.id, true);
+	await artifacts.writeArtifact(session.id, 'implementation_plan', '# Plan\n');
+
+	await mgr.deleteSession(session.id);
+
+	t.is(await mgr.readSession(session.id), null);
+	t.deepEqual(await mgr.listSessions(), []);
+	t.is(await artifacts.readArtifact(session.id, 'implementation_plan'), null);
 });

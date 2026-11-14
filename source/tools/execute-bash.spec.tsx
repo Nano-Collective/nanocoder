@@ -455,6 +455,117 @@ for (const command of ['echo a:{:b', 'ls | grep x &', 'f(){ echo hi; }; f']) {
 	});
 }
 
+// The pattern guard used to match anywhere in the command text, so searching
+// for or printing one of the patterns was refused as if it ran it.
+for (const command of [
+	'grep "dd if=" build.log',
+	"grep -rn 'mkfs' docs/",
+	'echo "never pipe to > /dev/sda"',
+	'git commit -m "docs: explain why chmod -R 000 is blocked"',
+	'rg "dd\\\\s+if=" source/',
+	'ls ./add if=x',
+	'cat mkfsnotes.txt',
+]) {
+	test(`execute_bash validator allows quoted or embedded pattern ${JSON.stringify(command)}`, async t => {
+		const result = await executeBashTool.validator!({command});
+		t.true(result.valid);
+	});
+}
+
+// Quoting only spares a quoted argument. A quoted command name, a quoted
+// redirect target, and a quoted string another shell runs are still checked.
+for (const command of [
+	'mkfs.ext4 /dev/sda1',
+	'sudo dd if=/dev/zero of=/dev/sda',
+	'"mkfs" /dev/sda1',
+	'ls && "dd" if=/dev/zero of=/dev/sda',
+	'cat image.bin > "/dev/sda"',
+	'bash -c "dd if=/dev/zero of=/dev/sda"',
+	"sh -lc 'mkfs.ext4 /dev/sda1'",
+	'eval "chmod -R 000 /"',
+	'ssh host "mkfs /dev/sda"',
+	'grep x file; mkfs /dev/sda',
+]) {
+	test(`execute_bash validator still blocks ${JSON.stringify(command)}`, async t => {
+		const result = await executeBashTool.validator!({command});
+		t.false(result.valid);
+	});
+}
+
+// The `rm -rf /` guard used to be a single regex that only matched that exact
+// spelling, so every other way of writing "recursive force delete of /" got
+// through. These are the variants from the issue, plus the spellings the old
+// regex happened to catch (`/*/*`, `/.*`, `/?`) which the parser still has to
+// refuse.
+for (const command of [
+	'rm -rf /',
+	'rm -fr /',
+	'rm -r -f /',
+	'rm -Rf /',
+	'rm --recursive --force /',
+	'rm -rf --no-preserve-root /',
+	'rm -r --no-preserve-root /',
+	'rm -rf /*',
+	'rm -rf /*/*',
+	'rm -rf /*/',
+	'rm -rf //',
+	'rm -rf /.',
+	'rm -rf /..',
+	'rm -rf /.*',
+	'rm -rf /?',
+	'rm -rf /{etc,usr}',
+	'rm -rf /tmp/..',
+	'RM -RF /',
+	'rm -rf ~',
+	'rm -rf ~/',
+	'rm -rf ~/*',
+	'rm -rf $HOME',
+	'rm -rf "$HOME"',
+	'rm -rf "${HOME}/"',
+	'sudo rm -fr /',
+	'/bin/rm -r -f /',
+	'ls && rm -fr /',
+	// A backslash-newline is a line continuation, so this is one command.
+	'rm -rf \\\n/',
+	'rm -rf \\\r\n/',
+]) {
+	test(`execute_bash validator blocks ${JSON.stringify(command)}`, async t => {
+		const result = await executeBashTool.validator!({command});
+		t.false(result.valid);
+	});
+}
+
+// The guard blocks the target, not every mention of `rm`: ordinary cleanups,
+// plain deletes, and recursive deletes below the home directory stay allowed.
+for (const command of [
+	'rm -rf /tmp/nanocoder-build',
+	'rm -rf /tmp/*',
+	'rm -rf ./dist',
+	'rm -rf node_modules',
+	'rm -rf ~/project/node_modules',
+	'rm -rf $HOME/project/.cache',
+	'rm -rf "/tmp/build dir"',
+	'rm -rf .',
+	'rm -rf ./',
+	'rm -rf ../dist',
+	'rm -f /tmp/foo',
+	'rm -r /tmp/foo',
+	'rm --version',
+	'rm -rf src && ls /',
+	// A bare newline ends the command: `rm -rf` runs with no operand and `/`
+	// is a separate (permission-denied) command, so this is not a delete of /.
+	'rm -rf\n/',
+	// `rm` as a sub-command of another tool, and one whose argument list ends
+	// at the shell's `;` rather than at a target.
+	'git rm -rf src',
+	'find . -name "*.tmp" -exec rm -rf {} ;',
+]) {
+	test(`execute_bash validator allows ${JSON.stringify(command)}`, async t => {
+		const result = await executeBashTool.validator!({command});
+		t.true(result.valid);
+	});
+}
+
 // ============================================================================
 // Tests for execute_bash Tool Handler - Failure Capsules
 // ============================================================================

@@ -51,7 +51,7 @@ kubectl get pods -n {{ namespace }} {{# selector }}-l {{ selector }}{{/ selector
 
 Restart Nanocoder. The model can now call `k8s_pods({ namespace: "default" })`. Run `/tools` to see all loaded tools by source.
 
-Don't wrap placeholders in your own quotes. Every substituted value is already single-quoted, so `-l "{{ selector }}"` would pass the quote characters through as part of the value (`-l "'app=api'"`).
+Don't wrap placeholders in your own quotes. Every substituted value is already quoted for the shell, and quoting it again breaks that quoting: inside `"{{ q }}"` the added quotes are literal, so `$(...)` in the value runs, and inside `'{{ q }}'` the value ends up unquoted. A tool whose body does this is rejected when it loads (see [Placeholder placement](#placeholder-placement)).
 
 ## File Structure
 
@@ -113,7 +113,7 @@ parameters:
 
 - `approval: never` — runs without confirmation (still subject to mode-based overrides).
 - `approval: always` (default) — always prompts the user.
-- `approval: destructive` - prompts in `normal` mode but auto-approves in `auto-accept`, `architect` and `yolo` modes, matching how built-in file-mutation tools behave.
+- `approval: destructive` - prompts in `normal` mode but auto-approves in `auto-accept`, `architect` and `yolo` modes, matching how built-in file edits behave.
 
 Tools listed in the top-level `alwaysAllow` config field skip the prompt regardless. Tools listed in `disabledTools` don't load at all.
 
@@ -155,6 +155,30 @@ echo '; rm -rf /; #'
 
 `echo` sees one argument, not three commands.
 
+### Placeholder placement
+
+That protection only holds where the shell reads the quotes Nanocoder adds, which is where a bare word would go. When a tool loads, Nanocoder checks where each placeholder for a declared parameter sits and rejects the tool, with an error naming the placeholder, if it is:
+
+- **inside `"..."`**: the added single quotes are literal there, so `$(...)` or backticks in the value run. With `grep "{{ q }}"` and `q = "$(rm -rf ~)"`, the shell runs `rm`.
+- **inside `'...'` or `$'...'`**: the value's own quotes close yours, and the value ends up unquoted.
+- **inside `${...}`**, or directly after `$` or a backslash: the added quotes are no longer read as quotes.
+- **in a `#` comment or a here-document**: a newline in the value ends the comment, or a line in it ends the document, and the rest runs as commands. In an unquoted here-document `$(...)` runs as well.
+- **in a section that opens and closes in different quoting contexts**, for example `{{# a }}'{{/ a }}`: including or leaving out the section would change how the rest of the body is quoted.
+
+Under cmd.exe the check is a placeholder inside `"..."` or after `^`.
+
+To use a value inside a string, assign it to a variable first and quote the variable:
+
+```sh
+q={{ q }}
+grep -rn "TODO: $q" .
+cat <<EOF
+Searching for $q
+EOF
+```
+
+Only declared parameters are substituted. A placeholder for a name that isn't under `parameters:` always renders empty, even if the model sends a value for it.
+
 ## Execution
 
 When the tool runs:
@@ -184,7 +208,7 @@ When the tool runs:
 
 ## Security Model
 
-A custom tool runs with your full shell privileges. The trust boundary is "you wrote this file or you trust the repo it came from" — the same model as `.nanocoder/commands/`, `.envrc`, or `package.json` scripts. Parameter values are quoted for the selected shell, subject to the cmd.exe restrictions above. The script body itself is whatever you wrote: if you put `rm -rf /` in there, it will run.
+A custom tool runs with your full shell privileges. The trust boundary is "you wrote this file or you trust the repo it came from" — the same model as `.nanocoder/commands/`, `.envrc`, or `package.json` scripts. Parameter values are quoted for the selected shell, subject to the cmd.exe restrictions above, and a body that puts a placeholder where that quoting doesn't hold is rejected at load time. The script body itself is whatever you wrote: if you put `rm -rf /` in there, it will run.
 
 Project tools sit in `.nanocoder/tools/` and travel with the repo; personal tools sit in your personal config directory and don't. Treat custom tools from an unfamiliar repo with the same skepticism you'd apply to running its install script.
 

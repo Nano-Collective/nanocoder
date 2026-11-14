@@ -1,3 +1,6 @@
+import {mkdtempSync, mkdirSync, rmSync, writeFileSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 import test from 'ava';
 import React from 'react';
 import {renderWithTheme} from '../test-utils/render-with-theme.js';
@@ -28,14 +31,35 @@ test('SecurityDisclaimer displays Security Warning title', t => {
 });
 
 test('SecurityDisclaimer displays the current working directory', t => {
-	const {lastFrame} = renderWithTheme(
-		<SecurityDisclaimer onConfirm={() => {}} onExit={() => {}} />,
-	);
+	// The path wraps inside the box, so a long checkout path (a deep worktree,
+	// a CI workspace) would split across lines and never match whole. Show a
+	// short folder to check the path is printed, then check the default is
+	// the current working directory by comparing renders.
+	const folder = mkdtempSync(join(tmpdir(), 'nc-'));
+	try {
+		const {lastFrame} = renderWithTheme(
+			<SecurityDisclaimer
+				directory={folder}
+				onConfirm={() => {}}
+				onExit={() => {}}
+			/>,
+		);
+		t.true(lastFrame()!.includes(folder));
 
-	const output = lastFrame();
-	t.truthy(output);
-	// process.cwd() should be displayed
-	t.regex(output!, new RegExp(process.cwd()));
+		const byDefault = renderWithTheme(
+			<SecurityDisclaimer onConfirm={() => {}} onExit={() => {}} />,
+		).lastFrame();
+		const explicitCwd = renderWithTheme(
+			<SecurityDisclaimer
+				directory={process.cwd()}
+				onConfirm={() => {}}
+				onExit={() => {}}
+			/>,
+		).lastFrame();
+		t.is(byDefault, explicitCwd);
+	} finally {
+		rmSync(folder, {recursive: true, force: true});
+	}
 });
 
 test('SecurityDisclaimer displays trust warning message', t => {
@@ -175,4 +199,34 @@ test('SecurityDisclaimer maintains consistent layout', t => {
 
 	// Check for TitledBox structure
 	t.regex(output!, /│/); // Border characters from TitledBox
+});
+
+test('SecurityDisclaimer names the plugins and hooks in the folder', t => {
+	const root = mkdtempSync(join(tmpdir(), 'trust-prompt-'));
+	try {
+		const pluginDir = join(root, '.nanocoder', 'plugins');
+		mkdirSync(pluginDir, {recursive: true});
+		writeFileSync(join(pluginDir, 'pulled.mjs'), 'export default {}\n');
+		writeFileSync(
+			join(root, 'agents.config.json'),
+			JSON.stringify({
+				nanocoder: {
+					hooks: {'session-start': [{command: 'echo hooked'}]},
+				},
+			}),
+		);
+
+		const {lastFrame} = renderWithTheme(
+			<SecurityDisclaimer
+				directory={root}
+				onConfirm={() => {}}
+				onExit={() => {}}
+			/>,
+		);
+		const output = lastFrame() ?? '';
+		t.regex(output, /1 plugin/);
+		t.regex(output, /1 session-start hook/);
+	} finally {
+		rmSync(root, {recursive: true, force: true});
+	}
 });

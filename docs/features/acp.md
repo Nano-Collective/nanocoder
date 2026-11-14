@@ -12,7 +12,7 @@ Nanocoder can run as an [Agent Client Protocol](https://agentclientprotocol.com)
 nanocoder --acp
 ```
 
-You normally don't run this command yourself — the editor or extension spawns it for you (see [Setup in Zed](#setup-in-zed) and the [VS Code extension](vscode-extension.md)).
+You normally don't run this command yourself — the editor or extension spawns it for you (see [Setup in Zed](#setup-in-zed), [Setup in Xcode](#setup-in-xcode) and the [VS Code extension](vscode-extension.md)).
 
 ## ACP vs. the VS Code companion
 
@@ -28,15 +28,94 @@ With ACP the **client is the UI**: the agent runs headless and everything (strea
 ## What works over ACP
 
 - **Streaming responses** including reasoning/thinking, rendered in the editor's agent panel.
-- **Tool calls with rich cards** — file tools report their kind and the files they touch, and edits (`string_replace`, `write_file`) include a **before/after diff** the editor can preview.
+- **Tool calls with rich cards** - file tools report their kind and the files they touch, and edits (`string_replace`, `write_file`) include a **before/after diff** the editor can preview. A call that fails (a non-zero exit, a missing file, a validation error) settles with status `failed`. Every tool call a subagent makes is announced as well, not only the ones that need approval, and settles with its real status; a call the subagent is refused leaves a failed card.
 - **Permission prompts** — tools that need approval surface as the editor's own allow/deny prompt, respecting the current [development mode](development-modes.md).
-- **Development modes** — `normal`, `auto-accept`, `yolo`, `plan`, and `architect` are exposed as ACP session modes and selectable from the editor (sessions start in `auto-accept`).
+- **Approval policy** — tools in an [`alwaysAllow`](../configuration/index.md#tool-auto-approval) list (the top-level one, or an MCP server's) never prompt in `normal` mode. The `session/new`, `session/load` and `session/resume` responses list the offered tools that skip the prompt this way under `_meta["nanocoder/approval"].alwaysAllow`, so a client can show them. The report does not change how approvals are decided.
+- **Development modes** - `normal`, `auto-accept`, `yolo`, `plan`, and `architect` are exposed as ACP session modes and selectable from the editor (sessions start in `auto-accept`, which still asks before bash commands and before `file_op` deletes a file or overwrites one with a move or copy). Pass `--mode <mode>` in `args` to start every session in another mode. An unknown mode ID is rejected with an invalid-params error and leaves the mode unchanged, and each change is confirmed with a `current_mode_update` notification. A mode change sent while a prompt is running applies to that prompt straight away: the next model request is offered the new mode's tools, each call is approved under the new mode, and a call the new mode no longer offers (for example an edit after switching to `plan`) is refused. A call that is already running is not interrupted.
 - **Model display and switching** — the editor shows the current model and lets you switch between the models configured for your active provider.
+- **Per-session model** — the provider and model belong to each session. Changing them with `session/set_config_option` affects only that session: other sessions keep theirs, and a turn that is already running finishes on the model it started with, so the change applies from the next turn. The config options returned by `session/new`, `session/load`, `session/resume` and `session/set_config_option` are the session's own, and the saved session records them. `session/resume` and `session/load` put a session back on the provider and model it was saved with; if either is no longer available it stays on the default and the response carries `_meta["nanocoder/modelFallback"]` with the saved `{provider, model}`. A new session starts from the default, which is the model the agent started with or the most recent selection made in any session (a session in another project can start on that project's provider instead; see [Requirements](#requirements)). `agentCapabilities._meta.nanocoder.perSessionModel` is `true` when the agent works this way, so a client can offer per-thread model controls only then. A session only gets a client of its own once it picks a different provider or model, and the last-used model and auto-commit follow the most recent selection. The subagents a session starts use the provider and model the session is on. The provider's tune settings, including aggressive compaction, apply to that session only. A provider that lists no models leaves the session with no model, not the previous provider's.
 - **`ask_user`** — when the agent asks a clarifying question, the options appear as selectable buttons in the editor. (Selection only; a free-form typed answer is not available over ACP.)
 - **`@`-mentioned files** — files you reference in the editor are read and included in the prompt, using the editor's live buffer (including unsaved edits) when available.
-- **Session persistence** - ACP sessions are saved to disk like TUI sessions (see [Session Management](session-management.md)). Loading or resuming a thread replays its history, even after the editor and agent restart.
-- **Session management** - clients can list, resume, close and delete sessions. Nanocoder also answers a `renameSession` extension method (`sessionId`, `title`), and new sessions get a generated title from the first message.
+- **Session persistence** - ACP sessions are saved to disk like TUI sessions (see [Session Management](session-management.md)). Loading or resuming a thread replays its history, even after the editor and agent restart. Loading or resuming a session ID that is neither in memory nor on disk fails with `Session not found on disk: <id>` instead of creating an empty session; only `session/new` creates one.
+- **Session management** - clients can list, resume, close and delete sessions. Nanocoder also answers a `_nanocoder/renameSession` extension method (`sessionId`, `title`; see [Extension methods](#extension-methods)), and new sessions get a generated title from the first message. `session/list` entries carry `_meta["nanocoder/pinned"]`, and the `initialize` response carries the effective `retentionDays` and `maxSessions` in `_meta["nanocoder/retention"]`.
+- **MCP servers from the editor** - the `mcpServers` an editor sends on `session/new`, `session/load` and `session/resume` (stdio and HTTP) are connected for that session only, on top of your own MCP configuration. Their tools exist only in that session, and in any subagent it starts; other sessions and your config files are never touched. `session/load` and `session/resume` replace the session's previous set, and `session/close` disconnects it. A server that fails to connect, or one that uses SSE (not supported), is logged and skipped, and the request still succeeds. Their tools follow the same approval rules as MCP tools from your own config (they ask in `normal` mode, ask in `auto-accept` unless the server annotates them read-only, and run unprompted in `yolo`; a client cannot pre-approve them), and a tool whose name an existing tool already has is skipped. Because the editor launched the agent, its servers are trusted like the rest of what it sends and are not run through the project-config security check.
+- **Turning tools off for a session** - an editor that provides its own version of a tool, such as a browser, can ask Nanocoder not to offer the built-in one: send `_meta: {"nanocoder/disabledTools": ["browser"]}` on `session/new`, `session/load` or `session/resume`. The names are added to your own [`disabledTools`](../configuration/index.md#disabling-tools), never replacing it, and apply to that session only: the tools are left out of the tool list and the prompt, a call the model makes to one anyway is refused with an error and nothing runs, and subagents the session starts respect the same list. Other sessions are unaffected, and your config files are never read or changed for this. The response `_meta` reports the list in effect under the same key (yours and the editor's), so an editor can check that it was honoured. It is not saved with the session, so send it on every new, load and resume (a load or resume without it turns nothing off). A name that is not a known tool is ignored, and left out of the reported list.
 - **Images** - PNG, JPEG, GIF and WebP attachments are sent to the model as images.
+- **Slash commands** - `/clear`, `/help` and your custom commands work in any client. The other built-in commands (`/copy`, `/model`, `/provider`, `/settings`, `/init`, `/theme`, `/compact`, `/context-max`, `/usage`) are answered with a short reply instead of running. The wording depends on `clientInfo` from `initialize`: the VS Code extension (`Nanocoder VS Code Extension`) gets replies that point at its sidebar and composer (the model picker and the Configuration popover; see [VS Code Extension](vscode-extension.md)), and every other client, including one that sends no `clientInfo`, gets neutral text that points at the client's own selectors and settings or at the interactive CLI. `/copy` is listed in `/help` only for the VS Code extension, and in other clients it replies that it isn't available. Replies already saved in a session keep the wording they were written with.
+
+## Extension methods
+
+ACP reserves method names starting with `_` for custom methods. Nanocoder's are:
+
+| Method | Params | What it does |
+|--------|--------|--------------|
+| `_nanocoder/renameSession` | `sessionId`, `title` | Sets a session's title |
+| `_nanocoder/pinSession` | `sessionId`, `pinned` | Marks a session as retained, or clears the mark, so retention skips it (see [Pinned sessions](session-management.md#retention-and-pinned-sessions)) |
+| `_nanocoder/timeline/list` | `sessionId` | Lists the session's file-change checkpoints, including which `filesChanged` were `createdFiles` and the `turnId` of the prompt that made them |
+| `_nanocoder/timeline/revert` | `sessionId`, `checkpointId` | Reverts the files and history to before a checkpoint |
+| `_nanocoder/timeline/read` | `sessionId`, `checkpointId`, `path` | Reads a file as it was just before a checkpoint's tool call (read-only; see [Reading before-images](#reading-before-images)) |
+| `_nanocoder/retryTurn` | `sessionId`, optional `promptText` | Removes the last turn so the prompt can be sent again |
+| `_nanocoder/cancelSubagent` | `sessionId`, `childRunId` | Cancels one running subagent; the turn and the other subagents carry on (see [Subagent events](#subagent-events)) |
+
+The agent also sends two notifications: `_nanocoder/sessionTitleChanged` when it titles a session in the background, and `_nanocoder/subagent` as each subagent run progresses (see [Subagent events](#subagent-events)).
+
+**Capability detection.** `initialize` lists the exact names under `agentCapabilities._meta.nanocoder`:
+
+```json
+{"nanocoder": {"extMethods": ["_nanocoder/renameSession", "..."], "extNotifications": ["_nanocoder/sessionTitleChanged", "_nanocoder/subagent"]}}
+```
+
+Take the names from that list as they are rather than building them from a prefix. An agent that doesn't list a method doesn't support it under that name.
+
+**Deprecated aliases.** The first five methods are still answered under their bare names (`renameSession`, `pinSession`, `timeline/list`, `timeline/revert`, `retryTurn`) for clients that predate the prefix. Methods added since, such as `timeline/read` and `cancelSubagent`, have no bare name. The first use of each logs a deprecation notice. The aliases will be removed in a later release, announced in the changelog.
+
+**Unknown methods.** A custom request the agent doesn't recognise fails with the standard JSON-RPC "Method not found" error (`-32601`), so "not supported" can be told apart from "failed".
+
+### Reading before-images
+
+`_nanocoder/timeline/read` returns the saved copy of one file from just before a checkpoint's tool call. It only reads: files, history and the checkpoint index are not touched. The result is one of:
+
+- `{"kind": "text", "content": "..."}` - the file's contents before the call.
+- `{"kind": "created"}` - the file did not exist before the call, so there is no before-image.
+- `{"kind": "unavailable", "reason": "..."}` - there is nothing to return. This covers a checkpoint that was reverted or pruned, a path the checkpoint does not hold, a binary file, and a saved copy that is missing from disk.
+
+`path` is relative to the session's working directory, or an absolute path inside it. A path outside the working directory fails with an error. The session must be loaded, as for `timeline/list`.
+
+**Finding the baseline for a turn.** Each checkpoint is one tool call, and one prompt can make many of them over several model round-trips. `truncateToMessageIndex` does not mark a turn: it moves forward with every round-trip, so two edits the agent makes for one prompt can carry different values. Use `turnId` instead. Every checkpoint recorded while the agent works on one prompt has the same `turnId` in `timeline/list`.
+
+The file as it was before the agent's turn is the before-image from the checkpoint with the lowest `seq` among those that share the turn's `turnId` and whose `filesChanged` contains the path. If that checkpoint also lists the path in `createdFiles`, the file did not exist before the turn. Checkpoints recorded by an older Nanocoder have no `turnId`, so their turns cannot be told apart. If the turn's earliest checkpoints were pruned (see the limits below), the earliest one left may already include the agent's own earlier edits.
+
+Use `createdFiles` from `timeline/list` to tell a created file from an edited one without a read.
+
+**Limits.**
+
+- Binary files are never saved, so they always read as `unavailable`.
+- A session keeps at most 50 checkpoints; older ones read as `unavailable`. Reverting deletes the reverted turn's checkpoints and every later one, so those read as `unavailable` too.
+- Timelines of sessions untouched for 7 days, or beyond the 20 most recent, are pruned.
+- A shell command or other tool whose targets are not known up front gets a checkpoint only when the Git scan of the workspace before and after the call is complete. A scan that hit its file cap, or that could not run, records none.
+- There is no size cap: a large text file is returned whole.
+
+### Subagent events
+
+When the agent delegates to a subagent, the parent `agent` tool call's title is refreshed with progress, and the subagent's own tool calls appear as `subagent:` cards, as before. A client that wants each subagent as its own run can also read the `_nanocoder/subagent` notifications, which carry:
+
+| Field | Meaning |
+|-------|---------|
+| `sessionId` | The session the run belongs to |
+| `toolCallId` | The parent's `agent` tool call that started the run |
+| `childRunId` | Identifies the run for as long as it lives |
+| `parentRunId` | The run that started this one; empty for a child of the turn |
+| `name` | The subagent's name |
+| `status` | `started`, `progress`, `completed`, `failed` or `cancelled` |
+| `tokenCount`, `toolCallCount`, `lastTool` | Progress, on `progress` and `completed` events |
+| `result` | The subagent's final output, on `completed` |
+| `error` | Why the run ended, on `failed` and `cancelled` |
+
+Every run sends `started`, then any number of `progress`, then exactly one of `completed`, `failed` or `cancelled`. Runs that overlap each send their own events; tell them apart by `childRunId`. A client that ignores the notification sees nothing different.
+
+**Cancelling one run.** `_nanocoder/cancelSubagent` with the `sessionId` and `childRunId` ends that run and returns `{"cancelled": true}`. The run reports `cancelled`, its parent `agent` call gets a "Subagent was cancelled" result, and the turn and the other subagents carry on. It returns `{"cancelled": false}` when there is nothing to cancel: the run already ended, or belongs to another session. Cancelling the turn with `session/cancel` still cancels every run.
+
+**Approvals.** The permission request for a subagent's tool call (its tool call ID starts with `subagent:`) carries the run in the request's `_meta` as `nanocoder/childRunId`.
 
 ## Setup in Zed
 
@@ -74,17 +153,43 @@ To pin a specific provider or model for the editor session, add them to `args`:
 
 Otherwise Nanocoder uses your configured default provider and last-used model. You can switch models later from Zed's model selector.
 
+## Setup in Xcode
+
+Xcode versions that support custom agents in the coding assistant can run Nanocoder over ACP:
+
+1. Find the full path to Nanocoder with `which nanocoder`. Xcode doesn't read your shell's `PATH` or expand `~`, so it needs the absolute path.
+2. Trust your project folder once: open a terminal in it, run `nanocoder` and accept the trust prompt. `nanocoder --acp` refuses a folder you haven't trusted (see [Troubleshooting](#troubleshooting)).
+3. In Xcode, choose **Xcode > Settings**, select **Intelligence**, and click **Add an Agent**. The section and field names vary between Xcode versions.
+4. Set the agent's command (labelled **Command** or **Executable**) to the path from step 1 and **Arguments** to `--acp`. To pin a provider or model, add them after it, e.g. `--acp --provider ollama --model qwen2.5-coder:7b`.
+
+The flag is `--acp`, not a bare `acp` (the form some other agents use).
+
+If the agent fails to start because `node` can't be found, set the command to the output of `which node` and **Arguments** to the Nanocoder path followed by `--acp`.
+
 ## Requirements
 
 - Nanocoder installed and on your `PATH` (a global install puts `nanocoder` on `PATH`).
 - A configured provider. The ACP server resolves provider and model the same way the CLI does — from the project's `agents.config.json` (or your global config). See [Providers](../configuration/providers/index.md).
-- The editor spawns the agent in your **project directory**, so project-level config and relative paths resolve against the open folder.
+- Each session works in the directory the editor names for it (the `cwd` in `session/new` or `session/load`), even if the agent process was started somewhere else. `session/resume` is the exception: it ignores the client's `cwd` and puts the session back in the directory it was saved with. Relative paths, `execute_bash`, the git tools, the project boundary for file tools, the system prompt and `AGENTS.md` all follow that directory, and a `cd` in one session does not move another.
+- Each session also reads the project `agents.config.json` of its own directory, layered over your global config as the CLI does: `alwaysAllow`, `disabledTools`, lifecycle hooks, formatters, `sandbox`, `firewall`, `autoCommit`, auto-compact, retry and turn limits, `systemPrompt`, tune and the providers the model picker offers all come from there, so two sessions in different projects keep their own settings. A session in the directory the agent started in shares its configuration. Each session also loads `.nanocoder/plugins/` from its own directory (see [Hooks](hooks.md)).
+- A session in another directory starts on the provider and model nanocoder started there would pick (your last-used provider if that project configures it, else its first one), unless that project configures the agent's current provider exactly as the launch directory does. If none of its providers can be reached, it stays on the agent's current one.
+- A session in another directory also gets that project's custom tools, custom commands, skills and the MCP servers of its `.mcp.json` (with your global ones), in place of the launch directory's. They are set up the first time a session opens there, shared by every session in that directory, and disconnected when the agent exits.
 
 ## Limitations
 
 - **`ask_user` is selection-only.** ACP permission options have no text input, so the model receives whichever option you pick rather than a typed answer.
 - **Audio and other image types are not processed.** Audio, and images other than PNG, JPEG, GIF and WebP, are noted to the model but not sent.
-- **Sub-agent tool approvals ignore the session mode.** Tool calls inside a sub-agent always ask for permission, regardless of the ACP session's mode or the configured `alwaysAllow` list, so a `yolo` or `auto-accept` session is still prompted there. An approved sub-agent call is also marked `completed` as soon as it is approved, before it actually runs, so it may still fail afterwards. The sub-agent approval handler is also shared across the agent process, so if two sessions run sub-agents at the same time, an approval prompt can be routed to the wrong session.
+
+## Trusting a folder from a client
+
+Run these in the project folder. Neither loads the folder's config, `.env` or anything else it defines.
+
+- `nanocoder trust --status [--json]` prints the folder, a `status` (`trusted`, `not-trusted`, `changed` or `needs-re-approval`), a `summary` of what the folder will run, and its `fingerprint`.
+- `nanocoder trust --grant <fingerprint>` saves the folder only if its fingerprint still matches the one given. It exits `1` if the folder changed in the meantime, so the user can be asked about the new contents.
+
+Each trust entry records which fingerprint version it was saved with. An entry from another version reads as `needs-re-approval` instead of `changed`.
+
+A session's `cwd` is checked too. `session/new`, `session/load` and `session/resume` for a folder other than the one `nanocoder --acp` started in fail unless that folder is trusted on its own. The error has code `-32003` and `data["nanocoder/trustRequired"]` = `{cwd, status}` (status as in `trust --status`), so a client can run the two commands above in that folder and retry.
 
 ## Troubleshooting
 
@@ -92,6 +197,11 @@ Otherwise Nanocoder uses your configured default provider and last-used model. Y
 
 - Confirm `nanocoder --acp` runs from your shell. If the editor was launched from the desktop (not a terminal), it may not see your shell's `PATH` — use an absolute path to the binary, or to the Node runtime, in the `command`/`args`.
 - Check the editor's agent/log output for the spawn error.
+
+**"Directory ... is not trusted" and it exits immediately**
+
+- `nanocoder --acp` refuses a directory you haven't trusted, because it loads that directory's `agents.config.json`, hooks and MCP servers. Trust the folder by running `nanocoder` there once, set `NANOCODER_TRUST_DIRECTORY=1`, or add `--trust-directory` to the editor's `args` for a one-off. The VS Code extension adds it for you when the workspace is trusted in VS Code.
+- A trust refusal exits with code `3`; every other startup failure exits with `1`. A client can use that to show its own trust prompt, then check the folder with `nanocoder trust --status --json` and save exactly what it showed with `nanocoder trust --grant <fingerprint>`. See [Trusting a folder from a client](#trusting-a-folder-from-a-client) above.
 
 **"No provider configured" or it exits immediately**
 

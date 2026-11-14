@@ -2,19 +2,35 @@
  * Git Utils Tests
  */
 
-import {execSync} from 'node:child_process';
-import {mkdirSync, mkdtempSync, rmSync, writeFileSync} from 'node:fs';
+import {execFileSync, execSync} from 'node:child_process';
+import {
+	chmodSync,
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	realpathSync,
+	rmSync,
+	writeFileSync,
+} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
 import {
+	createSessionContext,
+	runInSessionContext,
+} from '@/services/session-context';
+import {
 	parseGitStatus,
 	execGit,
+	execGitBuffer,
+	execGitReadOnly,
 	isGitAvailable,
 	isGhAvailable,
+	resetBinaryAvailabilityCacheForTests,
 	getCurrentBranchSync,
 	getDefaultBranchSync,
 	getGitStatusSummarySync,
+	pushBranch,
 	truncateDiff,
 } from './utils';
 
@@ -23,6 +39,64 @@ import {
 // ============================================================================
 
 console.log('\nutils.spec.ts – Git Utilities');
+
+test('execGitBuffer preserves binary stdout and execGit honors cancellation', async t => {
+	const env = {
+		...process.env,
+		GIT_CONFIG_GLOBAL: '/dev/null',
+		GIT_CONFIG_NOSYSTEM: '1',
+		GIT_TERMINAL_PROMPT: '0',
+	};
+	const directory = mkdtempSync(join(tmpdir(), 'nanocoder-git-buffer-'));
+	const repository = join(directory, 'repo');
+	const hooks = join(repository, '.empty-hooks');
+	mkdirSync(hooks, {recursive: true});
+	t.teardown(() => rmSync(directory, {recursive: true, force: true}));
+	execFileSync('git', ['init', '--initial-branch=main', repository], {
+		stdio: 'ignore',
+		env,
+	});
+	execFileSync('git', ['-C', repository, 'config', 'user.name', 'Git test'], {env});
+	execFileSync('git', [
+		'-C',
+		repository,
+		'config',
+		'user.email',
+		'git-test@example.test',
+	], {env});
+	execFileSync('git', ['-C', repository, 'config', 'core.hooksPath', hooks], {env});
+	const contents = Buffer.concat([
+		Buffer.alloc(65_535, 0x61),
+		Buffer.from('€\0'),
+		Buffer.alloc(70_000, 0x62),
+		Buffer.from('\n'),
+	]);
+	writeFileSync(join(repository, 'binary.bin'), contents);
+	execFileSync('git', ['-C', repository, 'add', '--', 'binary.bin'], {env});
+	execFileSync('git', ['-C', repository, 'commit', '-m', 'test binary output'], {
+		stdio: 'ignore',
+		env,
+	});
+	const oid = execFileSync('git', ['-C', repository, 'rev-parse', 'HEAD'], {
+		encoding: 'utf8',
+		env,
+	}).trim();
+	const output = await execGitBuffer([
+		'-C',
+		repository,
+		'cat-file',
+		'blob',
+		`${oid}:binary.bin`,
+	]);
+	t.deepEqual(output, contents);
+
+	const controller = new AbortController();
+	controller.abort();
+	await t.throwsAsync(
+		execGit(['--version'], undefined, {signal: controller.signal}),
+		{message: 'Git command cancelled'},
+	);
+});
 
 // ============================================================================
 // Availability Check Tests
@@ -36,6 +110,85 @@ test('isGitAvailable returns boolean', t => {
 test('isGhAvailable returns boolean', t => {
 	const result = isGhAvailable();
 	t.is(typeof result, 'boolean');
+});
+
+test.serial(
+	'PATH scan matches exec verdict for non-executable binaries (Unix only)',
+	t => {
+		if (process.platform === 'win32') {
+			t.pass('executable bits are not meaningful on Windows; skipping');
+			return;
+		}
+		const dir = mkdtempSync(join(tmpdir(), 'nanocoder-path-scan-'));
+		const originalPath = process.env.PATH;
+		const fixture = join(dir, 'git');
+		try {
+			writeFileSync(fixture, '#!/bin/sh\nexit 0\n');
+
+			// Present but not executable: a shell could not exec it, so the
+			// scan must report git unavailable — same verdict execSync gives.
+			chmodSync(fixture, 0o644);
+			process.env.PATH = dir;
+			resetBinaryAvailabilityCacheForTests();
+			t.false(isGitAvailable(), 'non-executable git on PATH is not available');
+
+			// Flip the executable bit: now the scan finds it.
+			chmodSync(fixture, 0o755);
+			resetBinaryAvailabilityCacheForTests();
+			t.true(isGitAvailable(), 'executable git on PATH is available');
+		} finally {
+			process.env.PATH = originalPath;
+			resetBinaryAvailabilityCacheForTests();
+			rmSync(dir, {recursive: true, force: true});
+		}
+	},
+);
+
+test.serial('PATH scan honours quoted PATH entries', t => {
+	const dir = mkdtempSync(join(tmpdir(), 'nanocoder-quoted-path-'));
+	const originalPath = process.env.PATH;
+	const binaryName = process.platform === 'win32' ? 'git.cmd' : 'git';
+	try {
+		writeFileSync(
+			join(dir, binaryName),
+			process.platform === 'win32' ? '@echo off\r\n' : '#!/bin/sh\nexit 0\n',
+		);
+		chmodSync(join(dir, binaryName), 0o755);
+
+		// cmd.exe accepts quoted PATH entries like "C:\Program Files\Git\cmd";
+		// the old `git --version` check resolved them, so the scan must too —
+		// otherwise git tools would silently disappear for those installs.
+		process.env.PATH = `"${dir}"`;
+		resetBinaryAvailabilityCacheForTests();
+		t.true(
+			isGitAvailable(),
+			'quoted PATH entry should still resolve the binary',
+		);
+	} finally {
+		process.env.PATH = originalPath;
+		resetBinaryAvailabilityCacheForTests();
+		rmSync(dir, {recursive: true, force: true});
+	}
+});
+
+test.serial('PATH scan ignores directories named like the binary', t => {
+	const dir = mkdtempSync(join(tmpdir(), 'nanocoder-path-dir-'));
+	const originalPath = process.env.PATH;
+	const binaryName = process.platform === 'win32' ? 'git.cmd' : 'git';
+	try {
+		mkdirSync(join(dir, binaryName));
+
+		process.env.PATH = dir;
+		resetBinaryAvailabilityCacheForTests();
+		t.false(
+			isGitAvailable(),
+			'a directory on PATH must not count as an installed binary',
+		);
+	} finally {
+		process.env.PATH = originalPath;
+		resetBinaryAvailabilityCacheForTests();
+		rmSync(dir, {recursive: true, force: true});
+	}
 });
 
 // ============================================================================
@@ -177,6 +330,54 @@ test('execGit disables terminal prompts', async t => {
 		'envcheck',
 	]);
 	t.is(out, '0');
+});
+
+// An ACP session can live in a different repository from the one the agent
+// was spawned in (#1707); git has to run in the session's project.
+test('execGit runs in the session project inside a session scope', async t => {
+	const dir = realpathSync(mkdtempSync(join(tmpdir(), 'nanocoder-git-scope-')));
+	try {
+		execSync('git init -q', {cwd: dir});
+		const topLevel = await runInSessionContext(createSessionContext(dir), () =>
+			execGit(['rev-parse', '--show-toplevel']),
+		);
+		t.is(realpathSync(topLevel.trim()), dir);
+	} finally {
+		rmSync(dir, {recursive: true, force: true});
+	}
+});
+
+// Read-only git backs tools that run without approval, so a repo whose
+// config names a core.fsmonitor hook must not get it executed.
+test('execGitReadOnly does not run a core.fsmonitor hook from repo config', async t => {
+	if (process.platform === 'win32') {
+		t.pass();
+		return;
+	}
+	const dir = realpathSync(mkdtempSync(join(tmpdir(), 'nanocoder-git-fsmon-')));
+	try {
+		execSync('git init -q', {cwd: dir});
+		const marker = join(dir, 'fsmonitor-ran');
+		const hook = join(dir, 'hook.sh');
+		writeFileSync(hook, `#!/bin/sh\ntouch '${marker}'\nexit 1\n`);
+		chmodSync(hook, 0o755);
+		execFileSync('git', ['-C', dir, 'config', 'core.fsmonitor', hook]);
+		writeFileSync(join(dir, 'file.txt'), 'x');
+		const scope = createSessionContext(dir);
+
+		await runInSessionContext(scope, () =>
+			execGitReadOnly(['status', '--porcelain']),
+		);
+		t.false(existsSync(marker));
+
+		// Sanity: the same call without the override does run it.
+		await runInSessionContext(scope, () =>
+			execGit(['status', '--porcelain']),
+		).catch(() => undefined);
+		t.true(existsSync(marker));
+	} finally {
+		rmSync(dir, {recursive: true, force: true});
+	}
 });
 
 test('execGit closes stdin so a prompt cannot block', async t => {
@@ -377,3 +578,75 @@ test.serial(
 		}
 	},
 );
+
+// ============================================================================
+// pushBranch — real local bare-repo "remote", no network/gh dependency.
+// Mirrors postPrComment/getPrNumberForBranch/createDraftPr in never being
+// mocked: those need a real `gh` session and have no direct tests either,
+// consistent with this file's convention of testing execGit-backed
+// functions against a real (offline) repo rather than mocking child_process.
+// ============================================================================
+
+test.serial('pushBranch pushes the current branch to a local remote', async t => {
+	if (!isGitAvailable()) {
+		t.pass('git not available; skipping');
+		return;
+	}
+	const remoteDir = mkdtempSync(join(tmpdir(), 'nanocoder-git-remote-'));
+	const cloneDir = mkdtempSync(join(tmpdir(), 'nanocoder-git-clone-'));
+	const originalCwd = process.cwd();
+	try {
+		execSync('git init -q --bare', {cwd: remoteDir});
+		execSync(`git clone -q ${JSON.stringify(remoteDir)} ${JSON.stringify(cloneDir)}`);
+		execSync('git -c user.email=t@t -c user.name=t commit --allow-empty -q -m init', {
+			cwd: cloneDir,
+		});
+		execSync('git checkout -q -b feature/push-test', {cwd: cloneDir});
+		execSync('git -c user.email=t@t -c user.name=t commit --allow-empty -q -m fix', {
+			cwd: cloneDir,
+		});
+
+		process.chdir(cloneDir);
+		await pushBranch('feature/push-test', {setUpstream: true});
+
+		const remoteBranches = execSync('git branch', {cwd: remoteDir}).toString();
+		t.true(remoteBranches.includes('feature/push-test'));
+	} finally {
+		process.chdir(originalCwd);
+		rmSync(remoteDir, {recursive: true, force: true});
+		rmSync(cloneDir, {recursive: true, force: true});
+	}
+});
+
+test.serial('pushBranch with an explicit cwd pushes from that directory, not process.cwd()', async t => {
+	if (!isGitAvailable()) {
+		t.pass('git not available; skipping');
+		return;
+	}
+	const remoteDir = mkdtempSync(join(tmpdir(), 'nanocoder-git-remote-'));
+	const cloneDir = mkdtempSync(join(tmpdir(), 'nanocoder-git-clone-'));
+	try {
+		execSync('git init -q --bare', {cwd: remoteDir});
+		execSync(`git clone -q ${JSON.stringify(remoteDir)} ${JSON.stringify(cloneDir)}`);
+		execSync('git -c user.email=t@t -c user.name=t commit --allow-empty -q -m init', {
+			cwd: cloneDir,
+		});
+		execSync('git checkout -q -b feature/push-cwd-test', {cwd: cloneDir});
+		execSync('git -c user.email=t@t -c user.name=t commit --allow-empty -q -m fix', {
+			cwd: cloneDir,
+		});
+
+		// Deliberately do NOT chdir the test process — the whole point of
+		// `cwd` is to work without it, since the daemon's own process.cwd()
+		// is a different, unrelated directory (this is the mechanism that
+		// lets ci-fix-orchestrator.ts publish a fix committed inside an
+		// isolated clone).
+		await pushBranch('feature/push-cwd-test', {setUpstream: true, cwd: cloneDir});
+
+		const remoteBranches = execSync('git branch', {cwd: remoteDir}).toString();
+		t.true(remoteBranches.includes('feature/push-cwd-test'));
+	} finally {
+		rmSync(remoteDir, {recursive: true, force: true});
+		rmSync(cloneDir, {recursive: true, force: true});
+	}
+});

@@ -23,6 +23,15 @@ if (typeof nodeModule.enableCompileCache === 'function') {
 
 const require = nodeModule.createRequire(import.meta.url);
 
+// Loads the launch directory's `.env` (minus the keys #2054 protects). Called
+// right before importing a path that reads config, as importing config used
+// to do as a side effect; the fast paths that never did (`trust`, `storage`,
+// `init`, ...) still never read it.
+async function loadProjectEnv(): Promise<void> {
+	const {bootstrapProjectDotenv} = await import('@/config/project-dotenv');
+	bootstrapProjectDotenv();
+}
+
 // Resolved inline rather than through `@/utils/package-version` to keep the
 // fast path import-free (see the note above). A missing or malformed
 // package.json must not throw here: this runs at module load, before any
@@ -78,15 +87,32 @@ if (args[0] === 'daemon') {
 	] as const;
 	type DaemonSub = (typeof valid)[number];
 	if (!sub || !(valid as readonly string[]).includes(sub)) {
-		console.error(
-			'Usage: nanocoder daemon <start|stop|status|logs|install|uninstall>',
-		);
-		process.exit(sub ? 1 : 0);
+		const help = !sub || sub === '--help' || sub === '-h';
+		const usage =
+			'Usage: nanocoder daemon <start|stop|status|logs|install|uninstall>';
+		if (help) console.log(usage);
+		else console.error(usage);
+		process.exit(help ? 0 : 1);
 	}
+	await loadProjectEnv();
 	const {runDaemonCli} = await import('@/daemon/cli');
 	const result = await runDaemonCli(sub as DaemonSub, {
 		projectRoot: process.cwd(),
+		args: args.slice(2),
 		trustDirectory: args.includes('--trust-directory'),
+	});
+	if (result.output) console.log(result.output);
+	process.exit(result.exitCode);
+}
+
+// Handle `nanocoder verify --pr <n> [--post-review]` — fast path. Headless
+// PR review; pulls in the full LLM/tool/subagent stack (unlike `daemon`
+// above) but never Ink.
+if (args[0] === 'verify') {
+	await loadProjectEnv();
+	const {runVerifyCli} = await import('@/verify/cli');
+	const result = await runVerifyCli(args.slice(1), {
+		projectRoot: process.cwd(),
 	});
 	if (result.output) console.log(result.output);
 	process.exit(result.exitCode);
@@ -95,10 +121,13 @@ if (args[0] === 'daemon') {
 // Handle `nanocoder skills <sub>` — fast path, only loads the skill
 // installer (no Ink, no providers, no tool registry).
 if (args[0] === 'skills') {
+	await loadProjectEnv();
 	const {runSkillsCli, SKILLS_CLI_USAGE} = await import('@/skills/install');
-	if (args[1] !== 'add') {
-		console.error(SKILLS_CLI_USAGE);
-		process.exit(args[1] ? 1 : 0);
+	if (args[1] !== 'add' || args.includes('--help') || args.includes('-h')) {
+		const help = !args[1] || args.includes('--help') || args.includes('-h');
+		if (help) console.log(SKILLS_CLI_USAGE);
+		else console.error(SKILLS_CLI_USAGE);
+		process.exit(help ? 0 : 1);
 	}
 	const result = await runSkillsCli({
 		projectRoot: process.cwd(),
@@ -114,8 +143,25 @@ if (args[0] === 'skills') {
 // Handle `nanocoder config <sub>` — fast path. Resolving the effective
 // config only needs the config module graph, not Ink or the tool registry.
 if (args[0] === 'config') {
+	await loadProjectEnv();
 	const {runConfigCli} = await import('@/config/config-cli');
 	const result = runConfigCli(args[1], args.slice(2));
+	if (result.exitCode === 0) {
+		console.log(result.output);
+	} else {
+		console.error(result.output);
+	}
+	process.exit(result.exitCode);
+}
+
+// Handle `nanocoder trust` — fast path. Reads and writes only the trust list in
+// the global preferences file, so it never loads the folder's project config or
+// starts anything it defines. Its import graph also stays free of React and Ink
+// (trust-cli.spec.ts checks this), which is why preferences.ts logs through
+// @/utils/logging and not the Ink message queue.
+if (args[0] === 'trust') {
+	const {runTrustCli} = await import('@/config/trust/trust-cli');
+	const result = runTrustCli(args.slice(1));
 	if (result.exitCode === 0) {
 		console.log(result.output);
 	} else {
@@ -205,15 +251,32 @@ Commands:
   copilot login [provider-name]   Log in to GitHub Copilot (device flow). Saves credentials for the "GitHub Copilot" provider.
   codex login [provider-name]     Log in to ChatGPT/Codex (device flow). Saves credentials for the "ChatGPT" provider.
   review <branch|pr-number>       Review a branch or PR diff for bugs, security issues, and style violations.
+  worktree <PR-number> [options]  Start an interactive session in a new worktree for a GitHub PR.
+                                  Accepts the global options below, e.g. --provider, --mode.
   daemon <subcommand>             Manage the per-project skill daemon.
                                   Subcommands: start, stop, status, logs, install, uninstall.
+                                  start [--trust <comment-only|auto-fix|full-commit>]
+                                  Trust level for daemon-triggered CI investigation/auto-fix;
+                                  defaults to agents.config.json's verify.trustLevel, then
+                                  comment-only. full-commit prompts a one-time confirmation.
                                   start refuses to run in an untrusted directory; pass
                                   --trust-directory to bypass the check for this run only.
+  verify --pr <n> [--post-review] [--trust-directory] [--provider <name>] [--model <name>]
+                                  Headless, read-only PR review: runs the verify-pr-review
+                                  subagent plus a semgrep pass. Prints the review to stdout
+                                  by default; posts it as a PR comment with --post-review.
+                                  Refuses an untrusted directory; pass --trust-directory
+                                  to bypass the check for this run only.
+                                  --provider/--model select the LLM (see Options below).
   skills add <target>             Install a skill bundle from a git repository.
                                   <target> is an index name, owner/repo, a git URL, or a local path.
                                   Flags: --ref, --subdir, --global, --force, --yes, --index.
   config <subcommand>             Inspect the resolved configuration and where each value came from.
                                   Subcommands: list, show [key], diff. Add --json for machine output.
+  trust --status [--json]         Show whether this folder is trusted, what it will run, and its
+                                  fingerprint. Runs nothing from the folder. Status is trusted,
+                                  not-trusted, changed or needs-re-approval.
+  trust --grant <fingerprint>     Trust this folder only if its fingerprint still matches.
   storage [--format json]         Inspect session and artifact storage (read-only).
                                   Interactive by default; JSON works without a TTY.
   completion <shell>              Generate a shell completion script (bash, zsh, or fish).
@@ -222,7 +285,7 @@ Commands:
 Options:
   -v, --version       Show version number
   -h, --help          Show help
-  --vscode            Run in VS Code mode
+  --vscode            Start the legacy VS Code companion (deprecated)
   --vscode-port       Specify VS Code port
   --provider          Specify AI provider (must be configured in agents.config.json).
                       Quote names with spaces: --provider "GitHub Copilot"
@@ -235,8 +298,8 @@ Options:
                       line. Necessary for large prompts: Linux caps a single
                       argument at 128 KiB and execve fails with E2BIG.
   --trust-directory   Skip the first-run directory trust prompt for this run only.
-                      Valid with the "run" command and "daemon start". Does not modify
-                      the preferences file.
+                      Valid with "run", "daemon start", "verify" and --acp. Does not
+                      modify the preferences file.
   --plain             Use a lightweight, Ink-free runtime for non-interactive runs.
                       Only valid with the "run" command. Auto-enables in CI / non-TTY.
   --no-plain          Force the Ink runtime even in CI / non-TTY environments.
@@ -252,7 +315,8 @@ Options:
                       Only valid with the "run" command. Always uses the plain runtime.
   --output-format     Specify stdout format ('text' or 'json'). Synonym for --json.
   --acp               Run as an ACP (Agent Client Protocol) server for editor integration.
-                      Communicates via JSON-RPC over stdin/stdout.
+                      Communicates via JSON-RPC over stdin/stdout. Refuses an untrusted
+                      directory unless --trust-directory is passed.
   -c, --continue      Resume the most recent session for the current directory, silently.
                       Starts a fresh session if none exists. Interactive mode only.
   -r, --resume [id]   Resume a session by id or 1-based list index (e.g. "last", "2",
@@ -274,13 +338,24 @@ Examples:
   nanocoder review main
   nanocoder review feature/auth
   nanocoder review 42
+  nanocoder worktree 42
+  nanocoder worktree 42 --mode plan
   nanocoder --continue
   nanocoder --resume last
   nanocoder --resume
+  nanocoder verify --pr 861
+  nanocoder verify --pr 861 --post-review
   nanocoder storage
   nanocoder storage --format json | jq .sections
   `);
 	process.exit(0);
+}
+
+const {validateCliArgs} = await import('./cli-args.js');
+const cliArgsError = validateCliArgs(args);
+if (cliArgsError) {
+	console.error(cliArgsError);
+	process.exit(1);
 }
 
 // Validate output format value to prevent injection
@@ -292,6 +367,27 @@ async function main(): Promise<void> {
 	// Parse args and dispatch non-TUI branches BEFORE importing ink or @/app.
 	// Those packages pull ~thousand+ modules; --acp / --plain / auth must stay
 	// on the lightweight path. Ink + App load only in the final TUI branch.
+	if (args[0] === 'worktree') {
+		const [{createPrWorktree, parseWorktreePrNumber}, {parseWorktreeArgs}] =
+			await Promise.all([
+				import('./commands/gh-pr-worktree'),
+				import('./cli-args.js'),
+			]);
+		// Global options after the PR number (`--provider`, `--mode`, ...) are
+		// validated by validateCliArgs above and read by the normal startup
+		// path below, so the worktree session honours them.
+		const worktreeArgs = parseWorktreeArgs(args);
+		const prNumber = parseWorktreePrNumber(
+			'error' in worktreeArgs ? args.slice(1) : worktreeArgs.positionals,
+		);
+		if (!process.stdin.isTTY || !process.stdout.isTTY) {
+			throw new Error(
+				'`nanocoder worktree` requires an interactive terminal (TTY).',
+			);
+		}
+		const worktreePath = await createPrWorktree(prNumber);
+		console.log(`Starting Nanocoder in ${worktreePath}`);
+	}
 
 	const vscodeMode = args.includes('--vscode');
 
@@ -575,9 +671,9 @@ async function main(): Promise<void> {
 	// (rather than silently dropping) if the user passes it interactively
 	// or with `review` (review is TTY-only but sets nonInteractiveMode).
 	const trustDirectoryRequested = args.includes('--trust-directory');
-	if (trustDirectoryRequested && !isRunCommand) {
+	if (trustDirectoryRequested && !isRunCommand && !args.includes('--acp')) {
 		console.error(
-			'--trust-directory only applies to non-interactive commands (`nanocoder run ...`, `nanocoder daemon start`); ignoring.',
+			'--trust-directory only applies to non-interactive commands (`nanocoder run ...`, `nanocoder daemon start`, `nanocoder verify`, `nanocoder --acp`); ignoring.',
 		);
 	}
 	const trustDirectory = trustDirectoryRequested && isRunCommand;
@@ -710,11 +806,19 @@ async function main(): Promise<void> {
 			process.exit(1);
 		}
 	} else if (acpMode) {
+		await loadProjectEnv();
 		const {runAcpServer} = await import('@/acp/acp-server');
-		await runAcpServer({cliProvider, cliModel, appVersion: version});
+		await runAcpServer({
+			cliProvider,
+			cliModel,
+			appVersion: version,
+			trustDirectory: trustDirectoryRequested,
+			mode: cliMode,
+		});
 	} else if (plainMode && nonInteractivePrompt) {
 		// Headless, Ink-free path. Note: --plain is currently only valid with
 		// `run`, so we must have a non-empty prompt here.
+		await loadProjectEnv();
 		const {runPlainShell} = await import('@/plain/shell');
 		await runPlainShell({
 			prompt: nonInteractivePrompt,
@@ -725,11 +829,11 @@ async function main(): Promise<void> {
 			outputFormat,
 		});
 	} else {
-		// Interactive TUI — load Ink + App only now.
-		const [{render}, {default: App}] = await Promise.all([
-			import('ink'),
-			import('@/app'),
-		]);
+		// Interactive TUI — load Ink + App only now, with React's production
+		// build (see load-tui-renderer.ts).
+		await loadProjectEnv();
+		const {loadTuiRenderer} = await import('@/app/load-tui-renderer');
+		const renderTui = await loadTuiRenderer();
 
 		// Prevent Node's global performance entry buffer from growing without
 		// bound during long Ink sessions. See issue #521.
@@ -781,7 +885,7 @@ async function main(): Promise<void> {
 		// Screen mode: fullscreen (alt screen + in-app scroll) by DEFAULT.
 		// Passing --no-alt-screen or setting alternateScreen:false in preferences
 		// forces inline mode (main screen + native scrollback).
-		const {getAlternateScreen, getMouseReporting} = await import(
+		const {getAlternateScreen, getMouseReporting, getMaxFps} = await import(
 			'@/config/preferences'
 		);
 		const altScreenAllowed =
@@ -821,15 +925,15 @@ async function main(): Promise<void> {
 				MOUSE_REPORTING_ON,
 				stripMouseSequences,
 				wheelEvents,
-			} = await import('@/utils/terminal-mouse');
+			} = await import('@/terminal/terminal-mouse');
 			const {
 				createPasteExtractor,
 				DISABLE_BRACKETED_PASTE,
 				ENABLE_BRACKETED_PASTE,
 				pasteEvents,
-			} = await import('@/utils/terminal-paste');
+			} = await import('@/terminal/terminal-paste');
 			const {splitControlKeypresses} = await import(
-				'@/utils/terminal-keypress'
+				'@/terminal/terminal-keypress'
 			);
 
 			// Bracketed paste in both screen modes. Without it the terminal
@@ -930,26 +1034,27 @@ async function main(): Promise<void> {
 			}) as unknown as NodeJS.ReadStream;
 		}
 
-		const result = render(
-			<App
-				vscodeMode={vscodeMode}
-				vscodePort={vscodePort}
-				nonInteractivePrompt={nonInteractivePrompt}
-				nonInteractiveMode={nonInteractiveMode}
-				cliProvider={cliProvider}
-				cliModel={cliModel}
-				cliMode={cliMode}
-				trustDirectory={trustDirectory}
-				altScreenActive={useAltScreen}
-				initialSession={initialSession}
-				openSessionSelectorOnStart={openSessionSelectorOnStart}
-			/>,
+		const result = renderTui(
+			{
+				vscodeMode,
+				vscodePort,
+				nonInteractivePrompt,
+				nonInteractiveMode,
+				cliProvider,
+				cliModel,
+				cliMode,
+				trustDirectory,
+				altScreenActive: useAltScreen,
+				initialSession,
+				openSessionSelectorOnStart,
+			},
 			{
 				// Ctrl+C is handled inside App (routed through the shutdown
 				// manager) so the exit-render handler below can paint the
 				// farewell frame before the process dies.
 				exitOnCtrlC: false,
 				...(inkStdin ? {stdin: inkStdin} : {}),
+				maxFps: getMaxFps(),
 			},
 		);
 
@@ -998,7 +1103,15 @@ async function main(): Promise<void> {
 	}
 }
 
-main().catch(err => {
+main().catch(async (err: unknown) => {
 	console.error(err instanceof Error ? err.message : err);
-	process.exit(1);
+	// Exit through the shutdown manager so registered handlers still run, such
+	// as the session-end hook of `run` / --plain. It exits the process itself,
+	// or returns early when a shutdown is already under way and that one will.
+	try {
+		const {getShutdownManager} = await import('@/utils/shutdown');
+		await getShutdownManager().gracefulShutdown(1);
+	} catch {
+		process.exit(1);
+	}
 });

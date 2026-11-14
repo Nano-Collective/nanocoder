@@ -33,6 +33,22 @@ class FakeMemoryManager {
 		this.cleared = true;
 		this.memories = [];
 	}
+
+	async addMemory(input: {
+		content: string;
+		category: string;
+		sourceSessionId?: string;
+	}): Promise<SemanticMemory> {
+		const memory: SemanticMemory = {
+			id: `memory-${this.memories.length + 1}`,
+			content: input.content,
+			category: input.category,
+			timestamp: '2026-08-05T00:00:00.000Z',
+			sourceSessionId: input.sourceSessionId,
+		};
+		this.memories.push(memory);
+		return memory;
+	}
 }
 
 class FakeSummarizerService {
@@ -43,6 +59,18 @@ class FakeSummarizerService {
 
 	proposeMemoriesFromMessages(messages: Message[]): MemoryProposal[] {
 		return messages.length === 0 ? [] : this.proposals;
+	}
+
+	async remember(input: {
+		content: string;
+		category?: string;
+	}): Promise<SemanticMemory> {
+		return {
+			id: 'remembered',
+			content: input.content,
+			category: input.category ?? 'project',
+			timestamp: '2026-08-05T00:00:00.000Z',
+		};
 	}
 
 	async acceptProposal(
@@ -285,6 +313,66 @@ test('memory command rejects accept with an out-of-range index', async t => {
 	t.deepEqual(summarizerService.accepted, []);
 });
 
+test('memory command rejects malformed accept indices', async t => {
+	const summarizerService = new FakeSummarizerService([
+		{
+			content: 'Auth uses Clerk.',
+			category: 'architecture',
+			sourceType: 'explicit-user',
+			evidence: {userMessages: ['Refactor auth.'], assistantMessages: []},
+			warnings: [],
+		},
+	]);
+	const command = createMemoryCommand({
+		memoryManager: new FakeMemoryManager(),
+		summarizerService,
+	});
+	await command.handler(['propose'], [{role: 'user', content: 'Refactor auth.'}], testMetadata);
+
+	for (const index of [
+		'1oops',
+		'1.5',
+		'1.',
+		'+1',
+		'1e1',
+		'1e2',
+		'0x1',
+		'-1',
+		'0',
+		'',
+		'9'.repeat(30),
+	]) {
+		const result = await command.handler(['accept', index], [], testMetadata);
+		const {lastFrame} = renderWithTheme(result as React.ReactElement);
+		const output = lastFrame() ?? '';
+
+		t.true(output.includes('Usage: /memory accept <1-1>'));
+		if (index) {
+			t.true(output.includes('Invalid proposal number "'));
+			if (index.length < 30) t.true(output.includes(`"${index}"`));
+		}
+		t.deepEqual(summarizerService.accepted, []);
+	}
+
+	const missing = await command.handler(['accept'], [], testMetadata);
+	t.true(
+		(renderWithTheme(missing as React.ReactElement).lastFrame() ?? '').includes(
+			'Usage: /memory accept <1-1>',
+		),
+	);
+	t.deepEqual(summarizerService.accepted, []);
+
+	const leadingZero = await command.handler(['accept', '01'], [], testMetadata);
+	t.true(
+		(renderWithTheme(leadingZero as React.ReactElement).lastFrame() ?? '').includes(
+			'Saved architecture memory: Auth uses Clerk.',
+		),
+	);
+	t.deepEqual(summarizerService.accepted, [
+		{content: 'Auth uses Clerk.', category: 'architecture'},
+	]);
+});
+
 test('lazy registry exposes /memory', t => {
 	const memory = lazyCommands.find(command => command.name === 'memory');
 
@@ -471,3 +559,33 @@ test('memory ls and rm aliases behave like list and delete', async t => {
 	await command.handler(['rm', 'ff000000'], [], testMetadata);
 	t.deepEqual(manager.memories, []);
 });
+
+test('createMemoryCommand binds default summarizerService to the injected memoryManager', async t => {
+	const customManager = new FakeMemoryManager();
+	const command = createMemoryCommand({memoryManager: customManager});
+
+	// Propose memories from conversation turns
+	const proposeResult = await command.handler(
+		['propose'],
+		[
+			{
+				role: 'user',
+				content: 'Use the existing provider abstraction for model changes.',
+			},
+		],
+		testMetadata,
+	);
+	const proposeText = renderWithTheme(proposeResult as React.ReactElement).lastFrame() ?? '';
+	t.true(proposeText.includes('provider abstraction'));
+
+	// Accept proposal 1
+	const acceptResult = await command.handler(['accept', '1'], [], testMetadata);
+	const acceptText = renderWithTheme(acceptResult as React.ReactElement).lastFrame() ?? '';
+	t.true(acceptText.includes('Saved'));
+
+	// The accepted memory must be saved to customManager
+	const memories = await customManager.listMemories();
+	t.is(memories.length, 1, 'Injected memoryManager should contain the accepted memory');
+	t.true(memories[0].content.includes('provider abstraction'));
+});
+

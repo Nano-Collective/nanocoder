@@ -17,7 +17,6 @@ import {
 	mergeEnv,
 	resolveCwd,
 	runScript,
-	shellArgs,
 } from './handler';
 import type {CustomToolMetadata} from '@/types/custom-tools';
 
@@ -66,6 +65,16 @@ function meta(extra: Partial<CustomToolMetadata> = {}): CustomToolMetadata {
 	};
 }
 
+/** String parameters with these names; only declared names are substituted. */
+function stringParams(
+	...names: string[]
+): CustomToolMetadata['parameters'] {
+	return Object.fromEntries(names.map(name => [name, {type: 'string'}]));
+}
+
+const withParams = (...names: string[]) =>
+	meta({parameters: stringParams(...names)});
+
 test('applyParameterDefaults fills omitted args and keeps provided ones', t => {
 	const m = meta({
 		parameters: {
@@ -89,32 +98,6 @@ test('expandVars replaces $VAR and ${VAR}', t => {
 	t.is(expandVars('${NCT_MISSING}'), '');
 	if (prev === undefined) delete process.env.NCT_FOO;
 	else process.env.NCT_FOO = prev;
-});
-
-test('shellArgs wraps one verbatim cmd.exe command and uses -c for posix shells', t => {
-	t.deepEqual(shellArgs('cmd.exe', 'echo hi'), [
-		'/d',
-		'/v:off',
-		'/s',
-		'/c',
-		'"echo hi"',
-	]);
-	t.deepEqual(shellArgs('cmd', 'echo hi'), [
-		'/d',
-		'/v:off',
-		'/s',
-		'/c',
-		'"echo hi"',
-	]);
-	t.deepEqual(shellArgs('C:\\Windows\\System32\\cmd.exe', 'echo hi'), [
-		'/d',
-		'/v:off',
-		'/s',
-		'/c',
-		'"echo hi"',
-	]);
-	t.deepEqual(shellArgs('/bin/sh', 'echo hi'), ['-c', 'echo hi']);
-	t.deepEqual(shellArgs('/bin/bash', 'echo hi'), ['-c', 'echo hi']);
 });
 
 // Prove runScript forwards shellArgs, not a hardcoded -c. A POSIX script
@@ -143,7 +126,10 @@ cmdExecutionTest('buildHandler preserves quoted cmd.exe arguments', async t => {
 	);
 	const handler = buildHandler(
 		// An omitted shell resolves to cmd.exe on Windows through pickShell.
-		meta({shell: undefined}),
+		meta({
+			shell: undefined,
+			parameters: stringParams('node', 'probe', 'value'),
+		}),
 		'{{ node }} {{ probe }} {{ value }}',
 		testDir,
 	);
@@ -567,18 +553,60 @@ shellCase(
 );
 
 shellCase('buildHandler renders body and executes', async t => {
-	const handler = buildHandler(meta(), `echo {{ name }}`, testDir);
+	const handler = buildHandler(withParams('name'), `echo {{ name }}`, testDir);
 	const result = await handler({name: 'world'});
 	t.is(result, 'EXIT_CODE: 0\nworld');
 });
 
+// The validator doesn't strip extra keys, so a model can send a value for a
+// name the tool never declared. It must not fill a placeholder: an undeclared
+// one in a comment would otherwise turn a newline in the value into a command.
+shellCase('buildHandler ignores arguments for undeclared placeholders', async t => {
+	const marker = join(testDir, 'pwned-undeclared');
+	const handler = buildHandler(
+		withParams('name'),
+		`# Use {{ param }} to substitute\necho {{ name }}`,
+		testDir,
+	);
+	const result = await handler({
+		name: 'ok',
+		param: `x\ntouch ${marker}\n`,
+	});
+	t.is(result, 'EXIT_CODE: 0\nok');
+	t.false(existsSync(marker));
+});
+
 shellCase('buildHandler: shell-escape blocks injection', async t => {
-	const handler = buildHandler(meta(), `echo {{ payload }}`, testDir);
+	const handler = buildHandler(
+		withParams('payload'),
+		`echo {{ payload }}`,
+		testDir,
+	);
 	// If quoting were broken, the inner `; ls` would run separately and
 	// stdout would not contain the literal payload.
 	const result = await handler({payload: `; ls / ; echo done`});
 	t.is(result, 'EXIT_CODE: 0\n; ls / ; echo done');
 });
+
+// A placeholder the author wrapped in quotes defeats the quoting: inside "…"
+// the added single quotes are literal and $(…) in the value runs; inside '…'
+// the value ends up unquoted. The handler must refuse to run such a body
+// rather than execute the model's value.
+for (const body of [
+	`echo "{{ q }}"`,
+	`echo '{{ q }}'`,
+	`echo "prefix $(printf %s "{{ q }}")"`,
+]) {
+	shellCase(`buildHandler refuses a quoted placeholder: ${body}`, async t => {
+		const marker = join(testDir, `pwned-${body.length}`);
+		const handler = buildHandler(withParams('q'), body, testDir);
+		await t.throwsAsync(
+			handler({q: `$(touch ${marker})' ; touch ${marker} ; '`}),
+			{message: /unsafe/},
+		);
+		t.false(existsSync(marker), 'the model-controlled value must not run');
+	});
+}
 
 shellCase('buildHandler honors env merging', async t => {
 	const handler = buildHandler(

@@ -1,5 +1,4 @@
 import {readFile} from 'node:fs/promises';
-import {highlight} from 'cli-highlight';
 import {Box, Text, useFocus, useInput} from 'ink';
 import {useEffect, useMemo, useState} from 'react';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
@@ -12,14 +11,15 @@ import {
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {useUIStateContext} from '@/hooks/useUIState';
+import {highlight} from '@/terminal/highlighter';
+import {compressIndentation} from '@/terminal/indentation-normalizer';
 import type {FileExplorerProps, ViewMode} from '@/types/file-explorer';
 import {
 	buildFileTree,
 	type FileNode,
 	flattenTree,
 	flattenTreeAll,
-} from '@/utils/file-tree';
-import {compressIndentation} from '@/utils/indentation-normalizer';
+} from '@/utils/fs/file-tree';
 import {getVSCodeServerSync} from '@/vscode/vscode-server';
 import {TreeItem} from './tree-item';
 import {

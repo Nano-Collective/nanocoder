@@ -4,7 +4,6 @@
  */
 
 import type {Tokenizer, TokenizerProvider} from '../types/tokenization.js';
-import {AnthropicTokenizer} from './tokenizers/anthropic-tokenizer.js';
 import {GenericTokenizer} from './tokenizers/generic-tokenizer.js';
 import {LlamaTokenizer} from './tokenizers/llama-tokenizer.js';
 import {OpenAITokenizer} from './tokenizers/openai-tokenizer.js';
@@ -82,7 +81,12 @@ export function createTokenizer(
 			return new OpenAITokenizer(normalizedModelId);
 
 		case 'anthropic':
-			return new AnthropicTokenizer(normalizedModelId);
+			// Anthropic has not published a tokenizer for Claude 3 or later; the
+			// old @anthropic-ai/tokenizer package is the Claude 2 vocabulary and
+			// miscounts current models. o200k_base is the same proxy used for
+			// unknown models. Detection still runs first so a Claude provider is
+			// never routed to the Llama tokenizer by a model-name substring.
+			return new GenericTokenizer();
 
 		case 'llama':
 			return new LlamaTokenizer(normalizedModelId);
