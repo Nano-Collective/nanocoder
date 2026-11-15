@@ -57,6 +57,24 @@ test('collectWhoami strips credentials embedded in the base URL', t => {
 	t.is(info.baseURL, 'https://proxy.example/v1');
 });
 
+test('collectWhoami drops the query string and fragment from the base URL', t => {
+	const cases: Array<[string, string]> = [
+		['https://proxy.example/v1?api-key=SECRET', 'https://proxy.example/v1'],
+		['https://proxy.example/v1?key=SECRET#frag', 'https://proxy.example/v1'],
+		[
+			'https://user:hunter2@proxy.example/v1?token=SECRET',
+			'https://proxy.example/v1',
+		],
+		['http://localhost:11434/v1', 'http://localhost:11434/v1'],
+	];
+	for (const [raw, expected] of cases) {
+		const info = collectWhoami('Proxy', 'm', [
+			provider('Proxy', {baseURL: raw}),
+		]);
+		t.is(info.baseURL, expected);
+	}
+});
+
 test('collectWhoami reports a missing key instead of the placeholder', t => {
 	// loadProviderConfigs fills in "dummy-key" when a provider has no key.
 	const info = collectWhoami('Ollama', 'llama3', [

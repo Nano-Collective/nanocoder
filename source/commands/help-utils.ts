@@ -75,6 +75,7 @@ const CATEGORY_COMMANDS: Record<HelpCategory, readonly string[]> = {
 		'status',
 		'tip',
 		'usage',
+		'whoami',
 	],
 	Other: [],
 };

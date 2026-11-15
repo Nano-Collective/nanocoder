@@ -4,8 +4,8 @@ import {loadProviderConfigs} from '@/client-factory';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
-import {generateKey} from '@/session/key-generator';
 import type {AIProviderConfig, Command} from '@/types/index';
+import {generateKey} from '@/utils/key-generator';
 
 /** What `loadProviderConfigs` puts in `apiKey` when the provider has none. */
 const NO_KEY_PLACEHOLDER = 'dummy-key';
@@ -24,6 +24,11 @@ export interface WhoamiInfo {
 export function maskApiKey(key: string): string {
 	if (key.length < MIN_REVEAL_LENGTH) return '********';
 	return `${key.slice(0, 3)}...${key.slice(-4)}`;
+}
+
+/** Drop `user:password@`, the query string and the fragment: any of them can carry a secret. */
+function cleanBaseURL(baseURL: string): string {
+	return baseURL.replace(/\/\/[^/@]*@/, '//').replace(/[?#].*$/, '');
 }
 
 /** The active provider's identity. Only masked or descriptive values come back, never a raw key. */
@@ -50,10 +55,7 @@ export function collectWhoami(
 	return {
 		provider: config.name,
 		model: model || 'none',
-		// Drop any user:password@ from the URL so it cannot leak either.
-		baseURL: baseURL
-			? baseURL.replace(/\/\/[^/@]*@/, '//')
-			: 'provider default',
+		baseURL: baseURL ? cleanBaseURL(baseURL) : 'provider default',
 		apiKey: usesOAuth
 			? 'OAuth login (no API key)'
 			: apiKey && apiKey !== NO_KEY_PLACEHOLDER
