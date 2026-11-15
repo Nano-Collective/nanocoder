@@ -16,6 +16,7 @@ import {
 import {stringReplaceDisplayPath} from './string-replace-preview.js';
 import {stringReplaceTool} from './string-replace.js';
 import {clearReadTracker, markFileSeenAndVisible} from '../runtime/read-tracker.js';
+import {XMLToolCallParser} from '../../tool-calling/xml-parser.js';
 import {
 	resetFirewallConfig,
 	setFirewallConfig,
@@ -1670,4 +1671,55 @@ test.serial('string_replace: a file changed outside after the read is refused', 
 	} finally {
 		process.chdir(originalCwd);
 	}
+});
+
+// ============================================================================
+// Issue #2203: XML Tool-Call Parser Regression Tests
+// ============================================================================
+
+test('string_replace XML parsing regression: replaces pretty-printed JSON byte-for-byte', async t => {
+	const initialJson = '{\n  "name": "nanocoder",\n  "version": "1.0.0"\n}';
+	const filePath = await createTestFile('package.json', initialJson);
+
+	const oldStr = '{\n  "name": "nanocoder",\n  "version": "1.0.0"\n}';
+	const newStr = '{\n  "name": "nanocoder",\n  "version": "1.0.1"\n}';
+	const xml = `<string_replace><path>${filePath}</path><old_str>${oldStr}</old_str><new_str>${newStr}</new_str></string_replace>`;
+
+	const parsed = XMLToolCallParser.parseToolCalls(xml);
+	t.is(parsed.length, 1);
+	t.is(parsed[0].toolName, 'string_replace');
+
+	await executeStringReplace({
+		path: parsed[0].parameters.path as string,
+		old_str: parsed[0].parameters.old_str as string,
+		new_str: parsed[0].parameters.new_str as string,
+	});
+
+	const updated = await readFile(filePath, 'utf-8');
+	t.is(updated, newStr);
+});
+
+test('string_replace XML parsing regression: replaces literal null, 1.0, and 1e3 without coercion', async t => {
+	const initialContent = 'value: null\nrate: 1.0\nlimit: 1e3\n';
+	const filePath = await createTestFile('literals.txt', initialContent);
+
+	for (const [oldVal, newVal] of [
+		['null', 'undefined'],
+		['1.0', '2.0'],
+		['1e3', '1e6'],
+	] as const) {
+		const xml = `<string_replace><path>${filePath}</path><old_str>${oldVal}</old_str><new_str>${newVal}</new_str></string_replace>`;
+
+		const parsed = XMLToolCallParser.parseToolCalls(xml);
+		t.is(parsed.length, 1);
+
+		await executeStringReplace({
+			path: parsed[0].parameters.path as string,
+			old_str: parsed[0].parameters.old_str as string,
+			new_str: parsed[0].parameters.new_str as string,
+		});
+	}
+
+	const updated = await readFile(filePath, 'utf-8');
+	t.is(updated, 'value: undefined\nrate: 2.0\nlimit: 1e6\n');
 });

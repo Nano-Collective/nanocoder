@@ -790,3 +790,115 @@ test('parseToolCalls - allows valid tool calls with HTML-like parameter content'
 	t.is(result[0].toolName, 'create_file');
 	t.truthy(result[0].parameters.content);
 });
+
+// ============================================================================
+// Issue #2203: Preserve raw string parameters and avoid unwanted coercion
+// ============================================================================
+
+test('parseToolCalls - preserves pretty-printed JSON in write_file content', t => {
+	const rawJson =
+		'{\n  "name": "nanocoder",\n  "version": "1.0.0",\n  "scripts": {\n    "test": "ava"\n  }\n}';
+	const content = `<write_file><path>package.json</path><content>${rawJson}</content></write_file>`;
+	const result = XMLToolCallParser.parseToolCalls(content);
+
+	t.is(result.length, 1);
+	t.is(result[0].toolName, 'write_file');
+	t.is(typeof result[0].parameters.content, 'string');
+	t.is(result[0].parameters.content, rawJson);
+});
+
+test('parseToolCalls - preserves literal null in write_file content', t => {
+	const content =
+		'<write_file><path>test.txt</path><content>null</content></write_file>';
+	const result = XMLToolCallParser.parseToolCalls(content);
+
+	t.is(result.length, 1);
+	t.is(result[0].toolName, 'write_file');
+	t.is(typeof result[0].parameters.content, 'string');
+	t.is(result[0].parameters.content, 'null');
+});
+
+test('parseToolCalls - preserves literal 1.0 and 1e3 in write_file content', t => {
+	const content =
+		'<write_file><path>test.txt</path><content>1.0</content></write_file>';
+	const result = XMLToolCallParser.parseToolCalls(content);
+
+	t.is(result.length, 1);
+	t.is(typeof result[0].parameters.content, 'string');
+	t.is(result[0].parameters.content, '1.0');
+
+	const contentScientific =
+		'<write_file><path>test.txt</path><content>1e3</content></write_file>';
+	const resultScientific = XMLToolCallParser.parseToolCalls(contentScientific);
+
+	t.is(resultScientific.length, 1);
+	t.is(typeof resultScientific[0].parameters.content, 'string');
+	t.is(resultScientific[0].parameters.content, '1e3');
+});
+
+test('parseToolCalls - preserves multiline arrays in write_file content', t => {
+	const rawArray = '[\n  "alpha",\n  "beta",\n  "gamma"\n]';
+	const content = `<write_file><path>list.json</path><content>${rawArray}</content></write_file>`;
+	const result = XMLToolCallParser.parseToolCalls(content);
+
+	t.is(result.length, 1);
+	t.is(typeof result[0].parameters.content, 'string');
+	t.is(result[0].parameters.content, rawArray);
+});
+
+test('parseToolCalls - preserves raw text and formatting in string_replace old_str and new_str', t => {
+	const oldStr = '{\n  "debug": false\n}';
+	const newStr = '{\n  "debug": true\n}';
+	const content = `<string_replace><path>config.json</path><old_str>${oldStr}</old_str><new_str>${newStr}</new_str></string_replace>`;
+	const result = XMLToolCallParser.parseToolCalls(content);
+
+	t.is(result.length, 1);
+	t.is(result[0].toolName, 'string_replace');
+	t.is(typeof result[0].parameters.old_str, 'string');
+	t.is(typeof result[0].parameters.new_str, 'string');
+	t.is(result[0].parameters.old_str, oldStr);
+	t.is(result[0].parameters.new_str, newStr);
+});
+
+test('parseToolCalls - preserves literal null, 1.0, and 1e3 in string_replace', t => {
+	const content =
+		'<string_replace><path>test.txt</path><old_str>null</old_str><new_str>1.0</new_str></string_replace>';
+	const result = XMLToolCallParser.parseToolCalls(content);
+
+	t.is(result.length, 1);
+	t.is(typeof result[0].parameters.old_str, 'string');
+	t.is(typeof result[0].parameters.new_str, 'string');
+	t.is(result[0].parameters.old_str, 'null');
+	t.is(result[0].parameters.new_str, '1.0');
+});
+
+test('parseToolCalls - preserves bash command containing JSON, numbers, and brackets', t => {
+	const command = 'echo \'{"status": "ok"}\' | grep -q "ok" && echo 1.0';
+	const content = `<execute_bash><command>${command}</command></execute_bash>`;
+	const result = XMLToolCallParser.parseToolCalls(content);
+
+	t.is(result.length, 1);
+	t.is(typeof result[0].parameters.command, 'string');
+	t.is(result[0].parameters.command, command);
+});
+
+test('parseToolCalls - preserves path parameter literally without coercion', t => {
+	const contentNum = '<read_file><path>123</path></read_file>';
+	const resultNum = XMLToolCallParser.parseToolCalls(contentNum);
+	t.is(resultNum[0].parameters.path, '123');
+
+	const contentNull = '<read_file><path>null</path></read_file>';
+	const resultNull = XMLToolCallParser.parseToolCalls(contentNull);
+	t.is(resultNull[0].parameters.path, 'null');
+});
+
+test('parseToolCalls - does not coerce null, 1.0, or 1e3 for generic parameters', t => {
+	const content =
+		'<custom_tool><val>null</val><ver>1.0</ver><count>1e3</count></custom_tool>';
+	const result = XMLToolCallParser.parseToolCalls(content);
+
+	t.is(result.length, 1);
+	t.is(result[0].parameters.val, 'null');
+	t.is(result[0].parameters.ver, '1.0');
+	t.is(result[0].parameters.count, '1e3');
+});

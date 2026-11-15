@@ -10,6 +10,7 @@ import {resolveToolApproval} from '../approval-policy.js';
 import {ThemeContext} from '../../hooks/useTheme.js';
 import {writeFileTool} from './write-file.js';
 import {clearReadTracker, markFileSeenAndVisible} from '../runtime/read-tracker.js';
+import {XMLToolCallParser} from '../../tool-calling/xml-parser.js';
 import {
 	resetFirewallConfig,
 	setFirewallConfig,
@@ -1339,5 +1340,50 @@ test.serial('write_file validator: refuses to overwrite a file changed outside a
 		if (!result.valid) t.regex(result.error, /modified externally/);
 	} finally {
 		process.chdir(originalCwd);
+	}
+});
+
+// ============================================================================
+// Issue #2203: XML Tool-Call Parser Regression Tests
+// ============================================================================
+
+test('write_file XML parsing regression: writes pretty-printed JSON byte-for-byte identical', async t => {
+	const filePath = join(testDir, 'pretty.json');
+	const rawJson = '{\n  "name": "nanocoder",\n  "version": "1.0.0",\n  "private": true\n}';
+	const xml = `<write_file><path>${filePath}</path><content>${rawJson}</content></write_file>`;
+
+	const parsed = XMLToolCallParser.parseToolCalls(xml);
+	t.is(parsed.length, 1);
+	t.is(parsed[0].toolName, 'write_file');
+
+	await executeWriteFile({
+		path: parsed[0].parameters.path as string,
+		content: parsed[0].parameters.content as string,
+	});
+
+	const written = await readFile(filePath, 'utf-8');
+	t.is(written, rawJson);
+});
+
+test('write_file XML parsing regression: writes literal null, 1.0, 1e3, and multiline array byte-for-byte identical', async t => {
+	for (const [filename, value] of [
+		['null.txt', 'null'],
+		['one-point-zero.txt', '1.0'],
+		['scientific.txt', '1e3'],
+		['array.json', '[\n  "item1",\n  "item2"\n]'],
+	] as const) {
+		const filePath = join(testDir, filename);
+		const xml = `<write_file><path>${filePath}</path><content>${value}</content></write_file>`;
+
+		const parsed = XMLToolCallParser.parseToolCalls(xml);
+		t.is(parsed.length, 1);
+
+		await executeWriteFile({
+			path: parsed[0].parameters.path as string,
+			content: parsed[0].parameters.content as string,
+		});
+
+		const written = await readFile(filePath, 'utf-8');
+		t.is(written, value);
 	}
 });

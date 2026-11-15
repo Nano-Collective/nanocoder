@@ -63,7 +63,7 @@ export class XMLToolCallParser {
 				continue;
 			}
 
-			const parameters = this.parseParameters(innerXml);
+			const parameters = this.parseParameters(innerXml, toolName);
 			const brokenTag = this.findBrokenTag(innerXml);
 
 			toolCalls.push({
@@ -282,11 +282,106 @@ export class XMLToolCallParser {
 	}
 
 	/**
+	 * Parameter names that represent raw textual content and must never be
+	 * coerced via JSON.parse or converted into scalar primitives.
+	 */
+	private static readonly RAW_STRING_PARAMETERS = new Set([
+		'author',
+		'base',
+		'body',
+		'branch',
+		'code',
+		'command',
+		'content',
+		'description',
+		'destination',
+		'details',
+		'diff',
+		'directory',
+		'explanation',
+		'file',
+		'file_path',
+		'filepath',
+		'fileschanged',
+		'grep',
+		'head',
+		'include',
+		'instruction',
+		'instructions',
+		'message',
+		'new_str',
+		'old_str',
+		'patch',
+		'path',
+		'pattern',
+		'plan',
+		'prompt',
+		'query',
+		'question',
+		'reason',
+		'ref',
+		'replacement',
+		'search',
+		'selector',
+		'target',
+		'text',
+		'title',
+		'url',
+		'verdict',
+		'walkthrough',
+	]);
+
+	/**
+	 * Determines whether a parameter should be preserved strictly as a raw string.
+	 */
+	private static isRawStringParameter(
+		paramName: string,
+		toolName?: string,
+	): boolean {
+		const lowerParam = paramName.toLowerCase();
+		if (this.RAW_STRING_PARAMETERS.has(lowerParam)) {
+			return true;
+		}
+
+		if (toolName) {
+			const lowerTool = toolName.toLowerCase();
+			if (
+				(lowerTool === 'write_file' || lowerTool === 'create_file') &&
+				(lowerParam === 'content' || lowerParam === 'path')
+			) {
+				return true;
+			}
+			if (
+				lowerTool === 'string_replace' &&
+				(lowerParam === 'old_str' ||
+					lowerParam === 'new_str' ||
+					lowerParam === 'path')
+			) {
+				return true;
+			}
+			if (lowerTool === 'execute_bash' && lowerParam === 'command') {
+				return true;
+			}
+			if (
+				lowerTool === 'diff_edit' &&
+				(lowerParam === 'diff' || lowerParam === 'path')
+			) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	/**
 	 * Parses parameters from inner XML content
 	 */
-	private static parseParameters(innerXml: string): Record<string, unknown> {
+	private static parseParameters(
+		innerXml: string,
+		toolName?: string,
+	): Record<string, unknown> {
 		const parameters: Record<string, unknown> = {};
-		let match;
+		let match: RegExpExecArray | null;
 
 		// Reset regex state
 		this.PARAMETER_REGEX.lastIndex = 0;
@@ -297,9 +392,27 @@ export class XMLToolCallParser {
 			// Trim whitespace from parameter value
 			const trimmedValue = paramValue.trim();
 
+			// Raw string parameters must be preserved verbatim without JSON/primitive coercion
+			if (this.isRawStringParameter(paramName, toolName)) {
+				parameters[paramName] = trimmedValue;
+				continue;
+			}
+
 			// Try to parse as JSON for complex objects/arrays
 			try {
-				parameters[paramName] = JSON.parse(trimmedValue) as unknown;
+				const parsed = JSON.parse(trimmedValue) as unknown;
+				// Never coerce 'null' string to JavaScript null primitive
+				if (parsed === null) {
+					parameters[paramName] = trimmedValue;
+				} else if (
+					typeof parsed === 'number' &&
+					String(parsed) !== trimmedValue
+				) {
+					// Preserve exact numeric representation (e.g. '1.0' -> '1.0', '1e3' -> '1e3')
+					parameters[paramName] = trimmedValue;
+				} else {
+					parameters[paramName] = parsed;
+				}
 			} catch {
 				// If not valid JSON, use as string (preserving internal whitespace/newlines)
 				parameters[paramName] = trimmedValue;

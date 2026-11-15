@@ -329,7 +329,7 @@ test('parseToolCalls: JSON argument survives an HTML wrapper around a fenced XML
 		t.is(result.toolCalls[0].function.name, 'write_file');
 		t.deepEqual(result.toolCalls[0].function.arguments, {
 			path: 'a.json',
-			content: {name: 'read_file', arguments: {path: '/x'}},
+			content: json,
 		});
 	}
 });
@@ -349,7 +349,7 @@ test('parseToolCalls: JSON tool call quoted inside an XML call stays an argument
 			t.is(result.toolCalls[0].function.name, 'write_file');
 			t.deepEqual(result.toolCalls[0].function.arguments, {
 				path: 'a.json',
-				content: {name: 'read_file', arguments: {path: '/x'}},
+				content: json,
 			});
 		}
 	}
