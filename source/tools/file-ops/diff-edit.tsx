@@ -1,5 +1,5 @@
 import {constants} from 'node:fs';
-import {access, writeFile} from 'node:fs/promises';
+import {access, lstat, writeFile} from 'node:fs/promises';
 import {resolve} from 'node:path';
 import {Box, Text} from 'ink';
 import React from 'react';
@@ -19,8 +19,11 @@ import {
 } from '@/tools/file-ops/path-validators';
 import {
 	forgetReadContent,
+	getLineNumbersForText,
 	hasSeenFile,
+	hasVisibleLines,
 	markFileSeen,
+	recordEditVisibility,
 } from '@/tools/runtime/read-tracker';
 import {createFileToolApproval} from '@/tools/runtime/tool-approval';
 import type {NanocoderToolExport} from '@/types/core';
@@ -300,6 +303,27 @@ const executeDiffEdit = async (args: DiffEditArgs): Promise<string> => {
 	invalidateCache(absPath);
 	markFileSeen(absPath);
 	forgetReadContent(absPath);
+	// Carry what the agent had read forward through the edit: each block
+	// moves the lines below it and the written region counts as seen. Blocks
+	// are applied in order, so positions follow the evolving content.
+	try {
+		const stats = await lstat(absPath);
+		let working = fileContent;
+		for (const block of blocks) {
+			const blockLines = getLineNumbersForText(working, block.search);
+			if (blockLines.length === 0) continue;
+			recordEditVisibility(
+				absPath,
+				stats,
+				blockLines[0],
+				blockLines.length,
+				block.replace.replace(/\r\n/g, '\n').split('\n').length,
+			);
+			working = replaceFirstLiteral(working, block.search, block.replace);
+		}
+	} catch {
+		// If stat fails, fall back to file-level tracking only
+	}
 
 	const blockLabel = blocks.length === 1 ? 'block' : 'blocks';
 	return (
@@ -503,6 +527,31 @@ const diffEditValidator = async (
 		const encodingResult = validateEditableEncoding(args.path, cached);
 		if (!encodingResult.valid) return encodingResult;
 		validateBlocks(cached.content, blocks, args.path);
+
+		// Line-level visibility check: ensure the agent has actually read the lines
+		// in each SEARCH block. This prevents blind edits where the model hallucinates
+		// SEARCH content it never saw.
+		const allTargetLines: number[] = [];
+		for (const block of blocks) {
+			const blockLines = getLineNumbersForText(cached.content, block.search);
+			allTargetLines.push(...blockLines);
+		}
+
+		if (allTargetLines.length > 0) {
+			try {
+				const stats = await lstat(absPath);
+				const visibilityCheck = hasVisibleLines(absPath, stats, allTargetLines);
+				if (!visibilityCheck.visible) {
+					return {
+						valid: false,
+						error:
+							visibilityCheck.error ?? 'Lines in SEARCH blocks not visible',
+					};
+				}
+			} catch {
+				// If we can't stat the file, fall back to file-level check (already passed)
+			}
+		}
 	} catch (error) {
 		return {
 			valid: false,

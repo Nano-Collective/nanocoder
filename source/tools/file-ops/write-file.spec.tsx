@@ -9,7 +9,7 @@ import {themes} from '../../config/themes.js';
 import {resolveToolApproval} from '../approval-policy.js';
 import {ThemeContext} from '../../hooks/useTheme.js';
 import {writeFileTool} from './write-file.js';
-import {clearReadTracker, markFileSeen} from '../runtime/read-tracker.js';
+import {clearReadTracker, markFileSeenAndVisible} from '../runtime/read-tracker.js';
 import {
 	resetFirewallConfig,
 	setFirewallConfig,
@@ -286,7 +286,7 @@ test('write_file validator: allows overwriting an existing file after it is read
 	const originalCwd = process.cwd();
 	try {
 		process.chdir(testDir);
-		markFileSeen('existing.txt');
+		markFileSeenAndVisible('existing.txt');
 
 		const result = await writeFileTool.validator({
 			path: 'existing.txt',
@@ -852,7 +852,7 @@ test('write_file formatter: normalizes tabs to 2 spaces', async t => {
 test('write_file: refuses a .pdf and leaves the document untouched', async t => {
 	const pdfBytes = '%PDF-1.4 fake document bytes';
 	const filePath = await createTestFile('doc.pdf', pdfBytes);
-	markFileSeen(filePath);
+	markFileSeenAndVisible(filePath);
 
 	await t.throwsAsync(
 		executeWriteFile({path: filePath, content: 'plain transcript text'}),
@@ -1279,7 +1279,7 @@ test('write_file validator: refuses to overwrite a Latin-1 file', async t => {
 	const originalCwd = process.cwd();
 	try {
 		process.chdir(testDir);
-		markFileSeen('legacy.txt');
+		markFileSeenAndVisible('legacy.txt');
 
 		const result = await writeFileTool.validator({
 			path: 'legacy.txt',
@@ -1313,4 +1313,31 @@ test('write_file: genuinely new file write succeeds without read failure', async
 	t.truthy(output);
 	const content = await readFile(filePath, 'utf-8');
 	t.is(content, 'brand new content');
+});
+
+// ============================================================================
+// Overwriting a file that changed on disk after it was read
+// ============================================================================
+
+test.serial('write_file validator: refuses to overwrite a file changed outside after the read', async t => {
+	const filePath = join(testDir, 'changed-outside.txt');
+	await writeFile(filePath, 'original\n', 'utf-8');
+
+	const originalCwd = process.cwd();
+	try {
+		process.chdir(testDir);
+		markFileSeenAndVisible('changed-outside.txt');
+
+		// Someone saves the file in an editor while the agent is working.
+		await writeFile(filePath, 'original\nedited in an editor\n', 'utf-8');
+
+		const result = await writeFileTool.validator!({
+			path: 'changed-outside.txt',
+			content: 'the agent version',
+		});
+		t.false(result.valid);
+		if (!result.valid) t.regex(result.error, /modified externally/);
+	} finally {
+		process.chdir(originalCwd);
+	}
 });
