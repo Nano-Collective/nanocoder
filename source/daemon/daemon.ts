@@ -324,7 +324,9 @@ export async function startDaemon(opts: DaemonOptions): Promise<DaemonHandle> {
 		((r: EventRouter, o: FileWatcherOptions) => new FileWatcherSource(r, o));
 	const watcher = buildFileWatcher(router, {
 		root: opts.projectRoot,
-		detectAiComments: true, // Enable AI comment detection
+		// Reading changed files for markers only pays off when a skill listens
+		// for them; the subscriptions are registered by the boot pipeline above.
+		detectAiComments: router.listByKind('file.ai-comment').length > 0,
 	});
 	const cron = new ScheduleEventSource(router);
 

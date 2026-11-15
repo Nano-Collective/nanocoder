@@ -377,9 +377,9 @@ test('file.ai-comment with path filter matches correctly', async t => {
 		payload: {
 			file: 'docs/readme.md',
 			comment: 'fix typo',
-			marker: 'AI',
+			marker: 'AI?',
 			line: 1,
-			context: '<!-- fix typo AI -->',
+			context: '<!-- fix typo AI? -->',
 		},
 		at: Date.now(),
 	});

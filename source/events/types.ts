@@ -26,7 +26,7 @@ export interface FileChangedPayload {
 export interface FileAiCommentPayload {
 	file: string;
 	comment: string;
-	marker: 'AI!' | 'AI?' | 'AI';
+	marker: 'AI!' | 'AI?';
 	line: number;
 	context: string;
 }
