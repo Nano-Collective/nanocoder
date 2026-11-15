@@ -1,5 +1,5 @@
 import {constants} from 'node:fs';
-import {access, writeFile} from 'node:fs/promises';
+import {access, lstat, writeFile} from 'node:fs/promises';
 import {resolve} from 'node:path';
 import React from 'react';
 import {getColors} from '@/config/index';
@@ -18,8 +18,11 @@ import {
 } from '@/tools/file-ops/path-validators';
 import {
 	forgetReadContent,
+	getLineNumbersForText,
 	hasSeenFile,
+	hasVisibleLines,
 	markFileSeen,
+	recordEditVisibility,
 } from '@/tools/runtime/read-tracker';
 import {createFileToolApproval} from '@/tools/runtime/tool-approval';
 import type {NanocoderToolExport} from '@/types/core';
@@ -135,6 +138,24 @@ const executeStringReplace = async (
 	// not blind.
 	markFileSeen(absPath);
 	forgetReadContent(absPath);
+	// The agent just wrote this range, so it counts as seen. The edit changed
+	// the file's mtime/size and may have moved the lines below it, so carry the
+	// rest of what the agent had read forward instead of forgetting it.
+	try {
+		const stats = await lstat(absPath);
+		const editStart = fileContent
+			.slice(0, fileContent.indexOf(old_str))
+			.split('\n').length;
+		recordEditVisibility(
+			absPath,
+			stats,
+			editStart,
+			old_str.split('\n').length,
+			new_str.split('\n').length,
+		);
+	} catch {
+		// If stat fails, fall back to file-level tracking only
+	}
 
 	const oldStrLines = old_str.split('\n');
 	const newStrLines = new_str.split('\n');
@@ -313,6 +334,26 @@ const stringReplaceValidator = async (
 				valid: false,
 				error: `Found ${occurrences} matches for the search string. Please provide more surrounding context to make the match unique.`,
 			};
+		}
+
+		// Line-level visibility check: ensure the agent has actually read the lines
+		// being edited. This prevents blind edits where the model hallucinates
+		// content it never saw.
+		const targetLines = getLineNumbersForText(fileContent, old_str);
+		if (targetLines.length > 0) {
+			try {
+				const stats = await lstat(absPath);
+				const visibilityCheck = hasVisibleLines(absPath, stats, targetLines);
+				if (!visibilityCheck.visible) {
+					return {
+						valid: false,
+						error: visibilityCheck.error ?? 'Lines not visible',
+					};
+				}
+			} catch {
+				// If we can't stat the file, fall back to file-level check (already passed)
+				// This preserves backward compatibility if stat fails for any reason
+			}
 		}
 	} catch (error) {
 		const errorMessage = formatError(error);

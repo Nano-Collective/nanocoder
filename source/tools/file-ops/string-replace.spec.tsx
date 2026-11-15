@@ -15,7 +15,7 @@ import {
 } from '../../services/session-cwd.js';
 import {stringReplaceDisplayPath} from './string-replace-preview.js';
 import {stringReplaceTool} from './string-replace.js';
-import {clearReadTracker, markFileSeen} from '../runtime/read-tracker.js';
+import {clearReadTracker, markFileSeenAndVisible} from '../runtime/read-tracker.js';
 import {
 	resetFirewallConfig,
 	setFirewallConfig,
@@ -436,7 +436,7 @@ test('string_replace validator: accepts valid input', async t => {
 	const originalCwd = process.cwd();
 	try {
 		process.chdir(testDir);
-		markFileSeen('test.txt');
+		markFileSeenAndVisible('test.txt');
 
 		const result = await stringReplaceTool.validator({
 			path: 'test.txt',
@@ -513,7 +513,7 @@ test('string_replace validator: rejects when content not found', async t => {
 	const originalCwd = process.cwd();
 	try {
 		process.chdir(testDir);
-		markFileSeen('test.txt');
+		markFileSeenAndVisible('test.txt');
 
 		const result = await stringReplaceTool.validator({
 			path: 'test.txt',
@@ -544,7 +544,7 @@ test('string_replace validator: rejects when multiple matches found', async t =>
 	const originalCwd = process.cwd();
 	try {
 		process.chdir(testDir);
-		markFileSeen('test.txt');
+		markFileSeenAndVisible('test.txt');
 
 		const result = await stringReplaceTool.validator({
 			path: 'test.txt',
@@ -601,7 +601,7 @@ test('string_replace validator: allows editing after the file is read', async t 
 	try {
 		process.chdir(testDir);
 		// Simulate a prior read_file call against this file.
-		markFileSeen('test.txt');
+		markFileSeenAndVisible('test.txt');
 
 		const result = await stringReplaceTool.validator({
 			path: 'test.txt',
@@ -1275,7 +1275,7 @@ test('string_replace validator: refuses a .docx path', async t => {
 	const originalCwd = process.cwd();
 	try {
 		process.chdir(testDir);
-		markFileSeen('spec.docx');
+		markFileSeenAndVisible('spec.docx');
 
 		const result = await stringReplaceTool.validator({
 			path: 'spec.docx',
@@ -1361,7 +1361,7 @@ test('string_replace validator: refuses a Latin-1 file', async t => {
 	const originalCwd = process.cwd();
 	try {
 		process.chdir(testDir);
-		markFileSeen('legacy.txt');
+		markFileSeenAndVisible('legacy.txt');
 
 		const result = await stringReplaceTool.validator({
 			path: 'legacy.txt',
@@ -1506,7 +1506,7 @@ test('string_replace validator: accepts an LF edit for a CRLF file', async t => 
 	const originalCwd = process.cwd();
 	try {
 		process.chdir(testDir);
-		markFileSeen('test.txt');
+		markFileSeenAndVisible('test.txt');
 
 		const result = await stringReplaceTool.validator({
 			path: 'test.txt',
@@ -1564,7 +1564,7 @@ test('string_replace: throws when mutation firewall blocks test deletion', async
 		'feature.spec.ts',
 		"test('feature A', () => {});\ntest('feature B', () => {});\n",
 	);
-	markFileSeen(filePath);
+	markFileSeenAndVisible(filePath);
 
 	await t.throwsAsync(
 		async () => {
@@ -1581,3 +1581,93 @@ test('string_replace: throws when mutation firewall blocks test deletion', async
 	t.true(content.includes('feature B'));
 });
 
+
+// ============================================================================
+// Line-level visibility across the agent's own edits
+// ============================================================================
+
+const numberedLines = (count: number) =>
+	`${Array.from({length: count}, (_, i) => `line ${i + 1}`).join('\n')}\n`;
+
+test.serial('string_replace: a second edit after a first needs no re-read', async t => {
+	await createTestFile('multi.txt', numberedLines(12));
+	const originalCwd = process.cwd();
+	try {
+		process.chdir(testDir);
+		await readFileTool.tool.execute!(
+			{path: 'multi.txt'},
+			{toolCallId: 'test', messages: []},
+		);
+
+		// The first edit turns line 2 into three lines, which moves the rest down.
+		const first = {path: 'multi.txt', old_str: 'line 2\n', new_str: 'a\nb\nc\n'};
+		t.true((await stringReplaceTool.validator!(first)).valid);
+		await stringReplaceTool.tool.execute!(first, {toolCallId: 'test', messages: []});
+
+		// Line 9 was read in full and has not changed, so it is still editable.
+		const second = {path: 'multi.txt', old_str: 'line 9\n', new_str: 'nine\n'};
+		t.true((await stringReplaceTool.validator!(second)).valid);
+		await stringReplaceTool.tool.execute!(second, {toolCallId: 'test', messages: []});
+
+		const content = await readFile(join(testDir, 'multi.txt'), 'utf-8');
+		t.true(content.startsWith('line 1\na\nb\nc\nline 3\n'));
+		t.true(content.includes('nine\n'));
+		t.false(content.includes('line 9\n'));
+	} finally {
+		process.chdir(originalCwd);
+	}
+});
+
+test.serial('string_replace: lines the agent never read are refused', async t => {
+	await createTestFile('partial.txt', numberedLines(12));
+	const originalCwd = process.cwd();
+	try {
+		process.chdir(testDir);
+		await readFileTool.tool.execute!(
+			{path: 'partial.txt', start_line: 1, end_line: 3},
+			{toolCallId: 'test', messages: []},
+		);
+
+		const seen = await stringReplaceTool.validator!({
+			path: 'partial.txt',
+			old_str: 'line 2\n',
+			new_str: 'two\n',
+		});
+		t.true(seen.valid);
+
+		const unseen = await stringReplaceTool.validator!({
+			path: 'partial.txt',
+			old_str: 'line 9\n',
+			new_str: 'nine\n',
+		});
+		t.false(unseen.valid);
+		if (!unseen.valid) t.regex(unseen.error, /has not been read/);
+	} finally {
+		process.chdir(originalCwd);
+	}
+});
+
+test.serial('string_replace: a file changed outside after the read is refused', async t => {
+	const filePath = await createTestFile('outside.txt', numberedLines(12));
+	const originalCwd = process.cwd();
+	try {
+		process.chdir(testDir);
+		await readFileTool.tool.execute!(
+			{path: 'outside.txt'},
+			{toolCallId: 'test', messages: []},
+		);
+
+		// Someone saves the file in an editor while the agent is working.
+		await writeFile(filePath, `${numberedLines(12)}added outside\n`, 'utf-8');
+
+		const result = await stringReplaceTool.validator!({
+			path: 'outside.txt',
+			old_str: 'line 5\n',
+			new_str: 'five\n',
+		});
+		t.false(result.valid);
+		if (!result.valid) t.regex(result.error, /modified externally/);
+	} finally {
+		process.chdir(originalCwd);
+	}
+});
