@@ -46,6 +46,13 @@ interface StringReplaceArgs {
 
 const STRING_REPLACE_CONTEXT_LINES = 20;
 
+// The schema marks new_str as required, but a model can still send a call
+// without it. Without this check, `undefined` reaches the replacement and the
+// literal text "undefined" is written into the file. An empty string is valid:
+// it deletes old_str.
+const NEW_STR_REQUIRED_ERROR =
+	'new_str is required and must be a string. Use an empty string ("") to delete text.';
+
 function formatUpdatedFileContext(
 	content: string,
 	startLine: number,
@@ -87,6 +94,12 @@ const executeStringReplace = async (
 		throw new Error(
 			'old_str cannot be empty. Provide the exact content to find and replace.',
 		);
+	}
+
+	// Checked again here (not only in the validator) so the file is never
+	// written when execute is reached without validation.
+	if (typeof args.new_str !== 'string') {
+		throw new Error(NEW_STR_REQUIRED_ERROR);
 	}
 
 	const formatResult = validateEditableFormat(path);
@@ -297,6 +310,10 @@ const stringReplaceValidator = async (
 			error:
 				'old_str cannot be empty. Provide the exact content to find and replace.',
 		};
+	}
+
+	if (typeof args.new_str !== 'string') {
+		return {valid: false, error: NEW_STR_REQUIRED_ERROR};
 	}
 
 	// Read-before-edit: refuse to edit a file the model has not actually seen
