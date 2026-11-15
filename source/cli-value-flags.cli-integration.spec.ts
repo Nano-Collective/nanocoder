@@ -8,16 +8,20 @@ const runtimeModules = {
 	'@/models/index': `export function setSessionContextLimit(value) {
 		globalThis.cliTestContextLimit = value;
 	}`,
-	'@/app': 'export default function App() {}',
+	'@/acp/acp-server': `export async function runAcpServer(options) {
+		console.log(JSON.stringify({acpOptions: options}));
+		process.exit(0);
+	}`,
 	'@/utils/perf-buffer': 'export function installPerfBufferGuard() {}',
 	// Every export cli.tsx pulls from this module must be stubbed here: the
 	// loader short-circuits the whole specifier, so a missing name surfaces as
 	// "<name> is not a function" at run time rather than an import error.
 	'@/config/preferences': `export function loadPreferences() { return {}; }
 		export function getAlternateScreen() { return false; }
-		export function getMouseReporting() { return false; }`,
-	ink: `export function render(element) {
-		console.log(JSON.stringify({...element.props, contextLimit: globalThis.cliTestContextLimit}));
+		export function getMouseReporting() { return false; }
+		export function getMaxFps() { return process.env.CLI_TEST_MAX_FPS ? Number(process.env.CLI_TEST_MAX_FPS) : 30; }`,
+	'@/app/render-tui': `export function renderTui(props, options) {
+		console.log(JSON.stringify({...props, contextLimit: globalThis.cliTestContextLimit, inkOptions: options}));
 		process.exit(0);
 	}`,
 };
@@ -35,7 +39,7 @@ const loaderUrl = `data:text/javascript,${encodeURIComponent(
 )}`;
 const cliPath = fileURLToPath(new URL('./cli.tsx', import.meta.url));
 
-function runCli(args: string[]) {
+function runCli(args: string[], extraEnv: Record<string, string> = {}) {
 	return spawnSync(
 		process.execPath,
 		[
@@ -54,6 +58,7 @@ function runCli(args: string[]) {
 				...process.env,
 				NODE_DISABLE_COMPILE_CACHE: '1',
 				TSX_DISABLE_CACHE: '1',
+				...extraEnv,
 			},
 		},
 	);
@@ -211,4 +216,32 @@ test('--json cannot be combined with --no-plain', t => {
 	const result = runCli(['--json', 'run', 'hello']);
 	t.is(result.status, 1);
 	t.true(result.stderr.includes('cannot be combined with --no-plain'), result.stderr);
+});
+
+test('Ink render receives default maxFps of 30 when unconfigured', t => {
+	const result = runCli(['run', 'hello']);
+	t.is(result.status, 0, result.stderr);
+	const output = JSON.parse(result.stdout);
+	t.is(output.inkOptions?.maxFps, 30);
+});
+
+test('Ink render receives configured maxFps in render options', t => {
+	const result = runCli(['run', 'hello'], {CLI_TEST_MAX_FPS: '15'});
+	t.is(result.status, 0, result.stderr);
+	const output = JSON.parse(result.stdout);
+	t.is(output.inkOptions?.maxFps, 15);
+});
+
+test('--acp hands --mode to the ACP server as the starting mode', t => {
+	for (const option of [['--mode', 'normal'], ['--mode=normal']]) {
+		const result = runCli(['--acp', ...option]);
+		t.is(result.status, 0, result.stderr);
+		t.is(JSON.parse(result.stdout).acpOptions.mode, 'normal');
+	}
+});
+
+test('--acp without --mode leaves the starting mode unset', t => {
+	const result = runCli(['--acp']);
+	t.is(result.status, 0, result.stderr);
+	t.is(JSON.parse(result.stdout).acpOptions.mode, undefined);
 });

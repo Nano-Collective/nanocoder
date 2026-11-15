@@ -242,6 +242,53 @@ test('matchGlob: basic patterns', t => {
 	t.false(matchGlob('file.txt', 'other.txt'));
 });
 
+test('matchGlob: globstar slash preserves filename and directory boundaries', t => {
+	const cases: Array<[string, string, boolean]> = [
+		['**/foo.ts', 'foo.ts', true],
+		['**/foo.ts', 'a/foo.ts', true],
+		['**/foo.ts', 'a/b/foo.ts', true],
+		['**/foo.ts', 'barfoo.ts', false],
+		['**/foo.ts', 'a/barfoo.ts', false],
+		['**/package.json', 'mypackage.json', false],
+		['src/**/x.ts', 'src/x.ts', true],
+		['src/**/x.ts', 'src/a/x.ts', true],
+		['src/**/x.ts', 'src/a/b/x.ts', true],
+		['src/**/x.ts', 'src/abx.ts', false],
+		['src/**/x.ts', 'src/a/abx.ts', false],
+		['**/foo.ts', 'a\\foo.ts', true],
+		['**/foo.ts', 'a\\barfoo.ts', false],
+		['src\\**\\x.ts', 'src\\abx.ts', false],
+		['**/{foo,bar}.ts', 'a/foo.ts', true],
+		['**/{foo,bar}.ts', 'a/notfoo.ts', false],
+		['docs/**/', 'docs/a.md', true],
+		['docs/**/', 'docs/deep/sub/file.md', true],
+		['docs/**/', 'src/a.md', false],
+		['**/', 'foo.ts', true],
+		['docs\\**\\', 'docs\\a.md', true],
+		['docs/**', 'docs/deep/sub/file.md', true],
+		['*a**a', 'a/a', true],
+	];
+	for (const [pattern, path, expected] of cases) {
+		t.is(matchGlob(pattern, path), expected, `${pattern} vs ${path}`);
+	}
+});
+
+test('file.changed globstar filter ignores look-alike filenames', async t => {
+	const d = makeDispatcher();
+	const router = new EventRouter(d);
+	router.subscribe(fileChangedSub('exact-name', {filter: {paths: ['**/foo.ts']}}));
+
+	await router.emit(fileEvent('barfoo.ts'));
+	await router.emit(fileEvent('a/barfoo.ts'));
+	t.is(d.calls.length, 0);
+	await router.emit(fileEvent('foo.ts'));
+	await router.emit(fileEvent('a/foo.ts'));
+	t.deepEqual(d.calls.map(call => call.event.payload), [
+		{file: 'foo.ts', eventKind: 'change'},
+		{file: 'a/foo.ts', eventKind: 'change'},
+	]);
+});
+
 // Chokidar reports the platform separator, so on Windows a `/`-authored
 // pattern is asked to match `docs\guide.md`. Both directions matter: a
 // segment pattern must still match, and `*` must not cross a backslash any
@@ -270,4 +317,80 @@ test('matchGlob: patterns authored with Windows separators', t => {
 	t.true(matchGlob('docs\\**', 'docs/guide.md'));
 	t.true(matchGlob('docs\\**', 'docs\\guide.md'));
 	t.false(matchGlob('docs\\*.md', 'docs/deep/guide.md'));
+});
+
+// A dispatch resolves only when its triggered run ends, so subscriptions on
+// one event must start together, not wait for each other.
+test('emit starts every matching subscription without waiting for the others', async t => {
+	const started: string[] = [];
+	let release: () => void = () => {};
+	const blocked = new Promise<void>(resolve => {
+		release = resolve;
+	});
+	const router = new EventRouter({
+		dispatch: async sub => {
+			started.push(sub.id);
+			if (sub.id === 'slow') await blocked;
+		},
+	});
+	router.subscribe(cronSub('slow', '0 9 * * *'));
+	router.subscribe(cronSub('fast', '0 9 * * *'));
+
+	const done = router.emit(cronEvent('0 9 * * *'));
+	await new Promise(resolve => setImmediate(resolve));
+	t.deepEqual(started, ['slow', 'fast']);
+	release();
+	await done;
+});
+
+test('one failing subscription neither skips the others nor rejects emit', async t => {
+	const dispatched: string[] = [];
+	const errors: Array<{id: string; message: string}> = [];
+	const router = new EventRouter(
+		{
+			dispatch(sub) {
+				dispatched.push(sub.id);
+				if (sub.id === 'throws') throw new Error('sync boom');
+				if (sub.id === 'rejects') return Promise.reject(new Error('async boom'));
+			},
+		},
+		(sub, _event, error) => {
+			errors.push({id: sub.id, message: (error as Error).message});
+		},
+	);
+	router.subscribe(cronSub('throws', '* * * * *'));
+	router.subscribe(cronSub('rejects', '* * * * *'));
+	router.subscribe(cronSub('ok', '* * * * *'));
+
+	await t.notThrowsAsync(router.emit(cronEvent('* * * * *')));
+	t.deepEqual(dispatched, ['throws', 'rejects', 'ok']);
+	t.deepEqual(errors, [
+		{id: 'throws', message: 'sync boom'},
+		{id: 'rejects', message: 'async boom'},
+	]);
+});
+
+// matchGlob runs on the shared utils/fs/glob-match engine.
+
+test('matchGlob keeps a trailing **/ meaning "anything under this directory"', t => {
+	t.true(matchGlob('docs/**/', 'docs/a.md'));
+	t.true(matchGlob('docs/**/', 'docs/sub/a.md'));
+	t.false(matchGlob('docs/**/', 'src/a.md'));
+	t.true(matchGlob('**/', 'a/b/c.ts'));
+});
+
+test('matchGlob stays fast on a pattern that makes a backtracking regex hang', t => {
+	const start = Date.now();
+	t.false(matchGlob(`${'*a'.repeat(25)}b`, 'a'.repeat(2000)));
+	t.false(matchGlob('**/**/**/**/**/**/x', `${'a/'.repeat(200)}y`));
+	t.true(Date.now() - start < 200);
+});
+
+test('matchGlob matches nothing for a pattern the matcher refuses, instead of throwing', t => {
+	t.false(matchGlob('a'.repeat(1001), 'a'.repeat(1001)));
+	t.false(matchGlob('{a,b}'.repeat(10), 'a'.repeat(10)));
+});
+
+test('matchGlob trims whitespace around brace alternatives', t => {
+	t.true(matchGlob('src/*.{ts, tsx}', 'src/a.tsx'));
 });

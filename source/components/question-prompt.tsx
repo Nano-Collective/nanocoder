@@ -4,7 +4,10 @@ import TextInput from '@/components/text-input';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
-import type {PendingQuestion, QuestionOptionMeta} from '@/utils/question-queue';
+import type {
+	PendingQuestion,
+	QuestionOptionMeta,
+} from '@/tools/runtime/question-queue';
 import {ensureString} from '@/utils/type-helpers';
 
 interface QuestionPromptProps {

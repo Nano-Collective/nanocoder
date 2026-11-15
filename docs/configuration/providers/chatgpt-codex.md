@@ -24,7 +24,7 @@ The `sdkProvider: "chatgpt-codex"` field enables the ChatGPT/Codex authenticatio
 ## Setup
 
 1. Ensure you have an active [ChatGPT subscription](https://chatgpt.com)
-2. Log in, either inside Nanocoder with `/codex-login [provider-name]` or from a shell with `nanocoder codex login [provider-name]`
+2. Log in, either inside Nanocoder with `/login codex [provider-name]` or from a shell with `nanocoder codex login [provider-name]`
 3. Credentials are cached locally and refreshed automatically
 
 Credentials are stored under the provider name you log in with, and looked up by the exact `name` of the provider entry. Both commands default to `ChatGPT`, as does the `/settings providers` wizard. If you name the provider something else, pass the same name when logging in, for example `nanocoder codex login "Work ChatGPT"`.

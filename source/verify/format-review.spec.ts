@@ -88,3 +88,13 @@ test('formatReviewBody notes the review is a non-blocking comment', t => {
 	});
 	t.true(body.includes('does not block merge'));
 });
+
+test('formatReviewBody redacts secrets quoted from the diff', t => {
+	const body = formatReviewBody({
+		prNumber: 7,
+		subagentOutput: 'Hardcoded key AKIAIOSFODNN7EXAMPLE in config.ts.',
+		scan: noFindings,
+	});
+	t.false(body.includes('AKIAIOSFODNN7EXAMPLE'));
+	t.true(body.includes('[REDACTED]'));
+});

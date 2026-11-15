@@ -19,7 +19,7 @@ sidebar_order: 19
 }
 ```
 
-Together AI model IDs are namespaced (e.g. `deepseek-ai/DeepSeek-V3`, `meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8`). Browse the full list at [Available models](https://docs.together.ai/docs/serverless/models).
+Together AI model IDs are namespaced (e.g. `deepseek-ai/DeepSeek-V4-Pro-0813`, `zai-org/GLM-5.3`). Browse the full list at [Available models](https://docs.together.ai/docs/serverless/models).
 
 ## Setup
 

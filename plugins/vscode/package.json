@@ -2,7 +2,7 @@
 	"name": "nanocoder-vscode",
 	"displayName": "Nanocoder",
 	"description": "VS Code integration for Nanocoder - local-first AI coding assistant",
-	"version": "0.3.0",
+	"version": "0.4.0",
 	"publisher": "nanocollective",
 	"repository": {
 		"type": "git",
@@ -187,7 +187,7 @@
 					"type": "string",
 					"default": "auto-accept",
 					"scope": "resource",
-					"description": "The current operating mode for the Nanocoder assistant (e.g. chat, auto-accept)"
+					"description": "The current operating mode for the Nanocoder assistant: normal, auto-accept, yolo, plan or architect"
 				},
 				"nanocoder.model": {
 					"type": "string",

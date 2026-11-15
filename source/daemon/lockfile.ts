@@ -17,13 +17,16 @@ import {existsSync, mkdirSync} from 'node:fs';
 import {readFile, rename, unlink, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {dirname, join, posix} from 'node:path';
-import {ensureNanocoderGitignore} from '@/utils/ensure-nanocoder-gitignore';
+import {ensureNanocoderGitignore} from '@/utils/fs/ensure-nanocoder-gitignore';
 
 export interface DaemonLock {
 	pid: number;
 	socketPath: string;
 	startedAt: number;
 	projectRoot: string;
+	/** CI investigation trust level the daemon was started with. Optional:
+	 * absent in lockfiles written by older daemons. */
+	ciTrustLevel?: string;
 }
 
 export function getLockfilePath(projectRoot: string): string {

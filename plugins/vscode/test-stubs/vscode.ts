@@ -112,6 +112,13 @@ export class Uri {
 		return new Uri('file', fsPath);
 	}
 
+	static parse(val: string): Uri {
+		const idx = val.indexOf(':');
+		const scheme = idx !== -1 ? val.slice(0, idx) : 'file';
+		const fsPath = idx !== -1 ? val.slice(idx + 1) : val;
+		return new Uri(scheme, fsPath);
+	}
+
 	static joinPath(base: Uri, ...parts: string[]): Uri {
 		return new Uri(base.scheme, [base.fsPath, ...parts].join('/'));
 	}
@@ -135,6 +142,14 @@ export class RelativePattern {
 		public readonly base: Uri | {uri: Uri} | string,
 		public readonly pattern: string,
 	) {}
+}
+
+export class TabInputText {
+	constructor(public readonly uri: Uri) {}
+}
+
+export class TabInputTextDiff {
+	constructor(public readonly original: Uri, public readonly modified: Uri) {}
 }
 
 export enum SymbolKind {
@@ -256,6 +271,7 @@ export const workspace = {
 		__test.findFiles(include, exclude, limit),
 	openTextDocument: (uri: Uri) => __test.openTextDocument(uri),
 	asRelativePath: (target: Uri | string) => __test.asRelativePath(target),
+	registerTextDocumentContentProvider: () => noopDisposable,
 	onDidChangeConfiguration: () => noopDisposable,
 	onDidChangeTextDocument: () => noopDisposable,
 };
@@ -298,6 +314,11 @@ export const window = {
 	showTextDocument: async () => undefined,
 	showOpenDialog: async () => undefined,
 	registerWebviewViewProvider: () => noopDisposable,
+	tabGroups: {
+		all: [] as {tabs: unknown[]}[],
+		close: async (_tab: unknown) => true,
+	},
+	activeTerminal: undefined as unknown,
 	onDidChangeActiveTextEditor: () => noopDisposable,
 	onDidChangeTextEditorSelection: () => noopDisposable,
 	onDidStartTerminalShellExecution: (listener: (event: any) => unknown) => {

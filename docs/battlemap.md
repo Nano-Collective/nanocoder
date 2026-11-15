@@ -66,7 +66,7 @@ Twelve axes grouped into four buckets:
 
 Nanocoder's provider list is the broadest of any community-led project here:
 
-- **Native cloud**: Anthropic, Atlas Cloud, ChatGPT / Codex, Cheaper Inference, Google Gemini, GitHub Copilot, GitHub Models, Groq, Kimi Code, MiniMax Coding, Mistral, OpenAI, OpenRouter, OrcaRouter, Poe, Requesty, Thesean AI, Together AI, Z.ai, Z.ai Coding
+- **Native cloud**: Anthropic, Atlas Cloud, ChatGPT / Codex, Google Gemini, GitHub Copilot, GitHub Models, Groq, Kimi Code, MiniMax Coding, Mistral, OpenAI, OpenRouter, Poe, Requesty, Thesean AI, Together AI, Z.ai, Z.ai Coding
 - **Local**: Atomic Chat, Ollama, llama.cpp, llama-swap, LM Studio, LocalAI, MLX Server, vLLM
 - **Custom**: any OpenAI-compatible endpoint
 
@@ -94,7 +94,7 @@ Nanocoder is the only project in this survey that is **collectively owned, non-p
 
 | Tool | Local models | MCP | Extensibility | Tool calling | Subagents / scheduled |
 |---|---|---|---|---|---|
-| **Nanocoder** | **8 local servers (Atomic Chat, Ollama, llama.cpp, llama-swap, LM Studio, LocalAI, MLX, vLLM)** | **Client** | **Slash + custom markdown commands, custom tools, Skills (bundles + flat-file), lifecycle hooks, MCP, LSP, runtime model tuning** | **Native function calling + XML fallback + JSON fallback (malformed calls are sent back to the model to self-correct)** | **Subagents + cron scheduler + event-driven triggers via per-project daemon** |
+| **Nanocoder** | **8 local servers (Atomic Chat, Ollama, llama.cpp, llama-swap, LM Studio, LocalAI, MLX, vLLM)** | **Client** | **Slash + custom markdown commands, custom tools, Skills (bundles + flat-file), lifecycle hooks, in-process JavaScript plugins, MCP, LSP, runtime model tuning** | **Native function calling + XML fallback + JSON fallback (malformed calls are sent back to the model to self-correct)** | **Subagents + cron scheduler + event-driven triggers via per-project daemon** |
 | Claude Code | None (cloud only) | Client | Slash commands, Skills, Hooks, Agent SDK | Native | Subagents + Routines (cloud cron) |
 | Codex CLI | Via OpenAI-compatible config | Client | Slash commands, AGENTS.md, Skills, lifecycle hooks | Native | Subagents; no cron |
 | Gemini CLI | Not documented | Client | Custom commands, Extensions, tools, hooks | Native | Subagents; no scheduler |
@@ -130,7 +130,7 @@ Runtime model tuning at this scope (changing tool profiles, compaction strategy,
 
 | Tool | Interface | Plain / non-TTY |
 |---|---|---|
-| **Nanocoder** | TUI (Ink), VS Code extension with live diffs, ACP agent for editor integration, `--plain` shell | Yes (`--plain`, `run` subcommand) |
+| **Nanocoder** | TUI (Ink) with optional voice mode, VS Code extension with live diffs, ACP agent for editor integration, `--plain` shell | Yes (`--plain`, `run` subcommand) |
 | Claude Code | TUI, VS Code, Cursor, JetBrains, Desktop, Web, iOS, Slack | Yes (`claude -p`) |
 | Codex CLI | Rust TUI, IDE extensions, Desktop, Web | Yes (`codex exec`) |
 | Gemini CLI | TUI, VS Code companion, ACP IDE integration | Yes (`-p` with JSON output) |
@@ -170,7 +170,7 @@ What this means in practice: the project's incentives are aligned with the peopl
 
 **Zero telemetry. Zero tracking. No analytics product, no usage metrics phoned home.** Beyond the providers and MCP servers you configure, Nanocoder makes exactly two calls on its own, and neither carries your code, prompts or any identifier:
 
-- **Version check**: each interactive start asks the public npm registry for the latest `@nanocollective/nanocoder` version, so it can tell you when an update is available. There is currently no setting to turn this off.
+- **Version check**: each interactive start asks the public npm registry for the latest `@nanocollective/nanocoder` version, so it can tell you when an update is available. Set `NANOCODER_NO_UPDATE_CHECK=1` to turn it off; `/update` still checks when you ask.
 - **Model metadata**: context limits and pricing are looked up from the public [models.dev](https://models.dev) catalogue, downloaded once and cached locally.
 
 Compare that to the rest of the field: Anthropic and OpenAI's default postures are not transparent in their public repos; OpenCode's telemetry posture is under-documented and OMP states none at all; Crush and Pi ship version checks and install pings too.
@@ -257,7 +257,7 @@ This is real and worth being clear about.
 
 - **Community size.** Every other tool here sits above Nanocoder (<!--stars:Nano-Collective/nanocoder-->2.4k<!--/stars--> stars): OpenCode <!--stars:anomalyco/opencode-->203k<!--/stars-->, Claude Code <!--stars:anthropics/claude-code-->143k<!--/stars-->, Codex <!--stars:openai/codex-->120k<!--/stars-->, Gemini CLI <!--stars:google-gemini/gemini-cli-->107k<!--/stars-->, Pi <!--stars:earendil-works/pi-->99k<!--/stars-->, Aider <!--stars:Aider-AI/aider-->49k<!--/stars-->, OMP <!--stars:can1357/oh-my-pi-->28k<!--/stars-->, Crush <!--stars:charmbracelet/crush-->28k<!--/stars-->. Growth and contribution velocity matter more than absolute count, but the gap is large and it is not closing on its own.
 - **Surface breadth.** Claude Code, Codex, and OpenCode ship desktop and / or web surfaces. Nanocoder is TUI plus VS Code plus ACP plus `--plain`. Enough for most CLI users, not all.
-- **Extension depth.** Pi's TypeScript extension API is still deeper and more programmable than Nanocoder's file-based Skills + MCP + custom-tools + hooks combination.
+- **Extension depth.** Pi's TypeScript extension API is still deeper and more programmable than Nanocoder's file-based Skills + MCP + custom-tools + hooks combination. Nanocoder's in-process plugins (`.nanocoder/plugins/*.mjs`) can block or annotate tool calls, observe compaction, deny permission prompts and append prompt context, but they cannot add tools, commands or UI.
 - **IDE-level code intelligence.** OMP wires full LSP and DAP into the agent's tool surface. Nanocoder has an LSP client but nothing at that depth, and no debugger integration at all.
 - **Distribution polish.** Crush's single Go binary and OMP's prebuilt binaries are both smoother than Node + pnpm. Nanocoder mitigates with Homebrew and Nix Flakes.
 

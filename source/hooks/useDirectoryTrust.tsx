@@ -1,13 +1,17 @@
 import path from 'path';
 import {useCallback, useState} from 'react';
+import {loadPreferences, savePreferences} from '@/config/preferences';
 import {
+	ensureDirectoryTrust,
 	grantDirectoryTrust,
 	isDirectoryTrusted,
-	loadPreferences,
-	savePreferences,
-} from '@/config/preferences';
+} from '@/config/trust/directory-trust';
 import {formatError} from '@/utils/error-formatter';
-import {logError, logInfo} from '@/utils/message-queue';
+import {
+	notifyError,
+	notifyInfo,
+	notifyWarning,
+} from '@/utils/message-queue-core';
 
 interface UseDirectoryTrustReturn {
 	isTrusted: boolean;
@@ -27,13 +31,24 @@ function checkTrustSync(directory: string): {
 	error: string | null;
 } {
 	try {
-		return {
-			trusted: isDirectoryTrusted(directory, loadPreferences()),
-			error: null,
-		};
+		// Same resolution as --plain, ACP and the daemon, including
+		// NANOCODER_TRUST_DIRECTORY=1 recording the folder as trusted. A
+		// project .env cannot set that variable (see project-dotenv), so only
+		// the user's own shell can skip the disclaimer this way.
+		const trust = ensureDirectoryTrust(directory, false);
+		if (trust.persisted) {
+			notifyInfo(
+				`Marked ${path.resolve(directory)} as trusted (NANOCODER_TRUST_DIRECTORY=1).`, // nosemgrep
+			);
+		} else if (trust.persistFailed) {
+			notifyWarning(
+				'NANOCODER_TRUST_DIRECTORY=1 trusted this directory for this run, but saving it to your preferences failed.',
+			);
+		}
+		return {trusted: trust.trusted, error: null};
 	} catch (err) {
 		const errorMessage = formatError(err);
-		logError(`${errorMessage}`);
+		notifyError(`${errorMessage}`);
 		return {
 			trusted: false,
 			error: `Failed to check directory trust status: ${errorMessage}`,
@@ -74,7 +89,7 @@ export function useDirectoryTrust(
 						shownFingerprint,
 					);
 					savePreferences(granted);
-					logInfo(
+					notifyInfo(
 						`Directory added to trusted list: ${path.resolve(directory)}`, // nosemgrep
 					);
 				}
@@ -84,7 +99,7 @@ export function useDirectoryTrust(
 				const errorMessage = formatError(err);
 				setError(`Failed to save directory trust: ${errorMessage}`);
 
-				logError(`${errorMessage}`);
+				notifyError(`${errorMessage}`);
 			}
 		},
 		[directory],
