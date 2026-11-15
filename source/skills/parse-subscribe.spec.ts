@@ -38,6 +38,31 @@ test('parses schedule.cron with cron expression', t => {
 	t.deepEqual(result, [{kind: 'schedule.cron', cron: '0 9 * * MON'}]);
 });
 
+test('parses ci.job.failed with branches', t => {
+	const result = parseSubscribeBlock([
+		{kind: 'ci.job.failed', branches: ['main', 'release/**']},
+	]);
+	t.deepEqual(result, [
+		{kind: 'ci.job.failed', branches: ['main', 'release/**']},
+	]);
+});
+
+test('parses ci.job.failed with no branches', t => {
+	const result = parseSubscribeBlock([{kind: 'ci.job.failed'}]);
+	t.deepEqual(result, [{kind: 'ci.job.failed'}]);
+});
+
+test('rejects bad ci.job.failed branches entry', t => {
+	t.throws(
+		() =>
+			parseSubscribeBlock([{kind: 'ci.job.failed', branches: [42]}]),
+		{
+			instanceOf: SubscribeParseError,
+			message: /branches must be an array/,
+		},
+	);
+});
+
 test('carries through target and confirm fields', t => {
 	const result = parseSubscribeBlock([
 		{

@@ -7,12 +7,13 @@ import {
 	useRef,
 	useState,
 } from 'react';
-import {isNewlineKey} from '@/utils/newline-key';
+import {isNewlineKey} from '@/terminal/newline-key';
+import {pasteEvents} from '@/terminal/terminal-paste';
 import {
 	getVisualLineSegments,
 	moveCursorToVisualLine,
 	wrapWithTrimmedContinuations,
-} from '@/utils/text-wrapping';
+} from '@/terminal/text-wrapping';
 
 /**
  * The raw byte sequence behind the keypress a `useInput` handler is running
@@ -80,6 +81,25 @@ export function classifyIncomingValue(
 	return {kind: 'unchanged', pending: [...pending]};
 }
 
+// Cursor offsets are UTF-16 code-unit indexes into the value. An astral
+// character (every emoji) is a surrogate pair, two units, so a key press has to
+// move over or delete it whole: stepping by one unit strands the caret inside
+// the pair and lets Backspace/Delete leave a lone surrogate behind.
+
+/** Pulls an offset that falls inside a surrogate pair back to the pair's start. */
+function snapToCharBoundary(value: string, offset: number): number {
+	return (value.codePointAt(offset - 1) ?? 0) > 0xffff ? offset - 1 : offset;
+}
+
+function stepBack(value: string, offset: number): number {
+	return snapToCharBoundary(value, Math.max(0, offset - 1));
+}
+
+function stepForward(value: string, offset: number): number {
+	const width = (value.codePointAt(offset) ?? 0) > 0xffff ? 2 : 1;
+	return Math.min(value.length, offset + width);
+}
+
 export type Props = {
 	readonly placeholder?: string;
 	readonly focus?: boolean;
@@ -93,6 +113,8 @@ export type Props = {
 	readonly wrapWidth?: number;
 	readonly handleEnter?: boolean;
 	readonly onEdgeArrow?: (direction: 'up' | 'down') => void;
+	/** Replaces the default paste handling (insert at the caret). */
+	readonly onPaste?: (payload: string) => void;
 };
 
 /**
@@ -126,6 +148,7 @@ const TextInput = forwardRef<TextInputHandle, Props>(function TextInput(
 		wrapWidth,
 		handleEnter = true,
 		onEdgeArrow,
+		onPaste,
 	}: Props,
 	ref,
 ) {
@@ -194,6 +217,43 @@ const TextInput = forwardRef<TextInputHandle, Props>(function TextInput(
 	// state — and only clamp it against the new value's bounds.
 	const skipNextCursorResetRef = useRef(false);
 
+	// cli.tsx lifts bracketed pastes off stdin before Ink sees them, so a field
+	// that doesn't take them from pasteEvents never receives them at all.
+	// Subscribe while focused, the same condition that gates keystrokes, so a
+	// paste lands in exactly the field that typing would. The handler is read
+	// through a ref so the subscription doesn't churn on every render.
+	const handlePasteRef = useRef<(payload: string) => void>(() => {});
+	// Reassigned on every render, deliberately outside an effect: the listener
+	// must always call the latest onPaste/onChange. Moving this into an effect
+	// would bring back the stale closure the ref is here to avoid.
+	handlePasteRef.current = (payload: string) => {
+		if (onPaste) {
+			onPaste(payload);
+			return;
+		}
+		// Terminals send line breaks in a paste as CR.
+		const text = payload.replace(/\r\n?/g, '\n');
+		const current = originalValueRef.current;
+		const offset = cursorOffsetRef.current;
+		const next = current.slice(0, offset) + text + current.slice(offset);
+		cursorOffsetRef.current = offset + text.length;
+		originalValueRef.current = next;
+		recordEmit(next);
+		setState({cursorOffset: offset + text.length, cursorWidth: 0});
+		onChange(next);
+	};
+
+	useEffect(() => {
+		if (!focus) {
+			return;
+		}
+		const handlePaste = (payload: string) => handlePasteRef.current(payload);
+		pasteEvents.on('paste', handlePaste);
+		return () => {
+			pasteEvents.off('paste', handlePaste);
+		};
+	}, [focus]);
+
 	useEffect(() => {
 		if (!focus || !showCursor) {
 			return;
@@ -254,7 +314,9 @@ const TextInput = forwardRef<TextInputHandle, Props>(function TextInput(
 		});
 	}, [originalValue, focus, showCursor]);
 
-	// Word-jump helpers (whitespace-delimited, like readline Alt+B/F)
+	// Word-jump helpers (whitespace-delimited). Ctrl+Left lands on the start of
+	// the previous word, like readline's Alt+B; Ctrl+Right lands on the start of
+	// the next word, where readline's Alt+F would stop at the end of this one.
 	// Newlines are treated as whitespace — Ctrl+Left/Right cross line boundaries.
 	function moveToPrevWord(value: string, offset: number): number {
 		let i = offset;
@@ -298,17 +360,23 @@ const TextInput = forwardRef<TextInputHandle, Props>(function TextInput(
 
 		renderedValue = value.length > 0 ? '' : chalk.inverse(' ');
 
+		// for...of yields code points but cursorOffset counts UTF-16 units, so
+		// advance by each character's unit length. A character is highlighted
+		// when any of its units falls in the caret range.
 		let i = 0;
 
 		for (const char of value) {
-			if (i >= cursorOffset - cursorActualWidth && i <= cursorOffset) {
+			if (
+				i + char.length > cursorOffset - cursorActualWidth &&
+				i <= cursorOffset
+			) {
 				renderedValue +=
 					char === '\n' ? chalk.inverse(' ') + '\n' : chalk.inverse(char);
 			} else {
 				renderedValue += char;
 			}
 
-			i++;
+			i += char.length;
 		}
 
 		if (value.length > 0 && cursorOffset === value.length) {
@@ -341,11 +409,13 @@ const TextInput = forwardRef<TextInputHandle, Props>(function TextInput(
 				}
 
 				const direction = key.upArrow ? 'up' : 'down';
-				const next = moveCursorToVisualLine(segments, cur, direction);
-				if (next === null) {
+				const target = moveCursorToVisualLine(segments, cur, direction);
+				if (target === null) {
 					// First/last visual line — hand off to history navigation
 					onEdgeArrow?.(direction);
 				} else {
+					// A column on the new row can fall inside an emoji's pair.
+					const next = snapToCharBoundary(val, target);
 					cursorOffsetRef.current = next;
 					setState(s => ({...s, cursorOffset: next}));
 				}
@@ -408,7 +478,7 @@ const TextInput = forwardRef<TextInputHandle, Props>(function TextInput(
 						);
 					}
 				} else if (key.rightArrow) {
-					// Ctrl+Right: jump to end of next word
+					// Ctrl+Right: jump to start of next word
 					if (showCursor) {
 						nextCursorOffset = moveToNextWord(
 							originalValueRef.current,
@@ -443,7 +513,7 @@ const TextInput = forwardRef<TextInputHandle, Props>(function TextInput(
 						case 'b': {
 							// Move cursor back one character
 							if (showCursor) {
-								nextCursorOffset--;
+								nextCursorOffset = stepBack(nextValue, nextCursorOffset);
 							}
 
 							break;
@@ -452,7 +522,7 @@ const TextInput = forwardRef<TextInputHandle, Props>(function TextInput(
 						case 'f': {
 							// Move cursor forward one character
 							if (showCursor) {
-								nextCursorOffset++;
+								nextCursorOffset = stepForward(nextValue, nextCursorOffset);
 							}
 
 							break;
@@ -515,11 +585,11 @@ const TextInput = forwardRef<TextInputHandle, Props>(function TextInput(
 				}
 			} else if (key.leftArrow) {
 				if (showCursor) {
-					nextCursorOffset--;
+					nextCursorOffset = stepBack(nextValue, nextCursorOffset);
 				}
 			} else if (key.rightArrow) {
 				if (showCursor) {
-					nextCursorOffset++;
+					nextCursorOffset = stepForward(nextValue, nextCursorOffset);
 				}
 			} else if (isBackspaceKey(key, rawInputRef.current)) {
 				// Backspace deletes the character before the cursor.
@@ -533,13 +603,14 @@ const TextInput = forwardRef<TextInputHandle, Props>(function TextInput(
 				// kittyKeyboard — if that changes, this guard needs the
 				// corresponding handling.
 				if (cursorOffsetRef.current > 0) {
+					const start = stepBack(nextValue, cursorOffsetRef.current);
 					nextValue =
-						originalValueRef.current.slice(0, cursorOffsetRef.current - 1) +
+						originalValueRef.current.slice(0, start) +
 						originalValueRef.current.slice(
 							cursorOffsetRef.current,
 							originalValueRef.current.length,
 						);
-					nextCursorOffset--;
+					nextCursorOffset = start;
 				}
 			} else if (key.delete) {
 				// Delete removes the character after the cursor (forward delete).
@@ -550,7 +621,7 @@ const TextInput = forwardRef<TextInputHandle, Props>(function TextInput(
 					nextValue =
 						originalValueRef.current.slice(0, cursorOffsetRef.current) +
 						originalValueRef.current.slice(
-							cursorOffsetRef.current + 1,
+							stepForward(nextValue, cursorOffsetRef.current),
 							originalValueRef.current.length,
 						);
 					// Cursor stays in place — forward delete doesn't move it.

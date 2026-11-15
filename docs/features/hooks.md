@@ -121,7 +121,7 @@ Surfaces:
 
 - `pre-tool-use` and `post-tool-use` fire everywhere tools run: the interactive TUI (including streamed `execute_bash`), `nanocoder run`, the `--plain` shell, ACP, and subagents.
 - `post-tool-use` fires for every call that produces a result, successful or not — a handler that threw, a validation failure, malformed arguments. An audit-log hook therefore sees the failures too, which is usually the point. A call refused by `pre-tool-use` is the one exception: it never ran, so `post-tool-use` does not fire for it.
-- `session-start`, `session-end`, and `user-prompt-submit` fire in the interactive TUI and in `run` / `--plain`. In `run`, the prompt on the command line is the submitted prompt, and a veto exits 1 before any model call. ACP sessions are driven by the editor and fire the tool hooks only.
+- `session-start`, `session-end`, and `user-prompt-submit` fire in the interactive TUI, in `run` / `--plain`, and in ACP. In `run`, the prompt on the command line is the submitted prompt, and a veto exits 1 before any model call. In ACP each editor chat is a session: `session-start` fires when the chat is created, loaded or resumed, `session-end` when the editor closes or deletes it (and at shutdown for any still open), and a `user-prompt-submit` veto ends that prompt with the stop reason `refusal` before any model call.
 - `pre-compact` fires for automatic compaction and for `/compact`.
 
 ### `session-end` runs on a shutdown budget
@@ -236,11 +236,13 @@ Shell hooks for the same event run first. If a shell hook blocks, plugins do not
 
 An editor session (ACP) has no trust prompt. It loads plugins from the session's workspace only when that directory is already in your trusted list. Plugins are isolated between workspaces, including when sessions run concurrently.
 
+Daemon-triggered runs (see [Skills](skills.md#the-daemon)) also load the project's plugins, after the daemon's trust check.
+
 This is the initial in-process plugin API. Its types ship with the CLI; a separately published, independently versioned SDK package and custom UI component APIs are not provided yet.
 
 ## Security
 
-Hooks are project-local shell commands, so `agents.config.json` in a repository is a code-execution surface — exactly like the `mcpServers` in the same file, and like `.nanocoder/tools/`. All of them are gated by the directory-trust prompt you accept the first time Nanocoder runs in a directory. Treat an untrusted repository's `agents.config.json` the way you would treat its `package.json` scripts, and use `/doctor` to see what a project has wired up.
+Hooks are project-local shell commands, so `agents.config.json` in a repository is a code-execution surface - exactly like the `mcpServers` in the same file, and like `.nanocoder/tools/`. All of them are gated by the directory-trust prompt. The prompt lists what the folder will run (plugins, hooks, formatters, MCP servers and skills with `subscribe:` triggers), and trust is tied to a fingerprint of those, so adding or changing a `hooks` entry or a plugin file asks again the next time Nanocoder starts there. Scripts a hook runs and files a plugin imports are not part of the fingerprint, so editing those does not ask again. `nanocoder trust --status` shows the same list and fingerprint without running anything. Treat an untrusted repository's `agents.config.json` the way you would treat its `package.json` scripts, and use `/doctor` to see what a project has wired up.
 
 **Hooks inherit Nanocoder's whole environment.** The `NANOCODER_*` variables are *added* to `process.env`, not a replacement for it, so a hook can read every provider API key, token, and secret the agent itself was started with. That is what makes ordinary hooks work — `git`, `biome`, and `docker` all need their usual environment — but it means a hook can exfiltrate credentials as easily as it can format a file. This is the same trust you extend to an `mcpServers` entry in the same file, which is spawned with the same environment; treat it the same way. If a hook does not need the secrets, unset them in the hook itself (`env -u ANTHROPIC_API_KEY …`) rather than assuming it cannot see them.
 

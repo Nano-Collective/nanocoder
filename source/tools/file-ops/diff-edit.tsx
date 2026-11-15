@@ -4,21 +4,29 @@ import {resolve} from 'node:path';
 import {Box, Text} from 'ink';
 import React from 'react';
 import ToolMessage, {CappedLines} from '@/components/tool-message';
+import {
+	enforceFirewall,
+	evaluateMutationEnvelope,
+} from '@/firewall/mutation-firewall';
 import {ThemeContext} from '@/hooks/useTheme';
 import {getSafeSessionCwd} from '@/services/session-cwd';
-import type {NanocoderToolExport} from '@/types/core';
-import {jsonSchema, tool} from '@/types/core';
-import {EditRecoveryError} from '@/utils/edit-recovery';
-import {formatError} from '@/utils/error-formatter';
-import {getCachedFileContent, invalidateCache} from '@/utils/file-cache';
-import {replaceFirstLiteral} from '@/utils/literal-replace';
-import {validateEditableFormat, validatePath} from '@/utils/path-validators';
+import {EditRecoveryError} from '@/tools/file-ops/edit-recovery';
+import {replaceFirstLiteral} from '@/tools/file-ops/literal-replace';
+import {
+	validateEditableEncoding,
+	validateEditableFormat,
+	validatePath,
+} from '@/tools/file-ops/path-validators';
 import {
 	forgetReadContent,
 	hasSeenFile,
 	markFileSeen,
-} from '@/utils/read-tracker';
-import {createFileToolApproval} from '@/utils/tool-approval';
+} from '@/tools/runtime/read-tracker';
+import {createFileToolApproval} from '@/tools/runtime/tool-approval';
+import type {NanocoderToolExport} from '@/types/core';
+import {jsonSchema, tool} from '@/types/core';
+import {formatError} from '@/utils/error-formatter';
+import {getCachedFileContent, invalidateCache} from '@/utils/fs/file-cache';
 import {
 	closeDiffInVSCode,
 	isVSCodeConnected,
@@ -272,10 +280,21 @@ const executeDiffEdit = async (args: DiffEditArgs): Promise<string> => {
 	const absPath = resolve(getSafeSessionCwd(), path);
 	const blocks = parseDiffEditBlocks(diff);
 	const cached = await getCachedFileContent(absPath);
+	const encodingResult = validateEditableEncoding(path, cached);
+	if (!encodingResult.valid) {
+		throw new Error(encodingResult.error);
+	}
 	const fileContent = cached.content;
 
 	validateBlocks(fileContent, blocks, path);
 	const newContent = applyBlocks(fileContent, blocks);
+
+	const firewallResult = evaluateMutationEnvelope(
+		path,
+		fileContent,
+		newContent,
+	);
+	const firewallWarning = enforceFirewall(firewallResult);
 
 	await writeFile(absPath, newContent, 'utf-8');
 	invalidateCache(absPath);
@@ -283,8 +302,10 @@ const executeDiffEdit = async (args: DiffEditArgs): Promise<string> => {
 	forgetReadContent(absPath);
 
 	const blockLabel = blocks.length === 1 ? 'block' : 'blocks';
-	return capDiffEditResult(
-		`Successfully applied ${blocks.length} diff ${blockLabel}.${formatUpdatedFileContext(fileContent, newContent, blocks)}`,
+	return (
+		capDiffEditResult(
+			`Successfully applied ${blocks.length} diff ${blockLabel}.${formatUpdatedFileContext(fileContent, newContent, blocks)}`,
+		) + firewallWarning
 	);
 };
 
@@ -479,6 +500,8 @@ const diffEditValidator = async (
 
 	try {
 		const cached = await getCachedFileContent(absPath);
+		const encodingResult = validateEditableEncoding(args.path, cached);
+		if (!encodingResult.valid) return encodingResult;
 		validateBlocks(cached.content, blocks, args.path);
 	} catch (error) {
 		return {

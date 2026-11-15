@@ -50,59 +50,10 @@ export function isLevelEnabled(level: LogLevel): boolean {
 }
 
 /**
- * Convenience methods that match console.log API
- */
-export const log = {
-	fatal: (msg: string, ...args: unknown[]) => getLogger().fatal(msg, ...args),
-	error: (msg: string, ...args: unknown[]) => getLogger().error(msg, ...args),
-	warn: (msg: string, ...args: unknown[]) => getLogger().warn(msg, ...args),
-	info: (msg: string, ...args: unknown[]) => getLogger().info(msg, ...args),
-	http: (msg: string, ...args: unknown[]) => getLogger().http(msg, ...args),
-	debug: (msg: string, ...args: unknown[]) => getLogger().debug(msg, ...args),
-	trace: (msg: string, ...args: unknown[]) => getLogger().trace(msg, ...args),
-};
-
-/**
- * Backward compatibility facade - wraps console during transition
- * This will be gradually replaced with structured logging
- */
-export const console = {
-	log: (...args: unknown[]) => {
-		// For now, use info level for console.log
-		log.info(args.join(' '));
-
-		if (process.env.NODE_ENV === 'development') {
-			process.stderr.write(
-				'\x1b[33m[DEPRECATED]\x1b[0m console.log() is deprecated. Use logger.info() instead.\n',
-			);
-		}
-	},
-	error: (...args: unknown[]) => {
-		log.error(args.join(' '));
-	},
-	warn: (...args: unknown[]) => {
-		log.warn(args.join(' '));
-	},
-	info: (...args: unknown[]) => {
-		log.info(args.join(' '));
-	},
-	debug: (...args: unknown[]) => {
-		log.debug(args.join(' '));
-	},
-};
-
-/**
  * Flush any pending logs
  */
 export async function flush(): Promise<void> {
 	await loggerProvider.flush();
-}
-
-/**
- * Flush logs synchronously (for signal handlers)
- */
-function _flushSync(): void {
-	loggerProvider.flushSync();
 }
 
 /**

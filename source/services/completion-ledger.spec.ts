@@ -176,6 +176,48 @@ test.serial('`&&` chains and arguments still count', t => {
 	}
 });
 
+test.serial('a command only counts when it is what runs, not text that mentions it', t => {
+	for (const command of [
+		'echo pnpm test',
+		'echo "ok" && echo pnpm test',
+		'echo "x && pnpm test"',
+		'git commit -m "pnpm test passes"',
+		'# pnpm test',
+	]) {
+		const ledger = ledgerFor(['pnpm test']);
+		edit(ledger);
+		run(ledger, command, 0);
+		t.truthy(takeEvidenceRejection(ledger), command);
+	}
+});
+
+test.serial('leading environment assignments and redirects still count', t => {
+	for (const command of [
+		'CI=1 pnpm test',
+		'CI=1 NODE_ENV=test pnpm test -- --run',
+		'pnpm test 2>&1',
+		'pnpm test > out.log 2>&1',
+		'pnpm test -- -t "a|b;c"',
+	]) {
+		const ledger = ledgerFor(['pnpm test']);
+		edit(ledger);
+		run(ledger, command, 0);
+		t.is(takeEvidenceRejection(ledger), null, command);
+	}
+});
+
+test.serial('a background `&` or a newline hides the exit code, wherever it is', t => {
+	for (const command of ['pnpm test & echo started', 'pnpm test\necho done']) {
+		const ledger = ledgerFor(['pnpm test']);
+		edit(ledger);
+		run(ledger, command, 0);
+		t.true(
+			takeEvidenceRejection(ledger)?.content.includes('hidden by a pipe'),
+			command,
+		);
+	}
+});
+
 test.serial('a command only matches as whole words', t => {
 	const ledger = ledgerFor(['pnpm test']);
 	edit(ledger);

@@ -2,8 +2,8 @@ import {readFileSync} from 'node:fs';
 import path from 'node:path';
 import {getAppConfig} from '@/config/index';
 import {getProjectRoot} from '@/services/session-cwd';
+import {isFileMutationTool} from '@/tools/runtime/tool-approval';
 import type {Message, ToolCall, ToolResult} from '@/types/core';
-import {isFileMutationTool} from '@/utils/tool-approval';
 
 /**
  * Evidence that a turn's edits were verified. `nanocoder.verify.required`
@@ -18,21 +18,85 @@ const MAX_REJECTIONS = 2;
 /** The package.json scripts `required: "auto"` looks for. */
 const AUTO_SCRIPTS = ['test', 'typecheck', 'lint'];
 
-/**
- * A pipe, `;` or `||` can hide the required command's own exit code
- * (`pnpm test | tail` exits 0 whatever the tests did), as can a trailing `&`.
- */
-const MASKS_EXIT_STATUS = /[|;]|&\s*$/;
-
 const INTERNAL_PREFIX = '<nanocoder-internal-verification>';
+
+/** Leading `VAR=value` assignments, so `CI=1 pnpm test` still runs `pnpm test`. */
+const ENV_PREFIX = '^(?:[A-Za-z_]\\w*=\\S*\\s+)*';
+
+interface ParsedCommand {
+	/** The parts joined by `&&`, so `cd app && pnpm test` is two commands. */
+	segments: string[];
+	/**
+	 * A pipe, `;`, newline or background `&` outside quotes can hide the real
+	 * exit code (`pnpm test | tail` exits 0 whatever the tests did). A `|` or
+	 * `;` inside quotes, `&&` and a redirect such as `2>&1` do not.
+	 */
+	masksExitStatus: boolean;
+}
+
+/** Split a bash command on unquoted `&&` and note whether it masks its exit code. */
+function parseCommand(command: string): ParsedCommand {
+	const segments: string[] = [];
+	let current = '';
+	let quote: string | null = null;
+	let masksExitStatus = false;
+
+	for (let i = 0; i < command.length; i++) {
+		const char = command[i];
+		if (quote) {
+			current += char;
+			if (char === '\\' && quote === '"') {
+				current += command[++i] ?? '';
+			} else if (char === quote) {
+				quote = null;
+			}
+			continue;
+		}
+		if (char === '"' || char === "'") {
+			quote = char;
+			current += char;
+			continue;
+		}
+		if (char === '\\') {
+			current += char + (command[++i] ?? '');
+			continue;
+		}
+		if (char === '&' && command[i + 1] === '&') {
+			segments.push(current);
+			current = '';
+			i++;
+			continue;
+		}
+		if (char === '|' || char === ';' || char === '\n') {
+			masksExitStatus = true;
+		} else if (
+			char === '&' &&
+			command[i - 1] !== '>' &&
+			command[i - 1] !== '<' &&
+			command[i + 1] !== '>'
+		) {
+			masksExitStatus = true;
+		}
+		current += char;
+	}
+	segments.push(current);
+
+	return {
+		segments: segments.map(segment => segment.trim()).filter(Boolean),
+		masksExitStatus,
+	};
+}
 
 interface RequiredEvidence {
 	label: string;
+	/** Matches the start of one `&&` segment, so `echo pnpm test` never counts. */
 	matches: RegExp;
 }
 
 interface EvidenceEntry {
 	command: string;
+	segments: string[];
+	masksExitStatus: boolean;
 	exitCode: number | null;
 	at: string;
 	/** Order among edits and commands; later than `lastEditSeq` means fresh. */
@@ -58,15 +122,19 @@ function escapeRegExp(text: string): string {
 	return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-/** The command as a whole word run: `pnpm test` matches `pnpm test -- x`, not `pnpm test:all`. */
+/**
+ * The command at the start of a segment, as a whole word run: `pnpm test`
+ * matches `pnpm test -- x` and `CI=1 pnpm test`, not `pnpm test:all` or
+ * `echo pnpm test`.
+ */
 function commandPattern(command: string): RegExp {
 	const words = command.trim().split(/\s+/).map(escapeRegExp).join('\\s+');
 	// `command` is the user's own `nanocoder.verify.required` entry, not
 	// attacker input. Every word goes through escapeRegExp and is joined by a
-	// fixed `\s+`; the rest is fixed lookarounds with no nested quantifiers, so
-	// ReDoS is not reachable.
+	// fixed `\s+`; the rest is a fixed prefix and lookahead with no nested
+	// quantifiers over the same characters, so ReDoS is not reachable.
 	// nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp
-	return new RegExp(`(?<![\\w-])${words}(?![\\w:./-])`);
+	return new RegExp(`${ENV_PREFIX}${words}(?![\\w:./-])`);
 }
 
 function detectPackageManager(root: string): string {
@@ -105,7 +173,7 @@ function detectRequired(root: string): RequiredEvidence[] {
 			// lint), never user input, so the pattern is effectively a constant.
 			// nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp
 			matches: new RegExp(
-				`(?<![\\w-])(?:npm|pnpm|yarn|bun)\\s+(?:run\\s+)?${name}(?![\\w:./-])`,
+				`${ENV_PREFIX}(?:npm|pnpm|yarn|bun)\\s+(?:run\\s+)?${name}(?![\\w:./-])`,
 			),
 		}),
 	);
@@ -164,8 +232,10 @@ export function recordToolOutcome(
 	if (name !== 'execute_bash') return;
 
 	const exit = /^EXIT_CODE: (-?\d+)/.exec(result.content);
+	const command = commandOf(toolCall);
 	ledger.entries.push({
-		command: commandOf(toolCall),
+		command,
+		...parseCommand(command),
 		exitCode: exit ? Number(exit[1]) : null,
 		at: new Date().toISOString(),
 		seq: ++ledger.seq,
@@ -174,12 +244,14 @@ export function recordToolOutcome(
 
 function checkEvidence(ledger: CompletionLedger): EvidenceStatus[] {
 	return ledger.required.map(({label, matches}) => {
-		const runs = ledger.entries.filter(entry => matches.test(entry.command));
+		const runs = ledger.entries.filter(entry =>
+			entry.segments.some(segment => matches.test(segment)),
+		);
 		const fresh = runs.find(
 			entry =>
 				entry.exitCode === 0 &&
 				entry.seq > ledger.lastEditSeq &&
-				!MASKS_EXIT_STATUS.test(entry.command),
+				!entry.masksExitStatus,
 		);
 		if (fresh) return {label, ok: true, detail: 'exit 0'};
 

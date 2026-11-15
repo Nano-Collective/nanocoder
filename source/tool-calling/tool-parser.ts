@@ -1,8 +1,8 @@
 import {FORMAT_GUIDANCE_MESSAGE} from '@/tool-calling/format-guidance';
 import {normalizeWhitespace, removeRanges} from '@/tool-calling/whitespace';
 import {XMLToolCallParser} from '@/tool-calling/xml-parser';
+import {generateToolCallId} from '@/tools/runtime/tool-call-id';
 import type {ToolCall} from '@/types/index';
-import {generateToolCallId} from '@/utils/tool-call-id';
 import {ensureString} from '@/utils/type-helpers';
 
 /**
@@ -35,8 +35,77 @@ type ParseResult =
 	  };
 
 const JSON_FENCE_REGEX = /```(?:json)?\s*\n?([\s\S]*?)\n?```/gi;
-const JSON_INLINE_REGEX =
-	/\{\s*"name"\s*:\s*"([^"]+)"\s*,\s*"arguments"\s*:\s*(\{[\s\S]*?\})\s*\}/g;
+const JSON_OBJECT_START_REGEX = /\{\s*"(?:name|arguments)"\s*:/g;
+
+// Total characters the inline scans of one reply may read. Scans that fall
+// out of step with the quotes of cut-off calls can't be cached and would each
+// read to the end of the reply.
+const JSON_SCAN_BUDGET_BASE = 1_000_000;
+const JSON_SCAN_BUDGET_PER_CHAR = 4;
+
+type JSONScanState = {
+	// Where each object a scan has passed ends (null if it never closes), so
+	// many unclosed openers cost one scan instead of one each.
+	ends: Map<number, number | null>;
+	budget: number;
+	exhausted: boolean;
+};
+
+// Braces inside JSON strings must not end the enclosing tool call.
+function findJSONObjectEnd(
+	content: string,
+	start: number,
+	state: JSONScanState,
+): number | null {
+	const known = state.ends.get(start);
+	if (known !== undefined) return known;
+
+	const limit = Math.min(content.length, start + state.budget);
+	const openers: number[] = [];
+	let inString = false;
+	let escaped = false;
+	let index = start;
+
+	for (; index < limit; index++) {
+		const char = content[index];
+		if (inString) {
+			if (char === '\n' || char === '\r') {
+				// JSON strings can't hold a raw line break, even escaped, so no
+				// open object here can parse.
+				break;
+			}
+			if (escaped) {
+				escaped = false;
+			} else if (char === '\\') {
+				escaped = true;
+			} else if (char === '"') {
+				inString = false;
+			}
+			continue;
+		}
+
+		if (char === '"') {
+			inString = true;
+		} else if (char === '{') {
+			openers.push(index);
+		} else if (char === '}') {
+			const opener = openers.pop();
+			if (opener !== undefined) state.ends.set(opener, index + 1);
+			if (openers.length === 0) {
+				state.budget -= index + 1 - start;
+				return index + 1;
+			}
+		}
+	}
+
+	state.budget -= index - start;
+	if (index === limit && limit < content.length) {
+		state.exhausted = true;
+		return null;
+	}
+	for (const opener of openers) state.ends.set(opener, null);
+	return null;
+}
 
 function tryParseJSONToolCall(raw: string): ToolCall | null {
 	try {
@@ -68,12 +137,18 @@ function tryParseJSONToolCall(raw: string): ToolCall | null {
 /**
  * JSON fallback parser for open-weights models that emit JSON-shaped tool calls
  * instead of XML (the panicked-into-JSON failure mode). Handles markdown-fenced
- * blocks and bare `{"name":..., "arguments":...}` objects. Only runs when the
- * XML parser found no tool calls.
+ * blocks and bare `{"name":..., "arguments":...}` objects. Its calls are only
+ * used when the XML and function-tag parsers found none.
  */
-function parseJSONToolCalls(content: string): {
+function parseJSONToolCalls(
+	content: string,
+	skipRanges: Array<[number, number]> = [],
+): {
 	toolCalls: ToolCall[];
 	cleanedContent: string;
+	ranges: Array<[number, number]>;
+	// The scan budget ran out, so calls later in the reply may be missed.
+	exhausted: boolean;
 } {
 	const toolCalls: ToolCall[] = [];
 	const matchedRanges: Array<[number, number]> = [];
@@ -92,23 +167,49 @@ function parseJSONToolCalls(content: string): {
 		}
 	}
 
+	const scan: JSONScanState = {
+		ends: new Map(),
+		budget: JSON_SCAN_BUDGET_BASE + content.length * JSON_SCAN_BUDGET_PER_CHAR,
+		exhausted: false,
+	};
 	let inlineMatch: RegExpExecArray | null;
-	const inlinePattern = new RegExp(JSON_INLINE_REGEX);
+	const inlinePattern = new RegExp(JSON_OBJECT_START_REGEX);
 	while ((inlineMatch = inlinePattern.exec(content)) !== null) {
 		const start = inlineMatch.index;
 		if (matchedRanges.some(([s, e]) => start >= s && start < e)) continue;
-		const call = tryParseJSONToolCall(inlineMatch[0]);
+		const skipped = skipRanges.find(([s, e]) => start >= s && start < e);
+		if (skipped) {
+			inlinePattern.lastIndex = skipped[1];
+			continue;
+		}
+		const end = findJSONObjectEnd(content, start, scan);
+		if (scan.exhausted) break;
+		if (end === null) continue;
+		const call = tryParseJSONToolCall(content.slice(start, end));
 		if (call) {
 			toolCalls.push(call);
-			matchedRanges.push([start, start + inlineMatch[0].length]);
+			matchedRanges.push([start, end]);
+			// Skip only past parsed calls: a non-call object can still
+			// contain one.
+			inlinePattern.lastIndex = end;
 		}
 	}
 
 	if (toolCalls.length === 0) {
-		return {toolCalls, cleanedContent: content};
+		return {
+			toolCalls,
+			cleanedContent: content,
+			ranges: matchedRanges,
+			exhausted: scan.exhausted,
+		};
 	}
 
-	return {toolCalls, cleanedContent: removeRanges(content, matchedRanges)};
+	return {
+		toolCalls,
+		cleanedContent: removeRanges(content, matchedRanges),
+		ranges: matchedRanges,
+		exhausted: scan.exhausted,
+	};
 }
 
 const FUNCTION_TAG_REGEX = /<function=(\w+)>([\s\S]*?)<\/function>/g;
@@ -123,6 +224,7 @@ const FUNCTION_TAG_REGEX = /<function=(\w+)>([\s\S]*?)<\/function>/g;
 function parseFunctionTagToolCalls(content: string): {
 	toolCalls: ToolCall[];
 	cleanedContent: string;
+	ranges: Array<[number, number]>;
 } {
 	const toolCalls: ToolCall[] = [];
 	const matchedRanges: Array<[number, number]> = [];
@@ -159,10 +261,35 @@ function parseFunctionTagToolCalls(content: string): {
 	}
 
 	if (toolCalls.length === 0) {
-		return {toolCalls, cleanedContent: content};
+		return {toolCalls, cleanedContent: content, ranges: matchedRanges};
 	}
 
-	return {toolCalls, cleanedContent: removeRanges(content, matchedRanges)};
+	return {
+		toolCalls,
+		cleanedContent: removeRanges(content, matchedRanges),
+		ranges: matchedRanges,
+	};
+}
+
+/**
+ * Blank out valid function-tag / JSON tool calls before the XML scan, so XML
+ * quoted inside their arguments (e.g. a write_file of docs containing
+ * `<execute_bash>...`) is not mistaken for a separate call. Spans enclosed by
+ * an XML call are kept: there the JSON is that call's argument.
+ */
+function maskEmbeddedCalls(
+	content: string,
+	ranges: Array<[number, number]>,
+): string {
+	if (ranges.length === 0) return content;
+	const xmlRanges = XMLToolCallParser.findToolCallRanges(content);
+	let result = content;
+	for (const [start, end] of ranges) {
+		if (xmlRanges.some(([s, e]) => s <= start && end <= e)) continue;
+		result =
+			result.slice(0, start) + ' '.repeat(end - start) + result.slice(end);
+	}
+	return result;
 }
 
 const JSON_MALFORMED_PATTERNS: Array<{regex: RegExp; error: string}> = [
@@ -180,6 +307,15 @@ const JSON_MALFORMED_PATTERNS: Array<{regex: RegExp; error: string}> = [
 		error: 'Incomplete tool call: missing "name" field',
 	},
 ];
+
+// `tag` is what XMLToolCallParser left in the call: an opening tag that is
+// never closed, or a closing tag with no opening tag.
+function describeBrokenTag(toolName: string, tag: string): string {
+	if (tag.startsWith('</')) {
+		return `Invalid tool call: ${tag} inside <${toolName}> does not close any parameter`;
+	}
+	return `Invalid tool call: ${tag} inside <${toolName}> is never closed with </${tag.slice(1)}`;
+}
 
 function detectMalformedJSONToolCall(
 	content: string,
@@ -215,18 +351,73 @@ export function stripEmbeddedToolCallText(content: unknown): string {
  * tool calls under reasoning pressure. Only runs on the XML fallback path when
  * native tool calling is disabled.
  * Type-preserving: Accepts unknown type, converts to string for processing.
+ *
+ * `toolNames` (the tools offered to the model) turns on the broken-call
+ * checks: an XML call to one of them that is never closed, or that leaves a
+ * parameter open, returns success: false instead of ending the turn as plain
+ * text or running with that argument missing.
  */
-export function parseToolCalls(content: unknown): ParseResult {
+export function parseToolCalls(
+	content: unknown,
+	toolNames?: readonly string[],
+): ParseResult {
 	// 1. Safety Coercion
 	const contentStr = ensureString(content);
 
 	// Strip tags first - some models (like GLM-4) emit these for chain-of-thought
 	const strippedContent = stripThinkTags(contentStr);
 
+	const fnTagResult = parseFunctionTagToolCalls(strippedContent);
+	let jsonResult = parseJSONToolCalls(strippedContent);
+	if (jsonResult.exhausted) {
+		// JSON text inside an XML call's arguments is that call's content, so
+		// it shouldn't use up the budget.
+		jsonResult = parseJSONToolCalls(
+			strippedContent,
+			XMLToolCallParser.findToolCallRanges(strippedContent),
+		);
+	}
+	// Unscanned JSON calls can't be masked, so XML quoted in their arguments
+	// would run as calls of its own.
+	if (jsonResult.exhausted) {
+		return {
+			success: false,
+			error:
+				'Too many incomplete JSON tool calls to parse. Send only complete tool calls.',
+			examples: FORMAT_GUIDANCE_MESSAGE,
+		};
+	}
+	const xmlContent = maskEmbeddedCalls(strippedContent, [
+		...fnTagResult.ranges,
+		...jsonResult.ranges,
+	]);
+
+	// A broken call fails the whole reply, even next to calls that parsed, so
+	// the model never acts on half of what it sent.
+	const unclosed =
+		toolNames && XMLToolCallParser.findUnclosedToolCall(xmlContent, toolNames);
+	if (unclosed) {
+		return {
+			success: false,
+			error: `Incomplete tool call: <${unclosed}> is never closed with </${unclosed}>`,
+			examples: FORMAT_GUIDANCE_MESSAGE,
+		};
+	}
+
 	// 2. Try XML parser for valid tool calls (OPTIMISTIC: Success first!)
-	if (XMLToolCallParser.hasToolCalls(strippedContent)) {
+	if (XMLToolCallParser.hasToolCalls(xmlContent)) {
 		// Parse valid XML tool calls
-		const parsedCalls = XMLToolCallParser.parseToolCalls(strippedContent);
+		const parsedCalls = XMLToolCallParser.parseToolCalls(xmlContent);
+		const broken = parsedCalls.find(
+			call => call.brokenTag && toolNames?.includes(call.toolName),
+		);
+		if (broken?.brokenTag) {
+			return {
+				success: false,
+				error: describeBrokenTag(broken.toolName, broken.brokenTag),
+				examples: FORMAT_GUIDANCE_MESSAGE,
+			};
+		}
 		const convertedCalls = XMLToolCallParser.convertToToolCalls(parsedCalls);
 
 		if (convertedCalls.length > 0) {
@@ -241,7 +432,6 @@ export function parseToolCalls(content: unknown): ParseResult {
 	}
 
 	// 3. Try Llama 3.x function-tag fallback: <function=name>{json}</function>
-	const fnTagResult = parseFunctionTagToolCalls(strippedContent);
 	if (fnTagResult.toolCalls.length > 0) {
 		return {
 			success: true,
@@ -251,7 +441,6 @@ export function parseToolCalls(content: unknown): ParseResult {
 	}
 
 	// 4. Try JSON fallback (open-weights models that emit JSON-shaped tool calls)
-	const jsonResult = parseJSONToolCalls(strippedContent);
 	if (jsonResult.toolCalls.length > 0) {
 		return {
 			success: true,

@@ -1,5 +1,5 @@
 import {constants} from 'node:fs';
-import {access, lstat, readFile} from 'node:fs/promises';
+import {access, lstat, readFile, stat} from 'node:fs/promises';
 import {resolve} from 'node:path';
 import {Box, Text} from 'ink';
 import React from 'react';
@@ -12,21 +12,22 @@ import {
 } from '@/constants';
 import {ThemeContext} from '@/hooks/useTheme';
 import {getProjectRoot, getSafeSessionCwd} from '@/services/session-cwd';
-import type {NanocoderToolExport} from '@/types/core';
-import {jsonSchema, tool} from '@/types/core';
-import {formatError} from '@/utils/error-formatter';
-import {getCachedFileContent} from '@/utils/file-cache';
-import {getFileType} from '@/utils/file-type-detector';
-import {isValidFilePath, resolveFilePath} from '@/utils/path-validation';
 import {
 	markFileSeen,
 	matchReadContent,
+	READ_STUB_MARKER,
 	rememberReadContent,
-} from '@/utils/read-tracker';
-import {calculateTokens} from '@/utils/token-calculator';
+} from '@/tools/runtime/read-tracker';
+import type {NanocoderToolExport} from '@/types/core';
+import {jsonSchema, tool} from '@/types/core';
+import {formatError} from '@/utils/error-formatter';
+import {getCachedFileContent} from '@/utils/fs/file-cache';
+import {getFileType} from '@/utils/fs/file-type-detector';
+import {isValidFilePath, resolveFilePath} from '@/utils/fs/path-validation';
+import {estimateTokens} from '@/utils/token-calculator';
 
 function formatReadStub(path: string, lineCount: number, size: number): string {
-	return `[file: ${path} — already in context, unchanged since last read (${lineCount} lines, ${size} bytes). pass start_line/end_line to read the body again.]`;
+	return `[file: ${path} — ${READ_STUB_MARKER} (${lineCount} lines, ${size} bytes). pass start_line/end_line to read the body again.]`;
 }
 
 const executeReadFile = async (args: {
@@ -67,11 +68,10 @@ const executeReadFile = async (args: {
 				// Try to detect encoding and line count
 				try {
 					const cached = await getCachedFileContent(absPath);
-					const lines = cached.lines;
 					const content = cached.content;
 
-					output += `Lines: ${lines.length}\n`;
-					output += `Estimated Tokens: ~${calculateTokens(content)}\n`;
+					output += `Lines: ${cached.totalLines}\n`;
+					output += `Estimated Tokens: ~${estimateTokens(content)}\n`;
 
 					// Detect file type from extension
 					const fileType = getFileType(absPath);
@@ -109,8 +109,10 @@ const executeReadFile = async (args: {
 			return output;
 		}
 
-		const stats = await lstat(absPath);
-		if (stats.isFile() || stats.isSymbolicLink()) {
+		// stat, not lstat: a symlink's own mtime/size never change when its
+		// target does, so the stub check must compare the target's.
+		const stats = await stat(absPath);
+		if (stats.isFile()) {
 			const stub = matchReadContent(
 				absPath,
 				stats,
@@ -133,7 +135,7 @@ const executeReadFile = async (args: {
 		}
 
 		const lines = cached.lines;
-		const totalLines = lines.length;
+		const totalLines = cached.totalLines;
 
 		// Return a bounded preview only for very large files. Most files can be
 		// understood and edited after a single read; truly large files still have
@@ -362,8 +364,7 @@ const readFileFormatter = async (
 		if (path && typeof path === 'string') {
 			const absPath = resolve(getSafeSessionCwd(), path);
 			const cached = await getCachedFileContent(absPath);
-			const lines = cached.lines;
-			const totalLines = lines.length;
+			const totalLines = cached.totalLines;
 
 			const isTruncated = result?.includes('[Truncated at line ') ?? false;
 
@@ -375,7 +376,7 @@ const readFileFormatter = async (
 			const readLines = readEndLine - startLine + 1;
 			const isPartialRead = startLine > 1 || readEndLine < totalLines;
 
-			const tokens = isMetadataOnly ? 0 : result ? calculateTokens(result) : 0;
+			const tokens = isMetadataOnly ? 0 : result ? estimateTokens(result) : 0;
 
 			fileInfo = {
 				totalLines,
@@ -448,7 +449,7 @@ const readFileValidator = async (args: {
 		// Auto-clamp end_line to file length instead of erroring
 		if (args.end_line !== undefined) {
 			const cached = await getCachedFileContent(absPath);
-			const totalLines = cached.lines.length;
+			const totalLines = cached.totalLines;
 
 			if (args.end_line > totalLines) {
 				args.end_line = totalLines;
@@ -459,13 +460,15 @@ const readFileValidator = async (args: {
 		// Skip this check for metadata_only requests
 		if (!args.metadata_only) {
 			const cached = await getCachedFileContent(absPath);
+			const allLines = cached.lines;
+			const totalLines = cached.totalLines;
 			const startLine = args.start_line ? Math.max(1, args.start_line) : 1;
 			const endLine = args.end_line
-				? Math.min(cached.lines.length, args.end_line)
-				: cached.lines.length;
+				? Math.min(totalLines, args.end_line)
+				: totalLines;
 
 			for (let i = startLine - 1; i < endLine; i++) {
-				const line = cached.lines[i];
+				const line = allLines[i];
 				if (line && line.length > MAX_LINE_LENGTH_CHARS) {
 					return {
 						valid: false,

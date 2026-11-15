@@ -1,10 +1,38 @@
 import test from 'ava';
 import {
 	type BrowserPage,
+	chromiumInstallHint,
 	getBrowserPage,
 	resetBrowserPageForTests,
+	resetBrowserResolveCacheForTests,
 	runBrowserAction,
 } from './browser-page.js';
+import {hostResolver} from './fetch-url-guard.js';
+
+// Specs never reach real DNS: public names resolve publicly, rebinding-style
+// names resolve to what they spell, and anything else fails to resolve.
+const DNS: Record<string, string[]> = {
+	'example.com': ['93.184.216.34'],
+	'169.254.169.254.nip.io': ['169.254.169.254'],
+	'internal.example.com': ['93.184.216.34', '10.0.0.7'],
+	'localtest.me': ['127.0.0.1'],
+};
+const originalResolve = hostResolver.resolve;
+const lookups: string[] = [];
+test.before(() => {
+	hostResolver.resolve = async host => {
+		lookups.push(host);
+		const addresses = DNS[host];
+		if (!addresses) throw new Error(`ENOTFOUND ${host}`);
+		return addresses;
+	};
+});
+test.after.always(() => {
+	hostResolver.resolve = originalResolve;
+});
+test.beforeEach(() => {
+	resetBrowserResolveCacheForTests();
+});
 
 function fakePage(overrides: Partial<BrowserPage> = {}): BrowserPage {
 	return {
@@ -144,6 +172,13 @@ test('the launched page aborts requests to private addresses', async t => {
 	t.is(await outcome('http://10.1.1.1/iframe'), 'abort');
 	t.is(await outcome('http://localhost:3000/app.js'), 'continue');
 	t.is(await outcome('https://example.com/'), 'continue');
+	// Names are resolved: a public record pointing at metadata or a private
+	// address is blocked, one pointing at loopback is allowed.
+	t.is(await outcome('http://169.254.169.254.nip.io/latest/meta-data'), 'abort');
+	t.is(await outcome('https://internal.example.com/'), 'abort');
+	t.is(await outcome('http://localtest.me:3000/'), 'continue');
+	t.is(await outcome('http://does-not-resolve.invalid/'), 'abort');
+	t.is(await outcome('data:text/plain,hi'), 'continue');
 	resetBrowserPageForTests();
 });
 
@@ -231,4 +266,82 @@ test('a failed browser launch can be retried', async t => {
 	await t.throwsAsync(getBrowserPage(load), {message: 'no chromium'});
 	t.is(calls, 2);
 	resetBrowserPageForTests();
+});
+
+test.serial('navigate resolves the host and blocks names that point at private addresses', async t => {
+	const opened: string[] = [];
+	const page = fakePage({
+		goto: async url => {
+			opened.push(url);
+			return null;
+		},
+	});
+	await t.throwsAsync(
+		runBrowserAction(page, {
+			action: 'navigate',
+			url: 'http://169.254.169.254.nip.io/latest/meta-data',
+		}),
+		{
+			message:
+				'navigate cannot open a private or internal address: 169.254.169.254.nip.io resolves to 169.254.169.254',
+		},
+	);
+	t.deepEqual(opened, []);
+	await t.notThrowsAsync(
+		runBrowserAction(page, {action: 'navigate', url: 'http://localtest.me:3000/'}),
+	);
+});
+
+test.serial('a redirect that lands a frame on a name resolving to metadata is dropped', async t => {
+	let landed = false;
+	const page = fakePage({
+		goto: async url => {
+			landed = url !== 'about:blank';
+			return null;
+		},
+		frames: () =>
+			framesAt(landed ? 'http://169.254.169.254.nip.io/latest' : 'about:blank')(),
+	});
+	await t.throwsAsync(
+		runBrowserAction(page, {action: 'navigate', url: 'https://example.com/r'}),
+		{message: /redirect to a private or internal address: 169\.254\.169\.254\.nip\.io resolves to 169\.254\.169\.254/},
+	);
+});
+
+test.serial('subresources from one host share a lookup', async t => {
+	resetBrowserPageForTests();
+	const fake = fakePlaywright();
+	await getBrowserPage(fake.load);
+	const before = lookups.filter(h => h === 'example.com').length;
+	for (const path of ['a.js', 'b.css', 'c.png']) {
+		await fake.route?.({
+			request: () => ({url: () => `https://example.com/${path}`}),
+			abort: async () => undefined,
+			continue: async () => undefined,
+		});
+	}
+	t.is(lookups.filter(h => h === 'example.com').length - before, 1);
+	resetBrowserPageForTests();
+});
+
+test('a missing Chromium points at the playwright-core install command', async t => {
+	resetBrowserPageForTests();
+	const load = async () => ({
+		chromium: {
+			launch: async () => {
+				throw new Error(
+					"browserType.launch: Executable doesn't exist at /x/chrome\nPlease run: npx playwright install",
+				);
+			},
+		},
+	});
+	const error = await t.throwsAsync(getBrowserPage(load as never));
+	t.regex(error?.message ?? '', /npx playwright-core@\d+\.\d+\.\d+ install chromium/);
+	t.regex(error?.message ?? '', /--with-deps/);
+	t.notRegex(error?.message ?? '', /npx playwright install/);
+	resetBrowserPageForTests();
+});
+
+test('the install hint pins the bundled playwright-core version', t => {
+	t.regex(chromiumInstallHint(), /^npx playwright-core@\d+\.\d+\.\d+ install chromium/);
 });
