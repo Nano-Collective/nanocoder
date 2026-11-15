@@ -380,12 +380,16 @@ export async function runOnce(options: RunOptions): Promise<TaskRun> {
 		let spawnFailure: string | undefined;
 		let processFailed = false;
 		try {
-			const result = await execFileAsync('node', args, {
+			const pending = execFileAsync('node', args, {
 				cwd: workspace,
 				timeout: timeoutMs,
 				maxBuffer: 64 * 1024 * 1024,
 				env: {...process.env, NO_COLOR: '1', FORCE_COLOR: '0'},
 			});
+			// `run` reads piped stdin to EOF, and execFile always opens a pipe
+			// (it ignores a `stdio` option), so close it or the run never starts.
+			pending.child.stdin?.end();
+			const result = await pending;
 			stdout = result.stdout;
 		} catch (error) {
 			processFailed = true;
