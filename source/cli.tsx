@@ -620,14 +620,14 @@ async function main(): Promise<void> {
 		process.exit(1);
 	}
 	if (isRunCommand && !process.stdin.isTTY) {
-		const {MAX_STDIN_PROMPT_BYTES} = await import('./constants.js');
+		const {MAX_STDIN_PROMPT_CHARS} = await import('./constants.js');
 		try {
-			const piped = await readStdinText(process.stdin, MAX_STDIN_PROMPT_BYTES);
+			const piped = await readStdinText(process.stdin, MAX_STDIN_PROMPT_CHARS);
 			stdinPiped = piped.trim().length > 0;
 			nonInteractivePrompt = composePromptWithStdin(
 				promptFromStdin ? undefined : nonInteractivePrompt,
 				piped,
-				MAX_STDIN_PROMPT_BYTES,
+				MAX_STDIN_PROMPT_CHARS,
 			);
 		} catch (error) {
 			console.error(

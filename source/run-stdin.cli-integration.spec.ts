@@ -97,7 +97,7 @@ test('--prompt-file <file> still takes stdin as extra input', t => {
 });
 
 test('an oversized pipe is read without failing the run', t => {
-	// Well past MAX_STDIN_PROMPT_BYTES. Stopping early closes the pipe on the
+	// Well past MAX_STDIN_PROMPT_CHARS. Stopping early closes the pipe on the
 	// writer, which must not turn into a crash here.
 	const result = runCli(['run', 'summarize'], 'z'.repeat(500_000));
 	t.false(result.stderr.includes(USAGE_ERROR), result.stderr);
