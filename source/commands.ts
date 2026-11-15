@@ -1,14 +1,23 @@
 import React from 'react';
-import type {Command, LazyCommand, Message} from '@/types/index';
+import {findCommandAlias} from '@/commands/aliases';
+import {errorMsg} from '@/components/message-factory';
+import {
+	type AnyCommand,
+	type Command,
+	isStatefulCommand,
+	type LazyCommand,
+	type Message,
+} from '@/types/index';
 import {fuzzyScore} from '@/utils/fuzzy-matching';
-import {errorMsg} from '@/utils/message-factory';
 
 class CommandRegistry {
 	private commands = new Map<string, Command>();
 	private lazyEntries = new Map<string, LazyCommand>();
 	// Cached proxy wrappers for lazy commands so `get()` returns a stable
-	// reference across calls and handler resolution only happens once.
+	// reference across calls.
 	private lazyProxies = new Map<string, Command>();
+	// Lazy command modules already imported, so each loads only once.
+	private loaded = new Map<string, AnyCommand>();
 
 	register(command: Command | Command[]): void {
 		if (Array.isArray(command)) {
@@ -33,20 +42,44 @@ class CommandRegistry {
 	private proxyForLazy(entry: LazyCommand): Command {
 		const cached = this.lazyProxies.get(entry.name);
 		if (cached) return cached;
-		let resolved: Command | null = null;
 		const proxy: Command = {
 			name: entry.name,
 			description: entry.description,
 			progressLabel: entry.progressLabel,
+			echoInvocation: entry.echoInvocation,
+			hidden: entry.hidden,
 			handler: async (args, messages, metadata) => {
-				if (!resolved) {
-					resolved = await entry.load();
+				const resolved = await this.loadLazy(entry);
+				if (isStatefulCommand(resolved)) {
+					throw new Error(
+						`/${entry.name} needs app state; run it through the command dispatcher.`,
+					);
 				}
 				return resolved.handler(args, messages, metadata);
 			},
 		};
 		this.lazyProxies.set(entry.name, proxy);
 		return proxy;
+	}
+
+	private async loadLazy(entry: LazyCommand): Promise<AnyCommand> {
+		const cached = this.loaded.get(entry.name);
+		if (cached) return cached;
+		const command = await entry.load();
+		this.loaded.set(entry.name, command);
+		return command;
+	}
+
+	/**
+	 * The command module itself, importing it if it is lazy. Unlike `get()`,
+	 * which returns a metadata proxy without loading anything, this tells a
+	 * stateful command apart from one that just returns output.
+	 */
+	async load(name: string): Promise<AnyCommand | undefined> {
+		const eager = this.commands.get(name);
+		if (eager) return eager;
+		const lazy = this.lazyEntries.get(name);
+		return lazy ? this.loadLazy(lazy) : undefined;
 	}
 
 	get(name: string): Command | undefined {
@@ -67,6 +100,15 @@ class CommandRegistry {
 
 	getCompletions(prefix: string): string[] {
 		const commandNames = [...this.commands.keys(), ...this.lazyEntries.keys()];
+
+		// Old command names (see `aliases.ts`) are never offered while typing,
+		// but one typed out in full completes to itself. Without that, Enter
+		// on a fully typed `/quit` would accept whatever fuzzy match the menu
+		// had highlighted instead of submitting it.
+		const alias = findCommandAlias(prefix);
+		if (alias && !commandNames.includes(alias.name)) {
+			commandNames.push(alias.name);
+		}
 
 		// No prefix: return all commands alphabetically
 		if (!prefix) {

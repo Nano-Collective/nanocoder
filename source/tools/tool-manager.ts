@@ -1,3 +1,4 @@
+import {randomUUID} from 'node:crypto';
 import {getAppConfig} from '@/config/index';
 import {getBraveSearchApiKey} from '@/config/nanocoder-tools-config';
 import {buildToolEntry} from '@/custom-tools/build-tool';
@@ -6,7 +7,9 @@ import {CustomToolLoader} from '@/custom-tools/loader';
 // inside `initializeMCP()` so sessions without MCP servers never pay the
 // cost of the @modelcontextprotocol/sdk import graph.
 import type {MCPClient} from '@/mcp/mcp-client';
-import {allToolExports} from '@/tools/index';
+import {MCPToolCatalog} from '@/mcp/tool-catalog';
+import {getAllToolExports} from '@/tools/index';
+import {createLoadToolSchemaTool} from '@/tools/mcp/load-tool-schema';
 import {getToolsForProfile, resolveToolProfile} from '@/tools/tool-profiles';
 import {ToolRegistry} from '@/tools/tool-registry';
 import type {TuneConfig} from '@/types/config';
@@ -24,6 +27,8 @@ import type {
 	ToolValidator,
 } from '@/types/index';
 import type {MCPHealthChange} from '@/types/mcp';
+import {getLogger} from '@/utils/logging';
+import {notifyWarning} from '@/utils/message-queue-core';
 import {getShutdownManager} from '@/utils/shutdown';
 
 /**
@@ -55,7 +60,13 @@ const MODE_EXCLUDED_TOOLS: Record<DevelopmentMode, string[]> = {
 		// No git mutation tools — keep read-only git tools
 		'git_add',
 		'git_commit',
-		'git_pr', // can create PRs — excluded like other git mutators
+		// git_pr bundles both read-only actions (view/list/diff/checks/logs)
+		// and mutating ones (create/comment/review) behind one tool name, so
+		// it can't be split per-action here — excluded wholesale for now.
+		// source/verify/trust-level.ts is the action-granular allowlist meant to
+		// replace this blunt exclusion once the verify subcommand (issue
+		// #861) consumes it.
+		'git_pr',
 	],
 	headless: ['ask_user', 'agent', 'write_plan'],
 	architect: ['write_plan', 'git_commit', 'git_pr'],
@@ -107,6 +118,24 @@ export function filterToolNamesForMode(
 }
 
 /**
+ * Catalog records for MCP tool entries, for a client that can't list its
+ * discovered tools directly.
+ */
+function catalogToolsFromEntries(
+	entries: ToolEntry[],
+	mapping: ReturnType<MCPClient['getToolMapping']>,
+): MCPTool[] {
+	return entries.map(e => {
+		const map = mapping.get(e.name);
+		return {
+			name: e.name,
+			serverName: map?.serverName || 'mcp',
+			readOnly: map?.readOnly,
+		};
+	});
+}
+
+/**
  * Session-artifact tools. These write to the *parent session's* artifact
  * directory, so a subagent calling one would silently overwrite the plan,
  * task list, or walkthrough the user is about to act on. Subagents converse
@@ -137,14 +166,69 @@ export class ToolManager {
 			subscribe?: import('@/types/skills').SkillTrigger[];
 		}
 	>();
+	private mcpCatalog: MCPToolCatalog = new MCPToolCatalog();
+	/** Whether initializeMCP chose on-demand discovery for this client. */
+	private mcpDiscovery = false;
+	/** Per unhealthy server, the tool names that were registered before it failed. */
+	private mcpLoadedBeforeOutage = new Map<string, Set<string>>();
 
-	constructor() {
-		this.registry = ToolRegistry.fromToolExports(allToolExports);
+	/** The manager this one is layered over; set only for a session's manager. */
+	private readonly parent?: ToolManager;
+	/** Shutdown handler name; one per manager, so closing one leaves the rest. */
+	private readonly mcpShutdownName: string;
+
+	constructor(parent?: ToolManager) {
+		this.parent = parent;
+		this.mcpShutdownName = parent ? `mcp-client:${randomUUID()}` : 'mcp-client';
+		this.mcpCatalog = new MCPToolCatalog(parent?.mcpCatalog);
+		if (parent) {
+			this.registry = new ToolRegistry(parent.registry);
+			this.customTools = parent.customTools;
+			return;
+		}
+		this.registry = ToolRegistry.fromToolExports(getAllToolExports());
 
 		// Remove web_search if no Brave Search API key is configured
 		if (!getBraveSearchApiKey()) {
 			this.registry.unregister('web_search');
 		}
+	}
+
+	/**
+	 * A manager for one ACP session: everything this one offers, read live,
+	 * plus MCP servers of its own that no other session sees. Connecting and
+	 * disconnecting it only ever touches those servers.
+	 */
+	forSession(): ToolManager {
+		return new ToolManager(this);
+	}
+
+	/**
+	 * Returns the MCP tool catalog for on-demand tool discovery.
+	 */
+	getMcpCatalog(): MCPToolCatalog {
+		return this.mcpCatalog;
+	}
+
+	/**
+	 * Dynamically loads an on-demand MCP tool from the catalog into the active ToolRegistry.
+	 */
+	loadMcpTool(toolName: string): boolean {
+		if (this.registry.hasTool(toolName)) {
+			this.mcpCatalog.markLoaded(toolName);
+			return true;
+		}
+
+		const mcpClient = this.mcpClient ?? this.parent?.mcpClient;
+		if (!mcpClient) return false;
+
+		const mcpToolEntries = mcpClient.getToolEntries();
+		const entry = mcpToolEntries.find(e => e.name === toolName);
+		if (!entry) return false;
+
+		this.registry.register(entry);
+		this.mcpCatalog.markLoaded(toolName);
+		return true;
 	}
 
 	/**
@@ -160,6 +244,7 @@ export class ToolManager {
 		servers: MCPServer[],
 		onProgress?: (result: MCPInitResult) => void,
 		onHealthChange?: (change: MCPHealthChange) => void,
+		tuneConfig?: Partial<TuneConfig>,
 	): Promise<MCPInitResult[]> {
 		const enabledServers = servers?.filter(server => server.enabled !== false);
 		// Reinitialization must close the previous transports before replacing the client.
@@ -179,7 +264,16 @@ export class ToolManager {
 								this.mcpClient?.getToolMapping().get(name)?.serverName ===
 								change.serverName,
 						);
+						// Remember which schemas the model had loaded, so recovery
+						// restores exactly those rather than every tool the server has.
+						this.mcpLoadedBeforeOutage.set(
+							change.serverName,
+							new Set(toolNames.filter(name => this.registry.hasTool(name))),
+						);
 						this.registry.unregisterMany(toolNames);
+						this.mcpCatalog.removeServerTools(change.serverName);
+					} else if (change.status === 'connected') {
+						this.restoreServerTools(change.serverName);
 					}
 				}),
 			].filter((unsubscribe): unsubscribe is () => void => !!unsubscribe);
@@ -188,7 +282,7 @@ export class ToolManager {
 			};
 
 			getShutdownManager().register({
-				name: 'mcp-client',
+				name: this.mcpShutdownName,
 				priority: 20,
 				handler: async () => {
 					await this.disconnectMCP();
@@ -201,14 +295,106 @@ export class ToolManager {
 			);
 
 			const mcpToolEntries = this.mcpClient.getToolEntries();
-			this.registry.registerMany(mcpToolEntries);
+			const mapping = this.mcpClient.getToolMapping();
+
+			const useDiscovery =
+				tuneConfig?.mcpDiscovery === 'always' ||
+				(tuneConfig?.mcpDiscovery !== 'disabled' && mcpToolEntries.length >= 8);
+			this.mcpDiscovery = useDiscovery;
+
+			this.mcpCatalog.clear();
+			const discoveredTools: MCPTool[] =
+				typeof this.mcpClient.getAllDiscoveredTools === 'function'
+					? this.mcpClient.getAllDiscoveredTools()
+					: catalogToolsFromEntries(mcpToolEntries, mapping);
+
+			for (const tool of discoveredTools) {
+				this.mcpCatalog.add(tool.serverName, tool, !useDiscovery);
+			}
+
+			if (useDiscovery) {
+				this.registry.registerToolExport(createLoadToolSchemaTool(this));
+			} else {
+				this.registry.unregister('load_tool_schema');
+				this.registerMcpTools(mcpToolEntries);
+			}
+
+			// Tools are keyed by name, so a name two servers share silently
+			// reaches only one of them. Say which.
+			const conflicts =
+				typeof this.mcpClient.getToolNameConflicts === 'function'
+					? this.mcpClient.getToolNameConflicts()
+					: [];
+			if (conflicts.length > 0) {
+				const lines = conflicts
+					.slice(0, 5)
+					.map(
+						c =>
+							`"${c.tool}" (${c.servers.join(', ')}; calls go to ${c.active})`,
+					);
+				const more =
+					conflicts.length > 5 ? ` and ${conflicts.length - 5} more` : '';
+				const message = `MCP servers expose the same tool names, so only one server handles each: ${lines.join('; ')}${more}.`;
+				// An ACP session's manager has no TUI to show a chat warning;
+				// log it there, as registerMcpTools does for its own collisions.
+				if (this.parent) getLogger().warn(message);
+				else notifyWarning(message);
+			}
 
 			return results;
 		}
 		return [];
 	}
 
+	/**
+	 * Bring a recovered server's tools back the way initializeMCP set them up.
+	 * Without discovery every tool is registered. With discovery the tools
+	 * return to the catalog, and only the schemas the model had loaded before
+	 * the outage are registered again, so the request doesn't suddenly carry
+	 * every schema the server has.
+	 */
+	private restoreServerTools(serverName: string): void {
+		const client = this.mcpClient;
+		if (!client) return;
+		const entries = client.getToolEntries(serverName);
+		const wasLoaded = this.mcpLoadedBeforeOutage.get(serverName);
+		this.mcpLoadedBeforeOutage.delete(serverName);
+		const toLoad = this.mcpDiscovery
+			? entries.filter(entry => wasLoaded?.has(entry.name))
+			: entries;
+		const loadedNames = new Set(toLoad.map(entry => entry.name));
+
+		const tools: MCPTool[] =
+			typeof client.getServerTools === 'function'
+				? client.getServerTools(serverName)
+				: catalogToolsFromEntries(entries, client.getToolMapping());
+		for (const tool of tools) {
+			this.mcpCatalog.add(serverName, tool, loadedNames.has(tool.name));
+		}
+		this.registerMcpTools(toLoad);
+	}
+
+	/**
+	 * Register a server's tools. A session's manager never takes a name its
+	 * parent already offers: the existing tool wins and the new one is skipped.
+	 */
+	private registerMcpTools(entries: ToolEntry[]): void {
+		const free = entries.filter(entry => {
+			const taken = this.parent?.hasTool(entry.name);
+			if (taken) {
+				getLogger().warn(
+					`MCP tool "${entry.name}" skipped: a tool with that name already exists`,
+				);
+			}
+			return !taken;
+		});
+		this.registry.registerMany(free);
+	}
+
 	protected async createMCPClient(): Promise<MCPClient> {
+		// The parent's factory builds a new client; its own is not handed over.
+		// Going through it keeps one seam for swapping the client in tests.
+		if (this.parent) return this.parent.createMCPClient();
 		const {MCPClient} = await import('@/mcp/mcp-client');
 		return new MCPClient();
 	}
@@ -263,7 +449,7 @@ export class ToolManager {
 	getAvailableToolNames(
 		tuneConfig?: TuneConfig,
 		developmentMode?: DevelopmentMode,
-		disabledTools?: string[],
+		disabledTools?: readonly string[],
 		model?: string,
 	): string[] {
 		let names = this.getToolNames();
@@ -318,10 +504,15 @@ export class ToolManager {
 		return filterToolNamesForMode(names, mode, {
 			getCustomToolPolicy: name => this.getCustomToolPolicy(name),
 			getMcpReadOnly: name =>
-				mode === 'plan'
-					? this.mcpClient?.getToolMapping().get(name)?.readOnly
-					: undefined,
+				mode === 'plan' ? this.mcpReadOnly(name) : undefined,
 		});
+	}
+
+	private mcpReadOnly(name: string): boolean | undefined {
+		return (
+			this.mcpClient?.getToolMapping().get(name)?.readOnly ??
+			this.parent?.mcpReadOnly(name)
+		);
 	}
 
 	/**
@@ -407,14 +598,23 @@ export class ToolManager {
 	}
 
 	getToolHandler(toolName: string): ToolHandler | undefined {
+		if (!this.registry.hasTool(toolName) && this.mcpCatalog.has(toolName)) {
+			this.loadMcpTool(toolName);
+		}
 		return this.registry.getHandler(toolName);
 	}
 
 	getToolFormatter(toolName: string): ToolFormatter | undefined {
+		if (!this.registry.hasTool(toolName) && this.mcpCatalog.has(toolName)) {
+			this.loadMcpTool(toolName);
+		}
 		return this.registry.getFormatter(toolName);
 	}
 
 	getToolValidator(toolName: string): ToolValidator | undefined {
+		if (!this.registry.hasTool(toolName) && this.mcpCatalog.has(toolName)) {
+			this.loadMcpTool(toolName);
+		}
 		return this.registry.getValidator(toolName);
 	}
 
@@ -422,12 +622,28 @@ export class ToolManager {
 		return this.registry.getStreamingFormatter(toolName);
 	}
 
+	/**
+	 * Whether a call can skip a checkpoint and join a parallel batch. An
+	 * unloaded on-demand MCP tool is not read-only here: its catalog flag is
+	 * the server's own readOnlyHint, which must not decide either (see
+	 * createMCPToolApproval in mcp/tool-approval.ts). Once loaded, its
+	 * registry entry carries no readOnly flag either, so the answer doesn't
+	 * change.
+	 */
 	isReadOnly(toolName: string): boolean {
 		return this.registry.getEntry(toolName)?.readOnly === true;
 	}
 
 	hasTool(toolName: string): boolean {
 		return this.registry.hasTool(toolName);
+	}
+
+	/**
+	 * True for an on-demand MCP tool that is in the catalog but whose schema
+	 * the model hasn't loaded with `load_tool_schema` yet.
+	 */
+	isUnloadedMcpTool(toolName: string): boolean {
+		return !this.registry.hasTool(toolName) && this.mcpCatalog.has(toolName);
 	}
 
 	/**
@@ -479,12 +695,7 @@ export class ToolManager {
 	}
 
 	getMCPToolInfo(toolName: string): {isMCPTool: boolean; serverName?: string} {
-		if (!this.mcpClient) {
-			return {isMCPTool: false};
-		}
-
-		const toolMapping = this.mcpClient.getToolMapping();
-		const mapping = toolMapping.get(toolName);
+		const mapping = this.mcpClient?.getToolMapping().get(toolName);
 
 		if (mapping) {
 			return {
@@ -493,12 +704,16 @@ export class ToolManager {
 			};
 		}
 
-		return {isMCPTool: false};
+		return this.parent?.getMCPToolInfo(toolName) ?? {isMCPTool: false};
 	}
 
 	async disconnectMCP(): Promise<void> {
 		this.mcpHealthUnsubscribe?.();
 		this.mcpHealthUnsubscribe = null;
+		this.mcpCatalog.clear();
+		this.mcpDiscovery = false;
+		this.mcpLoadedBeforeOutage.clear();
+		this.registry.unregister('load_tool_schema');
 		if (this.mcpClient) {
 			const mcpTools = this.mcpClient.getNativeToolsRegistry();
 			const mcpToolNames = Object.keys(mcpTools);
@@ -509,10 +724,13 @@ export class ToolManager {
 			this.mcpClient = null;
 		}
 
-		getShutdownManager().unregister('mcp-client');
+		getShutdownManager().unregister(this.mcpShutdownName);
 	}
 
 	getToolEntry(toolName: string): ToolEntry | undefined {
+		if (!this.registry.hasTool(toolName) && this.mcpCatalog.has(toolName)) {
+			this.loadMcpTool(toolName);
+		}
 		return this.registry.getEntry(toolName);
 	}
 

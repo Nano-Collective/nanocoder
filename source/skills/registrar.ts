@@ -20,6 +20,7 @@
 import type {CustomCommandLoader} from '@/custom-commands/loader';
 import type {EventRouter} from '@/events/event-router';
 import type {
+	CiJobFailedFilter,
 	FileChangedFilter,
 	ScheduleCronFilter,
 	Subscription,
@@ -336,6 +337,18 @@ function buildSubscription(
 	if (trig.kind === 'schedule.cron') {
 		const filter: ScheduleCronFilter = {cron: trig.cron};
 		return {ok: true, subscription: {...base, kind: 'schedule.cron', filter}};
+	}
+	if (trig.kind === 'ci.job.failed') {
+		const filter: CiJobFailedFilter = {};
+		if (trig.branches) filter.branches = trig.branches;
+		return {
+			ok: true,
+			subscription: {
+				...base,
+				kind: 'ci.job.failed',
+				...(Object.keys(filter).length > 0 ? {filter} : {}),
+			},
+		};
 	}
 	const _exhaustive: never = trig;
 	return {

@@ -70,21 +70,6 @@ Nanocoder 由社群集體而非商業公司打造，直接決定了它的安全�
 
 Nanocoder 純為社群而生，不以營利為目的。我們的持續開發離不開贊助商的支持。[成為贊助商](https://nanocollective.org/sponsor)。
 
-### [Atlas Cloud](https://www.atlascloud.ai/console/coding-plan)
-
-<p>
-  <a href="https://www.atlascloud.ai/console/coding-plan" title="Atlas Cloud">
-    <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="https://nanocollective.org/sponsors/atlas-cloud-white.png">
-      <img alt="Atlas Cloud" height="40" src="https://nanocollective.org/sponsors/atlas-cloud-black.png">
-    </picture>
-  </a>
-</p>
-
-> Atlas Cloud 是一個全模態 AI 推理平台，為開發者提供統一的 API 介面，讓你無縫呼叫影片生成、圖像生成以及各種 LLM 模型。無需再維護繁雜的多廠商鑑權，只需接入一次，即可使用 300 多個跨模態精選模型。
-
-歡迎了解 [Atlas Cloud 新推出的 Coding Plan 優惠](https://www.atlascloud.ai/console/coding-plan)，以更具性價比的預算獲取 API 額度。
-
 ## 加入社群
 
 Nano Collective 是一個非營利組織，旨在為開發者社群打造優秀的 AI 工具。非常期待你的加入。

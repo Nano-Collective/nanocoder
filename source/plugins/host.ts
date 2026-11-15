@@ -4,11 +4,13 @@ import path from 'node:path';
 import {pathToFileURL} from 'node:url';
 
 import {loadPreferences} from '@/config/preferences';
+import {isDirectoryTrusted} from '@/config/trust/directory-trust';
 import type {NanocoderPlugin, PluginHooks} from '@/sdk/plugin';
 import type {HookContext, HookOutcome} from '@/services/lifecycle-hooks';
 import {getProjectRoot} from '@/services/session-cwd';
 import type {HookEvent} from '@/types/config';
-import {logError} from '@/utils/message-queue';
+import {notifyError} from '@/utils/message-queue-core';
+import {isPlainObject} from '@/utils/type-helpers';
 
 type PluginEvent = keyof PluginHooks;
 
@@ -28,8 +30,10 @@ const PLUGIN_EVENT_FOR: Partial<Record<HookEvent, PluginEvent>> = {
 };
 
 const PLUGIN_HOOK_TIMEOUT_MS = 30_000;
+let pluginLoadTimeoutMs = PLUGIN_HOOK_TIMEOUT_MS;
 
 const FAILED = Symbol('failed');
+const TIMED_OUT = Symbol('timed out');
 
 interface PluginState {
 	plugins: NanocoderPlugin[];
@@ -58,15 +62,12 @@ export function loadTrustedProjectPlugins(): Promise<void> {
 }
 
 function isProjectTrusted(projectRoot: string): boolean {
-	const root = path.resolve(projectRoot);
-	let trusted = false;
 	try {
-		const listed = loadPreferences().trustedDirectories ?? [];
-		trusted = listed.some(dir => path.resolve(dir) === root);
+		return isDirectoryTrusted(projectRoot, loadPreferences());
 	} catch (error) {
-		logError(`Could not read directory trust: ${errorMessage(error)}`);
+		notifyError(`Could not read directory trust: ${errorMessage(error)}`);
+		return false;
 	}
-	return trusted;
 }
 
 /** Keep concurrent ACP workspaces isolated, including their delegated tools. */
@@ -88,9 +89,28 @@ export async function withTrustedProjectPlugins<T>(
 	return pluginScope.run(state, run);
 }
 
-export function resetPluginsForTests(): void {
+export function resetPluginsForTests({
+	loadTimeoutMs = PLUGIN_HOOK_TIMEOUT_MS,
+} = {}): void {
 	defaultState = {plugins: [], loading: null};
 	projectStates.clear();
+	pluginLoadTimeoutMs = loadTimeoutMs;
+}
+
+async function importWithin(url: string, ms: number): Promise<unknown> {
+	let timer: NodeJS.Timeout | undefined;
+	try {
+		return await Promise.race([
+			import(url),
+			// Not unref'd. A top-level await on a promise nothing settles leaves
+			// the event loop empty, and Node would exit silently instead.
+			new Promise(resolve => {
+				timer = setTimeout(resolve, ms, TIMED_OUT);
+			}),
+		]);
+	} finally {
+		clearTimeout(timer);
+	}
 }
 
 async function importPlugins(root: string, state: PluginState): Promise<void> {
@@ -104,43 +124,44 @@ async function importPlugins(root: string, state: PluginState): Promise<void> {
 			.sort();
 	} catch (error) {
 		if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-			logError(`Could not read plugins in ${dir}: ${errorMessage(error)}`);
+			notifyError(`Could not read plugins in ${dir}: ${errorMessage(error)}`);
 		}
 		return;
 	}
 
 	for (const file of files) {
-		let exported: unknown;
+		let mod: unknown;
 		try {
-			const mod = (await import(pathToFileURL(path.join(dir, file)).href)) as {
-				default?: unknown;
-			};
-			exported = mod.default;
+			mod = await importWithin(
+				pathToFileURL(path.join(dir, file)).href,
+				pluginLoadTimeoutMs,
+			);
 		} catch (error) {
-			logError(`Plugin ${file} failed to load: ${errorMessage(error)}`);
+			notifyError(`Plugin ${file} failed to load: ${errorMessage(error)}`);
 			continue;
 		}
+		if (mod === TIMED_OUT) {
+			notifyError(
+				`Plugin ${file} did not finish loading within ${pluginLoadTimeoutMs / 1000}s and was skipped.`,
+			);
+			continue;
+		}
+		const exported = (mod as {default?: unknown}).default;
 
 		const problem = validatePlugin(exported);
 		if (problem) {
-			logError(`Plugin ${file} skipped: ${problem}.`);
+			notifyError(`Plugin ${file} skipped: ${problem}.`);
 			continue;
 		}
 		const plugin = exported as NanocoderPlugin;
 		if (state.plugins.some(loaded => loaded.name === plugin.name)) {
-			logError(
+			notifyError(
 				`Plugin ${file} skipped: name "${plugin.name}" is already loaded.`,
 			);
 			continue;
 		}
 		state.plugins.push(plugin);
 	}
-}
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-	if (typeof value !== 'object' || value === null) return false;
-	const proto = Object.getPrototypeOf(value);
-	return proto === Object.prototype || proto === null;
 }
 
 function validatePlugin(value: unknown): string | undefined {
@@ -163,7 +184,7 @@ function errorMessage(error: unknown): string {
 }
 
 function logBadReturn(plugin: NanocoderPlugin, event: string): void {
-	logError(
+	notifyError(
 		`Plugin "${plugin.name}" (${event}) returned an unexpected value, skipping.`,
 	);
 }
@@ -188,7 +209,7 @@ async function invoke(
 			}),
 		]);
 	} catch (error) {
-		logError(
+		notifyError(
 			`Plugin "${plugin.name}" (${event}) ${errorMessage(error)}, skipping.`,
 		);
 		return FAILED;
@@ -293,7 +314,7 @@ export async function consultPluginPermission(
 			return {decision: 'deny', reason: vote.reason.trim()};
 		}
 		if (!isPlainObject(vote) || vote.decision !== 'defer') {
-			logError(
+			notifyError(
 				`Plugin "${plugin.name}" (permission.asked) returned an invalid vote, treating as defer.`,
 			);
 		}

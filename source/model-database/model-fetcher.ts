@@ -1,6 +1,6 @@
 import {CACHE_MODELS_EXPIRATION_MS} from '@/constants';
 import {ModelEntry} from '@/types/index';
-import {logError} from '@/utils/message-queue';
+import {notifyError} from '@/utils/message-queue-core';
 
 // Cache for fetched model data
 interface ModelCache {
@@ -246,7 +246,7 @@ async function fetchOpenRouterModels(): Promise<OpenRouterModel[]> {
 		const data = (await response.json()) as OpenRouterResponse;
 		return data.data || [];
 	} catch (error) {
-		logError('Failed to fetch OpenRouter models', true, {error});
+		notifyError('Failed to fetch OpenRouter models', true, {error});
 		return [];
 	}
 }

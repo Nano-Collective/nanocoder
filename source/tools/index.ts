@@ -51,13 +51,12 @@ const staticTools: NanocoderToolExport[] = [
 	checkSkillTool,
 ];
 
-// Conditionally available tools (based on system capabilities)
-// Git tools are only registered if git is installed
-// PR tool additionally requires gh CLI
-const conditionalTools: NanocoderToolExport[] = [...getGitTools()];
-
-// All built-in tool exports — the single source of truth for static tools
-export const allToolExports: NanocoderToolExport[] = [
-	...staticTools,
-	...conditionalTools,
-];
+// Conditionally available tools (based on system capabilities).
+// Git tools are only registered if git is installed; the PR tool
+// additionally requires gh CLI. Built lazily — evaluating this at import
+// time spawned git/gh and blocked the first frame (#1819); the underlying
+// availability checks are now spawn-free, and callers invoke this when the
+// registry is actually constructed.
+export function getAllToolExports(): NanocoderToolExport[] {
+	return [...staticTools, ...getGitTools()];
+}

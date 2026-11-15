@@ -149,22 +149,28 @@ test('createLogMethod handles logger method errors with fallback', t => {
 		},
 	};
 
-	const originalConsole = console.info;
-	let consoleCalled = false;
-	console.info = (...args: unknown[]) => {
-		consoleCalled = true;
-		originalConsole(...args);
+	const originalError = console.error;
+	const originalInfo = console.info;
+	let errorCalled = false;
+	let infoCalled = false;
+	console.error = () => {
+		errorCalled = true;
+	};
+	console.info = () => {
+		infoCalled = true;
 	};
 
-	const logMethod = createLogMethod(mockLogger, 'info');
+	try {
+		const logMethod = createLogMethod(mockLogger, 'info');
+		// Should fall back to console.error (stderr), never console.info (stdout)
+		logMethod('test message');
+	} finally {
+		console.error = originalError;
+		console.info = originalInfo;
+	}
 
-	// Should fallback to console
-	logMethod('test message');
-
-	t.true(consoleCalled);
-
-	// Restore console
-	console.info = originalConsole;
+	t.true(errorCalled);
+	t.false(infoCalled);
 });
 
 // Test createLogMethods function
@@ -369,28 +375,34 @@ test('createLogMethod handles complex objects', t => {
 // Test console fallback for trace level
 // ============================================================================
 
-test('createLogMethod falls back to console.log for trace level', t => {
+test('createLogMethod reports trace failures on console.error', t => {
 	const mockLogger = {
 		trace: () => {
 			throw new Error('Trace not supported');
 		},
 	};
 
-	const originalConsole = console.log;
-	let consoleCalled = false;
-	console.log = (...args: unknown[]) => {
-		consoleCalled = true;
-		originalConsole(...args);
+	const originalError = console.error;
+	const originalLog = console.log;
+	let errorCalled = false;
+	let logCalled = false;
+	console.error = () => {
+		errorCalled = true;
+	};
+	console.log = () => {
+		logCalled = true;
 	};
 
-	const logMethod = createLogMethod(mockLogger, 'trace');
+	try {
+		const logMethod = createLogMethod(mockLogger, 'trace');
+		logMethod('trace message');
+	} finally {
+		console.error = originalError;
+		console.log = originalLog;
+	}
 
-	logMethod('trace message');
-
-	t.true(consoleCalled);
-
-	// Restore console
-	console.log = originalConsole;
+	t.true(errorCalled);
+	t.false(logCalled);
 });
 
 // Test method signature compatibility

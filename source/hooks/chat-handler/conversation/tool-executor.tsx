@@ -3,34 +3,34 @@ import type {ConversationStateManager} from '@/app/utils/conversation-state';
 import AgentProgress, {MultiAgentProgress} from '@/components/agent-progress';
 import BashProgress from '@/components/bash-progress';
 import {ErrorMessage} from '@/components/message-box';
-import {getShowAgentBashOutput} from '@/config/preferences';
-import type {BashExecutionState} from '@/services/bash-executor';
-import {
-	clearAllSubagentProgress,
-	getSubagentProgress,
-	resetSubagentProgressById,
-} from '@/services/subagent-events';
-import {generateKey} from '@/session/key-generator';
-import {buildSubagentFailureMessage} from '@/subagents/failure-message';
-import {MAX_CONCURRENT_AGENTS} from '@/subagents/subagent-executor';
-import type {AgentToolArgs} from '@/tools/agent-tool';
-import {startAgentExecution} from '@/tools/agent-tool';
-import type {Task} from '@/tools/tasks/types';
-import type {ToolManager} from '@/tools/tool-manager';
-import type {ToolCall, ToolExecutionContext, ToolResult} from '@/types/core';
-import {formatError} from '@/utils/error-formatter';
-import {
-	runStreamingBashTool,
-	type StreamingBashRun,
-} from '@/utils/streaming-bash-tool';
-import {parseToolArguments} from '@/utils/tool-args-parser';
 import {
 	ALWAYS_EXPANDED_TOOLS,
 	displayToolResult,
 	isToolResultError,
 	LIVE_TASK_TOOLS,
 	recordExpandableToolResult,
-} from '@/utils/tool-result-display';
+} from '@/components/tool-result-display';
+import {getShowAgentBashOutput} from '@/config/preferences';
+import {
+	runStreamingBashTool,
+	type StreamingBashRun,
+} from '@/hooks/chat-handler/conversation/streaming-bash-tool';
+import type {BashExecutionState} from '@/services/bash-executor';
+import {
+	clearAllSubagentProgress,
+	getSubagentProgress,
+	resetSubagentProgressById,
+} from '@/services/subagent-events';
+import {buildSubagentFailureMessage} from '@/subagents/failure-message';
+import {MAX_CONCURRENT_AGENTS} from '@/subagents/subagent-executor';
+import type {AgentToolArgs} from '@/tools/agent-tool';
+import {startAgentExecution} from '@/tools/agent-tool';
+import {parseToolArguments} from '@/tools/runtime/tool-args-parser';
+import type {Task} from '@/tools/tasks/types';
+import type {ToolManager} from '@/tools/tool-manager';
+import type {ToolCall, ToolExecutionContext, ToolResult} from '@/types/core';
+import {formatError} from '@/utils/error-formatter';
+import {generateKey} from '@/utils/key-generator';
 
 /**
  * Validates and executes a single tool call.
@@ -140,6 +140,7 @@ export const displayExecutedTool = async (
 		toolCall,
 		result.content,
 	);
+
 	const expandId = recordExpandableToolResult(toolCall, result, bashState);
 
 	if (
@@ -483,7 +484,12 @@ const executeAgentBatch = async (
  * Other tools are executed sequentially to preserve ordering.
  * Results are displayed in the original input order.
  *
- * @returns Array of tool results from executed tools
+ * Stops before the next tool once `options.signal` is aborted, so an Escape
+ * during one tool of an auto-approved batch does not let the rest run.
+ *
+ * @returns Results for the tools that ran, in input order. When the batch
+ * stops early (abort, or `beforeExecute` declining) this is a prefix of the
+ * input and the caller must pair the remaining tool calls with results.
  */
 export const executeToolsDirectly = async (
 	toolsToExecuteDirectly: ToolCall[],
@@ -508,6 +514,8 @@ export const executeToolsDirectly = async (
 		 */
 		signal?: AbortSignal;
 		executionContext?: Omit<ToolExecutionContext, 'abortSignal'>;
+		/** Stop the batch when an execution-time approval decision changes. */
+		beforeExecute?: (toolCall: ToolCall) => Promise<boolean>;
 	},
 ): Promise<ToolResult[]> => {
 	// Import processToolUse here to avoid circular dependencies
@@ -524,6 +532,14 @@ export const executeToolsDirectly = async (
 	const directResults: ToolResult[] = [];
 
 	for (const {group, type} of groups) {
+		if (options?.signal?.aborted) {
+			return directResults;
+		}
+		for (const toolCall of group) {
+			if (options?.beforeExecute && !(await options.beforeExecute(toolCall))) {
+				return directResults;
+			}
+		}
 		let executions: Array<{
 			toolCall: ToolCall;
 			result: ToolResult;
@@ -566,6 +582,8 @@ export const executeToolsDirectly = async (
 			// Sequential execution for non-parallelizable tools (or single-item groups)
 			executions = [];
 			for (const toolCall of group) {
+				// Escape during the previous tool: don't start the next one.
+				if (options?.signal?.aborted) break;
 				executions.push(
 					await executeApprovedTool(
 						toolCall,

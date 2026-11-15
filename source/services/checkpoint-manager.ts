@@ -2,6 +2,10 @@ import {existsSync} from 'fs';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import {TRUNCATION_DESCRIPTION_LENGTH} from '@/constants';
+import {
+	describeCheckpointGaps,
+	validateCheckpointName,
+} from '@/services/checkpoint-utils';
 import type {
 	CheckpointConversation,
 	CheckpointData,
@@ -11,14 +15,10 @@ import type {
 	CheckpointValidationResult,
 } from '@/types/checkpoint';
 import type {Message} from '@/types/core';
-import {
-	describeCheckpointGaps,
-	validateCheckpointName,
-} from '@/utils/checkpoint-utils';
 import {formatError} from '@/utils/error-formatter';
-import {logWarning} from '@/utils/message-queue';
+import {ensureNanocoderGitignore} from '@/utils/fs/ensure-nanocoder-gitignore';
+import {notifyWarning} from '@/utils/message-queue-core';
 import {FileSnapshotService} from './file-snapshot';
-
 /**
  * Service for managing conversation checkpoints.
  * Checkpoints are stored in .nanocoder/checkpoints/ within the workspace root.
@@ -40,6 +40,8 @@ export class CheckpointManager {
 	 * Initialize the checkpoints directory
 	 */
 	private async ensureCheckpointsDir(): Promise<void> {
+		await ensureNanocoderGitignore(this.workspaceRoot);
+
 		if (!existsSync(this.checkpointsDir)) {
 			await fs.mkdir(this.checkpointsDir, {recursive: true});
 		}
@@ -330,7 +332,7 @@ export class CheckpointManager {
 
 				fileSnapshots.set(relativePath, content);
 			} catch (error) {
-				logWarning('Could not load file snapshot', true, {
+				notifyWarning('Could not load file snapshot', true, {
 					context: {
 						relativePath,
 						error: formatError(error),
@@ -381,7 +383,7 @@ export class CheckpointManager {
 						}
 					}
 				} catch (error) {
-					logWarning('Could not read checkpoint', true, {
+					notifyWarning('Could not read checkpoint', true, {
 						context: {
 							checkpointName: entry,
 							error: formatError(error),
@@ -549,7 +551,7 @@ export class CheckpointManager {
 			}
 		} catch (error) {
 			// If we can't read the directory, just return 0
-			logWarning('Could not calculate directory size', true, {
+			notifyWarning('Could not calculate directory size', true, {
 				context: {
 					dirPath,
 					error: formatError(error),
