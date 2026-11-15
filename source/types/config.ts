@@ -212,13 +212,13 @@ export interface CiWatchConfig {
 }
 
 /**
- * Project-level (`agents.config.json`) verify/CI-watch policy — trust level
- * and poll cadence. Unlike `CiWatchConfig.enabled` (a personal, per-machine
- * opt-in to background GitHub polling, kept in preferences), trust level
- * and cadence are security/policy decisions appropriate to commit and
- * review with the rest of the project, so they live here instead. When
- * set, `pollIntervalMs`/`maxPollIntervalMs` here override the
- * preferences-backed `CiWatchConfig` values of the same name — see
+ * Project-level (`agents.config.json`) verify policy: CI-watch trust level
+ * and poll cadence, plus completion evidence. Unlike `CiWatchConfig.enabled`
+ * (a personal, per-machine opt-in to background GitHub polling, kept in
+ * preferences), trust level and cadence are security/policy decisions
+ * appropriate to commit and review with the rest of the project, so they live
+ * here instead. When set, `pollIntervalMs`/`maxPollIntervalMs` here override
+ * the preferences-backed `CiWatchConfig` values of the same name — see
  * `loadCiWatchConfig` in `source/config/index.ts`.
  */
 export interface VerifyConfig {
@@ -227,6 +227,12 @@ export interface VerifyConfig {
 	trustLevel?: TrustLevel;
 	pollIntervalMs?: number;
 	maxPollIntervalMs?: number;
+	/**
+	 * Completion evidence: commands that must have exited 0 after the agent's
+	 * last file edit before a turn can end, or "auto" to detect the `test`,
+	 * `typecheck` and `lint` scripts in package.json. Off unless set.
+	 */
+	required?: string[] | 'auto';
 }
 
 /**
@@ -417,8 +423,9 @@ export interface DiskNanocoderConfig {
 	/** Negative-space mutation firewall. Off by default. */
 	firewall?: Partial<FirewallConfig>;
 	/**
-	 * Project-level verify policy: CI-watch trust level and poll cadence.
-	 * Read by `loadVerifyConfig()`.
+	 * Project-level verify policy: CI-watch trust level and poll cadence, and
+	 * `required` completion evidence (commands that must exit 0 after the last
+	 * edit, or "auto"). Read by `loadVerifyConfig()`.
 	 */
 	verify?: VerifyConfig;
 }
