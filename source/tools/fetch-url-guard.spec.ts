@@ -1,5 +1,9 @@
 import test from 'ava';
-import {assertPublicHttpUrl} from './fetch-url-guard.js';
+import {
+	assertPublicHttpUrl,
+	assertResolvedPublicHttpUrl,
+	hostResolver,
+} from './fetch-url-guard.js';
 
 test('assertPublicHttpUrl allows public http(s)', t => {
 	t.notThrows(() => assertPublicHttpUrl('https://example.com/docs'));
@@ -50,4 +54,179 @@ test('assertPublicHttpUrl rejects loopback, metadata, RFC1918, IPv6 local', t =>
 			message: /internal\/private network/,
 		});
 	}
+});
+
+// --- IPv6 forms that embed an IPv4 address, and reserved IPv4 ranges (#1942) ---
+
+test('assertPublicHttpUrl rejects IPv6 forms that embed an internal IPv4 address', t => {
+	const blocked = [
+		'http://[::127.0.0.1]/', // ::/96 IPv4-compatible
+		'http://[::a00:1]/', // ::/96, 10.0.0.1
+		'http://[::ffff:7f00:1]/', // ::ffff:0:0/96 mapped, hex spelling
+		'http://[::ffff:0:7f00:1]/', // ::ffff:0:0:0/96 translated
+		'http://[64:ff9b::7f00:1]/', // 64:ff9b::/96 NAT64
+		'http://[64:ff9b::169.254.169.254]/', // NAT64, cloud metadata
+		'http://[2002:7f00:1::]/', // 2002::/16 6to4
+		'http://[2002:c0a8:101::1]/', // 6to4, 192.168.1.1
+	];
+	for (const url of blocked) {
+		t.throws(
+			() => assertPublicHttpUrl(url),
+			{message: /internal\/private network/},
+			url,
+		);
+	}
+});
+
+test('assertPublicHttpUrl allows IPv6 forms that embed a public IPv4 address', t => {
+	const allowed = [
+		'http://[64:ff9b::8.8.8.8]/',
+		'http://[2002:808:808::1]/',
+		'http://[::ffff:8.8.8.8]/',
+		'http://[2606:2800:220:1::1]/',
+	];
+	for (const url of allowed) {
+		t.notThrows(() => assertPublicHttpUrl(url), url);
+	}
+});
+
+test('assertPublicHttpUrl rejects reserved IPv4 ranges', t => {
+	const blocked = [
+		'http://192.0.0.1', // 192.0.0.0/24 IETF protocol assignments
+		'http://198.18.0.1', // 198.18.0.0/15 benchmarking
+		'http://198.19.255.254',
+		'http://224.0.0.1', // 224.0.0.0/4 multicast
+		'http://239.255.255.250',
+		'http://240.0.0.1', // 240.0.0.0/4 reserved
+		'http://255.255.255.255', // broadcast
+	];
+	for (const url of blocked) {
+		t.throws(
+			() => assertPublicHttpUrl(url),
+			{message: /internal\/private network/},
+			url,
+		);
+	}
+	for (const url of ['http://192.0.1.1', 'http://198.20.0.1', 'http://223.255.255.254']) {
+		t.notThrows(() => assertPublicHttpUrl(url), url);
+	}
+});
+
+// --- Names that resolve to internal addresses (#1662) ---
+// A fake resolver stands in for DNS, so none of this depends on the network.
+
+const withResolver = async (
+	table: Record<string, string[]>,
+	run: () => Promise<void>,
+) => {
+	const original = hostResolver.resolve;
+	hostResolver.resolve = async host => {
+		const addresses = table[host];
+		if (!addresses) throw new Error(`getaddrinfo ENOTFOUND ${host}`);
+		return addresses;
+	};
+	try {
+		await run();
+	} finally {
+		hostResolver.resolve = original;
+	}
+};
+
+test.serial('assertResolvedPublicHttpUrl allows names that resolve to public addresses', async t => {
+	await withResolver(
+		{
+			'docs.example.test': ['93.184.216.34'],
+			'dual.example.test': ['93.184.216.34', '2606:2800:220:1::1'],
+			// `new URL()` rewrites a dotted tail to hex, so only resolver output
+			// reaches the dotted branch of the parser (#1942).
+			'dotted.example.test': ['64:ff9b::8.8.8.8'],
+		},
+		async () => {
+			await t.notThrowsAsync(() =>
+				assertResolvedPublicHttpUrl('https://docs.example.test/page'),
+			);
+			await t.notThrowsAsync(() =>
+				assertResolvedPublicHttpUrl('http://dual.example.test:8080/'),
+			);
+			await t.notThrowsAsync(() =>
+				assertResolvedPublicHttpUrl('http://dotted.example.test/'),
+			);
+		},
+	);
+});
+
+test.serial('assertResolvedPublicHttpUrl rejects names that resolve to internal addresses', async t => {
+	const table = {
+		'localtest.me': ['127.0.0.1'],
+		'169.254.169.254.nip.io': ['169.254.169.254'],
+		'v6.example.test': ['::1'],
+		'mapped.example.test': ['::ffff:127.0.0.1'],
+		'lan.example.test': ['192.168.1.10'],
+		'cgnat.example.test': ['100.64.0.1'],
+		'linklocal.example.test': ['fe80::1'],
+		'ula.example.test': ['fd12:3456:789a::1'],
+		// Resolver output is not normalised the way URL hostnames are (#1942).
+		'compat.example.test': ['::127.0.0.1'],
+		'nat64.example.test': ['64:ff9b::7f00:1'],
+		'sixtofour.example.test': ['2002:a9fe:a9fe::1'],
+		'zoned.example.test': ['::ffff:0:7f00:1%1'],
+	};
+	await withResolver(table, async () => {
+		for (const host of Object.keys(table)) {
+			await t.throwsAsync(
+				() => assertResolvedPublicHttpUrl(`http://${host}:18080/admin`),
+				{message: /internal\/private network address: .* resolves to /},
+				host,
+			);
+		}
+	});
+});
+
+test.serial('assertResolvedPublicHttpUrl rejects a name with one public and one private address', async t => {
+	await withResolver(
+		{'mixed.example.test': ['93.184.216.34', '127.0.0.1']},
+		async () => {
+			await t.throwsAsync(
+				() => assertResolvedPublicHttpUrl('http://mixed.example.test/'),
+				{message: /resolves to 127\.0\.0\.1/},
+			);
+		},
+	);
+});
+
+test.serial('assertResolvedPublicHttpUrl does not look up IP literals and still blocks them', async t => {
+	// An empty table makes any lookup throw ENOTFOUND, so a lookup would show up
+	// as the wrong error.
+	await withResolver({}, async () => {
+		await t.notThrowsAsync(() => assertResolvedPublicHttpUrl('http://8.8.8.8/'));
+		await t.throwsAsync(() => assertResolvedPublicHttpUrl('http://127.0.0.1/'), {
+			message: /internal\/private network address: 127\.0\.0\.1$/,
+		});
+		await t.throwsAsync(() => assertResolvedPublicHttpUrl('http://[::1]/'), {
+			message: /internal\/private network/,
+		});
+	});
+});
+
+test.serial('assertResolvedPublicHttpUrl keeps the text checks', async t => {
+	await withResolver({}, async () => {
+		await t.throwsAsync(() => assertResolvedPublicHttpUrl('not a url'), {
+			message: /Invalid URL format/,
+		});
+		await t.throwsAsync(() => assertResolvedPublicHttpUrl('ftp://example.com'), {
+			message: /Invalid URL protocol/,
+		});
+		await t.throwsAsync(() => assertResolvedPublicHttpUrl('http://localhost:3000'), {
+			message: /internal\/private network/,
+		});
+	});
+});
+
+test.serial('assertResolvedPublicHttpUrl rejects a name that does not resolve', async t => {
+	await withResolver({}, async () => {
+		await t.throwsAsync(
+			() => assertResolvedPublicHttpUrl('http://nxdomain.example.test/'),
+			{message: /ENOTFOUND/},
+		);
+	});
 });

@@ -10,11 +10,12 @@ Implemented context-visibility firewall (issue #1573) to prevent blind edits. Th
 - Overwrite protection: `write_file` requires reading entire file before overwriting existing files
 - Compaction safety: Visibility receipts are invalidated after context compaction
 - Subagent isolation: Each subagent maintains separate visibility state
-- External change detection: Tracks mtime/size to detect file modifications
+- External change detection: Tracks mtime/size to detect file modifications, so `string_replace`, `diff_edit` and `write_file` refuse a file that changed on disk after it was read
+- Edits keep what was read: after the agent's own `string_replace` or `diff_edit`, the lines it had read are carried forward (moved by the edit's change in line count) and the written lines count as seen, so a second edit does not need a re-read
 - CRLF normalization: Consistent line counting across Windows and Unix line endings
 
 **Technical changes:**
-- Extended `read-tracker.ts` with visibility receipt system (line ranges, mtime/size tracking, generation-based invalidation, CRLF normalization)
+- Extended `source/tools/runtime/read-tracker.ts` with visibility receipt system (line ranges, mtime/size tracking, generation-based invalidation, CRLF normalization)
 - Updated `read-file.tsx` to record visibility for all returned content (full files, ranges, previews)
 - Updated `search-file-contents.tsx` to record visibility for match lines and context (fixed path resolution to use search cwd)
 - Enhanced `string-replace.tsx` validator with line-level checks before edits

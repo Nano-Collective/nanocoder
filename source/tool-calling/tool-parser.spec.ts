@@ -181,6 +181,84 @@ test('parseToolCalls: many unterminated JSON openers do not stall parsing', t =>
 	}
 });
 
+const CUT_OFF_CALL =
+	'{"name":"write_file","arguments":{"path":"a.ts","content":"console.log(\\"hi\\");';
+
+test('parseToolCalls: cut-off JSON calls on their own lines stop at the newline', t => {
+	// ~400 KB: rescanning to the end from every call takes about 2 s, and
+	// the scan budget would run out before the last call.
+	const valid = {name: 'read_file', arguments: {path: 'b.ts'}};
+	for (const cutOff of [CUT_OFF_CALL, `${CUT_OFF_CALL}\\`]) {
+		const content = `${Array(5000).fill(cutOff).join('\n')}\n${JSON.stringify(valid)}`;
+
+		const started = Date.now();
+		const result = parseToolCalls(content);
+		const elapsed = Date.now() - started;
+
+		t.true(result.success, cutOff);
+		if (result.success) {
+			t.is(result.toolCalls.length, 1, cutOff);
+			t.is(result.toolCalls[0].function.name, 'read_file', cutOff);
+			t.deepEqual(
+				result.toolCalls[0].function.arguments,
+				valid.arguments,
+				cutOff,
+			);
+		}
+		t.true(elapsed < 500, `Parsing ${content.length} chars took ${elapsed}ms`);
+	}
+});
+
+test('parseToolCalls: XML in a JSON call after a few cut-off calls stays an argument', t => {
+	const args = {path: 'examples.md', content: EMBEDDED_XML};
+	const content = `${Array(20).fill(CUT_OFF_CALL).join(' ')} ${JSON.stringify({name: 'write_file', arguments: args})}`;
+
+	const result = parseToolCalls(content);
+
+	t.true(result.success);
+	if (result.success) {
+		t.is(result.toolCalls.length, 1);
+		t.is(result.toolCalls[0].function.name, 'write_file');
+		t.deepEqual(result.toolCalls[0].function.arguments, args);
+	}
+});
+
+test('parseToolCalls: rejects a reply that runs out of JSON scan budget', t => {
+	// ~400 KB with no newline to stop at: without a budget each call is
+	// rescanned to the end, about 2 s. The XML in the last call's arguments
+	// must not run once the scan gives up.
+	const args = {path: 'examples.md', content: EMBEDDED_XML};
+	const content = `${Array(5000).fill(CUT_OFF_CALL).join(' ')} ${JSON.stringify({name: 'write_file', arguments: args})}`;
+
+	const started = Date.now();
+	const result = parseToolCalls(content);
+	const elapsed = Date.now() - started;
+
+	t.false(result.success);
+	if (!result.success) {
+		t.regex(result.error, /incomplete JSON tool calls/);
+	}
+	t.true(elapsed < 500, `Parsing ${content.length} chars took ${elapsed}ms`);
+});
+
+test('parseToolCalls: cut-off JSON calls inside an XML call argument stay content', t => {
+	// ~16 KB: enough to run out of JSON scan budget if these are scanned.
+	const fileContent = Array(200).fill(CUT_OFF_CALL).join(' ');
+	const content = `<write_file><path>notes.md</path><content>${fileContent}</content></write_file>`;
+
+	const result = parseToolCalls(content);
+
+	t.true(result.success);
+	if (result.success) {
+		t.is(result.toolCalls.length, 1);
+		t.is(result.toolCalls[0].function.name, 'write_file');
+		t.deepEqual(result.toolCalls[0].function.arguments, {
+			path: 'notes.md',
+			content: fileContent,
+		});
+	}
+});
+
 test('parseToolCalls: unclosed tags before a code fence do not stall parsing', t => {
 	// ~630 KB: scanning these tags for a call around the fence takes about 1 s.
 	const tags = `<item>${'x'.repeat(57)}`.repeat(10000);
@@ -704,5 +782,211 @@ test('parseToolCalls: leaves plain prose alone when JSON-shaped text is just dis
 	t.true(result.success);
 	if (result.success) {
 		t.is(result.toolCalls.length, 0);
+	}
+});
+
+// Broken XML calls. These checks run only when the caller passes the names of
+// the tools offered to the model.
+
+const OFFERED = ['read_file', 'write_file', 'list_directory'];
+
+test('parseToolCalls: reports a call that is never closed', t => {
+	for (const content of [
+		'<read_file><path>/test/file.txt</path>',
+		'I will read it first.\n  <read_file>\n    <path>/test/file.txt</path>\n',
+		'<read_file><path>/test/file.txt</path></read_files>',
+		'<tool_call>\n<read_file>\n<path>/test/file.txt</path>\n',
+	]) {
+		const result = parseToolCalls(content, OFFERED);
+		t.false(result.success, content);
+		if (!result.success) {
+			t.is(
+				result.error,
+				'Incomplete tool call: <read_file> is never closed with </read_file>',
+			);
+		}
+	}
+});
+
+test('parseToolCalls: reports a call cut off partway through an argument', t => {
+	const content = '<write_file>\n<path>a.ts</path>\n<content>\nexport const x = 1;\n';
+
+	const result = parseToolCalls(content, OFFERED);
+
+	t.false(result.success);
+	if (!result.success) {
+		t.is(
+			result.error,
+			'Incomplete tool call: <write_file> is never closed with </write_file>',
+		);
+	}
+});
+
+test('parseToolCalls: reports a parameter closed with the wrong tag instead of running without it', t => {
+	const result = parseToolCalls(
+		'<read_file><path>/test/file.txt</wrong_close></read_file>',
+		OFFERED,
+	);
+
+	t.false(result.success);
+	if (!result.success) {
+		t.is(
+			result.error,
+			'Invalid tool call: <path> inside <read_file> is never closed with </path>',
+		);
+	}
+});
+
+test('parseToolCalls: reports a parameter that is never closed', t => {
+	// Without the check this lists the working directory instead of src.
+	const result = parseToolCalls(
+		'<list_directory><path>src</list_directory>',
+		OFFERED,
+	);
+
+	t.false(result.success);
+	if (!result.success) {
+		t.is(
+			result.error,
+			'Invalid tool call: <path> inside <list_directory> is never closed with </path>',
+		);
+	}
+});
+
+test('parseToolCalls: reports a closing tag that closes no parameter', t => {
+	const result = parseToolCalls(
+		'<read_file><path>a.ts</path></extra></read_file>',
+		OFFERED,
+	);
+
+	t.false(result.success);
+	if (!result.success) {
+		t.is(
+			result.error,
+			'Invalid tool call: </extra> inside <read_file> does not close any parameter',
+		);
+	}
+});
+
+test('parseToolCalls: runs nothing when a complete call comes with a broken one', t => {
+	const content =
+		'<read_file><path>a.ts</path></read_file>\n<read_file><path>b.ts</path>';
+
+	const result = parseToolCalls(content, OFFERED);
+
+	t.false(result.success);
+});
+
+test('parseToolCalls: leaves HTML tags and tool names in prose alone', t => {
+	for (const content of [
+		'Add a <br> after the title, or wrap it in <b>bold</b>.',
+		'Next I will use <read_file> to check the config.',
+	]) {
+		const result = parseToolCalls(content, OFFERED);
+		t.true(result.success, content);
+		if (result.success) {
+			t.deepEqual(result.toolCalls, []);
+		}
+	}
+});
+
+test('parseToolCalls: leaves a call written in prose, outside code, alone', t => {
+	// An unclosed call is only reported when it starts a line and nothing
+	// but its own tags follows it.
+	for (const content of [
+		'use <read_file><path>x</path> to read a file',
+		'To read a file, use <read_file><path>x</path>',
+		'<read_file><path>x</path> reads a file.',
+	]) {
+		const result = parseToolCalls(content, OFFERED);
+		t.true(result.success, content);
+		if (result.success) {
+			t.deepEqual(result.toolCalls, []);
+		}
+	}
+});
+
+test('parseToolCalls: leaves a broken call inside code alone', t => {
+	for (const content of [
+		'Like this:\n```xml\n<read_file><path>a.ts</path>\n```\nThat is all.',
+		'Like this:\n```xml\n<read_file><path>a.ts</path>\n',
+		'Call it as `<read_file><path>a.ts</path>` and close it.',
+	]) {
+		const result = parseToolCalls(content, OFFERED);
+		t.true(result.success, content);
+		if (result.success) {
+			t.deepEqual(result.toolCalls, []);
+		}
+	}
+});
+
+test('parseToolCalls: checks a call the parser already runs from inside a code fence', t => {
+	// The first fence is read as a wrapper, so this call would otherwise run
+	// with {}.
+	const result = parseToolCalls(
+		'```xml\n<read_file><path>a.ts</wrong_close></read_file>\n```',
+		OFFERED,
+	);
+
+	t.false(result.success);
+});
+
+test("parseToolCalls: leaves XML quoted inside another call's arguments alone", t => {
+	for (const content of [
+		'<write_file><path>notes.md</path><content>Use <read_file><path>x</path> to read.</content></write_file>',
+		'{"name": "write_file", "arguments": {"path": "notes.md", "content": "Use <read_file><path>x</path> to read."}}',
+	]) {
+		const result = parseToolCalls(content, OFFERED);
+		t.true(result.success, content);
+		if (result.success) {
+			t.is(result.toolCalls.length, 1);
+			t.is(result.toolCalls[0].function.name, 'write_file');
+			t.is(
+				result.toolCalls[0].function.arguments.content,
+				'Use <read_file><path>x</path> to read.',
+			);
+		}
+	}
+});
+
+test('parseToolCalls: only checks calls to the offered tools', t => {
+	// read_file isn't offered here, so its broken call is handled as before.
+	const notOffered = parseToolCalls(
+		'<read_file><path>a.ts</wrong_close></read_file>',
+		['list_directory'],
+	);
+	t.true(notOffered.success);
+	if (notOffered.success) {
+		t.deepEqual(notOffered.toolCalls[0].function.arguments, {});
+	}
+
+	const notATool = parseToolCalls('<my_config><setting>on</setting>', OFFERED);
+	t.true(notATool.success);
+});
+
+test('parseToolCalls: does not call a closed call unclosed when it is rejected for another reason', t => {
+	// The = makes this attribute-style syntax, which the parser skips; the
+	// call is closed, so the unclosed error would be wrong.
+	const result = parseToolCalls(
+		'<read_file><path>a.ts</path><start_line=5></read_file>',
+		OFFERED,
+	);
+
+	t.true(result.success);
+});
+
+test('parseToolCalls: without tool names, broken calls are handled as before', t => {
+	const unclosed = parseToolCalls('<read_file><path>/test/file.txt</path>');
+	t.true(unclosed.success);
+	if (unclosed.success) {
+		t.deepEqual(unclosed.toolCalls, []);
+	}
+
+	const mismatched = parseToolCalls(
+		'<read_file><path>/test/file.txt</wrong_close></read_file>',
+	);
+	t.true(mismatched.success);
+	if (mismatched.success) {
+		t.deepEqual(mismatched.toolCalls[0].function.arguments, {});
 	}
 });

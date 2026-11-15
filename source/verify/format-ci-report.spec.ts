@@ -63,3 +63,13 @@ test('formatCiReport falls back to the advisory footer when fixApplied is omitte
 	});
 	t.false(body.includes('a fix was implemented'));
 });
+
+test('formatCiReport redacts secrets quoted from the CI log', t => {
+	const body = formatCiReport({
+		...baseInput,
+		subagentOutput:
+			'### Root Cause\nThe log printed ghp_abcdefghijklmnopqrstuvwxyz0123456789 before failing.',
+	});
+	t.false(body.includes('ghp_'));
+	t.true(body.includes('[REDACTED]'));
+});

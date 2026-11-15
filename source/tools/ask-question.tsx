@@ -3,10 +3,13 @@ import React from 'react';
 
 import ToolMessage from '@/components/tool-message';
 import {ThemeContext} from '@/hooks/useTheme';
+import type {
+	QuestionOptionMeta,
+	QuestionType,
+} from '@/tools/runtime/question-queue';
+import {signalQuestion} from '@/tools/runtime/question-queue';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
-import type {QuestionOptionMeta, QuestionType} from '@/utils/question-queue';
-import {signalQuestion} from '@/utils/question-queue';
 import {ensureString, toOptionString} from '@/utils/type-helpers';
 
 interface RichOption {

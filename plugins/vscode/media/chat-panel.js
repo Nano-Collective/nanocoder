@@ -51,6 +51,10 @@
 
 	let showTokenUsage = false;
 
+	// Highlight fenced code in every marked.parse() below: streaming text,
+	// finished text and thought bubbles.
+	globalThis.NanocoderMarkdownHighlight.configureMarkdown(globalThis.marked, globalThis.hljs);
+
 	// ── Slash command autocomplete state ────────────────────
 	const slashDropdown = document.getElementById('slash-dropdown');
 	const { SLASH_COMMANDS, findSlashCommandToken, applySlashCommand } = globalThis.NanocoderSlashCommandUtils;
@@ -699,9 +703,11 @@
 					statusEl.dataset.status = 'cancelled';
 				}
 			});
+			// The turn is over (completed, cancelled or failed): no cursor may linger.
+			document.querySelectorAll('.streaming-cursor').forEach(el => el.classList.remove('streaming-cursor'));
 			stopVisualLoader();
 			finishCurrentWorkSummary(outcome);
-			
+
 			const hiddenFooters = document.querySelectorAll('.agent-footer-processing');
 			hiddenFooters.forEach(f => {
 				f.style.display = '';
@@ -2092,6 +2098,8 @@
 
 			currentTurnEl = msgEl;
 			currentTextEl = textContainer;
+			// Blinking cursor (CSS) while this block streams; see endCurrentTextBlock().
+			textContainer.classList.add('streaming-cursor');
 			scrollToBottomIfFollowing();
 		} else {
 			// Append to existing turn
@@ -2296,6 +2304,7 @@
 				} else {
 					messagesContainer.innerHTML = '';
 				}
+				setSessionResumingIndicator(false);
 				currentTurnEl = null;
 				currentTextEl = null;
 				currentTurnText = '';
@@ -2348,12 +2357,34 @@
 			case 'promptQueueCleared':
 				removeQueuedBubbles(message.ids || []);
 				break;
+	function setSessionResumingIndicator(isResuming) {
+		let indicator = document.getElementById('session-resuming-indicator');
+		if (isResuming) {
+			if (!indicator) {
+				indicator = document.createElement('div');
+				indicator.id = 'session-resuming-indicator';
+				indicator.className = 'session-resuming-indicator flex items-center justify-center gap-2 p-2 text-xs bg-vscode-dropdown-bg border-b border-vscode-border text-vscode-fg opacity-80 shrink-0 z-10';
+				indicator.innerHTML = `${ICONS.pending}<span>Resuming session...</span>`;
+				const chatView = document.getElementById('chat-view');
+				if (chatView && messagesContainer) {
+					chatView.insertBefore(indicator, messagesContainer);
+				}
+			}
+		} else if (indicator) {
+			indicator.remove();
+		}
+	}
+
 			case 'sessionLoaded':
 				finishCurrentWorkSummary(currentWorkSummary?._overrideOutcome || 'completed');
 				pendingUserMessages.clear();
 				const loader = document.getElementById('session-loader');
 				if (loader) loader.remove();
+				setSessionResumingIndicator(false);
 				scrollToBottom(true);
+				break;
+			case 'sessionResuming':
+				setSessionResumingIndicator(message.isResuming);
 				break;
 			case 'acpUpdate':
 				handleAcpUpdate(message.update);
@@ -2616,6 +2647,7 @@
 	function endCurrentTextBlock() {
 		flushPendingRender();
 		closeAgentSegment();
+		if (currentTextEl) currentTextEl.classList.remove('streaming-cursor');
 		currentTurnEl = null;
 		currentTextEl = null;
 		syncLastAgentRawText();
@@ -3873,6 +3905,9 @@
 		card.className = 'my-2 border border-vscode-widget-border rounded bg-vscode-editor-bg overflow-hidden group tool-card';
 		card.id = `tool-card-${toolCallId}`;
 
+		const initialPath = diffPath(update);
+		if (initialPath) card.dataset.filePath = initialPath;
+
 		const row = document.createElement('div');
 		row.className = 'tool-card-row flex items-center justify-between px-3 py-2';
 		// Guarded rather than unbound: the card is created from the queued
@@ -3881,7 +3916,9 @@
 		// that window - the whole approval wait - raised "Change <id> not found".
 		row.onclick = () => {
 			if (card.dataset.hasDiff !== 'true') return;
-			vscode.postMessage({ type: 'showDiff', toolCallId });
+			const message = { type: 'showDiff', toolCallId };
+			if (card.dataset.filePath) message.filePath = card.dataset.filePath;
+			vscode.postMessage(message);
 		};
 
 		const left = document.createElement('div');
@@ -3927,7 +3964,8 @@
 
 	// Reveal the diff affordance once the extension host has a change
 	// registered for this card - see hasDiffContent.
-	function setEditCardDiffAvailable(el) {
+	function setEditCardDiffAvailable(el, filePath) {
+		if (filePath) el.dataset.filePath = filePath;
 		if (el.dataset.hasDiff === 'true') return;
 		el.dataset.hasDiff = 'true';
 
@@ -3954,7 +3992,8 @@
 		const actionEl = el.querySelector('.tool-card-action');
 		if (actionEl) actionEl.textContent = state.action;
 
-		if (hasDiffContent(update)) setEditCardDiffAvailable(el);
+		const path = diffPath(update);
+		if (path) setEditCardDiffAvailable(el, path);
 
 		if (isSettled(state.status)) {
 			const actions = el.querySelector('.tool-actions');
