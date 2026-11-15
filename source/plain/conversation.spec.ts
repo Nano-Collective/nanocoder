@@ -2708,3 +2708,50 @@ test.serial(
 		t.is(calls.length, 1);
 	},
 );
+
+test.serial(
+	"executes text-based tool calls when an open-weights model emits JSON tool calls on a native-tools turn",
+	async (t) => {
+		const client = makeFakeClient({
+			responses: [
+				{
+					choices: [
+						{
+							message: {
+								role: "assistant",
+								content: '```json\n{"name": "safe_tool", "arguments": {}}\n```',
+							},
+						},
+					],
+				},
+				{choices: [{message: {role: "assistant", content: "done"}}]},
+			],
+		});
+		const toolManager = makeFakeToolManager({
+			knownTools: new Set(["safe_tool"]),
+		});
+		let executed = false;
+		setToolRegistryGetter(() => ({
+			safe_tool: (async () => {
+				executed = true;
+				return "ok";
+			}) as ToolHandler,
+		}));
+
+		const outcome = await runPlainConversation({
+			client,
+			toolManager,
+			systemMessage: SYSTEM,
+			initialMessages: [USER],
+			developmentMode: "auto-accept",
+			nonInteractiveAlwaysAllow: [],
+			abortSignal: new AbortController().signal,
+		});
+
+		t.is(outcome.kind, "success");
+		t.true(executed);
+		t.is(outcome.toolCalls.length, 1);
+		t.is(outcome.toolCalls[0].name, "safe_tool");
+	},
+);
+

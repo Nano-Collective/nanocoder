@@ -395,6 +395,11 @@ async function runTurn(
 		// answering with nothing or emitting broken tool calls is stopped well
 		// short of maxTurns instead of spending a request on every one of them.
 		retryLimits: getRetryLimits(),
+		policy: {
+			textToolCalls: 'whenever-no-native',
+			stripThinkTags: true,
+			repeatSignature: 'emitted',
+		},
 		adapter: {
 			// The turn writes straight to the session's history, so a throw part
 			// way through keeps the round-trips that already ran.

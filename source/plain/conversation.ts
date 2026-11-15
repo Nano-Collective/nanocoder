@@ -278,6 +278,11 @@ async function runPlainConversationBody(
 		signal: abortSignal,
 		maxTurns,
 		retryLimits,
+		policy: {
+			textToolCalls: 'whenever-no-native',
+			stripThinkTags: true,
+			repeatSignature: 'emitted',
+		},
 		adapter: {
 			history: {
 				get: () => messages,

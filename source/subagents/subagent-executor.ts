@@ -793,6 +793,11 @@ export class SubagentExecutor {
 			// is nobody to ask inside a delegated run, so a stuck subagent stops
 			// with an error naming the setting.
 			retryLimits: getRetryLimits(),
+			policy: {
+				textToolCalls: 'whenever-no-native',
+				stripThinkTags: true,
+				repeatSignature: 'emitted',
+			},
 			adapter: {
 				history: {
 					get: history,
