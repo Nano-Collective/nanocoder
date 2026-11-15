@@ -1,6 +1,6 @@
 /**
  * A module-level singleton handler slot wired up by App.tsx and invoked from
- * deep in the tool / subagent layers (mirrors message-queue.tsx). The UI sets
+ * deep in the tool / subagent layers (mirrors message-queue-core.ts). The UI sets
  * one handler; callers `signal()` and await the user's response. When no
  * handler is registered, `signal()` resolves to a caller-supplied fallback.
  */

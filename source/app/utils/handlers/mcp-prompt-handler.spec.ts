@@ -57,7 +57,7 @@ test('returns false when no MCP client is connected', async t => {
 		createOptions(),
 	);
 
-	t.false(handled);
+	t.is(handled, undefined);
 });
 
 test('returns false when the command name matches no connected prompt', async t => {
@@ -71,7 +71,7 @@ test('returns false when the command name matches no connected prompt', async t 
 		createOptions(),
 	);
 
-	t.false(handled);
+	t.is(handled, undefined);
 });
 
 test('sends the resolved prompt text as the next chat message', async t => {
@@ -97,7 +97,7 @@ test('sends the resolved prompt text as the next chat message', async t => {
 		}),
 	);
 
-	t.true(handled);
+	t.is(handled, 'handed-off', 'the chat turn completes the command');
 	t.is(sentPrompt, 'hello there');
 });
 
@@ -228,7 +228,7 @@ test('reports missing required arguments without calling the server', async t =>
 		}),
 	);
 
-	t.true(handled);
+	t.is(handled, 'done-after-render');
 	t.false(called);
 	t.regex(queuedMessage, /Missing required argument.*repo/);
 });
@@ -278,7 +278,7 @@ test('reports a server error instead of throwing', async t => {
 		}),
 	);
 
-	t.true(handled);
+	t.is(handled, 'done-after-render');
 	t.regex(queuedMessage, /server unreachable/);
 });
 
@@ -321,7 +321,7 @@ test('a multi-message prompt ending on a user turn splices earlier turns into hi
 		}),
 	);
 
-	t.true(handled);
+	t.is(handled, 'handed-off');
 	// Only the final user turn is submitted as the "next chat message" ...
 	t.is(sentMessage, 'real question');
 	// ... and the earlier turns arrive as separate, role-preserving messages,
@@ -379,7 +379,6 @@ test('a prompt that does not end on a user turn is appended as history instead o
 
 	let onHandleChatMessageCalled = false;
 	let newMessages: Array<{role: string; content: string}> | undefined;
-	let completed = false;
 
 	const handled = await handleMCPPromptCommand(
 		'mcp:docs:seed',
@@ -392,13 +391,10 @@ test('a prompt that does not end on a user turn is appended as history instead o
 			onHandleChatMessage: async () => {
 				onHandleChatMessageCalled = true;
 			},
-			onCommandComplete: () => {
-				completed = true;
-			},
 		}),
 	);
 
-	t.true(handled);
+	t.is(handled, 'done', 'nothing left to answer, so it completes at once');
 	t.false(
 		onHandleChatMessageCalled,
 		'there is no next user turn to submit, so no chat round-trip is triggered',
@@ -407,5 +403,4 @@ test('a prompt that does not end on a user turn is appended as history instead o
 		{role: 'user', content: 'set the scene'},
 		{role: 'assistant', content: 'scripted reply'},
 	]);
-	t.true(completed);
 });

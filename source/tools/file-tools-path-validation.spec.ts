@@ -6,7 +6,7 @@ import {diffEditTool} from './file-ops/diff-edit.js';
 import {writeFileTool} from './file-ops/write-file.js';
 import {stringReplaceTool} from './file-ops/string-replace.js';
 import {readFileTool} from './read-file.js';
-import {markFileSeen} from '../utils/read-tracker.js';
+import {markFileSeenAndVisible} from './runtime/read-tracker.js';
 
 // ============================================================================
 // Test Setup
@@ -287,7 +287,7 @@ test('string_replace validator: accepts valid relative paths', async (t) => {
 
 		// The validator enforces read-before-edit: mark the file as seen using
 		// the same resolved path it computes internally (resolve(path) from cwd).
-		markFileSeen(resolve('test.txt'));
+		markFileSeenAndVisible(resolve('test.txt'));
 
 		const result = await validator({
 			path: 'test.txt',
@@ -408,7 +408,7 @@ test('diff_edit validator: accepts valid relative paths', async (t) => {
 
 		const testFile = join(testDir, 'test.txt');
 		await fsWriteFile(testFile, 'old content', 'utf-8');
-		markFileSeen(resolve('test.txt'));
+		markFileSeenAndVisible(resolve('test.txt'));
 
 		const result = await validator({
 			path: 'test.txt',

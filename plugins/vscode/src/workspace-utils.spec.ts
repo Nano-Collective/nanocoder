@@ -2,7 +2,7 @@
 import test from 'ava';
 import * as os from 'os';
 import * as vscode from 'vscode';
-import {resolveExtensionCwd, resolveProjectCwd} from './workspace-utils';
+import {acpCliArgs, resolveExtensionCwd, resolveProjectCwd} from './workspace-utils';
 
 test.beforeEach(() => {
     (vscode as any).__test.reset();
@@ -12,6 +12,20 @@ test.beforeEach(() => {
 test.afterEach.always(() => {
     (vscode as any).__test.reset();
     (vscode.workspace as any).workspaceFolders = undefined;
+    (vscode.workspace as any).isTrusted = undefined;
+});
+
+test('acpCliArgs passes --trust-directory only when the workspace is trusted', t => {
+    (vscode.workspace as any).isTrusted = true;
+    t.deepEqual(acpCliArgs(), ['--acp', '--trust-directory']);
+
+    (vscode.workspace as any).isTrusted = false;
+    t.deepEqual(acpCliArgs(), ['--acp']);
+});
+
+test('acpCliArgs does not trust the directory when trust is unknown', t => {
+    (vscode.workspace as any).isTrusted = undefined;
+    t.deepEqual(acpCliArgs(), ['--acp']);
 });
 
 test('resolveExtensionCwd prefers configured cwd over workspace folder', t => {

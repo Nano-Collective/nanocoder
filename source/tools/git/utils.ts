@@ -5,9 +5,16 @@
  * status parsing, and availability checks.
  */
 
-import {execSync, spawn} from 'node:child_process';
-import {existsSync, readFileSync} from 'node:fs';
-import {isAbsolute, join} from 'node:path';
+import {spawn} from 'node:child_process';
+import {
+	accessSync,
+	constants,
+	existsSync,
+	readFileSync,
+	statSync,
+} from 'node:fs';
+import {devNull} from 'node:os';
+import {delimiter, isAbsolute, join} from 'node:path';
 import {TIMEOUT_GH_METADATA_MS, TIMEOUT_GIT_PUSH_MS} from '@/constants';
 import {getProjectRoot} from '@/services/session-cwd';
 import {getLogger} from '@/utils/logging';
@@ -53,42 +60,104 @@ export interface CommitInfo {
 
 // ============================================================================
 // Availability Checks (Synchronous - for conditional tool registration)
+//
+// These must never spawn child processes: they run while the tool registry
+// is built, and blocking on `git`/`gh` before the first rendered frame used
+// to cost ~200ms of startup (#1819). Availability is resolved by scanning
+// PATH / the .git directory on the filesystem instead.
 // ============================================================================
 
 /**
- * Check if git is available on the system (synchronous)
+ * Memoized PATH lookup per binary name. PATH is fixed for the life of a
+ * process, so each name costs one scan rather than one scan per call.
+ */
+const binaryOnPathCache = new Map<string, boolean>();
+
+/**
+ * Check whether an executable resolves on PATH without spawning a shell.
+ * Mirrors shell resolution: every PATH entry is checked against the bare
+ * name plus each PATHEXT extension on Windows (`.exe`, `.cmd`, ...).
+ * cmd.exe accepts quoted PATH entries (`"C:\Program Files\Git\cmd"`), so
+ * surrounding quotes are stripped before the directory is stat-ed — without
+ * that, git could be installed and working while this scan misses it.
+ */
+function isBinaryOnPath(name: string): boolean {
+	const cached = binaryOnPathCache.get(name);
+	if (cached !== undefined) return cached;
+
+	const pathEntries = (process.env.PATH ?? '')
+		.split(delimiter)
+		.map(entry => entry.replace(/^"(.*)"$/, '$1'))
+		.filter(Boolean);
+	const extensions =
+		process.platform === 'win32'
+			? (process.env.PATHEXT ?? '.COM;.EXE;.BAT;.CMD')
+					.split(';')
+					.filter(Boolean)
+			: [''];
+
+	let found = false;
+	for (const dir of pathEntries) {
+		for (const ext of extensions) {
+			const candidate = join(dir, name + ext);
+			try {
+				// Regular file only: a directory named like the binary must not
+				// count as an installed executable.
+				if (!statSync(candidate).isFile()) continue;
+				// X_OK mirrors whether a shell could actually exec the file: it
+				// checks the executable bit on Unix and is a no-op on Windows
+				// (where PATHEXT above does the equivalent filtering).
+				accessSync(candidate, constants.X_OK);
+				found = true;
+				break;
+			} catch {
+				// Missing, not a file, or not executable — keep looking.
+			}
+		}
+		if (found) break;
+	}
+
+	binaryOnPathCache.set(name, found);
+	return found;
+}
+
+/**
+ * @internal Test-only: clear the memoized PATH lookups so a test can point
+ * PATH at a fixture directory and get a fresh verdict instead of the
+ * cached one from the real environment.
+ */
+export function resetBinaryAvailabilityCacheForTests(): void {
+	binaryOnPathCache.clear();
+}
+
+/**
+ * Check if git is available on the system (synchronous, spawn-free)
  */
 export function isGitAvailable(): boolean {
-	try {
-		execSync('git --version', {stdio: 'ignore'});
-		return true;
-	} catch {
-		return false;
-	}
+	return isBinaryOnPath('git');
 }
 
 /**
- * Check if the current directory is inside a git repository (synchronous)
+ * Check if the current directory is inside a git repository (synchronous,
+ * spawn-free). Walks up from `process.cwd()` looking for `.git`, the same
+ * filesystem signal the boot summary uses — also true inside worktrees,
+ * where `.git` is a `gitdir:` file rather than a directory.
+ *
+ * Unlike `git rev-parse --is-inside-work-tree`, this intentionally ignores
+ * the `GIT_DIR` / `GIT_WORK_TREE` environment variables: honoring them
+ * would mean shelling out again, which is exactly the cost this check
+ * exists to avoid. Advanced setups pointing GIT_DIR at an external repo
+ * will have the git tools hidden; execute_bash remains available.
  */
 export function isInsideGitRepo(): boolean {
-	try {
-		execSync('git rev-parse --is-inside-work-tree', {stdio: 'ignore'});
-		return true;
-	} catch {
-		return false;
-	}
+	return findGitDirSync() !== null;
 }
 
 /**
- * Check if gh CLI is available on the system (synchronous)
+ * Check if gh CLI is available on the system (synchronous, spawn-free)
  */
 export function isGhAvailable(): boolean {
-	try {
-		execSync('gh --version', {stdio: 'ignore'});
-		return true;
-	} catch {
-		return false;
-	}
+	return isBinaryOnPath('gh');
 }
 
 // ============================================================================
@@ -225,9 +294,9 @@ export function getDefaultBranchSync(
  * `<Static>` render path. Returns null when not in a git repository so
  * callers can cleanly omit the surface.
  *
- * Skips the `isInsideGitRepo()` shell-out: `getCurrentBranchSync` already
- * returns null whenever no `.git` directory is found, which is the same
- * signal at zero process-spawn cost.
+ * Skips the `isInsideGitRepo()` check entirely: `getCurrentBranchSync`
+ * already returns null whenever no `.git` directory is found, which is the
+ * same signal at zero cost.
  */
 export function getGitStatusSummarySync(
 	startDir: string = process.cwd(),
@@ -268,8 +337,13 @@ const GIT_TIMEOUT_MS = 60_000;
  */
 const GIT_ENV = {...process.env, GIT_TERMINAL_PROMPT: '0'};
 
+interface ExecOptions {
+	signal?: AbortSignal;
+	env?: Record<string, string>;
+}
+
 /**
- * Spawn a command, collect stdout, and resolve with the trimmed output.
+ * Spawn a command, collect stdout bytes, and resolve without decoding chunks.
  * Rejects with stderr (or an exit-code message) on non-zero exit. `label` is
  * the human-readable command name used in error messages (e.g. 'Git', 'gh').
  *
@@ -278,23 +352,27 @@ const GIT_ENV = {...process.env, GIT_TERMINAL_PROMPT: '0'};
  * (ssh passphrases and gpg pinentry read the tty directly).
  *
  * `timeoutMs` overrides the default bound for slower calls (e.g. push).
+ * `options.signal` cancels the command and `options.env` adds variables such
+ * as GIT_INDEX_FILE on top of the default Git environment.
  */
-function execProcess(
+function execProcessRaw(
 	command: string,
 	args: string[],
 	label: string,
 	timeoutMs?: number,
-): Promise<string> {
+	{signal, env}: ExecOptions = {},
+): Promise<Buffer> {
 	return new Promise((resolve, reject) => {
 		// The project root, not the live process cwd: inside an ACP session it is
 		// the session's own directory (see services/session-cwd).
 		const proc = spawn(command, args, {
 			cwd: getProjectRoot(),
 			stdio: ['ignore', 'pipe', 'pipe'],
-			env: GIT_ENV,
+			env: env ? {...GIT_ENV, ...env} : GIT_ENV,
+			signal,
 		});
-		let stdout = '';
-		let stderr = '';
+		const stdout: Buffer[] = [];
+		const stderr: Buffer[] = [];
 		let settled = false;
 
 		// Settle here rather than on `close`: a helper the child spawned (ssh,
@@ -319,42 +397,91 @@ function execProcess(
 			finish();
 		};
 
-		proc.stdout.on('data', (data: Buffer) => {
-			stdout += data.toString();
-		});
+		proc.stdout.on('data', (data: Buffer) => stdout.push(data));
 
-		proc.stderr.on('data', (data: Buffer) => {
-			stderr += data.toString();
-		});
+		proc.stderr.on('data', (data: Buffer) => stderr.push(data));
 
 		proc.on('close', (code: number | null) => {
 			settle(() => {
 				if (code === 0) {
-					resolve(stdout.trimEnd());
+					resolve(Buffer.concat(stdout));
 				} else {
+					const stderrText = Buffer.concat(stderr).toString();
 					const errorMessage =
-						stderr.trim() || `${label} command failed with exit code ${code}`;
+						stderrText.trim() ||
+						`${label} command failed with exit code ${code}`;
 					reject(new Error(errorMessage));
 				}
 			});
 		});
 
 		proc.on('error', error => {
-			settle(() =>
-				reject(new Error(`Failed to execute ${command}: ${error.message}`)),
-			);
+			settle(() => {
+				if (signal?.aborted) {
+					reject(new Error(`${label} command cancelled`));
+					return;
+				}
+				reject(new Error(`Failed to execute ${command}: ${error.message}`));
+			});
 		});
 	});
 }
 
+function execProcess(
+	command: string,
+	args: string[],
+	label: string,
+	timeoutMs?: number,
+	options?: ExecOptions,
+): Promise<string> {
+	return execProcessRaw(command, args, label, timeoutMs, options).then(output =>
+		output.toString().trimEnd(),
+	);
+}
+
 /**
- * Execute a git command and return the output
+ * Execute a git command and return the output. Pass `timeoutMs` for slower
+ * calls (e.g. push) and `options` to cancel or add environment variables.
  */
 export async function execGit(
 	args: string[],
 	timeoutMs?: number,
+	options?: ExecOptions,
 ): Promise<string> {
-	return execProcess('git', args, 'Git', timeoutMs);
+	return execProcess('git', args, 'Git', timeoutMs, options);
+}
+
+/**
+ * Config overrides for git runs that only read the repo. These back tools
+ * that run without approval, so nothing in the repo's own config may make
+ * them start a program: core.fsmonitor names a hook `git status` and `git
+ * diff` execute, and a hook directory is consulted by some read paths too.
+ * A sandboxed `execute_bash` cannot write `.git`, but a repo can arrive with
+ * this config already set.
+ */
+const READ_ONLY_GIT_CONFIG = [
+	'-c',
+	'core.fsmonitor=false',
+	'-c',
+	`core.hooksPath=${devNull}`,
+];
+
+/** execGit for commands that only read: see READ_ONLY_GIT_CONFIG. */
+export async function execGitReadOnly(
+	args: string[],
+	timeoutMs?: number,
+	options?: ExecOptions,
+): Promise<string> {
+	return execGit([...READ_ONLY_GIT_CONFIG, ...args], timeoutMs, options);
+}
+
+/** Execute git and preserve stdout bytes exactly for target file snapshots. */
+export async function execGitBuffer(
+	args: string[],
+	timeoutMs?: number,
+	options?: ExecOptions,
+): Promise<Buffer> {
+	return execProcessRaw('git', args, 'Git', timeoutMs, options);
 }
 
 /**
@@ -364,8 +491,9 @@ export async function execGit(
 export async function execGh(
 	args: string[],
 	timeoutMs?: number,
+	options?: ExecOptions,
 ): Promise<string> {
-	return execProcess('gh', args, 'gh', timeoutMs);
+	return execProcess('gh', args, 'gh', timeoutMs, options);
 }
 
 // ============================================================================
@@ -377,7 +505,7 @@ export async function execGh(
  */
 export async function hasStagedChanges(): Promise<boolean> {
 	try {
-		const diff = await execGit(['diff', '--cached', '--name-only']);
+		const diff = await execGitReadOnly(['diff', '--cached', '--name-only']);
 		return diff.trim().length > 0;
 	} catch (error) {
 		logger.debug('Failed to check for staged changes', {error});
@@ -390,8 +518,8 @@ export async function hasStagedChanges(): Promise<boolean> {
  */
 export async function isRebaseInProgress(): Promise<boolean> {
 	try {
-		await execGit(['rev-parse', '--git-path', 'rebase-merge']);
-		const result = await execGit([
+		await execGitReadOnly(['rev-parse', '--git-path', 'rebase-merge']);
+		const result = await execGitReadOnly([
 			'rev-parse',
 			'--verify',
 			'--quiet',
@@ -408,7 +536,7 @@ export async function isRebaseInProgress(): Promise<boolean> {
  */
 export async function isMergeInProgress(): Promise<boolean> {
 	try {
-		await execGit(['rev-parse', '--verify', '--quiet', 'MERGE_HEAD']);
+		await execGitReadOnly(['rev-parse', '--verify', '--quiet', 'MERGE_HEAD']);
 		return true;
 	} catch {
 		return false;
@@ -424,7 +552,7 @@ export async function isMergeInProgress(): Promise<boolean> {
  */
 export async function getCurrentBranch(): Promise<string> {
 	try {
-		return await execGit(['rev-parse', '--abbrev-ref', 'HEAD']);
+		return await execGitReadOnly(['rev-parse', '--abbrev-ref', 'HEAD']);
 	} catch (error) {
 		logger.debug('Failed to get current branch', {error});
 		return 'HEAD'; // Detached HEAD state
@@ -438,7 +566,7 @@ export async function getCurrentBranch(): Promise<string> {
  * head branch, unlike comparing branch names.
  */
 export async function getCurrentCommitSha(): Promise<string> {
-	return execGit(['rev-parse', 'HEAD']);
+	return execGitReadOnly(['rev-parse', 'HEAD']);
 }
 
 /**
@@ -575,7 +703,7 @@ export async function createDraftPr(opts: {
  */
 export async function getDefaultBranch(): Promise<string> {
 	try {
-		const remoteBranch = await execGit([
+		const remoteBranch = await execGitReadOnly([
 			'symbolic-ref',
 			'refs/remotes/origin/HEAD',
 			'--short',
@@ -588,11 +716,11 @@ export async function getDefaultBranch(): Promise<string> {
 		);
 		// Fall back to checking if main or master exists
 		try {
-			await execGit(['rev-parse', '--verify', 'main']);
+			await execGitReadOnly(['rev-parse', '--verify', 'main']);
 			return 'main';
 		} catch {
 			try {
-				await execGit(['rev-parse', '--verify', 'master']);
+				await execGitReadOnly(['rev-parse', '--verify', 'master']);
 				return 'master';
 			} catch {
 				return 'main';
@@ -606,7 +734,7 @@ export async function getDefaultBranch(): Promise<string> {
  */
 export async function getUpstreamBranch(): Promise<string | null> {
 	try {
-		return await execGit(['rev-parse', '--abbrev-ref', '@{upstream}']);
+		return await execGitReadOnly(['rev-parse', '--abbrev-ref', '@{upstream}']);
 	} catch (error) {
 		logger.debug('Failed to get upstream branch', {error});
 		return null;
@@ -624,7 +752,7 @@ export async function getAheadBehind(): Promise<{
 		const upstream = await getUpstreamBranch();
 		if (!upstream) return {ahead: 0, behind: 0};
 
-		const result = await execGit([
+		const result = await execGitReadOnly([
 			'rev-list',
 			'--left-right',
 			'--count',
@@ -693,7 +821,7 @@ export async function getCommits(
 		args.push('--');
 		if (options.file) args.push(options.file);
 
-		const output = await execGit(args);
+		const output = await execGitReadOnly(args);
 		if (!output.trim()) return [];
 
 		return output.split('\n').map(line => {
@@ -817,7 +945,7 @@ export async function getDiffStats(
 		const args = ['diff', '--numstat'];
 		if (staged) args.push('--cached');
 
-		const output = await execGit(args);
+		const output = await execGitReadOnly(args);
 		if (!output.trim()) return stats;
 
 		for (const line of output.split('\n')) {
@@ -845,7 +973,7 @@ export async function getDiffStats(
  */
 export async function getStashCount(): Promise<number> {
 	try {
-		const output = await execGit(['stash', 'list']);
+		const output = await execGitReadOnly(['stash', 'list']);
 		if (!output.trim()) return 0;
 		return output.split('\n').length;
 	} catch (error) {

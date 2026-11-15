@@ -7,12 +7,13 @@ import {
 	useRef,
 	useState,
 } from 'react';
-import {isNewlineKey} from '@/utils/newline-key';
+import {isNewlineKey} from '@/terminal/newline-key';
+import {pasteEvents} from '@/terminal/terminal-paste';
 import {
 	getVisualLineSegments,
 	moveCursorToVisualLine,
 	wrapWithTrimmedContinuations,
-} from '@/utils/text-wrapping';
+} from '@/terminal/text-wrapping';
 
 /**
  * The raw byte sequence behind the keypress a `useInput` handler is running
@@ -112,6 +113,8 @@ export type Props = {
 	readonly wrapWidth?: number;
 	readonly handleEnter?: boolean;
 	readonly onEdgeArrow?: (direction: 'up' | 'down') => void;
+	/** Replaces the default paste handling (insert at the caret). */
+	readonly onPaste?: (payload: string) => void;
 };
 
 /**
@@ -145,6 +148,7 @@ const TextInput = forwardRef<TextInputHandle, Props>(function TextInput(
 		wrapWidth,
 		handleEnter = true,
 		onEdgeArrow,
+		onPaste,
 	}: Props,
 	ref,
 ) {
@@ -213,6 +217,43 @@ const TextInput = forwardRef<TextInputHandle, Props>(function TextInput(
 	// state — and only clamp it against the new value's bounds.
 	const skipNextCursorResetRef = useRef(false);
 
+	// cli.tsx lifts bracketed pastes off stdin before Ink sees them, so a field
+	// that doesn't take them from pasteEvents never receives them at all.
+	// Subscribe while focused, the same condition that gates keystrokes, so a
+	// paste lands in exactly the field that typing would. The handler is read
+	// through a ref so the subscription doesn't churn on every render.
+	const handlePasteRef = useRef<(payload: string) => void>(() => {});
+	// Reassigned on every render, deliberately outside an effect: the listener
+	// must always call the latest onPaste/onChange. Moving this into an effect
+	// would bring back the stale closure the ref is here to avoid.
+	handlePasteRef.current = (payload: string) => {
+		if (onPaste) {
+			onPaste(payload);
+			return;
+		}
+		// Terminals send line breaks in a paste as CR.
+		const text = payload.replace(/\r\n?/g, '\n');
+		const current = originalValueRef.current;
+		const offset = cursorOffsetRef.current;
+		const next = current.slice(0, offset) + text + current.slice(offset);
+		cursorOffsetRef.current = offset + text.length;
+		originalValueRef.current = next;
+		recordEmit(next);
+		setState({cursorOffset: offset + text.length, cursorWidth: 0});
+		onChange(next);
+	};
+
+	useEffect(() => {
+		if (!focus) {
+			return;
+		}
+		const handlePaste = (payload: string) => handlePasteRef.current(payload);
+		pasteEvents.on('paste', handlePaste);
+		return () => {
+			pasteEvents.off('paste', handlePaste);
+		};
+	}, [focus]);
+
 	useEffect(() => {
 		if (!focus || !showCursor) {
 			return;
@@ -273,7 +314,9 @@ const TextInput = forwardRef<TextInputHandle, Props>(function TextInput(
 		});
 	}, [originalValue, focus, showCursor]);
 
-	// Word-jump helpers (whitespace-delimited, like readline Alt+B/F)
+	// Word-jump helpers (whitespace-delimited). Ctrl+Left lands on the start of
+	// the previous word, like readline's Alt+B; Ctrl+Right lands on the start of
+	// the next word, where readline's Alt+F would stop at the end of this one.
 	// Newlines are treated as whitespace — Ctrl+Left/Right cross line boundaries.
 	function moveToPrevWord(value: string, offset: number): number {
 		let i = offset;
@@ -435,7 +478,7 @@ const TextInput = forwardRef<TextInputHandle, Props>(function TextInput(
 						);
 					}
 				} else if (key.rightArrow) {
-					// Ctrl+Right: jump to end of next word
+					// Ctrl+Right: jump to start of next word
 					if (showCursor) {
 						nextCursorOffset = moveToNextWord(
 							originalValueRef.current,

@@ -200,12 +200,12 @@ These fields work with all transport types:
 | `alwaysAllow` | Array of tool names that skip confirmation prompts |
 | `enabled` | Whether the server is active (default: `true`). `false` skips it entirely — no connection, no tools registered |
 | `timeout` | Connection timeout in milliseconds. Bounds the connection handshake and the initial tool listing; individual tool calls keep the MCP SDK's default timeout (60 seconds) |
-| `healthCheckInterval` | Optional MCP ping interval in milliseconds (default: `30000`). Set to `0` to disable periodic health checks. Transport errors trigger a liveness ping even when periodic checks are disabled; recoverable errors preserve tools if the server responds. Health pings use `timeout` when configured, otherwise 10 seconds. A failed ping or transport close marks the server unhealthy and removes its tools; unhealthy servers continue to be checked with exponential backoff and automatically restore their tools when they respond again. |
+| `healthCheckInterval` | Optional MCP ping interval in milliseconds (default: `30000`). Set to `0` to disable health pings entirely, including the liveness ping that otherwise follows a transport error. Health pings use `timeout` when configured, otherwise 10 seconds, and are skipped while a tool call or resource read is in flight on that server. Two failed pings in a row, or a transport close, mark the server unhealthy and remove its tools; unhealthy servers continue to be checked with exponential backoff and automatically restore their tools when they respond again. After a transport close (for example a crashed stdio server), Nanocoder reconnects from the server's config with the same backoff, using this interval as the base delay (30 seconds when it is `0`). |
 | `tags` | Array of tags, shown as `#tag` labels in `/mcp` output |
 
 ## Auto-Approve Tools
 
-The `alwaysAllow` field specifies MCP tools that execute without confirmation in normal mode:
+The `alwaysAllow` field specifies MCP tools that execute without confirmation in normal and auto-accept modes:
 
 ```json
 {
@@ -218,20 +218,20 @@ The `alwaysAllow` field specifies MCP tools that execute without confirmation in
 }
 ```
 
-- Tools in `alwaysAllow` skip the confirmation prompt in normal mode
-- Tools not listed still require approval
-- In auto-accept and yolo modes, all MCP tools run without confirmation regardless
+- Tools in `alwaysAllow` skip the confirmation prompt in normal and auto-accept modes
+- Tools not listed still require approval, including in auto-accept mode (unless the server annotates them `readOnlyHint: true`)
+- In yolo mode, all MCP tools run without confirmation regardless
 - Only auto-approve read-only tools; avoid auto-approving tools that modify files or execute commands
 
 ### How `alwaysAllow` interacts with development modes
 
-`alwaysAllow` is a **normal-mode** setting. It is not a global exemption — the
+`alwaysAllow` is not a global exemption — the
 [development mode](../features/development-modes.md) decides first:
 
 | Mode | MCP tool behaviour | Does `alwaysAllow` apply? |
 |------|--------------------|---------------------------|
 | `normal` | Prompts for confirmation | **Yes** — listed tools skip the prompt |
-| `auto-accept` | Runs without confirmation | No — everything already runs |
+| `auto-accept` | Runs tools the server annotates `readOnlyHint: true`; prompts for the rest | **Yes** — listed tools skip the prompt |
 | `yolo` | Runs without confirmation | No — everything already runs |
 | `plan` | Only tools the server annotates `readOnlyHint: true` are available at all; the rest are hidden | **No** — it cannot re-enable a mutating tool |
 | `headless` | Runs without confirmation | No — everything already runs |
@@ -242,11 +242,20 @@ Two consequences worth calling out:
   model's intentions without side effects, so listing a mutating tool there has
   no effect. Availability in plan mode is decided solely by the server's
   `readOnlyHint` annotation, and a tool with no annotation is treated as a
-  possible mutation and hidden. Note this is only about *availability*:
-  `readOnlyHint` is supplied by the same server being gated, so it is confined
-  to that one decision. It never skips a confirmation prompt in normal mode
-  (only your `alwaysAllow` list does that), never suppresses a checkpoint before
-  the call, and never promotes the tool into a parallel batch.
+  possible mutation and hidden. `readOnlyHint` is supplied by the same server
+  being gated, so it is trusted only where a read-only built-in would be: it
+  decides plan-mode availability and lets the tool run unprompted in
+  auto-accept. It never skips a confirmation prompt in normal mode (only your
+  `alwaysAllow` list does that), never suppresses a checkpoint before the call,
+  and never promotes the tool into a parallel batch.
+- **Auto-accept prompts for MCP tools, like `execute_bash`.** A server can
+  expose a tool as capable as a shell (a command runner, a database client, a
+  deploy tool), and auto-accept still asks before bash, so it also asks before
+  an MCP tool unless the tool is in that server's `alwaysAllow` list or the
+  server annotates it `readOnlyHint: true`. Non-interactive runs
+  (`nanocoder run`) default to auto-accept, so a run that calls an unlisted MCP
+  tool stops with `tool-approval-required`; add the tool to `alwaysAllow`, or
+  pass `--mode yolo`.
 - **Headless runs every MCP tool unattended, with no per-server opt-out.**
   Headless is the internal mode the daemon uses for triggered skill runs, where
   no user is present to answer a prompt. MCP tools there behave like
@@ -288,7 +297,7 @@ Supported syntax: `$VAR`, `${VAR}`, `${VAR:-default}`. Variable names must be up
 
 Run `/settings mcp` for interactive configuration with:
 
-- Pre-configured templates for popular servers (Filesystem, GitHub, Brave Search, DuckDuckGo, You.com, Serply, FXMacroData, Context7, DeepWiki, Playwright, etc.)
+- Pre-configured templates for popular servers (Filesystem, GitHub, Brave Search, DuckDuckGo, You.com, Context7, DeepWiki, Playwright, etc.)
 - Custom server setup for stdio, HTTP, and WebSocket
 - Edit or delete existing servers
 - **Ctrl+E** to open the config file in your system editor

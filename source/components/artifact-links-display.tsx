@@ -5,7 +5,7 @@ import {
 	artifactManager,
 } from '@/artifacts/artifact-manager';
 import {useTheme} from '@/hooks/useTheme';
-import {createTerminalFileLink} from '@/utils/terminal-file-link';
+import {createTerminalFileLink} from '@/terminal/terminal-file-link';
 
 const ARTIFACT_LABELS: Record<ArtifactDescriptor['kind'], string> = {
 	implementation_plan: 'Plan',

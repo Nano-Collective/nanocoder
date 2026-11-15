@@ -19,3 +19,12 @@ export function resolveProjectCwd(): string | undefined {
 export function resolveExtensionCwd(): string {
     return resolveProjectCwd() || os.homedir() || process.cwd();
 }
+
+/**
+ * Arguments for the background `nanocoder --acp` process. The CLI refuses a
+ * directory it hasn't been told to trust, so `--trust-directory` is passed
+ * only when the user has granted this workspace VS Code's Workspace Trust.
+ */
+export function acpCliArgs(): string[] {
+    return vscode.workspace.isTrusted ? ['--acp', '--trust-directory'] : ['--acp'];
+}

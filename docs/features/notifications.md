@@ -89,7 +89,7 @@ Notification preferences are stored in `nanocoder-preferences.json` under the to
 | `events.ciInvestigationComplete` | boolean | `true` | Notify when the automated CI-failure investigation finishes |
 | `customMessages.<event>` | object | — | Override the default title and message for an event |
 
-The last three fire only from the per-project daemon (`nanocoder daemon start`) — see [Scheduler](./scheduler.md) and CI Watch configuration in [Preferences](../configuration/preferences.md#ci-watch-configuration).
+The last three fire only from the per-project daemon (`nanocoder daemon start`) — see [Skills → The daemon](./skills.md#the-daemon) and CI Watch configuration in [Preferences](../configuration/preferences.md#ci-watch-configuration).
 
 Events you leave out of `events` keep their default of `true`, so `{"notifications": {"enabled": true}}` is enough to turn every event on.
 

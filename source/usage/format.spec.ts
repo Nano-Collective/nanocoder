@@ -3,6 +3,7 @@ import {
 	formatCompactTokenCount,
 	formatCost,
 	formatUsageIndicator,
+	getCacheHitRate,
 	getTotalTokens,
 } from './format.js';
 
@@ -34,6 +35,13 @@ test('formatCompactTokenCount renders millions', t => {
 	t.is(formatCompactTokenCount(1_000_000), '1M');
 	t.is(formatCompactTokenCount(1_300_000), '1.3M');
 	t.is(formatCompactTokenCount(120_000_000), '120M');
+});
+
+test('formatCompactTokenCount rolls over to the next unit when rounding reaches it', t => {
+	t.is(formatCompactTokenCount(999_600), '1M');
+	t.is(formatCompactTokenCount(999_999), '1M');
+	t.is(formatCompactTokenCount(999.6), '1k');
+	t.is(formatCompactTokenCount(999_400), '999k');
 });
 
 test('formatCompactTokenCount handles invalid input', t => {
@@ -125,7 +133,7 @@ test('formatUsageIndicator reports cached tokens when the provider read from cac
 			cacheReadTokens: 9800,
 			cost: 0.02,
 		}),
-		'Tokens: 12.4k | 9.8k cached | ~$0.02',
+		'Tokens: 12.4k | 9.8k cached (82%) | ~$0.02',
 	);
 });
 
@@ -135,4 +143,22 @@ test('formatUsageIndicator omits the cached segment when nothing was cached', t 
 		formatUsageIndicator({totalTokens: 4200, cacheReadTokens: 0}),
 		'Tokens: 4.2k',
 	);
+});
+
+test('formatUsageIndicator omits the hit rate when input tokens are unknown', t => {
+	t.is(
+		formatUsageIndicator({totalTokens: 4200, cacheReadTokens: 3000}),
+		'Tokens: 4.2k | 3k cached',
+	);
+});
+
+test('getCacheHitRate is reads over inclusive input tokens', t => {
+	t.is(getCacheHitRate({inputTokens: 1000, cacheReadTokens: 250}), 0.25);
+	t.is(getCacheHitRate({inputTokens: 1000, cacheReadTokens: 0}), 0);
+});
+
+test('getCacheHitRate returns null for missing or inconsistent counts', t => {
+	t.is(getCacheHitRate({cacheReadTokens: 250}), null);
+	t.is(getCacheHitRate({inputTokens: 0, cacheReadTokens: 0}), null);
+	t.is(getCacheHitRate({inputTokens: 100, cacheReadTokens: 200}), null);
 });

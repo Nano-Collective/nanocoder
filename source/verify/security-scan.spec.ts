@@ -273,3 +273,20 @@ test('runSecurityScan degrades gracefully when semgrep is unavailable', async t 
 	t.deepEqual(result.findings, []);
 	t.is(result.totalFound, 0);
 });
+
+test('runSemgrepProcess ends option parsing before the paths', async t => {
+	const proc = createFakeProc();
+	let spawnedArgs: string[] = [];
+	const spawnFn = (_cmd: string, args: string[]) => {
+		spawnedArgs = args;
+		return proc;
+	};
+	const promise = runSemgrepProcess('.', 0, ['--output=pwn', 'a.ts'], spawnFn);
+	proc.stdout.emit('data', Buffer.from('{"results":[]}'));
+	proc.emit('close', 0);
+	await promise;
+	const separator = spawnedArgs.indexOf('--');
+	t.true(separator > 0, 'a -- separator is passed');
+	t.deepEqual(spawnedArgs.slice(separator + 1), ['--output=pwn', 'a.ts']);
+	t.true(spawnedArgs.slice(0, separator).includes('--json'), 'options precede the separator');
+});

@@ -276,7 +276,7 @@ export async function getValidCodexToken(
 	// Need to refresh
 	if (!credential.refreshToken) {
 		throw new Error(
-			'Codex access token expired and no refresh token available. Please run /codex-login again.',
+			'Codex access token expired and no refresh token available. Please run /login codex again.',
 		);
 	}
 
@@ -286,7 +286,7 @@ export async function getValidCodexToken(
 	);
 	if (!refreshed) {
 		throw new Error(
-			'Failed to refresh Codex access token. Please run /codex-login again.',
+			'Failed to refresh Codex access token. Please run /login codex again.',
 		);
 	}
 
