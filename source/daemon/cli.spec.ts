@@ -5,13 +5,22 @@ import {mkdir, mkdtemp, rm, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
-import {loadPreferences, resetPreferencesCache, savePreferences} from '@/config/preferences';
-import {ensureDirectoryTrust, isDirectoryTrusted} from '@/config/trust/directory-trust';
-import {describeProjectTrust} from '@/config/trust/project-trust';
+import {
+	loadPreferences,
+	resetPreferencesCache,
+	savePreferences,
+} from '../config/preferences';
+import {
+	ensureDirectoryTrust,
+	isDirectoryTrusted,
+} from '../config/trust/directory-trust';
+import {describeProjectTrust} from '../config/trust/project-trust';
 import {CONFIG_AUTO_FIX_WARNING, runDaemonCli} from './cli';
+import {DaemonIpcServer} from './ipc';
 import {
 	getLockfilePath,
 	getSocketPath,
+	isProcessAlive,
 	removeLockfile,
 	writeLockfile,
 } from './lockfile';
@@ -357,12 +366,15 @@ test.serial(
 	'status reports the live pid, socket, and uptime when the daemon is running',
 	async t => {
 		const root = await tempProject();
+		const socketPath = getSocketPath(root);
+		const server = new DaemonIpcServer(socketPath, {
+			listSubscriptions: () => [],
+		});
+		await server.start();
 		try {
-			// Stub the daemon with this process's own pid so isProcessAlive
-			// returns true. Matches what stubLaunchDaemon does for `start`.
 			await writeLockfile({
 				pid: process.pid,
-				socketPath: '/tmp/test-daemon.sock',
+				socketPath,
 				startedAt: Date.now() - 5_000,
 				projectRoot: root,
 			});
@@ -372,8 +384,35 @@ test.serial(
 			t.is(result.exitCode, 0);
 			t.regex(result.output, /Running\. pid /);
 			t.regex(result.output, new RegExp(`pid ${process.pid}`));
-			t.regex(result.output, /socket \/tmp\/test-daemon\.sock/);
+			t.true(result.output.includes(`socket ${socketPath}`));
 			t.regex(result.output, /uptime 5s/);
+		} finally {
+			await server.stop();
+			await rm(root, {recursive: true, force: true});
+		}
+	},
+);
+
+test.serial(
+	'status cleans a stale lockfile when pid is alive but socket is dead',
+	async t => {
+		const root = await tempProject();
+		try {
+			await writeLockfile({
+				pid: process.pid,
+				socketPath: '/tmp/nonexistent-daemon.sock',
+				startedAt: Date.now() - 5_000,
+				projectRoot: root,
+			});
+
+			const result = await runDaemonCli('status', {projectRoot: root});
+
+			t.is(result.exitCode, 0);
+			t.regex(
+				result.output,
+				new RegExp(`Stale lockfile cleaned \\(was pid ${process.pid}\\)`),
+			);
+			t.false(existsSync(getLockfilePath(root)));
 		} finally {
 			await rm(root, {recursive: true, force: true});
 		}
@@ -499,56 +538,101 @@ test.serial('stop reports no daemon when there is no lockfile', async t => {
 	}
 });
 
-test.serial('stop preserves the live lockfile while shutdown takes longer than five seconds', async t => {
-	t.timeout(15_000);
-	const root = await tempProject();
-	const {spawn} = await import('node:child_process');
-	const child = spawn(
-		process.execPath,
-		[
-			'-e',
-			"process.on('SIGTERM', () => setTimeout(() => process.exit(0), 6000)); setInterval(() => {}, 1000); process.stdout.write('ready');",
-		],
-		{stdio: ['ignore', 'pipe', 'ignore']},
-	);
-	try {
-		await once(child.stdout!, 'data');
-		await writeLockfile({
-			pid: child.pid!,
-			socketPath: '/nonexistent/test-daemon.sock',
-			startedAt: Date.now(),
-			projectRoot: root,
+test.serial(
+	'stop preserves the live lockfile while shutdown takes longer than five seconds',
+	async t => {
+		t.timeout(15_000);
+		const root = await tempProject();
+		const socketPath = getSocketPath(root);
+		const server = new DaemonIpcServer(socketPath, {
+			listSubscriptions: () => [],
+			shutdown: () => {
+				setTimeout(async () => {
+					await server.stop();
+					await removeLockfile(root);
+				}, 6000);
+			},
 		});
-		let stopped = false;
-		const stopping = runDaemonCli('stop', {projectRoot: root}).then(result => {
-			stopped = true;
-			return result;
-		});
-		await new Promise(resolve => setTimeout(resolve, 5500));
-		t.false(stopped);
-		t.true(existsSync(getLockfilePath(root)));
-		const result = await stopping;
-		t.is(result.exitCode, 0);
-		t.regex(result.output, /Daemon stopped/);
-		t.false(existsSync(getLockfilePath(root)));
-	} finally {
-		if (child.exitCode === null) child.kill('SIGKILL');
-		await rm(root, {recursive: true, force: true});
-	}
-});
+		await server.start();
+		try {
+			await writeLockfile({
+				pid: process.pid,
+				socketPath,
+				startedAt: Date.now(),
+				projectRoot: root,
+			});
+			let stopped = false;
+			const stopping = runDaemonCli('stop', {projectRoot: root}).then(
+				result => {
+					stopped = true;
+					return result;
+				},
+			);
+			await new Promise(resolve => setTimeout(resolve, 5500));
+			t.false(stopped);
+			t.true(existsSync(getLockfilePath(root)));
+			const result = await stopping;
+			t.is(result.exitCode, 0);
+			t.regex(result.output, /Daemon stopped/);
+			t.false(existsSync(getLockfilePath(root)));
+		} finally {
+			await server.stop();
+			await rm(root, {recursive: true, force: true});
+		}
+	},
+);
 
 test.serial(
 	'stop removes the lockfile and reports the previous pid when the daemon is live',
 	async t => {
 		const root = await tempProject();
-		// Fork a real child so SIGTERM from `stop` lands on something that
-		// isn't this test process (which would trip the shutdown manager and
-		// abort the run). The child just sleeps; we kill it at the end.
-		const {spawn} = await import('node:child_process');
-		const child = spawn(process.execPath, ['-e', 'setInterval(()=>{},1000)'], {
-			stdio: 'ignore',
+		const socketPath = getSocketPath(root);
+		let stopped = false;
+		const server = new DaemonIpcServer(socketPath, {
+			listSubscriptions: () => [],
+			shutdown: async () => {
+				stopped = true;
+				await server.stop();
+				await removeLockfile(root);
+			},
 		});
+		await server.start();
 		try {
+			await writeLockfile({
+				pid: process.pid,
+				socketPath,
+				startedAt: Date.now(),
+				projectRoot: root,
+			});
+
+			const result = await runDaemonCli('stop', {projectRoot: root});
+
+			t.is(result.exitCode, 0);
+			t.regex(result.output, new RegExp(`pid ${process.pid}`));
+			t.true(stopped);
+			t.false(existsSync(getLockfilePath(root)));
+		} finally {
+			await server.stop();
+			await rm(root, {recursive: true, force: true});
+		}
+	},
+);
+
+test.serial(
+	'stop does not signal an unrelated process when the lockfile socket is unreachable',
+	async t => {
+		const root = await tempProject();
+		const {spawn} = await import('node:child_process');
+		// Spawn an unrelated child process
+		const child = spawn(
+			process.execPath,
+			['-e', 'setInterval(()=>{}, 1000)'],
+			{
+				stdio: 'ignore',
+			},
+		);
+		try {
+			// Write lockfile pointing to the unrelated process with an unreachable socket path
 			await writeLockfile({
 				pid: child.pid ?? -1,
 				socketPath: '/nonexistent/test-daemon.sock',
@@ -558,14 +642,49 @@ test.serial(
 
 			const result = await runDaemonCli('stop', {projectRoot: root});
 
-			// Either the clean path (IPC failed, SIGTERM killed the child,
-			// child removed its lockfile) or the manual-cleanup fallback
-			// (SIGTERM killed it, but the lockfile removal raced). Both
-			// produce exit 0 with the pid acknowledged in the output.
+			// Lockfile should be identified as stale and removed, returning no daemon running
 			t.is(result.exitCode, 0);
-			t.regex(result.output, new RegExp(`pid ${child.pid}`));
+			t.is(result.output, 'No daemon is running.');
+			t.false(existsSync(getLockfilePath(root)));
+
+			// The unrelated process MUST still be running (not killed by SIGTERM)
+			t.true(isProcessAlive(child.pid!));
 		} finally {
 			if (!child.killed) child.kill('SIGKILL');
+			await rm(root, {recursive: true, force: true});
+		}
+	},
+);
+
+test.serial(
+	'start cleans a stale lockfile and boots cleanly when socket is dead',
+	async t => {
+		const root = await tempProject();
+		try {
+			await withIsolatedPreferences(async () => {
+				// Stale lockfile pointing to current pid (alive) but dead socket
+				await writeLockfile({
+					pid: process.pid,
+					socketPath: '/nonexistent/test-daemon.sock',
+					startedAt: Date.now() - 10_000,
+					projectRoot: root,
+				});
+
+				let launched = false;
+				const result = await runDaemonCli('start', {
+					projectRoot: root,
+					trustDirectory: true,
+					launchDaemon: projectRoot => {
+						launched = true;
+						return stubLaunchDaemon(projectRoot);
+					},
+				});
+
+				t.true(launched);
+				t.is(result.exitCode, 0);
+				t.regex(result.output, /Daemon started/);
+			});
+		} finally {
 			await rm(root, {recursive: true, force: true});
 		}
 	},
@@ -1023,37 +1142,51 @@ for (const args of [['--trust', '--trust-directory'], ['--trust'], ['--trust=']]
 	});
 }
 
-test.serial('start while running says a requested --trust level was not applied', async t => {
-	const root = await tempProject();
-	try {
-		await writeLockfile({
-			pid: process.pid,
-			socketPath: '/tmp/test-daemon.sock',
-			startedAt: Date.now(),
-			projectRoot: root,
-			ciTrustLevel: 'comment-only',
+test.serial(
+	'start while running says a requested --trust level was not applied',
+	async t => {
+		const root = await tempProject();
+		const socketPath = getSocketPath(root);
+		const server = new DaemonIpcServer(socketPath, {
+			listSubscriptions: () => [],
 		});
-		const result = await runDaemonCli('start', {
-			projectRoot: root,
-			trustDirectory: true,
-			args: ['--trust', 'auto-fix'],
-		});
-		t.is(result.exitCode, 0);
-		t.regex(result.output, /already running/);
-		t.regex(result.output, /CI trust level: comment-only/);
-		t.regex(result.output, /--trust auto-fix was not applied/);
-	} finally {
-		await removeLockfile(root);
-		await rm(root, {recursive: true, force: true});
-	}
-});
+		await server.start();
+		try {
+			await writeLockfile({
+				pid: process.pid,
+				socketPath,
+				startedAt: Date.now(),
+				projectRoot: root,
+				ciTrustLevel: 'comment-only',
+			});
+			const result = await runDaemonCli('start', {
+				projectRoot: root,
+				trustDirectory: true,
+				args: ['--trust', 'auto-fix'],
+			});
+			t.is(result.exitCode, 0);
+			t.regex(result.output, /already running/);
+			t.regex(result.output, /CI trust level: comment-only/);
+			t.regex(result.output, /--trust auto-fix was not applied/);
+		} finally {
+			await server.stop();
+			await removeLockfile(root);
+			await rm(root, {recursive: true, force: true});
+		}
+	},
+);
 
 test.serial('status shows the CI trust level from the lockfile', async t => {
 	const root = await tempProject();
+	const socketPath = getSocketPath(root);
+	const server = new DaemonIpcServer(socketPath, {
+		listSubscriptions: () => [],
+	});
+	await server.start();
 	try {
 		await writeLockfile({
 			pid: process.pid,
-			socketPath: '/tmp/test-daemon.sock',
+			socketPath,
 			startedAt: Date.now(),
 			projectRoot: root,
 			ciTrustLevel: 'auto-fix',
@@ -1061,6 +1194,7 @@ test.serial('status shows the CI trust level from the lockfile', async t => {
 		const result = await runDaemonCli('status', {projectRoot: root});
 		t.regex(result.output, /CI trust level auto-fix/);
 	} finally {
+		await server.stop();
 		await removeLockfile(root);
 		await rm(root, {recursive: true, force: true});
 	}

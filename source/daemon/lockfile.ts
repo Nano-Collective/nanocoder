@@ -161,16 +161,61 @@ export function isProcessAlive(pid: number): boolean {
 }
 
 /**
+ * Probe whether the IPC endpoint answers a `ping` with `pong`.
+ * Returns false on connection failure, timeout, or unexpected response.
+ */
+export async function probeDaemonIpc(
+	socketPath: string,
+	timeoutMs = 1000,
+): Promise<boolean> {
+	const {DaemonIpcClient} = await import('./ipc');
+	const client = new DaemonIpcClient(socketPath);
+	let timer: NodeJS.Timeout | null = null;
+	try {
+		const pingPromise = (async () => {
+			await client.connect();
+			const pong = await client.ping();
+			return pong === 'pong';
+		})();
+
+		const timeoutPromise = new Promise<boolean>((_, reject) => {
+			timer = setTimeout(
+				() => reject(new Error('IPC ping timeout')),
+				timeoutMs,
+			);
+		});
+
+		return await Promise.race([pingPromise, timeoutPromise]);
+	} catch {
+		return false;
+	} finally {
+		if (timer) clearTimeout(timer);
+		await client.disconnect().catch(() => {});
+	}
+}
+
+/**
  * Read the lockfile and verify the daemon is actually running. Removes
  * stale lockfiles as a side effect so subsequent `daemon start` calls
  * have a clean slate.
+ *
+ * Verifies both that the recorded PID exists in the OS process table
+ * and that the daemon's IPC endpoint answers a `ping`. This prevents
+ * false positives where an unrelated process reuses a recycled PID
+ * after a reboot or crash.
  */
 export async function readLiveLockfile(
 	projectRoot: string,
+	probeIpc: (socketPath: string) => Promise<boolean> = probeDaemonIpc,
 ): Promise<DaemonLock | null> {
 	const lock = await readLockfile(projectRoot);
 	if (!lock) return null;
 	if (!isProcessAlive(lock.pid)) {
+		await removeLockfile(projectRoot);
+		return null;
+	}
+	const live = await probeIpc(lock.socketPath);
+	if (!live) {
 		await removeLockfile(projectRoot);
 		return null;
 	}

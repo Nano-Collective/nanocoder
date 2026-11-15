@@ -6,12 +6,14 @@ import {
 	getLockfilePath,
 	getSocketPath,
 	isProcessAlive,
+	probeDaemonIpc,
 	readLiveLockfile,
 	readLockfile,
 	removeLockfile,
 	resolveSocketPath,
 	writeLockfile,
 } from './lockfile';
+import {DaemonIpcServer} from './ipc';
 
 console.log(`\nlockfile.spec.ts`);
 
@@ -87,7 +89,7 @@ test('isProcessAlive returns false for a clearly-dead PID', t => {
 	t.false(isProcessAlive(99_999_999));
 });
 
-test.serial('readLiveLockfile reaps stale lockfiles', async t => {
+test.serial('readLiveLockfile reaps stale lockfiles when process is dead', async t => {
 	const root = await tempProject();
 	try {
 		await writeLockfile({
@@ -110,18 +112,65 @@ test.serial('readLiveLockfile reaps stale lockfiles', async t => {
 	}
 });
 
-test.serial('readLiveLockfile returns the lock when process is alive', async t => {
+test.serial('readLiveLockfile reaps stale lockfiles when process is alive but socket is dead', async t => {
 	const root = await tempProject();
 	try {
 		await writeLockfile({
 			pid: process.pid,
-			socketPath: 's',
+			socketPath: join(root, 'nonexistent.sock'),
+			startedAt: 1,
+			projectRoot: root,
+		});
+		const live = await readLiveLockfile(root);
+		t.is(live, null);
+		// stale file should have been removed
+		const back = await readFile(getLockfilePath(root), 'utf-8').catch(() => null);
+		t.is(back, null);
+	} finally {
+		await rm(root, {recursive: true, force: true});
+	}
+});
+
+test.serial('readLiveLockfile returns the lock when process is alive and IPC responds', async t => {
+	const root = await tempProject();
+	const socketPath = getSocketPath(root);
+	const server = new DaemonIpcServer(socketPath, {
+		listSubscriptions: () => [],
+	});
+	await server.start();
+	try {
+		await writeLockfile({
+			pid: process.pid,
+			socketPath,
 			startedAt: 1,
 			projectRoot: root,
 		});
 		const live = await readLiveLockfile(root);
 		t.is(live?.pid, process.pid);
+		t.is(live?.socketPath, socketPath);
 	} finally {
+		await server.stop();
+		await rm(root, {recursive: true, force: true});
+	}
+});
+
+test.serial('probeDaemonIpc returns false for non-existent socket', async t => {
+	const result = await probeDaemonIpc('/tmp/nonexistent-test-socket.sock', 100);
+	t.false(result);
+});
+
+test.serial('probeDaemonIpc returns true for responsive IPC server', async t => {
+	const root = await tempProject();
+	const socketPath = getSocketPath(root);
+	const server = new DaemonIpcServer(socketPath, {
+		listSubscriptions: () => [],
+	});
+	await server.start();
+	try {
+		const result = await probeDaemonIpc(socketPath);
+		t.true(result);
+	} finally {
+		await server.stop();
 		await rm(root, {recursive: true, force: true});
 	}
 });

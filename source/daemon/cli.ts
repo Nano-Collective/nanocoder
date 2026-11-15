@@ -38,7 +38,12 @@ import {
 	isFullCommitTrustConfirmed,
 	recordFullCommitTrustConfirmed,
 } from './full-commit-trust';
-import {getLockfilePath, readLiveLockfile, readLockfile} from './lockfile';
+import {
+	getLockfilePath,
+	readLiveLockfile,
+	readLockfile,
+	removeLockfile,
+} from './lockfile';
 
 function getLogPath(projectRoot: string): string {
 	return join(projectRoot, '.nanocoder', 'daemon.log');
@@ -218,6 +223,8 @@ export interface DaemonCliOptions {
 	/** Test seam: override reading the project-level trust-level config,
 	 * avoiding `getAppConfig()`'s real cwd-based filesystem reads in tests. */
 	loadVerifyConfigFn?: () => {trustLevel?: TrustLevel} | undefined;
+	/** Test seam: override IPC liveness probe. */
+	probeIpcFn?: (socketPath: string) => Promise<boolean>;
 	/**
 	 * One-shot override for `start`'s directory-trust gate (`--trust-directory`
 	 * on `nanocoder daemon start`), mirroring the `run` command's flag of the
@@ -314,7 +321,7 @@ async function start(opts: DaemonCliOptions): Promise<DaemonCliResult> {
 		return {exitCode: 1, output: `${parsed.error}\n${START_USAGE}`};
 	}
 
-	const live = await readLiveLockfile(opts.projectRoot);
+	const live = await readLiveLockfile(opts.projectRoot, opts.probeIpcFn);
 	if (live) {
 		const current = isTrustLevel(live.ciTrustLevel)
 			? ` CI trust level: ${live.ciTrustLevel}.`
@@ -438,7 +445,11 @@ async function start(opts: DaemonCliOptions): Promise<DaemonCliResult> {
 
 	// Wait briefly for the daemon to write its lockfile, so `start` reports
 	// success only if the boot actually happened.
-	const lock = await waitForLockfile(opts.projectRoot, 5000);
+	const lock = await waitForLockfile(
+		opts.projectRoot,
+		5000,
+		opts.probeIpcFn ?? (opts.launchDaemon ? async () => true : undefined),
+	);
 	if (!lock) {
 		return {
 			exitCode: 1,
@@ -454,23 +465,30 @@ async function start(opts: DaemonCliOptions): Promise<DaemonCliResult> {
 }
 
 async function stop(opts: DaemonCliOptions): Promise<DaemonCliResult> {
-	const live = await readLiveLockfile(opts.projectRoot);
+	const live = await readLiveLockfile(opts.projectRoot, opts.probeIpcFn);
 	if (!live) {
 		return {exitCode: 0, output: 'No daemon is running.'};
 	}
 
 	// Prefer IPC: works on Windows (where SIGTERM is force-kill) and gives
 	// the daemon a chance to drain its event loop cleanly. Falls back to
-	// SIGTERM if IPC can't be reached (older daemon, socket missing, etc).
-	const ipcAccepted = await tryIpcShutdown(live.socketPath);
+	// SIGTERM only if IPC was reachable (confirming process identity) but
+	// shutdown failed or timed out. If IPC is completely unreachable,
+	// never send a signal to an unconfirmed PID.
+	const shutdownResult = await tryIpcShutdown(live.socketPath);
 
-	if (!ipcAccepted) {
+	if (shutdownResult.status === 'unreachable') {
+		await removeLockfile(opts.projectRoot);
+		return {exitCode: 0, output: 'No daemon is running.'};
+	}
+
+	if (shutdownResult.status === 'failed') {
 		try {
 			process.kill(live.pid, 'SIGTERM');
 		} catch (err) {
 			return {
 				exitCode: 1,
-				output: `Failed to stop daemon (pid ${live.pid}): IPC unreachable and SIGTERM failed: ${formatError(
+				output: `Failed to stop daemon (pid ${live.pid}): IPC shutdown failed and SIGTERM failed: ${formatError(
 					err,
 				)}`,
 			};
@@ -479,9 +497,14 @@ async function stop(opts: DaemonCliOptions): Promise<DaemonCliResult> {
 
 	// Allow the entry's 30s shutdown budget plus 5s for final cleanup.
 	// The lockfile still protects an active run from a second daemon.
-	const removed = await waitForLockfileGone(opts.projectRoot, 35_000);
+	const removed = await waitForLockfileGone(
+		opts.projectRoot,
+		35_000,
+		opts.probeIpcFn,
+	);
 	if (!removed) {
-		const how = ipcAccepted ? 'IPC shutdown' : 'SIGTERM';
+		const how =
+			shutdownResult.status === 'accepted' ? 'IPC shutdown' : 'SIGTERM';
 		return {
 			exitCode: 1,
 			output: `Sent ${how} to daemon (pid ${live.pid}), but shutdown has not completed. Lockfile preserved; check the daemon log.`,
@@ -490,13 +513,18 @@ async function stop(opts: DaemonCliOptions): Promise<DaemonCliResult> {
 	return {exitCode: 0, output: `Daemon stopped (was pid ${live.pid}).`};
 }
 
+type IpcShutdownResult =
+	| {status: 'accepted'}
+	| {status: 'unreachable'}
+	| {status: 'failed'};
+
 /**
  * Best-effort attempt to ask the daemon to shut itself down over IPC.
- * Returns true if the daemon accepted the request. Any failure (no socket,
- * timeout, older daemon without the method) returns false so the caller
- * can fall back to SIGTERM.
+ * Distinguishes between connection failure (unreachable, meaning the process
+ * cannot be confirmed as the daemon) and failure during shutdown after connecting
+ * (safe to fall back to SIGTERM).
  */
-async function tryIpcShutdown(socketPath: string): Promise<boolean> {
+async function tryIpcShutdown(socketPath: string): Promise<IpcShutdownResult> {
 	const {DaemonIpcClient} = await import('./ipc');
 	const client = new DaemonIpcClient(socketPath);
 	try {
@@ -507,7 +535,7 @@ async function tryIpcShutdown(socketPath: string): Promise<boolean> {
 			),
 		]);
 	} catch {
-		return false;
+		return {status: 'unreachable'};
 	}
 	try {
 		await Promise.race([
@@ -516,9 +544,9 @@ async function tryIpcShutdown(socketPath: string): Promise<boolean> {
 				setTimeout(() => reject(new Error('IPC shutdown timeout')), 2000),
 			),
 		]);
-		return true;
+		return {status: 'accepted'};
 	} catch {
-		return false;
+		return {status: 'failed'};
 	} finally {
 		await client.disconnect().catch(() => {});
 	}
@@ -529,7 +557,7 @@ async function status(opts: DaemonCliOptions): Promise<DaemonCliResult> {
 	if (!lock) {
 		return {exitCode: 0, output: 'Not running.'};
 	}
-	const live = await readLiveLockfile(opts.projectRoot);
+	const live = await readLiveLockfile(opts.projectRoot, opts.probeIpcFn);
 	if (!live) {
 		return {
 			exitCode: 0,
@@ -615,6 +643,7 @@ function launchSelfHosted(
 async function waitForLockfile(
 	projectRoot: string,
 	timeoutMs: number,
+	probeIpcFn?: (socketPath: string) => Promise<boolean>,
 ): Promise<{pid: number; socketPath: string} | null> {
 	const deadline = Date.now() + timeoutMs;
 	const path = getLockfilePath(projectRoot);
@@ -623,7 +652,7 @@ async function waitForLockfile(
 			// Report the path the daemon actually bound, not a recomputed one:
 			// the socket location can depend on TMPDIR, which need not match
 			// between a launchd/systemd-started daemon and this process.
-			const live = await readLiveLockfile(projectRoot);
+			const live = await readLiveLockfile(projectRoot, probeIpcFn);
 			if (live) return {pid: live.pid, socketPath: live.socketPath};
 		}
 		await new Promise(r => setTimeout(r, 50));
@@ -634,11 +663,12 @@ async function waitForLockfile(
 async function waitForLockfileGone(
 	projectRoot: string,
 	timeoutMs: number,
+	probeIpcFn?: (socketPath: string) => Promise<boolean>,
 ): Promise<boolean> {
 	const deadline = Date.now() + timeoutMs;
 	while (Date.now() < deadline) {
 		// Reap a stale lockfile only when its process has actually exited.
-		if (!(await readLiveLockfile(projectRoot))) return true;
+		if (!(await readLiveLockfile(projectRoot, probeIpcFn))) return true;
 		await new Promise(r => setTimeout(r, 50));
 	}
 	return false;
