@@ -22,6 +22,19 @@ export class XMLToolCallParser {
 	private static readonly PARAMETER_REGEX = /<(\w+)>(.*?)<\/\1>/gs;
 	// Fenced code (an unclosed fence runs to the end) and inline code spans.
 	private static readonly CODE_REGEX = /```[\s\S]*?(?:```|$)|`[^`\n]*`/g;
+	// Parameters whose value is raw text: file contents, edit strings, shell
+	// commands and paths. They are never JSON-parsed, so text that happens to be
+	// valid JSON (a pretty-printed package.json, `1.0`, `null`) reaches the tool
+	// exactly as written instead of being parsed and re-serialised.
+	// The parser does not see tool schemas, so this is keyed by name; every
+	// built-in tool that takes one of these names takes it as a string.
+	private static readonly RAW_STRING_PARAMS: ReadonlySet<string> = new Set([
+		'content',
+		'old_str',
+		'new_str',
+		'command',
+		'path',
+	]);
 
 	/**
 	 * Extracts tool calls from text content containing XML-formatted tool calls
@@ -296,6 +309,11 @@ export class XMLToolCallParser {
 
 			// Trim whitespace from parameter value
 			const trimmedValue = paramValue.trim();
+
+			if (this.RAW_STRING_PARAMS.has(paramName)) {
+				parameters[paramName] = trimmedValue;
+				continue;
+			}
 
 			// Try to parse as JSON for complex objects/arrays
 			try {

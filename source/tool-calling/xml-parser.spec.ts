@@ -1,5 +1,6 @@
 import test from 'ava';
 import {XMLToolCallParser} from './xml-parser';
+import {ensureString} from '../utils/type-helpers';
 
 console.log(`\nxml-parser.spec.ts`);
 
@@ -789,4 +790,74 @@ test('parseToolCalls - allows valid tool calls with HTML-like parameter content'
 	t.is(result.length, 1);
 	t.is(result[0].toolName, 'create_file');
 	t.truthy(result[0].parameters.content);
+});
+
+// Raw-text parameters (issue #2203): file contents, edit strings, shell
+// commands and paths must reach the tool exactly as the model wrote them, even
+// when the text happens to be valid JSON.
+
+function parseSingleCall(content: string) {
+	const result = XMLToolCallParser.parseToolCalls(content);
+	if (result.length !== 1) {
+		throw new Error(`expected one tool call, got ${result.length}`);
+	}
+	return result[0].parameters;
+}
+
+test('parseToolCalls - keeps pretty-printed JSON file content byte-for-byte', t => {
+	const json = '{\n  "name": "x",\n  "version": "1.0.0"\n}';
+	const parameters = parseSingleCall(
+		`<write_file><path>package.json</path><content>${json}\n</content></write_file>`,
+	);
+
+	t.is(parameters.content, json);
+	// What the tool actually writes goes through ensureString.
+	t.is(ensureString(parameters.content), json);
+});
+
+test('parseToolCalls - keeps JSON-looking scalar and array content as the exact text', t => {
+	for (const value of ['null', '1.0', '1e3', '[1,\n 2]', 'true', '"quoted"']) {
+		const parameters = parseSingleCall(
+			`<write_file><path>f</path><content>${value}</content></write_file>`,
+		);
+		t.is(parameters.content, value, `content ${JSON.stringify(value)}`);
+		t.is(ensureString(parameters.content), value);
+	}
+});
+
+test('parseToolCalls - keeps JSON-looking string_replace old_str and new_str', t => {
+	const parameters = parseSingleCall(
+		'<string_replace><path>config.json</path><old_str>{"debug": false}</old_str><new_str>{\n  "debug": true\n}</new_str></string_replace>',
+	);
+
+	t.deepEqual(parameters, {
+		path: 'config.json',
+		old_str: '{"debug": false}',
+		new_str: '{\n  "debug": true\n}',
+	});
+});
+
+test('parseToolCalls - keeps JSON-looking bash commands and paths as strings', t => {
+	t.deepEqual(
+		parseSingleCall('<execute_bash><command>123</command></execute_bash>'),
+		{command: '123'},
+	);
+	t.deepEqual(parseSingleCall('<read_file><path>2024</path></read_file>'), {
+		path: '2024',
+	});
+});
+
+test('parseToolCalls - still parses JSON in structured parameters', t => {
+	t.deepEqual(
+		parseSingleCall(
+			'<read_file><path>a.ts</path><start_line>10</start_line><end_line>20</end_line></read_file>',
+		),
+		{path: 'a.ts', start_line: 10, end_line: 20},
+	);
+	t.deepEqual(
+		parseSingleCall(
+			'<git_add><files>["a.ts", "b.ts"]</files><all>false</all></git_add>',
+		),
+		{files: ['a.ts', 'b.ts'], all: false},
+	);
 });
