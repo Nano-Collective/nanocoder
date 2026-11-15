@@ -8,7 +8,7 @@ import {
 	updateTitleShape as updateShapeInHook,
 } from './useTitleShape';
 import {getTitleShape, resetPreferencesCache, updateTitleShape as updateTitleShapeInPrefs} from '@/config/preferences';
-import type {TitleShape} from '../components/ui/styled-title';
+import type {TitleShape} from '../types/ui';
 import type {UserPreferences} from '@/types/index';
 import test from 'ava';
 import {render} from 'ink-testing-library';

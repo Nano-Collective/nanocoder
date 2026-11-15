@@ -5,6 +5,7 @@
 
 import llamaTokenizer from 'llama-tokenizer-js';
 import type {Message} from '@/types/core';
+import {estimateTokens} from '@/utils/token-calculator';
 import type {Tokenizer} from '../../types/tokenization';
 
 export class LlamaTokenizer implements Tokenizer {
@@ -20,7 +21,7 @@ export class LlamaTokenizer implements Tokenizer {
 			return tokens.length;
 		} catch {
 			// Fallback to character-based estimation if tokenization fails
-			return Math.ceil(text.length / 4);
+			return estimateTokens(text);
 		}
 	}
 

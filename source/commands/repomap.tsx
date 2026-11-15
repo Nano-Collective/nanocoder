@@ -1,5 +1,6 @@
 import {Box, Text} from 'ink';
 import React from 'react';
+import {errorMsg} from '@/components/message-factory';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
@@ -8,9 +9,9 @@ import {
 	DEFAULT_REPO_MAP_TOKENS,
 	type RepoMap,
 } from '@/repo-map/index';
-import {generateKey} from '@/session/key-generator';
+import {getProjectRoot} from '@/services/session-cwd';
 import type {Command} from '@/types/index';
-import {errorMsg} from '@/utils/message-factory';
+import {generateKey} from '@/utils/key-generator';
 
 const MIN_TOKENS = 64;
 const MAX_TOKENS = 32_000;
@@ -96,7 +97,9 @@ export const repomapCommand: Command = {
 		}
 
 		try {
-			const map = await buildRepoMap(process.cwd(), {maxTokens});
+			// The project root, not process.cwd(): in an ACP session the process
+			// cwd is wherever the editor spawned the agent.
+			const map = await buildRepoMap(getProjectRoot(), {maxTokens});
 			return React.createElement(RepoMapView, {
 				key: generateKey('repomap'),
 				map,

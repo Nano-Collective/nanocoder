@@ -496,6 +496,48 @@ test('buildNarrowCommand narrows a package script whose body runs the runner', t
 	}
 });
 
+test('buildNarrowCommand keeps pre/post scripts out of a package-script re-run', t => {
+	const cwd = mkdtempSync(join(tmpdir(), 'nanocoder-capsule-'));
+	try {
+		writeFileSync(
+			join(cwd, 'package.json'),
+			JSON.stringify({
+				scripts: {
+					pretest: 'npm run build',
+					test: 'jest jest/',
+					'test:unit': 'jest jest/',
+					'posttest:unit': 'codecov',
+				},
+			}),
+		);
+		const jest = reportFor(JEST_OUTPUT);
+
+		// npm 7+ skips only the hooks under --ignore-scripts.
+		t.is(
+			buildNarrowCommand('npm test', jest, cwd),
+			"npm --ignore-scripts test -- jest/auth.test.js -t 'refreshSession retries once on 401'",
+		);
+		t.is(
+			buildNarrowCommand('npm run test:unit', jest, cwd),
+			"npm --ignore-scripts run test:unit -- jest/auth.test.js -t 'refreshSession retries once on 401'",
+		);
+		t.is(
+			buildNarrowCommand('npm test --ignore-scripts', jest, cwd),
+			"npm test --ignore-scripts -- jest/auth.test.js -t 'refreshSession retries once on 401'",
+		);
+		// pnpm rejects --ignore-scripts on run and yarn 1 ignores it.
+		t.is(buildNarrowCommand('pnpm test', jest, cwd), null);
+		t.is(buildNarrowCommand('yarn run test:unit', jest, cwd), null);
+		// A direct runner call never involved the hooks.
+		t.is(
+			buildNarrowCommand('npx jest jest/', jest, cwd),
+			"npx jest jest/ jest/auth.test.js -t 'refreshSession retries once on 401'",
+		);
+	} finally {
+		rmSync(cwd, {recursive: true, force: true});
+	}
+});
+
 test('buildNarrowCommand leaves anything beyond a plain command alone', t => {
 	const report = reportFor(JEST_OUTPUT);
 

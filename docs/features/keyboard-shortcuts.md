@@ -8,7 +8,7 @@ sidebar_order: 11
 
 This page covers the main chat input and common interactive views. Some specialised screens may show additional inline controls.
 
-Press `?` in an empty prompt to open an in-app overlay listing the main shortcuts; press `?` or Esc to close it.
+Press `?` in an empty prompt to open an in-app overlay listing the main shortcuts; press `?` or Esc to close it. On a short terminal the overlay shows as many shortcuts as fit; scroll the rest with Up/Down or PgUp/PgDn.
 
 ## Submitting & Multi-line Input
 
@@ -103,6 +103,7 @@ Note that Ctrl+V is bound to *image* paste, not text. Use your terminal's paste 
 |--------|----------|
 | Previous prompt | Up |
 | Next prompt | Down |
+| Reverse history search (Enter selects, Esc cancels, Ctrl+R again cycles older) | Ctrl+R |
 | Select a queued message (empty input) | Down / Up |
 | Load the selected queued message back into the input | Enter |
 | Remove the selected queued message | Backspace / Delete |
@@ -134,7 +135,7 @@ Pressing Esc before the model has produced any output, and before any tool has s
 |--------|----------|
 | Toggle development mode | Shift+Tab |
 | Toggle compact tool output | Ctrl+O |
-| Toggle expanded reasoning traces | Ctrl+R |
+| Toggle expanded reasoning traces | Ctrl+N |
 | Collapse / expand the live task list | Ctrl+T |
 | Attach to a running subagent, or cycle to the next one | Ctrl+S |
 

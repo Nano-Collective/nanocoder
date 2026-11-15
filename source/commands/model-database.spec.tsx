@@ -3,7 +3,7 @@ import clipboard from 'clipboardy';
 import React from 'react';
 import {renderWithTheme} from '../test-utils/render-with-theme.js';
 import {clearModelCache} from '../model-database/model-fetcher.js';
-import {ModelDatabaseDisplay, modelDatabaseCommand} from './model-database.js';
+import {ModelDatabaseDisplay} from './model-database.js';
 
 console.log(`\nmodel-database.spec.tsx – ${React.version}`);
 
@@ -80,35 +80,6 @@ function createMockOpenRouterResponse() {
 		],
 	};
 }
-
-// ============================================================================
-// Command Metadata Tests
-// ============================================================================
-
-test('modelDatabaseCommand: has correct name', t => {
-	t.is(modelDatabaseCommand.name, 'model-database');
-});
-
-test('modelDatabaseCommand: has description', t => {
-	t.truthy(modelDatabaseCommand.description);
-	t.true(modelDatabaseCommand.description.length > 0);
-});
-
-test('modelDatabaseCommand: has handler function', t => {
-	t.is(typeof modelDatabaseCommand.handler, 'function');
-});
-
-test('modelDatabaseCommand: handler is async', t => {
-	const result = modelDatabaseCommand.handler([], [], {});
-	t.truthy(result);
-	t.true(result instanceof Promise);
-});
-
-test('modelDatabaseCommand: handler returns React element', async t => {
-	const result = await modelDatabaseCommand.handler([], [], {});
-	t.truthy(result);
-	t.true(React.isValidElement(result));
-});
 
 // ============================================================================
 // Component Rendering Tests - Loading State
@@ -721,7 +692,7 @@ test.serial('ModelDatabaseDisplay: displays command title', async t => {
 		const output = lastFrame();
 		t.truthy(output);
 		// Should display the command title
-		t.regex(output!, /model-database|Model Browser/i);
+		t.regex(output!, /\/model browse/);
 	} finally {
 		globalThis.fetch = originalFetch;
 		clearModelCache();
