@@ -617,35 +617,27 @@ test('cancel() on a detached process kills a spawned child (process-group assert
 	);
 });
 
-test('cancel() kills a background child after the shell leader has exited', async t => {
+test('stopAll kills a background child after the shell leader has exited', async t => {
 	if (process.platform === 'win32') {
 		t.pass('Skipped on Windows - no process groups');
 		return;
 	}
 
 	const executor = createExecutor();
-	// No `wait`: the wrapping shell exits straight away, but the backgrounded
-	// child keeps the output pipe open, so the execution is still active.
-	const {promise, executionId} = executor.execute('sleep 30 & echo PID:$!');
-
-	let childPid: number | undefined;
-	for (let tick = 0; tick < 30 && !childPid; tick++) {
-		await new Promise(resolve => setTimeout(resolve, 100));
-		const match = executor.getState(executionId)?.fullOutput.match(/PID:(\d+)/);
-		if (match) childPid = Number(match[1]);
-	}
+	// No `wait`: the wrapping shell exits straight away while the backgrounded
+	// child keeps the output pipe open. The command completes when the shell
+	// exits and the child is left running in the leader-less group.
+	const result = await executor.execute('sleep 30 & echo PID:$!').promise;
+	const childPid = Number(result.fullOutput.match(/PID:(\d+)/)?.[1]);
 	t.truthy(childPid, 'Should have captured the background child PID');
-	// Let the shell leader exit before cancelling.
-	await new Promise(resolve => setTimeout(resolve, 200));
-	t.true(isLiveProcess(childPid!), 'Child should be alive before cancel');
+	t.true(isLiveProcess(childPid), 'Child should be alive after the result');
 
-	t.true(executor.cancel(executionId));
-	await promise;
+	await executor.stopAll();
 	await new Promise(resolve => setTimeout(resolve, 300));
 
 	t.false(
-		isLiveProcess(childPid!),
-		'cancel must reach the process group even when its leader is gone',
+		isLiveProcess(childPid),
+		'shutdown must reach the process group even when its leader is gone',
 	);
 });
 
@@ -1054,4 +1046,56 @@ posixOnly('a forced exit SIGKILLs commands and leftover jobs that are still runn
 	for (const pgid of pgids) {
 		t.true(await isGoneWithin(pgid, 1000), `group ${pgid} must not outlive nanocoder`);
 	}
+});
+
+// A job backgrounded without redirection inherits the command's stdout and
+// holds the pipe open for its whole life. The result must not wait for it.
+posixOnly('a background job holding stdout open does not block the result', async t => {
+	const executor = createExecutor();
+	const started = Date.now();
+	const result = await executor.execute('sleep 20 & echo PID:$$; echo done').promise;
+	const elapsed = Date.now() - started;
+	const pgid = Number(result.fullOutput.match(/PID:(\d+)/)?.[1]);
+	killGroupsOnTeardown(t, [pgid]);
+
+	t.true(elapsed < 3000, `expected the result within 3s, took ${elapsed}ms`);
+	t.is(result.exitCode, 0);
+	t.regex(result.fullOutput, /done/);
+	t.true(isGroupAlive(pgid), 'the background job must keep running');
+
+	// Still tracked, so shutdown cleanup reaches it.
+	await executor.stopAll();
+	t.false(isGroupAlive(pgid), 'stopAll must stop the background job');
+});
+
+posixOnly('a background job still writing after the result is not killed by a closed pipe', async t => {
+	const executor = createExecutor();
+	const result = await executor.execute(
+		'(sleep 0.5; while :; do echo tick; sleep 0.1; done) & echo PID:$$',
+	).promise;
+	const pgid = Number(result.fullOutput.match(/PID:(\d+)/)?.[1]);
+	killGroupsOnTeardown(t, [pgid]);
+	t.is(result.exitCode, 0);
+
+	await new Promise(resolve => setTimeout(resolve, 1200));
+	t.true(isGroupAlive(pgid), 'the job must survive writing to its stdout');
+	t.false(result.fullOutput.includes('tick'), 'output after the result is not collected');
+	await executor.stopAll();
+});
+
+test('large output from a fast command is captured in full', async t => {
+	const executor = createExecutor();
+	const result = await executor.execute('seq 1 200000').promise;
+	const lines = result.fullOutput.trimEnd().split('\n');
+	t.is(lines.length, 200000);
+	t.is(lines[0], '1');
+	t.is(lines.at(-1), '200000');
+	t.is(result.exitCode, 0);
+});
+
+test('exit code is reported when the shell exits without a close', async t => {
+	const executor = createExecutor();
+	const result = await executor.execute('sleep 5 & exit 3').promise;
+	t.is(result.exitCode, 3);
+	await executor.stopAll();
 });

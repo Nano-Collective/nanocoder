@@ -2,7 +2,7 @@ import test from 'ava';
 import {
 	getVisualLineSegments,
 	moveCursorToVisualLine,
-} from '../utils/text-wrapping';
+} from '../terminal/text-wrapping';
 import * as textInputModule from './text-input';
 
 /**

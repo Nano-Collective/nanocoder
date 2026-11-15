@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'ava';
-import {isLockAbandoned} from '@/utils/exclusive-file-lock';
+import {isLockAbandoned} from '@/utils/fs/exclusive-file-lock';
 import {appendRelevantProjectContextWithCount} from './project-context.js';
 import {SemanticMemoryManager} from './semantic-memory-manager.js';
 

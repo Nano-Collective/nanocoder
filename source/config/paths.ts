@@ -1,66 +1,19 @@
 import {existsSync, mkdirSync, writeFileSync} from 'fs';
-import {homedir} from 'os';
 import {join} from 'path';
-import {log} from '@/utils/logging';
+import {getConfigRoot} from '@/services/session-context';
+import {getLogger} from '@/utils/logging';
+import {getAppDataPath, getConfigPath} from './platform-dirs';
 
-export function getAppDataPath(): string {
-	// Allow explicit override via environment variable
-	if (process.env.NANOCODER_DATA_DIR) {
-		return process.env.NANOCODER_DATA_DIR;
-	}
-
-	// Check XDG_DATA_HOME first (works cross-platform for testing)
-	if (process.env.XDG_DATA_HOME) {
-		return join(process.env.XDG_DATA_HOME, 'nanocoder');
-	}
-
-	// Platform-specific app data directories
-	let baseAppDataPath: string;
-	switch (process.platform) {
-		case 'win32': {
-			baseAppDataPath =
-				process.env.APPDATA ?? join(homedir(), 'AppData', 'Roaming');
-			break;
-		}
-		case 'darwin': {
-			baseAppDataPath = join(homedir(), 'Library', 'Application Support');
-			break;
-		}
-		default: {
-			baseAppDataPath = join(homedir(), '.local', 'share');
-		}
-	}
-	return join(baseAppDataPath, 'nanocoder');
-}
-
-export function getConfigPath(): string {
-	// Allow explicit override via environment variable
-	if (process.env.NANOCODER_CONFIG_DIR) {
-		return process.env.NANOCODER_CONFIG_DIR;
-	}
-
-	// Platform-specific defaults
-	let baseConfigPath: string;
-	switch (process.platform) {
-		case 'win32':
-			baseConfigPath =
-				process.env.APPDATA ?? join(homedir(), 'AppData', 'Roaming');
-			break;
-		case 'darwin':
-			baseConfigPath = join(homedir(), 'Library', 'Preferences');
-			break;
-		default:
-			baseConfigPath =
-				process.env.XDG_CONFIG_HOME ?? join(homedir(), '.config');
-	}
-	return join(baseConfigPath, 'nanocoder');
-}
+export {getAppDataPath, getConfigPath};
 
 // Hold a map of what config files are where
 export const confDirMap: Record<string, string> = {};
 
 // Find the closest config file for the requested configuration file
-export function getClosestConfigFile(fileName: string): string {
+export function getClosestConfigFile(
+	fileName: string,
+	cwd: string = getConfigRoot(),
+): string {
 	try {
 		const configDir = getConfigPath();
 
@@ -69,8 +22,9 @@ export function getClosestConfigFile(fileName: string): string {
 		const isExplicitConfigDir = Boolean(process.env.NANOCODER_CONFIG_DIR);
 
 		if (!isExplicitConfigDir) {
-			// First, lets check for a working directory config
-			const cwdPath = join(process.cwd(), fileName); // nosemgrep
+			// First, lets check for a working directory config (the active session's
+			// folder in a multi-session process)
+			const cwdPath = join(cwd, fileName); // nosemgrep
 			if (existsSync(cwdPath)) {
 				// nosemgrep
 				confDirMap[fileName] = cwdPath; // nosemgrep
@@ -92,7 +46,7 @@ export function getClosestConfigFile(fileName: string): string {
 
 		return configPath; // nosemgrep
 	} catch (error) {
-		log.error(`Failed to load ${fileName}: ${String(error)}`);
+		getLogger().error(`Failed to load ${fileName}: ${String(error)}`);
 	}
 
 	// The code should never hit this, but it makes the TS compiler happy.
@@ -117,6 +71,6 @@ function createDefaultConfFile(filePath: string, fileName: string): void {
 			);
 		}
 	} catch (error) {
-		log.error(`Failed to write ${filePath}: ${String(error)}`);
+		getLogger().error(`Failed to write ${filePath}: ${String(error)}`);
 	}
 }

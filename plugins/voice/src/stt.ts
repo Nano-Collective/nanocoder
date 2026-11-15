@@ -1,7 +1,7 @@
-import cp from 'node:child_process';
 import {existsSync} from 'node:fs';
 import {join} from 'node:path';
 import {platform} from 'node:process';
+import crossSpawn from 'cross-spawn';
 import {getVoiceBinDir, getWhisperModelPath} from './dependencies.js';
 
 const MAX_OUTPUT_BYTES = 1024 * 1024; // 1MB limit for safety
@@ -54,7 +54,7 @@ export async function transcribeAudio(
 
 		const args = ['-m', modelPath, '-f', filePath, '-nt']; // -nt disables timestamps
 
-		const proc = cp.spawn(command, args, {
+		const proc = crossSpawn.spawn(command, args, {
 			stdio: ['ignore', 'pipe', 'ignore'],
 		});
 

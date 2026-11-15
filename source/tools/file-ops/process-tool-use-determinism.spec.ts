@@ -34,7 +34,7 @@ import {
 } from '@/message-handler';
 import {clearPendingHookContext} from '@/services/lifecycle-hooks';
 import {setProjectRoot, setSessionCwd} from '@/services/session-cwd';
-import {markFileSeen} from '@/utils/read-tracker';
+import {markFileSeenAndVisible} from '@/tools/runtime/read-tracker';
 
 console.log(`\nfile-ops processToolUse determinism spec`);
 
@@ -125,7 +125,7 @@ test.serial(
 		writeFileSync(absPath, initial, 'utf-8');
 		// Validator requires a read-before-edit: simulate the model having
 		// read the file. Both invocations start from the same read state.
-		markFileSeen(absPath);
+		markFileSeenAndVisible(absPath);
 
 		const args = {
 			path: relPath,
@@ -139,6 +139,8 @@ test.serial(
 		// Reset to the same initial state and run again — proves the result
 		// is a function of inputs only, not of any cached state from A.
 		writeFileSync(absPath, initial, 'utf-8');
+		// The reset is an outside change to the file, so the model reads it again.
+		markFileSeenAndVisible(absPath);
 		const resultB = await invoke({name: 'string_replace', args});
 		const bytesB = readFileSync(absPath);
 
@@ -156,7 +158,7 @@ test.serial(
 		const absPath = absOf(relPath);
 		const initial = 'line one\nline two\nline three\n';
 		writeFileSync(absPath, initial, 'utf-8');
-		markFileSeen(absPath);
+		markFileSeenAndVisible(absPath);
 
 		const diff =
 			'<<<<<<< SEARCH\nline two\n=======\nLINE-TWO\n>>>>>>> REPLACE';
@@ -166,6 +168,8 @@ test.serial(
 		const bytesA = readFileSync(absPath);
 
 		writeFileSync(absPath, initial, 'utf-8');
+		// The reset is an outside change to the file, so the model reads it again.
+		markFileSeenAndVisible(absPath);
 		const resultB = await invoke({name: 'diff_edit', args});
 		const bytesB = readFileSync(absPath);
 
@@ -187,7 +191,7 @@ test.serial(
 		const absPath = absOf(relPath);
 		const initial = 'X\n';
 		writeFileSync(absPath, initial, 'utf-8');
-		markFileSeen(absPath);
+		markFileSeenAndVisible(absPath);
 
 		const args = {
 			path: relPath,
@@ -198,6 +202,8 @@ test.serial(
 		const bytesA = readFileSync(absPath);
 
 		writeFileSync(absPath, initial, 'utf-8');
+		// The reset is an outside change to the file, so the model reads it again.
+		markFileSeenAndVisible(absPath);
 		const resultB = await invoke({name: 'string_replace', args});
 		const bytesB = readFileSync(absPath);
 

@@ -39,11 +39,6 @@ Hosted services using the OpenAI-compatible API format.
 
 - [OpenRouter](openrouter.md) - Unified API for multiple AI providers
 - [Requesty](requesty.md) - OpenAI-compatible LLM router for multiple AI providers
-- [OrcaRouter](orcarouter.md) - OpenAI-compatible LLM router for multiple AI providers
-- [Cheaper Inference](cheaper-inference.md) - OpenAI-compatible gateway for models from multiple AI providers
-- [API Route](api-route.md) - OpenAI-compatible gateway for models from multiple AI providers
-- [CloudGPU](cloudgpu.md) - OpenAI-compatible model API gateway
-- [FutureInfra](futureinfra.md) - OpenAI-compatible AI API router for models from multiple AI providers
 - [Together AI](together.md) - Fast inference for open-source models with OpenAI-compatible API
 - [Groq](groq.md) - Very fast open-weight model inference on LPU hardware
 - [OpenAI](openai.md) - GPT models via OpenAI's API
@@ -51,6 +46,7 @@ Hosted services using the OpenAI-compatible API format.
 - [GitHub Models](github-models.md) - AI models via GitHub's marketplace
 - [Poe](poe.md) - Access multiple AI models through Poe
 - [Atlas Cloud](atlas-cloud.md) - Aggregates 300+ models behind one OpenAI-compatible endpoint
+- [CloudGPU](cloudgpu.md) - OpenAI-compatible model API
 - [Z.ai](z-ai.md) - GLM models from Zhipu AI
 - [Z.ai Coding](z-ai-coding.md) - Z.ai coding subscription plan
 
@@ -111,7 +107,7 @@ The case that bites: `@ai-sdk/anthropic` derives the ceiling from the model id a
         "sdkProvider": "anthropic",
         "baseUrl": "https://api.minimax.io/anthropic/v1",
         "apiKey": "${MINIMAX_API_KEY}",
-        "models": ["minimax-m3"],
+        "models": ["MiniMax-M3"],
         "maxOutputTokens": 32000
       }
     ]
@@ -186,6 +182,7 @@ API keys and other config values support environment variable substitution:
 - `$VAR_NAME` - simple variable reference
 - `${VAR_NAME}` - braced reference
 - `${VAR_NAME:-default}` - reference with default value
+- `$$` - escape for a literal `$` (e.g. `pa$$WORD` or `$$VAR_NAME`)
 
 ```json
 {

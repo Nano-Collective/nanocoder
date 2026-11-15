@@ -1,34 +1,23 @@
 /**
  * Cache management for models.dev data
- * Stores model database in XDG_CACHE_HOME for fast lookup
+ * Stores model database in the platform cache dir (see getCachePath)
  */
 
 import {constants} from 'node:fs';
 import {access, mkdir, readFile, writeFile} from 'node:fs/promises';
-import * as os from 'node:os';
 import * as path from 'node:path';
-import {xdgCache} from 'xdg-basedir';
+import {getCachePath} from '@/config/platform-dirs';
 import {CACHE_MODELS_EXPIRATION_MS} from '@/constants';
 import {formatError} from '@/utils/error-formatter';
 import {getLogger} from '@/utils/logging';
 import type {CachedModelsData, ModelsDevDatabase} from './models-types.js';
 
-const DEFAULT_CACHE_DIR =
-	process.platform === 'darwin'
-		? path.join(os.homedir(), 'Library', 'Caches')
-		: path.join(os.homedir(), '.cache');
-
-function getCacheDir(): string {
-	const cacheBase = xdgCache || DEFAULT_CACHE_DIR;
-	return path.join(cacheBase, 'nanocoder');
-}
-
 function getCacheFilePath(): string {
-	return path.join(getCacheDir(), 'models.json');
+	return path.join(getCachePath(), 'models.json');
 }
 
 async function ensureCacheDir(): Promise<void> {
-	const dir = getCacheDir();
+	const dir = getCachePath();
 
 	try {
 		await access(dir, constants.F_OK);

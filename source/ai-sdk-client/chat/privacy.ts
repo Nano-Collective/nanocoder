@@ -1,7 +1,7 @@
 import type {ScrubOptions} from '@nanocollective/prompt-scrub';
+import {truncateToolResult} from '@/tools/runtime/truncate-tool-result';
 import type {Message, ToolCall} from '@/types/index';
 import {getLogger} from '@/utils/logging';
-import {truncateToolResult} from '@/utils/truncate-tool-result';
 
 /**
  * Paths and URLs are deliberately left in the clear. The agent has to act on

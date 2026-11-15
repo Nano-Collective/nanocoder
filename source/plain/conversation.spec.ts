@@ -11,17 +11,22 @@ import {
 	resetAutoCompactSession,
 	setAutoCompactStrategy,
 	setAutoCompactThreshold,
-} from "@/utils/auto-compact.js";
+} from "@/conversation/compaction/auto-compact.js";
 import type { ToolManager } from "@/tools/tool-manager";
+import { TUNE_DEFAULTS } from "@/types/config";
 import type {
 	AISDKCoreTool,
+	DevelopmentMode,
 	LLMChatResponse,
 	LLMClient,
 	Message,
+	ModeOverrides,
+	ToolApprovalPolicy,
 	ToolCall,
 	ToolEntry,
 	ToolHandler,
 } from "@/types/core";
+import "@/tools/file-ops/write-file";
 import { runPlainConversation } from "./conversation.js";
 
 // Suppress ANSI in test output so tokens streamed to stdout stay readable.
@@ -64,14 +69,17 @@ function makeFakeClient(options: FakeClientOptions): LLMClient {
 
 interface FakeToolManagerOptions {
 	knownTools?: Set<string>;
-	needsApprovalByName?: Record<string, boolean>;
+	/** What the mode offers the model; defaults to every known tool. */
+	offeredTools?: Set<string>;
+	needsApprovalByName?: Record<string, ToolApprovalPolicy>;
 }
 
 function makeFakeToolManager(opts: FakeToolManagerOptions = {}): ToolManager {
 	const known = opts.knownTools ?? new Set<string>();
+	const offered = opts.offeredTools ?? known;
 	const approvals = opts.needsApprovalByName ?? {};
 	return {
-		getAvailableToolNames: () => Array.from(known),
+		getAvailableToolNames: () => Array.from(offered),
 		getFilteredTools: () => {
 			const filtered: Record<string, AISDKCoreTool> = {};
 			for (const name of known) {
@@ -123,6 +131,33 @@ test("returns success when model emits content and no tool calls", async (t) => 
 
 	t.is(outcome.kind, "success");
 	t.is(outcome.steps, 1);
+});
+
+test("tune's XML tool mode asks the client not to send native tools", async (t) => {
+	const seen: Array<ModeOverrides | undefined> = [];
+	const client: LLMClient = {
+		...makeFakeClient({ responses: [] }),
+		chat: async (_messages, _tools, _callbacks, _signal, modeOverrides) => {
+			seen.push(modeOverrides);
+			return {
+				choices: [{ message: { role: "assistant", content: "done" } }],
+			};
+		},
+	};
+
+	const outcome = await runPlainConversation({
+		client,
+		toolManager: makeFakeToolManager(),
+		systemMessage: SYSTEM,
+		initialMessages: [USER],
+		developmentMode: "auto-accept",
+		nonInteractiveAlwaysAllow: [],
+		abortSignal: new AbortController().signal,
+		tune: { ...TUNE_DEFAULTS, enabled: true, toolMode: "xml" },
+	});
+
+	t.is(outcome.kind, "success");
+	t.is(seen[0]?.nativeToolsDisabled, true);
 });
 
 test("nudges through empty responses up to the cap, then returns error", async (t) => {
@@ -271,6 +306,73 @@ test("returns tool-approval-required when a tool needs approval and mode is not 
 	t.is(outcome.steps, 1);
 	if (outcome.kind === TOOL_APPROVAL_REQUIRED_KIND) {
 		t.deepEqual(outcome.toolNames, ["risky_tool"]);
+		t.false(outcome.autoAcceptWouldRun);
+	}
+});
+
+// Mirrors the real policies: file edits are waived in auto-accept, bash is not.
+const waivedInAutoAccept: ToolApprovalPolicy = (_args, mode) =>
+	mode !== "auto-accept";
+const neverWaived: ToolApprovalPolicy = () => true;
+
+async function runBlockedTurn(
+	developmentMode: DevelopmentMode,
+	toolNames: string[],
+) {
+	const toolCalls: ToolCall[] = toolNames.map((name, index) => ({
+		id: `call-${index}`,
+		function: { name, arguments: {} },
+	}));
+	const client = makeFakeClient({
+		responses: [
+			{
+				choices: [
+					{
+						message: {
+							role: "assistant",
+							content: "",
+							tool_calls: toolCalls,
+						},
+					},
+				],
+			},
+		],
+	});
+	const toolManager = makeFakeToolManager({
+		knownTools: new Set(["edit_tool", "bash_tool"]),
+		needsApprovalByName: {
+			edit_tool: waivedInAutoAccept,
+			bash_tool: neverWaived,
+		},
+	});
+
+	return runPlainConversation({
+		client,
+		toolManager,
+		systemMessage: SYSTEM,
+		initialMessages: [USER],
+		developmentMode,
+		nonInteractiveAlwaysAllow: [],
+		abortSignal: new AbortController().signal,
+	});
+}
+
+test("autoAcceptWouldRun is true when auto-accept would run every blocked call", async (t) => {
+	const outcome = await runBlockedTurn("normal", ["edit_tool"]);
+
+	t.is(outcome.kind, TOOL_APPROVAL_REQUIRED_KIND);
+	if (outcome.kind === TOOL_APPROVAL_REQUIRED_KIND) {
+		t.true(outcome.autoAcceptWouldRun);
+	}
+});
+
+test("autoAcceptWouldRun is false when auto-accept would still ask for a call", async (t) => {
+	const outcome = await runBlockedTurn("normal", ["edit_tool", "bash_tool"]);
+
+	t.is(outcome.kind, TOOL_APPROVAL_REQUIRED_KIND);
+	if (outcome.kind === TOOL_APPROVAL_REQUIRED_KIND) {
+		t.deepEqual(outcome.toolNames, ["edit_tool", "bash_tool"]);
+		t.false(outcome.autoAcceptWouldRun);
 	}
 });
 
@@ -650,6 +752,67 @@ test("unknown tool is logged with an error and no result, and is flagged as an e
 	t.is(logged.result, null);
 	t.truthy(logged.error);
 	t.regex(String(logged.error), /unknown tool/i);
+});
+
+test.serial("a registered tool the mode did not offer is refused, not run", async (t) => {
+	// write_file is registered but not offered; in yolo nothing else would
+	// stop it, so this pins the offered list reaching the partition.
+	let wrote = false;
+	setToolRegistryGetter(() => ({
+		write_file: (async () => {
+			wrote = true;
+			return "written";
+		}) as ToolHandler,
+	}));
+	const client = makeFakeClient({
+		responses: [
+			{
+				choices: [
+					{
+						message: {
+							role: "assistant",
+							content: "",
+							tool_calls: [
+								{
+									id: "call-1",
+									function: {
+										name: "write_file",
+										arguments: { path: "x.ts", content: "hi" },
+									},
+								},
+							],
+						},
+					},
+				],
+			},
+			{
+				choices: [{ message: { role: "assistant", content: "recovered" } }],
+			},
+		],
+	});
+	const toolManager = makeFakeToolManager({
+		knownTools: new Set(["read_file", "write_file"]),
+		offeredTools: new Set(["read_file"]),
+	});
+
+	const outcome = await runPlainConversation({
+		client,
+		toolManager,
+		systemMessage: SYSTEM,
+		initialMessages: [USER],
+		developmentMode: "yolo",
+		nonInteractiveAlwaysAllow: [],
+		abortSignal: new AbortController().signal,
+	});
+
+	t.is(outcome.kind, "success");
+	t.false(wrote);
+	t.is(outcome.toolCalls.length, 1);
+	t.is(outcome.toolCalls[0].result, null);
+	t.regex(
+		String(outcome.toolCalls[0].error),
+		/not available in the current mode/,
+	);
 });
 
 test("aborted signal short-circuits with an error outcome", async (t) => {
@@ -1329,6 +1492,97 @@ test.serial(
 	},
 );
 
+test.serial(
+	"ignores non-finite usage fields instead of poisoning the totals",
+	async (t) => {
+		// NaN and Infinity are broken reports, not counts: a NaN total would
+		// make every later sum NaN, and an Infinity input would read as
+		// unbounded spend in the --json report.
+		const reply = (usage: Record<string, number>) => ({
+			choices: [
+				{ message: { role: "assistant" as const, content: "" } },
+			],
+			usage,
+		});
+		const toolCall: ToolCall = {
+			id: "call-1",
+			function: { name: "safe_tool", arguments: {} },
+		};
+		const client = makeFakeClient({
+			responses: [
+				{
+					...reply({
+						inputTokens: Number.NaN,
+						outputTokens: 10,
+						totalTokens: Number.NaN,
+					}),
+					choices: [
+						{
+							message: {
+								role: "assistant",
+								content: "",
+								tool_calls: [toolCall],
+							},
+						},
+					],
+				},
+				{
+					...reply({ inputTokens: 100, outputTokens: Number.POSITIVE_INFINITY }),
+					choices: [{ message: { role: "assistant", content: "done" } }],
+				},
+			],
+		});
+		setToolRegistryGetter(() => ({ safe_tool: async () => "ok" }));
+		const toolManager = makeFakeToolManager({
+			knownTools: new Set(["safe_tool"]),
+		});
+
+		const outcome = await runPlainConversation({
+			client,
+			toolManager,
+			systemMessage: SYSTEM,
+			initialMessages: [USER],
+			developmentMode: "auto-accept",
+			nonInteractiveAlwaysAllow: [],
+			abortSignal: new AbortController().signal,
+		});
+
+		t.is(outcome.kind, "success");
+		t.deepEqual(outcome.usage, {
+			inputTokens: 100,
+			outputTokens: 10,
+			totalTokens: 110,
+		});
+	},
+);
+
+test.serial(
+	"omits usage when the provider reports only non-finite fields",
+	async (t) => {
+		const client = makeFakeClient({
+			responses: [
+				{
+					choices: [{ message: { role: "assistant", content: "done" } }],
+					usage: { inputTokens: Number.NaN, totalTokens: Number.NaN },
+				},
+			],
+		});
+
+		const outcome = await runPlainConversation({
+			client,
+			toolManager: makeFakeToolManager(),
+			systemMessage: SYSTEM,
+			initialMessages: [USER],
+			developmentMode: "auto-accept",
+			nonInteractiveAlwaysAllow: [],
+			abortSignal: new AbortController().signal,
+		});
+
+		t.is(outcome.kind, "success");
+		t.is(outcome.usage, undefined);
+	},
+);
+
 // --- Agent-loop retry limits (nanocoder.retries) — issue #897 ---
 
 function repeatingToolResponse(): Partial<LLMChatResponse> {
@@ -1640,6 +1894,155 @@ test.serial(
 			3,
 			"every unknown-tool turn is logged as an error",
 		);
+	},
+);
+
+// What the client returns for a call to a real tool whose arguments could not
+// be parsed (see convertAISDKToolCall): `{}` in their place, and the error.
+function unparsableArgumentsResponse(): Partial<LLMChatResponse> {
+	return {
+		choices: [
+			{
+				message: {
+					role: "assistant",
+					content: "",
+					tool_calls: [
+						{
+							id: "call-bad",
+							function: { name: "read_file", arguments: {} },
+							argumentsError:
+								"not valid JSON: Expected ',' or '}' after property value in JSON at position 20",
+						},
+					],
+				},
+			},
+		],
+		usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
+	};
+}
+
+test.serial(
+	"a call with unparsable arguments is not run and counts toward the repeated-call cap",
+	async (t) => {
+		// One model request per turn, so steps and usage cover every request
+		// and the cap stops a stuck model after maxRepeatedToolCalls of them.
+		let handlerRuns = 0;
+		setToolRegistryGetter(() => ({
+			read_file: (async () => {
+				handlerRuns++;
+				return "file contents";
+			}) as ToolHandler,
+		}));
+		const calls: RecordedCall[] = [];
+		const client = makeRecordingClient(
+			[
+				unparsableArgumentsResponse(),
+				unparsableArgumentsResponse(),
+				unparsableArgumentsResponse(),
+			],
+			calls,
+		);
+		const toolManager = makeFakeToolManager({
+			knownTools: new Set(["read_file"]),
+			// Approval is required, so a call that reached the approval step
+			// would stop a non-interactive run with tool-approval-required.
+			needsApprovalByName: { read_file: true },
+		});
+
+		const outcome = await runPlainConversation({
+			client,
+			toolManager,
+			systemMessage: SYSTEM,
+			initialMessages: [USER],
+			developmentMode: "normal",
+			nonInteractiveAlwaysAllow: [],
+			abortSignal: new AbortController().signal,
+		});
+
+		t.is(outcome.kind, "error");
+		if (outcome.kind === "error") {
+			t.regex(outcome.message, /repeated the same tool call 3 times/i);
+		}
+		t.is(calls.length, 3);
+		t.is(outcome.steps, 3);
+		t.is(outcome.usage?.totalTokens, 45);
+		t.is(handlerRuns, 0, "the tool never runs with the {} placeholder");
+		t.is(outcome.toolCalls.length, 3);
+		for (const logged of outcome.toolCalls) {
+			t.is(logged.name, "read_file");
+			t.is(logged.result, null);
+			t.regex(String(logged.error), /^Invalid arguments for tool "read_file": not valid JSON/);
+		}
+
+		// What the second request replays for the first turn: the call with
+		// `{}`, paired with the error the model is asked to fix.
+		const replayed = calls[1].messages;
+		const assistant = replayed.find(
+			(m) => m.role === "assistant" && m.tool_calls?.length,
+		);
+		t.deepEqual(assistant?.tool_calls?.[0].function.arguments, {});
+		const result = replayed.find(
+			(m) => m.role === "tool" && m.tool_call_id === "call-bad",
+		);
+		t.regex(String(result?.content), /^Invalid arguments for tool "read_file"/);
+		t.regex(String(result?.content), /The call was not run/);
+	},
+);
+
+test.serial(
+	"a model that fixes its unparsable arguments goes on normally",
+	async (t) => {
+		const ran: unknown[] = [];
+		setToolRegistryGetter(() => ({
+			read_file: (async (args: unknown) => {
+				ran.push(args);
+				return "hi there";
+			}) as ToolHandler,
+		}));
+		const calls: RecordedCall[] = [];
+		const client = makeRecordingClient(
+			[
+				unparsableArgumentsResponse(),
+				{
+					choices: [
+						{
+							message: {
+								role: "assistant",
+								content: "",
+								tool_calls: [
+									{
+										id: "call-good",
+										function: {
+											name: "read_file",
+											arguments: { path: "hello.txt" },
+										},
+									},
+								],
+							},
+						},
+					],
+				},
+				{ choices: [{ message: { role: "assistant", content: "done" } }] },
+			],
+			calls,
+		);
+		const toolManager = makeFakeToolManager({
+			knownTools: new Set(["read_file"]),
+		});
+
+		const outcome = await runPlainConversation({
+			client,
+			toolManager,
+			systemMessage: SYSTEM,
+			initialMessages: [USER],
+			developmentMode: "auto-accept",
+			nonInteractiveAlwaysAllow: [],
+			abortSignal: new AbortController().signal,
+		});
+
+		t.is(outcome.kind, "success");
+		t.is(calls.length, 3);
+		t.deepEqual(ran, [{ path: "hello.txt" }]);
 	},
 );
 
@@ -2306,3 +2709,154 @@ test.serial(
 		t.is(calls.length, 1);
 	},
 );
+
+// ---------------------------------------------------------------------------
+// nanocoder.verify: a run that edited files cannot end without evidence
+// ---------------------------------------------------------------------------
+
+const toolTurn = (id: string, name: string, args: Record<string, unknown>) => ({
+	choices: [
+		{
+			message: {
+				role: "assistant",
+				content: "",
+				tool_calls: [{ id, function: { name, arguments: args } }] as ToolCall[],
+			},
+		},
+	],
+});
+const textTurn = (content: string) => ({
+	choices: [{ message: { role: "assistant", content } }],
+});
+
+/**
+ * Plays the scripted turns, records the last message the model saw on each
+ * call, and answers execute_bash with the given exit code.
+ */
+async function runVerified(
+	script: Array<Record<string, unknown>>,
+	bashExitCode: number,
+	required: string[] | undefined,
+) {
+	const seen: string[] = [];
+	let call = 0;
+	const client = {
+		...makeFakeClient({ responses: [] }),
+		chat: async (
+			messages: Message[],
+			_tools: unknown,
+			callbacks: { onToken?: (token: string) => void },
+		): Promise<LLMChatResponse> => {
+			seen.push(messages.at(-1)?.content ?? "");
+			const turn = script[call++] as unknown as LLMChatResponse | undefined;
+			if (!turn) throw new Error("script ran out");
+			const text = turn.choices[0]?.message.content;
+			if (text) callbacks.onToken?.(text);
+			return turn;
+		},
+	} as unknown as LLMClient;
+	setToolRegistryGetter(() => ({
+		write_file: (async () => "File written") as ToolHandler,
+		execute_bash: (async () =>
+			`EXIT_CODE: ${bashExitCode}\noutput`) as ToolHandler,
+	}));
+
+	const previous = getAppConfig().verify;
+	getAppConfig().verify = required ? { required } : undefined;
+	try {
+		const outcome = await runPlainConversation({
+			client,
+			toolManager: makeFakeToolManager({
+				knownTools: new Set(["write_file", "execute_bash"]),
+			}),
+			systemMessage: SYSTEM,
+			initialMessages: [USER],
+			developmentMode: "yolo",
+			nonInteractiveAlwaysAllow: [],
+			abortSignal: new AbortController().signal,
+		});
+		return { outcome, seen, calls: call };
+	} finally {
+		getAppConfig().verify = previous;
+	}
+}
+
+test.serial("verify: a headless run is sent back until the required command passes", async (t) => {
+	const { outcome, seen, calls } = await runVerified(
+		[
+			toolTurn("w", "write_file", { path: "a.ts", content: "x" }),
+			textTurn("Fixed it."),
+			toolTurn("b", "execute_bash", { command: "pnpm test" }),
+			textTurn("Confirmed."),
+		],
+		0,
+		["pnpm test"],
+	);
+
+	t.is(calls, 4);
+	t.true(seen[2]?.includes("`pnpm test` (not run)"), "the model is told what to run");
+	t.is(outcome.kind, "success");
+	if (outcome.kind === "success") {
+		t.is(outcome.finalText, "Fixed it.\n\nVerification: ✓ pnpm test (exit 0)");
+	}
+});
+
+test.serial("verify: a failing run is not evidence, and the model may finish after two reminders", async (t) => {
+	const { outcome, seen, calls } = await runVerified(
+		[
+			toolTurn("w", "write_file", { path: "a.ts", content: "x" }),
+			textTurn("Done."),
+			toolTurn("b", "execute_bash", { command: "pnpm test" }),
+			textTurn("Still done."),
+			textTurn("Really done."),
+		],
+		1,
+		["pnpm test"],
+	);
+
+	t.is(calls, 5);
+	t.true(seen[4]?.includes("last run exited 1"));
+	t.is(outcome.kind, "success");
+	if (outcome.kind === "success") {
+		t.is(outcome.finalText, "Done.\n\nVerification: ✗ pnpm test (last run exited 1)");
+	}
+});
+
+test.serial("verify: an edit after a passing run makes the evidence stale", async (t) => {
+	const { seen, calls } = await runVerified(
+		[
+			toolTurn("w1", "write_file", { path: "a.ts", content: "x" }),
+			toolTurn("b", "execute_bash", { command: "pnpm test" }),
+			toolTurn("w2", "write_file", { path: "a.ts", content: "y" }),
+			textTurn("Done."),
+			toolTurn("b2", "execute_bash", { command: "pnpm test" }),
+			textTurn("Confirmed."),
+		],
+		0,
+		["pnpm test"],
+	);
+
+	t.is(calls, 6);
+	t.true(seen[4]?.includes("not run since your last edit"));
+});
+
+test.serial("verify: nothing changes when it is not configured", async (t) => {
+	const { outcome, calls } = await runVerified(
+		[toolTurn("w", "write_file", { path: "a.ts", content: "x" }), textTurn("Done.")],
+		0,
+		undefined,
+	);
+
+	t.is(calls, 2);
+	t.is(outcome.kind, "success");
+	if (outcome.kind === "success") t.is(outcome.finalText, "Done.");
+});
+
+test.serial("verify: a run that edited nothing is not held up", async (t) => {
+	const { outcome, calls } = await runVerified([textTurn("Just an answer.")], 0, [
+		"pnpm test",
+	]);
+
+	t.is(calls, 1);
+	if (outcome.kind === "success") t.is(outcome.finalText, "Just an answer.");
+});
