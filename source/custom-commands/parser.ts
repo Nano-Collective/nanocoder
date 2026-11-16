@@ -93,10 +93,6 @@ function parseEnhancedFrontmatter(frontmatter: string): CustomCommandMetadata {
 			continue;
 		}
 
-		// Check for YAML block scalar indicators (`|` / `>` with optional
-		// chomping/indent markers). Only the value after the colon counts —
-		// a description like `Render a <Component>` ends with `>` but is not
-		// a block scalar.
 		{
 			const colonIndex = findColonOutsideQuotes(line);
 			if (colonIndex !== -1) {
@@ -163,10 +159,6 @@ function parseEnhancedFrontmatter(frontmatter: string): CustomCommandMetadata {
 	return mapRawToMetadata(raw);
 }
 
-/**
- * True when `value` is a YAML block scalar header (`|`, `>`, `|-`, `>+2`, …),
- * not merely a scalar that happens to end with `|` or `>`.
- */
 function isBlockScalarIndicator(value: string): boolean {
 	return /^[|>](?:[+-]?\d*|\d+[+-]?)$/.test(value);
 }
