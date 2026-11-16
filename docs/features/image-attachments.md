@@ -42,7 +42,7 @@ Whether the image is actually understood depends on the model — attach images 
 
 ## Clipboard Requirements by Platform
 
-Clipboard paste (**Ctrl+V**) shells out to a platform tool to read the image. If the tool isn't installed, the paste is a no-op and a one-line note is written to the debug log naming the missing command.
+Clipboard paste (**Ctrl+V**) shells out to a platform tool to read the image. The read runs in the background, so a cold or slow helper no longer freezes the input box while it starts. If the tool isn't installed, the read takes longer than 3 seconds, or the image is over the 10 MB limit, a one-line note above the input box says why nothing was attached; a missing tool is also written to the debug log.
 
 | Platform | Required tool |
 |----------|---------------|

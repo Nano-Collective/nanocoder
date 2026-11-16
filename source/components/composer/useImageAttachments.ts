@@ -1,5 +1,6 @@
-import {useCallback, useState} from 'react';
+import {useCallback, useRef, useState} from 'react';
 import {
+	type ClipboardImageResult,
 	extractImageReferences,
 	readClipboardImage,
 	readImageFile,
@@ -42,21 +43,44 @@ export function collectDroppedImages(
  * model-capability heuristic: if the model can't see images it will say so
  * or error, which is clearer than an over-cautious warning on every attach.
  */
-export function useImageAttachments() {
+export function useImageAttachments(
+	readClipboard: () => Promise<ClipboardImageResult> = readClipboardImage,
+) {
 	const [attachments, setAttachments] = useState<ImageAttachment[]>([]);
+	const [clipboardNotice, setClipboardNotice] = useState<string | null>(null);
+	// A cold Windows PowerShell can take seconds. Ignore repeat Ctrl+V presses
+	// while a read is in flight instead of stacking helpers and duplicating the
+	// attachment once each one finishes.
+	const clipboardReadInFlightRef = useRef(false);
 
 	/**
 	 * Ctrl+V: attach the image on the system clipboard, if there is one. Text
 	 * pasted into the terminal arrives as a bracketed paste on stdin (cli.tsx
 	 * enables DECSET 2004 and routes payloads to pasteEvents), never as a
 	 * Ctrl+V keypress, so the key is free to mean "paste image".
+	 *
+	 * The read runs off the event loop; a failure (missing helper, timeout,
+	 * oversized image) lands in `clipboardNotice` instead of vanishing.
 	 */
-	const attachFromClipboard = useCallback(() => {
-		const image = readClipboardImage();
-		if (image) {
-			setAttachments(prev => [...prev, image]);
+	const attachFromClipboard = useCallback(async () => {
+		if (clipboardReadInFlightRef.current) return;
+		clipboardReadInFlightRef.current = true;
+		setClipboardNotice(null);
+		try {
+			const {image, error} = await readClipboard();
+			if (image) {
+				setAttachments(prev => [...prev, image]);
+			} else if (error) {
+				setClipboardNotice(error);
+			}
+		} catch {
+			// The reader is contracted to resolve, but never let a thrown error
+			// turn a Ctrl+V into an unhandled rejection or a silent no-op.
+			setClipboardNotice('Could not read the clipboard image');
+		} finally {
+			clipboardReadInFlightRef.current = false;
 		}
-	}, []);
+	}, [readClipboard]);
 
 	/** Ctrl+X: drop the most recently added image. */
 	const removeLast = useCallback(() => {
@@ -70,7 +94,15 @@ export function useImageAttachments() {
 
 	const clear = useCallback(() => {
 		setAttachments([]);
+		setClipboardNotice(null);
 	}, []);
 
-	return {attachments, attachFromClipboard, removeLast, replace, clear};
+	return {
+		attachments,
+		clipboardNotice,
+		attachFromClipboard,
+		removeLast,
+		replace,
+		clear,
+	};
 }

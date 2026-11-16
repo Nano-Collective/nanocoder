@@ -6,7 +6,10 @@ import {
 	extractImagePathFromText,
 	extractImageReferences,
 	mediaTypeForPath,
+	readClipboardImage,
 	readImageFile,
+	runClipboardCommand,
+	type ClipboardCommandResult,
 } from './clipboard-image.js';
 
 // A 1x1 transparent PNG.
@@ -144,4 +147,209 @@ test('extractImageReferences numbers placeholders from startIndex', t => {
 	const {text, paths} = extractImageReferences(`see '${file}'`, 2);
 	t.deepEqual(paths, [file]);
 	t.is(text, 'see [Image #3]');
+});
+
+function commandResult(
+	overrides: Partial<ClipboardCommandResult> = {},
+): ClipboardCommandResult {
+	return {
+		stdout: Buffer.alloc(0),
+		missing: false,
+		timedOut: false,
+		tooLarge: false,
+		failed: false,
+		...overrides,
+	};
+}
+
+test('readClipboardImage attaches PNG bytes streamed by wl-paste', async t => {
+	const result = await readClipboardImage({
+		platform: 'linux',
+		run: async () => commandResult({stdout: PNG_BYTES}),
+	});
+
+	t.is(result.error, undefined);
+	t.is(result.image?.data, PNG_BYTES.toString('base64'));
+	t.is(result.image?.mediaType, 'image/png');
+	t.is(result.image?.source, 'clipboard');
+});
+
+test('readClipboardImage falls back to xclip when wl-paste is missing', async t => {
+	const calls: string[] = [];
+	const result = await readClipboardImage({
+		platform: 'linux',
+		run: async command => {
+			calls.push(command);
+			return command === 'wl-paste'
+				? commandResult({missing: true})
+				: commandResult({stdout: PNG_BYTES});
+		},
+	});
+
+	t.deepEqual(calls, ['wl-paste', 'xclip']);
+	t.truthy(result.image);
+});
+
+test('readClipboardImage names the missing Linux helpers', async t => {
+	const result = await readClipboardImage({
+		platform: 'linux',
+		run: async () => commandResult({missing: true}),
+	});
+
+	t.is(result.image, null);
+	t.regex(result.error ?? '', /wl-paste or xclip/);
+});
+
+test('readClipboardImage reports a clipboard helper timeout', async t => {
+	const result = await readClipboardImage({
+		platform: 'linux',
+		run: async () => commandResult({timedOut: true}),
+	});
+
+	t.is(result.image, null);
+	t.regex(result.error ?? '', /timed out after 3s/);
+});
+
+test('readClipboardImage reports an oversized clipboard image', async t => {
+	const result = await readClipboardImage({
+		platform: 'win32',
+		run: async () => commandResult({tooLarge: true}),
+	});
+
+	t.is(result.image, null);
+	t.regex(result.error ?? '', /10 MB/);
+});
+
+test('readClipboardImage attaches PowerShell output on Windows', async t => {
+	const result = await readClipboardImage({
+		platform: 'win32',
+		run: async () => commandResult({stdout: PNG_BYTES}),
+	});
+
+	t.is(result.error, undefined);
+	t.is(result.image?.data, PNG_BYTES.toString('base64'));
+});
+
+test('readClipboardImage explains that Windows needs PowerShell', async t => {
+	const result = await readClipboardImage({
+		platform: 'win32',
+		run: async () => commandResult({missing: true}),
+	});
+
+	t.is(result.image, null);
+	t.regex(result.error ?? '', /PowerShell/);
+});
+
+test('readClipboardImage reports an unreadable clipboard', async t => {
+	const result = await readClipboardImage({
+		platform: 'linux',
+		run: async () => commandResult({failed: true}),
+	});
+
+	t.is(result.image, null);
+	t.regex(result.error ?? '', /Could not read the clipboard image/);
+});
+
+test('readClipboardImage treats an empty clipboard as a silent no-op', async t => {
+	const result = await readClipboardImage({
+		platform: 'linux',
+		run: async () => commandResult(),
+	});
+
+	t.deepEqual(result, {image: null});
+});
+
+test('readClipboardImage explains that macOS needs osascript', async t => {
+	const result = await readClipboardImage({
+		platform: 'darwin',
+		run: async () => commandResult({missing: true}),
+	});
+
+	t.is(result.image, null);
+	t.regex(result.error ?? '', /osascript/);
+});
+
+test('readClipboardImage treats a non-image macOS clipboard as a no-op', async t => {
+	const result = await readClipboardImage({
+		platform: 'darwin',
+		run: async () => commandResult({stdout: Buffer.from('NO_IMAGE')}),
+	});
+
+	t.deepEqual(result, {image: null});
+});
+
+test('readClipboardImage rejects a macOS temp file over the size limit', async t => {
+	const result = await readClipboardImage({
+		platform: 'darwin',
+		run: async (_command, args) => {
+			const outFile = /POSIX file "([^"]+)"/.exec(args[1] ?? '')?.[1];
+			if (outFile) {
+				writeFileSync(outFile, Buffer.alloc(10 * 1024 * 1024 + 1));
+			}
+			return commandResult({stdout: Buffer.from('OK')});
+		},
+	});
+
+	t.is(result.image, null);
+	t.regex(result.error ?? '', /10 MB/);
+});
+
+test('readClipboardImage returns no image on unsupported platforms', async t => {
+	const result = await readClipboardImage({
+		platform: 'aix',
+		run: async () => commandResult({stdout: PNG_BYTES}),
+	});
+
+	t.deepEqual(result, {image: null});
+});
+
+test('runClipboardCommand flags an executable that is not installed', async t => {
+	const result = await runClipboardCommand(
+		'nanocoder-clipboard-helper-does-not-exist',
+		[],
+		{timeoutMs: 100},
+	);
+
+	t.true(result.missing);
+	t.false(result.timedOut);
+	t.false(result.tooLarge);
+	t.false(result.failed);
+	t.is(result.stdout.length, 0);
+});
+
+test('runClipboardCommand reports a helper that outlives its timeout', async t => {
+	const result = await runClipboardCommand(
+		process.execPath,
+		['-e', 'setInterval(() => {}, 1000)'],
+		{timeoutMs: 150},
+	);
+
+	t.true(result.timedOut);
+	t.false(result.missing);
+	t.false(result.tooLarge);
+	t.false(result.failed);
+});
+
+test('runClipboardCommand returns stdout as bytes', async t => {
+	const result = await runClipboardCommand(
+		process.execPath,
+		['-e', 'process.stdout.write(Buffer.from([1, 2, 3]))'],
+		{timeoutMs: 5000},
+	);
+
+	t.deepEqual([...result.stdout], [1, 2, 3]);
+	t.false(result.failed);
+});
+
+test('runClipboardCommand flags output over the size cap', async t => {
+	const result = await runClipboardCommand(
+		process.execPath,
+		['-e', 'process.stdout.write(Buffer.alloc(4096))'],
+		{timeoutMs: 5000, maxBytes: 1024},
+	);
+
+	t.true(result.tooLarge);
+	t.false(result.timedOut);
+	t.false(result.missing);
+	t.false(result.failed);
 });
