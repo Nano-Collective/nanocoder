@@ -1,5 +1,7 @@
 const ARGUMENT_QUOTE_CHARS = new Set(['"', "'", '`']);
 
+const ESCAPE_NEXT = new Set(['"', "'", '`', ' ', '\\']);
+
 /**
  * Parses command arguments while preserving quoted multi-word values.
  */
@@ -9,8 +11,11 @@ export function parseCustomCommandArgs(input: string): string[] {
 	let quoteChar: string | null = null;
 	let isEscaped = false;
 	let hasCurrentArg = false;
+	const text = input.trim();
 
-	for (const char of input.trim()) {
+	for (let i = 0; i < text.length; i++) {
+		const char = text[i]!;
+
 		if (isEscaped) {
 			currentArg += char;
 			hasCurrentArg = true;
@@ -19,7 +24,12 @@ export function parseCustomCommandArgs(input: string): string[] {
 		}
 
 		if (char === '\\') {
-			isEscaped = true;
+			const next = text[i + 1];
+			if (next !== undefined && ESCAPE_NEXT.has(next)) {
+				isEscaped = true;
+			} else {
+				currentArg += '\\';
+			}
 			hasCurrentArg = true;
 			continue;
 		}
