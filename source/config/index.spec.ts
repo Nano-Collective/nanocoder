@@ -984,7 +984,7 @@ test.serial('modeProviders reports clear error and does not throw when provider 
 			errors.some(
 				err =>
 					err.includes('Provider "nomodels" (modeProviders.plan) has no "models" list') &&
-					err.includes('agents.config.json'),
+					err.includes('Add one wherever the provider is defined.'),
 			),
 		);
 		t.false(errors.some(err => err.includes('TypeError')));

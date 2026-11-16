@@ -422,7 +422,7 @@ Use a different provider and model per development mode, for example a fast, che
 }
 ```
 
-Keys are mode names (`normal`, `auto-accept`, `yolo`, `plan`, `architect`). Each entry needs a `provider` that matches a configured provider name (case-insensitive) and a `model`; if that provider has a non-empty `models` list, the model must be in it. Invalid entries are skipped with an error in the log. A `--provider` or `--model` CLI flag takes priority at startup.
+Keys are mode names (`normal`, `auto-accept`, `yolo`, `plan`, `architect`). Each entry needs a `provider` that matches a configured provider name (case-insensitive) and a `model`; the provider must also have a `models` list, otherwise the entry is skipped with an error (and if that list is non-empty, the model must be in it). Invalid entries are skipped with an error in the log. A `--provider` or `--model` CLI flag takes priority at startup.
 
 ### Model Tuning
 

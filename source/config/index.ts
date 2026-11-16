@@ -98,7 +98,7 @@ function tryLoadConfig<T>(
 	configPath: string,
 	label: string,
 	// biome-ignore lint/suspicious/noExplicitAny: parsed JSON is dynamically shaped
-	extract: (config: any, configPath: string) => T | null,
+	extract: (config: any) => T | null,
 ): T | null {
 	if (!existsSync(configPath)) {
 		return null;
@@ -106,7 +106,7 @@ function tryLoadConfig<T>(
 
 	try {
 		const config = readCachedConfigFile(configPath);
-		return extract(config, configPath);
+		return extract(config);
 	} catch (error) {
 		notifyError(
 			`Failed to load ${label} config from ${configPath}: ${String(error)}`,
@@ -126,7 +126,7 @@ function loadHierarchicalConfig<T>(
 	fileName: string,
 	label: string,
 	// biome-ignore lint/suspicious/noExplicitAny: parsed JSON is dynamically shaped
-	extract: (config: any, configPath: string) => T | null,
+	extract: (config: any) => T | null,
 ): T | null {
 	const projectResult = tryLoadConfig(
 		join(cwd, fileName), // nosemgrep
@@ -743,7 +743,7 @@ function loadModeProvidersConfig(
 			cwd,
 			'agents.config.json',
 			'modeProviders',
-			(config, configPath) => {
+			config => {
 				const modeProviders = config.nanocoder?.modeProviders;
 				if (
 					!modeProviders ||
@@ -798,7 +798,7 @@ function loadModeProvidersConfig(
 						!Array.isArray(matchedProvider.models)
 					) {
 						notifyError(
-							`Provider "${matchedProvider.name}" (modeProviders.${mode}) has no "models" list. Add one in ${configPath}.`,
+							`Provider "${matchedProvider.name}" (modeProviders.${mode}) has no "models" list. Add one wherever the provider is defined.`,
 						);
 						continue;
 					}
