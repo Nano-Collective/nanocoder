@@ -564,6 +564,16 @@ export interface MCPServerConfig {
 	url?: string;
 	headers?: Record<string, string>;
 	timeout?: number;
+	/**
+	 * How long a tool call may wait for the server, in milliseconds. Defaults
+	 * to the MCP SDK's 60 seconds; 0 means no limit.
+	 */
+	toolTimeout?: number;
+	/**
+	 * Restart the tool-call timer whenever the server reports progress, so a
+	 * long call that keeps reporting is not cut off. Defaults to true.
+	 */
+	resetTimeoutOnProgress?: boolean;
 	/** Period between MCP ping health checks, in milliseconds. */
 	healthCheckInterval?: number;
 	alwaysAllow?: string[];
