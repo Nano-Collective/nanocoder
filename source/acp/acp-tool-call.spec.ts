@@ -169,6 +169,31 @@ test('buildToolCallMeta - string_replace produces whole-file diff for unique mat
 	}
 });
 
+test('buildToolCallMeta - string_replace falls back to hunk diff for overlapping matches', async t => {
+	// "aa" starts at index 0 and 1 of "aaa", so the edit is ambiguous and the
+	// client must not be shown a whole-file diff that implies it is not.
+	const dir = mkdtempSync(join(tmpdir(), 'acp-overlap-'));
+	try {
+		const file = join(dir, 'a.txt');
+		writeFileSync(file, 'aaa');
+
+		const meta = await buildToolCallMeta(
+			makeCall('string_replace', {
+				path: file,
+				old_str: 'aa',
+				new_str: 'B',
+			}),
+		);
+
+		const diff = meta.content[0] as any;
+		t.is(diff.type, 'diff');
+		t.is(diff.oldText, 'aa');
+		t.is(diff.newText, 'B');
+	} finally {
+		rmSync(dir, {recursive: true, force: true});
+	}
+});
+
 test('buildToolCallMeta - relative edit paths follow the session cwd', async t => {
 	const root = mkdtempSync(join(tmpdir(), 'acp-cwd-'));
 	const sub = join(root, 'sub');

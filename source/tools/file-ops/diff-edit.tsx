@@ -11,7 +11,10 @@ import {
 import {ThemeContext} from '@/hooks/useTheme';
 import {getSafeSessionCwd} from '@/services/session-cwd';
 import {EditRecoveryError} from '@/tools/file-ops/edit-recovery';
-import {replaceFirstLiteral} from '@/tools/file-ops/literal-replace';
+import {
+	countLiteralOccurrences,
+	replaceFirstLiteral,
+} from '@/tools/file-ops/literal-replace';
 import {
 	validateEditableEncoding,
 	validateEditableFormat,
@@ -137,10 +140,6 @@ export function parseDiffEditBlocks(diff: string): DiffEditBlock[] {
 	return blocks;
 }
 
-function countOccurrences(content: string, search: string): number {
-	return content.split(search).length - 1;
-}
-
 function validateBlocks(
 	fileContent: string,
 	blocks: DiffEditBlock[],
@@ -157,7 +156,7 @@ function validateBlocks(
 		}
 		seenSearchBlocks.add(block.search);
 
-		const occurrences = countOccurrences(fileContent, block.search);
+		const occurrences = countLiteralOccurrences(fileContent, block.search);
 
 		if (occurrences === 0) {
 			throw new EditRecoveryError(
@@ -181,7 +180,7 @@ function applyBlocks(fileContent: string, blocks: DiffEditBlock[]): string {
 	let newContent = fileContent;
 
 	blocks.forEach((block, index) => {
-		const occurrences = countOccurrences(newContent, block.search);
+		const occurrences = countLiteralOccurrences(newContent, block.search);
 		if (occurrences !== 1) {
 			throw new Error(
 				`Search block ${index + 1} could not be applied cleanly after earlier edits.`,
