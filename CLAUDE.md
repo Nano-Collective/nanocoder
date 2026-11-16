@@ -21,7 +21,7 @@ pnpm run test:types                             # TypeScript checking only
 pnpm run test:format                            # Biome format check
 pnpm run test:lint                              # Biome lint check
 pnpm run test:lint:fix                          # Auto-fix lint/format issues
-pnpm run test:knip                              # Unused code detection
+pnpm run test:knip                              # Unused code detection, plus a production pass that flags files only specs import
 pnpm run test:benchmark                         # Run model benchmarks
 pnpm run test:agent-eval                        # Agent evaluation harness (steps/tokens/cost per task; needs a model, not part of test:all)
 
@@ -47,24 +47,29 @@ Nanocoder is a React-based CLI coding agent built with Ink.js that provides loca
 ### Key Directories
 
 - `source/hooks/` - React hooks: `useAppState` (central state), `useModeHandlers`, `useAppHandlers` (orchestrator), plus `chat-handler/useChatHandler` (LLM interaction) with the conversation loop and tool executor in `chat-handler/conversation/`
-- `source/app/` - `App.tsx` plus app-internal helpers (`utils/app-util.ts`, `utils/conversation-state.ts`, prompt sections, orchestration hooks in `app/hooks/`)
+- `source/app/` - `App.tsx` plus app-internal helpers (`utils/app-util.ts`, `utils/command-dispatcher.ts`, `utils/conversation-state.ts`, prompt sections, orchestration hooks in `app/hooks/`)
 - `source/ai-sdk-client/` - Wrapper over Vercel AI SDK: chat handler, providers, converters, tool helpers, error handling
-- `source/tools/` - Built-in tools (file ops, bash, search, web fetch). Registered in `source/tools/tool-manager.ts`; file editors are `string_replace`, `diff_edit` and `write_file` (in `source/tools/file-ops/`)
-- `source/components/` - Ink UI components
+- `source/tools/` - Built-in tools (file ops, bash, search, web fetch). Registered in `source/tools/tool-manager.ts`; file editors are `string_replace`, `diff_edit` and `write_file` (in `source/tools/file-ops/`, with their helpers: edit recovery, literal replace, line endings, path validators). `source/tools/runtime/` holds the tool-call runtime every frontend shares: per-tool approval checks, the approval / confirm / question queues, argument parsing, call ids, cancellation, schema validation, result truncation and the read tracker
+- `source/components/` - Ink UI components, plus the Ink-bound helpers other layers render through: `message-factory.ts` (`errorMsg`/`infoMsg`/...), `message-queue.tsx` (chat-queue renderer), `tool-result-display.tsx`
+- `source/utils/` - Framework-free helpers (logging, shutdown, error formatting, text). `utils/fs/` holds the filesystem helpers: atomic writes, file locks, the file cache, gitignore loading, file search (ripgrep) and file trees, glob matching, path validation. Nothing here renders Ink: UI helpers live in `components/`
 - `source/config/` - Configuration loading and preferences
 - `source/commands/` - Built-in slash commands (`/model`, `/provider`, `/clear`, etc.)
 - `source/custom-commands/` - User-defined markdown commands from `.nanocoder/commands/`
 - `source/mcp/` - Model Context Protocol server integration
 - `source/tool-calling/` - XML/text tool-call parsers for the fallback path (non-native-tool models)
-- `source/services/` - Checkpoint manager, bash executor, file snapshots, lifecycle hooks (user shell commands run at fixed points in the agent loop)
-- `source/usage/` - Token/cost usage: breakdown calculator, per-response usage + cost builder (provider-reported tokens priced via models.dev), compact formatters for the per-response indicator, session usage storage
+- `source/services/` - Checkpoint manager, bash executor, file snapshots, lifecycle hooks (user shell commands run at fixed points in the agent loop), update checker, desktop notifications
+- `source/input/` - Ink-free prompt-input model behind `components/composer/`: paste and attachment placeholders, paste detection, atomic placeholder deletion, `@file` / MCP resource mentions, file autocomplete, clipboard images, and `assemblePrompt` (`prompt-processor.ts`)
+- `source/terminal/` - Terminal protocol and text rendering helpers: keypress, mouse and bracketed-paste parsing, OSC 8 file links, newline-key detection, syntax highlighting, text wrapping, ANSI-aware truncation
+- `source/usage/` - Token/cost usage: breakdown calculator, per-response usage + cost builder (provider-reported tokens priced via models.dev), compact formatters for the per-response indicator, context-window percentage from provider-reported usage. Lifetime usage history lives in `source/stats/`
 - `source/session/` - Chat session persistence (autosave / resume)
-- `source/schedule/` - Cron expression helpers (validate, next run, human-readable labels) used by `/schedule` and skill cron subscriptions
+- `source/schedule/` - Cron expression helpers (validate, next run, human-readable labels) used by `/skills schedule` and skill cron subscriptions
 - `source/subagents/` - Subagent executor (delegated agent runs)
 - `source/auth/` - Copilot / Codex device-flow login
 - `source/lsp/` - Language server client integration
 - `source/wizards/` - Interactive setup flows (config, MCP, providers)
 - `source/plain/` - Non-Ink CLI shell used by `--plain`
+- `source/agent-loop/` - Shared, Ink-free agent turn engine (`runTurnEngine`): one iterative loop owning the model call, text tool-call parsing, retry guards, auto-compaction and turn limits. Every frontend plugs in through an adapter: the TUI (`hooks/chat-handler/conversation/conversation-loop.tsx`), `--plain`, ACP and subagents all run on it, with TUI-only behaviours (interactive repeated-call prompt, compact-and-retry, text tool calls on native models) switched on through engine policy and hooks
+- `source/conversation/` - Framework-free conversation primitives the agent loop and every frontend share: system prompt assembly (`prompt-builder.ts`), message building, capping and visibility, run outcome. `conversation/compaction/` holds auto-compaction, `/compact` (message compression, LLM summariser, compression backup) and the `?key=value` once-overrides
 - `source/skills/` - Unified skill primitive: loaders (bundle + flat-dir adapter), manifest parser, frontmatter `subscribe:` parser, registrar that fans members into the existing command / subagent / tool registries, dispatcher for triggered runs
 - `source/events/` - Event router, file watcher source (chokidar), cron source (croner), backpressure (per-subscription concurrency cap + 500ms trailing debounce on `file.changed`)
 - `source/daemon/` - Per-project daemon process: lockfile, Unix-socket IPC server / TUI client, CLI surface (`nanocoder daemon <start|stop|status|logs|install|uninstall>`), launchd plist + systemd user unit installers, background CI watch
@@ -85,7 +90,7 @@ Nanocoder is a React-based CLI coding agent built with Ink.js that provides loca
 
 ### State Management Pattern
 
-All state lives in `source/hooks/useAppState.tsx`. Other hooks (`useChatHandler`, `useModeHandlers`) receive state and setters from it. `source/app/App.tsx` orchestrates them via `useAppHandlers`. Global `source/utils/message-queue.tsx` lets deep components push chat messages without prop-drilling.
+All state lives in `source/hooks/useAppState.tsx`. Other hooks (`useChatHandler`, `useModeHandlers`) receive state and setters from it. `source/app/App.tsx` orchestrates them via `useAppHandlers`. The global chat queue in `source/utils/message-queue-core.ts` lets any module push chat messages (`addToMessageQueue`, the `notify*` helpers) without prop-drilling. It has no React/Ink imports, so the CLI fast paths stay Ink-free (`source/config/no-ink-fast-paths.spec.ts` enforces this); `source/components/message-queue.tsx` only adds the Ink renderer that `App.tsx` installs with `setGlobalMessageQueue`.
 
 ### Tool System
 
@@ -104,13 +109,21 @@ Two execution paths exist: native tool calling (preferred, via AI SDK) and an XM
 
 ### Command System
 
-Slash commands live in `source/commands/` and are lazy-loaded via `source/commands/lazy-registry.ts`. To add a new command: create the command file exporting a `Command` object (name, description, handler), then add an entry to `lazyCommands` in the registry. Commands return React elements for Ink rendering. Some commands (clear, model, provider, etc.) need app state and are intercepted as "special commands" in `source/app/utils/app-util.ts`.
+Slash commands live in `source/commands/` and are lazy-loaded via `source/commands/lazy-registry.ts`. To add a new command: create the command file, then add an entry to `lazyCommands` in the registry. Every slash command is resolved by `dispatchSlashCommand` in `source/app/utils/command-dispatcher.ts`, in this order: custom commands, MCP prompts, old names from `source/commands/aliases.ts`, inline `?key=value` overrides, then the registry.
 
-A command that does slow work before returning (LLM round-trip, network) should declare `progressLabel`. `handleBuiltInCommand` then holds a `CommandProgress` spinner in the live slot for the duration, so the UI is not silent while the handler runs. Set it on both the module's `Command` object and its `lazyCommands` entry - the spinner has to render before `load()` resolves, so it cannot be read off the lazily-imported module.
+A command module exports one of two shapes (`source/types/commands.ts`):
+- **`Command`** (`handler`): reads its args, the messages and some metadata, and returns a React element or string to show.
+- **`StatefulCommand`** (`run`): changes app state. It receives a typed `CommandContext` (args plus the setters and services it may use) and returns a `CommandCompletion` saying when the prompt is handed back: `done`, `done-after-render` once queued output has rendered, `handed-off` when something it started (a chat turn, a picker) completes it, `{show}` to display output the way a `Command` does, or `{until}` with a promise that settles when a live component it mounted closes. If a command needs app state the context lacks, add it to `CommandContext` and to `createCommandContext` in the dispatcher.
+
+Commands never call `onCommandComplete` or set completion timers themselves: every slash command (built-in, custom, MCP prompt) completes through `completeCommand` in the dispatcher, which holds the one 100 ms `done-after-render` delay (its comment explains why it stays).
+
+A command with both kinds of subcommand is a `StatefulCommand` whose `run` handles the stateful ones and returns `{show: await view.handler(context.rawArgs, context.messages, context.handlerMetadata())}` for the rest (see `/agents`, `/tools`, `/skills`, `/commands`). There are no stub commands: never add a command module whose real logic lives somewhere else.
+
+A command that does slow work before returning (LLM round-trip, network) should declare `progressLabel`. The dispatcher then holds a `CommandProgress` spinner in the live slot for the duration, so the UI is not silent while the command runs. Set it on both the module's command object and its `lazyCommands` entry - the spinner has to render before `load()` resolves, so it cannot be read off the lazily-imported module.
 
 ### Custom Tools
 
-File-based tools live in `source/custom-tools/`. `CustomToolLoader` discovers `.md` files in `.nanocoder/tools/` (project) and `~/.config/nanocoder/tools/` (personal, via `getConfigPath()`); project tools shadow personal ones by `name`. Each file's YAML frontmatter declares the schema; `schema-builder.ts` synthesizes both the AI SDK `inputSchema` and a `ToolValidator`. `template.ts` renders the script body with `{{ name }}` and `{{# section }}` placeholders, shell-quoting all substitutions. `handler.ts` spawns the shell with timeout + env/cwd resolution. `build-tool.ts` glues everything into a `ToolEntry`, then `ToolManager.initializeCustomTools()` registers them into the same registry as built-ins and MCP tools - downstream code (`/tools`, subagents, mode filtering) sees them through the unified registry. Mode policy for custom tools lives in `ToolManager.getAvailableToolNames`: plan mode requires `approval=never && read_only=true`, headless mode requires `approval=never`.
+File-based tools live in `source/custom-tools/`. `CustomToolLoader` discovers `.md` files in `.nanocoder/tools/` (project) and `~/.config/nanocoder/tools/` (personal, via `getConfigPath()`); project tools shadow personal ones by `name`. Each file's YAML frontmatter declares the schema; `schema-builder.ts` synthesizes both the AI SDK `inputSchema` and a `ToolValidator`. `template.ts` renders the script body with `{{ name }}` and `{{# section }}` placeholders, shell-quoting all substitutions of declared parameters; `findUnsafePlaceholder` rejects (at parse time and again in the handler) a body that puts a placeholder where that quoting doesn't hold (inside quotes, comments, here-docs). `handler.ts` spawns the shell with timeout + env/cwd resolution. `build-tool.ts` glues everything into a `ToolEntry`, then `ToolManager.initializeCustomTools()` registers them into the same registry as built-ins and MCP tools - downstream code (`/tools`, subagents, mode filtering) sees them through the unified registry. Mode policy for custom tools lives in `ToolManager.getAvailableToolNames`: plan mode requires `approval=never && read_only=true`, headless mode requires `approval=never`.
 
 ### Configuration Resolution Order
 
@@ -143,6 +156,7 @@ Bundle tools default to `tools_visibility: scoped`: hidden from the global tool 
 - **TypeScript strict mode** with `@/*` path alias mapping to `source/*`
 - **Biome** for formatting (tabs, single quotes, semicolons, trailing commas)
 - **Key lint rules**: `useExhaustiveDependencies: error`, `noUnusedVariables: error`, `noUnusedImports: error`
+- **Layering**: `utils/`, `types/` and `config/` are the bottom layer. They must not value-import `components/`, `hooks/`, `tools/`, `mcp/`, `session/` or `app/components/`. Each type-only import into those needs an allowlist entry with a reason. A value import of `app/`, `ai-sdk-client/` or `services/` needs a documented exception. `source/layering.spec.ts` enforces all of this; its failure message names the file, the import and the fix
 - **React 19** with Ink.js for CLI rendering
 
 ## Testing
@@ -162,7 +176,7 @@ Cloud STT sends microphone audio to the configured OpenAI endpoint only after ex
 
 Five user-facing modes (Shift+Tab cycles them in this order during chat):
 - **normal**: Confirm each tool before execution
-- **auto-accept**: Automatically execute most tools (bash and destructive git still prompt)
+- **auto-accept**: Automatically execute most tools (bash, destructive git, and MCP tools that are neither read-only nor `alwaysAllow`-ed still prompt)
 - **yolo**: Automatically execute every tool without exception
 - **plan**: Show tool calls but don't execute
 - **architect**: Like auto-accept for file edits, then review the whole turn's result with a one-keypress checkpoint undo

@@ -14,6 +14,8 @@ import {artifactManager} from '@/artifacts/artifact-manager';
 import {AcpAgent} from '@/acp/acp-agent';
 import type {AcpInitContext} from '@/acp/acp-types';
 import {clearAppConfig, getAppConfig} from '@/config';
+import {loadPreferences, savePreferences} from '@/config/preferences';
+import {grantDirectoryTrust} from '@/config/trust/directory-trust';
 import {
 	setToolRegistryGetter,
 	setToolManagerGetter,
@@ -21,7 +23,7 @@ import {
 import {convertToModelMessages} from '@/ai-sdk-client/converters/message-converter';
 import {sessionManager} from '@/session/session-manager';
 import {registerSubagentRun} from '@/services/subagent-events';
-import {resolveAutoCompactSettings} from '@/utils/auto-compact';
+import {resolveAutoCompactSettings} from '@/conversation/compaction/auto-compact';
 import {getLogger} from '@/utils/logging';
 import {SemanticMemoryManager} from '@/memory/semantic-memory-manager';
 import {readFileTool} from '@/tools/read-file';
@@ -32,7 +34,7 @@ import {
 	matchReadContent,
 	rememberReadContent,
 	runWithReadContentScope,
-} from '@/utils/read-tracker';
+} from '@/tools/runtime/read-tracker';
 
 console.log('\nacp-agent.spec.ts');
 
@@ -588,7 +590,7 @@ test.serial(
 
 		try {
 			const {agent} = createAgent();
-			const session = await agent.newSession({cwd: '/tmp'});
+			const session = await agent.newSession({cwd: testConfigDir});
 			const originalClient = agent['initContext'].client;
 
 			await t.throwsAsync(
@@ -680,14 +682,14 @@ const configOptionsOf = async (agent: AcpAgent, sessionId: string) =>
 test.serial('AcpAgent.setSessionConfigOption - switches the client model', async t => {
 	await withProviders(async () => {
 		const {agent} = createAgent();
-		const session = await agent.newSession({cwd: '/tmp'});
+		const session = await agent.newSession({cwd: testConfigDir});
 		const result = await agent.setSessionConfigOption({
 			sessionId: session.sessionId,
 			configId: 'model',
 			value: 'other-model',
 		});
 		t.is(optionValue(result.configOptions, 'model'), 'other-model');
-		const after = await agent.newSession({cwd: '/tmp'});
+		const after = await agent.newSession({cwd: testConfigDir});
 		t.is(optionValue(after.configOptions, 'model'), 'other-model');
 	});
 });
@@ -695,8 +697,8 @@ test.serial('AcpAgent.setSessionConfigOption - switches the client model', async
 test.serial('AcpAgent.setSessionConfigOption - one session changing model or provider leaves the other alone', async t => {
 	await withProviders(async () => {
 		const {agent} = createAgent();
-		const a = await agent.newSession({cwd: '/tmp'});
-		const b = await agent.newSession({cwd: '/tmp'});
+		const a = await agent.newSession({cwd: testConfigDir});
+		const b = await agent.newSession({cwd: testConfigDir});
 		const shared = agent['initContext'].client;
 		const sessionA = agent['sessions'].get(a.sessionId)!;
 		const sessionB = agent['sessions'].get(b.sessionId)!;
@@ -729,7 +731,7 @@ test.serial('AcpAgent.setSessionConfigOption - one session changing model or pro
 test.serial('AcpAgent.setSessionConfigOption - a model chosen during a turn applies from the next turn', async t => {
 	await withProviders(async () => {
 		const {agent} = createAgent();
-		const created = await agent.newSession({cwd: '/tmp'});
+		const created = await agent.newSession({cwd: testConfigDir});
 		const session = agent['sessions'].get(created.sessionId)!;
 		const turnClient = agent['initContext'].client;
 		const promptBefore = session.baseSystemMessage;
@@ -799,8 +801,8 @@ test.serial('AcpAgent.setSessionConfigOption - one session\'s tune does not chan
 	await withProviders(
 		async () => {
 			const {agent} = createAgent();
-			const a = await agent.newSession({cwd: '/tmp'});
-			const b = await agent.newSession({cwd: '/tmp'});
+			const a = await agent.newSession({cwd: testConfigDir});
+			const b = await agent.newSession({cwd: testConfigDir});
 			const sessionA = agent['sessions'].get(a.sessionId)!;
 			const sessionB = agent['sessions'].get(b.sessionId)!;
 			const compact = {
@@ -841,12 +843,40 @@ test.serial('AcpAgent.setSessionConfigOption - one session\'s tune does not chan
 	);
 });
 
+test.serial("AcpAgent - a provider whose tune picks XML tool mode keeps native tools off that session's requests", async t => {
+	await withProviders(
+		async () => {
+			const {agent} = createAgent();
+			const created = await agent.newSession({cwd: testConfigDir});
+			const session = agent['sessions'].get(created.sessionId)!;
+			t.false(session.nativeToolsDisabled);
+
+			await agent.setSessionConfigOption({
+				sessionId: created.sessionId,
+				configId: 'provider',
+				value: 'xml-provider',
+			});
+			// The prompt now carries the tool definitions as text, so the
+			// request must not send native tools alongside them.
+			t.true(session.nativeToolsDisabled);
+		},
+		[
+			{
+				name: 'xml-provider',
+				baseUrl: 'http://localhost:1/v1',
+				models: ['xml-model'],
+				tune: {enabled: true, toolMode: 'xml'},
+			},
+		],
+	);
+});
+
 test.serial('AcpAgent.setSessionConfigOption - a provider that lists no models leaves the session with no model, not the old one', async t => {
 	await withProviders(
 		async () => {
 			const {agent} = createAgent();
 			await sessionManager.initialize();
-			const created = await agent.newSession({cwd: '/tmp'});
+			const created = await agent.newSession({cwd: testConfigDir});
 			const session = agent['sessions'].get(created.sessionId)!;
 			t.is(session.model, 'test-model');
 
@@ -890,8 +920,8 @@ test.serial('AcpAgent.prompt - each session saves its own provider and model', a
 	await withProviders(async () => {
 		const {agent} = createAgent();
 		await sessionManager.initialize();
-		const a = await agent.newSession({cwd: '/tmp'});
-		const b = await agent.newSession({cwd: '/tmp'});
+		const a = await agent.newSession({cwd: testConfigDir});
+		const b = await agent.newSession({cwd: testConfigDir});
 		await agent.setSessionConfigOption({
 			sessionId: a.sessionId,
 			configId: 'provider',
@@ -925,14 +955,14 @@ test.serial('AcpAgent - resume and load restore the model a session was saved wi
 			messageCount: 1,
 			provider: 'second-provider',
 			model: 'other-model',
-			workingDirectory: '/tmp',
+			workingDirectory: testConfigDir,
 			messages: [{role: 'user', content: 'hi'}],
 		});
 
 		const resumeAgent = createAgent().agent;
 		const resumed = await resumeAgent.resumeSession({
 			sessionId: saved.id,
-			cwd: '/tmp',
+			cwd: testConfigDir,
 		});
 		t.is(optionValue(resumed.configOptions, 'provider'), 'second-provider');
 		t.is(optionValue(resumed.configOptions, 'model'), 'other-model');
@@ -943,7 +973,7 @@ test.serial('AcpAgent - resume and load restore the model a session was saved wi
 		const loadAgent = createAgent().agent;
 		const loaded = await loadAgent.loadSession({
 			sessionId: saved.id,
-			cwd: '/tmp',
+			cwd: testConfigDir,
 			mcpServers: [],
 		});
 		t.is(optionValue(loaded.configOptions, 'provider'), 'second-provider');
@@ -973,7 +1003,7 @@ test.serial('AcpAgent.resumeSession - falls back to the default when the saved m
 			const {agent} = createAgent();
 			const resumed = await agent.resumeSession({
 				sessionId: saved.id,
-				cwd: '/tmp',
+				cwd: testConfigDir,
 			});
 
 			t.is(optionValue(resumed.configOptions, 'provider'), 'test-provider');
@@ -981,6 +1011,37 @@ test.serial('AcpAgent.resumeSession - falls back to the default when the saved m
 			t.deepEqual(resumed._meta?.['nanocoder/modelFallback'], {provider, model});
 		}
 	});
+});
+
+test.serial('AcpAgent - a session with no provider or model of its own saves its client\'s, never a made-up default', async t => {
+	const context = createMockInitContext();
+	context.provider = '';
+	context.model = '';
+	const agent = new AcpAgent(context, createMockConn());
+	const {sessionId} = await agent.newSession({cwd: '/tmp'});
+	await agent.prompt({sessionId, prompt: [{type: 'text', text: 'hi'}]});
+
+	const saved = await sessionManager.loadSession(sessionId);
+	t.is(saved?.provider, 'test-provider');
+	t.is(saved?.model, 'test-model');
+	await agent.deleteSession({sessionId});
+});
+
+test.serial('AcpAgent.resumeSession - a session saved with no model restores nothing and reports no fallback', async t => {
+	const {agent} = createAgent();
+	await sessionManager.initialize();
+	const saved = await sessionManager.createSession({
+		title: 'Saved',
+		messageCount: 1,
+		provider: '',
+		model: '',
+		workingDirectory: '/tmp',
+		messages: [{role: 'user', content: 'hi'}],
+	});
+	const resumed = await agent.resumeSession({sessionId: saved.id, cwd: '/tmp'});
+	t.is(resumed._meta?.['nanocoder/modelFallback'], undefined);
+	t.is(optionValue(resumed.configOptions, 'provider'), 'test-provider');
+	await agent.deleteSession({sessionId: saved.id});
 });
 
 test.serial('AcpAgent.resumeSession - a session saved on the default model needs no client of its own', async t => {
@@ -1036,6 +1097,53 @@ test('AcpAgent.prompt - propagates API errors cleanly', async t => {
 	t.true(notice.displayOnly, 'the error notice must never reach the model');
 });
 
+test('AcpAgent.prompt - an error on a later round-trip keeps the earlier ones, on disk too', async t => {
+	const {agent} = createAgent();
+	let calls = 0;
+	agent['initContext'].client.chat = async () => {
+		calls++;
+		if (calls === 1) {
+			return {
+				choices: [
+					{
+						message: {
+							content: 'looking',
+							tool_calls: [
+								{id: 'call-1', function: {name: 'lookup', arguments: {}}},
+							],
+						},
+					},
+				],
+			};
+		}
+		throw new Error('RequestError: Internal error (500)');
+	};
+
+	const created = await agent.newSession({cwd: '/tmp'});
+	await t.throwsAsync(
+		() =>
+			agent.prompt({
+				sessionId: created.sessionId,
+				prompt: [{type: 'text', text: 'go'}],
+			}),
+		{message: /RequestError/},
+	);
+
+	const expected = ['user', 'assistant', 'tool', 'assistant'];
+	const live = agent['sessions'].get(created.sessionId)!.messages;
+	t.deepEqual(
+		live.map((m: Message) => m.role),
+		expected,
+	);
+	t.is(live[1].tool_calls?.[0]?.id, 'call-1');
+	t.true(live[3].displayOnly);
+	const saved = await sessionManager.loadSession(created.sessionId);
+	t.deepEqual(
+		saved?.messages.map(m => m.role),
+		expected,
+	);
+});
+
 test('AcpAgent.prompt - resolves cleanly on user cancellation instead of throwing', async t => {
 	const {agent, conn} = createAgent();
 
@@ -1044,12 +1152,30 @@ test('AcpAgent.prompt - resolves cleanly on user cancellation instead of throwin
 		updates.push(u);
 	};
 
-	// Mirrors what chat-handler.ts throws when the abort signal fires mid-stream
-	agent['initContext'].client.chat = async () => {
-		throw new Error('Operation was cancelled');
-	};
-
 	const session = await agent.newSession({cwd: '/tmp'});
+	// Cancelled while the tool card is being sent, and the write fails with
+	// an error that says nothing about cancelling.
+	agent['initContext'].client.chat = async () => ({
+		choices: [
+			{
+				message: {
+					content: '',
+					tool_calls: [
+						{id: 'call-1', function: {name: 'lookup', arguments: {}}},
+					],
+				},
+			},
+		],
+	});
+	agent['initContext'].toolManager.hasTool = () => true;
+	agent['initContext'].toolManager.getAvailableToolNames = () => ['lookup'];
+	conn.sessionUpdate = async (u: any) => {
+		if (u.update?.sessionUpdate === 'tool_call') {
+			await agent.cancel({sessionId: session.sessionId});
+			throw new Error('write EPIPE');
+		}
+		updates.push(u);
+	};
 
 	const result = await agent.prompt({
 		sessionId: session.sessionId,
@@ -1595,6 +1721,78 @@ test('AcpAgent.closeSession - releases the timeline lock only after the cancelle
 	t.false(acpSession.turnActive);
 });
 
+const startGatedTurn = async () => {
+	const context = createMockInitContext();
+	let chatCalls = 0;
+	let releaseChat!: () => void;
+	const chatGate = new Promise<void>(resolve => {
+		releaseChat = resolve;
+	});
+	(context.client as any).chat = async () => {
+		chatCalls++;
+		// The first turn completes, so the session is on disk.
+		if (chatCalls > 1) await chatGate;
+		return {choices: [{message: {content: 'Test response'}}]};
+	};
+	const agent = new AcpAgent(context, createMockConn());
+	const session = await agent.newSession({cwd: '/tmp'});
+	await agent.prompt({
+		sessionId: session.sessionId,
+		prompt: [{type: 'text', text: 'first'}],
+	});
+	const live = (agent as any).sessions.get(session.sessionId);
+	const turn = agent.prompt({
+		sessionId: session.sessionId,
+		prompt: [{type: 'text', text: 'second'}],
+	});
+	while (chatCalls === 1) {
+		await new Promise(resolve => setImmediate(resolve));
+	}
+	return {agent, sessionId: session.sessionId, live, turn, releaseChat};
+};
+
+test.serial('AcpAgent.deleteSession - a delete during a turn is not undone by the turn saving', async t => {
+	const {agent, sessionId, live, turn, releaseChat} = await startGatedTurn();
+
+	const deleting = agent.deleteSession({sessionId});
+	for (let i = 0; i < 200 && !live.closed; i++) {
+		await new Promise(resolve => setTimeout(resolve, 5));
+	}
+	t.true(live.closed, 'the running turn is told to stop');
+	releaseChat();
+	await turn.catch(() => {});
+	await deleting;
+
+	t.is(await sessionManager.loadSession(sessionId), null);
+	t.false((agent as any).sessions.has(sessionId));
+});
+
+test.serial('AcpAgent.resumeSession - a resume during a turn leaves one live session for the id', async t => {
+	const {agent, sessionId, live, turn, releaseChat} = await startGatedTurn();
+
+	const resuming = agent.resumeSession({sessionId, cwd: '/tmp'});
+	// Reading the session from disk comes first, so give it real time.
+	for (let i = 0; i < 200 && !live.closed; i++) {
+		await new Promise(resolve => setTimeout(resolve, 5));
+	}
+	t.true(live.closed, 'the old copy is retired, not left running');
+	t.true(live.turnActive, 'and the resume waits for its turn to end');
+	releaseChat();
+	await turn.catch(() => {});
+	await resuming;
+
+	const resumed = (agent as any).sessions.get(sessionId);
+	t.not(resumed, live);
+	t.false(live.turnActive);
+	// The old turn's last save is what the resumed copy starts from.
+	t.deepEqual(
+		resumed.messages.map((m: Message) => m.content),
+		live.messages.map((m: Message) => m.content),
+	);
+	t.true(resumed.messages.some((m: Message) => m.content === 'second'));
+	await agent.deleteSession({sessionId});
+});
+
 test('AcpAgent.closeSession - clears the session read stubs', async t => {
 	const {agent} = createAgent();
 	const session = await agent.newSession({cwd: '/tmp'});
@@ -2044,23 +2242,44 @@ test('AcpAgent.prompt - a cancelled turn does not generate a title', async t => 
 	const {agent} = createAgent();
 
 	let chatCalls = 0;
+	const session = await agent.newSession({cwd: '/tmp'});
+	// What chat-handler.ts throws when the abort signal fires mid-stream.
 	agent['initContext'].client.chat = async () => {
 		chatCalls++;
+		await agent.cancel({sessionId: session.sessionId});
 		throw new Error('Operation was cancelled');
 	};
-
-	const session = await agent.newSession({cwd: '/tmp'});
-	await agent.prompt({
+	const result = await agent.prompt({
 		sessionId: session.sessionId,
 		prompt: [{type: 'text', text: 'fix this'}],
 	});
 	await agent['pendingTitleGeneration'];
+	t.is(result.stopReason, 'cancelled');
 
 	// The cancel path early-returns from inside catch, which still runs the
 	// finally. Reaching the finally must not be mistaken for a clean turn.
 	t.is(chatCalls, 1);
 	const stored = await sessionManager.readSession(session.sessionId);
 	t.not(stored?.titleGenerated, true);
+});
+
+test('AcpAgent.prompt - an error that only says it was cancelled is still an error', async t => {
+	const {agent} = createAgent();
+	// Nobody cancelled: an internal abort (a timeout) surfaces with the same
+	// wording, and the user should see it as the failure it is.
+	agent['initContext'].client.chat = async () => {
+		throw new Error('Operation was cancelled');
+	};
+	const session = await agent.newSession({cwd: '/tmp'});
+	await t.throwsAsync(
+		agent.prompt({
+			sessionId: session.sessionId,
+			prompt: [{type: 'text', text: 'fix this'}],
+		}),
+		{message: 'Operation was cancelled'},
+	);
+	const live = agent['sessions'].get(session.sessionId)!;
+	t.is(live.messages.at(-1)?.outcome, 'failed');
 });
 
 test('AcpAgent.prompt - an errored turn does not generate a title', async t => {
@@ -2640,14 +2859,14 @@ test.serial('AcpAgent - new, load and resume report the same approval policy', a
 		getMCPToolInfo: () => ({isMCPTool: false}),
 	} as any;
 	const agent = new AcpAgent(context, createMockConn());
-	const created = await agent.newSession({cwd: '/tmp'});
+	const created = await agent.newSession({cwd: testConfigDir});
 
 	try {
 		await agent.prompt({
 			sessionId: created.sessionId,
 			prompt: [{type: 'text', text: 'Persist this session.'}],
 		});
-		const params = {sessionId: created.sessionId, cwd: '/tmp'};
+		const params = {sessionId: created.sessionId, cwd: testConfigDir};
 		const loaded = await agent.loadSession({...params, mcpServers: []});
 		const resumed = await agent.resumeSession(params);
 
@@ -2784,7 +3003,7 @@ const createMcpAgent = () => {
 	return {agent, toolManager, toolsOf};
 };
 
-const SESSION_CWD = '/tmp';
+const SESSION_CWD = testConfigDir;
 
 test.serial('AcpAgent.newSession - the client\'s MCP servers exist in that session only', async t => {
 	const {agent, toolManager, toolsOf} = createMcpAgent();
@@ -3096,7 +3315,7 @@ test.serial('AcpAgent - new, load and resume honour the client\'s disabled tools
 	config.disabledTools = ['fetch_url'];
 	const {agent, offeredWith} = createDisabledToolsAgent();
 	const meta = {[DISABLED_META]: ['browser']};
-	const created = await agent.newSession({cwd: '/tmp', _meta: meta});
+	const created = await agent.newSession({cwd: testConfigDir, _meta: meta});
 
 	try {
 		// The session's prompt was built with both lists, the user's kept.
@@ -3106,7 +3325,7 @@ test.serial('AcpAgent - new, load and resume honour the client\'s disabled tools
 			sessionId: created.sessionId,
 			prompt: [{type: 'text', text: 'Persist this session.'}],
 		});
-		const params = {sessionId: created.sessionId, cwd: '/tmp', _meta: meta};
+		const params = {sessionId: created.sessionId, cwd: testConfigDir, _meta: meta};
 		const loaded = await agent.loadSession({...params, mcpServers: []});
 		const resumed = await agent.resumeSession(params);
 
@@ -3237,4 +3456,376 @@ test.serial('AcpAgent - an unknown or malformed disabled tool is ignored, with a
 		config.disabledTools = previous;
 		if (created) await agent.deleteSession({sessionId: created.sessionId});
 	}
+});
+
+// ============================================================================
+// Lifecycle hooks
+// ============================================================================
+
+/**
+ * Runs `body` with these hooks in the project config, then puts the config
+ * back. Hook bodies go through node so they run the same on every platform.
+ */
+const withHooksConfig = async (
+	hooks: Record<string, Array<{command: string}>>,
+	body: () => Promise<void>,
+) => {
+	const configPath = join(testConfigDir, 'agents.config.json');
+	const original = existsSync(configPath)
+		? readFileSync(configPath, 'utf8')
+		: undefined;
+	writeFileSync(configPath, JSON.stringify({nanocoder: {hooks}}));
+	clearAppConfig();
+	try {
+		await body();
+	} finally {
+		if (original === undefined) rmSync(configPath, {force: true});
+		else writeFileSync(configPath, original);
+		clearAppConfig();
+	}
+};
+
+const nodeHook = (script: string) => `node -e "${script}"`;
+
+const recordingAgent = () => {
+	const {agent, conn} = createAgent();
+	const sent: Message[][] = [];
+	agent['initContext'].client.chat = async (messages: Message[]) => {
+		sent.push(messages);
+		return {choices: [{message: {content: 'ok'}}]};
+	};
+	const updates: any[] = [];
+	conn.sessionUpdate = async (u: any) => {
+		updates.push(u);
+	};
+	return {agent, sent, updates};
+};
+
+const lastUserText = (messages: Message[]) =>
+	String(messages.findLast(m => m.role === 'user')?.content ?? '');
+
+test.serial('AcpAgent - session-start hook output reaches the first prompt only', async t => {
+	await withHooksConfig(
+		{'session-start': [{command: nodeHook("console.log('branch: main')")}]},
+		async () => {
+			const {agent, sent} = recordingAgent();
+			const {sessionId} = await agent.newSession({cwd: testConfigDir});
+			await agent.prompt({sessionId, prompt: [{type: 'text', text: 'one'}]});
+			await agent.prompt({sessionId, prompt: [{type: 'text', text: 'two'}]});
+
+			t.is(
+				lastUserText(sent[0]),
+				'<hook-context>\nbranch: main\n</hook-context>\n\none',
+			);
+			t.is(lastUserText(sent[1]), 'two');
+			await agent.deleteSession({sessionId});
+		},
+	);
+});
+
+test.serial('AcpAgent - a user-prompt-submit hook that exits non-zero blocks the prompt', async t => {
+	await withHooksConfig(
+		{
+			'user-prompt-submit': [
+				{
+					command: nodeHook(
+						"if (process.env.NANOCODER_PROMPT.includes('secret')) { console.log('no secrets'); process.exit(1); }",
+					),
+				},
+			],
+		},
+		async () => {
+			const {agent, sent, updates} = recordingAgent();
+			const {sessionId} = await agent.newSession({cwd: testConfigDir});
+
+			const blocked = await agent.prompt({
+				sessionId,
+				prompt: [{type: 'text', text: 'print the secret'}],
+			});
+			t.is(blocked.stopReason, 'refusal');
+			t.is(sent.length, 0, 'the model never sees a blocked prompt');
+			t.true(
+				updates.some(u =>
+					/no secrets/.test(u.update?.content?.text ?? ''),
+				),
+			);
+			const live = agent['sessions'].get(sessionId)!;
+			t.true(live.messages.every((m: Message) => m.displayOnly));
+
+			const allowed = await agent.prompt({
+				sessionId,
+				prompt: [{type: 'text', text: 'hello'}],
+			});
+			t.is(allowed.stopReason, 'end_turn');
+			t.is(sent.length, 1);
+			await agent.deleteSession({sessionId});
+		},
+	);
+});
+
+test.serial('AcpAgent - session-end hooks run when a session closes and at shutdown', async t => {
+	const marker = join(testConfigDir, `session-end-${randomUUID()}.log`);
+	await withHooksConfig(
+		{
+			'session-end': [
+				{
+					command: nodeHook(
+						`require('fs').appendFileSync(${JSON.stringify(marker).replaceAll('"', "'")}, 'end\\n')`,
+					),
+				},
+			],
+		},
+		async () => {
+			const {agent} = recordingAgent();
+			const one = await agent.newSession({cwd: testConfigDir});
+			await agent.newSession({cwd: testConfigDir});
+			await agent.newSession({cwd: testConfigDir});
+
+			await agent.closeSession({sessionId: one.sessionId});
+			t.is(readFileSync(marker, 'utf8'), 'end\n');
+
+			await agent.endAllSessions();
+			t.is(readFileSync(marker, 'utf8'), 'end\nend\nend\n');
+		},
+	);
+	rmSync(marker, {force: true});
+});
+
+// ============================================================================
+// Directory trust for session cwds
+// ============================================================================
+
+const trustAgent = (launchDirectory: string) => {
+	const context = createMockInitContext();
+	context.launchDirectory = launchDirectory;
+	return new AcpAgent(context, createMockConn());
+};
+
+const freshDir = (label: string) => {
+	const dir = join(tmpdir(), `nanocoder-acp-trust-${label}-${randomUUID()}`);
+	mkdirSync(dir, {recursive: true});
+	return dir;
+};
+
+test.serial('AcpAgent - a session in an untrusted folder is refused with the trust-required error', async t => {
+	const launch = freshDir('launch');
+	const other = freshDir('other');
+	try {
+		const agent = trustAgent(launch);
+		const error = await t.throwsAsync(agent.newSession({cwd: other}));
+		t.is((error as any).code, -32003);
+		t.deepEqual((error as any).data, {
+			'nanocoder/trustRequired': {cwd: other, status: 'not-trusted'},
+		});
+		t.regex(error!.message, /nanocoder trust --status/);
+
+		// The folder the server was started in passed the server's own check.
+		await t.notThrowsAsync(agent.newSession({cwd: launch}));
+	} finally {
+		rmSync(launch, {recursive: true, force: true});
+		rmSync(other, {recursive: true, force: true});
+	}
+});
+
+test.serial('AcpAgent - a session in a trusted folder starts', async t => {
+	const launch = freshDir('launch');
+	const other = freshDir('trusted');
+	const before = loadPreferences();
+	try {
+		savePreferences(grantDirectoryTrust(loadPreferences(), other));
+		const agent = trustAgent(launch);
+		const {sessionId} = await agent.newSession({cwd: other});
+		t.truthy(sessionId);
+	} finally {
+		savePreferences(before);
+		rmSync(launch, {recursive: true, force: true});
+		rmSync(other, {recursive: true, force: true});
+	}
+});
+
+test.serial('AcpAgent - load and resume refuse a saved session whose folder is not trusted', async t => {
+	const launch = freshDir('launch');
+	const other = freshDir('saved');
+	const before = loadPreferences();
+	try {
+		// Saved while the folder was trusted, then trust is withdrawn.
+		savePreferences(grantDirectoryTrust(loadPreferences(), other));
+		const writer = trustAgent(launch);
+		const {sessionId} = await writer.newSession({cwd: other});
+		await writer.prompt({sessionId, prompt: [{type: 'text', text: 'hi'}]});
+		savePreferences(before);
+
+		const agent = trustAgent(launch);
+		const loadError = await t.throwsAsync(
+			agent.loadSession({sessionId, cwd: other, mcpServers: []}),
+		);
+		t.is((loadError as any).code, -32003);
+		const resumeError = await t.throwsAsync(
+			agent.resumeSession({sessionId, cwd: launch}),
+		);
+		t.is((resumeError as any).code, -32003);
+		t.false((agent as any).sessions.has(sessionId));
+		await writer.deleteSession({sessionId});
+	} finally {
+		savePreferences(before);
+		rmSync(launch, {recursive: true, force: true});
+		rmSync(other, {recursive: true, force: true});
+	}
+});
+
+test.serial('AcpAgent - a session in another folder reads that project\'s config, not the launch directory\'s', async t => {
+	const config = getAppConfig();
+	const previous = config.alwaysAllow;
+	config.alwaysAllow = ['write_file'];
+	const projectDir = join(tmpdir(), `nanocoder-acp-project-${randomUUID()}`);
+	mkdirSync(projectDir, {recursive: true});
+	writeFileSync(
+		join(projectDir, 'agents.config.json'),
+		JSON.stringify({nanocoder: {alwaysAllow: ['read_file']}}),
+	);
+	const context = createMockInitContext();
+	context.toolManager = {
+		...context.toolManager,
+		getAvailableToolNames: () => ['read_file', 'write_file'],
+		getMCPToolInfo: () => ({isMCPTool: false}),
+	} as any;
+	const agent = new AcpAgent(context, createMockConn());
+	const inProject = await agent.newSession({cwd: projectDir});
+	const inLaunchDir = await agent.newSession({cwd: testConfigDir});
+
+	try {
+		const alwaysAllow = (response: {_meta?: Record<string, any> | null}) =>
+			response._meta?.['nanocoder/approval']?.alwaysAllow;
+		t.deepEqual(alwaysAllow(inProject), ['read_file']);
+		t.deepEqual(alwaysAllow(inLaunchDir), ['write_file']);
+		// Outside any session the launch directory's config is untouched.
+		t.deepEqual(getAppConfig().alwaysAllow, ['write_file']);
+	} finally {
+		config.alwaysAllow = previous;
+		await agent.deleteSession({sessionId: inProject.sessionId});
+		await agent.deleteSession({sessionId: inLaunchDir.sessionId});
+		rmSync(projectDir, {recursive: true, force: true});
+	}
+});
+
+test.serial('AcpAgent.resumeSession - a session resumed straight after session/new is found', async t => {
+	const {agent} = createAgent();
+	await sessionManager.initialize();
+	const created = await agent.newSession({cwd: testConfigDir});
+	// Nothing worth saving yet, so the session exists only in memory.
+	t.falsy(await sessionManager.readSession(created.sessionId));
+
+	const resumed = await agent.resumeSession({
+		sessionId: created.sessionId,
+		cwd: testConfigDir,
+	});
+	t.truthy(resumed.modes);
+	const session = agent['sessions'].get(created.sessionId);
+	t.truthy(session);
+	t.is(session?.cwd, testConfigDir);
+	t.is(agent['sessions'].size, 1);
+
+	await agent.deleteSession({sessionId: created.sessionId});
+});
+
+test.serial('AcpAgent.resumeSession - an id that is neither live nor on disk is still not found', async t => {
+	const {agent} = createAgent();
+	await t.throwsAsync(
+		agent.resumeSession({sessionId: randomUUID(), cwd: testConfigDir}),
+		{message: /Session not found on disk/},
+	);
+});
+
+test.serial('AcpAgent - a session in another project gets that project\'s commands and MCP servers', async t => {
+	const other = freshDir('folder-tools');
+	const before = loadPreferences();
+	const updates: any[] = [];
+	const conn = createMockConn();
+	conn.sessionUpdate = async (update: any) => {
+		updates.push(update);
+	};
+	const context = createMockInitContext();
+	context.launchDirectory = testConfigDir;
+	context.toolManager = new ToolManager();
+	const agent = new AcpAgent(context, conn);
+	try {
+		mkdirSync(join(other, '.nanocoder', 'commands'), {recursive: true});
+		writeFileSync(
+			join(other, '.nanocoder', 'commands', 'folder-hello.md'),
+			'---\ndescription: Says hello from the folder\n---\nSay hello.\n',
+		);
+		writeFileSync(
+			join(other, '.mcp.json'),
+			JSON.stringify({
+				mcpServers: {
+					'folder-server': {
+						transport: 'stdio',
+						command: process.execPath,
+						args: ['--input-type=module', '-e', FIXTURE_SERVER],
+						env: {FIXTURE_TOOL: 'folder_tool'},
+					},
+				},
+			}),
+		);
+		savePreferences(grantDirectoryTrust(loadPreferences(), other));
+
+		const inOther = await agent.newSession({cwd: other});
+		const inLaunch = await agent.newSession({cwd: testConfigDir});
+		const commandsOf = (sessionId: string) =>
+			updates
+				.filter(
+					u =>
+						u.sessionId === sessionId &&
+						u.update.sessionUpdate === 'available_commands_update',
+				)
+				.flatMap(u => u.update.availableCommands.map((c: any) => c.name));
+		const toolsOf = (sessionId: string): ToolManager =>
+			(agent as any).toolManagerFor(sessionId);
+
+		t.true(commandsOf(inOther.sessionId).includes('/folder-hello'));
+		t.false(commandsOf(inLaunch.sessionId).includes('/folder-hello'));
+		t.true(toolsOf(inOther.sessionId).hasTool('folder_tool'));
+		t.false(toolsOf(inLaunch.sessionId).hasTool('folder_tool'));
+	} finally {
+		await agent.endAllSessions();
+		savePreferences(before);
+		rmSync(other, {recursive: true, force: true});
+	}
+});
+
+test.serial('AcpAgent - a session in another project starts on that project\'s provider', async t => {
+	await withProviders(async () => {
+		const other = freshDir('provider');
+		const before = loadPreferences();
+		try {
+			writeFileSync(
+				join(other, 'agents.config.json'),
+				JSON.stringify({
+					nanocoder: {
+						providers: [
+							{
+								name: 'folder-provider',
+								baseUrl: 'http://localhost:1/v1',
+								models: ['folder-model'],
+							},
+						],
+					},
+				}),
+			);
+			savePreferences(grantDirectoryTrust(loadPreferences(), other));
+			const agent = trustAgent(testConfigDir);
+
+			const inOther = await agent.newSession({cwd: other});
+			t.is(optionValue(inOther.configOptions, 'provider'), 'folder-provider');
+			t.is(optionValue(inOther.configOptions, 'model'), 'folder-model');
+
+			// The launch folder, and the process default, are unchanged.
+			const inLaunch = await agent.newSession({cwd: testConfigDir});
+			t.is(optionValue(inLaunch.configOptions, 'provider'), 'test-provider');
+			t.is(agent['initContext'].provider, 'test-provider');
+		} finally {
+			savePreferences(before);
+			rmSync(other, {recursive: true, force: true});
+		}
+	});
 });

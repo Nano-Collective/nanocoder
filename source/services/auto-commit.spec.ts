@@ -12,7 +12,7 @@ import type {ReactElement, ReactNode} from 'react';
 import test from 'ava';
 import {getAppConfig} from '../config/index';
 import type {LLMClient} from '../types/core';
-import {setGlobalMessageQueue} from '../utils/message-queue';
+import {setGlobalMessageQueue} from '../components/message-queue';
 import {getProjectRoot, setProjectRoot} from './session-cwd';
 import {
 	cleanMessage,
@@ -96,6 +96,25 @@ test.serial('commits the edited file with the generated message', async t => {
 			git(dir, 'rev-parse HEAD'),
 		);
 		t.is(git(dir, 'show --name-only --format= HEAD'), 'a.ts');
+	} finally {
+		rmSync(dir, {recursive: true, force: true});
+	}
+});
+
+test.serial('writes the message with the client the call passes, not the process-wide one', async t => {
+	const dir = makeRepo();
+	try {
+		setAutoCommitClient(replying('chore: from the process-wide client'));
+		const file = join(dir, 'a.ts');
+		writeFileSync(file, 'export const a = 1;\n');
+
+		await maybeAutoCommit(
+			'write_file',
+			{path: file},
+			replying('feat: from the session client'),
+		);
+
+		t.is(git(dir, 'log -1 --format=%s'), 'feat: from the session client');
 	} finally {
 		rmSync(dir, {recursive: true, force: true});
 	}

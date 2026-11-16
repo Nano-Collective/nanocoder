@@ -10,7 +10,7 @@ import {
 	getGitStatusSummarySync,
 } from '@/tools/git/utils';
 import {DEVELOPMENT_MODE_LABELS, type DevelopmentMode} from '@/types/core';
-import {homeRelative} from '@/utils/path';
+import {homeRelative} from '@/utils/fs/path';
 
 /**
  * Format the project/workspace segment shown in the startup summary.

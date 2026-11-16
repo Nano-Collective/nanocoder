@@ -12,7 +12,7 @@ Memory creation is always manual and explicit. Nothing is ever saved automatical
 
 ## Commands
 
-- `/remember [--category <name>] <content>` - Save a memory directly. `-c` is a short form of `--category`.
+- `/memory add [--category <name>] <content>` - Save a memory directly (`/remember` still works as an alias). `-c` is a short form of `--category`.
 - `/memory list` - List all saved memories with their short IDs and categories. `/memory ls` is an alias, and a bare `/memory` with no subcommand does the same thing.
 - `/memory delete <id>` - Delete a specific memory. `/memory rm` is an alias.
 - `/memory clear` - Delete all memories for the current project.
@@ -22,8 +22,8 @@ Memory creation is always manual and explicit. Nothing is ever saved automatical
 ### Example
 
 ```
-/remember The auth module uses Clerk and avoids middleware in the edge runtime.
-/remember -c codingStyle Use camelCase for all variable names.
+/memory add The auth module uses Clerk and avoids middleware in the edge runtime.
+/memory add -c codingStyle Use camelCase for all variable names.
 
 /memory list
 /memory delete 18d51c0d
@@ -37,7 +37,7 @@ Memory creation is always manual and explicit. Nothing is ever saved automatical
 
 ## Categories
 
-Memories are grouped into: `architecture`, `bugFix`, `refactor`, `todo`, `codingStyle`, or `project` (the default, for anything that doesn't match a more specific category). `/remember` infers a category automatically from the content unless you pass `--category`. `--category` is not checked against this list: any other name is saved as given, and its words still count as category matches during recall.
+Memories are grouped into: `architecture`, `bugFix`, `refactor`, `todo`, `codingStyle`, or `project` (the default, for anything that doesn't match a more specific category). `/memory add` infers a category automatically from the content unless you pass `--category`. `--category` is not checked against this list: any other name is saved as given, and its words still count as category matches during recall.
 
 ## Recall
 
@@ -99,7 +99,7 @@ The check is a heuristic tuned to over-flag rather than miss: it only adds a war
 
 ## Turning It Off
 
-Semantic memory is on by default. Toggle it from `/settings` -> **Advanced** -> **Semantic Memory**. Turning it off disables both recall (memories are no longer injected into prompts) and writes (`/remember` and `/memory accept` are refused while it's off).
+Semantic memory is on by default. Toggle it from `/settings` -> **Advanced** -> **Semantic Memory**. Turning it off disables both recall (memories are no longer injected into prompts) and writes (`/memory add` and `/memory accept` are refused while it's off).
 
 ## Storage and Scope
 

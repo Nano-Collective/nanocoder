@@ -8,13 +8,9 @@ import {writeFileSync} from 'node:fs';
 import {
 	describeProjectTrust,
 	TRUST_FINGERPRINT_VERSION,
-} from '@/config/project-trust';
-import {
-	isDirectoryTrusted,
-	loadPreferences,
-	resetPreferencesCache,
-	savePreferences,
-} from '@/config/preferences';
+} from '@/config/trust/project-trust';
+import {loadPreferences, resetPreferencesCache, savePreferences} from '@/config/preferences';
+import {isDirectoryTrusted} from '@/config/trust/directory-trust';
 import {useDirectoryTrust} from './useDirectoryTrust';
 
 console.log('\nuseDirectoryTrust.spec.tsx');

@@ -38,7 +38,7 @@ On Linux, add `--with-deps` to also install the system libraries Chromium needs.
 The tool uses the same address checks as `fetch_url`, except that loopback is allowed so you can test a local dev server:
 
 - `localhost`, `*.localhost`, `127.x.x.x` and `::1` are allowed.
-- Private network addresses and cloud metadata addresses (such as `169.254.169.254`) are blocked.
+- Private network addresses, reserved, multicast and broadcast IPv4 ranges, and cloud metadata addresses (such as `169.254.169.254`) are blocked, as are IPv6 addresses that embed any of these or a loopback address (IPv4-mapped, IPv4-compatible, IPv4-translated, NAT64 and 6to4).
 - Hostnames are resolved before loading, so a public name that points at a private or metadata address (for example `169.254.169.254.nip.io`) is blocked too.
 - The check applies to the `navigate` URL, to every request the page makes (subresources, iframes, `fetch`, link clicks), and to where each frame lands after redirects.
 

@@ -1,5 +1,11 @@
 import test from 'ava';
-import {cmdQuote, renderBody, renderValue, shellQuote} from './template';
+import {
+	cmdQuote,
+	findUnsafePlaceholder,
+	renderBody,
+	renderValue,
+	shellQuote,
+} from './template';
 
 console.log('\ncustom-tools/template.spec.ts');
 
@@ -115,6 +121,91 @@ test('renderBody inverted section: included only when falsy', t => {
 	t.is(renderBody(tpl, {flag: ''}), 'off');
 	t.is(renderBody(tpl, {flag: true}), '');
 	t.is(renderBody(tpl, {flag: 'x'}), '');
+});
+
+// ---------------------------------------------------------------------------
+// findUnsafePlaceholder
+// ---------------------------------------------------------------------------
+
+const posixSafe = [
+	'echo {{ q }}',
+	'kubectl get pods -n {{ ns }} {{# sel }}-l {{ sel }}{{/ sel }}',
+	`echo "literal" {{ q }} 'also literal'`,
+	'q={{ q }}; echo "$q"',
+	'echo $(printf %s {{ q }})',
+	'echo `printf %s {{ q }}`',
+	'echo "$(printf %s {{ q }})" ',
+	'echo $(( 1 + 2 )) {{ q }}',
+	"# don't worry\necho {{ q }}",
+	'echo a#b {{ q }}',
+	'cat <<EOF\nit\'s "fine"\nEOF\necho {{ q }}',
+	'cat <<-\'END\'\n\tliteral $x\n\tEND\necho {{ q }}',
+	'grep -c x <<< {{ q }}',
+	"awk '{print $1}' {{ file }}",
+	'echo \\" {{ q }}',
+	// The workaround docs/features/custom-tools.md recommends.
+	'q={{ q }}\ngrep -rn "TODO: $q" .\ncat <<EOF\nSearching for $q\nEOF\n',
+];
+
+for (const body of posixSafe) {
+	test(`findUnsafePlaceholder accepts: ${JSON.stringify(body)}`, t => {
+		t.is(findUnsafePlaceholder(body, 'posix'), undefined);
+	});
+}
+
+const posixUnsafe: Array<[string, RegExp]> = [
+	['echo "{{ q }}"', /inside a "\.\.\." string/],
+	["echo '{{ q }}'", /inside a '\.\.\.' string/],
+	['echo "a $(printf %s "{{ q }}") b"', /inside a "\.\.\." string/],
+	['echo `echo "{{ q }}"`', /inside a "\.\.\." string/],
+	["echo $'x{{ q }}'", /\$'\.\.\.'/],
+	['echo ${X:-{{ q }}}', /\$\{\.\.\.\}/],
+	['echo hi # {{ q }}', /comment/],
+	['cat <<EOF\n{{ q }}\nEOF', /here-document/],
+	["cat <<'EOF'\nvalue: {{ q }}\nEOF", /here-document/],
+	['echo \\{{ q }}', /backslash/],
+	['echo ${{ q }}', /follows a \$/],
+	[
+		"echo {{# a }}'{{/ a }}{{ q }}{{# a }}'{{/ a }}",
+		/different quoting contexts/,
+	],
+];
+
+for (const [body, reason] of posixUnsafe) {
+	test(`findUnsafePlaceholder rejects: ${JSON.stringify(body)}`, t => {
+		const problem = findUnsafePlaceholder(body, 'posix');
+		t.truthy(problem);
+		t.regex(problem ?? '', reason);
+	});
+}
+
+test('findUnsafePlaceholder: rejected bodies really are injectable', t => {
+	// Document why: what each rejected shape renders to.
+	t.is(
+		renderBody('echo "{{ q }}"', {q: '$(id)'}),
+		`echo "'$(id)'"`,
+		'the $(id) sits inside double quotes, so the shell runs it',
+	);
+	t.is(
+		renderBody("echo '{{ q }}'", {q: '; id'}),
+		`echo ''; id''`,
+		'the author quote closes before the value, so ; id runs',
+	);
+});
+
+test('findUnsafePlaceholder cmd.exe rules', t => {
+	t.is(findUnsafePlaceholder('echo {{ q }}', 'cmd'), undefined);
+	t.is(findUnsafePlaceholder('echo "x" {{ q }} "y"', 'cmd'), undefined);
+	t.is(findUnsafePlaceholder("echo '{{ q }}'", 'cmd'), undefined);
+	t.regex(
+		findUnsafePlaceholder('echo "{{ q }}"', 'cmd') ?? '',
+		/inside a "\.\.\." string/,
+	);
+	t.regex(findUnsafePlaceholder('echo ^{{ q }}', 'cmd') ?? '', /follows a \^/);
+	t.regex(
+		findUnsafePlaceholder('echo {{# a }}"{{/ a }} {{ q }}', 'cmd') ?? '',
+		/different quoting contexts/,
+	);
 });
 
 test('renderBody positive and inverted sections on the same var', t => {

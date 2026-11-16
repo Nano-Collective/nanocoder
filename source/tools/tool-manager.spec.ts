@@ -4,7 +4,11 @@ import type {
 } from '@/types/index';
 import type {MCPClient} from '@/mcp/mcp-client';
 import test from 'ava';
-import {setGlobalMessageQueue} from '@/utils/message-queue';
+import {setGlobalMessageQueue} from '@/components/message-queue';
+import {
+	filterValidToolCalls,
+	partitionUnknownToolCalls,
+} from '@/hooks/chat-handler/utils/tool-filters';
 import {getShutdownManager} from '@/utils/shutdown';
 import {resolveToolApproval} from './approval-policy';
 import {describeSkippedMCPTools, ToolManager} from './tool-manager';
@@ -441,6 +445,65 @@ test('disconnectMCP removes only MCP tools, not a built-in it shadowed', async t
 
 	t.is(manager.getToolEntry('list_directory'), builtIn);
 	t.false(manager.hasTool('echo_tool'));
+});
+
+// On-demand discovery lists MCP tools in a catalog and registers them when
+// the model loads one, so the same rule has to hold there.
+const discovery = {mcpDiscovery: 'always'} as const;
+
+test('discovery mode keeps an MCP tool named like a built-in out of the catalog', async t => {
+	const {manager, servers} = fakeMCPServer('fs', ['write_file', 'fs_stat']);
+	const builtIn = manager.getToolEntry('write_file');
+
+	const results = await manager.initializeMCP(
+		servers,
+		undefined,
+		undefined,
+		discovery,
+	);
+
+	t.deepEqual(results[0].skippedTools, ['write_file']);
+	const catalog = manager.getMcpCatalog();
+	t.false(catalog.has('write_file'), 'load_tool_schema must not offer it');
+	t.true(catalog.has('fs_stat'));
+	t.false(manager.loadMcpTool('write_file'));
+	t.is(manager.getToolEntry('write_file'), builtIn, 'built-in entry untouched');
+	t.false(manager.getMCPToolInfo('write_file').isMCPTool);
+});
+
+test('discovery mode: disconnectMCP removes a tool loaded on demand, not a built-in', async t => {
+	const {manager, servers} = fakeMCPServer('fs', ['list_directory', 'echo_tool']);
+	const builtIn = manager.getToolEntry('list_directory');
+	await manager.initializeMCP(servers, undefined, undefined, discovery);
+	t.true(manager.loadMcpTool('echo_tool'));
+	t.deepEqual(manager.getMCPToolInfo('echo_tool'), {
+		isMCPTool: true,
+		serverName: 'fs',
+	});
+
+	await manager.disconnectMCP();
+
+	t.false(manager.hasTool('echo_tool'));
+	t.is(manager.getToolEntry('list_directory'), builtIn);
+});
+
+test('discovery mode: an outage and recovery keep a built-in and restore the loaded MCP tool', async t => {
+	const {manager, servers, setHealth} = fakeMCPServer('fs', [
+		'list_directory',
+		'echo_tool',
+	]);
+	const builtIn = manager.getToolEntry('list_directory');
+	await manager.initializeMCP(servers, undefined, undefined, discovery);
+	t.true(manager.loadMcpTool('echo_tool'));
+
+	setHealth('unhealthy');
+	t.false(manager.hasTool('echo_tool'));
+	t.is(manager.getToolEntry('list_directory'), builtIn);
+
+	setHealth('connected');
+	t.true(manager.hasTool('echo_tool'), 'the loaded schema comes back');
+	t.false(manager.getMcpCatalog().has('list_directory'));
+	t.is(manager.getToolEntry('list_directory'), builtIn);
 });
 
 test('git_commit still needs approval in auto-accept when an MCP server offers git_commit', async t => {
@@ -1388,7 +1451,7 @@ test('getAvailableToolNames - disabledTools removes a bundle-form skill tool', t
 // names used for runtime execution are always identical for a given mode/tune
 // combo. This is the key invariant that prevents prompt/runtime drift.
 
-import {buildSystemPrompt} from '../utils/prompt-builder.js';
+import {buildSystemPrompt} from '../conversation/prompt-builder.js';
 import type {TuneConfig} from '@/types/config';
 import type {DevelopmentMode} from '@/types/core';
 
@@ -1800,4 +1863,385 @@ test('forSession - a skipped session MCP tool is reported and does not relabel t
 	// The session's server maps read_file, but the session never registered it.
 	t.deepEqual(session.getMCPToolInfo('read_file'), {isMCPTool: false});
 	await session.disconnectMCP();
+});
+
+// ============================================================================
+// On-demand MCP Tool Discovery & Dynamic Hydration
+// ============================================================================
+
+test('mcp discovery keeps deferred tools in catalog until dynamically loaded', async t => {
+	const manager = new ToolManager();
+
+	// Mock MCPClient with 10 tools
+	const mockTools: any[] = [];
+	for (let i = 1; i <= 10; i++) {
+		mockTools.push({
+			name: `mcp_tool_${i}`,
+			tool: {
+				description: `MCP Tool ${i}`,
+				parameters: {type: 'object'},
+				execute: async () => `result ${i}`,
+			},
+			handler: async () => `result ${i}`,
+			approval: 'always',
+		});
+	}
+
+	(manager as any).createMCPClient = async () => ({
+		connectToServers: async () => [{serverName: 'test-server', success: true, toolCount: 10}],
+		getToolEntries: () => mockTools,
+		getToolMapping: () => new Map(mockTools.map(t => [t.name, {serverName: 'test-server', originalName: t.name, readOnly: false}])),
+		getNativeToolsRegistry: () => Object.fromEntries(mockTools.map(t => [t.name, t.tool])),
+		onHealthChange: () => () => {},
+		disconnect: async () => {},
+	});
+
+	// Auto-discovery activates because tool count >= 8
+	await manager.initializeMCP([{name: 'test-server', transport: 'stdio'}]);
+
+	const catalog = manager.getMcpCatalog();
+	t.is(catalog.size, 10);
+	t.is(catalog.getUnloaded().length, 10);
+	t.false(manager.hasTool('mcp_tool_1'));
+
+	// Hydrate on-demand
+	t.true(manager.loadMcpTool('mcp_tool_1'));
+	t.true(manager.hasTool('mcp_tool_1'));
+	t.is(catalog.getUnloaded().length, 9);
+	t.is(catalog.getLoaded().length, 1);
+
+	// Direct execution fallback auto-hydrates
+	t.false(manager.hasTool('mcp_tool_2'));
+	const handler = manager.getToolHandler('mcp_tool_2');
+	t.truthy(handler);
+	t.true(manager.hasTool('mcp_tool_2'));
+	t.is(catalog.getLoaded().length, 2);
+
+	// Disconnect clears catalog
+	await manager.disconnectMCP();
+	t.is(catalog.size, 0);
+	t.false(manager.hasTool('load_tool_schema'));
+});
+
+test('forSession - ending a session does not wipe the shared base catalog', async t => {
+	const base = new ToolManager();
+	const mockTools = [
+		{
+			name: 'base_tool_1',
+			tool: {description: 'Base Tool 1', parameters: {type: 'object'}, execute: async () => '1'},
+			handler: async () => '1',
+			approval: 'always',
+		},
+		{
+			name: 'base_tool_2',
+			tool: {description: 'Base Tool 2', parameters: {type: 'object'}, execute: async () => '2'},
+			handler: async () => '2',
+			approval: 'always',
+		},
+	];
+
+	(base as any).createMCPClient = async () => ({
+		connectToServers: async () => [{serverName: 'shared-server', success: true, toolCount: 2}],
+		getToolEntries: () => mockTools,
+		getToolMapping: () => new Map(mockTools.map(t => [t.name, {serverName: 'shared-server', originalName: t.name, readOnly: false}])),
+		getNativeToolsRegistry: () => Object.fromEntries(mockTools.map(t => [t.name, t.tool])),
+		onHealthChange: () => () => {},
+		disconnect: async () => {},
+	});
+
+	await base.initializeMCP([{name: 'shared-server', transport: 'stdio'}], undefined, undefined, {mcpDiscovery: 'always'});
+
+	t.is(base.getMcpCatalog().size, 2);
+	t.true(base.hasTool('load_tool_schema'), 'discovery registered load_tool_schema on base');
+
+	const session = base.forSession();
+	t.is(session.getMcpCatalog().size, 2, 'session inherits parent catalog entries');
+
+	await session.disconnectMCP();
+
+	t.is(base.getMcpCatalog().size, 2, 'base catalog must retain all entries after session disconnect');
+	t.true(base.getMcpCatalog().has('base_tool_1'));
+	t.true(base.getMcpCatalog().has('base_tool_2'));
+});
+
+test('ToolManager - load_tool_schema is not registered when no MCP servers or discovery disabled', async t => {
+	const manager = new ToolManager();
+	t.false(manager.hasTool('load_tool_schema'), 'must not register load_tool_schema by default');
+});
+
+test('ToolManager on-demand discovery obeys tuneConfig.mcpDiscovery === "always" for < 8 tools', async t => {
+	const manager = new ToolManager();
+	const mockTools: any[] = [];
+	for (let i = 1; i <= 3; i++) {
+		mockTools.push({
+			name: `mcp_tool_${i}`,
+			tool: {
+				description: `MCP Tool ${i}`,
+				parameters: {type: 'object'},
+				execute: async () => `result ${i}`,
+			},
+			handler: async () => `result ${i}`,
+			approval: 'always',
+		});
+	}
+
+	(manager as any).createMCPClient = async () => ({
+		connectToServers: async () => [{serverName: 'test-server', success: true, toolCount: 3}],
+		getToolEntries: () => mockTools,
+		getToolMapping: () => new Map(mockTools.map(t => [t.name, {serverName: 'test-server', originalName: t.name, readOnly: false}])),
+		getNativeToolsRegistry: () => Object.fromEntries(mockTools.map(t => [t.name, t.tool])),
+		onHealthChange: () => () => {},
+		disconnect: async () => {},
+	});
+
+	await manager.initializeMCP(
+		[{name: 'test-server', transport: 'stdio'}],
+		undefined,
+		undefined,
+		{mcpDiscovery: 'always'},
+	);
+
+	const catalog = manager.getMcpCatalog();
+	t.is(catalog.size, 3);
+	t.is(catalog.getUnloaded().length, 3);
+	t.false(manager.hasTool('mcp_tool_1'));
+
+	// Hydrate on-demand
+	t.true(manager.loadMcpTool('mcp_tool_1'));
+	t.true(manager.hasTool('mcp_tool_1'));
+	t.is(catalog.getUnloaded().length, 2);
+
+	await manager.disconnectMCP();
+});
+
+test('ToolManager on-demand discovery obeys tuneConfig.mcpDiscovery === "disabled" for >= 8 tools', async t => {
+	const manager = new ToolManager();
+	const mockTools: any[] = [];
+	for (let i = 1; i <= 10; i++) {
+		mockTools.push({
+			name: `mcp_tool_${i}`,
+			tool: {
+				description: `MCP Tool ${i}`,
+				parameters: {type: 'object'},
+				execute: async () => `result ${i}`,
+			},
+			handler: async () => `result ${i}`,
+			approval: 'always',
+		});
+	}
+
+	(manager as any).createMCPClient = async () => ({
+		connectToServers: async () => [{serverName: 'test-server', success: true, toolCount: 10}],
+		getToolEntries: () => mockTools,
+		getToolMapping: () => new Map(mockTools.map(t => [t.name, {serverName: 'test-server', originalName: t.name, readOnly: false}])),
+		getNativeToolsRegistry: () => Object.fromEntries(mockTools.map(t => [t.name, t.tool])),
+		onHealthChange: () => () => {},
+		disconnect: async () => {},
+	});
+
+	await manager.initializeMCP(
+		[{name: 'test-server', transport: 'stdio'}],
+		undefined,
+		undefined,
+		{mcpDiscovery: 'disabled'},
+	);
+
+	const catalog = manager.getMcpCatalog();
+	// When disabled, all tools are registered immediately and loaded into active tools
+	t.is(catalog.size, 10);
+	t.is(catalog.getUnloaded().length, 0);
+	t.is(catalog.getLoaded().length, 10);
+	t.true(manager.hasTool('mcp_tool_1'));
+	t.true(manager.hasTool('mcp_tool_10'));
+
+	await manager.disconnectMCP();
+});
+
+// ============================================================================
+// On-demand discovery survives a server outage
+// ============================================================================
+
+/**
+ * A ten-tool server whose health listener the test drives. Ten tools puts
+ * initializeMCP in discovery mode by default.
+ */
+function outageFixture() {
+	let healthListener:
+		| ((change: {serverName: string; status: 'unhealthy' | 'connected'}) => void)
+		| undefined;
+	const mockTools: any[] = [];
+	for (let i = 1; i <= 10; i++) {
+		mockTools.push({
+			name: `mcp_tool_${i}`,
+			tool: {
+				description: `MCP Tool ${i}`,
+				parameters: {type: 'object'},
+				execute: async () => `result ${i}`,
+			},
+			handler: async () => `result ${i}`,
+			approval: true,
+		});
+	}
+	const fakeClient = {
+		onHealthChange(listener: typeof healthListener) {
+			healthListener = listener;
+			return () => {};
+		},
+		async connectToServers() {
+			return [{serverName: 'flaky-server', success: true, toolCount: 10}];
+		},
+		getToolNameConflicts: () => [],
+		getToolEntries: () => mockTools,
+		getToolMapping: () =>
+			new Map(
+				mockTools.map(t => [
+					t.name,
+					{serverName: 'flaky-server', originalName: t.name, readOnly: false},
+				]),
+			),
+		getNativeToolsRegistry: () =>
+			Object.fromEntries(mockTools.map(t => [t.name, t.tool])),
+		disconnect: async () => {},
+	};
+	const manager = new HealthSeamToolManager(fakeClient);
+	return {
+		manager,
+		emit: (status: 'unhealthy' | 'connected') =>
+			healthListener?.({serverName: 'flaky-server', status}),
+	};
+}
+
+const mcpToolNames = (manager: ToolManager) =>
+	manager.getToolNames().filter(name => name.startsWith('mcp_tool_'));
+
+test('discovery mode: a recovered server goes back to the catalog, not every schema', async t => {
+	const {manager, emit} = outageFixture();
+	await manager.initializeMCP([{name: 'flaky-server', transport: 'stdio'}]);
+	t.true(manager.hasTool('load_tool_schema'));
+	t.true(manager.loadMcpTool('mcp_tool_1'));
+	t.deepEqual(mcpToolNames(manager), ['mcp_tool_1']);
+
+	emit('unhealthy');
+	t.deepEqual(mcpToolNames(manager), []);
+	t.is(manager.getMcpCatalog().size, 0);
+
+	emit('connected');
+	t.deepEqual(
+		mcpToolNames(manager),
+		['mcp_tool_1'],
+		'only the schema the model had loaded comes back',
+	);
+	const catalog = manager.getMcpCatalog();
+	t.is(catalog.size, 10, 'the server is listed in the catalog again');
+	t.is(catalog.getUnloaded().length, 9);
+	t.true(catalog.isLoaded('mcp_tool_1'));
+
+	// The rest still load on demand.
+	t.true(manager.loadMcpTool('mcp_tool_2'));
+	t.true(manager.hasTool('mcp_tool_2'));
+	await manager.disconnectMCP();
+});
+
+test('without discovery a recovered server registers every tool and refills the catalog', async t => {
+	const {manager, emit} = outageFixture();
+	await manager.initializeMCP(
+		[{name: 'flaky-server', transport: 'stdio'}],
+		undefined,
+		undefined,
+		{mcpDiscovery: 'disabled'},
+	);
+	t.is(mcpToolNames(manager).length, 10);
+
+	emit('unhealthy');
+	emit('connected');
+	t.is(mcpToolNames(manager).length, 10);
+	t.is(manager.getMcpCatalog().size, 10);
+	t.is(manager.getMcpCatalog().getUnloaded().length, 0);
+	await manager.disconnectMCP();
+});
+
+test('a call to an unloaded on-demand MCP tool says to call load_tool_schema first', async t => {
+	const {manager} = outageFixture();
+	await manager.initializeMCP([{name: 'flaky-server', transport: 'stdio'}]);
+	t.true(manager.isUnloadedMcpTool('mcp_tool_3'));
+	t.false(manager.isUnloadedMcpTool('read_file'), 'a built-in is not an MCP tool');
+
+	const call = {
+		id: 'call_1',
+		function: {name: 'mcp_tool_3', arguments: {}},
+	};
+	const offered = manager.getAvailableToolNames(undefined, 'normal', []);
+	for (const partition of [
+		filterValidToolCalls([call], manager, offered),
+		partitionUnknownToolCalls([call], manager, offered),
+	]) {
+		t.is(partition.validToolCalls.length, 0);
+		t.is(partition.rejectedToolCalls.length, 1);
+		const content = String(partition.errorResults[0]?.content);
+		t.true(content.includes('load_tool_schema'), content);
+		t.false(content.includes('does not exist'), content);
+		t.false(content.includes('not available in the current mode'), content);
+	}
+
+	// Once loaded, the same call is valid.
+	t.true(manager.loadMcpTool('mcp_tool_3'));
+	t.is(
+		filterValidToolCalls(
+			[call],
+			manager,
+			manager.getAvailableToolNames(undefined, 'normal', []),
+		).validToolCalls.length,
+		1,
+	);
+	await manager.disconnectMCP();
+});
+
+// readOnlyHint comes from the server being gated, so it must not skip a
+// checkpoint or put a call in a parallel batch, whether or not the tool's
+// schema has been loaded yet.
+test('isReadOnly ignores the readOnlyHint of an unloaded on-demand MCP tool', async t => {
+	const mockTools = Array.from({length: 3}, (_, i) => ({
+		name: `annotated_${i}`,
+		tool: {description: 'reader', parameters: {type: 'object'}},
+		handler: async () => 'ok',
+	}));
+	const manager = new HealthSeamToolManager({
+		onHealthChange: () => () => {},
+		connectToServers: async () => [
+			{serverName: 'hint-server', success: true, toolCount: 3},
+		],
+		getToolNameConflicts: () => [],
+		getToolEntries: () => mockTools,
+		getToolMapping: () =>
+			new Map(
+				mockTools.map(t => [
+					t.name,
+					{serverName: 'hint-server', originalName: t.name, readOnly: true},
+				]),
+			),
+		getNativeToolsRegistry: () =>
+			Object.fromEntries(mockTools.map(t => [t.name, t.tool])),
+		disconnect: async () => {},
+	});
+	await manager.initializeMCP(
+		[{name: 'hint-server', transport: 'stdio'}],
+		undefined,
+		undefined,
+		{mcpDiscovery: 'always'},
+	);
+
+	t.true(
+		manager.getMcpCatalog().get('annotated_0')?.readOnly,
+		'the catalog still shows the hint to the model',
+	);
+	t.false(manager.hasTool('annotated_0'));
+	t.false(
+		manager.isReadOnly('annotated_0'),
+		'an unloaded tool must not be read-only on the server hint alone',
+	);
+
+	t.true(manager.loadMcpTool('annotated_0'));
+	t.false(manager.isReadOnly('annotated_0'), 'nor once it is loaded');
+	t.true(manager.isReadOnly('read_file'), 'built-in readers are unaffected');
+	await manager.disconnectMCP();
 });

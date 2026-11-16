@@ -29,6 +29,15 @@ export interface MCPTool {
 	readOnly?: boolean;
 }
 
+export interface MCPToolCatalogEntry {
+	name: string;
+	serverName: string;
+	description: string;
+	readOnly: boolean;
+	isLoaded: boolean;
+	inputSchema?: MCPToolInputSchema;
+}
+
 export interface MCPResource {
 	uri: string;
 	name: string;

@@ -25,7 +25,7 @@ The Nanocoder VS Code extension provides a native sidebar chat powered by the Ag
 - **Queued Follow-ups**: Type a follow-up while a turn is still running and it waits in line instead of being rejected. Queued messages show a Queued badge and run in order as the agent frees up.
 - **Cancellation**: The Stop button or the Escape key ends the whole turn - the current tool is aborted and any queued tools are skipped.
 - **Configuration Management**: The `Nanocoder: Open Configuration` command opens your `agents.config.json` - the project-level file if there is one, otherwise the global one.
-- **Legacy Companion Mode**: The original WebSocket companion for terminal CLI sessions is still available, now opt-in.
+- **Legacy Companion Mode**: The original WebSocket companion for terminal CLI sessions is still available, now opt-in. It is deprecated and will be removed in a future release (see [Legacy Companion Mode](#legacy-companion-mode)).
 
 ## Installation
 
@@ -36,6 +36,8 @@ Run Nanocoder with the `--vscode` flag and it will prompt you to install the bun
 ```bash
 nanocoder --vscode
 ```
+
+`--vscode` also starts the deprecated legacy companion (see below), so after the extension is installed you can drop the flag: the sidebar chat starts its own agent. Manual installation works without it.
 
 ### Manual Installation
 
@@ -61,7 +63,7 @@ nanocoder --vscode
 
 ## Using the Sidebar Chat
 
-1. **Open the chat**: Click the Nanocoder icon in the Activity Bar. The extension spawns `nanocoder --acp` in the background and connects automatically - your project's `agents.config.json` (or your global config) is picked up as usual. If the workspace is not trusted in VS Code (Restricted Mode), the extension does not pass `--trust-directory`, so the CLI only runs there if you have already trusted the folder with Nanocoder. In a folder Nanocoder has never trusted, or one whose trusted setup has changed since, the CLI refuses to start and the status bar shows **Failed** (see [Troubleshooting](#troubleshooting)).
+1. **Open the chat**: Click the Nanocoder icon in the Activity Bar. The extension spawns `nanocoder --acp` in the background and connects automatically - your project's `agents.config.json` (or your global config) is picked up as usual. The CLI is not started until you open the chat, so VS Code windows where you don't use Nanocoder never run it; the `Explain Code` / `Generate Tests` lenses and the status bar item are still there as soon as the window opens. If the workspace is not trusted in VS Code (Restricted Mode), the extension does not pass `--trust-directory`, so the CLI only runs there if you have already trusted the folder with Nanocoder. In a folder Nanocoder has never trusted, or one whose trusted setup has changed since, the CLI refuses to start, the status bar shows **Folder not trusted**, and the extension shows what the folder will run and offers to trust it (see [Troubleshooting](#troubleshooting)).
 
 2. **Chat**: Responses stream in as they generate, with a blinking cursor at the end of the text still being written. Code blocks are syntax-highlighted as soon as the fence opens, in colours that follow your light or dark VS Code theme. Everything the agent does to answer - its thoughts, tool calls, edit cards and task plan - is collected, in order, into one collapsible work summary per turn. The reply text stays outside it, so the answer is never hidden. The header reads "Working..." while the turn runs, then "Worked for", "Stopped after" or "Failed after" plus the duration, and the summary folds away when the turn ends (unless you opened or closed it yourself). It reopens automatically when a tool inside it needs your approval.
 
@@ -212,6 +214,8 @@ The copy shortcut is bound only while the Nanocoder chat view has focus.
 
 ## Legacy Companion Mode
 
+> **Deprecated.** The WebSocket companion (`nanocoder --vscode`, `/ide`, `--vscode-port`, and the extension's `nanocoder.autoConnect`, Connect, Disconnect and Start Nanocoder CLI commands) duplicates the sidebar chat, which runs `nanocoder --acp` itself. It will be removed in a future release, and Nanocoder prints a warning the first time it is enabled in a session. Use the [sidebar chat](#using-the-sidebar-chat) instead.
+
 Before the sidebar chat, the extension paired with a Nanocoder session running in a terminal (`nanocoder --vscode`, or `/ide` from within a session) over a local WebSocket. That mode is still available - it is now opt-in via `nanocoder.autoConnect` - and is useful if you prefer the terminal TUI:
 
 - **Diff previews**: file changes proposed in the terminal session open automatically in VS Code's diff viewer (controlled by `nanocoder.showDiffPreview`); you approve or reject in the CLI.
@@ -237,8 +241,9 @@ If the discovery file isn't readable from VS Code - for example when the CLI run
   - `Nanocoder: Failed`: the CLI could not be started. Click to open the output logs and recovery options.
   - `Nanocoder: Update CLI`: the installed CLI is too old for this extension. Update it, then click to restart.
   - `Nanocoder: Not installed`: the CLI was not found. Install it, then click to retry.
+  - `Nanocoder: Folder not trusted`: the CLI refused to start in a folder Nanocoder has not trusted. Click to see the trust prompt again.
   - `Nanocoder: Disconnected`: the agent process is stopped. Click to restart it.
-- **Failed in an untrusted folder.** The extension never passes `--trust-directory`, so in a folder Nanocoder has not trusted (or whose trusted setup has changed) the CLI exits with code 3 and the item shows Failed. Run `nanocoder` once in that folder in a terminal and accept the trust prompt, or run `nanocoder trust --status` there and then `nanocoder trust --grant <fingerprint>`, then restart the agent.
+- **Folder not trusted.** In Restricted Mode the extension does not pass `--trust-directory`, so in a folder Nanocoder has not trusted (or whose trusted setup has changed) the CLI exits with code 3. The extension does not retry that as a crash: it runs `nanocoder trust --status --json`, shows what the folder will run, and on **Trust Folder** saves trust for exactly that fingerprint with `nanocoder trust --grant` and starts the agent again. You can also run `nanocoder` once in that folder in a terminal and accept its trust prompt, then restart the agent.
 - Check the Nanocoder output channel (`View > Output > Nanocoder`) - the ACP handshake, CLI discovery, and any `[CLI stderr]` errors are logged there, and the crash dialog includes the last error line.
 - Ensure the `nanocoder` CLI is installed and on your PATH (or set `nanocoder.cliPath`). If `cliPath` points to a missing file, the extension logs a warning and falls back to normal discovery.
 - The extension resolves your login shell's PATH before spawning, so version managers like nvm work even when VS Code is launched from the Dock. If the CLI crashes at startup, check that `node --version` in a terminal meets the minimum required by Nanocoder.

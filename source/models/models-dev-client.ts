@@ -5,10 +5,10 @@
 
 import {request} from 'undici';
 import {TIMEOUT_HTTP_BODY_MS, TIMEOUT_HTTP_HEADERS_MS} from '@/constants';
+import {defineSessionValue} from '@/services/session-context';
 import type {AIProviderConfig, ProviderConfig} from '@/types/config';
 import {formatError} from '@/utils/error-formatter';
 import {getLogger} from '@/utils/logging';
-import {createSessionOverride} from '@/utils/session-override';
 import {readCache, writeCache} from './models-cache.js';
 import type {
 	ModelInfo,
@@ -349,7 +349,7 @@ async function findModelByName(modelName: string): Promise<ModelInfo | null> {
  * Allows users to manually set a context limit via /context-max command.
  * Non-positive values collapse back to null (no override).
  */
-const contextLimitSession = createSessionOverride<number>(limit =>
+const contextLimitSession = defineSessionValue<number>(limit =>
 	limit !== null && limit > 0 ? limit : null,
 );
 

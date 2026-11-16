@@ -44,7 +44,7 @@ nanocoder -h
 |--------|-------|-------------|
 | `--version` | `-v` | Display the installed version number |
 | `--help` | `-h` | Show usage information and available options |
-| `--vscode` | | Run in VS Code mode (for extension) |
+| `--vscode` | | **Deprecated.** Start the legacy VS Code companion (WebSocket). It will be removed in a future release; the [VS Code extension](../features/vscode-extension.md) now runs the agent itself over ACP |
 | `--vscode-port` | | Ask for a specific VS Code server port. By default it binds an ephemeral port and publishes it to a discovery file the extension reads, so this is only needed when you want a known port (e.g. for port forwarding). If the requested port is busy, the next 10 ports are tried in turn and the one actually bound is written to the discovery file and the log |
 | `--acp` | | Run as an [ACP server](../features/acp.md) for editor integration (Zed, etc.) |
 | `--provider` | | Specify AI provider by its configured name (must be configured in agents.config.json). Quote names with spaces, e.g. `--provider "GitHub Copilot"` |

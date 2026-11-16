@@ -226,6 +226,20 @@ test('ConfigurationError: cwdPath property is optional', t => {
 	t.is(error3.cwdPath, undefined);
 });
 
+test('ConfigurationError: unreadableError property is optional and captured', t => {
+	const error1 = new ConfigurationError('Test', '/path');
+	const error2 = new ConfigurationError(
+		'unreadable: /path: JSON syntax error',
+		'/path',
+		'/cwd',
+		false,
+		'unreadable: /path: JSON syntax error',
+	);
+
+	t.is(error1.unreadableError, undefined);
+	t.is(error2.unreadableError, 'unreadable: /path: JSON syntax error');
+});
+
 // ============================================================================
 // createLLMClient - No Configuration Tests
 // ============================================================================
@@ -286,6 +300,79 @@ test.serial(
 
 		t.is(error.message, 'No providers configured in agents.config.json');
 		t.true(error.isEmptyConfig);
+	},
+);
+
+test.serial(
+	'createLLMClient: attaches unreadableError with file path when agents.config.json has invalid JSON syntax',
+	async t => {
+		const invalidDir = join(testDir, 'invalid-json-test');
+		mkdirSync(invalidDir, {recursive: true});
+
+		const filePath = join(invalidDir, 'agents.config.json');
+		writeFileSync(
+			filePath,
+			'{\n  "nanocoder": {\n    "providers": [\n  }\n}',
+		);
+
+		process.cwd = () => invalidDir;
+		clearAppConfig();
+		reloadAppConfig();
+
+		const error = await t.throwsAsync(createLLMClient(), {
+			instanceOf: ConfigurationError,
+		});
+
+		t.truthy(error.unreadableError);
+		t.true(error.unreadableError?.startsWith('unreadable: '));
+		t.true(error.unreadableError?.includes(filePath));
+		t.true(error.message.includes('unreadable: '));
+		t.true(error.message.includes(filePath));
+	},
+);
+
+test.serial(
+	'createLLMClient: captures unreadableError from global config when project config has no providers but global config has invalid JSON syntax',
+	async t => {
+		const projectDir = join(testDir, 'valid-empty-project-test');
+		const globalDir = join(testDir, 'broken-global-test');
+		mkdirSync(projectDir, {recursive: true});
+		mkdirSync(globalDir, {recursive: true});
+
+		writeFileSync(
+			join(projectDir, 'agents.config.json'),
+			'{\n  "nanocoder": {\n    "providers": []\n  }\n}',
+		);
+
+		const brokenGlobalPath = join(globalDir, 'agents.config.json');
+		writeFileSync(
+			brokenGlobalPath,
+			'{\n  "nanocoder": {\n    "providers": [\n  }\n}',
+		);
+
+		const previousConfigDir = process.env.NANOCODER_CONFIG_DIR;
+		process.env.NANOCODER_CONFIG_DIR = globalDir;
+		process.cwd = () => projectDir;
+		clearAppConfig();
+		reloadAppConfig();
+
+		try {
+			const error = await t.throwsAsync(createLLMClient(), {
+				instanceOf: ConfigurationError,
+			});
+
+			t.truthy(error.unreadableError);
+			t.true(error.unreadableError?.startsWith('unreadable: '));
+			t.true(error.unreadableError?.includes(brokenGlobalPath));
+			t.true(error.message.includes('unreadable: '));
+			t.true(error.message.includes(brokenGlobalPath));
+		} finally {
+			if (previousConfigDir === undefined) {
+				delete process.env.NANOCODER_CONFIG_DIR;
+			} else {
+				process.env.NANOCODER_CONFIG_DIR = previousConfigDir;
+			}
+		}
 	},
 );
 

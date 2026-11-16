@@ -66,7 +66,7 @@ Twelve axes grouped into four buckets:
 
 Nanocoder's provider list is the broadest of any community-led project here:
 
-- **Native cloud**: Anthropic, API Route, Atlas Cloud, ChatGPT / Codex, Cheaper Inference, FutureInfra, Google Gemini, GitHub Copilot, GitHub Models, Groq, Kimi Code, MiniMax Coding, Mistral, OpenAI, OpenRouter, OrcaRouter, Poe, Requesty, Thesean AI, Together AI, Z.ai, Z.ai Coding
+- **Native cloud**: Anthropic, Atlas Cloud, ChatGPT / Codex, Google Gemini, GitHub Copilot, GitHub Models, Groq, Kimi Code, MiniMax Coding, Mistral, OpenAI, OpenRouter, Poe, Requesty, Thesean AI, Together AI, Z.ai, Z.ai Coding
 - **Local**: Atomic Chat, Ollama, llama.cpp, llama-swap, LM Studio, LocalAI, MLX Server, vLLM
 - **Custom**: any OpenAI-compatible endpoint
 
