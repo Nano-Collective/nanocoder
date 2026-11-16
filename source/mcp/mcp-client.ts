@@ -586,8 +586,10 @@ export class MCPClient {
 		for (const [serverName, serverTools] of this.serverTools.entries()) {
 			for (const mcpTool of serverTools) {
 				const toolName = mcpTool.name;
-				nativeTools[toolName] = toNativeTool(serverName, mcpTool, input =>
-					this.callTool(toolName, input),
+				nativeTools[toolName] = toNativeTool(
+					serverName,
+					mcpTool,
+					(input, options) => this.callTool(toolName, input, options),
 				);
 			}
 		}
@@ -643,8 +645,8 @@ export class MCPClient {
 				const coreTool = nativeTools[toolName];
 
 				if (coreTool) {
-					const handler = createValidatedHandler(coreTool, args =>
-						this.callTool(toolName, args),
+					const handler = createValidatedHandler(coreTool, (args, options) =>
+						this.callTool(toolName, args, options),
 					);
 					const approval = createMCPToolApproval({
 						readOnly: mcpTool.readOnly === true,
@@ -685,6 +687,7 @@ export class MCPClient {
 	async callTool(
 		toolName: string,
 		args: Record<string, unknown>,
+		options?: {abortSignal?: AbortSignal},
 	): Promise<string | StructuredToolOutput> {
 		// First, try to find which server has this tool
 		const toolMapping = this.getToolMapping();
@@ -698,7 +701,12 @@ export class MCPClient {
 				const originalToolName = parts.slice(2).join('_');
 				const fallbackClient = this.getHealthyClient(serverName);
 				return this.healthMonitor.trackInFlight(serverName, () =>
-					this.executeToolCall(fallbackClient, originalToolName, args),
+					this.executeToolCall(
+						fallbackClient,
+						originalToolName,
+						args,
+						options?.abortSignal,
+					),
 				);
 			}
 			throw new Error(`MCP tool not found: ${toolName}`);
@@ -712,7 +720,12 @@ export class MCPClient {
 		const sanitizedArgs = coerceStringArguments(toolDef, args);
 
 		return this.healthMonitor.trackInFlight(mapping.serverName, () =>
-			this.executeToolCall(client, mapping.originalName, sanitizedArgs),
+			this.executeToolCall(
+				client,
+				mapping.originalName,
+				sanitizedArgs,
+				options?.abortSignal,
+			),
 		);
 	}
 
@@ -720,6 +733,7 @@ export class MCPClient {
 		client: Client,
 		toolName: string,
 		args: Record<string, unknown>,
+		abortSignal?: AbortSignal,
 	): Promise<string | StructuredToolOutput> {
 		const correlationId = generateCorrelationId();
 		const metrics = startMetrics();
@@ -733,10 +747,13 @@ export class MCPClient {
 			});
 
 			try {
-				const result = await client.callTool({
+				const params = {
 					name: toolName,
 					arguments: args,
-				});
+				};
+				const result = abortSignal
+					? await client.callTool(params, undefined, {signal: abortSignal})
+					: await client.callTool(params);
 
 				this.logger.debug('MCP tool executed successfully', {
 					toolName,
@@ -782,10 +799,18 @@ export class MCPClient {
 
 				return output('Tool executed successfully (no output)');
 			} catch (error) {
+				const finalMetrics = endMetrics(metrics);
+				if (abortSignal?.aborted) {
+					this.logger.debug('MCP tool execution cancelled', {
+						toolName,
+						duration: `${finalMetrics.duration.toFixed(2)}ms`,
+						correlationId,
+					});
+					throw error;
+				}
+
 				const errorMessage = formatError(error);
 				const errorName = error instanceof Error ? error.name : 'Unknown';
-
-				const finalMetrics = endMetrics(metrics);
 
 				this.logger.error('MCP tool execution failed', {
 					toolName,

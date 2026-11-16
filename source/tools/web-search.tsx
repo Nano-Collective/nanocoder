@@ -33,6 +33,7 @@ interface BraveSearchResponse {
 export const executeWebSearch = async (
 	args: SearchArgs,
 	apiKeyOverride?: string,
+	abortSignal?: AbortSignal,
 ): Promise<string> => {
 	const apiKey = apiKeyOverride ?? getBraveSearchApiKey();
 	if (!apiKey) {
@@ -53,7 +54,12 @@ export const executeWebSearch = async (
 				'Accept-Encoding': 'gzip',
 				'X-Subscription-Token': apiKey,
 			},
-			signal: AbortSignal.timeout(TIMEOUT_WEB_SEARCH_MS),
+			signal: abortSignal
+				? AbortSignal.any([
+						abortSignal,
+						AbortSignal.timeout(TIMEOUT_WEB_SEARCH_MS),
+					])
+				: AbortSignal.timeout(TIMEOUT_WEB_SEARCH_MS),
 		});
 
 		if (response.status === 401 || response.status === 403) {
@@ -90,6 +96,7 @@ export const executeWebSearch = async (
 
 		return formattedResults;
 	} catch (error: unknown) {
+		if (abortSignal?.aborted) throw error;
 		if (
 			error instanceof Error &&
 			(error.name === 'AbortError' || error.name === 'TimeoutError')
@@ -123,8 +130,8 @@ const webSearchCoreTool = tool({
 		},
 		required: ['query'],
 	}),
-	execute: async (args, _options) => {
-		return await executeWebSearch(args);
+	execute: async (args, options) => {
+		return await executeWebSearch(args, undefined, options?.abortSignal);
 	},
 });
 

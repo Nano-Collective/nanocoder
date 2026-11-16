@@ -1201,7 +1201,7 @@ test.serial(
 		const results = await executePromise;
 		t.true(toolAborted, 'Tool should have caught abort event mid-flight');
 		t.is(results.length, 1);
-		t.true(results[0].content.includes('Aborted mid-flight'));
+		t.is(results[0].content, 'Tool execution was cancelled by the user.');
 
 		setToolRegistryGetter(createMockToolRegistry);
 	},

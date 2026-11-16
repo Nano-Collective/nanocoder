@@ -20,6 +20,10 @@ interface FetchArgs {
 
 const MAX_REDIRECTS = 5;
 const URL_FETCH_TIMEOUT_MS = 15_000;
+const MAX_FETCH_RESPONSE_BYTES = 10 * 1024 * 1024;
+const MAX_FETCH_ATTEMPTS = 3;
+const FETCH_RETRY_DELAY_MS = 500;
+const MAX_FETCH_RETRY_DELAY_MS = 30_000;
 const REDIRECT_STATUS_CODES = new Set([301, 302, 303, 307, 308]);
 
 /** Statuses that mean "this server will not answer a HEAD", so retry as GET. */
@@ -28,49 +32,59 @@ const HEAD_UNSUPPORTED_STATUS_CODES = new Set([400, 403, 405, 501]);
 /**
  * Ask one hop what it is, without downloading it.
  *
- * The walk below only needs a status and a `Location`, so it asks for headers
- * rather than a body. A GET here would transfer the whole final page and
- * throw it away, since `convertToMarkdown` fetches the resolved URL itself -
- * every `fetch_url` call would move the target twice, doubling bandwidth and
- * rate-limit consumption and hitting any endpoint that meters or logs
- * requests once per call more than it should.
+ * The redirect walk only needs a status and a `Location`, so it asks for
+ * headers rather than a body. The resolved page is downloaded once afterward
+ * for conversion; fetching its body here would waste bandwidth.
  *
  * Not every server answers HEAD. One that refuses, or that fails outright,
  * falls back to a GET whose body is discarded - the old behaviour, now only
  * on the servers that actually need it.
  */
-const probeHop = async (url: string): Promise<Response> => {
+const createUrlFetchSignal = (abortSignal?: AbortSignal): AbortSignal =>
+	abortSignal
+		? AbortSignal.any([abortSignal, AbortSignal.timeout(URL_FETCH_TIMEOUT_MS)])
+		: AbortSignal.timeout(URL_FETCH_TIMEOUT_MS);
+
+const probeHop = async (
+	url: string,
+	abortSignal?: AbortSignal,
+): Promise<Response> => {
 	try {
 		const head = await fetch(url, {
 			method: 'HEAD',
 			redirect: 'manual',
-			signal: AbortSignal.timeout(URL_FETCH_TIMEOUT_MS),
+			signal: createUrlFetchSignal(abortSignal),
 		});
 		if (!HEAD_UNSUPPORTED_STATUS_CODES.has(head.status)) {
 			return head;
 		}
 		await head.body?.cancel();
-	} catch {
+	} catch (error) {
+		if (abortSignal?.aborted) throw error;
 		// Network-level refusal of the HEAD itself; let the GET report the
 		// real error so the message the model sees is unchanged.
 	}
 
 	return await fetch(url, {
 		redirect: 'manual',
-		signal: AbortSignal.timeout(URL_FETCH_TIMEOUT_MS),
+		signal: createUrlFetchSignal(abortSignal),
 	});
 };
 
-const resolveSafeRedirects = async (url: string): Promise<string> => {
+const resolveSafeRedirects = async (
+	url: string,
+	abortSignal?: AbortSignal,
+): Promise<string> => {
 	let currentUrl = url;
 
 	for (let redirectCount = 0; ; redirectCount++) {
+		abortSignal?.throwIfAborted();
 		const validation = await fetchUrlValidator({url: currentUrl});
 		if (!validation.valid) {
 			throw new Error(validation.error);
 		}
 
-		const response = await probeHop(currentUrl);
+		const response = await probeHop(currentUrl, abortSignal);
 
 		try {
 			if (!REDIRECT_STATUS_CODES.has(response.status)) {
@@ -93,6 +107,152 @@ const resolveSafeRedirects = async (url: string): Promise<string> => {
 			await response.body?.cancel();
 		}
 	}
+};
+
+const waitBeforeFetchRetry = (
+	delayMs: number,
+	abortSignal?: AbortSignal,
+): Promise<void> =>
+	new Promise((resolve, reject) => {
+		if (abortSignal?.aborted) {
+			reject(abortSignal.reason);
+			return;
+		}
+		const timer = setTimeout(() => {
+			abortSignal?.removeEventListener('abort', onAbort);
+			resolve();
+		}, delayMs);
+		const onAbort = () => {
+			clearTimeout(timer);
+			abortSignal?.removeEventListener('abort', onAbort);
+			reject(abortSignal?.reason);
+		};
+		abortSignal?.addEventListener('abort', onAbort, {once: true});
+	});
+
+const getFetchRetryDelay = (
+	attempt: number,
+	retryAfter: string | null,
+): number => {
+	const retryAfterValue = retryAfter?.trim();
+	if (retryAfterValue) {
+		const seconds = Number(retryAfterValue);
+		const retryAt = Date.parse(retryAfterValue);
+		const requestedDelay = Number.isFinite(seconds)
+			? seconds * 1000
+			: Number.isFinite(retryAt)
+				? Math.max(0, retryAt - Date.now())
+				: undefined;
+		if (requestedDelay !== undefined) {
+			return Math.min(requestedDelay, MAX_FETCH_RETRY_DELAY_MS);
+		}
+	}
+	const exponentialDelay = FETCH_RETRY_DELAY_MS * 2 ** attempt;
+	return Math.min(
+		exponentialDelay + exponentialDelay * 0.25 * Math.random(),
+		MAX_FETCH_RETRY_DELAY_MS,
+	);
+};
+
+const readPageResponse = async (response: Response): Promise<Buffer> => {
+	const contentLength = Number(response.headers.get('content-length'));
+	if (
+		Number.isFinite(contentLength) &&
+		contentLength > MAX_FETCH_RESPONSE_BYTES
+	) {
+		await response.body?.cancel();
+		throw new Error(
+			`Response too large: Content-Length ${contentLength} exceeds maxBytes ${MAX_FETCH_RESPONSE_BYTES}`,
+		);
+	}
+
+	if (!response.body) {
+		const body = Buffer.from(await response.arrayBuffer());
+		if (body.byteLength > MAX_FETCH_RESPONSE_BYTES) {
+			throw new Error(
+				`Response too large: body exceeds maxBytes ${MAX_FETCH_RESPONSE_BYTES}`,
+			);
+		}
+		return body;
+	}
+
+	const reader = response.body.getReader();
+	const chunks: Uint8Array[] = [];
+	let received = 0;
+	try {
+		while (true) {
+			const {value, done} = await reader.read();
+			if (done) break;
+			if (!value) continue;
+			received += value.byteLength;
+			if (received > MAX_FETCH_RESPONSE_BYTES) {
+				await reader.cancel();
+				throw new Error(
+					`Response too large: body exceeds maxBytes ${MAX_FETCH_RESPONSE_BYTES}`,
+				);
+			}
+			chunks.push(value);
+		}
+	} finally {
+		reader.releaseLock();
+	}
+	return Buffer.concat(chunks);
+};
+
+const fetchPageResponse = async (
+	url: string,
+	abortSignal?: AbortSignal,
+): Promise<Buffer> => {
+	for (let attempt = 0; attempt < MAX_FETCH_ATTEMPTS; attempt++) {
+		let response: Response;
+		try {
+			response = await fetch(url, {
+				headers: {
+					'User-Agent':
+						'Mozilla/5.0 (compatible; get-md/1.0; +https://github.com/nano-collective/get-md)',
+					Accept:
+						'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+					'Accept-Language': 'en-US,en;q=0.5',
+					'Accept-Encoding': 'gzip, deflate, br',
+				},
+				redirect: 'manual',
+				signal: createUrlFetchSignal(abortSignal),
+			});
+		} catch (error) {
+			if (abortSignal?.aborted || attempt === MAX_FETCH_ATTEMPTS - 1) {
+				throw error;
+			}
+			await waitBeforeFetchRetry(
+				getFetchRetryDelay(attempt, null),
+				abortSignal,
+			);
+			continue;
+		}
+
+		if (!response.ok) {
+			try {
+				await response.body?.cancel();
+			} catch {
+				// Preserve the HTTP status as the useful fetch error.
+			}
+			const retryable =
+				response.status === 429 ||
+				(response.status >= 500 && response.status < 600);
+			if (!retryable || attempt === MAX_FETCH_ATTEMPTS - 1) {
+				throw new Error(
+					`Failed to fetch URL: HTTP ${response.status}: ${response.statusText}`,
+				);
+			}
+			await waitBeforeFetchRetry(
+				getFetchRetryDelay(attempt, response.headers.get('retry-after')),
+				abortSignal,
+			);
+			continue;
+		}
+
+		return await readPageResponse(response);
+	}
+	throw new Error('Failed to fetch URL');
 };
 
 /**
@@ -203,12 +363,15 @@ const windowContent = (content: string, args: FetchArgs): string => {
 	return `${text}\n\n[Content truncated - showing characters ${start}-${end} of ${total}. Call fetch_url again with start_index=${end} to continue.]`;
 };
 
-const executeFetchUrl = async (args: FetchArgs): Promise<string> => {
+const executeFetchUrl = async (
+	args: FetchArgs,
+	abortSignal?: AbortSignal,
+): Promise<string> => {
 	try {
 		// Walked and validated on every call, cache hit or not: a name that has
 		// since started resolving somewhere internal, or a redirect that now
 		// points there, must be refused on the tenth call as on the first.
-		const safeUrl = await resolveSafeRedirects(args.url);
+		const safeUrl = await resolveSafeRedirects(args.url, abortSignal);
 
 		// Keyed by where the redirects landed, so a chain that now ends
 		// elsewhere converts that page instead of the one it used to reach.
@@ -217,16 +380,21 @@ const executeFetchUrl = async (args: FetchArgs): Promise<string> => {
 			return windowContent(cached, args);
 		}
 
-		// Use get-md to convert URL to LLM-friendly markdown (lazy import
-		// so the ~100-module HTML-parsing graph only loads when the tool
-		// actually runs).
+		// get-md's URL fetcher does not accept AbortSignal; fetch the bounded
+		// response here so cancelling the turn also closes its network request.
 		const {convertToMarkdown} = await import('@nanocollective/get-md');
 		// The redirect chain was validated hop by hop above. Keep redirects off
 		// for the conversion fetch as well, so a changed response cannot escape
 		// validation between the probe and conversion requests. The conversion
 		// runs guarded to protect `globalThis.process` from happy-dom overwrites.
+		const body = await fetchPageResponse(safeUrl, abortSignal);
 		const result = await withPreservedProcess(() =>
-			convertToMarkdown(safeUrl, {followRedirects: false}),
+			new URL(safeUrl).pathname.toLowerCase().endsWith('.pdf')
+				? convertToMarkdown(body, {baseUrl: safeUrl})
+				: convertToMarkdown(new TextDecoder().decode(body), {
+						inputType: 'html',
+						baseUrl: safeUrl,
+					}),
 		);
 
 		const content = result.markdown;
@@ -239,6 +407,7 @@ const executeFetchUrl = async (args: FetchArgs): Promise<string> => {
 
 		return windowContent(content, args);
 	} catch (error: unknown) {
+		if (abortSignal?.aborted) throw error;
 		const message = formatError(error);
 		throw new Error(
 			message.startsWith('Failed to fetch URL:')
@@ -271,8 +440,8 @@ const fetchUrlCoreTool = tool({
 		},
 		required: ['url'],
 	}),
-	execute: async (args, _options) => {
-		return await executeFetchUrl(args);
+	execute: async (args, options) => {
+		return await executeFetchUrl(args, options?.abortSignal);
 	},
 });
 

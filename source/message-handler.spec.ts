@@ -764,3 +764,32 @@ test('processToolUse - does not run a tool once the turn is cancelled', async t 
 	t.true(result.isError);
 	t.regex(String(result.content), /cancelled by the user/i);
 });
+
+test('processToolUse - returns when an in-flight handler ignores cancellation', async t => {
+	let finishHandler!: (value: string) => void;
+	let handlerStarted!: () => void;
+	const started = new Promise<void>(resolve => {
+		handlerStarted = resolve;
+	});
+	const handlerResult = new Promise<string>(resolve => {
+		finishHandler = resolve;
+	});
+	setToolRegistryGetter(() => ({
+		slow_tool: async () => {
+			handlerStarted();
+			return await handlerResult;
+		},
+	}));
+	const controller = new AbortController();
+	const pending = processToolUse(createMockToolCall('slow_tool', {}), {
+		abortSignal: controller.signal,
+	});
+
+	await started;
+	controller.abort();
+	const result = await pending;
+	finishHandler('completed after cancellation');
+
+	t.true(result.isError);
+	t.regex(String(result.content), /cancelled by the user/i);
+});

@@ -524,6 +524,44 @@ test('executeWebSearch throws on network error', async t => {
 	}
 });
 
+test.serial('web_search aborts the in-flight request when the turn is cancelled', async t => {
+	if (!executeWebSearch) {
+		t.pass('Skipping test - web-search module not available');
+		return;
+	}
+	const originalFetch = globalThis.fetch;
+	const controller = new AbortController();
+	let requestStarted!: () => void;
+	let requestAborted = false;
+	const started = new Promise<void>(resolve => {
+		requestStarted = resolve;
+	});
+	globalThis.fetch = async (_input, init) =>
+		await new Promise<Response>((_resolve, reject) => {
+			const signal = init?.signal;
+			if (!signal) throw new Error('web_search did not pass an abort signal');
+			signal.addEventListener(
+				'abort',
+				() => {
+					requestAborted = true;
+					reject(signal.reason);
+				},
+				{once: true},
+			);
+			requestStarted();
+		});
+
+	try {
+		const pending = executeWebSearch({query: 'slow'}, 'test-key', controller.signal);
+		await started;
+		controller.abort();
+		await t.throwsAsync(pending);
+		t.true(requestAborted);
+	} finally {
+		globalThis.fetch = originalFetch;
+	}
+});
+
 test('executeWebSearch handles non-Error objects in catch', async t => {
 	if (!executeWebSearch) {
 		t.pass('Skipping test - web-search module not available');
