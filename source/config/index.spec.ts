@@ -807,9 +807,11 @@ async function withModeProvidersConfig(
 		const fullConfig = {
 			...configData,
 			nanocoder: {
-				...(configData.nanocoder as Record<string, unknown> || {}),
-				providers,
-			}
+				...((configData.nanocoder as Record<string, unknown>) || {}),
+				providers:
+					((configData.nanocoder as Record<string, unknown> | undefined)
+						?.providers as unknown[]) ?? providers,
+			},
 		};
 
 		writeFileSync(
@@ -943,6 +945,109 @@ test.serial('modeProviders accepts model if provider has empty models list', asy
 			});
 		}
 	);
+});
+
+test.serial('modeProviders reports clear error and does not throw when provider has no models list', async t => {
+	const errors: string[] = [];
+	const {setMessageQueueSink} = await import('../utils/message-queue-core.js');
+	setMessageQueueSink((type, message) => {
+		if (type === 'error') {
+			errors.push(message);
+		}
+	});
+
+	try {
+		await withModeProvidersConfig(
+			'no-models-list',
+			{
+				nanocoder: {
+					providers: [
+						{
+							name: 'nomodels',
+							baseUrl: 'http://x',
+						},
+					],
+					modeProviders: {
+						plan: {
+							provider: 'nomodels',
+							model: 'm',
+						},
+					},
+				},
+			},
+			modeProviders => {
+				t.is(modeProviders, undefined);
+			},
+		);
+
+		t.true(
+			errors.some(
+				err =>
+					err.includes('Provider "nomodels" (modeProviders.plan) has no "models" list') &&
+					err.includes('agents.config.json'),
+			),
+		);
+		t.false(errors.some(err => err.includes('TypeError')));
+	} finally {
+		setMessageQueueSink(null);
+	}
+});
+
+test.serial('modeProviders keeps valid entries when one provider has no models list', async t => {
+	const errors: string[] = [];
+	const {setMessageQueueSink} = await import('../utils/message-queue-core.js');
+	setMessageQueueSink((type, message) => {
+		if (type === 'error') {
+			errors.push(message);
+		}
+	});
+
+	try {
+		await withModeProvidersConfig(
+			'partial-no-models-list',
+			{
+				nanocoder: {
+					providers: [
+						{
+							name: 'nomodels',
+							baseUrl: 'http://x',
+						},
+						{
+							name: 'validprovider',
+							models: ['model1'],
+						},
+					],
+					modeProviders: {
+						plan: {
+							provider: 'nomodels',
+							model: 'm',
+						},
+						yolo: {
+							provider: 'validprovider',
+							model: 'model1',
+						},
+					},
+				},
+			},
+			modeProviders => {
+				t.deepEqual(modeProviders, {
+					yolo: {
+						provider: 'validprovider',
+						model: 'model1',
+					},
+				});
+			},
+		);
+
+		t.true(
+			errors.some(err =>
+				err.includes('Provider "nomodels" (modeProviders.plan) has no "models" list'),
+			),
+		);
+		t.false(errors.some(err => err.includes('TypeError')));
+	} finally {
+		setMessageQueueSink(null);
+	}
 });
 
 // Tests for tune (nanocoder.tune)
