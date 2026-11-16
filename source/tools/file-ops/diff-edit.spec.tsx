@@ -7,8 +7,12 @@ import {themes} from '../../config/themes.js';
 import {MAX_CACHEABLE_FILE_SIZE_BYTES} from '../../constants.js';
 import {ThemeContext} from '../../hooks/useTheme.js';
 import {resolveToolApproval} from '../approval-policy.js';
-import {clearReadTracker, markFileSeen} from '../../utils/read-tracker.js';
+import {clearReadTracker, markFileSeenAndVisible} from '../runtime/read-tracker.js';
 import {diffEditTool, parseDiffEditBlocks} from './diff-edit.js';
+import {
+	resetFirewallConfig,
+	setFirewallConfig,
+} from '../../firewall/mutation-firewall.js';
 
 console.log(`\ndiff-edit.spec.tsx - ${React.version}`);
 
@@ -31,6 +35,7 @@ let testDir: string;
 test.beforeEach(async () => {
 	testDir = await mkdtemp(join(process.cwd(), '.diff-edit-test-'));
 	clearReadTracker();
+	resetFirewallConfig();
 });
 
 test.afterEach(async () => {
@@ -332,7 +337,7 @@ test('diff_edit validator accepts a unique block after file is read', async t =>
 		return;
 	}
 	const filePath = await createTestFile('test.ts', 'const oldValue = 1;\n');
-	markFileSeen(filePath);
+	markFileSeenAndVisible(filePath);
 
 	const result = await validator({
 		path: projectRelativePath(filePath),
@@ -412,7 +417,7 @@ test('diff_edit validator refuses a .docx path', async t => {
 	}
 
 	const filePath = await createTestFile('notes.docx', 'PK fake docx bytes');
-	markFileSeen(filePath);
+	markFileSeenAndVisible(filePath);
 
 	const result = await validator({
 		path: projectRelativePath(filePath),
@@ -470,7 +475,7 @@ test('diff_edit validator refuses a Latin-1 file', async t => {
 
 	const filePath = join(testDir, 'legacy.js');
 	await writeFile(filePath, LATIN1_BYTES);
-	markFileSeen(filePath);
+	markFileSeenAndVisible(filePath);
 
 	const result = await validator({
 		path: projectRelativePath(filePath),
@@ -571,4 +576,77 @@ test('diff_edit formatter does not render description when omitted', async t => 
 	const output = lastFrame();
 	t.truthy(output);
 	t.notRegex(output!, /Description:/);
+});
+
+test('diff_edit: throws when mutation firewall blocks test deletion', async t => {
+	setFirewallConfig({mode: 'strict', enabled: true});
+	const filePath = await createTestFile(
+		'math.spec.ts',
+		"test('adds numbers', () => {});\ntest('multiplies numbers', () => {});\n",
+	);
+	markFileSeenAndVisible(filePath);
+	const relPath = projectRelativePath(filePath);
+
+	const diff = `<<<<<<< SEARCH
+test('adds numbers', () => {});
+test('multiplies numbers', () => {});
+=======
+test('adds numbers', () => {});
+>>>>>>> REPLACE`;
+
+	await t.throwsAsync(
+		async () => {
+			await executeDiffEdit({
+				path: relPath,
+				diff,
+			});
+		},
+		{message: /\[Mutation Firewall\] Blocked mutation/},
+	);
+
+	const content = await readFile(filePath, 'utf-8');
+	t.true(content.includes('multiplies numbers'));
+});
+
+// ============================================================================
+// Line-level visibility across the agent's own edits
+// ============================================================================
+
+test.serial('diff_edit: a second edit after a first needs no re-read', async t => {
+	const validator = diffEditTool.validator!;
+	const lines = Array.from({length: 12}, (_, i) => `line ${i + 1}`);
+	const filePath = await createTestFile('multi.txt', `${lines.join('\n')}\n`);
+	markFileSeenAndVisible(filePath);
+	const path = projectRelativePath(filePath);
+	const ctx = {toolCallId: 'test', messages: []};
+
+	// The first edit turns line 2 into three lines, which moves the rest down.
+	const first = {path, diff: diffBlock('line 2', 'a\nb\nc')};
+	t.deepEqual(await validator(first), {valid: true});
+	await diffEditTool.tool.execute!(first, ctx);
+
+	// Line 9 was read earlier and is unchanged, so it can still be edited.
+	const second = {path, diff: diffBlock('line 9', 'nine')};
+	t.deepEqual(await validator(second), {valid: true});
+	await diffEditTool.tool.execute!(second, ctx);
+
+	const content = await readFile(filePath, 'utf-8');
+	t.true(content.startsWith('line 1\na\nb\nc\nline 3\n'));
+	t.true(content.includes('nine\n'));
+});
+
+test.serial('diff_edit: a file changed outside after the read is refused', async t => {
+	const validator = diffEditTool.validator!;
+	const filePath = await createTestFile('outside.txt', 'one\ntwo\nthree\n');
+	markFileSeenAndVisible(filePath);
+
+	// Someone saves the file in an editor while the agent is working.
+	await writeFile(filePath, 'one\ntwo\nthree\nfour added outside\n', 'utf-8');
+
+	const result = await validator({
+		path: projectRelativePath(filePath),
+		diff: diffBlock('two', 'TWO'),
+	});
+	t.false(result.valid);
+	if (!result.valid) t.regex(result.error, /modified externally/);
 });

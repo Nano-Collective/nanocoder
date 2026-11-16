@@ -10,4 +10,10 @@ export interface AcpInitContext {
 	model: string;
 	/** Starting mode of every session (`--mode`); `auto-accept` when unset. */
 	initialMode?: DevelopmentMode;
+	/**
+	 * The directory the server was started in, after its own trust check
+	 * passed (`--trust-directory` included). When set, a session in any other
+	 * directory is refused unless that directory is trusted too.
+	 */
+	launchDirectory?: string;
 }

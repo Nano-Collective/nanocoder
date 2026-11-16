@@ -1,4 +1,3 @@
-import cp from 'node:child_process';
 import crypto from 'node:crypto';
 import {
 	chmodSync,
@@ -11,6 +10,7 @@ import https from 'node:https';
 import {cpus, homedir} from 'node:os';
 import {delimiter, join} from 'node:path';
 import {platform} from 'node:process';
+import crossSpawn from 'cross-spawn';
 
 export interface DependencyCheckResult {
 	installed: boolean;
@@ -150,7 +150,7 @@ async function defaultCheckCommand(
 ): Promise<boolean> {
 	return new Promise(resolve => {
 		try {
-			const proc = cp.spawn(cmd, args, {stdio: 'ignore'});
+			const proc = crossSpawn.spawn(cmd, args, {stdio: 'ignore'});
 			proc.on('close', code => resolve(code === 0));
 			proc.on('error', () => resolve(false));
 		} catch {
@@ -319,7 +319,9 @@ export async function defaultExec(
 				tail = tail.slice(-OUTPUT_TAIL_BYTES);
 			}
 		};
-		const proc = cp.spawn(command, args, {stdio: ['ignore', 'pipe', 'pipe']});
+		const proc = crossSpawn.spawn(command, args, {
+			stdio: ['ignore', 'pipe', 'pipe'],
+		});
 		proc.stdout?.on('data', append);
 		proc.stderr?.on('data', append);
 		proc.on('close', code => {

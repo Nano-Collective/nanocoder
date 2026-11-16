@@ -15,13 +15,21 @@ import {
 } from '../../services/session-cwd.js';
 import {stringReplaceDisplayPath} from './string-replace-preview.js';
 import {stringReplaceTool} from './string-replace.js';
-import {clearReadTracker, markFileSeen} from '../../utils/read-tracker.js';
+import {clearReadTracker, markFileSeenAndVisible} from '../runtime/read-tracker.js';
+import {
+	resetFirewallConfig,
+	setFirewallConfig,
+} from '../../firewall/mutation-firewall.js';
 import {readFileTool} from '../read-file.js';
 import {buildMinimalPdf} from '../../test-utils/minimal-pdf.js';
 
 // ============================================================================
 // Test Helpers
 // ============================================================================
+
+// biome-ignore lint/suspicious/noControlCharactersInRegex: stripping terminal styling before text-only assertions.
+const ANSI_RE = /\x1b\[[0-9;]*m/g;
+const stripAnsi = (value: string) => value.replace(ANSI_RE, '');
 
 console.log(`\nstring-replace.spec.tsx – ${React.version}`);
 
@@ -48,6 +56,7 @@ test.beforeEach(async () => {
 	// Read-before-edit state is process-global; reset it between serial tests
 	// so a file "seen" by one test can't authorize an edit in another.
 	clearReadTracker();
+	resetFirewallConfig();
 });
 
 // Clean up temporary directory after each test
@@ -427,7 +436,7 @@ test('string_replace validator: accepts valid input', async t => {
 	const originalCwd = process.cwd();
 	try {
 		process.chdir(testDir);
-		markFileSeen('test.txt');
+		markFileSeenAndVisible('test.txt');
 
 		const result = await stringReplaceTool.validator({
 			path: 'test.txt',
@@ -504,7 +513,7 @@ test('string_replace validator: rejects when content not found', async t => {
 	const originalCwd = process.cwd();
 	try {
 		process.chdir(testDir);
-		markFileSeen('test.txt');
+		markFileSeenAndVisible('test.txt');
 
 		const result = await stringReplaceTool.validator({
 			path: 'test.txt',
@@ -535,7 +544,7 @@ test('string_replace validator: rejects when multiple matches found', async t =>
 	const originalCwd = process.cwd();
 	try {
 		process.chdir(testDir);
-		markFileSeen('test.txt');
+		markFileSeenAndVisible('test.txt');
 
 		const result = await stringReplaceTool.validator({
 			path: 'test.txt',
@@ -592,7 +601,7 @@ test('string_replace validator: allows editing after the file is read', async t 
 	try {
 		process.chdir(testDir);
 		// Simulate a prior read_file call against this file.
-		markFileSeen('test.txt');
+		markFileSeenAndVisible('test.txt');
 
 		const result = await stringReplaceTool.validator({
 			path: 'test.txt',
@@ -814,7 +823,7 @@ test('string_replace validator: handles file read errors', async t => {
 	const filePath = await createTestFile('test.txt', 'content\n');
 
 	// Mock getCachedFileContent to throw an error
-	const originalCache = await import('../../utils/file-cache.js');
+	const originalCache = await import('../../utils/fs/file-cache.js');
 	const mockError = new Error('EACCES: permission denied');
 
 	// Since we can't easily mock the file cache, we'll test with an invalid path
@@ -1266,7 +1275,7 @@ test('string_replace validator: refuses a .docx path', async t => {
 	const originalCwd = process.cwd();
 	try {
 		process.chdir(testDir);
-		markFileSeen('spec.docx');
+		markFileSeenAndVisible('spec.docx');
 
 		const result = await stringReplaceTool.validator({
 			path: 'spec.docx',
@@ -1352,7 +1361,7 @@ test('string_replace validator: refuses a Latin-1 file', async t => {
 	const originalCwd = process.cwd();
 	try {
 		process.chdir(testDir);
-		markFileSeen('legacy.txt');
+		markFileSeenAndVisible('legacy.txt');
 
 		const result = await stringReplaceTool.validator({
 			path: 'legacy.txt',
@@ -1456,3 +1465,209 @@ test('string_replace: formatter does not render description when omitted', async
 	t.notRegex(output!, /Description:/);
 });
 
+
+// ============================================================================
+// CRLF files (#1930)
+// ============================================================================
+
+test('string_replace: multi-line LF edit matches a CRLF file', async t => {
+	const filePath = await createTestFile('a.txt', 'one\r\ntwo\r\nthree\r\n');
+
+	const result = await executeStringReplace({
+		path: filePath,
+		old_str: 'one\ntwo',
+		new_str: 'ONE\nTWO',
+	});
+
+	t.is(await readFile(filePath, 'utf-8'), 'ONE\r\nTWO\r\nthree\r\n');
+	t.true(result.includes('Successfully replaced content at lines 1-2'));
+});
+
+test('string_replace: added lines in a CRLF file keep CRLF', async t => {
+	const filePath = await createTestFile('b.txt', 'one\r\ntwo\r\nthree\r\n');
+
+	await executeStringReplace({
+		path: filePath,
+		old_str: 'two',
+		new_str: 'TWO\nTWO-b',
+	});
+
+	t.is(await readFile(filePath, 'utf-8'), 'one\r\nTWO\r\nTWO-b\r\nthree\r\n');
+});
+
+test('string_replace validator: accepts an LF edit for a CRLF file', async t => {
+	await createTestFile('test.txt', 'one\r\ntwo\r\nthree\r\n');
+
+	if (!stringReplaceTool.validator) {
+		t.fail('Validator not defined');
+		return;
+	}
+
+	const originalCwd = process.cwd();
+	try {
+		process.chdir(testDir);
+		markFileSeenAndVisible('test.txt');
+
+		const result = await stringReplaceTool.validator({
+			path: 'test.txt',
+			old_str: 'one\ntwo',
+			new_str: 'ONE\nTWO',
+		});
+
+		t.true(result.valid);
+	} finally {
+		process.chdir(originalCwd);
+	}
+});
+
+test('string_replace formatter: previews an LF edit for a CRLF file', async t => {
+	const filePath = await createTestFile('test.ts', 'one\r\ntwo\r\nthree\r\n');
+
+	if (!stringReplaceTool.formatter) {
+		t.fail('Formatter not defined');
+		return;
+	}
+
+	const preview = await stringReplaceTool.formatter({
+		path: filePath,
+		old_str: 'one\ntwo',
+		new_str: 'ONE\nTWO',
+	});
+	const {lastFrame} = render(<TestThemeProvider>{preview}</TestThemeProvider>);
+
+	t.false(lastFrame()?.includes('Content not found') ?? true);
+	t.true(lastFrame()?.includes('ONE') ?? false);
+});
+
+test('string_replace formatter: result shows the edit line in a mixed-ending file', async t => {
+	const filePath = await createTestFile(
+		'mixed.txt',
+		'a\r\nb\r\nc\r\nd\r\nx\ny\n',
+	);
+	const args = {path: filePath, old_str: 'x\ny', new_str: 'X\nY'};
+
+	const result = await executeStringReplace(args);
+	t.is(await readFile(filePath, 'utf-8'), 'a\r\nb\r\nc\r\nd\r\nX\nY\n');
+
+	if (!stringReplaceTool.formatter) {
+		t.fail('Formatter not defined');
+		return;
+	}
+	const element = await stringReplaceTool.formatter(args, result);
+	const {lastFrame} = render(<TestThemeProvider>{element}</TestThemeProvider>);
+	t.true(stripAnsi(lastFrame() ?? '').includes('Location: lines 5-6'));
+});
+
+test('string_replace: throws when mutation firewall blocks test deletion', async t => {
+	setFirewallConfig({mode: 'strict', enabled: true});
+	const filePath = await createTestFile(
+		'feature.spec.ts',
+		"test('feature A', () => {});\ntest('feature B', () => {});\n",
+	);
+	markFileSeenAndVisible(filePath);
+
+	await t.throwsAsync(
+		async () => {
+			await executeStringReplace({
+				path: filePath,
+				old_str: "test('feature B', () => {});\n",
+				new_str: '',
+			});
+		},
+		{message: /\[Mutation Firewall\] Blocked mutation/},
+	);
+
+	const content = await readFile(filePath, 'utf-8');
+	t.true(content.includes('feature B'));
+});
+
+
+// ============================================================================
+// Line-level visibility across the agent's own edits
+// ============================================================================
+
+const numberedLines = (count: number) =>
+	`${Array.from({length: count}, (_, i) => `line ${i + 1}`).join('\n')}\n`;
+
+test.serial('string_replace: a second edit after a first needs no re-read', async t => {
+	await createTestFile('multi.txt', numberedLines(12));
+	const originalCwd = process.cwd();
+	try {
+		process.chdir(testDir);
+		await readFileTool.tool.execute!(
+			{path: 'multi.txt'},
+			{toolCallId: 'test', messages: []},
+		);
+
+		// The first edit turns line 2 into three lines, which moves the rest down.
+		const first = {path: 'multi.txt', old_str: 'line 2\n', new_str: 'a\nb\nc\n'};
+		t.true((await stringReplaceTool.validator!(first)).valid);
+		await stringReplaceTool.tool.execute!(first, {toolCallId: 'test', messages: []});
+
+		// Line 9 was read in full and has not changed, so it is still editable.
+		const second = {path: 'multi.txt', old_str: 'line 9\n', new_str: 'nine\n'};
+		t.true((await stringReplaceTool.validator!(second)).valid);
+		await stringReplaceTool.tool.execute!(second, {toolCallId: 'test', messages: []});
+
+		const content = await readFile(join(testDir, 'multi.txt'), 'utf-8');
+		t.true(content.startsWith('line 1\na\nb\nc\nline 3\n'));
+		t.true(content.includes('nine\n'));
+		t.false(content.includes('line 9\n'));
+	} finally {
+		process.chdir(originalCwd);
+	}
+});
+
+test.serial('string_replace: lines the agent never read are refused', async t => {
+	await createTestFile('partial.txt', numberedLines(12));
+	const originalCwd = process.cwd();
+	try {
+		process.chdir(testDir);
+		await readFileTool.tool.execute!(
+			{path: 'partial.txt', start_line: 1, end_line: 3},
+			{toolCallId: 'test', messages: []},
+		);
+
+		const seen = await stringReplaceTool.validator!({
+			path: 'partial.txt',
+			old_str: 'line 2\n',
+			new_str: 'two\n',
+		});
+		t.true(seen.valid);
+
+		const unseen = await stringReplaceTool.validator!({
+			path: 'partial.txt',
+			old_str: 'line 9\n',
+			new_str: 'nine\n',
+		});
+		t.false(unseen.valid);
+		if (!unseen.valid) t.regex(unseen.error, /has not been read/);
+	} finally {
+		process.chdir(originalCwd);
+	}
+});
+
+test.serial('string_replace: a file changed outside after the read is refused', async t => {
+	const filePath = await createTestFile('outside.txt', numberedLines(12));
+	const originalCwd = process.cwd();
+	try {
+		process.chdir(testDir);
+		await readFileTool.tool.execute!(
+			{path: 'outside.txt'},
+			{toolCallId: 'test', messages: []},
+		);
+
+		// Someone saves the file in an editor while the agent is working.
+		await writeFile(filePath, `${numberedLines(12)}added outside\n`, 'utf-8');
+
+		const result = await stringReplaceTool.validator!({
+			path: 'outside.txt',
+			old_str: 'line 5\n',
+			new_str: 'five\n',
+		});
+		t.false(result.valid);
+		if (!result.valid) t.regex(result.error, /modified externally/);
+	} finally {
+		process.chdir(originalCwd);
+	}
+});

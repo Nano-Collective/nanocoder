@@ -3,8 +3,8 @@ import path from 'node:path';
 import {getClosestConfigFile} from '@/config/index';
 import {notifyPreferencesChanged} from '@/config/preferences';
 import type {UserPreferences} from '@/types/config';
-import {atomicWriteJson} from '@/utils/atomic-write';
-import {logError} from '@/utils/message-queue';
+import {atomicWriteJson} from '@/utils/fs/atomic-write';
+import {notifyError} from '@/utils/message-queue-core';
 
 /**
  * Reads the active agents.config.json, merges the given partial update into the
@@ -108,7 +108,7 @@ function readConfigObject(
 		}
 		return {};
 	} catch (error) {
-		logError(`Failed to read config for update: ${String(error)}`);
+		notifyError(`Failed to read config for update: ${String(error)}`);
 		return undefined;
 	}
 }
@@ -121,7 +121,7 @@ function writeConfigObject(
 	try {
 		writeConfigFileAtomic(configPath, config);
 	} catch (error) {
-		logError(`Failed to write config ${label}: ${String(error)}`);
+		notifyError(`Failed to write config ${label}: ${String(error)}`);
 	}
 }
 

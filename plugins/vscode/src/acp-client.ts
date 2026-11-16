@@ -38,6 +38,19 @@ export class NanocoderAcpClient {
 	private outputChannel: vscode.OutputChannel;
 	private stateManager: AcpStateManager;
 	private _sessionId?: string;
+	private _lastActiveSessionId?: string;
+
+	get sessionId(): string | undefined {
+		return this._sessionId;
+	}
+
+	get lastActiveSessionId(): string | undefined {
+		return this._lastActiveSessionId;
+	}
+
+	set lastActiveSessionId(id: string | undefined) {
+		this._lastActiveSessionId = id;
+	}
 	/** In-flight {@link getOrCreateSession} promise; coalesces overlapping callers. */
 	private _pendingSession: Promise<string | undefined> | null = null;
 	/**
@@ -134,6 +147,9 @@ export class NanocoderAcpClient {
 
 	setConnection(connection: ClientSideConnection): void {
 		this.connection = connection;
+		if (this._sessionId) {
+			this._lastActiveSessionId = this._sessionId;
+		}
 		this._sessionId = undefined; // Clear any stale session to force re-creation
 		this._abandonPendingSession();
 		this._clearPendingPermissions();
@@ -299,6 +315,7 @@ export class NanocoderAcpClient {
 				return undefined;
 			}
 			this._sessionId = result.sessionId;
+			this._lastActiveSessionId = result.sessionId;
 			this.onSessionArtifacts?.(result._meta);
 
 			// Parse modes and configOptions
@@ -439,6 +456,7 @@ export class NanocoderAcpClient {
 		this._clearPendingPermissions();
 		const previousSessionId = this._sessionId;
 		this._sessionId = undefined;
+		this._lastActiveSessionId = undefined;
 		// Let the agent cancel the old session's work and free its resources
 		// (timeline lock, in-memory history). Fire-and-forget: New Chat must
 		// not wait on the agent, and a failure only leaves the session open.
@@ -584,20 +602,24 @@ export class NanocoderAcpClient {
 		if (!this.connection) return;
 		try {
 			await this.connection.deleteSession({sessionId});
+			if (this._lastActiveSessionId === sessionId) {
+				this._lastActiveSessionId = undefined;
+			}
 		} catch (error) {
 			this.outputChannel.appendLine(`deleteSession failed: ${error}`);
 			vscode.window.showErrorMessage(`Failed to delete session: ${error}`);
 		}
 	}
 
-	async resumeSession(sessionId: string): Promise<void> {
-		if (!this.connection) return;
+	async resumeSession(sessionId: string, options?: { silent?: boolean }): Promise<boolean> {
+		if (!this.connection) return false;
 		try {
 			const cwd = resolveExtensionCwd();
 			const result = await this.connection.resumeSession({sessionId, cwd});
 			// A session still being created must not land on top of this one.
 			this._abandonPendingSession();
 			this._sessionId = sessionId;
+			this._lastActiveSessionId = sessionId;
 			if (result.modes) {
 				this.currentMode = result.modes.currentModeId;
 				this.availableModes = result.modes.availableModes.map((mode: any) => mode.id);
@@ -607,9 +629,13 @@ export class NanocoderAcpClient {
 			}
 			this.onSessionArtifacts?.(result._meta);
 			this.notifyStateSync();
+			return true;
 		} catch (error) {
 			this.outputChannel.appendLine(`resumeSession failed: ${error}`);
-			vscode.window.showErrorMessage(`Failed to resume session: ${error}`);
+			if (!options?.silent) {
+				vscode.window.showErrorMessage(`Failed to resume session: ${error}`);
+			}
+			return false;
 		}
 	}
 

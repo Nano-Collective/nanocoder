@@ -10,14 +10,14 @@ import {reloadAppConfig} from '@/config/index';
 import {formatConfigLintIssue, lintProviderConfig} from '@/config/lint';
 import {loadAllProviderConfigs} from '@/config/mcp-config-loader';
 import {saveTune, updateLastUsed} from '@/config/preferences';
+import {applyTuneCompaction} from '@/conversation/compaction/auto-compact';
 import type {ActiveMode} from '@/hooks/useAppState';
 import {getToolManager} from '@/message-handler';
 import {getModelContextLimit, getSessionContextLimit} from '@/models/index';
-import {generateKey} from '@/session/key-generator';
+import {bumpReadContentGeneration} from '@/tools/runtime/read-tracker';
 import type {AIProviderConfig, TuneConfig} from '@/types/config';
 import {LLMClient, Message} from '@/types/core';
-import {applyTuneCompaction} from '@/utils/auto-compact';
-import {bumpReadContentGeneration} from '@/utils/read-tracker';
+import {generateKey} from '@/utils/key-generator';
 
 interface UseModeHandlersProps {
 	client: LLMClient | null;

@@ -13,6 +13,7 @@ import {jsonSchema, tool} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
 import {
 	execGit,
+	execGitReadOnly,
 	type FileChange,
 	getDiffStats,
 	hasStagedChanges,
@@ -42,7 +43,7 @@ async function getCommitPreview(args: GitCommitInput): Promise<{
 	amendWarning: string | null;
 }> {
 	// Get staged files
-	const statusOutput = await execGit(['status', '--porcelain']);
+	const statusOutput = await execGitReadOnly(['status', '--porcelain']);
 	const {staged} = parseGitStatus(statusOutput);
 
 	// Get diff stats

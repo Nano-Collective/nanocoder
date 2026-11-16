@@ -37,6 +37,7 @@ import {
 } from '@/events/sources/github-checkrun';
 import {ScheduleEventSource} from '@/events/sources/schedule';
 import type {CiJobFailedPayload} from '@/events/types';
+import {sendNotification} from '@/services/notifications';
 import {bootSkillPipeline} from '@/skills/bootstrap';
 import {
 	type ActivityListener,
@@ -54,9 +55,8 @@ import {
 import {ToolManager} from '@/tools/tool-manager';
 import type {CiWatchConfig} from '@/types/config';
 import {formatError} from '@/utils/error-formatter';
-import {sendNotification} from '@/utils/notifications';
 import {formatCiReport} from '@/verify/format-ci-report';
-import {isTrustLevel} from '@/verify/trust';
+import {isTrustLevel} from '@/verify/trust-level';
 import {readCiWatchState, writeCiWatchState} from './ci-watch-state';
 import {DaemonIpcServer} from './ipc';
 import {
@@ -322,7 +322,12 @@ export async function startDaemon(opts: DaemonOptions): Promise<DaemonHandle> {
 	const buildFileWatcher =
 		opts.fileWatcherFactory ??
 		((r: EventRouter, o: FileWatcherOptions) => new FileWatcherSource(r, o));
-	const watcher = buildFileWatcher(router, {root: opts.projectRoot});
+	const watcher = buildFileWatcher(router, {
+		root: opts.projectRoot,
+		// Reading changed files for markers only pays off when a skill listens
+		// for them; the subscriptions are registered by the boot pipeline above.
+		detectAiComments: router.listByKind('file.ai-comment').length > 0,
+	});
 	const cron = new ScheduleEventSource(router);
 
 	for (const sub of router.listByKind('schedule.cron')) {

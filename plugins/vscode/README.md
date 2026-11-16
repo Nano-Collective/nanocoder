@@ -15,6 +15,7 @@ The extension provides a native sidebar chat powered by the Agent Client Protoco
 - **Cancellation**: Stop ends the whole turn - the current tool aborts and queued tools are skipped
 - **Diff Previews**: Click a file-edit card to open the change in VS Code's diff viewer
 - **Editor Code Lenses**: `Explain Code` and `Generate Tests` links above every function, method, constructor and class - clicking one opens the chat and sends that symbol as context
+- **Fix with Nanocoder**: When a command fails in an integrated terminal, a notification offers to open the chat and send the command, its exit code and its output - nothing is sent until you take the action. It relies on VS Code's terminal shell integration (the `terminal.integrated.shellIntegration.enabled` setting, on by default, for shells such as bash, zsh, fish and PowerShell); without it no notification appears. Ctrl+C is not treated as a failure
 - **Legacy Companion Mode** (opt-in): Pairs with a terminal CLI session over WebSocket for diff previews and editor context
 
 ## Installation
@@ -133,6 +134,7 @@ Configure the extension in VS Code settings (`Ctrl+,` / `Cmd+,`):
 | `nanocoder.showDiffPreview` | `true`        | Show diff preview before applying file changes                        |
 | `nanocoder.codeLens`        | `true`        | Show Explain Code / Generate Tests lenses above functions and classes  |
 | `nanocoder.showTokenUsage`  | `false`       | Show token usage and estimated cost below chat responses              |
+| `nanocoder.terminalErrors`  | `true`        | Offer Fix with Nanocoder when a command fails in an integrated terminal |
 | `nanocoder.autoConnect`     | `false`       | Auto-connect the legacy WebSocket companion on startup                |
 | `nanocoder.serverPort`      | `51820`       | Fallback WebSocket port for the legacy companion, used only when the discovery file is missing or stale (e.g. the CLI runs on a remote host over SSH) |
 | `nanocoder.serverToken`     | (empty)       | Bearer token for the legacy companion. Normally read from the discovery file; set it by hand only when that file is unreachable, copying it from `vscode-server.json` in the nanocoder config directory on the CLI's host |
@@ -140,6 +142,8 @@ Configure the extension in VS Code settings (`Ctrl+,` / `Cmd+,`):
 ## Legacy Companion Mode
 
 The original integration pairs the extension with a Nanocoder session running in a terminal (`nanocoder --vscode`) over a local WebSocket. It is opt-in via `nanocoder.autoConnect` and useful if you prefer the terminal TUI.
+
+**Deprecated:** the companion duplicates the sidebar chat, which runs `nanocoder --acp` itself, and will be removed in a future release. Nanocoder warns the first time it is enabled in a session.
 
 The CLI binds an ephemeral port (or the one passed with `--vscode-port`) and writes the port and a per-session bearer token to a discovery file, `vscode-server.json` in the nanocoder config directory. The extension reads that file to connect. `nanocoder.serverPort` (default 51820) and `nanocoder.serverToken` are only fallbacks for when the file cannot be read, such as a CLI on a remote host over SSH.
 
