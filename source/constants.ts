@@ -170,7 +170,14 @@ export const DELAY_COMMAND_COMPLETE_MS = 100;
 export const INTERVAL_BASH_PROGRESS_MS = 500;
 export const BASH_OUTPUT_PREVIEW_LENGTH = 150;
 export const TIMEOUT_BASH_DEFAULT_MS = 120_000;
+// How much of each stream is held from the start. Past this the collector
+// rolls a separate tail window, so a command that floods memory with progress
+// lines still leaves its ending - where build and test summaries live - intact.
 export const BASH_MAX_OUTPUT_BYTES = 5 * 1024 * 1024;
+// Tail window kept alongside the head cap. Comfortably larger than the most any
+// consumer of the collected output asks for (MAX_TOOL_RESULT_CHARS), so the end
+// of a command's output survives the later head-and-tail cut.
+export const BASH_MAX_OUTPUT_TAIL_BYTES = 256 * 1024;
 
 // === FILE SCANNER ===
 export const MAX_FILES_TO_SCAN = 1000;

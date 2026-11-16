@@ -301,16 +301,23 @@ shellCase('runScript: timeout kills long-running script', async t => {
 	);
 });
 
+// The streaming cap's notice; the later 2000-character cut has its own marker
+// ('... [Output truncated: N characters total; ...'), so match the stream
+// wording specifically.
+const STDOUT_NOTICE =
+	/\.\.\. \[Output truncated: \d+ bytes omitted to prevent memory exhaustion\]/;
+const STDERR_NOTICE =
+	/\.\.\. \[Stderr truncated: \d+ bytes omitted to prevent memory exhaustion\]/;
+
 shellCase(
-	'runScript: caps output accumulation at BASH_MAX_OUTPUT_BYTES with a marker',
+	'runScript: output past BASH_MAX_OUTPUT_BYTES keeps the ending the head-only cap dropped',
 	async t => {
 		// Emits well over BASH_MAX_OUTPUT_BYTES (37 bytes * 250_000 lines ≈ 9 MB),
-		// so the streaming cap must trip. The notice is written at the end of the
-		// capped stdout section and survives the final truncation (which keeps the
-		// tail) — asserting it there proves the cap engaged rather than merely that
-		// the result was trimmed to the 2000-character limit.
+		// so the streaming cap trips. The cap used to stop at the cut and drop
+		// everything after it, which is where build and test summaries live
+		// (#2237).
 		const result = await runScript(
-			`yes '0123456789abcdefghijklmnopqrstuvwxyz' | head -n 250000`,
+			`yes '0123456789abcdefghijklmnopqrstuvwxyz' | head -n 250000; printf 'SUMMARY: 1 failed\\n'`,
 			{
 				cwd: testDir,
 				env: process.env,
@@ -319,13 +326,11 @@ shellCase(
 			},
 		);
 
-		const marker = '... [Output truncated to prevent memory exhaustion]';
 		t.true(
-			result.endsWith(marker),
-			'cap marker must survive truncation at the tail of the result',
+			result.includes('SUMMARY: 1 failed'),
+			'the ending of a capped stream must survive the final cut',
 		);
-		const matches = result.split(marker).length - 1;
-		t.is(matches, 1, 'truncation marker must appear exactly once');
+		t.true(result.length <= 2100, `result is trimmed (${result.length} chars)`);
 	},
 );
 
@@ -389,13 +394,10 @@ shellCase(
 );
 
 shellCase(
-	'runScript: caps stderr-only output and appends the per-stream stderr notice exactly once',
+	'runScript: caps an stderr-only flood and keeps its ending',
 	async t => {
-		const stdoutMarker = '... [Output truncated to prevent memory exhaustion]';
-		const stderrMarker = '... [Stderr truncated to prevent memory exhaustion]';
-
 		const result = await runScript(
-			`yes '0123456789abcdefghijklmnopqrstuvwxyz' | head -n 250000 >&2`,
+			`yes '0123456789abcdefghijklmnopqrstuvwxyz' | head -n 250000 >&2; printf 'STDERR-SUMMARY: 1 failed\\n' >&2`,
 			{
 				cwd: testDir,
 				env: process.env,
@@ -405,16 +407,12 @@ shellCase(
 		);
 
 		t.true(
-			result.includes(stderrMarker),
-			'the stderr notice must appear when only stderr hits the cap',
+			result.includes('STDERR-SUMMARY: 1 failed'),
+			'the ending of a capped stderr stream must survive the final cut',
 		);
-		t.is(
-			result.split(stderrMarker).length - 1,
-			1,
-			'the stderr notice must appear exactly once',
-		);
-		t.false(
-			result.includes(stdoutMarker),
+		t.notRegex(
+			result,
+			STDOUT_NOTICE,
 			'the stdout notice must not appear when stdout was not capped',
 		);
 		t.regex(
@@ -426,13 +424,10 @@ shellCase(
 );
 
 shellCase(
-	'runScript: per-stream notices stay with their own stream when only stdout is capped',
+	'runScript: a capped stdout keeps its ending and leaves stderr whole',
 	async t => {
-		const stdoutMarker = '... [Output truncated to prevent memory exhaustion]';
-		const stderrMarker = '... [Stderr truncated to prevent memory exhaustion]';
-
 		const result = await runScript(
-			`echo 'small stderr line' >&2; yes '0123456789abcdefghijklmnopqrstuvwxyz' | head -n 250000`,
+			`echo 'small stderr line' >&2; yes '0123456789abcdefghijklmnopqrstuvwxyz' | head -n 250000; printf 'STDOUT-SUMMARY: done\\n'`,
 			{
 				cwd: testDir,
 				env: process.env,
@@ -442,11 +437,12 @@ shellCase(
 		);
 
 		t.true(
-			result.includes(stdoutMarker),
-			'the stdout notice must appear when stdout hits the cap',
+			result.includes('STDOUT-SUMMARY: done'),
+			'the ending of a capped stdout stream must survive the final cut',
 		);
-		t.false(
-			result.includes(stderrMarker),
+		t.notRegex(
+			result,
+			STDERR_NOTICE,
 			'the stderr notice must not appear when stderr fits the budget',
 		);
 		t.regex(
@@ -479,12 +475,9 @@ shellCase(
 			/CRITICAL_ERROR_LINE/,
 			'stderr written after a stdout flood must survive',
 		);
-		t.true(
-			result.includes('... [Output truncated to prevent memory exhaustion]'),
-			'the stdout notice must still mark the capped stream',
-		);
-		t.false(
-			result.includes('... [Stderr truncated to prevent memory exhaustion]'),
+		t.notRegex(
+			result,
+			STDERR_NOTICE,
 			'stderr fit its own budget, so it must not be marked truncated',
 		);
 	},
