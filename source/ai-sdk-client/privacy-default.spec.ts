@@ -26,7 +26,11 @@ function startCapturingServer(): Promise<{
 			body += chunk;
 		});
 		req.on('end', () => {
-			bodies.push(body);
+			// The client also probes the server for its context window; only the
+			// chat request carries the prompt under test.
+			if (req.url?.endsWith('/chat/completions')) {
+				bodies.push(body);
+			}
 			res.writeHead(200, {'Content-Type': 'text/event-stream'});
 			const base = {id: 'x', object: 'chat.completion.chunk', created: 0, model: 'm'};
 			res.write(
