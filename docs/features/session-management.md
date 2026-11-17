@@ -48,6 +48,17 @@ The new name must be non-empty and **100 characters or less**. If the name excee
 
 The name is saved with the session and shown in `/resume`. Later autosaves keep it rather than replacing it with a title derived from your messages. A rename made before you have sent the first message is applied once the session is created.
 
+## Forking a Session
+
+```bash
+/fork                 # copy the current conversation into a new session
+/fork <title>         # same, with a custom title
+```
+
+`/fork` saves the current conversation, then creates and switches to a new session that contains a copy of its messages. The original session is untouched and stays available in `/resume`, so you can try a different approach without losing the thread you branched from. Forks are titled `<title> (fork)` by default (or use the title you pass) and are marked as forks of the original in the `/resume` selector.
+
+Messages are copied; session-scoped artifacts such as the plan and task list start fresh in the fork. New turns in the fork do not affect the original session.
+
 ## What Gets Saved
 
 Each session captures:
