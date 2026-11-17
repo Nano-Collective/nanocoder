@@ -1,6 +1,7 @@
 import {existsSync, readFileSync} from 'fs';
 import {join} from 'path';
 import {substituteEnvVars} from '@/config/env-substitution';
+import {readCachedConfigFile} from '@/config/index';
 import {getConfigPath} from '@/config/paths';
 import {getConfigRoot} from '@/services/session-context';
 import type {MCPServerConfig, ProviderConfig} from '@/types/config';
@@ -283,25 +284,16 @@ function loadProjectProviderConfigs(cwd: string): ProviderConfig[] {
 	const configPath = join(cwd, 'agents.config.json'); // nosemgrep
 
 	if (existsSync(configPath)) {
-		try {
-			const rawData = readFileSync(configPath, 'utf-8');
-			const config = JSON.parse(rawData);
-
-			if (config.nanocoder && Array.isArray(config.nanocoder.providers)) {
-				// Apply environment variable substitution
-				const processedProviders = substituteEnvVars(
-					config.nanocoder.providers,
-				);
-				return processedProviders;
-			} else if (Array.isArray(config.providers)) {
-				// Apply environment variable substitution
-				const processedProviders = substituteEnvVars(config.providers);
-				return processedProviders;
+		const config = readCachedConfigFile(configPath);
+		if (config && typeof config === 'object') {
+			const typed = config as Record<string, unknown>;
+			const nanocoder = typed.nanocoder as Record<string, unknown> | undefined;
+			if (nanocoder && Array.isArray(nanocoder.providers)) {
+				return substituteEnvVars(nanocoder.providers as ProviderConfig[]);
 			}
-		} catch (error) {
-			notifyError(
-				`Failed to load project provider config from ${configPath}: ${String(error)}`,
-			);
+			if (Array.isArray(typed.providers)) {
+				return substituteEnvVars(typed.providers as ProviderConfig[]);
+			}
 		}
 	}
 
@@ -327,23 +319,18 @@ function loadGlobalProviderConfigs(): ProviderConfig[] {
 
 // Helper function to load provider config from a specific file
 function loadProviderConfigFromFile(filePath: string): ProviderConfig[] {
-	try {
-		const rawData = readFileSync(filePath, 'utf-8');
-		const config = JSON.parse(rawData);
-
-		if (config.nanocoder && Array.isArray(config.nanocoder.providers)) {
-			// Apply environment variable substitution
-			const processedProviders = substituteEnvVars(config.nanocoder.providers);
-			return processedProviders;
-		} else if (Array.isArray(config.providers)) {
-			// Apply environment variable substitution
-			const processedProviders = substituteEnvVars(config.providers);
-			return processedProviders;
+	if (existsSync(filePath)) {
+		const config = readCachedConfigFile(filePath);
+		if (config && typeof config === 'object') {
+			const typed = config as Record<string, unknown>;
+			const nanocoder = typed.nanocoder as Record<string, unknown> | undefined;
+			if (nanocoder && Array.isArray(nanocoder.providers)) {
+				return substituteEnvVars(nanocoder.providers as ProviderConfig[]);
+			}
+			if (Array.isArray(typed.providers)) {
+				return substituteEnvVars(typed.providers as ProviderConfig[]);
+			}
 		}
-	} catch (error) {
-		notifyError(
-			`Failed to load provider config from ${filePath}: ${String(error)}`,
-		);
 	}
 
 	return [];

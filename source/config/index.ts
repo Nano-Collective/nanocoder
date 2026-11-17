@@ -58,16 +58,34 @@ import {isTrustLevel} from '@/verify/trust-level';
 export {confDirMap, getClosestConfigFile} from '@/config/paths';
 export {DEFAULT_SESSION_CONFIG} from '@/config/session-config';
 
-type ConfigFileCacheEntry = {
-	mtimeMs: number;
-	size: number;
-	data: unknown;
-};
+type ConfigFileCacheEntry =
+	| {
+			mtimeMs: number;
+			size: number;
+			ok: true;
+			data: unknown;
+	  }
+	| {
+			mtimeMs: number;
+			size: number;
+			ok: false;
+			error: unknown;
+	  };
 
 const configFileCache = new Map<string, ConfigFileCacheEntry>();
 
-function readCachedConfigFile(configPath: string): unknown {
-	const stats = statSync(configPath);
+export function readCachedConfigFile(configPath: string): unknown {
+	if (!existsSync(configPath)) {
+		return null;
+	}
+
+	let stats: ReturnType<typeof statSync>;
+	try {
+		stats = statSync(configPath);
+	} catch {
+		return null;
+	}
+
 	const cached = configFileCache.get(configPath);
 
 	if (
@@ -75,18 +93,41 @@ function readCachedConfigFile(configPath: string): unknown {
 		cached.mtimeMs === stats.mtimeMs &&
 		cached.size === stats.size
 	) {
-		return structuredClone(cached.data);
+		if (cached.ok) {
+			return structuredClone(cached.data);
+		}
+		return null;
 	}
 
-	const data: unknown = JSON.parse(readFileSync(configPath, 'utf-8'));
+	try {
+		const data: unknown = JSON.parse(readFileSync(configPath, 'utf-8'));
 
-	configFileCache.set(configPath, {
-		mtimeMs: stats.mtimeMs,
-		size: stats.size,
-		data: structuredClone(data),
-	});
+		configFileCache.set(configPath, {
+			mtimeMs: stats.mtimeMs,
+			size: stats.size,
+			ok: true,
+			data: structuredClone(data),
+		});
 
-	return data;
+		return data;
+	} catch (error) {
+		const isGlobal = resolve(configPath).startsWith(resolve(getConfigPath()));
+		const skipLabel = isGlobal
+			? 'global config skipped'
+			: 'project config skipped';
+		notifyError(
+			`Failed to load config from ${configPath}: ${String(error)} — ${skipLabel}`,
+		);
+
+		configFileCache.set(configPath, {
+			mtimeMs: stats.mtimeMs,
+			size: stats.size,
+			ok: false,
+			error,
+		});
+
+		return null;
+	}
 }
 
 /**
@@ -106,6 +147,9 @@ function tryLoadConfig<T>(
 
 	try {
 		const config = readCachedConfigFile(configPath);
+		if (config === null) {
+			return null;
+		}
 		return extract(config);
 	} catch (error) {
 		notifyError(
