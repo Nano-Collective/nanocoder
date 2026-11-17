@@ -197,6 +197,24 @@ For long prompts, use `--prompt-file <path>` to read the prompt from a file inst
 nanocoder run --prompt-file prompt.md
 ```
 
+### Piping Input
+
+`run` reads piped stdin, so command output can go straight into the prompt:
+
+```bash
+git diff | nanocoder run "write a commit message for this change"
+npm test 2>&1 | nanocoder run "why did this fail"
+```
+
+- The piped text is appended to the prompt inside a `<stdin>` block.
+- With no prompt argument, the piped text is the prompt.
+- `--prompt-file -` names stdin as the prompt explicitly. Like any `--prompt-file`, it replaces a positional prompt. It also works on Windows, where `/dev/stdin` does not exist, and exits with an error if stdin is a terminal.
+- Whitespace-only input is ignored, so `run` with no prompt and an empty pipe still exits with the usage error.
+- At most **100,000 characters** are read. This is a character count, not a byte count, so text that is not ASCII can be larger than 100 KB. Longer input is cut at the limit and the prompt ends with `[stdin truncated - kept the first N characters]`, so the model knows it did not see everything.
+- Only `run` reads stdin. `nanocoder review` and the interactive session are unaffected.
+
+> **Note - scripts that launch `run`:** whenever stdin is not a terminal, `run` waits for it to close before starting. A parent process that leaves the pipe open without writing to it makes `run` wait indefinitely. Close it or point it at nothing: `nanocoder run "..." < /dev/null` in a shell, `stdio: ['ignore', 'pipe', 'pipe']` with `spawn`, or `child.stdin.end()` with `execFile`, which always opens a stdin pipe.
+
 If a tool requires approval that the active mode won't grant, nanocoder prints `Tool approval required for: ...` and exits with status code `1` in the Ink runtime, or `2` under the `--plain` runtime (used automatically in CI and non-TTY environments, and always with `--json`).
 
 Because there is nobody to answer a prompt in a `run`, the agent-loop [retry limits](../configuration/index.md#retry-limits) hard-stop instead of pausing: a model that repeats the same tool call, returns empty responses, or keeps emitting malformed tool calls past its configured cap ends the run with an error. The run exits with status code `1` in this case, and also when it fails on a provider or connection error or times out, so CI can tell a failed run from a finished one. Under the `--plain` runtime (used automatically in CI and non-TTY environments) the error also names the limit that fired.

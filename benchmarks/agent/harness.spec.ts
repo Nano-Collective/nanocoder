@@ -380,6 +380,30 @@ test('runOnce still measures a run that exits non-zero with a report', async t =
 	t.regex(run.failure ?? '', /CLI run failed/);
 });
 
+test('runOnce closes the CLI stdin so a run that reads the pipe can finish', async t => {
+	// `nanocoder run` reads piped stdin to EOF before it starts, so a harness
+	// that leaves the pipe open would sit here until the run timeout.
+	const cliPath = await stubCli(`
+		let seen = false;
+		process.stdin.on('data', () => {});
+		process.stdin.on('end', () => {
+			seen = true;
+			process.stdout.write(JSON.stringify({kind: 'success', exitCode: 0, finalText: 'done', steps: 1}));
+		});
+		setTimeout(() => { if (!seen) process.exit(9); }, 20_000).unref();
+	`);
+
+	const run = await runOnce({
+		cliPath,
+		fixture: await fixture([{kind: 'files-unchanged'}]),
+		workspaceRoot: tempRoot,
+		timeoutMs: 5000,
+	});
+
+	t.true(run.pass, run.failure);
+	t.true(run.durationMs < 4000, `waited ${run.durationMs} ms for stdin`);
+});
+
 test('runOnce reports a harness failure when the CLI prints nothing', async t => {
 	const cliPath = await stubCli('process.exit(9);');
 
