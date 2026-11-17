@@ -50,6 +50,54 @@ test('ignores emails, existing placeholders, scoped packages and bare handles', 
 	);
 });
 
+test('does not treat annotations, versions or dotted prose as file mentions', t => {
+	for (const prompt of [
+		'why does @pytest.mark.skip not run?',
+		'explain @org.junit.Test and @lombok.Getter',
+		'import @angular/core.module here',
+		'pin @1.2.3 of the package',
+		'bookmark @home.page works',
+	]) {
+		t.deepEqual(parseRawFileMentions(prompt), [], prompt);
+	}
+});
+
+test('ignores mentions inside inline code and fenced blocks', t => {
+	t.deepEqual(
+		parseRawFileMentions('check `@src/missing.tsx` here'),
+		[],
+		'inline code span',
+	);
+	t.deepEqual(
+		parseRawFileMentions('```\n@src/missing.tsx\n```'),
+		[],
+		'fenced block',
+	);
+	// A real mention outside the code span is still found.
+	t.deepEqual(
+		parseRawFileMentions('`@src/missing.tsx` then @src/other.tsx').map(
+			mention => mention.rawText,
+		),
+		['@src/other.tsx'],
+	);
+});
+
+test('accepts dotfiles and mistyped extensions, ignores extensionless names', t => {
+	t.deepEqual(
+		parseRawFileMentions('use @.env and @SRC/APP.TSX and @src/app.tsxx').map(
+			mention => mention.rawText,
+		),
+		['@.env', '@SRC/APP.TSX', '@src/app.tsxx'],
+	);
+
+	// Bare names have no extension, so they stay plain text instead of
+	// producing a warning for every "@Makefile"-style mention.
+	t.deepEqual(
+		parseRawFileMentions('read @Makefile, @LICENSE and @src/utils'),
+		[],
+	);
+});
+
 test.serial('reports a missing file with a close suggestion', async t => {
 	const dir = inTempProject(t);
 
@@ -71,6 +119,18 @@ test.serial('resolves existing files, line ranges and placeholders', async t => 
 		),
 		[],
 	);
+});
+
+test.serial('prefers a same-extension suggestion on a tie', async t => {
+	const dir = inTempProject(t);
+	mkdirSync(join(dir, 'lib'), {recursive: true});
+	writeFileSync(join(dir, 'lib', 'utli.ts'), '');
+	writeFileSync(join(dir, 'lib', 'util.md'), '');
+
+	const unresolved = await findUnresolvedFileMentions('read @lib/util.ts', dir);
+
+	t.is(unresolved.length, 1);
+	t.is(unresolved[0]?.suggestion, 'lib/utli.ts');
 });
 
 test.serial('reports a directory mention as not a file', async t => {

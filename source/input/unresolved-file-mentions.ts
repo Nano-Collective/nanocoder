@@ -1,3 +1,4 @@
+import {FILE_EXTENSION_TO_LANGUAGE} from '@/constants';
 import {getAllFiles} from './file-autocomplete';
 import {loadFileContent} from './file-content-loader';
 
@@ -28,16 +29,54 @@ const MENTION_REGEX = /(^|\s)@([^\s@]+)/g;
 // Punctuation that commonly trails a mention in prose, e.g. "@src/app.tsx.".
 const TRAILING_PUNCTUATION = /[.,;!?)\]}'"]+$/;
 
+// Extensions we accept on a bare mention. Anything else is treated as prose:
+// an annotation ("@pytest.mark.skip"), a scoped package ("@angular/core.module")
+// or a version ("@1.2.3") must not raise a "could not attach" warning.
+const KNOWN_EXTENSIONS = new Set([
+	...Object.keys(FILE_EXTENSION_TO_LANGUAGE),
+	// Common text and data files with no highlight.js grammar.
+	'.txt',
+	'.csv',
+	'.tsv',
+	'.log',
+	'.env',
+	'.cfg',
+	'.conf',
+	'.properties',
+	'.bat',
+	'.ps1',
+	'.cmd',
+	'.gradle',
+	'.sln',
+	'.csproj',
+	'.ipynb',
+	'.lock',
+	'.vue',
+	'.svelte',
+	'.astro',
+	'.dart',
+	'.tf',
+	'.hcl',
+	'.nix',
+	'.proto',
+]);
+
 /**
  * Extract every file-like @mention from a prompt. Existing placeholders
  * ("[@src/app.tsx]") are ignored, as are bare handles such as "@media" that do
- * not look like paths.
+ * not look like paths, and anything inside inline code or a fenced block.
+ *
+ * A mention needs a `/`-separated path with a known extension, a dotfile
+ * ("@.env") or a directory separator at the end ("@src/"). Bare names without
+ * an extension ("@Makefile", "@LICENSE", "@src/utils") are deliberately left
+ * alone: they are too close to prose to warn about.
  */
 export function parseRawFileMentions(text: string): ParsedFileMention[] {
 	const mentions: ParsedFileMention[] = [];
+	const searchable = maskCodeSpans(text);
 	MENTION_REGEX.lastIndex = 0;
 
-	for (const match of text.matchAll(MENTION_REGEX)) {
+	for (const match of searchable.matchAll(MENTION_REGEX)) {
 		const prefix = match[1] ?? '';
 		const rawToken = match[2] ?? '';
 		const startIndex = (match.index ?? 0) + prefix.length;
@@ -78,15 +117,50 @@ export function parseRawFileMentions(text: string): ParsedFileMention[] {
 	return mentions;
 }
 
+/**
+ * Blank out inline code spans and fenced code blocks, preserving offsets, so a
+ * path quoted inside backticks is not treated as a mention.
+ */
+function maskCodeSpans(text: string): string {
+	const blank = (match: string) => match.replace(/[^\n]/g, ' ');
+	return text.replace(/```[\s\S]*?```/g, blank).replace(/`[^`\n]*`/g, blank);
+}
+
 function looksLikeFilePath(filePath: string): boolean {
 	if (!filePath) return false;
 	// A trailing separator is an explicit directory mention ("@src/").
 	if (filePath.endsWith('/') || filePath.endsWith('\\')) return true;
+
+	const name = filePath.split(/[\\/]/).pop() ?? '';
+
+	// A dotfile at any depth ("@.env", "@.env.local") is a real path. A name of
+	// "." or ".." is a directory, not a file.
+	if (name.startsWith('.') && name.length > 1) {
+		return name !== '..';
+	}
+
+	// Dotted versions ("@1.2.3", "@2.0") are prose, not paths.
+	if (/^\d+(?:\.\d+)+$/.test(name)) return false;
+
+	const dot = name.lastIndexOf('.');
 	// Require an extension-like final segment. That keeps scoped package names
 	// such as "@types/node" and bare handles such as "@media" out of mention
 	// warnings, while covering the typo/rename/wrong-case cases this is for.
-	const name = filePath.split(/[\\/]/).pop() ?? '';
-	return name.includes('.') && name !== '.' && name !== '..';
+	if (dot <= 0) return false;
+
+	const extension = name.slice(dot).toLowerCase();
+	if (KNOWN_EXTENSIONS.has(extension)) return true;
+
+	// Catch a mistyped extension ("@src/app.tsxx") without accepting arbitrary
+	// dotted words. Extensions shorter than three characters collide with too
+	// many annotation names, so only longer ones get the near-miss check.
+	if (extension.length < 4) return false;
+	for (const known of KNOWN_EXTENSIONS) {
+		if (Math.abs(known.length - extension.length) > 1) continue;
+		if (editDistance(extension, known) <= 1) return true;
+	}
+
+	return false;
 }
 
 /**
@@ -138,26 +212,56 @@ async function suggestClosestFile(
 	cwd: string,
 ): Promise<string | undefined> {
 	const wanted = filePath.replace(/\\/g, '/').toLowerCase();
+	const wantedExtension = extensionOf(wanted);
 	const files = await getAllFiles(cwd);
-	let best: {path: string; distance: number} | undefined;
+	let best:
+		| {path: string; distance: number; sameExtension: boolean}
+		| undefined;
 
 	for (const file of files) {
+		// Normalization only swaps separators and folds case, so the length is
+		// the same either way. Use the raw length to reject most candidates
+		// before allocating a normalized copy.
+		const lengthDelta = Math.abs(file.length - wanted.length);
+		if (lengthDelta > allowedDistance(wanted.length, file.length)) continue;
+
 		const candidate = file.replace(/\\/g, '/').toLowerCase();
 		// The exact path would have loaded; only near-misses are suggestions.
 		if (candidate === wanted) continue;
 
+		// The edit distance can never be smaller than the length difference, so
+		// the filter above drops most candidates before the O(n*m) matrix. This
+		// keeps the scan cheap in repositories with tens of thousands of files.
 		const distance = editDistance(wanted, candidate);
-		const allowed = Math.max(
-			2,
-			Math.floor(Math.max(wanted.length, candidate.length) * 0.3),
-		);
+		const allowed = allowedDistance(wanted.length, candidate.length);
 		if (distance > allowed) continue;
-		if (!best || distance < best.distance) {
-			best = {path: file, distance};
+
+		// On a tie, prefer a file with the same extension: a typo is far more
+		// often in the name than in the extension.
+		const sameExtension = extensionOf(candidate) === wantedExtension;
+		if (
+			!best ||
+			distance < best.distance ||
+			(distance === best.distance && sameExtension && !best.sameExtension)
+		) {
+			best = {path: file, distance, sameExtension};
 		}
 	}
 
 	return best?.path;
+}
+
+function allowedDistance(
+	wantedLength: number,
+	candidateLength: number,
+): number {
+	return Math.max(2, Math.floor(Math.max(wantedLength, candidateLength) * 0.3));
+}
+
+function extensionOf(path: string): string {
+	const name = path.split('/').pop() ?? '';
+	const dot = name.lastIndexOf('.');
+	return dot > 0 ? name.slice(dot) : '';
 }
 
 function editDistance(a: string, b: string): number {
