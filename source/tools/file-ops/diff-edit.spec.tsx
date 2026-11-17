@@ -648,7 +648,7 @@ test('diff_edit validator: accepts an LF block for a CRLF file', async t => {
 		return;
 	}
 	const filePath = await createTestFile('c.txt', 'one\r\ntwo\r\nthree\r\n');
-	markFileSeen(filePath);
+	markFileSeenAndVisible(filePath);
 
 	const result = await validator({
 		path: projectRelativePath(filePath),
@@ -666,7 +666,7 @@ test('diff_edit validator: a missed block on a CRLF file still gives usable reco
 	}
 	const original = 'function run() {\r\n\tstart();\r\n}\r\n';
 	const filePath = await createTestFile('d.ts', original);
-	markFileSeen(filePath);
+	markFileSeenAndVisible(filePath);
 	const replace = 'function run() {\n\tfinish();\n}';
 
 	const result = await validator({
