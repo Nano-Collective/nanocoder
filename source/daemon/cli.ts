@@ -23,10 +23,17 @@ import {dirname, join, resolve} from 'node:path';
 import {createInterface} from 'node:readline/promises';
 import {fileURLToPath} from 'node:url';
 import {getAppConfig} from '@/config/index';
-import {ensureDirectoryTrust, untrustedReason} from '@/config/preferences';
-import {ensureNanocoderGitignore} from '@/utils/ensure-nanocoder-gitignore';
+import {
+	ensureDirectoryTrust,
+	untrustedReason,
+} from '@/config/trust/directory-trust';
 import {formatError} from '@/utils/error-formatter';
-import {isTrustLevel, resolveTrustLevel, type TrustLevel} from '@/verify/trust';
+import {ensureNanocoderGitignore} from '@/utils/fs/ensure-nanocoder-gitignore';
+import {
+	isTrustLevel,
+	resolveTrustLevel,
+	type TrustLevel,
+} from '@/verify/trust-level';
 import {
 	isFullCommitTrustConfirmed,
 	recordFullCommitTrustConfirmed,
@@ -454,16 +461,26 @@ async function stop(opts: DaemonCliOptions): Promise<DaemonCliResult> {
 
 	// Prefer IPC: works on Windows (where SIGTERM is force-kill) and gives
 	// the daemon a chance to drain its event loop cleanly. Falls back to
-	// SIGTERM if IPC can't be reached (older daemon, socket missing, etc).
-	const ipcAccepted = await tryIpcShutdown(live.socketPath);
+	// SIGTERM only once IPC has answered (an older daemon without `shutdown`,
+	// a hung request). If IPC can't be reached the PID is unverified: it may
+	// belong to an unrelated process, so it is never signalled.
+	const shutdown = await tryIpcShutdown(live.socketPath);
 
+	if (shutdown === 'unreachable') {
+		return {
+			exitCode: 1,
+			output: `Daemon (pid ${live.pid}) is not answering on ${live.socketPath}, so the pid cannot be confirmed as the daemon and was not signalled. Lockfile preserved; check the daemon log.`,
+		};
+	}
+
+	const ipcAccepted = shutdown === 'accepted';
 	if (!ipcAccepted) {
 		try {
 			process.kill(live.pid, 'SIGTERM');
 		} catch (err) {
 			return {
 				exitCode: 1,
-				output: `Failed to stop daemon (pid ${live.pid}): IPC unreachable and SIGTERM failed: ${formatError(
+				output: `Failed to stop daemon (pid ${live.pid}): IPC shutdown failed and SIGTERM failed: ${formatError(
 					err,
 				)}`,
 			};
@@ -485,11 +502,14 @@ async function stop(opts: DaemonCliOptions): Promise<DaemonCliResult> {
 
 /**
  * Best-effort attempt to ask the daemon to shut itself down over IPC.
- * Returns true if the daemon accepted the request. Any failure (no socket,
- * timeout, older daemon without the method) returns false so the caller
- * can fall back to SIGTERM.
+ * 'accepted': the daemon took the request. 'failed': it answered the
+ * connection but not the request (timeout, older daemon without the
+ * method), so the caller can fall back to SIGTERM. 'unreachable': no
+ * connection, so nothing confirms the lockfile's pid is the daemon.
  */
-async function tryIpcShutdown(socketPath: string): Promise<boolean> {
+async function tryIpcShutdown(
+	socketPath: string,
+): Promise<'accepted' | 'failed' | 'unreachable'> {
 	const {DaemonIpcClient} = await import('./ipc');
 	const client = new DaemonIpcClient(socketPath);
 	try {
@@ -500,7 +520,7 @@ async function tryIpcShutdown(socketPath: string): Promise<boolean> {
 			),
 		]);
 	} catch {
-		return false;
+		return 'unreachable';
 	}
 	try {
 		await Promise.race([
@@ -509,9 +529,9 @@ async function tryIpcShutdown(socketPath: string): Promise<boolean> {
 				setTimeout(() => reject(new Error('IPC shutdown timeout')), 2000),
 			),
 		]);
-		return true;
+		return 'accepted';
 	} catch {
-		return false;
+		return 'failed';
 	} finally {
 		await client.disconnect().catch(() => {});
 	}
@@ -630,8 +650,11 @@ async function waitForLockfileGone(
 ): Promise<boolean> {
 	const deadline = Date.now() + timeoutMs;
 	while (Date.now() < deadline) {
-		// Reap a stale lockfile only when its process has actually exited.
-		if (!(await readLiveLockfile(projectRoot))) return true;
+		// Reap a stale lockfile only when its process has actually exited: a
+		// shutting-down daemon closes its IPC endpoint well before it exits.
+		if (!(await readLiveLockfile(projectRoot, {verifyIpc: false}))) {
+			return true;
+		}
 		await new Promise(r => setTimeout(r, 50));
 	}
 	return false;

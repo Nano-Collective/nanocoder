@@ -2,7 +2,8 @@ import type {BoxProps} from 'ink';
 import {Box} from 'ink';
 import {useTheme} from '@/hooks/useTheme';
 import {useTitleShape} from '@/hooks/useTitleShape';
-import {StyledTitle, type TitleShape} from './styled-title';
+import type {TitleShape} from '@/types/ui';
+import {StyledTitle} from './styled-title';
 
 export interface TitledBoxProps extends Omit<BoxProps, 'borderStyle'> {
 	/** Title to display in the top border */

@@ -17,11 +17,40 @@ export interface StateSyncPayload {
 	availableProviders: string[];
 }
 
+/**
+ * Outcome of a provider or model switch, so the UI only reports what really
+ * happened. `persistError` is set when the session switched but saving the
+ * VS Code setting failed.
+ */
+export type ConfigSwitchResult =
+	| {ok: true; persistError?: string}
+	| {ok: false; error: string};
+
+const NOT_CONNECTED = 'not connected to the Nanocoder agent';
+const NO_SESSION = 'no active session';
+
+function errorText(error: unknown): string {
+	return error instanceof Error ? error.message : String(error);
+}
+
 export class NanocoderAcpClient {
 	public connection: ClientSideConnection | null = null;
 	private outputChannel: vscode.OutputChannel;
 	private stateManager: AcpStateManager;
 	private _sessionId?: string;
+	private _lastActiveSessionId?: string;
+
+	get sessionId(): string | undefined {
+		return this._sessionId;
+	}
+
+	get lastActiveSessionId(): string | undefined {
+		return this._lastActiveSessionId;
+	}
+
+	set lastActiveSessionId(id: string | undefined) {
+		this._lastActiveSessionId = id;
+	}
 	/** In-flight {@link getOrCreateSession} promise; coalesces overlapping callers. */
 	private _pendingSession: Promise<string | undefined> | null = null;
 	/**
@@ -80,8 +109,9 @@ export class NanocoderAcpClient {
 			}
 			if (e.affectsConfiguration('nanocoder.model')) {
 				const newModel = vscode.workspace.getConfiguration('nanocoder').get<string>('model');
-				if (newModel && newModel !== this.currentModel) {
-					this.setSessionModel(newModel, false);
+				// Without a session the new value is applied when one is created.
+				if (newModel && newModel !== this.currentModel && this.connection && this._sessionId) {
+					void this._applyModelSetting(newModel);
 				}
 			}
 		});
@@ -117,6 +147,9 @@ export class NanocoderAcpClient {
 
 	setConnection(connection: ClientSideConnection): void {
 		this.connection = connection;
+		if (this._sessionId) {
+			this._lastActiveSessionId = this._sessionId;
+		}
 		this._sessionId = undefined; // Clear any stale session to force re-creation
 		this._abandonPendingSession();
 		this._clearPendingPermissions();
@@ -282,6 +315,7 @@ export class NanocoderAcpClient {
 				return undefined;
 			}
 			this._sessionId = result.sessionId;
+			this._lastActiveSessionId = result.sessionId;
 			this.onSessionArtifacts?.(result._meta);
 
 			// Parse modes and configOptions
@@ -299,7 +333,7 @@ export class NanocoderAcpClient {
 				await this.setSessionMode(initialMode, false);
 			}
 			if (initialModel && this.currentModel && this.currentModel !== initialModel && this.availableModels.includes(initialModel)) {
-				await this.setSessionModel(initialModel, false);
+				await this._applyModelSetting(initialModel);
 			}
 
 			this.notifyStateSync();
@@ -344,8 +378,9 @@ export class NanocoderAcpClient {
 		}
 	}
 
-	async setSessionProvider(providerId: string, persist = true): Promise<void> {
-		if (!this.connection || !this._sessionId) return;
+	async setSessionProvider(providerId: string, persist = true,): Promise<ConfigSwitchResult> {
+		if (!this.connection) return {ok: false, error: NOT_CONNECTED};
+		if (!this._sessionId) return {ok: false, error: NO_SESSION};
 		try {
 			const result = await this.connection.setSessionConfigOption({
 				sessionId: this._sessionId,
@@ -360,13 +395,16 @@ export class NanocoderAcpClient {
 				this.currentProvider = providerId;
 			}
 			this.notifyStateSync();
+			return {ok: true};
 		} catch (error) {
 			this.outputChannel.appendLine(`Failed to set provider: ${error}`);
+			return {ok: false, error: errorText(error)};
 		}
 	}
 
-	async setSessionModel(modelId: string, persist = true): Promise<void> {
-		if (!this.connection || !this._sessionId) return;
+	async setSessionModel(modelId: string, persist = true,): Promise<ConfigSwitchResult> {
+		if (!this.connection) return {ok: false, error: NOT_CONNECTED};
+		if (!this._sessionId) return {ok: false, error: NO_SESSION};
 		try {
 			const result = await this.connection.setSessionConfigOption({
 				sessionId: this._sessionId,
@@ -380,13 +418,35 @@ export class NanocoderAcpClient {
 				this.currentModel = modelId;
 			}
 			this.notifyStateSync();
-
-			if (persist) {
-				const config = vscode.workspace.getConfiguration('nanocoder');
-				await config.update('model', modelId, vscode.ConfigurationTarget.Global);
-			}
 		} catch (error) {
 			this.outputChannel.appendLine(`Failed to set model: ${error}`);
+			return {ok: false, error: errorText(error)};
+		}
+
+		// The session already switched; a failed save only loses the default
+		// for new sessions, so it is reported apart from the switch itself.
+		if (persist) {
+			try {
+				const config = vscode.workspace.getConfiguration('nanocoder');
+				await config.update('model', modelId, vscode.ConfigurationTarget.Global);
+			} catch (error) {
+				this.outputChannel.appendLine(`Failed to save model setting: ${error}`);
+				return {ok: true, persistError: errorText(error)};
+			}
+		}
+		return {ok: true};
+	}
+
+	/**
+	 * Apply the `nanocoder.model` setting to the session. Switches from the
+	 * model dropdown report their own result; this covers the setting itself.
+	 */
+	private async _applyModelSetting(modelId: string): Promise<void> {
+		const result = await this.setSessionModel(modelId, false);
+		if (!result.ok) {
+			vscode.window.showWarningMessage(
+				`Nanocoder: Could not switch to model ${modelId} from your settings: ${result.error}`,
+			);
 		}
 	}
 
@@ -396,6 +456,7 @@ export class NanocoderAcpClient {
 		this._clearPendingPermissions();
 		const previousSessionId = this._sessionId;
 		this._sessionId = undefined;
+		this._lastActiveSessionId = undefined;
 		// Let the agent cancel the old session's work and free its resources
 		// (timeline lock, in-memory history). Fire-and-forget: New Chat must
 		// not wait on the agent, and a failure only leaves the session open.
@@ -541,20 +602,24 @@ export class NanocoderAcpClient {
 		if (!this.connection) return;
 		try {
 			await this.connection.deleteSession({sessionId});
+			if (this._lastActiveSessionId === sessionId) {
+				this._lastActiveSessionId = undefined;
+			}
 		} catch (error) {
 			this.outputChannel.appendLine(`deleteSession failed: ${error}`);
 			vscode.window.showErrorMessage(`Failed to delete session: ${error}`);
 		}
 	}
 
-	async resumeSession(sessionId: string): Promise<void> {
-		if (!this.connection) return;
+	async resumeSession(sessionId: string, options?: { silent?: boolean }): Promise<boolean> {
+		if (!this.connection) return false;
 		try {
 			const cwd = resolveExtensionCwd();
 			const result = await this.connection.resumeSession({sessionId, cwd});
 			// A session still being created must not land on top of this one.
 			this._abandonPendingSession();
 			this._sessionId = sessionId;
+			this._lastActiveSessionId = sessionId;
 			if (result.modes) {
 				this.currentMode = result.modes.currentModeId;
 				this.availableModes = result.modes.availableModes.map((mode: any) => mode.id);
@@ -564,9 +629,13 @@ export class NanocoderAcpClient {
 			}
 			this.onSessionArtifacts?.(result._meta);
 			this.notifyStateSync();
+			return true;
 		} catch (error) {
 			this.outputChannel.appendLine(`resumeSession failed: ${error}`);
-			vscode.window.showErrorMessage(`Failed to resume session: ${error}`);
+			if (!options?.silent) {
+				vscode.window.showErrorMessage(`Failed to resume session: ${error}`);
+			}
+			return false;
 		}
 	}
 

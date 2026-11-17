@@ -3,39 +3,7 @@
  */
 
 import nodeProcess from 'node:process';
-import {homedir, platform} from 'os';
-import {join} from 'path';
 import type {EnhancedLoggerConfig, LoggerConfig, LogLevel} from './types.js';
-
-/**
- * Get the default log directory based on platform
- * Follows OS conventions:
- * - macOS: ~/Library/Logs/nanocoder
- * - Linux: ~/.local/state/nanocoder/logs (XDG_STATE_HOME)
- * - Windows: %LOCALAPPDATA%/nanocoder/logs
- */
-export function getDefaultLogDirectory(): string {
-	if (nodeProcess.env.NANOCODER_LOG_DIR) {
-		return nodeProcess.env.NANOCODER_LOG_DIR;
-	}
-
-	switch (platform()) {
-		case 'win32':
-			return join(
-				nodeProcess.env.LOCALAPPDATA || join(homedir(), 'AppData', 'Local'),
-				'nanocoder',
-				'logs',
-			);
-		case 'darwin':
-			return join(homedir(), 'Library', 'Logs', 'nanocoder');
-		default: // linux
-			return join(
-				nodeProcess.env.XDG_STATE_HOME || join(homedir(), '.local', 'state'),
-				'nanocoder',
-				'logs',
-			);
-	}
-}
 
 /**
  * Create development configuration (internal).

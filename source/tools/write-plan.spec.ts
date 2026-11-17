@@ -6,7 +6,7 @@ import {ArtifactManager} from '@/artifacts/artifact-manager';
 import {PlanStore} from '@/plans/storage';
 import {ToolManager} from '@/tools/tool-manager';
 import {ToolRegistry} from '@/tools/tool-registry';
-import {getToolJsonSchema} from '@/utils/schema-validate';
+import {getToolJsonSchema} from '@/tools/runtime/schema-validate';
 import {createWritePlanTool} from './write-plan';
 
 test('write_plan replaces the current session plan without accepting a path', async t => {

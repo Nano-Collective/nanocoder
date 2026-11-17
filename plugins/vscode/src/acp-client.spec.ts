@@ -534,3 +534,233 @@ test('NanocoderAcpClient - each extension method resolves on its own against wha
 		['_nanocoder/renameSession', 'retryTurn'],
 	);
 });
+
+// ── provider / model switching ─────────────────────────────
+
+/** Swap the `nanocoder` settings' `update` for the length of one test. */
+function stubSettingsUpdate(
+	t: import('ava').ExecutionContext,
+	update: (key: string, value: unknown) => Promise<void>,
+) {
+	const original = vscode.workspace.getConfiguration;
+	// Saving the model setting only calls `update`.
+	(vscode.workspace as any).getConfiguration = () => ({update});
+	t.teardown(() => {
+		(vscode.workspace as any).getConfiguration = original;
+	});
+}
+
+test('NanocoderAcpClient - switching provider or model reports failure when not connected', async t => {
+	const client = new NanocoderAcpClient({appendLine: () => {}} as any, new AcpStateManager());
+
+	t.deepEqual(await client.setSessionProvider('ollama'), {
+		ok: false,
+		error: 'not connected to the Nanocoder agent',
+	});
+	t.deepEqual(await client.setSessionModel('qwen'), {
+		ok: false,
+		error: 'not connected to the Nanocoder agent',
+	});
+
+	client.setConnection({} as any);
+	t.deepEqual(await client.setSessionProvider('ollama'), {
+		ok: false,
+		error: 'no active session',
+	});
+});
+
+test('NanocoderAcpClient - a provider switch the backend rejects is reported as failed', async t => {
+	const client = makeClient({
+		setSessionConfigOption: () => Promise.reject(new Error('Connection closed')),
+	});
+	client.currentProvider = 'openrouter';
+
+	t.deepEqual(await client.setSessionProvider('ollama'), {
+		ok: false,
+		error: 'Connection closed',
+	});
+	t.is(client.currentProvider, 'openrouter', 'the local state must not claim the switch');
+});
+
+test('NanocoderAcpClient - a confirmed provider switch is reported as ok', async t => {
+	const client = makeClient({setSessionConfigOption: async () => ({})});
+
+	t.deepEqual(await client.setSessionProvider('ollama'), {ok: true});
+	t.is(client.currentProvider, 'ollama');
+});
+
+test('NanocoderAcpClient - a model switch the backend rejects is not saved as the default', async t => {
+	const saved: unknown[] = [];
+	stubSettingsUpdate(t, async (key, value) => {
+		saved.push([key, value]);
+	});
+	const client = makeClient({
+		setSessionConfigOption: () => Promise.reject(new Error('unknown model')),
+	});
+
+	t.deepEqual(await client.setSessionModel('qwen'), {ok: false, error: 'unknown model'});
+	t.deepEqual(saved, []);
+});
+
+test('NanocoderAcpClient - a model switch that cannot be saved still reports the switch', async t => {
+	stubSettingsUpdate(t, () => Promise.reject(new Error('settings.json is read-only')));
+	const client = makeClient({setSessionConfigOption: async () => ({})});
+
+	t.deepEqual(await client.setSessionModel('qwen'), {
+		ok: true,
+		persistError: 'settings.json is read-only',
+	});
+	t.is(client.currentModel, 'qwen', 'the session did switch');
+});
+
+test('NanocoderAcpClient - a confirmed and saved model switch is reported as ok', async t => {
+	const saved: unknown[] = [];
+	stubSettingsUpdate(t, async (key, value) => {
+		saved.push([key, value]);
+	});
+	const client = makeClient({setSessionConfigOption: async () => ({})});
+
+	t.deepEqual(await client.setSessionModel('qwen'), {ok: true});
+	t.deepEqual(saved, [['model', 'qwen']]);
+});
+
+// ── applying the nanocoder.model setting ───────────────────
+
+/** Set `nanocoder.model` and collect the messages shown during one test. */
+function useModelSetting(t: import('ava').ExecutionContext, model: string) {
+	(vscode as any).__test.configuration = (
+		_section: string,
+		key: string,
+		fallback: unknown,
+	) => (key === 'model' ? model : fallback);
+	t.teardown(() => (vscode as any).__test.reset());
+	return () => (vscode as any).__test.shownMessages as {kind: string; message: string}[];
+}
+
+/** A connection whose new sessions start on `llama`, with `qwen` also available. */
+function sessionConnection(setSessionConfigOption: () => Promise<unknown>) {
+	return {
+		newSession: async () => ({
+			sessionId: 'session-new',
+			configOptions: [
+				{id: 'model', currentValue: 'llama', options: [{value: 'llama'}, {value: 'qwen'}]},
+			],
+		}),
+		setSessionConfigOption,
+	};
+}
+
+test('NanocoderAcpClient - a default model the new session rejects is reported', async t => {
+	const shown = useModelSetting(t, 'qwen');
+	const client = makeConnectedClient(
+		sessionConnection(() => Promise.reject(new Error('model is not loaded'))),
+	);
+
+	t.is(await client.getOrCreateSession('/cwd'), 'session-new');
+	t.is(client.currentModel, 'llama');
+	t.deepEqual(shown(), [
+		{
+			kind: 'warning',
+			message: 'Nanocoder: Could not switch to model qwen from your settings: model is not loaded',
+		},
+	]);
+});
+
+test('NanocoderAcpClient - a default model the new session accepts shows nothing', async t => {
+	const shown = useModelSetting(t, 'qwen');
+	const client = makeConnectedClient(sessionConnection(async () => ({})));
+
+	await client.getOrCreateSession('/cwd');
+
+	t.is(client.currentModel, 'qwen');
+	t.deepEqual(shown(), []);
+});
+
+/** Construct a client and capture its settings-change listener. */
+function clientWithSettingsListener(t: import('ava').ExecutionContext, connection: unknown) {
+	let listener: ((event: {affectsConfiguration(key: string): boolean}) => void) | undefined;
+	const original = vscode.workspace.onDidChangeConfiguration;
+	(vscode.workspace as any).onDidChangeConfiguration = (callback: typeof listener) => {
+		listener = callback;
+		return {dispose: () => {}};
+	};
+	t.teardown(() => {
+		(vscode.workspace as any).onDidChangeConfiguration = original;
+	});
+	const client = makeClient(connection);
+	client.currentModel = 'llama';
+	const changeModelSetting = () =>
+		listener?.({affectsConfiguration: key => key === 'nanocoder.model'});
+	return {client, changeModelSetting};
+}
+
+test('NanocoderAcpClient - a model setting change the agent rejects is reported', async t => {
+	const shown = useModelSetting(t, 'qwen');
+	const {changeModelSetting} = clientWithSettingsListener(t, {
+		setSessionConfigOption: () => Promise.reject(new Error('Connection closed')),
+	});
+
+	changeModelSetting();
+	await settle();
+
+	t.deepEqual(shown(), [
+		{
+			kind: 'warning',
+			message: 'Nanocoder: Could not switch to model qwen from your settings: Connection closed',
+		},
+	]);
+});
+
+test('NanocoderAcpClient - a model setting change without a session waits for the next one', async t => {
+	const shown = useModelSetting(t, 'qwen');
+	let calls = 0;
+	const {client, changeModelSetting} = clientWithSettingsListener(t, {
+		setSessionConfigOption: async () => {
+			calls++;
+			return {};
+		},
+	});
+	(client as any)._sessionId = undefined;
+
+	changeModelSetting();
+	await settle();
+
+	t.is(calls, 0);
+	t.deepEqual(shown(), []);
+});
+
+test('NanocoderAcpClient - failed resumeSession retains existing _sessionId and returns false', async (t) => {
+	const originalShowError = vscode.window.showErrorMessage;
+	(vscode.window as any).showErrorMessage = () => Promise.resolve(undefined);
+	t.teardown(() => {
+		(vscode.window as any).showErrorMessage = originalShowError;
+	});
+
+	const outputChannel = {appendLine: () => {}} as any;
+	const stateManager = new AcpStateManager();
+	const client = new NanocoderAcpClient(outputChannel, stateManager);
+	client.setConnection({
+		resumeSession: () => Promise.reject(new Error('session corrupted')),
+	} as any);
+	(client as any)._sessionId = 'session-active';
+
+	const ok = await client.resumeSession('session-bogus');
+	t.false(ok);
+	t.is(client.sessionId, 'session-active', 'must retain existing session id on failure');
+});
+
+test('NanocoderAcpClient - tracks lastActiveSessionId across reconnects and clears on newChat', async (t) => {
+	const outputChannel = {appendLine: () => {}} as any;
+	const stateManager = new AcpStateManager();
+	const client = new NanocoderAcpClient(outputChannel, stateManager);
+
+	client.setConnection({} as any);
+	(client as any)._sessionId = 'session-123';
+
+	client.setConnection({} as any);
+	t.is(client.sessionId, undefined, 'sessionId is cleared on reconnect');
+	t.is(client.lastActiveSessionId, 'session-123', 'lastActiveSessionId captures prior session');
+
+	client.newChat();
+	t.is(client.lastActiveSessionId, undefined, 'newChat clears lastActiveSessionId');
+});

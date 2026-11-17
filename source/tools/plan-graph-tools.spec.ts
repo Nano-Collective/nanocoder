@@ -4,7 +4,7 @@ import {join} from 'node:path';
 import test from 'ava';
 import {PlanStore} from '@/plans/storage';
 import {SESSION_ARTIFACT_TOOLS, ToolManager} from '@/tools/tool-manager';
-import {buildSystemPrompt, resetSectionCache} from '@/utils/prompt-builder';
+import {buildSystemPrompt, resetSectionCache} from '@/conversation/prompt-builder';
 import {createGetPlanTool} from './get-plan';
 import {createUpdatePlanNodeTool} from './update-plan-node';
 

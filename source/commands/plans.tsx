@@ -6,8 +6,8 @@ import {
 } from '@/components/plan-graph-display';
 import {useTheme} from '@/hooks/useTheme';
 import {PlanStore, PlanStoreError} from '@/plans/storage';
-import {generateKey} from '@/session/key-generator';
 import type {Command} from '@/types/index';
+import {generateKey} from '@/utils/key-generator';
 
 const USAGE = 'Usage: /plans [list|show [id]|use <id|none>|delete <id>|help]';
 

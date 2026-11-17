@@ -6,15 +6,15 @@ import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {getToolManager} from '@/message-handler';
-import type {ToolCall} from '@/types/core';
-import {formatError} from '@/utils/error-formatter';
-import {getLogger} from '@/utils/logging';
 import {
 	getToolJsonSchema,
 	validateArgsAgainstSchema,
-} from '@/utils/schema-validate';
-import {parseToolArguments} from '@/utils/tool-args-parser';
-import {formatValidationError} from '@/utils/tool-validation';
+} from '@/tools/runtime/schema-validate';
+import {parseToolArguments} from '@/tools/runtime/tool-args-parser';
+import {formatValidationError} from '@/tools/runtime/tool-validation';
+import type {ToolCall} from '@/types/core';
+import {formatError} from '@/utils/error-formatter';
+import {getLogger} from '@/utils/logging';
 
 interface ToolConfirmationProps {
 	toolCall: ToolCall;

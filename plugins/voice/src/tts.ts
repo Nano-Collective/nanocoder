@@ -1,7 +1,7 @@
-import cp from 'node:child_process';
 import {existsSync} from 'node:fs';
 import {join} from 'node:path';
 import {platform} from 'node:process';
+import crossSpawn from 'cross-spawn';
 import {getVoiceBinDir} from './dependencies.js';
 
 function resolvePiperCommand(): string {
@@ -45,7 +45,7 @@ export async function synthesizeSpeech(
 
 		const args = ['--model', modelPath, '--output_file', outputPath];
 
-		const proc = cp.spawn(command, args, {
+		const proc = crossSpawn.spawn(command, args, {
 			stdio: ['pipe', 'ignore', 'ignore'],
 		});
 

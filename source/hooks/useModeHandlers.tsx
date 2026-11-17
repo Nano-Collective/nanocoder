@@ -10,14 +10,14 @@ import {reloadAppConfig} from '@/config/index';
 import {formatConfigLintIssue, lintProviderConfig} from '@/config/lint';
 import {loadAllProviderConfigs} from '@/config/mcp-config-loader';
 import {saveTune, updateLastUsed} from '@/config/preferences';
+import {applyTuneCompaction} from '@/conversation/compaction/auto-compact';
 import type {ActiveMode} from '@/hooks/useAppState';
 import {getToolManager} from '@/message-handler';
 import {getModelContextLimit, getSessionContextLimit} from '@/models/index';
-import {generateKey} from '@/session/key-generator';
+import {bumpReadContentGeneration} from '@/tools/runtime/read-tracker';
 import type {AIProviderConfig, TuneConfig} from '@/types/config';
 import {LLMClient, Message} from '@/types/core';
-import {applyTuneCompaction} from '@/utils/auto-compact';
-import {bumpReadContentGeneration} from '@/utils/read-tracker';
+import {generateKey} from '@/utils/key-generator';
 
 interface UseModeHandlersProps {
 	client: LLMClient | null;
@@ -69,10 +69,11 @@ export function useModeHandlers({
 	const warnIfHistoryWontFit = async (
 		model: string,
 		providerConfig: AIProviderConfig | null,
+		history: Message[],
 	): Promise<void> => {
-		if (messages.length === 0) return;
+		if (history.length === 0) return;
 		try {
-			const used = messages.reduce((sum, m) => sum + getMessageTokens(m), 0);
+			const used = history.reduce((sum, m) => sum + getMessageTokens(m), 0);
 			const limit =
 				getSessionContextLimit() ??
 				(await getModelContextLimit(model, {
@@ -96,10 +97,13 @@ export function useModeHandlers({
 	// provider, so a selection may also switch the active provider. Staying on
 	// the same provider just swaps the model on the live client; crossing to a
 	// different provider spins up a fresh client (and re-runs config lint).
+	// `history` is the conversation the new model will continue: /resume passes
+	// the resumed session's messages, which `messages` here doesn't hold yet.
 	const handleModelSelect = async (
 		selectedProvider: string,
 		selectedModel: string,
 		isProgrammatic: boolean = false,
+		history: Message[] = messages,
 	) => {
 		const sameProvider = selectedProvider === currentProvider;
 
@@ -129,7 +133,11 @@ export function useModeHandlers({
 					);
 				}
 
-				await warnIfHistoryWontFit(selectedModel, client.getProviderConfig());
+				await warnIfHistoryWontFit(
+					selectedModel,
+					client.getProviderConfig(),
+					history,
+				);
 				exitMode();
 				return true;
 			}
@@ -177,7 +185,11 @@ export function useModeHandlers({
 				);
 			}
 
-			await warnIfHistoryWontFit(newModel, newClient.getProviderConfig());
+			await warnIfHistoryWontFit(
+				newModel,
+				newClient.getProviderConfig(),
+				history,
+			);
 
 			// Re-run lint scoped to the newly active provider so any
 			// misconfiguration becomes visible right when it would start

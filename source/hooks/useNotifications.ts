@@ -1,5 +1,5 @@
 import {useEffect, useRef} from 'react';
-import {sendNotification} from '@/utils/notifications';
+import {sendNotification} from '@/services/notifications';
 
 interface NotificationState {
 	isToolConfirmationMode: boolean;

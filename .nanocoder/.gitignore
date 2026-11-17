@@ -2,3 +2,4 @@
 /plans/
 /timeline/
 /daemon.*
+/ci-watch-state.json*

@@ -2,8 +2,8 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {getProjectRoot} from '@/services/session-cwd';
-import {ensureNanocoderGitignore} from '@/utils/ensure-nanocoder-gitignore';
-import {withExclusiveLock} from '@/utils/exclusive-file-lock';
+import {ensureNanocoderGitignore} from '@/utils/fs/ensure-nanocoder-gitignore';
+import {withExclusiveLock} from '@/utils/fs/exclusive-file-lock';
 import {
 	assertValidPlanGraph,
 	buildPlanNodes,
