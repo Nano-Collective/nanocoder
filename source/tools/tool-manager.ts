@@ -452,7 +452,13 @@ export class ToolManager {
 		disabledTools?: readonly string[],
 		model?: string,
 	): string[] {
-		let names = this.getToolNames();
+		// A scoped skill tool belongs to its bundle's subagent, which builds
+		// its own list from getAllTools({forSkill}). Every caller here is the
+		// main conversation (TUI, --plain, ACP), so leaving scoped tools in
+		// would let it run one that getAllTools() hides from it.
+		let names = this.getToolNames().filter(
+			name => !this.registry.getEntry(name)?.scoped,
+		);
 
 		if (tuneConfig?.enabled) {
 			const profile = resolveToolProfile(tuneConfig.toolProfile, model);

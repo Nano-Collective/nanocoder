@@ -1892,3 +1892,63 @@ test('isReadOnly ignores the readOnlyHint of an unloaded on-demand MCP tool', as
 	t.true(manager.isReadOnly('read_file'), 'built-in readers are unaffected');
 	await manager.disconnectMCP();
 });
+
+// ============================================================================
+// Scoped skill tools (#2244)
+// ============================================================================
+
+const registerTestSkillTool = (
+	manager: ToolManager,
+	name: string,
+	scoped: boolean,
+): void => {
+	manager.registerSkillTool({
+		name,
+		tool: {description: 'x'},
+		handler: async () => 'RAN',
+		approval: false,
+		readOnly: true,
+		ownerSkill: 'k8s',
+		scoped,
+	} as Parameters<ToolManager['registerSkillTool']>[0]);
+};
+
+test('getAvailableToolNames - leaves out a scoped skill tool', t => {
+	const manager = new ToolManager();
+	registerTestSkillTool(manager, 'secret_tool', true);
+
+	t.false(manager.getAvailableToolNames(undefined, 'normal', []).includes('secret_tool'));
+	t.false(manager.getAvailableToolNames(undefined, 'yolo', []).includes('secret_tool'));
+	t.false(manager.getAvailableToolNames().includes('secret_tool'));
+});
+
+test('getAvailableToolNames - keeps a global skill tool', t => {
+	const manager = new ToolManager();
+	registerTestSkillTool(manager, 'public_tool', false);
+
+	t.true(manager.getAvailableToolNames(undefined, 'normal', []).includes('public_tool'));
+});
+
+test('a scoped skill tool stays visible to its own skill', t => {
+	const manager = new ToolManager();
+	registerTestSkillTool(manager, 'secret_tool', true);
+
+	t.true('secret_tool' in manager.getAllTools({forSkill: 'k8s'}));
+	t.false('secret_tool' in manager.getAllTools({forSkill: 'other'}));
+	t.truthy(manager.getToolHandler('secret_tool'));
+});
+
+test('filterValidToolCalls - refuses a scoped skill tool in the main conversation', t => {
+	const manager = new ToolManager();
+	registerTestSkillTool(manager, 'secret_tool', true);
+
+	const result = filterValidToolCalls(
+		[{id: 'call-1', function: {name: 'secret_tool', arguments: {}}}],
+		manager,
+		manager.getAvailableToolNames(undefined, 'normal', []),
+	);
+
+	t.is(result.validToolCalls.length, 0);
+	t.is(result.rejectedToolCalls.length, 1);
+	t.regex(String(result.errorResults[0]?.content), /not available/);
+});
