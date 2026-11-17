@@ -6,7 +6,10 @@ import type {
 	ToolKind,
 } from '@agentclientprotocol/sdk';
 import {getSafeSessionCwd} from '@/services/session-cwd';
-import {fitEditToLineEndings} from '@/tools/file-ops/line-endings';
+import {
+	fitContentToLineEndings,
+	fitEditToLineEndings,
+} from '@/tools/file-ops/line-endings';
 import {replaceFirstLiteral} from '@/tools/file-ops/literal-replace';
 import type {ToolCall} from '@/types/core';
 import {truncateText} from '@/utils/truncate-text';
@@ -256,5 +259,11 @@ async function buildWriteFileDiff(
 		oldText = null; // New file.
 	}
 
-	return {type: 'diff', path: absPath, oldText, newText};
+	// Match the file's line endings the same way the tool does.
+	return {
+		type: 'diff',
+		path: absPath,
+		oldText,
+		newText: fitContentToLineEndings(oldText, newText),
+	};
 }

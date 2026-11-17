@@ -255,6 +255,22 @@ test('buildToolCallMeta - write_file diff captures existing content as oldText',
 	}
 });
 
+test('buildToolCallMeta - write_file diff keeps a CRLF file CRLF', async t => {
+	const dir = mkdtempSync(join(tmpdir(), 'acp-tc-'));
+	const file = join(dir, 'crlf.ts');
+	writeFileSync(file, 'a\r\nb\r\n');
+	try {
+		const meta = await buildToolCallMeta(
+			makeCall('write_file', {path: file, content: 'a\nc\n'}),
+		);
+		const diff = meta.content[0] as any;
+		t.is(diff.oldText, 'a\r\nb\r\n');
+		t.is(diff.newText, 'a\r\nc\r\n');
+	} finally {
+		rmSync(dir, {recursive: true, force: true});
+	}
+});
+
 // ============================================================================
 // withDiff: false - the queued-batch announcement discards content, so it must
 // not pay to read the file off disk first.
