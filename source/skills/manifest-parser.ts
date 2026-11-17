@@ -18,6 +18,7 @@ import type {
 	SkillTrigger,
 } from '@/types/skills';
 import {parseYamlObject} from '@/utils/frontmatter';
+import {stripUtf8Bom} from '@/utils/strip-utf8-bom';
 
 const SKILL_NAME_REGEX = /^[a-z][a-z0-9-]*$/;
 const TARGET_REGEX = /^(command|agent|tool|skill):[a-z][a-z0-9_-]*$/;
@@ -39,7 +40,7 @@ export function parseSkillManifest(filePath: string): SkillManifest {
 }
 
 export function parseSkillManifestContent(content: string): SkillManifest {
-	const raw = parseYamlObject(content);
+	const raw = parseYamlObject(stripUtf8Bom(content));
 	if (raw === null) {
 		throw new SkillManifestParseError('skill.yaml is not a valid YAML mapping');
 	}

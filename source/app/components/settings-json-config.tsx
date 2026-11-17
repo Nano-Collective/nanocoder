@@ -3,6 +3,7 @@ import {useCallback, useState} from 'react';
 import {JsonViewer} from '@/components/json-viewer';
 import {writeConfigFileAtomic} from '@/config/config-writer';
 import {getClosestConfigFile} from '@/config/index';
+import {stripUtf8Bom} from '@/utils/strip-utf8-bom';
 
 /**
  * In-TUI editor for a JSON config file (agents.config.json, .mcp.json, …). The
@@ -25,7 +26,7 @@ export function SettingsJsonConfigPanel({
 	const [filePath] = useState(() => getClosestConfigFile(configFileName));
 	const [data] = useState<unknown>(() => {
 		try {
-			return JSON.parse(readFileSync(filePath, 'utf-8'));
+			return JSON.parse(stripUtf8Bom(readFileSync(filePath, 'utf-8')));
 		} catch {
 			// Missing/empty file: seed the expected shape so the editor is usable.
 			return configFileName.includes('mcp') ? {mcpServers: {}} : {};

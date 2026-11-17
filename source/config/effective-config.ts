@@ -49,6 +49,7 @@ import {
 	resolveActiveProfile,
 } from '@/config/profile';
 import {FIREWALL_DEFAULTS, resolveFirewallConfig} from '@/types/firewall';
+import {stripUtf8Bom} from '@/utils/strip-utf8-bom';
 import {isObject} from '@/utils/type-helpers';
 
 /**
@@ -293,7 +294,9 @@ interface RawLayer {
 function parseJsonFile(path: string): Record<string, unknown> | null {
 	if (!existsSync(path)) return null;
 	try {
-		const parsed: unknown = JSON.parse(readFileSync(path, 'utf-8'));
+		const parsed: unknown = JSON.parse(
+			stripUtf8Bom(readFileSync(path, 'utf-8')),
+		);
 		return isObject(parsed) ? parsed : null;
 	} catch {
 		return null;
@@ -309,7 +312,9 @@ function readRawFile(
 		return {layer, file, path, exists: false, data: null};
 	}
 	try {
-		const parsed: unknown = JSON.parse(readFileSync(path, 'utf-8'));
+		const parsed: unknown = JSON.parse(
+			stripUtf8Bom(readFileSync(path, 'utf-8')),
+		);
 		return {
 			layer,
 			file,
@@ -839,7 +844,7 @@ function readEnvProviderNames(): Set<string> {
 	if (!rawData) return names;
 
 	try {
-		const parsed: unknown = JSON.parse(rawData);
+		const parsed: unknown = JSON.parse(stripUtf8Bom(rawData));
 		const list = Array.isArray(parsed)
 			? parsed
 			: (getAt(isObject(parsed) ? parsed : null, ['nanocoder', 'providers']) ??
@@ -894,7 +899,7 @@ function readEnvMcpServers(): {servers: Map<string, unknown>; origin: string} {
 	if (!rawData) return {servers: new Map(), origin};
 
 	try {
-		const parsed: unknown = JSON.parse(rawData);
+		const parsed: unknown = JSON.parse(stripUtf8Bom(rawData));
 		if (Array.isArray(parsed)) {
 			const byName = new Map<string, unknown>();
 			for (const server of parsed) {

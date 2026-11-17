@@ -6,6 +6,13 @@ import {getActiveProfile} from '@/config/profile';
 import {getConfigRoot} from '@/services/session-context';
 import type {MCPServerConfig, ProviderConfig} from '@/types/config';
 import {notifyError} from '@/utils/message-queue-core';
+import {stripUtf8Bom} from '@/utils/strip-utf8-bom';
+
+/** Read and parse a JSON config file, tolerating a leading UTF-8 BOM. */
+// biome-ignore lint/suspicious/noExplicitAny: parsed JSON is dynamically shaped
+function readJsonFile(filePath: string): any {
+	return JSON.parse(stripUtf8Bom(readFileSync(filePath, 'utf-8')));
+}
 
 // Simplified configuration source types
 export type ConfigSource = 'project' | 'global' | 'env';
@@ -101,8 +108,7 @@ export function loadProjectMCPConfig(
 	}
 
 	try {
-		const rawData = readFileSync(configPath, 'utf-8');
-		const config = JSON.parse(rawData);
+		const config = readJsonFile(configPath);
 
 		const mcpServers = parseMCPServers(config);
 
@@ -132,8 +138,7 @@ export function loadGlobalMCPConfig(): MCPServerWithSource[] {
 	}
 
 	try {
-		const rawData = readFileSync(configPath, 'utf-8');
-		const config = JSON.parse(rawData);
+		const config = readJsonFile(configPath);
 
 		const mcpServers = parseMCPServers(config);
 
@@ -221,7 +226,7 @@ function loadEnvMCPConfigs(): MCPServerWithSource[] {
 	}
 
 	try {
-		const config = JSON.parse(rawData);
+		const config = JSON.parse(stripUtf8Bom(rawData));
 
 		// Accept direct array format (env vars) or standard .mcp.json wrapper format
 		let servers: unknown[] | null = null;
@@ -300,8 +305,7 @@ function loadProjectProviderConfigs(cwd: string): ProviderConfig[] {
 
 	if (existsSync(configPath)) {
 		try {
-			const rawData = readFileSync(configPath, 'utf-8');
-			const config = JSON.parse(rawData);
+			const config = readJsonFile(configPath);
 
 			if (config.nanocoder && Array.isArray(config.nanocoder.providers)) {
 				// Apply environment variable substitution
@@ -344,8 +348,7 @@ function loadGlobalProviderConfigs(): ProviderConfig[] {
 // Helper function to load provider config from a specific file
 function loadProviderConfigFromFile(filePath: string): ProviderConfig[] {
 	try {
-		const rawData = readFileSync(filePath, 'utf-8');
-		const config = JSON.parse(rawData);
+		const config = readJsonFile(filePath);
 
 		if (config.nanocoder && Array.isArray(config.nanocoder.providers)) {
 			// Apply environment variable substitution
@@ -388,7 +391,7 @@ function loadEnvProviderConfigs(): ProviderConfig[] {
 	}
 
 	try {
-		const config = JSON.parse(rawData);
+		const config = JSON.parse(stripUtf8Bom(rawData));
 
 		// Accept direct array format or standard agents.config.json wrapper format
 		if (Array.isArray(config)) {

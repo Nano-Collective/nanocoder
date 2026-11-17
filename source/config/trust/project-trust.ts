@@ -10,6 +10,7 @@ import {
 import path from 'node:path';
 import {HOOK_EVENTS, type HookEvent} from '@/types/config';
 import {parseYamlObject, splitFrontmatter} from '@/utils/frontmatter';
+import {stripUtf8Bom} from '@/utils/strip-utf8-bom';
 
 /**
  * Bump when `describeProjectTrust` changes what it fingerprints. A trust entry
@@ -399,7 +400,7 @@ function listMcpServers(root: string, lines: string[]): number {
 
 	let parsed: unknown;
 	try {
-		parsed = JSON.parse(raw) as unknown;
+		parsed = JSON.parse(stripUtf8Bom(raw)) as unknown;
 	} catch {
 		return 0;
 	}
@@ -592,7 +593,7 @@ function readJsonFile(file: string, lines: string[]): unknown {
 		return undefined;
 	}
 	try {
-		return JSON.parse(raw) as unknown;
+		return JSON.parse(stripUtf8Bom(raw)) as unknown;
 	} catch {
 		lines.push(`invalid ${path.basename(file)} ${hashText(raw)}`);
 		return undefined;

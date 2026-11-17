@@ -1,4 +1,5 @@
 import {readFileSync, statSync} from 'node:fs';
+import {stripUtf8Bom} from '@/utils/strip-utf8-bom';
 
 interface ConfigFileCacheEntry {
 	mtimeMs: number;
@@ -29,9 +30,9 @@ export function readCachedConfigFile(configPath: string): unknown {
 		return structuredClone(cached.data);
 	}
 
-	const raw = readFileSync(configPath, 'utf-8');
-	const clean = raw.replace(/^\uFEFF/, '');
-	const data: unknown = JSON.parse(clean);
+	const data: unknown = JSON.parse(
+		stripUtf8Bom(readFileSync(configPath, 'utf-8')),
+	);
 
 	configFileCache.set(configPath, {
 		mtimeMs: stats.mtimeMs,
