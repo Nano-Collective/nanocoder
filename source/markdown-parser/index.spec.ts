@@ -4,9 +4,8 @@ import {join} from 'node:path';
 import test from 'ava';
 import chalk from 'chalk';
 import stripAnsi from 'strip-ansi';
-import stripAnsi from 'strip-ansi';
 import type {Colors} from '../types/markdown-parser.js';
-import {parseMarkdown} from './index.js';
+import {parseMarkdown, parseMarkdownParts} from './index.js';
 
 console.log(`\nindex.spec.ts`);
 
@@ -198,6 +197,15 @@ test('parseMarkdown handles code blocks without language', t => {
 	t.true(result.includes('Plain code'));
 });
 
+test('parseMarkdown preserves HTML inside code blocks', t => {
+	const text = '```html\n<div>Hello<br>World</div>\n&lt;span&gt;test&lt;/span&gt;\n```';
+	const result = parseMarkdown(text, mockColors);
+	const plainResult = stripAnsi(result);
+
+	t.true(plainResult.includes('<br>'));
+	t.true(plainResult.includes('&lt;span&gt;test&lt;/span&gt;'));
+});
+
 // Code blocks used to render in cli-highlight's own palette: the parser passed
 // `theme: 'default'`, a string where the library expects a token -> formatter
 // map, so the option was dropped. Colour must come from the caller's palette.
@@ -342,4 +350,92 @@ test('parseMarkdown restores inline code placeholders correctly', t => {
 	t.false(result.includes('__INLINE_CODE'));
 	t.false(result.includes('_INLINE'));
 	t.false(result.includes('CODE_'));
+});
+
+test('parseMarkdown preserves literal placeholder tokens alongside real code', t => {
+	const text = [
+		'Literal __CODE_BLOCK_0__ and __INLINE_CODE_0__.',
+		'',
+		'```text',
+		'const value = "real code";',
+		'```',
+		'',
+		'Also `inline code`.',
+	].join('\n');
+	const result = parseMarkdown(text, mockColors);
+
+	t.true(result.includes('__CODE_BLOCK_0__'));
+	t.true(result.includes('__INLINE_CODE_0__'));
+	t.true(result.includes('const value = "real code";'));
+	t.true(result.includes('inline code'));
+	t.false(result.includes('__NANOCODER_MD_'));
+});
+
+test('parseMarkdown avoids marker collisions after HTML entity decoding', t => {
+	const text = [
+		'&#95;_NANOCODER_MD_0__CODE_BLOCK_0__',
+		'',
+		'```text',
+		'real code',
+		'```',
+	].join('\n');
+	const result = parseMarkdown(text, mockColors);
+
+	t.true(result.includes('__NANOCODER_MD_0__CODE_BLOCK_0__'));
+	t.true(result.includes('real code'));
+	t.false(result.includes('__NANOCODER_MD_1__'));
+});
+
+test('parseMarkdownParts preserves literal placeholder tokens alongside real code', t => {
+	const text = [
+		'Literal __CODE_BLOCK_0__ and __INLINE_CODE_0__.',
+		'',
+		'```text',
+		'const value = "real code";',
+		'```',
+		'',
+		'Also `inline code`.',
+	].join('\n');
+	const parts = parseMarkdownParts(text, mockColors);
+	const textContent = parts
+		.filter(part => part.type === 'text')
+		.map(part => part.content)
+		.join('');
+	const codeContent = parts
+		.filter(part => part.type === 'code')
+		.map(part => part.content)
+		.join('');
+
+	t.true(textContent.includes('__CODE_BLOCK_0__'));
+	t.true(textContent.includes('__INLINE_CODE_0__'));
+	t.true(textContent.includes('inline code'));
+	t.true(codeContent.includes('const value = "real code";'));
+	t.false(`${textContent}${codeContent}`.includes('__NANOCODER_MD_'));
+});
+
+test('parseMarkdownParts preserves namespaced literal markers after entity decoding', t => {
+	const text = [
+		'&#95;_NANOCODER_MD_0__CODE_BLOCK_0__ and __NANOCODER_MD_1__INLINE_CODE_0__',
+		'',
+		'```text',
+		'real code',
+		'```',
+		'',
+		'Also `inline code`.',
+	].join('\n');
+	const parts = parseMarkdownParts(text, mockColors);
+	const textContent = parts
+		.filter(part => part.type === 'text')
+		.map(part => part.content)
+		.join('');
+	const codeContent = parts
+		.filter(part => part.type === 'code')
+		.map(part => part.content)
+		.join('');
+
+	t.true(textContent.includes('__NANOCODER_MD_0__CODE_BLOCK_0__'));
+	t.true(textContent.includes('__NANOCODER_MD_1__INLINE_CODE_0__'));
+	t.true(textContent.includes('inline code'));
+	t.true(codeContent.includes('real code'));
+	t.false(`${textContent}${codeContent}`.includes('__NANOCODER_MD_2__'));
 });

@@ -33,6 +33,12 @@ export interface ExtensionMessageSessionLoaded {
 	type: 'sessionLoaded';
 }
 
+export interface ExtensionMessageSessionResuming {
+	type: 'sessionResuming';
+	isResuming: boolean;
+	sessionId?: string;
+}
+
 export interface ExtensionMessageAcpUpdate {
 	type: 'acpUpdate';
 	update: any; // schema.SessionNotification or custom internal payload
@@ -71,12 +77,19 @@ export interface ExtensionMessagePermissionsCancelled {
 
 export interface ExtensionMessageSyncState {
 	type: 'syncState';
-	mode: string;
+	mode?: string;
 	availableModes: string[];
-	model: string;
+	model?: string;
 	availableModels: string[];
-	provider: string;
+	provider?: string;
 	availableProviders: string[];
+}
+
+/** ACP child-process / handshake status so the composer is not stuck on "Loading...". */
+export interface ExtensionMessageConnectionStatus {
+	type: 'connectionStatus';
+	status: 'connecting' | 'connected' | 'error';
+	message?: string;
 }
 
 export interface ExtensionMessageCopyLastCodeBlock {
@@ -197,6 +210,24 @@ export interface ExtensionMessageMentionCompletions {
 	items: MentionItem[];
 }
 
+/** A submitted prompt is waiting behind the in-flight turn. */
+export interface ExtensionMessagePromptQueued {
+	type: 'promptQueued';
+	id: string;
+}
+
+/** The host has started (or dequeued) this prompt as the active turn. */
+export interface ExtensionMessagePromptStarted {
+	type: 'promptStarted';
+	id: string;
+}
+
+/** Waiting prompts were discarded (Stop / Escape, new chat, /clear, resume). */
+export interface ExtensionMessagePromptQueueCleared {
+	type: 'promptQueueCleared';
+	ids: string[];
+}
+
 export type ExtensionToWebviewMessage =
 	| ExtensionMessageAppendMessage
 	| ExtensionMessageAppendThought
@@ -210,8 +241,10 @@ export type ExtensionToWebviewMessage =
 	| ExtensionMessagePermissionsCancelled
 	| ExtensionMessageProviderResult
 	| ExtensionMessageSyncState
+	| ExtensionMessageConnectionStatus
 	| ExtensionMessageUpdateSessions
 	| ExtensionMessageSessionLoaded
+	| ExtensionMessageSessionResuming
 	| ExtensionMessageSettingsData
 	| ExtensionMessageSettingsUpdated
 	| ExtensionMessageTokenUsageVisibility
@@ -223,7 +256,10 @@ export type ExtensionToWebviewMessage =
 	| ExtensionMessageCopyLastCodeBlock
 	| ExtensionMessageCopyResult
 	| ExtensionMessageRunPrompt
-	| ExtensionMessageMentionCompletions;
+	| ExtensionMessageMentionCompletions
+	| ExtensionMessagePromptQueued
+	| ExtensionMessagePromptStarted
+	| ExtensionMessagePromptQueueCleared;
 
 // ---------------------------------------------------------
 // Messages: Webview -> Extension Host
@@ -235,6 +271,8 @@ export interface WebviewMessageReady {
 
 export interface WebviewMessageSubmitMessage {
 	type: 'submitMessage';
+	/** Client-generated id so the host can queue, start, or discard this prompt. */
+	id: string;
 	text: string;
 	images?: { data: string; mimeType: string }[];
 }
@@ -247,6 +285,12 @@ export interface WebviewMessageRetryMessage {
 
 export interface WebviewMessageCancel {
 	type: 'cancel';
+}
+
+/** Remove one waiting prompt before it starts. Does not cancel the in-flight turn. */
+export interface WebviewMessageCancelQueuedMessage {
+	type: 'cancelQueuedMessage';
+	id: string;
 }
 
 export interface WebviewMessageApproveTool {
@@ -268,6 +312,7 @@ export interface WebviewMessageResolveTool {
 export interface WebviewMessageShowDiff {
 	type: 'showDiff';
 	toolCallId: string;
+	filePath?: string;
 }
 
 
@@ -388,6 +433,7 @@ export type WebviewToExtensionMessage =
 	| WebviewMessageSubmitMessage
 	| WebviewMessageRetryMessage
 	| WebviewMessageCancel
+	| WebviewMessageCancelQueuedMessage
 	| WebviewMessageApproveTool
 	| WebviewMessageDenyTool
 	| WebviewMessageResolveTool

@@ -357,40 +357,6 @@ export const MCP_TEMPLATES: McpTemplate[] = [
 		transportType: 'http',
 	},
 	{
-		id: 'serply',
-		name: 'Serply',
-		description:
-			'Serply Google, Bing, News, Scholar, Maps, Jobs and Amazon search plus URL scraping MCP server',
-		command: '',
-		fields: [
-			{
-				name: 'serverName',
-				prompt: 'Server name',
-				required: true,
-				default: 'serply',
-			},
-			{
-				name: 'apiKey',
-				prompt: 'Serply API key (from https://serply.io)',
-				required: true,
-				sensitive: true,
-			},
-		],
-		buildConfig: answers => ({
-			name: answers.serverName || 'serply',
-			transport: 'http' as McpTransportType,
-			url: 'https://api.serply.io/mcp',
-			description: 'Serply web search and URL scraping MCP server',
-			tags: ['serply', 'search', 'web', 'scrape', 'http'],
-			timeout: TIMEOUT_MCP_DEFAULT_MS,
-			// Serply authenticates with an X-API-Key header, not a bearer token.
-			headers: {'X-API-Key': (answers.apiKey || '').trim()},
-			templateId: 'serply',
-		}),
-		category: 'remote',
-		transportType: 'http',
-	},
-	{
 		id: 'gitlab',
 		name: 'GitLab',
 		description: 'GitLab MCP server for repository management and operations',
@@ -522,6 +488,12 @@ export const MCP_TEMPLATES: McpTemplate[] = [
 				required: false,
 			},
 			{
+				name: 'headers',
+				prompt:
+					'HTTP headers (Name: value, one per line, for http transport, optional)',
+				required: false,
+			},
+			{
 				name: 'command',
 				prompt: 'Command (for stdio transport)',
 				required: false,
@@ -564,6 +536,18 @@ export const MCP_TEMPLATES: McpTemplate[] = [
 				}
 				config.url = answers.url;
 				config.timeout = TIMEOUT_MCP_DEFAULT_MS;
+				// Only the http transport sends headers (transport-factory),
+				// so they are not written for websocket servers.
+				if (transport === 'http' && answers.headers) {
+					const headers: Record<string, string> = {};
+					for (const line of answers.headers.split('\n')) {
+						const separator = line.indexOf(':');
+						if (separator <= 0) continue;
+						const name = line.slice(0, separator).trim();
+						if (name) headers[name] = line.slice(separator + 1).trim();
+					}
+					if (Object.keys(headers).length > 0) config.headers = headers;
+				}
 			}
 
 			if (answers.envVars) {
@@ -592,8 +576,8 @@ export const MCP_TEMPLATES: McpTemplate[] = [
  * Resolution order:
  * 1. `templateId` — stamped by the wizard when the config is built. This
  *    survives a custom `serverName` (e.g. `you-paid`, `gh-work`). Name
- *    matching misses those and would fall through to `custom`, whose
- *    buildConfig never writes headers — silently dropping the bearer token.
+ *    matching misses those and would fall through to `custom`, which would
+ *    rebuild the server from its generic fields instead of the template's.
  * 2. `url` — `https://api.githubcopilot.com/mcp/` is `github-remote`. Configs
  *    saved before that stamp have no `templateId`, and their tags say
  *    `github` (the stdio template), so this is what keeps the bearer header.

@@ -1,3 +1,4 @@
+import {pathToFileURL} from 'node:url';
 import React, {useEffect, useRef} from 'react';
 import {ConfigurationError, createLLMClient} from '@/client-factory';
 import {commandRegistry} from '@/commands';
@@ -23,18 +24,20 @@ import {TIMEOUT_OUTPUT_FLUSH_MS} from '@/constants';
 import {CustomCommandExecutor} from '@/custom-commands/executor';
 import {CustomCommandLoader} from '@/custom-commands/loader';
 import {resolveStartupProvider} from '@/hooks/startup-provider';
+import {setAvailableSubagents} from '@/input/prompt-processor';
 import {getLSPManager, type LSPInitResult} from '@/lsp/index';
 import {
 	setCommandLoaderGetter,
 	setToolManagerGetter,
 	setToolRegistryGetter,
 } from '@/message-handler';
+import {loadPlugins} from '@/plugins/host';
 import {
 	beginSessionStartHooks,
 	runLifecycleHooks,
 	SESSION_END_HOOK_HANDLER,
 } from '@/services/lifecycle-hooks';
-import {generateKey} from '@/session/key-generator';
+import {checkForUpdates} from '@/services/update-checker';
 import {sessionManager} from '@/session/session-manager';
 import {
 	recordSubagentApiCallForStats,
@@ -50,9 +53,8 @@ import {
 	MCPConnectionStatus,
 } from '@/types/core';
 import type {MCPInitResult, UpdateInfo, UserPreferences} from '@/types/index';
-import {setAvailableSubagents} from '@/utils/prompt-processor';
+import {generateKey} from '@/utils/key-generator';
 import {getShutdownManager} from '@/utils/shutdown';
-import {checkForUpdates} from '@/utils/update-checker';
 
 interface UseAppInitializationProps {
 	setClient: (client: LLMClient | null) => void;
@@ -132,6 +134,7 @@ export function useAppInitialization({
 		preferredProvider?: string,
 		preferredModel?: string,
 		isProgrammatic: boolean = false,
+		strictProvider: boolean = false,
 	): Promise<LLMClient | null> => {
 		// Lint provider configs before instantiation so typos and misplaced
 		// blocks surface as warnings in the chat queue, without a box —
@@ -150,6 +153,8 @@ export function useAppInitialization({
 		const {client, actualProvider} = await createLLMClient(
 			preferredProvider,
 			preferredModel,
+			undefined,
+			{strictProvider},
 		);
 		setClient(client);
 		setCurrentProvider(actualProvider);
@@ -248,9 +253,30 @@ export function useAppInitialization({
 					setMcpServersStatus([...mcpStatus]);
 				}
 			};
+			const onHealthChange = (change: {
+				serverName: string;
+				status: 'connected' | 'unhealthy';
+				error?: string;
+			}) => {
+				const statusIndex = mcpStatus.findIndex(
+					s => s.name === change.serverName,
+				);
+				if (statusIndex === -1) return;
+				mcpStatus[statusIndex] = {
+					name: change.serverName,
+					status: change.status === 'connected' ? 'connected' : 'unhealthy',
+					errorMessage: change.error,
+				};
+				setMcpServersStatus([...mcpStatus]);
+			};
 
 			try {
-				await toolManager.initializeMCP(config.mcpServers, onProgress);
+				await toolManager.initializeMCP(
+					config.mcpServers,
+					onProgress,
+					onHealthChange,
+					config.tune,
+				);
 			} catch (error) {
 				// Mark all pending servers as failed
 				mcpStatus.forEach((status, index) => {
@@ -277,7 +303,7 @@ export function useAppInitialization({
 	const initializeLSPServers = async () => {
 		const lspConfig = getAppConfig();
 		const lspManager = await getLSPManager({
-			rootUri: `file://${process.cwd()}`,
+			rootUri: pathToFileURL(process.cwd()).href,
 			autoDiscover: true,
 			// Use custom servers from config if provided
 			servers: lspConfig.lspServers?.map(server => ({
@@ -408,7 +434,12 @@ export function useAppInitialization({
 				);
 			}
 			const model = cliModel || modeConfig?.model || undefined;
-			const client = await initializeClient(provider, model, isProgrammatic);
+			const client = await initializeClient(
+				provider,
+				model,
+				isProgrammatic,
+				Boolean(cliProvider),
+			);
 
 			// Create and initialize the SubagentExecutor if client was successfully created
 			if (client) {
@@ -667,6 +698,10 @@ export function useAppInitialization({
 			// so nothing gates on MCP/LSP/update-check completing. Show
 			// the prompt immediately after the LLM client + subagents are
 			// ready. Everything else connects in the background.
+			// Wait so the first prompt sees plugins. Trust is not revoked
+			// during a session; if it ever is, this load has to be undone
+			// or the plugins stay active after the revoke.
+			await loadPlugins(true);
 			setMcpInitialized(true);
 			setStartChat(true);
 

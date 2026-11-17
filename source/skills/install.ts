@@ -639,7 +639,9 @@ function describeSubscription(
 	const detail =
 		trigger.kind === 'schedule.cron'
 			? `cron "${trigger.cron}"`
-			: `paths ${(trigger.paths ?? ['**']).join(', ')}`;
+			: trigger.kind === 'ci.job.failed'
+				? `branches ${(trigger.branches ?? ['*']).join(', ')}`
+				: `paths ${(trigger.paths ?? ['**']).join(', ')}`;
 	return `${trigger.kind} → ${target} · ${detail}${trigger.confirm ? ' [confirm: plan mode]' : ''}`;
 }
 

@@ -28,6 +28,7 @@ Custom providers support all [provider configuration fields](index.md#provider-c
 - `socketTimeout` - Connect, header and body timeout (use `-1` for no timeout). See [Timeouts](index.md#timeouts--connection-pooling)
 - `disableTools` - Disable tool calling for this provider
 - `disableToolModels` - Disable tool calling for specific models
+- `includeUsage` - Request streaming token usage metrics (default: `true`). Set to `false` for proxies that reject `stream_options`
 - `caCertPath` - Path to a PEM CA bundle for self-signed or privately issued TLS certificates
 
 ## Setup via Wizard

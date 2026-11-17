@@ -1,17 +1,24 @@
-import {type ChildProcess, spawn} from 'node:child_process';
+import {spawn} from 'node:child_process';
 import {existsSync} from 'node:fs';
 import {isAbsolute, resolve} from 'node:path';
 import {TRUNCATION_OUTPUT_LIMIT} from '@/constants';
-import {cmdQuote, renderBody, shellQuote} from '@/custom-tools/template';
+import {
+	cmdQuote,
+	findUnsafePlaceholder,
+	renderBody,
+	shellQuote,
+} from '@/custom-tools/template';
+import {truncateToolResult} from '@/tools/runtime/truncate-tool-result';
 import type {CustomToolMetadata} from '@/types/custom-tools';
 import type {ToolHandler} from '@/types/index';
-import {isRealPathInside} from '@/utils/path-validation';
+import {isRealPathInside} from '@/utils/fs/path-validation';
+import {signalProcessTree} from '@/utils/process-tree';
+import {isWindowsCmd, shellArgs} from '@/utils/shell-args';
 import {
 	makeStreamCollector,
 	STDERR_TRUNCATION_NOTICE,
 	STDOUT_TRUNCATION_NOTICE,
 } from '@/utils/stream-collector';
-import {truncateToolResult} from '@/utils/truncate-tool-result';
 
 /**
  * Build a `ToolHandler` that renders the script body and runs it under the
@@ -25,9 +32,22 @@ export function buildHandler(
 ): ToolHandler {
 	return async (args: Record<string, unknown>): Promise<string> => {
 		const shell = pickShell(metadata.shell);
+		// The loader already rejects these bodies; check again here so a body
+		// that reached the handler another way still never runs unquoted values.
+		const declared = Object.keys(metadata.parameters);
+		const unsafe = findUnsafePlaceholder(
+			body,
+			isWindowsCmd(shell) ? 'cmd' : 'posix',
+			declared,
+		);
+		if (unsafe) throw new Error(`Custom tool body is unsafe: ${unsafe}`);
+		// Only declared parameters are substituted. The validator doesn't strip
+		// extra keys, and a model-supplied value for an undeclared name would
+		// otherwise fill a placeholder nobody checked, such as one in a comment.
+		const filled = applyParameterDefaults(metadata, args ?? {});
 		const rendered = renderBody(
 			body,
-			applyParameterDefaults(metadata, args ?? {}),
+			Object.fromEntries(declared.map(name => [name, filled[name]])),
 			isWindowsCmd(shell) ? cmdQuote : shellQuote,
 		);
 		const cwd = resolveCwd(metadata.cwd, projectRoot);
@@ -105,7 +125,7 @@ export function runScript(
 			// process group.
 			child.stdout?.destroy();
 			child.stderr?.destroy();
-			killProcessTree(child);
+			signalProcessTree(child);
 
 			// Force-kill the group if it refuses to die within a grace window.
 			// No `!child.killed` guard: Node sets that flag the moment a signal
@@ -114,11 +134,13 @@ export function runScript(
 			// the single-process case, the shell exiting does not mean its group
 			// is empty, and reaping a descendant that ignored SIGTERM is the
 			// whole point. Firing against an already-dead group is harmless:
-			// killProcessTree swallows the ESRCH, and it is unref'd so it never
-			// holds the process open.
-			setTimeout(() => {
-				killProcessTree(child, 'SIGKILL');
-			}, 1_000).unref();
+			// signalProcessTree swallows the ESRCH, and it is unref'd so it never
+			// holds the process open. Windows already used taskkill /F.
+			if (process.platform !== 'win32') {
+				setTimeout(() => {
+					signalProcessTree(child, 'SIGKILL');
+				}, 1_000).unref();
+			}
 
 			// Settle now rather than waiting for `exit`/`close`: neither is
 			// guaranteed to be prompt while a descendant holds an inherited
@@ -170,45 +192,6 @@ export function runScript(
 			});
 		});
 	});
-}
-
-/**
- * Terminate the spawned shell and its descendants.
- *
- * The child is spawned `detached` on Unix, making it the leader of its own
- * process group; signalling the negative PID kills the whole tree, so work the
- * tool backgrounded cannot survive the shell's timeout. Windows has no process
- * groups here, so we fall back to the single process: a descendant the tool
- * backgrounded keeps running to completion (the promise already settled, so
- * this leaks a stray process rather than hanging the call — documented
- * limitation; a Job Object / `taskkill /T` could close it).
- */
-function killProcessTree(
-	child: ChildProcess,
-	signal: NodeJS.Signals = 'SIGTERM',
-): void {
-	const pid = child.pid;
-	if (pid === undefined) return;
-
-	if (process.platform === 'win32') {
-		try {
-			child.kill(signal);
-		} catch {
-			// Process already exited; nothing to terminate.
-		}
-		return;
-	}
-
-	try {
-		process.kill(-pid, signal);
-	} catch {
-		// Group already gone (or never formed) — fall back to the lone process.
-		try {
-			child.kill(signal);
-		} catch {
-			// Process already exited; nothing to terminate.
-		}
-	}
 }
 
 /**
@@ -300,19 +283,8 @@ export function expandVars(value: string): string {
 	});
 }
 
-/** cmd.exe: disable AutoRun/delayed expansion, then run one wrapped command. */
-export function shellArgs(shell: string, script: string): string[] {
-	return isWindowsCmd(shell)
-		? ['/d', '/v:off', '/s', '/c', `"${script}"`]
-		: ['-c', script];
-}
-
-function isWindowsCmd(shell: string): boolean {
-	const name = shell.replaceAll('\\', '/').split('/').pop() ?? '';
-	return /^cmd(\.exe)?$/i.test(name);
-}
-
-function pickShell(configured: string | undefined): string {
+/** The shell a tool runs under: its `shell:` setting, else the platform default. */
+export function pickShell(configured: string | undefined): string {
 	if (configured === 'bash') return '/bin/bash';
 	if (configured === 'sh') return '/bin/sh';
 	if (process.platform === 'win32') return process.env.ComSpec || 'cmd.exe';

@@ -1,8 +1,9 @@
 import test from 'ava';
 import React from 'react';
+import stripAnsi from 'strip-ansi';
 import {renderWithTheme} from '@/test-utils/render-with-theme';
 import type {Message} from '@/types/core';
-import {createReviewCommand} from './review';
+import {createReviewCommand, type ReviewDependencies} from './review';
 
 const baseMessages: Message[] = [
 	{role: 'user', content: '/review feature'},
@@ -29,6 +30,106 @@ function createClient(response: string) {
 	};
 }
 
+function createGitHubFixture(options: {
+	remoteUrls?: Record<string, string>;
+	parents?: Record<string, string>;
+	pullRequests?: Record<string, string[]>;
+	pullRequestErrors?: Record<string, string>;
+	/** Old lowercase slug to current slug, like GitHub's rename redirects. */
+	redirects?: Record<string, string>;
+	/** Lowercase slug to the `gh pr list --json` rows it returns. */
+	openPullRequests?: Record<string, unknown[]>;
+	/** Lowercase slug to its GitHub default branch. */
+	defaultBranches?: Record<string, string>;
+	/** Refs `git rev-parse --verify` should treat as missing. */
+	missingRefs?: string[];
+} = {}) {
+	const remoteUrls = options.remoteUrls ?? {
+		origin: 'git@github.com:user/repo.git',
+	};
+	const parents = options.parents ?? {};
+	const pullRequests = options.pullRequests ?? {};
+	const pullRequestErrors = options.pullRequestErrors ?? {};
+	const redirects = options.redirects ?? {};
+	const canonicalSlug = (slug: string) => redirects[slug.toLowerCase()] ?? slug;
+	const gitCalls: string[][] = [];
+	const ghCalls: string[][] = [];
+	const dependencies: ReviewDependencies = {
+		execGit: async args => {
+			gitCalls.push(args);
+			if (args[0] === 'remote' && args.length === 1) {
+				return Object.keys(remoteUrls).join('\n');
+			}
+			if (args[0] === 'remote' && args[1] === 'get-url') {
+				const name = args[3] ?? args[2] ?? '';
+				const url = remoteUrls[name];
+				if (!url) throw new Error(`unknown remote: ${name}`);
+				return url;
+			}
+			if (args[0] === 'rev-parse') {
+				if (args.includes('--short')) return '0123abc';
+				const missing = (options.missingRefs ?? []).some(ref =>
+					args.some(arg => arg === ref || arg === `${ref}^{commit}`),
+				);
+				if (missing) throw new Error('fatal: needed a single revision');
+				return '';
+			}
+			if (args[0] === 'symbolic-ref') throw new Error('not a symbolic ref');
+			if (args[0] === 'diff') return 'diff --git a/file.ts b/file.ts\n+const x = 1;';
+			throw new Error(`unexpected git command: ${args.join(' ')}`);
+		},
+		getCurrentBranch: async () => 'feature',
+		getDefaultBranch: async () => 'main',
+		isGhAvailable: () => true,
+		execGh: async args => {
+			ghCalls.push(args);
+			if (args[0] === 'api') {
+				const path =
+					args.find(arg => arg.startsWith('repos/'))?.replace(/^repos\//, '') ??
+					'';
+				const requestError = pullRequestErrors[path];
+				if (requestError) throw new Error(requestError);
+
+				const pullRequestMatch = path.match(
+					/^([^/]+\/[^/]+)\/pulls\/(\d+)$/,
+				);
+				if (pullRequestMatch) {
+					const [, requested, number] = pullRequestMatch;
+					const repository = canonicalSlug(requested);
+					const exists = pullRequests[repository.toLowerCase()]?.includes(number);
+					if (!exists) throw new Error('HTTP 404: Not Found');
+					return JSON.stringify({
+						html_url: `https://github.com/${repository}/pull/${number}`,
+					});
+				}
+
+				const repository = canonicalSlug(path);
+				const parent = parents[repository.toLowerCase()];
+				return JSON.stringify({
+					full_name: repository,
+					default_branch: options.defaultBranches?.[repository.toLowerCase()],
+					parent: parent ? {full_name: parent} : null,
+				});
+			}
+			if (args[0] === 'pr' && args[1] === 'list') {
+				const repo = args[args.indexOf('--repo') + 1].replace(
+					/^github\.com\//,
+					'',
+				);
+				return JSON.stringify(
+					options.openPullRequests?.[canonicalSlug(repo).toLowerCase()] ?? [],
+				);
+			}
+			if (args[0] === 'pr' && args[1] === 'diff') {
+				return 'diff --git a/pr-file.ts b/pr-file.ts\n+const y = 2;';
+			}
+			throw new Error(`unexpected gh command: ${args.join(' ')}`);
+		},
+	};
+
+	return {dependencies, gitCalls, ghCalls};
+}
+
 test('reviewCommand has correct name and description', t => {
 	const command = createReviewCommand({
 		execGit: async () => '',
@@ -48,7 +149,7 @@ test('review with no args reviews current branch (no usage error)', async t => {
 
 	const command = createReviewCommand({
 		execGit: async args => {
-			if (args[0] === 'rev-parse') return '';
+			if (args[0] === 'rev-parse' || args[0] === 'remote') return '';
 			diffArgs = args;
 			return 'diff --git a/file.ts b/file.ts\n+const x = 1;';
 		},
@@ -90,12 +191,42 @@ test('review returns an error when no client is available', async t => {
 	t.true(output.includes('No active LLM client available'));
 });
 
+test('review renders the model reply as a parsed Markdown assistant message', async t => {
+	const command = createReviewCommand({
+		execGit: async args => {
+			if (args[0] === 'rev-parse' || args[0] === 'remote') return '';
+			return 'diff --git a/file.ts b/file.ts\n+const x = 1;';
+		},
+		getCurrentBranch: async () => 'feature',
+		getDefaultBranch: async () => 'main',
+		loadPrompt: () => 'review prompt',
+	});
+
+	const result = await command.handler(['feature'], baseMessages, {
+		...testMetadata,
+		client: createClient(
+			'<think>private notes</think>## Findings\n\n**Bug**: `x` is unused.',
+		) as never,
+	});
+
+	const {lastFrame} = renderWithTheme(result as React.ReactElement);
+	const output = stripAnsi(lastFrame() || '');
+
+	t.true(output.includes('Review scope: branch "feature" against "main".'));
+	t.true(output.includes('test-model'));
+	t.true(output.includes('Findings'));
+	t.true(output.includes('Bug'));
+	t.false(output.includes('## Findings'));
+	t.false(output.includes('**Bug**'));
+	t.false(output.includes('private notes'));
+});
+
 test('review generates a review from the branch diff', async t => {
 	let receivedMessages: Message[] = [];
 
 	const command = createReviewCommand({
 		execGit: async args => {
-			if (args[0] === 'rev-parse') return '';
+			if (args[0] === 'rev-parse' || args[0] === 'remote') return '';
 			return 'diff --git a/file.ts b/file.ts\n+const x = 1;';
 		},
 		getCurrentBranch: async () => 'feature',
@@ -164,7 +295,7 @@ test('review warns when diff is empty', async t => {
 test('review warns when the model returns an empty response', async t => {
 	const command = createReviewCommand({
 		execGit: async args => {
-			if (args[0] === 'rev-parse') return '';
+			if (args[0] === 'rev-parse' || args[0] === 'remote') return '';
 			return 'diff --git a/file.ts b/file.ts\n+const x = 1;';
 		},
 		getCurrentBranch: async () => 'feature',
@@ -187,7 +318,7 @@ test('review warns when the model returns an empty response', async t => {
 test('review returns an error when the LLM request fails', async t => {
 	const command = createReviewCommand({
 		execGit: async args => {
-			if (args[0] === 'rev-parse') return '';
+			if (args[0] === 'rev-parse' || args[0] === 'remote') return '';
 			return 'diff --git a/file.ts b/file.ts\n+const x = 1;';
 		},
 		getCurrentBranch: async () => 'feature',
@@ -240,7 +371,7 @@ test('review uses the review system prompt', async t => {
 
 	const command = createReviewCommand({
 		execGit: async args => {
-			if (args[0] === 'rev-parse') return '';
+			if (args[0] === 'rev-parse' || args[0] === 'remote') return '';
 			return 'diff --git a/file.ts b/file.ts\n+const x = 1;';
 		},
 		getCurrentBranch: async () => 'feature',
@@ -272,36 +403,197 @@ test('review uses the review system prompt', async t => {
 	t.true(systemPrompt.includes('Security vulnerabilities'));
 });
 
-test('review handles PR number target with gh available', async t => {
-	let executedGhArgs: string[][] = [];
-
-	const command = createReviewCommand({
-		execGit: async args => {
-			if (args[0] === 'rev-parse') return '';
-			if (args[0] === 'remote') return 'git@github.com:user/repo.git';
-			return 'diff --git a/file.ts b/file.ts\n+const x = 1;';
+test('quick review resolves a bare PR number to the unique upstream parent', async t => {
+	const {dependencies, ghCalls} = createGitHubFixture({
+		remoteUrls: {
+			origin: 'git@github.com:puri-adityakumar/nanocoder.git',
 		},
-		getCurrentBranch: async () => 'feature',
-		getDefaultBranch: async () => 'main',
-		isGhAvailable: () => true,
-		execGh: async args => {
-			executedGhArgs.push(args);
-			return 'diff --git a/pr-file.ts b/pr-file.ts\n+const y = 2;';
+		parents: {
+			'puri-adityakumar/nanocoder': 'Nano-Collective/nanocoder',
+		},
+		pullRequests: {
+			'nano-collective/nanocoder': ['42'],
 		},
 	});
+	let chatCalls = 0;
+	let receivedMessages: Message[] = [];
+	const client = {
+		chat: async (
+			messages: Message[],
+			requestOptions?: unknown,
+			providerOptions?: unknown,
+		) => {
+			chatCalls += 1;
+			receivedMessages = messages;
+			t.deepEqual(requestOptions, {});
+			t.deepEqual(providerOptions, {});
+			return {
+				choices: [{message: {content: 'PR review looks good.'}}],
+			};
+		},
+	};
+	const command = createReviewCommand(dependencies);
 
-	const result = await command.handler(['42'], baseMessages, {
+	const result = await command.handler(['quick', '42'], baseMessages, {
+		...testMetadata,
+		client,
+	});
+
+	t.truthy(React.isValidElement(result));
+	const {lastFrame} = renderWithTheme(result as React.ReactElement);
+	const output = lastFrame() || '';
+
+	t.true(output.includes('PR review looks good.'));
+	t.true(output.includes('Review scope: PR #42 in Nano-Collective/nanocoder.'));
+	t.is(chatCalls, 1, 'quick review makes exactly one model call');
+	t.is(receivedMessages.length, 2);
+	t.deepEqual(receivedMessages.map(message => message.role), ['system', 'user']);
+	t.deepEqual(ghCalls.at(-1), [
+		'pr',
+		'diff',
+		'42',
+		'--repo',
+		'github.com/Nano-Collective/nanocoder',
+	]);
+	const apiCalls = ghCalls.filter(args => args[0] === 'api');
+	t.true(apiCalls.length > 0);
+	for (const args of apiCalls) {
+		t.deepEqual(args.slice(1, 3), ['--hostname', 'github.com']);
+	}
+});
+
+test('bare PR resolution treats a renamed upstream slug as the same repository', async t => {
+	const {dependencies, ghCalls} = createGitHubFixture({
+		remoteUrls: {
+			origin: 'git@github.com:puri-adityakumar/nanocoder.git',
+			upstream: 'https://github.com/Mote-Software/nanocoder.git',
+		},
+		parents: {
+			'puri-adityakumar/nanocoder': 'Nano-Collective/nanocoder',
+		},
+		redirects: {
+			'mote-software/nanocoder': 'Nano-Collective/nanocoder',
+		},
+		pullRequests: {
+			'nano-collective/nanocoder': ['42'],
+		},
+	});
+	const command = createReviewCommand(dependencies);
+
+	const result = await command.handler(['quick', '42'], baseMessages, {
+		...testMetadata,
+		client: createClient('Renamed upstream review.'),
+	});
+
+	t.truthy(React.isValidElement(result));
+	const {lastFrame} = renderWithTheme(result as React.ReactElement);
+	const output = stripAnsi(lastFrame() || '').replace(/\s+/g, ' ');
+
+	t.true(output.includes('Review scope: PR #42 in Nano-Collective/nanocoder.'), output);
+	t.deepEqual(ghCalls.at(-1), [
+		'pr',
+		'diff',
+		'42',
+		'--repo',
+		'github.com/Nano-Collective/nanocoder',
+	]);
+});
+
+test('bare PR resolution ignores a stale remote that returns 404', async t => {
+	const {dependencies, ghCalls} = createGitHubFixture({
+		remoteUrls: {
+			origin: 'https://github.com/acme/app.git',
+			stale: 'https://github.com/deleted-org/gone.git',
+		},
+		pullRequests: {
+			'acme/app': ['42'],
+		},
+		pullRequestErrors: {
+			'deleted-org/gone': 'HTTP 404: Not Found',
+		},
+	});
+	const command = createReviewCommand(dependencies);
+
+	const result = await command.handler(['quick', '42'], baseMessages, {
 		...testMetadata,
 		client: createClient('PR review looks good.'),
 	});
 
 	t.truthy(React.isValidElement(result));
+	const {lastFrame} = renderWithTheme(result as React.ReactElement);
+	const output = stripAnsi(lastFrame() || '').replace(/\s+/g, ' ');
 
+	t.true(output.includes('Review scope: PR #42 in acme/app.'));
+	t.deepEqual(ghCalls.at(-1), [
+		'pr',
+		'diff',
+		'42',
+		'--repo',
+		'github.com/acme/app',
+	]);
+});
+
+test('bare PR number fails clearly when fork and upstream numbers collide', async t => {
+	const {dependencies, ghCalls} = createGitHubFixture({
+		remoteUrls: {
+			origin: 'https://github.com/puri-adityakumar/nanocoder',
+			upstream: 'ssh://git@github.com/Nano-Collective/nanocoder.git',
+		},
+		parents: {
+			'puri-adityakumar/nanocoder': 'Nano-Collective/nanocoder',
+		},
+		pullRequests: {
+			'puri-adityakumar/nanocoder': ['42'],
+			'nano-collective/nanocoder': ['42'],
+		},
+	});
+	let chatCalls = 0;
+	const command = createReviewCommand(dependencies);
+
+	const result = await command.handler(['quick', '42'], baseMessages, {
+		...testMetadata,
+		client: {
+			chat: async () => {
+				chatCalls += 1;
+				return {choices: [{message: {content: 'should not run'}}]};
+			},
+		},
+	});
+
+	t.truthy(React.isValidElement(result));
+	const {lastFrame} = renderWithTheme(result as React.ReactElement);
+	const output = stripAnsi(lastFrame() || '').replace(/\s+/g, ' ');
+
+	t.true(
+		output.includes('exists in multiple configured GitHub repositories'),
+		output,
+	);
+	t.true(output.includes('full GitHub PR URL'));
+	t.false(ghCalls.some(args => args[0] === 'pr' && args[1] === 'diff'));
+	t.is(chatCalls, 0);
+});
+
+test('explicit GitHub PR URL uses its owner and repository directly', async t => {
+	const {dependencies, ghCalls, gitCalls} = createGitHubFixture();
+	const command = createReviewCommand(dependencies);
+
+	const result = await command.handler(
+		['https://github.com/other-owner/other-repo/pull/42?tab=files'],
+		baseMessages,
+		{...testMetadata, client: createClient('Explicit URL review.')},
+	);
+
+	t.truthy(React.isValidElement(result));
 	const {lastFrame} = renderWithTheme(result as React.ReactElement);
 	const output = lastFrame() || '';
 
-	t.true(output.includes('PR review looks good.'));
-	t.deepEqual(executedGhArgs, [['pr', 'diff', '42', '--repo', 'user/repo']]);
+	t.true(
+		output.includes('Review scope: PR #42 in other-owner/other-repo.'),
+	);
+	t.deepEqual(ghCalls, [
+		['pr', 'diff', '42', '--repo', 'github.com/other-owner/other-repo'],
+	]);
+	t.deepEqual(gitCalls, []);
 });
 
 test('review returns error for PR number when gh is unavailable', async t => {
@@ -325,19 +617,46 @@ test('review returns error for PR number when gh is unavailable', async t => {
 	t.true(output.includes('PR review requires the gh CLI'));
 });
 
-test('review returns error for PR number when gh fails', async t => {
+test('review rejects extra target arguments and non-PR GitHub URLs', async t => {
+	let gitCalls = 0;
 	const command = createReviewCommand({
-		execGit: async args => {
-			if (args[0] === 'remote') return 'git@github.com:user/repo.git';
+		execGit: async () => {
+			gitCalls += 1;
 			return '';
 		},
 		getCurrentBranch: async () => 'feature',
 		getDefaultBranch: async () => 'main',
-		isGhAvailable: () => true,
-		execGh: async () => {
-			throw new Error('not authenticated');
+	});
+
+	for (const {args, expected} of [
+		{args: ['quick', '42', 'extra'], expected: 'Usage: /review'},
+		{args: ['feature', 'main'], expected: 'Usage: /review'},
+		{
+			args: ['https://github.com/owner/repo/issues/42'],
+			expected: 'Target URL must be a GitHub pull request URL',
+		},
+	]) {
+		const result = await command.handler(args, baseMessages, {
+			...testMetadata,
+			client: createClient('should not be called'),
+		});
+
+		t.truthy(React.isValidElement(result));
+		const {lastFrame} = renderWithTheme(result as React.ReactElement);
+		const output = lastFrame() || '';
+		t.true(output.includes(expected));
+	}
+
+	t.is(gitCalls, 0, 'invalid targets are rejected before GitHub or git access');
+});
+
+test('review returns error when GitHub cannot safely resolve a bare PR number', async t => {
+	const {dependencies} = createGitHubFixture({
+		pullRequestErrors: {
+			'user/repo/pulls/42': 'HTTP 403: Resource not accessible',
 		},
 	});
+	const command = createReviewCommand(dependencies);
 
 	const result = await command.handler(['42'], baseMessages, {
 		...testMetadata,
@@ -350,20 +669,14 @@ test('review returns error for PR number when gh fails', async t => {
 	const output = lastFrame() || '';
 
 	t.true(output.includes('Failed to fetch PR #42 diff'));
-	t.true(output.includes('not authenticated'));
+	t.true(output.includes('Pass a full GitHub PR URL'));
 });
 
-test('review returns error for PR number with non-GitHub remote', async t => {
-	const command = createReviewCommand({
-		execGit: async args => {
-			if (args[0] === 'remote') return 'git@gitlab.com:user/repo.git';
-			return '';
-		},
-		getCurrentBranch: async () => 'feature',
-		getDefaultBranch: async () => 'main',
-		isGhAvailable: () => true,
-		execGh: async () => 'diff from gh',
+test('review returns error for PR number with no GitHub remotes', async t => {
+	const {dependencies} = createGitHubFixture({
+		remoteUrls: {origin: 'git@gitlab.com:user/repo.git'},
 	});
+	const command = createReviewCommand(dependencies);
 
 	const result = await command.handler(['42'], baseMessages, {
 		...testMetadata,
@@ -375,7 +688,8 @@ test('review returns error for PR number with non-GitHub remote', async t => {
 	const {lastFrame} = renderWithTheme(result as React.ReactElement);
 	const output = lastFrame() || '';
 
-	t.true(output.includes('Cannot determine GitHub repository slug'));
+	t.true(output.includes('Cannot determine a GitHub repository'));
+	t.true(output.includes('full GitHub PR URL'));
 });
 
 test('review rejects target starting with dash', async t => {
@@ -403,7 +717,7 @@ test('review with no args reviews current branch against default', async t => {
 
 	const command = createReviewCommand({
 		execGit: async args => {
-			if (args[0] === 'rev-parse') return '';
+			if (args[0] === 'rev-parse' || args[0] === 'remote') return '';
 			diffArgs = args;
 			return 'diff --git a/file.ts b/file.ts\n+const x = 1;';
 		},
@@ -430,7 +744,7 @@ test('review with default branch as target reviews current branch against it', a
 
 	const command = createReviewCommand({
 		execGit: async args => {
-			if (args[0] === 'rev-parse') return '';
+			if (args[0] === 'rev-parse' || args[0] === 'remote') return '';
 			diffArgs = args;
 			return 'diff --git a/file.ts b/file.ts\n+const x = 1;';
 		},
@@ -461,7 +775,7 @@ test('review surfaces truncation info when diff exceeds limit', async t => {
 
 	const command = createReviewCommand({
 		execGit: async args => {
-			if (args[0] === 'rev-parse') return '';
+			if (args[0] === 'rev-parse' || args[0] === 'remote') return '';
 			return bigDiff;
 		},
 		getCurrentBranch: async () => 'feature',
@@ -489,8 +803,14 @@ test('review surfaces truncation info when diff exceeds limit', async t => {
 	});
 
 	t.truthy(React.isValidElement(result));
-	t.true(userMessage.includes('diff truncated'));
-	t.true(userMessage.includes('first and last 500 of 1100 lines'));
+	t.true(userMessage.includes('Partial diff coverage'));
+	t.true(userMessage.includes('first 500 and last 500 of 1100 diff lines'));
+
+	const {lastFrame} = renderWithTheme(result as React.ReactElement);
+	const output = lastFrame() || '';
+	t.true(output.includes('Review scope: branch "feature" against "main".'));
+	t.true(output.includes('Partial diff coverage'));
+	t.true(output.includes('100 intervening lines were omitted and were not reviewed.'));
 });
 
 test('review uses fallback prompt when loadPrompt returns fallback', async t => {
@@ -516,7 +836,7 @@ test('review uses fallback prompt when loadPrompt returns fallback', async t => 
 
 	const command = createReviewCommand({
 		execGit: async args => {
-			if (args[0] === 'rev-parse') return '';
+			if (args[0] === 'rev-parse' || args[0] === 'remote') return '';
 			return 'diff --git a/file.ts b/file.ts\n+const x = 1;';
 		},
 		getCurrentBranch: async () => 'feature',
@@ -533,4 +853,152 @@ test('review uses fallback prompt when loadPrompt returns fallback', async t => 
 
 	t.truthy(React.isValidElement(result));
 	t.is(systemPrompt, fallbackPrompt);
+});
+
+async function runBaseReview(fixture: ReturnType<typeof createGitHubFixture>) {
+	const command = createReviewCommand({
+		...fixture.dependencies,
+		loadPrompt: () => 'review prompt',
+	});
+	const result = await command.handler(['quick'], baseMessages, {
+		...testMetadata,
+		client: createClient('Base review.') as never,
+	});
+	const {lastFrame} = renderWithTheme(result as React.ReactElement);
+	const output = stripAnsi(lastFrame() || '').replace(/\s+/g, ' ');
+	const diffCall = fixture.gitCalls.find(args => args[0] === 'diff');
+	return {output, diffRange: diffCall?.at(-1)};
+}
+
+test('current-branch review uses the fork parent remote, not local main', async t => {
+	const fixture = createGitHubFixture({
+		remoteUrls: {
+			origin: 'git@github.com:user/repo.git',
+			upstream: 'https://github.com/owner/repo.git',
+		},
+		parents: {'user/repo': 'owner/repo'},
+		defaultBranches: {'owner/repo': 'main', 'user/repo': 'main'},
+	});
+
+	const {output, diffRange} = await runBaseReview(fixture);
+
+	t.is(diffRange, 'upstream/main...feature');
+	t.true(
+		output.includes(
+			'Review scope: current branch "feature" against upstream/main (owner/repo) at 0123abc.',
+		),
+	);
+	t.false(output.includes('may be behind'));
+});
+
+test('current-branch review matches a parent remote that still uses the old repository name', async t => {
+	const fixture = createGitHubFixture({
+		remoteUrls: {
+			origin: 'git@github.com:user/repo.git',
+			legacy: 'https://github.com/Old-Owner/repo.git',
+		},
+		parents: {'user/repo': 'New-Owner/repo'},
+		redirects: {'old-owner/repo': 'New-Owner/repo'},
+		defaultBranches: {'new-owner/repo': 'main'},
+	});
+
+	const {diffRange} = await runBaseReview(fixture);
+
+	t.is(diffRange, 'legacy/main...feature');
+});
+
+test('current-branch review in a fork without the parent remote warns and uses origin', async t => {
+	const fixture = createGitHubFixture({
+		parents: {'user/repo': 'owner/repo'},
+		defaultBranches: {'user/repo': 'main'},
+	});
+
+	const {output, diffRange} = await runBaseReview(fixture);
+
+	t.is(diffRange, 'origin/main...feature');
+	t.true(output.includes('against origin/main (user/repo)'));
+	t.true(output.includes('This is a fork of owner/repo'));
+	t.true(
+		output.includes(
+			'git remote add upstream https://github.com/owner/repo.git && git fetch upstream',
+		),
+	);
+});
+
+test("current-branch review uses the open PR's base branch and ignores other forks' PRs", async t => {
+	const fixture = createGitHubFixture({
+		remoteUrls: {
+			origin: 'git@github.com:user/repo.git',
+			upstream: 'https://github.com/owner/repo.git',
+		},
+		parents: {'user/repo': 'owner/repo'},
+		defaultBranches: {'owner/repo': 'main'},
+		openPullRequests: {
+			'owner/repo': [
+				{
+					number: 3,
+					baseRefName: 'main',
+					headRefName: 'feature',
+					headRepositoryOwner: {login: 'someone-else'},
+				},
+				{
+					number: 7,
+					baseRefName: 'release',
+					headRefName: 'feature',
+					headRepositoryOwner: {login: 'user'},
+				},
+			],
+		},
+	});
+
+	const {output, diffRange} = await runBaseReview(fixture);
+
+	t.is(diffRange, 'upstream/release...feature');
+	t.true(
+		output.includes(
+			'against upstream/release, the base of open PR #7 in owner/repo at 0123abc.',
+		),
+	);
+	const prList = fixture.ghCalls.find(args => args[0] === 'pr');
+	t.deepEqual(prList?.slice(0, 4), ['pr', 'list', '--repo', 'github.com/owner/repo']);
+});
+
+test('current-branch review falls back to local main with a fetch hint when the remote branch is missing', async t => {
+	const fixture = createGitHubFixture({
+		defaultBranches: {'user/repo': 'main'},
+		missingRefs: ['origin/main'],
+	});
+
+	const {output, diffRange} = await runBaseReview(fixture);
+
+	t.is(diffRange, 'main...feature');
+	t.true(output.includes('against "main"'));
+	t.true(output.includes('origin/main has not been fetched'));
+	t.true(output.includes('Run: git fetch origin'));
+});
+
+test('current-branch review without gh still prefers the upstream remote', async t => {
+	const fixture = createGitHubFixture({
+		remoteUrls: {
+			origin: 'git@github.com:user/repo.git',
+			upstream: 'https://github.com/owner/repo.git',
+		},
+	});
+	fixture.dependencies.isGhAvailable = () => false;
+
+	const {output, diffRange} = await runBaseReview(fixture);
+
+	t.is(diffRange, 'upstream/main...feature');
+	t.true(output.includes('against upstream/main (owner/repo)'));
+	t.is(fixture.ghCalls.length, 0);
+});
+
+test('current-branch review with no remotes uses the local default branch', async t => {
+	const fixture = createGitHubFixture({remoteUrls: {}});
+
+	const {output, diffRange} = await runBaseReview(fixture);
+
+	t.is(diffRange, 'main...feature');
+	t.true(output.includes('current branch "feature" against "main".'));
+	t.false(output.includes('may be out of date'));
 });

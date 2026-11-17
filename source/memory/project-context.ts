@@ -1,8 +1,10 @@
 import {getLogger} from '@/utils/logging';
-import type {SemanticMemory} from './semantic-memory-manager';
+import {estimateTokens} from '@/utils/token-calculator';
+import type {MemoryFileChange, SemanticMemory} from './semantic-memory-manager';
 import {SemanticMemoryManager} from './semantic-memory-manager';
 
-export type MemoryFinder = Pick<SemanticMemoryManager, 'findRelevantMemories'>;
+export type MemoryFinder = Pick<SemanticMemoryManager, 'findRelevantMemories'> &
+	Partial<Pick<SemanticMemoryManager, 'findChangedFiles'>>;
 
 export interface ProjectContextOptions {
 	memoryLimit?: number;
@@ -24,10 +26,6 @@ export const MAX_MEMORY_LIMIT = 50;
 export const MIN_TOKEN_BUDGET = 40;
 export const MAX_TOKEN_BUDGET = 4000;
 
-function estimateTokens(value: string): number {
-	return Math.ceil(value.length / 4);
-}
-
 /**
  * Picks a fence longer than the longest backtick run in the body, the way
  * Markdown itself does. Memory content is interpolated verbatim, so a fixed
@@ -41,9 +39,65 @@ function fenceFor(body: string): string {
 	return '`'.repeat(Math.max(3, longest + 1));
 }
 
+const MAX_LISTED_CHANGED_FILES = 3;
+
+function joinFiles(files: string[]): string {
+	const listed = files.slice(0, MAX_LISTED_CHANGED_FILES);
+	const hidden = files.length - listed.length;
+	return hidden > 0
+		? `${listed.join(', ')} and ${hidden} more`
+		: listed.join(', ');
+}
+
+/** Kept short: it is paid for out of the same token budget as the memories. */
+function formatStaleWarning(
+	commit: string,
+	changes: MemoryFileChange[],
+): string {
+	const modified = changes
+		.filter(change => change.status === 'modified')
+		.map(change => change.path);
+	const deleted = changes
+		.filter(change => change.status === 'deleted')
+		.map(change => change.path);
+	const clauses = [
+		...(modified.length > 0
+			? [
+					`${joinFiles(modified)} ${modified.length === 1 ? 'has' : 'have'} changed`,
+				]
+			: []),
+		...(deleted.length > 0
+			? [
+					`${joinFiles(deleted)} ${deleted.length === 1 ? 'has' : 'have'} been deleted`,
+				]
+			: []),
+	];
+	return `[WARNING: recorded at ${commit.slice(0, 7)}, ${clauses.join(' and ')} since. Verify before trusting.]`;
+}
+
+/**
+ * Staleness is advisory: if git cannot answer, memories are injected exactly
+ * as they were before the check existed.
+ */
+async function findChangedFiles(
+	memoryFinder: MemoryFinder,
+	memories: SemanticMemory[],
+): Promise<Map<string, MemoryFileChange[]>> {
+	if (!memoryFinder.findChangedFiles || memories.length === 0) {
+		return new Map();
+	}
+	try {
+		return await memoryFinder.findChangedFiles(memories);
+	} catch (error) {
+		getLogger().warn({error}, 'Failed to check project memory freshness');
+		return new Map();
+	}
+}
+
 function formatProjectContextWithCount(
 	memories: SemanticMemory[],
 	options: ProjectContextOptions = {},
+	changedFiles: Map<string, MemoryFileChange[]> = new Map(),
 ): {content: string; memoryCount: number} {
 	if (memories.length === 0) return {content: '', memoryCount: 0};
 
@@ -57,7 +111,12 @@ function formatProjectContextWithCount(
 			.replaceAll(/\s+/gu, ' ')
 			.trim()
 			.replace(/^[-*]\s+/u, '');
-		const bullet = `- ${text}`;
+		const changes = changedFiles.get(memory.id);
+		const warning =
+			changes && memory.git
+				? `${formatStaleWarning(memory.git.commit, changes)} `
+				: '';
+		const bullet = `- ${warning}${text}`;
 		const bulletTokens = estimateTokens(`${bullet}\n`);
 		if (usedTokens + bulletTokens > tokenBudget) continue;
 
@@ -87,12 +146,14 @@ export async function appendRelevantProjectContextWithCount(
 	}
 
 	try {
+		const memories = await memoryFinder.findRelevantMemories(
+			query,
+			options.memoryLimit ?? DEFAULT_MEMORY_LIMIT,
+		);
 		const projectContext = formatProjectContextWithCount(
-			await memoryFinder.findRelevantMemories(
-				query,
-				options.memoryLimit ?? DEFAULT_MEMORY_LIMIT,
-			),
+			memories,
 			options,
+			await findChangedFiles(memoryFinder, memories),
 		);
 
 		if (!projectContext.content) return {systemPrompt, memoryCount: 0};

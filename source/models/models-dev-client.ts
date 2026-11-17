@@ -5,10 +5,10 @@
 
 import {request} from 'undici';
 import {TIMEOUT_HTTP_BODY_MS, TIMEOUT_HTTP_HEADERS_MS} from '@/constants';
+import {defineSessionValue} from '@/services/session-context';
 import type {AIProviderConfig, ProviderConfig} from '@/types/config';
 import {formatError} from '@/utils/error-formatter';
 import {getLogger} from '@/utils/logging';
-import {createSessionOverride} from '@/utils/session-override';
 import {readCache, writeCache} from './models-cache.js';
 import type {
 	ModelInfo,
@@ -349,7 +349,7 @@ async function findModelByName(modelName: string): Promise<ModelInfo | null> {
  * Allows users to manually set a context limit via /context-max command.
  * Non-positive values collapse back to null (no override).
  */
-const contextLimitSession = createSessionOverride<number>(limit =>
+const contextLimitSession = defineSessionValue<number>(limit =>
 	limit !== null && limit > 0 ? limit : null,
 );
 
@@ -507,6 +507,30 @@ export async function getModelContextLimit(
 ): Promise<number | null> {
 	const resolved = await resolveModelContextLimit(modelId, options);
 	return resolved.limit;
+}
+
+/**
+ * Whether models.dev lists image input for this exact model id. Providers
+ * can disagree, so any listing with image input wins. null when the model is
+ * not listed (most local models), so callers can still try.
+ */
+export async function getModelAcceptsImages(
+	modelId: string,
+): Promise<boolean | null> {
+	let listed = false;
+	try {
+		const data = await getModelsData();
+		for (const provider of Object.values(data ?? {})) {
+			const input = provider?.models?.[modelId]?.modalities?.input;
+			if (input?.includes('image')) {
+				return true;
+			}
+			listed ||= !!input;
+		}
+	} catch {
+		// Lookup failure is the same as an unlisted model.
+	}
+	return listed ? false : null;
 }
 
 /**

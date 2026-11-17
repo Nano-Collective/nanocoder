@@ -1,6 +1,7 @@
 import test from 'ava';
 import {renderWithTheme as render} from '@/test-utils/render-with-theme';
 import React from 'react';
+import stripAnsi from 'strip-ansi';
 import {McpStep} from './mcp-step.js';
 
 // ============================================================================
@@ -995,7 +996,7 @@ test('McpStep with initialEditName opens that server edit/delete choice', t => {
 // Regression: a custom-named instance of a template (e.g. `you-paid`) must
 // resolve back to its template when edited. Before templateId was stamped
 // onto the built config, the name lookup missed and the edit flow fell
-// through to `custom`, whose buildConfig never writes headers — silently
+// through to `custom`, whose buildConfig then never wrote headers — silently
 // dropping the saved bearer token on re-save.
 test('McpStep editing a custom-named template instance resolves its template', async t => {
 	const customNamedServers: Record<
@@ -1044,62 +1045,6 @@ test('McpStep editing a custom-named template instance resolves its template', a
 	// The label shows the template default `[you]`; the prefilled value sits
 	// in the input box.
 	t.regex(output, /you-paid/, 'server name should be prefilled in the input');
-
-	unmount();
-});
-
-// Regression: templates that store their key in an X-API-Key header (today
-// `serply`) must get the saved key back when edited. The edit flow used to
-// read only env vars and a bearer Authorization header, so the required
-// API key field came back empty and blocked a re-save.
-test('McpStep editing an X-API-Key template instance keeps its saved key', async t => {
-	const serplyServers: Record<
-		string,
-		{
-			name: string;
-			transport: 'http';
-			url: string;
-			headers: {'X-API-Key': string};
-			templateId: string;
-			tags: string[];
-		}
-	> = {
-		'serply-work': {
-			name: 'serply-work',
-			transport: 'http',
-			url: 'https://api.serply.io/mcp',
-			headers: {'X-API-Key': 'serply_test_key_123'},
-			templateId: 'serply',
-			tags: ['serply', 'search', 'web', 'scrape', 'http'],
-		},
-	};
-
-	const {lastFrame, stdin, unmount} = render(
-		<McpStep
-			onComplete={() => {}}
-			existingServers={serplyServers}
-			initialEditName="serply-work"
-		/>,
-	);
-
-	await waitTick();
-	// Item 1 is "Edit this server".
-	stdin.write('1');
-	await waitTick();
-	t.regex(lastFrame()!, /Serply Configuration/);
-
-	// Accept the prefilled server name, then the prefilled API key.
-	stdin.write('\r');
-	await waitTick();
-	t.regex(lastFrame()!, /Serply API key/);
-	stdin.write('\r');
-	await waitTick();
-
-	t.notRegex(
-		lastFrame()!,
-		/This field is required/,
-		'the saved X-API-Key value should prefill the required key field',
-	);
 
 	unmount();
 });
@@ -1168,4 +1113,155 @@ test('McpStep without initialEditName still opens the initial menu', t => {
 	);
 
 	t.regex(lastFrame()!, /Add MCP servers/);
+});
+
+test('McpStep lets Backspace edit the environment variables field', async t => {
+	let saved: Record<string, {env?: Record<string, string>}> = {};
+	const existingServers = {
+		'my-server': {
+			name: 'my-server',
+			transport: 'stdio' as const,
+			command: 'node',
+			tags: ['custom'],
+		},
+	};
+	// Open straight on "Edit this server", so no arrow key is needed to get
+	// to the form.
+	const {stdin, lastFrame} = render(
+		<McpStep
+			onComplete={servers => {
+				saved = servers;
+			}}
+			existingServers={existingServers}
+			initialEditName="my-server"
+		/>,
+	);
+
+	const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+	// CI renders with colour on; match against the text, not its escape codes.
+	const frame = () => stripAnsi(lastFrame() ?? '');
+	// Generous: a loaded CI runner can take well over a second to render.
+	const waitFor = async (until: RegExp) => {
+		for (let i = 0; i < 50 && !until.test(frame()); i++) {
+			await sleep(100);
+		}
+		t.regex(frame(), until);
+	};
+	// A key sent before its screen has mounted is lost, so Enter is re-sent
+	// until the target shows. That is only safe for Enter here: a surplus one
+	// skips an optional field or adds a blank env line, which is ignored.
+	// Keys that would overshoot (arrows, Esc) are sent once, after their
+	// screen shows, and then waited on.
+	const pressEnterUntil = async (until: RegExp) => {
+		for (let i = 0; i < 20 && !until.test(frame()); i++) {
+			stdin.write('\r');
+			await sleep(250);
+		}
+		t.regex(frame(), until);
+	};
+	const pressOnce = async (key: string, screen: RegExp, until: RegExp) => {
+		await waitFor(screen);
+		await sleep(100);
+		stdin.write(key);
+		await waitFor(until);
+	};
+
+	// Edit this server, then accept the transport, name and URL fields, submit
+	// the empty headers field with Esc, and accept the command and args fields.
+	await waitFor(/Edit this server/);
+	await pressEnterUntil(/HTTP headers/);
+	await pressOnce('\u001B', /HTTP headers/, /Command \(for stdio/);
+	await pressEnterUntil(/Environment variables/);
+
+	// One key per write, as a person types. Keys this close together reach
+	// the handler before a re-render, so each edit must build on the last.
+	const type = async (keys: string[]) => {
+		for (const key of keys) {
+			stdin.write(key);
+			await sleep(20);
+		}
+	};
+	await type([...'API_KEY=abc123XY']);
+	await waitFor(/API_KEY=abc123XY/);
+	await type(['\u007F', '\u007F']);
+	await waitFor(/API_KEY=abc123(?!X)/);
+
+	// Esc submits the field. Done & Save is last in the list, and Up from the
+	// first item wraps to the last in ink-select-input.
+	await pressOnce('\u001B', /API_KEY=abc123(?!X)/, /Added: my-server/);
+	await pressOnce('\u001B[A', /Added: my-server/, /> Done & Save/);
+	stdin.write('\r');
+	for (let i = 0; i < 50 && !saved['my-server']; i++) {
+		await sleep(100);
+	}
+	t.deepEqual(saved['my-server']?.env, {API_KEY: 'abc123'});
+});
+
+// Regression: Serply and FXMacroData were removed from the wizard, so editing
+// a server built from either falls back to Custom MCP Server. That template
+// had no headers field and did not prefill the transport, so saving dropped
+// the API-key header (and env vars were dropped too, since multiline fields
+// started empty instead of from the saved value).
+test('McpStep editing a server from a removed template keeps its headers', async t => {
+	let saved: Record<
+		string,
+		{transport?: string; url?: string; headers?: Record<string, string>}
+	> = {};
+	const existingServers = {
+		serply: {
+			name: 'serply',
+			transport: 'http' as const,
+			url: 'https://api.serply.io/mcp',
+			headers: {'X-API-Key': 'serply_test_key_123'},
+			tags: ['serply', 'search', 'http'],
+			templateId: 'serply',
+		},
+	};
+	const {stdin, lastFrame} = render(
+		<McpStep
+			onComplete={servers => {
+				saved = servers;
+			}}
+			existingServers={existingServers}
+			initialEditName="serply"
+		/>,
+	);
+
+	const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+	const frame = () => stripAnsi(lastFrame() ?? '');
+	const waitFor = async (until: RegExp) => {
+		for (let i = 0; i < 50 && !until.test(frame()); i++) {
+			await sleep(100);
+		}
+		t.regex(frame(), until);
+	};
+	const pressEnterUntil = async (until: RegExp) => {
+		for (let i = 0; i < 20 && !until.test(frame()); i++) {
+			stdin.write('\r');
+			await sleep(250);
+		}
+		t.regex(frame(), until);
+	};
+	const pressOnce = async (key: string, screen: RegExp, until: RegExp) => {
+		await waitFor(screen);
+		await sleep(100);
+		stdin.write(key);
+		await waitFor(until);
+	};
+
+	await pressOnce('1', /Edit this server/, /Custom MCP Server Configuration/);
+	// The saved header is shown in the headers field, ready to keep.
+	await pressEnterUntil(/HTTP headers/);
+	await waitFor(/X-API-Key: serply_test_key_123/);
+	await pressOnce('\u001B', /X-API-Key/, /Command \(for stdio/);
+	await pressEnterUntil(/Environment variables/);
+	await pressOnce('\u001B', /Environment variables/, /Added: serply/);
+	await pressOnce('\u001B[A', /Added: serply/, /> Done & Save/);
+	stdin.write('\r');
+	for (let i = 0; i < 50 && !saved.serply; i++) {
+		await sleep(100);
+	}
+	t.is(saved.serply?.transport, 'http');
+	t.is(saved.serply?.url, 'https://api.serply.io/mcp');
+	t.deepEqual(saved.serply?.headers, {'X-API-Key': 'serply_test_key_123'});
 });

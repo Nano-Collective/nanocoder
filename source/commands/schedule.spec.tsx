@@ -48,7 +48,7 @@ test('schedule with any subcommand falls through to usage', async t => {
 	if (React.isValidElement(result)) {
 		const {lastFrame} = renderWithTheme(result);
 		const output = lastFrame();
-		t.regex(output!, /Usage: \/schedule/);
+		t.regex(output!, /Usage: \/skills schedule/);
 		t.notRegex(output!, /\blist\b/);
 		t.notRegex(output!, /\badd\b/);
 	}
@@ -59,7 +59,7 @@ test('schedule list is no longer a recognized subcommand', async t => {
 	if (React.isValidElement(result)) {
 		const {lastFrame} = renderWithTheme(result);
 		const output = lastFrame();
-		t.regex(output!, /Usage: \/schedule/);
+		t.regex(output!, /Usage: \/skills schedule/);
 	}
 });
 
@@ -68,6 +68,6 @@ test('schedule add is no longer a recognized subcommand', async t => {
 	if (React.isValidElement(result)) {
 		const {lastFrame} = renderWithTheme(result);
 		const output = lastFrame();
-		t.regex(output!, /Usage: \/schedule/);
+		t.regex(output!, /Usage: \/skills schedule/);
 	}
 });

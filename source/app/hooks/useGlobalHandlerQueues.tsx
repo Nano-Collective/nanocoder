@@ -2,15 +2,19 @@ import {useCallback, useEffect, useRef, useState} from 'react';
 import {
 	type PendingQuestion,
 	setGlobalQuestionHandler,
-} from '@/utils/question-queue';
+} from '@/tools/runtime/question-queue';
 import {
 	type PendingToolApproval,
 	setGlobalToolApprovalHandler,
-} from '@/utils/tool-approval-queue';
+} from '@/tools/runtime/tool-approval-queue';
 import {
 	type PendingToolConfirmation,
 	setGlobalToolConfirmHandler,
-} from '@/utils/tool-confirm-queue';
+} from '@/tools/runtime/tool-confirm-queue';
+import {
+	type PendingVoiceInstall,
+	setGlobalVoiceInstallHandler,
+} from '@/utils/voice-install-queue';
 
 interface UseGlobalHandlerQueuesProps {
 	setPendingQuestion: (question: PendingQuestion | null) => void;
@@ -23,6 +27,8 @@ interface GlobalHandlerQueues {
 	handleSubagentToolApproval: (confirmed: boolean) => void;
 	pendingToolConfirmation: PendingToolConfirmation | null;
 	handleToolConfirmation: (confirmed: boolean) => void;
+	pendingVoiceInstall: PendingVoiceInstall | null;
+	handleVoiceInstallConfirm: (confirmed: boolean) => void;
 }
 
 /**
@@ -173,11 +179,21 @@ export function useGlobalHandlerQueues({
 		ABANDONED_APPROVAL,
 	);
 
+	const [pendingVoiceInstall, setPendingVoiceInstall] =
+		useState<PendingVoiceInstall | null>(null);
+	const handleVoiceInstallConfirm = useHandlerQueue(
+		setGlobalVoiceInstallHandler,
+		setPendingVoiceInstall,
+		ABANDONED_APPROVAL,
+	);
+
 	return {
 		handleQuestionAnswer,
 		pendingSubagentApproval,
 		handleSubagentToolApproval,
 		pendingToolConfirmation,
 		handleToolConfirmation,
+		pendingVoiceInstall,
+		handleVoiceInstallConfirm,
 	};
 }

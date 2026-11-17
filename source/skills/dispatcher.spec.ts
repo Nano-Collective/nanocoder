@@ -11,6 +11,96 @@ import {
 
 console.log(`\ndispatcher.spec.ts`);
 
+function deferred() {
+	let resolve!: () => void;
+	const promise = new Promise<void>(done => {
+		resolve = done;
+	});
+	return {promise, resolve};
+}
+
+test('stop waits for a pending checkpoint and prevents its executor from starting', async t => {
+	const checkpoint = deferred();
+	const started = deferred();
+	let executed = false;
+	let activity = 0;
+	const dispatcher = new SkillDispatcher({
+		checkpointer: {
+			async create() {
+				started.resolve();
+				await checkpoint.promise;
+				return 'checkpoint';
+			},
+		},
+		buildExecutor: () => {
+			executed = true;
+			throw new Error('Executor must not start during shutdown');
+		},
+		onActivity: () => {
+			activity++;
+		},
+	});
+	const run = dispatcher.dispatch(
+		fileChangedSub({kind: 'agent', name: 'docs-agent'}),
+		fileEvent(),
+	);
+	await started.promise;
+	let stopped = false;
+	const stopping = dispatcher.stop().then(() => {
+		stopped = true;
+	});
+	await new Promise(resolve => setImmediate(resolve));
+	t.false(stopped);
+	checkpoint.resolve();
+	const [runResult] = await Promise.all([run, stopping]);
+	// The abort path returns normally: no rejection, and no activity reported.
+	t.is(runResult, undefined);
+	t.false(executed);
+	t.is(activity, 0);
+	t.true(stopped);
+});
+
+test('stop cancels and drains every active run, including a rejection', async t => {
+	const cleanup = [deferred(), deferred()];
+	const signals: AbortSignal[] = [];
+	let calls = 0;
+	const dispatcher = new SkillDispatcher({
+		buildExecutor: () => ({
+			async execute(task, signal) {
+				const index = calls++;
+				if (signal) signals.push(signal);
+				await cleanup[index].promise;
+				if (index === 0) throw new Error('cancelled');
+				return {
+					subagentName: task.subagent_type,
+					success: false,
+					output: '',
+					error: 'Aborted',
+					executionTimeMs: 0,
+				};
+			},
+		}),
+	});
+	const sub = fileChangedSub({kind: 'agent', name: 'docs-agent'});
+	const first = dispatcher.dispatch(sub, fileEvent());
+	const second = dispatcher.dispatch({...sub, id: 'sub-2'}, fileEvent());
+	const settled = Promise.allSettled([first, second]);
+	let stopped = false;
+	const stopping = dispatcher.stop().then(() => {
+		stopped = true;
+	});
+	t.is(signals.length, 2);
+	t.true(signals.every(signal => signal.aborted));
+	cleanup[0].resolve();
+	await new Promise(resolve => setImmediate(resolve));
+	t.false(stopped);
+	cleanup[1].resolve();
+	await stopping;
+	t.is((await settled)[0].status, 'rejected');
+	await dispatcher.dispatch(sub, fileEvent());
+	t.is(calls, 2);
+});
+
 function fileChangedSub(target: {
 	kind: 'agent' | 'command' | 'tool' | 'skill';
 	name: string;
@@ -70,6 +160,35 @@ test('buildTriggeredTask: schedule.cron event produces matching trigger context'
 			type: 'event',
 			kind: 'schedule.cron',
 			payload: {cron: '0 9 * * MON'},
+		},
+	});
+});
+
+test('buildTriggeredTask: ci.job.failed event produces matching trigger context (not mislabeled as schedule.cron)', t => {
+	const sub: Subscription = {
+		id: 'builtin:ci-investigator',
+		kind: 'ci.job.failed',
+		target: {kind: 'agent', name: 'verify-ci-investigator'},
+		source: 'manifest',
+		ownerSkill: 'builtin',
+	};
+	const event: Event = {
+		kind: 'ci.job.failed',
+		payload: {
+			runId: 42,
+			workflowName: 'CI',
+			branch: 'feature-x',
+			headSha: 'abc123',
+			url: 'https://example.com/run/42',
+		},
+		at: 1_700_000_000_000,
+	};
+	const task = buildTriggeredTask(sub, event);
+	t.deepEqual(task.context, {
+		trigger: {
+			type: 'event',
+			kind: 'ci.job.failed',
+			payload: event.payload,
 		},
 	});
 });

@@ -18,6 +18,7 @@ import type {
 import {getLogger} from '@/utils/logging';
 import {isLocalURL} from '@/utils/url-utils';
 import {handleChat} from './chat/chat-handler.js';
+import {PrefixTracker} from './chat/prefix-tracker.js';
 import {normalizeModelIdForRequest} from './model-id.js';
 import {
 	createProvider,
@@ -43,6 +44,10 @@ export class AISDKClient implements LLMClient {
 	private readonly privacySessionMapRef: {current: Record<string, string>} = {
 		current: {},
 	};
+
+	// Per client, matching what a single-slot local server caches: see
+	// PrefixTracker for why helper calls on this client are tracked too.
+	private readonly prefixTracker = new PrefixTracker();
 
 	constructor(providerConfig: AIProviderConfig) {
 		const logger = getLogger();
@@ -208,6 +213,7 @@ export class AISDKClient implements LLMClient {
 				modeOverrides?.privacySessionMapRef ?? this.privacySessionMapRef,
 			privacyEnabled: modeOverrides?.privacyEnabled ?? getPrivacyPreference(),
 			onPrivacyEvent: callbacks.onPrivacyEvent,
+			prefixTracker: this.prefixTracker,
 		});
 	}
 

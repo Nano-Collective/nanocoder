@@ -81,6 +81,7 @@ const definitionRenames: Record<string, string> = {
 	'Partial<AutoCompactConfig>': 'AutoCompactConfig',
 	'Partial<TuneConfig>': 'TuneConfig',
 	'Partial<RetryLimitsConfig>': 'RetryLimitsConfig',
+	'Partial<FirewallConfig>': 'FirewallConfig',
 	'Partial<Record<DiskDefaultMode,ModeProviderConfig>>': 'DiskModeProviders',
 	'Record<string,number>': 'RecordStringNumber',
 	'Record<string,string>': 'RecordStringString',
@@ -230,6 +231,7 @@ function main(): void {
 	setRequired(definitions, 'OpenRouterPlugin', ['id']);
 	setRequired(definitions, 'ModeProviderConfig', ['provider', 'model']);
 	setRequired(definitions, 'HookDefinition', ['command']);
+	setRequired(definitions, 'FormatterConfig', ['match', 'command']);
 
 	// lspServers is an inline array with an anonymous item schema (not a
 	// named definition).  The type requires name, command, languages.

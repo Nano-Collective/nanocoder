@@ -7,6 +7,7 @@ import {
 	MAX_TIMELINE_SESSIONS,
 } from '@/constants';
 import type {
+	TimelineBeforeImage,
 	TimelineCaptureInput,
 	TimelineEntryMeta,
 	TimelineIndex,
@@ -14,9 +15,10 @@ import type {
 	TimelineRevertResult,
 	TimelineScanResult,
 } from '@/types/timeline';
-import {atomicWriteFile} from '@/utils/atomic-write';
 import {formatError} from '@/utils/error-formatter';
-import {logWarning} from '@/utils/message-queue';
+import {atomicWriteFile} from '@/utils/fs/atomic-write';
+import {ensureNanocoderGitignore} from '@/utils/fs/ensure-nanocoder-gitignore';
+import {notifyWarning} from '@/utils/message-queue-core';
 import {FileSnapshotService} from './file-snapshot';
 import {
 	acquireTimelineLock,
@@ -35,6 +37,10 @@ import {
  * the exclusion has to live here rather than rely on `git ls-files` filtering.
  */
 const EXCLUDED_PREFIXES = ['.nanocoder/timeline/', '.nanocoder/checkpoints/'];
+
+/** Checkpoint ids are `crypto.randomUUID()`, and become a directory name. */
+const ENTRY_ID_PATTERN =
+	/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
  * Snapshots round-trip through UTF-8, which silently corrupts binaries. A NUL
@@ -116,7 +122,7 @@ export class TimelineManager {
 			});
 			this.lockHeld = acquired;
 		} catch (error) {
-			logWarning('Could not acquire timeline session lock', true, {
+			notifyWarning('Could not acquire timeline session lock', true, {
 				context: {
 					sessionId: this.sessionId,
 					error: formatError(error),
@@ -137,7 +143,7 @@ export class TimelineManager {
 		try {
 			await releaseTimelineLock(this.timelineDir);
 		} catch (error) {
-			logWarning('Could not release timeline session lock', true, {
+			notifyWarning('Could not release timeline session lock', true, {
 				context: {
 					sessionId: this.sessionId,
 					error: formatError(error),
@@ -223,7 +229,7 @@ export class TimelineManager {
 			for (const [relative, snapshot] of captured) {
 				// Checked as bytes, before the decode - see isProbablyBinary.
 				if (isProbablyBinary(snapshot)) {
-					logWarning('Skipping binary file in action timeline', true, {
+					notifyWarning('Skipping binary file in action timeline', true, {
 						context: {relativePath: relative},
 					});
 					continue;
@@ -239,6 +245,71 @@ export class TimelineManager {
 	async list(): Promise<TimelineEntryMeta[]> {
 		const index = await this.loadIndex();
 		return index.entries.map(entry => this.toMeta(entry));
+	}
+
+	/**
+	 * Read-only: the contents `filePath` had just before the checkpoint's tool
+	 * call. Only paths the checkpoint recorded are read, so this cannot be used
+	 * to read arbitrary files; a path outside the workspace throws.
+	 *
+	 * Binary files are never recorded (see `snapshotPaths`), so they come back
+	 * as `unavailable` along with any other path the checkpoint does not hold.
+	 */
+	async readBefore(
+		checkpointId: string,
+		filePath: string,
+	): Promise<TimelineBeforeImage> {
+		const relativePath = this.toRelativePath(filePath);
+		if (!relativePath) {
+			throw new Error(`Path is outside the workspace: '${filePath}'`);
+		}
+
+		const index = await this.loadIndex();
+		const entry = index.entries.find(
+			candidate => candidate.id === checkpointId,
+		);
+		if (!entry) {
+			return {
+				kind: 'unavailable',
+				reason: 'The checkpoint no longer exists (reverted or pruned)',
+			};
+		}
+		if (!entry.filesChanged.includes(relativePath)) {
+			return {
+				kind: 'unavailable',
+				reason:
+					'The checkpoint holds no before-image for this path (it is not part of the checkpoint, or it is binary)',
+			};
+		}
+		if (entry.createdFiles.includes(relativePath)) {
+			return {kind: 'created'};
+		}
+
+		// The index is user-writable JSON on disk, and `entry.id` becomes part of
+		// a path below. Only an id this manager could have generated may do that.
+		if (!ENTRY_ID_PATTERN.test(entry.id)) {
+			notifyWarning('Ignoring unsafe checkpoint id in timeline index', true, {
+				context: {checkpointId: entry.id},
+			});
+			return {
+				kind: 'unavailable',
+				reason: 'The checkpoint has an invalid id in the timeline index',
+			};
+		}
+
+		try {
+			const filesDir = this.entryFilesDir(entry.id);
+			const filePathOnDisk = path.join(filesDir, relativePath); // nosemgrep
+			return {
+				kind: 'text',
+				content: await fs.readFile(filePathOnDisk, 'utf-8'),
+			};
+		} catch {
+			return {
+				kind: 'unavailable',
+				reason: 'The saved before-image is missing',
+			};
+		}
 	}
 
 	async capture(
@@ -281,6 +352,7 @@ export class TimelineManager {
 			truncateToMessageIndex: input.truncateToMessageIndex,
 			filesChanged: [...existing.keys(), ...createdFiles],
 			createdFiles,
+			...(input.turnId ? {turnId: input.turnId} : {}),
 		};
 
 		if (existing.size > 0) {
@@ -408,7 +480,7 @@ export class TimelineManager {
 			// normalisation that happened at capture time.
 			const relativePath = this.toRelativePath(indexedPath);
 			if (!relativePath || relativePath !== indexedPath) {
-				logWarning('Ignoring unsafe path in timeline index', true, {
+				notifyWarning('Ignoring unsafe path in timeline index', true, {
 					context: {relativePath: indexedPath},
 				});
 				continue;
@@ -419,7 +491,7 @@ export class TimelineManager {
 					await this.fileSnapshotService.deleteFile(relativePath);
 					restored.push(relativePath);
 				} catch (error) {
-					logWarning('Could not delete created timeline file', true, {
+					notifyWarning('Could not delete created timeline file', true, {
 						context: {
 							relativePath,
 							error: formatError(error),
@@ -435,7 +507,7 @@ export class TimelineManager {
 
 				snapshots.set(relativePath, content);
 			} catch (error) {
-				logWarning('Could not load timeline file snapshot', true, {
+				notifyWarning('Could not load timeline file snapshot', true, {
 					context: {
 						relativePath,
 						error: formatError(error),
@@ -486,10 +558,13 @@ export class TimelineManager {
 			timestamp: entry.timestamp,
 			truncateToMessageIndex: entry.truncateToMessageIndex,
 			filesChanged: entry.filesChanged,
+			createdFiles: entry.createdFiles,
+			...(entry.turnId ? {turnId: entry.turnId} : {}),
 		};
 	}
 
 	private async ensureDir(): Promise<void> {
+		await ensureNanocoderGitignore(this.workspaceRoot);
 		await this.pruneStaleSessions();
 
 		// Try to acquire the session lock before any writes land. The
@@ -613,7 +688,7 @@ export class TimelineManager {
 			this.index = parsed;
 			return this.index;
 		} catch (error) {
-			logWarning('Could not read timeline index, starting empty', true, {
+			notifyWarning('Could not read timeline index, starting empty', true, {
 				context: {
 					error: formatError(error),
 				},

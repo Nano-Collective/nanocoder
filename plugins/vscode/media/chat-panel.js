@@ -37,8 +37,23 @@
 	const imagePreviewContainer = document.getElementById('image-preview-container');
 	
 	let pendingImages = [];
-	let pendingUserMessageText = null;
+	/** id → submitted text, so ACP user_message_chunk echoes can be de-duped even when several prompts are queued. */
+	const pendingUserMessages = new Map();
+	const queuedIds = new Set();
+	/** Follow-ups parked locally so we never send a second ACP `prompt()` while one is in flight. */
+	let waitingPrompts = [];
+	/** True from the moment we post (or receive) a turn until it completes or is cancelled. */
+	let turnInFlight = false;
+	/** After Stop, ignore the cancelled turn's `prompt_response` so it cannot flush a fresh submit. */
+	let ignoreNextCompletion = false;
+	let activePromptId = null;
+	let messageIdCounter = 0;
+
 	let showTokenUsage = false;
+
+	// Highlight fenced code in every marked.parse() below: streaming text,
+	// finished text and thought bubbles.
+	globalThis.NanocoderMarkdownHighlight.configureMarkdown(globalThis.marked, globalThis.hljs);
 
 	// ── Slash command autocomplete state ────────────────────
 	const slashDropdown = document.getElementById('slash-dropdown');
@@ -241,7 +256,13 @@
 	// The trigger rules and token arithmetic live in mention-utils.js so they
 	// can be unit tested in Node — this file is one DOM-bound IIFE and none of
 	// it is reachable from a test runner.
-	const { findMentionQuery, removeMentionToken } = globalThis.NanocoderMentionUtils;
+	const mentionUtils = globalThis.NanocoderMentionUtils;
+	const findMentionQuery = mentionUtils && mentionUtils.findMentionQuery
+		? mentionUtils.findMentionQuery
+		: function () { return null; };
+	const removeMentionToken = mentionUtils && mentionUtils.removeMentionToken
+		? mentionUtils.removeMentionToken
+		: function (text, start) { return { text: text || '', cursor: start || 0 }; };
 
 	function closeMention() {
 		mentionOpen = false;
@@ -535,7 +556,8 @@
 		circle: `<svg class="opacity-50" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"></circle></svg>`,
 		arrowRight: `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>`,
 		edit: `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>`,
-		refresh: `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>`
+		refresh: `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>`,
+		close: `<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>`
 	};
 
 	let lastUserPromptText = '';
@@ -634,6 +656,39 @@
 		return footer;
 	}
 
+	// Composer has something that submitMessage() would send. While a turn
+	// is running this is what flips the button from Stop back to Send so a
+	// follow-up can be queued instead of cancelling the agent.
+	function composerHasPayload() {
+		return Boolean(
+			chatInput.value.trim() ||
+			attachedPaths.length > 0 ||
+			pendingImages.length > 0
+		);
+	}
+
+	function shouldCancelTurn() {
+		return isProcessing && !composerHasPayload();
+	}
+
+	function syncSendStopButton() {
+		if (!sendStopBtn) return;
+		const showStop = shouldCancelTurn();
+		sendStopBtn.title = showStop
+			? 'Stop (cancel)'
+			: (isProcessing ? 'Queue (Enter)' : 'Send (Enter)');
+		sendStopBtn.classList.toggle('is-processing', showStop);
+		const hint = document.getElementById('queue-hint');
+		if (hint) {
+			hint.classList.toggle('hidden', !isProcessing);
+		}
+		if (chatInput) {
+			chatInput.placeholder = isProcessing
+				? 'Queue a follow-up (Enter)…'
+				: 'Ask Nanocoder anything...';
+		}
+	}
+
 	// --- Send / Stop toggle logic ---
 	function setProcessing(active, outcome = 'completed') {
 		isProcessing = active;
@@ -648,9 +703,11 @@
 					statusEl.dataset.status = 'cancelled';
 				}
 			});
+			// The turn is over (completed, cancelled or failed): no cursor may linger.
+			document.querySelectorAll('.streaming-cursor').forEach(el => el.classList.remove('streaming-cursor'));
 			stopVisualLoader();
 			finishCurrentWorkSummary(outcome);
-			
+
 			const hiddenFooters = document.querySelectorAll('.agent-footer-processing');
 			hiddenFooters.forEach(f => {
 				f.style.display = '';
@@ -658,9 +715,14 @@
 			});
 			scrollToBottom(true);
 		}
-		if (sendStopBtn) {
-			sendStopBtn.title = active ? 'Stop (cancel)' : 'Send (Enter)';
-			sendStopBtn.classList.toggle('is-processing', active);
+		syncSendStopButton();
+	}
+
+	function discardLocalQueue() {
+		const ids = waitingPrompts.map(entry => entry.id);
+		waitingPrompts = [];
+		if (ids.length > 0) {
+			removeQueuedBubbles(ids);
 		}
 	}
 
@@ -785,6 +847,7 @@
 			appendMessage('Approved the implementation plan. Proceeding.', 'user');
 			currentTurnEl = null;
 			currentTextEl = null;
+			turnInFlight = true;
 			setProcessing(true);
 			startVisualLoader();
 			vscode.postMessage({type: 'approvePlan'});
@@ -811,16 +874,132 @@
 		scrollToBottomIfFollowing();
 	}
 
+	/** Id of a turn this page already opened locally, so promptStarted does not open it again. */
+	let locallyStartedId = null;
+
+	function openTurn() {
+		finishCurrentWorkSummary('completed');
+		turnStartedAt = Date.now();
+		agentTurnId++;
+		currentTurnFooter = null;
+		currentTurnEl = null;
+		currentTextEl = null;
+		setProcessing(true);
+		startVisualLoader();
+	}
+
+	function sendToHost(entry) {
+		turnInFlight = true;
+		activePromptId = entry.id;
+		turnCancelled = false;
+		vscode.postMessage({
+			type: 'submitMessage',
+			id: entry.id,
+			text: entry.text,
+			images: entry.images,
+		});
+	}
+
+	function flushWaitingPrompt(outcome) {
+		if (ignoreNextCompletion) {
+			ignoreNextCompletion = false;
+			if (!turnInFlight) {
+				setProcessing(false, outcome || 'cancelled');
+			}
+			return;
+		}
+		const next = waitingPrompts.shift();
+		if (next) {
+			finishCurrentWorkSummary(outcome || 'completed');
+			stopVisualLoader();
+			setQueuedState(next.id, false);
+			sendToHost(next);
+			return;
+		}
+		turnInFlight = false;
+		activePromptId = null;
+		setProcessing(false, outcome || 'completed');
+	}
+
 	// Shared by the Stop button and Escape so the two can't drift apart.
 	function requestCancel() {
+		ignoreNextCompletion = turnInFlight;
+		discardLocalQueue();
+		turnInFlight = false;
 		vscode.postMessage({ type: 'cancel' });
 		turnCancelled = true;
 		setProcessing(false, 'cancelled');
 	}
 
+	function messageWrapper(id) {
+		return messagesContainer.querySelector(`[data-message-id="${id}"]`);
+	}
+
+	function createQueuedBadge(id) {
+		const row = document.createElement('div');
+		row.className = 'queued-badge flex items-center gap-1.5 mt-1 text-xs';
+
+		const pill = document.createElement('span');
+		pill.className = 'px-1.5 py-0.5 rounded border border-vscode-border bg-vscode-widget-bg text-vscode-fg opacity-80';
+		pill.textContent = 'Queued';
+
+		const removeBtn = document.createElement('button');
+		removeBtn.type = 'button';
+		removeBtn.className = 'flex items-center justify-center bg-transparent border-none cursor-pointer text-vscode-fg opacity-60 hover:opacity-100 p-0.5 rounded hover:bg-vscode-toolbarHover';
+		removeBtn.title = 'Remove from queue';
+		removeBtn.setAttribute('aria-label', 'Remove from queue');
+		removeBtn.innerHTML = ICONS.close;
+		removeBtn.addEventListener('click', (e) => {
+			e.stopPropagation();
+			waitingPrompts = waitingPrompts.filter(entry => entry.id !== id);
+			removeQueuedBubbles([id]);
+			vscode.postMessage({ type: 'cancelQueuedMessage', id: id });
+		});
+
+		row.appendChild(pill);
+		row.appendChild(removeBtn);
+		return row;
+	}
+
+	function setQueuedState(id, queued) {
+		const wrapper = messageWrapper(id);
+		if (!wrapper) return;
+		const existing = wrapper.querySelector('.queued-badge');
+		if (queued) {
+			queuedIds.add(id);
+			if (!existing) {
+				wrapper.insertBefore(createQueuedBadge(id), wrapper.lastElementChild);
+			}
+		} else {
+			queuedIds.delete(id);
+			if (existing) existing.remove();
+		}
+	}
+
+	function removeQueuedBubbles(ids) {
+		const drop = new Set(ids);
+		waitingPrompts = waitingPrompts.filter(entry => !drop.has(entry.id));
+		for (const id of ids) {
+			queuedIds.delete(id);
+			pendingUserMessages.delete(id);
+			const wrapper = messageWrapper(id);
+			if (wrapper) wrapper.remove();
+		}
+	}
+
+	function consumePendingUserText(text) {
+		for (const [id, pending] of pendingUserMessages) {
+			if (pending === text) {
+				pendingUserMessages.delete(id);
+				return true;
+			}
+		}
+		return false;
+	}
+
 	if (sendStopBtn) {
 		sendStopBtn.addEventListener('click', () => {
-			if (isProcessing) {
+			if (shouldCancelTurn()) {
 				requestCancel();
 			} else {
 				submitMessage();
@@ -973,6 +1152,7 @@
 			wrapper.appendChild(removeBtn);
 			imagePreviewContainer.appendChild(wrapper);
 		});
+		syncSendStopButton();
 	}
 
 	const imageModal = document.getElementById('image-modal');
@@ -1118,6 +1298,7 @@
 		// Typing is what lifts a dismissal, so this runs before the update.
 		slashSuppressed = false;
 		updateSlashAutocomplete();
+		syncSendStopButton();
 	});
 
 	if (slashDropdown) {
@@ -1268,6 +1449,7 @@
 			} else {
 				copyLastResponse();
 			}
+			syncSendStopButton();
 			return;
 		}
 
@@ -1302,33 +1484,28 @@
 	// through it would overwrite a draft the user is typing and sweep up chips
 	// and images they staged for a different question.
 	function dispatchPrompt(text, images) {
-		// A new turn re-opens the door to tool updates that the previous
-		// cancel closed.
-		turnCancelled = false;
+		const id = 'msg-' + (++messageIdCounter);
+		const entry = {id, text, images};
+		appendMessage(text, 'user', images, id);
+		pendingUserMessages.set(id, text);
 		lastUserPromptText = text;
 		lastUserPromptImages = images;
 
-		// Send message to extension host
-		vscode.postMessage({
-			type: 'submitMessage',
-			text: text,
-			images: images
-		});
-
-		// Optimistically append user message
-		appendMessage(text, 'user', images);
-		pendingUserMessageText = text;
-
-		if (!isProcessing) {
-			// Switch to processing state
+		// Park follow-ups here. Posting a second `submitMessage` while a turn
+		// is in flight makes ACP reject it with "RequestError: Internal error"
+		// — the host queue is a backstop, but this gate is what the user feels.
+		if (turnInFlight) {
+			waitingPrompts.push(entry);
+			setQueuedState(id, true);
 			setProcessing(true);
-
-			startVisualLoader();
-
-			// Reset turn elements so agent starts a fresh block
-			currentTurnEl = null;
-			currentTextEl = null;
+			syncSendStopButton();
+			return;
 		}
+
+		locallyStartedId = id;
+		openTurn();
+		sendToHost(entry);
+		syncSendStopButton();
 	}
 
 	function retryPrompt(text, images, footerElement = null) {
@@ -1375,7 +1552,7 @@
 		lastAgentSegments = '';
 		lastAgentRawText = '';
 
-		pendingUserMessageText = null;
+		pendingUserMessages.set('retry', text);
 
 		vscode.postMessage({
 			type: 'retryMessage',
@@ -1533,6 +1710,7 @@
 		if (attachedPaths.length === 0) {
 			contextChipsContainer.classList.add('hidden');
 			renderChipsClear();
+			syncSendStopButton();
 			return;
 		}
 		contextChipsContainer.classList.remove('hidden');
@@ -1579,6 +1757,7 @@
 			});
 			contextChipsContainer.appendChild(chip);
 		}
+		syncSendStopButton();
 	}
 
 	if (composerBox) {
@@ -1677,14 +1856,15 @@
 			.join('\n\n');
 	}
 
-	function appendMessage(content, role, images = undefined) {
+	function appendMessage(content, role, images = undefined, id = undefined) {
+		const welcome = document.querySelector('.welcome-message');
+		if (welcome) welcome.remove();
 		const loader = document.getElementById('session-loader');
 		if (loader) loader.remove();
 
-		// A user message opens a new turn, so the agent segments that follow get
-		// a fresh id. The raw-text accumulator is handed over lazily, once the
-		// new response produces text.
-		if (role === 'user') {
+		// A locally submitted prompt carries an id and must not open a turn yet:
+		// a Queued bubble is not the next turn. History and ACP echoes have no id.
+		if (role === 'user' && !id) {
 			// Close the previous turn's summary before the new message is
 			// inserted, so it can never swallow work from the turn after it.
 			// The ownership maps deliberately survive: a tool the agent was told
@@ -1699,7 +1879,9 @@
 			lastUserPromptImages = images;
 		}
 
+
 		const wrapper = document.createElement('div');
+		if (id) wrapper.dataset.messageId = id;
 		wrapper.className = 'group flex flex-col min-w-0 shrink-0 ' +
 			(role === 'user' ? 'self-end items-end max-w-[90%]' : 'self-start items-start max-w-full w-full');
 		wrapper.dataset.role = role;
@@ -1841,6 +2023,7 @@
 	}
 
 	function startVisualLoader() {
+		stopVisualLoader();
 		const wrapper = document.createElement('div');
 		wrapper.className = 'group flex flex-row gap-1.5 min-w-0 shrink-0 self-start items-center max-w-full';
 		const span = document.createElement('span');
@@ -1915,6 +2098,8 @@
 
 			currentTurnEl = msgEl;
 			currentTextEl = textContainer;
+			// Blinking cursor (CSS) while this block streams; see endCurrentTextBlock().
+			textContainer.classList.add('streaming-cursor');
 			scrollToBottomIfFollowing();
 		} else {
 			// Append to existing turn
@@ -2119,6 +2304,7 @@
 				} else {
 					messagesContainer.innerHTML = '';
 				}
+				setSessionResumingIndicator(false);
 				currentTurnEl = null;
 				currentTextEl = null;
 				currentTurnText = '';
@@ -2138,7 +2324,13 @@
 				lastAgentRawText = '';
 				lastUserPromptText = '';
 				lastUserPromptImages = undefined;
-				pendingUserMessageText = null;
+				pendingUserMessages.clear();
+				queuedIds.clear();
+				waitingPrompts = [];
+				turnInFlight = false;
+				activePromptId = null;
+				locallyStartedId = null;
+				ignoreNextCompletion = false;
 				// The transcript was just wiped, so the summary has no DOM left to
 				// close - drop it rather than stamping a duration on a box the
 				// user can no longer see.
@@ -2147,12 +2339,52 @@
 				workSummaryByPlanId.clear();
 				setProcessing(false);
 				break;
+			case 'promptQueued':
+				turnInFlight = true;
+				setQueuedState(message.id, true);
+				setProcessing(true);
+				break;
+			case 'promptStarted':
+				turnInFlight = true;
+				activePromptId = message.id;
+				setQueuedState(message.id, false);
+				if (locallyStartedId === message.id) {
+					locallyStartedId = null;
+				} else {
+					openTurn();
+				}
+				break;
+			case 'promptQueueCleared':
+				removeQueuedBubbles(message.ids || []);
+				break;
+	function setSessionResumingIndicator(isResuming) {
+		let indicator = document.getElementById('session-resuming-indicator');
+		if (isResuming) {
+			if (!indicator) {
+				indicator = document.createElement('div');
+				indicator.id = 'session-resuming-indicator';
+				indicator.className = 'session-resuming-indicator flex items-center justify-center gap-2 p-2 text-xs bg-vscode-dropdown-bg border-b border-vscode-border text-vscode-fg opacity-80 shrink-0 z-10';
+				indicator.innerHTML = `${ICONS.pending}<span>Resuming session...</span>`;
+				const chatView = document.getElementById('chat-view');
+				if (chatView && messagesContainer) {
+					chatView.insertBefore(indicator, messagesContainer);
+				}
+			}
+		} else if (indicator) {
+			indicator.remove();
+		}
+	}
+
 			case 'sessionLoaded':
 				finishCurrentWorkSummary(currentWorkSummary?._overrideOutcome || 'completed');
-				pendingUserMessageText = null;
+				pendingUserMessages.clear();
 				const loader = document.getElementById('session-loader');
 				if (loader) loader.remove();
+				setSessionResumingIndicator(false);
 				scrollToBottom(true);
+				break;
+			case 'sessionResuming':
+				setSessionResumingIndicator(message.isResuming);
 				break;
 			case 'acpUpdate':
 				handleAcpUpdate(message.update);
@@ -2201,6 +2433,9 @@
 				break;
 			case 'syncState':
 				handleSyncState(message);
+				break;
+			case 'connectionStatus':
+				handleConnectionStatus(message);
 				break;
 			case 'updateSessions':
 				sessionsData = message.sessions || [];
@@ -2386,6 +2621,23 @@
 		if (modelDropdown) modelDropdown.setOptions(message.availableModels, message.model);
 	}
 
+	function handleConnectionStatus(message) {
+		if (!messagesContainer) return;
+		let el = document.getElementById('connection-status');
+		if (message.status === 'connected') {
+			if (el) el.remove();
+			return;
+		}
+		if (!el) {
+			el = document.createElement('div');
+			el.id = 'connection-status';
+			el.className = 'flex flex-col items-center justify-center h-full opacity-50 mt-10 text-xs px-4 text-center';
+			messagesContainer.appendChild(el);
+		}
+		el.textContent = message.message
+			|| (message.status === 'connecting' ? 'Connecting to Nanocoder…' : 'Connection failed');
+	}
+
 	// Close the current streamed-text block: flush any pending throttled
 	// render, then reset so the next agent_message_chunk starts a fresh
 	// markdown block. Called whenever another element (the work summary or a
@@ -2395,6 +2647,7 @@
 	function endCurrentTextBlock() {
 		flushPendingRender();
 		closeAgentSegment();
+		if (currentTextEl) currentTextEl.classList.remove('streaming-cursor');
 		currentTurnEl = null;
 		currentTextEl = null;
 		syncLastAgentRawText();
@@ -2408,9 +2661,7 @@
 			if (update.content) {
 				endCurrentTextBlock();
 				if (update.content.text) {
-					if (pendingUserMessageText === update.content.text) {
-						pendingUserMessageText = null;
-					} else {
+					if (!consumePendingUserText(update.content.text)) {
 						appendMessage(update.content.text, 'user');
 					}
 				}
@@ -2451,11 +2702,10 @@
 		} else if (update.sessionUpdate === 'plan') {
 			handlePlanUpdate(update);
 		} else if (update.sessionUpdate === 'prompt_response' || update.sessionUpdate === 'done') {
-			pendingUserMessageText = null;
 			// Show token usage (and estimated cost) for the finished turn
 			appendUsageIndicator(update.usage, update.cost);
-			// Turn is complete — restore the send button
-			setProcessing(false, update.outcome || 'completed');
+			// Drain one locally parked follow-up, or release the mutex.
+			flushWaitingPrompt(update.outcome || 'completed');
 		}
 		keepVisualLoaderAtBottom();
 	}
@@ -3655,6 +3905,9 @@
 		card.className = 'my-2 border border-vscode-widget-border rounded bg-vscode-editor-bg overflow-hidden group tool-card';
 		card.id = `tool-card-${toolCallId}`;
 
+		const initialPath = diffPath(update);
+		if (initialPath) card.dataset.filePath = initialPath;
+
 		const row = document.createElement('div');
 		row.className = 'tool-card-row flex items-center justify-between px-3 py-2';
 		// Guarded rather than unbound: the card is created from the queued
@@ -3663,7 +3916,9 @@
 		// that window - the whole approval wait - raised "Change <id> not found".
 		row.onclick = () => {
 			if (card.dataset.hasDiff !== 'true') return;
-			vscode.postMessage({ type: 'showDiff', toolCallId });
+			const message = { type: 'showDiff', toolCallId };
+			if (card.dataset.filePath) message.filePath = card.dataset.filePath;
+			vscode.postMessage(message);
 		};
 
 		const left = document.createElement('div');
@@ -3709,7 +3964,8 @@
 
 	// Reveal the diff affordance once the extension host has a change
 	// registered for this card - see hasDiffContent.
-	function setEditCardDiffAvailable(el) {
+	function setEditCardDiffAvailable(el, filePath) {
+		if (filePath) el.dataset.filePath = filePath;
 		if (el.dataset.hasDiff === 'true') return;
 		el.dataset.hasDiff = 'true';
 
@@ -3736,7 +3992,8 @@
 		const actionEl = el.querySelector('.tool-card-action');
 		if (actionEl) actionEl.textContent = state.action;
 
-		if (hasDiffContent(update)) setEditCardDiffAvailable(el);
+		const path = diffPath(update);
+		if (path) setEditCardDiffAvailable(el, path);
 
 		if (isSettled(state.status)) {
 			const actions = el.querySelector('.tool-actions');

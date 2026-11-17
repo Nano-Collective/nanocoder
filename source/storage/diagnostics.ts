@@ -274,7 +274,9 @@ async function scanSessions(
 	const diskIds = new Set<string>();
 	for (const entry of entries) {
 		const filePath = path.join(root, entry.name);
-		if (entry.name === 'sessions.json') {
+		// The lock file guards index updates across processes and may be left
+		// behind by a crash until the next save reclaims it.
+		if (entry.name === 'sessions.json' || entry.name === 'sessions.json.lock') {
 			store.sizeBytes += await fileBytes(filePath, store);
 			continue;
 		}

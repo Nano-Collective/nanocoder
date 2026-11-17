@@ -39,6 +39,18 @@ The **auto** profile is the default. It keeps the full tool surface for cloud mo
 
 > **Why don't I see my MCP tools?** MCP tools are only exposed in the resolved `full` profile. If you connect an MCP server but the model cannot see its tools, open `/tune` and either switch the tool profile to **full** or use a larger/cloud model so `auto` resolves to `full`. `/mcp` still shows connected servers even when the current tool profile filters their tools out of the model prompt.
 
+### MCP Tool Discovery (`mcpDiscovery`)
+
+When multiple MCP servers provide numerous tools, injecting all tool JSON schemas directly into the prompt consumes significant context tokens. Nanocoder supports on-demand MCP discovery via `tune.mcpDiscovery`:
+
+| Value | Behaviour |
+|-------|-----------|
+| **`auto`** (default) | Automatically enables on-demand discovery when 8 or more MCP tools are available across connected servers. |
+| **`always`** | Always enables on-demand discovery, even when fewer than 8 MCP tools are connected. |
+| **`disabled`** | Disables on-demand discovery. All MCP tools have their full JSON schemas eagerly registered and hydrated in the prompt. |
+
+When on-demand discovery is enabled, a compact tool catalog listing available MCP tool names, servers, and short descriptions is presented to the model. The model loads full schemas as needed using the `load_tool_schema` tool.
+
 The **minimal** profile is designed for small models (1B-15B parameters) that struggle with large tool sets. It reduces the system prompt size and forces the model to call one tool at a time.
 
 The **nano** profile is designed for the smallest models or low-end hardware running larger models locally. It is strictly more aggressive than `minimal`:

@@ -42,6 +42,8 @@ import {
 import {loadAllMCPConfigs} from '@/config/mcp-config-loader';
 import {getConfigPath} from '@/config/paths';
 import {loadPreferences} from '@/config/preferences';
+import {FIREWALL_DEFAULTS, resolveFirewallConfig} from '@/types/firewall';
+import {isObject} from '@/utils/type-helpers';
 
 /**
  * Where a value came from, in ascending precedence. `default` is a built-in
@@ -160,10 +162,6 @@ function isEnvReference(value: unknown): boolean {
 	return typeof value === 'string' && /^\$\{?[A-Za-z_]/.test(value);
 }
 
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-	return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
 /**
  * Replace credential values with a placeholder, recursively. Returns the
  * value unchanged (and `redacted: false`) when nothing was secret.
@@ -189,7 +187,7 @@ export function redactValue(
 		return {value: redacted ? mapped : value, redacted};
 	}
 
-	if (isPlainObject(value)) {
+	if (isObject(value)) {
 		let redacted = false;
 		const mapped: Record<string, unknown> = {};
 		for (const [key, item] of Object.entries(value)) {
@@ -217,7 +215,7 @@ function parseJsonFile(path: string): Record<string, unknown> | null {
 	if (!existsSync(path)) return null;
 	try {
 		const parsed: unknown = JSON.parse(readFileSync(path, 'utf-8'));
-		return isPlainObject(parsed) ? parsed : null;
+		return isObject(parsed) ? parsed : null;
 	} catch {
 		return null;
 	}
@@ -238,8 +236,8 @@ function readRawFile(
 			file,
 			path,
 			exists: true,
-			data: isPlainObject(parsed) ? parsed : null,
-			error: isPlainObject(parsed)
+			data: isObject(parsed) ? parsed : null,
+			error: isObject(parsed)
 				? undefined
 				: 'top-level value is not a JSON object',
 		};
@@ -284,7 +282,7 @@ function getAt(
 ): unknown {
 	return path.reduce<unknown>(
 		(current, segment) =>
-			isPlainObject(current) && Object.hasOwn(current, segment)
+			isObject(current) && Object.hasOwn(current, segment)
 				? current[segment]
 				: undefined,
 		data,
@@ -300,7 +298,7 @@ function hasAt(
 	const parent = getAt(data, path.slice(0, -1));
 	const last = path[path.length - 1] as string;
 	return (
-		isPlainObject(parent) &&
+		isObject(parent) &&
 		Object.hasOwn(parent, last) &&
 		parent[last] !== undefined
 	);
@@ -316,11 +314,7 @@ function flattenLeaves(
 	prefix: string[],
 	maxDepth: number,
 ): Array<{path: string[]; value: unknown}> {
-	if (
-		!isPlainObject(value) ||
-		maxDepth <= 0 ||
-		Object.keys(value).length === 0
-	) {
+	if (!isObject(value) || maxDepth <= 0 || Object.keys(value).length === 0) {
 		return [{path: prefix, value}];
 	}
 	return Object.entries(value).flatMap(([key, item]) =>
@@ -383,6 +377,17 @@ function blockSpecs(): BlockSpec[] {
 			defaults: DEFAULT_RETRY_LIMITS as unknown as Record<string, unknown>,
 		},
 		{
+			path: ['nanocoder', 'firewall'],
+			file: agents,
+			effective: resolveFirewallConfig(config.firewall),
+			defaults: FIREWALL_DEFAULTS as unknown as Record<string, unknown>,
+		},
+		{
+			path: ['nanocoder', 'verify'],
+			file: agents,
+			effective: config.verify,
+		},
+		{
 			path: ['nanocoder', 'paste'],
 			file: preferences,
 			effective: config.paste,
@@ -427,6 +432,35 @@ function blockSpecs(): BlockSpec[] {
 			file: agents,
 			effective: config.nanocoderTools,
 			depth: 3,
+		},
+		{
+			path: ['nanocoder', 'hooks'],
+			file: agents,
+			effective: config.hooks,
+		},
+		{
+			path: ['nanocoder', 'formatters'],
+			file: agents,
+			effective: config.formatters,
+			leaf: true,
+		},
+		{
+			path: ['nanocoder', 'lspServers'],
+			file: agents,
+			effective: config.lspServers,
+			leaf: true,
+		},
+		{
+			path: ['nanocoder', 'sandbox'],
+			file: agents,
+			effective: config.sandbox,
+			leaf: true,
+		},
+		{
+			path: ['nanocoder', 'autoCommit'],
+			file: agents,
+			effective: config.autoCommit,
+			leaf: true,
 		},
 	];
 }
@@ -480,10 +514,7 @@ function resolveBlockEntries(
 		? [{path: [] as string[], value: spec.effective}]
 		: [...leafPaths.values()].map(path => ({
 				path,
-				value: getAt(
-					isPlainObject(spec.effective) ? spec.effective : null,
-					path,
-				),
+				value: getAt(isObject(spec.effective) ? spec.effective : null, path),
 			}));
 
 	return leaves.map(leaf => {
@@ -627,7 +658,7 @@ function resolveProviderEntries(layers: RawLayer[]): EffectiveConfigEntry[] {
 		const list = Array.isArray(nested) ? nested : Array.isArray(top) ? top : [];
 		const byName = new Map<string, unknown>();
 		for (const provider of list) {
-			if (isPlainObject(provider) && typeof provider.name === 'string') {
+			if (isObject(provider) && typeof provider.name === 'string') {
 				byName.set(provider.name, provider);
 			}
 		}
@@ -700,13 +731,11 @@ function readEnvProviderNames(): Set<string> {
 		const parsed: unknown = JSON.parse(rawData);
 		const list = Array.isArray(parsed)
 			? parsed
-			: (getAt(isPlainObject(parsed) ? parsed : null, [
-					'nanocoder',
-					'providers',
-				]) ?? getAt(isPlainObject(parsed) ? parsed : null, ['providers']));
+			: (getAt(isObject(parsed) ? parsed : null, ['nanocoder', 'providers']) ??
+				getAt(isObject(parsed) ? parsed : null, ['providers']));
 		if (!Array.isArray(list)) return names;
 		for (const provider of list) {
-			if (isPlainObject(provider) && typeof provider.name === 'string') {
+			if (isObject(provider) && typeof provider.name === 'string') {
 				names.add(provider.name);
 			}
 		}
@@ -725,9 +754,9 @@ function readMcpServers(
 ): Map<string, unknown> {
 	const byName = new Map<string, unknown>();
 	const servers = getAt(data, ['mcpServers']);
-	if (!isPlainObject(servers)) return byName;
+	if (!isObject(servers)) return byName;
 	for (const [name, server] of Object.entries(servers)) {
-		byName.set(name, isPlainObject(server) ? {name, ...server} : server);
+		byName.set(name, isObject(server) ? {name, ...server} : server);
 	}
 	return byName;
 }
@@ -758,14 +787,14 @@ function readEnvMcpServers(): {servers: Map<string, unknown>; origin: string} {
 		if (Array.isArray(parsed)) {
 			const byName = new Map<string, unknown>();
 			for (const server of parsed) {
-				if (isPlainObject(server) && typeof server.name === 'string') {
+				if (isObject(server) && typeof server.name === 'string') {
 					byName.set(server.name, server);
 				}
 			}
 			return {servers: byName, origin};
 		}
 		return {
-			servers: readMcpServers(isPlainObject(parsed) ? parsed : null),
+			servers: readMcpServers(isObject(parsed) ? parsed : null),
 			origin,
 		};
 	} catch {
@@ -903,6 +932,11 @@ export function selectOverrides(
  * block), then the same two with a `nanocoder.` prefix added, then
  * case-insensitively, and finally as a substring so a bare `threshold` still
  * finds something.
+ *
+ * A `nanocoder.`-prefixed query also falls back to the same key under
+ * `preferences.`, because every other setting lives under `nanocoder.` and
+ * reaching for `nanocoder.notifications` is the natural habit — the key just
+ * happens to live at the top level of nanocoder-preferences.json.
  */
 export function findEntries(
 	config: EffectiveConfig,
@@ -912,6 +946,9 @@ export function findEntries(
 	if (query === '') return [];
 
 	const candidates = [query, `nanocoder.${query}`, `preferences.${query}`];
+	if (query.startsWith('nanocoder.')) {
+		candidates.push(`preferences.${query.slice('nanocoder.'.length)}`);
+	}
 
 	for (const candidate of candidates) {
 		const exact = config.entries.filter(entry => entry.key === candidate);
