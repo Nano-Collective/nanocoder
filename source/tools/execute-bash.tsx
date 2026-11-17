@@ -13,7 +13,11 @@ import {
 	buildFailureCapsule,
 	type RerunCommand,
 } from '@/tools/bash-failure-capsule';
-import {formatBackgroundStart, startBackgroundJob} from '@/tools/bash-jobs';
+import {
+	formatBackgroundStart,
+	isRunInBackground,
+	startBackgroundJob,
+} from '@/tools/bash-jobs';
 import {truncateToolResult} from '@/tools/runtime/truncate-tool-result';
 import type {NanocoderToolExport, StructuredToolOutput} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
@@ -30,8 +34,6 @@ export function executeBashCommand(
 	options?: {
 		timeoutMs?: number;
 		signal?: AbortSignal;
-		background?: boolean;
-		sessionId?: string;
 	},
 ): {
 	executionId: string;
@@ -122,7 +124,7 @@ const executeExecuteBash = async (
 	args: {command: string; run_in_background?: boolean},
 	options?: {abortSignal?: AbortSignal; sessionId?: string},
 ): Promise<StructuredToolOutput> => {
-	if (args.run_in_background) {
+	if (isRunInBackground(args.run_in_background)) {
 		const {job, error} = await startBackgroundJob(args.command, {
 			sessionId: options?.sessionId,
 		});

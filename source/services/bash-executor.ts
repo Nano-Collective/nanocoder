@@ -367,7 +367,26 @@ export class BashExecutor extends EventEmitter {
 			}
 		};
 
-		const backgroundKeepLatest = background ? {keepLatest: true} : undefined;
+		const backgroundKeepLatest = background
+			? {
+					keepLatest: true,
+					onTrim: (droppedChars: number) => {
+						state.fullOutput = state.fullOutput.slice(droppedChars);
+						const job = this.jobs.get(executionId);
+						if (job) job.readStdout -= droppedChars;
+					},
+				}
+			: undefined;
+		const backgroundKeepLatestStderr = background
+			? {
+					keepLatest: true,
+					onTrim: (droppedChars: number) => {
+						state.stderr = state.stderr.slice(droppedChars);
+						const job = this.jobs.get(executionId);
+						if (job) job.readStderr -= droppedChars;
+					},
+				}
+			: undefined;
 		const stdoutCollector = makeStreamCollector(
 			text => {
 				state.fullOutput += text;
@@ -380,7 +399,7 @@ export class BashExecutor extends EventEmitter {
 				state.stderr += text;
 			},
 			STDERR_TRUNCATION_NOTICE,
-			backgroundKeepLatest,
+			backgroundKeepLatestStderr,
 		);
 
 		// Both streams are finished (or past their drain grace period) when the

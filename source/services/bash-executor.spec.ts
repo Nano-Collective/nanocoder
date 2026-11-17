@@ -1001,6 +1001,31 @@ test('readJobOutput only returns output produced since the previous read', async
 	await executor.killJob(executionId);
 });
 
+test('bash_output keeps returning new output from a background job past the cap', async t => {
+	const executor = createExecutor();
+	const dir = mkdtempSync(join(tmpdir(), 'nc-bg-keeplatest-'));
+	const script = join(dir, 'flood.js');
+	writeFileSync(
+		script,
+		"console.log('PID:' + process.pid); console.log('A'.repeat(6 * 1024 * 1024)); setInterval(() => console.log('tick'), 100);\n",
+	);
+	const {executionId} = executor.execute(`node ${script}`, {background: true});
+
+	// Let the flood cross the cap and a few ticks land.
+	await new Promise(resolve => setTimeout(resolve, 3000));
+	const first = executor.readJobOutput(executionId)!;
+	t.truthy(first.output, 'the flood itself must be readable');
+
+	await new Promise(resolve => setTimeout(resolve, 1000));
+	const second = executor.readJobOutput(executionId)!;
+	t.true(
+		second.output.includes('tick'),
+		'bash_output must keep returning output after the cap was trimmed',
+	);
+
+	await executor.killJob(executionId);
+});
+
 test('background execute ignores the turn AbortSignal', async t => {
 	const executor = createExecutor();
 	const controller = new AbortController();

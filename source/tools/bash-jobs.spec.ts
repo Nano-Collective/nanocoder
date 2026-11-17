@@ -8,6 +8,7 @@ import {
 	formatBackgroundOutput,
 	formatBackgroundStart,
 	formatKillResult,
+	isRunInBackground,
 	readBackgroundStart,
 	startBackgroundJob,
 } from '@/tools/bash-jobs';
@@ -47,6 +48,14 @@ function makeJob(overrides: Partial<BashJobOutput> = {}): BashJobOutput {
 		...overrides,
 	};
 }
+
+test('isRunInBackground reads a boolean or string flag the same way', t => {
+	t.true(isRunInBackground(true), 'a boolean true backgrounds');
+	t.true(isRunInBackground('true'), 'a fallback-path string "true" backgrounds');
+	t.false(isRunInBackground(false), 'a boolean false stays foreground');
+	t.false(isRunInBackground('false'), 'a string "false" stays foreground');
+	t.false(isRunInBackground(undefined), 'an absent flag stays foreground');
+});
 
 test('readBackgroundStart returns the first output and consumes it', async t => {
 	const {executionId} = bashExecutor.execute(JOB_COMMAND, {background: true});

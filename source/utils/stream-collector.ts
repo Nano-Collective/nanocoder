@@ -14,6 +14,24 @@ export type StreamCollector = {
 	flush: () => void;
 };
 
+export type StreamCollectorOptions = {
+	/**
+	 * Keep the most recent output instead of the oldest bytes past the cap:
+	 * once the budget is exceeded, drop the head of the buffer and keep the
+	 * tail, so a chatty dev server or watcher keeps producing readable output
+	 * instead of freezing at the cap.
+	 */
+	keepLatest?: boolean;
+	/**
+	 * Called with the number of characters dropped from the front of the
+	 * buffer when a `keepLatest` trim happens. The buffer's owner drops the
+	 * same head from its accumulated output and moves its read cursor back over
+	 * the dropped characters, so the next read starts where the retained tail
+	 * begins.
+	 */
+	onTrim?: (droppedChars: number) => void;
+};
+
 /**
  * Bound how much of a child process's stream is held in memory.
  *
@@ -40,7 +58,7 @@ export type StreamCollector = {
 export function makeStreamCollector(
 	append: (text: string) => void,
 	marker: string,
-	options?: {keepLatest?: boolean},
+	options?: StreamCollectorOptions,
 ): StreamCollector {
 	let bytes = 0;
 	let truncated = false;
@@ -50,21 +68,37 @@ export function makeStreamCollector(
 
 	const deliverText = (text: string): void => {
 		if (!text) return;
-		tail += text;
-		if (Buffer.byteLength(tail, 'utf8') > BASH_MAX_OUTPUT_BYTES) {
-			while (Buffer.byteLength(tail, 'utf8') > BASH_MAX_OUTPUT_BYTES) {
-				const codePoint = tail.codePointAt(0) ?? 1;
-				tail = tail.slice(codePoint > 0xffff ? 2 : 1);
+		let next = tail + text;
+		if (next.length > emitted.length) {
+			append(next.slice(emitted.length));
+			emitted = next;
+		}
+		if (Buffer.byteLength(next, 'utf8') > BASH_MAX_OUTPUT_BYTES) {
+			// Drop whole characters from the front until the window fits the
+			// cap. Dropping a byte count instead could split a multi-byte
+			// character in half, so walk one character at a time and stop at a
+			// boundary. Dropping once per chunk (instead of one character per
+			// iteration) keeps a chunk that crosses the cap off the event loop.
+			const overage = Buffer.byteLength(next, 'utf8') - BASH_MAX_OUTPUT_BYTES;
+			let droppedBytes = 0;
+			let droppedChars = 0;
+			while (droppedBytes < overage) {
+				const size = (next.codePointAt(droppedChars) ?? 1) > 0xffff ? 2 : 1;
+				droppedBytes += size;
+				droppedChars += size;
 			}
+			// The dropped head has already been delivered, so the emission
+			// cursor shifts with it instead of keeping a stale offset that would
+			// swallow or skip the output that follows.
+			emitted = emitted.slice(droppedChars);
+			next = next.slice(droppedChars);
 			if (!truncated) {
 				truncated = true;
 				append(marker);
 			}
+			options?.onTrim?.(droppedChars);
 		}
-		if (tail.length > emitted.length) {
-			append(tail.slice(emitted.length));
-			emitted = tail;
-		}
+		tail = next;
 		bytes = Buffer.byteLength(tail, 'utf8');
 	};
 

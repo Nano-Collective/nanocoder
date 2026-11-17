@@ -5,7 +5,11 @@ import {
 	appendPostToolUseOutput,
 	runPreToolUseGate,
 } from '@/services/lifecycle-hooks';
-import {formatBackgroundStart, startBackgroundJob} from '@/tools/bash-jobs';
+import {
+	formatBackgroundStart,
+	isRunInBackground,
+	startBackgroundJob,
+} from '@/tools/bash-jobs';
 import {
 	bashRunFailed,
 	distillBashResultForLLM,
@@ -101,7 +105,7 @@ export async function runStreamingBashTool(
 	// A background job returns as soon as it has a job id and its first output.
 	// It is not tied to this turn's AbortSignal, and no live BashProgress is
 	// mounted: the process is expected to outlive the tool call.
-	if (parsedArgs.run_in_background === true) {
+	if (isRunInBackground(parsedArgs.run_in_background)) {
 		const {job, error} = await startBackgroundJob(commandStr, {sessionId});
 		setLiveComponent(null);
 		const content = error

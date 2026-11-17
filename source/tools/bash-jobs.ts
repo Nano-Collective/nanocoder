@@ -6,6 +6,16 @@ import {type BashJobOutput, bashExecutor} from '@/services/bash-executor';
 import {truncateToolResult} from '@/tools/runtime/truncate-tool-result';
 
 /**
+ * Whether a tool call asked to run the command in the background. The JSON
+ * schema declares `run_in_background` as a boolean, but arguments that reach
+ * the executor through a fallback path can arrive as a string (`"true"`), so
+ * both front ends read the flag the same way.
+ */
+export function isRunInBackground(value: unknown): boolean {
+	return value === true || value === 'true';
+}
+
+/**
  * How long `execute_bash run_in_background` waits for the job's first output
  * before handing the job id back. A server prints its startup banner in this
  * window; a command that prints nothing just returns an empty preview.
