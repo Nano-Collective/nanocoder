@@ -317,10 +317,11 @@ export async function handleChat(
 			// Provider-specific request extras (Codex Responses API fields,
 			// OpenRouter provider routing / reasoning / transforms / fallback
 			// models). buildProviderOptions returns undefined when nothing
-			// applies, so the SDK call site doesn't see an empty object.
+			// applies, so the SDK call site doesn't see an empty object. It gets
+			// the scrubbed prompt: Codex sends it as `instructions`.
 			const providerOptions = buildProviderOptions(
 				providerConfig,
-				systemContent,
+				finalSystemContent,
 				modeOverrides?.modelParameters,
 			);
 
