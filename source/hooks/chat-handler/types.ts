@@ -14,6 +14,7 @@ import type {
 	LLMClient,
 	Message,
 } from '@/types/core';
+import type {BudgetLimits} from '@/usage/budget';
 
 export interface UseChatHandlerProps {
 	client: LLMClient | null;
@@ -40,6 +41,12 @@ export interface UseChatHandlerProps {
 		'normal' | 'auto-accept' | 'yolo' | 'plan' | 'headless' | 'architect'
 	>;
 	nonInteractiveMode?: boolean;
+	/**
+	 * Spend/token cap from `--max-budget-usd` / `--max-tokens-total`. Only
+	 * honored for non-interactive runs; interactive sessions use
+	 * `nanocoder.budget` perSessionUsd instead.
+	 */
+	cliBudget?: BudgetLimits;
 	onConversationComplete?: () => void;
 	// Fired when a turn that STARTED in plan mode runs to completion without
 	// being interrupted — i.e. a plan was actually produced. Decided here rather

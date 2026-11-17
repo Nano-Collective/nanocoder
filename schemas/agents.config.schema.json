@@ -20,6 +20,24 @@
 		}
 	},
 	"definitions": {
+		"BudgetConfig": {
+			"properties": {
+				"maxTokensTotal": {
+					"description": "Maximum total tokens (provider-reported input + output) per run/session.",
+					"type": "number"
+				},
+				"perRunUsd": {
+					"description": "Maximum estimated spend in USD for one `nanocoder run`.",
+					"type": "number"
+				},
+				"perSessionUsd": {
+					"description": "Maximum estimated spend in USD for one interactive/daemon session.",
+					"type": "number"
+				}
+			},
+			"type": "object",
+			"additionalProperties": false
+		},
 		"DiskNanocoderConfig": {
 			"description": "On-disk representation of the `nanocoder` namespace in agents.config.json.\n\nEvery field is optional — the loader applies sensible defaults for each one.\nFields that live in nanocoder-preferences.json (notifications, sessions,\npaste) are intentionally absent: the schema should not advertise keys the\nloader silently ignores.",
 			"properties": {
@@ -37,6 +55,10 @@
 				"autoCompact": {
 					"$ref": "#/definitions/AutoCompactConfig",
 					"description": "Automatic context compression when usage exceeds threshold. All fields have defaults."
+				},
+				"budget": {
+					"$ref": "#/definitions/BudgetConfig",
+					"description": "Spend and token budget cap for runs and sessions. A run stops cleanly\nat 100% of a limit (exit code 3 in headless mode); interactive sessions\nask whether to continue or raise the limit. Models without a price in\nmodels.dev fall back to the token limit only."
 				},
 				"defaultMode": {
 					"description": "Default conversation mode when none is specified.",

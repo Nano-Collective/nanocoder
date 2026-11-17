@@ -18,6 +18,7 @@ import type { HooksConfig } from "@/types/config";
 import { TOOL_APPROVAL_REQUIRED_KIND } from "@/constants";
 import type { ToolManager } from "@/tools/tool-manager";
 import type { DevelopmentMode, LLMClient } from "@/types/core";
+import { BUDGET_EXCEEDED_EXIT_CODE } from "@/usage/budget";
 import { notifyError, notifyWarning } from "@/components/message-queue";
 import { ShutdownManager } from "@/utils/shutdown";
 import type { PlainConversationOutcome } from "./conversation.js";
@@ -1609,5 +1610,98 @@ test.serial(
 		t.is(jsonOutput.warnings.length, 1);
 		t.is(jsonOutput.warnings[0], "Some startup warning");
 		t.true(jsonOutput.message.includes("prompt rejected by policy"));
+	},
+);
+
+test.serial(
+	"budget-exceeded outcome exits 3 in text mode and prints the total spent",
+	async (t) => {
+		const shutdown: CapturedShutdown = { code: null };
+		const stdout = capturingStdout();
+		const stderr = capturingStderr();
+		try {
+			await runPlainShell({
+				prompt: "do the thing",
+				developmentMode: "auto-accept",
+				trustDirectory: true,
+				outputFormat: "text",
+				deps: baseDeps({
+					initializePlain: makeFakeInitializePlain(),
+					runPlainConversation: makeFakeRunPlainConversation({
+						kind: "budget-exceeded",
+						message:
+							"Budget exceeded: spent 1,000 of 1,000 tokens (100%). Reached the token limit of 1,000 tokens — stopping before the next request.",
+						finalText: "partial",
+						reasoning: null,
+						steps: 2,
+						toolCalls: [],
+						budget: {
+							totals: {
+								totalTokens: 1000,
+								totalCostUsd: undefined,
+								costKnown: false,
+							},
+							limits: { maxTokensTotal: 1000 },
+						},
+					}),
+					getShutdownManager: makeFakeShutdownManager(shutdown),
+				}),
+			});
+		} finally {
+			stdout.restore();
+			stderr.restore();
+		}
+
+		t.is(shutdown.code, BUDGET_EXCEEDED_EXIT_CODE);
+		t.is(shutdown.code, 3);
+		t.regex(stderr.get(), /Budget exceeded: spent 1,000 of 1,000 tokens/);
+	},
+);
+
+test.serial(
+	"--json budget-exceeded outcome emits exit code 3 with the budget block",
+	async (t) => {
+		const shutdown: CapturedShutdown = { code: null };
+		const stdout = capturingStdout();
+		try {
+			await runPlainShell({
+				prompt: "do the thing",
+				developmentMode: "auto-accept",
+				trustDirectory: true,
+				outputFormat: "json",
+				deps: baseDeps({
+					initializePlain: makeFakeInitializePlain(),
+					runPlainConversation: makeFakeRunPlainConversation({
+						kind: "budget-exceeded",
+						message: "Budget exceeded: spent $2.00 of $2.00 (100%).",
+						finalText: "partial",
+						reasoning: null,
+						steps: 2,
+						toolCalls: [],
+						budget: {
+							totals: {
+								totalTokens: 500,
+								totalCostUsd: 2,
+								costKnown: true,
+							},
+							limits: { maxBudgetUsd: 2 },
+						},
+					}),
+					getShutdownManager: makeFakeShutdownManager(shutdown),
+				}),
+			});
+		} finally {
+			stdout.restore();
+		}
+
+		const report = JSON.parse(stdout.get());
+		t.is(report.kind, "budget-exceeded");
+		t.is(report.exitCode, 3);
+		t.is(report.message, "Budget exceeded: spent $2.00 of $2.00 (100%).");
+		t.deepEqual(report.budget, {
+			totals: { totalTokens: 500, totalCostUsd: 2, costKnown: true },
+			limits: { maxBudgetUsd: 2 },
+		});
+		t.is(shutdown.code, 3);
 	},
 );

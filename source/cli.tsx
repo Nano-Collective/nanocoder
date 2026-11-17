@@ -297,6 +297,14 @@ Options:
   --prompt-file       Read the run prompt from a file instead of the command
                       line. Necessary for large prompts: Linux caps a single
                       argument at 128 KiB and execve fails with E2BIG.
+  --max-budget-usd    Stop a run cleanly once estimated spend reaches this many
+                      USD (e.g. 2.50). Only valid with the "run" command.
+                      Overrides nanocoder.budget.perRunUsd. At 80% of the
+                      limit a warning is shown; at 100% the run stops before
+                      the next request (exit code 3 in --plain mode).
+  --max-tokens-total  Stop a run cleanly once total tokens (input + output)
+                      reach this number (e.g. 100000). Only valid with the
+                      "run" command. Overrides nanocoder.budget.maxTokensTotal.
   --trust-directory   Skip the first-run directory trust prompt for this run only.
                       Valid with "run", "daemon start", "verify" and --acp. Does not
                       modify the preferences file.
@@ -518,6 +526,44 @@ async function main(): Promise<void> {
 		break;
 	}
 
+	// Extract --max-budget-usd / --max-tokens-total for `run`. Accept spaced
+	// and fused forms. Both must be finite numbers above zero; they cap one
+	// run and override `nanocoder.budget` in agents.config.json. The run-only
+	// check lives below, next to --prompt-file, once runCommandIndex exists.
+	const cliBudget: {maxBudgetUsd?: number; maxTokensTotal?: number} = {};
+	for (let i = 0; i < args.length; i++) {
+		const arg = args[i];
+		let flag: '--max-budget-usd' | '--max-tokens-total' | undefined;
+		let rawValue: string | undefined;
+		if (arg === '--max-budget-usd' || arg === '--max-tokens-total') {
+			flag = arg;
+			rawValue = args[i + 1];
+			if (!rawValue || rawValue.startsWith('-')) {
+				console.error(`${flag} requires a value above zero.`);
+				process.exit(1);
+			}
+		} else if (arg.startsWith('--max-budget-usd=')) {
+			flag = '--max-budget-usd';
+			rawValue = arg.slice('--max-budget-usd='.length);
+		} else if (arg.startsWith('--max-tokens-total=')) {
+			flag = '--max-tokens-total';
+			rawValue = arg.slice('--max-tokens-total='.length);
+		}
+		if (flag === undefined || rawValue === undefined) continue;
+		const parsed = Number(rawValue);
+		if (!Number.isFinite(parsed) || parsed <= 0) {
+			console.error(
+				`Invalid ${flag} value: "${rawValue}". Must be a number above zero.`,
+			);
+			process.exit(1);
+		}
+		if (flag === '--max-budget-usd') {
+			cliBudget.maxBudgetUsd = parsed;
+		} else {
+			cliBudget.maxTokensTotal = Math.round(parsed);
+		}
+	}
+
 	// Extract --json or --output-format json. Accept spaced and fused formats.
 	let outputFormat: 'text' | 'json' = 'text';
 	for (let i = 0; i < args.length; i++) {
@@ -613,6 +659,18 @@ async function main(): Promise<void> {
 
 	if (isRunCommand && isReviewCommand) {
 		console.error('Cannot use both `run` and `review` in the same invocation.');
+		process.exit(1);
+	}
+
+	// --max-budget-usd / --max-tokens-total are run caps, not session settings.
+	if (
+		(cliBudget.maxBudgetUsd !== undefined ||
+			cliBudget.maxTokensTotal !== undefined) &&
+		runCommandIndex === -1
+	) {
+		console.error(
+			'--max-budget-usd and --max-tokens-total only apply to `nanocoder run`.',
+		);
 		process.exit(1);
 	}
 
@@ -827,6 +885,7 @@ async function main(): Promise<void> {
 			cliModel,
 			trustDirectory,
 			outputFormat,
+			budget: cliBudget,
 		});
 	} else {
 		// Interactive TUI — load Ink + App only now, with React's production
@@ -1043,6 +1102,7 @@ async function main(): Promise<void> {
 				cliProvider,
 				cliModel,
 				cliMode,
+				cliBudget,
 				trustDirectory,
 				altScreenActive: useAltScreen,
 				initialSession,

@@ -23,6 +23,8 @@ const VALUED_FLAGS = [
 	'--mode',
 	'--output-format',
 	'--prompt-file',
+	'--max-budget-usd',
+	'--max-tokens-total',
 ] as const;
 
 /** A flag standing alone. */

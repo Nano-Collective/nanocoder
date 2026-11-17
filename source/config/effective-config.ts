@@ -32,6 +32,7 @@ import {existsSync, readFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {
 	DEFAULT_AUTO_COMPACT_CONFIG,
+	DEFAULT_BUDGET_CONFIG,
 	DEFAULT_HEADLESS_CONFIG,
 	DEFAULT_RETRY_LIMITS,
 	DEFAULT_SESSION_CONFIG,
@@ -369,6 +370,12 @@ function blockSpecs(): BlockSpec[] {
 			effective: config.headless,
 			defaults: DEFAULT_HEADLESS_CONFIG as unknown as Record<string, unknown>,
 			env: {variable: 'NANOCODER_MAX_TURNS', leaf: 'maxTurns'},
+		},
+		{
+			path: ['nanocoder', 'budget'],
+			file: agents,
+			effective: config.budget,
+			defaults: DEFAULT_BUDGET_CONFIG as unknown as Record<string, unknown>,
 		},
 		{
 			path: ['nanocoder', 'retries'],
