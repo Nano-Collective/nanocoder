@@ -13,6 +13,17 @@ import {
 	loadPreferences,
 } from '@/config/preferences';
 import {
+	clearProfileCache,
+	getActiveProfile,
+	getActiveProfileName,
+	getCliProfile,
+	loadAvailableProfiles,
+	loadDefaultProfileName,
+	resolveActiveProfile,
+	setActiveProfile,
+	setCliProfile,
+} from '@/config/profile';
+import {
 	DEFAULT_SESSION_CONFIG,
 	normalizeSessionConfig,
 } from '@/config/session-config';
@@ -57,6 +68,17 @@ import {isTrustLevel} from '@/verify/trust-level';
 
 export {confDirMap, getClosestConfigFile} from '@/config/paths';
 export {DEFAULT_SESSION_CONFIG} from '@/config/session-config';
+export {
+	clearProfileCache,
+	getActiveProfile,
+	getActiveProfileName,
+	getCliProfile,
+	loadAvailableProfiles,
+	loadDefaultProfileName,
+	resolveActiveProfile,
+	setActiveProfile,
+	setCliProfile,
+};
 
 type ConfigFileCacheEntry = {
 	mtimeMs: number;
@@ -128,6 +150,24 @@ function loadHierarchicalConfig<T>(
 	// biome-ignore lint/suspicious/noExplicitAny: parsed JSON is dynamically shaped
 	extract: (config: any) => T | null,
 ): T | null {
+	if (fileName === 'agents.config.json') {
+		const activeProfile = getActiveProfile(cwd);
+		if (activeProfile) {
+			const synthetic = {
+				nanocoder: {
+					...activeProfile,
+					defaultMode:
+						activeProfile.mode ??
+						(activeProfile as Record<string, unknown>).defaultMode,
+				},
+			};
+			const profileResult = extract(synthetic);
+			if (profileResult !== null && profileResult !== undefined) {
+				return profileResult;
+			}
+		}
+	}
+
 	const projectResult = tryLoadConfig(
 		join(cwd, fileName), // nosemgrep
 		label,

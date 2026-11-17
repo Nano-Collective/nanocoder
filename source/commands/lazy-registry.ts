@@ -97,6 +97,11 @@ export const lazyCommands: LazyCommand[] = [
 		load: () => import('@/commands/model').then(m => m.modelCommand),
 	},
 	{
+		name: 'profile',
+		description: 'List or switch configuration profiles (/profile [name])',
+		load: () => import('@/commands/profile').then(m => m.profileCommand),
+	},
+	{
 		name: 'commands',
 		description:
 			'List custom commands. Subcommands: show <name>, create <name>',

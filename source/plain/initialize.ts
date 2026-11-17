@@ -8,6 +8,7 @@ import {
 	loadPreferences,
 	updateLastUsed,
 } from '@/config/preferences';
+import {getActiveProfile} from '@/config/profile';
 import {validateProjectConfigSecurity} from '@/config/validation';
 import {CustomCommandLoader} from '@/custom-commands/loader';
 import {resolveStartupProvider} from '@/hooks/startup-provider';
@@ -61,6 +62,7 @@ export async function initializePlain(
 	setCommandLoaderGetter(() => customCommandLoader);
 	commandRegistry.registerLazy(lazyCommands);
 
+	const activeProfile = getActiveProfile();
 	// Same rule as the TUI: a saved provider that has since been renamed or
 	// removed falls back to the first configured one instead of failing the
 	// run; an explicit --provider stays strict.
@@ -69,13 +71,14 @@ export async function initializePlain(
 		undefined,
 		preferences.lastProvider,
 		loadAllProviderConfigs().map(p => p.name),
+		activeProfile?.provider,
 	);
 	if (staleName) {
 		writeStatus(
 			`Saved provider '${staleName}' is not in agents.config.json — falling back to the first configured provider.`,
 		);
 	}
-	const preferredModel = options.cliModel;
+	const preferredModel = options.cliModel || activeProfile?.model;
 
 	let client: LLMClient;
 	let actualProvider: string;

@@ -11,7 +11,7 @@ import {
 	InfoMessage,
 	WarningMessage,
 } from '@/components/message-box';
-import {getAppConfig, reloadAppConfig} from '@/config/index';
+import {getActiveProfile, getAppConfig, reloadAppConfig} from '@/config/index';
 import {formatConfigLintIssue, lintProviderConfigs} from '@/config/lint';
 import {loadAllProviderConfigs} from '@/config/mcp-config-loader';
 import {
@@ -422,8 +422,14 @@ export function useAppInitialization({
 			const currentMode = developmentModeRef?.current || 'normal';
 			const modeConfig = config.modeProviders?.[currentMode];
 
-			// Use CLI provider/model if provided, otherwise mode-specific, otherwise preferences
-			const isProgrammatic = !(cliProvider || cliModel) && !!modeConfig;
+			const activeProfile = getActiveProfile();
+			const profileProvider = activeProfile?.provider;
+			const profileModel = activeProfile?.model;
+
+			// Use CLI provider/model if provided, otherwise profile, otherwise mode-specific, otherwise preferences
+			const isProgrammatic =
+				!(cliProvider || cliModel) &&
+				!!(profileProvider || profileModel || modeConfig);
 			// A saved/mode provider can go stale (renamed or removed from
 			// agents.config.json). Passing it through would make createLLMClient
 			// throw and strand the app on an error screen with no client. Fall
@@ -436,6 +442,7 @@ export function useAppInitialization({
 				modeConfig?.provider,
 				preferences.lastProvider,
 				configuredNames,
+				profileProvider,
 			);
 			if (staleName) {
 				addToChatQueue(
@@ -446,7 +453,7 @@ export function useAppInitialization({
 					/>,
 				);
 			}
-			const model = cliModel || modeConfig?.model || undefined;
+			const model = cliModel || profileModel || modeConfig?.model || undefined;
 			const client = await initializeClient(
 				provider,
 				model,

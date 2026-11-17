@@ -290,6 +290,7 @@ Commands:
 Options:
   -v, --version       Show version number
   -h, --help          Show help
+  --profile           Use a named configuration profile from agents.config.json
   --vscode            Start the legacy VS Code companion (deprecated)
   --vscode-port       Specify VS Code port
   --provider          Specify AI provider (must be configured in agents.config.json).
@@ -416,6 +417,27 @@ async function main(): Promise<void> {
 		}
 	}
 
+	// Extract --profile if specified
+	let cliProfile: string | undefined;
+	const profileArgIndex = args.findIndex(
+		arg => arg === '--profile' || arg.startsWith('--profile='),
+	);
+	const profileValue =
+		profileArgIndex === -1
+			? undefined
+			: args[profileArgIndex].startsWith('--profile=')
+				? args[profileArgIndex].slice('--profile='.length)
+				: args[profileArgIndex + 1];
+	if (profileArgIndex !== -1) {
+		if (!profileValue || profileValue.startsWith('-')) {
+			console.error('--profile requires a profile name.');
+			process.exit(1);
+		}
+		cliProfile = profileValue.trim();
+		const {setCliProfile} = await import('@/config/profile');
+		setCliProfile(cliProfile);
+	}
+
 	// Extract --provider if specified — validate against allowlist pattern
 	let cliProvider: string | undefined;
 	const providerArgIndex = args.findIndex(
@@ -523,6 +545,22 @@ async function main(): Promise<void> {
 			process.exit(1);
 		}
 		break;
+	}
+
+	// Resolve and validate active profile (fail fast on unknown profile)
+	let profileMode: CliMode | undefined;
+	const {resolveActiveProfile} = await import('@/config/profile');
+	try {
+		const active = resolveActiveProfile();
+		if (
+			active?.profile.mode &&
+			(VALID_MODES as readonly string[]).includes(active.profile.mode)
+		) {
+			profileMode = active.profile.mode as CliMode;
+		}
+	} catch (error) {
+		console.error((error as Error).message);
+		process.exit(1);
 	}
 
 	// Extract --json or --output-format json. Accept spaced and fused formats.
@@ -861,7 +899,7 @@ async function main(): Promise<void> {
 			cliModel,
 			appVersion: version,
 			trustDirectory: trustDirectoryRequested,
-			mode: cliMode,
+			mode: cliMode ?? profileMode,
 		});
 	} else if (plainMode && nonInteractivePrompt) {
 		// Headless, Ink-free path. Note: --plain is currently only valid with
@@ -870,7 +908,7 @@ async function main(): Promise<void> {
 		const {runPlainShell} = await import('@/plain/shell');
 		await runPlainShell({
 			prompt: nonInteractivePrompt,
-			developmentMode: cliMode ?? 'auto-accept',
+			developmentMode: cliMode ?? profileMode ?? 'auto-accept',
 			cliProvider,
 			cliModel,
 			trustDirectory,
@@ -1090,7 +1128,7 @@ async function main(): Promise<void> {
 				nonInteractiveMode,
 				cliProvider,
 				cliModel,
-				cliMode,
+				cliMode: cliMode ?? profileMode,
 				trustDirectory,
 				altScreenActive: useAltScreen,
 				initialSession,

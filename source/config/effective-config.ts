@@ -42,6 +42,12 @@ import {
 import {loadAllMCPConfigs} from '@/config/mcp-config-loader';
 import {getConfigPath} from '@/config/paths';
 import {loadPreferences} from '@/config/preferences';
+import {
+	getActiveProfileName,
+	loadAvailableProfiles,
+	loadDefaultProfileName,
+	resolveActiveProfile,
+} from '@/config/profile';
 import {FIREWALL_DEFAULTS, resolveFirewallConfig} from '@/types/firewall';
 import {isObject} from '@/utils/type-helpers';
 
@@ -50,13 +56,19 @@ import {isObject} from '@/utils/type-helpers';
  * constant, `global` the user-level config directory, `project` the working
  * directory, `env` a `NANOCODER_*` environment variable.
  */
-export type ConfigLayerId = 'default' | 'global' | 'project' | 'env';
+export type ConfigLayerId =
+	| 'default'
+	| 'global'
+	| 'project'
+	| 'profile'
+	| 'env';
 
 /** Ascending precedence. Index into this to compare two layers. */
 const LAYER_PRECEDENCE: readonly ConfigLayerId[] = [
 	'default',
 	'global',
 	'project',
+	'profile',
 	'env',
 ];
 
@@ -116,6 +128,7 @@ export interface ConfigLayerInfo {
 export interface EffectiveConfig {
 	cwd: string;
 	configDir: string;
+	activeProfile?: string;
 	layers: ConfigLayerInfo[];
 	entries: EffectiveConfigEntry[];
 }
@@ -262,10 +275,30 @@ function readRawLayers(cwd: string, configDir: string): RawLayer[] {
 		'agents.config.json',
 		'nanocoder-preferences.json',
 	];
-	return files.flatMap(file => [
+	const layers = files.flatMap(file => [
 		readRawFile('global', file, join(configDir, file)),
 		readRawFile('project', file, join(cwd, file)),
 	]);
+
+	try {
+		const active = resolveActiveProfile(cwd);
+		if (active) {
+			const profileOrigin = active.originFile
+				? `${active.originFile} (profile ${active.name})`
+				: `profile: ${active.name}`;
+			layers.push({
+				layer: 'profile',
+				file: 'agents.config.json',
+				path: profileOrigin,
+				exists: true,
+				data: {nanocoder: active.profile},
+			});
+		}
+	} catch {
+		// Ignore if active profile resolution throws in raw reading
+	}
+
+	return layers;
 }
 
 /**
@@ -342,7 +375,7 @@ interface BlockSpec {
 	depth?: number;
 }
 
-function blockSpecs(): BlockSpec[] {
+function blockSpecs(cwd?: string): BlockSpec[] {
 	const config = getAppConfig();
 	const agents: ConfigFileName = 'agents.config.json';
 	const preferences: ConfigFileName = 'nanocoder-preferences.json';
@@ -460,6 +493,18 @@ function blockSpecs(): BlockSpec[] {
 			path: ['nanocoder', 'autoCommit'],
 			file: agents,
 			effective: config.autoCommit,
+			leaf: true,
+		},
+		{
+			path: ['nanocoder', 'defaultProfile'],
+			file: agents,
+			effective: loadDefaultProfileName(cwd),
+			leaf: true,
+		},
+		{
+			path: ['nanocoder', 'profiles'],
+			file: agents,
+			effective: loadAvailableProfiles(cwd),
 			leaf: true,
 		},
 	];
@@ -880,7 +925,7 @@ export function resolveEffectiveConfig(options?: {
 	const rawLayers = readRawLayers(cwd, configDir);
 
 	const entries: EffectiveConfigEntry[] = [
-		...blockSpecs().flatMap(spec => resolveBlockEntries(spec, rawLayers)),
+		...blockSpecs(cwd).flatMap(spec => resolveBlockEntries(spec, rawLayers)),
 		...resolvePreferencesEntries(rawLayers),
 		...resolveProviderEntries(rawLayers),
 		...resolveMcpEntries(cwd, configDir),
@@ -910,7 +955,14 @@ export function resolveEffectiveConfig(options?: {
 			})),
 	];
 
-	return {cwd, configDir, layers, entries};
+	let activeProfile: string | undefined;
+	try {
+		activeProfile = getActiveProfileName(cwd);
+	} catch {
+		// Ignore
+	}
+
+	return {cwd, configDir, activeProfile, layers, entries};
 }
 
 /**

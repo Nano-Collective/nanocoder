@@ -46,6 +46,7 @@ const CATEGORY_COMMANDS: Record<HelpCategory, readonly string[]> = {
 		'init',
 		'login',
 		'model',
+		'profile',
 		'setup-config',
 		'settings',
 		'tune',
@@ -202,6 +203,10 @@ const COMMAND_HELP_OVERRIDES: Record<string, CommandHelpOverrides> = {
 		usage: '/model [browse]',
 		options: ['browse'],
 		examples: ['/model', '/model browse'],
+	},
+	profile: {
+		usage: '/profile [name]',
+		examples: ['/profile', '/profile fast', '/profile review'],
 	},
 	memory: {
 		usage:
