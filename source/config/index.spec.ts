@@ -11,6 +11,7 @@ import {
 	loadDefaultMode,
 	reloadAppConfig,
 } from './index';
+import {setMessageQueueSink} from '@/utils/message-queue-core';
 import {resolveTune} from './tune';
 import {updateConfigNestedValue} from './config-writer';
 
@@ -2088,6 +2089,184 @@ test.serial(
 			} else {
 				delete process.env.NANOCODER_CONFIG_DIR;
 			}
+		}
+	},
+);
+
+test.serial(
+	'invalid project agents.config.json reports a single parse error and falls back to global config',
+	t => {
+		const dir = mkdtempSync(join(tmpdir(), 'nanocoder-broken-config-'));
+		const projectDir = join(dir, 'project');
+		const globalDir = join(dir, 'global');
+		mkdirSync(projectDir, {recursive: true});
+		mkdirSync(globalDir, {recursive: true});
+
+		const projectConfigFile = join(projectDir, 'agents.config.json');
+		const globalConfigFile = join(globalDir, 'agents.config.json');
+
+		// Invalid JSON with trailing comma in project file
+		writeFileSync(
+			projectConfigFile,
+			'{"nanocoder": {"providers": [{"name":"a","models":["m"],"baseUrl":"http://x"},]}}',
+			'utf-8',
+		);
+
+		// Valid global config with provider global-one
+		writeFileSync(
+			globalConfigFile,
+			JSON.stringify({
+				nanocoder: {
+					providers: [
+						{
+							name: 'global-one',
+							models: ['m-global'],
+							baseUrl: 'http://global',
+						},
+					],
+				},
+			}),
+			'utf-8',
+		);
+
+		const capturedMessages: Array<{type: string; message: string}> = [];
+		setMessageQueueSink((type, message) => {
+			capturedMessages.push({type, message});
+		});
+
+		const originalCwd = process.cwd();
+		const originalConfigDir = process.env.NANOCODER_CONFIG_DIR;
+		const originalNodeEnv = process.env.NODE_ENV;
+
+		try {
+			process.chdir(projectDir);
+			process.env.NANOCODER_CONFIG_DIR = globalDir;
+			process.env.NODE_ENV = 'development';
+
+			clearAppConfig();
+			reloadAppConfig();
+			const config = getAppConfig();
+
+			// Count error messages
+			const errors = capturedMessages.filter(m => m.type === 'error');
+			t.is(
+				errors.length,
+				1,
+				`Expected exactly 1 error message for broken project config, got: ${JSON.stringify(errors.map(e => e.message))}`,
+			);
+			t.true(
+				errors[0]!.message.includes(projectConfigFile),
+				'Error message should name the file',
+			);
+			t.regex(
+				errors[0]!.message,
+				/SyntaxError/i,
+				'Error message should contain JSON syntax error',
+			);
+			t.true(
+				errors[0]!.message.includes('project config skipped'),
+				'Error message should say project config skipped',
+			);
+
+			// Verify fallback to global provider
+			t.is(config.providers.length, 1);
+			t.is(config.providers[0]?.name, 'global-one');
+		} finally {
+			setMessageQueueSink(null);
+			process.chdir(originalCwd);
+
+			if (originalConfigDir === undefined) {
+				delete process.env.NANOCODER_CONFIG_DIR;
+			} else {
+				process.env.NANOCODER_CONFIG_DIR = originalConfigDir;
+			}
+
+			if (originalNodeEnv === undefined) {
+				delete process.env.NODE_ENV;
+			} else {
+				process.env.NODE_ENV = originalNodeEnv;
+			}
+
+			clearAppConfig();
+			rmSync(dir, {recursive: true, force: true});
+		}
+	},
+);
+
+test.serial(
+	'invalid global agents.config.json reports a single parse error',
+	t => {
+		const dir = mkdtempSync(join(tmpdir(), 'nanocoder-broken-global-'));
+		const projectDir = join(dir, 'project');
+		const globalDir = join(dir, 'global');
+		mkdirSync(projectDir, {recursive: true});
+		mkdirSync(globalDir, {recursive: true});
+
+		const globalConfigFile = join(globalDir, 'agents.config.json');
+
+		// Invalid JSON with trailing comma in global file
+		writeFileSync(
+			globalConfigFile,
+			'{"nanocoder": {"providers": [{"name":"a","models":["m"],"baseUrl":"http://x"},]}}',
+			'utf-8',
+		);
+
+		const capturedMessages: Array<{type: string; message: string}> = [];
+		setMessageQueueSink((type, message) => {
+			capturedMessages.push({type, message});
+		});
+
+		const originalCwd = process.cwd();
+		const originalConfigDir = process.env.NANOCODER_CONFIG_DIR;
+		const originalNodeEnv = process.env.NODE_ENV;
+
+		try {
+			process.chdir(projectDir);
+			process.env.NANOCODER_CONFIG_DIR = globalDir;
+			process.env.NODE_ENV = 'development';
+
+			clearAppConfig();
+			reloadAppConfig();
+			getAppConfig();
+
+			// Count error messages
+			const errors = capturedMessages.filter(m => m.type === 'error');
+			t.is(
+				errors.length,
+				1,
+				`Expected exactly 1 error message for broken global config, got: ${JSON.stringify(errors.map(e => e.message))}`,
+			);
+			t.true(
+				errors[0]!.message.includes(globalConfigFile),
+				'Error message should name the file',
+			);
+			t.regex(
+				errors[0]!.message,
+				/SyntaxError/i,
+				'Error message should contain JSON syntax error',
+			);
+			t.true(
+				errors[0]!.message.includes('global config skipped'),
+				'Error message should say global config skipped',
+			);
+		} finally {
+			setMessageQueueSink(null);
+			process.chdir(originalCwd);
+
+			if (originalConfigDir === undefined) {
+				delete process.env.NANOCODER_CONFIG_DIR;
+			} else {
+				process.env.NANOCODER_CONFIG_DIR = originalConfigDir;
+			}
+
+			if (originalNodeEnv === undefined) {
+				delete process.env.NODE_ENV;
+			} else {
+				process.env.NODE_ENV = originalNodeEnv;
+			}
+
+			clearAppConfig();
+			rmSync(dir, {recursive: true, force: true});
 		}
 	},
 );
