@@ -24,7 +24,7 @@ import TextInput, {
 	useRawInput,
 } from '@/components/text-input';
 import {useInputState} from '@/hooks/useInputState';
-import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
+import {useResponsiveTerminal, useTerminalRows} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {useUIStateContext} from '@/hooks/useUIState';
 import type {
@@ -164,6 +164,12 @@ export default function UserInput({
 	// ChatInput's wrapper). Centred adds the ~2-column inset a box narrower
 	// than its container gets from being centred rather than flush left.
 	const indicatorIndent = (centered ? 3 : 1) + (fullscreen ? 1 : 0);
+	// Caps a huge draft's visual height so its border and the mode line below
+	// it can't scroll off a short terminal. 6 rows of overhead: the box's own
+	// top/bottom border, the marginTop above it, and the mode-line status row
+	// below, plus the app frame's top/bottom padding.
+	const terminalRows = useTerminalRows();
+	const maxComposerLines = Math.max(1, Math.min(10, terminalRows - 6));
 	const [textInputKey, setTextInputKey] = useState(0);
 	// Imperative handle into TextInput so the terminal paste path can read the
 	// caret position before the splice and put it back after. Without this the
@@ -788,6 +794,7 @@ export default function UserInput({
 								wrapWidth={inputWrapWidth}
 								handleEnter={false}
 								onPaste={handleTerminalPaste}
+								maxVisibleLines={maxComposerLines}
 							/>
 						</Box>
 					)}
