@@ -8,6 +8,7 @@ import {diffEditTool} from '@/tools/file-ops/diff-edit';
 import {stringReplaceTool} from '@/tools/file-ops/string-replace';
 import {writeFileTool} from '@/tools/file-ops/write-file';
 import {findFilesTool} from '@/tools/find-files';
+import {getPlanTool} from '@/tools/get-plan';
 import {getGitTools} from '@/tools/git';
 import {listDirectoryTool} from '@/tools/list-directory';
 import {formatDocumentTool} from '@/tools/lsp-format-document';
@@ -16,6 +17,7 @@ import {readFileTool} from '@/tools/read-file';
 import {searchFileContentsTool} from '@/tools/search-file-contents';
 import {checkSkillTool} from '@/tools/skill-check';
 import {writeTasksTool} from '@/tools/tasks';
+import {updatePlanNodeTool} from '@/tools/update-plan-node';
 import {webSearchTool} from '@/tools/web-search';
 import {writePlanTool} from '@/tools/write-plan';
 import {writeWalkthroughTool} from '@/tools/write-walkthrough';
@@ -45,19 +47,21 @@ const staticTools: NanocoderToolExport[] = [
 	writeTasksTool,
 	// Plan mode artifact tool
 	writePlanTool,
+	// Persistent plan graph tools
+	getPlanTool,
+	updatePlanNodeTool,
 	// Completion artifact tool
 	writeWalkthroughTool,
 	// Skill authoring linter
 	checkSkillTool,
 ];
 
-// Conditionally available tools (based on system capabilities)
-// Git tools are only registered if git is installed
-// PR tool additionally requires gh CLI
-const conditionalTools: NanocoderToolExport[] = [...getGitTools()];
-
-// All built-in tool exports — the single source of truth for static tools
-export const allToolExports: NanocoderToolExport[] = [
-	...staticTools,
-	...conditionalTools,
-];
+// Conditionally available tools (based on system capabilities).
+// Git tools are only registered if git is installed; the PR tool
+// additionally requires gh CLI. Built lazily — evaluating this at import
+// time spawned git/gh and blocked the first frame (#1819); the underlying
+// availability checks are now spawn-free, and callers invoke this when the
+// registry is actually constructed.
+export function getAllToolExports(): NanocoderToolExport[] {
+	return [...staticTools, ...getGitTools()];
+}

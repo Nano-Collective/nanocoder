@@ -3,9 +3,9 @@ import {memo} from 'react';
 import {useNonInteractiveRender} from '@/hooks/useNonInteractiveRender';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
+import {wrapWithTrimmedContinuations} from '@/terminal/text-wrapping';
 import type {UserMessageProps} from '@/types/index';
-import {wrapWithTrimmedContinuations} from '@/utils/text-wrapping';
-import {calculateTokens} from '@/utils/token-calculator';
+import {estimateTokens} from '@/utils/token-calculator';
 
 // Strip VS Code context blocks from display (code is still sent to LLM)
 function stripVSCodeContext(message: string): string {
@@ -67,7 +67,7 @@ export default memo(function UserMessage({
 	const {colors} = useTheme();
 	const boxWidth = useTerminalWidth();
 	const nonInteractive = useNonInteractiveRender();
-	const tokens = calculateTokens(tokenContent ?? message);
+	const tokens = estimateTokens(tokenContent ?? message);
 
 	// Non-interactive (`run`) mode: the user already knows what prompt they
 	// submitted — echoing it back as a boxed "You:" block is pure noise.

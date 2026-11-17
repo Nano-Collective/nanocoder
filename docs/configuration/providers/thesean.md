@@ -16,7 +16,7 @@ sidebar_order: 25
 	"sdkProvider": "anthropic",
 	"baseUrl": "https://api.thesean.ai",
 	"apiKey": "your-thesean-api-key",
-	"models": ["ship-like/claude-opus-4-8", "ship-like/claude-sonnet-5"]
+	"models": ["ship-like/claude-opus-5-5", "ship-like/claude-sonnet-5-5"]
 }
 ```
 
@@ -33,12 +33,12 @@ If long replies stop mid-sentence, set `maxOutputTokens` on the provider entry. 
 
 Use the exact model IDs below in the `model` field:
 
-- `ship-like/claude-opus-4-8` — Maximum capability Claude model
-- `ship-like/claude-sonnet-5` — Balanced performance and speed
-- `ship-like/claude-haiku-4-5` — Fastest, lowest cost
-- `ship-like/gpt-5.6-sol` — GPT model via OpenAI Responses API
+- `ship-like/claude-opus-5-5` — Maximum capability Claude model
+- `ship-like/claude-sonnet-5-5` — Balanced performance and speed
+- `ship-like/claude-haiku-5-5` — Fastest, lowest cost
+- `ship-like/gpt-6.1-sol` — GPT model via OpenAI Responses API
 
-> **Note**: The `gpt-5.6-sol` model uses the OpenAI Responses API, not the Anthropic API. If you configure it with `sdkProvider: "anthropic"`, tool calling and responses may not work as expected. Use the Claude models for full Nanocoder compatibility or update your configuration in agents.config.json.
+> **Note**: The `gpt-6.1-sol` model uses the OpenAI Responses API, not the Anthropic API. If you configure it with `sdkProvider: "anthropic"`, tool calling and responses may not work as expected. Use the Claude models for full Nanocoder compatibility or update your configuration in agents.config.json.
 
 ## Pricing
 

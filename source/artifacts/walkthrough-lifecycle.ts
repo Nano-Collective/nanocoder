@@ -1,4 +1,8 @@
 import {isAutoDiagnosticsMessage} from '@/hooks/chat-handler/conversation/auto-diagnostics';
+import {
+	type CompletionLedger,
+	createCompletionLedger,
+} from '@/services/completion-ledger';
 import type {Message, ToolCall} from '@/types/core';
 import {isApprovedPlanMessage} from './approved-plan';
 
@@ -8,6 +12,8 @@ export interface WalkthroughLifecycle {
 	required: boolean;
 	written: boolean;
 	fallbackAttempted: boolean;
+	/** Verification evidence for this turn (see `nanocoder.verify`). */
+	ledger: CompletionLedger;
 }
 
 /**
@@ -44,6 +50,7 @@ export function createWalkthroughLifecycle(
 			: false,
 		written: false,
 		fallbackAttempted: false,
+		ledger: createCompletionLedger(),
 	};
 }
 

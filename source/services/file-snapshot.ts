@@ -5,20 +5,21 @@ import * as path from 'path';
 import {MAX_CHECKPOINT_FILES} from '@/constants';
 import type {CaptureResult} from '@/types/checkpoint';
 import {formatError} from '@/utils/error-formatter';
-import {loadGitignore} from '@/utils/gitignore-loader';
+import {loadGitignore} from '@/utils/fs/gitignore-loader';
 import {getLogger} from '@/utils/logging';
-import {logWarning} from '@/utils/message-queue';
+import {notifyWarning} from '@/utils/message-queue-core';
 
 /**
  * Nanocoder's own runtime state under `.nanocoder/`. Unless a repo gitignores
  * it, git reports all of it as untracked, so every checkpoint snapshotted the
  * earlier checkpoints (0, 2, 6, 14, 30 files...) until the file cap crowded
  * out the user's real changes, and restoring one wrote stale checkpoint and
- * timeline data back over the live store. User content under `.nanocoder/`
- * (commands, agents, tools, skills) is still captured.
+ * timeline data back over the live store. Plan graphs are runtime state too, so
+ * a checkpoint must not resurrect an old graph over the live one. User content
+ * under `.nanocoder/` (commands, agents, tools, skills) is still captured.
  */
 const NANOCODER_STATE_PATH =
-	/^\.nanocoder\/(?:checkpoints\/|timeline\/|timeline\.|daemon\.)/;
+	/^\.nanocoder\/(?:checkpoints\/|timeline\/|timeline\.|plans\/|daemon\.)/;
 
 function isNanocoderStatePath(file: string): boolean {
 	return NANOCODER_STATE_PATH.test(file.replace(/\\/g, '/'));
@@ -93,9 +94,13 @@ export class FileSnapshotService {
 					path: normalizedPath,
 					reason: 'Outside the workspace',
 				});
-				logWarning('Refusing to capture a file outside the workspace', true, {
-					context: {filePath},
-				});
+				notifyWarning(
+					'Refusing to capture a file outside the workspace',
+					true,
+					{
+						context: {filePath},
+					},
+				);
 				continue;
 			}
 
@@ -120,7 +125,7 @@ export class FileSnapshotService {
 						path: normalizedPath,
 						reason,
 					});
-					logWarning('Could not capture file', true, {
+					notifyWarning('Could not capture file', true, {
 						context: {
 							filePath,
 							error: reason,
@@ -281,7 +286,7 @@ export class FileSnapshotService {
 			);
 
 			if (filtered.length > MAX_CHECKPOINT_FILES) {
-				logWarning(
+				notifyWarning(
 					'Too many modified files detected, limiting to maximum',
 					true,
 					{
@@ -306,7 +311,7 @@ export class FileSnapshotService {
 				available: true,
 			};
 		} catch {
-			logWarning('Git not available for file tracking', true, {
+			notifyWarning('Git not available for file tracking', true, {
 				context: {
 					workspaceRoot: this.workspaceRoot,
 				},

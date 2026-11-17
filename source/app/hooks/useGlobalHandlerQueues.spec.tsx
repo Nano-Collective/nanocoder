@@ -4,12 +4,12 @@ import React from 'react';
 import {
 	type PendingQuestion,
 	signalQuestion,
-} from '@/utils/question-queue';
+} from '@/tools/runtime/question-queue';
 import {
 	type PendingToolApproval,
 	signalToolApproval,
-} from '@/utils/tool-approval-queue';
-import {signalToolConfirm} from '@/utils/tool-confirm-queue';
+} from '@/tools/runtime/tool-approval-queue';
+import {signalToolConfirm} from '@/tools/runtime/tool-confirm-queue';
 import {useGlobalHandlerQueues} from './useGlobalHandlerQueues';
 
 console.log('\nuseGlobalHandlerQueues.spec.tsx');

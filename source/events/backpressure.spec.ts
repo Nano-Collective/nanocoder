@@ -127,3 +127,13 @@ test.serial('dispose cancels pending debounce timers', async t => {
 
 	t.is(inner.calls.length, 0);
 });
+
+test.serial('dispose rejects new cron and file events', async t => {
+	const inner = recording();
+	const bp = new BackpressureDispatcher(inner, {debounceMs: DEBOUNCE});
+	bp.dispose();
+	await bp.dispatch(cronSub('cron'), cronEvent('* * * * *'));
+	await bp.dispatch(fileSub('file'), fileEvent('a.md'));
+	await new Promise(resolve => setTimeout(resolve, DEBOUNCE + 20));
+	t.is(inner.calls.length, 0);
+});

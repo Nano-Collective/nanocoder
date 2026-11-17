@@ -175,7 +175,8 @@ function SetupConfigResult({
 
 export const setupConfigCommand: Command = {
 	name: 'setup-config',
-	description: 'Open a configuration file in your editor',
+	description:
+		'Open a config file (agents.config.json, .mcp.json, preferences) in $EDITOR',
 	handler: async (args: string[]) => {
 		const options = getConfigOptions();
 

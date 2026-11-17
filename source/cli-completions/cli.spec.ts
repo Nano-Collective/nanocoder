@@ -5,6 +5,8 @@ import {
 	renderFishCompletion,
 	renderZshCompletion,
 } from './render';
+import {COMMANDS} from '../cli-args';
+import {KNOWN_RUN_FLAGS} from '../run-prompt-args';
 import {COMPLETION_FLAGS, COMPLETION_SHELLS, COMPLETION_SUBCOMMANDS} from './spec';
 
 console.log(`\ncli.spec.ts`);
@@ -152,4 +154,46 @@ test.serial('scripts are rendered standalone for direct use', t => {
 	t.true(renderBashCompletion().endsWith('complete -F _nanocoder nanocoder\n'));
 	t.true(renderZshCompletion().startsWith('#compdef nanocoder'));
 	t.true(renderFishCompletion().includes('complete -c nanocoder -f\n'));
+});
+
+test('every top-level command and run flag is in the completion spec', t => {
+	// Drift guard: verify, review, skills, --mouse/--no-mouse and
+	// --prompt-file were all accepted by the CLI but never tab-completed.
+	const subcommands = new Set(COMPLETION_SUBCOMMANDS.map(s => s.name));
+	for (const command of COMMANDS) {
+		t.true(subcommands.has(command), `missing subcommand ${command}`);
+	}
+	const flags = new Set(COMPLETION_FLAGS.map(f => `--${f.name}`));
+	for (const flag of KNOWN_RUN_FLAGS) {
+		t.true(flags.has(flag), `missing flag ${flag}`);
+	}
+});
+
+test.serial('subcommand flags are offered after their subcommand only', t => {
+	for (const shell of COMPLETION_SHELLS) {
+		const script = scriptFor(shell);
+		for (const subcommand of COMPLETION_SUBCOMMANDS) {
+			for (const flag of subcommand.flags ?? []) {
+				t.true(
+					longFlagPattern(shell, flag.name).test(script),
+					`${shell}: missing --${flag.name} for ${subcommand.name}`,
+				);
+			}
+		}
+	}
+
+	// The global list is what `nanocoder --<TAB>` offers, and the CLI rejects
+	// these two at the top level.
+	const globalFlags = (/local flags="([^"]*)"/.exec(scriptFor('bash'))?.[1] ?? '')
+		.split(' ');
+	t.false(globalFlags.includes('--status'));
+	t.false(globalFlags.includes('--grant'));
+	t.true(globalFlags.includes('--json'));
+
+	t.regex(scriptFor('bash'), /trust\)\s+flags="--status --grant --json"/);
+	t.regex(scriptFor('zsh'), /trust\)\s+_arguments [^\n]*--status[^\n]*--grant/);
+	t.regex(
+		scriptFor('fish'),
+		/__fish_seen_subcommand_from trust' -l grant -r/,
+	);
 });

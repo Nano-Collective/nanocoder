@@ -8,15 +8,16 @@
 
 import {Box, Text} from 'ink';
 import React from 'react';
+import {createToolFile} from '@/commands/create-scaffold';
+import {infoMsg} from '@/components/message-factory';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {getToolManager} from '@/message-handler';
-import {generateKey} from '@/session/key-generator';
 import {findSkill} from '@/skills/skill-registry';
 import type {ToolManager} from '@/tools/tool-manager';
-import type {Command} from '@/types/index';
-import {infoMsg} from '@/utils/message-factory';
+import type {Command, StatefulCommand} from '@/types/index';
+import {generateKey} from '@/utils/key-generator';
 
 export interface GroupedTools {
 	builtin: string[];
@@ -147,14 +148,14 @@ function ToolsView({toolManager}: {toolManager: ToolManager | null}) {
 	);
 }
 
-export const toolsCommand: Command = {
+/** The read-only part of /tools: every subcommand that only shows something. */
+const toolsView: Command = {
 	name: 'tools',
 	description:
 		'List available tools (built-in, MCP, custom). Subcommand: create <name>',
 	handler: (args, _messages, _metadata) => {
-		// `create` is intercepted earlier in app-util.ts and dispatched to
-		// handleToolCreate, but if a user reaches here with `create` and no
-		// name (e.g. from a non-app context), show usage rather than a list.
+		// `/tools create` runs in `toolsCommand.run`; a caller that uses this
+		// view directly with `create` gets the usage rather than a list.
 		if (args[0] === 'create') {
 			return Promise.resolve(
 				infoMsg(
@@ -171,5 +172,27 @@ export const toolsCommand: Command = {
 				toolManager,
 			}),
 		);
+	},
+};
+
+/**
+ * /tools. `create` write files and may start a design
+ * conversation, so they run with app state; everything else is `toolsView`.
+ */
+export const toolsCommand: StatefulCommand = {
+	name: toolsView.name,
+	description: toolsView.description,
+	run: async context => {
+		const [sub, name] = context.rawArgs;
+		if (sub === 'create') {
+			return createToolFile(name, context);
+		}
+		return {
+			show: await toolsView.handler(
+				context.rawArgs,
+				context.messages,
+				context.handlerMetadata(),
+			),
+		};
 	},
 };

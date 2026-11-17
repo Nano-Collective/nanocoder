@@ -267,3 +267,38 @@ echo`,
 	const meta = parseCustomToolFile(path).metadata;
 	t.deepEqual(meta.env, {FOO: 'bar', BAZ: 'qux'});
 });
+
+test('rejects a body that puts a placeholder inside quotes', t => {
+	const path = writeTool(
+		'quoted.md',
+		`---
+name: search
+description: Search.
+shell: bash
+parameters:
+  q:
+    type: string
+---
+grep -r "{{ q }}" .`,
+	);
+	const error = t.throws(() => parseCustomToolFile(path), {
+		instanceOf: CustomToolParseError,
+	});
+	t.regex(error?.message ?? '', /\{\{ q \}\} is inside a "\.\.\." string/);
+});
+
+test('accepts the same body with a bare placeholder', t => {
+	const path = writeTool(
+		'bare.md',
+		`---
+name: search
+description: Search.
+shell: bash
+parameters:
+  q:
+    type: string
+---
+grep -r {{ q }} .`,
+	);
+	t.is(parseCustomToolFile(path).metadata.name, 'search');
+});

@@ -14,12 +14,14 @@
 
 import {validateCron} from '@/schedule/cron';
 import type {
+	CiJobFailedTrigger,
+	FileAiCommentTrigger,
 	FileChangedTrigger,
 	FileChangeEventKind,
 	ScheduleCronTrigger,
 	SkillTrigger,
 } from '@/types/skills';
-import {logError} from '@/utils/message-queue';
+import {notifyError} from '@/utils/message-queue-core';
 
 const FILE_EVENT_KINDS: ReadonlySet<FileChangeEventKind> = new Set([
 	'add',
@@ -65,7 +67,7 @@ export function parseSubscribeBlockOrWarn(
 		return parseSubscribeBlock(raw);
 	} catch (err) {
 		if (err instanceof SubscribeParseError) {
-			logError(
+			notifyError(
 				`Invalid subscribe block in ${filePath}: ${err.message}. Loaded without triggers.`,
 			);
 			return undefined;
@@ -91,11 +93,17 @@ function parseTrigger(raw: unknown, index: number): SkillTrigger {
 	if (kind === 'file.changed') {
 		return {...base, ...parseFileChanged(obj, index)};
 	}
+	if (kind === 'file.ai-comment') {
+		return {...base, ...parseFileAiComment(obj, index)};
+	}
 	if (kind === 'schedule.cron') {
 		return {...base, ...parseScheduleCron(obj, index)};
 	}
+	if (kind === 'ci.job.failed') {
+		return {...base, ...parseCiJobFailed(obj, index)};
+	}
 	throw new SubscribeParseError(
-		`subscribe[${index}].kind "${kind}" is not a supported event kind (expected: file.changed, schedule.cron)`,
+		`subscribe[${index}].kind "${kind}" is not a supported event kind (expected: file.changed, file.ai-comment, schedule.cron, ci.job.failed)`,
 	);
 }
 
@@ -163,6 +171,27 @@ function parseFileChanged(
 	return trigger;
 }
 
+function parseFileAiComment(
+	obj: Record<string, unknown>,
+	index: number,
+): FileAiCommentTrigger {
+	const trigger: FileAiCommentTrigger = {kind: 'file.ai-comment'};
+
+	if (obj.paths !== undefined) {
+		if (
+			!Array.isArray(obj.paths) ||
+			!obj.paths.every((p): p is string => typeof p === 'string')
+		) {
+			throw new SubscribeParseError(
+				`subscribe[${index}].paths must be an array of glob strings`,
+			);
+		}
+		trigger.paths = obj.paths;
+	}
+
+	return trigger;
+}
+
 function parseScheduleCron(
 	obj: Record<string, unknown>,
 	index: number,
@@ -180,4 +209,25 @@ function parseScheduleCron(
 		);
 	}
 	return {kind: 'schedule.cron', cron};
+}
+
+function parseCiJobFailed(
+	obj: Record<string, unknown>,
+	index: number,
+): CiJobFailedTrigger {
+	const trigger: CiJobFailedTrigger = {kind: 'ci.job.failed'};
+
+	if (obj.branches !== undefined) {
+		if (
+			!Array.isArray(obj.branches) ||
+			!obj.branches.every((b): b is string => typeof b === 'string')
+		) {
+			throw new SubscribeParseError(
+				`subscribe[${index}].branches must be an array of glob strings`,
+			);
+		}
+		trigger.branches = obj.branches;
+	}
+
+	return trigger;
 }

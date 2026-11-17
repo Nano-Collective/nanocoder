@@ -1,7 +1,7 @@
 import test from 'ava';
 import React from 'react';
 import {renderWithTheme} from '@/test-utils/render-with-theme';
-import {commandsCommand} from './custom-commands';
+import {commandsCommand, commandsView} from './custom-commands';
 
 void React; // JSX runtime requires React in scope
 
@@ -10,7 +10,7 @@ void React; // JSX runtime requires React in scope
 // ============================================================================
 
 test('commandsCommand has correct name', t => {
-	t.is(commandsCommand.name, 'custom-commands');
+	t.is(commandsCommand.name, 'commands');
 });
 
 test('commandsCommand has a description', t => {
@@ -22,8 +22,8 @@ test('commandsCommand description mentions create subcommand', t => {
 	t.regex(commandsCommand.description, /create/);
 });
 
-test('commandsCommand has a handler function', t => {
-	t.is(typeof commandsCommand.handler, 'function');
+test('commandsCommand has a run function', t => {
+	t.is(typeof commandsCommand.run, 'function');
 });
 
 // ============================================================================
@@ -31,7 +31,7 @@ test('commandsCommand has a handler function', t => {
 // ============================================================================
 
 test.serial('commands list returns a renderable element', async t => {
-	const result = await commandsCommand.handler([]);
+	const result = await commandsView.handler([]);
 	t.truthy(result);
 	t.true(React.isValidElement(result));
 	if (React.isValidElement(result)) {
@@ -47,7 +47,7 @@ test.serial('commands list returns a renderable element', async t => {
 // ============================================================================
 
 test('commands show with no name shows usage', async t => {
-	const result = await commandsCommand.handler(['show']);
+	const result = await commandsView.handler(['show']);
 	t.truthy(result);
 	if (React.isValidElement(result)) {
 		const {lastFrame} = renderWithTheme(result);
@@ -57,7 +57,7 @@ test('commands show with no name shows usage', async t => {
 });
 
 test('commands show with nonexistent name shows not found', async t => {
-	const result = await commandsCommand.handler([
+	const result = await commandsView.handler([
 		'show',
 		'nonexistent-command',
 	]);
@@ -76,7 +76,7 @@ test('commands show with nonexistent name shows not found', async t => {
 // ============================================================================
 
 test('commands refresh is no longer a recognized subcommand', async t => {
-	const result = await commandsCommand.handler(['refresh']);
+	const result = await commandsView.handler(['refresh']);
 	t.truthy(result);
 	if (React.isValidElement(result)) {
 		const {lastFrame} = renderWithTheme(result);
@@ -92,7 +92,7 @@ test('commands refresh is no longer a recognized subcommand', async t => {
 // ============================================================================
 
 test('commands create shows usage hint', async t => {
-	const result = await commandsCommand.handler(['create']);
+	const result = await commandsView.handler(['create']);
 	t.truthy(result);
 	if (React.isValidElement(result)) {
 		const {lastFrame} = renderWithTheme(result);
@@ -103,7 +103,7 @@ test('commands create shows usage hint', async t => {
 });
 
 test('commands create usage mentions AI-assisted session', async t => {
-	const result = await commandsCommand.handler(['create']);
+	const result = await commandsView.handler(['create']);
 	t.truthy(result);
 	if (React.isValidElement(result)) {
 		const {lastFrame} = renderWithTheme(result);
