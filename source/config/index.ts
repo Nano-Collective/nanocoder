@@ -541,6 +541,25 @@ function loadLspServersConfig(cwd: string): AppConfig['lspServers'] {
 	);
 }
 
+function loadLspConfig(cwd: string): AppConfig['lsp'] {
+	const configured = loadHierarchicalConfig(
+		cwd,
+		'agents.config.json',
+		'lsp',
+		config => {
+			const autoDiscover = config.nanocoder?.lsp?.autoDiscover;
+			return typeof autoDiscover === 'boolean' ? {autoDiscover} : null;
+		},
+	);
+	const disabledByEnvironment =
+		process.env.NANOCODER_LSP?.trim().toLowerCase() === 'off';
+	return {
+		autoDiscover: disabledByEnvironment
+			? false
+			: (configured?.autoDiscover ?? true),
+	};
+}
+
 function loadSystemPromptConfig(cwd: string): SystemPromptConfig | undefined {
 	return (
 		loadHierarchicalConfig(
@@ -794,6 +813,16 @@ function loadModeProvidersConfig(
 					}
 
 					if (
+						!matchedProvider.models ||
+						!Array.isArray(matchedProvider.models)
+					) {
+						notifyError(
+							`Provider "${matchedProvider.name}" (modeProviders.${mode}) has no "models" list. Add one wherever the provider is defined.`,
+						);
+						continue;
+					}
+
+					if (
 						matchedProvider.models.length > 0 &&
 						!matchedProvider.models.includes(modelName)
 					) {
@@ -820,10 +849,11 @@ function loadNotificationsConfig(): NotificationsConfig | undefined {
 	return getNotificationsPreference();
 }
 
-// Load project-level verify policy (trust level, poll cadence overrides)
-// from agents.config.json. Unlike ciWatch.enabled (a personal, per-machine
-// opt-in kept in preferences), trust level and cadence are security/policy
-// decisions appropriate to commit and review with the rest of the project.
+// Load project-level verify policy (trust level, poll cadence overrides, and
+// `required` completion evidence) from agents.config.json. Unlike
+// ciWatch.enabled (a personal, per-machine opt-in kept in preferences), these
+// are security/policy decisions appropriate to commit and review with the rest
+// of the project.
 function loadVerifyConfig(cwd: string): VerifyConfig | undefined {
 	return (
 		loadHierarchicalConfig(cwd, 'agents.config.json', 'verify', config => {
@@ -838,6 +868,21 @@ function loadVerifyConfig(cwd: string): VerifyConfig | undefined {
 			}
 			if (typeof verify.maxPollIntervalMs === 'number') {
 				result.maxPollIntervalMs = verify.maxPollIntervalMs;
+			}
+			// `required`: commands, or "auto". Anything else is ignored with a
+			// warning, which leaves completion evidence off.
+			const required = verify.required;
+			if (required === 'auto') {
+				result.required = required;
+			} else if (
+				Array.isArray(required) &&
+				required.every(item => typeof item === 'string' && item.trim() !== '')
+			) {
+				result.required = required;
+			} else if (required !== undefined) {
+				notifyWarning(
+					`nanocoder.verify.required must be "auto" or a list of commands (got ${JSON.stringify(required)}); completion evidence is off`,
+				);
 			}
 			return Object.keys(result).length > 0 ? result : null;
 		}) ?? undefined
@@ -947,10 +992,12 @@ function loadAppConfig(cwd: string): AppConfig {
 
 	// Load user-defined LSP servers (auto-discovery still runs alongside)
 	const lspServers = loadLspServersConfig(cwd);
+	const lsp = loadLspConfig(cwd);
 
 	return {
 		providers,
 		mcpServers,
+		lsp,
 		lspServers,
 		autoCompact,
 		sessions,

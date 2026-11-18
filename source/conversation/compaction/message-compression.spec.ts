@@ -464,6 +464,157 @@ test('compressMessages detects success in tool results', t => {
 	t.true(toolMsg?.content?.includes('success') ?? false);
 });
 
+// ==================== Success pattern anchoring (#1633) ====================
+
+test('compressMessages default mode does not claim success for a log that also reports failures (#1633)', t => {
+	const tokenizer = createMockTokenizer();
+	const messages: Message[] = [
+		createToolMessage(
+			'read_file',
+			'Build completed successfully\nfailures: 3',
+		),
+		createUserMessage('Recent'),
+	];
+
+	const result = compressMessages(messages, tokenizer, {
+		mode: 'default',
+		keepRecentMessages: 1,
+	});
+
+	const content = result.compressedMessages[0]?.content ?? '';
+	// The body must not be reduced to a blanket success claim
+	t.false(content.includes('Result: success'));
+	// Both the success mention and the failure count must survive
+	t.true(content.includes('Build completed successfully'));
+	t.true(content.includes('failures: 3'));
+});
+
+test('compressMessages default mode still collapses a clean whole-body success', t => {
+	const tokenizer = createMockTokenizer();
+	const messages: Message[] = [
+		createToolMessage('execute_bash', 'completed successfully'),
+		createToolMessage('execute_bash', 'No errors.\n'),
+		createUserMessage('Recent'),
+	];
+
+	const result = compressMessages(messages, tokenizer, {
+		mode: 'default',
+		keepRecentMessages: 1,
+	});
+
+	t.is(
+		result.compressedMessages[0]?.content,
+		'Tool: execute_bash\nResult: success',
+	);
+	t.is(
+		result.compressedMessages[1]?.content,
+		'Tool: execute_bash\nResult: success',
+	);
+});
+
+test('compressMessages default mode keeps a key line instead of claiming success for a passing log', t => {
+	const tokenizer = createMockTokenizer();
+	const messages: Message[] = [
+		createToolMessage('execute_bash', '3 packages audited\ncompleted successfully'),
+		createUserMessage('Recent'),
+	];
+
+	const result = compressMessages(messages, tokenizer, {
+		mode: 'default',
+		keepRecentMessages: 1,
+	});
+
+	const content = result.compressedMessages[0]?.content ?? '';
+	t.false(content.includes('Result: success'));
+	t.true(content.includes('3 packages audited'));
+});
+
+test('compressMessages default mode keeps a failure line that appears past the leading lines (#1633)', t => {
+	const tokenizer = createMockTokenizer();
+	const messages: Message[] = [
+		createToolMessage(
+			'execute_bash',
+			'Build completed successfully\nstep 1 ok\nstep 2 ok\nstep 3 ok\nfailures: 3',
+		),
+		createUserMessage('Recent'),
+	];
+
+	const result = compressMessages(messages, tokenizer, {
+		mode: 'default',
+		keepRecentMessages: 1,
+	});
+
+	// The success line survives, but the failure reported on the last line must
+	// not be truncated away while it does.
+	t.is(
+		result.compressedMessages[0]?.content,
+		'Tool: execute_bash\nResult: Build completed successfully\nfailures: 3',
+	);
+});
+
+test('compressMessages default mode does not treat "no errors" as a failure signal (#1633)', t => {
+	const tokenizer = createMockTokenizer();
+	const messages: Message[] = [
+		createToolMessage('execute_bash', 'Linted 12 files\nno errors'),
+		createUserMessage('Recent'),
+	];
+
+	const result = compressMessages(messages, tokenizer, {
+		mode: 'default',
+		keepRecentMessages: 1,
+	});
+
+	// "no errors" contains "error" but describes a passing run, so the
+	// mixed-outcome guard must not fire and keep the whole body.
+	t.is(
+		result.compressedMessages[0]?.content,
+		'Tool: execute_bash\nResult: Linted 12 files',
+	);
+});
+
+test('compressMessages aggressive mode does not report "no errors" as an error (#1633)', t => {
+	const tokenizer = createMockTokenizer();
+	const messages: Message[] = [
+		createToolMessage('execute_bash', 'Linted 12 files\nno errors'),
+		createUserMessage('Recent'),
+	];
+
+	const result = compressMessages(messages, tokenizer, {
+		mode: 'aggressive',
+		keepRecentMessages: 1,
+	});
+
+	t.is(
+		result.compressedMessages[0]?.content,
+		'Tool: execute_bash\nResult: success',
+	);
+});
+
+test('compressMessages default mode truncates a long mixed-outcome line (#1633)', t => {
+	const tokenizer = createMockTokenizer();
+	// One long line that mentions both success and an error word, like verbose
+	// JSON. It must still be compressed, not kept in full.
+	const longBody = JSON.stringify({
+		success: true,
+		errors: ['boom', 'bang'],
+		payload: 'x'.repeat(20_000),
+	});
+	const messages: Message[] = [
+		createToolMessage('read_file', longBody),
+		createUserMessage('Recent'),
+	];
+
+	const result = compressMessages(messages, tokenizer, {
+		mode: 'default',
+		keepRecentMessages: 1,
+	});
+
+	const content = result.compressedMessages[0]?.content ?? '';
+	t.true(content.startsWith('Tool: read_file\nResult: '));
+	t.true(content.endsWith('...'));
+	t.true(content.length < 300);
+});
+
 // ==================== keepRecentMessages option ====================
 
 test('compressMessages respects custom keepRecentMessages value', t => {

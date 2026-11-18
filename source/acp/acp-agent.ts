@@ -87,6 +87,7 @@ import {
 } from '@/conversation/prompt-builder';
 import {resolveStartupProvider} from '@/hooks/startup-provider';
 import {appendRelevantProjectContextWithCount} from '@/memory/project-context';
+import {appendActivePlanContext} from '@/plans/context';
 import {withTrustedProjectPlugins} from '@/plugins/host';
 import {type HookContext, runLifecycleHooks} from '@/services/lifecycle-hooks';
 import {
@@ -508,11 +509,17 @@ export class AcpAgent implements Agent {
 					session.getMemoryFinder(),
 					getProjectContextPreferences(),
 				);
+				// Plan graphs are project state and change between turns. This runs
+				// inside the session's context, so an editor session sees the plan
+				// for its own workspace, not the agent's launch directory.
+				const systemPrompt = await appendActivePlanContext(
+					projectContext.systemPrompt,
+				);
 				session.systemMessage = {
 					role: 'system',
-					content: projectContext.systemPrompt,
+					content: systemPrompt,
 				};
-				setLastBuiltPrompt(projectContext.systemPrompt);
+				setLastBuiltPrompt(systemPrompt);
 				if (projectContext.memoryCount > 0) {
 					logger.info(
 						`ACP recall: session=${params.sessionId} count=${projectContext.memoryCount}`,

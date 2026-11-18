@@ -81,6 +81,7 @@ export const MAX_TIMELINE_SESSION_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 export const MAX_FIND_FILES_RESULTS = 100;
 export const MAX_SEARCH_RESULTS = 100;
 export const MAX_PROMPT_HISTORY_SIZE = 100;
+export const MAX_WEB_SEARCH_RESULTS = 20;
 export const MAX_WEB_SEARCH_QUERY_LENGTH = 500;
 
 // === DEFAULTS ===
@@ -127,6 +128,7 @@ export const TIPS = [
 	'Use @ followed by a file path to add that file to context.',
 	'Use /explorer to browse project files and add them to context.',
 	'Run /checkpoint create before a risky refactor so you can restore it later.',
+	'Run /plans to see plan-graph progress and which task is ready next.',
 	'Run /compact --preview to inspect a context compression before applying it.',
 	'Run /copy to copy the last assistant response to your clipboard.',
 	'Run /usage to see how much of the current model context is in use.',
@@ -194,6 +196,14 @@ export const CACHE_FILE_LIST_TTL_MS = 5000;
 
 // === FETCH URL ===
 export const MAX_URL_CONTENT_BYTES = 100_000; // ~100 KB
+
+// === CLI RUN ===
+// Most piped stdin `nanocoder run` will read into the prompt. Matches the
+// fetch_url cap: ~25k tokens, enough for a large diff or test log without
+// one pipe filling a small local model's context window.
+//
+// Counted in characters, not bytes: ~100 KB of ASCII, more for text that is not.
+export const MAX_STDIN_PROMPT_CHARS = 100_000;
 
 // === AI SDK ===
 export const MAX_TOOL_STEPS = 10;

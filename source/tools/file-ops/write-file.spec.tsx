@@ -9,7 +9,7 @@ import {themes} from '../../config/themes.js';
 import {resolveToolApproval} from '../approval-policy.js';
 import {ThemeContext} from '../../hooks/useTheme.js';
 import {writeFileTool} from './write-file.js';
-import {clearReadTracker, markFileSeen} from '../runtime/read-tracker.js';
+import {clearReadTracker, markFileSeenAndVisible} from '../runtime/read-tracker.js';
 import {
 	resetFirewallConfig,
 	setFirewallConfig,
@@ -286,7 +286,7 @@ test('write_file validator: allows overwriting an existing file after it is read
 	const originalCwd = process.cwd();
 	try {
 		process.chdir(testDir);
-		markFileSeen('existing.txt');
+		markFileSeenAndVisible('existing.txt');
 
 		const result = await writeFileTool.validator({
 			path: 'existing.txt',
@@ -852,7 +852,7 @@ test('write_file formatter: normalizes tabs to 2 spaces', async t => {
 test('write_file: refuses a .pdf and leaves the document untouched', async t => {
 	const pdfBytes = '%PDF-1.4 fake document bytes';
 	const filePath = await createTestFile('doc.pdf', pdfBytes);
-	markFileSeen(filePath);
+	markFileSeenAndVisible(filePath);
 
 	await t.throwsAsync(
 		executeWriteFile({path: filePath, content: 'plain transcript text'}),
@@ -1003,6 +1003,72 @@ test('write_file formatter: shows a diff against previous content when overwriti
 	t.regex(output, /line two/); // removed line is still shown, not just the new content
 	t.regex(output, /line one/); // unchanged context is still shown
 	t.false(output.includes('File content:'));
+});
+
+// ============================================================================
+// CRLF line endings (#1964)
+// ============================================================================
+
+test('write_file: keeps CRLF line endings when overwriting a CRLF file', async t => {
+	const filePath = await createTestFile('crlf.txt', 'one\r\ntwo\r\n');
+
+	await executeWriteFile({path: filePath, content: 'one\ntwo\nthree\n'});
+
+	const content = await readFile(filePath, 'utf-8');
+	t.is(content, 'one\r\ntwo\r\nthree\r\n');
+});
+
+test('write_file: converts mixed content for a CRLF file', async t => {
+	const filePath = await createTestFile('crlf-mixed.txt', 'one\r\ntwo\r\n');
+
+	await executeWriteFile({path: filePath, content: 'one\r\ntwo\nthree\n'});
+
+	const content = await readFile(filePath, 'utf-8');
+	t.is(content, 'one\r\ntwo\r\nthree\r\n');
+});
+
+test('write_file: writes CRLF content to an LF file as sent', async t => {
+	const filePath = await createTestFile('lf.txt', 'one\ntwo\n');
+
+	await executeWriteFile({path: filePath, content: 'one\r\ntwo\r\n'});
+
+	const content = await readFile(filePath, 'utf-8');
+	t.is(content, 'one\r\ntwo\r\n');
+});
+
+test('write_file: writes a new file with the line endings it was given', async t => {
+	const filePath = join(testDir, 'new-lf.txt');
+
+	await executeWriteFile({path: filePath, content: 'one\ntwo\n'});
+
+	const content = await readFile(filePath, 'utf-8');
+	t.is(content, 'one\ntwo\n');
+});
+
+test('write_file formatter: diffs an LF rewrite of a CRLF file by line, not by line ending', async t => {
+	const filePath = await createTestFile(
+		'crlf-preview.txt',
+		'line one\r\nline two\r\nline three\r\n',
+	);
+
+	if (!writeFileTool.formatter) {
+		t.fail('Formatter not defined');
+		return;
+	}
+
+	const args = {path: filePath, content: 'line one\nCHANGED\nline three\n'};
+	const preview = await writeFileTool.formatter(args);
+	const previewOutput = stripAnsi(
+		render(<TestThemeProvider>{preview}</TestThemeProvider>).lastFrame()!,
+	);
+	t.regex(previewOutput, /Diff:\s*\+1\s*-1/);
+
+	const result = await executeWriteFile(args);
+	const after = await writeFileTool.formatter(args, result);
+	const resultOutput = stripAnsi(
+		render(<TestThemeProvider>{after}</TestThemeProvider>).lastFrame()!,
+	);
+	t.regex(resultOutput, /Diff:\s*\+1\s*-1/);
 });
 
 test('write_file formatter: still dumps full content for a brand-new file', async t => {
@@ -1279,7 +1345,7 @@ test('write_file validator: refuses to overwrite a Latin-1 file', async t => {
 	const originalCwd = process.cwd();
 	try {
 		process.chdir(testDir);
-		markFileSeen('legacy.txt');
+		markFileSeenAndVisible('legacy.txt');
 
 		const result = await writeFileTool.validator({
 			path: 'legacy.txt',
@@ -1313,4 +1379,31 @@ test('write_file: genuinely new file write succeeds without read failure', async
 	t.truthy(output);
 	const content = await readFile(filePath, 'utf-8');
 	t.is(content, 'brand new content');
+});
+
+// ============================================================================
+// Overwriting a file that changed on disk after it was read
+// ============================================================================
+
+test.serial('write_file validator: refuses to overwrite a file changed outside after the read', async t => {
+	const filePath = join(testDir, 'changed-outside.txt');
+	await writeFile(filePath, 'original\n', 'utf-8');
+
+	const originalCwd = process.cwd();
+	try {
+		process.chdir(testDir);
+		markFileSeenAndVisible('changed-outside.txt');
+
+		// Someone saves the file in an editor while the agent is working.
+		await writeFile(filePath, 'original\nedited in an editor\n', 'utf-8');
+
+		const result = await writeFileTool.validator!({
+			path: 'changed-outside.txt',
+			content: 'the agent version',
+		});
+		t.false(result.valid);
+		if (!result.valid) t.regex(result.error, /modified externally/);
+	} finally {
+		process.chdir(originalCwd);
+	}
 });

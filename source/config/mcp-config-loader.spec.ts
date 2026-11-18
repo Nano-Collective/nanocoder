@@ -603,6 +603,48 @@ test('loadEnvProviderConfigs - supports direct providers format', t => {
     }
 });
 
+test.serial('loadEnvProviderConfigs - substitutes nested extraBody values', t => {
+    const originalProviders = process.env.NANOCODER_PROVIDERS;
+    const originalExtraBody = process.env.NANOCODER_EXTRA_BODY;
+
+    try {
+        process.env.NANOCODER_EXTRA_BODY = 'disabled';
+        process.env.NANOCODER_PROVIDERS = JSON.stringify({
+            providers: [
+                {
+                    name: 'env-provider',
+                    models: ['test-model'],
+                    extraBody: {
+                        top_k: 20,
+                        chat_template_kwargs: {
+                            enable_thinking: '$' + '{NANOCODER_EXTRA_BODY}',
+                        },
+                    },
+                },
+            ],
+        });
+
+        const provider = loadAllProviderConfigs().find(
+            item => item.name === 'env-provider',
+        );
+        t.deepEqual(provider?.extraBody, {
+            top_k: 20,
+            chat_template_kwargs: {enable_thinking: 'disabled'},
+        });
+    } finally {
+        if (originalProviders !== undefined) {
+            process.env.NANOCODER_PROVIDERS = originalProviders;
+        } else {
+            delete process.env.NANOCODER_PROVIDERS;
+        }
+        if (originalExtraBody !== undefined) {
+            process.env.NANOCODER_EXTRA_BODY = originalExtraBody;
+        } else {
+            delete process.env.NANOCODER_EXTRA_BODY;
+        }
+    }
+});
+
 test('hierarchical precedence - env overrides project and global', t => {
     const testDir = t.context.testDir as string;
     const originalMcpServers = process.env.NANOCODER_MCPSERVERS;

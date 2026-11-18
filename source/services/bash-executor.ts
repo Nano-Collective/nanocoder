@@ -277,6 +277,8 @@ export class BashExecutor extends EventEmitter {
 				cwd,
 				env: childEnv,
 				windowsVerbatimArguments: true,
+				// Close stdin so commands that wait for input get EOF.
+				stdio: ['ignore', 'pipe', 'pipe'],
 			});
 		} else {
 			// codeql[js/shell-command-built-from-environment] -c script uses $NC_CWD_FILE; path is env, not argv
@@ -285,6 +287,9 @@ export class BashExecutor extends EventEmitter {
 				cwd,
 				detached: true,
 				env: childEnv,
+				// Close stdin so commands that wait for input get EOF and fail fast
+				// instead of hanging until the timeout.
+				stdio: ['ignore', 'pipe', 'pipe'],
 			});
 		}
 

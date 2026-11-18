@@ -42,7 +42,7 @@ const MAX_PASTE_CHARS = 10_000_000;
  */
 const MIN_PARTIAL_START = 3;
 
-/** Singleton bus: cli.tsx publishes payloads, UserInput subscribes. */
+/** Singleton bus: cli.tsx publishes payloads, the focused TextInput subscribes. */
 export const pasteEvents = new EventEmitter();
 
 /**

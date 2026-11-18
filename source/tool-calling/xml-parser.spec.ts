@@ -336,21 +336,49 @@ test('parseToolCalls - handles whitespace-only content', t => {
 	t.deepEqual(result, []);
 });
 
-test('parseToolCalls - handles unclosed tags gracefully', t => {
+test('parseToolCalls - does not parse an unclosed call, and findUnclosedToolCall names it', t => {
 	const content = '<read_file><path>/test/file.txt</path>';
-	const result = XMLToolCallParser.parseToolCalls(content);
 
-	// Should not match incomplete XML
-	t.deepEqual(result, []);
+	t.deepEqual(XMLToolCallParser.parseToolCalls(content), []);
+	t.is(
+		XMLToolCallParser.findUnclosedToolCall(content, ['read_file']),
+		'read_file',
+	);
 });
 
-test('parseToolCalls - handles mismatched tags gracefully', t => {
+test('parseToolCalls - marks a call whose parameter is closed with the wrong tag', t => {
 	const content = '<read_file><path>/test/file.txt</wrong_close></read_file>';
 	const result = XMLToolCallParser.parseToolCalls(content);
 
-	// Regex should still match the outer tags
+	// The outer tags still match, but <path> is never closed, so the call has
+	// no usable arguments.
 	t.is(result.length, 1);
 	t.is(result[0].toolName, 'read_file');
+	t.deepEqual(result[0].parameters, {});
+	t.is(result[0].brokenTag, '<path>');
+});
+
+test('parseToolCalls - a complete call has no brokenTag, even with XML in a value', t => {
+	const content =
+		'<write_file><path>a.html</path><content><div>hi<br></div></content></write_file>';
+	const result = XMLToolCallParser.parseToolCalls(content);
+
+	t.is(result.length, 1);
+	t.is(result[0].brokenTag, undefined);
+});
+
+test('findUnclosedToolCall - skips code, prose and calls that parse', t => {
+	const tools = ['read_file', 'write_file'];
+	for (const content of [
+		'Add a <br> after the title.',
+		'Next I will use <read_file> to check it.',
+		'```xml\n<read_file><path>a.ts</path>\n```',
+		'Call it as `<read_file><path>a.ts</path>` and close it.',
+		'<write_file><path>a.md</path><content><read_file><path>x</path></content></write_file>',
+		'<my_config><setting>on</setting>',
+	]) {
+		t.is(XMLToolCallParser.findUnclosedToolCall(content, tools), undefined, content);
+	}
 });
 
 test('parseToolCalls - handles nested tool names', t => {
@@ -358,8 +386,32 @@ test('parseToolCalls - handles nested tool names', t => {
 	const content = '<read_file><read_file>nested_value</read_file></read_file>';
 	const result = XMLToolCallParser.parseToolCalls(content);
 
-	// Should parse the outer read_file
-	t.truthy(result.length > 0);
+	// The first </read_file> closes the parameter, so the call ends at the
+	// second one.
+	t.is(result.length, 1);
+	t.is(result[0].toolName, 'read_file');
+	t.deepEqual(result[0].parameters, {read_file: 'nested_value'});
+	t.is(result[0].brokenTag, undefined);
+});
+
+test('parseToolCalls - does not run a call left open into the next call to the same tool', t => {
+	const content =
+		'<read_file><read_file>a.ts</read_file>\n<read_file><path>b.ts</path></read_file>';
+	const result = XMLToolCallParser.parseToolCalls(content);
+
+	// The outer <read_file> is never closed: the last </read_file> pairs with
+	// the second call's opening tag.
+	t.is(result.length, 2);
+	t.is(result[0].brokenTag, '<read_file>');
+	t.deepEqual(result[1].parameters, {path: 'b.ts'});
+});
+
+test('findToolCallRanges - covers the whole of a call that holds a tag with its own name', t => {
+	const content = '<read_file><read_file>a.ts</read_file></read_file>';
+
+	t.deepEqual(XMLToolCallParser.findToolCallRanges(content), [
+		[0, content.length],
+	]);
 });
 
 test('parseToolCalls - handles tool names with underscores and numbers', t => {
@@ -506,6 +558,15 @@ test('removeToolCallsFromContent - handles content with only tool calls', t => {
 	const result = XMLToolCallParser.removeToolCallsFromContent(content);
 
 	t.is(result, '');
+});
+
+test('removeToolCallsFromContent - removes a call that holds a tag with its own name', t => {
+	const content =
+		'Reading it now.\n<read_file><read_file>a.ts</read_file></read_file>';
+
+	const result = XMLToolCallParser.removeToolCallsFromContent(content);
+
+	t.is(result, 'Reading it now.');
 });
 
 // hasToolCalls tests
