@@ -199,14 +199,14 @@ test('provider contextWindows must map to numbers', t => {
 // OpenRouter / RecordStringUnknown
 // ---------------------------------------------------------------------------
 
-test('RecordStringUnknown (extraBody) accepts arbitrary keys', t => {
-	// OpenRouterParameters.extraBody is Record<string, unknown>: any key/value.
+test('provider and OpenRouter extraBody accept arbitrary keys', t => {
 	assertValid(t, 'extraBody with content', {
 		nanocoder: {
 			providers: [
 				{
 					name: 'openrouter',
 					models: ['a'],
+					extraBody: {top_k: 20, nested: {ok: true}},
 					openrouter: {extraBody: {custom_field: 'value', nested: {ok: true}}},
 				},
 			],

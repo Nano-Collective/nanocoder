@@ -251,6 +251,7 @@ export function loadProviderConfigs(): AIProviderConfig[] {
 		disableToolModels: provider.disableToolModels,
 		// SDK provider package to use
 		sdkProvider: provider.sdkProvider,
+		extraBody: provider.extraBody,
 		// OpenRouter-specific request body fields (provider routing, plugins,
 		// reasoning, etc.). Always-on for the OpenRouter provider — never gated
 		// by tune so users get consistent routing across sessions.
