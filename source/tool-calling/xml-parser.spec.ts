@@ -386,8 +386,32 @@ test('parseToolCalls - handles nested tool names', t => {
 	const content = '<read_file><read_file>nested_value</read_file></read_file>';
 	const result = XMLToolCallParser.parseToolCalls(content);
 
-	// Should parse the outer read_file
-	t.truthy(result.length > 0);
+	// The first </read_file> closes the parameter, so the call ends at the
+	// second one.
+	t.is(result.length, 1);
+	t.is(result[0].toolName, 'read_file');
+	t.deepEqual(result[0].parameters, {read_file: 'nested_value'});
+	t.is(result[0].brokenTag, undefined);
+});
+
+test('parseToolCalls - does not run a call left open into the next call to the same tool', t => {
+	const content =
+		'<read_file><read_file>a.ts</read_file>\n<read_file><path>b.ts</path></read_file>';
+	const result = XMLToolCallParser.parseToolCalls(content);
+
+	// The outer <read_file> is never closed: the last </read_file> pairs with
+	// the second call's opening tag.
+	t.is(result.length, 2);
+	t.is(result[0].brokenTag, '<read_file>');
+	t.deepEqual(result[1].parameters, {path: 'b.ts'});
+});
+
+test('findToolCallRanges - covers the whole of a call that holds a tag with its own name', t => {
+	const content = '<read_file><read_file>a.ts</read_file></read_file>';
+
+	t.deepEqual(XMLToolCallParser.findToolCallRanges(content), [
+		[0, content.length],
+	]);
 });
 
 test('parseToolCalls - handles tool names with underscores and numbers', t => {
@@ -534,6 +558,15 @@ test('removeToolCallsFromContent - handles content with only tool calls', t => {
 	const result = XMLToolCallParser.removeToolCallsFromContent(content);
 
 	t.is(result, '');
+});
+
+test('removeToolCallsFromContent - removes a call that holds a tag with its own name', t => {
+	const content =
+		'Reading it now.\n<read_file><read_file>a.ts</read_file></read_file>';
+
+	const result = XMLToolCallParser.removeToolCallsFromContent(content);
+
+	t.is(result, 'Reading it now.');
 });
 
 // hasToolCalls tests
