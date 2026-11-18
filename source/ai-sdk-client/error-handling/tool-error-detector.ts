@@ -25,8 +25,18 @@ const HISTORY_ERROR_PATTERNS = [
 	/context (?:length|window)|too many tokens|maximum context/i,
 ];
 
+const TOOL_VALIDATION_ERROR_PATTERNS = [
+	/invalid schema(?: for)?(?: a)? function\b/i,
+	/invalid function call arguments\b/i,
+	/\binvalid\b.*\bfunction\b.*\barguments\b/i,
+	/\btool_choice\b/i,
+];
+
 function messageIndicatesToolSupport(message: string): boolean {
 	if (HISTORY_ERROR_PATTERNS.some(pattern => pattern.test(message))) {
+		return false;
+	}
+	if (TOOL_VALIDATION_ERROR_PATTERNS.some(pattern => pattern.test(message))) {
 		return false;
 	}
 
@@ -43,6 +53,22 @@ function messageIndicatesToolSupport(message: string): boolean {
 		if (pattern.test(message)) {
 			return true;
 		}
+	}
+
+	// Narrow server-rejection patterns for OpenAI-compatible providers.
+	// These identify a request parameter or tool definition being rejected,
+	// without treating every HTTP 400, invalid function, or invalid parameter
+	// message as evidence that the model lacks tool support.
+	const ambiguousToolParameterPatterns = [
+		/^invalid parameter:\s*(?:tools|tool definitions?|function[s]?|native tools)\b/i,
+		/^invalid request:\s*unknown (?:field|property)\s*["'`]?tools["'`]?\b/i,
+		/^invalid tool definition$/i,
+	];
+
+	if (
+		ambiguousToolParameterPatterns.some(pattern => pattern.test(message))
+	) {
+		return true;
 	}
 
 	// Pattern 3: Ollama-specific error messages

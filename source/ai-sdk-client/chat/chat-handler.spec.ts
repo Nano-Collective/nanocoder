@@ -1490,7 +1490,9 @@ test.serial('a model that rejects native tools is retried with XML tool definiti
 		'local-model-without-tools',
 		body =>
 			body.tools
-				? badRequest('This model does not support tools')
+				? badRequest(
+						'registry.ollama.ai/library/local-model does not support tools',
+					)
 				: sseReply('<read_file><path>hello.txt</path></read_file>'),
 	);
 

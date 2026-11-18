@@ -111,7 +111,20 @@ test('isToolSupportError detects function unsupported messages', t => {
 
 test('isToolSupportError ignores invalid tool messages', t => {
 	t.false(isToolSupportError(new Error('invalid tool')));
-	t.false(isToolSupportError(new Error('Invalid tool definition')));
+});
+
+test('isToolSupportError detects invalid tool definition server rejections', t => {
+	t.true(isToolSupportError(new Error('Invalid tool definition')));
+	t.true(
+		isToolSupportError(
+			new Error('Invalid parameter: tools'),
+		),
+	);
+	t.true(
+		isToolSupportError(
+			new Error('invalid request: unknown field "tools"'),
+		),
+	);
 });
 
 test('isToolSupportError ignores invalid function messages', t => {
