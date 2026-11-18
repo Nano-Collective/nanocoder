@@ -1,6 +1,7 @@
 import {existsSync, readFileSync} from 'fs';
 import {join} from 'path';
 import {AISDKClient} from '@/ai-sdk-client';
+import {FallbackLLMClient, parseFallbackEntry} from '@/client-fallback';
 import {
 	getCodexNoCredentialsMessage,
 	loadCodexCredential,
@@ -37,20 +38,59 @@ export async function createLLMClient(
 	overrides?: Partial<
 		Pick<AIProviderConfig, 'contextWindow' | 'contextWindows'>
 	>,
-	options: {strictProvider?: boolean} = {},
+	options: {
+		strictProvider?: boolean;
+		/**
+		 * Providers already attempted for this request chain. Internal:
+		 * keeps a fallback chain from cycling (A falls back to B, B falls
+		 * back to A) by excluding them from the next provider's list.
+		 */
+		fallbackChain?: string[];
+	} = {},
 ): Promise<{client: LLMClient; actualProvider: string}> {
 	// Check if agents.config.json exists
 	const agentsJsonPath = getClosestConfigFile('agents.config.json');
 	const hasConfigFile = existsSync(agentsJsonPath);
 
 	// Use AI SDK - it handles both tool-calling and non-tool-calling models
-	return createAISDKClient(
+	const {client, actualProvider} = await createAISDKClient(
 		provider,
 		model,
 		hasConfigFile,
 		overrides,
 		options.strictProvider,
 	);
+
+	// Wrap the client when the resolved provider declares fallbacks, so a
+	// retryable failure re-sends the same request to the next entry. The
+	// wrapper delegates everything else to the primary, which stays the
+	// selected provider for the next turn.
+	const attempted = new Set(
+		(options.fallbackChain ?? []).map(name => name.toLowerCase()),
+	);
+	attempted.add(actualProvider.toLowerCase());
+	const fallbackEntries = (
+		loadProviderConfigs().find(p => p.name === actualProvider)?.fallback ?? []
+	).filter(entry => {
+		const parsed = parseFallbackEntry(entry);
+		return parsed && !attempted.has(parsed.provider.toLowerCase());
+	});
+	if (fallbackEntries.length === 0) {
+		return {client, actualProvider};
+	}
+
+	const wrapped = new FallbackLLMClient(
+		client,
+		fallbackEntries,
+		async (fallbackProvider, fallbackModel) =>
+			(
+				await createLLMClient(fallbackProvider, fallbackModel, undefined, {
+					strictProvider: true,
+					fallbackChain: [...attempted],
+				})
+			).client,
+	);
+	return {client: wrapped, actualProvider};
 }
 
 async function createAISDKClient(
@@ -243,6 +283,8 @@ export function loadProviderConfigs(): AIProviderConfig[] {
 		// made `promptCaching: false` and a custom `maxRetries` silently inert.
 		promptCaching: provider.promptCaching as boolean | undefined,
 		maxRetries: provider.maxRetries,
+		// Provider fallback list, tried in order on retryable failures.
+		fallback: provider.fallback,
 		requestTimeout: provider.requestTimeout,
 		socketTimeout: provider.socketTimeout,
 		connectionPool: provider.connectionPool,

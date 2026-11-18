@@ -462,6 +462,16 @@ async function runTurn(
 								},
 							});
 						},
+						// A fallback provider answered instead of the primary.
+						onNotice: (message: string) => {
+							conn.sessionUpdate({
+								sessionId: session.sessionId,
+								update: {
+									sessionUpdate: 'agent_message_chunk',
+									content: {type: 'text', text: message},
+								},
+							});
+						},
 					},
 					reasoning: () =>
 						streamedReasoning.trim() ? streamedReasoning : undefined,

@@ -89,7 +89,28 @@ Use dedicated AI SDK packages for native API support, enabled via the `sdkProvid
 | `requestTimeout` | Fallback for `socketTimeout` in milliseconds (optional). Not a separate whole-request deadline, see [Timeouts & Connection Pooling](#timeouts--connection-pooling) |
 | `socketTimeout` | Connect, response-header and body timeout in milliseconds (default: 120,000, or 600,000 for a local `baseUrl`). Uses `requestTimeout` if not set. Set to `-1` to disable (optional) |
 | `maxRetries` | How many times a failed network request is retried (default: 2). Unrelated to the agent-loop [Retry Limits](../index.md#retry-limits), which cap how often the model may repeat itself (optional) |
+| `fallback` | Providers (or `provider/model` pairs) tried in order when this provider fails a request with a retryable error (429, 5xx, network) after exhausting `maxRetries`. The first fallback that answers serves the turn; the primary stays selected for the next turn. Non-retryable errors (auth, invalid request) never trigger a fallback. See [Provider Fallback](#provider-fallback) (optional) |
 | `connectionPool` | Connection pool settings (optional, see [Timeouts & Connection Pooling](#timeouts--connection-pooling)) |
+
+### Provider Fallback
+
+`fallback` lists backup providers (or `provider/model` pairs) for a provider. When the primary fails a request with a retryable error — 429, 5xx, or a network failure — after exhausting its own `maxRetries`, nanocoder re-sends the same request to the next entry in order. The first fallback that answers serves the turn, a one-line notice names the provider that answered, and the primary stays selected for the next turn. Non-retryable errors (authentication, invalid request, context-length) never trigger a fallback, and a fallback naming the primary itself or a duplicate is skipped.
+
+```json
+{
+  "nanocoder": {
+    "providers": [
+      {
+        "name": "openrouter",
+        "baseUrl": "https://openrouter.ai/api/v1",
+        "apiKey": "${OPENROUTER_API_KEY}",
+        "models": ["anthropic/claude-sonnet-4-5"],
+        "fallback": ["ollama", "openai/gpt-5"]
+      }
+    ]
+  }
+}
+```
 
 ### Output Token Ceiling
 
