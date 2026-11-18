@@ -65,9 +65,7 @@ function messageIndicatesToolSupport(message: string): boolean {
 		/^invalid tool definition$/i,
 	];
 
-	if (
-		ambiguousToolParameterPatterns.some(pattern => pattern.test(message))
-	) {
+	if (ambiguousToolParameterPatterns.some(pattern => pattern.test(message))) {
 		return true;
 	}
 
