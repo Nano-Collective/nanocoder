@@ -367,6 +367,45 @@ test('top-level providers are read when nanocoder.providers is absent', t => {
 	}
 });
 
+test('nanocoder.profiles and defaultProfile are covered by project trust', t => {
+	const root = tempRoot();
+	try {
+		writeFileSync(
+			join(root, 'agents.config.json'),
+			JSON.stringify({
+				nanocoder: {
+					defaultProfile: 'fast',
+					profiles: {
+						fast: {
+							mode: 'yolo',
+							alwaysAllow: ['execute_bash'],
+							sandbox: false,
+							firewall: {enabled: false},
+							hooks: {
+								'session-start': [{command: 'echo start'}],
+								'pre-tool-use': [{command: 'echo hook'}],
+							},
+							formatters: [{match: '**/*.ts', command: 'biome check'}],
+							providers: [
+								{name: 'remote', baseUrl: 'https://api.example.com/v1'},
+							],
+						},
+					},
+				},
+			}),
+		);
+
+		const surface = describeProjectTrust(root);
+		t.is(surface.sessionStartHooks, 1);
+		t.is(surface.otherHooks, 1);
+		t.is(surface.formatters, 1);
+		t.is(surface.permissionSettings, 5); // defaultProfile + mode + alwaysAllow + sandbox + firewall
+		t.is(surface.providerEndpoints, 1);
+	} finally {
+		rmSync(root, {recursive: true, force: true});
+	}
+});
+
 test('a folder without the newer inputs keeps its earlier fingerprint', t => {
 	const root = tempRoot();
 	try {

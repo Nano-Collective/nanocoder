@@ -98,7 +98,8 @@ export const lazyCommands: LazyCommand[] = [
 	},
 	{
 		name: 'profile',
-		description: 'List or switch configuration profiles (/profile [name])',
+		description:
+			'List or switch configuration profiles (/profile [name|--clear])',
 		load: () => import('@/commands/profile').then(m => m.profileCommand),
 	},
 	{

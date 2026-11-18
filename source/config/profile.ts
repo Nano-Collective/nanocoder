@@ -1,16 +1,19 @@
-import {existsSync, readFileSync} from 'node:fs';
+import {existsSync} from 'node:fs';
 import {join} from 'node:path';
+import {readCachedConfigFile} from '@/config/cached-reader';
 import {getConfigPath} from '@/config/paths';
-import {getConfigRoot} from '@/services/session-context';
 import type {DiskProfileConfig, DiskProfilesConfig} from '@/types/config';
+import {notifyError} from '@/utils/message-queue-core';
 
 let _cliProfile: string | undefined;
+let _explicitlyCleared = false;
 
 /**
  * Set the profile name specified via CLI flag (`--profile <name>`).
  */
 export function setCliProfile(profile: string | undefined): void {
 	_cliProfile = profile && profile.trim() !== '' ? profile.trim() : undefined;
+	_explicitlyCleared = false;
 }
 
 /**
@@ -25,22 +28,24 @@ export function getCliProfile(): string | undefined {
  */
 export function clearProfileCache(): void {
 	_cliProfile = undefined;
+	_explicitlyCleared = false;
 }
 
 /**
- * Safely parse a JSON file and return its object content, or null if missing/invalid.
+ * Safely parse a JSON file using the cached config reader and return its object content,
+ * or null if missing/invalid. Reports syntax errors through notifyError.
  */
 function tryReadJsonObject(filePath: string): Record<string, unknown> | null {
 	if (!existsSync(filePath)) {
 		return null;
 	}
 	try {
-		const raw = readFileSync(filePath, 'utf-8');
-		const parsed = JSON.parse(raw);
+		const parsed = readCachedConfigFile(filePath);
 		return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
 			? (parsed as Record<string, unknown>)
 			: null;
-	} catch {
+	} catch (error) {
+		notifyError(`Failed to load config from ${filePath}: ${String(error)}`);
 		return null;
 	}
 }
@@ -93,7 +98,7 @@ function readDefaultProfileFromFile(filePath: string): string | null {
  * Project profiles override global profiles with the same name.
  */
 export function loadAvailableProfiles(
-	cwd: string = getConfigRoot(),
+	cwd: string = process.cwd(),
 ): DiskProfilesConfig {
 	const globalPath = join(getConfigPath(), 'agents.config.json');
 	const projectPath = join(cwd, 'agents.config.json');
@@ -112,7 +117,7 @@ export function loadAvailableProfiles(
  */
 function getProfileOriginFile(
 	name: string,
-	cwd: string = getConfigRoot(),
+	cwd: string = process.cwd(),
 ): string | undefined {
 	const projectPath = join(cwd, 'agents.config.json');
 	const projectProfiles = readProfilesFromFile(projectPath);
@@ -133,7 +138,7 @@ function getProfileOriginFile(
  * Load the default profile name specified in agents.config.json (project-over-global).
  */
 export function loadDefaultProfileName(
-	cwd: string = getConfigRoot(),
+	cwd: string = process.cwd(),
 ): string | undefined {
 	const projectPath = join(cwd, 'agents.config.json');
 	const projectDefault = readDefaultProfileFromFile(projectPath);
@@ -163,8 +168,12 @@ export interface ActiveProfileInfo {
  * 4. undefined
  */
 export function getActiveProfileName(
-	cwd: string = getConfigRoot(),
+	cwd: string = process.cwd(),
 ): string | undefined {
+	if (_explicitlyCleared) {
+		return undefined;
+	}
+
 	if (_cliProfile) {
 		return _cliProfile;
 	}
@@ -185,8 +194,12 @@ export function getActiveProfileName(
  * profile names (fail-fast).
  */
 export function resolveActiveProfile(
-	cwd: string = getConfigRoot(),
+	cwd: string = process.cwd(),
 ): ActiveProfileInfo | undefined {
+	if (_explicitlyCleared) {
+		return undefined;
+	}
+
 	let requestedName: string | undefined;
 	let origin: ProfileOrigin | undefined;
 
@@ -206,9 +219,7 @@ export function resolveActiveProfile(
 	}
 
 	const available = loadAvailableProfiles(cwd);
-	const profile = available[requestedName];
-
-	if (!profile) {
+	if (!Object.hasOwn(available, requestedName)) {
 		const availableNames = Object.keys(available);
 		const listText =
 			availableNames.length > 0
@@ -217,6 +228,7 @@ export function resolveActiveProfile(
 		throw new Error(`Unknown profile "${requestedName}". ${listText}`);
 	}
 
+	const profile = available[requestedName];
 	const originFile = getProfileOriginFile(requestedName, cwd);
 	return {
 		name: requestedName,
@@ -231,7 +243,7 @@ export function resolveActiveProfile(
  * Throws if an unknown profile was requested.
  */
 export function getActiveProfile(
-	cwd: string = getConfigRoot(),
+	cwd: string = process.cwd(),
 ): DiskProfileConfig | undefined {
 	return resolveActiveProfile(cwd)?.profile;
 }
@@ -239,13 +251,16 @@ export function getActiveProfile(
 /**
  * Switch the active profile at runtime.
  * Throws if the profile name does not exist.
+ * Passing undefined or empty string clears the active profile and overrides
+ * both NANOCODER_PROFILE and defaultProfile.
  */
 export function setActiveProfile(
 	name: string | undefined,
-	cwd: string = getConfigRoot(),
+	cwd: string = process.cwd(),
 ): void {
 	if (!name || name.trim() === '') {
 		_cliProfile = undefined;
+		_explicitlyCleared = true;
 		return;
 	}
 
@@ -261,4 +276,5 @@ export function setActiveProfile(
 	}
 
 	_cliProfile = trimmed;
+	_explicitlyCleared = false;
 }

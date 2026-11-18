@@ -205,8 +205,14 @@ const COMMAND_HELP_OVERRIDES: Record<string, CommandHelpOverrides> = {
 		examples: ['/model', '/model browse'],
 	},
 	profile: {
-		usage: '/profile [name]',
-		examples: ['/profile', '/profile fast', '/profile review'],
+		usage: '/profile [name|--clear]',
+		options: ['--clear'],
+		examples: [
+			'/profile',
+			'/profile fast',
+			'/profile review',
+			'/profile --clear',
+		],
 	},
 	memory: {
 		usage:

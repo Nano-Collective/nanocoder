@@ -12,10 +12,12 @@ import type {CommandContext, StatefulCommand} from '@/types/index';
  *
  * /profile          - List all configured profiles, highlighting the active one
  * /profile <name>   - Switch to the named profile and reload configuration
+ * /profile --clear  - Clear active profile and run with base configuration
  */
 export const profileCommand: StatefulCommand = {
 	name: 'profile',
-	description: 'List or switch configuration profiles (/profile [name])',
+	description:
+		'List or switch configuration profiles (/profile [name|--clear])',
 	run: async (context: CommandContext) => {
 		const targetName = context.args[0]?.trim();
 		const profiles = loadAvailableProfiles();
@@ -63,6 +65,22 @@ export const profileCommand: StatefulCommand = {
 			return 'done';
 		}
 
+		if (
+			targetName === '--clear' ||
+			targetName === 'clear' ||
+			targetName === '--reset'
+		) {
+			setActiveProfile(undefined);
+			reloadAppConfig();
+			context.addToChatQueue(
+				successMsg(
+					'Profile cleared. Running without a configuration profile.',
+					'profile-cleared',
+				),
+			);
+			return 'done';
+		}
+
 		if (!Object.hasOwn(profiles, targetName)) {
 			const listText =
 				profileNames.length > 0
@@ -81,14 +99,33 @@ export const profileCommand: StatefulCommand = {
 		reloadAppConfig();
 
 		const profile = profiles[targetName];
+		let modelSwitchFailed = false;
 		if (context.switchModel && (profile.provider || profile.model)) {
 			const targetProvider = profile.provider || context.provider;
 			const targetModel = profile.model || context.model;
 			try {
-				await context.switchModel(targetProvider, targetModel);
+				const switched = await context.switchModel(targetProvider, targetModel);
+				if (!switched) {
+					modelSwitchFailed = true;
+				}
 			} catch {
-				// Best-effort model switch; configuration has still been updated
+				modelSwitchFailed = true;
 			}
+		}
+
+		if (profile.mode && context.switchMode) {
+			context.switchMode(profile.mode);
+		}
+
+		if (modelSwitchFailed) {
+			const targetModel = profile.model || context.model;
+			context.addToChatQueue(
+				errorMsg(
+					`Failed to switch model to "${targetModel}". Profile configuration was not fully applied.`,
+					'profile-model-switch-failed',
+				),
+			);
+			return 'done';
 		}
 
 		context.addToChatQueue(

@@ -123,6 +123,7 @@ function createCommandContext(
 		enterSessionSelectorMode: options.onEnterSessionSelectorMode,
 		resumeSession: options.onResumeSession,
 		switchModel: options.onSwitchModel,
+		switchMode: options.onSwitchMode,
 		submitChatMessage: (message, displayValue) =>
 			options.onHandleChatMessage(message, displayValue),
 	};

@@ -313,3 +313,145 @@ test.serial('/profile slash command lists profiles and switches active profile',
 	t.is(getCliProfile(), 'fast');
 	t.deepEqual(switchedTo, {provider: 'ollama', model: 'qwen2.5:7b'});
 });
+
+test.serial(
+	'unknown profile fails fast on prototype property like constructor',
+	t => {
+		const projectAgents = {
+			nanocoder: {
+				profiles: {
+					fast: {provider: 'ollama'},
+				},
+			},
+		};
+		writeFileSync(
+			join(projectDir, 'agents.config.json'),
+			JSON.stringify(projectAgents, null, 2),
+		);
+		setCliProfile('constructor');
+		const error = t.throws(() => resolveActiveProfile(projectDir), {
+			message: /Unknown profile "constructor"\. Available profiles: fast/,
+		});
+		t.truthy(error);
+	},
+);
+
+test.serial(
+	'setActiveProfile(undefined) clears active profile and overrides env and defaultProfile',
+	t => {
+		const projectAgents = {
+			nanocoder: {
+				defaultProfile: 'config-default',
+				profiles: {
+					'config-default': {provider: 'ollama'},
+				},
+			},
+		};
+		writeFileSync(
+			join(projectDir, 'agents.config.json'),
+			JSON.stringify(projectAgents, null, 2),
+		);
+		process.env.NANOCODER_PROFILE = 'config-default';
+
+		t.is(getActiveProfileName(projectDir), 'config-default');
+		setActiveProfile(undefined, projectDir);
+		t.is(getActiveProfileName(projectDir), undefined);
+		t.is(resolveActiveProfile(projectDir), undefined);
+	},
+);
+
+test.serial(
+	'loadAvailableProfiles tolerates a UTF-8 BOM in agents.config.json',
+	t => {
+		const projectAgents = {
+			nanocoder: {
+				profiles: {
+					bomProfile: {provider: 'ollama', model: 'llama3'},
+				},
+			},
+		};
+		writeFileSync(
+			join(projectDir, 'agents.config.json'),
+			'\uFEFF' + JSON.stringify(projectAgents),
+		);
+		const profiles = loadAvailableProfiles(projectDir);
+		t.truthy(profiles.bomProfile);
+		t.is(profiles.bomProfile.provider, 'ollama');
+	},
+);
+
+test.serial('/profile --clear clears active profile', async t => {
+	const projectAgents = {
+		nanocoder: {
+			defaultProfile: 'fast',
+			profiles: {
+				fast: {provider: 'ollama', model: 'qwen2.5:7b'},
+			},
+		},
+	};
+	process.env.NANOCODER_CONFIG_DIR = globalDir;
+	writeFileSync(
+		join(globalDir, 'agents.config.json'),
+		JSON.stringify(projectAgents),
+	);
+
+	setActiveProfile('fast', globalDir);
+	t.is(getActiveProfileName(globalDir), 'fast');
+
+	const messages: unknown[] = [];
+	const context: Partial<CommandContext> = {
+		args: ['--clear'],
+		argText: '--clear',
+		addToChatQueue: msg => messages.push(msg),
+	};
+	const res = await profileCommand.run(context as CommandContext);
+	t.is(res, 'done');
+	t.is(getActiveProfileName(globalDir), undefined);
+	t.is(messages.length, 1);
+});
+
+test.serial(
+	'/profile applies profile mode and reports model switch failure',
+	async t => {
+		const projectAgents = {
+			nanocoder: {
+				profiles: {
+					architect: {mode: 'architect'},
+					failingModel: {provider: 'broken', model: 'broken-model'},
+				},
+			},
+		};
+		process.env.NANOCODER_CONFIG_DIR = globalDir;
+		writeFileSync(
+			join(globalDir, 'agents.config.json'),
+			JSON.stringify(projectAgents),
+		);
+
+		let switchedMode: string | undefined;
+		const messages: unknown[] = [];
+		const context: Partial<CommandContext> = {
+			args: ['architect'],
+			argText: 'architect',
+			provider: 'default',
+			model: 'default',
+			addToChatQueue: msg => messages.push(msg),
+			switchMode: mode => {
+				switchedMode = mode;
+			},
+			switchModel: async () => false,
+		};
+
+		// 1. Switches mode
+		const res1 = await profileCommand.run(context as CommandContext);
+		t.is(res1, 'done');
+		t.is(switchedMode, 'architect');
+
+		// 2. Model switch returns false -> reports failure message
+		messages.length = 0;
+		context.args = ['failingModel'];
+		context.argText = 'failingModel';
+		const res2 = await profileCommand.run(context as CommandContext);
+		t.is(res2, 'done');
+		t.is(messages.length, 1);
+	},
+);

@@ -1,6 +1,10 @@
-import {existsSync, readFileSync, realpathSync, statSync} from 'fs';
+import {existsSync, realpathSync} from 'fs';
 import {join, resolve} from 'path';
 import {type CliMode, VALID_MODES} from '@/app/types';
+import {
+	clearConfigFileCache,
+	readCachedConfigFile,
+} from '@/config/cached-reader';
 import {substituteEnvVars} from '@/config/env-substitution';
 import {
 	loadAllMCPConfigs,
@@ -79,37 +83,6 @@ export {
 	setActiveProfile,
 	setCliProfile,
 };
-
-type ConfigFileCacheEntry = {
-	mtimeMs: number;
-	size: number;
-	data: unknown;
-};
-
-const configFileCache = new Map<string, ConfigFileCacheEntry>();
-
-function readCachedConfigFile(configPath: string): unknown {
-	const stats = statSync(configPath);
-	const cached = configFileCache.get(configPath);
-
-	if (
-		cached &&
-		cached.mtimeMs === stats.mtimeMs &&
-		cached.size === stats.size
-	) {
-		return structuredClone(cached.data);
-	}
-
-	const data: unknown = JSON.parse(readFileSync(configPath, 'utf-8'));
-
-	configFileCache.set(configPath, {
-		mtimeMs: stats.mtimeMs,
-		size: stats.size,
-		data: structuredClone(data),
-	});
-
-	return data;
-}
 
 /**
  * Read a JSON config file and hand the parsed contents to `extract`. Returns
@@ -1171,7 +1144,7 @@ export function getRetryLimits(): RetryLimitsConfig {
 
 // Function to reload the app configuration (useful after config file changes)
 export function reloadAppConfig(): void {
-	configFileCache.clear();
+	clearConfigFileCache();
 	sessionRootConfigs.clear();
 	_appConfig = null;
 	getAppConfig();
@@ -1179,7 +1152,7 @@ export function reloadAppConfig(): void {
 }
 
 export function clearAppConfig(): void {
-	configFileCache.clear();
+	clearConfigFileCache();
 	sessionRootConfigs.clear();
 	_appConfig = null;
 	_configGeneration++;
