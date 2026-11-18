@@ -39,11 +39,6 @@ Hosted services using the OpenAI-compatible API format.
 
 - [OpenRouter](openrouter.md) - Unified API for multiple AI providers
 - [Requesty](requesty.md) - OpenAI-compatible LLM router for multiple AI providers
-- [OrcaRouter](orcarouter.md) - OpenAI-compatible LLM router for multiple AI providers
-- [Cheaper Inference](cheaper-inference.md) - OpenAI-compatible gateway for models from multiple AI providers
-- [API Route](api-route.md) - OpenAI-compatible gateway for models from multiple AI providers
-- [FutureInfra](futureinfra.md) - OpenAI-compatible AI API router for models from multiple AI providers
-- [Opper](opper.md) - EU-hosted OpenAI-compatible gateway for models from multiple AI providers
 - [Together AI](together.md) - Fast inference for open-source models with OpenAI-compatible API
 - [Groq](groq.md) - Very fast open-weight model inference on LPU hardware
 - [OpenAI](openai.md) - GPT models via OpenAI's API
@@ -186,6 +181,7 @@ API keys and other config values support environment variable substitution:
 - `$VAR_NAME` - simple variable reference
 - `${VAR_NAME}` - braced reference
 - `${VAR_NAME:-default}` - reference with default value
+- `$$` - escape for a literal `$` (e.g. `pa$$WORD` or `$$VAR_NAME`)
 
 ```json
 {

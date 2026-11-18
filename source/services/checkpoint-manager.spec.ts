@@ -3,7 +3,7 @@ import * as path from 'path';
 import type {Message} from '@/types/core';
 import test from 'ava';
 import * as fs from 'fs/promises';
-import {describeCheckpointGaps} from '@/utils/checkpoint-utils';
+import {describeCheckpointGaps} from '@/services/checkpoint-utils';
 import {CheckpointManager} from './checkpoint-manager';
 import {execFileSync} from 'node:child_process';
 // Helper to create a temporary directory for tests

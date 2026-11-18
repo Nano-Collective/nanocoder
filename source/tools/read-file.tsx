@@ -1,5 +1,5 @@
 import {constants} from 'node:fs';
-import {access, lstat, readFile, stat} from 'node:fs/promises';
+import {access, lstat, stat} from 'node:fs/promises';
 import {resolve} from 'node:path';
 import {Box, Text} from 'ink';
 import React from 'react';
@@ -12,19 +12,20 @@ import {
 } from '@/constants';
 import {ThemeContext} from '@/hooks/useTheme';
 import {getProjectRoot, getSafeSessionCwd} from '@/services/session-cwd';
-import type {NanocoderToolExport} from '@/types/core';
-import {jsonSchema, tool} from '@/types/core';
-import {formatError} from '@/utils/error-formatter';
-import {getCachedFileContent} from '@/utils/file-cache';
-import {getFileType} from '@/utils/file-type-detector';
-import {isValidFilePath, resolveFilePath} from '@/utils/path-validation';
 import {
 	markFileSeen,
 	matchReadContent,
 	READ_STUB_MARKER,
+	recordVisibilityReceipt,
 	rememberReadContent,
-} from '@/utils/read-tracker';
-import {calculateTokens} from '@/utils/token-calculator';
+} from '@/tools/runtime/read-tracker';
+import type {NanocoderToolExport} from '@/types/core';
+import {jsonSchema, tool} from '@/types/core';
+import {formatError} from '@/utils/error-formatter';
+import {getCachedFileContent} from '@/utils/fs/file-cache';
+import {getFileType} from '@/utils/fs/file-type-detector';
+import {isValidFilePath, resolveFilePath} from '@/utils/fs/path-validation';
+import {estimateTokens} from '@/utils/token-calculator';
 
 function formatReadStub(path: string, lineCount: number, size: number): string {
 	return `[file: ${path} — ${READ_STUB_MARKER} (${lineCount} lines, ${size} bytes). pass start_line/end_line to read the body again.]`;
@@ -71,26 +72,21 @@ const executeReadFile = async (args: {
 					const content = cached.content;
 
 					output += `Lines: ${cached.totalLines}\n`;
-					output += `Estimated Tokens: ~${calculateTokens(content)}\n`;
+					output += `Estimated Tokens: ~${estimateTokens(content)}\n`;
 
 					// Detect file type from extension
 					const fileType = getFileType(absPath);
 					output += `File Type: ${fileType}\n`;
 
-					// Detect likely encoding (simple heuristic)
-					let encoding = 'UTF-8';
-					try {
-						// `derived` records what the cache actually produced for this
-						// path, so the label cannot disagree with the content above.
-						if (cached.derived) {
-							encoding = 'Binary (Converted to Markdown)';
-						} else {
-							// Try to read as UTF-8
-							await readFile(absPath, 'utf-8');
-						}
-					} catch (_error: unknown) {
-						encoding = 'Binary/Unknown';
-					}
+					// `derived` and `notUtf8` record what the cache actually found for
+					// this path, so the label cannot disagree with the content above.
+					// Reading the file as UTF-8 never fails, since Node replaces bytes
+					// that don't decode with U+FFFD, so only the raw bytes can tell.
+					const encoding = cached.derived
+						? 'Binary (Converted to Markdown)'
+						: cached.notUtf8
+							? 'Not valid UTF-8 (a legacy encoding such as Latin-1, Windows-1252 or Shift-JIS, or binary data)'
+							: 'UTF-8';
 					output += `Encoding: ${encoding}\n`;
 				} catch (error: unknown) {
 					// If we can't read it, mark as not readable
@@ -131,6 +127,7 @@ const executeReadFile = async (args: {
 			// An empty file has been seen in full; allow edits/overwrites against it.
 			markFileSeen(absPath);
 			rememberReadContent(absPath, stats, 0, args.start_line, args.end_line);
+			recordVisibilityReceipt(absPath, stats, undefined, undefined);
 			return EMPTY_CONTENT_MARKER;
 		}
 
@@ -159,6 +156,8 @@ const executeReadFile = async (args: {
 				args.start_line,
 				args.end_line,
 			);
+			// Record visibility receipt for the preview lines shown
+			recordVisibilityReceipt(absPath, stats, 1, previewEndLine);
 
 			return `${preview}\n\n[Truncated at line ${previewEndLine} of ${totalLines}. Use read_file with start_line: ${previewEndLine + 1} and end_line to continue.]`;
 		}
@@ -182,6 +181,8 @@ const executeReadFile = async (args: {
 			args.start_line,
 			args.end_line,
 		);
+		// Record visibility receipt for the actual lines returned
+		recordVisibilityReceipt(absPath, stats, startLine, endLine);
 
 		// Return content without line numbers for clean content-based editing
 		return linesToReturn.join('\n');
@@ -376,7 +377,7 @@ const readFileFormatter = async (
 			const readLines = readEndLine - startLine + 1;
 			const isPartialRead = startLine > 1 || readEndLine < totalLines;
 
-			const tokens = isMetadataOnly ? 0 : result ? calculateTokens(result) : 0;
+			const tokens = isMetadataOnly ? 0 : result ? estimateTokens(result) : 0;
 
 			fileInfo = {
 				totalLines,

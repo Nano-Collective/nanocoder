@@ -6,9 +6,9 @@ import {mergeDisabledTools} from '@/acp/acp-capabilities';
 import {getAppConfig} from '@/config/index';
 import {SemanticMemoryManager} from '@/memory/semantic-memory-manager';
 import {
-	createSessionCwdScope,
-	type SessionCwdScope,
-} from '@/services/session-cwd';
+	createSessionContext,
+	type SessionContext,
+} from '@/services/session-context';
 import {TimelineManager} from '@/services/timeline-manager';
 import type {DevelopmentMode, LLMClient, Message} from '@/types/core';
 
@@ -19,12 +19,12 @@ export class AcpSession {
 	readonly clientCapabilities?: ClientCapabilities;
 	readonly timeline: TimelineManager;
 	/**
-	 * Where this session's tools run: `cwd` from the client, moved by a bash
-	 * `cd`. Turns run inside it, so relative paths, bash, the path boundary and
-	 * the system prompt follow the session, not the directory the agent was
-	 * spawned in.
+	 * Where this session runs: `cwd` from the client, moved by a bash `cd`. Its
+	 * requests and turns run inside it, so relative paths, bash, the path
+	 * boundary, the system prompt and the project config (agents.config.json,
+	 * .mcp.json) follow the session, not the directory the agent was spawned in.
 	 */
-	readonly cwdScope: SessionCwdScope;
+	readonly context: SessionContext;
 
 	messages: Message[] = [];
 	systemMessage?: Message;
@@ -56,6 +56,18 @@ export class AcpSession {
 	 * switching provider does not change when another session compacts.
 	 */
 	aggressiveCompact = false;
+	/**
+	 * Tune's tool mode for this session is XML or JSON, set when its prompt is
+	 * built: the prompt carries the tool definitions, so the request must not
+	 * send native tools too.
+	 */
+	nativeToolsDisabled = false;
+	/**
+	 * Output of this session's `session-start` hooks, until the first prompt
+	 * that goes to the model takes it. Kept per session, not in the hook
+	 * service's process-wide buffer, since one ACP process hosts many chats.
+	 */
+	startHookOutput: Promise<string> | null = null;
 	private memoryFinder?: SemanticMemoryManager;
 
 	constructor(options: {
@@ -64,6 +76,7 @@ export class AcpSession {
 		conn: AgentSideConnection;
 		clientCapabilities?: ClientCapabilities;
 		initialMode?: DevelopmentMode;
+		context?: SessionContext;
 	}) {
 		this.sessionId = options.sessionId;
 		this.cwd = options.cwd;
@@ -71,7 +84,8 @@ export class AcpSession {
 		this.clientCapabilities = options.clientCapabilities;
 		this.developmentMode = options.initialMode ?? 'auto-accept';
 		this.timeline = new TimelineManager(options.cwd, options.sessionId);
-		this.cwdScope = createSessionCwdScope(options.cwd);
+		this.context = options.context ?? createSessionContext(options.cwd);
+		this.context.sessionId = options.sessionId;
 	}
 
 	/**

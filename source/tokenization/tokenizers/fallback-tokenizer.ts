@@ -1,15 +1,14 @@
 import type {Message} from '@/types/core';
+import {estimateTokens} from '@/utils/token-calculator';
 import type {Tokenizer} from '../../types/tokenization';
 
 /**
  * Fallback tokenizer for unsupported models
- * Uses a simple character-based estimation (4 chars per token)
+ * Uses a simple character-based estimation (see estimateTokens)
  */
 export class FallbackTokenizer implements Tokenizer {
-	private readonly CHARS_PER_TOKEN = 4;
-
 	encode(text: string): number {
-		return Math.ceil(text.length / this.CHARS_PER_TOKEN);
+		return estimateTokens(text);
 	}
 
 	countTokens(message: Message): number {
@@ -17,7 +16,7 @@ export class FallbackTokenizer implements Tokenizer {
 		const role = message.role || '';
 
 		// Count tokens for content + a small overhead for role and formatting
-		return this.encode(content) + Math.ceil(role.length / this.CHARS_PER_TOKEN);
+		return this.encode(content) + estimateTokens(role);
 	}
 
 	getName(): string {

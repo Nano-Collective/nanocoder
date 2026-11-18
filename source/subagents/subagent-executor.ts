@@ -5,11 +5,15 @@
  * Supports concurrent execution via unique agentId for progress isolation.
  */
 
+import {NO_RESPONSE_MESSAGE, runTurnEngine} from '@/agent-loop/turn-engine';
 import {createLLMClient} from '@/client-factory';
-import {getAppConfig, getRetryLimits} from '@/config/index';
+import {
+	getAppConfig,
+	getRetryLimits,
+	getSubagentMaxTurns,
+} from '@/config/index';
 import {getProjectContextPreferences} from '@/config/preferences';
 import {invalidArgumentsResult} from '@/hooks/chat-handler/utils/tool-filters';
-import {computeToolCallSignature} from '@/hooks/chat-handler/utils/tool-signature';
 import {
 	appendRelevantProjectContextWithCount,
 	type MemoryFinder,
@@ -23,6 +27,7 @@ import {
 	appendPostToolUseOutput,
 	runPreToolUseGate,
 } from '@/services/lifecycle-hooks';
+import {getProjectRoot} from '@/services/session-cwd';
 import {
 	appendSubagentTool,
 	emitSubagentRunEvent,
@@ -40,6 +45,17 @@ import {
 	updateSubagentSessionStreaming,
 } from '@/services/subagent-session-store';
 import {resolveToolApproval} from '@/tools/approval-policy';
+import {
+	clearReadContentScope,
+	runWithReadContentScope,
+} from '@/tools/runtime/read-tracker';
+import {
+	getSubagentToolBridge,
+	signalToolApproval,
+} from '@/tools/runtime/tool-approval-queue';
+import {parseToolArguments} from '@/tools/runtime/tool-args-parser';
+import {toolErrorToContent} from '@/tools/runtime/tool-validation';
+import {truncateToolResult} from '@/tools/runtime/truncate-tool-result';
 import {SESSION_ARTIFACT_TOOLS, type ToolManager} from '@/tools/tool-manager';
 import type {
 	AISDKCoreTool,
@@ -50,22 +66,11 @@ import type {
 	Message,
 	ToolCall,
 	ToolExecutionContext,
+	ToolResult,
 } from '@/types/core';
-import {maybeAutoCompact} from '@/utils/auto-compact';
 import {formatError} from '@/utils/error-formatter';
-import {capMessagesForModel} from '@/utils/message-capping';
-import {
-	clearReadContentScope,
-	runWithReadContentScope,
-} from '@/utils/read-tracker';
-import {
-	getSubagentToolBridge,
-	signalToolApproval,
-} from '@/utils/tool-approval-queue';
-import {parseToolArguments} from '@/utils/tool-args-parser';
-import {toolErrorToContent} from '@/utils/tool-validation';
-import {truncateToolResult} from '@/utils/truncate-tool-result';
-import {isGitPrCallAllowed, type TrustLevel} from '@/verify/trust';
+import {estimateTokens} from '@/utils/token-calculator';
+import {isGitPrCallAllowed, type TrustLevel} from '@/verify/trust-level';
 import {getSubagentLoader} from './subagent-loader.js';
 import type {
 	SubagentConfigWithSource,
@@ -121,7 +126,8 @@ export async function recordSubagentApiCallForStats(
 }
 
 /**
- * Thrown when the conversation loop stops itself (repeated-call cap). Carries
+ * Thrown when the conversation loop stops itself (a retry guard or the turn
+ * limit). Carries
  * the assistant text produced before the stop so the parent still receives the
  * work the subagent did complete instead of an empty result.
  */
@@ -142,7 +148,7 @@ class SubagentLoopStopError extends Error {
 export class SubagentExecutor {
 	private toolManager: ToolManager;
 	private parentClient: LLMClient;
-	private projectRoot: string;
+	private fixedProjectRoot?: string;
 	private parentMode: DevelopmentMode;
 	private onApiCallComplete?: SubagentApiCallHandler;
 	/**
@@ -154,29 +160,47 @@ export class SubagentExecutor {
 	 * that don't supply a resolver (plain shell, tests).
 	 */
 	private modeResolver?: () => DevelopmentMode;
-	private memoryFinder: MemoryFinder;
+	private fixedMemoryFinder?: MemoryFinder;
+	private memoryFinders = new Map<string, MemoryFinder>();
 	private projectContextOptions?: ProjectContextOptions;
 
+	/**
+	 * `projectRoot` left out means the active session's project root, read on
+	 * each run, so one executor serves ACP sessions in different folders.
+	 */
 	constructor(
 		toolManager: ToolManager,
 		parentClient: LLMClient,
-		projectRoot: string = process.cwd(),
+		projectRoot?: string,
 		parentMode: DevelopmentMode = 'normal',
 		optionsOrHandler: SubagentExecutorOptions | SubagentApiCallHandler = {},
 	) {
 		this.toolManager = toolManager;
 		this.parentClient = parentClient;
-		this.projectRoot = projectRoot;
+		this.fixedProjectRoot = projectRoot;
 		this.parentMode = parentMode;
 		const options =
 			typeof optionsOrHandler === 'function'
 				? {onApiCallComplete: optionsOrHandler}
 				: optionsOrHandler;
 		this.onApiCallComplete = options.onApiCallComplete;
-		this.memoryFinder =
-			options.memoryFinder ??
-			new SemanticMemoryManager({cwd: this.projectRoot});
+		this.fixedMemoryFinder = options.memoryFinder;
 		this.projectContextOptions = options.projectContextOptions;
+	}
+
+	private get projectRoot(): string {
+		return this.fixedProjectRoot ?? getProjectRoot();
+	}
+
+	private get memoryFinder(): MemoryFinder {
+		if (this.fixedMemoryFinder) return this.fixedMemoryFinder;
+		const root = this.projectRoot;
+		let finder = this.memoryFinders.get(root);
+		if (!finder) {
+			finder = new SemanticMemoryManager({cwd: root});
+			this.memoryFinders.set(root, finder);
+		}
+		return finder;
 	}
 
 	/**
@@ -213,7 +237,7 @@ export class SubagentExecutor {
 	 *                  `tools`/`disallowedTools`, applied on top of whatever
 	 *                  the loaded config (frontmatter) declares. Lets a
 	 *                  caller enforce a trust-level allowlist (see
-	 *                  `source/verify/trust.ts`) without needing a second,
+	 *                  `source/verify/trust-level.ts`) without needing a second,
 	 *                  hand-maintained tool list in the subagent's own file.
 	 *                  `alwaysAllow` additionally skips the approval prompt
 	 *                  for the named tools (see `resolveToolApproval`'s
@@ -690,31 +714,13 @@ export class SubagentExecutor {
 		let streamingText = '';
 		let streamingReasoning = '';
 
-		// Repeated-call cap (`nanocoder.retries.maxRepeatedToolCalls`): the same
-		// agent-loop guard the main runtimes apply. A subagent re-issuing the
-		// identical tool call(s) on consecutive turns is stuck; there is no user
-		// to ask inside a delegated run, so hitting the cap stops with an error.
-		// The signature covers every emitted call, so a subagent stuck on an
-		// unknown tool trips the cap too.
-		//
-		// Deliberately out of scope for #897: a hard turn ceiling (the plain and
-		// ACP `maxTurns` equivalent) and alternating-pattern detection, so a
-		// subagent cycling A, B, A, B... is still only bounded by the parent's
-		// abort signal. Revisit as its own change.
-		const {maxRepeatedToolCalls} = getRetryLimits();
-		let lastToolSignature = '';
-		let repeatedToolCallCount = 0;
-
-		// Assistant text from every turn so far. The repeated-call stop hands
-		// this to the parent instead of discarding the work already done.
+		// Assistant text from every turn so far. A guard stop hands this to the
+		// parent instead of discarding the work already done.
 		const assistantTranscript: string[] = [];
 
 		if (agentId) {
 			initSubagentSession(agentId, config.name, messages);
 		}
-
-		// Rough token estimate: ~4 chars per token
-		const estimateTokens = (text: string) => Math.ceil(text.length / 4);
 
 		const emitProgress = (
 			status: 'running' | 'tool_call' | 'complete' | 'error',
@@ -752,221 +758,245 @@ export class SubagentExecutor {
 		// onToken callback (which fires frequently and must be fast).
 		const progressRef = agentId ? getSubagentProgress(agentId) : null;
 
-		while (true) {
-			// Check for cancellation before each turn
-			if (signal?.aborted) {
-				emitProgress('error');
-				throw new Error('Aborted');
+		// Bookkeeping for the progress counters and the live session view.
+		const updateLiveTokenCount = () => {
+			// Update the live token count directly on the mutable progress object
+			// so the UI polls the latest value.
+			if (agentId) {
+				if (progressRef) {
+					progressRef.tokenCount = totalTokens;
+				}
+			} else {
+				subagentProgress.tokenCount = totalTokens;
 			}
+		};
 
-			iterations++;
+		// The system prompt stays at the front of `messages`; the engine sees
+		// the conversation after it.
+		const systemMessage =
+			messages[0]?.role === 'system' ? messages[0] : undefined;
+		const history = () => (systemMessage ? messages.slice(1) : messages);
 
-			// Yield to event loop so Ink can render current state
-			emitProgress('running');
-			await new Promise(resolve => setTimeout(resolve, 50));
+		// Captured before each request so a concurrent parent-model change
+		// cannot misattribute the provider's usage to another model.
+		let provider = 'unknown';
+		let model = 'unknown';
+		let finalAnswer = '';
 
-			// Capture these before the request so a concurrent parent-model change
-			// cannot misattribute the provider's usage to another model.
-			const provider = client.getProviderConfig().name || 'unknown';
-			const model = client.getCurrentModel() || 'unknown';
-			const maxMessages = getAppConfig().sessions?.maxMessages ?? 1000;
-			const systemMessage =
-				messages[0]?.role === 'system' ? messages[0] : undefined;
-			const history = systemMessage ? messages.slice(1) : messages;
-			const cappedHistory = capMessagesForModel(history, maxMessages);
-			const modelMessages = systemMessage
-				? [systemMessage, ...cappedHistory]
-				: cappedHistory;
-
-			const response = await client.chat(
-				modelMessages,
-				tools,
-				{
-					onToken: token => {
-						totalTokens++;
-						if (agentId) {
-							streamingText += token;
-							updateSubagentSessionStreaming(
-								agentId,
-								streamingText,
-								streamingReasoning,
-							);
-						}
-						// Update the live token count directly on the mutable
-						// progress object so the UI polls the latest value.
-						if (agentId) {
-							const progress = progressRef;
-							if (progress) {
-								progress.tokenCount = totalTokens;
-							}
-						} else {
-							subagentProgress.tokenCount = totalTokens;
-						}
-					},
-					onReasoningToken: token => {
-						totalTokens++;
-						if (agentId) {
-							streamingReasoning += token;
-							updateSubagentSessionStreaming(
-								agentId,
-								streamingText,
-								streamingReasoning,
-							);
-						}
-						// Update the live token count directly on the mutable
-						if (agentId) {
-							const progress = progressRef;
-							if (progress) {
-								progress.tokenCount = totalTokens;
-							}
-						} else {
-							subagentProgress.tokenCount = totalTokens;
-						}
+		const result = await runTurnEngine<never>({
+			client,
+			signal: signal ?? new AbortController().signal,
+			// The last allowed turn offers no tools and asks for a final answer,
+			// so a subagent that keeps calling tools still hands something back.
+			maxTurns: getSubagentMaxTurns(),
+			// The `nanocoder.retries` caps the other headless loops apply: there
+			// is nobody to ask inside a delegated run, so a stuck subagent stops
+			// with an error naming the setting.
+			retryLimits: getRetryLimits(),
+			adapter: {
+				history: {
+					get: history,
+					set: next => {
+						messages.splice(
+							0,
+							messages.length,
+							...(systemMessage ? [systemMessage] : []),
+							...next,
+						);
 					},
 				},
-				signal,
-			);
+				getSystemMessage: () => systemMessage,
+				prepareTurn: async () => {
+					iterations++;
 
-			if (onApiCallComplete && hasReportedUsage(response.usage)) {
-				onApiCallComplete({
-					provider,
-					model,
-					inputTokens: response.usage.inputTokens,
-					outputTokens: response.usage.outputTokens,
-					totalTokens: response.usage.totalTokens,
-					...(response.usage.cacheReadTokens !== undefined && {
-						cacheReadTokens: response.usage.cacheReadTokens,
-					}),
-					...(response.usage.cacheWriteTokens !== undefined && {
-						cacheWriteTokens: response.usage.cacheWriteTokens,
-					}),
-					timestamp: Date.now(),
-				});
-			}
+					// Yield to event loop so Ink can render current state
+					emitProgress('running');
+					await new Promise(resolve => setTimeout(resolve, 50));
 
-			const responseContent = response.choices[0]?.message.content || '';
-			if (responseContent.trim()) {
-				assistantTranscript.push(responseContent);
-			}
+					provider = client.getProviderConfig().name || 'unknown';
+					model = client.getCurrentModel() || 'unknown';
+					return {tools, availableNames: Object.keys(tools)};
+				},
+				beginModelCall: () => ({
+					callbacks: {
+						onToken: token => {
+							totalTokens++;
+							if (agentId) {
+								streamingText += token;
+								updateSubagentSessionStreaming(
+									agentId,
+									streamingText,
+									streamingReasoning,
+								);
+							}
+							updateLiveTokenCount();
+						},
+						onReasoningToken: token => {
+							totalTokens++;
+							if (agentId) {
+								streamingReasoning += token;
+								updateSubagentSessionStreaming(
+									agentId,
+									streamingText,
+									streamingReasoning,
+								);
+							}
+							updateLiveTokenCount();
+						},
+					},
+					reasoning: () => undefined,
+				}),
+				onModelResponse: response => {
+					if (onApiCallComplete && hasReportedUsage(response.usage)) {
+						onApiCallComplete({
+							provider,
+							model,
+							inputTokens: response.usage.inputTokens,
+							outputTokens: response.usage.outputTokens,
+							totalTokens: response.usage.totalTokens,
+							...(response.usage.cacheReadTokens !== undefined && {
+								cacheReadTokens: response.usage.cacheReadTokens,
+							}),
+							...(response.usage.cacheWriteTokens !== undefined && {
+								cacheWriteTokens: response.usage.cacheWriteTokens,
+							}),
+							timestamp: Date.now(),
+						});
+					}
 
-			const toolCalls = response.choices[0]?.message.tool_calls;
-			if (!toolCalls || toolCalls.length === 0) {
+					const responseContent = response.choices?.[0]?.message.content || '';
+					if (responseContent.trim()) {
+						assistantTranscript.push(responseContent);
+					}
+				},
+				// Every call goes to executeToolCall, which refuses a tool this
+				// subagent cannot use with its own message.
+				partitionToolCalls: toolCalls => ({
+					validToolCalls: toolCalls,
+					rejectedToolCalls: [],
+					errorResults: [],
+				}),
+				onAssistantTurn: ({toolCalls}) => {
+					// Count tokens from tool call arguments
+					for (const tc of toolCalls) {
+						const argStr =
+							typeof tc.function.arguments === 'string'
+								? tc.function.arguments
+								: JSON.stringify(tc.function.arguments);
+						totalTokens += estimateTokens(argStr);
+					}
+				},
+				onTurnRecorded: () => {
+					if (agentId) {
+						streamingText = '';
+						streamingReasoning = '';
+						updateSubagentSessionStreaming(
+							agentId,
+							streamingText,
+							streamingReasoning,
+						);
+						updateSubagentSessionMessages(agentId, messages);
+					}
+				},
+				onFinalAnswer: ({content}) => {
+					finalAnswer = content;
+					return {kind: 'finish'};
+				},
+				// Execute each tool call — yield between each so Ink can render
+				executeTools: async toolCalls => {
+					const results: ToolResult[] = [];
+					for (const toolCall of toolCalls) {
+						// Check for cancellation before each tool call
+						if (signal?.aborted) {
+							emitProgress('error');
+							throw new Error('Aborted');
+						}
+
+						const toolName = toolCall.function.name;
+						totalToolCalls++;
+						appendSubagentTool(agentId, toolName);
+						emitProgress('tool_call', toolName);
+						await new Promise(resolve => setTimeout(resolve, 50));
+
+						const toolResult = await runWithReadContentScope(
+							agentId ?? 'subagent',
+							() =>
+								this.executeToolCall(
+									toolName,
+									toolCall.function.arguments,
+									// Scoped to this subagent: the model names its own calls
+									// (`call_1`), so two subagents would otherwise share ids
+									// on the client.
+									agentId ? `${agentId}:${toolCall.id}` : toolCall.id,
+									config,
+									signal,
+									{...executionContext, subagentRunId: agentId},
+									alwaysAllow,
+									toolCall.argumentsError,
+								),
+						);
+
+						// Count tokens from tool results
+						totalTokens += estimateTokens(toolResult.content);
+
+						results.push({
+							role: 'tool',
+							content: toolResult.content,
+							...(toolResult.images ? {images: toolResult.images} : {}),
+							tool_call_id: toolCall.id,
+							name: toolName,
+						});
+						if (agentId) {
+							updateSubagentSessionMessages(agentId, [...messages, ...results]);
+						}
+
+						emitProgress('running', toolName);
+						await new Promise(resolve => setTimeout(resolve, 50));
+					}
+					return {kind: 'continue', results};
+				},
+			},
+		});
+
+		switch (result.kind) {
+			case 'completed':
 				emitProgress('complete');
-				return responseContent;
-			}
-
-			const currentToolSignature = computeToolCallSignature(toolCalls);
-			const currentRepeatedCount =
-				currentToolSignature && currentToolSignature === lastToolSignature
-					? repeatedToolCallCount + 1
-					: 1;
-			if (currentRepeatedCount >= maxRepeatedToolCalls) {
+				return finalAnswer;
+			// A reply with no choices failed the request; the parent gets an
+			// error rather than an empty answer it would read as success.
+			case 'no-response':
+				emitProgress('error');
+				throw new Error(NO_RESPONSE_MESSAGE);
+			case 'aborted':
+				// A request the abort cut short throws what the client threw.
+				if (result.error !== undefined) {
+					throw result.error;
+				}
+				emitProgress('error');
+				throw new Error('Aborted');
+			case 'model-error':
+				throw result.error;
+			// A retry guard gave up (repeated calls, empty or malformed turns).
+			case 'guard-stop':
 				emitProgress('error');
 				throw new SubagentLoopStopError(
-					`Subagent repeated the same tool call ${currentRepeatedCount} times in a row without making progress — stopping to avoid a loop (nanocoder.retries.maxRepeatedToolCalls = ${maxRepeatedToolCalls}).`,
+					result.message,
 					assistantTranscript.join('\n\n'),
 				);
-			}
-			lastToolSignature = currentToolSignature;
-			repeatedToolCallCount = currentRepeatedCount;
-
-			// Count tokens from tool call arguments
-			for (const tc of toolCalls) {
-				const argStr =
-					typeof tc.function.arguments === 'string'
-						? tc.function.arguments
-						: JSON.stringify(tc.function.arguments);
-				totalTokens += estimateTokens(argStr);
-			}
-
-			messages.push({
-				role: 'assistant',
-				content: responseContent,
-				tool_calls: toolCalls,
-			});
-			if (systemMessage) {
-				// Gate on the same view the model receives, so the threshold is not
-				// measured against rows the cap already dropped from the request.
-				const gateInput = capMessagesForModel(messages.slice(1), maxMessages);
-				const compacted = await maybeAutoCompact(
-					gateInput,
-					systemMessage,
-					client,
-					tools,
-					{signal},
+			// The final, tool-free turn still came back with tool calls.
+			case 'max-turns':
+				emitProgress('error');
+				throw new SubagentLoopStopError(
+					`Subagent reached its turn limit (${result.maxTurns}) without a final answer — stopping (nanocoder.headless.subagentMaxTurns).`,
+					assistantTranscript.join('\n\n'),
 				);
-				// Only adopt the result when compaction actually ran. Otherwise
-				// maybeAutoCompact hands back the capped view it was given, and
-				// writing that in would permanently discard history the cap only
-				// ever meant to hide from a single request.
-				if (compacted !== gateInput) {
-					messages.splice(0, messages.length, systemMessage, ...compacted);
-				}
-			}
-			if (agentId) {
-				streamingText = '';
-				streamingReasoning = '';
-				updateSubagentSessionStreaming(
-					agentId,
-					streamingText,
-					streamingReasoning,
-				);
-				updateSubagentSessionMessages(agentId, messages);
-			}
-
-			// Execute each tool call — yield between each so Ink can render
-			for (const toolCall of toolCalls) {
-				// Check for cancellation before each tool call
-				if (signal?.aborted) {
-					emitProgress('error');
-					throw new Error('Aborted');
-				}
-
-				const toolName = toolCall.function.name;
-				totalToolCalls++;
-				appendSubagentTool(agentId, toolName);
-				emitProgress('tool_call', toolName);
-				await new Promise(resolve => setTimeout(resolve, 50));
-
-				const toolResult = await runWithReadContentScope(
-					agentId ?? 'subagent',
-					() =>
-						this.executeToolCall(
-							toolName,
-							toolCall.function.arguments,
-							// Scoped to this subagent: the model names its own calls
-							// (`call_1`), so two subagents would otherwise share ids on
-							// the client.
-							agentId ? `${agentId}:${toolCall.id}` : toolCall.id,
-							config,
-							signal,
-							{...executionContext, subagentRunId: agentId},
-							alwaysAllow,
-							toolCall.argumentsError,
-						),
-				);
-
-				// Count tokens from tool results
-				totalTokens += estimateTokens(toolResult.content);
-
-				messages.push({
-					role: 'tool',
-					content: toolResult.content,
-					...(toolResult.images ? {images: toolResult.images} : {}),
-					tool_call_id: toolCall.id,
-					name: toolName,
-				});
-				if (agentId) {
-					updateSubagentSessionMessages(agentId, messages);
-				}
-
-				emitProgress('running', toolName);
-				await new Promise(resolve => setTimeout(resolve, 50));
-			}
+			// Unreachable: execute() always puts the system prompt first, and
+			// executeTools never stops the run.
+			case 'no-system-message':
+			case 'adapter-stop':
+				emitProgress('error');
+				throw new Error(`Subagent loop ended unexpectedly (${result.kind})`);
 		}
-
-		// Unreachable — loop exits via return when model stops calling tools
-		return '';
 	}
 
 	/**

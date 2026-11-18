@@ -25,6 +25,7 @@ test.after.always(() => rmSync(configDir, {recursive: true, force: true}));
 test('banner packages have no eager imports in startup UI modules', t => {
  for (const relativeFile of [
   'components/welcome-message.tsx',
+  'app/components/settings-panels.tsx',
   'app/components/settings-selector.tsx',
   'hooks/use-banner-modules.ts',
  ]) {
@@ -62,7 +63,7 @@ test.serial('Nanocoder Shape settings preview renders after lazy loading', async
 		resetPreferencesCache();
 		const {renderWithTheme} = await import('../test-utils/render-with-theme.js');
 		const {SettingsNanocoderShapePanel} = await import(
-			'../app/components/settings-selector.js'
+			'../app/components/settings-panels.js'
 		);
 		const {lastFrame, unmount} = renderWithTheme(
 			<SettingsNanocoderShapePanel onBack={() => {}} onCancel={() => {}} />,

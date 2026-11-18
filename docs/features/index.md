@@ -89,7 +89,7 @@ When the AI wants to edit a file, run a command, or perform any action, it uses 
 | Mode | Behaviour | Best For |
 |------|-----------|----------|
 | **Normal** (default) | Confirm each tool that can change something; read-only tools run directly | Unfamiliar codebases, sensitive operations |
-| **Auto-Accept** | Most tools execute immediately; bash, `browser`, `git_commit`, `git_pr` create/comment/review, and `approval: always` custom tools still prompt | Trusted tasks, faster iteration |
+| **Auto-Accept** | Most tools execute immediately; bash, `browser`, `git_commit`, `git_pr` create/comment/review, MCP tools not marked read-only or `alwaysAllow`-ed, and `approval: always` custom tools still prompt | Trusted tasks, faster iteration |
 | **Yolo** | Every tool executes immediately with no prompt | Zero interruptions, full trust |
 | **Plan** | Read-only tools run; every mutation tool is removed, and the AI writes a plan for you to approve | Exploring and planning before any change |
 | **Architect** | File edits run without a prompt, then you keep or revert the whole turn | Multi-file changes you want to judge as a whole |
@@ -168,6 +168,11 @@ For multi-step tasks, the [task management](task-management.md) system keeps you
 ```
 
 The AI also has a task tool and will proactively create and update tasks when working on involved problems. Task state lives with the session rather than in your project directory, and is restored when you resume.
+
+For work that spans sessions or has real ordering constraints, plan mode can
+persist its output as a dependency graph instead. The graph is written to
+`.nanocoder/plans/`, and `/plans` shows a progress dashboard such as
+"3/12 done, blocked on auth". See [Persistent Plan Graphs](persistent-plans.md).
 
 ## Customizing Nanocoder
 
@@ -283,7 +288,6 @@ Extend Nanocoder's capabilities by connecting [MCP (Model Context Protocol) serv
 | [Subagents](subagents.md) | Specialized AI agents with isolated context (a kind of skill member) |
 | [Custom Tools](custom-tools.md) | Model-callable shell scripts (a kind of skill member) |
 | [Lifecycle Hooks](hooks.md) | Shell commands run at fixed points in the agent loop, able to veto a tool call, plus in-process JavaScript plugins |
-| [Scheduler](scheduler.md) | Migration pointer — cron triggers are now [skill subscriptions](skills.md#event-subscriptions) |
 | [Commands Reference](commands.md) | All slash commands and special input syntax |
 | [Development Modes](development-modes.md) | Normal, auto-accept, yolo, plan, and architect modes |
 | [Context Compression](context-compression.md) | Managing token usage in long conversations |
@@ -291,6 +295,7 @@ Extend Nanocoder's capabilities by connecting [MCP (Model Context Protocol) serv
 | [Session Management](session-management.md) | Automatic session saving and resumption |
 | [Storage Diagnostics](storage-diagnostics.md) | Read-only storage overview and JSON report |
 | [Task Management](task-management.md) | Tracking multi-step work |
+| [Persistent Plan Graphs](persistent-plans.md) | Durable, dependency-aware plans that survive session restarts |
 | [Semantic Memory](semantic-memory.md) | Save durable project facts and recall them automatically across sessions |
 | [File Explorer](file-explorer.md) | Interactive file browser for context selection |
 | [Image Attachments](image-attachments.md) | Send screenshots and images to vision-capable models |

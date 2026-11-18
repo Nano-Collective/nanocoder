@@ -1,3 +1,4 @@
+import {randomBytes} from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
@@ -1223,11 +1224,11 @@ export class ChatWebviewProvider
 	}
 }
 
-function getNonce() {
-	let text = '';
-	const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-	for (let i = 0; i < 32; i++) {
-		text += possible.charAt(Math.floor(Math.random() * possible.length));
-	}
-	return text;
+/**
+ * The CSP script nonce. It is the only thing that stops injected markup from
+ * running script in the webview, so it must be unguessable: Math.random is
+ * not a CSPRNG.
+ */
+export function getNonce(): string {
+	return randomBytes(16).toString('hex');
 }

@@ -1,6 +1,7 @@
 import React from 'react';
 import {appendToolDefinitionsToPrompt} from '@/ai-sdk-client/tools/system-prompt-assembler';
 import {ConversationStateManager} from '@/app/utils/conversation-state';
+import {infoMsg} from '@/components/message-factory';
 import UserMessage from '@/components/user-message';
 import {getAppConfig} from '@/config/index';
 import {
@@ -9,16 +10,19 @@ import {
 	getProjectContextPreferences,
 	subscribeToPreferences,
 } from '@/config/preferences';
+import {MessageBuilder} from '@/conversation/message-builder';
+import {
+	buildSystemPrompt,
+	setLastBuiltPrompt,
+} from '@/conversation/prompt-builder';
 import {CommandIntegration} from '@/custom-commands/command-integration';
 import {appendRelevantProjectContextWithCount} from '@/memory/project-context';
 import {SemanticMemoryManager} from '@/memory/semantic-memory-manager';
 import {processToolUse} from '@/message-handler';
-import {generateKey} from '@/session/key-generator';
+import {appendActivePlanContext} from '@/plans/context';
 import {getTuneToolMode} from '@/types/config';
 import type {ImageAttachment, Message} from '@/types/core';
-import {MessageBuilder} from '@/utils/message-builder';
-import {infoMsg} from '@/utils/message-factory';
-import {buildSystemPrompt, setLastBuiltPrompt} from '@/utils/prompt-builder';
+import {generateKey} from '@/utils/key-generator';
 import {processAssistantResponse} from './conversation/conversation-loop';
 import {createResetStreamingState} from './state/streaming-state';
 import type {ChatHandlerReturn, UseChatHandlerProps} from './types';
@@ -81,7 +85,6 @@ export function useChatHandler({
 	currentModel,
 	setIsCancelling,
 	addToChatQueue,
-	abortController,
 	setAbortController,
 	developmentMode = 'normal',
 	developmentModeRef,
@@ -255,6 +258,13 @@ export function useChatHandler({
 				created: boolean;
 				name?: string;
 			},
+			// The turn's controller, passed by the caller that created it. Reading
+			// the `abortController` prop here instead would see the value from the
+			// render this callback was memoised in - usually null, since the
+			// caller's setAbortController has not re-rendered yet - and the loop
+			// would mint a second controller that the caller's abort checks never
+			// see.
+			turnController?: AbortController,
 		) => {
 			if (!client) return;
 
@@ -264,7 +274,7 @@ export function useChatHandler({
 					messages: msgs,
 					client,
 					toolManager,
-					abortController,
+					abortController: turnController ?? null,
 					setAbortController,
 					setIsGenerating,
 					setStreamingReasoning,
@@ -318,7 +328,6 @@ export function useChatHandler({
 		[
 			client,
 			toolManager,
-			abortController,
 			setAbortController,
 			setMessages,
 			addToChatQueue,
@@ -408,7 +417,9 @@ export function useChatHandler({
 			conversationStateManager.current.initializeState(message);
 		}
 
-		// Create abort controller for cancellation
+		// Create abort controller for cancellation. This is the turn's only
+		// controller: it is handed to the conversation loop explicitly, so the
+		// one Escape aborts (app state) is the one the checks below read.
 		const controller = new AbortController();
 		setAbortController(controller);
 
@@ -447,6 +458,10 @@ export function useChatHandler({
 				{...getProjectContextPreferences(), ...projectContextOptions},
 			);
 			systemPrompt = projectContext.systemPrompt;
+			// Persisted plan state changes between turns and must be visible after
+			// a restart, so it is appended here rather than baked into the cached
+			// base prompt.
+			systemPrompt = await appendActivePlanContext(systemPrompt);
 			setLastBuiltPrompt(systemPrompt);
 			if (projectContext.memoryCount > 0) {
 				addToChatQueue(
@@ -475,6 +490,7 @@ export function useChatHandler({
 					finalAssistantText = content;
 				},
 				architectCheckpointState,
+				controller,
 			);
 
 			if (

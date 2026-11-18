@@ -30,8 +30,6 @@ import {
 import type {AIProviderConfig} from '@/types/index';
 import {getLogger} from '@/utils/logging';
 import {isOpenRouterProvider} from './openrouter.js';
-import {isOpperProvider} from './opper.js';
-import {isOrcaRouterProvider} from './orcarouter.js';
 import {isRequestyProvider} from './requesty.js';
 
 /**
@@ -588,25 +586,12 @@ export async function createProvider(
 		headers['X-Title'] = 'Nanocoder';
 	}
 
-	// OrcaRouter (https://www.orcarouter.ai) is an OpenAI-compatible router and
-	// uses the same app-attribution headers as OpenRouter.
-	if (isOrcaRouterProvider(providerConfig.name)) {
-		headers['HTTP-Referer'] = 'https://github.com/Nano-Collective/nanocoder';
-		headers['X-Title'] = 'Nanocoder';
-	}
-
 	// Usage reporting is on by default. When the user has not set
 	// `includeUsage` explicitly, a strict endpoint that rejects
 	// `stream_options` gets one retry without it instead of failing the turn.
 	const includeUsageExplicit = typeof config.includeUsage === 'boolean';
 	const includeUsage = includeUsageExplicit ? config.includeUsage : true;
 	const baseFetch = createUndiciFetch(undiciAgent);
-
-	// Opper (https://opper.ai) names the calling application on its traces via
-	// X-Opper-Name, so runs show up as "nanocoder" in the user's Opper console.
-	if (isOpperProvider(providerConfig.name)) {
-		headers['X-Opper-Name'] = 'nanocoder';
-	}
 
 	const {createOpenAICompatible} = await import('@ai-sdk/openai-compatible');
 	return {

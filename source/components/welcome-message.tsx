@@ -9,14 +9,14 @@ import {
 import {useBannerModules} from '@/hooks/use-banner-modules';
 import {useResponsiveTerminal, useTerminalRows} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
+import {wrapWithTrimmedContinuations} from '@/terminal/text-wrapping';
 import {
 	formatGitStatusSummary,
 	getGitStatusSummarySync,
 } from '@/tools/git/utils';
 import {DEFAULT_NANOCODER_SHAPE, type NanocoderShape} from '@/types/ui';
+import {homeRelative, truncateMiddle} from '@/utils/fs/path';
 import {getPackageVersion, UNKNOWN_VERSION} from '@/utils/package-version';
-import {homeRelative, truncateMiddle} from '@/utils/path';
-import {wrapWithTrimmedContinuations} from '@/utils/text-wrapping';
 import {getRandomTip} from '@/utils/tips';
 
 // Resolve the version once at module load time to avoid repeated file reads.

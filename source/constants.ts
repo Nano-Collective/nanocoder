@@ -12,7 +12,6 @@ export const TIMEOUT_OUTPUT_FLUSH_MS = 1000;
 export const TIMEOUT_EXECUTION_MAX_MS = 300_000; // 5 minutes
 export const TIMEOUT_WEB_SEARCH_MS = 10_000;
 export const TIMEOUT_VSCODE_EXTENSION_SKIP_MS = 3000;
-export const TIMEOUT_MESSAGE_PROCESSING_MS = 5 * 60 * 1000; // 5 minutes
 export const TIMEOUT_HTTP_HEADERS_MS = 10_000;
 export const TIMEOUT_HTTP_BODY_MS = 30_000;
 export const TIMEOUT_UPDATE_CHECK_MS = 10_000;
@@ -51,6 +50,11 @@ export const PASTE_CHUNK_BASE_WINDOW_MS = 500;
 export const PASTE_CHUNK_MAX_WINDOW_MS = 2000;
 export const PASTE_RAPID_DETECTION_MS = 50;
 export const PASTE_LARGE_CONTENT_THRESHOLD_CHARS = 150;
+/**
+ * Default threshold for single-line paste handling.
+ * Pastes <= this character limit are inserted directly without placeholders.
+ */
+export const DEFAULT_SINGLE_LINE_PASTE_THRESHOLD = 800;
 
 // === CACHE CONFIGURATION ===
 export const CACHE_FILE_TTL_MS = 5000;
@@ -77,8 +81,7 @@ export const MAX_TIMELINE_SESSION_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 export const MAX_FIND_FILES_RESULTS = 100;
 export const MAX_SEARCH_RESULTS = 100;
 export const MAX_PROMPT_HISTORY_SIZE = 100;
-export const MAX_USAGE_SESSIONS = 100;
-export const MAX_DAILY_AGGREGATES = 30;
+export const MAX_WEB_SEARCH_RESULTS = 20;
 export const MAX_WEB_SEARCH_QUERY_LENGTH = 500;
 
 // === DEFAULTS ===
@@ -125,6 +128,7 @@ export const TIPS = [
 	'Use @ followed by a file path to add that file to context.',
 	'Use /explorer to browse project files and add them to context.',
 	'Run /checkpoint create before a risky refactor so you can restore it later.',
+	'Run /plans to see plan-graph progress and which task is ready next.',
 	'Run /compact --preview to inspect a context compression before applying it.',
 	'Run /copy to copy the last assistant response to your clipboard.',
 	'Run /usage to see how much of the current model context is in use.',
@@ -160,6 +164,8 @@ export const TRUNCATION_DESCRIPTION_LENGTH = 100;
 export const TOOL_OUTPUT_DISPLAY_LINES = 20;
 
 // === DELAYS ===
+// How long a slash command that queued output waits before completing; see
+// `completeCommand` in source/app/utils/command-dispatcher.ts for why.
 export const DELAY_COMMAND_COMPLETE_MS = 100;
 
 // === BASH EXECUTION ===
@@ -190,6 +196,14 @@ export const CACHE_FILE_LIST_TTL_MS = 5000;
 
 // === FETCH URL ===
 export const MAX_URL_CONTENT_BYTES = 100_000; // ~100 KB
+
+// === CLI RUN ===
+// Most piped stdin `nanocoder run` will read into the prompt. Matches the
+// fetch_url cap: ~25k tokens, enough for a large diff or test log without
+// one pipe filling a small local model's context window.
+//
+// Counted in characters, not bytes: ~100 KB of ASCII, more for text that is not.
+export const MAX_STDIN_PROMPT_CHARS = 100_000;
 
 // === AI SDK ===
 export const MAX_TOOL_STEPS = 10;

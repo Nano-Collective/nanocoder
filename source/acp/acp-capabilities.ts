@@ -54,6 +54,15 @@ export const ACP_EXT_METHODS = [
 	'cancelSubagent',
 ] as const;
 
+/**
+ * JSON-RPC error code for a session refused because its `cwd` is not a
+ * trusted folder: the per-session form of the server's exit code 3. The
+ * error's data carries `nanocoder/trustRequired` with the folder and its
+ * status, so a client can run `nanocoder trust --status --json` there and
+ * retry after `nanocoder trust --grant <fingerprint>`.
+ */
+export const ACP_TRUST_REQUIRED_ERROR_CODE = -32003;
+
 /** Sent when a session is titled in the background. */
 export const ACP_SESSION_TITLE_NOTIFICATION = '_nanocoder/sessionTitleChanged';
 

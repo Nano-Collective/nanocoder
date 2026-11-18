@@ -1,4 +1,4 @@
-import {chmod, mkdtemp, readFile, rm, writeFile} from 'node:fs/promises';
+import {chmod, mkdtemp, readFile, rm, symlink, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
@@ -9,7 +9,7 @@ import {themes} from '../../config/themes.js';
 import {resolveToolApproval} from '../approval-policy.js';
 import {ThemeContext} from '../../hooks/useTheme.js';
 import {writeFileTool} from './write-file.js';
-import {clearReadTracker, markFileSeen} from '../../utils/read-tracker.js';
+import {clearReadTracker, markFileSeenAndVisible} from '../runtime/read-tracker.js';
 import {
 	resetFirewallConfig,
 	setFirewallConfig,
@@ -286,7 +286,7 @@ test('write_file validator: allows overwriting an existing file after it is read
 	const originalCwd = process.cwd();
 	try {
 		process.chdir(testDir);
-		markFileSeen('existing.txt');
+		markFileSeenAndVisible('existing.txt');
 
 		const result = await writeFileTool.validator({
 			path: 'existing.txt',
@@ -298,6 +298,41 @@ test('write_file validator: allows overwriting an existing file after it is read
 		process.chdir(originalCwd);
 	}
 });
+
+(process.platform === 'win32' ? test.skip : test)(
+	'write_file validator: rejects a dangling symlink that points outside the project',
+	async t => {
+		if (!writeFileTool.validator) {
+			t.fail('Validator not defined');
+			return;
+		}
+
+		const outside = await mkdtemp(join(tmpdir(), 'write-file-outside-'));
+		const originalCwd = process.cwd();
+		try {
+			// A cloned repo ships `notes.md -> <outside>/authorized_keys`. The
+			// target does not exist yet, so writing through the link creates it.
+			await symlink(
+				join(outside, 'authorized_keys'),
+				join(testDir, 'notes.md'),
+			);
+			process.chdir(testDir);
+
+			const result = await writeFileTool.validator({
+				path: 'notes.md',
+				content: 'ssh-ed25519 AAAA attacker',
+			});
+
+			t.false(result.valid);
+			if (!result.valid) {
+				t.regex(result.error, /escapes project directory via symlink/);
+			}
+		} finally {
+			process.chdir(originalCwd);
+			await rm(outside, {recursive: true, force: true});
+		}
+	},
+);
 
 test('write_file validator: rejects non-existent parent directory', async t => {
 	if (!writeFileTool.validator) {
@@ -817,7 +852,7 @@ test('write_file formatter: normalizes tabs to 2 spaces', async t => {
 test('write_file: refuses a .pdf and leaves the document untouched', async t => {
 	const pdfBytes = '%PDF-1.4 fake document bytes';
 	const filePath = await createTestFile('doc.pdf', pdfBytes);
-	markFileSeen(filePath);
+	markFileSeenAndVisible(filePath);
 
 	await t.throwsAsync(
 		executeWriteFile({path: filePath, content: 'plain transcript text'}),
@@ -968,6 +1003,72 @@ test('write_file formatter: shows a diff against previous content when overwriti
 	t.regex(output, /line two/); // removed line is still shown, not just the new content
 	t.regex(output, /line one/); // unchanged context is still shown
 	t.false(output.includes('File content:'));
+});
+
+// ============================================================================
+// CRLF line endings (#1964)
+// ============================================================================
+
+test('write_file: keeps CRLF line endings when overwriting a CRLF file', async t => {
+	const filePath = await createTestFile('crlf.txt', 'one\r\ntwo\r\n');
+
+	await executeWriteFile({path: filePath, content: 'one\ntwo\nthree\n'});
+
+	const content = await readFile(filePath, 'utf-8');
+	t.is(content, 'one\r\ntwo\r\nthree\r\n');
+});
+
+test('write_file: converts mixed content for a CRLF file', async t => {
+	const filePath = await createTestFile('crlf-mixed.txt', 'one\r\ntwo\r\n');
+
+	await executeWriteFile({path: filePath, content: 'one\r\ntwo\nthree\n'});
+
+	const content = await readFile(filePath, 'utf-8');
+	t.is(content, 'one\r\ntwo\r\nthree\r\n');
+});
+
+test('write_file: writes CRLF content to an LF file as sent', async t => {
+	const filePath = await createTestFile('lf.txt', 'one\ntwo\n');
+
+	await executeWriteFile({path: filePath, content: 'one\r\ntwo\r\n'});
+
+	const content = await readFile(filePath, 'utf-8');
+	t.is(content, 'one\r\ntwo\r\n');
+});
+
+test('write_file: writes a new file with the line endings it was given', async t => {
+	const filePath = join(testDir, 'new-lf.txt');
+
+	await executeWriteFile({path: filePath, content: 'one\ntwo\n'});
+
+	const content = await readFile(filePath, 'utf-8');
+	t.is(content, 'one\ntwo\n');
+});
+
+test('write_file formatter: diffs an LF rewrite of a CRLF file by line, not by line ending', async t => {
+	const filePath = await createTestFile(
+		'crlf-preview.txt',
+		'line one\r\nline two\r\nline three\r\n',
+	);
+
+	if (!writeFileTool.formatter) {
+		t.fail('Formatter not defined');
+		return;
+	}
+
+	const args = {path: filePath, content: 'line one\nCHANGED\nline three\n'};
+	const preview = await writeFileTool.formatter(args);
+	const previewOutput = stripAnsi(
+		render(<TestThemeProvider>{preview}</TestThemeProvider>).lastFrame()!,
+	);
+	t.regex(previewOutput, /Diff:\s*\+1\s*-1/);
+
+	const result = await executeWriteFile(args);
+	const after = await writeFileTool.formatter(args, result);
+	const resultOutput = stripAnsi(
+		render(<TestThemeProvider>{after}</TestThemeProvider>).lastFrame()!,
+	);
+	t.regex(resultOutput, /Diff:\s*\+1\s*-1/);
 });
 
 test('write_file formatter: still dumps full content for a brand-new file', async t => {
@@ -1166,6 +1267,25 @@ test('write_file: throws when mutation firewall blocks test deletion', async t =
 	t.true(content.includes('old test'));
 });
 
+test('write_file: lenient firewall writes the file and reports the violation in the result', async t => {
+	setFirewallConfig({mode: 'lenient', enabled: true});
+	const filePath = await createTestFile(
+		'service.spec.ts',
+		"test('preserves behavior', () => {});\ntest('old test', () => {});\n",
+	);
+
+	const result = await executeWriteFile({
+		path: filePath,
+		content: "test('preserves behavior', () => {});\n",
+	});
+
+	t.regex(result, /^File overwritten successfully/);
+	t.regex(result, /\[Mutation Firewall\] Warning \(lenient mode/);
+	t.regex(result, /protect_test_cases/);
+	const content = await readFile(filePath, 'utf-8');
+	t.false(content.includes('old test'));
+});
+
 test('write_file: fails closed when existing file cannot be read and leaves disk untouched', async t => {
 	if (process.platform === 'win32') {
 		t.pass('Skipped on Windows: POSIX chmod 000 is not supported');
@@ -1194,6 +1314,61 @@ test('write_file: fails closed when existing file cannot be read and leaves disk
 	t.is(content, 'secret original content');
 });
 
+// ============================================================================
+// Encoding Guard Tests
+// ============================================================================
+
+// "café" then "old", in Latin-1: the é is a lone E9 byte, not valid UTF-8.
+const LATIN1_BYTES = Buffer.from('caf\xe9\nold\n', 'latin1');
+
+test('write_file: refuses to overwrite a Latin-1 file and leaves every byte unchanged', async t => {
+	const filePath = join(testDir, 'legacy.txt');
+	await writeFile(filePath, LATIN1_BYTES);
+
+	// What the model saw: the é decoded to U+FFFD.
+	await t.throwsAsync(
+		executeWriteFile({path: filePath, content: 'caf�\nnew\n'}),
+		{message: /not valid UTF-8/},
+	);
+
+	t.deepEqual(await readFile(filePath), LATIN1_BYTES);
+});
+
+test('write_file validator: refuses to overwrite a Latin-1 file', async t => {
+	await writeFile(join(testDir, 'legacy.txt'), LATIN1_BYTES);
+
+	if (!writeFileTool.validator) {
+		t.fail('Validator not defined');
+		return;
+	}
+
+	const originalCwd = process.cwd();
+	try {
+		process.chdir(testDir);
+		markFileSeenAndVisible('legacy.txt');
+
+		const result = await writeFileTool.validator({
+			path: 'legacy.txt',
+			content: 'caf�\nnew\n',
+		});
+
+		t.false(result.valid);
+		if (!result.valid) {
+			t.regex(result.error, /not valid UTF-8/);
+		}
+	} finally {
+		process.chdir(originalCwd);
+	}
+});
+
+test('write_file: still overwrites a UTF-8 file with non-ASCII text', async t => {
+	const filePath = await createTestFile('utf8.txt', 'café\nold\n');
+
+	await executeWriteFile({path: filePath, content: 'café\nnew\n'});
+
+	t.is(await readFile(filePath, 'utf-8'), 'café\nnew\n');
+});
+
 test('write_file: genuinely new file write succeeds without read failure', async t => {
 	const filePath = join(testDir, 'new-file.txt');
 	const output = await executeWriteFile({
@@ -1204,4 +1379,31 @@ test('write_file: genuinely new file write succeeds without read failure', async
 	t.truthy(output);
 	const content = await readFile(filePath, 'utf-8');
 	t.is(content, 'brand new content');
+});
+
+// ============================================================================
+// Overwriting a file that changed on disk after it was read
+// ============================================================================
+
+test.serial('write_file validator: refuses to overwrite a file changed outside after the read', async t => {
+	const filePath = join(testDir, 'changed-outside.txt');
+	await writeFile(filePath, 'original\n', 'utf-8');
+
+	const originalCwd = process.cwd();
+	try {
+		process.chdir(testDir);
+		markFileSeenAndVisible('changed-outside.txt');
+
+		// Someone saves the file in an editor while the agent is working.
+		await writeFile(filePath, 'original\nedited in an editor\n', 'utf-8');
+
+		const result = await writeFileTool.validator!({
+			path: 'changed-outside.txt',
+			content: 'the agent version',
+		});
+		t.false(result.valid);
+		if (!result.valid) t.regex(result.error, /modified externally/);
+	} finally {
+		process.chdir(originalCwd);
+	}
 });

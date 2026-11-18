@@ -455,6 +455,43 @@ for (const command of ['echo a:{:b', 'ls | grep x &', 'f(){ echo hi; }; f']) {
 	});
 }
 
+// The pattern guard used to match anywhere in the command text, so searching
+// for or printing one of the patterns was refused as if it ran it.
+for (const command of [
+	'grep "dd if=" build.log',
+	"grep -rn 'mkfs' docs/",
+	'echo "never pipe to > /dev/sda"',
+	'git commit -m "docs: explain why chmod -R 000 is blocked"',
+	'rg "dd\\\\s+if=" source/',
+	'ls ./add if=x',
+	'cat mkfsnotes.txt',
+]) {
+	test(`execute_bash validator allows quoted or embedded pattern ${JSON.stringify(command)}`, async t => {
+		const result = await executeBashTool.validator!({command});
+		t.true(result.valid);
+	});
+}
+
+// Quoting only spares a quoted argument. A quoted command name, a quoted
+// redirect target, and a quoted string another shell runs are still checked.
+for (const command of [
+	'mkfs.ext4 /dev/sda1',
+	'sudo dd if=/dev/zero of=/dev/sda',
+	'"mkfs" /dev/sda1',
+	'ls && "dd" if=/dev/zero of=/dev/sda',
+	'cat image.bin > "/dev/sda"',
+	'bash -c "dd if=/dev/zero of=/dev/sda"',
+	"sh -lc 'mkfs.ext4 /dev/sda1'",
+	'eval "chmod -R 000 /"',
+	'ssh host "mkfs /dev/sda"',
+	'grep x file; mkfs /dev/sda',
+]) {
+	test(`execute_bash validator still blocks ${JSON.stringify(command)}`, async t => {
+		const result = await executeBashTool.validator!({command});
+		t.false(result.valid);
+	});
+}
+
 // The `rm -rf /` guard used to be a single regex that only matched that exact
 // spelling, so every other way of writing "recursive force delete of /" got
 // through. These are the variants from the issue, plus the spellings the old
