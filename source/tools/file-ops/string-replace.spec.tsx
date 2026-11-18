@@ -502,6 +502,89 @@ test('string_replace validator: rejects empty old_str', async t => {
 	}
 });
 
+// ============================================================================
+// Missing / non-string new_str (malformed model calls)
+// ============================================================================
+
+// Runs the validator from inside testDir on a file the model has already read,
+// so the call reaches the argument checks rather than the read-before-edit gate.
+async function validateSeenFile(args: unknown) {
+	const validator = stringReplaceTool.validator;
+	if (!validator) throw new Error('Validator not defined');
+
+	const originalCwd = process.cwd();
+	try {
+		process.chdir(testDir);
+		markFileSeenAndVisible('test.txt');
+		// biome-ignore lint/suspicious/noExplicitAny: simulating malformed model call
+		return await validator(args as any);
+	} finally {
+		process.chdir(originalCwd);
+	}
+}
+
+test('string_replace validator: rejects missing new_str', async t => {
+	await createTestFile('test.txt', 'alpha\nbeta\n');
+
+	const result = await validateSeenFile({path: 'test.txt', old_str: 'beta'});
+
+	t.false(result.valid);
+	if (!result.valid) {
+		t.regex(result.error, /new_str/);
+	}
+});
+
+test('string_replace validator: rejects non-string new_str', async t => {
+	await createTestFile('test.txt', 'alpha\nbeta\n');
+
+	for (const new_str of [123, null, {text: 'x'}]) {
+		const result = await validateSeenFile({
+			path: 'test.txt',
+			old_str: 'beta',
+			new_str,
+		});
+		t.false(result.valid, `expected rejection for new_str=${JSON.stringify(new_str)}`);
+	}
+});
+
+test('string_replace validator: missing new_str on a CRLF file returns an error instead of throwing', async t => {
+	await createTestFile('test.txt', 'alpha\r\nbeta\r\n');
+
+	const result = await validateSeenFile({path: 'test.txt', old_str: 'beta'});
+
+	t.false(result.valid);
+	if (!result.valid) {
+		t.regex(result.error, /new_str/);
+	}
+});
+
+test('string_replace: execute rejects missing new_str and leaves the file unchanged', async t => {
+	const original = 'alpha\nbeta\n';
+	const filePath = await createTestFile('test.txt', original);
+
+	await t.throwsAsync(
+		async () => {
+			// biome-ignore lint/suspicious/noExplicitAny: simulating malformed model call
+			await executeStringReplace({path: filePath, old_str: 'beta'} as any);
+		},
+		{message: /new_str/},
+	);
+
+	t.is(await readFile(filePath, 'utf-8'), original);
+});
+
+test('string_replace validator: still accepts empty new_str (deletion)', async t => {
+	await createTestFile('test.txt', 'alpha\nbeta\n');
+
+	const result = await validateSeenFile({
+		path: 'test.txt',
+		old_str: 'beta\n',
+		new_str: '',
+	});
+
+	t.true(result.valid);
+});
+
 test('string_replace validator: rejects when content not found', async t => {
 	await createTestFile('test.txt', 'Hello World\n');
 
