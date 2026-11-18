@@ -1,8 +1,11 @@
 import {FORMAT_GUIDANCE_MESSAGE} from '@/tool-calling/format-guidance';
 import {normalizeWhitespace} from '@/tool-calling/whitespace';
+import type {JsonSchemaNode} from '@/tools/runtime/schema-validate';
 import {generateToolCallId} from '@/tools/runtime/tool-call-id';
 import type {ToolCall} from '@/types/index';
 import {ensureString} from '@/utils/type-helpers';
+
+export type ToolSchemas = Readonly<Record<string, JsonSchemaNode | undefined>>;
 
 interface ParsedToolCall {
 	toolName: string;
@@ -27,7 +30,10 @@ export class XMLToolCallParser {
 	 * Extracts tool calls from text content containing XML-formatted tool calls
 	 * Type-preserving: Accepts unknown type, converts to string for processing
 	 */
-	static parseToolCalls(content: unknown): ParsedToolCall[] {
+	static parseToolCalls(
+		content: unknown,
+		toolSchemas?: ToolSchemas,
+	): ParsedToolCall[] {
 		const toolCalls: ParsedToolCall[] = [];
 		let match;
 
@@ -70,7 +76,10 @@ export class XMLToolCallParser {
 				match.index + toolName.length + 2,
 				end - (toolName.length + 3),
 			);
-			const parameters = this.parseParameters(innerXml);
+			const parameters = this.parseParameters(
+				innerXml,
+				toolSchemas?.[toolName],
+			);
 			const brokenTag = this.findBrokenTag(innerXml);
 
 			toolCalls.push({
@@ -346,7 +355,10 @@ export class XMLToolCallParser {
 	/**
 	 * Parses parameters from inner XML content
 	 */
-	private static parseParameters(innerXml: string): Record<string, unknown> {
+	private static parseParameters(
+		innerXml: string,
+		toolSchema?: JsonSchemaNode,
+	): Record<string, unknown> {
 		const parameters: Record<string, unknown> = {};
 		let match;
 
@@ -356,10 +368,23 @@ export class XMLToolCallParser {
 		while ((match = this.PARAMETER_REGEX.exec(innerXml)) !== null) {
 			const [, paramName, paramValue] = match;
 
-			// Trim whitespace from parameter value
-			const trimmedValue = paramValue.trim();
+			const parameterSchema = toolSchema?.properties?.[paramName];
+			const parameterTypes = parameterSchema?.type;
+			const permitsString =
+				parameterTypes === 'string' ||
+				(Array.isArray(parameterTypes) && parameterTypes.includes('string'));
 
-			// Try to parse as JSON for complex objects/arrays
+			// A string parameter is text, even when its contents happen to be
+			// valid JSON. Preserve its exact XML value for file contents,
+			// commands, and replacement strings.
+			if (permitsString) {
+				parameters[paramName] = paramValue;
+				continue;
+			}
+
+			// Preserve the historical heuristic when no definite string schema
+			// is available, and parse explicitly typed structured/scalar values.
+			const trimmedValue = paramValue.trim();
 			try {
 				parameters[paramName] = JSON.parse(trimmedValue) as unknown;
 			} catch {

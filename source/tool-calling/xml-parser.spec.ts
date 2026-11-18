@@ -206,6 +206,111 @@ test('parseToolCalls - parses JSON number parameters', t => {
 	t.deepEqual(result[0].parameters, {x: 42, y: 3.14, z: -10});
 });
 
+test('parseToolCalls - preserves JSON-looking string parameters with schemas', t => {
+	const content = `<write_file><path>f</path><content>
+{
+  "name": "x",
+  "version": "1.0.0"
+}
+</content></write_file>`;
+	const result = XMLToolCallParser.parseToolCalls(content, {
+		write_file: {
+			type: 'object',
+			properties: {
+				path: {type: 'string'},
+				content: {type: 'string'},
+			},
+		},
+	});
+
+	t.is(result[0].parameters.path, 'f');
+	t.is(
+		result[0].parameters.content,
+		'\n{\n  "name": "x",\n  "version": "1.0.0"\n}\n',
+	);
+});
+
+test('parseToolCalls - preserves string scalar and multiline values with schemas', t => {
+	const content =
+		'<string_replace><path>f</path><old_str> null\n1.0\n1e3 </old_str><new_str>[1,\n 2]</new_str></string_replace>';
+	const result = XMLToolCallParser.parseToolCalls(content, {
+		string_replace: {
+			type: 'object',
+			properties: {
+				path: {type: 'string'},
+				old_str: {type: 'string'},
+				new_str: {type: 'string'},
+			},
+		},
+	});
+
+	t.deepEqual(result[0].parameters, {
+		path: 'f',
+		old_str: ' null\n1.0\n1e3 ',
+		new_str: '[1,\n 2]',
+	});
+});
+
+test('parseToolCalls - preserves JSON-looking shell commands with schemas', t => {
+	const command = 'printf \'{"version":"1.0"}\'';
+	const result = XMLToolCallParser.parseToolCalls(
+		`<execute_bash><command>${command}</command></execute_bash>`,
+		{
+			execute_bash: {
+				type: 'object',
+				properties: {command: {type: 'string'}},
+			},
+		},
+	);
+
+	t.is(result[0].parameters.command, command);
+});
+
+test('parseToolCalls - parses explicitly typed non-string parameters with schemas', t => {
+	const content =
+		'<configure><options>{"timeout": 5000}</options><files>["a.txt"]</files><enabled>true</enabled><retries>1.0</retries></configure>';
+	const result = XMLToolCallParser.parseToolCalls(content, {
+		configure: {
+			type: 'object',
+			properties: {
+				options: {type: 'object'},
+				files: {type: 'array'},
+				enabled: {type: 'boolean'},
+				retries: {type: 'number'},
+			},
+		},
+	});
+
+	t.deepEqual(result[0].parameters, {
+		options: {timeout: 5000},
+		files: ['a.txt'],
+		enabled: true,
+		retries: 1,
+	});
+});
+
+test('parseToolCalls - preserves string values allowed by union schemas', t => {
+	const result = XMLToolCallParser.parseToolCalls(
+		'<union><nullable>null</nullable><object>{"name":"x"}</object><array>[1,\n 2]</array></union>',
+		{
+			union: {
+				type: 'object',
+				properties: {
+					nullable: {type: ['string', 'null']},
+					object: {type: ['string', 'object']},
+					array: {type: ['string', 'array']},
+				},
+			},
+		},
+	);
+
+	t.deepEqual(result[0].parameters, {
+		nullable: 'null',
+		object: '{"name":"x"}',
+		array: '[1,\n 2]',
+	});
+});
+
 test('parseToolCalls - treats invalid JSON as string', t => {
 	const content = '<test><invalid>{not valid json}</invalid></test>';
 	const result = XMLToolCallParser.parseToolCalls(content);

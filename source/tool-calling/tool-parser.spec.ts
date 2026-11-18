@@ -24,6 +24,28 @@ test('parseToolCalls: successfully parses valid XML tool call', t => {
 	}
 });
 
+test('parseToolCalls: forwards schemas to preserve XML string arguments', t => {
+	const content =
+		'<write_file><path>f</path><content>{"version": "1.0"}\n</content></write_file>';
+	const result = parseToolCalls(content, ['write_file'], {
+		write_file: {
+			type: 'object',
+			properties: {
+				path: {type: 'string'},
+				content: {type: 'string'},
+			},
+		},
+	});
+
+	t.true(result.success);
+	if (result.success) {
+		t.is(
+			result.toolCalls[0].function.arguments.content,
+			'{"version": "1.0"}\n',
+		);
+	}
+});
+
 test('parseToolCalls: parses XML tool calls whose values contain =', t => {
 	const content = `<execute_bash><command>FOO=1 echo hi</command></execute_bash>
 <string_replace><path>a.ts</path><old_str>const x = 1;</old_str><new_str>const x = 2;</new_str></string_replace>`;
