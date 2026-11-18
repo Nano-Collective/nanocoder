@@ -572,7 +572,10 @@ export default function UserInput({
 
 		// Ctrl+V / Ctrl+X: attach the clipboard image / drop the last one.
 		if (isComposerKey('attachClipboardImage', inputChar, key)) {
-			images.attachFromClipboard();
+			// The read is async so a slow helper (cold PowerShell, missing
+			// Wayland tool) cannot freeze the composer; the hook reports any
+			// failure through `clipboardNotice`.
+			void images.attachFromClipboard();
 			return;
 		}
 		if (isComposerKey('removeLastImage', inputChar, key)) {
@@ -762,6 +765,12 @@ export default function UserInput({
 					borderStyle="round"
 					borderColor={isBashMode ? colors.tool : colors.primary}
 				>
+					{/* Ctrl+V failure: say why nothing was attached instead of the
+					paste failing silently. Cleared on the next attempt or when the
+					composer resets. */}
+					{images.clipboardNotice && (
+						<Text color={colors.warning}>{images.clipboardNotice}</Text>
+					)}
 					{/* Input row */}
 					{isReverseSearchMode ? (
 						<ReverseSearchPrompt
