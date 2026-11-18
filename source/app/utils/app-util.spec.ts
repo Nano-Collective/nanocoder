@@ -124,6 +124,20 @@ test('custom command args extraction - empty quoted argument', t => {
 	t.deepEqual(parseCustomCommandArgs('arg1 "" arg3'), ['arg1', '', 'arg3']);
 });
 
+test('custom command args extraction - keeps Windows path backslashes', t => {
+	t.deepEqual(parseCustomCommandArgs('"C:\\src\\app.ts" D:\\x\\y'), [
+		'C:\\src\\app.ts',
+		'D:\\x\\y',
+	]);
+});
+
+test('custom command args extraction - still escapes quote and space', t => {
+	t.deepEqual(parseCustomCommandArgs('"say \\"hello\\"" a\\ b'), [
+		'say "hello"',
+		'a b',
+	]);
+});
+
 // Test checkpoint load detection
 test('checkpoint load detection - load subcommand', t => {
 	const commandParts = ['checkpoint', 'load'];
