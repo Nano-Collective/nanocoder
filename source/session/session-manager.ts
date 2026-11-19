@@ -230,10 +230,12 @@ export class SessionManager {
 			// cannot be read. The index entry is then all that is left of the
 			// pin, the creation time and a title the user or the titler chose,
 			// so keep them instead of resetting them.
+			// A value the caller passes still wins.
 			const existing = sessions.find(s => s.id === sessionId);
 			const keepExistingTitle =
 				existing !== undefined &&
 				!sessionData.titleManuallySet &&
+				!sessionData.titleGenerated &&
 				(existing.titleManuallySet || existing.titleGenerated);
 
 			const created: Session = {
@@ -249,8 +251,10 @@ export class SessionManager {
 				titleManuallySet: keepExistingTitle
 					? existing.titleManuallySet
 					: sessionData.titleManuallySet,
-				titleGenerated: keepExistingTitle ? existing.titleGenerated : undefined,
-				pinned: existing?.pinned,
+				titleGenerated: keepExistingTitle
+					? existing.titleGenerated
+					: sessionData.titleGenerated,
+				pinned: sessionData.pinned ?? existing?.pinned,
 			};
 
 			await this.writeSessionLocked(created, sessions);

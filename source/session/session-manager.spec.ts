@@ -211,6 +211,32 @@ test.serial(
 	},
 );
 
+test.serial(
+	'createSession over an indexed id takes the new title when the old one was only derived',
+	async t => {
+		const original = await manager.createSession(newSessionData('Old derived'));
+
+		const recreated = await recreateOverUnreadableFile(original.id, {
+			title: 'New derived',
+		});
+
+		t.is(recreated.title, 'New derived');
+		t.falsy(recreated.titleManuallySet);
+		t.falsy(recreated.titleGenerated);
+	},
+);
+
+test.serial('createSession honours a pin passed by the caller', async t => {
+	const session = await manager.createSession({
+		...newSessionData('Pinned at creation'),
+		pinned: true,
+	});
+
+	t.true(session.pinned);
+	t.true((await manager.listSessions())[0].pinned);
+	t.true((await manager.readSession(session.id))?.pinned);
+});
+
 // --- readSession ---
 
 test.serial(
