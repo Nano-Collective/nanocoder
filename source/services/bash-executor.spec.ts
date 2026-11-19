@@ -442,17 +442,18 @@ test('signal abort resolves with the cancel error', async t => {
 	t.true(result.isComplete, 'Command should be marked complete');
 });
 
-test('output cap trips and appends the truncation marker exactly once', async t => {
+test('a flood past the cap and the tail window appends the notice exactly once', async t => {
 	// Dynamically import the limit so we test against the actual cap
-	const { BASH_MAX_OUTPUT_BYTES } = await import('../constants.js');
+	const { BASH_MAX_OUTPUT_BYTES, BASH_MAX_OUTPUT_TAIL_BYTES } = await import('../constants.js');
 	const executor = createExecutor();
 
-	// We'll write more than BASH_MAX_OUTPUT_BYTES using python to avoid
-	// large bash allocations. This will emit slightly over the limit.
-	const { promise } = executor.execute(`python3 -c "print('A' * (${BASH_MAX_OUTPUT_BYTES} + 1000))"`);
+	// Past the head cap and the tail window, so the middle really is dropped.
+	// `python` keeps the write off the shell's own command line.
+	const total = BASH_MAX_OUTPUT_BYTES + BASH_MAX_OUTPUT_TAIL_BYTES + 1000;
+	const { promise } = executor.execute(`python3 -c "print('A' * ${total})"`);
 	const result = await promise;
 
-	const truncationMarker = '... [Output truncated to prevent memory exhaustion]';
+	const truncationMarker = '... [Output truncated: ';
 
 	t.true(
 		result.fullOutput.includes(truncationMarker),
@@ -464,20 +465,47 @@ test('output cap trips and appends the truncation marker exactly once', async t 
 	t.is(matches, 1, 'The truncation marker should be appended exactly once');
 
 	t.true(
-		result.fullOutput.length < BASH_MAX_OUTPUT_BYTES + 10000,
+		result.fullOutput.length < BASH_MAX_OUTPUT_BYTES + BASH_MAX_OUTPUT_TAIL_BYTES + 10000,
 		`fullOutput length ${result.fullOutput.length} is capped properly`,
+	);
+	t.true(
+		result.fullOutput.trimEnd().endsWith('A'.repeat(1000)),
+		'the bytes after the cap are kept as the tail',
 	);
 });
 
-const STDOUT_TRUNCATION_MARKER = '... [Output truncated to prevent memory exhaustion]';
-const STDERR_TRUNCATION_MARKER = '... [Stderr truncated to prevent memory exhaustion]';
-
-test('flooding stderr past the cap does not truncate stdout - each stream has its own independent budget', async t => {
-	const { BASH_MAX_OUTPUT_BYTES } = await import('../constants.js');
+test('output past the cap keeps its ending, where the summary is', async t => {
+	const { BASH_MAX_OUTPUT_BYTES, BASH_MAX_OUTPUT_TAIL_BYTES } = await import('../constants.js');
 	const executor = createExecutor();
 
+	// Past the cap and the tail window so the middle is dropped, then the line a
+	// build or test run ends with.
+	const lines = Math.ceil(
+		(BASH_MAX_OUTPUT_BYTES + BASH_MAX_OUTPUT_TAIL_BYTES) / 9,
+	) + 100;
 	const { promise } = executor.execute(
-		`python3 -c "import sys; sys.stderr.write('E' * (${BASH_MAX_OUTPUT_BYTES} + 1000)); sys.stderr.flush(); sys.stdout.write('important stdout data')"`,
+		`python3 -c "import sys; sys.stdout.write('progress\\n' * ${lines}); print('SUMMARY: 1 failed')"`,
+	);
+	const result = await promise;
+
+	t.true(
+		result.fullOutput.includes('SUMMARY: 1 failed'),
+		'the summary at the end of the output must survive the cap (#2237)',
+	);
+	t.true(result.fullOutput.trimEnd().endsWith('SUMMARY: 1 failed'));
+	t.regex(result.fullOutput, /bytes omitted to prevent memory exhaustion/);
+});
+
+const STDOUT_TRUNCATION_MARKER = '... [Output truncated: ';
+const STDERR_TRUNCATION_MARKER = '... [Stderr truncated: ';
+
+test('flooding stderr past the cap does not truncate stdout - each stream has its own independent budget', async t => {
+	const { BASH_MAX_OUTPUT_BYTES, BASH_MAX_OUTPUT_TAIL_BYTES } = await import('../constants.js');
+	const executor = createExecutor();
+
+	const flood = BASH_MAX_OUTPUT_BYTES + BASH_MAX_OUTPUT_TAIL_BYTES + 1000;
+	const { promise } = executor.execute(
+		`python3 -c "import sys; sys.stderr.write('E' * ${flood}); sys.stderr.flush(); sys.stdout.write('important stdout data')"`,
 	);
 	const result = await promise;
 
@@ -496,11 +524,12 @@ test('flooding stderr past the cap does not truncate stdout - each stream has it
 });
 
 test('flooding stdout past the cap does not truncate stderr - each stream has its own independent budget', async t => {
-	const { BASH_MAX_OUTPUT_BYTES } = await import('../constants.js');
+	const { BASH_MAX_OUTPUT_BYTES, BASH_MAX_OUTPUT_TAIL_BYTES } = await import('../constants.js');
 	const executor = createExecutor();
 
+	const flood = BASH_MAX_OUTPUT_BYTES + BASH_MAX_OUTPUT_TAIL_BYTES + 1000;
 	const { promise } = executor.execute(
-		`python3 -c "import sys; sys.stdout.write('O' * (${BASH_MAX_OUTPUT_BYTES} + 1000)); sys.stdout.flush(); sys.stderr.write('important stderr data')"`,
+		`python3 -c "import sys; sys.stdout.write('O' * ${flood}); sys.stdout.flush(); sys.stderr.write('important stderr data')"`,
 	);
 	const result = await promise;
 
@@ -547,20 +576,20 @@ test('a trailing incomplete multi-byte sequence is flushed at stream end, not dr
 	t.true(result.fullOutput.startsWith('ab'));
 });
 
-test('truncation cut landing mid-character does not leak a replacement char after the marker', async t => {
+test('a cap landing inside a character keeps the whole character', async t => {
 	const { BASH_MAX_OUTPUT_BYTES } = await import('../constants.js');
 	const executor = createExecutor();
 	const padLen = BASH_MAX_OUTPUT_BYTES - 1;
 
-	// pads to one byte short of the cap, cutting the char that follows
+	// pads to one byte short of the cap, so the character that follows cannot fit
 	const { promise } = executor.execute(
 		`python3 -c "import sys; o = sys.stdout.buffer; o.write(b'A' * ${padLen}); o.write('\\u2014'.encode('utf-8')); o.flush()"`,
 	);
 	const result = await promise;
 
 	t.true(
-		result.fullOutput.endsWith(STDOUT_TRUNCATION_MARKER),
-		'output should end with the truncation marker, not a stray decoded byte',
+		result.fullOutput.endsWith('—'),
+		'the character is kept whole past the cap instead of being cut',
 	);
 	t.false(
 		result.fullOutput.includes('�'),

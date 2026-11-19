@@ -16,8 +16,8 @@ import {signalProcessTree} from '@/utils/process-tree';
 import {isWindowsCmd, shellArgs} from '@/utils/shell-args';
 import {
 	makeStreamCollector,
-	STDERR_TRUNCATION_NOTICE,
-	STDOUT_TRUNCATION_NOTICE,
+	stderrTruncationNotice,
+	stdoutTruncationNotice,
 } from '@/utils/stream-collector';
 
 /**
@@ -164,10 +164,10 @@ export function runScript(
 		// Per-stream byte budgets, shared with the built-in bash executor.
 		const stdoutCollector = makeStreamCollector(text => {
 			stdout += text;
-		}, STDOUT_TRUNCATION_NOTICE);
+		}, stdoutTruncationNotice);
 		const stderrCollector = makeStreamCollector(text => {
 			stderr += text;
-		}, STDERR_TRUNCATION_NOTICE);
+		}, stderrTruncationNotice);
 		child.stdout?.on('data', stdoutCollector.collect);
 		child.stderr?.on('data', stderrCollector.collect);
 
@@ -206,8 +206,9 @@ function formatScriptOutput(
 	stderr: string,
 ): string {
 	const exitCode = code ?? 0;
-	// Any cap notice is already inline at the end of its own stream (see
-	// makeStreamCollector), so it survives the tail-keeping truncation below.
+	// The stream collector already keeps each stream's ending and marks what it
+	// dropped (see makeStreamCollector), so this cut's tail lands on the real end
+	// of the output rather than on the front of it.
 	const out = stdout.trimEnd();
 	const err = stderr.trimEnd();
 	const prefix = `EXIT_CODE: ${exitCode}\n`;

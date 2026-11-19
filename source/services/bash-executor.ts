@@ -24,8 +24,8 @@ import {shellArgs} from '@/utils/shell-args';
 import {getShutdownManager} from '@/utils/shutdown';
 import {
 	makeStreamCollector,
-	STDERR_TRUNCATION_NOTICE,
-	STDOUT_TRUNCATION_NOTICE,
+	stderrTruncationNotice,
+	stdoutTruncationNotice,
 } from '@/utils/stream-collector';
 import {bashChildEnv} from './bash-env.js';
 import {
@@ -316,10 +316,10 @@ export class BashExecutor extends EventEmitter {
 
 		const stdoutCollector = makeStreamCollector(text => {
 			state.fullOutput += text;
-		}, STDOUT_TRUNCATION_NOTICE);
+		}, stdoutTruncationNotice);
 		const stderrCollector = makeStreamCollector(text => {
 			state.stderr += text;
-		}, STDERR_TRUNCATION_NOTICE);
+		}, stderrTruncationNotice);
 
 		// Both streams are finished (or past their drain grace period) when the
 		// command completes, so release whatever the decoders were holding back
