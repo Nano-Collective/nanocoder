@@ -11,6 +11,7 @@ import {
 } from '@/hooks/chat-handler/utils/tool-filters';
 import {getShutdownManager} from '@/utils/shutdown';
 import {resolveToolApproval} from './approval-policy';
+import {resetRunToolAccess, setRunToolAccess} from './tool-access';
 import {describeSkippedMCPTools, ToolManager} from './tool-manager';
 import {getToolsForProfile} from './tool-profiles';
 
@@ -1446,6 +1447,118 @@ test('getAvailableToolNames - disabledTools removes a bundle-form skill tool', t
 	t.true(baseline.includes('k8s_pods'), 'baseline should include skill tool');
 	t.false(disabled.includes('k8s_pods'), 'disabled list should remove it');
 	t.is(disabled.length, baseline.length - 1);
+});
+
+// ============================================================================
+// --allowed-tools / --disallowed-tools run filter
+// ============================================================================
+
+test.serial('getAvailableToolNames - --allowed-tools keeps only matching tools', t => {
+	const manager = new ToolManager();
+	setRunToolAccess({allowed: ['read_file', 'search_*'], disallowed: []});
+
+	const names = manager.getAvailableToolNames(undefined, 'normal', []);
+
+	t.true(names.includes('read_file'));
+	t.true(names.includes('search_file_contents'));
+	for (const name of names) {
+		t.true(
+			name === 'read_file' || name.startsWith('search_'),
+			`unexpected tool ${name}`,
+		);
+	}
+	resetRunToolAccess();
+});
+
+test.serial('getAvailableToolNames - --disallowed-tools removes matching tools', t => {
+	const manager = new ToolManager();
+	setRunToolAccess({allowed: [], disallowed: ['execute_bash', 'mcp_*']});
+
+	const names = manager.getAvailableToolNames(undefined, 'normal', []);
+
+	t.false(names.includes('execute_bash'));
+	t.true(names.includes('read_file'));
+	resetRunToolAccess();
+});
+
+test.serial('getAvailableToolNames - deny wins over allow for the same tool', t => {
+	const manager = new ToolManager();
+	setRunToolAccess({allowed: ['read_file', 'write_file'], disallowed: ['write_file']});
+
+	const names = manager.getAvailableToolNames(undefined, 'normal', []);
+
+	t.true(names.includes('read_file'));
+	t.false(names.includes('write_file'));
+	resetRunToolAccess();
+});
+
+test.serial('getAvailableToolNames - the run filter cannot re-add a mode exclusion', t => {
+	const manager = new ToolManager();
+	setRunToolAccess({allowed: ['execute_bash', 'read_file'], disallowed: []});
+
+	const names = manager.getAvailableToolNames(undefined, 'plan', []);
+
+	t.false(names.includes('execute_bash'), 'plan mode still excludes it');
+	t.true(names.includes('read_file'));
+	resetRunToolAccess();
+});
+
+test.serial('getAvailableToolNames - the run filter intersects with disabledTools', t => {
+	const manager = new ToolManager();
+	setRunToolAccess({allowed: ['read_file', 'execute_bash'], disallowed: []});
+
+	const names = manager.getAvailableToolNames(undefined, 'normal', [
+		'execute_bash',
+	]);
+
+	t.deepEqual(names, ['read_file']);
+	resetRunToolAccess();
+});
+
+test.serial('getKnownToolNames - includes on-demand MCP catalog tools', async t => {
+	const {manager, servers} = fakeMCPServer('fs', ['fs_stat']);
+	await manager.initializeMCP(servers, undefined, undefined, discovery);
+
+	t.true(manager.getKnownToolNames().includes('fs_stat'));
+	await manager.disconnectMCP();
+});
+
+test.serial('getAvailableToolNames - keeps load_tool_schema when an allow pattern matches an unloaded MCP tool', async t => {
+	const {manager, servers} = fakeMCPServer('fs', ['fs_stat', 'echo_tool']);
+	await manager.initializeMCP(servers, undefined, undefined, discovery);
+	t.true(manager.hasTool('load_tool_schema'));
+
+	setRunToolAccess({allowed: ['fs_*'], disallowed: []});
+	const names = manager.getAvailableToolNames(undefined, 'normal', []);
+
+	t.true(names.includes('load_tool_schema'));
+	t.false(names.includes('echo_tool'));
+	resetRunToolAccess();
+	await manager.disconnectMCP();
+});
+
+test.serial('getAvailableToolNames - an explicit load_tool_schema deny wins over an MCP allow', async t => {
+	const {manager, servers} = fakeMCPServer('fs', ['fs_stat', 'echo_tool']);
+	await manager.initializeMCP(servers, undefined, undefined, discovery);
+
+	setRunToolAccess({allowed: ['fs_*'], disallowed: ['load_tool_schema']});
+	const names = manager.getAvailableToolNames(undefined, 'normal', []);
+
+	t.false(names.includes('load_tool_schema'));
+	resetRunToolAccess();
+	await manager.disconnectMCP();
+});
+
+test.serial('getAvailableToolNames - no load_tool_schema when no allowed tool is in the catalog', async t => {
+	const {manager, servers} = fakeMCPServer('fs', ['fs_stat']);
+	await manager.initializeMCP(servers, undefined, undefined, discovery);
+
+	setRunToolAccess({allowed: ['read_file'], disallowed: []});
+	const names = manager.getAvailableToolNames(undefined, 'normal', []);
+
+	t.false(names.includes('load_tool_schema'));
+	resetRunToolAccess();
+	await manager.disconnectMCP();
 });
 
 // ============================================================================

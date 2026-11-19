@@ -16,6 +16,7 @@ import { setToolRegistryGetter } from "@/message-handler";
 import { setProjectRoot } from "@/services/session-cwd";
 import type { HooksConfig } from "@/types/config";
 import { TOOL_APPROVAL_REQUIRED_KIND } from "@/constants";
+import { resetRunToolAccess, setRunToolAccess } from "@/tools/tool-access";
 import type { ToolManager } from "@/tools/tool-manager";
 import type { DevelopmentMode, LLMClient } from "@/types/core";
 import { notifyError, notifyWarning } from "@/components/message-queue";
@@ -36,6 +37,11 @@ const FAKE_TOOL_MANAGER = {
 	hasTool: () => false,
 	getToolEntry: () => undefined,
 	getToolValidator: () => undefined,
+	getKnownToolNames: () => [
+		"read_file",
+		"execute_bash",
+		"search_file_contents",
+	],
 } as unknown as ToolManager;
 
 interface CapturedShutdown {
@@ -360,6 +366,116 @@ test.serial(
 		t.is(shutdown.code, 0);
 	},
 );
+
+test.serial(
+	"--allowed-tools with an unknown name fails the run before the conversation",
+	async (t) => {
+		const shutdown: CapturedShutdown = { code: null };
+		const stdout = capturingStdout();
+		let conversationRan = false;
+		try {
+			setRunToolAccess({allowed: ["reed_file"], disallowed: []});
+			await runPlainShell({
+				prompt: "do the thing",
+				developmentMode: "auto-accept",
+				trustDirectory: true,
+				outputFormat: "json",
+				deps: baseDeps({
+					initializePlain: makeFakeInitializePlain(),
+					runPlainConversation: async () => {
+						conversationRan = true;
+						return {
+							kind: "success",
+							finalText: "should not run",
+							reasoning: null,
+							toolCalls: [],
+							steps: 0,
+						};
+					},
+					getShutdownManager: makeFakeShutdownManager(shutdown),
+				}),
+			});
+		} finally {
+			stdout.restore();
+			resetRunToolAccess();
+		}
+
+		const report = JSON.parse(stdout.get());
+		t.is(report.kind, "error");
+		t.is(report.exitCode, 1);
+		t.true(report.message.includes("reed_file"));
+		t.true(report.message.includes("read_file"), "lists the valid tools");
+		t.false(conversationRan, "no model call with an unknown filter");
+		t.is(shutdown.code, 1);
+	},
+);
+
+test.serial("the plain boot line names the run tool filter", async (t) => {
+	const shutdown: CapturedShutdown = { code: null };
+	const stderr = capturingStderr();
+	try {
+		setRunToolAccess({
+			allowed: ["read_file", "search_*"],
+			disallowed: ["execute_bash"],
+		});
+		await runPlainShell({
+			prompt: "do the thing",
+			developmentMode: "auto-accept",
+			trustDirectory: true,
+			outputFormat: "text",
+			deps: baseDeps({
+				initializePlain: makeFakeInitializePlain(),
+				runPlainConversation: makeFakeRunPlainConversation({
+					kind: "success",
+					finalText: "done",
+					reasoning: null,
+					toolCalls: [],
+					steps: 1,
+				}),
+				getShutdownManager: makeFakeShutdownManager(shutdown),
+			}),
+		});
+	} finally {
+		stderr.restore();
+		resetRunToolAccess();
+	}
+
+	t.true(
+		stderr.get().includes("Tools: only read_file, search_* (blocked: execute_bash)"),
+	);
+	t.is(shutdown.code, 0);
+});
+
+test.serial("the JSON report carries the run tool filter", async (t) => {
+	const shutdown: CapturedShutdown = { code: null };
+	const stdout = capturingStdout();
+	try {
+		setRunToolAccess({allowed: ["read_file"], disallowed: []});
+		await runPlainShell({
+			prompt: "do the thing",
+			developmentMode: "auto-accept",
+			trustDirectory: true,
+			outputFormat: "json",
+			deps: baseDeps({
+				initializePlain: makeFakeInitializePlain(),
+				runPlainConversation: makeFakeRunPlainConversation({
+					kind: "success",
+					finalText: "done",
+					reasoning: null,
+					toolCalls: [],
+					steps: 1,
+				}),
+				getShutdownManager: makeFakeShutdownManager(shutdown),
+			}),
+		});
+	} finally {
+		stdout.restore();
+		resetRunToolAccess();
+	}
+
+	const report = JSON.parse(stdout.get());
+	t.deepEqual(report.toolAccess, {allowed: ["read_file"], disallowed: []});
+});
 
 test.serial(
 	"--json success outcome includes usage block when present in conversation outcome",

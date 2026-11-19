@@ -10,6 +10,10 @@ import {
 	formatBootSummaryProjectLabel,
 } from './app-container';
 import type {AppContainerProps} from './app-container';
+import {
+	resetRunToolAccess,
+	setRunToolAccess,
+} from '../../tools/tool-access';
 
 test('createStaticComponents includes welcome message when shouldShowWelcome is true', t => {
 	const props: AppContainerProps = {
@@ -105,6 +109,26 @@ test('createStaticComponents omits boot summary when no provider or model', t =>
 
 	const components = createStaticComponents(props);
 	t.is(components.length, 0);
+});
+
+test.serial('createStaticComponents names the run tool filter', t => {
+	setRunToolAccess({allowed: ['read_file'], disallowed: ['execute_bash']});
+	try {
+		const components = createStaticComponents({
+			shouldShowWelcome: false,
+			currentProvider: 'local',
+			currentModel: 'gpt-4',
+		});
+
+		const {lastFrame, unmount} = renderWithTheme(<>{components}</>);
+		const output = stripAnsi(lastFrame() ?? '');
+		t.regex(output, /Tools:/);
+		t.regex(output, /read_file/);
+		t.regex(output, /execute_bash/);
+		unmount();
+	} finally {
+		resetRunToolAccess();
+	}
 });
 
 test('createStaticComponents renders boot summary with mode in non-interactive mode', t => {

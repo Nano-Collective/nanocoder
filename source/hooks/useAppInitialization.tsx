@@ -45,6 +45,7 @@ import {
 } from '@/subagents/subagent-executor';
 import {getSubagentLoader} from '@/subagents/subagent-loader';
 import {setAgentToolExecutor, setAvailableAgentNames} from '@/tools/agent-tool';
+import {hasRunToolAccess, validateRunToolAccess} from '@/tools/tool-access';
 import {describeSkippedMCPTools, ToolManager} from '@/tools/tool-manager';
 import type {CustomCommand} from '@/types/commands';
 import {
@@ -715,19 +716,48 @@ export function useAppInitialization({
 			// during a session; if it ever is, this load has to be undone
 			// or the plugins stay active after the revoke.
 			await loadPlugins(true);
+
+			// A run-level --allowed-tools/--disallowed-tools filter needs the
+			// full tool set before it can be checked: custom and skill tools are
+			// registered above, MCP tools only when their servers connect. Await
+			// MCP in that case so a typo fails the run before chat starts;
+			// otherwise keep it in the background as before.
+			const mcpReady = initializeMCPServers(newToolManager);
+			if (hasRunToolAccess()) {
+				await mcpReady;
+				const toolAccessError = validateRunToolAccess(
+					newToolManager.getKnownToolNames(),
+				);
+				if (toolAccessError) {
+					addToChatQueue(
+						<ErrorMessage
+							key={generateKey('tool-access-error')}
+							message={toolAccessError}
+							hideBox={true}
+						/>,
+					);
+					// Render the transcript so the error is visible, but leave
+					// mcpInitialized false: the non-interactive runner submits
+					// the prompt once that flips, and it must not run past a
+					// filter that failed to validate.
+					setStartChat(true);
+					setTimeout(() => {
+						void getShutdownManager().gracefulShutdown(1);
+					}, TIMEOUT_OUTPUT_FLUSH_MS);
+					return;
+				}
+			} else {
+				void mcpReady;
+			}
 			setMcpInitialized(true);
 			setStartChat(true);
 
 			// === BACKGROUND WORK ===
-			// All three run concurrently after the chat is interactive.
-			// MCP tools register dynamically as servers connect; LSP
-			// diagnostics appear when ready; update banner shows when the
-			// npm check resolves.
+			// LSP and the update banner run concurrently after the chat is
+			// interactive. MCP tools register dynamically as servers connect.
 			void checkForUpdates()
 				.then(info => setUpdateInfo(info))
 				.catch(() => setUpdateInfo(null));
-
-			void initializeMCPServers(newToolManager);
 
 			void initializeLSPServers();
 		};

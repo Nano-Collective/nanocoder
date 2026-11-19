@@ -9,6 +9,7 @@ import {
 	type GitStatusSummary,
 	getGitStatusSummarySync,
 } from '@/tools/git/utils';
+import {formatToolAccessSummary, getRunToolAccess} from '@/tools/tool-access';
 import {DEVELOPMENT_MODE_LABELS, type DevelopmentMode} from '@/types/core';
 import {homeRelative} from '@/utils/fs/path';
 
@@ -80,6 +81,12 @@ function BootSummary({
 	const modeLabel = mode ? DEVELOPMENT_MODE_LABELS[mode] : undefined;
 	const gitStatus = getGitStatusSummarySync();
 	const projectLabel = formatBootSummaryProjectLabel(process.cwd(), gitStatus);
+	// A run restricted with --allowed-tools/--disallowed-tools says so up
+	// front; otherwise a missing tool looks like a broken install.
+	const runToolAccess = getRunToolAccess();
+	const toolAccessLabel = runToolAccess
+		? formatToolAccessSummary(runToolAccess)
+		: undefined;
 
 	// Narrow terminals: provider + model + mode on the first line, with the
 	// workspace/branch underneath so the line doesn't overflow.
@@ -103,6 +110,9 @@ function BootSummary({
 					)}
 				</Text>
 				<Text color={colors.primary}>{projectLabel}</Text>
+				{toolAccessLabel && (
+					<Text color={colors.info}>Tools: {toolAccessLabel}</Text>
+				)}
 			</Box>
 		);
 	}
@@ -124,6 +134,12 @@ function BootSummary({
 					)}
 					<Text color={colors.secondary}> · </Text>
 					<Text color={colors.primary}>{projectLabel}</Text>
+					{toolAccessLabel && (
+						<>
+							<Text color={colors.secondary}> · </Text>
+							<Text color={colors.info}>Tools: {toolAccessLabel}</Text>
+						</>
+					)}
 				</>
 			) : (
 				<Text color={colors.primary}>{projectLabel}</Text>

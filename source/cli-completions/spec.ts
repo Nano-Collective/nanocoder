@@ -190,6 +190,20 @@ export const COMPLETION_FLAGS: readonly CompletionFlag[] = [
 		description: 'Read the run prompt from a file (run mode only)',
 	},
 	{
+		name: 'allowed-tools',
+		takesValue: true,
+		valueName: 'tools',
+		description:
+			'Only offer these comma-separated tools for this run (* globs allowed)',
+	},
+	{
+		name: 'disallowed-tools',
+		takesValue: true,
+		valueName: 'tools',
+		description:
+			'Remove these comma-separated tools for this run (deny wins over allow)',
+	},
+	{
 		name: 'json',
 		takesValue: false,
 		description: 'Output execution results as JSON (run mode only)',

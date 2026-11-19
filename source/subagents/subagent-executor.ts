@@ -56,6 +56,10 @@ import {
 import {parseToolArguments} from '@/tools/runtime/tool-args-parser';
 import {toolErrorToContent} from '@/tools/runtime/tool-validation';
 import {truncateToolResult} from '@/tools/runtime/truncate-tool-result';
+import {
+	filterToolNamesByAccess,
+	matchesAnyToolPattern,
+} from '@/tools/tool-access';
 import {SESSION_ARTIFACT_TOOLS, type ToolManager} from '@/tools/tool-manager';
 import type {
 	AISDKCoreTool,
@@ -533,7 +537,7 @@ export class SubagentExecutor {
 			// scoped to it, and listing them in `tools:` is not required.
 			available = available.filter(
 				tool =>
-					config.tools?.includes(tool) ||
+					matchesAnyToolPattern(tool, config.tools ?? []) ||
 					(config.ownerSkill !== undefined &&
 						this.toolManager.getOwnerSkill(tool) === config.ownerSkill),
 			);
@@ -541,7 +545,7 @@ export class SubagentExecutor {
 
 		if (config.disallowedTools && config.disallowedTools.length > 0) {
 			available = available.filter(
-				tool => !config.disallowedTools?.includes(tool),
+				tool => !matchesAnyToolPattern(tool, config.disallowedTools ?? []),
 			);
 		}
 
@@ -564,6 +568,11 @@ export class SubagentExecutor {
 		// (daemon-triggered) run would be offered ask_user and tools that
 		// need an approval nobody is there to give.
 		available = this.toolManager.filterToolNamesForMode(available, mode);
+
+		// The run's --allowed-tools / --disallowed-tools filter applies to
+		// subagents too: otherwise "only read tools this run" could be
+		// bypassed by delegating an edit to a subagent.
+		available = filterToolNamesByAccess(available);
 
 		// Always exclude the session-artifact tools. Subagents run with the
 		// parent's session id, so `getAllTools()` (which applies no development

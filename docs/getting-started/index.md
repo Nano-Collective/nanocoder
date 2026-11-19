@@ -61,6 +61,8 @@ nanocoder -h
 | `--mouse` | | In fullscreen mode, the mouse wheel scrolls the chat viewport; select text with Shift+drag (Option+drag in iTerm2). Enabled by default. |
 | `--no-mouse` | | Disable mouse reporting in fullscreen mode: native text selection works directly, but the wheel no longer scrolls chat history. |
 | `--prompt-file <path>` | | Read the `run` prompt from a file instead of the command line. Takes precedence over a positional prompt. Pass `-` to read it from stdin (`git diff \| nanocoder run --prompt-file -`). Use it for large prompts: Linux caps a single argument at 128 KiB, and anything bigger fails to launch with `E2BIG`. Only valid with `run`. |
+| `--allowed-tools <names>` | | Offer only these tools for this run, comma-separated. Accepts built-in, custom and MCP tool names, plus `*` globs (`read_file,search_*,mcp_*`). Unknown names are an error listing the valid tools. See Tool Access Flags below. |
+| `--disallowed-tools <names>` | | Remove these tools for this run, comma-separated. Deny wins over `--allowed-tools`. Unknown names are an error. See Tool Access Flags below. |
 | `--continue` | `-c` | Resume the most recent [saved session](../features/session-management.md) for the current directory; starts a fresh session if none exists. Interactive only — errors with `run`. Mutually exclusive with `--resume`. |
 | `--resume [id]` | `-r` | Resume a [saved session](../features/session-management.md) by session ID, 1-based list index, or `last`. With no ID, opens the session picker at startup. Errors if the session is not found. Interactive only — errors with `run`. |
 | `init [--preset <type>] [-f\|--force] [--lean]` | | Initialize the current project. Bundled presets: `react`, `nextjs`, and `rust`. `--force` regenerates an existing `AGENTS.md`; `--lean` skips `CLAUDE.md` when merging existing project guidance |
@@ -100,6 +102,28 @@ nanocoder --mode normal run "refactor db module"
 ```
 
 If `--mode` is omitted, `run` mode starts in `auto-accept`. Interactive mode starts in the `defaultMode` set in `agents.config.json` (see [Default Development Mode](../configuration/index.md#default-development-mode)), or `normal` if none is set.
+
+**Tool Access Flags:**
+
+`--allowed-tools` and `--disallowed-tools` narrow what the model can use for one run, in every mode (including `plan`, `auto-accept` and headless `run`):
+
+```bash
+# Read-only analysis: only read and search tools are offered
+nanocoder --allowed-tools read_file,search_file_contents,list_directory run "summarize the auth module"
+
+# Everything except shell access, including delegated subagents
+nanocoder --disallowed-tools execute_bash run "fix the failing test"
+
+# Globs match a family of tools; deny wins over allow
+nanocoder --allowed-tools "read_file,mcp_*" --disallowed-tools "mcp_admin_*" run "inspect the data"
+```
+
+- Filtered tools are removed from the tool list the model sees, not merely blocked when called.
+- Names are built-in tools, custom tools, skill tools and MCP tool names. `*` is a simple glob (`search_*`, `mcp_*`).
+- An unknown name fails the run with an error listing the valid tools, so a typo cannot silently widen access.
+- The filter also applies to subagents, and to `tools` / `disallowedTools` in a subagent's frontmatter.
+- `/status`, the boot summary and the `--json` report show the active filter.
+- Not supported with `--acp`; an ACP client restricts tools per session instead.
 
 ## Project Initialization Presets
 

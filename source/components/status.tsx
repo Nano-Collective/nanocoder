@@ -11,6 +11,7 @@ import {
 } from '@/constants';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
 import {formatGitStatusSummary, type GitStatusSummary} from '@/tools/git/utils';
+import {formatToolAccessSummary, getRunToolAccess} from '@/tools/tool-access';
 import type {LSPConnectionStatus, MCPConnectionStatus} from '@/types/core';
 import type {ThemePreset} from '@/types/ui';
 import type {UpdateInfo} from '@/types/utils';
@@ -86,6 +87,12 @@ export default memo(function Status({
 	const mcpTotal = mcpStatus.length;
 	const lspTotal = lspStatus.length;
 
+	// Run-level --allowed-tools/--disallowed-tools, when this process has one.
+	const runToolAccess = getRunToolAccess();
+	const toolAccessSummary = runToolAccess
+		? formatToolAccessSummary(runToolAccess)
+		: undefined;
+
 	// Get status color
 	const getStatusColor = (connected: number, total: number) => {
 		if (total === 0) return colors.secondary;
@@ -152,6 +159,9 @@ export default memo(function Status({
 						<Text color={colors.secondary}>
 							✓ {customCommandsCount} custom commands
 						</Text>
+					)}
+					{toolAccessSummary && (
+						<Text color={colors.secondary}>Tools: {toolAccessSummary}</Text>
 					)}
 					{vscodeMode && vscodePort && (
 						<Text color={showPortWarning ? colors.warning : colors.secondary}>
@@ -263,6 +273,12 @@ export default memo(function Status({
 					{customCommandsCount !== undefined && customCommandsCount > 0 && (
 						<Text color={colors.secondary}>
 							✓ {customCommandsCount} custom commands loaded
+						</Text>
+					)}
+					{toolAccessSummary && (
+						<Text color={colors.secondary}>
+							<Text bold={true}>Tool access: </Text>
+							{toolAccessSummary}
 						</Text>
 					)}
 					{vscodeMode && vscodePort && (
