@@ -255,7 +255,9 @@ Commands:
                                   Use --preset <react|nextjs|rust> for bundled defaults.
   copilot login [provider-name]   Log in to GitHub Copilot (device flow). Saves credentials for the "GitHub Copilot" provider.
   codex login [provider-name]     Log in to ChatGPT/Codex (device flow). Saves credentials for the "ChatGPT" provider.
-  review <branch|pr-number>       Review a branch or PR diff for bugs, security issues, and style violations.
+  review [quick|deep] [target]    Review a branch, PR, commits, or the working tree.
+                                  Non-TTY and --output-format json print the report
+                                  on stdout and progress on stderr.
   worktree <PR-number> [options]  Start an interactive session in a new worktree for a GitHub PR.
                                   Accepts the global options below, e.g. --provider, --mode.
   daemon <subcommand>             Manage the per-project skill daemon.
@@ -304,8 +306,8 @@ Options:
                       argument at 128 KiB and execve fails with E2BIG.
                       Use "-" to read the prompt from stdin.
   --trust-directory   Skip the first-run directory trust prompt for this run only.
-                      Valid with "run", "daemon start", "verify" and --acp. Does not
-                      modify the preferences file.
+                      Valid with "run", "review", "daemon start", "verify" and --acp.
+                      Does not modify the preferences file.
   --plain             Use a lightweight, Ink-free runtime for non-interactive runs.
                       Only valid with the "run" command. Auto-enables in CI / non-TTY.
   --no-plain          Force the Ink runtime even in CI / non-TTY environments.
@@ -318,7 +320,8 @@ Options:
   --no-mouse          Disable mouse reporting in fullscreen mode: native text selection
                       works directly, but the wheel no longer scrolls chat history.
   --json              Output execution results as a single well-formed JSON object to stdout.
-                      Only valid with the "run" command. Always uses the plain runtime.
+                      Valid with "run" (always uses the plain runtime) and "review"
+                      (runs headless).
   --output-format     Specify stdout format ('text' or 'json'). Synonym for --json.
   --acp               Run as an ACP (Agent Client Protocol) server for editor integration.
                       Communicates via JSON-RPC over stdin/stdout. Refuses an untrusted
@@ -710,20 +713,27 @@ async function main(): Promise<void> {
 
 	// Validate execution constraints for --json rules
 	if (outputFormat === 'json' && !nonInteractiveMode) {
-		console.error("Error: --json can only be used with the 'run' command.");
+		console.error(
+			"Error: --json can only be used with the 'run' or 'review' command.",
+		);
 		process.exit(1);
 	}
 
-	// --trust-directory is only respected with `run`. Surface a warning
-	// (rather than silently dropping) if the user passes it interactively
-	// or with `review` (review is TTY-only but sets nonInteractiveMode).
+	// --trust-directory is only respected with `run`, `review` and --acp.
+	// Surface a warning (rather than silently dropping) if the user passes it
+	// to the interactive session.
 	const trustDirectoryRequested = args.includes('--trust-directory');
-	if (trustDirectoryRequested && !isRunCommand && !args.includes('--acp')) {
+	const trustDirectoryApplies = isRunCommand || isReviewCommand;
+	if (
+		trustDirectoryRequested &&
+		!trustDirectoryApplies &&
+		!args.includes('--acp')
+	) {
 		console.error(
-			'--trust-directory only applies to non-interactive commands (`nanocoder run ...`, `nanocoder daemon start`, `nanocoder verify`, `nanocoder --acp`); ignoring.',
+			'--trust-directory only applies to non-interactive commands (`nanocoder run ...`, `nanocoder review ...`, `nanocoder daemon start`, `nanocoder verify`, `nanocoder --acp`); ignoring.',
 		);
 	}
-	const trustDirectory = trustDirectoryRequested && isRunCommand;
+	const trustDirectory = trustDirectoryRequested && trustDirectoryApplies;
 
 	// --plain: lightweight, Ink-free runtime. Only valid with `run` in v1.
 	// Auto-detect: enable when stdout isn't a TTY or the env looks like CI,
@@ -748,13 +758,6 @@ async function main(): Promise<void> {
 	// Enforce exclusive stdout protocol constraints
 	if (outputFormat === 'json' && vscodeMode) {
 		console.error('Error: --json cannot be combined with --vscode.');
-		process.exit(1);
-	}
-
-	if (outputFormat === 'json' && isReviewCommand) {
-		console.error(
-			'Error: --json cannot be used with `nanocoder review`. Review output is displayed in the interactive terminal.',
-		);
 		process.exit(1);
 	}
 
@@ -784,15 +787,12 @@ async function main(): Promise<void> {
 	const plainForJson = outputFormat === 'json' && isRunCommand;
 	const plainMode = plainRequested || plainAuto || plainForJson;
 
-	// Hard-error when `review` lands in a non-interactive context (piped
-	// stdout, CI). The plain shell has no slash-command dispatch, so
-	// `/review <target>` would be sent verbatim to the model as chat.
-	if (isReviewCommand && !process.stdout.isTTY) {
-		console.error(
-			'Error: `nanocoder review` requires an interactive terminal (TTY).',
-		);
-		process.exit(1);
-	}
+	// Non-TTY, CI, and --output-format json run the review without Ink.
+	// A TTY without JSON still opens the interactive review.
+	const reviewHeadless =
+		isReviewCommand &&
+		Boolean(reviewPrompt) &&
+		(outputFormat === 'json' || !process.stdout.isTTY || ciDetected);
 
 	// --acp: Agent Client Protocol server mode for editor integration
 	const acpMode = args.includes('--acp');
@@ -863,6 +863,25 @@ async function main(): Promise<void> {
 			trustDirectory: trustDirectoryRequested,
 			mode: cliMode,
 		});
+	} else if (reviewHeadless && reviewPrompt) {
+		await loadProjectEnv();
+		const {runHeadlessReviewCli} = await import('@/review/headless-review');
+		const reviewArgs = reviewPrompt.startsWith('/review')
+			? reviewPrompt.slice('/review'.length).trim().split(/\s+/).filter(Boolean)
+			: [];
+		const outcome = await runHeadlessReviewCli({
+			args: reviewArgs,
+			cliProvider,
+			cliModel,
+			trustDirectory,
+			outputFormat,
+		});
+		// process.exit() can discard buffered output when stdout is piped.
+		await new Promise<void>(resolve =>
+			process.stdout.write(outcome.stdout, 'utf8', () => resolve()),
+		);
+		const {getShutdownManager} = await import('@/utils/shutdown');
+		await getShutdownManager().gracefulShutdown(outcome.exitCode);
 	} else if (plainMode && nonInteractivePrompt) {
 		// Headless, Ink-free path. Note: --plain is currently only valid with
 		// `run`, so we must have a non-empty prompt here.

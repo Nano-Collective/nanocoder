@@ -116,7 +116,7 @@ Names are matched case-insensitively. A key that is skipped is reported in a war
 | `NANOCODER_NO_UPDATE_CHECK` | Set to `1` to disable automatic update checks at startup. Running `/update` still performs an explicit check |
 | `NANOCODER_DEFAULT_SHUTDOWN_TIMEOUT` | Graceful shutdown timeout in milliseconds (default: 5000) |
 | `NANOCODER_MAX_TURNS` | Maximum LLM turns for headless runs (`--plain`, ACP, and subagents unless `subagentMaxTurns` is set). Overrides `nanocoder.headless.maxTurns`; default 200. See [Headless](#headless) |
-| `NANOCODER_TRUST_DIRECTORY` | Set to `1` to trust the working directory and save it to `trustedDirectories` for later runs. Honoured by the interactive TUI, `run` (Ink and `--plain`), `nanocoder daemon start`, `nanocoder verify` and `--acp`. Must come from your shell: a project `.env` cannot set it. See [Directory trust](../getting-started/index.md#directory-trust) |
+| `NANOCODER_TRUST_DIRECTORY` | Set to `1` to trust the working directory and save it to `trustedDirectories` for later runs. Honoured by the interactive TUI, `run` (Ink and `--plain`), headless `nanocoder review`, `nanocoder daemon start`, `nanocoder verify` and `--acp`. Must come from your shell: a project `.env` cannot set it. See [Directory trust](../getting-started/index.md#directory-trust) |
 | `NANOCODER_SKILLS_INDEX` | URL or local path of the skills index used by `nanocoder skills add` (same as `--index`). See [Skills](../features/skills.md) |
 | `NANOCODER_DOCTOR_PROBE` | Set to `0` to stop `/doctor` from probing local provider ports |
 
