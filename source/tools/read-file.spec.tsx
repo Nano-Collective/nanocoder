@@ -724,21 +724,21 @@ test.serial(
 
 		try {
 			mkdirSync(testDir, {recursive: true});
-			// PNG signature followed by short, newline-separated binary chunks:
+			// PNG-style bytes in a non-image file, followed by short, newline-separated binary chunks:
 			// passes the long-line guard, so only the NUL check can catch it.
 			const png = Buffer.from([
 				0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00,
 				0x0d, 0x49, 0x48, 0x44, 0x52, 0x0a, 0x00, 0x01, 0x02, 0x0a,
 			]);
-			writeFileSync(join(testDir, 'image.png'), png);
+			writeFileSync(join(testDir, 'data.bin'), png);
 			process.chdir(testDir);
 
-			const result = await readFileTool.validator!({path: 'image.png'});
+			const result = await readFileTool.validator!({path: 'data.bin'});
 
 			t.false(result.valid);
 			if (!result.valid) {
 				t.regex(result.error, /is a binary file/);
-				t.regex(result.error, /image\.png/);
+				t.regex(result.error, /data\.bin/);
 			}
 		} finally {
 			process.chdir(originalCwd);
