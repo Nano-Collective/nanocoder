@@ -75,6 +75,8 @@ import {
 	stripEmbeddedToolCallText,
 	stripThinkTags,
 } from '@/tool-calling/index';
+import type {ToolSchemas} from '@/tool-calling/xml-parser';
+import {getToolJsonSchema} from '@/tools/runtime/schema-validate';
 import type {RetryLimitsConfig} from '@/types/config';
 import type {
 	AISDKCoreTool,
@@ -100,6 +102,15 @@ const FINAL_TURN_INSTRUCTION =
  * an error, not a finished turn with an empty answer.
  */
 export const NO_RESPONSE_MESSAGE = 'No response received from model';
+
+function getToolSchemas(tools: Record<string, AISDKCoreTool>): ToolSchemas {
+	return Object.fromEntries(
+		Object.entries(tools).map(([name, tool]) => [
+			name,
+			getToolJsonSchema(tool),
+		]),
+	);
+}
 
 export interface TurnContext {
 	/** Zero-based iteration index. */
@@ -397,11 +408,18 @@ export async function runTurnEngine<S>(
 			toolCalls: [],
 			cleanedContent,
 		});
+		// The offered tool names turn on the broken-call checks. A reply cut off
+		// at the output limit can stop partway through a call; that is a
+		// truncated turn, not a malformed one, so it is left to the truncation
+		// handling below.
+		const offeredNames =
+			result.finishReason === 'length' ? undefined : prepared.availableNames;
+		const toolSchemas = getToolSchemas(prepared.tools);
 		let parsed: ReturnType<typeof parseToolCalls>;
 		if (textToolCalls === 'off' || finalTurn) {
 			parsed = unparsed(fullContent);
 		} else if (result.toolsDisabled) {
-			parsed = parseToolCalls(fullContent);
+			parsed = parseToolCalls(fullContent, offeredNames, toolSchemas);
 		} else if (textToolCalls === 'fallback') {
 			parsed = unparsed(fullContent);
 		} else if (nativeToolCalls.length > 0) {
@@ -409,7 +427,7 @@ export async function runTurnEngine<S>(
 			// echoed alongside them so it does not leak into history.
 			parsed = unparsed(stripEmbeddedToolCallText(fullContent));
 		} else {
-			parsed = parseToolCalls(fullContent);
+			parsed = parseToolCalls(fullContent, offeredNames, toolSchemas);
 		}
 
 		if (!parsed.success) {

@@ -8,7 +8,7 @@ import type {GoogleGenerativeAIProvider} from '@ai-sdk/google';
 import type {OpenAIProvider} from '@ai-sdk/openai';
 import type {OpenAICompatibleProvider} from '@ai-sdk/openai-compatible';
 import {
-	type Agent,
+	type Dispatcher,
 	type RequestInit as UndiciRequestInit,
 	fetch as undiciFetch,
 } from 'undici';
@@ -121,7 +121,7 @@ export function createStreamOptionsFallbackFetch(
  * this fetch will honor the configured CA bundle — even Anthropic and Google,
  * which would otherwise use the global fetch and bypass our TLS settings.
  */
-export function createUndiciFetch(undiciAgent: Agent) {
+export function createUndiciFetch(undiciAgent: Dispatcher) {
 	return async (
 		url: string | URL | Request,
 		options?: RequestInit,
@@ -136,26 +136,33 @@ export function createUndiciFetch(undiciAgent: Agent) {
 			const decoder = new TextDecoder('utf-8');
 			const encoder = new TextEncoder();
 			let buffer = '';
+			const malformedDone = 'data:  [DONE]';
 
 			const transform = new TransformStream({
 				transform(chunk, controller) {
 					buffer += decoder.decode(chunk, {stream: true});
 
-					if (buffer.includes('data:  [DONE]')) {
-						buffer = buffer.replace(/data:\s\s\[DONE\]/g, 'data: [DONE]');
+					buffer = buffer.replaceAll(malformedDone, 'data: [DONE]');
+					// Only hold a suffix that could become the malformed marker.
+					// Complete events (including their framing) must reach the SDK
+					// even when the provider pauses before sending another chunk.
+					let tailLength = Math.min(buffer.length, malformedDone.length - 1);
+					while (
+						tailLength > 0 &&
+						!buffer.endsWith(malformedDone.slice(0, tailLength))
+					) {
+						tailLength--;
 					}
-
-					if (buffer.length > 13) {
-						const toEnqueue = buffer.slice(0, -13);
-						buffer = buffer.slice(-13);
+					const enqueueLength = buffer.length - tailLength;
+					if (enqueueLength > 0) {
+						const toEnqueue = buffer.slice(0, enqueueLength);
+						buffer = buffer.slice(enqueueLength);
 						controller.enqueue(encoder.encode(toEnqueue));
 					}
 				},
 				flush(controller) {
 					buffer += decoder.decode();
-					if (buffer.includes('data:  [DONE]')) {
-						buffer = buffer.replace(/data:\s\s\[DONE\]/g, 'data: [DONE]');
-					}
+					buffer = buffer.replaceAll(malformedDone, 'data: [DONE]');
 					if (buffer.length > 0) {
 						controller.enqueue(encoder.encode(buffer));
 					}
@@ -360,7 +367,7 @@ export function createReasoningItemNormalizer(): TransformStream<
  */
 export async function createProvider(
 	providerConfig: AIProviderConfig,
-	undiciAgent: Agent,
+	undiciAgent: Dispatcher,
 ): Promise<TaggedProvider> {
 	const logger = getLogger();
 	const {config, sdkProvider} = providerConfig;

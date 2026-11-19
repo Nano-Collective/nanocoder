@@ -45,7 +45,7 @@ import {
 } from '@/subagents/subagent-executor';
 import {getSubagentLoader} from '@/subagents/subagent-loader';
 import {setAgentToolExecutor, setAvailableAgentNames} from '@/tools/agent-tool';
-import {ToolManager} from '@/tools/tool-manager';
+import {describeSkippedMCPTools, ToolManager} from '@/tools/tool-manager';
 import type {CustomCommand} from '@/types/commands';
 import {
 	LLMClient,
@@ -271,12 +271,24 @@ export function useAppInitialization({
 			};
 
 			try {
-				await toolManager.initializeMCP(
+				const results = await toolManager.initializeMCP(
 					config.mcpServers,
 					onProgress,
 					onHealthChange,
 					config.tune,
 				);
+				for (const result of results) {
+					const warning = describeSkippedMCPTools(result);
+					if (warning) {
+						addToChatQueue(
+							<WarningMessage
+								key={generateKey(`mcp-skipped-tools-${result.serverName}`)}
+								message={warning}
+								hideBox={true}
+							/>,
+						);
+					}
+				}
 			} catch (error) {
 				// Mark all pending servers as failed
 				mcpStatus.forEach((status, index) => {
@@ -302,9 +314,10 @@ export function useAppInitialization({
 	// Initialize LSP servers with auto-discovery
 	const initializeLSPServers = async () => {
 		const lspConfig = getAppConfig();
+		const autoDiscover = lspConfig.lsp?.autoDiscover !== false;
 		const lspManager = await getLSPManager({
 			rootUri: pathToFileURL(process.cwd()).href,
-			autoDiscover: true,
+			autoDiscover,
 			// Use custom servers from config if provided
 			servers: lspConfig.lspServers?.map(server => ({
 				name: server.name,
@@ -362,7 +375,7 @@ export function useAppInitialization({
 
 		try {
 			await lspManager.initialize({
-				autoDiscover: true,
+				autoDiscover,
 				servers: lspConfig.lspServers?.map(server => ({
 					name: server.name,
 					command: server.command,

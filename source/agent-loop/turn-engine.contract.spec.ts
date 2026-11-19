@@ -448,6 +448,24 @@ for (const {
 	);
 
 	test.serial(
+		`[${name}] asks the model to close a text tool call left open`,
+		async t => {
+			const open = '<probe>\n  <id>x</id>\n';
+			const seen = await run({
+				replies: [{...text(open), toolsDisabled: true}, text('done')],
+			});
+			t.is(seen.end, 'completed');
+			t.deepEqual(seen.executed, []);
+			const [assistant, nudge] = seen.requests[1].slice(-2);
+			t.deepEqual(assistant, {role: 'assistant', content: open});
+			t.regex(
+				String(nudge.content),
+				/Incomplete tool call: <probe> is never closed with <\/probe>/,
+			);
+		},
+	);
+
+	test.serial(
 		`[${name}] answers an unknown tool with an error result`,
 		async t => {
 			const seen = await run({replies: [call('nope'), text('done')]});
@@ -487,6 +505,32 @@ for (const {
 		t.is(fragment.content, 'half a');
 		t.deepEqual(nudge, {role: 'user', content: TRUNCATED_TURN_INSTRUCTION});
 	});
+
+	test.serial(
+		`[${name}] treats a text tool call cut off at the output limit as truncated`,
+		async t => {
+			const seen = await run({
+				replies: [
+					{
+						...text('<probe>\n  <id>x'),
+						toolsDisabled: true,
+						finishReason: 'length',
+					},
+					text('done'),
+				],
+			});
+			t.is(seen.end, 'completed');
+			t.deepEqual(seen.executed, []);
+			if (!continuesTruncation) {
+				t.is(seen.requests.length, 1);
+				return;
+			}
+			t.deepEqual(lastOf(seen.requests[1]), {
+				role: 'user',
+				content: TRUNCATED_TURN_INSTRUCTION,
+			});
+		},
+	);
 
 	test.serial(`[${name}] an abort before the first turn calls nothing`, async t => {
 		const seen = await run({replies: [], abortBeforeStart: true});

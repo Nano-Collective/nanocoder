@@ -4439,3 +4439,85 @@ test.serial('runAcpConversation - a session with its own tools runs them, and ot
 	t.is(await runTurn(own), 'session registry');
 	t.is(await runTurn(), 'shared registry');
 });
+
+// Serial: it swaps the process-wide tool registry.
+test.serial('runAcpConversation - nanocoder.verify sends the model back and reports the evidence', async t => {
+	// The session's own project config turns it on, as it does for a real
+	// editor session rooted in that folder.
+	const project = mkdtempSync(join(tmpdir(), 'nanocoder-verify-acp-'));
+	t.teardown(() => rmSync(project, {recursive: true, force: true}));
+	writeFileSync(
+		join(project, 'agents.config.json'),
+		JSON.stringify({nanocoder: {verify: {required: ['pnpm test']}}}),
+	);
+	const {conn, updates} = createMockConn();
+	const session = createMockSession(conn, {devMode: 'yolo', cwd: project});
+	const toolManager = {
+		...createMockToolManager(),
+		getAvailableToolNames: () => ['write_file', 'execute_bash'],
+		hasTool: () => true,
+		getToolEntry: () => ({approval: false}),
+	};
+	setToolRegistryGetter(() => ({
+		write_file: async () => 'File written',
+		execute_bash: async () => 'EXIT_CODE: 0\nok',
+	}));
+
+	let callCount = 0;
+	let reminder = '';
+	const client = {
+		chat: async (messages: any[]) => {
+			callCount++;
+			if (callCount === 1) {
+				return {
+					choices: [
+						{
+							message: {
+								content: '',
+								tool_calls: [
+									createMockToolCall('write_file', {path: 'a.ts', content: 'x'}),
+								],
+							},
+						},
+					],
+				};
+			}
+			if (callCount === 2) {
+				return {choices: [{message: {content: 'Done.'}}]};
+			}
+			if (callCount === 3) {
+				reminder = messages.at(-1)?.content ?? '';
+				return {
+					choices: [
+						{
+							message: {
+								content: '',
+								tool_calls: [
+									createMockToolCall('execute_bash', {command: 'pnpm test'}),
+								],
+							},
+						},
+					],
+				};
+			}
+			return {choices: [{message: {content: 'Confirmed.'}}]};
+		},
+	} as unknown as LLMClient;
+
+	const result = await runAcpConversation({
+		session,
+		client,
+		toolManager: toolManager as any,
+		conn,
+		nonInteractiveAlwaysAllow: [],
+	});
+	t.is(result.stopReason, 'end_turn');
+
+	t.is(callCount, 4);
+	t.true(reminder.includes('`pnpm test` (not run)'));
+	const texts = updates
+		.map(update => update.update)
+		.filter(update => update.sessionUpdate === 'agent_message_chunk')
+		.map(update => update.content.text as string);
+	t.true(texts.some(text => text.includes('Verification: ✓ pnpm test (exit 0)')));
+});

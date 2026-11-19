@@ -19,6 +19,7 @@ import {
 	findBwrap,
 	macSandboxProfile,
 	planBashSpawn,
+	spawnPlanned,
 } from './bash-sandbox.js';
 
 console.log('\nbash-sandbox.spec.ts');
@@ -188,6 +189,40 @@ test('findBwrap walks PATH', t => {
 	} finally {
 		rmSync(dir, {recursive: true, force: true});
 	}
+});
+
+test('spawnPlanned closes stdin so waiting commands get EOF', async t => {
+	if (platform === 'win32') {
+		t.pass('uses sh as a stand-in for bwrap; unix only');
+		return;
+	}
+	// `sh` stands in for the bwrap binary: only the stdio wiring is under test.
+	const proc = spawnPlanned(
+		{
+			bin: 'bwrap',
+			bwrap: '/bin/sh',
+			args: ['-c', 'cat; echo done'],
+			detached: true,
+		} as unknown as Parameters<typeof spawnPlanned>[0],
+		{cwd: tmpdir(), env: process.env},
+	);
+	t.is(proc.stdin, null, 'stdin is not an open pipe');
+	let out = '';
+	proc.stdout?.on('data', (c: Buffer) => {
+		out += c.toString();
+	});
+	let timer: NodeJS.Timeout | undefined;
+	const hung = new Promise<'hung'>(resolve => {
+		timer = setTimeout(() => resolve('hung'), 5000);
+	});
+	const closed = new Promise<'closed'>(resolve =>
+		proc.on('close', () => resolve('closed')),
+	);
+	const result = await Promise.race([closed, hung]);
+	clearTimeout(timer);
+	if (result === 'hung') proc.kill();
+	t.is(result, 'closed');
+	t.regex(out, /done/);
 });
 
 // Writes to these run code outside the jail: git config and hooks the next

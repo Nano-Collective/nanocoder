@@ -80,6 +80,17 @@
 					"$ref": "#/definitions/HooksConfig",
 					"description": "Shell commands run at fixed points in the agent loop, keyed by lifecycle\nevent. A project-local file can set these, so they carry the same\ncode-execution weight as project MCP servers (`.mcp.json`) and are\ngated behind directory trust."
 				},
+				"lsp": {
+					"description": "Language server behavior. Auto-discovery is enabled by default.",
+					"properties": {
+						"autoDiscover": {
+							"description": "Disable scanning PATH for installed language servers at startup.",
+							"type": "boolean"
+						}
+					},
+					"type": "object",
+					"additionalProperties": false
+				},
 				"lspServers": {
 					"description": "LSP server configurations (optional — auto-discovery enabled by default).",
 					"items": {
@@ -158,7 +169,7 @@
 				},
 				"verify": {
 					"$ref": "#/definitions/VerifyConfig",
-					"description": "Project-level verify policy: CI-watch trust level and poll cadence.\nRead by `loadVerifyConfig()`."
+					"description": "Project-level verify policy: CI-watch trust level and poll cadence, and\n`required` completion evidence (commands that must exit 0 after the last\nedit, or \"auto\"). Read by `loadVerifyConfig()`."
 				}
 			},
 			"type": "object",
@@ -678,6 +689,9 @@
 				"disableTools": {
 					"type": "boolean"
 				},
+				"extraBody": {
+					"$ref": "#/definitions/RecordStringUnknown"
+				},
 				"headers": {
 					"$ref": "#/definitions/RecordStringString"
 				},
@@ -764,13 +778,28 @@
 			"additionalProperties": false
 		},
 		"VerifyConfig": {
-			"description": "Project-level (`agents.config.json`) verify/CI-watch policy — trust level\nand poll cadence. Unlike `CiWatchConfig.enabled` (a personal, per-machine\nopt-in to background GitHub polling, kept in preferences), trust level\nand cadence are security/policy decisions appropriate to commit and\nreview with the rest of the project, so they live here instead. When\nset, `pollIntervalMs`/`maxPollIntervalMs` here override the\npreferences-backed `CiWatchConfig` values of the same name — see\n`loadCiWatchConfig` in `source/config/index.ts`.",
+			"description": "Project-level (`agents.config.json`) verify policy: CI-watch trust level\nand poll cadence, plus completion evidence. Unlike `CiWatchConfig.enabled`\n(a personal, per-machine opt-in to background GitHub polling, kept in\npreferences), trust level and cadence are security/policy decisions\nappropriate to commit and review with the rest of the project, so they live\nhere instead. When set, `pollIntervalMs`/`maxPollIntervalMs` here override\nthe preferences-backed `CiWatchConfig` values of the same name — see\n`loadCiWatchConfig` in `source/config/index.ts`.",
 			"properties": {
 				"maxPollIntervalMs": {
 					"type": "number"
 				},
 				"pollIntervalMs": {
 					"type": "number"
+				},
+				"required": {
+					"anyOf": [
+						{
+							"items": {
+								"type": "string"
+							},
+							"type": "array"
+						},
+						{
+							"const": "auto",
+							"type": "string"
+						}
+					],
+					"description": "Completion evidence: commands that must have exited 0 after the agent's\nlast file edit before a turn can end, or \"auto\" to detect the `test`,\n`typecheck` and `lint` scripts in package.json. Off unless set."
 				},
 				"trustLevel": {
 					"description": "Trust level for daemon-triggered CI investigation/auto-fix. Undefined\ndefers to the `--trust` CLI flag, then 'comment-only'.",

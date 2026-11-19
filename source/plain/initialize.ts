@@ -25,7 +25,7 @@ import {
 } from '@/subagents/subagent-executor';
 import {getSubagentLoader} from '@/subagents/subagent-loader';
 import {setAgentToolExecutor, setAvailableAgentNames} from '@/tools/agent-tool';
-import {ToolManager} from '@/tools/tool-manager';
+import {describeSkippedMCPTools, ToolManager} from '@/tools/tool-manager';
 import type {DevelopmentMode, LLMClient, MCPInitResult} from '@/types/index';
 
 export interface PlainInitResult {
@@ -199,12 +199,16 @@ async function initializeMCP(toolManager: ToolManager): Promise<void> {
 	};
 
 	try {
-		await toolManager.initializeMCP(
+		const results = await toolManager.initializeMCP(
 			config.mcpServers,
 			onProgress,
 			undefined,
 			config.tune,
 		);
+		for (const result of results) {
+			const warning = describeSkippedMCPTools(result);
+			if (warning) writeStatus(warning);
+		}
 	} catch (error) {
 		writeStatus(`MCP initialization error: ${String(error)}`);
 	}

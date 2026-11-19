@@ -33,6 +33,8 @@ The `/settings providers` wizard asks for the API key and models, then offers op
 
 Nanocoder forwards OpenRouter-specific request body fields through an `openrouter` block on the provider config. These are **always-on** for the OpenRouter provider — they are not gated by [tune](../../features/tune.md), so routing rules apply on every request regardless of session state.
 
+The provider-level `extraBody` also works for OpenRouter. On collisions, `openrouter.extraBody` overrides provider-level `extraBody`, and typed OpenRouter options override both. `model`, `messages`, `tools`, and `stream` are kept under Nanocoder's control.
+
 The provider is detected by name: any provider entry called `openrouter`, in any case (`OpenRouter`, `openrouter`, `OPENROUTER`), picks these options up. If you put an `openrouter` block on a provider with a different name, such as `My OpenRouter`, the options are not sent and nanocoder logs a warning at startup so the misconfiguration is visible immediately.
 
 > **How this compares to `tune`.** Tune covers runtime model behaviour (temperature, tool profile, compaction, reasoning effort) and can be toggled or persisted per-session via the `/tune` modal. The `openrouter` block covers transport and routing concerns (which upstream provider serves the request, at what tier, with which fallbacks) — these are static, file-only, and never disabled. The one bridge between them is `tune.modelParameters.reasoningEffort`, which populates `openrouter.reasoning.effort` when the latter is unset. Explicit values on the provider config always win.
