@@ -226,8 +226,88 @@ test('parseToolCalls - preserves JSON-looking string parameters with schemas', t
 	t.is(result[0].parameters.path, 'f');
 	t.is(
 		result[0].parameters.content,
-		'\n{\n  "name": "x",\n  "version": "1.0.0"\n}\n',
+		'{\n  "name": "x",\n  "version": "1.0.0"\n}',
 	);
+});
+
+test('parseToolCalls - removes one wrapping newline from multiline string parameters', t => {
+	const lfResult = XMLToolCallParser.parseToolCalls(
+		'<read_file><path>\nsrc/a.ts\n</path></read_file>',
+		{
+			read_file: {
+				type: 'object',
+				properties: {path: {type: 'string'}},
+			},
+		},
+	);
+	t.is(lfResult[0].parameters.path, 'src/a.ts');
+
+	const crlfResult = XMLToolCallParser.parseToolCalls(
+		'<read_file><path>\r\nsrc/a.ts\r\n</path></read_file>',
+		{
+			read_file: {
+				type: 'object',
+				properties: {path: {type: 'string'}},
+			},
+		},
+	);
+	t.is(crlfResult[0].parameters.path, 'src/a.ts');
+});
+
+test('parseToolCalls - preserves internal newlines and surrounding spaces in string parameters', t => {
+	const result = XMLToolCallParser.parseToolCalls(
+		'<write_file><path>\n  src/a.ts  \n</path><content>\nline 1\n\n  line 3  \n</content></write_file>',
+		{
+			write_file: {
+				type: 'object',
+				properties: {
+					path: {type: 'string'},
+					content: {type: 'string'},
+				},
+			},
+		},
+	);
+
+	t.is(result[0].parameters.path, '  src/a.ts  ');
+	t.is(result[0].parameters.content, 'line 1\n\n  line 3  ');
+});
+
+test('parseToolCalls - removes exactly one wrapping newline', t => {
+	const result = XMLToolCallParser.parseToolCalls(
+		'<read_file><path>\n\nsrc/a.ts\n\n</path></read_file>',
+		{
+			read_file: {
+				type: 'object',
+				properties: {path: {type: 'string'}},
+			},
+		},
+	);
+
+	t.is(result[0].parameters.path, '\nsrc/a.ts\n');
+});
+
+test('parseToolCalls - preserves JSON-looking string values as strings', t => {
+	const result = XMLToolCallParser.parseToolCalls(
+		'<test><object>\n{"name":"x"}\n</object><array>\n[1,2]\n</array><null_value>\nnull\n</null_value><number>\n42\n</number></test>',
+		{
+			test: {
+				type: 'object',
+				properties: {
+					object: {type: 'string'},
+					array: {type: 'string'},
+					null_value: {type: 'string'},
+					number: {type: 'string'},
+				},
+			},
+		},
+	);
+
+	t.deepEqual(result[0].parameters, {
+		object: '{"name":"x"}',
+		array: '[1,2]',
+		null_value: 'null',
+		number: '42',
+	});
 });
 
 test('parseToolCalls - preserves string scalar and multiline values with schemas', t => {

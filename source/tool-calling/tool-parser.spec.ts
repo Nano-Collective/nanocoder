@@ -41,7 +41,7 @@ test('parseToolCalls: forwards schemas to preserve XML string arguments', t => {
 	if (result.success) {
 		t.is(
 			result.toolCalls[0].function.arguments.content,
-			'{"version": "1.0"}\n',
+			'{"version": "1.0"}',
 		);
 	}
 });

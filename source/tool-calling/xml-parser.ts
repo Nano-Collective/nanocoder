@@ -370,15 +370,18 @@ export class XMLToolCallParser {
 
 			const parameterSchema = toolSchema?.properties?.[paramName];
 			const parameterTypes = parameterSchema?.type;
+			// anyOf and oneOf are not inspected here, so these schemas fall back
+			// to the legacy JSON parsing heuristic.
 			const permitsString =
 				parameterTypes === 'string' ||
 				(Array.isArray(parameterTypes) && parameterTypes.includes('string'));
 
 			// A string parameter is text, even when its contents happen to be
-			// valid JSON. Preserve its exact XML value for file contents,
+			// valid JSON. Remove only wrapping XML line breaks for file contents,
 			// commands, and replacement strings.
 			if (permitsString) {
-				parameters[paramName] = paramValue;
+				parameters[paramName] =
+					this.removeWrappingParameterNewlines(paramValue);
 				continue;
 			}
 
@@ -394,6 +397,22 @@ export class XMLToolCallParser {
 		}
 
 		return parameters;
+	}
+
+	private static removeWrappingParameterNewlines(value: string): string {
+		let result = value;
+		if (result.startsWith('\r\n')) {
+			result = result.slice(2);
+		} else if (result.startsWith('\n')) {
+			result = result.slice(1);
+		}
+
+		if (result.endsWith('\r\n')) {
+			result = result.slice(0, -2);
+		} else if (result.endsWith('\n')) {
+			result = result.slice(0, -1);
+		}
+		return result;
 	}
 
 	/**
