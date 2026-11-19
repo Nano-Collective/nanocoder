@@ -83,6 +83,8 @@ test('loadProjectMCPConfig - loads all supported fields from .mcp.json', t => {
                 url: 'https://example.com/mcp',
                 headers: {'Authorization': 'Bearer token'},
                 timeout: 45000,
+                toolTimeout: 600000,
+                resetTimeoutOnProgress: false,
                 alwaysAllow: ['search'],
                 description: 'A test server',
                 tags: ['test', 'example'],
@@ -101,6 +103,8 @@ test('loadProjectMCPConfig - loads all supported fields from .mcp.json', t => {
     t.is(server.url, 'https://example.com/mcp');
     t.deepEqual(server.headers, {'Authorization': 'Bearer token'});
     t.is(server.timeout, 45000);
+    t.is(server.toolTimeout, 600000);
+    t.is(server.resetTimeoutOnProgress, false);
     t.deepEqual(server.alwaysAllow, ['search']);
     t.is(server.description, 'A test server');
     t.deepEqual(server.tags, ['test', 'example']);

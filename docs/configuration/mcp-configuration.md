@@ -199,7 +199,9 @@ These fields work with all transport types:
 | `description` | Human-readable description shown in `/mcp` output |
 | `alwaysAllow` | Array of tool names that skip confirmation prompts |
 | `enabled` | Whether the server is active (default: `true`). `false` skips it entirely — no connection, no tools registered |
-| `timeout` | Connection timeout in milliseconds. Bounds the connection handshake and the initial tool listing; individual tool calls keep the MCP SDK's default timeout (60 seconds) |
+| `timeout` | Connection timeout in milliseconds. Bounds the connection handshake and the initial tool listing; tool calls use `toolTimeout` instead |
+| `toolTimeout` | How long a tool call may wait for the server, in milliseconds (default: `60000`, the MCP SDK's default). Set to `0` for no limit. Raise it for servers whose tools legitimately run for minutes, such as builds, test runs or long queries. A call that runs out reports the limit it hit and names this setting |
+| `resetTimeoutOnProgress` | Restart the `toolTimeout` timer each time the server sends a progress notification (default: `true`), so a long call that keeps reporting progress is not cut off. Set to `false` to make `toolTimeout` a hard limit for the whole call |
 | `healthCheckInterval` | Optional MCP ping interval in milliseconds (default: `30000`). Set to `0` to disable health pings entirely, including the liveness ping that otherwise follows a transport error. Health pings use `timeout` when configured, otherwise 10 seconds, and are skipped while a tool call or resource read is in flight on that server. Two failed pings in a row, or a transport close, mark the server unhealthy and remove its tools; unhealthy servers continue to be checked with exponential backoff and automatically restore their tools when they respond again. After a transport close (for example a crashed stdio server), Nanocoder reconnects from the server's config with the same backoff, using this interval as the base delay (30 seconds when it is `0`). |
 | `tags` | Array of tags, shown as `#tag` labels in `/mcp` output |
 
