@@ -41,6 +41,29 @@ function isMissingFile(error: unknown): boolean {
 }
 
 /**
+ * Output cap for the `git` listings in `getModifiedFilesResult`. Node's
+ * `execFileSync` defaults to 1 MB, and `git ls-files --others` on ~30,000
+ * untracked files is ~1.28 MB, so the default throws ENOBUFS and the whole
+ * scan was misread as "git not available". 64 MB covers that listing by a
+ * wide margin; anything larger still falls back to the tracked files below
+ * instead of an empty checkpoint.
+ */
+const GIT_OUTPUT_MAX_BUFFER = 64 * 1024 * 1024;
+
+/**
+ * An `execFileSync` output that outgrew `maxBuffer` throws with code
+ * ENOBUFS. That is a listing too large to hold, not a missing git binary,
+ * so the caller must not treat it as "git not available".
+ */
+function isMaxBufferError(error: unknown): boolean {
+	return (
+		typeof error === 'object' &&
+		error !== null &&
+		(error as NodeJS.ErrnoException).code === 'ENOBUFS'
+	);
+}
+
+/**
  * Service for capturing and restoring file snapshots for checkpoints
  */
 export class FileSnapshotService {
@@ -222,13 +245,26 @@ export class FileSnapshotService {
 	 * `truncatedCount` reports how many the cap dropped rather than only that it
 	 * fired, so the number reaches the checkpoint's metadata and, from there, a
 	 * later restore. `available` is false when git could not answer at all.
+	 *
+	 * The untracked listing is the unbounded one, so it gets a raised output
+	 * buffer (see `GIT_OUTPUT_MAX_BUFFER`). If even that overflows, only the
+	 * untracked list is lost: the tracked changes are still returned with
+	 * `truncated` set, rather than the whole scan failing. `truncatedCount`
+	 * is 0 in that case - the listing itself overflowed, so the untracked
+	 * count is unknown, and callers must treat `truncated`, not the count,
+	 * as the incompleteness signal.
+	 *
+	 * `options.maxBuffer` exists so tests can force the overflow path with a
+	 * lowered limit instead of a 64 MB fixture; production callers pass
+	 * nothing and get the raised default.
 	 */
-	getModifiedFilesResult(): {
+	getModifiedFilesResult(options?: {maxBuffer?: number}): {
 		files: string[];
 		truncated: boolean;
 		truncatedCount: number;
 		available: boolean;
 	} {
+		const maxBuffer = options?.maxBuffer ?? GIT_OUTPUT_MAX_BUFFER;
 		try {
 			// This scan runs on every checkpoint and twice per ACP tool call, so
 			// the common path - HEAD exists - must cost a single spawn. Rather
@@ -240,6 +276,7 @@ export class FileSnapshotService {
 					cwd: this.workspaceRoot,
 					encoding: 'utf-8',
 					stdio: ['pipe', 'pipe', 'pipe'],
+					maxBuffer,
 				}).trim();
 			} catch {
 				// Unborn HEAD: nothing to diff against, but the index can still be
@@ -254,25 +291,50 @@ export class FileSnapshotService {
 						cwd: this.workspaceRoot,
 						encoding: 'utf-8',
 						stdio: ['pipe', 'pipe', 'pipe'],
+						maxBuffer,
 					},
 				).trim();
 			}
 
-			const untrackedOutput = execFileSync(
-				'git',
-				['ls-files', '--others', '--exclude-standard'],
-				{
-					cwd: this.workspaceRoot,
-					encoding: 'utf-8',
-					stdio: ['pipe', 'pipe', 'pipe'],
-				},
-			).trim();
+			// A generated-output folder can hold tens of thousands of untracked
+			// paths while the tracked diff stays tiny, so the untracked listing
+			// gets its own failure path: an overflowed listing is not "git
+			// missing", and losing it must not lose the tracked changes too.
+			let untrackedFiles: string[] = [];
+			let untrackedOverflowed = false;
+			try {
+				const untrackedOutput = execFileSync(
+					'git',
+					['ls-files', '--others', '--exclude-standard'],
+					{
+						cwd: this.workspaceRoot,
+						encoding: 'utf-8',
+						stdio: ['pipe', 'pipe', 'pipe'],
+						maxBuffer,
+					},
+				).trim();
+				untrackedFiles = untrackedOutput
+					? untrackedOutput.split('\n').filter(Boolean)
+					: [];
+			} catch (error) {
+				if (!isMaxBufferError(error)) {
+					throw error;
+				}
+
+				untrackedOverflowed = true;
+				notifyWarning(
+					'Untracked file list too large to capture; snapshotting tracked changes only',
+					true,
+					{
+						context: {
+							workspaceRoot: this.workspaceRoot,
+						},
+					},
+				);
+			}
 
 			const modifiedFiles = modifiedOutput
 				? modifiedOutput.split('\n').filter(Boolean)
-				: [];
-			const untrackedFiles = untrackedOutput
-				? untrackedOutput.split('\n').filter(Boolean)
 				: [];
 
 			const allFiles = [...new Set([...modifiedFiles, ...untrackedFiles])];
@@ -306,7 +368,7 @@ export class FileSnapshotService {
 
 			return {
 				files: filtered,
-				truncated: false,
+				truncated: untrackedOverflowed,
 				truncatedCount: 0,
 				available: true,
 			};

@@ -1,6 +1,7 @@
 import {execFile, execFileSync} from 'child_process';
 import {chmodSync, existsSync} from 'fs';
 import * as path from 'path';
+import {tmpdir} from 'node:os';
 import {promisify} from 'util';
 import test from 'ava';
 import * as fs from 'fs/promises';
@@ -612,6 +613,129 @@ test.serial(
 			);
 		} finally {
 			await cleanupTempDir(tempDir);
+		}
+	},
+);
+
+// #2241: `git ls-files --others` on ~30,000 untracked files is ~1.28 MB,
+// past Node's 1 MB execFileSync default, so the scan threw ENOBUFS and the
+// checkpoint came back empty even though a tracked file had changed.
+test.serial(
+	'FileSnapshotService still captures tracked changes with many untracked files',
+	async t => {
+		t.timeout(60_000);
+		const tempDir = await createTempDir();
+		try {
+			initGitRepo(tempDir);
+			await createTestFile(tempDir, 'tracked.txt', 'v1');
+			execFileSync('git', ['add', '.'], {cwd: tempDir, stdio: 'pipe'});
+			execFileSync(
+				'git',
+				[
+					'-c',
+					'user.email=test@test.com',
+					'-c',
+					'user.name=test',
+					'commit',
+					'-qm',
+					'init',
+				],
+				{cwd: tempDir, stdio: 'pipe'},
+			);
+			await createTestFile(tempDir, 'tracked.txt', 'v2');
+
+			// 30,000 empty files, as in the issue's reproducer. Created in
+			// batches: 30,000 open handles at once hits EMFILE.
+			const genDir = path.join(tempDir, 'gen');
+			await fs.mkdir(genDir, {recursive: true});
+			for (let start = 0; start < 30000; start += 1000) {
+				const batch: Promise<void>[] = [];
+				for (let i = start; i < Math.min(start + 1000, 30000); i++) {
+					batch.push(
+						fs.writeFile(
+							path.join(genDir, `generated-output-file-number-${i}.txt`),
+							'',
+						),
+					);
+				}
+
+				await Promise.all(batch);
+			}
+
+			const service = new FileSnapshotService(tempDir);
+			const result = service.getModifiedFilesResult();
+
+			t.true(result.available);
+			t.true(result.files.includes('tracked.txt'));
+		} finally {
+			await cleanupTempDir(tempDir);
+		}
+	},
+);
+
+// Same overflow, forced with a lowered limit instead of a huge fixture: a
+// 200-byte buffer fits the one-line tracked diff but not the untracked
+// listing, so only the untracked call throws ENOBUFS.
+test.serial(
+	'FileSnapshotService returns tracked changes when only the untracked list overflows',
+	async t => {
+		const tempDir = await createTempDir();
+		try {
+			initGitRepo(tempDir);
+			await createTestFile(tempDir, 'tracked.txt', 'v1');
+			execFileSync('git', ['add', '.'], {cwd: tempDir, stdio: 'pipe'});
+			execFileSync(
+				'git',
+				[
+					'-c',
+					'user.email=test@test.com',
+					'-c',
+					'user.name=test',
+					'commit',
+					'-qm',
+					'init',
+				],
+				{cwd: tempDir, stdio: 'pipe'},
+			);
+			await createTestFile(tempDir, 'tracked.txt', 'v2');
+			for (let i = 0; i < 30; i++) {
+				await createTestFile(
+					tempDir,
+					`untracked-${String(i).padStart(2, '0')}.txt`,
+					'untracked',
+				);
+			}
+
+			const service = new FileSnapshotService(tempDir);
+			const result = service.getModifiedFilesResult({maxBuffer: 200});
+
+			// The tracked change survives; the lost untracked list is
+			// reported as truncation, not as "git not available".
+			t.true(result.available);
+			t.deepEqual(result.files, ['tracked.txt']);
+			t.true(result.truncated);
+		} finally {
+			await cleanupTempDir(tempDir);
+		}
+	},
+);
+
+test.serial(
+	'FileSnapshotService still reports git as unavailable outside a repository',
+	async t => {
+		// The temp dirs above sit inside this repo, so git answers from the
+		// parent checkout; a real non-repo needs a directory outside it.
+		const outsideRepo = await fs.mkdtemp(
+			path.join(tmpdir(), 'snapshot-no-git-'),
+		);
+		try {
+			const service = new FileSnapshotService(outsideRepo);
+			const result = service.getModifiedFilesResult();
+
+			t.false(result.available);
+			t.deepEqual(result.files, []);
+		} finally {
+			await cleanupTempDir(outsideRepo);
 		}
 	},
 );
