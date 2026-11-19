@@ -198,6 +198,7 @@ export function buildProviderConfigObject(
 					organizationId?: string;
 					timeout?: number;
 					sdkProvider?: SdkProvider;
+					extraBody?: Record<string, unknown>;
 					openrouter?: OpenRouterParameters;
 				} = {
 					name: p.name,
@@ -226,6 +227,10 @@ export function buildProviderConfigObject(
 
 				if (p.sdkProvider) {
 					providerConfig.sdkProvider = p.sdkProvider;
+				}
+
+				if (p.extraBody) {
+					providerConfig.extraBody = p.extraBody;
 				}
 
 				if (p.openrouter) {

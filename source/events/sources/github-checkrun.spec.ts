@@ -504,3 +504,77 @@ test('pollIntervalMs is clamped to the 5s minimum', async t => {
 	await fireScheduled(scheduler.calls[0]);
 	t.is(scheduler.calls[1]?.ms, 5_000);
 });
+
+// `gh run list --branch main` also lists a fork's pull request whose branch is
+// named `main`. Its commit is not on origin, so it must never be "fixed".
+test('ignores a failing pull_request run from a fork, without hiding this repo\'s own failure', async t => {
+	const {router, events} = captureRouter();
+	router.subscribe(ciSub());
+	const scheduler = stubScheduler();
+	const forkRun = {...FAILED_RUN, databaseId: 50, headSha: 'f0f0f0f', event: 'pull_request'};
+	const ownRun = {...FAILED_RUN, databaseId: 41, event: 'push'};
+	const apiCalls: string[][] = [];
+
+	const source = new CiEventSource(router, {
+		branch: 'feature-x',
+		execGhFn: async args => {
+			if (args[0] === 'api') {
+				apiCalls.push(args);
+				return args[1]?.endsWith('/50') ? 'false\n' : 'true\n';
+			}
+			t.true(args.at(-1)?.includes('event'), 'requests the event field');
+			return runListJson([forkRun, ownRun]);
+		},
+		scheduleFn: scheduler.scheduleFn,
+		clearFn: scheduler.clearFn,
+	});
+
+	await source.start();
+	await fireScheduled(scheduler.calls[0]);
+
+	t.is(events.length, 1);
+	t.is((events[0]?.payload as {runId: number}).runId, 41);
+	t.deepEqual(apiCalls.map(a => a[1]), ['repos/{owner}/{repo}/actions/runs/50']);
+
+	// The verdict is cached: the next poll does not look it up again.
+	await fireScheduled(scheduler.calls[1]);
+	t.is(apiCalls.length, 1);
+});
+
+test('a same-repo pull_request run is still reported', async t => {
+	const {router, events} = captureRouter();
+	router.subscribe(ciSub());
+	const scheduler = stubScheduler();
+	const source = new CiEventSource(router, {
+		branch: 'feature-x',
+		execGhFn: async args =>
+			args[0] === 'api'
+				? 'true'
+				: runListJson([{...FAILED_RUN, event: 'pull_request'}]),
+		scheduleFn: scheduler.scheduleFn,
+		clearFn: scheduler.clearFn,
+	});
+	await source.start();
+	await fireScheduled(scheduler.calls[0]);
+	t.is(events.length, 1);
+});
+
+test('a failed head-repository lookup backs off and reports nothing', async t => {
+	const {router, events} = captureRouter();
+	router.subscribe(ciSub());
+	const scheduler = stubScheduler();
+	const source = new CiEventSource(router, {
+		branch: 'feature-x',
+		pollIntervalMs: 5_000,
+		execGhFn: async args => {
+			if (args[0] === 'api') throw new Error('rate limited');
+			return runListJson([{...FAILED_RUN, event: 'pull_request'}]);
+		},
+		scheduleFn: scheduler.scheduleFn,
+		clearFn: scheduler.clearFn,
+	});
+	await source.start();
+	await fireScheduled(scheduler.calls[0]);
+	t.is(events.length, 0);
+	t.true((scheduler.calls[1]?.ms ?? 0) >= 5_000);
+});

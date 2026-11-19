@@ -31,14 +31,35 @@ test('SecurityDisclaimer displays Security Warning title', t => {
 });
 
 test('SecurityDisclaimer displays the current working directory', t => {
-	const {lastFrame} = renderWithTheme(
-		<SecurityDisclaimer onConfirm={() => {}} onExit={() => {}} />,
-	);
+	// The path wraps inside the box, so a long checkout path (a deep worktree,
+	// a CI workspace) would split across lines and never match whole. Show a
+	// short folder to check the path is printed, then check the default is
+	// the current working directory by comparing renders.
+	const folder = mkdtempSync(join(tmpdir(), 'nc-'));
+	try {
+		const {lastFrame} = renderWithTheme(
+			<SecurityDisclaimer
+				directory={folder}
+				onConfirm={() => {}}
+				onExit={() => {}}
+			/>,
+		);
+		t.true(lastFrame()!.includes(folder));
 
-	const output = lastFrame();
-	t.truthy(output);
-	// process.cwd() should be displayed
-	t.regex(output!, new RegExp(process.cwd()));
+		const byDefault = renderWithTheme(
+			<SecurityDisclaimer onConfirm={() => {}} onExit={() => {}} />,
+		).lastFrame();
+		const explicitCwd = renderWithTheme(
+			<SecurityDisclaimer
+				directory={process.cwd()}
+				onConfirm={() => {}}
+				onExit={() => {}}
+			/>,
+		).lastFrame();
+		t.is(byDefault, explicitCwd);
+	} finally {
+		rmSync(folder, {recursive: true, force: true});
+	}
 });
 
 test('SecurityDisclaimer displays trust warning message', t => {

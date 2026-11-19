@@ -1,9 +1,9 @@
 import type {MCPServerConfig} from '@/types/config';
-import {logWarning} from '@/utils/message-queue';
+import {notifyWarning} from '@/utils/message-queue-core';
 
 /**
  * Collect MCP security findings as strings (no logging). Exported so tests
- * and callers can assert on the scanner without capturing logWarning, which
+ * and callers can assert on the scanner without capturing notifyWarning, which
  * is a module binding and not monkey-patchable from globalThis.
  *
  * Prefers rawEnv/rawHeaders (pre-substitution snapshots from the loader) so
@@ -64,7 +64,7 @@ export function collectMCPSecurityFindings(
  */
 export function validateMCPConfigSecurity(mcpServers: MCPServerConfig[]): void {
 	for (const finding of collectMCPSecurityFindings(mcpServers)) {
-		logWarning(finding);
+		notifyWarning(finding);
 	}
 }
 

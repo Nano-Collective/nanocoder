@@ -258,7 +258,7 @@ test('ChatInput hides live task list and shows collapsed badge when showTaskList
 	const output = lastFrame();
 	t.truthy(output);
 	t.notRegex(output!, /First task/);
-	t.regex(output!, /Tasks \(~1\/2 Ctrl-t\)/);
+	t.regex(output!, /Tasks \(~1\/2 Ctrl\+T\)/);
 	unmount();
 });
 
@@ -276,7 +276,7 @@ test('ChatInput shows unread badge when showTaskList is false and taskListHasUnr
 	const output = lastFrame();
 	t.truthy(output);
 	t.notRegex(output!, /First task/);
-	t.regex(output!, /Tasks \(~1\/2\* Ctrl-t\)/);
+	t.regex(output!, /Tasks \(~1\/2\* Ctrl\+T\)/);
 	unmount();
 });
 

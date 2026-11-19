@@ -1,5 +1,5 @@
 import test from 'ava';
-import React from 'react';
+import type {CommandContext} from '@/types/index';
 import {ideCommand} from './ide';
 
 console.log('\nide.spec.tsx');
@@ -14,20 +14,15 @@ test('ideCommand has a description', t => {
 	t.is(ideCommand.description, 'Connect to an IDE');
 });
 
-test('ideCommand has a handler function', t => {
-	t.is(typeof ideCommand.handler, 'function');
-});
+test('ideCommand opens the IDE picker and hands the prompt back', async t => {
+	let opened = 0;
+	const context = {
+		args: [],
+		enterIdeSelectionMode: () => opened++,
+	} as unknown as CommandContext;
 
-test('ideCommand handler returns a React element', async t => {
-	const result = await ideCommand.handler([]);
-	t.truthy(React.isValidElement(result));
-});
+	const completion = await ideCommand.run(context);
 
-test('ideCommand handler returns a Fragment (stub for special handling)', async t => {
-	const result = await ideCommand.handler([]);
-	t.truthy(result);
-	// The handler returns React.Fragment since actual logic is in app-util.ts
-	if (React.isValidElement(result)) {
-		t.is(result.type, React.Fragment);
-	}
+	t.is(opened, 1);
+	t.is(completion, 'done');
 });
