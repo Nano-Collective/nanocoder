@@ -78,6 +78,7 @@ Use dedicated AI SDK packages for native API support, enabled via the `sdkProvid
 | `contextWindows` | Per-model context window overrides in tokens, keyed by model name (optional) |
 | `maxOutputTokens` | Cap on tokens the model may generate in one response, for all models on this provider (optional, see [Output Token Ceiling](#output-token-ceiling)) |
 | `sdkProvider` | AI SDK provider to use (see below, defaults to `openai-compatible`) |
+| `extraBody` | Additional JSON request fields for OpenAI-compatible chat endpoints (optional); `model`, `messages`, `tools`, and `stream` remain client-controlled |
 | `organizationId` | OpenAI organization ID, sent as the `OpenAI-Organization` header (optional) |
 | `headers` | Extra HTTP headers sent with every request to this provider, as an object of name/value pairs (optional). An explicit `OpenAI-Organization` here wins over `organizationId` |
 | `tune` | [Tune](../../features/tune.md) defaults applied while this provider is active (optional) |

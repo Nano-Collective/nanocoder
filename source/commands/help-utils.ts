@@ -34,6 +34,7 @@ const CATEGORY_COMMANDS: Record<HelpCategory, readonly string[]> = {
 		'copy',
 		'expand',
 		'export',
+		'plans',
 		'rename',
 		'resume',
 		'retry',
@@ -75,6 +76,7 @@ const CATEGORY_COMMANDS: Record<HelpCategory, readonly string[]> = {
 		'status',
 		'tip',
 		'usage',
+		'whoami',
 	],
 	Other: [],
 };
@@ -217,6 +219,15 @@ const COMMAND_HELP_OVERRIDES: Record<string, CommandHelpOverrides> = {
 			'/memory add --category architecture Use TypeScript',
 			'/memory delete 12ab34cd',
 			'/memory propose',
+		],
+	},
+	plans: {
+		usage: '/plans [list|show [id]|use <id|none>|delete <id>]',
+		options: ['list', 'show [id]', 'use <id|none>', 'delete|rm <id>'],
+		examples: [
+			'/plans',
+			'/plans show auth-refactor',
+			'/plans use auth-refactor',
 		],
 	},
 	privacy: {

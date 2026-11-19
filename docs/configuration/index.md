@@ -172,6 +172,32 @@ This lets you persist context limits for unknown or local models without reapply
 
 Beyond providers and MCP servers, `agents.config.json` supports application-level settings under the `nanocoder` key.
 
+### Language servers
+
+Nanocoder discovers installed language servers by scanning `PATH` when the LSP manager starts. Discovery is asynchronous and enabled by default. If you install a server while Nanocoder is running, restart it to discover the new server; each new discovery pass takes a fresh `PATH` snapshot. To turn auto-discovery off while still using explicitly configured servers, set `nanocoder.lsp.autoDiscover` to `false`:
+
+```json
+{
+  "nanocoder": {
+    "lsp": {
+      "autoDiscover": false
+    },
+    "lspServers": [
+      {
+        "name": "typescript-language-server",
+        "command": "typescript-language-server",
+        "args": ["--stdio"],
+        "languages": ["ts", "tsx", "js", "jsx"]
+      }
+    ]
+  }
+}
+```
+
+Project-level configuration takes precedence over the user-level setting. With auto-discovery disabled, `/lsp` reports that state; any entries in `lspServers` are still started.
+
+The `NANOCODER_LSP=off` environment variable also disables automatic discovery for that process, overriding the config value.
+
 ### Auto-Compact
 
 Automatically compress context when it reaches a percentage of the model's context limit. See [Context Compression](../features/context-compression.md) for full details on how compression works.
@@ -303,6 +329,32 @@ Set `nanocoder.autoCommit` to `true` (boolean; any other value is treated as off
 
 This produces one commit per edit. Squash them before opening a PR if you prefer a tidier history (`git rebase -i`, or `git reset --soft <base>` and commit again).
 
+### Completion Evidence
+
+Models sometimes edit code and say "fixed" without ever running the tests. Set `nanocoder.verify.required` and a turn that edited files is not accepted as finished until each required command has run through `execute_bash` and exited `0` **after the last edit**. Off by default.
+
+```json
+{
+  "nanocoder": {
+    "verify": {
+      "required": ["pnpm test", "pnpm run lint"]
+    }
+  }
+}
+```
+
+`required` is a list of commands, or `"auto"` to require the `test`, `typecheck` and `lint` scripts that exist in the project's `package.json` (the package manager is read from the lockfile; other ecosystems list their commands explicitly). Anything else is ignored with a warning, which leaves the feature off.
+
+- **How it works.** The agent loop keeps a ledger for each task (each user message) with every `execute_bash` command, its exit code and a timestamp. When the model tries to finish after editing, any required command without a fresh exit-`0` run is sent back to it ("You must run each command below and fix any failure before finishing").
+- **Stale evidence does not count.** A passing run followed by another edit has to be repeated.
+- **A command matches as whole words, at the start of a command:** `pnpm test` is satisfied by `pnpm test -- --watch=false`, `CI=1 pnpm test` or `cd app && pnpm test`, but not by `pnpm test:all` or by text that only mentions it (`echo pnpm test`).
+- **The exit code has to be real.** A run containing a pipe, `;`, a newline, `||` or a background `&` outside quotes (such as `pnpm test | tail`) does not count, because those can report `0` whatever the tests did.
+- **No endless loops.** A task is sent back at most twice, after which the model may finish and the result is marked unverified.
+- The final response ends with a line such as `Verification: ✓ pnpm test (exit 0) · ✗ pnpm run lint (last run exited 1)`. It is shown after a turn in the interactive UI, appended to the answer in `nanocoder run` (including `--json`), and sent as a final message over ACP.
+- Works the same in the interactive UI, `nanocoder run` / `--plain`, and the VS Code extension. A task that edits nothing is never held up.
+- **Not covered:** edits made by [subagents](../features/subagents.md), and runs triggered by the daemon (file watches and schedules), which go through the subagent executor.
+- `required` lives in the same `nanocoder.verify` block as the CI-watch settings (`trustLevel`, `pollIntervalMs`, `maxPollIntervalMs`), so you can set them together.
+
 ### Retry Limits
 
 Caps on how many times the conversation loop auto-retries a failing pattern without user intervention, so a stuck model cannot silently drain tokens. They apply to every agent loop: the interactive TUI, the `--plain` runtime used by `nanocoder run "..."` in CI and non-TTY environments, the ACP loop used by editor clients, and delegated [subagent](../features/subagents.md) runs. Outside the TUI they act within the [Headless](#headless) turn ceiling. These are agent-loop limits — the per-provider `maxRetries` setting is unrelated and governs network request retries (see [Providers](providers/index.md)).
@@ -396,7 +448,7 @@ Use a different provider and model per development mode, for example a fast, che
 }
 ```
 
-Keys are mode names (`normal`, `auto-accept`, `yolo`, `plan`, `architect`). Each entry needs a `provider` that matches a configured provider name (case-insensitive) and a `model`; if that provider has a non-empty `models` list, the model must be in it. Invalid entries are skipped with an error in the log. A `--provider` or `--model` CLI flag takes priority at startup.
+Keys are mode names (`normal`, `auto-accept`, `yolo`, `plan`, `architect`). Each entry needs a `provider` that matches a configured provider name (case-insensitive) and a `model`; the provider must also have a `models` list, otherwise the entry is skipped with an error (and if that list is non-empty, the model must be in it). Invalid entries are skipped with an error in the log. A `--provider` or `--model` CLI flag takes priority at startup.
 
 ### Model Tuning
 

@@ -87,7 +87,9 @@ import {
 } from '@/conversation/prompt-builder';
 import {resolveStartupProvider} from '@/hooks/startup-provider';
 import {appendRelevantProjectContextWithCount} from '@/memory/project-context';
+import {appendActivePlanContext} from '@/plans/context';
 import {withTrustedProjectPlugins} from '@/plugins/host';
+import {bashExecutor} from '@/services/bash-executor';
 import {type HookContext, runLifecycleHooks} from '@/services/lifecycle-hooks';
 import {
 	createSessionContext,
@@ -508,11 +510,17 @@ export class AcpAgent implements Agent {
 					session.getMemoryFinder(),
 					getProjectContextPreferences(),
 				);
+				// Plan graphs are project state and change between turns. This runs
+				// inside the session's context, so an editor session sees the plan
+				// for its own workspace, not the agent's launch directory.
+				const systemPrompt = await appendActivePlanContext(
+					projectContext.systemPrompt,
+				);
 				session.systemMessage = {
 					role: 'system',
-					content: projectContext.systemPrompt,
+					content: systemPrompt,
 				};
-				setLastBuiltPrompt(projectContext.systemPrompt);
+				setLastBuiltPrompt(systemPrompt);
 				if (projectContext.memoryCount > 0) {
 					logger.info(
 						`ACP recall: session=${params.sessionId} count=${projectContext.memoryCount}`,
@@ -686,6 +694,8 @@ export class AcpAgent implements Agent {
 		try {
 			await whileIdle(session);
 			await this.releaseMcpServers(sessionId);
+			// Background jobs belong to the session, so closing it stops them.
+			await bashExecutor.stopSessionJobs(sessionId);
 		} finally {
 			session.releaseTurn();
 		}
@@ -984,6 +994,12 @@ export class AcpAgent implements Agent {
 			await this.releaseMcpServers(params.sessionId);
 		}
 		await sessionManager.deleteSession(params.sessionId);
+		// Evict from in-memory map if present
+		this.sessions.delete(params.sessionId);
+		clearAcpReadStubs(params.sessionId);
+		await this.releaseMcpServers(params.sessionId);
+		// A deleted session leaves no reason to keep its background jobs alive.
+		await bashExecutor.stopSessionJobs(params.sessionId);
 		logger.info(`ACP deleteSession: ${params.sessionId}`);
 		return {};
 	}
