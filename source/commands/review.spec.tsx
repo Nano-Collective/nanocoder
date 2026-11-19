@@ -1,9 +1,15 @@
 import test from 'ava';
 import React from 'react';
 import stripAnsi from 'strip-ansi';
+import {ReviewActivityStore} from '@/review/review-activity';
+import {createReviewMessage} from '@/review/review-session';
 import {renderWithTheme} from '@/test-utils/render-with-theme';
 import type {Message} from '@/types/core';
-import {createReviewCommand, type ReviewDependencies} from './review';
+import {
+	createReviewCommand,
+	createReviewView,
+	type ReviewDependencies,
+} from './review';
 
 const baseMessages: Message[] = [
 	{role: 'user', content: '/review feature'},
@@ -140,14 +146,14 @@ test('reviewCommand has correct name and description', t => {
 	t.is(command.name, 'review');
 	t.regex(
 		command.description,
-		/Review a branch or PR diff for bugs, security issues, and style violations/,
+		/Grounded, evidence-checked review/,
 	);
 });
 
 test('review with no args reviews current branch (no usage error)', async t => {
 	let diffArgs: string[] = [];
 
-	const command = createReviewCommand({
+	const command = createReviewView({
 		execGit: async args => {
 			if (args[0] === 'rev-parse' || args[0] === 'remote') return '';
 			diffArgs = args;
@@ -172,7 +178,7 @@ test('review with no args reviews current branch (no usage error)', async t => {
 });
 
 test('review returns an error when no client is available', async t => {
-	const command = createReviewCommand({
+	const command = createReviewView({
 		execGit: async () => '',
 		getCurrentBranch: async () => 'feature',
 		getDefaultBranch: async () => 'main',
@@ -192,7 +198,7 @@ test('review returns an error when no client is available', async t => {
 });
 
 test('review renders the model reply as a parsed Markdown assistant message', async t => {
-	const command = createReviewCommand({
+	const command = createReviewView({
 		execGit: async args => {
 			if (args[0] === 'rev-parse' || args[0] === 'remote') return '';
 			return 'diff --git a/file.ts b/file.ts\n+const x = 1;';
@@ -224,7 +230,7 @@ test('review renders the model reply as a parsed Markdown assistant message', as
 test('review generates a review from the branch diff', async t => {
 	let receivedMessages: Message[] = [];
 
-	const command = createReviewCommand({
+	const command = createReviewView({
 		execGit: async args => {
 			if (args[0] === 'rev-parse' || args[0] === 'remote') return '';
 			return 'diff --git a/file.ts b/file.ts\n+const x = 1;';
@@ -270,7 +276,7 @@ test('review generates a review from the branch diff', async t => {
 });
 
 test('review warns when diff is empty', async t => {
-	const command = createReviewCommand({
+	const command = createReviewView({
 		execGit: async args => {
 			if (args[0] === 'rev-parse') return '';
 			return '';
@@ -293,7 +299,7 @@ test('review warns when diff is empty', async t => {
 });
 
 test('review warns when the model returns an empty response', async t => {
-	const command = createReviewCommand({
+	const command = createReviewView({
 		execGit: async args => {
 			if (args[0] === 'rev-parse' || args[0] === 'remote') return '';
 			return 'diff --git a/file.ts b/file.ts\n+const x = 1;';
@@ -316,7 +322,7 @@ test('review warns when the model returns an empty response', async t => {
 });
 
 test('review returns an error when the LLM request fails', async t => {
-	const command = createReviewCommand({
+	const command = createReviewView({
 		execGit: async args => {
 			if (args[0] === 'rev-parse' || args[0] === 'remote') return '';
 			return 'diff --git a/file.ts b/file.ts\n+const x = 1;';
@@ -345,7 +351,7 @@ test('review returns an error when the LLM request fails', async t => {
 });
 
 test('review returns an error when git fails', async t => {
-	const command = createReviewCommand({
+	const command = createReviewView({
 		execGit: async () => {
 			throw new Error('not a git repository');
 		},
@@ -369,7 +375,7 @@ test('review returns an error when git fails', async t => {
 test('review uses the review system prompt', async t => {
 	let systemPrompt = '';
 
-	const command = createReviewCommand({
+	const command = createReviewView({
 		execGit: async args => {
 			if (args[0] === 'rev-parse' || args[0] === 'remote') return '';
 			return 'diff --git a/file.ts b/file.ts\n+const x = 1;';
@@ -432,7 +438,7 @@ test('quick review resolves a bare PR number to the unique upstream parent', asy
 			};
 		},
 	};
-	const command = createReviewCommand(dependencies);
+	const command = createReviewView(dependencies);
 
 	const result = await command.handler(['quick', '42'], baseMessages, {
 		...testMetadata,
@@ -478,7 +484,7 @@ test('bare PR resolution treats a renamed upstream slug as the same repository',
 			'nano-collective/nanocoder': ['42'],
 		},
 	});
-	const command = createReviewCommand(dependencies);
+	const command = createReviewView(dependencies);
 
 	const result = await command.handler(['quick', '42'], baseMessages, {
 		...testMetadata,
@@ -512,7 +518,7 @@ test('bare PR resolution ignores a stale remote that returns 404', async t => {
 			'deleted-org/gone': 'HTTP 404: Not Found',
 		},
 	});
-	const command = createReviewCommand(dependencies);
+	const command = createReviewView(dependencies);
 
 	const result = await command.handler(['quick', '42'], baseMessages, {
 		...testMetadata,
@@ -548,7 +554,7 @@ test('bare PR number fails clearly when fork and upstream numbers collide', asyn
 		},
 	});
 	let chatCalls = 0;
-	const command = createReviewCommand(dependencies);
+	const command = createReviewView(dependencies);
 
 	const result = await command.handler(['quick', '42'], baseMessages, {
 		...testMetadata,
@@ -575,7 +581,7 @@ test('bare PR number fails clearly when fork and upstream numbers collide', asyn
 
 test('explicit GitHub PR URL uses its owner and repository directly', async t => {
 	const {dependencies, ghCalls, gitCalls} = createGitHubFixture();
-	const command = createReviewCommand(dependencies);
+	const command = createReviewView(dependencies);
 
 	const result = await command.handler(
 		['https://github.com/other-owner/other-repo/pull/42?tab=files'],
@@ -597,7 +603,7 @@ test('explicit GitHub PR URL uses its owner and repository directly', async t =>
 });
 
 test('review returns error for PR number when gh is unavailable', async t => {
-	const command = createReviewCommand({
+	const command = createReviewView({
 		execGit: async () => '',
 		getCurrentBranch: async () => 'feature',
 		getDefaultBranch: async () => 'main',
@@ -619,7 +625,7 @@ test('review returns error for PR number when gh is unavailable', async t => {
 
 test('review rejects extra target arguments and non-PR GitHub URLs', async t => {
 	let gitCalls = 0;
-	const command = createReviewCommand({
+	const command = createReviewView({
 		execGit: async () => {
 			gitCalls += 1;
 			return '';
@@ -656,7 +662,7 @@ test('review returns error when GitHub cannot safely resolve a bare PR number', 
 			'user/repo/pulls/42': 'HTTP 403: Resource not accessible',
 		},
 	});
-	const command = createReviewCommand(dependencies);
+	const command = createReviewView(dependencies);
 
 	const result = await command.handler(['42'], baseMessages, {
 		...testMetadata,
@@ -676,7 +682,7 @@ test('review returns error for PR number with no GitHub remotes', async t => {
 	const {dependencies} = createGitHubFixture({
 		remoteUrls: {origin: 'git@gitlab.com:user/repo.git'},
 	});
-	const command = createReviewCommand(dependencies);
+	const command = createReviewView(dependencies);
 
 	const result = await command.handler(['42'], baseMessages, {
 		...testMetadata,
@@ -693,7 +699,7 @@ test('review returns error for PR number with no GitHub remotes', async t => {
 });
 
 test('review rejects target starting with dash', async t => {
-	const command = createReviewCommand({
+	const command = createReviewView({
 		execGit: async () => '',
 		getCurrentBranch: async () => 'feature',
 		getDefaultBranch: async () => 'main',
@@ -715,7 +721,7 @@ test('review rejects target starting with dash', async t => {
 test('review with no args reviews current branch against default', async t => {
 	let diffArgs: string[] = [];
 
-	const command = createReviewCommand({
+	const command = createReviewView({
 		execGit: async args => {
 			if (args[0] === 'rev-parse' || args[0] === 'remote') return '';
 			diffArgs = args;
@@ -742,7 +748,7 @@ test('review with no args reviews current branch against default', async t => {
 test('review with default branch as target reviews current branch against it', async t => {
 	let diffArgs: string[] = [];
 
-	const command = createReviewCommand({
+	const command = createReviewView({
 		execGit: async args => {
 			if (args[0] === 'rev-parse' || args[0] === 'remote') return '';
 			diffArgs = args;
@@ -773,7 +779,7 @@ test('review surfaces truncation info when diff exceeds limit', async t => {
 
 	let userMessage = '';
 
-	const command = createReviewCommand({
+	const command = createReviewView({
 		execGit: async args => {
 			if (args[0] === 'rev-parse' || args[0] === 'remote') return '';
 			return bigDiff;
@@ -834,7 +840,7 @@ test('review uses fallback prompt when loadPrompt returns fallback', async t => 
 		},
 	};
 
-	const command = createReviewCommand({
+	const command = createReviewView({
 		execGit: async args => {
 			if (args[0] === 'rev-parse' || args[0] === 'remote') return '';
 			return 'diff --git a/file.ts b/file.ts\n+const x = 1;';
@@ -855,8 +861,60 @@ test('review uses fallback prompt when loadPrompt returns fallback', async t => 
 	t.is(systemPrompt, fallbackPrompt);
 });
 
+test('review activity needs no client or Git and reports when no review exists', async t => {
+	const command = createReviewView({
+		execGit: async () => {
+			throw new Error('git must not run for /review activity');
+		},
+		getCurrentBranch: async () => 'feature',
+		getDefaultBranch: async () => 'main',
+	});
+
+	const empty = await command.handler(['activity'], baseMessages, {
+		...testMetadata,
+		client: undefined,
+	});
+	const {lastFrame} = renderWithTheme(empty as React.ReactElement);
+	t.regex(stripAnsi(lastFrame() ?? ''), /No review activity in this session yet/);
+
+	const extra = await command.handler(['activity', 'now'], baseMessages, testMetadata);
+	const {lastFrame: usageFrame} = renderWithTheme(extra as React.ReactElement);
+	t.regex(stripAnsi(usageFrame() ?? ''), /Usage: \/review activity/);
+});
+
+test('review activity renders the latest saved review expanded', async t => {
+	const store = new ReviewActivityStore();
+	store
+		.begin({source: 'agent', name: 'finder', summary: 'Looking for defects'})
+		.complete('Finished (2 model calls, 1 tool call)');
+	store.finish('completed');
+	const command = createReviewView({
+		execGit: async () => '',
+		getCurrentBranch: async () => 'feature',
+		getDefaultBranch: async () => 'main',
+	});
+	const result = await command.handler(
+		['activity'],
+		[
+			...baseMessages,
+			createReviewMessage({
+				report: 'report',
+				tier: 'Grounded',
+				status: 'incomplete',
+				activity: store.toSummary(),
+			}),
+		],
+		testMetadata,
+	);
+	const {lastFrame} = renderWithTheme(result as React.ReactElement);
+	const frame = stripAnsi(lastFrame() ?? '');
+	t.true(frame.includes('Grounded review · incomplete · 1 agent'));
+	t.true(frame.includes('Looking for defects'));
+	t.true(frame.includes('Finished (2 model calls, 1 tool call)'));
+});
+
 async function runBaseReview(fixture: ReturnType<typeof createGitHubFixture>) {
-	const command = createReviewCommand({
+	const command = createReviewView({
 		...fixture.dependencies,
 		loadPrompt: () => 'review prompt',
 	});

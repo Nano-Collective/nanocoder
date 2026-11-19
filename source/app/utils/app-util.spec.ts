@@ -1196,8 +1196,13 @@ test.serial(
 		const options = createProgressTestOptions({
 			onAddToChatQueue: component => queued.push(component),
 		});
-		const originalExecute = commandRegistry.execute;
-		commandRegistry.execute = async () => 'Review result';
+		const originalReview = commandRegistry.get('review');
+		commandRegistry.register({
+			name: 'review',
+			description: 'review stub',
+			echoInvocation: true,
+			run: async () => ({show: 'Review result'}),
+		});
 
 		try {
 			await handleMessageSubmission('/review quick 1467', options);
@@ -1212,7 +1217,7 @@ test.serial(
 				'Review result',
 			);
 		} finally {
-			commandRegistry.execute = originalExecute;
+			if (originalReview) commandRegistry.register(originalReview);
 		}
 	},
 );
