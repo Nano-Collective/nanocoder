@@ -223,6 +223,25 @@ test.serial('Escape cancels a running review and the result says so', async t =>
 	t.deepEqual(state.capture, [true, false]);
 });
 
+test.serial('an incomplete review is labelled incomplete above its report', async t => {
+	const fixture = featureFixture(t);
+	const {rendered, options, state} = mountReviewSession(call =>
+		call.role === 'verifier'
+			? {content: 'I could not decide.'}
+			: {content: findingBlock({file: 'src/file.ts', line: 2})},
+	);
+	t.teardown(rendered.unmount);
+
+	registerReview(createReviewFixtureTools(fixture));
+	await handleMessageSubmission('/review branch feature/tui', options);
+	await tick();
+
+	const final = rendered.lastFrame() ?? '';
+	t.true(final.includes('Grounded review · incomplete · 2 agents'));
+	t.false(final.includes('Grounded review · completed · '));
+	t.is(readPersistedReview(state.messages[0]!)?.status, 'incomplete');
+});
+
 test.serial('a second review cannot replace the running review or its Escape handler', async t => {
 	const fixture = featureFixture(t);
 	let releaseFinder: (() => void) | undefined;
@@ -287,7 +306,7 @@ test.serial('/review activity shows the saved trace of the latest review', async
 	await tick();
 
 	const frame = rendered.lastFrame() ?? '';
-	t.true(frame.includes('Grounded review (completed) · completed'));
+	t.true(frame.includes('Grounded review · completed · 1 agent'));
 	t.true(frame.includes('review: Resolve review scope'));
 	t.true(frame.includes('agent: finder'));
 });

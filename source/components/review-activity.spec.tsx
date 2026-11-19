@@ -139,6 +139,27 @@ test('recentCount 0 renders only the summary line for a finished review', t => {
 	unmount();
 });
 
+test('a finished review shows an incomplete outcome instead of the run status', t => {
+	const store = new ReviewActivityStore({reviewId: 'outcome-review'});
+	store.begin({source: 'agent', name: 'finder', summary: 'Finding'}).complete('Done');
+	store.finish('completed');
+	const summary = store.toSummary();
+
+	const incomplete = renderWithTheme(
+		<ReviewActivity summary={summary} recentCount={0} outcome="incomplete" />,
+	);
+	t.true(incomplete.lastFrame()?.includes('Review · incomplete · 1 agent'));
+	incomplete.unmount();
+
+	for (const outcome of ['completed', 'clarification', 'empty'] as const) {
+		const other = renderWithTheme(
+			<ReviewActivity summary={summary} recentCount={0} outcome={outcome} />,
+		);
+		t.true(other.lastFrame()?.includes('Review · completed · 1 agent'), outcome);
+		other.unmount();
+	}
+});
+
 test('activity view unsubscribes when unmounted', async t => {
 	const store = new ReviewActivityStore({reviewId: 'cleanup-review'});
 	const subscribe = store.subscribe.bind(store);

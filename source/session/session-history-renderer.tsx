@@ -199,6 +199,7 @@ export function buildSessionHistoryComponents(
 							summary={review.activity}
 							title={`${review.tier} review`}
 							recentCount={0}
+							outcome={review.status}
 						/>,
 						<AssistantMessage
 							key={generateKey('resume-review-report')}

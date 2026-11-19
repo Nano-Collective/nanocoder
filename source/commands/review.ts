@@ -830,7 +830,8 @@ function renderReviewActivity(
 	return React.createElement(ReviewActivity, {
 		key: generateKey('review-activity-details'),
 		summary: review.activity,
-		title: `${review.tier} review (${review.status})`,
+		title: `${review.tier} review`,
+		outcome: review.status,
 		expanded: true,
 	});
 }

@@ -6,6 +6,7 @@ import type {
 	ReviewActivityStore,
 	ReviewActivitySummary,
 } from '@/review/review-activity';
+import type {GroundedReviewStatus} from '@/review/run-grounded-review';
 
 export type ReviewActivityProps = {
 	title?: string;
@@ -17,6 +18,12 @@ export type ReviewActivityProps = {
 	recentCount?: number;
 	/** Upper bound on events shown when expanded. */
 	maxExpandedEvents?: number;
+	/**
+	 * Result of a finished review. The activity store only records that the
+	 * run ended, so without this an incomplete review would read as
+	 * "completed" directly above a report that says otherwise.
+	 */
+	outcome?: GroundedReviewStatus;
 } & (
 	| {store: ReviewActivityStore; summary?: never}
 	| {summary: ReviewActivitySummary; store?: never}
@@ -69,6 +76,7 @@ export function ReviewActivity({
 	expanded: initiallyExpanded = false,
 	recentCount = 3,
 	maxExpandedEvents = 80,
+	outcome,
 }: ReviewActivityProps): React.ReactElement {
 	const {colors} = useTheme();
 	const [, forceRender] = useReducer((value: number) => value + 1, 0);
@@ -116,12 +124,14 @@ export function ReviewActivity({
 		recentCount > 0 ? summary.events.slice(-recentCount) : [];
 	const events = expanded ? expandedEvents : recentEvents;
 	const running = summary.status === 'running';
+	const status =
+		!running && outcome === 'incomplete' ? outcome : summary.status;
 	const statusColor =
-		summary.status === 'completed'
+		status === 'completed'
 			? colors.success
-			: summary.status === 'failed'
+			: status === 'failed'
 				? colors.error
-				: summary.status === 'cancelled'
+				: status === 'cancelled' || status === 'incomplete'
 					? colors.warning
 					: colors.primary;
 	const agents = countBySource(summary.events, 'agent');
@@ -133,9 +143,7 @@ export function ReviewActivity({
 		<Box flexDirection="column" marginBottom={1}>
 			<Box>
 				<Text color={colors.secondary}>{title} · </Text>
-				<Text color={statusColor}>
-					{cancelling ? 'cancelling' : summary.status}
-				</Text>
+				<Text color={statusColor}>{cancelling ? 'cancelling' : status}</Text>
 				<Text color={colors.secondary}>
 					{' '}
 					· {agents} agent{agents === 1 ? '' : 's'} · {toolCalls} tool call

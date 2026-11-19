@@ -101,6 +101,7 @@ export async function runGroundedReviewCommand(
 				summary: result.activity,
 				title: `${tier} review`,
 				recentCount: 0,
+				outcome: result.status,
 			}),
 		);
 		addToChatQueue(

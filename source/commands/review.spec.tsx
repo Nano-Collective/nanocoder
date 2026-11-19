@@ -908,7 +908,7 @@ test('review activity renders the latest saved review expanded', async t => {
 	);
 	const {lastFrame} = renderWithTheme(result as React.ReactElement);
 	const frame = stripAnsi(lastFrame() ?? '');
-	t.true(frame.includes('Grounded review (incomplete) · completed · 1 agent'));
+	t.true(frame.includes('Grounded review · incomplete · 1 agent'));
 	t.true(frame.includes('Looking for defects'));
 	t.true(frame.includes('Finished (2 model calls, 1 tool call)'));
 });
