@@ -83,6 +83,8 @@ test('loadProjectMCPConfig - loads all supported fields from .mcp.json', t => {
                 url: 'https://example.com/mcp',
                 headers: {'Authorization': 'Bearer token'},
                 timeout: 45000,
+                toolTimeout: 600000,
+                resetTimeoutOnProgress: false,
                 alwaysAllow: ['search'],
                 description: 'A test server',
                 tags: ['test', 'example'],
@@ -101,6 +103,8 @@ test('loadProjectMCPConfig - loads all supported fields from .mcp.json', t => {
     t.is(server.url, 'https://example.com/mcp');
     t.deepEqual(server.headers, {'Authorization': 'Bearer token'});
     t.is(server.timeout, 45000);
+    t.is(server.toolTimeout, 600000);
+    t.is(server.resetTimeoutOnProgress, false);
     t.deepEqual(server.alwaysAllow, ['search']);
     t.is(server.description, 'A test server');
     t.deepEqual(server.tags, ['test', 'example']);
@@ -599,6 +603,48 @@ test('loadEnvProviderConfigs - supports direct providers format', t => {
             process.env.NANOCODER_PROVIDERS = originalValue;
         } else {
             delete process.env.NANOCODER_PROVIDERS;
+        }
+    }
+});
+
+test.serial('loadEnvProviderConfigs - substitutes nested extraBody values', t => {
+    const originalProviders = process.env.NANOCODER_PROVIDERS;
+    const originalExtraBody = process.env.NANOCODER_EXTRA_BODY;
+
+    try {
+        process.env.NANOCODER_EXTRA_BODY = 'disabled';
+        process.env.NANOCODER_PROVIDERS = JSON.stringify({
+            providers: [
+                {
+                    name: 'env-provider',
+                    models: ['test-model'],
+                    extraBody: {
+                        top_k: 20,
+                        chat_template_kwargs: {
+                            enable_thinking: '$' + '{NANOCODER_EXTRA_BODY}',
+                        },
+                    },
+                },
+            ],
+        });
+
+        const provider = loadAllProviderConfigs().find(
+            item => item.name === 'env-provider',
+        );
+        t.deepEqual(provider?.extraBody, {
+            top_k: 20,
+            chat_template_kwargs: {enable_thinking: 'disabled'},
+        });
+    } finally {
+        if (originalProviders !== undefined) {
+            process.env.NANOCODER_PROVIDERS = originalProviders;
+        } else {
+            delete process.env.NANOCODER_PROVIDERS;
+        }
+        if (originalExtraBody !== undefined) {
+            process.env.NANOCODER_EXTRA_BODY = originalExtraBody;
+        } else {
+            delete process.env.NANOCODER_EXTRA_BODY;
         }
     }
 });

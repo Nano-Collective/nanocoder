@@ -3,7 +3,10 @@ import {getModelContextLimit, getSessionContextLimit} from '@/models/index';
 import {runLifecycleHooks} from '@/services/lifecycle-hooks';
 import {defineSessionValue} from '@/services/session-context';
 import {createTokenizer} from '@/tokenization/index';
-import {bumpReadContentGeneration} from '@/tools/runtime/read-tracker';
+import {
+	bumpReadContentGeneration,
+	invalidateAllVisibilityReceipts,
+} from '@/tools/runtime/read-tracker';
 import type {
 	CompressionMode,
 	CompressionStrategy,
@@ -247,6 +250,7 @@ export async function performAutoCompact(
 					}
 
 					bumpReadContentGeneration();
+					invalidateAllVisibilityReceipts();
 					return llmCompressed;
 				}
 			} catch (_error) {
@@ -285,6 +289,7 @@ export async function performAutoCompact(
 
 		// Return compressed user messages (without system message)
 		bumpReadContentGeneration();
+		invalidateAllVisibilityReceipts();
 		return compressedUserMessages;
 	} finally {
 		// Clean up tokenizer

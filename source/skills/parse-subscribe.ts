@@ -15,6 +15,7 @@
 import {validateCron} from '@/schedule/cron';
 import type {
 	CiJobFailedTrigger,
+	FileAiCommentTrigger,
 	FileChangedTrigger,
 	FileChangeEventKind,
 	ScheduleCronTrigger,
@@ -92,6 +93,9 @@ function parseTrigger(raw: unknown, index: number): SkillTrigger {
 	if (kind === 'file.changed') {
 		return {...base, ...parseFileChanged(obj, index)};
 	}
+	if (kind === 'file.ai-comment') {
+		return {...base, ...parseFileAiComment(obj, index)};
+	}
 	if (kind === 'schedule.cron') {
 		return {...base, ...parseScheduleCron(obj, index)};
 	}
@@ -99,7 +103,7 @@ function parseTrigger(raw: unknown, index: number): SkillTrigger {
 		return {...base, ...parseCiJobFailed(obj, index)};
 	}
 	throw new SubscribeParseError(
-		`subscribe[${index}].kind "${kind}" is not a supported event kind (expected: file.changed, schedule.cron, ci.job.failed)`,
+		`subscribe[${index}].kind "${kind}" is not a supported event kind (expected: file.changed, file.ai-comment, schedule.cron, ci.job.failed)`,
 	);
 }
 
@@ -162,6 +166,27 @@ function parseFileChanged(
 			);
 		}
 		trigger.eventKinds = obj.eventKinds;
+	}
+
+	return trigger;
+}
+
+function parseFileAiComment(
+	obj: Record<string, unknown>,
+	index: number,
+): FileAiCommentTrigger {
+	const trigger: FileAiCommentTrigger = {kind: 'file.ai-comment'};
+
+	if (obj.paths !== undefined) {
+		if (
+			!Array.isArray(obj.paths) ||
+			!obj.paths.every((p): p is string => typeof p === 'string')
+		) {
+			throw new SubscribeParseError(
+				`subscribe[${index}].paths must be an array of glob strings`,
+			);
+		}
+		trigger.paths = obj.paths;
 	}
 
 	return trigger;

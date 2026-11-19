@@ -233,7 +233,8 @@ the service manager sends it — not to `daemon.log`.
 
 The daemon writes a JSON lockfile at `.nanocoder/daemon.json` (PID,
 socket path, start time) and an append-only log at
-`.nanocoder/daemon.log`. Stale lockfiles (PID no longer alive) are
+`.nanocoder/daemon.log`. Stale lockfiles (PID no longer alive, or nothing
+listening on the recorded socket because the OS reused the PID) are
 reaped automatically on the next `daemon start` or `daemon status`.
 
 Auto-start ships for **macOS** (LaunchAgent under
@@ -253,8 +254,10 @@ the socket moves to `<tmpdir>/nanocoder-daemon-<hash>.sock` instead. The
 bound path is recorded in the lockfile, so clients always read it back
 rather than recomputing it. `nanocoder daemon stop`
 prefers an IPC shutdown request (clean drain of the event loop) and
-falls back to `SIGTERM` only if the daemon is unreachable, so stops are
-graceful on Windows too where `SIGTERM` would otherwise be force-kill.
+falls back to `SIGTERM` only if the daemon answered the connection but not
+the request, so stops are graceful on Windows too where `SIGTERM` would
+otherwise be force-kill. If the daemon cannot be reached at all, `stop`
+never signals the recorded PID, which could belong to another program.
 
 Internally, the daemon runs every triggered agent or command in
 **`headless`** mode. Headless runs have no foreground prompts, and they

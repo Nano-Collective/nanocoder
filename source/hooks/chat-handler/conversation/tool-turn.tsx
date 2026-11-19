@@ -13,6 +13,7 @@ import {
 } from '@/constants';
 import {consultPluginPermission} from '@/plugins/host';
 import {CheckpointManager} from '@/services/checkpoint-manager';
+import {recordToolOutcome} from '@/services/completion-ledger';
 import {runPreToolUseGate} from '@/services/lifecycle-hooks';
 import {getProjectRoot} from '@/services/session-cwd';
 import {resolveToolApproval} from '@/tools/approval-policy';
@@ -375,9 +376,12 @@ export async function runToolTurn(
 		);
 		turnResults.push(...directResults);
 		for (const [index, result] of directResults.entries()) {
+			const toolCall = autoTools[index];
+			if (toolCall) {
+				recordToolOutcome(walkthroughLifecycle.ledger, toolCall, result);
+			}
 			if (!result.isError) {
 				onToolExecuted?.(result.name);
-				const toolCall = autoTools[index];
 				if (toolCall) {
 					observeSuccessfulLifecycleTool(walkthroughLifecycle, toolCall);
 				}
@@ -478,8 +482,14 @@ export async function runToolTurn(
 				processToolWithContext,
 				setLiveComponent,
 				signal,
+				sessionId,
 			);
 			turnResults.push(execution.result);
+			recordToolOutcome(
+				walkthroughLifecycle.ledger,
+				toolCall,
+				execution.result,
+			);
 			if (!execution.result.isError) {
 				onToolExecuted?.(execution.result.name);
 				observeSuccessfulLifecycleTool(walkthroughLifecycle, toolCall);

@@ -1597,7 +1597,7 @@ test.serial(
 // ============================================================================
 
 test.serial(
-	'loadProviderConfigs threads the openrouter block from ProviderConfig to AIProviderConfig',
+	'loadProviderConfigs threads generic extraBody and openrouter options to AIProviderConfig',
 	t => {
 		const originalProviders = process.env.NANOCODER_PROVIDERS;
 
@@ -1609,6 +1609,10 @@ test.serial(
 						baseUrl: 'https://openrouter.ai/api/v1',
 						apiKey: 'test-key',
 						models: ['anthropic/claude-3.5-sonnet'],
+						extraBody: {
+							top_k: 20,
+							chat_template_kwargs: {enable_thinking: false},
+						},
 						openrouter: {
 							provider: {sort: 'price', allow_fallbacks: true},
 							reasoning: {effort: 'high'},
@@ -1630,6 +1634,10 @@ test.serial(
 				service_tier: 'flex',
 				plugins: [{id: 'context-compression', engine: 'middle-out'}],
 				models: ['openai/gpt-4o'],
+			});
+			t.deepEqual(openrouter?.extraBody, {
+				top_k: 20,
+				chat_template_kwargs: {enable_thinking: false},
 			});
 			// Make sure the baseURL/apiKey translation still works alongside it.
 			t.is(openrouter?.config.baseURL, 'https://openrouter.ai/api/v1');
