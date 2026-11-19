@@ -1,0 +1,52 @@
+name: issue-triage
+
+# Thin caller for the shared org workflow. The machinery lives in
+# Nano-Collective/.github; what stays here is the trigger wiring and
+# `.github/issue-triage/config.json`, which is this project's label taxonomy
+# and its idea of what is in scope.
+#
+#   opened                  triage the new issue
+#   labeled needs-triage    a maintainer asked for a re-triage
+#   schedule                sweep: fix alias labels, re-triage anything without
+#                           exactly one type label, close flagged issues the
+#                           author never disputed
+#   workflow_dispatch       one issue by number, or a sweep if left empty
+
+on:
+  issues:
+    types: [opened, labeled]
+  schedule:
+    - cron: '0 8 * * *' # Daily at 08:00 UTC, an hour before stale-prs
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: Issue to triage (leave empty to run the sweep)
+        required: false
+        type: string
+      dry_run:
+        description: Log intended changes without making them
+        type: boolean
+        default: true
+
+# No workflow-level concurrency group, deliberately. Every label change on an
+# issue starts this workflow (the shared plan job discards the irrelevant ones
+# in seconds), and a group keyed on the issue would let those no-op runs
+# displace a pending real triage: Actions keeps one pending run per group and
+# cancels the rest. Real triage runs are serialised per issue inside the shared
+# workflow, where only needs-triage events reach them.
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  issue-triage:
+    uses: Nano-Collective/.github/.github/workflows/issue-triage.yml@main
+    permissions:
+      contents: read
+      issues: write
+    with:
+      issue-number: ${{ inputs.issue_number }}
+      dry-run: ${{ inputs.dry_run == true }}
+    secrets:
+      MINIMAX_API_KEY: ${{ secrets.MINIMAX_API_KEY }}

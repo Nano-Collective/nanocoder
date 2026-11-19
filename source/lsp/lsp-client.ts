@@ -4,7 +4,9 @@
  */
 
 import {EventEmitter} from 'node:events';
-import {ChildProcess, spawn} from 'child_process';
+import {pathToFileURL} from 'node:url';
+import type {ChildProcess} from 'child_process';
+import spawn from 'cross-spawn';
 import {createChildLogger} from '@/utils/logging';
 import {
 	CodeAction,
@@ -27,6 +29,7 @@ import {
 	TextDocumentIdentifier,
 	TextDocumentItem,
 	TextEdit,
+	WorkspaceFolder,
 } from './protocol';
 
 export interface LSPServerConfig {
@@ -45,6 +48,19 @@ interface PendingRequest {
 	timeoutId: NodeJS.Timeout;
 }
 
+/**
+ * What an unexpected server exit looked like. `stderrTail` is the last output
+ * the server wrote before dying — usually the stack trace that explains why.
+ */
+export interface LSPCrashInfo {
+	code: number | null;
+	signal: NodeJS.Signals | null;
+	stderrTail: string;
+}
+
+/** How much of a server's stderr is kept for crash reports. */
+const MAX_STDERR_TAIL_CHARS = 4 * 1024;
+
 const logger = createChildLogger({module: 'lsp-client'});
 
 export class LSPClient extends EventEmitter {
@@ -55,6 +71,9 @@ export class LSPClient extends EventEmitter {
 	private initialized: boolean = false;
 	private serverCapabilities: ServerCapabilities | null = null;
 	private openDocuments: Map<string, number> = new Map(); // uri -> version
+	private stderrTail: string = '';
+	/** Set by stop(), so an exit we asked for is not reported as a crash. */
+	private stopping: boolean = false;
 
 	constructor(private config: LSPServerConfig) {
 		super();
@@ -66,26 +85,52 @@ export class LSPClient extends EventEmitter {
 	async start(): Promise<InitializeResult> {
 		return new Promise((resolve, reject) => {
 			try {
-				this.process = spawn(this.config.command, this.config.args || [], {
+				this.stopping = false;
+				this.stderrTail = '';
+				const child = spawn(this.config.command, this.config.args || [], {
 					stdio: ['pipe', 'pipe', 'pipe'],
 					env: {...process.env, ...this.config.env},
 				});
+				this.process = child;
 
-				this.process.stdout?.on('data', (data: Buffer) => {
+				child.stdout?.on('data', (data: Buffer) => {
 					this.handleData(data.toString());
 				});
 
-				this.process.stderr?.on('data', (_data: Buffer) => {});
+				// Kept rather than discarded: when a server dies, its last stderr
+				// is usually the only explanation of why.
+				child.stderr?.on('data', (data: Buffer) => {
+					this.stderrTail = (this.stderrTail + data.toString()).slice(
+						-MAX_STDERR_TAIL_CHARS,
+					);
+				});
 
-				this.process.on('error', error => {
-					this.emit('error', error);
+				// Writing to a server that has just died fails with EPIPE on stdin.
+				// Unhandled, that error event would take the whole process down;
+				// the exit handler below already reports the death itself.
+				child.stdin?.on('error', error => {
+					logger.debug(
+						{err: error, server: this.config.name},
+						'LSP stdin write failed',
+					);
+				});
+
+				child.on('error', error => {
+					// Node may still fire 'exit' after a spawn error; that exit is
+					// part of this failure, not a crash.
+					this.stopping = true;
+					this.failPendingRequests(
+						new Error(
+							`LSP server "${this.config.name}" failed: ${error.message}`,
+						),
+					);
+					// An 'error' emit with no listener throws, which would turn a
+					// missing binary into an uncaught exception.
+					if (this.listenerCount('error') > 0) this.emit('error', error);
 					reject(error);
 				});
 
-				this.process.on('exit', code => {
-					this.emit('exit', code);
-					this.initialized = false;
-				});
+				child.on('exit', (code, signal) => this.handleExit(code, signal));
 
 				// Initialize the server
 				this.initialize()
@@ -94,7 +139,15 @@ export class LSPClient extends EventEmitter {
 						this.initialized = true;
 						resolve(result);
 					})
-					.catch(reject);
+					.catch(error => {
+						// A server that failed to initialize can stay running (it
+						// may refuse `initialize` and keep waiting). Nobody will use
+						// it, so end it here — as a deliberate stop, so its exit is
+						// never reported as a crash of a server that never started.
+						this.stopping = true;
+						if (!child.killed) child.kill();
+						reject(error);
+					});
 			} catch (error) {
 				reject(error instanceof Error ? error : new Error(String(error)));
 			}
@@ -106,6 +159,7 @@ export class LSPClient extends EventEmitter {
 	 */
 	async stop(): Promise<void> {
 		if (!this.process) return;
+		this.stopping = true;
 
 		try {
 			// Send shutdown request
@@ -141,6 +195,11 @@ export class LSPClient extends EventEmitter {
 	 */
 	isReady(): boolean {
 		return this.initialized && this.process !== null && !this.process.killed;
+	}
+
+	/** The last stderr the server wrote, trimmed. */
+	getStderrTail(): string {
+		return this.stderrTail.trim();
 	}
 
 	/**
@@ -295,6 +354,9 @@ export class LSPClient extends EventEmitter {
 				})) as {items?: Diagnostic[]} | null;
 				return result?.items || [];
 			} catch (error) {
+				// A dead server is not "no diagnostics": let the crash surface
+				// instead of reporting the file as clean.
+				if (!this.isReady()) throw error;
 				// Fall back to cached diagnostics if pull not supported
 				logger.debug(
 					{err: error, uri},
@@ -308,10 +370,63 @@ export class LSPClient extends EventEmitter {
 
 	// Private methods
 
+	/**
+	 * The server process is gone. Anything still waiting on it will never get
+	 * an answer, so fail it now rather than at the 30s timeout, and report an
+	 * exit we did not ask for as a crash.
+	 *
+	 * Only a server that finished starting can crash. One that dies during
+	 * startup (or never spawned) already failed start() through the rejected
+	 * `initialize` request; reporting it again as a crash would trigger a
+	 * restart of a server that never worked.
+	 */
+	private handleExit(code: number | null, signal: NodeJS.Signals | null): void {
+		const wasRunning = this.initialized;
+		const crashed = !this.stopping && wasRunning;
+		this.initialized = false;
+		this.process = null;
+		this.openDocuments.clear();
+
+		const status = signal ? `signal ${signal}` : `exit code ${code}`;
+		const name = `LSP server "${this.config.name}"`;
+		this.failPendingRequests(
+			new Error(
+				this.stopping
+					? `${name} stopped`
+					: wasRunning
+						? `${name} crashed (${status})`
+						: `${name} exited during startup (${status})`,
+			),
+		);
+
+		if (crashed) {
+			const info: LSPCrashInfo = {
+				code,
+				signal,
+				stderrTail: this.getStderrTail(),
+			};
+			logger.warn(
+				{server: this.config.name, ...info},
+				'LSP server exited unexpectedly',
+			);
+			this.emit('crash', info);
+		}
+		this.emit('exit', code);
+	}
+
+	private failPendingRequests(error: Error): void {
+		for (const pending of this.pendingRequests.values()) {
+			clearTimeout(pending.timeoutId);
+			pending.reject(error);
+		}
+		this.pendingRequests.clear();
+	}
+
 	private async initialize(): Promise<InitializeResult> {
+		const workspaceFolder = this.getWorkspaceFolder();
 		const params: InitializeParams = {
 			processId: process.pid,
-			rootUri: this.config.rootUri || `file://${process.cwd()}`,
+			rootUri: workspaceFolder.uri,
 			capabilities: {
 				textDocument: {
 					synchronization: {
@@ -358,19 +473,13 @@ export class LSPClient extends EventEmitter {
 					},
 				},
 				workspace: {
-					applyEdit: true,
-					workspaceEdit: {
-						documentChanges: true,
-					},
 					didChangeConfiguration: {
 						dynamicRegistration: false,
 					},
 					workspaceFolders: true,
 				},
 			},
-			workspaceFolders: this.config.rootUri
-				? [{uri: this.config.rootUri, name: 'workspace'}]
-				: null,
+			workspaceFolders: [workspaceFolder],
 		};
 
 		const result = (await this.sendRequest(
@@ -382,6 +491,13 @@ export class LSPClient extends EventEmitter {
 		this.sendNotification(LSPMethods.Initialized, {});
 
 		return result;
+	}
+
+	private getWorkspaceFolder(): WorkspaceFolder {
+		return {
+			uri: this.config.rootUri || pathToFileURL(process.cwd()).href,
+			name: 'workspace',
+		};
 	}
 
 	private sendRequest(method: string, params: unknown): Promise<unknown> {
@@ -424,7 +540,9 @@ export class LSPClient extends EventEmitter {
 		this.send(notification);
 	}
 
-	private send(message: JsonRpcRequest | JsonRpcNotification): void {
+	private send(
+		message: JsonRpcRequest | JsonRpcNotification | JsonRpcResponse,
+	): void {
 		const content = JSON.stringify(message);
 		const header = `Content-Length: ${Buffer.byteLength(content)}\r\n\r\n`;
 		this.process?.stdin?.write(header + content);
@@ -461,6 +579,7 @@ export class LSPClient extends EventEmitter {
 			try {
 				const message = JSON.parse(content) as
 					| JsonRpcResponse
+					| JsonRpcRequest
 					| JsonRpcNotification;
 				this.handleMessage(message);
 			} catch (error) {
@@ -473,9 +592,19 @@ export class LSPClient extends EventEmitter {
 		}
 	}
 
-	private handleMessage(message: JsonRpcResponse | JsonRpcNotification): void {
-		// Check if it's a response
-		if ('id' in message && message.id !== null) {
+	private handleMessage(
+		message: JsonRpcResponse | JsonRpcRequest | JsonRpcNotification,
+	): void {
+		if ('method' in message) {
+			if ('id' in message) {
+				this.handleServerRequest(message);
+			} else {
+				this.handleNotification(message);
+			}
+			return;
+		}
+
+		if (message.id !== null) {
 			const pending = this.pendingRequests.get(message.id);
 			if (pending) {
 				clearTimeout(pending.timeoutId);
@@ -486,12 +615,43 @@ export class LSPClient extends EventEmitter {
 					pending.resolve(message.result);
 				}
 			}
-			return;
 		}
+	}
 
-		// It's a notification
-		if ('method' in message) {
-			this.handleNotification(message);
+	private handleServerRequest(request: JsonRpcRequest): void {
+		switch (request.method) {
+			case 'workspace/workspaceFolders':
+				this.send({
+					jsonrpc: '2.0',
+					id: request.id,
+					result: [this.getWorkspaceFolder()],
+				});
+				break;
+			case 'workspace/configuration': {
+				const params = request.params;
+				const items =
+					typeof params === 'object' &&
+					params !== null &&
+					'items' in params &&
+					Array.isArray(params.items)
+						? params.items
+						: [];
+				this.send({
+					jsonrpc: '2.0',
+					id: request.id,
+					result: items.map(() => null),
+				});
+				break;
+			}
+			default:
+				this.send({
+					jsonrpc: '2.0',
+					id: request.id,
+					error: {
+						code: -32601,
+						message: `Method not found: ${request.method}`,
+					},
+				});
 		}
 	}
 

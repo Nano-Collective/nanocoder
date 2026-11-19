@@ -6,9 +6,7 @@ sidebar_order: 17
 
 # Atlas Cloud
 
-[Atlas Cloud](https://www.atlascloud.ai) is a full-modal AI inference platform that exposes video, image, and LLM models through a single API. Rather than wiring up a separate integration per vendor, you connect once and get unified access to 300+ curated models across every modality. For Nanocoder, the relevant slice is its OpenAI-compatible LLM endpoint, which works as a drop-in coding provider.
-
-> **Coding plan:** Atlas Cloud runs a budget-friendly coding plan promotion for cheaper API access. See [atlascloud.ai/console/coding-plan](https://www.atlascloud.ai/console/coding-plan).
+[Atlas Cloud](https://www.atlascloud.ai) provides an OpenAI-compatible API that gives access to models from OpenAI, Anthropic, Google, and other providers through a single endpoint.
 
 ## Configuration
 

@@ -88,6 +88,7 @@ test('Doctor renders all diagnostic sections in one report', async t => {
 	t.regex(output!, /LSP/);
 	t.regex(output!, /MCP/);
 	t.regex(output!, /Hooks/);
+	t.regex(output!, /Formatters/);
 	t.regex(output!, /Daemon/);
 });
 
@@ -128,6 +129,36 @@ test('Doctor reports when no lifecycle hooks are configured', async t => {
 	t.regex(lastFrame()!, /No lifecycle hooks configured/);
 });
 
+test('Doctor lists configured formatters', async t => {
+	const report = await collectDoctorReport(createDependencies());
+
+	const withFormatters = {
+		...report,
+		formatters: {
+			status: 'ok' as const,
+			data: [
+				{label: 'biome', match: ['**/*.ts', '**/*.tsx']},
+				{label: 'gofmt -w "$FILE"', match: ['**/*.go']},
+			],
+		},
+	};
+
+	const {lastFrame} = renderWithTheme(<Doctor report={withFormatters} />);
+	const output = lastFrame()!;
+
+	t.regex(output, /biome • \*\*\/\*\.ts, \*\*\/\*\.tsx/);
+	t.regex(output, /gofmt -w "\$FILE" • \*\*\/\*\.go/);
+});
+
+test('Doctor reports when no formatters are configured', async t => {
+	const report = await collectDoctorReport(createDependencies());
+
+	t.is(report.formatters.status, 'ok');
+
+	const {lastFrame} = renderWithTheme(<Doctor report={report} />);
+	t.regex(lastFrame()!, /No formatters configured/);
+});
+
 test('Doctor reports providers without leaking api keys', async t => {
 	const report = await collectDoctorReport(createDependencies());
 
@@ -144,6 +175,50 @@ test('Doctor reports providers without leaking api keys', async t => {
 	t.notRegex(output, /secret-local-key/);
 	t.notRegex(output, /secret-hosted-key/);
 	t.notRegex(output, /apiKey/);
+});
+
+test('Doctor redacts credentials and tokens embedded in provider and MCP URLs', async t => {
+	const report = await collectDoctorReport(
+		createDependencies({
+			getProviders: () => [
+				{
+					name: 'ProxyProvider',
+					type: 'openai',
+					models: ['model-1'],
+					config: {
+						baseURL:
+							'https://user:sk-test-LEAKCHECK123@proxy.example.com/v1?key=QUERYKEY-LEAKCHECK',
+					},
+				},
+			],
+			getToolManager: () =>
+				({
+					getConnectedServers: () => ['zapier-like'],
+					getServerTools: () => [],
+					getServerInfo: () => ({
+						name: 'zapier-like',
+						transport: 'http',
+						connected: true,
+						url: 'https://mcp.example.com/api/mcp/s/PATHTOKEN-LEAKCHECK/mcp?api_key=APIKEY-LEAKCHECK',
+					}),
+				}) as never,
+		}),
+	);
+
+	const {lastFrame} = renderWithTheme(<Doctor report={report} />);
+	const rawOutput = lastFrame()!;
+	const normalized = rawOutput.replace(/[│\n\r]/g, '');
+
+	t.notRegex(normalized, /sk-test-LEAKCHECK123/);
+	t.notRegex(normalized, /QUERYKEY-LEAKCHECK/);
+	t.notRegex(normalized, /PATHTOKEN-LEAKCHECK/);
+	t.notRegex(normalized, /APIKEY-LEAKCHECK/);
+
+	t.regex(normalized, /https:\/\/proxy\.example\.com\/v1/);
+	t.regex(
+		normalized,
+		/https:\/\/mcp\.example\.com\/api\/mcp\/s\/<redacted>\/mcp/,
+	);
 });
 
 test('Doctor reports LSP MCP and daemon details', async t => {

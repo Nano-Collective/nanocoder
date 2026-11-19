@@ -30,7 +30,6 @@ import {
 import type {AIProviderConfig} from '@/types/index';
 import {getLogger} from '@/utils/logging';
 import {isOpenRouterProvider} from './openrouter.js';
-import {isOrcaRouterProvider} from './orcarouter.js';
 import {isRequestyProvider} from './requesty.js';
 
 /**
@@ -47,6 +46,74 @@ export type TaggedProvider =
 	  }
 	| {kind: 'anthropic'; provider: AnthropicProvider}
 	| {kind: 'google'; provider: GoogleGenerativeAIProvider};
+
+type FetchLike = (
+	url: string | URL | Request,
+	options?: RequestInit,
+) => Promise<Response>;
+
+/** A 400/422 whose body names the streaming usage option. */
+const STREAM_OPTIONS_ERROR = /stream_options|include_usage/i;
+
+function withoutStreamOptions(body: string): string | undefined {
+	try {
+		const parsed = JSON.parse(body) as Record<string, unknown>;
+		if (!parsed || typeof parsed !== 'object' || !('stream_options' in parsed))
+			return undefined;
+		delete parsed.stream_options;
+		return JSON.stringify(parsed);
+	} catch {
+		return undefined;
+	}
+}
+
+/**
+ * Retry once without `stream_options` when an OpenAI-compatible endpoint
+ * rejects it. `includeUsage` defaults to true, which makes the SDK send
+ * `stream_options: {include_usage: true}`; some strict endpoints and proxies
+ * answer that with a 400 or 422. When the error body names the option, the
+ * request is replayed without it and later requests from this provider skip
+ * it up front, so the session keeps working (without streamed usage) rather
+ * than failing every turn. Setting `includeUsage` explicitly in the provider
+ * config bypasses this wrapper.
+ */
+export function createStreamOptionsFallbackFetch(
+	baseFetch: FetchLike,
+	providerName: string,
+): FetchLike {
+	let stripStreamOptions = false;
+	return async (url, options) => {
+		const body = options?.body;
+		if (typeof body !== 'string' || !body.includes('"stream_options"')) {
+			return baseFetch(url, options);
+		}
+		if (stripStreamOptions) {
+			const stripped = withoutStreamOptions(body);
+			return baseFetch(url, stripped ? {...options, body: stripped} : options);
+		}
+
+		const response = await baseFetch(url, options);
+		if (response.status !== 400 && response.status !== 422) return response;
+
+		let errorText: string;
+		try {
+			errorText = await response.clone().text();
+		} catch {
+			return response;
+		}
+		if (!STREAM_OPTIONS_ERROR.test(errorText)) return response;
+
+		const stripped = withoutStreamOptions(body);
+		if (!stripped) return response;
+
+		stripStreamOptions = true;
+		getLogger().warn(
+			'Endpoint rejected stream_options; retrying without streaming usage. Set "includeUsage": false in the provider config to skip this.',
+			{provider: providerName, status: response.status},
+		);
+		return baseFetch(url, {...options, body: stripped});
+	};
+}
 
 /**
  * Wraps undici's fetch so requests flow through the shared Agent. The Agent
@@ -69,26 +136,33 @@ export function createUndiciFetch(undiciAgent: Agent) {
 			const decoder = new TextDecoder('utf-8');
 			const encoder = new TextEncoder();
 			let buffer = '';
+			const malformedDone = 'data:  [DONE]';
 
 			const transform = new TransformStream({
 				transform(chunk, controller) {
 					buffer += decoder.decode(chunk, {stream: true});
 
-					if (buffer.includes('data:  [DONE]')) {
-						buffer = buffer.replace(/data:\s\s\[DONE\]/g, 'data: [DONE]');
+					buffer = buffer.replaceAll(malformedDone, 'data: [DONE]');
+					// Only hold a suffix that could become the malformed marker.
+					// Complete events (including their framing) must reach the SDK
+					// even when the provider pauses before sending another chunk.
+					let tailLength = Math.min(buffer.length, malformedDone.length - 1);
+					while (
+						tailLength > 0 &&
+						!buffer.endsWith(malformedDone.slice(0, tailLength))
+					) {
+						tailLength--;
 					}
-
-					if (buffer.length > 13) {
-						const toEnqueue = buffer.slice(0, -13);
-						buffer = buffer.slice(-13);
+					const enqueueLength = buffer.length - tailLength;
+					if (enqueueLength > 0) {
+						const toEnqueue = buffer.slice(0, enqueueLength);
+						buffer = buffer.slice(enqueueLength);
 						controller.enqueue(encoder.encode(toEnqueue));
 					}
 				},
 				flush(controller) {
 					buffer += decoder.decode();
-					if (buffer.includes('data:  [DONE]')) {
-						buffer = buffer.replace(/data:\s\s\[DONE\]/g, 'data: [DONE]');
-					}
+					buffer = buffer.replaceAll(malformedDone, 'data: [DONE]');
 					if (buffer.length > 0) {
 						controller.enqueue(encoder.encode(buffer));
 					}
@@ -519,12 +593,12 @@ export async function createProvider(
 		headers['X-Title'] = 'Nanocoder';
 	}
 
-	// OrcaRouter (https://www.orcarouter.ai) is an OpenAI-compatible router and
-	// uses the same app-attribution headers as OpenRouter.
-	if (isOrcaRouterProvider(providerConfig.name)) {
-		headers['HTTP-Referer'] = 'https://github.com/Nano-Collective/nanocoder';
-		headers['X-Title'] = 'Nanocoder';
-	}
+	// Usage reporting is on by default. When the user has not set
+	// `includeUsage` explicitly, a strict endpoint that rejects
+	// `stream_options` gets one retry without it instead of failing the turn.
+	const includeUsageExplicit = typeof config.includeUsage === 'boolean';
+	const includeUsage = includeUsageExplicit ? config.includeUsage : true;
+	const baseFetch = createUndiciFetch(undiciAgent);
 
 	const {createOpenAICompatible} = await import('@ai-sdk/openai-compatible');
 	return {
@@ -533,8 +607,11 @@ export async function createProvider(
 			name: providerConfig.name,
 			baseURL: config.baseURL ?? '',
 			apiKey: config.apiKey ?? 'dummy-key',
-			fetch: createUndiciFetch(undiciAgent),
+			fetch: includeUsageExplicit
+				? baseFetch
+				: createStreamOptionsFallbackFetch(baseFetch, providerConfig.name),
 			headers,
+			includeUsage,
 		}),
 	};
 }

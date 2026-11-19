@@ -1,15 +1,17 @@
-import {mkdirSync, rmSync, writeFileSync} from 'node:fs';
+import {mkdirSync, rmSync, symlinkSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 import test from 'ava';
 import {render} from 'ink-testing-library';
 import React from 'react';
 import {themes} from '../config/themes';
-import {EMPTY_CONTENT_MARKER, FILE_READ_PREVIEW_LINES} from '../constants';
+import {EMPTY_CONTENT_MARKER, FILE_READ_PREVIEW_LINES, MAX_LINE_LENGTH_CHARS,} from '../constants';
 import {ThemeContext} from '../hooks/useTheme';
+import {MAX_IMAGE_BYTES} from '../input/clipboard-image';
+import type {VisualToolOutput} from '../types/core';
 import {
 	bumpReadContentGeneration,
 	clearReadTracker,
-} from '../utils/read-tracker.js';
+} from './runtime/read-tracker.js';
 import {readFileTool} from './read-file';
 
 // ============================================================================
@@ -58,8 +60,11 @@ test('ReadFileFormatter renders with path', async t => {
 			return;
 		}
 
+		// Relative, as the model usually passes it: the formatter shows the
+		// path as given and cuts it at the line end, so an absolute path under
+		// a long checkout directory would hide the file name.
 		const element = await formatter(
-			{path: join(testDir, 'test.ts')},
+			{path: join('test-fmt', 'test.ts')},
 			'const x = 1;',
 		);
 		const {lastFrame} = render(
@@ -69,8 +74,7 @@ test('ReadFileFormatter renders with path', async t => {
 		const output = lastFrame();
 		t.truthy(output);
 		t.regex(output!, /read_file/);
-		// The path might be truncated or split across lines depending on terminal width
-		t.regex(output!, /test\.ts|tes[\s\S]*?t\.ts|test/);
+		t.regex(stripAnsi(output!), /Path:\s+test-fmt[\\/]test\.ts/);
 	} finally {
 		rmSync(testDir, {recursive: true, force: true});
 	}
@@ -1073,6 +1077,52 @@ test.serial('read_file metadata_only returns file info without content', async t
 	}
 });
 
+test.serial('read_file metadata_only does not label a file that is not valid UTF-8 as UTF-8', async t => {
+	t.timeout(10000);
+	const testDir = join(process.cwd(), 'test-meta-latin1');
+
+	try {
+		mkdirSync(testDir, {recursive: true});
+		// "café" in Latin-1 (a single E9 byte), then a second line.
+		writeFileSync(
+			join(testDir, 'legacy.legacy'),
+			Buffer.from([0x63, 0x61, 0x66, 0xe9, 0x0a, 0x6f, 0x6c, 0x64, 0x0a]),
+		);
+
+		const result = await readFileTool.tool.execute!(
+			{path: join(testDir, 'legacy.legacy'), metadata_only: true},
+			{toolCallId: 'test', messages: []},
+		);
+
+		t.notRegex(result, /Encoding: UTF-8/);
+		t.regex(
+			result,
+			/Encoding: Not valid UTF-8 \(a legacy encoding such as Latin-1, Windows-1252 or Shift-JIS, or binary data\)\n/,
+		);
+	} finally {
+		rmSync(testDir, {recursive: true, force: true});
+	}
+});
+
+test.serial('read_file metadata_only still labels UTF-8 with non-ASCII text as UTF-8', async t => {
+	t.timeout(10000);
+	const testDir = join(process.cwd(), 'test-meta-utf8');
+
+	try {
+		mkdirSync(testDir, {recursive: true});
+		writeFileSync(join(testDir, 'notes.txt'), 'café ✓ 日本\n', 'utf-8');
+
+		const result = await readFileTool.tool.execute!(
+			{path: join(testDir, 'notes.txt'), metadata_only: true},
+			{toolCallId: 'test', messages: []},
+		);
+
+		t.regex(result, /Encoding: UTF-8\n/);
+	} finally {
+		rmSync(testDir, {recursive: true, force: true});
+	}
+});
+
 test.serial('read_file metadata_only handles directories', async t => {
 	t.timeout(10000);
 	const testDir = join(process.cwd(), 'test-meta-dir');
@@ -1336,6 +1386,267 @@ test.serial('read_file returns the body again after compact generation bump', as
 			{toolCallId: 'test', messages: []},
 		);
 		t.true(result.includes('keep me'));
+	} finally {
+		rmSync(testDir, {recursive: true, force: true});
+	}
+});
+
+test.serial('read_file returns the new body after a symlinked file target changes', async t => {
+	t.timeout(10000);
+	const testDir = join(process.cwd(), 'test-read-stub-symlink-temp');
+
+	try {
+		mkdirSync(testDir, {recursive: true});
+		const targetPath = join(testDir, 'CLAUDE.md');
+		const linkPath = join(testDir, 'AGENTS.md');
+		writeFileSync(targetPath, 'Build with: npm run build\n');
+		symlinkSync('CLAUDE.md', linkPath);
+
+		const first = await readFileTool.tool.execute!(
+			{path: linkPath},
+			{toolCallId: 'test', messages: []},
+		);
+		t.true(first.includes('npm run build'));
+
+		// An unchanged target still stubs through the link.
+		const second = await readFileTool.tool.execute!(
+			{path: linkPath},
+			{toolCallId: 'test', messages: []},
+		);
+		t.true(second.includes('already in context'));
+
+		writeFileSync(targetPath, 'Build with: pnpm build\n');
+		const third = await readFileTool.tool.execute!(
+			{path: linkPath},
+			{toolCallId: 'test', messages: []},
+		);
+		t.true(third.includes('pnpm build'));
+		t.false(third.includes('already in context'));
+	} finally {
+		rmSync(testDir, {recursive: true, force: true});
+	}
+});
+
+test.serial('read_file reports a symlink as missing once its target is deleted', async t => {
+	t.timeout(10000);
+	const testDir = join(process.cwd(), 'test-read-stub-dangling-temp');
+
+	try {
+		mkdirSync(testDir, {recursive: true});
+		const targetPath = join(testDir, 'target.md');
+		const linkPath = join(testDir, 'link.md');
+		writeFileSync(targetPath, 'gone soon\n');
+		symlinkSync('target.md', linkPath);
+
+		await readFileTool.tool.execute!(
+			{path: linkPath},
+			{toolCallId: 'test', messages: []},
+		);
+
+		rmSync(targetPath);
+		await t.throwsAsync(
+			readFileTool.tool.execute!(
+				{path: linkPath},
+				{toolCallId: 'test', messages: []},
+			),
+			{message: /does not exist/},
+		);
+	} finally {
+		rmSync(testDir, {recursive: true, force: true});
+	}
+});
+
+test.serial('read_file metadata_only still describes a symlink as a link', async t => {
+	t.timeout(10000);
+	const testDir = join(process.cwd(), 'test-read-meta-symlink-temp');
+
+	try {
+		mkdirSync(testDir, {recursive: true});
+		const linkPath = join(testDir, 'dangling.md');
+		symlinkSync('missing.md', linkPath);
+
+		const result = await readFileTool.tool.execute!(
+			{path: linkPath, metadata_only: true},
+			{toolCallId: 'test', messages: []},
+		);
+		t.regex(result, /Type: symlink/);
+	} finally {
+		rmSync(testDir, {recursive: true, force: true});
+	}
+});
+
+
+// ============================================================================
+// Tests for read_file - image files
+// ============================================================================
+
+// A valid 1x1 PNG, small enough to inline.
+const TINY_PNG = Buffer.from(
+	'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+	'base64',
+);
+
+test.serial('read_file returns an image part for a png file', async t => {
+	t.timeout(10000);
+	const testDir = join(process.cwd(), 'test-read-image-temp');
+
+	try {
+		mkdirSync(testDir, {recursive: true});
+		writeFileSync(join(testDir, 'shot.png'), TINY_PNG);
+
+		const result = (await readFileTool.tool.execute!(
+			{path: join(testDir, 'shot.png')},
+			{toolCallId: 'test', messages: []},
+		)) as VisualToolOutput;
+
+		t.is(result.images.length, 1);
+		t.is(result.images[0]?.mediaType, 'image/png');
+		t.is(result.images[0]?.data, TINY_PNG.toString('base64'));
+		t.true(result.llmContent.includes('shot.png'));
+	} finally {
+		rmSync(testDir, {recursive: true, force: true});
+	}
+});
+
+test.serial('read_file matches image extensions case-insensitively', async t => {
+	t.timeout(10000);
+	const testDir = join(process.cwd(), 'test-read-image-case-temp');
+
+	try {
+		mkdirSync(testDir, {recursive: true});
+		writeFileSync(join(testDir, 'PHOTO.JPG'), TINY_PNG);
+
+		const result = (await readFileTool.tool.execute!(
+			{path: join(testDir, 'PHOTO.JPG')},
+			{toolCallId: 'test', messages: []},
+		)) as VisualToolOutput;
+
+		t.is(result.images[0]?.mediaType, 'image/jpeg');
+	} finally {
+		rmSync(testDir, {recursive: true, force: true});
+	}
+});
+
+test.serial('read_file sends an image again instead of a repeat-read stub', async t => {
+	t.timeout(10000);
+	const testDir = join(process.cwd(), 'test-read-image-repeat-temp');
+
+	try {
+		mkdirSync(testDir, {recursive: true});
+		writeFileSync(join(testDir, 'shot.png'), TINY_PNG);
+
+		const args = {path: join(testDir, 'shot.png')};
+		const options = {toolCallId: 'test', messages: []};
+		await readFileTool.tool.execute!(args, options);
+		const second = (await readFileTool.tool.execute!(
+			args,
+			options,
+		)) as VisualToolOutput;
+
+		t.is(second.images.length, 1);
+	} finally {
+		rmSync(testDir, {recursive: true, force: true});
+	}
+});
+
+test.serial('read_file metadata_only on an image still returns text metadata', async t => {
+	t.timeout(10000);
+	const testDir = join(process.cwd(), 'test-read-image-meta-temp');
+
+	try {
+		mkdirSync(testDir, {recursive: true});
+		writeFileSync(join(testDir, 'shot.png'), TINY_PNG);
+
+		const result = await readFileTool.tool.execute!(
+			{path: join(testDir, 'shot.png'), metadata_only: true},
+			{toolCallId: 'test', messages: []},
+		);
+
+		t.is(typeof result, 'string');
+		t.regex(result as string, /File Information/);
+	} finally {
+		rmSync(testDir, {recursive: true, force: true});
+	}
+});
+
+test.serial('read_file validator accepts an image that looks like minified text', async t => {
+	t.timeout(10000);
+	const testDir = join(process.cwd(), 'test-read-image-validate-temp');
+
+	try {
+		mkdirSync(testDir, {recursive: true});
+		// No newline for longer than the minified-content limit, as in most
+		// binary image data. A text file like this is rejected.
+		writeFileSync(
+			join(testDir, 'dense.png'),
+			Buffer.alloc(MAX_LINE_LENGTH_CHARS + 1, 0x41),
+		);
+		writeFileSync(
+			join(testDir, 'dense.txt'),
+			Buffer.alloc(MAX_LINE_LENGTH_CHARS + 1, 0x41),
+		);
+
+		const image = await readFileTool.validator!({
+			path: join(testDir, 'dense.png'),
+		});
+		const text = await readFileTool.validator!({
+			path: join(testDir, 'dense.txt'),
+		});
+
+		t.true(image.valid);
+		t.false(text.valid);
+	} finally {
+		rmSync(testDir, {recursive: true, force: true});
+	}
+});
+
+test.serial('read_file validator rejects an image over the size limit', async t => {
+	t.timeout(10000);
+	const testDir = join(process.cwd(), 'test-read-image-toolarge-temp');
+
+	try {
+		mkdirSync(testDir, {recursive: true});
+		writeFileSync(join(testDir, 'huge.png'), Buffer.alloc(MAX_IMAGE_BYTES + 1));
+
+		const result = await readFileTool.validator!({
+			path: join(testDir, 'huge.png'),
+		});
+
+		t.false(result.valid);
+		if (!result.valid) {
+			t.regex(result.error, /limit for images/);
+		}
+	} finally {
+		rmSync(testDir, {recursive: true, force: true});
+	}
+});
+
+test.serial('ReadFileFormatter labels an image read without line or token counts', async t => {
+	t.timeout(10000);
+	const testDir = join(process.cwd(), 'test-read-image-fmt-temp');
+
+	try {
+		mkdirSync(testDir, {recursive: true});
+		writeFileSync(join(testDir, 'shot.png'), TINY_PNG);
+
+		const formatter = readFileTool.formatter;
+		if (!formatter) {
+			t.fail('Formatter is not defined');
+			return;
+		}
+
+		const element = await formatter(
+			{path: join('test-read-image-fmt-temp', 'shot.png')},
+			'[image: shot.png]',
+		);
+		const {lastFrame} = render(
+			<TestThemeProvider>{element}</TestThemeProvider>,
+		);
+		const output = stripAnsi(lastFrame() ?? '');
+
+		t.regex(output, /\(image\)/);
+		t.notRegex(output, /Lines:/);
+		t.notRegex(output, /Tokens:/);
 	} finally {
 		rmSync(testDir, {recursive: true, force: true});
 	}

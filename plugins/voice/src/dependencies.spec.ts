@@ -1,5 +1,5 @@
 import test from 'ava';
-import {mkdtempSync} from 'node:fs';
+import {mkdirSync, mkdtempSync, rmSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 
@@ -18,9 +18,22 @@ import {
 	ASSET_CHECKSUMS,
 	getVoiceBinDir,
 	getConfigDir,
+	defaultExec,
+	tailOutput,
+	getWhisperModelPath,
+	explainBrewFailure,
 } from './dependencies.js';
 
-test('checkDependenciesInstalled returns true when all commands succeed', async (t) => {
+function writeWhisperModel(): string {
+	mkdirSync(getVoiceBinDir(), {recursive: true});
+	const modelPath = join(getVoiceBinDir(), 'ggml-base.en.bin');
+	writeFileSync(modelPath, 'model');
+	return modelPath;
+}
+
+test.serial('checkDependenciesInstalled returns true when all commands succeed', async (t) => {
+	const modelPath = writeWhisperModel();
+	t.teardown(() => rmSync(modelPath, {force: true}));
 	const mockChecker = async () => true;
 	const result = await checkDependenciesInstalled(mockChecker);
 	t.true(result.installed);
@@ -147,4 +160,194 @@ test('installDependencies fails gracefully on download failure', async (t) => {
 		},
 		{ message: /failed/i },
 	);
+});
+
+test.serial('checkDependenciesInstalled reports whisper missing when the ggml model is absent', async (t) => {
+	rmSync(join(getVoiceBinDir(), 'ggml-base.en.bin'), {force: true});
+	const result = await checkDependenciesInstalled(async () => true);
+	t.false(result.installed);
+	t.deepEqual(result.missing, ['whisper']);
+	t.false(result.details.whisper);
+});
+
+test.serial('checkDependenciesInstalled honours WHISPER_MODEL for the model check', async (t) => {
+	const original = process.env.WHISPER_MODEL;
+	const customModel = join(testConfigDir, 'custom-model.bin');
+	t.teardown(() => {
+		if (original === undefined) delete process.env.WHISPER_MODEL;
+		else process.env.WHISPER_MODEL = original;
+		rmSync(customModel, {force: true});
+	});
+	process.env.WHISPER_MODEL = customModel;
+	t.is(getWhisperModelPath(), customModel);
+	t.false((await checkDependenciesInstalled(async () => true)).details.whisper);
+	writeFileSync(customModel, 'model');
+	t.true((await checkDependenciesInstalled(async () => true)).installed);
+});
+
+test.serial('installDependencies downloads the checksummed whisper model on every platform', async (t) => {
+	rmSync(join(getVoiceBinDir(), 'ggml-base.en.bin'), {force: true});
+	const downloaded: {url: string; destPath: string; expectedSha256?: string}[] = [];
+	await installDependencies({
+		execRunner: async () => {},
+		downloadFn: async (url, destPath, expectedSha256) => {
+			downloaded.push({url, destPath, expectedSha256});
+		},
+	});
+	const model = downloaded.find(d => d.url.endsWith('/ggml-base.en.bin'));
+	t.truthy(model, `no whisper model download on ${process.platform}`);
+	t.is(model?.destPath, join(getVoiceBinDir(), 'ggml-base.en.bin'));
+	t.is(model?.expectedSha256, ASSET_CHECKSUMS['ggml-base.en.bin']);
+});
+
+test.serial('macOS: a failed Piper download still fetches the whisper model, with monotonic progress', async (t) => {
+	if (process.platform !== 'darwin') {
+		t.pass('darwin-only install branch');
+		return;
+	}
+	rmSync(join(getVoiceBinDir(), 'ggml-base.en.bin'), {force: true});
+	rmSync(join(getVoiceBinDir(), 'piper'), {force: true});
+	const downloaded: string[] = [];
+	const progress: number[] = [];
+	await t.throwsAsync(
+		installDependencies({
+			execRunner: async () => {},
+			onProgress: (_message, percent) => {
+				progress.push(percent);
+			},
+			downloadFn: async url => {
+				downloaded.push(url);
+				if (url.includes('/rhasspy/piper/releases/')) {
+					throw new Error('piper download failed');
+				}
+			},
+		}),
+		{message: /piper download failed/},
+	);
+	t.true(downloaded.some(url => url.endsWith('/ggml-base.en.bin')));
+	t.deepEqual(progress, [...progress].sort((a, b) => a - b));
+});
+
+test('tailOutput keeps only the last non-empty lines', t => {
+	const text = Array.from({length: 30}, (_, i) => `line ${i}`).join('\n');
+	const tail = tailOutput(`${text}\n\n`, 3);
+	t.is(tail, 'line 27\nline 28\nline 29');
+});
+
+test('defaultExec pipes output and reports its tail on failure', async t => {
+	const error = await t.throwsAsync(
+		defaultExec(process.execPath, [
+			'-e',
+			"console.log('building'); console.error('fatal: no compiler'); process.exit(3)",
+		]),
+	);
+	t.regex(error?.message ?? '', /exit code 3/);
+	t.regex(error?.message ?? '', /building\nfatal: no compiler/);
+});
+
+test('defaultExec resolves on success', async t => {
+	await t.notThrowsAsync(
+		defaultExec(process.execPath, ['-e', "console.log('ok')"]),
+	);
+});
+
+// The output a real `brew install sox whisper-cpp` printed with Intel Homebrew
+// under Rosetta on an M4 Mac: warnings, no "Error:" line, exit code 1.
+const TIER3_BREW_OUTPUT = `Command brew install sox whisper-cpp failed with exit code 1:
+Warning: Your Xcode (26.6) is outdated.
+Please update to Xcode 27.0 (or delete it).
+Xcode can be updated from the App Store.
+Warning: A newer Command Line Tools release is available.
+Update them from Software Update in System Settings.
+This is a Tier 3 configuration:
+  https://docs.brew.sh/Support-Tiers#tier-3
+You can report issues with Tier 3 configurations to Homebrew/* repositories!
+Read the above document before opening any issues or PRs.`;
+
+test('explainBrewFailure names Intel Homebrew under Rosetta and the fix, not the raw warnings', t => {
+	const message = explainBrewFailure(TIER3_BREW_OUTPUT, ['sox', 'whisper.cpp'], {
+		brewPath: '/usr/local/bin/brew',
+		appleSilicon: true,
+	});
+	t.regex(message, /Intel build, running under Rosetta/);
+	t.regex(message, /\/opt\/homebrew/);
+	t.regex(message, /brew install sox whisper\.cpp/);
+	t.notRegex(message, /report issues with Tier 3/);
+	t.true(message.split('\n').length <= 3);
+});
+
+test('explainBrewFailure explains an outdated Xcode on a supported setup', t => {
+	const message = explainBrewFailure(
+		'Warning: Your Xcode (26.6) is outdated.\nError: whisper.cpp: failed to build',
+		['whisper.cpp'],
+		{brewPath: '/opt/homebrew/bin/brew', appleSilicon: true},
+	);
+	t.regex(message, /newer Xcode or Command Line Tools/);
+	t.notRegex(message, /Rosetta/);
+});
+
+test('explainBrewFailure falls back to Homebrew\'s own Error lines', t => {
+	const message = explainBrewFailure(
+		'==> Fetching sox\nWarning: something unrelated\nError: No such keg: /opt/homebrew/Cellar/sox',
+		['sox'],
+		{brewPath: '/opt/homebrew/bin/brew', appleSilicon: true},
+	);
+	t.regex(message, /Error: No such keg/);
+	t.notRegex(message, /something unrelated/);
+});
+
+test.serial('macOS: Homebrew installs only the missing formulae, under their current names', async t => {
+	if (process.platform !== 'darwin') {
+		t.pass('darwin-only install branch');
+		return;
+	}
+	const calls: string[][] = [];
+	await installDependencies({
+		execRunner: async (command, args) => {
+			calls.push([command, ...args]);
+		},
+		downloadFn: async () => {},
+		// sox's `rec` is already installed, whisper-cli is not.
+		commandChecker: async cmd => cmd === 'rec',
+		brewEnvironment: {brewPath: '/opt/homebrew/bin/brew', appleSilicon: true},
+	});
+	const brewCalls = calls.filter(call => call[0].endsWith('brew'));
+	t.deepEqual(brewCalls, [['/opt/homebrew/bin/brew', 'install', 'whisper.cpp']]);
+});
+
+test.serial('macOS: nothing is asked of Homebrew when sox and whisper-cli are present', async t => {
+	if (process.platform !== 'darwin') {
+		t.pass('darwin-only install branch');
+		return;
+	}
+	const calls: string[][] = [];
+	await installDependencies({
+		execRunner: async (command, args) => {
+			calls.push([command, ...args]);
+		},
+		downloadFn: async () => {},
+		commandChecker: async cmd => cmd === 'rec' || cmd === 'whisper-cli',
+		brewEnvironment: {brewPath: '/opt/homebrew/bin/brew', appleSilicon: true},
+	});
+	t.false(calls.some(call => call[0].endsWith('brew')));
+});
+
+test.serial('macOS: a failed Homebrew install throws the short explanation', async t => {
+	if (process.platform !== 'darwin') {
+		t.pass('darwin-only install branch');
+		return;
+	}
+	const error = await t.throwsAsync(
+		installDependencies({
+			execRunner: async command => {
+				if (command.endsWith('brew')) throw new Error(TIER3_BREW_OUTPUT);
+			},
+			downloadFn: async () => {},
+			commandChecker: async () => false,
+			brewEnvironment: {brewPath: '/usr/local/bin/brew', appleSilicon: true},
+		}),
+	);
+	t.regex(error?.message ?? '', /running under Rosetta/);
+	t.regex(error?.message ?? '', /brew install sox whisper\.cpp/);
+	t.notRegex(error?.message ?? '', /Read the above document/);
 });

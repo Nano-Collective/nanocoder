@@ -43,3 +43,4 @@ test('uses the GitHub Models catalogue endpoint', t => {
 		'https://models.github.ai/catalog/models',
 	);
 });
+

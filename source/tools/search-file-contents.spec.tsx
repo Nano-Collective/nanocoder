@@ -1,4 +1,4 @@
-import {mkdirSync, mkdtempSync, rmSync, writeFileSync} from 'node:fs';
+import {mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join, parse as parsePath} from 'node:path';
 import test from 'ava';
@@ -1979,6 +1979,32 @@ test.serial(
 		} finally {
 			resetSessionCwd();
 			rmSync(dir, {recursive: true, force: true});
+		}
+	},
+);
+
+(process.platform === 'win32' ? test.serial.skip : test.serial)(
+	'search_file_contents rejects a path through an in-project symlink that points outside',
+	async t => {
+		const root = mkdtempSync(join(tmpdir(), 'nc-search-root-'));
+		const outside = mkdtempSync(join(tmpdir(), 'nc-search-outside-'));
+		try {
+			writeFileSync(join(outside, 'secret.txt'), 'symlink_needle secret');
+			// Lexically `link` is inside the project, but ripgrep follows a
+			// symlink named on its command line, so it would grep `outside`.
+			symlinkSync(outside, join(root, 'link'));
+			setProjectRoot(root);
+			setSessionCwd(root);
+			const result = await searchFileContentsTool.tool.execute!(
+				{query: 'symlink_needle', path: 'link', maxResults: 30},
+				{toolCallId: 'test', messages: []},
+			);
+			t.regex(result, /escapes project directory/);
+			t.false(result.includes('secret.txt'));
+		} finally {
+			resetSessionCwd();
+			rmSync(root, {recursive: true, force: true});
+			rmSync(outside, {recursive: true, force: true});
 		}
 	},
 );

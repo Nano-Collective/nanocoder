@@ -1,4 +1,5 @@
 import test from 'ava';
+import {createServer, type ServerResponse} from 'node:http';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -7,6 +8,7 @@ import {Agent, MockAgent} from 'undici';
 import {
 	createProvider,
 	createReasoningItemNormalizer,
+	createStreamOptionsFallbackFetch,
 	createUndiciFetch,
 } from './provider-factory.js';
 
@@ -56,24 +58,6 @@ test('createProvider adds Requesty headers for requesty provider', async t => {
 		models: ['openai/gpt-4o-mini'],
 		config: {
 			baseURL: 'https://router.requesty.ai/v1',
-			apiKey: 'test-key',
-		},
-	};
-
-	const agent = new Agent();
-	const provider = await createProvider(config, agent);
-
-	t.truthy(provider);
-	t.is(provider.kind, 'openai-compatible');
-});
-
-test('createProvider adds OrcaRouter headers for orcarouter provider', async t => {
-	const config: AIProviderConfig = {
-		name: 'OrcaRouter',
-		type: 'openai',
-		models: ['openai/gpt-5.5'],
-		config: {
-			baseURL: 'https://api.orcarouter.ai/v1',
 			apiKey: 'test-key',
 		},
 	};
@@ -233,6 +217,103 @@ test('createProvider uses openai-compatible when sdkProvider is explicitly opena
 	t.truthy(provider);
 	t.is(typeof provider.provider, 'function');
 	t.is(typeof provider.kind, 'string');
+});
+
+test('createProvider enables streaming usage by default for openai-compatible', async t => {
+	let capturedBody: any = null;
+	const http = await import('node:http');
+	const server = http.createServer((req, res) => {
+		let raw = '';
+		req.on('data', chunk => {
+			raw += chunk;
+		});
+		req.on('end', () => {
+			capturedBody = JSON.parse(raw);
+			res.writeHead(200, {'Content-Type': 'text/event-stream'});
+			res.write('data: {"choices":[{"delta":{"content":"hello"}}]}\n\n');
+			res.end('data: [DONE]\n\n');
+		});
+	});
+
+	await new Promise<void>(resolve => server.listen(0, resolve));
+	const port = (server.address() as any).port;
+
+	try {
+		const config: AIProviderConfig = {
+			name: 'Ollama',
+			type: 'openai',
+			models: ['llama3:8b'],
+			config: {
+				baseURL: `http://127.0.0.1:${port}/v1`,
+				apiKey: 'test-key',
+			},
+		};
+
+		const agent = new Agent();
+		const provider = await createProvider(config, agent);
+		const model = (provider.provider as any)('llama3:8b');
+
+		const streamResult = await model.doStream({
+			prompt: [{role: 'user', content: [{type: 'text', text: 'hi'}]}],
+		});
+		for await (const _ of streamResult.stream) {
+			// consume stream
+		}
+
+		t.truthy(capturedBody);
+		t.deepEqual(capturedBody.stream_options, {include_usage: true});
+	} finally {
+		server.close();
+	}
+});
+
+test('createProvider respects includeUsage: false for openai-compatible', async t => {
+	let capturedBody: any = null;
+	const http = await import('node:http');
+	const server = http.createServer((req, res) => {
+		let raw = '';
+		req.on('data', chunk => {
+			raw += chunk;
+		});
+		req.on('end', () => {
+			capturedBody = JSON.parse(raw);
+			res.writeHead(200, {'Content-Type': 'text/event-stream'});
+			res.write('data: {"choices":[{"delta":{"content":"hello"}}]}\n\n');
+			res.end('data: [DONE]\n\n');
+		});
+	});
+
+	await new Promise<void>(resolve => server.listen(0, resolve));
+	const port = (server.address() as any).port;
+
+	try {
+		const config: AIProviderConfig = {
+			name: 'CustomProvider',
+			type: 'openai',
+			models: ['custom-model'],
+			config: {
+				baseURL: `http://127.0.0.1:${port}/v1`,
+				apiKey: 'test-key',
+				includeUsage: false,
+			},
+		};
+
+		const agent = new Agent();
+		const provider = await createProvider(config, agent);
+		const model = (provider.provider as any)('custom-model');
+
+		const streamResult = await model.doStream({
+			prompt: [{role: 'user', content: [{type: 'text', text: 'hi'}]}],
+		});
+		for await (const _ of streamResult.stream) {
+			// consume stream
+		}
+
+		t.truthy(capturedBody);
+		t.is(capturedBody.stream_options, undefined);
+	} finally {
+		server.close();
+	}
 });
 
 test('createProvider google provider works without baseURL', async t => {
@@ -419,6 +500,69 @@ test.serial('createProvider throws when github-copilot has no stored credential'
 		}
 		fs.rmSync(tmpDir, {recursive: true, force: true});
 	}
+});
+
+test('createUndiciFetch forwards a complete event before the next chunk', async t => {
+	const event = 'data: {"content":"first"}\n\n';
+	let stream: ServerResponse | undefined;
+	const server = createServer((_req, res) => {
+		stream = res;
+		res.writeHead(200, {'Content-Type': 'text/event-stream'});
+		res.write(event);
+	});
+	const agent = new Agent();
+	t.teardown(async () => {
+		stream?.end();
+		await agent.destroy();
+		await new Promise<void>(resolve => server.close(() => resolve()));
+	});
+	await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+	const address = server.address();
+	if (!address || typeof address === 'string') throw new Error('Missing port');
+	const response = await createUndiciFetch(agent)(`http://127.0.0.1:${address.port}`);
+	const reader = response.body!.getReader();
+	let received = '';
+	const firstEvent = async () => {
+		while (!received.includes('\n\n')) {
+			const {value, done} = await reader.read();
+			if (done) break;
+			received += new TextDecoder().decode(value);
+		}
+		return received;
+	};
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	try {
+		const result = await Promise.race([
+			firstEvent(),
+			new Promise<string>(resolve => {timer = setTimeout(() => resolve('event stalled'), 1000);}),
+		]);
+		t.is(result, event);
+	} finally {
+		clearTimeout(timer);
+		await reader.cancel();
+	}
+});
+
+test('createUndiciFetch repairs a DONE marker delivered one character at a time', async t => {
+	const input = 'data:  [DONE]\n\n';
+	const server = createServer(async (_req, res) => {
+		res.writeHead(200, {'Content-Type': 'text/event-stream'});
+		for (const char of input) {
+			res.write(char);
+			await new Promise(resolve => setTimeout(resolve, 2));
+		}
+		res.end();
+	});
+	const agent = new Agent();
+	t.teardown(async () => {
+		await agent.destroy();
+		await new Promise<void>(resolve => server.close(() => resolve()));
+	});
+	await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+	const address = server.address();
+	if (!address || typeof address === 'string') throw new Error('Missing port');
+	const response = await createUndiciFetch(agent)(`http://127.0.0.1:${address.port}`);
+	t.is(await response.text(), 'data: [DONE]\n\n');
 });
 
 test('createUndiciFetch patches double spaces in SSE data: [DONE]', async t => {
@@ -861,4 +1005,120 @@ test('createProvider google provider honours baseURL and headers', async t => {
 	});
 	t.is(result.text, 'ok');
 	t.is(seenHeaders['x-proxy-token'], 'secret');
+});
+
+async function startStrictServer(errorStatus: number, errorBody: string) {
+	const bodies: any[] = [];
+	const http = await import('node:http');
+	const server = http.createServer((req, res) => {
+		let raw = '';
+		req.on('data', chunk => {
+			raw += chunk;
+		});
+		req.on('end', () => {
+			const body = JSON.parse(raw);
+			bodies.push(body);
+			if (body.stream_options) {
+				res.writeHead(errorStatus, {'Content-Type': 'application/json'});
+				res.end(errorBody);
+				return;
+			}
+			res.writeHead(200, {'Content-Type': 'text/event-stream'});
+			res.write('data: {"choices":[{"delta":{"content":"hello"}}]}\n\n');
+			res.end('data: [DONE]\n\n');
+		});
+	});
+	await new Promise<void>(resolve => server.listen(0, resolve));
+	const port = (server.address() as any).port;
+	return {server, port, bodies};
+}
+
+async function streamOnce(port: number, includeUsage?: boolean) {
+	const config: AIProviderConfig = {
+		name: 'Strict Proxy',
+		type: 'openai',
+		models: ['m'],
+		config: {
+			baseURL: `http://127.0.0.1:${port}/v1`,
+			apiKey: 'test-key',
+			...(includeUsage === undefined ? {} : {includeUsage}),
+		},
+	};
+	const provider = await createProvider(config, new Agent());
+	const model = (provider.provider as any)('m');
+	const run = async () => {
+		const result = await model.doStream({
+			prompt: [{role: 'user', content: [{type: 'text', text: 'hi'}]}],
+		});
+		for await (const _ of result.stream) {
+			// consume stream
+		}
+	};
+	await run();
+	await run();
+}
+
+test('createProvider retries once without stream_options when a strict endpoint rejects it', async t => {
+	const {server, port, bodies} = await startStrictServer(
+		400,
+		'{"error":{"message":"Unrecognized request argument supplied: stream_options"}}',
+	);
+	try {
+		await streamOnce(port);
+		// First turn: rejected, then retried without the option. Second turn:
+		// sent without it up front, so no further 400s.
+		t.is(bodies.length, 3);
+		t.deepEqual(bodies[0].stream_options, {include_usage: true});
+		t.is(bodies[1].stream_options, undefined);
+		t.is(bodies[2].stream_options, undefined);
+		t.is(bodies[1].messages[0].content, 'hi');
+	} finally {
+		server.close();
+	}
+});
+
+test('createStreamOptionsFallbackFetch leaves unrelated 400s alone', async t => {
+	let calls = 0;
+	const fetchStub = async () => {
+		calls++;
+		return new Response('{"error":"model not found"}', {status: 400});
+	};
+	const wrapped = createStreamOptionsFallbackFetch(fetchStub, 'p');
+	const response = await wrapped('http://x', {
+		method: 'POST',
+		body: JSON.stringify({model: 'm', stream_options: {include_usage: true}}),
+	});
+	t.is(response.status, 400);
+	t.is(calls, 1);
+	t.is(await response.text(), '{"error":"model not found"}');
+});
+
+test('createStreamOptionsFallbackFetch retries a 422 naming include_usage', async t => {
+	const sent: string[] = [];
+	const fetchStub = async (_url: unknown, options?: RequestInit) => {
+		sent.push(String(options?.body));
+		return sent.length === 1
+			? new Response('{"detail":"extra field include_usage"}', {status: 422})
+			: new Response('ok', {status: 200});
+	};
+	const wrapped = createStreamOptionsFallbackFetch(fetchStub, 'p');
+	const response = await wrapped('http://x', {
+		method: 'POST',
+		body: JSON.stringify({model: 'm', stream_options: {include_usage: true}}),
+	});
+	t.is(response.status, 200);
+	t.deepEqual(JSON.parse(sent[1]), {model: 'm'});
+});
+
+test('createProvider does not retry when includeUsage is set explicitly', async t => {
+	const {server, port, bodies} = await startStrictServer(
+		400,
+		'{"error":{"message":"stream_options is not supported"}}',
+	);
+	try {
+		await t.throwsAsync(streamOnce(port, true));
+		t.is(bodies.length, 1);
+	} finally {
+		server.close();
+	}
 });

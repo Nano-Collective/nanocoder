@@ -12,14 +12,15 @@ import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {getLSPManager} from '@/lsp/lsp-manager';
 import {getToolManager} from '@/message-handler';
+import {getConfiguredFormatters} from '@/services/formatters';
 import {getConfiguredHooks} from '@/services/lifecycle-hooks';
-import {generateKey} from '@/session/key-generator';
 import type {ToolManager} from '@/tools/tool-manager';
 import {HOOK_EVENTS, type HookEvent} from '@/types/config';
 import type {AIProviderConfig, Command} from '@/types/index';
 import {formatError} from '@/utils/error-formatter';
+import {generateKey} from '@/utils/key-generator';
 import {getPackageVersion} from '@/utils/package-version';
-import {isLocalURL} from '@/utils/url-utils';
+import {isLocalURL, redactUrlSecrets} from '@/utils/url-utils';
 
 const LOCAL_PROBE_TIMEOUT_MS = 500;
 
@@ -54,6 +55,11 @@ export interface DoctorHook {
 	matchTools?: string[];
 }
 
+export interface DoctorFormatter {
+	label: string;
+	match: string[];
+}
+
 export interface DoctorReport {
 	system: {
 		nodeVersion: string;
@@ -68,6 +74,7 @@ export interface DoctorReport {
 	}>;
 	mcp: Section<DoctorMcpServer[]>;
 	hooks: Section<DoctorHook[]>;
+	formatters: Section<DoctorFormatter[]>;
 	daemon: Section<
 		| {state: 'running'; lock: DaemonLock; uptimeMs: number}
 		| {state: 'not-running'}
@@ -171,20 +178,23 @@ async function collectProviders(
 
 	return Promise.all(
 		providers.map(async provider => {
-			const baseURL = provider.config.baseURL ?? null;
-			const local = baseURL ? isLocalURL(baseURL) : false;
+			const rawBaseURL = provider.config.baseURL ?? null;
+			const local = rawBaseURL ? isLocalURL(rawBaseURL) : false;
 			const reachability =
-				baseURL && local
-					? await deps.probeLocalProvider(baseURL)
-					: baseURL
+				rawBaseURL && local
+					? await deps.probeLocalProvider(rawBaseURL)
+					: rawBaseURL
 						? 'not-local'
 						: 'skipped';
+			const baseURL = rawBaseURL
+				? (redactUrlSecrets(rawBaseURL) ?? null)
+				: null;
 
 			return {
 				name: provider.name,
 				modelCount: provider.models.length,
 				baseURL,
-				location: baseURL ? (local ? 'local' : 'hosted') : 'unknown',
+				location: rawBaseURL ? (local ? 'local' : 'hosted') : 'unknown',
 				reachability,
 			};
 		}),
@@ -192,7 +202,8 @@ async function collectProviders(
 }
 
 function collectMcp(toolManager: ToolManager | null): DoctorMcpServer[] {
-	const serverNames = toolManager?.getConnectedServers() ?? [];
+	const serverNames =
+		toolManager?.getServerNames?.() ?? toolManager?.getConnectedServers() ?? [];
 
 	return serverNames.map(serverName => {
 		const serverInfo = toolManager?.getServerInfo(serverName);
@@ -203,7 +214,7 @@ function collectMcp(toolManager: ToolManager | null): DoctorMcpServer[] {
 			toolCount: serverTools.length,
 			resourceCount: serverInfo?.resourceCount ?? 0,
 			promptCount: serverInfo?.promptCount ?? 0,
-			url: serverInfo?.url,
+			url: redactUrlSecrets(serverInfo?.url),
 		};
 	});
 }
@@ -220,6 +231,14 @@ function collectHooks(): DoctorHook[] {
 			...(hook.matchTools ? {matchTools: hook.matchTools} : {}),
 		})),
 	);
+}
+
+/** Formatters are shell commands too, so they are listed the same way. */
+function collectFormatters(): DoctorFormatter[] {
+	return getConfiguredFormatters().map(formatter => ({
+		label: formatter.name ?? formatter.command,
+		match: formatter.match,
+	}));
 }
 
 function normalizeDaemon(
@@ -247,16 +266,16 @@ function normalizeDaemon(
 export async function collectDoctorReport(
 	dependencies: DoctorDependencies = defaultDependencies(),
 ): Promise<DoctorReport> {
-	const [nanocoder, providers, lsp, mcp, hooks, daemonLock] = await Promise.all(
-		[
+	const [nanocoder, providers, lsp, mcp, hooks, formatters, daemonLock] =
+		await Promise.all([
 			settle(() => dependencies.getVersion().then(version => ({version}))),
 			settle(() => collectProviders(dependencies)),
 			settle(() => dependencies.getLspStatus()),
 			settle(() => collectMcp(dependencies.getToolManager())),
 			settle(() => collectHooks()),
+			settle(() => collectFormatters()),
 			settle(() => dependencies.getDaemonLock()),
-		],
-	);
+		]);
 
 	return {
 		system: {
@@ -269,6 +288,7 @@ export async function collectDoctorReport(
 		lsp,
 		mcp,
 		hooks,
+		formatters,
 		daemon:
 			daemonLock.status === 'ok'
 				? normalizeDaemon(daemonLock.data, dependencies.now())
@@ -406,6 +426,19 @@ export function Doctor({report}: {report: DoctorReport}) {
 					<Text key={`${hook.event}:${hook.label}`} color={colors.text}>
 						• {hook.event}: {hook.label}
 						{hook.matchTools ? ` • ${hook.matchTools.join(', ')}` : ''}
+					</Text>
+				))
+			)}
+
+			<SectionTitle>Formatters</SectionTitle>
+			{report.formatters.status === 'error' ? (
+				<SectionError message={report.formatters.error} />
+			) : report.formatters.data.length === 0 ? (
+				<Text color={colors.secondary}>• No formatters configured</Text>
+			) : (
+				report.formatters.data.map(formatter => (
+					<Text key={formatter.label} color={colors.text}>
+						• {formatter.label} • {formatter.match.join(', ')}
 					</Text>
 				))
 			)}

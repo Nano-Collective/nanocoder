@@ -5,11 +5,13 @@
 
 import {EventEmitter} from 'node:events';
 import {readFile} from 'fs/promises';
-import {extname} from 'path';
-import {fileURLToPath} from 'url';
+import {extname, resolve} from 'path';
+import {fileURLToPath, pathToFileURL} from 'url';
+import {getSessionCwd} from '@/services/session-cwd';
 import {formatError} from '@/utils/error-formatter';
+import {notifyError, notifyInfo} from '@/utils/message-queue-core';
 import {getShutdownManager} from '@/utils/shutdown';
-import {LSPClient, LSPServerConfig} from './lsp-client';
+import {LSPClient, type LSPCrashInfo, LSPServerConfig} from './lsp-client';
 import {
 	CodeAction,
 	CompletionItem,
@@ -38,6 +40,46 @@ export interface LSPInitResult {
 	error?: string;
 }
 
+/**
+ * Restarts allowed per server after a crash. One recovers from a one-off death
+ * (OOM, a killed process); a server that keeps dying is left down instead of
+ * being restarted in a loop.
+ */
+const MAX_CRASH_RESTARTS = 1;
+
+/** Lines of a crashed server's stderr shown to the user. */
+const CRASH_STDERR_LINES = 10;
+
+/**
+ * How long a diagnostics request waits for a just-opened document's first
+ * publishDiagnostics. Servers check a file asynchronously after didOpen, so
+ * asking straight away would report a broken file as clean.
+ */
+const FIRST_DIAGNOSTICS_WAIT_MS = 5000;
+
+/**
+ * One spelling per file, so a URI the server publishes matches the one we
+ * opened (servers re-encode URIs, e.g. a drive letter's colon on Windows).
+ */
+export function normalizeUri(
+	uri: string,
+	options?: {windows?: boolean},
+): string {
+	if (!uri.startsWith('file://')) return uri;
+	try {
+		const windows = options?.windows ?? process.platform === 'win32';
+		let filePath = fileURLToPath(uri, {windows});
+		// Windows drive letters are case-insensitive. Preserve the rest of the
+		// path: directories may opt into case-sensitive names.
+		if (windows) {
+			filePath = filePath.replace(/^[A-Z]:/, drive => drive.toLowerCase());
+		}
+		return pathToFileURL(filePath, {windows}).href;
+	} catch {
+		return uri;
+	}
+}
+
 export interface DiagnosticsResult {
 	uri: string;
 	diagnostics: Diagnostic[];
@@ -48,12 +90,23 @@ export class LSPManager extends EventEmitter {
 	private languageToServer: Map<string, string> = new Map(); // extension -> serverName
 	private documentServers: Map<string, string> = new Map(); // uri -> serverName
 	private diagnosticsCache: Map<string, Diagnostic[]> = new Map(); // uri -> diagnostics
+	// uri -> text we last sent, so an unchanged document is not re-sent and
+	// its cached diagnostics stay valid.
+	private openTexts: Map<string, string> = new Map();
+	// uris whose first diagnostics never arrived for the current text, so a
+	// server that does not publish for clean files costs the wait only once.
+	private diagnosticsTimedOut: Set<string> = new Set();
 	private rootUri: string;
 	private initialized: boolean = false;
+	private restartCounts: Map<string, number> = new Map(); // serverName -> restarts
+	// extension -> why its server is down, so a diagnostics call can say so
+	// instead of looking like the file type was never supported.
+	private unavailableReasons: Map<string, string> = new Map();
+	private shuttingDown: boolean = false;
 
 	constructor(config: LSPManagerConfig = {}) {
 		super();
-		this.rootUri = config.rootUri || `file://${process.cwd()}`;
+		this.rootUri = config.rootUri || pathToFileURL(process.cwd()).href;
 	}
 
 	/**
@@ -62,6 +115,7 @@ export class LSPManager extends EventEmitter {
 	async initialize(config: LSPManagerConfig = {}): Promise<LSPInitResult[]> {
 		const results: LSPInitResult[] = [];
 		const serversToStart: LSPServerConfig[] = [];
+		this.shuttingDown = false;
 
 		// Add custom servers first (they take priority)
 		if (config.servers) {
@@ -128,11 +182,15 @@ export class LSPManager extends EventEmitter {
 
 			// Handle diagnostics from this server
 			client.on('diagnostics', (params: PublishDiagnosticsParams) => {
-				this.diagnosticsCache.set(params.uri, params.diagnostics);
-				this.emit('diagnostics', params);
+				const uri = normalizeUri(params.uri);
+				this.diagnosticsCache.set(uri, params.diagnostics);
+				this.emit('diagnostics', {...params, uri});
 			});
 
 			client.on('exit', (_code: number | null) => {
+				// A restarted server registers a new client under the same name;
+				// a late exit from the old one must not unregister it.
+				if (this.clients.get(config.name) !== client) return;
 				this.clients.delete(config.name);
 				// Remove language mappings for this server
 				for (const [lang, serverName] of this.languageToServer.entries()) {
@@ -142,13 +200,33 @@ export class LSPManager extends EventEmitter {
 				}
 			});
 
-			await client.start();
+			client.on('crash', (info: LSPCrashInfo) => {
+				void this.handleCrash(config, info);
+			});
+
+			try {
+				await client.start();
+			} catch (error) {
+				// The server's own explanation (e.g. typescript-language-server's
+				// "Could not find a valid TypeScript installation") is usually on
+				// stderr, not in the protocol error.
+				const tail = client
+					.getStderrTail()
+					.split('\n')
+					.slice(-CRASH_STDERR_LINES)
+					.join('\n');
+				const message = formatError(error);
+				throw new Error(
+					tail && !message.includes(tail) ? `${message}\n${tail}` : message,
+				);
+			}
 
 			// Store client and language mappings
 			this.clients.set(config.name, client);
 			for (const lang of config.languages) {
 				this.languageToServer.set(lang, config.name);
 			}
+			this.markAvailable(config.languages);
 
 			return {
 				serverName: config.name,
@@ -156,11 +234,111 @@ export class LSPManager extends EventEmitter {
 				languages: config.languages,
 			};
 		} catch (error) {
+			const message = formatError(error);
+			// Say why later, when a diagnostics call for this file type would
+			// otherwise just report that no server exists for it. A language
+			// another server already covers is not unavailable.
+			this.markUnavailable(
+				config.languages.filter(lang => !this.languageToServer.has(lang)),
+				`Language server "${config.name}" failed to start: ${message}`,
+			);
 			return {
 				serverName: config.name,
 				success: false,
-				error: formatError(error),
+				error: message,
 			};
+		}
+	}
+
+	/**
+	 * A server died without being asked to. Say so — otherwise every later
+	 * diagnostics call quietly reports a clean file — and try one restart.
+	 */
+	private async handleCrash(
+		config: LSPServerConfig,
+		info: LSPCrashInfo,
+	): Promise<void> {
+		// Its published diagnostics describe files as they were when it died.
+		this.dropDiagnosticsFor(config.languages);
+
+		const status = info.signal
+			? `signal ${info.signal}`
+			: `exit code ${info.code}`;
+		const tail = info.stderrTail
+			.split('\n')
+			.slice(-CRASH_STDERR_LINES)
+			.join('\n');
+		const restarts = this.restartCounts.get(config.name) ?? 0;
+		const canRestart = restarts < MAX_CRASH_RESTARTS && !this.shuttingDown;
+		this.markUnavailable(
+			config.languages,
+			`Language server "${config.name}" crashed (${status})${
+				canRestart
+					? ' and is restarting; try again shortly.'
+					: ' and was not restarted.'
+			}`,
+		);
+
+		notifyError(
+			`Language server "${config.name}" crashed (${status}).${
+				canRestart
+					? ' Restarting it.'
+					: ` Not restarting; ${config.languages.map(l => `.${l}`).join(', ')} diagnostics are unavailable until Nanocoder restarts.`
+			}${tail ? `\n${tail}` : ''}`,
+		);
+		if (!canRestart) return;
+
+		this.restartCounts.set(config.name, restarts + 1);
+		const result = await this.startServer(config);
+		if (this.shuttingDown) {
+			// shutdown() ran while the restart was starting; it never saw this
+			// client, so stop it here rather than leave the process running.
+			await this.clients.get(config.name)?.stop();
+			return;
+		}
+		if (result.success) {
+			this.markAvailable(config.languages);
+			notifyInfo(`Language server "${config.name}" restarted.`);
+		} else {
+			this.markUnavailable(
+				config.languages,
+				`Language server "${config.name}" crashed (${status}) and could not be restarted: ${result.error}`,
+			);
+			notifyError(
+				`Language server "${config.name}" could not be restarted: ${result.error}`,
+			);
+		}
+	}
+
+	private markUnavailable(languages: string[], reason: string): void {
+		for (const lang of languages) this.unavailableReasons.set(lang, reason);
+	}
+
+	private markAvailable(languages: string[]): void {
+		for (const lang of languages) this.unavailableReasons.delete(lang);
+	}
+
+	/**
+	 * Why the language server for this file is down, when it crashed. Undefined
+	 * when it is running, or when no server was ever configured for the type.
+	 */
+	getUnavailableReason(filePath: string): string | undefined {
+		return this.unavailableReasons.get(extname(filePath).slice(1));
+	}
+
+	private dropDiagnosticsFor(languages: string[]): void {
+		for (const uri of this.diagnosticsCache.keys()) {
+			if (languages.includes(extname(uri).slice(1))) {
+				this.diagnosticsCache.delete(uri);
+				this.documentServers.delete(uri);
+			}
+		}
+		// The restarted server has none of them open.
+		for (const uri of this.openTexts.keys()) {
+			if (languages.includes(extname(uri).slice(1))) {
+				this.openTexts.delete(uri);
+				this.diagnosticsTimedOut.delete(uri);
+			}
 		}
 	}
 
@@ -168,6 +346,7 @@ export class LSPManager extends EventEmitter {
 	 * Stop all language servers
 	 */
 	async shutdown(): Promise<void> {
+		this.shuttingDown = true;
 		const stopPromises = Array.from(this.clients.values()).map(client =>
 			client.stop(),
 		);
@@ -177,6 +356,10 @@ export class LSPManager extends EventEmitter {
 		this.languageToServer.clear();
 		this.documentServers.clear();
 		this.diagnosticsCache.clear();
+		this.openTexts.clear();
+		this.diagnosticsTimedOut.clear();
+		this.restartCounts.clear();
+		this.unavailableReasons.clear();
 		this.initialized = false;
 	}
 
@@ -191,15 +374,29 @@ export class LSPManager extends EventEmitter {
 	}
 
 	/**
-	 * Convert file path to URI
+	 * Absolute filesystem path for a file. Relative paths resolve against the
+	 * session cwd, as the file tools do.
 	 */
-	private fileToUri(filePath: string): string {
-		if (filePath.startsWith('file://')) return filePath;
-		return `file://${filePath}`;
+	private toFsPath(filePath: string): string {
+		if (filePath.startsWith('file://')) return fileURLToPath(filePath);
+		// Paths reach here from lsp_get_diagnostics, whose validator confines them
+		// to the project (resolveFilePath), and from edits to files the tools
+		// already validated.
+		return resolve(getSessionCwd(), filePath); // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
 	}
 
 	/**
-	 * Open a document in the appropriate language server
+	 * Convert file path to URI
+	 */
+	private fileToUri(filePath: string): string {
+		if (filePath.startsWith('file://')) return normalizeUri(filePath);
+		return normalizeUri(pathToFileURL(this.toFsPath(filePath)).href);
+	}
+
+	/**
+	 * Open a document in the appropriate language server. A document that is
+	 * already open is updated instead, and left alone when its text has not
+	 * changed, so its cached diagnostics stay valid.
 	 */
 	async openDocument(filePath: string, content?: string): Promise<boolean> {
 		const client = this.getClientForFile(filePath);
@@ -210,9 +407,20 @@ export class LSPManager extends EventEmitter {
 		const languageId = getLanguageId(ext);
 
 		// Read content if not provided
-		const text = content ?? (await readFile(filePath, 'utf-8'));
+		const text = content ?? (await readFile(this.toFsPath(filePath), 'utf-8'));
 
-		client.openDocument(uri, languageId, text);
+		const previous = this.openTexts.get(uri);
+		if (previous === text) return true;
+
+		// Whatever was published describes the old text.
+		this.diagnosticsCache.delete(uri);
+		this.diagnosticsTimedOut.delete(uri);
+		if (previous === undefined) {
+			client.openDocument(uri, languageId, text);
+		} else {
+			client.updateDocument(uri, text);
+		}
+		this.openTexts.set(uri, text);
 		this.documentServers.set(uri, client.getCapabilities() ? 'active' : '');
 
 		return true;
@@ -226,7 +434,19 @@ export class LSPManager extends EventEmitter {
 		if (!client || !client.isReady()) return false;
 
 		const uri = this.fileToUri(filePath);
-		client.updateDocument(uri, content);
+		if (this.openTexts.get(uri) === content) return true;
+		this.diagnosticsCache.delete(uri);
+		this.diagnosticsTimedOut.delete(uri);
+		if (this.openTexts.has(uri)) {
+			client.updateDocument(uri, content);
+		} else {
+			client.openDocument(
+				uri,
+				getLanguageId(extname(filePath).slice(1)),
+				content,
+			);
+		}
+		this.openTexts.set(uri, content);
 
 		return true;
 	}
@@ -242,12 +462,16 @@ export class LSPManager extends EventEmitter {
 		client.closeDocument(uri);
 		this.documentServers.delete(uri);
 		this.diagnosticsCache.delete(uri);
+		this.openTexts.delete(uri);
+		this.diagnosticsTimedOut.delete(uri);
 
 		return true;
 	}
 
 	/**
-	 * Get diagnostics for a file
+	 * Get diagnostics for a file. For a document opened but not yet checked,
+	 * waits (bounded) for the server's first result rather than reporting it
+	 * clean.
 	 */
 	async getDiagnostics(filePath: string): Promise<Diagnostic[]> {
 		const uri = this.fileToUri(filePath);
@@ -256,11 +480,45 @@ export class LSPManager extends EventEmitter {
 		const cached = this.diagnosticsCache.get(uri);
 		if (cached) return cached;
 
-		// Try pull diagnostics
 		const client = this.getClientForFile(filePath);
 		if (!client || !client.isReady()) return [];
 
-		return client.getDiagnostics(uri);
+		// A server that supports pull answers for the current text directly.
+		if (client.getCapabilities()?.diagnosticProvider) {
+			return client.getDiagnostics(uri);
+		}
+
+		// Push only: wait for the first publish for a document we opened.
+		if (!this.openTexts.has(uri) || this.diagnosticsTimedOut.has(uri)) {
+			return [];
+		}
+		const published = await this.waitForDiagnostics(
+			uri,
+			FIRST_DIAGNOSTICS_WAIT_MS,
+		);
+		if (published) return published;
+		this.diagnosticsTimedOut.add(uri);
+		return [];
+	}
+
+	/** The next diagnostics published for `uri`, or undefined on timeout. */
+	private waitForDiagnostics(
+		uri: string,
+		timeoutMs: number,
+	): Promise<Diagnostic[] | undefined> {
+		return new Promise(resolvePublished => {
+			const onDiagnostics = (params: PublishDiagnosticsParams) => {
+				if (params.uri !== uri) return;
+				finish(params.diagnostics);
+			};
+			const timer = setTimeout(() => finish(undefined), timeoutMs);
+			const finish = (result: Diagnostic[] | undefined) => {
+				clearTimeout(timer);
+				this.off('diagnostics', onDiagnostics);
+				resolvePublished(result);
+			};
+			this.on('diagnostics', onDiagnostics);
+		});
 	}
 
 	/**

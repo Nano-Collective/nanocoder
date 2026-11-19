@@ -1,7 +1,15 @@
-import {existsSync, mkdirSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
+
+import {existsSync, mkdirSync, readFileSync, rmSync, writeFileSync,mkdtempSync,utimesSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
+import * as path from 'node:path';
 import test from 'ava';
+import fs from 'node:fs';
+import {syncBuiltinESMExports} from 'node:module';
+import {
+	describeProjectTrust,
+	TRUST_FINGERPRINT_VERSION,
+} from '@/config/trust/project-trust';
 import {
 	DEFAULT_MEMORY_LIMIT,
 	DEFAULT_TOKEN_BUDGET,
@@ -10,8 +18,9 @@ import {
 	MIN_MEMORY_LIMIT,
 	MIN_TOKEN_BUDGET,
 } from '@/memory/project-context';
+import {getClosestConfigFile} from '@/config/index';
+import {isDirectoryTrusted} from '@/config/trust/directory-trust';
 import {
-	ensureDirectoryTrust,
 	getCompactToolDisplay,
 	getLastUsedModel,
 	getNanocoderShape,
@@ -21,7 +30,6 @@ import {
 	getProjectContextPreferences,
 	getReasoningExpanded,
 	getSemanticMemoryEnabled,
-	isDirectoryTrusted,
 	loadPreferences,
 	resolveProjectContextPreferences,
 	resetPreferencesCache,
@@ -41,11 +49,24 @@ import {
 	getPrivacyPreference,
 	updatePrivacyPreference,
 	getMouseReporting,
+	updateAlternateScreen,
+	getAlternateScreen,
 	updateMouseReporting,
 	updateShowAgentBashOutput,
 	updateShowUsageFooter,
+	getPreferencesVersion,
+	subscribeToPreferences,
+	DEFAULT_MAX_FPS,
+	MIN_MAX_FPS,
+	MAX_MAX_FPS,
+	isValidMaxFps,
+	getUiMaxFps,
+	getMaxFps,
 } from './preferences';
-import {updatePreferencesNestedValue} from '@/config/config-writer';
+import {
+	updatePreferencesNestedValue,
+	writeConfigFileAtomic,
+} from '@/config/config-writer';
 import type {UserPreferences} from '@/types/index';
 
 console.log('\npreferences.spec.ts');
@@ -58,6 +79,10 @@ test.before(() => {
 	process.env.NANOCODER_CONFIG_DIR = testConfigDir;
 	mkdirSync(testConfigDir, {recursive: true});
 	// Reset the preferences cache to pick up the new config directory
+	resetPreferencesCache();
+});
+
+test.beforeEach(() => {
 	resetPreferencesCache();
 });
 
@@ -2098,115 +2123,6 @@ test.serial('full workflow: update and retrieve project context preferences', t 
 });
 
 // ============================================================================
-// Directory Trust Tests — shared by the interactive TUI, --plain, and the
-// daemon boot path (see source/daemon/cli.ts's `start`).
-// ============================================================================
-
-test('isDirectoryTrusted returns false when trustedDirectories is empty', t => {
-	t.false(isDirectoryTrusted('/some/project', {}));
-});
-
-test('isDirectoryTrusted matches an exact entry', t => {
-	const dir = process.cwd();
-	t.true(isDirectoryTrusted(dir, {trustedDirectories: [dir]}));
-});
-
-test('isDirectoryTrusted resolves relative entries before comparing', t => {
-	const dir = process.cwd();
-	t.true(isDirectoryTrusted(dir, {trustedDirectories: ['.']}));
-});
-
-test('isDirectoryTrusted does not match an unrelated directory', t => {
-	t.false(
-		isDirectoryTrusted(process.cwd(), {
-			trustedDirectories: ['/some/other/project'],
-		}),
-	);
-});
-
-test('ensureDirectoryTrust trusts without persisting when bypass is true', t => {
-	let saveCalled = false;
-	const result = ensureDirectoryTrust('/untrusted/project', true, {
-		loadPreferences: () => ({trustedDirectories: []}),
-		savePreferences: () => {
-			saveCalled = true;
-		},
-	});
-	t.deepEqual(result, {trusted: true, persisted: false});
-	t.false(saveCalled);
-});
-
-test('ensureDirectoryTrust trusts an already-recorded directory without persisting again', t => {
-	const dir = process.cwd();
-	let saveCalled = false;
-	const result = ensureDirectoryTrust(dir, false, {
-		loadPreferences: () => ({trustedDirectories: [dir]}),
-		savePreferences: () => {
-			saveCalled = true;
-		},
-	});
-	t.deepEqual(result, {trusted: true, persisted: false});
-	t.false(saveCalled);
-});
-
-test.serial(
-	'ensureDirectoryTrust refuses an unrecorded directory when NANOCODER_TRUST_DIRECTORY is unset',
-	t => {
-		delete process.env.NANOCODER_TRUST_DIRECTORY;
-		const result = ensureDirectoryTrust('/untrusted/project', false, {
-			loadPreferences: () => ({trustedDirectories: []}),
-			savePreferences: () => {
-				t.fail('should not persist when refusing');
-			},
-		});
-		t.deepEqual(result, {trusted: false, persisted: false});
-	},
-);
-
-test.serial(
-	'ensureDirectoryTrust with NANOCODER_TRUST_DIRECTORY=1 trusts and persists a new entry',
-	t => {
-		process.env.NANOCODER_TRUST_DIRECTORY = '1';
-		let savedPreferences: UserPreferences | null = null;
-		try {
-			const target = join(tmpdir(), 'nanocoder-untrusted-project');
-			const result = ensureDirectoryTrust(target, false, {
-				loadPreferences: () => ({trustedDirectories: []}),
-				savePreferences: prefs => {
-					savedPreferences = prefs;
-				},
-			});
-			t.true(result.trusted);
-			t.true(result.persisted);
-			t.deepEqual(savedPreferences?.trustedDirectories, [target]);
-		} finally {
-			delete process.env.NANOCODER_TRUST_DIRECTORY;
-		}
-	},
-);
-
-test.serial(
-	'ensureDirectoryTrust with NANOCODER_TRUST_DIRECTORY=1 does not duplicate an already-trusted directory',
-	t => {
-		process.env.NANOCODER_TRUST_DIRECTORY = '1';
-		try {
-			const dir = process.cwd();
-			let saveCalled = false;
-			const result = ensureDirectoryTrust(dir, false, {
-				loadPreferences: () => ({trustedDirectories: [dir]}),
-				savePreferences: () => {
-					saveCalled = true;
-				},
-			});
-			t.deepEqual(result, {trusted: true, persisted: false});
-			t.false(saveCalled);
-		} finally {
-			delete process.env.NANOCODER_TRUST_DIRECTORY;
-		}
-	},
-);
-
-// ============================================================================
 // Trust is global-only: a project-level nanocoder-preferences.json (which
 // ships with a cloned repo) must never be able to mark its own directory
 // trusted, and trust writes must never land in it.
@@ -2308,3 +2224,700 @@ test.serial(
 		});
 	},
 );
+
+test.serial(
+	'loadPreferences ignores fullCommitConfirmedProjects and ciWatch from a project-level preferences file',
+	t => {
+		withProjectPreferences(
+			{
+				fullCommitConfirmedProjects: ['/evil'],
+				ciWatch: {enabled: true},
+			},
+			null,
+			() => {
+				const prefs = loadPreferences();
+				t.is(prefs.fullCommitConfirmedProjects, undefined);
+				t.is(prefs.ciWatch, undefined);
+			},
+		);
+	},
+);
+
+test.serial(
+	'loadPreferences takes fullCommitConfirmedProjects and ciWatch from the global file',
+	t => {
+		withProjectPreferences(
+			{fullCommitConfirmedProjects: ['/evil'], ciWatch: {enabled: false}},
+			{fullCommitConfirmedProjects: ['/mine'], ciWatch: {enabled: true}},
+			() => {
+				const prefs = loadPreferences();
+				t.deepEqual(prefs.fullCommitConfirmedProjects, ['/mine']);
+				t.true(prefs.ciWatch?.enabled);
+			},
+		);
+	},
+);
+
+test.serial(
+	'savePreferences writes fullCommitConfirmedProjects to the global file, never the project file',
+	t => {
+		withProjectPreferences({}, {lastModel: 'kept'}, ({projectFile, globalFile}) => {
+			const prefs = loadPreferences();
+			prefs.fullCommitConfirmedProjects = ['/confirmed'];
+			savePreferences(prefs);
+
+			const project = JSON.parse(readFileSync(projectFile, 'utf-8'));
+			const global = JSON.parse(readFileSync(globalFile, 'utf-8'));
+			t.is(project.fullCommitConfirmedProjects, undefined);
+			t.deepEqual(global.fullCommitConfirmedProjects, ['/confirmed']);
+			t.is(global.lastModel, 'kept');
+		});
+	},
+);
+
+// ============================================================================
+// maxFps (TUI Frame Rate Limit) Tests
+// ============================================================================
+
+test('maxFps constants have expected values', t => {
+	t.is(DEFAULT_MAX_FPS, 30);
+	t.is(MIN_MAX_FPS, 1);
+	t.is(MAX_MAX_FPS, 60);
+});
+
+test('isValidMaxFps accepts valid integers between 1 and 60', t => {
+	t.true(isValidMaxFps(1));
+	t.true(isValidMaxFps(15));
+	t.true(isValidMaxFps(30));
+	t.true(isValidMaxFps(45));
+	t.true(isValidMaxFps(60));
+});
+
+test('isValidMaxFps rejects out-of-range numbers', t => {
+	t.false(isValidMaxFps(0));
+	t.false(isValidMaxFps(-1));
+	t.false(isValidMaxFps(-30));
+	t.false(isValidMaxFps(61));
+	t.false(isValidMaxFps(100));
+});
+
+test('isValidMaxFps rejects non-integer numbers', t => {
+	t.false(isValidMaxFps(0.5));
+	t.false(isValidMaxFps(15.5));
+	t.false(isValidMaxFps(30.1));
+	t.false(isValidMaxFps(59.9));
+	t.false(isValidMaxFps(NaN));
+	t.false(isValidMaxFps(Number.POSITIVE_INFINITY));
+	t.false(isValidMaxFps(Number.NEGATIVE_INFINITY));
+});
+
+test('isValidMaxFps rejects non-number types', t => {
+	t.false(isValidMaxFps('30'));
+	t.false(isValidMaxFps(''));
+	t.false(isValidMaxFps(null));
+	t.false(isValidMaxFps(undefined));
+	t.false(isValidMaxFps(true));
+	t.false(isValidMaxFps(false));
+	t.false(isValidMaxFps({}));
+	t.false(isValidMaxFps([]));
+});
+
+test.serial(
+	'getMaxFps returns DEFAULT_MAX_FPS (30) when preference is not configured',
+	t => {
+		const preferencesPath = getTestPreferencesPath();
+		writeFileSync(
+			preferencesPath,
+			JSON.stringify({lastProvider: 'test'}),
+			'utf-8',
+		);
+
+		try {
+			t.is(getMaxFps(), 30);
+			t.is(getUiMaxFps(), undefined);
+		} finally {
+			if (existsSync(preferencesPath)) {
+				rmSync(preferencesPath, {force: true});
+			}
+		}
+	},
+);
+
+test.serial(
+	'getMaxFps returns DEFAULT_MAX_FPS (30) when file does not exist',
+	t => {
+		const preferencesPath = getTestPreferencesPath();
+		if (existsSync(preferencesPath)) {
+			rmSync(preferencesPath, {force: true});
+		}
+
+		t.is(getMaxFps(), 30);
+		t.is(getUiMaxFps(), undefined);
+	},
+);
+
+test.serial(
+	'getMaxFps returns valid configured value from nanocoder.ui.maxFps',
+	t => {
+		const preferencesPath = getTestPreferencesPath();
+		const prefs: UserPreferences = {
+			nanocoder: {
+				ui: {
+					maxFps: 15,
+				},
+			},
+		};
+		writeFileSync(preferencesPath, JSON.stringify(prefs, null, 2), 'utf-8');
+
+		try {
+			t.is(getMaxFps(), 15);
+			t.is(getUiMaxFps(), 15);
+		} finally {
+			if (existsSync(preferencesPath)) {
+				rmSync(preferencesPath, {force: true});
+			}
+		}
+	},
+);
+
+test.serial(
+	'getMaxFps rejects invalid values and falls back to default 30',
+	t => {
+		const preferencesPath = getTestPreferencesPath();
+		const invalidCases = [0, -5, 61, 100, 15.5, '15', null, true, {}];
+
+		try {
+			for (const invalid of invalidCases) {
+				writeFileSync(
+					preferencesPath,
+					JSON.stringify({nanocoder: {ui: {maxFps: invalid}}}, null, 2),
+					'utf-8',
+				);
+				t.is(
+					getMaxFps(),
+					30,
+					`Expected default 30 for invalid value: ${JSON.stringify(invalid)}`,
+				);
+				t.is(
+					getUiMaxFps(),
+					undefined,
+					`Expected undefined for invalid value: ${JSON.stringify(invalid)}`,
+				);
+			}
+		} finally {
+			if (existsSync(preferencesPath)) {
+				rmSync(preferencesPath, {force: true});
+			}
+		}
+	},
+);
+
+test.serial(
+	'updatePreferencesNestedValue writes ui.maxFps properly and preserves existing preferences',
+	t => {
+		const preferencesPath = getTestPreferencesPath();
+		const initialPrefs: UserPreferences = {
+			lastProvider: 'test-provider',
+			nanocoder: {
+				paste: {singleLineThreshold: 500},
+			},
+		};
+		writeFileSync(
+			preferencesPath,
+			JSON.stringify(initialPrefs, null, 2),
+			'utf-8',
+		);
+
+		try {
+			updatePreferencesNestedValue('ui', 'maxFps', 24);
+
+			const data = JSON.parse(
+				readFileSync(preferencesPath, 'utf-8'),
+			) as UserPreferences;
+			t.is(data.nanocoder?.ui?.maxFps, 24);
+			t.is(data.lastProvider, 'test-provider');
+			t.is(data.nanocoder?.paste?.singleLineThreshold, 500);
+			t.is(getMaxFps(), 24);
+			t.is(getUiMaxFps(), 24);
+		} finally {
+			if (existsSync(preferencesPath)) {
+				rmSync(preferencesPath, {force: true});
+			}
+		}
+	},
+);
+
+test.serial(
+	'updatePreferencesNestedValue invalidates cached preferences and notifies subscribers',
+	t => {
+		const preferencesPath = getTestPreferencesPath();
+		let notifications = 0;
+		let unsubscribe: (() => void) | undefined;
+
+		try {
+			t.true(
+				savePreferences({
+					nanocoder: {ui: {maxFps: 30}},
+				}),
+			);
+			t.is(loadPreferences().nanocoder?.ui?.maxFps, 30);
+			t.is(getMaxFps(), 30);
+
+			const previousVersion = getPreferencesVersion();
+			unsubscribe = subscribeToPreferences(() => {
+				notifications++;
+			});
+
+			updatePreferencesNestedValue('ui', 'maxFps', 24);
+
+			t.is(getPreferencesVersion(), previousVersion + 1);
+			t.is(notifications, 1);
+			t.is(loadPreferences().nanocoder?.ui?.maxFps, 24);
+			t.is(getMaxFps(), 24);
+			t.is(notifications, 1);
+		} finally {
+			unsubscribe?.();
+			if (existsSync(preferencesPath)) {
+				rmSync(preferencesPath, {force: true});
+			}
+		}
+	},
+);
+
+test.serial(
+	'writeConfigFileAtomic invalidates preferences once after a successful preferences write',
+	t => {
+		const dir = mkdtempSync(path.join(tmpdir(), 'nanocoder-writer-cache-'));
+		const previousDir = process.env.NANOCODER_CONFIG_DIR;
+		const file = path.join(dir, 'nanocoder-preferences.json');
+		let notifications = 0;
+		let unsubscribe: (() => void) | undefined;
+
+		try {
+			process.env.NANOCODER_CONFIG_DIR = dir;
+			resetPreferencesCache();
+
+			t.true(savePreferences({showAgentBashOutput: false}));
+			t.false(getShowAgentBashOutput());
+
+			const previousVersion = getPreferencesVersion();
+			unsubscribe = subscribeToPreferences(() => {
+				notifications++;
+			});
+
+			writeConfigFileAtomic(file, {showAgentBashOutput: true});
+
+			t.is(getPreferencesVersion(), previousVersion + 1);
+			t.is(notifications, 1);
+			t.true(loadPreferences().showAgentBashOutput);
+			t.true(getShowAgentBashOutput());
+
+			const versionAfterWrite = getPreferencesVersion();
+
+			const blockingFile = path.join(dir, 'blocking-file');
+			writeFileSync(blockingFile, 'not a directory');
+
+			t.throws(() =>
+				writeConfigFileAtomic(
+					path.join(blockingFile, 'nanocoder-preferences.json'),
+					{showAgentBashOutput: false},
+				),
+			);
+			t.is(getPreferencesVersion(), versionAfterWrite);
+			t.is(notifications, 1);
+			t.true(getShowAgentBashOutput());
+		} finally {
+			unsubscribe?.();
+			if (previousDir === undefined) {
+				delete process.env.NANOCODER_CONFIG_DIR;
+			} else {
+				process.env.NANOCODER_CONFIG_DIR = previousDir;
+			}
+
+			resetPreferencesCache();
+			rmSync(dir, {recursive: true, force: true});
+		}
+	},
+);
+
+
+test.serial('loadPreferences returns cached data when file is unchanged', t => {
+	const dir = mkdtempSync(path.join(tmpdir(), 'nanocoder-cache-'));
+	const previousDir = process.env.NANOCODER_CONFIG_DIR;
+
+	try {
+		process.env.NANOCODER_CONFIG_DIR = dir;
+		const file = path.join(dir, 'nanocoder-preferences.json');
+
+		writeFileSync(file, JSON.stringify({selectedTheme: 'dark'}));
+		resetPreferencesCache();
+
+		const first = loadPreferences();
+		const second = loadPreferences();
+
+		t.deepEqual(first, second);
+		t.not(first, second);
+
+		// Callers must not be able to modify the cached object.
+		first.selectedTheme = 'light';
+
+		t.is(loadPreferences().selectedTheme, 'dark');
+	} finally {
+		if (previousDir === undefined) {
+			delete process.env.NANOCODER_CONFIG_DIR;
+		} else {
+			process.env.NANOCODER_CONFIG_DIR = previousDir;
+		}
+
+		resetPreferencesCache();
+		rmSync(dir, {recursive: true, force: true});
+	}
+});
+
+test.serial('savePreferences invalidates the cache immediately', t => {
+	const dir = mkdtempSync(path.join(tmpdir(), 'nanocoder-cache-'));
+	const previousDir = process.env.NANOCODER_CONFIG_DIR;
+
+	try {
+		process.env.NANOCODER_CONFIG_DIR = dir;
+		const file = path.join(dir, 'nanocoder-preferences.json');
+
+		writeFileSync(file, JSON.stringify({reasoningExpanded: false}));
+		resetPreferencesCache();
+
+		t.false(loadPreferences().reasoningExpanded);
+
+		const saved = savePreferences({reasoningExpanded: true});
+		t.true(saved);
+
+		// No delay: an in-process save must invalidate immediately.
+		t.true(loadPreferences().reasoningExpanded);
+	} finally {
+		if (previousDir === undefined) {
+			delete process.env.NANOCODER_CONFIG_DIR;
+		} else {
+			process.env.NANOCODER_CONFIG_DIR = previousDir;
+		}
+
+		resetPreferencesCache();
+		rmSync(dir, {recursive: true, force: true});
+	}
+});
+
+test.serial('loadPreferences detects external file modifications', async t => {
+	const dir = mkdtempSync(path.join(tmpdir(), 'nanocoder-cache-'));
+	const previousDir = process.env.NANOCODER_CONFIG_DIR;
+
+	try {
+		process.env.NANOCODER_CONFIG_DIR = dir;
+		const file = path.join(dir, 'nanocoder-preferences.json');
+
+		writeFileSync(file, JSON.stringify({reasoningExpanded: false}));
+		resetPreferencesCache();
+
+		t.false(loadPreferences().reasoningExpanded);
+
+		// Simulate another process modifying the preferences file.
+		writeFileSync(file, JSON.stringify({reasoningExpanded: true}));
+
+		const changedTime = new Date(Date.now() + 60_000);
+		utimesSync(file, changedTime, changedTime);
+
+		// Cached data remains valid during the metadata-check interval.
+		t.false(loadPreferences().reasoningExpanded);
+
+		// Allow the one-second interval to expire.
+		await new Promise(resolve => setTimeout(resolve, 1100));
+
+		t.true(loadPreferences().reasoningExpanded);
+	} finally {
+		if (previousDir === undefined) {
+			delete process.env.NANOCODER_CONFIG_DIR;
+		} else {
+			process.env.NANOCODER_CONFIG_DIR = previousDir;
+		}
+
+		resetPreferencesCache();
+		rmSync(dir, {recursive: true, force: true});
+	}
+});
+
+test.serial('loadPreferences respects config directory changes', t => {
+	const firstDir = mkdtempSync(path.join(tmpdir(), 'nanocoder-first-'));
+	const secondDir = mkdtempSync(path.join(tmpdir(), 'nanocoder-second-'));
+	const previousDir = process.env.NANOCODER_CONFIG_DIR;
+
+	try {
+		writeFileSync(
+			path.join(firstDir, 'nanocoder-preferences.json'),
+			JSON.stringify({reasoningExpanded: false}),
+		);
+
+		writeFileSync(
+			path.join(secondDir, 'nanocoder-preferences.json'),
+			JSON.stringify({reasoningExpanded: true}),
+		);
+
+		process.env.NANOCODER_CONFIG_DIR = firstDir;
+		resetPreferencesCache();
+
+		t.false(loadPreferences().reasoningExpanded);
+
+		// Path changes must invalidate immediately, even within one second.
+		process.env.NANOCODER_CONFIG_DIR = secondDir;
+
+		t.true(loadPreferences().reasoningExpanded);
+	} finally {
+		if (previousDir === undefined) {
+			delete process.env.NANOCODER_CONFIG_DIR;
+		} else {
+			process.env.NANOCODER_CONFIG_DIR = previousDir;
+		}
+
+		resetPreferencesCache();
+		rmSync(firstDir, {recursive: true, force: true});
+		rmSync(secondDir, {recursive: true, force: true});
+	}
+});
+
+test.serial('loadPreferences avoids repeated filesystem reads and stats', t => {
+	const dir = mkdtempSync(path.join(tmpdir(), 'nanocoder-reads-'));
+	const previousDir = process.env.NANOCODER_CONFIG_DIR;
+	const preferencesFile = path.join(dir, 'nanocoder-preferences.json');
+
+	const originalReadFileSync = fs.readFileSync;
+	const originalStatSync = fs.statSync;
+
+	let reads = 0;
+	let stats = 0;
+
+	const isPreferencesFile = (file: unknown): boolean => {
+		return (
+			typeof file === 'string' &&
+			path.resolve(file) === path.resolve(preferencesFile)
+		);
+	};
+
+	try {
+		writeFileSync(
+			preferencesFile,
+			JSON.stringify({reasoningExpanded: false}),
+		);
+
+		process.env.NANOCODER_CONFIG_DIR = dir;
+		resetPreferencesCache();
+
+		fs.readFileSync = ((
+			file: Parameters<typeof fs.readFileSync>[0],
+			...args: unknown[]
+		) => {
+			if (isPreferencesFile(file)) {
+				reads++;
+			}
+
+			return Reflect.apply(originalReadFileSync, fs, [file, ...args]);
+		}) as typeof fs.readFileSync;
+
+		fs.statSync = ((
+			file: Parameters<typeof fs.statSync>[0],
+			...args: unknown[]
+		) => {
+			if (isPreferencesFile(file)) {
+				stats++;
+			}
+
+			return Reflect.apply(originalStatSync, fs, [file, ...args]);
+		}) as typeof fs.statSync;
+
+		syncBuiltinESMExports();
+
+		// First load reads the preferences file.
+		loadPreferences();
+
+		t.is(reads, 1);
+
+		const initialStats = stats;
+
+		// Hot-path calls should require neither reads nor stats.
+		for (let i = 0; i < 10; i++) {
+			loadPreferences();
+		}
+
+		t.is(reads, 1);
+		t.is(stats, initialStats);
+
+		// Successful saves invalidate the cache immediately.
+		t.true(savePreferences({reasoningExpanded: true}));
+
+		loadPreferences();
+
+		t.is(reads, 2);
+
+		const statsAfterSave = stats;
+
+		for (let i = 0; i < 10; i++) {
+			loadPreferences();
+		}
+
+		t.is(reads, 2);
+		t.is(stats, statsAfterSave);
+	} finally {
+		fs.readFileSync = originalReadFileSync;
+		fs.statSync = originalStatSync;
+		syncBuiltinESMExports();
+
+		if (previousDir === undefined) {
+			delete process.env.NANOCODER_CONFIG_DIR;
+		} else {
+			process.env.NANOCODER_CONFIG_DIR = previousDir;
+		}
+
+		resetPreferencesCache();
+		rmSync(dir, {recursive: true, force: true});
+	}
+});
+
+test.serial('cached preference getter refreshes after save', t => {
+	const dir = mkdtempSync(path.join(tmpdir(), 'nanocoder-derived-cache-'));
+	const previousDir = process.env.NANOCODER_CONFIG_DIR;
+
+	try {
+		process.env.NANOCODER_CONFIG_DIR = dir;
+
+		const file = path.join(dir, 'nanocoder-preferences.json');
+
+		writeFileSync(
+			file,
+			JSON.stringify({showAgentBashOutput: false}),
+		);
+
+		resetPreferencesCache();
+
+		t.false(getShowAgentBashOutput());
+
+		t.true(savePreferences({showAgentBashOutput: true}));
+
+		// The preferences version changes after a successful save.
+		t.true(getShowAgentBashOutput());
+
+		// Repeated calls reuse the derived value.
+		t.true(getShowAgentBashOutput());
+	} finally {
+		if (previousDir === undefined) {
+			delete process.env.NANOCODER_CONFIG_DIR;
+		} else {
+			process.env.NANOCODER_CONFIG_DIR = previousDir;
+		}
+
+		resetPreferencesCache();
+		rmSync(dir, {recursive: true, force: true});
+	}
+});
+
+test.serial('cached preference getter stays on the filesystem-free hot path', t => {
+	const dir = mkdtempSync(path.join(tmpdir(), 'nanocoder-derived-fast-'));
+	const previousDir = process.env.NANOCODER_CONFIG_DIR;
+
+	const originalReadFileSync = fs.readFileSync;
+	const originalStatSync = fs.statSync;
+
+	let reads = 0;
+	let stats = 0;
+
+	try {
+		process.env.NANOCODER_CONFIG_DIR = dir;
+
+		const file = path.join(dir, 'nanocoder-preferences.json');
+
+		writeFileSync(
+			file,
+			JSON.stringify({showAgentBashOutput: true}),
+		);
+
+		resetPreferencesCache();
+
+		// Populate the version-based derived cache first.
+		t.true(getShowAgentBashOutput());
+
+		fs.readFileSync = ((
+			filePath: Parameters<typeof fs.readFileSync>[0],
+			...args: unknown[]
+		) => {
+			reads++;
+			return Reflect.apply(originalReadFileSync, fs, [
+				filePath,
+				...args,
+			]);
+		}) as typeof fs.readFileSync;
+
+		fs.statSync = ((
+			filePath: Parameters<typeof fs.statSync>[0],
+			...args: unknown[]
+		) => {
+			stats++;
+			return Reflect.apply(originalStatSync, fs, [
+				filePath,
+				...args,
+			]);
+		}) as typeof fs.statSync;
+
+		syncBuiltinESMExports();
+
+		for (let i = 0; i < 1000; i++) {
+			t.true(getShowAgentBashOutput());
+		}
+
+		t.is(reads, 0);
+		t.is(stats, 0);
+	} finally {
+		fs.readFileSync = originalReadFileSync;
+		fs.statSync = originalStatSync;
+		syncBuiltinESMExports();
+
+		if (previousDir === undefined) {
+			delete process.env.NANOCODER_CONFIG_DIR;
+		} else {
+			process.env.NANOCODER_CONFIG_DIR = previousDir;
+		}
+
+		resetPreferencesCache();
+		rmSync(dir, {recursive: true, force: true});
+	}
+});
+
+// Every boolean preference: its default when unset, and that a write is read
+// back from the file under its own key.
+const booleanPreferences: Array<{
+	key: keyof UserPreferences;
+	get: () => boolean;
+	set: (value: boolean) => void;
+	unset: boolean;
+}> = [
+	{key: 'reasoningExpanded', get: getReasoningExpanded, set: updateReasoningExpanded, unset: false},
+	{key: 'compactToolDisplay', get: getCompactToolDisplay, set: updateCompactToolDisplay, unset: true},
+	{key: 'showUsageFooter', get: getShowUsageFooter, set: updateShowUsageFooter, unset: true},
+	{key: 'enablePromptScrubbing', get: getPrivacyPreference, set: updatePrivacyPreference, unset: false},
+	{key: 'alternateScreen', get: getAlternateScreen, set: updateAlternateScreen, unset: true},
+	{key: 'mouseReporting', get: getMouseReporting, set: updateMouseReporting, unset: true},
+	{key: 'professionalTone', get: getProfessionalTone, set: updateProfessionalTone, unset: false},
+	{key: 'showAgentBashOutput', get: getShowAgentBashOutput, set: updateShowAgentBashOutput, unset: false},
+];
+
+for (const {key, get, set, unset} of booleanPreferences) {
+	test.serial(`${key}: defaults to ${unset} and round-trips through the file`, t => {
+		const preferencesPath = getTestPreferencesPath();
+		rmSync(preferencesPath, {force: true});
+		resetPreferencesCache();
+		try {
+			t.is(get(), unset);
+			set(!unset);
+			t.is(get(), !unset);
+			t.is(JSON.parse(readFileSync(preferencesPath, 'utf-8'))[key], !unset);
+			set(unset);
+			t.is(get(), unset);
+		} finally {
+			rmSync(preferencesPath, {force: true});
+			resetPreferencesCache();
+		}
+	});
+}

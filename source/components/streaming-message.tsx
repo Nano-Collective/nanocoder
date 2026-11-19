@@ -4,8 +4,8 @@ import {memo, useRef} from 'react';
 import {useNonInteractiveRender} from '@/hooks/useNonInteractiveRender';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
-import {wrapWithTrimmedContinuations} from '@/utils/text-wrapping';
-import {calculateTokens} from '@/utils/token-calculator';
+import {wrapWithTrimmedContinuations} from '@/terminal/text-wrapping';
+import {estimateTokens} from '@/utils/token-calculator';
 import {AssistantMessageBox} from './assistant-message';
 
 /**
@@ -34,8 +34,17 @@ export function computeStreamingTail(
 		// No newline at all (one huge line) must fall back to the unsnapped
 		// rawTailStart, not 0 — snapping to 0 would discard the bound entirely
 		// and render the whole message.
+		// #1691: only snap back when that newline is close. Searching without a
+		// lower bound meant a short line followed by one huge line (a minified
+		// bundle, a big JSON blob) snapped the start back past the whole bound,
+		// so the tail became the entire message and every streaming update
+		// re-wrapped all of it. Past one line's width, accept a partial leading
+		// line rather than losing the bound.
 		const prevNewline = message.lastIndexOf('\n', sliceStart);
-		sliceStart = prevNewline === -1 ? rawTailStart : prevNewline + 1;
+		sliceStart =
+			prevNewline === -1 || prevNewline < rawTailStart - textWidth
+				? rawTailStart
+				: prevNewline + 1;
 	}
 	const tail = (sliceStart > 0 ? message.slice(sliceStart) : message).trim();
 	return {tail, sliced: sliceStart > 0};
@@ -85,7 +94,7 @@ export default memo(function StreamingMessage({
 		);
 	}
 
-	const tokens = calculateTokens(message);
+	const tokens = estimateTokens(message);
 	const elapsedSec = (Date.now() - startTime) / 1000;
 	const tokPerSec = elapsedSec > 0.1 ? (tokens / elapsedSec).toFixed(1) : '—';
 

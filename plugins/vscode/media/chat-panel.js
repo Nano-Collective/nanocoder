@@ -9,12 +9,16 @@
 	const artifactLinks = document.getElementById('artifact-links');
 	const contextChipsContainer = document.getElementById('context-chips');
 	const contextChipsClearBtn = document.getElementById('context-chips-clear');
+	const pendingChangesContainer = document.getElementById('pending-changes-container');
 	const addMenuBtn = document.getElementById('add-menu-btn');
 	const addMenuDropdown = document.getElementById('add-menu-dropdown');
 
 	// [{path, name, kind: 'file'|'folder', agentEdited?: boolean}]. Entries the
 	// agent contributed are flagged so submitMessage can leave them out.
 	let attachedPaths = [];
+	let pendingChanges = [];
+	let pendingChangesDismissed = false;
+	let pendingChangesCollapsed = false;
 
 	// ── @ mention autocomplete state ────────────────────────
 	const mentionDropdown = document.getElementById('mention-dropdown');
@@ -50,6 +54,10 @@
 	let messageIdCounter = 0;
 
 	let showTokenUsage = false;
+
+	// Highlight fenced code in every marked.parse() below: streaming text,
+	// finished text and thought bubbles.
+	globalThis.NanocoderMarkdownHighlight.configureMarkdown(globalThis.marked, globalThis.hljs);
 
 	// ── Slash command autocomplete state ────────────────────
 	const slashDropdown = document.getElementById('slash-dropdown');
@@ -699,9 +707,11 @@
 					statusEl.dataset.status = 'cancelled';
 				}
 			});
+			// The turn is over (completed, cancelled or failed): no cursor may linger.
+			document.querySelectorAll('.streaming-cursor').forEach(el => el.classList.remove('streaming-cursor'));
 			stopVisualLoader();
 			finishCurrentWorkSummary(outcome);
-			
+
 			const hiddenFooters = document.querySelectorAll('.agent-footer-processing');
 			hiddenFooters.forEach(f => {
 				f.style.display = '';
@@ -1754,6 +1764,126 @@
 		syncSendStopButton();
 	}
 
+	function renderPendingChanges() {
+		pendingChangesContainer.innerHTML = '';
+
+		if (pendingChanges.length === 0 || pendingChangesDismissed) {
+			pendingChangesContainer.classList.add('hidden');
+			return;
+		}
+
+		pendingChangesContainer.classList.remove('hidden');
+
+		const card = document.createElement('div');
+		card.className = 'pending-changes-card';
+
+		pendingChangesContainer.appendChild(card);
+
+		const header = document.createElement('div')
+		header.className = 'pending-changes-header';
+
+		const title = document.createElement('span');
+		title.textContent = 'Pending changes';
+
+		const actions = document.createElement('div');
+		actions.className = 'pending-changes-actions';
+
+		const chevron = document.createElement('span');
+		chevron.textContent = pendingChangesCollapsed ? '▸' : '▾';
+		chevron.style.fontSize = '1.1em';
+
+		const dismissButton = document.createElement('button');
+		dismissButton.className = 'pending-changes-dismiss';
+		dismissButton.textContent = 'X';
+		dismissButton.title = 'Dismiss';
+
+		dismissButton.addEventListener('click', (event) => {
+			event.stopPropagation();
+			pendingChangesDismissed = true;
+			renderPendingChanges();
+		});
+
+		actions.appendChild(chevron);
+		actions.appendChild(dismissButton);
+
+		header.appendChild(title);
+		header.appendChild(actions);
+
+		card.appendChild(header);
+
+		const content = document.createElement('div');
+		content.className = 'pending-changes-content';
+		card.appendChild(content);
+
+		content.classList.toggle('hidden', pendingChangesCollapsed);
+
+		header.addEventListener('click', () => {
+			pendingChangesCollapsed = !pendingChangesCollapsed;
+			content.classList.toggle('hidden', pendingChangesCollapsed);
+			chevron.textContent = pendingChangesCollapsed ? '▸' : '▾';
+		});
+
+		for (const change of pendingChanges) {
+			const row = document.createElement('div');
+			row.className = 'pending-change-row';
+
+			const fileName = document.createElement('span');
+			fileName.className = 'pending-change-file';
+			fileName.textContent = basename(change.filePath);
+
+			const stats = document.createElement('span');
+			stats.className = 'pending-change-stats';
+
+			const additionsSpan = document.createElement('span');
+			additionsSpan.className = 'pending-change-additions';
+			additionsSpan.textContent = `+${change.additions}`;
+
+			const deletionsSpan = document.createElement('span');
+			deletionsSpan.className = 'pending-change-deletions';
+			deletionsSpan.textContent = ` -${change.deletions}`;
+
+			stats.appendChild(additionsSpan);
+			stats.appendChild(deletionsSpan);
+
+			row.appendChild(fileName);
+			row.appendChild(stats);
+
+			row.addEventListener('click', () => {
+				vscode.postMessage({
+					type: 'showDiff',
+					toolCallId: change.toolCallId,
+					filePath: change.filePath,
+				});
+			});
+
+			content.appendChild(row);
+			
+		}
+		
+	}
+
+	function removeResolvedPendingChange(update) {
+		const toolCallId = update?.toolCallId || (update?.toolCall && update.toolCall.toolCallId);
+
+		if (!toolCallId) return;
+
+		const state = resolveEditCardState(update);
+
+		if (!isSettled(state.status)) return;
+
+		const hasPendingChange = pendingChanges.some(
+			change => change.toolCallId === toolCallId,
+		);
+
+		if (!hasPendingChange) return;
+
+		pendingChanges = pendingChanges.filter(
+			change => change.toolCallId !== toolCallId,
+		);
+
+		renderPendingChanges();
+	}
+
 	if (composerBox) {
 		const handleDrag = (e) => {
 			e.preventDefault();
@@ -2092,6 +2222,8 @@
 
 			currentTurnEl = msgEl;
 			currentTextEl = textContainer;
+			// Blinking cursor (CSS) while this block streams; see endCurrentTextBlock().
+			textContainer.classList.add('streaming-cursor');
 			scrollToBottomIfFollowing();
 		} else {
 			// Append to existing turn
@@ -2296,6 +2428,7 @@
 				} else {
 					messagesContainer.innerHTML = '';
 				}
+				setSessionResumingIndicator(false);
 				currentTurnEl = null;
 				currentTextEl = null;
 				currentTurnText = '';
@@ -2307,6 +2440,12 @@
 				// the previous one touched.
 				attachedPaths = attachedPaths.filter(a => !a.agentEdited);
 				renderChips();
+				// The card lists edits waiting on approval in the conversation that just
+				// ended, so it starts empty in the next one.
+				pendingChanges = [];
+				pendingChangesDismissed = false;
+				pendingChangesCollapsed = false;
+				renderPendingChanges();
 				turnCancelled = false;
 				agentTurnId = 0;
 				turnStartedAt = 0;
@@ -2348,15 +2487,57 @@
 			case 'promptQueueCleared':
 				removeQueuedBubbles(message.ids || []);
 				break;
+	function setSessionResumingIndicator(isResuming) {
+		let indicator = document.getElementById('session-resuming-indicator');
+		if (isResuming) {
+			if (!indicator) {
+				indicator = document.createElement('div');
+				indicator.id = 'session-resuming-indicator';
+				indicator.className = 'session-resuming-indicator flex items-center justify-center gap-2 p-2 text-xs bg-vscode-dropdown-bg border-b border-vscode-border text-vscode-fg opacity-80 shrink-0 z-10';
+				indicator.innerHTML = `${ICONS.pending}<span>Resuming session...</span>`;
+				const chatView = document.getElementById('chat-view');
+				if (chatView && messagesContainer) {
+					chatView.insertBefore(indicator, messagesContainer);
+				}
+			}
+		} else if (indicator) {
+			indicator.remove();
+		}
+	}
+
 			case 'sessionLoaded':
 				finishCurrentWorkSummary(currentWorkSummary?._overrideOutcome || 'completed');
 				pendingUserMessages.clear();
 				const loader = document.getElementById('session-loader');
 				if (loader) loader.remove();
+				setSessionResumingIndicator(false);
 				scrollToBottom(true);
+				break;
+			case 'sessionResuming':
+				setSessionResumingIndicator(message.isResuming);
 				break;
 			case 'acpUpdate':
 				handleAcpUpdate(message.update);
+				break;
+			case 'pendingChangeAdded':
+				pendingChangesDismissed = false;
+
+				// The same action announced twice replaces itself. Two separate actions on
+				// one file stay separate, since each may still be waiting for approval.
+				pendingChanges = pendingChanges.filter(
+					change =>
+						change.toolCallId !== message.toolCallId ||
+						change.filePath !== message.filePath
+				);
+
+				pendingChanges.push({
+					toolCallId: message.toolCallId,
+					filePath: message.filePath,
+					additions: message.additions,
+					deletions: message.deletions,
+				});
+
+				renderPendingChanges();
 				break;
 			case 'permissionRequested':
 				handlePermissionRequested(message.toolCallId, message.toolCall, message.options);
@@ -2616,6 +2797,7 @@
 	function endCurrentTextBlock() {
 		flushPendingRender();
 		closeAgentSegment();
+		if (currentTextEl) currentTextEl.classList.remove('streaming-cursor');
 		currentTurnEl = null;
 		currentTextEl = null;
 		syncLastAgentRawText();
@@ -3662,6 +3844,8 @@
 		const toolCallId = update.toolCallId || (update.toolCall && update.toolCall.toolCallId);
 		if (!toolCallId) return;
 
+		removeResolvedPendingChange(update);
+
 		const existingCard = document.getElementById(`tool-card-${toolCallId}`);
 		// A card the user can already see keeps taking updates in the turn that
 		// drew it, even after a cancel: that is how a tool still in flight when
@@ -3873,6 +4057,9 @@
 		card.className = 'my-2 border border-vscode-widget-border rounded bg-vscode-editor-bg overflow-hidden group tool-card';
 		card.id = `tool-card-${toolCallId}`;
 
+		const initialPath = diffPath(update);
+		if (initialPath) card.dataset.filePath = initialPath;
+
 		const row = document.createElement('div');
 		row.className = 'tool-card-row flex items-center justify-between px-3 py-2';
 		// Guarded rather than unbound: the card is created from the queued
@@ -3881,7 +4068,9 @@
 		// that window - the whole approval wait - raised "Change <id> not found".
 		row.onclick = () => {
 			if (card.dataset.hasDiff !== 'true') return;
-			vscode.postMessage({ type: 'showDiff', toolCallId });
+			const message = { type: 'showDiff', toolCallId };
+			if (card.dataset.filePath) message.filePath = card.dataset.filePath;
+			vscode.postMessage(message);
 		};
 
 		const left = document.createElement('div');
@@ -3927,7 +4116,8 @@
 
 	// Reveal the diff affordance once the extension host has a change
 	// registered for this card - see hasDiffContent.
-	function setEditCardDiffAvailable(el) {
+	function setEditCardDiffAvailable(el, filePath) {
+		if (filePath) el.dataset.filePath = filePath;
 		if (el.dataset.hasDiff === 'true') return;
 		el.dataset.hasDiff = 'true';
 
@@ -3954,7 +4144,8 @@
 		const actionEl = el.querySelector('.tool-card-action');
 		if (actionEl) actionEl.textContent = state.action;
 
-		if (hasDiffContent(update)) setEditCardDiffAvailable(el);
+		const path = diffPath(update);
+		if (path) setEditCardDiffAvailable(el, path);
 
 		if (isSettled(state.status)) {
 			const actions = el.querySelector('.tool-actions');

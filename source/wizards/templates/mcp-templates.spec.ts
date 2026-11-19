@@ -267,6 +267,48 @@ test('custom template: handles empty env var lines', t => {
 	});
 });
 
+// Regression: Custom MCP Server had no headers field, so editing an http
+// server whose template was removed (Serply, FXMacroData) rebuilt it without
+// its API-key header.
+test('custom template: writes http headers, one per line', t => {
+	const template = MCP_TEMPLATES.find(t => t.id === 'custom');
+	t.truthy(template);
+
+	const config = template!.buildConfig({
+		transport: 'http',
+		serverName: 'serply',
+		url: 'https://api.serply.io/mcp',
+		headers:
+			'X-API-Key: serply_key_123\n\nAuthorization: Bearer a:b\nnot a header\n',
+	});
+
+	t.is(config.transport, 'http');
+	t.deepEqual(config.headers, {
+		'X-API-Key': 'serply_key_123',
+		Authorization: 'Bearer a:b',
+	});
+});
+
+test('custom template: omits headers when none are given or transport is not http', t => {
+	const template = MCP_TEMPLATES.find(t => t.id === 'custom');
+	t.truthy(template);
+
+	const http = template!.buildConfig({
+		transport: 'http',
+		serverName: 'plain',
+		url: 'https://example.com/mcp',
+	});
+	t.is(http.headers, undefined);
+
+	const websocket = template!.buildConfig({
+		transport: 'websocket',
+		serverName: 'ws',
+		url: 'wss://example.com/mcp',
+		headers: 'X-API-Key: ignored',
+	});
+	t.is(websocket.headers, undefined);
+});
+
 // ============================================================================
 // Tests for Remote Server Templates (New Feature)
 // ============================================================================
@@ -452,64 +494,6 @@ test('you template: stamps templateId so edits resolve under a custom name', t =
 	// The custom name no longer matches a template id, but resolution must
 	// still find `you` via the stamp rather than falling through to `custom`.
 	t.is(resolveMcpTemplateId(config), 'you');
-});
-
-test('serply template: builds HTTP config with X-API-Key header', t => {
-	const template = MCP_TEMPLATES.find(t => t.id === 'serply');
-	t.truthy(template);
-
-	const config = template!.buildConfig({
-		serverName: 'serply',
-		apiKey: 'serply_test_key_123',
-	});
-
-	t.is(config.name, 'serply');
-	t.is(config.transport, 'http');
-	t.is(config.url, 'https://api.serply.io/mcp');
-	t.is(config.timeout, 30000);
-	t.deepEqual(config.headers, {'X-API-Key': 'serply_test_key_123'});
-	t.deepEqual(config.tags, ['serply', 'search', 'web', 'scrape', 'http']);
-});
-
-test('serply template: requires the API key field', t => {
-	const template = MCP_TEMPLATES.find(t => t.id === 'serply');
-	t.truthy(template);
-
-	const apiKeyField = template!.fields.find(f => f.name === 'apiKey');
-	t.truthy(apiKeyField);
-	t.true(apiKeyField!.required);
-	t.true(apiKeyField!.sensitive);
-});
-
-test('serply template: defaults server name to serply when unset', t => {
-	const template = MCP_TEMPLATES.find(t => t.id === 'serply');
-	t.truthy(template);
-
-	const config = template!.buildConfig({apiKey: 'serply_test_key_123'});
-
-	t.is(config.name, 'serply');
-});
-
-test('serply template: trims whitespace from API key', t => {
-	const template = MCP_TEMPLATES.find(t => t.id === 'serply');
-	t.truthy(template);
-
-	const config = template!.buildConfig({apiKey: '  serply_test_key_123  '});
-
-	t.deepEqual(config.headers, {'X-API-Key': 'serply_test_key_123'});
-});
-
-test('serply template: stamps templateId so edits resolve under a custom name', t => {
-	const template = MCP_TEMPLATES.find(t => t.id === 'serply');
-	t.truthy(template);
-
-	const config = template!.buildConfig({
-		serverName: 'serply-work',
-		apiKey: 'serply_test_key_123',
-	});
-
-	t.is(config.templateId, 'serply');
-	t.is(resolveMcpTemplateId(config), 'serply');
 });
 
 test('resolveMcpTemplateId: prefers templateId over tags and name', t => {

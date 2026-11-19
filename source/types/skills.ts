@@ -77,9 +77,20 @@ export interface FileChangedTrigger extends SkillTriggerBase {
 	eventKinds?: FileChangeEventKind[];
 }
 
+export interface FileAiCommentTrigger extends SkillTriggerBase {
+	kind: 'file.ai-comment';
+	paths?: string[];
+}
+
 export interface ScheduleCronTrigger extends SkillTriggerBase {
 	kind: 'schedule.cron';
 	cron: string;
+}
+
+export interface CiJobFailedTrigger extends SkillTriggerBase {
+	kind: 'ci.job.failed';
+	/** Glob patterns; omitted = every branch the source polls. */
+	branches?: string[];
 }
 
 /**
@@ -87,7 +98,11 @@ export interface ScheduleCronTrigger extends SkillTriggerBase {
  * bundle manifest's `subscribe:` block or a member file's frontmatter).
  * The registrar resolves these into runtime `Subscription` objects.
  */
-export type SkillTrigger = FileChangedTrigger | ScheduleCronTrigger;
+export type SkillTrigger =
+	| FileChangedTrigger
+	| FileAiCommentTrigger
+	| ScheduleCronTrigger
+	| CiJobFailedTrigger;
 
 export interface SkillSource {
 	priority: SkillPriority;

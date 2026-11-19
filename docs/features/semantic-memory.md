@@ -12,7 +12,7 @@ Memory creation is always manual and explicit. Nothing is ever saved automatical
 
 ## Commands
 
-- `/remember [--category <name>] <content>` - Save a memory directly. `-c` is a short form of `--category`.
+- `/memory add [--category <name>] <content>` - Save a memory directly (`/remember` still works as an alias). `-c` is a short form of `--category`.
 - `/memory list` - List all saved memories with their short IDs and categories. `/memory ls` is an alias, and a bare `/memory` with no subcommand does the same thing.
 - `/memory delete <id>` - Delete a specific memory. `/memory rm` is an alias.
 - `/memory clear` - Delete all memories for the current project.
@@ -22,8 +22,8 @@ Memory creation is always manual and explicit. Nothing is ever saved automatical
 ### Example
 
 ```
-/remember The auth module uses Clerk and avoids middleware in the edge runtime.
-/remember -c codingStyle Use camelCase for all variable names.
+/memory add The auth module uses Clerk and avoids middleware in the edge runtime.
+/memory add -c codingStyle Use camelCase for all variable names.
 
 /memory list
 /memory delete 18d51c0d
@@ -37,7 +37,7 @@ Memory creation is always manual and explicit. Nothing is ever saved automatical
 
 ## Categories
 
-Memories are grouped into: `architecture`, `bugFix`, `refactor`, `todo`, `codingStyle`, or `project` (the default, for anything that doesn't match a more specific category). `/remember` infers a category automatically from the content unless you pass `--category`. `--category` is not checked against this list: any other name is saved as given, and its words still count as category matches during recall.
+Memories are grouped into: `architecture`, `bugFix`, `refactor`, `todo`, `codingStyle`, or `project` (the default, for anything that doesn't match a more specific category). `/memory add` infers a category automatically from the content unless you pass `--category`. `--category` is not checked against this list: any other name is saved as given, and its words still count as category matches during recall.
 
 ## Recall
 
@@ -46,6 +46,16 @@ When you send a message, Nanocoder ranks saved memories by relevance to that mes
 A memory is kept when it covers at least 10% of the query's keywords, and either the category matched, at least two keywords overlapped, or a single overlapping keyword is at least half the query. That last rule is why `auth` and `fix auth` both recall a Clerk/auth memory, while a one-word hit in a long prompt still does not. Memories that do not fit the remaining token budget are skipped so a later, shorter memory can still be injected.
 
 Retrieval is keyword-based, not a true embeddings/vector search. The "semantic" in the name refers to the kind of facts stored (durable project knowledge), not the matching technique.
+
+### Staleness warnings
+
+Inside a git repository, saving a memory also records the current commit, the branch, and a content hash of every tracked file the memory mentions (for example `src/auth.ts`, or a bare `auth.ts` when exactly one tracked file has that name). When the memory is recalled, those files are hashed again. If any has been edited since, uncommitted edits included, or deleted, the memory is injected with a warning in front of it:
+
+```
+- [WARNING: recorded at 8c21a3f, src/auth.ts has changed since. Verify before trusting.] src/auth.ts refreshes the token before retrying.
+```
+
+The warning counts against the same token budget as the memories. New commits that don't touch a memory's files don't trigger it. Memories saved outside a git repository, before the first commit, or before this check existed are recalled without warnings.
 
 ### Where recall is active
 
@@ -89,7 +99,7 @@ The check is a heuristic tuned to over-flag rather than miss: it only adds a war
 
 ## Turning It Off
 
-Semantic memory is on by default. Toggle it from `/settings` -> **Advanced** -> **Semantic Memory**. Turning it off disables both recall (memories are no longer injected into prompts) and writes (`/remember` and `/memory accept` are refused while it's off).
+Semantic memory is on by default. Toggle it from `/settings` -> **Advanced** -> **Semantic Memory**. Turning it off disables both recall (memories are no longer injected into prompts) and writes (`/memory add` and `/memory accept` are refused while it's off).
 
 ## Storage and Scope
 

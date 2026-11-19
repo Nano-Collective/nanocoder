@@ -19,6 +19,8 @@ import {
 	NanocoderCodeLensProvider,
 	sendCodeLensPrompt,
 } from './code-lens-provider';
+import {registerTerminalErrorWatcher} from './terminal-error-watcher';
+import { resolveExtensionCwd } from './workspace-utils';
 
 const DEFAULT_PORT = 51820;
 const ACTIVE_EDITOR_DEBOUNCE_MS = 150;
@@ -46,9 +48,10 @@ export function activate(context: vscode.ExtensionContext) {
 	acpStateManager = new AcpStateManager();
 	acpClient = new NanocoderAcpClient(outputChannel, acpStateManager);
 	acpProcessManager = new AcpProcessManager(outputChannel, acpStateManager, acpClient);
-
-	// Start the ACP process side-by-side with the companion mode
-	acpProcessManager.start();
+	// The agent process (`nanocoder --acp`) is not spawned here: the extension
+	// activates in every window at startup (for the lenses and status bar), and
+	// windows that never use Nanocoder should not run it. It starts when the
+	// chat view first resolves.
 
 	// Create status bar item
 	statusBarItem = vscode.window.createStatusBarItem(
@@ -66,11 +69,23 @@ export function activate(context: vscode.ExtensionContext) {
 	const chatProvider = new ChatWebviewProvider(context.extensionUri, outputChannel, acpClient, diffManager);
 	context.subscriptions.push(
 		chatProvider,
-		vscode.window.registerWebviewViewProvider(ChatWebviewProvider.viewType, chatProvider, {
-			// Preserve DOM when user switches to Explorer/SCM/etc. and back.
-			// Without this VS Code destroys the webview on hide, wiping the transcript.
-			webviewOptions: {retainContextWhenHidden: true},
-		})
+		vscode.window.registerWebviewViewProvider(
+			ChatWebviewProvider.viewType,
+			{
+				// Everything that talks to the agent goes through the chat view
+				// (Explain Code / Generate Tests focus it first), so its first
+				// resolve is where the agent process gets spawned.
+				resolveWebviewView: (webviewView, resolveContext, token) => {
+					void acpProcessManager.ensureStarted();
+					return chatProvider.resolveWebviewView(webviewView, resolveContext, token);
+				},
+			},
+			{
+				// Preserve DOM when user switches to Explorer/SCM/etc. and back.
+				// Without this VS Code destroys the webview on hide, wiping the transcript.
+				webviewOptions: {retainContextWhenHidden: true},
+			},
+		)
 	);
 
 	// Register Title Bar Actions
@@ -116,8 +131,7 @@ export function activate(context: vscode.ExtensionContext) {
 			acpProcessManager.start();
 		}),
 		vscode.commands.registerCommand('nanocoder.openConfig', async () => {
-			const config = vscode.workspace.getConfiguration('nanocoder');
-			const cwdSetting = config.get<string>('cwd') || (vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd());
+			const cwdSetting = resolveExtensionCwd();
 			// Project-level config first, then the global one - the same order the CLI reads them.
 			const configPath = resolveConfigPath(cwdSetting, getGlobalConfigDir(), 'agents.config.json');
 			try {
@@ -165,6 +179,9 @@ export function activate(context: vscode.ExtensionContext) {
 			sendCodeLensPrompt(chatProvider, 'Write unit tests for this code.', uri, range),
 		),
 	);
+
+	// "Fix with Nanocoder" on a command that fails in an integrated terminal.
+	context.subscriptions.push(registerTerminalErrorWatcher(chatProvider));
 
 	// Push active editor state to the CLI so the input box can show an
 	// "In <file>" pill and auto-attach a selection as context on submit.
@@ -301,7 +318,7 @@ function handleFileChange(message: FileChangeMessage): void {
 
 	if (showDiffPreview) {
 		// Show diff immediately
-		diffManager.showDiff(message.id);
+		diffManager.showDiff(message.id, {restoreTerminalFocus: true});
 	}
 }
 

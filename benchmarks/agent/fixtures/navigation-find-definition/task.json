@@ -1,0 +1,11 @@
+{
+	"category": "navigation",
+	"prompt": "Which file defines the function that decides whether an account is over its storage quota? Answer with the file path only. Do not modify any file.",
+	"assertions": [
+		{
+			"kind": "final-text-matches",
+			"pattern": "src/billing/storage-quota\\.js"
+		},
+		{"kind": "files-unchanged"}
+	]
+}
