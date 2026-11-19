@@ -224,20 +224,39 @@ export class SessionManager {
 				: crypto.randomUUID();
 		const timestamp = new Date().toISOString();
 
-		const session: Session = {
-			id: sessionId,
-			title: sessionData.title,
-			createdAt: timestamp,
-			lastAccessedAt: timestamp,
-			messageCount: sessionData.messageCount,
-			provider: sessionData.provider,
-			model: sessionData.model,
-			workingDirectory: sessionData.workingDirectory,
-			messages: sessionData.messages,
-			titleManuallySet: sessionData.titleManuallySet,
-		};
+		const session = await this.withIndexLock(async () => {
+			const sessions = await this.readIndex();
+			// Autosave recreates the live session under its own id when the file
+			// cannot be read. The index entry is then all that is left of the
+			// pin, the creation time and a title the user or the titler chose,
+			// so keep them instead of resetting them.
+			const existing = sessions.find(s => s.id === sessionId);
+			const keepExistingTitle =
+				existing !== undefined &&
+				!sessionData.titleManuallySet &&
+				(existing.titleManuallySet || existing.titleGenerated);
 
-		await this.saveSession(session);
+			const created: Session = {
+				id: sessionId,
+				title: keepExistingTitle ? existing.title : sessionData.title,
+				createdAt: existing?.createdAt ?? timestamp,
+				lastAccessedAt: timestamp,
+				messageCount: sessionData.messageCount,
+				provider: sessionData.provider,
+				model: sessionData.model,
+				workingDirectory: sessionData.workingDirectory,
+				messages: sessionData.messages,
+				titleManuallySet: keepExistingTitle
+					? existing.titleManuallySet
+					: sessionData.titleManuallySet,
+				titleGenerated: keepExistingTitle ? existing.titleGenerated : undefined,
+				pinned: existing?.pinned,
+			};
+
+			await this.writeSessionLocked(created, sessions);
+			return created;
+		});
+
 		await this.enforceSessionLimits();
 		return session;
 	}
@@ -249,34 +268,41 @@ export class SessionManager {
 
 		// File write and index update happen together under the lock
 		// to prevent orphaned files if the process dies between them.
-		await this.withIndexLock(async () => {
-			const sessionFilePath = path.join(this.sessionsDir, `${session.id}.json`);
+		await this.withIndexLock(async () =>
+			this.writeSessionLocked(session, await this.readIndex()),
+		);
+	}
 
-			// Write session file atomically
-			await atomicWriteFile(
-				sessionFilePath,
-				JSON.stringify(session, null, 2),
-				0o600,
-			);
+	/** Write the session file and its index entry. Caller holds the index lock. */
+	private async writeSessionLocked(
+		session: Session,
+		sessions: SessionMetadata[],
+	): Promise<void> {
+		const sessionFilePath = path.join(this.sessionsDir, `${session.id}.json`);
 
-			// Update index
-			const sessions = await this.readIndex();
-			const existingSessionIndex = sessions.findIndex(s => s.id === session.id);
+		// Write session file atomically
+		await atomicWriteFile(
+			sessionFilePath,
+			JSON.stringify(session, null, 2),
+			0o600,
+		);
 
-			const sessionMetadata = toSessionMetadata(session);
+		// Update index
+		const existingSessionIndex = sessions.findIndex(s => s.id === session.id);
 
-			if (existingSessionIndex >= 0) {
-				sessions[existingSessionIndex] = sessionMetadata;
-			} else {
-				sessions.push(sessionMetadata);
-			}
+		const sessionMetadata = toSessionMetadata(session);
 
-			await atomicWriteFile(
-				this.sessionsIndexPath,
-				JSON.stringify(sessions, null, 2),
-				0o600,
-			);
-		});
+		if (existingSessionIndex >= 0) {
+			sessions[existingSessionIndex] = sessionMetadata;
+		} else {
+			sessions.push(sessionMetadata);
+		}
+
+		await atomicWriteFile(
+			this.sessionsIndexPath,
+			JSON.stringify(sessions, null, 2),
+			0o600,
+		);
 	}
 
 	/** Read the index file (internal helper — not locked). */
