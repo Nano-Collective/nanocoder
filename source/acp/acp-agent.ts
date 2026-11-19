@@ -1817,10 +1817,19 @@ export class AcpAgent implements Agent {
 				return;
 			}
 
+			// A session file that cannot be read still has its index entry, which
+			// holds everything this save carries forward. Without it the pin, the
+			// creation time and a chosen title would be reset.
+			const previous =
+				existingSession ??
+				(await sessionManager.listSessions()).find(
+					s => s.id === session.sessionId,
+				);
+
 			// Simple title generation if it's new. A user-renamed title is never
 			// auto-derived over — the flag below is what tells the CLI's autosave
 			// the same thing, so it has to be carried forward on every save.
-			let title = existingSession?.title;
+			let title = previous?.title;
 			if (!title || title === 'New Session') {
 				const firstUserMessage = saveableMessages.find(m => m.role === 'user');
 				title =
@@ -1833,10 +1842,10 @@ export class AcpAgent implements Agent {
 				...this.savedModelOf(session),
 				id: session.sessionId,
 				title,
-				titleManuallySet: existingSession?.titleManuallySet,
-				pinned: existingSession?.pinned,
-				titleGenerated: existingSession?.titleGenerated,
-				createdAt: existingSession?.createdAt || timestamp,
+				titleManuallySet: previous?.titleManuallySet,
+				pinned: previous?.pinned,
+				titleGenerated: previous?.titleGenerated,
+				createdAt: previous?.createdAt || timestamp,
 				lastAccessedAt: timestamp,
 				messageCount: saveableMessages.length,
 				workingDirectory: session.cwd,
