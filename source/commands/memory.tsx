@@ -65,7 +65,7 @@ function parseAddArgs(args: string[]): ParsedAddArgs {
  * short enough to retype without copying out of wrapped terminal output. */
 const SHORT_ID_LENGTH = 8;
 
-export function shortMemoryId(id: string): string {
+function shortMemoryId(id: string): string {
 	return id.replaceAll('-', '').slice(0, SHORT_ID_LENGTH);
 }
 
@@ -75,7 +75,7 @@ type IdLookup =
 	| {kind: 'ambiguous'; matches: SemanticMemory[]};
 
 /** Accepts a short id, a full UUID, or any unambiguous prefix of either. */
-export function resolveMemoryId(
+function resolveMemoryId(
 	memories: SemanticMemory[],
 	input: string,
 ): IdLookup {
