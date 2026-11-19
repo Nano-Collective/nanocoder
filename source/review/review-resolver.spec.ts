@@ -1,5 +1,11 @@
 import {execFileSync} from 'node:child_process';
-import {existsSync, readFileSync, symlinkSync, writeFileSync} from 'node:fs';
+import {
+	existsSync,
+	readFileSync,
+	symlinkSync,
+	utimesSync,
+	writeFileSync,
+} from 'node:fs';
 import {join} from 'node:path';
 import test from 'ava';
 import {ReviewActivityStore} from './review-activity';
@@ -496,6 +502,35 @@ test('worktree snapshots leave the real index and files untouched', async t => {
 	t.true(readFileSync(indexPath).equals(indexBefore));
 	t.is(fixture.runGit(['status', '--porcelain=v1', '-z']), statusBefore);
 	t.is(fixture.runGit(['diff', '--cached', '--name-only']), 'src/file.ts');
+});
+
+test('worktree snapshots catch a same-size edit made in the same second as the last index write', async t => {
+	const fixture = createReviewGitFixture();
+	t.teardown(fixture.cleanup);
+	// Pin every timestamp Git compares to one second, so the edited file looks
+	// unchanged by its stat data and only the racy-index check can catch it.
+	fixture.runGit(['config', 'core.trustctime', 'false']);
+	const stamp = new Date('2024-01-01T00:00:00Z');
+	const filePath = join(fixture.root, 'src/file.ts');
+	utimesSync(filePath, stamp, stamp);
+	fixture.runGit(['add', '--', 'src/file.ts']);
+	fixture.write('src/file.ts', 'export const value = 2;\n');
+	utimesSync(filePath, stamp, stamp);
+	const indexPath = fixture.runGit(['rev-parse', '--path-format=absolute', '--git-path', 'index']);
+	utimesSync(indexPath, stamp, stamp);
+
+	const snapshot = await createWorkingTreeSnapshot(
+		{scope: {kind: 'working-tree', description: 'racy edit'}},
+		{
+			tools: createReviewFixtureTools(fixture),
+			activity: new ReviewActivityStore({reviewId: 'racy-edit'}),
+		},
+	);
+
+	t.deepEqual(
+		snapshot.files.map(file => [file.path, file.headContent]),
+		[['src/file.ts', 'export const value = 2;\n']],
+	);
 });
 
 function skipEvents(activity: ReviewActivityStore) {
