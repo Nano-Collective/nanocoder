@@ -1,4 +1,3 @@
-import {execSync} from 'child_process';
 import {existsSync, mkdirSync, writeFileSync} from 'fs';
 import {Box, Text} from 'ink';
 import {dirname, join} from 'path';
@@ -9,6 +8,7 @@ import {getConfigPath} from '@/config/paths';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import type {Command} from '@/types/commands';
+import {getEditor, openInEditor as launchEditor} from '@/utils/editor';
 import {formatError} from '@/utils/error-formatter';
 
 interface ConfigOption {
@@ -72,16 +72,6 @@ function getConfigOptions(): ConfigOption[] {
 	return options;
 }
 
-function getEditor(): string {
-	if (process.env.EDITOR) return process.env.EDITOR;
-	if (process.env.VISUAL) return process.env.VISUAL;
-
-	// When running inside VS Code's integrated terminal, default to code
-	if (process.env.TERM_PROGRAM === 'vscode') return 'code --wait';
-
-	return 'vi';
-}
-
 function ensureFileExists(filePath: string): void {
 	const dir = dirname(filePath);
 	if (!existsSync(dir)) {
@@ -97,10 +87,8 @@ function ensureFileExists(filePath: string): void {
 }
 
 function openInEditor(filePath: string): void {
-	const editor = getEditor();
 	ensureFileExists(filePath);
-	// nosemgrep: javascript.lang.security.detect-child-process.detect-child-process
-	execSync(`${editor} ${JSON.stringify(filePath)}`, {stdio: 'inherit'});
+	launchEditor(filePath);
 }
 
 function SetupConfigResult({
