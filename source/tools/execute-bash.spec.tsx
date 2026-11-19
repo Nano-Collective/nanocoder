@@ -12,13 +12,13 @@ import {render} from 'ink-testing-library';
 import React from 'react';
 import {themes} from '../config/themes';
 import {ThemeContext} from '../hooks/useTheme';
-import {resetSessionCwd, setSessionCwd} from '../services/session-cwd';
-import {
+import {resetSessionCwd, setSessionCwd} from '../services/session-cwd';	import {
 	bashRunFailed,
 	distillBashResultForLLM,
 	executeBashCommand,
 	executeBashTool,
 	formatBashResultForLLM,
+	resolveBashTimeoutMs,
 } from './execute-bash';
 
 // ============================================================================
@@ -199,6 +199,34 @@ test('ExecuteBashFormatter wraps long command instead of truncating', t => {
 	);
 });
 
+test('ExecuteBashFormatter shows a non-default timeout', t => {
+	const formatter = executeBashTool.formatter;
+	if (!formatter) {
+		t.fail('Formatter is not defined');
+		return;
+	}
+
+	const element = formatter({command: 'npm run build', timeout_seconds: 300});
+	const {lastFrame} = render(<TestThemeProvider>{element}</TestThemeProvider>);
+
+	const output = lastFrame();
+	t.regex(output!, /Timeout/);
+	t.regex(output!, /300 seconds/);
+});
+
+test('ExecuteBashFormatter keeps the default timeout out of the preview', t => {
+	const formatter = executeBashTool.formatter;
+	if (!formatter) {
+		t.fail('Formatter is not defined');
+		return;
+	}
+
+	const element = formatter({command: 'ls'});
+	const {lastFrame} = render(<TestThemeProvider>{element}</TestThemeProvider>);
+
+	t.false(lastFrame()!.includes('Timeout'));
+});
+
 // execute_bash returns {llmContent, isError}. These tests assert on the text
 // the model receives, so they read llmContent; isError has its own tests.
 async function runBash(command: string): Promise<string> {
@@ -366,6 +394,34 @@ test('execute_bash tool has handler function', t => {
 
 test('execute_bash tool has formatter function', t => {
 	t.is(typeof executeBashTool.formatter, 'function');
+});
+
+// ============================================================================
+// Tests for the per-call timeout
+// ============================================================================
+
+test('resolveBashTimeoutMs defaults to 2 minutes', t => {
+	t.is(resolveBashTimeoutMs(), 120_000);
+	t.is(resolveBashTimeoutMs(undefined), 120_000);
+});
+
+test('resolveBashTimeoutMs clamps to 1 second and 300 seconds', t => {
+	t.is(resolveBashTimeoutMs(0), 1_000);
+	t.is(resolveBashTimeoutMs(-10), 1_000);
+	t.is(resolveBashTimeoutMs(300), 300_000);
+	t.is(resolveBashTimeoutMs(600), 300_000);
+});
+
+test('execute_bash kills a command at the requested timeout_seconds', async t => {
+	const result = await executeBashTool.tool.execute!(
+		{command: 'sleep 5', timeout_seconds: 1},
+		{toolCallId: 'test', messages: []},
+	);
+
+	// The message names the limit that was applied, in seconds, so the model
+	// can decide whether a larger timeout_seconds is worth another run.
+	t.regex(result.llmContent, /timed out after 1 seconds/);
+	t.true(result.isError);
 });
 
 // ============================================================================
