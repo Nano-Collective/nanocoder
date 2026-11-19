@@ -12,6 +12,7 @@ import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
+import {installProxyGlobalDispatcher} from '@/utils/proxy-dispatcher';
 import {estimateTokens} from '@/utils/token-calculator';
 
 interface SearchArgs {
@@ -84,6 +85,8 @@ export const executeWebSearch = async (
 	const encodedQuery = encodeURIComponent(args.query);
 
 	try {
+		await installProxyGlobalDispatcher();
+
 		const searchUrl = `https://api.search.brave.com/res/v1/web/search?q=${encodedQuery}&count=${maxResults}`;
 
 		const response = await fetch(searchUrl, {

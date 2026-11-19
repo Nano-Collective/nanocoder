@@ -8,7 +8,7 @@ import type {GoogleGenerativeAIProvider} from '@ai-sdk/google';
 import type {OpenAIProvider} from '@ai-sdk/openai';
 import type {OpenAICompatibleProvider} from '@ai-sdk/openai-compatible';
 import {
-	type Agent,
+	type Dispatcher,
 	type RequestInit as UndiciRequestInit,
 	fetch as undiciFetch,
 } from 'undici';
@@ -121,7 +121,7 @@ export function createStreamOptionsFallbackFetch(
  * this fetch will honor the configured CA bundle — even Anthropic and Google,
  * which would otherwise use the global fetch and bypass our TLS settings.
  */
-export function createUndiciFetch(undiciAgent: Agent) {
+export function createUndiciFetch(undiciAgent: Dispatcher) {
 	return async (
 		url: string | URL | Request,
 		options?: RequestInit,
@@ -367,7 +367,7 @@ export function createReasoningItemNormalizer(): TransformStream<
  */
 export async function createProvider(
 	providerConfig: AIProviderConfig,
-	undiciAgent: Agent,
+	undiciAgent: Dispatcher,
 ): Promise<TaggedProvider> {
 	const logger = getLogger();
 	const {config, sdkProvider} = providerConfig;
