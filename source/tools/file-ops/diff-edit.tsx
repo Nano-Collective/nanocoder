@@ -145,7 +145,7 @@ function validateBlocks(
 	fileContent: string,
 	blocks: DiffEditBlock[],
 	path: string,
-): void {
+): string {
 	const seenSearchBlocks = new Set<string>();
 
 	blocks.forEach((block, index) => {
@@ -175,6 +175,10 @@ function validateBlocks(
 			);
 		}
 	});
+
+	// A unique original match may disappear or become ambiguous after an edit.
+	// Dry-run execution too, before approval or any file writes.
+	return applyBlocks(fileContent, blocks);
 }
 
 function applyBlocks(fileContent: string, blocks: DiffEditBlock[]): string {
@@ -289,8 +293,7 @@ const executeDiffEdit = async (args: DiffEditArgs): Promise<string> => {
 	}
 	const fileContent = cached.content;
 
-	validateBlocks(fileContent, blocks, path);
-	const newContent = applyBlocks(fileContent, blocks);
+	const newContent = validateBlocks(fileContent, blocks, path);
 
 	const firewallResult = evaluateMutationEnvelope(
 		path,
@@ -450,8 +453,7 @@ const diffEditFormatter = async (
 			const blocks = parseDiffEditBlocks(args.diff);
 			const cached = await getCachedFileContent(absPath);
 			const fileContent = cached.content;
-			validateBlocks(fileContent, blocks, args.path);
-			const newContent = applyBlocks(fileContent, blocks);
+			const newContent = validateBlocks(fileContent, blocks, args.path);
 			const changeId = sendFileChangeToVSCode(
 				absPath,
 				fileContent,

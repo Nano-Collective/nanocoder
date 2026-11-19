@@ -813,6 +813,16 @@ function loadModeProvidersConfig(
 					}
 
 					if (
+						!matchedProvider.models ||
+						!Array.isArray(matchedProvider.models)
+					) {
+						notifyError(
+							`Provider "${matchedProvider.name}" (modeProviders.${mode}) has no "models" list. Add one wherever the provider is defined.`,
+						);
+						continue;
+					}
+
+					if (
 						matchedProvider.models.length > 0 &&
 						!matchedProvider.models.includes(modelName)
 					) {
