@@ -41,6 +41,8 @@ const TOOL_KINDS: Record<string, ToolKind> = {
 	write_file: 'edit',
 	diff_edit: 'edit',
 	execute_bash: 'execute',
+	bash_output: 'read',
+	kill_bash: 'execute',
 	fetch_url: 'fetch',
 	web_search: 'fetch',
 	agent: 'think',
@@ -90,6 +92,16 @@ export async function buildToolCallMeta(
 				title: command
 					? `execute_bash: ${truncate(command, 80)}`
 					: 'execute_bash',
+				kind,
+				locations: [],
+				content: [],
+			};
+		}
+		case 'bash_output':
+		case 'kill_bash': {
+			const jobId = asString(args.job_id);
+			return {
+				title: jobId ? `${name}: ${truncate(jobId, 80)}` : name,
 				kind,
 				locations: [],
 				content: [],

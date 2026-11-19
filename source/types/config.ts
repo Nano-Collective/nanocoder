@@ -34,6 +34,8 @@ export interface AIProviderConfig {
 	disableToolModels?: string[]; // List of model names to disable tools for
 	// SDK provider package to use (default: 'openai-compatible')
 	sdkProvider?: SdkProvider;
+	// Arbitrary request body fields for OpenAI-compatible chat endpoints.
+	extraBody?: Record<string, unknown>;
 	// Opt out of Anthropic prompt caching (enabled by default on that SDK).
 	// Read only when sdkProvider is 'anthropic'; setting it on any other SDK
 	// provider has no effect, since those either prefix-cache automatically
@@ -95,6 +97,8 @@ export interface ProviderConfig {
 	includeUsage?: boolean;
 	// SDK provider package to use (default: 'openai-compatible')
 	sdkProvider?: SdkProvider;
+	// Arbitrary request body fields for OpenAI-compatible chat endpoints.
+	extraBody?: Record<string, unknown>;
 	// OpenRouter-specific request body fields. Only applied when the provider
 	// is OpenRouter (name match, case-insensitive).
 	openrouter?: OpenRouterParameters;
@@ -599,6 +603,16 @@ export interface MCPServerConfig {
 	url?: string;
 	headers?: Record<string, string>;
 	timeout?: number;
+	/**
+	 * How long a tool call may wait for the server, in milliseconds. Defaults
+	 * to the MCP SDK's 60 seconds; 0 means no limit.
+	 */
+	toolTimeout?: number;
+	/**
+	 * Restart the tool-call timer whenever the server reports progress, so a
+	 * long call that keeps reporting is not cut off. Defaults to true.
+	 */
+	resetTimeoutOnProgress?: boolean;
 	/** Period between MCP ping health checks, in milliseconds. */
 	healthCheckInterval?: number;
 	alwaysAllow?: string[];

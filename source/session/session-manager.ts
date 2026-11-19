@@ -51,6 +51,77 @@ export interface SessionMetadata {
 	pinned?: boolean;
 }
 
+/**
+ * Rename budget for transient sharing violations: one initial attempt plus five
+ * retries. Windows refuses to replace a file another process has open, and the
+ * holder — usually the index reader in a second Nanocoder process — normally
+ * lets go within milliseconds, so a short bounded wait beats failing the save.
+ */
+const RENAME_MAX_RETRIES = 5;
+const RENAME_BASE_DELAY_MS = 10;
+const RENAME_MAX_DELAY_MS = 160;
+const RENAME_JITTER_MS = 10;
+const RETRYABLE_RENAME_CODES: ReadonlySet<string> = new Set([
+	'EPERM',
+	'EBUSY',
+	'EACCES',
+]);
+
+type RenameFn = (from: string, to: string) => Promise<void>;
+
+const defaultRename: RenameFn = (from, to) => fs.rename(from, to);
+
+let renameImpl: RenameFn = defaultRename;
+
+/**
+ * Test seam: replace the rename primitive so the retry path can be exercised
+ * deterministically. Call with no arguments to restore the default.
+ * @internal
+ */
+export function setRenameForTests(impl?: RenameFn): void {
+	renameImpl = impl ?? defaultRename;
+}
+
+function isRetryableRenameError(error: unknown): boolean {
+	const code = (error as NodeJS.ErrnoException | null | undefined)?.code;
+	return typeof code === 'string' && RETRYABLE_RENAME_CODES.has(code);
+}
+
+/** Exponential backoff with jitter, so concurrent writers don't retry in step. */
+function renameBackoffMs(attempt: number): number {
+	const base = Math.min(
+		RENAME_BASE_DELAY_MS * 2 ** attempt,
+		RENAME_MAX_DELAY_MS,
+	);
+	return base + Math.floor(Math.random() * RENAME_JITTER_MS);
+}
+
+/**
+ * Rename `from` onto `to`, retrying a bounded number of times when the
+ * filesystem reports a transient sharing violation.
+ *
+ * POSIX never blocks a rename because a file is open, so this only fires on
+ * Windows (and on network mounts that return EBUSY). Platform is deliberately
+ * not checked: a genuine permission error costs one bounded backoff
+ * (~360 ms) before the original error is rethrown unchanged, and gating on
+ * `process.platform` would make the retry path untestable on Linux CI.
+ */
+async function renameWithRetry(from: string, to: string): Promise<void> {
+	for (let attempt = 0; ; attempt++) {
+		try {
+			await renameImpl(from, to);
+			return;
+		} catch (error) {
+			if (attempt >= RENAME_MAX_RETRIES || !isRetryableRenameError(error)) {
+				throw error;
+			}
+			await new Promise<void>(resolve => {
+				setTimeout(resolve, renameBackoffMs(attempt));
+			});
+		}
+	}
+}
+
 /** Write data to a temp file then atomically rename into place. */
 async function atomicWriteFile(
 	filePath: string,
@@ -60,7 +131,7 @@ async function atomicWriteFile(
 	const tmpPath = `${filePath}.${crypto.randomUUID()}.tmp`;
 	try {
 		await fs.writeFile(tmpPath, data, {mode});
-		await fs.rename(tmpPath, filePath);
+		await renameWithRetry(tmpPath, filePath);
 	} catch (error) {
 		// Clean up temp file on failure
 		try {

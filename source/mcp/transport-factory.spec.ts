@@ -200,6 +200,30 @@ test('TransportFactory.validateServerConfig: rejects an invalid health interval'
 	t.true(result.errors.some(error => error.includes('healthCheckInterval')));
 });
 
+test('TransportFactory.validateServerConfig: checks the tool-call timeout settings', t => {
+	const server = {name: 'tools', transport: 'http' as const, url: 'http://localhost:3000/mcp'};
+
+	t.true(TransportFactory.validateServerConfig({...server, toolTimeout: 0}).valid);
+	t.true(
+		TransportFactory.validateServerConfig({
+			...server,
+			toolTimeout: 300_000,
+			resetTimeoutOnProgress: false,
+		}).valid,
+	);
+
+	const negative = TransportFactory.validateServerConfig({...server, toolTimeout: -1});
+	t.false(negative.valid);
+	t.true(negative.errors.some(error => error.includes('toolTimeout')));
+
+	const notBoolean = TransportFactory.validateServerConfig({
+		...server,
+		resetTimeoutOnProgress: 'yes' as unknown as boolean,
+	});
+	t.false(notBoolean.valid);
+	t.true(notBoolean.errors.some(error => error.includes('resetTimeoutOnProgress')));
+});
+
 test('TransportFactory.validateServerConfig: detects invalid stdio config', t => {
 	const server: MCPServer = {
 		name: 'test-stdio-invalid',

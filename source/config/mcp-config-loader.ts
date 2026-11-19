@@ -57,6 +57,8 @@ function mapServerConfig(server: unknown): MCPServerConfig {
 		url: typedServer.url,
 		headers: typedServer.headers,
 		timeout: typedServer.timeout,
+		toolTimeout: typedServer.toolTimeout,
+		resetTimeoutOnProgress: typedServer.resetTimeoutOnProgress,
 		healthCheckInterval: typedServer.healthCheckInterval,
 		alwaysAllow: typedServer.alwaysAllow,
 		description: typedServer.description,
