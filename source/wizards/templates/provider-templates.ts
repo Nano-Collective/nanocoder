@@ -268,6 +268,8 @@ function apiKeyTemplate(opts: {
 function oauthProviderTemplate(opts: {
 	id: string;
 	name: string;
+	/** Must match the name the login commands save credentials under. */
+	defaultProviderName: string;
 	baseUrl: string;
 	sdkProvider: ProviderConfig['sdkProvider'];
 	modelDefault?: string;
@@ -276,7 +278,11 @@ function oauthProviderTemplate(opts: {
 		id: opts.id,
 		name: opts.name,
 		fields: [
-			{name: 'providerName', prompt: 'Provider name', default: opts.name},
+			{
+				name: 'providerName',
+				prompt: 'Provider name',
+				default: opts.defaultProviderName,
+			},
 			{
 				name: 'model',
 				prompt: 'Model name(s) (comma-separated).',
@@ -285,7 +291,7 @@ function oauthProviderTemplate(opts: {
 			},
 		],
 		buildConfig: answers => ({
-			name: answers.providerName || opts.name,
+			name: answers.providerName || opts.defaultProviderName,
 			baseUrl: opts.baseUrl,
 			models: parseArrayField(answers.model),
 			sdkProvider: opts.sdkProvider,
@@ -300,7 +306,7 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 		defaultProviderName: 'Ollama',
 		defaultBaseUrl: 'http://localhost:11434/v1',
 		configFallbackName: 'ollama',
-		modelDefault: 'llama4',
+		modelDefault: 'qwen3.8',
 	}),
 	localServerTemplate({
 		id: 'llama-cpp',
@@ -326,7 +332,7 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 		baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
 		apiKeyPrompt: 'API Key (from https://aistudio.google.com/apikey)',
 		sdkProvider: 'google',
-		modelDefault: 'gemini-3.6-flash',
+		modelDefault: 'gemini-3.8-flash',
 	}),
 	{
 		id: 'openrouter',
@@ -346,7 +352,7 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 			{
 				name: 'model',
 				prompt: 'Model name(s) (comma-separated)',
-				default: 'anthropic/claude-sonnet-5',
+				default: 'anthropic/claude-sonnet-5.5',
 				required: true,
 			},
 			{
@@ -394,7 +400,7 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 			{
 				name: 'fallbackModels',
 				prompt:
-					'Fallback model list (comma-separated, e.g. "openai/gpt-4o, anthropic/claude-3.5-sonnet"). Leave empty for no fallback',
+					'Fallback model list (comma-separated, e.g. "anthropic/claude-sonnet-5.5, openai/gpt-6.1-sol"). Leave empty for no fallback',
 				type: 'array',
 				default: '',
 			},
@@ -418,20 +424,7 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 		name: 'Requesty',
 		baseUrl: 'https://router.requesty.ai/v1',
 		apiKeyPrompt: 'API Key (from https://app.requesty.ai/api-keys)',
-		modelDefault: 'openai/gpt-4o-mini',
-	}),
-	apiKeyTemplate({
-		id: 'orcarouter',
-		name: 'OrcaRouter',
-		baseUrl: 'https://api.orcarouter.ai/v1',
-		apiKeyPrompt: 'API Key (from https://www.orcarouter.ai/console)',
-		modelDefault: 'openai/gpt-5.5',
-	}),
-	apiKeyTemplate({
-		id: 'cheaper-inference',
-		name: 'Cheaper Inference',
-		baseUrl: 'https://api.cheaperinference.com/v1',
-		modelDefault: 'claude-sonnet-5',
+		modelDefault: 'openai/gpt-6.1-sol',
 	}),
 	{
 		id: 'openai',
@@ -451,7 +444,7 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 			{
 				name: 'model',
 				prompt: 'Model name(s) (comma-separated)',
-				default: 'gpt-5.6-sol',
+				default: 'gpt-6.1-sol',
 				required: true,
 			},
 			{
@@ -478,7 +471,7 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 		name: 'Anthropic Claude',
 		baseUrl: 'https://api.anthropic.com/v1',
 		sdkProvider: 'anthropic',
-		modelDefault: 'claude-sonnet-5',
+		modelDefault: 'claude-sonnet-5-5',
 	}),
 	apiKeyTemplate({
 		id: 'mistral',
@@ -498,14 +491,14 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 		name: 'Z.ai',
 		baseUrl: 'https://api.z.ai/api/paas/v4/',
 		providerNameRequired: true,
-		modelDefault: 'glm-5.2',
+		modelDefault: 'glm-5.3',
 	}),
 	apiKeyTemplate({
 		id: 'z-ai-coding',
 		name: 'Z.ai Coding Subscription',
 		baseUrl: 'https://api.z.ai/api/coding/paas/v4/',
 		providerNameRequired: true,
-		modelDefault: 'glm-5.2',
+		modelDefault: 'glm-5.3',
 	}),
 	apiKeyTemplate({
 		id: 'github-models',
@@ -517,21 +510,23 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 	oauthProviderTemplate({
 		id: 'chatgpt-codex',
 		name: 'ChatGPT / Codex',
+		defaultProviderName: 'ChatGPT',
 		baseUrl: 'https://chatgpt.com/backend-api/codex',
 		sdkProvider: 'chatgpt-codex',
-		modelDefault: 'gpt-5.3-codex',
+		modelDefault: 'gpt-6.1-sol',
 	}),
 	oauthProviderTemplate({
 		id: 'github-copilot',
 		name: 'GitHub Copilot',
+		defaultProviderName: 'GitHub Copilot',
 		baseUrl: 'https://api.githubcopilot.com',
 		sdkProvider: 'github-copilot',
-		modelDefault: 'gpt-5.6-sol',
+		modelDefault: 'gpt-6.1-sol',
 	}),
 	apiKeyTemplate({
 		id: 'kimi-code',
 		name: 'Kimi Code',
-		baseUrl: 'https://api.kimi.com/coding/v1',
+		baseUrl: 'https://api.kimi.ai/coding/v1',
 		modelDefault: 'kimi-for-coding',
 		sdkProvider: 'anthropic',
 	}),
@@ -540,7 +535,7 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 		name: 'MiniMax Coding Plan',
 		defaultProviderName: 'MiniMax Coding',
 		baseUrl: 'https://api.minimax.io/anthropic/v1',
-		modelDefault: 'MiniMax-M3,MiniMax-M2.7',
+		modelDefault: 'MiniMax-M3.1-Flash,MiniMax-M3',
 		sdkProvider: 'anthropic',
 	}),
 	apiKeyTemplate({
@@ -548,7 +543,7 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 		name: 'Thesean AI',
 		baseUrl: 'https://api.thesean.ai',
 		apiKeyPrompt: 'API Key (from https://app.thesean.ai/)',
-		modelDefault: 'ship-like/claude-opus-4-8',
+		modelDefault: 'ship-like/claude-opus-5-5',
 		sdkProvider: 'anthropic',
 	}),
 	apiKeyTemplate({
@@ -556,21 +551,21 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 		name: 'Poe',
 		baseUrl: 'https://api.poe.com/v1',
 		apiKeyPrompt: 'API Key (from poe.com/api_key)',
-		modelDefault: 'gpt-5.6-sol',
+		modelDefault: 'claude-sonnet-5.5',
 	}),
 	apiKeyTemplate({
 		id: 'atlas-cloud',
 		name: 'Atlas Cloud',
 		baseUrl: 'https://api.atlascloud.ai/v1',
 		apiKeyPrompt: 'API Key (from atlascloud.ai/developer)',
-		modelDefault: 'openai/gpt-5.6-sol',
+		modelDefault: 'openai/gpt-6.1-sol',
 	}),
 	apiKeyTemplate({
 		id: 'together',
 		name: 'Together AI',
 		baseUrl: 'https://api.together.ai/v1',
 		apiKeyPrompt: 'API Key (from api.together.ai/settings/api-keys)',
-		modelDefault: 'deepseek-ai/DeepSeek-V4-Pro',
+		modelDefault: 'deepseek-ai/DeepSeek-V4-Pro-0813',
 	}),
 	{
 		id: 'custom',
@@ -599,9 +594,9 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 				required: true,
 			},
 			{
-				name: 'timeout',
-				prompt: 'Request timeout (ms)',
-				default: '30000',
+				name: 'requestTimeout',
+				prompt: 'Request timeout in ms (optional, blank for the default)',
+				required: false,
 				validator: value => {
 					if (!value) return undefined;
 					const num = Number(value);
@@ -621,8 +616,8 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 			if (answers.apiKey) {
 				config.apiKey = answers.apiKey;
 			}
-			if (answers.timeout) {
-				config.timeout = Number(answers.timeout);
+			if (answers.requestTimeout) {
+				config.requestTimeout = Number(answers.requestTimeout);
 			}
 			return config;
 		},

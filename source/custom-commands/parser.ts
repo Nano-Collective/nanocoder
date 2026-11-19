@@ -1,12 +1,9 @@
 import {readFileSync} from 'fs';
-import {
-	parseSubscribeBlock,
-	SubscribeParseError,
-} from '@/skills/parse-subscribe';
+import {parseSubscribeBlockOrWarn} from '@/skills/parse-subscribe';
 import type {CustomCommandMetadata, ParsedCustomCommand} from '@/types/index';
 import type {SkillTrigger} from '@/types/skills';
 import {parseYamlObject, splitFrontmatter} from '@/utils/frontmatter';
-import {logError} from '@/utils/message-queue';
+import {notifyError} from '@/utils/message-queue-core';
 
 /**
  * Set of frontmatter keys that are always parsed as arrays
@@ -222,7 +219,9 @@ export function parseCommandFile(filePath: string): ParsedCustomCommand {
 			metadata = parseEnhancedFrontmatter(split.frontmatter);
 		} catch (error) {
 			// If parsing fails, treat entire file as content
-			logError(`Failed to parse frontmatter in ${filePath}: ${String(error)}`);
+			notifyError(
+				`Failed to parse frontmatter in ${filePath}: ${String(error)}`,
+			);
 			return {
 				metadata: {},
 				content: fileContent,
@@ -258,15 +257,7 @@ function extractSubscribe(
 ): SkillTrigger[] | undefined {
 	const raw = parseYamlObject(frontmatter);
 	if (!raw || raw.subscribe === undefined) return undefined;
-	try {
-		return parseSubscribeBlock(raw.subscribe);
-	} catch (err) {
-		if (err instanceof SubscribeParseError) {
-			logError(`Invalid subscribe block in ${filePath}: ${err.message}`);
-			return undefined;
-		}
-		throw err;
-	}
+	return parseSubscribeBlockOrWarn(raw.subscribe, filePath);
 }
 
 /**

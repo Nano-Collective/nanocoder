@@ -392,6 +392,7 @@ Do stuff.`,
 	);
 	writeFileSync(join(resourcesDir, 'template.yaml'), 'key: value', 'utf-8');
 	writeFileSync(join(resourcesDir, 'helper.sh'), '#!/bin/bash\necho hi', 'utf-8');
+	writeFileSync(join(resourcesDir, 'report.template'), 'Hi {{name}}', 'utf-8');
 
 	const loader = new CustomCommandLoader(testDir);
 	loader.loadCommands();
@@ -399,7 +400,11 @@ Do stuff.`,
 	const command = loader.getCommand('my-skill');
 	t.truthy(command);
 	t.truthy(command?.loadedResources);
-	t.is(command?.loadedResources?.length, 2);
+	t.is(command?.loadedResources?.length, 3);
+	t.is(
+		command?.loadedResources?.find(r => r.name === 'report.template')?.type,
+		'template',
+	);
 
 	const templateRes = command?.loadedResources?.find(
 		r => r.name === 'template.yaml',
@@ -588,6 +593,82 @@ Generate API docs.`,
 		['read_file'],
 	);
 	t.is(relevant.length, 0);
+});
+
+test('CustomCommandLoader - findRelevantCommands tags match whole words only', t => {
+	const testDir = createTestDir('relevance-word-boundary');
+	t.teardown(() => cleanupTestDir(testDir));
+
+	const commandsDir = join(testDir, '.nanocoder', 'commands');
+	mkdirSync(commandsDir, {recursive: true});
+
+	writeFileSync(
+		join(commandsDir, 'test-cmd.md'),
+		`---
+description: Run the tests
+tags: [test]
+---
+Run tests.`,
+		'utf-8',
+	);
+
+	const loader = new CustomCommandLoader(testDir);
+	loader.loadCommands();
+
+	t.is(loader.findRelevantCommands('upgrade to the latest release', []).length, 0);
+	t.is(loader.findRelevantCommands('add a test for this', []).length, 1);
+	// A later whole-word hit still counts after an embedded one.
+	t.is(loader.findRelevantCommands('the latest TEST.', []).length, 1);
+});
+
+test('CustomCommandLoader - findRelevantCommands matches literal punctuation in tags', t => {
+	const testDir = createTestDir('relevance-literal-tag');
+	t.teardown(() => cleanupTestDir(testDir));
+
+	const commandsDir = join(testDir, '.nanocoder', 'commands');
+	mkdirSync(commandsDir, {recursive: true});
+	writeFileSync(
+		join(commandsDir, 'version-cmd.md'),
+		`---
+description: Check the API version
+tags: [v1.2]
+---
+Check version.`,
+		'utf-8',
+	);
+
+	const loader = new CustomCommandLoader(testDir);
+	loader.loadCommands();
+
+	t.is(loader.findRelevantCommands('Use API V1.2 please', []).length, 1);
+	t.is(loader.findRelevantCommands('Use API v1x2 please', []).length, 0);
+});
+
+test('CustomCommandLoader - findRelevantCommands scores description word overlap', t => {
+	const testDir = createTestDir('relevance-description');
+	t.teardown(() => cleanupTestDir(testDir));
+
+	const commandsDir = join(testDir, '.nanocoder', 'commands');
+	mkdirSync(commandsDir, {recursive: true});
+
+	writeFileSync(
+		join(commandsDir, 'changelog.md'),
+		`---
+description: Draft release notes from recent commits
+tags: [unrelated-tag]
+---
+Draft notes.`,
+		'utf-8',
+	);
+
+	const loader = new CustomCommandLoader(testDir);
+	loader.loadCommands();
+
+	const relevant = loader.findRelevantCommands(
+		'can you draft the release notes for me',
+		[],
+	);
+	t.is(relevant[0]?.name, 'changelog');
 });
 
 // ============================================================================

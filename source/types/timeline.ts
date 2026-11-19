@@ -12,6 +12,15 @@ export interface TimelineEntryMeta {
 	/** Slice `messages` to this index (exclusive) so the assistant tool_calls turn is dropped. */
 	truncateToMessageIndex: number;
 	filesChanged: string[];
+	/** The entries of `filesChanged` that did not exist before this tool call; revert unlinks them. */
+	createdFiles: string[];
+	/**
+	 * Identifies the user prompt whose turn made this tool call. Every checkpoint
+	 * of one prompt shares it, however many model round-trips the prompt took
+	 * (`truncateToMessageIndex` moves on with each round-trip, so it cannot group
+	 * them). Absent on checkpoints recorded before this field existed.
+	 */
+	turnId?: string;
 }
 
 export interface TimelineCaptureInput {
@@ -19,6 +28,7 @@ export interface TimelineCaptureInput {
 	toolName: string;
 	title: string;
 	truncateToMessageIndex: number;
+	turnId?: string;
 	/** Relative paths → UTF-8 before-image, or `null` if the file did not exist (revert deletes it). */
 	files: Map<string, string | null>;
 }
@@ -44,7 +54,10 @@ export interface TimelineIndex {
 	entries: TimelineIndexEntry[];
 }
 
-export interface TimelineIndexEntry extends TimelineEntryMeta {
-	/** Files that did not exist before this tool call; revert unlinks them. */
-	createdFiles: string[];
-}
+export type TimelineIndexEntry = TimelineEntryMeta;
+
+/** What a checkpoint holds for one path, as a client reads it back. */
+export type TimelineBeforeImage =
+	| {kind: 'text'; content: string}
+	| {kind: 'created'}
+	| {kind: 'unavailable'; reason: string};

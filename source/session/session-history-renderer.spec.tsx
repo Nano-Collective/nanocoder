@@ -4,7 +4,7 @@ import React from 'react';
 import {themes} from '../config/themes';
 import {ThemeContext} from '../hooks/useTheme';
 import type {Message} from '../types/core';
-import {resetKeyGeneratorForTests} from './key-generator';
+import {resetKeyGeneratorForTests} from '../utils/key-generator';
 import {buildSessionHistoryComponents} from './session-history-renderer';
 
 function TestThemeProvider({children}: {children: React.ReactNode}) {

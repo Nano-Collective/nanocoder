@@ -5,18 +5,23 @@ import {
 	SuccessMessage,
 	WarningMessage,
 } from '@/components/message-box';
-import {CheckpointManager} from '@/services/checkpoint-manager';
-import {generateKey} from '@/session/key-generator';
-import {Command, Message} from '@/types/index';
-import {describeGapsMessage} from '@/utils/checkpoint-utils';
-import {formatError} from '@/utils/error-formatter';
 import {
 	errorMsg,
 	infoMsg,
 	successMsg,
 	warningMsg,
-} from '@/utils/message-factory';
-import {addToMessageQueue} from '@/utils/message-queue';
+} from '@/components/message-factory';
+import {CheckpointManager} from '@/services/checkpoint-manager';
+import {describeGapsMessage} from '@/services/checkpoint-utils';
+import type {
+	CommandCompletion,
+	CommandContext,
+	Message,
+	StatefulCommand,
+} from '@/types/index';
+import {formatError} from '@/utils/error-formatter';
+import {generateKey} from '@/utils/key-generator';
+import {addToMessageQueue} from '@/utils/message-queue-core';
 
 // Default checkpoint manager instance (lazy-initialized)
 let defaultCheckpointManager: CheckpointManager | null = null;
@@ -48,18 +53,20 @@ function CheckpointHelp() {
 /checkpoint list - List all available checkpoints
   • Shows checkpoint name, creation time, message count, and files changed
 
-/checkpoint load - Interactive checkpoint selection and restore
-  • Choose from available checkpoints
-  • Shows confirmation before restoring
-  • Optionally creates backup of current session
+/checkpoint load [name] - Restore files from a checkpoint
+  • Without a name, choose from available checkpoints interactively
+  • The interactive selector offers to back up the current session first
+  • With a name, restores immediately (no prompt)
+  • Restores files only; the conversation is not restored
 
 /checkpoint delete <name> - Delete a specific checkpoint
-  • Permanently removes checkpoint and all its data
-  • Shows confirmation before deletion
+  • Permanently removes the checkpoint and all its data, immediately
 
 /checkpoint help - Show this help message
 
-Note: Checkpoints are stored in your nanocoder config directory.`}
+Aliases: save (create), ls (list), restore (load), remove/rm (delete)
+
+Note: Checkpoints are stored in .nanocoder/checkpoints in the project.`}
 			hideBox={false}
 		/>
 	);
@@ -91,14 +98,18 @@ async function createCheckpoint(
 			metadata.model,
 		);
 
+		const captured = checkpointMetadata.filesChanged;
+		const filesLine =
+			captured.length === 0
+				? 'No modified files to capture'
+				: `${captured.length} files captured: ${captured.slice(0, 3).join(', ')}${
+						captured.length > 3 ? '...' : ''
+					}`;
+
 		return successMsg(
 			`Checkpoint '${checkpointMetadata.name}' created successfully
   └─ ${checkpointMetadata.messageCount} messages saved
-  └─ ${
-		checkpointMetadata.filesChanged.length
-	} files captured: ${checkpointMetadata.filesChanged.slice(0, 3).join(', ')}${
-		checkpointMetadata.filesChanged.length > 3 ? '...' : ''
-	}
+  └─ ${filesLine}
   └─ Provider: ${checkpointMetadata.provider.name} (${
 		checkpointMetadata.provider.model
 	})`,
@@ -311,50 +322,99 @@ async function deleteCheckpoint(args: string[]): Promise<React.ReactElement> {
 }
 
 /**
- * Main checkpoint command handler
+ * Runs a /checkpoint subcommand and returns what to show.
  */
-export const checkpointCommand: Command = {
+export async function runCheckpointSubcommand(
+	args: string[],
+	messages: Message[],
+	metadata: {provider: string; model: string},
+): Promise<React.ReactElement> {
+	if (args.length === 0) {
+		return runCheckpointSubcommand(['help'], messages, metadata);
+	}
+
+	const subcommand = args[0].toLowerCase();
+	const subArgs = args.slice(1);
+
+	switch (subcommand) {
+		case 'create':
+		case 'save':
+			return await createCheckpoint(subArgs, messages, metadata);
+
+		case 'list':
+		case 'ls':
+			return await listCheckpoints();
+
+		case 'load':
+		case 'restore':
+			return await loadCheckpoint(subArgs, messages, metadata);
+
+		case 'delete':
+		case 'remove':
+		case 'rm':
+			return await deleteCheckpoint(subArgs);
+
+		case 'help':
+		case '--help':
+		case '-h':
+			return React.createElement(CheckpointHelp, {
+				key: generateKey('help'),
+			});
+
+		default:
+			return errorMsg(
+				`Unknown checkpoint subcommand: ${subcommand}. Use /checkpoint help for available commands.`,
+				'error',
+			);
+	}
+}
+
+/**
+ * Bare `/checkpoint load` (or `restore`) opens the interactive picker, which
+ * completes the command once a checkpoint is chosen or the picker closes.
+ */
+async function openCheckpointPicker(
+	context: CommandContext,
+): Promise<CommandCompletion> {
+	try {
+		const manager = new CheckpointManager();
+		const checkpoints = await manager.listCheckpoints();
+
+		if (checkpoints.length === 0) {
+			context.addToChatQueue(
+				infoMsg(
+					'No checkpoints available. Create one with /checkpoint create [name]',
+					'checkpoint-info',
+				),
+			);
+			return 'done';
+		}
+
+		context.enterCheckpointLoadMode(checkpoints, context.messages.length);
+		return 'handed-off';
+	} catch (error) {
+		context.addToChatQueue(
+			errorMsg(
+				`Failed to list checkpoints: ${formatError(error)}`,
+				'checkpoint-error',
+			),
+		);
+		return 'done';
+	}
+}
+
+export const checkpointCommand: StatefulCommand = {
 	name: 'checkpoint',
 	description:
 		'Manage conversation checkpoints - save and restore session snapshots',
-	handler: async (args: string[], messages: Message[], metadata) => {
-		if (args.length === 0) {
-			return checkpointCommand.handler(['help'], messages, metadata);
+	run: async context => {
+		const trimmed = context.argText.trim();
+		const args = trimmed ? trimmed.split(/\s+/) : [];
+		if (args.length === 1 && (args[0] === 'load' || args[0] === 'restore')) {
+			return openCheckpointPicker(context);
 		}
-
-		const subcommand = args[0].toLowerCase();
-		const subArgs = args.slice(1);
-
-		switch (subcommand) {
-			case 'create':
-			case 'save':
-				return await createCheckpoint(subArgs, messages, metadata);
-
-			case 'list':
-			case 'ls':
-				return await listCheckpoints();
-
-			case 'load':
-			case 'restore':
-				return await loadCheckpoint(subArgs, messages, metadata);
-
-			case 'delete':
-			case 'remove':
-			case 'rm':
-				return await deleteCheckpoint(subArgs);
-
-			case 'help':
-			case '--help':
-			case '-h':
-				return React.createElement(CheckpointHelp, {
-					key: generateKey('help'),
-				});
-
-			default:
-				return errorMsg(
-					`Unknown checkpoint subcommand: ${subcommand}. Use /checkpoint help for available commands.`,
-					'error',
-				);
-		}
+		return {
+			show: await runCheckpointSubcommand(args, context.messages, context),
+		};
 	},
 };

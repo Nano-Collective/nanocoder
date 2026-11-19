@@ -3,9 +3,9 @@ import * as path from 'path';
 import type {Message} from '@/types/core';
 import test from 'ava';
 import * as fs from 'fs/promises';
-import {describeCheckpointGaps} from '@/utils/checkpoint-utils';
+import {describeCheckpointGaps} from '@/services/checkpoint-utils';
 import {CheckpointManager} from './checkpoint-manager';
-
+import {execFileSync} from 'node:child_process';
 // Helper to create a temporary directory for tests
 async function createTempDir(): Promise<string> {
 	const tempDir = path.join(
@@ -1005,6 +1005,142 @@ test.serial(
 			await manager.restoreFiles(data);
 
 			t.false(existsSync(path.join(tempDir, created)));
+		} finally {
+			await cleanupTempDir(tempDir);
+		}
+	},
+);
+
+test.serial(
+	'getChangesSince reports only paths that differ from the checkpoint',
+	async t => {
+		const tempDir = await createTempDir();
+		try {
+			await fs.writeFile(path.join(tempDir, 'edited.txt'), 'before');
+			await fs.writeFile(path.join(tempDir, 'untouched.txt'), 'same');
+			const manager = new CheckpointManager(tempDir);
+			await manager.saveCheckpoint(
+				'changes',
+				createMockMessages(1),
+				'Provider',
+				'model',
+				['edited.txt', 'untouched.txt', 'created.txt', 'never-created.txt'],
+			);
+
+			// A turn that edits one file, creates one, and whose other two
+			// mutations failed or were no-ops.
+			await fs.writeFile(path.join(tempDir, 'edited.txt'), 'after');
+			await fs.writeFile(path.join(tempDir, 'created.txt'), 'new');
+
+			t.deepEqual(await manager.getChangesSince('changes'), {
+				filesChanged: ['edited.txt'],
+				filesMissing: ['created.txt'],
+			});
+		} finally {
+			await cleanupTempDir(tempDir);
+		}
+	},
+);
+
+test.serial(
+	'CheckpointManager prevents checkpoint secrets from being staged by git add -A',
+	async t => {
+		const tempDir = await createTempDir();
+
+		try {
+			const git = (args: string[]): string =>
+				execFileSync('git', args, {
+					cwd: tempDir,
+					encoding: 'utf8',
+				});
+
+			git(['init', '-q']);
+
+			// User configuration files should remain trackable.
+			const commandPath = path.join(
+				tempDir,
+				'.nanocoder',
+				'commands',
+				'review.md',
+			);
+
+			await fs.mkdir(path.dirname(commandPath), {
+				recursive: true,
+			});
+			await fs.writeFile(commandPath, '# Review command\n');
+
+			// Save a conversation containing a test secret.
+			const manager = new CheckpointManager(tempDir);
+
+			await manager.saveCheckpoint(
+				'before-refactor',
+				[
+					{
+						role: 'user',
+						content: 'my API key is sk-test-SECRET-IN-CHAT',
+					},
+				],
+				'TestProvider',
+				'test-model',
+				[],
+			);
+
+			const conversationPath = path.join(
+				tempDir,
+				'.nanocoder',
+				'checkpoints',
+				'before-refactor',
+				'conversation.json',
+			);
+
+			// Confirm the test secret was actually saved.
+			const conversation = await fs.readFile(
+				conversationPath,
+				'utf8',
+			);
+
+			t.true(conversation.includes('sk-test-SECRET-IN-CHAT'));
+
+			// Reproduce the original issue.
+			git(['add', '-A']);
+
+			// List staged files.
+			const staged = git([
+				'diff',
+				'--cached',
+				'--name-only',
+			])
+				.trim()
+				.split(/\r?\n/);
+
+			// Runtime files must not be staged.
+			t.false(
+				staged.some(file =>
+					file.startsWith('.nanocoder/checkpoints/'),
+				),
+				'Checkpoint files must not be staged',
+			);
+
+			// User configuration must remain committable.
+			t.true(
+				staged.includes('.nanocoder/commands/review.md'),
+				'Custom commands should remain trackable',
+			);
+
+			// The generated gitignore must be staged.
+			t.true(
+				staged.includes('.nanocoder/.gitignore'),
+				'Generated .gitignore should be trackable',
+			);
+
+			// Verify Git's ignore rules directly.
+			const ignored = git([
+				'check-ignore',
+				'-v',
+				'.nanocoder/checkpoints/before-refactor/conversation.json',
+			]);
+
+			t.true(ignored.includes('/checkpoints/'));
 		} finally {
 			await cleanupTempDir(tempDir);
 		}

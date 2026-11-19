@@ -7,6 +7,7 @@ import {
 	MAX_TIMELINE_SESSIONS,
 } from '@/constants';
 import type {
+	TimelineBeforeImage,
 	TimelineCaptureInput,
 	TimelineEntryMeta,
 	TimelineIndex,
@@ -14,10 +15,17 @@ import type {
 	TimelineRevertResult,
 	TimelineScanResult,
 } from '@/types/timeline';
-import {atomicWriteFile} from '@/utils/atomic-write';
 import {formatError} from '@/utils/error-formatter';
-import {logWarning} from '@/utils/message-queue';
+import {atomicWriteFile} from '@/utils/fs/atomic-write';
+import {ensureNanocoderGitignore} from '@/utils/fs/ensure-nanocoder-gitignore';
+import {notifyWarning} from '@/utils/message-queue-core';
 import {FileSnapshotService} from './file-snapshot';
+import {
+	acquireTimelineLock,
+	isTimelineLockLive,
+	refreshTimelineLock,
+	releaseTimelineLock,
+} from './timeline-lock';
 
 /**
  * Paths the timeline must never treat as workspace content. Snapshotting its
@@ -29,6 +37,10 @@ import {FileSnapshotService} from './file-snapshot';
  * the exclusion has to live here rather than rely on `git ls-files` filtering.
  */
 const EXCLUDED_PREFIXES = ['.nanocoder/timeline/', '.nanocoder/checkpoints/'];
+
+/** Checkpoint ids are `crypto.randomUUID()`, and become a directory name. */
+const ENTRY_ID_PATTERN =
+	/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
  * Snapshots round-trip through UTF-8, which silently corrupts binaries. A NUL
@@ -52,6 +64,9 @@ export class TimelineManager {
 	private readonly timelineRoot: string;
 	private readonly timelineDir: string;
 	private readonly fileSnapshotService: FileSnapshotService;
+	private readonly sessionId: string;
+	private readonly sessionStartedAt: number;
+	private lockHeld = false;
 	private index: TimelineIndex | null = null;
 	private prunedStaleSessions = false;
 
@@ -61,6 +76,80 @@ export class TimelineManager {
 		this.timelineRoot = path.join(workspaceRoot, '.nanocoder', 'timeline'); // nosemgrep
 		this.timelineDir = path.join(this.timelineRoot, sessionId); // nosemgrep
 		this.fileSnapshotService = new FileSnapshotService(workspaceRoot);
+		this.sessionId = sessionId;
+		this.sessionStartedAt = Date.now();
+	}
+
+	/**
+	 * Best-effort: try to acquire the per-session lock so
+	 * pruneStaleSessions will skip this directory while we are still
+	 * writing into it. Failure is non-fatal - we log and continue so a
+	 * crashed sibling cannot block the chat.
+	 */
+	private async tryAcquireSessionLock(): Promise<void> {
+		// Idempotent: once the lock is held by this manager instance, the
+		// on-disk lockfile is ours and a second `ensureDir` call must not
+		// race against itself by observing the file as held and
+		// resetting `lockHeld` to false.
+		if (this.lockHeld) {
+			// Refresh the lock's timestamp so a long-lived session never
+			// trips the MAX_LOCK_AGE_MS guard while it is still running.
+			// Best-effort: a failed refresh must not block the capture.
+			try {
+				if (await refreshTimelineLock(this.timelineDir)) {
+					return;
+				}
+			} catch {
+				// ignore - the live PID probe still protects the session
+				return;
+			}
+			// No lock of ours on disk: another process's prune reaped it
+			// (e.g. after a >24h idle). Drop the stale claim and fall
+			// through to re-acquire, otherwise the session runs unprotected.
+			this.lockHeld = false;
+		}
+		try {
+			// Self-healing: a resumed session may inherit a lockfile left by
+			// a crashed predecessor under the same id. `acquireTimelineLock`
+			// refuses on any present file without probing, so reap a dead
+			// lock first — this is the caller contract documented in
+			// `timeline-lock.spec.ts`. A live lock is left untouched and the
+			// acquire below will correctly return false.
+			await isTimelineLockLive(this.timelineDir);
+			const acquired = await acquireTimelineLock(this.timelineDir, {
+				pid: process.pid,
+				startedAt: this.sessionStartedAt,
+			});
+			this.lockHeld = acquired;
+		} catch (error) {
+			notifyWarning('Could not acquire timeline session lock', true, {
+				context: {
+					sessionId: this.sessionId,
+					error: formatError(error),
+				},
+			});
+		}
+	}
+
+	/**
+	 * Release the per-session lock. Idempotent. A later capture on the
+	 * same manager re-acquires it.
+	 */
+	async dispose(): Promise<void> {
+		if (!this.lockHeld) {
+			return;
+		}
+		this.lockHeld = false;
+		try {
+			await releaseTimelineLock(this.timelineDir);
+		} catch (error) {
+			notifyWarning('Could not release timeline session lock', true, {
+				context: {
+					sessionId: this.sessionId,
+					error: formatError(error),
+				},
+			});
+		}
 	}
 
 	toRelativePath(filePath: string): string | null {
@@ -140,7 +229,7 @@ export class TimelineManager {
 			for (const [relative, snapshot] of captured) {
 				// Checked as bytes, before the decode - see isProbablyBinary.
 				if (isProbablyBinary(snapshot)) {
-					logWarning('Skipping binary file in action timeline', true, {
+					notifyWarning('Skipping binary file in action timeline', true, {
 						context: {relativePath: relative},
 					});
 					continue;
@@ -156,6 +245,71 @@ export class TimelineManager {
 	async list(): Promise<TimelineEntryMeta[]> {
 		const index = await this.loadIndex();
 		return index.entries.map(entry => this.toMeta(entry));
+	}
+
+	/**
+	 * Read-only: the contents `filePath` had just before the checkpoint's tool
+	 * call. Only paths the checkpoint recorded are read, so this cannot be used
+	 * to read arbitrary files; a path outside the workspace throws.
+	 *
+	 * Binary files are never recorded (see `snapshotPaths`), so they come back
+	 * as `unavailable` along with any other path the checkpoint does not hold.
+	 */
+	async readBefore(
+		checkpointId: string,
+		filePath: string,
+	): Promise<TimelineBeforeImage> {
+		const relativePath = this.toRelativePath(filePath);
+		if (!relativePath) {
+			throw new Error(`Path is outside the workspace: '${filePath}'`);
+		}
+
+		const index = await this.loadIndex();
+		const entry = index.entries.find(
+			candidate => candidate.id === checkpointId,
+		);
+		if (!entry) {
+			return {
+				kind: 'unavailable',
+				reason: 'The checkpoint no longer exists (reverted or pruned)',
+			};
+		}
+		if (!entry.filesChanged.includes(relativePath)) {
+			return {
+				kind: 'unavailable',
+				reason:
+					'The checkpoint holds no before-image for this path (it is not part of the checkpoint, or it is binary)',
+			};
+		}
+		if (entry.createdFiles.includes(relativePath)) {
+			return {kind: 'created'};
+		}
+
+		// The index is user-writable JSON on disk, and `entry.id` becomes part of
+		// a path below. Only an id this manager could have generated may do that.
+		if (!ENTRY_ID_PATTERN.test(entry.id)) {
+			notifyWarning('Ignoring unsafe checkpoint id in timeline index', true, {
+				context: {checkpointId: entry.id},
+			});
+			return {
+				kind: 'unavailable',
+				reason: 'The checkpoint has an invalid id in the timeline index',
+			};
+		}
+
+		try {
+			const filesDir = this.entryFilesDir(entry.id);
+			const filePathOnDisk = path.join(filesDir, relativePath); // nosemgrep
+			return {
+				kind: 'text',
+				content: await fs.readFile(filePathOnDisk, 'utf-8'),
+			};
+		} catch {
+			return {
+				kind: 'unavailable',
+				reason: 'The saved before-image is missing',
+			};
+		}
 	}
 
 	async capture(
@@ -198,6 +352,7 @@ export class TimelineManager {
 			truncateToMessageIndex: input.truncateToMessageIndex,
 			filesChanged: [...existing.keys(), ...createdFiles],
 			createdFiles,
+			...(input.turnId ? {turnId: input.turnId} : {}),
 		};
 
 		if (existing.size > 0) {
@@ -267,6 +422,10 @@ export class TimelineManager {
 				force: true,
 			});
 		}
+		// The rm above deleted the `.lock` file along with the directory,
+		// so our in-memory claim is void. Reset it so the next `ensureDir`
+		// re-acquires instead of early-returning into a no-op refresh.
+		this.lockHeld = false;
 	}
 
 	/**
@@ -321,7 +480,7 @@ export class TimelineManager {
 			// normalisation that happened at capture time.
 			const relativePath = this.toRelativePath(indexedPath);
 			if (!relativePath || relativePath !== indexedPath) {
-				logWarning('Ignoring unsafe path in timeline index', true, {
+				notifyWarning('Ignoring unsafe path in timeline index', true, {
 					context: {relativePath: indexedPath},
 				});
 				continue;
@@ -332,7 +491,7 @@ export class TimelineManager {
 					await this.fileSnapshotService.deleteFile(relativePath);
 					restored.push(relativePath);
 				} catch (error) {
-					logWarning('Could not delete created timeline file', true, {
+					notifyWarning('Could not delete created timeline file', true, {
 						context: {
 							relativePath,
 							error: formatError(error),
@@ -348,7 +507,7 @@ export class TimelineManager {
 
 				snapshots.set(relativePath, content);
 			} catch (error) {
-				logWarning('Could not load timeline file snapshot', true, {
+				notifyWarning('Could not load timeline file snapshot', true, {
 					context: {
 						relativePath,
 						error: formatError(error),
@@ -399,14 +558,38 @@ export class TimelineManager {
 			timestamp: entry.timestamp,
 			truncateToMessageIndex: entry.truncateToMessageIndex,
 			filesChanged: entry.filesChanged,
+			createdFiles: entry.createdFiles,
+			...(entry.turnId ? {turnId: entry.turnId} : {}),
 		};
 	}
 
 	private async ensureDir(): Promise<void> {
+		await ensureNanocoderGitignore(this.workspaceRoot);
 		await this.pruneStaleSessions();
 
+		// Try to acquire the session lock before any writes land. The
+		// session directory may not exist yet, so mkdir is the safe path.
 		if (!existsSync(this.timelineDir)) {
 			await fs.mkdir(this.timelineDir, {recursive: true});
+		}
+		await this.tryAcquireSessionLock();
+		await this.touchSessionDir();
+	}
+
+	/**
+	 * Refresh the session directory's mtime so it stays out of both the
+	 * age-based and the count-based prune windows. utimes is a single
+	 * syscall and never throws on a directory we just created.
+	 */
+	private async touchSessionDir(): Promise<void> {
+		try {
+			const now = new Date();
+			await fs.utimes(this.timelineDir, now, now);
+		} catch {
+			// Best-effort: a stale mtime may let pruning take this
+			// session out of rotation, but the live-lock check below
+			// still prevents the directory from being deleted out
+			// from under us.
 		}
 	}
 
@@ -454,6 +637,13 @@ export class TimelineManager {
 			);
 
 			for (const entry of stale) {
+				// An active session may have stale mtimeMs (mid-tool-call
+				// with no recent capture) but still be writing. Probe its
+				// lockfile before removing the directory.
+				const lockInfo = await isTimelineLockLive(entry.dir);
+				if (lockInfo.live) {
+					continue;
+				}
 				await fs.rm(entry.dir, {
 					recursive: true,
 					force: true,
@@ -498,7 +688,7 @@ export class TimelineManager {
 			this.index = parsed;
 			return this.index;
 		} catch (error) {
-			logWarning('Could not read timeline index, starting empty', true, {
+			notifyWarning('Could not read timeline index, starting empty', true, {
 				context: {
 					error: formatError(error),
 				},

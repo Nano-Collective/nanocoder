@@ -6,7 +6,7 @@ sidebar_order: 2
 
 # Community
 
-Nanocoder is built by the [Nano Collective](/collective) — a community-led group building open-source AI tools for the people who use them, not for profit. Whether you're interested in contributing code, documentation, or just being part of the community, there are several ways to get involved.
+Nanocoder is built by the [Nano Collective](https://nanocollective.org) - a community-led group building open-source AI tools for the people who use them, not for profit. Whether you're interested in contributing code, documentation, or just being part of the community, there are several ways to get involved.
 
 ## Contributing Code
 
@@ -37,5 +37,5 @@ Nanocoder is built by volunteers and offered freely. If the project has been use
 
 For donation channels, sponsorship, and the current state of contributor compensation:
 
-- **[Support the Collective](/collective/organisation/support)** — donations, sponsorship, and other ways to help.
-- **[Economics Charter](/collective/organisation/economics-charter)** — how the community fund works and how scoped paid bounties are agreed.
+- **[Support the Collective](https://docs.nanocollective.org/collective/organisation/support)** - donations, sponsorship, and other ways to help.
+- **[Economics Charter](https://docs.nanocollective.org/collective/organisation/economics-charter)** - how the community fund works and how scoped paid bounties are agreed.

@@ -1,5 +1,5 @@
 /**
- * /schedule — read-only view of cron subscriptions declared across all
+ * /skills schedule (formerly /schedule) — read-only view of cron subscriptions declared across all
  * loaded skills.
  *
  * The legacy `.nanocoder/schedules.json`-backed scheduler was replaced by
@@ -9,14 +9,14 @@
 
 import {Box, Text} from 'ink';
 import React from 'react';
+import {infoMsg} from '@/components/message-factory';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {formatCronHuman} from '@/schedule/cron';
-import {generateKey} from '@/session/key-generator';
 import {getLoadedSkills} from '@/skills/skill-registry';
 import type {Command} from '@/types/index';
-import {infoMsg} from '@/utils/message-factory';
+import {generateKey} from '@/utils/key-generator';
 
 interface CronEntry {
 	skill: string;
@@ -59,8 +59,8 @@ function ScheduleView({entries}: {entries: CronEntry[]}) {
 			>
 				<Text color={colors.secondary}>
 					No cron subscriptions declared. Add a `schedule.cron` entry to a
-					command's frontmatter or a bundle's `skill.yaml` and run `nanocoder
-					daemon start` to make it fire.
+					command's or agent's frontmatter, or a bundle's `skill.yaml`, and run
+					`nanocoder daemon start` to make it fire.
 				</Text>
 			</TitledBoxWithPreferences>
 		);
@@ -101,7 +101,7 @@ export const scheduleCommand: Command = {
 	handler: async args => {
 		if (args.length > 0) {
 			return infoMsg(
-				"Usage: /schedule\n\nMutations happen by editing a command's frontmatter `subscribe:` block, or a bundle's `skill.yaml`. See docs.",
+				"Usage: /skills schedule\n\nMutations happen by editing a command's frontmatter `subscribe:` block, or a bundle's `skill.yaml`. See docs.",
 				'schedule',
 			);
 		}

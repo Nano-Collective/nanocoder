@@ -9,7 +9,7 @@ function makeProvider(
 	overrides: Partial<AIProviderConfig> = {},
 ): AIProviderConfig {
 	return {
-		name: 'OpenRouter',
+		name: 'openrouter',
 		type: 'openai-compatible',
 		models: ['x-ai/grok-4'],
 		config: {
@@ -213,13 +213,117 @@ test('OpenRouter routing extras (zdr, max_price, latency thresholds) flow throug
 	});
 });
 
-test('OpenRouter detection is case-insensitive on provider name', t => {
+test('OpenRouter options are keyed by the exact provider name', t => {
+	// @ai-sdk/openai-compatible reads providerOptions[<provider name>], so a
+	// provider named "OpenRouter" (the wizard default) must get its options
+	// under "OpenRouter", not "openrouter".
 	const provider = withOpenRouter(
 		{service_tier: 'flex'},
-		{name: 'openrouter'},
+		{name: 'OpenRouter'},
 	);
 	const result = buildProviderOptions(provider, '', undefined);
-	t.deepEqual(result, {openrouter: {service_tier: 'flex'}});
+	t.deepEqual(result, {OpenRouter: {service_tier: 'flex'}});
+});
+
+test('OpenRouter options reach the request body for a capitalised provider name', async t => {
+	const {createOpenAICompatible} = await import('@ai-sdk/openai-compatible');
+	const {generateText} = await import('ai');
+	let body: Record<string, unknown> = {};
+	const provider = createOpenAICompatible({
+		name: 'OpenRouter',
+		baseURL: 'https://openrouter.ai/api/v1',
+		apiKey: 'test-key',
+		fetch: async (_input, init) => {
+			body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+			return new Response(
+				JSON.stringify({
+					id: '1',
+					created: 0,
+					model: 'x',
+					choices: [
+						{
+							index: 0,
+							message: {role: 'assistant', content: 'ok'},
+							finish_reason: 'stop',
+						},
+					],
+				}),
+				{headers: {'content-type': 'application/json'}},
+			);
+		},
+	});
+	const providerOptions = buildProviderOptions(
+		withOpenRouter(
+			{service_tier: 'flex', provider: {sort: 'price'}},
+			{name: 'OpenRouter'},
+		),
+		'',
+		undefined,
+	);
+	await generateText({
+		model: provider.chatModel('x'),
+		prompt: 'hi',
+		providerOptions: providerOptions as Parameters<
+			typeof generateText
+		>[0]['providerOptions'],
+	});
+	t.is(body['service_tier'], 'flex');
+	t.deepEqual(body['provider'], {sort: 'price'});
+});
+
+test('generic extraBody reaches non-OpenRouter chat completion requests', async t => {
+	const {createOpenAICompatible} = await import('@ai-sdk/openai-compatible');
+	const {generateText} = await import('ai');
+	let body: Record<string, unknown> = {};
+	const provider = createOpenAICompatible({
+		name: 'Local vLLM',
+		baseURL: 'http://localhost:8000/v1',
+		apiKey: 'test-key',
+		fetch: async (_input, init) => {
+			body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+			return new Response(
+				JSON.stringify({
+					id: '1',
+					created: 0,
+					model: 'selected-model',
+					choices: [
+						{
+							index: 0,
+							message: {role: 'assistant', content: 'ok'},
+							finish_reason: 'stop',
+						},
+					],
+				}),
+				{headers: {'content-type': 'application/json'}},
+			);
+		},
+	});
+	const providerOptions = buildProviderOptions(
+		makeProvider({
+			name: 'Local vLLM',
+			sdkProvider: 'openai-compatible',
+			extraBody: {
+				top_k: 20,
+				chat_template_kwargs: {enable_thinking: false},
+				model: 'wrong-model',
+				messages: [],
+			},
+		}),
+		'',
+		undefined,
+	);
+	await generateText({
+		model: provider.chatModel('selected-model'),
+		prompt: 'hi',
+		providerOptions: providerOptions as Parameters<
+			typeof generateText
+		>[0]['providerOptions'],
+	});
+	t.is(body['model'], 'selected-model');
+	t.is(body['top_k'], 20);
+	t.deepEqual(body['chat_template_kwargs'], {enable_thinking: false});
+	t.true(Array.isArray(body['messages']));
+	t.is((body['messages'] as Array<{role: string}>)[0]?.role, 'user');
 });
 
 test('OpenRouter combines provider, reasoning, plugins, models, service_tier', t => {
@@ -269,6 +373,63 @@ test('OpenRouter extraBody is overridden by typed fields on key collision', t =>
 	const result = buildProviderOptions(provider, '', undefined);
 	t.deepEqual(result, {
 		openrouter: {service_tier: 'flex', custom: 'kept'},
+	});
+});
+
+test('OpenAI-compatible providers forward generic extraBody without replacing chat fields', t => {
+	const provider = makeProvider({
+		name: 'Local vLLM',
+		sdkProvider: 'openai-compatible',
+		extraBody: {
+			top_k: 20,
+			chat_template_kwargs: {enable_thinking: false},
+			model: 'wrong-model',
+			messages: [],
+			tools: [],
+			stream: false,
+		},
+	});
+	const result = buildProviderOptions(provider, '', undefined);
+	t.deepEqual(result, {
+		'Local vLLM': {
+			top_k: 20,
+			chat_template_kwargs: {enable_thinking: false},
+		},
+	});
+});
+
+test('generic extraBody is ignored by non-OpenAI-compatible SDK providers', t => {
+	const provider = makeProvider({
+		name: 'Local Anthropic',
+		sdkProvider: 'anthropic',
+		extraBody: {top_k: 20},
+	});
+	t.is(buildProviderOptions(provider, '', undefined), undefined);
+});
+
+test('OpenRouter merges generic and OpenRouter extraBody before typed options', t => {
+	const provider = withOpenRouter(
+		{
+			service_tier: 'flex',
+			extraBody: {
+				shared: 'openrouter',
+				service_tier: 'priority',
+				model: 'wrong-model',
+				messages: [],
+				tools: [],
+				stream: false,
+			},
+		},
+		{
+			extraBody: {
+				shared: 'generic',
+				top_k: 20,
+			},
+		},
+	);
+	const result = buildProviderOptions(provider, '', undefined);
+	t.deepEqual(result, {
+		openrouter: {shared: 'openrouter', top_k: 20, service_tier: 'flex'},
 	});
 });
 

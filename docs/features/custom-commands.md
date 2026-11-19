@@ -31,7 +31,7 @@ mkdir -p .nanocoder/commands
 ```markdown
 ---
 description: Review code for issues and improvements
-aliases: [review]
+aliases: [rc]
 parameters: [filename]
 ---
 
@@ -51,16 +51,20 @@ Then invoke it:
 
 Commands live in `.nanocoder/commands/` in your project root. Each `.md` file becomes a command named after the file.
 
+Personal commands that follow you across projects go in the `commands/` folder of your personal config directory: `~/.config/nanocoder/commands/` on Linux, `~/Library/Preferences/nanocoder/commands/` on macOS, `%APPDATA%\nanocoder\commands\` on Windows (or `$NANOCODER_CONFIG_DIR/commands/` when that is set). A project command with the same name overrides a personal one.
+
 ```
 .nanocoder/commands/
   test.md              -> /test
-  review.md            -> /review
+  review-pr.md         -> /review-pr
   refactor/
     dry.md             -> /refactor:dry
     solid.md           -> /refactor:solid
 ```
 
 Subdirectories create namespaced commands using colon syntax (e.g., `refactor/dry.md` becomes `/refactor:dry`).
+
+Custom commands are checked before built-in commands, so a custom command or alias with the same name as a built-in (for example `review.md` or `aliases: [review]`) silently replaces the built-in `/review`. Pick names that do not collide with the [built-in commands](commands.md).
 
 ## Frontmatter Reference
 
@@ -100,7 +104,7 @@ dependencies: [other-command]
 | `author` | string | Author name, shown in `/commands show` |
 | `examples` | string[] | Usage examples, shown in `/commands show` |
 | `references` | string[] | Related files or URLs, shown in `/commands show` |
-| `dependencies` | string[] | Other commands this one depends on |
+| `dependencies` | string[] | Informational only. Parsed and kept with the command, but Nanocoder does not load or check the listed commands |
 
 ### Array Syntax
 
@@ -108,11 +112,11 @@ Arrays can be written in either JSON-style or YAML dash syntax:
 
 ```yaml
 # JSON-style (inline)
-aliases: [review, code-review]
+aliases: [rc, code-review]
 
 # YAML dash syntax (multiline)
 aliases:
-  - review
+  - rc
   - code-review
 ```
 
@@ -129,7 +133,7 @@ Review {{filename}} using {{style}} conventions.
 ```
 
 ```bash
-/review src/app.ts airbnb
+/review-code src/app.ts airbnb
 # Becomes: Review src/app.ts using airbnb conventions.
 ```
 
@@ -137,7 +141,7 @@ Built-in variables are always available:
 
 - `{{cwd}}` - Current working directory
 - `{{command}}` - The command name
-- `{{args}}` - All arguments as a single string
+- `{{args}}` - All arguments as a single string, exactly as typed (quotes and apostrophes preserved). Named positional parameters still receive shell-style parsed tokens
 
 ### Optional arguments
 
@@ -182,8 +186,11 @@ as `<name>`.
 
 Commands with `tags` or `triggers` can be automatically injected into the system prompt when the user's message matches. This lets you add context-specific instructions without the user needing to invoke the command explicitly.
 
-- **tags**: Matched as keywords against the user's message
-- **triggers**: Matched as phrases against the user's message
+- **tags**: Matched as whole words against the user's message (the tag `test` matches "add a test" but not "latest")
+- **triggers**: Matched as whole-word phrases against the user's message
+- **description** and **category** add weight when the message shares words with them, but only tags and triggers make a command eligible
+
+Up to three of the best-matching commands are injected per message.
 
 ```yaml
 ---
@@ -201,15 +208,16 @@ When writing tests for this project, follow these conventions:
 
 ## Resources
 
-When using the directory-as-command pattern, files in a `resources/` subdirectory are automatically loaded and passed as additional context. This is useful for bundling templates, configs, or reference documents alongside the command.
+When using the directory-as-command pattern, files in a `resources/` subdirectory are listed for the model when the command runs. Nanocoder passes each file's name and type (`script`, `template`, `config` or `document`), not its contents; the model reads a file with its normal tools when it needs it. This is useful for bundling templates, configs, or reference documents alongside the command.
 
 ```
 .nanocoder/commands/
   api-gen/
     api-gen.md            -> The command (must match directory name)
     resources/
-      template.yaml       -> Loaded as a resource
-      examples.json       -> Loaded as a resource
+      template.yaml       -> Listed as a config resource
+      examples.json       -> Listed as a config resource
+      report.template     -> Listed as a template resource
 ```
 
 ## Commands

@@ -3,11 +3,39 @@ import {basename, join} from 'node:path';
 import {getConfigPath} from '@/config/paths';
 import {parseCommandFile} from '@/custom-commands/parser';
 import type {CommandResource, CustomCommand} from '@/types/index';
-import {logError, logWarning} from '@/utils/message-queue';
+import {notifyError, notifyWarning} from '@/utils/message-queue-core';
 
 const RESOURCES_DIR = 'resources';
 const RELEVANCE_THRESHOLD = 5;
 const MAX_COMMANDS_IN_CONTEXT = 3;
+
+/**
+ * Whether `phrase` appears in `haystackLower` as whole words, case-insensitive.
+ * The caller passes the haystack already lowercased, so it is not lowercased
+ * again here. A plain substring test lets the tag `test` match "latest".
+ */
+function containsPhrase(haystackLower: string, phrase: string): boolean {
+	const needle = phrase.trim().toLowerCase();
+	if (!needle) return false;
+	const isWordChar = (char: string | undefined): boolean =>
+		char !== undefined &&
+		(('a' <= char && char <= 'z') || ('0' <= char && char <= '9'));
+	for (
+		let i = haystackLower.indexOf(needle);
+		i !== -1;
+		i = haystackLower.indexOf(needle, i + 1)
+	) {
+		const before = haystackLower[i - 1];
+		const after = haystackLower[i + needle.length];
+		if (!isWordChar(before) && !isWordChar(after)) return true;
+	}
+	return false;
+}
+
+/** Distinct lowercase words of four or more letters. */
+function significantWords(text: string): string[] {
+	return [...new Set(text.toLowerCase().match(/[a-z0-9]{4,}/g) ?? [])];
+}
 
 /**
  * Validate that a directory entry doesn't contain path traversal patterns.
@@ -63,7 +91,9 @@ export class CustomCommandLoader {
 		try {
 			entries = readdirSync(dir);
 		} catch (error) {
-			logWarning(`Failed to read command directory ${dir}: ${String(error)}`);
+			notifyWarning(
+				`Failed to read command directory ${dir}: ${String(error)}`,
+			);
 			return;
 		}
 
@@ -97,7 +127,7 @@ export class CustomCommandLoader {
 		}
 
 		if (failedEntries > 0) {
-			logWarning(
+			notifyWarning(
 				`Failed to inspect ${failedEntries} file(s) in command directory ${dir}`,
 			);
 		}
@@ -160,7 +190,7 @@ export class CustomCommandLoader {
 				}
 			}
 		} catch (error) {
-			logError(
+			notifyError(
 				`Failed to load custom command from ${filePath}: ${String(error)}`,
 			);
 		}
@@ -179,7 +209,7 @@ export class CustomCommandLoader {
 		try {
 			entries = readdirSync(resourcesDir);
 		} catch (error) {
-			logWarning(
+			notifyWarning(
 				`Failed to read resources directory ${resourcesDir}: ${String(error)}`,
 			);
 			return [];
@@ -204,8 +234,8 @@ export class CustomCommandLoader {
 			let type: CommandResource['type'] = 'document';
 			if (['.py', '.js', '.sh', '.bat', '.ts'].includes(ext)) {
 				type = 'script';
-			} else if (['.txt', '.md'].includes(ext)) {
-				type = entry.endsWith('.template') ? 'template' : 'document';
+			} else if (ext === '.template') {
+				type = 'template';
 			} else if (['.json', '.yaml', '.yml', '.toml'].includes(ext)) {
 				type = 'config';
 			}
@@ -220,7 +250,7 @@ export class CustomCommandLoader {
 		}
 
 		if (failedResources > 0) {
-			logWarning(
+			notifyWarning(
 				`Failed to inspect ${failedResources} resource(s) in directory ${resourcesDir}`,
 			);
 		}
@@ -360,22 +390,27 @@ export class CustomCommandLoader {
 		let score = 0;
 		const meta = command.metadata;
 
-		if (meta.description?.toLowerCase().includes(requestLower)) {
-			score += 10;
+		// Description: reward overlap of meaningful words, since a request
+		// almost never contains a whole description (or vice versa).
+		if (meta.description) {
+			const overlap = significantWords(meta.description).filter(word =>
+				containsPhrase(requestLower, word),
+			).length;
+			if (overlap >= 2) score += 10;
 		}
-		if (meta.category?.toLowerCase().includes(requestLower)) {
+		if (meta.category && containsPhrase(requestLower, meta.category)) {
 			score += 5;
 		}
 		if (meta.triggers?.length) {
 			for (const trigger of meta.triggers) {
-				if (requestLower.includes(trigger.toLowerCase())) {
+				if (containsPhrase(requestLower, trigger)) {
 					score += 15;
 				}
 			}
 		}
 		if (meta.tags?.length) {
 			for (const tag of meta.tags) {
-				if (requestLower.includes(tag.toLowerCase())) {
+				if (containsPhrase(requestLower, tag)) {
 					score += 5;
 				}
 			}

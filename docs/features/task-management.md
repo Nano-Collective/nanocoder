@@ -18,12 +18,17 @@ For complex, multi-step work, the task system helps you and the AI stay aligned 
 
 ```bash
 /tasks                          # View all tasks with status
+/tasks list                     # Same as above
 /tasks add Implement auth       # Add a new task
-/tasks Implement auth           # Shorthand — same as above
+/tasks start 1                  # Mark task 1 as in progress
+/tasks done 1                   # Mark task 1 as completed
+/tasks complete 1               # Alias for done
 /tasks remove 1                 # Remove task by number
 /tasks rm 1                     # Alias for remove
 /tasks clear                    # Clear all tasks
 ```
+
+Press `Ctrl+T` to collapse or expand the task list shown above the prompt.
 
 ## AI-Managed Tasks
 
@@ -52,7 +57,18 @@ Task state belongs to the session, not to your project directory.
 
 `write_tasks` is part of the **full** tool profile. The `minimal` and `nano` profiles deliberately trade it away for a smaller prompt, so the AI will not create or update tasks while one of those profiles is active — `/tasks` still works for managing the list by hand. See [Tune](tune.md) for how profiles resolve.
 
+Plan mode also removes `write_tasks`, so the AI does not create or update tasks while planning; `/tasks` still works by hand. See [Development Modes](development-modes.md#plan-mode).
+
+## Tasks and Plan Graphs
+
+Tasks are session-scoped and flat — a checklist for the current conversation.
+Plan graphs are project-scoped and dependency-aware, and they persist across
+sessions. For work that outlives a session or must happen in a specific order,
+use a [persistent plan graph](persistent-plans.md); use tasks for the short
+checklist within one session.
+
 ## Related
 
-- [Development Modes](development-modes.md) — plan mode produces a plan artifact alongside the task list
+- [Development Modes](development-modes.md) — plan mode produces a plan artifact alongside the task list, and removes the task tool while planning
+- [Persistent Plan Graphs](persistent-plans.md) — durable, dependency-aware plans and the `/plans` dashboard
 - [Session Management](session-management.md) — how sessions and their artifacts are stored and resumed

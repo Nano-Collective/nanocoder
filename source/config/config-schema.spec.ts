@@ -43,6 +43,17 @@ test('empty config file is valid', t => {
 	assertValid(t, 'empty object', {});
 });
 
+test('formatter match accepts a single glob or an array and requires a command', t => {
+	for (const match of ['**/*.ts', ['**/*.ts', '**/*.tsx']]) {
+		assertValid(t, 'formatter match', {nanocoder: {formatters: [
+			{match, command: 'biome format --write "$FILE"'},
+		]}});
+	}
+	assertInvalid(t, 'formatter missing command', {nanocoder: {formatters: [
+		{match: '**/*.ts'},
+	]}});
+});
+
 test('config with only $schema is valid', t => {
 	assertValid(t, '$schema only', {
 		$schema: 'https://raw.githubusercontent.com/Nano-Collective/nanocoder/main/schemas/agents.config.schema.json',
@@ -87,7 +98,6 @@ test('all documented nanocoder fields are accepted together', t => {
 					headers: {Authorization: 'Bearer ${TOKEN}'},
 				},
 			],
-			mcpServers: [{name: 'mcp', transport: 'stdio'}],
 			alwaysAllow: ['execute_bash'],
 			disabledTools: ['web_search'],
 			systemPrompt: {mode: 'append', content: 'Be terse.'},
@@ -96,6 +106,7 @@ test('all documented nanocoder fields are accepted together', t => {
 			nanocoderTools: {webSearch: {apiKey: 'sk-abc'}},
 			headless: {maxTurns: 20},
 			sandbox: true,
+			autoCommit: true,
 		},
 	});
 });
@@ -188,14 +199,14 @@ test('provider contextWindows must map to numbers', t => {
 // OpenRouter / RecordStringUnknown
 // ---------------------------------------------------------------------------
 
-test('RecordStringUnknown (extraBody) accepts arbitrary keys', t => {
-	// OpenRouterParameters.extraBody is Record<string, unknown>: any key/value.
+test('provider and OpenRouter extraBody accept arbitrary keys', t => {
 	assertValid(t, 'extraBody with content', {
 		nanocoder: {
 			providers: [
 				{
 					name: 'openrouter',
 					models: ['a'],
+					extraBody: {top_k: 20, nested: {ok: true}},
 					openrouter: {extraBody: {custom_field: 'value', nested: {ok: true}}},
 				},
 			],
@@ -247,22 +258,28 @@ test('lspServers requires name, command, languages', t => {
 	});
 });
 
-// ---------------------------------------------------------------------------
-// mcpServers (MCPServerConfig)
-// ---------------------------------------------------------------------------
-
-test('mcpServer requires name and transport', t => {
-	assertInvalid(t, 'mcp missing transport', {
-		nanocoder: {mcpServers: [{name: 'm'}]},
+test('lsp auto-discovery setting is optional and boolean', t => {
+	assertValid(t, 'lsp auto-discovery enabled', {
+		nanocoder: {lsp: {autoDiscover: true}},
 	});
-	assertValid(t, 'mcp minimal', {
-		nanocoder: {mcpServers: [{name: 'm', transport: 'stdio'}]},
+	assertValid(t, 'lsp auto-discovery disabled', {
+		nanocoder: {lsp: {autoDiscover: false}},
+	});
+	assertInvalid(t, 'lsp auto-discovery must be boolean', {
+		nanocoder: {lsp: {autoDiscover: 'off'}},
+	});
+	assertInvalid(t, 'lsp rejects unknown keys', {
+		nanocoder: {lsp: {unknown: true}},
 	});
 });
 
-test('mcpServer transport enum is enforced', t => {
-	assertInvalid(t, 'mcp bad transport', {
-		nanocoder: {mcpServers: [{name: 'm', transport: 'grpc'}]},
+// ---------------------------------------------------------------------------
+// mcpServers belong in .mcp.json, not agents.config.json
+// ---------------------------------------------------------------------------
+
+test('mcpServers is rejected in agents.config.json (the loader never reads it)', t => {
+	assertInvalid(t, 'mcpServers in agents.config.json', {
+		nanocoder: {mcpServers: [{name: 'm', transport: 'stdio'}]},
 	});
 });
 
@@ -479,7 +496,7 @@ test('DiskNanocoderConfig exposes every on-disk key', t => {
 		'autoCompact',
 		'tune',
 		'headless',
-		'mcpServers',
+		'lsp',
 		'lspServers',
 		'alwaysAllow',
 		'disabledTools',
@@ -489,6 +506,9 @@ test('DiskNanocoderConfig exposes every on-disk key', t => {
 		'retries',
 		'hooks',
 		'sandbox',
+		'autoCommit',
+		'firewall',
+		'verify',
 	];
 	for (const key of expected) {
 		t.true(
@@ -497,13 +517,93 @@ test('DiskNanocoderConfig exposes every on-disk key', t => {
 		);
 	}
 	// Preferences-only keys must NOT be advertised on the agents.config.json schema.
-	for (const absent of ['notifications', 'sessions', 'paste']) {
+	for (const absent of ['notifications', 'sessions', 'paste', 'mcpServers']) {
 		t.false(
 			props.includes(absent),
 			`"${absent}" lives in nanocoder-preferences.json and should not appear in the agents.config.json schema`,
 		);
 	}
 	t.is(schema.definitions.DiskNanocoderConfig.additionalProperties, false);
+});
+
+// The loader is the real contract: a key it reads from agents.config.json but
+// the DiskNanocoderConfig type lacks gets `additionalProperties: false` in the
+// generated schema, so editors flag a documented, working key as an error.
+// Enumerate what the loader actually reads, straight from its source, so a new
+// loader key fails here until the type (and the regenerated schema) catches up.
+function loaderReadKeys(): Map<string, Set<string>> {
+	const loaderSource = readFileSync(
+		join(process.cwd(), 'source/config/index.ts'),
+		'utf-8',
+	);
+	const blocks = loaderSource
+		.split(/loadHierarchicalConfig\(/)
+		.slice(1)
+		.filter(block => /^\s*cwd,\s*'agents\.config\.json'/.test(block));
+	const keys = new Map<string, Set<string>>();
+	for (const block of blocks) {
+		for (const match of block.matchAll(
+			/const (\w+) = config\.nanocoder\?\.(\w+);/g,
+		)) {
+			const [, variable, key] = match;
+			const subKeys = keys.get(key) ?? new Set<string>();
+			for (const sub of block.matchAll(
+				new RegExp(`\\b${variable}\\.(\\w+)`, 'g'),
+			)) {
+				subKeys.add(sub[1]);
+			}
+			keys.set(key, subKeys);
+		}
+	}
+	return keys;
+}
+
+function resolveRef(node: {$ref?: string}): Record<string, unknown> {
+	if (node.$ref) {
+		return schema.definitions[node.$ref.replace('#/definitions/', '')];
+	}
+	return node as Record<string, unknown>;
+}
+
+test('every agents.config.json key the loader reads is in the schema', t => {
+	const keys = loaderReadKeys();
+	// Sanity check the scraper itself, so a refactor of the loader cannot
+	// quietly turn this test into a no-op.
+	for (const known of ['autoCompact', 'retries', 'sandbox', 'verify']) {
+		t.true(keys.has(known), `loader scrape should find "${known}"`);
+	}
+	const props = schema.definitions.DiskNanocoderConfig.properties;
+	for (const [key, subKeys] of keys) {
+		t.truthy(
+			props[key],
+			`the loader reads nanocoder.${key} but DiskNanocoderConfig does not declare it (add it to source/types/config.ts and run pnpm generate:schema)`,
+		);
+		if (!props[key]) continue;
+		const sub = resolveRef(props[key]);
+		if (sub.type !== 'object' || !sub.properties) continue;
+		const subProps = sub.properties as Record<string, unknown>;
+		for (const subKey of subKeys) {
+			t.truthy(
+				subProps[subKey],
+				`the loader reads nanocoder.${key}.${subKey} but the schema does not declare it`,
+			);
+		}
+	}
+});
+
+test('verify policy validates, and rejects an unknown trust level', t => {
+	assertValid(t, 'verify policy', {
+		nanocoder: {
+			verify: {
+				trustLevel: 'auto-fix',
+				pollIntervalMs: 30000,
+				maxPollIntervalMs: 300000,
+			},
+		},
+	});
+	assertInvalid(t, 'verify trustLevel typo', {
+		nanocoder: {verify: {trustLevel: 'yolo'}},
+	});
 });
 
 test('definition names are clean (no TypeScript generics)', t => {
@@ -522,9 +622,9 @@ test('ProviderConfig requires name and models in the schema', t => {
 	t.deepEqual([...(def.required ?? [])].sort(), ['models', 'name']);
 });
 
-test('MCPServerConfig requires name and transport in the schema', t => {
-	const def = schema.definitions.MCPServerConfig;
-	t.deepEqual([...(def.required ?? [])].sort(), ['name', 'transport']);
+test('MCPServerConfig is not in the agents.config.json schema', t => {
+	// Including it would also leak the loader-internal rawEnv/rawHeaders/source fields.
+	t.is(schema.definitions.MCPServerConfig, undefined);
 });
 
 test('RecordStringString maps to additionalProperties of type string', t => {

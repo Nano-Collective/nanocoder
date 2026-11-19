@@ -8,9 +8,9 @@ import {getProjectRoot, getSafeSessionCwd} from '@/services/session-cwd';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
-import {loadGitignore} from '@/utils/gitignore-loader';
-import {isValidFilePath, resolveFilePath} from '@/utils/path-validation';
-import {calculateTokens} from '@/utils/token-calculator';
+import {loadGitignore} from '@/utils/fs/gitignore-loader';
+import {isValidFilePath, resolveFilePath} from '@/utils/fs/path-validation';
+import {estimateTokens} from '@/utils/token-calculator';
 
 interface ListDirectoryArgs {
 	path?: string;
@@ -86,8 +86,16 @@ const executeListDirectory = async (
 					const fullPath = join(currentPath, item.name);
 
 					// Check if this item should be ignored using gitignore patterns.
-					// Match root-relative so the project-root .gitignore applies.
-					if (ig.ignores(relative(root, fullPath))) {
+					// Match root-relative so the project-root .gitignore applies. A
+					// directory is tested with its trailing slash too: a
+					// directory-only pattern (`node_modules/`, `dist/`) matches only
+					// that form, so without it the ignored folder still listed and
+					// then read back as empty.
+					const ignorePath = relative(root, fullPath);
+					if (
+						ig.ignores(ignorePath) ||
+						(item.isDirectory() && ig.ignores(`${ignorePath}/`))
+					) {
 						continue;
 					}
 
@@ -337,7 +345,7 @@ const listDirectoryFormatter = (
 	// Calculate tokens from the result
 	let tokens = 0;
 	if (result) {
-		tokens = calculateTokens(result);
+		tokens = estimateTokens(result);
 	}
 
 	return <ListDirectoryFormatter args={args} result={result} tokens={tokens} />;

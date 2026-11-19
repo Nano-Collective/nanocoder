@@ -3,6 +3,14 @@ import type {MCPServerConfig} from '@/types/config';
 
 export type MCPTransportType = 'stdio' | 'websocket' | 'http';
 
+export type MCPHealthStatus = 'connected' | 'unhealthy';
+
+export interface MCPHealthChange {
+	serverName: string;
+	status: MCPHealthStatus;
+	error?: string;
+}
+
 // MCPServer is MCPServerConfig without the source tracking field
 export type MCPServer = Omit<MCPServerConfig, 'source'>;
 
@@ -19,6 +27,15 @@ export interface MCPTool {
 	 * mode policy fails safe.
 	 */
 	readOnly?: boolean;
+}
+
+export interface MCPToolCatalogEntry {
+	name: string;
+	serverName: string;
+	description: string;
+	readOnly: boolean;
+	isLoaded: boolean;
+	inputSchema?: MCPToolInputSchema;
 }
 
 export interface MCPResource {
@@ -69,4 +86,10 @@ export interface MCPInitResult {
 	resourceCount?: number;
 	promptCount?: number;
 	error?: string;
+	/**
+	 * Tools this server offered but that were not registered, because a
+	 * built-in or custom tool already has the name. Set by
+	 * `ToolManager.initializeMCP`, not by the MCP client.
+	 */
+	skippedTools?: string[];
 }

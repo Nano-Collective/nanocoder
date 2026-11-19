@@ -57,6 +57,111 @@ test('parseToolCalls - handles empty parameter values', t => {
 	t.deepEqual(result[0].parameters, {query: '', path: '/test'});
 });
 
+test('parseToolCalls - keeps bash command containing =', t => {
+	const content =
+		'<execute_bash><command>FOO=1 echo hi</command></execute_bash>';
+	const result = XMLToolCallParser.parseToolCalls(content);
+
+	t.is(result.length, 1);
+	t.is(result[0].toolName, 'execute_bash');
+	t.deepEqual(result[0].parameters, {command: 'FOO=1 echo hi'});
+});
+
+test('parseToolCalls - keeps string_replace with = in old_str and new_str', t => {
+	const content =
+		'<string_replace><path>a.ts</path><old_str>const x = 1;</old_str><new_str>const x = 2;</new_str></string_replace>';
+	const result = XMLToolCallParser.parseToolCalls(content);
+
+	t.is(result.length, 1);
+	t.is(result[0].toolName, 'string_replace');
+	t.deepEqual(result[0].parameters, {
+		path: 'a.ts',
+		old_str: 'const x = 1;',
+		new_str: 'const x = 2;',
+	});
+});
+
+test('parseToolCalls - keeps comparison operators like == and <= in values', t => {
+	const content =
+		'<string_replace><path>a.ts</path><old_str>if (a == b && c <= d) {}</old_str><new_str>if (a === b) {}</new_str></string_replace>';
+	const result = XMLToolCallParser.parseToolCalls(content);
+
+	t.is(result.length, 1);
+	t.is(result[0].parameters.old_str, 'if (a == b && c <= d) {}');
+	t.is(result[0].parameters.new_str, 'if (a === b) {}');
+});
+
+test('parseToolCalls - a code fence inside a call stays part of its argument', t => {
+	const markdown = '# Setup\n\n```bash\nFOO=1 make\n```';
+	const content = `<write_file><path>README.md</path><content>${markdown}</content></write_file>`;
+	const result = XMLToolCallParser.parseToolCalls(content);
+
+	t.is(result.length, 1);
+	t.is(result[0].toolName, 'write_file');
+	t.deepEqual(result[0].parameters, {path: 'README.md', content: markdown});
+});
+
+test('parseToolCalls - still unwraps a fenced call inside a generic wrapper tag', t => {
+	const fenced = '```xml\n<read_file><path>a.ts</path></read_file>\n```';
+	for (const content of [
+		`<response>Reading a.ts:\n${fenced}\n</response>`,
+		`<response><tool_call>Reading a.ts:\n${fenced}\n</tool_call></response>`,
+	]) {
+		const result = XMLToolCallParser.parseToolCalls(content);
+
+		t.is(result.length, 1, content);
+		t.is(result[0].toolName, 'read_file');
+		t.deepEqual(result[0].parameters, {path: 'a.ts'});
+	}
+});
+
+test('parseToolCalls - still rejects <parameter=name> attribute syntax', t => {
+	for (const content of [
+		'<read_file><parameter=path>/test.txt</parameter></read_file>',
+		'<read_file><parameter =path>/test.txt</parameter></read_file>',
+		'<read_file><Parameter=path>/test.txt</Parameter></read_file>',
+		'<read_file><path>a.ts</path><parameter=other>value</parameter></read_file>',
+		'<read_file><function=read_file>{"path":"a.ts"}</function></read_file>',
+	]) {
+		t.is(XMLToolCallParser.parseToolCalls(content).length, 0, content);
+	}
+});
+
+test('parseToolCalls - still rejects attribute syntax on named parameter tags', t => {
+	for (const content of [
+		'<read_file><path=a.ts>x</path></read_file>',
+		'<execute_bash><command=ls></command></execute_bash>',
+	]) {
+		t.is(XMLToolCallParser.parseToolCalls(content).length, 0, content);
+	}
+});
+
+test('parseToolCalls - still rejects = in text between parameters', t => {
+	for (const content of [
+		'<read_file>path=a.ts</read_file>',
+		'<read_file><path>a.ts</path> start_line=5</read_file>',
+	]) {
+		t.is(XMLToolCallParser.parseToolCalls(content).length, 0, content);
+	}
+});
+
+test('parseToolCalls - preserves attribute-style tag examples inside parameter values', t => {
+	for (const example of [
+		'<function=read_file>{"path":"a.ts"}</function>',
+		'<parameter=path>a.ts</parameter>',
+		'<Parameter =path>a.ts</Parameter>',
+	]) {
+		const content = `<write_file><path>docs.md</path><content>${example}</content></write_file>`;
+
+		t.deepEqual(XMLToolCallParser.parseToolCalls(content), [
+			{
+				toolName: 'write_file',
+				parameters: {path: 'docs.md', content: example},
+			},
+		]);
+	}
+});
+
 // JSON parameter tests
 test('parseToolCalls - parses JSON array parameters', t => {
 	const content =
@@ -99,6 +204,191 @@ test('parseToolCalls - parses JSON number parameters', t => {
 	t.is(result.length, 1);
 	t.is(result[0].toolName, 'calculate');
 	t.deepEqual(result[0].parameters, {x: 42, y: 3.14, z: -10});
+});
+
+test('parseToolCalls - preserves JSON-looking string parameters with schemas', t => {
+	const content = `<write_file><path>f</path><content>
+{
+  "name": "x",
+  "version": "1.0.0"
+}
+</content></write_file>`;
+	const result = XMLToolCallParser.parseToolCalls(content, {
+		write_file: {
+			type: 'object',
+			properties: {
+				path: {type: 'string'},
+				content: {type: 'string'},
+			},
+		},
+	});
+
+	t.is(result[0].parameters.path, 'f');
+	t.is(
+		result[0].parameters.content,
+		'{\n  "name": "x",\n  "version": "1.0.0"\n}',
+	);
+});
+
+test('parseToolCalls - removes one wrapping newline from multiline string parameters', t => {
+	const lfResult = XMLToolCallParser.parseToolCalls(
+		'<read_file><path>\nsrc/a.ts\n</path></read_file>',
+		{
+			read_file: {
+				type: 'object',
+				properties: {path: {type: 'string'}},
+			},
+		},
+	);
+	t.is(lfResult[0].parameters.path, 'src/a.ts');
+
+	const crlfResult = XMLToolCallParser.parseToolCalls(
+		'<read_file><path>\r\nsrc/a.ts\r\n</path></read_file>',
+		{
+			read_file: {
+				type: 'object',
+				properties: {path: {type: 'string'}},
+			},
+		},
+	);
+	t.is(crlfResult[0].parameters.path, 'src/a.ts');
+});
+
+test('parseToolCalls - preserves internal newlines and surrounding spaces in string parameters', t => {
+	const result = XMLToolCallParser.parseToolCalls(
+		'<write_file><path>\n  src/a.ts  \n</path><content>\nline 1\n\n  line 3  \n</content></write_file>',
+		{
+			write_file: {
+				type: 'object',
+				properties: {
+					path: {type: 'string'},
+					content: {type: 'string'},
+				},
+			},
+		},
+	);
+
+	t.is(result[0].parameters.path, '  src/a.ts  ');
+	t.is(result[0].parameters.content, 'line 1\n\n  line 3  ');
+});
+
+test('parseToolCalls - removes exactly one wrapping newline', t => {
+	const result = XMLToolCallParser.parseToolCalls(
+		'<read_file><path>\n\nsrc/a.ts\n\n</path></read_file>',
+		{
+			read_file: {
+				type: 'object',
+				properties: {path: {type: 'string'}},
+			},
+		},
+	);
+
+	t.is(result[0].parameters.path, '\nsrc/a.ts\n');
+});
+
+test('parseToolCalls - preserves JSON-looking string values as strings', t => {
+	const result = XMLToolCallParser.parseToolCalls(
+		'<test><object>\n{"name":"x"}\n</object><array>\n[1,2]\n</array><null_value>\nnull\n</null_value><number>\n42\n</number></test>',
+		{
+			test: {
+				type: 'object',
+				properties: {
+					object: {type: 'string'},
+					array: {type: 'string'},
+					null_value: {type: 'string'},
+					number: {type: 'string'},
+				},
+			},
+		},
+	);
+
+	t.deepEqual(result[0].parameters, {
+		object: '{"name":"x"}',
+		array: '[1,2]',
+		null_value: 'null',
+		number: '42',
+	});
+});
+
+test('parseToolCalls - preserves string scalar and multiline values with schemas', t => {
+	const content =
+		'<string_replace><path>f</path><old_str> null\n1.0\n1e3 </old_str><new_str>[1,\n 2]</new_str></string_replace>';
+	const result = XMLToolCallParser.parseToolCalls(content, {
+		string_replace: {
+			type: 'object',
+			properties: {
+				path: {type: 'string'},
+				old_str: {type: 'string'},
+				new_str: {type: 'string'},
+			},
+		},
+	});
+
+	t.deepEqual(result[0].parameters, {
+		path: 'f',
+		old_str: ' null\n1.0\n1e3 ',
+		new_str: '[1,\n 2]',
+	});
+});
+
+test('parseToolCalls - preserves JSON-looking shell commands with schemas', t => {
+	const command = 'printf \'{"version":"1.0"}\'';
+	const result = XMLToolCallParser.parseToolCalls(
+		`<execute_bash><command>${command}</command></execute_bash>`,
+		{
+			execute_bash: {
+				type: 'object',
+				properties: {command: {type: 'string'}},
+			},
+		},
+	);
+
+	t.is(result[0].parameters.command, command);
+});
+
+test('parseToolCalls - parses explicitly typed non-string parameters with schemas', t => {
+	const content =
+		'<configure><options>{"timeout": 5000}</options><files>["a.txt"]</files><enabled>true</enabled><retries>1.0</retries></configure>';
+	const result = XMLToolCallParser.parseToolCalls(content, {
+		configure: {
+			type: 'object',
+			properties: {
+				options: {type: 'object'},
+				files: {type: 'array'},
+				enabled: {type: 'boolean'},
+				retries: {type: 'number'},
+			},
+		},
+	});
+
+	t.deepEqual(result[0].parameters, {
+		options: {timeout: 5000},
+		files: ['a.txt'],
+		enabled: true,
+		retries: 1,
+	});
+});
+
+test('parseToolCalls - preserves string values allowed by union schemas', t => {
+	const result = XMLToolCallParser.parseToolCalls(
+		'<union><nullable>null</nullable><object>{"name":"x"}</object><array>[1,\n 2]</array></union>',
+		{
+			union: {
+				type: 'object',
+				properties: {
+					nullable: {type: ['string', 'null']},
+					object: {type: ['string', 'object']},
+					array: {type: ['string', 'array']},
+				},
+			},
+		},
+	);
+
+	t.deepEqual(result[0].parameters, {
+		nullable: 'null',
+		object: '{"name":"x"}',
+		array: '[1,\n 2]',
+	});
 });
 
 test('parseToolCalls - treats invalid JSON as string', t => {
@@ -231,21 +521,49 @@ test('parseToolCalls - handles whitespace-only content', t => {
 	t.deepEqual(result, []);
 });
 
-test('parseToolCalls - handles unclosed tags gracefully', t => {
+test('parseToolCalls - does not parse an unclosed call, and findUnclosedToolCall names it', t => {
 	const content = '<read_file><path>/test/file.txt</path>';
-	const result = XMLToolCallParser.parseToolCalls(content);
 
-	// Should not match incomplete XML
-	t.deepEqual(result, []);
+	t.deepEqual(XMLToolCallParser.parseToolCalls(content), []);
+	t.is(
+		XMLToolCallParser.findUnclosedToolCall(content, ['read_file']),
+		'read_file',
+	);
 });
 
-test('parseToolCalls - handles mismatched tags gracefully', t => {
+test('parseToolCalls - marks a call whose parameter is closed with the wrong tag', t => {
 	const content = '<read_file><path>/test/file.txt</wrong_close></read_file>';
 	const result = XMLToolCallParser.parseToolCalls(content);
 
-	// Regex should still match the outer tags
+	// The outer tags still match, but <path> is never closed, so the call has
+	// no usable arguments.
 	t.is(result.length, 1);
 	t.is(result[0].toolName, 'read_file');
+	t.deepEqual(result[0].parameters, {});
+	t.is(result[0].brokenTag, '<path>');
+});
+
+test('parseToolCalls - a complete call has no brokenTag, even with XML in a value', t => {
+	const content =
+		'<write_file><path>a.html</path><content><div>hi<br></div></content></write_file>';
+	const result = XMLToolCallParser.parseToolCalls(content);
+
+	t.is(result.length, 1);
+	t.is(result[0].brokenTag, undefined);
+});
+
+test('findUnclosedToolCall - skips code, prose and calls that parse', t => {
+	const tools = ['read_file', 'write_file'];
+	for (const content of [
+		'Add a <br> after the title.',
+		'Next I will use <read_file> to check it.',
+		'```xml\n<read_file><path>a.ts</path>\n```',
+		'Call it as `<read_file><path>a.ts</path>` and close it.',
+		'<write_file><path>a.md</path><content><read_file><path>x</path></content></write_file>',
+		'<my_config><setting>on</setting>',
+	]) {
+		t.is(XMLToolCallParser.findUnclosedToolCall(content, tools), undefined, content);
+	}
 });
 
 test('parseToolCalls - handles nested tool names', t => {
@@ -253,8 +571,32 @@ test('parseToolCalls - handles nested tool names', t => {
 	const content = '<read_file><read_file>nested_value</read_file></read_file>';
 	const result = XMLToolCallParser.parseToolCalls(content);
 
-	// Should parse the outer read_file
-	t.truthy(result.length > 0);
+	// The first </read_file> closes the parameter, so the call ends at the
+	// second one.
+	t.is(result.length, 1);
+	t.is(result[0].toolName, 'read_file');
+	t.deepEqual(result[0].parameters, {read_file: 'nested_value'});
+	t.is(result[0].brokenTag, undefined);
+});
+
+test('parseToolCalls - does not run a call left open into the next call to the same tool', t => {
+	const content =
+		'<read_file><read_file>a.ts</read_file>\n<read_file><path>b.ts</path></read_file>';
+	const result = XMLToolCallParser.parseToolCalls(content);
+
+	// The outer <read_file> is never closed: the last </read_file> pairs with
+	// the second call's opening tag.
+	t.is(result.length, 2);
+	t.is(result[0].brokenTag, '<read_file>');
+	t.deepEqual(result[1].parameters, {path: 'b.ts'});
+});
+
+test('findToolCallRanges - covers the whole of a call that holds a tag with its own name', t => {
+	const content = '<read_file><read_file>a.ts</read_file></read_file>';
+
+	t.deepEqual(XMLToolCallParser.findToolCallRanges(content), [
+		[0, content.length],
+	]);
 });
 
 test('parseToolCalls - handles tool names with underscores and numbers', t => {
@@ -401,6 +743,15 @@ test('removeToolCallsFromContent - handles content with only tool calls', t => {
 	const result = XMLToolCallParser.removeToolCallsFromContent(content);
 
 	t.is(result, '');
+});
+
+test('removeToolCallsFromContent - removes a call that holds a tag with its own name', t => {
+	const content =
+		'Reading it now.\n<read_file><read_file>a.ts</read_file></read_file>';
+
+	const result = XMLToolCallParser.removeToolCallsFromContent(content);
+
+	t.is(result, 'Reading it now.');
 });
 
 // hasToolCalls tests

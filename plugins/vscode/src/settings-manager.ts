@@ -29,6 +29,40 @@ export interface SettingsData {
  * CLI reads them from .mcp.json (see config/mcp-config-loader.ts), merging
  * project, global and env sources rather than picking one file.
  */
+/** The CLI's global config directory, resolved like getConfigPath() in source/config/paths.ts. */
+export function getGlobalConfigDir(): string {
+	if (process.env.NANOCODER_CONFIG_DIR) {
+		return process.env.NANOCODER_CONFIG_DIR;
+	}
+
+	let baseConfigPath: string;
+	switch (process.platform) {
+		case 'win32':
+			baseConfigPath = process.env.APPDATA ?? path.join(os.homedir(), 'AppData', 'Roaming');
+			break;
+		case 'darwin':
+			baseConfigPath = path.join(os.homedir(), 'Library', 'Preferences');
+			break;
+		default:
+			baseConfigPath = process.env.XDG_CONFIG_HOME ?? path.join(os.homedir(), '.config');
+	}
+	return path.join(baseConfigPath, 'nanocoder');
+}
+
+/**
+ * Resolve a config file: project-level first, then global.
+ * If neither exists, return the global path (it will be created on write).
+ */
+export function resolveConfigPath(cwd: string, globalDir: string, fileName: string): string {
+	// fileName is never user input - every call site passes a string literal.
+	// Same shape as getConfigPath() in source/config/index.ts.
+	const projectPath = path.join(cwd, fileName); // nosemgrep
+	if (fs.existsSync(projectPath)) {
+		return projectPath;
+	}
+	return path.join(globalDir, fileName); // nosemgrep
+}
+
 export class SettingsManager {
 	constructor(private outputChannel: { appendLine: (msg: string) => void }) {}
 
@@ -308,36 +342,11 @@ export class SettingsManager {
 	}
 
 	private getGlobalConfigDir(): string {
-		if (process.env.NANOCODER_CONFIG_DIR) {
-			return process.env.NANOCODER_CONFIG_DIR;
-		}
-
-		let baseConfigPath: string;
-		switch (process.platform) {
-			case 'win32':
-				baseConfigPath = process.env.APPDATA ?? path.join(os.homedir(), 'AppData', 'Roaming');
-				break;
-			case 'darwin':
-				baseConfigPath = path.join(os.homedir(), 'Library', 'Preferences');
-				break;
-			default:
-				baseConfigPath = process.env.XDG_CONFIG_HOME ?? path.join(os.homedir(), '.config');
-		}
-		return path.join(baseConfigPath, 'nanocoder');
+		return getGlobalConfigDir();
 	}
 
-	/**
-	 * Resolve a config file: project-level first, then global.
-	 * If neither exists, return the global path (it will be created on write).
-	 */
 	private resolveConfigPath(cwd: string, globalDir: string, fileName: string): string {
-		// fileName is never user input - both call sites pass a string literal.
-		// Same shape as getConfigPath() in source/config/index.ts.
-		const projectPath = path.join(cwd, fileName); // nosemgrep
-		if (fs.existsSync(projectPath)) {
-			return projectPath;
-		}
-		return path.join(globalDir, fileName); // nosemgrep
+		return resolveConfigPath(cwd, globalDir, fileName);
 	}
 
 	private readJsonSafe(filePath: string): any {

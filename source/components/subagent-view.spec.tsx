@@ -130,3 +130,68 @@ test.serial('detaches when the session no longer exists', async t => {
 	t.true(detached);
 	unmount();
 });
+
+// Regression: the tool line sliced every result to 100 characters and
+// appended "..." unconditionally, so a short result like "OK" rendered
+// as "OK..." and implied output that was never truncated. The ellipsis
+// belongs only on results that were actually cut, matching the guarded
+// pattern in tools/git/git-commit.tsx.
+test.serial(
+	'short tool results render without a truncation ellipsis',
+	async t => {
+		initSubagentSession('agent-a', 'explorer', [
+			{role: 'user', content: 'list the directory'},
+			{role: 'tool', name: 'list_directory', content: 'OK'},
+		]);
+
+		const {frames, unmount} = render(
+			wrap(
+				<SubagentView
+					agentId="agent-a"
+					onDetach={() => {}}
+					reasoningExpanded={false}
+				/>,
+			),
+		);
+		await tick();
+
+		const output = allOutput(frames);
+		t.regex(output, /⚒ list_directory: OK/);
+		t.notRegex(output, /OK\.\.\./);
+		unmount();
+	},
+);
+
+// The companion case: a result past the limit still carries the ellipsis,
+// so the guard cannot pass by never truncating. The box wraps long lines,
+// so count the rendered characters instead of matching one line.
+test.serial('long tool results keep the truncation ellipsis', async t => {
+	const long = 'x'.repeat(150);
+
+	initSubagentSession('agent-a', 'explorer', [
+		{role: 'user', content: 'read the file'},
+		{role: 'tool', name: 'read_file', content: long},
+	]);
+
+	const {frames, lastFrame, unmount} = render(
+		wrap(
+			<SubagentView
+				agentId="agent-a"
+				onDetach={() => {}}
+				reasoningExpanded={false}
+			/>,
+		),
+	);
+	await tick();
+
+	const output = stripAnsi(lastFrame() ?? '');
+	// Isolate the tool line and its wrapped continuation: the status bar
+	// after it carries its own x in the agent name.
+	const toolOutput = output.slice(
+		output.indexOf('⚒ read_file:'),
+		output.indexOf('Main Session'),
+	);
+	t.is((toolOutput.match(/x/g) ?? []).length, 100);
+	t.regex(output, /\.\.\./);
+	unmount();
+});

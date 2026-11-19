@@ -36,7 +36,10 @@ home with one manifest and one shareable artifact.
 ## Single-file form
 
 Drop one `.md` into the right flat dir. Frontmatter declares the
-member; the file basename is the skill name.
+member; the file basename is the skill name (a namespaced command such
+as `commands/refactor/dry.md` is the skill `refactor:dry`). A command,
+an agent and a tool may share a name - they show up as separate
+entries in `/skills`.
 
 ```markdown
 <!-- .nanocoder/agents/docs-agent.md -->
@@ -71,10 +74,11 @@ A directory under `.nanocoder/skills/<name>/` with `skill.yaml`:
 
 ```yaml
 # skill.yaml
-name: k8s
-description: Kubernetes operational helpers.
-version: 0.2.0
-author: you@example.com
+name: k8s                        # required, kebab-case: ^[a-z][a-z0-9-]*$
+description: Kubernetes operational helpers.   # required
+version: 0.2.0                   # optional
+author: you@example.com          # optional
+tags: [kubernetes, ops]          # optional, informational (not used for matching)
 
 subscribe:
   - kind: file.changed
@@ -85,10 +89,14 @@ tools_visibility:
   default: scoped
 ```
 
+`tools_visibility: scoped` (or `global`) is shorthand for the
+`default:` mapping above.
+
 Inside a bundle, members are aware of each other:
 
 - A bundle's subagent automatically gets its sibling tools in its
-  effective tool list. You do not list `k8s_pods` and `k8s_logs` in
+  effective tool list, even when its frontmatter has a `tools:`
+  allowlist. You do not list `k8s_pods` and `k8s_logs` in
   `agents/k8s-agent.md`'s `tools:` field - they are siblings.
 - Scoped tools (`tools_visibility.default: scoped`, the default for
   bundles) are hidden from the global tool list - only the bundle's
@@ -104,7 +112,8 @@ Inside a bundle, members are aware of each other:
   `/k8s:status`. Shortcut: `commands/<bundleName>.md` (e.g.
   `commands/k8s.md`) keeps the bare bundle name (`/k8s`).
 - `agents/` — **exactly one (or zero)**. The agent is the bundle's
-  brain; if you need a second one, that's a second skill.
+  brain; if you need a second one, that's a second skill. Extra `.md`
+  files in `agents/` are ignored and reported as a load error.
 - `tools/` — **any number**. Tools are named by their frontmatter
   `name:` (snake_case), independent of the bundle name.
 
@@ -140,13 +149,44 @@ subscribe:
     cron: "0 9 * * MON"
 ```
 
-Accepted manifest target kinds are `command:`, `agent:`, and `tool:`.
-`skill:` is parsed for forward compatibility, but registering it today
-raises a clear "not supported yet" error instead of loading a dead
-subscription.
+Inside a bundle, member frontmatter must not set `target:` itself - a
+member's subscription always targets that member. Put explicit targets
+in `skill.yaml`.
 
-v1 event kinds: `file.changed` (filter: `paths`, `eventKinds`) and
-`schedule.cron` (filter: `cron`).
+Target kinds:
+
+- `agent:` - the daemon runs the subagent with a prompt describing the
+  event and its payload.
+- `command:` - the daemon renders the command (with no arguments, so
+  parameter defaults apply) and runs it as an unattended agent run,
+  with the event payload appended. In a bundle manifest, name the
+  member as it appears in `commands/` (`command:status`, not
+  `command:k8s:status`).
+- `tool:` - rejected. A triggered tool call has nothing to fill in its
+  arguments, so the subscription reports an error at load time. Point
+  the subscription at an agent or command that calls the tool instead.
+- `skill:` - parsed for forward compatibility, but registering it
+  today raises a clear "not supported yet" error.
+
+Event kinds:
+
+- `file.changed` - filters: `paths` (glob list; omit it to match every
+  file) and `eventKinds` (any of `add`, `change`, `unlink`; omit it to
+  match all three). Globs support `*`, `**`, `?` and `{a,b}`; negation
+  (`!`) is not supported. Changes under `.git/`, `node_modules/` and
+  `.nanocoder/` are never reported.
+- `schedule.cron` - filter: `cron`, a standard 5-field expression (or
+  6-field with seconds). An invalid expression is rejected when the
+  file loads instead of reaching the daemon.
+- `ci.job.failed` - filter: `branches`, glob-matched against the failing
+  run's branch; omitted matches every branch. Only ever fires when the
+  daemon's CI watch is active - see
+  [CI Watch Configuration](../configuration/preferences.md#ci-watch-configuration).
+
+A malformed `subscribe:` block on a single-file command, agent or tool
+is logged and dropped: the member still loads, just without triggers.
+In `skill.yaml` it fails the bundle's load, with the error shown by
+`/skills` and in the daemon log.
 
 ### `confirm: true`
 
@@ -172,15 +212,29 @@ the daemon's job.
 ```
 nanocoder daemon start      # spawn the per-project daemon detached
 nanocoder daemon stop       # SIGTERM the daemon, wait for lockfile cleanup
-nanocoder daemon status     # report running / not running, PID, uptime
+nanocoder daemon status     # running / not running, PID, uptime, socket, CI trust level
 nanocoder daemon logs       # tail .nanocoder/daemon.log (last 64KB)
 nanocoder daemon install    # install per-user auto-start
 nanocoder daemon uninstall  # remove the auto-start unit
 ```
 
+`daemon start` refuses to start in a directory you haven't trusted, because triggered runs execute tools without confirmation. Trust the directory by running `nanocoder` interactively there once, pass `--trust-directory` to bypass the check for that one start (not saved), or set `NANOCODER_TRUST_DIRECTORY=1` to trust it and save that for future runs. `NANOCODER_TRUST_DIRECTORY` only counts when it comes from your shell environment; a project `.env` cannot set it. To trust a folder without starting a session, run `nanocoder trust --status` to see what it will run and its fingerprint, then `nanocoder trust --grant <fingerprint>`.
+
+Trust is tied to a fingerprint of what the folder will run, and that fingerprint covers every skill, agent and command with a `subscribe:` block. Adding, removing or editing a subscription (including installing a bundle with subscriptions via `nanocoder skills add`) changes the fingerprint, so the next `daemon start` is refused with "changed since you trusted it" until you trust the folder again with one of the methods above. Starting with a different `--trust` level while a daemon is already running does not apply it; see [Verify](verify.md).
+
+`daemon install` is not gated: it only writes the auto-start unit, and the
+gate applies when the daemon actually boots. Installing in an untrusted
+directory therefore succeeds and says so — install prints a warning naming
+both remedies — and every autostart boot after it is refused until you
+trust the directory. That refusal comes from `daemon start` itself, before
+the daemon child that owns `daemon.log` is spawned, so it goes to the
+`daemon start` command's own output — under an autostart service, wherever
+the service manager sends it — not to `daemon.log`.
+
 The daemon writes a JSON lockfile at `.nanocoder/daemon.json` (PID,
 socket path, start time) and an append-only log at
-`.nanocoder/daemon.log`. Stale lockfiles (PID no longer alive) are
+`.nanocoder/daemon.log`. Stale lockfiles (PID no longer alive, or nothing
+listening on the recorded socket because the OS reused the PID) are
 reaped automatically on the next `daemon start` or `daemon status`.
 
 Auto-start ships for **macOS** (LaunchAgent under
@@ -200,13 +254,22 @@ the socket moves to `<tmpdir>/nanocoder-daemon-<hash>.sock` instead. The
 bound path is recorded in the lockfile, so clients always read it back
 rather than recomputing it. `nanocoder daemon stop`
 prefers an IPC shutdown request (clean drain of the event loop) and
-falls back to `SIGTERM` only if the daemon is unreachable, so stops are
-graceful on Windows too where `SIGTERM` would otherwise be force-kill.
+falls back to `SIGTERM` only if the daemon answered the connection but not
+the request, so stops are graceful on Windows too where `SIGTERM` would
+otherwise be force-kill. If the daemon cannot be reached at all, `stop`
+never signals the recorded PID, which could belong to another program.
 
-Internally, the daemon runs every triggered subagent in **`headless`**
-mode (no foreground prompts, no `ask_user`, no `agent`). The
-`confirm: true` opt-in below switches a specific subscription to plan
-mode instead.
+Internally, the daemon runs every triggered agent or command in
+**`headless`** mode. Headless runs have no foreground prompts, and they
+remove only `ask_user`, `agent` and `write_plan` from the tool list.
+Custom tools are offered only when they declare `approval: never`.
+Everything else runs **unattended, without confirmation**: built-in tools
+such as `execute_bash`, `write_file`, `string_replace` and `git_commit`,
+and every tool from every enabled MCP server. Setting `"enabled": false`
+on an MCP server is the only way to keep its tools out of headless runs.
+Scope triggered skills carefully, and use `confirm: true` (above) to run
+a subscription in plan mode instead when it should not change anything
+on its own.
 
 Triggered runs are subagent runs, so the
 [`maxRepeatedToolCalls`](../configuration/index.md#retry-limits) cap
@@ -335,7 +398,10 @@ Skills load from three levels, highest priority first:
 - **personal / global** - the same layout under your platform config dir
   (`~/.config/nanocoder/` on Linux, `~/Library/Preferences/nanocoder/` on
   macOS, or `$NANOCODER_CONFIG_DIR`). Available in every repo on the machine.
-- **built-in** - shipped with nanocoder.
+- **built-in** - shipped with nanocoder. Today that is three subagents:
+  `explore`, plus `verify-pr-review` and `verify-ci-investigator`, which
+  [Verify](verify.md) and the daemon's CI watch use. No built-in bundles
+  ship yet.
 
 A project skill shadows a personal one of the same name, which shadows a
 built-in. To reuse a skill you wrote in one repo everywhere, move it up a
@@ -367,7 +433,8 @@ The legacy scheduler (the `ScheduleRunner` that read
 happen exclusively through skill subscriptions executed by the daemon.
 
 Move each entry into the targeted command's frontmatter, or into a bundle
-manifest:
+manifest. When the cron fires, the daemon renders the command and runs it
+as an unattended agent run in `headless` mode:
 
 Before:
 ```json

@@ -1,6 +1,7 @@
 import {constants} from 'node:fs';
 import {access} from 'node:fs/promises';
 import {resolve as resolvePath} from 'node:path';
+import {fileURLToPath} from 'node:url';
 import type {JSONValue} from 'ai';
 import {Box, Text} from 'ink';
 import React from 'react';
@@ -8,10 +9,31 @@ import ToolMessage from '@/components/tool-message';
 import {TIMEOUT_LSP_DIAGNOSTICS_MS} from '@/constants';
 import {ThemeContext} from '@/hooks/useTheme';
 import {DiagnosticSeverity, getLSPManager} from '@/lsp/index';
+import {getProjectRoot, getSafeSessionCwd} from '@/services/session-cwd';
 import type {NanocoderToolExport, ToolExecuteResult} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
+import {isValidFilePath, resolveFilePath} from '@/utils/fs/path-validation';
 import {type DiagnosticInfo, getVSCodeServer} from '@/vscode/index';
+
+/**
+ * Convert an LSP document URI to a filesystem path for display.
+ *
+ * Uses `fileURLToPath` so Windows drive letters (`file:///C:/src/app.ts`),
+ * UNC authorities (`file://server/share/app.ts`) and percent-encoding are
+ * handled correctly. Non-file URIs, and file URIs the current platform can't
+ * represent, are returned unchanged.
+ */
+export function uriToPath(uri: string, options?: {windows?: boolean}): string {
+	if (!uri.startsWith('file://')) {
+		return uri;
+	}
+	try {
+		return fileURLToPath(uri, options);
+	} catch {
+		return uri;
+	}
+}
 
 interface GetDiagnosticsArgs {
 	path?: string;
@@ -187,6 +209,12 @@ const executeGetDiagnostics = async (
 	if (args.path) {
 		// Check if we have LSP support for this file type
 		if (!lspManager.hasLanguageSupport(args.path)) {
+			// A crashed server is not the same as an unsupported file type: say
+			// so, rather than suggesting the type was never covered.
+			const reason = lspManager.getUnavailableReason(args.path);
+			if (reason) {
+				return `No diagnostics available for ${args.path}: ${reason}`;
+			}
 			return `No language server available for file type: ${args.path}. Try running with --vscode flag to use VS Code's TypeScript diagnostics.`;
 		}
 
@@ -246,8 +274,7 @@ const executeGetDiagnostics = async (
 	const structured: StructuredDiagnostic[] = [];
 
 	for (const {uri, diagnostics} of allDiagnostics) {
-		// Convert URI to path
-		const path = uri.startsWith('file://') ? uri.slice(7) : uri;
+		const path = uriToPath(uri);
 		lines.push(`\n${path}:`);
 
 		for (const diag of diagnostics) {
@@ -367,8 +394,27 @@ const getDiagnosticsValidator = async (
 		return {valid: true};
 	}
 
+	// Same project boundary as read_file: the language server is handed the
+	// file's contents, so a path outside the project must not reach it.
+	const cwd = getSafeSessionCwd();
+	const root = getProjectRoot();
+	if (!isValidFilePath(args.path, root)) {
+		return {
+			valid: false,
+			error: `Invalid file path: "${args.path}". Path must be within the project directory.`,
+		};
+	}
+	let absPath: string;
+	try {
+		absPath = resolveFilePath(args.path, cwd, root);
+	} catch (error) {
+		return {
+			valid: false,
+			error: `Path validation failed: ${formatError(error)}`,
+		};
+	}
+
 	// Validate that the file exists
-	const absPath = resolvePath(args.path);
 
 	try {
 		await access(absPath, constants.F_OK);

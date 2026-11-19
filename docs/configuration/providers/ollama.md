@@ -28,13 +28,13 @@ No API key is required for local use.
 
 ## Context Length
 
-By default, Ollama uses a 2048 token context window which is too small for agentic coding. Set the context length as high as your system's memory can handle — larger context means the model can track more of the conversation history, tool calls, and file contents.
+Ollama's default context window is small (a few thousand tokens, depending on the Ollama version), which is too small for agentic coding. Set the context length as high as your system's memory can handle. A larger context means the model can track more of the conversation history, tool calls, and file contents.
 
 ```bash
-OLLAMA_NUM_CTX=32768 ollama serve
+OLLAMA_CONTEXT_LENGTH=32768 ollama serve
 ```
 
-Or set it permanently in your environment.
+Or set it permanently in your environment, or per model with `PARAMETER num_ctx 32768` in a Modelfile.
 
 ### Signs of an Insufficient Context Limit
 

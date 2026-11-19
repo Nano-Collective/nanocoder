@@ -1,4 +1,4 @@
-import {mkdtempSync} from 'node:fs';
+import {mkdirSync, mkdtempSync, rmSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
@@ -15,6 +15,12 @@ resetPreferencesCache();
 
 import type {SettingsTabId} from '@/app/components/settings-constants';
 import type {ActiveMode} from '@/hooks/useAppState';
+import {
+	resetSessionContextLimit,
+	setSessionContextLimit,
+} from '@/models/index';
+import {readFileTool} from '@/tools/read-file';
+import {clearReadTracker} from '@/tools/runtime/read-tracker';
 import type {LLMClient, Message} from '@/types/core';
 import type {AIProviderConfig, TuneConfig} from '@/types/config';
 import {useModeHandlers} from './useModeHandlers';
@@ -63,6 +69,7 @@ interface ProbeProps {
 	client?: LLMClient | null;
 	currentModel?: string;
 	currentProvider?: string;
+	messages?: Message[];
 }
 
 function setup(probe: ProbeProps = {}) {
@@ -87,8 +94,8 @@ function setup(probe: ProbeProps = {}) {
 		setCurrentProvider,
 		setCurrentProviderConfig,
 		setMessages,
-		messages: [],
-		getMessageTokens: () => 0,
+		messages: probe.messages ?? [],
+		getMessageTokens: m => m.content.length,
 		setActiveMode,
 		setIsSettingsMode,
 		setSettingsActiveTab,
@@ -239,6 +246,91 @@ test('handleModelSelect on same provider with no client only exits mode', async 
 	t.deepEqual(setActiveMode.calls, [[null]]);
 });
 
+test.serial('handleModelSelect on another provider builds a client for it', async t => {
+	process.env.NANOCODER_PROVIDERS = JSON.stringify([
+		{
+			name: 'other-provider',
+			baseUrl: 'http://127.0.0.1:9/v1',
+			apiKey: 'test',
+			models: ['other-model'],
+		},
+	]);
+	try {
+		const client = createMockClient('current-model');
+		const {handlers, setClient, setCurrentProvider, setCurrentModel} = setup({
+			client,
+		});
+
+		t.true(
+			await handlers.handleModelSelect('other-provider', 'other-model', true),
+		);
+
+		t.is(setClient.calls.length, 1);
+		const newClient = setClient.calls[0]![0]!;
+		t.not(newClient, client);
+		t.is(newClient.getCurrentModel(), 'other-model');
+		t.deepEqual(setCurrentProvider.calls, [['other-provider']]);
+		t.deepEqual(setCurrentModel.calls, [['other-model']]);
+	} finally {
+		delete process.env.NANOCODER_PROVIDERS;
+	}
+});
+
+test.serial('handleModelSelect keeps the current client and labels when the provider is gone', async t => {
+	const client = createMockClient('current-model');
+	const {handlers, setClient, setCurrentProvider, setCurrentModel, addToChatQueue} =
+		setup({client});
+
+	t.false(
+		await handlers.handleModelSelect('gone-provider', 'gone-model', true),
+	);
+
+	t.is(setClient.calls.length, 0);
+	t.is(setCurrentProvider.calls.length, 0);
+	t.is(setCurrentModel.calls.length, 0);
+	t.is(client.getCurrentModel(), 'current-model');
+	t.is(addToChatQueue.calls.length, 1, 'reports why it did not switch');
+});
+
+test.serial('handleModelSelect sizes the history it is given, not the current one', async t => {
+	// /resume hands over the resumed session's messages: that is what the new
+	// model continues, while `messages` still holds the conversation being left.
+	const long: Message[] = [{role: 'user', content: 'x'.repeat(100)}];
+	const short: Message[] = [{role: 'user', content: 'short'}];
+	setSessionContextLimit(50);
+	try {
+		const leaving = setup({
+			client: createMockClient('old-model'),
+			currentModel: 'old-model',
+			messages: long,
+		});
+		await leaving.handlers.handleModelSelect(
+			'current-provider',
+			'new-model',
+			true,
+			short,
+		);
+		t.is(leaving.addToChatQueue.calls.length, 0);
+
+		const resuming = setup({
+			client: createMockClient('old-model'),
+			currentModel: 'old-model',
+			messages: short,
+		});
+		await resuming.handlers.handleModelSelect(
+			'current-provider',
+			'new-model',
+			true,
+			long,
+		);
+		t.is(resuming.addToChatQueue.calls.length, 1);
+		const warning = resuming.addToChatQueue.calls[0]![0] as React.ReactElement;
+		t.true(String(warning.key).includes('-model-context-overflow-'));
+	} finally {
+		resetSessionContextLimit();
+	}
+});
+
 test('handleTuneSelect persists tune, clears history, and exits mode', async t => {
 	const client = createMockClient();
 	const {handlers, setTune, setMessages, setActiveMode, addToChatQueue} = setup(
@@ -306,6 +398,66 @@ test('reloadProviders leaves the conversation and settings panel intact', async 
 	t.is(setIsSettingsMode.calls.length, 0, 'leaves the settings panel open');
 	t.is(addToChatQueue.calls.length, 1, 'reports the outcome exactly once');
 });
+
+async function withReadStub(
+	t: import('ava').ExecutionContext,
+	clearHistory: () => Promise<unknown>,
+) {
+	clearReadTracker();
+	const dir = join(process.cwd(), `mode-read-stub-${Date.now()}`);
+	mkdirSync(dir, {recursive: true});
+	const file = join(dir, 'kept.ts');
+	writeFileSync(file, 'export const kept = 1;\n');
+	const read = () =>
+		readFileTool.tool.execute!(
+			{path: file},
+			{toolCallId: 'read', messages: []},
+		) as Promise<string>;
+	try {
+		t.true((await read()).includes('kept = 1'));
+		t.true((await read()).includes('already in context'));
+		await clearHistory();
+		t.true((await read()).includes('kept = 1'));
+	} finally {
+		clearReadTracker();
+		rmSync(dir, {recursive: true, force: true});
+	}
+}
+
+test.serial('handleTuneSelect makes the next read_file return the file', async t => {
+	const {handlers} = setup();
+	await withReadStub(t, () =>
+		handlers.handleTuneSelect({
+			enabled: false,
+			toolProfile: 'minimal',
+			aggressiveCompact: false,
+		} as unknown as TuneConfig),
+	);
+});
+
+test.serial(
+	'handleConfigWizardComplete makes the next read_file return the file',
+	async t => {
+		process.env.NANOCODER_PROVIDERS = JSON.stringify({
+			providers: [
+				{
+					name: 'LocalTest',
+					baseUrl: 'http://localhost:8000/v1',
+					models: ['test-model'],
+				},
+			],
+		});
+		const {handlers, setMessages} = setup();
+		try {
+			await withReadStub(t, () =>
+				handlers.handleConfigWizardComplete('agents.config.json'),
+			);
+			t.deepEqual(setMessages.calls, [[[]]]);
+		} finally {
+			delete process.env.NANOCODER_PROVIDERS;
+		}
+	},
+);
 
 test('enterSettingsMode forwards the requested tab', t => {
 	const {handlers, setSettingsActiveTab} = setup();

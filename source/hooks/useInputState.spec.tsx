@@ -4,7 +4,15 @@ import {PlaceholderType} from '../types/hooks';
 import test from 'ava';
 import {cleanup, render} from 'ink-testing-library';
 import React from 'react';
-import {MAX_UNDO_STACK, useInputState} from './useInputState';
+import {
+	applyEdit,
+	applyRedo,
+	applyUndo,
+	type EditorState,
+	MAX_UNDO_STACK,
+	reconcileStaleEdit,
+	useInputState,
+} from './useInputState';
 
 console.log('\nuseInputState.spec.ts');
 
@@ -1165,4 +1173,259 @@ test('redo stack is capped at MAX_UNDO_STACK', t => {
 	instance.rerender(<TestComponent />);
 
 	t.true(currentHook!.redoStack.length < MAX_UNDO_STACK);
+});
+
+// ============================================================================
+// insertPaste — cursor-aware bracketed paste
+// ============================================================================
+
+test('insertPaste with cursorOffset splices a short paste at the caret and returns the new cursor', t => {
+	const {instance} = setupTest();
+
+	currentHook!.setInput('hello world');
+	instance.rerender(<TestComponent />);
+
+	const result = currentHook!.insertPaste('PASTED', 5);
+	instance.rerender(<TestComponent />);
+
+	t.deepEqual(result, {cursorOffset: 11});
+	t.is(currentHook!.input, 'helloPASTED world');
+});
+
+test('insertPaste with cursorOffset returns the cursor after the placeholder for a long paste', t => {
+	const {instance} = setupTest();
+
+	currentHook!.setInput('hello world');
+	instance.rerender(<TestComponent />);
+
+	const pasted = 'x'.repeat(801);
+	const result = currentHook!.insertPaste(pasted, 5);
+	instance.rerender(<TestComponent />);
+
+	t.truthy(result);
+	// Placeholder label is `[Paste #1: 801 chars]`, spliced at offset 5 on its
+	// own line so "hello" does not fuse with the paste at submit. The caret
+	// counts the separator too.
+	t.is(result!.cursorOffset, 5 + '\n[Paste #1: 801 chars]'.length);
+	t.true(currentHook!.input.startsWith('hello\n[Paste #1: 801 chars] world'));
+});
+
+test('insertPaste without a cursorOffset appends and returns null (legacy behaviour)', t => {
+	const {instance} = setupTest();
+
+	currentHook!.setInput('hello');
+	instance.rerender(<TestComponent />);
+
+	const result = currentHook!.insertPaste('world');
+	instance.rerender(<TestComponent />);
+
+	t.is(result, null);
+	t.is(currentHook!.input, 'helloworld');
+});
+
+test('insertPaste with an empty payload is a no-op', t => {
+	const {instance} = setupTest();
+
+	currentHook!.setInput('hello');
+	instance.rerender(<TestComponent />);
+
+	const result = currentHook!.insertPaste('', 2);
+	instance.rerender(<TestComponent />);
+
+	t.is(result, null);
+	t.is(currentHook!.input, 'hello');
+});
+
+test('insertPaste at cursor 0 inserts at the start', t => {
+	const {instance} = setupTest();
+
+	currentHook!.setInput('world');
+	instance.rerender(<TestComponent />);
+
+	const result = currentHook!.insertPaste('hello ', 0);
+	instance.rerender(<TestComponent />);
+
+	t.deepEqual(result, {cursorOffset: 6});
+	t.is(currentHook!.input, 'hello world');
+});
+
+test('insertPaste at cursor equal to value length appends', t => {
+	const {instance} = setupTest();
+
+	currentHook!.setInput('abc');
+	instance.rerender(<TestComponent />);
+
+	const result = currentHook!.insertPaste('xyz', 3);
+	instance.rerender(<TestComponent />);
+
+	t.deepEqual(result, {cursorOffset: 6});
+	t.is(currentHook!.input, 'abcxyz');
+});
+
+// reconcileStaleEdit: TextInput reported `edited`, built from `base`, but the
+// input has since become `latest` (a paste or undo landed out of band).
+test('reconcileStaleEdit passes the edit through when nothing changed', t => {
+	t.is(reconcileStaleEdit('abc', 'abcd', 'abc'), 'abcd');
+});
+
+test('reconcileStaleEdit puts typing after an appended paste', t => {
+	t.is(reconcileStaleEdit('abc', 'abcx', 'abc[P]'), 'abc[P]x');
+	t.is(reconcileStaleEdit('', 'x', '[P]'), '[P]x');
+});
+
+test('reconcileStaleEdit keeps key order across a burst', t => {
+	// Second key of a burst: TextInput built "xy" on its own "x", while the
+	// input already holds the paste and the first key.
+	t.is(reconcileStaleEdit('x', 'xy', '[P]x'), '[P]xy');
+});
+
+test('reconcileStaleEdit replays a deletion without touching the paste', t => {
+	t.is(reconcileStaleEdit('abc', 'ab', 'abc[P]'), 'ab[P]');
+});
+
+test('reconcileStaleEdit replays an edit before the change point', t => {
+	t.is(reconcileStaleEdit('abc', 'Xabc', 'abc[P]'), 'Xabc[P]');
+	t.is(reconcileStaleEdit('abc', 'bc', 'abc[P]'), 'bc[P]');
+});
+
+test('reconcileStaleEdit builds on a cleared input', t => {
+	// Submit cleared the input; the next key must not revive the old text.
+	t.is(reconcileStaleEdit('hello', 'hellox', ''), 'x');
+});
+
+test('reconcileStaleEdit lands an edit inside replaced text at its end', t => {
+	// "abcdef" became "aXYf"; an insert where "cd" used to be has nowhere of
+	// its own left, so it goes after the replacement.
+	t.is(reconcileStaleEdit('abcdef', 'abc!def', 'aXYf'), 'aXY!f');
+});
+
+test('insertPaste builds on a key typed in the same batch', t => {
+	const {hook} = setupTest();
+
+	// No rerender between the two: the paste must read the ref, not the
+	// render-time state that still says "".
+	hook.updateInput('a');
+	hook.insertPaste('pasted');
+
+	t.is(hook.currentStateRef.current.displayValue, 'apasted');
+});
+
+test('resetInput clears the ref before the next render', t => {
+	const {hook, instance} = setupTest();
+
+	hook.updateInput('hello');
+	instance.rerender(<TestComponent />);
+	hook.resetInput();
+
+	t.is(hook.currentStateRef.current.displayValue, '');
+	// A key TextInput reports on top of the text it still shows builds on the
+	// cleared input instead.
+	hook.updateInput('hellox');
+	t.is(hook.currentStateRef.current.displayValue, 'x');
+});
+
+// setInputState replaces the input outside of typing (history recall, a
+// completion, a restored draft). Readers that run in the same stdin batch,
+// before a re-render, read currentStateRef: it must already hold the new
+// value, or Enter submits the old input and the next key edits it.
+test('setInputState updates currentStateRef immediately', t => {
+	const {hook} = setupTest();
+	hook.updateInput('draft');
+
+	hook.setInputState({displayValue: 'recalled', placeholderContent: {}});
+	t.is(hook.currentStateRef.current.displayValue, 'recalled');
+});
+
+test('a key typed in the same batch as setInputState edits the new input', t => {
+	const {hook, instance} = setupTest();
+	hook.updateInput('draft');
+	instance.rerender(<TestComponent />);
+	const rendered = currentHook!;
+
+	// TextInput still shows "draft" and reports its edit against it.
+	rendered.setInputState({displayValue: 'recalled', placeholderContent: {}});
+	rendered.updateInput('draft!');
+	t.is(rendered.currentStateRef.current.displayValue, 'recalled!');
+});
+
+test('setInput updates currentStateRef immediately', t => {
+	const {hook} = setupTest();
+	hook.updateInput('before');
+
+	hook.setInput('after');
+	t.is(hook.currentStateRef.current.displayValue, 'after');
+});
+
+// --- Editor state transitions (the store's only writers) ---
+
+const text = (displayValue: string): InputState => ({
+	displayValue,
+	placeholderContent: {},
+});
+const editor = (
+	current: string,
+	undo: string[] = [],
+	redo: string[] = [],
+): EditorState => ({
+	current: text(current),
+	undo: undo.map(text),
+	redo: redo.map(text),
+});
+const shape = (s: EditorState) => ({
+	current: s.current.displayValue,
+	undo: s.undo.map(e => e.displayValue),
+	redo: s.redo.map(e => e.displayValue),
+});
+
+test('applyEdit pushes the old input onto undo and clears redo', t => {
+	t.deepEqual(shape(applyEdit(editor('ab', ['a'], ['abc']), text('abd'))), {
+		current: 'abd',
+		undo: ['a', 'ab'],
+		redo: [],
+	});
+});
+
+test('applyUndo and applyRedo move one step between the stacks', t => {
+	const undone = applyUndo(editor('abc', ['a', 'ab'], []));
+	t.deepEqual(shape(undone), {current: 'ab', undo: ['a'], redo: ['abc']});
+	t.deepEqual(shape(applyRedo(undone)), {
+		current: 'abc',
+		undo: ['a', 'ab'],
+		redo: [],
+	});
+});
+
+test('undo and redo with an empty stack return the same state object', t => {
+	const state = editor('x');
+	t.is(applyUndo(state), state);
+	t.is(applyRedo(state), state);
+});
+
+test('every transition caps the stack it pushes onto', t => {
+	const full = Array.from({length: MAX_UNDO_STACK}, (_, i) => `s${i}`);
+
+	const edited = applyEdit(editor('now', full), text('next'));
+	t.is(edited.undo.length, MAX_UNDO_STACK);
+	t.is(edited.undo.at(-1)!.displayValue, 'now');
+	t.is(edited.undo[0]!.displayValue, 's1', 'the oldest entry is dropped');
+
+	t.is(applyUndo(editor('now', ['prev'], full)).redo.length, MAX_UNDO_STACK);
+	t.is(applyRedo(editor('now', full, ['next'])).undo.length, MAX_UNDO_STACK);
+});
+
+test('currentStateRef keeps its identity and tracks every writer before a render', t => {
+	const {hook} = setupTest();
+	const ref = hook.currentStateRef;
+
+	hook.updateInput('typed');
+	t.is(ref.current.displayValue, 'typed');
+	hook.undo();
+	t.is(ref.current.displayValue, '');
+	hook.redo();
+	t.is(ref.current.displayValue, 'typed');
+	hook.setInputState(text('replaced'));
+	t.is(ref.current.displayValue, 'replaced');
+	hook.resetInput();
+	t.is(ref.current.displayValue, '');
+	t.is(currentHook!.currentStateRef, ref);
 });

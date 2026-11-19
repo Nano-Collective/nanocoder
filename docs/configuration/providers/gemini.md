@@ -22,6 +22,8 @@ Use Google's Gemini models with native API support via `@ai-sdk/google`.
 
 The `sdkProvider: "google"` field enables the native Google SDK, which is required for Gemini 3 models with tool calling support.
 
+`baseUrl` is optional and defaults to Google's endpoint shown above. Point it at a proxy or gateway that speaks the Gemini API if you need one; any `headers` on the entry are sent with every request.
+
 ## Setup
 
 1. Get an API key from [aistudio.google.com/apikey](https://aistudio.google.com/apikey)

@@ -2,6 +2,7 @@ import {ConfigurationError, createLLMClient} from '@/client-factory';
 import {commandRegistry} from '@/commands';
 import {lazyCommands} from '@/commands/lazy-registry';
 import {getAppConfig} from '@/config/index';
+import {loadAllProviderConfigs} from '@/config/mcp-config-loader';
 import {
 	getLastUsedModel,
 	loadPreferences,
@@ -9,21 +10,23 @@ import {
 } from '@/config/preferences';
 import {validateProjectConfigSecurity} from '@/config/validation';
 import {CustomCommandLoader} from '@/custom-commands/loader';
+import {resolveStartupProvider} from '@/hooks/startup-provider';
+import {setAvailableSubagents} from '@/input/prompt-processor';
 import {
 	setCommandLoaderGetter,
 	setToolManagerGetter,
 	setToolRegistryGetter,
 } from '@/message-handler';
 import {writeStatus} from '@/plain/writer';
+import {setAutoCommitClient} from '@/services/auto-commit';
 import {
 	recordSubagentApiCallForStats,
 	SubagentExecutor,
 } from '@/subagents/subagent-executor';
 import {getSubagentLoader} from '@/subagents/subagent-loader';
 import {setAgentToolExecutor, setAvailableAgentNames} from '@/tools/agent-tool';
-import {ToolManager} from '@/tools/tool-manager';
-import type {LLMClient, MCPInitResult} from '@/types/index';
-import {setAvailableSubagents} from '@/utils/prompt-processor';
+import {describeSkippedMCPTools, ToolManager} from '@/tools/tool-manager';
+import type {DevelopmentMode, LLMClient, MCPInitResult} from '@/types/index';
 
 export interface PlainInitResult {
 	client: LLMClient;
@@ -36,6 +39,8 @@ export interface PlainInitResult {
 export interface PlainInitOptions {
 	cliProvider?: string;
 	cliModel?: string;
+	/** The run's mode, so its subagents are offered what the main agent is. */
+	developmentMode?: DevelopmentMode;
 }
 
 /**
@@ -56,17 +61,38 @@ export async function initializePlain(
 	setCommandLoaderGetter(() => customCommandLoader);
 	commandRegistry.registerLazy(lazyCommands);
 
-	const preferredProvider = options.cliProvider || preferences.lastProvider;
+	// Same rule as the TUI: a saved provider that has since been renamed or
+	// removed falls back to the first configured one instead of failing the
+	// run; an explicit --provider stays strict.
+	const {provider: preferredProvider, staleName} = resolveStartupProvider(
+		options.cliProvider,
+		undefined,
+		preferences.lastProvider,
+		loadAllProviderConfigs().map(p => p.name),
+	);
+	if (staleName) {
+		writeStatus(
+			`Saved provider '${staleName}' is not in agents.config.json — falling back to the first configured provider.`,
+		);
+	}
 	const preferredModel = options.cliModel;
 
 	let client: LLMClient;
 	let actualProvider: string;
 	try {
-		const result = await createLLMClient(preferredProvider, preferredModel);
+		const result = await createLLMClient(
+			preferredProvider,
+			preferredModel,
+			undefined,
+			{strictProvider: Boolean(options.cliProvider)},
+		);
 		client = result.client;
 		actualProvider = result.actualProvider;
 	} catch (error) {
 		if (error instanceof ConfigurationError) {
+			if (error.unreadableError) {
+				throw new Error(error.unreadableError);
+			}
 			throw new Error(
 				error.isEmptyConfig || error.message.includes('No providers configured')
 					? 'No providers configured. Run nanocoder interactively to set them up.'
@@ -95,12 +121,14 @@ export async function initializePlain(
 	}
 
 	updateLastUsed(actualProvider, finalModel);
+	setAutoCommitClient(client);
 
 	const subagentExecutor = new SubagentExecutor(
 		toolManager,
 		client,
-		process.cwd(),
-		'normal',
+		// No fixed root: an ACP session's subagents load from its own folder.
+		undefined,
+		options.developmentMode ?? 'normal',
 		recordSubagentApiCallForStats,
 	);
 	setAgentToolExecutor(subagentExecutor);
@@ -171,7 +199,16 @@ async function initializeMCP(toolManager: ToolManager): Promise<void> {
 	};
 
 	try {
-		await toolManager.initializeMCP(config.mcpServers, onProgress);
+		const results = await toolManager.initializeMCP(
+			config.mcpServers,
+			onProgress,
+			undefined,
+			config.tune,
+		);
+		for (const result of results) {
+			const warning = describeSkippedMCPTools(result);
+			if (warning) writeStatus(warning);
+		}
 	} catch (error) {
 		writeStatus(`MCP initialization error: ${String(error)}`);
 	}

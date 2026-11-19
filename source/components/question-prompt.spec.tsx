@@ -1,7 +1,7 @@
 import test from 'ava';
 import React, {useEffect, useState} from 'react';
 import {renderWithTheme} from '../test-utils/render-with-theme';
-import type {PendingQuestion} from '../utils/question-queue';
+import type {PendingQuestion} from '../tools/runtime/question-queue';
 import QuestionPrompt from './question-prompt';
 
 console.log(`\nquestion-prompt.spec.tsx – ${React.version}`);

@@ -14,8 +14,6 @@ import {
 	getLoggerConfig,
 	initializeLogger,
 	isLevelEnabled,
-	log,
-	console as structuredConsole,
 } from './index.js';
 
 // Import logger provider for reset functionality
@@ -133,30 +131,6 @@ test('isLevelEnabled checks log level correctly', t => {
 	t.true(isLevelEnabled('warn'), 'Warn should be enabled');
 	t.true(isLevelEnabled('error'), 'Error should be enabled');
 	t.true(isLevelEnabled('fatal'), 'Fatal should be enabled');
-});
-
-test('log convenience methods work correctly', t => {
-	const logger = initializeLogger({level: 'debug'});
-
-	t.notThrows(() => {
-		log.debug('Debug message');
-		log.info('Info message');
-		log.warn('Warning message');
-		log.error('Error message');
-		log.fatal('Fatal message');
-		log.http('HTTP message');
-		log.trace('Trace message');
-	}, 'Log methods should not throw');
-});
-
-test('structured console facade provides backward compatibility', t => {
-	t.notThrows(() => {
-		structuredConsole.log('Test log message');
-		structuredConsole.info('Test info message');
-		structuredConsole.warn('Test warning message');
-		structuredConsole.error('Test error message');
-		structuredConsole.debug('Test debug message');
-	}, 'Console facade methods should not throw');
 });
 
 test('flush and end methods work correctly', async t => {

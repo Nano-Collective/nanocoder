@@ -73,7 +73,8 @@ test('enhanceSystemPrompt appends skills section when relevant commands found', 
 	t.true(result.startsWith('base prompt'));
 	t.true(result.includes('## Available Skills'));
 	t.true(result.includes('Generate API documentation'));
-	t.true(result.includes('Tool restrictions listed in a Skill are enforced'));
+	// No command field restricts tools, so the prompt must not claim it.
+	t.false(result.includes('Tool restrictions'));
 });
 
 test('enhanceSystemPrompt includes examples when present', t => {

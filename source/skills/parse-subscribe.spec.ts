@@ -38,6 +38,31 @@ test('parses schedule.cron with cron expression', t => {
 	t.deepEqual(result, [{kind: 'schedule.cron', cron: '0 9 * * MON'}]);
 });
 
+test('parses ci.job.failed with branches', t => {
+	const result = parseSubscribeBlock([
+		{kind: 'ci.job.failed', branches: ['main', 'release/**']},
+	]);
+	t.deepEqual(result, [
+		{kind: 'ci.job.failed', branches: ['main', 'release/**']},
+	]);
+});
+
+test('parses ci.job.failed with no branches', t => {
+	const result = parseSubscribeBlock([{kind: 'ci.job.failed'}]);
+	t.deepEqual(result, [{kind: 'ci.job.failed'}]);
+});
+
+test('rejects bad ci.job.failed branches entry', t => {
+	t.throws(
+		() =>
+			parseSubscribeBlock([{kind: 'ci.job.failed', branches: [42]}]),
+		{
+			instanceOf: SubscribeParseError,
+			message: /branches must be an array/,
+		},
+	);
+});
+
 test('carries through target and confirm fields', t => {
 	const result = parseSubscribeBlock([
 		{
@@ -91,6 +116,16 @@ test('rejects schedule.cron without cron', t => {
 	});
 });
 
+test('rejects schedule.cron with an invalid cron expression', t => {
+	t.throws(
+		() => parseSubscribeBlock([{kind: 'schedule.cron', cron: 'not a cron'}]),
+		{
+			instanceOf: SubscribeParseError,
+			message: /is not a valid cron expression/,
+		},
+	);
+});
+
 test('rejects confirm that is not a boolean', t => {
 	t.throws(
 		() =>
@@ -139,4 +174,49 @@ test('error message identifies offending index', t => {
 			message: /subscribe\[1\]/,
 		},
 	);
+});
+
+test('unknown key on file.changed throws instead of widening the trigger', t => {
+	t.throws(
+		() => parseSubscribeBlock([{kind: 'file.changed', path: ['docs/**']}]),
+		{
+			instanceOf: SubscribeParseError,
+			message: /unknown key "path".*Did you mean "paths"\?/,
+		},
+	);
+});
+
+test('unknown key on file.ai-comment throws', t => {
+	t.throws(
+		() => parseSubscribeBlock([{kind: 'file.ai-comment', path: ['src/**']}]),
+		{instanceOf: SubscribeParseError, message: /unknown key "path"/},
+	);
+});
+
+test('unknown key on schedule.cron throws', t => {
+	t.throws(
+		() =>
+			parseSubscribeBlock([
+				{kind: 'schedule.cron', cron: '0 9 * * MON', paths: ['x']},
+			]),
+		{instanceOf: SubscribeParseError, message: /unknown key "paths"/},
+	);
+});
+
+test('unknown key on ci.job.failed throws', t => {
+	t.throws(
+		() => parseSubscribeBlock([{kind: 'ci.job.failed', branch: ['main']}]),
+		{
+			instanceOf: SubscribeParseError,
+			message: /unknown key "branch".*Did you mean "branches"\?/,
+		},
+	);
+});
+
+test('unknown key without a close match has no hint', t => {
+	const err = t.throws(
+		() => parseSubscribeBlock([{kind: 'file.changed', zzzzzz: 1}]),
+		{instanceOf: SubscribeParseError},
+	);
+	t.notRegex(err.message, /Did you mean/);
 });

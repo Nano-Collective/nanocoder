@@ -1,8 +1,9 @@
-import {mkdtempSync, rmSync, writeFileSync} from 'node:fs';
+import {mkdirSync, mkdtempSync, rmSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join, resolve} from 'node:path';
 import test from 'ava';
 import {buildToolCallMeta} from '@/acp/acp-tool-call';
+import {resetSessionCwd, setSessionCwd} from '@/services/session-cwd';
 import type {ToolCall} from '@/types/core';
 
 console.log('\nacp-tool-call.spec.ts');
@@ -145,6 +146,24 @@ test('buildToolCallMeta - execute_bash includes the command in the title', async
 	t.true(meta.title.includes('pnpm run build'));
 });
 
+test('buildToolCallMeta - bash_output is a read and includes the job id', async t => {
+	const meta = await buildToolCallMeta(
+		makeCall('bash_output', {job_id: 'job-123'}),
+	);
+	t.is(meta.kind, 'read');
+	t.is(meta.locations.length, 0);
+	t.is(meta.title, 'bash_output: job-123');
+});
+
+test('buildToolCallMeta - kill_bash is an execute and includes the job id', async t => {
+	const meta = await buildToolCallMeta(
+		makeCall('kill_bash', {job_id: 'job-123'}),
+	);
+	t.is(meta.kind, 'execute');
+	t.is(meta.locations.length, 0);
+	t.is(meta.title, 'kill_bash: job-123');
+});
+
 test('buildToolCallMeta - string_replace produces whole-file diff for unique match', async t => {
 	const dir = mkdtempSync(join(tmpdir(), 'acp-tc-'));
 	const file = join(dir, 'a.ts');
@@ -165,6 +184,51 @@ test('buildToolCallMeta - string_replace produces whole-file diff for unique mat
 		t.is(diff.newText, 'const a = 1;\nconst b = 3;\n');
 	} finally {
 		rmSync(dir, {recursive: true, force: true});
+	}
+});
+
+test('buildToolCallMeta - relative edit paths follow the session cwd', async t => {
+	const root = mkdtempSync(join(tmpdir(), 'acp-cwd-'));
+	const sub = join(root, 'sub');
+	mkdirSync(sub);
+	writeFileSync(join(root, 'note.txt'), 'launch text\n');
+	writeFileSync(join(sub, 'note.txt'), 'session text\n');
+	setSessionCwd(sub);
+	try {
+		const replace = await buildToolCallMeta(
+			makeCall('string_replace', {
+				path: 'note.txt',
+				old_str: 'session text',
+				new_str: 'edited text',
+			}),
+		);
+		t.is(replace.locations[0]?.path, join(sub, 'note.txt'));
+		const replaceDiff = replace.content[0] as any;
+		t.is(replaceDiff.oldText, 'session text\n');
+		t.is(replaceDiff.newText, 'edited text\n');
+
+		const write = await buildToolCallMeta(
+			makeCall('write_file', {path: 'note.txt', content: 'fresh\n'}),
+		);
+		t.is(write.locations[0]?.path, join(sub, 'note.txt'));
+		const writeDiff = write.content[0] as any;
+		t.is(writeDiff.oldText, 'session text\n');
+		t.is(writeDiff.path, join(sub, 'note.txt'));
+
+		const move = await buildToolCallMeta(
+			makeCall('file_op', {
+				operation: 'move',
+				path: 'note.txt',
+				destination: 'other.txt',
+			}),
+		);
+		t.deepEqual(
+			move.locations.map(location => location.path),
+			[join(sub, 'note.txt'), join(sub, 'other.txt')],
+		);
+	} finally {
+		resetSessionCwd();
+		rmSync(root, {recursive: true, force: true});
 	}
 });
 
@@ -204,6 +268,22 @@ test('buildToolCallMeta - write_file diff captures existing content as oldText',
 		const diff = meta.content[0] as any;
 		t.is(diff.oldText, 'old body');
 		t.is(diff.newText, 'new body');
+	} finally {
+		rmSync(dir, {recursive: true, force: true});
+	}
+});
+
+test('buildToolCallMeta - write_file diff keeps a CRLF file CRLF', async t => {
+	const dir = mkdtempSync(join(tmpdir(), 'acp-tc-'));
+	const file = join(dir, 'crlf.ts');
+	writeFileSync(file, 'a\r\nb\r\n');
+	try {
+		const meta = await buildToolCallMeta(
+			makeCall('write_file', {path: file, content: 'a\nc\n'}),
+		);
+		const diff = meta.content[0] as any;
+		t.is(diff.oldText, 'a\r\nb\r\n');
+		t.is(diff.newText, 'a\r\nc\r\n');
 	} finally {
 		rmSync(dir, {recursive: true, force: true});
 	}
@@ -310,6 +390,27 @@ test('buildToolCallMeta - string_replace diff shows $ tokens literally', async t
 		// The previewed diff has to be the diff that lands on disk.
 		const diff = meta.content[0] as any;
 		t.is(diff.newText, `#!/bin/sh\n${replacement}\nexit 0\n`);
+	} finally {
+		rmSync(dir, {recursive: true, force: true});
+	}
+});
+
+test('buildToolCallMeta - string_replace diff fits an LF edit to a CRLF file', async t => {
+	const dir = mkdtempSync(join(tmpdir(), 'acp-tc-'));
+	const file = join(dir, 'a.txt');
+	writeFileSync(file, 'one\r\ntwo\r\nthree\r\n');
+	try {
+		const meta = await buildToolCallMeta(
+			makeCall('string_replace', {
+				path: file,
+				old_str: 'one\ntwo',
+				new_str: 'ONE\nTWO',
+			}),
+		);
+		// The previewed diff has to be the diff that lands on disk.
+		const diff = meta.content[0] as any;
+		t.is(diff.oldText, 'one\r\ntwo\r\nthree\r\n');
+		t.is(diff.newText, 'ONE\r\nTWO\r\nthree\r\n');
 	} finally {
 		rmSync(dir, {recursive: true, force: true});
 	}

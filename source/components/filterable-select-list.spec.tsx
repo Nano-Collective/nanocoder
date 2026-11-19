@@ -323,3 +323,23 @@ test('Escape calls onCancel', async t => {
 	t.true(cancelled);
 	unmount();
 });
+
+test.serial('shrinks the window so the picker fits an 18-row terminal', t => {
+	const original = process.stdout.rows;
+	process.stdout.rows = 18;
+	try {
+		const many = Array.from({length: 20}, (_, i) => ({
+			label: `item-${String(i).padStart(2, '0')}`,
+			value: String(i),
+		}));
+		const {lastFrame, unmount} = renderWithTheme(
+			<FilterableSelectList items={many} onSelect={() => {}} />,
+		);
+		const shown = (lastFrame() ?? '').match(/item-\d\d/g) ?? [];
+		// 18 rows less the list, its titled box and the app frame (11).
+		t.is(shown.length, 7);
+		unmount();
+	} finally {
+		process.stdout.rows = original;
+	}
+});

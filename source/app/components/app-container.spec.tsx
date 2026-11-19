@@ -1,4 +1,4 @@
-import {mkdtempSync, rmSync} from 'node:fs';
+import {mkdirSync, mkdtempSync, rmSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
@@ -7,7 +7,6 @@ import stripAnsi from 'strip-ansi';
 import {renderWithTheme} from '../../test-utils/render-with-theme';
 import {
 	createStaticComponents,
-	formatBootSummaryGitLabel,
 	formatBootSummaryProjectLabel,
 } from './app-container';
 import type {AppContainerProps} from './app-container';
@@ -170,14 +169,14 @@ test('formatBootSummaryProjectLabel appends feature branch', t => {
 	);
 });
 
-test('formatBootSummaryProjectLabel marks the default branch', t => {
+test('formatBootSummaryProjectLabel leaves the default branch unmarked', t => {
 	t.is(
 		formatBootSummaryProjectLabel('/work/example', {
 			branch: 'main',
 			isDefault: true,
 			detached: false,
 		}),
-		'/work/example · main (default)',
+		'/work/example · main',
 	);
 });
 
@@ -195,38 +194,25 @@ test('formatBootSummaryProjectLabel marks detached HEAD', t => {
 // Keep legacy formatter coverage because /status and external callers share
 // the branch marker semantics.
 
-test('formatBootSummaryGitLabel renders feature branch with ⎇ prefix', t => {
-	t.is(
-		formatBootSummaryGitLabel({
-			branch: 'fix/read-file-empty',
-			isDefault: false,
-			detached: false,
-		}),
-		'⎇ fix/read-file-empty',
-	);
-});
-
-test('formatBootSummaryGitLabel marks the default branch', t => {
-	t.is(
-		formatBootSummaryGitLabel({
-			branch: 'main',
-			isDefault: true,
-			detached: false,
-		}),
-		'⎇ main',
-	);
-});
-
-test('formatBootSummaryGitLabel marks detached HEAD', t => {
-	t.is(
-		formatBootSummaryGitLabel({
-			branch: 'abc1234',
-			isDefault: false,
-			detached: true,
-		}),
-		'⎇ abc1234 (detached)',
-	);
-});
+test.serial(
+	'createStaticComponents boot summary includes working directory (cwd) rather than config dir',
+	t => {
+		const originalCwd = process.cwd;
+		try {
+			process.cwd = () => '/mock/working/dir';
+			const props: AppContainerProps = {
+				shouldShowWelcome: false,
+				currentProvider: 'mock-provider',
+				currentModel: 'mock-model',
+			};
+			const components = createStaticComponents(props);
+			const output = stripAnsi(renderWithTheme(<>{components}</>).lastFrame() ?? '');
+			t.regex(output, /\/mock\/working\/dir/);
+		} finally {
+			process.cwd = originalCwd;
+		}
+	},
+);
 
 test.serial(
 	'createStaticComponents boot summary includes git branch when inside a repo',
@@ -301,9 +287,18 @@ test.serial(
 test.serial(
 	'createStaticComponents narrow boot summary places branch on its own line',
 	t => {
+		// The summary reads the real checkout's branch and path, so pin both:
+		// a throwaway workspace whose .git/HEAD names a known branch. Against
+		// the developer's own checkout a long branch name wrapped onto a line
+		// of its own and the assertion depended on what was checked out.
+		const dir = mkdtempSync(join(tmpdir(), 'nanocoder-boot-test-'));
+		mkdirSync(join(dir, '.git'));
+		writeFileSync(join(dir, '.git', 'HEAD'), 'ref: refs/heads/feature\n');
+		const originalCwd = process.cwd();
 		const originalColumns = process.stdout.columns;
 		process.stdout.columns = 50;
 		try {
+			process.chdir(dir);
 			const props: AppContainerProps = {
 				shouldShowWelcome: false,
 				currentProvider: 'test-provider',
@@ -313,10 +308,40 @@ test.serial(
 			const {lastFrame, unmount} = renderWithTheme(<>{components}</>);
 			const output = lastFrame();
 			t.truthy(output);
-			// Branch label sits on a line by itself, separated from the
-			// provider/model line by a newline. Strip ANSI so color codes
-			// (present when CI forces color) don't break the adjacency match.
-			t.regex(stripAnsi(output!), /test-model[^\n]*\n\S+.*\s+·\s+\S+/);
+			// Branch label sits below the provider/model line, not beside it.
+			// Strip ANSI so color codes (present when CI forces color) don't
+			// break the match, and join the later lines, since the temp
+			// workspace path is itself wider than 50 columns.
+			const lines = stripAnsi(output!).split('\n');
+			const modelLine = lines.findIndex(line => line.includes('test-model'));
+			t.true(modelLine >= 0);
+			t.regex(lines[modelLine] ?? '', /test-model\s*$/);
+			t.regex(lines.slice(modelLine + 1).join(' '), /\S\s+·\s+feature\b/);
+			unmount();
+		} finally {
+			process.stdout.columns = originalColumns;
+			process.chdir(originalCwd);
+			rmSync(dir, {recursive: true, force: true});
+		}
+	},
+);
+
+test.serial(
+	'createStaticComponents narrow boot summary keeps the workspace when the model is unknown',
+	t => {
+		const originalColumns = process.stdout.columns;
+		process.stdout.columns = 50;
+		try {
+			const components = createStaticComponents({
+				shouldShowWelcome: false,
+				currentProvider: 'test-provider',
+				currentModel: '',
+			});
+			const {lastFrame, unmount} = renderWithTheme(<>{components}</>);
+			const output = stripAnsi(lastFrame() ?? '');
+			// The wide layout falls back to the workspace line; narrow used to
+			// render nothing at all.
+			t.true(output.replace(/\s+/g, '').includes(process.cwd().split('/').pop()!));
 			unmount();
 		} finally {
 			process.stdout.columns = originalColumns;

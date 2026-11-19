@@ -12,12 +12,16 @@
  * callers, since they know which surface they are parsing.
  */
 
+import {validateCron} from '@/schedule/cron';
 import type {
+	CiJobFailedTrigger,
+	FileAiCommentTrigger,
 	FileChangedTrigger,
 	FileChangeEventKind,
 	ScheduleCronTrigger,
 	SkillTrigger,
 } from '@/types/skills';
+import {notifyError} from '@/utils/message-queue-core';
 
 const FILE_EVENT_KINDS: ReadonlySet<FileChangeEventKind> = new Set([
 	'add',
@@ -49,6 +53,29 @@ export function parseSubscribeBlock(raw: unknown): SkillTrigger[] | undefined {
 	return raw.map((entry, index) => parseTrigger(entry, index));
 }
 
+/**
+ * Parse a `subscribe:` block from a single-file command, agent or tool.
+ * A malformed block is logged and dropped: the file still loads, just
+ * without triggers. All three member kinds share this so a bad block is
+ * handled the same way everywhere.
+ */
+export function parseSubscribeBlockOrWarn(
+	raw: unknown,
+	filePath: string,
+): SkillTrigger[] | undefined {
+	try {
+		return parseSubscribeBlock(raw);
+	} catch (err) {
+		if (err instanceof SubscribeParseError) {
+			notifyError(
+				`Invalid subscribe block in ${filePath}: ${err.message}. Loaded without triggers.`,
+			);
+			return undefined;
+		}
+		throw err;
+	}
+}
+
 function parseTrigger(raw: unknown, index: number): SkillTrigger {
 	if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
 		throw new SubscribeParseError(
@@ -61,17 +88,90 @@ function parseTrigger(raw: unknown, index: number): SkillTrigger {
 		throw new SubscribeParseError(`subscribe[${index}].kind must be a string`);
 	}
 
+	assertKnownKeys(obj, kind, index);
 	const base = parseCommonFields(obj, index);
 
 	if (kind === 'file.changed') {
 		return {...base, ...parseFileChanged(obj, index)};
 	}
+	if (kind === 'file.ai-comment') {
+		return {...base, ...parseFileAiComment(obj, index)};
+	}
 	if (kind === 'schedule.cron') {
 		return {...base, ...parseScheduleCron(obj, index)};
 	}
+	if (kind === 'ci.job.failed') {
+		return {...base, ...parseCiJobFailed(obj, index)};
+	}
 	throw new SubscribeParseError(
-		`subscribe[${index}].kind "${kind}" is not a supported event kind (expected: file.changed, schedule.cron)`,
+		`subscribe[${index}].kind "${kind}" is not a supported event kind (expected: file.changed, file.ai-comment, schedule.cron, ci.job.failed)`,
 	);
+}
+
+const COMMON_KEYS = ['kind', 'target', 'confirm'];
+
+const KIND_KEYS: Record<string, readonly string[]> = {
+	'file.changed': ['paths', 'eventKinds'],
+	'file.ai-comment': ['paths'],
+	'schedule.cron': ['cron'],
+	'ci.job.failed': ['branches'],
+};
+
+/**
+ * Reject keys the trigger kind does not define. A typo such as `path:` for
+ * `paths:` would otherwise be dropped silently and the trigger would match
+ * everything.
+ */
+function assertKnownKeys(
+	obj: Record<string, unknown>,
+	kind: string,
+	index: number,
+): void {
+	const own = KIND_KEYS[kind];
+	if (!own) return; // unsupported kind: reported by the caller
+	const allowed = [...COMMON_KEYS, ...own];
+	for (const key of Object.keys(obj)) {
+		if (allowed.includes(key)) continue;
+		const hint = closestKey(key, allowed);
+		throw new SubscribeParseError(
+			`subscribe[${index}] has unknown key "${key}" for kind "${kind}"` +
+				(hint
+					? `. Did you mean "${hint}"?`
+					: ` (expected: ${allowed.join(', ')})`),
+		);
+	}
+}
+
+function closestKey(
+	key: string,
+	candidates: readonly string[],
+): string | undefined {
+	let best: string | undefined;
+	let bestDist = 3;
+	for (const c of candidates) {
+		const d = editDistance(key.toLowerCase(), c.toLowerCase());
+		if (d < bestDist) {
+			bestDist = d;
+			best = c;
+		}
+	}
+	return best;
+}
+
+function editDistance(a: string, b: string): number {
+	let prev = Array.from({length: b.length + 1}, (_, j) => j);
+	for (let i = 1; i <= a.length; i++) {
+		const cur = [i];
+		for (let j = 1; j <= b.length; j++) {
+			cur[j] = Math.min(
+				prev[j] + 1,
+				cur[j - 1] + 1,
+				prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1),
+			);
+		}
+		prev = cur;
+	}
+	return prev[b.length];
 }
 
 function parseCommonFields(
@@ -138,6 +238,27 @@ function parseFileChanged(
 	return trigger;
 }
 
+function parseFileAiComment(
+	obj: Record<string, unknown>,
+	index: number,
+): FileAiCommentTrigger {
+	const trigger: FileAiCommentTrigger = {kind: 'file.ai-comment'};
+
+	if (obj.paths !== undefined) {
+		if (
+			!Array.isArray(obj.paths) ||
+			!obj.paths.every((p): p is string => typeof p === 'string')
+		) {
+			throw new SubscribeParseError(
+				`subscribe[${index}].paths must be an array of glob strings`,
+			);
+		}
+		trigger.paths = obj.paths;
+	}
+
+	return trigger;
+}
+
 function parseScheduleCron(
 	obj: Record<string, unknown>,
 	index: number,
@@ -148,5 +269,32 @@ function parseScheduleCron(
 			`subscribe[${index}].cron must be a non-empty cron expression`,
 		);
 	}
+	const invalid = validateCron(cron);
+	if (invalid) {
+		throw new SubscribeParseError(
+			`subscribe[${index}].cron "${cron}" is not a valid cron expression: ${invalid}`,
+		);
+	}
 	return {kind: 'schedule.cron', cron};
+}
+
+function parseCiJobFailed(
+	obj: Record<string, unknown>,
+	index: number,
+): CiJobFailedTrigger {
+	const trigger: CiJobFailedTrigger = {kind: 'ci.job.failed'};
+
+	if (obj.branches !== undefined) {
+		if (
+			!Array.isArray(obj.branches) ||
+			!obj.branches.every((b): b is string => typeof b === 'string')
+		) {
+			throw new SubscribeParseError(
+				`subscribe[${index}].branches must be an array of glob strings`,
+			);
+		}
+		trigger.branches = obj.branches;
+	}
+
+	return trigger;
 }

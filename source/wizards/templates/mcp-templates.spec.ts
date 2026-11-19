@@ -267,6 +267,48 @@ test('custom template: handles empty env var lines', t => {
 	});
 });
 
+// Regression: Custom MCP Server had no headers field, so editing an http
+// server whose template was removed (Serply, FXMacroData) rebuilt it without
+// its API-key header.
+test('custom template: writes http headers, one per line', t => {
+	const template = MCP_TEMPLATES.find(t => t.id === 'custom');
+	t.truthy(template);
+
+	const config = template!.buildConfig({
+		transport: 'http',
+		serverName: 'serply',
+		url: 'https://api.serply.io/mcp',
+		headers:
+			'X-API-Key: serply_key_123\n\nAuthorization: Bearer a:b\nnot a header\n',
+	});
+
+	t.is(config.transport, 'http');
+	t.deepEqual(config.headers, {
+		'X-API-Key': 'serply_key_123',
+		Authorization: 'Bearer a:b',
+	});
+});
+
+test('custom template: omits headers when none are given or transport is not http', t => {
+	const template = MCP_TEMPLATES.find(t => t.id === 'custom');
+	t.truthy(template);
+
+	const http = template!.buildConfig({
+		transport: 'http',
+		serverName: 'plain',
+		url: 'https://example.com/mcp',
+	});
+	t.is(http.headers, undefined);
+
+	const websocket = template!.buildConfig({
+		transport: 'websocket',
+		serverName: 'ws',
+		url: 'wss://example.com/mcp',
+		headers: 'X-API-Key: ignored',
+	});
+	t.is(websocket.headers, undefined);
+});
+
 // ============================================================================
 // Tests for Remote Server Templates (New Feature)
 // ============================================================================
@@ -325,6 +367,52 @@ test('github-remote template: builds correct HTTP config with headers', t => {
 	t.deepEqual(config.headers, {
 		Authorization: 'Bearer ghp_test123',
 	});
+});
+
+function answersFor(template: McpTemplate): Record<string, string> {
+	const answers: Record<string, string> = {};
+	for (const field of template.fields) {
+		answers[field.name] = field.sensitive
+			? 'secret'
+			: (field.default ?? 'placeholder');
+	}
+	return answers;
+}
+
+test('templates with a serverName field stamp templateId', t => {
+	for (const template of MCP_TEMPLATES) {
+		if (template.id === 'custom') continue;
+		if (!template.fields.some(field => field.name === 'serverName')) continue;
+
+		const answers = answersFor(template);
+		answers.serverName = `${template.id}-renamed`;
+		const built = template.buildConfig(answers);
+
+		t.is(built.name, `${template.id}-renamed`, template.id);
+		t.is(built.templateId, template.id, template.id);
+		t.is(resolveMcpTemplateId(built), template.id, template.id);
+	}
+});
+
+test('templates without a serverName field do not stamp templateId', t => {
+	for (const template of MCP_TEMPLATES) {
+		if (template.fields.some(field => field.name === 'serverName')) continue;
+
+		const built = template.buildConfig(answersFor(template));
+		t.is(built.templateId, undefined, template.id);
+	}
+});
+
+test('resolveMcpTemplateId: legacy github-remote without templateId keeps its template', t => {
+	t.is(
+		resolveMcpTemplateId({
+			name: 'gh-work',
+			transport: 'http',
+			url: 'https://api.githubcopilot.com/mcp/',
+			tags: ['remote', 'github', 'git', 'repository', 'http'],
+		}),
+		'github-remote',
+	);
 });
 
 test('you template: builds authenticated HTTP config with API key', t => {

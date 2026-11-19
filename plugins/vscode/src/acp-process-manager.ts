@@ -1,6 +1,5 @@
 import * as vscode from 'vscode';
 import * as cp from 'child_process';
-import * as os from 'os';
 import * as path from 'path';
 import {existsSync} from 'node:fs';
 import {ClientSideConnection, ndJsonStream} from '@agentclientprotocol/sdk';
@@ -8,6 +7,71 @@ import {AcpStateManager, ACPStatus} from './acp-state';
 import {NanocoderAcpClient} from './acp-client';
 import {findCliPath, nodeExistsAlongside, promptInstallCli, resolveSpawnEnv} from './cli-discovery';
 import {planCliSpawn} from './cli-path-discovery';
+import {acpCliArgs, resolveExtensionCwd} from './workspace-utils';
+
+/**
+ * `nanocoder --acp` exits with this code when it refuses an untrusted folder
+ * (see source/acp/acp-server.ts). Retrying cannot fix that, so it is handled
+ * as a trust prompt instead of a crash.
+ */
+export const ACP_TRUST_REFUSED_EXIT_CODE = 3;
+
+/** What `nanocoder trust --status --json` prints. */
+interface TrustStatusReport {
+	path: string;
+	status: 'trusted' | 'not-trusted' | 'changed' | 'needs-re-approval';
+	summary: string | null;
+	fingerprint: string;
+}
+
+/** Where and how the last launch spawned the CLI, reused for `nanocoder trust`. */
+interface CliLaunchContext {
+	cliPath: string;
+	env: NodeJS.ProcessEnv;
+	cwd: string | undefined;
+}
+
+/** The two `nanocoder trust` invocations the extension makes. */
+type TrustCommand = {kind: 'status'} | {kind: 'grant'; fingerprint: string};
+
+/** `describeProjectTrust` fingerprints are SHA-256 hex digests. */
+const TRUST_FINGERPRINT_PATTERN = /^[0-9a-f]{64}$/;
+
+/**
+ * Argument list for a trust command: fixed flags, plus a fingerprint only when
+ * it has the digest's exact shape. The fingerprint is read back from the
+ * CLI's own output, but it still reaches a child process, so anything else is
+ * refused rather than passed on.
+ */
+function trustCliArgs(command: TrustCommand): string[] | null {
+	if (command.kind === 'status') return ['trust', '--status', '--json'];
+	return TRUST_FINGERPRINT_PATTERN.test(command.fingerprint)
+		? ['trust', '--grant', command.fingerprint]
+		: null;
+}
+
+interface CliRunResult {
+	code: number | null;
+	stdout: string;
+	stderr: string;
+}
+
+function parseTrustStatus(stdout: string): TrustStatusReport | null {
+	try {
+		const parsed = JSON.parse(stdout) as Partial<TrustStatusReport>;
+		if (typeof parsed.fingerprint !== 'string' || typeof parsed.status !== 'string') {
+			return null;
+		}
+		return {
+			path: typeof parsed.path === 'string' ? parsed.path : '',
+			status: parsed.status,
+			summary: typeof parsed.summary === 'string' ? parsed.summary : null,
+			fingerprint: parsed.fingerprint,
+		};
+	} catch {
+		return null;
+	}
+}
 
 export class AcpProcessManager {
 	private childProcess: cp.ChildProcess | null = null;
@@ -19,6 +83,10 @@ export class AcpProcessManager {
 	private maxRetries = 5;
 	private isDisposed = false;
 	private lastStderr = '';
+	private retryTimer: NodeJS.Timeout | null = null;
+	private currentLaunch: Promise<void> | null = null;
+	private hasStarted = false;
+	private launchContext: CliLaunchContext | null = null;
 
 	constructor(outputChannel: vscode.OutputChannel, stateManager: AcpStateManager, acpClient: NanocoderAcpClient) {
 		this.outputChannel = outputChannel;
@@ -26,24 +94,60 @@ export class AcpProcessManager {
 		this.acpClient = acpClient;
 	}
 
+	/**
+	 * Start the agent process unless this manager already has. The extension
+	 * spawns `nanocoder --acp` lazily, the first time something needs it (the
+	 * chat view opening), so this is safe to call from every such path; crash
+	 * retries and a manual restart go through {@link start} instead.
+	 *
+	 * Resolves when the launch this call started (or joined) finishes, or at
+	 * once when the process was started earlier.
+	 */
+	ensureStarted(): Promise<void> {
+		if (!this.hasStarted) {
+			return this.start();
+		}
+		return this.currentLaunch ?? Promise.resolve();
+	}
+
 	async start(): Promise<void> {
-		// Nothing awaits start(), so an exception here would surface as an
-		// unhandled rejection: no log line, no status change, and a UI stuck on
-		// "Connecting". cp.spawn throws synchronously for an unspawnable path
-		// (a .cmd without a shell on Windows), which is exactly that case.
+		// Refuse to start a disposed manager: a retry timer scheduled before
+		// dispose() can still fire here and would overwrite the new manager's
+		// acpClient.connection.
+		if (this.isDisposed) {
+			return;
+		}
+		this.hasStarted = true;
+		if (this.currentLaunch) {
+			return this.currentLaunch;
+		}
+		this.currentLaunch = this._runLaunch();
+		return this.currentLaunch;
+	}
+
+	private async _runLaunch(): Promise<void> {
 		try {
 			await this.launch();
 		} catch (error) {
+			if (this.isDisposed) {
+				this.outputChannel.appendLine(`ACP launch aborted after dispose: ${error}`);
+				return;
+			}
 			const message = error instanceof Error ? error.message : String(error);
 			this.outputChannel.appendLine(`Failed to start ACP process: ${message}`);
 			this.stateManager.setStatus(ACPStatus.Failed, {reason: message});
 			vscode.window.showErrorMessage(
 				`Could not start the Nanocoder CLI: ${message}. See the Nanocoder output channel for details.`
 			);
+		} finally {
+			this.currentLaunch = null;
 		}
 	}
 
 	private async launch(): Promise<void> {
+		if (this.isDisposed) {
+			return;
+		}
 		this.stateManager.setStatus(ACPStatus.Starting);
 
 		const config = vscode.workspace.getConfiguration('nanocoder');
@@ -71,7 +175,8 @@ export class AcpProcessManager {
 			return;
 		}
 
-		this.outputChannel.appendLine(`Starting ACP process: ${cliPath} --acp`);
+		const acpArgs = acpCliArgs();
+		this.outputChannel.appendLine(`Starting ACP process: ${cliPath} ${acpArgs.join(' ')}`);
 		// Spawn with the login shell's PATH so the CLI's `#!/usr/bin/env node`
 		// shebang (and the dev-fallback `node`) resolve the same node the user
 		// gets in a terminal, not launchd's - which may be an older install.
@@ -89,15 +194,16 @@ export class AcpProcessManager {
 		}
 		
 		// Fallbacks: configured cwd -> workspace folder -> user homedir -> process cwd
-		const cwdSetting = config.get<string>('cwd') || vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || os.homedir() || process.cwd();
+		const cwdSetting = resolveExtensionCwd();
 		// On Windows the discovered path is usually an npm/pnpm shim, which
 		// cannot be spawned directly - see planCliSpawn.
-		const plan = planCliSpawn(cliPath, ['--acp']);
+		const plan = planCliSpawn(cliPath, acpArgs);
 		if (plan.command !== cliPath) {
 			this.outputChannel.appendLine(
 				`Resolved launch command: ${plan.command} ${plan.args.join(' ')}${plan.shell ? ' (via shell)' : ''}`
 			);
 		}
+		this.launchContext = {cliPath, env, cwd: cwdSetting};
 		const spawnOptions: cp.SpawnOptions = { shell: plan.shell, env, cwd: cwdSetting };
 		this.childProcess = cp.spawn(plan.command, plan.args, spawnOptions);
 
@@ -120,10 +226,10 @@ export class AcpProcessManager {
 		// handshake) - count it as one crash so retries aren't double-burned.
 		const child = this.childProcess;
 		let crashReported = false;
-		const reportCrash = () => {
+		const reportCrash = (exitCode?: number | null) => {
 			if (crashReported || this.isDisposed) return;
 			crashReported = true;
-			this.handleCrash();
+			this.handleCrash(exitCode);
 		};
 
 		child.on('error', (err) => {
@@ -133,23 +239,24 @@ export class AcpProcessManager {
 
 		child.on('exit', (code, signal) => {
 			this.outputChannel.appendLine(`ACP process exited with code ${code} signal ${signal}`);
-			reportCrash();
+			reportCrash(code);
 		});
 
-		// Create Web Streams from Node.js streams
+		// Closures capture the local `child`, not `this.childProcess`, so a
+		// late `data` event after dispose() cannot NPE on the nulled field.
 		const input = new ReadableStream<Uint8Array>({
 			start: (controller) => {
-				this.childProcess!.stdout!.on('data', (chunk: Buffer) => {
+				child.stdout!.on('data', (chunk: Buffer) => {
 					controller.enqueue(new Uint8Array(chunk));
 				});
-				this.childProcess!.stdout!.on('end', () => controller.close());
-				this.childProcess!.stdout!.on('error', (err) => controller.error(err));
+				child.stdout!.on('end', () => controller.close());
+				child.stdout!.on('error', (err) => controller.error(err));
 			}
 		});
 
 		const output = new WritableStream<Uint8Array>({
 			write: (chunk) => {
-				this.childProcess!.stdin!.write(chunk);
+				child.stdin!.write(chunk);
 			},
 			abort: (reason) => {
 				this.outputChannel.appendLine(`Stream output aborted: ${reason}`);
@@ -170,21 +277,61 @@ export class AcpProcessManager {
 				return this.acpClient.handleExtNotification(method, params);
 			}
 		} as any), stream);
+
+		await this._installConnection(child, connection, reportCrash);
+	}
+
+	/**
+	 * Install a fresh connection on the shared acpClient and await the
+	 * handshake, checking `isDisposed` before each shared-state write so a
+	 * Restart that lands during spawn or during the handshake round-trip
+	 * cannot overwrite the new manager's connection or reset its retry counter.
+	 */
+	private async _installConnection(
+		child: cp.ChildProcess,
+		connection: ClientSideConnection,
+		reportCrash: (exitCode?: number | null) => void,
+	): Promise<void> {
+		if (this.isDisposed) {
+			child.kill();
+			return;
+		}
 		this.acpClient.setConnection(connection);
 		const initialized = await this.acpClient.initializeHandshake();
-		
+
+		if (this.isDisposed) {
+			child.kill();
+			return;
+		}
+
 		if (initialized) {
 			this.retryCount = 0; // Reset retries on successful connection
 		} else if (this.stateManager.status !== ACPStatus.VersionMismatch) {
-			// Failed handshake: kill the child (it may still be alive) and
-			// count one crash - the exit event is absorbed by reportCrash's guard.
-			child.kill();
-			reportCrash();
+			// Failed handshake: count one crash, and kill the child if it is
+			// still alive. A CLI that is exiting on its own (a trust refusal
+			// closes stdout, failing the handshake, just before it exits 3) gets
+			// a moment to do so, because the exit code decides whether this is a
+			// crash to retry or a trust prompt. The exit event reports it; the
+			// fallback covers an exit that never arrives, and if the exit already
+			// fired, reportCrash's guard absorbs both timers.
+			const killTimer = setTimeout(() => child.kill(), 500);
+			const fallback = setTimeout(() => reportCrash(child.exitCode), 3000);
+			killTimer.unref?.();
+			fallback.unref?.();
+			child.once('exit', () => {
+				clearTimeout(killTimer);
+				clearTimeout(fallback);
+			});
 		}
 	}
 
-	private handleCrash() {
+	private handleCrash(exitCode?: number | null) {
 		if (this.isDisposed || this.stateManager.status === ACPStatus.VersionMismatch) return;
+
+		if (exitCode === ACP_TRUST_REFUSED_EXIT_CODE) {
+			this.handleTrustRefusal();
+			return;
+		}
 
 		if (this.retryCount < this.maxRetries) {
 			const delay = this.retryCount === 0 ? 0 : Math.min(1000 * Math.pow(2, this.retryCount - 1), 10000); // Immediate first retry, then backoff
@@ -194,9 +341,11 @@ export class AcpProcessManager {
 				totalAttempts: this.maxRetries,
 			});
 			this.outputChannel.appendLine(`ACP process crashed. Restarting in ${delay}ms (attempt ${this.retryCount}/${this.maxRetries})`);
-			
-			setTimeout(() => {
-				this.start();
+
+			this.retryTimer = setTimeout(() => {
+				this.retryTimer = null;
+				if (this.isDisposed) return;
+				void this.start();
 			}, delay);
 		} else {
 			const lastError = this.lastStderr.trim().split('\n').pop();
@@ -210,8 +359,153 @@ export class AcpProcessManager {
 		}
 	}
 
+	/**
+	 * The CLI refused the folder because it is not trusted. Every retry would be
+	 * refused the same way, so stop and ask the user instead.
+	 */
+	private handleTrustRefusal(): void {
+		const reason = this.lastStderr.trim().split('\n').pop() || 'folder is not trusted';
+		this.retryCount = 0;
+		this.stateManager.setStatus(ACPStatus.Untrusted, {reason});
+		this.outputChannel.appendLine('ACP process refused to start: the folder is not trusted. Not restarting.');
+		void this.promptForTrust();
+	}
+
+	/**
+	 * Show what the folder will run (`nanocoder trust --status --json`, which
+	 * loads nothing from it) and, if the user agrees, save trust for exactly the
+	 * fingerprint shown (`nanocoder trust --grant`), then start again.
+	 */
+	private async promptForTrust(): Promise<void> {
+		const report = await this.readTrustStatus();
+		if (this.isDisposed) return;
+
+		if (!report) {
+			const action = await vscode.window.showWarningMessage(
+				'Nanocoder did not start because this folder is not trusted. Run `nanocoder` in the folder once to review and trust it, or trust the workspace in VS Code.',
+				'Manage Workspace Trust',
+				'Show Logs',
+			);
+			if (action === 'Manage Workspace Trust') {
+				await vscode.commands.executeCommand('workbench.trust.manage');
+			} else if (action === 'Show Logs') {
+				this.outputChannel.show(true);
+			}
+			return;
+		}
+
+		if (report.status === 'trusted') {
+			// Trusted in the meantime (e.g. from a terminal), or the two checks
+			// disagree. Leave the restart to the user so a disagreement cannot
+			// turn into a restart loop.
+			const action = await vscode.window.showWarningMessage(
+				'Nanocoder refused to start because the folder was not trusted, but it is trusted now.',
+				'Restart',
+				'Show Logs',
+			);
+			if (action === 'Restart' && !this.isDisposed) {
+				void this.start();
+			} else if (action === 'Show Logs') {
+				this.outputChannel.show(true);
+			}
+			return;
+		}
+
+		const folder = report.path || 'this folder';
+		const why =
+			report.status === 'changed'
+				? `${folder} changed since you trusted it.`
+				: report.status === 'needs-re-approval'
+					? `${folder} needs to be trusted again after a Nanocoder upgrade.`
+					: `${folder} is not a trusted folder.`;
+		const contents = report.summary ?? 'It contains nothing that Nanocoder runs.';
+		const action = await vscode.window.showWarningMessage(
+			`Nanocoder did not start: ${why} Trusting it lets Nanocoder load its project config, hooks and MCP servers.`,
+			{modal: true, detail: contents},
+			'Trust Folder',
+			'Show Logs',
+		);
+		if (this.isDisposed) return;
+
+		if (action === 'Show Logs') {
+			this.outputChannel.show(true);
+			return;
+		}
+		if (action !== 'Trust Folder') return;
+
+		const granted = await this.runTrustCli({kind: 'grant', fingerprint: report.fingerprint});
+		if (this.isDisposed) return;
+		if (granted?.code === 0) {
+			this.outputChannel.appendLine(`Trusted ${folder}. Starting ACP process.`);
+			void this.start();
+			return;
+		}
+		const detail = (granted?.stdout || granted?.stderr || '').trim();
+		vscode.window.showErrorMessage(
+			`Could not trust ${folder}.${detail ? ` ${detail}` : ''}`,
+		);
+	}
+
+	private async readTrustStatus(): Promise<TrustStatusReport | null> {
+		const result = await this.runTrustCli({kind: 'status'});
+		if (!result || result.code !== 0) return null;
+		return parseTrustStatus(result.stdout);
+	}
+
+	/**
+	 * Run a `nanocoder trust` subcommand with the same binary, env and cwd as
+	 * the refused launch, so it inspects the same folder and trust list.
+	 * Never goes through a shell: a CLI that can only be launched via one (a
+	 * Windows .cmd shim with no resolvable script) gets the fallback message
+	 * instead. Resolves null when there was no launch, the command was refused,
+	 * or the CLI could not be spawned.
+	 */
+	private runTrustCli(command: TrustCommand): Promise<CliRunResult | null> {
+		const context = this.launchContext;
+		const args = trustCliArgs(command);
+		if (!context || !args) return Promise.resolve(null);
+		return new Promise(resolve => {
+			let plan;
+			try {
+				plan = planCliSpawn(context.cliPath, args);
+			} catch (error) {
+				this.outputChannel.appendLine(`Could not run nanocoder ${args.join(' ')}: ${error}`);
+				resolve(null);
+				return;
+			}
+			if (plan.shell) {
+				this.outputChannel.appendLine(`Not running nanocoder ${args.join(' ')}: the CLI at ${context.cliPath} can only be launched through a shell.`);
+				resolve(null);
+				return;
+			}
+			// No shell, an argument array, and args from trustCliArgs: fixed flags
+			// plus a fingerprint that matched the SHA-256 hex pattern. The command
+			// is the CLI the extension already launched for --acp.
+			const child = cp.spawn(plan.command, plan.args, {shell: false, env: context.env, cwd: context.cwd}); // nosemgrep: javascript.lang.security.detect-child-process.detect-child-process
+			let stdout = '';
+			let stderr = '';
+			child.stdout?.on('data', data => {
+				stdout += data.toString();
+			});
+			child.stderr?.on('data', data => {
+				stderr += data.toString();
+			});
+			child.on('error', error => {
+				this.outputChannel.appendLine(`Could not run nanocoder ${args.join(' ')}: ${error.message}`);
+				resolve(null);
+			});
+			child.on('close', code => resolve({code, stdout, stderr}));
+		});
+	}
+
 	dispose() {
 		this.isDisposed = true;
+		// Clear the retry timer: an orphaned one would call start() on the
+		// disposed manager and overwrite the new manager's acpClient.connection.
+		if (this.retryTimer) {
+			clearTimeout(this.retryTimer);
+			this.retryTimer = null;
+		}
 		if (this.childProcess) {
 			this.childProcess.kill();
 			this.childProcess = null;

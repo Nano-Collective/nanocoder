@@ -11,6 +11,7 @@ import {buildStatsViewModel} from '@/stats/aggregators';
 import {renderCumulativeChart} from '@/stats/chart';
 import {STATS_RANGES, type StatsLedger, type StatsRange} from '@/stats/types';
 import {formatCompactTokenCount, formatCost} from '@/usage/format';
+import {truncateText} from '@/utils/truncate-text';
 
 function formatSince(createdAt: number, days: number): string {
 	const d = new Date(createdAt);
@@ -26,13 +27,6 @@ function formatPeak(date: string, tokens: number): string {
 function shareBar(share: number, width: number): string {
 	const filled = Math.round(Math.min(1, Math.max(0, share)) * width);
 	return `${'▇'.repeat(filled)}${'░'.repeat(width - filled)}`;
-}
-
-function truncate(text: string, max: number): string {
-	const chars = [...text];
-	if (chars.length <= max) return text;
-	if (max <= 1) return chars.slice(0, max).join('');
-	return `${chars.slice(0, max - 1).join('')}…`;
 }
 
 function RangeTabs({
@@ -100,17 +94,20 @@ export function StatsDisplay({
 				return;
 			}
 			// Match Settings tabs: left/right only (no letter shortcut).
-			if (key.leftArrow) {
-				const idx = STATS_RANGES.indexOf(range);
-				const prev =
-					STATS_RANGES[(idx - 1 + STATS_RANGES.length) % STATS_RANGES.length];
-				if (prev) setRange(prev);
-				return;
-			}
-			if (key.rightArrow) {
-				const idx = STATS_RANGES.indexOf(range);
-				const next = STATS_RANGES[(idx + 1) % STATS_RANGES.length];
-				if (next) setRange(next);
+			// Step from the range React holds, not the one this closure captured:
+			// Ink re-registers the handler in a passive effect that runs after the
+			// frame is painted, so a press arriving right after a range change is
+			// still dispatched here with the previous render's value.
+			if (key.leftArrow || key.rightArrow) {
+				const delta = key.rightArrow ? 1 : -1;
+				setRange(prev => {
+					const idx = STATS_RANGES.indexOf(prev);
+					return (
+						STATS_RANGES[
+							(idx + delta + STATS_RANGES.length) % STATS_RANGES.length
+						] ?? prev
+					);
+				});
 			}
 		},
 		{isActive: interactive},
@@ -226,10 +223,10 @@ export function StatsDisplay({
 									>
 										<Text color={colors.secondary} wrap="truncate-end">
 											{`${i + 1}.`.padEnd(3)}
-											{truncate(pair.provider, providerNameWidth).padEnd(
+											{truncateText(pair.provider, providerNameWidth).padEnd(
 												providerNameWidth,
 											)}{' '}
-											{truncate(pair.model, modelNameWidth).padEnd(
+											{truncateText(pair.model, modelNameWidth).padEnd(
 												modelNameWidth,
 											)}{' '}
 											{shareBar(pair.share, providerBarWidth)}{' '}

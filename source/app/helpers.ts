@@ -61,7 +61,12 @@ export function isNonInteractiveModeComplete(
  * Used by the Ink runtime (`useNonInteractiveMode`) for the interactive
  * non-interactive path. The headless plain shell (`runPlainShell`) has its
  * own intentionally distinct mapping (exit 2 for tool-approval-required).
+ * A timed-out run is a failure: CI must not read it as success.
  */
 export function getExitCodeForReason(reason: NonInteractiveExitReason): number {
-	return reason === 'error' || reason === TOOL_APPROVAL_REQUIRED_KIND ? 1 : 0;
+	return reason === 'error' ||
+		reason === 'timeout' ||
+		reason === TOOL_APPROVAL_REQUIRED_KIND
+		? 1
+		: 0;
 }

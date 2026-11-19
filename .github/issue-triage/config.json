@@ -1,0 +1,56 @@
+{
+	"types": [
+		{
+			"name": "bug",
+			"description": "Something that exists does not work as intended"
+		},
+		{
+			"name": "enhancement",
+			"description": "A new feature, or a change to how something works"
+		},
+		{
+			"name": "question",
+			"description": "Asks how something works or whether something is possible"
+		},
+		{
+			"name": "documentation",
+			"description": "The docs are missing, wrong or unclear"
+		}
+	],
+	"areas": {
+		"area:tui": "Terminal UI: rendering, the input box, keyboard handling, scrollback, layout, themes",
+		"area:tools": "Built-in tools, tool calling and validation, custom tools, git tools",
+		"area:cli": "CLI flags, headless and plain mode, `nanocoder run`, shell completions, slash commands",
+		"area:providers": "LLM providers, model configuration, the client factory, tokenisation, context limits",
+		"area:agent": "The agent loop: context management, compaction, subagents, memory, sessions, checkpoints, planning",
+		"area:mcp": "MCP client and server integration",
+		"area:lsp": "Language server integration",
+		"area:vscode": "The VS Code extension and the ACP integration",
+		"area:docs": "Documentation",
+		"area:ci": "GitHub Actions and CI"
+	},
+	"flags": {
+		"performance": "Speed, memory use or token efficiency is the substance of the issue",
+		"security": "A security weakness or hardening",
+		"architecture": "Requires a structural design change across modules",
+		"good first issue": "Small, well-specified and self-contained: a newcomer could fix it from the issue alone"
+	},
+	"aliases": {
+		"Feature": "enhancement",
+		"Needs discussion": "proposal",
+		"ui": "area:tui",
+		"ux": "area:tui",
+		"cli": "area:cli",
+		"mcp": "area:mcp",
+		"git": "area:tools",
+		"extension": "area:vscode",
+		"ai": "area:providers",
+		"tokenization": "area:providers",
+		"optimization": "performance",
+		"safety": "security"
+	},
+	"exemptLabels": ["high-priority", "security", "no-stale"],
+	"supportUrl": "https://discord.gg/ktPDV6rekE",
+	"proposalGuidance": "A proposal is a speculative idea, a design exploration or an 'is there interest in…' post: something to discuss rather than something anyone has committed to build. Concrete, clearly scoped features — a new flag, a new slash command, a fix to how an existing feature behaves — are not proposals, however large.",
+	"scopeGuidance": "Nanocoder is a local-first CLI coding agent. Out of scope: requests to bundle or endorse a specific commercial product or service, features that require a hosted Nano Collective backend, and support for models or providers through anything other than a standard API. Integrations reachable through MCP or a custom provider configuration are in scope as documentation, not as built-in code."
+}

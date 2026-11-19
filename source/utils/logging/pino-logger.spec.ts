@@ -10,6 +10,7 @@ import {
 // Implementation imports
 import {
 	createLoggerWithTransport,
+	createPinoLogger,
 	getLoggerStats,
 } from './pino-logger.js';
 import type {LoggerConfig} from './types.js';
@@ -1115,4 +1116,63 @@ test('createPinoLogger uses determineTransportConfig for file logging', async t 
 	t.truthy(logger, 'Should create file-based logger');
 
 	logger.info('File transport test');
+});
+
+test.serial(
+	'NANOCODER_LOG_DISABLE_FILE creates no log directory even with NANOCODER_LOG_LEVEL set',
+	t => {
+		const logDir = join(testLogDir, 'disabled-file-logging');
+		const saved = {
+			dir: process.env.NANOCODER_LOG_DIR,
+			disable: process.env.NANOCODER_LOG_DISABLE_FILE,
+			level: process.env.NANOCODER_LOG_LEVEL,
+		};
+		process.env.NANOCODER_LOG_DIR = logDir;
+		process.env.NANOCODER_LOG_DISABLE_FILE = 'true';
+		process.env.NANOCODER_LOG_LEVEL = 'debug';
+		try {
+			const logger = createPinoLogger();
+			logger.info('should not be written');
+			t.false(logger.isLevelEnabled('info'));
+			t.false(existsSync(logDir));
+		} finally {
+			for (const [key, value] of [
+				['NANOCODER_LOG_DIR', saved.dir],
+				['NANOCODER_LOG_DISABLE_FILE', saved.disable],
+				['NANOCODER_LOG_LEVEL', saved.level],
+			] as const) {
+				if (value === undefined) delete process.env[key];
+				else process.env[key] = value;
+			}
+		}
+	},
+);
+
+test('a process exiting right after creating the logger exits cleanly', async t => {
+	// Given a path, sonic-boom opened the log file asynchronously, so an exit
+	// straight after startup (a fast `nanocoder verify --help`) made pino's own
+	// exit hook throw "sonic boom is not ready yet" and the run exit 1.
+	const {spawnSync} = await import('node:child_process');
+	const {fileURLToPath} = await import('node:url');
+	const modulePath = fileURLToPath(new URL('./pino-logger.ts', import.meta.url));
+	const logDir = join(testLogDir, `early-exit-${Date.now()}`);
+	const script = `
+		process.on('uncaughtException', e => { console.error('FAILED: ' + e.message); process.exitCode = 1; });
+		process.on('unhandledRejection', e => { console.error('FAILED: ' + (e && e.message)); process.exitCode = 1; });
+		const {createPinoLogger} = await import(${JSON.stringify(modulePath)});
+		const logger = createPinoLogger({level: 'info'});
+		logger.info('started');
+		process.exit(0);
+	`;
+	const result = spawnSync(
+		process.execPath,
+		['--import=tsx', '--input-type=module', '-e', script],
+		{
+			encoding: 'utf8',
+			timeout: 15_000,
+			env: {...process.env, NANOCODER_LOG_DIR: logDir, NODE_ENV: 'production'},
+		},
+	);
+	t.is(result.stderr.includes('FAILED'), false, result.stderr);
+	t.is(result.status, 0, result.stderr);
 });

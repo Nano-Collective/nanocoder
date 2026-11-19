@@ -77,7 +77,7 @@ test.serial('reports schedules.json deprecation warning when present', async t =
 });
 
 test.serial(
-	'cross-kind flat skill name collision: command "foo" + tool "foo" → reported, first (command) wins',
+	'cross-kind flat skills sharing a name (command "foo" + tool "foo") both survive',
 	async t => {
 		resetSkillRegistry();
 		const root = await tempProject();
@@ -103,19 +103,16 @@ test.serial(
 				eventRouter: noopRouter(),
 			});
 
+			// Different kinds are different members: both stay in /skills, and
+			// neither loses its subscriptions.
 			const fooSkills = result.skills.filter(s => s.name === 'foo');
-			t.is(fooSkills.length, 1, 'exactly one "foo" should appear in /skills');
-			t.truthy(
-				fooSkills[0]?.commands && fooSkills[0].commands.length > 0,
-				'the command flavor wins (first in synthesizer order)',
+			t.is(fooSkills.length, 2);
+			t.truthy(fooSkills.some(s => s.commands && s.commands.length > 0));
+			t.truthy(fooSkills.some(s => s.tools && s.tools.length > 0));
+			t.is(
+				result.registration.collisions.filter(c => c.name === 'foo').length,
+				0,
 			);
-
-			const fooCollisions = result.registration.collisions.filter(
-				c => c.name === 'foo',
-			);
-			t.is(fooCollisions.length, 1, 'a single collision is reported');
-			t.regex(fooCollisions[0]?.message ?? '', /collides with already-loaded/);
-			t.regex(fooCollisions[0]?.message ?? '', /Keeping the first/);
 		} finally {
 			await rm(root, {recursive: true, force: true});
 		}

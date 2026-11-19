@@ -1,12 +1,39 @@
 import {Box, Text} from 'ink';
 import React from 'react';
 import {commandRegistry} from '@/commands';
+import {errorMsg} from '@/components/message-factory';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
-import {generateKey} from '@/session/key-generator';
-import {Command} from '@/types/index';
+import type {Command} from '@/types/index';
+import {generateKey} from '@/utils/key-generator';
 import {getPackageVersion} from '@/utils/package-version';
+import {
+	findHelpCommand,
+	getCommandHelpDetails,
+	groupHelpCommands,
+} from './help-utils';
+
+/** `[what you want, what to type]` rows for the "Common Tasks" blurb. */
+const COMMON_TASKS: readonly (readonly [string, string])[] = [
+	['Ask about your codebase', 'How does the session autosave work?'],
+	['Change code', 'Add input validation to the signup handler'],
+	['Point at a file', 'Explain @src/utils/parse.ts (@ completes paths)'],
+	[
+		'Run a shell command',
+		'!npm test (the output is added to the conversation)',
+	],
+	['Use a slash command', '/commit, /review, /resume (type / to browse)'],
+	[
+		'Add your own commands',
+		'Markdown files in .nanocoder/commands/ (see /commands)',
+	],
+	['Keyboard shortcuts', 'press ? in an empty prompt'],
+	[
+		'Try a setting for one command',
+		'/usage ?context-max=200k (/compact and /usage accept ?key=value)',
+	],
+];
 
 let cachedVersion: string | null = null;
 
@@ -18,9 +45,11 @@ function getCachedPackageVersion(): string {
 function Help({
 	version,
 	commands,
+	selectedCommand,
 }: {
 	version: string;
-	commands: Array<{name: string; description: string}>;
+	commands: Command[];
+	selectedCommand?: Command;
 }) {
 	const boxWidth = useTerminalWidth();
 	const {colors} = useTheme();
@@ -59,49 +88,117 @@ function Help({
 					Common Tasks:
 				</Text>
 			</Box>
-			<Text color={colors.text}>
-				{' '}
-				• Ask questions about your codebase {'>'} How does foo.py work?
-			</Text>
-			<Text color={colors.text}> • Edit files {'>'} Update bar.ts to...</Text>
-			<Text color={colors.text}> • Fix errors {'>'} cargo build</Text>
-			<Text color={colors.text}> • Run commands {'>'} /help</Text>
-			<Text color={colors.text}> • Resume sessions {'>'} /resume</Text>
-			<Text color={colors.text}>
-				{' '}
-				• Keyboard shortcuts {'>'} press ? in an empty prompt
-			</Text>
-
-			<Box marginTop={1}>
-				<Text color={colors.primary} bold>
-					Commands:
+			{COMMON_TASKS.map(([task, example]) => (
+				<Text key={task} color={colors.text}>
+					{' '}
+					• {task} {'>'} {example}
 				</Text>
-			</Box>
-			{commands.length === 0 ? (
-				<Text color={colors.text}> No commands available.</Text>
+			))}
+
+			{selectedCommand ? (
+				<CommandDetails command={selectedCommand} />
 			) : (
-				commands.map((cmd, index) => (
-					<Text key={index} color={colors.text}>
-						{' '}
-						• /{cmd.name} - {cmd.description}
-					</Text>
-				))
+				<CommandList commands={commands} />
 			)}
 		</TitledBoxWithPreferences>
+	);
+}
+
+function CommandList({commands}: {commands: Command[]}) {
+	const {colors} = useTheme();
+	const groups = groupHelpCommands(commands);
+
+	return (
+		<Box flexDirection="column" marginTop={1}>
+			{groups.length === 0 ? (
+				<Text color={colors.text}> No commands available.</Text>
+			) : (
+				groups.map(group => (
+					<Box key={group.category} flexDirection="column" marginBottom={1}>
+						<Text color={colors.primary} bold>
+							{group.category}:
+						</Text>
+						{group.commands.map(command => (
+							<Text key={command.name} color={colors.text}>
+								{' '}
+								• /{command.name} - {command.description}
+							</Text>
+						))}
+					</Box>
+				))
+			)}
+		</Box>
+	);
+}
+
+function CommandDetails({command}: {command: Command}) {
+	const {colors} = useTheme();
+	const details = getCommandHelpDetails(command);
+
+	return (
+		<Box flexDirection="column" marginTop={1}>
+			<Text color={colors.primary} bold>
+				Command: /{command.name}
+			</Text>
+			<Text color={colors.text}>{command.description}</Text>
+			<Text color={colors.secondary}>Category: {details.category}</Text>
+			<Text color={colors.secondary}>Usage: {details.usage}</Text>
+			{details.aliases?.length ? (
+				<Text color={colors.secondary}>
+					Aliases: {details.aliases.map(alias => `/${alias}`).join(', ')}
+				</Text>
+			) : null}
+			{details.options?.length ? (
+				<Box flexDirection="column" marginTop={1}>
+					<Text color={colors.primary} bold>
+						Options & subcommands:
+					</Text>
+					{details.options.map(option => (
+						<Text key={option} color={colors.text}>
+							• {option}
+						</Text>
+					))}
+				</Box>
+			) : null}
+			{details.examples?.length ? (
+				<Box flexDirection="column" marginTop={1}>
+					<Text color={colors.primary} bold>
+						Examples:
+					</Text>
+					{details.examples.map(example => (
+						<Text key={example} color={colors.text}>
+							• {example}
+						</Text>
+					))}
+				</Box>
+			) : null}
+		</Box>
 	);
 }
 
 export const helpCommand: Command = {
 	name: 'help',
 	description: 'Show available commands',
-	handler: async (_args: string[], _messages, _metadata) => {
+	handler: async (args: string[], _messages, _metadata) => {
 		const commands = commandRegistry.getAll();
 		const version = getCachedPackageVersion();
+		const requestedName = args[0];
+		const selectedCommand = requestedName
+			? findHelpCommand(commands, requestedName)
+			: undefined;
+
+		if (requestedName && !selectedCommand) {
+			return errorMsg(
+				`Unknown command: ${requestedName}. Type /help to see available commands.`,
+				'help-error',
+			);
+		}
 
 		return React.createElement(Help, {
 			key: generateKey('help'),
 			version,
 			commands: commands,
+			selectedCommand,
 		});
 	},
 };

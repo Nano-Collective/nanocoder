@@ -2,60 +2,19 @@
  * Environment-based configuration for Pino logger
  */
 
-import {homedir, platform} from 'os';
-import {join} from 'path';
+import nodeProcess from 'node:process';
 import type {EnhancedLoggerConfig, LoggerConfig, LogLevel} from './types.js';
-
-/**
- * Get the default log directory based on platform
- * Follows OS conventions:
- * - macOS: ~/Library/Logs/nanocoder
- * - Linux: ~/.local/state/nanocoder/logs (XDG_STATE_HOME)
- * - Windows: %LOCALAPPDATA%/nanocoder/logs
- */
-export function getDefaultLogDirectory(): string {
-	if (process.env.NANOCODER_LOG_DIR) {
-		return process.env.NANOCODER_LOG_DIR;
-	}
-
-	switch (platform()) {
-		case 'win32':
-			return join(
-				process.env.LOCALAPPDATA || join(homedir(), 'AppData', 'Local'),
-				'nanocoder',
-				'logs',
-			);
-		case 'darwin':
-			return join(homedir(), 'Library', 'Logs', 'nanocoder');
-		default: // linux
-			return join(
-				process.env.XDG_STATE_HOME || join(homedir(), '.local', 'state'),
-				'nanocoder',
-				'logs',
-			);
-	}
-}
 
 /**
  * Create development configuration (internal).
  */
 function createDevelopmentConfig(): EnhancedLoggerConfig {
 	return {
-		level: (process.env.NANOCODER_LOG_LEVEL as LogLevel) || 'debug',
-		destination: String(process.stdout.fd),
+		level: (nodeProcess.env.NANOCODER_LOG_LEVEL as LogLevel) || 'debug',
 		pretty: true,
 		redact: ['apiKey', 'token', 'password', 'secret'],
 		correlation: true,
 		serialize: false,
-		target: 'pino-pretty',
-		options: {
-			translateTime: 'HH:MM:ss Z',
-			ignore: 'pid,hostname',
-			messageFormat: undefined,
-			customPrettifiers: {},
-			levelFirst: false,
-			singleLine: false,
-		},
 	};
 }
 
@@ -75,27 +34,22 @@ function createDevelopmentConfig(): EnhancedLoggerConfig {
  */
 function createProductionConfig(): EnhancedLoggerConfig {
 	// Check if file logging is explicitly disabled
-	const disableFileLogging = process.env.NANOCODER_LOG_DISABLE_FILE === 'true';
+	const disableFileLogging =
+		nodeProcess.env.NANOCODER_LOG_DISABLE_FILE === 'true';
 
 	// File log level defaults to 'info' for useful diagnostics
 	// Can be overridden with NANOCODER_LOG_LEVEL env var
-	const fileLogLevel =
-		(process.env.NANOCODER_LOG_LEVEL as LogLevel) ||
-		(disableFileLogging ? 'silent' : 'info');
+	const fileLogLevel: LogLevel = disableFileLogging
+		? 'silent'
+		: (nodeProcess.env.NANOCODER_LOG_LEVEL as LogLevel) || 'info';
 
-	const baseConfig = {
+	return {
 		level: fileLogLevel,
 		pretty: false,
 		redact: ['apiKey', 'token', 'password', 'email', 'userId', 'secret'],
 		correlation: true,
 		serialize: true,
 	};
-
-	if (disableFileLogging) {
-		return baseConfig;
-	}
-
-	return baseConfig;
 }
 
 /**
@@ -103,7 +57,7 @@ function createProductionConfig(): EnhancedLoggerConfig {
  */
 function createTestConfig(): EnhancedLoggerConfig {
 	return {
-		level: (process.env.LOG_LEVEL as LogLevel) || 'debug', // Changed from 'silent' to 'debug'
+		level: (nodeProcess.env.LOG_LEVEL as LogLevel) || 'debug', // Changed from 'silent' to 'debug'
 		pretty: false,
 		redact: ['apiKey', 'token', 'password'],
 		correlation: false,
@@ -123,13 +77,13 @@ function createTestConfig(): EnhancedLoggerConfig {
  * explicitly set NODE_ENV=development to see debug logs.
  */
 function getEnvironmentConfig(): EnhancedLoggerConfig {
-	if (process.env.NODE_ENV === 'test') {
+	if (nodeProcess.env.NODE_ENV === 'test') {
 		return createTestConfig();
 	}
 
 	// Pretty/verbose console output is explicit opt-in via NANOCODER_LOG_LEVEL,
 	// not implicit based on NODE_ENV. This avoids polluting user output in production.
-	if (process.env.NANOCODER_LOG_LEVEL) {
+	if (nodeProcess.env.NANOCODER_LOG_LEVEL) {
 		return createDevelopmentConfig();
 	}
 

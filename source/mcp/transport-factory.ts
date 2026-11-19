@@ -199,6 +199,25 @@ export class TransportFactory {
 		errors: string[];
 	} {
 		const errors: string[] = [];
+		if (
+			server.healthCheckInterval !== undefined &&
+			(!Number.isFinite(server.healthCheckInterval) ||
+				server.healthCheckInterval < 0)
+		) {
+			errors.push('healthCheckInterval must be a non-negative finite number');
+		}
+		if (
+			server.toolTimeout !== undefined &&
+			(!Number.isFinite(server.toolTimeout) || server.toolTimeout < 0)
+		) {
+			errors.push('toolTimeout must be a non-negative finite number');
+		}
+		if (
+			server.resetTimeoutOnProgress !== undefined &&
+			typeof server.resetTimeoutOnProgress !== 'boolean'
+		) {
+			errors.push('resetTimeoutOnProgress must be true or false');
+		}
 
 		switch (server.transport) {
 			case 'stdio':

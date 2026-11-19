@@ -5,7 +5,7 @@
 
 一个纯终端驱动的开源编程 Agent，由社区共建，不受商业公司控制。模型随意选，代码留在本地，告别平台绑定。
 
-Nanocoder 由非盈利性 AI 开发者社区 [Nano Collective](https://nanocollective.org) 打造。它能通过你指定的模型来实现 Agentic Coding（智能体编程）：既能用 Ollama 跑本地模型，也能接入 OpenRouter、Anthropic、Google 以及各类兼容 OpenAI 格式的 API。谁来处理你的代码？数据发到哪？全由你自己说了算。这里没有闭源黑盒，也没有把关键能力锁在付费墙后面：**尊重隐私**、**本地优先**、**面向所有人免费开放**。
+Nanocoder 由非盈利性 AI 开发者社区 [Nano Collective](https://nanocollective.org) 打造。它能通过你指定的模型来实现 Agentic Coding（智能体编程）：既能用 Ollama 跑本地模型，也能接入 OpenRouter、Requesty、Anthropic、Google 以及各类兼容 OpenAI 格式的 API。谁来处理你的代码？数据发到哪？全由你自己说了算。这里没有闭源黑盒，也没有把关键能力锁在付费墙后面：**尊重隐私**、**本地优先**、**面向所有人免费开放**。
 
 ![Example](./.github/assets/example-preview.gif)
 
@@ -69,21 +69,6 @@ Nanocoder 由社区集体而非商业公司打造，直接决定了它的安全�
 ## 赞助商
 
 Nanocoder 纯为社区而生，不以盈利为目的。我们的持续开发离不开赞助商的支持。[成为赞助商](https://nanocollective.org/sponsor)。
-
-### [Atlas Cloud](https://www.atlascloud.ai/console/coding-plan)
-
-<p>
-  <a href="https://www.atlascloud.ai/console/coding-plan" title="Atlas Cloud">
-    <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="https://nanocollective.org/sponsors/atlas-cloud-white.png">
-      <img alt="Atlas Cloud" height="40" src="https://nanocollective.org/sponsors/atlas-cloud-black.png">
-    </picture>
-  </a>
-</p>
-
-> Atlas Cloud 是一个全模态 AI 推理平台，为开发者提供统一的 API 接口，让你无缝调用视频生成、图像生成以及各种 LLM 模型。无需再维护繁杂的多厂商鉴权，只需接入一次，即可使用 300 多个跨模态精选模型。
-
-欢迎了解 [Atlas Cloud 新推出的 Coding Plan 优惠](https://www.atlascloud.ai/console/coding-plan)，以更具性价比的预算获取 API 额度。
 
 ## 加入社区
 

@@ -3,19 +3,33 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import test from 'ava';
 import React from 'react';
+import stripAnsi from 'strip-ansi';
 import {
 	createClearMessagesHandler,
 	handleMessageSubmission,
-	parseCustomCommandArgs,
 } from './app-util.js';
+import {parseCustomCommandArgs} from '@/custom-commands/args';
 import {SETTINGS_TAB_IDS} from '@/app/components/settings-constants';
+import {parseInput} from '@/command-parser';
 import {commandRegistry} from '@/commands';
 import {lazyCommands} from '@/commands/lazy-registry';
+import {createReviewCommand} from '@/commands/review';
 import BashProgress from '@/components/bash-progress';
 import CommandProgress from '@/components/command-progress';
-import type {MessageSubmissionOptions} from '@/types/index';
 import type {Session} from '@/session/session-manager';
 import {sessionManager} from '@/session/session-manager';
+import {renderWithTheme} from '@/test-utils/render-with-theme';
+import type {Message, MessageSubmissionOptions} from '@/types/index';
+import {
+	autoCompactSessionOverrides,
+	resetAutoCompactSession,
+	setAutoCompactThreshold,
+} from '@/conversation/compaction/auto-compact';
+import {
+	applyOnceOverrides,
+	expandOverrideArgs,
+	parseInlineOverrides,
+} from '@/conversation/compaction/inline-overrides';
 
 // Test command parsing edge cases
 // These tests document the expected behavior of parsing patterns
@@ -104,6 +118,32 @@ test('custom command args extraction - escaped quote inside quoted argument', t 
 		'say "hello"',
 		'next',
 	]);
+});
+
+test('custom command args extraction - keeps backslashes in Windows paths', t => {
+	t.deepEqual(parseCustomCommandArgs('"C:\\src\\app.ts" D:\\x\\y'), [
+		'C:\\src\\app.ts',
+		'D:\\x\\y',
+	]);
+});
+
+test('custom command args extraction - keeps backslashes in single quoted paths', t => {
+	t.deepEqual(parseCustomCommandArgs("'C:\\src\\app.ts'"), ['C:\\src\\app.ts']);
+});
+
+test('custom command args extraction - escaped space joins one argument', t => {
+	t.deepEqual(parseCustomCommandArgs('my\\ file.txt next'), [
+		'my file.txt',
+		'next',
+	]);
+});
+
+test('custom command args extraction - escaped backslash is a single backslash', t => {
+	t.deepEqual(parseCustomCommandArgs('a\\\\b'), ['a\\b']);
+});
+
+test('custom command args extraction - trailing backslash stays literal', t => {
+	t.deepEqual(parseCustomCommandArgs('path\\'), ['path\\']);
 });
 
 test('custom command args extraction - empty quoted argument', t => {
@@ -878,6 +918,19 @@ test('rename command - valid name calls onRenameSession with trimmed value', asy
 	t.is(capturedName, 'my-session');
 });
 
+test('rename command - surrounding spaces do not count toward the length limit', async t => {
+	let capturedName: string | undefined;
+	const name = 'a'.repeat(100);
+	const options = createRenameTestOptions({
+		onRenameSession: value => {
+			capturedName = value;
+		},
+		commandArgs: ['', '', name, '', ''],
+	});
+	await handleMessageSubmission(`/rename   ${name}  `, options);
+	t.is(capturedName, name);
+});
+
 test('rename command - multi-word name is joined with spaces', async t => {
 	let capturedName: string | undefined;
 	const options = createRenameTestOptions({
@@ -1137,6 +1190,85 @@ function createProgressTestOptions(overrides: {
 }
 
 test.serial(
+	'review command - echoes the submitted invocation before its result',
+	async t => {
+		const queued: React.ReactNode[] = [];
+		const options = createProgressTestOptions({
+			onAddToChatQueue: component => queued.push(component),
+		});
+		const originalExecute = commandRegistry.execute;
+		commandRegistry.execute = async () => 'Review result';
+
+		try {
+			await handleMessageSubmission('/review quick 1467', options);
+
+			t.is(queued.length, 2);
+			t.is(
+				(queued[0] as React.ReactElement<{message: string}>).props.message,
+				'$ /review quick 1467',
+			);
+			t.is(
+				(queued[1] as React.ReactElement<{message: string}>).props.message,
+				'Review result',
+			);
+		} finally {
+			commandRegistry.execute = originalExecute;
+		}
+	},
+);
+
+test.serial(
+	'TUI /review quick runs a one-shot review with a mock provider',
+	async t => {
+		const originalReview = commandRegistry.get('review');
+		const queued: React.ReactNode[] = [];
+		let chatCalls = 0;
+		commandRegistry.register({
+			...createReviewCommand({
+				execGit: async args => {
+					if (args[0] === 'rev-parse' || args[0] === 'remote') return '';
+					return 'diff --git a/file.ts b/file.ts\n+const x = 1;';
+				},
+				getCurrentBranch: async () => 'feature',
+				getDefaultBranch: async () => 'main',
+			}),
+			echoInvocation: true,
+		});
+		const options = createProgressTestOptions({
+			onAddToChatQueue: component => queued.push(component),
+		});
+		options.client = {
+			chat: async () => {
+				chatCalls += 1;
+				return {choices: [{message: {content: 'Mock provider review.'}}]};
+			},
+		} as NonNullable<MessageSubmissionOptions['client']>;
+
+		try {
+			await handleMessageSubmission('/review quick feature', options);
+
+			t.is(chatCalls, 1);
+			t.is(queued.length, 2);
+			t.is(
+				(queued[0] as React.ReactElement<{message: string}>).props.message,
+				'$ /review quick feature',
+			);
+			const resultMessage = stripAnsi(
+				renderWithTheme(queued[1] as React.ReactElement).lastFrame() ?? '',
+			);
+			t.true(
+				resultMessage.includes(
+					'Review scope: branch "feature" against "main".',
+				),
+			);
+			t.true(resultMessage.includes('Mock provider review.'));
+		} finally {
+			if (originalReview) commandRegistry.register(originalReview);
+		}
+	},
+);
+
+test.serial(
 	'progress spinner - /commit mounts CommandProgress then clears it',
 	async t => {
 		const live: React.ReactNode[] = [];
@@ -1202,4 +1334,327 @@ test('progress spinner - only slow commands opt in', t => {
 
 	const help = lazyCommands.find(c => c.name === 'help');
 	t.is(help?.progressLabel, undefined);
+});
+
+// --- Inline `?key=value` overrides (issue #1151) ---
+
+test('inline overrides - /usage ?context-max=200k is parsed into a session-override', t => {
+	// ?context-max is a session-override key (handled by applyOnceOverrides),
+	// not a legacy --flag, so expandOverrideArgs leaves it alone and the
+	// dispatcher applies it through the existing session-override stores.
+	// /usage reads getSessionContextLimit() inside its awaited handler, so
+	// the override is observable for that command's run.
+	const trimmed = '/usage ?context-max=200k'.slice(1).trim().split(/\s+/);
+	const {args, overrides} = parseInlineOverrides(trimmed.slice(1));
+	t.deepEqual(args, []);
+	t.deepEqual(overrides, [{key: 'context-max', value: '200k'}]);
+	t.deepEqual(expandOverrideArgs(overrides), []);
+});
+
+test('inline overrides - mixed positional args survive the split', t => {
+	const trimmed = '/compact --mechanical ?preview --llm'
+		.slice(1)
+		.trim()
+		.split(/\s+/);
+	const {args, overrides} = parseInlineOverrides(trimmed.slice(1));
+	t.deepEqual(args, ['--mechanical', '--llm']);
+	t.deepEqual(overrides, [{key: 'preview', value: true}]);
+});
+
+test('inline overrides - applyOnceOverrides restore function is idempotent and safe', async t => {
+	const restore = await applyOnceOverrides([]);
+	t.notThrows(() => restore());
+	t.notThrows(() => restore());
+});
+
+function queuedText(node: React.ReactNode): string {
+	if (React.isValidElement(node)) {
+		const {message} = node.props as {message?: unknown};
+		return typeof message === 'string' ? message : '';
+	}
+	return typeof node === 'string' ? node : '';
+}
+
+test.serial('inline overrides - unknown ?keys warn and reach the handler unchanged', async t => {
+	// Regression: an unrecognised `?key=value` token on a command that
+	// supports overrides must neither vanish silently nor pollute the
+	// override stores. The dispatcher forwards it verbatim and queues one
+	// warning naming the key.
+	const texts: string[] = [];
+	const options = createResumeTestOptions({
+		onAddToChatQueue: node => {
+			texts.push(queuedText(node));
+		},
+	});
+
+	await handleMessageSubmission('/usage ?bogus=1', options);
+
+	t.true(
+		texts.some(text => text.includes('?bogus')),
+		`expected an unknown-override warning naming ?bogus, got: ${JSON.stringify(texts)}`,
+	);
+});
+
+test.serial('inline overrides - commands outside the allowlist get their ?tokens untouched', async t => {
+	// Regression: free-text commands (`/remember ?important use tabs`,
+	// `/tasks add check ?preview`) had `?word` tokens reordered or expanded
+	// into flags. Only override-aware commands parse them now: /context-max
+	// receives `?context-max=200k` as its literal argument (so it reports
+	// its normal invalid-limit error), no override is applied, and no
+	// unknown-override warning is queued.
+	const {getSessionContextLimit, resetSessionContextLimit} = await import(
+		'@/models/index.js'
+	);
+	resetSessionContextLimit();
+	const texts: string[] = [];
+	let limitDuringCall: number | null | undefined;
+	const options = createResumeTestOptions({
+		onAddToChatQueue: node => {
+			limitDuringCall = getSessionContextLimit();
+			texts.push(queuedText(node));
+		},
+	});
+
+	await handleMessageSubmission('/context-max ?context-max=200k', options);
+
+	t.true(
+		texts.some(text => text.includes('Invalid context limit')),
+		`expected the handler's normal invalid-limit error, got: ${JSON.stringify(texts)}`,
+	);
+	t.false(texts.some(text => text.includes('Unknown inline override')));
+	t.is(limitDuringCall, null);
+	t.is(getSessionContextLimit(), null);
+	resetSessionContextLimit();
+});
+
+test.serial('inline overrides - dispatcher applies a ?context-max override and restores the prior value', async t => {
+	// Regression: a once-scoped override must write the new value into the
+	// session-override store for the duration of the command, and restore the
+	// **prior** value (not null) afterwards so a pre-existing session setting
+	// survives the override. /usage is exercised end-to-end via
+	// handleMessageSubmission because it is the one built-in that reads
+	// getSessionContextLimit() synchronously inside its handler.
+	const {getSessionContextLimit, setSessionContextLimit, resetSessionContextLimit} =
+		await import('@/models/index.js');
+	resetSessionContextLimit();
+	setSessionContextLimit(8192);
+
+	let limitDuringCall: number | null | undefined;
+	const options = createResumeTestOptions({
+		onAddToChatQueue: () => {
+			limitDuringCall = getSessionContextLimit();
+		},
+	});
+
+	await handleMessageSubmission('/usage ?context-max=200k', options);
+
+	t.is(
+		limitDuringCall,
+		200000,
+		'applyOnceOverrides should have written 200000 before the usage handler ran',
+	);
+	t.is(
+		getSessionContextLimit(),
+		8192,
+		'restoreOnce should have put the prior 8192 back after the command',
+	);
+
+	resetSessionContextLimit();
+});
+
+test.serial('inline overrides - /compact ?threshold skips compaction below the threshold', async t => {
+	// End-to-end for the headline example: the once-threshold gates the
+	// manual compaction (mirroring the automatic path's gate). A tiny
+	// transcript against a huge once-limit sits near 0%, so the command
+	// reports the skip instead of compacting — and restores both stores.
+	const {
+		getSessionContextLimit,
+		resetSessionContextLimit,
+	} = await import('@/models/index.js');
+	resetAutoCompactSession();
+	resetSessionContextLimit();
+	setAutoCompactThreshold(50);
+
+	const texts: string[] = [];
+	const options = createResumeTestOptions({
+		onAddToChatQueue: node => {
+			texts.push(queuedText(node));
+		},
+	});
+	const messages: Message[] = [
+		{role: 'user', content: 'Hello, please compact this short transcript.'},
+	];
+	options.messages = messages;
+	let rewritten: Message[] | null = null;
+	options.setMessages = msgs => {
+		rewritten = msgs;
+	};
+
+	await handleMessageSubmission(
+		'/compact ?threshold=80 ?context-max=999999999',
+		options,
+	);
+
+	t.true(
+		texts.some(text => text.includes('below') && text.includes('80%')),
+		`expected a below-threshold skip message, got: ${JSON.stringify(texts)}`,
+	);
+	t.is(rewritten, null, 'skipped compaction must not rewrite messages');
+	t.is(
+		autoCompactSessionOverrides.threshold,
+		50,
+		'prior threshold is restored after the gated command',
+	);
+	t.is(
+		getSessionContextLimit(),
+		null,
+		'once context limit is restored after the gated command',
+	);
+
+	resetAutoCompactSession();
+	resetSessionContextLimit();
+});
+
+test.serial('inline overrides - /compact ?threshold proceeds at or above the threshold', async t => {
+	// Mirror image: a 1-token once-limit puts any transcript at hundreds of
+	// percent, so the gate passes and the normal mechanical compaction runs.
+	const {resetSessionContextLimit} = await import('@/models/index.js');
+	resetAutoCompactSession();
+	resetSessionContextLimit();
+
+	const texts: string[] = [];
+	const options = createResumeTestOptions({
+		onAddToChatQueue: node => {
+			texts.push(queuedText(node));
+		},
+	});
+	options.messages = [
+		{role: 'user', content: 'Hello, please compact this short transcript.'},
+	];
+	let rewritten: Message[] | null = null;
+	options.setMessages = msgs => {
+		rewritten = msgs;
+	};
+
+	await handleMessageSubmission('/compact ?threshold=80 ?context-max=1', options);
+
+	t.true(
+		texts.some(text => text.includes('Compacted')),
+		`expected a compaction success message, got: ${JSON.stringify(texts)}`,
+	);
+	t.not(rewritten, null, 'compaction above the threshold rewrites messages');
+	t.is(
+		autoCompactSessionOverrides.threshold,
+		null,
+		'no prior threshold means null after restore',
+	);
+
+	resetAutoCompactSession();
+	resetSessionContextLimit();
+});
+
+// --- Old command names (source/commands/aliases.ts) keep working ---
+
+function createAliasTestOptions(): {
+	options: MessageSubmissionOptions;
+	calls: string[];
+	queued: React.ReactNode[];
+	live: React.ReactNode[];
+} {
+	const calls: string[] = [];
+	const queued: React.ReactNode[] = [];
+	const live: React.ReactNode[] = [];
+	const options = {
+		...createSettingsTestOptions({onAddToChatQueue: node => queued.push(node)}),
+		onEnterModelSelectionMode: () => calls.push('model-selection'),
+		onEnterModelDatabaseMode: () => calls.push('model-database'),
+		setLiveComponent: (node: React.ReactNode) => live.push(node),
+	} as MessageSubmissionOptions;
+	return {options, calls, queued, live};
+}
+
+async function settle(): Promise<void> {
+	await new Promise(resolve => setTimeout(resolve, 0));
+}
+
+test.serial('alias - /model-database opens the model browser', async t => {
+	const {options, calls} = createAliasTestOptions();
+	await handleMessageSubmission('/model-database', options);
+	t.deepEqual(calls, ['model-database']);
+});
+
+test.serial('alias - /model browse opens the model browser, /model the picker', async t => {
+	const browse = createAliasTestOptions();
+	await handleMessageSubmission('/model browse', {
+		...browse.options,
+		commandArgs: ['browse'],
+	});
+	t.deepEqual(browse.calls, ['model-database']);
+
+	const plain = createAliasTestOptions();
+	await handleMessageSubmission('/model', plain.options);
+	t.deepEqual(plain.calls, ['model-selection']);
+});
+
+for (const [message, componentName, provider] of [
+	['/codex-login', 'CodexLogin', 'ChatGPT'],
+	['/login codex', 'CodexLogin', 'ChatGPT'],
+	['/copilot-login', 'CopilotLogin', 'GitHub Copilot'],
+	['/copilot-login Work Copilot', 'CopilotLogin', 'Work Copilot'],
+	['/login copilot', 'CopilotLogin', 'GitHub Copilot'],
+] as const) {
+	test.serial(`alias - ${message} starts the ${componentName} device flow`, async t => {
+		const {options, live} = createAliasTestOptions();
+		await handleMessageSubmission(message, options);
+		const element = live[0] as React.ReactElement<{providerName: string}>;
+		t.true(React.isValidElement(element));
+		t.is((element.type as {name?: string}).name, componentName);
+		t.is(element.props.providerName, provider);
+	});
+}
+
+test.serial('alias - /login without a target shows usage', async t => {
+	const {options, queued, live} = createAliasTestOptions();
+	await handleMessageSubmission('/login', options);
+	await settle();
+	t.is(live.length, 0);
+	t.true(queued.some(node => queuedText(node).includes('/login <codex|copilot>')));
+});
+
+test.serial('alias - /remember runs /memory add', async t => {
+	const {options, queued} = createAliasTestOptions();
+	// No text, so nothing is written: the usage message proves the routing.
+	await handleMessageSubmission('/remember', options);
+	await settle();
+	t.true(
+		queued.some(node => queuedText(node).includes('Usage: /memory add')),
+		JSON.stringify(queued.map(queuedText)),
+	);
+});
+
+test.serial('alias - /schedule runs /skills schedule', async t => {
+	const {options, queued} = createAliasTestOptions();
+	await handleMessageSubmission('/schedule extra', options);
+	await settle();
+	t.true(
+		queued.some(node => queuedText(node).includes('Usage: /skills schedule')),
+		JSON.stringify(queued.map(queuedText)),
+	);
+});
+
+test.serial('alias - a project command named like an old alias still wins', async t => {
+	let completed = false;
+	const {options} = createAliasTestOptions();
+	const customCommandCache = new Map([
+		['remember', {name: 'remember', fullName: 'remember'}],
+	]) as unknown as MessageSubmissionOptions['customCommandCache'];
+	await handleMessageSubmission('/remember', {
+		...options,
+		customCommandCache,
+		onCommandComplete: () => {
+			completed = true;
+		},
+		onAddToChatQueue: () => t.fail('the built-in /memory add should not run'),
+	});
+	t.true(completed);
 });

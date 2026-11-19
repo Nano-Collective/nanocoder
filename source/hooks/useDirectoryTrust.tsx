@@ -1,12 +1,21 @@
 import path from 'path';
 import {useCallback, useState} from 'react';
 import {loadPreferences, savePreferences} from '@/config/preferences';
+import {
+	ensureDirectoryTrust,
+	grantDirectoryTrust,
+	isDirectoryTrusted,
+} from '@/config/trust/directory-trust';
 import {formatError} from '@/utils/error-formatter';
-import {logError, logInfo} from '@/utils/message-queue';
+import {
+	notifyError,
+	notifyInfo,
+	notifyWarning,
+} from '@/utils/message-queue-core';
 
 interface UseDirectoryTrustReturn {
 	isTrusted: boolean;
-	handleConfirmTrust: () => void;
+	handleConfirmTrust: (shownFingerprint?: string) => void;
 	isTrustLoading: boolean;
 	isTrustedError: string | null;
 }
@@ -22,16 +31,24 @@ function checkTrustSync(directory: string): {
 	error: string | null;
 } {
 	try {
-		const preferences = loadPreferences();
-		const trustedDirectories = preferences.trustedDirectories || [];
-		const normalizedDirectory = path.resolve(directory); // nosemgrep
-		const trusted = trustedDirectories.some(
-			trustedDir => path.resolve(trustedDir) === normalizedDirectory, // nosemgrep
-		);
-		return {trusted, error: null};
+		// Same resolution as --plain, ACP and the daemon, including
+		// NANOCODER_TRUST_DIRECTORY=1 recording the folder as trusted. A
+		// project .env cannot set that variable (see project-dotenv), so only
+		// the user's own shell can skip the disclaimer this way.
+		const trust = ensureDirectoryTrust(directory, false);
+		if (trust.persisted) {
+			notifyInfo(
+				`Marked ${path.resolve(directory)} as trusted (NANOCODER_TRUST_DIRECTORY=1).`, // nosemgrep
+			);
+		} else if (trust.persistFailed) {
+			notifyWarning(
+				'NANOCODER_TRUST_DIRECTORY=1 trusted this directory for this run, but saving it to your preferences failed.',
+			);
+		}
+		return {trusted: trust.trusted, error: null};
 	} catch (err) {
 		const errorMessage = formatError(err);
-		logError(`${errorMessage}`);
+		notifyError(`${errorMessage}`);
 		return {
 			trusted: false,
 			error: `Failed to check directory trust status: ${errorMessage}`,
@@ -58,37 +75,35 @@ export function useDirectoryTrust(
 	const [error, setError] = useState<string | null>(initial.error);
 
 	// Handler to confirm trust for the current directory
-	const handleConfirmTrust = useCallback(() => {
-		try {
-			setError(null);
+	const handleConfirmTrust = useCallback(
+		(shownFingerprint?: string) => {
+			try {
+				setError(null);
 
-			const preferences = loadPreferences();
-			const trustedDirectories = preferences.trustedDirectories || [];
+				const preferences = loadPreferences();
 
-			// Normalize the directory path before storing and checking
-			const normalizedDirectory = path.resolve(directory); // nosemgrep
+				if (!isDirectoryTrusted(directory, preferences)) {
+					const granted = grantDirectoryTrust(
+						preferences,
+						directory,
+						shownFingerprint,
+					);
+					savePreferences(granted);
+					notifyInfo(
+						`Directory added to trusted list: ${path.resolve(directory)}`, // nosemgrep
+					);
+				}
 
-			// Only add if not already trusted (check using normalized paths)
-			if (
-				!trustedDirectories.some(
-					trustedDir => path.resolve(trustedDir) === normalizedDirectory, // nosemgrep
-				)
-			) {
-				trustedDirectories.push(normalizedDirectory);
-				preferences.trustedDirectories = trustedDirectories;
-				savePreferences(preferences);
+				setIsTrusted(true);
+			} catch (err) {
+				const errorMessage = formatError(err);
+				setError(`Failed to save directory trust: ${errorMessage}`);
 
-				logInfo(`Directory added to trusted list: ${normalizedDirectory}`);
+				notifyError(`${errorMessage}`);
 			}
-
-			setIsTrusted(true);
-		} catch (err) {
-			const errorMessage = formatError(err);
-			setError(`Failed to save directory trust: ${errorMessage}`);
-
-			logError(`${errorMessage}`);
-		}
-	}, [directory]);
+		},
+		[directory],
+	);
 
 	return {
 		isTrusted,

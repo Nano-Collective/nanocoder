@@ -1,22 +1,22 @@
 import {Box, Text} from 'ink';
-import BigText from 'ink-big-text';
-import Gradient from 'ink-gradient';
 import {memo, useState, useSyncExternalStore} from 'react';
+import stringWidth from 'string-width';
 import {
 	getNanocoderShape,
 	getPreferencesVersion,
 	subscribeToPreferences,
 } from '@/config/preferences';
+import {useBannerModules} from '@/hooks/use-banner-modules';
 import {useResponsiveTerminal, useTerminalRows} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
+import {wrapWithTrimmedContinuations} from '@/terminal/text-wrapping';
 import {
 	formatGitStatusSummary,
 	getGitStatusSummarySync,
 } from '@/tools/git/utils';
 import {DEFAULT_NANOCODER_SHAPE, type NanocoderShape} from '@/types/ui';
-import {getPackageVersion} from '@/utils/package-version';
-import {homeRelative, truncateMiddle} from '@/utils/path';
-import {wrapWithTrimmedContinuations} from '@/utils/text-wrapping';
+import {homeRelative, truncateMiddle} from '@/utils/fs/path';
+import {getPackageVersion, UNKNOWN_VERSION} from '@/utils/package-version';
 import {getRandomTip} from '@/utils/tips';
 
 // Resolve the version once at module load time to avoid repeated file reads.
@@ -150,10 +150,20 @@ export default memo(function WelcomeMessage({
 		}
 	}
 
+	const bannerModules = useBannerModules(logoText !== null);
+
+	const StyledBigText = bannerModules?.BigText;
+	const StyledGradient = bannerModules?.Gradient;
+
+	// Each menu row is a single line this wide: label, gap, key. A menu is only
+	// offered when that line fits the width too, or its rows wrap apart.
+	const menuWidth = (items: Array<[string, string]>) =>
+		Math.max(...items.map(([l, k]) => l.length + k.length)) + 4;
+
 	let menu: Array<[string, string]> = [];
-	if (budget >= MENU_FULL_ROWS) {
+	if (budget >= MENU_FULL_ROWS && menuWidth(MENU_FULL) <= actualWidth) {
 		menu = MENU_FULL;
-	} else if (budget >= MENU_MIN_ROWS) {
+	} else if (budget >= MENU_MIN_ROWS && menuWidth(MENU_MIN) <= actualWidth) {
 		menu = MENU_MIN;
 	}
 
@@ -163,10 +173,7 @@ export default memo(function WelcomeMessage({
 		return marker ? `${branch} (${marker})` : branch;
 	})();
 
-	const colW =
-		menu.length > 0
-			? Math.max(...menu.map(([l, k]) => l.length + k.length)) + 4
-			: 0;
+	const colW = menu.length > 0 ? menuWidth(menu) : 0;
 
 	// Full terminal width for every row so the wordmark and the text below it
 	// share one center axis — a capped box would sit left of the centered
@@ -199,17 +206,32 @@ export default memo(function WelcomeMessage({
 		const branchBudget = Math.max(6, termW - 16);
 		const shortBranch = truncateMiddle(branchLabel, branchBudget);
 		const branchPart = `⎇ ${shortBranch} · `;
-		const cwdBudget = Math.max(10, termW - branchPart.length - 3);
+		// branchPart already includes the separator, so the trailing 3 is not it:
+		// it is slack, kept from the original budget, for fonts that draw ⎇ and ·
+		// wider than string-width reports.
+		const cwdBudget = Math.max(10, termW - stringWidth(branchPart) - 3);
 		return {branchLabel: shortBranch, cwd: truncateMiddle(cwd, cwdBudget)};
 	})();
 
 	return (
-		<Box flexDirection="column" width={termW} marginBottom={1}>
+		<Box
+			flexDirection="column"
+			width={termW}
+			height={Math.max(0, budget - 1)}
+			justifyContent="center"
+			marginBottom={1}
+		>
 			{logoText && (
 				<Box justifyContent={justify} width={termW}>
-					<Gradient colors={[colors.primary, colors.tool]}>
-						<BigText text={logoText} font={logoFont} />
-					</Gradient>
+					{StyledGradient && StyledBigText ? (
+						<StyledGradient colors={[colors.primary, colors.tool]}>
+							<StyledBigText text={logoText} font={logoFont} />
+						</StyledGradient>
+					) : (
+						<Text bold color={colors.primary}>
+							{logoText}
+						</Text>
+					)}
 				</Box>
 			)}
 
@@ -218,7 +240,11 @@ export default memo(function WelcomeMessage({
 					<Text color={colors.text} bold>
 						nanocoder
 					</Text>
-					<Text color={colors.secondary}> v{version}</Text>
+					<Text color={colors.secondary}>
+						{version === UNKNOWN_VERSION
+							? ' (version unknown)'
+							: ` v${version}`}
+					</Text>
 				</Text>
 			</Box>
 			<Box justifyContent={justify} width={termW} marginTop={1}>

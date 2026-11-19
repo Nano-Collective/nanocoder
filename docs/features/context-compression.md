@@ -8,7 +8,7 @@ sidebar_order: 3
 
 Every message in your conversation takes up space in the model's context window. In long sessions, you'll eventually hit the limit — the AI loses access to earlier messages and starts losing track of what you've discussed. Context compression solves this by intelligently condensing older messages while keeping the important parts.
 
-This matters most when you're on extended coding sessions or using paid APIs where token usage affects cost. Auto-compact uses the same `autoCompact` settings in the TUI, `--plain` / `nanocoder run`, ACP editor sessions, and subagent loops. `/compact` is still TUI-only.
+This matters most when you're on extended coding sessions or using paid APIs where token usage affects cost. Auto-compact uses the same `autoCompact` settings in the TUI, `--plain` / `nanocoder run`, ACP editor sessions, and subagent loops. `/compact` is still TUI-only. `read_file` also stubs a repeat of the same path and line range when the file has not changed; compact, `/clear`, `/resume`, `/tune`, or finishing the config wizard forces a real read again. Each ACP chat keeps its own stubs, and clearing, retrying, reverting, or reloading that chat forces a real read too.
 
 ## How It Works
 
@@ -28,10 +28,20 @@ Either way, the system preserves:
 Use the `/compact` command to manually compress your conversation history:
 
 ```bash
-/compact              # Compress using the current strategy (LLM by default)
+/compact              # Compress using the current strategy and mode (LLM by default)
 /compact --preview    # Preview compression without applying
 /compact --restore    # Restore from pre-compression backup
 ```
+
+`/compact` also takes one-shot [inline overrides](commands.md#inline-overrides) that apply to that command only:
+
+```bash
+/compact ?threshold=80        # Compact only if usage is at or above 80%, otherwise report usage and skip
+/compact ?preview             # Same as --preview
+/compact ?context-max=200k    # Measure usage against a 200k limit for this command
+```
+
+`?threshold` accepts 50-95; other values are ignored and the command runs ungated.
 
 ### Strategy Flags
 
@@ -39,7 +49,9 @@ Use the `/compact` command to manually compress your conversation history:
 |----------|------|-------------|
 | LLM (default) | `--llm` | Force LLM summarisation for this invocation |
 | Mechanical | `--mechanical` | Force mechanical (regex) compression for this invocation |
-| Session-wide | `--strategy llm` / `--strategy mechanical` | Persist strategy for the current session |
+| Session-wide | `--strategy llm` / `--strategy mechanical` | Set the strategy for the rest of the session (manual and auto-compact). Does not compact on its own |
+
+Without `--llm` or `--mechanical`, `/compact` uses the session strategy set with `--strategy`, then `autoCompact.strategy` from config, then `llm`. With no model connected it always runs mechanically.
 
 ### Mechanical Compression Modes
 
@@ -47,9 +59,11 @@ These only apply to the mechanical strategy:
 
 | Mode | Flag | Description |
 |------|------|-------------|
-| Default | (none) | Balanced compression — good for most cases |
+| Default | `--default` | Balanced compression, good for most cases |
 | Conservative | `--conservative` | Preserves more content, less aggressive |
 | Aggressive | `--aggressive` | Maximum compression, minimal content retention |
+
+Without a mode flag, `/compact` uses the same mode auto-compact would: tune's aggressive compact if it is on, otherwise `autoCompact.mode` from config (`conservative` by default).
 
 **Examples:**
 
@@ -113,7 +127,7 @@ Override auto-compact settings for the current session without modifying config 
 /compact --strategy mechanical  # Use mechanical compression for this session
 ```
 
-Session overrides are temporary and reset when you restart Nanocoder.
+These flags only change settings - they don't compact anything by themselves. Run `/compact` separately to compress now. Session overrides are temporary and reset when you restart Nanocoder. They take priority over both config and tune's [Aggressive Compact](tune.md#aggressive-compact) setting.
 
 ## How Compression Works
 
@@ -142,7 +156,7 @@ Each older message is truncated individually using regex heuristics:
 While preserving:
 
 1. **System messages** — Always kept intact
-2. **Recent messages** — Last 2 messages kept at full detail (configurable)
+2. **Recent messages** - Last 2 messages kept at full detail
 3. **Tool calls** — Structure preserved for conversation continuity
 4. **Error information** — Error types and resolution status retained
 
@@ -197,7 +211,7 @@ Check that:
 
 ### LLM compaction always falls back to mechanical
 
-If you see "LLM summary unavailable - falling back to mechanical compaction." every time, the summariser call is failing. Check:
+If you see "LLM summary unavailable - falling back to mechanical compaction." after `/compact`, or an auto-compact notice reading "Context at N% capacity - auto-compacting (summary degraded: LLM call failed)...", every time, the summariser call is failing. Check:
 
 1. The active provider/model is reachable and responding
 2. The model's context window is large enough to fit the compressible segment (the summariser call sends the older messages as a transcript)

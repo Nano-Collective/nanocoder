@@ -1,5 +1,5 @@
 import {readFile} from 'node:fs/promises';
-import {highlight} from 'cli-highlight';
+import {dirname} from 'node:path';
 import {Box, Text, useFocus, useInput} from 'ink';
 import {useEffect, useMemo, useState} from 'react';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
@@ -12,14 +12,15 @@ import {
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {useUIStateContext} from '@/hooks/useUIState';
+import {highlight} from '@/terminal/highlighter';
+import {compressIndentation} from '@/terminal/indentation-normalizer';
 import type {FileExplorerProps, ViewMode} from '@/types/file-explorer';
 import {
 	buildFileTree,
 	type FileNode,
 	flattenTree,
 	flattenTreeAll,
-} from '@/utils/file-tree';
-import {compressIndentation} from '@/utils/indentation-normalizer';
+} from '@/utils/fs/file-tree';
 import {getVSCodeServerSync} from '@/vscode/vscode-server';
 import {TreeItem} from './tree-item';
 import {
@@ -116,6 +117,16 @@ export function FileExplorer({onClose}: FileExplorerProps) {
 						item.node.path.toLowerCase().includes(searchQuery.toLowerCase()),
 				)
 			: flatList;
+
+	// filteredList swaps between every search match and just the expanded rows
+	// (and shrinks when a directory collapses), but only the arrow handlers
+	// clamp selectedIndex. Leaving a search would strand it past the end of the
+	// shorter list: nothing highlighted, Up and Enter inert.
+	useEffect(() => {
+		setSelectedIndex(prev =>
+			Math.min(prev, Math.max(0, filteredList.length - 1)),
+		);
+	}, [filteredList.length]);
 
 	// Calculate scroll window
 	const scrollStart = Math.max(
@@ -253,18 +264,25 @@ export function FileExplorer({onClose}: FileExplorerProps) {
 		}
 	};
 
+	// Collapse the highlighted directory if it is open, otherwise move up to
+	// its parent row. Paths come from path.join in buildFileTree, so they use
+	// the platform separator; dirname splits them the same way.
 	const handleGoUp = () => {
-		// Find parent directory and collapse it
 		if (!selectedNode) return;
-		const parts = selectedNode.path.split('/');
-		if (parts.length > 1) {
-			parts.pop();
-			const parentPath = parts.join('/');
+		if (selectedNode.isDirectory && expanded.has(selectedNode.path)) {
 			setExpanded(prev => {
 				const next = new Set(prev);
-				next.delete(parentPath);
+				next.delete(selectedNode.path);
 				return next;
 			});
+			return;
+		}
+		const parentPath = dirname(selectedNode.path);
+		const parentIndex = filteredList.findIndex(
+			item => item.node.path === parentPath,
+		);
+		if (parentIndex !== -1) {
+			setSelectedIndex(parentIndex);
 		}
 	};
 
@@ -354,8 +372,9 @@ export function FileExplorer({onClose}: FileExplorerProps) {
 					toggleFileSelection(selectedNode.path);
 				}
 			}
-		} else if (key.backspace) {
-			// Go up one directory by collapsing current
+		} else if (key.backspace || key.delete) {
+			// Ink reports the usual Backspace byte (\x7f) as `delete`, so accept
+			// both.
 			handleGoUp();
 		}
 	});
@@ -518,7 +537,7 @@ export function FileExplorer({onClose}: FileExplorerProps) {
 					<Text color={colors.secondary}>
 						{searchMode
 							? 'Type to filter | Backspace: delete | Esc: exit search'
-							: 'Up/Down: navigate | Enter: expand/preview | Space: select | /: search | Esc: done'}
+							: 'Up/Down: navigate | Enter: expand/preview | Backspace: up | Space: select | /: search | Esc: done'}
 					</Text>
 				</Box>
 			</Box>

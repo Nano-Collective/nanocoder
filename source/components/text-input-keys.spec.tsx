@@ -1,6 +1,11 @@
+import {readdirSync, readFileSync} from 'node:fs';
+import {join} from 'node:path';
+import {fileURLToPath} from 'node:url';
 import test from 'ava';
+import chalk from 'chalk';
 import {render} from 'ink-testing-library';
 import React, {useState} from 'react';
+import {pasteEvents} from '../terminal/terminal-paste';
 import TextInput from './text-input';
 
 /**
@@ -350,4 +355,270 @@ test('component Ctrl+A moves to start when showCursor is true (positive control)
 	await waitForValue(valueRef, v => v === 'xabc');
 	t.is(valueRef.current, 'xabc');
 	unmount();
+});
+
+// --- Astral characters (an emoji is a surrogate pair: two UTF-16 units) ---
+//
+// Cursor offsets count UTF-16 units. The render loop used to count code points
+// instead, and the edit keys stepped one unit at a time, so an emoji in the
+// value desynced the caret and let Backspace/Delete split the pair.
+
+const LEFT = '\u001b[D';
+const RIGHT = '\u001b[C';
+const DOWN = '\u001b[B';
+const HOME = '\u001b[H';
+const END = '\u001b[F';
+const DELETE = '\u001b[3~';
+const BACKSPACE = '\u007f';
+const CTRL_B = '\u0002';
+const CTRL_F = '\u0006';
+
+test('component Left moves the caret one visible character at a time across an emoji', async t => {
+	// The caret is an inverse-video run, which chalk drops at level 0 (no TTY),
+	// so pin the level for this render.
+	const originalLevel = chalk.level;
+	chalk.level = 1;
+	t.teardown(() => {
+		chalk.level = originalLevel;
+	});
+
+	const valueRef: ValueRef = {current: ''};
+	const {stdin, lastFrame, unmount} = render(
+		<ControlledTextInput valueRef={valueRef} initialValue="😀abc" />,
+	);
+	t.teardown(unmount);
+
+	const frames = [
+		`😀ab${chalk.inverse('c')}`,
+		`😀a${chalk.inverse('b')}c`,
+		`😀${chalk.inverse('a')}bc`,
+		`${chalk.inverse('😀')}abc`,
+	];
+	for (const [index, expected] of frames.entries()) {
+		await press(stdin, LEFT);
+		// Poll: a fixed sleep can read the frame before Ink has flushed it.
+		const start = Date.now();
+		while (
+			!(lastFrame() ?? '').includes(expected) &&
+			Date.now() - start < 2000
+		) {
+			await new Promise(resolve => setTimeout(resolve, 20));
+		}
+		const frame = lastFrame() ?? '';
+		t.true(
+			frame.includes(expected),
+			`after Left #${index + 1}: ${JSON.stringify(frame)}`,
+		);
+	}
+});
+
+const emojiEdits: Array<
+	[name: string, initial: string, keys: string[], expected: string]
+> = [
+	['Backspace removes a whole emoji', 'a😀b', [END, LEFT, BACKSPACE], 'ab'],
+	['Delete removes a whole emoji', 'a😀b', [HOME, RIGHT, DELETE], 'ab'],
+	['Left steps over a whole emoji', '😀', [LEFT, 'X'], 'X😀'],
+	['Right steps over a whole emoji', '😀', [HOME, RIGHT, 'X'], '😀X'],
+	['Ctrl+B steps over a whole emoji', '😀', [CTRL_B, 'X'], 'X😀'],
+	['Ctrl+F steps over a whole emoji', '😀', [HOME, CTRL_F, 'X'], '😀X'],
+	[
+		'Down lands beside an emoji, not inside it',
+		'abc\n😀x',
+		[HOME, RIGHT, DOWN, 'X'],
+		'abc\nX😀x',
+	],
+];
+
+for (const [name, initial, keys, expected] of emojiEdits) {
+	test(`component ${name}`, async t => {
+		const valueRef: ValueRef = {current: initial};
+		const {stdin, unmount} = render(
+			<ControlledTextInput valueRef={valueRef} initialValue={initial} />,
+		);
+		t.teardown(unmount);
+
+		for (const key of keys) {
+			await press(stdin, key);
+		}
+
+		t.is(valueRef.current, expected);
+	});
+}
+
+// --- Bracketed paste ---
+//
+// cli.tsx lifts bracketed pastes off stdin and publishes them on pasteEvents,
+// so a field only ever sees a paste if it subscribes. Only the composer used
+// to, so pasting into any other field did nothing.
+
+test('component paste inserts at the caret of a focused field', async t => {
+	const valueRef: ValueRef = {current: ''};
+	const {stdin, unmount} = render(
+		<ControlledTextInput valueRef={valueRef} initialValue="ac" />,
+	);
+	t.teardown(unmount);
+
+	await press(stdin, '\u001b[D'); // left -> caret between a and c
+	pasteEvents.emit('paste', 'b');
+	await waitForValue(valueRef, v => v === 'abc');
+	t.is(valueRef.current, 'abc');
+
+	// The caret ends after the pasted text, so typing continues from there.
+	await press(stdin, 'X');
+	await waitForValue(valueRef, v => v === 'abXc');
+	t.is(valueRef.current, 'abXc');
+});
+
+test('component paste turns the CR line breaks a terminal sends into newlines', async t => {
+	const valueRef: ValueRef = {current: ''};
+	const {unmount} = render(<ControlledTextInput valueRef={valueRef} />);
+	t.teardown(unmount);
+
+	await new Promise(resolve => setTimeout(resolve, 20));
+	pasteEvents.emit('paste', 'one\rtwo\r\nthree');
+	await waitForValue(valueRef, v => v.length > 0);
+	t.is(valueRef.current, 'one\ntwo\nthree');
+});
+
+test('component paste is ignored by a field without focus', async t => {
+	const changes: string[] = [];
+	const {unmount} = render(
+		<TextInput value="" onChange={v => changes.push(v)} focus={false} />,
+	);
+	t.teardown(unmount);
+
+	await new Promise(resolve => setTimeout(resolve, 20));
+	pasteEvents.emit('paste', 'nope');
+	await new Promise(resolve => setTimeout(resolve, 50));
+	t.deepEqual(changes, []);
+});
+
+test('component onPaste replaces the default insert', async t => {
+	const changes: string[] = [];
+	const pastes: string[] = [];
+	const {unmount} = render(
+		<TextInput
+			value=""
+			onChange={v => changes.push(v)}
+			onPaste={payload => pastes.push(payload)}
+		/>,
+	);
+	t.teardown(unmount);
+
+	await new Promise(resolve => setTimeout(resolve, 20));
+	pasteEvents.emit('paste', 'handled elsewhere');
+	await new Promise(resolve => setTimeout(resolve, 50));
+	t.deepEqual(pastes, ['handled elsewhere']);
+	t.deepEqual(changes, []);
+});
+
+test('component paste listener is removed on blur and on unmount', async t => {
+	// pasteEvents is a process-wide singleton, so a leaked listener would make
+	// a later field's paste land twice. Effects flush after render returns, so
+	// settle before each count.
+	const settle = () => new Promise(resolve => setTimeout(resolve, 20));
+	const baseline = pasteEvents.listenerCount('paste');
+	const {rerender, unmount} = render(<TextInput value="" onChange={() => {}} />);
+	await settle();
+	t.is(pasteEvents.listenerCount('paste'), baseline + 1);
+
+	rerender(<TextInput value="" onChange={() => {}} focus={false} />);
+	await settle();
+	t.is(pasteEvents.listenerCount('paste'), baseline);
+
+	rerender(<TextInput value="" onChange={() => {}} />);
+	await settle();
+	t.is(pasteEvents.listenerCount('paste'), baseline + 1);
+
+	unmount();
+	await settle();
+	t.is(pasteEvents.listenerCount('paste'), baseline);
+});
+
+// --- Ctrl+A/E/U/K stay scoped to the current line in multi-line input ---
+//
+// Each readline shortcut used to compute its offset from the start/end of
+// the whole buffer instead of the current logical line, so on line 2 of a
+// 3-line prompt, Ctrl+K deleted every line after the cursor and Ctrl+U
+// deleted every line before it.
+
+const MULTILINE = 'alpha\nbravo\ncharlie';
+
+// Moves the cursor from end-of-buffer to index 9: inside "bravo", between
+// the second and third character ("bra|vo").
+async function toMidSecondLine(stdin: ReturnType<typeof render>['stdin']) {
+	for (let i = 0; i < 10; i++) await press(stdin, LEFT);
+}
+
+test('component Ctrl+U in multi-line input deletes only the current line', async t => {
+	const valueRef: ValueRef = {current: ''};
+	const {stdin, unmount} = render(
+		<ControlledTextInput valueRef={valueRef} initialValue={MULTILINE} />,
+	);
+
+	// Cursor starts at the end (end of "charlie"). Ctrl+U should remove only
+	// "charlie", leaving the first two lines untouched.
+	await press(stdin, '\u0015');
+
+	await waitForValue(valueRef, v => v === 'alpha\nbravo\n');
+	t.is(valueRef.current, 'alpha\nbravo\n');
+	unmount();
+});
+
+test('component Ctrl+K in multi-line input deletes only within the current line', async t => {
+	const valueRef: ValueRef = {current: ''};
+	const {stdin, unmount} = render(
+		<ControlledTextInput valueRef={valueRef} initialValue={MULTILINE} />,
+	);
+
+	await toMidSecondLine(stdin);
+	// Ctrl+K should remove only "vo" (the rest of line 2), leaving line 3 intact.
+	await press(stdin, '\u000b');
+
+	await waitForValue(valueRef, v => v === 'alpha\nbra\ncharlie');
+	t.is(valueRef.current, 'alpha\nbra\ncharlie');
+	unmount();
+});
+
+test('component Ctrl+A in multi-line input moves to the start of the current line', async t => {
+	const valueRef: ValueRef = {current: ''};
+	const {stdin, unmount} = render(
+		<ControlledTextInput valueRef={valueRef} initialValue={MULTILINE} />,
+	);
+
+	await toMidSecondLine(stdin);
+	await press(stdin, '\u0001'); // Ctrl+A
+	await press(stdin, 'X');
+
+	await waitForValue(valueRef, v => v === 'alpha\nXbravo\ncharlie');
+	t.is(valueRef.current, 'alpha\nXbravo\ncharlie');
+	unmount();
+});
+
+test('component Ctrl+E in multi-line input moves to the end of the current line', async t => {
+	const valueRef: ValueRef = {current: ''};
+	const {stdin, unmount} = render(
+		<ControlledTextInput valueRef={valueRef} initialValue={MULTILINE} />,
+	);
+
+	await toMidSecondLine(stdin);
+	await press(stdin, '\u0005'); // Ctrl+E
+	await press(stdin, 'X');
+
+	await waitForValue(valueRef, v => v === 'alpha\nbravoX\ncharlie');
+	t.is(valueRef.current, 'alpha\nbravoX\ncharlie');
+	unmount();
+});
+
+// --- Stock Ink (#1505) ---
+// `key.raw` only exists through a pnpm patch to Ink. pnpm patches apply inside
+// this repo alone, so every test here passes with the patch while an npm
+// install (plain Ink) loses it and Backspace turns into forward Delete. Read
+// the sequence through useRawInput instead; this fails if `key.raw` creeps back.
+test('source never reads key.raw, which stock Ink does not provide', t => {
+	const sourceDir = fileURLToPath(new URL('..', import.meta.url));
+	const offenders = readdirSync(sourceDir, {recursive: true, encoding: 'utf8'})
+		.filter(file => /\.tsx?$/.test(file) && !/\.spec\.tsx?$/.test(file))
+		.filter(file => /\bkey\.raw\b/.test(readFileSync(join(sourceDir, file), 'utf8')));
+	t.deepEqual(offenders, []);
 });

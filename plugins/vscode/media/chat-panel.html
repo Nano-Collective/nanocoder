@@ -95,7 +95,6 @@
 									<option value="gemini">Google Gemini</option>
 									<option value="openrouter">OpenRouter</option>
 									<option value="requesty">Requesty</option>
-									<option value="orcarouter">OrcaRouter</option>
 									<option value="openai">OpenAI</option>
 									<option value="anthropic">Anthropic Claude</option>
 									<option value="mistral">Mistral AI</option>
@@ -330,6 +329,8 @@
 		</div>
 
 		<div class="p-4 pt-2 bg-vscode-bg shrink-0">
+
+			<div id="queue-hint" class="hidden text-[0.75em] opacity-60 px-1 pb-1.5 font-vscode">Enter queues a follow-up · Esc cancels</div>
 			<div id="artifact-bar" class="hidden mb-2 px-3 py-2 bg-vscode-widget-bg border border-vscode-widget-border rounded-lg flex-col gap-2">
 				<div class="flex items-center justify-between w-full">
 					<span class="font-vscode text-[0.75em] uppercase tracking-[0.04em] opacity-60 shrink-0">Artifacts</span>
@@ -346,6 +347,10 @@
 					<div id="artifact-links" class="flex flex-wrap gap-1.5 min-w-0"></div>
 				</div>
 			</div>
+
+			<div id="pending-changes-container" class="hidden"></div>
+			
+
 			<div id="composer-box" class="flex flex-col bg-vscode-input-bg border border-vscode-input-border rounded-2xl focus-within:border-vscode-input-focus transition-colors shadow-sm relative">
 				<div id="image-preview-container" class="flex flex-wrap gap-2 px-3 pt-3 empty:hidden"></div>
 				<!-- NEW: Attached context chips row -->
@@ -438,6 +443,9 @@
 			</div>
 		</div>
 	<script nonce="{{nonce}}" src="{{markedUri}}"></script>
+	<script nonce="{{nonce}}" src="{{highlightUri}}"></script>
+	<!-- Hooks highlight.js into marked; same ordering requirement. -->
+	<script nonce="{{nonce}}" src="{{markdownHighlightUri}}"></script>
 	<!-- Pure @-mention helpers; must load before chat-panel.js reads them. -->
 	<script nonce="{{nonce}}" src="{{mentionUtilsUri}}"></script>
 	<!-- Pure drop-payload helpers; same ordering requirement. -->
