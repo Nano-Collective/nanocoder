@@ -56,8 +56,11 @@ export function buildFinderPrompt(input: {
 	diff: string;
 	omittedPaths: string[];
 	binaryPaths: string[];
+	/** Specialist perspective for `/review deep`. */
+	focus?: string;
 }): string {
 	const sections = [
+		...(input.focus ? [`Review focus: ${input.focus}`] : []),
 		`Review scope: ${input.scope}`,
 		`Changed files:\n${input.changedFiles}`,
 	];

@@ -9,35 +9,24 @@ import {
 	type ReviewToolMode,
 	runReviewAgent,
 } from './review-agent';
-import {checkCitation, citedExcerpt} from './review-citations';
 import {
 	buildPromptDiff,
 	createReviewContextTools,
 	describeChangedFiles,
-	renderFileDiff,
 } from './review-context';
 import {
 	type DroppedFinding,
-	formatFindingForVerifier,
 	parseFindings,
-	parseVerdict,
-	REVIEW_CONFIDENCE_THRESHOLD,
 	type ReviewFinding,
-	severityRank,
 	type VerifiedFinding,
 } from './review-findings';
-import {
-	buildFinderPrompt,
-	buildVerifierPrompt,
-	FINDER_SYSTEM_PROMPT,
-	VERIFIER_SYSTEM_PROMPT,
-} from './review-prompts';
+import {buildFinderPrompt, FINDER_SYSTEM_PROMPT} from './review-prompts';
 import {formatResolvedReviewScope, resolveReviewScope} from './review-resolver';
-import type {ReviewTargetSnapshot} from './review-snapshot';
 import {
 	defaultReviewFoundationTools,
 	type ReviewFoundationTools,
 } from './review-tools';
+import {verifyCitedFindings} from './review-verify';
 
 export type GroundedReviewStatus =
 	| 'completed'
@@ -99,7 +88,6 @@ export interface GroundedReviewOptions {
 }
 
 const MAX_PROMPT_DIFF_LINES = 1500;
-const MAX_VERIFIER_DIFF_LINES = 300;
 
 function promptDiffLimits(client: LLMClient): {
 	maxLines: number;
@@ -118,13 +106,6 @@ function listPaths(paths: string[], limit = 5): string {
 	return paths.length > limit
 		? `${shown}, and ${paths.length - limit} more`
 		: shown;
-}
-
-function clipDiff(diff: string): string {
-	const lines = diff.split('\n');
-	return lines.length <= MAX_VERIFIER_DIFF_LINES
-		? diff
-		: `${lines.slice(0, MAX_VERIFIER_DIFF_LINES).join('\n')}\n[diff truncated; use review_diff or review_read_file]`;
 }
 
 /**
@@ -292,132 +273,22 @@ export async function runGroundedReview(
 		);
 	}
 
-	const seen = new Set<string>();
-	const cited: Array<{
-		finding: ReviewFinding;
-		snapshotFile: ReviewTargetSnapshot['files'][number];
-	}> = [];
-	for (const finding of parsed.findings) {
-		const key = `${finding.file}:${finding.line}:${finding.issue.toLowerCase()}`;
-		if (seen.has(key)) continue;
-		seen.add(key);
-		const citation = checkCitation(snapshot, finding);
-		if (!citation.ok) {
-			result.dropped.push({
-				reason: 'citation',
-				detail: citation.reason,
-				finding,
-			});
-			continue;
-		}
-		cited.push({finding, snapshotFile: citation.file});
-	}
-	cited.sort(
-		(left, right) =>
-			severityRank(left.finding.severity) -
-			severityRank(right.finding.severity),
+	const verification = await verifyCitedFindings({
+		findings: parsed.findings,
+		snapshot,
+		contextTools,
+		client: options.client,
+		toolMode: options.toolMode,
+		activity,
+		reviewSpan,
+		budgets,
+		scopeText,
+		result,
+		account,
+		...(signal ? {signal} : {}),
+	});
+	if (verification === 'cancelled') return settle('cancelled');
+	return settle(
+		result.incompleteReasons.length > 0 ? 'incomplete' : 'completed',
 	);
-
-	reviewSpan.progress(
-		cited.length === 0
-			? 'No citable findings to verify'
-			: `Verifying ${Math.min(cited.length, budgets.maxVerifications)} finding${cited.length === 1 ? '' : 's'}`,
-	);
-
-	for (const [index, {finding, snapshotFile}] of cited.entries()) {
-		if (index >= budgets.maxVerifications) {
-			result.unverified.push({
-				finding,
-				reason: `not verified: only ${budgets.maxVerifications} findings are verified per review`,
-			});
-			continue;
-		}
-		const verifier = await runReviewAgent({
-			client: options.client,
-			name: `verifier ${finding.id}`,
-			summary: `Checking ${finding.file}:${finding.line}`,
-			systemPrompt: VERIFIER_SYSTEM_PROMPT,
-			userPrompt: buildVerifierPrompt({
-				scope: scopeText,
-				finding: formatFindingForVerifier(finding),
-				excerpt: citedExcerpt(snapshotFile, finding.line),
-				fileDiff: clipDiff(renderFileDiff(snapshotFile)),
-			}),
-			tools: contextTools,
-			budget: budgets.verifier,
-			toolMode: options.toolMode,
-			activity,
-			parentId: reviewSpan.id,
-			...(signal ? {signal} : {}),
-		});
-		account(verifier);
-		result.stats.verifierRuns++;
-
-		if (verifier.status === 'cancelled') {
-			reviewSpan.cancel('Cancelled during verification');
-			result.message =
-				'Review cancelled during verification; results are partial.';
-			for (const remaining of cited.slice(index)) {
-				result.unverified.push({
-					finding: remaining.finding,
-					reason: 'not verified: review cancelled',
-				});
-			}
-			return settle('cancelled');
-		}
-
-		if (verifier.incompleteReason) {
-			result.unverified.push({
-				finding,
-				reason: verifier.incompleteReason,
-			});
-			continue;
-		}
-		const verdict = parseVerdict(verifier.output, finding.id);
-		if (!verdict) {
-			result.unverified.push({
-				finding,
-				reason:
-					verifier.status === 'failed'
-						? `verifier failed: ${verifier.error ?? 'unknown error'}`
-						: verifier.status === 'budget-exhausted'
-							? 'verifier reached its budget without a verdict'
-							: 'verifier response could not be parsed',
-			});
-			continue;
-		}
-		if (verdict.verdict === 'CONFIRM') {
-			if (verdict.confidence >= REVIEW_CONFIDENCE_THRESHOLD) {
-				result.findings.push({
-					...finding,
-					confidence: verdict.confidence,
-					verificationReason: verdict.reason,
-				});
-			} else {
-				result.dropped.push({
-					reason: 'low-confidence',
-					detail: `confirmed with confidence ${verdict.confidence}, below ${REVIEW_CONFIDENCE_THRESHOLD}: ${verdict.reason}`,
-					finding,
-				});
-			}
-		} else {
-			result.dropped.push({
-				reason: verdict.verdict === 'REJECT' ? 'rejected' : 'insufficient',
-				detail: verdict.reason,
-				finding,
-			});
-		}
-	}
-
-	if (result.unverified.length > 0) {
-		result.incompleteReasons.push(
-			`${result.unverified.length} cited finding${result.unverified.length === 1 ? ' was' : 's were'} not verified.`,
-		);
-	}
-
-	const incomplete = result.incompleteReasons.length > 0;
-	reviewSpan.complete(
-		`${result.findings.length} verified finding${result.findings.length === 1 ? '' : 's'}${incomplete ? ' (incomplete)' : ''}`,
-	);
-	return settle(incomplete ? 'incomplete' : 'completed');
 }

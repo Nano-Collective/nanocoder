@@ -6,7 +6,7 @@ sidebar_order: 23
 
 # Code review
 
-`/review` runs a grounded review: an agent investigates the exact revision under review with read-only tools, every reported issue must cite `file:line` in the changed code, and an independent verifier re-checks each issue before it is shown. `/review quick` keeps the original one-shot, diff-only review.
+`/review` runs a grounded review: an agent investigates the exact revision under review with read-only tools, every reported issue must cite `file:line` in the changed code, and an independent verifier re-checks each issue before it is shown. `/review deep` runs the same checks with three specialist finders. `/review quick` keeps the original one-shot, diff-only review.
 
 ## Choosing what to review
 
@@ -17,6 +17,7 @@ sidebar_order: 23
 | `/review 42`, `/review PR 42`, or a GitHub PR URL | A pull request, pinned to its current head. Bare numbers are resolved across configured GitHub remotes and fork parents |
 | `/review last 3 commits` | Recent commits on the current branch (`last 3 commits on branch <name>` for another branch) |
 | `/review working tree` | Uncommitted changes, including untracked files |
+| `/review deep [target]` | The same review with three specialist finders (bugs, standards and API misuse, intent and spec), then one shared verification pass |
 | `/review quick [<branch or PR>]` | The one-shot diff review |
 | `/review activity` | The detailed activity trace of the latest review in this session |
 
@@ -27,9 +28,19 @@ When a target is ambiguous (for example a local and a remote branch with the sam
 1. **Pin the scope.** Base and head commits are resolved and the changed files are snapshotted. Remote targets are fetched into temporary refs and never checked out, so your working tree is untouched.
 2. **Find.** A finder agent gets the diff and can call `review_changed_files`, `review_diff`, `review_read_file`, `review_search`, and `review_log`. These tools answer from the pinned revision, not from whatever is checked out. The agent has a fixed budget of model turns and tool calls; when it runs out it must report with what it has.
 3. **Check citations.** Each issue must point at an existing line of a changed text file, in or within three lines of a changed line or a deletion boundary in the head. Issues that do not are dropped and listed under **Dropped**.
-4. **Verify.** Each remaining issue (up to 8, most severe first) goes to a separate verifier agent that re-reads the code and answers `CONFIRM`, `REJECT`, or `INSUFFICIENT` with a confidence. Only confirmations with confidence 80 or higher are reported as findings.
+4. **Verify.** Each remaining issue (up to 8, most severe first, one per cited line before any second issue on the same line) goes to a separate verifier agent that re-reads the code and answers `CONFIRM`, `REJECT`, or `INSUFFICIENT` with a confidence. Only confirmations with confidence 80 or higher are reported as findings. An unverified issue on a line that already has a verified finding is listed as a note instead, so it does not mark the review incomplete.
 
 Models without native tool calling use the same text tool-call fallback as normal chat.
+
+## Deep review
+
+`/review deep` uses the same pinned revision, citation check, verifier, activity view, and saved summary. It runs three finders, each with its own tool budget:
+
+- **bugs** — logic errors, edge cases, races, error handling, security
+- **standards and API misuse** — wrong or deprecated APIs, type-safety, leaks, surrounding patterns
+- **intent and spec** — whether the change does what it claims, and whether callers or migrations are left unfinished
+
+Findings that cite the same line and describe the same issue are merged before verification, and the report notes which perspective already covered them. A specialist that fails or runs out of budget makes the review incomplete; the other specialists' findings are still verified. The review fails only when every specialist finder fails.
 
 ## Reading the result
 
