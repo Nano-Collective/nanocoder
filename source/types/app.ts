@@ -49,6 +49,7 @@ export interface MessageSubmissionOptions {
 	setIsToolExecuting: (value: boolean) => void;
 	onCommandComplete?: () => void;
 	setMessages: (messages: Message[]) => void;
+	appendMessages?: (messages: Message[]) => void;
 	messages: Message[];
 	provider: string;
 	providerConfig: AIProviderConfig | null;

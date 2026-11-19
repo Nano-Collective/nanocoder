@@ -111,6 +111,34 @@ test('activity keybindings are inactive unless the review view is focused', asyn
 	unmount();
 });
 
+test('recentCount 0 renders only the summary line for a finished review', t => {
+	const store = new ReviewActivityStore({reviewId: 'final-review'});
+	store
+		.begin({source: 'tool', name: 'git diff', summary: 'Reading the diff'})
+		.complete('Diff read');
+	store
+		.begin({source: 'api', name: 'gh api', summary: 'Reading the pull request'})
+		.complete('Read');
+	const finder = store.begin({source: 'agent', name: 'finder', summary: 'Finding'});
+	store
+		.begin({source: 'api', name: 'model', summary: 'finder: turn 1', parentId: finder.id})
+		.complete('Answered');
+	store
+		.begin({source: 'tool', name: 'review_diff', summary: 'Reading a diff', parentId: finder.id})
+		.complete('Read');
+	finder.complete('Done');
+	store.finish('completed');
+	const {lastFrame, unmount} = renderWithTheme(
+		<ReviewActivity summary={store.toSummary()} recentCount={0} />,
+	);
+
+	const frame = lastFrame() ?? '';
+	t.true(frame.includes('Review · completed · 1 agent · 1 tool call · 1 model call'));
+	t.false(frame.includes('tool: git diff'));
+	t.false(frame.includes('agent: finder'));
+	unmount();
+});
+
 test('activity view unsubscribes when unmounted', async t => {
 	const store = new ReviewActivityStore({reviewId: 'cleanup-review'});
 	const subscribe = store.subscribe.bind(store);

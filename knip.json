@@ -30,13 +30,7 @@
 		".husky/**",
 		".github/**",
 		"benchmarks/count-loader.mjs",
-		"benchmarks/agent/fixtures/**",
-		"source/components/review-activity.tsx",
-		"source/review/review-activity.ts",
-		"source/review/review-request.ts",
-		"source/review/review-resolver.ts",
-		"source/review/review-snapshot.ts",
-		"source/review/review-tools.ts"
+		"benchmarks/agent/fixtures/**"
 	],
 	"ignoreExportsUsedInFile": {
 		"interface": true,
