@@ -130,12 +130,24 @@ test('CLI integration: help and version remain fast for worktree arguments', t =
 	t.regex(version, /^\d+\.\d+\.\d+$/);
 });
 
-test('CLI integration: review PR command retains its interactive guard', t => {
-	const result = spawnSync(process.execPath, [cliPath, 'review', '42'], {
-		encoding: 'utf8',
-	});
-	t.is(result.status, 1);
-	t.true(result.stderr.includes('`nanocoder review` requires an interactive terminal'));
+test.serial('CLI integration: review PR command without a TTY runs the headless review trust gate', t => {
+	const projectPath = mkdtempSync(join(tmpdir(), 'nanocoder-cli-review-'));
+	const configPath = mkdtempSync(join(tmpdir(), 'nanocoder-cli-review-config-'));
+	try {
+		const env: NodeJS.ProcessEnv = {...process.env, NANOCODER_CONFIG_DIR: configPath};
+		delete env.NANOCODER_TRUST_DIRECTORY;
+		const result = spawnSync(process.execPath, [cliPath, 'review', '42'], {
+			cwd: projectPath,
+			encoding: 'utf8',
+			env,
+		});
+		t.is(result.status, 1);
+		t.true(result.stderr.includes('is not trusted. Pass --trust-directory'));
+		t.is(result.stdout, '');
+	} finally {
+		rmSync(projectPath, {recursive: true, force: true});
+		rmSync(configPath, {recursive: true, force: true});
+	}
 });
 
 test('CLI integration: init help exits successfully with preset guidance', t => {

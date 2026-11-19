@@ -151,7 +151,8 @@ export const COMPLETION_FLAGS: readonly CompletionFlag[] = [
 	{
 		name: 'trust-directory',
 		takesValue: false,
-		description: 'Skip the first-run directory trust prompt (run mode only)',
+		description:
+			'Skip the first-run directory trust prompt (run, review, daemon start)',
 	},
 	{
 		name: 'plain',
@@ -192,14 +193,15 @@ export const COMPLETION_FLAGS: readonly CompletionFlag[] = [
 	{
 		name: 'json',
 		takesValue: false,
-		description: 'Output execution results as JSON (run mode only)',
+		description: 'Output execution results as JSON (run and review only)',
 	},
 	{
 		name: 'output-format',
 		takesValue: true,
 		valueName: 'format',
 		values: ['text', 'json'],
-		description: "Specify stdout format ('text' or 'json', run mode only)",
+		description:
+			"Specify stdout format ('text' or 'json', run and review only)",
 	},
 	{
 		name: 'acp',
