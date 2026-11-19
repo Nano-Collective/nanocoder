@@ -100,6 +100,9 @@ function createCommandContext(
 		handlerMetadata: () => buildHandlerMetadata(options),
 		messages: options.messages,
 		setMessages: options.setMessages,
+		appendMessages:
+			options.appendMessages ??
+			(additions => options.setMessages([...options.messages, ...additions])),
 		provider: options.provider,
 		model: options.model,
 		client: options.client,
