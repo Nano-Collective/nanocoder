@@ -31,6 +31,27 @@ interface BraveSearchResponse {
 	};
 }
 
+const escapeMarkdown = (text: unknown): string =>
+	String(text ?? '')
+		.replace(/<\/?(?:strong|b|em|i|mark)>/gi, '')
+		.replace(/\s+/g, ' ')
+		.trim()
+		.replace(/[\\`*_[\]<>~|=]/g, '\\$&')
+		.replace(/^(?=[#+-]|\d+[.)])/, '\\');
+
+const toSafeUrl = (raw: unknown): string | undefined => {
+	const url = String(raw ?? '');
+	// Reject, do not strip (host-join risk); an angle bracket would close the autolink.
+	if (/[\s\u0000-\u001f\u007f<>]/.test(url)) return undefined;
+	if (!/^https?:\/\//i.test(url)) return undefined;
+	try {
+		const {protocol} = new URL(url);
+		return protocol === 'http:' || protocol === 'https:' ? url : undefined;
+	} catch {
+		return undefined;
+	}
+};
+
 const normalizeWebSearchMaxResults = (value: unknown): number => {
 	if (value === undefined || value === null) {
 		return DEFAULT_WEB_SEARCH_RESULTS;
@@ -98,10 +119,14 @@ export const executeWebSearch = async (
 		for (let i = 0; i < results.length; i++) {
 			const result = results[i];
 			if (!result) continue;
-			formattedResults += `## ${i + 1}. ${result.title}\n\n`;
-			formattedResults += `**URL:** ${result.url}\n\n`;
-			if (result.description) {
-				formattedResults += `${result.description}\n\n`;
+			formattedResults += `## ${i + 1}. ${escapeMarkdown(result.title)}\n\n`;
+			const url = toSafeUrl(result.url);
+			if (url) {
+				formattedResults += `**URL:** <${url}>\n\n`;
+			}
+			const description = escapeMarkdown(result.description);
+			if (description) {
+				formattedResults += `${description}\n\n`;
 			}
 			formattedResults += '---\n\n';
 		}
