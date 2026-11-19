@@ -148,15 +148,55 @@ test('diff_edit applies a single block', async t => {
 
 test('diff_edit applies multiple blocks atomically', async t => {
 	const filePath = await createTestFile('test.ts', 'alpha\ngamma\n');
-
-	const result = await executeDiffEdit({
-		path: filePath,
+	markFileSeenAndVisible(filePath);
+	const args = {
+		path: projectRelativePath(filePath),
 		diff: [diffBlock('alpha', 'beta'), diffBlock('gamma', 'delta')].join('\n'),
-	});
+	};
+
+	t.deepEqual(await diffEditTool.validator!(args), {valid: true});
+	t.is(await readFile(filePath, 'utf-8'), 'alpha\ngamma\n');
+	const result = await executeDiffEdit(args);
 
 	t.is(await readFile(filePath, 'utf-8'), 'beta\ndelta\n');
 	t.regex(result, /Successfully applied 2 diff blocks/);
 });
+
+for (const {name, content, diff} of [
+	{
+		name: 'a chain that makes the next search ambiguous',
+		content: 'one\ntwo\n',
+		diff: [diffBlock('one', 'two'), diffBlock('two', 'THREE')].join('\n'),
+	},
+	{
+		name: 'a swap that makes the next search ambiguous',
+		content: 'X=1\nY=2\n',
+		diff: [diffBlock('X=1', 'Y=2'), diffBlock('Y=2', 'X=1')].join('\n'),
+	},
+	{
+		name: 'an earlier edit that removes the next search',
+		content: 'one\ntwo\n',
+		diff: [diffBlock('one\ntwo', 'three'), diffBlock('two', 'four')].join('\n'),
+	},
+]) {
+	test(`diff_edit validator rejects ${name} without writing`, async t => {
+		const filePath = await createTestFile('dependent.txt', content);
+		markFileSeenAndVisible(filePath);
+		const args = {path: projectRelativePath(filePath), diff};
+
+		const result = await diffEditTool.validator!(args);
+		t.false(result.valid);
+		if (!result.valid) {
+			t.regex(result.error, /Search block 2 .*after earlier edits/);
+		}
+		t.is(await readFile(filePath, 'utf-8'), content);
+
+		await t.throwsAsync(executeDiffEdit(args), {
+			message: /Search block 2 .*after earlier edits/,
+		});
+		t.is(await readFile(filePath, 'utf-8'), content);
+	});
+}
 
 test('diff_edit rejects duplicate search blocks and leaves file unchanged', async t => {
 	const filePath = await createTestFile('test.ts', 'alpha\n');

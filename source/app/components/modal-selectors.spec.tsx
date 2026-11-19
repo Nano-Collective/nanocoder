@@ -100,7 +100,7 @@ test('ModalSelectors renders ModelDatabaseDisplay when activeMode is modelDataba
 
 		const output = await waitForFrame(lastFrame);
 		t.truthy(output);
-		t.regex(output, /model-database|model browse|Model Browser/i);
+		t.regex(output, /model browse|Model Browser/i);
 		unmount();
 	} finally {
 		globalThis.fetch = originalFetch;

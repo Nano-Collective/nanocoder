@@ -34,6 +34,8 @@ export interface AIProviderConfig {
 	disableToolModels?: string[]; // List of model names to disable tools for
 	// SDK provider package to use (default: 'openai-compatible')
 	sdkProvider?: SdkProvider;
+	// Arbitrary request body fields for OpenAI-compatible chat endpoints.
+	extraBody?: Record<string, unknown>;
 	// Opt out of Anthropic prompt caching (enabled by default on that SDK).
 	// Read only when sdkProvider is 'anthropic'; setting it on any other SDK
 	// provider has no effect, since those either prefix-cache automatically
@@ -95,6 +97,8 @@ export interface ProviderConfig {
 	includeUsage?: boolean;
 	// SDK provider package to use (default: 'openai-compatible')
 	sdkProvider?: SdkProvider;
+	// Arbitrary request body fields for OpenAI-compatible chat endpoints.
+	extraBody?: Record<string, unknown>;
 	// OpenRouter-specific request body fields. Only applied when the provider
 	// is OpenRouter (name match, case-insensitive).
 	openrouter?: OpenRouterParameters;

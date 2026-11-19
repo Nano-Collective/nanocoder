@@ -374,6 +374,67 @@ test('redactValue leaves non-secret values untouched', t => {
 	});
 });
 
+test('redactValue removes embedded URL credentials and sensitive query values', t => {
+	const secret = 'synthetic-url-credential';
+	for (const url of [
+		`https://user:${secret}@example.test/v1?model=demo`,
+		`postgres://user:${secret}@db.test/database`,
+		`https://example.test/mcp?api_key=${secret}&api_key=second-secret&mode=demo`,
+		`https://example.test/v1?key=${secret}`,
+		`https://example.test/v1?access_token=${secret}`,
+		`https://example.test/v1?sig=${secret}`,
+		`https://user:${secret}@invalid host/`,
+	]) {
+		const result = redactValue(url, 'url');
+		t.true(result.redacted);
+		t.false(String(result.value).includes(secret));
+		t.false(String(result.value).includes('second-secret'));
+	}
+	const safe = 'https://example.test/v1?model=demo';
+	t.deepEqual(redactValue(safe, 'baseUrl'), {value: safe, redacted: false});
+});
+
+test('redactValue removes separate and equals-form secret CLI arguments', t => {
+	const args = ['-y', 'some-mcp', '--api-key', 'synthetic-arg-secret', '--token=synthetic-token', '--model', 'demo'];
+	t.deepEqual(redactValue(args, 'args'), {
+		value: ['-y', 'some-mcp', '--api-key', '<redacted>', '--token=<redacted>', '--model', 'demo'],
+		redacted: true,
+	});
+	t.is(args[3], 'synthetic-arg-secret', 'redaction must not mutate runtime config');
+	t.deepEqual(redactValue(['--api-key', '$API_KEY', '--token=${TOKEN}'], 'args'), {
+		value: ['--api-key', '$API_KEY', '--token=${TOKEN}'], redacted: false,
+	});
+});
+
+test('config diagnostics redact resolved MCP references and embedded secrets in every output mode', t => {
+	const secret = 'SYNTHETIC_DIAGNOSTIC_SECRET';
+	withFixture({
+		env: {NANOCODER_REDACTION_TEST: secret},
+		projectAgents: {nanocoder: {providers: [{name: 'demo', models: ['model'], baseUrl: 'https://example.test/v1?key=$NANOCODER_REDACTION_TEST'}]}},
+		projectMcp: {mcpServers: {
+			local: {command: 'some-mcp', args: ['--api-key', '$NANOCODER_REDACTION_TEST', `--token=${secret}`], env: {DATABASE_URL: `postgres://user:${secret}@db.test/db`, CUSTOM_VALUE: '$NANOCODER_REDACTION_TEST', LOG_LEVEL: 'debug'}},
+			remote: {transport: 'http', url: 'https://example.test/mcp?api_key=${NANOCODER_REDACTION_TEST}', headers: {'Ocp-Apim-Subscription-Key': '$NANOCODER_REDACTION_TEST', 'X-Custom': '$NANOCODER_REDACTION_TEST', Accept: 'application/json'}},
+		}},
+	}, () => {
+		const config = resolveEffectiveConfig();
+		for (const key of ['mcpServers.local', 'mcpServers.remote', 'nanocoder.providers.demo']) {
+			const found = entry(config, key);
+			t.true(found?.redacted);
+			t.false(JSON.stringify(found).includes(secret));
+		}
+		const local = entry(config, 'mcpServers.local')?.value as {env: Record<string, string>};
+		t.is(local.env.LOG_LEVEL, 'debug');
+		t.is(local.env.CUSTOM_VALUE, '<redacted>');
+		for (const command of ['show', 'list', 'diff'] as const) {
+			for (const args of [[], ['--json']]) {
+				const output = runConfigCli(command, args);
+				t.is(output.exitCode, 0);
+				t.false(output.output.includes(secret), `${command} ${args.join(' ')} must not expose secrets`);
+			}
+		}
+	});
+});
+
 test('selectOverrides returns only what the config files change', t => {
 	withFixture(
 		{
