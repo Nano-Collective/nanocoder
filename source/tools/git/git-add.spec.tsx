@@ -2,6 +2,10 @@
  * Git Add Tool Tests
  */
 
+import {execSync} from 'node:child_process';
+import {mkdtempSync, rmSync, writeFileSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 import React from 'react';
 import test from 'ava';
 import {render} from 'ink-testing-library';
@@ -142,3 +146,83 @@ test('git_add formatter shows no changes warning', t => {
 	t.truthy(output);
 	t.regex(output!, /No changes/i);
 });
+
+// ============================================================================
+// Pathspec Tests
+// ============================================================================
+
+type GitAddExecute = (args: {
+	files?: string[];
+	all?: boolean;
+	update?: boolean;
+}) => Promise<string>;
+
+/**
+ * A repo with one commit and a `.gitignore` for `.env`, so a staged `.env`
+ * can only come from git reading it as an option rather than a path.
+ */
+function createRepo(prefix: string): string {
+	const dir = mkdtempSync(join(tmpdir(), prefix));
+	execSync('git init -q -b main', {cwd: dir});
+	execSync('git config user.email test@example.com', {cwd: dir});
+	execSync('git config user.name Test', {cwd: dir});
+	writeFileSync(join(dir, '.gitignore'), '.env\n');
+	execSync('git add .gitignore', {cwd: dir});
+	execSync('git commit -q -m baseline', {cwd: dir});
+	return dir;
+}
+
+/** Staged paths only - untracked entries are reported separately by git. */
+function stagedPaths(dir: string): string[] {
+	const output = execSync('git status --porcelain', {cwd: dir})
+		.toString()
+		.split('\n')
+		.filter(line => line.length > 3 && !line.startsWith('??'));
+
+	return output.map(line => line.slice(3).trim());
+}
+
+test.serial('git_add stages a file whose name starts with a dash', async t => {
+	t.timeout(30_000);
+	const dir = createRepo('nanocoder-git-add-dash-');
+	const originalCwd = process.cwd();
+
+	try {
+		writeFileSync(join(dir, '-weird.txt'), 'dash\n');
+		process.chdir(dir);
+
+		// biome-ignore lint/suspicious/noExplicitAny: Test accesses the AI SDK execute function.
+		const execute = (gitAddTool.tool as any).execute as GitAddExecute;
+		const result = await execute({files: ['-weird.txt']});
+
+		t.regex(result, /Staged 1 file\(s\)/);
+		t.deepEqual(stagedPaths(dir), ['-weird.txt']);
+	} finally {
+		process.chdir(originalCwd);
+		rmSync(dir, {recursive: true, force: true});
+	}
+});
+
+test.serial(
+	'git_add rejects an option-shaped entry instead of staging ignored files',
+	async t => {
+		t.timeout(30_000);
+		const dir = createRepo('nanocoder-git-add-option-');
+		const originalCwd = process.cwd();
+
+		try {
+			writeFileSync(join(dir, '.env'), 'SECRET=1\n');
+			process.chdir(dir);
+
+			// biome-ignore lint/suspicious/noExplicitAny: Test accesses the AI SDK execute function.
+			const execute = (gitAddTool.tool as any).execute as GitAddExecute;
+			const result = await execute({files: ['--force', '.env']});
+
+			t.regex(result, /^Error:/);
+			t.deepEqual(stagedPaths(dir), []);
+		} finally {
+			process.chdir(originalCwd);
+			rmSync(dir, {recursive: true, force: true});
+		}
+	},
+);
