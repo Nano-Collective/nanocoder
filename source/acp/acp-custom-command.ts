@@ -7,7 +7,8 @@ import type {CustomCommand} from '@/types/index';
 /**
  * Reply for a built-in slash command that only the CLI or the client's own UI
  * can run, or null when `commandName` is not one. The VS Code extension keeps
- * wording that points at its sidebar; every other client gets neutral text.
+ * wording that points at its sidebar and composer; every other client gets
+ * neutral text.
  */
 export function builtinCommandReply(
 	commandName: string,
@@ -54,10 +55,16 @@ export function builtinCommandReply(
 			: "`/copy` isn't available in this client.";
 	}
 
-	if (commandName === 'model' || commandName === 'provider') {
+	if (commandName === 'model') {
 		return vsCode
-			? `Use the ${commandName} selector in the chat header to switch ${commandName}s.`
-			: `Use your client's ${commandName} selector.`;
+			? "Use the model picker on the chat input's bottom row to switch models."
+			: "Use your client's model selector.";
+	}
+
+	if (commandName === 'provider') {
+		return vsCode
+			? 'Use the Provider selector in the Configuration popover (the sliders button next to the model picker) to switch providers.'
+			: "Use your client's provider selector.";
 	}
 
 	if (commandName === 'settings') {

@@ -33,6 +33,12 @@ export interface ExtensionMessageSessionLoaded {
 	type: 'sessionLoaded';
 }
 
+export interface ExtensionMessageSessionResuming {
+	type: 'sessionResuming';
+	isResuming: boolean;
+	sessionId?: string;
+}
+
 export interface ExtensionMessageAcpUpdate {
 	type: 'acpUpdate';
 	update: any; // schema.SessionNotification or custom internal payload
@@ -247,6 +253,7 @@ export type ExtensionToWebviewMessage =
 	| ExtensionMessageConnectionStatus
 	| ExtensionMessageUpdateSessions
 	| ExtensionMessageSessionLoaded
+	| ExtensionMessageSessionResuming
 	| ExtensionMessageSettingsData
 	| ExtensionMessageSettingsUpdated
 	| ExtensionMessageTokenUsageVisibility
@@ -314,6 +321,7 @@ export interface WebviewMessageResolveTool {
 export interface WebviewMessageShowDiff {
 	type: 'showDiff';
 	toolCallId: string;
+	filePath?: string;
 }
 
 

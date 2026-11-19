@@ -4,9 +4,9 @@ import {useNonInteractiveRender} from '@/hooks/useNonInteractiveRender';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {Colors, parseMarkdown} from '@/markdown-parser/index';
+import {wrapWithTrimmedContinuations} from '@/terminal/text-wrapping';
 import type {AssistantReasoningProps} from '@/types/index';
-import {wrapWithTrimmedContinuations} from '@/utils/text-wrapping';
-import {calculateTokens} from '@/utils/token-calculator';
+import {estimateTokens} from '@/utils/token-calculator';
 
 // Indent applied to the expanded body so the "⚙ Thought" header acts as a
 // section header with its body (and any tool summary that follows) grouped
@@ -21,7 +21,7 @@ export default memo(function AssistantReasoning({
 	const {colors} = useTheme();
 	const boxWidth = useTerminalWidth();
 	const nonInteractive = useNonInteractiveRender();
-	const tokens = calculateTokens(reasoning);
+	const tokens = estimateTokens(reasoning);
 	const effectiveWidth = Math.max(1, boxWidth - EXPANDED_INDENT);
 
 	// Render markdown to terminal-formatted text

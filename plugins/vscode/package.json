@@ -187,7 +187,7 @@
 					"type": "string",
 					"default": "auto-accept",
 					"scope": "resource",
-					"description": "The current operating mode for the Nanocoder assistant (e.g. chat, auto-accept)"
+					"description": "The current operating mode for the Nanocoder assistant: normal, auto-accept, yolo, plan or architect"
 				},
 				"nanocoder.model": {
 					"type": "string",
@@ -209,6 +209,11 @@
 					"default": true,
 					"scope": "resource",
 					"description": "Show Explain Code / Generate Tests actions above functions and classes in the editor."
+				},
+				"nanocoder.terminalErrors": {
+					"type": "boolean",
+					"default": true,
+					"description": "Offer a Fix with Nanocoder action when a command fails in an integrated terminal. Needs the terminal's shell integration (terminal.integrated.shellIntegration.enabled) to report exit codes; without it nothing is offered. Nothing is sent to the agent until you take the action."
 				},
 				"nanocoder.showTokenUsage": {
 					"type": "boolean",

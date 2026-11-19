@@ -3,7 +3,7 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
 import type {DiagnosticInfo} from '@/vscode/index';
-import {getDiagnosticsTool} from './lsp-get-diagnostics.js';
+import {getDiagnosticsTool, uriToPath} from './lsp-get-diagnostics.js';
 
 // ============================================================================
 // Test Setup and Mocks
@@ -358,18 +358,42 @@ test('get_diagnostics: formats multiple diagnostics', async t => {
 	t.is(diagnostics[2].severity, 'information');
 });
 
-test('get_diagnostics: handles URI to path conversion', async t => {
-	// Test URI to path conversion (file:// prefix removal)
-	const fileUri = 'file:///home/user/test.ts';
-	const path = fileUri.startsWith('file://') ? fileUri.slice(7) : fileUri;
+test('uriToPath: converts POSIX file URIs', t => {
+	t.is(
+		uriToPath('file:///home/user/test.ts', {windows: false}),
+		'/home/user/test.ts',
+	);
+});
 
-	t.is(path, '/home/user/test.ts');
+test('uriToPath: decodes percent-encoded characters', t => {
+	t.is(
+		uriToPath('file:///home/user/my%20file.ts', {windows: false}),
+		'/home/user/my file.ts',
+	);
+});
 
-	// Test non-URI paths
-	const plainPath = '/home/user/test.ts';
-	const unchangedPath = plainPath.startsWith('file://') ? plainPath.slice(7) : plainPath;
+test('uriToPath: handles Windows drive letters', t => {
+	t.is(uriToPath('file:///C:/src/app.ts', {windows: true}), 'C:\\src\\app.ts');
+});
 
-	t.is(unchangedPath, '/home/user/test.ts');
+test('uriToPath: handles Windows UNC paths', t => {
+	t.is(
+		uriToPath('file://server/share/app.ts', {windows: true}),
+		'\\\\server\\share\\app.ts',
+	);
+});
+
+test('uriToPath: returns non-file URIs unchanged', t => {
+	t.is(uriToPath('/home/user/test.ts'), '/home/user/test.ts');
+	t.is(uriToPath('untitled:Untitled-1'), 'untitled:Untitled-1');
+});
+
+test('uriToPath: falls back to the raw URI when it cannot be converted', t => {
+	// A host is not valid in a file URI on POSIX
+	t.is(
+		uriToPath('file://server/share', {windows: false}),
+		'file://server/share',
+	);
 });
 
 // ============================================================================
@@ -456,8 +480,9 @@ test('get_diagnostics validator: validates existing file', async t => {
 		return;
 	}
 
-	// Create a temporary directory and file
-	const tempDir = await mkdtemp(join(tmpdir(), 'lsp-diagnostics-test-'));
+	// Create a temporary directory and file inside the project: paths outside
+	// it are rejected before the existence check.
+	const tempDir = await mkdtemp(join(process.cwd(), 'lsp-diagnostics-test-'));
 	const testFile = join(tempDir, 'test.ts');
 
 	try {
@@ -478,13 +503,35 @@ test('get_diagnostics validator: rejects non-existent file', async t => {
 		return;
 	}
 
-	const nonExistentPath = '/this/path/does/not/exist/test.ts';
+	const nonExistentPath = 'this/path/does/not/exist/test.ts';
 	const result = await validator({path: nonExistentPath});
 
 	t.is(result.valid, false);
 	if (!result.valid) {
 		t.true(result.error.includes('does not exist'));
 		t.true(result.error.includes(nonExistentPath));
+	}
+});
+
+test('get_diagnostics validator: rejects paths outside the project', async t => {
+	const validator = getDiagnosticsTool.validator;
+	if (!validator) {
+		t.fail('Validator not defined');
+		return;
+	}
+	const outside = await mkdtemp(join(tmpdir(), 'lsp-diagnostics-outside-'));
+	try {
+		const file = join(outside, 'secret.ts');
+		await writeFile(file, 'const x = 1;');
+		for (const path of [file, '../outside.ts', '/etc/hosts']) {
+			const result = await validator({path});
+			t.is(result.valid, false, path);
+			if (!result.valid) {
+				t.regex(result.error, /within the project|Path validation failed/, path);
+			}
+		}
+	} finally {
+		await rm(outside, {recursive: true, force: true});
 	}
 });
 

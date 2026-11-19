@@ -4,9 +4,9 @@
  * `/copy code` copies just the last fenced code block from that response.
  */
 import clipboard from 'clipboardy';
+import {errorMsg, successMsg, warningMsg} from '@/components/message-factory';
 import type {Command} from '@/types/commands';
 import type {Message} from '@/types/core';
-import {errorMsg, successMsg, warningMsg} from '@/utils/message-factory';
 
 function findLastAssistantContent(messages: Message[]): string | undefined {
 	for (let i = messages.length - 1; i >= 0; i--) {

@@ -13,6 +13,7 @@ import {mkdirSync, rmSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
+import {isValidElement} from 'react';
 import {ToolManager} from '@/tools/tool-manager';
 
 console.log('\ncustom-tools/end-to-end.spec.ts');
@@ -54,7 +55,7 @@ function writeTool(name: string, contents: string) {
 	writeFileSync(join(projectToolsDir, name), contents, 'utf-8');
 }
 
-test.serial('custom tool appears in ToolManager registry', t => {
+test.serial('custom tool appears in ToolManager registry', async t => {
 	writeTool(
 		'list_files.md',
 		`---
@@ -80,6 +81,10 @@ ls {{ dir }}`,
 	const entry = manager.getToolEntry('list_files_custom');
 	t.truthy(entry);
 	t.truthy(entry?.formatter);
+	// The formatter is loaded lazily (so skills loading stays Ink-free) but
+	// still resolves to the rendered component.
+	const preview = await entry?.formatter?.({dir: 'src'});
+	t.true(isValidElement(preview));
 	t.truthy(entry?.validator);
 	t.truthy(entry?.handler);
 	t.true(entry?.readOnly);
@@ -270,25 +275,38 @@ echo`,
 	manager.initializeCustomTools(projectRoot);
 	t.true(manager.isCustomTool('survives_mcp_disconnect'));
 
-	// Stand in for a connected server: a registered tool that the client
-	// reports, so unregisterMany() has a name to remove and the test fails if
-	// that call ever goes away.
-	manager.registerSkillTool({
-		name: 'mcp_reported_tool',
-		tool: {description: 'from mcp', execute: async () => 'ok'} as never,
-		handler: async () => 'ok',
-	});
+	// Stand in for a connected server whose tool goes through initializeMCP, so
+	// disconnectMCP() has an MCP-registered name to remove and the test fails
+	// if that removal ever goes away.
 	(
-		manager as unknown as {
-			mcpClient: {
-				getNativeToolsRegistry: () => Record<string, unknown>;
-				disconnect: () => Promise<void>;
-			};
-		}
-	).mcpClient = {
-		getNativeToolsRegistry: () => ({mcp_reported_tool: {}}),
+		manager as unknown as {createMCPClient: () => Promise<unknown>}
+	).createMCPClient = async () => ({
+		onHealthChange: () => () => {},
+		connectToServers: async () => [{serverName: 'stand-in', success: true}],
+		getToolEntries: () => [
+			{
+				name: 'mcp_reported_tool',
+				tool: {description: 'from mcp', execute: async () => 'ok'} as never,
+				handler: async () => 'ok',
+			},
+		],
+		getToolMapping: () =>
+			new Map([
+				[
+					'mcp_reported_tool',
+					{
+						serverName: 'stand-in',
+						originalName: 'mcp_reported_tool',
+						readOnly: false,
+					},
+				],
+			]),
+		getToolNameConflicts: () => [],
 		disconnect: async () => {},
-	};
+	});
+	await manager.initializeMCP([
+		{name: 'stand-in', transport: 'http', url: 'http://localhost/mcp'},
+	]);
 	t.true(manager.hasTool('mcp_reported_tool'));
 
 	await manager.disconnectMCP();

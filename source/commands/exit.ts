@@ -22,4 +22,3 @@ function createExitCommand(name: string, description: string): Command {
 }
 
 export const exitCommand = createExitCommand('exit', 'Exit the application');
-export const quitCommand = createExitCommand('quit', 'Quit the application');

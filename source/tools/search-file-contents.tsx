@@ -1,3 +1,4 @@
+import {lstat} from 'node:fs/promises';
 import path from 'node:path';
 import {Box, Text} from 'ink';
 import React from 'react';
@@ -13,12 +14,13 @@ import {
 	getProjectRoot,
 	getSessionCwd,
 } from '@/services/session-cwd';
+import {recordVisibilityReceipt} from '@/tools/runtime/read-tracker';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
-import {searchProjectContents} from '@/utils/file-search';
-import {isPathInside, isValidFilePath} from '@/utils/path-validation';
-import {calculateTokens} from '@/utils/token-calculator';
+import {searchProjectContents} from '@/utils/fs/file-search';
+import {isValidFilePath, resolveFilePath} from '@/utils/fs/path-validation';
+import {estimateTokens} from '@/utils/token-calculator';
 
 const MAX_CONTEXT_LINES = 10;
 
@@ -50,15 +52,18 @@ const executeSearchFileContents = async (
 	// Validate and resolve search path if provided. Resolve relative to the
 	// session cwd, but bound containment to the project root so an absolute
 	// in-project path (e.g. the workspace root) is not rejected once the shell
-	// has `cd`-ed into a subdir.
+	// has `cd`-ed into a subdir. Containment must be symlink-aware: ripgrep
+	// follows a symlink named on its command line even without --follow, so a
+	// lexically in-project `link -> ~` would grep the home directory.
 	const root = getProjectRoot();
 	let searchPath: string | undefined;
 	if (args.path) {
 		if (!isValidFilePath(args.path, root)) {
 			return `Error: Invalid path "${args.path}"`;
 		}
-		searchPath = path.resolve(cwd, args.path);
-		if (!isPathInside(searchPath, root)) {
+		try {
+			searchPath = resolveFilePath(args.path, cwd, root);
+		} catch {
 			return `Error: Path escapes project directory: ${args.path}`;
 		}
 	}
@@ -83,6 +88,55 @@ const executeSearchFileContents = async (
 
 		if (matches.length === 0) {
 			return `No matches found for "${args.query}"`;
+		}
+
+		// Record visibility receipts for lines shown in search results
+		// Group matches by file to batch the receipt recording
+		const matchesByFile = new Map<string, number[]>();
+		for (const match of matches) {
+			// Resolve relative to searchRoot (where the search actually ran),
+			// not project root, so the key matches what edit tools will use
+			const absPath = path.resolve(searchRoot, match.file);
+			if (!matchesByFile.has(absPath)) {
+				matchesByFile.set(absPath, []);
+			}
+			// Record the match line and context lines if present
+			const fileLines = matchesByFile.get(absPath);
+			if (!fileLines) continue;
+			const startLine = Math.max(1, match.line - contextLines);
+			const endLine = match.line + contextLines;
+			for (let i = startLine; i <= endLine; i++) {
+				if (!fileLines.includes(i)) {
+					fileLines.push(i);
+				}
+			}
+		}
+
+		// Record visibility receipts for each file's shown lines
+		for (const [absPath, lines] of matchesByFile) {
+			try {
+				const stats = await lstat(absPath);
+				// Record each range of consecutive lines
+				lines.sort((a, b) => a - b);
+				let rangeStart = lines[0];
+				let rangeEnd = lines[0];
+
+				for (let i = 1; i < lines.length; i++) {
+					if (lines[i] === rangeEnd + 1) {
+						// Consecutive line, extend range
+						rangeEnd = lines[i];
+					} else {
+						// Gap found, record current range and start new one
+						recordVisibilityReceipt(absPath, stats, rangeStart, rangeEnd);
+						rangeStart = lines[i];
+						rangeEnd = lines[i];
+					}
+				}
+				// Record the last range
+				recordVisibilityReceipt(absPath, stats, rangeStart, rangeEnd);
+			} catch {
+				// If we can't stat the file, skip recording (file may have been deleted)
+			}
 		}
 
 		// Format results grep-style. Without context every match is a single
@@ -205,7 +259,7 @@ const SearchFileContentsFormatter = React.memo(
 		);
 
 		// Calculate tokens
-		const tokens = result ? calculateTokens(result) : 0;
+		const tokens = result ? estimateTokens(result) : 0;
 
 		const messageContent = (
 			<Box flexDirection="column">

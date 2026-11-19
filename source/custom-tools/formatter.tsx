@@ -2,8 +2,7 @@ import {Box, Text} from 'ink';
 import React from 'react';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
-import type {ToolFormatter} from '@/types/core';
-import {calculateTokens} from '@/utils/token-calculator';
+import {estimateTokens} from '@/utils/token-calculator';
 
 const MAX_VALUE_PREVIEW = 80;
 
@@ -33,7 +32,7 @@ function CustomToolFormatterComponent({
 	const argEntries = Object.entries(args ?? {}).filter(
 		([, v]) => v !== undefined && v !== null && v !== '',
 	);
-	const tokens = result ? calculateTokens(result) : 0;
+	const tokens = result ? estimateTokens(result) : 0;
 	return (
 		<Box flexDirection="column" marginBottom={1} width={boxWidth}>
 			<Text color={colors.tool}>⚒ {toolName}</Text>
@@ -66,8 +65,10 @@ function CustomToolFormatterComponent({
  * Renders the tool name, the provided args, and (after execution) a token
  * estimate of the output. Matches the visual style of `webSearchFormatter`.
  */
-export function makeCustomToolFormatter(toolName: string): ToolFormatter {
-	return (args: Record<string, unknown>, result?: string) =>
+export function makeCustomToolFormatter(
+	toolName: string,
+): (args: Record<string, unknown>, result?: string) => React.ReactElement {
+	return (args, result) =>
 		React.createElement(CustomToolFormatterComponent, {
 			toolName,
 			args: args ?? {},

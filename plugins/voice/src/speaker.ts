@@ -1,5 +1,5 @@
-import cp from 'node:child_process';
 import {platform} from 'node:process';
+import crossSpawn from 'cross-spawn';
 
 /**
  * Plays an audio file through the default system speakers.
@@ -33,7 +33,7 @@ export async function playAudio(
 			args.push('-d'); // route to default device
 		}
 
-		const proc = cp.spawn(command, args, {stdio: 'ignore'});
+		const proc = crossSpawn.spawn(command, args, {stdio: 'ignore'});
 
 		let timeoutId: NodeJS.Timeout | undefined;
 		if (timeoutMs && timeoutMs > 0) {

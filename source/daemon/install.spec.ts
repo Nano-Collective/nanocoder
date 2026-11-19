@@ -6,7 +6,7 @@ import {
 	resetPreferencesCache,
 	savePreferences,
 } from '@/config/preferences';
-import {describeProjectTrust} from '@/config/project-trust';
+import {describeProjectTrust} from '@/config/trust/project-trust';
 import {
 	buildLaunchAgentPlist,
 	buildScheduledTaskXml,

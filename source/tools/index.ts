@@ -1,5 +1,6 @@
 import {agentTool} from '@/tools/agent-tool';
 import {askQuestionTool} from '@/tools/ask-question';
+import {bashOutputTool} from '@/tools/bash-output';
 import {browserTool} from '@/tools/browser';
 import {executeBashTool} from '@/tools/execute-bash';
 import {fetchUrlTool} from '@/tools/fetch-url';
@@ -8,7 +9,9 @@ import {diffEditTool} from '@/tools/file-ops/diff-edit';
 import {stringReplaceTool} from '@/tools/file-ops/string-replace';
 import {writeFileTool} from '@/tools/file-ops/write-file';
 import {findFilesTool} from '@/tools/find-files';
+import {getPlanTool} from '@/tools/get-plan';
 import {getGitTools} from '@/tools/git';
+import {killBashTool} from '@/tools/kill-bash';
 import {listDirectoryTool} from '@/tools/list-directory';
 import {formatDocumentTool} from '@/tools/lsp-format-document';
 import {getDiagnosticsTool} from '@/tools/lsp-get-diagnostics';
@@ -16,6 +19,7 @@ import {readFileTool} from '@/tools/read-file';
 import {searchFileContentsTool} from '@/tools/search-file-contents';
 import {checkSkillTool} from '@/tools/skill-check';
 import {writeTasksTool} from '@/tools/tasks';
+import {updatePlanNodeTool} from '@/tools/update-plan-node';
 import {webSearchTool} from '@/tools/web-search';
 import {writePlanTool} from '@/tools/write-plan';
 import {writeWalkthroughTool} from '@/tools/write-walkthrough';
@@ -28,6 +32,8 @@ const staticTools: NanocoderToolExport[] = [
 	stringReplaceTool,
 	diffEditTool,
 	executeBashTool,
+	bashOutputTool,
+	killBashTool,
 	webSearchTool,
 	fetchUrlTool,
 	browserTool,
@@ -45,6 +51,9 @@ const staticTools: NanocoderToolExport[] = [
 	writeTasksTool,
 	// Plan mode artifact tool
 	writePlanTool,
+	// Persistent plan graph tools
+	getPlanTool,
+	updatePlanNodeTool,
 	// Completion artifact tool
 	writeWalkthroughTool,
 	// Skill authoring linter

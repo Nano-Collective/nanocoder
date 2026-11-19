@@ -1,9 +1,13 @@
 import {EventEmitter} from 'node:events';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {pathToFileURL} from 'node:url';
 import test from 'ava';
 import {
 	LSPManager,
 	type LSPManagerConfig,
 	getLSPManager,
+	normalizeUri,
 	resetLSPManager,
 } from './lsp-manager';
 
@@ -487,4 +491,88 @@ test('LSPManager - events still work after shutdown', async t => {
 
 	manager.emit('diagnostics', {uri: 'test', diagnostics: []});
 	t.true(called);
+});
+
+// fileToUri: paths must become valid, percent-encoded, absolute file URIs so
+// they match the URIs language servers publish diagnostics under.
+const toUri = (filePath: string): string =>
+	(
+		new LSPManager() as unknown as {fileToUri(p: string): string}
+	).fileToUri(filePath);
+
+const tempUri = normalizeUri(pathToFileURL(tmpdir()).href).replace(/\/$/, '');
+
+test('fileToUri - plain absolute path', t => {
+	t.is(toUri(join(tmpdir(), 'proj/src/app.ts')), `${tempUri}/proj/src/app.ts`);
+});
+
+test('fileToUri - percent-encodes spaces', t => {
+	t.is(
+		toUri(join(tmpdir(), 'my proj/bad file.ts')),
+		`${tempUri}/my%20proj/bad%20file.ts`,
+	);
+});
+
+test('fileToUri - percent-encodes non-ASCII', t => {
+	t.is(
+		toUri(join(tmpdir(), '中文/文件.ts')),
+		`${tempUri}/%E4%B8%AD%E6%96%87/%E6%96%87%E4%BB%B6.ts`,
+	);
+});
+
+test('fileToUri - encodes # and % instead of truncating', t => {
+	t.is(toUri(join(tmpdir(), 'h#sh/p%ct.ts')), `${tempUri}/h%23sh/p%25ct.ts`);
+});
+
+test('fileToUri - resolves relative paths against cwd', t => {
+	const original = process.cwd;
+	process.cwd = () => join(tmpdir(), 'work dir');
+	try {
+		t.is(toUri('src/app.ts'), `${tempUri}/work%20dir/src/app.ts`);
+	} finally {
+		process.cwd = original;
+	}
+});
+
+test('fileToUri - normalizes existing file URIs for the current platform', t => {
+	t.is(
+		toUri('file:///C:/src/app.ts'),
+		process.platform === 'win32'
+			? 'file:///c:/src/app.ts'
+			: 'file:///C:/src/app.ts',
+	);
+});
+
+test('normalizeUri - matches Windows drive casing and encoded colons', t => {
+	t.is(
+		normalizeUri('file:///C:/src/app.ts', {windows: true}),
+		normalizeUri('file:///c%3A/src/app.ts', {windows: true}),
+	);
+	t.is(
+		normalizeUri('file:///C:/Src/App.ts', {windows: true}),
+		'file:///c:/Src/App.ts',
+	);
+});
+
+test('normalizeUri - preserves POSIX path casing', t => {
+	t.is(
+		normalizeUri('file:///C:/Src/App.ts', {windows: false}),
+		'file:///C:/Src/App.ts',
+	);
+	t.not(
+		normalizeUri('file:///C:/Src/App.ts', {windows: false}),
+		normalizeUri('file:///c:/src/app.ts', {windows: false}),
+	);
+});
+
+test('normalizeUri - preserves non-file and unrepresentable URIs', t => {
+	t.is(normalizeUri('untitled:Untitled-1'), 'untitled:Untitled-1');
+	t.is(
+		normalizeUri('file://server/share/app.ts', {windows: false}),
+		'file://server/share/app.ts',
+	);
+	t.is(
+		normalizeUri('file://server/share/App.ts', {windows: true}),
+		'file://server/share/App.ts',
+	);
 });
