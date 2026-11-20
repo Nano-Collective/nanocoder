@@ -903,6 +903,18 @@ export interface UserPreferences {
 	 */
 	mouseReporting?: boolean;
 	/**
+	 * How the kitty keyboard protocol is negotiated at startup, which is what
+	 * makes Shift+Enter distinguishable from Enter in terminals that implement
+	 * it (kitty, WezTerm, Ghostty, foot, recent VS Code). 'auto' (default):
+	 * query the terminal and enable the protocol only on an affirmative reply.
+	 * 'enabled': switch the protocol on without asking — for a terminal that
+	 * supports it but whose reply is lost across a transport (ssh, a
+	 * container pty) that eats or echoes the query. 'disabled': never touch
+	 * the protocol, for terminals or transports that print the query bytes
+	 * instead of swallowing them.
+	 */
+	kittyKeyboardMode?: 'auto' | 'enabled' | 'disabled';
+	/**
 	 * "Boring" output mode. false (default): playful touches stay, e.g. the
 	 * "Worked for a plucky 12s." completion note. true: progress text is
 	 * strictly functional and the system prompt gains a section telling the
