@@ -1121,6 +1121,11 @@ async function main(): Promise<void> {
 				// manager) so the exit-render handler below can paint the
 				// farewell frame before the process dies.
 				exitOnCtrlC: false,
+				// Ask kitty-protocol terminals (kitty, WezTerm, Ghostty) to encode
+				// keys distinctly, which is what makes Shift+Enter distinguishable
+				// from Enter. Ink queries the terminal first and does nothing when
+				// it does not answer, so every other terminal is unaffected.
+				kittyKeyboard: {mode: 'auto'},
 				...(inkStdin ? {stdin: inkStdin} : {}),
 				maxFps: getMaxFps(),
 			},
