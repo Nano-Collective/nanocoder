@@ -391,3 +391,8 @@ test('deriveTitleFromFirstMessage caps the title length', t => {
 	const title = deriveTitleFromFirstMessage('x'.repeat(200));
 	t.is(title, `${'x'.repeat(50)}...`);
 });
+
+test('an image-only first message does not title the session after its context block', t => {
+	const content = '<turn-context>\n## Project Context\n- a\n</turn-context>';
+	t.is(deriveTitleFromFirstMessage(content), null);
+});

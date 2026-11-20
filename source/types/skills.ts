@@ -77,6 +77,11 @@ export interface FileChangedTrigger extends SkillTriggerBase {
 	eventKinds?: FileChangeEventKind[];
 }
 
+export interface FileAiCommentTrigger extends SkillTriggerBase {
+	kind: 'file.ai-comment';
+	paths?: string[];
+}
+
 export interface ScheduleCronTrigger extends SkillTriggerBase {
 	kind: 'schedule.cron';
 	cron: string;
@@ -95,6 +100,7 @@ export interface CiJobFailedTrigger extends SkillTriggerBase {
  */
 export type SkillTrigger =
 	| FileChangedTrigger
+	| FileAiCommentTrigger
 	| ScheduleCronTrigger
 	| CiJobFailedTrigger;
 

@@ -1,5 +1,5 @@
 import type {LanguageModel} from 'ai';
-import {Agent} from 'undici';
+import type {Dispatcher} from 'undici';
 import {getPrivacyPreference} from '@/config/preferences';
 import {
 	TIMEOUT_SOCKET_DEFAULT_MS,
@@ -16,6 +16,7 @@ import type {
 	StreamCallbacks,
 } from '@/types/index';
 import {getLogger} from '@/utils/logging';
+import {createDispatcher} from '@/utils/proxy-dispatcher';
 import {isLocalURL} from '@/utils/url-utils';
 import {handleChat} from './chat/chat-handler.js';
 import {PrefixTracker} from './chat/prefix-tracker.js';
@@ -33,7 +34,7 @@ export class AISDKClient implements LLMClient {
 	private currentModel: string;
 	private availableModels: string[];
 	private providerConfig: AIProviderConfig;
-	private undiciAgent: Agent;
+	private undiciAgent: Dispatcher;
 	private cachedContextSize: number;
 	private maxRetries: number;
 	// Placeholder map for callers that do not supply their own. The TUI hands
@@ -81,7 +82,7 @@ export class AISDKClient implements LLMClient {
 				? 0
 				: (effectiveSocketTimeout ?? defaultTimeout);
 
-		this.undiciAgent = new Agent({
+		this.undiciAgent = createDispatcher({
 			connect: {
 				timeout: resolvedSocketTimeout,
 				...getTlsConnectOptions(this.providerConfig),

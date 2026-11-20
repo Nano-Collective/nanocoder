@@ -24,6 +24,28 @@ test('parseToolCalls: successfully parses valid XML tool call', t => {
 	}
 });
 
+test('parseToolCalls: forwards schemas to preserve XML string arguments', t => {
+	const content =
+		'<write_file><path>f</path><content>{"version": "1.0"}\n</content></write_file>';
+	const result = parseToolCalls(content, ['write_file'], {
+		write_file: {
+			type: 'object',
+			properties: {
+				path: {type: 'string'},
+				content: {type: 'string'},
+			},
+		},
+	});
+
+	t.true(result.success);
+	if (result.success) {
+		t.is(
+			result.toolCalls[0].function.arguments.content,
+			'{"version": "1.0"}',
+		);
+	}
+});
+
 test('parseToolCalls: parses XML tool calls whose values contain =', t => {
 	const content = `<execute_bash><command>FOO=1 echo hi</command></execute_bash>
 <string_replace><path>a.ts</path><old_str>const x = 1;</old_str><new_str>const x = 2;</new_str></string_replace>`;
@@ -946,6 +968,64 @@ test("parseToolCalls: leaves XML quoted inside another call's arguments alone", 
 				'Use <read_file><path>x</path> to read.',
 			);
 		}
+	}
+});
+
+test('parseToolCalls: runs a call that holds a tag with its own name', t => {
+	// The first closing tag with the call's name belongs to the inner tag, so
+	// the call ends at the one that pairs with its opening tag.
+	for (const {content, args} of [
+		{
+			content: '<read_file><read_file>a.ts</read_file></read_file>',
+			args: {read_file: 'a.ts'},
+		},
+		{
+			content:
+				'<write_file><path>docs/tools.md</path><content>Example: <write_file><path>a.md</path></write_file></content></write_file>',
+			args: {
+				path: 'docs/tools.md',
+				content: 'Example: <write_file><path>a.md</path></write_file>',
+			},
+		},
+	]) {
+		const result = parseToolCalls(content, OFFERED);
+		t.true(result.success, content);
+		if (result.success) {
+			t.is(result.toolCalls.length, 1);
+			t.deepEqual(result.toolCalls[0].function.arguments, args);
+		}
+	}
+});
+
+test('parseToolCalls: reports the parameter left open in a call that holds a tag with its own name', t => {
+	const result = parseToolCalls(
+		'<read_file><read_file>a.ts</read_file><path>b.ts</read_file>',
+		OFFERED,
+	);
+
+	t.false(result.success);
+	if (!result.success) {
+		t.is(
+			result.error,
+			'Invalid tool call: <path> inside <read_file> is never closed with </path>',
+		);
+	}
+});
+
+test('parseToolCalls: does not join a broken call to the next call to the same tool', t => {
+	// Running the first call on to the second </read_file> would close its
+	// <path> with the second call's </path> and merge the two calls.
+	const result = parseToolCalls(
+		'<read_file><path>a.ts</wrong_close></read_file>\n<read_file><path>b.ts</path></read_file>',
+		OFFERED,
+	);
+
+	t.false(result.success);
+	if (!result.success) {
+		t.is(
+			result.error,
+			'Invalid tool call: <path> inside <read_file> is never closed with </path>',
+		);
 	}
 });
 

@@ -1,5 +1,6 @@
 import {FORMAT_GUIDANCE_MESSAGE} from '@/tool-calling/format-guidance';
 import {normalizeWhitespace, removeRanges} from '@/tool-calling/whitespace';
+import type {ToolSchemas} from '@/tool-calling/xml-parser';
 import {XMLToolCallParser} from '@/tool-calling/xml-parser';
 import {generateToolCallId} from '@/tools/runtime/tool-call-id';
 import type {ToolCall} from '@/types/index';
@@ -360,6 +361,7 @@ export function stripEmbeddedToolCallText(content: unknown): string {
 export function parseToolCalls(
 	content: unknown,
 	toolNames?: readonly string[],
+	toolSchemas?: ToolSchemas,
 ): ParseResult {
 	// 1. Safety Coercion
 	const contentStr = ensureString(content);
@@ -407,7 +409,10 @@ export function parseToolCalls(
 	// 2. Try XML parser for valid tool calls (OPTIMISTIC: Success first!)
 	if (XMLToolCallParser.hasToolCalls(xmlContent)) {
 		// Parse valid XML tool calls
-		const parsedCalls = XMLToolCallParser.parseToolCalls(xmlContent);
+		const parsedCalls = XMLToolCallParser.parseToolCalls(
+			xmlContent,
+			toolSchemas,
+		);
 		const broken = parsedCalls.find(
 			call => call.brokenTag && toolNames?.includes(call.toolName),
 		);

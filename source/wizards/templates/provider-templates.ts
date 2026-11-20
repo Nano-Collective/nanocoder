@@ -561,6 +561,12 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 		modelDefault: 'openai/gpt-6.1-sol',
 	}),
 	apiKeyTemplate({
+		id: 'gmi-cloud',
+		name: 'GMI Cloud',
+		baseUrl: 'https://api.gmi-serving.com/v1',
+		apiKeyPrompt: 'GMI Cloud API Key (from console.gmicloud.ai)',
+	}),
+	apiKeyTemplate({
 		id: 'popnow',
 		name: 'PopNow',
 		baseUrl: 'https://api.popnow.ai/v1',

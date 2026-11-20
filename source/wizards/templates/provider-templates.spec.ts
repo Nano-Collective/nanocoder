@@ -461,6 +461,37 @@ test('atlas-cloud template: uses default provider name when empty', t => {
 	t.is(config.name, 'Atlas Cloud');
 });
 
+test('gmi-cloud template: builds an OpenAI-compatible provider config', t => {
+	const template = PROVIDER_TEMPLATES.find(t => t.id === 'gmi-cloud');
+	t.is(template?.name, 'GMI Cloud');
+
+	t.deepEqual(
+		template!.buildConfig({
+			providerName: '',
+			apiKey: 'test-key',
+			model: 'vendor/chat-model, another-vendor/another-model',
+		}),
+		{
+			name: 'GMI Cloud',
+			baseUrl: 'https://api.gmi-serving.com/v1',
+			apiKey: 'test-key',
+			models: ['vendor/chat-model', 'another-vendor/another-model'],
+		},
+	);
+});
+
+test('gmi-cloud template: requires a masked API key and has no model default', t => {
+	const template = PROVIDER_TEMPLATES.find(t => t.id === 'gmi-cloud');
+	const keyField = template?.fields.find(field => field.name === 'apiKey');
+	const modelField = template?.fields.find(field => field.name === 'model');
+
+	t.true(keyField?.required);
+	t.true(keyField?.sensitive);
+	t.is(keyField?.default, undefined);
+	t.true(modelField?.required);
+	t.is(modelField?.default, '');
+});
+
 test('popnow template: sets baseUrl and parses models', t => {
 	const template = PROVIDER_TEMPLATES.find(t => t.id === 'popnow');
 	t.truthy(template);
