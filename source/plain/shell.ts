@@ -49,6 +49,11 @@ import {
 	takePendingHookContext,
 } from '@/services/lifecycle-hooks';
 import {fileMutationPaths} from '@/tools/file-ops/file-mutating-tools';
+import {
+	formatToolAccessSummary,
+	getRunToolAccess,
+	validateRunToolAccess,
+} from '@/tools/tool-access';
 import {getTuneToolMode} from '@/types/config';
 import type {DevelopmentMode, Message} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
@@ -198,8 +203,40 @@ export async function runPlainShell(
 
 	const {client, toolManager, provider, model} = init;
 
+	// The run filter is installed by cli.tsx before this shell starts. Every
+	// tool is registered by now (built-in, custom, skill and MCP), so a name
+	// that matches nothing is a typo — fail instead of silently widening
+	// access, especially for a --disallowed-tools typo.
+	const toolAccessError = validateRunToolAccess(
+		toolManager.getKnownToolNames(),
+	);
+	if (toolAccessError) {
+		if (isJson) {
+			emitJsonReport({
+				kind: 'error',
+				exitCode: 1,
+				finalText: '',
+				reasoning: null,
+				toolCalls: [],
+				steps: 0,
+				filesChanged: [],
+				message: toolAccessError,
+				warnings: collectedWarnings,
+			});
+		} else {
+			writeError(toolAccessError);
+		}
+		setMessageQueueSink(null);
+		await deps.getShutdownManager().gracefulShutdown(1);
+		return;
+	}
+
 	// Traditional status writes go to stderr via plain/writer, leaving stdout clean
 	writeBoot(provider, model, developmentMode);
+	const runToolAccess = getRunToolAccess();
+	if (runToolAccess) {
+		writeStatus(`Tools: ${formatToolAccessSummary(runToolAccess)}`);
+	}
 
 	const tune = resolveTune(
 		getAppConfig(),
@@ -430,6 +467,12 @@ export async function runPlainShell(
 			steps: outcome.steps,
 			filesChanged: Array.from(filesChangedSet),
 			warnings: collectedWarnings,
+			...(runToolAccess && {
+				toolAccess: {
+					allowed: [...runToolAccess.allowed],
+					disallowed: [...runToolAccess.disallowed],
+				},
+			}),
 			...(outcome.usage && {
 				usage: outcome.usage,
 			}),

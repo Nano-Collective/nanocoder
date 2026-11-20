@@ -10,6 +10,11 @@ import type {MCPClient} from '@/mcp/mcp-client';
 import {MCPToolCatalog} from '@/mcp/tool-catalog';
 import {getAllToolExports} from '@/tools/index';
 import {createLoadToolSchemaTool} from '@/tools/mcp/load-tool-schema';
+import {
+	filterToolNamesByAccess,
+	getRunToolAccess,
+	matchesAnyToolPattern,
+} from '@/tools/tool-access';
 import {getToolsForProfile, resolveToolProfile} from '@/tools/tool-profiles';
 import {ToolRegistry} from '@/tools/tool-registry';
 import type {TuneConfig} from '@/types/config';
@@ -600,7 +605,44 @@ export class ToolManager {
 			names = names.filter(n => !disabledSet.has(n));
 		}
 
+		// Apply this run's --allowed-tools / --disallowed-tools filter last, so
+		// deny wins over every other source of availability.
+		const access = getRunToolAccess();
+		if (access) {
+			names = filterToolNamesByAccess(names, access);
+			// On-demand MCP discovery exposes schemas through load_tool_schema.
+			// If the allow-list names a catalog tool, the loader has to stay
+			// reachable or that tool can never be loaded. The loader is an
+			// internal access path, so it survives an allow-list that does not
+			// name it; an explicit --disallowed-tools load_tool_schema wins.
+			if (
+				access.allowed.length > 0 &&
+				this.registry.hasTool('load_tool_schema') &&
+				!matchesAnyToolPattern('load_tool_schema', access.disallowed) &&
+				this.mcpCatalog
+					.getUnloaded()
+					.some(tool => filterToolNamesByAccess([tool.name], access).length > 0)
+			) {
+				if (!names.includes('load_tool_schema')) {
+					names = [...names, 'load_tool_schema'];
+				}
+			}
+		}
+
 		return names;
+	}
+
+	/**
+	 * Every tool name this run could offer: registered tools plus MCP tools
+	 * that are still in the on-demand catalog. Used to validate run-level tool
+	 * patterns after custom, skill and MCP tools have been registered.
+	 */
+	getKnownToolNames(): string[] {
+		const names = new Set(this.getToolNames());
+		for (const tool of this.mcpCatalog.getAll()) {
+			names.add(tool.name);
+		}
+		return [...names];
 	}
 
 	/**

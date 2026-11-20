@@ -276,6 +276,7 @@ The emitted object looks like:
 - `filesChanged` - deduplicated list of file paths touched by file-mutating tools (`write_file`, `string_replace`, `diff_edit`, `lsp_format_document`)
 - `usage` — provider-reported token counts summed across every turn of the run. Omitted entirely when the provider reports no token telemetry (common with local models), so an absent block means "unknown", never "zero". When a provider reports input and output counts but no total, `totalTokens` is derived as their sum.
 - `warnings` — array containing configuration, hook, formatter, plugin, and runtime error/warning messages (the same diagnostic messages streamed to stderr)
+- `toolAccess` — present when `--allowed-tools` or `--disallowed-tools` narrowed the run, with the `allowed` and `disallowed` patterns as given
 
 A few more fields appear conditionally: `message` (the error text, when `kind` is `"error"`), and, when `kind` is `"tool-approval-required"`, `toolNames` (the tools awaiting approval) and `autoAcceptWouldRun` (whether `--mode auto-accept` would have run every blocked call; when false, only `--mode yolo` or `alwaysAllow` unblocks it).
 

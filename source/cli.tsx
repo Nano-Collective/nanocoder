@@ -312,6 +312,11 @@ Options:
                       line. Necessary for large prompts: Linux caps a single
                       argument at 128 KiB and execve fails with E2BIG.
                       Use "-" to read the prompt from stdin.
+  --allowed-tools     Only offer these tools for this run (comma-separated).
+                      Accepts built-in, custom and MCP tool names plus simple *
+                      globs, e.g. --allowed-tools "read_file,search_*,mcp_*".
+  --disallowed-tools  Remove these tools for this run (comma-separated). Deny
+                      wins over --allowed-tools. Unknown names are an error.
   --trust-directory   Skip the first-run directory trust prompt for this run only.
                       Valid with "run", "daemon start", "verify" and --acp. Does not
                       modify the preferences file.
@@ -543,6 +548,29 @@ async function main(): Promise<void> {
 			process.exit(1);
 		}
 		break;
+	}
+
+	// Extract --allowed-tools / --disallowed-tools. This is a process-wide
+	// run filter: ToolManager and subagents read it, so the restriction covers
+	// prompt building, runtime tool lists and delegated work alike. Names are
+	// validated after custom, skill and MCP tools are registered, because an
+	// MCP tool name is not known until its server connects.
+	const {parseToolAccessArgs, setRunToolAccess} = await import(
+		'@/tools/tool-access'
+	);
+	const toolAccess = parseToolAccessArgs(args);
+	if ('error' in toolAccess) {
+		console.error(toolAccess.error);
+		process.exit(1);
+	}
+	if (toolAccess.allowed.length > 0 || toolAccess.disallowed.length > 0) {
+		if (args.includes('--acp')) {
+			console.error(
+				'--allowed-tools and --disallowed-tools are not supported with --acp. An ACP client restricts tools per session with nanocoder/disabledTools instead.',
+			);
+			process.exit(1);
+		}
+		setRunToolAccess(toolAccess);
 	}
 
 	// Extract --json or --output-format json. Accept spaced and fused formats.

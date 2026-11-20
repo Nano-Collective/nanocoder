@@ -2,6 +2,10 @@ import test from 'ava';
 import React from 'react';
 import {themes} from '../config/themes';
 import {renderWithTheme} from '../test-utils/render-with-theme.js';
+import {
+	resetRunToolAccess,
+	setRunToolAccess,
+} from '../tools/tool-access';
 import Status from './status';
 
 console.log('\nstatus.spec.tsx');
@@ -867,4 +871,22 @@ test('Status shows Git line in narrow layout', t => {
 	t.regex(output!, /main/);
 
 	process.stdout.columns = originalColumns;
+});
+
+test.serial('Status names the run tool filter', t => {
+	const originalColumns = process.stdout.columns;
+	process.stdout.columns = 120;
+	setRunToolAccess({allowed: ['read_file'], disallowed: ['execute_bash']});
+
+	try {
+		const {lastFrame} = renderWithTheme(<Status {...defaultProps} />);
+		const output = lastFrame();
+		t.truthy(output);
+		t.regex(output!, /Tool access:/);
+		t.regex(output!, /only read_file/);
+		t.regex(output!, /execute_bash/);
+	} finally {
+		resetRunToolAccess();
+		process.stdout.columns = originalColumns;
+	}
 });
