@@ -32,6 +32,7 @@ test.serial('matchesToolPattern - * is a wildcard over any run of characters', t
 	t.true(matchesToolPattern('mcp_fs_read', 'mcp_*'));
 	t.true(matchesToolPattern('read_file', '*'));
 	t.true(matchesToolPattern('anything', '*'));
+	t.true(matchesToolPattern('a*b', '*'));
 	t.false(matchesToolPattern('write_file', 'search_*'));
 	t.false(matchesToolPattern('mcp_fs_read', 'mcp__*'));
 });
@@ -45,6 +46,24 @@ test.serial('matchesToolPattern - wildcard anchors at both ends', t => {
 test.serial('matchesToolPattern - regex metacharacters in a name are literal', t => {
 	t.true(matchesToolPattern('a+b(c)', 'a+b(c)'));
 	t.false(matchesToolPattern('aab(c)', 'a+b(c)'));
+});
+
+test.serial('matchesToolPattern - only * is special', t => {
+	t.false(matchesToolPattern('read_file', 'read_file?'));
+	t.false(matchesToolPattern('read_file1', 'read_file?'));
+	t.true(matchesToolPattern('read_file?', 'read_file?'));
+	t.false(matchesToolPattern('read_filex', 'read_file{x,y}'));
+	t.true(matchesToolPattern('read_file{x,y}', 'read_file{x,y}'));
+});
+
+test.serial('matchesToolPattern - many * segments do not backtrack', t => {
+	// A regex built from this pattern takes minutes on this name; the greedy
+	// scan has to answer immediately.
+	const name = `${'a'.repeat(60)}b`;
+	const pattern = `${'*a'.repeat(40)}*z`;
+	const started = Date.now();
+	t.false(matchesToolPattern(name, pattern));
+	t.true(Date.now() - started < 1000);
 });
 
 test.serial('matchesAnyToolPattern - any pattern may match', t => {

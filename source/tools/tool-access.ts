@@ -33,31 +33,55 @@ const FLAGS: readonly ToolAccessFlag[] = [
 
 let runToolAccess: RunToolAccess | undefined;
 
-const patternCache = new Map<string, RegExp>();
-
 function isToolAccessFlag(value: string): value is ToolAccessFlag {
 	return (FLAGS as readonly string[]).includes(value);
-}
-
-function escapeRegExp(value: string): string {
-	return value.replace(/[.+?^${}()|[\]\\]/g, '\\$&');
 }
 
 /**
  * Match one tool name against a pattern. A pattern without `*` is an exact
  * name; `*` stands for any run of characters. Names are case-sensitive,
  * because tool names are.
+ *
+ * Hand-rolled rather than a RegExp: a pattern of repeated `*a` segments makes
+ * a backtracking engine take minutes on a long name, and this runs over every
+ * tool name on every tool-list build. The greedy scan remembers only the last
+ * `*` it saw, so there is nothing to backtrack into. Every character other
+ * than `*` is literal - `?` and `{a,b}` are not special here.
  */
 export function matchesToolPattern(name: string, pattern: string): boolean {
-	if (pattern === '*') return true;
-	if (!pattern.includes('*')) return name === pattern;
+	let nameIndex = 0;
+	let patternIndex = 0;
+	// Pattern index of the last `*`, and the name index to resume from when the
+	// current guess fails.
+	let starIndex = -1;
+	let resumeNameIndex = 0;
 
-	let regex = patternCache.get(pattern);
-	if (!regex) {
-		regex = new RegExp(`^${pattern.split('*').map(escapeRegExp).join('.*')}$`);
-		patternCache.set(pattern, regex);
+	while (nameIndex < name.length) {
+		if (patternIndex < pattern.length && pattern[patternIndex] === '*') {
+			starIndex = patternIndex;
+			resumeNameIndex = nameIndex;
+			patternIndex++;
+		} else if (
+			patternIndex < pattern.length &&
+			pattern[patternIndex] === name[nameIndex]
+		) {
+			nameIndex++;
+			patternIndex++;
+		} else if (starIndex !== -1) {
+			// Let the last `*` swallow one more character and retry.
+			patternIndex = starIndex + 1;
+			resumeNameIndex++;
+			nameIndex = resumeNameIndex;
+		} else {
+			return false;
+		}
 	}
-	return regex.test(name);
+
+	// Trailing `*`s may match nothing.
+	while (patternIndex < pattern.length && pattern[patternIndex] === '*') {
+		patternIndex++;
+	}
+	return patternIndex === pattern.length;
 }
 
 export function matchesAnyToolPattern(
