@@ -766,3 +766,36 @@ test('an inherited mark starts the run tainted with nothing framed', async t => 
 	t.true(seen!.externalContent.inContext);
 	t.is(seen!.externalContent.summary, undefined);
 });
+
+test('the mark survives the framed message leaving the view mid-run', async t => {
+	// Auto-compaction rewrites the framed tool messages, and the message cap
+	// hides them. Re-deriving the answer from the view alone would let either
+	// one clear the mark mid-run - exactly when a later write runs unguarded.
+	let messages: Message[] = [
+		{role: 'user', content: 'go'},
+		{role: 'tool', tool_call_id: 't0', name: 'fetch_url', content: FRAMED},
+	];
+	const seen: boolean[] = [];
+	const {run} = setup([call('a'), call('b'), text('done')], {
+		history: {
+			get: () => messages,
+			set: next => {
+				messages = next;
+			},
+		},
+		executeTools: async (calls, context) => {
+			seen.push(context.externalContent.inContext);
+			// What compaction does: the framed result is no longer in the view.
+			messages = messages.filter(
+				message =>
+					message.role !== 'tool' ||
+					!String(message.content).includes('<external_content'),
+			);
+			return {kind: 'continue', results: calls.map(resultFor)};
+		},
+	});
+
+	await run();
+
+	t.deepEqual(seen, [true, true], 'the run stays marked once it was marked');
+});

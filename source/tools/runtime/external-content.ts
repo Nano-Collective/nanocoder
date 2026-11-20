@@ -128,6 +128,10 @@ const MAX_SUMMARY_URL_CHARS = 80;
  * Read the frame back out of the message view the next request will send. The
  * tag is the marker: whatever the model can read, this finds, which is why the
  * flag needs no separate storage and cannot drift from the history.
+ *
+ * A file whose *contents* happen to contain the tag would match too. That can
+ * only over-mark - the tool that read it is local, so the mark costs a
+ * confirmation rather than hiding one - which is the direction to fail in.
  */
 export function externalContentIn(
 	messages: readonly Message[],
@@ -147,6 +151,13 @@ export function externalContentIn(
 	}
 	return {inContext: false};
 }
+
+/**
+ * Short tag for surfaces that only have a title to work with (an ACP permission
+ * card, a subagent's approval line). The terminal's own prompt uses
+ * `formatExternalContentReason`, which can afford the source.
+ */
+export const EXTERNAL_CONTENT_REASON = 'read external content';
 
 /** One line naming what was read, for the confirmation prompt. */
 export function formatExternalContentReason(

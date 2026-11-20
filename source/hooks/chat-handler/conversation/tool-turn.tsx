@@ -19,7 +19,7 @@ import {runPreToolUseGate} from '@/services/lifecycle-hooks';
 import {getProjectRoot} from '@/services/session-cwd';
 import {
 	type ExternalContentApproval,
-	escalatedByExternalContent,
+	escalationExplainsApproval,
 	resolveToolApproval,
 } from '@/tools/approval-policy';
 import {
@@ -263,7 +263,14 @@ export async function runToolTurn(
 				refuseToolCall(toolCall, vote.reason);
 				continue;
 			}
-			if (escalatedByExternalContent(toolEntry, currentMode, approvalContext)) {
+			if (
+				await escalationExplainsApproval(
+					toolCall.function.name,
+					toolEntry,
+					toolCall.function.arguments,
+					approvalContext,
+				)
+			) {
 				escalationReasons.set(
 					toolCall.id,
 					formatExternalContentReason(externalContentPresence),
@@ -419,9 +426,10 @@ export async function runToolTurn(
 					// The decision changed since classification (a mode switch),
 					// so record the reason here too; the prompt reads this map.
 					if (
-						escalatedByExternalContent(
+						await escalationExplainsApproval(
+							toolCall.function.name,
 							toolManager?.getToolEntry(toolCall.function.name),
-							developmentModeRef?.current ?? developmentMode,
+							toolCall.function.arguments,
 							{
 								mode: developmentModeRef?.current ?? developmentMode,
 								alwaysAllow: getAppConfig().alwaysAllow ?? [],

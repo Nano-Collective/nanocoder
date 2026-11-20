@@ -65,6 +65,12 @@ export interface SubagentResult {
 	tokensUsed?: number;
 	/** Execution time in milliseconds */
 	executionTimeMs: number;
+	/**
+	 * Whether this run read text from outside the workspace. The `agent` tool
+	 * marks its result with it, so a page a subagent read cannot leave the
+	 * parent unmarked just because the parent never read it itself.
+	 */
+	externalContentTouched?: boolean;
 	/** Set by `ci-fix-orchestrator.ts` when a CI-fix run actually committed
 	 * and published a fix (auto-fix's draft PR, or full-commit's direct
 	 * push) — lets a caller distinguish "a fix was applied" from "just a

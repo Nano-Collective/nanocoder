@@ -856,3 +856,18 @@ test('a failure the handler reports instead of throwing is marked too', async t 
 	t.true(result.isError);
 	t.deepEqual(result.externalSource, {kind: 'mcp', server: 'github'});
 });
+
+test('a handler can declare that this answer came from outside the workspace', async t => {
+	// `agent` does this when the subagent read a page: the tool is not an
+	// external source, but this particular answer is.
+	const manager = managerFor(undefined, async () => ({
+		llmContent: 'summary of the page',
+		externalSource: {kind: 'subagent' as const},
+	}));
+
+	const result = await processToolUse(createMockToolCall('tool', {}), {
+		toolManager: manager,
+	});
+
+	t.deepEqual(result.externalSource, {kind: 'subagent'});
+});

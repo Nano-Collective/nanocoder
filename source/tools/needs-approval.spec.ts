@@ -1,6 +1,10 @@
 import test from 'ava';
 import type {DevelopmentMode, NanocoderToolExport} from '../types/core.js';
-import {resolveToolApproval} from './approval-policy.js';
+import {
+	escalatedByExternalContent,
+	escalationExplainsApproval,
+	resolveToolApproval,
+} from './approval-policy.js';
 import {browserTool} from './browser.js';
 import {executeBashTool} from './execute-bash.js';
 import {fetchUrlTool} from './fetch-url.js';
@@ -511,4 +515,55 @@ test('the switch being off means no escalation at all', async t => {
 
 test('headless is out of scope: it has nobody to ask', async t => {
 	t.false(await withExternalContent(writeFileTool, 'headless', TAINTED));
+});
+
+// ---------------------------------------------------------------------------
+// The escalation set is narrow on purpose
+//
+// Only calls that can act on the world are escalated. Asking the user a
+// question, updating the task list or writing a walkthrough are not changes to
+// the workspace, and making the model ask permission to ask a question would be
+// a regression rather than a guard.
+// ---------------------------------------------------------------------------
+
+const benigned = (name: string) =>
+	({name, approval: false}) as import('../types/core.js').NanocoderToolExport;
+
+test('tools that never gate stay ungated: a question is not a change', async t => {
+	t.false(await withExternalContent(benigned('ask_user'), 'auto-accept', TAINTED));
+	t.false(
+		await withExternalContent(benigned('write_tasks'), 'auto-accept', TAINTED),
+	);
+	t.false(
+		await withExternalContent(
+			benigned('write_walkthrough'),
+			'auto-accept',
+			TAINTED,
+		),
+	);
+});
+
+test('a tool that would ask anyway is not blamed on the page', async t => {
+	// execute_bash prompts in auto-accept through its own policy, so the
+	// escalation is not what raised the prompt. The confirmation UI shows the
+	// reason only when this says so.
+	const ctx = {mode: 'auto-accept' as const, externalContent: TAINTED};
+
+	t.true(
+		await resolveToolApproval('execute_bash', executeBashTool, {}, ctx),
+		'bash still prompts',
+	);
+	t.false(
+		await escalatedByExternalContent('execute_bash', executeBashTool, 'auto-accept', ctx),
+		'but not because of external content',
+	);
+	t.false(
+		await escalationExplainsApproval('execute_bash', executeBashTool, {}, ctx),
+	);
+
+	const write = {mode: 'auto-accept' as const, externalContent: TAINTED};
+	t.true(
+		await escalationExplainsApproval('write_file', writeFileTool, {}, write),
+		'a waived write is escalated by the page, so the reason does belong',
+	);
 });

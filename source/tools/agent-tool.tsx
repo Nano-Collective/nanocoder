@@ -10,7 +10,12 @@ import {randomUUID} from 'node:crypto';
 import {buildSubagentFailureMessage} from '@/subagents/failure-message.js';
 import type {SubagentExecutor} from '@/subagents/subagent-executor.js';
 import {getSubagentLoader} from '@/subagents/subagent-loader.js';
-import type {ToolExecutionContext} from '@/types/core';
+import type {SubagentResult} from '@/subagents/types.js';
+import type {
+	ExternalContentSource,
+	StructuredToolOutput,
+	ToolExecutionContext,
+} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 import type {NanocoderToolExport} from '@/types/index';
 
@@ -80,12 +85,23 @@ function delegationContext(options?: ToolExecutionContext) {
  * @param signal - Optional abort signal for cancellation
  * @returns Object with unique agentId and promise that resolves with the result
  */
+/**
+ * What a delegated run hands back. The mark rides along when the subagent read
+ * outside text, so the caller can frame and taint with it.
+ */
+interface DelegatedResult {
+	content: string;
+	success: boolean;
+	error?: string;
+	externalSource?: ExternalContentSource;
+}
+
 export function startAgentExecution(
 	args: AgentToolArgs,
 	options?: ToolExecutionContext,
 ): {
 	agentId: string;
-	promise: Promise<{content: string; success: boolean; error?: string}>;
+	promise: Promise<DelegatedResult>;
 } {
 	const agentId = randomUUID();
 
@@ -103,11 +119,7 @@ export function startAgentExecution(
 	// Wrap in setTimeout(0) to fully detach from the current call stack.
 	// This ensures the caller can set up the live component and Ink can
 	// render before execution begins — matching how spawn() works for bash.
-	const promise = new Promise<{
-		content: string;
-		success: boolean;
-		error?: string;
-	}>(resolve => {
+	const promise = new Promise<DelegatedResult>(resolve => {
 		setTimeout(async () => {
 			const result = await executor.execute(
 				{
@@ -125,6 +137,7 @@ export function startAgentExecution(
 				content: result.output,
 				success: result.success,
 				error: result.error,
+				externalSource: delegatedSource(result),
 			});
 		}, 0);
 	});
@@ -132,10 +145,22 @@ export function startAgentExecution(
 	return {agentId, promise};
 }
 
+/**
+ * A subagent's answer is its own text, but it is only "external" when the run
+ * read something from outside: a summary written while looking at a page can
+ * carry that page's instructions, and the parent must see it framed and marked
+ * rather than as an ordinary tool result.
+ */
+function delegatedSource(
+	result: SubagentResult,
+): ExternalContentSource | undefined {
+	return result.externalContentTouched ? {kind: 'subagent'} : undefined;
+}
+
 async function executeAgent(
 	args: AgentToolArgs,
 	options?: ToolExecutionContext,
-): Promise<string> {
+): Promise<string | StructuredToolOutput> {
 	if (!executorInstance) {
 		throw new Error('Subagent executor not initialized');
 	}
@@ -172,7 +197,9 @@ async function executeAgent(
 		throw new Error(buildSubagentFailureMessage(result.error, result.output));
 	}
 
-	return result.output;
+	const externalSource = delegatedSource(result);
+	if (!externalSource) return result.output;
+	return {llmContent: result.output, externalSource};
 }
 
 const agentCoreTool = tool({

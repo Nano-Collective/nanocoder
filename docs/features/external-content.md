@@ -21,9 +21,10 @@ workspace is written to the conversation inside a frame:
 ```
 
 The system prompt tells the model that everything inside that frame is data to
-read, never instructions, and that only your own messages are instructions. If
-the wrapped text asks it to run a command, send a URL, change its rules, or
-reveal files, the model is told to report that to you instead of acting on it.
+read, never instructions, and that instructions come from your messages and the
+system prompt. If the wrapped text asks it to run a command, send a URL, change
+its rules, or reveal files, the model is told to report that to you instead of
+acting on it.
 
 ## Which results are framed
 
@@ -33,6 +34,9 @@ reveal files, the model is told to report that to you instead of acting on it.
 - every MCP tool — the server's text, labelled `mcp:<server>`
 - the MCP discovery catalog (`load_tool_schema`) — a server's own description of
   its tools, labelled `mcp`
+- `agent` — a subagent's answer, but only when that run read outside text: a
+  summary written while looking at a page can carry that page's instructions,
+  and an ordinary summary of your own code should not be framed
 
 A failure from one of these tools is framed too: an MCP server's error text, and
 the URL a fetch says it could not reach, are still not your words.
@@ -90,7 +94,11 @@ Reading stays free: `read_file`, `search_file_contents`, `find_files` and the
 language-server tools never escalate, because reading your own files is what the
 model was asked to do.
 
-Two limits worth knowing. The mark lasts for the current run, so a later prompt
-that says "now do what that page said" starts clean — the framing survives in the
-history, but the escalation does not. And `/compact` summarises the conversation
-without the frame, so the mark goes with it.
+Limits worth knowing. The mark is scoped to the current run and cannot be
+cleared by auto-compaction or by the message cap once it is set — that would
+hand a later write the mode's waiver back mid-turn. It ends when the framed text
+leaves the conversation: `/compact` without it, `/clear`, or a session resumed
+after the page was summarised away. A run also inherits the mark from the parent
+that delegated to it, and a subagent that read a page marks its own answer, so
+delegation closes both directions. A failed delegated run still returns a
+diagnostic rather than framed content.

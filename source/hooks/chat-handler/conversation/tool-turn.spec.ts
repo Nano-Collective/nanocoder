@@ -35,7 +35,18 @@ function withEscalation(fn: () => () => void): () => void {
 		'utf-8',
 	);
 	reloadAppConfig();
-	return fn();
+	const restore = fn();
+	return () => {
+		restore();
+		// The config dir is process-wide: leaving it pointed at this fixture
+		// would make every later spec in this worker read it.
+		if (previous === undefined) {
+			delete process.env.NANOCODER_CONFIG_DIR;
+		} else {
+			process.env.NANOCODER_CONFIG_DIR = previous;
+		}
+		reloadAppConfig();
+	};
 }
 
 /** Every file under `dir`, as text, for assertions about what was captured. */
@@ -72,6 +83,9 @@ test.serial(
 		setToolRegistryGetter(() => registry.getHandlers());
 		setToolManagerGetter(() => null);
 		setGlobalToolConfirmHandler(async () => true);
+		t.teardown(() => {
+			setGlobalToolConfirmHandler(async () => false);
+		});
 
 		const toolManager = {
 			getToolEntry: (name: string) => registry.getEntry(name),

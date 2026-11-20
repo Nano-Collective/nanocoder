@@ -83,7 +83,12 @@ export interface ToolCall {
  * same way (see `@/tools/runtime/external-content`), it only decides the label
  * the model sees and the source named in a confirmation prompt.
  */
-export type ExternalContentKind = 'web' | 'search' | 'browser' | 'mcp';
+export type ExternalContentKind =
+	| 'web'
+	| 'search'
+	| 'browser'
+	| 'mcp'
+	| 'subagent';
 
 /**
  * What a tool *is*, declared once where the tool is registered. The approval
@@ -151,6 +156,13 @@ export interface Tool {
 export interface StructuredToolOutput {
 	llmContent: string;
 	structured?: JSONValue;
+	/**
+	 * Set by a handler whose output came from outside the workspace *for this
+	 * call*, where the tool itself is not an external source. `agent` uses it:
+	 * a subagent that read a page returns a summary written by a model that was
+	 * looking at that page, so the parent must see it framed and marked.
+	 */
+	externalSource?: ExternalContentSource;
 	/**
 	 * Set by a handler whose run failed without throwing - a shell command that
 	 * exited non-zero, say - so the result carries the failure instead of every

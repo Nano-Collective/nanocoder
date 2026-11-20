@@ -3599,7 +3599,7 @@ test.serial('a subagent inherits the parent mark and escalates for it', async t 
 			},
 			{content: 'Done'},
 		]);
-		await new SubagentExecutor(toolManager, client).execute(
+		const result = await new SubagentExecutor(toolManager, client).execute(
 			{subagent_type: 'explore', description: 'write'},
 			undefined,
 			0,
@@ -3607,6 +3607,10 @@ test.serial('a subagent inherits the parent mark and escalates for it', async t 
 			// The parent read a page, so the delegated run starts marked.
 			{sessionId: SESSION, externalContentTouched: true},
 			{tools: ['write_file']},
+		);
+		t.true(
+			result.externalContentTouched,
+			'and it reports the mark, so the parent frames what it gets back',
 		);
 	} finally {
 		unregister();

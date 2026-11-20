@@ -44,10 +44,13 @@ import {
 } from '@/services/subagent-events';
 import {
 	type ExternalContentApproval,
-	escalatedByExternalContent,
+	escalationExplainsApproval,
 	resolveToolApproval,
 } from '@/tools/approval-policy';
-import {externalContentIn} from '@/tools/runtime/external-content';
+import {
+	EXTERNAL_CONTENT_REASON,
+	externalContentIn,
+} from '@/tools/runtime/external-content';
 import {
 	clearReadContentScope,
 	runWithReadContentScope,
@@ -246,12 +249,6 @@ export function clearAcpReadStubs(sessionId: string): void {
 }
 
 const SUBAGENT_TOOL_CALL_PREFIX = 'subagent:';
-
-/**
- * Appended to a permission card's title when reading external content is what
- * made the call need approval. The protocol has no other text field for it.
- */
-const EXTERNAL_CONTENT_REASON = 'read external content';
 
 /**
  * Give every tool call of the latest assistant message a result, for a turn
@@ -708,15 +705,16 @@ async function runTurn(
 							meta,
 							abortController.signal,
 							undefined,
-							escalatedByExternalContent(
+							(await escalationExplainsApproval(
+								toolCall.function.name,
 								toolManager.getToolEntry(toolCall.function.name),
-								session.developmentMode,
+								toolCall.function.arguments,
 								{
 									mode: session.developmentMode,
 									alwaysAllow: nonInteractiveAlwaysAllow,
 									externalContent,
 								},
-							)
+							))
 								? EXTERNAL_CONTENT_REASON
 								: undefined,
 						);

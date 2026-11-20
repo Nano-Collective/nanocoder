@@ -1,3 +1,4 @@
+import {isFileMutationTool} from '@/tools/runtime/tool-approval';
 import {parseToolArguments} from '@/tools/runtime/tool-args-parser';
 import type {
 	DevelopmentMode,
@@ -52,17 +53,28 @@ const ESCALATION_MODES: ReadonlySet<DevelopmentMode> = new Set<DevelopmentMode>(
 );
 
 /**
- * Whether a call can act on the world rather than just read the workspace.
+ * Whether a call acts on the world rather than just reading the workspace.
  *
- * A read-only tool is excluded - reading is what the model is supposed to do
- * with the page it was asked to summarise. Two exceptions matter: a read-only
- * tool whose output comes from outside is also the tool that reaches outside
- * (`fetch_url` is exactly this), and an MCP tool's `readOnly` is the server's
- * own claim about itself.
+ * Deliberately narrow. Reading is what the model is supposed to do with the
+ * page it was asked to summarise, so read-only tools are excluded - with one
+ * exception: a read-only tool whose output comes from outside is also the tool
+ * that reaches outside (`fetch_url` is exactly this), and an MCP tool's
+ * `readOnly` is the server's own claim about itself.
+ *
+ * File writes are the other half, recognised by the same registry the architect
+ * checkpoint uses. Everything else is left alone on purpose: `ask_user`,
+ * `write_tasks` and the plan tools declare `approval: false` and are not
+ * changes to the workspace, so making the model ask permission to ask the user
+ * a question would be a regression, not a guard. `execute_bash` and the git
+ * tools already prompt in these modes through their own policy.
  */
-function actsOutsideWorkspace(target: ApprovalTarget | undefined): boolean {
-	if (target?.readOnly !== true) return true;
-	return target.externalSource !== undefined;
+function actsOutsideWorkspace(
+	toolName: string,
+	target: ApprovalTarget | undefined,
+): boolean {
+	if (target?.externalSource !== undefined) return true;
+	if (toolName === 'agent') return true;
+	return isFileMutationTool(toolName);
 }
 
 /**
@@ -73,6 +85,7 @@ function actsOutsideWorkspace(target: ApprovalTarget | undefined): boolean {
  * separately would let the prompt and the decision drift apart.
  */
 export function escalatedByExternalContent(
+	toolName: string,
 	target: ApprovalTarget | undefined,
 	mode: DevelopmentMode,
 	ctx: ApprovalContext,
@@ -80,7 +93,34 @@ export function escalatedByExternalContent(
 	const external = ctx.externalContent;
 	if (!external?.inContext || !external.escalate) return false;
 	if (!ESCALATION_MODES.has(mode)) return false;
-	return actsOutsideWorkspace(target);
+	return actsOutsideWorkspace(toolName, target);
+}
+
+/**
+ * Whether the escalation is the *reason* this call needs approval, rather than
+ * a call that would have prompted anyway - an irreversible delete, or a bash
+ * command. The confirmation prompt names the page only when the page is what
+ * changed the answer; otherwise it would blame external content for a prompt
+ * the user was going to see regardless.
+ */
+export async function escalationExplainsApproval(
+	toolName: string,
+	target: ApprovalTarget | undefined,
+	rawArguments: unknown,
+	ctx: ApprovalContext,
+): Promise<boolean> {
+	if (!escalatedByExternalContent(toolName, target, ctx.mode, ctx))
+		return false;
+	const withoutEscalation = await resolveToolApproval(
+		toolName,
+		target,
+		rawArguments,
+		{
+			...ctx,
+			externalContent: {inContext: false, escalate: false},
+		},
+	);
+	return !withoutEscalation;
 }
 
 /**
@@ -131,7 +171,7 @@ export async function resolveToolApproval(
 
 	// External content is in the model's view: a call that can act on the world
 	// waits for the user even where the mode would have waived it.
-	if (escalatedByExternalContent(target, ctx.mode, ctx)) {
+	if (escalatedByExternalContent(toolName, target, ctx.mode, ctx)) {
 		return true;
 	}
 

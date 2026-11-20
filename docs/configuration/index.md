@@ -458,6 +458,8 @@ The `nanocoder.tune` block sets default tool profile, tool-calling mode and mode
 
 Allow specific tools to run without confirmation, even in normal development mode. The `alwaysAllow` array accepts tool names — listed tools execute immediately without prompting for approval, and the same list also applies to non-interactive runs (`nanocoder run ...`).
 
+One thing outranks it: with [`nanocoder.untrustedContent.escalate`](#untrusted-external-content) on, a call that can act on the world still asks while external content is in the model's view, even if it is listed here. The global switch is the way to say "I accept that"; there is deliberately no per-tool opt-out.
+
 ```json
 {
   "nanocoder": {
@@ -465,6 +467,24 @@ Allow specific tools to run without confirmation, even in normal development mod
   }
 }
 ```
+
+### Untrusted External Content
+
+Text from `fetch_url`, `web_search`, `browser` and MCP servers reaches the model inside an `<external_content source="..." url="...">` frame, and the system prompt says that everything inside it is data rather than instructions. That framing is always on.
+
+`nanocoder.untrustedContent.escalate` controls the second half: while that text is in the model's view, calls that can change files or reach the network ask for confirmation in `auto-accept` and `architect`, instead of running on the mode's waiver. Default is `false` — like `sandbox` and `firewall`, a behaviour that adds prompts ships opt-in.
+
+```json
+{
+  "nanocoder": {
+    "untrustedContent": {
+      "escalate": true
+    }
+  }
+}
+```
+
+It covers file writes, `fetch_url` / `web_search` / `browser`, MCP tools, and `agent` delegation. It does not cover `yolo` ("never ask"), normal mode (it already asks), or `headless` runs (nobody to ask). `ask_user`, the task list and the plan tools are not escalated: asking a question is not a change to the workspace. See [External Content](../features/external-content.md) for the full behaviour and its limits.
 
 ### Disabling Tools
 

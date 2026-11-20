@@ -104,7 +104,7 @@ export async function processToolUse(
 		);
 		// The arguments this call actually carried: `fetch_url`'s URL, so the
 		// frame can name what was read.
-		const externalSource = externalSourceFor(declaredSource, parsedArgs);
+		let externalSource = externalSourceFor(declaredSource, parsedArgs);
 		// Lifecycle gate: a pre-tool-use hook that exits non-zero denies the
 		// call outright, and its output goes back to the model as the reason so
 		// it can adapt instead of retrying blindly.
@@ -120,6 +120,18 @@ export async function processToolUse(
 		}
 
 		const result = await handler(parsedArgs, options);
+
+		// A handler may declare that this particular answer came from outside
+		// even though the tool itself is not an external source: `agent` does
+		// this when the subagent read a page.
+		if (
+			typeof result === 'object' &&
+			result !== null &&
+			'externalSource' in result &&
+			result.externalSource !== undefined
+		) {
+			externalSource = result.externalSource;
+		}
 
 		// Image bytes stay off `content` so truncation cannot chew them up
 		// and the model receives them as image parts, not a base64 blob.

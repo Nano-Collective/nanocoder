@@ -344,6 +344,12 @@ export async function runTurnEngine<S>(
 	const {history} = adapter;
 	const guards = createHeadlessRetryGuards(retryLimits);
 	let modelCalls = 0;
+	// The run's mark, pinned: once external text has been in view this run, no
+	// later turn of the same run is judged differently. Auto-compaction rewrites
+	// the framed tool messages, and the message cap hides them; re-deriving the
+	// answer from the view alone would let either one quietly clear the mark
+	// mid-run, which is precisely when a later write would run unguarded.
+	let externalContentTouched = initialExternalContentTouched;
 	const stop = (result: TurnEngineStop<S>): TurnEngineResult<S> => ({
 		...result,
 		modelCalls,
@@ -385,13 +391,13 @@ export async function runTurnEngine<S>(
 		// are the same thing rather than two drifting copies.
 		const requestView = capMessagesForModel(history.get(), maxMessages);
 		const detected = externalContentIn(requestView);
+		externalContentTouched = externalContentTouched || detected.inContext;
 		const context: TurnContext = {
 			turn,
 			finalTurn: turn === maxTurns - 1,
-			externalContent:
-				initialExternalContentTouched && !detected.inContext
-					? {inContext: true}
-					: detected,
+			externalContent: externalContentTouched
+				? {inContext: true, summary: detected.summary}
+				: {inContext: false},
 		};
 		const {finalTurn} = context;
 		const prepared = await adapter.prepareTurn(context);

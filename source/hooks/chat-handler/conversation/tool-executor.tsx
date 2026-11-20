@@ -415,6 +415,11 @@ const executeAgentBatch = async (
 			content: agentResult.success
 				? agentResult.content
 				: buildFailedAgentContent(agentResult),
+			// A subagent that read a page hands back a summary written while
+			// looking at it: mark it so the parent's next call is judged with it.
+			...(agentResult.success && agentResult.externalSource
+				? {externalSource: agentResult.externalSource}
+				: {}),
 		};
 
 		results.push({toolCall: e.toolCall, result});

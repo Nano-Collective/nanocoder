@@ -29,9 +29,10 @@ export interface MCPToolEntry {
 	handler: MCPToolHandler;
 	approval: ToolApprovalPolicy;
 	/**
-	 * Set by `getToolEntries` for every tool it discovers: a tool's output is
-	 * the server's text, so every MCP result is framed for the model and every
-	 * MCP call reaches outside the workspace.
+	 * Set by `getToolEntries` on every entry it builds: a tool's output is the
+	 * server's text, so every MCP result is framed for the model and every MCP
+	 * call reaches outside the workspace. Optional in the type because callers
+	 * construct entries structurally, but the client always fills it in.
 	 */
 	externalSource?: ExternalToolSource;
 }
