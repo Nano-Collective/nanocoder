@@ -25,6 +25,7 @@ import {
 	reloadAppConfig,
 } from './index';
 import {resetPreferencesCache} from './preferences';
+import {clearProfileCache} from './profile';
 
 console.log(`\neffective-config.spec.ts`);
 
@@ -682,6 +683,57 @@ test('runConfigCli renders list, show, and diff', t => {
 		t.is(diff.exitCode, 0);
 		t.regex(diff.output, /Overrides in effect/);
 	});
+});
+
+test('runConfigCli applies the spaced --profile form like --profile=<name>', t => {
+	withFixture(
+		{
+			projectAgents: {
+				nanocoder: {
+					defaultProfile: 'pp',
+					retries: {maxEmptyTurns: 5},
+					profiles: {
+						pp: {retries: {maxEmptyTurns: 11}},
+						gp: {retries: {maxEmptyTurns: 22}},
+					},
+				},
+			},
+		},
+		() => {
+			try {
+				const spaced = runConfigCli('show', ['--profile', 'gp']);
+				t.is(spaced.exitCode, 0);
+				t.regex(spaced.output, /active profile\s+gp/);
+				t.regex(spaced.output, /nanocoder\.retries\.maxEmptyTurns \*\s+22\s+profile/);
+
+				const equals = runConfigCli('show', ['--profile=gp']);
+				t.is(equals.exitCode, 0);
+				t.regex(equals.output, /active profile\s+gp/);
+
+				for (const command of ['list', 'diff'] as const) {
+					const res = runConfigCli(command, ['--profile', 'gp']);
+					t.is(res.exitCode, 0);
+					t.regex(res.output, /active profile\s+gp/);
+				}
+
+				// A key filter before the flag must not see the profile value as
+				// another positional.
+				const scoped = runConfigCli('show', [
+					'nanocoder.retries.maxEmptyTurns',
+					'--profile',
+					'gp',
+				]);
+				t.is(scoped.exitCode, 0);
+				t.regex(scoped.output, /value\s+22/);
+
+				const missing = runConfigCli('show', ['--profile']);
+				t.is(missing.exitCode, 1);
+				t.regex(missing.output, /--profile requires a profile name/);
+			} finally {
+				clearProfileCache();
+			}
+		},
+	);
 });
 
 test('runConfigCli reports an unknown key and a bad subcommand', t => {
