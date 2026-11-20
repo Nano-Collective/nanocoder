@@ -3,6 +3,7 @@ import {writeFileSync, mkdirSync, rmSync} from 'fs';
 import {tmpdir} from 'os';
 import {join} from 'path';
 import {loadAllMCPConfigs, loadGlobalMCPConfig, loadProjectMCPConfig, loadAllProviderConfigs, mergeMCPConfigs} from '@/config/mcp-config-loader';
+import {setMessageQueueSink} from '@/utils/message-queue-core';
 import {TransportFactory} from '@/mcp/transport-factory';
 
 test.beforeEach(t => {
@@ -887,4 +888,179 @@ test('loadEnvMCPConfigs - keeps pre-substitution env in raw fields', t => {
             delete process.env.MY_ENV_MCP_KEY;
         }
     }
+});
+
+// ============================================================================
+// Invalid provider entries (issue #2249)
+// ============================================================================
+
+test('loadAllProviderConfigs - skips a null provider entry and keeps valid ones (#2249)', t => {
+	const testDir = t.context.testDir as string;
+	const messages: string[] = [];
+	const originalProviders = process.env.NANOCODER_PROVIDERS;
+	delete process.env.NANOCODER_PROVIDERS;
+
+	try {
+		setMessageQueueSink((_type, message) => {
+			messages.push(message);
+		});
+
+		const projectConfig = {
+			nanocoder: {
+				providers: [
+					null,
+					{
+						name: 'valid-provider',
+						baseUrl: 'http://valid.example.com',
+						models: ['model-1'],
+					},
+				],
+			},
+		};
+		writeFileSync(join(testDir, 'agents.config.json'), JSON.stringify(projectConfig));
+
+		// Must not throw TypeError: Cannot read properties of null (reading 'name')
+		const result = loadAllProviderConfigs();
+		t.is(result.length, 1);
+		t.is(result[0].name, 'valid-provider');
+		t.true(
+			messages.some(message =>
+				message.includes(`providers[0] in ${join(testDir, 'agents.config.json')} is not an object`),
+			),
+			`expected a clear message for providers[0], got: ${JSON.stringify(messages)}`,
+		);
+	} finally {
+		setMessageQueueSink(null);
+		if (originalProviders !== undefined) {
+			process.env.NANOCODER_PROVIDERS = originalProviders;
+		} else {
+			delete process.env.NANOCODER_PROVIDERS;
+		}
+	}
+});
+
+test('loadAllProviderConfigs - skips a number entry and an entry without a name (#2249)', t => {
+	const testDir = t.context.testDir as string;
+	const messages: string[] = [];
+	const originalProviders = process.env.NANOCODER_PROVIDERS;
+	delete process.env.NANOCODER_PROVIDERS;
+
+	try {
+		setMessageQueueSink((_type, message) => {
+			messages.push(message);
+		});
+
+		const projectConfig = {
+			nanocoder: {
+				providers: [
+					42,
+					{models: ['m']},
+					{
+						name: 'valid-provider',
+						baseUrl: 'http://valid.example.com',
+						models: ['model-1'],
+					},
+				],
+			},
+		};
+		writeFileSync(join(testDir, 'agents.config.json'), JSON.stringify(projectConfig));
+
+		const result = loadAllProviderConfigs();
+		t.is(result.length, 1);
+		t.is(result[0].name, 'valid-provider');
+		t.true(
+			messages.some(message => message.includes('providers[0]') && message.includes('is not an object')),
+			`expected a clear message for providers[0], got: ${JSON.stringify(messages)}`,
+		);
+		t.true(
+			messages.some(message => message.includes('providers[1]') && message.includes('has no "name"')),
+			`expected a clear message for providers[1], got: ${JSON.stringify(messages)}`,
+		);
+	} finally {
+		setMessageQueueSink(null);
+		if (originalProviders !== undefined) {
+			process.env.NANOCODER_PROVIDERS = originalProviders;
+		} else {
+			delete process.env.NANOCODER_PROVIDERS;
+		}
+	}
+});
+
+test('loadAllProviderConfigs - skips a provider whose models is not an array (#2249)', t => {
+	const testDir = t.context.testDir as string;
+	const messages: string[] = [];
+	const originalProviders = process.env.NANOCODER_PROVIDERS;
+	delete process.env.NANOCODER_PROVIDERS;
+
+	try {
+		setMessageQueueSink((_type, message) => {
+			messages.push(message);
+		});
+
+		const projectConfig = {
+			nanocoder: {
+				providers: [
+					{name: 'bad-models', models: 'model-1'},
+					{
+						name: 'valid-provider',
+						baseUrl: 'http://valid.example.com',
+						models: ['model-1'],
+					},
+				],
+			},
+		};
+		writeFileSync(join(testDir, 'agents.config.json'), JSON.stringify(projectConfig));
+
+		const result = loadAllProviderConfigs();
+		t.is(result.length, 1);
+		t.is(result[0].name, 'valid-provider');
+		t.true(
+			messages.some(
+				message => message.includes('providers[0]') && message.includes('"models"') && message.includes('not an array'),
+			),
+			`expected a clear message for providers[0], got: ${JSON.stringify(messages)}`,
+		);
+	} finally {
+		setMessageQueueSink(null);
+		if (originalProviders !== undefined) {
+			process.env.NANOCODER_PROVIDERS = originalProviders;
+		} else {
+			delete process.env.NANOCODER_PROVIDERS;
+		}
+	}
+});
+
+test('loadAllProviderConfigs - skips invalid entries from NANOCODER_PROVIDERS (#2249)', t => {
+	const messages: string[] = [];
+	const originalProviders = process.env.NANOCODER_PROVIDERS;
+
+	try {
+		setMessageQueueSink((_type, message) => {
+			messages.push(message);
+		});
+
+		process.env.NANOCODER_PROVIDERS = JSON.stringify([
+			null,
+			{
+				name: 'env-valid',
+				baseUrl: 'http://env.example.com',
+				models: ['model-1'],
+			},
+		]);
+
+		const result = loadAllProviderConfigs();
+		t.is(result.length, 1);
+		t.is(result[0].name, 'env-valid');
+		t.true(
+			messages.some(message => message.includes('providers[0]') && message.includes('is not an object')),
+			`expected a clear message for providers[0], got: ${JSON.stringify(messages)}`,
+		);
+	} finally {
+		setMessageQueueSink(null);
+		if (originalProviders !== undefined) {
+			process.env.NANOCODER_PROVIDERS = originalProviders;
+		} else {
+			delete process.env.NANOCODER_PROVIDERS;
+		}
+	}
 });
