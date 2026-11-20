@@ -569,6 +569,40 @@ test('runcrate template: uses default provider name and model default', t => {
 // be confused with the Anthropic Claude template during edit lookups.
 // ============================================================================
 
+test('cloudgpu template: uses fixed endpoint and parses model IDs', t => {
+	const template = PROVIDER_TEMPLATES.find(t => t.id === 'cloudgpu');
+	t.truthy(template);
+
+	const config = template!.buildConfig({
+		providerName: 'CloudGPU',
+		apiKey: 'test-key',
+		model: 'kimi-k3, glm-5.2',
+	});
+
+	t.is(config.baseUrl, 'https://cloudgpu.app/v1');
+	t.is(config.apiKey, 'test-key');
+	t.is(config.sdkProvider, undefined);
+	t.deepEqual(config.models, ['kimi-k3', 'glm-5.2']);
+});
+
+test('cloudgpu template: uses default provider name and model', t => {
+	const template = PROVIDER_TEMPLATES.find(t => t.id === 'cloudgpu');
+	t.truthy(template);
+
+	const modelField = template!.fields.find(f => f.name === 'model');
+	t.is(modelField?.default, 'kimi-k3');
+	const apiKeyField = template!.fields.find(f => f.name === 'apiKey');
+	t.is(apiKeyField?.prompt, 'API Key (from cloudgpu.app/api/console)');
+	t.is(
+		template!.buildConfig({
+			providerName: '',
+			apiKey: 'test-key',
+			model: 'kimi-k3',
+		}).name,
+		'CloudGPU',
+	);
+});
+
 test('together template: sets baseUrl and parses models', t => {
 	const template = PROVIDER_TEMPLATES.find(t => t.id === 'together');
 	t.truthy(template);

@@ -581,6 +581,13 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 		modelDefault: 'deepseek/v4-flash/chat',
 	}),
 	apiKeyTemplate({
+		id: 'cloudgpu',
+		name: 'CloudGPU',
+		baseUrl: 'https://cloudgpu.app/v1',
+		apiKeyPrompt: 'API Key (from cloudgpu.app/api/console)',
+		modelDefault: 'kimi-k3',
+	}),
+	apiKeyTemplate({
 		id: 'together',
 		name: 'Together AI',
 		baseUrl: 'https://api.together.ai/v1',
