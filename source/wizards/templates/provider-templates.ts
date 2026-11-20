@@ -426,6 +426,13 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 		apiKeyPrompt: 'API Key (from https://app.requesty.ai/api-keys)',
 		modelDefault: 'openai/gpt-6.1-sol',
 	}),
+	apiKeyTemplate({
+		id: 'runcrate',
+		name: 'Runcrate',
+		baseUrl: 'https://api.runcrate.ai/v1',
+		apiKeyPrompt: 'API Key (from https://www.runcrate.ai/dashboard/api-keys)',
+		modelDefault: 'deepseek-ai/DeepSeek-V4.1-Flash',
+	}),
 	{
 		id: 'openai',
 		name: 'OpenAI',
