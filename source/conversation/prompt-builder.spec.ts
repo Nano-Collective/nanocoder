@@ -1,7 +1,15 @@
 import test from 'ava';
-import {existsSync, mkdtempSync, rmSync, writeFileSync} from 'fs';
+import {
+	existsSync,
+	mkdtempSync,
+	readdirSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from 'fs';
 import {tmpdir} from 'os';
 import {join} from 'path';
+import {fileURLToPath} from 'url';
 import {resetPreferencesCache} from '@/config/preferences';
 import {
 	createSessionContext,
@@ -367,6 +375,31 @@ test('buildSystemPrompt - nano profile uses shortened task approach', t => {
 	// Standard task approach phrasing should not appear
 	t.false(result.includes('Simple tasks'));
 	t.false(result.includes('Complex tasks'));
+});
+
+test('buildSystemPrompt - nano architect mode renders its heading without replacement characters', t => {
+	const result = buildSystemPrompt('architect', TUNE_NANO, NANO_TOOLS);
+	t.true(result.includes('## TASK APPROACH — ARCHITECT MODE'));
+	t.false(result.includes('�'));
+});
+
+test('markdown read as UTF-8 - prompt sections and built-in subagents are valid UTF-8', t => {
+	const decoder = new TextDecoder('utf-8', {fatal: true});
+	const directories = [
+		['prompts/sections', '../app/prompts/sections/'],
+		['subagents/built-in', '../subagents/built-in/'],
+	] as const;
+	for (const [label, relativePath] of directories) {
+		const directory = fileURLToPath(new URL(relativePath, import.meta.url));
+		const files = readdirSync(directory).filter(name => name.endsWith('.md'));
+		t.true(files.length > 0, `${label} has no markdown files`);
+		for (const name of files) {
+			t.notThrows(
+				() => decoder.decode(readFileSync(join(directory, name))),
+				`${label}/${name} contains an invalid UTF-8 byte sequence`,
+			);
+		}
+	}
 });
 
 test('buildSystemPrompt - nano profile uses shortened file editing', t => {

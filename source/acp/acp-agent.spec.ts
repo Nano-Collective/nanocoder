@@ -2090,6 +2090,46 @@ test.serial(
 );
 
 test.serial(
+	'AcpAgent - a save over an unreadable session file keeps the pin, createdAt and title from the index',
+	async t => {
+		const {agent} = createAgent();
+		await sessionManager.initialize();
+
+		const session = await agent.newSession({cwd: '/tmp'});
+		await agent.prompt({
+			sessionId: session.sessionId,
+			prompt: [{type: 'text', text: 'Hello!'}],
+		});
+		await agent.extMethod('renameSession', {
+			sessionId: session.sessionId,
+			title: 'Kept title',
+		});
+		await agent.extMethod('_nanocoder/pinSession', {
+			sessionId: session.sessionId,
+			pinned: true,
+		});
+		const {createdAt} = (await sessionManager.listSessions()).find(
+			s => s.id === session.sessionId,
+		)!;
+
+		writeFileSync(
+			join(sessionManager['sessionsDir'], `${session.sessionId}.json`),
+			'{"truncated":',
+		);
+		await agent.prompt({
+			sessionId: session.sessionId,
+			prompt: [{type: 'text', text: 'Follow-up message'}],
+		});
+
+		const persisted = await sessionManager.readSession(session.sessionId);
+		t.true(persisted!.pinned);
+		t.is(persisted!.createdAt, createdAt);
+		t.is(persisted!.title, 'Kept title');
+		t.true(persisted!.titleManuallySet);
+	},
+);
+
+test.serial(
 	'AcpAgent.extMethod - pinSession marks a session, session/list reports it, and it survives prompts and renames',
 	async t => {
 		const {agent} = createAgent();

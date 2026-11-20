@@ -16,7 +16,7 @@ import type {ValidationErrorDetail} from '@/types/core';
 
 // Minimal structural view of the bits of JSON Schema 7 we inspect. Anything we
 // don't recognise is treated as "no constraint" so we never false-positive.
-interface JsonSchemaNode {
+export interface JsonSchemaNode {
 	type?: string | string[];
 	enum?: unknown[];
 	properties?: Record<string, JsonSchemaNode>;

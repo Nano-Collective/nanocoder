@@ -106,7 +106,7 @@ Plan mode removes mutation tools and leaves only read-only and interaction tools
 
 `write_plan` is the one write plan mode allows. It writes the Markdown plan to the session's own artifact directory. When the model also passes `nodes`, it persists the dependency graph to `.nanocoder/plans/` in the project — gitignored runtime state, so the plan survives session restarts. `write_plan` exists in plan mode only; the other modes do not have it.
 
-The following are **excluded**: the file mutation tools (`write_file`, `string_replace`, `diff_edit`, `file_op`, `lsp_format_document`), `execute_bash`, `browser`, the task and walkthrough tools (`write_tasks`, `write_walkthrough`), the git write tools (`git_add`, `git_commit`, `git_pr`), and `update_plan_node` — planning may define the graph, but marking work as done is execution. Custom tools are available only when they declare `approval: never` and `read_only: true`.
+The following are **excluded**: the file mutation tools (`write_file`, `string_replace`, `diff_edit`, `file_op`, `lsp_format_document`), the shell tools (`execute_bash`, `bash_output`, `kill_bash`), `browser`, the task and walkthrough tools (`write_tasks`, `write_walkthrough`), the git write tools (`git_add`, `git_commit`, `git_pr`), and `update_plan_node` — planning may define the graph, but marking work as done is execution. Custom tools are available only when they declare `approval: never` and `read_only: true`.
 
 Subagents started with `agent` in plan mode get the same exclusions, so delegating work does not open a path to a mutation.
 

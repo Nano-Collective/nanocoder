@@ -89,6 +89,7 @@ import {resolveStartupProvider} from '@/hooks/startup-provider';
 import {buildProjectContextSection} from '@/memory/project-context';
 import {appendActivePlanContext} from '@/plans/context';
 import {withTrustedProjectPlugins} from '@/plugins/host';
+import {bashExecutor} from '@/services/bash-executor';
 import {type HookContext, runLifecycleHooks} from '@/services/lifecycle-hooks';
 import {
 	createSessionContext,
@@ -707,6 +708,8 @@ export class AcpAgent implements Agent {
 		try {
 			await whileIdle(session);
 			await this.releaseMcpServers(sessionId);
+			// Background jobs belong to the session, so closing it stops them.
+			await bashExecutor.stopSessionJobs(sessionId);
 		} finally {
 			session.releaseTurn();
 		}
@@ -1005,6 +1008,12 @@ export class AcpAgent implements Agent {
 			await this.releaseMcpServers(params.sessionId);
 		}
 		await sessionManager.deleteSession(params.sessionId);
+		// Evict from in-memory map if present
+		this.sessions.delete(params.sessionId);
+		clearAcpReadStubs(params.sessionId);
+		await this.releaseMcpServers(params.sessionId);
+		// A deleted session leaves no reason to keep its background jobs alive.
+		await bashExecutor.stopSessionJobs(params.sessionId);
 		logger.info(`ACP deleteSession: ${params.sessionId}`);
 		return {};
 	}
@@ -1835,10 +1844,19 @@ export class AcpAgent implements Agent {
 				return;
 			}
 
+			// A session file that cannot be read still has its index entry, which
+			// holds everything this save carries forward. Without it the pin, the
+			// creation time and a chosen title would be reset.
+			const previous =
+				existingSession ??
+				(await sessionManager.listSessions()).find(
+					s => s.id === session.sessionId,
+				);
+
 			// Simple title generation if it's new. A user-renamed title is never
 			// auto-derived over — the flag below is what tells the CLI's autosave
 			// the same thing, so it has to be carried forward on every save.
-			let title = existingSession?.title;
+			let title = previous?.title;
 			if (!title || title === 'New Session') {
 				const firstUserMessage = saveableMessages.find(m => m.role === 'user');
 				title =
@@ -1851,10 +1869,10 @@ export class AcpAgent implements Agent {
 				...this.savedModelOf(session),
 				id: session.sessionId,
 				title,
-				titleManuallySet: existingSession?.titleManuallySet,
-				pinned: existingSession?.pinned,
-				titleGenerated: existingSession?.titleGenerated,
-				createdAt: existingSession?.createdAt || timestamp,
+				titleManuallySet: previous?.titleManuallySet,
+				pinned: previous?.pinned,
+				titleGenerated: previous?.titleGenerated,
+				createdAt: previous?.createdAt || timestamp,
 				lastAccessedAt: timestamp,
 				messageCount: saveableMessages.length,
 				workingDirectory: session.cwd,

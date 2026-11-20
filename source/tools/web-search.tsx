@@ -12,6 +12,7 @@ import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
+import {installProxyGlobalDispatcher} from '@/utils/proxy-dispatcher';
 import {estimateTokens} from '@/utils/token-calculator';
 
 interface SearchArgs {
@@ -30,6 +31,27 @@ interface BraveSearchResponse {
 		results?: BraveSearchResult[];
 	};
 }
+
+const escapeMarkdown = (text: unknown): string =>
+	String(text ?? '')
+		.replace(/<\/?(?:strong|b|em|i|mark)>/gi, '')
+		.replace(/\s+/g, ' ')
+		.trim()
+		.replace(/[\\`*_[\]<>~|=]/g, '\\$&')
+		.replace(/^(?=[#+-]|\d+[.)])/, '\\');
+
+const toSafeUrl = (raw: unknown): string | undefined => {
+	const url = String(raw ?? '');
+	// Reject, do not strip (host-join risk); an angle bracket would close the autolink.
+	if (/[\s\u0000-\u001f\u007f<>]/.test(url)) return undefined;
+	if (!/^https?:\/\//i.test(url)) return undefined;
+	try {
+		const {protocol} = new URL(url);
+		return protocol === 'http:' || protocol === 'https:' ? url : undefined;
+	} catch {
+		return undefined;
+	}
+};
 
 const normalizeWebSearchMaxResults = (value: unknown): number => {
 	if (value === undefined || value === null) {
@@ -63,6 +85,8 @@ export const executeWebSearch = async (
 	const encodedQuery = encodeURIComponent(args.query);
 
 	try {
+		await installProxyGlobalDispatcher();
+
 		const searchUrl = `https://api.search.brave.com/res/v1/web/search?q=${encodedQuery}&count=${maxResults}`;
 
 		const response = await fetch(searchUrl, {
@@ -98,10 +122,14 @@ export const executeWebSearch = async (
 		for (let i = 0; i < results.length; i++) {
 			const result = results[i];
 			if (!result) continue;
-			formattedResults += `## ${i + 1}. ${result.title}\n\n`;
-			formattedResults += `**URL:** ${result.url}\n\n`;
-			if (result.description) {
-				formattedResults += `${result.description}\n\n`;
+			formattedResults += `## ${i + 1}. ${escapeMarkdown(result.title)}\n\n`;
+			const url = toSafeUrl(result.url);
+			if (url) {
+				formattedResults += `**URL:** <${url}>\n\n`;
+			}
+			const description = escapeMarkdown(result.description);
+			if (description) {
+				formattedResults += `${description}\n\n`;
 			}
 			formattedResults += '---\n\n';
 		}
