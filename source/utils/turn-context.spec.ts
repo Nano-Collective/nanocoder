@@ -112,3 +112,22 @@ test('an opening tag inside the user text is left alone', t => {
 	const typed = 'why does <turn-context> show up in my export?';
 	t.is(stripTurnContext(typed), typed);
 });
+
+test('a block the user pasted into their own text is left alone', t => {
+	const typed = 'explain this wrapper:\n<turn-context>\nfoo\n</turn-context>\nthanks';
+	t.is(stripTurnContext(typed), typed);
+	t.is(
+		stripTurnContext(appendTurnContext(typed, [MEMORIES])),
+		typed,
+	);
+});
+
+test('an unterminated tag the user typed on its own line is left alone', t => {
+	const typed = 'look at this:\n<turn-context>\nunterminated sample\nmy real question';
+	t.is(stripTurnContext(typed), typed);
+});
+
+test('a block at the end of a user message that quotes a block earlier is removed once', t => {
+	const typed = 'compare:\n\n<turn-context>\nsample\n</turn-context>\n\nwith the real one';
+	t.is(stripTurnContext(appendTurnContext(typed, [MEMORIES])), typed);
+});

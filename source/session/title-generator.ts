@@ -1,5 +1,6 @@
 import {MAX_SESSION_NAME_LENGTH} from '@/constants';
 import type {LLMClient, Message} from '@/types/core';
+import {stripTurnContext} from '@/utils/turn-context';
 
 /** Below this many characters, a first message is too thin to be a title. */
 const WEAK_TITLE_THRESHOLD = 40;
@@ -44,7 +45,7 @@ export interface TitleContext {
  * message, so a long file path can neither inflate nor rescue a short prompt.
  */
 export function normalizeFirstMessage(content: string): string {
-	return content
+	return stripTurnContext(content)
 		.replace(ACTIVE_FILE_PREFIX, '')
 		.split('\n')[0]
 		.replace(/\s+/g, ' ')
@@ -59,7 +60,7 @@ export function normalizeFirstMessage(content: string): string {
  * still reads as clipped in the history list.
  */
 export function deriveTitleFromFirstMessage(content: string): string | null {
-	const firstLine = content
+	const firstLine = stripTurnContext(content)
 		.replace(ACTIVE_FILE_PREFIX, '')
 		.split('\n')[0]
 		.trim();
@@ -107,7 +108,9 @@ export function extractUserMessages(messages: Message[]): string[] {
 		if (message.role !== 'user') continue;
 		if (typeof message.content !== 'string') continue;
 
-		const trimmed = message.content.replace(ACTIVE_FILE_PREFIX, '').trim();
+		const trimmed = stripTurnContext(message.content)
+			.replace(ACTIVE_FILE_PREFIX, '')
+			.trim();
 		if (trimmed) turns.push(trimmed);
 	}
 

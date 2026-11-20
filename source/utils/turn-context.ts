@@ -19,22 +19,7 @@
 const TURN_CONTEXT_OPEN_TAG = '<turn-context>';
 const TURN_CONTEXT_CLOSE_TAG = '</turn-context>';
 
-/**
- * Matches one whole context block, including the blank line that separates it
- * from the user's text. Non-greedy so several blocks in one string (a
- * compacted or hand-edited message) are removed individually rather than
- * swallowing everything between the first and last.
- */
-const TURN_CONTEXT_BLOCK = /\n*<turn-context>\n[\s\S]*?\n<\/turn-context>/gu;
-
-/**
- * An opening tag whose block runs to the end of the string. Mechanical
- * compaction truncates a long user message mid-content, so a stored block can
- * lose its closing tag; without this, the remains would survive every strip
- * and be shown to the user forever. Applied only after the well-formed pass,
- * so it can never eat a later complete block.
- */
-const TRUNCATED_TURN_CONTEXT_BLOCK = /\n*<turn-context>(\n[\s\S]*)?$/u;
+const BLOCK_SEPARATOR_OPEN = `\n\n${TURN_CONTEXT_OPEN_TAG}`;
 
 /**
  * Append the turn's context sections to the user's message.
@@ -64,9 +49,13 @@ export function appendTurnContext(
  * Strip context blocks, leaving the text the user actually typed.
  *
  * Used for display (replayed history, exports, the ACP timeline) and before
- * anything re-reads a stored message as if it were user input — re-submitting
+ * anything re-reads a stored message as if it were user input: re-submitting
  * it raw would both double-wrap the block and search for skills using the
  * previous turn's context as part of the query.
+ *
+ * Only a block at the very end of the message, set off by the blank line
+ * `appendTurnContext` writes, is removed. A tag the user typed or pasted
+ * earlier in their own text is their text and is left alone.
  *
  * The stored and re-sent content keeps its block: that is what preserves the
  * cache.
@@ -75,8 +64,49 @@ export function stripTurnContext(content: string): string {
 	if (!content.includes(TURN_CONTEXT_OPEN_TAG)) {
 		return content;
 	}
-	return content
-		.replaceAll(TURN_CONTEXT_BLOCK, '')
-		.replace(TRUNCATED_TURN_CONTEXT_BLOCK, '')
-		.trimEnd();
+	let current = content;
+	for (;;) {
+		const next = stripTrailingBlock(current);
+		if (next === null) {
+			return current === content ? content : current.trimEnd();
+		}
+		current = next;
+	}
+}
+
+function stripTrailingBlock(content: string): string | null {
+	const text = content.trimEnd();
+	if (text.endsWith(TURN_CONTEXT_CLOSE_TAG)) {
+		const body = text.slice(0, -TURN_CONTEXT_CLOSE_TAG.length);
+		const start = body.lastIndexOf(`${BLOCK_SEPARATOR_OPEN}\n`);
+		if (start >= 0) {
+			return body.slice(0, start);
+		}
+		return body.startsWith(`${TURN_CONTEXT_OPEN_TAG}\n`) ? '' : null;
+	}
+
+	// Mechanical compaction can cut a stored block short, leaving an opening
+	// tag with no close.
+	const start = text.lastIndexOf(BLOCK_SEPARATOR_OPEN);
+	if (start >= 0) {
+		const rest = text.slice(start + BLOCK_SEPARATOR_OPEN.length);
+		if (
+			(rest === '' || rest.startsWith('\n')) &&
+			!rest.includes(TURN_CONTEXT_CLOSE_TAG)
+		) {
+			return text.slice(0, start);
+		}
+		return null;
+	}
+	const bareStart = text.startsWith(TURN_CONTEXT_OPEN_TAG);
+	if (bareStart) {
+		const rest = text.slice(TURN_CONTEXT_OPEN_TAG.length);
+		if (
+			(rest === '' || rest.startsWith('\n')) &&
+			!rest.includes(TURN_CONTEXT_CLOSE_TAG)
+		) {
+			return '';
+		}
+	}
+	return null;
 }
