@@ -88,4 +88,6 @@ export const browserTool: NanocoderToolExport = {
 		if (mode === 'headless') return false;
 		return true;
 	},
+	// A rendered page is the same third-party text `fetch_url` brings back.
+	externalSource: {kind: 'browser', urlArg: 'url'},
 };

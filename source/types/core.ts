@@ -74,6 +74,44 @@ export interface ToolCall {
 	argumentsError?: string;
 }
 
+/**
+ * Where a tool's output comes from when it is not this machine: the web tools,
+ * page automation, or any tool an MCP server exposes. Local file, shell and LSP
+ * tools belong to the workspace and are not external content.
+ *
+ * The kind is a classification, not a trust level: every kind is treated the
+ * same way (see `@/tools/runtime/external-content`), it only decides the label
+ * the model sees and the source named in a confirmation prompt.
+ */
+export type ExternalContentKind = 'web' | 'search' | 'browser' | 'mcp';
+
+/**
+ * What a tool *is*, declared once where the tool is registered. The approval
+ * policy reads it to know which calls reach outside the workspace, and the
+ * message builder reads it to frame the result for the model.
+ */
+export interface ExternalToolSource {
+	kind: ExternalContentKind;
+	/**
+	 * Argument that carries the address a call reads (`fetch_url`'s `url`).
+	 * Copied onto the result so the frame can name what was read.
+	 */
+	urlArg?: string;
+	/** MCP server owning the tool. */
+	server?: string;
+}
+
+/**
+ * What one result *carries*, resolved at execution time from the tool's
+ * declaration plus the arguments of the call. Present exactly when the model
+ * is about to read text this machine did not produce.
+ */
+export interface ExternalContentSource {
+	kind: ExternalContentKind;
+	url?: string;
+	server?: string;
+}
+
 export interface ToolResult {
 	tool_call_id: string;
 	role: 'tool';
@@ -83,6 +121,12 @@ export interface ToolResult {
 	/** Raw base64. Sent as image parts, not copied into `content`. */
 	images?: ImageAttachment[];
 	isError?: boolean;
+	/**
+	 * Set when this result came from outside the workspace. The message written
+	 * to history is then wrapped in an `<external_content>` frame; an unmarked
+	 * result is written through unchanged.
+	 */
+	externalSource?: ExternalContentSource;
 }
 
 export interface ToolParameterSchema {
@@ -195,6 +239,8 @@ export interface NanocoderToolExport {
 	validator?: ToolValidator;
 	readOnly?: boolean;
 	approval?: ToolApprovalPolicy;
+	/** Set for tools whose output comes from outside the workspace. */
+	externalSource?: ExternalToolSource;
 }
 
 export interface ToolEntry {
@@ -206,6 +252,8 @@ export interface ToolEntry {
 	validator?: ToolValidator;
 	readOnly?: boolean;
 	approval?: ToolApprovalPolicy;
+	/** Set for tools whose output comes from outside the workspace. */
+	externalSource?: ExternalToolSource;
 	ownerSkill?: string;
 	scoped?: boolean;
 }

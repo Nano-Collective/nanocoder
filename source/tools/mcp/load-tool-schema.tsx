@@ -153,5 +153,9 @@ export function createLoadToolSchemaTool(
 		// Tool inspection is safe and non-mutating
 		approval: () => false,
 		readOnly: true,
+		// The result is the server's own description and parameter text, which
+		// sanitizeCatalogText only trims. Framed like any other MCP output; the
+		// catalog spans servers, so the frame names `mcp` rather than one server.
+		externalSource: {kind: 'mcp'},
 	};
 }

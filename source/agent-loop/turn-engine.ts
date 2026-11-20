@@ -76,6 +76,7 @@ import {
 	stripThinkTags,
 } from '@/tool-calling/index';
 import type {ToolSchemas} from '@/tool-calling/xml-parser';
+import {toToolMessage} from '@/tools/runtime/external-content';
 import {getToolJsonSchema} from '@/tools/runtime/schema-validate';
 import type {RetryLimitsConfig} from '@/types/config';
 import type {
@@ -214,9 +215,9 @@ export interface TurnEngineAdapter<S> {
 	emptyTurnNudge?(history: Message[]): string;
 	onEmptyRetry?(attempt: number, nudge: string): void | Promise<void>;
 	/**
-	 * How tool results are written to history. Defaults to the results as
-	 * they are; the TUI writes them through its MessageBuilder (truncation,
-	 * structured content).
+	 * How tool results are written to history. Defaults to the results as they
+	 * are, framed by `toToolMessage`; the TUI writes them through its
+	 * MessageBuilder (truncation, structured content), which frames too.
 	 */
 	toolResultMessages?(results: ToolResult[]): Message[];
 	/**
@@ -324,10 +325,13 @@ export async function runTurnEngine<S>(
 		...result,
 		modelCalls,
 	});
-	const resultMessages = (results: ToolResult[]): Message[] =>
-		results.length === 0
-			? []
-			: (adapter.toolResultMessages?.(results) ?? results);
+	const resultMessages = (results: ToolResult[]): Message[] => {
+		if (results.length === 0) return [];
+		// A frontend that shapes its own tool messages owns the framing: the TUI
+		// writes through `MessageBuilder`, which frames. Everything else gets the
+		// default path, framed here so no frontend has to remember to.
+		return adapter.toolResultMessages?.(results) ?? results.map(toToolMessage);
+	};
 	const append = (...messages: Message[]) => {
 		if (messages.length === 0) return;
 		history.set([...history.get(), ...messages]);

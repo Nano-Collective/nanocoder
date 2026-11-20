@@ -280,4 +280,6 @@ export const webSearchTool: NanocoderToolExport = {
 	formatter: webSearchFormatter,
 	validator: webSearchValidator,
 	readOnly: true,
+	// Snippets are a third party's text; the query is not an address to name.
+	externalSource: {kind: 'search'},
 };

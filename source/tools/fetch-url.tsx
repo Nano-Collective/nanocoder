@@ -381,4 +381,7 @@ export const fetchUrlTool: NanocoderToolExport = {
 	formatter: fetchUrlFormatter,
 	validator: fetchUrlValidator,
 	readOnly: true,
+	// A page is text this machine did not produce: framed for the model, and an
+	// address the frame can name.
+	externalSource: {kind: 'web', urlArg: 'url'},
 };

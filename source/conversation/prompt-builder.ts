@@ -294,6 +294,28 @@ export function buildSystemPrompt(
 		sections.push(loadSection('web-tools'));
 	}
 
+	// External content — whenever a tool can put text from outside this machine
+	// in front of the model: the built-in web tools, any MCP tool, or the
+	// discovery catalog that offers MCP tools not yet hydrated. The section
+	// explains the `<external_content>` frame those results carry (see
+	// @/tools/runtime/external-content).
+	const managerReportsMcpTool = (name: string): boolean => {
+		// Callers and tests pass managers that answer only some of the interface;
+		// a missing method must not take the whole prompt build down.
+		if (!toolManager) return false;
+		if (typeof toolManager.getMCPToolInfo !== 'function') return false;
+		return toolManager.getMCPToolInfo(name)?.isMCPTool === true;
+	};
+	const hasExternalSourceTools =
+		toolSet.has('fetch_url') ||
+		toolSet.has('web_search') ||
+		toolSet.has('browser') ||
+		toolSet.has('load_tool_schema') ||
+		availableToolNames.some(managerReportsMcpTool);
+	if (hasExternalSourceTools) {
+		sections.push(loadSection('external-content'));
+	}
+
 	if (toolSet.has('browser')) {
 		sections.push(loadSection('browser'));
 	}

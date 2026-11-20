@@ -45,6 +45,7 @@ import {
 	updateSubagentSessionStreaming,
 } from '@/services/subagent-session-store';
 import {resolveToolApproval} from '@/tools/approval-policy';
+import {externalSourceFor} from '@/tools/runtime/external-content';
 import {
 	clearReadContentScope,
 	runWithReadContentScope,
@@ -939,10 +940,20 @@ export class SubagentExecutor {
 						// Count tokens from tool results
 						totalTokens += estimateTokens(toolResult.content);
 
+						// A subagent runs its own loop instead of going through
+						// processToolUse, so the source has to be resolved here too;
+						// otherwise a page or MCP result it read would reach its own
+						// context unframed.
+						const externalSource = externalSourceFor(
+							this.toolManager?.getToolEntry?.(toolName)?.externalSource,
+							toolCall.function.arguments,
+						);
+
 						results.push({
 							role: 'tool',
 							content: toolResult.content,
 							...(toolResult.images ? {images: toolResult.images} : {}),
+							...(externalSource ? {externalSource} : {}),
 							tool_call_id: toolCall.id,
 							name: toolName,
 						});

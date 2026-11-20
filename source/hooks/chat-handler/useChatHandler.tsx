@@ -50,6 +50,11 @@ export function getBaseSystemPrompt(
 			toolsDisabled,
 			systemPromptOverride,
 			model,
+			// The manager is what tells the prompt builder whether any tool
+			// reaches outside this machine; without it an MCP-only session
+			// would get no external-content guidance.
+			undefined,
+			toolManager,
 		);
 	}
 
@@ -67,6 +72,8 @@ export function getBaseSystemPrompt(
 			toolsDisabled,
 			systemPromptOverride,
 			model,
+			undefined,
+			toolManager,
 		)
 	);
 }
