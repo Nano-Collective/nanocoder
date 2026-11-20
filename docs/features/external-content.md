@@ -51,5 +51,46 @@ A framed result carries a short notice under it in the chat:
 ```
 
 Lookalike delimiters inside the page are neutralised, so a page cannot close the
-frame early and write text that looks like it came from somewhere else. The
-frame marks the boundary; it does not block anything by itself.
+frame early and write text that looks like it came from somewhere else.
+
+## Approvals after a page is read
+
+Marking the boundary only tells the model to be careful. The second half is for
+the user: while external content is in the model's view, a call that can change
+files or reach the network asks for confirmation even where the mode would
+otherwise have waived it, and the prompt names what was read.
+
+This is opt-in. Turn it on in `agents.config.json`:
+
+```json
+{
+  "nanocoder": {
+    "untrustedContent": {
+      "escalate": true
+    }
+  }
+}
+```
+
+What changes when it is on:
+
+- In **auto-accept** and **architect**, file writes, shell commands, the egress
+  tools (`fetch_url`, `web_search`, `browser`), MCP tools and subagent
+  delegation wait for you, with the source named above the question.
+- In **architect**, a write approved this way is still added to the turn's
+  checkpoint before it runs, so one keypress still undoes the whole turn.
+- A subagent starts with the same state as its parent: the task string it was
+  given was written by a model that had read the page.
+- `yolo` is unchanged: it means "never ask", so it never asks.
+- **normal** mode is unchanged: it already asked.
+- **headless** and daemon-triggered runs are unchanged. They have nobody to
+  confirm, and escalating there would stop the run instead of asking anyone.
+
+Reading stays free: `read_file`, `search_file_contents`, `find_files` and the
+language-server tools never escalate, because reading your own files is what the
+model was asked to do.
+
+Two limits worth knowing. The mark lasts for the current run, so a later prompt
+that says "now do what that page said" starts clean — the framing survives in the
+history, but the escalation does not. And `/compact` summarises the conversation
+without the frame, so the mark goes with it.

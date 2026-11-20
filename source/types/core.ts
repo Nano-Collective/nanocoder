@@ -183,8 +183,17 @@ export interface ToolExecutionContext {
 	toolManager?: ToolManager;
 	/** The call being executed, so a subagent it starts can name its parent call. */
 	toolCallId?: string;
-	/** Set for a subagent's own tool calls: the run executing them. */
+	/**
+	 * Set for a subagent's own tool calls: the run executing them.
+	 */
 	subagentRunId?: string;
+	/**
+	 * Whether the model has read text from outside the workspace this run. Read
+	 * by tools that start something of their own - `agent` hands it to the
+	 * subagent, so delegated work inherits the escalation instead of laundering
+	 * it away.
+	 */
+	externalContentTouched?: boolean;
 	/**
 	 * The client the call's turn runs on, when it is not the process-wide one:
 	 * an ACP session that picked its own model. Auto-commit writes its message

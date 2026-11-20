@@ -17,6 +17,8 @@ export interface PendingToolApproval {
 	toolCall: ToolCall;
 	/** Name of the subagent requesting approval */
 	subagentName: string;
+	/** Why the prompt is up, when reading external content is the reason. */
+	reason?: string;
 }
 
 // No handler — default to denied (safe fallback).
@@ -56,6 +58,8 @@ export interface SubagentToolBridge {
 		toolCall: ToolCall,
 		abortSignal?: AbortSignal,
 		subagentRunId?: string,
+		/** Why this prompt is up, when reading external content escalated it. */
+		reason?: string,
 	): Promise<'approved' | 'denied' | 'cancelled'>;
 	/** Settle the announced call with what actually happened. */
 	end(

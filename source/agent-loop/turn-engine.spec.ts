@@ -11,6 +11,7 @@ import type {
 } from '@/types/core';
 import {
 	runTurnEngine,
+	type TurnContext,
 	type TurnEngineAdapter,
 	type TurnEngineOptions,
 } from './turn-engine';
@@ -681,4 +682,87 @@ test('onEmptyRetry is awaited before the nudge is recorded', async t => {
 	t.deepEqual(order, ['retry']);
 	t.is(historyAtRetry, 1);
 	t.is(history()[1].role, 'user');
+});
+
+// ============================================================================
+// External content mark
+//
+// The mark is read back out of the view the request sends, so what the model
+// can see and what counts as tainted are the same thing.
+// ============================================================================
+
+const FRAMED =
+	'<external_content source="fetch_url" url="https://example.test/p">\nbody\n</external_content>';
+
+test('a framed result already in history marks the run as tainted', async t => {
+	let messages: Message[] = [
+		{role: 'user', content: 'go'},
+		{role: 'tool', tool_call_id: 't0', name: 'fetch_url', content: FRAMED},
+	];
+	let seen: TurnContext | undefined;
+	const {run} = setup([call('a'), text('done')], {
+		history: {
+			get: () => messages,
+			set: next => {
+				messages = next;
+			},
+		},
+		executeTools: async (calls, context) => {
+			seen = context;
+			return {kind: 'continue', results: calls.map(resultFor)};
+		},
+	});
+
+	await run();
+
+	t.truthy(seen);
+	t.true(seen!.externalContent.inContext);
+	t.is(seen!.externalContent.summary, 'fetch_url https://example.test/p');
+});
+
+test('a workspace-only history leaves the run untainted', async t => {
+	let messages: Message[] = [
+		{role: 'user', content: 'go'},
+		{role: 'tool', tool_call_id: 't0', name: 'read_file', content: 'file body'},
+	];
+	let seen: TurnContext | undefined;
+	const {run} = setup([call('a'), text('done')], {
+		history: {
+			get: () => messages,
+			set: next => {
+				messages = next;
+			},
+		},
+		executeTools: async (calls, context) => {
+			seen = context;
+			return {kind: 'continue', results: calls.map(resultFor)};
+		},
+	});
+
+	await run();
+
+	t.truthy(seen);
+	t.false(seen!.externalContent.inContext);
+});
+
+test('an inherited mark starts the run tainted with nothing framed', async t => {
+	// What a subagent gets: its parent read outside text and wrote the task
+	// string while looking at it.
+	let seen: TurnContext | undefined;
+	const {run} = setup(
+		[call('a'), text('done')],
+		{
+			executeTools: async (calls, context) => {
+				seen = context;
+				return {kind: 'continue', results: calls.map(resultFor)};
+			},
+		},
+		{initialExternalContentTouched: true},
+	);
+
+	await run();
+
+	t.truthy(seen);
+	t.true(seen!.externalContent.inContext);
+	t.is(seen!.externalContent.summary, undefined);
 });

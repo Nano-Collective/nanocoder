@@ -27,10 +27,17 @@ export async function requestToolPermission(
 	meta?: AcpToolCallMeta,
 	abortSignal?: AbortSignal,
 	requestMeta?: Record<string, unknown>,
+	/**
+	 * Why this prompt is up, when the answer is not self-evident - reading
+	 * external content escalated the call. Appended to the card title, which is
+	 * the only text this protocol lets a server attach to a permission request.
+	 */
+	escalationReason?: string,
 ): Promise<'approved' | 'denied' | 'cancelled'> {
+	const title = meta?.title ?? toolCall.function.name;
 	const toolCallUpdate: ToolCallUpdate = {
 		toolCallId: toolCall.id,
-		title: meta?.title ?? toolCall.function.name,
+		title: escalationReason ? `${title} (${escalationReason})` : title,
 		kind: meta?.kind,
 		rawInput: toolCall.function.arguments,
 		status: 'pending',

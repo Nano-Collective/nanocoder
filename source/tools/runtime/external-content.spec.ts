@@ -1,9 +1,11 @@
 import test from 'ava';
 import {MAX_TOOL_RESULT_CHARS} from '@/constants';
-import type {ExternalToolSource, ToolResult} from '@/types/core';
+import type {ExternalToolSource, Message, ToolResult} from '@/types/core';
 import {
 	boundedToolResult,
+	externalContentIn,
 	externalSourceFor,
+	formatExternalContentReason,
 	isExternalResult,
 	toToolMessage,
 } from './external-content.js';
@@ -296,4 +298,68 @@ test('a result with no content is written empty rather than crashing the turn', 
 	});
 
 	t.is(message.content, '');
+});
+
+// ============================================================================
+// Reading the frame back out
+//
+// The approval rule and the confirmation prompt both read this, so it is the
+// single definition of "external content is in context".
+// ============================================================================
+
+const framedToolMessage = (content: string): Message => ({
+	role: 'tool',
+	tool_call_id: 'call_1',
+	name: 'fetch_url',
+	content,
+});
+
+test('nothing framed means nothing in context', t => {
+	t.deepEqual(externalContentIn([]), {inContext: false});
+	t.deepEqual(
+		externalContentIn([framedToolMessage('file contents'), {role: 'user', content: 'hi'}]),
+		{inContext: false},
+	);
+});
+
+test('a framed tool message puts the source in context', t => {
+	t.deepEqual(
+		externalContentIn([
+			framedToolMessage(
+				'<external_content source="fetch_url" url="https://example.test/a">\npage\n</external_content>',
+			),
+		]),
+		{inContext: true, summary: 'fetch_url https://example.test/a'},
+	);
+});
+
+test('an MCP frame names its server', t => {
+	t.deepEqual(
+		externalContentIn([
+			framedToolMessage('<external_content source="mcp:github">\nissues\n</external_content>'),
+		]),
+		{inContext: true, summary: 'mcp:github'},
+	);
+});
+
+test('a very long url is shortened in the summary', t => {
+	const url = `https://example.test/${'a'.repeat(200)}`;
+	const presence = externalContentIn([
+		framedToolMessage(`<external_content source="fetch_url" url="${url}">\npage\n</external_content>`),
+	]);
+
+	t.true(presence.inContext);
+	t.true((presence.summary ?? '').length < url.length);
+	t.true((presence.summary ?? '').endsWith('…'));
+});
+
+test('the reason names what was read, in one line', t => {
+	const reason = formatExternalContentReason({
+		inContext: true,
+		summary: 'fetch_url https://example.test/a',
+	});
+
+	t.regex(reason, /fetch_url https:\/\/example\.test\/a/);
+	t.regex(reason, /change files or reach the network/);
+	t.false(reason.includes('\n'));
 });

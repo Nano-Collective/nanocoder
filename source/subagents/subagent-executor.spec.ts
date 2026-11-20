@@ -3567,3 +3567,98 @@ test.serial('a subagent nudges an empty reply instead of returning it', async t 
 		content: 'Please continue with the task.',
 	});
 });
+
+test.serial('a subagent inherits the parent mark and escalates for it', async t => {
+	const restore = enterSubagentHookFixture(
+		{},
+		{untrustedContent: {escalate: true}},
+	);
+	const toolManager = createMockToolManager({
+		write_file: {handler: async () => 'wrote', readOnly: false},
+	});
+	const reasons: Array<string | undefined> = [];
+	const unregister = registerSubagentToolBridge(SESSION, {
+		getMode: () => 'auto-accept',
+		begin: async () => {},
+		approve: async (_toolCall, _signal, _runId, reason) => {
+			reasons.push(reason);
+			return 'approved';
+		},
+		end: async () => {},
+	});
+	try {
+		const client = createMockClient([
+			{
+				content: '',
+				tool_calls: [
+					{
+						id: 'tc1',
+						function: {name: 'write_file', arguments: '{"path":"out.txt"}'},
+					},
+				],
+			},
+			{content: 'Done'},
+		]);
+		await new SubagentExecutor(toolManager, client).execute(
+			{subagent_type: 'explore', description: 'write'},
+			undefined,
+			0,
+			'run-taint',
+			// The parent read a page, so the delegated run starts marked.
+			{sessionId: SESSION, externalContentTouched: true},
+			{tools: ['write_file']},
+		);
+	} finally {
+		unregister();
+		restore();
+	}
+
+	t.deepEqual(reasons, ['read external content']);
+});
+
+test.serial('an untainted subagent does not escalate the same call', async t => {
+	const restore = enterSubagentHookFixture(
+		{},
+		{untrustedContent: {escalate: true}},
+	);
+	const toolManager = createMockToolManager({
+		write_file: {handler: async () => 'wrote', readOnly: false},
+	});
+	let approvals = 0;
+	const unregister = registerSubagentToolBridge(SESSION, {
+		getMode: () => 'auto-accept',
+		begin: async () => {},
+		approve: async () => {
+			approvals++;
+			return 'approved';
+		},
+		end: async () => {},
+	});
+	try {
+		const client = createMockClient([
+			{
+				content: '',
+				tool_calls: [
+					{
+						id: 'tc1',
+						function: {name: 'write_file', arguments: '{"path":"out.txt"}'},
+					},
+				],
+			},
+			{content: 'Done'},
+		]);
+		await new SubagentExecutor(toolManager, client).execute(
+			{subagent_type: 'explore', description: 'write'},
+			undefined,
+			0,
+			'run-clean',
+			{sessionId: SESSION},
+			{tools: ['write_file']},
+		);
+	} finally {
+		unregister();
+		restore();
+	}
+
+	t.is(approvals, 0);
+});

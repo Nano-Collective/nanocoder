@@ -13,6 +13,7 @@ import {
 	getSubagentMaxTurns,
 } from '@/config/index';
 import {getProjectContextPreferences} from '@/config/preferences';
+import {isUntrustedContentEscalationEnabled} from '@/config/untrusted-content';
 import {invalidArgumentsResult} from '@/hooks/chat-handler/utils/tool-filters';
 import {
 	appendRelevantProjectContextWithCount,
@@ -44,7 +45,10 @@ import {
 	updateSubagentSessionMessages,
 	updateSubagentSessionStreaming,
 } from '@/services/subagent-session-store';
-import {resolveToolApproval} from '@/tools/approval-policy';
+import {
+	escalatedByExternalContent,
+	resolveToolApproval,
+} from '@/tools/approval-policy';
 import {externalSourceFor} from '@/tools/runtime/external-content';
 import {
 	clearReadContentScope,
@@ -91,6 +95,12 @@ const MAX_SUBAGENT_DEPTH = 2;
 
 /** Maximum number of concurrent subagents */
 export const MAX_CONCURRENT_AGENTS = 5;
+
+/**
+ * Shown on a subagent's approval prompt when reading external content is what
+ * escalated the call. Short because it sits on a prompt, not in a document.
+ */
+const EXTERNAL_CONTENT_REASON = 'read external content';
 
 /** Receives provider-reported usage for one subagent model invocation. */
 export type SubagentApiCallHandler = (
@@ -794,6 +804,11 @@ export class SubagentExecutor {
 			// is nobody to ask inside a delegated run, so a stuck subagent stops
 			// with an error naming the setting.
 			retryLimits: getRetryLimits(),
+			// A delegated run starts marked when the parent had read outside
+			// text: the task string it was handed was written by a model looking
+			// at that text, so delegation must not clear the escalation.
+			initialExternalContentTouched:
+				executionContext?.externalContentTouched ?? false,
 			adapter: {
 				history: {
 					get: history,
@@ -904,7 +919,7 @@ export class SubagentExecutor {
 					return {kind: 'finish'};
 				},
 				// Execute each tool call — yield between each so Ink can render
-				executeTools: async toolCalls => {
+				executeTools: async (toolCalls, context) => {
 					const results: ToolResult[] = [];
 					for (const toolCall of toolCalls) {
 						// Check for cancellation before each tool call
@@ -934,6 +949,9 @@ export class SubagentExecutor {
 									{...executionContext, subagentRunId: agentId},
 									alwaysAllow,
 									toolCall.argumentsError,
+									// Inherited from the parent, or found in this run's own
+									// view: either way the approval rule sees it.
+									context.externalContent.inContext,
 								),
 						);
 
@@ -1019,11 +1037,16 @@ export class SubagentExecutor {
 		rawArguments: unknown,
 		alwaysAllow?: string[],
 		mode: DevelopmentMode = this.currentMode(),
+		externalContentTouched = false,
 	): Promise<boolean> {
 		const toolEntry = this.toolManager.getToolEntry(toolName);
 		return resolveToolApproval(toolName, toolEntry, rawArguments, {
 			mode,
 			alwaysAllow: alwaysAllow ?? getAppConfig().alwaysAllow ?? [],
+			externalContent: {
+				inContext: externalContentTouched,
+				escalate: isUntrustedContentEscalationEnabled(),
+			},
 		});
 	}
 
@@ -1039,6 +1062,7 @@ export class SubagentExecutor {
 		executionContext?: Omit<ToolExecutionContext, 'abortSignal'>,
 		alwaysAllow?: string[],
 		argumentsError?: string,
+		externalContentTouched = false,
 	): Promise<{content: string; images?: Message['images']}> {
 		// One ToolCall object for this call, shared by the approval prompt and
 		// the lifecycle gate so runPreToolUseGate can key its once-per-call
@@ -1140,17 +1164,37 @@ export class SubagentExecutor {
 		// Check if this tool needs user approval. A bridge supplies its own
 		// session's mode: the executor is shared, so its mode can't be right for
 		// every session at once.
+		const approvalMode = bridge?.getMode();
+		const approvalContext = {
+			mode: approvalMode ?? this.currentMode(),
+			alwaysAllow: alwaysAllow ?? getAppConfig().alwaysAllow ?? [],
+			externalContent: {
+				inContext: externalContentTouched,
+				escalate: isUntrustedContentEscalationEnabled(),
+			},
+		};
 		const needsApproval = await this.needsApprovalForTool(
 			toolName,
 			rawArguments,
 			alwaysAllow,
-			bridge?.getMode(),
+			approvalMode,
+			externalContentTouched,
 		);
 		if (needsApproval) {
 			const vote = await consultPluginPermission(toolName, parsedArgs);
 			if (vote.decision === 'deny') {
 				return finish({content: `Error: ${vote.reason}`}, true);
 			}
+
+			// Names the reason only when the escalation is what raised this
+			// prompt, so a plain approval does not carry a misleading line.
+			const escalation = escalatedByExternalContent(
+				this.toolManager.getToolEntry(toolName),
+				approvalContext.mode,
+				approvalContext,
+			)
+				? EXTERNAL_CONTENT_REASON
+				: undefined;
 
 			// Pass the turn's signal: without it this await is the one place a
 			// subagent cannot be cancelled. `tool-executor` starts a batch of
@@ -1162,11 +1206,13 @@ export class SubagentExecutor {
 						toolCall,
 						signal,
 						executionContext?.subagentRunId,
+						escalation,
 					)
 				: (await signalToolApproval(
 							{
 								toolCall,
 								subagentName: config.name,
+								reason: escalation,
 							},
 							signal,
 						))

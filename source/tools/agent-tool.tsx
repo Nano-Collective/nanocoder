@@ -64,6 +64,11 @@ function delegationContext(options?: ToolExecutionContext) {
 		...(options?.subagentRunId !== undefined && {
 			subagentRunId: options.subagentRunId,
 		}),
+		// The subagent starts from the parent's state, so delegation cannot
+		// launder a page's instructions through a model-written task string.
+		...(options?.externalContentTouched !== undefined && {
+			externalContentTouched: options.externalContentTouched,
+		}),
 	};
 }
 

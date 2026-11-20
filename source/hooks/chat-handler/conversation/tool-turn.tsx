@@ -7,6 +7,7 @@ import {
 } from '@/artifacts/walkthrough-lifecycle';
 import {ErrorMessage, InfoMessage} from '@/components/message-box';
 import {getAppConfig} from '@/config/index';
+import {isUntrustedContentEscalationEnabled} from '@/config/untrusted-content';
 import {
 	TOOL_APPROVAL_REQUIRED_KIND,
 	TOOL_APPROVAL_REQUIRED_PREFIX,
@@ -16,7 +17,15 @@ import {CheckpointManager} from '@/services/checkpoint-manager';
 import {recordToolOutcome} from '@/services/completion-ledger';
 import {runPreToolUseGate} from '@/services/lifecycle-hooks';
 import {getProjectRoot} from '@/services/session-cwd';
-import {resolveToolApproval} from '@/tools/approval-policy';
+import {
+	type ExternalContentApproval,
+	escalatedByExternalContent,
+	resolveToolApproval,
+} from '@/tools/approval-policy';
+import {
+	type ExternalContentPresence,
+	formatExternalContentReason,
+} from '@/tools/runtime/external-content';
 import {isFileMutationTool} from '@/tools/runtime/tool-approval';
 import {parseToolArguments} from '@/tools/runtime/tool-args-parser';
 import {
@@ -125,6 +134,8 @@ export interface ToolTurnContext {
 	flushAll: () => Promise<void>;
 	/** A task tool updated the live task list this turn. */
 	markLiveTaskUpdates: () => void;
+	/** Text from outside the workspace the model can read this turn. */
+	externalContent: ExternalContentPresence;
 }
 
 /**
@@ -163,7 +174,15 @@ export async function runToolTurn(
 		notOfferedReason,
 		flushAll,
 		markLiveTaskUpdates,
+		externalContent: externalContentPresence,
 	} = context;
+
+	// The switch is read once per turn rather than per call: it is a config
+	// value, and every tool this turn is judged against the same answer.
+	const externalContent: ExternalContentApproval = {
+		inContext: externalContentPresence.inContext,
+		escalate: isUntrustedContentEscalationEnabled(),
+	};
 
 	// The SDK never auto-executes tools (execute is stripped). We evaluate
 	// needsApproval ourselves, then run every tool through one routine that
@@ -171,6 +190,10 @@ export async function runToolTurn(
 	// suspend on a confirmation prompt before executing. No second code path.
 	const autoTools: ToolCall[] = [];
 	const confirmTools: ToolCall[] = [];
+	// Why a call is being confirmed, when reading external content is the
+	// reason. Filled during classification, read when the prompt is raised, so
+	// the prompt cannot name a reason the decision did not use.
+	const escalationReasons = new Map<string, string>();
 	// Results for tools a pre-tool-use hook refused. They skip execution
 	// entirely but still need a result to pair with their tool call.
 	const blockedResults: ToolResult[] = [];
@@ -213,19 +236,22 @@ export async function runToolTurn(
 		}
 
 		const toolEntry = toolManager?.getToolEntry(toolCall.function.name);
+		const currentMode = developmentModeRef?.current ?? developmentMode;
+		const approvalContext = {
+			// Prefer the live ref so a mode switch made while this turn's
+			// tools are still executing takes effect on the next call.
+			mode: currentMode,
+			// The top-level alwaysAllow list applies in interactive
+			// sessions too; plan mode stays safe because a call to a tool
+			// its mode excludes is refused before it gets here.
+			alwaysAllow: getAppConfig().alwaysAllow ?? [],
+			externalContent,
+		};
 		const needsApproval = await resolveToolApproval(
 			toolCall.function.name,
 			toolEntry,
 			toolCall.function.arguments,
-			{
-				// Prefer the live ref so a mode switch made while this turn's
-				// tools are still executing takes effect on the next call.
-				mode: developmentModeRef?.current ?? developmentMode,
-				// The top-level alwaysAllow list applies in interactive
-				// sessions too; plan mode stays safe because a call to a tool
-				// its mode excludes is refused before it gets here.
-				alwaysAllow: getAppConfig().alwaysAllow ?? [],
-			},
+			approvalContext,
 		);
 
 		if (needsApproval) {
@@ -236,6 +262,12 @@ export async function runToolTurn(
 			if (vote.decision === 'deny') {
 				refuseToolCall(toolCall, vote.reason);
 				continue;
+			}
+			if (escalatedByExternalContent(toolEntry, currentMode, approvalContext)) {
+				escalationReasons.set(
+					toolCall.id,
+					formatExternalContentReason(externalContentPresence),
+				);
 			}
 			confirmTools.push(toolCall);
 		} else {
@@ -289,44 +321,55 @@ export async function runToolTurn(
 		developmentModeRef?.current === 'architect' ||
 		developmentMode === 'architect';
 
-	if (inArchitectMode && architectCheckpointState) {
-		const mutationPaths = getArchitectMutationPaths(autoTools);
+	/**
+	 * Record what a set of file mutations is about to touch, before they run.
+	 *
+	 * Called at turn start for the auto-approved batch, and again when an
+	 * escalated mutation is approved: architect used to waive every file edit,
+	 * so the batch was the whole set and the checkpoint could be built once. A
+	 * taint-escalated write is approved later than that, and without this second
+	 * call it would run outside the checkpoint - breaking "one keypress undoes
+	 * the whole turn" exactly where the risk is highest.
+	 */
+	const checkpointMutations = async (paths: string[]): Promise<void> => {
+		if (paths.length === 0 || !architectCheckpointState) return;
+		// A failure here must not take the turn down with it: the tools below
+		// have not run yet, so the user would lose the whole turn over a
+		// checkpoint they never asked for. Warn and carry on unprotected rather
+		// than abort - the review gate reads `created` and simply will not offer
+		// revert.
+		try {
+			const checkpointManager = new CheckpointManager(getProjectRoot());
 
-		if (mutationPaths.length > 0) {
-			// A failure here must not take the turn down with it: the tools
-			// below have not run yet, so the user would lose the whole turn
-			// over a checkpoint they never asked for. Warn and carry on
-			// unprotected rather than abort - the review gate reads
-			// `created` and simply will not offer revert.
-			try {
-				const checkpointManager = new CheckpointManager(getProjectRoot());
+			if (!architectCheckpointState.created) {
+				const checkpointMetadata = await checkpointManager.saveCheckpoint(
+					`architect-${new Date().toISOString().replace(/[:.]/g, '-')}`,
+					turnStartMessages,
+					currentProvider,
+					currentModel,
+					paths,
+				);
 
-				if (!architectCheckpointState.created) {
-					const checkpointMetadata = await checkpointManager.saveCheckpoint(
-						`architect-${new Date().toISOString().replace(/[:.]/g, '-')}`,
-						turnStartMessages,
-						currentProvider,
-						currentModel,
-						mutationPaths,
-					);
-
-					architectCheckpointState.created = true;
-					architectCheckpointState.name = checkpointMetadata.name;
-				} else if (architectCheckpointState.name) {
-					await checkpointManager.extendCheckpoint(
-						architectCheckpointState.name,
-						mutationPaths,
-					);
-				}
-			} catch (error) {
-				notifyWarning('Could not checkpoint architect turn', true, {
-					context: {
-						error: formatError(error),
-						paths: mutationPaths.join(', '),
-					},
-				});
+				architectCheckpointState.created = true;
+				architectCheckpointState.name = checkpointMetadata.name;
+			} else if (architectCheckpointState.name) {
+				await checkpointManager.extendCheckpoint(
+					architectCheckpointState.name,
+					paths,
+				);
 			}
+		} catch (error) {
+			notifyWarning('Could not checkpoint architect turn', true, {
+				context: {
+					error: formatError(error),
+					paths: paths.join(', '),
+				},
+			});
 		}
+	};
+
+	if (inArchitectMode) {
+		await checkpointMutations(getArchitectMutationPaths(autoTools));
 	}
 
 	// 1) Auto-approved tools execute as a batch (parallelizes consecutive
@@ -341,7 +384,11 @@ export async function runToolTurn(
 				...displayOptions,
 				setLiveComponent,
 				signal: signal,
-				executionContext: {sessionId, workingDirectory},
+				executionContext: {
+					sessionId,
+					workingDirectory,
+					externalContentTouched: externalContentPresence.inContext,
+				},
 				beforeExecute: async toolCall => {
 					// A mode switch since this batch was classified can hide the
 					// tool; alwaysAllow must not run it under the new mode.
@@ -356,6 +403,7 @@ export async function runToolTurn(
 						{
 							mode: developmentModeRef?.current ?? developmentMode,
 							alwaysAllow: getAppConfig().alwaysAllow ?? [],
+							externalContent,
 						},
 					);
 					if (!needsApproval) return true;
@@ -367,6 +415,24 @@ export async function runToolTurn(
 					);
 					if (vote.decision === 'deny') {
 						return stopBatchAt(toolCall, vote.reason);
+					}
+					// The decision changed since classification (a mode switch),
+					// so record the reason here too; the prompt reads this map.
+					if (
+						escalatedByExternalContent(
+							toolManager?.getToolEntry(toolCall.function.name),
+							developmentModeRef?.current ?? developmentMode,
+							{
+								mode: developmentModeRef?.current ?? developmentMode,
+								alwaysAllow: getAppConfig().alwaysAllow ?? [],
+								externalContent,
+							},
+						)
+					) {
+						escalationReasons.set(
+							toolCall.id,
+							formatExternalContentReason(externalContentPresence),
+						);
 					}
 					batchStoppedByGate = true;
 					confirmTools.unshift(...autoTools.slice(autoTools.indexOf(toolCall)));
@@ -435,6 +501,7 @@ export async function runToolTurn(
 				abortSignal: signal,
 				sessionId,
 				workingDirectory,
+				externalContentTouched: externalContentPresence.inContext,
 			});
 
 		for (let i = 0; i < confirmTools.length; i++) {
@@ -450,7 +517,10 @@ export async function runToolTurn(
 			// other way must also release it - otherwise the loop stays
 			// parked here and the confirmation for a dead turn stays on
 			// screen. An abort settles this as "declined".
-			const approved = await signalToolConfirm({toolCall}, signal);
+			const approved = await signalToolConfirm(
+				{toolCall, reason: escalationReasons.get(toolCall.id)},
+				signal,
+			);
 
 			// Approved, but the turn was cancelled while the prompt was up:
 			// treat it like a decline rather than running the tool.
@@ -476,6 +546,12 @@ export async function runToolTurn(
 			// batch uses. isGenerating is true so the live area renders and the
 			// global Escape handler stays armed during execution.
 			setIsGenerating(true);
+			// A file mutation the taint rule escalated is approved here, after
+			// the turn-start checkpoint was written, so extend it now - before
+			// the write lands and escapes the undo.
+			if (inArchitectMode && isFileMutationTool(toolCall.function.name)) {
+				await checkpointMutations(getArchitectMutationPaths([toolCall]));
+			}
 			const execution = await executeApprovedTool(
 				toolCall,
 				toolManager,

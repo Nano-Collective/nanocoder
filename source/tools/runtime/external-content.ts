@@ -111,6 +111,52 @@ export function isExternalResult(result: ToolResult): boolean {
 }
 
 /**
+ * What the model's current view holds of outside text. The approval rule and
+ * the confirmation prompt both read this, so they agree on what "tainted"
+ * means without either keeping its own copy of the state.
+ */
+export interface ExternalContentPresence {
+	inContext: boolean;
+	/** `fetch_url https://…` — the first framed result found, for the prompt. */
+	summary?: string;
+}
+
+const FRAME_PATTERN = /<external_content source="([^"]*)"(?: url="([^"]*)")?>/;
+const MAX_SUMMARY_URL_CHARS = 80;
+
+/**
+ * Read the frame back out of the message view the next request will send. The
+ * tag is the marker: whatever the model can read, this finds, which is why the
+ * flag needs no separate storage and cannot drift from the history.
+ */
+export function externalContentIn(
+	messages: readonly Message[],
+): ExternalContentPresence {
+	for (const message of messages) {
+		if (message.role !== 'tool') continue;
+		const match = FRAME_PATTERN.exec(message.content);
+		const source = match?.[1];
+		if (!source) continue;
+		const url = match?.[2];
+		if (!url) return {inContext: true, summary: source};
+		const bounded =
+			url.length > MAX_SUMMARY_URL_CHARS
+				? `${url.slice(0, MAX_SUMMARY_URL_CHARS)}…`
+				: url;
+		return {inContext: true, summary: `${source} ${bounded}`};
+	}
+	return {inContext: false};
+}
+
+/** One line naming what was read, for the confirmation prompt. */
+export function formatExternalContentReason(
+	presence: ExternalContentPresence,
+): string {
+	const source = presence.summary ? ` (${presence.summary})` : '';
+	return `External content${source} is in context: this call can change files or reach the network.`;
+}
+
+/**
  * Bound a result's text before it enters context, leaving room for the frame
  * when there will be one. Callers that know the source use this instead of
  * `truncateToolResult` so the elision marker reports the tool's real output
