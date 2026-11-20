@@ -149,24 +149,39 @@ export function buildLaunchAgentPlist(
 `;
 }
 
+function quoteSystemdWord(value: string): string {
+	return `"${value
+		.replace(/\\/g, '\\\\')
+		.replace(/"/g, '\\"')
+		.replace(/%/g, '%%')}"`;
+}
+
 export function buildSystemdUnit(
 	projectRoot: string,
 	hash: string,
 	daemonCommand: string,
 ): string {
-	// systemd expands `%` specifiers in these values, and Environment= splits
-	// on unquoted spaces and reads C escapes inside quotes.
+	for (const [name, value] of Object.entries({projectRoot, daemonCommand})) {
+		if (/\p{Cc}/u.test(value)) {
+			throw new Error(
+				`${name} cannot contain control characters in a systemd unit.`,
+			);
+		}
+	}
+
 	const root = projectRoot.replace(/%/g, '%%');
-	const envRoot = root.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+	// These directives do not decode C-style escapes. A trailing separator
+	// preserves the directory and keeps a final backslash from joining lines.
+	const pathRoot = root.endsWith('\\') ? `${root}/` : root;
 	return `[Unit]
-Description=nanocoder daemon for ${root}
+Description=nanocoder daemon for ${pathRoot}
 After=default.target
 
 [Service]
 Type=simple
-WorkingDirectory=${root}
-Environment="NANOCODER_PROJECT_ROOT=${envRoot}"
-ExecStart=${daemonCommand} daemon start
+WorkingDirectory=${pathRoot}
+Environment=${quoteSystemdWord(`NANOCODER_PROJECT_ROOT=${projectRoot}`)}
+ExecStart=${quoteSystemdWord(daemonCommand)} daemon start
 Restart=on-failure
 RestartSec=5
 
