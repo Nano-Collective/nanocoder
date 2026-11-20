@@ -161,7 +161,10 @@ export function buildSystemdUnit(
 	hash: string,
 	daemonCommand: string,
 ): string {
-	for (const [name, value] of Object.entries({projectRoot, daemonCommand})) {
+	for (const [name, value] of [
+		['The project path', projectRoot],
+		['The daemon command', daemonCommand],
+	] as const) {
 		if (/\p{Cc}/u.test(value)) {
 			throw new Error(
 				`${name} cannot contain control characters in a systemd unit.`,
