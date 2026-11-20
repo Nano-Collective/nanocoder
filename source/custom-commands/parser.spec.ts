@@ -714,9 +714,10 @@ Content`;
 
 	const result = parseCommandFile(filePath);
 
-	// BOM character prevents frontmatter parsing, so entire file is content
-	// The metadata will be empty since no frontmatter was detected
-	t.true(result.content.includes('Command'));
+	// A leading BOM is stripped before splitting, so the frontmatter block is
+	// recognised and the body no longer contains the marker lines.
+	t.is(result.metadata.description, 'Command');
+	t.is(result.content, 'Content');
 });
 
 test('parseCommandFile handles very long description', t => {
