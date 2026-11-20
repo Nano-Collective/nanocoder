@@ -86,7 +86,7 @@ import {
 	setLastBuiltPrompt,
 } from '@/conversation/prompt-builder';
 import {resolveStartupProvider} from '@/hooks/startup-provider';
-import {appendRelevantProjectContextWithCount} from '@/memory/project-context';
+import {buildProjectContextSection} from '@/memory/project-context';
 import {appendActivePlanContext} from '@/plans/context';
 import {withTrustedProjectPlugins} from '@/plugins/host';
 import {bashExecutor} from '@/services/bash-executor';
@@ -109,6 +109,7 @@ import type {ToolManager} from '@/tools/tool-manager';
 import {getTuneToolMode} from '@/types/config';
 import type {LLMClient} from '@/types/core';
 import {getLogger} from '@/utils/logging';
+import {appendTurnContext, stripTurnContext} from '@/utils/turn-context';
 
 const logger = getLogger();
 
@@ -493,6 +494,25 @@ export class AcpAgent implements Agent {
 				contextualUserText = `[Active file: ${session.activeFile}]\n\n${contextualUserText}`;
 			}
 
+			// Recalled memories ride at the end of the user message rather than
+			// being appended to the system prompt, so the system block stays
+			// byte-stable across turns for KV-cache reuse (#1574). The session
+			// keeps serving baseSystemMessage, which no longer needs a per-turn
+			// rebuild.
+			const projectContext = await buildProjectContextSection(
+				userText,
+				session.getMemoryFinder(),
+				getProjectContextPreferences(),
+			);
+			if (projectContext.memoryCount > 0) {
+				logger.info(
+					`ACP recall: session=${params.sessionId} count=${projectContext.memoryCount}`,
+				);
+			}
+			contextualUserText = appendTurnContext(contextualUserText, [
+				projectContext.content,
+			]);
+
 			const previousAssistant = findLastAssistantMessage(session);
 			session.messages = [
 				...session.messages,
@@ -504,28 +524,22 @@ export class AcpAgent implements Agent {
 			];
 
 			if (session.baseSystemMessage) {
-				const projectContext = await appendRelevantProjectContextWithCount(
-					session.baseSystemMessage.content,
-					userText,
-					session.getMemoryFinder(),
-					getProjectContextPreferences(),
-				);
-				// Plan graphs are project state and change between turns. This runs
-				// inside the session's context, so an editor session sees the plan
-				// for its own workspace, not the agent's launch directory.
+				// Recall no longer rebuilds this message — it rides in the user
+				// text above (#1574). The plan block still does: plan graphs are
+				// project state that changes between turns. This runs inside the
+				// session's context, so an editor session sees the plan for its
+				// own workspace, not the agent's launch directory.
+				//
+				// With no active plan the result equals baseSystemMessage, so the
+				// system block stays byte-identical for the whole session.
 				const systemPrompt = await appendActivePlanContext(
-					projectContext.systemPrompt,
+					session.baseSystemMessage.content,
 				);
 				session.systemMessage = {
 					role: 'system',
 					content: systemPrompt,
 				};
 				setLastBuiltPrompt(systemPrompt);
-				if (projectContext.memoryCount > 0) {
-					logger.info(
-						`ACP recall: session=${params.sessionId} count=${projectContext.memoryCount}`,
-					);
-				}
 			}
 
 			const config = getAppConfig();
@@ -1238,8 +1252,15 @@ export class AcpAgent implements Agent {
 				for (let i = session.messages.length - 1; i >= 0; i--) {
 					const m = session.messages[i];
 					if (m.role !== 'user') continue;
+					// The stored message carries the per-turn context block, but
+					// the client only ever saw the text the user typed, so the
+					// block has to come off before comparing — otherwise the
+					// exact match misses and the fallback below silently retries
+					// the most recent turn instead of the named one.
 					const contentStr =
-						typeof m.content === 'string' ? m.content.trim() : '';
+						typeof m.content === 'string'
+							? stripTurnContext(m.content).trim()
+							: '';
 					if (contentStr === promptText) {
 						targetUserIdx = i;
 						break;
@@ -1569,7 +1590,13 @@ export class AcpAgent implements Agent {
 						sessionId: session.sessionId,
 						update: {
 							sessionUpdate: 'user_message_chunk',
-							content: {type: 'text', text: message.content},
+							// Per-turn context is harness-authored, so replay shows
+							// only what the user actually sent. The stored message
+							// keeps it, which is what preserves the cached prefix.
+							content: {
+								type: 'text',
+								text: stripTurnContext(message.content),
+							},
 						},
 					});
 				}

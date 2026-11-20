@@ -25,7 +25,7 @@ import {
 	buildSystemPrompt,
 	setLastBuiltPrompt,
 } from '@/conversation/prompt-builder';
-import {appendRelevantProjectContextWithCount} from '@/memory/project-context';
+import {buildProjectContextSection} from '@/memory/project-context';
 import {SemanticMemoryManager} from '@/memory/semantic-memory-manager';
 import {
 	type PlainConversationOutcome,
@@ -54,6 +54,7 @@ import type {DevelopmentMode, Message} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
 import {setMessageQueueSink} from '@/utils/message-queue-core';
 import {getShutdownManager} from '@/utils/shutdown';
+import {appendTurnContext} from '@/utils/turn-context';
 
 export interface RunPlainShellOptions {
 	prompt: string;
@@ -79,7 +80,7 @@ export interface RunPlainShellDeps {
 	getShutdownManager: typeof getShutdownManager;
 	loadPreferences: typeof loadPreferences;
 	savePreferences: typeof savePreferences;
-	appendRelevantProjectContextWithCount: typeof appendRelevantProjectContextWithCount;
+	buildProjectContextSection: typeof buildProjectContextSection;
 	appendActivePlanContext: typeof appendActivePlanContext;
 	artifacts: Pick<
 		ArtifactManager,
@@ -95,7 +96,7 @@ const defaultDeps: RunPlainShellDeps = {
 	getShutdownManager,
 	loadPreferences,
 	savePreferences,
-	appendRelevantProjectContextWithCount,
+	buildProjectContextSection,
 	appendActivePlanContext,
 	artifacts: artifactManager,
 };
@@ -238,15 +239,16 @@ export async function runPlainShell(
 		toolsForPrompt,
 	);
 
-	const projectContext = await deps.appendRelevantProjectContextWithCount(
-		toolPrompt,
+	// Recalled memories ride in the user message, not the system prompt, so
+	// the system block stays byte-stable for local KV-cache reuse (#1574).
+	const projectContext = await deps.buildProjectContextSection(
 		prompt,
 		new SemanticMemoryManager(),
 		resolveProjectContextPreferences(deps.loadPreferences()),
 	);
-	const systemContent = await deps.appendActivePlanContext(
-		projectContext.systemPrompt,
-	);
+	// The plan block is still appended per turn (it is persisted state that
+	// changes between turns); the recalled memories above are not.
+	const systemContent = await deps.appendActivePlanContext(toolPrompt);
 	if (projectContext.memoryCount > 0) {
 		writeStatus(
 			`Recalling ${projectContext.memoryCount} project memor${projectContext.memoryCount === 1 ? 'y' : 'ies'}...`,
@@ -299,9 +301,12 @@ export async function runPlainShell(
 	const initialMessages: Message[] = [
 		{
 			role: 'user',
-			content: hookContext
-				? `<hook-context>\n${hookContext}\n</hook-context>\n\n${prompt}`
-				: prompt,
+			content: appendTurnContext(
+				hookContext
+					? `<hook-context>\n${hookContext}\n</hook-context>\n\n${prompt}`
+					: prompt,
+				[projectContext.content],
+			),
 		},
 	];
 
