@@ -73,6 +73,25 @@ test('buildLaunchAgentPlist contains required keys', t => {
 	t.regex(plist, /<key>KeepAlive<\/key>\s*<true\/>/);
 });
 
+test('buildLaunchAgentPlist escapes ampersands and angle brackets', t => {
+	const plist = buildLaunchAgentPlist('/Users/me/R&D <x>', 'abcd1234ef', 'a&b');
+	t.regex(plist, /<string>\/Users\/me\/R&amp;D &lt;x&gt;<\/string>/);
+	t.regex(plist, /<string>a&amp;b<\/string>/);
+	t.notRegex(plist, /R&D|<x>|a&b/);
+});
+
+test('buildSystemdUnit escapes % and quotes the Environment= value', t => {
+	const unit = buildSystemdUnit('/home/me/my proj/100%', 'abcd1234ef', 'nanocoder');
+	t.regex(unit, /Description=nanocoder daemon for \/home\/me\/my proj\/100%%\n/);
+	t.regex(unit, /WorkingDirectory=\/home\/me\/my proj\/100%%\n/);
+	t.regex(unit, /Environment="NANOCODER_PROJECT_ROOT=\/home\/me\/my proj\/100%%"\n/);
+});
+
+test('buildSystemdUnit escapes quotes and backslashes inside the Environment= value', t => {
+	const unit = buildSystemdUnit('/home/me/a"b\\c', 'abcd1234ef', 'nanocoder');
+	t.true(unit.includes('Environment="NANOCODER_PROJECT_ROOT=/home/me/a\\"b\\\\c"\n'));
+});
+
 test('buildSystemdUnit contains required keys', t => {
 	const unit = buildSystemdUnit('/some/project', 'abcd1234ef', 'nanocoder');
 	t.regex(unit, /Description=nanocoder daemon for \/some\/project/);

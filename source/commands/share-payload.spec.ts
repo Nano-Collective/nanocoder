@@ -3,6 +3,7 @@ import type {Message} from '@/types/index';
 import {isApprovedPlanMessage} from '@/artifacts/approved-plan';
 import {isInternalWalkthroughMessage} from '@/artifacts/walkthrough-lifecycle';
 import {BASH_OUTPUT_PREFIX} from '@/constants';
+import {appendTurnContext} from '@/utils/turn-context';
 import {isAutoDiagnosticsMessage} from '@/hooks/chat-handler/conversation/auto-diagnostics';
 import {
 	buildSharePayload,
@@ -257,4 +258,19 @@ test('firstUserRequest is undefined when no turn is a request', t => {
 	const {payload} = build([...protocolTurns, {role: 'assistant', content: 'Ok.'}]);
 
 	t.is(firstUserRequest(payload.messages), undefined);
+});
+
+// Per-turn skills and recalled memories are stored in the user's message
+// (#1574). A shared transcript is read by people, so it shows what was typed.
+test('a shared user message drops its per-turn context block', t => {
+	const typed = 'Fix the login bug';
+	const stored = appendTurnContext(typed, [
+		'## Project Context\n\n- Auth uses Clerk.',
+	]);
+	const {payload} = build([
+		{role: 'user', content: stored},
+		{role: 'assistant', content: 'Fixed.'},
+	]);
+
+	t.is(payload.messages[0]?.content, typed);
 });
