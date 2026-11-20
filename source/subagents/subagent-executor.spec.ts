@@ -3666,3 +3666,55 @@ test.serial('an untainted subagent does not escalate the same call', async t => 
 
 	t.is(approvals, 0);
 });
+
+test.serial('a subagent frames a per-call source the tool declared', async t => {
+	// The nested case: a depth-1 subagent calls `agent`, its child read a page,
+	// and the child's answer comes back as a dynamic source. If this boundary
+	// dropped it, the depth-1 run would hand the parent an unmarked summary.
+	const toolManager = createMockToolManager({
+		nested_agent: {
+			handler: async () => ({
+				llmContent: 'summary written while looking at a page',
+				externalSource: {kind: 'subagent' as const},
+			}),
+			readOnly: false,
+		},
+	});
+
+	const payloads: Message[][] = [];
+	const client = createMockClient(
+		[
+			{
+				content: '',
+				tool_calls: [
+					{id: 'tc1', function: {name: 'nested_agent', arguments: '{}'}},
+				],
+			},
+			{content: 'Done'},
+		],
+		messages => payloads.push(messages),
+	);
+
+	const result = await new SubagentExecutor(toolManager, client).execute(
+		{subagent_type: 'explore', description: 'nested'},
+		undefined,
+		0,
+		undefined,
+		undefined,
+		{tools: ['nested_agent']},
+	);
+
+	const toolMessage = payloads
+		.flat()
+		.find(message => message.role === 'tool' && message.name === 'nested_agent');
+	t.truthy(toolMessage);
+	t.regex(
+		String(toolMessage?.content),
+		/^<external_content source="nested_agent">/,
+		'the frame reaches this run, not just the top level',
+	);
+	t.true(
+		result.externalContentTouched,
+		'and this run reports the mark upward',
+	);
+});

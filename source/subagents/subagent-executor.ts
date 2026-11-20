@@ -71,6 +71,7 @@ import type {
 	ApiCallRecord,
 	ApiUsage,
 	DevelopmentMode,
+	ExternalContentSource,
 	LLMClient,
 	Message,
 	ToolCall,
@@ -825,8 +826,14 @@ export class SubagentExecutor {
 					},
 				},
 				getSystemMessage: () => systemMessage,
-				prepareTurn: async () => {
+				prepareTurn: async context => {
 					iterations++;
+
+					// Read the mark here, not only when tools run: a run whose
+					// last tool batch read a page may finish with a plain answer,
+					// and that iteration still has the frame in view.
+					sawExternalContent =
+						sawExternalContent || context.externalContent.inContext;
 
 					// Yield to event loop so Ink can render current state
 					emitProgress('running');
@@ -964,19 +971,16 @@ export class SubagentExecutor {
 						totalTokens += estimateTokens(toolResult.content);
 
 						// A subagent runs its own loop instead of going through
-						// processToolUse, so the source has to be resolved here too;
-						// otherwise a page or MCP result it read would reach its own
-						// context unframed.
-						const externalSource = externalSourceFor(
-							this.toolManager?.getToolEntry?.(toolName)?.externalSource,
-							toolCall.function.arguments,
-						);
-
+						// processToolUse, so the source travels out of the call with
+						// the content; `executeToolCall` has already merged the tool's
+						// declaration with anything the handler declared per call.
 						results.push({
 							role: 'tool',
 							content: toolResult.content,
 							...(toolResult.images ? {images: toolResult.images} : {}),
-							...(externalSource ? {externalSource} : {}),
+							...(toolResult.externalSource
+								? {externalSource: toolResult.externalSource}
+								: {}),
 							tool_call_id: toolCall.id,
 							name: toolName,
 						});
@@ -1071,7 +1075,11 @@ export class SubagentExecutor {
 		alwaysAllow?: string[],
 		argumentsError?: string,
 		externalContentTouched = false,
-	): Promise<{content: string; images?: Message['images']}> {
+	): Promise<{
+		content: string;
+		images?: Message['images'];
+		externalSource?: ExternalContentSource;
+	}> {
 		// One ToolCall object for this call, shared by the approval prompt and
 		// the lifecycle gate so runPreToolUseGate can key its once-per-call
 		// suppression on it.
@@ -1092,7 +1100,11 @@ export class SubagentExecutor {
 		const bridge = getSubagentToolBridge(executionContext?.sessionId);
 		await bridge?.begin(toolCall, config.name);
 		const finish = async (
-			result: {content: string; images?: Message['images']},
+			result: {
+				content: string;
+				images?: Message['images'];
+				externalSource?: ExternalContentSource;
+			},
 			failed: boolean,
 		) => {
 			await bridge?.end(toolCall, {content: result.content, failed});
@@ -1264,18 +1276,26 @@ export class SubagentExecutor {
 				Array.isArray(result.images)
 					? result.images
 					: undefined;
+			// A handler may declare that this particular answer came from outside
+			// even though the tool is not an external source - `agent` does this
+			// when the subagent it called read a page. That declaration has to
+			// survive this boundary, or a nested delegation would launder it: the
+			// depth-1 run would hand the parent an unmarked summary.
+			const externalSource =
+				typeof result === 'object' &&
+				result !== null &&
+				'externalSource' in result &&
+				result.externalSource !== undefined
+					? result.externalSource
+					: externalSourceFor(
+							this.toolManager?.getToolEntry?.(toolName)?.externalSource,
+							parsedArgs,
+						);
 			// Formatters run on a successful write, before post-tool-use, as in
 			// processToolUse. Bounded here with the frame's size in mind, for the
 			// same reason: the frame is added later and must not push the result
 			// past the cap, and one truncation keeps the elision marker honest.
-			const truncated = boundedToolResult(
-				content,
-				toolName,
-				externalSourceFor(
-					this.toolManager?.getToolEntry?.(toolName)?.externalSource,
-					parsedArgs,
-				),
-			);
+			const truncated = boundedToolResult(content, toolName, externalSource);
 			// Failure is either a structured isError or, for the many tools that
 			// return plain text, an "Error..." message - as the top-level ACP path
 			// reads it.
@@ -1300,6 +1320,7 @@ export class SubagentExecutor {
 				{
 					content: commitNote ? `${withHooks}\n\n${commitNote}` : withHooks,
 					...(images && images.length > 0 ? {images} : {}),
+					...(externalSource ? {externalSource} : {}),
 				},
 				failed,
 			);
