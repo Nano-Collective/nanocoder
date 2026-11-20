@@ -423,3 +423,27 @@ test('a folder without the newer inputs keeps its earlier fingerprint', t => {
 		rmSync(root, {recursive: true, force: true});
 	}
 });
+
+test('a profile lspServers entry is counted and changes the fingerprint', t => {
+	const root = tempRoot();
+	try {
+		const write = (command: string) =>
+			writeFileSync(
+				join(root, 'agents.config.json'),
+				JSON.stringify({
+					nanocoder: {
+						profiles: {
+							p: {lspServers: [{name: 'x', command, languages: ['ts']}]},
+						},
+					},
+				}),
+			);
+		write('lsp-a');
+		const first = describeProjectTrust(root);
+		t.is(first.lspServers, 1);
+		write('lsp-b');
+		t.not(describeProjectTrust(root).fingerprint, first.fingerprint);
+	} finally {
+		rmSync(root, {recursive: true, force: true});
+	}
+});

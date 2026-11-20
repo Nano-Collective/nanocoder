@@ -231,18 +231,36 @@ function listLspServers(
 	config: ProjectConfig | undefined,
 	lines: string[],
 ): number {
-	const servers = config?.nanocoder?.lspServers;
-	if (!Array.isArray(servers)) return 0;
-
 	let count = 0;
-	for (const entry of servers) {
-		if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue;
-		const {name, command, languages} = entry as Record<string, unknown>;
-		if (typeof name !== 'string' || typeof command !== 'string') continue;
-		if (command.trim() === '' || !Array.isArray(languages)) continue;
-		lines.push(`lsp ${JSON.stringify(entry)}`);
-		count++;
+
+	const countServers = (servers: unknown, prefix: string): void => {
+		if (!Array.isArray(servers)) return;
+		for (const entry of servers) {
+			if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue;
+			const {name, command, languages} = entry as Record<string, unknown>;
+			if (typeof name !== 'string' || typeof command !== 'string') continue;
+			if (command.trim() === '' || !Array.isArray(languages)) continue;
+			lines.push(`${prefix}${JSON.stringify(entry)}`);
+			count++;
+		}
+	};
+
+	countServers(config?.nanocoder?.lspServers, 'lsp ');
+
+	const profiles = config?.nanocoder?.profiles;
+	if (profiles && typeof profiles === 'object' && !Array.isArray(profiles)) {
+		for (const [profileName, profile] of Object.entries(profiles).sort(
+			([a], [b]) => a.localeCompare(b),
+		)) {
+			if (profile && typeof profile === 'object' && !Array.isArray(profile)) {
+				countServers(
+					(profile as Record<string, unknown>).lspServers,
+					`lsp profile:${profileName} `,
+				);
+			}
+		}
 	}
+
 	return count;
 }
 
