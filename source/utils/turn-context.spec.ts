@@ -86,3 +86,29 @@ test('several blocks are each removed', t => {
 test('an image-only turn strips back to empty', t => {
 	t.is(stripTurnContext(appendTurnContext('', [MEMORIES])), '');
 });
+
+// Mechanical compaction cuts a long user message at a character count, so a
+// stored block can lose its closing tag. Without this, the remains would
+// survive every strip and be shown to the user for the life of the session.
+test('a block truncated past its opening tag is still removed', t => {
+	const sent = appendTurnContext('fix the auth bug', [MEMORIES]);
+	const truncated = sent.slice(0, sent.indexOf('\n', sent.indexOf('<turn-context>')) + 12);
+
+	t.true(truncated.includes('<turn-context>'));
+	t.false(truncated.includes('</turn-context>'));
+	t.is(stripTurnContext(truncated), 'fix the auth bug');
+});
+
+test('a truncated block does not swallow a well-formed one before it', t => {
+	const first = appendTurnContext('fix the auth bug', [MEMORIES]);
+	const mangled = `${first}\n\n<turn-context>\n## Available Skills`;
+
+	t.is(stripTurnContext(mangled), 'fix the auth bug');
+});
+
+test('an opening tag inside the user text is left alone', t => {
+	// Only a block at the very end can be a truncation remnant; a tag the user
+	// typed mid-message is their own text.
+	const typed = 'why does <turn-context> show up in my export?';
+	t.is(stripTurnContext(typed), typed);
+});

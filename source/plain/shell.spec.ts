@@ -857,10 +857,6 @@ test.serial(
 						};
 					},
 					getShutdownManager: makeFakeShutdownManager(shutdown),
-					appendRelevantProjectContextWithCount: async (systemPrompt) => ({
-						systemPrompt,
-						memoryCount: 0,
-					}),
 					appendActivePlanContext: async (systemPrompt) =>
 						`${systemPrompt}\n\n## ACTIVE PLAN (persisted)\n\n- api`,
 				}),
