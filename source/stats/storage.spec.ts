@@ -25,6 +25,7 @@ import {
 	createEmptyLedger,
 	getStatsFilePath,
 	readStatsLedger,
+	readStatsLedgerResult,
 	writeStatsLedger,
 } from './storage';
 import {STATS_LEDGER_VERSION, makePairKey} from './types';
@@ -534,4 +535,75 @@ test('readStatsLedger reads without probing existsSync on the stats files', t =>
 	}
 
 	t.is(probes, 0);
+});
+test('readStatsLedgerResult refuses to write over a corrupt ledger', t => {
+	const statsPath = getStatsFilePath();
+	fs.mkdirSync(path.dirname(statsPath), {recursive: true});
+	fs.writeFileSync(statsPath, '{"version":2,"totalSessions":', 'utf8');
+
+	const read = readStatsLedgerResult();
+
+	t.false(read.writable);
+	t.is(read.blockedBy, 'unreadable');
+	t.is(read.ledger.totalSessions, 0);
+});
+
+test('readStatsLedgerResult refuses to write over a newer ledger version', t => {
+	const statsPath = getStatsFilePath();
+	fs.mkdirSync(path.dirname(statsPath), {recursive: true});
+	fs.writeFileSync(
+		statsPath,
+		JSON.stringify({
+			version: STATS_LEDGER_VERSION + 1,
+			createdAt: 1,
+			totalSessions: 500,
+			totalPrompts: 9000,
+			totalTokens: 123456789,
+			totalCost: 321,
+			daily: [],
+			monthly: [],
+		}),
+		'utf8',
+	);
+
+	const read = readStatsLedgerResult();
+
+	t.false(read.writable);
+	t.is(read.blockedBy, 'unsupported-version');
+	t.is(read.ledger.totalSessions, 0);
+});
+
+test('a flush keeps a newer ledger file intact and backs it up', t => {
+	const statsPath = getStatsFilePath();
+	fs.mkdirSync(path.dirname(statsPath), {recursive: true});
+	const original = JSON.stringify({
+		version: STATS_LEDGER_VERSION + 1,
+		createdAt: 1,
+		totalSessions: 500,
+		totalPrompts: 9000,
+		totalTokens: 123456789,
+		totalCost: 321,
+		daily: [],
+		monthly: [],
+	});
+	fs.writeFileSync(statsPath, original, 'utf8');
+
+	recordUserPrompt('OpenRouter', 'gpt-5', '2026-11-13');
+	flushStatsLedgerSync();
+
+	t.is(fs.readFileSync(statsPath, 'utf8'), original);
+	t.is(fs.readFileSync(`${statsPath}.bak`, 'utf8'), original);
+});
+
+test('a flush keeps a corrupt ledger file intact and backs it up', t => {
+	const statsPath = getStatsFilePath();
+	fs.mkdirSync(path.dirname(statsPath), {recursive: true});
+	const original = 'not json at all';
+	fs.writeFileSync(statsPath, original, 'utf8');
+
+	recordUserPrompt('OpenRouter', 'gpt-5', '2026-11-13');
+	flushStatsLedgerSync();
+
+	t.is(fs.readFileSync(statsPath, 'utf8'), original);
+	t.is(fs.readFileSync(`${statsPath}.bak`, 'utf8'), original);
 });
