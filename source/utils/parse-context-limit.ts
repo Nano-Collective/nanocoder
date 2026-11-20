@@ -17,9 +17,6 @@ export function parseContextLimit(value: string): number | null {
 	const parsed = Number(
 		`${integerPart}${fractionalPart ? `.${fractionalPart}` : ''}`,
 	);
-	if (!Number.isFinite(parsed)) {
-		return null;
-	}
 
 	const multiplier = suffix === 'k' ? 1_000 : suffix === 'm' ? 1_000_000 : 1;
 	const limit = Math.round(parsed * multiplier);
