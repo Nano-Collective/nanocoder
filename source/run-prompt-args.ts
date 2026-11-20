@@ -23,6 +23,7 @@ const VALUED_FLAGS = [
 	'--mode',
 	'--output-format',
 	'--prompt-file',
+	'--profile',
 ] as const;
 
 /** A flag standing alone. */

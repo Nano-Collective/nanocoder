@@ -2,6 +2,7 @@ import {existsSync, readFileSync} from 'fs';
 import {join} from 'path';
 import {substituteEnvVars} from '@/config/env-substitution';
 import {getConfigPath} from '@/config/paths';
+import {getActiveProfile} from '@/config/profile';
 import {getConfigRoot} from '@/services/session-context';
 import type {MCPServerConfig, ProviderConfig} from '@/types/config';
 import {notifyError} from '@/utils/message-queue-core';
@@ -267,6 +268,19 @@ export function loadAllProviderConfigs(
 	// Add project providers (medium priority) - overrides global ones
 	for (const provider of projectProviders) {
 		providerMap.set(provider.name, provider);
+	}
+
+	// Add profile providers (higher priority than project, lower than env)
+	try {
+		const activeProfile = getActiveProfile(cwd);
+		if (activeProfile?.providers && Array.isArray(activeProfile.providers)) {
+			const processed = substituteEnvVars(activeProfile.providers);
+			for (const provider of processed) {
+				providerMap.set(provider.name, provider);
+			}
+		}
+	} catch {
+		// Ignore if active profile resolution throws here
 	}
 
 	// Add env providers last (highest priority) - overrides all
