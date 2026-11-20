@@ -1,3 +1,4 @@
+import {pathToFileURL} from 'node:url';
 import React, {useEffect, useRef} from 'react';
 import {ConfigurationError, createLLMClient} from '@/client-factory';
 import {commandRegistry} from '@/commands';
@@ -10,7 +11,7 @@ import {
 	InfoMessage,
 	WarningMessage,
 } from '@/components/message-box';
-import {getAppConfig, reloadAppConfig} from '@/config/index';
+import {getActiveProfile, getAppConfig, reloadAppConfig} from '@/config/index';
 import {formatConfigLintIssue, lintProviderConfigs} from '@/config/lint';
 import {loadAllProviderConfigs} from '@/config/mcp-config-loader';
 import {
@@ -23,6 +24,7 @@ import {TIMEOUT_OUTPUT_FLUSH_MS} from '@/constants';
 import {CustomCommandExecutor} from '@/custom-commands/executor';
 import {CustomCommandLoader} from '@/custom-commands/loader';
 import {resolveStartupProvider} from '@/hooks/startup-provider';
+import {setAvailableSubagents} from '@/input/prompt-processor';
 import {getLSPManager, type LSPInitResult} from '@/lsp/index';
 import {
 	setCommandLoaderGetter,
@@ -35,7 +37,7 @@ import {
 	runLifecycleHooks,
 	SESSION_END_HOOK_HANDLER,
 } from '@/services/lifecycle-hooks';
-import {generateKey} from '@/session/key-generator';
+import {checkForUpdates} from '@/services/update-checker';
 import {sessionManager} from '@/session/session-manager';
 import {
 	recordSubagentApiCallForStats,
@@ -43,7 +45,7 @@ import {
 } from '@/subagents/subagent-executor';
 import {getSubagentLoader} from '@/subagents/subagent-loader';
 import {setAgentToolExecutor, setAvailableAgentNames} from '@/tools/agent-tool';
-import {ToolManager} from '@/tools/tool-manager';
+import {describeSkippedMCPTools, ToolManager} from '@/tools/tool-manager';
 import type {CustomCommand} from '@/types/commands';
 import {
 	LLMClient,
@@ -51,9 +53,8 @@ import {
 	MCPConnectionStatus,
 } from '@/types/core';
 import type {MCPInitResult, UpdateInfo, UserPreferences} from '@/types/index';
-import {setAvailableSubagents} from '@/utils/prompt-processor';
+import {generateKey} from '@/utils/key-generator';
 import {getShutdownManager} from '@/utils/shutdown';
-import {checkForUpdates} from '@/utils/update-checker';
 
 interface UseAppInitializationProps {
 	setClient: (client: LLMClient | null) => void;
@@ -270,11 +271,24 @@ export function useAppInitialization({
 			};
 
 			try {
-				await toolManager.initializeMCP(
+				const results = await toolManager.initializeMCP(
 					config.mcpServers,
 					onProgress,
 					onHealthChange,
+					config.tune,
 				);
+				for (const result of results) {
+					const warning = describeSkippedMCPTools(result);
+					if (warning) {
+						addToChatQueue(
+							<WarningMessage
+								key={generateKey(`mcp-skipped-tools-${result.serverName}`)}
+								message={warning}
+								hideBox={true}
+							/>,
+						);
+					}
+				}
 			} catch (error) {
 				// Mark all pending servers as failed
 				mcpStatus.forEach((status, index) => {
@@ -300,9 +314,10 @@ export function useAppInitialization({
 	// Initialize LSP servers with auto-discovery
 	const initializeLSPServers = async () => {
 		const lspConfig = getAppConfig();
+		const autoDiscover = lspConfig.lsp?.autoDiscover !== false;
 		const lspManager = await getLSPManager({
-			rootUri: `file://${process.cwd()}`,
-			autoDiscover: true,
+			rootUri: pathToFileURL(process.cwd()).href,
+			autoDiscover,
 			// Use custom servers from config if provided
 			servers: lspConfig.lspServers?.map(server => ({
 				name: server.name,
@@ -360,7 +375,7 @@ export function useAppInitialization({
 
 		try {
 			await lspManager.initialize({
-				autoDiscover: true,
+				autoDiscover,
 				servers: lspConfig.lspServers?.map(server => ({
 					name: server.name,
 					command: server.command,
@@ -407,8 +422,14 @@ export function useAppInitialization({
 			const currentMode = developmentModeRef?.current || 'normal';
 			const modeConfig = config.modeProviders?.[currentMode];
 
-			// Use CLI provider/model if provided, otherwise mode-specific, otherwise preferences
-			const isProgrammatic = !(cliProvider || cliModel) && !!modeConfig;
+			const activeProfile = getActiveProfile();
+			const profileProvider = activeProfile?.provider;
+			const profileModel = activeProfile?.model;
+
+			// Use CLI provider/model if provided, otherwise profile, otherwise mode-specific, otherwise preferences
+			const isProgrammatic =
+				!(cliProvider || cliModel) &&
+				!!(profileProvider || profileModel || modeConfig);
 			// A saved/mode provider can go stale (renamed or removed from
 			// agents.config.json). Passing it through would make createLLMClient
 			// throw and strand the app on an error screen with no client. Fall
@@ -421,6 +442,7 @@ export function useAppInitialization({
 				modeConfig?.provider,
 				preferences.lastProvider,
 				configuredNames,
+				profileProvider,
 			);
 			if (staleName) {
 				addToChatQueue(
@@ -431,7 +453,7 @@ export function useAppInitialization({
 					/>,
 				);
 			}
-			const model = cliModel || modeConfig?.model || undefined;
+			const model = cliModel || profileModel || modeConfig?.model || undefined;
 			const client = await initializeClient(
 				provider,
 				model,

@@ -6,9 +6,9 @@ import {matchGlob} from '@/events/event-router';
 import {runHookCommand} from '@/services/lifecycle-hooks';
 import {getProjectRoot, getSafeSessionCwd} from '@/services/session-cwd';
 import type {FormatterDefinition} from '@/types/config';
-import {invalidateCache} from '@/utils/file-cache';
-import {logError} from '@/utils/message-queue';
-import {isPathInside} from '@/utils/path-validation';
+import {invalidateCache} from '@/utils/fs/file-cache';
+import {isPathInside} from '@/utils/fs/path-validation';
+import {notifyError} from '@/utils/message-queue-core';
 
 /** Ceiling on a single formatter's runtime. Overridable via `timeout`. */
 const DEFAULT_FORMATTER_TIMEOUT_MS = 30_000;
@@ -103,7 +103,7 @@ export async function formatWrittenFile(
 		if (run.failure || run.exitCode !== 0) {
 			const detail =
 				run.failure ?? (run.stderr.trim() || run.stdout.trim() || '');
-			logError(
+			notifyError(
 				`Formatter "${label}" failed on ${relativePath}${
 					detail ? `: ${detail}` : ` (exit ${run.exitCode})`
 				}`,

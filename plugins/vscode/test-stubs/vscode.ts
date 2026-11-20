@@ -73,6 +73,11 @@ export class CodeLens {
 
 export class Disposable {
 	constructor(private readonly _callOnDispose: () => void) {}
+	static from(...disposables: {dispose(): unknown}[]): Disposable {
+		return new Disposable(() => {
+			for (const disposable of disposables) disposable.dispose();
+		});
+	}
 	dispose(): void {
 		this._callOnDispose();
 	}
@@ -107,6 +112,13 @@ export class Uri {
 		return new Uri('file', fsPath);
 	}
 
+	static parse(val: string): Uri {
+		const idx = val.indexOf(':');
+		const scheme = idx !== -1 ? val.slice(0, idx) : 'file';
+		const fsPath = idx !== -1 ? val.slice(idx + 1) : val;
+		return new Uri(scheme, fsPath);
+	}
+
 	static joinPath(base: Uri, ...parts: string[]): Uri {
 		return new Uri(base.scheme, [base.fsPath, ...parts].join('/'));
 	}
@@ -130,6 +142,14 @@ export class RelativePattern {
 		public readonly base: Uri | {uri: Uri} | string,
 		public readonly pattern: string,
 	) {}
+}
+
+export class TabInputText {
+	constructor(public readonly uri: Uri) {}
+}
+
+export class TabInputTextDiff {
+	constructor(public readonly original: Uri, public readonly modified: Uri) {}
 }
 
 export enum SymbolKind {
@@ -211,8 +231,17 @@ export const __test = {
 	): Promise<Uri[]> => [],
 	/** Messages surfaced through `window.show*Message`, newest last. */
 	shownMessages: [] as {kind: 'info' | 'warning' | 'error'; message: string}[],
+	/** The button picked on the next `showWarningMessage`; undefined = dismissed. */
+	messageChoice: undefined as string | undefined,
+	/** Listeners for `window.on(Start|End)TerminalShellExecution`. */
+	terminalListeners: {
+		start: [] as ((event: any) => unknown)[],
+		end: [] as ((event: any) => unknown)[],
+	},
 
 	reset(): void {
+		__test.messageChoice = undefined;
+		__test.terminalListeners = {start: [], end: []};
 		__test.findFiles = async () => [];
 		__test.configuration = (_s, _k, fallback) => fallback;
 		__test.executeCommand = async () => undefined;
@@ -242,6 +271,7 @@ export const workspace = {
 		__test.findFiles(include, exclude, limit),
 	openTextDocument: (uri: Uri) => __test.openTextDocument(uri),
 	asRelativePath: (target: Uri | string) => __test.asRelativePath(target),
+	registerTextDocumentContentProvider: () => noopDisposable,
 	onDidChangeConfiguration: () => noopDisposable,
 	onDidChangeTextDocument: () => noopDisposable,
 };
@@ -258,9 +288,9 @@ export const window = {
 		__test.shownMessages.push({kind: 'info', message});
 		return undefined;
 	},
-	showWarningMessage: async (message: string) => {
+	showWarningMessage: async (message: string, ..._items: string[]) => {
 		__test.shownMessages.push({kind: 'warning', message});
-		return undefined;
+		return __test.messageChoice;
 	},
 	showErrorMessage: async (message: string) => {
 		__test.shownMessages.push({kind: 'error', message});
@@ -284,8 +314,21 @@ export const window = {
 	showTextDocument: async () => undefined,
 	showOpenDialog: async () => undefined,
 	registerWebviewViewProvider: () => noopDisposable,
+	tabGroups: {
+		all: [] as {tabs: unknown[]}[],
+		close: async (_tab: unknown) => true,
+	},
+	activeTerminal: undefined as unknown,
 	onDidChangeActiveTextEditor: () => noopDisposable,
 	onDidChangeTextEditorSelection: () => noopDisposable,
+	onDidStartTerminalShellExecution: (listener: (event: any) => unknown) => {
+		__test.terminalListeners.start.push(listener);
+		return noopDisposable;
+	},
+	onDidEndTerminalShellExecution: (listener: (event: any) => unknown) => {
+		__test.terminalListeners.end.push(listener);
+		return noopDisposable;
+	},
 };
 
 export const languages = {

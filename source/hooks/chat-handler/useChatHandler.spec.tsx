@@ -9,7 +9,7 @@ import {
 	updateProfessionalTone,
 } from '@/config/preferences';
 import {setToolRegistryGetter} from '@/message-handler';
-import {getLastBuiltPrompt} from '@/utils/prompt-builder';
+import {getLastBuiltPrompt} from '@/conversation/prompt-builder';
 import {getBaseSystemPrompt, useChatHandler} from './useChatHandler';
 import type {UseChatHandlerProps, ChatHandlerReturn} from './types';
 import type {LLMClient, Message} from '../../types/core';
@@ -1028,12 +1028,12 @@ test('useChatHandler - injects project context from memory finder', async t => {
 	await waitForCondition(() => hookResult !== null);
 	await hookResult!.handleChatMessage('refactor auth');
 
-	t.true(sentMessages[0].content.includes('## Project Context'));
-	t.true(
-		sentMessages[0].content.includes(
-			'- Auth uses Clerk and avoids middleware.',
-		),
-	);
+	// The recalled block rides in the user turn, not the system prompt (#1574).
+	t.false(sentMessages[0].content.includes('## Project Context'));
+	const userMessage = String(sentMessages.at(-1)?.content ?? '');
+	t.true(userMessage.startsWith('refactor auth'));
+	t.true(userMessage.includes('## Project Context'));
+	t.true(userMessage.includes('- Auth uses Clerk and avoids middleware.'));
 	t.true(
 		queuedComponents.some(
 			component =>
@@ -1044,13 +1044,20 @@ test('useChatHandler - injects project context from memory finder', async t => {
 	rendered.unmount();
 });
 
-test('useChatHandler - does not accumulate project context across turns', async t => {
+// The memo at useChatHandler.tsx:155 has always claimed to keep the system
+// message "stable across turns" to preserve the KV cache, but the per-turn
+// skills and memory appends defeated it: the system block differed on every
+// user message, so a local backend re-prefilled the whole context each turn.
+// This is the assertion that the claim now holds (#1574).
+test('useChatHandler - sends a byte-identical system prompt across turns', async t => {
 	let hookResult: ChatHandlerReturn | null = null;
 	const sentSystemPrompts: string[] = [];
+	const sentUserMessages: string[] = [];
 	const client: LLMClient = {
 		...createMockClient(),
 		chat: async (messages, _tools, callbacks) => {
 			sentSystemPrompts.push(String(messages[0]?.content ?? ''));
+			sentUserMessages.push(String(messages.at(-1)?.content ?? ''));
 			callbacks.onFinish?.();
 			return {
 				choices: [
@@ -1098,7 +1105,235 @@ test('useChatHandler - does not accumulate project context across turns', async 
 	await hookResult!.handleChatMessage('refactor auth');
 	await hookResult!.handleChatMessage('unrelated question about docs');
 
-	t.true(sentSystemPrompts[0]?.includes('## Project Context'));
-	t.false(sentSystemPrompts[1]?.includes('## Project Context'));
+	// Two turns, one recalling a memory and one recalling nothing: the system
+	// block must not differ by a single byte between them.
+	t.is(sentSystemPrompts.length, 2);
+	t.is(sentSystemPrompts[0], sentSystemPrompts[1]);
+	t.false(sentSystemPrompts[0]?.includes('## Project Context'));
+
+	// The context went to the turn that recalled it, and only that turn.
+	t.true(sentUserMessages[0]?.includes('## Project Context'));
+	t.false(sentUserMessages[1]?.includes('## Project Context'));
+	rendered.unmount();
+});
+
+// Escape aborts whichever controller app state holds, i.e. the last one handed
+// to setAbortController. The prop the hook receives stays null here, as it
+// does in the real app until the submit's setAbortController re-renders.
+const createCancellableProps = () => {
+	const controllers: AbortController[] = [];
+	const pressEscape = () => {
+		controllers[controllers.length - 1]?.abort();
+	};
+	return {
+		controllers,
+		pressEscape,
+		setAbortController: (controller: AbortController | null) => {
+			if (controller) controllers.push(controller);
+		},
+	};
+};
+
+test('useChatHandler - Escape during a plan turn stops the plan review', async t => {
+	let planComplete = 0;
+	let hookResult: ChatHandlerReturn | null = null;
+	const cancel = createCancellableProps();
+	const client: LLMClient = {
+		...createMockClient(),
+		chat: async (_messages, _tools, callbacks) => {
+			// The user presses Escape while the reply streams; the provider
+			// still returns what it had.
+			cancel.pressEscape();
+			callbacks.onFinish?.();
+			return {
+				choices: [
+					{message: {role: 'assistant' as const, content: '# Plan\n\n1. Build it.'}},
+				],
+			};
+		},
+	};
+	let planWrites = 0;
+	setToolRegistryGetter(() => ({
+		write_plan: async () => {
+			planWrites++;
+			return 'Plan saved';
+		},
+	}));
+
+	try {
+		render(
+			<TestHookComponent
+				{...createMockProps({
+					client,
+					toolManager: {
+						...createMockToolManager(),
+						getAvailableToolNames: () => ['write_plan'],
+					} as NonNullable<UseChatHandlerProps['toolManager']>,
+					developmentMode: 'plan',
+					setAbortController: cancel.setAbortController,
+					onPlanTurnComplete: () => {
+						planComplete++;
+					},
+				})}
+				onResult={result => {
+					hookResult = result;
+				}}
+			/>,
+		);
+
+		await waitForCondition(() => hookResult !== null);
+		await hookResult!.handleChatMessage('make a plan');
+
+		t.is(cancel.controllers.length, 1, 'one controller per turn');
+		t.is(planWrites, 0, 'a cancelled turn must not persist a fallback plan');
+		t.is(planComplete, 0, 'a cancelled turn must not offer plan review');
+	} finally {
+		setToolRegistryGetter(() => ({}));
+	}
+});
+
+test('useChatHandler - Escape during memory recall stops the model call', async t => {
+	let hookResult: ChatHandlerReturn | null = null;
+	let chatSignal: AbortSignal | undefined;
+	const cancel = createCancellableProps();
+	const client: LLMClient = {
+		...createMockClient(),
+		chat: async (_messages, _tools, callbacks, signal) => {
+			chatSignal = signal;
+			callbacks.onFinish?.();
+			return {
+				choices: [{message: {role: 'assistant' as const, content: 'ok'}}],
+			};
+		},
+	};
+
+	const rendered = render(
+		<TestHookComponent
+			{...createMockProps({
+				client,
+				toolManager: createMockToolManager(),
+				setAbortController: cancel.setAbortController,
+				memoryFinder: {
+					findRelevantMemories: async () => {
+						cancel.pressEscape();
+						return [];
+					},
+				},
+			})}
+			onResult={result => {
+				hookResult = result;
+			}}
+		/>,
+	);
+
+	await waitForCondition(() => hookResult !== null);
+	await hookResult!.handleChatMessage('refactor auth');
+
+	t.is(cancel.controllers.length, 1, 'one controller per turn');
+	t.true(chatSignal?.aborted, 'the model call must see the cancel');
+	rendered.unmount();
+});
+
+// Skills are matched against the current request, so they travel in the turn's
+// user message rather than the system prompt (#1574). The builder is covered in
+// isolation by command-integration.spec.ts; what that cannot show is that the
+// section survives into the array handed to the client. It matters here because
+// the call site swallows failures by design (it falls back to '' so a broken
+// skills loader cannot break the turn), so a regression would produce no crash
+// and no red test — the model would just silently stop receiving skills.
+test('useChatHandler - sends per-turn skills to the model in the user message', async t => {
+	let hookResult: ChatHandlerReturn | null = null;
+	let sentMessages: Message[] = [];
+	const matchedAgainst: string[] = [];
+	const client: LLMClient = {
+		...createMockClient(),
+		chat: async (messages, _tools, callbacks) => {
+			sentMessages = messages;
+			callbacks.onFinish?.();
+			return {choices: [{message: {role: 'assistant', content: 'ok'}}]};
+		},
+	};
+
+	const customCommandLoader = {
+		findRelevantCommands: (request: string) => {
+			matchedAgainst.push(request);
+			return [
+				{
+					name: 'changelog',
+					fullName: 'changelog',
+					path: '/test/changelog.md',
+					metadata: {description: 'Write a changelog entry'},
+					content: 'Summarise the change in one self-contained bullet.',
+				},
+			];
+		},
+	} as unknown as NonNullable<UseChatHandlerProps['customCommandLoader']>;
+
+	const rendered = render(
+		<TestHookComponent
+			{...createMockProps({
+				client,
+				toolManager: createMockToolManager(),
+				customCommandLoader,
+			})}
+			onResult={result => {
+				hookResult = result;
+			}}
+		/>,
+	);
+
+	await waitForCondition(() => hookResult !== null);
+	await hookResult!.handleChatMessage('update the changelog');
+
+	// Skills are chosen for THIS request, so the user's text is the query.
+	t.deepEqual(matchedAgainst, ['update the changelog']);
+
+	const userMessage = String(sentMessages.at(-1)?.content ?? '');
+	t.true(userMessage.startsWith('update the changelog'));
+	t.true(userMessage.includes('## Available Skills'));
+	t.true(
+		userMessage.includes('Summarise the change in one self-contained bullet.'),
+	);
+	// The other half of the move: it must no longer be in the system block.
+	t.false(
+		String(sentMessages[0]?.content ?? '').includes('## Available Skills'),
+	);
+	rendered.unmount();
+});
+
+test('useChatHandler - a turn with no skills and no memories is sent verbatim', async t => {
+	let hookResult: ChatHandlerReturn | null = null;
+	let sentMessages: Message[] = [];
+	const client: LLMClient = {
+		...createMockClient(),
+		chat: async (messages, _tools, callbacks) => {
+			sentMessages = messages;
+			callbacks.onFinish?.();
+			return {choices: [{message: {role: 'assistant', content: 'ok'}}]};
+		},
+	};
+
+	const rendered = render(
+		<TestHookComponent
+			{...createMockProps({
+				client,
+				toolManager: createMockToolManager(),
+				customCommandLoader: {
+					findRelevantCommands: () => [],
+				} as unknown as NonNullable<UseChatHandlerProps['customCommandLoader']>,
+				memoryFinder: {findRelevantMemories: async () => []},
+			})}
+			onResult={result => {
+				hookResult = result;
+			}}
+		/>,
+	);
+
+	await waitForCondition(() => hookResult !== null);
+	await hookResult!.handleChatMessage('just a question');
+
+	// Byte-identical, not merely "contains": an empty wrapper would still be a
+	// new prefix for every backend that caches on exact bytes.
+	t.is(String(sentMessages.at(-1)?.content ?? ''), 'just a question');
 	rendered.unmount();
 });

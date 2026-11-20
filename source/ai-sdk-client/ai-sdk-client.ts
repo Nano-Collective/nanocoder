@@ -1,5 +1,5 @@
 import type {LanguageModel} from 'ai';
-import {Agent} from 'undici';
+import type {Dispatcher} from 'undici';
 import {getPrivacyPreference} from '@/config/preferences';
 import {
 	TIMEOUT_SOCKET_DEFAULT_MS,
@@ -16,8 +16,10 @@ import type {
 	StreamCallbacks,
 } from '@/types/index';
 import {getLogger} from '@/utils/logging';
+import {createDispatcher} from '@/utils/proxy-dispatcher';
 import {isLocalURL} from '@/utils/url-utils';
 import {handleChat} from './chat/chat-handler.js';
+import {PrefixTracker} from './chat/prefix-tracker.js';
 import {normalizeModelIdForRequest} from './model-id.js';
 import {
 	createProvider,
@@ -32,7 +34,7 @@ export class AISDKClient implements LLMClient {
 	private currentModel: string;
 	private availableModels: string[];
 	private providerConfig: AIProviderConfig;
-	private undiciAgent: Agent;
+	private undiciAgent: Dispatcher;
 	private cachedContextSize: number;
 	private maxRetries: number;
 	// Placeholder map for callers that do not supply their own. The TUI hands
@@ -43,6 +45,10 @@ export class AISDKClient implements LLMClient {
 	private readonly privacySessionMapRef: {current: Record<string, string>} = {
 		current: {},
 	};
+
+	// Per client, matching what a single-slot local server caches: see
+	// PrefixTracker for why helper calls on this client are tracked too.
+	private readonly prefixTracker = new PrefixTracker();
 
 	constructor(providerConfig: AIProviderConfig) {
 		const logger = getLogger();
@@ -76,7 +82,7 @@ export class AISDKClient implements LLMClient {
 				? 0
 				: (effectiveSocketTimeout ?? defaultTimeout);
 
-		this.undiciAgent = new Agent({
+		this.undiciAgent = createDispatcher({
 			connect: {
 				timeout: resolvedSocketTimeout,
 				...getTlsConnectOptions(this.providerConfig),
@@ -208,6 +214,7 @@ export class AISDKClient implements LLMClient {
 				modeOverrides?.privacySessionMapRef ?? this.privacySessionMapRef,
 			privacyEnabled: modeOverrides?.privacyEnabled ?? getPrivacyPreference(),
 			onPrivacyEvent: callbacks.onPrivacyEvent,
+			prefixTracker: this.prefixTracker,
 		});
 	}
 

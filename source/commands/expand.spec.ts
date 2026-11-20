@@ -6,7 +6,7 @@ import type {ToolCall, ToolResult} from '@/types/core';
 import {
 	clearExpandableToolResults,
 	recordExpandableToolResult,
-} from '@/utils/tool-result-display';
+} from '@/components/tool-result-display';
 import {expandCommand} from './expand';
 
 const metadata = {

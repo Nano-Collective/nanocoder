@@ -1,8 +1,15 @@
-import {existsSync, mkdirSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
+
+import {existsSync, mkdirSync, readFileSync, rmSync, writeFileSync,mkdtempSync,utimesSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
+import * as path from 'node:path';
 import test from 'ava';
-import {describeProjectTrust} from '@/config/project-trust';
+import fs from 'node:fs';
+import {syncBuiltinESMExports} from 'node:module';
+import {
+	describeProjectTrust,
+	TRUST_FINGERPRINT_VERSION,
+} from '@/config/trust/project-trust';
 import {
 	DEFAULT_MEMORY_LIMIT,
 	DEFAULT_TOKEN_BUDGET,
@@ -11,10 +18,9 @@ import {
 	MIN_MEMORY_LIMIT,
 	MIN_TOKEN_BUDGET,
 } from '@/memory/project-context';
+import {getClosestConfigFile} from '@/config/index';
+import {isDirectoryTrusted} from '@/config/trust/directory-trust';
 import {
-	directoryTrustRefusal,
-	ensureDirectoryTrust,
-	grantDirectoryTrust,
 	getCompactToolDisplay,
 	getLastUsedModel,
 	getNanocoderShape,
@@ -24,7 +30,6 @@ import {
 	getProjectContextPreferences,
 	getReasoningExpanded,
 	getSemanticMemoryEnabled,
-	isDirectoryTrusted,
 	loadPreferences,
 	resolveProjectContextPreferences,
 	resetPreferencesCache,
@@ -44,10 +49,13 @@ import {
 	getPrivacyPreference,
 	updatePrivacyPreference,
 	getMouseReporting,
+	updateAlternateScreen,
+	getAlternateScreen,
 	updateMouseReporting,
 	updateShowAgentBashOutput,
 	updateShowUsageFooter,
-	trustRecheck,
+	getPreferencesVersion,
+	subscribeToPreferences,
 	DEFAULT_MAX_FPS,
 	MIN_MAX_FPS,
 	MAX_MAX_FPS,
@@ -55,7 +63,10 @@ import {
 	getUiMaxFps,
 	getMaxFps,
 } from './preferences';
-import {updatePreferencesNestedValue} from '@/config/config-writer';
+import {
+	updatePreferencesNestedValue,
+	writeConfigFileAtomic,
+} from '@/config/config-writer';
 import type {UserPreferences} from '@/types/index';
 
 console.log('\npreferences.spec.ts');
@@ -68,6 +79,10 @@ test.before(() => {
 	process.env.NANOCODER_CONFIG_DIR = testConfigDir;
 	mkdirSync(testConfigDir, {recursive: true});
 	// Reset the preferences cache to pick up the new config directory
+	resetPreferencesCache();
+});
+
+test.beforeEach(() => {
 	resetPreferencesCache();
 });
 
@@ -2108,309 +2123,6 @@ test.serial('full workflow: update and retrieve project context preferences', t 
 });
 
 // ============================================================================
-// Directory Trust Tests — shared by the interactive TUI, --plain, and the
-// daemon boot path (see source/daemon/cli.ts's `start`).
-// ============================================================================
-
-test('isDirectoryTrusted returns false when trustedDirectories is empty', t => {
-	t.false(isDirectoryTrusted('/some/project', {}));
-});
-
-test('isDirectoryTrusted matches a record with the current fingerprint', t => {
-	const dir = process.cwd();
-	const fingerprint = describeProjectTrust(dir).fingerprint;
-	t.true(
-		isDirectoryTrusted(dir, {
-			trustedDirectories: [{path: dir, fingerprint}],
-		}),
-	);
-	t.true(
-		isDirectoryTrusted(dir, {
-			trustedDirectories: [{path: '.', fingerprint}],
-		}),
-	);
-});
-
-test('isDirectoryTrusted ignores a path that has no fingerprint', t => {
-	const dir = process.cwd();
-	t.false(isDirectoryTrusted(dir, {trustedDirectories: [dir]}));
-});
-
-test('isDirectoryTrusted ignores a stale fingerprint', t => {
-	const dir = process.cwd();
-	t.false(
-		isDirectoryTrusted(dir, {
-			trustedDirectories: [{path: dir, fingerprint: 'stale'}],
-		}),
-	);
-});
-
-test('isDirectoryTrusted is false after a plugin is added', t => {
-	const root = join(tmpdir(), `trust-plugin-${Date.now()}`);
-	mkdirSync(join(root, '.nanocoder', 'plugins'), {recursive: true});
-	try {
-		const before = describeProjectTrust(root).fingerprint;
-		writeFileSync(
-			join(root, '.nanocoder', 'plugins', 'pulled.mjs'),
-			'export default {name:"pulled"}\n',
-		);
-		t.false(
-			isDirectoryTrusted(root, {
-				trustedDirectories: [{path: root, fingerprint: before}],
-			}),
-		);
-		t.true(
-			isDirectoryTrusted(root, {
-				trustedDirectories: [
-					{
-						path: root,
-						fingerprint: describeProjectTrust(root).fingerprint,
-					},
-				],
-			}),
-		);
-	} finally {
-		rmSync(root, {recursive: true, force: true});
-	}
-});
-
-test('isDirectoryTrusted does not match an unrelated directory', t => {
-	t.false(
-		isDirectoryTrusted(process.cwd(), {
-			trustedDirectories: ['/some/other/project'],
-		}),
-	);
-});
-
-test('ensureDirectoryTrust trusts without persisting when bypass is true', t => {
-	let saveCalled = false;
-	const result = ensureDirectoryTrust('/untrusted/project', true, {
-		loadPreferences: () => ({trustedDirectories: []}),
-		savePreferences: () => {
-			saveCalled = true;
-		},
-	});
-	t.deepEqual(result, {trusted: true, persisted: false});
-	t.false(saveCalled);
-});
-
-test('ensureDirectoryTrust trusts an already-recorded directory without persisting again', t => {
-	const dir = process.cwd();
-	let saveCalled = false;
-	const result = ensureDirectoryTrust(dir, false, {
-		loadPreferences: () => ({
-			trustedDirectories: [
-				{path: dir, fingerprint: describeProjectTrust(dir).fingerprint},
-			],
-		}),
-		savePreferences: () => {
-			saveCalled = true;
-		},
-	});
-	t.deepEqual(result, {trusted: true, persisted: false});
-	t.false(saveCalled);
-});
-
-test.serial(
-	'ensureDirectoryTrust refuses an unrecorded directory when NANOCODER_TRUST_DIRECTORY is unset',
-	t => {
-		delete process.env.NANOCODER_TRUST_DIRECTORY;
-		const result = ensureDirectoryTrust('/untrusted/project', false, {
-			loadPreferences: () => ({trustedDirectories: []}),
-			savePreferences: () => {
-				t.fail('should not persist when refusing');
-			},
-		});
-		t.deepEqual(result, {trusted: false, persisted: false, recheck: null});
-	},
-);
-
-test.serial(
-	'ensureDirectoryTrust flags a trusted directory whose fingerprint changed',
-	t => {
-		delete process.env.NANOCODER_TRUST_DIRECTORY;
-		const dir = process.cwd();
-		const result = ensureDirectoryTrust(dir, false, {
-			loadPreferences: () => ({
-				trustedDirectories: [{path: dir, fingerprint: 'old'}],
-			}),
-			savePreferences: () => {
-				t.fail('should not persist when refusing');
-			},
-		});
-		t.deepEqual(result, {trusted: false, persisted: false, recheck: 'changed'});
-	},
-);
-
-test.serial(
-	'ensureDirectoryTrust says a path-only entry needs re-approval after the upgrade',
-	t => {
-		delete process.env.NANOCODER_TRUST_DIRECTORY;
-		const dir = process.cwd();
-		const result = ensureDirectoryTrust(dir, false, {
-			loadPreferences: () => ({trustedDirectories: [dir]}),
-			savePreferences: () => {
-				t.fail('should not persist when refusing');
-			},
-		});
-		t.deepEqual(result, {trusted: false, persisted: false, recheck: 'upgrade'});
-	},
-);
-
-test.serial('directoryTrustRefusal returns the refusal message for an untrusted directory', t => {
-	delete process.env.NANOCODER_TRUST_DIRECTORY;
-	const message = directoryTrustRefusal('/untrusted/project', false, {
-		loadPreferences: () => ({trustedDirectories: []}),
-		savePreferences: () => {
-			t.fail('should not persist when refusing');
-		},
-	});
-	t.regex(message ?? '', /is not trusted/);
-	t.regex(message ?? '', /--trust-directory/);
-	t.regex(message ?? '', /NANOCODER_TRUST_DIRECTORY=1/);
-});
-
-test.serial('directoryTrustRefusal words a path-only entry as needing re-approval after the upgrade', t => {
-	delete process.env.NANOCODER_TRUST_DIRECTORY;
-	const dir = process.cwd();
-	const message = directoryTrustRefusal(dir, false, {
-		loadPreferences: () => ({trustedDirectories: [dir]}),
-		savePreferences: () => {
-			t.fail('should not persist when refusing');
-		},
-	});
-	t.regex(message ?? '', /needs re-approval after the upgrade/);
-});
-
-test.serial('directoryTrustRefusal words a changed fingerprint differently from an unknown directory', t => {
-	delete process.env.NANOCODER_TRUST_DIRECTORY;
-	const dir = process.cwd();
-	const message = directoryTrustRefusal(dir, false, {
-		loadPreferences: () => ({
-			trustedDirectories: [{path: dir, fingerprint: 'old'}],
-		}),
-		savePreferences: () => {
-			t.fail('should not persist when refusing');
-		},
-	});
-	t.regex(message ?? '', /changed since you trusted it/);
-	t.notRegex(message ?? '', /is not trusted/);
-});
-
-test('directoryTrustRefusal is null when bypassed or already trusted', t => {
-	const deps = {
-		loadPreferences: () => ({trustedDirectories: []}),
-		savePreferences: () => {
-			t.fail('should not persist');
-		},
-	};
-	t.is(directoryTrustRefusal('/untrusted/project', true, deps), null);
-
-	const dir = process.cwd();
-	t.is(
-		directoryTrustRefusal(dir, false, {
-			...deps,
-			loadPreferences: () => ({
-				trustedDirectories: [
-					{path: dir, fingerprint: describeProjectTrust(dir).fingerprint},
-				],
-			}),
-		}),
-		null,
-	);
-});
-
-test('trust checks skip malformed entries instead of throwing', t => {
-	const dir = process.cwd();
-	const preferences = {
-		trustedDirectories: [null, {}, {path: 5}, 7],
-	} as unknown as UserPreferences;
-	t.false(isDirectoryTrusted(dir, preferences));
-	t.is(trustRecheck(dir, preferences), null);
-	const granted = grantDirectoryTrust(preferences, dir);
-	t.true(isDirectoryTrusted(dir, granted));
-});
-
-test.serial(
-	'ensureDirectoryTrust with NANOCODER_TRUST_DIRECTORY=1 trusts and persists a new entry',
-	t => {
-		process.env.NANOCODER_TRUST_DIRECTORY = '1';
-		let savedPreferences: UserPreferences | null = null;
-		try {
-			const target = join(tmpdir(), 'nanocoder-untrusted-project');
-			const result = ensureDirectoryTrust(target, false, {
-				loadPreferences: () => ({trustedDirectories: []}),
-				savePreferences: prefs => {
-					savedPreferences = prefs;
-				},
-			});
-			t.true(result.trusted);
-			t.true(result.persisted);
-			t.deepEqual(savedPreferences?.trustedDirectories, [
-				{
-					path: target,
-					fingerprint: describeProjectTrust(target).fingerprint,
-				},
-			]);
-		} finally {
-			delete process.env.NANOCODER_TRUST_DIRECTORY;
-		}
-	},
-);
-
-test.serial(
-	'ensureDirectoryTrust with NANOCODER_TRUST_DIRECTORY=1 does not duplicate an already-trusted directory',
-	t => {
-		process.env.NANOCODER_TRUST_DIRECTORY = '1';
-		try {
-			const dir = process.cwd();
-			let saveCalled = false;
-			const result = ensureDirectoryTrust(dir, false, {
-				loadPreferences: () => ({
-					trustedDirectories: [
-						{
-							path: dir,
-							fingerprint: describeProjectTrust(dir).fingerprint,
-						},
-					],
-				}),
-				savePreferences: () => {
-					saveCalled = true;
-				},
-			});
-			t.deepEqual(result, {trusted: true, persisted: false});
-			t.false(saveCalled);
-		} finally {
-			delete process.env.NANOCODER_TRUST_DIRECTORY;
-		}
-	},
-);
-
-test.serial(
-	'ensureDirectoryTrust with NANOCODER_TRUST_DIRECTORY=1 replaces a path-only entry',
-	t => {
-		process.env.NANOCODER_TRUST_DIRECTORY = '1';
-		let savedPreferences: UserPreferences | null = null;
-		try {
-			const dir = process.cwd();
-			const result = ensureDirectoryTrust(dir, false, {
-				loadPreferences: () => ({trustedDirectories: [dir]}),
-				savePreferences: prefs => {
-					savedPreferences = prefs;
-				},
-			});
-			t.true(result.trusted);
-			t.true(result.persisted);
-			t.deepEqual(savedPreferences?.trustedDirectories, [
-				{path: dir, fingerprint: describeProjectTrust(dir).fingerprint},
-			]);
-		} finally {
-			delete process.env.NANOCODER_TRUST_DIRECTORY;
-		}
-	},
-);
-
-// ============================================================================
 // Trust is global-only: a project-level nanocoder-preferences.json (which
 // ships with a cloned repo) must never be able to mark its own directory
 // trusted, and trust writes must never land in it.
@@ -2734,3 +2446,478 @@ test.serial(
 		}
 	},
 );
+
+test.serial(
+	'updatePreferencesNestedValue invalidates cached preferences and notifies subscribers',
+	t => {
+		const preferencesPath = getTestPreferencesPath();
+		let notifications = 0;
+		let unsubscribe: (() => void) | undefined;
+
+		try {
+			t.true(
+				savePreferences({
+					nanocoder: {ui: {maxFps: 30}},
+				}),
+			);
+			t.is(loadPreferences().nanocoder?.ui?.maxFps, 30);
+			t.is(getMaxFps(), 30);
+
+			const previousVersion = getPreferencesVersion();
+			unsubscribe = subscribeToPreferences(() => {
+				notifications++;
+			});
+
+			updatePreferencesNestedValue('ui', 'maxFps', 24);
+
+			t.is(getPreferencesVersion(), previousVersion + 1);
+			t.is(notifications, 1);
+			t.is(loadPreferences().nanocoder?.ui?.maxFps, 24);
+			t.is(getMaxFps(), 24);
+			t.is(notifications, 1);
+		} finally {
+			unsubscribe?.();
+			if (existsSync(preferencesPath)) {
+				rmSync(preferencesPath, {force: true});
+			}
+		}
+	},
+);
+
+test.serial(
+	'writeConfigFileAtomic invalidates preferences once after a successful preferences write',
+	t => {
+		const dir = mkdtempSync(path.join(tmpdir(), 'nanocoder-writer-cache-'));
+		const previousDir = process.env.NANOCODER_CONFIG_DIR;
+		const file = path.join(dir, 'nanocoder-preferences.json');
+		let notifications = 0;
+		let unsubscribe: (() => void) | undefined;
+
+		try {
+			process.env.NANOCODER_CONFIG_DIR = dir;
+			resetPreferencesCache();
+
+			t.true(savePreferences({showAgentBashOutput: false}));
+			t.false(getShowAgentBashOutput());
+
+			const previousVersion = getPreferencesVersion();
+			unsubscribe = subscribeToPreferences(() => {
+				notifications++;
+			});
+
+			writeConfigFileAtomic(file, {showAgentBashOutput: true});
+
+			t.is(getPreferencesVersion(), previousVersion + 1);
+			t.is(notifications, 1);
+			t.true(loadPreferences().showAgentBashOutput);
+			t.true(getShowAgentBashOutput());
+
+			const versionAfterWrite = getPreferencesVersion();
+
+			const blockingFile = path.join(dir, 'blocking-file');
+			writeFileSync(blockingFile, 'not a directory');
+
+			t.throws(() =>
+				writeConfigFileAtomic(
+					path.join(blockingFile, 'nanocoder-preferences.json'),
+					{showAgentBashOutput: false},
+				),
+			);
+			t.is(getPreferencesVersion(), versionAfterWrite);
+			t.is(notifications, 1);
+			t.true(getShowAgentBashOutput());
+		} finally {
+			unsubscribe?.();
+			if (previousDir === undefined) {
+				delete process.env.NANOCODER_CONFIG_DIR;
+			} else {
+				process.env.NANOCODER_CONFIG_DIR = previousDir;
+			}
+
+			resetPreferencesCache();
+			rmSync(dir, {recursive: true, force: true});
+		}
+	},
+);
+
+
+test.serial('loadPreferences returns cached data when file is unchanged', t => {
+	const dir = mkdtempSync(path.join(tmpdir(), 'nanocoder-cache-'));
+	const previousDir = process.env.NANOCODER_CONFIG_DIR;
+
+	try {
+		process.env.NANOCODER_CONFIG_DIR = dir;
+		const file = path.join(dir, 'nanocoder-preferences.json');
+
+		writeFileSync(file, JSON.stringify({selectedTheme: 'dark'}));
+		resetPreferencesCache();
+
+		const first = loadPreferences();
+		const second = loadPreferences();
+
+		t.deepEqual(first, second);
+		t.not(first, second);
+
+		// Callers must not be able to modify the cached object.
+		first.selectedTheme = 'light';
+
+		t.is(loadPreferences().selectedTheme, 'dark');
+	} finally {
+		if (previousDir === undefined) {
+			delete process.env.NANOCODER_CONFIG_DIR;
+		} else {
+			process.env.NANOCODER_CONFIG_DIR = previousDir;
+		}
+
+		resetPreferencesCache();
+		rmSync(dir, {recursive: true, force: true});
+	}
+});
+
+test.serial('savePreferences invalidates the cache immediately', t => {
+	const dir = mkdtempSync(path.join(tmpdir(), 'nanocoder-cache-'));
+	const previousDir = process.env.NANOCODER_CONFIG_DIR;
+
+	try {
+		process.env.NANOCODER_CONFIG_DIR = dir;
+		const file = path.join(dir, 'nanocoder-preferences.json');
+
+		writeFileSync(file, JSON.stringify({reasoningExpanded: false}));
+		resetPreferencesCache();
+
+		t.false(loadPreferences().reasoningExpanded);
+
+		const saved = savePreferences({reasoningExpanded: true});
+		t.true(saved);
+
+		// No delay: an in-process save must invalidate immediately.
+		t.true(loadPreferences().reasoningExpanded);
+	} finally {
+		if (previousDir === undefined) {
+			delete process.env.NANOCODER_CONFIG_DIR;
+		} else {
+			process.env.NANOCODER_CONFIG_DIR = previousDir;
+		}
+
+		resetPreferencesCache();
+		rmSync(dir, {recursive: true, force: true});
+	}
+});
+
+test.serial('loadPreferences detects external file modifications', async t => {
+	const dir = mkdtempSync(path.join(tmpdir(), 'nanocoder-cache-'));
+	const previousDir = process.env.NANOCODER_CONFIG_DIR;
+
+	try {
+		process.env.NANOCODER_CONFIG_DIR = dir;
+		const file = path.join(dir, 'nanocoder-preferences.json');
+
+		writeFileSync(file, JSON.stringify({reasoningExpanded: false}));
+		resetPreferencesCache();
+
+		t.false(loadPreferences().reasoningExpanded);
+
+		// Simulate another process modifying the preferences file.
+		writeFileSync(file, JSON.stringify({reasoningExpanded: true}));
+
+		const changedTime = new Date(Date.now() + 60_000);
+		utimesSync(file, changedTime, changedTime);
+
+		// Cached data remains valid during the metadata-check interval.
+		t.false(loadPreferences().reasoningExpanded);
+
+		// Allow the one-second interval to expire.
+		await new Promise(resolve => setTimeout(resolve, 1100));
+
+		t.true(loadPreferences().reasoningExpanded);
+	} finally {
+		if (previousDir === undefined) {
+			delete process.env.NANOCODER_CONFIG_DIR;
+		} else {
+			process.env.NANOCODER_CONFIG_DIR = previousDir;
+		}
+
+		resetPreferencesCache();
+		rmSync(dir, {recursive: true, force: true});
+	}
+});
+
+test.serial('loadPreferences respects config directory changes', t => {
+	const firstDir = mkdtempSync(path.join(tmpdir(), 'nanocoder-first-'));
+	const secondDir = mkdtempSync(path.join(tmpdir(), 'nanocoder-second-'));
+	const previousDir = process.env.NANOCODER_CONFIG_DIR;
+
+	try {
+		writeFileSync(
+			path.join(firstDir, 'nanocoder-preferences.json'),
+			JSON.stringify({reasoningExpanded: false}),
+		);
+
+		writeFileSync(
+			path.join(secondDir, 'nanocoder-preferences.json'),
+			JSON.stringify({reasoningExpanded: true}),
+		);
+
+		process.env.NANOCODER_CONFIG_DIR = firstDir;
+		resetPreferencesCache();
+
+		t.false(loadPreferences().reasoningExpanded);
+
+		// Path changes must invalidate immediately, even within one second.
+		process.env.NANOCODER_CONFIG_DIR = secondDir;
+
+		t.true(loadPreferences().reasoningExpanded);
+	} finally {
+		if (previousDir === undefined) {
+			delete process.env.NANOCODER_CONFIG_DIR;
+		} else {
+			process.env.NANOCODER_CONFIG_DIR = previousDir;
+		}
+
+		resetPreferencesCache();
+		rmSync(firstDir, {recursive: true, force: true});
+		rmSync(secondDir, {recursive: true, force: true});
+	}
+});
+
+test.serial('loadPreferences avoids repeated filesystem reads and stats', t => {
+	const dir = mkdtempSync(path.join(tmpdir(), 'nanocoder-reads-'));
+	const previousDir = process.env.NANOCODER_CONFIG_DIR;
+	const preferencesFile = path.join(dir, 'nanocoder-preferences.json');
+
+	const originalReadFileSync = fs.readFileSync;
+	const originalStatSync = fs.statSync;
+
+	let reads = 0;
+	let stats = 0;
+
+	const isPreferencesFile = (file: unknown): boolean => {
+		return (
+			typeof file === 'string' &&
+			path.resolve(file) === path.resolve(preferencesFile)
+		);
+	};
+
+	try {
+		writeFileSync(
+			preferencesFile,
+			JSON.stringify({reasoningExpanded: false}),
+		);
+
+		process.env.NANOCODER_CONFIG_DIR = dir;
+		resetPreferencesCache();
+
+		fs.readFileSync = ((
+			file: Parameters<typeof fs.readFileSync>[0],
+			...args: unknown[]
+		) => {
+			if (isPreferencesFile(file)) {
+				reads++;
+			}
+
+			return Reflect.apply(originalReadFileSync, fs, [file, ...args]);
+		}) as typeof fs.readFileSync;
+
+		fs.statSync = ((
+			file: Parameters<typeof fs.statSync>[0],
+			...args: unknown[]
+		) => {
+			if (isPreferencesFile(file)) {
+				stats++;
+			}
+
+			return Reflect.apply(originalStatSync, fs, [file, ...args]);
+		}) as typeof fs.statSync;
+
+		syncBuiltinESMExports();
+
+		// First load reads the preferences file.
+		loadPreferences();
+
+		t.is(reads, 1);
+
+		const initialStats = stats;
+
+		// Hot-path calls should require neither reads nor stats.
+		for (let i = 0; i < 10; i++) {
+			loadPreferences();
+		}
+
+		t.is(reads, 1);
+		t.is(stats, initialStats);
+
+		// Successful saves invalidate the cache immediately.
+		t.true(savePreferences({reasoningExpanded: true}));
+
+		loadPreferences();
+
+		t.is(reads, 2);
+
+		const statsAfterSave = stats;
+
+		for (let i = 0; i < 10; i++) {
+			loadPreferences();
+		}
+
+		t.is(reads, 2);
+		t.is(stats, statsAfterSave);
+	} finally {
+		fs.readFileSync = originalReadFileSync;
+		fs.statSync = originalStatSync;
+		syncBuiltinESMExports();
+
+		if (previousDir === undefined) {
+			delete process.env.NANOCODER_CONFIG_DIR;
+		} else {
+			process.env.NANOCODER_CONFIG_DIR = previousDir;
+		}
+
+		resetPreferencesCache();
+		rmSync(dir, {recursive: true, force: true});
+	}
+});
+
+test.serial('cached preference getter refreshes after save', t => {
+	const dir = mkdtempSync(path.join(tmpdir(), 'nanocoder-derived-cache-'));
+	const previousDir = process.env.NANOCODER_CONFIG_DIR;
+
+	try {
+		process.env.NANOCODER_CONFIG_DIR = dir;
+
+		const file = path.join(dir, 'nanocoder-preferences.json');
+
+		writeFileSync(
+			file,
+			JSON.stringify({showAgentBashOutput: false}),
+		);
+
+		resetPreferencesCache();
+
+		t.false(getShowAgentBashOutput());
+
+		t.true(savePreferences({showAgentBashOutput: true}));
+
+		// The preferences version changes after a successful save.
+		t.true(getShowAgentBashOutput());
+
+		// Repeated calls reuse the derived value.
+		t.true(getShowAgentBashOutput());
+	} finally {
+		if (previousDir === undefined) {
+			delete process.env.NANOCODER_CONFIG_DIR;
+		} else {
+			process.env.NANOCODER_CONFIG_DIR = previousDir;
+		}
+
+		resetPreferencesCache();
+		rmSync(dir, {recursive: true, force: true});
+	}
+});
+
+test.serial('cached preference getter stays on the filesystem-free hot path', t => {
+	const dir = mkdtempSync(path.join(tmpdir(), 'nanocoder-derived-fast-'));
+	const previousDir = process.env.NANOCODER_CONFIG_DIR;
+
+	const originalReadFileSync = fs.readFileSync;
+	const originalStatSync = fs.statSync;
+
+	let reads = 0;
+	let stats = 0;
+
+	try {
+		process.env.NANOCODER_CONFIG_DIR = dir;
+
+		const file = path.join(dir, 'nanocoder-preferences.json');
+
+		writeFileSync(
+			file,
+			JSON.stringify({showAgentBashOutput: true}),
+		);
+
+		resetPreferencesCache();
+
+		// Populate the version-based derived cache first.
+		t.true(getShowAgentBashOutput());
+
+		fs.readFileSync = ((
+			filePath: Parameters<typeof fs.readFileSync>[0],
+			...args: unknown[]
+		) => {
+			reads++;
+			return Reflect.apply(originalReadFileSync, fs, [
+				filePath,
+				...args,
+			]);
+		}) as typeof fs.readFileSync;
+
+		fs.statSync = ((
+			filePath: Parameters<typeof fs.statSync>[0],
+			...args: unknown[]
+		) => {
+			stats++;
+			return Reflect.apply(originalStatSync, fs, [
+				filePath,
+				...args,
+			]);
+		}) as typeof fs.statSync;
+
+		syncBuiltinESMExports();
+
+		for (let i = 0; i < 1000; i++) {
+			t.true(getShowAgentBashOutput());
+		}
+
+		t.is(reads, 0);
+		t.is(stats, 0);
+	} finally {
+		fs.readFileSync = originalReadFileSync;
+		fs.statSync = originalStatSync;
+		syncBuiltinESMExports();
+
+		if (previousDir === undefined) {
+			delete process.env.NANOCODER_CONFIG_DIR;
+		} else {
+			process.env.NANOCODER_CONFIG_DIR = previousDir;
+		}
+
+		resetPreferencesCache();
+		rmSync(dir, {recursive: true, force: true});
+	}
+});
+
+// Every boolean preference: its default when unset, and that a write is read
+// back from the file under its own key.
+const booleanPreferences: Array<{
+	key: keyof UserPreferences;
+	get: () => boolean;
+	set: (value: boolean) => void;
+	unset: boolean;
+}> = [
+	{key: 'reasoningExpanded', get: getReasoningExpanded, set: updateReasoningExpanded, unset: false},
+	{key: 'compactToolDisplay', get: getCompactToolDisplay, set: updateCompactToolDisplay, unset: true},
+	{key: 'showUsageFooter', get: getShowUsageFooter, set: updateShowUsageFooter, unset: true},
+	{key: 'enablePromptScrubbing', get: getPrivacyPreference, set: updatePrivacyPreference, unset: false},
+	{key: 'alternateScreen', get: getAlternateScreen, set: updateAlternateScreen, unset: true},
+	{key: 'mouseReporting', get: getMouseReporting, set: updateMouseReporting, unset: true},
+	{key: 'professionalTone', get: getProfessionalTone, set: updateProfessionalTone, unset: false},
+	{key: 'showAgentBashOutput', get: getShowAgentBashOutput, set: updateShowAgentBashOutput, unset: false},
+];
+
+for (const {key, get, set, unset} of booleanPreferences) {
+	test.serial(`${key}: defaults to ${unset} and round-trips through the file`, t => {
+		const preferencesPath = getTestPreferencesPath();
+		rmSync(preferencesPath, {force: true});
+		resetPreferencesCache();
+		try {
+			t.is(get(), unset);
+			set(!unset);
+			t.is(get(), !unset);
+			t.is(JSON.parse(readFileSync(preferencesPath, 'utf-8'))[key], !unset);
+			set(unset);
+			t.is(get(), unset);
+		} finally {
+			rmSync(preferencesPath, {force: true});
+			resetPreferencesCache();
+		}
+	});
+}

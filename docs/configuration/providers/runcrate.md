@@ -6,7 +6,9 @@ sidebar_order: 31
 
 # Runcrate
 
-[Runcrate](https://www.runcrate.ai/?utm_source=nanocoder&utm_medium=listing&utm_campaign=gpu_pricing) is a GPU cloud that also serves open models, such as DeepSeek V4.1 Flash, GLM-5.3, Qwen3.8 Flash and gpt-oss 120B, on an OpenAI-compatible API. It speaks the OpenAI Chat Completions API, including streaming and tool calling, so it works as a drop-in coding provider for Nanocoder. Five open models (DeepSeek V4.1 Flash, GLM-5.3, GLM-5.3 Flash, Qwen3.8 Flash and gpt-oss 120B) include a limited [free allowance](https://www.runcrate.ai/inference/free?utm_source=nanocoder&utm_medium=listing&utm_campaign=gpu_pricing) when you sign in with a GitHub account that is at least 30 days old. The allowance is shared by the workspace and resets per session and weekly; past it, requests are billed from your balance or stop until it resets.
+[Runcrate](https://www.runcrate.ai) serves open models such as DeepSeek V4.1 Flash, GLM-5.3, Qwen3.8 Flash and gpt-oss 120B on an OpenAI-compatible API, including streaming and tool calling.
+
+Some open models include a limited free allowance for GitHub accounts of a minimum age. The allowance, its terms and the list of eligible models are set by Runcrate and can change, so check the [Runcrate dashboard](https://www.runcrate.ai/dashboard/api-keys) for what applies to your account.
 
 ## Configuration
 
@@ -21,9 +23,8 @@ sidebar_order: 31
 
 ## Setup
 
-1. Sign in to [Runcrate](https://www.runcrate.ai/?utm_source=nanocoder&utm_medium=listing&utm_campaign=gpu_pricing) with GitHub. The free allowance applies only when you sign in with a GitHub account that is at least 30 days old.
-2. Create an API key in the [Runcrate dashboard](https://www.runcrate.ai/dashboard/api-keys?utm_source=nanocoder&utm_medium=listing&utm_campaign=gpu_pricing) (keys start with `rc_live_`). The same page shows how much free usage is left and when it resets.
-3. Set `RUNCRATE_API_KEY`, or paste the key into the wizard
+1. Sign in to [Runcrate](https://www.runcrate.ai) and create an API key in the [dashboard](https://www.runcrate.ai/dashboard/api-keys) (keys start with `rc_live_`)
+2. Paste the key into the wizard, or set `RUNCRATE_API_KEY` in your environment and reference it with `${RUNCRATE_API_KEY}`. Nanocoder resolves that reference; it does not read the variable automatically
 
 ## Models
 
@@ -35,4 +36,4 @@ Model names use the `vendor/model` form and are passed through unchanged, for ex
 - `Qwen/Qwen3.8-Flash`
 - `openai/gpt-oss-120b`
 
-The current catalog is public at `https://api.runcrate.ai/v1/models`. Enter the model IDs you want in the wizard's model field, separated by commas.
+The catalog at `https://api.runcrate.ai/v1/models` also lists image, video and audio models, which Nanocoder cannot use. Enter the chat model IDs you want in the wizard's model field, separated by commas.

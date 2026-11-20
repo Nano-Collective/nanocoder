@@ -3,11 +3,11 @@ import {render} from 'ink-testing-library';
 import React from 'react';
 import {themes} from '../config/themes';
 import {ThemeContext} from '../hooks/useTheme';
-import {setGlobalQuestionHandler} from '../utils/question-queue';
+import {setGlobalQuestionHandler} from './runtime/question-queue';
 import {
 	getToolJsonSchema,
 	validateArgsAgainstSchema,
-} from '../utils/schema-validate';
+} from './runtime/schema-validate';
 import {askQuestionTool} from './ask-question';
 
 console.log(`\nask-question.spec.tsx – ${React.version}`);

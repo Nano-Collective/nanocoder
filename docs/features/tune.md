@@ -30,14 +30,26 @@ Controls which tools the AI has access to.
 |---------|-------|-----------|
 | **auto** (default) | Resolves to `full`, `minimal`, or `nano` from the active model id | Cloud/unknown models get `full`; models up to 15B parameters get a reduced profile automatically |
 | **full** | All registered tools including MCP servers | No filtering applied |
-| **minimal** | 8 core tools: `read_file`, `write_file`, `string_replace`, `execute_bash`, `find_files`, `search_file_contents`, `list_directory`, `agent` | Slim prompt and single-tool enforcement enabled automatically |
-| **nano** | 5 core tools: `read_file`, `diff_edit`, `write_file`, `execute_bash`, `search_file_contents` | Ultra-slim prompt, single-tool enforcement, AGENTS.md omitted by default |
+| **minimal** | 10 core tools: `read_file`, `write_file`, `string_replace`, `execute_bash`, `bash_output`, `kill_bash`, `find_files`, `search_file_contents`, `list_directory`, `agent` | Slim prompt and single-tool enforcement enabled automatically |
+| **nano** | 7 core tools: `read_file`, `diff_edit`, `write_file`, `execute_bash`, `bash_output`, `kill_bash`, `search_file_contents` | Ultra-slim prompt, single-tool enforcement, AGENTS.md omitted by default |
 
 The **auto** profile is the default. It keeps the full tool surface for cloud models and model ids with no size hint, resolves models up to 15B parameters to `minimal`, and resolves models up to 4B parameters to `nano`. The status bar shows the resolved profile, for example `tune: minimal (auto)`.
 
 > **What about tasks and walkthroughs?** `write_tasks` and `write_walkthrough` are part of the `full` profile only. Under `minimal` or `nano` the AI will not build a task list or record a completion walkthrough — that prompt and tool budget is spent on editing instead. `/tasks` still works for managing the list yourself. Plan mode is the exception: `write_plan` is added back on every profile so plan review works everywhere. See [Task Management](task-management.md) and [Development Modes](development-modes.md).
 
 > **Why don't I see my MCP tools?** MCP tools are only exposed in the resolved `full` profile. If you connect an MCP server but the model cannot see its tools, open `/tune` and either switch the tool profile to **full** or use a larger/cloud model so `auto` resolves to `full`. `/mcp` still shows connected servers even when the current tool profile filters their tools out of the model prompt.
+
+### MCP Tool Discovery (`mcpDiscovery`)
+
+When multiple MCP servers provide numerous tools, injecting all tool JSON schemas directly into the prompt consumes significant context tokens. Nanocoder supports on-demand MCP discovery via `tune.mcpDiscovery`:
+
+| Value | Behaviour |
+|-------|-----------|
+| **`auto`** (default) | Automatically enables on-demand discovery when 8 or more MCP tools are available across connected servers. |
+| **`always`** | Always enables on-demand discovery, even when fewer than 8 MCP tools are connected. |
+| **`disabled`** | Disables on-demand discovery. All MCP tools have their full JSON schemas eagerly registered and hydrated in the prompt. |
+
+When on-demand discovery is enabled, a compact tool catalog listing available MCP tool names, servers, and short descriptions is presented to the model. The model loads full schemas as needed using the `load_tool_schema` tool.
 
 The **minimal** profile is designed for small models (1B-15B parameters) that struggle with large tool sets. It reduces the system prompt size and forces the model to call one tool at a time.
 

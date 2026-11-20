@@ -36,7 +36,9 @@ You can override the default location using the `NANOCODER_LOG_DIR` environment 
 
 To disable file logging entirely, set `NANOCODER_LOG_DISABLE_FILE=true`. This takes precedence over `NANOCODER_LOG_LEVEL`: no log directory or file is created and nothing is written.
 
-When Nanocoder runs under the Bun runtime, Pino's file transport is not loaded (it relies on worker threads Bun does not support), so a lightweight fallback logger is used and no log file is written.
+When Nanocoder runs under the Bun runtime, Pino's file transport is not loaded (it relies on worker threads Bun does not support), so a lightweight fallback logger writes to stderr instead and no log file is written.
+
+Log lines never go to stdout, so `nanocoder run --json` output and the ACP JSON-RPC stream stay clean whatever `NANOCODER_LOG_LEVEL` is set to. The log file is opened before logging starts, and the last lines before the process exits are flushed.
 
 ## Configuration Examples
 
