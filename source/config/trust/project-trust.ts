@@ -138,22 +138,41 @@ function listHooks(
 	config: ProjectConfig | undefined,
 	lines: string[],
 ): {sessionStart: number; other: number} {
-	const hooks = config?.nanocoder?.hooks;
-	if (!hooks || typeof hooks !== 'object' || Array.isArray(hooks)) {
-		return {sessionStart: 0, other: 0};
-	}
-
 	let sessionStart = 0;
 	let other = 0;
-	for (const event of HOOK_EVENTS) {
-		const entries = hookEntries(hooks[event]);
-		// The whole entry: matchTools, matchFiles, and timeout change what runs.
-		for (const entry of entries) {
-			lines.push(`hook ${event} ${JSON.stringify(entry)}`);
+
+	const countHooksObject = (hooks: unknown, prefix: string): void => {
+		if (!hooks || typeof hooks !== 'object' || Array.isArray(hooks)) {
+			return;
 		}
-		if (event === 'session-start') sessionStart += entries.length;
-		else other += entries.length;
+		const hooksRecord = hooks as Record<string, unknown>;
+		for (const event of HOOK_EVENTS) {
+			const entries = hookEntries(hooksRecord[event]);
+			// The whole entry: matchTools, matchFiles, and timeout change what runs.
+			for (const entry of entries) {
+				lines.push(`${prefix}${event} ${JSON.stringify(entry)}`);
+			}
+			if (event === 'session-start') sessionStart += entries.length;
+			else other += entries.length;
+		}
+	};
+
+	countHooksObject(config?.nanocoder?.hooks, 'hook ');
+
+	const profiles = config?.nanocoder?.profiles;
+	if (profiles && typeof profiles === 'object' && !Array.isArray(profiles)) {
+		for (const [profileName, profile] of Object.entries(profiles).sort(
+			([a], [b]) => a.localeCompare(b),
+		)) {
+			if (profile && typeof profile === 'object' && !Array.isArray(profile)) {
+				countHooksObject(
+					(profile as Record<string, unknown>).hooks,
+					`hook profile:${profileName} `,
+				);
+			}
+		}
 	}
+
 	return {sessionStart, other};
 }
 
@@ -161,26 +180,44 @@ function listFormatters(
 	config: ProjectConfig | undefined,
 	lines: string[],
 ): number {
-	const formatters = config?.nanocoder?.formatters;
-	if (!Array.isArray(formatters)) return 0;
-
 	let count = 0;
-	for (const entry of formatters) {
-		if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue;
-		const command = (entry as {command?: unknown}).command;
-		if (typeof command !== 'string' || command.trim() === '') continue;
-		const match = (entry as {match?: unknown}).match;
-		const globs = Array.isArray(match)
-			? match.filter((item): item is string => typeof item === 'string')
-			: typeof match === 'string'
-				? [match]
-				: [];
-		if (globs.length === 0) continue;
-		// The whole entry, so `prettier` + `--write *.ts` and
-		// `prettier --write` + `*.ts` can't produce the same line.
-		lines.push(`formatter ${JSON.stringify(entry)}`);
-		count++;
+
+	const countFormattersArray = (formatters: unknown, prefix: string): void => {
+		if (!Array.isArray(formatters)) return;
+		for (const entry of formatters) {
+			if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue;
+			const command = (entry as {command?: unknown}).command;
+			if (typeof command !== 'string' || command.trim() === '') continue;
+			const match = (entry as {match?: unknown}).match;
+			const globs = Array.isArray(match)
+				? match.filter((item): item is string => typeof item === 'string')
+				: typeof match === 'string'
+					? [match]
+					: [];
+			if (globs.length === 0) continue;
+			// The whole entry, so `prettier` + `--write *.ts` and
+			// `prettier --write` + `*.ts` can't produce the same line.
+			lines.push(`${prefix}${JSON.stringify(entry)}`);
+			count++;
+		}
+	};
+
+	countFormattersArray(config?.nanocoder?.formatters, 'formatter ');
+
+	const profiles = config?.nanocoder?.profiles;
+	if (profiles && typeof profiles === 'object' && !Array.isArray(profiles)) {
+		for (const [profileName, profile] of Object.entries(profiles).sort(
+			([a], [b]) => a.localeCompare(b),
+		)) {
+			if (profile && typeof profile === 'object' && !Array.isArray(profile)) {
+				countFormattersArray(
+					(profile as Record<string, unknown>).formatters,
+					`formatter profile:${profileName} `,
+				);
+			}
+		}
 	}
+
 	return count;
 }
 
@@ -194,18 +231,36 @@ function listLspServers(
 	config: ProjectConfig | undefined,
 	lines: string[],
 ): number {
-	const servers = config?.nanocoder?.lspServers;
-	if (!Array.isArray(servers)) return 0;
-
 	let count = 0;
-	for (const entry of servers) {
-		if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue;
-		const {name, command, languages} = entry as Record<string, unknown>;
-		if (typeof name !== 'string' || typeof command !== 'string') continue;
-		if (command.trim() === '' || !Array.isArray(languages)) continue;
-		lines.push(`lsp ${JSON.stringify(entry)}`);
-		count++;
+
+	const countServers = (servers: unknown, prefix: string): void => {
+		if (!Array.isArray(servers)) return;
+		for (const entry of servers) {
+			if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue;
+			const {name, command, languages} = entry as Record<string, unknown>;
+			if (typeof name !== 'string' || typeof command !== 'string') continue;
+			if (command.trim() === '' || !Array.isArray(languages)) continue;
+			lines.push(`${prefix}${JSON.stringify(entry)}`);
+			count++;
+		}
+	};
+
+	countServers(config?.nanocoder?.lspServers, 'lsp ');
+
+	const profiles = config?.nanocoder?.profiles;
+	if (profiles && typeof profiles === 'object' && !Array.isArray(profiles)) {
+		for (const [profileName, profile] of Object.entries(profiles).sort(
+			([a], [b]) => a.localeCompare(b),
+		)) {
+			if (profile && typeof profile === 'object' && !Array.isArray(profile)) {
+				countServers(
+					(profile as Record<string, unknown>).lspServers,
+					`lsp profile:${profileName} `,
+				);
+			}
+		}
 	}
+
 	return count;
 }
 
@@ -228,23 +283,55 @@ function listPermissionSettings(
 	const nanocoder = config?.nanocoder;
 	if (!nanocoder || typeof nanocoder !== 'object') return 0;
 
-	const settings: [string, unknown][] = [
-		['alwaysAllow', nanocoder.alwaysAllow],
-		['defaultMode', nanocoder.defaultMode],
-		['sandbox', nanocoder.sandbox],
-		[
-			'verify.trustLevel',
-			nanocoder.verify && typeof nanocoder.verify === 'object'
-				? (nanocoder.verify as {trustLevel?: unknown}).trustLevel
-				: undefined,
-		],
-	];
 	let count = 0;
-	for (const [name, value] of settings) {
-		if (value === undefined) continue;
-		lines.push(`setting ${name} ${JSON.stringify(value)}`);
+
+	const checkSettings = (
+		obj: Record<string, unknown>,
+		prefix: string,
+	): void => {
+		const settings: [string, unknown][] = [
+			['alwaysAllow', obj.alwaysAllow],
+			['defaultMode', obj.defaultMode],
+			['mode', obj.mode],
+			['sandbox', obj.sandbox],
+			['firewall', obj.firewall],
+			[
+				'verify.trustLevel',
+				obj.verify && typeof obj.verify === 'object'
+					? (obj.verify as {trustLevel?: unknown}).trustLevel
+					: undefined,
+			],
+		];
+		for (const [name, value] of settings) {
+			if (value === undefined) continue;
+			lines.push(`setting ${prefix}${name} ${JSON.stringify(value)}`);
+			count++;
+		}
+	};
+
+	if (nanocoder.defaultProfile !== undefined) {
+		lines.push(
+			`setting defaultProfile ${JSON.stringify(nanocoder.defaultProfile)}`,
+		);
 		count++;
 	}
+
+	checkSettings(nanocoder as Record<string, unknown>, '');
+
+	const profiles = nanocoder.profiles;
+	if (profiles && typeof profiles === 'object' && !Array.isArray(profiles)) {
+		for (const [profileName, profile] of Object.entries(profiles).sort(
+			([a], [b]) => a.localeCompare(b),
+		)) {
+			if (profile && typeof profile === 'object' && !Array.isArray(profile)) {
+				checkSettings(
+					profile as Record<string, unknown>,
+					`profile:${profileName}.`,
+				);
+			}
+		}
+	}
+
 	return count;
 }
 
@@ -257,22 +344,42 @@ function listProviderEndpoints(
 	config: ProjectConfig | undefined,
 	lines: string[],
 ): number {
-	const providers = Array.isArray(config?.nanocoder?.providers)
+	let count = 0;
+
+	const countProviders = (providers: unknown, prefix: string): void => {
+		if (!Array.isArray(providers)) return;
+		for (const entry of providers) {
+			if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue;
+			const {name, baseUrl} = entry as Record<string, unknown>;
+			if (baseUrl === undefined) continue;
+			lines.push(
+				`provider ${prefix}${JSON.stringify(name)} baseUrl ${JSON.stringify(baseUrl)}`,
+			);
+			count++;
+		}
+	};
+
+	const topProviders = Array.isArray(config?.nanocoder?.providers)
 		? config.nanocoder.providers
 		: Array.isArray(config?.providers)
 			? config.providers
 			: [];
+	countProviders(topProviders, '');
 
-	let count = 0;
-	for (const entry of providers) {
-		if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue;
-		const {name, baseUrl} = entry as Record<string, unknown>;
-		if (baseUrl === undefined) continue;
-		lines.push(
-			`provider ${JSON.stringify(name)} baseUrl ${JSON.stringify(baseUrl)}`,
-		);
-		count++;
+	const profiles = config?.nanocoder?.profiles;
+	if (profiles && typeof profiles === 'object' && !Array.isArray(profiles)) {
+		for (const [profileName, profile] of Object.entries(profiles).sort(
+			([a], [b]) => a.localeCompare(b),
+		)) {
+			if (profile && typeof profile === 'object' && !Array.isArray(profile)) {
+				countProviders(
+					(profile as Record<string, unknown>).providers,
+					`profile:${profileName} `,
+				);
+			}
+		}
 	}
+
 	return count;
 }
 
@@ -448,12 +555,16 @@ function hookEntries(entries: unknown): object[] {
 
 interface ProjectConfig {
 	nanocoder?: {
+		defaultProfile?: unknown;
+		profiles?: Record<string, unknown>;
 		hooks?: Partial<Record<HookEvent, unknown>>;
 		formatters?: unknown[];
 		lspServers?: unknown[];
 		alwaysAllow?: unknown;
 		defaultMode?: unknown;
+		mode?: unknown;
 		sandbox?: unknown;
+		firewall?: unknown;
 		verify?: unknown;
 		providers?: unknown;
 	};

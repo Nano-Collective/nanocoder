@@ -638,6 +638,11 @@ export function runHookCommand(
 			env,
 			shell: true,
 			detached: process.platform !== 'win32',
+			// Nothing is written to a hook's stdin (see docs/features/hooks.md), so
+			// give it EOF immediately. A piped stdin that is never closed makes a
+			// command that reads input (`cat`, `jq`, a formatter run without a file
+			// argument) block until the timeout kills it.
+			stdio: ['ignore', 'pipe', 'pipe'],
 		});
 
 		const timeoutMs = hook.timeout ?? defaultTimeoutMs;

@@ -33,8 +33,10 @@ export function resolveStartupProvider(
 	modeProvider: string | undefined,
 	lastProvider: string | undefined,
 	configuredNames: readonly string[],
+	profileProvider?: string,
 ): ResolvedStartupProvider {
-	const provider = cliProvider || modeProvider || lastProvider;
+	const provider =
+		cliProvider || profileProvider || modeProvider || lastProvider;
 
 	if (!cliProvider && provider) {
 		const staleName = provider;

@@ -333,6 +333,41 @@ Content`;
 // Multi-line String Tests
 // ============================================================================
 
+test('parseEnhancedFrontmatter keeps inline values that end with > or |', t => {
+	const filePath = join(testDir, 'ends-with-gt.md');
+	const content = `---
+description: Render a <Component>
+aliases: [rc]
+parameters: [name]
+---
+Body {{name}}`;
+
+	writeFileSync(filePath, content, 'utf-8');
+
+	const result = parseCommandFile(filePath);
+
+	t.is(result.metadata.description, 'Render a <Component>');
+	t.deepEqual(result.metadata.aliases, ['rc']);
+	t.deepEqual(result.metadata.parameters, ['name']);
+	t.is(result.content, 'Body {{name}}');
+});
+
+test('parseEnhancedFrontmatter keeps inline values that contain a pipe', t => {
+	const filePath = join(testDir, 'contains-pipe.md');
+	const content = `---
+description: a | b
+aliases: [pipe]
+---
+Content`;
+
+	writeFileSync(filePath, content, 'utf-8');
+
+	const result = parseCommandFile(filePath);
+
+	t.is(result.metadata.description, 'a | b');
+	t.deepEqual(result.metadata.aliases, ['pipe']);
+});
+
 test('parseEnhancedFrontmatter parses multi-line string with pipe', t => {
 	const filePath = join(testDir, 'multiline-pipe.md');
 	const content = `---
