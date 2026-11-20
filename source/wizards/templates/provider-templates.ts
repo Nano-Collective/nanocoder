@@ -567,6 +567,13 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 		apiKeyPrompt: 'GMI Cloud API Key (from console.gmicloud.ai)',
 	}),
 	apiKeyTemplate({
+		id: 'popnow',
+		name: 'PopNow',
+		baseUrl: 'https://api.popnow.ai/v1',
+		apiKeyPrompt: 'API Key (from popnow.ai/api/console/keys)',
+		modelDefault: 'deepseek/v4-flash/chat',
+	}),
+	apiKeyTemplate({
 		id: 'together',
 		name: 'Together AI',
 		baseUrl: 'https://api.together.ai/v1',
