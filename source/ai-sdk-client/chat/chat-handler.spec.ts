@@ -798,7 +798,7 @@ async function streamRouting(parts: Record<string, unknown>[]): Promise<{
 	};
 }
 
-test('a backlog of stream chunks does not hold the event loop', async t => {
+test.serial('a backlog of stream chunks does not hold the event loop', async t => {
 	// Every part is queued before reading starts, the way a fast server or a
 	// busy moment leaves chunks buffered: nothing in the loop has to wait.
 	const deltas = Array.from({length: 5_000}, () => ({
