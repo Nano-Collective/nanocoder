@@ -4259,3 +4259,214 @@ test.serial('processAssistantResponse - nanocoder.verify also counts tools the u
 	t.true(seen[2]?.includes('`pnpm test` (not run)'));
 	t.true(notes.includes('Verification: ✓ pnpm test (exit 0)'));
 });
+
+// ============================================================================
+// turn-end lifecycle hook
+//
+// The hook lives in the frontend's onFinalAnswer adapter, not the shared turn
+// engine, so ACP and subagents keep their own hook surfaces. It reports the
+// files the whole prompt changed and a failure reopens the turn under the same
+// cap as the other self-correction retries.
+// ============================================================================
+
+test.serial('a passing turn-end hook sees the files the prompt changed', async t => {
+	const leave = enterHookFixture();
+	const queued: any[] = [];
+	let chatCalls = 0;
+
+	try {
+		withLoopHooks({
+			'turn-end': [
+				{
+					command: hookNode(
+						"console.log(JSON.stringify([process.env.NANOCODER_MESSAGE_COUNT,process.env.NANOCODER_FILES_CHANGED_JSON]))",
+					),
+				},
+			],
+		});
+
+		setSessionCwd(HOOK_GATE_DIR);
+		writeFileSync(join(HOOK_GATE_DIR, 'source.txt'), 'first file');
+		const registry = ToolRegistry.fromToolExports([fileOpTool]);
+		setToolRegistryGetter(() => registry.getHandlers());
+
+		const client = createMockClient({content: '', toolCalls: []});
+		client.chat = async () => {
+			chatCalls++;
+			if (chatCalls === 1) {
+				return {
+					choices: [
+						{
+							message: {
+								role: 'assistant',
+								content: '',
+								tool_calls: [
+									{
+										id: 'copy-1',
+										function: {
+											name: 'file_op',
+											arguments: {
+												operation: 'copy',
+												path: 'source.txt',
+												destination: 'target.txt',
+											},
+										},
+									},
+								],
+							},
+						},
+					],
+					toolsDisabled: false,
+				} as never;
+			}
+			return {
+				choices: [{message: {role: 'assistant', content: 'done'}}],
+				toolsDisabled: false,
+			} as never;
+		};
+
+		await processAssistantResponse(
+			createDefaultParams({
+				client,
+				toolManager: {
+					...createMockToolManager({
+						tools: ['file_op'],
+						needsApproval: false,
+					}),
+					getToolEntry: (name: string) => registry.getEntry(name),
+					getToolFormatter: () => undefined,
+				} as never,
+				developmentMode: 'auto-accept' as const,
+				addToChatQueue: (component: any) => queued.push(component),
+			}) as never,
+		);
+	} finally {
+		setToolRegistryGetter(() => ({}));
+		resetSessionCwd();
+		leave();
+	}
+
+	t.is(chatCalls, 2, 'a passing hook must not spend an extra model turn');
+	t.is(
+		readFileSync(join(HOOK_GATE_DIR, 'target.txt'), 'utf8'),
+		'first file',
+		'the tool copied the file before turn-end fired',
+	);
+
+	const hookMessage = queued.find(
+		(component: any) =>
+			typeof component.props?.message === 'string' &&
+			component.props.message.startsWith('['),
+	);
+	t.truthy(hookMessage, 'the hook output should be shown to the user');
+	const [messageCount, filesChanged] = JSON.parse(hookMessage.props.message);
+	t.true(Number(messageCount) > 0);
+	t.deepEqual(
+		JSON.parse(filesChanged),
+		['target.txt'],
+		'copy reports its destination, not its source',
+	);
+});
+
+test.serial('a failing turn-end hook is fed back to the model and capped', async t => {
+	const leave = enterHookFixture();
+	const queued: any[] = [];
+	const setMessagesCalls: Message[][] = [];
+	let chatCalls = 0;
+
+	try {
+		withLoopHooks({
+			'turn-end': [
+				{
+					name: 'tests',
+					command: hookNode(
+						"console.log('2 tests failed');process.exit(1)",
+					),
+				},
+			],
+		});
+
+		const client = createMockClient({content: '', toolCalls: []});
+		client.chat = async () => {
+			chatCalls++;
+			return {
+				choices: [
+					{message: {role: 'assistant', content: `attempt ${chatCalls}`}},
+				],
+				toolsDisabled: false,
+			} as never;
+		};
+
+		await withRetryLimits({maxMalformedRetries: 1}, async () => {
+			await processAssistantResponse(
+				createDefaultParams({
+					client,
+					toolManager: createMockToolManager({tools: []}) as never,
+					addToChatQueue: (component: any) => queued.push(component),
+					setMessages: (messages: Message[]) => setMessagesCalls.push(messages),
+				}) as never,
+			);
+		});
+	} finally {
+		leave();
+	}
+
+	t.is(chatCalls, 2, 'one continuation, then the retry cap stops the loop');
+	const feedbackSnapshots = setMessagesCalls.filter(snapshot =>
+		snapshot.some(
+			message =>
+				message.role === 'user' &&
+				String(message.content).includes('<hook-output event="turn-end"'),
+		),
+	);
+	t.true(feedbackSnapshots.length > 0, 'the failure should reach the model');
+	const feedback = feedbackSnapshots[0].filter(
+		message =>
+			message.role === 'user' &&
+			String(message.content).includes('<hook-output event="turn-end"'),
+	);
+	t.is(feedback.length, 1, 'exactly one feedback turn per failure');
+	t.true(String(feedback[0].content).includes('2 tests failed'));
+	t.true(
+		queuedMessages(queued).some(message => message.includes('turn-end hook failed')),
+		'exhausting the cap should surface a stop message',
+	);
+});
+
+test.serial('Escape during a turn-end hook starts no continuation', async t => {
+	const leave = enterHookFixture();
+	let chatCalls = 0;
+
+	try {
+		withLoopHooks({
+			'turn-end': [{command: hookNode('setTimeout(() => {}, 10000)')}],
+		});
+		const client = createMockClient({content: 'done'});
+		client.chat = async () => {
+			chatCalls++;
+			return {
+				choices: [{message: {role: 'assistant', content: 'done'}}],
+				toolsDisabled: false,
+			} as never;
+		};
+		const controller = new AbortController();
+		const abortTimer = setTimeout(() => controller.abort(), 50);
+		const started = Date.now();
+		try {
+			await processAssistantResponse(
+				createDefaultParams({
+					client,
+					toolManager: createMockToolManager({tools: []}) as never,
+					abortController: controller as never,
+				}) as never,
+			);
+			t.true(Date.now() - started < 3_000, 'Escape must not wait out the hook');
+		} finally {
+			clearTimeout(abortTimer);
+		}
+	} finally {
+		leave();
+	}
+
+	t.is(chatCalls, 1, 'a cancelled turn must not get another model round');
+});

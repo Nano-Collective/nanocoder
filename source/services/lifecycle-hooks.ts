@@ -46,6 +46,17 @@ export interface HookContext {
 	toolResult?: string;
 	prompt?: string;
 	messageCount?: number;
+	/**
+	 * Paths the turn actually mutated, in the order they were first touched,
+	 * as the model passed them. Only successful file-mutation tool calls
+	 * contribute, so a refused or failed write never appears here. `turn-end`
+	 * only.
+	 */
+	filesChanged?: string[];
+	/** Name of the subagent that finished. `subagent-end` only. */
+	subagentName?: string;
+	/** Whether the subagent's delegated run completed without error. */
+	subagentSuccess?: boolean;
 }
 
 export interface HookOutcome {
@@ -70,6 +81,28 @@ export interface HookFailure {
 	exitCode: number;
 	/** stdout and stderr, trimmed and joined. Empty when the hook wrote nothing. */
 	output: string;
+}
+
+/**
+ * The `<hook-output>` block handed back to the model when a `turn-end` hook
+ * exits non-zero.
+ *
+ * Each hook's captured output is already capped, but several failing hooks in
+ * one event can still add up to more than the context budget for a tool result.
+ * Re-truncate the joined envelope the same way `appendPostToolUseOutput` does
+ * for `post-tool-use`; the tail (where runners print their summary) survives.
+ */
+export function buildTurnEndFeedback(failures: HookFailure[]): string {
+	return truncateToolResult(
+		failures
+			.map(
+				failure =>
+					`<hook-output event="turn-end" exit="${failure.exitCode}">\n${
+						failure.output || '(no output)'
+					}\n</hook-output>`,
+			)
+			.join('\n\n'),
+	);
 }
 
 /** Events where a non-zero exit vetoes the action instead of just logging. */
@@ -388,6 +421,21 @@ function buildEnv(
 	if (context.messageCount !== undefined) {
 		env.NANOCODER_MESSAGE_COUNT = String(context.messageCount);
 	}
+	if (context.filesChanged) {
+		// Newline-separated, so a hook can `while read -r f` without a JSON
+		// parser. Empty means "the turn changed no files"; the variable is
+		// still set so a hook can tell that apart from "not a turn-end event".
+		// A path can itself contain a newline, which makes this form ambiguous;
+		// the JSON companion below is the lossless spelling for that case.
+		env.NANOCODER_FILES_CHANGED = context.filesChanged.join('\n');
+		env.NANOCODER_FILES_CHANGED_JSON = JSON.stringify(context.filesChanged);
+	}
+	if (context.subagentName !== undefined) {
+		env.NANOCODER_SUBAGENT_NAME = context.subagentName;
+	}
+	if (context.subagentSuccess !== undefined) {
+		env.NANOCODER_SUBAGENT_SUCCESS = context.subagentSuccess ? 'true' : 'false';
+	}
 
 	return env;
 }
@@ -581,6 +629,7 @@ export function runHookCommand(
 	env: NodeJS.ProcessEnv,
 	cwd: string,
 	defaultTimeoutMs: number,
+	signal?: AbortSignal,
 ): Promise<HookRun> {
 	const prepared = toPlatformHookCommand(hook.command, env);
 	if ('failure' in prepared) {
@@ -592,14 +641,37 @@ export function runHookCommand(
 		});
 	}
 	const command = prepared.command;
+	if (signal?.aborted) {
+		return Promise.resolve({
+			exitCode: null,
+			stdout: '',
+			stderr: '',
+			failure: 'cancelled',
+		});
+	}
 	return new Promise<HookRun>(resolve => {
 		let settled = false;
 		const finish = (run: HookRun) => {
 			if (settled) return;
 			settled = true;
 			clearTimeout(timer);
+			signal?.removeEventListener('abort', onAbort);
 			resolve(run);
 		};
+		// Escape must not leave the user staring at a hook that is still
+		// sleeping off its 30s timeout. Kill the same process tree the timeout
+		// kills and settle immediately; callers check the signal before acting
+		// on the result, so no failure is fed back to the model.
+		const onAbort = () => {
+			killHookTree(proc);
+			finish({
+				exitCode: null,
+				stdout,
+				stderr,
+				failure: 'cancelled',
+			});
+		};
+		signal?.addEventListener('abort', onAbort, {once: true});
 
 		let stdout = '';
 		let stderr = '';
@@ -695,11 +767,15 @@ export function runHookCommand(
 export async function runLifecycleHooks(
 	event: HookEvent,
 	context: HookContext = {},
+	signal?: AbortSignal,
 ): Promise<HookOutcome> {
-	const shell = await runShellHooks(event, context);
+	const shell = await runShellHooks(event, context, signal);
 	if (shell.blocked) return shell;
 
-	const plugin = await runPluginHooks(event, context);
+	// A cancelled turn must not go on to run plugin hooks either.
+	const plugin = signal?.aborted
+		? {blocked: false, output: '', failures: []}
+		: await runPluginHooks(event, context);
 	const output = [shell.output, plugin.output].filter(Boolean).join('\n');
 	return {...plugin, output, failures: shell.failures};
 }
@@ -707,6 +783,7 @@ export async function runLifecycleHooks(
 async function runShellHooks(
 	event: HookEvent,
 	context: HookContext,
+	signal?: AbortSignal,
 ): Promise<HookOutcome> {
 	const hooks = getConfiguredHooks(event).filter(hook =>
 		appliesTo(hook, context),
@@ -724,7 +801,9 @@ async function runShellHooks(
 	const failures: HookFailure[] = [];
 
 	for (const hook of hooks) {
-		const run = await runHookCommand(hook, env, cwd, defaultTimeoutMs);
+		if (signal?.aborted) break;
+		const run = await runHookCommand(hook, env, cwd, defaultTimeoutMs, signal);
+		if (signal?.aborted) break;
 		const label = hookLabel(hook);
 
 		if (run.failure) {

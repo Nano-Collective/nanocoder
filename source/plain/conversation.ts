@@ -18,7 +18,13 @@ import {
 	recordToolOutcome,
 	takeEvidenceRejection,
 } from '@/services/completion-ledger';
+import {
+	buildTurnEndFeedback,
+	runLifecycleHooks,
+} from '@/services/lifecycle-hooks';
 import {resolveToolApproval} from '@/tools/approval-policy';
+import {fileMutationPaths} from '@/tools/file-ops/file-mutating-tools';
+import {parseToolArguments} from '@/tools/runtime/tool-args-parser';
 import type {ToolManager} from '@/tools/tool-manager';
 import {getTuneToolMode, type TuneConfig} from '@/types/config';
 import type {
@@ -278,6 +284,14 @@ async function runPlainConversationBody(
 	let finalTextBeforeTurn = '';
 	let reasoningBeforeTurn = '';
 
+	// `turn-end` scope is one prompt: files from every tool round-trip count,
+	// and the retry counter bounds how often a failing hook can reopen it.
+	const turnFilesChanged = new Set<string>();
+	let turnEndRetryCount = 0;
+	// `onFinalAnswer` cannot return an error outcome, so a hook that exhausts
+	// the cap records its message here for the result switch below.
+	let turnEndGiveUpMessage: string | undefined;
+
 	const result = await runTurnEngine<ApprovalRequired>({
 		client,
 		signal: abortSignal,
@@ -399,7 +413,7 @@ async function runPlainConversationBody(
 					writeStatus(message);
 				}
 			},
-			onFinalAnswer: ({finalTurn, prepared}) => {
+			onFinalAnswer: async ({finalTurn, prepared}) => {
 				// Only nudge when the walkthrough will actually outlive the run.
 				// `nanocoder --plain` deletes its ephemeral artifact directory on
 				// exit and reports nothing about the walkthrough, so forcing one
@@ -431,7 +445,49 @@ async function runPlainConversationBody(
 					finalTextBeforeWalkthroughNudge ??= accumulatedFinalText;
 					return {kind: 'continue', messages: [evidenceRejection]};
 				}
-				return {kind: 'finish'};
+				// Only fire once the prompt is genuinely over: the nudge branches
+				// above return `continue` and will reach onFinalAnswer again.
+				const turnEnd = await runLifecycleHooks(
+					'turn-end',
+					{
+						messageCount: messages.length,
+						filesChanged: [...turnFilesChanged],
+					},
+					abortSignal,
+				);
+				if (abortSignal.aborted) return {kind: 'finish'};
+				if (turnEnd.output && !isJson) {
+					writeStatus(turnEnd.output);
+				}
+				if (turnEnd.failures.length === 0) return {kind: 'finish'};
+				if (!isJson) {
+					for (const failure of turnEnd.failures) {
+						writeError(
+							`turn-end hook exited ${failure.exitCode}${
+								failure.output ? `:\n${failure.output}` : '.'
+							}`,
+						);
+					}
+				}
+				if (turnEndRetryCount >= maxMalformedRetries) {
+					turnEndGiveUpMessage = `The turn-end hook failed ${turnEndRetryCount + 1} time${
+						turnEndRetryCount === 0 ? '' : 's'
+					} in a row and the model could not resolve it — stopping (nanocoder.retries.maxMalformedRetries = ${maxMalformedRetries}).`;
+					return {kind: 'finish'};
+				}
+				turnEndRetryCount++;
+				return {
+					kind: 'continue',
+					messages: [
+						{
+							role: 'user',
+							content: `A turn-end hook reported a problem after your last message. Address it, then give your final answer.\n\n${buildTurnEndFeedback(
+								turnEnd.failures,
+							)}`,
+						},
+					],
+					resetRetryGuards: true,
+				};
 			},
 			executeTools: async toolCalls => {
 				const toolsNeedingApproval: ToolCall[] = [];
@@ -483,6 +539,14 @@ async function runPlainConversationBody(
 					recordToolOutcome(walkthroughLifecycle.ledger, toolCall, toolResult);
 					if (!toolResult.isError) {
 						observeSuccessfulLifecycleTool(walkthroughLifecycle, toolCall);
+						for (const path of fileMutationPaths(
+							toolCall.function.name,
+							parseToolArguments<Record<string, unknown>>(
+								toolCall.function.arguments,
+							),
+						)) {
+							turnFilesChanged.add(path);
+						}
 					}
 
 					const contentStr = toolResult.content
@@ -527,6 +591,9 @@ async function runPlainConversationBody(
 
 	switch (result.kind) {
 		case 'completed': {
+			// A failing turn-end hook that used up the continuation cap ends the
+			// run with an error rather than a successful answer.
+			if (turnEndGiveUpMessage) return error(turnEndGiveUpMessage);
 			const verification = formatVerificationSummary(
 				walkthroughLifecycle.ledger,
 			);
