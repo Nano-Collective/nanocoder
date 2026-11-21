@@ -1112,39 +1112,49 @@ test.serial(
 	},
 );
 
-test.serial(
-	'createLLMClient: handles provider with empty models array',
-	async t => {
-		globalThis.fetch = createMockFetch(true, 200);
+for (const models of [undefined, [] as string[]]) {
+	test.serial(
+		`createLLMClient: requires a model when the provider models list is ${models === undefined ? 'missing' : 'empty'}`,
+		async t => {
+			globalThis.fetch = createMockFetch(true, 200);
 
-		const configDir = join(testDir, 'empty-models-test');
-		mkdirSync(configDir, {recursive: true});
+			const configDir = join(
+				testDir,
+				`empty-models-test-${models === undefined ? 'missing' : 'empty'}`,
+			);
+			mkdirSync(configDir, {recursive: true});
 
-		createTestConfig(
-			{
-				nanocoder: {
-					providers: [
-						{
-							name: 'EmptyModelsProvider',
-							baseUrl: 'http://localhost:8000/v1',
-							models: [],
-						},
-					],
+			createTestConfig(
+				{
+					nanocoder: {
+						providers: [
+							{
+								name: 'EmptyModelsProvider',
+								baseUrl: 'http://localhost:8000/v1',
+								...(models === undefined ? {} : {models}),
+							},
+						],
+					},
 				},
-			},
-			configDir,
-		);
+				configDir,
+			);
 
-		process.cwd = () => configDir;
-		reloadAppConfig();
+			process.cwd = () => configDir;
+			reloadAppConfig();
 
-		const result = await createLLMClient();
+			const error = await t.throwsAsync(createLLMClient(), {
+				instanceOf: ConfigurationError,
+			});
+			t.true(error.message.includes('EmptyModelsProvider'));
+			t.true(error.message.includes(join(configDir, 'agents.config.json')));
+			t.true(error.message.includes('--model'));
 
-		t.truthy(result);
-		t.truthy(result.client);
-		t.truthy(result.actualProvider); // Actual provider name may vary based on default config
-	},
-);
+			const result = await createLLMClient(undefined, 'custom-model');
+			t.is(result.actualProvider, 'EmptyModelsProvider');
+			t.is(result.client.getCurrentModel(), 'custom-model');
+		},
+	);
+}
 
 test.serial(
 	'createLLMClient: resolves explicit provider names case-insensitively',
