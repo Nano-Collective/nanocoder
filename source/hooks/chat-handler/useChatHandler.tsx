@@ -10,6 +10,7 @@ import {
 	getProjectContextPreferences,
 	subscribeToPreferences,
 } from '@/config/preferences';
+import {resetAgentsMdTracker} from '@/conversation/agents-md';
 import {MessageBuilder} from '@/conversation/message-builder';
 import {
 	buildSystemPrompt,
@@ -242,6 +243,7 @@ export function useChatHandler({
 	React.useEffect(() => {
 		if (messages.length === 0) {
 			conversationStateManager.current.reset();
+			resetAgentsMdTracker();
 			if (privacySessionMapRef) {
 				privacySessionMapRef.current = {};
 			}

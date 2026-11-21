@@ -59,6 +59,11 @@ import {
 	setAutoCompactStrategy,
 	setAutoCompactThreshold,
 } from '@/conversation/compaction/auto-compact.js';
+import {
+	noteAgentsMdAccess,
+	resetAgentsMdIgnoreCache,
+	resetAgentsMdTracker,
+} from '@/conversation/agents-md.js';
 
 console.log('\nacp-conversation.spec.ts');
 
@@ -174,6 +179,9 @@ const createMockToolManager = () => ({
 test.beforeEach(() => {
 	setToolRegistryGetter(() => ({}));
 	setToolManagerGetter(() => null);
+	resetSessionCwd();
+	resetAgentsMdTracker();
+	resetAgentsMdIgnoreCache();
 });
 
 // ============================================================================
@@ -4520,4 +4528,56 @@ test.serial('runAcpConversation - nanocoder.verify sends the model back and repo
 		.filter(update => update.sessionUpdate === 'agent_message_chunk')
 		.map(update => update.content.text as string);
 	t.true(texts.some(text => text.includes('Verification: ✓ pnpm test (exit 0)')));
+});
+
+test('runAcpConversation - nested AGENTS.md reaches the model as turn context', async t => {
+	const root = mkdtempSync(join(tmpdir(), 'nc-acp-agents-'));
+	try {
+		writeFileSync(join(root, 'AGENTS.md'), 'ROOT RULES');
+		mkdirSync(join(root, 'packages', 'api'), {recursive: true});
+		writeFileSync(
+			join(root, 'packages', 'api', 'AGENTS.md'),
+			'NESTED ACP RULES',
+		);
+		setProjectRoot(root);
+		setSessionCwd(root);
+
+		const {conn} = createMockConn();
+		const session = createMockSession(conn, {cwd: root});
+		session.includeAgentsMd = true;
+		runInSessionContext(session.context, () => {
+			noteAgentsMdAccess('packages/api/src/handler.ts');
+		});
+
+		const sent: Message[][] = [];
+		const client = {
+			chat: async (messages: Message[]) => {
+				sent.push(messages);
+				return {
+					choices: [{message: {content: 'Done.'}}],
+				};
+			},
+		} as unknown as LLMClient;
+
+		const result = await runAcpConversation({
+			session,
+			client,
+			toolManager: createMockToolManager() as any,
+			conn,
+			nonInteractiveAlwaysAllow: [],
+		});
+
+		t.is(result.stopReason, 'end_turn');
+		const request = sent[0] ?? [];
+		const systemPrompt = String(request[0]?.content ?? '');
+		const lastMessage = String(request.at(-1)?.content ?? '');
+		t.false(systemPrompt.includes('NESTED ACP RULES'));
+		t.true(lastMessage.includes('<turn-context>'));
+		t.true(lastMessage.includes('NESTED ACP RULES'));
+	} finally {
+		resetSessionCwd();
+		resetAgentsMdTracker();
+		resetAgentsMdIgnoreCache();
+		rmSync(root, {recursive: true, force: true});
+	}
 });

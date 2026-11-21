@@ -22,7 +22,7 @@ import {
 	createSessionContext,
 	runInSessionContext,
 } from '@/services/session-context';
-import {setProjectRoot} from '@/services/session-cwd';
+import {resetSessionCwd, setProjectRoot, setSessionCwd} from '@/services/session-cwd';
 import {loadPlugins, resetPluginsForTests} from '@/plugins/host';
 import {filterToolNamesForMode, type ToolManager} from '@/tools/tool-manager';
 import type {HooksConfig} from '@/types/config';
@@ -58,6 +58,11 @@ import {
 	rememberReadContent,
 	runWithReadContentScope,
 } from '@/tools/runtime/read-tracker';
+import {
+	noteAgentsMdAccess,
+	resetAgentsMdIgnoreCache,
+	resetAgentsMdTracker,
+} from '@/conversation/agents-md';
 
 console.log('\nsubagent-executor.spec.ts');
 
@@ -155,6 +160,12 @@ test.before(async () => {
 
 	// Auto-approve all tool calls in tests (mirrors auto-accept mode)
 	setGlobalToolApprovalHandler(async () => true);
+});
+
+test.afterEach.always(() => {
+	resetAgentsMdTracker();
+	resetAgentsMdIgnoreCache();
+	resetSessionCwd();
 });
 
 test.serial('an executor with no fixed root uses the active session folder', t => {
@@ -3521,4 +3532,45 @@ test.serial('a subagent nudges an empty reply instead of returning it', async t 
 		role: 'user',
 		content: 'Please continue with the task.',
 	});
+});
+
+test.serial('subagents receive nested AGENTS.md rules in turn context', async t => {
+	const root = mkdtempSync(join(tmpdir(), 'nc-subagent-agents-'));
+	try {
+		writeFileSync(join(root, 'AGENTS.md'), 'ROOT RULES');
+		mkdirSync(join(root, 'packages', 'api'), {recursive: true});
+		writeFileSync(
+			join(root, 'packages', 'api', 'AGENTS.md'),
+			'NESTED SUBAGENT RULES',
+		);
+		setProjectRoot(root);
+		setSessionCwd(root);
+		noteAgentsMdAccess('packages/api/src/handler.ts');
+
+		const sent: Message[][] = [];
+		const client = createMockClient(
+			[{content: 'Done.'}],
+			messages => sent.push(messages),
+		);
+		const executor = new SubagentExecutor(createMockToolManager(), client, root);
+		const result = await executor.execute({
+			subagent_type: 'explore',
+			description: 'Read the handler',
+		});
+
+		t.true(result.success);
+		const last = sent.at(-1) ?? [];
+		const systemPrompt = last.find(m => m.role === 'system');
+		const taskMessage = last.filter(m => m.role === 'user').at(-1);
+		t.false(String(systemPrompt?.content ?? '').includes('NESTED SUBAGENT RULES'));
+		t.true(String(taskMessage?.content ?? '').includes('<turn-context>'));
+		t.true(
+			String(taskMessage?.content ?? '').includes('NESTED SUBAGENT RULES'),
+		);
+	} finally {
+		resetSessionCwd();
+		resetAgentsMdTracker();
+		resetAgentsMdIgnoreCache();
+		rmSync(root, {recursive: true, force: true});
+	}
 });

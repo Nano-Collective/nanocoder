@@ -12,7 +12,16 @@ import {
 	getRetryLimits,
 	getSubagentMaxTurns,
 } from '@/config/index';
-import {getProjectContextPreferences} from '@/config/preferences';
+import {
+	getProjectContextPreferences,
+	loadPreferences,
+} from '@/config/preferences';
+import {resolveTune} from '@/config/tune';
+import {
+	getNestedAgentsMdSection,
+	noteAgentsMdAccessForTool,
+} from '@/conversation/agents-md';
+import {shouldIncludeAgentsMd} from '@/conversation/prompt-builder';
 import {invalidArgumentsResult} from '@/hooks/chat-handler/utils/tool-filters';
 import {
 	buildProjectContextSection,
@@ -818,6 +827,25 @@ export class SubagentExecutor {
 					},
 				},
 				getSystemMessage: () => systemMessage,
+				// Delegated work gets the nested rules it discovers itself, not
+				// just the ones the parent found before spawning it.
+				getTurnContextSections: () => {
+					if (
+						!shouldIncludeAgentsMd(
+							resolveTune(
+								getAppConfig(),
+								client.getProviderConfig(),
+								loadPreferences(),
+							),
+							client.getCurrentModel(),
+							getAppConfig().systemPrompt,
+						)
+					) {
+						return [];
+					}
+					const section = getNestedAgentsMdSection();
+					return section ? [section] : [];
+				},
 				prepareTurn: async () => {
 					iterations++;
 
@@ -1217,6 +1245,9 @@ export class SubagentExecutor {
 					'isError' in result &&
 					!!result.isError) ||
 				content.startsWith('Error');
+			if (!failed) {
+				noteAgentsMdAccessForTool(toolName, parsedArgs);
+			}
 			const formatted = failed
 				? truncated
 				: await formatWrittenFile(toolName, parsedArgs, truncated);

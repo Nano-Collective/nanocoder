@@ -648,3 +648,39 @@ test('onEmptyRetry is awaited before the nudge is recorded', async t => {
 	t.is(historyAtRetry, 1);
 	t.is(history()[1].role, 'user');
 });
+
+test('turn context sections travel in a user message, not the system prompt', async t => {
+	const {run, requests, history} = setup([text('done')], {
+		getTurnContextSections: () => ['NESTED AGENTS RULES'],
+	});
+	await run();
+
+	t.is(requests[0][0].content, 'sys');
+	t.deepEqual(requests[0].at(-1), {
+		role: 'user',
+		content: '<turn-context>\nNESTED AGENTS RULES\n</turn-context>',
+	});
+	// Ephemeral request context must not be persisted in the conversation.
+	t.deepEqual(
+		history().map(m => ({role: m.role, content: m.content})),
+		[
+			{role: 'user', content: 'go'},
+			{role: 'assistant', content: 'done'},
+		],
+	);
+});
+
+test('turn context is read per request so newly discovered rules reach the next call', async t => {
+	let discovered = false;
+	const {run, requests} = setup([call('a'), text('done')], {
+		getTurnContextSections: () => (discovered ? ['API RULES'] : []),
+		executeTools: async calls => {
+			discovered = true;
+			return {kind: 'continue', results: calls.map(resultFor)};
+		},
+	});
+	await run();
+
+	t.is(requests[0].length, 2);
+	t.true(requests[1].at(-1)?.content.includes('API RULES'));
+});

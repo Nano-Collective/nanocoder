@@ -84,6 +84,7 @@ import {resolveTune} from '@/config/tune';
 import {
 	buildSystemPrompt,
 	setLastBuiltPrompt,
+	shouldIncludeAgentsMd,
 } from '@/conversation/prompt-builder';
 import {resolveStartupProvider} from '@/hooks/startup-provider';
 import {buildProjectContextSection} from '@/memory/project-context';
@@ -1790,6 +1791,11 @@ export class AcpAgent implements Agent {
 			toolsForPrompt,
 		);
 		setLastBuiltPrompt(systemContent);
+		session.includeAgentsMd = shouldIncludeAgentsMd(
+			tune,
+			model,
+			getAppConfig().systemPrompt,
+		);
 
 		session.baseSystemMessage = {role: 'system', content: systemContent};
 		session.systemMessage = session.baseSystemMessage;

@@ -37,6 +37,11 @@ import {
 } from '@/models/models-dev-client.js';
 import {setGlobalQuestionHandler} from '@/tools/runtime/question-queue.js';
 import {setGlobalToolConfirmHandler} from '@/tools/runtime/tool-confirm-queue.js';
+import {
+	noteAgentsMdAccess,
+	resetAgentsMdIgnoreCache,
+	resetAgentsMdTracker,
+} from '@/conversation/agents-md.js';
 
 // The ShutdownManager singleton is created as a side effect of transitive
 // imports (via @/utils/logging). Its uncaughtException/unhandledRejection
@@ -4258,4 +4263,36 @@ test.serial('processAssistantResponse - nanocoder.verify also counts tools the u
 	t.is(calls, 4);
 	t.true(seen[2]?.includes('`pnpm test` (not run)'));
 	t.true(notes.includes('Verification: ✓ pnpm test (exit 0)'));
+});
+
+test.serial('processAssistantResponse - nested AGENTS.md reaches the model as turn context', async t => {
+	const root = mkdtempSync(join(tmpdir(), 'nc-tui-agents-'));
+	try {
+		writeFileSync(join(root, 'AGENTS.md'), 'ROOT RULES');
+		mkdirSync(join(root, 'packages', 'api'), {recursive: true});
+		writeFileSync(
+			join(root, 'packages', 'api', 'AGENTS.md'),
+			'NESTED TUI RULES',
+		);
+		setProjectRoot(root);
+		setSessionCwd(root);
+		noteAgentsMdAccess('packages/api/src/handler.ts');
+
+		const {client, requests} = scriptedClient([{content: 'Done.'}]);
+		await processAssistantResponse(
+			createDefaultParams({client, systemMessage: {role: 'system', content: 'You are a helpful assistant'}}),
+		);
+
+		const request = requests[0] ?? [];
+		const systemPrompt = String(request[0]?.content ?? '');
+		const lastMessage = String(request.at(-1)?.content ?? '');
+		t.false(systemPrompt.includes('NESTED TUI RULES'));
+		t.true(lastMessage.includes('<turn-context>'));
+		t.true(lastMessage.includes('NESTED TUI RULES'));
+	} finally {
+		resetSessionCwd();
+		resetAgentsMdTracker();
+		resetAgentsMdIgnoreCache();
+		rmSync(root, {recursive: true, force: true});
+	}
 });

@@ -10,6 +10,11 @@ import {
 	getRetryLimits,
 } from '@/config/index';
 import {TOOL_APPROVAL_REQUIRED_KIND} from '@/constants';
+import {
+	getNestedAgentsMdSection,
+	resetAgentsMdTracker,
+} from '@/conversation/agents-md';
+import {shouldIncludeAgentsMd} from '@/conversation/prompt-builder';
 import {partitionUnknownToolCalls} from '@/hooks/chat-handler/utils/tool-filters';
 import {processToolUse} from '@/message-handler';
 import {color, write, writeError, writeLine, writeStatus} from '@/plain/writer';
@@ -178,6 +183,10 @@ async function runPlainConversationBody(
 
 	const isJson = outputFormat === 'json';
 
+	// Each plain run is its own conversation; don't carry nested rules found by
+	// a previous run in the same process.
+	resetAgentsMdTracker();
+
 	let messages = initialMessages;
 	const walkthroughLifecycle = createWalkthroughLifecycle(initialMessages);
 	let accumulatedFinalText = '';
@@ -291,6 +300,13 @@ async function runPlainConversationBody(
 				},
 			},
 			getSystemMessage: () => systemMessage,
+			getTurnContextSections: () => {
+				if (!shouldIncludeAgentsMd(tune, model, getAppConfig().systemPrompt)) {
+					return [];
+				}
+				const section = getNestedAgentsMdSection();
+				return section ? [section] : [];
+			},
 			prepareTurn: () => {
 				const availableNames = toolManager.getAvailableToolNames(
 					tune,
