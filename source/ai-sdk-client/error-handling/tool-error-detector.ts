@@ -25,26 +25,19 @@ const HISTORY_ERROR_PATTERNS = [
 	/context (?:length|window)|too many tokens|maximum context/i,
 ];
 
+const TOOL_VALIDATION_ERROR_PATTERNS = [
+	/invalid schema(?: for)?(?: a)? function\b/i,
+	/invalid function call arguments\b/i,
+	/\binvalid\b.*\bfunction\b.*\barguments\b/i,
+	/\btool_choice\b/i,
+];
+
 function messageIndicatesToolSupport(message: string): boolean {
 	if (HISTORY_ERROR_PATTERNS.some(pattern => pattern.test(message))) {
 		return false;
 	}
-
-	// Pattern 1: 400 Bad Request with tool-related messages
-	if (message.includes('400') && message.includes('bad request')) {
-		const toolPatterns = [
-			/tool/i,
-			/function/i,
-			/invalid.*parameter/i,
-			/unexpected.*field/i,
-			/unrecognized/i,
-		];
-
-		for (const pattern of toolPatterns) {
-			if (pattern.test(message)) {
-				return true;
-			}
-		}
+	if (TOOL_VALIDATION_ERROR_PATTERNS.some(pattern => pattern.test(message))) {
+		return false;
 	}
 
 	// Pattern 2: Direct mentions of tool/function not supported
@@ -53,18 +46,27 @@ function messageIndicatesToolSupport(message: string): boolean {
 		/function.*not.*support/i,
 		/tool.*unsupported/i,
 		/function.*unsupported/i,
-		// Ollama: "registry.ollama.ai/library/<model> does not support tools"
 		/(?:not|n't) support (?:native )?(?:tools|tool calling|function calling|functions)\b/i,
-		/invalid.*tool/i,
-		/invalid.*function/i,
-		/tool.*parameter.*invalid/i,
-		/function.*parameter.*invalid/i,
 	];
 
 	for (const pattern of directPatterns) {
 		if (pattern.test(message)) {
 			return true;
 		}
+	}
+
+	// Narrow server-rejection patterns for OpenAI-compatible providers.
+	// These identify a request parameter or tool definition being rejected,
+	// without treating every HTTP 400, invalid function, or invalid parameter
+	// message as evidence that the model lacks tool support.
+	const ambiguousToolParameterPatterns = [
+		/^invalid parameter:\s*(?:tools|tool definitions?|function[s]?|native tools)\b/i,
+		/^invalid request:\s*unknown (?:field|property)\s*["'`]?tools["'`]?\b/i,
+		/^invalid tool definition$/i,
+	];
+
+	if (ambiguousToolParameterPatterns.some(pattern => pattern.test(message))) {
+		return true;
 	}
 
 	// Pattern 3: Ollama-specific error messages
