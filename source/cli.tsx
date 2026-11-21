@@ -13,11 +13,12 @@
 import {readFileSync} from 'node:fs';
 import nodeModule from 'node:module';
 import {
-	argsBeforeRun,
 	composePromptWithStdin,
 	parseRunPrompt,
 	readStdinText,
 	STDIN_PROMPT_FILE,
+	wantsHelp,
+	wantsVersion,
 } from './run-prompt-args.js';
 
 // Enable V8 compile cache (Node 22.8+). After the first run, Node caches
@@ -55,8 +56,6 @@ const version = ((): string => {
 
 // Parse CLI arguments
 const args = process.argv.slice(2);
-// The fast paths below only look here: words after `run` are prompt text.
-const optionArgs = argsBeforeRun(args);
 
 // Storage diagnostics are independent of chat startup. JSON mode does not load Ink.
 if (args[0] === 'storage') {
@@ -76,7 +75,7 @@ if (args[0] === 'storage') {
 }
 
 // Handle --version/-v flag — fast path, no heavy imports
-if (optionArgs.includes('--version') || optionArgs.includes('-v')) {
+if (wantsVersion(args)) {
 	console.log(version);
 	process.exit(0);
 }
@@ -258,7 +257,7 @@ if (args[0] === 'completion') {
 }
 
 // Handle --help/-h flag — fast path, no heavy imports
-if (optionArgs.includes('--help') || optionArgs.includes('-h')) {
+if (wantsHelp(args)) {
 	console.log(`
 Usage: nanocoder [options] [command]
 

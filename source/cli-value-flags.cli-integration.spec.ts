@@ -324,3 +324,12 @@ test('-v and -h before run still print the version and the help', t => {
 	t.is(help.status, 0, help.stderr);
 	t.true(help.stdout.includes('Usage: nanocoder'), help.stdout);
 });
+
+test('run --help or run -h with nothing else still prints the help', t => {
+	// Only the lone flag: `run explain --help output` above is a prompt.
+	for (const flag of ['--help', '-h']) {
+		const result = runCli(['run', flag]);
+		t.is(result.status, 0, `run ${flag}: ${result.stderr}`);
+		t.true(result.stdout.includes('Usage: nanocoder'), result.stdout);
+	}
+});

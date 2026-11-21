@@ -81,6 +81,32 @@ export function argsBeforeRun(args: readonly string[]): readonly string[] {
 	return runCommandIndex === -1 ? args : args.slice(0, runCommandIndex);
 }
 
+/** The top-level `--version` / `-v` fast path: the flag before `run`. */
+export function wantsVersion(args: readonly string[]): boolean {
+	const options = argsBeforeRun(args);
+	return options.includes('--version') || options.includes('-v');
+}
+
+const isHelpFlag = (arg: string | undefined) =>
+	arg === '--help' || arg === '-h';
+
+/**
+ * The top-level `--help` / `-h` fast path: the flag before `run`, or as the
+ * only word after it. `nanocoder run --help` asks for help, not for an agent
+ * turn whose prompt is "--help"; with other words after `run` the flag is
+ * prompt text like any other.
+ */
+export function wantsHelp(args: readonly string[]): boolean {
+	const options = argsBeforeRun(args);
+	if (options.some(isHelpFlag)) return true;
+	const afterRun = args.slice(options.length + 1);
+	return (
+		options.length < args.length &&
+		afterRun.length === 1 &&
+		isHelpFlag(afterRun[0])
+	);
+}
+
 /** Flags taking a value. Exported so tests cover them from the source list. */
 export const RUN_FLAGS_WITH_VALUES: readonly string[] = VALUED_FLAGS;
 
