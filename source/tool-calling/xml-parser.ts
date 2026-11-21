@@ -7,6 +7,49 @@ import {ensureString} from '@/utils/type-helpers';
 
 export type ToolSchemas = Readonly<Record<string, JsonSchemaNode | undefined>>;
 
+/**
+ * Builtin tool parameters that carry identifiers or control values, so
+ * surrounding whitespace is treated as model padding and removed. Free-text
+ * parameters keep their whitespace after the wrapping-newline removal, and
+ * custom or MCP tools keep the schema-typed string behaviour, because a
+ * string type alone cannot tell a padded identifier from a
+ * whitespace-sensitive pattern or patch body.
+ *
+ * Only always-registered builtins are listed. Conditionally registered
+ * names (git tools outside a git repository, load_tool_schema without MCP
+ * discovery) can legally be taken by a custom or MCP tool, so trimming by
+ * name there would reach a tool this list does not describe.
+ */
+const TRIMMED_IDENTIFIER_PARAMS: ReadonlySet<string> = new Set([
+	'read_file.path',
+	'write_file.path',
+	'string_replace.path',
+	'diff_edit.path',
+	'file_op.operation',
+	'file_op.path',
+	'file_op.destination',
+	'bash_output.job_id',
+	'kill_bash.job_id',
+	'browser.action',
+	'browser.url',
+	'browser.selector',
+	'search_file_contents.path',
+	'list_directory.path',
+	'lsp_get_diagnostics.path',
+	'lsp_format_document.path',
+	'fetch_url.url',
+	'agent.subagent_type',
+	'ask_user.questionType',
+	'check_skill.name',
+	'write_plan.plan_id',
+	'get_plan.plan_id',
+	'update_plan_node.plan_id',
+	'update_plan_node.node_id',
+	'update_plan_node.status',
+	'update_plan_node.agent',
+	'update_plan_node.checkpoint',
+]);
+
 interface ParsedToolCall {
 	toolName: string;
 	parameters: Record<string, unknown>;
@@ -79,6 +122,7 @@ export class XMLToolCallParser {
 			const parameters = this.parseParameters(
 				innerXml,
 				toolSchemas?.[toolName],
+				toolName,
 			);
 			const brokenTag = this.findBrokenTag(innerXml);
 
@@ -358,6 +402,7 @@ export class XMLToolCallParser {
 	private static parseParameters(
 		innerXml: string,
 		toolSchema?: JsonSchemaNode,
+		toolName?: string,
 	): Record<string, unknown> {
 		const parameters: Record<string, unknown> = {};
 		let match;
@@ -377,11 +422,16 @@ export class XMLToolCallParser {
 				(Array.isArray(parameterTypes) && parameterTypes.includes('string'));
 
 			// A string parameter is text, even when its contents happen to be
-			// valid JSON. Remove only wrapping XML line breaks for file contents,
-			// commands, and replacement strings.
+			// valid JSON. Remove the wrapping XML line breaks; identifier-like
+			// builtin parameters are also trimmed, treating surrounding
+			// whitespace as model padding rather than part of the value.
 			if (permitsString) {
+				const unwrapped = this.removeWrappingParameterNewlines(paramValue);
 				parameters[paramName] =
-					this.removeWrappingParameterNewlines(paramValue);
+					toolName !== undefined &&
+					TRIMMED_IDENTIFIER_PARAMS.has(`${toolName}.${paramName}`)
+						? unwrapped.trim()
+						: unwrapped;
 				continue;
 			}
 
