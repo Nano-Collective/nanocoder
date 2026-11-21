@@ -42,7 +42,14 @@ import {
 import {loadAllMCPConfigs} from '@/config/mcp-config-loader';
 import {getConfigPath} from '@/config/paths';
 import {loadPreferences} from '@/config/preferences';
+import {
+	getActiveProfileName,
+	loadAvailableProfiles,
+	loadDefaultProfileName,
+	resolveActiveProfile,
+} from '@/config/profile';
 import {FIREWALL_DEFAULTS, resolveFirewallConfig} from '@/types/firewall';
+import {stripUtf8Bom} from '@/utils/strip-utf8-bom';
 import {isObject} from '@/utils/type-helpers';
 
 /**
@@ -50,13 +57,19 @@ import {isObject} from '@/utils/type-helpers';
  * constant, `global` the user-level config directory, `project` the working
  * directory, `env` a `NANOCODER_*` environment variable.
  */
-export type ConfigLayerId = 'default' | 'global' | 'project' | 'env';
+export type ConfigLayerId =
+	| 'default'
+	| 'global'
+	| 'project'
+	| 'profile'
+	| 'env';
 
 /** Ascending precedence. Index into this to compare two layers. */
 const LAYER_PRECEDENCE: readonly ConfigLayerId[] = [
 	'default',
 	'global',
 	'project',
+	'profile',
 	'env',
 ];
 
@@ -116,6 +129,7 @@ export interface ConfigLayerInfo {
 export interface EffectiveConfig {
 	cwd: string;
 	configDir: string;
+	activeProfile?: string;
 	layers: ConfigLayerInfo[];
 	entries: EffectiveConfigEntry[];
 }
@@ -141,6 +155,10 @@ const SECRET_KEY_SEGMENTS = new Set([
 	'apikey',
 	'accesskey',
 	'privatekey',
+	'key',
+	'subscription',
+	'signature',
+	'sig',
 ]);
 
 /** Whether a key names a credential. See SECRET_KEY_SEGMENTS. */
@@ -170,7 +188,19 @@ export function redactValue(
 	value: unknown,
 	keyHint = '',
 ): {value: unknown; redacted: boolean} {
-	if (isSecretKey(keyHint) && !isEnvReference(value)) {
+	return redactConfigValue(value, keyHint);
+}
+
+function redactConfigValue(
+	value: unknown,
+	keyHint: string,
+	rawValue?: unknown,
+): {value: unknown; redacted: boolean} {
+	const resolvedReference =
+		typeof rawValue === 'string' &&
+		rawValue !== value &&
+		/\$\{?[A-Za-z_]/.test(rawValue);
+	if (resolvedReference || (isSecretKey(keyHint) && !isEnvReference(value))) {
 		if (value === undefined || value === null || value === '') {
 			return {value, redacted: false};
 		}
@@ -179,8 +209,24 @@ export function redactValue(
 
 	if (Array.isArray(value)) {
 		let redacted = false;
+		let secretArgument = false;
 		const mapped = value.map(item => {
-			const result = redactValue(item, keyHint);
+			const hint = secretArgument ? 'secret' : keyHint;
+			secretArgument = false;
+			if (keyHint === 'args' && hint !== 'secret' && typeof item === 'string') {
+				const equals = item.indexOf('=');
+				const flag = equals === -1 ? item : item.slice(0, equals);
+				if (flag.startsWith('-') && isSecretKey(flag)) {
+					if (equals === -1) {
+						secretArgument = true;
+						return item;
+					}
+					const result = redactConfigValue(item.slice(equals + 1), 'secret');
+					redacted ||= result.redacted;
+					return `${flag}=${result.value}`;
+				}
+			}
+			const result = redactConfigValue(item, hint);
 			redacted ||= result.redacted;
 			return result.value;
 		});
@@ -191,11 +237,45 @@ export function redactValue(
 		let redacted = false;
 		const mapped: Record<string, unknown> = {};
 		for (const [key, item] of Object.entries(value)) {
-			const result = redactValue(item, key);
+			const raw = isObject(rawValue)
+				? rawValue[key]
+				: key === 'env'
+					? value.rawEnv
+					: key === 'headers'
+						? value.rawHeaders
+						: undefined;
+			const result = redactConfigValue(item, key, raw);
 			redacted ||= result.redacted;
 			mapped[key] = result.value;
 		}
 		return {value: redacted ? mapped : value, redacted};
+	}
+
+	if (typeof value === 'string' && /^[a-z][a-z0-9+.-]*:\/\//i.test(value)) {
+		try {
+			const url = new URL(value);
+			let redacted = false;
+			if (url.username || url.password) {
+				url.username = REDACTED;
+				url.password = '';
+				redacted = true;
+			}
+			for (const key of new Set(url.searchParams.keys())) {
+				if (isSecretKey(key)) {
+					url.searchParams.set(key, REDACTED);
+					redacted = true;
+				}
+			}
+			return {value: redacted ? url.toString() : value, redacted};
+		} catch {
+			// An invalid credential-bearing URL must not leak through diagnostics.
+			if (
+				value.includes('@') ||
+				/[?&][^=]*(?:key|token|secret|password|signature)=/i.test(value)
+			) {
+				return {value: REDACTED, redacted: true};
+			}
+		}
 	}
 
 	return {value, redacted: false};
@@ -214,7 +294,9 @@ interface RawLayer {
 function parseJsonFile(path: string): Record<string, unknown> | null {
 	if (!existsSync(path)) return null;
 	try {
-		const parsed: unknown = JSON.parse(readFileSync(path, 'utf-8'));
+		const parsed: unknown = JSON.parse(
+			stripUtf8Bom(readFileSync(path, 'utf-8')),
+		);
 		return isObject(parsed) ? parsed : null;
 	} catch {
 		return null;
@@ -230,7 +312,9 @@ function readRawFile(
 		return {layer, file, path, exists: false, data: null};
 	}
 	try {
-		const parsed: unknown = JSON.parse(readFileSync(path, 'utf-8'));
+		const parsed: unknown = JSON.parse(
+			stripUtf8Bom(readFileSync(path, 'utf-8')),
+		);
 		return {
 			layer,
 			file,
@@ -262,10 +346,30 @@ function readRawLayers(cwd: string, configDir: string): RawLayer[] {
 		'agents.config.json',
 		'nanocoder-preferences.json',
 	];
-	return files.flatMap(file => [
+	const layers = files.flatMap(file => [
 		readRawFile('global', file, join(configDir, file)),
 		readRawFile('project', file, join(cwd, file)),
 	]);
+
+	try {
+		const active = resolveActiveProfile(cwd);
+		if (active) {
+			const profileOrigin = active.originFile
+				? `${active.originFile} (profile ${active.name})`
+				: `profile: ${active.name}`;
+			layers.push({
+				layer: 'profile',
+				file: 'agents.config.json',
+				path: profileOrigin,
+				exists: true,
+				data: {nanocoder: active.profile},
+			});
+		}
+	} catch {
+		// Ignore if active profile resolution throws in raw reading
+	}
+
+	return layers;
 }
 
 /**
@@ -342,7 +446,7 @@ interface BlockSpec {
 	depth?: number;
 }
 
-function blockSpecs(): BlockSpec[] {
+function blockSpecs(cwd?: string): BlockSpec[] {
 	const config = getAppConfig();
 	const agents: ConfigFileName = 'agents.config.json';
 	const preferences: ConfigFileName = 'nanocoder-preferences.json';
@@ -460,6 +564,18 @@ function blockSpecs(): BlockSpec[] {
 			path: ['nanocoder', 'autoCommit'],
 			file: agents,
 			effective: config.autoCommit,
+			leaf: true,
+		},
+		{
+			path: ['nanocoder', 'defaultProfile'],
+			file: agents,
+			effective: loadDefaultProfileName(cwd),
+			leaf: true,
+		},
+		{
+			path: ['nanocoder', 'profiles'],
+			file: agents,
+			effective: loadAvailableProfiles(cwd),
 			leaf: true,
 		},
 	];
@@ -728,7 +844,7 @@ function readEnvProviderNames(): Set<string> {
 	if (!rawData) return names;
 
 	try {
-		const parsed: unknown = JSON.parse(rawData);
+		const parsed: unknown = JSON.parse(stripUtf8Bom(rawData));
 		const list = Array.isArray(parsed)
 			? parsed
 			: (getAt(isObject(parsed) ? parsed : null, ['nanocoder', 'providers']) ??
@@ -783,7 +899,7 @@ function readEnvMcpServers(): {servers: Map<string, unknown>; origin: string} {
 	if (!rawData) return {servers: new Map(), origin};
 
 	try {
-		const parsed: unknown = JSON.parse(rawData);
+		const parsed: unknown = JSON.parse(stripUtf8Bom(rawData));
 		if (Array.isArray(parsed)) {
 			const byName = new Map<string, unknown>();
 			for (const server of parsed) {
@@ -880,7 +996,7 @@ export function resolveEffectiveConfig(options?: {
 	const rawLayers = readRawLayers(cwd, configDir);
 
 	const entries: EffectiveConfigEntry[] = [
-		...blockSpecs().flatMap(spec => resolveBlockEntries(spec, rawLayers)),
+		...blockSpecs(cwd).flatMap(spec => resolveBlockEntries(spec, rawLayers)),
 		...resolvePreferencesEntries(rawLayers),
 		...resolveProviderEntries(rawLayers),
 		...resolveMcpEntries(cwd, configDir),
@@ -910,7 +1026,14 @@ export function resolveEffectiveConfig(options?: {
 			})),
 	];
 
-	return {cwd, configDir, layers, entries};
+	let activeProfile: string | undefined;
+	try {
+		activeProfile = getActiveProfileName(cwd);
+	} catch {
+		// Ignore
+	}
+
+	return {cwd, configDir, activeProfile, layers, entries};
 }
 
 /**

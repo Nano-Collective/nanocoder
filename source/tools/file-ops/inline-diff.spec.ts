@@ -32,6 +32,20 @@ test('collapseUnchangedLines: keeps three lines of context around a change', t =
 	t.deepEqual(collapsed[collapsed.length - 1], {type: 'gap', count: 17});
 });
 
+test('computeLineDiff: drops the CR from CRLF lines', t => {
+	const entries = computeLineDiff('a\r\nb\r\nc\r\n', 'a\r\nB\r\nc\r\n');
+
+	t.deepEqual(
+		entries.map(e => [e.type, e.text]),
+		[
+			['unchanged', 'a'],
+			['removed', 'b'],
+			['added', 'B'],
+			['unchanged', 'c'],
+		],
+	);
+});
+
 test('collapseUnchangedLines: leaves a short unchanged run between changes intact', t => {
 	const oldText = numberedLines(10);
 	const newText = numberedLines(10)

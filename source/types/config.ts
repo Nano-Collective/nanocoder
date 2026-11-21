@@ -34,6 +34,8 @@ export interface AIProviderConfig {
 	disableToolModels?: string[]; // List of model names to disable tools for
 	// SDK provider package to use (default: 'openai-compatible')
 	sdkProvider?: SdkProvider;
+	// Arbitrary request body fields for OpenAI-compatible chat endpoints.
+	extraBody?: Record<string, unknown>;
 	// Opt out of Anthropic prompt caching (enabled by default on that SDK).
 	// Read only when sdkProvider is 'anthropic'; setting it on any other SDK
 	// provider has no effect, since those either prefix-cache automatically
@@ -95,6 +97,8 @@ export interface ProviderConfig {
 	includeUsage?: boolean;
 	// SDK provider package to use (default: 'openai-compatible')
 	sdkProvider?: SdkProvider;
+	// Arbitrary request body fields for OpenAI-compatible chat endpoints.
+	extraBody?: Record<string, unknown>;
 	// OpenRouter-specific request body fields. Only applied when the provider
 	// is OpenRouter (name match, case-insensitive).
 	openrouter?: OpenRouterParameters;
@@ -212,13 +216,13 @@ export interface CiWatchConfig {
 }
 
 /**
- * Project-level (`agents.config.json`) verify/CI-watch policy — trust level
- * and poll cadence. Unlike `CiWatchConfig.enabled` (a personal, per-machine
- * opt-in to background GitHub polling, kept in preferences), trust level
- * and cadence are security/policy decisions appropriate to commit and
- * review with the rest of the project, so they live here instead. When
- * set, `pollIntervalMs`/`maxPollIntervalMs` here override the
- * preferences-backed `CiWatchConfig` values of the same name — see
+ * Project-level (`agents.config.json`) verify policy: CI-watch trust level
+ * and poll cadence, plus completion evidence. Unlike `CiWatchConfig.enabled`
+ * (a personal, per-machine opt-in to background GitHub polling, kept in
+ * preferences), trust level and cadence are security/policy decisions
+ * appropriate to commit and review with the rest of the project, so they live
+ * here instead. When set, `pollIntervalMs`/`maxPollIntervalMs` here override
+ * the preferences-backed `CiWatchConfig` values of the same name — see
  * `loadCiWatchConfig` in `source/config/index.ts`.
  */
 export interface VerifyConfig {
@@ -227,6 +231,12 @@ export interface VerifyConfig {
 	trustLevel?: TrustLevel;
 	pollIntervalMs?: number;
 	maxPollIntervalMs?: number;
+	/**
+	 * Completion evidence: commands that must have exited 0 after the agent's
+	 * last file edit before a turn can end, or "auto" to detect the `test`,
+	 * `typecheck` and `lint` scripts in package.json. Off unless set.
+	 */
+	required?: string[] | 'auto';
 }
 
 /**
@@ -370,6 +380,11 @@ export interface DiskNanocoderConfig {
 		/** Turn ceiling for a delegated subagent run. Defaults to `maxTurns`. */
 		subagentMaxTurns?: number;
 	};
+	/** Language server behavior. Auto-discovery is enabled by default. */
+	lsp?: {
+		/** Disable scanning PATH for installed language servers at startup. */
+		autoDiscover?: boolean;
+	};
 	/** LSP server configurations (optional — auto-discovery enabled by default). */
 	lspServers?: {
 		name: string;
@@ -417,10 +432,36 @@ export interface DiskNanocoderConfig {
 	/** Negative-space mutation firewall. Off by default. */
 	firewall?: Partial<FirewallConfig>;
 	/**
-	 * Project-level verify policy: CI-watch trust level and poll cadence.
-	 * Read by `loadVerifyConfig()`.
+	 * Project-level verify policy: CI-watch trust level and poll cadence, and
+	 * `required` completion evidence (commands that must exit 0 after the last
+	 * edit, or "auto"). Read by `loadVerifyConfig()`.
 	 */
 	verify?: VerifyConfig;
+	/** Name of the default profile to use when none is explicitly specified. */
+	defaultProfile?: string;
+	/** Named configuration profiles that bundle provider, model, mode, and section overrides. */
+	profiles?: DiskProfilesConfig;
+}
+
+/**
+ * Map of profile name to profile configuration.
+ */
+export interface DiskProfilesConfig {
+	[profileName: string]: DiskProfileConfig;
+}
+
+/**
+ * Configuration overrides applied by a named profile.
+ * Can override provider, model, mode, and any nanocoder.* section.
+ */
+export interface DiskProfileConfig
+	extends Partial<Omit<DiskNanocoderConfig, 'profiles' | 'defaultProfile'>> {
+	/** Active provider to use for this profile. */
+	provider?: string;
+	/** Model name to use for this profile. */
+	model?: string;
+	/** Mode to start in (normal, auto-accept, yolo, plan). */
+	mode?: DiskDefaultMode;
 }
 
 /**
@@ -449,6 +490,11 @@ export interface AppConfig {
 	modeProviders?: Partial<Record<DevelopmentMode, ModeProviderConfig>>;
 
 	mcpServers?: MCPServerConfig[];
+
+	// Language server behavior (auto-discovery is enabled by default).
+	lsp?: {
+		autoDiscover?: boolean;
+	};
 
 	// LSP server configurations (optional - auto-discovery enabled by default)
 	lspServers?: {
@@ -557,6 +603,16 @@ export interface MCPServerConfig {
 	url?: string;
 	headers?: Record<string, string>;
 	timeout?: number;
+	/**
+	 * How long a tool call may wait for the server, in milliseconds. Defaults
+	 * to the MCP SDK's 60 seconds; 0 means no limit.
+	 */
+	toolTimeout?: number;
+	/**
+	 * Restart the tool-call timer whenever the server reports progress, so a
+	 * long call that keeps reporting is not cut off. Defaults to true.
+	 */
+	resetTimeoutOnProgress?: boolean;
 	/** Period between MCP ping health checks, in milliseconds. */
 	healthCheckInterval?: number;
 	alwaysAllow?: string[];

@@ -120,6 +120,7 @@ export function buildLaunchAgentPlist(
 	hash: string,
 	daemonCommand: string,
 ): string {
+	const root = xmlEscape(projectRoot);
 	return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -128,16 +129,16 @@ export function buildLaunchAgentPlist(
 \t<string>com.nanocoder.daemon.${hash}</string>
 \t<key>ProgramArguments</key>
 \t<array>
-\t\t<string>${daemonCommand}</string>
+\t\t<string>${xmlEscape(daemonCommand)}</string>
 \t\t<string>daemon</string>
 \t\t<string>start</string>
 \t</array>
 \t<key>WorkingDirectory</key>
-\t<string>${projectRoot}</string>
+\t<string>${root}</string>
 \t<key>EnvironmentVariables</key>
 \t<dict>
 \t\t<key>NANOCODER_PROJECT_ROOT</key>
-\t\t<string>${projectRoot}</string>
+\t\t<string>${root}</string>
 \t</dict>
 \t<key>RunAtLoad</key>
 \t<true/>
@@ -153,14 +154,18 @@ export function buildSystemdUnit(
 	hash: string,
 	daemonCommand: string,
 ): string {
+	// systemd expands `%` specifiers in these values, and Environment= splits
+	// on unquoted spaces and reads C escapes inside quotes.
+	const root = projectRoot.replace(/%/g, '%%');
+	const envRoot = root.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
 	return `[Unit]
-Description=nanocoder daemon for ${projectRoot}
+Description=nanocoder daemon for ${root}
 After=default.target
 
 [Service]
 Type=simple
-WorkingDirectory=${projectRoot}
-Environment=NANOCODER_PROJECT_ROOT=${projectRoot}
+WorkingDirectory=${root}
+Environment="NANOCODER_PROJECT_ROOT=${envRoot}"
 ExecStart=${daemonCommand} daemon start
 Restart=on-failure
 RestartSec=5
@@ -171,7 +176,8 @@ WantedBy=default.target
 }
 
 /**
- * XML escape for the fields we inject into the Task Scheduler manifest.
+ * XML escape for the fields we inject into the Task Scheduler manifest and
+ * the LaunchAgent plist.
  * Project paths can contain `&`, `<`, `'`, etc. in extreme cases.
  */
 function xmlEscape(value: string): string {

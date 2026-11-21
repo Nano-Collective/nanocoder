@@ -1,5 +1,5 @@
 import {constants} from 'node:fs';
-import {access, writeFile} from 'node:fs/promises';
+import {access, lstat} from 'node:fs/promises';
 import {resolve} from 'node:path';
 import React from 'react';
 import {getColors} from '@/config/index';
@@ -18,13 +18,17 @@ import {
 } from '@/tools/file-ops/path-validators';
 import {
 	forgetReadContent,
+	getLineNumbersForText,
 	hasSeenFile,
+	hasVisibleLines,
 	markFileSeen,
+	recordEditVisibility,
 } from '@/tools/runtime/read-tracker';
 import {createFileToolApproval} from '@/tools/runtime/tool-approval';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
+import {atomicWriteUserFile} from '@/utils/fs/atomic-write';
 import {getCachedFileContent, invalidateCache} from '@/utils/fs/file-cache';
 import {
 	closeDiffInVSCode,
@@ -42,6 +46,13 @@ interface StringReplaceArgs {
 }
 
 const STRING_REPLACE_CONTEXT_LINES = 20;
+
+// The schema marks new_str as required, but a model can still send a call
+// without it. Without this check, `undefined` reaches the replacement and the
+// literal text "undefined" is written into the file. An empty string is valid:
+// it deletes old_str.
+const NEW_STR_REQUIRED_ERROR =
+	'new_str is required and must be a string. Use an empty string ("") to delete text.';
 
 function formatUpdatedFileContext(
 	content: string,
@@ -84,6 +95,12 @@ const executeStringReplace = async (
 		throw new Error(
 			'old_str cannot be empty. Provide the exact content to find and replace.',
 		);
+	}
+
+	// Checked again here (not only in the validator) so the file is never
+	// written when execute is reached without validation.
+	if (typeof args.new_str !== 'string') {
+		throw new Error(NEW_STR_REQUIRED_ERROR);
 	}
 
 	const formatResult = validateEditableFormat(path);
@@ -129,12 +146,30 @@ const executeStringReplace = async (
 	);
 	const firewallWarning = enforceFirewall(firewallResult);
 
-	await writeFile(absPath, newContent, 'utf-8');
+	await atomicWriteUserFile(absPath, newContent);
 	invalidateCache(absPath);
 	// The model now knows the file's current contents, so a follow-up edit is
 	// not blind.
 	markFileSeen(absPath);
 	forgetReadContent(absPath);
+	// The agent just wrote this range, so it counts as seen. The edit changed
+	// the file's mtime/size and may have moved the lines below it, so carry the
+	// rest of what the agent had read forward instead of forgetting it.
+	try {
+		const stats = await lstat(absPath);
+		const editStart = fileContent
+			.slice(0, fileContent.indexOf(old_str))
+			.split('\n').length;
+		recordEditVisibility(
+			absPath,
+			stats,
+			editStart,
+			old_str.split('\n').length,
+			new_str.split('\n').length,
+		);
+	} catch {
+		// If stat fails, fall back to file-level tracking only
+	}
 
 	const oldStrLines = old_str.split('\n');
 	const newStrLines = new_str.split('\n');
@@ -278,6 +313,10 @@ const stringReplaceValidator = async (
 		};
 	}
 
+	if (typeof args.new_str !== 'string') {
+		return {valid: false, error: NEW_STR_REQUIRED_ERROR};
+	}
+
 	// Read-before-edit: refuse to edit a file the model has not actually seen
 	// this session. Editing blind is the dominant source of mismatched old_str
 	// on small models; forcing a Read first makes old_str match exactly.
@@ -313,6 +352,26 @@ const stringReplaceValidator = async (
 				valid: false,
 				error: `Found ${occurrences} matches for the search string. Please provide more surrounding context to make the match unique.`,
 			};
+		}
+
+		// Line-level visibility check: ensure the agent has actually read the lines
+		// being edited. This prevents blind edits where the model hallucinates
+		// content it never saw.
+		const targetLines = getLineNumbersForText(fileContent, old_str);
+		if (targetLines.length > 0) {
+			try {
+				const stats = await lstat(absPath);
+				const visibilityCheck = hasVisibleLines(absPath, stats, targetLines);
+				if (!visibilityCheck.visible) {
+					return {
+						valid: false,
+						error: visibilityCheck.error ?? 'Lines not visible',
+					};
+				}
+			} catch {
+				// If we can't stat the file, fall back to file-level check (already passed)
+				// This preserves backward compatibility if stat fails for any reason
+			}
 		}
 	} catch (error) {
 		const errorMessage = formatError(error);

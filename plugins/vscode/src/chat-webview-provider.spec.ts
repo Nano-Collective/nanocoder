@@ -22,6 +22,8 @@ function makeStubs() {
 			showDiffCalls.push({id, options});
 		},
 		getPendingChanges: () => pendingChangesAdded,
+		getPendingChange: (id: string) =>
+			pendingChangesAdded.find(change => change.id === id),
 	} as any;
 
 	const acpClient = {
@@ -383,6 +385,84 @@ test('ChatWebviewProvider - handleDiffs keys pending changes uniquely when multi
 	t.true(added[1].id.startsWith('tool-call-123_'));
 	t.is(added[0].filePath, 'src/foo.ts');
 	t.is(added[1].filePath, 'src/bar.ts');
+});
+
+test('ChatWebviewProvider - handleDiffs posts line counts for the pending changes card', t => {
+	const {provider, getPostedMessages} = makeStubs();
+
+	(provider as any).handleDiffs({
+		update: {
+			toolCallId: 'tool-call-1',
+			content: [
+				{
+					type: 'diff',
+					path: 'src/foo.ts',
+					oldText: 'a\nb\nc\n',
+					newText: 'a\nB\nc\nd\n',
+				},
+			],
+		},
+	});
+
+	const posted = getPostedMessages().filter(m => m.type === 'pendingChangeAdded');
+	t.is(posted.length, 1);
+	t.is(posted[0].toolCallId, 'tool-call-1');
+	t.is(posted[0].filePath, 'src/foo.ts');
+	t.is(posted[0].additions, 2);
+	t.is(posted[0].deletions, 1);
+});
+
+test('ChatWebviewProvider - handleDiffs announces a repeated update for the same change once', t => {
+	const {provider, getPostedMessages} = makeStubs();
+	const update = {
+		update: {
+			toolCallId: 'tool-call-1',
+			content: [{type: 'diff', path: 'src/foo.ts', oldText: 'a', newText: 'b'}],
+		},
+	};
+
+	(provider as any).handleDiffs(update);
+	(provider as any).handleDiffs(update);
+
+	const posted = getPostedMessages().filter(m => m.type === 'pendingChangeAdded');
+	t.is(posted.length, 1);
+});
+
+test('ChatWebviewProvider - handleDiffs announces every file of one tool call', t => {
+	const {provider, getPostedMessages} = makeStubs();
+
+	(provider as any).handleDiffs({
+		update: {
+			toolCallId: 'tool-call-1',
+			content: [
+				{type: 'diff', path: 'src/foo.ts', oldText: 'a', newText: 'b'},
+				{type: 'diff', path: 'src/bar.ts', oldText: 'a', newText: 'b'},
+			],
+		},
+	});
+
+	const posted = getPostedMessages().filter(m => m.type === 'pendingChangeAdded');
+	t.deepEqual(posted.map(m => m.filePath), ['src/foo.ts', 'src/bar.ts']);
+});
+
+test('ChatWebviewProvider - a diff that arrived before the view existed is announced once the webview is ready', t => {
+	const {provider, getPostedMessages} = makeStubs();
+	const view = (provider as any)._view;
+
+	(provider as any)._view = undefined;
+	(provider as any).handleDiffs({
+		update: {
+			toolCallId: 'tool-call-1',
+			content: [{type: 'diff', path: 'src/foo.ts', oldText: 'a', newText: 'b'}],
+		},
+	});
+	(provider as any)._view = view;
+	(provider as any)._replayPendingChanges();
+
+	const posted = getPostedMessages().filter(m => m.type === 'pendingChangeAdded');
+	t.is(posted.length, 1);
+	t.is(posted[0].toolCallId, 'tool-call-1');
+	t.is(posted[0].filePath, 'src/foo.ts');
 });
 
 test('ChatWebviewProvider - resetSessionState clears pending diff changes', async (t) => {

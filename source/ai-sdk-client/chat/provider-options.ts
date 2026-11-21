@@ -14,6 +14,20 @@ import {isOpenRouterProvider} from '../providers/openrouter.js';
  */
 export type ProviderOptions = Record<string, Record<string, unknown>>;
 
+// The OpenAI-compatible SDK sets these from the active chat request.
+const CHAT_REQUEST_FIELDS = new Set(['model', 'messages', 'tools', 'stream']);
+
+function safeExtraBody(
+	extraBody: Record<string, unknown> | undefined,
+): Record<string, unknown> {
+	if (!extraBody || typeof extraBody !== 'object' || Array.isArray(extraBody)) {
+		return {};
+	}
+	return Object.fromEntries(
+		Object.entries(extraBody).filter(([key]) => !CHAT_REQUEST_FIELDS.has(key)),
+	);
+}
+
 /**
  * Whether to mark this provider's requests with Anthropic cache breakpoints.
  *
@@ -33,7 +47,7 @@ export function isPromptCachingEnabled(
 /**
  * Build the `providerOptions` value for a streamText/generateText call.
  *
- * Currently handles two providers:
+ * Currently handles provider-specific options for:
  *   - chatgpt-codex: requires `instructions`, `store: false`, and reasoning
  *     controls under the `openai` provider key (Responses API).
  *   - openrouter: forwards `provider`, `reasoning`, `plugins`, `models`,
@@ -65,14 +79,19 @@ export function buildProviderOptions(
 		};
 	}
 
+	const usesOpenAICompatible =
+		providerConfig.sdkProvider === undefined ||
+		providerConfig.sdkProvider === 'openai-compatible';
+
 	if (isOpenRouterProvider(providerConfig.name)) {
 		const openrouter = providerConfig.openrouter;
 		const reasoning = buildOpenRouterReasoning(openrouter, modelParameters);
 
-		// Start from the generic escape-hatch so typed fields below can
-		// override anything the user happened to spell the same way.
 		const payload: Record<string, unknown> = {
-			...(openrouter?.extraBody ?? {}),
+			...safeExtraBody(
+				usesOpenAICompatible ? providerConfig.extraBody : undefined,
+			),
+			...safeExtraBody(openrouter?.extraBody),
 		};
 		if (openrouter?.provider !== undefined) {
 			payload['provider'] = openrouter.provider;
@@ -100,6 +119,13 @@ export function buildProviderOptions(
 			return undefined;
 		}
 		return {[openAICompatibleOptionsKey(providerConfig.name)]: payload};
+	}
+
+	if (usesOpenAICompatible) {
+		const payload = safeExtraBody(providerConfig.extraBody);
+		if (Object.keys(payload).length > 0) {
+			return {[openAICompatibleOptionsKey(providerConfig.name)]: payload};
+		}
 	}
 
 	return undefined;

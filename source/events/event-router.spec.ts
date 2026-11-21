@@ -319,6 +319,101 @@ test('matchGlob: patterns authored with Windows separators', t => {
 	t.false(matchGlob('docs\\*.md', 'docs/deep/guide.md'));
 });
 
+test('file.ai-comment event dispatches to matching subscription', async t => {
+	const d = makeDispatcher();
+	const router = new EventRouter(d);
+	router.subscribe({
+		id: 'ai1',
+		kind: 'file.ai-comment',
+		target: {kind: 'agent', name: 'fixer'},
+		source: 'frontmatter',
+		ownerSkill: 'auto-fix',
+	});
+
+	await router.emit({
+		kind: 'file.ai-comment',
+		payload: {
+			file: 'src/code.ts',
+			comment: 'fix null check',
+			marker: 'AI!',
+			line: 10,
+			context: 'function foo() { // fix null check AI! }',
+		},
+		at: Date.now(),
+	});
+
+	t.is(d.calls.length, 1);
+	t.is(d.calls[0]?.sub.id, 'ai1');
+});
+
+test('file.ai-comment with path filter matches correctly', async t => {
+	const d = makeDispatcher();
+	const router = new EventRouter(d);
+	router.subscribe({
+		id: 'ai-src',
+		kind: 'file.ai-comment',
+		target: {kind: 'agent', name: 'fixer'},
+		source: 'frontmatter',
+		ownerSkill: 'auto-fix',
+		filter: {paths: ['src/**']},
+	});
+
+	// Should match
+	await router.emit({
+		kind: 'file.ai-comment',
+		payload: {
+			file: 'src/utils.ts',
+			comment: 'optimize',
+			marker: 'AI!',
+			line: 5,
+			context: '// optimize AI!',
+		},
+		at: Date.now(),
+	});
+
+	// Should not match
+	await router.emit({
+		kind: 'file.ai-comment',
+		payload: {
+			file: 'docs/readme.md',
+			comment: 'fix typo',
+			marker: 'AI?',
+			line: 1,
+			context: '<!-- fix typo AI? -->',
+		},
+		at: Date.now(),
+	});
+
+	t.is(d.calls.length, 1);
+	t.is(d.calls[0]?.event.payload.file, 'src/utils.ts');
+});
+
+test('file.ai-comment with no filter dispatches all', async t => {
+	const d = makeDispatcher();
+	const router = new EventRouter(d);
+	router.subscribe({
+		id: 'ai-all',
+		kind: 'file.ai-comment',
+		target: {kind: 'agent', name: 'fixer'},
+		source: 'frontmatter',
+		ownerSkill: 'auto-fix',
+	});
+
+	await router.emit({
+		kind: 'file.ai-comment',
+		payload: {
+			file: 'anywhere.js',
+			comment: 'refactor',
+			marker: 'AI?',
+			line: 20,
+			context: '// refactor AI?',
+		},
+		at: Date.now(),
+	});
+
+	t.is(d.calls.length, 1);
+});
+
 // A dispatch resolves only when its triggered run ends, so subscriptions on
 // one event must start together, not wait for each other.
 test('emit starts every matching subscription without waiting for the others', async t => {
