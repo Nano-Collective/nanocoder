@@ -25,6 +25,7 @@ import {
 	getAppConfig,
 	getRetryLimits,
 } from '@/config/index';
+import {getNestedAgentsMdSection} from '@/conversation/agents-md';
 import {partitionUnknownToolCalls} from '@/hooks/chat-handler/utils/tool-filters';
 import {processToolUse} from '@/message-handler';
 import {
@@ -410,6 +411,13 @@ async function runTurn(
 				},
 			},
 			getSystemMessage: () => session.systemMessage,
+			// The tracker lives in this session's context, so concurrent editor
+			// sessions never inject each other's nested rules.
+			getTurnContextSections: () => {
+				if (!session.includeAgentsMd) return [];
+				const section = getNestedAgentsMdSection();
+				return section ? [section] : [];
+			},
 			prepareTurn: () => {
 				// The client's per-session list on top of the user's own
 				// disabledTools.

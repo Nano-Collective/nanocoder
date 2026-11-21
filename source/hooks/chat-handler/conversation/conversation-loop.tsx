@@ -13,10 +13,12 @@ import {displayCompactCountsSummary} from '@/components/tool-result-display';
 import {getAppConfig, getRetryLimits} from '@/config/index';
 import {getShowUsageFooter} from '@/config/preferences';
 import {MAX_COMPACT_RETRIES} from '@/constants';
+import {getNestedAgentsMdSection} from '@/conversation/agents-md';
 import {compressionBackup} from '@/conversation/compaction/compression-backup';
 import {compressMessages} from '@/conversation/compaction/message-compression';
 import {buildCompletionNote} from '@/conversation/completion-note';
 import {MessageBuilder} from '@/conversation/message-builder';
+import {shouldIncludeAgentsMd} from '@/conversation/prompt-builder';
 import {markRunFailed} from '@/conversation/run-outcome';
 import {
 	formatVerificationSummary,
@@ -416,6 +418,19 @@ export const processAssistantResponse = async (
 		adapter: {
 			history: {get: () => history, set: setHistory},
 			getSystemMessage: () => systemMessage,
+			getTurnContextSections: () => {
+				if (
+					!shouldIncludeAgentsMd(
+						tune,
+						currentModel,
+						getAppConfig().systemPrompt,
+					)
+				) {
+					return [];
+				}
+				const section = getNestedAgentsMdSection();
+				return section ? [section] : [];
+			},
 			prepareTurn: () => {
 				turnStartMessages = history;
 				hasLiveTaskUpdates = false;

@@ -59,17 +59,25 @@ The **nano** profile is designed for the smallest models or low-end hardware run
 - Drops the `CORE PRINCIPLES` and `CODING PRACTICES` prompt sections.
 - Uses shortened `TASK APPROACH`, `FILE OPERATIONS`, `CONSTRAINTS` sections (≤4 lines each).
 - Replaces the verbose `SYSTEM INFORMATION` block with a single-line `## SYSTEM` line.
-- Omits `AGENTS.md` from the system prompt by default (override with the **Include AGENTS.md** toggle).
+- Omits every `AGENTS.md` layer by default (override with the **Include AGENTS.md** toggle).
 
 Together these reduce the system prompt from ~500–700 tokens (`minimal`) to roughly ~150–250 tokens (`nano`), leaving more of the context window for actual work.
 
 ### Include AGENTS.md
 
-Toggles whether `AGENTS.md` from the project root is appended to the system prompt.
+Toggles the layered `AGENTS.md` rules. When on, Nanocoder loads:
+
+1. `<config dir>/AGENTS.md` for machine-wide rules, so guidance follows you across projects. This respects `NANOCODER_CONFIG_DIR`.
+2. The project-root `AGENTS.md`.
+3. Nested `AGENTS.md` files from directories the AI reads or edits during the session. A file appears once its directory is touched; files are ordered shallow to deep so the closest file wins on conflicts. Ignored directories (`.gitignore`, `.nanocoderignore`, and built-in ignores such as `node_modules` and `dist`) are skipped.
+
+The user-level and project-root files live in the system prompt. Nested files travel in the user message at request time instead, so discovering a new one does not change the system prompt and invalidate the prompt cache.
 
 - Defaults **ON** for `full` and `minimal` profiles (preserves prior behaviour).
 - Defaults **OFF** for the `nano` profile, including when `auto` resolves to `nano` for the active model.
 - Can be flipped explicitly per session, persisted via preferences, or pinned in `agents.config.json` via `tune.includeAgentsMd`.
+- Turns off every layer together. `systemPrompt.mode: "replace"` also skips them, because it replaces the built-in prompt entirely.
+- Caps each file at 32,000 characters. A truncated file includes a visible note describing how much was omitted.
 
 Disabling this is useful on tiny models that get crowded out by long project guidelines.
 

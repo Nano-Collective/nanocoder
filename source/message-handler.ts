@@ -1,3 +1,4 @@
+import {noteAgentsMdAccessForTool} from '@/conversation/agents-md';
 import type {CustomCommandLoader} from '@/custom-commands/loader';
 import {invalidArgumentsResult} from '@/hooks/chat-handler/utils/tool-filters';
 import {maybeAutoCommit} from '@/services/auto-commit';
@@ -125,6 +126,11 @@ export async function processToolUse(
 			result !== null &&
 			'isError' in result &&
 			result.isError === true;
+		// A successful read/edit means the agent now works in that directory:
+		// remember any AGENTS.md above it for the next model request.
+		if (!failed) {
+			noteAgentsMdAccessForTool(toolCall.function.name, parsedArgs);
+		}
 		// Formatters run on a successful write only, and before post-tool-use
 		// so its hooks see the formatted file.
 		const content =
