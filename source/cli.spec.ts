@@ -638,6 +638,68 @@ test('CLI parsing: handles --mode before run command', t => {
 	t.is(prompt, 'audit module');
 });
 
+test('CLI parsing: handles --profile before run command', t => {
+	const args = ['--profile', 'fast', 'run', 'analyze', 'code'];
+	const prompt = parsePrompt(args);
+	t.is(prompt, 'analyze code');
+});
+
+test('CLI parsing: handles --profile=<name> before run command', t => {
+	const args = ['--profile=fast', 'run', 'analyze', 'code'];
+	const prompt = parsePrompt(args);
+	t.is(prompt, 'analyze code');
+});
+
+// Profile argument extraction — mirrors the parser in cli.tsx
+function parseProfileArg(args: string[]): {
+	profile?: string;
+	error?: string;
+} {
+	const profileArgIndex = args.findIndex(
+		arg => arg === '--profile' || arg.startsWith('--profile='),
+	);
+	if (profileArgIndex === -1) {
+		return {};
+	}
+	const profileValue = args[profileArgIndex].startsWith('--profile=')
+		? args[profileArgIndex].slice('--profile='.length)
+		: args[profileArgIndex + 1];
+	if (!profileValue || profileValue.startsWith('-')) {
+		return {error: '--profile requires a profile name.'};
+	}
+	return {profile: profileValue.trim()};
+}
+
+test('CLI parsing: extracts --profile <name>', t => {
+	const result = parseProfileArg(['--profile', 'fast']);
+	t.is(result.profile, 'fast');
+	t.is(result.error, undefined);
+});
+
+test('CLI parsing: extracts --profile=<name>', t => {
+	const result = parseProfileArg(['--profile=review']);
+	t.is(result.profile, 'review');
+	t.is(result.error, undefined);
+});
+
+test('CLI parsing: errors on --profile without value', t => {
+	const result = parseProfileArg(['--profile']);
+	t.is(result.profile, undefined);
+	t.is(result.error, '--profile requires a profile name.');
+});
+
+test('CLI parsing: errors on --profile followed by another flag', t => {
+	const result = parseProfileArg(['--profile', '--plain']);
+	t.is(result.profile, undefined);
+	t.is(result.error, '--profile requires a profile name.');
+});
+
+test('CLI parsing: errors on empty --profile=', t => {
+	const result = parseProfileArg(['--profile=']);
+	t.is(result.profile, undefined);
+	t.is(result.error, '--profile requires a profile name.');
+});
+
 // Review guard tests — mirrors the guards in cli.tsx
 function resolveReviewGuards(opts: {
 	args: string[];

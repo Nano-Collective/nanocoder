@@ -44,28 +44,56 @@ function hash(value: string): string {
 	return createHash('sha1').update(value).digest('hex');
 }
 
-// Tool definitions are the same objects for the life of a registry entry, so
-// hashing each one once is enough. Keyed weakly so dropped tools are collected.
-const toolHashCache = new WeakMap<object, string>();
+// Serialising the tool schemas is the expensive half of fingerprinting — about
+// 18KB of JSON across a default tool set, on every request — so the result is
+// cached. (The SDK memoizes schema *resolution* on the Schema object itself;
+// stringify and hash are what repeat.)
+//
+// The cache cannot be keyed on the tool: `ToolRegistry.getNativeTools` strips
+// `execute` with a rest-spread, so it hands out a fresh object per tool per
+// call and a tool-keyed cache never hits. That spread is shallow, so
+// `inputSchema` is the reference that does survive — built-ins are module-level
+// constants, and MCP and custom tools are built once at registration. Keyed
+// weakly so dropped schemas are collected.
+const schemaDigestCache = new WeakMap<object, string>();
+
+/** No `inputSchema` at all, versus one that would not resolve. */
+const NO_SCHEMA = 'none';
+const UNREADABLE_SCHEMA = 'unreadable';
+
+async function schemaDigest(
+	schema: AISDKCoreTool['inputSchema'],
+): Promise<string> {
+	if (!schema) {
+		return NO_SCHEMA;
+	}
+	// A WeakMap keys on objects and functions but not on primitives. A schema
+	// may legitimately be either of the former: `jsonSchema()` accepts a thunk.
+	if (typeof schema !== 'object' && typeof schema !== 'function') {
+		return UNREADABLE_SCHEMA;
+	}
+	const cached = schemaDigestCache.get(schema);
+	if (cached) {
+		return cached;
+	}
+	let digest: string;
+	try {
+		digest = hash(JSON.stringify(await asSchema(schema).jsonSchema));
+	} catch {
+		// Not cached: a schema can resolve lazily, so a failure now does not
+		// mean a failure next turn, and caching it would hide the recovery.
+		return UNREADABLE_SCHEMA;
+	}
+	schemaDigestCache.set(schema, digest);
+	return digest;
+}
 
 async function hashTool(name: string, tool: AISDKCoreTool): Promise<string> {
-	const cached = toolHashCache.get(tool);
-	if (cached) {
-		return `${name}:${cached}`;
-	}
-	let schema: unknown = null;
-	try {
-		schema = tool.inputSchema
-			? await asSchema(tool.inputSchema).jsonSchema
-			: null;
-	} catch {
-		// An unserialisable schema still gets a stable (description-only) hash.
-	}
-	const digest = hash(
-		JSON.stringify({description: tool.description ?? '', schema}),
-	);
-	toolHashCache.set(tool, digest);
-	return `${name}:${digest}`;
+	// The description is combined per call rather than cached with the schema:
+	// nothing stops two tools sharing one schema object, and keying their whole
+	// hash on it would collide and hide a real tool change.
+	const digest = await schemaDigest(tool.inputSchema);
+	return `${name}:${hash(`${tool.description ?? ''}\n${digest}`)}`;
 }
 
 export async function fingerprintPrompt(

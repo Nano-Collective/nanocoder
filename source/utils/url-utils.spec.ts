@@ -1,5 +1,5 @@
 import test from 'ava';
-import {isLocalURL} from './url-utils';
+import {isLocalURL, redactUrlSecrets} from './url-utils';
 
 // ============================================================================
 // isLocalURL - localhost
@@ -80,3 +80,180 @@ test('isLocalURL handles malformed URL with 127.0.0.1', t => {
 test('isLocalURL returns false for malformed non-local URL', t => {
 	t.false(isLocalURL('not-a-url'));
 });
+
+for (const host of [
+	'127.0.0.2',
+	'127.255.255.254',
+	'192.168.1.50',
+	'10.0.0.5',
+	'172.16.0.1',
+	'172.31.255.254',
+	'169.254.1.1',
+	'100.64.0.1',
+	'100.127.255.254',
+	'[::ffff:127.0.0.1]',
+	'[::ffff:192.168.1.50]',
+	'[fc00::1]',
+	'[fd12::1]',
+	'[fe80::1]',
+	'[febf::1]',
+	'host.docker.internal',
+	'ollama',
+	'gpu-box.local',
+	'foo.localhost',
+	'localhost.',
+	'GPU-BOX.LOCAL.',
+]) {
+	test(`isLocalURL recognizes self-hosted provider ${host}`, t => {
+		t.true(isLocalURL(`http://${host}:11434/v1`));
+	});
+}
+
+for (const host of [
+	'172.15.255.255',
+	'172.32.0.0',
+	'100.63.255.255',
+	'100.128.0.0',
+	'169.253.1.1',
+	'192.169.1.1',
+	'8.8.8.8',
+	'[::ffff:8.8.8.8]',
+	'[2001:4860:4860::8888]',
+	'[fe7f::1]',
+	'[fec0::1]',
+	'localhost.example.com',
+	'gpu-box.local.example.com',
+	'host.docker.internal.example.com',
+]) {
+	test(`isLocalURL keeps public provider ${host} remote`, t => {
+		t.false(isLocalURL(`http://${host}:11434/v1`));
+	});
+}
+
+// ============================================================================
+// redactUrlSecrets
+// ============================================================================
+
+test('redactUrlSecrets removes credentials and query parameters from URLs', t => {
+	const raw =
+		'https://user:sk-test-LEAKCHECK123@proxy.example.com/v1?key=QUERYKEY-LEAKCHECK';
+	t.is(redactUrlSecrets(raw), 'https://proxy.example.com/v1');
+});
+
+test('redactUrlSecrets masks long token path segments and strips queries', t => {
+	const raw =
+		'https://mcp.example.com/api/mcp/s/PATHTOKEN-LEAKCHECK/mcp?api_key=APIKEY-LEAKCHECK';
+	t.is(redactUrlSecrets(raw), 'https://mcp.example.com/api/mcp/s/<redacted>/mcp');
+});
+
+test('redactUrlSecrets masks token-like path segments with sk- prefix', t => {
+	const raw = 'https://proxy.example.com/v1/sk-abc1234/models';
+	t.is(redactUrlSecrets(raw), 'https://proxy.example.com/v1/<redacted>/models');
+});
+
+test('redactUrlSecrets preserves standard short path segments', t => {
+	const raw = 'https://openrouter.ai/api/v1/chat/completions';
+	t.is(redactUrlSecrets(raw), 'https://openrouter.ai/api/v1/chat/completions');
+});
+
+test('redactUrlSecrets does not over-redact token endpoints or tokenizer paths', t => {
+	t.is(
+		redactUrlSecrets('https://proxy.example.com/v1/tokenizer/encode'),
+		'https://proxy.example.com/v1/tokenizer/encode',
+	);
+	t.is(
+		redactUrlSecrets('https://proxy.example.com/v1/tokens'),
+		'https://proxy.example.com/v1/tokens',
+	);
+});
+
+test('redactUrlSecrets preserves Azure deployment names and model identifiers', t => {
+	t.is(
+		redactUrlSecrets(
+			'https://my-resource.openai.azure.com/openai/deployments/gpt-4o-mini-deployment/chat/completions',
+		),
+		'https://my-resource.openai.azure.com/openai/deployments/gpt-4o-mini-deployment/chat/completions',
+	);
+	t.is(
+		redactUrlSecrets('https://example.com/deployments/MyDeployment2024'),
+		'https://example.com/deployments/MyDeployment2024',
+	);
+	t.is(
+		redactUrlSecrets('https://example.com/models/Qwen3Coder30B'),
+		'https://example.com/models/Qwen3Coder30B',
+	);
+});
+
+test('redactUrlSecrets masks 16-23 character opaque hex and alphanumeric tokens', t => {
+	t.is(
+		redactUrlSecrets('https://proxy.example.com/v1/abcdef1234567890abcd'),
+		'https://proxy.example.com/v1/<redacted>',
+	);
+	t.is(
+		redactUrlSecrets('https://proxy.example.com/v1/abc123def456ghi789jk'),
+		'https://proxy.example.com/v1/<redacted>',
+	);
+});
+
+test('redactUrlSecrets masks secret-shaped segments even under models or deployments paths', t => {
+	t.is(
+		redactUrlSecrets('https://example.com/v1/models/sk-1234567890abcdef'),
+		'https://example.com/v1/models/<redacted>',
+	);
+	t.is(
+		redactUrlSecrets(
+			'https://example.com/deployments/123e4567-e89b-12d3-a456-426614174000',
+		),
+		'https://example.com/deployments/<redacted>',
+	);
+	t.is(
+		redactUrlSecrets(
+			'https://example.com/openai/deployments/sk-abcdef123456/chat',
+		),
+		'https://example.com/openai/deployments/<redacted>/chat',
+	);
+	t.is(
+		redactUrlSecrets('https://example.com/v1/model/ghp_abcdef123456'),
+		'https://example.com/v1/model/<redacted>',
+	);
+	t.is(
+		redactUrlSecrets('https://example.com/mcp/s/gptSecretToken1234'),
+		'https://example.com/mcp/s/<redacted>',
+	);
+	t.is(
+		redactUrlSecrets('https://example.com/webhooks/claudeSecretToken1234'),
+		'https://example.com/webhooks/<redacted>',
+	);
+});
+
+test('redactUrlSecrets masks short webhook tokens and high-entropy segments', t => {
+	t.is(
+		redactUrlSecrets('https://api.example.com/hooks/abc123XYZ789'),
+		'https://api.example.com/hooks/<redacted>',
+	);
+	t.is(
+		redactUrlSecrets('https://api.example.com/webhooks/webhookToken12345'),
+		'https://api.example.com/webhooks/<redacted>',
+	);
+});
+
+test('redactUrlSecrets handles empty and nullish values gracefully', t => {
+	t.is(redactUrlSecrets(undefined), undefined);
+	t.is(redactUrlSecrets(null), undefined);
+	t.is(redactUrlSecrets(''), undefined);
+	t.is(redactUrlSecrets('   '), undefined);
+});
+
+test('redactUrlSecrets masks tokens and strips credentials on schemeless URLs', t => {
+	const schemelessToken = 'proxy.example.com/v1/sk-abc123def4567890';
+	t.is(redactUrlSecrets(schemelessToken), 'proxy.example.com/v1/<redacted>');
+
+	const schemelessUserinfo =
+		'user:pass@proxy.example.com/v1/sk-abc123def4567890';
+	t.is(redactUrlSecrets(schemelessUserinfo), 'proxy.example.com/v1/<redacted>');
+
+	const schemelessQuery =
+		'user:secret@proxy.example.com/v1/models?api_key=SECRET123';
+	t.is(redactUrlSecrets(schemelessQuery), 'proxy.example.com/v1/models');
+});
+

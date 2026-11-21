@@ -464,6 +464,157 @@ test('compressMessages detects success in tool results', t => {
 	t.true(toolMsg?.content?.includes('success') ?? false);
 });
 
+// ==================== Success pattern anchoring (#1633) ====================
+
+test('compressMessages default mode does not claim success for a log that also reports failures (#1633)', t => {
+	const tokenizer = createMockTokenizer();
+	const messages: Message[] = [
+		createToolMessage(
+			'read_file',
+			'Build completed successfully\nfailures: 3',
+		),
+		createUserMessage('Recent'),
+	];
+
+	const result = compressMessages(messages, tokenizer, {
+		mode: 'default',
+		keepRecentMessages: 1,
+	});
+
+	const content = result.compressedMessages[0]?.content ?? '';
+	// The body must not be reduced to a blanket success claim
+	t.false(content.includes('Result: success'));
+	// Both the success mention and the failure count must survive
+	t.true(content.includes('Build completed successfully'));
+	t.true(content.includes('failures: 3'));
+});
+
+test('compressMessages default mode still collapses a clean whole-body success', t => {
+	const tokenizer = createMockTokenizer();
+	const messages: Message[] = [
+		createToolMessage('execute_bash', 'completed successfully'),
+		createToolMessage('execute_bash', 'No errors.\n'),
+		createUserMessage('Recent'),
+	];
+
+	const result = compressMessages(messages, tokenizer, {
+		mode: 'default',
+		keepRecentMessages: 1,
+	});
+
+	t.is(
+		result.compressedMessages[0]?.content,
+		'Tool: execute_bash\nResult: success',
+	);
+	t.is(
+		result.compressedMessages[1]?.content,
+		'Tool: execute_bash\nResult: success',
+	);
+});
+
+test('compressMessages default mode keeps a key line instead of claiming success for a passing log', t => {
+	const tokenizer = createMockTokenizer();
+	const messages: Message[] = [
+		createToolMessage('execute_bash', '3 packages audited\ncompleted successfully'),
+		createUserMessage('Recent'),
+	];
+
+	const result = compressMessages(messages, tokenizer, {
+		mode: 'default',
+		keepRecentMessages: 1,
+	});
+
+	const content = result.compressedMessages[0]?.content ?? '';
+	t.false(content.includes('Result: success'));
+	t.true(content.includes('3 packages audited'));
+});
+
+test('compressMessages default mode keeps a failure line that appears past the leading lines (#1633)', t => {
+	const tokenizer = createMockTokenizer();
+	const messages: Message[] = [
+		createToolMessage(
+			'execute_bash',
+			'Build completed successfully\nstep 1 ok\nstep 2 ok\nstep 3 ok\nfailures: 3',
+		),
+		createUserMessage('Recent'),
+	];
+
+	const result = compressMessages(messages, tokenizer, {
+		mode: 'default',
+		keepRecentMessages: 1,
+	});
+
+	// The success line survives, but the failure reported on the last line must
+	// not be truncated away while it does.
+	t.is(
+		result.compressedMessages[0]?.content,
+		'Tool: execute_bash\nResult: Build completed successfully\nfailures: 3',
+	);
+});
+
+test('compressMessages default mode does not treat "no errors" as a failure signal (#1633)', t => {
+	const tokenizer = createMockTokenizer();
+	const messages: Message[] = [
+		createToolMessage('execute_bash', 'Linted 12 files\nno errors'),
+		createUserMessage('Recent'),
+	];
+
+	const result = compressMessages(messages, tokenizer, {
+		mode: 'default',
+		keepRecentMessages: 1,
+	});
+
+	// "no errors" contains "error" but describes a passing run, so the
+	// mixed-outcome guard must not fire and keep the whole body.
+	t.is(
+		result.compressedMessages[0]?.content,
+		'Tool: execute_bash\nResult: Linted 12 files',
+	);
+});
+
+test('compressMessages aggressive mode does not report "no errors" as an error (#1633)', t => {
+	const tokenizer = createMockTokenizer();
+	const messages: Message[] = [
+		createToolMessage('execute_bash', 'Linted 12 files\nno errors'),
+		createUserMessage('Recent'),
+	];
+
+	const result = compressMessages(messages, tokenizer, {
+		mode: 'aggressive',
+		keepRecentMessages: 1,
+	});
+
+	t.is(
+		result.compressedMessages[0]?.content,
+		'Tool: execute_bash\nResult: success',
+	);
+});
+
+test('compressMessages default mode truncates a long mixed-outcome line (#1633)', t => {
+	const tokenizer = createMockTokenizer();
+	// One long line that mentions both success and an error word, like verbose
+	// JSON. It must still be compressed, not kept in full.
+	const longBody = JSON.stringify({
+		success: true,
+		errors: ['boom', 'bang'],
+		payload: 'x'.repeat(20_000),
+	});
+	const messages: Message[] = [
+		createToolMessage('read_file', longBody),
+		createUserMessage('Recent'),
+	];
+
+	const result = compressMessages(messages, tokenizer, {
+		mode: 'default',
+		keepRecentMessages: 1,
+	});
+
+	const content = result.compressedMessages[0]?.content ?? '';
+	t.true(content.startsWith('Tool: read_file\nResult: '));
+	t.true(content.endsWith('...'));
+	t.true(content.length < 300);
+});
+
 // ==================== keepRecentMessages option ====================
 
 test('compressMessages respects custom keepRecentMessages value', t => {
@@ -602,4 +753,81 @@ test('compressMessages preserves display-only messages in output but excludes th
 		0,
 	);
 	t.is(result.compressedTokenCount, expectedCompressedTokens);
+});
+
+// ==================== Per-turn context blocks (#1574) ====================
+//
+// Skills and recalled memories ride at the end of the user's message and are
+// stored in history, so compaction is the first thing that reads them back.
+// Two properties matter: the user's own words survive, and the block never
+// survives half-cut — `summarizeText` slices at a character count, and a
+// recalled-memory block is budgeted well past the 500-char threshold, so a
+// naive pass would routinely leave an opening tag with no close.
+
+const TURN_CONTEXT_MEMORIES =
+	'<turn-context>\n## Project Context\n\n- Auth uses Clerk; sessions are JWTs.\n</turn-context>';
+
+test('compressMessages drops a stale per-turn context block from an older message', t => {
+	const tokenizer = createMockTokenizer();
+	const messages: Message[] = [
+		createUserMessage(`refactor the auth module\n\n${TURN_CONTEXT_MEMORIES}`),
+		createAssistantMessage('Done.'),
+		createUserMessage('now add a test'),
+		createAssistantMessage('Added.'),
+	];
+
+	const result = compressMessages(messages, tokenizer, {
+		mode: 'default',
+		keepRecentMessages: 2,
+	});
+
+	const compacted = result.compressedMessages[0];
+	t.is(compacted?.content, 'refactor the auth module');
+});
+
+test('compressMessages never leaves an unterminated context block', t => {
+	const tokenizer = createMockTokenizer();
+	// Long enough to trip the 500-char threshold, which truncates to 200 — a
+	// cut that lands inside the block when it is not removed first.
+	const longBlock = `<turn-context>\n## Project Context\n\n${'- Auth uses Clerk; sessions are JWTs.\n'.repeat(20)}</turn-context>`;
+	const messages: Message[] = [
+		createUserMessage(`refactor the auth module\n\n${longBlock}`),
+		createAssistantMessage('Done.'),
+		createUserMessage('now add a test'),
+		createAssistantMessage('Added.'),
+	];
+
+	const result = compressMessages(messages, tokenizer, {
+		mode: 'default',
+		keepRecentMessages: 2,
+	});
+
+	for (const message of result.compressedMessages) {
+		const content = message.content ?? '';
+		t.false(
+			content.includes('<turn-context>'),
+			'no block, whole or partial, may survive compaction',
+		);
+	}
+	t.is(result.compressedMessages[0]?.content, 'refactor the auth module');
+});
+
+test('compressMessages leaves a message that carries no block untouched', t => {
+	const tokenizer = createMockTokenizer();
+	const original = createUserMessage('refactor the auth module');
+	const messages: Message[] = [
+		original,
+		createAssistantMessage('Done.'),
+		createUserMessage('now add a test'),
+		createAssistantMessage('Added.'),
+	];
+
+	const result = compressMessages(messages, tokenizer, {
+		mode: 'default',
+		keepRecentMessages: 2,
+	});
+
+	// Identity, not just equality: nothing is reallocated for a history that
+	// never carried a block.
+	t.is(result.compressedMessages[0], original);
 });

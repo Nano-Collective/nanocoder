@@ -9,6 +9,7 @@ import {
 import {
 	DEFAULT_WEB_SEARCH_RESULTS,
 	MAX_WEB_SEARCH_QUERY_LENGTH,
+	MAX_WEB_SEARCH_RESULTS,
 	TIMEOUT_WEB_SEARCH_MS,
 } from '@/constants';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
@@ -16,11 +17,12 @@ import {useTheme} from '@/hooks/useTheme';
 import {assertResolvedPublicHttpUrl} from '@/tools/fetch-url-guard';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
+import {installProxyGlobalDispatcher} from '@/utils/proxy-dispatcher';
 import {estimateTokens} from '@/utils/token-calculator';
 
 interface SearchArgs {
 	query: string;
-	max_results?: number;
+	max_results?: number | null;
 }
 
 /** One result, the same shape whichever engine found it. */
@@ -35,6 +37,44 @@ interface BraveSearchResponse {
 		results?: SearchResult[];
 	};
 }
+
+const escapeMarkdown = (text: unknown): string =>
+	String(text ?? '')
+		.replace(/<\/?(?:strong|b|em|i|mark)>/gi, '')
+		.replace(/\s+/g, ' ')
+		.trim()
+		.replace(/[\\`*_[\]<>~|=]/g, '\\$&')
+		.replace(/^(?=[#+-]|\d+[.)])/, '\\');
+
+const toSafeUrl = (raw: unknown): string | undefined => {
+	const url = String(raw ?? '');
+	// Reject, do not strip (host-join risk); an angle bracket would close the autolink.
+	if (/[\s\u0000-\u001f\u007f<>]/.test(url)) return undefined;
+	if (!/^https?:\/\//i.test(url)) return undefined;
+	try {
+		const {protocol} = new URL(url);
+		return protocol === 'http:' || protocol === 'https:' ? url : undefined;
+	} catch {
+		return undefined;
+	}
+};
+
+const normalizeWebSearchMaxResults = (value: unknown): number => {
+	if (value === undefined || value === null) {
+		return DEFAULT_WEB_SEARCH_RESULTS;
+	}
+
+	const normalized =
+		typeof value === 'string' && value.trim() !== '' ? Number(value) : value;
+
+	if (typeof normalized !== 'number' || !Number.isFinite(normalized)) {
+		throw new Error(
+			`max_results must be a finite number or a non-empty numeric string (clamped to 1-${MAX_WEB_SEARCH_RESULTS})`,
+		);
+	}
+
+	return Math.min(MAX_WEB_SEARCH_RESULTS, Math.max(1, Math.trunc(normalized)));
+};
 
 interface SearxngSearchResponse {
 	results?: Array<{title?: string; url?: string; content?: string}>;
@@ -169,10 +209,14 @@ function formatResults(query: string, results: SearchResult[]): string {
 	for (let i = 0; i < results.length; i++) {
 		const result = results[i];
 		if (!result) continue;
-		formattedResults += `## ${i + 1}. ${result.title}\n\n`;
-		formattedResults += `**URL:** ${result.url}\n\n`;
-		if (result.description) {
-			formattedResults += `${result.description}\n\n`;
+		formattedResults += `## ${i + 1}. ${escapeMarkdown(result.title)}\n\n`;
+		const url = toSafeUrl(result.url);
+		if (url) {
+			formattedResults += `**URL:** <${url}>\n\n`;
+		}
+		const description = escapeMarkdown(result.description);
+		if (description) {
+			formattedResults += `${description}\n\n`;
 		}
 		formattedResults += '---\n\n';
 	}
@@ -186,9 +230,12 @@ function formatResults(query: string, results: SearchResult[]): string {
  */
 export const executeWebSearch = async (
 	args: SearchArgs,
-	settings?: WebSearchSettings,
+	settings?: WebSearchSettings | string,
 ): Promise<string> => {
-	let resolved = settings;
+	let resolved =
+		typeof settings === 'string'
+			? {engine: 'brave' as const, apiKey: settings, allowPrivateNetwork: false}
+			: settings;
 	if (!resolved) {
 		const status = getWebSearchStatus();
 		if (!status.available) {
@@ -197,9 +244,10 @@ export const executeWebSearch = async (
 		resolved = status.settings;
 	}
 
-	const maxResults = args.max_results ?? DEFAULT_WEB_SEARCH_RESULTS;
+	const maxResults = normalizeWebSearchMaxResults(args.max_results);
 
 	try {
+		await installProxyGlobalDispatcher();
 		const results = await ENGINES[resolved.engine](
 			args.query,
 			maxResults,
@@ -233,9 +281,9 @@ const webSearchCoreTool = tool({
 				description: 'The search query.',
 			},
 			max_results: {
-				type: 'number',
+				type: ['number', 'null'],
 				description:
-					'Maximum number of search results to return (default: 10).',
+					'Maximum number of search results to return (default: 10). Fractional values are truncated and the limit is clamped to the 1-20 range the Brave API accepts. Numeric strings are accepted and null uses the default.',
 			},
 		},
 		required: ['query'],
@@ -312,7 +360,7 @@ export const webSearchFormatter = (
 	return (
 		<WebSearchFormatterComponent
 			query={args.query || 'unknown'}
-			maxResults={args.max_results ?? DEFAULT_WEB_SEARCH_RESULTS}
+			maxResults={normalizeWebSearchMaxResults(args.max_results)}
 			result={result}
 		/>
 	);
@@ -336,6 +384,15 @@ export const webSearchValidator = (
 		return Promise.resolve({
 			valid: false,
 			error: `Search query is too long (${query.length} characters). Maximum length is ${MAX_WEB_SEARCH_QUERY_LENGTH} characters.`,
+		});
+	}
+
+	try {
+		normalizeWebSearchMaxResults(args.max_results);
+	} catch (error: unknown) {
+		return Promise.resolve({
+			valid: false,
+			error: error instanceof Error ? error.message : 'Invalid max_results',
 		});
 	}
 

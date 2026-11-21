@@ -1,9 +1,10 @@
-import {existsSync, mkdirSync, writeFileSync} from 'node:fs';
+import {existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
 import React from 'react';
 import {reloadAppConfig} from '@/config/index';
+import {bashExecutor} from '@/services/bash-executor';
 import {setProjectRoot} from '@/services/session-cwd';
 import type {HooksConfig} from '@/types/config';
 import {runStreamingBashTool} from './streaming-bash-tool';
@@ -38,6 +39,24 @@ test('runStreamingBashTool propagates AbortSignal to underlying bash execution',
 	t.true(elapsed < 1000, 'Command should abort immediately instead of sleeping');
 	t.truthy(result.bashState);
 	t.is(result.bashState!.error, 'Cancelled via AbortSignal');
+});
+
+// The interactive path starts the command itself, so it is the one place
+// timeout_seconds could be dropped without any other path noticing.
+test('runStreamingBashTool honours timeout_seconds', async t => {
+	const toolCall = {
+		id: 'call_timeout',
+		type: 'function',
+		function: {
+			name: 'execute_bash',
+			arguments: JSON.stringify({command: 'sleep 10', timeout_seconds: 1}),
+		},
+	} as any;
+
+	const run = await runStreamingBashTool(toolCall, null, () => {}, 'test');
+
+	t.is(run.bashState?.error, 'Command timed out after 1 seconds');
+	t.true(run.result.isError);
 });
 
 // A command that runs but exits non-zero is the case that used to read as a
@@ -76,6 +95,47 @@ test('runStreamingBashTool leaves a clean run unflagged', async t => {
 
 	t.is(run.bashState?.exitCode, 0);
 	t.falsy(run.result.isError);
+});
+
+test('runStreamingBashTool returns a background job without a live component', async t => {
+	const dir = mkdtempSync(join(tmpdir(), 'nc-stream-bg-'));
+	const script = join(dir, 'job.js');
+	writeFileSync(
+		script,
+		"console.log('started'); setInterval(() => {}, 1000);\n",
+	);
+	t.teardown(() => rmSync(dir, {recursive: true, force: true}));
+
+	const toolCall = {
+		id: 'call_bg',
+		type: 'function',
+		function: {
+			name: 'execute_bash',
+			arguments: JSON.stringify({
+				command: `node "${script}"`,
+				run_in_background: true,
+			}),
+		},
+	} as any;
+
+	let live: React.ReactNode = 'unset';
+	const run = await runStreamingBashTool(
+		toolCall,
+		null,
+		component => {
+			live = component;
+		},
+		'test',
+	);
+
+	t.is(live, null, 'no live BashProgress is mounted for a background job');
+	t.falsy(run.bashState);
+	t.false(run.result.isError);
+	t.true(run.result.content.includes('JOB_ID:'));
+
+	const jobId = run.result.content.match(/JOB_ID: (\S+)/)?.[1];
+	t.truthy(jobId);
+	await bashExecutor.killJob(jobId!);
 });
 
 // ============================================================================
