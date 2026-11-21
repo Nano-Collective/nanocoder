@@ -1,4 +1,5 @@
 import type {ValidationErrorDetail} from '@/types/core';
+import {matchSchemaPattern} from './schema-pattern.js';
 
 /**
  * Conservative, dependency-free type checker for tool arguments against the
@@ -442,16 +443,19 @@ function validateStrict(
 			);
 		}
 		if (typeof node.pattern === 'string') {
-			try {
-				if (!new RegExp(node.pattern).test(value)) {
-					addStrictError(
-						out,
-						path,
-						`string must match the pattern ${node.pattern}`,
-					);
-				}
-			} catch {
-				// An invalid pattern is a schema bug, not a document bug.
+			const match = matchSchemaPattern(value, node.pattern);
+			if (!match.supported) {
+				addStrictError(
+					out,
+					path,
+					`schema pattern is unsupported: ${match.reason}`,
+				);
+			} else if (!match.matched) {
+				addStrictError(
+					out,
+					path,
+					`string must match the pattern ${node.pattern}`,
+				);
 			}
 		}
 	}
@@ -595,14 +599,19 @@ function validateStrict(
 		const matchedPatterns = new Set<string>();
 		if (isJsonObject(node.patternProperties)) {
 			for (const [pattern, sub] of Object.entries(node.patternProperties)) {
-				let regex: RegExp;
-				try {
-					regex = new RegExp(pattern);
-				} catch {
+				const probe = matchSchemaPattern('', pattern);
+				if (!probe.supported) {
+					addStrictError(
+						out,
+						path,
+						`schema patternProperties pattern is unsupported: ${probe.reason}`,
+					);
 					continue;
 				}
 				for (const key of keys) {
-					if (!regex.test(key)) continue;
+					const match = matchSchemaPattern(key, pattern);
+					if (!match.supported) continue;
+					if (!match.matched) continue;
 					matchedPatterns.add(key);
 					validateStrict(
 						value[key],

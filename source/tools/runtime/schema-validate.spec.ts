@@ -286,6 +286,25 @@ test('strict: enforces string, numeric and array constraints', t => {
 		validateJsonDocument('abc', {type: 'string', pattern: '^\\d+$'}).length,
 		1,
 	);
+	t.deepEqual(
+		validateJsonDocument('123', {type: 'string', pattern: '^\\d+$'}),
+		[],
+	);
+	const unsupportedPattern = validateJsonDocument('aaa', {
+		type: 'string',
+		pattern: '^(a+)+$',
+	});
+	t.is(unsupportedPattern.length, 1);
+	t.regex(String(unsupportedPattern[0].message), /pattern is unsupported/);
+	t.deepEqual(
+		validateJsonDocument('a+b', {type: 'string', pattern: '^a\\+b$'}),
+		[],
+	);
+	const unsupportedEscape = validateJsonDocument('word', {
+		type: 'string',
+		pattern: '\\bword\\b',
+	});
+	t.regex(String(unsupportedEscape[0].message), /escape.*outside the supported/);
 	t.is(validateJsonDocument(4, {type: 'number', minimum: 5}).length, 1);
 	t.is(validateJsonDocument(6, {type: 'number', maximum: 5}).length, 1);
 	t.is(
@@ -299,6 +318,45 @@ test('strict: enforces string, numeric and array constraints', t => {
 		validateJsonDocument([1, 1], {type: 'array', uniqueItems: true}).length,
 		1,
 	);
+});
+
+test('strict: validates patternProperties with the bounded pattern matcher', t => {
+	const schema = {
+		type: 'object',
+		patternProperties: {'^x-[a-z]+$': {type: 'integer'}},
+		additionalProperties: false,
+	};
+	t.deepEqual(validateJsonDocument({'x-name': 3}, schema), []);
+	const errors = validateJsonDocument({'x-name': 'three'}, schema);
+	t.is(errors.length, 1);
+	t.is(errors[0].path, 'x-name');
+
+	const unsupported = validateJsonDocument({'x-name': 3}, {
+		type: 'object',
+		patternProperties: {'^(x|y)-name$': {type: 'integer'}},
+	});
+	t.is(unsupported.length, 1);
+	t.regex(String(unsupported[0].message), /patternProperties pattern is unsupported/);
+	const unsupportedWithoutProperties = validateJsonDocument({}, {
+		type: 'object',
+		patternProperties: {'^(x|y)-name$': {type: 'integer'}},
+	});
+	t.is(unsupportedWithoutProperties.length, 1);
+});
+
+test('strict: pattern matching stays bounded for long values', t => {
+	t.deepEqual(
+		validateJsonDocument('a'.repeat(50_000), {
+			type: 'string',
+			pattern: '^a+$',
+		}),
+		[],
+	);
+	const limited = validateJsonDocument('a'.repeat(100_000), {
+		type: 'string',
+		pattern: 'a'.repeat(256),
+	});
+	t.regex(String(limited[0].message), /exceeds the validation work limit/);
 });
 
 test('strict: supports tuple items and additionalItems', t => {

@@ -257,7 +257,7 @@ nanocoder run --json-schema ./review.schema.json "Review the working tree change
 nanocoder run --output-format json --json-schema ./review.schema.json "Review the working tree changes" | jq .structured.verdict
 ```
 
-The validator supports JSON types, `required`, `properties`, `additionalProperties`, `patternProperties`, arrays and tuple items, enums/constants, numeric/string/array/object constraints, `anyOf`/`oneOf`/`allOf`/`not`, and local `$ref` pointers to `$defs` or `definitions`. Remote references and other unsupported validation keywords are not resolved or enforced. Native provider structured-output modes are not currently selected; the prompt-and-validate flow works consistently with hosted and local models.
+The validator supports JSON types, `required`, `properties`, `additionalProperties`, `patternProperties`, arrays and tuple items, enums/constants, numeric/string/array/object constraints, `anyOf`/`oneOf`/`allOf`/`not`, and local `$ref` pointers to `$defs` or `definitions`. To avoid running untrusted patterns through a backtracking regex engine, schema patterns support literals, `.`, `\d`/`\w`/`\s` (and uppercase negations), character classes/ranges, `^`/`$`, and simple quantifiers (`*`, `+`, `?`, `{m,n}`); groups, alternation, lookarounds, and other unsupported syntax are reported as schema errors. Remote references and other unsupported validation keywords are not resolved or enforced. Native provider structured-output modes are not currently selected; the prompt-and-validate flow works consistently with hosted and local models.
 
 #### Output Shape
 
