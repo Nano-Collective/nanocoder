@@ -12,6 +12,7 @@
 // pulled in via dynamic `await import()` only when the app actually boots.
 import {readFileSync} from 'node:fs';
 import nodeModule from 'node:module';
+import type {JsonSchemaDocument} from '@/tools/runtime/schema-validate.js';
 import {
 	composePromptWithStdin,
 	parseRunPrompt,
@@ -313,6 +314,9 @@ Options:
                       line. Necessary for large prompts: Linux caps a single
                       argument at 128 KiB and execve fails with E2BIG.
                       Use "-" to read the prompt from stdin.
+  --json-schema       Validate the final run answer against a JSON Schema.
+                      Takes a schema file path or inline JSON (quote it).
+                      Uses the plain runtime and retries invalid answers.
   --trust-directory   Skip the first-run directory trust prompt for this run only.
                       Valid with "run", "daemon start", "verify" and --acp. Does not
                       modify the preferences file.
@@ -330,6 +334,11 @@ Options:
   --json              Output execution results as a single well-formed JSON object to stdout.
                       Only valid with the "run" command. Always uses the plain runtime.
   --output-format     Specify stdout format ('text' or 'json'). Synonym for --json.
+  --json-schema       Validate the final run answer against a JSON Schema. Takes a
+                      schema file path or inline JSON (quote it). On failure the
+                      validator errors are sent back to the model and retried; the
+                      run exits non-zero if it never validates. Always uses the
+                      plain runtime.
   --acp               Run as an ACP (Agent Client Protocol) server for editor integration.
                       Communicates via JSON-RPC over stdin/stdout. Refuses an untrusted
                       directory unless --trust-directory is passed.
@@ -620,6 +629,36 @@ async function main(): Promise<void> {
 	const isRunCommand = runCommandIndex !== -1;
 	let nonInteractivePrompt = parseRunPrompt(args);
 
+	// --json-schema: validate the final `run` answer against a user schema.
+	// The value is a file path or inline JSON; loading it here means a typo
+	// fails before the session starts instead of after a model round-trip.
+	let jsonSchema: JsonSchemaDocument | undefined;
+	const jsonSchemaIndex = args.findIndex(
+		arg => arg === '--json-schema' || arg.startsWith('--json-schema='),
+	);
+	if (jsonSchemaIndex !== -1) {
+		const rawValue = args[jsonSchemaIndex].startsWith('--json-schema=')
+			? args[jsonSchemaIndex].slice('--json-schema='.length)
+			: args[jsonSchemaIndex + 1];
+		if (!rawValue || rawValue === 'run' || rawValue.startsWith('--')) {
+			console.error(
+				'--json-schema requires a schema file path or inline JSON.',
+			);
+			process.exit(1);
+		}
+		if (!isRunCommand) {
+			console.error('--json-schema only applies to `nanocoder run`.');
+			process.exit(1);
+		}
+		const {loadJsonSchema} = await import('./plain/structured-output.js');
+		try {
+			jsonSchema = loadJsonSchema(rawValue);
+		} catch (error) {
+			console.error(error instanceof Error ? error.message : String(error));
+			process.exit(1);
+		}
+	}
+
 	// --prompt-file: read the prompt from a file rather than argv.
 	//
 	// Linux caps a *single* argv entry at MAX_ARG_STRLEN (32 pages = 131072
@@ -809,6 +848,11 @@ async function main(): Promise<void> {
 		process.exit(1);
 	}
 
+	if (jsonSchema && vscodeMode) {
+		console.error('Error: --json-schema cannot be combined with --vscode.');
+		process.exit(1);
+	}
+
 	if (outputFormat === 'json' && isReviewCommand) {
 		console.error(
 			'Error: --json cannot be used with `nanocoder review`. Review output is displayed in the interactive terminal.',
@@ -839,8 +883,16 @@ async function main(): Promise<void> {
 		);
 		process.exit(1);
 	}
+	if (jsonSchema && noPlainRequested) {
+		console.error(
+			'Error: --json-schema needs the plain shell and cannot be combined with --no-plain.',
+		);
+		process.exit(1);
+	}
 	const plainForJson = outputFormat === 'json' && isRunCommand;
-	const plainMode = plainRequested || plainAuto || plainForJson;
+	const plainForSchema = jsonSchema !== undefined && isRunCommand;
+	const plainMode =
+		plainRequested || plainAuto || plainForJson || plainForSchema;
 
 	// Hard-error when `review` lands in a non-interactive context (piped
 	// stdout, CI). The plain shell has no slash-command dispatch, so
@@ -857,6 +909,11 @@ async function main(): Promise<void> {
 
 	if (outputFormat === 'json' && acpMode) {
 		console.error('Error: --json cannot be combined with --acp.');
+		process.exit(1);
+	}
+
+	if (jsonSchema && acpMode) {
+		console.error('Error: --json-schema cannot be combined with --acp.');
 		process.exit(1);
 	}
 
@@ -933,6 +990,7 @@ async function main(): Promise<void> {
 			cliModel,
 			trustDirectory,
 			outputFormat,
+			jsonSchema,
 		});
 	} else {
 		// Interactive TUI — load Ink + App only now, with React's production
