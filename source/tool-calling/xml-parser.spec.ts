@@ -232,26 +232,32 @@ test('parseToolCalls - preserves JSON-looking string parameters with schemas', t
 
 test('parseToolCalls - removes one wrapping newline from multiline string parameters', t => {
 	const lfResult = XMLToolCallParser.parseToolCalls(
-		'<read_file><path>\nsrc/a.ts\n</path></read_file>',
+		'<write_file><path>a.ts</path><content>\nline 1\nline 2\n</content></write_file>',
 		{
-			read_file: {
+			write_file: {
 				type: 'object',
-				properties: {path: {type: 'string'}},
+				properties: {
+					path: {type: 'string'},
+					content: {type: 'string'},
+				},
 			},
 		},
 	);
-	t.is(lfResult[0].parameters.path, 'src/a.ts');
+	t.is(lfResult[0].parameters.content, 'line 1\nline 2');
 
 	const crlfResult = XMLToolCallParser.parseToolCalls(
-		'<read_file><path>\r\nsrc/a.ts\r\n</path></read_file>',
+		'<write_file><path>a.ts</path><content>\r\nline 1\r\nline 2\r\n</content></write_file>',
 		{
-			read_file: {
+			write_file: {
 				type: 'object',
-				properties: {path: {type: 'string'}},
+				properties: {
+					path: {type: 'string'},
+					content: {type: 'string'},
+				},
 			},
 		},
 	);
-	t.is(crlfResult[0].parameters.path, 'src/a.ts');
+	t.is(crlfResult[0].parameters.content, 'line 1\r\nline 2');
 });
 
 test('parseToolCalls - preserves internal newlines and surrounding spaces in string parameters', t => {
@@ -268,22 +274,25 @@ test('parseToolCalls - preserves internal newlines and surrounding spaces in str
 		},
 	);
 
-	t.is(result[0].parameters.path, '  src/a.ts  ');
+	t.is(result[0].parameters.path, 'src/a.ts');
 	t.is(result[0].parameters.content, 'line 1\n\n  line 3  ');
 });
 
-test('parseToolCalls - removes exactly one wrapping newline', t => {
+test('parseToolCalls - removes exactly one wrapping newline from free text', t => {
 	const result = XMLToolCallParser.parseToolCalls(
-		'<read_file><path>\n\nsrc/a.ts\n\n</path></read_file>',
+		'<write_file><path>a.ts</path><content>\n\nline 1\n\n</content></write_file>',
 		{
-			read_file: {
+			write_file: {
 				type: 'object',
-				properties: {path: {type: 'string'}},
+				properties: {
+					path: {type: 'string'},
+					content: {type: 'string'},
+				},
 			},
 		},
 	);
 
-	t.is(result[0].parameters.path, '\nsrc/a.ts\n');
+	t.is(result[0].parameters.content, '\nline 1\n');
 });
 
 test('parseToolCalls - preserves JSON-looking string values as strings', t => {
@@ -1007,4 +1016,109 @@ test('parseToolCalls - allows valid tool calls with HTML-like parameter content'
 	t.is(result.length, 1);
 	t.is(result[0].toolName, 'create_file');
 	t.truthy(result[0].parameters.content);
+});
+
+test('parseToolCalls - trims padded identifier parameters with real tool schemas', t => {
+	for (const xml of [
+		'<read_file>\n<path> src/a.ts </path>\n</read_file>',
+		'<read_file>\n  <path>\n    src/a.ts\n  </path>\n</read_file>',
+	]) {
+		const result = XMLToolCallParser.parseToolCalls(xml, {
+			read_file: {
+				type: 'object',
+				properties: {path: {type: 'string'}},
+			},
+		});
+		t.is(result[0].parameters.path, 'src/a.ts');
+	}
+});
+
+test('parseToolCalls - trims a padded enum before schema validation', t => {
+	const schema = {
+		type: 'object' as const,
+		properties: {
+			operation: {type: 'string' as const, enum: ['delete', 'move', 'copy', 'mkdir']},
+			path: {type: 'string' as const},
+		},
+	};
+	const result = XMLToolCallParser.parseToolCalls(
+		'<file_op><operation> delete </operation><path>a.ts</path></file_op>',
+		{file_op: schema},
+	);
+
+	t.is(result[0].parameters.operation, 'delete');
+});
+
+test('parseToolCalls - trims boundary padding without altering internal spaces', t => {
+	const result = XMLToolCallParser.parseToolCalls(
+		'<read_file><path> src/a b.ts </path></read_file>',
+		{
+			read_file: {
+				type: 'object',
+				properties: {path: {type: 'string'}},
+			},
+		},
+	);
+
+	t.is(result[0].parameters.path, 'src/a b.ts');
+});
+
+test('parseToolCalls - keeps a numeric-looking identifier parameter a string', t => {
+	const result = XMLToolCallParser.parseToolCalls(
+		'<read_file><path> 42 </path></read_file>',
+		{
+			read_file: {
+				type: 'object',
+				properties: {path: {type: 'string'}},
+			},
+		},
+	);
+
+	t.is(result[0].parameters.path, '42');
+});
+
+test('parseToolCalls - keeps exact free-text values that share no trim entry', t => {
+	const schema = {
+		type: 'object' as const,
+		properties: {
+			text: {type: 'string' as const},
+		},
+	};
+	const result = XMLToolCallParser.parseToolCalls(
+		'<browser><action> type </action><text>  value  </text></browser>',
+		{browser: schema},
+	);
+
+	t.is(result[0].parameters.action, 'type');
+	t.is(result[0].parameters.text, '  value  ');
+});
+
+test('parseToolCalls - leaves unknown custom tools untouched', t => {
+	const result = XMLToolCallParser.parseToolCalls(
+		'<custom_tool><pattern>  needle  </pattern></custom_tool>',
+		{
+			custom_tool: {
+				type: 'object',
+				properties: {pattern: {type: 'string'}},
+			},
+		},
+	);
+
+	t.is(result[0].parameters.pattern, '  needle  ');
+});
+
+test('parseToolCalls - a custom tool on a conditionally registered name keeps whitespace', t => {
+	// git tools are only registered inside a git repository, so outside one
+	// a custom or MCP tool may legally hold the name git_diff.
+	const result = XMLToolCallParser.parseToolCalls(
+		'<git_diff><file> report.md </file></git_diff>',
+		{
+			git_diff: {
+				type: 'object',
+				properties: {file: {type: 'string'}},
+			},
+		},
+	);
+
+	t.is(result[0].parameters.file, ' report.md ');
 });
