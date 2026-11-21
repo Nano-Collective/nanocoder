@@ -6,7 +6,10 @@ import {
 	resetPreferencesCache,
 	savePreferences,
 } from '@/config/preferences';
-import {describeProjectTrust} from '@/config/trust/project-trust';
+import {
+	describeProjectTrust,
+	TRUST_FINGERPRINT_VERSION,
+} from '@/config/trust/project-trust';
 import {
 	buildLaunchAgentPlist,
 	buildScheduledTaskXml,
@@ -170,6 +173,7 @@ test.serial(
 						{
 							path: project,
 							fingerprint: describeProjectTrust(project).fingerprint,
+							fingerprintVersion: TRUST_FINGERPRINT_VERSION,
 						},
 					],
 				});

@@ -221,7 +221,7 @@ Profiles are defined in the `nanocoder.profiles` object within `agents.config.js
         "provider": "anthropic",
         "model": "claude-3-7-sonnet-20250219",
         "mode": "normal",
-        "contextLimit": 128000
+        "retries": {"maxEmptyTurns": 3}
       },
       "review": {
         "provider": "openrouter",

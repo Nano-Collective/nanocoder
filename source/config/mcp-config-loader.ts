@@ -15,7 +15,7 @@ function readJsonFile(filePath: string): any {
 }
 
 // Simplified configuration source types
-export type ConfigSource = 'project' | 'global' | 'env';
+export type ConfigSource = 'project' | 'global' | 'env' | 'profile';
 
 export interface MCPServerWithSource {
 	server: MCPServerConfig;
@@ -155,20 +155,29 @@ export function loadGlobalMCPConfig(): MCPServerWithSource[] {
 }
 
 /**
- * Merge project-level and global MCP configurations
- * ALL servers from both locations are loaded (project servers shown first)
- * No overriding - each unique server is preserved
+ * Merge project-level and global MCP configurations, plus profile and env
+ * overrides. ALL servers from all locations are loaded; each unique server
+ * name is preserved once. Precedence: env beats profile beats project beats
+ * global, mirroring how profile providers are merged.
  */
 export function mergeMCPConfigs(
 	projectServers: MCPServerWithSource[],
 	globalServers: MCPServerWithSource[],
 	envServers: MCPServerWithSource[] = [],
+	profileServers: MCPServerWithSource[] = [],
 ): MCPServerWithSource[] {
 	const serverMap = new Map<string, MCPServerWithSource>();
 
 	// Add env servers first (highest priority, displayed first in UI)
 	for (const envServer of envServers) {
 		serverMap.set(envServer.server.name, envServer);
+	}
+
+	// Add profile servers next (higher priority than project, lower than env)
+	for (const profileServer of profileServers) {
+		if (!serverMap.has(profileServer.server.name)) {
+			serverMap.set(profileServer.server.name, profileServer);
+		}
 	}
 
 	// Add project servers next
@@ -200,7 +209,36 @@ export function loadAllMCPConfigs(
 		process.env.NODE_ENV === 'test' ? [] : loadGlobalMCPConfig();
 	const envServers = loadEnvMCPConfigs();
 
-	return mergeMCPConfigs(projectServers, globalServers, envServers);
+	// Profile MCP servers are merged like profile providers: higher priority
+	// than project, lower than env. A missing active profile is harmless.
+	// Profile `mcpServers` is an object keyed by server name (like .mcp.json),
+	// not an array.
+	let profileServers: MCPServerWithSource[] = [];
+	try {
+		const activeProfile = getActiveProfile(cwd);
+		const rawProfileServers = (activeProfile as Record<string, unknown>)
+			?.mcpServers;
+		if (
+			rawProfileServers &&
+			typeof rawProfileServers === 'object' &&
+			!Array.isArray(rawProfileServers)
+		) {
+			profileServers = Object.entries(
+				rawProfileServers as Record<string, unknown>,
+			).map(([name, serverConfig]) =>
+				mapAndSubstituteServer({name, ...(serverConfig as object)}, 'profile'),
+			);
+		}
+	} catch {
+		// Ignore if active profile resolution throws
+	}
+
+	return mergeMCPConfigs(
+		projectServers,
+		globalServers,
+		envServers,
+		profileServers,
+	);
 }
 
 /**

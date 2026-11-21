@@ -16,8 +16,13 @@ import {stripUtf8Bom} from '@/utils/strip-utf8-bom';
  * Bump when `describeProjectTrust` changes what it fingerprints. A trust entry
  * from another version holds a fingerprint that can't be compared with this
  * one, so it reads as needing re-approval rather than as a changed folder.
+ *
+ * Bumped to 2 because `listPermissionSettings` now fingerprints the top-level
+ * `mode` and `firewall` settings (#2306): a folder that was trusted under
+ * version 1 and uses either setting gets a new fingerprint and is shown the
+ * disclaimer once more.
  */
-export const TRUST_FINGERPRINT_VERSION = 1;
+export const TRUST_FINGERPRINT_VERSION = 2;
 
 export interface ProjectTrustSurface {
 	plugins: number;

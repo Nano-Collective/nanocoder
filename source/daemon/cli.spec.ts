@@ -6,7 +6,10 @@ import {join} from 'node:path';
 import test from 'ava';
 import {loadPreferences, resetPreferencesCache, savePreferences} from '@/config/preferences';
 import {ensureDirectoryTrust, isDirectoryTrusted} from '@/config/trust/directory-trust';
-import {describeProjectTrust} from '@/config/trust/project-trust';
+import {
+	describeProjectTrust,
+	TRUST_FINGERPRINT_VERSION,
+} from '@/config/trust/project-trust';
 import {CONFIG_AUTO_FIX_WARNING, runDaemonCli} from './cli';
 import {DaemonIpcServer} from './ipc';
 import {
@@ -258,6 +261,7 @@ test.serial(
 						{
 							path: root,
 							fingerprint: describeProjectTrust(root).fingerprint,
+							fingerprintVersion: TRUST_FINGERPRINT_VERSION,
 						},
 					],
 				});
@@ -519,7 +523,11 @@ test.serial(
 		const alreadyTrusted = ensureDirectoryTrust(dir, false, {
 			loadPreferences: () => ({
 				trustedDirectories: [
-					{path: dir, fingerprint: describeProjectTrust(dir).fingerprint},
+					{
+						path: dir,
+						fingerprint: describeProjectTrust(dir).fingerprint,
+						fingerprintVersion: TRUST_FINGERPRINT_VERSION,
+					},
 				],
 			}),
 			savePreferences: () => false,

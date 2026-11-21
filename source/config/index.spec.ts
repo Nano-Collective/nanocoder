@@ -85,6 +85,37 @@ test.serial('LSP auto-discovery setting falls through config layers and defaults
 	}
 });
 
+test.serial('getAppConfig does not throw when the active profile disappears', t => {
+	const originalCwd = process.cwd();
+	const originalConfigDir = process.env.NANOCODER_CONFIG_DIR;
+	const projectDir = join(testDir, 'profile-removed-project');
+	const globalDir = join(testDir, 'profile-removed-global');
+	mkdirSync(projectDir, {recursive: true});
+	mkdirSync(globalDir, {recursive: true});
+	try {
+		process.env.NANOCODER_CONFIG_DIR = globalDir;
+		process.chdir(projectDir);
+		writeFileSync(
+			join(projectDir, 'agents.config.json'),
+			JSON.stringify({nanocoder: {defaultProfile: 'gone'}}),
+			'utf-8',
+		);
+		// loadHierarchicalConfig used to call getActiveProfile on the unknown
+		// profile and throw: it must fall back to the files instead.
+		reloadAppConfig();
+		t.truthy(getAppConfig());
+		// Simulate the profile being removed mid-session: reloading must still
+		// not throw.
+		reloadAppConfig();
+		t.truthy(getAppConfig());
+	} finally {
+		clearAppConfig();
+		process.chdir(originalCwd);
+		if (originalConfigDir === undefined) delete process.env.NANOCODER_CONFIG_DIR;
+		else process.env.NANOCODER_CONFIG_DIR = originalConfigDir;
+	}
+});
+
 test('getClosestConfigFile creates default config if none exists', t => {
 	const fileName = 'test-config.json';
 	const configPath = getClosestConfigFile(fileName);

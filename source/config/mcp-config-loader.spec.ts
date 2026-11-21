@@ -328,6 +328,84 @@ test('mergeMCPConfigs - project configs override global configs', t => {
     t.is(globalOnly?.source, 'global');
 });
 
+test('mergeMCPConfigs - profile servers rank between env and project', t => {
+    const base = (source: 'global' | 'project' | 'profile' | 'env', suffix: string) => ({
+        server: {
+            name: 'shared-server',
+            transport: 'stdio',
+            command: 'npx',
+            args: [suffix],
+        },
+        source,
+    });
+    const result = mergeMCPConfigs(
+        [base('project', 'project-version')],
+        [base('global', 'global-version')],
+        [base('env', 'env-version')],
+        [base('profile', 'profile-version')],
+    );
+
+    t.is(result.length, 1);
+    const shared = result.find(s => s.server.name === 'shared-server');
+    t.truthy(shared);
+    t.is(shared?.server.args?.[0], 'env-version');
+    t.is(shared?.source, 'env');
+
+    // Without env, profile outranks project which outranks global.
+    const withoutEnv = mergeMCPConfigs(
+        [base('project', 'project-version')],
+        [base('global', 'global-version')],
+        [],
+        [base('profile', 'profile-version')],
+    );
+    t.is(withoutEnv.length, 1);
+    t.is(withoutEnv[0]?.server.args?.[0], 'profile-version');
+    t.is(withoutEnv[0]?.source, 'profile');
+});
+
+test('mergeMCPConfigs - profile servers do not override env servers', t => {
+    const result = mergeMCPConfigs(
+        [],
+        [],
+        [{server: {name: 'env-only', transport: 'stdio', command: 'x'}, source: 'env'}],
+        [{server: {name: 'env-only', transport: 'stdio', command: 'profile'}, source: 'profile'}],
+    );
+
+    t.is(result.length, 1);
+    t.is(result[0]?.server.command, 'x');
+    t.is(result[0]?.source, 'env');
+});
+
+test('loadAllMCPConfigs - loads mcpServers from the active profile', t => {
+    const testDir = t.context.testDir as string;
+    writeFileSync(
+        join(testDir, 'agents.config.json'),
+        JSON.stringify({
+            nanocoder: {
+                defaultProfile: 'fast',
+                profiles: {
+                    fast: {
+                        mcpServers: {
+                            'profile-server': {
+                                transport: 'stdio',
+                                command: 'profile-cmd',
+                                args: ['--from-profile'],
+                            },
+                        },
+                    },
+                },
+            },
+        }),
+    );
+
+    const result = loadAllMCPConfigs();
+    const profileServer = result.find(s => s.server.name === 'profile-server');
+    t.truthy(profileServer, 'profile mcpServers should be loaded');
+    t.is(profileServer?.source, 'profile');
+    t.is(profileServer?.server.command, 'profile-cmd');
+    t.deepEqual(profileServer?.server.args, ['--from-profile']);
+});
+
 test('loadAllProviderConfigs - loads providers from project config', t => {
     const testDir = t.context.testDir as string;
 
