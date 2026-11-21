@@ -252,7 +252,15 @@ test('strict: supports const and local $ref', t => {
 	t.regex(String(errors[0].message), /must equal "bug"/);
 });
 
-	test('strict: reports an unresolvable $ref', t => {
+test('strict: resolves prototype-named ref segments as own data properties', t => {
+	const schema = JSON.parse(
+		'{"$defs":{"__proto__":{"type":"string"}},"$ref":"#/$defs/__proto__"}',
+	) as Record<string, unknown>;
+	t.deepEqual(validateJsonDocument('safe', schema), []);
+	t.is(validateJsonDocument(42, schema).length, 1);
+});
+
+test('strict: reports an unresolvable $ref', t => {
 	const errors = validateJsonDocument(
 		{a: 'value'},
 		{type: 'object', properties: {a: {$ref: '#/$defs/missing'}}},

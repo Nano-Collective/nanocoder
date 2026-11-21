@@ -291,10 +291,14 @@ function resolveLocalRef(
 	if (!ref.startsWith('#/')) return undefined;
 	let current: unknown = root;
 	for (const segment of ref.slice(2).split('/').map(decodePointerSegment)) {
-		if (!isJsonObject(current) || !Object.hasOwn(current, segment)) {
+		if (!isJsonObject(current)) {
 			return undefined;
 		}
-		current = current[segment];
+		const descriptor = Object.getOwnPropertyDescriptor(current, segment);
+		if (!descriptor || !Object.hasOwn(descriptor, 'value')) {
+			return undefined;
+		}
+		current = descriptor.value;
 	}
 	return isJsonObject(current) ? (current as JsonSchemaDocument) : undefined;
 }
