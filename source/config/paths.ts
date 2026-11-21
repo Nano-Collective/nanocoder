@@ -1,6 +1,7 @@
-import {existsSync, mkdirSync, writeFileSync} from 'fs';
+import {existsSync} from 'fs';
 import {join} from 'path';
 import {getConfigRoot} from '@/services/session-context';
+import {atomicWritePrivateJson} from '@/utils/fs/atomic-write';
 import {getLogger} from '@/utils/logging';
 import {getAppDataPath, getConfigPath} from './platform-dirs';
 
@@ -63,12 +64,10 @@ function createDefaultConfFile(filePath: string, fileName: string): void {
 			// Maybe add a better sample config?
 			const sampleConfig = {};
 
-			mkdirSync(filePath, {recursive: true});
-			writeFileSync(
-				configFilePath, // nosemgrep
-				JSON.stringify(sampleConfig, null, 2),
-				'utf-8',
-			);
+			// Atomic and owner-only (0600): this seeds agents.config.json, which
+			// later holds plaintext API keys, so a fresh install must not create
+			// a world-readable file (and an interrupted write must not truncate).
+			atomicWritePrivateJson(configFilePath, sampleConfig);
 		}
 	} catch (error) {
 		getLogger().error(`Failed to write ${filePath}: ${String(error)}`);
