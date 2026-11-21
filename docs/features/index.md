@@ -114,7 +114,7 @@ Override the default mode with `--mode` — works both interactively and with `r
 nanocoder --mode yolo                      # interactive, no approvals
 nanocoder --mode plan run "audit auth"     # run mode, plan only
 ```
-For structured output that's easy to parse in scripts, add `--json`: `nanocoder --plain --json run "..."` prints a single JSON object to `stdout` with the final answer, tool call log, and modified files. See [Commands → JSON Output](commands.md#json-output).
+For a JSON report with the final answer, tool call log, and modified files, add `--json`: `nanocoder --plain --json run "..."`. To make the answer itself conform to a schema, use `nanocoder run --json-schema ./schema.json "..."`; see [Commands → JSON Output](commands.md#json-output) and [Validated Structured Output](commands.md#validated-structured-output).
 
 See [Commands → Non-Interactive Mode](commands.md#non-interactive-mode) and [Development Modes](development-modes.md) for details.
 

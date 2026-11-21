@@ -239,6 +239,26 @@ nanocoder --plain --json run "refactor the auth module" | jq .finalText
 
 `--json` requires `run` and is incompatible with `--acp` and `--vscode` — combining them exits with an error before the session starts.
 
+#### Validated Structured Output
+
+Use `--json-schema <file|inline JSON>` with `run` to require that the final answer is a single JSON document matching a schema. The flag accepts a schema file path or inline JSON (quote inline schemas so the shell passes them as one argument). It always uses the plain runtime, and cannot be combined with `--no-plain`, `--acp`, `--vscode`, or `review`.
+
+```bash
+nanocoder run --json-schema ./review.schema.json "Review the working tree changes"
+nanocoder run --json-schema '{"type":"object","required":["verdict"],"properties":{"verdict":{"type":"string","enum":["pass","fail"]}}}' "Classify this change"
+```
+
+The schema is included in the model instructions. The final answer is parsed and validated locally; if it is invalid, the validator's errors are sent back to the model for another attempt, using the configured `nanocoder.retries.maxMalformedRetries` limit. If the answer still fails validation, the run exits non-zero and reports the validation errors to `stderr` (or in the JSON report's `message`). A single surrounding JSON markdown fence is tolerated, but prose around the document is not.
+
+Without `--output-format json`, the validated JSON value alone is written to `stdout`, so it can be piped directly to `jq`. With JSON report mode, the validated value is available at `.structured`:
+
+```bash
+nanocoder run --json-schema ./review.schema.json "Review the working tree changes" | jq .verdict
+nanocoder run --output-format json --json-schema ./review.schema.json "Review the working tree changes" | jq .structured.verdict
+```
+
+The validator supports JSON types, `required`, `properties`, `additionalProperties`, `patternProperties`, arrays and tuple items, enums/constants, numeric/string/array/object constraints, `anyOf`/`oneOf`/`allOf`/`not`, and local `$ref` pointers to `$defs` or `definitions`. Remote references and other unsupported validation keywords are not resolved or enforced. Native provider structured-output modes are not currently selected; the prompt-and-validate flow works consistently with hosted and local models.
+
 #### Output Shape
 
 The emitted object looks like:
