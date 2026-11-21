@@ -71,6 +71,16 @@ export function parseRunPrompt(args: string[]): string | undefined {
 	return promptArgs.join(' ');
 }
 
+/**
+ * The arguments that can be top-level options: everything before `run`. The
+ * words after it are prompt text, so `run go test -v` must not trigger the
+ * `--version` fast path.
+ */
+export function argsBeforeRun(args: readonly string[]): readonly string[] {
+	const runCommandIndex = args.indexOf('run');
+	return runCommandIndex === -1 ? args : args.slice(0, runCommandIndex);
+}
+
 /** Flags taking a value. Exported so tests cover them from the source list. */
 export const RUN_FLAGS_WITH_VALUES: readonly string[] = VALUED_FLAGS;
 
