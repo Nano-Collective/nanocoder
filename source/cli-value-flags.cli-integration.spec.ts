@@ -39,6 +39,7 @@ const loaderUrl = `data:text/javascript,${encodeURIComponent(
 )}`;
 const cliPath = fileURLToPath(new URL('./cli.tsx', import.meta.url));
 
+
 function runCli(args: string[], extraEnv: Record<string, string> = {}) {
 	return spawnSync(
 		process.execPath,
@@ -268,6 +269,20 @@ test('--json cannot be combined with --no-plain', t => {
 	const result = runCli(['--json', 'run', 'hello']);
 	t.is(result.status, 1);
 	t.true(result.stderr.includes('cannot be combined with --no-plain'), result.stderr);
+});
+
+test('--json-schema validates its value before rejecting --no-plain', t => {
+	const missing = runCli(['--json-schema', 'run', 'hello']);
+	t.is(missing.status, 1);
+	t.true(missing.stderr.includes('--json-schema requires a schema file path'));
+
+	const badInline = runCli(['--json-schema={"type":', 'run', 'hello']);
+	t.is(badInline.status, 1);
+	t.true(badInline.stderr.includes('Could not parse --json-schema inline JSON'));
+
+	const valid = runCli(['--json-schema={"type":"object"}', 'run', 'hello']);
+	t.is(valid.status, 1);
+	t.true(valid.stderr.includes('--json-schema needs the plain shell'));
 });
 
 test('Ink render receives default maxFps of 30 when unconfigured', t => {

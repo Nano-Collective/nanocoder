@@ -782,6 +782,81 @@ test.serial(
 	},
 );
 
+test.serial(
+	'text schema outcome prints only the structured document to stdout',
+	async t => {
+		const shutdown: CapturedShutdown = {code: null};
+		const stdout = capturingStdout();
+		const stderr = capturingStderr();
+		try {
+			await runPlainShell({
+				prompt: 'classify this',
+				developmentMode: 'auto-accept',
+				trustDirectory: true,
+				outputFormat: 'text',
+				jsonSchema: {type: 'object'},
+				deps: baseDeps({
+					initializePlain: makeFakeInitializePlain(),
+					runPlainConversation: makeFakeRunPlainConversation({
+						kind: 'success',
+						finalText: '{\n  "label": "bug"\n}',
+						structured: {label: 'bug'},
+						reasoning: null,
+						steps: 1,
+						toolCalls: [],
+					}),
+					getShutdownManager: makeFakeShutdownManager(shutdown),
+				}),
+			});
+		} finally {
+			stdout.restore();
+			stderr.restore();
+		}
+
+		t.deepEqual(JSON.parse(stdout.get()), {label: 'bug'});
+		t.true(stdout.get().endsWith('\n'));
+		t.is(stdout.get().trim().split('\n').length, 3);
+		t.is(shutdown.code, 0);
+		t.regex(stderr.get(), /done/);
+	},
+);
+
+test.serial(
+	'--json schema outcome includes the structured key in the report',
+	async t => {
+		const shutdown: CapturedShutdown = {code: null};
+		const stdout = capturingStdout();
+		try {
+			await runPlainShell({
+				prompt: 'classify this',
+				developmentMode: 'auto-accept',
+				trustDirectory: true,
+				outputFormat: 'json',
+				jsonSchema: {type: 'object'},
+				deps: baseDeps({
+					initializePlain: makeFakeInitializePlain(),
+					runPlainConversation: makeFakeRunPlainConversation({
+						kind: 'success',
+						finalText: '{\n  "label": "bug"\n}',
+						structured: {label: 'bug'},
+						reasoning: null,
+						steps: 1,
+						toolCalls: [],
+					}),
+					getShutdownManager: makeFakeShutdownManager(shutdown),
+				}),
+			});
+		} finally {
+			stdout.restore();
+		}
+
+		const report = JSON.parse(stdout.get());
+		t.deepEqual(report.structured, {label: 'bug'});
+		t.is(report.finalText, '{\n  "label": "bug"\n}');
+		t.is(shutdown.code, 0);
+	},
+);
+
 // --- Text mode (outputFormat: 'text') ---
 //
 // Unlike --json, text mode writes status/boot/error/"done" lines to stderr

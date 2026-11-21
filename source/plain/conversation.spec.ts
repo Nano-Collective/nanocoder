@@ -2860,3 +2860,207 @@ test.serial("verify: a run that edited nothing is not held up", async (t) => {
 	t.is(calls, 1);
 	if (outcome.kind === "success") t.is(outcome.finalText, "Just an answer.");
 });
+
+// --- Structured output (`--json-schema`) ---
+
+const reviewSchema = {
+	type: "object",
+	required: ["verdict", "issues"],
+	additionalProperties: false,
+	properties: {
+		verdict: { type: "string", enum: ["pass", "fail"] },
+		issues: {
+			type: "array",
+			items: {
+				type: "object",
+				required: ["file", "line", "message"],
+				properties: {
+					file: { type: "string" },
+					line: { type: "integer", minimum: 1 },
+					message: { type: "string" },
+				},
+			},
+		},
+	},
+} as const;
+
+test.serial("json-schema: accepts a final answer that validates", async (t) => {
+	const client = makeFakeClient({
+		responses: [
+			{
+				choices: [
+					{
+						message: {
+							role: "assistant",
+							content: '{"verdict":"pass","issues":[]}',
+						},
+					},
+				],
+			},
+		],
+	});
+
+	const outcome = await runPlainConversation({
+		client,
+		toolManager: makeFakeToolManager(),
+		systemMessage: SYSTEM,
+		initialMessages: [USER],
+		developmentMode: "auto-accept",
+		nonInteractiveAlwaysAllow: [],
+		abortSignal: new AbortController().signal,
+		jsonSchema: reviewSchema,
+	});
+
+	t.is(outcome.kind, "success");
+	if (outcome.kind === "success") {
+		t.deepEqual(outcome.structured, { verdict: "pass", issues: [] });
+		t.is(
+			outcome.finalText,
+			JSON.stringify({ verdict: "pass", issues: [] }, null, 2),
+		);
+	}
+});
+
+test.serial(
+	"json-schema: feeds validation errors back and succeeds on retry",
+	async (t) => {
+		const calls: RecordedCall[] = [];
+		const client = makeRecordingClient(
+			[
+				{
+					choices: [
+						{ message: { role: "assistant", content: '{"verdict":"pass"}' } },
+					],
+				},
+				{
+					choices: [
+						{
+							message: {
+								role: "assistant",
+								content: '{"verdict":"pass","issues":[]}',
+							},
+						},
+					],
+				},
+			],
+			calls,
+		);
+
+		const outcome = await runPlainConversation({
+			client,
+			toolManager: makeFakeToolManager(),
+			systemMessage: SYSTEM,
+			initialMessages: [USER],
+			developmentMode: "auto-accept",
+			nonInteractiveAlwaysAllow: [],
+			abortSignal: new AbortController().signal,
+			jsonSchema: reviewSchema,
+		});
+
+		t.is(outcome.kind, "success");
+		t.is(outcome.steps, 2);
+		if (outcome.kind === "success") {
+			t.deepEqual(outcome.structured, { verdict: "pass", issues: [] });
+			t.is(
+				outcome.finalText,
+				JSON.stringify({verdict: 'pass', issues: []}, null, 2),
+			);
+		}
+
+		const correction = calls[1].messages.find(
+			message =>
+				message.role === "user" &&
+				/did not validate against the required JSON Schema/.test(
+					String(message.content),
+				),
+		);
+		t.truthy(correction, "the retry turn must carry the validator errors");
+		t.regex(String(correction?.content), /issues/);
+	},
+);
+
+test.serial(
+	"json-schema: stops with the validator errors when the cap is hit",
+	async (t) => {
+		const invalid = {
+			choices: [
+				{ message: { role: "assistant", content: '{"verdict":"pass"}' } },
+			],
+		};
+		const client = makeFakeClient({
+			responses: [invalid, invalid, invalid],
+		});
+
+		const outcome = await runPlainConversation({
+			client,
+			toolManager: makeFakeToolManager(),
+			systemMessage: SYSTEM,
+			initialMessages: [USER],
+			developmentMode: "auto-accept",
+			nonInteractiveAlwaysAllow: [],
+			abortSignal: new AbortController().signal,
+			jsonSchema: reviewSchema,
+		});
+
+		t.is(outcome.kind, "error");
+		t.is(outcome.steps, 3);
+		if (outcome.kind === "error") {
+			t.regex(outcome.message, /did not validate against the JSON Schema/);
+			t.regex(outcome.message, /after 3 attempts/);
+			t.regex(outcome.message, /issues: missing required property/);
+		}
+	},
+);
+
+test.serial(
+	"json-schema: streamed tokens and reasoning stay off stdout",
+	async (t) => {
+		const originalWrite = process.stdout.write.bind(process.stdout);
+		let stdout = "";
+		// biome-ignore lint/suspicious/noExplicitAny: matching Node's overloaded write signature
+		(process.stdout.write as any) = (chunk: any) => {
+			stdout += String(chunk);
+			return true;
+		};
+
+		try {
+			const client = {
+				...makeFakeClient({ responses: [] }),
+				chat: async (
+					_messages: Message[],
+					_tools: Record<string, AISDKCoreTool>,
+					callbacks: { onToken?: (token: string) => void; onReasoningToken?: (token: string) => void },
+				) => {
+					callbacks.onReasoningToken?.("thinking");
+					callbacks.onToken?.('{"verdict":"pass","issues":[]}');
+					return {
+						choices: [
+							{
+								message: {
+									role: "assistant",
+									content: '{"verdict":"pass","issues":[]}',
+								},
+							},
+						],
+					} as LLMChatResponse;
+				},
+			} as unknown as LLMClient;
+
+			const outcome = await runPlainConversation({
+				client,
+				toolManager: makeFakeToolManager(),
+				systemMessage: SYSTEM,
+				initialMessages: [USER],
+				developmentMode: "auto-accept",
+				nonInteractiveAlwaysAllow: [],
+				abortSignal: new AbortController().signal,
+				jsonSchema: reviewSchema,
+			});
+
+			t.is(outcome.kind, "success");
+			t.is(stdout, "");
+		} finally {
+			process.stdout.write = originalWrite;
+		}
+	},
+);
