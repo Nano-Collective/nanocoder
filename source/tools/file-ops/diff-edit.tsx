@@ -81,6 +81,11 @@ function normalizeBlockContent(value: string): string {
 	return stripTrailingBoundaryNewline(stripSingleBoundaryNewline(value));
 }
 
+function findMarkerLine(diff: string, pattern: RegExp, start: number): number {
+	pattern.lastIndex = start;
+	return pattern.exec(diff)?.index ?? -1;
+}
+
 export function parseDiffEditBlocks(diff: string): DiffEditBlock[] {
 	if (!diff || diff.trim().length === 0) {
 		throw new Error(
@@ -92,7 +97,7 @@ export function parseDiffEditBlocks(diff: string): DiffEditBlock[] {
 	let index = 0;
 
 	while (index < diff.length) {
-		const searchStart = diff.indexOf(SEARCH_MARKER, index);
+		const searchStart = findMarkerLine(diff, /^<<<<<<< SEARCH\r?$/gm, index);
 		if (searchStart === -1) {
 			if (diff.slice(index).trim().length > 0 && blocks.length === 0) {
 				throw new Error(`Missing ${SEARCH_MARKER} marker.`);
@@ -101,7 +106,11 @@ export function parseDiffEditBlocks(diff: string): DiffEditBlock[] {
 		}
 
 		const searchContentStart = searchStart + SEARCH_MARKER.length;
-		const separatorStart = diff.indexOf(SEPARATOR_MARKER, searchContentStart);
+		const separatorStart = findMarkerLine(
+			diff,
+			/^=======\r?$/gm,
+			searchContentStart,
+		);
 		if (separatorStart === -1) {
 			throw new Error(
 				`Diff block ${blocks.length + 1} is missing ======= separator.`,
@@ -109,7 +118,11 @@ export function parseDiffEditBlocks(diff: string): DiffEditBlock[] {
 		}
 
 		const replaceContentStart = separatorStart + SEPARATOR_MARKER.length;
-		const replaceEnd = diff.indexOf(REPLACE_MARKER, replaceContentStart);
+		const replaceEnd = findMarkerLine(
+			diff,
+			/^>>>>>>> REPLACE\r?$/gm,
+			replaceContentStart,
+		);
 		if (replaceEnd === -1) {
 			throw new Error(
 				`Diff block ${blocks.length + 1} is missing >>>>>>> REPLACE marker.`,
