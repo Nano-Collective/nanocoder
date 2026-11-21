@@ -476,3 +476,47 @@ test('a formatter crash does not cancel the next request in a reused instance', 
 	t.regex(frame, /healthy preview/);
 	t.false(/cancelled due to formatter/.test(frame));
 });
+
+test('the escalation reason is shown above the question', async t => {
+	const manager = mockToolManager();
+	setToolManagerGetter(() => manager);
+	const app = renderWithTheme(
+		<ToolConfirmation
+			toolCall={toolCall('write_file', {path: 'a.txt'})}
+			reason="External content (fetch_url https://example.test/p) is in context: this call can change files or reach the network."
+			onConfirm={() => {}}
+			onCancel={() => {}}
+		/>,
+	);
+	t.teardown(() => {
+		app.unmount();
+		setToolManagerGetter(() => null);
+	});
+
+	await waitForPrompt(app.lastFrame);
+	const frame = app.lastFrame() ?? '';
+
+	t.regex(frame, /External content \(fetch_url https:\/\/example\.test\/p\)/);
+	t.regex(frame, /Do you want to execute tool "write_file"\?/);
+});
+
+test('no reason line is shown when the prompt is an ordinary one', async t => {
+	const manager = mockToolManager();
+	setToolManagerGetter(() => manager);
+	const app = renderWithTheme(
+		<ToolConfirmation
+			toolCall={toolCall('schema_tool', {path: 'a.txt'})}
+			onConfirm={() => {}}
+			onCancel={() => {}}
+		/>,
+	);
+	t.teardown(() => {
+		app.unmount();
+		setToolManagerGetter(() => null);
+	});
+
+	await waitForPrompt(app.lastFrame);
+	const frame = app.lastFrame() ?? '';
+
+	t.false(/External content/.test(frame));
+});

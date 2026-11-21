@@ -6,6 +6,10 @@ import {
 	appendPostToolUseOutput,
 	runPreToolUseGate,
 } from '@/services/lifecycle-hooks';
+import {
+	boundedToolResult,
+	externalSourceFor,
+} from '@/tools/runtime/external-content';
 import {parseToolArguments} from '@/tools/runtime/tool-args-parser';
 import {createCancellationResults} from '@/tools/runtime/tool-cancellation';
 import {toolErrorToContent} from '@/tools/runtime/tool-validation';
@@ -70,6 +74,16 @@ export async function processToolUse(
 		return {...createCancellationResults([toolCall])[0], isError: true};
 	}
 
+	// Where a result would come from, resolved from the tool's declaration
+	// before the call runs: a failure is framed too, because an MCP server's
+	// error text is the server's text just as much as its output is. A
+	// session-scoped manager that answers registry lookups only is tolerated:
+	// the frame is the one thing lost, never the call.
+	const toolManager = options?.toolManager ?? getToolManager();
+	const declaredSource = toolManager?.getToolEntry?.(
+		toolCall.function.name,
+	)?.externalSource;
+
 	try {
 		const toolRegistry =
 			options?.toolManager?.getToolRegistry() ?? toolRegistryGetter?.();
@@ -88,6 +102,9 @@ export async function processToolUse(
 			toolCall.function.arguments,
 			{strict: true},
 		);
+		// The arguments this call actually carried: `fetch_url`'s URL, so the
+		// frame can name what was read.
+		let externalSource = externalSourceFor(declaredSource, parsedArgs);
 		// Lifecycle gate: a pre-tool-use hook that exits non-zero denies the
 		// call outright, and its output goes back to the model as the reason so
 		// it can adapt instead of retrying blindly.
@@ -103,6 +120,19 @@ export async function processToolUse(
 		}
 
 		const result = await handler(parsedArgs, options);
+
+		// A handler may declare that this particular answer came from outside
+		// even though the tool itself is not an external source: `agent` does
+		// this when the subagent read a page.
+		if (
+			typeof result === 'object' &&
+			result !== null &&
+			'externalSource' in result &&
+			result.externalSource !== undefined
+		) {
+			externalSource = result.externalSource;
+		}
+
 		// Image bytes stay off `content` so truncation cannot chew them up
 		// and the model receives them as image parts, not a base64 blob.
 		const isVisual =
@@ -116,9 +146,13 @@ export async function processToolUse(
 			'llmContent' in result &&
 			!isVisual;
 		const rawContent = isStructured || isVisual ? result.llmContent : result;
+		// Bounded with the frame's own size in mind, so the frame added at the
+		// message boundary cannot push the result past the cap and have its
+		// closing tag cut. One truncation, so the elision marker reports the
+		// tool's real output size.
 		const truncated =
 			typeof rawContent === 'string'
-				? truncateToolResult(rawContent)
+				? boundedToolResult(rawContent, toolCall.function.name, externalSource)
 				: (rawContent as string);
 		const failed =
 			typeof result === 'object' &&
@@ -164,6 +198,7 @@ export async function processToolUse(
 			...(isStructured && result.structured !== undefined
 				? {structuredContent: result.structured}
 				: {}),
+			...(externalSource ? {externalSource} : {}),
 			...(isVisual && result.images.length > 0 ? {images: result.images} : {}),
 			// A handler can report failure without throwing (a non-zero shell exit
 			// returns normally); surface it so --json and ACP see a failed call.
@@ -183,6 +218,9 @@ export async function processToolUse(
 		const failedArgs = parseToolArguments<Record<string, unknown>>(
 			toolCall.function.arguments,
 		);
+		// A thrown failure from an external tool is framed like its output: the
+		// message usually carries the server's or the page's own words.
+		const externalSource = externalSourceFor(declaredSource, failedArgs);
 		return {
 			tool_call_id: toolCall.id,
 			role: 'tool',
@@ -190,9 +228,14 @@ export async function processToolUse(
 			content: await appendPostToolUseOutput(
 				toolCall.function.name,
 				failedArgs,
-				truncateToolResult(toolErrorToContent(error)),
+				boundedToolResult(
+					toolErrorToContent(error),
+					toolCall.function.name,
+					externalSource,
+				),
 			),
 			isError: true,
+			...(externalSource ? {externalSource} : {}),
 		};
 	}
 }

@@ -3,6 +3,7 @@ import {getToolJsonSchema} from '@/tools/runtime/schema-validate';
 import {withValidation} from '@/tools/runtime/tool-validation';
 import type {
 	AISDKCoreTool,
+	ExternalToolSource,
 	MCPTool,
 	StructuredToolOutput,
 	Tool,
@@ -27,6 +28,13 @@ export interface MCPToolEntry {
 	tool: AISDKCoreTool;
 	handler: MCPToolHandler;
 	approval: ToolApprovalPolicy;
+	/**
+	 * Set by `getToolEntries` on every entry it builds: a tool's output is the
+	 * server's text, so every MCP result is framed for the model and every MCP
+	 * call reaches outside the workspace. Optional in the type because callers
+	 * construct entries structurally, but the client always fills it in.
+	 */
+	externalSource?: ExternalToolSource;
 }
 
 function describeTool(serverName: string, mcpTool: MCPTool): string {

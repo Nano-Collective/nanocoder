@@ -25,6 +25,7 @@ import {
 	getAppConfig,
 	getRetryLimits,
 } from '@/config/index';
+import {isUntrustedContentEscalationEnabled} from '@/config/untrusted-content';
 import {partitionUnknownToolCalls} from '@/hooks/chat-handler/utils/tool-filters';
 import {processToolUse} from '@/message-handler';
 import {
@@ -41,7 +42,15 @@ import {
 	onSubagentRunEvent,
 	type SubagentRunEvent,
 } from '@/services/subagent-events';
-import {resolveToolApproval} from '@/tools/approval-policy';
+import {
+	type ExternalContentApproval,
+	escalationExplainsApproval,
+	resolveToolApproval,
+} from '@/tools/approval-policy';
+import {
+	EXTERNAL_CONTENT_REASON,
+	externalContentIn,
+} from '@/tools/runtime/external-content';
 import {
 	clearReadContentScope,
 	runWithReadContentScope,
@@ -136,7 +145,7 @@ function createSubagentToolBridge(
 				// The call still runs; the client just never saw its card.
 			}
 		},
-		approve: async (toolCall, abortSignal, subagentRunId) => {
+		approve: async (toolCall, abortSignal, subagentRunId, reason) => {
 			const call = announced(toolCall);
 			try {
 				return await requestToolPermission(
@@ -146,6 +155,7 @@ function createSubagentToolBridge(
 					metas.get(call.id),
 					abortSignal,
 					subagentRunId ? {'nanocoder/childRunId': subagentRunId} : undefined,
+					reason,
 				);
 			} catch {
 				return 'denied';
@@ -527,7 +537,11 @@ async function runTurn(
 					? {kind: 'continue', messages: [evidenceRejection]}
 					: {kind: 'finish'};
 			},
-			executeTools: async validToolCalls => {
+			executeTools: async (validToolCalls, context) => {
+				const externalContent: ExternalContentApproval = {
+					inContext: context.externalContent.inContext,
+					escalate: isUntrustedContentEscalationEnabled(),
+				};
 				const announcedBatch =
 					validToolCalls.length > 1 && !abortController.signal.aborted;
 				if (announcedBatch) {
@@ -659,6 +673,7 @@ async function runTurn(
 						toolManager,
 						nonInteractiveAlwaysAllow,
 						session.developmentMode,
+						externalContent,
 					);
 
 					if (needsApproval) {
@@ -689,6 +704,19 @@ async function runTurn(
 							conn,
 							meta,
 							abortController.signal,
+							undefined,
+							(await escalationExplainsApproval(
+								toolCall.function.name,
+								toolManager.getToolEntry(toolCall.function.name),
+								toolCall.function.arguments,
+								{
+									mode: session.developmentMode,
+									alwaysAllow: nonInteractiveAlwaysAllow,
+									externalContent,
+								},
+							))
+								? EXTERNAL_CONTENT_REASON
+								: undefined,
 						);
 
 						if (permission === 'cancelled') {
@@ -753,6 +781,9 @@ async function runTurn(
 						...(options.sessionTools && {toolManager: options.sessionTools}),
 						toolCallId: toolCall.id,
 						client,
+						// Handed to `agent`, so a subagent started from tainted
+						// context inherits the escalation.
+						externalContentTouched: context.externalContent.inContext,
 					});
 					await finishTimelineCapture(session, timelineCapture);
 
@@ -857,6 +888,9 @@ async function executePlanFallback(
 		abortSignal: session.abortController.signal,
 		sessionId: session.sessionId,
 		workingDirectory: session.cwd,
+		// No turn context here: read the mark off the session's own history, which
+		// is the same view the next request would send.
+		externalContentTouched: externalContentIn(session.messages).inContext,
 	});
 	await emitToolCallUpdate(
 		session,
@@ -1038,12 +1072,13 @@ async function evaluateNeedsApproval(
 	toolManager: ToolManager,
 	nonInteractiveAlwaysAllow: string[],
 	mode: DevelopmentMode,
+	externalContent?: ExternalContentApproval,
 ): Promise<boolean> {
 	const toolEntry = toolManager.getToolEntry(toolCall.function.name);
 	return resolveToolApproval(
 		toolCall.function.name,
 		toolEntry,
 		toolCall.function.arguments,
-		{mode, alwaysAllow: nonInteractiveAlwaysAllow},
+		{mode, alwaysAllow: nonInteractiveAlwaysAllow, externalContent},
 	);
 }

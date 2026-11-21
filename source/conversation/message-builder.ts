@@ -1,5 +1,5 @@
 import type {ImageAttachment, Message, ToolResult} from '@/types/core';
-import {truncateToolResult} from '../tools/runtime/truncate-tool-result.js';
+import {toToolMessage} from '../tools/runtime/external-content.js';
 
 /**
  * Builder pattern for constructing message arrays.
@@ -28,18 +28,15 @@ export class MessageBuilder {
 
 	/**
 	 * Add tool result messages from tool execution.
+	 *
+	 * Every result goes through `toToolMessage`, so a result that came from
+	 * outside the workspace is framed for the model and every other result is
+	 * written through unchanged.
 	 */
 	addToolResults(results: ToolResult[]): this {
-		const toolMessages: Message[] = results.map(result => ({
-			role: 'tool' as const,
-			content: truncateToolResult(result.content || ''),
-			tool_call_id: result.tool_call_id,
-			name: result.name,
-			structuredContent: result.structuredContent,
-			...(result.images && result.images.length > 0
-				? {images: result.images}
-				: {}),
-		}));
+		const toolMessages: Message[] = results.map(result =>
+			toToolMessage(result),
+		);
 		this.messages.push(...toolMessages);
 		return this;
 	}

@@ -667,6 +667,7 @@ export class MCPClient {
 						tool: coreTool,
 						handler,
 						approval,
+						externalSource: {kind: 'mcp', server: serverName},
 					});
 				}
 			}

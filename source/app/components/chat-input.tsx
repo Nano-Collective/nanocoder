@@ -263,6 +263,7 @@ export function ChatInput({
 						// previous request onto the new one.
 						key={pendingSubagentApproval.toolCall.id}
 						toolCall={pendingSubagentApproval.toolCall}
+						reason={pendingSubagentApproval.reason}
 						onConfirm={onSubagentToolApproval}
 						onCancel={() => onSubagentToolApproval(false)}
 					/>
@@ -273,6 +274,7 @@ export function ChatInput({
 					<ToolConfirmation
 						key={pendingToolConfirmation.toolCall.id}
 						toolCall={pendingToolConfirmation.toolCall}
+						reason={pendingToolConfirmation.reason}
 						onConfirm={onToolConfirmation}
 						onCancel={() => onToolConfirmation(false)}
 					/>

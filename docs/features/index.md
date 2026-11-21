@@ -266,6 +266,8 @@ When a language server is connected (`/lsp` lists them), the AI can read diagnos
 
 The built-in [`browser` tool](browser.md) drives a headless Chromium page: the model can open a URL (including a local dev server), click, type, and take screenshots that vision models can see. Chromium is installed separately with the command the tool prints the first time it is missing. It asks for approval in every mode except yolo.
 
+Text that `fetch_url`, `web_search`, the `browser` tool or an MCP server brings back is text you did not write, so it reaches the model inside an external-content frame and is marked in the chat — see [External Content](external-content.md).
+
 ### Voice Mode
 
 Run `/voice` to talk to Nanocoder instead of typing. [Voice mode](voice-mode.md) supports push-to-talk on **Ctrl+G** or hands-free speech detection, uses local Whisper and Piper by default, and installs its audio tools on first use.

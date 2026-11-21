@@ -763,3 +763,74 @@ test('buildSystemPrompt - includes MCP catalog section when load_tool_schema is 
 	);
 	t.false(withoutManager.includes('### Available On-Demand MCP Tools (Catalog)'));
 });
+
+// ============================================================================
+// External content
+// ============================================================================
+
+test('buildSystemPrompt - explains the external content frame when a web tool is available', t => {
+	const result = buildSystemPrompt('normal', undefined, ['web_search']);
+	t.true(result.includes('EXTERNAL CONTENT'));
+	t.true(result.includes('<external_content'));
+});
+
+test('buildSystemPrompt - explains the frame for MCP tools too', t => {
+	const mockManager = {
+		getMCPToolInfo: (name: string) => ({isMCPTool: name === 'list_issues'}),
+	} as any;
+
+	const result = buildSystemPrompt(
+		'normal',
+		undefined,
+		['read_file', 'list_issues'],
+		false,
+		undefined,
+		undefined,
+		false,
+		mockManager,
+	);
+
+	t.true(result.includes('EXTERNAL CONTENT'));
+});
+
+test('buildSystemPrompt - omits the frame when every tool stays on this machine', t => {
+	const result = buildSystemPrompt('normal', undefined, [
+		'read_file',
+		'execute_bash',
+		'string_replace',
+	]);
+
+	t.false(result.includes('EXTERNAL CONTENT'));
+});
+
+test('buildSystemPrompt - a manager that answers only part of the interface does not break the prompt', t => {
+	// Regression: an unguarded getMCPToolInfo() call threw here and took the
+	// whole prompt build down for callers that pass a partial stub.
+	const stub = {
+		getMcpCatalog: () => ({formatCatalogSection: () => ''}),
+	} as any;
+
+	const result = buildSystemPrompt(
+		'normal',
+		undefined,
+		['read_file'],
+		false,
+		undefined,
+		undefined,
+		false,
+		stub,
+	);
+
+	t.false(result.includes('EXTERNAL CONTENT'));
+});
+
+test('buildSystemPrompt - the MCP discovery catalog counts as an external source', t => {
+	// In discovery mode no MCP tool is hydrated yet, so the catalog tool is the
+	// only sign that MCP output will reach the model.
+	const result = buildSystemPrompt('normal', undefined, [
+		'read_file',
+		'load_tool_schema',
+	]);
+
+	t.true(result.includes('EXTERNAL CONTENT'));
+});
