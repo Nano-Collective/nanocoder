@@ -43,6 +43,7 @@ import {
 	updatePasteThreshold,
 	updateProfessionalTone,
 	updateReasoningExpanded,
+	updateSelectedTheme,
 	updateSemanticMemoryEnabled,
 	updateSemanticMemoryLimit,
 	updateSemanticMemoryTokenBudget,
@@ -185,6 +186,66 @@ test.serial('loadPreferences returns empty object for JSON with syntax errors', 
 	} finally {
 		if (existsSync(preferencesPath)) {
 			rmSync(preferencesPath, {force: true});
+		}
+	}
+});
+
+test.serial(
+	'an unreadable preferences file is backed up before the next save overwrites it',
+	t => {
+		const preferencesPath = getTestPreferencesPath();
+		const backupPath = `${preferencesPath}.bak`;
+		const original = '{"selectedTheme":"dracula","lastProvider":"ollama",}';
+
+		writeFileSync(preferencesPath, original, 'utf-8');
+		if (existsSync(backupPath)) rmSync(backupPath, {force: true});
+
+		try {
+			t.deepEqual(loadPreferences(), {});
+			t.true(existsSync(backupPath), 'the unreadable file should be backed up');
+			t.is(readFileSync(backupPath, 'utf-8'), original);
+
+			updateSelectedTheme('nord');
+
+			const saved = JSON.parse(readFileSync(preferencesPath, 'utf-8')) as {
+				selectedTheme?: string;
+			};
+			t.is(saved.selectedTheme, 'nord');
+			t.is(
+				readFileSync(backupPath, 'utf-8'),
+				original,
+				'the backup keeps the original content',
+			);
+		} finally {
+			for (const file of [preferencesPath, backupPath]) {
+				if (existsSync(file)) rmSync(file, {force: true});
+			}
+		}
+	},
+);
+
+test.serial('repeated loads of the same unreadable file back it up once', t => {
+	const preferencesPath = getTestPreferencesPath();
+	const backupPath = `${preferencesPath}.bak`;
+
+	writeFileSync(preferencesPath, '{"lastProvider":"ollama",}', 'utf-8');
+	if (existsSync(backupPath)) rmSync(backupPath, {force: true});
+
+	try {
+		loadPreferences();
+		// Simulate a later load that finds a different, corrupted version.
+		writeFileSync(preferencesPath, '{"selectedTheme":"nord",}', 'utf-8');
+		loadPreferences();
+
+		t.is(
+			readFileSync(backupPath, 'utf-8'),
+			'{"selectedTheme":"nord",}',
+			'the newest unreadable version replaces the stale backup',
+		);
+		t.true(existsSync(backupPath));
+	} finally {
+		for (const file of [preferencesPath, backupPath]) {
+			if (existsSync(file)) rmSync(file, {force: true});
 		}
 	}
 });
