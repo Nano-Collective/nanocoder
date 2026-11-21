@@ -146,19 +146,19 @@ test('missing and empty values of non-port flags retain unset behavior', t => {
 	}
 });
 
-test('--vscode-port rejects missing and empty values', t => {
+test('--vscode-port ignores missing and empty values inside the prompt', t => {
 	for (const option of [
 		['--vscode-port'],
 		['--vscode-port', ''],
 		['--vscode-port='],
 	]) {
 		const result = runCli(['run', 'analyze code', ...option]);
-		t.is(result.status, 1, option.join(' '));
+		t.is(result.status, 0, option.join(' '));
 		t.true(result.stderr.includes('--vscode-port'), result.stderr);
 	}
 
 	// The shared scan runs before `run` too: an empty argument there is this
-	// flag's value, not an unknown command.
+	// flag's value, not an unknown command, and stays a hard error.
 	const beforeRun = runCli(['--vscode-port', '', 'run', 'hello']);
 	t.is(beforeRun.status, 1, beforeRun.stderr);
 	t.true(
@@ -182,28 +182,31 @@ test('a negative number is not accepted as the value of --provider', t => {
 	t.true(result.stderr.includes('Unknown option "-5"'), result.stderr);
 });
 
-test('fused values preserve additional equals signs for existing validation', t => {
+test('fused invalid values are ignored inside the prompt, rejected before run', t => {
 	for (const flag of ['--model', '--provider', '--context-max']) {
 		const result = runCli(['run', 'hello', `${flag}=123=extra`]);
-		t.is(result.status, 1);
+		t.is(result.status, 0, result.stderr);
 		t.true(
 			result.stderr.includes(`Invalid ${flag} value: "123=extra"`),
 			result.stderr,
 		);
+		const beforeRun = runCli([`${flag}=123=extra`, 'run', 'hello']);
+		t.is(beforeRun.status, 1, result.stderr);
 	}
-	// Port parsing is strict: the numeric prefix is not silently accepted.
+	// Port parsing is strict: the numeric prefix is not silently accepted,
+	// but inside the prompt the pair is a mention and the run goes ahead.
 	const result = runCli(['run', 'hello', '--vscode-port=3000=extra', 'world']);
-	t.is(result.status, 1);
+	t.is(result.status, 0);
 	t.true(
 		result.stderr.includes('Invalid --vscode-port value: "3000=extra"'),
 		result.stderr,
 	);
 });
 
-test('--vscode-port rejects non-numeric and out-of-range values', t => {
+test('--vscode-port ignores non-numeric and out-of-range values inside the prompt', t => {
 	for (const value of ['abc', '99999', '8080abc', '0', '-1']) {
 		const result = runCli(['run', 'hello', `--vscode-port=${value}`]);
-		t.is(result.status, 1, value);
+		t.is(result.status, 0, value);
 		t.true(
 			result.stderr.includes(`Invalid --vscode-port value: "${value}"`),
 			result.stderr,
@@ -244,15 +247,17 @@ test('--model accepts @ and + in model ids', t => {
 	t.is(JSON.parse(result.stdout).cliModel, 'org/model@2024+beta');
 });
 
-test('--mode with no value is rejected', t => {
-	for (const args of [
-		['run', 'hello', '--mode'],
-		['--mode', '--plain', 'run', 'hello'],
-	]) {
-		const result = runCli(args);
-		t.is(result.status, 1);
-		t.true(result.stderr.includes('--mode requires a value'), result.stderr);
-	}
+test('--mode with no value is ignored inside the prompt, rejected before run', t => {
+	const insidePrompt = runCli(['run', 'hello', '--mode']);
+	t.is(insidePrompt.status, 0, insidePrompt.stderr);
+	t.true(
+		insidePrompt.stderr.includes('--mode requires a value'),
+		insidePrompt.stderr,
+	);
+
+	const beforeRun = runCli(['--mode', '--plain', 'run', 'hello']);
+	t.is(beforeRun.status, 1);
+	t.true(beforeRun.stderr.includes('--mode requires a value'), beforeRun.stderr);
 });
 
 test('run with no prompt is a usage error', t => {
@@ -282,6 +287,36 @@ test('Ink render receives configured maxFps in render options', t => {
 	t.is(result.status, 0, result.stderr);
 	const output = JSON.parse(result.stdout);
 	t.is(output.inkOptions?.maxFps, 15);
+});
+
+test('a prompt that only mentions an option name is not parsed as that option', t => {
+	// https://github.com/Nano-Collective/nanocoder/issues/2308 — the flag
+	// extraction used to scan the whole argv, so prompt words that mentioned
+	// an option aborted the run on value validation.
+	for (const args of [
+		['run', 'explain', 'the', '--vscode-port', 'option'],
+		['run', 'fix it', '--vscode-port', 'abc'],
+		['run', 'fix it', '--provider', 'bad;name'],
+		['run', 'fix it', '--model', 'bad!model'],
+	]) {
+		const result = runCli(args);
+		t.is(result.status, 0, `${args.join(' ')}: ${result.stderr}`);
+		const props = JSON.parse(result.stdout);
+		t.is(props.vscodePort, undefined);
+		t.is(props.cliProvider, undefined);
+		t.is(props.cliModel, undefined);
+	}
+});
+
+test('non-run flags inside the prompt stay prompt text', t => {
+	// --resume/--continue/--acp are not `run` options: inside the prompt they
+	// are words the user wrote, so they neither take effect nor abort.
+	for (const flag of ['--resume', '--continue', '--acp']) {
+		const result = runCli(['run', 'explain', flag, 'usage']);
+		t.is(result.status, 0, `${flag}: ${result.stderr}`);
+		const props = JSON.parse(result.stdout);
+		t.is(props.acpOptions, undefined);
+	}
 });
 
 test('--acp hands --mode to the ACP server as the starting mode', t => {
