@@ -8,6 +8,7 @@ import {loadPreferences, resetPreferencesCache, savePreferences} from '@/config/
 import {ensureDirectoryTrust, isDirectoryTrusted} from '@/config/trust/directory-trust';
 import {describeProjectTrust} from '@/config/trust/project-trust';
 import {CONFIG_AUTO_FIX_WARNING, runDaemonCli} from './cli';
+import {projectHash, systemdUnitPath} from './install';
 import {DaemonIpcServer} from './ipc';
 import {
 	getLockfilePath,
@@ -717,6 +718,37 @@ test.serial('unknown flag is rejected with exit 1 and no daemon spawned', async 
 	} finally {
 		await rm(root, {recursive: true, force: true});
 	}
+});
+
+test.serial('install reports an invalid systemd project path without writing a unit', async t => {
+	await withIsolatedPreferences(async () => {
+		const home = await mkdtemp(join(tmpdir(), 'daemon-cli-install-'));
+		const previousPlatform = process.platform;
+		const previousEnv = {
+			HOME: process.env.HOME,
+			USERPROFILE: process.env.USERPROFILE,
+			PATH: process.env.PATH,
+		};
+		try {
+			// Exercise the Linux renderer on every host, without touching the real
+			// home or allowing systemctl to run if validation ever regresses.
+			Object.defineProperty(process, 'platform', {value: 'linux'});
+			Object.assign(process.env, {HOME: home, USERPROFILE: home, PATH: home});
+			const projectRoot = join(home, 'project\ninvalid');
+			const result = await runDaemonCli('install', {projectRoot});
+
+			t.is(result.exitCode, 1);
+			t.is(result.output, 'The project path cannot contain control characters in a systemd unit.');
+			t.false(existsSync(systemdUnitPath(home, projectHash(projectRoot))));
+		} finally {
+			Object.defineProperty(process, 'platform', {value: previousPlatform});
+			for (const [name, value] of Object.entries(previousEnv)) {
+				if (value === undefined) delete process.env[name];
+				else process.env[name] = value;
+			}
+			await rm(home, {recursive: true, force: true});
+		}
+	});
 });
 
 test.serial('--help prints usage, exits 0 and never runs the subcommand', async t => {

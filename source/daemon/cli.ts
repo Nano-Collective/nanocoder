@@ -293,11 +293,15 @@ async function installCommand(
 	opts: DaemonCliOptions,
 ): Promise<DaemonCliResult> {
 	const {installAutoStart} = await import('./install');
-	const result = await installAutoStart({projectRoot: opts.projectRoot});
-	return {
-		exitCode: result.platform === 'unsupported' ? 1 : 0,
-		output: result.message,
-	};
+	try {
+		const result = await installAutoStart({projectRoot: opts.projectRoot});
+		return {
+			exitCode: result.platform === 'unsupported' ? 1 : 0,
+			output: result.message,
+		};
+	} catch (err) {
+		return {exitCode: 1, output: formatError(err)};
+	}
 }
 
 async function uninstallCommand(
