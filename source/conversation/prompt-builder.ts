@@ -12,6 +12,8 @@ import type {SystemPromptConfig, TuneConfig} from '@/types/config';
 import {TUNE_DEFAULTS} from '@/types/config';
 import type {DevelopmentMode} from '@/types/core';
 import {getLogger} from '@/utils/logging';
+import {notifyWarning} from '@/utils/message-queue-core';
+import {expandAgentsMdImports} from './agents-md-imports.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -113,19 +115,42 @@ Current Working Directory: ${getProjectRoot()}
 Current Date: ${dateStr}`;
 }
 
+// Import warnings already shown, so a broken `@path` is reported once instead
+// of on every prompt rebuild.
+const reportedImportWarnings = new Set<string>();
+
 // The project root is the launch directory everywhere except inside an ACP
 // session's scope, where it is the `cwd` the client named for the session.
 function appendAgentsMd(prompt: string): string {
-	const agentsPath = join(getProjectRoot(), 'AGENTS.md');
+	const projectRoot = getProjectRoot();
+	const agentsPath = join(projectRoot, 'AGENTS.md');
 	if (existsSync(agentsPath)) {
 		try {
-			const agentsContent = readFileSync(agentsPath, 'utf-8');
-			return `${prompt}\n\nAdditional Context...\n\n${agentsContent}`;
+			const raw = readFileSync(agentsPath, 'utf-8');
+			// `@path` lines are inlined here, so the model never receives a
+			// reference it cannot open by itself.
+			const {content, warnings} = expandAgentsMdImports(raw, {
+				filePath: agentsPath,
+				projectRoot,
+			});
+			reportImportWarnings(warnings, projectRoot);
+			return `${prompt}\n\nAdditional Context...\n\n${content}`;
 		} catch {
 			// Silently skip if unreadable
 		}
 	}
 	return prompt;
+}
+
+function reportImportWarnings(warnings: string[], projectRoot: string): void {
+	for (const warning of warnings) {
+		// Keyed by project too: another folder with a broken import of its own
+		// deserves its own warning.
+		const key = `${projectRoot}\0${warning}`;
+		if (reportedImportWarnings.has(key)) continue;
+		reportedImportWarnings.add(key);
+		notifyWarning(warning, true, {source: 'agents-md-imports'});
+	}
 }
 
 // Search/discovery tools that justify a "prefer native over bash" instruction
