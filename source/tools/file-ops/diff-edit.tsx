@@ -81,8 +81,7 @@ function normalizeBlockContent(value: string): string {
 	return stripTrailingBoundaryNewline(stripSingleBoundaryNewline(value));
 }
 
-function findMarkerLine(diff: string, marker: string, start: number): number {
-	const pattern = new RegExp(`^${marker}\\r?$`, 'gm');
+function findMarkerLine(diff: string, pattern: RegExp, start: number): number {
 	pattern.lastIndex = start;
 	return pattern.exec(diff)?.index ?? -1;
 }
@@ -98,7 +97,7 @@ export function parseDiffEditBlocks(diff: string): DiffEditBlock[] {
 	let index = 0;
 
 	while (index < diff.length) {
-		const searchStart = findMarkerLine(diff, SEARCH_MARKER, index);
+		const searchStart = findMarkerLine(diff, /^<<<<<<< SEARCH\r?$/gm, index);
 		if (searchStart === -1) {
 			if (diff.slice(index).trim().length > 0 && blocks.length === 0) {
 				throw new Error(`Missing ${SEARCH_MARKER} marker.`);
@@ -109,7 +108,7 @@ export function parseDiffEditBlocks(diff: string): DiffEditBlock[] {
 		const searchContentStart = searchStart + SEARCH_MARKER.length;
 		const separatorStart = findMarkerLine(
 			diff,
-			SEPARATOR_MARKER,
+			/^=======\r?$/gm,
 			searchContentStart,
 		);
 		if (separatorStart === -1) {
@@ -121,7 +120,7 @@ export function parseDiffEditBlocks(diff: string): DiffEditBlock[] {
 		const replaceContentStart = separatorStart + SEPARATOR_MARKER.length;
 		const replaceEnd = findMarkerLine(
 			diff,
-			REPLACE_MARKER,
+			/^>>>>>>> REPLACE\r?$/gm,
 			replaceContentStart,
 		);
 		if (replaceEnd === -1) {
