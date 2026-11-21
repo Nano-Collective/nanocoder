@@ -1,6 +1,7 @@
 import test from 'ava';
 import {
 	existsSync,
+	mkdirSync,
 	mkdtempSync,
 	readdirSync,
 	readFileSync,
@@ -15,6 +16,7 @@ import {
 	createSessionContext,
 	runInSessionContext,
 } from '@/services/session-context';
+import {setMessageQueueSink} from '@/utils/message-queue-core';
 import {
 	buildSystemPrompt,
 	getLastBuiltPrompt,
@@ -508,6 +510,51 @@ test('buildSystemPrompt - appends the session project AGENTS.md inside a session
 		rmSync(dir, {recursive: true, force: true});
 	}
 });
+
+// ============================================================================
+// buildSystemPrompt — @path imports inside AGENTS.md
+// ============================================================================
+
+test('buildSystemPrompt - inlines @path imports from AGENTS.md', t => {
+	const dir = mkdtempSync(join(tmpdir(), 'nc-prompt-imports-'));
+	try {
+		mkdirSync(join(dir, 'docs'), {recursive: true});
+		writeFileSync(join(dir, 'docs', 'testing.md'), 'IMPORTED GUIDANCE');
+		writeFileSync(join(dir, 'AGENTS.md'), '# Rules\n@docs/testing.md');
+		const tune: TuneConfig = {...TUNE_NANO, includeAgentsMd: true};
+		const result = runInSessionContext(createSessionContext(dir), () =>
+			buildSystemPrompt('normal', tune, NANO_TOOLS),
+		);
+		t.true(result.includes('IMPORTED GUIDANCE'));
+		t.false(result.includes('@docs/testing.md'));
+	} finally {
+		rmSync(dir, {recursive: true, force: true});
+	}
+});
+
+test.serial(
+	'buildSystemPrompt - reports an unresolved AGENTS.md import once',
+	t => {
+		const dir = mkdtempSync(join(tmpdir(), 'nc-prompt-imports-'));
+		const warnings: string[] = [];
+		setMessageQueueSink((type, message) => {
+			if (type === 'warning') warnings.push(message);
+		});
+		try {
+			writeFileSync(join(dir, 'AGENTS.md'), '# Rules\n@docs/missing.md');
+			const tune: TuneConfig = {...TUNE_NANO, includeAgentsMd: true};
+			runInSessionContext(createSessionContext(dir), () => {
+				buildSystemPrompt('normal', tune, NANO_TOOLS);
+				buildSystemPrompt('normal', tune, NANO_TOOLS);
+			});
+			t.is(warnings.length, 1);
+			t.true(warnings[0]?.includes('@docs/missing.md') ?? false);
+		} finally {
+			setMessageQueueSink(null);
+			rmSync(dir, {recursive: true, force: true});
+		}
+	},
+);
 
 // ============================================================================
 // buildSystemPrompt — systemPrompt override (replace / append, content / file)

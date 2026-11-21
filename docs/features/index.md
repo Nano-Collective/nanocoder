@@ -182,6 +182,8 @@ Run `/init` or `nanocoder init` to analyze your project and generate an `AGENTS.
 
 The `AGENTS.md` file is automatically loaded every session, so the AI always knows how your project works.
 
+A long `AGENTS.md` can be split into focused files and pulled back in with `@path` imports. A line that is only a reference — `@docs/testing.md`, or `@~/guides/style.md` for a file in your Nanocoder config directory — is replaced by that file's contents when the prompt is built, recursively, so the model receives the guidance itself rather than a path it has to go read. Imports resolve relative to the importing file and must stay inside the project root or the config directory; nesting stops after five levels, a file already included is skipped, and each import and the expansion as a whole are size-capped. Anything that cannot be loaded is reported as a warning instead of failing silently, and references inside fenced code blocks are left untouched so the syntax can be documented in place.
+
 ### Skills: the unified extension model
 
 **[Skills](skills.md)** are the umbrella for everything you can plug into Nanocoder — custom commands, subagents, custom tools, and event-driven triggers all live under one model. A skill is either a single `.md` file (a one-member skill) or a directory under `.nanocoder/skills/<name>/` (a bundle that ships a command + subagent + tools together).
