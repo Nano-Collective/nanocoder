@@ -85,10 +85,22 @@ export const lazyCommands: LazyCommand[] = [
 		load: () => import('@/commands/doctor').then(m => m.doctorCommand),
 	},
 	{
+		name: 'whoami',
+		description:
+			'Show the active provider, model, base URL, and masked API key',
+		load: () => import('@/commands/whoami').then(m => m.whoamiCommand),
+	},
+	{
 		name: 'model',
 		description:
 			"Select a model from any configured provider (/model browse to search OpenRouter's model list)",
 		load: () => import('@/commands/model').then(m => m.modelCommand),
+	},
+	{
+		name: 'profile',
+		description:
+			'List or switch configuration profiles (/profile [name|--clear])',
+		load: () => import('@/commands/profile').then(m => m.profileCommand),
 	},
 	{
 		name: 'commands',
@@ -200,6 +212,11 @@ export const lazyCommands: LazyCommand[] = [
 		name: 'tasks',
 		description: 'Manage your task list',
 		load: () => import('@/commands/tasks').then(m => m.tasksCommand),
+	},
+	{
+		name: 'plans',
+		description: 'View and manage persistent plan graphs',
+		load: () => import('@/commands/plans').then(m => m.plansCommand),
 	},
 	{
 		name: 'settings',

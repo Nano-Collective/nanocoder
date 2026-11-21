@@ -6,7 +6,10 @@ import type {
 	ToolKind,
 } from '@agentclientprotocol/sdk';
 import {getSafeSessionCwd} from '@/services/session-cwd';
-import {fitEditToLineEndings} from '@/tools/file-ops/line-endings';
+import {
+	fitContentToLineEndings,
+	fitEditToLineEndings,
+} from '@/tools/file-ops/line-endings';
 import {replaceFirstLiteral} from '@/tools/file-ops/literal-replace';
 import type {ToolCall} from '@/types/core';
 import {truncateText} from '@/utils/truncate-text';
@@ -38,6 +41,8 @@ const TOOL_KINDS: Record<string, ToolKind> = {
 	write_file: 'edit',
 	diff_edit: 'edit',
 	execute_bash: 'execute',
+	bash_output: 'read',
+	kill_bash: 'execute',
 	fetch_url: 'fetch',
 	web_search: 'fetch',
 	agent: 'think',
@@ -87,6 +92,16 @@ export async function buildToolCallMeta(
 				title: command
 					? `execute_bash: ${truncate(command, 80)}`
 					: 'execute_bash',
+				kind,
+				locations: [],
+				content: [],
+			};
+		}
+		case 'bash_output':
+		case 'kill_bash': {
+			const jobId = asString(args.job_id);
+			return {
+				title: jobId ? `${name}: ${truncate(jobId, 80)}` : name,
 				kind,
 				locations: [],
 				content: [],
@@ -256,5 +271,11 @@ async function buildWriteFileDiff(
 		oldText = null; // New file.
 	}
 
-	return {type: 'diff', path: absPath, oldText, newText};
+	// Match the file's line endings the same way the tool does.
+	return {
+		type: 'diff',
+		path: absPath,
+		oldText,
+		newText: fitContentToLineEndings(oldText, newText),
+	};
 }
