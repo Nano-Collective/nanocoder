@@ -622,6 +622,43 @@ for (const command of [
 	});
 }
 
+// An `rm` that only appears inside a quoted argument is text being passed
+// around - a commit message, a note, a search term - not a delete (#2238).
+for (const command of [
+	'git commit -m "docs: warn never to run rm -rf / on CI"',
+	"echo 'rm -rf ~' >> notes.txt",
+	'grep -rn "rm -rf /" scripts/',
+	"git commit -m 'never rm -rf $HOME'",
+	// Single quotes do not expand, so this prints the text.
+	"echo '$(rm -rf /)'",
+]) {
+	test(`execute_bash validator allows quoted rm ${JSON.stringify(command)}`, async t => {
+		const result = await executeBashTool.validator!({command});
+		t.true(result.valid);
+	});
+}
+
+// Quoting spares only a quoted argument. A quoted command name, a quoted
+// target, a string another shell runs, and a command substitution inside
+// double quotes (which runs) are still checked.
+for (const command of [
+	'"rm" -rf /',
+	'sudo "rm" -rf ~',
+	'ls; \'rm\' -rf /',
+	'rm -rf "/"',
+	'bash -c "rm -rf /"',
+	"sh -c 'rm -rf ~'",
+	'eval "rm -rf $HOME"',
+	'echo "$(rm -rf /)"',
+	'echo "`rm -rf /`"',
+	'git commit -m "wip" && rm -rf ~',
+]) {
+	test(`execute_bash validator still blocks quoted rm ${JSON.stringify(command)}`, async t => {
+		const result = await executeBashTool.validator!({command});
+		t.false(result.valid);
+	});
+}
+
 // ============================================================================
 // Tests for execute_bash Tool Handler - Failure Capsules
 // ============================================================================

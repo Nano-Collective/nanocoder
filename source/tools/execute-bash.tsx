@@ -326,11 +326,17 @@ const DESTRUCTIVE_RM_TARGETS = new Set(['/', '~', '$HOME', '${HOME}']);
  * Flags and targets of every `rm` in a command. Argument words stop at the
  * next command separator, so `rm -rf src && ls /` is judged on its own
  * arguments instead of folding the rest of the line into them.
+ *
+ * `rm` is looked for in `searchIn`, the same command with the text of quoted
+ * arguments masked out (see `maskQuotedText`), so an `rm` that is only
+ * mentioned in a commit message or an `echo` is not read as a command. Its
+ * arguments are still read from `command`, where `rm -rf "$HOME"` keeps the
+ * quoted target.
  */
-function rmArgumentLists(command: string): string[][] {
+function rmArgumentLists(command: string, searchIn = command): string[][] {
 	const pattern = /\brm\b/gi;
 	const lists: string[][] = [];
-	let match = pattern.exec(command);
+	let match = pattern.exec(searchIn);
 	while (match) {
 		const rest = command.slice(match.index + match[0].length);
 		const separator = rest.search(/[;&|\n]/);
@@ -343,7 +349,7 @@ function rmArgumentLists(command: string): string[][] {
 				// "$HOME"` deletes the same directory as `rm -rf $HOME`.
 				.map(word => word.replace(/['"]/g, '')),
 		);
-		match = pattern.exec(command);
+		match = pattern.exec(searchIn);
 	}
 	return lists;
 }
@@ -418,6 +424,32 @@ function isDestructiveRm(words: string[]): boolean {
 const RUNS_QUOTED_TEXT =
 	/\b(?:ba|z|k|da|fi|tc|c)?sh\s+(?:-\w+\s+)*-\w*c\b|\b(?:eval|ssh|xargs)\b/;
 
+/** A double- or single-quoted span, as the shell delimits it. */
+const QUOTED_SPAN = /"(?:[^"\\]|\\.)*"|'[^']*'/g;
+
+/**
+ * Whether the text before a quoted span puts it in command position or after
+ * a redirect, where its text is what runs or what gets written.
+ */
+const ENDS_IN_COMMAND_POSITION = /(?:^|[;&|(`\n>]|\bsudo)\s*$/;
+
+/**
+ * The command with the text of its quoted arguments replaced by spaces of the
+ * same length, so offsets still line up with `command`. Same exceptions as
+ * `withoutQuotedArguments` (a span in command position or after a redirect,
+ * or a command that hands quoted text to another shell), plus a double-quoted
+ * span with a command substitution: its `$(...)` or backticks run.
+ */
+function maskQuotedText(command: string): string {
+	if (RUNS_QUOTED_TEXT.test(command)) return command;
+	return command.replace(QUOTED_SPAN, (span, offset: number) =>
+		ENDS_IN_COMMAND_POSITION.test(command.slice(0, offset)) ||
+		(span.startsWith('"') && /\$\(|`/.test(span))
+			? span
+			: ' '.repeat(span.length),
+	);
+}
+
 /**
  * The command with its quoted arguments blanked out, so `grep "dd if=" log`
  * or `echo 'never run mkfs'` is judged on what runs rather than on the text it
@@ -428,12 +460,10 @@ const RUNS_QUOTED_TEXT =
  */
 function withoutQuotedArguments(command: string): string {
 	if (RUNS_QUOTED_TEXT.test(command)) return command;
-	return command.replace(
-		/"(?:[^"\\]|\\.)*"|'[^']*'/g,
-		(span, offset: number) =>
-			/(?:^|[;&|(`\n>]|\bsudo)\s*$/.test(command.slice(0, offset))
-				? span.slice(1, -1)
-				: "''",
+	return command.replace(QUOTED_SPAN, (span, offset: number) =>
+		ENDS_IN_COMMAND_POSITION.test(command.slice(0, offset))
+			? span.slice(1, -1)
+			: "''",
 	);
 }
 
@@ -468,12 +498,15 @@ const executeBashValidator = (args: {
 	// A recursive force delete of `/`, `~` or `$HOME` is destructive however its
 	// flags are spelled, so it is parsed rather than pattern-matched. Backslash
 	// line continuations are joined first: `rm -rf \` with `/` on the next line
-	// is one command, so the target has to stay attached to its flags.
+	// is one command, so the target has to stay attached to its flags. An `rm`
+	// that only appears inside a quoted argument (`git commit -m "..."`,
+	// `echo '...'`) is text, not a command, and is not looked at.
 	const parseable = command.replace(/\\\r?\n/g, ' ');
 	const unquoted = withoutQuotedArguments(command);
 	const isDestructive =
-		rmArgumentLists(parseable).some(isDestructiveRm) ||
-		dangerousPatterns.some(pattern => pattern.test(unquoted));
+		rmArgumentLists(parseable, maskQuotedText(parseable)).some(
+			isDestructiveRm,
+		) || dangerousPatterns.some(pattern => pattern.test(unquoted));
 
 	if (isDestructive) {
 		return Promise.resolve({
