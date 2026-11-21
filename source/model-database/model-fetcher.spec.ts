@@ -38,6 +38,30 @@ function createMockOpenRouterResponse(
 	};
 }
 
+test.serial('model browser keeps only verified current MiniMax text choices', async t => {
+	clearModelCache();
+	const originalFetch = globalThis.fetch;
+	globalThis.fetch = async () => new Response(JSON.stringify(createMockOpenRouterResponse([
+		{id: 'minimax/minimax-m2.7', name: 'Legacy'},
+		{id: 'minimax/minimax-m3', name: 'M3', created: 200},
+		{id: 'minimax/minimax-m3.1-flash:free', name: 'Flash', created: 100},
+		{id: 'minimax/minimax-m3.1-flash', name: 'Unverified'},
+		{id: 'openai/gpt-4.1', name: 'GPT-4.1', created: 300},
+	])));
+	try {
+		const models = await fetchModels();
+		t.deepEqual(models.map(model => model.id), [
+			'openai/gpt-4.1',
+			'minimax/minimax-m3.1-flash:free',
+			'minimax/minimax-m3',
+		]);
+		t.deepEqual(await fetchModels(), models);
+	} finally {
+		globalThis.fetch = originalFetch;
+		clearModelCache();
+	}
+});
+
 // Tests for cache management
 test.serial('clearModelCache resets the cache', async t => {
 	// Clear any existing cache

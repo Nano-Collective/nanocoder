@@ -20,7 +20,11 @@ sidebar_order: 24
 }
 ```
 
-The `sdkProvider: "anthropic"` field is required as MiniMax's API uses the Anthropic message format.
+The `sdkProvider: "anthropic"` field selects MiniMax's Anthropic-compatible message format. New configurations list MiniMax-M3.1-Flash first, with MiniMax-M3 as an alternative. The China endpoint is `https://api.minimaxi.com/anthropic/v1`.
+
+[MiniMax M Plan](https://platform.minimax.io/docs/m-plan/other-tools) documents MiniMax-M3.1-Flash with a Subscription Key. Choose models supported by your account; the example does not imply M3 subscription entitlement.
+
+Discovery intentionally hides legacy, `-Preview`, and other unlisted MiniMax text IDs on the official endpoints. If your account needs one of these IDs, use manual model entry; discovery will need an update before offering a newly released text model. On OpenRouter and OpenCode Zen, it offers the verified gateway IDs only when the gateway returns them: `minimax/minimax-m3.1-flash:free` / `minimax/minimax-m3` and `minimax-m3.1-flash-free` / `minimax-m3`, respectively. Existing model lists and manually entered legacy or custom IDs are preserved, including on custom endpoints.
 
 ## Output Token Ceiling
 
