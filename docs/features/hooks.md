@@ -147,6 +147,16 @@ Each hook is run with the relevant context in its environment. Nothing is passed
 | `NANOCODER_TOOL_RESULT` | `post-tool-use` | The tool's result (truncated to 16k characters) |
 | `NANOCODER_PROMPT` | `user-prompt-submit` | The submitted prompt |
 | `NANOCODER_MESSAGE_COUNT` | `pre-compact` | Messages in the conversation |
+| `NANOCODER_HOOK_CONTEXT_TRUNCATED` | oversized hook context | `true` when a model-supplied value was truncated |
+
+To keep hook processes within operating-system launch limits,
+`NANOCODER_TOOL_ARGS`, `NANOCODER_COMMAND`, `NANOCODER_PROMPT`, and
+`NANOCODER_FILE` are capped at 16,384 characters. Oversized
+`NANOCODER_TOOL_ARGS` becomes the valid JSON value `{"truncated":true}`;
+`NANOCODER_COMMAND`, `NANOCODER_PROMPT`, and `NANOCODER_FILE` are truncated
+with an elision marker. If any of these values is truncated, a vetoing event
+is blocked even when its hook exits successfully, because the hook did not see
+the full input. The hook still starts with the bounded environment.
 
 Hook commands are **not** env-substituted when the config is read, so `$NANOCODER_FILE` in your `command` reaches the shell intact.
 
@@ -184,7 +194,12 @@ The gate is also applied again at each execution boundary (`processToolUse`, the
 
 The first veto ends the chain — later hooks on that event don't run.
 
-Only a deliberate non-zero exit blocks. A hook that hangs past its `timeout` is killed, logged, and skipped, so a broken script degrades to "no hook" instead of wedging the agent. On the other events a non-zero exit is logged and the remaining hooks still run; on `post-tool-use` the failing hook's output is also handed to the model (see below).
+On vetoing events, a non-zero exit, a hook process that cannot start, or
+truncated context blocks the action. A hook that hangs past its `timeout` is
+killed, logged, and skipped, so a broken script cannot wedge the agent. On the
+other events a non-zero exit is logged and the remaining hooks still run; on
+`post-tool-use` the failing hook's output is also handed to the model (see
+below).
 
 Killing a hook kills what it started. The command runs under a shell, so signalling that shell alone would leave the grandchildren of a compound command (`a && b`, a pipeline) running after the agent has moved on. Hooks are spawned into their own process group on POSIX and reaped with `taskkill /T` on Windows, so the whole tree goes.
 
