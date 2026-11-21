@@ -128,12 +128,13 @@ function findSuggestion(
 function unknownOptionError(
 	option: string,
 	candidates: readonly string[],
+	helpCommand = 'nanocoder --help',
 ): string {
 	const optionName = option.split('=', 1)[0];
 	const match = findSuggestion(optionName, candidates);
 	return match
 		? `Unknown option "${option}". Did you mean "${match}"?`
-		: `Unknown option "${option}". Run "nanocoder --help" to see available options.`;
+		: `Unknown option "${option}". Run "${helpCommand}" to see available options.`;
 }
 
 function unknownCommandError(command: string): string {
@@ -199,6 +200,7 @@ function scanArgs(
 	start: number,
 	end: number,
 	flags: FlagSet = GLOBAL_FLAGS,
+	helpCommand?: string,
 ): ScannedArgs {
 	const positionals: number[] = [];
 	for (let i = start; i < end; i++) {
@@ -222,10 +224,11 @@ function scanArgs(
 		if (arg.startsWith('-')) {
 			return {
 				positionals,
-				error: unknownOptionError(arg, [
-					...flags.withValues,
-					...flags.withoutValues,
-				]),
+				error: unknownOptionError(
+					arg,
+					[...flags.withValues, ...flags.withoutValues],
+					helpCommand,
+				),
 			};
 		}
 		positionals.push(i);
@@ -273,7 +276,13 @@ export function parseWorktreeArgs(
  * ignore it — the bug this validation exists to prevent.
  */
 export function validateInitArgs(args: string[]): string | undefined {
-	const {error} = scanArgs(args, 1, args.length, INIT_FLAGS);
+	const {error} = scanArgs(
+		args,
+		1,
+		args.length,
+		INIT_FLAGS,
+		'nanocoder init --help',
+	);
 	return error;
 }
 
