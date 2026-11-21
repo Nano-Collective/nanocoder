@@ -416,6 +416,22 @@ Set `nanocoder.autoCommit` to `true` (boolean; any other value is treated as off
 
 This produces one commit per edit. Squash them before opening a PR if you prefer a tidier history (`git rebase -i`, or `git reset --soft <base>` and commit again).
 
+### Git Snapshot
+
+When the project folder is a git repository, the system prompt includes a short snapshot of it taken when the session starts: the current branch (or detached HEAD) and default branch, the upstream with ahead/behind counts, a `git status` summary with up to 10 changed paths, and the last 5 commit subjects. The model then knows about uncommitted work without spending a turn on `git status` and `git log`. The block is labelled as a session-start snapshot, so the model re-checks before acting on it.
+
+Only local, read-only git commands run (no fetch), each with a short timeout; a slow or failing `git status` on a very large repository is left out of the block rather than delaying the session. Outside a repository, or without git installed, nothing is added. The snapshot is taken once per session, so the prompt stays the same across turns. It is never added under the `nano` tool profile.
+
+Set `nanocoder.gitContext` to `false` to turn it off (default `true`):
+
+```json
+{
+  "nanocoder": {
+    "gitContext": false
+  }
+}
+```
+
 ### Completion Evidence
 
 Models sometimes edit code and say "fixed" without ever running the tests. Set `nanocoder.verify.required` and a turn that edited files is not accepted as finished until each required command has run through `execute_bash` and exited `0` **after the last edit**. Off by default.

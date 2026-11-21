@@ -2,6 +2,7 @@ import {existsSync, readFileSync} from 'fs';
 import {homedir, platform, release} from 'os';
 import {basename, dirname, isAbsolute, join, normalize, resolve} from 'path';
 import {fileURLToPath} from 'url';
+import {getAppConfig} from '@/config/index';
 import {getProfessionalTone} from '@/config/preferences';
 import {getSubagentDescriptions} from '@/input/prompt-processor';
 import {defineSessionValue} from '@/services/session-context';
@@ -12,6 +13,7 @@ import type {SystemPromptConfig, TuneConfig} from '@/types/config';
 import {TUNE_DEFAULTS} from '@/types/config';
 import type {DevelopmentMode} from '@/types/core';
 import {getLogger} from '@/utils/logging';
+import {getGitContextSection} from './git-context';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -362,6 +364,12 @@ ${getSubagentDescriptions()}`;
 
 	// System info (dynamic) — slim variant under nano
 	sections.push(generateSystemInfo(nano));
+
+	// Git snapshot (dynamic, taken once per session) — skipped under nano to
+	// keep its prompt small, and when `nanocoder.gitContext` is false
+	if (!nano && getAppConfig().gitContext !== false) {
+		sections.push(getGitContextSection());
+	}
 
 	// Compose and (optionally) append AGENTS.md.
 	// Nano omits AGENTS.md by default; users can override via tune.includeAgentsMd.

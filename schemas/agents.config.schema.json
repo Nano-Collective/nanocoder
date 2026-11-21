@@ -65,6 +65,10 @@
 					},
 					"type": "array"
 				},
+				"gitContext": {
+					"description": "Add a snapshot of the git repository (branch, upstream, status, recent commits) to the system prompt at session start. On by default; never added under the nano tool profile.",
+					"type": "boolean"
+				},
 				"headless": {
 					"description": "Maximum LLM turns for headless runs (--plain, ACP and subagent loops).",
 					"properties": {
@@ -223,6 +227,10 @@
 						"$ref": "#/definitions/FormatterConfig"
 					},
 					"type": "array"
+				},
+				"gitContext": {
+					"description": "Add a snapshot of the git repository (branch, upstream, status, recent commits) to the system prompt at session start. On by default; never added under the nano tool profile.",
+					"type": "boolean"
 				},
 				"headless": {
 					"description": "Maximum LLM turns for headless runs (--plain, ACP and subagent loops).",

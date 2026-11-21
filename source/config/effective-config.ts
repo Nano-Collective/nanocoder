@@ -567,6 +567,12 @@ function blockSpecs(cwd?: string): BlockSpec[] {
 			leaf: true,
 		},
 		{
+			path: ['nanocoder', 'gitContext'],
+			file: agents,
+			effective: config.gitContext,
+			leaf: true,
+		},
+		{
 			path: ['nanocoder', 'defaultProfile'],
 			file: agents,
 			effective: loadDefaultProfileName(cwd),
