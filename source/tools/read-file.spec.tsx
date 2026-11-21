@@ -11,6 +11,7 @@ import type {VisualToolOutput} from '../types/core';
 import {
 	bumpReadContentGeneration,
 	clearReadTracker,
+	hasSeenFile,
 } from './runtime/read-tracker.js';
 import {readFileTool} from './read-file';
 
@@ -603,6 +604,31 @@ test.serial('read_file validator rejects start_line < 1', async t => {
 		}
 	} finally {
 		process.chdir(originalCwd);
+		rmSync(testDir, {recursive: true, force: true});
+	}
+});
+
+test.serial('read_file rejects start_line past EOF without marking the file seen', async t => {
+	t.timeout(10000);
+	const testDir = join(process.cwd(), 'test-read-past-eof-temp');
+	const filePath = join(testDir, 'ten-lines.txt');
+
+	try {
+		mkdirSync(testDir, {recursive: true});
+		writeFileSync(
+			filePath,
+			Array.from({length: 10}, (_, index) => `line-${index + 1}`).join('\n'),
+		);
+
+		await t.throwsAsync(
+			readFileTool.tool.execute!(
+				{path: filePath, start_line: 500},
+				{toolCallId: 'test', messages: []},
+			),
+			{message: /start_line 500 exceeds file length \(10 lines\)/},
+		);
+		t.false(hasSeenFile(filePath));
+	} finally {
 		rmSync(testDir, {recursive: true, force: true});
 	}
 });
