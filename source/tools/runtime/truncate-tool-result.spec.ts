@@ -1,5 +1,8 @@
 import test from 'ava';
-import {truncateToolResult} from './truncate-tool-result.js';
+import {
+	snapOutsideSurrogate,
+	truncateToolResult,
+} from './truncate-tool-result.js';
 
 test('leaves results at or below the cap unchanged', t => {
 	const content = 'short result';
@@ -64,5 +67,58 @@ test('does not cut through a whitespace-delimited token (a secret stays whole or
 		for (const fragment of result.match(/\S*567890\S*/g) ?? []) {
 			t.true(fragment === secret, `offset ${offset}: ${fragment}`);
 		}
+	}
+});
+
+test('snapOutsideSurrogate steps boundary away from surrogate pair splits', t => {
+	// 'abc' (0,1,2), '\u{1F600}' -> \uD83D (3), \uDE00 (4), 'def' (5,6,7)
+	const text = 'abc\u{1F600}def';
+
+	// Cut at index 4 splits the pair. 'before' steps back to 3, keeping 'abc'.
+	t.is(snapOutsideSurrogate(text, 4, 'before'), 3);
+	t.is(text.slice(0, snapOutsideSurrogate(text, 4, 'before')), 'abc');
+
+	// Cut at index 4 with 'after' steps forward to 5, keeping 'def'.
+	t.is(snapOutsideSurrogate(text, 4, 'after'), 5);
+	t.is(text.slice(snapOutsideSurrogate(text, 4, 'after')), 'def');
+
+	// Cuts already outside the pair remain unchanged.
+	t.is(snapOutsideSurrogate(text, 3, 'before'), 3);
+	t.is(snapOutsideSurrogate(text, 5, 'before'), 5);
+	t.is(snapOutsideSurrogate(text, 3, 'after'), 3);
+	t.is(snapOutsideSurrogate(text, 5, 'after'), 5);
+
+	// Edge boundaries (0, length) are bounds-safe.
+	t.is(snapOutsideSurrogate(text, 0, 'before'), 0);
+	t.is(snapOutsideSurrogate(text, text.length, 'after'), text.length);
+});
+
+test('never cuts a surrogate pair in half (zero lone surrogates)', t => {
+	const loneSurrogatePattern =
+		/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+
+	// Astral characters without whitespace nearby (where snapOutsideToken cannot intervene)
+	for (let len = 3000; len < 3040; len++) {
+		const s = '\u{1F600}'.repeat(len);
+		for (const max of [1000, 1001, 2000, 2001, 2500]) {
+			const truncated = truncateToolResult(s, max);
+			t.false(
+				loneSurrogatePattern.test(truncated),
+				`Lone surrogate found for len ${len}, max ${max}`,
+			);
+			t.true(truncated.length <= max);
+		}
+	}
+});
+
+test('preserves surrogate pairs when cut boundary falls on arbitrary lengths', t => {
+	const loneSurrogatePattern =
+		/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+
+	const emojiRun = '🌟🎉🚀🔥'.repeat(500);
+	for (let max = 150; max < 250; max++) {
+		const truncated = truncateToolResult(emojiRun, max);
+		t.false(loneSurrogatePattern.test(truncated), `max ${max}`);
+		t.true(truncated.length <= max);
 	}
 });

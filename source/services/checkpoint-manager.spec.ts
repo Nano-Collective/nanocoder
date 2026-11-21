@@ -4,6 +4,7 @@ import type {Message} from '@/types/core';
 import test from 'ava';
 import * as fs from 'fs/promises';
 import {describeCheckpointGaps} from '@/services/checkpoint-utils';
+import {appendTurnContext} from '@/utils/turn-context';
 import {CheckpointManager} from './checkpoint-manager';
 import {execFileSync} from 'node:child_process';
 // Helper to create a temporary directory for tests
@@ -1141,6 +1142,40 @@ test.serial(
 			]);
 
 			t.true(ignored.includes('/checkpoints/'));
+		} finally {
+			await cleanupTempDir(tempDir);
+		}
+	},
+);
+
+// The per-turn context block (#1574) is stored in the user's message and is
+// long enough to fill the 100-char description window on its own, which would
+// leave every checkpoint in `/checkpoint list` described by recalled memories
+// rather than by what the user asked for.
+test.serial(
+	'CheckpointManager describes a checkpoint by the typed message, not its context block',
+	async t => {
+		const tempDir = await createTempDir();
+		try {
+			const manager = new CheckpointManager(tempDir);
+			const messages: Message[] = [
+				{
+					role: 'user',
+					content: appendTurnContext('Refactor the auth module', [
+						'## Project Context\n\n- Auth uses Clerk; sessions are JWTs.',
+					]),
+				},
+				{role: 'assistant', content: 'Done.'},
+			];
+
+			const metadata = await manager.saveCheckpoint(
+				'context-desc-test',
+				messages,
+				'Provider',
+				'model',
+			);
+
+			t.is(metadata.description, 'Refactor the auth module');
 		} finally {
 			await cleanupTempDir(tempDir);
 		}

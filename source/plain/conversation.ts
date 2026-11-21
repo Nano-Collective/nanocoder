@@ -13,6 +13,11 @@ import {TOOL_APPROVAL_REQUIRED_KIND} from '@/constants';
 import {partitionUnknownToolCalls} from '@/hooks/chat-handler/utils/tool-filters';
 import {processToolUse} from '@/message-handler';
 import {color, write, writeError, writeLine, writeStatus} from '@/plain/writer';
+import {
+	formatVerificationSummary,
+	recordToolOutcome,
+	takeEvidenceRejection,
+} from '@/services/completion-ledger';
 import {resolveToolApproval} from '@/tools/approval-policy';
 import type {ToolManager} from '@/tools/tool-manager';
 import {getTuneToolMode, type TuneConfig} from '@/types/config';
@@ -410,6 +415,22 @@ async function runPlainConversationBody(
 					finalTextBeforeWalkthroughNudge ??= accumulatedFinalText;
 					return {kind: 'continue', messages: [walkthroughFallback]};
 				}
+
+				// With `nanocoder.verify.required` set, a run that edited files
+				// cannot end until the required commands have exited 0 since the
+				// last edit.
+				const evidenceRejection = finalTurn
+					? null
+					: takeEvidenceRejection(walkthroughLifecycle.ledger);
+				if (evidenceRejection) {
+					if (!isJson) {
+						writeStatus(
+							'edits are not verified yet - asking for the required checks',
+						);
+					}
+					finalTextBeforeWalkthroughNudge ??= accumulatedFinalText;
+					return {kind: 'continue', messages: [evidenceRejection]};
+				}
 				return {kind: 'finish'};
 			},
 			executeTools: async toolCalls => {
@@ -459,6 +480,7 @@ async function runPlainConversationBody(
 						workingDirectory,
 					});
 					toolResults.push(toolResult);
+					recordToolOutcome(walkthroughLifecycle.ledger, toolCall, toolResult);
 					if (!toolResult.isError) {
 						observeSuccessfulLifecycleTool(walkthroughLifecycle, toolCall);
 					}
@@ -504,12 +526,22 @@ async function runPlainConversationBody(
 	});
 
 	switch (result.kind) {
-		case 'completed':
+		case 'completed': {
+			const verification = formatVerificationSummary(
+				walkthroughLifecycle.ledger,
+			);
+			// The answer was already streamed to stdout; the proof follows it.
+			if (verification && !isJson) {
+				writeLine();
+				writeLine(verification);
+			}
+			const answer = finalTextBeforeWalkthroughNudge ?? accumulatedFinalText;
 			return {
 				kind: 'success',
 				...snapshot(),
-				finalText: finalTextBeforeWalkthroughNudge ?? accumulatedFinalText,
+				finalText: verification ? `${answer}\n\n${verification}` : answer,
 			};
+		}
 		case 'adapter-stop':
 			return {
 				kind: TOOL_APPROVAL_REQUIRED_KIND,

@@ -10,6 +10,7 @@ import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
 import {withPreservedProcess} from '@/utils/preserve-process';
+import {installProxyGlobalDispatcher} from '@/utils/proxy-dispatcher';
 import {estimateTokens} from '@/utils/token-calculator';
 
 interface FetchArgs {
@@ -205,6 +206,10 @@ const windowContent = (content: string, args: FetchArgs): string => {
 
 const executeFetchUrl = async (args: FetchArgs): Promise<string> => {
 	try {
+		// Send the probes below, and get-md's own download, through
+		// HTTP(S)_PROXY / NO_PROXY when set.
+		await installProxyGlobalDispatcher();
+
 		// Walked and validated on every call, cache hit or not: a name that has
 		// since started resolving somewhere internal, or a redirect that now
 		// points there, must be refused on the tenth call as on the first.

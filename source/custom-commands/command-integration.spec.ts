@@ -40,18 +40,18 @@ function createTestCommand(overrides?: Partial<CustomCommand>): CustomCommand {
 const mockTm = createMockToolManager(['read_file', 'string_replace', 'bash']);
 
 // ============================================================================
-// enhanceSystemPrompt
+// buildSkillsSection
 // ============================================================================
 
-test('enhanceSystemPrompt returns base prompt when no relevant commands', t => {
+test('buildSkillsSection returns nothing when no relevant commands', t => {
 	const loader = createMockLoader({findRelevantCommands: () => []});
 	const integration = new CommandIntegration(loader, mockTm);
 
-	const result = integration.enhanceSystemPrompt('base', 'hello');
-	t.is(result, 'base');
+	const result = integration.buildSkillsSection('hello');
+	t.is(result, '');
 });
 
-test('enhanceSystemPrompt appends skills section when relevant commands found', t => {
+test('buildSkillsSection builds the section when relevant commands found', t => {
 	const cmd = createTestCommand({
 		name: 'api-docs',
 		content: 'Generate API documentation',
@@ -65,19 +65,15 @@ test('enhanceSystemPrompt appends skills section when relevant commands found', 
 	});
 	const integration = new CommandIntegration(loader, mockTm);
 
-	const result = integration.enhanceSystemPrompt(
-		'base prompt',
-		'generate api docs',
-	);
+	const result = integration.buildSkillsSection('generate api docs');
 
-	t.true(result.startsWith('base prompt'));
-	t.true(result.includes('## Available Skills'));
+	t.true(result.startsWith('## Available Skills'));
 	t.true(result.includes('Generate API documentation'));
 	// No command field restricts tools, so the prompt must not claim it.
 	t.false(result.includes('Tool restrictions'));
 });
 
-test('enhanceSystemPrompt includes examples when present', t => {
+test('buildSkillsSection includes examples when present', t => {
 	const cmd = createTestCommand({
 		content: 'Instructions here',
 		metadata: {
@@ -90,14 +86,14 @@ test('enhanceSystemPrompt includes examples when present', t => {
 	});
 	const integration = new CommandIntegration(loader, mockTm);
 
-	const result = integration.enhanceSystemPrompt('base', 'request');
+	const result = integration.buildSkillsSection('request');
 
 	t.true(result.includes('**Examples:**'));
 	t.true(result.includes('Example one'));
 	t.true(result.includes('Example two'));
 });
 
-test('enhanceSystemPrompt includes resources when present', t => {
+test('buildSkillsSection includes resources when present', t => {
 	const cmd = createTestCommand({
 		content: 'Instructions here',
 		metadata: {description: 'A skill'},
@@ -120,14 +116,14 @@ test('enhanceSystemPrompt includes resources when present', t => {
 	});
 	const integration = new CommandIntegration(loader, mockTm);
 
-	const result = integration.enhanceSystemPrompt('base', 'request');
+	const result = integration.buildSkillsSection('request');
 
 	t.true(result.includes('**Available Resources:**'));
 	t.true(result.includes('`template.yaml` (config): Use via skill resource'));
 	t.true(result.includes('`run.sh` (script): Execute via skill resource'));
 });
 
-test('enhanceSystemPrompt handles multiple relevant commands', t => {
+test('buildSkillsSection handles multiple relevant commands', t => {
 	const cmd1 = createTestCommand({
 		name: 'cmd1',
 		fullName: 'cmd1',
@@ -145,7 +141,7 @@ test('enhanceSystemPrompt handles multiple relevant commands', t => {
 	});
 	const integration = new CommandIntegration(loader, mockTm);
 
-	const result = integration.enhanceSystemPrompt('base', 'request');
+	const result = integration.buildSkillsSection('request');
 
 	t.true(result.includes('First command instructions'));
 	t.true(result.includes('Second command instructions'));
