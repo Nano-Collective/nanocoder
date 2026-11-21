@@ -123,6 +123,10 @@ Set it below whatever the endpoint actually permits - an oversized value is reje
 
 A `/tune` max-tokens value, where one is set, takes priority. Headless runs (`nanocoder run "..."`) never carry `/tune` parameters, so on those this provider setting is the only way to raise the ceiling.
 
+### Detected Context Window
+
+When neither a session override nor a configured value is set, Nanocoder asks the server which context window it is actually serving, once per provider and model per session, and uses that instead of the models.dev value: Ollama (`/api/show`, the `num_ctx` parameter, else the model's `context_length`), llama.cpp (`/props`) and vLLM (`/v1/models`, `max_model_len`). The server is recognised from the provider name or its default port; an unrecognised local or private-network host is tried against each in turn. If the server does not answer within a couple of seconds, Nanocoder falls back to the models.dev value. Set `contextWindow` or `contextWindows` to pin a value.
+
 ### Context Window Overrides
 
 `contextWindows` overrides `contextWindow` for exact model matches. Both are used only when no session override has been set with `/context-max` or `--context-max`.
