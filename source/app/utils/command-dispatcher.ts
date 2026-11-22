@@ -110,6 +110,7 @@ function createCommandContext(
 		onceThreshold,
 		addToChatQueue: options.onAddToChatQueue,
 		setLiveComponent: options.setLiveComponent,
+		setBtwPanel: options.setBtwPanel,
 		setLiveComponentCapturesInput: options.setLiveComponentCapturesInput,
 		setIsToolExecuting: options.setIsToolExecuting,
 		clearMessages: options.onClearMessages,
@@ -127,6 +128,7 @@ function createCommandContext(
 		resumeSession: options.onResumeSession,
 		switchModel: options.onSwitchModel,
 		switchMode: options.onSwitchMode,
+		onApiCallComplete: options.onApiCallComplete,
 		submitChatMessage: (message, displayValue) =>
 			options.onHandleChatMessage(message, displayValue),
 	};

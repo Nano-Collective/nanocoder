@@ -279,6 +279,19 @@ export default function App({
 		}
 	}, []);
 
+	const handleApiCallComplete = React.useCallback(
+		(record: import('@/types').ApiCallRecord) => {
+			appState.setApiCallHistory(prev => [...prev, record]);
+			// Lifetime /stats: tokens + estimated cost (never blocks UI).
+			void import('@/stats/record')
+				.then(({recordApiCallForStats}) => recordApiCallForStats(record))
+				.catch(() => {
+					/* ignore */
+				});
+		},
+		[appState.setApiCallHistory],
+	);
+
 	// Setup chat handler
 	const chatHandler = useChatHandler({
 		client: appState.client,
@@ -350,15 +363,7 @@ export default function App({
 		onSetLiveTaskList: appState.setLiveTaskList,
 		setLiveComponent: appState.setLiveComponent,
 		setLastApiUsage: appState.setLastApiUsage,
-		onApiCallComplete: record => {
-			appState.setApiCallHistory(prev => [...prev, record]);
-			// Lifetime /stats: tokens + estimated cost (never blocks UI).
-			void import('@/stats/record')
-				.then(({recordApiCallForStats}) => recordApiCallForStats(record))
-				.catch(() => {
-					/* ignore */
-				});
-		},
+		onApiCallComplete: handleApiCallComplete,
 		tune: appState.tune,
 		subagentsReady: appState.subagentsReady,
 		privacySessionMapRef: appState.privacySessionMapRef,
@@ -573,6 +578,7 @@ export default function App({
 		tune: appState.tune,
 		lastApiUsage: appState.lastApiUsage,
 		apiCallHistory: appState.apiCallHistory,
+		onApiCallComplete: handleApiCallComplete,
 		abortController: appState.abortController,
 		updateInfo: appState.updateInfo,
 		mcpServersStatus: appState.mcpServersStatus,
@@ -615,6 +621,7 @@ export default function App({
 		addToChatQueue: appState.addToChatQueue,
 		setChatComponents: appState.setChatComponents,
 		setLiveComponent: appState.setLiveComponent,
+		setBtwPanel: appState.setBtwPanel,
 		client: appState.client,
 		getMessageTokens: appState.getMessageTokens,
 		enterModelSelectionMode: modeHandlers.enterModelSelectionMode,
@@ -842,9 +849,8 @@ export default function App({
 		);
 	}
 
-	const liveComponent =
-		appState.liveComponent ??
-		(chatHandler.isGenerating &&
+	const streamingComponent =
+		chatHandler.isGenerating &&
 		(chatHandler.streamingContent || chatHandler.streamingReasoning) ? (
 			<>
 				{chatHandler.streamingReasoning && !chatHandler.streamingContent && (
@@ -867,7 +873,15 @@ export default function App({
 					/>
 				)}
 			</>
-		) : null);
+		) : null;
+	const liveComponent =
+		appState.liveComponent || appState.btwPanel || streamingComponent ? (
+			<>
+				{appState.btwPanel}
+				{appState.liveComponent}
+				{streamingComponent}
+			</>
+		) : null;
 
 	// Non-interactive render tree — minimal transcript + one status line,
 	// no interactive affordances.

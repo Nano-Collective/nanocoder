@@ -46,6 +46,7 @@ export interface MessageSubmissionOptions {
 	onSwitchMode?: (mode: DevelopmentMode) => void;
 	onAddToChatQueue: (component: React.ReactNode) => void;
 	setLiveComponent: (component: React.ReactNode) => void;
+	setBtwPanel?: (component: React.ReactNode) => void;
 	setLiveComponentCapturesInput: (value: boolean) => void;
 	setIsToolExecuting: (value: boolean) => void;
 	onCommandComplete?: () => void;
@@ -63,5 +64,7 @@ export interface MessageSubmissionOptions {
 	developmentMode?: DevelopmentMode;
 	lastApiUsage?: ApiUsageSnapshot | null;
 	apiCallHistory?: ApiCallRecord[];
+	/** Record an out-of-band API call (e.g. /btw) so /usage and stats stay honest. */
+	onApiCallComplete?: (record: ApiCallRecord) => void;
 	sessionId?: string;
 }

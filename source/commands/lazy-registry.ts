@@ -30,6 +30,12 @@ export const lazyCommands: LazyCommand[] = [
 		load: () => import('@/commands/exit').then(m => m.exitCommand),
 	},
 	{
+		name: 'btw',
+		description:
+			'Ask a quick side question without adding it to conversation history (/btw <question>)',
+		load: () => import('@/commands/btw').then(m => m.btwCommand),
+	},
+	{
 		name: 'clear',
 		description: 'Clear the chat history, model context, and tasks',
 		load: () => import('@/commands/clear').then(m => m.clearCommand),
