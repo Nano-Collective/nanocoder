@@ -2,7 +2,13 @@ import {mkdtempSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
-import {buildEditorCommand, editorArgs, getEditor, openInEditor} from './editor';
+import {
+	EditorExitError,
+	buildEditorCommand,
+	editorArgs,
+	getEditor,
+	openInEditor,
+} from './editor';
 
 test.serial('editor arguments and literal paths survive without shell expansion', t => {
 	const dir = mkdtempSync(join(tmpdir(), 'nanocoder-editor-'));
@@ -51,6 +57,30 @@ test.serial('missing editors report the spawn error and restore raw mode', t => 
 	}
 });
 
+test.serial('non-zero editor exit throws EditorExitError, not a launch error', t => {
+	const saved = {...process.env};
+	try {
+		process.env.EDITOR = `"${process.execPath}" -e "process.exit(1)"`;
+		delete process.env.VISUAL;
+		const error = t.throws(() => openInEditor('/tmp/config.json'), {
+			instanceOf: EditorExitError,
+		});
+		t.regex(error.message, /^Editor exited with status 1/);
+	} finally {
+		process.env = saved;
+	}
+});
+
+test.serial('launch failures are not EditorExitError', t => {
+	const saved = {...process.env};
+	try {
+		process.env.VISUAL = 'nanocoder-editor-that-does-not-exist';
+		const error = t.throws(() => openInEditor('/tmp/config.json'));
+		t.false(error instanceof EditorExitError);
+	} finally {
+		process.env = saved;
+	}
+});
 
 test('editor command quoting preserves arguments and Windows paths', t => {
  t.deepEqual(editorArgs('code --wait'), ['code', '--wait']);

@@ -1,6 +1,14 @@
 import {spawnSync} from 'node:child_process';
 import {resolveBinaryOnPath} from '@/tools/git/utils';
 
+/** The editor ran but exited abnormally (as opposed to failing to launch). */
+export class EditorExitError extends Error {
+	constructor(message: string) {
+		super(message);
+		this.name = 'EditorExitError';
+	}
+}
+
 export function getEditor(): string {
 	return (
 		process.env.VISUAL ||
@@ -98,7 +106,7 @@ export function openInEditor(filePath: string): void {
 		});
 		if (result.error) throw result.error;
 		if (result.status !== 0) {
-			throw new Error(
+			throw new EditorExitError(
 				`Editor exited with ${result.signal ?? `status ${result.status}`}; changes may not be saved`,
 			);
 		}

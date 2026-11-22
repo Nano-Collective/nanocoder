@@ -8,7 +8,11 @@ import {getConfigPath} from '@/config/paths';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import type {Command} from '@/types/commands';
-import {getEditor, openInEditor as launchEditor} from '@/utils/editor';
+import {
+	EditorExitError,
+	getEditor,
+	openInEditor as launchEditor,
+} from '@/utils/editor';
 import {formatError} from '@/utils/error-formatter';
 
 interface ConfigOption {
@@ -201,7 +205,10 @@ export const setupConfigCommand: Command = {
 		} catch (error) {
 			return React.createElement(SetupConfigResult, {
 				options,
-				error: `Failed to open editor: ${formatError(error)}`,
+				error:
+					error instanceof EditorExitError
+						? error.message
+						: `Failed to open editor: ${formatError(error)}`,
 			});
 		}
 	},

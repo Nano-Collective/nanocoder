@@ -14,7 +14,7 @@ import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {getColors} from '@/config/index';
 import {getConfigPath} from '@/config/paths';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
-import {openInEditor as launchEditor} from '@/utils/editor';
+import {EditorExitError, openInEditor as launchEditor} from '@/utils/editor';
 import {formatError} from '@/utils/error-formatter';
 import {notifyError, notifyInfo} from '@/utils/message-queue-core';
 import {stripUtf8Bom} from '@/utils/strip-utf8-bom';
@@ -228,9 +228,11 @@ export function BaseConfigWizard<T>({
 			setError(null);
 		} catch (err) {
 			setError(
-				err instanceof Error
-					? `Failed to open editor: ${err.message}`
-					: 'Failed to open editor',
+				err instanceof EditorExitError
+					? err.message
+					: err instanceof Error
+						? `Failed to open editor: ${err.message}`
+						: 'Failed to open editor',
 			);
 			setStep('summary');
 		}
