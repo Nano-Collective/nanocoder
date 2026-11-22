@@ -629,8 +629,10 @@ for (const command of [
 	"echo 'rm -rf ~' >> notes.txt",
 	'grep -rn "rm -rf /" scripts/',
 	"git commit -m 'never rm -rf $HOME'",
-	// Single quotes do not expand, so this prints the text.
-	"echo '$(rm -rf /)'",
+	'git commit -m "never run rm -rf / on CI"',
+	'git add -A && git commit -m "drop the rm -rf / example"',
+	"cd docs && grep -rn 'rm -rf ~' . | grep -v draft",
+	'grep "rm -rf /" build.log 2>&1',
 ]) {
 	test(`execute_bash validator allows quoted rm ${JSON.stringify(command)}`, async t => {
 		const result = await executeBashTool.validator!({command});
@@ -652,6 +654,46 @@ for (const command of [
 	'echo "$(rm -rf /)"',
 	'echo "`rm -rf /`"',
 	'git commit -m "wip" && rm -rf ~',
+	// Quoted text is masked only when every command on the line treats it as
+	// text, and nothing on the line runs or escapes it.
+	// Piped or fed to a shell.
+	'echo "rm -rf /" | sh',
+	'printf "rm -rf /" | bash',
+	'$(echo "rm -rf /")',
+	'sh<<<"rm -rf /"',
+	'bash <<< "rm -rf ~"',
+	'source <(echo "rm -rf /")',
+	'x="rm -rf /"; $x',
+	'echo "rm -rf /" > x.sh && sh x.sh',
+	// Shell flags and runners.
+	'bash --norc -c "rm -rf /"',
+	'bash --login -c "rm -rf /"',
+	'sh -o posix -c "rm -rf /"',
+	'bash +e -c "rm -rf /"',
+	'su -c "rm -rf /"',
+	'script -qc "rm -rf /"',
+	'watch "rm -rf /"',
+	'tmux new "rm -rf /"',
+	'parallel ::: "rm -rf /"',
+	'env -S "rm -rf /"',
+	"git -c alias.x='!rm -rf /' x",
+	'rg --pre "rm -rf /" pattern',
+	// A quoted `rm` after a prefix word or keyword.
+	'command "rm" -rf /',
+	'env "rm" -rf /',
+	'exec "rm" -rf /',
+	'nohup "rm" -rf /',
+	'nice "rm" -rf /',
+	'time "rm" -rf /',
+	'sudo -u root "rm" -rf /',
+	'FOO=1 "rm" -rf /',
+	'! "rm" -rf /',
+	'{ "rm" -rf /; }',
+	'if true; then "rm" -rf /; fi',
+	'for i in 1; do "rm" -rf /; done',
+	// Escapes the quote matcher does not follow.
+	'echo \\"x\\"; rm -rf /; echo \\"y\\"',
+	"echo $'a\\'b'; rm -rf /; echo 'c'",
 ]) {
 	test(`execute_bash validator still blocks quoted rm ${JSON.stringify(command)}`, async t => {
 		const result = await executeBashTool.validator!({command});

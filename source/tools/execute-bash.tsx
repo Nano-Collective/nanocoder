@@ -434,20 +434,45 @@ const QUOTED_SPAN = /"(?:[^"\\]|\\.)*"|'[^']*'/g;
 const ENDS_IN_COMMAND_POSITION = /(?:^|[;&|(`\n>]|\bsudo)\s*$/;
 
 /**
+ * Commands whose quoted arguments are only text: printed, searched for, stored
+ * as a message, or a path. Matched against the start of each command on the
+ * line, after its quoted spans are replaced by placeholders, so a quoted
+ * command name (`"rm"`) never matches. `rg --pre` runs a program on each file,
+ * so `rg` counts only without it.
+ */
+const PASSES_QUOTED_TEXT_ONLY =
+	/^(?:echo|printf|grep|egrep|fgrep|cd|git\s+(?:add|commit)|rg(?!.*\s--pre\b))(?:\s|$)/;
+
+/**
+ * Syntax that runs or feeds text to a command (`$(`, backticks, `<<<`, `<(`,
+ * `>(`), and backslashes, whose escapes (`\"`, `$'...\'...'`) `QUOTED_SPAN`
+ * does not follow.
+ */
+const RUNS_OR_ESCAPES = /\$\(|`|<<<|[<>]\(|\\/;
+
+/**
  * The command with the text of its quoted arguments replaced by spaces of the
- * same length, so offsets still line up with `command`. Same exceptions as
- * `withoutQuotedArguments` (a span in command position or after a redirect,
- * or a command that hands quoted text to another shell), plus a double-quoted
- * span with a command substitution: its `$(...)` or backticks run.
+ * same length, so offsets still line up with `command`. Only when every
+ * command on the line is one that treats quoted text as text (see
+ * `PASSES_QUOTED_TEXT_ONLY`) and the line has nothing that runs or escapes it
+ * (see `RUNS_OR_ESCAPES`). Anything else - a pipe into a shell, a runner such
+ * as `bash -c` or `su -c`, a prefix such as `env` or `sudo`, an assignment, a
+ * keyword - returns the command unchanged, so it is checked as before.
  */
 function maskQuotedText(command: string): string {
-	if (RUNS_QUOTED_TEXT.test(command)) return command;
-	return command.replace(QUOTED_SPAN, (span, offset: number) =>
-		ENDS_IN_COMMAND_POSITION.test(command.slice(0, offset)) ||
-		(span.startsWith('"') && /\$\(|`/.test(span))
-			? span
-			: ' '.repeat(span.length),
+	if (RUNS_OR_ESCAPES.test(command)) return command;
+	const placeholders = command.replace(QUOTED_SPAN, span =>
+		'Q'.repeat(span.length),
 	);
+	const passesTextOnly = placeholders
+		// `&` followed by a digit or `-` is a redirect (`2>&1`, `>&-`), not a
+		// separator.
+		.split(/[;|\n()]|&(?![\d-])/)
+		.map(segment => segment.trim())
+		.filter(Boolean)
+		.every(segment => PASSES_QUOTED_TEXT_ONLY.test(segment));
+	if (!passesTextOnly) return command;
+	return command.replace(QUOTED_SPAN, span => ' '.repeat(span.length));
 }
 
 /**
@@ -499,8 +524,8 @@ const executeBashValidator = (args: {
 	// flags are spelled, so it is parsed rather than pattern-matched. Backslash
 	// line continuations are joined first: `rm -rf \` with `/` on the next line
 	// is one command, so the target has to stay attached to its flags. An `rm`
-	// that only appears inside a quoted argument (`git commit -m "..."`,
-	// `echo '...'`) is text, not a command, and is not looked at.
+	// that only appears inside a quoted argument of a command that treats it as
+	// text (`git commit -m "..."`, `echo '...'`) is not looked at.
 	const parseable = command.replace(/\\\r?\n/g, ' ');
 	const unquoted = withoutQuotedArguments(command);
 	const isDestructive =
