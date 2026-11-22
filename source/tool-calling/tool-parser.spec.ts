@@ -741,6 +741,64 @@ test('parseToolCalls: detects malformed JSON with string arguments', t => {
 	}
 });
 
+test('parseToolCalls: reports stringified JSON arguments instead of dropping them', t => {
+	// Escaped quotes inside the string. The malformed-pattern regex stops
+	// at the first one, so this used to come back as prose.
+	const payload = JSON.stringify({
+		name: 'write_file',
+		arguments: JSON.stringify({path: 'notes.txt', content: 'x'}),
+	});
+	t.is(
+		payload,
+		'{"name":"write_file","arguments":"{\\"path\\":\\"notes.txt\\",\\"content\\":\\"x\\"}"}',
+	);
+
+	for (const content of [
+		payload,
+		`  ${payload}`,
+		`Note:\n${payload}`,
+		`\`\`\`json\n${payload}\n\`\`\``,
+	]) {
+		const result = parseToolCalls(content);
+		t.false(result.success, content);
+		if (!result.success) {
+			t.is(
+				result.error,
+				'Invalid tool call: "arguments" must be an object, not a string',
+			);
+			t.regex(result.examples, /native tool calling/i);
+		}
+	}
+});
+
+test('parseToolCalls: leaves a mid-sentence stringified arguments object as prose', t => {
+	const payload = JSON.stringify({
+		name: 'write_file',
+		arguments: JSON.stringify({path: 'notes.txt', content: 'x'}),
+	});
+	const content = `The log showed ${payload} and then continued.`;
+
+	const result = parseToolCalls(content);
+
+	t.true(result.success);
+	if (result.success) {
+		t.deepEqual(result.toolCalls, []);
+		t.is(result.cleanedContent, content);
+	}
+});
+
+test('parseToolCalls: reports a string argument that contains a raw newline', t => {
+	const content = '{"name": "read_file", "arguments": "hello\nworld"}';
+
+	const result = parseToolCalls(content);
+
+	t.false(result.success);
+	if (!result.success) {
+		t.regex(result.error, /"arguments" must be an object/i);
+		t.regex(result.examples, /native tool calling/i);
+	}
+});
+
 test('parseToolCalls: detects malformed JSON with missing arguments field', t => {
 	const content = `{"name": "read_file"}`;
 
