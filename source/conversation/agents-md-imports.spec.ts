@@ -75,6 +75,37 @@ test('leaves @paths inside fenced code blocks untouched', t => {
 	}
 });
 
+test('a longer fence is not closed by a shorter one inside it', t => {
+	const root = makeProject();
+	try {
+		write(root, 'docs/testing.md', 'Expanded.');
+		// Valid Markdown: a ```` block may contain ``` blocks.
+		const content = [
+			'````markdown',
+			'```md',
+			'@docs/testing.md',
+			'```',
+			'````',
+		].join('\n');
+		const result = expand(root, content);
+		t.is(result.warnings.length, 0);
+		t.is(result.content, content);
+	} finally {
+		rmSync(root, {recursive: true, force: true});
+	}
+});
+
+test('a bare @word on its own line is prose, not a missing import', t => {
+	const root = makeProject();
+	try {
+		const result = expand(root, '@TODO pick a name\n@decorator');
+		t.deepEqual(result.warnings, []);
+		t.is(result.content, '@TODO pick a name\n@decorator');
+	} finally {
+		rmSync(root, {recursive: true, force: true});
+	}
+});
+
 test('leaves inline mentions in prose untouched', t => {
 	const root = makeProject();
 	try {
@@ -95,6 +126,20 @@ test('reports a missing import and leaves the reference in place', t => {
 			'AGENTS.md: @docs/missing.md was not imported (file not found)',
 		]);
 		t.is(result.content, '@docs/missing.md');
+	} finally {
+		rmSync(root, {recursive: true, force: true});
+	}
+});
+
+test('names the importing file when a nested import fails', t => {
+	const root = makeProject();
+	try {
+		// The reference lives in docs/testing.md, so that is the file to open.
+		write(root, 'docs/testing.md', '@missing.md');
+		const result = expand(root, '@docs/testing.md');
+		t.deepEqual(result.warnings, [
+			'docs/testing.md: @missing.md was not imported (file not found)',
+		]);
 	} finally {
 		rmSync(root, {recursive: true, force: true});
 	}

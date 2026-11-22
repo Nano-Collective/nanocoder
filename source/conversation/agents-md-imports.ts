@@ -1,6 +1,6 @@
 import {readFileSync, realpathSync, statSync} from 'node:fs';
 import {homedir} from 'node:os';
-import {dirname, isAbsolute, join, resolve} from 'node:path';
+import {dirname, isAbsolute, join, relative, resolve, sep} from 'node:path';
 import {getConfigPath} from '@/config/platform-dirs';
 import {MAX_TOOL_RESULT_CHARS} from '@/constants';
 import {truncateToolResult} from '@/tools/runtime/truncate-tool-result';
@@ -39,8 +39,11 @@ const MAX_IMPORTED_CHARS = 100_000;
 /** A whole line that is nothing but a reference, optionally indented. */
 const IMPORT_LINE = /^\s*@(\S+)\s*$/;
 
-/** Fence opener/closer: ``` or ~~~ (three or more, either character). */
+/** Fence opener: ``` or ~~~ (three or more, either character). */
 const FENCE = /^\s*(`{3,}|~{3,})/;
+
+/** Fence closer: only fence characters, optionally indented. */
+const FENCE_CLOSE = /^\s*(`{3,}|~{3,})\s*$/;
 
 export interface AgentsMdImportOptions {
 	/** Absolute path of the AGENTS.md being expanded. */
@@ -70,6 +73,8 @@ interface AllowedRoot {
 
 interface ExpandState {
 	roots: AllowedRoot[];
+	/** Used to name the offending file in a warning. */
+	projectRoot: string;
 	home: string;
 	maxDepth: number;
 	maxChars: number;
@@ -94,6 +99,7 @@ export function expandAgentsMdImports(
 			options.projectRoot,
 			options.configDir ?? getConfigPath(),
 		]),
+		projectRoot: resolve(options.projectRoot),
 		home: options.homeDir ?? homedir(),
 		maxDepth: options.maxDepth ?? MAX_IMPORT_DEPTH,
 		maxChars: options.maxChars ?? MAX_IMPORTED_CHARS,
@@ -106,7 +112,13 @@ export function expandAgentsMdImports(
 	if (root) state.seen.add(root);
 
 	return {
-		content: expandContent(content, dirname(options.filePath), 0, state),
+		content: expandContent(
+			content,
+			dirname(options.filePath),
+			0,
+			state,
+			labelFor(options.filePath, state),
+		),
 		warnings: state.warnings,
 	};
 }
@@ -117,19 +129,29 @@ function expandContent(
 	baseDir: string,
 	depth: number,
 	state: ExpandState,
+	sourceLabel: string,
 ): string {
 	const lines = content.split(/\r?\n/);
 	const output: string[] = [];
-	let fence: string | null = null;
+	// A closer must use the same character and be at least as long as the
+	// opener, so a ``` line inside a ```` block does not end the block early.
+	let fence: {character: string; length: number} | null = null;
 
 	for (const line of lines) {
 		const fenceMatch = line.match(FENCE);
 		if (fenceMatch) {
-			const character = (fenceMatch[1] ?? '`')[0] ?? '`';
+			const run = fenceMatch[1] ?? '`';
+			const character = run[0] ?? '`';
 			if (fence === null) {
-				fence = character;
-			} else if (fence === character) {
-				fence = null;
+				fence = {character, length: run.length};
+			} else {
+				const closeRun = line.match(FENCE_CLOSE)?.[1] ?? '';
+				if (
+					closeRun.length >= fence.length &&
+					(closeRun[0] ?? '') === fence.character
+				) {
+					fence = null;
+				}
 			}
 			output.push(line);
 			continue;
@@ -141,14 +163,15 @@ function expandContent(
 		}
 
 		const importMatch = line.match(IMPORT_LINE);
-		if (!importMatch) {
+		const spec = importMatch?.[1] ?? '';
+		// `@TODO` or `@decorator` on a line of its own is not a file reference;
+		// warning about a file that was never meant is worse than silence.
+		if (!importMatch || !looksLikePath(spec)) {
 			output.push(line);
 			continue;
 		}
 
-		output.push(
-			expandImport(importMatch[1] ?? '', baseDir, depth, line, state),
-		);
+		output.push(expandImport(spec, baseDir, depth, line, state, sourceLabel));
 	}
 
 	return output.join('\n');
@@ -161,58 +184,112 @@ function expandImport(
 	depth: number,
 	line: string,
 	state: ExpandState,
+	sourceLabel: string,
 ): string {
 	const target = resolveSpecifier(spec, baseDir, state.home);
-	if (!target.ok) return report(spec, target.reason, line, state);
+	if (!target.ok) return report(spec, target.reason, line, state, sourceLabel);
 
 	if (!isContained(target.path, state.roots)) {
-		return report(spec, 'outside the project root', line, state);
+		return report(spec, 'outside the project root', line, state, sourceLabel);
 	}
 
 	let isFile = false;
 	try {
 		isFile = statSync(target.path).isFile();
 	} catch {
-		return report(spec, 'file not found', line, state);
+		return report(spec, 'file not found', line, state, sourceLabel);
 	}
-	if (!isFile) return report(spec, 'not a file', line, state);
+	if (!isFile) return report(spec, 'not a file', line, state, sourceLabel);
 
 	const key = safeRealPath(target.path) ?? resolve(target.path);
 	if (state.seen.has(key)) {
-		return report(spec, 'already included (circular import)', line, state);
+		return report(
+			spec,
+			'already included (circular import)',
+			line,
+			state,
+			sourceLabel,
+		);
 	}
 	if (depth + 1 > state.maxDepth) {
-		return report(spec, 'nested too deeply', line, state);
+		return report(spec, 'nested too deeply', line, state, sourceLabel);
 	}
 
 	let raw: string;
 	try {
 		raw = readFileSync(target.path, 'utf-8');
 	} catch {
-		return report(spec, 'could not be read', line, state);
+		return report(spec, 'could not be read', line, state, sourceLabel);
 	}
 
 	// Same cap as tool output: one oversized file cannot push the rest of the
 	// instruction set out of the context window.
 	const capped = truncateToolResult(raw, MAX_TOOL_RESULT_CHARS);
 	if (state.importedChars + capped.length > state.maxChars) {
-		return report(spec, 'over the import size budget', line, state);
+		return report(
+			spec,
+			'over the import size budget',
+			line,
+			state,
+			sourceLabel,
+		);
 	}
 
 	state.seen.add(key);
 	state.importedChars += capped.length;
 
-	return expandContent(capped, dirname(target.path), depth + 1, state);
+	return expandContent(
+		capped,
+		dirname(target.path),
+		depth + 1,
+		state,
+		labelFor(target.path, state),
+	);
 }
 
+/**
+ * A warning names the file the reference is written in, so a failure in
+ * `.nanocoder/rules/style.md` does not send the reader to AGENTS.md.
+ */
 function report(
 	spec: string,
 	reason: string,
 	line: string,
 	state: ExpandState,
+	sourceLabel: string,
 ): string {
-	state.warnings.push(`AGENTS.md: @${spec} was not imported (${reason})`);
+	state.warnings.push(`${sourceLabel}: @${spec} was not imported (${reason})`);
 	return line;
+}
+
+/** How a file is named in a warning: project-relative, then `~`-relative. */
+function labelFor(filePath: string, state: ExpandState): string {
+	const absolute = resolve(filePath);
+	const fromRoot = relative(state.projectRoot, absolute);
+	if (fromRoot && !fromRoot.startsWith('..') && !isAbsolute(fromRoot)) {
+		return toPosix(fromRoot);
+	}
+	const fromHome = relative(resolve(state.home), absolute);
+	if (fromHome && !fromHome.startsWith('..') && !isAbsolute(fromHome)) {
+		return toPosix(`~/${fromHome}`);
+	}
+	return toPosix(absolute);
+}
+
+function toPosix(path: string): string {
+	return sep === '/' ? path : path.split(sep).join('/');
+}
+
+/**
+ * Only something that reads as a path is treated as an import: `@docs/x.md`,
+ * `@style.md`, `@~/rules.md`. A bare `@word` stays as prose.
+ */
+function looksLikePath(spec: string): boolean {
+	return (
+		spec.startsWith('~/') ||
+		spec.includes('/') ||
+		/\.[A-Za-z0-9]{1,8}$/.test(spec)
+	);
 }
 
 type Resolution = {ok: true; path: string} | {ok: false; reason: string};
