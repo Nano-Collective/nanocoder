@@ -10,6 +10,7 @@ import {
 import {isNewlineKey} from '@/terminal/newline-key';
 import {pasteEvents} from '@/terminal/terminal-paste';
 import {
+	clampVisibleLines,
 	getVisualLineSegments,
 	moveCursorToVisualLine,
 	wrapWithTrimmedContinuations,
@@ -113,6 +114,11 @@ export type Props = {
 	readonly wrapWidth?: number;
 	readonly handleEnter?: boolean;
 	readonly onEdgeArrow?: (direction: 'up' | 'down') => void;
+	/**
+	 * Caps rendered visual lines, scrolling to keep the cursor's line in
+	 * view, instead of letting the box grow past the terminal.
+	 */
+	readonly maxVisibleLines?: number;
 	/** Replaces the default paste handling (insert at the caret). */
 	readonly onPaste?: (payload: string) => void;
 };
@@ -148,6 +154,7 @@ const TextInput = forwardRef<TextInputHandle, Props>(function TextInput(
 		wrapWidth,
 		handleEnter = true,
 		onEdgeArrow,
+		maxVisibleLines,
 		onPaste,
 	}: Props,
 	ref,
@@ -677,7 +684,17 @@ const TextInput = forwardRef<TextInputHandle, Props>(function TextInput(
 			? wrapWithTrimmedContinuations(finalValue, wrapWidth)
 			: finalValue;
 
-	return <Text>{displayValue}</Text>;
+	const visibleValue = maxVisibleLines
+		? clampVisibleLines(
+				(displayValue ?? '').split('\n'),
+				originalValue,
+				cursorOffset,
+				wrapWidth,
+				maxVisibleLines,
+			).join('\n')
+		: displayValue;
+
+	return <Text>{visibleValue}</Text>;
 });
 
 export default TextInput;

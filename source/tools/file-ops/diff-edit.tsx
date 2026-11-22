@@ -1,5 +1,5 @@
 import {constants} from 'node:fs';
-import {access, lstat, writeFile} from 'node:fs/promises';
+import {access, lstat} from 'node:fs/promises';
 import {resolve} from 'node:path';
 import {Box, Text} from 'ink';
 import React from 'react';
@@ -29,6 +29,7 @@ import {createFileToolApproval} from '@/tools/runtime/tool-approval';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
+import {atomicWriteUserFile} from '@/utils/fs/atomic-write';
 import {getCachedFileContent, invalidateCache} from '@/utils/fs/file-cache';
 import {
 	closeDiffInVSCode,
@@ -145,7 +146,7 @@ function validateBlocks(
 	fileContent: string,
 	blocks: DiffEditBlock[],
 	path: string,
-): void {
+): string {
 	const seenSearchBlocks = new Set<string>();
 
 	blocks.forEach((block, index) => {
@@ -175,6 +176,10 @@ function validateBlocks(
 			);
 		}
 	});
+
+	// A unique original match may disappear or become ambiguous after an edit.
+	// Dry-run execution too, before approval or any file writes.
+	return applyBlocks(fileContent, blocks);
 }
 
 function applyBlocks(fileContent: string, blocks: DiffEditBlock[]): string {
@@ -289,8 +294,7 @@ const executeDiffEdit = async (args: DiffEditArgs): Promise<string> => {
 	}
 	const fileContent = cached.content;
 
-	validateBlocks(fileContent, blocks, path);
-	const newContent = applyBlocks(fileContent, blocks);
+	const newContent = validateBlocks(fileContent, blocks, path);
 
 	const firewallResult = evaluateMutationEnvelope(
 		path,
@@ -299,7 +303,7 @@ const executeDiffEdit = async (args: DiffEditArgs): Promise<string> => {
 	);
 	const firewallWarning = enforceFirewall(firewallResult);
 
-	await writeFile(absPath, newContent, 'utf-8');
+	await atomicWriteUserFile(absPath, newContent);
 	invalidateCache(absPath);
 	markFileSeen(absPath);
 	forgetReadContent(absPath);
@@ -450,8 +454,7 @@ const diffEditFormatter = async (
 			const blocks = parseDiffEditBlocks(args.diff);
 			const cached = await getCachedFileContent(absPath);
 			const fileContent = cached.content;
-			validateBlocks(fileContent, blocks, args.path);
-			const newContent = applyBlocks(fileContent, blocks);
+			const newContent = validateBlocks(fileContent, blocks, args.path);
 			const changeId = sendFileChangeToVSCode(
 				absPath,
 				fileContent,

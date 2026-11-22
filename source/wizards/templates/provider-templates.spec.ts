@@ -461,6 +461,148 @@ test('atlas-cloud template: uses default provider name when empty', t => {
 	t.is(config.name, 'Atlas Cloud');
 });
 
+test('gmi-cloud template: builds an OpenAI-compatible provider config', t => {
+	const template = PROVIDER_TEMPLATES.find(t => t.id === 'gmi-cloud');
+	t.is(template?.name, 'GMI Cloud');
+
+	t.deepEqual(
+		template!.buildConfig({
+			providerName: '',
+			apiKey: 'test-key',
+			model: 'vendor/chat-model, another-vendor/another-model',
+		}),
+		{
+			name: 'GMI Cloud',
+			baseUrl: 'https://api.gmi-serving.com/v1',
+			apiKey: 'test-key',
+			models: ['vendor/chat-model', 'another-vendor/another-model'],
+		},
+	);
+});
+
+test('gmi-cloud template: requires a masked API key and has no model default', t => {
+	const template = PROVIDER_TEMPLATES.find(t => t.id === 'gmi-cloud');
+	const keyField = template?.fields.find(field => field.name === 'apiKey');
+	const modelField = template?.fields.find(field => field.name === 'model');
+
+	t.true(keyField?.required);
+	t.true(keyField?.sensitive);
+	t.is(keyField?.default, undefined);
+	t.true(modelField?.required);
+	t.is(modelField?.default, '');
+});
+
+test('popnow template: sets baseUrl and parses models', t => {
+	const template = PROVIDER_TEMPLATES.find(t => t.id === 'popnow');
+	t.truthy(template);
+
+	const config = template!.buildConfig({
+		providerName: 'PopNow',
+		apiKey: 'test-key',
+		model: 'deepseek/v4-flash/chat, moonshot/kimi-k3/chat',
+	});
+
+	t.is(config.name, 'PopNow');
+	t.is(config.baseUrl, 'https://api.popnow.ai/v1');
+	t.is(config.apiKey, 'test-key');
+	t.deepEqual(config.models, [
+		'deepseek/v4-flash/chat',
+		'moonshot/kimi-k3/chat',
+	]);
+});
+
+test('popnow template: uses default provider name and model default', t => {
+	const template = PROVIDER_TEMPLATES.find(t => t.id === 'popnow');
+	t.truthy(template);
+
+	const modelField = template!.fields.find(f => f.name === 'model');
+	t.is(modelField?.default, 'deepseek/v4-flash/chat');
+
+	const config = template!.buildConfig({
+		providerName: '',
+		apiKey: 'test-key',
+		model: 'deepseek/v4-flash/chat',
+	});
+
+	t.is(config.name, 'PopNow');
+});
+
+test('runcrate template: sets baseUrl, default model, and parses models', t => {
+	const template = PROVIDER_TEMPLATES.find(t => t.id === 'runcrate');
+	t.truthy(template);
+
+	const config = template!.buildConfig({
+		providerName: 'Runcrate',
+		apiKey: 'test-key',
+		model: 'deepseek-ai/DeepSeek-V4.1-Flash, zai-org/GLM-5.3',
+	});
+
+	t.is(config.name, 'Runcrate');
+	t.is(config.baseUrl, 'https://api.runcrate.ai/v1');
+	t.is(config.apiKey, 'test-key');
+	t.is(config.sdkProvider, undefined);
+	t.deepEqual(config.models, [
+		'deepseek-ai/DeepSeek-V4.1-Flash',
+		'zai-org/GLM-5.3',
+	]);
+});
+
+test('runcrate template: uses default provider name and model default', t => {
+	const template = PROVIDER_TEMPLATES.find(t => t.id === 'runcrate');
+	t.truthy(template);
+
+	const modelField = template!.fields.find(f => f.name === 'model');
+	t.is(modelField?.default, 'deepseek-ai/DeepSeek-V4.1-Flash');
+
+	const config = template!.buildConfig({
+		providerName: '',
+		apiKey: 'test-key',
+		model: 'deepseek-ai/DeepSeek-V4.1-Flash',
+	});
+
+	t.is(config.name, 'Runcrate');
+});
+
+// ============================================================================
+// Tests for template ID vs sdkProvider collision prevention
+// Providers that use sdkProvider: 'anthropic' (like MiniMax, Kimi) must not
+// be confused with the Anthropic Claude template during edit lookups.
+// ============================================================================
+
+test('cloudgpu template: uses fixed endpoint and parses model IDs', t => {
+	const template = PROVIDER_TEMPLATES.find(t => t.id === 'cloudgpu');
+	t.truthy(template);
+
+	const config = template!.buildConfig({
+		providerName: 'CloudGPU',
+		apiKey: 'test-key',
+		model: 'kimi-k3, glm-5.2',
+	});
+
+	t.is(config.baseUrl, 'https://cloudgpu.app/v1');
+	t.is(config.apiKey, 'test-key');
+	t.is(config.sdkProvider, undefined);
+	t.deepEqual(config.models, ['kimi-k3', 'glm-5.2']);
+});
+
+test('cloudgpu template: uses default provider name and model', t => {
+	const template = PROVIDER_TEMPLATES.find(t => t.id === 'cloudgpu');
+	t.truthy(template);
+
+	const modelField = template!.fields.find(f => f.name === 'model');
+	t.is(modelField?.default, 'kimi-k3');
+	const apiKeyField = template!.fields.find(f => f.name === 'apiKey');
+	t.is(apiKeyField?.prompt, 'API Key (from cloudgpu.app/api/console)');
+	t.is(
+		template!.buildConfig({
+			providerName: '',
+			apiKey: 'test-key',
+			model: 'kimi-k3',
+		}).name,
+		'CloudGPU',
+	);
+});
+
 test('together template: sets baseUrl and parses models', t => {
 	const template = PROVIDER_TEMPLATES.find(t => t.id === 'together');
 	t.truthy(template);

@@ -1,5 +1,5 @@
 import {constants} from 'node:fs';
-import {access, lstat, writeFile} from 'node:fs/promises';
+import {access, lstat} from 'node:fs/promises';
 import {resolve} from 'node:path';
 import React from 'react';
 import {getColors} from '@/config/index';
@@ -28,6 +28,7 @@ import {createFileToolApproval} from '@/tools/runtime/tool-approval';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
+import {atomicWriteUserFile} from '@/utils/fs/atomic-write';
 import {getCachedFileContent, invalidateCache} from '@/utils/fs/file-cache';
 import {
 	closeDiffInVSCode,
@@ -45,6 +46,13 @@ interface StringReplaceArgs {
 }
 
 const STRING_REPLACE_CONTEXT_LINES = 20;
+
+// The schema marks new_str as required, but a model can still send a call
+// without it. Without this check, `undefined` reaches the replacement and the
+// literal text "undefined" is written into the file. An empty string is valid:
+// it deletes old_str.
+const NEW_STR_REQUIRED_ERROR =
+	'new_str is required and must be a string. Use an empty string ("") to delete text.';
 
 function formatUpdatedFileContext(
 	content: string,
@@ -87,6 +95,12 @@ const executeStringReplace = async (
 		throw new Error(
 			'old_str cannot be empty. Provide the exact content to find and replace.',
 		);
+	}
+
+	// Checked again here (not only in the validator) so the file is never
+	// written when execute is reached without validation.
+	if (typeof args.new_str !== 'string') {
+		throw new Error(NEW_STR_REQUIRED_ERROR);
 	}
 
 	const formatResult = validateEditableFormat(path);
@@ -132,7 +146,7 @@ const executeStringReplace = async (
 	);
 	const firewallWarning = enforceFirewall(firewallResult);
 
-	await writeFile(absPath, newContent, 'utf-8');
+	await atomicWriteUserFile(absPath, newContent);
 	invalidateCache(absPath);
 	// The model now knows the file's current contents, so a follow-up edit is
 	// not blind.
@@ -297,6 +311,10 @@ const stringReplaceValidator = async (
 			error:
 				'old_str cannot be empty. Provide the exact content to find and replace.',
 		};
+	}
+
+	if (typeof args.new_str !== 'string') {
+		return {valid: false, error: NEW_STR_REQUIRED_ERROR};
 	}
 
 	// Read-before-edit: refuse to edit a file the model has not actually seen

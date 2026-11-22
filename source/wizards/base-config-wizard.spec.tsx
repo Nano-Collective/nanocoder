@@ -372,4 +372,72 @@ test.serial(
 	},
 );
 
+test.serial(
+	'loads a pre-existing config that starts with a UTF-8 BOM',
+	async t => {
+		const testDir = join(
+			tmpdir(),
+			`nanocoder-wizard-test-bom-${Date.now()}`,
+		);
+		mkdirSync(testDir, {recursive: true});
+		t.teardown(() => rmSync(testDir, {recursive: true, force: true}));
+
+		const configFileName = 'agents.config.json';
+		const configPath = join(testDir, configFileName);
+		writeFileSync(
+			configPath,
+			`\uFEFF${JSON.stringify({
+				providers: [{name: 'openai'}, {name: 'anthropic'}],
+			})}`,
+			'utf-8',
+		);
+
+		const receivedOnFirstRender: string[][] = [];
+
+		function ConfigureCapture({items}: {items: FakeItems}) {
+			const [captured] = React.useState(items.entries);
+			receivedOnFirstRender.push(captured);
+			return (
+				<Box flexDirection="column">
+					<Text>configure step</Text>
+					<Text>entries: {captured.join(',')}</Text>
+				</Box>
+			);
+		}
+
+		const {lastFrame, stdin} = renderWithTheme(
+			<BaseConfigWizard<FakeItems>
+				title="Title"
+				focusId="bom-wizard"
+				configFileName={configFileName}
+				initialItems={{entries: []}}
+				parseConfig={raw => ({
+					entries: (raw as {providers: {name: string}[]}).providers.map(
+						p => p.name,
+					),
+				})}
+				buildConfig={items => ({
+					providers: items.entries.map(name => ({name})),
+				})}
+				hasItems={items => items.entries.length > 0}
+				renderConfigureStep={({items}) => <ConfigureCapture items={items} />}
+				renderSummaryItems={noopRenderSummary}
+				projectDir={testDir}
+				onComplete={() => {}}
+			/>,
+		);
+
+		stdin.write('\r');
+		await new Promise(r => setTimeout(r, 100));
+
+		t.true(receivedOnFirstRender.length >= 1);
+		for (const captured of receivedOnFirstRender) {
+			t.deepEqual(captured, ['openai', 'anthropic']);
+		}
+
+		const output = lastFrame()!;
+		t.regex(output, /entries: openai,anthropic/);
+	},
+);
+
 

@@ -17,8 +17,10 @@ Type `/` in the chat input to see available commands. All commands start with `/
 | `/setup-config` | Open a config file (`agents.config.json`, `.mcp.json`, preferences) in your `$EDITOR`; lists the project and global copies to pick from |
 | `/clear` | Clear chat history |
 | `/model [browse]` | Switch between available models from any configured provider. `/model browse` opens the OpenRouter model browser (searchable, filterable by open/proprietary): Enter copies the highlighted model's ID to the clipboard and, when the active provider is OpenRouter, also switches the session to that model |
+| `/profile [name\|--clear]` | List configuration profiles, switch to a named profile, or clear the active profile (`/profile --clear`) (see [Named Configuration Profiles](../configuration/index.md#named-configuration-profiles)) |
 | `/status` | Display current status (CWD, provider, model, theme, available updates, AGENTS setup) |
 | `/tasks` | Manage task list for tracking complex work (see [Task Management](task-management.md)) |
+| `/plans` | View and manage persistent plan graphs: `/plans` (list), `/plans show [id]`, `/plans use <id\|none>`, `/plans delete <id>` (see [Persistent Plan Graphs](persistent-plans.md)) |
 | `/settings` | Interactive settings menu. Accepts a tab name to jump straight there: `/settings providers`, `/settings mcp`, `/settings appearance`, `/settings input`, `/settings behavior`, `/settings advanced` |
 | `/firewall` | Guard file edits made by the model: in `strict` mode block, in `lenient` mode only warn about, edits that delete existing tests, change exported signatures, add explicit `any` types, or touch protected paths. Off by default. Subcommands: `status`, `enable` (same as `mode strict`), `disable` (same as `mode disabled`), `mode <strict\|lenient\|disabled>`, `toggle <any\|tests\|exports>`, `protect <pattern>`, `unprotect <pattern>`, `reset`. Changes last for the session; set defaults under `nanocoder.firewall` (see [Mutation Firewall](../configuration/index.md#mutation-firewall)) |
 | `/mcp` | Show connected MCP servers and their tools |
@@ -196,6 +198,24 @@ For long prompts, use `--prompt-file <path>` to read the prompt from a file inst
 ```bash
 nanocoder run --prompt-file prompt.md
 ```
+
+### Piping Input
+
+`run` reads piped stdin, so command output can go straight into the prompt:
+
+```bash
+git diff | nanocoder run "write a commit message for this change"
+npm test 2>&1 | nanocoder run "why did this fail"
+```
+
+- The piped text is appended to the prompt inside a `<stdin>` block.
+- With no prompt argument, the piped text is the prompt.
+- `--prompt-file -` names stdin as the prompt explicitly. Like any `--prompt-file`, it replaces a positional prompt. It also works on Windows, where `/dev/stdin` does not exist, and exits with an error if stdin is a terminal.
+- Whitespace-only input is ignored, so `run` with no prompt and an empty pipe still exits with the usage error.
+- At most **100,000 characters** are read. This is a character count, not a byte count, so text that is not ASCII can be larger than 100 KB. Longer input is cut at the limit and the prompt ends with `[stdin truncated - kept the first N characters]`, so the model knows it did not see everything.
+- Only `run` reads stdin. `nanocoder review` and the interactive session are unaffected.
+
+> **Note - scripts that launch `run`:** whenever stdin is not a terminal, `run` waits for it to close before starting. A parent process that leaves the pipe open without writing to it makes `run` wait indefinitely. Close it or point it at nothing: `nanocoder run "..." < /dev/null` in a shell, `stdio: ['ignore', 'pipe', 'pipe']` with `spawn`, or `child.stdin.end()` with `execFile`, which always opens a stdin pipe.
 
 If a tool requires approval that the active mode won't grant, nanocoder prints `Tool approval required for: ...` and exits with status code `1` in the Ink runtime, or `2` under the `--plain` runtime (used automatically in CI and non-TTY environments, and always with `--json`).
 

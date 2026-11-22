@@ -119,6 +119,12 @@ export const COMPLETION_SUBCOMMANDS: readonly CompletionSubcommand[] = [
 
 export const COMPLETION_FLAGS: readonly CompletionFlag[] = [
 	{
+		name: 'profile',
+		takesValue: true,
+		valueName: 'name',
+		description: 'Use a named configuration profile from agents.config.json',
+	},
+	{
 		name: 'provider',
 		takesValue: true,
 		valueName: 'provider',
