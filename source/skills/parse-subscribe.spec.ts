@@ -175,3 +175,48 @@ test('error message identifies offending index', t => {
 		},
 	);
 });
+
+test('unknown key on file.changed throws instead of widening the trigger', t => {
+	t.throws(
+		() => parseSubscribeBlock([{kind: 'file.changed', path: ['docs/**']}]),
+		{
+			instanceOf: SubscribeParseError,
+			message: /unknown key "path".*Did you mean "paths"\?/,
+		},
+	);
+});
+
+test('unknown key on file.ai-comment throws', t => {
+	t.throws(
+		() => parseSubscribeBlock([{kind: 'file.ai-comment', path: ['src/**']}]),
+		{instanceOf: SubscribeParseError, message: /unknown key "path"/},
+	);
+});
+
+test('unknown key on schedule.cron throws', t => {
+	t.throws(
+		() =>
+			parseSubscribeBlock([
+				{kind: 'schedule.cron', cron: '0 9 * * MON', paths: ['x']},
+			]),
+		{instanceOf: SubscribeParseError, message: /unknown key "paths"/},
+	);
+});
+
+test('unknown key on ci.job.failed throws', t => {
+	t.throws(
+		() => parseSubscribeBlock([{kind: 'ci.job.failed', branch: ['main']}]),
+		{
+			instanceOf: SubscribeParseError,
+			message: /unknown key "branch".*Did you mean "branches"\?/,
+		},
+	);
+});
+
+test('unknown key without a close match has no hint', t => {
+	const err = t.throws(
+		() => parseSubscribeBlock([{kind: 'file.changed', zzzzzz: 1}]),
+		{instanceOf: SubscribeParseError},
+	);
+	t.notRegex(err.message, /Did you mean/);
+});

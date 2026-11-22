@@ -2,7 +2,7 @@ import {mkdtempSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
-import {editorArgs, getEditor, openInEditor} from './editor';
+import {buildEditorCommand, editorArgs, getEditor, openInEditor} from './editor';
 
 test.serial('editor arguments and literal paths survive without shell expansion', t => {
 	const dir = mkdtempSync(join(tmpdir(), 'nanocoder-editor-'));
@@ -58,4 +58,34 @@ test('editor command quoting preserves arguments and Windows paths', t => {
  t.deepEqual(editorArgs(String.raw`"C:\Program Files\Editor\editor.exe" --wait`), [String.raw`C:\Program Files\Editor\editor.exe`, '--wait']);
  t.throws(() => editorArgs('"unfinished'), {message: /Unclosed quote/});
  t.throws(() => editorArgs('  '), {message: /Empty editor/});
+});
+
+test('Windows: PATHEXT-resolved .cmd shim runs through cmd.exe with quoting', t => {
+	const r = buildEditorCommand(
+		'code',
+		['--wait', 'C:\\my dir\\a&b.json'],
+		'win32',
+		() => 'C:\\bin\\code.cmd',
+	);
+	t.is(r.verbatim, true);
+	t.deepEqual(r.args.slice(0, 3), ['/d', '/s', '/c']);
+	t.is(
+		r.args[3],
+		'""C:\\bin\\code.cmd" "--wait" "C:\\my dir\\a&b.json""',
+	);
+});
+
+test('Windows: .exe is spawned directly and .cmd with a quote is refused', t => {
+	t.deepEqual(
+		buildEditorCommand('notepad', ['f.json'], 'win32', () => 'C:\\w\\notepad.exe'),
+		{command: 'C:\\w\\notepad.exe', args: ['f.json'], verbatim: false},
+	);
+	t.throws(() =>
+		buildEditorCommand('code', ['a"b.json'], 'win32', () => 'C:\\bin\\code.cmd'),
+	);
+	t.deepEqual(buildEditorCommand('nano', ['f'], 'linux'), {
+		command: 'nano',
+		args: ['f'],
+		verbatim: false,
+	});
 });

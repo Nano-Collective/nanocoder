@@ -15,6 +15,7 @@ import {getConfigPath} from '@/config/paths';
 import {loadPreferences} from '@/config/preferences';
 import type {AIProviderConfig, LLMClient} from '@/types/index';
 import {formatError} from '@/utils/error-formatter';
+import {stripUtf8Bom} from '@/utils/strip-utf8-bom';
 import {isLocalURL} from '@/utils/url-utils';
 
 // Custom error class for configuration errors that need special UI handling
@@ -87,7 +88,7 @@ async function createAISDKClient(
 			);
 			for (const file of filesToCheck) {
 				try {
-					JSON.parse(readFileSync(file, 'utf-8'));
+					JSON.parse(stripUtf8Bom(readFileSync(file, 'utf-8')));
 				} catch (err) {
 					unreadableError = `unreadable: ${file}: ${err instanceof Error ? err.message : String(err)}`;
 					break;
@@ -251,6 +252,7 @@ export function loadProviderConfigs(): AIProviderConfig[] {
 		disableToolModels: provider.disableToolModels,
 		// SDK provider package to use
 		sdkProvider: provider.sdkProvider,
+		extraBody: provider.extraBody,
 		// OpenRouter-specific request body fields (provider routing, plugins,
 		// reasoning, etc.). Always-on for the OpenRouter provider — never gated
 		// by tune so users get consistent routing across sessions.

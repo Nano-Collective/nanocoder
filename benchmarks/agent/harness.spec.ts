@@ -131,6 +131,23 @@ test('loadFixtures reads every vendored task with its assertions', async t => {
 	t.true(categories.size >= 3);
 });
 
+test('loadFixtures returns fixtures in alphabetical order', async t => {
+	const dir = path.join(tempRoot, 'ordered-fixtures');
+	for (const name of ['zebra', 'alpha', 'middle']) {
+		const fixtureDir = path.join(dir, name);
+		await fs.mkdir(fixtureDir, {recursive: true});
+		await fs.writeFile(
+			path.join(fixtureDir, 'task.json'),
+			JSON.stringify({prompt: name, assertions: []}),
+		);
+	}
+
+	t.deepEqual(
+		(await loadFixtures(dir)).map(item => item.name),
+		['alpha', 'middle', 'zebra'],
+	);
+});
+
 test('hashTree changes when a fixture file changes', async t => {
 	await fs.writeFile(path.join(tempRoot, 'a.txt'), 'one');
 	const before = await hashTree(tempRoot);
@@ -380,6 +397,30 @@ test('runOnce still measures a run that exits non-zero with a report', async t =
 	t.regex(run.failure ?? '', /CLI run failed/);
 });
 
+test('runOnce closes the CLI stdin so a run that reads the pipe can finish', async t => {
+	// `nanocoder run` reads piped stdin to EOF before it starts, so a harness
+	// that leaves the pipe open would sit here until the run timeout.
+	const cliPath = await stubCli(`
+		let seen = false;
+		process.stdin.on('data', () => {});
+		process.stdin.on('end', () => {
+			seen = true;
+			process.stdout.write(JSON.stringify({kind: 'success', exitCode: 0, finalText: 'done', steps: 1}));
+		});
+		setTimeout(() => { if (!seen) process.exit(9); }, 20_000).unref();
+	`);
+
+	const run = await runOnce({
+		cliPath,
+		fixture: await fixture([{kind: 'files-unchanged'}]),
+		workspaceRoot: tempRoot,
+		timeoutMs: 5000,
+	});
+
+	t.true(run.pass, run.failure);
+	t.true(run.durationMs < 4000, `waited ${run.durationMs} ms for stdin`);
+});
+
 test('runOnce reports a harness failure when the CLI prints nothing', async t => {
 	const cliPath = await stubCli('process.exit(9);');
 
@@ -392,6 +433,40 @@ test('runOnce reports a harness failure when the CLI prints nothing', async t =>
 	t.false(run.pass);
 	t.truthy(run.failure);
 	t.is(run.steps, 0);
+});
+
+test('runOnce aborts the CLI and removes its throwaway workspace', async t => {
+	const startedPath = path.join(tempRoot, 'stub-started');
+	const cliPath = await stubCli(`
+		import {writeFileSync} from 'node:fs';
+		writeFileSync(${JSON.stringify(startedPath)}, 'started');
+		setInterval(() => {}, 1000);
+	`);
+	const workspaceRoot = path.join(tempRoot, 'workspaces');
+	await fs.mkdir(workspaceRoot);
+	const controller = new AbortController();
+	const running = runOnce({
+		cliPath,
+		fixture: await fixture([{kind: 'files-unchanged'}]),
+		workspaceRoot,
+		signal: controller.signal,
+	});
+
+	let started = false;
+	for (let attempt = 0; attempt < 100; attempt++) {
+		try {
+			await fs.access(startedPath);
+			started = true;
+			break;
+		} catch {
+			await new Promise(resolve => setTimeout(resolve, 10));
+		}
+	}
+	t.true(started, 'stub CLI starts before it is aborted');
+	controller.abort();
+	const error = await t.throwsAsync(running);
+	t.is(error?.name, 'AbortError');
+	t.deepEqual(await fs.readdir(workspaceRoot), []);
 });
 
 for (const [kind, exitCode, processExit] of [

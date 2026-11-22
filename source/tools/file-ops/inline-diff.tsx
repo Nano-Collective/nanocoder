@@ -46,7 +46,8 @@ export function computeLineDiff(
 	let newLine = 0;
 
 	for (const change of changes) {
-		const lines = change.value.split('\n');
+		// Split on CRLF too: a trailing CR renders as a blank line in Ink.
+		const lines = change.value.split(/\r?\n/);
 		if (lines.length > 0 && lines[lines.length - 1] === '') {
 			lines.pop();
 		}

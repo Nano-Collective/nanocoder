@@ -18,6 +18,7 @@ import type {Message} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
 import {ensureNanocoderGitignore} from '@/utils/fs/ensure-nanocoder-gitignore';
 import {notifyWarning} from '@/utils/message-queue-core';
+import {stripTurnContext} from '@/utils/turn-context';
 import {FileSnapshotService} from './file-snapshot';
 /**
  * Service for managing conversation checkpoints.
@@ -98,7 +99,10 @@ export class CheckpointManager {
 			return 'Empty conversation';
 		}
 
-		const firstMessage = userMessages[0].content;
+		// Only the text the user typed: the per-turn context block (#1574) is
+		// long enough to fill the truncation window on its own, which would
+		// leave every checkpoint described by its recalled memories.
+		const firstMessage = stripTurnContext(userMessages[0].content);
 		// Take first characters and add ellipsis if longer
 		return firstMessage.length > TRUNCATION_DESCRIPTION_LENGTH
 			? `${firstMessage.substring(0, TRUNCATION_DESCRIPTION_LENGTH)}...`
