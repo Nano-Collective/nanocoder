@@ -134,7 +134,6 @@ export function parseMarkdownTable(
 		wrapOnWordBoundary: true,
 	});
 
-
 	for (const row of dataRows) {
 		table.push(row);
 	}
