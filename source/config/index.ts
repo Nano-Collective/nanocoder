@@ -1,5 +1,5 @@
 import {existsSync, realpathSync} from 'fs';
-import {join, resolve} from 'path';
+import {isAbsolute, join, resolve} from 'path';
 import {type CliMode, VALID_MODES} from '@/app/types';
 import {
 	clearConfigFileCache,
@@ -523,6 +523,39 @@ function loadAlwaysAllowConfig(cwd: string): string[] | undefined {
 	);
 }
 
+/**
+ * Fallback project instruction filenames. Keep them relative to the project
+ * root — an absolute path or a `..` segment would turn this into an arbitrary
+ * file read rather than a project instruction lookup.
+ */
+function loadInstructionFilesConfig(cwd: string): string[] | undefined {
+	return (
+		loadHierarchicalConfig(
+			cwd,
+			'agents.config.json',
+			'instructionFiles',
+			config => {
+				const value = config.nanocoder?.instructionFiles;
+				if (!Array.isArray(value)) return null;
+
+				const files: string[] = [];
+				const seen = new Set<string>();
+				for (const item of value) {
+					if (typeof item !== 'string') continue;
+					const name = item.trim();
+					if (!name || isAbsolute(name)) continue;
+					if (name.split(/[\\/]/).includes('..')) continue;
+					const key = name.toLowerCase();
+					if (seen.has(key)) continue;
+					seen.add(key);
+					files.push(name);
+				}
+				return files;
+			},
+		) ?? undefined
+	);
+}
+
 function loadDisabledToolsConfig(cwd: string): string[] | undefined {
 	return (
 		loadHierarchicalConfig(
@@ -1004,6 +1037,9 @@ function loadAppConfig(cwd: string): AppConfig {
 	// Load top-level disabledTools (filtered out of every tool-availability path)
 	const disabledTools = loadDisabledToolsConfig(cwd);
 
+	// Load fallback project instruction filenames
+	const instructionFiles = loadInstructionFilesConfig(cwd);
+
 	// Load custom system prompt override
 	const systemPrompt = loadSystemPromptConfig(cwd);
 
@@ -1051,6 +1087,7 @@ function loadAppConfig(cwd: string): AppConfig {
 		nanocoderTools,
 		alwaysAllow,
 		disabledTools,
+		instructionFiles,
 		systemPrompt,
 		hooks,
 		formatters,

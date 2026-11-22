@@ -84,6 +84,7 @@ test('Doctor renders all diagnostic sections in one report', async t => {
 	t.regex(output!, /\/doctor/);
 	t.regex(output!, /System/);
 	t.regex(output!, /Nanocoder/);
+	t.regex(output!, /Instructions/);
 	t.regex(output!, /Providers/);
 	t.regex(output!, /LSP/);
 	t.regex(output!, /MCP/);
@@ -302,6 +303,24 @@ test('collectDoctorReport keeps other sections when one source fails', async t =
 
 	const {lastFrame} = renderWithTheme(<Doctor report={report} />);
 	t.regex(lastFrame()!, /provider config unreadable/);
+});
+
+test('Doctor reports the resolved project instruction file', async t => {
+	const report = await collectDoctorReport(createDependencies());
+	t.is(report.instructions.status, 'ok');
+
+	const withInstructions = {
+		...report,
+		instructions: {
+			status: 'ok' as const,
+			data: {name: 'CLAUDE.md', path: '/repo/CLAUDE.md'},
+		},
+	};
+	const {lastFrame} = renderWithTheme(<Doctor report={withInstructions} />);
+	const output = lastFrame();
+	t.truthy(output);
+	t.regex(output!, /CLAUDE\.md/);
+	t.regex(output!, /\/repo\/CLAUDE\.md/);
 });
 
 test('doctorCommand has expected shape', async t => {

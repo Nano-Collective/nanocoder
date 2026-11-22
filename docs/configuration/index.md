@@ -242,7 +242,7 @@ Each profile can specify:
 - `provider` (string): AI provider name (from configured providers)
 - `model` (string): Model ID for the provider
 - `mode` (string): Starting development mode (`normal`, `auto-accept`, `yolo`, `plan`, `architect`)
-- Any `nanocoder.*` settings: `autoCompact`, `hooks`, `formatters`, `alwaysAllow`, `disabledTools`, `sandbox`, `firewall`, `retries`, `tune`, `systemPrompt`, etc.
+- Any `nanocoder.*` settings: `autoCompact`, `hooks`, `formatters`, `alwaysAllow`, `disabledTools`, `instructionFiles`, `sandbox`, `firewall`, `retries`, `tune`, `systemPrompt`, etc.
 - Profile-specific `providers` array, merged into the available providers when the profile is active
 
 #### Profile Selection Precedence
@@ -713,6 +713,32 @@ Use `"mode": "append"` to keep the built-in prompt and add your text at the end:
 - Tool definitions are still injected into the prompt for providers that don't support native tool calling. Tool availability is controlled separately via `disabledTools` and `/tune`.
 - If the file can't be read, Nanocoder logs a warning and falls back to the built-in prompt.
 - Project-level `agents.config.json` wins over the global config.
+
+### Project Instruction Files
+
+Nanocoder appends a project instruction file to the system prompt as `Additional Context...`. It uses the first file it finds, in this order:
+
+1. `AGENTS.md`
+2. `CLAUDE.md`
+3. `GEMINI.md`
+4. `.github/copilot-instructions.md`
+5. `.cursorrules`
+
+This lets a repo that already maintains guidance for another tool work with Nanocoder without creating a duplicate `AGENTS.md`. Files must be directly inside the project root; absolute paths and `..` segments are ignored.
+
+Change the fallback list (or its order) with `nanocoder.instructionFiles`:
+
+```json
+{
+  "nanocoder": {
+    "instructionFiles": ["CLAUDE.md", ".cursorrules"]
+  }
+}
+```
+
+`AGENTS.md` is always checked first. An explicit empty list (`"instructionFiles": []`) disables all fallbacks. The value shown by `/status` and `/doctor` is the file that was actually selected.
+
+The existing `tune.includeAgentsMd` switch (and the `nano` profile) still controls whether any project instruction file is sent to the model, regardless of which filename was found.
 
 ### Web Search
 

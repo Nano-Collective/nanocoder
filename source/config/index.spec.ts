@@ -118,6 +118,89 @@ test.serial('getAppConfig does not throw when the active profile disappears', t 
 	}
 });
 
+test.serial('instructionFiles is honoured only from the user-level config', t => {
+	const originalCwd = process.cwd();
+	const originalConfigDir = process.env.NANOCODER_CONFIG_DIR;
+	const globalDir = join(testDir, 'instructions-global');
+	const projectDir = join(testDir, 'instructions-project');
+	mkdirSync(globalDir, {recursive: true});
+	mkdirSync(projectDir, {recursive: true});
+	writeFileSync(
+		join(globalDir, 'agents.config.json'),
+		JSON.stringify({nanocoder: {instructionFiles: ['GEMINI.md', 'CLAUDE.md']}}),
+		'utf-8',
+	);
+
+	try {
+		process.env.NANOCODER_CONFIG_DIR = globalDir;
+		process.chdir(projectDir);
+		reloadAppConfig();
+		t.deepEqual(
+			getAppConfig().instructionFiles,
+			['GEMINI.md', 'CLAUDE.md'],
+			'uses the user-level list',
+		);
+
+		// A cloned project must not be able to redirect the instruction-file
+		// lookup: project config is untrusted until the folder is trusted, and
+		// this option decides which file is read into the system prompt.
+		writeFileSync(
+			join(projectDir, 'agents.config.json'),
+			JSON.stringify({nanocoder: {instructionFiles: ['.env', '.git/config']}}),
+			'utf-8',
+		);
+		reloadAppConfig();
+		t.deepEqual(
+			getAppConfig().instructionFiles,
+			['GEMINI.md', 'CLAUDE.md'],
+			'project-level entries are ignored',
+		);
+	} finally {
+		clearAppConfig();
+		process.chdir(originalCwd);
+		if (originalConfigDir === undefined) delete process.env.NANOCODER_CONFIG_DIR;
+		else process.env.NANOCODER_CONFIG_DIR = originalConfigDir;
+	}
+});
+
+test.serial('user-level instructionFiles drops malformed entries', t => {
+	const originalCwd = process.cwd();
+	const originalConfigDir = process.env.NANOCODER_CONFIG_DIR;
+	const globalDir = join(testDir, 'instructions-malformed');
+	const projectDir = join(testDir, 'instructions-malformed-project');
+	mkdirSync(globalDir, {recursive: true});
+	mkdirSync(projectDir, {recursive: true});
+	writeFileSync(
+		join(globalDir, 'agents.config.json'),
+		JSON.stringify({
+			nanocoder: {
+				instructionFiles: [
+					'AGENTS.md',
+					true,
+					'',
+					'  .cursorrules  ',
+					'/etc/passwd',
+					'../secret.md',
+					'.cursorrules',
+				],
+			},
+		}),
+		'utf-8',
+	);
+
+	try {
+		process.env.NANOCODER_CONFIG_DIR = globalDir;
+		process.chdir(projectDir);
+		reloadAppConfig();
+		t.deepEqual(getAppConfig().instructionFiles, ['AGENTS.md', '.cursorrules']);
+	} finally {
+		clearAppConfig();
+		process.chdir(originalCwd);
+		if (originalConfigDir === undefined) delete process.env.NANOCODER_CONFIG_DIR;
+		else process.env.NANOCODER_CONFIG_DIR = originalConfigDir;
+	}
+});
+
 test('getClosestConfigFile creates default config if none exists', t => {
 	const fileName = 'test-config.json';
 	const configPath = getClosestConfigFile(fileName);

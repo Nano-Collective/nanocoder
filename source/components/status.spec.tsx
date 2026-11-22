@@ -1,6 +1,10 @@
 import test from 'ava';
+import {mkdtempSync, rmSync, writeFileSync} from 'fs';
+import {tmpdir} from 'os';
+import {join} from 'path';
 import React from 'react';
 import {themes} from '../config/themes';
+import {createSessionContext, runInSessionContext} from '../services/session-context';
 import {renderWithTheme} from '../test-utils/render-with-theme.js';
 import Status from './status';
 
@@ -867,4 +871,24 @@ test('Status shows Git line in narrow layout', t => {
 	t.regex(output!, /main/);
 
 	process.stdout.columns = originalColumns;
+});
+
+test('Status shows the resolved fallback instruction filename', t => {
+	const dir = mkdtempSync(join(tmpdir(), 'nc-status-instructions-'));
+	const originalColumns = process.stdout.columns;
+	try {
+		writeFileSync(join(dir, 'CLAUDE.md'), 'CLAUDE PROJECT RULES');
+		process.stdout.columns = 80;
+
+		const output = runInSessionContext(createSessionContext(dir), () => {
+			const {lastFrame} = renderWithTheme(<Status {...defaultProps} />);
+			return lastFrame();
+		});
+
+		t.truthy(output);
+		t.regex(output!, /Using CLAUDE\.md/);
+	} finally {
+		process.stdout.columns = originalColumns;
+		rmSync(dir, {recursive: true, force: true});
+	}
 });

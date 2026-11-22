@@ -1,9 +1,9 @@
-import {existsSync} from 'fs';
 import {Box, Text} from 'ink';
 import {memo} from 'react';
 
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {confDirMap} from '@/config/index';
+import {findProjectInstructionFile} from '@/config/instruction-files';
 import {getThemeColors, themes} from '@/config/themes';
 import {
 	PATH_LENGTH_NARROW_TERMINAL,
@@ -75,8 +75,11 @@ export default memo(function Status({
 	const {boxWidth, isNarrow, truncatePath} = useResponsiveTerminal();
 	const colors = getThemeColors(theme);
 
-	// Check for AGENTS.md synchronously if not provided
-	const hasAgentsMd = agentsMdLoaded ?? existsSync(`${cwd}/AGENTS.md`);
+	// Use the same resolver as the prompt builder so the name shown here is
+	// the file whose rules actually reached the model.
+	const instructionFile = findProjectInstructionFile();
+	const instructionFileName = instructionFile?.name ?? 'AGENTS.md';
+	const hasAgentsMd = agentsMdLoaded ?? Boolean(instructionFile);
 
 	// Connection status calculations
 	const mcpStatus = mcpServersStatus || [];
@@ -138,7 +141,7 @@ export default memo(function Status({
 					)}
 					{hasAgentsMd ? (
 						<Text color={colors.secondary} italic>
-							✓ AGENTS.md
+							✓ {instructionFileName}
 						</Text>
 					) : (
 						<Text color={colors.secondary} italic>
@@ -249,7 +252,7 @@ export default memo(function Status({
 					)}
 					{hasAgentsMd ? (
 						<Text color={colors.secondary} italic>
-							<Text>↳ Using AGENTS.md. Project initialized</Text>
+							<Text>↳ Using {instructionFileName}. Project initialized</Text>
 						</Text>
 					) : (
 						<Text color={colors.secondary} italic>

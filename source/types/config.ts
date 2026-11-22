@@ -400,6 +400,8 @@ export interface DiskNanocoderConfig {
 	disabledTools?: string[];
 	/** Custom system prompt — replaces or extends the built-in prompt. */
 	systemPrompt?: SystemPromptConfig;
+	/** Project instruction filenames tried after AGENTS.md, in priority order. */
+	instructionFiles?: string[];
 	/**
 	 * Shell commands run at fixed points in the agent loop, keyed by lifecycle
 	 * event. A project-local file can set these, so they carry the same
@@ -518,6 +520,9 @@ export interface AppConfig {
 
 	// Custom system prompt — replaces or extends the built-in prompt
 	systemPrompt?: SystemPromptConfig;
+
+	// Project instruction filenames tried after AGENTS.md, in priority order
+	instructionFiles?: string[];
 
 	// Lifecycle hooks — shell commands run at fixed points in the agent loop.
 	// Project-local config, so it carries the same code-execution weight as

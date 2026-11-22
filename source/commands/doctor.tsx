@@ -3,6 +3,7 @@ import {Box, Text} from 'ink';
 import React from 'react';
 import {loadProviderConfigs} from '@/client-factory';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
+import {findProjectInstructionFile} from '@/config/instruction-files';
 import {
 	type DaemonLock,
 	readLiveLockfile,
@@ -67,6 +68,7 @@ export interface DoctorReport {
 		arch: string;
 	};
 	nanocoder: Section<{version: string}>;
+	instructions: Section<{name: string; path: string} | null>;
 	providers: Section<DoctorProvider[]>;
 	lsp: Section<{
 		initialized: boolean;
@@ -266,16 +268,25 @@ function normalizeDaemon(
 export async function collectDoctorReport(
 	dependencies: DoctorDependencies = defaultDependencies(),
 ): Promise<DoctorReport> {
-	const [nanocoder, providers, lsp, mcp, hooks, formatters, daemonLock] =
-		await Promise.all([
-			settle(() => dependencies.getVersion().then(version => ({version}))),
-			settle(() => collectProviders(dependencies)),
-			settle(() => dependencies.getLspStatus()),
-			settle(() => collectMcp(dependencies.getToolManager())),
-			settle(() => collectHooks()),
-			settle(() => collectFormatters()),
-			settle(() => dependencies.getDaemonLock()),
-		]);
+	const [
+		nanocoder,
+		instructions,
+		providers,
+		lsp,
+		mcp,
+		hooks,
+		formatters,
+		daemonLock,
+	] = await Promise.all([
+		settle(() => dependencies.getVersion().then(version => ({version}))),
+		settle(() => findProjectInstructionFile()),
+		settle(() => collectProviders(dependencies)),
+		settle(() => dependencies.getLspStatus()),
+		settle(() => collectMcp(dependencies.getToolManager())),
+		settle(() => collectHooks()),
+		settle(() => collectFormatters()),
+		settle(() => dependencies.getDaemonLock()),
+	]);
 
 	return {
 		system: {
@@ -284,6 +295,7 @@ export async function collectDoctorReport(
 			arch: process.arch,
 		},
 		nanocoder,
+		instructions,
 		providers,
 		lsp,
 		mcp,
@@ -354,6 +366,22 @@ export function Doctor({report}: {report: DoctorReport}) {
 				</Text>
 			) : (
 				<SectionError message={report.nanocoder.error} />
+			)}
+
+			<SectionTitle>Instructions</SectionTitle>
+			{report.instructions.status === 'error' ? (
+				<SectionError message={report.instructions.error} />
+			) : report.instructions.data ? (
+				<>
+					<Text color={colors.text}>• {report.instructions.data.name}</Text>
+					<Text color={colors.secondary}>
+						• {report.instructions.data.path}
+					</Text>
+				</>
+			) : (
+				<Text color={colors.secondary}>
+					• No project instruction file found
+				</Text>
 			)}
 
 			<SectionTitle>Providers</SectionTitle>

@@ -80,6 +80,18 @@ test('unknown key inside nanocoder namespace is rejected', t => {
 	assertInvalid(t, 'bogus namespace key', {nanocoder: {bogus: 1}});
 });
 
+test('instructionFiles accepts filenames and rejects other shapes', t => {
+	assertValid(t, 'instructionFiles list', {
+		nanocoder: {instructionFiles: ['CLAUDE.md', '.cursorrules']},
+	});
+	assertInvalid(t, 'instructionFiles must be an array', {
+		nanocoder: {instructionFiles: 'CLAUDE.md'},
+	});
+	assertInvalid(t, 'instructionFiles entries must be strings', {
+		nanocoder: {instructionFiles: [42]},
+	});
+});
+
 test('unknown key deep inside a sub-object is rejected (headless)', t => {
 	assertInvalid(t, 'headless bogus', {
 		nanocoder: {headless: {bogus: 1}},

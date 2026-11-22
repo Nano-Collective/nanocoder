@@ -512,7 +512,7 @@ test('buildSystemPrompt - appends the session project AGENTS.md inside a session
 });
 
 // ============================================================================
-// buildSystemPrompt — @path imports inside AGENTS.md
+// buildSystemPrompt — @path imports in project instruction files
 // ============================================================================
 
 test('buildSystemPrompt - inlines @path imports from AGENTS.md', t => {
@@ -527,6 +527,23 @@ test('buildSystemPrompt - inlines @path imports from AGENTS.md', t => {
 		);
 		t.true(result.includes('IMPORTED GUIDANCE'));
 		t.false(result.includes('@docs/testing.md'));
+	} finally {
+		rmSync(dir, {recursive: true, force: true});
+	}
+});
+
+// ============================================================================
+// buildSystemPrompt — project instruction file fallbacks (#2265)
+// ============================================================================
+
+test('buildSystemPrompt - falls back to CLAUDE.md when AGENTS.md is absent', t => {
+	const dir = mkdtempSync(join(tmpdir(), 'nc-prompt-fallback-'));
+	try {
+		writeFileSync(join(dir, 'CLAUDE.md'), 'CLAUDE PROJECT RULES');
+		const result = runInSessionContext(createSessionContext(dir), () =>
+			buildSystemPrompt('normal', {...TUNE_NANO, includeAgentsMd: true}, NANO_TOOLS),
+		);
+		t.true(result.includes('CLAUDE PROJECT RULES'));
 	} finally {
 		rmSync(dir, {recursive: true, force: true});
 	}
@@ -555,6 +572,54 @@ test.serial(
 		}
 	},
 );
+
+test('buildSystemPrompt - AGENTS.md still wins over fallback files', t => {
+	const dir = mkdtempSync(join(tmpdir(), 'nc-prompt-precedence-'));
+	try {
+		writeFileSync(join(dir, 'AGENTS.md'), 'AGENTS PROJECT RULES');
+		writeFileSync(join(dir, 'CLAUDE.md'), 'CLAUDE PROJECT RULES');
+		const result = runInSessionContext(createSessionContext(dir), () =>
+			buildSystemPrompt('normal', {...TUNE_NANO, includeAgentsMd: true}, NANO_TOOLS),
+		);
+		t.true(result.includes('AGENTS PROJECT RULES'));
+		t.false(result.includes('CLAUDE PROJECT RULES'));
+	} finally {
+		rmSync(dir, {recursive: true, force: true});
+	}
+});
+
+test('buildSystemPrompt - includeAgentsMd=false disables fallback files too', t => {
+	const dir = mkdtempSync(join(tmpdir(), 'nc-prompt-disabled-'));
+	try {
+		writeFileSync(join(dir, 'CLAUDE.md'), 'CLAUDE PROJECT RULES');
+		const result = runInSessionContext(createSessionContext(dir), () =>
+			buildSystemPrompt('normal', {...TUNE_NANO, includeAgentsMd: false}, NANO_TOOLS),
+		);
+		t.false(result.includes('CLAUDE PROJECT RULES'));
+	} finally {
+		rmSync(dir, {recursive: true, force: true});
+	}
+});
+
+test('buildSystemPrompt - inlines @path imports from a fallback file', t => {
+	const dir = mkdtempSync(join(tmpdir(), 'nc-prompt-fallback-imports-'));
+	try {
+		mkdirSync(join(dir, 'docs'), {recursive: true});
+		writeFileSync(join(dir, 'docs', 'testing.md'), 'FALLBACK IMPORTED GUIDANCE');
+		writeFileSync(join(dir, 'CLAUDE.md'), '# Rules\n@docs/testing.md');
+		const result = runInSessionContext(createSessionContext(dir), () =>
+			buildSystemPrompt(
+				'normal',
+				{...TUNE_NANO, includeAgentsMd: true},
+				NANO_TOOLS,
+			),
+		);
+		t.true(result.includes('FALLBACK IMPORTED GUIDANCE'));
+		t.false(result.includes('@docs/testing.md'));
+	} finally {
+		rmSync(dir, {recursive: true, force: true});
+	}
+});
 
 // ============================================================================
 // buildSystemPrompt — systemPrompt override (replace / append, content / file)
