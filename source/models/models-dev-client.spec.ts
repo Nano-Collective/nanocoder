@@ -1,11 +1,14 @@
 import test from 'ava';
 import {
+	bindSessionContextLimit,
 	getModelAcceptsImages,
 	getModelContextLimit,
 	getModelPricing,
 	getSessionContextLimit,
+	getSessionContextOverride,
 	resetSessionContextLimit,
 	resolveModelContextLimit,
+	restoreSessionContextOverride,
 	setSessionContextLimit,
 } from './models-dev-client.js';
 
@@ -323,6 +326,98 @@ test('resetSessionContextLimit - clears the override', t => {
 test('resetSessionContextLimit - is safe to call when already null', t => {
 	resetSessionContextLimit();
 	t.is(getSessionContextLimit(), null);
+});
+
+// ============================================================================
+// Session override is tied to the provider and model it was set for
+// ============================================================================
+
+test('getSessionContextLimit - scoped override applies only to its provider and model', t => {
+	setSessionContextLimit(8000, {provider: 'local', model: 'small'});
+
+	t.is(getSessionContextLimit({provider: 'local', model: 'small'}), 8000);
+	t.is(getSessionContextLimit({provider: 'local', model: 'large'}), null);
+	t.is(getSessionContextLimit({provider: 'cloud', model: 'small'}), null);
+});
+
+test('getSessionContextLimit - unscoped override applies to every model', t => {
+	setSessionContextLimit(8000);
+
+	t.is(getSessionContextLimit({provider: 'any', model: 'any'}), 8000);
+});
+
+test('getSessionContextLimit - without an active scope returns the stored limit', t => {
+	setSessionContextLimit(8000, {provider: 'local', model: 'small'});
+
+	t.is(getSessionContextLimit(), 8000);
+});
+
+test('resolveModelContextLimit - ignores a session override set for another model', async t => {
+	setSessionContextLimit(8000, {provider: 'local', model: 'small'});
+	const providerConfig = {
+		name: 'local',
+		type: 'openai',
+		models: ['small', 'large'],
+		contextWindows: {large: 200_000},
+		config: {},
+	};
+
+	const same = await resolveModelContextLimit('small', {providerConfig});
+	t.deepEqual(same, {limit: 8000, source: 'session'});
+
+	const other = await resolveModelContextLimit('large', {providerConfig});
+	t.deepEqual(other, {limit: 200_000, source: 'provider-model-config'});
+});
+
+test('resolveModelContextLimit - ignores a session override set for another provider', async t => {
+	setSessionContextLimit(8000, {provider: 'local', model: 'shared'});
+
+	const resolved = await resolveModelContextLimit('shared', {
+		providerConfig: {
+			name: 'cloud',
+			type: 'openai',
+			models: ['shared'],
+			contextWindow: 128_000,
+			config: {},
+		},
+	});
+
+	t.deepEqual(resolved, {limit: 128_000, source: 'provider-config'});
+});
+
+test('bindSessionContextLimit - ties an unscoped override to the starting model', t => {
+	setSessionContextLimit(8000);
+	bindSessionContextLimit({provider: 'local', model: 'small'});
+
+	t.is(getSessionContextLimit({provider: 'local', model: 'small'}), 8000);
+	t.is(getSessionContextLimit({provider: 'local', model: 'large'}), null);
+});
+
+test('bindSessionContextLimit - keeps an override that already has a scope', t => {
+	setSessionContextLimit(8000, {provider: 'local', model: 'small'});
+	bindSessionContextLimit({provider: 'cloud', model: 'big'});
+
+	t.is(getSessionContextLimit({provider: 'local', model: 'small'}), 8000);
+	t.is(getSessionContextLimit({provider: 'cloud', model: 'big'}), null);
+});
+
+test('bindSessionContextLimit - is a no-op without an override', t => {
+	bindSessionContextLimit({provider: 'local', model: 'small'});
+
+	t.is(getSessionContextOverride(), null);
+});
+
+test('restoreSessionContextOverride - restores the limit with its scope, or clears it', t => {
+	setSessionContextLimit(8000, {provider: 'local', model: 'small'});
+	const prior = getSessionContextOverride();
+
+	setSessionContextLimit(64_000);
+	restoreSessionContextOverride(prior);
+	t.is(getSessionContextLimit({provider: 'local', model: 'small'}), 8000);
+	t.is(getSessionContextLimit({provider: 'local', model: 'large'}), null);
+
+	restoreSessionContextOverride(null);
+	t.is(getSessionContextOverride(), null);
 });
 
 test('getModelContextLimit - session override takes priority over models.dev', async t => {

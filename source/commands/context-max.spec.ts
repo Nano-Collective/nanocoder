@@ -1,5 +1,6 @@
 import test from 'ava';
 import React from 'react';
+import {resetSessionContextLimit} from '@/models/index';
 import type {AIProviderConfig, CommandContext} from '@/types';
 import {contextMaxCommand} from './context-max.js';
 
@@ -44,6 +45,40 @@ test('/context-max shows unknown when no context is resolved', async t => {
 
 	t.is(completion, 'done-after-render');
 	t.true(getMessageText(queued).includes('Context limit:'));
+});
+
+test.serial('/context-max override stops applying after a model switch', async t => {
+	const providerConfig: AIProviderConfig = {
+		name: 'Test Provider',
+		type: 'openai',
+		models: ['small-model', 'large-model'],
+		contextWindows: {'large-model': 200_000},
+		config: {},
+	};
+	const queued: React.ReactNode[] = [];
+	const run = (argText: string, model: string) =>
+		contextMaxCommand.run({
+			argText,
+			model,
+			provider: 'Test Provider',
+			providerConfig,
+			addToChatQueue: node => queued.push(node),
+		} as unknown as CommandContext);
+
+	try {
+		await run('8k', 'small-model');
+		t.true(getMessageText(queued[0]).includes('small-model'));
+
+		await run('', 'small-model');
+		t.true(getMessageText(queued[1]).includes('8,000'));
+		t.true(getMessageText(queued[1]).includes('session override'));
+
+		await run('', 'large-model');
+		t.true(getMessageText(queued[2]).includes('200,000'));
+		t.true(getMessageText(queued[2]).includes('provider model config'));
+	} finally {
+		resetSessionContextLimit();
+	}
 });
 
 test('/context-max uses provider config for context resolution', async t => {

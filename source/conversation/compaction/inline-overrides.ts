@@ -238,9 +238,9 @@ export async function applyOnceOverrides(
 			case 'context-max': {
 				const numeric = parseContextLimit(String(value));
 				if (numeric === null) break;
-				const prior = models.getSessionContextLimit();
+				const prior = models.getSessionContextOverride();
 				models.setSessionContextLimit(numeric);
-				restorations.push(() => models.setSessionContextLimit(prior));
+				restorations.push(() => models.restoreSessionContextOverride(prior));
 				break;
 			}
 			// No default: keys not listed here fall through to

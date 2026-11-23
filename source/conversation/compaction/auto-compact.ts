@@ -139,7 +139,7 @@ export async function performAutoCompact(
 
 	// Get context limit: session override takes priority
 	let contextLimit: number | null;
-	const sessionLimit = getSessionContextLimit();
+	const sessionLimit = getSessionContextLimit({provider, model});
 	if (sessionLimit !== null) {
 		contextLimit = sessionLimit;
 	} else {
