@@ -23,7 +23,11 @@ import {
 	INTERVAL_BASH_PROGRESS_MS,
 	TIMEOUT_BASH_DEFAULT_MS,
 } from '@/constants';
-import {signalProcessTree} from '@/utils/process-tree';
+import {
+	findWindowsOrphans,
+	killWindowsTree,
+	signalProcessTree,
+} from '@/utils/process-tree';
 import {isWindowsCmd, shellArgs} from '@/utils/shell-args';
 import {getShutdownManager} from '@/utils/shutdown';
 import {
@@ -46,6 +50,33 @@ import {
 } from './session-cwd.js';
 
 const isWindows = platform === 'win32';
+
+/**
+ * Windows only: processes a finished command's cmd.exe started and left
+ * running (`start /b ...`). Once cmd.exe exits, `taskkill /T` on it no longer
+ * reaches them, so they are tracked and stopped by their own pids.
+ */
+const windowsOrphans = new WeakMap<ChildProcess, number[]>();
+
+/**
+ * Slack around a command's spawn and exit times when matching the creation
+ * times of the processes it left behind: Windows stamps process creation with
+ * a coarser clock than Date.now().
+ */
+const ORPHAN_CLOCK_SLACK_MS = 100;
+
+function isPidAlive(pid: number): boolean {
+	try {
+		process.kill(pid, 0);
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+function isShellAlive(proc: ChildProcess): boolean {
+	return proc.exitCode === null && proc.signalCode === null;
+}
 
 /**
  * The applied timeout as the model was told to ask for it: in seconds. A
@@ -102,11 +133,16 @@ function writeWindowsCwdEpilogue(executionId: string): string {
  * cannot be recycled while any member is alive, so a successful probe means
  * a signal reaches our own processes. With the Linux jail on, the command
  * runs in a second group that bwrap started, which counts too.
+ *
+ * On Windows there are no groups: the command is alive while cmd.exe runs,
+ * and after that while any process it left behind runs.
  */
 function isGroupAlive(proc: ChildProcess): boolean {
 	if (proc.pid === undefined) return false;
 	if (isWindows) {
-		return proc.exitCode === null && proc.signalCode === null;
+		return (
+			isShellAlive(proc) || (windowsOrphans.get(proc) ?? []).some(isPidAlive)
+		);
 	}
 	const command = sandboxedCommandGroup(proc);
 	return probeGroup(proc.pid) || (command !== undefined && probeGroup(command));
@@ -180,6 +216,15 @@ function detachStreams(proc: ChildProcess): void {
 }
 
 function signalGroups(proc: ChildProcess, signal: NodeJS.Signals): void {
+	if (isWindows) {
+		// Never taskkill a dead cmd.exe's pid: it may belong to another
+		// process by now. Its leftovers are reached by their own pids.
+		if (isShellAlive(proc)) signalProcessTree(proc, signal);
+		for (const pid of windowsOrphans.get(proc) ?? []) {
+			if (isPidAlive(pid)) killWindowsTree(pid);
+		}
+		return;
+	}
 	const command = sandboxedCommandGroup(proc);
 	if (command !== undefined) {
 		try {
@@ -288,6 +333,12 @@ export class BashExecutor extends EventEmitter {
 	// Run once a leftover group is gone: the jail's placeholder mounts must
 	// outlive every process that could still write through them.
 	private leftoverCleanups = new Map<ChildProcess, () => void>();
+	// Windows: finished commands whose leftovers are still being looked up.
+	// stopAll() waits for these; killAll() marks them to be killed on arrival.
+	private orphanLookups = new Map<
+		ChildProcess,
+		{done: Promise<void>; killOnArrival: boolean}
+	>();
 
 	execute(
 		command: string,
@@ -394,6 +445,8 @@ export class BashExecutor extends EventEmitter {
 				: undefined;
 		const releaseProtected = guard?.release;
 
+		// Bounds the creation time of anything cmd.exe leaves behind (Windows).
+		const spawnedAt = Date.now();
 		let proc: ChildProcess;
 		if (sandbox) {
 			const planned = planBashSpawn({
@@ -604,6 +657,10 @@ export class BashExecutor extends EventEmitter {
 			// what the shell itself wrote, then stop collecting and leave the job
 			// running; trackLeftovers() keeps it reachable for shutdown cleanup.
 			let exitCode: number | null = null;
+			let exitedAt: number | undefined;
+			// Whether every pipe holder has let go. If not when the command
+			// finishes, the shell left something running that inherited them.
+			let pipesClosed = false;
 			let graceTimer: NodeJS.Timeout | undefined;
 
 			const finish = (code: number | null) => {
@@ -623,7 +680,13 @@ export class BashExecutor extends EventEmitter {
 				applyCapturedCwd();
 				cleanupJailTmp();
 				clearInterval(intervalId);
-				this.trackLeftovers(proc, releaseProtected);
+				this.trackLeftovers(
+					proc,
+					releaseProtected,
+					pipesClosed
+						? undefined
+						: {spawnedAt, exitedAt: exitedAt ?? Date.now()},
+				);
 				state.isComplete = true;
 				state.exitCode = code;
 				this.markJobFinished(executionId);
@@ -635,12 +698,13 @@ export class BashExecutor extends EventEmitter {
 
 			proc.on('exit', (code: number | null) => {
 				exitCode = code;
-				const exitedAt = Date.now();
+				const shellExitedAt = Date.now();
+				exitedAt = shellExitedAt;
 				const drain = () => {
 					const now = Date.now();
 					if (
 						now - lastOutputAt < OUTPUT_QUIET_MS &&
-						now - exitedAt < OUTPUT_DRAIN_MAX_MS
+						now - shellExitedAt < OUTPUT_DRAIN_MAX_MS
 					) {
 						graceTimer = setTimeout(drain, OUTPUT_QUIET_MS);
 						return;
@@ -654,6 +718,7 @@ export class BashExecutor extends EventEmitter {
 			});
 
 			proc.on('close', (code: number | null) => {
+				pipesClosed = true;
 				finish(exitCode ?? code);
 			});
 
@@ -875,6 +940,10 @@ export class BashExecutor extends EventEmitter {
 		for (const id of this.getActiveExecutionIds()) {
 			this.cancel(id);
 		}
+		// A command that just finished may not have its leftovers listed yet.
+		await Promise.all(
+			Array.from(this.orphanLookups.values(), lookup => lookup.done),
+		);
 		for (const proc of this.leftovers) {
 			const cleanup = this.leftoverCleanups.get(proc);
 			this.leftoverCleanups.delete(proc);
@@ -897,6 +966,11 @@ export class BashExecutor extends EventEmitter {
 		];
 		for (const proc of procs) {
 			if (isGroupAlive(proc)) signalGroups(proc, 'SIGKILL');
+		}
+		// Nothing can wait for a lookup here. If the process lives on (killAll
+		// outside an exit), kill what it finds as soon as it arrives.
+		for (const lookup of this.orphanLookups.values()) {
+			lookup.killOnArrival = true;
 		}
 		for (const entry of this.executions.values()) {
 			entry.releaseProtected?.();
@@ -922,8 +996,36 @@ export class BashExecutor extends EventEmitter {
 	 * running, such as a job it started with `cmd &`, so shutdown can stop it.
 	 * Dead groups are pruned every second: once its last member exits, the
 	 * group id can be reused by an unrelated process.
+	 *
+	 * On Windows, `heldPipes` says the command finished while something still
+	 * held its output pipes: a process cmd.exe started inherits them, however
+	 * the command redirects its output. Only then are cmd.exe's leftovers
+	 * looked up, as the lookup takes a few hundred ms.
 	 */
-	private trackLeftovers(proc: ChildProcess, onGone?: () => void): void {
+	private trackLeftovers(
+		proc: ChildProcess,
+		onGone?: () => void,
+		heldPipes?: {spawnedAt: number; exitedAt: number},
+	): void {
+		if (isWindows && heldPipes && proc.pid !== undefined) {
+			const lookup = {done: Promise.resolve(), killOnArrival: false};
+			lookup.done = findWindowsOrphans(
+				proc.pid,
+				heldPipes.spawnedAt - ORPHAN_CLOCK_SLACK_MS,
+				heldPipes.exitedAt + ORPHAN_CLOCK_SLACK_MS,
+			).then(pids => {
+				this.orphanLookups.delete(proc);
+				windowsOrphans.set(proc, pids);
+				if (lookup.killOnArrival) {
+					if (isGroupAlive(proc)) signalGroups(proc, 'SIGKILL');
+					onGone?.();
+					return;
+				}
+				this.trackLeftovers(proc, onGone);
+			});
+			this.orphanLookups.set(proc, lookup);
+			return;
+		}
 		if (!isGroupRunning(proc)) {
 			onGone?.();
 			return;

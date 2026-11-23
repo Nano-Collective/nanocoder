@@ -967,6 +967,70 @@ posixOnly('killAll SIGKILLs running commands and leftover jobs without waiting',
 	t.true(await isGoneWithin(leftoverPgid, 1000), 'the background job must be gone');
 });
 
+// #2342: on Windows, `start /b` returns at once and cmd.exe exits, so the job
+// it started is left running with no live parent. Shutdown must still reach it.
+const windowsOnly = process.platform === 'win32' ? test : test.skip;
+
+/* c8 ignore start -- the callbacks run in the Windows CI job */
+// Writes its pid to the file named by its first argument, then idles. A file
+// rather than stdout, so the pid does not depend on the output drain window.
+const PID_WRITER = join(mkdtempSync(join(tmpdir(), 'nc-pid-writer-')), 'pid-writer.cjs');
+writeFileSync(
+	PID_WRITER,
+	"require('fs').writeFileSync(process.argv[2], String(process.pid)); setInterval(() => {}, 1000);\n",
+);
+
+async function startDetachedJob(
+	t: ExecutionContext,
+	executor: BashExecutor,
+): Promise<number> {
+	const dir = mkdtempSync(join(tmpdir(), 'nc-start-b-'));
+	const pidFile = join(dir, 'pid');
+	let pid: number | undefined;
+	t.teardown(() => {
+		if (pid !== undefined && isLiveProcess(pid)) {
+			execFileSync('taskkill', ['/pid', String(pid), '/T', '/F'], {stdio: 'ignore'});
+		}
+		rmSync(dir, {recursive: true, force: true});
+	});
+
+	const result = await executor.execute(
+		`start /b node "${PID_WRITER}" "${pidFile}"`,
+	).promise;
+	t.is(result.exitCode, 0);
+
+	for (let tick = 0; tick < 50 && pid === undefined; tick++) {
+		try {
+			pid = Number(readFileSync(pidFile, 'utf8')) || undefined;
+		} catch {
+			await new Promise(resolve => setTimeout(resolve, 100));
+		}
+	}
+	if (pid === undefined) throw new Error('the start /b job never wrote its pid');
+	return pid;
+}
+
+windowsOnly('stopAll stops a job started with start /b after cmd.exe has exited', async t => {
+	const executor = createExecutor();
+	const pid = await startDetachedJob(t, executor);
+	t.true(isLiveProcess(pid), 'the start /b job should still be running');
+
+	await executor.stopAll();
+
+	t.true(await isGoneWithin(pid, 3000), 'the start /b job must be gone');
+});
+
+windowsOnly('killAll kills a job started with start /b after cmd.exe has exited', async t => {
+	const executor = createExecutor();
+	const pid = await startDetachedJob(t, executor);
+	t.true(isLiveProcess(pid), 'the start /b job should still be running');
+
+	executor.killAll();
+
+	t.true(await isGoneWithin(pid, 3000), 'the start /b job must be gone');
+});
+/* c8 ignore stop */
+
 // ============================================================================
 // Background jobs
 // ============================================================================
