@@ -425,7 +425,9 @@ export async function runTurnEngine<S>(
 		} else if (nativeToolCalls.length > 0) {
 			// Trust the native calls, but drop any tool-call text the model
 			// echoed alongside them so it does not leak into history.
-			parsed = unparsed(stripEmbeddedToolCallText(fullContent));
+			parsed = unparsed(
+				stripEmbeddedToolCallText(fullContent, prepared.availableNames),
+			);
 		} else {
 			parsed = parseToolCalls(fullContent, offeredNames, toolSchemas);
 		}
