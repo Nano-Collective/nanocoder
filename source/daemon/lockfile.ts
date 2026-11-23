@@ -135,6 +135,11 @@ export async function writeLockfile(lock: DaemonLock): Promise<void> {
 	await rename(tmp, path);
 }
 
+/**
+ * Remove the lockfile. When `expectedPid` is provided, the lockfile is only
+ * removed if its recorded PID matches, preventing an exiting daemon or stale
+ * lockfile reap from deleting a successor daemon's lockfile.
+ */
 export async function removeLockfile(
 	projectRoot: string,
 	expectedPid?: number,

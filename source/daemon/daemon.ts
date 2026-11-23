@@ -436,6 +436,12 @@ export async function startDaemon(opts: DaemonOptions): Promise<DaemonHandle> {
 				await toolManager.disconnectMCP();
 			} finally {
 				try {
+					// Removing the lockfile before closing the IPC server ensures
+					// callers of readLiveLockfile never observe a closed IPC endpoint
+					// while the lockfile is still present. A concurrent start landing
+					// in the microtask gap between removeLockfile and ipcServer.stop()
+					// will find no lockfile and proceed; DaemonIpcServer.start()
+					// already unlinks any lingering socket from a prior run.
 					await removeLockfile(opts.projectRoot, process.pid);
 				} finally {
 					await ipcServer.stop();

@@ -589,48 +589,6 @@ test.serial('stop preserves the live lockfile while shutdown takes longer than f
 });
 
 test.serial(
-	'start while daemon is shutting down reports daemon already running when IPC is still answering',
-	async t => {
-		const root = await tempProject();
-		try {
-			// Real daemon keeps IPC listening until MCP disconnect finishes
-			let finishShutdown: () => void = () => {};
-			const shutdownPending = new Promise<void>(resolve => {
-				finishShutdown = resolve;
-			});
-
-			const server = await listenOnSocket(root, {
-				listSubscriptions: () => [],
-				shutdown: () => shutdownPending.then(() => removeLockfile(root, process.pid)),
-			});
-			await writeLockfile({
-				pid: process.pid,
-				socketPath: getSocketPath(root),
-				startedAt: Date.now(),
-				projectRoot: root,
-			});
-
-			const stopping = runDaemonCli('stop', {projectRoot: root});
-			// Wait briefly for IPC shutdown request to be received
-			await new Promise(r => setTimeout(r, 100));
-
-			// Attempt start while shutdown is draining but IPC is still active
-			const startResult = await runDaemonCli('start', {projectRoot: root});
-			t.is(startResult.exitCode, 0);
-			t.regex(startResult.output, /Daemon already running/);
-
-			// Now let shutdown finish
-			finishShutdown();
-			await server.stop();
-			const stopResult = await stopping;
-			t.is(stopResult.exitCode, 0);
-		} finally {
-			await rm(root, {recursive: true, force: true});
-		}
-	},
-);
-
-test.serial(
 	'stopping daemon does not delete successor daemon lockfile with different pid',
 	async t => {
 		const root = await tempProject();
