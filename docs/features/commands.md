@@ -17,6 +17,7 @@ Type `/` in the chat input to see available commands. All commands start with `/
 | `/setup-config` | Open a config file (`agents.config.json`, `.mcp.json`, preferences) in your `$EDITOR`; lists the project and global copies to pick from |
 | `/clear` | Clear chat history |
 | `/model [browse]` | Switch between available models from any configured provider. `/model browse` opens the OpenRouter model browser (searchable, filterable by open/proprietary): Enter copies the highlighted model's ID to the clipboard and, when the active provider is OpenRouter, also switches the session to that model |
+| `/profile [name\|--clear]` | List configuration profiles, switch to a named profile, or clear the active profile (`/profile --clear`) (see [Named Configuration Profiles](../configuration/index.md#named-configuration-profiles)) |
 | `/status` | Display current status (CWD, provider, model, theme, available updates, AGENTS setup) |
 | `/tasks` | Manage task list for tracking complex work (see [Task Management](task-management.md)) |
 | `/plans` | View and manage persistent plan graphs: `/plans` (list), `/plans show [id]`, `/plans use <id\|none>`, `/plans delete <id>` (see [Persistent Plan Graphs](persistent-plans.md)) |

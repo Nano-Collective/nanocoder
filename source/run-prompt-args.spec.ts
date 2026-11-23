@@ -1,6 +1,7 @@
 import {Readable} from 'node:stream';
 import test from 'ava';
 import {
+	argsBeforeRun,
 	composePromptWithStdin,
 	parseRunPrompt,
 	readStdinText,
@@ -111,4 +112,18 @@ test('readStdinText stops once past the cap instead of buffering everything', as
 
 test('readStdinText returns an empty string for an empty stream', async t => {
 	t.is(await readStdinText(Readable.from([]), MAX), '');
+});
+
+test('argsBeforeRun keeps only the words before `run`', t => {
+	t.deepEqual(argsBeforeRun(['--mode', 'plan', 'run', 'go', 'test', '-v']), [
+		'--mode',
+		'plan',
+	]);
+	t.deepEqual(argsBeforeRun(['run', 'node', '--version']), []);
+});
+
+test('argsBeforeRun returns every argument when there is no `run`', t => {
+	t.deepEqual(argsBeforeRun(['--version']), ['--version']);
+	t.deepEqual(argsBeforeRun(['-h']), ['-h']);
+	t.deepEqual(argsBeforeRun([]), []);
 });

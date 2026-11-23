@@ -448,6 +448,31 @@ export interface DiskNanocoderConfig {
 	 * edit, or "auto"). Read by `loadVerifyConfig()`.
 	 */
 	verify?: VerifyConfig;
+	/** Name of the default profile to use when none is explicitly specified. */
+	defaultProfile?: string;
+	/** Named configuration profiles that bundle provider, model, mode, and section overrides. */
+	profiles?: DiskProfilesConfig;
+}
+
+/**
+ * Map of profile name to profile configuration.
+ */
+export interface DiskProfilesConfig {
+	[profileName: string]: DiskProfileConfig;
+}
+
+/**
+ * Configuration overrides applied by a named profile.
+ * Can override provider, model, mode, and any nanocoder.* section.
+ */
+export interface DiskProfileConfig
+	extends Partial<Omit<DiskNanocoderConfig, 'profiles' | 'defaultProfile'>> {
+	/** Active provider to use for this profile. */
+	provider?: string;
+	/** Model name to use for this profile. */
+	model?: string;
+	/** Mode to start in (normal, auto-accept, yolo, plan). */
+	mode?: DiskDefaultMode;
 }
 
 /**

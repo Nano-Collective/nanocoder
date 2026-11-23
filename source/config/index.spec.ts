@@ -12,6 +12,7 @@ import {
 	reloadAppConfig,
 } from './index';
 import {resolveTune} from './tune';
+import {updateConfigNestedValue} from './config-writer';
 
 type AppConfig = ReturnType<typeof import('./index.js').getAppConfig>;
 
@@ -2003,5 +2004,90 @@ test.serial(
 				t.is(appConfig.firewall?.rules?.blockAnyTypeInjection, false);
 			},
 		);
+	},
+);
+
+test.serial(
+	'loadAppConfig reads agents.config.json that starts with a UTF-8 BOM',
+	async t => {
+		const originalCwd = process.cwd();
+		const originalConfigDir = process.env.NANOCODER_CONFIG_DIR;
+		const testSubdir = join(verifyTestDir, 'bom-config');
+		const globalConfigDir = join(testSubdir, 'global-config');
+		mkdirSync(testSubdir, {recursive: true});
+		mkdirSync(globalConfigDir, {recursive: true});
+
+		try {
+			writeFileSync(
+				join(testSubdir, 'agents.config.json'),
+				'\uFEFF' +
+					JSON.stringify({nanocoder: {retries: {maxEmptyTurns: 7}}}),
+				'utf-8',
+			);
+			process.chdir(testSubdir);
+			process.env.NANOCODER_CONFIG_DIR = globalConfigDir;
+
+			const {resetPreferencesCache} = await import('./preferences.js');
+			resetPreferencesCache();
+			const {reloadAppConfig: reload, getAppConfig} = await import(
+				'./index.js'
+			);
+			reload();
+			t.is(getAppConfig().retries?.maxEmptyTurns, 7);
+		} finally {
+			clearAppConfig();
+			process.chdir(originalCwd);
+			if (originalConfigDir !== undefined) {
+				process.env.NANOCODER_CONFIG_DIR = originalConfigDir;
+			} else {
+				delete process.env.NANOCODER_CONFIG_DIR;
+			}
+			const {resetPreferencesCache} = await import('./preferences.js');
+			resetPreferencesCache();
+		}
+	},
+);
+
+test.serial(
+	'config set round-trips an agents.config.json that starts with a UTF-8 BOM',
+	t => {
+		const originalCwd = process.cwd();
+		const originalConfigDir = process.env.NANOCODER_CONFIG_DIR;
+		const testSubdir = join(verifyTestDir, 'bom-config-set');
+		const configFile = join(testSubdir, 'agents.config.json');
+		mkdirSync(testSubdir, {recursive: true});
+
+		try {
+			writeFileSync(
+				configFile,
+				'\uFEFF' +
+					JSON.stringify({nanocoder: {lsp: {autoDiscover: false}}}),
+				'utf-8',
+			);
+			process.chdir(testSubdir);
+			// getClosestConfigFile skips the cwd lookup once NANOCODER_CONFIG_DIR
+			// is set, so the env var has to go for the project file to be the
+			// active write target.
+			delete process.env.NANOCODER_CONFIG_DIR;
+
+			updateConfigNestedValue('retries', 'maxEmptyTurns', 9);
+
+			const raw = readFileSync(configFile, 'utf-8');
+			const written = JSON.parse(raw) as {
+				nanocoder?: {retries?: {maxEmptyTurns?: number}; lsp?: unknown};
+			};
+			t.is(written.nanocoder?.retries?.maxEmptyTurns, 9);
+			t.deepEqual(written.nanocoder?.lsp, {autoDiscover: false});
+			// The atomic rewrite normalises the file, dropping the BOM.
+			t.false(raw.startsWith('\uFEFF'));
+		} finally {
+			clearAppConfig();
+			process.chdir(originalCwd);
+			if (originalConfigDir !== undefined) {
+				process.env.NANOCODER_CONFIG_DIR = originalConfigDir;
+			} else {
+				delete process.env.NANOCODER_CONFIG_DIR;
+			}
+		}
 	},
 );
