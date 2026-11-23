@@ -13,7 +13,7 @@ import type {CustomToolMetadata} from '@/types/custom-tools';
 import type {ToolHandler} from '@/types/index';
 import {isRealPathInside} from '@/utils/fs/path-validation';
 import {signalProcessTree} from '@/utils/process-tree';
-import {isWindowsCmd, shellArgs} from '@/utils/shell-args';
+import {isWindowsCmd, shellArgs, shellEnv} from '@/utils/shell-args';
 import {
 	makeStreamCollector,
 	STDERR_TRUNCATION_NOTICE,
@@ -106,9 +106,12 @@ export function runScript(
 		// child must not be able to outlive the shell's timeout.
 		const child = spawn(options.shell, shellArgs(options.shell, script), {
 			cwd: options.cwd,
-			env: options.env,
+			env: {...options.env, ...shellEnv(options.shell, script)},
 			stdio: ['ignore', 'pipe', 'pipe'],
 			detached: process.platform !== 'win32',
+			// Own console, so the UTF-8 code page set for the script does not
+			// carry over to the user's terminal.
+			windowsHide: true,
 			// cmd.exe parses a command string itself. Let it receive the wrapper and
 			// the doubled quotes from shellArgs verbatim; libuv quoting them again
 			// changes the argv seen by the child command.

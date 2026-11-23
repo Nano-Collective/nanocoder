@@ -1,30 +1,37 @@
 import test from 'ava';
-import {isWindowsCmd, shellArgs} from './shell-args';
+import {isWindowsCmd, shellArgs, shellEnv} from './shell-args';
 
 test('shellArgs wraps one verbatim cmd.exe command and uses -c for posix shells', t => {
 	t.deepEqual(shellArgs('cmd.exe', 'echo hi'), [
 		'/d',
-		'/v:off',
+		'/v:on',
 		'/s',
 		'/c',
-		'"echo hi"',
+		'"chcp 65001 >nul 2>&1 & cmd /d /v:off /s /c !NC_CMD_SCRIPT!"',
 	]);
 	t.deepEqual(shellArgs('cmd', 'echo hi'), [
 		'/d',
-		'/v:off',
+		'/v:on',
 		'/s',
 		'/c',
-		'"echo hi"',
+		'"chcp 65001 >nul 2>&1 & cmd /d /v:off /s /c !NC_CMD_SCRIPT!"',
 	]);
 	t.deepEqual(shellArgs('C:\\Windows\\System32\\cmd.exe', 'echo hi'), [
 		'/d',
-		'/v:off',
+		'/v:on',
 		'/s',
 		'/c',
-		'"echo hi"',
+		'"chcp 65001 >nul 2>&1 & cmd /d /v:off /s /c !NC_CMD_SCRIPT!"',
 	]);
 	t.deepEqual(shellArgs('/bin/sh', 'echo hi'), ['-c', 'echo hi']);
 	t.deepEqual(shellArgs('/bin/bash', 'echo hi'), ['-c', 'echo hi']);
+});
+
+test('shellEnv hands the wrapped command to cmd.exe and nothing to posix shells', t => {
+	t.deepEqual(shellEnv('cmd.exe', 'echo "a" & echo b'), {
+		NC_CMD_SCRIPT: '"echo "a" & echo b"',
+	});
+	t.deepEqual(shellEnv('/bin/sh', 'echo hi'), {});
 });
 
 test('isWindowsCmd recognises cmd and cmd.exe by basename only', t => {

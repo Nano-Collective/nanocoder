@@ -21,7 +21,7 @@ import {
 	TIMEOUT_BASH_DEFAULT_MS,
 } from '@/constants';
 import {signalProcessTree} from '@/utils/process-tree';
-import {shellArgs} from '@/utils/shell-args';
+import {shellArgs, shellEnv} from '@/utils/shell-args';
 import {getShutdownManager} from '@/utils/shutdown';
 import {
 	makeStreamCollector,
@@ -337,8 +337,11 @@ export class BashExecutor extends EventEmitter {
 			const shell = process.env.ComSpec || 'cmd.exe';
 			proc = spawn(shell, shellArgs(shell, command), {
 				cwd,
-				env: childEnv,
+				env: {...childEnv, ...shellEnv(shell, command)},
 				windowsVerbatimArguments: true,
+				// Own console, so the UTF-8 code page set for the command does not
+				// carry over to the user's terminal.
+				windowsHide: true,
 				// Close stdin so commands that wait for input get EOF.
 				stdio: ['ignore', 'pipe', 'pipe'],
 			});

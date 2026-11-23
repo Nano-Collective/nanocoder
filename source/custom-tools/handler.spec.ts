@@ -113,7 +113,10 @@ spawnArgTest('runScript passes shellArgs argv into spawn', async t => {
 		shell: bin,
 		timeoutMs: 5_000,
 	});
-	t.is(result, 'EXIT_CODE: 0\n/d\n/v:off\n/s\n/c\n"echo hi"');
+	t.is(
+		result,
+		'EXIT_CODE: 0\n/d\n/v:on\n/s\n/c\n"chcp 65001 >nul 2>&1 & cmd /d /v:off /s /c !NC_CMD_SCRIPT!"',
+	);
 });
 
 const cmdExecutionTest = process.platform === 'win32' ? test : test.skip;
@@ -136,6 +139,16 @@ cmdExecutionTest('buildHandler preserves quoted cmd.exe arguments', async t => {
 	const value = 'a b&c|d<e>f^g"h!i';
 	const result = await handler({node: 'node', probe, value});
 	t.is(result, `EXIT_CODE: 0\n${JSON.stringify([value])}`);
+});
+
+cmdExecutionTest('runScript keeps non-ASCII cmd.exe output', async t => {
+	const result = await runScript('echo héllo wörld 你好', {
+		cwd: testDir,
+		env: process.env,
+		shell: process.env.ComSpec || 'cmd.exe',
+		timeoutMs: 10_000,
+	});
+	t.is(result, 'EXIT_CODE: 0\nhéllo wörld 你好');
 });
 /* c8 ignore stop */
 
