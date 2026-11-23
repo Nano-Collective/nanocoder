@@ -331,7 +331,7 @@ Options:
                       works directly, but the wheel no longer scrolls chat history.
   --json              Output execution results as a single well-formed JSON object to stdout.
                       Only valid with the "run" command. Always uses the plain runtime.
-  --output-format     Specify stdout format ('text' or 'json'). Synonym for --json.
+  --output-format     Specify stdout format ('text', 'json' or 'stream-json'). Synonym for --json.
   --acp               Run as an ACP (Agent Client Protocol) server for editor integration.
                       Communicates via JSON-RPC over stdin/stdout. Refuses an untrusted
                       directory unless --trust-directory is passed.
@@ -370,7 +370,9 @@ Examples:
 	process.exit(0);
 }
 
-const {validateCliArgs} = await import('./cli-args.js');
+const {resolveMachineOutputErrors, validateCliArgs} = await import(
+	'./cli-args.js'
+);
 const cliArgsError = validateCliArgs(args);
 if (cliArgsError) {
 	console.error(cliArgsError);
@@ -378,8 +380,10 @@ if (cliArgsError) {
 }
 
 // Validate output format value to prevent injection
-function isValidOutputFormat(value: unknown): value is 'text' | 'json' {
-	return value === 'text' || value === 'json';
+function isValidOutputFormat(
+	value: unknown,
+): value is 'text' | 'json' | 'stream-json' {
+	return value === 'text' || value === 'json' || value === 'stream-json';
 }
 
 async function main(): Promise<void> {
@@ -586,7 +590,7 @@ async function main(): Promise<void> {
 	}
 
 	// Extract --json or --output-format json. Accept spaced and fused formats.
-	let outputFormat: 'text' | 'json' = 'text';
+	let outputFormat: 'text' | 'json' | 'stream-json' = 'text';
 	for (let i = 0; i < args.length; i++) {
 		const arg = args[i];
 		if (arg === '--json') {
@@ -596,7 +600,7 @@ async function main(): Promise<void> {
 			const value = args[i + 1];
 			if (!isValidOutputFormat(value)) {
 				console.error(
-					`Invalid --output-format value: "${value}". Must be 'text' or 'json'.`,
+					`Invalid --output-format value: "${value}". Must be 'text', 'json' or 'stream-json'.`,
 				);
 				process.exit(1);
 			}
@@ -606,7 +610,7 @@ async function main(): Promise<void> {
 			const rawValue = arg.slice('--output-format='.length);
 			if (!isValidOutputFormat(rawValue)) {
 				console.error(
-					`Invalid --output-format value: "${rawValue}". Must be 'text' or 'json'.`,
+					`Invalid --output-format value: "${rawValue}". Must be 'text', 'json' or 'stream-json'.`,
 				);
 				process.exit(1);
 			}
@@ -614,6 +618,13 @@ async function main(): Promise<void> {
 			break;
 		}
 	}
+
+	// 'json' prints one report at the end; 'stream-json' streams NDJSON
+	// events to stdout plus that same report as the final `result` event.
+	// Both are machine-only stdout protocols, so they share every guard
+	// below that --json used to carry alone.
+	const isMachineOutputFormat =
+		outputFormat === 'json' || outputFormat === 'stream-json';
 
 	// Check for non-interactive mode (run command). The filtering lives in
 	// ./run-prompt-args so it exists exactly once — a hand-written copy of it
@@ -768,9 +779,26 @@ async function main(): Promise<void> {
 		process.exit(1);
 	}
 
-	// Validate execution constraints for --json rules
-	if (outputFormat === 'json' && !nonInteractiveMode) {
-		console.error("Error: --json can only be used with the 'run' command.");
+	// Validate execution constraints for the machine-output formats
+	// (--json / --output-format stream-json). The five guards live in
+	// resolveMachineOutputErrors so the messages exist exactly once; each
+	// site below reads its own field, keeping the order the guards had
+	// among the --plain / review-TTY checks between them. `--acp` and
+	// `--no-plain` are read here (rather than at their later uses) because
+	// the helper needs them.
+	const acpMode = args.includes('--acp');
+	const noPlainRequested = args.includes('--no-plain');
+	const machineOutputErrors = resolveMachineOutputErrors({
+		outputFormat,
+		nonInteractiveMode,
+		isRunCommand,
+		isReviewCommand,
+		vscodeMode,
+		noPlainRequested,
+		acpMode,
+	});
+	if (machineOutputErrors.runOnly) {
+		console.error(machineOutputErrors.runOnly);
 		process.exit(1);
 	}
 
@@ -789,7 +817,6 @@ async function main(): Promise<void> {
 	// Auto-detect: enable when stdout isn't a TTY or the env looks like CI,
 	// unless --no-plain forces the Ink path.
 	const plainRequested = args.includes('--plain');
-	const noPlainRequested = args.includes('--no-plain');
 	if (plainRequested && noPlainRequested) {
 		console.error('Cannot pass both --plain and --no-plain.');
 		process.exit(1);
@@ -806,15 +833,13 @@ async function main(): Promise<void> {
 	}
 
 	// Enforce exclusive stdout protocol constraints
-	if (outputFormat === 'json' && vscodeMode) {
-		console.error('Error: --json cannot be combined with --vscode.');
+	if (machineOutputErrors.vscode) {
+		console.error(machineOutputErrors.vscode);
 		process.exit(1);
 	}
 
-	if (outputFormat === 'json' && isReviewCommand) {
-		console.error(
-			'Error: --json cannot be used with `nanocoder review`. Review output is displayed in the interactive terminal.',
-		);
+	if (machineOutputErrors.review) {
+		console.error(machineOutputErrors.review);
 		process.exit(1);
 	}
 
@@ -835,13 +860,11 @@ async function main(): Promise<void> {
 		(!process.stdout.isTTY || ciDetected || stdinPiped);
 	// --json is a plain-shell protocol: the Ink runtime has no JSON output, so
 	// honouring the flag means taking the plain path even in a real terminal.
-	if (outputFormat === 'json' && isRunCommand && noPlainRequested) {
-		console.error(
-			'Error: --json needs the plain shell and cannot be combined with --no-plain.',
-		);
+	if (machineOutputErrors.noPlain) {
+		console.error(machineOutputErrors.noPlain);
 		process.exit(1);
 	}
-	const plainForJson = outputFormat === 'json' && isRunCommand;
+	const plainForJson = isMachineOutputFormat && isRunCommand;
 	const plainMode = plainRequested || plainAuto || plainForJson;
 
 	// Hard-error when `review` lands in a non-interactive context (piped
@@ -855,10 +878,8 @@ async function main(): Promise<void> {
 	}
 
 	// --acp: Agent Client Protocol server mode for editor integration
-	const acpMode = args.includes('--acp');
-
-	if (outputFormat === 'json' && acpMode) {
-		console.error('Error: --json cannot be combined with --acp.');
+	if (machineOutputErrors.acp) {
+		console.error(machineOutputErrors.acp);
 		process.exit(1);
 	}
 
