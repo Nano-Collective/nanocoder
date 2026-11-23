@@ -410,6 +410,24 @@ async function main(): Promise<void> {
 
 	const vscodeMode = args.includes('--vscode');
 
+	// Everything after `run` is prompt text. A token there that only looks
+	// like an option is a mention, not a flag, so a flag with an unusable
+	// value inside the prompt is ignored with a warning — the pre-validation
+	// behaviour — while the same flag before `run` stays a hard error.
+	const runCommandIndex = args.indexOf('run');
+	const flagValueProblem = (message: string, flagIndex: number): void => {
+		if (runCommandIndex !== -1 && flagIndex > runCommandIndex) {
+			console.error(`Ignoring option inside the run prompt: ${message}`);
+			return;
+		}
+		console.error(message);
+		process.exit(1);
+	};
+	// Flags that are not `run` options at all (--continue/--resume/--acp)
+	// only count before `run`; the prompt keeps them as text.
+	const preRunArgs =
+		runCommandIndex === -1 ? args : args.slice(0, runCommandIndex);
+
 	// Extract VS Code port if specified
 	let vscodePort: number | undefined;
 	const portArgIndex = args.findIndex(
@@ -422,21 +440,23 @@ async function main(): Promise<void> {
 		// The flag is present, so a value is required. An explicitly empty or
 		// missing value must fail instead of quietly asking for a random port.
 		if (value === undefined || value === '') {
-			console.error(
+			flagValueProblem(
 				'--vscode-port requires a value. Use an integer between 1 and 65535.',
+				portArgIndex,
 			);
-			process.exit(1);
+		} else {
+			// Strict integer: a numeric prefix like `8080abc` or an out-of-range
+			// value must be reported, not silently rounded down.
+			const port = /^\d+$/.test(value) ? Number(value) : Number.NaN;
+			if (!Number.isInteger(port) || port < 1 || port > 65535) {
+				flagValueProblem(
+					`Invalid --vscode-port value: "${value}". Use an integer between 1 and 65535.`,
+					portArgIndex,
+				);
+			} else {
+				vscodePort = port;
+			}
 		}
-		// Strict integer: a numeric prefix like `8080abc` or an out-of-range
-		// value must be reported, not silently rounded down.
-		const port = /^\d+$/.test(value) ? Number(value) : Number.NaN;
-		if (!Number.isInteger(port) || port < 1 || port > 65535) {
-			console.error(
-				`Invalid --vscode-port value: "${value}". Use an integer between 1 and 65535.`,
-			);
-			process.exit(1);
-		}
-		vscodePort = port;
 	}
 
 	// Extract --profile if specified
@@ -452,12 +472,12 @@ async function main(): Promise<void> {
 				: args[profileArgIndex + 1];
 	if (profileArgIndex !== -1) {
 		if (!profileValue || profileValue.startsWith('-')) {
-			console.error('--profile requires a profile name.');
-			process.exit(1);
+			flagValueProblem('--profile requires a profile name.', profileArgIndex);
+		} else {
+			cliProfile = profileValue.trim();
+			const {setCliProfile} = await import('@/config/profile');
+			setCliProfile(cliProfile);
 		}
-		cliProfile = profileValue.trim();
-		const {setCliProfile} = await import('@/config/profile');
-		setCliProfile(cliProfile);
 	}
 
 	// Extract --provider if specified — validate against allowlist pattern
@@ -480,10 +500,10 @@ async function main(): Promise<void> {
 		if (/^[a-zA-Z0-9 _./():+@-]+$/.test(value) && value.trim() !== '') {
 			cliProvider = value.trim();
 		} else {
-			console.error(
+			flagValueProblem(
 				`Invalid --provider value: "${value}". Provider name may contain letters, digits, spaces and _ . / ( ) : + @ - only. Quote names with spaces, e.g. --provider "GitHub Copilot".`,
+				providerArgIndex,
 			);
-			process.exit(1);
 		}
 	}
 
@@ -505,10 +525,10 @@ async function main(): Promise<void> {
 		if (/^[a-zA-Z0-9_/.:@+-]+$/.test(value)) {
 			cliModel = value;
 		} else {
-			console.error(
+			flagValueProblem(
 				`Invalid --model value: "${value}". Model name must contain only alphanumeric characters and - _ . / : @ +`,
+				modelArgIndex,
 			);
-			process.exit(1);
 		}
 	}
 
@@ -531,10 +551,10 @@ async function main(): Promise<void> {
 		if (limit !== null) {
 			setSessionContextLimit(limit);
 		} else {
-			console.error(
+			flagValueProblem(
 				`Invalid --context-max value: "${contextMaxValue}". Use a positive number, e.g. 8192 or 128k`,
+				contextMaxArgIndex,
 			);
-			process.exit(1);
 		}
 	}
 
@@ -549,10 +569,11 @@ async function main(): Promise<void> {
 		if (arg === '--mode') {
 			rawValue = args[i + 1];
 			if (!rawValue || rawValue.startsWith('-')) {
-				console.error(
+				flagValueProblem(
 					`--mode requires a value. Must be one of: ${VALID_MODES.join(', ')}`,
+					i,
 				);
-				process.exit(1);
+				break;
 			}
 		} else if (arg.startsWith('--mode=')) {
 			rawValue = arg.slice('--mode='.length);
@@ -561,10 +582,10 @@ async function main(): Promise<void> {
 		if ((VALID_MODES as readonly string[]).includes(rawValue)) {
 			cliMode = rawValue as CliMode;
 		} else {
-			console.error(
+			flagValueProblem(
 				`Invalid --mode value: "${rawValue}". Must be one of: ${VALID_MODES.join(', ')}`,
+				i,
 			);
-			process.exit(1);
 		}
 		break;
 	}
@@ -595,20 +616,22 @@ async function main(): Promise<void> {
 		} else if (arg === '--output-format' && args[i + 1]) {
 			const value = args[i + 1];
 			if (!isValidOutputFormat(value)) {
-				console.error(
+				flagValueProblem(
 					`Invalid --output-format value: "${value}". Must be 'text' or 'json'.`,
+					i,
 				);
-				process.exit(1);
+				break;
 			}
 			outputFormat = value;
 			break;
 		} else if (arg.startsWith('--output-format=')) {
 			const rawValue = arg.slice('--output-format='.length);
 			if (!isValidOutputFormat(rawValue)) {
-				console.error(
+				flagValueProblem(
 					`Invalid --output-format value: "${rawValue}". Must be 'text' or 'json'.`,
+					i,
 				);
-				process.exit(1);
+				break;
 			}
 			outputFormat = rawValue;
 			break;
@@ -617,8 +640,8 @@ async function main(): Promise<void> {
 
 	// Check for non-interactive mode (run command). The filtering lives in
 	// ./run-prompt-args so it exists exactly once — a hand-written copy of it
-	// in cli.spec.ts had drifted six flags behind this.
-	const runCommandIndex = args.indexOf('run');
+	// in cli.spec.ts had drifted six flags behind this. `runCommandIndex` was
+	// computed with the option extraction above.
 	const isRunCommand = runCommandIndex !== -1;
 	let nonInteractivePrompt = parseRunPrompt(args);
 
@@ -651,12 +674,12 @@ async function main(): Promise<void> {
 			try {
 				nonInteractivePrompt = readFileSync(promptFile, 'utf8');
 			} catch (error) {
-				console.error(
+				flagValueProblem(
 					`Could not read --prompt-file "${promptFile}": ${
 						error instanceof Error ? error.message : String(error)
 					}`,
+					promptFileIndex,
 				);
-				process.exit(1);
 			}
 		}
 	}
@@ -740,8 +763,9 @@ async function main(): Promise<void> {
 
 	// --continue/-c and --resume/-r: session resume flags for the interactive
 	// TUI only (mirrors Claude Code's -c/-r). Mutually exclusive.
-	const continueRequested = args.includes('--continue') || args.includes('-c');
-	const resumeFlagIndex = args.findIndex(
+	const continueRequested =
+		preRunArgs.includes('--continue') || preRunArgs.includes('-c');
+	const resumeFlagIndex = preRunArgs.findIndex(
 		arg => arg === '--resume' || arg === '-r',
 	);
 	const resumeRequested = resumeFlagIndex !== -1;
@@ -778,7 +802,11 @@ async function main(): Promise<void> {
 	// (rather than silently dropping) if the user passes it interactively
 	// or with `review` (review is TTY-only but sets nonInteractiveMode).
 	const trustDirectoryRequested = args.includes('--trust-directory');
-	if (trustDirectoryRequested && !isRunCommand && !args.includes('--acp')) {
+	if (
+		trustDirectoryRequested &&
+		!isRunCommand &&
+		!preRunArgs.includes('--acp')
+	) {
 		console.error(
 			'--trust-directory only applies to non-interactive commands (`nanocoder run ...`, `nanocoder daemon start`, `nanocoder verify`, `nanocoder --acp`); ignoring.',
 		);
@@ -855,7 +883,7 @@ async function main(): Promise<void> {
 	}
 
 	// --acp: Agent Client Protocol server mode for editor integration
-	const acpMode = args.includes('--acp');
+	const acpMode = preRunArgs.includes('--acp');
 
 	if (outputFormat === 'json' && acpMode) {
 		console.error('Error: --json cannot be combined with --acp.');

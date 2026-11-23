@@ -79,17 +79,17 @@ test('review rejects unknown options instead of calling them extra targets', t =
 test('init rejects unknown and unsupported options, accepting its own', t => {
 	t.is(
 		validateInitArgs(['init', '--bogus', '--preset', 'rust']),
-		'Unknown option "--bogus". Run "nanocoder --help" to see available options.',
+		'Unknown option "--bogus". Run "nanocoder init --help" to see available options.',
 	);
 	// Global flags are not honoured by `init`, so accepting them would ignore
 	// them silently — the same symptom as an unknown option.
 	t.is(
 		validateInitArgs(['init', '--provider', 'ollama', '--preset', 'rust']),
-		'Unknown option "--provider". Run "nanocoder --help" to see available options.',
+		'Unknown option "--provider". Run "nanocoder init --help" to see available options.',
 	);
 	t.is(
 		validateInitArgs(['init', '--json']),
-		'Unknown option "--json". Run "nanocoder --help" to see available options.',
+		'Unknown option "--json". Run "nanocoder init --help" to see available options.',
 	);
 	t.is(
 		validateInitArgs(['init', '--presett', 'rust']),
