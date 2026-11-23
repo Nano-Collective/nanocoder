@@ -1,21 +1,21 @@
-import clipboard from 'clipboardy';
 import {errorMsg, successMsg, warningMsg} from '@/components/message-factory';
 import {COMMIT_SYSTEM_PROMPT} from '@/tools/git/commit-prompt';
 import {execGit, hasStagedChanges, truncateDiff} from '@/tools/git/utils';
 import type {Command} from '@/types/commands';
 import type {Message} from '@/types/core';
+import {type ClipboardRoute, copyTextToClipboard} from '@/utils/clipboard';
 import {formatError} from '@/utils/error-formatter';
 
 type CommitDependencies = {
 	hasStagedChanges: () => Promise<boolean>;
 	execGit: (args: string[]) => Promise<string>;
-	writeClipboard: (text: string) => Promise<void>;
+	writeClipboard: (text: string) => Promise<ClipboardRoute | void>;
 };
 
 const defaultDependencies: CommitDependencies = {
 	hasStagedChanges,
 	execGit,
-	writeClipboard: text => clipboard.write(text),
+	writeClipboard: text => copyTextToClipboard(text),
 };
 
 const COPY_FLAGS = new Set(['--copy', '-c']);
@@ -91,9 +91,11 @@ export function createCommitCommand(
 
 				if (copyToClipboard) {
 					try {
-						await dependencies.writeClipboard(commitMessage);
+						const route = await dependencies.writeClipboard(commitMessage);
 						return successMsg(
-							`${commitMessage}\n\nCopied to clipboard.`,
+							route === 'osc52'
+								? `${commitMessage}\n\nSent to the terminal clipboard via OSC 52 (the terminal does not confirm receipt).`
+								: `${commitMessage}\n\nCopied to clipboard.`,
 							'commit',
 						);
 					} catch (error) {
