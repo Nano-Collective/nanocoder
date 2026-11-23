@@ -1,8 +1,6 @@
 import {readFileSync} from 'node:fs';
-import {
-	type JsonSchemaDocument,
-	validateJsonDocument,
-} from '@/tools/runtime/schema-validate';
+import type {ErrorObject, ValidateFunction} from 'ajv';
+import type {JsonSchemaDocument} from '@/tools/runtime/schema-validate';
 import type {ValidationErrorDetail} from '@/types/core';
 
 /**
@@ -27,12 +25,57 @@ function errorMessage(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
 }
 
+let ajvPromise: Promise<import('ajv').default> | undefined;
+const compiledSchemas = new WeakMap<JsonSchemaDocument, ValidateFunction>();
+
+async function compileSchema(
+	schema: JsonSchemaDocument,
+): Promise<ValidateFunction> {
+	const cached = compiledSchemas.get(schema);
+	if (cached) return cached;
+
+	ajvPromise ??= import('ajv').then(
+		({default: Ajv}) => new Ajv({allErrors: true, multipleOfPrecision: 12}),
+	);
+	const ajv = await ajvPromise;
+	const validate = ajv.compile(schema);
+	compiledSchemas.set(schema, validate);
+	return validate;
+}
+
+function pointerPath(error: ErrorObject): string {
+	const segments = error.instancePath
+		.split('/')
+		.slice(1)
+		.map(segment => segment.replace(/~1/g, '/').replace(/~0/g, '~'));
+	if (error.keyword === 'required') {
+		const missing = (error.params as {missingProperty?: string})
+			.missingProperty;
+		if (missing !== undefined) segments.push(missing);
+	}
+	return segments.reduce((path, segment) => {
+		if (/^(0|[1-9]\d*)$/.test(segment)) return `${path}[${segment}]`;
+		return path ? `${path}.${segment}` : segment;
+	}, '');
+}
+
+function validationErrors(
+	errors: ErrorObject[] | null | undefined,
+): ValidationErrorDetail[] {
+	return (errors ?? []).map(error => ({
+		path: pointerPath(error),
+		message: error.message ?? `must satisfy the ${error.keyword} constraint`,
+	}));
+}
+
 /**
  * Load a schema from the flag value. A value starting with `{` or `[` is
  * inline JSON; anything else is a file path. Inline is checked first so a
  * typo in the JSON reports the parse error rather than "file not found".
  */
-export function loadJsonSchema(rawValue: string): JsonSchemaDocument {
+export async function loadJsonSchema(
+	rawValue: string,
+): Promise<JsonSchemaDocument> {
 	const value = rawValue.trim();
 	if (!value) {
 		throw new Error(
@@ -68,7 +111,13 @@ export function loadJsonSchema(rawValue: string): JsonSchemaDocument {
 		);
 	}
 
-	return parsed as JsonSchemaDocument;
+	const schema = parsed as JsonSchemaDocument;
+	try {
+		await compileSchema(schema);
+	} catch (error) {
+		throw new Error(`Invalid --json-schema: ${errorMessage(error)}`);
+	}
+	return schema;
 }
 
 /**
@@ -94,16 +143,18 @@ export function parseJsonDocument(
 }
 
 /** Parse and validate one final answer. */
-export function validateStructuredOutput(
+export async function validateStructuredOutput(
 	text: string,
 	schema: JsonSchemaDocument,
-): StructuredOutputValidation {
+): Promise<StructuredOutputValidation> {
 	const parsed = parseJsonDocument(text);
 	if (!parsed.ok) {
 		return {ok: false, errors: [], parseError: parsed.error};
 	}
-	const errors = validateJsonDocument(parsed.value, schema);
-	return {ok: errors.length === 0, value: parsed.value, errors};
+	const validate = await compileSchema(schema);
+	const valid = validate(parsed.value);
+	const errors = validationErrors(validate.errors);
+	return {ok: valid, value: parsed.value, errors};
 }
 
 /** Turn a failed validation into one readable sentence for the retry prompt. */

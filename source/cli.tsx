@@ -334,11 +334,6 @@ Options:
   --json              Output execution results as a single well-formed JSON object to stdout.
                       Only valid with the "run" command. Always uses the plain runtime.
   --output-format     Specify stdout format ('text' or 'json'). Synonym for --json.
-  --json-schema       Validate the final run answer against a JSON Schema. Takes a
-                      schema file path or inline JSON (quote it). On failure the
-                      validator errors are sent back to the model and retried; the
-                      run exits non-zero if it never validates. Always uses the
-                      plain runtime.
   --acp               Run as an ACP (Agent Client Protocol) server for editor integration.
                       Communicates via JSON-RPC over stdin/stdout. Refuses an untrusted
                       directory unless --trust-directory is passed.
@@ -652,7 +647,7 @@ async function main(): Promise<void> {
 		}
 		const {loadJsonSchema} = await import('./plain/structured-output.js');
 		try {
-			jsonSchema = loadJsonSchema(rawValue);
+			jsonSchema = await loadJsonSchema(rawValue);
 		} catch (error) {
 			console.error(error instanceof Error ? error.message : String(error));
 			process.exit(1);

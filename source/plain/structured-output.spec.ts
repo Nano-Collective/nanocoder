@@ -17,54 +17,54 @@ const schema = {
 	properties: {ok: {type: 'boolean'}},
 } as const;
 
-test('loads inline JSON', t => {
-	t.deepEqual(loadJsonSchema(JSON.stringify(schema)), schema);
+test('loads and compiles inline JSON Schema', async t => {
+	t.deepEqual(await loadJsonSchema(JSON.stringify(schema)), schema);
 });
 
-test('loads a schema file', t => {
+test('loads and compiles a schema file', async t => {
 	const directory = mkdtempSync(join(tmpdir(), 'nanocoder-schema-'));
 	const file = join(directory, 'schema.json');
 	try {
 		writeFileSync(file, JSON.stringify(schema));
-		t.deepEqual(loadJsonSchema(file), schema);
+		t.deepEqual(await loadJsonSchema(file), schema);
 	} finally {
 		rmSync(directory, {recursive: true, force: true});
 	}
 });
 
-test('a UTF-8 BOM in a schema file is ignored', t => {
+test('a UTF-8 BOM in a schema file is ignored', async t => {
 	const directory = mkdtempSync(join(tmpdir(), 'nanocoder-schema-'));
 	const file = join(directory, 'schema.json');
 	try {
 		writeFileSync(file, `\uFEFF${JSON.stringify(schema)}`);
-		t.deepEqual(loadJsonSchema(file), schema);
+		t.deepEqual(await loadJsonSchema(file), schema);
 	} finally {
 		rmSync(directory, {recursive: true, force: true});
 	}
 });
 
-test('rejects an empty value', t => {
-	t.throws(() => loadJsonSchema('  '), {message: /requires a schema/});
+test('rejects an empty value', async t => {
+	await t.throwsAsync(loadJsonSchema('  '), {message: /requires a schema/});
 });
 
-test('reports a missing schema file', t => {
-	t.throws(() => loadJsonSchema('definitely-missing-schema.json'), {
+test('reports a missing schema file', async t => {
+	await t.throwsAsync(loadJsonSchema('definitely-missing-schema.json'), {
 		message: /Could not read --json-schema file/,
 	});
 });
 
-test('reports invalid inline JSON', t => {
-	t.throws(() => loadJsonSchema('{"type":'), {
+test('reports invalid inline JSON', async t => {
+	await t.throwsAsync(loadJsonSchema('{"type":'), {
 		message: /Could not parse --json-schema inline JSON/,
 	});
 });
 
-test('reports invalid JSON in a schema file', t => {
+test('reports invalid JSON in a schema file', async t => {
 	const directory = mkdtempSync(join(tmpdir(), 'nanocoder-schema-'));
 	const file = join(directory, 'schema.json');
 	try {
 		writeFileSync(file, 'not json');
-		t.throws(() => loadJsonSchema(file), {
+		await t.throwsAsync(loadJsonSchema(file), {
 			message: /Could not parse --json-schema file/,
 		});
 	} finally {
@@ -72,10 +72,16 @@ test('reports invalid JSON in a schema file', t => {
 	}
 });
 
-test('rejects a non-object schema root', t => {
-	t.throws(() => loadJsonSchema('[1,2]'), {message: /JSON object at the root/});
-	t.throws(() => loadJsonSchema('"object"'), {
+test('rejects a non-object schema root', async t => {
+	await t.throwsAsync(loadJsonSchema('[1,2]'), {message: /JSON object at the root/});
+	await t.throwsAsync(loadJsonSchema('"object"'), {
 		message: /Could not read --json-schema file/,
+	});
+});
+
+test('rejects an invalid schema before a model run', async t => {
+	await t.throwsAsync(loadJsonSchema('{"type":"strin"}'), {
+		message: /Invalid --json-schema/,
 	});
 });
 
@@ -104,30 +110,88 @@ test('rejects an empty answer', t => {
 	t.false(result.ok);
 });
 
-test('validates a document and reports paths', t => {
-	const good = validateStructuredOutput('{"ok":true}', schema);
+test('validates a document and reports paths', async t => {
+	const good = await validateStructuredOutput('{"ok":true}', schema);
 	t.true(good.ok);
 	t.deepEqual(good.value, {ok: true});
 
-	const bad = validateStructuredOutput('{"ok":"yes"}', schema);
+	const bad = await validateStructuredOutput('{"ok":"yes"}', schema);
 	t.false(bad.ok);
 	t.is(bad.errors.length, 1);
 	t.is(bad.errors[0].path, 'ok');
 });
 
-test('describes parse and validation failures', t => {
+test('describes parse and validation failures', async t => {
 	t.regex(
 		describeStructuredOutputFailure(
-			validateStructuredOutput('not json', schema),
+			await validateStructuredOutput('not json', schema),
 		),
 		/not a single valid JSON document/,
 	);
 	t.regex(
 		describeStructuredOutputFailure(
-			validateStructuredOutput('{"ok":"yes"}', schema),
+			await validateStructuredOutput('{"ok":"yes"}', schema),
 		),
-		/ok: expected boolean/,
+		/ok: must be boolean/,
 	);
+});
+
+test('validates pattern alternation with Ajv', async t => {
+	const result = await validateStructuredOutput('"pass"', {
+		type: 'string',
+		pattern: '^(pass|fail)$',
+	});
+	t.true(result.ok);
+});
+
+test('validates conditional schemas with Ajv', async t => {
+	const conditionalSchema = {
+		type: 'object',
+		properties: {
+			kind: {enum: ['number', 'text']},
+			value: {},
+		},
+		if: {properties: {kind: {const: 'number'}}, required: ['kind']},
+		then: {properties: {value: {type: 'number'}}, required: ['value']},
+	};
+	const valid = await validateStructuredOutput(
+		'{"kind":"number","value":0.3}',
+		conditionalSchema,
+	);
+	t.true(valid.ok);
+	const invalid = await validateStructuredOutput(
+		'{"kind":"number","value":"0.3"}',
+		conditionalSchema,
+	);
+	t.false(invalid.ok);
+});
+
+test('validates multipleOf using Ajv decimal handling', async t => {
+	const result = await validateStructuredOutput('0.3', {
+		type: 'number',
+		multipleOf: 0.1,
+	});
+	t.true(result.ok);
+});
+
+test('enforces propertyNames and contains keywords', async t => {
+	const schema = {
+		type: 'object',
+		propertyNames: {pattern: '^[a-z]+$'},
+		properties: {
+			labels: {type: 'array', contains: {const: 'required'}},
+		},
+	};
+	const valid = await validateStructuredOutput(
+		'{"labels":["optional","required"]}',
+		schema,
+	);
+	t.true(valid.ok);
+	const invalid = await validateStructuredOutput(
+		'{"Bad-Key":["optional"]}',
+		schema,
+	);
+	t.false(invalid.ok);
 });
 
 test('the correction message asks for one bare JSON document', t => {

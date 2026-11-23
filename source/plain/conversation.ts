@@ -402,7 +402,7 @@ async function runPlainConversationBody(
 				accumulatedReasoning = reasoningBeforeTurn;
 				if (!isJson) {
 					writeError(
-						`Malformed tool call: ${error} — asking the model to retry (${attempt}/${maxMalformedRetries}).`,
+						`Malformed tool call: ${error}, asking the model to retry (${attempt}/${maxMalformedRetries}).`,
 					);
 				}
 			},
@@ -425,7 +425,7 @@ async function runPlainConversationBody(
 					writeStatus(message);
 				}
 			},
-			onFinalAnswer: ({content, finalTurn, prepared}) => {
+			onFinalAnswer: async ({content, finalTurn, prepared}) => {
 				// Only nudge when the walkthrough will actually outlive the run.
 				// `nanocoder --plain` deletes its ephemeral artifact directory on
 				// exit and reports nothing about the walkthrough, so forcing one
@@ -459,7 +459,10 @@ async function runPlainConversationBody(
 				}
 
 				if (jsonSchema) {
-					const validation = validateStructuredOutput(content, jsonSchema);
+					const validation = await validateStructuredOutput(
+						content,
+						jsonSchema,
+					);
 					if (validation.ok) {
 						structuredValue = validation.value;
 						return {kind: 'finish'};
@@ -483,7 +486,7 @@ async function runPlainConversationBody(
 					schemaRetryCount += 1;
 					if (!isJson) {
 						writeError(
-							`JSON schema validation failed: ${problem} — asking the model to retry (${schemaRetryCount}/${maxMalformedRetries}).`,
+							`JSON schema validation failed: ${problem}, asking the model to retry (${schemaRetryCount}/${maxMalformedRetries}).`,
 						);
 					}
 					return {

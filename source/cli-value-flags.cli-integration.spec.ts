@@ -280,6 +280,10 @@ test('--json-schema validates its value before rejecting --no-plain', t => {
 	t.is(badInline.status, 1);
 	t.true(badInline.stderr.includes('Could not parse --json-schema inline JSON'));
 
+	const badSchema = runCli(['--json-schema={"type":"strin"}', 'run', 'hello']);
+	t.is(badSchema.status, 1);
+	t.true(badSchema.stderr.includes('Invalid --json-schema'));
+
 	const valid = runCli(['--json-schema={"type":"object"}', 'run', 'hello']);
 	t.is(valid.status, 1);
 	t.true(valid.stderr.includes('--json-schema needs the plain shell'));

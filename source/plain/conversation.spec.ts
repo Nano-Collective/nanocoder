@@ -3007,7 +3007,7 @@ test.serial(
 		if (outcome.kind === "error") {
 			t.regex(outcome.message, /did not validate against the JSON Schema/);
 			t.regex(outcome.message, /after 3 attempts/);
-			t.regex(outcome.message, /issues: missing required property/);
+			t.regex(outcome.message, /issues: must have required property/);
 		}
 	},
 );
