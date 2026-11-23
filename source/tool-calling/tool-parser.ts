@@ -338,9 +338,15 @@ function detectMalformedJSONToolCall(
  * prose discussing tool call shapes doesn't get silently erased on turns
  * where the model never actually called a tool.
  */
-export function stripEmbeddedToolCallText(content: unknown): string {
+export function stripEmbeddedToolCallText(
+	content: unknown,
+	toolNames: readonly string[],
+): string {
 	const contentStr = ensureString(content);
-	const afterXml = XMLToolCallParser.removeToolCallsFromContent(contentStr);
+	const afterXml = XMLToolCallParser.removeToolCallsFromContent(
+		contentStr,
+		toolNames,
+	);
 	const {cleanedContent: afterFnTag} = parseFunctionTagToolCalls(afterXml);
 	const {cleanedContent} = parseJSONToolCalls(afterFnTag);
 	return normalizeWhitespace(cleanedContent);
@@ -426,8 +432,10 @@ export function parseToolCalls(
 		const convertedCalls = XMLToolCallParser.convertToToolCalls(parsedCalls);
 
 		if (convertedCalls.length > 0) {
-			const cleanedContent =
-				XMLToolCallParser.removeToolCallsFromContent(strippedContent);
+			const cleanedContent = XMLToolCallParser.removeToolCallsFromContent(
+				strippedContent,
+				toolNames ?? parsedCalls.map(call => call.toolName),
+			);
 			return {
 				success: true,
 				toolCalls: convertedCalls,
