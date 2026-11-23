@@ -423,10 +423,10 @@ function listMcpServers(root: string, lines: string[]): number {
 
 /**
  * Profile MCP servers declared under `nanocoder.profiles.<name>.mcpServers`.
- * Each is fingerprinted by name, command, args, and env keys so a project
- * that adds a server is asked to trust again before it can start a new
- * command. Mirrors the per-profile fingerprinting used for hooks, formatters,
- * LSP servers, and providers.
+ * Each is fingerprinted by name unconditionally plus command, args, env keys,
+ * url, transport, enabled, alwaysAllow, and header keys, so adding a server
+ * (even a URL-only one) or swapping any of these is a trust change and the
+ * folder is asked to trust again before the server starts.
  */
 function listProfileMcpServers(
 	config: ProjectConfig | undefined,
@@ -454,13 +454,41 @@ function listProfileMcpServers(
 				command?: unknown;
 				args?: unknown;
 				env?: unknown;
+				url?: unknown;
+				transport?: unknown;
+				enabled?: unknown;
+				alwaysAllow?: unknown;
+				headers?: unknown;
 			};
-			const parts: string[] = [];
+			const parts: string[] = [`name ${serverName}`];
 			if (typeof server.command === 'string') {
 				parts.push(`command ${server.command}`);
 			}
 			if (Array.isArray(server.args)) {
 				parts.push(`args ${JSON.stringify(server.args)}`);
+			}
+			if (typeof server.url === 'string') {
+				parts.push(`url ${server.url}`);
+			}
+			if (typeof server.transport === 'string') {
+				parts.push(`transport ${server.transport}`);
+			}
+			if (typeof server.enabled === 'boolean') {
+				parts.push(`enabled ${server.enabled}`);
+			}
+			if (Array.isArray(server.alwaysAllow)) {
+				parts.push(`alwaysAllow ${JSON.stringify(server.alwaysAllow)}`);
+			}
+			if (
+				server.headers &&
+				typeof server.headers === 'object' &&
+				!Array.isArray(server.headers)
+			) {
+				parts.push(
+					`headers ${JSON.stringify(
+						Object.keys(server.headers as Record<string, unknown>).sort(),
+					)}`,
+				);
 			}
 			if (
 				server.env &&
@@ -473,12 +501,8 @@ function listProfileMcpServers(
 					)}`,
 				);
 			}
-			if (parts.length > 0) {
-				lines.push(
-					`mcp profile:${profileName}.${serverName} ${parts.join(' ')}`,
-				);
-				count++;
-			}
+			lines.push(`mcp profile:${profileName}.${serverName} ${parts.join(' ')}`);
+			count++;
 		}
 	}
 	return count;
