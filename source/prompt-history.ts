@@ -225,20 +225,14 @@ export class PromptHistory {
 
 	/**
 	 * Where to write: the real file behind a symlink (a renamed-over link would
-	 * be replaced by a plain file and leave its target stale), and the mode the
-	 * existing file has, if any.
+	 * be replaced by a plain file and leave its target stale).
 	 */
-	private async resolveWriteTarget(): Promise<{path: string; mode?: number}> {
-		let path = this.historyFile;
+	private async resolveWriteTarget(): Promise<string> {
 		try {
-			path = await fs.realpath(this.historyFile);
+			return await fs.realpath(this.historyFile);
 		} catch {
 			// Not there yet: write the path as given.
-		}
-		try {
-			return {path, mode: (await fs.stat(path)).mode & 0o777};
-		} catch {
-			return {path};
+			return this.historyFile;
 		}
 	}
 
@@ -254,14 +248,13 @@ export class PromptHistory {
 				// truncates in place, so a crash mid-save used to leave a file
 				// starting with the marker followed by broken JSON, which the
 				// next load discarded. Rename replaces whatever is at the path,
-				// so write to the real file behind a symlink and give the new
-				// file the old one's permissions, as an in-place write would.
+				// so write to the real file behind a symlink. Prompts and pasted
+				// content can contain credentials, so every saved file is owner-only,
+				// including files created with a more permissive mode by older versions.
 				const target = await this.resolveWriteTarget();
-				await atomicWriteFile(
-					target.path,
-					JSON_FORMAT_MARKER + jsonContent,
-					target.mode === undefined ? undefined : {mode: target.mode},
-				);
+				await atomicWriteFile(target, JSON_FORMAT_MARKER + jsonContent, {
+					mode: 0o600,
+				});
 			} catch (error) {
 				// Silently fail to avoid disrupting the user experience
 				const errorMessage = formatError(error);
