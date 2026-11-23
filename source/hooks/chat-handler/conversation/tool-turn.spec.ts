@@ -1,4 +1,10 @@
-import {mkdtempSync, readdirSync, readFileSync, writeFileSync} from 'node:fs';
+import {
+	mkdtempSync,
+	readdirSync,
+	readFileSync,
+	realpathSync,
+	writeFileSync,
+} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
@@ -66,7 +72,12 @@ function readTree(dir: string): string {
 test.serial(
 	'an escalated write in architect mode is checkpointed before it runs',
 	async t => {
-		const project = mkdtempSync(join(tmpdir(), 'nanocoder-architect-taint-'));
+		// macOS tmpdir() is /var/... while /var is a symlink to /private/var.
+		// The read-tracker keys on the path the tool sees, which is resolved, so
+		// the fixture has to be recorded under the same resolved path.
+		const project = realpathSync(
+			mkdtempSync(join(tmpdir(), 'nanocoder-architect-taint-')),
+		);
 		writeFileSync(join(project, 'out.txt'), 'before', 'utf-8');
 		const previousRoot = getProjectRoot();
 		const previousCwd = process.cwd();

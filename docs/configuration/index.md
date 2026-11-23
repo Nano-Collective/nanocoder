@@ -559,13 +559,13 @@ One thing outranks it: with [`nanocoder.untrustedContent.escalate`](#untrusted-e
 
 Text from `fetch_url`, `web_search`, `browser` and MCP servers reaches the model inside an `<external_content source="..." url="...">` frame, and the system prompt says that everything inside it is data rather than instructions. That framing is always on.
 
-`nanocoder.untrustedContent.escalate` controls the second half: while that text is in the model's view, calls that can change files or reach the network ask for confirmation in `auto-accept` and `architect`, instead of running on the mode's waiver. Default is `false` — like `sandbox` and `firewall`, a behaviour that adds prompts ships opt-in.
+`nanocoder.untrustedContent.escalate` controls the second half: while that text is in the model's view, calls that can change files or reach the network ask for confirmation in `auto-accept` and `architect`, instead of running on the mode's waiver. It is on by default — the users this protects are the ones who never edit configuration. Set it to `false` to opt out:
 
 ```json
 {
   "nanocoder": {
     "untrustedContent": {
-      "escalate": true
+      "escalate": false
     }
   }
 }

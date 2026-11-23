@@ -7,7 +7,7 @@ import {isUntrustedContentEscalationEnabled} from './untrusted-content.js';
 
 /**
  * The switch the framing cannot work without: `escalate` decides whether reading
- * a page changes what the next tool call needs. Off unless the user says so.
+ * a page changes what the next tool call needs. On unless the user opts out.
  */
 
 function withConfig(untrustedContent: unknown): () => void {
@@ -30,19 +30,19 @@ function withConfig(untrustedContent: unknown): () => void {
 	};
 }
 
-test.serial('escalation is off when the block is absent', t => {
+test.serial('escalation is on when the block is absent', t => {
 	const restore = withConfig(undefined);
 	try {
-		t.false(isUntrustedContentEscalationEnabled());
+		t.true(isUntrustedContentEscalationEnabled());
 	} finally {
 		restore();
 	}
 });
 
-test.serial('escalation is off when the block is present but silent', t => {
+test.serial('escalation is on when the block is present but silent', t => {
 	const restore = withConfig({});
 	try {
-		t.false(isUntrustedContentEscalationEnabled());
+		t.true(isUntrustedContentEscalationEnabled());
 	} finally {
 		restore();
 	}
@@ -67,7 +67,7 @@ test.serial('escalation follows the configured value', t => {
 test.serial('a non-boolean value is ignored rather than trusted', t => {
 	const restore = withConfig({escalate: 'yes'});
 	try {
-		t.false(isUntrustedContentEscalationEnabled());
+		t.true(isUntrustedContentEscalationEnabled());
 	} finally {
 		restore();
 	}

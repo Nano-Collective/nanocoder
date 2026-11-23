@@ -438,7 +438,8 @@ export interface DiskNanocoderConfig {
 	untrustedContent?: {
 		/**
 		 * Confirm file writes, commands and network calls while external content
-		 * is in the model's view, in auto-accept and architect. Off by default.
+		 * is in the model's view, in auto-accept and architect. On by default;
+		 * set to false to opt out.
 		 */
 		escalate?: boolean;
 	};
@@ -603,7 +604,8 @@ export interface AppConfig {
 	// Negative-space mutation firewall
 	firewall?: Partial<FirewallConfig>;
 
-	// Untrusted external content: the frame is always on, escalation is opt-in.
+	// Untrusted external content: the frame is always on, escalation is on by
+	// default and an explicit `false` opts out.
 	untrustedContent?: {
 		escalate?: boolean;
 	};

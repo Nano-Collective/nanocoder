@@ -64,19 +64,21 @@ the user: while external content is in the model's view, a call that can change
 files or reach the network asks for confirmation even where the mode would
 otherwise have waived it, and the prompt names what was read.
 
-This is opt-in. Turn it on in `agents.config.json`:
+This is on by default. The users it protects are the ones who never edit
+configuration, so an opt-in would leave them unprotected. To accept the risk
+and keep the mode's waivers, opt out in `agents.config.json`:
 
 ```json
 {
   "nanocoder": {
     "untrustedContent": {
-      "escalate": true
+      "escalate": false
     }
   }
 }
 ```
 
-What changes when it is on:
+What changes while it is on:
 
 - In **auto-accept** and **architect**, file writes, shell commands, the egress
   tools (`fetch_url`, `web_search`, `browser`), MCP tools and subagent

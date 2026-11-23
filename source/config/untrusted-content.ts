@@ -4,11 +4,10 @@ import {getAppConfig} from '@/config/index';
  * Whether the approval escalation for untrusted external content is on.
  *
  * Framing (the `<external_content>` body, the prompt section and the chat
- * notice) is unconditional; only the escalation is switchable. It ships off by
- * default, the same way `firewall` and `sandbox` did: a behaviour that adds
- * confirmation prompts is opt-in first, and the default can be reconsidered once
- * it has run in the field.
+ * notice) is unconditional; only the escalation is switchable. It ships on by
+ * default: the users this protects are the ones who never edit configuration,
+ * so opt-in would leave them unprotected. An explicit `false` is the opt-out.
  */
 export function isUntrustedContentEscalationEnabled(): boolean {
-	return getAppConfig().untrustedContent?.escalate === true;
+	return getAppConfig().untrustedContent?.escalate !== false;
 }

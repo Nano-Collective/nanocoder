@@ -179,7 +179,7 @@
 					"description": "Untrusted external content (web, browser, MCP). The frame those results\ncarry is always on; this block only controls what happens to approvals.",
 					"properties": {
 						"escalate": {
-							"description": "Confirm file writes, commands and network calls while external content\nis in the model's view, in auto-accept and architect. Off by default.",
+							"description": "Confirm file writes, commands and network calls while external content\nis in the model's view, in auto-accept and architect. On by default;\nset to false to opt out.",
 							"type": "boolean"
 						}
 					},
@@ -352,6 +352,17 @@
 				"tune": {
 					"$ref": "#/definitions/TuneConfig",
 					"description": "Model mode defaults (tool profile, tool mode, model parameters)."
+				},
+				"untrustedContent": {
+					"description": "Untrusted external content (web, browser, MCP). The frame those results\ncarry is always on; this block only controls what happens to approvals.",
+					"properties": {
+						"escalate": {
+							"description": "Confirm file writes, commands and network calls while external content\nis in the model's view, in auto-accept and architect. On by default;\nset to false to opt out.",
+							"type": "boolean"
+						}
+					},
+					"type": "object",
+					"additionalProperties": false
 				},
 				"verify": {
 					"$ref": "#/definitions/VerifyConfig",
