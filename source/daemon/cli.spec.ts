@@ -12,6 +12,7 @@ import {DaemonIpcServer} from './ipc';
 import {
 	getLockfilePath,
 	getSocketPath,
+	readLockfile,
 	removeLockfile,
 	writeLockfile,
 } from './lockfile';
@@ -586,6 +587,42 @@ test.serial('stop preserves the live lockfile while shutdown takes longer than f
 		await rm(root, {recursive: true, force: true});
 	}
 });
+
+test.serial(
+	'stopping daemon does not delete successor daemon lockfile with different pid',
+	async t => {
+		const root = await tempProject();
+		try {
+			const oldPid = 1111;
+			const newPid = 2222;
+
+			await writeLockfile({
+				pid: oldPid,
+				socketPath: getSocketPath(root),
+				startedAt: Date.now() - 10_000,
+				projectRoot: root,
+			});
+
+			// Successor daemon starts and overwrites lockfile with its new PID
+			await writeLockfile({
+				pid: newPid,
+				socketPath: getSocketPath(root),
+				startedAt: Date.now(),
+				projectRoot: root,
+			});
+
+			// Old stopping daemon finishes cleanup and attempts to remove lockfile with its own PID
+			await removeLockfile(root, oldPid);
+
+			// Lockfile should be preserved because it belongs to the successor daemon
+			t.true(existsSync(getLockfilePath(root)));
+			const current = await readLockfile(root);
+			t.is(current?.pid, newPid);
+		} finally {
+			await rm(root, {recursive: true, force: true});
+		}
+	},
+);
 
 test.serial(
 	'stop removes the lockfile and reports the previous pid when the daemon is live',
