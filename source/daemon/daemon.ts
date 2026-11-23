@@ -426,12 +426,21 @@ export async function startDaemon(opts: DaemonOptions): Promise<DaemonHandle> {
 			const draining = skillDispatcher.stop();
 			await watcher.stop();
 			await draining;
-			await ipcServer.stop();
-			// MCP stdio servers are child processes with open pipes; left
-			// connected they keep the event loop alive and the daemon never
-			// exits after an IPC `shutdown`.
-			await toolManager.disconnectMCP();
-			await removeLockfile(opts.projectRoot);
+			try {
+				// MCP stdio servers are child processes with open pipes; left
+				// connected they keep the event loop alive and the daemon never
+				// exits after an IPC `shutdown`. Keep the IPC server alive and the
+				// lockfile in place until MCP disconnects, so concurrent `daemon start`
+				// probes see the live daemon rather than treating a closed IPC
+				// endpoint as stale and starting a duplicate daemon.
+				await toolManager.disconnectMCP();
+			} finally {
+				try {
+					await removeLockfile(opts.projectRoot, process.pid);
+				} finally {
+					await ipcServer.stop();
+				}
+			}
 		})();
 		return stopPromise;
 	};

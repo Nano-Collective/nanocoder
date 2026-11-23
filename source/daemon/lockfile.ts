@@ -135,9 +135,18 @@ export async function writeLockfile(lock: DaemonLock): Promise<void> {
 	await rename(tmp, path);
 }
 
-export async function removeLockfile(projectRoot: string): Promise<void> {
+export async function removeLockfile(
+	projectRoot: string,
+	expectedPid?: number,
+): Promise<void> {
 	const path = getLockfilePath(projectRoot);
 	try {
+		if (expectedPid !== undefined) {
+			const current = await readLockfile(projectRoot);
+			if (!current || current.pid !== expectedPid) {
+				return;
+			}
+		}
 		await unlink(path);
 	} catch (err) {
 		const code = (err as NodeJS.ErrnoException).code;
@@ -208,7 +217,7 @@ export async function readLiveLockfile(
 		!isProcessAlive(lock.pid) ||
 		(verifyIpc && (await isIpcEndpointGone(lock.socketPath)))
 	) {
-		await removeLockfile(projectRoot);
+		await removeLockfile(projectRoot, lock.pid);
 		return null;
 	}
 	return lock;

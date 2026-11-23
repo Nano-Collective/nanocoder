@@ -12,6 +12,7 @@ import {DaemonIpcServer} from './ipc';
 import {
 	getLockfilePath,
 	getSocketPath,
+	readLockfile,
 	removeLockfile,
 	writeLockfile,
 } from './lockfile';
@@ -586,6 +587,84 @@ test.serial('stop preserves the live lockfile while shutdown takes longer than f
 		await rm(root, {recursive: true, force: true});
 	}
 });
+
+test.serial(
+	'start while daemon is shutting down reports daemon already running when IPC is still answering',
+	async t => {
+		const root = await tempProject();
+		try {
+			// Real daemon keeps IPC listening until MCP disconnect finishes
+			let finishShutdown: () => void = () => {};
+			const shutdownPending = new Promise<void>(resolve => {
+				finishShutdown = resolve;
+			});
+
+			const server = await listenOnSocket(root, {
+				listSubscriptions: () => [],
+				shutdown: () => shutdownPending.then(() => removeLockfile(root, process.pid)),
+			});
+			await writeLockfile({
+				pid: process.pid,
+				socketPath: getSocketPath(root),
+				startedAt: Date.now(),
+				projectRoot: root,
+			});
+
+			const stopping = runDaemonCli('stop', {projectRoot: root});
+			// Wait briefly for IPC shutdown request to be received
+			await new Promise(r => setTimeout(r, 100));
+
+			// Attempt start while shutdown is draining but IPC is still active
+			const startResult = await runDaemonCli('start', {projectRoot: root});
+			t.is(startResult.exitCode, 0);
+			t.regex(startResult.output, /Daemon already running/);
+
+			// Now let shutdown finish
+			finishShutdown();
+			await server.stop();
+			const stopResult = await stopping;
+			t.is(stopResult.exitCode, 0);
+		} finally {
+			await rm(root, {recursive: true, force: true});
+		}
+	},
+);
+
+test.serial(
+	'stopping daemon does not delete successor daemon lockfile with different pid',
+	async t => {
+		const root = await tempProject();
+		try {
+			const oldPid = 1111;
+			const newPid = 2222;
+
+			await writeLockfile({
+				pid: oldPid,
+				socketPath: getSocketPath(root),
+				startedAt: Date.now() - 10_000,
+				projectRoot: root,
+			});
+
+			// Successor daemon starts and overwrites lockfile with its new PID
+			await writeLockfile({
+				pid: newPid,
+				socketPath: getSocketPath(root),
+				startedAt: Date.now(),
+				projectRoot: root,
+			});
+
+			// Old stopping daemon finishes cleanup and attempts to remove lockfile with its own PID
+			await removeLockfile(root, oldPid);
+
+			// Lockfile should be preserved because it belongs to the successor daemon
+			t.true(existsSync(getLockfilePath(root)));
+			const current = await readLockfile(root);
+			t.is(current?.pid, newPid);
+		} finally {
+			await rm(root, {recursive: true, force: true});
+		}
+	},
+);
 
 test.serial(
 	'stop removes the lockfile and reports the previous pid when the daemon is live',

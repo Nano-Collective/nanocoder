@@ -77,6 +77,51 @@ test.serial('removeLockfile deletes the file (no-op when missing)', async t => {
 	}
 });
 
+test.serial('removeLockfile with expectedPid removes file when pid matches', async t => {
+	const root = await tempProject();
+	try {
+		await writeLockfile({
+			pid: 1234,
+			socketPath: 's',
+			startedAt: 0,
+			projectRoot: root,
+		});
+		await removeLockfile(root, 1234);
+		t.is(await readLockfile(root), null);
+	} finally {
+		await rm(root, {recursive: true, force: true});
+	}
+});
+
+test.serial('removeLockfile with expectedPid preserves file when pid differs', async t => {
+	const root = await tempProject();
+	try {
+		await writeLockfile({
+			pid: 5678,
+			socketPath: 's',
+			startedAt: 0,
+			projectRoot: root,
+		});
+		await removeLockfile(root, 1234);
+		const lock = await readLockfile(root);
+		t.is(lock?.pid, 5678);
+	} finally {
+		await rm(root, {recursive: true, force: true});
+	}
+});
+
+test.serial('removeLockfile with expectedPid is a no-op when file is missing', async t => {
+	const root = await tempProject();
+	try {
+		await t.notThrowsAsync(async () => {
+			await removeLockfile(root, 1234);
+		});
+		t.is(await readLockfile(root), null);
+	} finally {
+		await rm(root, {recursive: true, force: true});
+	}
+});
+
 test('isProcessAlive returns true for current process', t => {
 	t.true(isProcessAlive(process.pid));
 });
