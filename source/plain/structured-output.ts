@@ -35,7 +35,7 @@ async function compileSchema(
 	if (cached) return cached;
 
 	ajvPromise ??= import('ajv').then(
-		({default: Ajv}) => new Ajv({allErrors: true, multipleOfPrecision: 12}),
+		({default: Ajv}) => new Ajv({multipleOfPrecision: 12}),
 	);
 	const ajv = await ajvPromise;
 	const validate = ajv.compile(schema);
