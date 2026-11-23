@@ -75,10 +75,7 @@ type IdLookup =
 	| {kind: 'ambiguous'; matches: SemanticMemory[]};
 
 /** Accepts a short id, a full UUID, or any unambiguous prefix of either. */
-function resolveMemoryId(
-	memories: SemanticMemory[],
-	input: string,
-): IdLookup {
+function resolveMemoryId(memories: SemanticMemory[], input: string): IdLookup {
 	const needle = input.trim().toLowerCase();
 	if (!needle) return {kind: 'missing'};
 
