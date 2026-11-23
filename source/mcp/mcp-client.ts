@@ -1,20 +1,9 @@
 import {Client} from '@modelcontextprotocol/sdk/client/index.js';
-import {StdioClientTransport} from '@modelcontextprotocol/sdk/client/stdio.js';
-import {StreamableHTTPClientTransport} from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import {WebSocketClientTransport} from '@modelcontextprotocol/sdk/client/websocket.js';
 import {
 	DEFAULT_REQUEST_TIMEOUT_MSEC,
 	type RequestOptions,
 } from '@modelcontextprotocol/sdk/shared/protocol.js';
 import {ErrorCode, McpError} from '@modelcontextprotocol/sdk/types.js';
-import {formatError} from '@/utils/error-formatter';
-
-// Union type for all supported client transports
-type ClientTransport =
-	| StdioClientTransport
-	| WebSocketClientTransport
-	| StreamableHTTPClientTransport;
-
 import type {
 	AISDKCoreTool,
 	MCPHealthChange,
@@ -29,6 +18,7 @@ import type {
 	StructuredToolOutput,
 	Tool,
 } from '@/types/index';
+import {formatError} from '@/utils/error-formatter';
 import {
 	generateCorrelationId,
 	getLogger,
@@ -65,7 +55,7 @@ import {
 } from './tool-adapter.js';
 import {createMCPToolApproval, isToolAutoApproved} from './tool-approval.js';
 import {formatToolResultContent} from './tool-result-format.js';
-import {TransportFactory} from './transport-factory.js';
+import {type ClientTransport, TransportFactory} from './transport-factory.js';
 
 /** The longest delay Node's setTimeout accepts (about 24.8 days). */
 const MAX_TIMER_MS = 2_147_483_647;
