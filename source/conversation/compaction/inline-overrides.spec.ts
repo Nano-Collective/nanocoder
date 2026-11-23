@@ -151,6 +151,18 @@ test('applyOnceOverrides - context-max override honours the k suffix and restore
 	t.is(getSessionContextLimit(), 8192, 'prior value is restored');
 });
 
+test('applyOnceOverrides - context-max override honours the m suffix', async t => {
+	setSessionContextLimit(8192);
+
+	const restore = await applyOnceOverrides([
+		{key: 'context-max', value: '1m'},
+	]);
+	t.is(getSessionContextLimit(), 1000000, 'm suffix multiplies by 1,000,000');
+
+	restore();
+	t.is(getSessionContextLimit(), 8192, 'prior value is restored');
+});
+
 test('applyOnceOverrides - auto-compact enabled override applies and restores the prior value', async t => {
 	setAutoCompactEnabled(false);
 

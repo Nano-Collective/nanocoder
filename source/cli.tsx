@@ -18,6 +18,8 @@ import {
 	parseRunPrompt,
 	readStdinText,
 	STDIN_PROMPT_FILE,
+	wantsHelp,
+	wantsVersion,
 } from './run-prompt-args.js';
 
 // Enable V8 compile cache (Node 22.8+). After the first run, Node caches
@@ -74,7 +76,7 @@ if (args[0] === 'storage') {
 }
 
 // Handle --version/-v flag — fast path, no heavy imports
-if (args.includes('--version') || args.includes('-v')) {
+if (wantsVersion(args)) {
 	console.log(version);
 	process.exit(0);
 }
@@ -256,7 +258,7 @@ if (args[0] === 'completion') {
 }
 
 // Handle --help/-h flag — fast path, no heavy imports
-if (args.includes('--help') || args.includes('-h')) {
+if (wantsHelp(args)) {
 	console.log(`
 Usage: nanocoder [options] [command]
 
@@ -306,7 +308,7 @@ Options:
   --provider          Specify AI provider (must be configured in agents.config.json).
                       Quote names with spaces: --provider "GitHub Copilot"
   --model             Specify AI model (must be available for the provider)
-  --context-max       Set maximum context length in tokens (supports k/K suffix, e.g. 128k)
+  --context-max       Set maximum context length in tokens (supports k/K and m/M suffixes, e.g. 128k or 1m)
   --mode              Start in a specific development mode (normal, auto-accept, yolo, plan,
                       architect). Defaults to "normal" for interactive sessions and
                       "auto-accept" for run mode.
@@ -534,7 +536,7 @@ async function main(): Promise<void> {
 			setSessionContextLimit(limit);
 		} else {
 			console.error(
-				`Invalid --context-max value: "${contextMaxValue}". Use a positive number, e.g. 8192 or 128k`,
+				`Invalid --context-max value: "${contextMaxValue}". Use a positive number, e.g. 8192, 128k, or 1m`,
 			);
 			process.exit(1);
 		}

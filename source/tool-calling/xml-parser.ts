@@ -441,38 +441,32 @@ export class XMLToolCallParser {
 	 * Removes XML tool call blocks from content, leaving only the text
 	 * Type-preserving: Accepts unknown type, converts to string for processing
 	 */
-	static removeToolCallsFromContent(content: unknown): string {
+	static removeToolCallsFromContent(
+		content: unknown,
+		toolNames: readonly string[],
+	): string {
 		let cleanedContent = ensureString(content);
+		const offered = new Set(toolNames);
+		if (offered.size === 0) return normalizeWhitespace(cleanedContent);
 
-		// Remove all markdown code blocks that contain XML tool calls (using global flag)
+		// Remove fenced blocks that wrap XML tool calls.
 		cleanedContent = cleanedContent.replace(
 			/```(?:\w+)?\s*\n?([\s\S]*?)\n?```/g,
-			(match, blockContent: string) => {
-				if (blockContent) {
-					// Reset regex and check if this block contains XML tool calls
-					this.TOOL_CALL_REGEX.lastIndex = 0;
-					const testResult = this.TOOL_CALL_REGEX.test(blockContent);
-					this.TOOL_CALL_REGEX.lastIndex = 0; // Reset again after test
-					if (testResult) {
-						// This code block contains XML tool calls, remove it entirely
-						return '';
-					}
-				}
-				// Keep blocks that don't contain XML tool calls
-				return match;
-			},
+			(match, blockContent: string) =>
+				this.namedToolCallRanges(blockContent, offered).next().done
+					? match
+					: '',
 		);
 
 		// Remove XML tool calls that aren't in code blocks
-		const callEnd = this.callEnds(cleanedContent);
-		const pattern = new RegExp(this.TOOL_CALL_REGEX);
 		let kept = '';
 		let from = 0;
-		let match: RegExpExecArray | null;
-		while ((match = pattern.exec(cleanedContent)) !== null) {
-			kept += cleanedContent.slice(from, match.index);
-			pattern.lastIndex = callEnd(match);
-			from = pattern.lastIndex;
+		for (const [start, end] of this.namedToolCallRanges(
+			cleanedContent,
+			offered,
+		)) {
+			kept += cleanedContent.slice(from, start);
+			from = end;
 		}
 		cleanedContent = kept + cleanedContent.slice(from);
 
@@ -481,6 +475,23 @@ export class XMLToolCallParser {
 
 		// Clean up whitespace artifacts left by removed tool calls
 		return normalizeWhitespace(cleanedContent);
+	}
+
+	private static *namedToolCallRanges(
+		content: string,
+		toolNames: ReadonlySet<string>,
+	): Generator<[number, number]> {
+		const pattern = /<(\w+)>(.*?)<\/\1>/sy;
+		const callEnd = this.callEnds(content);
+		let end = 0;
+		for (const opening of content.matchAll(/<(\w+)>/g)) {
+			if (opening.index < end || !toolNames.has(opening[1])) continue;
+			pattern.lastIndex = opening.index;
+			const match = pattern.exec(content);
+			if (!match) continue;
+			end = callEnd(match);
+			yield [opening.index, end];
+		}
 	}
 
 	/**

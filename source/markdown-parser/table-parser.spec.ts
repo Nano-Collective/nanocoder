@@ -16,6 +16,18 @@ const mockColors: Colors = {
 	tool: '#8b5cf6',
 };
 
+function getRenderedCells(output: string): string[][] {
+	return stripVTControlCharacters(output)
+		.split('\n')
+		.filter(line => line.startsWith('│'))
+		.map(line =>
+			line
+				.slice(1, -1)
+				.split('│')
+				.map(cell => cell.trim()),
+		);
+}
+
 test('parseMarkdownTable handles simple two-column table', t => {
 	const table = `| Name | Age |
 |------|-----|
@@ -60,8 +72,78 @@ test('parseMarkdownTable handles table with empty cells', t => {
 | John |     |
 |      | 30  |`;
 	const result = parseMarkdownTable(table, mockColors);
-	t.true(result.includes('John'));
-	t.true(result.includes('30'));
+	t.deepEqual(getRenderedCells(result), [
+		['Name', 'Age'],
+		['John', ''],
+		['', '30'],
+	]);
+});
+
+test('parseMarkdownTable preserves column alignment when middle cell is empty', t => {
+	const table = `| Name | Age | City  |
+|------|-----|-------|
+| John |     | Paris |`;
+	const result = parseMarkdownTable(table, mockColors, 80);
+	t.deepEqual(getRenderedCells(result), [
+		['Name', 'Age', 'City'],
+		['John', '', 'Paris'],
+	]);
+});
+
+test('parseMarkdownTable preserves column alignment when last cell is empty', t => {
+	const table = `| Col1 | Col2 | Col3 |
+|------|------|------|
+| 1    | 2    |      |`;
+	const result = parseMarkdownTable(table, mockColors, 80);
+	t.deepEqual(getRenderedCells(result), [
+		['Col1', 'Col2', 'Col3'],
+		['1', '2', ''],
+	]);
+});
+
+test('parseMarkdownTable preserves empty middle cell without outer pipes', t => {
+	const table = `A | B | C
+---|---|---
+1 |  | 3`;
+	const result = parseMarkdownTable(table, mockColors, 80);
+	t.deepEqual(getRenderedCells(result), [
+		['A', 'B', 'C'],
+		['1', '', '3'],
+	]);
+});
+
+test('parseMarkdownTable preserves column alignment when header corner cell is empty', t => {
+	const table = `|   | Mon | Tue |
+|---|-----|-----|
+| A | 1   | 2   |`;
+	const result = parseMarkdownTable(table, mockColors, 80);
+	t.deepEqual(getRenderedCells(result), [
+		['', 'Mon', 'Tue'],
+		['A', '1', '2'],
+	]);
+});
+
+test('parseMarkdownTable returns original text when separator row has blank cells', t => {
+	const partialBlankSep = `| A | B |
+|---|---|
+| 1 | 2 |`;
+	const oneBlankCellSep = `| A | B |
+|---|   |
+| 1 | 2 |`;
+	const allBlankSep = `| A | B |
+|   |   |
+| 1 | 2 |`;
+
+	t.not(parseMarkdownTable(partialBlankSep, mockColors, 80), partialBlankSep);
+	t.is(parseMarkdownTable(oneBlankCellSep, mockColors, 80), oneBlankCellSep);
+	t.is(parseMarkdownTable(allBlankSep, mockColors, 80), allBlankSep);
+});
+
+test('parseMarkdownTable returns original text when all headers and cells are empty', t => {
+	const table = `|   |   |
+|---|---|
+|   |   |`;
+	t.is(parseMarkdownTable(table, mockColors, 80), table);
 });
 
 test('parseMarkdownTable normalizes column count', t => {

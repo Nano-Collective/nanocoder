@@ -1,6 +1,6 @@
 import {lstat, readdir} from 'node:fs/promises';
 import {join, relative} from 'node:path';
-import {loadGitignore} from '@/utils/fs/gitignore-loader';
+import {addNestedGitignore, loadGitignore} from '@/utils/fs/gitignore-loader';
 
 export interface FileNode {
 	name: string;
@@ -40,6 +40,9 @@ export async function buildFileTree(
 		if (depth > maxDepth) return [];
 
 		try {
+			// A .gitignore below the root hides files too, as it does for git
+			// and for find_files.
+			await addNestedGitignore(ig, currentPath, relativeTo.replace(/\\/g, '/'));
 			const items = await readdir(currentPath, {withFileTypes: true});
 			const nodes: FileNode[] = [];
 
