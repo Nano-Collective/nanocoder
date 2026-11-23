@@ -689,6 +689,15 @@ More text`;
 	t.is(result, content);
 });
 
+test('removeToolCallsFromContent - preserves markup around a tool call', t => {
+	const content = '<kbd>see <read_file><path>a.ts</path></read_file></kbd>';
+	const result = XMLToolCallParser.removeToolCallsFromContent(content, [
+		'read_file',
+	]);
+
+	t.is(result, '<kbd>see </kbd>');
+});
+
 test('removeToolCallsFromContent - removes multiple tool calls', t => {
 	const content = `Text
 <read_file><path>/file1.txt</path></read_file>

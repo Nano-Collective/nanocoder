@@ -434,7 +434,7 @@ export function parseToolCalls(
 		if (convertedCalls.length > 0) {
 			const cleanedContent = XMLToolCallParser.removeToolCallsFromContent(
 				strippedContent,
-				toolNames ?? parsedCalls.map(call => call.toolName),
+				[...(toolNames ?? []), ...parsedCalls.map(call => call.toolName)],
 			);
 			return {
 				success: true,
