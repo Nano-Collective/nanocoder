@@ -100,7 +100,7 @@ class HeadersWebSocketClientTransport implements Transport {
 	async start(): Promise<void> {
 		if (this.socket) {
 			throw new Error(
-				'WebSocketClientTransport already started! If using Client class, note that connect() calls start() automatically.',
+				'HeadersWebSocketClientTransport already started! If using Client class, note that connect() calls start() automatically.',
 			);
 		}
 
@@ -179,12 +179,7 @@ class HeadersWebSocketClientTransport implements Transport {
 	}
 }
 
-// Union type for all supported client transports
-export type ClientTransport =
-	| StdioClientTransport
-	| WebSocketClientTransport
-	| StreamableHTTPClientTransport
-	| Transport;
+export type ClientTransport = Transport;
 
 /**
  * Factory for creating MCP client transports based on server configuration
@@ -248,9 +243,7 @@ export class TransportFactory {
 	/**
 	 * Creates a WebSocket transport for remote MCP servers
 	 */
-	private static createWebSocketTransport(
-		server: MCPServer,
-	): WebSocketClientTransport | Transport {
+	private static createWebSocketTransport(server: MCPServer): Transport {
 		if (!server.url) {
 			throw new Error(
 				`MCP server "${server.name}" missing URL for websocket transport`,

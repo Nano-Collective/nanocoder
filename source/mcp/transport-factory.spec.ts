@@ -431,7 +431,7 @@ test('TransportFactory.createTransport: websocket transport with headers handles
 		async () => {
 			await transport.start();
 		},
-		{message: /already started/},
+		{message: /^HeadersWebSocketClientTransport already started!/},
 	);
 
 	await new Promise<void>(resolve => setTimeout(resolve, 30));
