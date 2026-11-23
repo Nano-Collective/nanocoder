@@ -245,12 +245,16 @@ function createModelInfo(
  * Find a model by ID across all providers
  * Returns the model info and provider name
  */
-async function findModelById(modelId: string): Promise<ModelInfo | null> {
+async function findModelById(
+	modelId: string,
+	{ignoreCase = false}: {ignoreCase?: boolean} = {},
+): Promise<ModelInfo | null> {
 	const data = await getModelsData();
 	if (!data) {
 		return null;
 	}
 
+	const lowerId = modelId.toLowerCase();
 	let bestMatch: ModelInfo | null = null;
 
 	// Search through all providers, picking the match with highest context limit
@@ -259,7 +263,11 @@ async function findModelById(modelId: string): Promise<ModelInfo | null> {
 		if (!provider || typeof provider !== 'object' || !provider.models) {
 			continue;
 		}
-		const model = provider.models[modelId];
+		const model = ignoreCase
+			? Object.entries(provider.models).find(
+					([id]) => id.toLowerCase() === lowerId,
+				)?.[1]
+			: provider.models[modelId];
 		if (model) {
 			const contextLimit = model.limit?.context ?? null;
 			if (
@@ -535,8 +543,8 @@ export async function getModelAcceptsImages(
 
 /**
  * Per-model pricing memo. The lookup below scans the whole database, so the
- * result — including the negative one for local models that will never be on
- * models.dev — is cached for the process.
+ * result (including the negative one for local models that will never be on
+ * models.dev) is cached for the process.
  */
 const pricingMemo = new Map<string, ModelInfo['cost'] | null>();
 
@@ -553,10 +561,13 @@ export async function getModelPricing(
 		return memoized;
 	}
 	try {
-		// Exact id only: unlike context limits, a price borrowed from a
-		// similarly named model is wrong (e.g. a free local `llama3` billed
-		// as Groq's `llama3-70b-8192`).
-		const modelInfo = await findModelById(modelId);
+		// Exact id (in any case) only: unlike context limits, a price borrowed
+		// from a similarly named model is wrong (e.g. a free local `llama3`
+		// billed as Groq's `llama3-70b-8192`). Local providers are skipped
+		// before this lookup, by base URL, in buildResponseUsage and /usage.
+		const modelInfo =
+			(await findModelById(modelId)) ??
+			(await findModelById(modelId, {ignoreCase: true}));
 		const pricing = modelInfo ? modelInfo.cost : null;
 		pricingMemo.set(modelId, pricing);
 		return pricing;

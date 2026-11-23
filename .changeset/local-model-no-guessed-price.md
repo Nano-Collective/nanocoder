@@ -2,4 +2,4 @@
 "@nanocollective/nanocoder": patch
 ---
 
-Local models no longer show a cost in the usage footer or `/usage`. Pricing is now looked up by exact model id only, so a local Ollama or LM Studio model such as `llama3` or `qwen3-coder` is no longer billed at the rate of a hosted model with a similar name. Context-limit lookups still match by name. Closes #2338.
+Local models no longer show a cost in the usage footer, `/review`, ACP or `/usage`. Pricing is skipped when the active provider's base URL is local (Ollama, LM Studio), even when a hosted provider on models.dev lists the same model id, such as `gpt-oss:20b`. Pricing lookups also no longer borrow the price of a similarly named model: they match the model id exactly, ignoring case. Context-limit lookups still match by name. Closes #2338.

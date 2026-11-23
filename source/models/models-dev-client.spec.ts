@@ -492,6 +492,12 @@ test('getModelPricing - does not price a local model by a partial name match', a
 	t.is(pricing, null);
 });
 
+test('getModelPricing - matches a hosted id written in a different case', async t => {
+	const exact = await getModelPricing('gpt-4o');
+	t.truthy(exact);
+	t.deepEqual(await getModelPricing('GPT-4o'), exact);
+});
+
 test('getModelPricing - returns consistent pricing on repeated calls', async t => {
 	const pricing1 = await getModelPricing('gpt-4o');
 	const pricing2 = await getModelPricing('gpt-4o');

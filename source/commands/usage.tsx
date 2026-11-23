@@ -30,6 +30,7 @@ import {
 import {calculateUsageCost} from '@/usage/response-usage';
 import {generateKey} from '@/utils/key-generator';
 import {estimateTokens} from '@/utils/token-calculator';
+import {isLocalURL} from '@/utils/url-utils';
 
 export const usageCommand: Command = {
 	name: 'usage',
@@ -189,7 +190,11 @@ export const usageCommand: Command = {
 			cumulativeSession: NaN,
 		};
 		try {
-			const pricing = await getModelPricing(model);
+			// A local server (Ollama, LM Studio) is free, whatever models.dev
+			// lists under the same id.
+			const baseURL = client?.getProviderConfig()?.config.baseURL;
+			const pricing =
+				baseURL && isLocalURL(baseURL) ? null : await getModelPricing(model);
 			if (pricing) {
 				// ---- Current-context cost (same as Phase 2) ----
 				const snapshot = metadata.lastApiUsage;

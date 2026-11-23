@@ -554,7 +554,9 @@ export const processAssistantResponse = async (
 					// takes effect on the very next response.
 					const showUsageFooter = getShowUsageFooter();
 					const responseUsage = showUsageFooter
-						? await buildResponseUsageBounded(turnUsage, currentModel)
+						? await buildResponseUsageBounded(turnUsage, currentModel, {
+								baseURL: client.getProviderConfig().config.baseURL,
+							})
 						: undefined;
 					addToChatQueue(
 						<AssistantMessage

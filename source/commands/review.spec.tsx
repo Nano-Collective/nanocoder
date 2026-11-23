@@ -18,6 +18,7 @@ const testMetadata = {
 
 function createClient(response: string) {
 	return {
+		getProviderConfig: () => ({config: {}}),
 		chat: async () => ({
 			choices: [
 				{
@@ -234,6 +235,7 @@ test('review generates a review from the branch diff', async t => {
 	});
 
 	const client = {
+		getProviderConfig: () => ({config: {}}),
 		chat: async (messages: Message[]) => {
 			receivedMessages = messages;
 			return {
@@ -326,6 +328,7 @@ test('review returns an error when the LLM request fails', async t => {
 	});
 
 	const client = {
+		getProviderConfig: () => ({config: {}}),
 		chat: async () => {
 			throw new Error('LLM request failed');
 		},
@@ -379,6 +382,7 @@ test('review uses the review system prompt', async t => {
 	});
 
 	const client = {
+		getProviderConfig: () => ({config: {}}),
 		chat: async (messages: Message[]) => {
 			systemPrompt = (messages[0]?.content as string) || '';
 			return {
@@ -418,6 +422,7 @@ test('quick review resolves a bare PR number to the unique upstream parent', asy
 	let chatCalls = 0;
 	let receivedMessages: Message[] = [];
 	const client = {
+		getProviderConfig: () => ({config: {}}),
 		chat: async (
 			messages: Message[],
 			requestOptions?: unknown,
@@ -553,6 +558,7 @@ test('bare PR number fails clearly when fork and upstream numbers collide', asyn
 	const result = await command.handler(['quick', '42'], baseMessages, {
 		...testMetadata,
 		client: {
+			getProviderConfig: () => ({config: {}}),
 			chat: async () => {
 				chatCalls += 1;
 				return {choices: [{message: {content: 'should not run'}}]};
@@ -783,6 +789,7 @@ test('review surfaces truncation info when diff exceeds limit', async t => {
 	});
 
 	const client = {
+		getProviderConfig: () => ({config: {}}),
 		chat: async (messages: Message[]) => {
 			userMessage = (messages[1]?.content as string) || '';
 			return {
@@ -820,6 +827,7 @@ test('review uses fallback prompt when loadPrompt returns fallback', async t => 
 	let systemPrompt = '';
 
 	const client = {
+		getProviderConfig: () => ({config: {}}),
 		chat: async (messages: Message[]) => {
 			systemPrompt = (messages[0]?.content as string) || '';
 			return {
