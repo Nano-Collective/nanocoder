@@ -541,6 +541,12 @@ for (const command of [
 	'eval "chmod -R 000 /"',
 	'ssh host "mkfs /dev/sda"',
 	'grep x file; mkfs /dev/sda',
+	// The shell opens no quote in a comment, after a backslash, or in a
+	// heredoc body, so a quote there must not hide the next command.
+	'echo # "\nmkfs /dev/sda\necho "x"',
+	"ls # '\ndd if=/dev/zero of=/dev/sda\n# '",
+	'echo \\" ; mkfs /dev/sda ; echo "x"',
+	'cat <<EOF\n"\nEOF\nchmod -R 000 /\necho "x"',
 ]) {
 	test(`execute_bash validator still blocks ${JSON.stringify(command)}`, async t => {
 		const result = await executeBashTool.validator!({command});
@@ -633,6 +639,7 @@ for (const command of [
 	'git add -A && git commit -m "drop the rm -rf / example"',
 	"cd docs && grep -rn 'rm -rf ~' . | grep -v draft",
 	'grep "rm -rf /" build.log 2>&1',
+	'git commit -m "fix #12: never run rm -rf / on CI"',
 ]) {
 	test(`execute_bash validator allows quoted rm ${JSON.stringify(command)}`, async t => {
 		const result = await executeBashTool.validator!({command});
@@ -694,6 +701,17 @@ for (const command of [
 	// Escapes the quote matcher does not follow.
 	'echo \\"x\\"; rm -rf /; echo \\"y\\"',
 	"echo $'a\\'b'; rm -rf /; echo 'c'",
+	// A quote inside a comment opens nothing for the shell, so it must not
+	// open a span that hides the next line.
+	'echo # "\nrm -rf /\necho "x"',
+	"git commit -m x # '\nrm -rf /\n# '",
+	'grep x f # "\nrm -rf "$HOME"\ngrep "y" f',
+	'echo x # "\nrm -rf ~\necho "y"',
+	// Nor does one in a heredoc body.
+	'cat <<EOF\n"\nEOF\nrm -rf /\necho "x"',
+	// A quoted string may span lines, as it does in the shell; reading spans
+	// line by line would pair the wrong quotes here.
+	'echo "a\nb" ; rm -rf / ; echo "c"',
 ]) {
 	test(`execute_bash validator still blocks quoted rm ${JSON.stringify(command)}`, async t => {
 		const result = await executeBashTool.validator!({command});

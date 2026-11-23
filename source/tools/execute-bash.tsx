@@ -428,6 +428,21 @@ const RUNS_QUOTED_TEXT =
 const QUOTED_SPAN = /"(?:[^"\\]|\\.)*"|'[^']*'/g;
 
 /**
+ * Whether `QUOTED_SPAN` may read the quotes differently from the shell, so a
+ * span could cover text the shell runs. It does not follow a backslash outside
+ * quotes (`echo \" ; mkfs /dev/sda ; echo "x"`), a heredoc body, or a comment:
+ * the shell opens no quote inside a comment, but the regex does and carries
+ * the span onto the next line (`echo # "`, then `rm -rf /`, then `echo "x"`).
+ * Up to the first of these the two read the quotes alike, so a `#` that starts
+ * a comment is still outside every span.
+ */
+function mayMisreadQuotes(command: string): boolean {
+	return (
+		/\\|<</.test(command) || command.replace(QUOTED_SPAN, '').includes('#')
+	);
+}
+
+/**
  * Whether the text before a quoted span puts it in command position or after
  * a redirect, where its text is what runs or what gets written.
  */
@@ -444,23 +459,27 @@ const PASSES_QUOTED_TEXT_ONLY =
 	/^(?:echo|printf|grep|egrep|fgrep|cd|git\s+(?:add|commit)|rg(?!.*\s--pre\b))(?:\s|$)/;
 
 /**
- * Syntax that runs or feeds text to a command (`$(`, backticks, `<<<`, `<(`,
- * `>(`), and backslashes, whose escapes (`\"`, `$'...\'...'`) `QUOTED_SPAN`
- * does not follow.
+ * Syntax that runs or feeds text to a command: `$(`, backticks, `<<<`, `<(`,
+ * `>(`. Backslash escapes (`\"`, `$'...\'...'`) are left to
+ * `mayMisreadQuotes`.
  */
-const RUNS_OR_ESCAPES = /\$\(|`|<<<|[<>]\(|\\/;
+const RUNS_OR_FEEDS_TEXT = /\$\(|`|<<<|[<>]\(/;
 
 /**
  * The command with the text of its quoted arguments replaced by spaces of the
  * same length, so offsets still line up with `command`. Only when every
  * command on the line is one that treats quoted text as text (see
- * `PASSES_QUOTED_TEXT_ONLY`) and the line has nothing that runs or escapes it
- * (see `RUNS_OR_ESCAPES`). Anything else - a pipe into a shell, a runner such
- * as `bash -c` or `su -c`, a prefix such as `env` or `sudo`, an assignment, a
- * keyword - returns the command unchanged, so it is checked as before.
+ * `PASSES_QUOTED_TEXT_ONLY`), the line has nothing that runs or feeds the text
+ * (see `RUNS_OR_FEEDS_TEXT`), and its quotes read the same to the shell (see
+ * `mayMisreadQuotes`). Anything else - a pipe into a shell, a runner such as
+ * `bash -c` or `su -c`, a prefix such as `env` or `sudo`, an assignment, a
+ * keyword, a comment - returns the command unchanged, so it is checked as
+ * before.
  */
 function maskQuotedText(command: string): string {
-	if (RUNS_OR_ESCAPES.test(command)) return command;
+	if (RUNS_OR_FEEDS_TEXT.test(command) || mayMisreadQuotes(command)) {
+		return command;
+	}
 	const placeholders = command.replace(QUOTED_SPAN, span =>
 		'Q'.repeat(span.length),
 	);
@@ -481,10 +500,13 @@ function maskQuotedText(command: string): string {
  * passes around. A quoted span in command position (`"mkfs" /dev/sda`) or
  * after a redirect (`> "/dev/sda"`) is what runs or what gets written, so its
  * quotes are dropped and its text kept. A command that hands a quoted string
- * to another shell is returned unchanged.
+ * to another shell, or whose quotes the shell may read differently (see
+ * `mayMisreadQuotes`), is returned unchanged.
  */
 function withoutQuotedArguments(command: string): string {
-	if (RUNS_QUOTED_TEXT.test(command)) return command;
+	if (RUNS_QUOTED_TEXT.test(command) || mayMisreadQuotes(command)) {
+		return command;
+	}
 	return command.replace(QUOTED_SPAN, (span, offset: number) =>
 		ENDS_IN_COMMAND_POSITION.test(command.slice(0, offset))
 			? span.slice(1, -1)
