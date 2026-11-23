@@ -96,8 +96,73 @@ test('buildSystemdUnit contains required keys', t => {
 	const unit = buildSystemdUnit('/some/project', 'abcd1234ef', 'nanocoder');
 	t.regex(unit, /Description=nanocoder daemon for \/some\/project/);
 	t.regex(unit, /WorkingDirectory=\/some\/project/);
-	t.regex(unit, /ExecStart=nanocoder daemon start/);
+	t.regex(unit, /ExecStart="nanocoder" daemon start/);
 	t.regex(unit, /Restart=on-failure/);
+});
+
+for (const field of ['projectRoot', 'daemonCommand'] as const) {
+	test(`buildSystemdUnit rejects control characters in ${field}`, t => {
+		const controls = [
+			...Array.from({length: 32}, (_, code) => String.fromCharCode(code)),
+			'\u007f',
+			'\u0085',
+			'\u009f',
+		];
+		for (const control of controls) {
+			const projectRoot =
+				field === 'projectRoot' ? `/home/me/a${control}b` : '/home/me/project';
+			const command =
+				field === 'daemonCommand' ? `/opt/a${control}b/nanocoder` : 'nanocoder';
+			t.throws(() => buildSystemdUnit(projectRoot, 'abcd1234ef', command), {
+				message: /control characters/,
+			});
+		}
+	});
+}
+
+test('buildSystemdUnit keeps a trailing path backslash off the end of raw directives', t => {
+	const root = '/home/me/trail\\';
+	const unit = buildSystemdUnit(root, 'abcd1234ef', 'nanocoder');
+
+	// Description= and WorkingDirectory= do not decode C-style escapes.
+	// A directory separator preserves the path while avoiding a continuation.
+	t.true(unit.includes(`Description=nanocoder daemon for ${root}/\nAfter=default.target\n`));
+	t.true(unit.includes(`WorkingDirectory=${root}/\nEnvironment=`));
+	t.true(unit.includes('Environment="NANOCODER_PROJECT_ROOT=/home/me/trail\\\\"\n'));
+});
+
+test('buildSystemdUnit quotes and escapes the executable as one argument', t => {
+	const unit = buildSystemdUnit(
+		'/home/me/project',
+		'abcd1234ef',
+		'/opt/工具 100%/nano coder',
+	);
+
+	t.true(
+		unit.includes(
+			String.raw`ExecStart="/opt/工具 100%%/nano coder" daemon start` + '\n',
+		),
+	);
+});
+
+test.serial('installAutoStart rejects an injected command before replacing a systemd unit', async t => {
+	await withIsolatedPreferences(async () => {
+		await withTempHome(async (home, projectRoot) => {
+			const options = {projectRoot, platform: 'linux' as const, home, loadService: false};
+			await installAutoStart(options);
+			const target = systemdUnitPath(home, projectHash(projectRoot));
+			const before = await readFile(target);
+
+			await t.throwsAsync(
+				installAutoStart({
+					...options,
+					daemonCommand: 'nanocoder\nExecStartPre=/bin/true',
+				}),
+				{message: /control characters/},
+			);
+			t.deepEqual(await readFile(target), before);
+		});
+	});
 });
 
 test.serial('installAutoStart on darwin writes plist at expected path', async t => {

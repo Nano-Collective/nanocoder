@@ -297,3 +297,39 @@ test('--acp without --mode leaves the starting mode unset', t => {
 	t.is(result.status, 0, result.stderr);
 	t.is(JSON.parse(result.stdout).acpOptions.mode, undefined);
 });
+
+test('-v, --version, -h and --help inside the run prompt stay prompt text', t => {
+	// https://github.com/Nano-Collective/nanocoder/issues/2315 — the version and
+	// help fast paths used to scan the whole argv, so `run go test -v` printed
+	// the version and exited 0 without running the prompt.
+	for (const [args, prompt] of [
+		[['run', 'go', 'test', '-v'], 'go test -v'],
+		[['run', 'node', '--version'], 'node --version'],
+		[['run', 'grep', '-h', 'foo'], 'grep -h foo'],
+		[['run', 'explain', '--help', 'output'], 'explain --help output'],
+	] as const) {
+		const result = runCli([...args]);
+		t.is(result.status, 0, `${args.join(' ')}: ${result.stderr}`);
+		const props = JSON.parse(result.stdout);
+		t.is(props.nonInteractivePrompt, prompt);
+	}
+});
+
+test('-v and -h before run still print the version and the help', t => {
+	const version = runCli(['-v', 'run', 'hello']);
+	t.is(version.status, 0, version.stderr);
+	t.regex(version.stdout.trim(), /^[0-9]+[.][0-9]+[.][0-9]+/);
+
+	const help = runCli(['--help', 'run', 'hello']);
+	t.is(help.status, 0, help.stderr);
+	t.true(help.stdout.includes('Usage: nanocoder'), help.stdout);
+});
+
+test('run --help or run -h with nothing else still prints the help', t => {
+	// Only the lone flag: `run explain --help output` above is a prompt.
+	for (const flag of ['--help', '-h']) {
+		const result = runCli(['run', flag]);
+		t.is(result.status, 0, `run ${flag}: ${result.stderr}`);
+		t.true(result.stdout.includes('Usage: nanocoder'), result.stdout);
+	}
+});

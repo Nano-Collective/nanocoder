@@ -340,6 +340,20 @@ test('diff_edit rejects ambiguous search content', async t => {
 	);
 });
 
+test('diff_edit rejects overlapping search content (#2236)', async t => {
+	// "aa" starts at index 0 and 1 of "aaa", but split() sees one hit.
+	const filePath = await createTestFile('overlap.ts', 'aaa');
+
+	await t.throwsAsync(
+		async () => {
+			await executeDiffEdit({path: filePath, diff: diffBlock('aa', 'B')});
+		},
+		{message: /Search block 1 matched 2 times/},
+	);
+
+	t.is(await readFile(filePath, 'utf-8'), 'aaa');
+});
+
 test('diff_edit validator rejects empty path', async t => {
 	const validator = diffEditTool.validator;
 	if (!validator) {

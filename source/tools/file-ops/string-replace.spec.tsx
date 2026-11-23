@@ -1754,3 +1754,78 @@ test.serial('string_replace: a file changed outside after the read is refused', 
 		process.chdir(originalCwd);
 	}
 });
+
+// ============================================================================
+// Overlapping matches (#2236)
+// ============================================================================
+
+test('string_replace: overlapping matches are rejected as ambiguous', async t => {
+	// "aa" starts at index 0 and 1, but split() sees one hit, so the tool used
+	// to accept it and write "Ba".
+	const filePath = await createTestFile('a.txt', 'aaa');
+
+	await t.throwsAsync(
+		executeStringReplace({path: filePath, old_str: 'aa', new_str: 'B'}),
+		{message: /Found 2 matches/},
+	);
+
+	t.is(await readFile(filePath, 'utf-8'), 'aaa');
+});
+
+test('string_replace: overlapping repeated lines are rejected as ambiguous', async t => {
+	// "x\nx" covers lines 1-2 and 2-3.
+	const filePath = await createTestFile('b.txt', 'x\nx\nx\n');
+
+	await t.throwsAsync(
+		executeStringReplace({path: filePath, old_str: 'x\nx', new_str: 'Y'}),
+		{message: /Found 2 matches/},
+	);
+
+	t.is(await readFile(filePath, 'utf-8'), 'x\nx\nx\n');
+});
+
+test('string_replace validator: rejects overlapping matches', async t => {
+	await createTestFile('overlap.txt', 'aaa');
+
+	const validator = stringReplaceTool.validator;
+	if (!validator) {
+		t.fail('Validator not defined');
+		return;
+	}
+
+	const originalCwd = process.cwd();
+	try {
+		process.chdir(testDir);
+		markFileSeenAndVisible('overlap.txt');
+
+		const result = await validator({
+			path: 'overlap.txt',
+			old_str: 'aa',
+			new_str: 'B',
+		});
+
+		t.false(result.valid);
+		if (!result.valid) t.regex(result.error, /Found 2 matches/);
+	} finally {
+		process.chdir(originalCwd);
+	}
+});
+
+test('string_replace formatter: previews overlapping matches as ambiguous', async t => {
+	const filePath = await createTestFile('overlap-preview.txt', 'aaa');
+
+	const formatter = stringReplaceTool.formatter;
+	if (!formatter) {
+		t.fail('Formatter not defined');
+		return;
+	}
+
+	const element = await formatter({
+		path: filePath,
+		old_str: 'aa',
+		new_str: 'B',
+	});
+	const {lastFrame} = render(<TestThemeProvider>{element}</TestThemeProvider>);
+
+	t.regex(lastFrame() ?? '', /Found 2 matches/);
+});
