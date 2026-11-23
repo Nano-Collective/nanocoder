@@ -1,6 +1,7 @@
 import {readdirSync, statSync} from 'fs';
 import {basename, join, relative} from 'path';
 import {MAX_DIRECTORY_DEPTH, MAX_FILES_TO_SCAN} from '@/constants';
+import {toPosixPath} from '@/events/event-router';
 import {loadGitignore} from '@/utils/fs/gitignore-loader';
 
 interface ScanResult {
@@ -72,7 +73,9 @@ export class FileScanner {
 
 				// nosemgrep
 				const fullPath = join(dirPath, entry); // nosemgrep
-				const relativePath = relative(this.rootPath, fullPath);
+				// Always '/'-separated, so callers can split and match these paths
+				// the same way on Windows.
+				const relativePath = toPosixPath(relative(this.rootPath, fullPath));
 
 				if (this.shouldIgnore(fullPath)) {
 					continue;
