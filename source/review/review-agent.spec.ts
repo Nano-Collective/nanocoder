@@ -109,17 +109,29 @@ test('the tool-call budget is enforced and ends with one tool-free report turn',
 
 test('the turn budget stops a model that never finishes', async t => {
 	const {run, calls} = agentRun(
-		call =>
+		(call, index) =>
 			Object.keys(call.tools).length === 0
 				? {content: 'partial report'}
-				: {toolCalls: [{name: 'review_read_file', args: {path: 'a.ts'}}]},
+				: {toolCalls: [{name: 'review_read_file', args: {path: `file-${index}.ts`}}]},
 		{budget: {maxTurns: 3, maxToolCalls: 50}},
 	);
 	const outcome = await runReviewAgent(run);
 	t.is(outcome.status, 'budget-exhausted');
+	t.is(outcome.budgetReason, 'turns');
 	t.is(outcome.turns, 4);
 	t.is(calls.length, 4);
 	t.is(outcome.output, 'partial report');
+});
+
+test('repeating the exact same tool call stops through the shared loop guard', async t => {
+	const {run} = agentRun(
+		() => ({toolCalls: [{name: 'review_read_file', args: {path: 'a.ts'}}]}),
+		{budget: {maxTurns: 10, maxToolCalls: 50}},
+	);
+	const outcome = await runReviewAgent(run);
+	t.is(outcome.status, 'failed');
+	t.regex(outcome.error ?? '', /repeated the same tool call/i);
+	t.is(outcome.toolCalls, 2);
 });
 
 test('text fallback advertises tools in the prompt and parses XML calls', async t => {
@@ -147,7 +159,7 @@ test('malformed fallback calls are retried, then fail the agent', async t => {
 	});
 	const outcome = await runReviewAgent(run);
 	t.is(outcome.status, 'failed');
-	t.regex(outcome.error ?? '', /Malformed tool calls/);
+	t.regex(outcome.error ?? '', /malformed tool calls/i);
 	t.is(calls.length, 3);
 });
 
@@ -170,7 +182,7 @@ test('malformed native-mode text calls fail at the retry cap', async t => {
 	const {run, calls} = agentRun(() => ({content: '[tool_use: review_read_file]'}));
 	const outcome = await runReviewAgent(run);
 	t.is(outcome.status, 'failed');
-	t.regex(outcome.error ?? '', /Malformed tool calls/);
+	t.regex(outcome.error ?? '', /malformed tool calls/i);
 	t.is(calls.length, 3);
 });
 
@@ -193,11 +205,15 @@ test('native models that regress to text calls still run review tools, but quote
 		'EVIDENCE: <Box>\n<Text>row</Text>\n</Box>',
 		'END',
 	].join('\n');
-	const quoted = agentRun(() => ({content: report}));
-	const quotedOutcome = await runReviewAgent(quoted.run);
-	t.is(quotedOutcome.status, 'completed');
-	t.is(quotedOutcome.toolCalls, 0);
-	t.is(quotedOutcome.output, report);
+	for (const disabled of [false, true]) {
+		const quoted = agentRun(() => ({content: report}), {
+			toolMode: {disabled, format: 'xml'},
+		});
+		const quotedOutcome = await runReviewAgent(quoted.run);
+		t.is(quotedOutcome.status, 'completed');
+		t.is(quotedOutcome.toolCalls, 0);
+		t.is(quotedOutcome.output, report);
+	}
 });
 
 test('unknown tools return an error to the model and are recorded as failed', async t => {
@@ -256,3 +272,35 @@ test('output-limit truncation keeps the report but marks it partial', async t =>
 	t.is(outcome.output, 'NO FINDINGS');
 	t.regex(outcome.incompleteReason ?? '', /finder output was cut off/);
 });
+
+test('context budget stops before overflowing a small context window and runs a tool-free final turn', async t => {
+	const {client, calls} = createScriptedReviewClient(
+		(call, index) =>
+			Object.keys(call.tools).length === 0
+				? {content: 'NO FINDINGS'}
+				: {
+						toolCalls: [
+							{name: 'review_read_file', args: {path: `file-${index}.ts`}},
+						],
+					},
+		{contextSize: 8_000},
+	);
+	const {run} = agentRun(() => ({}), {
+		client,
+		budget: {maxTurns: 14, maxToolCalls: 24},
+		tools: [
+			readTool(async args => `${String(args.path)}\n${'x'.repeat(10_000)}`),
+		],
+	});
+	const outcome = await runReviewAgent(run);
+	t.is(outcome.status, 'budget-exhausted');
+	t.is(outcome.budgetReason, 'context');
+	t.is(outcome.output, 'NO FINDINGS');
+	t.regex(outcome.incompleteReason ?? '', /model context limit/);
+	t.true(outcome.toolCalls <= 2);
+	t.deepEqual(calls.at(-1)?.tools, {});
+	const lastPrompt = calls.at(-1)?.messages.at(-1);
+	t.is(lastPrompt?.role, 'user');
+	t.regex(lastPrompt?.content ?? '', /context budget for this review is nearly full/);
+});
+

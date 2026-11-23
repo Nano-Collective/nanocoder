@@ -278,12 +278,37 @@ test('a complete tool diff or whole-file read can cover an omitted file', async 
 				index === 0
 					? {toolCalls: [{name, args: {path: 'src/large.ts'}}]}
 					: {content: 'NO FINDINGS'},
-			{contextSize: 2000},
+			{contextSize: 6000},
 		);
 		const {result} = await review(fixture, () => ({}), {client});
 		t.regex(calls[0]!.messages[1]!.content, /NOT included in the diff below[\s\S]*- src\/large.ts/);
 		t.is(result.status, 'completed');
 	}
+});
+
+test('a small-context model stops before tool results overflow its context window', async t => {
+	const bigFile = `${Array.from({length: 250}, (_, index) => `export const row${index} = '${'a'.repeat(50)}';`).join('\n')}\n`;
+	const fixture = featureFixture(t, {
+		'src/a.ts': bigFile,
+		'src/b.ts': bigFile,
+		'src/c.ts': bigFile,
+		'src/d.ts': bigFile,
+		'src/e.ts': bigFile,
+		'src/f.ts': bigFile,
+	});
+	const paths = ['src/a.ts', 'src/b.ts', 'src/c.ts', 'src/d.ts', 'src/e.ts', 'src/f.ts'];
+	const {client, calls} = createScriptedReviewClient(
+		(call, index) =>
+			Object.keys(call.tools).length === 0
+				? {content: 'NO FINDINGS'}
+				: {toolCalls: [{name: 'review_read_file', args: {path: paths[index % paths.length]!}}]},
+		{contextSize: 32_768},
+	);
+	const {result} = await review(fixture, () => ({}), {client});
+	t.is(result.status, 'incomplete');
+	t.regex(result.incompleteReasons.join('\n'), /model context limit/);
+	t.true(result.stats.toolCalls < DEFAULT_GROUNDED_REVIEW_BUDGETS.finder.maxToolCalls);
+	t.deepEqual(calls.at(-1)?.tools, {});
 });
 
 test('findings the verifier could not judge, or beyond the verification cap, are unverified', async t => {

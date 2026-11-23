@@ -120,11 +120,23 @@ function listPaths(paths: string[], limit = 5): string {
 		: shown;
 }
 
-function clipDiff(diff: string): string {
+function clipDiff(diff: string, maxChars: number): string {
 	const lines = diff.split('\n');
-	return lines.length <= MAX_VERIFIER_DIFF_LINES
-		? diff
-		: `${lines.slice(0, MAX_VERIFIER_DIFF_LINES).join('\n')}\n[diff truncated; use review_diff or review_read_file]`;
+	const lineClipped =
+		lines.length <= MAX_VERIFIER_DIFF_LINES
+			? diff
+			: lines.slice(0, MAX_VERIFIER_DIFF_LINES).join('\n');
+	if (
+		lines.length <= MAX_VERIFIER_DIFF_LINES &&
+		lineClipped.length <= maxChars
+	) {
+		return diff;
+	}
+	const body =
+		lineClipped.length > maxChars
+			? lineClipped.slice(0, maxChars)
+			: lineClipped;
+	return `${body}\n[diff truncated; use review_diff or review_read_file]`;
 }
 
 /**
@@ -202,10 +214,8 @@ export async function runGroundedReview(
 	const contextTools = createReviewContextTools(snapshot, tools);
 	const scopeText = snapshot.scope.description;
 
-	const promptDiff = buildPromptDiff(
-		snapshot,
-		promptDiffLimits(options.client),
-	);
+	const diffLimits = promptDiffLimits(options.client);
+	const promptDiff = buildPromptDiff(snapshot, diffLimits);
 	if (promptDiff.binaryPaths.length > 0) {
 		result.notes.push(
 			`Binary files are not reviewed as text: ${listPaths(promptDiff.binaryPaths)}.`,
@@ -246,7 +256,10 @@ export async function runGroundedReview(
 		result.message = `The finder failed: ${finder.error ?? 'unknown error'}`;
 		return settle('failed');
 	}
-	if (finder.status === 'budget-exhausted') {
+	if (
+		finder.status === 'budget-exhausted' &&
+		finder.budgetReason !== 'context'
+	) {
 		result.incompleteReasons.push(
 			`The finder reached its budget (${budgets.finder.maxToolCalls} tool calls, ${budgets.finder.maxTurns} model turns) before finishing; issues may be missing.`,
 		);
@@ -341,7 +354,7 @@ export async function runGroundedReview(
 				scope: scopeText,
 				finding: formatFindingForVerifier(finding),
 				excerpt: citedExcerpt(snapshotFile, finding.line),
-				fileDiff: clipDiff(renderFileDiff(snapshotFile)),
+				fileDiff: clipDiff(renderFileDiff(snapshotFile), diffLimits.maxChars),
 			}),
 			tools: contextTools,
 			budget: budgets.verifier,
