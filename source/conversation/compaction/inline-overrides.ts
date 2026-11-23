@@ -207,7 +207,7 @@ export async function applyOnceOverrides(
 		{parseContextLimit},
 	] = await Promise.all([
 		import('./auto-compact-session.js'),
-		import('@/models/index.js'),
+		import('@/models/models-dev-client.js'),
 		import('../../utils/parse-context-limit.js'),
 	]);
 
