@@ -94,6 +94,10 @@ export function parseMarkdownTable(
 		),
 	);
 
+	// With enough columns the minimum-width floor pushes the total past the
+	// terminal, so take the excess back from the widest columns. A column needs
+	// 3 cells (1 character plus padding); if even that can't fit, leave the
+	// markdown as-is rather than draw borders that wrap.
 	let excess = colWidths.reduce((a, b) => a + b, 0) - availableWidth;
 	while (excess > 0) {
 		const widest = Math.max(...colWidths);
@@ -134,6 +138,7 @@ export function parseMarkdownTable(
 		wrapOnWordBoundary: true,
 	});
 
+	// Add data rows - don't style them, let cli-table3 handle layout
 	for (const row of dataRows) {
 		table.push(row);
 	}
