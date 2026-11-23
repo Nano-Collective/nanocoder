@@ -1,5 +1,4 @@
 import type {ChildProcess} from 'node:child_process';
-import {once} from 'node:events';
 import {existsSync} from 'node:fs';
 import {mkdir, mkdtemp, rm, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
@@ -9,9 +8,12 @@ import {loadPreferences, resetPreferencesCache, savePreferences} from '@/config/
 import {ensureDirectoryTrust, isDirectoryTrusted} from '@/config/trust/directory-trust';
 import {describeProjectTrust} from '@/config/trust/project-trust';
 import {CONFIG_AUTO_FIX_WARNING, runDaemonCli} from './cli';
+import {projectHash, systemdUnitPath} from './install';
+import {DaemonIpcServer} from './ipc';
 import {
 	getLockfilePath,
 	getSocketPath,
+	readLockfile,
 	removeLockfile,
 	writeLockfile,
 } from './lockfile';
@@ -51,18 +53,43 @@ async function withIsolatedPreferences<T>(fn: () => Promise<T>): Promise<T> {
 	}
 }
 
+const ipcServers: DaemonIpcServer[] = [];
+
+test.afterEach.always(async () => {
+	await Promise.all(ipcServers.splice(0).map(server => server.stop()));
+});
+
+/**
+ * Listen on the project's IPC endpoint, as a daemon does before it writes
+ * its lockfile. A live pid alone no longer makes a lockfile count as live.
+ */
+async function listenOnSocket(
+	projectRoot: string,
+	handlers: ConstructorParameters<typeof DaemonIpcServer>[1] = {
+		listSubscriptions: () => [],
+	},
+): Promise<DaemonIpcServer> {
+	const server = new DaemonIpcServer(getSocketPath(projectRoot), handlers);
+	await server.start();
+	ipcServers.push(server);
+	return server;
+}
+
 /**
  * Stub launcher matching the real daemon's behavior just enough for
- * `start`'s `waitForLockfile` poll to succeed: it writes a lockfile pointing
- * at this test process's own pid, which `isProcessAlive` will find alive.
+ * `start`'s `waitForLockfile` poll to succeed: it listens on the project
+ * socket and writes a lockfile pointing at this test process's own pid,
+ * which `isProcessAlive` will find alive.
  */
 function stubLaunchDaemon(projectRoot: string): ChildProcess {
-	void writeLockfile({
-		pid: process.pid,
-		socketPath: 'fake-socket-for-test',
-		startedAt: Date.now(),
-		projectRoot,
-	});
+	void listenOnSocket(projectRoot).then(() =>
+		writeLockfile({
+			pid: process.pid,
+			socketPath: getSocketPath(projectRoot),
+			startedAt: Date.now(),
+			projectRoot,
+		}),
+	);
 	return {} as unknown as ChildProcess;
 }
 
@@ -358,11 +385,12 @@ test.serial(
 	async t => {
 		const root = await tempProject();
 		try {
-			// Stub the daemon with this process's own pid so isProcessAlive
-			// returns true. Matches what stubLaunchDaemon does for `start`.
+			// Stub the daemon with this process's own pid and a real listener
+			// on its socket. Matches what stubLaunchDaemon does for `start`.
+			await listenOnSocket(root);
 			await writeLockfile({
 				pid: process.pid,
-				socketPath: '/tmp/test-daemon.sock',
+				socketPath: getSocketPath(root),
 				startedAt: Date.now() - 5_000,
 				projectRoot: root,
 			});
@@ -372,8 +400,33 @@ test.serial(
 			t.is(result.exitCode, 0);
 			t.regex(result.output, /Running\. pid /);
 			t.regex(result.output, new RegExp(`pid ${process.pid}`));
-			t.regex(result.output, /socket \/tmp\/test-daemon\.sock/);
+			t.true(result.output.includes(`socket ${getSocketPath(root)}`));
 			t.regex(result.output, /uptime 5s/);
+		} finally {
+			await rm(root, {recursive: true, force: true});
+		}
+	},
+);
+
+// A live pid is not proof of a daemon: the OS reuses pids after a crash or
+// reboot. Nothing listening on the recorded socket means the lockfile is stale.
+test.serial(
+	'status reports a stale lockfile when the pid is alive but nothing listens on the socket',
+	async t => {
+		const root = await tempProject();
+		try {
+			await writeLockfile({
+				pid: process.pid,
+				socketPath: getSocketPath(root),
+				startedAt: Date.now() - 5_000,
+				projectRoot: root,
+			});
+
+			const result = await runDaemonCli('status', {projectRoot: root});
+
+			t.is(result.exitCode, 0);
+			t.regex(result.output, /Stale lockfile cleaned/);
+			t.false(existsSync(getLockfilePath(root)));
 		} finally {
 			await rm(root, {recursive: true, force: true});
 		}
@@ -502,20 +555,20 @@ test.serial('stop reports no daemon when there is no lockfile', async t => {
 test.serial('stop preserves the live lockfile while shutdown takes longer than five seconds', async t => {
 	t.timeout(15_000);
 	const root = await tempProject();
-	const {spawn} = await import('node:child_process');
-	const child = spawn(
-		process.execPath,
-		[
-			'-e',
-			"process.on('SIGTERM', () => setTimeout(() => process.exit(0), 6000)); setInterval(() => {}, 1000); process.stdout.write('ready');",
-		],
-		{stdio: ['ignore', 'pipe', 'ignore']},
-	);
 	try {
-		await once(child.stdout!, 'data');
+		// Like the real daemon: the IPC endpoint closes as soon as shutdown
+		// starts, but the process and its lockfile outlive it while runs drain.
+		const server = await listenOnSocket(root, {
+			listSubscriptions: () => [],
+			shutdown: () => {
+				void server.stop().then(() => {
+					setTimeout(() => void removeLockfile(root), 6000);
+				});
+			},
+		});
 		await writeLockfile({
-			pid: child.pid!,
-			socketPath: '/nonexistent/test-daemon.sock',
+			pid: process.pid,
+			socketPath: getSocketPath(root),
 			startedAt: Date.now(),
 			projectRoot: root,
 		});
@@ -532,40 +585,130 @@ test.serial('stop preserves the live lockfile while shutdown takes longer than f
 		t.regex(result.output, /Daemon stopped/);
 		t.false(existsSync(getLockfilePath(root)));
 	} finally {
-		if (child.exitCode === null) child.kill('SIGKILL');
 		await rm(root, {recursive: true, force: true});
 	}
 });
 
 test.serial(
+	'stopping daemon does not delete successor daemon lockfile with different pid',
+	async t => {
+		const root = await tempProject();
+		try {
+			const oldPid = 1111;
+			const newPid = 2222;
+
+			await writeLockfile({
+				pid: oldPid,
+				socketPath: getSocketPath(root),
+				startedAt: Date.now() - 10_000,
+				projectRoot: root,
+			});
+
+			// Successor daemon starts and overwrites lockfile with its new PID
+			await writeLockfile({
+				pid: newPid,
+				socketPath: getSocketPath(root),
+				startedAt: Date.now(),
+				projectRoot: root,
+			});
+
+			// Old stopping daemon finishes cleanup and attempts to remove lockfile with its own PID
+			await removeLockfile(root, oldPid);
+
+			// Lockfile should be preserved because it belongs to the successor daemon
+			t.true(existsSync(getLockfilePath(root)));
+			const current = await readLockfile(root);
+			t.is(current?.pid, newPid);
+		} finally {
+			await rm(root, {recursive: true, force: true});
+		}
+	},
+);
+
+test.serial(
 	'stop removes the lockfile and reports the previous pid when the daemon is live',
 	async t => {
 		const root = await tempProject();
-		// Fork a real child so SIGTERM from `stop` lands on something that
-		// isn't this test process (which would trip the shutdown manager and
-		// abort the run). The child just sleeps; we kill it at the end.
-		const {spawn} = await import('node:child_process');
-		const child = spawn(process.execPath, ['-e', 'setInterval(()=>{},1000)'], {
-			stdio: 'ignore',
-		});
 		try {
+			await listenOnSocket(root, {
+				listSubscriptions: () => [],
+				shutdown: () => removeLockfile(root),
+			});
 			await writeLockfile({
-				pid: child.pid ?? -1,
-				socketPath: '/nonexistent/test-daemon.sock',
+				pid: process.pid,
+				socketPath: getSocketPath(root),
 				startedAt: Date.now(),
 				projectRoot: root,
 			});
 
 			const result = await runDaemonCli('stop', {projectRoot: root});
 
-			// Either the clean path (IPC failed, SIGTERM killed the child,
-			// child removed its lockfile) or the manual-cleanup fallback
-			// (SIGTERM killed it, but the lockfile removal raced). Both
-			// produce exit 0 with the pid acknowledged in the output.
 			t.is(result.exitCode, 0);
-			t.regex(result.output, new RegExp(`pid ${child.pid}`));
+			t.regex(result.output, new RegExp(`pid ${process.pid}`));
+			t.false(existsSync(getLockfilePath(root)));
 		} finally {
-			if (!child.killed) child.kill('SIGKILL');
+			await rm(root, {recursive: true, force: true});
+		}
+	},
+);
+
+// After a crash or reboot the OS can hand the lockfile's pid to an unrelated
+// process. With nothing listening on the socket, `stop` must neither take it
+// for the daemon nor signal it.
+test.serial(
+	'stop does not signal an unrelated process that reused the lockfile pid',
+	async t => {
+		const root = await tempProject();
+		const {spawn} = await import('node:child_process');
+		const unrelated = spawn(process.execPath, ['-e', 'setInterval(()=>{},1000)'], {
+			stdio: 'ignore',
+		});
+		try {
+			await writeLockfile({
+				pid: unrelated.pid ?? -1,
+				socketPath: getSocketPath(root),
+				startedAt: Date.now() - 3_600_000,
+				projectRoot: root,
+			});
+
+			const result = await runDaemonCli('stop', {projectRoot: root});
+			await new Promise(resolve => setTimeout(resolve, 300));
+
+			t.is(result.exitCode, 0);
+			t.is(result.output, 'No daemon is running.');
+			t.is(unrelated.exitCode, null, 'the unrelated process was terminated');
+			t.is(unrelated.signalCode, null, 'the unrelated process was signalled');
+			t.false(existsSync(getLockfilePath(root)));
+		} finally {
+			unrelated.kill('SIGKILL');
+			await rm(root, {recursive: true, force: true});
+		}
+	},
+);
+
+test.serial(
+	'start boots a new daemon when the lockfile pid was reused and nothing listens on the socket',
+	async t => {
+		const root = await tempProject();
+		const launcher = successfulLaunchDaemon(root);
+		try {
+			await writeLockfile({
+				pid: process.pid,
+				socketPath: getSocketPath(root),
+				startedAt: Date.now() - 3_600_000,
+				projectRoot: root,
+			});
+
+			const result = await runDaemonCli('start', {
+				projectRoot: root,
+				trustDirectory: true,
+				launchDaemon: launcher.launch,
+			});
+
+			t.is(result.exitCode, 0);
+			t.false(/already running/i.test(result.output));
+			t.is(launcher.calls.length, 1);
+		} finally {
 			await rm(root, {recursive: true, force: true});
 		}
 	},
@@ -582,12 +725,14 @@ function successfulLaunchDaemon(projectRoot: string) {
 	return {
 		launch: (root: string, trustLevel: import('@/verify/trust-level').TrustLevel) => {
 			calls.push({projectRoot: root, trustLevel});
-			void writeLockfile({
-				pid: process.pid,
-				socketPath: getSocketPath(projectRoot),
-				startedAt: Date.now(),
-				projectRoot,
-			});
+			void listenOnSocket(projectRoot).then(() =>
+				writeLockfile({
+					pid: process.pid,
+					socketPath: getSocketPath(projectRoot),
+					startedAt: Date.now(),
+					projectRoot,
+				}),
+			);
 			return {} as import('node:child_process').ChildProcess;
 		},
 		calls,
@@ -610,6 +755,37 @@ test.serial('unknown flag is rejected with exit 1 and no daemon spawned', async 
 	} finally {
 		await rm(root, {recursive: true, force: true});
 	}
+});
+
+test.serial('install reports an invalid systemd project path without writing a unit', async t => {
+	await withIsolatedPreferences(async () => {
+		const home = await mkdtemp(join(tmpdir(), 'daemon-cli-install-'));
+		const previousPlatform = process.platform;
+		const previousEnv = {
+			HOME: process.env.HOME,
+			USERPROFILE: process.env.USERPROFILE,
+			PATH: process.env.PATH,
+		};
+		try {
+			// Exercise the Linux renderer on every host, without touching the real
+			// home or allowing systemctl to run if validation ever regresses.
+			Object.defineProperty(process, 'platform', {value: 'linux'});
+			Object.assign(process.env, {HOME: home, USERPROFILE: home, PATH: home});
+			const projectRoot = join(home, 'project\ninvalid');
+			const result = await runDaemonCli('install', {projectRoot});
+
+			t.is(result.exitCode, 1);
+			t.is(result.output, 'The project path cannot contain control characters in a systemd unit.');
+			t.false(existsSync(systemdUnitPath(home, projectHash(projectRoot))));
+		} finally {
+			Object.defineProperty(process, 'platform', {value: previousPlatform});
+			for (const [name, value] of Object.entries(previousEnv)) {
+				if (value === undefined) delete process.env[name];
+				else process.env[name] = value;
+			}
+			await rm(home, {recursive: true, force: true});
+		}
+	});
 });
 
 test.serial('--help prints usage, exits 0 and never runs the subcommand', async t => {
@@ -1026,9 +1202,10 @@ for (const args of [['--trust', '--trust-directory'], ['--trust'], ['--trust=']]
 test.serial('start while running says a requested --trust level was not applied', async t => {
 	const root = await tempProject();
 	try {
+		await listenOnSocket(root);
 		await writeLockfile({
 			pid: process.pid,
-			socketPath: '/tmp/test-daemon.sock',
+			socketPath: getSocketPath(root),
 			startedAt: Date.now(),
 			projectRoot: root,
 			ciTrustLevel: 'comment-only',
@@ -1051,9 +1228,10 @@ test.serial('start while running says a requested --trust level was not applied'
 test.serial('status shows the CI trust level from the lockfile', async t => {
 	const root = await tempProject();
 	try {
+		await listenOnSocket(root);
 		await writeLockfile({
 			pid: process.pid,
-			socketPath: '/tmp/test-daemon.sock',
+			socketPath: getSocketPath(root),
 			startedAt: Date.now(),
 			projectRoot: root,
 			ciTrustLevel: 'auto-fix',

@@ -12,7 +12,14 @@
 // pulled in via dynamic `await import()` only when the app actually boots.
 import {readFileSync} from 'node:fs';
 import nodeModule from 'node:module';
-import {parseRunPrompt} from './run-prompt-args.js';
+import {
+	composePromptWithStdin,
+	parseRunPrompt,
+	readStdinText,
+	STDIN_PROMPT_FILE,
+	wantsHelp,
+	wantsVersion,
+} from './run-prompt-args.js';
 
 // Enable V8 compile cache (Node 22.8+). After the first run, Node caches
 // bytecode for every module on disk so subsequent launches skip parsing
@@ -68,7 +75,7 @@ if (args[0] === 'storage') {
 }
 
 // Handle --version/-v flag — fast path, no heavy imports
-if (args.includes('--version') || args.includes('-v')) {
+if (wantsVersion(args)) {
 	console.log(version);
 	process.exit(0);
 }
@@ -193,10 +200,19 @@ Examples:
 		process.exit(0);
 	}
 
-	const [{parseInitArguments}, initializer] = await Promise.all([
-		import('@/init/init-args'),
-		import('@/init/initializer'),
-	]);
+	const [{validateInitArgs}, {parseInitArguments}, initializer] =
+		await Promise.all([
+			import('./cli-args.js'),
+			import('@/init/init-args'),
+			import('@/init/initializer'),
+		]);
+	// This fast path runs before the shared top-level scan in this file, so
+	// `nanocoder init --bogus` must be rejected here instead of being ignored.
+	const initArgsError = validateInitArgs(args);
+	if (initArgsError) {
+		console.error(initArgsError);
+		process.exit(1);
+	}
 	try {
 		const options = parseInitArguments(args.slice(1));
 		const result = initializer.initializeProject({
@@ -241,7 +257,7 @@ if (args[0] === 'completion') {
 }
 
 // Handle --help/-h flag — fast path, no heavy imports
-if (args.includes('--help') || args.includes('-h')) {
+if (wantsHelp(args)) {
 	console.log(`
 Usage: nanocoder [options] [command]
 
@@ -285,18 +301,20 @@ Commands:
 Options:
   -v, --version       Show version number
   -h, --help          Show help
+  --profile           Use a named configuration profile from agents.config.json
   --vscode            Start the legacy VS Code companion (deprecated)
   --vscode-port       Specify VS Code port
   --provider          Specify AI provider (must be configured in agents.config.json).
                       Quote names with spaces: --provider "GitHub Copilot"
   --model             Specify AI model (must be available for the provider)
-  --context-max       Set maximum context length in tokens (supports k/K suffix, e.g. 128k)
+  --context-max       Set maximum context length in tokens (supports k/K and m/M suffixes, e.g. 128k or 1m)
   --mode              Start in a specific development mode (normal, auto-accept, yolo, plan,
                       architect). Defaults to "normal" for interactive sessions and
                       "auto-accept" for run mode.
   --prompt-file       Read the run prompt from a file instead of the command
                       line. Necessary for large prompts: Linux caps a single
                       argument at 128 KiB and execve fails with E2BIG.
+                      Use "-" to read the prompt from stdin.
   --trust-directory   Skip the first-run directory trust prompt for this run only.
                       Valid with "run", "daemon start", "verify" and --acp. Does not
                       modify the preferences file.
@@ -334,6 +352,7 @@ Examples:
   nanocoder --mode plan
   nanocoder --trust-directory run "analyze src/app.ts"
   nanocoder --plain run "summarize README.md"
+  git diff | nanocoder run "write a commit message"
   nanocoder --plain --json run "summarize README.md" | jq .finalText
   nanocoder review main
   nanocoder review feature/auth
@@ -396,17 +415,49 @@ async function main(): Promise<void> {
 	const portArgIndex = args.findIndex(
 		arg => arg === '--vscode-port' || arg.startsWith('--vscode-port='),
 	);
-	const portValue =
-		portArgIndex === -1
-			? undefined
-			: args[portArgIndex].startsWith('--vscode-port=')
-				? args[portArgIndex].slice('--vscode-port='.length)
-				: args[portArgIndex + 1];
-	if (portValue) {
-		const port = parseInt(portValue, 10);
-		if (!isNaN(port) && port > 0 && port < 65536) {
-			vscodePort = port;
+	if (portArgIndex !== -1) {
+		const value = args[portArgIndex].startsWith('--vscode-port=')
+			? args[portArgIndex].slice('--vscode-port='.length)
+			: args[portArgIndex + 1];
+		// The flag is present, so a value is required. An explicitly empty or
+		// missing value must fail instead of quietly asking for a random port.
+		if (value === undefined || value === '') {
+			console.error(
+				'--vscode-port requires a value. Use an integer between 1 and 65535.',
+			);
+			process.exit(1);
 		}
+		// Strict integer: a numeric prefix like `8080abc` or an out-of-range
+		// value must be reported, not silently rounded down.
+		const port = /^\d+$/.test(value) ? Number(value) : Number.NaN;
+		if (!Number.isInteger(port) || port < 1 || port > 65535) {
+			console.error(
+				`Invalid --vscode-port value: "${value}". Use an integer between 1 and 65535.`,
+			);
+			process.exit(1);
+		}
+		vscodePort = port;
+	}
+
+	// Extract --profile if specified
+	let cliProfile: string | undefined;
+	const profileArgIndex = args.findIndex(
+		arg => arg === '--profile' || arg.startsWith('--profile='),
+	);
+	const profileValue =
+		profileArgIndex === -1
+			? undefined
+			: args[profileArgIndex].startsWith('--profile=')
+				? args[profileArgIndex].slice('--profile='.length)
+				: args[profileArgIndex + 1];
+	if (profileArgIndex !== -1) {
+		if (!profileValue || profileValue.startsWith('-')) {
+			console.error('--profile requires a profile name.');
+			process.exit(1);
+		}
+		cliProfile = profileValue.trim();
+		const {setCliProfile} = await import('@/config/profile');
+		setCliProfile(cliProfile);
 	}
 
 	// Extract --provider if specified — validate against allowlist pattern
@@ -481,7 +532,7 @@ async function main(): Promise<void> {
 			setSessionContextLimit(limit);
 		} else {
 			console.error(
-				`Invalid --context-max value: "${contextMaxValue}". Use a positive number, e.g. 8192 or 128k`,
+				`Invalid --context-max value: "${contextMaxValue}". Use a positive number, e.g. 8192, 128k, or 1m`,
 			);
 			process.exit(1);
 		}
@@ -516,6 +567,22 @@ async function main(): Promise<void> {
 			process.exit(1);
 		}
 		break;
+	}
+
+	// Resolve and validate active profile (fail fast on unknown profile)
+	let profileMode: CliMode | undefined;
+	const {resolveActiveProfile} = await import('@/config/profile');
+	try {
+		const active = resolveActiveProfile();
+		if (
+			active?.profile.mode &&
+			(VALID_MODES as readonly string[]).includes(active.profile.mode)
+		) {
+			profileMode = active.profile.mode as CliMode;
+		}
+	} catch (error) {
+		console.error((error as Error).message);
+		process.exit(1);
 	}
 
 	// Extract --json or --output-format json. Accept spaced and fused formats.
@@ -580,11 +647,51 @@ async function main(): Promise<void> {
 			console.error('--prompt-file only applies to `nanocoder run`.');
 			process.exit(1);
 		}
+		if (promptFile !== STDIN_PROMPT_FILE) {
+			try {
+				nonInteractivePrompt = readFileSync(promptFile, 'utf8');
+			} catch (error) {
+				console.error(
+					`Could not read --prompt-file "${promptFile}": ${
+						error instanceof Error ? error.message : String(error)
+					}`,
+				);
+				process.exit(1);
+			}
+		}
+	}
+
+	// Piped stdin: `git diff | nanocoder run "write a commit message"`.
+	//
+	// Without this the pipe was never read and the model answered without
+	// ever seeing it, with no error to say so. Resolved here, with the rest
+	// of the prompt and before the runtime is chosen, so the plain shell and
+	// the Ink path both get the finished prompt.
+	//
+	// `--prompt-file -` names stdin as the prompt itself, so it replaces a
+	// positional prompt just as a real file does. Any other pipe is appended
+	// to the prompt, or is the prompt when there is none.
+	const promptFromStdin = promptFile === STDIN_PROMPT_FILE;
+	let stdinPiped = false;
+	if (isRunCommand && promptFromStdin && process.stdin.isTTY) {
+		console.error(
+			'`--prompt-file -` reads the prompt from stdin, but stdin is a terminal. Pipe something in, e.g. `git diff | nanocoder run --prompt-file -`.',
+		);
+		process.exit(1);
+	}
+	if (isRunCommand && !process.stdin.isTTY) {
+		const {MAX_STDIN_PROMPT_CHARS} = await import('./constants.js');
 		try {
-			nonInteractivePrompt = readFileSync(promptFile, 'utf8');
+			const piped = await readStdinText(process.stdin, MAX_STDIN_PROMPT_CHARS);
+			stdinPiped = piped.trim().length > 0;
+			nonInteractivePrompt = composePromptWithStdin(
+				promptFromStdin ? undefined : nonInteractivePrompt,
+				piped,
+				MAX_STDIN_PROMPT_CHARS,
+			);
 		} catch (error) {
 			console.error(
-				`Could not read --prompt-file "${promptFile}": ${
+				`Could not read stdin: ${
 					error instanceof Error ? error.message : String(error)
 				}`,
 			);
@@ -626,7 +733,7 @@ async function main(): Promise<void> {
 	// --plain or a non-TTY crashed on raw-mode stdin instead of explaining.
 	if (isRunCommand && !nonInteractivePrompt?.trim()) {
 		console.error(
-			'`nanocoder run` needs a prompt. Try: nanocoder run "your task" or nanocoder run --prompt-file <path>',
+			'`nanocoder run` needs a prompt. Try: nanocoder run "your task", nanocoder run --prompt-file <path>, or pipe one in: echo "your task" | nanocoder run',
 		);
 		process.exit(1);
 	}
@@ -724,7 +831,8 @@ async function main(): Promise<void> {
 		isRunCommand &&
 		!noPlainRequested &&
 		!vscodeMode &&
-		(!process.stdout.isTTY || ciDetected);
+		// Piped input has consumed stdin, which the Ink runtime needs for keys.
+		(!process.stdout.isTTY || ciDetected || stdinPiped);
 	// --json is a plain-shell protocol: the Ink runtime has no JSON output, so
 	// honouring the flag means taking the plain path even in a real terminal.
 	if (outputFormat === 'json' && isRunCommand && noPlainRequested) {
@@ -813,7 +921,7 @@ async function main(): Promise<void> {
 			cliModel,
 			appVersion: version,
 			trustDirectory: trustDirectoryRequested,
-			mode: cliMode,
+			mode: cliMode ?? profileMode,
 		});
 	} else if (plainMode && nonInteractivePrompt) {
 		// Headless, Ink-free path. Note: --plain is currently only valid with
@@ -822,7 +930,7 @@ async function main(): Promise<void> {
 		const {runPlainShell} = await import('@/plain/shell');
 		await runPlainShell({
 			prompt: nonInteractivePrompt,
-			developmentMode: cliMode ?? 'auto-accept',
+			developmentMode: cliMode ?? profileMode ?? 'auto-accept',
 			cliProvider,
 			cliModel,
 			trustDirectory,
@@ -1042,7 +1150,7 @@ async function main(): Promise<void> {
 				nonInteractiveMode,
 				cliProvider,
 				cliModel,
-				cliMode,
+				cliMode: cliMode ?? profileMode,
 				trustDirectory,
 				altScreenActive: useAltScreen,
 				initialSession,

@@ -15,6 +15,7 @@ import {
 	resolveEffectiveConfig,
 	selectOverrides,
 } from '@/config/effective-config';
+import {resolveActiveProfile, setCliProfile} from '@/config/profile';
 
 export interface ConfigCliResult {
 	exitCode: 0 | 1;
@@ -90,9 +91,11 @@ function renderLayerHeader(config: EffectiveConfig): string[] {
 		'Effective configuration',
 		`  working directory  ${config.cwd}`,
 		`  config directory   ${config.configDir}`,
-		'',
-		'Layers (lowest precedence first)',
 	];
+	if (config.activeProfile) {
+		lines.push(`  active profile     ${config.activeProfile}`);
+	}
+	lines.push('', 'Layers (lowest precedence first)');
 
 	const rows = config.layers.map(layer => {
 		const status = layer.error
@@ -310,6 +313,24 @@ export function runConfigCli(
 		return {
 			exitCode: 1,
 			output: `Unknown config command "${command}".\n\n${CONFIG_CLI_USAGE}`,
+		};
+	}
+
+	for (let i = 0; i < args.length; i++) {
+		const arg = args[i];
+		if (arg === '--profile') {
+			setCliProfile(args[i + 1]);
+		} else if (arg.startsWith('--profile=')) {
+			setCliProfile(arg.slice('--profile='.length));
+		}
+	}
+
+	try {
+		resolveActiveProfile(options?.cwd);
+	} catch (error) {
+		return {
+			exitCode: 1,
+			output: (error as Error).message,
 		};
 	}
 

@@ -16,6 +16,7 @@
 	},
 	"ignoreDependencies": ["lint-staged"],
 	"ignoreBinaries": [
+		"openssl",
 		"vsce",
 		"semgrep",
 		"which",

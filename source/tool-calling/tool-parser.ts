@@ -1,5 +1,6 @@
 import {FORMAT_GUIDANCE_MESSAGE} from '@/tool-calling/format-guidance';
 import {normalizeWhitespace, removeRanges} from '@/tool-calling/whitespace';
+import type {ToolSchemas} from '@/tool-calling/xml-parser';
 import {XMLToolCallParser} from '@/tool-calling/xml-parser';
 import {generateToolCallId} from '@/tools/runtime/tool-call-id';
 import type {ToolCall} from '@/types/index';
@@ -107,12 +108,29 @@ function findJSONObjectEnd(
 	return null;
 }
 
-function tryParseJSONToolCall(raw: string): ToolCall | null {
+const STRING_ARGUMENTS_ERROR =
+	'Invalid tool call: "arguments" must be an object, not a string';
+
+type JSONToolCallAttempt =
+	| {kind: 'call'; call: ToolCall}
+	| {kind: 'string-arguments'};
+
+function tryParseJSONToolCall(raw: string): JSONToolCallAttempt | null {
 	try {
 		const parsed = JSON.parse(raw) as {
 			name?: unknown;
 			arguments?: unknown;
 		};
+		// String arguments stay rejected. The parsed value still shows a
+		// string when the text holds escaped quotes, which the malformed
+		// regex cannot see.
+		if (
+			typeof parsed.name === 'string' &&
+			parsed.name &&
+			typeof parsed.arguments === 'string'
+		) {
+			return {kind: 'string-arguments'};
+		}
 		if (
 			typeof parsed.name !== 'string' ||
 			!parsed.name ||
@@ -123,15 +141,62 @@ function tryParseJSONToolCall(raw: string): ToolCall | null {
 			return null;
 		}
 		return {
-			id: generateToolCallId(),
-			function: {
-				name: parsed.name,
-				arguments: parsed.arguments as Record<string, unknown>,
+			kind: 'call',
+			call: {
+				id: generateToolCallId(),
+				function: {
+					name: parsed.name,
+					arguments: parsed.arguments as Record<string, unknown>,
+				},
 			},
 		};
 	} catch {
 		return null;
 	}
+}
+
+// Same `{` position as the malformed-pattern regex. Optional indent is
+// allowed; a brace in the middle of a sentence stays prose.
+function braceStartsLine(content: string, braceIndex: number): boolean {
+	for (let index = braceIndex - 1; index >= 0; index--) {
+		const char = content[index];
+		if (char === '\n') return true;
+		if (!/\s/.test(char)) return false;
+	}
+	return true;
+}
+
+function skipSpaceBackward(content: string, index: number): number {
+	let cursor = index;
+	while (cursor >= 0 && /\s/.test(content[cursor])) cursor--;
+	return cursor;
+}
+
+// `{` that is a JSON value: after `[`, a comma following a value, or a key.
+// The scanner already accepts that object when arguments is an object. A
+// brace after ordinary words, including a quoted phrase, stays prose.
+function braceContinuesJSONValue(content: string, braceIndex: number): boolean {
+	const beforeBrace = skipSpaceBackward(content, braceIndex - 1);
+	if (beforeBrace < 0) return false;
+	const before = content[beforeBrace];
+	if (before === '[') return true;
+	if (before === ',') {
+		const beforeComma = skipSpaceBackward(content, beforeBrace - 1);
+		return (
+			beforeComma >= 0 &&
+			(content[beforeComma] === '}' || content[beforeComma] === ']')
+		);
+	}
+	if (before !== ':') return false;
+	const quote = skipSpaceBackward(content, beforeBrace - 1);
+	if (quote < 0 || content[quote] !== '"') return false;
+	let key = quote - 1;
+	while (key >= 0 && /[\w-]/.test(content[key])) key--;
+	if (key < 0 || content[key] !== '"') return false;
+	const beforeKey = skipSpaceBackward(content, key - 1);
+	return (
+		beforeKey >= 0 && (content[beforeKey] === '{' || content[beforeKey] === ',')
+	);
 }
 
 /**
@@ -149,17 +214,22 @@ function parseJSONToolCalls(
 	ranges: Array<[number, number]>;
 	// The scan budget ran out, so calls later in the reply may be missed.
 	exhausted: boolean;
+	// Arguments JSON.parse left as a string, where a real call would be kept.
+	stringArguments: boolean;
 } {
 	const toolCalls: ToolCall[] = [];
 	const matchedRanges: Array<[number, number]> = [];
+	let stringArguments = false;
 
 	let fenceMatch: RegExpExecArray | null;
 	const fencePattern = new RegExp(JSON_FENCE_REGEX);
 	while ((fenceMatch = fencePattern.exec(content)) !== null) {
 		const inner = (fenceMatch[1] ?? '').trim();
-		const call = tryParseJSONToolCall(inner);
-		if (call) {
-			toolCalls.push(call);
+		const attempt = tryParseJSONToolCall(inner);
+		if (attempt?.kind === 'string-arguments') {
+			stringArguments = true;
+		} else if (attempt?.kind === 'call') {
+			toolCalls.push(attempt.call);
 			matchedRanges.push([
 				fenceMatch.index,
 				fenceMatch.index + fenceMatch[0].length,
@@ -185,9 +255,18 @@ function parseJSONToolCalls(
 		const end = findJSONObjectEnd(content, start, scan);
 		if (scan.exhausted) break;
 		if (end === null) continue;
-		const call = tryParseJSONToolCall(content.slice(start, end));
-		if (call) {
-			toolCalls.push(call);
+		const attempt = tryParseJSONToolCall(content.slice(start, end));
+		if (attempt?.kind === 'string-arguments') {
+			if (
+				braceStartsLine(content, start) ||
+				braceContinuesJSONValue(content, start)
+			) {
+				stringArguments = true;
+			}
+			continue;
+		}
+		if (attempt?.kind === 'call') {
+			toolCalls.push(attempt.call);
 			matchedRanges.push([start, end]);
 			// Skip only past parsed calls: a non-call object can still
 			// contain one.
@@ -201,6 +280,7 @@ function parseJSONToolCalls(
 			cleanedContent: content,
 			ranges: matchedRanges,
 			exhausted: scan.exhausted,
+			stringArguments,
 		};
 	}
 
@@ -209,6 +289,7 @@ function parseJSONToolCalls(
 		cleanedContent: removeRanges(content, matchedRanges),
 		ranges: matchedRanges,
 		exhausted: scan.exhausted,
+		stringArguments,
 	};
 }
 
@@ -294,9 +375,10 @@ function maskEmbeddedCalls(
 
 const JSON_MALFORMED_PATTERNS: Array<{regex: RegExp; error: string}> = [
 	{
+		// A raw newline inside the string never reaches JSON.parse.
 		regex:
 			/(?:^|\n)\s*\{\s*"name"\s*:\s*"[^"]+"\s*,\s*"arguments"\s*:\s*"[^"]*"\s*\}/,
-		error: 'Invalid tool call: "arguments" must be an object, not a string',
+		error: STRING_ARGUMENTS_ERROR,
 	},
 	{
 		regex: /(?:^|\n)\s*\{\s*"name"\s*:\s*"[^"]+"\s*,?\s*\}/,
@@ -337,9 +419,15 @@ function detectMalformedJSONToolCall(
  * prose discussing tool call shapes doesn't get silently erased on turns
  * where the model never actually called a tool.
  */
-export function stripEmbeddedToolCallText(content: unknown): string {
+export function stripEmbeddedToolCallText(
+	content: unknown,
+	toolNames: readonly string[],
+): string {
 	const contentStr = ensureString(content);
-	const afterXml = XMLToolCallParser.removeToolCallsFromContent(contentStr);
+	const afterXml = XMLToolCallParser.removeToolCallsFromContent(
+		contentStr,
+		toolNames,
+	);
 	const {cleanedContent: afterFnTag} = parseFunctionTagToolCalls(afterXml);
 	const {cleanedContent} = parseJSONToolCalls(afterFnTag);
 	return normalizeWhitespace(cleanedContent);
@@ -360,6 +448,7 @@ export function stripEmbeddedToolCallText(content: unknown): string {
 export function parseToolCalls(
 	content: unknown,
 	toolNames?: readonly string[],
+	toolSchemas?: ToolSchemas,
 ): ParseResult {
 	// 1. Safety Coercion
 	const contentStr = ensureString(content);
@@ -407,7 +496,10 @@ export function parseToolCalls(
 	// 2. Try XML parser for valid tool calls (OPTIMISTIC: Success first!)
 	if (XMLToolCallParser.hasToolCalls(xmlContent)) {
 		// Parse valid XML tool calls
-		const parsedCalls = XMLToolCallParser.parseToolCalls(xmlContent);
+		const parsedCalls = XMLToolCallParser.parseToolCalls(
+			xmlContent,
+			toolSchemas,
+		);
 		const broken = parsedCalls.find(
 			call => call.brokenTag && toolNames?.includes(call.toolName),
 		);
@@ -421,8 +513,10 @@ export function parseToolCalls(
 		const convertedCalls = XMLToolCallParser.convertToToolCalls(parsedCalls);
 
 		if (convertedCalls.length > 0) {
-			const cleanedContent =
-				XMLToolCallParser.removeToolCallsFromContent(strippedContent);
+			const cleanedContent = XMLToolCallParser.removeToolCallsFromContent(
+				strippedContent,
+				[...(toolNames ?? []), ...parsedCalls.map(call => call.toolName)],
+			);
 			return {
 				success: true,
 				toolCalls: convertedCalls,
@@ -460,7 +554,15 @@ export function parseToolCalls(
 		};
 	}
 
-	// 5. Check for malformed JSON tool call attempts
+	// 5. Check for malformed JSON tool call attempts. Escaped quotes are
+	// classified from the parsed value; the regex still covers a raw newline.
+	if (jsonResult.stringArguments) {
+		return {
+			success: false,
+			error: STRING_ARGUMENTS_ERROR,
+			examples: FORMAT_GUIDANCE_MESSAGE,
+		};
+	}
 	const jsonMalformed = detectMalformedJSONToolCall(strippedContent);
 	if (jsonMalformed) {
 		return {

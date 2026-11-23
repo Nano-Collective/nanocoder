@@ -1,4 +1,9 @@
-import type {ApiCallRecord, ApiUsageSnapshot, Message} from '@/types/core';
+import type {
+	ApiCallRecord,
+	ApiUsageSnapshot,
+	DevelopmentMode,
+	Message,
+} from '@/types/core';
 
 /** What every command declares, whichever way it runs. */
 interface CommandMetadata {
@@ -114,6 +119,8 @@ export interface CommandContext {
 	) => void | Promise<void>;
 	/** Missing where model switching is unavailable. */
 	switchModel?: (provider: string, model: string) => Promise<boolean>;
+	/** Switch development mode (normal, auto-accept, yolo, plan, architect). */
+	switchMode?: (mode: DevelopmentMode) => void;
 	/** Send a prompt to the model as a new chat turn. */
 	submitChatMessage: (message: string, displayValue?: string) => Promise<void>;
 }

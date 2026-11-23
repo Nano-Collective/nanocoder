@@ -49,5 +49,9 @@ jobs:
     with:
       pr-number: ${{ inputs.pr_number }}
       architecture-doc: CLAUDE.md
+      # MiniMax-M3.1-Flash writes 3–5x more reasoning per tool call than
+      # minimax-m3 did, and this repo's reviews run 22–29 min on it. The
+      # shared 30-min default cancelled about half of them.
+      timeout-minutes: 60
     secrets:
       MINIMAX_API_KEY: ${{ secrets.MINIMAX_API_KEY }}

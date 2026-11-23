@@ -36,6 +36,36 @@ function snapOutsidePlaceholder(
 	return index;
 }
 
+function isHighSurrogate(code: number): boolean {
+	return code >= 0xd800 && code <= 0xdbff;
+}
+
+function isLowSurrogate(code: number): boolean {
+	return code >= 0xdc00 && code <= 0xdfff;
+}
+
+/**
+ * If `index` lands between a high and low surrogate pair (cutting an astral
+ * code point such as an emoji in half), step back 1 (`bias: 'before'`) or
+ * forward 1 (`bias: 'after'`) into the elided range so the pair is kept whole
+ * or dropped entirely, never leaving a lone surrogate in the output.
+ */
+export function snapOutsideSurrogate(
+	content: string,
+	index: number,
+	bias: 'before' | 'after',
+): number {
+	if (index <= 0 || index >= content.length) return index;
+	if (bias === 'before') {
+		if (isHighSurrogate(content.charCodeAt(index - 1))) {
+			return index - 1;
+		}
+	} else if (isLowSurrogate(content.charCodeAt(index))) {
+		return index + 1;
+	}
+	return index;
+}
+
 // How far a cut may move to reach whitespace. Past this the text is one long
 // unbroken run (minified output, base64) and a hard cut is the only option.
 const MAX_TOKEN_SNAP = 256;
@@ -92,18 +122,26 @@ export function truncateToolResult(
 	const headLength = Math.floor(contentBudget * HEAD_SHARE);
 	const tailLength = contentBudget - headLength;
 
-	const headEnd = snapOutsideToken(
+	const headEnd = snapOutsideSurrogate(
 		content,
-		snapOutsidePlaceholder(content, headLength, 'before'),
-		'before',
-	);
-	const tailStart = Math.max(
-		headEnd,
 		snapOutsideToken(
 			content,
-			snapOutsidePlaceholder(content, content.length - tailLength, 'after'),
-			'after',
+			snapOutsidePlaceholder(content, headLength, 'before'),
+			'before',
 		),
+		'before',
+	);
+	const tailStart = snapOutsideSurrogate(
+		content,
+		Math.max(
+			headEnd,
+			snapOutsideToken(
+				content,
+				snapOutsidePlaceholder(content, content.length - tailLength, 'after'),
+				'after',
+			),
+		),
+		'after',
 	);
 
 	return content.slice(0, headEnd) + marker + content.slice(tailStart);

@@ -75,6 +75,8 @@ import {
 	stripEmbeddedToolCallText,
 	stripThinkTags,
 } from '@/tool-calling/index';
+import type {ToolSchemas} from '@/tool-calling/xml-parser';
+import {getToolJsonSchema} from '@/tools/runtime/schema-validate';
 import type {RetryLimitsConfig} from '@/types/config';
 import type {
 	AISDKCoreTool,
@@ -100,6 +102,15 @@ const FINAL_TURN_INSTRUCTION =
  * an error, not a finished turn with an empty answer.
  */
 export const NO_RESPONSE_MESSAGE = 'No response received from model';
+
+function getToolSchemas(tools: Record<string, AISDKCoreTool>): ToolSchemas {
+	return Object.fromEntries(
+		Object.entries(tools).map(([name, tool]) => [
+			name,
+			getToolJsonSchema(tool),
+		]),
+	);
+}
 
 export interface TurnContext {
 	/** Zero-based iteration index. */
@@ -403,19 +414,22 @@ export async function runTurnEngine<S>(
 		// handling below.
 		const offeredNames =
 			result.finishReason === 'length' ? undefined : prepared.availableNames;
+		const toolSchemas = getToolSchemas(prepared.tools);
 		let parsed: ReturnType<typeof parseToolCalls>;
 		if (textToolCalls === 'off' || finalTurn) {
 			parsed = unparsed(fullContent);
 		} else if (result.toolsDisabled) {
-			parsed = parseToolCalls(fullContent, offeredNames);
+			parsed = parseToolCalls(fullContent, offeredNames, toolSchemas);
 		} else if (textToolCalls === 'fallback') {
 			parsed = unparsed(fullContent);
 		} else if (nativeToolCalls.length > 0) {
 			// Trust the native calls, but drop any tool-call text the model
 			// echoed alongside them so it does not leak into history.
-			parsed = unparsed(stripEmbeddedToolCallText(fullContent));
+			parsed = unparsed(
+				stripEmbeddedToolCallText(fullContent, prepared.availableNames),
+			);
 		} else {
-			parsed = parseToolCalls(fullContent, offeredNames);
+			parsed = parseToolCalls(fullContent, offeredNames, toolSchemas);
 		}
 
 		if (!parsed.success) {
