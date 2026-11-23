@@ -1,7 +1,6 @@
 import {readdirSync, statSync} from 'fs';
-import {basename, join, relative} from 'path';
+import {basename, join, relative, sep} from 'path';
 import {MAX_DIRECTORY_DEPTH, MAX_FILES_TO_SCAN} from '@/constants';
-import {toPosixPath} from '@/events/event-router';
 import {loadGitignore} from '@/utils/fs/gitignore-loader';
 
 interface ScanResult {
@@ -74,8 +73,11 @@ export class FileScanner {
 				// nosemgrep
 				const fullPath = join(dirPath, entry); // nosemgrep
 				// Always '/'-separated, so callers can split and match these paths
-				// the same way on Windows.
-				const relativePath = toPosixPath(relative(this.rootPath, fullPath));
+				// the same way on Windows. Only the platform separator is replaced:
+				// on POSIX a backslash is a valid character in a file name.
+				const relativePath = relative(this.rootPath, fullPath)
+					.split(sep)
+					.join('/');
 
 				if (this.shouldIgnore(fullPath)) {
 					continue;
