@@ -65,7 +65,7 @@ nanocoder -h
 | `--resume [id]` | `-r` | Resume a [saved session](../features/session-management.md) by session ID, 1-based list index, or `last`. With no ID, opens the session picker at startup. Errors if the session is not found. Interactive only — errors with `run`. |
 | `init [--preset <type>] [-f\|--force] [--lean]` | | Initialize the current project. Bundled presets: `react`, `nextjs`, and `rust`. `--force` regenerates an existing `AGENTS.md`; `--lean` skips `CLAUDE.md` when merging existing project guidance |
 | `run` | | Run in non-interactive mode |
-| `review` | | Grounded review of a branch or PR: findings must cite changed code and pass an independent verifier. See [code review](../features/review.md) |
+| `review` | | Grounded review of a branch or PR: findings must cite lines on or near the change (within three lines, or at a deletion boundary) and pass an independent verifier. See [code review](../features/review.md) |
 | `worktree <PR-number>` | | Start an interactive session in a new Git worktree at a PR's head |
 | `daemon <start\|stop\|status\|logs\|install\|uninstall>` | | Manage the per-project [skill daemon](../features/skills.md#the-daemon). `start` refuses an untrusted directory unless `--trust-directory` is passed |
 | `skills add <target>` | | Install a skill bundle from an index name, `owner/repo`, a git URL or a local path. Flags: `--ref`, `--subdir`, `--global`, `--force`, `--yes`, `--index` |
@@ -206,7 +206,7 @@ nanocoder review feature/auth
 nanocoder review 42
 ```
 
-This runs a grounded review of the target against the default branch: an agent inspects the pinned revision with read-only tools, and only issues that cite changed code and pass an independent verifier are reported. You can also use `/review <target>` inside the interactive TUI, or `/review quick <target>` for the one-shot diff review. See [code review](../features/review.md).
+This runs a grounded review of the target against the default branch: an agent inspects the pinned revision with read-only tools, and only issues that cite lines on or near the change (within three lines, or at a deletion boundary) and pass an independent verifier are reported. You can also use `/review <target>` inside the interactive TUI, or `/review quick <target>` for the one-shot diff review. See [code review](../features/review.md).
 
 **Note:** `nanocoder review` requires an interactive terminal (TTY). It cannot be used with pipes or redirection (e.g. `nanocoder review main > review.md` will error) and its output cannot currently be captured to a file (also tracked in [#1287](https://github.com/Nano-Collective/nanocoder/issues/1287)).
 

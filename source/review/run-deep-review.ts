@@ -184,7 +184,10 @@ export async function runDeepReview(
 			);
 			continue;
 		}
-		if (finder.status === 'budget-exhausted') {
+		if (
+			finder.status === 'budget-exhausted' &&
+			finder.budgetReason !== 'context'
+		) {
 			result.incompleteReasons.push(
 				`The ${lens.label} finder reached its budget (${budgets.finder.maxToolCalls} tool calls, ${budgets.finder.maxTurns} model turns) before finishing; issues may be missing.`,
 			);

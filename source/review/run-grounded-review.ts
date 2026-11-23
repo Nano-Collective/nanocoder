@@ -183,10 +183,8 @@ export async function runGroundedReview(
 	const contextTools = createReviewContextTools(snapshot, tools);
 	const scopeText = snapshot.scope.description;
 
-	const promptDiff = buildPromptDiff(
-		snapshot,
-		promptDiffLimits(options.client),
-	);
+	const diffLimits = promptDiffLimits(options.client);
+	const promptDiff = buildPromptDiff(snapshot, diffLimits);
 	if (promptDiff.binaryPaths.length > 0) {
 		result.notes.push(
 			`Binary files are not reviewed as text: ${listPaths(promptDiff.binaryPaths)}.`,
@@ -227,7 +225,10 @@ export async function runGroundedReview(
 		result.message = `The finder failed: ${finder.error ?? 'unknown error'}`;
 		return settle('failed');
 	}
-	if (finder.status === 'budget-exhausted') {
+	if (
+		finder.status === 'budget-exhausted' &&
+		finder.budgetReason !== 'context'
+	) {
 		result.incompleteReasons.push(
 			`The finder reached its budget (${budgets.finder.maxToolCalls} tool calls, ${budgets.finder.maxTurns} model turns) before finishing; issues may be missing.`,
 		);

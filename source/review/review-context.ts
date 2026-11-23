@@ -244,7 +244,7 @@ function coversWholeRead(
  */
 export function createReviewContextTools(
 	snapshot: ReviewTargetSnapshot,
-	tools: ReviewFoundationTools,
+	tools: Pick<ReviewFoundationTools, 'execGit' | 'execGitBuffer'>,
 ): ReviewAgentTool[] {
 	const changed = new Map(snapshot.files.map(file => [file.path, file]));
 	const headOid = snapshot.headOid;
