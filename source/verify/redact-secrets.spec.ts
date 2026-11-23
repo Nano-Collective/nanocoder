@@ -1,7 +1,7 @@
 import test from 'ava';
 import {redactSecrets} from './redact-secrets';
 
-console.log('\nredact-secrets.spec.ts');
+console.log('\\nredact-secrets.spec.ts');
 
 const EMPTY_ENV = {};
 
@@ -41,6 +41,71 @@ test('redacts Google, GitLab, Stripe, Slack and JWT token shapes', t => {
 	}
 });
 
+test('redacts npm and Hugging Face tokens', t => {
+	const samples = [
+		'npm_a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8',
+		'hf_AbCdEfGhIjKlMnOpQrStUvWxYz0123456789',
+	];
+	for (const secret of samples) {
+		t.is(redactSecrets(`token ${secret}`, EMPTY_ENV), 'token [REDACTED]');
+	}
+});
+
+test('redacts credential values in authorization and cloud headers', t => {
+	t.is(
+		redactSecrets(
+			'Authorization: Bearer abcdef0123456789abcdef0123456789',
+			EMPTY_ENV,
+		),
+		'Authorization: Bearer [REDACTED]',
+	);
+	t.is(
+		redactSecrets(
+			'aws_secret_access_key = wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY',
+			EMPTY_ENV,
+		),
+		'aws_secret_access_key = [REDACTED]',
+	);
+	t.is(
+		redactSecrets(
+			'AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==',
+			EMPTY_ENV,
+		),
+		'AccountKey=[REDACTED]',
+	);
+});
+
+test('redacts passwords in database and git URLs but preserves URL structure', t => {
+	t.is(
+		redactSecrets(
+			'DATABASE_URL=postgres://admin:S3cretPassw0rd@db.internal:5432/app',
+			EMPTY_ENV,
+		),
+		'DATABASE_URL=postgres://admin:[REDACTED]@db.internal:5432/app',
+	);
+	t.is(
+		redactSecrets(
+			'git clone https://deploy:ghx-S3cretToken99@example.com/org/repo.git',
+			EMPTY_ENV,
+		),
+		'git clone https://deploy:[REDACTED]@example.com/org/repo.git',
+	);
+});
+
+test('redacts Twilio and SendGrid API keys', t => {
+	t.is(
+		redactSecrets('key SK0123456789abcdef0123456789abcdef', EMPTY_ENV),
+		'key [REDACTED]',
+	);
+	t.is(
+		redactSecrets(
+			'SG.abcdefghijklmnopqrstuv.abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG',
+			EMPTY_ENV,
+		),
+		'[REDACTED]',
+	);
+});
+
 test('new token shapes leave ordinary code alone', t => {
 	const text = [
 		// Identifiers that merely contain a prefix.
@@ -51,7 +116,7 @@ test('new token shapes leave ordinary code alone', t => {
 		// A dotted name starting with eyJ but without three long segments.
 		'eyJ.foo.bar',
 		'import {eyJunk} from "./x";',
-	].join('\n');
+	].join('\\n');
 	t.is(redactSecrets(text, EMPTY_ENV), text);
 });
 
@@ -60,14 +125,15 @@ test('redacts a PEM private key block', t => {
 		'-----BEGIN OPENSSH PRIVATE KEY-----',
 		'b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQ',
 		'-----END OPENSSH PRIVATE KEY-----',
-	].join('\n');
-	t.is(redactSecrets(`x\n${key}\ny`, EMPTY_ENV), 'x\n[REDACTED]\ny');
+	].join('\\n');
+	t.is(redactSecrets(`x\\n${key}\\ny`, EMPTY_ENV), 'x\\n[REDACTED]\\ny');
 });
 
 test('redacts values of secret-looking env vars of length >= 8', t => {
 	const env = {
 		MY_API_KEY: 'hunter2hunter2',
 		DB_PASSWORD: 'correct-horse',
+		DB_PASS: 'hunter2hunter2',
 		SHORT_TOKEN: 'abc',
 		HOME: '/home/someone',
 	};
@@ -87,7 +153,7 @@ test('escapes regex metacharacters in env values', t => {
 });
 
 test('leaves ordinary text alone', t => {
-	const text = '### Summary\nThe test `sk-foo` failed at src/a.ts:12 (task-key).';
+	const text = '### Summary\\nThe test `sk-foo` failed at src/a.ts:12 (task-key).';
 	t.is(redactSecrets(text, EMPTY_ENV), text);
 });
 
