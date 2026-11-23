@@ -534,9 +534,9 @@ export async function getModelAcceptsImages(
 }
 
 /**
- * Per-model pricing memo. Both lookups below scan the whole database (and a
- * miss scans it twice), so the result — including the negative one for local
- * models that will never be on models.dev — is cached for the process.
+ * Per-model pricing memo. The lookup below scans the whole database, so the
+ * result — including the negative one for local models that will never be on
+ * models.dev — is cached for the process.
  */
 const pricingMemo = new Map<string, ModelInfo['cost'] | null>();
 
@@ -553,12 +553,10 @@ export async function getModelPricing(
 		return memoized;
 	}
 	try {
-		let modelInfo = await findModelById(modelId);
-
-		if (!modelInfo) {
-			modelInfo = await findModelByName(modelId);
-		}
-
+		// Exact id only: unlike context limits, a price borrowed from a
+		// similarly named model is wrong (e.g. a free local `llama3` billed
+		// as Groq's `llama3-70b-8192`).
+		const modelInfo = await findModelById(modelId);
 		const pricing = modelInfo ? modelInfo.cost : null;
 		pricingMemo.set(modelId, pricing);
 		return pricing;
