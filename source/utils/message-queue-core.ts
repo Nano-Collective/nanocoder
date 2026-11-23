@@ -56,6 +56,16 @@ export function setMessageQueueSink(sink: MessageQueueSink | null): void {
 	globalMessageQueueSink = sink;
 }
 
+/**
+ * Returns true when a user-facing message sink or chat queue is attached.
+ */
+export function isMessageQueueAttached(): boolean {
+	return (
+		globalMessageQueueSink !== null ||
+		(globalAddToChatQueue !== null && globalMessageRenderer !== null)
+	);
+}
+
 // Get logger instance to avoid circular dependencies
 import {getLogger} from '@/utils/logging';
 

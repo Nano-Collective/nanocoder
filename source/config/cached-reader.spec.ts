@@ -62,6 +62,48 @@ test.serial(
 	},
 );
 
+test.serial(
+	'readCachedConfigFile defers error reporting until message sink is attached',
+	t => {
+		const dir = mkdtempSync(join(tmpdir(), 'nanocoder-cache-defer-'));
+		const file = join(dir, 'bad.json');
+
+		const captured: Array<{type: string; message: string}> = [];
+
+		try {
+			writeFileSync(file, '{"invalid": JSON,}', 'utf-8');
+			clearConfigFileCache();
+			setMessageQueueSink(null);
+
+			// 1. First read happens before any sink is set (e.g. resolveActiveProfile at CLI startup)
+			const first = readCachedConfigFile(file);
+			t.is(first, null);
+			t.is(captured.length, 0, 'No sink attached yet, captured should be empty');
+
+			// 2. Install sink (e.g. plain shell or TUI mounts)
+			setMessageQueueSink((type, message) => {
+				captured.push({type, message});
+			});
+
+			// 3. Second read happens with sink attached (e.g. initializePlain or App loading config)
+			const second = readCachedConfigFile(file);
+			t.is(second, null);
+			t.is(captured.length, 1, 'Error should be reported once sink is attached');
+			t.true(captured[0]!.message.includes('project config skipped'));
+			t.true(captured[0]!.message.includes(file));
+
+			// 4. Subsequent reads must not re-emit the error
+			const third = readCachedConfigFile(file);
+			t.is(third, null);
+			t.is(captured.length, 1, 'Subsequent read should not emit duplicate error');
+		} finally {
+			setMessageQueueSink(null);
+			clearConfigFileCache();
+			rmSync(dir, {recursive: true, force: true});
+		}
+	},
+);
+
 test.serial('readCachedConfigFile identifies global config files', t => {
 	const dir = mkdtempSync(join(tmpdir(), 'nanocoder-cache-global-'));
 	const globalDir = join(dir, 'global-dir');

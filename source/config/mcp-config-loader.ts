@@ -297,6 +297,20 @@ export function loadAllProviderConfigs(
 	return Array.from(providerMap.values());
 }
 
+function extractProvidersFromConfig(config: unknown): ProviderConfig[] {
+	if (config && typeof config === 'object') {
+		const typed = config as Record<string, unknown>;
+		const nanocoder = typed.nanocoder as Record<string, unknown> | undefined;
+		if (nanocoder && Array.isArray(nanocoder.providers)) {
+			return substituteEnvVars(nanocoder.providers as ProviderConfig[]);
+		}
+		if (Array.isArray(typed.providers)) {
+			return substituteEnvVars(typed.providers as ProviderConfig[]);
+		}
+	}
+	return [];
+}
+
 /**
  * Load provider configurations from project-level files
  */
@@ -305,17 +319,7 @@ function loadProjectProviderConfigs(cwd: string): ProviderConfig[] {
 	const configPath = join(cwd, 'agents.config.json'); // nosemgrep
 
 	if (existsSync(configPath)) {
-		const config = readCachedConfigFile(configPath);
-		if (config && typeof config === 'object') {
-			const typed = config as Record<string, unknown>;
-			const nanocoder = typed.nanocoder as Record<string, unknown> | undefined;
-			if (nanocoder && Array.isArray(nanocoder.providers)) {
-				return substituteEnvVars(nanocoder.providers as ProviderConfig[]);
-			}
-			if (Array.isArray(typed.providers)) {
-				return substituteEnvVars(typed.providers as ProviderConfig[]);
-			}
-		}
+		return extractProvidersFromConfig(readCachedConfigFile(configPath));
 	}
 
 	return [];
@@ -341,17 +345,7 @@ function loadGlobalProviderConfigs(): ProviderConfig[] {
 // Helper function to load provider config from a specific file
 function loadProviderConfigFromFile(filePath: string): ProviderConfig[] {
 	if (existsSync(filePath)) {
-		const config = readCachedConfigFile(filePath);
-		if (config && typeof config === 'object') {
-			const typed = config as Record<string, unknown>;
-			const nanocoder = typed.nanocoder as Record<string, unknown> | undefined;
-			if (nanocoder && Array.isArray(nanocoder.providers)) {
-				return substituteEnvVars(nanocoder.providers as ProviderConfig[]);
-			}
-			if (Array.isArray(typed.providers)) {
-				return substituteEnvVars(typed.providers as ProviderConfig[]);
-			}
-		}
+		return extractProvidersFromConfig(readCachedConfigFile(filePath));
 	}
 
 	return [];

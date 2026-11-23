@@ -1,7 +1,7 @@
 import {existsSync, readFileSync, statSync} from 'node:fs';
 import {resolve, sep} from 'node:path';
 import {getConfigPath} from '@/config/paths';
-import {notifyError} from '@/utils/message-queue-core';
+import {isMessageQueueAttached, notifyError} from '@/utils/message-queue-core';
 import {stripUtf8Bom} from '@/utils/strip-utf8-bom';
 
 type ConfigFileCacheEntry =
@@ -16,6 +16,7 @@ type ConfigFileCacheEntry =
 			size: number;
 			ok: false;
 			error: unknown;
+			reported: boolean;
 	  };
 
 const configFileCache = new Map<string, ConfigFileCacheEntry>();
@@ -31,10 +32,21 @@ function isGlobalConfig(configPath: string): boolean {
 	return resolvedConfig.startsWith(globalPrefix);
 }
 
+function notifyConfigFailure(configPath: string, error: unknown): void {
+	const isGlobal = isGlobalConfig(configPath);
+	const skipLabel = isGlobal
+		? 'global config skipped'
+		: 'project config skipped';
+	notifyError(
+		`Failed to load config from ${configPath}: ${String(error)} — ${skipLabel}`,
+	);
+}
+
 /**
  * Read and cache a JSON config file.
  * Handles UTF-8 BOM, deduplicates parse error reporting, and re-parses only when mtime or size changes.
- * Returns the parsed data or null on missing file / parse error.
+ * Returns the parsed data, or `null` if the file is missing, cannot be stat-ed, or fails to parse
+ * (callers should not expect it to throw).
  */
 export function readCachedConfigFile(configPath: string): unknown {
 	if (!existsSync(configPath)) {
@@ -58,6 +70,10 @@ export function readCachedConfigFile(configPath: string): unknown {
 		if (cached.ok) {
 			return structuredClone(cached.data);
 		}
+		if (!cached.reported && isMessageQueueAttached()) {
+			notifyConfigFailure(configPath, cached.error);
+			cached.reported = true;
+		}
 		return null;
 	}
 
@@ -75,19 +91,15 @@ export function readCachedConfigFile(configPath: string): unknown {
 
 		return data;
 	} catch (error) {
-		const isGlobal = isGlobalConfig(configPath);
-		const skipLabel = isGlobal
-			? 'global config skipped'
-			: 'project config skipped';
-		notifyError(
-			`Failed to load config from ${configPath}: ${String(error)} — ${skipLabel}`,
-		);
+		const reported = isMessageQueueAttached();
+		notifyConfigFailure(configPath, error);
 
 		configFileCache.set(configPath, {
 			mtimeMs: stats.mtimeMs,
 			size: stats.size,
 			ok: false,
 			error,
+			reported,
 		});
 
 		return null;

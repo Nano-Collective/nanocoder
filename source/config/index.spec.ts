@@ -10,6 +10,7 @@ import {
 	getSubagentMaxTurns,
 	loadDefaultMode,
 	reloadAppConfig,
+	resolveActiveProfile,
 } from './index';
 import {setMessageQueueSink} from '@/utils/message-queue-core';
 import {resolveTune} from './tune';
@@ -2130,9 +2131,6 @@ test.serial(
 		);
 
 		const capturedMessages: Array<{type: string; message: string}> = [];
-		setMessageQueueSink((type, message) => {
-			capturedMessages.push({type, message});
-		});
 
 		const originalCwd = process.cwd();
 		const originalConfigDir = process.env.NANOCODER_CONFIG_DIR;
@@ -2144,6 +2142,17 @@ test.serial(
 			process.env.NODE_ENV = 'development';
 
 			clearAppConfig();
+			setMessageQueueSink(null);
+
+			// First read happens before any sink is set (e.g. resolveActiveProfile at CLI startup)
+			resolveActiveProfile();
+			t.is(capturedMessages.length, 0, 'No error captured before sink is set');
+
+			// Now install the sink (plain shell or TUI mounts)
+			setMessageQueueSink((type, message) => {
+				capturedMessages.push({type, message});
+			});
+
 			reloadAppConfig();
 			const config = getAppConfig();
 
