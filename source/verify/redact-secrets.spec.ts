@@ -130,17 +130,20 @@ test('redacts values of secret-looking env vars of length >= 8', t => {
 	const env = {
 		MY_API_KEY: 'hunter2hunter2',
 		DB_PASSWORD: 'correct-horse',
-		DB_PASS: 'hunter2hunter2',
+		DB_PASS: 'db-pass-value-unique',
+		APP_PWD: 'pwd-value-unique',
+		SERVICE_CREDENTIAL: 'credential-value-unique',
+		SERVICE_AUTH: 'auth-value-unique',
 		SHORT_TOKEN: 'abc',
 		HOME: '/home/someone',
 	};
 	const out = redactSecrets(
-		'key hunter2hunter2, pw correct-horse, short abc, home /home/someone',
+		'key hunter2hunter2, pw correct-horse, db db-pass-value-unique, pwd pwd-value-unique, credential credential-value-unique, auth auth-value-unique, short abc, home /home/someone',
 		env,
 	);
 	t.is(
 		out,
-		'key [REDACTED], pw [REDACTED], short abc, home /home/someone',
+		'key [REDACTED], pw [REDACTED], db [REDACTED], pwd [REDACTED], credential [REDACTED], auth [REDACTED], short abc, home /home/someone',
 	);
 });
 
