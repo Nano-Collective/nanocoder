@@ -1,7 +1,7 @@
 import test from 'ava';
 import {redactSecrets} from './redact-secrets';
 
-console.log('\\nredact-secrets.spec.ts');
+console.log('\nredact-secrets.spec.ts');
 
 const EMPTY_ENV = {};
 
@@ -17,7 +17,7 @@ test('redacts common token shapes', t => {
 		'xoxp-1234567890-abcdefghij',
 	];
 	for (const secret of samples) {
-		const out = redactSecrets(`before ${secret} after`, EMPTY_ENV);
+		const out = redactSecrets('before ' + secret + ' after', EMPTY_ENV);
 		t.is(out, 'before [REDACTED] after', secret);
 	}
 });
@@ -36,7 +36,7 @@ test('redacts Google, GitLab, Stripe, Slack and JWT token shapes', t => {
 		'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U',
 	];
 	for (const secret of samples) {
-		const out = redactSecrets(`before ${secret} after`, EMPTY_ENV);
+		const out = redactSecrets('before ' + secret + ' after', EMPTY_ENV);
 		t.is(out, 'before [REDACTED] after', secret);
 	}
 });
@@ -47,7 +47,7 @@ test('redacts npm and Hugging Face tokens', t => {
 		'hf_AbCdEfGhIjKlMnOpQrStUvWxYz0123456789',
 	];
 	for (const secret of samples) {
-		t.is(redactSecrets(`token ${secret}`, EMPTY_ENV), 'token [REDACTED]');
+		t.is(redactSecrets('token ' + secret, EMPTY_ENV), 'token [REDACTED]');
 	}
 });
 
@@ -108,15 +108,12 @@ test('redacts Twilio and SendGrid API keys', t => {
 
 test('new token shapes leave ordinary code alone', t => {
 	const text = [
-		// Identifiers that merely contain a prefix.
 		'const risk_live_window = desk_test_mode;',
 		'function AIzaHelper() { return glpatch; }',
-		// Too short to be a Google key.
 		'const key = "AIzaShort";',
-		// A dotted name starting with eyJ but without three long segments.
 		'eyJ.foo.bar',
 		'import {eyJunk} from "./x";',
-	].join('\\n');
+	].join('\n');
 	t.is(redactSecrets(text, EMPTY_ENV), text);
 });
 
@@ -125,8 +122,8 @@ test('redacts a PEM private key block', t => {
 		'-----BEGIN OPENSSH PRIVATE KEY-----',
 		'b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQ',
 		'-----END OPENSSH PRIVATE KEY-----',
-	].join('\\n');
-	t.is(redactSecrets(`x\\n${key}\\ny`, EMPTY_ENV), 'x\\n[REDACTED]\\ny');
+	].join('\n');
+	t.is(redactSecrets('x\n' + key + '\ny', EMPTY_ENV), 'x\n[REDACTED]\ny');
 });
 
 test('redacts values of secret-looking env vars of length >= 8', t => {
@@ -153,7 +150,7 @@ test('escapes regex metacharacters in env values', t => {
 });
 
 test('leaves ordinary text alone', t => {
-	const text = '### Summary\\nThe test `sk-foo` failed at src/a.ts:12 (task-key).';
+	const text = '### Summary\nThe test sk-foo failed at src/a.ts:12 (task-key).';
 	t.is(redactSecrets(text, EMPTY_ENV), text);
 });
 
