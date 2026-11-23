@@ -8,6 +8,7 @@ import {
 	readFileSync,
 	rmSync,
 	unlinkSync,
+	writeFileSync,
 } from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
@@ -21,7 +22,7 @@ import {
 	TIMEOUT_BASH_DEFAULT_MS,
 } from '@/constants';
 import {signalProcessTree} from '@/utils/process-tree';
-import {shellArgs} from '@/utils/shell-args';
+import {isWindowsCmd, shellArgs} from '@/utils/shell-args';
 import {getShutdownManager} from '@/utils/shutdown';
 import {
 	makeStreamCollector,
@@ -51,6 +52,32 @@ const isWindows = platform === 'win32';
  */
 function formatTimeoutSeconds(ms: number): number {
 	return Number((ms / 1000).toFixed(3));
+}
+
+/** Best-effort removal of a scratch file created for one execution. */
+function removeIfExists(file: string | undefined): void {
+	if (!file) return;
+	try {
+		if (existsSync(file)) unlinkSync(file);
+	} catch {
+		// best-effort cleanup
+	}
+}
+
+/**
+ * cmd.exe stops at a newline and expands `%VAR%` once for the whole command
+ * line, so the POSIX `pwd && exit $?` epilogue cannot be appended inline. A
+ * fixed batch file invoked with `call` runs in the same shell: it sees the
+ * command's real ERRORLEVEL, records the final directory, and returns that
+ * same exit code. The user's command itself stays byte-for-byte intact.
+ */
+function writeWindowsCwdEpilogue(executionId: string): string {
+	const file = join(tmpdir(), `nanocoder-cwd-epilogue-${executionId}.cmd`);
+	writeFileSync(
+		file,
+		'@echo off\r\nset __nc_ec=%ERRORLEVEL%\r\ncd > "%NC_CWD_FILE%"\r\nexit /b %__nc_ec%\r\n',
+	);
+	return file;
 }
 
 /**
@@ -195,6 +222,7 @@ interface ExecutionEntry {
 	signal?: AbortSignal;
 	abortListener?: () => void;
 	cwdCaptureFile?: string;
+	windowsCwdEpilogue?: string;
 	jailTmp?: string;
 	cleanupJailTmp?: () => void;
 	releaseProtected?: () => void;
@@ -262,16 +290,35 @@ export class BashExecutor extends EventEmitter {
 		if (sandbox && !isWindows) {
 			jailTmp = resolveJailRoot(mkdtempSync(join(tmpdir(), 'nc-sbx-')));
 		}
-		const cwdCaptureFile = isWindows
-			? undefined
-			: join(jailTmp ?? tmpdir(), `nanocoder-cwd-${executionId}`);
+
+		// The Windows shell is cmd.exe unless a non-standard ComSpec is set.
+		// Only cmd can run the batch epilogue; other shells keep the old
+		// behaviour (no capture) rather than breaking their command syntax.
+		const windowsShell = isWindows
+			? process.env.ComSpec || 'cmd.exe'
+			: undefined;
+		const captureCwd = windowsShell === undefined || isWindowsCmd(windowsShell);
+		let windowsCwdEpilogue = '';
+		if (windowsShell && captureCwd) {
+			try {
+				windowsCwdEpilogue = writeWindowsCwdEpilogue(executionId);
+			} catch {
+				// Best-effort: without the wrapper the cwd stays where it was.
+			}
+		}
+		const cwdCaptureFile =
+			captureCwd && (!isWindows || windowsCwdEpilogue)
+				? join(jailTmp ?? tmpdir(), `nanocoder-cwd-${executionId}`)
+				: undefined;
 		const spawnCommand =
 			cwdCaptureFile === undefined
 				? command
-				: // Blank line before the epilogue: a command ending in a trailing
-					// backslash would otherwise line-continue into `__nc_ec=$?`.
-					// Capture path is $NC_CWD_FILE so positional args stay empty.
-					`${command}\n\n__nc_ec=$?\ncommand pwd -P > "$NC_CWD_FILE" 2>/dev/null\nexit $__nc_ec`;
+				: isWindows
+					? `${command} & call "${windowsCwdEpilogue}"`
+					: // Blank line before the epilogue: a command ending in a trailing
+						// backslash would otherwise line-continue into `__nc_ec=$?`.
+						// Capture path is $NC_CWD_FILE so positional args stay empty.
+						`${command}\n\n__nc_ec=$?\ncommand pwd -P > "$NC_CWD_FILE" 2>/dev/null\nexit $__nc_ec`;
 		const childEnv = {
 			...bashChildEnv(process.env, getAppConfig(), sandbox),
 			...(cwdCaptureFile ? {NC_CWD_FILE: cwdCaptureFile} : {}),
@@ -331,11 +378,11 @@ export class BashExecutor extends EventEmitter {
 				return {executionId, promise: Promise.resolve({...state})};
 			}
 			proc = spawnPlanned(planned, {cwd, env: childEnv});
-		} else if (cwdCaptureFile === undefined) {
+		} else if (isWindows) {
 			// cmd.exe parses the command line itself; without verbatim arguments
 			// Node escapes each inner `"` as `\"`, which cmd does not understand.
-			const shell = process.env.ComSpec || 'cmd.exe';
-			proc = spawn(shell, shellArgs(shell, command), {
+			const shell = windowsShell ?? 'cmd.exe';
+			proc = spawn(shell, shellArgs(shell, spawnCommand), {
 				cwd,
 				env: childEnv,
 				windowsVerbatimArguments: true,
@@ -368,11 +415,8 @@ export class BashExecutor extends EventEmitter {
 			} catch {
 				// Non-fatal: leave the session cwd where it was.
 			} finally {
-				try {
-					if (existsSync(cwdCaptureFile)) unlinkSync(cwdCaptureFile);
-				} catch {
-					// best-effort cleanup
-				}
+				removeIfExists(cwdCaptureFile);
+				removeIfExists(windowsCwdEpilogue);
 			}
 		};
 
@@ -459,6 +503,7 @@ export class BashExecutor extends EventEmitter {
 				// so the turn's AbortSignal must not tear it down.
 				signal: background ? undefined : options?.signal,
 				cwdCaptureFile,
+				windowsCwdEpilogue,
 				jailTmp,
 				cleanupJailTmp,
 				releaseProtected,
@@ -615,16 +660,9 @@ export class BashExecutor extends EventEmitter {
 		// as stopped before then lets nanocoder move on, or exit, around it.
 		this.executions.delete(executionId);
 		void this.stop(execution.process).then(() => {
-			// Drop the cwd temp file; a killed command must not move the session cwd.
-			if (execution.cwdCaptureFile) {
-				try {
-					if (existsSync(execution.cwdCaptureFile)) {
-						unlinkSync(execution.cwdCaptureFile);
-					}
-				} catch {
-					// best-effort cleanup
-				}
-			}
+			// Drop the cwd temp files; a killed command must not move the session cwd.
+			removeIfExists(execution.cwdCaptureFile);
+			removeIfExists(execution.windowsCwdEpilogue);
 			execution.cleanupJailTmp?.();
 			execution.releaseProtected?.();
 			execution.state.isComplete = true;
@@ -738,7 +776,11 @@ export class BashExecutor extends EventEmitter {
 		for (const proc of procs) {
 			if (isGroupAlive(proc)) signalGroups(proc, 'SIGKILL');
 		}
-		for (const entry of this.executions.values()) entry.releaseProtected?.();
+		for (const entry of this.executions.values()) {
+			entry.releaseProtected?.();
+			removeIfExists(entry.cwdCaptureFile);
+			removeIfExists(entry.windowsCwdEpilogue);
+		}
 		for (const cleanup of this.leftoverCleanups.values()) cleanup();
 		this.leftoverCleanups.clear();
 	}
