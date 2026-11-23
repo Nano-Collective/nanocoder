@@ -1,5 +1,8 @@
 import test from 'ava';
-import {replaceFirstLiteral} from '@/tools/file-ops/literal-replace';
+import {
+	countLiteralOccurrences,
+	replaceFirstLiteral,
+} from '@/tools/file-ops/literal-replace';
 
 console.log('\nliteral-replace.spec.ts');
 
@@ -51,4 +54,22 @@ test('replaceFirstLiteral matches String.replace for $-free input', t => {
 		replaceFirstLiteral(content, 'beta', 'BETA'),
 		content.replace('beta', 'BETA'),
 	);
+});
+
+test('countLiteralOccurrences counts overlapping matches (#2236)', t => {
+	t.is(countLiteralOccurrences('aaa', 'aa'), 2);
+	t.is(countLiteralOccurrences('x\nx\nx\n', 'x\nx'), 2);
+	t.is(countLiteralOccurrences('aaaa', 'aa'), 3);
+});
+
+test('countLiteralOccurrences agrees with split on non-overlapping matches', t => {
+	t.is(countLiteralOccurrences('a b a b', 'a'), 2);
+	t.is(countLiteralOccurrences('same\nsame\n', 'same'), 2);
+	t.is(countLiteralOccurrences('hello', 'nope'), 0);
+	t.is(countLiteralOccurrences('abc', 'abc'), 1);
+});
+
+test('countLiteralOccurrences treats an empty needle as no match', t => {
+	t.is(countLiteralOccurrences('abc', ''), 0);
+	t.is(countLiteralOccurrences('', ''), 0);
 });
