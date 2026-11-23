@@ -20,11 +20,30 @@ import type {
 
 const MAX_VERIFIER_DIFF_LINES = 300;
 
-function clipDiff(diff: string): string {
+function verifierDiffCharLimit(client: LLMClient): number {
+	const contextTokens = client.getContextSize();
+	return contextTokens > 0
+		? Math.min(80_000, Math.max(6_000, Math.floor(contextTokens * 4 * 0.3)))
+		: 60_000;
+}
+
+function clipDiff(diff: string, maxChars: number): string {
 	const lines = diff.split('\n');
-	return lines.length <= MAX_VERIFIER_DIFF_LINES
-		? diff
-		: `${lines.slice(0, MAX_VERIFIER_DIFF_LINES).join('\n')}\n[diff truncated; use review_diff or review_read_file]`;
+	const lineClipped =
+		lines.length <= MAX_VERIFIER_DIFF_LINES
+			? diff
+			: lines.slice(0, MAX_VERIFIER_DIFF_LINES).join('\n');
+	if (
+		lines.length <= MAX_VERIFIER_DIFF_LINES &&
+		lineClipped.length <= maxChars
+	) {
+		return diff;
+	}
+	const body =
+		lineClipped.length > maxChars
+			? lineClipped.slice(0, maxChars)
+			: lineClipped;
+	return `${body}\n[diff truncated; use review_diff or review_read_file]`;
 }
 
 export interface VerifyFindingsInput {
@@ -117,6 +136,7 @@ export async function verifyCitedFindings(
 		});
 	};
 
+	const diffMaxChars = verifierDiffCharLimit(input.client);
 	for (const [index, {finding, snapshotFile}] of cited.entries()) {
 		if (index >= budgets.maxVerifications) {
 			result.unverified.push({
@@ -134,7 +154,7 @@ export async function verifyCitedFindings(
 				scope: input.scopeText,
 				finding: formatFindingForVerifier(finding),
 				excerpt: citedExcerpt(snapshotFile, finding.line),
-				fileDiff: clipDiff(renderFileDiff(snapshotFile)),
+				fileDiff: clipDiff(renderFileDiff(snapshotFile), diffMaxChars),
 			}),
 			tools: input.contextTools,
 			budget: budgets.verifier,
