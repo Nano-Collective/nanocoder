@@ -250,6 +250,47 @@ function loadEnvMCPConfigs(): MCPServerWithSource[] {
 }
 
 /**
+ * Reason a raw provider entry is unusable, or null when the entry is valid.
+ * A provider entry must be an object with a non-empty string `name`, and
+ * `models` must be an array when present.
+ */
+function getInvalidProviderReason(entry: unknown): string | null {
+	if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) {
+		return 'is not an object';
+	}
+	const provider = entry as Partial<ProviderConfig>;
+	if (typeof provider.name !== 'string' || provider.name.trim() === '') {
+		return 'has no "name"';
+	}
+	if (provider.models !== undefined && !Array.isArray(provider.models)) {
+		return 'has a "models" value that is not an array';
+	}
+	return null;
+}
+
+/**
+ * Drop invalid provider entries, reporting each rejected entry once so a
+ * single bad entry cannot crash startup (see #2249). Valid entries load
+ * unchanged. `source` names where the entries came from (a file path or an
+ * environment variable) so the message points at the broken config.
+ */
+function filterValidProviders(
+	providers: unknown[],
+	source: string,
+): ProviderConfig[] {
+	const valid: ProviderConfig[] = [];
+	providers.forEach((entry, index) => {
+		const reason = getInvalidProviderReason(entry);
+		if (reason) {
+			notifyError(`providers[${index}] in ${source} ${reason}`);
+			return;
+		}
+		valid.push(entry as ProviderConfig);
+	});
+	return valid;
+}
+
+/**
  * Load provider configurations from all available levels (project and global)
  * This mirrors the approach used for MCP servers to support hierarchical loading
  */
@@ -312,11 +353,11 @@ function loadProjectProviderConfigs(cwd: string): ProviderConfig[] {
 				const processedProviders = substituteEnvVars(
 					config.nanocoder.providers,
 				);
-				return processedProviders;
+				return filterValidProviders(processedProviders, configPath);
 			} else if (Array.isArray(config.providers)) {
 				// Apply environment variable substitution
 				const processedProviders = substituteEnvVars(config.providers);
-				return processedProviders;
+				return filterValidProviders(processedProviders, configPath);
 			}
 		} catch (error) {
 			notifyError(
@@ -353,11 +394,11 @@ function loadProviderConfigFromFile(filePath: string): ProviderConfig[] {
 		if (config.nanocoder && Array.isArray(config.nanocoder.providers)) {
 			// Apply environment variable substitution
 			const processedProviders = substituteEnvVars(config.nanocoder.providers);
-			return processedProviders;
+			return filterValidProviders(processedProviders, filePath);
 		} else if (Array.isArray(config.providers)) {
 			// Apply environment variable substitution
 			const processedProviders = substituteEnvVars(config.providers);
-			return processedProviders;
+			return filterValidProviders(processedProviders, filePath);
 		}
 	} catch (error) {
 		notifyError(
@@ -390,16 +431,24 @@ function loadEnvProviderConfigs(): ProviderConfig[] {
 		return [];
 	}
 
+	const source =
+		!process.env.NANOCODER_PROVIDERS && process.env.NANOCODER_PROVIDERS_FILE
+			? process.env.NANOCODER_PROVIDERS_FILE
+			: 'environment variable NANOCODER_PROVIDERS';
+
 	try {
 		const config = JSON.parse(stripUtf8Bom(rawData));
 
 		// Accept direct array format or standard agents.config.json wrapper format
 		if (Array.isArray(config)) {
-			return substituteEnvVars(config);
+			return filterValidProviders(substituteEnvVars(config), source);
 		} else if (config.nanocoder && Array.isArray(config.nanocoder.providers)) {
-			return substituteEnvVars(config.nanocoder.providers);
+			return filterValidProviders(
+				substituteEnvVars(config.nanocoder.providers),
+				source,
+			);
 		} else if (Array.isArray(config.providers)) {
-			return substituteEnvVars(config.providers);
+			return filterValidProviders(substituteEnvVars(config.providers), source);
 		}
 	} catch (error) {
 		notifyError(
