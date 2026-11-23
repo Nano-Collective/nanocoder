@@ -263,3 +263,57 @@ test('buildFileTree drops a directory matched by a directory-only ignore pattern
 		rmSync(root, {recursive: true, force: true});
 	}
 });
+
+test('buildFileTree applies a .gitignore found in a subdirectory', async t => {
+	const root = mkdtempSync(join(tmpdir(), 'filetree-nested-ignore-'));
+	try {
+		mkdirSync(join(root, 'pkg', 'a', 'generated'), {recursive: true});
+		mkdirSync(join(root, 'pkg', 'b', 'generated'), {recursive: true});
+		writeFileSync(join(root, 'pkg', 'a', '.gitignore'), 'generated/\n');
+		writeFileSync(join(root, 'pkg', 'a', 'generated', 'big.js'), 'x');
+		writeFileSync(join(root, 'pkg', 'a', 'index.ts'), 'x');
+		writeFileSync(join(root, 'pkg', 'b', 'generated', 'kept.js'), 'x');
+
+		const paths = flattenTreeAll(await buildFileTree(root)).map(flat =>
+			flat.node.path.replace(/\\/g, '/'),
+		);
+
+		t.true(paths.includes('pkg/a/index.ts'));
+		t.false(paths.includes('pkg/a/generated'));
+		t.false(paths.includes('pkg/a/generated/big.js'));
+		// The rule belongs to pkg/a only: a sibling's folder of the same name stays.
+		t.true(paths.includes('pkg/b/generated/kept.js'));
+	} finally {
+		rmSync(root, {recursive: true, force: true});
+	}
+});
+
+test('buildFileTree scopes anchored and negated nested patterns to their directory', async t => {
+	const root = mkdtempSync(join(tmpdir(), 'filetree-nested-anchor-'));
+	try {
+		mkdirSync(join(root, 'pkg', 'deep'), {recursive: true});
+		writeFileSync(
+			join(root, 'pkg', '.gitignore'),
+			'/out.txt\n*.log\n!keep.log\n',
+		);
+		writeFileSync(join(root, 'pkg', 'out.txt'), 'x');
+		writeFileSync(join(root, 'pkg', 'deep', 'out.txt'), 'x');
+		writeFileSync(join(root, 'pkg', 'deep', 'drop.log'), 'x');
+		writeFileSync(join(root, 'pkg', 'deep', 'keep.log'), 'x');
+		writeFileSync(join(root, 'out.txt'), 'x');
+
+		const paths = flattenTreeAll(await buildFileTree(root)).map(flat =>
+			flat.node.path.replace(/\\/g, '/'),
+		);
+
+		// `/out.txt` is anchored to pkg/, so only pkg/out.txt goes.
+		t.false(paths.includes('pkg/out.txt'));
+		t.true(paths.includes('pkg/deep/out.txt'));
+		t.true(paths.includes('out.txt'));
+		// `*.log` applies at any depth below pkg/, and `!keep.log` brings one back.
+		t.false(paths.includes('pkg/deep/drop.log'));
+		t.true(paths.includes('pkg/deep/keep.log'));
+	} finally {
+		rmSync(root, {recursive: true, force: true});
+	}
+});

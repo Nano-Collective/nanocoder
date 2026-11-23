@@ -1,11 +1,12 @@
 import {spawn} from 'node:child_process';
 import type {Dirent} from 'node:fs';
-import {lstat, readdir, readFile} from 'node:fs/promises';
+import {lstat, readdir} from 'node:fs/promises';
 import path from 'node:path';
 import ignore from 'ignore';
 
 import {BINARY_FILE_EXTENSIONS} from '@/constants';
 import {
+	addNestedGitignore,
 	DEFAULT_IGNORE_DIRS,
 	findNanocoderIgnoreFile,
 	loadGitignore,
@@ -293,29 +294,6 @@ async function runRipgrep(
 
 const MAX_WALK_DEPTH = 200;
 
-// Unanchored `foo` matches any depth (dirPrefix/**/foo); anchored patterns stay scoped (dirPrefix/foo).
-function prefixGitignoreLine(
-	line: string,
-	dirPrefix: string,
-): string | undefined {
-	const trimmed = line.trimEnd();
-	if (!trimmed || trimmed.startsWith('#')) {
-		return undefined;
-	}
-	if (!dirPrefix) {
-		return trimmed;
-	}
-
-	const negated = trimmed.startsWith('!');
-	const pattern = negated ? trimmed.slice(1) : trimmed;
-	const isAnchoredOrNested =
-		pattern.startsWith('/') || pattern.replace(/\/$/, '').includes('/');
-	const prefixed = isAnchoredOrNested
-		? `${dirPrefix}/${pattern.replace(/^\//, '')}`
-		: `${dirPrefix}/**/${pattern}`;
-	return negated ? `!${prefixed}` : prefixed;
-}
-
 async function walkEmptyDirectories(
 	cwd: string,
 	rootPath: string,
@@ -359,22 +337,9 @@ async function walkEmptyDirectories(
 		}
 
 		const dirPrefix = normalizePathForMatch(path.relative(cwd, absolutePath));
-		// cwd's .gitignore is already in projectIgnore - re-reading it would duplicate and invert precedence.
-		if (dirPrefix !== '') {
-			const gitignoreContent = await readFile(
-				path.join(absolutePath, '.gitignore'),
-				'utf-8',
-			).catch(() => undefined);
-			if (gitignoreContent !== undefined) {
-				const patterns = gitignoreContent
-					.split('\n')
-					.map(line => prefixGitignoreLine(line, dirPrefix))
-					.filter((line): line is string => line !== undefined);
-				if (patterns.length > 0) {
-					ig.add(patterns);
-				}
-			}
-		}
+		// cwd's .gitignore is already in projectIgnore - re-reading it would duplicate and invert precedence
+		// (addNestedGitignore skips an empty prefix).
+		await addNestedGitignore(ig, absolutePath, dirPrefix);
 
 		let children: Dirent[];
 		try {

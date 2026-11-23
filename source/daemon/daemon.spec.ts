@@ -124,6 +124,76 @@ test.serial('stop cancels active runs and waits for cleanup before releasing res
 	}
 });
 
+test.serial(
+	'stop preserves the lockfile and IPC socket while disconnectMCP is in progress',
+	async t => {
+		t.timeout(10_000);
+		const root = await mkdtemp(join(tmpdir(), 'daemon-mcp-stop-'));
+		await mkdir(join(root, '.nanocoder'), {recursive: true});
+		let releaseDisconnect!: () => void;
+		const disconnectBlocked = new Promise<void>(resolve => {
+			releaseDisconnect = resolve;
+		});
+		let disconnectStarted!: () => void;
+		const disconnectBegun = new Promise<void>(resolve => {
+			disconnectStarted = resolve;
+		});
+
+		const toolManager = new ToolManager();
+		toolManager.disconnectMCP = async () => {
+			disconnectStarted();
+			await disconnectBlocked;
+		};
+
+		const handle = await startDaemon({
+			projectRoot: root,
+			toolManager,
+			buildExecutor: () => ({
+				execute: async () => ({success: true, output: '', toolCalls: 0}) as never,
+			}),
+		});
+
+		try {
+			t.true(existsSync(getLockfilePath(root)));
+
+			let stopped = false;
+			const stopping = handle.stop();
+			void stopping.then(() => {
+				stopped = true;
+			});
+
+			await disconnectBegun;
+			t.false(stopped);
+
+			// Lockfile must still be present while disconnectMCP is running
+			t.true(existsSync(getLockfilePath(root)));
+
+			// IPC socket must still accept connections while disconnectMCP is running
+			const client = new DaemonIpcClient(getSocketPath(root));
+			await t.notThrowsAsync(async () => {
+				await client.connect();
+				await client.disconnect();
+			});
+
+			// Now release disconnectMCP and let stop() finish
+			releaseDisconnect();
+			await stopping;
+			t.true(stopped);
+
+			// Lockfile and IPC socket should both be cleaned up
+			t.false(existsSync(getLockfilePath(root)));
+			const deadClient = new DaemonIpcClient(getSocketPath(root));
+			await t.throwsAsync(async () => {
+				await deadClient.connect();
+			});
+		} finally {
+			releaseDisconnect();
+			await handle.stop();
+			await rm(root, {recursive: true, force: true});
+		}
+	},
+);
+
 // ---- CI watch tests ----
 
 async function tempProject(): Promise<string> {
