@@ -8,6 +8,7 @@ import {pathToFileURL} from 'node:url';
 import type {ChildProcess} from 'child_process';
 import spawn from 'cross-spawn';
 import {createChildLogger} from '@/utils/logging';
+import {signalProcessTree} from '@/utils/process-tree';
 import {
 	CodeAction,
 	CodeActionParams,
@@ -31,6 +32,17 @@ import {
 	TextEdit,
 	WorkspaceFolder,
 } from './protocol';
+
+/**
+ * Whether the spawned process hasn't exited yet. On Windows an npm-installed
+ * server starts through a .cmd shim, so the child is cmd.exe and killing it
+ * alone leaves the server running: signalProcessTree ends the whole tree.
+ * Once the child has exited its pid may belong to something else, so it is
+ * only signalled while it is still running.
+ */
+function isRunning(child: ChildProcess): boolean {
+	return child.exitCode === null && child.signalCode === null;
+}
 
 export interface LSPServerConfig {
 	name: string;
@@ -145,7 +157,7 @@ export class LSPClient extends EventEmitter {
 						// it, so end it here — as a deliberate stop, so its exit is
 						// never reported as a crash of a server that never started.
 						this.stopping = true;
-						if (!child.killed) child.kill();
+						if (isRunning(child)) signalProcessTree(child);
 						reject(error);
 					});
 			} catch (error) {
@@ -175,8 +187,8 @@ export class LSPClient extends EventEmitter {
 		}
 
 		// Force kill if still running
-		if (this.process && !this.process.killed) {
-			this.process.kill();
+		if (this.process && isRunning(this.process)) {
+			signalProcessTree(this.process);
 		}
 
 		// Clear all pending request timeouts
