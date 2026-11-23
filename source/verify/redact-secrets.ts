@@ -13,28 +13,36 @@ export const REDACTED = '[REDACTED]';
 
 const SECRET_PATTERNS: readonly RegExp[] = [
 	// PEM private key blocks (RSA, EC, OPENSSH, PGP, plain).
-	/-----BEGIN [A-Z0-9 ]*PRIVATE KEY(?: BLOCK)?-----[\s\S]*?-----END [A-Z0-9 ]*PRIVATE KEY(?: BLOCK)?-----/g,
+	/-----BEGIN [A-Z0-9 ]*PRIVATE KEY(?: BLOCK)?-----[\\s\\S]*?-----END [A-Z0-9 ]*PRIVATE KEY(?: BLOCK)?-----/g,
 	// GitHub tokens: classic/OAuth/app/refresh, and fine-grained PATs.
-	/\bgh[pousr]_[A-Za-z0-9]{20,}\b/g,
-	/\bgithub_pat_[A-Za-z0-9_]{20,}\b/g,
+	/\\bgh[pousr]_[A-Za-z0-9]{20,}\\b/g,
+	/\\bgithub_pat_[A-Za-z0-9_]{20,}\\b/g,
 	// OpenAI / Anthropic style keys (sk-..., sk-ant-..., sk-proj-...).
-	/\bsk-[A-Za-z0-9_-]{16,}/g,
+	/\\bsk-[A-Za-z0-9_-]{16,}/g,
 	// AWS access key ids.
-	/\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/g,
+	/\\b(?:AKIA|ASIA)[A-Z0-9]{16}\\b/g,
 	// Slack bot/user/app tokens.
-	/\bxox[abposr]-[A-Za-z0-9-]{10,}/g,
+	/\\bxox[abposr]-[A-Za-z0-9-]{10,}/g,
 	// Google API keys: AIza plus exactly 35 key characters.
-	/\bAIza[0-9A-Za-z_-]{35}(?![0-9A-Za-z_-])/g,
+	/\\bAIza[0-9A-Za-z_-]{35}(?![0-9A-Za-z_-])/g,
 	// GitLab personal, deploy, runner, trigger and service-account tokens.
-	/\bgl(?:pat|dt|rt|ptt|soat)-[0-9A-Za-z_-]{20,}/g,
+	/\\bgl(?:pat|dt|rt|ptt|soat)-[0-9A-Za-z_-]{20,}/g,
 	// Stripe secret and restricted keys, live and test.
-	/\b(?:sk|rk)_(?:live|test)_[0-9A-Za-z]{16,}/g,
+	/\\b(?:sk|rk)_(?:live|test)_[0-9A-Za-z]{16,}/g,
 	// JWTs: base64url header and payload that both decode to a JSON object
 	// (`{"` encodes as `eyJ`), plus a signature.
-	/\beyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g,
+	/\\beyJ[A-Za-z0-9_-]{8,}\\.eyJ[A-Za-z0-9_-]{8,}\\.[A-Za-z0-9_-]{8,}/g,
+	// npm and Hugging Face access tokens.
+	/\\bnpm_[A-Za-z0-9]{30,}\\b/g,
+	/\\bhf_[A-Za-z0-9]{20,}\\b/g,
+	// Twilio API keys (SK followed by 32 hexadecimal characters).
+	/\\bSK[0-9a-fA-F]{32}\\b/g,
+	// SendGrid API keys consist of two dotted, high-entropy segments.
+	/\\bSG\\.[A-Za-z0-9_-]{16,}\\.[A-Za-z0-9_-]{16,}\\b/g,
 ];
 
-const SECRET_ENV_NAME = /TOKEN|KEY|SECRET|PASSWORD/i;
+const SECRET_ENV_NAME =
+	/(?:TOKEN|KEY|SECRET|PASSWORD|(?:^|_)PASS(?:$|_)|PWD|CREDENTIAL|AUTH)/i;
 const MIN_ENV_SECRET_LENGTH = 8;
 
 /**
@@ -73,6 +81,29 @@ export function redactSecrets(
 	for (const value of secretLiteralValues(env, extraValues)) {
 		result = result.replaceAll(value, REDACTED);
 	}
+
+	// Preserve the credential field names while replacing only their values.
+	result = result.replace(
+		/(\\bAuthorization\\s*:\\s*Bearer\\s+)[^\\s,;]+/gi,
+		`$1${REDACTED}`,
+	);
+	result = result.replace(
+		/(\\bBearer\\s+)[A-Za-z0-9._~+/-]+=*/gi,
+		`$1${REDACTED}`,
+	);
+	result = result.replace(
+		/(\\baws_secret_access_key\\s*=\\s*)[^\\s,;]+/gi,
+		`$1${REDACTED}`,
+	);
+	result = result.replace(
+		/(\\bAccountKey\\s*=\\s*)[^\\s,;]+/gi,
+		`$1${REDACTED}`,
+	);
+	result = result.replace(
+		/(\\b[a-z][a-z0-9+.-]*:\\/\\/[^\\s/:@]+:)[^@\\s/]+(@)/gi,
+		`$1${REDACTED}$2`,
+	);
+
 	for (const pattern of SECRET_PATTERNS) {
 		result = result.replace(pattern, REDACTED);
 	}
