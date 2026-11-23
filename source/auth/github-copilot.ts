@@ -102,7 +102,7 @@ async function pollForOAuthToken(
 	fetchFn: typeof fetch = fetch,
 ): Promise<string> {
 	const urls = getCopilotUrls(domain);
-	const intervalMs = Math.max(intervalSeconds * 1000, 1000);
+	let intervalMs = Math.max(intervalSeconds * 1000, 1000);
 	const deadline = Date.now() + POLL_TIMEOUT_MS;
 
 	// eslint-disable-next-line no-constant-condition
@@ -134,6 +134,7 @@ async function pollForOAuthToken(
 		const data = (await res.json()) as {
 			access_token?: string;
 			error?: string;
+			interval?: number;
 		};
 
 		if (data.access_token) {
@@ -141,6 +142,16 @@ async function pollForOAuthToken(
 		}
 
 		if (data.error === 'authorization_pending') {
+			await new Promise(r => setTimeout(r, intervalMs));
+			continue;
+		}
+
+		if (data.error === 'slow_down') {
+			// RFC 8628 section 3.5: wait longer between polls. GitHub sends the new
+			// interval in the response; otherwise add 5 seconds to the current one.
+			const nextMs =
+				typeof data.interval === 'number' ? data.interval * 1000 : 0;
+			intervalMs = nextMs > intervalMs ? nextMs : intervalMs + 5000;
 			await new Promise(r => setTimeout(r, intervalMs));
 			continue;
 		}
