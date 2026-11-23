@@ -166,6 +166,39 @@ function braceStartsLine(content: string, braceIndex: number): boolean {
 	return true;
 }
 
+function skipSpaceBackward(content: string, index: number): number {
+	let cursor = index;
+	while (cursor >= 0 && /\s/.test(content[cursor])) cursor--;
+	return cursor;
+}
+
+// `{` that is a JSON value: after `[`, a comma following a value, or a key.
+// The scanner already accepts that object when arguments is an object. A
+// brace after ordinary words, including a quoted phrase, stays prose.
+function braceContinuesJSONValue(content: string, braceIndex: number): boolean {
+	const beforeBrace = skipSpaceBackward(content, braceIndex - 1);
+	if (beforeBrace < 0) return false;
+	const before = content[beforeBrace];
+	if (before === '[') return true;
+	if (before === ',') {
+		const beforeComma = skipSpaceBackward(content, beforeBrace - 1);
+		return (
+			beforeComma >= 0 &&
+			(content[beforeComma] === '}' || content[beforeComma] === ']')
+		);
+	}
+	if (before !== ':') return false;
+	const quote = skipSpaceBackward(content, beforeBrace - 1);
+	if (quote < 0 || content[quote] !== '"') return false;
+	let key = quote - 1;
+	while (key >= 0 && /[\w-]/.test(content[key])) key--;
+	if (key < 0 || content[key] !== '"') return false;
+	const beforeKey = skipSpaceBackward(content, key - 1);
+	return (
+		beforeKey >= 0 && (content[beforeKey] === '{' || content[beforeKey] === ',')
+	);
+}
+
 /**
  * JSON fallback parser for open-weights models that emit JSON-shaped tool calls
  * instead of XML (the panicked-into-JSON failure mode). Handles markdown-fenced
@@ -181,7 +214,7 @@ function parseJSONToolCalls(
 	ranges: Array<[number, number]>;
 	// The scan budget ran out, so calls later in the reply may be missed.
 	exhausted: boolean;
-	// A line-start object whose arguments JSON.parse left as a string.
+	// Arguments JSON.parse left as a string, where a real call would be kept.
 	stringArguments: boolean;
 } {
 	const toolCalls: ToolCall[] = [];
@@ -193,7 +226,9 @@ function parseJSONToolCalls(
 	while ((fenceMatch = fencePattern.exec(content)) !== null) {
 		const inner = (fenceMatch[1] ?? '').trim();
 		const attempt = tryParseJSONToolCall(inner);
-		if (attempt?.kind === 'call') {
+		if (attempt?.kind === 'string-arguments') {
+			stringArguments = true;
+		} else if (attempt?.kind === 'call') {
 			toolCalls.push(attempt.call);
 			matchedRanges.push([
 				fenceMatch.index,
@@ -222,7 +257,12 @@ function parseJSONToolCalls(
 		if (end === null) continue;
 		const attempt = tryParseJSONToolCall(content.slice(start, end));
 		if (attempt?.kind === 'string-arguments') {
-			if (braceStartsLine(content, start)) stringArguments = true;
+			if (
+				braceStartsLine(content, start) ||
+				braceContinuesJSONValue(content, start)
+			) {
+				stringArguments = true;
+			}
 			continue;
 		}
 		if (attempt?.kind === 'call') {

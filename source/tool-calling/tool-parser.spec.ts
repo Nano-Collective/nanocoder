@@ -771,19 +771,82 @@ test('parseToolCalls: reports stringified JSON arguments instead of dropping the
 	}
 });
 
+test('parseToolCalls: reports stringified arguments nested in a wrapper object', t => {
+	// The call object does not start a line, but a real call in this position
+	// is still run. A stringified one used to come back as prose.
+	const call = {
+		name: 'write_file',
+		arguments: JSON.stringify({path: 'a'}),
+	};
+	const envelope = JSON.stringify({tool_calls: [call]});
+	t.is(
+		envelope,
+		'{"tool_calls":[{"name":"write_file","arguments":"{\\"path\\":\\"a\\"}"}]}',
+	);
+
+	for (const content of [
+		envelope,
+		JSON.stringify({tool_call: call}),
+		JSON.stringify({response: {action: call}}),
+		JSON.stringify({name: 'plan', steps: [call]}),
+		JSON.stringify({tool_calls: [{note: 'first'}, call]}),
+		`Note:\n${envelope}`,
+	]) {
+		const result = parseToolCalls(content);
+		t.false(result.success, content);
+		if (!result.success) {
+			t.is(
+				result.error,
+				'Invalid tool call: "arguments" must be an object, not a string',
+				content,
+			);
+			t.regex(result.examples, /native tool calling/i);
+		}
+	}
+});
+
+test('parseToolCalls: reports stringified arguments on the same line as a code fence', t => {
+	const payload = JSON.stringify({
+		name: 'write_file',
+		arguments: JSON.stringify({path: 'a'}),
+	});
+
+	for (const content of [
+		`\`\`\` ${payload} \`\`\``,
+		`\`\`\`json ${payload} \`\`\``,
+	]) {
+		const result = parseToolCalls(content);
+		t.false(result.success, content);
+		if (!result.success) {
+			t.is(
+				result.error,
+				'Invalid tool call: "arguments" must be an object, not a string',
+				content,
+			);
+			t.regex(result.examples, /native tool calling/i);
+		}
+	}
+});
+
 test('parseToolCalls: leaves a mid-sentence stringified arguments object as prose', t => {
 	const payload = JSON.stringify({
 		name: 'write_file',
 		arguments: JSON.stringify({path: 'notes.txt', content: 'x'}),
 	});
-	const content = `The log showed ${payload} and then continued.`;
 
-	const result = parseToolCalls(content);
-
-	t.true(result.success);
-	if (result.success) {
-		t.deepEqual(result.toolCalls, []);
-		t.is(result.cleanedContent, content);
+	for (const content of [
+		`The log showed ${payload} and then continued.`,
+		`Use this shape: ${payload} when calling it.`,
+		`See the calls, ${payload} for the format.`,
+		`He said "read this": ${payload} and stopped.`,
+		`Set "tool_calls": ${payload} in the log.`,
+	]) {
+		const result = parseToolCalls(content);
+		t.true(result.success, content);
+		if (result.success) {
+			t.deepEqual(result.toolCalls, [], content);
+			t.is(result.cleanedContent, content);
+		}
 	}
 });
 
