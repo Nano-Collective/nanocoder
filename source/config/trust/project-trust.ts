@@ -18,9 +18,11 @@ import {stripUtf8Bom} from '@/utils/strip-utf8-bom';
  * one, so it reads as needing re-approval rather than as a changed folder.
  *
  * Bumped to 2 because `listPermissionSettings` now fingerprints the top-level
- * `mode` and `firewall` settings (#2306): a folder that was trusted under
- * version 1 and uses either setting gets a new fingerprint and is shown the
- * disclaimer once more.
+ * `mode` and `firewall` settings (#2306). Every previously trusted folder is
+ * re-asked once ("needs re-approval after the upgrade") because old entries
+ * are version 1 and the version check is exact — not only folders using
+ * `mode` or `firewall`. Folders trusted after the bump record version 2 and
+ * skip the one-time re-prompt.
  */
 export const TRUST_FINGERPRINT_VERSION = 2;
 
@@ -66,6 +68,7 @@ export function describeProjectTrust(directory: string): ProjectTrustSurface {
 	const formatters = listFormatters(config, lines);
 	const lspServers = listLspServers(config, lines);
 	const mcpServers = listMcpServers(root, lines);
+	const profileMcpServers = listProfileMcpServers(config, lines);
 	const customTools = listCustomTools(root, lines);
 	const subscribedSkills = listSubscribedSkills(root, lines);
 	const subscribedAgents = listSubscribedFiles(root, 'agents', false, lines);
@@ -79,6 +82,7 @@ export function describeProjectTrust(directory: string): ProjectTrustSurface {
 		countLabel(hooks.sessionStart, 'session-start hook', 'session-start hooks'),
 		countLabel(hooks.other, 'other hook', 'other hooks'),
 		countLabel(mcpServers, 'MCP server', 'MCP servers'),
+		countLabel(profileMcpServers, 'profile MCP server', 'profile MCP servers'),
 		countLabel(formatters, 'formatter', 'formatters'),
 		countLabel(lspServers, 'LSP server', 'LSP servers'),
 		countLabel(customTools, 'custom tool', 'custom tools'),
@@ -415,6 +419,69 @@ function listMcpServers(root: string, lines: string[]): number {
 		return 0;
 	}
 	return Object.keys(servers).length;
+}
+
+/**
+ * Profile MCP servers declared under `nanocoder.profiles.<name>.mcpServers`.
+ * Each is fingerprinted by name, command, args, and env keys so a project
+ * that adds a server is asked to trust again before it can start a new
+ * command. Mirrors the per-profile fingerprinting used for hooks, formatters,
+ * LSP servers, and providers.
+ */
+function listProfileMcpServers(
+	config: ProjectConfig | undefined,
+	lines: string[],
+): number {
+	const nanocoder = config?.nanocoder;
+	if (!nanocoder || typeof nanocoder !== 'object') return 0;
+	const profiles = nanocoder.profiles;
+	if (!profiles || typeof profiles !== 'object' || Array.isArray(profiles))
+		return 0;
+	let count = 0;
+	for (const [profileName, profile] of Object.entries(profiles).sort(
+		([a], [b]) => a.localeCompare(b),
+	)) {
+		if (!profile || typeof profile !== 'object' || Array.isArray(profile))
+			continue;
+		const servers = (profile as Record<string, unknown>).mcpServers;
+		if (!servers || typeof servers !== 'object' || Array.isArray(servers))
+			continue;
+		for (const [serverName, serverConfig] of Object.entries(
+			servers as Record<string, unknown>,
+		)) {
+			if (!serverConfig || typeof serverConfig !== 'object') continue;
+			const server = serverConfig as {
+				command?: unknown;
+				args?: unknown;
+				env?: unknown;
+			};
+			const parts: string[] = [];
+			if (typeof server.command === 'string') {
+				parts.push(`command ${server.command}`);
+			}
+			if (Array.isArray(server.args)) {
+				parts.push(`args ${JSON.stringify(server.args)}`);
+			}
+			if (
+				server.env &&
+				typeof server.env === 'object' &&
+				!Array.isArray(server.env)
+			) {
+				parts.push(
+					`env ${JSON.stringify(
+						Object.keys(server.env as Record<string, unknown>).sort(),
+					)}`,
+				);
+			}
+			if (parts.length > 0) {
+				lines.push(
+					`mcp profile:${profileName}.${serverName} ${parts.join(' ')}`,
+				);
+				count++;
+			}
+		}
+	}
+	return count;
 }
 
 function listCustomTools(root: string, lines: string[]): number {

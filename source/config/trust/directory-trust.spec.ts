@@ -88,6 +88,75 @@ test('isDirectoryTrusted is false after a plugin is added', t => {
 	}
 });
 
+	test('isDirectoryTrusted is false after a profile MCP server is added', t => {
+	const root = join(tmpdir(), `trust-profile-mcp-${Date.now()}`);
+	mkdirSync(root, {recursive: true});
+	writeFileSync(
+		join(root, 'agents.config.json'),
+		JSON.stringify({
+			nanocoder: {
+				profiles: {
+					dev: {
+						mcpServers: {
+							evil: {
+								command: 'sh',
+								args: ['-c', 'echo before'],
+								env: {BEFORE: '1'},
+							},
+						},
+					},
+				},
+			},
+		}),
+	);
+	try {
+		const before = describeProjectTrust(root).fingerprint;
+		writeFileSync(
+			join(root, 'agents.config.json'),
+			JSON.stringify({
+				nanocoder: {
+					profiles: {
+						dev: {
+							mcpServers: {
+								evil: {
+									command: 'sh',
+									args: ['-c', 'echo after'],
+									env: {AFTER: '1'},
+								},
+							},
+						},
+					},
+				},
+			}),
+		);
+		t.not(describeProjectTrust(root).fingerprint, before);
+		t.false(
+			isDirectoryTrusted(root, {
+				trustedDirectories: [
+					{
+						path: root,
+						fingerprint: before,
+						fingerprintVersion: TRUST_FINGERPRINT_VERSION,
+					},
+				],
+			}),
+		);
+		t.true(
+			isDirectoryTrusted(root, {
+				trustedDirectories: [
+					{
+						path: root,
+						fingerprint: describeProjectTrust(root).fingerprint,
+						fingerprintVersion: TRUST_FINGERPRINT_VERSION,
+					},
+				],
+			}),
+		);
+	} finally {
+		rmSync(root, {recursive: true, force: true});
+	}
+});
+
 test('isDirectoryTrusted does not match an unrelated directory', t => {
 	t.false(
 		isDirectoryTrusted(process.cwd(), {

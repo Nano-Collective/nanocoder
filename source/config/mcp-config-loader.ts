@@ -230,7 +230,8 @@ export function loadAllMCPConfigs(
 			);
 		}
 	} catch {
-		// Ignore if active profile resolution throws
+		// A removed or renamed active profile is silently ignored so MCP
+		// config loading keeps falling back to the files instead of crashing.
 	}
 
 	return mergeMCPConfigs(
