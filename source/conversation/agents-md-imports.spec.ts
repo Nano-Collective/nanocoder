@@ -25,7 +25,6 @@ function expand(root: string, content: string, extra: Record<string, unknown> = 
 	return expandAgentsMdImports(content, {
 		filePath: join(root, 'AGENTS.md'),
 		projectRoot: root,
-		configDir: join(root, '.config'),
 		...extra,
 	});
 }
@@ -172,28 +171,68 @@ test('refuses an absolute import', t => {
 	}
 });
 
-test('expands a ~ import only inside the user config directory', t => {
+test('refuses a ~ import, including one into the config directory', t => {
 	const root = makeProject();
 	const home = makeProject();
 	try {
+		// A cloned repository must not be able to pull home files into the
+		// prompt, and least of all the directory that holds provider keys.
 		write(home, 'config/rules/style.md', 'House style.');
-		const allowed = expand(root, '@~/config/rules/style.md', {
+		const refused = expand(root, '@~/config/rules/style.md', {
 			homeDir: home,
-			configDir: join(home, 'config'),
 		});
-		t.is(allowed.warnings.length, 0);
-		t.is(allowed.content, 'House style.');
-
-		// Rest of the home directory stays off limits: a cloned repository must
-		// not be able to pull `~/.ssh` or notes into the prompt.
-		write(home, 'secrets.md', 'NOT SHARED');
-		const refused = expand(root, '@~/secrets.md', {homeDir: home});
 		t.is(refused.warnings.length, 1);
 		t.true(refused.warnings[0]?.includes('outside the project root') ?? false);
-		t.false(refused.content.includes('NOT SHARED'));
+		t.is(refused.content, '@~/config/rules/style.md');
+
+		write(home, 'secrets.md', 'NOT SHARED');
+		const secret = expand(root, '@~/secrets.md', {homeDir: home});
+		t.is(secret.warnings.length, 1);
+		t.false(secret.content.includes('NOT SHARED'));
 	} finally {
 		rmSync(root, {recursive: true, force: true});
 		rmSync(home, {recursive: true, force: true});
+	}
+});
+
+test('does not inline credentials from the real config directory', t => {
+	const root = makeProject();
+	const home = makeProject();
+	try {
+		// The names the platform config directory actually uses on macOS;
+		// `agents.config.json` can hold provider API keys.
+		const config = join('Library', 'Preferences', 'nanocoder');
+		write(home, join(config, 'agents.config.json'), '{"apiKey":"sk-live"}');
+		write(home, join(config, 'codex-credentials.json'), '{"token":"t0ken"}');
+
+		const result = expand(
+			root,
+			[
+				'@~/Library/Preferences/nanocoder/agents.config.json',
+				'@~/Library/Preferences/nanocoder/codex-credentials.json',
+			].join('\n'),
+			{homeDir: home},
+		);
+
+		t.is(result.warnings.length, 2);
+		t.false(result.content.includes('sk-live'));
+		t.false(result.content.includes('t0ken'));
+	} finally {
+		rmSync(root, {recursive: true, force: true});
+		rmSync(home, {recursive: true, force: true});
+	}
+});
+
+test('an indented reference is code, not an import', t => {
+	const root = makeProject();
+	try {
+		write(root, 'docs/testing.md', 'Expanded.');
+		const content = ['Run this:', '    @docs/testing.md'].join('\n');
+		const result = expand(root, content);
+		t.deepEqual(result.warnings, []);
+		t.is(result.content, content);
+	} finally {
+		rmSync(root, {recursive: true, force: true});
 	}
 });
 

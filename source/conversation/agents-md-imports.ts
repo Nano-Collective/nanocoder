@@ -1,7 +1,6 @@
 import {readFileSync, realpathSync, statSync} from 'node:fs';
 import {homedir} from 'node:os';
 import {dirname, isAbsolute, join, relative, resolve, sep} from 'node:path';
-import {getConfigPath} from '@/config/platform-dirs';
 import {MAX_TOOL_RESULT_CHARS} from '@/constants';
 import {truncateToolResult} from '@/tools/runtime/truncate-tool-result';
 import {isPathInside} from '@/utils/fs/path-validation';
@@ -19,9 +18,10 @@ import {isPathInside} from '@/utils/fs/path-validation';
  * The nesting is bounded on purpose. AGENTS.md comes from the repository, so a
  * clone is untrusted input that decides what gets read and sent:
  *
- * - every import must resolve inside the project root or the user config
- *   directory, checked again after resolving symlinks, so an in-repo link
- *   cannot point the model at `~/.ssh`;
+ * - every import must resolve inside the project root, checked again after
+ *   resolving symlinks, so neither an in-repo link nor a `@~/...` reference
+ *   can point the model at `~/.ssh` or at the config directory, which holds
+ *   credentials;
  * - lines inside fenced code blocks are left alone, so an AGENTS.md that
  *   documents the syntax is not rewritten;
  * - a file already included is not read again (a cycle ends in a warning, not
@@ -36,8 +36,8 @@ const MAX_IMPORT_DEPTH = 5;
 /** Total characters of imported content accepted in one expansion. */
 const MAX_IMPORTED_CHARS = 100_000;
 
-/** A whole line that is nothing but a reference, optionally indented. */
-const IMPORT_LINE = /^\s*@(\S+)\s*$/;
+/** A whole line that is nothing but a reference, with no indentation. */
+const IMPORT_LINE = /^@(\S+)\s*$/;
 
 /** Fence opener: ``` or ~~~ (three or more, either character). */
 const FENCE = /^\s*(`{3,}|~{3,})/;
@@ -50,8 +50,6 @@ export interface AgentsMdImportOptions {
 	filePath: string;
 	/** Project root; imports must stay inside it. */
 	projectRoot: string;
-	/** User config directory, the other allowed root. Defaults to the platform one. */
-	configDir?: string;
 	/** Home directory `~/` expands against. Injectable for tests. */
 	homeDir?: string;
 	/** Overrides for tests; both default to the module constants. */
@@ -95,10 +93,12 @@ export function expandAgentsMdImports(
 	options: AgentsMdImportOptions,
 ): AgentsMdImportResult {
 	const state: ExpandState = {
-		roots: toAllowedRoots([
-			options.projectRoot,
-			options.configDir ?? getConfigPath(),
-		]),
+		// The project root is the only allowed root on purpose. The user config
+		// directory holds `agents.config.json` (provider keys) and
+		// `codex-credentials.json`, and AGENTS.md comes from the repository, so
+		// letting a clone reach that directory would put the user's credentials
+		// in the system prompt.
+		roots: toAllowedRoots([options.projectRoot]),
 		projectRoot: resolve(options.projectRoot),
 		home: options.homeDir ?? homedir(),
 		maxDepth: options.maxDepth ?? MAX_IMPORT_DEPTH,
@@ -299,6 +299,10 @@ type Resolution = {ok: true; path: string} | {ok: false; reason: string};
  * (so `../rules/style.md` works from `.nanocoder/rules/`). Absolute paths are
  * refused: an AGENTS.md cannot name a file by absolute path at all, which
  * keeps Windows drive paths and `/etc/passwd` out without a special case.
+ *
+ * Both spellings still go through the containment check, so `@~/...` only
+ * resolves when the target happens to lie inside the project root — which is
+ * why the docs do not advertise it as a way to reach user files.
  */
 function resolveSpecifier(
 	spec: string,
