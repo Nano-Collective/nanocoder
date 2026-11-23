@@ -573,23 +573,48 @@ test.serial(
 		// Reload config to pick up new config
 		reloadAppConfig();
 
-		// Should throw error about missing API key
-		try {
-			await createLLMClient();
-			// If it succeeds, this test configuration may be invalid
-			// (might have found a different config), so we skip it
-			t.pass();
-		} catch (error: unknown) {
-			// Should throw an error mentioning API key or the provider
-			t.truthy(error);
-			const message = error instanceof Error ? error.message : String(error);
-			// Verify the error is related to API key or provider failure
-			t.true(
-				message.includes('API key') ||
-					message.includes('HostedTest') ||
-					message.includes('failed'),
-			);
-		}
+		const error = await t.throwsAsync(
+			createLLMClient('HostedTest', undefined, undefined, {
+				strictProvider: true,
+			}),
+		);
+		t.regex(error.message, /HostedTest: API key required for hosted providers/);
+	},
+);
+
+test.serial(
+	'loadProviderConfigs: leaves apiKey unset for a hosted provider without one',
+	t => {
+		const configDir = join(testDir, 'hosted-no-key-config-test');
+		mkdirSync(configDir, {recursive: true});
+		createTestConfig(
+			{
+				nanocoder: {
+					providers: [
+						{
+							name: 'HostedNoKey',
+							baseUrl: 'https://api.example.com/v1',
+							models: ['m'],
+						},
+						{
+							name: 'LocalNoKey',
+							baseUrl: 'http://localhost:11434/v1',
+							models: ['m'],
+						},
+					],
+				},
+			},
+			configDir,
+		);
+		process.cwd = () => configDir;
+		reloadAppConfig();
+
+		const configs = loadProviderConfigs();
+		const hosted = configs.find(p => p.name === 'HostedNoKey');
+		const local = configs.find(p => p.name === 'LocalNoKey');
+
+		t.is(hosted?.config.apiKey, undefined);
+		t.is(local?.config.apiKey, 'dummy-key');
 	},
 );
 

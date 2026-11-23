@@ -262,7 +262,13 @@ export function loadProviderConfigs(): AIProviderConfig[] {
 		tune: provider.tune,
 		config: {
 			baseURL: provider.baseUrl,
-			apiKey: provider.apiKey || 'dummy-key',
+			// Only local servers get a placeholder key. A hosted provider without
+			// one keeps it unset so validateProviderCredentials can reject it.
+			apiKey:
+				provider.apiKey ||
+				(provider.baseUrl && isLocalURL(provider.baseUrl)
+					? 'dummy-key'
+					: undefined),
 			caCertPath: provider.caCertPath,
 			// organizationId is sugar for the OpenAI-Organization header; an
 			// explicit header of the same name in `headers` wins.
