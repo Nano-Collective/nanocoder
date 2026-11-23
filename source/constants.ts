@@ -172,7 +172,14 @@ export const DELAY_COMMAND_COMPLETE_MS = 100;
 export const INTERVAL_BASH_PROGRESS_MS = 500;
 export const BASH_OUTPUT_PREVIEW_LENGTH = 150;
 export const TIMEOUT_BASH_DEFAULT_MS = 120_000;
+// Per-stream budget. Foreground commands keep this much from the start plus a
+// separate tail window, so a flood still ends with its useful summary; background
+// jobs keep this much of the latest output instead, read via `bash_output`.
 export const BASH_MAX_OUTPUT_BYTES = 5 * 1024 * 1024;
+// Tail window kept alongside the head cap for foreground commands. Comfortably
+// larger than the most any consumer of the collected output asks for
+// (MAX_TOOL_RESULT_CHARS), so a command's ending survives the later cut.
+export const BASH_MAX_OUTPUT_TAIL_BYTES = 256 * 1024;
 // How long execute_bash waits for a background job's first output before
 // returning the job id. Long enough for a server to print its startup banner,
 // short enough that the model is not blocked.

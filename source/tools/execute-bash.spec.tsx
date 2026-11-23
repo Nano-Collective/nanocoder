@@ -340,6 +340,24 @@ test('execute_bash does not truncate short output', async t => {
 	t.true(result.includes('short output'));
 });
 
+test.serial(
+	'execute_bash keeps the summary at the end of output larger than the 5 MB cap',
+	async t => {
+		// The issue's repro: ~8 MB of progress lines, then a final summary. The
+		// per-stream cap keeps the head and the tail, so the model still sees the
+		// summary the command ended with (#2237).
+		const result = await runBash(
+			`node -e "for(let i=0;i<200000;i++)console.log('progress line '+i+' ok ok ok ok ok ok'); console.log('SUMMARY: 1 failed')"`,
+		);
+
+		t.true(
+			result.includes('SUMMARY: 1 failed'),
+			'the final summary must reach the model',
+		);
+		t.true(result.length <= 2100, `result is trimmed (${result.length} chars)`);
+	},
+);
+
 test('execute_bash gives the model plain text, not JSON', async t => {
 	const result = await runBash('echo "test"');
 

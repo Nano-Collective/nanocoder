@@ -27,6 +27,8 @@ import {
 	makeStreamCollector,
 	STDERR_TRUNCATION_NOTICE,
 	STDOUT_TRUNCATION_NOTICE,
+	stderrTruncationNotice,
+	stdoutTruncationNotice,
 } from '@/utils/stream-collector';
 import {bashChildEnv} from './bash-env.js';
 import {
@@ -191,6 +193,8 @@ interface ExecutionEntry {
 	process: ChildProcess;
 	intervalId: NodeJS.Timeout;
 	resolve: (state: BashExecutionState) => void;
+	/** Releases the stream collectors before a cancel resolves the result. */
+	flushStreams: () => void;
 	timeoutId?: NodeJS.Timeout;
 	signal?: AbortSignal;
 	abortListener?: () => void;
@@ -376,6 +380,9 @@ export class BashExecutor extends EventEmitter {
 			}
 		};
 
+		// Background jobs keep a rolling latest window so `bash_output` can read
+		// increments from a long-running server; foreground commands keep the
+		// head plus the tail so the summary printed last survives the cap.
 		const backgroundKeepLatest = background
 			? {
 					keepLatest: true,
@@ -400,23 +407,23 @@ export class BashExecutor extends EventEmitter {
 			text => {
 				state.fullOutput += text;
 			},
-			STDOUT_TRUNCATION_NOTICE,
+			background ? STDOUT_TRUNCATION_NOTICE : stdoutTruncationNotice,
 			backgroundKeepLatest,
 		);
 		const stderrCollector = makeStreamCollector(
 			text => {
 				state.stderr += text;
 			},
-			STDERR_TRUNCATION_NOTICE,
+			background ? STDERR_TRUNCATION_NOTICE : stderrTruncationNotice,
 			backgroundKeepLatestStderr,
 		);
 
 		// Both streams are finished (or past their drain grace period) when the
-		// command completes, so release whatever the decoders were holding back
-		// mid-character. `cancel()`
-		// resolves and unregisters the execution before either handler gets
-		// here, so a cancelled run never flushes: its pending partial character
-		// is dropped along with the rest of the output it never produced.
+		// command completes, so release whatever the collectors were holding
+		// back: a dangling multi-byte character, or the omitted-byte notice and
+		// rolling tail of a stream that passed the cap. `cancel()` flushes too,
+		// so a timed-out or cancelled flood still reports where it ended rather
+		// than returning a bare head with no notice.
 		const flushStreams = () => {
 			stdoutCollector.flush();
 			stderrCollector.flush();
@@ -455,6 +462,7 @@ export class BashExecutor extends EventEmitter {
 				process: proc,
 				intervalId,
 				resolve,
+				flushStreams,
 				// A background job is meant to outlive the turn that started it,
 				// so the turn's AbortSignal must not tear it down.
 				signal: background ? undefined : options?.signal,
@@ -603,6 +611,11 @@ export class BashExecutor extends EventEmitter {
 		if (execution.signal && execution.abortListener) {
 			execution.signal.removeEventListener('abort', execution.abortListener);
 		}
+
+		// A flood is exactly the kind of command that times out. Release the
+		// collectors first so the result still carries the omitted-byte notice
+		// and the command's ending, not just the first 5 MB of output.
+		execution.flushStreams();
 
 		// Destroy stdio streams to prevent them from keeping the event loop alive
 		execution.process.stdout?.destroy();
