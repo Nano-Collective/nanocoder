@@ -578,7 +578,62 @@ test.serial(
 				strictProvider: true,
 			}),
 		);
-		t.regex(error.message, /HostedTest: API key required for hosted providers/);
+		t.regex(error.message, /HostedTest: .*set `apiKey`.*or authentication `headers`/);
+	},
+);
+
+/** Start the given providers and ask for one of them strictly. */
+async function createStrict(
+	name: string,
+	providers: Record<string, unknown>[],
+	dir: string,
+) {
+	globalThis.fetch = createMockFetch(true, 200);
+	const configDir = join(testDir, dir);
+	mkdirSync(configDir, {recursive: true});
+	createTestConfig({nanocoder: {providers}}, configDir);
+	process.cwd = () => configDir;
+	reloadAppConfig();
+	return createLLMClient(name, undefined, undefined, {strictProvider: true});
+}
+
+test.serial(
+	'createLLMClient: hosted provider authenticated by custom headers needs no API key',
+	async t => {
+		const result = await createStrict(
+			'HeaderAuth',
+			[
+				{
+					name: 'HeaderAuth',
+					baseUrl: 'https://gateway.example.com/v1',
+					headers: {'X-Api-Key': 'gateway-key'},
+					models: ['m'],
+				},
+			],
+			'hosted-header-auth-test',
+		);
+		t.is(result.actualProvider, 'HeaderAuth');
+	},
+);
+
+test.serial(
+	'createLLMClient: an organization id alone is not a credential',
+	async t => {
+		const error = await t.throwsAsync(
+			createStrict(
+				'OrgOnly',
+				[
+					{
+						name: 'OrgOnly',
+						baseUrl: 'https://api.example.com/v1',
+						organizationId: 'org-123',
+						models: ['m'],
+					},
+				],
+				'hosted-org-only-test',
+			),
+		);
+		t.regex(error.message, /OrgOnly: .*set `apiKey`/);
 	},
 );
 

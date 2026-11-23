@@ -311,13 +311,18 @@ function validateProviderCredentials(providerConfig: AIProviderConfig): void {
 		return;
 	}
 
-	// Require API key for hosted providers (local servers get a pass)
-	if (
-		!providerConfig.config.apiKey &&
-		!(
-			providerConfig.config.baseURL && isLocalURL(providerConfig.config.baseURL)
-		)
-	) {
-		throw new Error('API key required for hosted providers');
+	// A hosted provider needs a credential: an API key or authentication headers.
+	// Local servers get a pass. OpenAI-Organization picks an organization, it doesn't
+	// authenticate, so it doesn't count (it is also what `organizationId` adds).
+	const {apiKey, baseURL, headers} = providerConfig.config;
+	const hasAuthHeaders = Object.entries(headers ?? {}).some(
+		([name, value]) =>
+			Boolean(value) && name.toLowerCase() !== 'openai-organization',
+	);
+	if (!apiKey && !hasAuthHeaders && !(baseURL && isLocalURL(baseURL))) {
+		throw new Error(
+			'No credentials for this hosted provider: set `apiKey` in agents.config.json ' +
+				"(any non-empty value if the server doesn't check one) or authentication `headers`",
+		);
 	}
 }
