@@ -213,3 +213,22 @@ test('renderBody positive and inverted sections on the same var', t => {
 	t.is(renderBody(tpl, {id: '1', json: true}), "A '1'");
 	t.is(renderBody(tpl, {id: '1', json: false}), "B '1'");
 });
+
+test('findUnsafePlaceholder rejects placeholders in arithmetic and [[ ]] tests', t => {
+	// `$(( ))`, `(( ))` and `[[ ]]` evaluate their contents, so an array
+	// subscript like a[$(cmd)] runs cmd even where a value is quoted.
+	for (const body of [
+		'echo $(( {{ n }} + 1 ))',
+		'(( {{ n }} > 3 )) && echo big',
+		'[[ {{ n }} -gt 3 ]] && echo big',
+	]) {
+		const problem = findUnsafePlaceholder(body, 'posix');
+		t.truthy(problem, body);
+		t.regex(problem ?? '', /arithmetic expression|\[\[ \]\] test/, body);
+	}
+});
+
+test('findUnsafePlaceholder keeps assigning the value before arithmetic', t => {
+	t.is(findUnsafePlaceholder('n={{ n }}; echo $(( n + 1 ))', 'posix'), undefined);
+	t.is(findUnsafePlaceholder('echo $(( 1 + 2 )) {{ q }}', 'posix'), undefined);
+});
