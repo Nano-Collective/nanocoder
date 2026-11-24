@@ -41,7 +41,10 @@ import {
 	onSubagentRunEvent,
 	type SubagentRunEvent,
 } from '@/services/subagent-events';
-import {resolveToolApproval} from '@/tools/approval-policy';
+import {
+	resolveToolPermission,
+	type ToolPermissionResult,
+} from '@/tools/approval-policy';
 import {
 	clearReadContentScope,
 	runWithReadContentScope,
@@ -652,17 +655,32 @@ async function runTurn(
 						continue;
 					}
 
-					// Check if approval is needed. resolveToolApproval is the single
+					// Check if approval is needed. resolveToolPermission is the single
 					// authority shared with the interactive loop and plain shell - it
-					// applies yolo and the alwaysAllow list internally.
-					const needsApproval = await evaluateNeedsApproval(
+					// applies command permissions, yolo, and the alwaysAllow list.
+					const permission = await evaluateToolPermission(
 						toolCall,
 						toolManager,
 						nonInteractiveAlwaysAllow,
 						session.developmentMode,
 					);
 
-					if (needsApproval) {
+					// A deny rule is a hard refusal: it is checked before the
+					// prompt, yolo, and alwaysAllow, and cannot be approved by hand.
+					if (permission.decision === 'deny') {
+						const reason =
+							permission.reason ?? 'Denied by nanocoder.permissions.';
+						await emitToolCallUpdate(session, conn, toolCall, 'failed', reason);
+						toolResults.push({
+							tool_call_id: toolCall.id,
+							role: 'tool',
+							name: toolCall.function.name,
+							content: `Error: ${reason}`,
+						});
+						continue;
+					}
+
+					if (permission.decision === 'ask') {
 						const vote = await consultPluginPermission(
 							toolCall.function.name,
 							toolCall.function.arguments,
@@ -684,7 +702,7 @@ async function runTurn(
 							continue;
 						}
 
-						const permission = await requestToolPermission(
+						const approval = await requestToolPermission(
 							session,
 							toolCall,
 							conn,
@@ -692,7 +710,7 @@ async function runTurn(
 							abortController.signal,
 						);
 
-						if (permission === 'cancelled') {
+						if (approval === 'cancelled') {
 							await emitToolCallUpdate(
 								session,
 								conn,
@@ -717,7 +735,7 @@ async function runTurn(
 							return {kind: 'stop', payload: 'cancelled', results: toolResults};
 						}
 
-						if (permission === 'denied') {
+						if (approval === 'denied') {
 							await emitToolCallUpdate(
 								session,
 								conn,
@@ -1034,17 +1052,21 @@ function normalizeQuestionOptions(raw: unknown): string[] {
 	return raw.map(toOptionString).filter(option => option.length > 0);
 }
 
-async function evaluateNeedsApproval(
+async function evaluateToolPermission(
 	toolCall: ToolCall,
 	toolManager: ToolManager,
 	nonInteractiveAlwaysAllow: string[],
 	mode: DevelopmentMode,
-): Promise<boolean> {
+): Promise<ToolPermissionResult> {
 	const toolEntry = toolManager.getToolEntry(toolCall.function.name);
-	return resolveToolApproval(
+	return resolveToolPermission(
 		toolCall.function.name,
 		toolEntry,
 		toolCall.function.arguments,
-		{mode, alwaysAllow: nonInteractiveAlwaysAllow},
+		{
+			mode,
+			alwaysAllow: nonInteractiveAlwaysAllow,
+			permissions: getAppConfig().permissions,
+		},
 	);
 }

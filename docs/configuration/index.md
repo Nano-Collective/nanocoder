@@ -571,6 +571,39 @@ Allow specific tools to run without confirmation, even in normal development mod
 }
 ```
 
+### Command Permissions
+
+`nanocoder.permissions` narrows or widens approval per tool call. It is finer-grained than `alwaysAllow`: instead of trusting a whole tool, you can allow or deny specific shell commands.
+
+```json
+{
+  "nanocoder": {
+    "permissions": {
+      "allow": ["execute_bash(git status)", "execute_bash(git diff *)", "read_file"],
+      "deny": ["execute_bash(rm -rf *)", "execute_bash(curl *)"]
+    }
+  }
+}
+```
+
+Rules are either a bare tool name (`read_file`) or `tool(pattern)` (`execute_bash(git status)`). In a pattern, `*` matches any run of characters and every other character is literal; the pattern must match the whole command text. An `execute_bash` line is split on `;`, newlines, `&&`, `||`, and `|`, respecting quotes. An allow rule only skips the prompt when the line splits cleanly and it covers **every** simple command; otherwise the normal prompt remains.
+
+Deny is deliberately broader, because it is a refusal rather than a grant. A deny rule is tested against the whole line and every simple command, and it also looks past a leading privilege wrapper (`sudo curl …`), a leading path (`/bin/rm …`), extra whitespace (`rm  -rf …`), and `sh -c`/`bash -c`/`eval` strings. That means `execute_bash(curl *)` also refuses `sudo curl …`, but it does **not** catch a command hidden in an arbitrary argument or script (for example `find -exec`, `python -c`, or text merely mentioned in an echo). To refuse a command wherever it appears, use a pattern with wildcards on both sides, such as `execute_bash(*curl*)`; that form also matches when the line cannot be split. Deny does not normalize command forms either: `execute_bash(rm -rf *)` misses `rm -fr x` and `rm -r -f x`, and `execute_bash(curl *)` misses `timeout 5 curl x` and `echo curl x | sh`. Use `*…*` patterns when those variants matter.
+
+Patterns are matched literally, so `execute_bash(git diff *)` also matches `git diff --output=patch.txt`, which writes a file. Prefer the narrowest pattern that covers the commands you trust.
+
+Precedence (first match wins):
+
+1. A matching `deny` rule refuses the call. This happens before the approval prompt, before `alwaysAllow`, and before every development mode (including `yolo` and headless runs). A deny cannot be approved by hand.
+2. A matching `allow` rule runs the call without a prompt.
+3. `alwaysAllow`, then the development mode, then the tool's own approval policy.
+
+Rules do not bypass the built-in safety checks: a command still runs through `execute_bash`'s validator (for example, catastrophic `rm` targets and fork bombs remain blocked) even when an allow rule matches.
+
+The splitter refuses to reason about constructs that can hide another command: command or process substitution (including `$(...)` and backticks inside double quotes), subshells, braces, redirections, background `&`, comments, and ANSI-C `$'…'` quoting. An allow rule never covers such a line, so it falls back to the normal prompt. Deny still checks the raw line and a conservative split, but treat it as best-effort on those lines and use `*…*` patterns when in doubt. A malformed rule is ignored rather than applied with a different meaning.
+
+Project and user permission lists are combined: a project `agents.config.json` cannot remove a deny rule from your user-level config. Edits to a project's `permissions` block are part of the directory trust fingerprint, so they ask for approval again.
+
 ### Disabling Tools
 
 Turn off individual tools globally with the top-level `disabledTools` array. Listed tools are filtered out everywhere the model could ask for them — chat, [subagents](../features/subagents.md), and every [`/tune` profile](../features/tune.md). The model is told they don't exist, so it won't try to call them.

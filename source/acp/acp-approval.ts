@@ -1,4 +1,6 @@
+import {getAppConfig} from '@/config/index';
 import {resolveToolApproval} from '@/tools/approval-policy';
+import {evaluatePermissionRules} from '@/tools/command-permissions';
 import type {ToolManager} from '@/tools/tool-manager';
 import type {DevelopmentMode} from '@/types/core';
 
@@ -18,18 +20,22 @@ export async function getAlwaysAllowedTools(
 	disabledTools?: readonly string[],
 ): Promise<string[]> {
 	const allowed: string[] = [];
+	const permissions = getAppConfig().permissions;
 	for (const name of toolManager.getAvailableToolNames(
 		undefined,
 		mode,
 		disabledTools,
 	)) {
+		const rule = evaluatePermissionRules(name, undefined, permissions);
+		if (rule.deniedReason !== undefined) continue;
 		if (
 			alwaysAllow.includes(name) ||
+			rule.allowed ||
 			(!(await resolveToolApproval(
 				name,
 				toolManager.getToolEntry(name),
 				undefined,
-				{mode: 'normal'},
+				{mode: 'normal', permissions},
 			)) &&
 				toolManager.getMCPToolInfo(name).isMCPTool)
 		) {

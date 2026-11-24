@@ -62,6 +62,7 @@ import type {
 	ModeProviderConfig,
 	NotificationsConfig,
 	PasteConfig,
+	PermissionsConfig,
 	ProviderConfig,
 	RetryLimitsConfig,
 	SystemPromptConfig,
@@ -542,6 +543,82 @@ function loadDisabledToolsConfig(cwd: string): string[] | undefined {
 	);
 }
 
+/**
+ * Load command-level allow/deny rules from `nanocoder.permissions`.
+ *
+ * Each list is filtered to strings; malformed entries are dropped by the rule
+ * parser later rather than failing the whole config. Returns undefined when
+ * neither list is present so the permission resolver can skip the work.
+ *
+ * Unlike most settings, the user and project files are combined instead of
+ * letting the project win. A repository must not be able to remove a deny rule
+ * the user configured globally; adding rules still requires directory trust.
+ */
+function loadPermissionsConfig(cwd: string): PermissionsConfig | undefined {
+	const layers: PermissionsConfig[] = [];
+
+	// A profile can be renamed or removed mid-session. Like
+	// loadHierarchicalConfig, fall back to the files instead of throwing.
+	let activeProfile: DiskProfileConfig | undefined;
+	try {
+		activeProfile = getActiveProfile(cwd);
+	} catch {
+		activeProfile = undefined;
+	}
+	if (activeProfile) {
+		const profilePermissions = sanitizePermissions(
+			(activeProfile as Record<string, unknown>).permissions,
+		);
+		if (profilePermissions) layers.push(profilePermissions);
+	}
+
+	for (const configPath of [
+		join(cwd, 'agents.config.json'), // nosemgrep
+		join(getConfigPath(), 'agents.config.json'), // nosemgrep
+	]) {
+		const loaded = tryLoadConfig(configPath, 'permissions', config =>
+			sanitizePermissions(config.nanocoder?.permissions),
+		);
+		if (loaded) layers.push(loaded);
+	}
+
+	const merged: PermissionsConfig = {};
+	for (const layer of layers) {
+		for (const key of ['allow', 'deny'] as const) {
+			const rules = layer[key];
+			if (!rules) continue;
+			const current = merged[key] ?? [];
+			for (const rule of rules) {
+				if (!current.includes(rule)) current.push(rule);
+			}
+			merged[key] = current;
+		}
+	}
+
+	return merged.allow || merged.deny ? merged : undefined;
+}
+
+function sanitizePermissions(value: unknown): PermissionsConfig | null {
+	if (!value || typeof value !== 'object') return null;
+	const permissions = value as Record<string, unknown>;
+
+	const sanitize = (rules: unknown): string[] | undefined =>
+		Array.isArray(rules)
+			? rules.filter(
+					(item: unknown): item is string => typeof item === 'string',
+				)
+			: undefined;
+
+	const allow = sanitize(permissions.allow);
+	const deny = sanitize(permissions.deny);
+	if (allow === undefined && deny === undefined) return null;
+
+	const result: PermissionsConfig = {};
+	if (allow !== undefined) result.allow = allow;
+	if (deny !== undefined) result.deny = deny;
+	return result;
+}
+
 // User-defined LSP servers. Entries without a name, command or languages list
 // are dropped rather than handed to the LSP manager half-formed.
 function loadLspServersConfig(cwd: string): AppConfig['lspServers'] {
@@ -1004,6 +1081,9 @@ function loadAppConfig(cwd: string): AppConfig {
 	// Load top-level disabledTools (filtered out of every tool-availability path)
 	const disabledTools = loadDisabledToolsConfig(cwd);
 
+	// Load command-level allow/deny rules for tool execution
+	const permissions = loadPermissionsConfig(cwd);
+
 	// Load custom system prompt override
 	const systemPrompt = loadSystemPromptConfig(cwd);
 
@@ -1051,6 +1131,7 @@ function loadAppConfig(cwd: string): AppConfig {
 		nanocoderTools,
 		alwaysAllow,
 		disabledTools,
+		permissions,
 		systemPrompt,
 		hooks,
 		formatters,
