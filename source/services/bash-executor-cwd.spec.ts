@@ -64,6 +64,27 @@ test.serial('cd sub && cd updates the session cwd on Windows', async t => {
 	}
 });
 
+test.serial('Windows cwd capture keeps non-ASCII directory names intact', async t => {
+	if (platform !== 'win32') {
+		t.pass('Windows-only cwd capture test');
+		return;
+	}
+	const base = realpathSync(
+		mkdtempSync(join(tmpdir(), 'nc-bash-win-unicode-')),
+	);
+	const sub = join(base, 'café');
+	mkdirSync(sub);
+	try {
+		setSessionCwd(base);
+		const r = await run('cd café');
+		t.is(r.exitCode, 0, 'the command succeeded');
+		t.is(getSessionCwd(), sub, 'the non-ASCII cwd was captured as UTF-16');
+	} finally {
+		resetSessionCwd();
+		rmSync(base, {recursive: true, force: true});
+	}
+});
+
 test.serial('Windows cwd capture preserves the command exit code', async t => {
 	if (platform !== 'win32') {
 		t.pass('Windows-only cwd capture test');

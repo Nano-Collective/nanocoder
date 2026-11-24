@@ -7,6 +7,7 @@ import {
 	readdirSync,
 	readFileSync,
 	rmSync,
+	statSync,
 	unlinkSync,
 	writeFileSync,
 } from 'node:fs';
@@ -64,18 +65,31 @@ function removeIfExists(file: string | undefined): void {
 	}
 }
 
+/** Only a real, existing directory is safe to pin as the session cwd. */
+function isDirectory(dir: string): boolean {
+	try {
+		return existsSync(dir) && statSync(dir).isDirectory();
+	} catch {
+		return false;
+	}
+}
+
 /**
  * cmd.exe stops at a newline and expands `%VAR%` once for the whole command
  * line, so the POSIX `pwd && exit $?` epilogue cannot be appended inline. A
  * fixed batch file invoked with `call` runs in the same shell: it sees the
  * command's real ERRORLEVEL, records the final directory, and returns that
  * same exit code. The user's command itself stays byte-for-byte intact.
+ *
+ * `cd` runs through `cmd /u` so the redirect is UTF-16LE. A plain `cd > file`
+ * writes in the console's OEM code page, which mangles non-ASCII directories
+ * (e.g. C:\Users\José) before Node reads the capture file.
  */
 function writeWindowsCwdEpilogue(executionId: string): string {
 	const file = join(tmpdir(), `nanocoder-cwd-epilogue-${executionId}.cmd`);
 	writeFileSync(
 		file,
-		'@echo off\r\nset __nc_ec=%ERRORLEVEL%\r\ncd > "%NC_CWD_FILE%"\r\nexit /b %__nc_ec%\r\n',
+		'@echo off\r\nset __nc_ec=%ERRORLEVEL%\r\ncmd /d /u /c cd > "%NC_CWD_FILE%"\r\nexit /b %__nc_ec%\r\n',
 	);
 	return file;
 }
@@ -310,6 +324,10 @@ export class BashExecutor extends EventEmitter {
 			captureCwd && (!isWindows || windowsCwdEpilogue)
 				? join(jailTmp ?? tmpdir(), `nanocoder-cwd-${executionId}`)
 				: undefined;
+		// On Windows the epilogue is appended with `& call`, which leaves the
+		// user's command byte-for-byte intact. A command with an unbalanced
+		// quote (e.g. `echo "abc`) swallows that tail and echoes the temp path;
+		// rare and harmless, so we don't parse the command to prevent it.
 		const spawnCommand =
 			cwdCaptureFile === undefined
 				? command
@@ -407,10 +425,19 @@ export class BashExecutor extends EventEmitter {
 			if (!cwdCaptureFile) return;
 			try {
 				if (existsSync(cwdCaptureFile)) {
-					const captured = readFileSync(cwdCaptureFile, 'utf8').trim();
-					// Concurrent bash runs race here; last close wins, which is fine
-					// since the session cwd is a single shared value either way.
-					if (captured) setSessionCwd(captured);
+					const captured = readFileSync(
+						cwdCaptureFile,
+						isWindows ? 'utf16le' : 'utf8',
+					)
+						.trim()
+						.replace(/^\uFEFF/, '');
+					// A garbled or since-deleted path must never move the session
+					// cwd: file tools resolve relative paths against it as-is.
+					if (captured && isDirectory(captured)) {
+						// Concurrent bash runs race here; last close wins, which is
+						// fine since the session cwd is one shared value either way.
+						setSessionCwd(captured);
+					}
 				}
 			} catch {
 				// Non-fatal: leave the session cwd where it was.
