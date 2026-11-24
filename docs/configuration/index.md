@@ -110,10 +110,11 @@ Names are matched case-insensitively. A key that is skipped is reported in a war
 | Variable | Description |
 |----------|-------------|
 | `NANOCODER_CONFIG_DIR` | Override the user-level configuration directory. Project-level `agents.config.json` and `.mcp.json` still apply; the project-level `nanocoder-preferences.json` is skipped for top-level preferences |
-| `NANOCODER_CONTEXT_LIMIT` | Default context limit (tokens) used when no session override or provider `contextWindow`/`contextWindows` applies. It is checked before models.dev metadata (see [Context Limit Resolution Order](#context-limit-resolution-order)). Enables auto-compact and `/usage` to work correctly. The `--context-max` CLI flag takes priority |
+| `NANOCODER_CONTEXT_LIMIT` | Default context limit (tokens) used when no session override or provider `contextWindow`/`contextWindows` applies. Accepts positive integer or decimal strings, plus k/K or m/M suffixes. It is checked before models.dev metadata (see [Context Limit Resolution Order](#context-limit-resolution-order)). Enables auto-compact and `/usage` to work correctly. The `--context-max` CLI flag takes priority |
 | `NANOCODER_DATA_DIR` | Override the application data directory for internal data like usage statistics |
 | `NANOCODER_INSTALL_METHOD` | Override installation detection (`npm`, `homebrew`, `nix`, `unknown`) |
 | `NANOCODER_NO_UPDATE_CHECK` | Set to `1` to disable automatic update checks at startup. Running `/update` still performs an explicit check |
+| `NANOCODER_PROFILE` | Default profile name to activate (overridden by `--profile`; overrides `nanocoder.defaultProfile`). See [Named Configuration Profiles](#named-configuration-profiles) |
 | `NANOCODER_DEFAULT_SHUTDOWN_TIMEOUT` | Graceful shutdown timeout in milliseconds (default: 5000) |
 | `NANOCODER_MAX_TURNS` | Maximum LLM turns for headless runs (`--plain`, ACP, and subagents unless `subagentMaxTurns` is set). Overrides `nanocoder.headless.maxTurns`; default 200. See [Headless](#headless) |
 | `NANOCODER_TRUST_DIRECTORY` | Set to `1` to trust the working directory and save it to `trustedDirectories` for later runs. Honoured by the interactive TUI, `run` (Ink and `--plain`), `nanocoder daemon start`, `nanocoder verify` and `--acp`. Must come from your shell: a project `.env` cannot set it. See [Directory trust](../getting-started/index.md#directory-trust) |
@@ -168,6 +169,8 @@ Nanocoder resolves a model's context limit in this order:
 
 This lets you persist context limits for unknown or local models without reapplying `/context-max` every session.
 
+String-valued context-limit overrides (`/context-max`, `--context-max`, `?context-max=`, and `NANOCODER_CONTEXT_LIMIT`) accept positive integers or decimal values with a `k`/`K` (1,000) or `m`/`M` (1,000,000) suffix. Bare positive decimal strings remain supported and are rounded to whole tokens for compatibility. Values must remain within JavaScript's safe integer range so token counts are not silently changed. The `contextWindows` and `contextWindow` fields in `agents.config.json` remain numeric JSON values and do not accept suffix strings.
+
 ## Application Settings
 
 Beyond providers and MCP servers, `agents.config.json` supports application-level settings under the `nanocoder` key.
@@ -197,6 +200,92 @@ Nanocoder discovers installed language servers by scanning `PATH` when the LSP m
 Project-level configuration takes precedence over the user-level setting. With auto-discovery disabled, `/lsp` reports that state; any entries in `lspServers` are still started.
 
 The `NANOCODER_LSP=off` environment variable also disables automatic discovery for that process, overriding the config value.
+
+### Named Configuration Profiles
+
+Named configuration profiles bundle complete setups — including provider, model, mode, tool configuration, hooks, formatters, and security settings — under a name in `agents.config.json`. This allows switching easily between tasks such as fast local edits, heavy refactoring, or read-only code review.
+
+#### Defining Profiles
+
+Profiles are defined in the `nanocoder.profiles` object within `agents.config.json` (at user or project level):
+
+```json
+{
+  "nanocoder": {
+    "defaultProfile": "fast",
+    "profiles": {
+      "fast": {
+        "provider": "ollama",
+        "model": "qwen2.5-coder:7b",
+        "mode": "auto-accept"
+      },
+      "deep": {
+        "provider": "anthropic",
+        "model": "claude-3-7-sonnet-20250219",
+        "mode": "normal",
+        "contextLimit": 128000
+      },
+      "review": {
+        "provider": "openrouter",
+        "model": "deepseek/deepseek-r1",
+        "mode": "plan",
+        "disabledTools": ["write_file", "string_replace", "diff_edit", "execute_bash"]
+      }
+    }
+  }
+}
+```
+
+Each profile can specify:
+- `provider` (string): AI provider name (from configured providers)
+- `model` (string): Model ID for the provider
+- `mode` (string): Starting development mode (`normal`, `auto-accept`, `yolo`, `plan`, `architect`)
+- Any `nanocoder.*` settings: `autoCompact`, `hooks`, `formatters`, `alwaysAllow`, `disabledTools`, `sandbox`, `firewall`, `retries`, `tune`, `systemPrompt`, etc.
+- Profile-specific `providers` array, merged into the available providers when the profile is active
+
+#### Profile Selection Precedence
+
+Nanocoder resolves the active profile in this order:
+
+1. `--profile <name>` CLI flag (or `--profile=<name>`)
+2. `NANOCODER_PROFILE` environment variable
+3. `nanocoder.defaultProfile` in `agents.config.json` (project layer wins over global)
+4. No profile active (base configuration)
+
+Specifying an unknown profile name fails fast with an error listing available profiles.
+
+#### Using Profiles
+
+Run with a profile from the command line:
+
+```bash
+# Interactive session with the "fast" profile
+nanocoder --profile fast
+
+# Non-interactive run with the "review" profile
+nanocoder run --profile review "review src/auth.ts for edge cases"
+
+# Using the fused syntax
+nanocoder --profile=deep
+```
+
+Within the interactive TUI, use the `/profile` slash command:
+
+```bash
+/profile           # List configured profiles and see which one is active
+/profile fast      # Switch to the "fast" profile (applies mode, model, and reloads config)
+/profile --clear   # Clear active profile and revert to base configuration
+```
+
+#### Inspecting Effective Configuration
+
+Profile overrides layer on top of project and global configurations. You can inspect how profile settings merge using the `config` CLI command:
+
+```bash
+nanocoder config show           # Displays active profile and its origin in header
+nanocoder config diff           # Shows profile overrides in effect
+nanocoder config list           # Lists all configuration keys across layers
+```
 
 ### Auto-Compact
 

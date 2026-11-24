@@ -1,5 +1,5 @@
 import {constants} from 'node:fs';
-import {access, lstat, writeFile} from 'node:fs/promises';
+import {access, lstat} from 'node:fs/promises';
 import {resolve} from 'node:path';
 import {Box, Text} from 'ink';
 import React from 'react';
@@ -11,7 +11,10 @@ import {
 import {ThemeContext} from '@/hooks/useTheme';
 import {getSafeSessionCwd} from '@/services/session-cwd';
 import {EditRecoveryError} from '@/tools/file-ops/edit-recovery';
-import {replaceFirstLiteral} from '@/tools/file-ops/literal-replace';
+import {
+	countLiteralOccurrences,
+	replaceFirstLiteral,
+} from '@/tools/file-ops/literal-replace';
 import {
 	validateEditableEncoding,
 	validateEditableFormat,
@@ -29,6 +32,7 @@ import {createFileToolApproval} from '@/tools/runtime/tool-approval';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
+import {atomicWriteUserFile} from '@/utils/fs/atomic-write';
 import {getCachedFileContent, invalidateCache} from '@/utils/fs/file-cache';
 import {
 	closeDiffInVSCode,
@@ -137,10 +141,6 @@ export function parseDiffEditBlocks(diff: string): DiffEditBlock[] {
 	return blocks;
 }
 
-function countOccurrences(content: string, search: string): number {
-	return content.split(search).length - 1;
-}
-
 function validateBlocks(
 	fileContent: string,
 	blocks: DiffEditBlock[],
@@ -157,7 +157,7 @@ function validateBlocks(
 		}
 		seenSearchBlocks.add(block.search);
 
-		const occurrences = countOccurrences(fileContent, block.search);
+		const occurrences = countLiteralOccurrences(fileContent, block.search);
 
 		if (occurrences === 0) {
 			throw new EditRecoveryError(
@@ -185,7 +185,7 @@ function applyBlocks(fileContent: string, blocks: DiffEditBlock[]): string {
 	let newContent = fileContent;
 
 	blocks.forEach((block, index) => {
-		const occurrences = countOccurrences(newContent, block.search);
+		const occurrences = countLiteralOccurrences(newContent, block.search);
 		if (occurrences !== 1) {
 			throw new Error(
 				`Search block ${index + 1} could not be applied cleanly after earlier edits.`,
@@ -302,7 +302,7 @@ const executeDiffEdit = async (args: DiffEditArgs): Promise<string> => {
 	);
 	const firewallWarning = enforceFirewall(firewallResult);
 
-	await writeFile(absPath, newContent, 'utf-8');
+	await atomicWriteUserFile(absPath, newContent);
 	invalidateCache(absPath);
 	markFileSeen(absPath);
 	forgetReadContent(absPath);

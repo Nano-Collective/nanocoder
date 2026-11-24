@@ -1,5 +1,5 @@
 import {constants} from 'node:fs';
-import {access, lstat, writeFile} from 'node:fs/promises';
+import {access, lstat} from 'node:fs/promises';
 import {resolve} from 'node:path';
 import React from 'react';
 import {getColors} from '@/config/index';
@@ -10,7 +10,10 @@ import {
 import {getSafeSessionCwd} from '@/services/session-cwd';
 import {EditRecoveryError} from '@/tools/file-ops/edit-recovery';
 import {fitEditToLineEndings} from '@/tools/file-ops/line-endings';
-import {replaceFirstLiteral} from '@/tools/file-ops/literal-replace';
+import {
+	countLiteralOccurrences,
+	replaceFirstLiteral,
+} from '@/tools/file-ops/literal-replace';
 import {
 	validateEditableEncoding,
 	validateEditableFormat,
@@ -28,6 +31,7 @@ import {createFileToolApproval} from '@/tools/runtime/tool-approval';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
+import {atomicWriteUserFile} from '@/utils/fs/atomic-write';
 import {getCachedFileContent, invalidateCache} from '@/utils/fs/file-cache';
 import {
 	closeDiffInVSCode,
@@ -120,7 +124,7 @@ const executeStringReplace = async (
 		args.new_str,
 	);
 
-	const occurrences = fileContent.split(old_str).length - 1;
+	const occurrences = countLiteralOccurrences(fileContent, old_str);
 
 	if (occurrences === 0) {
 		throw new EditRecoveryError(
@@ -145,7 +149,7 @@ const executeStringReplace = async (
 	);
 	const firewallWarning = enforceFirewall(firewallResult);
 
-	await writeFile(absPath, newContent, 'utf-8');
+	await atomicWriteUserFile(absPath, newContent);
 	invalidateCache(absPath);
 	// The model now knows the file's current contents, so a follow-up edit is
 	// not blind.
@@ -241,7 +245,7 @@ const stringReplaceFormatter = async (
 			const fileContent = cached.content;
 			const fitted = fitEditToLineEndings(fileContent, old_str, new_str);
 
-			const occurrences = fileContent.split(fitted.oldStr).length - 1;
+			const occurrences = countLiteralOccurrences(fileContent, fitted.oldStr);
 			if (occurrences === 1) {
 				const newContent = replaceFirstLiteral(
 					fileContent,
@@ -332,7 +336,7 @@ const stringReplaceValidator = async (
 		if (!encodingResult.valid) return encodingResult;
 		const fileContent = cached.content;
 		const {oldStr} = fitEditToLineEndings(fileContent, old_str, args.new_str);
-		const occurrences = fileContent.split(oldStr).length - 1;
+		const occurrences = countLiteralOccurrences(fileContent, oldStr);
 
 		if (occurrences === 0) {
 			return {

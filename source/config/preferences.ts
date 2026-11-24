@@ -21,6 +21,7 @@ import type {NanocoderShape, ThemePreset, TitleShape} from '@/types/ui';
 import {atomicWriteFileSync} from '@/utils/fs/atomic-write';
 import {normalizeForCompare} from '@/utils/fs/path-validation';
 import {getLogger} from '@/utils/logging';
+import {stripUtf8Bom} from '@/utils/strip-utf8-bom';
 
 let PREFERENCES_PATH: string | null = null;
 let CACHED_CONFIG_DIR: string | undefined = undefined;
@@ -92,7 +93,9 @@ function readGlobalOnlyPreferences(): Partial<UserPreferences> | undefined {
 	const globalPath = getGlobalPreferencesPath();
 	if (!existsSync(globalPath)) return undefined;
 	try {
-		return JSON.parse(readFileSync(globalPath, 'utf-8')) as UserPreferences;
+		return JSON.parse(
+			stripUtf8Bom(readFileSync(globalPath, 'utf-8')),
+		) as UserPreferences;
 	} catch (error) {
 		getLogger().error(`Failed to load global preferences: ${String(error)}`);
 		return undefined;
@@ -103,10 +106,9 @@ function writeGlobalOnlyPreferences(values: Partial<UserPreferences>): void {
 	const globalPath = getGlobalPreferencesPath();
 	let data: Record<string, unknown> = {};
 	if (existsSync(globalPath)) {
-		data = JSON.parse(readFileSync(globalPath, 'utf-8')) as Record<
-			string,
-			unknown
-		>;
+		data = JSON.parse(
+			stripUtf8Bom(readFileSync(globalPath, 'utf-8')),
+		) as Record<string, unknown>;
 	}
 	mkdirSync(path.dirname(globalPath), {recursive: true});
 	atomicWriteFileSync(
@@ -188,7 +190,7 @@ export function loadPreferences(): UserPreferences {
 		}
 
 		const data = JSON.parse(
-			readFileSync(preferencesPath, 'utf-8'),
+			stripUtf8Bom(readFileSync(preferencesPath, 'utf-8')),
 		) as UserPreferences;
 
 		if (isProject) {

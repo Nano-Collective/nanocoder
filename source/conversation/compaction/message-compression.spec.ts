@@ -754,3 +754,80 @@ test('compressMessages preserves display-only messages in output but excludes th
 	);
 	t.is(result.compressedTokenCount, expectedCompressedTokens);
 });
+
+// ==================== Per-turn context blocks (#1574) ====================
+//
+// Skills and recalled memories ride at the end of the user's message and are
+// stored in history, so compaction is the first thing that reads them back.
+// Two properties matter: the user's own words survive, and the block never
+// survives half-cut — `summarizeText` slices at a character count, and a
+// recalled-memory block is budgeted well past the 500-char threshold, so a
+// naive pass would routinely leave an opening tag with no close.
+
+const TURN_CONTEXT_MEMORIES =
+	'<turn-context>\n## Project Context\n\n- Auth uses Clerk; sessions are JWTs.\n</turn-context>';
+
+test('compressMessages drops a stale per-turn context block from an older message', t => {
+	const tokenizer = createMockTokenizer();
+	const messages: Message[] = [
+		createUserMessage(`refactor the auth module\n\n${TURN_CONTEXT_MEMORIES}`),
+		createAssistantMessage('Done.'),
+		createUserMessage('now add a test'),
+		createAssistantMessage('Added.'),
+	];
+
+	const result = compressMessages(messages, tokenizer, {
+		mode: 'default',
+		keepRecentMessages: 2,
+	});
+
+	const compacted = result.compressedMessages[0];
+	t.is(compacted?.content, 'refactor the auth module');
+});
+
+test('compressMessages never leaves an unterminated context block', t => {
+	const tokenizer = createMockTokenizer();
+	// Long enough to trip the 500-char threshold, which truncates to 200 — a
+	// cut that lands inside the block when it is not removed first.
+	const longBlock = `<turn-context>\n## Project Context\n\n${'- Auth uses Clerk; sessions are JWTs.\n'.repeat(20)}</turn-context>`;
+	const messages: Message[] = [
+		createUserMessage(`refactor the auth module\n\n${longBlock}`),
+		createAssistantMessage('Done.'),
+		createUserMessage('now add a test'),
+		createAssistantMessage('Added.'),
+	];
+
+	const result = compressMessages(messages, tokenizer, {
+		mode: 'default',
+		keepRecentMessages: 2,
+	});
+
+	for (const message of result.compressedMessages) {
+		const content = message.content ?? '';
+		t.false(
+			content.includes('<turn-context>'),
+			'no block, whole or partial, may survive compaction',
+		);
+	}
+	t.is(result.compressedMessages[0]?.content, 'refactor the auth module');
+});
+
+test('compressMessages leaves a message that carries no block untouched', t => {
+	const tokenizer = createMockTokenizer();
+	const original = createUserMessage('refactor the auth module');
+	const messages: Message[] = [
+		original,
+		createAssistantMessage('Done.'),
+		createUserMessage('now add a test'),
+		createAssistantMessage('Added.'),
+	];
+
+	const result = compressMessages(messages, tokenizer, {
+		mode: 'default',
+		keepRecentMessages: 2,
+	});
+
+	// Identity, not just equality: nothing is reallocated for a history that
+	// never carried a block.
+	t.is(result.compressedMessages[0], original);
+});

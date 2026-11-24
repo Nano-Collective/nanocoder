@@ -1,10 +1,19 @@
 import {existsSync, readFileSync} from 'fs';
 import {join} from 'path';
+import {readCachedConfigFile} from '@/config/cached-reader';
 import {substituteEnvVars} from '@/config/env-substitution';
 import {getConfigPath} from '@/config/paths';
+import {getActiveProfile} from '@/config/profile';
 import {getConfigRoot} from '@/services/session-context';
 import type {MCPServerConfig, ProviderConfig} from '@/types/config';
 import {notifyError} from '@/utils/message-queue-core';
+import {stripUtf8Bom} from '@/utils/strip-utf8-bom';
+
+/** Read and parse a JSON config file, tolerating a leading UTF-8 BOM. */
+// biome-ignore lint/suspicious/noExplicitAny: parsed JSON is dynamically shaped
+function readJsonFile(filePath: string): any {
+	return JSON.parse(stripUtf8Bom(readFileSync(filePath, 'utf-8')));
+}
 
 // Simplified configuration source types
 export type ConfigSource = 'project' | 'global' | 'env';
@@ -100,8 +109,7 @@ export function loadProjectMCPConfig(
 	}
 
 	try {
-		const rawData = readFileSync(configPath, 'utf-8');
-		const config = JSON.parse(rawData);
+		const config = readJsonFile(configPath);
 
 		const mcpServers = parseMCPServers(config);
 
@@ -131,8 +139,7 @@ export function loadGlobalMCPConfig(): MCPServerWithSource[] {
 	}
 
 	try {
-		const rawData = readFileSync(configPath, 'utf-8');
-		const config = JSON.parse(rawData);
+		const config = readJsonFile(configPath);
 
 		const mcpServers = parseMCPServers(config);
 
@@ -220,7 +227,7 @@ function loadEnvMCPConfigs(): MCPServerWithSource[] {
 	}
 
 	try {
-		const config = JSON.parse(rawData);
+		const config = JSON.parse(stripUtf8Bom(rawData));
 
 		// Accept direct array format (env vars) or standard .mcp.json wrapper format
 		let servers: unknown[] | null = null;
@@ -269,12 +276,39 @@ export function loadAllProviderConfigs(
 		providerMap.set(provider.name, provider);
 	}
 
+	// Add profile providers (higher priority than project, lower than env)
+	try {
+		const activeProfile = getActiveProfile(cwd);
+		if (activeProfile?.providers && Array.isArray(activeProfile.providers)) {
+			const processed = substituteEnvVars(activeProfile.providers);
+			for (const provider of processed) {
+				providerMap.set(provider.name, provider);
+			}
+		}
+	} catch {
+		// Ignore if active profile resolution throws here
+	}
+
 	// Add env providers last (highest priority) - overrides all
 	for (const provider of envProviders) {
 		providerMap.set(provider.name, provider);
 	}
 
 	return Array.from(providerMap.values());
+}
+
+function extractProvidersFromConfig(config: unknown): ProviderConfig[] {
+	if (config && typeof config === 'object') {
+		const typed = config as Record<string, unknown>;
+		const nanocoder = typed.nanocoder as Record<string, unknown> | undefined;
+		if (nanocoder && Array.isArray(nanocoder.providers)) {
+			return substituteEnvVars(nanocoder.providers as ProviderConfig[]);
+		}
+		if (Array.isArray(typed.providers)) {
+			return substituteEnvVars(typed.providers as ProviderConfig[]);
+		}
+	}
+	return [];
 }
 
 /**
@@ -285,26 +319,7 @@ function loadProjectProviderConfigs(cwd: string): ProviderConfig[] {
 	const configPath = join(cwd, 'agents.config.json'); // nosemgrep
 
 	if (existsSync(configPath)) {
-		try {
-			const rawData = readFileSync(configPath, 'utf-8');
-			const config = JSON.parse(rawData);
-
-			if (config.nanocoder && Array.isArray(config.nanocoder.providers)) {
-				// Apply environment variable substitution
-				const processedProviders = substituteEnvVars(
-					config.nanocoder.providers,
-				);
-				return processedProviders;
-			} else if (Array.isArray(config.providers)) {
-				// Apply environment variable substitution
-				const processedProviders = substituteEnvVars(config.providers);
-				return processedProviders;
-			}
-		} catch (error) {
-			notifyError(
-				`Failed to load project provider config from ${configPath}: ${String(error)}`,
-			);
-		}
+		return extractProvidersFromConfig(readCachedConfigFile(configPath));
 	}
 
 	return [];
@@ -329,23 +344,8 @@ function loadGlobalProviderConfigs(): ProviderConfig[] {
 
 // Helper function to load provider config from a specific file
 function loadProviderConfigFromFile(filePath: string): ProviderConfig[] {
-	try {
-		const rawData = readFileSync(filePath, 'utf-8');
-		const config = JSON.parse(rawData);
-
-		if (config.nanocoder && Array.isArray(config.nanocoder.providers)) {
-			// Apply environment variable substitution
-			const processedProviders = substituteEnvVars(config.nanocoder.providers);
-			return processedProviders;
-		} else if (Array.isArray(config.providers)) {
-			// Apply environment variable substitution
-			const processedProviders = substituteEnvVars(config.providers);
-			return processedProviders;
-		}
-	} catch (error) {
-		notifyError(
-			`Failed to load provider config from ${filePath}: ${String(error)}`,
-		);
+	if (existsSync(filePath)) {
+		return extractProvidersFromConfig(readCachedConfigFile(filePath));
 	}
 
 	return [];
@@ -374,7 +374,7 @@ function loadEnvProviderConfigs(): ProviderConfig[] {
 	}
 
 	try {
-		const config = JSON.parse(rawData);
+		const config = JSON.parse(stripUtf8Bom(rawData));
 
 		// Accept direct array format or standard agents.config.json wrapper format
 		if (Array.isArray(config)) {

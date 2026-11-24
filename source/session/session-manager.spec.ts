@@ -130,6 +130,113 @@ test.serial('createSession adds metadata to the index', async t => {
 	t.is(sessions[0].messageCount, 2);
 });
 
+// Autosave recreates the live session with createSession() when its file
+// cannot be read. The index still has the entry, so what only the index knew
+// about the session must survive the recreate.
+async function recreateOverUnreadableFile(
+	id: string,
+	overrides: {title?: string; titleManuallySet?: boolean} = {},
+) {
+	await writeFile(join(sessionsDir, `${id}.json`), '{"truncated":');
+	return manager.createSession({
+		id,
+		title: overrides.title ?? 'Derived title',
+		titleManuallySet: overrides.titleManuallySet,
+		messageCount: 1,
+		provider: 'test',
+		model: 'test',
+		workingDirectory: '/tmp',
+		messages: [{role: 'user', content: 'hello'}],
+	});
+}
+
+test.serial(
+	'createSession over an indexed id keeps pinned and createdAt',
+	async t => {
+		const original = await manager.createSession(
+			newSessionData('Pinned session'),
+		);
+		await manager.setPinned(original.id, true);
+
+		const recreated = await recreateOverUnreadableFile(original.id);
+
+		t.true(recreated.pinned);
+		t.is(recreated.createdAt, original.createdAt);
+		const [entry] = await manager.listSessions();
+		t.true(entry.pinned);
+		t.is(entry.createdAt, original.createdAt);
+		t.true((await manager.readSession(original.id))?.pinned);
+	},
+);
+
+test.serial(
+	'createSession over an indexed id keeps a generated or renamed title',
+	async t => {
+		const generated = await manager.createSession(newSessionData('Derived title'));
+		await manager.saveSession({
+			...generated,
+			title: 'Generated title',
+			titleGenerated: true,
+		});
+		const renamed = await manager.createSession(newSessionData('Derived title'));
+		await manager.renameSession(renamed.id, 'Renamed title');
+
+		const regenerated = await recreateOverUnreadableFile(generated.id);
+		const rerenamed = await recreateOverUnreadableFile(renamed.id);
+
+		t.is(regenerated.title, 'Generated title');
+		t.true(regenerated.titleGenerated);
+		t.is(rerenamed.title, 'Renamed title');
+		t.true(rerenamed.titleManuallySet);
+	},
+);
+
+test.serial(
+	'createSession over an indexed id applies a rename passed by the caller',
+	async t => {
+		const original = await manager.createSession(newSessionData('Derived title'));
+		await manager.saveSession({
+			...original,
+			title: 'Generated title',
+			titleGenerated: true,
+		});
+
+		const recreated = await recreateOverUnreadableFile(original.id, {
+			title: 'Pending rename',
+			titleManuallySet: true,
+		});
+
+		t.is(recreated.title, 'Pending rename');
+		t.true(recreated.titleManuallySet);
+	},
+);
+
+test.serial(
+	'createSession over an indexed id takes the new title when the old one was only derived',
+	async t => {
+		const original = await manager.createSession(newSessionData('Old derived'));
+
+		const recreated = await recreateOverUnreadableFile(original.id, {
+			title: 'New derived',
+		});
+
+		t.is(recreated.title, 'New derived');
+		t.falsy(recreated.titleManuallySet);
+		t.falsy(recreated.titleGenerated);
+	},
+);
+
+test.serial('createSession honours a pin passed by the caller', async t => {
+	const session = await manager.createSession({
+		...newSessionData('Pinned at creation'),
+		pinned: true,
+	});
+
+	t.true(session.pinned);
+	t.true((await manager.listSessions())[0].pinned);
+	t.true((await manager.readSession(session.id))?.pinned);
+});
+
 // --- readSession ---
 
 test.serial(

@@ -17,6 +17,8 @@ import {
 	parseRunPrompt,
 	readStdinText,
 	STDIN_PROMPT_FILE,
+	wantsHelp,
+	wantsVersion,
 } from './run-prompt-args.js';
 
 // Enable V8 compile cache (Node 22.8+). After the first run, Node caches
@@ -73,7 +75,7 @@ if (args[0] === 'storage') {
 }
 
 // Handle --version/-v flag — fast path, no heavy imports
-if (args.includes('--version') || args.includes('-v')) {
+if (wantsVersion(args)) {
 	console.log(version);
 	process.exit(0);
 }
@@ -255,7 +257,7 @@ if (args[0] === 'completion') {
 }
 
 // Handle --help/-h flag — fast path, no heavy imports
-if (args.includes('--help') || args.includes('-h')) {
+if (wantsHelp(args)) {
 	console.log(`
 Usage: nanocoder [options] [command]
 
@@ -299,12 +301,13 @@ Commands:
 Options:
   -v, --version       Show version number
   -h, --help          Show help
+  --profile           Use a named configuration profile from agents.config.json
   --vscode            Start the legacy VS Code companion (deprecated)
   --vscode-port       Specify VS Code port
   --provider          Specify AI provider (must be configured in agents.config.json).
                       Quote names with spaces: --provider "GitHub Copilot"
   --model             Specify AI model (must be available for the provider)
-  --context-max       Set maximum context length in tokens (supports k/K suffix, e.g. 128k)
+  --context-max       Set maximum context length in tokens (supports k/K and m/M suffixes, e.g. 128k or 1m)
   --mode              Start in a specific development mode (normal, auto-accept, yolo, plan,
                       architect). Defaults to "normal" for interactive sessions and
                       "auto-accept" for run mode.
@@ -436,6 +439,27 @@ async function main(): Promise<void> {
 		vscodePort = port;
 	}
 
+	// Extract --profile if specified
+	let cliProfile: string | undefined;
+	const profileArgIndex = args.findIndex(
+		arg => arg === '--profile' || arg.startsWith('--profile='),
+	);
+	const profileValue =
+		profileArgIndex === -1
+			? undefined
+			: args[profileArgIndex].startsWith('--profile=')
+				? args[profileArgIndex].slice('--profile='.length)
+				: args[profileArgIndex + 1];
+	if (profileArgIndex !== -1) {
+		if (!profileValue || profileValue.startsWith('-')) {
+			console.error('--profile requires a profile name.');
+			process.exit(1);
+		}
+		cliProfile = profileValue.trim();
+		const {setCliProfile} = await import('@/config/profile');
+		setCliProfile(cliProfile);
+	}
+
 	// Extract --provider if specified — validate against allowlist pattern
 	let cliProvider: string | undefined;
 	const providerArgIndex = args.findIndex(
@@ -508,7 +532,7 @@ async function main(): Promise<void> {
 			setSessionContextLimit(limit);
 		} else {
 			console.error(
-				`Invalid --context-max value: "${contextMaxValue}". Use a positive number, e.g. 8192 or 128k`,
+				`Invalid --context-max value: "${contextMaxValue}". Use a positive number, e.g. 8192, 128k, or 1m`,
 			);
 			process.exit(1);
 		}
@@ -543,6 +567,22 @@ async function main(): Promise<void> {
 			process.exit(1);
 		}
 		break;
+	}
+
+	// Resolve and validate active profile (fail fast on unknown profile)
+	let profileMode: CliMode | undefined;
+	const {resolveActiveProfile} = await import('@/config/profile');
+	try {
+		const active = resolveActiveProfile();
+		if (
+			active?.profile.mode &&
+			(VALID_MODES as readonly string[]).includes(active.profile.mode)
+		) {
+			profileMode = active.profile.mode as CliMode;
+		}
+	} catch (error) {
+		console.error((error as Error).message);
+		process.exit(1);
 	}
 
 	// Extract --json or --output-format json. Accept spaced and fused formats.
@@ -881,7 +921,7 @@ async function main(): Promise<void> {
 			cliModel,
 			appVersion: version,
 			trustDirectory: trustDirectoryRequested,
-			mode: cliMode,
+			mode: cliMode ?? profileMode,
 		});
 	} else if (plainMode && nonInteractivePrompt) {
 		// Headless, Ink-free path. Note: --plain is currently only valid with
@@ -890,7 +930,7 @@ async function main(): Promise<void> {
 		const {runPlainShell} = await import('@/plain/shell');
 		await runPlainShell({
 			prompt: nonInteractivePrompt,
-			developmentMode: cliMode ?? 'auto-accept',
+			developmentMode: cliMode ?? profileMode ?? 'auto-accept',
 			cliProvider,
 			cliModel,
 			trustDirectory,
@@ -1110,7 +1150,7 @@ async function main(): Promise<void> {
 				nonInteractiveMode,
 				cliProvider,
 				cliModel,
-				cliMode,
+				cliMode: cliMode ?? profileMode,
 				trustDirectory,
 				altScreenActive: useAltScreen,
 				initialSession,
