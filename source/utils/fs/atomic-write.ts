@@ -178,6 +178,8 @@ export async function atomicWriteUserFile(
 	filePath: string,
 	data: string,
 ): Promise<void> {
+	// The sync resolver is deliberate: it is shared with the sync config
+	// writers, so both paths agree on the target of a symlinked file.
 	const target = resolveUserFileTarget(filePath);
 	if (target === undefined) {
 		await writeFile(filePath, data, 'utf-8');
@@ -236,12 +238,12 @@ export async function atomicWriteUserFile(
 
 /**
  * Ensure a file's parent directory exists, then atomically write pretty-printed
- * JSON. Convenience wrapper for config files that may not exist yet.
+ * JSON. An existing file keeps its mode, so a save cannot silently widen
+ * permissions set by another writer; new files use the process umask. Symlinks
+ * are followed, including dangling links, matching {@link atomicWriteUserFile}.
  */
 export function atomicWriteJson(filePath: string, data: unknown): void {
-	const dir = dirname(filePath);
-	mkdirSync(dir, {recursive: true});
-	atomicWriteFileSync(filePath, `${JSON.stringify(data, null, 2)}\n`);
+	writeJsonAtomic(filePath, data);
 }
 
 /** Owner-only permissions for files that may hold credentials. */
@@ -255,24 +257,40 @@ const PRIVATE_FILE_MODE = 0o600;
  * from {@link atomicWriteJson} so non-secret JSON keeps the process umask.
  */
 export function atomicWritePrivateJson(filePath: string, data: unknown): void {
+	writeJsonAtomic(filePath, data, PRIVATE_FILE_MODE);
+}
+
+/**
+ * Shared implementation for both JSON writers. `newFileMode` applies only when
+ * the target does not exist yet; an existing file's mode always wins so the
+ * temp-file rename cannot drop owner-only permissions.
+ */
+function writeJsonAtomic(
+	filePath: string,
+	data: unknown,
+	newFileMode?: number,
+): void {
 	const json = `${JSON.stringify(data, null, 2)}\n`;
 	const target = resolveUserFileTarget(filePath);
 	if (target === undefined) {
 		// Dangling symlink: `writeFile` follows it and creates the target, which
 		// is the only path that keeps the link instead of replacing it.
 		mkdirSync(dirname(filePath), {recursive: true});
-		writeFileSync(filePath, json, {
-			encoding: 'utf-8',
-			mode: PRIVATE_FILE_MODE,
-		});
+		writeFileSync(
+			filePath,
+			json,
+			newFileMode === undefined
+				? 'utf-8'
+				: {encoding: 'utf-8', mode: newFileMode},
+		);
 		return;
 	}
 
-	let mode = PRIVATE_FILE_MODE;
+	let mode = newFileMode;
 	try {
 		mode = statSync(target).mode & 0o777;
 	} catch {
-		// Target does not exist yet: create it owner-only.
+		// Target does not exist yet: use the caller's default (or the umask).
 	}
 
 	mkdirSync(dirname(target), {recursive: true});

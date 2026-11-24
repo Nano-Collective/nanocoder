@@ -315,7 +315,7 @@ export function BaseConfigWizard<T>({
 							<Box marginBottom={1}>
 								<Text color={colors.warning}>
 									This file lives inside your project. Add it to .gitignore and
-									avoid committing API keys — prefer $VAR references.
+									avoid committing API keys. Prefer $VAR references.
 								</Text>
 							</Box>
 						)}

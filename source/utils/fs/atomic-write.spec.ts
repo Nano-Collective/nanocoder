@@ -4,6 +4,7 @@ import * as fs from 'fs/promises';
 import {
 	atomicWriteFile,
 	atomicWriteFileSync,
+	atomicWriteJson,
 	atomicWritePrivateJson,
 	atomicWriteUserFile,
 	publishFileNoClobber,
@@ -85,6 +86,41 @@ test.serial('atomicWriteFileSync honours the requested file mode', async t => {
 
 		const stats = await fs.stat(filePath);
 		t.is(stats.mode & 0o777, 0o600);
+	} finally {
+		await cleanupTempDir(tempDir);
+	}
+});
+
+test.serial('atomicWriteJson preserves the mode of an existing file', async t => {
+	if (process.platform === 'win32') {
+		t.pass('skipped: POSIX file modes are not meaningful on Windows');
+		return;
+	}
+	const tempDir = await createTempDir();
+	try {
+		const filePath = path.join(tempDir, 'config.json');
+		await fs.writeFile(filePath, '{}', 'utf-8');
+		await fs.chmod(filePath, 0o600);
+
+		atomicWriteJson(filePath, {updated: true});
+
+		t.is((await fs.stat(filePath)).mode & 0o777, 0o600);
+	} finally {
+		await cleanupTempDir(tempDir);
+	}
+});
+
+test.serial('atomicWriteJson leaves new files at the process umask', async t => {
+	if (process.platform === 'win32') {
+		t.pass('skipped: POSIX file modes are not meaningful on Windows');
+		return;
+	}
+	const tempDir = await createTempDir();
+	try {
+		const filePath = path.join(tempDir, 'new-config.json');
+		atomicWriteJson(filePath, {ok: true});
+
+		t.is((await fs.stat(filePath)).mode & 0o777, 0o666 & ~process.umask());
 	} finally {
 		await cleanupTempDir(tempDir);
 	}
