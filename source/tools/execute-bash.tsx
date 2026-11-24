@@ -326,11 +326,17 @@ const DESTRUCTIVE_RM_TARGETS = new Set(['/', '~', '$HOME', '${HOME}']);
  * Flags and targets of every `rm` in a command. Argument words stop at the
  * next command separator, so `rm -rf src && ls /` is judged on its own
  * arguments instead of folding the rest of the line into them.
+ *
+ * `rm` is looked for in `searchIn`, the same command with the text of quoted
+ * arguments masked out (see `maskQuotedText`), so an `rm` that is only
+ * mentioned in a commit message or an `echo` is not read as a command. Its
+ * arguments are still read from `command`, where `rm -rf "$HOME"` keeps the
+ * quoted target.
  */
-function rmArgumentLists(command: string): string[][] {
+function rmArgumentLists(command: string, searchIn = command): string[][] {
 	const pattern = /\brm\b/gi;
 	const lists: string[][] = [];
-	let match = pattern.exec(command);
+	let match = pattern.exec(searchIn);
 	while (match) {
 		const rest = command.slice(match.index + match[0].length);
 		const separator = rest.search(/[;&|\n]/);
@@ -343,7 +349,7 @@ function rmArgumentLists(command: string): string[][] {
 				// "$HOME"` deletes the same directory as `rm -rf $HOME`.
 				.map(word => word.replace(/['"]/g, '')),
 		);
-		match = pattern.exec(command);
+		match = pattern.exec(searchIn);
 	}
 	return lists;
 }
@@ -418,22 +424,93 @@ function isDestructiveRm(words: string[]): boolean {
 const RUNS_QUOTED_TEXT =
 	/\b(?:ba|z|k|da|fi|tc|c)?sh\s+(?:-\w+\s+)*-\w*c\b|\b(?:eval|ssh|xargs)\b/;
 
+/** A double- or single-quoted span, as the shell delimits it. */
+const QUOTED_SPAN = /"(?:[^"\\]|\\.)*"|'[^']*'/g;
+
+/**
+ * Whether `QUOTED_SPAN` may read the quotes differently from the shell, so a
+ * span could cover text the shell runs. It does not follow a backslash outside
+ * quotes (`echo \" ; mkfs /dev/sda ; echo "x"`), a heredoc body, or a comment:
+ * the shell opens no quote inside a comment, but the regex does and carries
+ * the span onto the next line (`echo # "`, then `rm -rf /`, then `echo "x"`).
+ * Up to the first of these the two read the quotes alike, so a `#` that starts
+ * a comment is still outside every span.
+ */
+function mayMisreadQuotes(command: string): boolean {
+	return (
+		/\\|<</.test(command) || command.replace(QUOTED_SPAN, '').includes('#')
+	);
+}
+
+/**
+ * Whether the text before a quoted span puts it in command position or after
+ * a redirect, where its text is what runs or what gets written.
+ */
+const ENDS_IN_COMMAND_POSITION = /(?:^|[;&|(`\n>]|\bsudo)\s*$/;
+
+/**
+ * Commands whose quoted arguments are only text: printed, searched for, stored
+ * as a message, or a path. Matched against the start of each command on the
+ * line, after its quoted spans are replaced by placeholders, so a quoted
+ * command name (`"rm"`) never matches. `rg --pre` runs a program on each file,
+ * so `rg` counts only without it.
+ */
+const PASSES_QUOTED_TEXT_ONLY =
+	/^(?:echo|printf|grep|egrep|fgrep|cd|git\s+(?:add|commit)|rg(?!.*\s--pre\b))(?:\s|$)/;
+
+/**
+ * Syntax that runs or feeds text to a command: `$(`, backticks, `<<<`, `<(`,
+ * `>(`. Backslash escapes (`\"`, `$'...\'...'`) are left to
+ * `mayMisreadQuotes`.
+ */
+const RUNS_OR_FEEDS_TEXT = /\$\(|`|<<<|[<>]\(/;
+
+/**
+ * The command with the text of its quoted arguments replaced by spaces of the
+ * same length, so offsets still line up with `command`. Only when every
+ * command on the line is one that treats quoted text as text (see
+ * `PASSES_QUOTED_TEXT_ONLY`), the line has nothing that runs or feeds the text
+ * (see `RUNS_OR_FEEDS_TEXT`), and its quotes read the same to the shell (see
+ * `mayMisreadQuotes`). Anything else - a pipe into a shell, a runner such as
+ * `bash -c` or `su -c`, a prefix such as `env` or `sudo`, an assignment, a
+ * keyword, a comment - returns the command unchanged, so it is checked as
+ * before.
+ */
+function maskQuotedText(command: string): string {
+	if (RUNS_OR_FEEDS_TEXT.test(command) || mayMisreadQuotes(command)) {
+		return command;
+	}
+	const placeholders = command.replace(QUOTED_SPAN, span =>
+		'Q'.repeat(span.length),
+	);
+	const passesTextOnly = placeholders
+		// `&` followed by a digit or `-` is a redirect (`2>&1`, `>&-`), not a
+		// separator.
+		.split(/[;|\n()]|&(?![\d-])/)
+		.map(segment => segment.trim())
+		.filter(Boolean)
+		.every(segment => PASSES_QUOTED_TEXT_ONLY.test(segment));
+	if (!passesTextOnly) return command;
+	return command.replace(QUOTED_SPAN, span => ' '.repeat(span.length));
+}
+
 /**
  * The command with its quoted arguments blanked out, so `grep "dd if=" log`
  * or `echo 'never run mkfs'` is judged on what runs rather than on the text it
  * passes around. A quoted span in command position (`"mkfs" /dev/sda`) or
  * after a redirect (`> "/dev/sda"`) is what runs or what gets written, so its
  * quotes are dropped and its text kept. A command that hands a quoted string
- * to another shell is returned unchanged.
+ * to another shell, or whose quotes the shell may read differently (see
+ * `mayMisreadQuotes`), is returned unchanged.
  */
 function withoutQuotedArguments(command: string): string {
-	if (RUNS_QUOTED_TEXT.test(command)) return command;
-	return command.replace(
-		/"(?:[^"\\]|\\.)*"|'[^']*'/g,
-		(span, offset: number) =>
-			/(?:^|[;&|(`\n>]|\bsudo)\s*$/.test(command.slice(0, offset))
-				? span.slice(1, -1)
-				: "''",
+	if (RUNS_QUOTED_TEXT.test(command) || mayMisreadQuotes(command)) {
+		return command;
+	}
+	return command.replace(QUOTED_SPAN, (span, offset: number) =>
+		ENDS_IN_COMMAND_POSITION.test(command.slice(0, offset))
+			? span.slice(1, -1)
+			: "''",
 	);
 }
 
@@ -468,12 +545,15 @@ const executeBashValidator = (args: {
 	// A recursive force delete of `/`, `~` or `$HOME` is destructive however its
 	// flags are spelled, so it is parsed rather than pattern-matched. Backslash
 	// line continuations are joined first: `rm -rf \` with `/` on the next line
-	// is one command, so the target has to stay attached to its flags.
+	// is one command, so the target has to stay attached to its flags. An `rm`
+	// that only appears inside a quoted argument of a command that treats it as
+	// text (`git commit -m "..."`, `echo '...'`) is not looked at.
 	const parseable = command.replace(/\\\r?\n/g, ' ');
 	const unquoted = withoutQuotedArguments(command);
 	const isDestructive =
-		rmArgumentLists(parseable).some(isDestructiveRm) ||
-		dangerousPatterns.some(pattern => pattern.test(unquoted));
+		rmArgumentLists(parseable, maskQuotedText(parseable)).some(
+			isDestructiveRm,
+		) || dangerousPatterns.some(pattern => pattern.test(unquoted));
 
 	if (isDestructive) {
 		return Promise.resolve({

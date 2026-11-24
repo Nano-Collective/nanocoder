@@ -226,6 +226,19 @@ test('FileScanner - scan handles subdirectories', t => {
 	t.true(result.directories.includes('src/components'));
 });
 
+// A backslash is a path separator on Windows, so this name cannot exist there
+(process.platform === 'win32' ? test.skip : test)(
+	'FileScanner - scan keeps a backslash in a file name',
+	t => {
+		writeFileSync(join(testDir, 'src', 'we\\ird.txt'), 'test', 'utf-8');
+
+		const scanner = new FileScanner(testDir);
+		const result = scanner.scan();
+
+		t.true(result.files.includes('src/we\\ird.txt'));
+	},
+);
+
 test('FileScanner - scan ignores .svn directory', t => {
 	mkdirSync(join(testDir, '.svn'), {recursive: true});
 	writeFileSync(join(testDir, '.svn', 'entries'), 'test', 'utf-8');
