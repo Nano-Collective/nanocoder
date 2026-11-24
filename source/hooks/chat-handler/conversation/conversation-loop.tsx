@@ -489,14 +489,7 @@ export const processAssistantResponse = async (
 				// /stats, including calls that trigger auto-compaction or a
 				// malformed tool-call retry.
 				const usage = response.usage;
-				const hasReportedUsage =
-					!!usage &&
-					(Number.isFinite(usage.inputTokens) ||
-						Number.isFinite(usage.outputTokens) ||
-						Number.isFinite(usage.totalTokens) ||
-						Number.isFinite(usage.cacheReadTokens) ||
-						Number.isFinite(usage.cacheWriteTokens));
-				if (onApiCallComplete && hasReportedUsage && usage) {
+				if (onApiCallComplete && hasReportedUsage(usage) && usage) {
 					onApiCallComplete({
 						provider: currentProvider,
 						model: currentModel,
@@ -637,16 +630,9 @@ export const processAssistantResponse = async (
 					// field (input, output, or a lump-sum total). The indicator
 					// decides how to use it; a non-finite or wholly-empty report is
 					// treated as "no usage".
-					const hasReportedUsage =
-						!compacted &&
-						!!usage &&
-						(Number.isFinite(usage.inputTokens) ||
-							Number.isFinite(usage.outputTokens) ||
-							Number.isFinite(usage.totalTokens) ||
-							Number.isFinite(usage.cacheReadTokens) ||
-							Number.isFinite(usage.cacheWriteTokens));
+					const hasUsageSnapshot = !compacted && hasReportedUsage(usage);
 					setLastApiUsage(
-						hasReportedUsage && usage
+						hasUsageSnapshot && usage
 							? {...usage, atMessageCount: history.length}
 							: null,
 					);
