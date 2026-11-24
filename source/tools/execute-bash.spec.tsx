@@ -541,6 +541,12 @@ for (const command of [
 	'eval "chmod -R 000 /"',
 	'ssh host "mkfs /dev/sda"',
 	'grep x file; mkfs /dev/sda',
+	// The shell opens no quote in a comment, after a backslash, or in a
+	// heredoc body, so a quote there must not hide the next command.
+	'echo # "\nmkfs /dev/sda\necho "x"',
+	"ls # '\ndd if=/dev/zero of=/dev/sda\n# '",
+	'echo \\" ; mkfs /dev/sda ; echo "x"',
+	'cat <<EOF\n"\nEOF\nchmod -R 000 /\necho "x"',
 ]) {
 	test(`execute_bash validator still blocks ${JSON.stringify(command)}`, async t => {
 		const result = await executeBashTool.validator!({command});
@@ -619,6 +625,97 @@ for (const command of [
 	test(`execute_bash validator allows ${JSON.stringify(command)}`, async t => {
 		const result = await executeBashTool.validator!({command});
 		t.true(result.valid);
+	});
+}
+
+// An `rm` that only appears inside a quoted argument is text being passed
+// around - a commit message, a note, a search term - not a delete (#2238).
+for (const command of [
+	'git commit -m "docs: warn never to run rm -rf / on CI"',
+	"echo 'rm -rf ~' >> notes.txt",
+	'grep -rn "rm -rf /" scripts/',
+	"git commit -m 'never rm -rf $HOME'",
+	'git commit -m "never run rm -rf / on CI"',
+	'git add -A && git commit -m "drop the rm -rf / example"',
+	"cd docs && grep -rn 'rm -rf ~' . | grep -v draft",
+	'grep "rm -rf /" build.log 2>&1',
+	'git commit -m "fix #12: never run rm -rf / on CI"',
+]) {
+	test(`execute_bash validator allows quoted rm ${JSON.stringify(command)}`, async t => {
+		const result = await executeBashTool.validator!({command});
+		t.true(result.valid);
+	});
+}
+
+// Quoting spares only a quoted argument. A quoted command name, a quoted
+// target, a string another shell runs, and a command substitution inside
+// double quotes (which runs) are still checked.
+for (const command of [
+	'"rm" -rf /',
+	'sudo "rm" -rf ~',
+	'ls; \'rm\' -rf /',
+	'rm -rf "/"',
+	'bash -c "rm -rf /"',
+	"sh -c 'rm -rf ~'",
+	'eval "rm -rf $HOME"',
+	'echo "$(rm -rf /)"',
+	'echo "`rm -rf /`"',
+	'git commit -m "wip" && rm -rf ~',
+	// Quoted text is masked only when every command on the line treats it as
+	// text, and nothing on the line runs or escapes it.
+	// Piped or fed to a shell.
+	'echo "rm -rf /" | sh',
+	'printf "rm -rf /" | bash',
+	'$(echo "rm -rf /")',
+	'sh<<<"rm -rf /"',
+	'bash <<< "rm -rf ~"',
+	'source <(echo "rm -rf /")',
+	'x="rm -rf /"; $x',
+	'echo "rm -rf /" > x.sh && sh x.sh',
+	// Shell flags and runners.
+	'bash --norc -c "rm -rf /"',
+	'bash --login -c "rm -rf /"',
+	'sh -o posix -c "rm -rf /"',
+	'bash +e -c "rm -rf /"',
+	'su -c "rm -rf /"',
+	'script -qc "rm -rf /"',
+	'watch "rm -rf /"',
+	'tmux new "rm -rf /"',
+	'parallel ::: "rm -rf /"',
+	'env -S "rm -rf /"',
+	"git -c alias.x='!rm -rf /' x",
+	'rg --pre "rm -rf /" pattern',
+	// A quoted `rm` after a prefix word or keyword.
+	'command "rm" -rf /',
+	'env "rm" -rf /',
+	'exec "rm" -rf /',
+	'nohup "rm" -rf /',
+	'nice "rm" -rf /',
+	'time "rm" -rf /',
+	'sudo -u root "rm" -rf /',
+	'FOO=1 "rm" -rf /',
+	'! "rm" -rf /',
+	'{ "rm" -rf /; }',
+	'if true; then "rm" -rf /; fi',
+	'for i in 1; do "rm" -rf /; done',
+	// Escapes the quote matcher does not follow.
+	'echo \\"x\\"; rm -rf /; echo \\"y\\"',
+	"echo $'a\\'b'; rm -rf /; echo 'c'",
+	// A quote inside a comment opens nothing for the shell, so it must not
+	// open a span that hides the next line.
+	'echo # "\nrm -rf /\necho "x"',
+	"git commit -m x # '\nrm -rf /\n# '",
+	'grep x f # "\nrm -rf "$HOME"\ngrep "y" f',
+	'echo x # "\nrm -rf ~\necho "y"',
+	// Nor does one in a heredoc body.
+	'cat <<EOF\n"\nEOF\nrm -rf /\necho "x"',
+	// A quoted string may span lines, as it does in the shell; reading spans
+	// line by line would pair the wrong quotes here.
+	'echo "a\nb" ; rm -rf / ; echo "c"',
+]) {
+	test(`execute_bash validator still blocks quoted rm ${JSON.stringify(command)}`, async t => {
+		const result = await executeBashTool.validator!({command});
+		t.false(result.valid);
 	});
 }
 
