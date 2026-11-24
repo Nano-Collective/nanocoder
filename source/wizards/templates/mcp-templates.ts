@@ -490,7 +490,7 @@ export const MCP_TEMPLATES: McpTemplate[] = [
 			{
 				name: 'headers',
 				prompt:
-					'HTTP headers (Name: value, one per line, for http transport, optional)',
+					'HTTP headers (Name: value, one per line, for http/websocket transports, optional)',
 				required: false,
 			},
 			{
@@ -536,9 +536,7 @@ export const MCP_TEMPLATES: McpTemplate[] = [
 				}
 				config.url = answers.url;
 				config.timeout = TIMEOUT_MCP_DEFAULT_MS;
-				// Only the http transport sends headers (transport-factory),
-				// so they are not written for websocket servers.
-				if (transport === 'http' && answers.headers) {
+				if (answers.headers) {
 					const headers: Record<string, string> = {};
 					for (const line of answers.headers.split('\n')) {
 						const separator = line.indexOf(':');
