@@ -340,3 +340,21 @@ test.serial('copyCommand still reports the system error when stdout is not a ter
 	const {lastFrame} = renderWithTheme(result as React.ReactElement);
 	t.true((lastFrame() || '').includes('Failed to copy to clipboard: xclip not found'));
 });
+
+test.serial('copyCommand says when only the remote machine clipboard was set', async t => {
+	writeImpl = async () => {};
+	const original = process.env.SSH_CLIENT;
+	process.env.SSH_CLIENT = '1.2.3.4 1 22';
+	try {
+		// stdout is not a terminal in the test run, so OSC 52 is not possible.
+		const result = await copyCommand.handler([], baseMessages, testMetadata);
+		const {lastFrame} = renderWithTheme(result as React.ReactElement);
+		t.true((lastFrame() || '').includes('clipboard of the remote machine'));
+	} finally {
+		if (original === undefined) {
+			delete process.env.SSH_CLIENT;
+		} else {
+			process.env.SSH_CLIENT = original;
+		}
+	}
+});

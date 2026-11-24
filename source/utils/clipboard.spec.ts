@@ -77,7 +77,7 @@ test('copyTextToClipboard falls back to OSC 52 when the system clipboard fails',
 });
 
 test('copyTextToClipboard also sends OSC 52 over SSH when the system write works', async t => {
-	for (const env of [{SSH_TTY: '/dev/pts/1'}, {SSH_CONNECTION: '1.2.3.4 1 5.6.7.8 22'}]) {
+	for (const env of [{SSH_TTY: '/dev/pts/1'}, {SSH_CONNECTION: '1.2.3.4 1 5.6.7.8 22'}, {SSH_CLIENT: '1.2.3.4 1 22'}]) {
 		const dependencies = createDependencies({env});
 		t.is(await copyTextToClipboard('hello', dependencies), 'osc52');
 		t.deepEqual(dependencies.systemWrites, ['hello']);
@@ -124,6 +124,27 @@ test('copyTextToClipboard reports the system route over SSH when output is not a
 		env: {SSH_TTY: '/dev/pts/1'},
 		isTerminal: () => false,
 	});
-	t.is(await copyTextToClipboard('hello', dependencies), 'system');
+	t.is(await copyTextToClipboard('hello', dependencies), 'system-remote');
 	t.deepEqual(dependencies.terminalWrites, []);
+});
+
+test('copyTextToClipboard reports the remote route over SSH when the text is too large for OSC 52', async t => {
+	const dependencies = createDependencies({env: {SSH_TTY: '/dev/pts/1'}});
+	t.is(
+		await copyTextToClipboard('a'.repeat(OSC52_MAX_BASE64_LENGTH), dependencies),
+		'system-remote',
+	);
+	t.deepEqual(dependencies.terminalWrites, []);
+});
+
+test('buildOsc52Sequence splits the sequence into short DCS strings for GNU screen', t => {
+	const sequence = buildOsc52Sequence('x'.repeat(2000), {STY: '1.pts-0'}) ?? '';
+	const chunks = sequence.split(`${ESC}\\`).filter(chunk => chunk !== '');
+	t.true(chunks.length > 1);
+	for (const chunk of chunks) {
+		t.true(chunk.startsWith(`${ESC}P`));
+		t.true(chunk.length <= 200 + 2);
+	}
+	const joined = chunks.map(chunk => chunk.slice(2)).join('');
+	t.is(joined, buildOsc52Sequence('x'.repeat(2000), {}));
 });

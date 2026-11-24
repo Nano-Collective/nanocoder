@@ -95,7 +95,9 @@ export function createCommitCommand(
 						return successMsg(
 							route === 'osc52'
 								? `${commitMessage}\n\nSent to the terminal clipboard via OSC 52 (the terminal does not confirm receipt).`
-								: `${commitMessage}\n\nCopied to clipboard.`,
+								: route === 'system-remote'
+									? `${commitMessage}\n\nCopied to the clipboard of the remote machine; it was not sent to the terminal clipboard.`
+									: `${commitMessage}\n\nCopied to clipboard.`,
 							'commit',
 						);
 					} catch (error) {

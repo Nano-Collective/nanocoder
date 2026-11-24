@@ -233,6 +233,21 @@ test('commit --copy says when the message went through OSC 52', async t => {
 	t.false(output.includes('Copied to clipboard'));
 });
 
+test('commit --copy says when only the remote machine clipboard was set', async t => {
+	const command = createCopyTestCommand(async () => 'system-remote');
+
+	const result = await command.handler(['--copy'], baseMessages, {
+		...testMetadata,
+		client: createClient('feat: remote only'),
+	});
+
+	const {lastFrame} = renderWithTheme(result as React.ReactElement);
+	const output = lastFrame() || '';
+
+	t.true(output.includes('clipboard of the remote machine'));
+	t.false(output.includes('Copied to clipboard.'));
+});
+
 test('commit -c is accepted as a short form', async t => {
 	const written: string[] = [];
 	const command = createCopyTestCommand(async text => {

@@ -58,9 +58,13 @@ function copiedMessage(
 	subject: string,
 	detail: string,
 ): string {
-	return route === 'osc52'
-		? `Sent ${subject} to the terminal clipboard via OSC 52 (${detail}; the terminal does not confirm receipt)`
-		: `Copied ${subject} to clipboard (${detail})`;
+	if (route === 'osc52') {
+		return `Sent ${subject} to the terminal clipboard via OSC 52 (${detail}; the terminal does not confirm receipt)`;
+	}
+	if (route === 'system-remote') {
+		return `Copied ${subject} to the clipboard of the remote machine (${detail}); it was not sent to the terminal clipboard`;
+	}
+	return `Copied ${subject} to clipboard (${detail})`;
 }
 
 export const copyCommand: Command = {

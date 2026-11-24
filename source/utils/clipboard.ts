@@ -10,7 +10,13 @@
  */
 import clipboard from 'clipboardy';
 
-export type ClipboardRoute = 'system' | 'osc52';
+/**
+ * - `system`: the clipboard of this machine.
+ * - `osc52`: asked the terminal to set its clipboard (not confirmed).
+ * - `system-remote`: over SSH, only the remote machine's clipboard was set,
+ *   because the terminal route was not possible.
+ */
+export type ClipboardRoute = 'system' | 'osc52' | 'system-remote';
 
 export type ClipboardDependencies = {
 	writeSystem: (text: string) => Promise<void>;
@@ -25,6 +31,12 @@ export type ClipboardDependencies = {
  */
 export const OSC52_MAX_BASE64_LENGTH = 100_000;
 
+/**
+ * GNU screen cuts a DCS string at about 768 bytes, so the sequence is sent as
+ * several DCS strings that screen joins again before passing them on.
+ */
+const SCREEN_CHUNK_LENGTH = 200;
+
 const ESC = '\u001b';
 const BEL = '\u0007';
 
@@ -38,7 +50,7 @@ const defaultDependencies: ClipboardDependencies = {
 };
 
 function isRemoteSession(env: NodeJS.ProcessEnv): boolean {
-	return Boolean(env.SSH_TTY || env.SSH_CONNECTION);
+	return Boolean(env.SSH_TTY || env.SSH_CONNECTION || env.SSH_CLIENT);
 }
 
 /**
@@ -62,7 +74,13 @@ export function buildOsc52Sequence(
 		return `${ESC}Ptmux;${sequence.replaceAll(ESC, `${ESC}${ESC}`)}${ESC}\\`;
 	}
 	if (env.STY) {
-		return `${ESC}P${sequence}${ESC}\\`;
+		const chunks: string[] = [];
+		for (let i = 0; i < sequence.length; i += SCREEN_CHUNK_LENGTH) {
+			chunks.push(
+				`${ESC}P${sequence.slice(i, i + SCREEN_CHUNK_LENGTH)}${ESC}\\`,
+			);
+		}
+		return chunks.join('');
 	}
 	return sequence;
 }
@@ -109,7 +127,7 @@ export async function copyTextToClipboard(
 	}
 
 	if (systemWorked) {
-		return 'system';
+		return isRemoteSession(dependencies.env) ? 'system-remote' : 'system';
 	}
 	throw systemError;
 }
