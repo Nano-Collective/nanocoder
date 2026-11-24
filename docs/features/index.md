@@ -114,7 +114,7 @@ Override the default mode with `--mode` — works both interactively and with `r
 nanocoder --mode yolo                      # interactive, no approvals
 nanocoder --mode plan run "audit auth"     # run mode, plan only
 ```
-For structured output that's easy to parse in scripts, add `--json`: `nanocoder --plain --json run "..."` prints a single JSON object to `stdout` with the final answer, tool call log, and modified files. See [Commands → JSON Output](commands.md#json-output).
+For a JSON report with the final answer, tool call log, and modified files, add `--json`: `nanocoder --plain --json run "..."`. To make the answer itself conform to a schema, use `nanocoder run --json-schema ./schema.json "..."`; see [Commands → JSON Output](commands.md#json-output) and [Validated Structured Output](commands.md#validated-structured-output).
 
 See [Commands → Non-Interactive Mode](commands.md#non-interactive-mode) and [Development Modes](development-modes.md) for details.
 
@@ -181,6 +181,10 @@ persist its output as a dependency graph instead. The graph is written to
 Run `/init` or `nanocoder init` to analyze your project and generate an `AGENTS.md` file — a project-specific prompt that gives the AI context about your codebase, conventions, and tooling. Use `--preset react`, `--preset nextjs`, or `--preset rust` to add bundled stack guidance, a `.nanocoderignore`, and a `/check` command skill. Use `/init --force` to regenerate `AGENTS.md`; existing preset files are preserved.
 
 The `AGENTS.md` file is automatically loaded every session, so the AI always knows how your project works.
+
+A long `AGENTS.md` can be split into focused files and pulled back in with `@path` imports. A line that is only a reference, such as `@docs/testing.md` or `@.nanocoder/rules/style.md`, is replaced by that file's contents when the prompt is built, recursively, so the model receives the guidance itself rather than a path it has to go read.
+
+Imports resolve relative to the importing file and must stay inside the project root, checked again after resolving symlinks, so an `AGENTS.md` from a repository you cloned cannot pull in files from elsewhere on your machine, including your Nanocoder config directory (which holds `agents.config.json` and any provider credentials in it). A `@~/...` reference is home-relative but still subject to that check, so in practice it resolves only if the target is inside the project. Paths inside `.git` and files covered by the project's `.gitignore` or `.nanocoderignore` are refused as well, so a cloned repository cannot get a token from the origin URL or a local `.env` sent to the provider. The line must start at the beginning of the line and nothing else may be on it; indented lines, inline mentions and lines inside fenced code blocks are left untouched, so the syntax can be documented in place. Nesting stops after five levels and each import and the expansion as a whole are size-capped; a file imported from two unrelated places is expanded both times, while a repeat along the same chain is reported as a cycle. Anything that cannot be loaded is reported as a warning instead of failing silently.
 
 ### Skills: the unified extension model
 

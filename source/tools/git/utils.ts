@@ -5,7 +5,7 @@
  * status parsing, and availability checks.
  */
 
-import {spawn} from 'node:child_process';
+import {execFileSync, spawn} from 'node:child_process';
 import {
 	accessSync,
 	constants,
@@ -473,6 +473,28 @@ export async function execGitReadOnly(
 	options?: ExecOptions,
 ): Promise<string> {
 	return execGit([...READ_ONLY_GIT_CONFIG, ...args], timeoutMs, options);
+}
+
+/**
+ * Synchronous execGitReadOnly for the few callers that cannot await, such as
+ * the session-start git snapshot in the system prompt. Bounded by a short
+ * timeout and an output cap so a huge repository degrades to an error the
+ * caller can drop instead of a slow start. GIT_OPTIONAL_LOCKS=0 keeps
+ * `git status` from taking the index lock to refresh it.
+ */
+export function execGitReadOnlySync(
+	args: string[],
+	{cwd = getProjectRoot(), timeoutMs = 2_000, maxBuffer = 1024 * 1024} = {},
+): string {
+	return execFileSync('git', [...READ_ONLY_GIT_CONFIG, ...args], {
+		cwd,
+		encoding: 'utf8',
+		stdio: ['ignore', 'pipe', 'ignore'],
+		env: {...GIT_ENV, GIT_OPTIONAL_LOCKS: '0'},
+		timeout: timeoutMs,
+		maxBuffer,
+		windowsHide: true,
+	}).trimEnd();
 }
 
 /** Execute git and preserve stdout bytes exactly for target file snapshots. */

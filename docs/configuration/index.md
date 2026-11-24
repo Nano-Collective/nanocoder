@@ -223,7 +223,7 @@ Profiles are defined in the `nanocoder.profiles` object within `agents.config.js
         "provider": "anthropic",
         "model": "claude-3-7-sonnet-20250219",
         "mode": "normal",
-        "contextLimit": 128000
+        "retries": {"maxEmptyTurns": 3}
       },
       "review": {
         "provider": "openrouter",
@@ -417,6 +417,22 @@ Set `nanocoder.autoCommit` to `true` (boolean; any other value is treated as off
 - Your git hooks and commit signing run as normal. The model is told the commit hash in the tool result.
 
 This produces one commit per edit. Squash them before opening a PR if you prefer a tidier history (`git rebase -i`, or `git reset --soft <base>` and commit again).
+
+### Git Snapshot
+
+When the project folder is a git repository, the system prompt includes a short snapshot of it taken when the session starts: the current branch (or detached HEAD) and default branch, the upstream with ahead/behind counts, a `git status` summary with up to 10 changed paths, and the last 5 commit subjects. The model then knows about uncommitted work without spending a turn on `git status` and `git log`. The block is labelled as a session-start snapshot, so the model re-checks before acting on it.
+
+Only local, read-only git commands run (no fetch), each with a short timeout; a slow or failing `git status` on a very large repository is left out of the block rather than delaying the session. Outside a repository, or without git installed, nothing is added. The snapshot is taken once per session, so the prompt stays the same across turns. It is never added under the `nano` tool profile.
+
+Set `nanocoder.gitContext` to `false` to turn it off (default `true`):
+
+```json
+{
+  "nanocoder": {
+    "gitContext": false
+  }
+}
+```
 
 ### Completion Evidence
 

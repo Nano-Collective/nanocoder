@@ -208,6 +208,13 @@ export const COMPLETION_FLAGS: readonly CompletionFlag[] = [
 		description: "Specify stdout format ('text' or 'json', run mode only)",
 	},
 	{
+		name: 'json-schema',
+		takesValue: true,
+		valueName: 'file|json',
+		description:
+			'Validate the run answer against a JSON Schema (file or inline JSON)',
+	},
+	{
 		name: 'acp',
 		takesValue: false,
 		description: 'Run as an ACP (Agent Client Protocol) server',

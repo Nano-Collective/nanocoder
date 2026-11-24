@@ -32,6 +32,7 @@ import {
 	runPlainConversation,
 } from '@/plain/conversation';
 import {initializePlain} from '@/plain/initialize';
+import {schemaInstruction} from '@/plain/structured-output';
 import {
 	color,
 	writeBoot,
@@ -49,6 +50,7 @@ import {
 	takePendingHookContext,
 } from '@/services/lifecycle-hooks';
 import {fileMutationPaths} from '@/tools/file-ops/file-mutating-tools';
+import type {JsonSchemaDocument} from '@/tools/runtime/schema-validate';
 import {getTuneToolMode} from '@/types/config';
 import type {DevelopmentMode, Message} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
@@ -63,6 +65,12 @@ export interface RunPlainShellOptions {
 	cliModel?: string;
 	trustDirectory: boolean;
 	outputFormat: 'text' | 'json';
+	/**
+	 * Validate the final answer against this schema. The validated object is
+	 * printed alone on stdout in text mode, or reported under `structured` in
+	 * `--output-format json` mode.
+	 */
+	jsonSchema?: JsonSchemaDocument;
 	/**
 	 * Injectable seams for testing. Each defaults to the real implementation,
 	 * so production call sites never need to pass this. Mirrors the pattern
@@ -122,11 +130,13 @@ export async function runPlainShell(
 		cliModel,
 		trustDirectory,
 		outputFormat,
+		jsonSchema,
 	} = options;
 
 	const deps: RunPlainShellDeps = {...defaultDeps, ...options.deps};
 
 	const isJson = outputFormat === 'json';
+	const isStructured = jsonSchema !== undefined;
 	const collectedWarnings: string[] = [];
 	setMessageQueueSink((type, message) => {
 		if (type === 'error') {
@@ -248,7 +258,10 @@ export async function runPlainShell(
 	);
 	// The plan block is still appended per turn (it is persisted state that
 	// changes between turns); the recalled memories above are not.
-	const systemContent = await deps.appendActivePlanContext(toolPrompt);
+	const planAwarePrompt = await deps.appendActivePlanContext(toolPrompt);
+	const systemContent = jsonSchema
+		? `${planAwarePrompt}\n\n${schemaInstruction(jsonSchema)}`
+		: planAwarePrompt;
 	if (projectContext.memoryCount > 0) {
 		writeStatus(
 			`Recalling ${projectContext.memoryCount} project memor${projectContext.memoryCount === 1 ? 'y' : 'ies'}...`,
@@ -357,14 +370,16 @@ export async function runPlainShell(
 			await cleanupArtifacts();
 		},
 	});
-	const finish = async (code: number) => {
+	const finish = async (code: number, options?: {newline?: boolean}) => {
 		markReported();
-		await shutdown(code, deps);
+		await shutdown(code, deps, options);
 	};
 
 	const nonInteractiveAlwaysAllow = getAppConfig().alwaysAllow ?? [];
 
-	if (!isJson) {
+	// A schema run owns stdout: the validated document is printed after the
+	// conversation, so the usual leading blank line would be noise in a pipe.
+	if (!isJson && !isStructured) {
 		writeLine();
 	}
 
@@ -383,6 +398,7 @@ export async function runPlainShell(
 			outputFormat,
 			sessionId,
 			workingDirectory: process.cwd(),
+			jsonSchema,
 		});
 		outcome = await conversationPromise;
 	} catch (error) {
@@ -435,6 +451,10 @@ export async function runPlainShell(
 			steps: outcome.steps,
 			filesChanged: Array.from(filesChangedSet),
 			warnings: collectedWarnings,
+			...(outcome.kind === 'success' &&
+				outcome.structured !== undefined && {
+					structured: outcome.structured,
+				}),
 			...(outcome.usage && {
 				usage: outcome.usage,
 			}),
@@ -457,6 +477,13 @@ export async function runPlainShell(
 
 	switch (outcome.kind) {
 		case 'success':
+			if (outcome.structured !== undefined) {
+				// The document alone on stdout, so `... | jq` works without
+				// stripping a banner or a trailing status line.
+				writeLine(JSON.stringify(outcome.structured, null, 2));
+				await finish(0, {newline: false});
+				return;
+			}
 			await finish(0);
 			return;
 		case TOOL_APPROVAL_REQUIRED_KIND:
@@ -520,10 +547,19 @@ function emitJsonReport(report: unknown): void {
 	}
 }
 
-async function shutdown(code: number, deps: RunPlainShellDeps): Promise<void> {
+async function shutdown(
+	code: number,
+	deps: RunPlainShellDeps,
+	options: {newline?: boolean} = {},
+): Promise<void> {
 	setMessageQueueSink(null);
 	if (code === 0) {
-		writeLine();
+		// A structured answer already ended with its own newline, so the usual
+		// blank separator would put a second one between the document and the
+		// next command's output.
+		if (options.newline !== false) {
+			writeLine();
+		}
 		writeStatus(color('green', 'done'));
 	}
 	await deps.getShutdownManager().gracefulShutdown(code);

@@ -52,6 +52,7 @@ const createMockClient = (): LLMClient => ({
 	setModel: () => {},
 	getContextSize: () => 0,
 	getAvailableModels: async () => [],
+	getProviderConfig: () => ({config: {}}),
 	chat: async (_messages, _tools, callbacks) => {
 		callbacks.onFinish?.();
 		return {
@@ -490,6 +491,7 @@ test('useChatHandler - offers review after write_plan succeeds', async t => {
 	let callCount = 0;
 	const client: LLMClient = {
 		...createMockClient(),
+		getProviderConfig: () => ({config: {}}),
 		chat: async (_messages, _tools, callbacks) => {
 			callbacks.onFinish?.();
 			callCount++;
@@ -577,6 +579,7 @@ test('useChatHandler - offers review after Architect mutation succeeds', async t
 
         const client: LLMClient = {
                 ...createMockClient(),
+                getProviderConfig: () => ({config: {}}),
                 chat: async (_messages, _tools, callbacks) => {
                         callbacks.onFinish?.();
                         callCount++;
@@ -689,6 +692,7 @@ test('useChatHandler - persists a prose plan when write_plan was omitted', async
 	let hookResult: ChatHandlerReturn | null = null;
 	const client: LLMClient = {
 		...createMockClient(),
+		getProviderConfig: () => ({config: {}}),
 		chat: async (_messages, _tools, callbacks) => {
 			callbacks.onFinish?.();
 			return {
@@ -978,6 +982,7 @@ test('useChatHandler - injects project context from memory finder', async t => {
 	const queuedComponents: React.ReactNode[] = [];
 	const client: LLMClient = {
 		...createMockClient(),
+		getProviderConfig: () => ({config: {}}),
 		chat: async (messages, _tools, callbacks) => {
 			sentMessages = messages;
 			callbacks.onFinish?.();
@@ -1055,6 +1060,7 @@ test('useChatHandler - sends a byte-identical system prompt across turns', async
 	const sentUserMessages: string[] = [];
 	const client: LLMClient = {
 		...createMockClient(),
+		getProviderConfig: () => ({config: {}}),
 		chat: async (messages, _tools, callbacks) => {
 			sentSystemPrompts.push(String(messages[0]?.content ?? ''));
 			sentUserMessages.push(String(messages.at(-1)?.content ?? ''));
@@ -1140,6 +1146,7 @@ test('useChatHandler - Escape during a plan turn stops the plan review', async t
 	const cancel = createCancellableProps();
 	const client: LLMClient = {
 		...createMockClient(),
+		getProviderConfig: () => ({config: {}}),
 		chat: async (_messages, _tools, callbacks) => {
 			// The user presses Escape while the reply streams; the provider
 			// still returns what it had.
@@ -1198,6 +1205,7 @@ test('useChatHandler - Escape during memory recall stops the model call', async 
 	const cancel = createCancellableProps();
 	const client: LLMClient = {
 		...createMockClient(),
+		getProviderConfig: () => ({config: {}}),
 		chat: async (_messages, _tools, callbacks, signal) => {
 			chatSignal = signal;
 			callbacks.onFinish?.();
@@ -1247,6 +1255,7 @@ test('useChatHandler - sends per-turn skills to the model in the user message', 
 	const matchedAgainst: string[] = [];
 	const client: LLMClient = {
 		...createMockClient(),
+		getProviderConfig: () => ({config: {}}),
 		chat: async (messages, _tools, callbacks) => {
 			sentMessages = messages;
 			callbacks.onFinish?.();
@@ -1306,6 +1315,7 @@ test('useChatHandler - a turn with no skills and no memories is sent verbatim', 
 	let sentMessages: Message[] = [];
 	const client: LLMClient = {
 		...createMockClient(),
+		getProviderConfig: () => ({config: {}}),
 		chat: async (messages, _tools, callbacks) => {
 			sentMessages = messages;
 			callbacks.onFinish?.();

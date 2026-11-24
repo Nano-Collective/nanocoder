@@ -23,6 +23,7 @@ const VALUED_FLAGS = [
 	'--mode',
 	'--output-format',
 	'--prompt-file',
+	'--json-schema',
 	'--profile',
 ] as const;
 

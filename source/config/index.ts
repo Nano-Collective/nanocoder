@@ -44,6 +44,7 @@ import {
 	getActiveSessionContext,
 	getConfigRoot,
 } from '@/services/session-context';
+import type {DiskProfileConfig} from '@/types/config';
 import {HOOK_EVENTS} from '@/types/config';
 import type {FirewallConfig} from '@/types/firewall';
 import type {
@@ -101,6 +102,9 @@ function tryLoadConfig<T>(
 
 	try {
 		const config = readCachedConfigFile(configPath);
+		if (config === null) {
+			return null;
+		}
 		return extract(config);
 	} catch (error) {
 		notifyError(
@@ -124,7 +128,15 @@ function loadHierarchicalConfig<T>(
 	extract: (config: any) => T | null,
 ): T | null {
 	if (fileName === 'agents.config.json') {
-		const activeProfile = getActiveProfile(cwd);
+		// The active profile may have been removed (or renamed) after the
+		// session started: fall back to the files instead of throwing, the
+		// same way loadAllProviderConfigs already guards this call.
+		let activeProfile: DiskProfileConfig | undefined;
+		try {
+			activeProfile = getActiveProfile(cwd);
+		} catch {
+			activeProfile = undefined;
+		}
 		if (activeProfile) {
 			const synthetic = {
 				nanocoder: {
@@ -465,6 +477,23 @@ function loadAutoCommitConfig(cwd: string): boolean {
 			}
 			return null;
 		}) ?? false
+	);
+}
+
+function loadGitContextConfig(cwd: string): boolean {
+	return (
+		loadHierarchicalConfig(cwd, 'agents.config.json', 'gitContext', config => {
+			const value = config.nanocoder?.gitContext;
+			if (value === true) return true;
+			if (value === false) return false;
+			if (value !== undefined) {
+				notifyWarning(
+					`nanocoder.gitContext must be true or false (got ${JSON.stringify(value)}); treating as on`,
+				);
+				return true;
+			}
+			return null;
+		}) ?? true
 	);
 }
 
@@ -1001,6 +1030,8 @@ function loadAppConfig(cwd: string): AppConfig {
 
 	const autoCommit = loadAutoCommitConfig(cwd);
 
+	const gitContext = loadGitContextConfig(cwd);
+
 	const firewall = loadFirewallConfig(cwd);
 
 	// Load user-defined LSP servers (auto-discovery still runs alongside)
@@ -1030,6 +1061,7 @@ function loadAppConfig(cwd: string): AppConfig {
 		tune,
 		sandbox,
 		autoCommit,
+		gitContext,
 		firewall,
 	};
 }

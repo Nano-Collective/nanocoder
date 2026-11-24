@@ -19,6 +19,7 @@ const runtimeModules = {
 	'@/config/preferences': `export function loadPreferences() { return {}; }
 		export function getAlternateScreen() { return false; }
 		export function getMouseReporting() { return false; }
+		export function getKittyKeyboardMode() { return 'auto'; }
 		export function getMaxFps() { return process.env.CLI_TEST_MAX_FPS ? Number(process.env.CLI_TEST_MAX_FPS) : 30; }`,
 	'@/app/render-tui': `export function renderTui(props, options) {
 		console.log(JSON.stringify({...props, contextLimit: globalThis.cliTestContextLimit, inkOptions: options}));
@@ -38,6 +39,7 @@ const loaderUrl = `data:text/javascript,${encodeURIComponent(
 	)});`,
 )}`;
 const cliPath = fileURLToPath(new URL('./cli.tsx', import.meta.url));
+
 
 function runCli(args: string[], extraEnv: Record<string, string> = {}) {
 	return spawnSync(
@@ -282,6 +284,24 @@ test('--json cannot be combined with --no-plain', t => {
 	const result = runCli(['--json', 'run', 'hello']);
 	t.is(result.status, 1);
 	t.true(result.stderr.includes('cannot be combined with --no-plain'), result.stderr);
+});
+
+test('--json-schema validates its value before rejecting --no-plain', t => {
+	const missing = runCli(['--json-schema', 'run', 'hello']);
+	t.is(missing.status, 1);
+	t.true(missing.stderr.includes('--json-schema requires a schema file path'));
+
+	const badInline = runCli(['--json-schema={"type":', 'run', 'hello']);
+	t.is(badInline.status, 1);
+	t.true(badInline.stderr.includes('Could not parse --json-schema inline JSON'));
+
+	const badSchema = runCli(['--json-schema={"type":"strin"}', 'run', 'hello']);
+	t.is(badSchema.status, 1);
+	t.true(badSchema.stderr.includes('Invalid --json-schema'));
+
+	const valid = runCli(['--json-schema={"type":"object"}', 'run', 'hello']);
+	t.is(valid.status, 1);
+	t.true(valid.stderr.includes('--json-schema needs the plain shell'));
 });
 
 test('Ink render receives default maxFps of 30 when unconfigured', t => {

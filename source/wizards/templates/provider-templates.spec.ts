@@ -112,6 +112,12 @@ test('mlx-server template: uses default baseUrl when empty', t => {
 	t.is(config.baseUrl, 'http://localhost:8080/v1');
 });
 
+test('custom template: says the API key is optional only for local servers', t => {
+	const template = PROVIDER_TEMPLATES.find(t => t.id === 'custom');
+	const apiKey = template?.fields.find(field => field.name === 'apiKey');
+	t.regex(apiKey?.prompt ?? '', /optional for local servers/i);
+});
+
 test('custom template: single model', t => {
 	const template = PROVIDER_TEMPLATES.find(t => t.id === 'custom');
 	t.truthy(template);

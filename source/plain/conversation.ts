@@ -12,6 +12,11 @@ import {
 import {TOOL_APPROVAL_REQUIRED_KIND} from '@/constants';
 import {partitionUnknownToolCalls} from '@/hooks/chat-handler/utils/tool-filters';
 import {processToolUse} from '@/message-handler';
+import {
+	describeStructuredOutputFailure,
+	schemaCorrectionMessage,
+	validateStructuredOutput,
+} from '@/plain/structured-output';
 import {color, write, writeError, writeLine, writeStatus} from '@/plain/writer';
 import {
 	formatVerificationSummary,
@@ -19,6 +24,7 @@ import {
 	takeEvidenceRejection,
 } from '@/services/completion-ledger';
 import {resolveToolApproval} from '@/tools/approval-policy';
+import type {JsonSchemaDocument} from '@/tools/runtime/schema-validate';
 import type {ToolManager} from '@/tools/tool-manager';
 import {getTuneToolMode, type TuneConfig} from '@/types/config';
 import type {
@@ -52,6 +58,13 @@ export interface RunPlainConversationOptions {
 	sessionId?: string;
 	workingDirectory?: string;
 	/**
+	 * Validate the final content-only answer against this JSON Schema. Invalid
+	 * answers are sent back to the model with their errors and retried within
+	 * the `maxMalformedRetries` budget; a run that never validates ends as an
+	 * `error` outcome instead of a success.
+	 */
+	jsonSchema?: JsonSchemaDocument;
+	/**
 	 * Force a walkthrough after approved-plan work. Off by default: the plain
 	 * shell's artifact directory is ephemeral, so a forced walkthrough there
 	 * would cost a model turn and then be deleted unread.
@@ -73,6 +86,8 @@ export type PlainConversationOutcome =
 	| {
 			kind: 'success';
 			finalText: string;
+			/** The validated document, when `jsonSchema` was supplied. */
+			structured?: unknown;
 			reasoning: string | null;
 			toolCalls: ToolCallLog[];
 			steps: number;
@@ -173,10 +188,14 @@ async function runPlainConversationBody(
 		outputFormat = 'text',
 		sessionId,
 		workingDirectory = process.cwd(),
+		jsonSchema,
 		enforceWalkthrough = false,
 	} = options;
 
 	const isJson = outputFormat === 'json';
+	// With a schema, stdout belongs to the validated document. Status lines
+	// still go to stderr, but streamed tokens and reasoning must not.
+	const streamToStdout = !isJson && jsonSchema === undefined;
 
 	let messages = initialMessages;
 	const walkthroughLifecycle = createWalkthroughLifecycle(initialMessages);
@@ -254,6 +273,7 @@ async function runPlainConversationBody(
 				totalTokens: turnTotal,
 				cacheReadTokens: cacheReadTokens ?? undefined,
 				cacheWriteTokens: cacheWriteTokens ?? undefined,
+				baseURL: client.getProviderConfig().config.baseURL,
 			});
 		} catch {
 			// Stats must never fail the plain loop.
@@ -268,6 +288,13 @@ async function runPlainConversationBody(
 	// hitting any of them hard-stops with a clear error instead of pausing.
 	const retryLimits = getRetryLimits();
 	const {maxEmptyTurns, maxMalformedRetries, maxTruncatedTurns} = retryLimits;
+
+	// Schema validation has its own streak, counted in model retries. It uses
+	// the malformed-output budget: both are "the model ignored the requested
+	// format" failures, and a separate cap would only add configuration.
+	let schemaRetryCount = 0;
+	let schemaFailure: string | undefined;
+	let structuredValue: unknown;
 
 	// Snapshot taken before each model call. Streamed text lands in the
 	// accumulators as it arrives, before we know whether the turn is usable. A
@@ -319,7 +346,7 @@ async function runPlainConversationBody(
 						onReasoningToken: (token: string) => {
 							streamedReasoning += token;
 							accumulatedReasoning += token;
-							if (!isJson) {
+							if (streamToStdout) {
 								if (!reasoningPrinted) {
 									reasoningPrinted = true;
 									write(color('gray', '> '));
@@ -329,7 +356,7 @@ async function runPlainConversationBody(
 						},
 						onToken: (token: string) => {
 							accumulatedFinalText += token;
-							if (!isJson) {
+							if (streamToStdout) {
 								if (reasoningPrinted && !contentStarted) {
 									writeLine();
 								}
@@ -342,7 +369,7 @@ async function runPlainConversationBody(
 					},
 					reasoning: () => streamedReasoning || undefined,
 					end: () => {
-						if (!isJson && (reasoningPrinted || contentStarted)) {
+						if (streamToStdout && (reasoningPrinted || contentStarted)) {
 							writeLine();
 						}
 					},
@@ -376,7 +403,7 @@ async function runPlainConversationBody(
 				accumulatedReasoning = reasoningBeforeTurn;
 				if (!isJson) {
 					writeError(
-						`Malformed tool call: ${error} — asking the model to retry (${attempt}/${maxMalformedRetries}).`,
+						`Malformed tool call: ${error}, asking the model to retry (${attempt}/${maxMalformedRetries}).`,
 					);
 				}
 			},
@@ -399,7 +426,7 @@ async function runPlainConversationBody(
 					writeStatus(message);
 				}
 			},
-			onFinalAnswer: ({finalTurn, prepared}) => {
+			onFinalAnswer: async ({content, finalTurn, prepared}) => {
 				// Only nudge when the walkthrough will actually outlive the run.
 				// `nanocoder --plain` deletes its ephemeral artifact directory on
 				// exit and reports nothing about the walkthrough, so forcing one
@@ -431,6 +458,46 @@ async function runPlainConversationBody(
 					finalTextBeforeWalkthroughNudge ??= accumulatedFinalText;
 					return {kind: 'continue', messages: [evidenceRejection]};
 				}
+
+				if (jsonSchema) {
+					const validation = await validateStructuredOutput(
+						content,
+						jsonSchema,
+					);
+					if (validation.ok) {
+						structuredValue = validation.value;
+						return {kind: 'finish'};
+					}
+
+					const problem = describeStructuredOutputFailure(validation);
+					// The last allowed turn has no room for another model call;
+					// give up with the validation errors instead of letting the
+					// engine replace them with a generic max-turns message.
+					if (finalTurn || schemaRetryCount >= maxMalformedRetries) {
+						schemaFailure = `Final answer did not validate against the JSON Schema after ${schemaRetryCount + 1} attempt${schemaRetryCount === 0 ? '' : 's'}: ${problem}`;
+						return {kind: 'finish'};
+					}
+
+					// A rejected answer is not part of the result returned to the
+					// caller. The engine keeps it in model history for correction;
+					// the plain outcome's accumulated text must roll back like the
+					// malformed-tool retry path does.
+					accumulatedFinalText = finalTextBeforeTurn;
+					accumulatedReasoning = reasoningBeforeTurn;
+					schemaRetryCount += 1;
+					if (!isJson) {
+						writeError(
+							`JSON schema validation failed: ${problem}, asking the model to retry (${schemaRetryCount}/${maxMalformedRetries}).`,
+						);
+					}
+					return {
+						kind: 'continue',
+						messages: [
+							{role: 'user', content: schemaCorrectionMessage(problem)},
+						],
+					};
+				}
+
 				return {kind: 'finish'};
 			},
 			executeTools: async toolCalls => {
@@ -527,19 +594,40 @@ async function runPlainConversationBody(
 
 	switch (result.kind) {
 		case 'completed': {
+			// The schema loop records the failure and finishes the engine, so
+			// the run still reports its tool calls and step count as an error.
+			if (schemaFailure) {
+				return error(schemaFailure);
+			}
+
 			const verification = formatVerificationSummary(
 				walkthroughLifecycle.ledger,
 			);
-			// The answer was already streamed to stdout; the proof follows it.
-			if (verification && !isJson) {
-				writeLine();
-				writeLine(verification);
+			if (verification) {
+				if (!isJson && !jsonSchema) {
+					// The answer was already streamed to stdout; the proof
+					// follows it.
+					writeLine();
+					writeLine(verification);
+				} else if (!isJson) {
+					// With a schema, stdout is the JSON document alone; keep
+					// the proof visible on stderr instead.
+					writeStatus(verification);
+				}
 			}
+
 			const answer = finalTextBeforeWalkthroughNudge ?? accumulatedFinalText;
+			const finalText =
+				jsonSchema && structuredValue !== undefined
+					? JSON.stringify(structuredValue, null, 2)
+					: verification
+						? `${answer}\n\n${verification}`
+						: answer;
 			return {
 				kind: 'success',
 				...snapshot(),
-				finalText: verification ? `${answer}\n\n${verification}` : answer,
+				finalText,
+				...(structuredValue !== undefined ? {structured: structuredValue} : {}),
 			};
 		}
 		case 'adapter-stop':

@@ -598,6 +598,38 @@ test('usage command shows per-provider breakdown for multi-provider history', as
 	t.regex(output!, /ollama:.*—/);
 });
 
+test('usage command does not price earlier calls made on a local server', async t => {
+	const messages = createMessages();
+	const metadata = {
+		...createMockMetadata('openai', 'gpt-4o'),
+		apiCallHistory: [
+			{
+				provider: 'openai',
+				model: 'gpt-4o',
+				inputTokens: 500,
+				outputTokens: 200,
+				timestamp: Date.now(),
+			},
+			{
+				// Same id as the hosted model, but served by a local Ollama.
+				provider: 'ollama',
+				model: 'gpt-4o',
+				inputTokens: 1_000_000,
+				outputTokens: 1_000_000,
+				baseURL: 'http://localhost:11434/v1',
+				timestamp: Date.now(),
+			},
+		] satisfies ApiCallRecord[],
+	};
+
+	const result = await usageCommand.handler([], messages, metadata);
+	const {lastFrame} = renderWithTheme(result);
+
+	const output = lastFrame();
+	t.truthy(output);
+	t.regex(output!, /ollama:.*\$0\.0+(?!\d)/);
+});
+
 test('usage command hides per-provider for single-provider history', async t => {
 	const messages = createMessages();
 	const metadata = {
