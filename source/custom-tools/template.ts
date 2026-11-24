@@ -163,6 +163,8 @@ const POSIX_REASON: Record<string, string> = {
 	backslash:
 		'follows a backslash, which escapes the opening quote added around the value',
 	dollar: "follows a $, which turns the value's quoting into $'...' escapes",
+	arithmetic:
+		'is inside an arithmetic expression or a [[ ]] test, where an array subscript like a[$(cmd)] still runs a command',
 };
 
 function posixProblem(tokens: BodyToken[]): string | undefined {
@@ -178,6 +180,11 @@ function posixProblem(tokens: BodyToken[]): string | undefined {
 		const token = tokens[index];
 		return token?.kind === 'char' ? token.c : undefined;
 	};
+	// `$(( … ))`, `(( … ))` and `[[ … ]]` evaluate what they contain: an
+	// array subscript such as `a[$(cmd)]` runs `cmd` even though the value
+	// would otherwise be quoted, so a placeholder inside one is rejected.
+	let arith: {kind: 'paren' | 'bracket'; depth: number} | undefined;
+
 	const fail = (name: string, reason: string) =>
 		`Placeholder {{ ${name} }} ${POSIX_REASON[reason]}. Values are already quoted for the shell, so don't wrap a placeholder in quotes. Use it bare, or assign it first (${name}={{ ${name} }}) and use "$${name}".`;
 
@@ -224,6 +231,7 @@ function posixProblem(tokens: BodyToken[]): string | undefined {
 
 		if (token.kind === 'value') {
 			if (frame.kind !== 'code') return fail(token.name, frame.kind);
+			if (arith) return fail(token.name, 'arithmetic');
 			if (prev === '$') return fail(token.name, 'dollar');
 			prev = "'";
 			i++;
@@ -269,6 +277,26 @@ function posixProblem(tokens: BodyToken[]): string | undefined {
 				prev = 'x';
 				continue;
 			}
+
+			if (arith) {
+				if (arith.kind === 'paren') {
+					if (c === '(') {
+						arith.depth++;
+					} else if (c === ')') {
+						if (arith.depth > 0) arith.depth--;
+						else if (next === ')') {
+							arith = undefined;
+							i++;
+						}
+					}
+				} else if (c === ']' && next === ']') {
+					arith = undefined;
+					i++;
+				}
+				prev = c;
+				i++;
+				continue;
+			}
 			if (c === "'") {
 				stack.push({kind: prev === '$' ? 'ansi' : 'single', depth: 0});
 			} else if (c === '"') {
@@ -276,6 +304,21 @@ function posixProblem(tokens: BodyToken[]): string | undefined {
 			} else if (c === '`') {
 				if (frame.end === '`') stack.pop();
 				else stack.push({kind: 'code', end: '`', depth: 0});
+			} else if (c === '$' && next === '(' && charAt(i + 2) === '(') {
+				arith = {kind: 'paren', depth: 0};
+				i += 3;
+				prev = '(';
+				continue;
+			} else if (c === '(' && next === '(' && WORD_BREAK.test(prev)) {
+				arith = {kind: 'paren', depth: 0};
+				i += 2;
+				prev = '(';
+				continue;
+			} else if (c === '[' && next === '[' && WORD_BREAK.test(prev)) {
+				arith = {kind: 'bracket', depth: 0};
+				i += 2;
+				prev = '[';
+				continue;
 			} else if (c === '$' && next === '(') {
 				stack.push({kind: 'code', end: ')', depth: 0});
 				i += 2;
