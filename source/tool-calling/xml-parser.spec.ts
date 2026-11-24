@@ -660,7 +660,7 @@ test('removeToolCallsFromContent - removes tool calls from plain text', t => {
 <read_file><path>/test/file.txt</path></read_file>
 And some more text`;
 
-	const result = XMLToolCallParser.removeToolCallsFromContent(content);
+	const result = XMLToolCallParser.removeToolCallsFromContent(content, ['read_file']);
 
 	t.is(result, 'Here is some text\n\nAnd some more text');
 });
@@ -672,21 +672,30 @@ test('removeToolCallsFromContent - removes code blocks containing tool calls', t
 \`\`\`
 More text`;
 
-	const result = XMLToolCallParser.removeToolCallsFromContent(content);
+	const result = XMLToolCallParser.removeToolCallsFromContent(content, ['read_file']);
 
 	t.is(result, 'Some text\n\nMore text');
 });
 
 test('removeToolCallsFromContent - keeps code blocks without tool calls', t => {
 	const content = `Some text
-\`\`\`javascript
-const x = 42;
+\`\`\`html
+<kbd>Ctrl</kbd>
 \`\`\`
 More text`;
 
-	const result = XMLToolCallParser.removeToolCallsFromContent(content);
+	const result = XMLToolCallParser.removeToolCallsFromContent(content, ['read_file']);
 
-	t.true(result.includes('const x = 42;'));
+	t.is(result, content);
+});
+
+test('removeToolCallsFromContent - preserves markup around a tool call', t => {
+	const content = '<kbd>see <read_file><path>a.ts</path></read_file></kbd>';
+	const result = XMLToolCallParser.removeToolCallsFromContent(content, [
+		'read_file',
+	]);
+
+	t.is(result, '<kbd>see </kbd>');
 });
 
 test('removeToolCallsFromContent - removes multiple tool calls', t => {
@@ -696,7 +705,7 @@ Middle text
 <read_file><path>/file2.txt</path></read_file>
 End text`;
 
-	const result = XMLToolCallParser.removeToolCallsFromContent(content);
+	const result = XMLToolCallParser.removeToolCallsFromContent(content, ['read_file']);
 
 	t.false(result.includes('<read_file>'));
 	t.true(result.includes('Text'));
@@ -709,7 +718,7 @@ test('removeToolCallsFromContent - removes tool_call wrappers', t => {
 <tool_call><read_file><path>/test.txt</path></read_file></tool_call>
 More text`;
 
-	const result = XMLToolCallParser.removeToolCallsFromContent(content);
+	const result = XMLToolCallParser.removeToolCallsFromContent(content, ['read_file']);
 
 	t.false(result.includes('<tool_call>'));
 	t.false(result.includes('<read_file>'));
@@ -725,7 +734,7 @@ test('removeToolCallsFromContent - cleans up excessive whitespace', t => {
 
 Line 2`;
 
-	const result = XMLToolCallParser.removeToolCallsFromContent(content);
+	const result = XMLToolCallParser.removeToolCallsFromContent(content, ['read_file']);
 
 	// Should reduce multiple newlines to double newlines
 	t.false(result.includes('\n\n\n'));
@@ -733,14 +742,14 @@ Line 2`;
 
 test('removeToolCallsFromContent - handles empty content', t => {
 	const content = '';
-	const result = XMLToolCallParser.removeToolCallsFromContent(content);
+	const result = XMLToolCallParser.removeToolCallsFromContent(content, ['read_file']);
 
 	t.is(result, '');
 });
 
 test('removeToolCallsFromContent - handles content with only tool calls', t => {
 	const content = '<read_file><path>/test.txt</path></read_file>';
-	const result = XMLToolCallParser.removeToolCallsFromContent(content);
+	const result = XMLToolCallParser.removeToolCallsFromContent(content, ['read_file']);
 
 	t.is(result, '');
 });
@@ -749,7 +758,7 @@ test('removeToolCallsFromContent - removes a call that holds a tag with its own 
 	const content =
 		'Reading it now.\n<read_file><read_file>a.ts</read_file></read_file>';
 
-	const result = XMLToolCallParser.removeToolCallsFromContent(content);
+	const result = XMLToolCallParser.removeToolCallsFromContent(content, ['read_file']);
 
 	t.is(result, 'Reading it now.');
 });
@@ -896,7 +905,7 @@ I'll read those files for you.`;
 	t.is(toolCalls[1].function.name, 'read_file');
 
 	// Remove from content
-	const cleaned = XMLToolCallParser.removeToolCallsFromContent(content);
+	const cleaned = XMLToolCallParser.removeToolCallsFromContent(content, ['read_file']);
 	t.false(cleaned.includes('<read_file>'));
 	t.true(cleaned.includes('Let me help you'));
 	t.true(cleaned.includes("I'll read those files"));
