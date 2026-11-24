@@ -254,6 +254,7 @@ async function runPlainConversationBody(
 				totalTokens: turnTotal,
 				cacheReadTokens: cacheReadTokens ?? undefined,
 				cacheWriteTokens: cacheWriteTokens ?? undefined,
+				baseURL: client.getProviderConfig().config.baseURL,
 			});
 		} catch {
 			// Stats must never fail the plain loop.

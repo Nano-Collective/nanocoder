@@ -860,6 +860,7 @@ export class SubagentExecutor {
 				}),
 				onModelResponse: response => {
 					if (onApiCallComplete && hasReportedUsage(response.usage)) {
+						const {baseURL} = client.getProviderConfig().config;
 						onApiCallComplete({
 							provider,
 							model,
@@ -872,6 +873,7 @@ export class SubagentExecutor {
 							...(response.usage.cacheWriteTokens !== undefined && {
 								cacheWriteTokens: response.usage.cacheWriteTokens,
 							}),
+							...(baseURL !== undefined && {baseURL}),
 							timestamp: Date.now(),
 						});
 					}

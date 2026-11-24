@@ -637,6 +637,7 @@ export const processAssistantResponse = async (
 							totalTokens: usage.totalTokens,
 							cacheReadTokens: usage.cacheReadTokens,
 							cacheWriteTokens: usage.cacheWriteTokens,
+							baseURL: client.getProviderConfig().config.baseURL,
 							timestamp: Date.now(),
 						});
 					}
