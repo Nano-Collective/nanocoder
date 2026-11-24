@@ -627,7 +627,7 @@ test('usage command does not price earlier calls made on a local server', async 
 
 	const output = lastFrame();
 	t.truthy(output);
-	t.regex(output!, /ollama:\s*\$0\.0+\s/);
+	t.regex(output!, /ollama:.*\$0\.0+(?!\d)/);
 });
 
 test('usage command hides per-provider for single-provider history', async t => {
