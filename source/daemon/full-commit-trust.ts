@@ -9,7 +9,7 @@
 
 import path from 'node:path';
 import {loadPreferences, savePreferences} from '@/config/preferences';
-import {normalizeForCompare} from '@/utils/path-validation';
+import {normalizeForCompare} from '@/utils/fs/path-validation';
 
 export function isFullCommitTrustConfirmed(projectRoot: string): boolean {
 	const preferences = loadPreferences();

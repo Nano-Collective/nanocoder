@@ -1,6 +1,7 @@
 import test from 'ava';
 import {renderWithTheme as render} from '@/test-utils/render-with-theme';
 import React from 'react';
+import {TIMEOUT_VSCODE_EXTENSION_SKIP_MS} from '@/constants';
 import {
 	VSCodeExtensionPrompt,
 	shouldPromptExtensionInstall,
@@ -248,4 +249,99 @@ test('VSCodeExtensionPrompt re-renders without crashing', t => {
 	});
 
 	t.truthy(lastFrame());
+});
+
+// ============================================================================
+// Failed install auto-skip timer
+// ============================================================================
+
+function failingInstaller() {
+	return {
+		isVSCodeCliAvailable: async () => true,
+		getExtensionStatus: async () => [
+			{cli: 'code', available: true, extensionInstalled: false},
+		],
+		installExtension: async () => ({
+			success: false,
+			message: 'install failed',
+			results: [{cli: 'code', success: false}],
+		}),
+	};
+}
+
+async function waitFor(check: () => boolean, timeoutMs = 5000) {
+	const start = Date.now();
+	while (!check()) {
+		if (Date.now() - start > timeoutMs) throw new Error('timed out');
+		await new Promise(resolve => setTimeout(resolve, 10));
+	}
+}
+
+/** A hand-driven stand-in for setTimeout / clearTimeout. */
+function fakeTimers() {
+	let nextId = 1;
+	const pending = new Map<number, {callback: () => void; delay: number}>();
+	return {
+		setTimeout: (callback: () => void, delay: number) => {
+			const id = nextId++;
+			pending.set(id, {callback, delay});
+			return id as unknown as ReturnType<typeof setTimeout>;
+		},
+		clearTimeout: (handle: ReturnType<typeof setTimeout>) => {
+			pending.delete(handle as unknown as number);
+		},
+		delays: () => [...pending.values()].map(timer => timer.delay),
+		fireAll: () => {
+			const due = [...pending.values()];
+			pending.clear();
+			for (const timer of due) timer.callback();
+		},
+	};
+}
+
+async function reachInstallError() {
+	let skipped = 0;
+	const timers = fakeTimers();
+	const rendered = render(
+		<VSCodeExtensionPrompt
+			onComplete={() => {}}
+			onSkip={() => {
+				skipped++;
+			}}
+			installer={failingInstaller()}
+			timers={timers}
+		/>,
+	);
+	const frame = () => rendered.lastFrame() ?? '';
+	await waitFor(() => frame().includes('Install the extension now?'));
+	// The select input subscribes to stdin in an effect that can run after
+	// the first frame is drawn, so a single Enter can be lost on a slow
+	// machine. Repeat it until the prompt reacts.
+	await waitFor(() => {
+		if (frame().includes('Install the extension now?')) {
+			rendered.stdin.write('\r');
+		}
+		return frame().includes('install failed');
+	});
+	// The auto-skip timer starts in an effect after the error frame.
+	await waitFor(() => timers.delays().length > 0);
+	return {rendered, timers, skipped: () => skipped};
+}
+
+test.serial('a failed install auto-skips after the delay', async t => {
+	const {rendered, timers, skipped} = await reachInstallError();
+	t.is(skipped(), 0);
+	t.deepEqual(timers.delays(), [TIMEOUT_VSCODE_EXTENSION_SKIP_MS]);
+	timers.fireAll();
+	t.is(skipped(), 1);
+	rendered.unmount();
+});
+
+test.serial('a failed install does not call onSkip after unmount', async t => {
+	const {rendered, timers, skipped} = await reachInstallError();
+	t.deepEqual(timers.delays(), [TIMEOUT_VSCODE_EXTENSION_SKIP_MS]);
+	rendered.unmount();
+	t.deepEqual(timers.delays(), [], 'unmounting cancels the auto-skip timer');
+	timers.fireAll();
+	t.is(skipped(), 0);
 });

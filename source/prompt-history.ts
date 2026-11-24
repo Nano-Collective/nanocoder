@@ -1,9 +1,10 @@
 import fs from 'fs/promises';
+import path from 'path';
 import {getClosestConfigFile} from '@/config/index';
 import {MAX_PROMPT_HISTORY_SIZE} from '@/constants';
-import {atomicWriteFile} from '@/utils/atomic-write';
 import {formatError} from '@/utils/error-formatter';
-import {logError} from '@/utils/message-queue';
+import {atomicWriteFile} from '@/utils/fs/atomic-write';
+import {notifyError} from '@/utils/message-queue-core';
 import type {InputState} from './types/hooks';
 
 const ENTRY_SEPARATOR = '\n---ENTRY_SEPARATOR---\n';
@@ -22,6 +23,83 @@ async function pathExists(filePath: string): Promise<boolean> {
 	}
 }
 
+/**
+ * Keep only usable entries from a parsed JSON history array. The file is
+ * user-editable, so a valid array can still hold `null`, numbers or bare
+ * strings; consumers (Up-arrow, Ctrl+R) call string methods on
+ * `displayValue` and would throw on those. Bare strings are upgraded to
+ * entries, anything without a string `displayValue` is dropped.
+ */
+function normalizeHistoryEntries(entries: unknown[]): InputState[] {
+	const normalized: InputState[] = [];
+	for (const entry of entries) {
+		if (typeof entry === 'string') {
+			if (entry.trim()) {
+				normalized.push({displayValue: entry, placeholderContent: {}});
+			}
+			continue;
+		}
+		if (typeof entry !== 'object' || entry === null) continue;
+		const {displayValue, placeholderContent} = entry as Partial<InputState>;
+		if (typeof displayValue !== 'string') continue;
+		normalized.push({
+			...(entry as InputState),
+			placeholderContent:
+				typeof placeholderContent === 'object' && placeholderContent !== null
+					? placeholderContent
+					: {},
+		});
+	}
+	return normalized;
+}
+
+function migrateStringArrayToInputState(stringEntries: string[]): InputState[] {
+	return stringEntries.map(entry => ({
+		displayValue: entry,
+		placeholderContent: {},
+	}));
+}
+
+/**
+ * Parse the history file's content. Throws a SyntaxError when the content is
+ * not valid history (e.g. a truncated JSON payload).
+ */
+function parseHistoryContent(content: string): InputState[] {
+	if (content.trim() === '{}') {
+		// getClosestConfigFile seeds a missing file with an empty JSON
+		// object. It is not history; reading it through the legacy
+		// line-per-entry path below made "{}" every new user's oldest
+		// Up-arrow entry.
+		return [];
+	} else if (content.startsWith(JSON_FORMAT_MARKER)) {
+		// New JSON format with InputState objects
+		const jsonContent = content.slice(JSON_FORMAT_MARKER.length);
+		const parsed: unknown = JSON.parse(jsonContent);
+		if (!Array.isArray(parsed)) {
+			throw new SyntaxError('Prompt history file does not contain an array');
+		}
+		return normalizeHistoryEntries(parsed);
+	} else if (content.includes(ENTRY_SEPARATOR)) {
+		// LEGACY_MIGRATION_REMOVE_AFTER: 1.27.0
+		// Old format using ENTRY_SEPARATOR. Migrate to InputState on read.
+		const stringEntries = content
+			.split(ENTRY_SEPARATOR)
+			.filter(entry => entry.trim() !== '');
+		return migrateStringArrayToInputState(stringEntries);
+	} else {
+		// LEGACY_MIGRATION_REMOVE_AFTER: 1.27.0
+		// Very old format using bare newlines. Migrate to InputState on read.
+		// Drop this branch and the ENTRY_SEPARATOR branch above once 1.27.0 ships.
+		const stringEntries = content
+			.split('\n')
+			.filter(line => line.trim() !== '');
+		return migrateStringArrayToInputState(stringEntries);
+	}
+}
+
+/** Atomic-write temp files older than this belong to a save that died. */
+const STALE_TEMP_FILE_MS = 60_000;
+
 export class PromptHistory {
 	private history: InputState[] = [];
 	private currentIndex: number = -1;
@@ -30,6 +108,10 @@ export class PromptHistory {
 	// Set when the file exists but could not be read (permissions, I/O). The
 	// content is unknown, so saving would replace history we never saw.
 	private persistenceBlocked = false;
+	// Prompts added by this process since its last save. A save merges these
+	// into what is on disk rather than writing this process's whole list, so
+	// two sessions sharing the file keep each other's prompts.
+	private pendingAdds: InputState[] = [];
 
 	constructor(historyFile?: string) {
 		this.historyFile =
@@ -38,41 +120,11 @@ export class PromptHistory {
 
 	async loadHistory(): Promise<void> {
 		this.persistenceBlocked = false;
+		this.pendingAdds = [];
+		await this.removeStaleTempFiles();
 		try {
 			const content = await fs.readFile(this.historyFile, 'utf8');
-
-			if (content.trim() === '{}') {
-				// getClosestConfigFile seeds a missing file with an empty JSON
-				// object. It is not history; reading it through the legacy
-				// line-per-entry path below made "{}" every new user's oldest
-				// Up-arrow entry.
-				this.history = [];
-			} else if (content.startsWith(JSON_FORMAT_MARKER)) {
-				// New JSON format with InputState objects
-				const jsonContent = content.slice(JSON_FORMAT_MARKER.length);
-				const parsed: unknown = JSON.parse(jsonContent);
-				if (!Array.isArray(parsed)) {
-					throw new SyntaxError(
-						'Prompt history file does not contain an array',
-					);
-				}
-				this.history = parsed as InputState[];
-			} else if (content.includes(ENTRY_SEPARATOR)) {
-				// LEGACY_MIGRATION_REMOVE_AFTER: 1.27.0
-				// Old format using ENTRY_SEPARATOR. Migrate to InputState on read.
-				const stringEntries = content
-					.split(ENTRY_SEPARATOR)
-					.filter(entry => entry.trim() !== '');
-				this.history = this.migrateStringArrayToInputState(stringEntries);
-			} else {
-				// LEGACY_MIGRATION_REMOVE_AFTER: 1.27.0
-				// Very old format using bare newlines. Migrate to InputState on read.
-				// Drop this branch and the ENTRY_SEPARATOR branch above once 1.27.0 ships.
-				const stringEntries = content
-					.split('\n')
-					.filter(line => line.trim() !== '');
-				this.history = this.migrateStringArrayToInputState(stringEntries);
-			}
+			this.history = parseHistoryContent(content);
 			this.currentIndex = -1;
 		} catch (error) {
 			this.history = [];
@@ -98,9 +150,36 @@ export class PromptHistory {
 			// do not save: that would replace entries we never saw. Fixing the
 			// cause brings the history back on the next load.
 			this.persistenceBlocked = true;
-			logError(
+			notifyError(
 				`Prompt history could not be read, leaving it untouched and not saving it this session: ${formatError(error)}`,
 			);
+		}
+	}
+
+	/**
+	 * Delete `<history>.<uuid>.tmp` files an atomic save left behind when the
+	 * process died between writing and renaming. A recent one may belong to a
+	 * save another session is making right now, so only old ones go.
+	 */
+	private async removeStaleTempFiles(): Promise<void> {
+		const dir = path.dirname(this.historyFile);
+		const prefix = `${path.basename(this.historyFile)}.`;
+		let names: string[];
+		try {
+			names = await fs.readdir(dir);
+		} catch {
+			return;
+		}
+		const now = Date.now();
+		for (const name of names) {
+			if (!name.startsWith(prefix) || !name.endsWith('.tmp')) continue;
+			const full = path.join(dir, name);
+			try {
+				const {mtimeMs} = await fs.stat(full);
+				if (now - mtimeMs > STALE_TEMP_FILE_MS) await fs.unlink(full);
+			} catch {
+				// Gone already, or not ours to remove.
+			}
 		}
 	}
 
@@ -113,13 +192,13 @@ export class PromptHistory {
 	 */
 	private async quarantineCorruptFile(error: unknown): Promise<void> {
 		const backupPath = await this.nextAvailableBackupPath();
-		logError(
+		notifyError(
 			`Prompt history file is corrupt, backing it up to ${backupPath}: ${formatError(error)}`,
 		);
 		try {
 			await fs.rename(this.historyFile, backupPath);
 		} catch (renameError) {
-			logError(
+			notifyError(
 				`Failed to back up corrupt prompt history: ${formatError(renameError)}`,
 			);
 		}
@@ -142,15 +221,6 @@ export class PromptHistory {
 			counter++;
 		}
 		return candidate;
-	}
-
-	private migrateStringArrayToInputState(
-		stringEntries: string[],
-	): InputState[] {
-		return stringEntries.map(entry => ({
-			displayValue: entry,
-			placeholderContent: {},
-		}));
 	}
 
 	/**
@@ -177,6 +247,8 @@ export class PromptHistory {
 		this.savePromise = this.savePromise.then(async () => {
 			if (this.persistenceBlocked) return;
 			try {
+				this.history = await this.mergeWithDisk();
+				this.pendingAdds = [];
 				const jsonContent = JSON.stringify(this.history, null, 2);
 				// Write to a temp file and rename into place. writeFile alone
 				// truncates in place, so a crash mid-save used to leave a file
@@ -193,10 +265,31 @@ export class PromptHistory {
 			} catch (error) {
 				// Silently fail to avoid disrupting the user experience
 				const errorMessage = formatError(error);
-				logError(`Failed to save prompt history: ${errorMessage}`);
+				notifyError(`Failed to save prompt history: ${errorMessage}`);
 			}
 		});
 		return this.savePromise;
+	}
+
+	/**
+	 * What to write: the file's current entries with this process's new
+	 * prompts applied on top (moved to the end, deduplicated by text). Falls
+	 * back to this process's own list when the file is missing or unreadable.
+	 */
+	private async mergeWithDisk(): Promise<InputState[]> {
+		let merged: InputState[];
+		try {
+			merged = parseHistoryContent(await fs.readFile(this.historyFile, 'utf8'));
+		} catch {
+			return this.history;
+		}
+		for (const entry of this.pendingAdds) {
+			merged = merged.filter(
+				existing => existing.displayValue !== entry.displayValue,
+			);
+			merged.push(entry);
+		}
+		return merged.slice(-MAX_PROMPT_HISTORY_SIZE);
 	}
 
 	addPrompt(inputState: InputState): void;
@@ -226,6 +319,10 @@ export class PromptHistory {
 
 		// Add to the end
 		this.history.push(inputState);
+		this.pendingAdds = this.pendingAdds.filter(
+			entry => entry.displayValue !== inputState.displayValue,
+		);
+		this.pendingAdds.push(inputState);
 
 		// Keep only the last MAX_PROMPT_HISTORY_SIZE entries
 		if (this.history.length > MAX_PROMPT_HISTORY_SIZE) {

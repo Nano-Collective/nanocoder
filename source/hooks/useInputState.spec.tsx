@@ -5,6 +5,10 @@ import test from 'ava';
 import {cleanup, render} from 'ink-testing-library';
 import React from 'react';
 import {
+	applyEdit,
+	applyRedo,
+	applyUndo,
+	type EditorState,
 	MAX_UNDO_STACK,
 	reconcileStaleEdit,
 	useInputState,
@@ -1318,4 +1322,110 @@ test('resetInput clears the ref before the next render', t => {
 	// cleared input instead.
 	hook.updateInput('hellox');
 	t.is(hook.currentStateRef.current.displayValue, 'x');
+});
+
+// setInputState replaces the input outside of typing (history recall, a
+// completion, a restored draft). Readers that run in the same stdin batch,
+// before a re-render, read currentStateRef: it must already hold the new
+// value, or Enter submits the old input and the next key edits it.
+test('setInputState updates currentStateRef immediately', t => {
+	const {hook} = setupTest();
+	hook.updateInput('draft');
+
+	hook.setInputState({displayValue: 'recalled', placeholderContent: {}});
+	t.is(hook.currentStateRef.current.displayValue, 'recalled');
+});
+
+test('a key typed in the same batch as setInputState edits the new input', t => {
+	const {hook, instance} = setupTest();
+	hook.updateInput('draft');
+	instance.rerender(<TestComponent />);
+	const rendered = currentHook!;
+
+	// TextInput still shows "draft" and reports its edit against it.
+	rendered.setInputState({displayValue: 'recalled', placeholderContent: {}});
+	rendered.updateInput('draft!');
+	t.is(rendered.currentStateRef.current.displayValue, 'recalled!');
+});
+
+test('setInput updates currentStateRef immediately', t => {
+	const {hook} = setupTest();
+	hook.updateInput('before');
+
+	hook.setInput('after');
+	t.is(hook.currentStateRef.current.displayValue, 'after');
+});
+
+// --- Editor state transitions (the store's only writers) ---
+
+const text = (displayValue: string): InputState => ({
+	displayValue,
+	placeholderContent: {},
+});
+const editor = (
+	current: string,
+	undo: string[] = [],
+	redo: string[] = [],
+): EditorState => ({
+	current: text(current),
+	undo: undo.map(text),
+	redo: redo.map(text),
+});
+const shape = (s: EditorState) => ({
+	current: s.current.displayValue,
+	undo: s.undo.map(e => e.displayValue),
+	redo: s.redo.map(e => e.displayValue),
+});
+
+test('applyEdit pushes the old input onto undo and clears redo', t => {
+	t.deepEqual(shape(applyEdit(editor('ab', ['a'], ['abc']), text('abd'))), {
+		current: 'abd',
+		undo: ['a', 'ab'],
+		redo: [],
+	});
+});
+
+test('applyUndo and applyRedo move one step between the stacks', t => {
+	const undone = applyUndo(editor('abc', ['a', 'ab'], []));
+	t.deepEqual(shape(undone), {current: 'ab', undo: ['a'], redo: ['abc']});
+	t.deepEqual(shape(applyRedo(undone)), {
+		current: 'abc',
+		undo: ['a', 'ab'],
+		redo: [],
+	});
+});
+
+test('undo and redo with an empty stack return the same state object', t => {
+	const state = editor('x');
+	t.is(applyUndo(state), state);
+	t.is(applyRedo(state), state);
+});
+
+test('every transition caps the stack it pushes onto', t => {
+	const full = Array.from({length: MAX_UNDO_STACK}, (_, i) => `s${i}`);
+
+	const edited = applyEdit(editor('now', full), text('next'));
+	t.is(edited.undo.length, MAX_UNDO_STACK);
+	t.is(edited.undo.at(-1)!.displayValue, 'now');
+	t.is(edited.undo[0]!.displayValue, 's1', 'the oldest entry is dropped');
+
+	t.is(applyUndo(editor('now', ['prev'], full)).redo.length, MAX_UNDO_STACK);
+	t.is(applyRedo(editor('now', full, ['next'])).undo.length, MAX_UNDO_STACK);
+});
+
+test('currentStateRef keeps its identity and tracks every writer before a render', t => {
+	const {hook} = setupTest();
+	const ref = hook.currentStateRef;
+
+	hook.updateInput('typed');
+	t.is(ref.current.displayValue, 'typed');
+	hook.undo();
+	t.is(ref.current.displayValue, '');
+	hook.redo();
+	t.is(ref.current.displayValue, 'typed');
+	hook.setInputState(text('replaced'));
+	t.is(ref.current.displayValue, 'replaced');
+	hook.resetInput();
+	t.is(ref.current.displayValue, '');
+	t.is(currentHook!.currentStateRef, ref);
 });

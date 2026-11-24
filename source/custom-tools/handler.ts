@@ -2,10 +2,16 @@ import {spawn} from 'node:child_process';
 import {existsSync} from 'node:fs';
 import {isAbsolute, resolve} from 'node:path';
 import {TRUNCATION_OUTPUT_LIMIT} from '@/constants';
-import {cmdQuote, renderBody, shellQuote} from '@/custom-tools/template';
+import {
+	cmdQuote,
+	findUnsafePlaceholder,
+	renderBody,
+	shellQuote,
+} from '@/custom-tools/template';
+import {truncateToolResult} from '@/tools/runtime/truncate-tool-result';
 import type {CustomToolMetadata} from '@/types/custom-tools';
 import type {ToolHandler} from '@/types/index';
-import {isRealPathInside} from '@/utils/path-validation';
+import {isRealPathInside} from '@/utils/fs/path-validation';
 import {signalProcessTree} from '@/utils/process-tree';
 import {isWindowsCmd, shellArgs} from '@/utils/shell-args';
 import {
@@ -13,7 +19,6 @@ import {
 	STDERR_TRUNCATION_NOTICE,
 	STDOUT_TRUNCATION_NOTICE,
 } from '@/utils/stream-collector';
-import {truncateToolResult} from '@/utils/truncate-tool-result';
 
 /**
  * Build a `ToolHandler` that renders the script body and runs it under the
@@ -27,9 +32,22 @@ export function buildHandler(
 ): ToolHandler {
 	return async (args: Record<string, unknown>): Promise<string> => {
 		const shell = pickShell(metadata.shell);
+		// The loader already rejects these bodies; check again here so a body
+		// that reached the handler another way still never runs unquoted values.
+		const declared = Object.keys(metadata.parameters);
+		const unsafe = findUnsafePlaceholder(
+			body,
+			isWindowsCmd(shell) ? 'cmd' : 'posix',
+			declared,
+		);
+		if (unsafe) throw new Error(`Custom tool body is unsafe: ${unsafe}`);
+		// Only declared parameters are substituted. The validator doesn't strip
+		// extra keys, and a model-supplied value for an undeclared name would
+		// otherwise fill a placeholder nobody checked, such as one in a comment.
+		const filled = applyParameterDefaults(metadata, args ?? {});
 		const rendered = renderBody(
 			body,
-			applyParameterDefaults(metadata, args ?? {}),
+			Object.fromEntries(declared.map(name => [name, filled[name]])),
 			isWindowsCmd(shell) ? cmdQuote : shellQuote,
 		);
 		const cwd = resolveCwd(metadata.cwd, projectRoot);
@@ -265,7 +283,8 @@ export function expandVars(value: string): string {
 	});
 }
 
-function pickShell(configured: string | undefined): string {
+/** The shell a tool runs under: its `shell:` setting, else the platform default. */
+export function pickShell(configured: string | undefined): string {
 	if (configured === 'bash') return '/bin/bash';
 	if (configured === 'sh') return '/bin/sh';
 	if (process.platform === 'win32') return process.env.ComSpec || 'cmd.exe';

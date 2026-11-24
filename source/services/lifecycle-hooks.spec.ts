@@ -11,10 +11,14 @@ import {join} from 'node:path';
 import test from 'ava';
 import {clearAppConfig, reloadAppConfig} from '@/config/index';
 import {processToolUse, setToolRegistryGetter} from '@/message-handler';
+import {
+	createSessionContext,
+	runInSessionContext,
+} from '@/services/session-context';
 import {setProjectRoot, setSessionCwd} from '@/services/session-cwd';
 import type {HooksConfig} from '@/types/config';
 import type {ToolCall} from '@/types/core';
-import {truncateToolResult} from '@/utils/truncate-tool-result';
+import {truncateToolResult} from '@/tools/runtime/truncate-tool-result';
 import {
 	addPendingHookContext,
 	beginSessionStartHooks,
@@ -227,6 +231,53 @@ test.serial('a root-anchored matchPaths matches an absolute path', async t => {
 	t.is(outsideRoot.output, '');
 });
 
+test.serial('matchPaths matches a ./-prefixed path', async t => {
+	withHooks({
+		'pre-tool-use': [{matchPaths: ['src/**'], command: node('process.exit(2)')}],
+	});
+
+	const outcome = await runLifecycleHooks('pre-tool-use', {
+		toolName: 'write_file',
+		toolArgs: {path: './src/a.ts'},
+	});
+
+	t.true(outcome.blocked, 'the same file as src/a.ts must hit the same veto');
+});
+
+test.serial(
+	'matchPaths resolves a relative path against the session cwd',
+	async t => {
+		const src = join(testDir, 'src');
+		mkdirSync(src, {recursive: true});
+		// The configured root keeps the tmpdir spelling while the session cwd is
+		// physical, as `pwd -P` reports it after `cd src` (on macOS /var is a
+		// symlink to /private/var, so the two spellings differ).
+		setProjectRoot(testDir);
+		setSessionCwd(join(realpathSync(testDir), 'src'));
+		try {
+			withHooks({
+				'pre-tool-use': [
+					{matchPaths: ['src/**'], command: node('process.exit(2)')},
+				],
+			});
+
+			const inSrc = await runLifecycleHooks('pre-tool-use', {
+				toolName: 'write_file',
+				toolArgs: {path: 'a.ts'},
+			});
+			const backAtRoot = await runLifecycleHooks('pre-tool-use', {
+				toolName: 'write_file',
+				toolArgs: {path: join(testDir, 'other', 'a.ts')},
+			});
+
+			t.true(inSrc.blocked, '`a.ts` after `cd src` is src/a.ts');
+			t.false(backAtRoot.blocked);
+		} finally {
+			setSessionCwd(testDir);
+		}
+	},
+);
+
 test.serial('matchPaths excludes a tool that acted on no file', async t => {
 	// A hook scoped to files is asking a question `execute_bash` cannot answer,
 	// so it must not fire — unlike a missing matchTools, which widens.
@@ -336,6 +387,26 @@ test.serial('a hook that times out does not block the action', async t => {
 	t.is(outcome.output, '');
 });
 
+test.serial('a hook that reads stdin sees EOF instead of hanging', async t => {
+	withHooks({
+		'post-tool-use': [
+			{
+				command: node(
+					"process.stdin.resume();process.stdin.on('end',()=>console.log('eof'))",
+				),
+				timeout: 5000,
+			},
+		],
+	});
+
+	const outcome = await runLifecycleHooks('post-tool-use', {
+		toolName: 'write_file',
+	});
+
+	t.deepEqual(outcome.failures, []);
+	t.is(outcome.output, 'eof');
+});
+
 test.serial('a hook naming a missing binary blocks like any non-zero exit', async t => {
 	withHooks({
 		'pre-tool-use': [{command: 'nanocoder-definitely-not-a-real-binary'}],
@@ -387,6 +458,24 @@ test.serial('every hook gets the session id and working directory', async t => {
 	const outcome = await runLifecycleHooks('session-end');
 
 	t.is(outcome.output, 'present present');
+});
+
+test.serial('a hook run for a session gets that session id', async t => {
+	withHooks({
+		'session-end': [
+			{command: node('console.log(process.env.NANOCODER_SESSION_ID)')},
+		],
+	});
+	const run = (sessionId: string) => {
+		const context = createSessionContext(testDir);
+		context.sessionId = sessionId;
+		return runInSessionContext(context, () => runLifecycleHooks('session-end'));
+	};
+
+	const [a, b] = await Promise.all([run('session-a'), run('session-b')]);
+
+	t.is(a.output, 'session-a');
+	t.is(b.output, 'session-b');
 });
 
 test.serial('execute_bash exposes its command as NANOCODER_COMMAND', async t => {

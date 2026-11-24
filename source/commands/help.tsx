@@ -1,18 +1,39 @@
 import {Box, Text} from 'ink';
 import React from 'react';
 import {commandRegistry} from '@/commands';
+import {errorMsg} from '@/components/message-factory';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
-import {generateKey} from '@/session/key-generator';
 import type {Command} from '@/types/index';
-import {errorMsg} from '@/utils/message-factory';
+import {generateKey} from '@/utils/key-generator';
 import {getPackageVersion} from '@/utils/package-version';
 import {
 	findHelpCommand,
 	getCommandHelpDetails,
 	groupHelpCommands,
 } from './help-utils';
+
+/** `[what you want, what to type]` rows for the "Common Tasks" blurb. */
+const COMMON_TASKS: readonly (readonly [string, string])[] = [
+	['Ask about your codebase', 'How does the session autosave work?'],
+	['Change code', 'Add input validation to the signup handler'],
+	['Point at a file', 'Explain @src/utils/parse.ts (@ completes paths)'],
+	[
+		'Run a shell command',
+		'!npm test (the output is added to the conversation)',
+	],
+	['Use a slash command', '/commit, /review, /resume (type / to browse)'],
+	[
+		'Add your own commands',
+		'Markdown files in .nanocoder/commands/ (see /commands)',
+	],
+	['Keyboard shortcuts', 'press ? in an empty prompt'],
+	[
+		'Try a setting for one command',
+		'/usage ?context-max=200k (/compact and /usage accept ?key=value)',
+	],
+];
 
 let cachedVersion: string | null = null;
 
@@ -67,18 +88,12 @@ function Help({
 					Common Tasks:
 				</Text>
 			</Box>
-			<Text color={colors.text}>
-				{' '}
-				• Ask questions about your codebase {'>'} How does foo.py work?
-			</Text>
-			<Text color={colors.text}> • Edit files {'>'} Update bar.ts to...</Text>
-			<Text color={colors.text}> • Fix errors {'>'} cargo build</Text>
-			<Text color={colors.text}> • Run commands {'>'} /help</Text>
-			<Text color={colors.text}> • Resume sessions {'>'} /resume</Text>
-			<Text color={colors.text}>
-				{' '}
-				• Keyboard shortcuts {'>'} press ? in an empty prompt
-			</Text>
+			{COMMON_TASKS.map(([task, example]) => (
+				<Text key={task} color={colors.text}>
+					{' '}
+					• {task} {'>'} {example}
+				</Text>
+			))}
 
 			{selectedCommand ? (
 				<CommandDetails command={selectedCommand} />

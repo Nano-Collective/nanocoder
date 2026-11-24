@@ -1,10 +1,10 @@
 import clipboard from 'clipboardy';
+import {errorMsg, successMsg, warningMsg} from '@/components/message-factory';
 import {COMMIT_SYSTEM_PROMPT} from '@/tools/git/commit-prompt';
 import {execGit, hasStagedChanges, truncateDiff} from '@/tools/git/utils';
 import type {Command} from '@/types/commands';
 import type {Message} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
-import {errorMsg, successMsg, warningMsg} from '@/utils/message-factory';
 
 type CommitDependencies = {
 	hasStagedChanges: () => Promise<boolean>;

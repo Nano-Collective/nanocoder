@@ -1,3 +1,9 @@
+---
+title: "Edit Recovery"
+description: "The evidence Nanocoder returns when an edit's search text does not match the file"
+sidebar_order: 17
+---
+
 # Edit recovery evidence
 
 When `string_replace` or a `diff_edit` SEARCH block cannot match the file,
@@ -24,7 +30,10 @@ read-before-edit and approval checks.
 
 Candidate bodies are omitted when they cannot fit the output budget or exceed
 40 lines. Such candidates have `truncated: true`; the agent must read their line
-ranges before retrying. Short, generic searches may have no candidate. Analysis
-is bounded by input size and comparison limits, and the evidence payload is
+ranges before retrying. Searches with fewer than 8 letter, digit, `_` or `$`
+characters are too generic to place and return `no_candidate`. A search longer
+than 40 lines or 8,000 characters, or a file larger than 1,000,000 characters,
+returns `budget_exceeded` with no candidates; read the relevant range and retry
+with a smaller search. Analysis is also bounded by comparison limits, and the evidence payload is
 capped at 3,600 characters to leave room for the error heading. No additional
 model calls or dependencies are required.

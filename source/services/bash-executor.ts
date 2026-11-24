@@ -15,6 +15,7 @@ import {platform} from 'node:process';
 
 import {getAppConfig} from '@/config/index';
 import {
+	BASH_BACKGROUND_MAX_RETAINED_JOBS,
 	BASH_OUTPUT_PREVIEW_LENGTH,
 	INTERVAL_BASH_PROGRESS_MS,
 	TIMEOUT_BASH_DEFAULT_MS,
@@ -27,7 +28,9 @@ import {
 	STDERR_TRUNCATION_NOTICE,
 	STDOUT_TRUNCATION_NOTICE,
 } from '@/utils/stream-collector';
+import {bashChildEnv} from './bash-env.js';
 import {
+	acquireProtectedMounts,
 	planBashSpawn,
 	resolveJailRoot,
 	sandboxedCommandGroup,
@@ -40,6 +43,15 @@ import {
 } from './session-cwd.js';
 
 const isWindows = platform === 'win32';
+
+/**
+ * The applied timeout as the model was told to ask for it: in seconds. A
+ * sub-second limit keeps its precision (`0.5 seconds`) rather than rounding
+ * to a whole second that was never applied.
+ */
+function formatTimeoutSeconds(ms: number): number {
+	return Number((ms / 1000).toFixed(3));
+}
 
 /**
  * On Unix, probe the process group rather than the leader. Every command runs
@@ -101,6 +113,30 @@ function isGroupRunning(proc: ChildProcess): boolean {
 	return isGroupAlive(proc) && hasRunningMember(proc);
 }
 
+/**
+ * How long to keep reading a command's output after its shell exits, when
+ * something (a background job) still holds the pipes open. Output the shell
+ * wrote is already in the pipe by then and drains in milliseconds, so stop
+ * once the pipes have been quiet for OUTPUT_QUIET_MS, and in any case after
+ * OUTPUT_DRAIN_MAX_MS so a chatty job cannot hold the result back.
+ */
+const OUTPUT_QUIET_MS = 150;
+const OUTPUT_DRAIN_MAX_MS = 1000;
+
+/**
+ * Stop collecting from a finished command's pipes without closing them: a
+ * background job still writing to a closed pipe would die of SIGPIPE. The
+ * data is read and dropped, and the pipes no longer keep Node alive.
+ */
+function detachStreams(proc: ChildProcess): void {
+	for (const stream of [proc.stdout, proc.stderr]) {
+		if (!stream || stream.destroyed) continue;
+		stream.removeAllListeners('data');
+		stream.on('data', () => {});
+		(stream as {unref?: () => void}).unref?.();
+	}
+}
+
 function signalGroups(proc: ChildProcess, signal: NodeJS.Signals): void {
 	const command = sandboxedCommandGroup(proc);
 	if (command !== undefined) {
@@ -124,6 +160,32 @@ export interface BashExecutionState {
 	error: string | null;
 }
 
+/**
+ * One read from a background job. `output` and `stderr` are only the text
+ * produced since the previous read, so a long-running server does not resend
+ * its whole log on every `bash_output` call.
+ */
+export interface BashJobOutput {
+	jobId: string;
+	command: string;
+	output: string;
+	stderr: string;
+	isComplete: boolean;
+	exitCode: number | null;
+	error: string | null;
+}
+
+interface BackgroundJob {
+	state: BashExecutionState;
+	/** Absent when the spawn was refused before a process existed. */
+	process?: ChildProcess;
+	promise: Promise<BashExecutionState>;
+	/** Character offsets already returned by readJobOutput(). */
+	readStdout: number;
+	readStderr: number;
+	sessionId?: string;
+}
+
 interface ExecutionEntry {
 	state: BashExecutionState;
 	process: ChildProcess;
@@ -135,25 +197,45 @@ interface ExecutionEntry {
 	cwdCaptureFile?: string;
 	jailTmp?: string;
 	cleanupJailTmp?: () => void;
+	releaseProtected?: () => void;
 }
 
 export class BashExecutor extends EventEmitter {
 	private executions = new Map<string, ExecutionEntry>();
+	// Background jobs. A running job is also in `executions`, so stopAll() and
+	// killAll() reach it; completed jobs stay here until their output is read
+	// or the retained-job cap drops them.
+	private jobs = new Map<string, BackgroundJob>();
 	// Process groups that outlive their execution entry: a cancelled command
 	// still being stopped, and jobs a finished command left behind (`cmd &`).
 	// stopAll() and killAll() reach these too.
 	private stopping = new Map<ChildProcess, Promise<void>>();
 	private leftovers = new Set<ChildProcess>();
 	private leftoverPrune?: NodeJS.Timeout;
+	// Run once a leftover group is gone: the jail's placeholder mounts must
+	// outlive every process that could still write through them.
+	private leftoverCleanups = new Map<ChildProcess, () => void>();
 
 	execute(
 		command: string,
-		options?: {timeoutMs?: number; signal?: AbortSignal},
+		options?: {
+			timeoutMs?: number;
+			signal?: AbortSignal;
+			/**
+			 * Keep the command running after the tool returns. No timeout is
+			 * applied, the turn's AbortSignal is ignored, and the job is tracked
+			 * until it exits or is killed so `bash_output`/`kill_bash` can reach it.
+			 */
+			background?: boolean;
+			/** Session that owns the job, so closing the session can stop it. */
+			sessionId?: string;
+		},
 	): {
 		executionId: string;
 		promise: Promise<BashExecutionState>;
 	} {
 		const executionId = randomUUID();
+		const background = options?.background === true;
 
 		const state: BashExecutionState = {
 			executionId,
@@ -191,7 +273,7 @@ export class BashExecutor extends EventEmitter {
 					// Capture path is $NC_CWD_FILE so positional args stay empty.
 					`${command}\n\n__nc_ec=$?\ncommand pwd -P > "$NC_CWD_FILE" 2>/dev/null\nexit $__nc_ec`;
 		const childEnv = {
-			...process.env,
+			...bashChildEnv(process.env, getAppConfig(), sandbox),
 			...(cwdCaptureFile ? {NC_CWD_FILE: cwdCaptureFile} : {}),
 			...(jailTmp ? {TMPDIR: jailTmp, TMP: jailTmp, TEMP: jailTmp} : {}),
 		};
@@ -209,6 +291,13 @@ export class BashExecutor extends EventEmitter {
 			}
 		};
 
+		// bwrap only; seatbelt protects these paths by name.
+		const guard =
+			sandbox && platform === 'linux'
+				? acquireProtectedMounts(projectRoot)
+				: undefined;
+		const releaseProtected = guard?.release;
+
 		let proc: ChildProcess;
 		if (sandbox) {
 			const planned = planBashSpawn({
@@ -220,11 +309,23 @@ export class BashExecutor extends EventEmitter {
 				projectRoot,
 				tmpDir: jailTmp,
 				hostTmp: resolveJailRoot(tmpdir()),
+				protectedMounts: guard?.mounts,
 			});
 			if ('error' in planned) {
 				cleanupJailTmp();
+				releaseProtected?.();
 				state.isComplete = true;
 				state.error = planned.error;
+				if (background) {
+					this.jobs.set(executionId, {
+						state,
+						promise: Promise.resolve({...state}),
+						readStdout: 0,
+						readStderr: 0,
+						sessionId: options?.sessionId,
+					});
+					this.pruneJobs();
+				}
 				this.emit('start', {...state});
 				this.emit('complete', {...state});
 				return {executionId, promise: Promise.resolve({...state})};
@@ -236,7 +337,10 @@ export class BashExecutor extends EventEmitter {
 			const shell = process.env.ComSpec || 'cmd.exe';
 			proc = spawn(shell, shellArgs(shell, command), {
 				cwd,
+				env: childEnv,
 				windowsVerbatimArguments: true,
+				// Close stdin so commands that wait for input get EOF.
+				stdio: ['ignore', 'pipe', 'pipe'],
 			});
 		} else {
 			// codeql[js/shell-command-built-from-environment] -c script uses $NC_CWD_FILE; path is env, not argv
@@ -245,6 +349,9 @@ export class BashExecutor extends EventEmitter {
 				cwd,
 				detached: true,
 				env: childEnv,
+				// Close stdin so commands that wait for input get EOF and fail fast
+				// instead of hanging until the timeout.
+				stdio: ['ignore', 'pipe', 'pipe'],
 			});
 		}
 
@@ -269,15 +376,44 @@ export class BashExecutor extends EventEmitter {
 			}
 		};
 
-		const stdoutCollector = makeStreamCollector(text => {
-			state.fullOutput += text;
-		}, STDOUT_TRUNCATION_NOTICE);
-		const stderrCollector = makeStreamCollector(text => {
-			state.stderr += text;
-		}, STDERR_TRUNCATION_NOTICE);
+		const backgroundKeepLatest = background
+			? {
+					keepLatest: true,
+					onTrim: (droppedChars: number) => {
+						state.fullOutput = state.fullOutput.slice(droppedChars);
+						const job = this.jobs.get(executionId);
+						if (job) job.readStdout -= droppedChars;
+					},
+				}
+			: undefined;
+		const backgroundKeepLatestStderr = background
+			? {
+					keepLatest: true,
+					onTrim: (droppedChars: number) => {
+						state.stderr = state.stderr.slice(droppedChars);
+						const job = this.jobs.get(executionId);
+						if (job) job.readStderr -= droppedChars;
+					},
+				}
+			: undefined;
+		const stdoutCollector = makeStreamCollector(
+			text => {
+				state.fullOutput += text;
+			},
+			STDOUT_TRUNCATION_NOTICE,
+			backgroundKeepLatest,
+		);
+		const stderrCollector = makeStreamCollector(
+			text => {
+				state.stderr += text;
+			},
+			STDERR_TRUNCATION_NOTICE,
+			backgroundKeepLatestStderr,
+		);
 
-		// Both streams are finished by the time `close`/`error` runs, so release
-		// whatever the decoders were holding back mid-character. `cancel()`
+		// Both streams are finished (or past their drain grace period) when the
+		// command completes, so release whatever the decoders were holding back
+		// mid-character. `cancel()`
 		// resolves and unregisters the execution before either handler gets
 		// here, so a cancelled run never flushes: its pending partial character
 		// is dropped along with the rest of the output it never produced.
@@ -288,7 +424,9 @@ export class BashExecutor extends EventEmitter {
 		};
 
 		// Collect output
+		let lastOutputAt = 0;
 		proc.stdout?.on('data', (data: Buffer) => {
+			lastOutputAt = Date.now();
 			stdoutCollector.collect(data);
 			state.outputPreview = state.fullOutput.slice(-BASH_OUTPUT_PREVIEW_LENGTH);
 			// Emit progress immediately when output is received
@@ -297,6 +435,7 @@ export class BashExecutor extends EventEmitter {
 		});
 
 		proc.stderr?.on('data', (data: Buffer) => {
+			lastOutputAt = Date.now();
 			stderrCollector.collect(data);
 			// Emit progress immediately when stderr is received
 			this.emit('progress', {...state});
@@ -316,36 +455,54 @@ export class BashExecutor extends EventEmitter {
 				process: proc,
 				intervalId,
 				resolve,
-				signal: options?.signal,
+				// A background job is meant to outlive the turn that started it,
+				// so the turn's AbortSignal must not tear it down.
+				signal: background ? undefined : options?.signal,
 				cwdCaptureFile,
 				jailTmp,
 				cleanupJailTmp,
+				releaseProtected,
 			};
 
 			const ms = options?.timeoutMs ?? TIMEOUT_BASH_DEFAULT_MS;
-			if (ms > 0) {
+			// Background jobs have no timeout: a dev server or watcher is
+			// supposed to keep running until kill_bash or shutdown.
+			if (!background && ms > 0) {
 				entry.timeoutId = setTimeout(() => {
-					this.cancel(executionId, `Command timed out after ${ms}ms`);
+					this.cancel(
+						executionId,
+						`Command timed out after ${formatTimeoutSeconds(ms)} seconds`,
+					);
 				}, ms);
 				entry.timeoutId.unref();
 			}
 
-			if (options?.signal) {
+			if (entry.signal) {
 				entry.abortListener = () => {
 					this.cancel(executionId, 'Cancelled via AbortSignal');
 				};
 
-				options.signal.addEventListener('abort', entry.abortListener, {
+				entry.signal.addEventListener('abort', entry.abortListener, {
 					once: true,
 				});
-				if (options.signal.aborted) {
+				if (entry.signal.aborted) {
 					process.nextTick(entry.abortListener);
 				}
 			}
 
 			this.executions.set(executionId, entry);
 
-			proc.on('close', (code: number | null) => {
+			// Finish when the shell exits, not when every pipe holder does. A job
+			// it backgrounded (`npm run dev &`) inherits stdout and keeps the
+			// pipes open for its whole life, so waiting for `close` would block
+			// until that job exits. Give the pipes a short grace period to drain
+			// what the shell itself wrote, then stop collecting and leave the job
+			// running; trackLeftovers() keeps it reachable for shutdown cleanup.
+			let exitCode: number | null = null;
+			let graceTimer: NodeJS.Timeout | undefined;
+
+			const finish = (code: number | null) => {
+				if (graceTimer) clearTimeout(graceTimer);
 				if (entry.timeoutId) clearTimeout(entry.timeoutId);
 				if (entry.signal && entry.abortListener) {
 					entry.signal.removeEventListener('abort', entry.abortListener);
@@ -355,20 +512,47 @@ export class BashExecutor extends EventEmitter {
 				if (!this.executions.has(executionId)) return;
 
 				flushStreams();
+				detachStreams(proc);
 
 				// Persist `cd` only on a real completion, not a cancel/timeout.
 				applyCapturedCwd();
 				cleanupJailTmp();
 				clearInterval(intervalId);
-				this.trackLeftovers(proc);
+				this.trackLeftovers(proc, releaseProtected);
 				state.isComplete = true;
 				state.exitCode = code;
 				this.emit('complete', {...state});
 				this.executions.delete(executionId);
+				this.pruneJobs();
 				resolve({...state});
+			};
+
+			proc.on('exit', (code: number | null) => {
+				exitCode = code;
+				const exitedAt = Date.now();
+				const drain = () => {
+					const now = Date.now();
+					if (
+						now - lastOutputAt < OUTPUT_QUIET_MS &&
+						now - exitedAt < OUTPUT_DRAIN_MAX_MS
+					) {
+						graceTimer = setTimeout(drain, OUTPUT_QUIET_MS);
+						return;
+					}
+					// Timers run before the I/O poll, so after a busy event loop
+					// output can be waiting unread. setImmediate runs after the
+					// poll, once it has been collected.
+					setImmediate(() => finish(exitCode));
+				};
+				graceTimer = setTimeout(drain, OUTPUT_QUIET_MS);
+			});
+
+			proc.on('close', (code: number | null) => {
+				finish(exitCode ?? code);
 			});
 
 			proc.on('error', (error: Error) => {
+				if (graceTimer) clearTimeout(graceTimer);
 				if (entry.timeoutId) clearTimeout(entry.timeoutId);
 				if (entry.signal && entry.abortListener) {
 					entry.signal.removeEventListener('abort', entry.abortListener);
@@ -382,13 +566,27 @@ export class BashExecutor extends EventEmitter {
 				applyCapturedCwd();
 				cleanupJailTmp();
 				clearInterval(intervalId);
+				this.trackLeftovers(proc, releaseProtected);
 				state.isComplete = true;
 				state.error = error.message;
 				this.emit('complete', {...state});
 				this.executions.delete(executionId);
+				this.pruneJobs();
 				resolve({...state}); // Resolve with error state instead of rejecting
 			});
 		});
+
+		if (background) {
+			this.jobs.set(executionId, {
+				state,
+				process: proc,
+				promise,
+				readStdout: 0,
+				readStderr: 0,
+				sessionId: options?.sessionId,
+			});
+			this.pruneJobs();
+		}
 
 		// Emit initial state
 		this.emit('start', {...state});
@@ -428,14 +626,84 @@ export class BashExecutor extends EventEmitter {
 				}
 			}
 			execution.cleanupJailTmp?.();
+			execution.releaseProtected?.();
 			execution.state.isComplete = true;
 			execution.state.error = reason;
 			this.emit('complete', {...execution.state});
 
 			// Resolve the promise with the cancelled state
 			execution.resolve({...execution.state});
+			this.pruneJobs();
 		});
 		return true;
+	}
+
+	/**
+	 * Read the output a background job has produced since the previous read.
+	 * The cursor advances, so a second call only returns new text. Returns
+	 * undefined for an unknown or already-pruned job.
+	 */
+	readJobOutput(jobId: string): BashJobOutput | undefined {
+		const job = this.jobs.get(jobId);
+		if (!job) return undefined;
+		const {state} = job;
+		const output = state.fullOutput.slice(job.readStdout);
+		const stderr = state.stderr.slice(job.readStderr);
+		job.readStdout = state.fullOutput.length;
+		job.readStderr = state.stderr.length;
+		return {
+			jobId,
+			command: state.command,
+			output,
+			stderr,
+			isComplete: state.isComplete,
+			exitCode: state.exitCode,
+			error: state.error,
+		};
+	}
+
+	/**
+	 * Stop a background job and wait until its process group is gone. The job
+	 * record is kept so a final `bash_output` still returns what it printed.
+	 */
+	async killJob(jobId: string): Promise<BashJobOutput | undefined> {
+		const job = this.jobs.get(jobId);
+		if (!job) return undefined;
+
+		if (!job.state.isComplete) {
+			const cancelled = this.cancel(jobId, 'Killed by user');
+			if (cancelled) await job.promise;
+		}
+
+		return {
+			jobId,
+			command: job.state.command,
+			output: '',
+			stderr: '',
+			isComplete: job.state.isComplete,
+			exitCode: job.state.exitCode,
+			error: job.state.error,
+		};
+	}
+
+	/** Stop every background job owned by a session, e.g. when it closes. */
+	async stopSessionJobs(sessionId: string): Promise<void> {
+		const owned = [...this.jobs.entries()]
+			.filter(([, job]) => job.sessionId === sessionId)
+			.map(([id]) => id);
+		await Promise.all(owned.map(id => this.killJob(id)));
+	}
+
+	/**
+	 * Drop the oldest completed jobs once the retained-job cap is exceeded.
+	 * Running jobs are never dropped; they are still in `executions`.
+	 */
+	private pruneJobs(): void {
+		if (this.jobs.size <= BASH_BACKGROUND_MAX_RETAINED_JOBS) return;
+		for (const [id, job] of this.jobs) {
+			if (this.jobs.size <= BASH_BACKGROUND_MAX_RETAINED_JOBS) break;
+			if (job.state.isComplete) this.jobs.delete(id);
+		}
 	}
 
 	/**
@@ -448,7 +716,9 @@ export class BashExecutor extends EventEmitter {
 			this.cancel(id);
 		}
 		for (const proc of this.leftovers) {
-			void this.stop(proc);
+			const cleanup = this.leftoverCleanups.get(proc);
+			this.leftoverCleanups.delete(proc);
+			void this.stop(proc).then(cleanup);
 		}
 		this.leftovers.clear();
 		await Promise.all(this.stopping.values());
@@ -468,6 +738,9 @@ export class BashExecutor extends EventEmitter {
 		for (const proc of procs) {
 			if (isGroupAlive(proc)) signalGroups(proc, 'SIGKILL');
 		}
+		for (const entry of this.executions.values()) entry.releaseProtected?.();
+		for (const cleanup of this.leftoverCleanups.values()) cleanup();
+		this.leftoverCleanups.clear();
 	}
 
 	private stop(proc: ChildProcess): Promise<void> {
@@ -486,13 +759,20 @@ export class BashExecutor extends EventEmitter {
 	 * Dead groups are pruned every second: once its last member exits, the
 	 * group id can be reused by an unrelated process.
 	 */
-	private trackLeftovers(proc: ChildProcess): void {
-		if (!isGroupRunning(proc)) return;
+	private trackLeftovers(proc: ChildProcess, onGone?: () => void): void {
+		if (!isGroupRunning(proc)) {
+			onGone?.();
+			return;
+		}
 		this.leftovers.add(proc);
+		if (onGone) this.leftoverCleanups.set(proc, onGone);
 		if (this.leftoverPrune) return;
 		this.leftoverPrune = setInterval(() => {
 			for (const leftover of this.leftovers) {
-				if (!isGroupRunning(leftover)) this.leftovers.delete(leftover);
+				if (isGroupRunning(leftover)) continue;
+				this.leftovers.delete(leftover);
+				this.leftoverCleanups.get(leftover)?.();
+				this.leftoverCleanups.delete(leftover);
 			}
 			if (this.leftovers.size === 0) {
 				clearInterval(this.leftoverPrune);
@@ -573,11 +853,25 @@ export class BashExecutor extends EventEmitter {
 
 	getState(executionId: string): BashExecutionState | undefined {
 		const execution = this.executions.get(executionId);
-		return execution ? {...execution.state} : undefined;
+		if (execution) return {...execution.state};
+		// A completed background job is no longer an active execution, but its
+		// final state is still worth showing.
+		const job = this.jobs.get(executionId);
+		return job ? {...job.state} : undefined;
 	}
 
 	hasActiveExecutions(): boolean {
 		return this.executions.size > 0;
+	}
+
+	/**
+	 * Whether the execution is a background job. Background jobs stay in the
+	 * active-execution map while running (so the shutdown machinery can reach
+	 * them), but the TUI's Escape handler must not cancel them: they are meant
+	 * to outlive the turn that started them.
+	 */
+	isBackgroundJob(executionId: string): boolean {
+		return this.jobs.has(executionId);
 	}
 
 	getActiveExecutionIds(): string[] {

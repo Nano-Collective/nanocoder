@@ -4,7 +4,7 @@ import {memo} from 'react';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
-import {wrapWithTrimmedContinuations} from '@/utils/text-wrapping';
+import {wrapWithTrimmedContinuations} from '@/terminal/text-wrapping';
 
 type MessageType = 'error' | 'success' | 'warning' | 'info';
 

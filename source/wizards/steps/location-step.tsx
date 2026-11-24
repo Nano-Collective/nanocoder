@@ -7,7 +7,7 @@ import {getColors} from '@/config';
 import {getConfigPath} from '@/config/paths';
 import {MIN_PATH_BUDGET_CHARS, WIZARD_ROW_CHROME_CHARS} from '@/constants';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
-import {homeRelative, truncateMiddle} from '@/utils/path';
+import {homeRelative, truncateMiddle} from '@/utils/fs/path';
 
 export type ConfigLocation = 'project' | 'global';
 

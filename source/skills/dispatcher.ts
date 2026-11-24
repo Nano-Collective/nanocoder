@@ -90,7 +90,7 @@ export interface SkillDispatcherOptions {
 	/**
 	 * Called when an event targets a kind the dispatcher does not (yet)
 	 * support. Defaults to a no-op; production wiring routes this through
-	 * `logError` from the message queue.
+	 * `notifyError` from the message queue.
 	 */
 	onUnsupportedTarget?: UnsupportedTargetLogger;
 	/**
@@ -248,6 +248,12 @@ function triggerContextFor(event: Event): TriggerContext {
 			return {type: 'event', kind: 'file.changed', payload: event.payload};
 		case 'schedule.cron':
 			return {type: 'event', kind: 'schedule.cron', payload: event.payload};
+		case 'file.ai-comment':
+			return {
+				type: 'event',
+				kind: 'file.ai-comment',
+				payload: event.payload,
+			};
 		case 'ci.job.failed':
 			return {type: 'event', kind: 'ci.job.failed', payload: event.payload};
 		default: {
@@ -273,8 +279,25 @@ export function buildTriggeredTask(
 ): SubagentTask {
 	const trigger = triggerContextFor(event);
 
-	const payloadJson = JSON.stringify(event.payload);
-	const prompt = `An event of kind \`${event.kind}\` fired. Payload: \`${payloadJson}\`. Proceed according to your instructions.`;
+	let prompt: string;
+	if (event.kind === 'file.ai-comment') {
+		// Special prompt for AI comment markers
+		const {file, comment, marker, line, context} = event.payload;
+		prompt = `An AI marker (${marker}) was detected in ${file} at line ${line}.
+
+Comment: "${comment}"
+
+Code context:
+\`\`\`
+${context}
+\`\`\`
+
+Please analyze the comment and surrounding code, then implement the requested change or answer the question. Make the necessary code modifications to resolve this issue.`;
+	} else {
+		// Generic prompt for other event types
+		const payloadJson = JSON.stringify(event.payload);
+		prompt = `An event of kind \`${event.kind}\` fired. Payload: \`${payloadJson}\`. Proceed according to your instructions.`;
+	}
 
 	return {
 		subagent_type: subscription.target.name,

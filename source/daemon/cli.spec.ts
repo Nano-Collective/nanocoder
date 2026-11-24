@@ -1,19 +1,14 @@
 import type {ChildProcess} from 'node:child_process';
-import {once} from 'node:events';
 import {existsSync} from 'node:fs';
 import {mkdir, mkdtemp, rm, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
-import {
-	ensureDirectoryTrust,
-	isDirectoryTrusted,
-	loadPreferences,
-	resetPreferencesCache,
-	savePreferences,
-} from '@/config/preferences';
-import {describeProjectTrust} from '@/config/project-trust';
-import {runDaemonCli} from './cli';
+import {loadPreferences, resetPreferencesCache, savePreferences} from '@/config/preferences';
+import {ensureDirectoryTrust, isDirectoryTrusted} from '@/config/trust/directory-trust';
+import {describeProjectTrust} from '@/config/trust/project-trust';
+import {CONFIG_AUTO_FIX_WARNING, runDaemonCli} from './cli';
+import {DaemonIpcServer} from './ipc';
 import {
 	getLockfilePath,
 	getSocketPath,
@@ -56,18 +51,43 @@ async function withIsolatedPreferences<T>(fn: () => Promise<T>): Promise<T> {
 	}
 }
 
+const ipcServers: DaemonIpcServer[] = [];
+
+test.afterEach.always(async () => {
+	await Promise.all(ipcServers.splice(0).map(server => server.stop()));
+});
+
+/**
+ * Listen on the project's IPC endpoint, as a daemon does before it writes
+ * its lockfile. A live pid alone no longer makes a lockfile count as live.
+ */
+async function listenOnSocket(
+	projectRoot: string,
+	handlers: ConstructorParameters<typeof DaemonIpcServer>[1] = {
+		listSubscriptions: () => [],
+	},
+): Promise<DaemonIpcServer> {
+	const server = new DaemonIpcServer(getSocketPath(projectRoot), handlers);
+	await server.start();
+	ipcServers.push(server);
+	return server;
+}
+
 /**
  * Stub launcher matching the real daemon's behavior just enough for
- * `start`'s `waitForLockfile` poll to succeed: it writes a lockfile pointing
- * at this test process's own pid, which `isProcessAlive` will find alive.
+ * `start`'s `waitForLockfile` poll to succeed: it listens on the project
+ * socket and writes a lockfile pointing at this test process's own pid,
+ * which `isProcessAlive` will find alive.
  */
 function stubLaunchDaemon(projectRoot: string): ChildProcess {
-	void writeLockfile({
-		pid: process.pid,
-		socketPath: 'fake-socket-for-test',
-		startedAt: Date.now(),
-		projectRoot,
-	});
+	void listenOnSocket(projectRoot).then(() =>
+		writeLockfile({
+			pid: process.pid,
+			socketPath: getSocketPath(projectRoot),
+			startedAt: Date.now(),
+			projectRoot,
+		}),
+	);
 	return {} as unknown as ChildProcess;
 }
 
@@ -363,11 +383,12 @@ test.serial(
 	async t => {
 		const root = await tempProject();
 		try {
-			// Stub the daemon with this process's own pid so isProcessAlive
-			// returns true. Matches what stubLaunchDaemon does for `start`.
+			// Stub the daemon with this process's own pid and a real listener
+			// on its socket. Matches what stubLaunchDaemon does for `start`.
+			await listenOnSocket(root);
 			await writeLockfile({
 				pid: process.pid,
-				socketPath: '/tmp/test-daemon.sock',
+				socketPath: getSocketPath(root),
 				startedAt: Date.now() - 5_000,
 				projectRoot: root,
 			});
@@ -377,8 +398,33 @@ test.serial(
 			t.is(result.exitCode, 0);
 			t.regex(result.output, /Running\. pid /);
 			t.regex(result.output, new RegExp(`pid ${process.pid}`));
-			t.regex(result.output, /socket \/tmp\/test-daemon\.sock/);
+			t.true(result.output.includes(`socket ${getSocketPath(root)}`));
 			t.regex(result.output, /uptime 5s/);
+		} finally {
+			await rm(root, {recursive: true, force: true});
+		}
+	},
+);
+
+// A live pid is not proof of a daemon: the OS reuses pids after a crash or
+// reboot. Nothing listening on the recorded socket means the lockfile is stale.
+test.serial(
+	'status reports a stale lockfile when the pid is alive but nothing listens on the socket',
+	async t => {
+		const root = await tempProject();
+		try {
+			await writeLockfile({
+				pid: process.pid,
+				socketPath: getSocketPath(root),
+				startedAt: Date.now() - 5_000,
+				projectRoot: root,
+			});
+
+			const result = await runDaemonCli('status', {projectRoot: root});
+
+			t.is(result.exitCode, 0);
+			t.regex(result.output, /Stale lockfile cleaned/);
+			t.false(existsSync(getLockfilePath(root)));
 		} finally {
 			await rm(root, {recursive: true, force: true});
 		}
@@ -507,20 +553,20 @@ test.serial('stop reports no daemon when there is no lockfile', async t => {
 test.serial('stop preserves the live lockfile while shutdown takes longer than five seconds', async t => {
 	t.timeout(15_000);
 	const root = await tempProject();
-	const {spawn} = await import('node:child_process');
-	const child = spawn(
-		process.execPath,
-		[
-			'-e',
-			"process.on('SIGTERM', () => setTimeout(() => process.exit(0), 6000)); setInterval(() => {}, 1000); process.stdout.write('ready');",
-		],
-		{stdio: ['ignore', 'pipe', 'ignore']},
-	);
 	try {
-		await once(child.stdout!, 'data');
+		// Like the real daemon: the IPC endpoint closes as soon as shutdown
+		// starts, but the process and its lockfile outlive it while runs drain.
+		const server = await listenOnSocket(root, {
+			listSubscriptions: () => [],
+			shutdown: () => {
+				void server.stop().then(() => {
+					setTimeout(() => void removeLockfile(root), 6000);
+				});
+			},
+		});
 		await writeLockfile({
-			pid: child.pid!,
-			socketPath: '/nonexistent/test-daemon.sock',
+			pid: process.pid,
+			socketPath: getSocketPath(root),
 			startedAt: Date.now(),
 			projectRoot: root,
 		});
@@ -537,7 +583,6 @@ test.serial('stop preserves the live lockfile while shutdown takes longer than f
 		t.regex(result.output, /Daemon stopped/);
 		t.false(existsSync(getLockfilePath(root)));
 	} finally {
-		if (child.exitCode === null) child.kill('SIGKILL');
 		await rm(root, {recursive: true, force: true});
 	}
 });
@@ -546,31 +591,86 @@ test.serial(
 	'stop removes the lockfile and reports the previous pid when the daemon is live',
 	async t => {
 		const root = await tempProject();
-		// Fork a real child so SIGTERM from `stop` lands on something that
-		// isn't this test process (which would trip the shutdown manager and
-		// abort the run). The child just sleeps; we kill it at the end.
-		const {spawn} = await import('node:child_process');
-		const child = spawn(process.execPath, ['-e', 'setInterval(()=>{},1000)'], {
-			stdio: 'ignore',
-		});
 		try {
+			await listenOnSocket(root, {
+				listSubscriptions: () => [],
+				shutdown: () => removeLockfile(root),
+			});
 			await writeLockfile({
-				pid: child.pid ?? -1,
-				socketPath: '/nonexistent/test-daemon.sock',
+				pid: process.pid,
+				socketPath: getSocketPath(root),
 				startedAt: Date.now(),
 				projectRoot: root,
 			});
 
 			const result = await runDaemonCli('stop', {projectRoot: root});
 
-			// Either the clean path (IPC failed, SIGTERM killed the child,
-			// child removed its lockfile) or the manual-cleanup fallback
-			// (SIGTERM killed it, but the lockfile removal raced). Both
-			// produce exit 0 with the pid acknowledged in the output.
 			t.is(result.exitCode, 0);
-			t.regex(result.output, new RegExp(`pid ${child.pid}`));
+			t.regex(result.output, new RegExp(`pid ${process.pid}`));
+			t.false(existsSync(getLockfilePath(root)));
 		} finally {
-			if (!child.killed) child.kill('SIGKILL');
+			await rm(root, {recursive: true, force: true});
+		}
+	},
+);
+
+// After a crash or reboot the OS can hand the lockfile's pid to an unrelated
+// process. With nothing listening on the socket, `stop` must neither take it
+// for the daemon nor signal it.
+test.serial(
+	'stop does not signal an unrelated process that reused the lockfile pid',
+	async t => {
+		const root = await tempProject();
+		const {spawn} = await import('node:child_process');
+		const unrelated = spawn(process.execPath, ['-e', 'setInterval(()=>{},1000)'], {
+			stdio: 'ignore',
+		});
+		try {
+			await writeLockfile({
+				pid: unrelated.pid ?? -1,
+				socketPath: getSocketPath(root),
+				startedAt: Date.now() - 3_600_000,
+				projectRoot: root,
+			});
+
+			const result = await runDaemonCli('stop', {projectRoot: root});
+			await new Promise(resolve => setTimeout(resolve, 300));
+
+			t.is(result.exitCode, 0);
+			t.is(result.output, 'No daemon is running.');
+			t.is(unrelated.exitCode, null, 'the unrelated process was terminated');
+			t.is(unrelated.signalCode, null, 'the unrelated process was signalled');
+			t.false(existsSync(getLockfilePath(root)));
+		} finally {
+			unrelated.kill('SIGKILL');
+			await rm(root, {recursive: true, force: true});
+		}
+	},
+);
+
+test.serial(
+	'start boots a new daemon when the lockfile pid was reused and nothing listens on the socket',
+	async t => {
+		const root = await tempProject();
+		const launcher = successfulLaunchDaemon(root);
+		try {
+			await writeLockfile({
+				pid: process.pid,
+				socketPath: getSocketPath(root),
+				startedAt: Date.now() - 3_600_000,
+				projectRoot: root,
+			});
+
+			const result = await runDaemonCli('start', {
+				projectRoot: root,
+				trustDirectory: true,
+				launchDaemon: launcher.launch,
+			});
+
+			t.is(result.exitCode, 0);
+			t.false(/already running/i.test(result.output));
+			t.is(launcher.calls.length, 1);
+		} finally {
 			await rm(root, {recursive: true, force: true});
 		}
 	},
@@ -585,14 +685,16 @@ test.serial(
 function successfulLaunchDaemon(projectRoot: string) {
 	const calls: Array<{projectRoot: string; trustLevel: string}> = [];
 	return {
-		launch: (root: string, trustLevel: import('@/verify/trust').TrustLevel) => {
+		launch: (root: string, trustLevel: import('@/verify/trust-level').TrustLevel) => {
 			calls.push({projectRoot: root, trustLevel});
-			void writeLockfile({
-				pid: process.pid,
-				socketPath: getSocketPath(projectRoot),
-				startedAt: Date.now(),
-				projectRoot,
-			});
+			void listenOnSocket(projectRoot).then(() =>
+				writeLockfile({
+					pid: process.pid,
+					socketPath: getSocketPath(projectRoot),
+					startedAt: Date.now(),
+					projectRoot,
+				}),
+			);
 			return {} as import('node:child_process').ChildProcess;
 		},
 		calls,
@@ -612,6 +714,31 @@ test.serial('unknown flag is rejected with exit 1 and no daemon spawned', async 
 		t.is(result.exitCode, 1);
 		t.regex(result.output, /Unknown flag/);
 		t.is(launcher.calls.length, 0);
+	} finally {
+		await rm(root, {recursive: true, force: true});
+	}
+});
+
+test.serial('--help prints usage, exits 0 and never runs the subcommand', async t => {
+	const root = await tempProject();
+	const launcher = successfulLaunchDaemon(root);
+	try {
+		const start = await runDaemonCli('start', {
+			projectRoot: root,
+			trustDirectory: true,
+			args: ['--help'],
+			launchDaemon: launcher.launch,
+		});
+		t.is(start.exitCode, 0);
+		t.regex(start.output, /^Usage: nanocoder daemon start/);
+		t.is(launcher.calls.length, 0);
+
+		const install = await runDaemonCli('install', {
+			projectRoot: root,
+			args: ['-h'],
+		});
+		t.is(install.exitCode, 0);
+		t.is(install.output, 'Usage: nanocoder daemon install');
 	} finally {
 		await rm(root, {recursive: true, force: true});
 	}
@@ -655,9 +782,10 @@ test.serial('--trust flag takes precedence over the project config value', async
 	}
 });
 
-test.serial('project config trust level is used when no flag is given', async t => {
+test.serial('project config trust level is used when no flag is given and the user confirms it', async t => {
 	const root = await tempProject();
 	const launcher = successfulLaunchDaemon(root);
+	let prompted = false;
 	try {
 		const result = await runDaemonCli('start', {
 			projectRoot: root,
@@ -665,7 +793,14 @@ test.serial('project config trust level is used when no flag is given', async t 
 			args: [],
 			launchDaemon: launcher.launch,
 			loadVerifyConfigFn: () => ({trustLevel: 'auto-fix'}),
+			isInteractive: () => true,
+			isFullCommitTrustConfirmedFn: () => false,
+			confirmConfigAutoFixTrust: async () => {
+				prompted = true;
+				return true;
+			},
 		});
+		t.true(prompted, 'a config-sourced auto-fix asks for confirmation');
 		t.is(result.exitCode, 0);
 		t.is(launcher.calls[0]?.trustLevel, 'auto-fix');
 		t.regex(result.output, /CI trust level: auto-fix \(agents\.config\.json\)/);
@@ -840,3 +975,209 @@ test.serial(
 		}
 	},
 );
+
+// ---- Elevated trust from agents.config.json needs the user's confirmation ----
+
+test.serial('config auto-fix without a terminal falls back to comment-only', async t => {
+	const root = await tempProject();
+	const launcher = successfulLaunchDaemon(root);
+	try {
+		const result = await runDaemonCli('start', {
+			projectRoot: root,
+			trustDirectory: true,
+			args: [],
+			launchDaemon: launcher.launch,
+			loadVerifyConfigFn: () => ({trustLevel: 'auto-fix'}),
+			isInteractive: () => false,
+			isFullCommitTrustConfirmedFn: () => false,
+			confirmConfigAutoFixTrust: async () => {
+				t.fail('no prompt without a terminal');
+				return true;
+			},
+		});
+		t.is(result.exitCode, 0);
+		t.is(launcher.calls[0]?.trustLevel, 'comment-only');
+		t.regex(result.output, /CI trust level: comment-only \(agents\.config\.json asked for auto-fix/);
+	} finally {
+		await rm(root, {recursive: true, force: true});
+		await removeLockfile(root);
+	}
+});
+
+test.serial('config full-commit without a terminal falls back to comment-only instead of failing', async t => {
+	const root = await tempProject();
+	const launcher = successfulLaunchDaemon(root);
+	try {
+		const result = await runDaemonCli('start', {
+			projectRoot: root,
+			trustDirectory: true,
+			args: [],
+			launchDaemon: launcher.launch,
+			loadVerifyConfigFn: () => ({trustLevel: 'full-commit'}),
+			isInteractive: () => false,
+			isFullCommitTrustConfirmedFn: () => false,
+		});
+		t.is(result.exitCode, 0);
+		t.is(launcher.calls[0]?.trustLevel, 'comment-only');
+	} finally {
+		await rm(root, {recursive: true, force: true});
+		await removeLockfile(root);
+	}
+});
+
+test.serial('declining a config auto-fix aborts without spawning', async t => {
+	const root = await tempProject();
+	const launcher = successfulLaunchDaemon(root);
+	try {
+		const result = await runDaemonCli('start', {
+			projectRoot: root,
+			trustDirectory: true,
+			args: [],
+			launchDaemon: launcher.launch,
+			loadVerifyConfigFn: () => ({trustLevel: 'auto-fix'}),
+			isInteractive: () => true,
+			isFullCommitTrustConfirmedFn: () => false,
+			confirmConfigAutoFixTrust: async () => false,
+		});
+		t.is(result.exitCode, 1);
+		t.regex(result.output, /not confirmed/);
+		t.is(launcher.calls.length, 0);
+	} finally {
+		await rm(root, {recursive: true, force: true});
+	}
+});
+
+test.serial('a confirmed project keeps its config level unattended', async t => {
+	const root = await tempProject();
+	const launcher = successfulLaunchDaemon(root);
+	try {
+		const result = await runDaemonCli('start', {
+			projectRoot: root,
+			trustDirectory: true,
+			args: [],
+			launchDaemon: launcher.launch,
+			loadVerifyConfigFn: () => ({trustLevel: 'auto-fix'}),
+			isInteractive: () => false,
+			isFullCommitTrustConfirmedFn: () => true,
+		});
+		t.is(result.exitCode, 0);
+		t.is(launcher.calls[0]?.trustLevel, 'auto-fix');
+	} finally {
+		await rm(root, {recursive: true, force: true});
+		await removeLockfile(root);
+	}
+});
+
+test.serial('an explicit --trust auto-fix needs no prompt', async t => {
+	const root = await tempProject();
+	const launcher = successfulLaunchDaemon(root);
+	try {
+		const result = await runDaemonCli('start', {
+			projectRoot: root,
+			trustDirectory: true,
+			args: ['--trust', 'auto-fix'],
+			launchDaemon: launcher.launch,
+			loadVerifyConfigFn: () => ({trustLevel: 'full-commit'}),
+			isInteractive: () => false,
+			isFullCommitTrustConfirmedFn: () => false,
+		});
+		t.is(result.exitCode, 0);
+		t.is(launcher.calls[0]?.trustLevel, 'auto-fix');
+	} finally {
+		await rm(root, {recursive: true, force: true});
+		await removeLockfile(root);
+	}
+});
+
+// ---- --trust parsing and already-running UX ----
+
+test.serial('--trust=<level> is accepted', async t => {
+	const root = await tempProject();
+	const launcher = successfulLaunchDaemon(root);
+	try {
+		const result = await runDaemonCli('start', {
+			projectRoot: root,
+			trustDirectory: true,
+			args: ['--trust=auto-fix'],
+			launchDaemon: launcher.launch,
+			loadVerifyConfigFn: () => undefined,
+		});
+		t.is(result.exitCode, 0);
+		t.is(launcher.calls[0]?.trustLevel, 'auto-fix');
+	} finally {
+		await rm(root, {recursive: true, force: true});
+		await removeLockfile(root);
+	}
+});
+
+for (const args of [['--trust', '--trust-directory'], ['--trust'], ['--trust=']]) {
+	test.serial(`${args.join(' ')} reports that --trust requires a level`, async t => {
+		const root = await tempProject();
+		const launcher = successfulLaunchDaemon(root);
+		try {
+			const result = await runDaemonCli('start', {
+				projectRoot: root,
+				trustDirectory: true,
+				args,
+				launchDaemon: launcher.launch,
+			});
+			t.is(result.exitCode, 1);
+			t.regex(result.output, /--trust requires a level/);
+			t.is(launcher.calls.length, 0);
+		} finally {
+			await rm(root, {recursive: true, force: true});
+		}
+	});
+}
+
+test.serial('start while running says a requested --trust level was not applied', async t => {
+	const root = await tempProject();
+	try {
+		await listenOnSocket(root);
+		await writeLockfile({
+			pid: process.pid,
+			socketPath: getSocketPath(root),
+			startedAt: Date.now(),
+			projectRoot: root,
+			ciTrustLevel: 'comment-only',
+		});
+		const result = await runDaemonCli('start', {
+			projectRoot: root,
+			trustDirectory: true,
+			args: ['--trust', 'auto-fix'],
+		});
+		t.is(result.exitCode, 0);
+		t.regex(result.output, /already running/);
+		t.regex(result.output, /CI trust level: comment-only/);
+		t.regex(result.output, /--trust auto-fix was not applied/);
+	} finally {
+		await removeLockfile(root);
+		await rm(root, {recursive: true, force: true});
+	}
+});
+
+test.serial('status shows the CI trust level from the lockfile', async t => {
+	const root = await tempProject();
+	try {
+		await listenOnSocket(root);
+		await writeLockfile({
+			pid: process.pid,
+			socketPath: getSocketPath(root),
+			startedAt: Date.now(),
+			projectRoot: root,
+			ciTrustLevel: 'auto-fix',
+		});
+		const result = await runDaemonCli('status', {projectRoot: root});
+		t.regex(result.output, /CI trust level auto-fix/);
+	} finally {
+		await removeLockfile(root);
+		await rm(root, {recursive: true, force: true});
+	}
+});
+
+test('config auto-fix warning describes the shell-less fix agent', t => {
+	const text = CONFIG_AUTO_FIX_WARNING('/repo');
+	t.notRegex(text, /runs shell commands/);
+	t.regex(text, /edits files and commits/);
+	t.regex(text, /no\s+shell/);
+});
