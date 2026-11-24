@@ -101,6 +101,9 @@ function tryLoadConfig<T>(
 
 	try {
 		const config = readCachedConfigFile(configPath);
+		if (config === null) {
+			return null;
+		}
 		return extract(config);
 	} catch (error) {
 		notifyError(
