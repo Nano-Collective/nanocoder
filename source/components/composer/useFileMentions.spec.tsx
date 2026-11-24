@@ -1,6 +1,6 @@
-import {mkdtempSync, rmSync, writeFileSync} from 'node:fs';
+import {mkdirSync, mkdtempSync, rmSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
-import {join} from 'node:path';
+import {dirname, join} from 'node:path';
 import test from 'ava';
 import {render} from 'ink-testing-library';
 import React from 'react';
@@ -52,7 +52,11 @@ function Probe({
 /** A temp cwd holding `files`, with the file-list cache reset around it. */
 function inTempDir(t: {teardown: (fn: () => void) => void}, files: string[]) {
 	const dir = mkdtempSync(join(tmpdir(), 'mentions-'));
-	for (const file of files) writeFileSync(join(dir, file), 'content');
+	for (const file of files) {
+		const fullPath = join(dir, file);
+		mkdirSync(dirname(fullPath), {recursive: true});
+		writeFileSync(fullPath, 'content');
+	}
 	const cwd = process.cwd();
 	process.chdir(dir);
 	clearFileListCache();
@@ -156,6 +160,25 @@ test.serial('selectCurrent attaches the highlighted file and closes the list', a
 	await wait();
 	t.is(s.replaced.length, 1);
 	t.regex(s.replaced[0]!.displayValue, /^read \[@zzpick\.txt\]/);
+	t.is(s.remounts, 1);
+	t.false(s.mentions.isActive);
+});
+
+test.serial('selectCurrent attaches a highlighted directory and closes the list', async t => {
+	inTempDir(t, ['zzdir/file.txt']);
+	const s = setup('read @zzdi');
+	t.teardown(s.unmount);
+	await until(() => s.mentions.completions.some(c => c.path === 'zzdir/'));
+
+	const dirIndex = s.mentions.completions.findIndex(c => c.path === 'zzdir/');
+	while (s.mentions.selectedIndex !== dirIndex) {
+		s.mentions.moveSelection('down');
+	}
+
+	t.true(await s.mentions.selectCurrent());
+	await wait();
+	t.is(s.replaced.length, 1);
+	t.regex(s.replaced[0]!.displayValue, /^read \[@zzdir\/\]/);
 	t.is(s.remounts, 1);
 	t.false(s.mentions.isActive);
 });

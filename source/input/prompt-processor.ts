@@ -65,12 +65,21 @@ export function assemblePrompt(inputState: InputState): string {
 				break;
 			}
 			case PlaceholderType.FILE: {
-				// Format file content with header for LLM context. Large files
-				// inline only a head preview plus a read_file hint so a single
-				// @-mention can't flood the conversation; small files inline whole.
-				const fileName =
-					placeholderContent.filePath.split('/').pop() ||
-					placeholderContent.filePath;
+				// Format file or directory content with header for LLM context. Large files
+				// or listings inline only a head preview plus a read_file or list_directory hint
+				// so a single @-mention can't flood the conversation; small files inline whole.
+				const isDirectory =
+					placeholderContent.content.startsWith('Directory: ') ||
+					placeholderContent.filePath.endsWith('/') ||
+					placeholderContent.displayText.includes('/]');
+				const segments = placeholderContent.filePath
+					.split(/[/\\]/)
+					.filter(Boolean);
+				const label =
+					segments[segments.length - 1] || placeholderContent.filePath;
+				const itemLabel = isDirectory
+					? `Directory: ${label}`
+					: `File: ${label}`;
 				const lines = placeholderContent.content.split('\n');
 				const totalLines = lines.length;
 
@@ -79,14 +88,19 @@ export function assemblePrompt(inputState: InputState): string {
 						.slice(0, FILE_MENTION_PREVIEW_LINES)
 						.join('\n');
 					const remaining = totalLines - FILE_MENTION_PREVIEW_LINES;
-					const relPath = isAbsolute(placeholderContent.filePath)
-						? relative(process.cwd(), placeholderContent.filePath)
-						: placeholderContent.filePath;
-					const header = `=== File: ${fileName} (${totalLines} lines, showing first ${FILE_MENTION_PREVIEW_LINES}) ===`;
-					const footer = `=== ${remaining} more lines, use read_file('${relPath}') for the full file ===`;
+					const relPath = (
+						isAbsolute(placeholderContent.filePath)
+							? relative(process.cwd(), placeholderContent.filePath)
+							: placeholderContent.filePath
+					).replace(/[/\\]+$/, '');
+					const hint = isDirectory
+						? `use list_directory('${relPath}') for the full listing`
+						: `use read_file('${relPath}') for the full file`;
+					const header = `=== ${itemLabel} (${totalLines} lines, showing first ${FILE_MENTION_PREVIEW_LINES}) ===`;
+					const footer = `=== ${remaining} more lines, ${hint} ===`;
 					replacementContent = `${header}\n${previewBody}\n${footer}`;
 				} else {
-					const header = `=== File: ${fileName} ===`;
+					const header = `=== ${itemLabel} ===`;
 					const footer = '='.repeat(header.length);
 					replacementContent = `${header}\n${placeholderContent.content}\n${footer}`;
 				}

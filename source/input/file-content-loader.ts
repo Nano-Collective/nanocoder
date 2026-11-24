@@ -1,7 +1,10 @@
-import {readFile, stat} from 'node:fs/promises';
-import {extname, resolve} from 'node:path';
+import {readdir, readFile, stat} from 'node:fs/promises';
+import {extname, join, relative, resolve} from 'node:path';
 import {BINARY_FILE_EXTENSIONS, MAX_FILE_TAG_SIZE_BYTES} from '@/constants.js';
+import {getProjectRoot} from '@/services/session-cwd';
 import {formatError} from '@/utils/error-formatter';
+import {addNestedGitignore, loadGitignore} from '@/utils/fs/gitignore-loader';
+import {isPathInside} from '@/utils/fs/path-validation';
 import {estimateTokens} from '@/utils/token-calculator';
 
 interface FileContentResult {
@@ -31,6 +34,10 @@ export async function loadFileContent(
 
 		// Check if file exists and get stats
 		const fileStats = await stat(absPath);
+
+		if (fileStats.isDirectory()) {
+			return loadDirectoryContent(filePath, absPath);
+		}
 
 		// Check if it's a file (not directory)
 		if (!fileStats.isFile()) {
@@ -189,6 +196,159 @@ export async function loadFileContent(
  */
 function formatFileContent(lines: string[], filePath: string): string {
 	return `Path: ${filePath}\n\n${lines.join('\n')}`;
+}
+
+const MAX_DIRECTORY_ENTRIES = 200;
+const MAX_DIRECTORY_DEPTH = 3;
+
+interface DirectoryWalkEntry {
+	relativePath: string;
+	isDirectory: boolean;
+}
+
+async function loadDirectoryContent(
+	filePath: string,
+	absPath: string,
+): Promise<FileContentResult> {
+	try {
+		const root = getProjectRoot();
+		const isInsideRoot = isPathInside(absPath, root);
+		const ignoreBase = isInsideRoot ? root : absPath;
+		const ig = loadGitignore(ignoreBase);
+
+		const listingHiddenDir = /(^|[/\\])\.[^./\\]/.test(
+			relative(ignoreBase, absPath),
+		);
+
+		if (isInsideRoot) {
+			const listedSegments = relative(root, absPath)
+				.split(/[/\\]/)
+				.filter(Boolean);
+			for (let depth = 1; depth < listedSegments.length; depth++) {
+				const ancestor = listedSegments.slice(0, depth);
+				await addNestedGitignore(
+					ig,
+					join(root, ...ancestor),
+					ancestor.join('/'),
+				);
+			}
+		}
+
+		const entries: DirectoryWalkEntry[] = [];
+		let hitCap = false;
+
+		const walk = async (
+			currentPath: string,
+			relativeTo: string,
+			depth: number,
+		): Promise<void> => {
+			if (depth > MAX_DIRECTORY_DEPTH || hitCap) return;
+
+			try {
+				await addNestedGitignore(
+					ig,
+					currentPath,
+					relative(ignoreBase, currentPath).replace(/\\/g, '/'),
+				);
+				const items = await readdir(currentPath, {withFileTypes: true});
+
+				// Sort items: directories first, then files, alphabetically
+				items.sort((a, b) => {
+					if (a.isDirectory() && !b.isDirectory()) return -1;
+					if (!a.isDirectory() && b.isDirectory()) return 1;
+					return a.name.localeCompare(b.name);
+				});
+
+				for (const item of items) {
+					if (entries.length >= MAX_DIRECTORY_ENTRIES) {
+						hitCap = true;
+						return;
+					}
+
+					// Skip hidden files unless explicitly listing a hidden dir
+					if (item.name.startsWith('.') && !listingHiddenDir) {
+						continue;
+					}
+
+					const fullPath = join(currentPath, item.name);
+					const isDir = item.isDirectory();
+					const ignorePath = relative(ignoreBase, fullPath).replace(/\\/g, '/');
+
+					if (
+						ig.ignores(ignorePath) ||
+						(isDir && ig.ignores(`${ignorePath}/`))
+					) {
+						continue;
+					}
+
+					const relPath = relativeTo ? `${relativeTo}/${item.name}` : item.name;
+					entries.push({
+						relativePath: relPath,
+						isDirectory: isDir,
+					});
+
+					if (isDir && depth < MAX_DIRECTORY_DEPTH) {
+						await walk(fullPath, relPath, depth + 1);
+					}
+				}
+			} catch (error: unknown) {
+				if (
+					error instanceof Error &&
+					'code' in error &&
+					error.code === 'EACCES'
+				) {
+					return;
+				}
+				throw error;
+			}
+		};
+
+		await walk(absPath, '', 0);
+
+		const normalizedDisplayPath = filePath.replace(/\\/g, '/');
+		const displayPath = normalizedDisplayPath.endsWith('/')
+			? normalizedDisplayPath
+			: `${normalizedDisplayPath}/`;
+
+		let body = '';
+		if (entries.length === 0) {
+			body = '(empty directory)';
+		} else {
+			body = entries
+				.map(e => (e.isDirectory ? `${e.relativePath}/` : e.relativePath))
+				.join('\n');
+			if (hitCap) {
+				body += `\n\n[Showing first ${MAX_DIRECTORY_ENTRIES} entries up to depth ${MAX_DIRECTORY_DEPTH}]`;
+			}
+		}
+
+		const formattedContent = `Directory: ${displayPath}\n\n${body}`;
+		const tokens = estimateTokens(formattedContent);
+
+		return {
+			success: true,
+			content: formattedContent,
+			metadata: {
+				path: filePath,
+				absolutePath: absPath,
+				size: formattedContent.length,
+				lineCount: formattedContent.split('\n').length,
+				tokens,
+			},
+		};
+	} catch (error) {
+		return {
+			success: false,
+			error: formatError(error),
+			metadata: {
+				path: filePath,
+				absolutePath: absPath,
+				size: 0,
+				lineCount: 0,
+				tokens: 0,
+			},
+		};
+	}
 }
 
 function formatBytes(bytes: number): string {

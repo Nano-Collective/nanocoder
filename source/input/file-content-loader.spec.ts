@@ -34,6 +34,16 @@ test.before(async () => {
 	// Create a large text file exceeding the size limit
 	const largeContent = 'x'.repeat(MAX_FILE_TAG_SIZE_BYTES + 1);
 	await writeFile(join(testDir, 'huge.csv'), largeContent, 'utf-8');
+
+	// Create test directory structure
+	const subDir = join(testDir, 'subdir');
+	const nestedDir = join(subDir, 'nested');
+	const emptyDir = join(testDir, 'empty');
+	await mkdir(nestedDir, {recursive: true});
+	await mkdir(emptyDir, {recursive: true});
+	await writeFile(join(subDir, 'file1.txt'), 'hello');
+	await writeFile(join(subDir, 'file2.ts'), 'export const x = 1;');
+	await writeFile(join(nestedDir, 'child.txt'), 'child');
 });
 
 test.after.always(async () => {
@@ -172,5 +182,91 @@ test('allows large files when line range is specified', async t => {
 	t.true(result.success);
 	// Should load the content (not metadata) since a line range was given
 	t.true(result.content!.startsWith('Path:'));
+});
+
+test('loads directory content successfully', async t => {
+	const dirPath = join(testDir, 'subdir');
+	const result = await loadFileContent(dirPath);
+
+	t.true(result.success);
+	t.truthy(result.content);
+	t.true(result.content!.startsWith(`Directory: ${dirPath.replace(/\\/g, '/')}/`));
+	t.true(result.content!.includes('nested/'));
+	t.true(result.content!.includes('nested/child.txt'));
+	t.true(result.content!.includes('file1.txt'));
+	t.true(result.content!.includes('file2.ts'));
+	t.is(result.metadata.path, dirPath);
+	t.true(result.metadata.tokens > 0);
+});
+
+test('loads directory with trailing slash', async t => {
+	const dirPath = `${join(testDir, 'subdir').replace(/\\/g, '/')}/`;
+	const result = await loadFileContent(dirPath);
+
+	t.true(result.success);
+	t.true(result.content!.startsWith(`Directory: ${dirPath}`));
+	t.true(result.content!.includes('file1.txt'));
+});
+
+test('loads empty directory', async t => {
+	const dirPath = join(testDir, 'empty');
+	const result = await loadFileContent(dirPath);
+
+	t.true(result.success);
+	t.true(result.content!.includes('(empty directory)'));
+});
+
+test('respects .gitignore and .nanocoderignore in directory listings', async t => {
+	const ignoreTestDir = join(testDir, 'ignore-test');
+	await mkdir(join(ignoreTestDir, 'keep'), {recursive: true});
+	await mkdir(join(ignoreTestDir, 'ignored-dir'), {recursive: true});
+	await writeFile(join(ignoreTestDir, '.gitignore'), 'ignored-dir/\n*.secret\n');
+	await writeFile(join(ignoreTestDir, '.nanocoderignore'), 'nanocodered.txt\n');
+	await writeFile(join(ignoreTestDir, 'keep', 'visible.txt'), 'hi');
+	await writeFile(join(ignoreTestDir, 'secret.secret'), 'shh');
+	await writeFile(join(ignoreTestDir, 'nanocodered.txt'), 'no');
+	await writeFile(join(ignoreTestDir, 'ignored-dir', 'hidden.txt'), 'no');
+
+	const result = await loadFileContent(ignoreTestDir);
+
+	t.true(result.success);
+	t.true(result.content!.includes('keep/visible.txt'));
+	t.false(result.content!.includes('secret.secret'));
+	t.false(result.content!.includes('nanocodered.txt'));
+	t.false(result.content!.includes('ignored-dir'));
+});
+
+test('respects max depth limit (depth 3)', async t => {
+	const depthTestDir = join(testDir, 'depth-test');
+	const deepPath = join(depthTestDir, 'd1', 'd2', 'd3', 'd4');
+	await mkdir(deepPath, {recursive: true});
+	await writeFile(join(depthTestDir, 'd1', 'f1.txt'), '1');
+	await writeFile(join(depthTestDir, 'd1', 'd2', 'f2.txt'), '2');
+	await writeFile(join(depthTestDir, 'd1', 'd2', 'd3', 'f3.txt'), '3');
+	await writeFile(join(deepPath, 'f4.txt'), '4');
+
+	const result = await loadFileContent(depthTestDir);
+
+	t.true(result.success);
+	t.true(result.content!.includes('d1/f1.txt'));
+	t.true(result.content!.includes('d1/d2/f2.txt'));
+	t.true(result.content!.includes('d1/d2/d3/f3.txt'));
+	t.false(result.content!.includes('f4.txt'));
+});
+
+test('caps directory listing at 200 entries', async t => {
+	const manyFilesDir = join(testDir, 'many-files');
+	await mkdir(manyFilesDir, {recursive: true});
+	for (let i = 0; i < 210; i++) {
+		await writeFile(
+			join(manyFilesDir, `file_${String(i).padStart(3, '0')}.txt`),
+			'a',
+		);
+	}
+
+	const result = await loadFileContent(manyFilesDir);
+
+	t.true(result.success);
+	t.true(result.content!.includes('[Showing first 200 entries up to depth 3]'));
 });
 

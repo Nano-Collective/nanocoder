@@ -1,5 +1,5 @@
 import {FILE_EXTENSION_TO_LANGUAGE} from '@/constants';
-import {getAllFiles} from './file-autocomplete';
+import {getAllEntries, getAllFiles} from './file-autocomplete';
 import {loadFileContent} from './file-content-loader';
 
 interface ParsedFileMention {
@@ -212,8 +212,11 @@ async function suggestClosestFile(
 	cwd: string,
 ): Promise<string | undefined> {
 	const wanted = filePath.replace(/\\/g, '/').toLowerCase();
+	const isDir = wanted.endsWith('/');
 	const wantedExtension = extensionOf(wanted);
-	const files = await getAllFiles(cwd);
+	const files = isDir
+		? (await getAllEntries(cwd)).map(e => e.path)
+		: await getAllFiles(cwd);
 	let best:
 		| {path: string; distance: number; sameExtension: boolean}
 		| undefined;

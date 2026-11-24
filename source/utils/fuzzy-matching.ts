@@ -74,42 +74,73 @@ export function fuzzyScoreFilePath(filePath: string, query: string): number {
 		return 0;
 	}
 
-	const lowerPath = filePath.toLowerCase();
-	const lowerQuery = query.toLowerCase();
+	const normalizedPath = filePath.replace(/\\/g, '/');
+	const normalizedQuery = query.replace(/\\/g, '/');
+
+	const lowerPath = normalizedPath.toLowerCase();
+	const lowerQuery = normalizedQuery.toLowerCase();
 
 	// Exact match (highest score)
 	if (lowerPath === lowerQuery) {
 		return 1000;
 	}
 
-	// Exact match of filename (without path)
-	const filename = filePath.split('/').pop() || '';
-	if (filename.toLowerCase() === lowerQuery) {
+	const cleanPath = lowerPath.endsWith('/')
+		? lowerPath.slice(0, -1)
+		: lowerPath;
+	const cleanQuery = lowerQuery.endsWith('/')
+		? lowerQuery.slice(0, -1)
+		: lowerQuery;
+
+	if (cleanPath === cleanQuery && cleanPath.length > 0) {
+		return 1000;
+	}
+
+	// Exact match of filename / directory name (without path)
+	const filename = cleanPath.split('/').pop() || '';
+	if (filename && (filename === cleanQuery || filename === lowerQuery)) {
 		return 900;
 	}
 
 	// Path ends with query
-	if (lowerPath.endsWith(lowerQuery)) {
+	if (
+		lowerPath.endsWith(lowerQuery) ||
+		(cleanQuery && cleanPath.endsWith(cleanQuery))
+	) {
 		return 850;
 	}
 
-	// Filename starts with query
-	if (filename.toLowerCase().startsWith(lowerQuery)) {
+	// Filename / directory name starts with query
+	if (
+		filename &&
+		(filename.startsWith(lowerQuery) ||
+			(cleanQuery && filename.startsWith(cleanQuery)))
+	) {
 		return 800;
 	}
 
 	// Path starts with query
-	if (lowerPath.startsWith(lowerQuery)) {
+	if (
+		lowerPath.startsWith(lowerQuery) ||
+		(cleanQuery && cleanPath.startsWith(cleanQuery))
+	) {
 		return 750;
 	}
 
-	// Filename contains query as substring
-	if (filename.toLowerCase().includes(lowerQuery)) {
+	// Filename / directory name contains query as substring
+	if (
+		filename &&
+		(filename.includes(lowerQuery) ||
+			(cleanQuery && filename.includes(cleanQuery)))
+	) {
 		return 700;
 	}
 
 	// Path contains query as substring
-	if (lowerPath.includes(lowerQuery)) {
+	if (
+		lowerPath.includes(lowerQuery) ||
+		(cleanQuery && cleanPath.includes(cleanQuery))
+	) {
 		return 600;
 	}
 

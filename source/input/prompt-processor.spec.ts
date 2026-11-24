@@ -45,6 +45,26 @@ test('assemblePrompt - replaces placeholder with file content', t => {
 	t.true(result.includes('file content'));
 });
 
+test('assemblePrompt - replaces placeholder with directory content', t => {
+	const inputState: InputState = {
+		displayValue: 'Dir: [@src/components/]',
+		placeholderContent: {
+			1: {
+				type: PlaceholderType.FILE,
+				content: 'Directory: src/components/\n\nButton.tsx\nCard.tsx',
+				filePath: 'src/components/',
+				displayText: '[@src/components/]',
+			},
+		},
+	};
+
+	const result = assemblePrompt(inputState);
+
+	t.true(result.includes('=== Directory: components ==='));
+	t.true(result.includes('Directory: src/components/'));
+	t.true(result.includes('Button.tsx'));
+});
+
 test('assemblePrompt - handles multiple placeholders', t => {
 	const inputState: InputState = {
 		displayValue: '[Paste #1: 5 chars] and [Paste #2: 12 chars]',
@@ -142,6 +162,40 @@ test('assemblePrompt - previews a large file and emits a read_file hint', t => {
 	t.true(
 		result.includes(
 			`${totalLines - FILE_MENTION_PREVIEW_LINES} more lines, use read_file('src/big.ts')`,
+		),
+	);
+});
+
+test('assemblePrompt - previews a large directory listing and emits a list_directory hint', t => {
+	const totalLines = FILE_MENTION_INLINE_MAX_LINES + 50;
+	const lines = [
+		'Directory: src/huge/',
+		'',
+		...Array.from({length: totalLines - 2}, (_, i) => `file_${i + 1}.ts`),
+	];
+	const content = lines.join('\n');
+	const inputState: InputState = {
+		displayValue: '[@src/huge/]',
+		placeholderContent: {
+			file_1: {
+				type: PlaceholderType.FILE,
+				content,
+				filePath: 'src/huge/',
+				displayText: '[@src/huge/]',
+			},
+		},
+	};
+
+	const result = assemblePrompt(inputState);
+
+	t.true(
+		result.includes(
+			`=== Directory: huge (${totalLines} lines, showing first ${FILE_MENTION_PREVIEW_LINES}) ===`,
+		),
+	);
+	t.true(
+		result.includes(
+			`${totalLines - FILE_MENTION_PREVIEW_LINES} more lines, use list_directory('src/huge')`,
 		),
 	);
 });
