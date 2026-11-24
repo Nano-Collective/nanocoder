@@ -398,3 +398,58 @@ test('TransportFactory.validateServerConfig: validates existing command (node)',
 	t.true(result.valid);
 	t.is(result.errors.length, 0);
 });
+
+// ============================================================================
+// Tests for stdio environment isolation (Issue #2329)
+// ============================================================================
+
+test('TransportFactory.createTransport: stdio server with env does not inherit the parent environment', t => {
+	process.env.NC_VERIFY_SECRET_KEY = 'parent-secret-value';
+	try {
+		const transport = TransportFactory.createTransport({
+			name: 'test-stdio-env-leak',
+			transport: 'stdio',
+			command: 'node',
+			env: {FOO: 'bar'},
+		});
+		const env = (
+			transport as unknown as {_serverParams: {env?: Record<string, string>}}
+		)._serverParams.env;
+
+		t.truthy(env);
+		t.is(env?.FOO, 'bar');
+		t.false('NC_VERIFY_SECRET_KEY' in (env ?? {}));
+	} finally {
+		delete process.env.NC_VERIFY_SECRET_KEY;
+	}
+});
+
+test('TransportFactory.createTransport: stdio server with env still gets the safe default environment', t => {
+	const transport = TransportFactory.createTransport({
+		name: 'test-stdio-env-defaults',
+		transport: 'stdio',
+		command: 'node',
+		env: {FOO: 'bar'},
+	});
+	const env = (
+		transport as unknown as {_serverParams: {env?: Record<string, string>}}
+	)._serverParams.env;
+
+	// PATH is part of the MCP SDK's safe default environment.
+	if (process.env.PATH !== undefined) {
+		t.is(env?.PATH, process.env.PATH);
+	}
+});
+
+test('TransportFactory.createTransport: stdio server without env passes undefined so the SDK uses its safe defaults', t => {
+	const transport = TransportFactory.createTransport({
+		name: 'test-stdio-no-env',
+		transport: 'stdio',
+		command: 'node',
+	});
+	const env = (
+		transport as unknown as {_serverParams: {env?: Record<string, string>}}
+	)._serverParams.env;
+
+	t.is(env, undefined);
+});

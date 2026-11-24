@@ -1,4 +1,7 @@
-import {StdioClientTransport} from '@modelcontextprotocol/sdk/client/stdio.js';
+import {
+	getDefaultEnvironment,
+	StdioClientTransport,
+} from '@modelcontextprotocol/sdk/client/stdio.js';
 import {StreamableHTTPClientTransport} from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import {WebSocketClientTransport} from '@modelcontextprotocol/sdk/client/websocket.js';
 import {execFileSync} from 'child_process';
@@ -126,8 +129,17 @@ export class TransportFactory {
 		return new StdioClientTransport({
 			command: server.command,
 			args,
+			// Never hand the server the whole parent environment: the MCP
+			// SDK only inherits a small safe set (PATH, HOME, ...) when env
+			// is undefined, and merges that same set under an explicit env.
+			// Spreading process.env here leaked every parent API key and
+			// token to the server as soon as any env entry was configured
+			// (issue #2329). Users who need a parent variable list it here.
 			env: server.env
-				? ({...process.env, ...server.env} as Record<string, string>)
+				? ({...getDefaultEnvironment(), ...server.env} as Record<
+						string,
+						string
+					>)
 				: undefined,
 			// Default 'inherit' lets server children write straight to the
 			// user's terminal — including crash dumps that land AFTER

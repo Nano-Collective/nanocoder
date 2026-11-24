@@ -183,6 +183,15 @@ test('acpMcpServersToConfig - an empty or missing list maps to nothing', t => {
 	t.deepEqual(acpMcpServersToConfig(undefined), {servers: [], skipped: []});
 });
 
+test('acpMcpServersToConfig - an empty env list maps to no env, so the server does not inherit the parent environment', t => {
+	const {servers} = acpMcpServersToConfig([
+		{name: 'plain', command: 'node', args: [], env: []},
+	]);
+
+	t.is(servers.length, 1);
+	t.is(servers[0].env, undefined);
+});
+
 // ============================================================================
 // Disabled tools
 // ============================================================================

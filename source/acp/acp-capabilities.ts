@@ -114,12 +114,17 @@ export function acpMcpServersToConfig(servers: McpServer[] = []): {
 
 	for (const server of servers) {
 		if (!('type' in server)) {
+			// An empty env list maps to no env at all: passing {} would be
+			// truthy downstream and make the transport inherit the whole
+			// parent environment (issue #2329).
+			const env =
+				server.env && server.env.length > 0 ? toRecord(server.env) : undefined;
 			mapped.push({
 				name: server.name,
 				transport: 'stdio',
 				command: server.command,
 				args: server.args ?? [],
-				env: toRecord(server.env),
+				env,
 			});
 		} else if (server.type === 'http') {
 			mapped.push({
