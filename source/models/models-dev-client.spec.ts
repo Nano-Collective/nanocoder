@@ -513,6 +513,19 @@ test('getModelPricing - returns null for local Ollama model not on models.dev', 
 	t.is(pricing, null);
 });
 
+test('getModelPricing - does not price a local model by a partial name match', async t => {
+	// The fixture has Groq's llama3-70b-8192 but no `llama3`; a partial match
+	// would show a cost for a free local Ollama model.
+	const pricing = await getModelPricing('llama3');
+	t.is(pricing, null);
+});
+
+test('getModelPricing - matches a hosted id written in a different case', async t => {
+	const exact = await getModelPricing('gpt-4o');
+	t.truthy(exact);
+	t.deepEqual(await getModelPricing('GPT-4o'), exact);
+});
+
 test('getModelPricing - returns consistent pricing on repeated calls', async t => {
 	const pricing1 = await getModelPricing('gpt-4o');
 	const pricing2 = await getModelPricing('gpt-4o');

@@ -1939,6 +1939,7 @@ const scriptedClient = (responses: any[]) => {
 			);
 		},
 		getCurrentModel: () => 'test-model',
+		getProviderConfig: () => ({config: {}}),
 	} as unknown as LLMClient;
 	return {client, sent};
 };
@@ -2209,6 +2210,7 @@ test('runAcpConversation - accumulates provider-reported usage across the turn o
 	let callCount = 0;
 	const client = {
 		getCurrentModel: () => 'test-model',
+		getProviderConfig: () => ({config: {}}),
 		chat: async () => {
 			callCount++;
 			if (callCount === 1) {
@@ -2254,6 +2256,7 @@ test('runAcpConversation - a total-only provider still reports usage on the Prom
 	const session = createMockSession(conn);
 	const client = {
 		getCurrentModel: () => 'test-model',
+		getProviderConfig: () => ({config: {}}),
 		chat: async () => ({
 			choices: [{message: {content: 'Hello'}}],
 			usage: {totalTokens: 1500},
@@ -2286,6 +2289,7 @@ test('runAcpConversation - an input-only provider does not fabricate output toke
 	const session = createMockSession(conn);
 	const client = {
 		getCurrentModel: () => 'test-model',
+		getProviderConfig: () => ({config: {}}),
 		chat: async () => ({
 			choices: [{message: {content: 'Hello'}}],
 			usage: {inputTokens: 800},
@@ -2313,6 +2317,7 @@ test('runAcpConversation - omits usage from the PromptResponse when the provider
 	const session = createMockSession(conn);
 	const client = {
 		getCurrentModel: () => 'test-model',
+		getProviderConfig: () => ({config: {}}),
 		chat: async () => ({
 			choices: [{message: {content: 'Hello'}}],
 		}),
@@ -2648,6 +2653,7 @@ test.serial('runAcpConversation - auto-commit writes its message with the sessio
 				: {choices: [{message: {content: 'done'}}]};
 		},
 		getCurrentModel: () => 'test-model',
+		getProviderConfig: () => ({config: {}}),
 	} as unknown as LLMClient;
 
 	await runAcpConversation({
