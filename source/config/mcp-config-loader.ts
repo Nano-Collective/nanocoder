@@ -1,5 +1,6 @@
 import {existsSync, readFileSync} from 'fs';
 import {join} from 'path';
+import {readCachedConfigFile} from '@/config/cached-reader';
 import {substituteEnvVars} from '@/config/env-substitution';
 import {getConfigPath} from '@/config/paths';
 import {getActiveProfile} from '@/config/profile';
@@ -296,6 +297,20 @@ export function loadAllProviderConfigs(
 	return Array.from(providerMap.values());
 }
 
+function extractProvidersFromConfig(config: unknown): ProviderConfig[] {
+	if (config && typeof config === 'object') {
+		const typed = config as Record<string, unknown>;
+		const nanocoder = typed.nanocoder as Record<string, unknown> | undefined;
+		if (nanocoder && Array.isArray(nanocoder.providers)) {
+			return substituteEnvVars(nanocoder.providers as ProviderConfig[]);
+		}
+		if (Array.isArray(typed.providers)) {
+			return substituteEnvVars(typed.providers as ProviderConfig[]);
+		}
+	}
+	return [];
+}
+
 /**
  * Load provider configurations from project-level files
  */
@@ -304,25 +319,7 @@ function loadProjectProviderConfigs(cwd: string): ProviderConfig[] {
 	const configPath = join(cwd, 'agents.config.json'); // nosemgrep
 
 	if (existsSync(configPath)) {
-		try {
-			const config = readJsonFile(configPath);
-
-			if (config.nanocoder && Array.isArray(config.nanocoder.providers)) {
-				// Apply environment variable substitution
-				const processedProviders = substituteEnvVars(
-					config.nanocoder.providers,
-				);
-				return processedProviders;
-			} else if (Array.isArray(config.providers)) {
-				// Apply environment variable substitution
-				const processedProviders = substituteEnvVars(config.providers);
-				return processedProviders;
-			}
-		} catch (error) {
-			notifyError(
-				`Failed to load project provider config from ${configPath}: ${String(error)}`,
-			);
-		}
+		return extractProvidersFromConfig(readCachedConfigFile(configPath));
 	}
 
 	return [];
@@ -347,22 +344,8 @@ function loadGlobalProviderConfigs(): ProviderConfig[] {
 
 // Helper function to load provider config from a specific file
 function loadProviderConfigFromFile(filePath: string): ProviderConfig[] {
-	try {
-		const config = readJsonFile(filePath);
-
-		if (config.nanocoder && Array.isArray(config.nanocoder.providers)) {
-			// Apply environment variable substitution
-			const processedProviders = substituteEnvVars(config.nanocoder.providers);
-			return processedProviders;
-		} else if (Array.isArray(config.providers)) {
-			// Apply environment variable substitution
-			const processedProviders = substituteEnvVars(config.providers);
-			return processedProviders;
-		}
-	} catch (error) {
-		notifyError(
-			`Failed to load provider config from ${filePath}: ${String(error)}`,
-		);
+	if (existsSync(filePath)) {
+		return extractProvidersFromConfig(readCachedConfigFile(filePath));
 	}
 
 	return [];
