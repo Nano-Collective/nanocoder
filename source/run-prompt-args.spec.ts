@@ -85,6 +85,17 @@ test('--prompt-file - is not mistaken for part of the prompt', t => {
 	t.is(parseRunPrompt(['run', 'do', '--prompt-file', '-', 'this']), 'do this');
 });
 
+test('--json-schema values are stripped from the run prompt', t => {
+	t.is(
+		parseRunPrompt(['run', '--json-schema', './schema.json', 'summarize', 'this']),
+		'summarize this',
+	);
+	t.is(
+		parseRunPrompt(['run', '--json-schema={"type":"object"}', 'summarize']),
+		'summarize',
+	);
+});
+
 test('readStdinText joins chunks', async t => {
 	t.is(await readStdinText(Readable.from(['abc', 'def']), MAX), 'abcdef');
 });
