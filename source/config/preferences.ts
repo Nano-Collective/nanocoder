@@ -350,7 +350,6 @@ type BooleanPreference = keyof typeof BOOLEAN_PREFERENCE_DEFAULTS;
 function getBooleanPreference(key: BooleanPreference): boolean {
 	return getPreference(key) ?? BOOLEAN_PREFERENCE_DEFAULTS[key];
 }
-}
 
 export function updateLastUsed(provider: string, model: string): void {
 	const preferences = loadPreferences();
