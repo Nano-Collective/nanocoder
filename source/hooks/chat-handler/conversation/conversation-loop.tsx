@@ -51,6 +51,17 @@ import {
 	type ToolTurnStop,
 } from './tool-turn';
 
+function hasReportedUsage(usage: LLMChatResponse['usage']): boolean {
+	return (
+		!!usage &&
+		(Number.isFinite(usage.inputTokens) ||
+			Number.isFinite(usage.outputTokens) ||
+			Number.isFinite(usage.totalTokens) ||
+			Number.isFinite(usage.cacheReadTokens) ||
+			Number.isFinite(usage.cacheWriteTokens))
+	);
+}
+
 interface ProcessAssistantResponseParams {
 	systemMessage: Message;
 	messages: Message[];
