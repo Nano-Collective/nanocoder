@@ -588,6 +588,13 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 		modelDefault: 'kimi-k3',
 	}),
 	apiKeyTemplate({
+		id: 'worldrouter',
+		name: 'WorldRouter',
+		baseUrl: 'https://inference-api.worldrouter.ai/v1',
+		apiKeyPrompt: 'API Key (from worldrouter.ai/dashboard/api-keys)',
+		modelDefault: 'claude-sonnet-5-5',
+	}),
+	apiKeyTemplate({
 		id: 'together',
 		name: 'Together AI',
 		baseUrl: 'https://api.together.ai/v1',

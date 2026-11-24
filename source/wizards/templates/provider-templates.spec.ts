@@ -603,6 +603,40 @@ test('cloudgpu template: uses default provider name and model', t => {
 	);
 });
 
+test('worldrouter template: uses fixed endpoint and parses model IDs', t => {
+	const template = PROVIDER_TEMPLATES.find(t => t.id === 'worldrouter');
+	t.truthy(template);
+
+	const config = template!.buildConfig({
+		providerName: 'WorldRouter',
+		apiKey: 'test-key',
+		model: 'claude-sonnet-5-5, deepseek-v4-flash',
+	});
+
+	t.is(config.baseUrl, 'https://inference-api.worldrouter.ai/v1');
+	t.is(config.apiKey, 'test-key');
+	t.is(config.sdkProvider, undefined);
+	t.deepEqual(config.models, ['claude-sonnet-5-5', 'deepseek-v4-flash']);
+});
+
+test('worldrouter template: uses default provider name and model', t => {
+	const template = PROVIDER_TEMPLATES.find(t => t.id === 'worldrouter');
+	t.truthy(template);
+
+	const modelField = template!.fields.find(f => f.name === 'model');
+	t.is(modelField?.default, 'claude-sonnet-5-5');
+	const apiKeyField = template!.fields.find(f => f.name === 'apiKey');
+	t.is(apiKeyField?.prompt, 'API Key (from worldrouter.ai/dashboard/api-keys)');
+	t.is(
+		template!.buildConfig({
+			providerName: '',
+			apiKey: 'test-key',
+			model: 'claude-sonnet-5-5',
+		}).name,
+		'WorldRouter',
+	);
+});
+
 test('together template: sets baseUrl and parses models', t => {
 	const template = PROVIDER_TEMPLATES.find(t => t.id === 'together');
 	t.truthy(template);
