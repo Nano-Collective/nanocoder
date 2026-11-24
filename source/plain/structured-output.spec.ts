@@ -136,6 +136,44 @@ test('describes parse and validation failures', async t => {
 	);
 });
 
+test('accepts schemas that name a format without enforcing it', async t => {
+	const schema = {
+		type: 'object',
+		properties: {
+			at: {type: 'string', format: 'date-time'},
+			link: {type: 'string', format: 'uri'},
+			mail: {type: 'string', format: 'email'},
+		},
+		required: ['at'],
+	};
+	t.deepEqual(await loadJsonSchema(JSON.stringify(schema)), schema);
+	const result = await validateStructuredOutput(
+		'{"at":"2026-11-24T10:00:00Z","link":"https://example.com"}',
+		schema,
+	);
+	t.true(result.ok);
+});
+
+test('loads and validates a draft 2020-12 schema', async t => {
+	const schema = {
+		$schema: 'https://json-schema.org/draft/2020-12/schema',
+		type: 'object',
+		properties: {tags: {type: 'array', prefixItems: [{type: 'string'}]}},
+		required: ['tags'],
+	};
+	t.deepEqual(await loadJsonSchema(JSON.stringify(schema)), schema);
+	t.true((await validateStructuredOutput('{"tags":["a"]}', schema)).ok);
+	t.false((await validateStructuredOutput('{"tags":[1]}', schema)).ok);
+});
+
+test('loads a draft 2019-09 schema', async t => {
+	const schema = {
+		$schema: 'https://json-schema.org/draft/2019-09/schema',
+		type: 'string',
+	};
+	t.deepEqual(await loadJsonSchema(JSON.stringify(schema)), schema);
+});
+
 test('validates pattern alternation with Ajv', async t => {
 	const result = await validateStructuredOutput('"pass"', {
 		type: 'string',

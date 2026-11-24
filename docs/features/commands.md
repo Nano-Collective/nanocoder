@@ -257,7 +257,7 @@ nanocoder run --json-schema ./review.schema.json "Review the working tree change
 nanocoder run --output-format json --json-schema ./review.schema.json "Review the working tree changes" | jq .structured.verdict
 ```
 
-Schemas are compiled and documents are validated with Ajv. Invalid schemas fail before the run session starts. Ajv's supported JSON Schema keywords, including conditional schemas such as `if`/`then`, `propertyNames`, and `contains`, are enforced. The schema validation uses prompt-and-validate retries; native provider structured-output modes are not currently wired and may be considered as a follow-up.
+Schemas are compiled and documents are validated with Ajv. Invalid schemas fail before the run session starts. Ajv's supported JSON Schema keywords, including conditional schemas such as `if`/`then`, `propertyNames`, and `contains`, are enforced. Schemas may declare draft-07, 2019-09 or 2020-12 as their `$schema`. `format` keywords such as `date-time` and `uri` are accepted but not enforced. The schema validation uses prompt-and-validate retries; native provider structured-output modes are not currently wired and may be considered as a follow-up.
 
 #### Output Shape
 

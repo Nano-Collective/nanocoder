@@ -25,8 +25,35 @@ function errorMessage(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
 }
 
-let ajvPromise: Promise<import('ajv').default> | undefined;
+type AjvInstance = import('ajv').default;
+const ajvInstances = new Map<string, Promise<AjvInstance>>();
 const compiledSchemas = new WeakMap<JsonSchemaDocument, ValidateFunction>();
+
+// Ajv ships no `format` validators without an extra package, and strict mode
+// refuses a schema that names one (`date-time`, `uri`, `email`). Formats are
+// annotations here, so they are accepted and not enforced.
+const AJV_OPTIONS = {multipleOfPrecision: 12, validateFormats: false};
+
+function ajvFor(schema: JsonSchemaDocument): Promise<AjvInstance> {
+	const dialect = String(schema.$schema ?? '');
+	const key = dialect.includes('2020-12')
+		? '2020'
+		: dialect.includes('2019-09')
+			? '2019'
+			: 'draft7';
+	let instance = ajvInstances.get(key);
+	if (!instance) {
+		instance = (
+			key === '2020'
+				? import('ajv/dist/2020.js').then(m => new m.default(AJV_OPTIONS))
+				: key === '2019'
+					? import('ajv/dist/2019.js').then(m => new m.default(AJV_OPTIONS))
+					: import('ajv').then(m => new m.default(AJV_OPTIONS))
+		) as Promise<AjvInstance>;
+		ajvInstances.set(key, instance);
+	}
+	return instance;
+}
 
 async function compileSchema(
 	schema: JsonSchemaDocument,
@@ -34,10 +61,7 @@ async function compileSchema(
 	const cached = compiledSchemas.get(schema);
 	if (cached) return cached;
 
-	ajvPromise ??= import('ajv').then(
-		({default: Ajv}) => new Ajv({multipleOfPrecision: 12}),
-	);
-	const ajv = await ajvPromise;
+	const ajv = await ajvFor(schema);
 	const validate = ajv.compile(schema);
 	compiledSchemas.set(schema, validate);
 	return validate;
