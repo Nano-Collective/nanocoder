@@ -1,5 +1,5 @@
 import chalk from 'chalk';
-import {type Key, Text, useInput, useStdin} from 'ink';
+import {Text, useInput} from 'ink';
 import {
 	forwardRef,
 	useEffect,
@@ -15,43 +15,6 @@ import {
 	moveCursorToVisualLine,
 	wrapWithTrimmedContinuations,
 } from '@/terminal/text-wrapping';
-
-/**
- * The raw byte sequence behind the keypress a `useInput` handler is running
- * for. Read `.current` inside the handler, not during render.
- *
- * Ink maps physical Backspace (`\x7f`) and forward Delete (`\x1b[3~`) to the
- * same `key.delete`, and does not recognise xterm's modified Enter at all, so
- * telling them apart needs the sequence itself. Stock Ink never puts it on
- * `Key`. A pnpm patch used to add a `raw` field to `Key`, but pnpm patches only
- * apply inside this repo: the published package depends on plain Ink, so
- * npm installs lost the field and Backspace became forward Delete (#1505).
- *
- * The sequence comes from the stdin emitter Ink exposes through `useStdin`,
- * the stream `useInput` itself listens to. The listener is prepended so it
- * always runs before any `useInput` handler, whatever order those
- * re-subscribe in.
- */
-export function useRawInput() {
-	const {internal_eventEmitter: emitter} = useStdin();
-	const rawRef = useRef('');
-
-	useEffect(() => {
-		const onInput = (data: unknown) => {
-			rawRef.current = String(data);
-		};
-		emitter.prependListener('input', onInput);
-		return () => {
-			emitter.removeListener('input', onInput);
-		};
-	}, [emitter]);
-
-	return rawRef;
-}
-
-/** Physical Backspace (`\x7f`) or Option/Alt+Backspace (`\x1b\x7f`). */
-export const isBackspaceKey = (key: Key, raw: string) =>
-	key.backspace || (key.delete && (raw === '\x7f' || raw === '\x1b\x7f'));
 
 /**
  * How the value effect should treat an incoming `value`, given the values
@@ -391,8 +354,6 @@ const TextInput = forwardRef<TextInputHandle, Props>(function TextInput(
 		}
 	}
 
-	const rawInputRef = useRawInput();
-
 	useInput(
 		(input, key) => {
 			if ((key.ctrl && input === 'c') || key.tab || (key.shift && key.tab)) {
@@ -435,7 +396,7 @@ const TextInput = forwardRef<TextInputHandle, Props>(function TextInput(
 			// the wrong place when the cursor was mid-text and left the cursor
 			// stranded in front of it. Checked before `key.return` because several
 			// of these encodings (ESC+CR, kitty CSI-u) do set `key.return`.
-			if (isNewlineKey(input, key, rawInputRef.current)) {
+			if (isNewlineKey(input, key)) {
 				const currentValue = originalValueRef.current;
 				const offset = cursorOffsetRef.current;
 				const withNewline =
@@ -598,17 +559,7 @@ const TextInput = forwardRef<TextInputHandle, Props>(function TextInput(
 				if (showCursor) {
 					nextCursorOffset = stepForward(nextValue, nextCursorOffset);
 				}
-			} else if (isBackspaceKey(key, rawInputRef.current)) {
-				// Backspace deletes the character before the cursor.
-				// Ink maps BOTH the physical Backspace (\x7f) and forward Delete
-				// (\x1b[3~) to `key.delete`, so we disambiguate on the raw
-				// sequence (see useRawInput): '\x7f' and the Option/Alt+Backspace
-				// variant '\x1b\x7f' (macOS/Linux terminals) are backward deletes,
-				// while '\x1b[3~' is the forward Delete key. Kitty keyboard protocol encodes
-				// Backspace as '\x1b[127u' (kittyCodepointNames[127] = 'delete');
-				// it is dormant here because nanocoder does not enable
-				// kittyKeyboard — if that changes, this guard needs the
-				// corresponding handling.
+			} else if (key.backspace) {
 				if (cursorOffsetRef.current > 0) {
 					const start = stepBack(nextValue, cursorOffsetRef.current);
 					nextValue =
@@ -620,10 +571,6 @@ const TextInput = forwardRef<TextInputHandle, Props>(function TextInput(
 					nextCursorOffset = start;
 				}
 			} else if (key.delete) {
-				// Delete removes the character after the cursor (forward delete).
-				// Only reached for the forward Delete key (\x1b[3~); the
-				// physical Backspace (\x7f) and Option/Alt+Backspace (\x1b\x7f)
-				// are handled in the branch above.
 				if (cursorOffsetRef.current < originalValueRef.current.length) {
 					nextValue =
 						originalValueRef.current.slice(0, cursorOffsetRef.current) +

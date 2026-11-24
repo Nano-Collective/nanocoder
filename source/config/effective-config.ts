@@ -30,6 +30,8 @@
 
 import {existsSync, readFileSync} from 'node:fs';
 import {join} from 'node:path';
+import type {CliMode} from '@/app/types';
+import {VALID_MODES} from '@/app/types';
 import {
 	DEFAULT_AUTO_COMPACT_CONFIG,
 	DEFAULT_HEADLESS_CONFIG,
@@ -691,20 +693,51 @@ function resolveBlockEntries(
 		for (const loser of losers) pushRaw(loser);
 
 		const {value, redacted} = redactValue(leaf.value, keyHint);
+
+		// `nanocoder.defaultMode` is resolved from an active profile's `mode`
+		// — the loader maps `mode` onto `defaultMode`
+		// (loadHierarchicalConfig in config/index.ts) and the profile
+		// outranks every file's own `defaultMode` — so the profile, not
+		// built-in or a project file, is the source when it supplies one.
+		let profileOrigin: string | undefined;
+		if (
+			value !== undefined &&
+			spec.path.join('.') === 'nanocoder.defaultMode'
+		) {
+			const profileLayer = layers.find(l => l.layer === 'profile');
+			if (profileLayer) {
+				const profileMode = getAt(profileLayer.data, ['nanocoder', 'mode']);
+				if (
+					typeof profileMode === 'string' &&
+					VALID_MODES.includes(profileMode.toLowerCase().trim() as CliMode)
+				) {
+					profileOrigin = profileLayer.path;
+				}
+			}
+		}
+
 		return {
 			key,
 			value,
 			redacted,
-			layer: winnerSuppliesLeaf
-				? ((winner as RawLayer).layer as ConfigLayerId)
-				: ('default' as const),
-			origin: winnerSuppliesLeaf ? (winner as RawLayer).path : 'built-in',
+			layer:
+				profileOrigin !== undefined
+					? 'profile'
+					: winnerSuppliesLeaf
+						? ((winner as RawLayer).layer as ConfigLayerId)
+						: ('default' as const),
+			origin:
+				profileOrigin !== undefined
+					? profileOrigin
+					: winnerSuppliesLeaf
+						? (winner as RawLayer).path
+						: 'built-in',
 			hasDefault,
 			defaultValue,
 			shadowed,
 			block: blockKey,
-			blockOrigin: winner?.path,
-			blockLayer: winner?.layer,
+			blockOrigin: profileOrigin !== undefined ? profileOrigin : winner?.path,
+			blockLayer: profileOrigin !== undefined ? 'profile' : winner?.layer,
 			rule: 'block' as const,
 		};
 	});
@@ -923,8 +956,24 @@ function resolveMcpEntries(
 	configDir: string,
 ): EffectiveConfigEntry[] {
 	const env = readEnvMcpServers();
-	// Ascending precedence, matching `mergeMCPConfigs`: env beats project
-	// beats global, and only a server of the same name is displaced.
+	// Ascending precedence, matching `mergeMCPConfigs`: env beats profile
+	// beats project beats global, and only a server of the same name is
+	// displaced.
+	let profileOrigin = `profile: unknown`;
+	let profileServers = new Map<string, unknown>();
+	try {
+		const active = resolveActiveProfile(cwd);
+		if (active) {
+			profileOrigin = active.originFile ?? `profile: ${active.name}`;
+			profileServers = readMcpServers(
+				active.profile as Record<string, unknown>,
+			);
+		}
+	} catch {
+		// A removed or renamed active profile is silently ignored so config
+		// loading keeps falling back to the files instead of crashing mid-session.
+	}
+
 	const mcpLayers: Array<{
 		layer: ConfigLayerId;
 		origin: string;
@@ -940,10 +989,11 @@ function resolveMcpEntries(
 			origin: join(cwd, '.mcp.json'),
 			servers: readMcpServers(parseJsonFile(join(cwd, '.mcp.json'))),
 		},
+		{layer: 'profile', origin: profileOrigin, servers: profileServers},
 		{layer: 'env', origin: env.origin, servers: env.servers},
 	];
 
-	return loadAllMCPConfigs().map(({server, source}) => {
+	return loadAllMCPConfigs(cwd).map(({server, source}) => {
 		const name = server.name;
 		const winnerIndex = mcpLayers.findIndex(l => l.layer === source);
 		const winner = mcpLayers[winnerIndex];

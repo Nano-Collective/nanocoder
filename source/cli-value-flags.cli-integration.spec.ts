@@ -19,6 +19,7 @@ const runtimeModules = {
 	'@/config/preferences': `export function loadPreferences() { return {}; }
 		export function getAlternateScreen() { return false; }
 		export function getMouseReporting() { return false; }
+		export function getKittyKeyboardMode() { return 'auto'; }
 		export function getMaxFps() { return process.env.CLI_TEST_MAX_FPS ? Number(process.env.CLI_TEST_MAX_FPS) : 30; }`,
 	'@/app/render-tui': `export function renderTui(props, options) {
 		console.log(JSON.stringify({...props, contextLimit: globalThis.cliTestContextLimit, inkOptions: options}));

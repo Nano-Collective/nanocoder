@@ -672,6 +672,7 @@ test.serial(
 								{
 									path: cwd,
 									fingerprint: describeProjectTrust(cwd).fingerprint,
+									fingerprintVersion: TRUST_FINGERPRINT_VERSION,
 								},
 							],
 						}) as never,

@@ -1046,9 +1046,12 @@ async function main(): Promise<void> {
 		// Screen mode: fullscreen (alt screen + in-app scroll) by DEFAULT.
 		// Passing --no-alt-screen or setting alternateScreen:false in preferences
 		// forces inline mode (main screen + native scrollback).
-		const {getAlternateScreen, getMouseReporting, getMaxFps} = await import(
-			'@/config/preferences'
-		);
+		const {
+			getAlternateScreen,
+			getKittyKeyboardMode,
+			getMouseReporting,
+			getMaxFps,
+		} = await import('@/config/preferences');
 		const altScreenAllowed =
 			!args.includes('--no-alt-screen') &&
 			(args.includes('--alt-screen') || getAlternateScreen());
@@ -1195,6 +1198,8 @@ async function main(): Promise<void> {
 			}) as unknown as NodeJS.ReadStream;
 		}
 
+		const kittyMode = getKittyKeyboardMode();
+
 		const result = renderTui(
 			{
 				vscodeMode,
@@ -1214,6 +1219,14 @@ async function main(): Promise<void> {
 				// manager) so the exit-render handler below can paint the
 				// farewell frame before the process dies.
 				exitOnCtrlC: false,
+				// Ask kitty-protocol terminals to encode keys distinctly,
+				// which is what makes Shift+Enter distinguishable from
+				// Enter. 'auto' (the default) queries the terminal first
+				// and does nothing when it does not answer; 'enabled' is
+				// for a terminal whose reply is eaten by an ssh-style
+				// transport, and 'disabled' writes no protocol bytes at
+				// all (the kittyKeyboardMode preference).
+				kittyKeyboard: {mode: kittyMode},
 				...(inkStdin ? {stdin: inkStdin} : {}),
 				maxFps: getMaxFps(),
 			},

@@ -179,13 +179,17 @@ Connects to remote servers via persistent WebSocket connections.
 |-------|----------|-------------|
 | `transport` | Yes | `"websocket"` |
 | `url` | Yes | Server endpoint (`ws://` or `wss://`) |
+| `headers` | No | HTTP headers sent during the WebSocket handshake (useful for authentication) |
 | `timeout` | No | Connection timeout in milliseconds (see [Common Fields](#common-fields)) |
 
 ```json
 {
   "realtime-data": {
     "transport": "websocket",
-    "url": "wss://api.example.com/mcp"
+    "url": "wss://api.example.com/mcp",
+    "headers": {
+      "Authorization": "Bearer $REALTIME_DATA_TOKEN"
+    }
   }
 }
 ```
@@ -328,7 +332,7 @@ Run `/settings mcp` for interactive configuration with:
 
 **Remote servers (HTTP/WebSocket):**
 - _Connection failed_ — Verify the URL is accessible. Test with `curl` for HTTP servers.
-- _Authentication errors_ — For HTTP, use `headers` with a Bearer token or API key. Ensure env vars are set.
+- _Authentication errors_ — For HTTP or WebSocket, use `headers` with a Bearer token or API key. Use `https://` or `wss://` when sending credentials and ensure env vars are set.
 
 **General:**
 - _Transport type mismatch_ — Ensure `transport` matches your server (`stdio` for local commands, `http`/`websocket` for remote URLs).
