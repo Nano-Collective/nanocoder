@@ -1,5 +1,9 @@
 import test from 'ava';
-import {parseToolCalls, stripThinkTags} from './tool-parser';
+import {
+	parseToolCalls,
+	stripThinkTags,
+	stripThinkTagsOutsideToolCalls,
+} from './tool-parser';
 
 console.log(`\ntool-parser.spec.ts`);
 
@@ -1250,4 +1254,25 @@ test('stripThinkTags: still drops an unclosed block that starts a line', t => {
 	const out = stripThinkTags(content);
 	t.regex(out, /Here is my response/);
 	t.notRegex(out, /still thinking/);
+});
+
+test('stripThinkTags: keeps a complete pair that sits inside a sentence', t => {
+	const content = 'Models emit <think>reasoning</think> blocks in docs.';
+	t.is(stripThinkTags(content), content);
+});
+
+test('parseToolCalls: keeps <think> when the reply was already pre-stripped', t => {
+	// The TUI pre-strips the reply before parsing, so the helper used there
+	// has to leave tool-call arguments alone too.
+	const content =
+		'<write_file><path>doc.md</path><content>Models emit <think>reasoning</think> blocks.</content></write_file>';
+	const pre = stripThinkTagsOutsideToolCalls(content);
+	const result = parseToolCalls(pre, ['write_file']);
+	t.true(result.success);
+	if (result.success) {
+		t.is(
+			result.toolCalls[0].function.arguments?.content,
+			'Models emit <think>reasoning</think> blocks.',
+		);
+	}
 });
