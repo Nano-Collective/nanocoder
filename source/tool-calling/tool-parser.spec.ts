@@ -1,5 +1,5 @@
 import test from 'ava';
-import {parseToolCalls} from './tool-parser';
+import {parseToolCalls, stripThinkTags} from './tool-parser';
 
 console.log(`\ntool-parser.spec.ts`);
 
@@ -1220,4 +1220,34 @@ test('parseToolCalls: without tool names, broken calls are handled as before', t
 	if (mismatched.success) {
 		t.deepEqual(mismatched.toolCalls[0].function.arguments, {});
 	}
+});
+
+
+test('parseToolCalls: keeps <think> inside a tool call argument', t => {
+	// The text is file content, not reasoning: stripping it would write a
+	// file with words missing (#2332).
+	const content =
+		'<write_file><path>doc.md</path><content>Models emit <think>reasoning</think> blocks.</content></write_file>';
+	const result = parseToolCalls(content, ['write_file']);
+
+	t.true(result.success);
+	if (result.success) {
+		t.is(result.toolCalls.length, 1);
+		t.is(
+			result.toolCalls[0].function.arguments?.content,
+			'Models emit <think>reasoning</think> blocks.',
+		);
+	}
+});
+
+test('stripThinkTags: keeps prose that mentions the tag', t => {
+	const content = 'Use the <think> tag to reason. Then done.';
+	t.is(stripThinkTags(content), content);
+});
+
+test('stripThinkTags: still drops an unclosed block that starts a line', t => {
+	const content = 'Here is my response.\n\n<think>\nstill thinking...';
+	const out = stripThinkTags(content);
+	t.regex(out, /Here is my response/);
+	t.notRegex(out, /still thinking/);
 });
