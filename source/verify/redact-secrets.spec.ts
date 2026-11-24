@@ -157,13 +157,20 @@ test('redacts only the password component of a URL', t => {
 			'git clone https://deploy:ghx-S3cretToken99@example.com/org/repo.git',
 			'git clone https://deploy:[REDACTED]@example.com/org/repo.git',
 		],
+		// Password may itself contain @ or /; mask up to the last @ before the host.
+		['postgres://admin:p@ss@db/x', 'postgres://admin:[REDACTED]@db/x'],
+		['postgres://admin:ab/cd123@db', 'postgres://admin:[REDACTED]@db'],
+		[
+			'https://u:p@ss/wd@host:8443/path?q=1#frag',
+			'https://u:[REDACTED]@host:8443/path?q=1#frag',
+		],
 	];
 	for (const [input, expected] of cases) {
 		t.is(redactSecrets(input, EMPTY_ENV), expected, input);
 	}
 });
 
-test('redacts PASS, PWD, CREDENTIAL and AUTH env values', t => {
+test('redacts PASS and CREDENTIAL env values', t => {
 	const env = {DB_PASS: 'hunter2hunter2'};
 	t.is(
 		redactSecrets(
@@ -171,6 +178,30 @@ test('redacts PASS, PWD, CREDENTIAL and AUTH env values', t => {
 			env,
 		),
 		'env DB_PASS=[REDACTED], then the text "connecting with [REDACTED]"',
+	);
+	const credEnv = {API_CREDENTIAL: 'abcdefgh1234'};
+	t.is(
+		redactSecrets('API_CREDENTIAL=abcdefgh1234', credEnv),
+		'API_CREDENTIAL=[REDACTED]',
+	);
+});
+
+test('PWD does not mask file paths, and AUTH does not mask non-secret values', t => {
+	// Every shell sets PWD to the current directory; redactSecrets defaults to
+	// process.env, so PWD must stay out of SECRET_ENV_NAME or all paths break.
+	const pwdEnv = {PWD: '/home/runner/work/nanocoder/nanocoder'};
+	t.is(
+		redactSecrets(
+			'see /home/runner/work/nanocoder/nanocoder/source/x.ts in the report',
+			pwdEnv,
+		),
+		'see /home/runner/work/nanocoder/nanocoder/source/x.ts in the report',
+	);
+	// AUTH_URL and AUTH_TYPE are configuration, not credentials.
+	const authEnv = {AUTH_URL: 'https://example.com', AUTH_TYPE: 'basic'};
+	t.is(
+		redactSecrets('AUTH_URL=https://example.com and AUTH_TYPE=basic', authEnv),
+		'AUTH_URL=https://example.com and AUTH_TYPE=basic',
 	);
 });
 
@@ -181,6 +212,8 @@ test('new patterns leave ordinary text, identifiers and URLs alone', t => {
 		'https://example.com/org/repo without any credentials',
 		'postgres://admin@db.internal:5432/app',
 		'npm install did not fail; hf_models are loaded lazily',
+		'Bearer authentication scheme is described here',
+		'Bearer abcdefghijklmnop is prose here',
 		'Warning: Bearer',
 		'ordinary text continues here for a while',
 	].join('\n');
