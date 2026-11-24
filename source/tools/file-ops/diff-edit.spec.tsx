@@ -85,6 +85,24 @@ function diffBlock(search: string, replace: string): string {
 const sampleDiff = diffBlock('const oldValue = 1;', 'const newValue = 2;');
 
 for (const eol of ['\n', '\r\n']) {
+	for (const [label, before, after] of [
+		['trailing whitespace', '', ' \t'],
+		['indented markers', ' \t', ''],
+		['surrounding whitespace', '\t ', ' \t'],
+	]) {
+		test(`parseDiffEditBlocks accepts ${label} with ${JSON.stringify(eol)}`, t => {
+			const search = `  old${eol}\tvalue `;
+			const replace = `\tnew${eol}  value `;
+			const block = [searchMarker, search, separatorMarker, replace, replaceMarker]
+				.map((line, index) => index % 2 === 0 ? `${before}${line}${after}` : line)
+				.join(eol);
+			t.deepEqual(parseDiffEditBlocks(`${block}${eol}${block}`), [
+				{search, replace},
+				{search, replace},
+			]);
+		});
+	}
+
 	test(`parseDiffEditBlocks preserves marker-like content with ${JSON.stringify(eol)}`, t => {
 		const search = ['Title', '==========', 'inline ======= text'].join(eol);
 		const replace = ['New Title', '==========', 'inline >>>>>>> REPLACE text'].join(eol);
