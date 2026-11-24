@@ -620,7 +620,7 @@ export interface MCPServerConfig {
 	tags?: string[];
 	enabled?: boolean;
 	// Optional source information for display purposes
-	source?: 'project' | 'global' | 'env';
+	source?: 'project' | 'global' | 'env' | 'profile';
 	// Pre-substitution credentials for validateMCPConfigSecurity. Env-var
 	// references are expanded before runtime use, so the scanner must read
 	// these raw copies or every $API_KEY looks hardcoded.

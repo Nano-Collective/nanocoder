@@ -9,6 +9,7 @@ import {defineSessionValue} from '@/services/session-context';
 import type {AIProviderConfig, ProviderConfig} from '@/types/config';
 import {formatError} from '@/utils/error-formatter';
 import {getLogger} from '@/utils/logging';
+import {parseContextLimit} from '@/utils/parse-context-limit';
 import {readCache, writeCache} from './models-cache.js';
 import type {
 	ModelInfo,
@@ -462,8 +463,8 @@ export async function resolveModelContextLimit(
 		// Check environment variable fallback
 		const envLimit = process.env.NANOCODER_CONTEXT_LIMIT;
 		if (envLimit) {
-			const parsed = Number.parseInt(envLimit, 10);
-			if (!Number.isNaN(parsed) && parsed > 0) {
+			const parsed = parseContextLimit(envLimit);
+			if (parsed !== null) {
 				return {limit: parsed, source: 'env'};
 			}
 		}

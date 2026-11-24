@@ -24,6 +24,36 @@ test('parseToolCalls: successfully parses valid XML tool call', t => {
 	}
 });
 
+test('parseToolCalls: preserves markup beside an XML tool call', t => {
+	const prose = 'Press <kbd>Ctrl</kbd>+<kbd>C</kbd> to stop.';
+	const result = parseToolCalls(
+		`${prose} <read_file><path>a.ts</path></read_file>`,
+		['read_file'],
+	);
+
+	if (!result.success) return t.fail(result.error);
+	t.is(result.cleanedContent, prose);
+	t.deepEqual(
+		result.toolCalls.map(call => call.function),
+		[{name: 'read_file', arguments: {path: 'a.ts'}}],
+	);
+});
+
+test('parseToolCalls: removes a parsed unoffered tool call from prose', t => {
+	const prose = 'Checking <kbd>Ctrl</kbd>.';
+	const result = parseToolCalls(
+		`${prose} <bogus_tool><path>a.ts</path></bogus_tool>`,
+		['read_file', 'write_file'],
+	);
+
+	if (!result.success) return t.fail(result.error);
+	t.is(result.cleanedContent, prose);
+	t.deepEqual(
+		result.toolCalls.map(call => call.function),
+		[{name: 'bogus_tool', arguments: {path: 'a.ts'}}],
+	);
+});
+
 test('parseToolCalls: forwards schemas to preserve XML string arguments', t => {
 	const content =
 		'<write_file><path>f</path><content>{"version": "1.0"}\n</content></write_file>';
