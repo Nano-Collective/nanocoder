@@ -19,6 +19,7 @@ import type {
 import type {UserPreferences} from '@/types/index';
 import type {NanocoderShape, ThemePreset, TitleShape} from '@/types/ui';
 import {atomicWriteFileSync} from '@/utils/fs/atomic-write';
+import {normalizeForCompare} from '@/utils/fs/path-validation';
 import {getLogger} from '@/utils/logging';
 import {stripUtf8Bom} from '@/utils/strip-utf8-bom';
 
@@ -74,7 +75,8 @@ function getGlobalPreferencesPath(): string {
 
 function isProjectPreferencesPath(preferencesPath: string): boolean {
 	return (
-		path.resolve(preferencesPath) !== path.resolve(getGlobalPreferencesPath())
+		normalizeForCompare(preferencesPath) !== // nosemgrep
+		normalizeForCompare(getGlobalPreferencesPath()) // nosemgrep
 	);
 }
 

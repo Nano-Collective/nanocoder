@@ -157,6 +157,77 @@ test('isDirectoryTrusted does not match an unrelated directory', t => {
 	);
 });
 
+if (process.platform === 'win32') {
+	test('isDirectoryTrusted matches a directory regardless of case on Windows', t => {
+		const dir = process.cwd();
+		const altCaseDir =
+			dir[0] === dir[0].toLowerCase()
+				? dir[0].toUpperCase() + dir.slice(1)
+				: dir[0].toLowerCase() + dir.slice(1);
+		const fingerprint = describeProjectTrust(dir).fingerprint;
+
+		t.true(
+			isDirectoryTrusted(altCaseDir, {
+				trustedDirectories: [
+					{path: dir, fingerprint, fingerprintVersion: TRUST_FINGERPRINT_VERSION},
+				],
+			}),
+		);
+		t.true(
+			isDirectoryTrusted(dir, {
+				trustedDirectories: [
+					{
+						path: altCaseDir,
+						fingerprint,
+						fingerprintVersion: TRUST_FINGERPRINT_VERSION,
+					},
+				],
+			}),
+		);
+	});
+
+	test('trustRecheck finds matching entry regardless of case on Windows', t => {
+		const dir = process.cwd();
+		const altCaseDir =
+			dir[0] === dir[0].toLowerCase()
+				? dir[0].toUpperCase() + dir.slice(1)
+				: dir[0].toLowerCase() + dir.slice(1);
+
+		t.is(
+			trustRecheck(altCaseDir, {
+				trustedDirectories: [
+					{
+						path: dir,
+						fingerprint: 'stale',
+						fingerprintVersion: TRUST_FINGERPRINT_VERSION,
+					},
+				],
+			}),
+			'changed',
+		);
+		t.is(
+			trustRecheck(altCaseDir, {
+				trustedDirectories: [dir],
+			}),
+			'upgrade',
+		);
+	});
+
+	test('grantDirectoryTrust deduplicates entries differing only in case on Windows', t => {
+		const dir = process.cwd();
+		const altCaseDir =
+			dir[0] === dir[0].toLowerCase()
+				? dir[0].toUpperCase() + dir.slice(1)
+				: dir[0].toLowerCase() + dir.slice(1);
+		const prefs: UserPreferences = {
+			trustedDirectories: [{path: dir, fingerprint: 'old'}],
+		};
+		const updated = grantDirectoryTrust(prefs, altCaseDir, 'new');
+		t.is(updated.trustedDirectories?.length, 1);
+		t.is(updated.trustedDirectories?.[0]?.fingerprint, 'new');
+	});
+}
+
 test('isDirectoryTrusted is false after a URL-only profile MCP server is added', t => {
 	const root = join(tmpdir(), `trust-profile-mcp-url-${Date.now()}`);
 	mkdirSync(root, {recursive: true});
