@@ -16,6 +16,7 @@ import Status from '@/components/status';
 import UserMessage from '@/components/user-message';
 import {getAppConfig} from '@/config/index';
 import {loadPreferences} from '@/config/preferences';
+import {ARCHITECT_REVERT_NOTICE_PREFIX} from '@/constants';
 import {resolveAutoCompactSettings} from '@/conversation/compaction/auto-compact';
 import {getLastBuiltPrompt} from '@/conversation/prompt-builder';
 import {CustomCommandExecutor} from '@/custom-commands/executor';
@@ -48,6 +49,7 @@ import type {
 	LSPConnectionStatus,
 	MCPConnectionStatus,
 	Message,
+	MessageSubmissionOptions,
 } from '@/types';
 import type {CustomCommand} from '@/types/commands';
 import type {TuneConfig} from '@/types/config';
@@ -146,7 +148,7 @@ interface UseAppHandlersProps {
 	) => Promise<boolean>;
 
 	// Chat handler
-	handleChatMessage: (message: string, displayValue?: string) => Promise<void>;
+	handleChatMessage: MessageSubmissionOptions['onHandleChatMessage'];
 	lastApiUsage?: ApiUsageSnapshot | null;
 	apiCallHistory?: ApiCallRecord[];
 
@@ -816,7 +818,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 				...messages,
 				{
 					role: 'user',
-					content: `[The changes from your previous turn were reverted and are no longer on disk.${fileList} Re-read any file before editing it - your earlier edits are gone.]`,
+					content: `${ARCHITECT_REVERT_NOTICE_PREFIX}${fileList} Re-read any file before editing it - your earlier edits are gone.]`,
 				},
 			]);
 		},

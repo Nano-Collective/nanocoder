@@ -2,6 +2,7 @@ import type {
 	ApiCallRecord,
 	ApiUsageSnapshot,
 	DevelopmentMode,
+	ImageAttachment,
 	Message,
 } from '@/types/core';
 
@@ -122,7 +123,11 @@ export interface CommandContext {
 	/** Switch development mode (normal, auto-accept, yolo, plan, architect). */
 	switchMode?: (mode: DevelopmentMode) => void;
 	/** Send a prompt to the model as a new chat turn. */
-	submitChatMessage: (message: string, displayValue?: string) => Promise<void>;
+	submitChatMessage: (
+		message: string,
+		displayValue?: string,
+		options?: {images?: ImageAttachment[]; replaceFrom?: number},
+	) => Promise<void>;
 }
 
 /**

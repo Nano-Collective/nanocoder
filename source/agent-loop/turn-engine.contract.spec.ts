@@ -406,6 +406,7 @@ for (const {
 		t.deepEqual(lastOf(seen.requests[1]), {
 			role: 'user',
 			content: EMPTY_TURN_NUDGE,
+			synthetic: true,
 		});
 		// The empty assistant turn itself is never recorded.
 		t.false(seen.requests[1].some(m => m.role === 'assistant'));
@@ -503,7 +504,11 @@ for (const {
 		}
 		const [fragment, nudge] = seen.requests[1].slice(-2);
 		t.is(fragment.content, 'half a');
-		t.deepEqual(nudge, {role: 'user', content: TRUNCATED_TURN_INSTRUCTION});
+		t.deepEqual(nudge, {
+			role: 'user',
+			content: TRUNCATED_TURN_INSTRUCTION,
+			synthetic: true,
+		});
 	});
 
 	test.serial(
@@ -528,6 +533,7 @@ for (const {
 			t.deepEqual(lastOf(seen.requests[1]), {
 				role: 'user',
 				content: TRUNCATED_TURN_INSTRUCTION,
+				synthetic: true,
 			});
 		},
 	);

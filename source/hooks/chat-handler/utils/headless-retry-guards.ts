@@ -16,13 +16,34 @@ export const TRUNCATED_TURN_INSTRUCTION =
 
 /** Sent after a turn with no text and no tool calls. */
 export const EMPTY_TURN_NUDGE = 'Please continue with the task.';
+export const REASONING_ONLY_NUDGE =
+	'You produced reasoning but no final response. Please provide your answer based on your reasoning above.';
+export const TOOL_RESULTS_NUDGE =
+	'Please provide a summary or response based on the tool results above.';
+
+const MALFORMED_TOOL_CALL_PREFIX =
+	'Your previous response contained a malformed tool call. ';
+const MALFORMED_TOOL_CALL_SUFFIX =
+	'\n\nPlease try again using the correct format.';
+
+export function isTurnRecoveryNotice(content: string): boolean {
+	// Older sessions have no synthetic flag. The generic empty-turn nudge
+	// is also a normal user prompt, so match only distinctive legacy text.
+	return (
+		content === REASONING_ONLY_NUDGE ||
+		content === TOOL_RESULTS_NUDGE ||
+		content === TRUNCATED_TURN_INSTRUCTION ||
+		(content.startsWith(MALFORMED_TOOL_CALL_PREFIX) &&
+			content.endsWith(MALFORMED_TOOL_CALL_SUFFIX))
+	);
+}
 
 /** The correction sent back after a malformed text tool call. */
 export function malformedToolCallNudge(
 	error: string,
 	examples: string,
 ): string {
-	return `Your previous response contained a malformed tool call. ${error}\n\n${examples}\n\nPlease try again using the correct format.`;
+	return `${MALFORMED_TOOL_CALL_PREFIX}${error}\n\n${examples}${MALFORMED_TOOL_CALL_SUFFIX}`;
 }
 
 /** What a guard decided about one failing turn. */

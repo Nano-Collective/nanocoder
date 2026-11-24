@@ -40,6 +40,8 @@ export interface Message {
 	images?: ImageAttachment[];
 	durationMs?: number;
 	outcome?: 'completed' | 'cancelled' | 'failed';
+	/** A harness-authored user-role message that still goes to the model. */
+	synthetic?: boolean;
 	/**
 	 * Harness-authored chrome: rendered in chat and persisted with session
 	 * history, but filtered out of the provider payload (see

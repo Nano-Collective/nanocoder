@@ -12,7 +12,7 @@ import {infoMsg} from '@/components/message-factory';
 import {displayCompactCountsSummary} from '@/components/tool-result-display';
 import {getAppConfig, getRetryLimits} from '@/config/index';
 import {getShowUsageFooter} from '@/config/preferences';
-import {MAX_COMPACT_RETRIES} from '@/constants';
+import {COMPACTION_RETRY_NOTICE, MAX_COMPACT_RETRIES} from '@/constants';
 import {compressionBackup} from '@/conversation/compaction/compression-backup';
 import {compressMessages} from '@/conversation/compaction/message-compression';
 import {buildCompletionNote} from '@/conversation/completion-note';
@@ -44,6 +44,11 @@ import type {
 import {buildResponseUsageBounded} from '@/usage/response-usage';
 import {generateKey} from '@/utils/key-generator';
 import {estimateTokens} from '@/utils/token-calculator';
+import {
+	EMPTY_TURN_NUDGE,
+	REASONING_ONLY_NUDGE,
+	TOOL_RESULTS_NUDGE,
+} from '../utils/headless-retry-guards';
 import {filterValidToolCalls} from '../utils/tool-filters';
 import {
 	type ArchitectCheckpointState,
@@ -675,12 +680,12 @@ export const processAssistantResponse = async (
 			emptyTurnNudge: currentHistory => {
 				const lastMessage = currentHistory[currentHistory.length - 1];
 				if (fullReasoning && fullReasoning.trim()) {
-					return 'You produced reasoning but no final response. Please provide your answer based on your reasoning above.';
+					return REASONING_ONLY_NUDGE;
 				}
 				if (lastMessage?.role === 'tool') {
-					return 'Please provide a summary or response based on the tool results above.';
+					return TOOL_RESULTS_NUDGE;
 				}
-				return 'Please continue with the task.';
+				return EMPTY_TURN_NUDGE;
 			},
 			onEmptyRetry: async (attempt, nudge) => {
 				// Coalesce auto-nudge notices into a single live counter that
@@ -747,8 +752,7 @@ export const processAssistantResponse = async (
 
 					const retryNudge: Message = {
 						role: 'user',
-						content:
-							'Context has been compacted. Please continue with the task.',
+						content: COMPACTION_RETRY_NOTICE,
 					};
 					const retryBuilder = new MessageBuilder(compressedUser);
 					retryBuilder.addMessage(retryNudge);

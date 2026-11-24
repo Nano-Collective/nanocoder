@@ -48,7 +48,8 @@ function contextFor(
 		rawArgs,
 		messages: [],
 		addToChatQueue: options.onAddToChatQueue,
-		submitChatMessage: options.onHandleChatMessage,
+	submitChatMessage: (message, displayValue) =>
+		options.onHandleChatMessage(message, displayValue),
 		handlerMetadata: () => ({
 			provider: 'test',
 			model: 'test',

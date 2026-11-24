@@ -124,8 +124,14 @@ function createCommandContext(
 		resumeSession: options.onResumeSession,
 		switchModel: options.onSwitchModel,
 		switchMode: options.onSwitchMode,
-		submitChatMessage: (message, displayValue) =>
-			options.onHandleChatMessage(message, displayValue),
+		submitChatMessage: (message, displayValue, submission) =>
+			options.onHandleChatMessage(
+				message,
+				displayValue,
+				submission?.images,
+				undefined,
+				submission?.replaceFrom,
+			),
 	};
 }
 

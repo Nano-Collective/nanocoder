@@ -838,6 +838,62 @@ test('useChatHandler - handleChatMessage splices historyMessages ahead of the ne
 	);
 });
 
+test('useChatHandler - sends and stores the replacement turn without the discarded history', async t => {
+	const earlier: Message[] = [
+		{role: 'user', content: 'Earlier request'},
+		{role: 'assistant', content: 'Earlier response'},
+	];
+	const messages: Message[] = [
+		...earlier,
+		{role: 'user', content: 'Check the build'},
+		{
+			role: 'assistant',
+			content: '',
+			tool_calls: [
+				{id: 'old', function: {name: 'read_file', arguments: {path: 'build.log'}}},
+			],
+		},
+		{role: 'tool', name: 'read_file', tool_call_id: 'old', content: 'Old result'},
+		{role: 'assistant', content: 'Old response'},
+	];
+	const client = createMockClient();
+	const chat = client.chat;
+	let providerMessages: Message[] = [];
+	client.chat = async (request, ...args) => {
+		providerMessages = request.filter(message => message.role !== 'system');
+		return chat(request, ...args);
+	};
+	let hookResult: ChatHandlerReturn | null = null;
+	let savedMessages: Message[] = [];
+	const app = render(
+		<TestHookComponent
+			{...createMockProps({
+				client,
+				toolManager: createMockToolManager(),
+				messages,
+				setMessages: updated => {
+					savedMessages = updated;
+				},
+			})}
+			onResult={result => {
+				hookResult = result;
+			}}
+		/>,
+	);
+	try {
+		await waitForCondition(() => hookResult !== null);
+		await hookResult!.handleChatMessage('Check the build', undefined, undefined, undefined, 2);
+		const retried: Message[] = [...earlier, {role: 'user', content: 'Check the build'}];
+		t.deepEqual(providerMessages, retried);
+		t.deepEqual(
+			savedMessages.map(({role, content}) => ({role, content})),
+			[...retried, {role: 'assistant', content: 'ok'}],
+		);
+	} finally {
+		app.unmount();
+	}
+});
+
 // The signal must be scoped to plan mode — a normal-mode turn completing must
 // NOT surface the plan review bar (this is the fix for the mode-inference race).
 test('useChatHandler - does NOT fire onPlanTurnComplete for a normal-mode turn', async t => {

@@ -72,6 +72,10 @@ export const MAX_SESSION_NAME_LENGTH = 100;
  * shared with the builder so the two cannot drift.
  */
 export const BASH_OUTPUT_PREFIX = 'Bash command output:';
+export const ARCHITECT_REVERT_NOTICE_PREFIX =
+	'[The changes from your previous turn were reverted and are no longer on disk.';
+export const COMPACTION_RETRY_NOTICE =
+	'Context has been compacted. Please continue with the task.';
 
 // === LIMITS ===
 export const MAX_CHECKPOINT_FILES = 50;

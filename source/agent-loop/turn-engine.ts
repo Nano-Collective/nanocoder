@@ -452,6 +452,7 @@ export async function runTurnEngine<S>(
 				{
 					role: 'user',
 					content: malformedToolCallNudge(parsed.error, parsed.examples),
+					synthetic: true,
 				},
 			);
 			continue;
@@ -552,7 +553,7 @@ export async function runTurnEngine<S>(
 				const nudge =
 					adapter.emptyTurnNudge?.(history.get()) ?? EMPTY_TURN_NUDGE;
 				await adapter.onEmptyRetry?.(verdict.attempt, nudge);
-				append({role: 'user', content: nudge});
+				append({role: 'user', content: nudge, synthetic: true});
 				continue;
 			}
 
@@ -570,7 +571,11 @@ export async function runTurnEngine<S>(
 				const verdict = guards.truncated();
 				if (verdict.action === 'retry') {
 					adapter.onTruncatedRetry?.(verdict.attempt);
-					append({role: 'user', content: TRUNCATED_TURN_INSTRUCTION});
+					append({
+						role: 'user',
+						content: TRUNCATED_TURN_INSTRUCTION,
+						synthetic: true,
+					});
 					continue;
 				}
 				adapter.onTruncatedGiveUp?.(verdict.message);
