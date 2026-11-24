@@ -102,9 +102,13 @@ export function resolveAutoCompactSettings(
  *
  * `nativeTools` are the tool definitions sent to the model out-of-band (native
  * tool calling). They occupy context but live outside the message list, so the
- * trigger would under-count without them and fire late — mirror the context
+ * trigger would under-count without them and fire late, mirror the context
  * indicator by adding their token cost to the gate. Pass `{}`/undefined under
  * XML/JSON fallback, where the definitions are already inside `systemMessage`.
+ *
+ * `countOnlyMessages` are ephemeral request messages (a turn-context block,
+ * for example). They count toward the trigger but are never compressed or
+ * written into history, so compaction cannot persist per-request context.
  */
 export async function performAutoCompact(
 	messages: Message[],
@@ -123,6 +127,7 @@ export async function performAutoCompact(
 	nativeTools?: Record<string, AISDKCoreTool>,
 	signal?: AbortSignal,
 	tuneAggressive?: boolean,
+	countOnlyMessages: readonly Message[] = [],
 ): Promise<Message[] | null> {
 	if (signal?.aborted) {
 		return null;
@@ -175,7 +180,10 @@ export async function performAutoCompact(
 		// is what compaction rewrites and the UI renders.
 		const allMessages = [systemMessage, ...messages];
 		let messageTokens = 0;
-		for (const msg of filterModelFacing(allMessages)) {
+		for (const msg of filterModelFacing([
+			...allMessages,
+			...countOnlyMessages,
+		])) {
 			messageTokens += tokenizer.countTokens(msg);
 		}
 
@@ -233,10 +241,12 @@ export async function performAutoCompact(
 					// both sides — otherwise the reduction % is inflated by tokens that
 					// never get removed.
 					const compressedTokenCount =
-						[systemMessage, ...filterModelFacing(llmCompressed)].reduce(
-							(sum, msg) => sum + tokenizer.countTokens(msg),
-							0,
-						) + toolDefTokens;
+						[
+							systemMessage,
+							...filterModelFacing(llmCompressed),
+							...filterModelFacing([...countOnlyMessages]),
+						].reduce((sum, msg) => sum + tokenizer.countTokens(msg), 0) +
+						toolDefTokens;
 					const reductionPercentage =
 						totalTokens > 0
 							? ((totalTokens - compressedTokenCount) / totalTokens) * 100
@@ -315,6 +325,8 @@ export async function maybeAutoCompact(
 		// A caller with its own tune (an ACP session) passes its aggressive-compact
 		// preset here instead of relying on the process-wide one.
 		aggressiveCompact?: boolean;
+		// Ephemeral request messages to include in the token count only.
+		countOnlyMessages?: readonly Message[];
 	},
 ): Promise<Message[]> {
 	if (options?.signal?.aborted) {
@@ -338,6 +350,7 @@ export async function maybeAutoCompact(
 			nativeTools,
 			options?.signal,
 			options?.aggressiveCompact,
+			options?.countOnlyMessages,
 		);
 		return compressed ?? messages;
 	} catch (error) {

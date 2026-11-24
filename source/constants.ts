@@ -160,6 +160,13 @@ export const TRUNCATION_OUTPUT_LIMIT = 2000;
 // The cap is intentionally higher than the Bash preview limit so normal file
 // reads and search results remain useful while unbounded tools stay bounded.
 export const MAX_TOOL_RESULT_CHARS = 20_000;
+// Per-file cap for AGENTS.md rules loaded into a prompt. A large nested file
+// can otherwise consume a small model's context the moment its folder is read.
+export const MAX_AGENTS_MD_FILE_CHARS = 32_000;
+// Whole nested layer cap. Discovery can span a monorepo, and that section is
+// re-sent on every request, so a dozen packages must not add up to an unbounded
+// prompt. The closest files are kept when the budget is exceeded.
+export const MAX_AGENTS_MD_NESTED_TOTAL_CHARS = 64_000;
 export const TRUNCATION_DESCRIPTION_LENGTH = 100;
 // Rows of tool output shown in the transcript; `/expand <n>` prints the rest.
 export const TOOL_OUTPUT_DISPLAY_LINES = 20;

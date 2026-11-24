@@ -1,4 +1,4 @@
-import {existsSync, readFileSync} from 'fs';
+import {readFileSync} from 'fs';
 import {homedir, platform, release} from 'os';
 import {basename, dirname, isAbsolute, join, normalize, resolve} from 'path';
 import {fileURLToPath} from 'url';
@@ -12,6 +12,7 @@ import type {SystemPromptConfig, TuneConfig} from '@/types/config';
 import {TUNE_DEFAULTS} from '@/types/config';
 import type {DevelopmentMode} from '@/types/core';
 import {getLogger} from '@/utils/logging';
+import {appendAgentsMd} from './agents-md';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -73,6 +74,40 @@ export function setLastBuiltPrompt(prompt: string): void {
 	lastBuiltPrompt.set(prompt);
 }
 
+/**
+ * Whether AGENTS.md rules belong in the prompt at all for this tune/model.
+ *
+ * The conversation loops call this before injecting the nested layer so all
+ * layers switch off together: the nano profile, `tune.includeAgentsMd: false`,
+ * and a custom prompt that replaces (rather than appends to) the built-in one.
+ * The override is resolved first. A `file` that could not be read, or an empty
+ * `content`, leaves the built-in prompt (and therefore AGENTS.md) in place.
+ */
+export function shouldIncludeAgentsMd(
+	tuneConfig: TuneConfig | undefined,
+	model?: string,
+	systemPromptOverride?: SystemPromptConfig,
+): boolean {
+	const override = systemPromptOverride
+		? {
+				content: resolveSystemPromptOverride(systemPromptOverride),
+				mode: systemPromptOverride.mode ?? 'replace',
+			}
+		: undefined;
+	if (
+		override &&
+		override.mode === 'replace' &&
+		override.content !== null &&
+		override.content.trim() !== ''
+	) {
+		return false;
+	}
+
+	const tune = tuneConfig ?? TUNE_DEFAULTS;
+	const nano = tune.enabled && isNanoProfile(tune.toolProfile, model);
+	return tune.includeAgentsMd ?? (nano ? false : true);
+}
+
 function generateSystemInfo(slim = false): string {
 	const now = new Date();
 	const dateStr = now.toISOString().split('T')[0];
@@ -111,21 +146,6 @@ Default Shell: ${getDefaultShell()}
 Home Directory: ${homedir()}
 Current Working Directory: ${getProjectRoot()}
 Current Date: ${dateStr}`;
-}
-
-// The project root is the launch directory everywhere except inside an ACP
-// session's scope, where it is the `cwd` the client named for the session.
-function appendAgentsMd(prompt: string): string {
-	const agentsPath = join(getProjectRoot(), 'AGENTS.md');
-	if (existsSync(agentsPath)) {
-		try {
-			const agentsContent = readFileSync(agentsPath, 'utf-8');
-			return `${prompt}\n\nAdditional Context...\n\n${agentsContent}`;
-		} catch {
-			// Silently skip if unreadable
-		}
-	}
-	return prompt;
 }
 
 // Search/discovery tools that justify a "prefer native over bash" instruction
@@ -363,11 +383,11 @@ ${getSubagentDescriptions()}`;
 	// System info (dynamic) — slim variant under nano
 	sections.push(generateSystemInfo(nano));
 
-	// Compose and (optionally) append AGENTS.md.
-	// Nano omits AGENTS.md by default; users can override via tune.includeAgentsMd.
+	// Compose and (optionally) append the stable AGENTS.md layers: the config
+	// directory file followed by the project-root file. Nested files are added
+	// at request time through the user message so this prompt stays cacheable.
 	let prompt = sections.filter(Boolean).join('\n\n');
-	const includeAgentsMd = tune.includeAgentsMd ?? (nano ? false : true);
-	if (includeAgentsMd) {
+	if (shouldIncludeAgentsMd(tune, model, systemPromptOverride)) {
 		prompt = appendAgentsMd(prompt);
 	}
 

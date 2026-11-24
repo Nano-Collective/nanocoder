@@ -1,7 +1,18 @@
 import test from 'ava';
 import {getRetryLimits} from '@/config/index';
+import {
+	resetAutoCompactSession,
+	setAutoCompactStrategy,
+	setAutoCompactThreshold,
+} from '@/conversation/compaction/auto-compact';
 import {partitionUnknownToolCalls} from '@/hooks/chat-handler/utils/tool-filters';
+import {
+	resetSessionContextLimit,
+	setSessionContextLimit,
+} from '@/models/index';
+import {createTokenizer} from '@/tokenization/index';
 import type {ToolManager} from '@/tools/tool-manager';
+import {calculateToolDefinitionsTokensFromDefs} from '@/usage/calculator';
 import type {
 	LLMChatResponse,
 	LLMClient,
@@ -648,4 +659,110 @@ test('onEmptyRetry is awaited before the nudge is recorded', async t => {
 	t.deepEqual(order, ['retry']);
 	t.is(historyAtRetry, 1);
 	t.is(history()[1].role, 'user');
+});
+
+test('turn context sections travel in a user message, not the system prompt', async t => {
+	const {run, requests, history} = setup([text('done')], {
+		getTurnContextSections: () => ['NESTED AGENTS RULES'],
+	});
+	await run();
+
+	t.is(requests[0][0].content, 'sys');
+	t.deepEqual(requests[0].at(-1), {
+		role: 'user',
+		content: '<turn-context>\nNESTED AGENTS RULES\n</turn-context>',
+	});
+	// Ephemeral request context must not be persisted in the conversation.
+	t.deepEqual(
+		history().map(m => ({role: m.role, content: m.content})),
+		[
+			{role: 'user', content: 'go'},
+			{role: 'assistant', content: 'done'},
+		],
+	);
+});
+
+test('turn context is read per request so newly discovered rules reach the next call', async t => {
+	let discovered = false;
+	const {run, requests} = setup([call('a'), text('done')], {
+		getTurnContextSections: () => (discovered ? ['API RULES'] : []),
+		executeTools: async calls => {
+			discovered = true;
+			return {kind: 'continue', results: calls.map(resultFor)};
+		},
+	});
+	await run();
+
+	t.is(requests[0].length, 2);
+	t.true(requests[1].at(-1)?.content.includes('API RULES'));
+});
+
+test.serial('the per-request turn context counts toward auto-compaction', async t => {
+	const systemMessage: Message = {
+		role: 'system',
+		content: 'You are a helpful assistant.',
+	};
+	const originalHistory: Message[] = [{role: 'user', content: 'a'.repeat(400)}];
+	const turnContext = 'b'.repeat(1600);
+	const assistantMessage: Message = {role: 'assistant', content: 'ack'};
+	const tokenizer = createTokenizer('openai', 'gpt-4');
+	const baselineTokens = [systemMessage, ...originalHistory, assistantMessage].reduce(
+		(sum, message) => sum + tokenizer.countTokens(message),
+		0,
+	);
+	const contextTokens = tokenizer.countTokens({role: 'user', content: turnContext});
+	const toolTokens = calculateToolDefinitionsTokensFromDefs(
+		{probe: {} as never},
+		tokenizer,
+	);
+	t.true(contextTokens >= baselineTokens, 'the context must be the deciding factor');
+
+	setAutoCompactStrategy('mechanical');
+	setAutoCompactThreshold(50);
+	// Baseline plus tool schemas sits below the threshold, so only the turn
+	// context can trip it.
+	setSessionContextLimit(Math.ceil((baselineTokens + toolTokens + 1) / 0.45));
+
+	const makeTestClient = () =>
+		({
+			...makeClient([call('a'), text('done')]),
+			getCurrentModel: () => 'gpt-4',
+			getProviderConfig: () => ({name: 'openai'}),
+		}) as unknown as LLMClient;
+	const runScenario = async (sections: string[]) => {
+		let history = [...originalHistory];
+		const recorded: boolean[] = [];
+		const {run} = setup<never>(
+			[call('a'), text('done')],
+			{
+				getSystemMessage: () => systemMessage,
+				history: {
+					get: () => history,
+					set: next => {
+						history = next;
+					},
+				},
+				getTurnContextSections: () => sections,
+				onTurnRecorded: ({compacted}) => {
+					recorded.push(compacted);
+				},
+			},
+			{client: makeTestClient()},
+		);
+		await run();
+		// Only the first turn is calibrated: tool results from turn one grow the
+		// history and can legitimately trip compaction on turn two.
+		return recorded[0];
+	};
+
+	try {
+		t.false(await runScenario([]), 'history alone stays put');
+		t.true(
+			await runScenario([turnContext]),
+			'the turn-context message pushes the gate over',
+		);
+	} finally {
+		resetAutoCompactSession();
+		resetSessionContextLimit();
+	}
 });

@@ -88,6 +88,7 @@ import type {
 	ToolCall,
 	ToolResult,
 } from '@/types/core';
+import {appendTurnContext} from '@/utils/turn-context';
 
 // On the last allowed turn we strip tools and inject this so the model
 // finalizes cleanly instead of the loop bailing out with a hard error and
@@ -170,6 +171,13 @@ export interface FinalAnswerContext extends TurnContext {
 export interface TurnEngineAdapter<S> {
 	history: {get(): Message[]; set(messages: Message[]): void};
 	getSystemMessage(): Message | undefined;
+	/**
+	 * Context discovered mid-turn (nested AGENTS.md, for example), carried in
+	 * a user message after the capped history instead of in the system prompt.
+	 * That keeps the system block byte-identical across requests, which is
+	 * what local prompt caches key on (#1957/#1972).
+	 */
+	getTurnContextSections?(): readonly (string | undefined)[];
 	prepareTurn(context: TurnContext): PreparedTurn | Promise<PreparedTurn>;
 	beginModelCall(context: TurnContext): ModelCallSink;
 	onModelResponse?(response: LLMChatResponse): Promise<void> | void;
@@ -363,6 +371,15 @@ export async function runTurnEngine<S>(
 		}
 
 		const maxMessages = getAppConfig().sessions?.maxMessages ?? 1000;
+		// Read per request, not per run: a file read earlier in this turn can
+		// discover a new nested AGENTS.md that the very next call must see.
+		const turnContext = appendTurnContext(
+			'',
+			adapter.getTurnContextSections?.() ?? [],
+		);
+		const turnContextMessages: Message[] = turnContext
+			? [{role: 'user', content: turnContext}]
+			: [];
 		const finalTurnNotice: Message[] = finalTurn
 			? [{role: 'user', content: FINAL_TURN_INSTRUCTION}]
 			: [];
@@ -374,6 +391,7 @@ export async function runTurnEngine<S>(
 				[
 					systemMessage,
 					...capMessagesForModel(history.get(), maxMessages),
+					...turnContextMessages,
 					...finalTurnNotice,
 				],
 				tools,
@@ -491,14 +509,20 @@ export async function runTurnEngine<S>(
 		}
 
 		// Gate on the same view the next turn will send, so the threshold is not
-		// measured against rows the cap already drops from the request.
+		// measured against rows the cap already drops from the request. The
+		// turn-context message is also in that request, but it is ephemeral:
+		// compaction counts its tokens without rewriting it into history.
 		const compactGateInput = capMessagesForModel(history.get(), maxMessages);
 		const compacted = await maybeAutoCompact(
 			compactGateInput,
 			systemMessage,
 			client,
 			result.toolsDisabled ? undefined : tools,
-			{...adapter.compactOptions?.(), signal},
+			{
+				...adapter.compactOptions?.(),
+				signal,
+				countOnlyMessages: turnContextMessages,
+			},
 		);
 		// Only adopt the result when compaction actually ran — otherwise
 		// maybeAutoCompact returns the capped view it was handed, and taking it

@@ -1,6 +1,18 @@
+import {mkdirSync, mkdtempSync, rmSync, writeFileSync} from "node:fs";
+import {tmpdir} from "node:os";
+import {join} from "node:path";
 import test from "ava";
 import { dropOrphanedToolResults } from "@/ai-sdk-client/converters/message-converter";
 import { getAppConfig, reloadAppConfig } from "@/config/index";
+import {
+	resetAgentsMdIgnoreCache,
+	resetAgentsMdTracker,
+} from "@/conversation/agents-md";
+import {
+	resetSessionCwd,
+	setProjectRoot,
+	setSessionCwd,
+} from "@/services/session-cwd";
 import { TOOL_APPROVAL_REQUIRED_KIND } from "@/constants";
 import { setToolManagerGetter, setToolRegistryGetter } from "@/message-handler";
 import {
@@ -1146,6 +1158,9 @@ function makeRecordingClient(
 
 test.afterEach.always(() => {
 	delete process.env.NANOCODER_MAX_TURNS;
+	resetSessionCwd();
+	resetAgentsMdTracker();
+	resetAgentsMdIgnoreCache();
 	reloadAppConfig();
 });
 
@@ -2859,4 +2874,84 @@ test.serial("verify: a run that edited nothing is not held up", async (t) => {
 
 	t.is(calls, 1);
 	if (outcome.kind === "success") t.is(outcome.finalText, "Just an answer.");
+});
+
+test.serial("nested AGENTS.md discovered by a tool reaches the next model request", async (t) => {
+	const root = mkdtempSync(join(tmpdir(), "nc-plain-agents-"));
+	try {
+		writeFileSync(join(root, "AGENTS.md"), "ROOT RULES");
+		mkdirSync(join(root, "packages", "api"), { recursive: true });
+		writeFileSync(
+			join(root, "packages", "api", "AGENTS.md"),
+			"NESTED PLAIN RULES",
+		);
+		setProjectRoot(root);
+		setSessionCwd(root);
+
+		const seen: Message[][] = [];
+		const fake = makeFakeClient({
+			responses: [
+				{
+					choices: [
+						{
+							message: {
+								role: "assistant",
+								content: "",
+								tool_calls: [
+									{
+										id: "call-1",
+										function: {
+											name: "read_file",
+											arguments: {
+												path: "packages/api/src/handler.ts",
+											},
+										},
+									},
+								],
+							},
+						},
+					],
+				},
+				{
+					choices: [{ message: { role: "assistant", content: "done" } }],
+				},
+			],
+		});
+		const client: LLMClient = {
+			...fake,
+			chat: async (messages: Message[]) => {
+				seen.push(messages);
+				return fake.chat(messages, {}, {} as never);
+			},
+		} as LLMClient;
+		setToolRegistryGetter(() => ({
+			read_file: (async () => "handler") as ToolHandler,
+		}));
+
+		const outcome = await runPlainConversation({
+			client,
+			toolManager: makeFakeToolManager({
+				knownTools: new Set(["read_file"]),
+				needsApprovalByName: { read_file: false },
+			}),
+			systemMessage: SYSTEM,
+			initialMessages: [USER],
+			developmentMode: "auto-accept",
+			nonInteractiveAlwaysAllow: [],
+			abortSignal: new AbortController().signal,
+		});
+
+		t.is(outcome.kind, "success");
+		const secondRequest = seen[1] ?? [];
+		const systemPrompt = String(secondRequest[0]?.content ?? "");
+		const lastMessage = String(secondRequest.at(-1)?.content ?? "");
+		t.false(systemPrompt.includes("NESTED PLAIN RULES"));
+		t.true(lastMessage.includes("<turn-context>"));
+		t.true(lastMessage.includes("NESTED PLAIN RULES"));
+	} finally {
+		resetSessionCwd();
+		resetAgentsMdTracker();
+		resetAgentsMdIgnoreCache();
+		rmSync(root, { recursive: true, force: true });
+	}
 });
