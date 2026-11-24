@@ -77,7 +77,7 @@ const normalizeWebSearchMaxResults = (value: unknown): number => {
 };
 
 interface SearxngSearchResponse {
-	results?: Array<{title?: string; url?: string; content?: string}>;
+	results: Array<{title?: string; url?: string; content?: string}>;
 }
 
 async function searchBrave(
@@ -176,14 +176,41 @@ async function searchSearxng(
 		throw new Error(`HTTP ${response.status}: ${response.statusText}`);
 	}
 
-	const data = (await response.json()) as SearxngSearchResponse;
-	return (data.results ?? [])
-		.filter(result => result.title && result.url)
+	const invalidResponseMessage =
+		'SearXNG returned an invalid JSON search response. Check that baseUrl points to a SearXNG instance with json enabled under search.formats in its settings.yml';
+	let data: unknown;
+	try {
+		data = await response.json();
+	} catch (error) {
+		if (error instanceof SyntaxError) throw new Error(invalidResponseMessage);
+		throw error;
+	}
+	if (
+		!data ||
+		typeof data !== 'object' ||
+		Array.isArray(data) ||
+		!('results' in data) ||
+		!Array.isArray(data.results)
+	) {
+		throw new Error(invalidResponseMessage);
+	}
+	return (data as SearxngSearchResponse).results
+		.filter(
+			result =>
+				result &&
+				typeof result.title === 'string' &&
+				result.title &&
+				typeof result.url === 'string' &&
+				result.url,
+		)
 		.slice(0, maxResults)
 		.map(result => ({
 			title: result.title as string,
 			url: result.url as string,
-			description: result.content || undefined,
+			description:
+				typeof result.content === 'string'
+					? result.content || undefined
+					: undefined,
 		}));
 }
 

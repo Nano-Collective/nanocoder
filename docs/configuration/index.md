@@ -732,6 +732,8 @@ SearXNG needs no key: set `engine` to `"searxng"` and `baseUrl` to the instance.
 
 By default `baseUrl` must be a public address, with the same checks `fetch_url` applies. Set `allowPrivateNetwork` to `true` to use an instance on this machine or your local network, as above.
 
+Project-level `nanocoder.nanocoderTools.webSearch.engine`, `baseUrl`, and `allowPrivateNetwork` settings are part of the directory trust fingerprint. Adding, changing, or removing them requires renewed directory approval, since they control where search queries are sent and whether private-network hosts are allowed.
+
 ### Mutation Firewall
 
 The negative-space mutation firewall mechanically validates proposed file modifications before disk writes occur (`write_file`, `string_replace`, `diff_edit`, and the `delete`, `move` and `copy` operations of `file_op`). It prevents accidental destruction of tests, unintended stripping of exported API contracts, and injection of loose `any` types.

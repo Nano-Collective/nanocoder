@@ -800,7 +800,7 @@ const searxng = (baseUrl: string | undefined, allowPrivateNetwork = false) => ({
 
 /** Run `fn` with fetch answering `body` (or `status`) and record each request. */
 async function withSearxngFetch(
-	response: {status?: number; body?: unknown},
+	response: {status?: number; body?: unknown; invalidJson?: boolean},
 	fn: (requests: Array<{url: string; options: any}>) => Promise<void>,
 ) {
 	const requests: Array<{url: string; options: any}> = [];
@@ -815,7 +815,10 @@ async function withSearxngFetch(
 			ok: status >= 200 && status < 300,
 			status,
 			statusText: 'status',
-			json: async () => response.body ?? {},
+			json: async () => {
+				if (response.invalidJson) throw new SyntaxError('Unexpected token <');
+				return response.body;
+			},
 		} as any;
 	}) as any;
 	try {
@@ -927,6 +930,30 @@ test.serial('executeWebSearch explains a SearXNG 403 as the JSON format being of
 		);
 	});
 });
+
+for (const [label, response] of [
+	['HTML instead of JSON', {invalidJson: true}],
+	['missing results', {body: {}}],
+	['non-array results', {body: {results: {}}}],
+	['null response', {body: null}],
+	['array response', {body: []}],
+] as const) {
+	test.serial(
+		`executeWebSearch explains a SearXNG response with ${label}`,
+		async t => {
+			await withSearxngFetch(response, async () => {
+				await t.throwsAsync(
+					() =>
+						executeWebSearch(
+							{query: 'x'},
+							searxng('https://search.example.com'),
+						),
+					{message: /SearXNG.*JSON.*search\.formats/},
+				);
+			});
+		},
+	);
+}
 
 test('executeWebSearch rejects a SearXNG baseUrl that is missing or not http', async t => {
 	if (!executeWebSearch) {

@@ -1,4 +1,4 @@
-import {mkdirSync, rmSync, writeFileSync} from 'node:fs';
+import {mkdirSync, mkdtempSync, rmSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
@@ -47,6 +47,55 @@ test('isDirectoryTrusted ignores a stale fingerprint', t => {
 		}),
 	);
 });
+
+for (const profile of [false, true]) {
+	for (const [label, before, after] of [
+		['adding a search engine', {}, {engine: 'searxng'}],
+		['adding a search endpoint', {}, {baseUrl: 'https://search.example.com'}],
+		['allowing private search hosts', {}, {allowPrivateNetwork: true}],
+		['switching search engines', {engine: 'brave'}, {engine: 'searxng'}],
+		[
+			'changing the search endpoint',
+			{engine: 'searxng', baseUrl: 'https://search.example.com'},
+			{engine: 'searxng', baseUrl: 'https://other.example.com'},
+		],
+		[
+			'relaxing the private-network guard',
+			{allowPrivateNetwork: false},
+			{allowPrivateNetwork: true},
+		],
+		[
+			'removing search configuration',
+			{engine: 'searxng', baseUrl: 'https://search.example.com'},
+			{},
+		],
+	] as const) {
+		test(`project trust requires renewed approval after ${label}${profile ? ' in a profile' : ''}`, t => {
+			const root = mkdtempSync(join(tmpdir(), 'trust-web-search-'));
+			const writeSearch = (webSearch: object) =>
+				writeFileSync(
+					join(root, 'agents.config.json'),
+					JSON.stringify({
+						nanocoder: profile
+							? {profiles: {search: {nanocoderTools: {webSearch}}}}
+							: {nanocoderTools: {webSearch}},
+					}),
+				);
+			try {
+				writeSearch(before);
+				const preferences = grantDirectoryTrust({}, root);
+				t.true(isDirectoryTrusted(root, preferences));
+				writeSearch(after);
+				t.false(isDirectoryTrusted(root, preferences));
+				t.true(
+					isDirectoryTrusted(root, grantDirectoryTrust(preferences, root)),
+				);
+			} finally {
+				rmSync(root, {recursive: true, force: true});
+			}
+		});
+	}
+}
 
 test('isDirectoryTrusted is false after a plugin is added', t => {
 	const root = join(tmpdir(), `trust-plugin-${Date.now()}`);
