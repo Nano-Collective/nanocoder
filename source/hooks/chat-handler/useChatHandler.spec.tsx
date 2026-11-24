@@ -919,6 +919,25 @@ test('getBaseSystemPrompt - headless mode ignores cached prompt', t => {
 	t.true(result.includes('Current Date:'));
 });
 
+test('getBaseSystemPrompt - an MCP-only session gets the external content guidance', t => {
+	// Without the manager the prompt builder cannot see that any tool reaches
+	// outside the machine, and an MCP-only session would get no guidance at all.
+	const toolManager = {
+		getAvailableToolNames: () => ['list_issues'],
+		getMCPToolInfo: (name: string) => ({isMCPTool: name === 'list_issues'}),
+	} as unknown as NonNullable<UseChatHandlerProps['toolManager']>;
+
+	const result = getBaseSystemPrompt(
+		'normal',
+		null,
+		toolManager,
+		undefined,
+		false,
+	);
+
+	t.true(result.includes('EXTERNAL CONTENT'));
+});
+
 test('getBaseSystemPrompt - normal mode reuses cached prompt', t => {
 	const toolManager = {
 		getAvailableToolNames: (_tune: unknown, mode: string) => [`tool-for-${mode}`],

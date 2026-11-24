@@ -76,6 +76,11 @@ import {
 	stripThinkTags,
 } from '@/tool-calling/index';
 import type {ToolSchemas} from '@/tool-calling/xml-parser';
+import type {ExternalContentPresence} from '@/tools/runtime/external-content';
+import {
+	externalContentIn,
+	toToolMessage,
+} from '@/tools/runtime/external-content';
 import {getToolJsonSchema} from '@/tools/runtime/schema-validate';
 import type {RetryLimitsConfig} from '@/types/config';
 import type {
@@ -117,6 +122,12 @@ export interface TurnContext {
 	turn: number;
 	/** The last allowed turn: no tools are offered and no text is parsed. */
 	finalTurn: boolean;
+	/**
+	 * Text from outside the workspace that the model can currently read, read
+	 * off the same view the request sends. Approval uses it to escalate; it is
+	 * refreshed every iteration because the frame is what marks it.
+	 */
+	externalContent: ExternalContentPresence;
 }
 
 export interface PreparedTurn {
@@ -214,9 +225,9 @@ export interface TurnEngineAdapter<S> {
 	emptyTurnNudge?(history: Message[]): string;
 	onEmptyRetry?(attempt: number, nudge: string): void | Promise<void>;
 	/**
-	 * How tool results are written to history. Defaults to the results as
-	 * they are; the TUI writes them through its MessageBuilder (truncation,
-	 * structured content).
+	 * How tool results are written to history. Defaults to the results as they
+	 * are, framed by `toToolMessage`; the TUI writes them through its
+	 * MessageBuilder (truncation, structured content), which frames too.
 	 */
 	toolResultMessages?(results: ToolResult[]): Message[];
 	/**
@@ -277,6 +288,12 @@ export interface TurnEngineOptions<S> {
 	retryLimits: RetryLimitsConfig;
 	adapter: TurnEngineAdapter<S>;
 	policy?: TurnEnginePolicy;
+	/**
+	 * Start the run already marked as having read external content. A subagent
+	 * inherits its parent's state: the task string it was given was written by a
+	 * model looking at that content, so delegation must not clear the mark.
+	 */
+	initialExternalContentTouched?: boolean;
 }
 
 export type TurnEngineStop<S> =
@@ -306,7 +323,14 @@ export type TurnEngineResult<S> = TurnEngineStop<S> & {modelCalls: number};
 export async function runTurnEngine<S>(
 	options: TurnEngineOptions<S>,
 ): Promise<TurnEngineResult<S>> {
-	const {client, signal, maxTurns, retryLimits, adapter} = options;
+	const {
+		client,
+		signal,
+		maxTurns,
+		retryLimits,
+		adapter,
+		initialExternalContentTouched = false,
+	} = options;
 	const {
 		textToolCalls = 'fallback',
 		stripThinkTags: stripThink = false,
@@ -320,14 +344,23 @@ export async function runTurnEngine<S>(
 	const {history} = adapter;
 	const guards = createHeadlessRetryGuards(retryLimits);
 	let modelCalls = 0;
+	// The run's mark, pinned: once external text has been in view this run, no
+	// later turn of the same run is judged differently. Auto-compaction rewrites
+	// the framed tool messages, and the message cap hides them; re-deriving the
+	// answer from the view alone would let either one quietly clear the mark
+	// mid-run, which is precisely when a later write would run unguarded.
+	let externalContentTouched = initialExternalContentTouched;
 	const stop = (result: TurnEngineStop<S>): TurnEngineResult<S> => ({
 		...result,
 		modelCalls,
 	});
-	const resultMessages = (results: ToolResult[]): Message[] =>
-		results.length === 0
-			? []
-			: (adapter.toolResultMessages?.(results) ?? results);
+	const resultMessages = (results: ToolResult[]): Message[] => {
+		if (results.length === 0) return [];
+		// A frontend that shapes its own tool messages owns the framing: the TUI
+		// writes through `MessageBuilder`, which frames. Everything else gets the
+		// default path, framed here so no frontend has to remember to.
+		return adapter.toolResultMessages?.(results) ?? results.map(toToolMessage);
+	};
 	const append = (...messages: Message[]) => {
 		if (messages.length === 0) return;
 		history.set([...history.get(), ...messages]);
@@ -352,7 +385,20 @@ export async function runTurnEngine<S>(
 			return stop({kind: 'aborted'});
 		}
 
-		const context: TurnContext = {turn, finalTurn: turn === maxTurns - 1};
+		const maxMessages = getAppConfig().sessions?.maxMessages ?? 1000;
+		// The view this iteration sends. The request and the approval decision
+		// both read it, so what the model can see and what counts as "tainted"
+		// are the same thing rather than two drifting copies.
+		const requestView = capMessagesForModel(history.get(), maxMessages);
+		const detected = externalContentIn(requestView);
+		externalContentTouched = externalContentTouched || detected.inContext;
+		const context: TurnContext = {
+			turn,
+			finalTurn: turn === maxTurns - 1,
+			externalContent: externalContentTouched
+				? {inContext: true, summary: detected.summary}
+				: {inContext: false},
+		};
 		const {finalTurn} = context;
 		const prepared = await adapter.prepareTurn(context);
 		const tools = finalTurn ? {} : prepared.tools;
@@ -362,7 +408,6 @@ export async function runTurnEngine<S>(
 			return stop({kind: 'no-system-message'});
 		}
 
-		const maxMessages = getAppConfig().sessions?.maxMessages ?? 1000;
 		const finalTurnNotice: Message[] = finalTurn
 			? [{role: 'user', content: FINAL_TURN_INSTRUCTION}]
 			: [];
@@ -371,11 +416,7 @@ export async function runTurnEngine<S>(
 		let result: LLMChatResponse;
 		try {
 			result = await client.chat(
-				[
-					systemMessage,
-					...capMessagesForModel(history.get(), maxMessages),
-					...finalTurnNotice,
-				],
+				[systemMessage, ...requestView, ...finalTurnNotice],
 				tools,
 				sink.callbacks,
 				signal,

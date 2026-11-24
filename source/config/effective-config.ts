@@ -492,6 +492,11 @@ function blockSpecs(cwd?: string): BlockSpec[] {
 			effective: config.verify,
 		},
 		{
+			path: ['nanocoder', 'untrustedContent'],
+			file: agents,
+			effective: config.untrustedContent,
+		},
+		{
 			path: ['nanocoder', 'paste'],
 			file: preferences,
 			effective: config.paste,

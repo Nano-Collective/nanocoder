@@ -267,6 +267,7 @@ export class ToolRegistry {
 			streamingFormatter: t.streamingFormatter,
 			readOnly: t.readOnly,
 			approval: t.approval,
+			externalSource: t.externalSource,
 		});
 	}
 

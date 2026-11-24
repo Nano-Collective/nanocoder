@@ -9,6 +9,7 @@ import {
 	getAppConfig,
 	getRetryLimits,
 } from '@/config/index';
+import {isUntrustedContentEscalationEnabled} from '@/config/untrusted-content';
 import {TOOL_APPROVAL_REQUIRED_KIND} from '@/constants';
 import {partitionUnknownToolCalls} from '@/hooks/chat-handler/utils/tool-filters';
 import {processToolUse} from '@/message-handler';
@@ -18,7 +19,10 @@ import {
 	recordToolOutcome,
 	takeEvidenceRejection,
 } from '@/services/completion-ledger';
-import {resolveToolApproval} from '@/tools/approval-policy';
+import {
+	type ExternalContentApproval,
+	resolveToolApproval,
+} from '@/tools/approval-policy';
 import type {ToolManager} from '@/tools/tool-manager';
 import {getTuneToolMode, type TuneConfig} from '@/types/config';
 import type {
@@ -433,7 +437,11 @@ async function runPlainConversationBody(
 				}
 				return {kind: 'finish'};
 			},
-			executeTools: async toolCalls => {
+			executeTools: async (toolCalls, context) => {
+				const externalContent: ExternalContentApproval = {
+					inContext: context.externalContent.inContext,
+					escalate: isUntrustedContentEscalationEnabled(),
+				};
 				const toolsNeedingApproval: ToolCall[] = [];
 				const toolsToExecute: ToolCall[] = [];
 				for (const toolCall of toolCalls) {
@@ -443,6 +451,7 @@ async function runPlainConversationBody(
 						toolManager,
 						nonInteractiveAlwaysAllow,
 						developmentMode,
+						externalContent,
 					);
 					if (needsApproval) {
 						toolsNeedingApproval.push(toolCall);
@@ -463,6 +472,7 @@ async function runPlainConversationBody(
 								toolManager,
 								nonInteractiveAlwaysAllow,
 								developmentMode,
+								externalContent,
 							),
 						},
 					};
@@ -478,6 +488,7 @@ async function runPlainConversationBody(
 						abortSignal,
 						sessionId,
 						workingDirectory,
+						externalContentTouched: context.externalContent.inContext,
 					});
 					toolResults.push(toolResult);
 					recordToolOutcome(walkthroughLifecycle.ledger, toolCall, toolResult);
@@ -575,13 +586,14 @@ async function evaluateNeedsApproval(
 	toolManager: ToolManager,
 	nonInteractiveAlwaysAllow: string[],
 	mode: DevelopmentMode,
+	externalContent?: ExternalContentApproval,
 ): Promise<boolean> {
 	const toolEntry = toolManager.getToolEntry(toolCall.function.name);
 	return resolveToolApproval(
 		toolCall.function.name,
 		toolEntry,
 		toolCall.function.arguments,
-		{mode, alwaysAllow: nonInteractiveAlwaysAllow},
+		{mode, alwaysAllow: nonInteractiveAlwaysAllow, externalContent},
 	);
 }
 
@@ -593,6 +605,7 @@ async function evaluateAutoAcceptWouldRun(
 	toolManager: ToolManager,
 	nonInteractiveAlwaysAllow: string[],
 	mode: DevelopmentMode,
+	externalContent?: ExternalContentApproval,
 ): Promise<boolean> {
 	if (mode === 'auto-accept') return false;
 	for (const toolCall of blockedToolCalls) {
@@ -601,6 +614,7 @@ async function evaluateAutoAcceptWouldRun(
 			toolManager,
 			nonInteractiveAlwaysAllow,
 			'auto-accept',
+			externalContent,
 		);
 		if (needsApproval) return false;
 	}

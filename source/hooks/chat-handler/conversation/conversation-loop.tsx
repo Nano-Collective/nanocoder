@@ -1,5 +1,9 @@
 import React from 'react';
-import {NO_RESPONSE_MESSAGE, runTurnEngine} from '@/agent-loop/turn-engine';
+import {
+	NO_RESPONSE_MESSAGE,
+	runTurnEngine,
+	type TurnContext,
+} from '@/agent-loop/turn-engine';
 import type {ConversationStateManager} from '@/app/utils/conversation-state';
 import {
 	createWalkthroughLifecycle,
@@ -357,7 +361,7 @@ export const processAssistantResponse = async (
 		}
 	};
 
-	const executeTools = (validToolCalls: ToolCall[]) =>
+	const executeTools = (validToolCalls: ToolCall[], context: TurnContext) =>
 		runToolTurn(validToolCalls, {
 			toolManager,
 			signal,
@@ -383,6 +387,7 @@ export const processAssistantResponse = async (
 			availableNames,
 			notOfferedReason,
 			flushAll,
+			externalContent: context.externalContent,
 			markLiveTaskUpdates: () => {
 				hasLiveTaskUpdates = true;
 			},

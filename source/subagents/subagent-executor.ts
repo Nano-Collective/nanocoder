@@ -13,6 +13,7 @@ import {
 	getSubagentMaxTurns,
 } from '@/config/index';
 import {getProjectContextPreferences} from '@/config/preferences';
+import {isUntrustedContentEscalationEnabled} from '@/config/untrusted-content';
 import {invalidArgumentsResult} from '@/hooks/chat-handler/utils/tool-filters';
 import {
 	buildProjectContextSection,
@@ -44,7 +45,15 @@ import {
 	updateSubagentSessionMessages,
 	updateSubagentSessionStreaming,
 } from '@/services/subagent-session-store';
-import {resolveToolApproval} from '@/tools/approval-policy';
+import {
+	escalationExplainsApproval,
+	resolveToolApproval,
+} from '@/tools/approval-policy';
+import {
+	boundedToolResult,
+	EXTERNAL_CONTENT_REASON,
+	externalSourceFor,
+} from '@/tools/runtime/external-content';
 import {
 	clearReadContentScope,
 	runWithReadContentScope,
@@ -62,6 +71,7 @@ import type {
 	ApiCallRecord,
 	ApiUsage,
 	DevelopmentMode,
+	ExternalContentSource,
 	LLMClient,
 	Message,
 	ToolCall,
@@ -421,7 +431,7 @@ export class SubagentExecutor {
 			};
 
 			try {
-				const output = await runWithReadContentScope(
+				const conversation = await runWithReadContentScope(
 					agentId ?? 'subagent',
 					() =>
 						this.runSubagentConversation(
@@ -437,6 +447,7 @@ export class SubagentExecutor {
 							emitRun,
 						),
 				);
+				const {output} = conversation;
 
 				// Read the final estimated progress count. Provider-reported usage is
 				// sent through recordUsage and is the source for lifetime accounting.
@@ -451,6 +462,7 @@ export class SubagentExecutor {
 					success: true,
 					tokensUsed: finalTokenCount,
 					executionTimeMs: Date.now() - startTime,
+					externalContentTouched: conversation.externalContentTouched,
 				};
 			} finally {
 				await Promise.allSettled(pendingUsageWrites);
@@ -717,11 +729,14 @@ export class SubagentExecutor {
 		onApiCallComplete?: SubagentApiCallHandler,
 		alwaysAllow?: string[],
 		emitRun?: SubagentRunEmitter,
-	): Promise<string> {
+	): Promise<{output: string; externalContentTouched: boolean}> {
 		let iterations = 0;
 		let lastTool: string | undefined;
 		let totalToolCalls = 0;
 		let totalTokens = 0;
+		// Starts from what the parent passed down, then follows this run's own
+		// view. Reported to `execute` so the `agent` tool can mark its answer.
+		let sawExternalContent = executionContext?.externalContentTouched ?? false;
 
 		let streamingText = '';
 		let streamingReasoning = '';
@@ -805,6 +820,11 @@ export class SubagentExecutor {
 			// is nobody to ask inside a delegated run, so a stuck subagent stops
 			// with an error naming the setting.
 			retryLimits: getRetryLimits(),
+			// A delegated run starts marked when the parent had read outside
+			// text: the task string it was handed was written by a model looking
+			// at that text, so delegation must not clear the escalation.
+			initialExternalContentTouched:
+				executionContext?.externalContentTouched ?? false,
 			adapter: {
 				history: {
 					get: history,
@@ -818,8 +838,14 @@ export class SubagentExecutor {
 					},
 				},
 				getSystemMessage: () => systemMessage,
-				prepareTurn: async () => {
+				prepareTurn: async context => {
 					iterations++;
+
+					// Read the mark here, not only when tools run: a run whose
+					// last tool batch read a page may finish with a plain answer,
+					// and that iteration still has the frame in view.
+					sawExternalContent =
+						sawExternalContent || context.externalContent.inContext;
 
 					// Yield to event loop so Ink can render current state
 					emitProgress('running');
@@ -915,7 +941,9 @@ export class SubagentExecutor {
 					return {kind: 'finish'};
 				},
 				// Execute each tool call — yield between each so Ink can render
-				executeTools: async toolCalls => {
+				executeTools: async (toolCalls, context) => {
+					sawExternalContent =
+						sawExternalContent || context.externalContent.inContext;
 					const results: ToolResult[] = [];
 					for (const toolCall of toolCalls) {
 						// Check for cancellation before each tool call
@@ -945,16 +973,26 @@ export class SubagentExecutor {
 									{...executionContext, subagentRunId: agentId},
 									alwaysAllow,
 									toolCall.argumentsError,
+									// Inherited from the parent, or found in this run's own
+									// view: either way the approval rule sees it.
+									context.externalContent.inContext,
 								),
 						);
 
 						// Count tokens from tool results
 						totalTokens += estimateTokens(toolResult.content);
 
+						// A subagent runs its own loop instead of going through
+						// processToolUse, so the source travels out of the call with
+						// the content; `executeToolCall` has already merged the tool's
+						// declaration with anything the handler declared per call.
 						results.push({
 							role: 'tool',
 							content: toolResult.content,
 							...(toolResult.images ? {images: toolResult.images} : {}),
+							...(toolResult.externalSource
+								? {externalSource: toolResult.externalSource}
+								: {}),
 							tool_call_id: toolCall.id,
 							name: toolName,
 						});
@@ -973,7 +1011,10 @@ export class SubagentExecutor {
 		switch (result.kind) {
 			case 'completed':
 				emitProgress('complete');
-				return finalAnswer;
+				return {
+					output: finalAnswer,
+					externalContentTouched: sawExternalContent,
+				};
 			// A reply with no choices failed the request; the parent gets an
 			// error rather than an empty answer it would read as success.
 			case 'no-response':
@@ -1020,11 +1061,16 @@ export class SubagentExecutor {
 		rawArguments: unknown,
 		alwaysAllow?: string[],
 		mode: DevelopmentMode = this.currentMode(),
+		externalContentTouched = false,
 	): Promise<boolean> {
 		const toolEntry = this.toolManager.getToolEntry(toolName);
 		return resolveToolApproval(toolName, toolEntry, rawArguments, {
 			mode,
 			alwaysAllow: alwaysAllow ?? getAppConfig().alwaysAllow ?? [],
+			externalContent: {
+				inContext: externalContentTouched,
+				escalate: isUntrustedContentEscalationEnabled(),
+			},
 		});
 	}
 
@@ -1040,7 +1086,12 @@ export class SubagentExecutor {
 		executionContext?: Omit<ToolExecutionContext, 'abortSignal'>,
 		alwaysAllow?: string[],
 		argumentsError?: string,
-	): Promise<{content: string; images?: Message['images']}> {
+		externalContentTouched = false,
+	): Promise<{
+		content: string;
+		images?: Message['images'];
+		externalSource?: ExternalContentSource;
+	}> {
 		// One ToolCall object for this call, shared by the approval prompt and
 		// the lifecycle gate so runPreToolUseGate can key its once-per-call
 		// suppression on it.
@@ -1061,7 +1112,11 @@ export class SubagentExecutor {
 		const bridge = getSubagentToolBridge(executionContext?.sessionId);
 		await bridge?.begin(toolCall, config.name);
 		const finish = async (
-			result: {content: string; images?: Message['images']},
+			result: {
+				content: string;
+				images?: Message['images'];
+				externalSource?: ExternalContentSource;
+			},
 			failed: boolean,
 		) => {
 			await bridge?.end(toolCall, {content: result.content, failed});
@@ -1141,17 +1196,38 @@ export class SubagentExecutor {
 		// Check if this tool needs user approval. A bridge supplies its own
 		// session's mode: the executor is shared, so its mode can't be right for
 		// every session at once.
+		const approvalMode = bridge?.getMode();
+		const approvalContext = {
+			mode: approvalMode ?? this.currentMode(),
+			alwaysAllow: alwaysAllow ?? getAppConfig().alwaysAllow ?? [],
+			externalContent: {
+				inContext: externalContentTouched,
+				escalate: isUntrustedContentEscalationEnabled(),
+			},
+		};
 		const needsApproval = await this.needsApprovalForTool(
 			toolName,
 			rawArguments,
 			alwaysAllow,
-			bridge?.getMode(),
+			approvalMode,
+			externalContentTouched,
 		);
 		if (needsApproval) {
 			const vote = await consultPluginPermission(toolName, parsedArgs);
 			if (vote.decision === 'deny') {
 				return finish({content: `Error: ${vote.reason}`}, true);
 			}
+
+			// Names the reason only when the escalation is what raised this
+			// prompt, so a plain approval does not carry a misleading line.
+			const escalation = (await escalationExplainsApproval(
+				toolName,
+				this.toolManager.getToolEntry(toolName),
+				rawArguments,
+				approvalContext,
+			))
+				? EXTERNAL_CONTENT_REASON
+				: undefined;
 
 			// Pass the turn's signal: without it this await is the one place a
 			// subagent cannot be cancelled. `tool-executor` starts a batch of
@@ -1163,11 +1239,13 @@ export class SubagentExecutor {
 						toolCall,
 						signal,
 						executionContext?.subagentRunId,
+						escalation,
 					)
 				: (await signalToolApproval(
 							{
 								toolCall,
 								subagentName: config.name,
+								reason: escalation,
 							},
 							signal,
 						))
@@ -1192,6 +1270,10 @@ export class SubagentExecutor {
 				...executionContext,
 				toolCallId,
 				abortSignal: signal,
+				// The nested run's own state, not the parent's: a subagent that
+				// has not read outside text must not hand a stale mark to the
+				// agent tool it calls.
+				externalContentTouched,
 			});
 			// Subagents converse in text, so collapse structured output to its
 			// text representation.
@@ -1206,9 +1288,26 @@ export class SubagentExecutor {
 				Array.isArray(result.images)
 					? result.images
 					: undefined;
+			// A handler may declare that this particular answer came from outside
+			// even though the tool is not an external source - `agent` does this
+			// when the subagent it called read a page. That declaration has to
+			// survive this boundary, or a nested delegation would launder it: the
+			// depth-1 run would hand the parent an unmarked summary.
+			const externalSource =
+				typeof result === 'object' &&
+				result !== null &&
+				'externalSource' in result &&
+				result.externalSource !== undefined
+					? result.externalSource
+					: externalSourceFor(
+							this.toolManager?.getToolEntry?.(toolName)?.externalSource,
+							parsedArgs,
+						);
 			// Formatters run on a successful write, before post-tool-use, as in
-			// processToolUse.
-			const truncated = truncateToolResult(content);
+			// processToolUse. Bounded here with the frame's size in mind, for the
+			// same reason: the frame is added later and must not push the result
+			// past the cap, and one truncation keeps the elision marker honest.
+			const truncated = boundedToolResult(content, toolName, externalSource);
 			// Failure is either a structured isError or, for the many tools that
 			// return plain text, an "Error..." message - as the top-level ACP path
 			// reads it.
@@ -1233,6 +1332,7 @@ export class SubagentExecutor {
 				{
 					content: commitNote ? `${withHooks}\n\n${commitNote}` : withHooks,
 					...(images && images.length > 0 ? {images} : {}),
+					...(externalSource ? {externalSource} : {}),
 				},
 				failed,
 			);

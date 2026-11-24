@@ -1,6 +1,10 @@
 import test from 'ava';
 import type {DevelopmentMode, NanocoderToolExport} from '../types/core.js';
-import {resolveToolApproval} from './approval-policy.js';
+import {
+	escalatedByExternalContent,
+	escalationExplainsApproval,
+	resolveToolApproval,
+} from './approval-policy.js';
 import {browserTool} from './browser.js';
 import {executeBashTool} from './execute-bash.js';
 import {fetchUrlTool} from './fetch-url.js';
@@ -400,4 +404,166 @@ test('yolo mode bypasses approval for high-risk dynamic tools', async t => {
 
 test('unknown tool (no entry) requires approval', async t => {
 	t.true(await resolveToolApproval('mystery_tool', undefined, {}, {mode: 'normal'}));
+});
+
+// ============================================================================
+// External content escalation
+//
+// Reading a page does not change what a tool is allowed to do; it changes who
+// has to say yes. The rule sits above `alwaysAllow` on purpose (see the order
+// table in approval-policy.ts), so these cases pin both halves of that.
+// ============================================================================
+
+const TAINTED = {inContext: true, escalate: true} as const;
+const UNTAINTED = {inContext: false, escalate: true} as const;
+
+/** Resolve with external-content context, in a mode that can escalate. */
+function withExternalContent(
+	tests: import('../types/core.js').NanocoderToolExport,
+	mode: 'auto-accept' | 'architect' | 'normal' | 'yolo' | 'plan' | 'headless',
+	externalContent: {inContext: boolean; escalate: boolean},
+	alwaysAllow?: string[],
+) {
+	return resolveToolApproval(tests.name, tests, {}, {
+		mode,
+		alwaysAllow,
+		externalContent,
+	});
+}
+
+test('a file write that auto-accept waives is confirmed once content is read', async t => {
+	t.false(await withExternalContent(writeFileTool, 'auto-accept', UNTAINTED));
+	t.true(await withExternalContent(writeFileTool, 'auto-accept', TAINTED));
+});
+
+test('the same write is confirmed in architect mode', async t => {
+	t.false(await withExternalContent(stringReplaceTool, 'architect', UNTAINTED));
+	t.true(await withExternalContent(stringReplaceTool, 'architect', TAINTED));
+});
+
+test('escalation outranks the alwaysAllow list', async t => {
+	t.false(
+		await withExternalContent(writeFileTool, 'auto-accept', UNTAINTED, [
+			'write_file',
+		]),
+	);
+	t.true(
+		await withExternalContent(writeFileTool, 'auto-accept', TAINTED, [
+			'write_file',
+		]),
+	);
+});
+
+test('a read-only tool stays unprompted: reading is what the model was asked to do', async t => {
+	t.false(await withExternalContent(readFileTool, 'auto-accept', TAINTED));
+	t.false(await withExternalContent(searchFileContentsTool, 'auto-accept', TAINTED));
+});
+
+test('the tools that reached outside are the ones escalated', async t => {
+	// fetch_url is readOnly, but it is also egress: the exfiltration channel.
+	t.true(await withExternalContent(fetchUrlTool, 'auto-accept', TAINTED));
+	t.true(await withExternalContent(webSearchTool, 'auto-accept', TAINTED));
+});
+
+test('delegation is escalated, so a subagent cannot be started blindly', async t => {
+	const agent = {
+		name: 'agent',
+		readOnly: false,
+		approval: false,
+	} as import('../types/core.js').NanocoderToolExport;
+
+	t.false(await withExternalContent(agent, 'auto-accept', UNTAINTED));
+	t.true(await withExternalContent(agent, 'auto-accept', TAINTED));
+});
+
+test('an MCP tool is escalated even when the server calls itself read-only', async t => {
+	const mcpTool = {
+		name: 'list_issues',
+		readOnly: true,
+		externalSource: {kind: 'mcp', server: 'github'},
+	} as import('../types/core.js').NanocoderToolExport;
+
+	t.false(await withExternalContent(mcpTool, 'auto-accept', UNTAINTED));
+	t.true(await withExternalContent(mcpTool, 'auto-accept', TAINTED));
+});
+
+test('yolo still never asks, whatever was read', async t => {
+	t.false(await withExternalContent(writeFileTool, 'yolo', TAINTED));
+});
+
+test('normal mode is unaffected: it already asked', async t => {
+	// The switch only changes an answer where the mode would have waived it.
+	// write_file's own policy asks in normal mode, so the reason it asks is not
+	// the escalation - but the answer is approval either way.
+	t.true(await withExternalContent(writeFileTool, 'normal', TAINTED));
+	const toolWithWaivingPolicy = {
+		name: 'write_plan',
+		readOnly: false,
+		approval: false,
+	} as import('../types/core.js').NanocoderToolExport;
+	t.false(await withExternalContent(toolWithWaivingPolicy, 'normal', TAINTED));
+});
+
+test('the switch being off means no escalation at all', async t => {
+	t.false(
+		await withExternalContent(writeFileTool, 'auto-accept', {
+			inContext: true,
+			escalate: false,
+		}),
+	);
+});
+
+test('headless is out of scope: it has nobody to ask', async t => {
+	t.false(await withExternalContent(writeFileTool, 'headless', TAINTED));
+});
+
+// ---------------------------------------------------------------------------
+// The escalation set is narrow on purpose
+//
+// Only calls that can act on the world are escalated. Asking the user a
+// question, updating the task list or writing a walkthrough are not changes to
+// the workspace, and making the model ask permission to ask a question would be
+// a regression rather than a guard.
+// ---------------------------------------------------------------------------
+
+const benigned = (name: string) =>
+	({name, approval: false}) as import('../types/core.js').NanocoderToolExport;
+
+test('tools that never gate stay ungated: a question is not a change', async t => {
+	t.false(await withExternalContent(benigned('ask_user'), 'auto-accept', TAINTED));
+	t.false(
+		await withExternalContent(benigned('write_tasks'), 'auto-accept', TAINTED),
+	);
+	t.false(
+		await withExternalContent(
+			benigned('write_walkthrough'),
+			'auto-accept',
+			TAINTED,
+		),
+	);
+});
+
+test('a tool that would ask anyway is not blamed on the page', async t => {
+	// execute_bash prompts in auto-accept through its own policy, so the
+	// escalation is not what raised the prompt. The confirmation UI shows the
+	// reason only when this says so.
+	const ctx = {mode: 'auto-accept' as const, externalContent: TAINTED};
+
+	t.true(
+		await resolveToolApproval('execute_bash', executeBashTool, {}, ctx),
+		'bash still prompts',
+	);
+	t.false(
+		await escalatedByExternalContent('execute_bash', executeBashTool, 'auto-accept', ctx),
+		'but not because of external content',
+	);
+	t.false(
+		await escalationExplainsApproval('execute_bash', executeBashTool, {}, ctx),
+	);
+
+	const write = {mode: 'auto-accept' as const, externalContent: TAINTED};
+	t.true(
+		await escalationExplainsApproval('write_file', writeFileTool, {}, write),
+		'a waived write is escalated by the page, so the reason does belong',
+	);
 });

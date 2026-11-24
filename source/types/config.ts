@@ -432,6 +432,18 @@ export interface DiskNanocoderConfig {
 	/** Negative-space mutation firewall. Off by default. */
 	firewall?: Partial<FirewallConfig>;
 	/**
+	 * Untrusted external content (web, browser, MCP). The frame those results
+	 * carry is always on; this block only controls what happens to approvals.
+	 */
+	untrustedContent?: {
+		/**
+		 * Confirm file writes, commands and network calls while external content
+		 * is in the model's view, in auto-accept and architect. On by default;
+		 * set to false to opt out.
+		 */
+		escalate?: boolean;
+	};
+	/**
 	 * Project-level verify policy: CI-watch trust level and poll cadence, and
 	 * `required` completion evidence (commands that must exit 0 after the last
 	 * edit, or "auto"). Read by `loadVerifyConfig()`.
@@ -591,6 +603,12 @@ export interface AppConfig {
 
 	// Negative-space mutation firewall
 	firewall?: Partial<FirewallConfig>;
+
+	// Untrusted external content: the frame is always on, escalation is on by
+	// default and an explicit `false` opts out.
+	untrustedContent?: {
+		escalate?: boolean;
+	};
 }
 
 // MCP Server configuration with source tracking

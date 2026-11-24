@@ -175,6 +175,17 @@
 					"$ref": "#/definitions/TuneConfig",
 					"description": "Model mode defaults (tool profile, tool mode, model parameters)."
 				},
+				"untrustedContent": {
+					"description": "Untrusted external content (web, browser, MCP). The frame those results\ncarry is always on; this block only controls what happens to approvals.",
+					"properties": {
+						"escalate": {
+							"description": "Confirm file writes, commands and network calls while external content\nis in the model's view, in auto-accept and architect. On by default;\nset to false to opt out.",
+							"type": "boolean"
+						}
+					},
+					"type": "object",
+					"additionalProperties": false
+				},
 				"verify": {
 					"$ref": "#/definitions/VerifyConfig",
 					"description": "Project-level verify policy: CI-watch trust level and poll cadence, and\n`required` completion evidence (commands that must exit 0 after the last\nedit, or \"auto\"). Read by `loadVerifyConfig()`."
@@ -341,6 +352,17 @@
 				"tune": {
 					"$ref": "#/definitions/TuneConfig",
 					"description": "Model mode defaults (tool profile, tool mode, model parameters)."
+				},
+				"untrustedContent": {
+					"description": "Untrusted external content (web, browser, MCP). The frame those results\ncarry is always on; this block only controls what happens to approvals.",
+					"properties": {
+						"escalate": {
+							"description": "Confirm file writes, commands and network calls while external content\nis in the model's view, in auto-accept and architect. On by default;\nset to false to opt out.",
+							"type": "boolean"
+						}
+					},
+					"type": "object",
+					"additionalProperties": false
 				},
 				"verify": {
 					"$ref": "#/definitions/VerifyConfig",

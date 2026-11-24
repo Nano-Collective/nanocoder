@@ -19,6 +19,11 @@ import {createGlobalHandlerSlot} from '@/utils/global-handler-slot';
 export interface PendingToolConfirmation {
 	/** The tool call awaiting the user's approve/decline decision. */
 	toolCall: ToolCall;
+	/**
+	 * Why the prompt is up, when the answer is not self-evident: reading
+	 * external content is what escalated this call. Shown above the question.
+	 */
+	reason?: string;
 }
 
 // No handler registered (e.g. non-interactive contexts) → default to declined.

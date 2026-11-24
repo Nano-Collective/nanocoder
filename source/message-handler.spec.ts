@@ -1,5 +1,11 @@
 import test from 'ava';
-import type {ToolCall, ToolHandler, ToolResult} from '@/types/index';
+import type {
+	ExternalToolSource,
+	StructuredToolOutput,
+	ToolCall,
+	ToolHandler,
+	ToolResult,
+} from '@/types/index';
 import type {ToolManager} from '@/tools/tool-manager';
 import {
 	getToolManager,
@@ -763,4 +769,105 @@ test('processToolUse - does not run a tool once the turn is cancelled', async t 
 	t.is(result.tool_call_id, 'call-1');
 	t.true(result.isError);
 	t.regex(String(result.content), /cancelled by the user/i);
+});
+
+// ============================================================================
+// External content marking
+//
+// A result is marked here, where the tool's declaration and the arguments of
+// the call are both in hand; the message builder does the framing.
+// ============================================================================
+
+function managerFor(
+	externalSource: ExternalToolSource | undefined,
+	handler: () => Promise<string | StructuredToolOutput>,
+): ToolManager {
+	return {
+		getToolRegistry: () => ({tool: handler}),
+		getToolEntry: () => ({name: 'tool', externalSource}),
+	} as unknown as ToolManager;
+}
+
+test('a web result carries the address the call read', async t => {
+	const manager = managerFor({kind: 'web', urlArg: 'url'}, async () => 'page');
+
+	const result = await processToolUse(
+		createMockToolCall('tool', {url: 'https://example.test/page'}),
+		{toolManager: manager},
+	);
+
+	t.deepEqual(result.externalSource, {
+		kind: 'web',
+		url: 'https://example.test/page',
+	});
+});
+
+test('an MCP result carries the server that owns the tool', async t => {
+	const manager = managerFor({kind: 'mcp', server: 'github'}, async () => 'issues');
+
+	const result = await processToolUse(createMockToolCall('tool', {}), {
+		toolManager: manager,
+	});
+
+	t.deepEqual(result.externalSource, {kind: 'mcp', server: 'github'});
+});
+
+test('a workspace result is not marked', async t => {
+	const manager = managerFor(undefined, async () => 'file contents');
+
+	const result = await processToolUse(createMockToolCall('tool', {}), {
+		toolManager: manager,
+	});
+
+	t.is(result.externalSource, undefined);
+});
+
+test('a failed external call is marked: the failure text is the source', async t => {
+	// An MCP server's error message is the server's text, and a fetch failure
+	// quotes the URL it could not reach, so a failure is framed like output.
+	const manager = managerFor({kind: 'web', urlArg: 'url'}, async () => {
+		throw new Error('Failed to fetch URL: connection refused');
+	});
+
+	const result = await processToolUse(
+		createMockToolCall('tool', {url: 'https://example.test/page'}),
+		{toolManager: manager},
+	);
+
+	t.true(result.isError);
+	t.deepEqual(result.externalSource, {
+		kind: 'web',
+		url: 'https://example.test/page',
+	});
+});
+
+test('a failure the handler reports instead of throwing is marked too', async t => {
+	// Same call, the other failure style: a handler that returns
+	// `{llmContent, isError}` rather than throwing.
+	const manager = managerFor({kind: 'mcp', server: 'github'}, async () => ({
+		llmContent: 'Error: server exploded',
+		isError: true,
+	}));
+
+	const result = await processToolUse(createMockToolCall('tool', {}), {
+		toolManager: manager,
+	});
+
+	t.true(result.isError);
+	t.deepEqual(result.externalSource, {kind: 'mcp', server: 'github'});
+});
+
+test('a handler can declare that this answer came from outside the workspace', async t => {
+	// `agent` does this when the subagent read a page: the tool is not an
+	// external source, but this particular answer is.
+	const manager = managerFor(undefined, async () => ({
+		llmContent: 'summary of the page',
+		externalSource: {kind: 'subagent' as const},
+	}));
+
+	const result = await processToolUse(createMockToolCall('tool', {}), {
+		toolManager: manager,
+	});
+
+	t.deepEqual(result.externalSource, {kind: 'subagent'});
 });

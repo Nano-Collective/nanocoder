@@ -480,6 +480,31 @@ function loadFirewallConfig(cwd: string): Partial<FirewallConfig> | undefined {
 	);
 }
 
+function loadUntrustedContentConfig(
+	cwd: string,
+): AppConfig['untrustedContent'] {
+	return (
+		loadHierarchicalConfig(
+			cwd,
+			'agents.config.json',
+			'untrustedContent',
+			config => {
+				const untrustedContent = config.nanocoder?.untrustedContent;
+				if (!untrustedContent || typeof untrustedContent !== 'object') {
+					return null;
+				}
+				const escalate = untrustedContent.escalate;
+				if (escalate === undefined) return {};
+				if (typeof escalate === 'boolean') return {escalate};
+				notifyWarning(
+					'nanocoder.untrustedContent.escalate must be true or false; ignoring it.',
+				);
+				return {};
+			},
+		) ?? undefined
+	);
+}
+
 function loadAlwaysAllowConfig(cwd: string): string[] | undefined {
 	return (
 		loadHierarchicalConfig(cwd, 'agents.config.json', 'alwaysAllow', config => {
@@ -1003,6 +1028,8 @@ function loadAppConfig(cwd: string): AppConfig {
 
 	const firewall = loadFirewallConfig(cwd);
 
+	const untrustedContent = loadUntrustedContentConfig(cwd);
+
 	// Load user-defined LSP servers (auto-discovery still runs alongside)
 	const lspServers = loadLspServersConfig(cwd);
 	const lsp = loadLspConfig(cwd);
@@ -1031,6 +1058,7 @@ function loadAppConfig(cwd: string): AppConfig {
 		sandbox,
 		autoCommit,
 		firewall,
+		untrustedContent,
 	};
 }
 

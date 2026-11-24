@@ -74,6 +74,49 @@ export interface ToolCall {
 	argumentsError?: string;
 }
 
+/**
+ * Where a tool's output comes from when it is not this machine: the web tools,
+ * page automation, or any tool an MCP server exposes. Local file, shell and LSP
+ * tools belong to the workspace and are not external content.
+ *
+ * The kind is a classification, not a trust level: every kind is treated the
+ * same way (see `@/tools/runtime/external-content`), it only decides the label
+ * the model sees and the source named in a confirmation prompt.
+ */
+export type ExternalContentKind =
+	| 'web'
+	| 'search'
+	| 'browser'
+	| 'mcp'
+	| 'subagent';
+
+/**
+ * What a tool *is*, declared once where the tool is registered. The approval
+ * policy reads it to know which calls reach outside the workspace, and the
+ * message builder reads it to frame the result for the model.
+ */
+export interface ExternalToolSource {
+	kind: ExternalContentKind;
+	/**
+	 * Argument that carries the address a call reads (`fetch_url`'s `url`).
+	 * Copied onto the result so the frame can name what was read.
+	 */
+	urlArg?: string;
+	/** MCP server owning the tool. */
+	server?: string;
+}
+
+/**
+ * What one result *carries*, resolved at execution time from the tool's
+ * declaration plus the arguments of the call. Present exactly when the model
+ * is about to read text this machine did not produce.
+ */
+export interface ExternalContentSource {
+	kind: ExternalContentKind;
+	url?: string;
+	server?: string;
+}
+
 export interface ToolResult {
 	tool_call_id: string;
 	role: 'tool';
@@ -83,6 +126,12 @@ export interface ToolResult {
 	/** Raw base64. Sent as image parts, not copied into `content`. */
 	images?: ImageAttachment[];
 	isError?: boolean;
+	/**
+	 * Set when this result came from outside the workspace. The message written
+	 * to history is then wrapped in an `<external_content>` frame; an unmarked
+	 * result is written through unchanged.
+	 */
+	externalSource?: ExternalContentSource;
 }
 
 export interface ToolParameterSchema {
@@ -107,6 +156,13 @@ export interface Tool {
 export interface StructuredToolOutput {
 	llmContent: string;
 	structured?: JSONValue;
+	/**
+	 * Set by a handler whose output came from outside the workspace *for this
+	 * call*, where the tool itself is not an external source. `agent` uses it:
+	 * a subagent that read a page returns a summary written by a model that was
+	 * looking at that page, so the parent must see it framed and marked.
+	 */
+	externalSource?: ExternalContentSource;
 	/**
 	 * Set by a handler whose run failed without throwing - a shell command that
 	 * exited non-zero, say - so the result carries the failure instead of every
@@ -139,8 +195,17 @@ export interface ToolExecutionContext {
 	toolManager?: ToolManager;
 	/** The call being executed, so a subagent it starts can name its parent call. */
 	toolCallId?: string;
-	/** Set for a subagent's own tool calls: the run executing them. */
+	/**
+	 * Set for a subagent's own tool calls: the run executing them.
+	 */
 	subagentRunId?: string;
+	/**
+	 * Whether the model has read text from outside the workspace this run. Read
+	 * by tools that start something of their own - `agent` hands it to the
+	 * subagent, so delegated work inherits the escalation instead of laundering
+	 * it away.
+	 */
+	externalContentTouched?: boolean;
 	/**
 	 * The client the call's turn runs on, when it is not the process-wide one:
 	 * an ACP session that picked its own model. Auto-commit writes its message
@@ -195,6 +260,8 @@ export interface NanocoderToolExport {
 	validator?: ToolValidator;
 	readOnly?: boolean;
 	approval?: ToolApprovalPolicy;
+	/** Set for tools whose output comes from outside the workspace. */
+	externalSource?: ExternalToolSource;
 }
 
 export interface ToolEntry {
@@ -206,6 +273,8 @@ export interface ToolEntry {
 	validator?: ToolValidator;
 	readOnly?: boolean;
 	approval?: ToolApprovalPolicy;
+	/** Set for tools whose output comes from outside the workspace. */
+	externalSource?: ExternalToolSource;
 	ownerSkill?: string;
 	scoped?: boolean;
 }

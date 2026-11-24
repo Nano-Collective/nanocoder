@@ -20,6 +20,11 @@ interface ToolConfirmationProps {
 	toolCall: ToolCall;
 	onConfirm: (confirmed: boolean) => void;
 	onCancel: () => void;
+	/**
+	 * Why this call is being confirmed, when the answer is not self-evident -
+	 * reading external content escalated it. Shown above the question.
+	 */
+	reason?: string;
 }
 
 interface ConfirmationOption {
@@ -31,6 +36,7 @@ export default function ToolConfirmation({
 	toolCall,
 	onConfirm,
 	onCancel,
+	reason,
 }: ToolConfirmationProps) {
 	const boxWidth = useTerminalWidth();
 	const {colors} = useTheme();
@@ -267,6 +273,12 @@ export default function ToolConfirmation({
 					before deciding. */}
 				{!isChecking && !hasFormatterError && (
 					<>
+						{reason !== undefined && (
+							<Box marginBottom={1}>
+								<Text color={colors.warning}>{`⚠ ${reason}`}</Text>
+							</Box>
+						)}
+
 						<Box marginBottom={1}>
 							<Text color={colors.tool}>
 								{`Do you want to execute ${

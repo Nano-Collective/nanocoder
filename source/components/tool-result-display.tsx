@@ -1,10 +1,12 @@
 import {Box, Text} from 'ink';
 import React from 'react';
 import BashProgress from '@/components/bash-progress';
+import {ExternalContentNotice} from '@/components/external-content-notice';
 import {ErrorMessage} from '@/components/message-box';
 import ToolMessage, {ToolOutputContext} from '@/components/tool-message';
 import {useTheme} from '@/hooks/useTheme';
 import type {BashExecutionState} from '@/services/bash-executor';
+import {isExternalResult} from '@/tools/runtime/external-content';
 import {parseToolArguments} from '@/tools/runtime/tool-args-parser';
 import type {ToolManager} from '@/tools/tool-manager';
 import type {ToolCall, ToolResult} from '@/types/index';
@@ -276,6 +278,20 @@ async function renderToolOutput(
  * @param compact - When true, show one-liner instead of full formatter output
  * @param expandId - `/expand` number, shown in the "+N more lines" note
  */
+/** A rendered result, with the external notice above it when it needs one. */
+function withExternalNotice(
+	result: ToolResult,
+	element: React.ReactElement,
+): React.ReactElement {
+	if (!isExternalResult(result)) return element;
+	return (
+		<Box flexDirection="column">
+			<ExternalContentNotice />
+			{element}
+		</Box>
+	);
+}
+
 export async function displayToolResult(
 	toolCall: ToolCall,
 	result: ToolResult,
@@ -300,26 +316,34 @@ export async function displayToolResult(
 				key={generateKey(`tool-error-compact-${result.tool_call_id}`)}
 				marginLeft={2}
 			>
-				<CompactToolError toolName={result.name} />
+				{withExternalNotice(
+					result,
+					<CompactToolError toolName={result.name} />,
+				)}
 			</Box>,
 		);
 		return;
 	}
 
 	if (errorMessage !== undefined) {
-		// Display as error message - shown in full
+		// Display as error message - shown in full. A failure from an external
+		// tool is framed for the model, so it carries the notice here too.
 		addToChatQueue(
-			<ErrorMessage
-				key={generateKey(`tool-error-${result.tool_call_id}`)}
-				message={errorMessage}
-				hideBox={true}
-			/>,
+			React.cloneElement(
+				withExternalNotice(
+					result,
+					<ErrorMessage message={errorMessage} hideBox={true} />,
+				),
+				{key: generateKey(`tool-error-${result.tool_call_id}`)},
+			),
 		);
 		return;
 	}
 
 	// Compact mode: show count-based one-liner instead of full formatter output
-	// (skip for tools that should always show expanded output)
+	// (skip for tools that should always show expanded output). The external
+	// notice follows the line even here: compact display hides the output, not
+	// where it came from.
 	if (compact && !ALWAYS_EXPANDED_TOOLS.has(result.name)) {
 		const description = getGroupedCompactDescription(result.name, 1);
 		addToChatQueue(
@@ -327,7 +351,13 @@ export async function displayToolResult(
 				key={generateKey(`tool-compact-${result.tool_call_id}`)}
 				marginLeft={2}
 			>
-				<CompactToolResult toolName={result.name} description={description} />
+				{withExternalNotice(
+					result,
+					<CompactToolResult
+						toolName={result.name}
+						description={description}
+					/>,
+				)}
 			</Box>,
 		);
 		return;
@@ -336,7 +366,10 @@ export async function displayToolResult(
 	if (!toolManager) return;
 
 	const key = generateKey(`tool-result-${result.tool_call_id}`);
-	const output = await renderToolOutput(toolCall, result, toolManager);
+	const output = withExternalNotice(
+		result,
+		await renderToolOutput(toolCall, result, toolManager),
+	);
 	addToChatQueue(
 		expandId === undefined ? (
 			React.cloneElement(output, {key})
@@ -386,7 +419,7 @@ export async function renderExpandedToolResult(
 			key={generateKey(`tool-expand-${entry.id}`)}
 			value={{expanded: true}}
 		>
-			{output}
+			{withExternalNotice(result, output)}
 		</ToolOutputContext.Provider>
 	);
 }
