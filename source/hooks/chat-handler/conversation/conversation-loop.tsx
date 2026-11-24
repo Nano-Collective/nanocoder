@@ -485,6 +485,30 @@ export const processAssistantResponse = async (
 				if (!response?.choices?.length) return;
 				fullReasoning = response.choices[0].message.reasoning;
 				turnUsage = response.usage;
+				// Record every billed model call for session /usage and lifetime
+				// /stats, including calls that trigger auto-compaction or a
+				// malformed tool-call retry.
+				const usage = response.usage;
+				const hasReportedUsage =
+					!!usage &&
+					(Number.isFinite(usage.inputTokens) ||
+						Number.isFinite(usage.outputTokens) ||
+						Number.isFinite(usage.totalTokens) ||
+						Number.isFinite(usage.cacheReadTokens) ||
+						Number.isFinite(usage.cacheWriteTokens));
+				if (onApiCallComplete && hasReportedUsage && usage) {
+					onApiCallComplete({
+						provider: currentProvider,
+						model: currentModel,
+						inputTokens: usage.inputTokens,
+						outputTokens: usage.outputTokens,
+						totalTokens: usage.totalTokens,
+						cacheReadTokens: usage.cacheReadTokens,
+						cacheWriteTokens: usage.cacheWriteTokens,
+						baseURL: client.getProviderConfig().config.baseURL,
+						timestamp: Date.now(),
+					});
+				}
 				// Notify the user once per session when the XML fallback path is
 				// active
 				if (response.toolsDisabled && !hasShownFallbackNotice) {
@@ -626,21 +650,6 @@ export const processAssistantResponse = async (
 							? {...usage, atMessageCount: history.length}
 							: null,
 					);
-
-					// Record a per-call history entry for session cost tracking
-					if (onApiCallComplete && hasReportedUsage && usage) {
-						onApiCallComplete({
-							provider: currentProvider,
-							model: currentModel,
-							inputTokens: usage.inputTokens,
-							outputTokens: usage.outputTokens,
-							totalTokens: usage.totalTokens,
-							cacheReadTokens: usage.cacheReadTokens,
-							cacheWriteTokens: usage.cacheWriteTokens,
-							baseURL: client.getProviderConfig().config.baseURL,
-							timestamp: Date.now(),
-						});
-					}
 				}
 
 				// Clear streaming content (but don't set isGenerating=false yet —
