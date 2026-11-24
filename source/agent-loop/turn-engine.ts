@@ -73,7 +73,7 @@ import {
 import {
 	parseToolCalls,
 	stripEmbeddedToolCallText,
-	stripThinkTags,
+	stripThinkTagsOutsideToolCalls,
 } from '@/tool-calling/index';
 import type {ToolSchemas} from '@/tool-calling/xml-parser';
 import {getToolJsonSchema} from '@/tools/runtime/schema-validate';
@@ -400,8 +400,11 @@ export async function runTurnEngine<S>(
 
 		const message = result.choices[0].message;
 		const nativeToolCalls = message.tool_calls || [];
+		// Strip through the tool-call-aware helper: a `<think>` inside a
+		// `write_file` argument is file content, not reasoning, and the
+		// interactive frontend turns this pre-strip on.
 		const fullContent = stripThink
-			? stripThinkTags(message.content || '')
+			? stripThinkTagsOutsideToolCalls(message.content || '')
 			: message.content || '';
 		const unparsed = (cleanedContent: string) => ({
 			success: true as const,
