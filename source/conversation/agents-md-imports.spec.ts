@@ -236,6 +236,55 @@ test('an indented reference is code, not an import', t => {
 	}
 });
 
+test('refuses an import from the git directory', t => {
+	const root = makeProject();
+	try {
+		// The origin URL in here can carry a token, and AGENTS.md arrives with
+		// the repository, so this must not reach the provider.
+		write(
+			root,
+			'.git/config',
+			'[remote "origin"]\n\turl = https://user:ghp_t0ken@github.com/a/b.git',
+		);
+		const result = expand(root, '@.git/config');
+		t.is(result.warnings.length, 1);
+		t.true(result.warnings[0]?.includes('git directory') ?? false);
+		t.false(result.content.includes('ghp_t0ken'));
+	} finally {
+		rmSync(root, {recursive: true, force: true});
+	}
+});
+
+test('refuses a gitignored file', t => {
+	const root = makeProject();
+	try {
+		write(root, '.gitignore', '.env\n');
+		write(root, '.env', 'API_KEY=sk-live');
+		const result = expand(root, '@.env');
+		t.is(result.warnings.length, 1);
+		t.true(result.warnings[0]?.includes('ignore rules') ?? false);
+		t.false(result.content.includes('sk-live'));
+	} finally {
+		rmSync(root, {recursive: true, force: true});
+	}
+});
+
+test('expands a snippet imported from two places', t => {
+	const root = makeProject();
+	try {
+		// Shared guidance reached from siblings is not a cycle: the second one
+		// is useful on its own, and the size budget bounds repeats.
+		write(root, 'shared.md', 'Shared rule.');
+		write(root, 'a.md', '@shared.md');
+		write(root, 'b.md', '@shared.md');
+		const result = expand(root, '@a.md\n@b.md');
+		t.deepEqual(result.warnings, []);
+		t.is(result.content, 'Shared rule.\nShared rule.');
+	} finally {
+		rmSync(root, {recursive: true, force: true});
+	}
+});
+
 test('a circular import is reported and not expanded again', t => {
 	const root = makeProject();
 	try {

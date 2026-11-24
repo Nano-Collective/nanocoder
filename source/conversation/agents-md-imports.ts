@@ -3,6 +3,7 @@ import {homedir} from 'node:os';
 import {dirname, isAbsolute, join, relative, resolve, sep} from 'node:path';
 import {MAX_TOOL_RESULT_CHARS} from '@/constants';
 import {truncateToolResult} from '@/tools/runtime/truncate-tool-result';
+import {loadGitignore} from '@/utils/fs/gitignore-loader';
 import {isPathInside} from '@/utils/fs/path-validation';
 
 /**
@@ -22,10 +23,16 @@ import {isPathInside} from '@/utils/fs/path-validation';
  *   resolving symlinks, so neither an in-repo link nor a `@~/...` reference
  *   can point the model at `~/.ssh` or at the config directory, which holds
  *   credentials;
+ * - the git directory and everything the project already ignores are refused:
+ *   `.git/config` can carry a token in the origin URL and a gitignored `.env`
+ *   is exactly where secrets live, so neither may follow a clone's AGENTS.md
+ *   into the system prompt;
  * - lines inside fenced code blocks are left alone, so an AGENTS.md that
  *   documents the syntax is not rewritten;
- * - a file already included is not read again (a cycle ends in a warning, not
- *   a hang), and nesting stops after a handful of levels;
+ * - a file that is already being expanded is not read again (a cycle ends in a
+ *   warning, not a hang), and nesting stops after a handful of levels; a file
+ *   imported twice from unrelated places is expanded both times, because that
+ *   is a shared snippet rather than a cycle;
  * - each file is capped like tool output and the whole expansion has its own
  *   budget, so one import cannot exhaust the context window.
  */
@@ -73,11 +80,19 @@ interface ExpandState {
 	roots: AllowedRoot[];
 	/** Used to name the offending file in a warning. */
 	projectRoot: string;
+	/** The same root after symlinks, so ignore patterns match the real tree. */
+	projectReal: string;
 	home: string;
 	maxDepth: number;
 	maxChars: number;
-	/** Real paths already included (or the root), for cycle detection. */
-	seen: Set<string>;
+	/**
+	 * Real paths of the files whose contents are being expanded right now, from
+	 * AGENTS.md down to the current line. Only a repeat along this chain is a
+	 * cycle; the same file reached from a sibling is expanded again.
+	 */
+	chain: Set<string>;
+	/** Loaded on first import, so a file with no imports does no extra reads. */
+	ignore: ReturnType<typeof loadGitignore> | null;
 	importedChars: number;
 	warnings: string[];
 }
@@ -100,16 +115,19 @@ export function expandAgentsMdImports(
 		// in the system prompt.
 		roots: toAllowedRoots([options.projectRoot]),
 		projectRoot: resolve(options.projectRoot),
+		projectReal:
+			safeRealPath(options.projectRoot) ?? resolve(options.projectRoot),
 		home: options.homeDir ?? homedir(),
 		maxDepth: options.maxDepth ?? MAX_IMPORT_DEPTH,
 		maxChars: options.maxChars ?? MAX_IMPORTED_CHARS,
-		seen: new Set(),
+		chain: new Set(),
+		ignore: null,
 		importedChars: 0,
 		warnings: [],
 	};
 
 	const root = safeRealPath(options.filePath);
-	if (root) state.seen.add(root);
+	if (root) state.chain.add(root);
 
 	return {
 		content: expandContent(
@@ -193,6 +211,10 @@ function expandImport(
 		return report(spec, 'outside the project root', line, state, sourceLabel);
 	}
 
+	if (hasGitSegment(target.path)) {
+		return report(spec, 'inside the git directory', line, state, sourceLabel);
+	}
+
 	let isFile = false;
 	try {
 		isFile = statSync(target.path).isFile();
@@ -201,8 +223,18 @@ function expandImport(
 	}
 	if (!isFile) return report(spec, 'not a file', line, state, sourceLabel);
 
+	if (isIgnored(target.path, state)) {
+		return report(
+			spec,
+			'excluded by the project ignore rules',
+			line,
+			state,
+			sourceLabel,
+		);
+	}
+
 	const key = safeRealPath(target.path) ?? resolve(target.path);
-	if (state.seen.has(key)) {
+	if (state.chain.has(key)) {
 		return report(
 			spec,
 			'already included (circular import)',
@@ -235,16 +267,57 @@ function expandImport(
 		);
 	}
 
-	state.seen.add(key);
+	state.chain.add(key);
 	state.importedChars += capped.length;
+	try {
+		return expandContent(
+			capped,
+			dirname(target.path),
+			depth + 1,
+			state,
+			labelFor(target.path, state),
+		);
+	} finally {
+		state.chain.delete(key);
+	}
+}
 
-	return expandContent(
-		capped,
-		dirname(target.path),
-		depth + 1,
-		state,
-		labelFor(target.path, state),
+/** `.git` at any depth, in either case, on the lexical or the real path. */
+function hasGitSegment(path: string): boolean {
+	return [resolve(path), safeRealPath(path)].some(
+		candidate =>
+			candidate !== null &&
+			toPosix(candidate)
+				.split('/')
+				.some(segment => segment.toLowerCase() === '.git'),
 	);
+}
+
+/**
+ * Whether the project's own ignore rules cover this file.
+ *
+ * The same rules that keep a file out of listings keep it out of the prompt: a
+ * gitignored `.env` holds secrets, and `AGENTS.md` arrives with the repository,
+ * so honouring the ignore files is what stops a clone from asking for one.
+ */
+function isIgnored(target: string, state: ExpandState): boolean {
+	const absolute = safeRealPath(target) ?? resolve(target);
+	const relativePath = relative(state.projectReal, absolute);
+	if (
+		!relativePath ||
+		relativePath.startsWith('..') ||
+		isAbsolute(relativePath)
+	) {
+		return false;
+	}
+
+	state.ignore ??= loadGitignore(state.projectRoot);
+	try {
+		return state.ignore.ignores(toPosix(relativePath));
+	} catch {
+		// An unparsable path is not evidence of an ignored file.
+		return false;
+	}
 }
 
 /**
