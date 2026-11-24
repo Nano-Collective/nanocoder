@@ -15,15 +15,24 @@ import {ensureString} from '@/utils/type-helpers';
  * being cut off at the mention.
  */
 export function stripThinkTags(content: string): string {
-	return (
-		content
-			// Complete `<think>...</think>` blocks, wherever they appear.
-			.replace(/<think>[\s\S]*?<\/think>/gi, '')
-			// An unclosed block only counts as reasoning when the tag starts a
-			// line: inline prose such as "use the <think> tag" keeps its text.
-			.replace(/^[ \t]*<think>[\s\S]*$/im, '')
-			// Orphaned closing tags.
-			.replace(/<\/think>/gi, '')
+	// A pair that opens a line is reasoning; one that sits inside a sentence is
+	// prose that mentions the tag. Stash the inline pairs so the later passes
+	// cannot eat their closing tag.
+	const stash: string[] = [];
+	let text = content.replace(/<think>[\s\S]*?<\/think>/gi, (match, offset) => {
+		const lineStart = content.lastIndexOf('\n', offset) + 1;
+		const before = content.slice(lineStart, offset);
+		if (/^[ \t]*$/.test(before)) return '';
+		stash.push(match);
+		return `\u0000${stash.length - 1}\u0000`;
+	});
+	// An unclosed block only counts as reasoning when the tag starts a line.
+	text = text.replace(/^[ \t]*<think>[\s\S]*$/im, '');
+	// Orphaned closing tags.
+	text = text.replace(/<\/think>/gi, '');
+	return text.replace(
+		/\u0000(\d+)\u0000/g,
+		(_, i) => stash[Number(i)] as string,
 	);
 }
 
@@ -32,7 +41,7 @@ export function stripThinkTags(content: string): string {
  * themselves untouched, so a `<think>` inside a tool call's argument is file
  * content, not reasoning.
  */
-function stripThinkTagsOutsideRanges(
+export function stripThinkTagsOutsideRanges(
 	content: string,
 	ranges: Array<[number, number]>,
 ): string {
@@ -50,6 +59,21 @@ function stripThinkTagsOutsideRanges(
 	}
 	result += stripThinkTags(content.slice(cursor));
 	return result;
+}
+
+/**
+ * Strips think tags from a reply without touching anything inside a tool call.
+ * Every call format the parser understands is masked: XML, `<function=name>`
+ * and JSON, so a `<think>` in a `write_file` argument survives whichever shape
+ * the model used.
+ */
+export function stripThinkTagsOutsideToolCalls(content: string): string {
+	const ranges = [
+		...XMLToolCallParser.findToolCallRanges(content),
+		...parseFunctionTagToolCalls(content).ranges,
+		...parseJSONToolCalls(content).ranges,
+	];
+	return stripThinkTagsOutsideRanges(content, ranges);
 }
 
 /**
@@ -488,10 +512,7 @@ export function parseToolCalls(
 	// Strip think tags first - some models (like GLM-4) emit these for
 	// chain-of-thought. Tool-call spans are left alone: a `<think>` inside a
 	// `write_file` argument is file content, not reasoning.
-	const strippedContent = stripThinkTagsOutsideRanges(
-		contentStr,
-		XMLToolCallParser.findToolCallRanges(contentStr),
-	);
+	const strippedContent = stripThinkTagsOutsideToolCalls(contentStr);
 
 	const fnTagResult = parseFunctionTagToolCalls(strippedContent);
 	let jsonResult = parseJSONToolCalls(strippedContent);
