@@ -208,3 +208,47 @@ test.serial('a read still in the kept window keeps its visibility receipt', t =>
 	capMessagesForModel(messages, 3);
 	t.true(hasVisibleLines(FILE, STATS, [350]).visible);
 });
+
+// A metadata_only read shows size and line count, not content, so it must not
+// keep a dropped read's receipt alive.
+test.serial('a kept metadata_only read does not keep the visibility receipt', t => {
+	clearReadTracker();
+	recordVisibilityReceipt(FILE, STATS, 340, 360);
+	const messages = [
+		...readTurn('r1', 'file body', {path: FILE, start_line: 340, end_line: 360}),
+		...filler(2),
+		...readTurn('m1', 'File Information for app.ts\nLines: 400', {
+			path: FILE,
+			metadata_only: true,
+		}),
+	];
+	capMessagesForModel(messages, 3);
+	t.false(hasVisibleLines(FILE, STATS, [350]).visible);
+});
+
+// The model's own write of the file is still in view, so the receipt that
+// write recorded stays.
+test.serial('a kept write of the same file keeps the visibility receipt', t => {
+	clearReadTracker();
+	recordVisibilityReceipt(FILE, STATS);
+	const messages: Message[] = [
+		...readTurn('r1', 'file body'),
+		...filler(2),
+		{
+			role: 'assistant',
+			content: '',
+			tool_calls: [
+				{
+					id: 'w1',
+					function: {
+						name: 'write_file',
+						arguments: {path: FILE, content: 'new body'},
+					},
+				},
+			],
+		},
+		{role: 'tool', tool_call_id: 'w1', name: 'write_file', content: 'ok'},
+	];
+	capMessagesForModel(messages, 3);
+	t.true(hasVisibleLines(FILE, STATS, [350]).visible);
+});

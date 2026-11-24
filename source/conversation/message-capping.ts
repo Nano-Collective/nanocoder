@@ -9,13 +9,17 @@ import type {Message, ToolCall} from '@/types/core';
 
 type ReadRange = {path: string; startLine?: number; endLine?: number};
 
+/** Tools whose call leaves the file content the model wrote in its context. */
+const EDIT_TOOLS = new Set(['write_file', 'string_replace', 'diff_edit']);
+
 function optionalLine(value: unknown): number | undefined {
 	return typeof value === 'number' ? value : undefined;
 }
 
 /**
  * The path + range of every read_file result in `messages` that carries the
- * file body (not a stub, which only points at an earlier body).
+ * file body (not a stub, which only points at an earlier body, and not a
+ * metadata_only read, which shows the file's size and type but no content).
  */
 function readBodies(
 	messages: Message[],
@@ -29,6 +33,7 @@ function readBodies(
 		if (isReadStub(message.content)) continue;
 		const args = call?.function.arguments;
 		if (typeof args?.path !== 'string') continue;
+		if (args.metadata_only === true) continue;
 		const range: ReadRange = {
 			path: resolve(getSafeSessionCwd(), args.path),
 			startLine: optionalLine(args.start_line),
@@ -43,6 +48,25 @@ function readBodies(
 }
 
 /**
+ * Paths the model wrote or edited in `messages`. The edit call carries the
+ * content it wrote, so the receipt that edit recorded is still backed by
+ * what the model sees.
+ */
+function editedPaths(messages: Message[]): Set<string> {
+	const paths = new Set<string>();
+	for (const message of messages) {
+		for (const call of message.tool_calls ?? []) {
+			if (!EDIT_TOOLS.has(call.function.name)) continue;
+			const path = call.function.arguments?.path;
+			if (typeof path === 'string') {
+				paths.add(resolve(getSafeSessionCwd(), path));
+			}
+		}
+	}
+	return paths;
+}
+
+/**
  * read_file answers a repeat read with an "unchanged since last read" stub,
  * which is only true while the earlier body is still in what the model sees.
  * When the cap drops that body, forget its stub entry so the next read
@@ -52,9 +76,10 @@ function readBodies(
  *
  * The same holds for the read-before-edit guard: a visibility receipt says
  * the model has seen those lines, which stops being true once the body is
- * dropped. A file with no read body left in the kept window loses its
+ * dropped. A file with nothing left in the kept window that shows its
+ * content (a read body, or the model's own write or edit of it) loses its
  * receipt, so the edit tools ask for a fresh read instead of allowing a
- * blind edit. A file the model read again in the kept window keeps it.
+ * blind edit.
  */
 function forgetDroppedReadBodies(dropped: Message[], kept: Message[]): void {
 	const calls = new Map<string, ToolCall>();
@@ -64,15 +89,18 @@ function forgetDroppedReadBodies(dropped: Message[], kept: Message[]): void {
 		}
 	}
 	const keptBodies = readBodies(kept, calls);
-	const keptFiles = new Set([...keptBodies.values()].map(range => range.path));
+	const stillVisible = editedPaths(kept);
+	for (const range of keptBodies.values()) {
+		stillVisible.add(range.path);
+	}
 	for (const [key, range] of readBodies(dropped, calls)) {
 		if (!keptBodies.has(key)) {
 			forgetReadContentRange(range.path, range.startLine, range.endLine);
 		}
-		// The model can no longer see this read. Unless it read the same file
-		// again in the messages still sent, its lines must stop counting as
-		// seen, or the edit tools would allow a blind edit.
-		if (!keptFiles.has(range.path)) {
+		// The model can no longer see this read. Unless the messages still
+		// sent show the file's content another way, its lines must stop
+		// counting as seen, or the edit tools would allow a blind edit.
+		if (!stillVisible.has(range.path)) {
 			forgetVisibilityReceipt(range.path);
 		}
 	}
@@ -87,8 +115,8 @@ function forgetDroppedReadBodies(dropped: Message[], kept: Message[]): void {
  *   index backwards to include the initiating `assistant` message and all its associated
  *   tool results.
  * - read_file stub entries whose body is dropped are forgotten, and so are the
- *   visibility receipts of files with no read body left in the kept window
- *   (see `forgetDroppedReadBodies`).
+ *   visibility receipts of files whose content is no longer shown in the kept
+ *   window (see `forgetDroppedReadBodies`).
  */
 export function capMessagesForModel(
 	messages: Message[],
