@@ -11,6 +11,9 @@ import {
 	setProjectRoot,
 	setSessionCwd,
 } from '../services/session-cwd';
+import {stringReplaceTool} from './file-ops/string-replace';
+import {readFileTool} from './read-file';
+import {clearReadTracker} from './runtime/read-tracker';
 import {searchFileContentsTool} from './search-file-contents';
 
 // ============================================================================
@@ -1867,6 +1870,60 @@ test.serial(
 				);
 			} finally {
 				process.chdir(originalCwd);
+			}
+		} finally {
+			rmSync(testDir, {recursive: true, force: true});
+		}
+	},
+);
+
+test.serial(
+	'search_file_contents treats negative contextLines as 0',
+	async t => {
+		t.timeout(10000);
+		const testDir = join(process.cwd(), 'test-search-context-negative-temp');
+
+		try {
+			mkdirSync(testDir, {recursive: true});
+			const lines = Array.from({length: 400}, (_, i) => `line${i + 1}`);
+			lines[1] = 'NEGATIVE_CONTEXT_MATCH';
+			writeFileSync(join(testDir, 'app.ts'), lines.join('\n'));
+
+			const originalCwd = process.cwd();
+
+			try {
+				process.chdir(testDir);
+				clearReadTracker();
+
+				await readFileTool.tool.execute!(
+					{path: 'app.ts', start_line: 1, end_line: 5},
+					{toolCallId: 'test', messages: []},
+				);
+
+				const editLine350 = () =>
+					stringReplaceTool.validator!({
+						path: 'app.ts',
+						old_str: 'line350',
+						new_str: 'changed',
+					});
+
+				t.false((await editLine350()).valid);
+
+				const result = await searchFileContentsTool.tool.execute!(
+					{
+						query: 'NEGATIVE_CONTEXT_MATCH',
+						contextLines: -1,
+						maxResults: 30,
+					},
+					{toolCallId: 'test', messages: []},
+				);
+
+				t.true(result.includes('NEGATIVE_CONTEXT_MATCH'));
+				t.false(result.includes('app.ts:2-'));
+				t.false((await editLine350()).valid);
+			} finally {
+				process.chdir(originalCwd);
+				clearReadTracker();
 			}
 		} finally {
 			rmSync(testDir, {recursive: true, force: true});
