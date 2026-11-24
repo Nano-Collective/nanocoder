@@ -111,6 +111,26 @@ test('SemanticMemoryManager stores memory category', async t => {
 	t.deepEqual(await manager.listMemories(), [memory]);
 });
 
+test('SemanticMemoryManager returns the existing memory for duplicate content', async t => {
+	const dir = await createTempDir();
+	const cwd = path.join(dir, 'repo');
+	await fs.mkdir(cwd);
+	const manager = new SemanticMemoryManager({memoryDir: dir, cwd});
+
+	const first = await manager.addMemory({
+		content: 'Use the existing provider abstraction for model changes.',
+		category: 'architecture',
+	});
+	const duplicate = await manager.addMemory({
+		content: '  use   the existing provider abstraction for model changes.  ',
+		category: 'project',
+	});
+
+	t.is(duplicate.id, first.id);
+	t.is(duplicate.category, 'architecture');
+	t.deepEqual(await manager.listMemories(), [first]);
+});
+
 test('SemanticMemoryManager deletes and clears memories', async t => {
 	const dir = await createTempDir();
 	const cwd = path.join(dir, 'repo');

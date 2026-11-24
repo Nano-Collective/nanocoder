@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'ava';
 import type {Message} from '@/types/core';
+import {appendTurnContext} from '@/utils/turn-context';
 import {SemanticMemoryManager} from './semantic-memory-manager.js';
 import {
 	inferMemoryCategory,
@@ -387,6 +388,45 @@ test('SummarizerService acceptProposal saves a proposal without re-deriving its 
 	t.is(memory.category, 'bugFix');
 	t.is(memory.sourceSessionId, 'session-1');
 	t.deepEqual(await manager.listMemories(), [memory]);
+});
+
+test('SummarizerService ignores recalled memories and skills in turn-context', t => {
+	const service = new SummarizerService();
+	const content = appendTurnContext('Refactor the storage adapter to fix the bug.', [
+		'## Available Skills\n- Use the existing provider abstraction for model changes.',
+		'## Project Context\n\n```\n- The storage layer uses an adapter per database backend.\n- Fixed the flaky login test by mocking the clock.\n```',
+	]);
+
+	t.deepEqual(service.proposeMemoriesFromMessages([{role: 'user', content}]), [
+		{
+			content: 'Refactor the storage adapter to fix the bug.',
+			category: 'bugFix',
+			sourceType: 'explicit-user',
+			evidence: {
+				userMessages: ['Refactor the storage adapter to fix the bug.'],
+				assistantMessages: [],
+			},
+			warnings: [],
+		},
+	] satisfies MemoryProposal[]);
+});
+
+test('SummarizerService does not save an accepted proposal twice', async t => {
+	const dir = await createTempDir();
+	const cwd = path.join(dir, 'repo');
+	await fs.mkdir(cwd);
+	const manager = new SemanticMemoryManager({memoryDir: dir, cwd});
+	const service = new SummarizerService(manager, () => true);
+	const proposal = {
+		content: 'Fixed the queued input regression by restoring drafts.',
+		category: 'bugFix',
+	};
+
+	const first = await service.acceptProposal(proposal);
+	const second = await service.acceptProposal(proposal);
+
+	t.is(second.id, first.id);
+	t.deepEqual(await manager.listMemories(), [first]);
 });
 
 // --- Reversal detector: the four variants the round-3 review found defeated,

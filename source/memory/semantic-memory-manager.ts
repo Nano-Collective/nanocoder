@@ -134,6 +134,11 @@ function hashScope(scope: string): string {
 	return crypto.createHash('sha256').update(scope).digest('hex').slice(0, 32);
 }
 
+/** Case and whitespace differences do not make a memory a new memory. */
+function normalizeMemoryContent(content: string): string {
+	return content.replaceAll(/\s+/gu, ' ').trim().toLowerCase();
+}
+
 const STOPWORDS = new Set([
 	'a',
 	'about',
@@ -335,6 +340,14 @@ export class SemanticMemoryManager {
 
 		return this.mutate(async () => {
 			const memories = await this.listMemories();
+			// Recalled memories can come back as proposals; saving one again
+			// would make it surface twice on every later turn.
+			const contentKey = normalizeMemoryContent(content);
+			const existing = memories.find(
+				memory => normalizeMemoryContent(memory.content) === contentKey,
+			);
+			if (existing) return existing;
+
 			memories.push(memory);
 			await this.writeMemories(memories);
 			return memory;
