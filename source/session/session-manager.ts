@@ -51,6 +51,16 @@ export interface SessionMetadata {
 	pinned?: boolean;
 }
 
+/** Distinguishes a missing session file from one that exists but cannot be read. */
+export type SessionReadResult =
+	| {ok: true; session: Session}
+	| {ok: false; reason: 'missing'}
+	| {ok: false; reason: 'corrupt'; filePath: string; error: unknown};
+
+export function formatCorruptSessionMessage(filePath: string): string {
+	return `Session file is unreadable: ${filePath}`;
+}
+
 /**
  * Rename budget for transient sharing violations: one initial attempt plus five
  * retries. Windows refuses to replace a file another process has open, and the
@@ -145,6 +155,15 @@ async function atomicWriteFile(
 
 function isEnoent(error: unknown): boolean {
 	return error instanceof Error && 'code' in error && error.code === 'ENOENT';
+}
+
+async function pathExists(filePath: string): Promise<boolean> {
+	try {
+		await fs.access(filePath);
+		return true;
+	} catch {
+		return false;
+	}
 }
 
 function toSessionMetadata(session: Session): SessionMetadata {
@@ -498,26 +517,50 @@ export class SessionManager {
 
 	/** Read a session from disk without updating lastAccessedAt (no write). */
 	async readSession(sessionId: string): Promise<Session | null> {
-		if (!isValidSessionId(sessionId)) return null;
+		const result = await this.readSessionResult(sessionId);
+		return result.ok ? result.session : null;
+	}
+
+	/**
+	 * Like readSession, but tells callers apart a missing file from one that
+	 * exists yet cannot be read. Anything that may overwrite the file needs the
+	 * difference so it can preserve the original first.
+	 */
+	async readSessionResult(sessionId: string): Promise<SessionReadResult> {
+		if (!isValidSessionId(sessionId)) return {ok: false, reason: 'missing'};
+
+		const filePath = path.join(this.sessionsDir, `${sessionId}.json`);
+		let data: string;
+		try {
+			data = await fs.readFile(filePath, 'utf-8');
+		} catch (error) {
+			if (isEnoent(error)) return {ok: false, reason: 'missing'};
+			return {ok: false, reason: 'corrupt', filePath, error};
+		}
 
 		try {
-			const sessionFilePath = path.join(this.sessionsDir, `${sessionId}.json`);
-			const data = await fs.readFile(sessionFilePath, 'utf-8');
 			const parsed: unknown = JSON.parse(data);
-			if (!isValidSession(parsed)) return null;
-			return parsed;
-		} catch (_error) {
-			return null;
+			if (!isValidSession(parsed)) {
+				return {
+					ok: false,
+					reason: 'corrupt',
+					filePath,
+					error: new Error('Session file has invalid content'),
+				};
+			}
+			return {ok: true, session: parsed};
+		} catch (error) {
+			return {ok: false, reason: 'corrupt', filePath, error};
 		}
 	}
 
 	async loadSession(sessionId: string): Promise<Session | null> {
-		const session = await this.readSession(sessionId);
-		if (!session) return null;
+		const result = await this.readSessionResult(sessionId);
+		if (!result.ok) return null;
 
 		// Update last accessed time
 		const updatedSession = {
-			...session,
+			...result.session,
 			lastAccessedAt: new Date().toISOString(),
 		};
 
@@ -603,6 +646,40 @@ export class SessionManager {
 
 	getSessionDirectory(): string {
 		return this.sessionsDir;
+	}
+
+	/**
+	 * Move a corrupt session file aside before anything can overwrite it.
+	 * Returns the backup path, or null when nothing was moved. A second
+	 * corruption gets a timestamped name so it cannot destroy an earlier copy.
+	 */
+	async quarantineCorruptSession(sessionId: string): Promise<string | null> {
+		if (!isValidSessionId(sessionId)) return null;
+
+		const filePath = path.join(this.sessionsDir, `${sessionId}.json`);
+		if (!(await pathExists(filePath))) return null;
+
+		const backupPath = await this.nextCorruptBackupPath(filePath);
+		try {
+			await renameWithRetry(filePath, backupPath);
+			return backupPath;
+		} catch {
+			return null;
+		}
+	}
+
+	private async nextCorruptBackupPath(filePath: string): Promise<string> {
+		const base = `${filePath}.corrupt`;
+		if (!(await pathExists(base))) return base;
+
+		const stamp = new Date().toISOString().replace(/[:.]/gu, '-');
+		let candidate = `${base}-${stamp}`;
+		let counter = 1;
+		while (await pathExists(candidate)) {
+			candidate = `${base}-${stamp}-${counter}`;
+			counter++;
+		}
+		return candidate;
 	}
 
 	/**

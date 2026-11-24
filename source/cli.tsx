@@ -971,6 +971,9 @@ async function main(): Promise<void> {
 				const outcome = await resolveSession('last', process.cwd());
 				if (outcome.ok) {
 					initialSession = outcome.session;
+				} else if (outcome.reason === 'corrupt') {
+					console.error(outcome.message);
+					process.exit(1);
 				} else {
 					console.log(
 						'No previous session found for this directory — starting fresh.',

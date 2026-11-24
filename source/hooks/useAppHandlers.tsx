@@ -30,8 +30,11 @@ import {
 } from '@/services/lifecycle-hooks';
 import {getProjectRoot} from '@/services/session-cwd';
 import {buildSessionHistoryComponents} from '@/session/session-history-renderer';
-import type {Session} from '@/session/session-manager';
-import {sessionManager} from '@/session/session-manager';
+import {
+	formatCorruptSessionMessage,
+	type Session,
+	sessionManager,
+} from '@/session/session-manager';
 import {createTokenizer} from '@/tokenization/index';
 import {
 	type GitStatusSummary,
@@ -691,10 +694,15 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 				if (session) {
 					await resumeSession(session);
 				} else {
+					const read = await sessionManager.readSessionResult(sessionId);
+					const message =
+						!read.ok && read.reason === 'corrupt'
+							? formatCorruptSessionMessage(read.filePath)
+							: 'Session not found';
 					addToChatQueue(
 						<ErrorMessage
 							key={generateKey('resume-error')}
-							message="Session not found"
+							message={message}
 							hideBox={true}
 						/>,
 					);

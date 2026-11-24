@@ -1,4 +1,10 @@
-import {mkdirSync, mkdtempSync, rmSync, writeFileSync} from 'node:fs';
+import {
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
@@ -149,5 +155,36 @@ test.serial('a pending rename is dropped when another session is resumed', async
 	t.is(saved?.title, 'Resumed one');
 	t.falsy(saved?.titleManuallySet);
 	t.is(saved?.messageCount, 2);
+	view.unmount();
+});
+
+test.serial('a corrupt session file is backed up before autosave recreates it', async t => {
+	const view = renderHook([]);
+	const session = await sessionManager.createSession({
+		title: 'Doomed session',
+		messageCount: 1,
+		provider: 'p',
+		model: 'm',
+		workingDirectory: root,
+		messages: [{role: 'user', content: 'before corruption'}],
+	});
+	view.hook.setSessionId(session.id);
+
+	const sessionPath = join(
+		sessionManager.getSessionDirectory(),
+		`${session.id}.json`,
+	);
+	const corruptContents = '{"truncated":';
+	writeFileSync(sessionPath, corruptContents);
+
+	view.setMessages([{role: 'user', content: 'after corruption'}]);
+	await wait(1300);
+
+	const backupPath = `${sessionPath}.corrupt`;
+	t.is(readFileSync(backupPath, 'utf8'), corruptContents);
+	const saved = await sessionManager.readSession(session.id);
+	t.truthy(saved);
+	t.is(saved?.title, 'after corruption');
+	t.is(saved?.messageCount, 1);
 	view.unmount();
 });

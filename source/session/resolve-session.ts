@@ -1,7 +1,11 @@
-import type {Session, SessionManager} from './session-manager';
-import {sessionManager} from './session-manager';
+import {
+	formatCorruptSessionMessage,
+	type Session,
+	type SessionManager,
+	sessionManager,
+} from './session-manager';
 
-export type ResolveSessionFailureReason = 'not-found' | 'empty';
+export type ResolveSessionFailureReason = 'not-found' | 'empty' | 'corrupt';
 
 export type ResolveSessionResult =
 	| {ok: true; session: Session}
@@ -32,6 +36,8 @@ export interface ResolveSessionOptions {
  *    so a raw uuid resolves correctly even when `all` is false and the
  *    session belongs to a different cwd. This matches the pre-refactor
  *    behavior of /resume.
+ *  - a session file that exists but cannot be parsed is reported as 'corrupt'
+ *    with its path, rather than as a missing session.
  */
 export async function resolveSession(
 	arg: string | undefined,
@@ -68,13 +74,22 @@ export async function resolveSession(
 	}
 
 	const session = await manager.loadSession(sessionId);
-	if (!session) {
+	if (session) return {ok: true, session};
+
+	// loadSession returns null for both a missing and a corrupt file. Only the
+	// latter has a file worth preserving, so look again with the detailed read.
+	const read = await manager.readSessionResult(sessionId);
+	if (!read.ok && read.reason === 'corrupt') {
 		return {
 			ok: false,
-			reason: 'not-found',
-			message: `Session not found: ${sessionId}`,
+			reason: 'corrupt',
+			message: formatCorruptSessionMessage(read.filePath),
 		};
 	}
 
-	return {ok: true, session};
+	return {
+		ok: false,
+		reason: 'not-found',
+		message: `Session not found: ${sessionId}`,
+	};
 }
