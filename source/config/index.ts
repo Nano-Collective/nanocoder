@@ -480,6 +480,23 @@ function loadAutoCommitConfig(cwd: string): boolean {
 	);
 }
 
+function loadGitContextConfig(cwd: string): boolean {
+	return (
+		loadHierarchicalConfig(cwd, 'agents.config.json', 'gitContext', config => {
+			const value = config.nanocoder?.gitContext;
+			if (value === true) return true;
+			if (value === false) return false;
+			if (value !== undefined) {
+				notifyWarning(
+					`nanocoder.gitContext must be true or false (got ${JSON.stringify(value)}); treating as on`,
+				);
+				return true;
+			}
+			return null;
+		}) ?? true
+	);
+}
+
 function loadFirewallConfig(cwd: string): Partial<FirewallConfig> | undefined {
 	return (
 		loadHierarchicalConfig(cwd, 'agents.config.json', 'firewall', config => {
@@ -1013,6 +1030,8 @@ function loadAppConfig(cwd: string): AppConfig {
 
 	const autoCommit = loadAutoCommitConfig(cwd);
 
+	const gitContext = loadGitContextConfig(cwd);
+
 	const firewall = loadFirewallConfig(cwd);
 
 	// Load user-defined LSP servers (auto-discovery still runs alongside)
@@ -1042,6 +1061,7 @@ function loadAppConfig(cwd: string): AppConfig {
 		tune,
 		sandbox,
 		autoCommit,
+		gitContext,
 		firewall,
 	};
 }
