@@ -95,6 +95,14 @@ function waitForPrompt(lastFrame: () => string | undefined) {
 	return waitUntil(() => /Yes, execute this tool/.test(lastFrame() ?? ''));
 }
 
+// Under React 19.3 + Ink 8, a component's passive effects — where useInput
+// subscribes to the stdin emitter — flush only after the frame that mounts it
+// has been committed. A key written into that window reaches handlers that
+// were already subscribed but not the freshly mounted selector, where it
+// vanishes. Tests that answer the prompt therefore yield here once the prompt
+// frame is visible, before writing to it.
+const yieldToInputSubscription = () => sleep(50);
+
 function deferred<T>() {
 	let resolve: (value: T) => void = () => {};
 	const promise = new Promise<T>(r => {
@@ -208,6 +216,7 @@ test('pressing Enter on the "No" option declines the tool', async t => {
 		{path: 'a.txt'},
 	);
 	await waitForPrompt(lastFrame);
+	await yieldToInputSubscription();
 
 	// Move the highlight down to "No, cancel execution" and select it. Let the
 	// highlight re-render before pressing Enter so the selection actually lands
@@ -259,6 +268,7 @@ test('a second answer from the same instance is ignored', async t => {
 	// Approve, then press Escape before the app would have unmounted this
 	// instance. The queue resolves its head on every answer, so a second answer
 	// here would settle the next queued request without ever showing it.
+	await yieldToInputSubscription();
 	stdin.write('\r');
 	await waitUntil(() => record.confirmations.length > 0);
 	stdin.write('\u001B');
@@ -301,6 +311,7 @@ test('the guard resets when a new request reuses the instance', async t => {
 	});
 
 	await waitForPrompt(app.lastFrame);
+	await yieldToInputSubscription();
 	app.stdin.write('\r');
 	await waitUntil(() => record.confirmations.length > 0);
 
@@ -375,6 +386,7 @@ test('Enter is ignored while the validator is still running', async t => {
 		'an early Enter must not be replayed once the prompt appears',
 	);
 
+	await yieldToInputSubscription();
 	stdin.write('\r');
 	await waitUntil(() => record.confirmations.length > 0);
 	t.deepEqual(record.confirmations, [true]);

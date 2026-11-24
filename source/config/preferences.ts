@@ -488,6 +488,26 @@ export function getMouseReporting(): boolean {
 	return getBooleanPreference('mouseReporting');
 }
 
+/**
+ * How the kitty keyboard protocol is negotiated at startup. 'auto' (default):
+ * query the terminal and enable the protocol on an affirmative reply — what
+ * makes Shift+Enter distinct from Enter in kitty-protocol terminals. 'enabled':
+ * switch the protocol on without asking, for a terminal whose reply is lost
+ * across a transport that eats the query. 'disabled': write no protocol bytes
+ * at all, for transports that print them. An invalid value falls back to
+ * 'auto'.
+ */
+export function getKittyKeyboardMode(): 'auto' | 'enabled' | 'disabled' {
+	const value = getPreference('kittyKeyboardMode');
+	return value === 'enabled' || value === 'disabled' ? value : 'auto';
+}
+
+export function updateKittyKeyboardMode(
+	mode: 'auto' | 'enabled' | 'disabled',
+): void {
+	setPreference('kittyKeyboardMode', mode);
+}
+
 export function updateMouseReporting(value: boolean): void {
 	setPreference('mouseReporting', value);
 }

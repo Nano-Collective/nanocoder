@@ -29,17 +29,16 @@ export function decodeHtmlEntities(text: string): string {
 		'&bull;': '•',
 	};
 
-	let result = text;
-	// Replace named entities
-	for (const [entity, char] of Object.entries(entities)) {
-		result = result.replace(new RegExp(entity, 'g'), char);
-	}
-	// Replace numeric entities (e.g., &#160; or &#xA0;)
-	result = result.replace(/&#(\d+);/g, (_match, code: string) =>
-		String.fromCharCode(parseInt(code, 10)),
+	// One pass, so the output of a replacement is never decoded again
+	// (`&amp;lt;` must stay `&lt;`).
+	return text.replace(
+		/&(?:#(\d+)|#[xX]([0-9A-Fa-f]+)|[a-z]+);/g,
+		(match, dec: string | undefined, hex: string | undefined) => {
+			if (dec === undefined && hex === undefined) {
+				return entities[match] ?? match;
+			}
+			const code = dec ? parseInt(dec, 10) : parseInt(hex ?? '', 16);
+			return code <= 0x10ffff ? String.fromCodePoint(code) : match;
+		},
 	);
-	result = result.replace(/&#x([0-9A-Fa-f]+);/g, (_match, code: string) =>
-		String.fromCharCode(parseInt(code, 16)),
-	);
-	return result;
 }

@@ -16,8 +16,15 @@ import {stripUtf8Bom} from '@/utils/strip-utf8-bom';
  * Bump when `describeProjectTrust` changes what it fingerprints. A trust entry
  * from another version holds a fingerprint that can't be compared with this
  * one, so it reads as needing re-approval rather than as a changed folder.
+ *
+ * Bumped to 2 because `listPermissionSettings` now fingerprints the top-level
+ * `mode` and `firewall` settings (#2306). Every previously trusted folder is
+ * re-asked once ("needs re-approval after the upgrade") because old entries
+ * are version 1 and the version check is exact — not only folders using
+ * `mode` or `firewall`. Folders trusted after the bump record version 2 and
+ * skip the one-time re-prompt.
  */
-export const TRUST_FINGERPRINT_VERSION = 1;
+export const TRUST_FINGERPRINT_VERSION = 2;
 
 export interface ProjectTrustSurface {
 	plugins: number;
@@ -61,6 +68,7 @@ export function describeProjectTrust(directory: string): ProjectTrustSurface {
 	const formatters = listFormatters(config, lines);
 	const lspServers = listLspServers(config, lines);
 	const mcpServers = listMcpServers(root, lines);
+	const profileMcpServers = listProfileMcpServers(config, lines);
 	const customTools = listCustomTools(root, lines);
 	const subscribedSkills = listSubscribedSkills(root, lines);
 	const subscribedAgents = listSubscribedFiles(root, 'agents', false, lines);
@@ -74,6 +82,7 @@ export function describeProjectTrust(directory: string): ProjectTrustSurface {
 		countLabel(hooks.sessionStart, 'session-start hook', 'session-start hooks'),
 		countLabel(hooks.other, 'other hook', 'other hooks'),
 		countLabel(mcpServers, 'MCP server', 'MCP servers'),
+		countLabel(profileMcpServers, 'profile MCP server', 'profile MCP servers'),
 		countLabel(formatters, 'formatter', 'formatters'),
 		countLabel(lspServers, 'LSP server', 'LSP servers'),
 		countLabel(customTools, 'custom tool', 'custom tools'),
@@ -410,6 +419,93 @@ function listMcpServers(root: string, lines: string[]): number {
 		return 0;
 	}
 	return Object.keys(servers).length;
+}
+
+/**
+ * Profile MCP servers declared under `nanocoder.profiles.<name>.mcpServers`.
+ * Each is fingerprinted by name unconditionally plus command, args, env keys,
+ * url, transport, enabled, alwaysAllow, and header keys, so adding a server
+ * (even a URL-only one) or swapping any of these is a trust change and the
+ * folder is asked to trust again before the server starts.
+ */
+function listProfileMcpServers(
+	config: ProjectConfig | undefined,
+	lines: string[],
+): number {
+	const nanocoder = config?.nanocoder;
+	if (!nanocoder || typeof nanocoder !== 'object') return 0;
+	const profiles = nanocoder.profiles;
+	if (!profiles || typeof profiles !== 'object' || Array.isArray(profiles))
+		return 0;
+	let count = 0;
+	for (const [profileName, profile] of Object.entries(profiles).sort(
+		([a], [b]) => a.localeCompare(b),
+	)) {
+		if (!profile || typeof profile !== 'object' || Array.isArray(profile))
+			continue;
+		const servers = (profile as Record<string, unknown>).mcpServers;
+		if (!servers || typeof servers !== 'object' || Array.isArray(servers))
+			continue;
+		for (const [serverName, serverConfig] of Object.entries(
+			servers as Record<string, unknown>,
+		)) {
+			if (!serverConfig || typeof serverConfig !== 'object') continue;
+			const server = serverConfig as {
+				command?: unknown;
+				args?: unknown;
+				env?: unknown;
+				url?: unknown;
+				transport?: unknown;
+				enabled?: unknown;
+				alwaysAllow?: unknown;
+				headers?: unknown;
+			};
+			const parts: string[] = [`name ${serverName}`];
+			if (typeof server.command === 'string') {
+				parts.push(`command ${server.command}`);
+			}
+			if (Array.isArray(server.args)) {
+				parts.push(`args ${JSON.stringify(server.args)}`);
+			}
+			if (typeof server.url === 'string') {
+				parts.push(`url ${server.url}`);
+			}
+			if (typeof server.transport === 'string') {
+				parts.push(`transport ${server.transport}`);
+			}
+			if (typeof server.enabled === 'boolean') {
+				parts.push(`enabled ${server.enabled}`);
+			}
+			if (Array.isArray(server.alwaysAllow)) {
+				parts.push(`alwaysAllow ${JSON.stringify(server.alwaysAllow)}`);
+			}
+			if (
+				server.headers &&
+				typeof server.headers === 'object' &&
+				!Array.isArray(server.headers)
+			) {
+				parts.push(
+					`headers ${JSON.stringify(
+						Object.keys(server.headers as Record<string, unknown>).sort(),
+					)}`,
+				);
+			}
+			if (
+				server.env &&
+				typeof server.env === 'object' &&
+				!Array.isArray(server.env)
+			) {
+				parts.push(
+					`env ${JSON.stringify(
+						Object.keys(server.env as Record<string, unknown>).sort(),
+					)}`,
+				);
+			}
+			lines.push(`mcp profile:${profileName}.${serverName} ${parts.join(' ')}`);
+			count++;
+		}
+	}
+	return count;
 }
 
 function listCustomTools(root: string, lines: string[]): number {
