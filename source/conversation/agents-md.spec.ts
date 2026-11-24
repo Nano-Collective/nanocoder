@@ -1,8 +1,18 @@
 import test from 'ava';
-import {mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync} from 'node:fs';
+import {
+	mkdirSync,
+	mkdtempSync,
+	rmSync,
+	symlinkSync,
+	utimesSync,
+	writeFileSync,
+} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {dirname, join} from 'node:path';
-import {MAX_AGENTS_MD_FILE_CHARS} from '@/constants';
+import {
+	MAX_AGENTS_MD_FILE_CHARS,
+	MAX_AGENTS_MD_NESTED_TOTAL_CHARS,
+} from '@/constants';
 import {
 	createSessionContext,
 	runInSessionContext,
@@ -183,6 +193,33 @@ test('a file over the cap is truncated with a visible note', t => {
 	}
 });
 
+test('the nested section has a total budget and keeps the closest files', t => {
+	const root = makeTempDir('nested-budget');
+	try {
+		const fileSize = Math.floor(MAX_AGENTS_MD_NESTED_TOTAL_CHARS / 3);
+		const shallow = 'S'.repeat(fileSize);
+		const middle = 'M'.repeat(fileSize);
+		const closest = 'C'.repeat(fileSize);
+		write(join(root, 'a', 'AGENTS.md'), shallow);
+		write(join(root, 'a', 'b', 'AGENTS.md'), middle);
+		write(join(root, 'a', 'b', 'c', 'AGENTS.md'), closest);
+		setProjectRoot(root);
+		setSessionCwd(root);
+		noteAgentsMdAccess('a/b/c/file.ts');
+
+		const section = getNestedAgentsMdSection() ?? '';
+
+		t.true(section.includes(middle));
+		t.true(section.includes(closest));
+		t.false(section.includes(shallow), 'the shallowest file must be dropped');
+		t.true(section.indexOf(middle) < section.indexOf(closest));
+		t.true(section.includes('1 nested file(s) omitted'));
+		t.true(section.includes('a/AGENTS.md'));
+	} finally {
+		cleanup(root);
+	}
+});
+
 test('a config dir inside the project is not appended twice', t => {
 	const root = makeTempDir('dedupe');
 	try {
@@ -291,6 +328,43 @@ test('default ignored directories never contribute rules', t => {
 		t.deepEqual(getDiscoveredAgentsMdPaths(), []);
 	} finally {
 		cleanup(root);
+	}
+});
+
+test('a symlink cannot pull rules in from outside the project root', t => {
+	const parent = makeTempDir('symlink-parent');
+	const root = join(parent, 'project');
+	const outside = join(parent, 'outside');
+	try {
+		write(join(outside, 'AGENTS.md'), 'OUTSIDE RULES');
+		write(join(root, 'AGENTS.md'), 'ROOT RULES');
+		try {
+			// Junctions do not need elevation on Windows.
+			symlinkSync(
+				outside,
+				join(root, 'link'),
+				process.platform === 'win32' ? 'junction' : 'dir',
+			);
+		} catch (error) {
+			if (
+				process.platform === 'win32' &&
+				(error as NodeJS.ErrnoException).code === 'EPERM'
+			) {
+				t.pass('symlink creation is not permitted on this Windows host');
+				return;
+			}
+			throw error;
+		}
+		setProjectRoot(root);
+		setSessionCwd(root);
+
+		noteAgentsMdAccess('link/file.ts');
+		noteAgentsMdAccess('link');
+
+		t.deepEqual(getDiscoveredAgentsMdPaths(), []);
+		t.is(getNestedAgentsMdSection(), undefined);
+	} finally {
+		cleanup(parent);
 	}
 });
 

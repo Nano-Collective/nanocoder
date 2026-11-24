@@ -287,6 +287,14 @@ async function runPlainConversationBody(
 	let finalTextBeforeTurn = '';
 	let reasoningBeforeTurn = '';
 
+	// The system-prompt override can name a file on disk; resolve the gate once
+	// per run instead of on every request.
+	const includeAgentsMd = shouldIncludeAgentsMd(
+		tune,
+		model,
+		getAppConfig().systemPrompt,
+	);
+
 	const result = await runTurnEngine<ApprovalRequired>({
 		client,
 		signal: abortSignal,
@@ -301,9 +309,7 @@ async function runPlainConversationBody(
 			},
 			getSystemMessage: () => systemMessage,
 			getTurnContextSections: () => {
-				if (!shouldIncludeAgentsMd(tune, model, getAppConfig().systemPrompt)) {
-					return [];
-				}
+				if (!includeAgentsMd) return [];
 				const section = getNestedAgentsMdSection();
 				return section ? [section] : [];
 			},

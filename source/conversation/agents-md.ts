@@ -3,9 +3,9 @@
  *
  * Three layers are supported:
  *
- * 1. `<config dir>/AGENTS.md` — follows the user across projects, including
- *    an explicit `NANOCODER_CONFIG_DIR`.
- * 2. `<project root>/AGENTS.md` — the existing project-level rules.
+ * 1. `<config dir>/AGENTS.md`, which follows the user across projects,
+ *    including an explicit `NANOCODER_CONFIG_DIR`.
+ * 2. `<project root>/AGENTS.md`, the existing project-level rules.
  * 3. Nested files under the project root, discovered lazily once the agent
  *    reads or edits a file in a subdirectory. They are ordered shallow to deep
  *    so the closest file comes last.
@@ -13,17 +13,22 @@
  * Layers 1 and 2 are baked into the base system prompt by `prompt-builder`.
  * Layer 3 changes as the agent works, so it travels in the user message at
  * request time (via `appendTurnContext`) to keep the system block byte-stable
- * for prompt caching. This module lives in `conversation/` rather than
- * `utils/` because it reads session-scoped state (`session-cwd`).
+ * for prompt caching. The nested section has its own total budget, keeping the
+ * closest files when a monorepo session discovers more rules than fit.
+ * This module lives in `conversation/` rather than `utils/` because it reads
+ * session-scoped state (`session-cwd`).
  */
-import {existsSync, readFileSync, statSync} from 'node:fs';
+import {lstatSync, readFileSync, statSync} from 'node:fs';
 import {dirname, isAbsolute, join, relative, resolve, sep} from 'node:path';
 import {getConfigPath} from '@/config/paths';
-import {MAX_AGENTS_MD_FILE_CHARS} from '@/constants';
+import {
+	MAX_AGENTS_MD_FILE_CHARS,
+	MAX_AGENTS_MD_NESTED_TOTAL_CHARS,
+} from '@/constants';
 import {defineSessionValue} from '@/services/session-context';
 import {getProjectRoot, getSafeSessionCwd} from '@/services/session-cwd';
 import {loadGitignore} from '@/utils/fs/gitignore-loader';
-import {isPathInside} from '@/utils/fs/path-validation';
+import {isPathInside, isRealPathInside} from '@/utils/fs/path-validation';
 
 const AGENTS_MD_FILENAME = 'AGENTS.md';
 // Marks an already-injected block. Re-appending the base layer (or rebuilding
@@ -175,7 +180,7 @@ function agentsMdBlock(file: AgentsMdFile): string {
 /**
  * Append the stable layers of AGENTS.md to a system prompt. Idempotent: a file
  * whose marker is already present is skipped. Nested files are deliberately
- * excluded here — they are injected at request time, where they cannot break
+ * excluded here. They are injected at request time, where they cannot break
  * the system-prompt cache prefix.
  */
 export function appendAgentsMd(prompt: string): string {
@@ -206,12 +211,39 @@ export function appendAgentsMd(prompt: string): string {
  * leave the request byte-identical to the previous one.
  */
 export function getNestedAgentsMdSection(): string | undefined {
-	const blocks: string[] = [];
+	const files: AgentsMdFile[] = [];
 	for (const filePath of nestedAgentsMdPaths()) {
 		const file = readAgentsMdFile(filePath);
-		if (file) blocks.push(agentsMdBlock(file));
+		if (file) files.push(file);
 	}
-	if (blocks.length === 0) return undefined;
+	if (files.length === 0) return undefined;
+
+	// Keep the closest rules: iterate deepest first, then restore shallow-to-deep
+	// order so the last block still has the highest precedence.
+	const included: AgentsMdFile[] = [];
+	const dropped: string[] = [];
+	let used = 0;
+	for (let index = files.length - 1; index >= 0; index--) {
+		const file = files[index];
+		const cost = agentsMdBlock(file).length + (included.length > 0 ? 2 : 0);
+		if (used + cost > MAX_AGENTS_MD_NESTED_TOTAL_CHARS) {
+			dropped.push(file.path);
+			continue;
+		}
+		used += cost;
+		included.unshift(file);
+	}
+
+	const blocks = included.map(agentsMdBlock);
+	if (dropped.length > 0) {
+		const root = resolve(getProjectRoot());
+		const omitted = dropped
+			.map(filePath => toProjectRelative(root, filePath) ?? filePath)
+			.join(', ');
+		blocks.push(
+			`[AGENTS.md: ${dropped.length} nested file(s) omitted because the ${MAX_AGENTS_MD_NESTED_TOTAL_CHARS}-character nested budget was reached: ${omitted}]`,
+		);
+	}
 	return `${NESTED_HEADER}\n\n${blocks.join('\n\n')}`;
 }
 
@@ -260,14 +292,36 @@ function toProjectRelative(root: string, absolutePath: string): string | null {
 }
 
 /**
+ * Symlink-aware containment for a directory that may not exist yet (a write
+ * into a new folder). Walk up to the nearest existing component, then resolve
+ * both sides with realpath. `lstat` sees a dangling link too, and a dangling
+ * link fails closed in `isRealPathInside`.
+ */
+function isStartInsideRoot(start: string, root: string): boolean {
+	let candidate = resolve(start);
+	for (;;) {
+		try {
+			lstatSync(candidate);
+			return isRealPathInside(candidate, root);
+		} catch {
+			const parent = dirname(candidate);
+			if (parent === candidate) return false;
+			candidate = parent;
+		}
+	}
+}
+
+/**
  * Record the AGENTS.md files that govern `targetPath` once the agent touches
  * it. Every ancestor from the file's directory up to (but not including) the
  * project root is collected, because a monorepo may keep rules at several
  * levels.
  *
  * Candidates are filtered through the same ignore matcher as the file-search
- * tools: an AGENTS.md under node_modules, a build directory, or a path hidden
- * by .gitignore/.nanocoderignore must not become instructions the model obeys.
+ * tools, and both the touched directory and each AGENTS.md are checked with
+ * realpath: an AGENTS.md under node_modules, a build directory, a path hidden
+ * by .gitignore/.nanocoderignore, or one reached through a symlink that leaves
+ * the project must not become instructions the model obeys.
  */
 export function noteAgentsMdAccess(targetPath: string): void {
 	const root = resolve(getProjectRoot());
@@ -283,7 +337,7 @@ export function noteAgentsMdAccess(targetPath: string): void {
 		// parent directory, so that parent is the place to look.
 	}
 
-	if (!isPathInside(start, root)) return;
+	if (!isPathInside(start, root) || !isStartInsideRoot(start, root)) return;
 
 	const matcher = getIgnoreMatcher(root);
 	const discovered = getDiscoveredPaths();
@@ -298,7 +352,7 @@ export function noteAgentsMdAccess(targetPath: string): void {
 			if (
 				relativeCandidate &&
 				!matcher.ignores(relativeCandidate) &&
-				existsSync(candidate)
+				isRealPathInside(candidate, root)
 			) {
 				discovered.add(resolve(candidate));
 			}

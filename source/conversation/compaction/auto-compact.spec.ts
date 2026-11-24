@@ -888,6 +888,51 @@ test('maybeAutoCompact returns history without a system role when over threshold
 	);
 });
 
+test('maybeAutoCompact counts ephemeral request context without persisting it', async t => {
+	setupAutoCompactEnv(100);
+	setAutoCompactStrategy('mechanical');
+	setAutoCompactThreshold(50);
+
+	const messages: Message[] = [
+		{role: 'user', content: 'short question'},
+		{role: 'assistant', content: 'short answer'},
+	];
+	const countOnly: Message[] = [{role: 'user', content: 'x'.repeat(300)}];
+	const client = {
+		getCurrentModel: () => 'gpt-4',
+		getProviderConfig: () => ({name: 'openai'}),
+	} as unknown as LLMClient;
+	const systemMessage: Message = {
+		role: 'system',
+		content: 'You are a helpful assistant.',
+	};
+
+	const without = await maybeAutoCompact(
+		messages,
+		systemMessage,
+		client,
+		undefined,
+		{},
+	);
+	t.is(without, messages, 'history on its own is below the threshold');
+
+	const withContext = await maybeAutoCompact(
+		messages,
+		systemMessage,
+		client,
+		undefined,
+		{countOnlyMessages: countOnly},
+	);
+
+	t.not(withContext, messages, 'count-only tokens push the gate over');
+	t.false(
+		withContext.some(
+			msg => typeof msg.content === 'string' && msg.content === countOnly[0].content,
+		),
+		'the ephemeral block must not be written into history',
+	);
+});
+
 test('maybeAutoCompact skips mechanical fallback when aborted during LLM summarise', async t => {
 	setupAutoCompactEnv(100);
 	setAutoCompactStrategy('llm');

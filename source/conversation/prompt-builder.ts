@@ -80,7 +80,7 @@ export function setLastBuiltPrompt(prompt: string): void {
  * The conversation loops call this before injecting the nested layer so all
  * layers switch off together: the nano profile, `tune.includeAgentsMd: false`,
  * and a custom prompt that replaces (rather than appends to) the built-in one.
- * The override is resolved first — a `file` that could not be read, or an empty
+ * The override is resolved first. A `file` that could not be read, or an empty
  * `content`, leaves the built-in prompt (and therefore AGENTS.md) in place.
  */
 export function shouldIncludeAgentsMd(

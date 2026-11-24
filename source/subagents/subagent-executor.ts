@@ -804,6 +804,18 @@ export class SubagentExecutor {
 		let model = 'unknown';
 		let finalAnswer = '';
 
+		// Resolve preferences, tune and any system-prompt override file once per
+		// delegated run; the nested layer itself is still read per request.
+		const includeAgentsMd = shouldIncludeAgentsMd(
+			resolveTune(
+				getAppConfig(),
+				client.getProviderConfig(),
+				loadPreferences(),
+			),
+			client.getCurrentModel(),
+			getAppConfig().systemPrompt,
+		);
+
 		const result = await runTurnEngine<never>({
 			client,
 			signal: signal ?? new AbortController().signal,
@@ -830,19 +842,7 @@ export class SubagentExecutor {
 				// Delegated work gets the nested rules it discovers itself, not
 				// just the ones the parent found before spawning it.
 				getTurnContextSections: () => {
-					if (
-						!shouldIncludeAgentsMd(
-							resolveTune(
-								getAppConfig(),
-								client.getProviderConfig(),
-								loadPreferences(),
-							),
-							client.getCurrentModel(),
-							getAppConfig().systemPrompt,
-						)
-					) {
-						return [];
-					}
+					if (!includeAgentsMd) return [];
 					const section = getNestedAgentsMdSection();
 					return section ? [section] : [];
 				},

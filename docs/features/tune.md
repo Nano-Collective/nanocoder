@@ -78,6 +78,7 @@ The user-level and project-root files live in the system prompt. Nested files tr
 - Can be flipped explicitly per session, persisted via preferences, or pinned in `agents.config.json` via `tune.includeAgentsMd`.
 - Turns off every layer together. `systemPrompt.mode: "replace"` also skips them, because it replaces the built-in prompt entirely.
 - Caps each file at 32,000 characters. A truncated file includes a visible note describing how much was omitted.
+- Caps the nested layer at 64,000 characters in total. When a session discovers more rules than fit, the closest files are kept and a note names the files that were dropped.
 
 Disabling this is useful on tiny models that get crowded out by long project guidelines.
 

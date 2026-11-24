@@ -390,6 +390,14 @@ export const processAssistantResponse = async (
 			},
 		});
 
+	// Resolving the override reads systemPrompt.file from disk, so decide once
+	// per run. Nested discovery still happens on every request below.
+	const includeAgentsMd = shouldIncludeAgentsMd(
+		tune,
+		currentModel,
+		getAppConfig().systemPrompt,
+	);
+
 	const result = await runTurnEngine<ToolTurnStop>({
 		client,
 		signal,
@@ -419,15 +427,7 @@ export const processAssistantResponse = async (
 			history: {get: () => history, set: setHistory},
 			getSystemMessage: () => systemMessage,
 			getTurnContextSections: () => {
-				if (
-					!shouldIncludeAgentsMd(
-						tune,
-						currentModel,
-						getAppConfig().systemPrompt,
-					)
-				) {
-					return [];
-				}
+				if (!includeAgentsMd) return [];
 				const section = getNestedAgentsMdSection();
 				return section ? [section] : [];
 			},

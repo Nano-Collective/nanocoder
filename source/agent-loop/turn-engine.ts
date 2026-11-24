@@ -507,14 +507,20 @@ export async function runTurnEngine<S>(
 		}
 
 		// Gate on the same view the next turn will send, so the threshold is not
-		// measured against rows the cap already drops from the request.
+		// measured against rows the cap already drops from the request. The
+		// turn-context message is also in that request, but it is ephemeral:
+		// compaction counts its tokens without rewriting it into history.
 		const compactGateInput = capMessagesForModel(history.get(), maxMessages);
 		const compacted = await maybeAutoCompact(
 			compactGateInput,
 			systemMessage,
 			client,
 			result.toolsDisabled ? undefined : tools,
-			{...adapter.compactOptions?.(), signal},
+			{
+				...adapter.compactOptions?.(),
+				signal,
+				countOnlyMessages: turnContextMessages,
+			},
 		);
 		// Only adopt the result when compaction actually ran — otherwise
 		// maybeAutoCompact returns the capped view it was handed, and taking it

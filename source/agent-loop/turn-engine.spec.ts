@@ -1,7 +1,18 @@
 import test from 'ava';
 import {getRetryLimits} from '@/config/index';
+import {
+	resetAutoCompactSession,
+	setAutoCompactStrategy,
+	setAutoCompactThreshold,
+} from '@/conversation/compaction/auto-compact';
 import {partitionUnknownToolCalls} from '@/hooks/chat-handler/utils/tool-filters';
+import {
+	resetSessionContextLimit,
+	setSessionContextLimit,
+} from '@/models/index';
+import {createTokenizer} from '@/tokenization/index';
 import type {ToolManager} from '@/tools/tool-manager';
+import {calculateToolDefinitionsTokensFromDefs} from '@/usage/calculator';
 import type {
 	LLMChatResponse,
 	LLMClient,
@@ -683,4 +694,74 @@ test('turn context is read per request so newly discovered rules reach the next 
 
 	t.is(requests[0].length, 2);
 	t.true(requests[1].at(-1)?.content.includes('API RULES'));
+});
+
+test.serial('the per-request turn context counts toward auto-compaction', async t => {
+	const systemMessage: Message = {
+		role: 'system',
+		content: 'You are a helpful assistant.',
+	};
+	const originalHistory: Message[] = [{role: 'user', content: 'a'.repeat(400)}];
+	const turnContext = 'b'.repeat(1600);
+	const assistantMessage: Message = {role: 'assistant', content: 'ack'};
+	const tokenizer = createTokenizer('openai', 'gpt-4');
+	const baselineTokens = [systemMessage, ...originalHistory, assistantMessage].reduce(
+		(sum, message) => sum + tokenizer.countTokens(message),
+		0,
+	);
+	const contextTokens = tokenizer.countTokens({role: 'user', content: turnContext});
+	const toolTokens = calculateToolDefinitionsTokensFromDefs(
+		{probe: {} as never},
+		tokenizer,
+	);
+	t.true(contextTokens >= baselineTokens, 'the context must be the deciding factor');
+
+	setAutoCompactStrategy('mechanical');
+	setAutoCompactThreshold(50);
+	// Baseline plus tool schemas sits below the threshold, so only the turn
+	// context can trip it.
+	setSessionContextLimit(Math.ceil((baselineTokens + toolTokens + 1) / 0.45));
+
+	const makeTestClient = () =>
+		({
+			...makeClient([call('a'), text('done')]),
+			getCurrentModel: () => 'gpt-4',
+			getProviderConfig: () => ({name: 'openai'}),
+		}) as unknown as LLMClient;
+	const runScenario = async (sections: string[]) => {
+		let history = [...originalHistory];
+		const recorded: boolean[] = [];
+		const {run} = setup<never>(
+			[call('a'), text('done')],
+			{
+				getSystemMessage: () => systemMessage,
+				history: {
+					get: () => history,
+					set: next => {
+						history = next;
+					},
+				},
+				getTurnContextSections: () => sections,
+				onTurnRecorded: ({compacted}) => {
+					recorded.push(compacted);
+				},
+			},
+			{client: makeTestClient()},
+		);
+		await run();
+		// Only the first turn is calibrated: tool results from turn one grow the
+		// history and can legitimately trip compaction on turn two.
+		return recorded[0];
+	};
+
+	try {
+		t.false(await runScenario([]), 'history alone stays put');
+		t.true(
+			await runScenario([turnContext]),
+			'the turn-context message pushes the gate over',
+		);
+	} finally {
+		resetAutoCompactSession();
+		resetSessionContextLimit();
+	}
 });

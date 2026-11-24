@@ -691,7 +691,7 @@ Use `"mode": "append"` to keep the built-in prompt and add your text at the end:
 | `file` | string | — | Path to a markdown/text file containing the prompt. Resolved relative to the working directory if not absolute. |
 
 **Notes:**
-- In `replace` mode, the built-in `## SYSTEM INFORMATION` section and every AGENTS.md layer (user-level, project root, and nested) are skipped — include them yourself if you need them.
+- In `replace` mode, the built-in `## SYSTEM INFORMATION` section and every AGENTS.md layer (user-level, project root, and nested) are skipped. Include them yourself if you need them.
 - Tool definitions are still injected into the prompt for providers that don't support native tool calling. Tool availability is controlled separately via `disabledTools` and `/tune`.
 - If the file can't be read, Nanocoder logs a warning and falls back to the built-in prompt.
 - Project-level `agents.config.json` wins over the global config.

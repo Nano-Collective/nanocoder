@@ -480,7 +480,7 @@ test('buildSystemPrompt - non-nano with includeAgentsMd=false omits AGENTS.md', 
 });
 
 // ============================================================================
-// shouldIncludeAgentsMd — gating shared with every conversation frontend
+// shouldIncludeAgentsMd: gating shared with every conversation frontend
 // ============================================================================
 
 test('shouldIncludeAgentsMd - includeAgentsMd=false disables every layer', t => {
