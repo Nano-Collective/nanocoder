@@ -2,4 +2,4 @@
 "@nanocollective/nanocoder": patch
 ---
 
-`<think>` blocks are no longer stripped from inside tool-call arguments, so a `write_file` whose content contains the tag keeps its text, and prose that merely mentions `<think>` is no longer cut off at the mention.
+`<think>` is only stripped where it is reasoning: a tag inside a tool-call argument (XML, `<function=name>` or JSON) is file content and survives, and prose that mentions the tag is no longer cut off. The interactive frontend, which pre-strips the reply, now uses the same tool-call-aware pass.
