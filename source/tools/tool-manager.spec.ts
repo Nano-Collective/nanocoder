@@ -529,6 +529,24 @@ test('plan mode keeps a built-in that an unannotated MCP tool is named like', as
 	t.true(planTools.includes('list_directory'));
 });
 
+test('in plan mode the unknown-tool hint names no tool plan mode hides', t => {
+	const manager = new ToolManager();
+	const offered = manager.getAvailableToolNames(undefined, 'plan', []);
+	t.true(manager.hasTool('write_file'));
+	t.false(offered.includes('write_file'));
+
+	const {errorResults} = filterValidToolCalls(
+		[{id: 'call_1', function: {name: 'writefile', arguments: {}}}],
+		manager,
+		offered,
+	);
+
+	const content = String(errorResults[0]?.content);
+	t.true(content.includes('does not exist'), content);
+	t.true(content.includes('read_file'), content);
+	t.false(content.includes('write_file'), content);
+});
+
 test('describeSkippedMCPTools - names the server and the skipped tools', t => {
 	t.is(describeSkippedMCPTools({serverName: 'fs', success: true}), null);
 	t.is(

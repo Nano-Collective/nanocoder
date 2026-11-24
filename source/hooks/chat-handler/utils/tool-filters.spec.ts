@@ -85,6 +85,32 @@ test('filterValidToolCalls - creates error for non-existent tools', t => {
 	t.true(errorResults[0].content.includes('read_file'));
 });
 
+test('filterValidToolCalls - the unknown-tool hint lists only the offered tools', t => {
+	const toolCalls: ToolCall[] = [
+		{
+			id: 'call_1',
+			function: {name: 'nonexistent_tool', arguments: {}},
+		},
+	];
+
+	const mockToolManager = {
+		hasTool: (name: string) => ['read_file', 'write_file'].includes(name),
+		getToolNames: () => ['read_file', 'write_file'],
+	} as unknown as ToolManager;
+
+	const {errorResults} = filterValidToolCalls(toolCalls, mockToolManager, [
+		'read_file',
+	]);
+
+	t.is(errorResults.length, 1);
+	t.true(
+		errorResults[0].content.includes('Available tools are: read_file.'),
+		errorResults[0].content,
+	);
+	// A registered tool the turn did not offer would only be refused next.
+	t.false(errorResults[0].content.includes('write_file'));
+});
+
 test('filterValidToolCalls - allows duplicate IDs through', t => {
 	const toolCalls: ToolCall[] = [
 		{
