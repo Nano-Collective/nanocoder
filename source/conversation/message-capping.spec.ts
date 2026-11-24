@@ -3,8 +3,10 @@ import type {Message} from '@/types/core';
 import {capMessagesForModel} from './message-capping.js';
 import {
 	clearReadTracker,
+	hasVisibleLines,
 	isReadStub,
 	matchReadContent,
+	recordVisibilityReceipt,
 	rememberReadContent,
 } from '../tools/runtime/read-tracker.js';
 
@@ -179,4 +181,30 @@ test.serial('capping within the limit leaves stub entries alone', t => {
 	rememberReadContent(FILE, STATS, 3);
 	capMessagesForModel(readTurn('r1', 'body'), 10);
 	t.truthy(matchReadContent(FILE, STATS));
+});
+
+// When trimming drops a read, the lines it showed must stop counting as
+// seen, or the edit tools would allow a blind edit.
+test.serial('dropping a read_file body forgets its visibility receipt', t => {
+	clearReadTracker();
+	recordVisibilityReceipt(FILE, STATS, 340, 360);
+	const messages = [
+		...readTurn('r1', 'file body', {path: FILE, start_line: 340, end_line: 360}),
+		...filler(4),
+	];
+	capMessagesForModel(messages, 4);
+	t.false(hasVisibleLines(FILE, STATS, [350]).visible);
+});
+
+// A fresh read of the same file is still in view, so its lines stay seen.
+test.serial('a read still in the kept window keeps its visibility receipt', t => {
+	clearReadTracker();
+	recordVisibilityReceipt(FILE, STATS, 340, 360);
+	const messages = [
+		...readTurn('r1', 'old body', {path: FILE, start_line: 340, end_line: 360}),
+		...filler(2),
+		...readTurn('r2', 'fresh body', {path: FILE, start_line: 340, end_line: 360}),
+	];
+	capMessagesForModel(messages, 3);
+	t.true(hasVisibleLines(FILE, STATS, [350]).visible);
 });

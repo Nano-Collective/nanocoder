@@ -1,6 +1,10 @@
 import {resolve} from 'node:path';
 import {getSafeSessionCwd} from '@/services/session-cwd';
-import {forgetReadContentRange, isReadStub} from '@/tools/runtime/read-tracker';
+import {
+	forgetReadContentRange,
+	forgetVisibilityReceipt,
+	isReadStub,
+} from '@/tools/runtime/read-tracker';
 import type {Message, ToolCall} from '@/types/core';
 
 type ReadRange = {path: string; startLine?: number; endLine?: number};
@@ -45,6 +49,12 @@ function readBodies(
  * returns the content again. Bodies still present in the kept window (a
  * fresh re-read) keep their entry, so a long capped session does not lose
  * every stub each turn the way a global generation bump would.
+ *
+ * The same holds for the read-before-edit guard: a visibility receipt says
+ * the model has seen those lines, which stops being true once the body is
+ * dropped. A file with no read body left in the kept window loses its
+ * receipt, so the edit tools ask for a fresh read instead of allowing a
+ * blind edit. A file the model read again in the kept window keeps it.
  */
 function forgetDroppedReadBodies(dropped: Message[], kept: Message[]): void {
 	const calls = new Map<string, ToolCall>();
@@ -54,9 +64,16 @@ function forgetDroppedReadBodies(dropped: Message[], kept: Message[]): void {
 		}
 	}
 	const keptBodies = readBodies(kept, calls);
+	const keptFiles = new Set([...keptBodies.values()].map(range => range.path));
 	for (const [key, range] of readBodies(dropped, calls)) {
 		if (!keptBodies.has(key)) {
 			forgetReadContentRange(range.path, range.startLine, range.endLine);
+		}
+		// The model can no longer see this read. Unless it read the same file
+		// again in the messages still sent, its lines must stop counting as
+		// seen, or the edit tools would allow a blind edit.
+		if (!keptFiles.has(range.path)) {
+			forgetVisibilityReceipt(range.path);
 		}
 	}
 }
@@ -69,8 +86,9 @@ function forgetDroppedReadBodies(dropped: Message[], kept: Message[]): void {
  * - If the boundary lands on or within a sequence of tool results, we walk the start
  *   index backwards to include the initiating `assistant` message and all its associated
  *   tool results.
- * - read_file stub entries whose body is dropped are forgotten (see
- *   `forgetDroppedReadBodies`).
+ * - read_file stub entries whose body is dropped are forgotten, and so are the
+ *   visibility receipts of files with no read body left in the kept window
+ *   (see `forgetDroppedReadBodies`).
  */
 export function capMessagesForModel(
 	messages: Message[],
