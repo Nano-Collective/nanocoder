@@ -56,6 +56,13 @@ jobs:
       - name: Verify execute_bash cmd.exe quoting
         run: pnpm run test:ava source/services/bash-executor.spec.ts --match="cmd.exe quoting*"
 
+      - name: Verify Windows path validation and preferences case normalization
+        run: >-
+          pnpm run test:ava
+          source/utils/fs/path-validation.spec.ts
+          source/config/trust/directory-trust.spec.ts
+          --match="*case on Windows*"
+
       - name: Verify execute_bash cwd capture on Windows
         run: pnpm run test:ava source/services/bash-executor-cwd.spec.ts
 

@@ -2125,6 +2125,7 @@ test.serial('full workflow: update and retrieve project context preferences', t 
 });
 
 // ============================================================================
+
 // Trust is global-only: a project-level nanocoder-preferences.json (which
 // ships with a cloned repo) must never be able to mark its own directory
 // trusted, and trust writes must never land in it.
