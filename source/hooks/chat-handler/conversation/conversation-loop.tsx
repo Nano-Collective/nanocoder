@@ -1,5 +1,9 @@
 import React from 'react';
-import {NO_RESPONSE_MESSAGE, runTurnEngine} from '@/agent-loop/turn-engine';
+import {
+	NO_RESPONSE_MESSAGE,
+	runTurnEngine,
+	type ToolExecutionOutcome,
+} from '@/agent-loop/turn-engine';
 import type {ConversationStateManager} from '@/app/utils/conversation-state';
 import {
 	createWalkthroughLifecycle,
@@ -22,9 +26,14 @@ import {
 	formatVerificationSummary,
 	takeEvidenceRejection,
 } from '@/services/completion-ledger';
-import {runLifecycleHooks} from '@/services/lifecycle-hooks';
+import {
+	buildTurnEndFeedback,
+	runLifecycleHooks,
+} from '@/services/lifecycle-hooks';
+import {fileMutationPaths} from '@/tools/file-ops/file-mutating-tools';
 import {signalQuestion} from '@/tools/runtime/question-queue';
 import {bumpReadContentGeneration} from '@/tools/runtime/read-tracker';
+import {parseToolArguments} from '@/tools/runtime/tool-args-parser';
 import {createCancellationResults} from '@/tools/runtime/tool-cancellation';
 import {loadTasks} from '@/tools/tasks/storage';
 import type {Task} from '@/tools/tasks/types';
@@ -299,6 +308,12 @@ export const processAssistantResponse = async (
 	let repeatedToolCallTotal = 0;
 	let finalContent = '';
 
+	// `turn-end` scope is one user prompt, not one model round-trip: the files
+	// set survives every continuation, and the retry counter bounds how many
+	// times a failing hook can reopen the turn.
+	const turnFilesChanged = new Set<string>();
+	let turnEndRetryCount = 0;
+
 	// When the repeated-call streak hits the cap: pause and ask in an
 	// interactive session (the repetition may be legitimate, e.g. polling a
 	// long-running job, and the user is the only one who can tell). Headless
@@ -357,8 +372,10 @@ export const processAssistantResponse = async (
 		}
 	};
 
-	const executeTools = (validToolCalls: ToolCall[]) =>
-		runToolTurn(validToolCalls, {
+	const executeTools = async (
+		validToolCalls: ToolCall[],
+	): Promise<ToolExecutionOutcome<ToolTurnStop>> => {
+		const outcome = await runToolTurn(validToolCalls, {
 			toolManager,
 			signal,
 			addToChatQueue,
@@ -387,6 +404,27 @@ export const processAssistantResponse = async (
 				hasLiveTaskUpdates = true;
 			},
 		});
+		// Only calls that actually produced a successful result count as
+		// changed files: a refused, failed or cancelled write never touched
+		// disk. fileMutationPaths is the same registry the --json report and
+		// ACP checkpoints use, so copy sources and mkdir directories are not
+		// misreported here.
+		for (const toolCall of validToolCalls) {
+			const succeeded = (outcome.results ?? []).some(
+				result => result.tool_call_id === toolCall.id && !result.isError,
+			);
+			if (!succeeded) continue;
+			for (const path of fileMutationPaths(
+				toolCall.function.name,
+				parseToolArguments<Record<string, unknown>>(
+					toolCall.function.arguments,
+				),
+			)) {
+				turnFilesChanged.add(path);
+			}
+		}
+		return outcome;
+	};
 
 	const result = await runTurnEngine<ToolTurnStop>({
 		client,
@@ -794,8 +832,83 @@ export const processAssistantResponse = async (
 					await flushAll();
 					return {kind: 'continue', messages: [], resetRetryGuards: true};
 				}
-				finalContent = content;
-				return {kind: 'finish'};
+				// The prompt is really over now (any walkthrough or verification
+				// nudge above was a continuation, not the final answer).
+				if (signal.aborted) {
+					finalContent = content;
+					return {kind: 'finish'};
+				}
+				const turnEnd = await runLifecycleHooks(
+					'turn-end',
+					{
+						messageCount: history.length,
+						filesChanged: [...turnFilesChanged],
+					},
+					signal,
+				);
+				// Escape during the hook: settle the turn, but never feed a
+				// failure back or start another model round for a run the user
+				// cancelled.
+				if (signal.aborted) {
+					finalContent = content;
+					return {kind: 'finish'};
+				}
+				if (turnEnd.output) {
+					addToChatQueue(
+						<InfoMessage
+							key={generateKey('turn-end-hook')}
+							message={turnEnd.output}
+							hideBox={true}
+						/>,
+					);
+				}
+				if (turnEnd.failures.length === 0) {
+					finalContent = content;
+					return {kind: 'finish'};
+				}
+				for (const failure of turnEnd.failures) {
+					addToChatQueue(
+						<ErrorMessage
+							key={generateKey('turn-end-hook-failure')}
+							message={`turn-end hook exited ${failure.exitCode}${
+								failure.output ? `:\n${failure.output}` : '.'
+							}`}
+							hideBox={true}
+						/>,
+					);
+				}
+				if (turnEndRetryCount >= maxMalformedRetries) {
+					await flushAll();
+					markRunFailed('turn-end-hook-giveup');
+					addToChatQueue(
+						<ErrorMessage
+							key={generateKey('turn-end-hook-giveup')}
+							message={`The turn-end hook failed ${turnEndRetryCount + 1} time${
+								turnEndRetryCount === 0 ? '' : 's'
+							} in a row and the model could not resolve it — stopping (nanocoder.retries.maxMalformedRetries = ${maxMalformedRetries}).`}
+							hideBox={true}
+						/>,
+					);
+					setIsGenerating(false);
+					onConversationComplete?.();
+					finalContent = content;
+					return {kind: 'finish'};
+				}
+				turnEndRetryCount++;
+				// Same envelope as post-tool-use, re-truncated as a whole so a
+				// chatty hook cannot push the feedback past the context budget.
+				const feedback = buildTurnEndFeedback(turnEnd.failures);
+				await flushAll();
+				return {
+					kind: 'continue',
+					messages: [
+						{
+							role: 'user',
+							content: `A turn-end hook reported a problem after your last message. Address it, then give your final answer.\n\n${feedback}`,
+						},
+					],
+					resetRetryGuards: true,
+				};
 			},
 			executeTools,
 		},
