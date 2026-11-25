@@ -39,6 +39,11 @@ export {
 // Per session: in ACP each session applies the tune of its own provider.
 const tuneAggressiveCompact = defineSessionValue<boolean>();
 
+// Tracks the effective limit and threshold for which the fixed-overhead
+// warning has already been shown in this session, so the notice fires once
+// per limit/threshold change rather than repeating after every turn.
+const warnedFixedOverheadKey = defineSessionValue<string>();
+
 /** Threshold used by tune's aggressive compact (the lowest supported value). */
 export const AGGRESSIVE_COMPACT_THRESHOLD =
 	COMPRESSION_CONSTANTS.MIN_THRESHOLD_PERCENT;
@@ -174,9 +179,15 @@ export async function performAutoCompact(
 		// tokens the model never receives — but they stay in `allMessages`, which
 		// is what compaction rewrites and the UI renders.
 		const allMessages = [systemMessage, ...messages];
-		let messageTokens = 0;
+		let systemTokens = 0;
+		let conversationTokens = 0;
 		for (const msg of filterModelFacing(allMessages)) {
-			messageTokens += tokenizer.countTokens(msg);
+			const tokens = tokenizer.countTokens(msg);
+			if (msg.role === 'system') {
+				systemTokens += tokens;
+			} else {
+				conversationTokens += tokens;
+			}
 		}
 
 		// Native tool definitions occupy context but aren't in the message list
@@ -186,7 +197,33 @@ export async function performAutoCompact(
 		const toolDefTokens = nativeTools
 			? calculateToolDefinitionsTokensFromDefs(nativeTools, tokenizer)
 			: 0;
-		const totalTokens = messageTokens + toolDefTokens;
+		const fixedTokens = systemTokens + toolDefTokens;
+		const totalTokens = fixedTokens + conversationTokens;
+
+		// Compaction can only shrink conversation messages, never the system
+		// prompt or tool definitions. When those fixed tokens alone already sit
+		// at or above the threshold, compacting cannot bring usage back under
+		// the gate and would otherwise re-fire after every turn.
+		const fixedPercentage = (fixedTokens / contextLimit) * 100;
+		if (fixedPercentage >= threshold) {
+			const warningKey = `${contextLimit}:${threshold}`;
+			if (
+				config.notifyUser &&
+				onNotify &&
+				warnedFixedOverheadKey.get() !== warningKey
+			) {
+				warnedFixedOverheadKey.set(warningKey);
+				const fixedSubject =
+					toolDefTokens > 0
+						? 'system prompt and tool definitions use'
+						: 'system prompt uses';
+				onNotify(
+					`Auto-compaction skipped: ${fixedSubject} ${fixedTokens.toLocaleString()} of ${contextLimit.toLocaleString()} tokens (${Math.round(fixedPercentage)}%, threshold ${threshold}%). Raise the context limit or switch to a smaller tool profile.`,
+				);
+			}
+			return null;
+		}
+		warnedFixedOverheadKey.reset();
 
 		// Check if threshold is reached
 		const usagePercentage = (totalTokens / contextLimit) * 100;
@@ -356,4 +393,5 @@ export async function maybeAutoCompact(
 export function resetAutoCompactSession(): void {
 	resetAutoCompactSessionOverrides();
 	tuneAggressiveCompact.reset();
+	warnedFixedOverheadKey.reset();
 }

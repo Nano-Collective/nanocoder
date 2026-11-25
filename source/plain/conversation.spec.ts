@@ -2427,7 +2427,7 @@ test.serial(
 	async (t) => {
 		resetAutoCompactSession();
 		resetSessionContextLimit();
-		setSessionContextLimit(100);
+		setSessionContextLimit(500);
 		setAutoCompactStrategy("mechanical");
 		setAutoCompactThreshold(50);
 

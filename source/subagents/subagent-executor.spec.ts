@@ -1936,12 +1936,12 @@ test.serial(
 
 test.serial('compacts subagent history after a tool turn', async t => {
 	resetSessionContextLimit();
-	setSessionContextLimit(80);
+	setSessionContextLimit(1500);
 	setAutoCompactEnabled(true);
 	setAutoCompactStrategy('mechanical');
 	setAutoCompactThreshold(50);
 
-	const blob = 'old context sentence. '.repeat(80);
+	const blob = 'old context sentence. '.repeat(120);
 	const payloads: Message[][] = [];
 	let reads = 0;
 	const toolManager = createMockToolManager({
