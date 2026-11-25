@@ -87,11 +87,11 @@ test.serial('/context-max override stops applying after a model switch', async t
 		t.true(getMessageText(queued[0]).includes('small-model'));
 
 		await run('', 'small-model');
-		t.true(getMessageText(queued[1]).includes('8,000'));
+		t.true(getMessageText(queued[1]).includes((8_000).toLocaleString()));
 		t.true(getMessageText(queued[1]).includes('session override'));
 
 		await run('', 'large-model');
-		t.true(getMessageText(queued[2]).includes('200,000'));
+		t.true(getMessageText(queued[2]).includes((200_000).toLocaleString()));
 		t.true(getMessageText(queued[2]).includes('provider model config'));
 	} finally {
 		resetSessionContextLimit();
