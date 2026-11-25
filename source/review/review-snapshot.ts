@@ -26,6 +26,8 @@ export interface ReviewSnapshotScope {
 export interface ReviewLineMap {
 	changedBaseLines: number[];
 	changedHeadLines: number[];
+	/** Surviving head lines adjacent to deletion-only zero-context hunks. */
+	headDeletionAnchors?: number[];
 }
 
 export interface ReviewFileSnapshot {
@@ -162,7 +164,19 @@ function mapChangedLines(
 	);
 	const changedBaseLines: number[] = [];
 	const changedHeadLines: number[] = [];
+	const headLines = (headContent ?? '').split('\n');
+	if (headLines.at(-1) === '') headLines.pop();
+	const headDeletionAnchors = new Set<number>();
 	for (const hunk of patch.hunks) {
+		if (hunk.oldLines > 0 && hunk.newLines === 0 && headLines.length > 0) {
+			// structuredPatch uses the insertion position (c + 1); the
+			// serialized @@ -a,b +c,0 @@ header subtracts one from newStart.
+			for (const boundary of [hunk.newStart - 1, hunk.newStart]) {
+				headDeletionAnchors.add(
+					Math.min(headLines.length, Math.max(1, boundary)),
+				);
+			}
+		}
 		let baseLine = hunk.oldStart;
 		let headLine = hunk.newStart;
 		for (const line of hunk.lines) {
@@ -176,7 +190,11 @@ function mapChangedLines(
 			}
 		}
 	}
-	return {changedBaseLines, changedHeadLines};
+	return {
+		changedBaseLines,
+		changedHeadLines,
+		headDeletionAnchors: [...headDeletionAnchors],
+	};
 }
 
 function makeSnapshot(

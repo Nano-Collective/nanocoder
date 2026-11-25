@@ -764,3 +764,32 @@ test('aborted remote fetch cleans its temporary ref and returns cancelled status
 	t.is(result.status, 'cancelled');
 	t.deepEqual(listReviewRefs(fixture), []);
 });
+
+test('keepActivityOpen leaves the trace running for the caller to finish', async t => {
+	const fixture = createReviewGitFixture();
+	t.teardown(fixture.cleanup);
+	fixture.write('src/file.ts', 'export const value = 2;\n');
+	const activity = new ReviewActivityStore({reviewId: 'kept-open'});
+	const result = await resolveReviewScope('/review working tree', {
+		activity,
+		keepActivityOpen: true,
+		tools: createReviewFixtureTools(fixture),
+	});
+
+	t.is(result.status, 'ready');
+	t.is(activity.getStatus(), 'running');
+	t.is(
+		activity.getEvents().find(event => event.name === 'Resolve review scope')?.status,
+		'completed',
+	);
+	activity.begin({source: 'agent', name: 'finder', summary: 'next stage'}).complete();
+	activity.finish('completed');
+	t.is(activity.getStatus(), 'completed');
+
+	const closed = new ReviewActivityStore({reviewId: 'closed'});
+	await resolveReviewScope('/review working tree', {
+		activity: closed,
+		tools: createReviewFixtureTools(fixture),
+	});
+	t.is(closed.getStatus(), 'completed');
+});

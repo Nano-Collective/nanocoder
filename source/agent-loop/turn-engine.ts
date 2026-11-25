@@ -257,6 +257,26 @@ export interface TurnEnginePolicy {
 	truncatedTurnGuard?: boolean;
 	/** Stop when the same tool calls repeat `maxRepeatedToolCalls` times. */
 	repeatedToolCallGuard?: boolean;
+	/**
+	 * Drop text-parsed tool calls that do not name an offered tool
+	 * (`prepared.availableNames`), so quoted markup (for example JSX in a
+	 * review finding) is not run as a tool call. When none is offered, the
+	 * raw text is left untouched.
+	 */
+	onlyOfferedTextToolCalls?: boolean;
+	/**
+	 * How text-parsed tool calls and their results are recorded in history.
+	 * `native` (default) writes `assistant.tool_calls` and `role: 'tool'`
+	 * messages; `text` keeps the raw assistant text without `tool_calls` and
+	 * writes tool results as one `user` message.
+	 */
+	textToolHistory?: 'native' | 'text';
+	/** Auto-compact history when approaching the context limit (default true). */
+	autoCompact?: boolean;
+	/** Cap outgoing history to `sessions.maxMessages` (default true). */
+	capHistory?: boolean;
+	/** Override the user instruction sent on the tool-free final turn. */
+	finalTurnInstruction?: string;
 }
 
 export interface TurnEngineOptions<S> {
@@ -305,6 +325,11 @@ export async function runTurnEngine<S>(
 		emptyTurnGuard = true,
 		truncatedTurnGuard = true,
 		repeatedToolCallGuard = true,
+		onlyOfferedTextToolCalls = false,
+		textToolHistory = 'native',
+		autoCompact = true,
+		capHistory = true,
+		finalTurnInstruction = FINAL_TURN_INSTRUCTION,
 	} = options.policy ?? {};
 	const {history} = adapter;
 	const guards = createHeadlessRetryGuards(retryLimits);
@@ -313,10 +338,20 @@ export async function runTurnEngine<S>(
 		...result,
 		modelCalls,
 	});
-	const resultMessages = (results: ToolResult[]): Message[] =>
-		results.length === 0
-			? []
-			: (adapter.toolResultMessages?.(results) ?? results);
+	const resultMessages = (results: ToolResult[], asText = false): Message[] => {
+		if (results.length === 0) return [];
+		if (asText && textToolHistory === 'text') {
+			return [
+				{
+					role: 'user',
+					content: results
+						.map(entry => `Result of ${entry.name}:\n${entry.content}`)
+						.join('\n\n'),
+				},
+			];
+		}
+		return adapter.toolResultMessages?.(results) ?? results;
+	};
 	const append = (...messages: Message[]) => {
 		if (messages.length === 0) return;
 		history.set([...history.get(), ...messages]);
@@ -351,20 +386,21 @@ export async function runTurnEngine<S>(
 			return stop({kind: 'no-system-message'});
 		}
 
-		const maxMessages = getAppConfig().sessions?.maxMessages ?? 1000;
+		const maxMessages = capHistory
+			? (getAppConfig().sessions?.maxMessages ?? 1000)
+			: Number.POSITIVE_INFINITY;
+		const historyForModel = capHistory
+			? capMessagesForModel(history.get(), maxMessages)
+			: history.get();
 		const finalTurnNotice: Message[] = finalTurn
-			? [{role: 'user', content: FINAL_TURN_INSTRUCTION}]
+			? [{role: 'user', content: finalTurnInstruction}]
 			: [];
 
 		const sink = adapter.beginModelCall(context);
 		let result: LLMChatResponse;
 		try {
 			result = await client.chat(
-				[
-					systemMessage,
-					...capMessagesForModel(history.get(), maxMessages),
-					...finalTurnNotice,
-				],
+				[systemMessage, ...historyForModel, ...finalTurnNotice],
 				tools,
 				sink.callbacks,
 				signal,
@@ -443,6 +479,18 @@ export async function runTurnEngine<S>(
 			continue;
 		}
 
+		if (onlyOfferedTextToolCalls && parsed.toolCalls.length > 0) {
+			const offeredCalls = parsed.toolCalls.filter(call =>
+				prepared.availableNames.includes(call.function.name),
+			);
+			parsed =
+				offeredCalls.length > 0
+					? {...parsed, toolCalls: offeredCalls}
+					: unparsed(fullContent);
+		}
+		const fromTextToolCalls =
+			nativeToolCalls.length === 0 && parsed.toolCalls.length > 0;
+
 		let allToolCalls: ToolCall[] = [...nativeToolCalls, ...parsed.toolCalls];
 		if (
 			maxToolCallsPerTurn !== undefined &&
@@ -465,33 +513,44 @@ export async function runTurnEngine<S>(
 
 		// A fully-empty assistant message (no text, no tool calls) is left out:
 		// providers reject one, and the empty-turn nudge below re-asks without it.
+		const omitAssistantToolCalls =
+			fromTextToolCalls && textToolHistory === 'text';
+		const assistantContent = omitAssistantToolCalls ? fullContent : content;
 		let assistantMessage: Message | undefined;
-		if (content.trim() || emittedToolCalls.length > 0) {
+		if (assistantContent.trim() || emittedToolCalls.length > 0) {
 			assistantMessage = {
 				role: 'assistant',
-				content,
-				tool_calls: emittedToolCalls.length > 0 ? emittedToolCalls : undefined,
+				content: assistantContent,
+				tool_calls:
+					!omitAssistantToolCalls && emittedToolCalls.length > 0
+						? emittedToolCalls
+						: undefined,
 				reasoning: sink.reasoning(),
 			};
 			append(assistantMessage);
 		}
 
-		// Gate on the same view the next turn will send, so the threshold is not
-		// measured against rows the cap already drops from the request.
-		const compactGateInput = capMessagesForModel(history.get(), maxMessages);
-		const compacted = await maybeAutoCompact(
-			compactGateInput,
-			systemMessage,
-			client,
-			result.toolsDisabled ? undefined : tools,
-			{...adapter.compactOptions?.(), signal},
-		);
-		// Only adopt the result when compaction actually ran — otherwise
-		// maybeAutoCompact returns the capped view it was handed, and taking it
-		// would discard history the cap only meant to hide from one request.
-		const compactionRan = compacted !== compactGateInput;
-		if (compactionRan) {
-			history.set(compacted);
+		let compactionRan = false;
+		if (autoCompact) {
+			// Gate on the same view the next turn will send, so the threshold is not
+			// measured against rows the cap already drops from the request.
+			const compactGateInput = capHistory
+				? capMessagesForModel(history.get(), maxMessages)
+				: history.get();
+			const compacted = await maybeAutoCompact(
+				compactGateInput,
+				systemMessage,
+				client,
+				result.toolsDisabled ? undefined : tools,
+				{...adapter.compactOptions?.(), signal},
+			);
+			// Only adopt the result when compaction actually ran — otherwise
+			// maybeAutoCompact returns the capped view it was handed, and taking it
+			// would discard history the cap only meant to hide from one request.
+			compactionRan = compacted !== compactGateInput;
+			if (compactionRan) {
+				history.set(compacted);
+			}
 		}
 		adapter.onTurnRecorded?.({assistantMessage, compacted: compactionRan});
 		if (signal.aborted) {
@@ -506,7 +565,7 @@ export async function runTurnEngine<S>(
 			const repeated = repeatedToolCallGuard
 				? guards.toolCalls(signatureCalls)
 				: null;
-			append(...resultMessages(resultsForAbandonedTurn));
+			append(...resultMessages(resultsForAbandonedTurn, fromTextToolCalls));
 			if (repeated && !(await continuePastRepeat(repeated, []))) {
 				return stop({
 					kind: 'guard-stop',
@@ -595,7 +654,7 @@ export async function runTurnEngine<S>(
 
 		const execution = await adapter.executeTools(validToolCalls, context);
 		append(
-			...resultMessages(execution.results ?? []),
+			...resultMessages(execution.results ?? [], fromTextToolCalls),
 			...(execution.messages ?? []),
 		);
 		if (execution.kind === 'stop') {

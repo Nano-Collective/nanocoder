@@ -648,3 +648,111 @@ test('onEmptyRetry is awaited before the nudge is recorded', async t => {
 	t.is(historyAtRetry, 1);
 	t.is(history()[1].role, 'user');
 });
+
+test('onlyOfferedTextToolCalls keeps quoted non-offered markup untouched while parsing offered calls', async t => {
+	const quoted = 'EVIDENCE: <Box>\n<Text>row</Text>\n</Box>';
+	const ignored = setup(
+		[{...text(quoted), toolsDisabled: true}],
+		{},
+		{policy: {textToolCalls: 'whenever-no-native', onlyOfferedTextToolCalls: true}},
+	);
+	const ignoredResult = await ignored.run();
+	t.is(ignoredResult.kind, 'completed');
+	t.is(ignored.history().at(-1)?.content, quoted);
+	t.is(ignored.history().at(-1)?.tool_calls, undefined);
+
+	const offered = setup(
+		[
+			{...text('<probe><id>1</id></probe>'), toolsDisabled: true},
+			text('done'),
+		],
+		{},
+		{policy: {textToolCalls: 'whenever-no-native', onlyOfferedTextToolCalls: true}},
+	);
+	const offeredResult = await offered.run();
+	t.is(offeredResult.kind, 'completed');
+	t.is(offeredResult.modelCalls, 2);
+	t.is(offered.history().at(-1)?.content, 'done');
+});
+
+test('onlyOfferedTextToolCalls still runs an offered call next to quoted markup', async t => {
+	const mixed =
+		'The component renders <Box><Text>row</Text></Box>.\n<probe><id>1</id></probe>';
+	const run = setup(
+		[{...text(mixed), toolsDisabled: true}, text('done')],
+		{},
+		{
+			policy: {
+				textToolCalls: 'whenever-no-native',
+				onlyOfferedTextToolCalls: true,
+				textToolHistory: 'text',
+			},
+		},
+	);
+	const result = await run.run();
+	t.is(result.kind, 'completed');
+	t.is(result.modelCalls, 2);
+	const [, assistant, toolReply] = run.history();
+	t.is(assistant.content, mixed);
+	t.is(toolReply.content, 'Result of probe:\nok');
+	t.is(run.history().at(-1)?.content, 'done');
+});
+
+test('textToolHistory text pairs raw assistant text with a user result message, leaving native calls native', async t => {
+	const textMode = setup(
+		[
+			{...text('<probe><id>1</id></probe>'), toolsDisabled: true},
+			text('done'),
+		],
+		{},
+		{policy: {textToolCalls: 'whenever-no-native', textToolHistory: 'text'}},
+	);
+	await textMode.run();
+	const [, assistant, toolReply] = textMode.history();
+	t.is(assistant.role, 'assistant');
+	t.is(assistant.tool_calls, undefined);
+	t.true(assistant.content.includes('<probe>'));
+	t.is(toolReply.role, 'user');
+	t.is(toolReply.content, 'Result of probe:\nok');
+
+	const nativeMode = setup(
+		[call('n1'), text('done')],
+		{},
+		{policy: {textToolCalls: 'whenever-no-native', textToolHistory: 'text'}},
+	);
+	await nativeMode.run();
+	const [, nativeAssistant, nativeToolReply] = nativeMode.history();
+	t.is(nativeAssistant.role, 'assistant');
+	t.is(nativeAssistant.tool_calls?.length, 1);
+	t.is(nativeToolReply.role, 'tool');
+	t.is(nativeToolReply.tool_call_id, 'n1');
+});
+
+test('autoCompact false skips auto-compaction and finalTurnInstruction overrides the final turn prompt', async t => {
+	let compactOptionsCalled = false;
+	const {run, requests} = setup(
+		[call('c1'), text('final answer')],
+		{
+			compactOptions: () => {
+				compactOptionsCalled = true;
+				return {};
+			},
+		},
+		{
+			maxTurns: 2,
+			policy: {
+				autoCompact: false,
+				capHistory: false,
+				finalTurnInstruction: 'Stop calling tools and write the summary now.',
+			},
+		},
+	);
+	const result = await run();
+	t.is(result.kind, 'completed');
+	t.false(compactOptionsCalled);
+	t.is(
+		requests[1]?.at(-1)?.content,
+		'Stop calling tools and write the summary now.',
+	);
+});
+

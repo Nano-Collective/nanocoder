@@ -14,7 +14,7 @@ export type ReviewRequestParseResult =
 	| {ok: false; error: string};
 
 const REVIEW_REQUEST_USAGE =
-	'Try `/review [branch <name> | PR number or URL | last N commits | working tree]`.';
+	'Try `/review [<branch> | PR number or URL | last N commits | working tree]`, or `/review quick` for the one-shot review.';
 
 const SMALL_NUMBERS: Record<string, number> = {
 	one: 1,
@@ -208,6 +208,15 @@ export function parseReviewRequest(input: string): ReviewRequestParseResult {
 				reference: remoteBranch[1].trim(),
 				selection: 'remote',
 			},
+		};
+	}
+
+	// A single bare word keeps the v1 `/review <branch>` form. It is still only
+	// a candidate: the resolver verifies it against exact local and remote refs.
+	if (/^[^\s-][^\s]*$/.test(value)) {
+		return {
+			ok: true,
+			request: {kind: 'branch', reference: value, selection: 'auto'},
 		};
 	}
 

@@ -596,6 +596,7 @@ export default function App({
 			setShowWelcome(true);
 		},
 		updateMessages: appState.updateMessages,
+		appendMessages: appState.appendMessages,
 		setIsCancelling: appState.setIsCancelling,
 		setDevelopmentMode: appState.setDevelopmentMode,
 		setIsConversationComplete: appState.setIsConversationComplete,

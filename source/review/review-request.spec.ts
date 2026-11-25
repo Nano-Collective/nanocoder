@@ -85,6 +85,15 @@ test('request parser reads GitHub PR numbers and pasted pull-request URLs', t =>
 	});
 });
 
+test('a single bare word is a branch candidate, not free text', t => {
+	t.deepEqual(parseReviewRequest('/review feature/foo'), {
+		ok: true,
+		request: {kind: 'branch', reference: 'feature/foo', selection: 'auto'},
+	});
+	t.false(parseReviewRequest('/review --force').ok);
+	t.false(parseReviewRequest('/review feature foo').ok);
+});
+
 test('request parser rejects guesses, invalid PR numbers, and quick-tier takeover', t => {
 	t.false(parseReviewRequest('review both changes and tests').ok);
 	t.false(parseReviewRequest('/review 9007199254740992').ok);
