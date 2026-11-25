@@ -6,7 +6,7 @@ sidebar_order: 8
 
 # Rapid-MLX
 
-[Rapid-MLX](https://rapidmlx.com) is an Apple Silicon inference server built on MLX that provides an OpenAI-compatible API at `http://localhost:8000/v1`.
+[Rapid-MLX](https://github.com/raullenchai/Rapid-MLX) is an Apple Silicon inference server built on MLX that provides an OpenAI-compatible API at `http://localhost:8000/v1`.
 
 ## Configuration
 
