@@ -30,3 +30,5 @@ rapid-mlx serve qwen3.5-4b-4bit
 ```
 
 Once the server is running, Nanocoder's `/settings providers` wizard can automatically fetch available models from `GET /v1/models`.
+
+Note: Rapid-MLX defaults to port `8000`, which is also commonly used by vLLM. If both run locally, point Nanocoder at the port Rapid-MLX actually bound.
