@@ -5,8 +5,10 @@ import {
 	resolveModelContextLimit,
 	setSessionContextLimit,
 } from './models-dev-client.js';
+import {TIMEOUT_CONTEXT_PROBE_MS} from '@/constants';
 import {
 	detectServerKinds,
+	parseOllamaPs,
 	parseOllamaShow,
 	probeServerContextLimit,
 	resetServerContextProbeCache,
@@ -20,22 +22,57 @@ interface Call {
 	url: string;
 	method: string;
 	body?: string;
+	signal?: AbortSignal;
 }
 
 let calls: Call[] = [];
 
 type Handler = (call: Call) => unknown;
 
+const aborted: string[] = [];
+
+/** Resolves with `value` after `ms`, or rejects when the request is aborted. */
+function delayed(
+	call: Call,
+	ms: number,
+	value: unknown,
+): Promise<unknown> {
+	return new Promise((resolve, reject) => {
+		const onAbort = () => {
+			clearTimeout(timer);
+			aborted.push(call.url);
+			reject(new Error('aborted'));
+		};
+		const timer = setTimeout(() => {
+			call.signal?.removeEventListener('abort', onAbort);
+			resolve(value);
+		}, ms);
+		call.signal?.addEventListener('abort', onAbort);
+	});
+}
+
+/** Never answers; only an abort ends it. */
+function hang(call: Call): Promise<unknown> {
+	return new Promise((_resolve, reject) => {
+		call.signal?.addEventListener('abort', () => {
+			aborted.push(call.url);
+			reject(new Error('aborted'));
+		});
+	});
+}
+
 function mockFetch(handler: Handler): void {
 	calls = [];
+	aborted.length = 0;
 	globalThis.fetch = (async (input: unknown, init?: RequestInit) => {
 		const call: Call = {
 			url: String(input),
 			method: init?.method ?? 'GET',
 			body: typeof init?.body === 'string' ? init.body : undefined,
+			signal: init?.signal ?? undefined,
 		};
 		calls.push(call);
-		const result = handler(call);
+		const result = await handler(call);
 		if (result instanceof Error) {
 			throw result;
 		}
@@ -79,25 +116,126 @@ test.serial('ollama: num_ctx from parameters wins over context_length', async t 
 	t.deepEqual(JSON.parse(calls[0].body ?? '{}'), {model: 'llama3.1:8b'});
 });
 
-test.serial('ollama: falls back to <arch>.context_length when num_ctx is unset', async t => {
-	mockFetch(() => ({
-		parameters: 'stop "<|eot|>"',
-		model_info: {'general.architecture': 'qwen3', 'qwen3.context_length': 40960},
-	}));
+test.serial('ollama: without num_ctx, uses context_length of the loaded model from /api/ps', async t => {
+	mockFetch(call =>
+		call.url.endsWith('/api/show')
+			? {
+					parameters: 'stop "<|eot|>"',
+					model_info: {'qwen3.context_length': 40960},
+				}
+			: {
+					models: [
+						{name: 'other:7b', model: 'other:7b', context_length: 2048},
+						{name: 'qwen3:8b', model: 'qwen3:8b', context_length: 4096},
+					],
+				},
+	);
 	t.is(
 		await probeServerContextLimit(
-			provider('http://localhost:11434/v1'),
+			provider('http://localhost:11434/v1', 'Ollama'),
 			'qwen3:8b',
 		),
-		40960,
+		4096,
+	);
+	t.deepEqual(
+		calls.map(c => `${c.method} ${c.url}`),
+		[
+			'POST http://localhost:11434/api/show',
+			'GET http://localhost:11434/api/ps',
+		],
 	);
 });
 
-test('parseOllamaShow rejects malformed payloads', t => {
-	t.is(parseOllamaShow(null), null);
-	t.is(parseOllamaShow({parameters: 'num_ctx abc', model_info: {}}), null);
-	t.is(parseOllamaShow({model_info: {'x.context_length': 'big'}}), null);
-	t.is(parseOllamaShow({model_info: {'x.context_length': -5}}), null);
+test.serial('ollama: the trained context_length is never used', async t => {
+	// Not loaded: /api/ps is empty, so there is no answer (the table applies).
+	mockFetch(call =>
+		call.url.endsWith('/api/show')
+			? {model_info: {'llama.context_length': 131072}}
+			: {models: []},
+	);
+	t.is(
+		await probeServerContextLimit(
+			provider('http://localhost:11434/v1', 'Ollama'),
+			'llama3.1:8b',
+		),
+		null,
+	);
+
+	// Loaded but the server omits context_length (older Ollama): still null.
+	mockFetch(call =>
+		call.url.endsWith('/api/show')
+			? {model_info: {'llama.context_length': 131072}}
+			: {models: [{name: 'm2:latest', model: 'm2:latest'}]},
+	);
+	t.is(
+		await probeServerContextLimit(
+			provider('http://localhost:11434/v1', 'Ollama'),
+			'm2',
+		),
+		null,
+	);
+});
+
+test.serial('ollama: /api/ps matching of a model with another model loaded is null', async t => {
+	mockFetch(call =>
+		call.url.endsWith('/api/show')
+			? {parameters: ''}
+			: {models: [{name: 'other:7b', model: 'other:7b', context_length: 8192}]},
+	);
+	t.is(
+		await probeServerContextLimit(
+			provider('http://localhost:11434/v1', 'Ollama'),
+			'qwen3:8b',
+		),
+		null,
+	);
+});
+
+test.serial('ollama: explicit num_ctx wins and /api/ps is not queried', async t => {
+	mockFetch(call =>
+		call.url.endsWith('/api/show')
+			? {parameters: 'num_ctx 16384'}
+			: {models: [{name: 'm:latest', context_length: 4096}]},
+	);
+	t.is(
+		await probeServerContextLimit(
+			provider('http://localhost:11434/v1', 'Ollama'),
+			'm',
+		),
+		16384,
+	);
+	t.is(calls.length, 1);
+});
+
+test.serial('ollama: /api/ps failure resolves to null', async t => {
+	mockFetch(call => (call.url.endsWith('/api/show') ? {parameters: ''} : 500));
+	t.is(
+		await probeServerContextLimit(
+			provider('http://localhost:11434/v1', 'Ollama'),
+			'm',
+		),
+		null,
+	);
+});
+
+test('parseOllamaPs tolerates tag variants and malformed payloads', t => {
+	const body = {
+		models: [{name: 'llama3:latest', model: 'llama3:latest', context_length: 4096}],
+	};
+	t.is(parseOllamaPs(body, 'llama3'), 4096);
+	t.is(parseOllamaPs(body, 'llama3:latest'), 4096);
+	t.is(parseOllamaPs(body, 'LLAMA3'), 4096);
+	t.is(parseOllamaPs(body, 'llama3:8b'), null);
+	// Matches on either the name or the model field.
+	t.is(
+		parseOllamaPs({models: [{model: 'hf.co/org/x:Q4', context_length: 2048}]}, 'hf.co/org/x:Q4'),
+		2048,
+	);
+	t.is(parseOllamaPs({models: [{name: 'llama3', context_length: 1024}]}, 'llama3:latest'), 1024);
+	t.is(parseOllamaPs(null, 'a'), null);
+	t.is(parseOllamaPs({models: 'x'}, 'a'), null);
+	t.is(parseOllamaPs({models: [null, {name: 'a', context_length: 'big'}]}, 'a'), null);
+	t.is(parseOllamaPs({models: [{name: 'a', context_length: -1}]}, 'a'), null);
 });
 
 test.serial('llama.cpp: reads default_generation_settings.n_ctx from /props', async t => {
@@ -137,7 +275,7 @@ test.serial('vLLM: no matching model id yields null', async t => {
 	);
 });
 
-test.serial('unclear local server is probed in bounded order until one answers', async t => {
+test.serial('unclear local server: all kinds are probed concurrently and a later kind can answer', async t => {
 	mockFetch(call => {
 		if (call.url.endsWith('/api/show')) return 404;
 		if (call.url.endsWith('/props')) return 404;
@@ -148,14 +286,69 @@ test.serial('unclear local server is probed in bounded order until one answers',
 		'm',
 	);
 	t.is(limit, 4096);
-	t.deepEqual(
-		calls.map(c => c.url),
-		[
-			'http://localhost:9999/api/show',
-			'http://localhost:9999/props',
-			'http://localhost:9999/v1/models',
-		],
+	t.deepEqual(calls.map(c => c.url).sort(), [
+		'http://localhost:9999/api/show',
+		'http://localhost:9999/props',
+		'http://localhost:9999/v1/models',
+	]);
+});
+
+test.serial('unclear local server: the first valid answer wins, others are aborted', async t => {
+	mockFetch(call => {
+		// Ollama would answer, but later than llama.cpp.
+		if (call.url.endsWith('/api/show')) {
+			return delayed(call, 300, {parameters: 'num_ctx 1111'});
+		}
+		if (call.url.endsWith('/props')) {
+			return delayed(call, 10, {default_generation_settings: {n_ctx: 2222}});
+		}
+		return hang(call);
+	});
+	const started = Date.now();
+	const limit = await probeServerContextLimit(
+		provider('http://localhost:9999/v1'),
+		'm',
 	);
+	t.is(limit, 2222);
+	t.true(Date.now() - started < 250);
+	t.deepEqual(aborted.sort(), [
+		'http://localhost:9999/api/show',
+		'http://localhost:9999/v1/models',
+	]);
+});
+
+test.serial('unclear local server: an early failure does not mask a slower success', async t => {
+	mockFetch(call => {
+		if (call.url.endsWith('/api/show')) return new Error('refused');
+		if (call.url.endsWith('/props')) return 404;
+		return delayed(call, 40, {data: [{id: 'm', max_model_len: 8192}]});
+	});
+	t.is(
+		await probeServerContextLimit(provider('http://localhost:9999/v1'), 'm'),
+		8192,
+	);
+});
+
+test.serial('unclear local server: when every kind hangs the probe returns within one overall cap', async t => {
+	mockFetch(hang);
+	const started = Date.now();
+	const limit = await probeServerContextLimit(
+		provider('http://localhost:9999/v1'),
+		'm',
+	);
+	const elapsed = Date.now() - started;
+	t.is(limit, null);
+	t.is(calls.length, 3);
+	// Sequential probing would take ~3x the cap.
+	t.true(elapsed >= TIMEOUT_CONTEXT_PROBE_MS - 100, `returned early: ${elapsed}ms`);
+	t.true(elapsed < TIMEOUT_CONTEXT_PROBE_MS + 700, `took too long: ${elapsed}ms`);
+	t.is(aborted.length, 3);
+});
+
+test.serial('a hinted server type stays a single request', async t => {
+	mockFetch(() => ({data: [{id: 'm', max_model_len: 4096}]}));
+	await probeServerContextLimit(provider('http://localhost:8000/v1', 'vllm'), 'm');
+	t.is(calls.length, 1);
 });
 
 test('detectServerKinds hints and gating', t => {

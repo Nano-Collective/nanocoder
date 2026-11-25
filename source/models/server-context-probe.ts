@@ -8,12 +8,15 @@
  * compaction threshold is never reached.
  *
  * Supported shapes:
- * - Ollama:    POST /api/show      -> `num_ctx` parameter, else `<arch>.context_length`
+ * - Ollama:    POST /api/show      -> explicit `num_ctx` parameter, else
+ *              GET  /api/ps        -> `context_length` of the loaded model
  * - llama.cpp: GET  /props         -> default_generation_settings.n_ctx
  * - vLLM:      GET  /v1/models     -> data[].max_model_len
  *
- * Every request has a short timeout, the probe never throws, and results
- * (including misses) are cached per base URL and model for the session.
+ * The probe never throws and is bounded by one overall timeout. When the
+ * server kind is unknown, every kind is probed concurrently and the first
+ * valid answer wins. Results (including misses) are cached per base URL and
+ * model for the session.
  */
 
 import {TIMEOUT_CONTEXT_PROBE_MS} from '@/constants';
@@ -86,10 +89,10 @@ function isLocalHost(hostname: string): boolean {
 }
 
 /**
- * Work out which server shape to try, in order. A provider name or well-known
- * default port is a strong hint and yields a single probe. Without a hint,
- * only local/private hosts are probed (Ollama, llama.cpp, vLLM in that
- * order); an unhinted remote host is most likely a hosted API with no such
+ * Work out which server shapes to try. A provider name or well-known default
+ * port is a strong hint and yields a single probe. Without a hint, only
+ * local/private hosts are probed (Ollama, llama.cpp and vLLM, concurrently);
+ * an unhinted remote host is most likely a hosted API with no such
  * endpoints, so it is skipped rather than sent three speculative requests.
  */
 export function detectServerKinds(config: ProbeProviderConfig): ServerKind[] {
@@ -133,6 +136,7 @@ async function requestJson(
 	url: string,
 	init: {method: 'GET' | 'POST'; body?: unknown},
 	headers: Record<string, string>,
+	signal: AbortSignal,
 ): Promise<unknown> {
 	const response = await fetch(url, {
 		method: init.method,
@@ -141,7 +145,7 @@ async function requestJson(
 			...(init.body !== undefined ? {'Content-Type': 'application/json'} : {}),
 		},
 		body: init.body !== undefined ? JSON.stringify(init.body) : undefined,
-		signal: AbortSignal.timeout(TIMEOUT_CONTEXT_PROBE_MS),
+		signal,
 	});
 	if (!response.ok) {
 		throw new Error(`HTTP ${response.status}`);
@@ -154,32 +158,48 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /**
- * Ollama: `num_ctx` from the Modelfile/`parameters` text is the value the
- * server will actually load the model with, so it wins. Only when no
- * `num_ctx` is set do we fall back to the architecture `context_length` from
- * `model_info`. That second value is the model's trained maximum, not
- * necessarily what the server allocates (Ollama's default window is smaller),
- * but it is the best figure `/api/show` exposes and is still the real model
- * metadata for the exact tag in use, unlike the name-matched catalogue.
+ * Ollama `/api/show`: only an explicit `num_ctx` (from the Modelfile or
+ * `parameters`) is trusted, because that is the value the server will load the
+ * model with. The `<arch>.context_length` in `model_info` is the model's
+ * trained maximum, which Ollama usually does not serve (its default window is
+ * much smaller, or `OLLAMA_CONTEXT_LENGTH`), so it is deliberately ignored.
  */
 export function parseOllamaShow(body: unknown): number | null {
-	if (!isRecord(body)) {
+	if (!isRecord(body) || typeof body.parameters !== 'string') {
 		return null;
 	}
-	if (typeof body.parameters === 'string') {
-		const match = /^\s*num_ctx\s+(\d+)\s*$/m.exec(body.parameters);
-		const numCtx = match ? positiveInt(Number.parseInt(match[1], 10)) : null;
-		if (numCtx) {
-			return numCtx;
-		}
+	const match = /^\s*num_ctx\s+(\d+)\s*$/m.exec(body.parameters);
+	return match ? positiveInt(Number.parseInt(match[1], 10)) : null;
+}
+
+/** `llama3` and `llama3:latest` name the same Ollama model. */
+function normalizeOllamaName(name: string): string {
+	const lower = name.trim().toLowerCase();
+	const lastSegment = lower.slice(lower.lastIndexOf('/') + 1);
+	return lastSegment.includes(':') ? lower : `${lower}:latest`;
+}
+
+/**
+ * Ollama `/api/ps`: the `context_length` a model is currently loaded with,
+ * i.e. the window actually being served. Null when the model is not loaded
+ * (or an older server omits the field).
+ */
+export function parseOllamaPs(body: unknown, modelId: string): number | null {
+	if (!isRecord(body) || !Array.isArray(body.models)) {
+		return null;
 	}
-	if (isRecord(body.model_info)) {
-		for (const [key, value] of Object.entries(body.model_info)) {
-			if (key.endsWith('.context_length')) {
-				const length = positiveInt(value);
-				if (length) {
-					return length;
-				}
+	const wanted = normalizeOllamaName(modelId);
+	for (const entry of body.models) {
+		if (!isRecord(entry)) {
+			continue;
+		}
+		const names = [entry.name, entry.model].filter(
+			(n): n is string => typeof n === 'string' && n !== '',
+		);
+		if (names.some(n => normalizeOllamaName(n) === wanted)) {
+			const length = positiveInt(entry.context_length);
+			if (length) {
+				return length;
 			}
 		}
 	}
@@ -210,23 +230,39 @@ async function probeKind(
 	origin: string,
 	modelId: string,
 	headers: Record<string, string>,
+	signal: AbortSignal,
 ): Promise<number | null> {
 	switch (kind) {
-		case 'ollama':
-			return parseOllamaShow(
+		case 'ollama': {
+			const explicit = parseOllamaShow(
 				await requestJson(
 					`${origin}/api/show`,
 					{method: 'POST', body: {model: modelId}},
 					headers,
+					signal,
 				),
 			);
+			if (explicit) {
+				return explicit;
+			}
+			// No explicit num_ctx: ask what the loaded model is really using.
+			return parseOllamaPs(
+				await requestJson(`${origin}/api/ps`, {method: 'GET'}, headers, signal),
+				modelId,
+			);
+		}
 		case 'llama-cpp':
 			return parseLlamaCppProps(
-				await requestJson(`${origin}/props`, {method: 'GET'}, headers),
+				await requestJson(`${origin}/props`, {method: 'GET'}, headers, signal),
 			);
 		case 'vllm':
 			return parseVllmModels(
-				await requestJson(`${origin}/v1/models`, {method: 'GET'}, headers),
+				await requestJson(
+					`${origin}/v1/models`,
+					{method: 'GET'},
+					headers,
+					signal,
+				),
 				modelId,
 			);
 	}
@@ -243,22 +279,49 @@ async function runProbe(
 	const origin = getOrigin(baseUrl);
 	const headers = buildHeaders(config);
 	const logger = getLogger();
-
-	for (const kind of detectServerKinds(config)) {
-		try {
-			const limit = await probeKind(kind, origin, modelId, headers);
-			if (limit) {
-				logger.debug({kind, modelId, limit}, 'Detected served context window');
-				return limit;
-			}
-		} catch (error) {
-			logger.debug(
-				{kind, modelId, error: formatError(error)},
-				'Context window probe failed',
-			);
-		}
+	const kinds = detectServerKinds(config);
+	if (kinds.length === 0) {
+		return null;
 	}
-	return null;
+
+	// One controller bounds the whole probe: it aborts every in-flight request
+	// when the overall cap elapses or as soon as one kind answers. The timer is
+	// always cleared so nothing is left hanging.
+	const controller = new AbortController();
+	const timer = setTimeout(() => controller.abort(), TIMEOUT_CONTEXT_PROBE_MS);
+	try {
+		return await new Promise<number | null>(resolve => {
+			let outstanding = kinds.length;
+			for (const kind of kinds) {
+				probeKind(kind, origin, modelId, headers, controller.signal)
+					.then(limit => {
+						if (limit) {
+							logger.debug(
+								{kind, modelId, limit},
+								'Detected served context window',
+							);
+							resolve(limit);
+						}
+					})
+					.catch(error => {
+						logger.debug(
+							{kind, modelId, error: formatError(error)},
+							'Context window probe failed',
+						);
+					})
+					.finally(() => {
+						outstanding -= 1;
+						if (outstanding === 0) {
+							resolve(null);
+						}
+					});
+			}
+		});
+	} finally {
+		clearTimeout(timer);
+		// Cancel whatever is still in flight; the losers' rejections are handled above.
+		controller.abort();
+	}
 }
 
 /**
