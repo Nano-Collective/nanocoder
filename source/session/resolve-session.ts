@@ -5,7 +5,11 @@ import {
 	sessionManager,
 } from './session-manager';
 
-export type ResolveSessionFailureReason = 'not-found' | 'empty' | 'corrupt';
+export type ResolveSessionFailureReason =
+	| 'not-found'
+	| 'empty'
+	| 'corrupt'
+	| 'unreadable';
 
 export type ResolveSessionResult =
 	| {ok: true; session: Session}
@@ -37,7 +41,9 @@ export interface ResolveSessionOptions {
  *    session belongs to a different cwd. This matches the pre-refactor
  *    behavior of /resume.
  *  - a session file that exists but cannot be parsed is reported as 'corrupt'
- *    with its path, rather than as a missing session.
+ *    with its path, rather than as a missing session. A transient read failure
+ *    (EACCES, EMFILE, a sharing violation) is reported as 'unreadable', so it
+ *    is never mistaken for corruption that should be quarantined.
  */
 export async function resolveSession(
 	arg: string | undefined,
@@ -73,19 +79,29 @@ export async function resolveSession(
 		}
 	}
 
-	const session = await manager.loadSession(sessionId);
-	if (session) return {ok: true, session};
-
-	// loadSession returns null for both a missing and a corrupt file. Only the
-	// latter has a file worth preserving, so look again with the detailed read.
+	// Read with detail first: loadSession returns null for a missing, corrupt or
+	// temporarily unreadable file, and retrying it would read the same file
+	// twice on every failure path.
 	const read = await manager.readSessionResult(sessionId);
-	if (!read.ok && read.reason === 'corrupt') {
+	if (!read.ok) {
+		if (read.reason === 'corrupt' || read.reason === 'unreadable') {
+			return {
+				ok: false,
+				reason: read.reason,
+				message: formatCorruptSessionMessage(read.filePath),
+			};
+		}
 		return {
 			ok: false,
-			reason: 'corrupt',
-			message: formatCorruptSessionMessage(read.filePath),
+			reason: 'not-found',
+			message: `Session not found: ${sessionId}`,
 		};
 	}
+
+	// loadSession refreshes lastAccessedAt; the detailed read above already
+	// verified the file is usable, so this only writes the access time.
+	const session = await manager.loadSession(sessionId);
+	if (session) return {ok: true, session};
 
 	return {
 		ok: false,

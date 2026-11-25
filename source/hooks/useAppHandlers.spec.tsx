@@ -967,14 +967,24 @@ const otherProviderSession = {
 } as unknown as Session;
 
 async function withStoredSession(session: Session, run: () => Promise<void>) {
-	const {initialize, listSessions, loadSession} = sessionManager;
+	const {initialize, listSessions, loadSession, readSessionResult} =
+		sessionManager;
 	sessionManager.initialize = async () => {};
 	sessionManager.listSessions = async () => [];
 	sessionManager.loadSession = async id => (id === session.id ? session : null);
+	sessionManager.readSessionResult = async id =>
+		id === session.id
+			? {ok: true, session}
+			: {ok: false, reason: 'missing'};
 	try {
 		await run();
 	} finally {
-		Object.assign(sessionManager, {initialize, listSessions, loadSession});
+		Object.assign(sessionManager, {
+			initialize,
+			listSessions,
+			loadSession,
+			readSessionResult,
+		});
 	}
 }
 

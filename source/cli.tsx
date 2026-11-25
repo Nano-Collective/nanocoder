@@ -971,9 +971,15 @@ async function main(): Promise<void> {
 				const outcome = await resolveSession('last', process.cwd());
 				if (outcome.ok) {
 					initialSession = outcome.session;
-				} else if (outcome.reason === 'corrupt') {
-					console.error(outcome.message);
-					process.exit(1);
+				} else if (
+					outcome.reason === 'corrupt' ||
+					outcome.reason === 'unreadable'
+				) {
+					// --continue is "pick up where you left off, or start fresh".
+					// Explain why the last session is unavailable, but do not lock
+					// the user out of the CLI: the file is left untouched so it can
+					// still be recovered or resumed explicitly by id.
+					console.log(`${outcome.message} Starting fresh.`);
 				} else {
 					console.log(
 						'No previous session found for this directory — starting fresh.',

@@ -116,6 +116,20 @@ test.serial('reports an unreadable session file when the index still has the id'
 	}
 });
 
+test.serial('reports a corrupt newest session when resolving "last"', async t => {
+	const session = await createSession(CWD_A, 'corrupt-last');
+	const filePath = join(manager.getSessionDirectory(), `${session.id}.json`);
+	await writeFile(filePath, '{"truncated":');
+
+	const result = await resolveSession('last', CWD_A, {manager});
+
+	t.false(result.ok);
+	if (!result.ok) {
+		t.is(result.reason, 'corrupt');
+		t.true(result.message.includes(filePath));
+	}
+});
+
 test.serial('returns not-found for an out-of-range index', async t => {
 	await createSession(CWD_A, 'only');
 

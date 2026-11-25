@@ -51,11 +51,12 @@ export interface SessionMetadata {
 	pinned?: boolean;
 }
 
-/** Distinguishes a missing session file from one that exists but cannot be read. */
+/** Distinguishes a missing session file from a corrupt one and from a transient read failure. */
 export type SessionReadResult =
 	| {ok: true; session: Session}
 	| {ok: false; reason: 'missing'}
-	| {ok: false; reason: 'corrupt'; filePath: string; error: unknown};
+	| {ok: false; reason: 'corrupt'; filePath: string; error: unknown}
+	| {ok: false; reason: 'unreadable'; filePath: string; error: unknown};
 
 export function formatCorruptSessionMessage(filePath: string): string {
 	return `Session file is unreadable: ${filePath}`;
@@ -522,9 +523,12 @@ export class SessionManager {
 	}
 
 	/**
-	 * Like readSession, but tells callers apart a missing file from one that
-	 * exists yet cannot be read. Anything that may overwrite the file needs the
-	 * difference so it can preserve the original first.
+	 * Like readSession, but lets callers tell a missing file apart from one that
+	 * exists but cannot be read. Anything that may overwrite the file needs the
+	 * difference so it can preserve the original first. A file that exists but
+	 * is unreadable right now (EACCES, EMFILE, a sharing violation) is reported
+	 * as 'unreadable', not 'corrupt', so a transient error never triggers a
+	 * quarantine of otherwise healthy bytes.
 	 */
 	async readSessionResult(sessionId: string): Promise<SessionReadResult> {
 		if (!isValidSessionId(sessionId)) return {ok: false, reason: 'missing'};
@@ -535,7 +539,7 @@ export class SessionManager {
 			data = await fs.readFile(filePath, 'utf-8');
 		} catch (error) {
 			if (isEnoent(error)) return {ok: false, reason: 'missing'};
-			return {ok: false, reason: 'corrupt', filePath, error};
+			return {ok: false, reason: 'unreadable', filePath, error};
 		}
 
 		try {

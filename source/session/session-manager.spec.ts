@@ -1,4 +1,4 @@
-import {
+import fs, {
 	mkdir,
 	mkdtemp,
 	open,
@@ -12,6 +12,7 @@ import {
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
+import {mock} from 'node:test';
 import {ArtifactManager} from '@/artifacts/artifact-manager';
 import {reloadAppConfig} from '@/config/index';
 import {SessionManager, setRenameForTests} from './session-manager.js';
@@ -299,6 +300,44 @@ test.serial('readSessionResult distinguishes corrupt files from missing ones', a
 	);
 	t.false(missing.ok);
 	if (!missing.ok) t.is(missing.reason, 'missing');
+});
+
+test.serial('readSessionResult reports a read error as unreadable, not corrupt', async t => {
+	const session = await manager.createSession({
+		title: 'Unreadable test',
+		messageCount: 1,
+		provider: 'test',
+		model: 'test',
+		workingDirectory: '/tmp',
+		messages: [{role: 'user', content: 'hi'}],
+	});
+	const filePath = join(sessionsDir, `${session.id}.json`);
+	const originalReadFile = fs.readFile;
+
+	// A permission/sharing failure is transient: the bytes on disk may still be
+	// perfectly valid, so it must not be labelled corrupt.
+	mock.method(
+		fs,
+		'readFile',
+		(async (...args: Parameters<typeof fs.readFile>) => {
+			if (args[0] === filePath) {
+				throw Object.assign(new Error('EACCES: permission denied'), {
+					code: 'EACCES',
+				});
+			}
+			return originalReadFile(...args);
+		}) as typeof fs.readFile,
+	);
+	try {
+		const result = await manager.readSessionResult(session.id);
+		t.false(result.ok);
+		if (!result.ok) {
+			t.is(result.reason, 'unreadable');
+			t.is(result.filePath, filePath);
+		}
+	} finally {
+		mock.restoreAll();
+	}
 });
 
 test.serial('quarantineCorruptSession preserves the corrupt bytes', async t => {
