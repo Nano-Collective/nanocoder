@@ -63,7 +63,7 @@ test('headless review writes the report to stdout and progress elsewhere', async
 	t.true(outcome.stdout.includes('`src/file.ts:2`'));
 	t.false(outcome.stdout.includes('finder: turn'));
 	t.true(progress.some(line => line.includes('finder')));
-	t.true(progress.some(line => line.startsWith('review — completed')));
+	t.true(progress.some(line => line.startsWith('review: completed')));
 });
 
 test('headless JSON keeps the status and findings and stays off the progress stream', async t => {
@@ -215,7 +215,9 @@ function cliDeps(
 		loadPreferences: () => ({trustedDirectories: []}),
 		savePreferences: () => {},
 		getAppConfig: () => ({}),
+		getShutdownManager: () => ({register: () => {}, unregister: () => {}}),
 		writeError: () => {},
+		writeStdout: async () => {},
 		...overrides,
 	};
 }
@@ -322,4 +324,40 @@ test.serial('a provider setup failure becomes a failed JSON document', async t =
 	>;
 	t.is(parsed.status, 'failed');
 	t.regex(parsed.message ?? '', /No providers configured/);
+});
+
+test.serial('a shutdown during the review waits for the cancelled report', async t => {
+	let shutdownHandler: (() => Promise<void>) | undefined;
+	let unregistered = false;
+	const written: string[] = [];
+	const run = runHeadlessReviewCli({
+		args: ['main'],
+		trustDirectory: true,
+		outputFormat: 'text',
+		deps: cliDeps({
+			getShutdownManager: () => ({
+				register: entry => {
+					shutdownHandler = entry.handler;
+				},
+				unregister: () => {
+					unregistered = true;
+				},
+			}),
+			runHeadlessReview: async options => {
+				await new Promise(resolve =>
+					options.signal?.addEventListener('abort', resolve),
+				);
+				return {exitCode: 2, stdout: 'partial report\n'};
+			},
+			writeStdout: async text => {
+				written.push(text);
+			},
+		}),
+	});
+	await new Promise(resolve => setImmediate(resolve));
+	if (!shutdownHandler) return t.fail('no shutdown handler registered');
+	await shutdownHandler();
+	t.deepEqual(written, ['partial report\n']);
+	t.deepEqual(await run, {exitCode: 2, stdout: 'partial report\n'});
+	t.true(unregistered);
 });

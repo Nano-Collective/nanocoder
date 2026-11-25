@@ -20,6 +20,7 @@ import {writeError, writeStatus} from '@/plain/writer';
 import type {TuneConfig} from '@/types/config';
 import type {LLMClient} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
+import {getShutdownManager} from '@/utils/shutdown';
 import {ReviewActivityStore} from './review-activity';
 import {renderGroundedReviewReport} from './review-report';
 import {resolveReviewToolMode} from './review-tool-mode';
@@ -134,8 +135,8 @@ function watchProgress(
 		const summary = activity.toSummary();
 		const latest = summary.events.at(-1);
 		const line = latest
-			? `${latest.source}: ${latest.name} — ${latest.updates.at(-1)?.summary ?? latest.status}`
-			: `review — ${summary.status}`;
+			? `${latest.source}: ${latest.name}: ${latest.updates.at(-1)?.summary ?? latest.status}`
+			: `review: ${summary.status}`;
 		if (line === previous) return;
 		previous = line;
 		writeProgress(line);
@@ -236,7 +237,7 @@ export async function runHeadlessReview(
 			...(options.tools ? {tools: options.tools} : {}),
 			...(options.signal ? {signal: options.signal} : {}),
 		});
-		writeProgress(`review — ${result.status}`);
+		writeProgress(`review: ${result.status}`);
 		if (format === 'json') {
 			return {
 				exitCode: exitCodeFor(result.status),
@@ -270,7 +271,19 @@ export interface HeadlessReviewCliDeps {
 	loadPreferences: typeof loadPreferences;
 	savePreferences: typeof savePreferences;
 	getAppConfig: typeof getAppConfig;
+	getShutdownManager: () => Pick<
+		ReturnType<typeof getShutdownManager>,
+		'register' | 'unregister'
+	>;
 	writeError: (line: string) => void;
+	writeStdout: (text: string) => Promise<void>;
+}
+
+function writeStdout(text: string): Promise<void> {
+	// process.exit() can discard buffered output when stdout is piped.
+	return new Promise(resolve =>
+		process.stdout.write(text, 'utf8', () => resolve()),
+	);
 }
 
 const defaultCliDeps: HeadlessReviewCliDeps = {
@@ -279,18 +292,55 @@ const defaultCliDeps: HeadlessReviewCliDeps = {
 	loadPreferences,
 	savePreferences,
 	getAppConfig,
+	getShutdownManager,
 	writeError,
+	writeStdout,
 };
+
+const SHUTDOWN_HANDLER = 'headless-review-report';
 
 /**
  * `nanocoder review` without a TTY: the same trust gate as `nanocoder run`,
  * then provider setup and the review. Setup failures still produce a JSON
- * document when JSON was requested.
+ * document when JSON was requested. The report is written to stdout before
+ * this resolves; the caller only has to exit with `exitCode`.
  */
 export async function runHeadlessReviewCli(
 	options: HeadlessReviewCliOptions,
 ): Promise<{exitCode: number; stdout: string}> {
 	const deps: HeadlessReviewCliDeps = {...defaultCliDeps, ...options.deps};
+	// Ctrl+C also starts the shutdown manager's own exit (code 0). Its handler
+	// waits here until the cancelled review's report is on stdout, and the
+	// caller's exit with the review's code then overrides that 0.
+	let markReported: () => void = () => undefined;
+	const reported = new Promise<void>(resolve => {
+		markReported = resolve;
+	});
+	const abortController = new AbortController();
+	const shutdown = deps.getShutdownManager();
+	shutdown.register({
+		name: SHUTDOWN_HANDLER,
+		priority: 10,
+		handler: async () => {
+			abortController.abort();
+			await reported;
+		},
+	});
+	try {
+		const outcome = await reviewWithoutTui(options, deps, abortController);
+		await deps.writeStdout(outcome.stdout);
+		return outcome;
+	} finally {
+		markReported();
+		shutdown.unregister(SHUTDOWN_HANDLER);
+	}
+}
+
+async function reviewWithoutTui(
+	options: HeadlessReviewCliOptions,
+	deps: HeadlessReviewCliDeps,
+	abortController: AbortController,
+): Promise<{exitCode: number; stdout: string}> {
 	const {tier} = splitHeadlessReviewArgs(options.args);
 	const fail = (message: string) => {
 		deps.writeError(message);
@@ -316,7 +366,6 @@ export async function runHeadlessReviewCli(
 	}
 
 	// Ctrl+C cancels the review, so the report still says what was covered.
-	const abortController = new AbortController();
 	const sigint = () => abortController.abort();
 	const signal = options.signal ?? abortController.signal;
 	if (!options.signal) process.on('SIGINT', sigint);

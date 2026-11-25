@@ -876,10 +876,6 @@ async function main(): Promise<void> {
 			trustDirectory,
 			outputFormat,
 		});
-		// process.exit() can discard buffered output when stdout is piped.
-		await new Promise<void>(resolve =>
-			process.stdout.write(outcome.stdout, 'utf8', () => resolve()),
-		);
 		const {getShutdownManager} = await import('@/utils/shutdown');
 		await getShutdownManager().gracefulShutdown(outcome.exitCode);
 	} else if (plainMode && nonInteractivePrompt) {
