@@ -2,4 +2,4 @@
 "@nanocollective/nanocoder": patch
 ---
 
-`/usage` no longer shows "—" for Cumulative Session when one call in the session used a model without a models.dev price. Unpriced calls are left out of the total and only their provider still shows "—" in the per-provider breakdown. Closes #2390.
+`/usage` no longer shows "—" for Cumulative Session or for a provider subtotal when only some of the calls used a model without a models.dev price. Unpriced calls are left out of the totals, and "—" remains for a total with no priced call, such as a provider whose calls were all unpriced. Closes #2390.

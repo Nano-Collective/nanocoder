@@ -211,7 +211,11 @@ export const usageCommand: Command = {
 				const history = metadata.apiCallHistory ?? [];
 				let cumulativeSession = 0;
 				let hasPricedCall = false;
-				const perProvider: Record<string, number> = {};
+				let hasUnpricedCall = false;
+				const providerTotals: Record<
+					string,
+					{sum: number; hasPricedCall: boolean; hasUnpricedCall: boolean}
+				> = {};
 				const pricingCache = new Map<string, typeof pricing>();
 
 				// Calls made earlier on a local server stay free while a hosted
@@ -240,18 +244,38 @@ export const usageCommand: Command = {
 						: (calculateUsageCost(record, recordPricing) ?? 0);
 
 					// An unpriced call (NaN) must not wipe out the cost of priced calls.
-					// It still marks its provider as unknown below.
+					// A total stays unknown only if it has no priced call to show.
+					const isPriced = !isLocalCall(record) && Number.isFinite(callCost);
+					const totals = (providerTotals[record.provider] ??= {
+						sum: 0,
+						hasPricedCall: false,
+						hasUnpricedCall: false,
+					});
 					if (Number.isFinite(callCost)) {
 						cumulativeSession += callCost;
-						hasPricedCall = true;
+						totals.sum += callCost;
+					} else {
+						hasUnpricedCall = true;
+						totals.hasUnpricedCall = true;
 					}
-					perProvider[record.provider] =
-						(perProvider[record.provider] ?? 0) + callCost;
+					if (isPriced) {
+						hasPricedCall = true;
+						totals.hasPricedCall = true;
+					}
+				}
+
+				const perProvider: Record<string, number> = {};
+				for (const [provider, totals] of Object.entries(providerTotals)) {
+					perProvider[provider] =
+						totals.hasUnpricedCall && !totals.hasPricedCall ? NaN : totals.sum;
 				}
 
 				cost = {
 					currentContext: currentContextCost,
-					cumulativeSession: hasPricedCall ? cumulativeSession : NaN,
+					cumulativeSession:
+						history.length === 0 || (hasUnpricedCall && !hasPricedCall)
+							? NaN
+							: cumulativeSession,
 					perProvider:
 						Object.keys(perProvider).length > 1 ? perProvider : undefined,
 				};
