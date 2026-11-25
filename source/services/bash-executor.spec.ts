@@ -1057,6 +1057,56 @@ test('isBackgroundJob reports whether an execution is a background job', async t
 	await executor.killJob(executionId);
 });
 
+test('listJobs reports running and stopped jobs with their timing', async t => {
+	const executor = createExecutor();
+	const startedBefore = Date.now();
+	const {executionId} = executor.execute(LONG_RUNNING_NODE, {background: true});
+
+	const running = executor.listJobs();
+	t.is(running.length, 1);
+	t.is(running[0].jobId, executionId);
+	t.is(running[0].command, LONG_RUNNING_NODE);
+	t.false(running[0].isComplete);
+	t.true(running[0].startedAt >= startedBefore);
+	t.is(running[0].endedAt, null);
+
+	await executor.killJob(executionId);
+	const stopped = executor.listJobs();
+	t.true(stopped[0].isComplete);
+	t.truthy(stopped[0].endedAt);
+	t.true(stopped[0].endedAt! >= running[0].startedAt);
+});
+
+test('peekJobOutput does not consume the output bash_output still needs', async t => {
+	const executor = createExecutor();
+	const {executionId} = executor.execute(CHATTY_NODE, {background: true});
+
+	// The process writes its first tick asynchronously, so wait for it before
+	// checking which of two readers gets that text.
+	const deadline = Date.now() + 2000;
+	while (
+		!executor.getState(executionId)?.fullOutput.includes('tick 0') &&
+		Date.now() < deadline
+	) {
+		await new Promise(resolve => setTimeout(resolve, 25));
+	}
+	t.true(executor.getState(executionId)?.fullOutput.includes('tick 0'));
+
+	const peeked = executor.peekJobOutput(executionId)!;
+	t.true(peeked.output.includes('tick 0'), 'peeking shows the unread text');
+
+	const next = executor.readJobOutput(executionId)!;
+	t.true(next.output.includes('tick 0'), 'bash_output still receives peeked text');
+
+	const afterRead = executor.peekJobOutput(executionId)!;
+	t.is(afterRead.output, next.output, 'peeking after a read returns that chunk');
+
+	const following = executor.readJobOutput(executionId)!;
+	t.false(following.output.includes('tick 0'), 'peeking must not advance the cursor');
+
+	await executor.killJob(executionId);
+});
+
 test('stopSessionJobs kills only the jobs owned by that session', async t => {
 	const executor = createExecutor();
 	const owned = executor.execute(LONG_RUNNING_NODE, {
@@ -1252,4 +1302,32 @@ test('exit code is reported when the shell exits without a close', async t => {
 	const result = await executor.execute('sleep 5 & exit 3').promise;
 	t.is(result.exitCode, 3);
 	await executor.stopAll();
+});
+
+// ============================================================================
+// /jobs support: count for the status badge and frozen runtime
+// ============================================================================
+
+test('getRunningJobCount ignores foreground commands and completed jobs', async t => {
+	const executor = createExecutor();
+	await executor.execute('echo foreground').promise;
+	t.is(executor.getRunningJobCount(), 0);
+
+	const {executionId} = executor.execute(LONG_RUNNING_NODE, {background: true});
+	t.truthy(await childPidOf(executor, executionId));
+	t.is(executor.getRunningJobCount(), 1);
+
+	await executor.killJob(executionId);
+	t.is(executor.getRunningJobCount(), 0);
+});
+
+test('a completed job keeps the runtime it had when it stopped', async t => {
+	const executor = createExecutor();
+	const {executionId} = executor.execute(LONG_RUNNING_NODE, {background: true});
+	t.truthy(await childPidOf(executor, executionId));
+
+	await executor.killJob(executionId);
+	const frozen = executor.listJobs()[0]!.runtimeMs;
+	await new Promise(resolve => setTimeout(resolve, 50));
+	t.is(executor.listJobs()[0]!.runtimeMs, frozen);
 });

@@ -214,6 +214,12 @@ export const lazyCommands: LazyCommand[] = [
 		load: () => import('@/commands/tasks').then(m => m.tasksCommand),
 	},
 	{
+		name: 'jobs',
+		description:
+			'List background bash jobs, read their output, or stop them (/jobs, /jobs <id>, /jobs kill <id>|all)',
+		load: () => import('@/commands/jobs').then(m => m.jobsCommand),
+	},
+	{
 		name: 'plans',
 		description: 'View and manage persistent plan graphs',
 		load: () => import('@/commands/plans').then(m => m.plansCommand),
