@@ -832,10 +832,24 @@ export const processAssistantResponse = async (
 			onConversationComplete?.();
 			return;
 		}
-		case 'aborted':
+		case 'aborted': {
 			// The model call raised the abort: unwind with its error.
 			if (result.error !== undefined) {
 				throw result.error;
+			}
+			// Keep what the model had already streamed. After an interrupt the
+			// user needs to read it back, and the next request needs it in
+			// history so the model knows what it had said.
+			const partial = streamedContent.trim();
+			if (partial) {
+				setHistory([...history, {role: 'assistant', content: partial}]);
+				addToChatQueue(
+					<AssistantMessage
+						key={generateKey('assistant-aborted')}
+						message={partial}
+						model={currentModel}
+					/>,
+				);
 			}
 			// Escape while the reply was finishing or while compaction ran: don't
 			// go on to execute this turn's tool calls. Pair them with
@@ -849,6 +863,7 @@ export const processAssistantResponse = async (
 				]);
 			}
 			throw new Error('Operation was cancelled');
+		}
 		case 'model-error':
 			throw result.error;
 		case 'no-response':
