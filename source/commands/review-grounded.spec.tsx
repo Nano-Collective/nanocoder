@@ -1,4 +1,5 @@
 import test from 'ava';
+import stripAnsi from 'strip-ansi';
 import {Box} from 'ink';
 import React, {useState} from 'react';
 import {commandRegistry} from '@/commands';
@@ -148,10 +149,10 @@ test.serial('the TUI shows live activity, toggles details, then renders and save
 
 	registerReview(createReviewFixtureTools(fixture));
 	const running = handleMessageSubmission('/review branch feature/tui', options);
-	await waitFor(() => rendered.lastFrame()?.includes('finder: turn 2') ?? false);
+	await waitFor(() => stripAnsi(rendered.lastFrame() ?? '').includes('finder: turn 2') ?? false);
 	await tick();
 
-	const live = rendered.lastFrame() ?? '';
+	const live = stripAnsi(rendered.lastFrame() ?? '');
 	t.true(live.includes('$ /review branch feature/tui'));
 	t.true(live.includes('Grounded review · running · 1 agent · 1 tool call · 2 model calls'));
 	t.true(live.includes('D details · Esc cancel'));
@@ -160,14 +161,14 @@ test.serial('the TUI shows live activity, toggles details, then renders and save
 	t.deepEqual(state.executing, [true]);
 
 	rendered.stdin.write('d');
-	await waitFor(() => rendered.lastFrame()?.includes('args: src/file.ts') ?? false);
-	t.true(rendered.lastFrame()?.includes('tool: review_read_file'));
+	await waitFor(() => stripAnsi(rendered.lastFrame() ?? '').includes('args: src/file.ts') ?? false);
+	t.true(stripAnsi(rendered.lastFrame() ?? '').includes('tool: review_read_file'));
 
 	releaseFinder?.();
 	await running;
 	await tick();
 
-	const final = rendered.lastFrame() ?? '';
+	const final = stripAnsi(rendered.lastFrame() ?? '');
 	t.true(final.includes('Grounded review · completed · 2 agents · 1 tool call · 3 model calls'));
 	t.true(final.includes('3 model calls · 1 tool call · 1 verifier run'));
 	t.true(final.includes('Grounded review · completed'));
@@ -202,7 +203,7 @@ test.serial('Escape cancels a running review and the result says so', async t =>
 
 	registerReview(createReviewFixtureTools(fixture));
 	const running = handleMessageSubmission('/review branch feature/tui', options);
-	await waitFor(() => rendered.lastFrame()?.includes('finder: turn 1') ?? false);
+	await waitFor(() => stripAnsi(rendered.lastFrame() ?? '').includes('finder: turn 1') ?? false);
 	let settled = false;
 	void running.then(() => {
 		settled = true;
@@ -215,7 +216,7 @@ test.serial('Escape cancels a running review and the result says so', async t =>
 	});
 	await tick();
 
-	const final = rendered.lastFrame() ?? '';
+	const final = stripAnsi(rendered.lastFrame() ?? '');
 	t.regex(final, /Grounded review · cancelled/);
 	t.true(final.includes('Review cancelled.'));
 	t.false(final.includes('No verified issues'));
@@ -236,7 +237,7 @@ test.serial('an incomplete review is labelled incomplete above its report', asyn
 	await handleMessageSubmission('/review branch feature/tui', options);
 	await tick();
 
-	const final = rendered.lastFrame() ?? '';
+	const final = stripAnsi(rendered.lastFrame() ?? '');
 	t.true(final.includes('Grounded review · incomplete · 2 agents'));
 	t.false(final.includes('Grounded review · completed · '));
 	t.is(readPersistedReview(state.messages[0]!)?.status, 'incomplete');
@@ -267,7 +268,7 @@ test.serial('a second review cannot replace the running review or its Escape han
 	};
 	registerReview(createReviewFixtureTools(fixture));
 	const running = handleMessageSubmission('/review branch feature/tui', options);
-	await waitFor(() => rendered.lastFrame()?.includes('finder: turn 1') ?? false);
+	await waitFor(() => stripAnsi(rendered.lastFrame() ?? '').includes('finder: turn 1') ?? false);
 	const second = createScriptedReviewClient(() => ({content: 'NO FINDINGS'}));
 	await handleMessageSubmission('/review branch feature/tui', {
 		...options,
@@ -276,7 +277,7 @@ test.serial('a second review cannot replace the running review or its Escape han
 	await waitFor(() => state.completed === 1);
 	t.is(second.calls.length, 0);
 	t.is(installed.length, 1);
-	t.true(rendered.lastFrame()?.includes('A review is already running. Press Esc to cancel it first.'));
+	t.true(stripAnsi(rendered.lastFrame() ?? '').includes('A review is already running. Press Esc to cancel it first.'));
 	t.deepEqual(state.capture, [true]);
 	t.deepEqual(state.executing, [true]);
 	let settled = false;
@@ -305,7 +306,7 @@ test.serial('/review activity shows the saved trace of the latest review', async
 	await handleMessageSubmission('/review activity', options);
 	await tick();
 
-	const frame = rendered.lastFrame() ?? '';
+	const frame = stripAnsi(rendered.lastFrame() ?? '');
 	t.true(frame.includes('Grounded review · completed · 1 agent'));
 	t.true(frame.includes('review: Resolve review scope'));
 	t.true(frame.includes('agent: finder'));
@@ -371,11 +372,11 @@ test.serial('/review runs the grounded review and /review quick the one-shot rev
 	await tick();
 	t.is(calls.length, 0);
 	t.is(readPersistedReview(state.messages[0]!)?.status, 'clarification');
-	t.true(rendered.lastFrame()?.includes('Grounded review · needs a target'));
+	t.true(stripAnsi(rendered.lastFrame() ?? '').includes('Grounded review · needs a target'));
 
 	await handleMessageSubmission('/review deep please look at the thing I did', options);
 	await tick();
 	t.is(calls.length, 0);
 	t.is(readPersistedReview(state.messages.at(-1)!)?.tier, 'Deep');
-	t.true(rendered.lastFrame()?.includes('Deep review · needs a target'));
+	t.true(stripAnsi(rendered.lastFrame() ?? '').includes('Deep review · needs a target'));
 });

@@ -1,4 +1,5 @@
 import test from 'ava';
+import stripAnsi from 'strip-ansi';
 import {render} from 'ink-testing-library';
 import React from 'react';
 import {themes} from '../config/themes';
@@ -30,7 +31,7 @@ function renderHistory(messages: Message[], model = 'test-model'): string {
 			<>{components}</>
 		</TestThemeProvider>,
 	);
-	return lastFrame() ?? '';
+	return stripAnsi(lastFrame() ?? '');
 }
 
 test.beforeEach(() => {

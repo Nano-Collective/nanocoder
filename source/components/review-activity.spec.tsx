@@ -1,4 +1,5 @@
 import test from 'ava';
+import stripAnsi from 'strip-ansi';
 import React from 'react';
 import {createReviewFixtureTools, createReviewGitFixture} from '@/review/review-test-helpers';
 import {resolveReviewScope} from '@/review/review-resolver';
@@ -39,14 +40,14 @@ test('review activity updates while a coordinator is awaiting work', async t => 
 	const resolution = resolveReviewScope('/review working tree', {activity: store, tools});
 	await gitCallStarted;
 	await tick();
-	t.true(lastFrame()?.includes('Locating the repository root'));
+	t.true(stripAnsi(lastFrame() ?? '').includes('Locating the repository root'));
 	t.is(store.getStatus(), 'running');
 
 	resumeGit?.();
 	const result = await resolution;
 	await tick();
 	t.is(result.status, 'ready');
-	t.true(lastFrame()?.includes('completed'));
+	t.true(stripAnsi(lastFrame() ?? '').includes('completed'));
 	unmount();
 });
 
@@ -73,11 +74,11 @@ test('D expands bounded safe activity details and Escape cancels the run', async
 	);
 	await tick();
 
-	t.false(lastFrame()?.includes('args:'));
+	t.false(stripAnsi(lastFrame() ?? '').includes('args:'));
 	stdin.write('d');
 	await tick();
-	t.true(lastFrame()?.includes('args: fetch --no-tags origin refs/heads/feature'));
-	t.true(lastFrame()?.includes('D details · Esc cancel'));
+	t.true(stripAnsi(lastFrame() ?? '').includes('args: fetch --no-tags origin refs/heads/feature'));
+	t.true(stripAnsi(lastFrame() ?? '').includes('D details · Esc cancel'));
 
 	stdin.write('\u001B');
 	stdin.write('\u001B');
@@ -87,7 +88,7 @@ test('D expands bounded safe activity details and Escape cancels the run', async
 	event.cancel('Stopped by user');
 	store.finish('cancelled');
 	await tick();
-	t.true(lastFrame()?.includes('cancelled'));
+	t.true(stripAnsi(lastFrame() ?? '').includes('cancelled'));
 	unmount();
 });
 
@@ -106,8 +107,8 @@ test('activity keybindings are inactive unless the review view is focused', asyn
 	stdin.write('d');
 	await tick();
 
-	t.false(lastFrame()?.includes('args:'));
-	t.false(lastFrame()?.includes('D details'));
+	t.false(stripAnsi(lastFrame() ?? '').includes('args:'));
+	t.false(stripAnsi(lastFrame() ?? '').includes('D details'));
 	unmount();
 });
 
@@ -132,7 +133,7 @@ test('recentCount 0 renders only the summary line for a finished review', t => {
 		<ReviewActivity summary={store.toSummary()} recentCount={0} />,
 	);
 
-	const frame = lastFrame() ?? '';
+	const frame = stripAnsi(lastFrame() ?? '');
 	t.true(frame.includes('Review · completed · 1 agent · 1 tool call · 1 model call'));
 	t.false(frame.includes('tool: git diff'));
 	t.false(frame.includes('agent: finder'));
@@ -148,14 +149,14 @@ test('a finished review shows an incomplete outcome instead of the run status', 
 	const incomplete = renderWithTheme(
 		<ReviewActivity summary={summary} recentCount={0} outcome="incomplete" />,
 	);
-	t.true(incomplete.lastFrame()?.includes('Review · incomplete · 1 agent'));
+	t.true(stripAnsi(incomplete.lastFrame() ?? '').includes('Review · incomplete · 1 agent'));
 	incomplete.unmount();
 
 	for (const outcome of ['completed', 'clarification', 'empty'] as const) {
 		const other = renderWithTheme(
 			<ReviewActivity summary={summary} recentCount={0} outcome={outcome} />,
 		);
-		t.true(other.lastFrame()?.includes('Review · completed · 1 agent'), outcome);
+		t.true(stripAnsi(other.lastFrame() ?? '').includes('Review · completed · 1 agent'), outcome);
 		other.unmount();
 	}
 });
