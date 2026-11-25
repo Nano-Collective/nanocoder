@@ -68,6 +68,9 @@ function stripThinkTagsOutsideRanges(
  * the model used.
  */
 export function stripThinkTagsOutsideToolCalls(content: string): string {
+	// Nothing to strip: skip the call-range scan, which parses the reply three
+	// times (XML, function tags, JSON) and is measurable on a large body.
+	if (!/<\/?think/i.test(content)) return content;
 	const ranges = [
 		...XMLToolCallParser.findToolCallRanges(content),
 		...parseFunctionTagToolCalls(content).ranges,
