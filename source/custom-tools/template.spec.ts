@@ -232,3 +232,16 @@ test('findUnsafePlaceholder keeps assigning the value before arithmetic', t => {
 	t.is(findUnsafePlaceholder('n={{ n }}; echo $(( n + 1 ))', 'posix'), undefined);
 	t.is(findUnsafePlaceholder('echo $(( 1 + 2 )) {{ q }}', 'posix'), undefined);
 });
+
+test('findUnsafePlaceholder rejects placeholders in let arguments', t => {
+	const problem = findUnsafePlaceholder('let x={{ n }}', 'posix');
+	t.truthy(problem);
+	t.regex(problem ?? '', /arithmetic/);
+});
+
+test('findUnsafePlaceholder tracks nested parens in arithmetic', t => {
+	for (const body of ['(( f({{ n }}) ))', '$(( (1+2) * {{ n }} ))']) {
+		t.regex(findUnsafePlaceholder(body, 'posix') ?? '', /arithmetic/, body);
+	}
+	t.is(findUnsafePlaceholder('(( a = (1) )) {{ q }}', 'posix'), undefined);
+});
