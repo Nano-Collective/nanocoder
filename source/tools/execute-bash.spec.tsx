@@ -591,6 +591,23 @@ for (const command of [
 	'rm -rf ${HOME}/..',
 	'rm -rf "$HOME/.."',
 	'rm -rf $HOME/../..',
+	// A relative target after a `cd` is resolved against that directory, so
+	// reaching the home parent, the home or the root through `cd` is caught
+	// too (#2323).
+	'cd ~ && rm -rf ..',
+	'cd ~; rm -rf ..',
+	'cd && rm -rf ..',
+	'cd $HOME && rm -rf ../*',
+	'cd "$HOME" && rm -fr ./..',
+	'cd ~/project && rm -rf ..',
+	'cd ~/project && rm -rf ../..',
+	'cd -P ~ && rm -rf ..',
+	'pushd ~ && rm -rf ..',
+	'cd ~ && cd project && rm -rf ../..',
+	`cd "${testHome}" && rm -rf ..`,
+	'cd /tmp && rm -rf ..',
+	'cd / && rm -rf *',
+	'cd /home && rm -rf *',
 	// The real home directory and its parent, not just the `~`/`$HOME`
 	// spellings, so this asserts the `os.homedir()` derivation itself.
 	`rm -rf "${testHome}"`,
@@ -643,6 +660,14 @@ for (const command of [
 	'rm -r /tmp/foo',
 	'rm --version',
 	'rm -rf src && ls /',
+	// A `cd` into a project and a relative cleanup there stays allowed, and a
+	// relative `cd` from an unknown directory does not make `..` destructive.
+	'cd ~/project && rm -rf node_modules dist',
+	'cd ~/project/build && rm -rf ../dist',
+	'cd /tmp && rm -rf *',
+	'cd / && rm -rf tmp/nanocoder-build',
+	'cd build && rm -rf ..',
+	'cd - && rm -rf ..',
 	// A bare newline ends the command: `rm -rf` runs with no operand and `/`
 	// is a separate (permission-denied) command, so this is not a delete of /.
 	'rm -rf\n/',

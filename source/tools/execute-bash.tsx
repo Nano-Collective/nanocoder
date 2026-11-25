@@ -403,6 +403,51 @@ function rmArgumentLists(command: string): string[][] {
 }
 
 /**
+ * `rm` argument lists with relative targets resolved against the directory an
+ * earlier `cd` or `pushd` in the same command moved to. `cd ~ && rm -rf ..`
+ * deletes the home directory's parent, but on its own `..` is relative to an
+ * unknown working directory and looks harmless (#2323).
+ *
+ * Only a directory the command itself names is tracked. A relative `cd` from
+ * an unknown directory, and `cd -`, leave it unknown, and those targets are
+ * left to `rmArgumentLists` as before.
+ */
+function rmArgumentListsAfterCd(command: string): string[][] {
+	const lists: string[][] = [];
+	let cwd: string | null = null;
+	for (const segment of command.split(/&&|\|\||[;&|\n]/)) {
+		const words = segment
+			.trim()
+			.split(/\s+/)
+			.filter(Boolean)
+			.map(word => word.replace(/['"]/g, ''));
+		if (words[0] === 'cd' || words[0] === 'pushd') {
+			// `cd -P dir`, `cd -- dir`: options come before the directory.
+			const dir = words
+				.slice(1)
+				.find(word => word === '-' || !word.startsWith('-'));
+			if (dir === undefined) cwd = HOME_DIR;
+			else if (dir === '-') cwd = null;
+			else if (/^(?:[/~$]|[A-Za-z]:\/)/.test(dir)) cwd = resolveRmTarget(dir);
+			else cwd = cwd === null ? null : resolveRmTarget(`${cwd}/${dir}`);
+			continue;
+		}
+		if (cwd === null) continue;
+		const base = cwd;
+		for (const words of rmArgumentLists(segment)) {
+			lists.push(
+				words.map(word =>
+					word.startsWith('-') || /^(?:[/~$]|[A-Za-z]:\/)/.test(word)
+						? word
+						: resolveRmTarget(`${base}/${word}`),
+				),
+			);
+		}
+	}
+	return lists;
+}
+
+/**
  * Whether an `rm` target names the filesystem root, the user's home, another
  * account's home, or the directory that holds every user's home. `/*`, `/.`,
  * `/..`, `//`, `~/..`, `~user/..` and `$HOME/..` all name one of those after
@@ -528,6 +573,7 @@ const executeBashValidator = (args: {
 	const unquoted = withoutQuotedArguments(command);
 	const isDestructive =
 		rmArgumentLists(parseable).some(isDestructiveRm) ||
+		rmArgumentListsAfterCd(parseable).some(isDestructiveRm) ||
 		dangerousPatterns.some(pattern => pattern.test(unquoted));
 
 	if (isDestructive) {
