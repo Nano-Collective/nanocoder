@@ -246,3 +246,23 @@ test('getFileCompletions returns directory completions with isDirectory flag', a
 	t.true(dirCompletion!.isDirectory);
 	t.true(dirCompletion!.path.endsWith('/'));
 });
+
+test('getFileCompletions breaks score ties in favor of files', async t => {
+	const dir = mkdtempSync(join(tmpdir(), 'nanocoder-autocomplete-ties-'));
+	t.teardown(() => {
+		rmSync(dir, {recursive: true, force: true});
+	});
+
+	// Create src/components/ (directory) and src/components.ts (file)
+	// Query "comp" prefix matches both filename/dirname, resulting in tied score 800
+	mkdirSync(join(dir, 'src', 'components'), {recursive: true});
+	writeFileSync(join(dir, 'src', 'components.ts'), 'export const comp = 1;');
+
+	const completions = await getFileCompletions('comp', dir);
+	const compFileIdx = completions.findIndex(c => c.path === 'src/components.ts');
+	const compDirIdx = completions.findIndex(c => c.path === 'src/components/');
+
+	t.true(compFileIdx !== -1);
+	t.true(compDirIdx !== -1);
+	t.true(compFileIdx < compDirIdx, 'file is ranked ahead of directory on score tie');
+});

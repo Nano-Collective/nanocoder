@@ -159,9 +159,9 @@ export async function getFileCompletions(
 			if (b.score !== a.score) {
 				return b.score - a.score;
 			}
-			// When scores are tied, prefer directories
+			// When scores are tied, prefer files over directories
 			if (a.isDirectory !== b.isDirectory) {
-				return a.isDirectory ? -1 : 1;
+				return a.isDirectory ? 1 : -1;
 			}
 			// If scores and types are equal, sort alphabetically
 			return a.path.localeCompare(b.path);

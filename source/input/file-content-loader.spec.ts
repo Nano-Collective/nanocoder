@@ -197,6 +197,8 @@ test('loads directory content successfully', async t => {
 	t.true(result.content!.includes('file2.ts'));
 	t.is(result.metadata.path, dirPath);
 	t.true(result.metadata.tokens > 0);
+	t.is(result.metadata.isDirectory, true);
+	t.is(result.metadata.truncated, false);
 });
 
 test('loads directory with trailing slash', async t => {
@@ -268,5 +270,7 @@ test('caps directory listing at 200 entries', async t => {
 
 	t.true(result.success);
 	t.true(result.content!.includes('[Showing first 200 entries up to depth 3]'));
+	t.is(result.metadata.isDirectory, true);
+	t.is(result.metadata.truncated, true);
 });
 

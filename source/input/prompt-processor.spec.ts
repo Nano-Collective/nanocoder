@@ -54,6 +54,7 @@ test('assemblePrompt - replaces placeholder with directory content', t => {
 				content: 'Directory: src/components/\n\nButton.tsx\nCard.tsx',
 				filePath: 'src/components/',
 				displayText: '[@src/components/]',
+				isDirectory: true,
 			},
 		},
 	};
@@ -166,8 +167,8 @@ test('assemblePrompt - previews a large file and emits a read_file hint', t => {
 	);
 });
 
-test('assemblePrompt - previews a large directory listing and emits a list_directory hint', t => {
-	const totalLines = FILE_MENTION_INLINE_MAX_LINES + 50;
+test('assemblePrompt - inlines directory listing whole and emits list_directory hint when capped', t => {
+	const totalLines = 150;
 	const lines = [
 		'Directory: src/huge/',
 		'',
@@ -182,22 +183,44 @@ test('assemblePrompt - previews a large directory listing and emits a list_direc
 				content,
 				filePath: 'src/huge/',
 				displayText: '[@src/huge/]',
+				isDirectory: true,
+				truncated: true,
 			},
 		},
 	};
 
 	const result = assemblePrompt(inputState);
 
+	t.true(result.includes('=== Directory: huge ==='));
+	t.true(result.includes('file_1.ts'));
+	t.true(result.includes(`file_${totalLines - 2}.ts`));
 	t.true(
 		result.includes(
-			`=== Directory: huge (${totalLines} lines, showing first ${FILE_MENTION_PREVIEW_LINES}) ===`,
+			"=== Capped at 200 entries, use list_directory('src/huge') for the full listing ===",
 		),
 	);
-	t.true(
-		result.includes(
-			`${totalLines - FILE_MENTION_PREVIEW_LINES} more lines, use list_directory('src/huge')`,
-		),
-	);
+});
+
+test('assemblePrompt - inlines directory listing whole with standard footer when not capped', t => {
+	const content = 'Directory: src/small/\n\nfile_1.ts\nfile_2.ts';
+	const inputState: InputState = {
+		displayValue: '[@src/small/]',
+		placeholderContent: {
+			file_1: {
+				type: PlaceholderType.FILE,
+				content,
+				filePath: 'src/small/',
+				displayText: '[@src/small/]',
+				isDirectory: true,
+			},
+		},
+	};
+
+	const result = assemblePrompt(inputState);
+
+	t.true(result.includes('=== Directory: small ==='));
+	t.true(result.includes(content));
+	t.false(result.includes('list_directory'));
 });
 
 test('assemblePrompt - handles file with nested path', t => {

@@ -49,6 +49,8 @@ export async function handleFileMention(
 		lastModified: Date.now(),
 		encoding: 'utf-8',
 		fileSize: fileResult.metadata.size,
+		isDirectory: fileResult.metadata.isDirectory,
+		truncated: fileResult.metadata.truncated,
 	};
 
 	const newPlaceholderContent = {

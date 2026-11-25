@@ -198,7 +198,7 @@ export async function findUnresolvedFileMentions(
 
 function describeFailure(error: string | undefined): string {
 	if (!error) return 'could not be read';
-	if (error === 'Path is not a file') return 'is a directory, not a file';
+	if (error === 'Path is not a file') return 'is not a regular file';
 	if (error === 'Failed to read file (might be binary)') {
 		return 'could not be read';
 	}

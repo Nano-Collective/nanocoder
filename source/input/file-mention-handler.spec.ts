@@ -83,6 +83,10 @@ test('creates placeholder for existing directory', async t => {
 
 	const placeholder = Object.values(result!.placeholderContent)[0];
 	t.is(placeholder.type, PlaceholderType.FILE);
+	if (placeholder.type === PlaceholderType.FILE) {
+		t.true(placeholder.isDirectory);
+		t.false(placeholder.truncated);
+	}
 	t.true(placeholder.content.includes('Directory:'));
 	t.true(placeholder.content.includes('Button.tsx'));
 });

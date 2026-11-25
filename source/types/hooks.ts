@@ -36,6 +36,8 @@ interface FilePlaceholderContent extends BasePlaceholderContent {
 	encoding?: string; // File encoding (utf8, etc.)
 	fileSize?: number; // Original file size
 	checksum?: string; // For detecting file changes
+	isDirectory?: boolean;
+	truncated?: boolean;
 }
 
 interface ResourcePlaceholderContent extends BasePlaceholderContent {

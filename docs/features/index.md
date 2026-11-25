@@ -28,13 +28,14 @@ The token count is whatever the provider reported for that response, and the cos
 
 ### Giving the AI Context
 
-Use **`@`** followed by a filename to include file contents in your message. Nanocoder fuzzy-matches as you type and shows autocomplete suggestions — press **Tab** to select.
+Use **`@`** followed by a filename or directory to include file contents or directory structure in your message. Mentioning a directory attaches a compact tree listing (up to 3 levels deep and capped at 200 entries, respecting `.gitignore` and `.nanocoderignore`). Nanocoder fuzzy-matches as you type and shows autocomplete suggestions with directories marked by a trailing `/` — press **Tab** to select.
 
 ```
 Can you review @src/app.tsx for any issues?
+What does the structure of @src/ look like?
 ```
 
-You can also include specific line ranges:
+You can also include specific line ranges for files:
 
 ```
 What does this function do? @src/utils.ts:45-80

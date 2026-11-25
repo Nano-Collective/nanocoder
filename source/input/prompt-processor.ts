@@ -65,44 +65,52 @@ export function assemblePrompt(inputState: InputState): string {
 				break;
 			}
 			case PlaceholderType.FILE: {
-				// Format file or directory content with header for LLM context. Large files
-				// or listings inline only a head preview plus a read_file or list_directory hint
-				// so a single @-mention can't flood the conversation; small files inline whole.
-				const isDirectory =
-					placeholderContent.content.startsWith('Directory: ') ||
-					placeholderContent.filePath.endsWith('/') ||
-					placeholderContent.displayText.includes('/]');
+				// Format file or directory content with header for LLM context.
+				const isDirectory = Boolean(placeholderContent.isDirectory);
 				const segments = placeholderContent.filePath
 					.split(/[/\\]/)
 					.filter(Boolean);
 				const label =
 					segments[segments.length - 1] || placeholderContent.filePath;
-				const itemLabel = isDirectory
-					? `Directory: ${label}`
-					: `File: ${label}`;
-				const lines = placeholderContent.content.split('\n');
-				const totalLines = lines.length;
 
-				if (totalLines > FILE_MENTION_INLINE_MAX_LINES) {
-					const previewBody = lines
-						.slice(0, FILE_MENTION_PREVIEW_LINES)
-						.join('\n');
-					const remaining = totalLines - FILE_MENTION_PREVIEW_LINES;
+				if (isDirectory) {
+					// Directory listings are already capped at MAX_DIRECTORY_ENTRIES (200),
+					// so inline whole and keep the list_directory hint when capped.
 					const relPath = (
 						isAbsolute(placeholderContent.filePath)
 							? relative(process.cwd(), placeholderContent.filePath)
 							: placeholderContent.filePath
 					).replace(/[/\\]+$/, '');
-					const hint = isDirectory
-						? `use list_directory('${relPath}') for the full listing`
-						: `use read_file('${relPath}') for the full file`;
-					const header = `=== ${itemLabel} (${totalLines} lines, showing first ${FILE_MENTION_PREVIEW_LINES}) ===`;
-					const footer = `=== ${remaining} more lines, ${hint} ===`;
-					replacementContent = `${header}\n${previewBody}\n${footer}`;
-				} else {
-					const header = `=== ${itemLabel} ===`;
-					const footer = '='.repeat(header.length);
+					const header = `=== Directory: ${label} ===`;
+					const footer = placeholderContent.truncated
+						? `=== Capped at 200 entries, use list_directory('${relPath}') for the full listing ===`
+						: '='.repeat(header.length);
 					replacementContent = `${header}\n${placeholderContent.content}\n${footer}`;
+				} else {
+					// Large files inline only a head preview plus a read_file hint so a single
+					// @-mention can't flood the conversation; small files inline whole.
+					const itemLabel = `File: ${label}`;
+					const lines = placeholderContent.content.split('\n');
+					const totalLines = lines.length;
+
+					if (totalLines > FILE_MENTION_INLINE_MAX_LINES) {
+						const previewBody = lines
+							.slice(0, FILE_MENTION_PREVIEW_LINES)
+							.join('\n');
+						const remaining = totalLines - FILE_MENTION_PREVIEW_LINES;
+						const relPath = (
+							isAbsolute(placeholderContent.filePath)
+								? relative(process.cwd(), placeholderContent.filePath)
+								: placeholderContent.filePath
+						).replace(/[/\\]+$/, '');
+						const header = `=== ${itemLabel} (${totalLines} lines, showing first ${FILE_MENTION_PREVIEW_LINES}) ===`;
+						const footer = `=== ${remaining} more lines, use read_file('${relPath}') for the full file ===`;
+						replacementContent = `${header}\n${previewBody}\n${footer}`;
+					} else {
+						const header = `=== ${itemLabel} ===`;
+						const footer = '='.repeat(header.length);
+						replacementContent = `${header}\n${placeholderContent.content}\n${footer}`;
+					}
 				}
 				break;
 			}
