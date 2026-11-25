@@ -1,10 +1,9 @@
 import {scrub} from '@nanocollective/prompt-scrub';
 
 import {Box, Text} from 'ink';
+import {errorMsg, infoMsg} from '@/components/message-factory';
 import {useTheme} from '@/hooks/useTheme';
-
 import type {Command} from '@/types/index';
-import {errorMsg, infoMsg} from '@/utils/message-factory';
 
 export const privacyCommand: Command = {
 	name: 'privacy',

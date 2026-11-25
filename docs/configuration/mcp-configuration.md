@@ -179,13 +179,17 @@ Connects to remote servers via persistent WebSocket connections.
 |-------|----------|-------------|
 | `transport` | Yes | `"websocket"` |
 | `url` | Yes | Server endpoint (`ws://` or `wss://`) |
+| `headers` | No | HTTP headers sent during the WebSocket handshake (useful for authentication) |
 | `timeout` | No | Connection timeout in milliseconds (see [Common Fields](#common-fields)) |
 
 ```json
 {
   "realtime-data": {
     "transport": "websocket",
-    "url": "wss://api.example.com/mcp"
+    "url": "wss://api.example.com/mcp",
+    "headers": {
+      "Authorization": "Bearer $REALTIME_DATA_TOKEN"
+    }
   }
 }
 ```
@@ -199,7 +203,9 @@ These fields work with all transport types:
 | `description` | Human-readable description shown in `/mcp` output |
 | `alwaysAllow` | Array of tool names that skip confirmation prompts |
 | `enabled` | Whether the server is active (default: `true`). `false` skips it entirely — no connection, no tools registered |
-| `timeout` | Connection timeout in milliseconds. Bounds the connection handshake and the initial tool listing; individual tool calls keep the MCP SDK's default timeout (60 seconds) |
+| `timeout` | Connection timeout in milliseconds. Bounds the connection handshake and the initial tool listing; tool calls use `toolTimeout` instead |
+| `toolTimeout` | How long a tool call may wait for the server, in milliseconds (default: `60000`, the MCP SDK's default). Set to `0` for no limit. Raise it for servers whose tools legitimately run for minutes, such as builds, test runs or long queries. A call that runs out reports the limit it hit and names this setting |
+| `resetTimeoutOnProgress` | Restart the `toolTimeout` timer each time the server sends a progress notification (default: `true`), so a long call that keeps reporting progress is not cut off. Set to `false` to make `toolTimeout` a hard limit for the whole call |
 | `healthCheckInterval` | Optional MCP ping interval in milliseconds (default: `30000`). Set to `0` to disable health pings entirely, including the liveness ping that otherwise follows a transport error. Health pings use `timeout` when configured, otherwise 10 seconds, and are skipped while a tool call or resource read is in flight on that server. Two failed pings in a row, or a transport close, mark the server unhealthy and remove its tools; unhealthy servers continue to be checked with exponential backoff and automatically restore their tools when they respond again. After a transport close (for example a crashed stdio server), Nanocoder reconnects from the server's config with the same backoff, using this interval as the base delay (30 seconds when it is `0`). |
 | `tags` | Array of tags, shown as `#tag` labels in `/mcp` output |
 
@@ -266,6 +272,22 @@ Two consequences worth calling out:
   `"enabled": false`, or don't configure that server in a project whose skills
   run under the daemon.
 
+## Tool Name Collisions
+
+Built-in tools always win. If a server offers a tool with the same name as a
+built-in or [custom tool](../features/custom-tools.md), for example the
+filesystem server's `write_file` and `list_directory` or the git server's
+`git_status` and `git_commit`, the server's version is skipped, and Nanocoder
+prints a warning at startup naming the server and the skipped tools. The
+existing tool keeps its behaviour and its approval rules, and the server's
+other tools work as usual. When a server goes unhealthy or disconnects, only
+the tools it registered are removed.
+
+If two servers offer a tool with the same name, only one of them handles it,
+and a startup warning names the servers and the one its calls go to. When that
+name also belongs to a built-in or custom tool, it is skipped for every server
+that offers it.
+
 ## Resources and Prompts
 
 A server can also declare MCP resources and prompts, alongside tools:
@@ -310,7 +332,7 @@ Run `/settings mcp` for interactive configuration with:
 
 **Remote servers (HTTP/WebSocket):**
 - _Connection failed_ — Verify the URL is accessible. Test with `curl` for HTTP servers.
-- _Authentication errors_ — For HTTP, use `headers` with a Bearer token or API key. Ensure env vars are set.
+- _Authentication errors_ — For HTTP or WebSocket, use `headers` with a Bearer token or API key. Use `https://` or `wss://` when sending credentials and ensure env vars are set.
 
 **General:**
 - _Transport type mismatch_ — Ensure `transport` matches your server (`stdio` for local commands, `http`/`websocket` for remote URLs).

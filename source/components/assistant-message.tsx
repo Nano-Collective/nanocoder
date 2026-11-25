@@ -4,9 +4,9 @@ import {useNonInteractiveRender} from '@/hooks/useNonInteractiveRender';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {parseMarkdownParts} from '@/markdown-parser/index';
+import {wrapWithTrimmedContinuations} from '@/terminal/text-wrapping';
 import type {AssistantMessageProps} from '@/types/index';
 import {formatUsageIndicator} from '@/usage/format';
-import {wrapWithTrimmedContinuations} from '@/utils/text-wrapping';
 import {estimateTokens} from '@/utils/token-calculator';
 
 export function AssistantMessageBox({
@@ -23,9 +23,8 @@ export function AssistantMessageBox({
 		<Box
 			flexDirection="column"
 			marginBottom={1}
-			backgroundColor={colors.base}
 			width={boxWidth}
-			padding={1}
+			paddingX={1}
 			borderStyle="bold"
 			borderLeft={true}
 			borderRight={false}
@@ -108,7 +107,7 @@ export default memo(function AssistantMessage({
 
 	return (
 		<>
-			<Box marginBottom={1} marginTop={1}>
+			<Box marginTop={1}>
 				<Text color={colors.info} bold>
 					{model}:
 				</Text>

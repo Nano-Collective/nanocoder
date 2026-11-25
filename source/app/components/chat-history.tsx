@@ -4,7 +4,7 @@ import ChatQueue, {computeFullscreenTailCap} from '@/components/chat-queue';
 import {RenderErrorBoundary} from '@/components/render-error-boundary';
 import {useTerminalRows} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
-import {wheelEvents} from '@/utils/terminal-mouse';
+import {wheelEvents} from '@/terminal/terminal-mouse';
 
 export interface ChatHistoryProps {
 	/** Whether the chat has started (ready to display) */

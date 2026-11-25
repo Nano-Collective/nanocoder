@@ -6,6 +6,10 @@ import {
 	appendPostToolUseOutput,
 	runPreToolUseGate,
 } from '@/services/lifecycle-hooks';
+import {parseToolArguments} from '@/tools/runtime/tool-args-parser';
+import {createCancellationResults} from '@/tools/runtime/tool-cancellation';
+import {toolErrorToContent} from '@/tools/runtime/tool-validation';
+import {truncateToolResult} from '@/tools/runtime/truncate-tool-result';
 import type {ToolManager} from '@/tools/tool-manager';
 import type {
 	ToolCall,
@@ -13,10 +17,6 @@ import type {
 	ToolHandler,
 	ToolResult,
 } from '@/types/index';
-import {parseToolArguments} from '@/utils/tool-args-parser';
-import {createCancellationResults} from '@/utils/tool-cancellation';
-import {toolErrorToContent} from '@/utils/tool-validation';
-import {truncateToolResult} from '@/utils/truncate-tool-result';
 
 // This will be set by the ChatSession
 let toolRegistryGetter: (() => Record<string, ToolHandler>) | null = null;

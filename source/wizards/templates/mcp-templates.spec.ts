@@ -289,7 +289,7 @@ test('custom template: writes http headers, one per line', t => {
 	});
 });
 
-test('custom template: omits headers when none are given or transport is not http', t => {
+test('custom template: writes headers for websocket and omits them when empty or stdio', t => {
 	const template = MCP_TEMPLATES.find(t => t.id === 'custom');
 	t.truthy(template);
 
@@ -304,9 +304,18 @@ test('custom template: omits headers when none are given or transport is not htt
 		transport: 'websocket',
 		serverName: 'ws',
 		url: 'wss://example.com/mcp',
+		headers: 'Authorization: Bearer ws_token_123',
+	});
+	t.deepEqual(websocket.headers, {Authorization: 'Bearer ws_token_123'});
+
+	const stdio = template!.buildConfig({
+		transport: 'stdio',
+		serverName: 'local',
+		command: 'node',
+		args: 'server.js',
 		headers: 'X-API-Key: ignored',
 	});
-	t.is(websocket.headers, undefined);
+	t.is(stdio.headers, undefined);
 });
 
 // ============================================================================

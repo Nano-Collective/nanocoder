@@ -9,7 +9,7 @@ import {extname, resolve} from 'path';
 import {fileURLToPath, pathToFileURL} from 'url';
 import {getSessionCwd} from '@/services/session-cwd';
 import {formatError} from '@/utils/error-formatter';
-import {notifyError, notifyInfo} from '@/utils/message-queue';
+import {notifyError, notifyInfo} from '@/utils/message-queue-core';
 import {getShutdownManager} from '@/utils/shutdown';
 import {LSPClient, type LSPCrashInfo, LSPServerConfig} from './lsp-client';
 import {

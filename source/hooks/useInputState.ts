@@ -5,11 +5,11 @@ import {
 	PASTE_LARGE_CONTENT_THRESHOLD_CHARS,
 	PASTE_RAPID_DETECTION_MS,
 } from '@/constants';
+import {handleAtomicDeletion} from '../input/atomic-deletion';
+import {PasteDetector} from '../input/paste-detection';
+import {handlePaste, resizePasteDisplayText} from '../input/paste-utils';
+import {findPlaceholderOccurrences} from '../input/placeholders';
 import {InputState, PlaceholderType} from '../types/hooks';
-import {handleAtomicDeletion} from '../utils/atomic-deletion';
-import {PasteDetector} from '../utils/paste-detection';
-import {handlePaste, resizePasteDisplayText} from '../utils/paste-utils';
-import {findPlaceholderOccurrences} from '../utils/placeholders';
 
 // Cap both undo and redo stacks so a long composition can't grow them
 // unbounded. Every keystroke/paste pushes one entry, and each entry holds a

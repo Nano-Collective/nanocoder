@@ -5,23 +5,23 @@ import {
 	SuccessMessage,
 	WarningMessage,
 } from '@/components/message-box';
+import {
+	errorMsg,
+	infoMsg,
+	successMsg,
+	warningMsg,
+} from '@/components/message-factory';
 import {CheckpointManager} from '@/services/checkpoint-manager';
-import {generateKey} from '@/session/key-generator';
+import {describeGapsMessage} from '@/services/checkpoint-utils';
 import type {
 	CommandCompletion,
 	CommandContext,
 	Message,
 	StatefulCommand,
 } from '@/types/index';
-import {describeGapsMessage} from '@/utils/checkpoint-utils';
 import {formatError} from '@/utils/error-formatter';
-import {
-	errorMsg,
-	infoMsg,
-	successMsg,
-	warningMsg,
-} from '@/utils/message-factory';
-import {addToMessageQueue} from '@/utils/message-queue';
+import {generateKey} from '@/utils/key-generator';
+import {addToMessageQueue} from '@/utils/message-queue-core';
 
 // Default checkpoint manager instance (lazy-initialized)
 let defaultCheckpointManager: CheckpointManager | null = null;

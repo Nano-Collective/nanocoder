@@ -10,7 +10,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import {getAppDataPath} from '@/config/paths';
 import {formatError} from '@/utils/error-formatter';
-import {notifyInfo, notifyWarning} from '@/utils/message-queue';
+import {notifyInfo, notifyWarning} from '@/utils/message-queue-core';
 import {isObject} from '@/utils/type-helpers';
 import {toLocalDateKey, toMonthKey} from './date-utils';
 import type {DailyStats, MonthlyStats, PairUsage, StatsLedger} from './types';

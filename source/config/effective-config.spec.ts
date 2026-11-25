@@ -1,12 +1,14 @@
 import {
 	existsSync,
 	mkdirSync,
+	readFileSync,
 	realpathSync,
 	rmSync,
 	writeFileSync,
 } from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
+import {fileURLToPath} from 'node:url';
 import test from 'ava';
 import {runConfigCli} from './config-cli';
 import {
@@ -124,6 +126,99 @@ test('unset keys resolve to the built-in default layer', t => {
 		t.true(threshold?.hasDefault);
 		t.deepEqual(threshold?.shadowed, []);
 	});
+});
+
+test("a profile's mode is reported as nanocoder.defaultMode from the profile layer", t => {
+	withFixture(
+		{
+			projectAgents: {
+				nanocoder: {
+					profiles: {fast: {mode: 'yolo'}},
+					defaultProfile: 'fast',
+				},
+			},
+		},
+		() => {
+			const config = resolveEffectiveConfig();
+			const mode = entry(config, 'nanocoder.defaultMode');
+			t.is(mode?.value, 'yolo');
+			t.is(mode?.layer, 'profile');
+			t.true(typeof mode?.origin === 'string' && mode.origin.includes('agents.config.json'));
+		},
+	);
+});
+
+test("a profile's mode outranks a project-level defaultMode", t => {
+	withFixture(
+		{
+			projectAgents: {
+				nanocoder: {
+					defaultMode: 'plan',
+					profiles: {fast: {mode: 'yolo'}},
+					defaultProfile: 'fast',
+				},
+			},
+		},
+		() => {
+			const config = resolveEffectiveConfig();
+			const mode = entry(config, 'nanocoder.defaultMode');
+			t.is(mode?.value, 'yolo');
+			t.is(mode?.layer, 'profile');
+		},
+	);
+});
+
+test('an invalid profile mode falls back to the project defaultMode', t => {
+	withFixture(
+		{
+			projectAgents: {
+				nanocoder: {
+					defaultMode: 'plan',
+					profiles: {fast: {mode: 'bogus'}},
+					defaultProfile: 'fast',
+				},
+			},
+		},
+		() => {
+			const config = resolveEffectiveConfig();
+			const mode = entry(config, 'nanocoder.defaultMode');
+			t.is(mode?.value, 'plan');
+			t.is(mode?.layer, 'project');
+		},
+	);
+});
+
+test('profile mcpServers are shown as the profile layer', t => {
+	withFixture(
+		{
+			projectAgents: {
+				nanocoder: {
+					defaultProfile: 'fast',
+					profiles: {
+						fast: {
+							mcpServers: {
+								'profile-server': {
+									transport: 'stdio',
+									command: 'npx',
+									args: ['-y', '@example/cli'],
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		() => {
+			const config = resolveEffectiveConfig();
+			const server = config.entries.find(
+				candidate => candidate.key === 'mcpServers.profile-server',
+			);
+			t.truthy(server, 'mcpServers.profile-server should be resolved');
+			t.is(server?.layer, 'profile');
+			t.is((server?.value as {command?: unknown})?.command, 'npx');
+			t.true(typeof server?.origin === 'string' && server.origin.includes('agents.config.json'));
+		},
+	);
 });
 
 test('a project value wins and records the global value it shadows', t => {
@@ -369,6 +464,67 @@ test('redactValue leaves non-secret values untouched', t => {
 	t.deepEqual(redactValue('hunter2', 'password'), {
 		value: '<redacted>',
 		redacted: true,
+	});
+});
+
+test('redactValue removes embedded URL credentials and sensitive query values', t => {
+	const secret = 'synthetic-url-credential';
+	for (const url of [
+		`https://user:${secret}@example.test/v1?model=demo`,
+		`postgres://user:${secret}@db.test/database`,
+		`https://example.test/mcp?api_key=${secret}&api_key=second-secret&mode=demo`,
+		`https://example.test/v1?key=${secret}`,
+		`https://example.test/v1?access_token=${secret}`,
+		`https://example.test/v1?sig=${secret}`,
+		`https://user:${secret}@invalid host/`,
+	]) {
+		const result = redactValue(url, 'url');
+		t.true(result.redacted);
+		t.false(String(result.value).includes(secret));
+		t.false(String(result.value).includes('second-secret'));
+	}
+	const safe = 'https://example.test/v1?model=demo';
+	t.deepEqual(redactValue(safe, 'baseUrl'), {value: safe, redacted: false});
+});
+
+test('redactValue removes separate and equals-form secret CLI arguments', t => {
+	const args = ['-y', 'some-mcp', '--api-key', 'synthetic-arg-secret', '--token=synthetic-token', '--model', 'demo'];
+	t.deepEqual(redactValue(args, 'args'), {
+		value: ['-y', 'some-mcp', '--api-key', '<redacted>', '--token=<redacted>', '--model', 'demo'],
+		redacted: true,
+	});
+	t.is(args[3], 'synthetic-arg-secret', 'redaction must not mutate runtime config');
+	t.deepEqual(redactValue(['--api-key', '$API_KEY', '--token=${TOKEN}'], 'args'), {
+		value: ['--api-key', '$API_KEY', '--token=${TOKEN}'], redacted: false,
+	});
+});
+
+test('config diagnostics redact resolved MCP references and embedded secrets in every output mode', t => {
+	const secret = 'SYNTHETIC_DIAGNOSTIC_SECRET';
+	withFixture({
+		env: {NANOCODER_REDACTION_TEST: secret},
+		projectAgents: {nanocoder: {providers: [{name: 'demo', models: ['model'], baseUrl: 'https://example.test/v1?key=$NANOCODER_REDACTION_TEST'}]}},
+		projectMcp: {mcpServers: {
+			local: {command: 'some-mcp', args: ['--api-key', '$NANOCODER_REDACTION_TEST', `--token=${secret}`], env: {DATABASE_URL: `postgres://user:${secret}@db.test/db`, CUSTOM_VALUE: '$NANOCODER_REDACTION_TEST', LOG_LEVEL: 'debug'}},
+			remote: {transport: 'http', url: 'https://example.test/mcp?api_key=${NANOCODER_REDACTION_TEST}', headers: {'Ocp-Apim-Subscription-Key': '$NANOCODER_REDACTION_TEST', 'X-Custom': '$NANOCODER_REDACTION_TEST', Accept: 'application/json'}},
+		}},
+	}, () => {
+		const config = resolveEffectiveConfig();
+		for (const key of ['mcpServers.local', 'mcpServers.remote', 'nanocoder.providers.demo']) {
+			const found = entry(config, key);
+			t.true(found?.redacted);
+			t.false(JSON.stringify(found).includes(secret));
+		}
+		const local = entry(config, 'mcpServers.local')?.value as {env: Record<string, string>};
+		t.is(local.env.LOG_LEVEL, 'debug');
+		t.is(local.env.CUSTOM_VALUE, '<redacted>');
+		for (const command of ['show', 'list', 'diff'] as const) {
+			for (const args of [[], ['--json']]) {
+				const output = runConfigCli(command, args);
+				t.is(output.exitCode, 0);
+				t.false(output.output.includes(secret), `${command} ${args.join(' ')} must not expose secrets`);
+			}
+		}
 	});
 });
 
@@ -649,4 +805,132 @@ test('runConfigCli --json emits parseable output', t => {
 		t.is(threshold?.value, 80);
 		t.is(threshold?.layer, 'project');
 	});
+});
+
+test('config diff surfaces the keys that run shell commands or commit', t => {
+	// The whole point of `config diff` on a cloned repo is to see what the
+	// config files make nanocoder do — and the keys that run shell commands
+	// (hooks, formatters, sandbox) or create commits (autoCommit) were exactly
+	// the ones missing (#1692).
+	withFixture(
+		{
+			projectAgents: {
+				nanocoder: {
+					autoCommit: true,
+					formatters: [
+						{match: ['**/*.ts'], command: 'biome check --write "$FILE"'},
+					],
+					hooks: {'pre-tool-use': [{command: 'echo guard'}]},
+					sandbox: true,
+				},
+			},
+			globalAgents: {
+				nanocoder: {
+					formatters: [{match: ['**/*.go'], command: 'gofmt -w "$FILE"'}],
+				},
+			},
+		},
+		() => {
+			const diff = runConfigCli('diff');
+			t.is(diff.exitCode, 0);
+			t.regex(diff.output, /nanocoder\.autoCommit/);
+			t.regex(diff.output, /nanocoder\.sandbox/);
+			t.regex(diff.output, /nanocoder\.formatters/);
+			t.regex(diff.output, /nanocoder\.hooks\.pre-tool-use/);
+			t.regex(
+				diff.output,
+				/gofmt/,
+				'the formatter the project file discarded is reported as ignored',
+			);
+
+			const show = runConfigCli('show', ['nanocoder.hooks']);
+			t.is(show.exitCode, 0);
+			t.regex(show.output, /echo guard/);
+		},
+	);
+});
+
+test('every key the loader reads is shown by config show (schema drift)', t => {
+	// The block list in blockSpecs() is hand-written, so it silently falls
+	// behind AppConfig: `autoCommit`, `formatters`, `hooks`, `sandbox` and
+	// `lspServers` were all invisible to `config list` until #1692. Deriving
+	// the expected keys from the committed schema — the artefact that claims
+	// to describe every key the loader reads from agents.config.json — makes
+	// the next addition fail here first.
+	const schemaPath = fileURLToPath(
+		new URL('../../schemas/agents.config.schema.json', import.meta.url),
+	);
+	const schema = JSON.parse(readFileSync(schemaPath, 'utf-8')) as {
+		properties: {nanocoder: {$ref: string}};
+		definitions: Record<string, {properties: Record<string, unknown>}>;
+	};
+	const namespace = schema.properties.nanocoder.$ref.replace(
+		'#/definitions/',
+		'',
+	);
+	const schemaKeys = Object.keys(schema.definitions[namespace]?.properties ?? {});
+	t.true(schemaKeys.length > 0, 'the schema must advertise the nanocoder keys');
+
+	withFixture(
+		{
+			projectAgents: {
+				nanocoder: {
+					alwaysAllow: ['read_file'],
+					autoCommit: true,
+					autoCompact: {threshold: 80},
+					defaultMode: 'plan',
+					defaultProfile: 'fast',
+					disabledTools: ['web_search'],
+					firewall: {mode: 'strict'},
+					formatters: [{match: ['**/*.js'], command: 'echo formatted'}],
+					headless: {maxTurns: 50},
+					hooks: {'post-tool-use': [{command: 'echo hook'}]},
+					lspServers: [{name: 'ts', command: 'tsserver', languages: ['ts']}],
+					modeProviders: {plan: {provider: 'p', model: 'm'}},
+					nanocoderTools: {webSearch: {apiKey: 'test-key'}},
+					profiles: {fast: {provider: 'p', model: 'm'}},
+					providers: [{name: 'p', models: ['m']}],
+					retries: {maxEmptyTurns: 5},
+					sandbox: true,
+					systemPrompt: {mode: 'append', content: 'extra context'},
+					tune: {enabled: false},
+					verify: {trustLevel: 'comment-only'},
+				},
+			},
+			globalPreferences: {notifications: {enabled: true}},
+		},
+		() => {
+			const config = resolveEffectiveConfig();
+
+			for (const key of schemaKeys) {
+				t.true(
+					findEntries(config, `nanocoder.${key}`).length > 0,
+					`nanocoder.${key} is in schemas/agents.config.schema.json, but "config show nanocoder.${key}" finds nothing`,
+				);
+			}
+
+			// Presence alone is a weak check for a block the loader may leave
+			// undefined — the row would still exist as a `null` placeholder.
+			// Pin the two blocks #2088 added to the values this fixture wrote,
+			// so a spec wired to the wrong field, or one that skips
+			// `resolveFirewallConfig`, fails here too.
+			t.is(entry(config, 'nanocoder.firewall.mode')?.value, 'strict');
+			t.is(
+				entry(config, 'nanocoder.firewall.enabled')?.value,
+				true,
+				'derived from mode by resolveFirewallConfig',
+			);
+			t.is(entry(config, 'nanocoder.verify.trustLevel')?.value, 'comment-only');
+
+			// `notifications` is deliberately absent from the schema — it lives
+			// at the top level of nanocoder-preferences.json rather than under
+			// `nanocoder` in agents.config.json — but it is just as much a key
+			// the loader reads, so it must be findable under the name people
+			// reach for.
+			const notifications = findEntries(config, 'nanocoder.notifications');
+			t.is(notifications.length, 1);
+			t.is(notifications[0]?.key, 'preferences.notifications');
+			t.is((notifications[0]?.value as {enabled: boolean}).enabled, true);
+		},
+	);
 });

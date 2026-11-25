@@ -7,7 +7,7 @@ import {sessionManager} from '@/session/session-manager';
 import {deriveTitleFromFirstMessage} from '@/session/title-generator';
 import type {Message} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
-import {notifyWarning} from '@/utils/message-queue';
+import {notifyWarning} from '@/utils/message-queue-core';
 import {getShutdownManager} from '@/utils/shutdown';
 
 interface UseSessionAutosaveProps {

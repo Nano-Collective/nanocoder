@@ -22,7 +22,7 @@ import {
 import {
 	getKeyGeneratorSessionId,
 	setKeyGeneratorSessionId,
-} from '@/session/key-generator';
+} from '@/utils/key-generator';
 import {clearAppConfig} from '@/config/index';
 import {
 	addPendingHookContext,
@@ -33,7 +33,7 @@ import {resetPreferencesCache} from '@/config/preferences';
 import type {Session} from '@/session/session-manager';
 import {sessionManager} from '@/session/session-manager';
 import {readFileTool} from '@/tools/read-file';
-import {clearReadTracker} from '@/utils/read-tracker';
+import {clearReadTracker} from '@/tools/runtime/read-tracker';
 import {writeFileSync} from 'fs';
 import {commandRegistry} from '@/commands';
 import {lazyCommands} from '@/commands/lazy-registry';

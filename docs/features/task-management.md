@@ -59,7 +59,16 @@ Task state belongs to the session, not to your project directory.
 
 Plan mode also removes `write_tasks`, so the AI does not create or update tasks while planning; `/tasks` still works by hand. See [Development Modes](development-modes.md#plan-mode).
 
+## Tasks and Plan Graphs
+
+Tasks are session-scoped and flat — a checklist for the current conversation.
+Plan graphs are project-scoped and dependency-aware, and they persist across
+sessions. For work that outlives a session or must happen in a specific order,
+use a [persistent plan graph](persistent-plans.md); use tasks for the short
+checklist within one session.
+
 ## Related
 
-- [Development Modes](development-modes.md) - plan mode produces a plan artifact, and removes the task tool while planning
+- [Development Modes](development-modes.md) — plan mode produces a plan artifact alongside the task list, and removes the task tool while planning
+- [Persistent Plan Graphs](persistent-plans.md) — durable, dependency-aware plans and the `/plans` dashboard
 - [Session Management](session-management.md) — how sessions and their artifacts are stored and resumed

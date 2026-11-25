@@ -1,11 +1,14 @@
 import test from 'ava';
 import {
+	bindSessionContextLimit,
 	getModelAcceptsImages,
 	getModelContextLimit,
 	getModelPricing,
 	getSessionContextLimit,
+	getSessionContextOverride,
 	resetSessionContextLimit,
 	resolveModelContextLimit,
+	restoreSessionContextOverride,
 	setSessionContextLimit,
 } from './models-dev-client.js';
 
@@ -325,6 +328,98 @@ test('resetSessionContextLimit - is safe to call when already null', t => {
 	t.is(getSessionContextLimit(), null);
 });
 
+// ============================================================================
+// Session override is tied to the provider and model it was set for
+// ============================================================================
+
+test('getSessionContextLimit - scoped override applies only to its provider and model', t => {
+	setSessionContextLimit(8000, {provider: 'local', model: 'small'});
+
+	t.is(getSessionContextLimit({provider: 'local', model: 'small'}), 8000);
+	t.is(getSessionContextLimit({provider: 'local', model: 'large'}), null);
+	t.is(getSessionContextLimit({provider: 'cloud', model: 'small'}), null);
+});
+
+test('getSessionContextLimit - unscoped override applies to every model', t => {
+	setSessionContextLimit(8000);
+
+	t.is(getSessionContextLimit({provider: 'any', model: 'any'}), 8000);
+});
+
+test('getSessionContextLimit - without an active scope returns the stored limit', t => {
+	setSessionContextLimit(8000, {provider: 'local', model: 'small'});
+
+	t.is(getSessionContextLimit(), 8000);
+});
+
+test('resolveModelContextLimit - ignores a session override set for another model', async t => {
+	setSessionContextLimit(8000, {provider: 'local', model: 'small'});
+	const providerConfig = {
+		name: 'local',
+		type: 'openai',
+		models: ['small', 'large'],
+		contextWindows: {large: 200_000},
+		config: {},
+	};
+
+	const same = await resolveModelContextLimit('small', {providerConfig});
+	t.deepEqual(same, {limit: 8000, source: 'session'});
+
+	const other = await resolveModelContextLimit('large', {providerConfig});
+	t.deepEqual(other, {limit: 200_000, source: 'provider-model-config'});
+});
+
+test('resolveModelContextLimit - ignores a session override set for another provider', async t => {
+	setSessionContextLimit(8000, {provider: 'local', model: 'shared'});
+
+	const resolved = await resolveModelContextLimit('shared', {
+		providerConfig: {
+			name: 'cloud',
+			type: 'openai',
+			models: ['shared'],
+			contextWindow: 128_000,
+			config: {},
+		},
+	});
+
+	t.deepEqual(resolved, {limit: 128_000, source: 'provider-config'});
+});
+
+test('bindSessionContextLimit - ties an unscoped override to the starting model', t => {
+	setSessionContextLimit(8000);
+	bindSessionContextLimit({provider: 'local', model: 'small'});
+
+	t.is(getSessionContextLimit({provider: 'local', model: 'small'}), 8000);
+	t.is(getSessionContextLimit({provider: 'local', model: 'large'}), null);
+});
+
+test('bindSessionContextLimit - keeps an override that already has a scope', t => {
+	setSessionContextLimit(8000, {provider: 'local', model: 'small'});
+	bindSessionContextLimit({provider: 'cloud', model: 'big'});
+
+	t.is(getSessionContextLimit({provider: 'local', model: 'small'}), 8000);
+	t.is(getSessionContextLimit({provider: 'cloud', model: 'big'}), null);
+});
+
+test('bindSessionContextLimit - is a no-op without an override', t => {
+	bindSessionContextLimit({provider: 'local', model: 'small'});
+
+	t.is(getSessionContextOverride(), null);
+});
+
+test('restoreSessionContextOverride - restores the limit with its scope, or clears it', t => {
+	setSessionContextLimit(8000, {provider: 'local', model: 'small'});
+	const prior = getSessionContextOverride();
+
+	setSessionContextLimit(64_000);
+	restoreSessionContextOverride(prior);
+	t.is(getSessionContextLimit({provider: 'local', model: 'small'}), 8000);
+	t.is(getSessionContextLimit({provider: 'local', model: 'large'}), null);
+
+	restoreSessionContextOverride(null);
+	t.is(getSessionContextOverride(), null);
+});
+
 test('getModelContextLimit - session override takes priority over models.dev', async t => {
 	setSessionContextLimit(4096);
 	// llama3.1 normally resolves via models.dev, but session override wins
@@ -354,6 +449,34 @@ test('getModelContextLimit - env variable used for unknown models', async t => {
 	try {
 		const limit = await getModelContextLimit('unknown-model-12345');
 		t.is(limit, 32000);
+	} finally {
+		delete process.env.NANOCODER_CONTEXT_LIMIT;
+		if (saved !== undefined) {
+			process.env.NANOCODER_CONTEXT_LIMIT = saved;
+		}
+	}
+});
+
+test('getModelContextLimit - env variable accepts m suffix', async t => {
+	const saved = process.env.NANOCODER_CONTEXT_LIMIT;
+	process.env.NANOCODER_CONTEXT_LIMIT = '1.5m';
+	try {
+		const limit = await getModelContextLimit('unknown-model-12345');
+		t.is(limit, 1500000);
+	} finally {
+		delete process.env.NANOCODER_CONTEXT_LIMIT;
+		if (saved !== undefined) {
+			process.env.NANOCODER_CONTEXT_LIMIT = saved;
+		}
+	}
+});
+
+test('getModelContextLimit - env variable accepts k suffix', async t => {
+	const saved = process.env.NANOCODER_CONTEXT_LIMIT;
+	process.env.NANOCODER_CONTEXT_LIMIT = '128k';
+	try {
+		const limit = await getModelContextLimit('unknown-model-12345');
+		t.is(limit, 128000);
 	} finally {
 		delete process.env.NANOCODER_CONTEXT_LIMIT;
 		if (saved !== undefined) {
@@ -483,6 +606,19 @@ test('getModelPricing - returns null for empty string', async t => {
 test('getModelPricing - returns null for local Ollama model not on models.dev', async t => {
 	const pricing = await getModelPricing('llama3.2:3b');
 	t.is(pricing, null);
+});
+
+test('getModelPricing - does not price a local model by a partial name match', async t => {
+	// The fixture has Groq's llama3-70b-8192 but no `llama3`; a partial match
+	// would show a cost for a free local Ollama model.
+	const pricing = await getModelPricing('llama3');
+	t.is(pricing, null);
+});
+
+test('getModelPricing - matches a hosted id written in a different case', async t => {
+	const exact = await getModelPricing('gpt-4o');
+	t.truthy(exact);
+	t.deepEqual(await getModelPricing('GPT-4o'), exact);
 });
 
 test('getModelPricing - returns consistent pricing on repeated calls', async t => {

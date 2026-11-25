@@ -2,6 +2,7 @@ import {randomUUID} from 'node:crypto';
 import {
 	existsSync,
 	mkdirSync,
+	mkdtempSync,
 	readFileSync,
 	rmSync,
 	writeFileSync,
@@ -23,18 +24,20 @@ import {
 import {convertToModelMessages} from '@/ai-sdk-client/converters/message-converter';
 import {sessionManager} from '@/session/session-manager';
 import {registerSubagentRun} from '@/services/subagent-events';
-import {resolveAutoCompactSettings} from '@/utils/auto-compact';
+import {resolveAutoCompactSettings} from '@/conversation/compaction/auto-compact';
 import {getLogger} from '@/utils/logging';
 import {SemanticMemoryManager} from '@/memory/semantic-memory-manager';
+import {PlanStore} from '@/plans/storage';
 import {readFileTool} from '@/tools/read-file';
 import {ToolManager} from '@/tools/tool-manager';
 import type {Message} from '@/types/core';
+import {appendTurnContext} from '@/utils/turn-context';
 import {
 	clearReadTracker,
 	matchReadContent,
 	rememberReadContent,
 	runWithReadContentScope,
-} from '@/utils/read-tracker';
+} from '@/tools/runtime/read-tracker';
 
 console.log('\nacp-agent.spec.ts');
 
@@ -2087,6 +2090,46 @@ test.serial(
 );
 
 test.serial(
+	'AcpAgent - a save over an unreadable session file keeps the pin, createdAt and title from the index',
+	async t => {
+		const {agent} = createAgent();
+		await sessionManager.initialize();
+
+		const session = await agent.newSession({cwd: '/tmp'});
+		await agent.prompt({
+			sessionId: session.sessionId,
+			prompt: [{type: 'text', text: 'Hello!'}],
+		});
+		await agent.extMethod('renameSession', {
+			sessionId: session.sessionId,
+			title: 'Kept title',
+		});
+		await agent.extMethod('_nanocoder/pinSession', {
+			sessionId: session.sessionId,
+			pinned: true,
+		});
+		const {createdAt} = (await sessionManager.listSessions()).find(
+			s => s.id === session.sessionId,
+		)!;
+
+		writeFileSync(
+			join(sessionManager['sessionsDir'], `${session.sessionId}.json`),
+			'{"truncated":',
+		);
+		await agent.prompt({
+			sessionId: session.sessionId,
+			prompt: [{type: 'text', text: 'Follow-up message'}],
+		});
+
+		const persisted = await sessionManager.readSession(session.sessionId);
+		t.true(persisted!.pinned);
+		t.is(persisted!.createdAt, createdAt);
+		t.is(persisted!.title, 'Kept title');
+		t.true(persisted!.titleManuallySet);
+	},
+);
+
+test.serial(
 	'AcpAgent.extMethod - pinSession marks a session, session/list reports it, and it survives prompts and renames',
 	async t => {
 		const {agent} = createAgent();
@@ -2553,12 +2596,14 @@ test('AcpAgent.prompt - recalls relevant project memories scoped to the session 
 	});
 
 	const capturedSystemPrompts: string[] = [];
+	const capturedUserMessages: string[] = [];
 	const conn = createMockConn();
 	const initContext = createMockInitContext();
 	initContext.client = {
 		...initContext.client,
 		chat: async (messages: Array<{content: string}>) => {
 			capturedSystemPrompts.push(messages[0]?.content ?? '');
+			capturedUserMessages.push(messages.at(-1)?.content ?? '');
 			return {choices: [{message: {content: 'Test response'}}]};
 		},
 	} as any;
@@ -2574,9 +2619,66 @@ test('AcpAgent.prompt - recalls relevant project memories scoped to the session 
 		prompt: [{type: 'text', text: 'unrelated question about docs'}],
 	});
 
-	t.true(capturedSystemPrompts[0]?.includes('## Project Context'));
-	t.true(capturedSystemPrompts[0]?.includes('Auth uses Clerk'));
-	t.false(capturedSystemPrompts[1]?.includes('## Project Context'));
+	// The recall rides in the user turn, so the system prompt is byte-identical
+	// across turns and the cached prefix survives (#1574).
+	t.is(capturedSystemPrompts[0], capturedSystemPrompts[1]);
+	t.false(capturedSystemPrompts[0]?.includes('## Project Context'));
+	t.true(capturedUserMessages[0]?.includes('## Project Context'));
+	t.true(capturedUserMessages[0]?.includes('Auth uses Clerk'));
+	t.false(capturedUserMessages[1]?.includes('## Project Context'));
+});
+
+test('AcpAgent.prompt - injects the active plan graph from the session cwd', async t => {
+	const projectRoot = mkdtempSync(join(tmpdir(), 'nanocoder-acp-plan-'));
+	try {
+		const store = new PlanStore(projectRoot);
+		await store.createPlan({
+			title: 'Auth refactor',
+			nodes: [
+				{id: 'db', title: 'Set up database'},
+				{
+					id: 'api',
+					title: 'Build API',
+					dependsOn: ['db'],
+					agent: 'general',
+				},
+			],
+		});
+
+		const capturedSystemPrompts: string[] = [];
+		const conn = createMockConn();
+		const initContext = createMockInitContext();
+		initContext.client = {
+			...initContext.client,
+			chat: async (messages: Array<{content: string}>) => {
+				capturedSystemPrompts.push(messages[0]?.content ?? '');
+				return {choices: [{message: {content: 'Test response'}}]};
+			},
+		} as any;
+		const agent = new AcpAgent(initContext, conn);
+		const session = await agent.newSession({cwd: projectRoot});
+
+		try {
+			await agent.prompt({
+				sessionId: session.sessionId,
+				prompt: [{type: 'text', text: 'continue the plan'}],
+			});
+			await agent.prompt({
+				sessionId: session.sessionId,
+				prompt: [{type: 'text', text: 'keep going'}],
+			});
+		} finally {
+			await agent.deleteSession({sessionId: session.sessionId});
+		}
+
+		t.true(capturedSystemPrompts[0]?.includes('ACTIVE PLAN (persisted)'));
+		t.true(capturedSystemPrompts[0]?.includes('auth-refactor'));
+		t.true(capturedSystemPrompts[0]?.includes('db'));
+		// The graph is re-read on every turn; the first prompt does not consume it.
+		t.true(capturedSystemPrompts[1]?.includes('ACTIVE PLAN (persisted)'));
+	} finally {
+		rmSync(projectRoot, {recursive: true, force: true});
+	}
 });
 
 test('AcpAgent.extMethod - retryTurn truncates the retried turn from session messages', async t => {
@@ -2634,6 +2736,34 @@ test('AcpAgent.extMethod - retryTurn uses an exact prompt match and never picks 
 	t.true(result.ok);
 	t.is(session.messages.length, 2);
 	t.is(session.messages[1].content, 'r1');
+});
+
+test('AcpAgent.extMethod - retryTurn matches a turn carrying per-turn context', async t => {
+	const {agent} = createAgent();
+	const created = await agent.newSession({cwd: '/tmp', mcpServers: []});
+	const session = (agent as any).sessions.get(created.sessionId);
+	session.messages = [
+		{
+			role: 'user',
+			content: appendTurnContext('first prompt', [
+				'## Project Context\n\n```\n- Auth uses Clerk.\n```',
+			]),
+		},
+		{role: 'assistant', content: 'r1'},
+		{role: 'user', content: appendTurnContext('second prompt', [])},
+		{role: 'assistant', content: 'r2'},
+	];
+
+	// The client only ever saw "first prompt", so retrying it must truncate at
+	// that turn. Without stripping the context block the exact match misses and
+	// the fallback retries the LAST user turn, losing the wrong messages.
+	const result = await agent.extMethod('retryTurn', {
+		sessionId: created.sessionId,
+		promptText: 'first prompt',
+	});
+
+	t.true(result.ok);
+	t.is(session.messages.length, 0);
 });
 
 test('AcpAgent.extMethod - retryTurn drops timeline checkpoints from the retried turn', async t => {

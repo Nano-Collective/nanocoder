@@ -1,4 +1,5 @@
 import {Box, Text} from 'ink';
+import {errorMsg, successMsg} from '@/components/message-factory';
 import {
 	getFirewallConfig,
 	resetFirewallConfig,
@@ -7,7 +8,6 @@ import {
 import {useTheme} from '@/hooks/useTheme';
 import type {FirewallConfig, FirewallMode} from '@/types/firewall';
 import type {Colors, Command} from '@/types/index';
-import {errorMsg, successMsg} from '@/utils/message-factory';
 
 const FIREWALL_SUBCOMMANDS =
 	'status, enable, disable, mode, toggle, protect, unprotect, reset';

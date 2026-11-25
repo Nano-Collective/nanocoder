@@ -4,7 +4,7 @@ import {memo, useRef} from 'react';
 import {useNonInteractiveRender} from '@/hooks/useNonInteractiveRender';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
-import {wrapWithTrimmedContinuations} from '@/utils/text-wrapping';
+import {wrapWithTrimmedContinuations} from '@/terminal/text-wrapping';
 import {estimateTokens} from '@/utils/token-calculator';
 import {AssistantMessageBox} from './assistant-message';
 
@@ -100,7 +100,7 @@ export default memo(function StreamingMessage({
 
 	return (
 		<>
-			<Box marginBottom={1} marginTop={1}>
+			<Box marginTop={1}>
 				<Text color={colors.info} bold>
 					<Spinner type="dots" /> {model}
 				</Text>

@@ -1,4 +1,4 @@
-import {mkdirSync, mkdtempSync, writeFileSync} from 'node:fs';
+import {mkdirSync, mkdtempSync, readFileSync, writeFileSync} from 'node:fs';
 import {rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
@@ -50,6 +50,65 @@ process.stdin.on('data', chunk => {
 process.stdin.on('end', () => process.exit(0));
 `;
 
+// A server that is stuck: it ignores `exit` and stdin closing and stays alive
+// until something kills it. It writes its pid next to itself so a test can
+// check that it is gone. With FAIL_INITIALIZE set it refuses `initialize`.
+const hungServer = String.raw`
+require('node:fs').writeFileSync(
+    require('node:path').join(__dirname, 'hung-server.pid'),
+    String(process.pid),
+);
+setInterval(() => {}, 1000);
+
+let buffer = Buffer.alloc(0);
+function send(message) {
+    const body = Buffer.from(JSON.stringify({jsonrpc: '2.0', ...message}));
+    process.stdout.write('Content-Length: ' + body.length + '\r\n\r\n');
+    process.stdout.write(body);
+}
+process.stdin.on('data', chunk => {
+    buffer = Buffer.concat([buffer, chunk]);
+    while (true) {
+        const headerEnd = buffer.indexOf('\r\n\r\n');
+        if (headerEnd < 0) return;
+        const match = /Content-Length:\s*(\d+)/i.exec(
+            buffer.subarray(0, headerEnd).toString(),
+        );
+        if (!match) return;
+        const start = headerEnd + 4;
+        const end = start + Number(match[1]);
+        if (buffer.length < end) return;
+        const message = JSON.parse(buffer.subarray(start, end).toString());
+        buffer = buffer.subarray(end);
+        if (message.method === 'initialize' && process.env.FAIL_INITIALIZE) {
+            send({id: message.id, error: {code: -32603, message: 'refused'}});
+        } else if (message.method === 'initialize') {
+            send({id: message.id, result: {capabilities: {}}});
+        } else if (message.method === 'shutdown') {
+            send({id: message.id, result: null});
+        }
+    }
+});
+`;
+
+function isRunning(pid: number): boolean {
+    try {
+        process.kill(pid, 0);
+        return true;
+    } catch (error) {
+        return (error as NodeJS.ErrnoException).code === 'EPERM';
+    }
+}
+
+async function exitsWithin(pid: number, ms: number): Promise<boolean> {
+    const deadline = Date.now() + ms;
+    while (isRunning(pid)) {
+        if (Date.now() > deadline) return false;
+        await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    return true;
+}
+
 function createFixture(onPath: boolean) {
     const previousCwd = process.cwd();
     const previousPath = process.env.PATH;
@@ -95,7 +154,7 @@ windowsTest('discovery verifies a .cmd language server on PATH', async t => {
     const fixture = createFixture(true);
     try {
         fixture.writeShim('typescript-language-server');
-        const status = getKnownServersStatus().find(
+        const status = (await getKnownServersStatus()).find(
             server => server.name === 'typescript-language-server',
         );
         t.true(status?.available);
@@ -130,7 +189,7 @@ windowsTest('discovery rejects a .cmd server whose version check fails', async t
     try {
         fixture.writeShim('typescript-language-server', '@echo off\r\nexit /b 1\r\n');
         t.true(
-            getKnownServersStatus().find(s => s.name === 'typescript-language-server')
+            (await getKnownServersStatus()).find(s => s.name === 'typescript-language-server')
                 ?.available,
         );
         const servers = await discoverLanguageServers(fixture.root);
@@ -145,7 +204,7 @@ windowsTest('Windows availability ignores a local POSIX shim without .cmd', asyn
     try {
         writeFileSync(join(fixture.bin, 'typescript-language-server'), '#!/bin/sh\nexit 0\n');
         t.false(
-            getKnownServersStatus().find(s => s.name === 'typescript-language-server')
+            (await getKnownServersStatus()).find(s => s.name === 'typescript-language-server')
                 ?.available,
         );
     } finally {
@@ -188,6 +247,65 @@ windowsTest('LSPClient initializes and shuts down through a .cmd shim', async t 
         t.false(client.isReady());
     } finally {
         await client.stop();
+        await fixture.cleanup();
+    }
+});
+
+function hungClient(fixture: ReturnType<typeof createFixture>, env?: Record<string, string>) {
+    writeFileSync(join(fixture.root, 'hung-server.cjs'), hungServer);
+    const client = new LSPClient({
+        name: 'hung-windows-server',
+        command: fixture.writeShim(
+            'hung-language-server',
+            `@echo off\r\n"${process.execPath}" "%~dp0..\\..\\hung-server.cjs" %*\r\n`,
+        ),
+        args: ['--stdio'],
+        languages: ['ts'],
+        rootUri: pathToFileURL(fixture.root).href,
+        env,
+    });
+    client.on('error', () => {});
+    const pid = () => Number(readFileSync(join(fixture.root, 'hung-server.pid'), 'utf8'));
+    return {client, pid};
+}
+
+windowsTest('LSPClient stop ends a server behind a .cmd shim that ignores exit', async t => {
+    t.timeout(65000);
+    const fixture = createFixture(false);
+    const {client, pid} = hungClient(fixture);
+    let serverPid: number | undefined;
+
+    try {
+        await client.start();
+        serverPid = pid();
+        await client.stop();
+        t.true(
+            await exitsWithin(serverPid, 5000),
+            `server pid ${serverPid} is still running after stop()`,
+        );
+    } finally {
+        await client.stop();
+        if (serverPid !== undefined && isRunning(serverPid)) process.kill(serverPid);
+        await fixture.cleanup();
+    }
+});
+
+windowsTest('LSPClient ends a server behind a .cmd shim that refuses initialize', async t => {
+    t.timeout(65000);
+    const fixture = createFixture(false);
+    const {client, pid} = hungClient(fixture, {FAIL_INITIALIZE: '1'});
+    let serverPid: number | undefined;
+
+    try {
+        await t.throwsAsync(client.start());
+        serverPid = pid();
+        t.true(
+            await exitsWithin(serverPid, 5000),
+            `server pid ${serverPid} is still running after a failed start()`,
+        );
+    } finally {
+        await client.stop();
+        if (serverPid !== undefined && isRunning(serverPid)) process.kill(serverPid);
         await fixture.cleanup();
     }
 });

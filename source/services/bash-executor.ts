@@ -7,7 +7,9 @@ import {
 	readdirSync,
 	readFileSync,
 	rmSync,
+	statSync,
 	unlinkSync,
+	writeFileSync,
 } from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
@@ -15,12 +17,13 @@ import {platform} from 'node:process';
 
 import {getAppConfig} from '@/config/index';
 import {
+	BASH_BACKGROUND_MAX_RETAINED_JOBS,
 	BASH_OUTPUT_PREVIEW_LENGTH,
 	INTERVAL_BASH_PROGRESS_MS,
 	TIMEOUT_BASH_DEFAULT_MS,
 } from '@/constants';
 import {signalProcessTree} from '@/utils/process-tree';
-import {shellArgs} from '@/utils/shell-args';
+import {isWindowsCmd, shellArgs} from '@/utils/shell-args';
 import {getShutdownManager} from '@/utils/shutdown';
 import {
 	makeStreamCollector,
@@ -42,6 +45,54 @@ import {
 } from './session-cwd.js';
 
 const isWindows = platform === 'win32';
+
+/**
+ * The applied timeout as the model was told to ask for it: in seconds. A
+ * sub-second limit keeps its precision (`0.5 seconds`) rather than rounding
+ * to a whole second that was never applied.
+ */
+function formatTimeoutSeconds(ms: number): number {
+	return Number((ms / 1000).toFixed(3));
+}
+
+/** Best-effort removal of a scratch file created for one execution. */
+function removeIfExists(file: string | undefined): void {
+	if (!file) return;
+	try {
+		if (existsSync(file)) unlinkSync(file);
+	} catch {
+		// best-effort cleanup
+	}
+}
+
+/** Only a real, existing directory is safe to pin as the session cwd. */
+function isDirectory(dir: string): boolean {
+	try {
+		return existsSync(dir) && statSync(dir).isDirectory();
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * cmd.exe stops at a newline and expands `%VAR%` once for the whole command
+ * line, so the POSIX `pwd && exit $?` epilogue cannot be appended inline. A
+ * fixed batch file invoked with `call` runs in the same shell: it sees the
+ * command's real ERRORLEVEL, records the final directory, and returns that
+ * same exit code. The user's command itself stays byte-for-byte intact.
+ *
+ * `cd` runs through `cmd /u` so the redirect is UTF-16LE. A plain `cd > file`
+ * writes in the console's OEM code page, which mangles non-ASCII directories
+ * (e.g. C:\Users\José) before Node reads the capture file.
+ */
+function writeWindowsCwdEpilogue(executionId: string): string {
+	const file = join(tmpdir(), `nanocoder-cwd-epilogue-${executionId}.cmd`);
+	writeFileSync(
+		file,
+		'@echo off\r\nset __nc_ec=%ERRORLEVEL%\r\ncmd /d /u /c cd > "%NC_CWD_FILE%"\r\nexit /b %__nc_ec%\r\n',
+	);
+	return file;
+}
 
 /**
  * On Unix, probe the process group rather than the leader. Every command runs
@@ -150,6 +201,32 @@ export interface BashExecutionState {
 	error: string | null;
 }
 
+/**
+ * One read from a background job. `output` and `stderr` are only the text
+ * produced since the previous read, so a long-running server does not resend
+ * its whole log on every `bash_output` call.
+ */
+export interface BashJobOutput {
+	jobId: string;
+	command: string;
+	output: string;
+	stderr: string;
+	isComplete: boolean;
+	exitCode: number | null;
+	error: string | null;
+}
+
+interface BackgroundJob {
+	state: BashExecutionState;
+	/** Absent when the spawn was refused before a process existed. */
+	process?: ChildProcess;
+	promise: Promise<BashExecutionState>;
+	/** Character offsets already returned by readJobOutput(). */
+	readStdout: number;
+	readStderr: number;
+	sessionId?: string;
+}
+
 interface ExecutionEntry {
 	state: BashExecutionState;
 	process: ChildProcess;
@@ -159,6 +236,7 @@ interface ExecutionEntry {
 	signal?: AbortSignal;
 	abortListener?: () => void;
 	cwdCaptureFile?: string;
+	windowsCwdEpilogue?: string;
 	jailTmp?: string;
 	cleanupJailTmp?: () => void;
 	releaseProtected?: () => void;
@@ -166,6 +244,10 @@ interface ExecutionEntry {
 
 export class BashExecutor extends EventEmitter {
 	private executions = new Map<string, ExecutionEntry>();
+	// Background jobs. A running job is also in `executions`, so stopAll() and
+	// killAll() reach it; completed jobs stay here until their output is read
+	// or the retained-job cap drops them.
+	private jobs = new Map<string, BackgroundJob>();
 	// Process groups that outlive their execution entry: a cancelled command
 	// still being stopped, and jobs a finished command left behind (`cmd &`).
 	// stopAll() and killAll() reach these too.
@@ -178,12 +260,24 @@ export class BashExecutor extends EventEmitter {
 
 	execute(
 		command: string,
-		options?: {timeoutMs?: number; signal?: AbortSignal},
+		options?: {
+			timeoutMs?: number;
+			signal?: AbortSignal;
+			/**
+			 * Keep the command running after the tool returns. No timeout is
+			 * applied, the turn's AbortSignal is ignored, and the job is tracked
+			 * until it exits or is killed so `bash_output`/`kill_bash` can reach it.
+			 */
+			background?: boolean;
+			/** Session that owns the job, so closing the session can stop it. */
+			sessionId?: string;
+		},
 	): {
 		executionId: string;
 		promise: Promise<BashExecutionState>;
 	} {
 		const executionId = randomUUID();
+		const background = options?.background === true;
 
 		const state: BashExecutionState = {
 			executionId,
@@ -210,16 +304,39 @@ export class BashExecutor extends EventEmitter {
 		if (sandbox && !isWindows) {
 			jailTmp = resolveJailRoot(mkdtempSync(join(tmpdir(), 'nc-sbx-')));
 		}
-		const cwdCaptureFile = isWindows
-			? undefined
-			: join(jailTmp ?? tmpdir(), `nanocoder-cwd-${executionId}`);
+
+		// The Windows shell is cmd.exe unless a non-standard ComSpec is set.
+		// Only cmd can run the batch epilogue; other shells keep the old
+		// behaviour (no capture) rather than breaking their command syntax.
+		const windowsShell = isWindows
+			? process.env.ComSpec || 'cmd.exe'
+			: undefined;
+		const captureCwd = windowsShell === undefined || isWindowsCmd(windowsShell);
+		let windowsCwdEpilogue = '';
+		if (windowsShell && captureCwd) {
+			try {
+				windowsCwdEpilogue = writeWindowsCwdEpilogue(executionId);
+			} catch {
+				// Best-effort: without the wrapper the cwd stays where it was.
+			}
+		}
+		const cwdCaptureFile =
+			captureCwd && (!isWindows || windowsCwdEpilogue)
+				? join(jailTmp ?? tmpdir(), `nanocoder-cwd-${executionId}`)
+				: undefined;
+		// On Windows the epilogue is appended with `& call`, which leaves the
+		// user's command byte-for-byte intact. A command with an unbalanced
+		// quote (e.g. `echo "abc`) swallows that tail and echoes the temp path;
+		// rare and harmless, so we don't parse the command to prevent it.
 		const spawnCommand =
 			cwdCaptureFile === undefined
 				? command
-				: // Blank line before the epilogue: a command ending in a trailing
-					// backslash would otherwise line-continue into `__nc_ec=$?`.
-					// Capture path is $NC_CWD_FILE so positional args stay empty.
-					`${command}\n\n__nc_ec=$?\ncommand pwd -P > "$NC_CWD_FILE" 2>/dev/null\nexit $__nc_ec`;
+				: isWindows
+					? `${command} & call "${windowsCwdEpilogue}"`
+					: // Blank line before the epilogue: a command ending in a trailing
+						// backslash would otherwise line-continue into `__nc_ec=$?`.
+						// Capture path is $NC_CWD_FILE so positional args stay empty.
+						`${command}\n\n__nc_ec=$?\ncommand pwd -P > "$NC_CWD_FILE" 2>/dev/null\nexit $__nc_ec`;
 		const childEnv = {
 			...bashChildEnv(process.env, getAppConfig(), sandbox),
 			...(cwdCaptureFile ? {NC_CWD_FILE: cwdCaptureFile} : {}),
@@ -264,19 +381,31 @@ export class BashExecutor extends EventEmitter {
 				releaseProtected?.();
 				state.isComplete = true;
 				state.error = planned.error;
+				if (background) {
+					this.jobs.set(executionId, {
+						state,
+						promise: Promise.resolve({...state}),
+						readStdout: 0,
+						readStderr: 0,
+						sessionId: options?.sessionId,
+					});
+					this.pruneJobs();
+				}
 				this.emit('start', {...state});
 				this.emit('complete', {...state});
 				return {executionId, promise: Promise.resolve({...state})};
 			}
 			proc = spawnPlanned(planned, {cwd, env: childEnv});
-		} else if (cwdCaptureFile === undefined) {
+		} else if (isWindows) {
 			// cmd.exe parses the command line itself; without verbatim arguments
 			// Node escapes each inner `"` as `\"`, which cmd does not understand.
-			const shell = process.env.ComSpec || 'cmd.exe';
-			proc = spawn(shell, shellArgs(shell, command), {
+			const shell = windowsShell ?? 'cmd.exe';
+			proc = spawn(shell, shellArgs(shell, spawnCommand), {
 				cwd,
 				env: childEnv,
 				windowsVerbatimArguments: true,
+				// Close stdin so commands that wait for input get EOF.
+				stdio: ['ignore', 'pipe', 'pipe'],
 			});
 		} else {
 			// codeql[js/shell-command-built-from-environment] -c script uses $NC_CWD_FILE; path is env, not argv
@@ -285,6 +414,9 @@ export class BashExecutor extends EventEmitter {
 				cwd,
 				detached: true,
 				env: childEnv,
+				// Close stdin so commands that wait for input get EOF and fail fast
+				// instead of hanging until the timeout.
+				stdio: ['ignore', 'pipe', 'pipe'],
 			});
 		}
 
@@ -293,28 +425,62 @@ export class BashExecutor extends EventEmitter {
 			if (!cwdCaptureFile) return;
 			try {
 				if (existsSync(cwdCaptureFile)) {
-					const captured = readFileSync(cwdCaptureFile, 'utf8').trim();
-					// Concurrent bash runs race here; last close wins, which is fine
-					// since the session cwd is a single shared value either way.
-					if (captured) setSessionCwd(captured);
+					const captured = readFileSync(
+						cwdCaptureFile,
+						isWindows ? 'utf16le' : 'utf8',
+					)
+						.trim()
+						.replace(/^\uFEFF/, '');
+					// A garbled or since-deleted path must never move the session
+					// cwd: file tools resolve relative paths against it as-is.
+					if (captured && isDirectory(captured)) {
+						// Concurrent bash runs race here; last close wins, which is
+						// fine since the session cwd is one shared value either way.
+						setSessionCwd(captured);
+					}
 				}
 			} catch {
 				// Non-fatal: leave the session cwd where it was.
 			} finally {
-				try {
-					if (existsSync(cwdCaptureFile)) unlinkSync(cwdCaptureFile);
-				} catch {
-					// best-effort cleanup
-				}
+				removeIfExists(cwdCaptureFile);
+				removeIfExists(windowsCwdEpilogue);
 			}
 		};
 
-		const stdoutCollector = makeStreamCollector(text => {
-			state.fullOutput += text;
-		}, STDOUT_TRUNCATION_NOTICE);
-		const stderrCollector = makeStreamCollector(text => {
-			state.stderr += text;
-		}, STDERR_TRUNCATION_NOTICE);
+		const backgroundKeepLatest = background
+			? {
+					keepLatest: true,
+					onTrim: (droppedChars: number) => {
+						state.fullOutput = state.fullOutput.slice(droppedChars);
+						const job = this.jobs.get(executionId);
+						if (job) job.readStdout -= droppedChars;
+					},
+				}
+			: undefined;
+		const backgroundKeepLatestStderr = background
+			? {
+					keepLatest: true,
+					onTrim: (droppedChars: number) => {
+						state.stderr = state.stderr.slice(droppedChars);
+						const job = this.jobs.get(executionId);
+						if (job) job.readStderr -= droppedChars;
+					},
+				}
+			: undefined;
+		const stdoutCollector = makeStreamCollector(
+			text => {
+				state.fullOutput += text;
+			},
+			STDOUT_TRUNCATION_NOTICE,
+			backgroundKeepLatest,
+		);
+		const stderrCollector = makeStreamCollector(
+			text => {
+				state.stderr += text;
+			},
+			STDERR_TRUNCATION_NOTICE,
+			backgroundKeepLatestStderr,
+		);
 
 		// Both streams are finished (or past their drain grace period) when the
 		// command completes, so release whatever the decoders were holding back
@@ -360,30 +526,38 @@ export class BashExecutor extends EventEmitter {
 				process: proc,
 				intervalId,
 				resolve,
-				signal: options?.signal,
+				// A background job is meant to outlive the turn that started it,
+				// so the turn's AbortSignal must not tear it down.
+				signal: background ? undefined : options?.signal,
 				cwdCaptureFile,
+				windowsCwdEpilogue,
 				jailTmp,
 				cleanupJailTmp,
 				releaseProtected,
 			};
 
 			const ms = options?.timeoutMs ?? TIMEOUT_BASH_DEFAULT_MS;
-			if (ms > 0) {
+			// Background jobs have no timeout: a dev server or watcher is
+			// supposed to keep running until kill_bash or shutdown.
+			if (!background && ms > 0) {
 				entry.timeoutId = setTimeout(() => {
-					this.cancel(executionId, `Command timed out after ${ms}ms`);
+					this.cancel(
+						executionId,
+						`Command timed out after ${formatTimeoutSeconds(ms)} seconds`,
+					);
 				}, ms);
 				entry.timeoutId.unref();
 			}
 
-			if (options?.signal) {
+			if (entry.signal) {
 				entry.abortListener = () => {
 					this.cancel(executionId, 'Cancelled via AbortSignal');
 				};
 
-				options.signal.addEventListener('abort', entry.abortListener, {
+				entry.signal.addEventListener('abort', entry.abortListener, {
 					once: true,
 				});
-				if (options.signal.aborted) {
+				if (entry.signal.aborted) {
 					process.nextTick(entry.abortListener);
 				}
 			}
@@ -421,6 +595,7 @@ export class BashExecutor extends EventEmitter {
 				state.exitCode = code;
 				this.emit('complete', {...state});
 				this.executions.delete(executionId);
+				this.pruneJobs();
 				resolve({...state});
 			};
 
@@ -468,9 +643,22 @@ export class BashExecutor extends EventEmitter {
 				state.error = error.message;
 				this.emit('complete', {...state});
 				this.executions.delete(executionId);
+				this.pruneJobs();
 				resolve({...state}); // Resolve with error state instead of rejecting
 			});
 		});
+
+		if (background) {
+			this.jobs.set(executionId, {
+				state,
+				process: proc,
+				promise,
+				readStdout: 0,
+				readStderr: 0,
+				sessionId: options?.sessionId,
+			});
+			this.pruneJobs();
+		}
 
 		// Emit initial state
 		this.emit('start', {...state});
@@ -499,16 +687,9 @@ export class BashExecutor extends EventEmitter {
 		// as stopped before then lets nanocoder move on, or exit, around it.
 		this.executions.delete(executionId);
 		void this.stop(execution.process).then(() => {
-			// Drop the cwd temp file; a killed command must not move the session cwd.
-			if (execution.cwdCaptureFile) {
-				try {
-					if (existsSync(execution.cwdCaptureFile)) {
-						unlinkSync(execution.cwdCaptureFile);
-					}
-				} catch {
-					// best-effort cleanup
-				}
-			}
+			// Drop the cwd temp files; a killed command must not move the session cwd.
+			removeIfExists(execution.cwdCaptureFile);
+			removeIfExists(execution.windowsCwdEpilogue);
 			execution.cleanupJailTmp?.();
 			execution.releaseProtected?.();
 			execution.state.isComplete = true;
@@ -517,8 +698,77 @@ export class BashExecutor extends EventEmitter {
 
 			// Resolve the promise with the cancelled state
 			execution.resolve({...execution.state});
+			this.pruneJobs();
 		});
 		return true;
+	}
+
+	/**
+	 * Read the output a background job has produced since the previous read.
+	 * The cursor advances, so a second call only returns new text. Returns
+	 * undefined for an unknown or already-pruned job.
+	 */
+	readJobOutput(jobId: string): BashJobOutput | undefined {
+		const job = this.jobs.get(jobId);
+		if (!job) return undefined;
+		const {state} = job;
+		const output = state.fullOutput.slice(job.readStdout);
+		const stderr = state.stderr.slice(job.readStderr);
+		job.readStdout = state.fullOutput.length;
+		job.readStderr = state.stderr.length;
+		return {
+			jobId,
+			command: state.command,
+			output,
+			stderr,
+			isComplete: state.isComplete,
+			exitCode: state.exitCode,
+			error: state.error,
+		};
+	}
+
+	/**
+	 * Stop a background job and wait until its process group is gone. The job
+	 * record is kept so a final `bash_output` still returns what it printed.
+	 */
+	async killJob(jobId: string): Promise<BashJobOutput | undefined> {
+		const job = this.jobs.get(jobId);
+		if (!job) return undefined;
+
+		if (!job.state.isComplete) {
+			const cancelled = this.cancel(jobId, 'Killed by user');
+			if (cancelled) await job.promise;
+		}
+
+		return {
+			jobId,
+			command: job.state.command,
+			output: '',
+			stderr: '',
+			isComplete: job.state.isComplete,
+			exitCode: job.state.exitCode,
+			error: job.state.error,
+		};
+	}
+
+	/** Stop every background job owned by a session, e.g. when it closes. */
+	async stopSessionJobs(sessionId: string): Promise<void> {
+		const owned = [...this.jobs.entries()]
+			.filter(([, job]) => job.sessionId === sessionId)
+			.map(([id]) => id);
+		await Promise.all(owned.map(id => this.killJob(id)));
+	}
+
+	/**
+	 * Drop the oldest completed jobs once the retained-job cap is exceeded.
+	 * Running jobs are never dropped; they are still in `executions`.
+	 */
+	private pruneJobs(): void {
+		if (this.jobs.size <= BASH_BACKGROUND_MAX_RETAINED_JOBS) return;
+		for (const [id, job] of this.jobs) {
+			if (this.jobs.size <= BASH_BACKGROUND_MAX_RETAINED_JOBS) break;
+			if (job.state.isComplete) this.jobs.delete(id);
+		}
 	}
 
 	/**
@@ -553,7 +803,11 @@ export class BashExecutor extends EventEmitter {
 		for (const proc of procs) {
 			if (isGroupAlive(proc)) signalGroups(proc, 'SIGKILL');
 		}
-		for (const entry of this.executions.values()) entry.releaseProtected?.();
+		for (const entry of this.executions.values()) {
+			entry.releaseProtected?.();
+			removeIfExists(entry.cwdCaptureFile);
+			removeIfExists(entry.windowsCwdEpilogue);
+		}
 		for (const cleanup of this.leftoverCleanups.values()) cleanup();
 		this.leftoverCleanups.clear();
 	}
@@ -668,11 +922,25 @@ export class BashExecutor extends EventEmitter {
 
 	getState(executionId: string): BashExecutionState | undefined {
 		const execution = this.executions.get(executionId);
-		return execution ? {...execution.state} : undefined;
+		if (execution) return {...execution.state};
+		// A completed background job is no longer an active execution, but its
+		// final state is still worth showing.
+		const job = this.jobs.get(executionId);
+		return job ? {...job.state} : undefined;
 	}
 
 	hasActiveExecutions(): boolean {
 		return this.executions.size > 0;
+	}
+
+	/**
+	 * Whether the execution is a background job. Background jobs stay in the
+	 * active-execution map while running (so the shutdown machinery can reach
+	 * them), but the TUI's Escape handler must not cancel them: they are meant
+	 * to outlive the turn that started them.
+	 */
+	isBackgroundJob(executionId: string): boolean {
+		return this.jobs.has(executionId);
 	}
 
 	getActiveExecutionIds(): string[] {

@@ -1,14 +1,14 @@
 import {useCallback, useEffect, useState} from 'react';
 import {useUIStateContext} from '@/hooks/useUIState';
-import {getToolManager} from '@/message-handler';
-import type {InputState} from '@/types/hooks';
 import {
 	getCurrentFileMention,
 	getFileCompletions,
-} from '@/utils/file-autocomplete';
-import {handleFileMention} from '@/utils/file-mention-handler';
+} from '@/input/file-autocomplete';
+import {handleFileMention} from '@/input/file-mention-handler';
+import {handleResourceMention} from '@/input/resource-mention-handler';
+import {getToolManager} from '@/message-handler';
+import type {InputState} from '@/types/hooks';
 import {fuzzyScoreFilePath} from '@/utils/fuzzy-matching';
-import {handleResourceMention} from '@/utils/resource-mention-handler';
 
 export interface MentionCompletion {
 	path: string;

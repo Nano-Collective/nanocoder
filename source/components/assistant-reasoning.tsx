@@ -4,8 +4,8 @@ import {useNonInteractiveRender} from '@/hooks/useNonInteractiveRender';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {Colors, parseMarkdown} from '@/markdown-parser/index';
+import {wrapWithTrimmedContinuations} from '@/terminal/text-wrapping';
 import type {AssistantReasoningProps} from '@/types/index';
-import {wrapWithTrimmedContinuations} from '@/utils/text-wrapping';
 import {estimateTokens} from '@/utils/token-calculator';
 
 // Indent applied to the expanded body so the "⚙ Thought" header acts as a

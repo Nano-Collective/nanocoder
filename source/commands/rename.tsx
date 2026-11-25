@@ -1,6 +1,6 @@
+import {errorMsg, successMsg} from '@/components/message-factory';
 import {MAX_SESSION_NAME_LENGTH} from '@/constants';
 import type {StatefulCommand} from '@/types/index';
-import {errorMsg, successMsg} from '@/utils/message-factory';
 
 export const renameCommand: StatefulCommand = {
 	name: 'rename',

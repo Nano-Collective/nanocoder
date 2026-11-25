@@ -16,7 +16,8 @@ import {getColors} from '@/config/index';
 import {getConfigPath} from '@/config/paths';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
 import {formatError} from '@/utils/error-formatter';
-import {notifyError, notifyInfo} from '@/utils/message-queue';
+import {notifyError, notifyInfo} from '@/utils/message-queue-core';
+import {stripUtf8Bom} from '@/utils/strip-utf8-bom';
 import {type ConfigLocation, LocationStep} from './steps/location-step';
 
 export type BaseWizardStep =
@@ -109,7 +110,7 @@ export function BaseConfigWizard<T>({
 			try {
 				if (existsSync(path)) {
 					try {
-						const content = readFileSync(path, 'utf-8');
+						const content = stripUtf8Bom(readFileSync(path, 'utf-8'));
 						const raw = JSON.parse(content) as unknown;
 						setItems(parseConfig(raw));
 						setConfigCorrupted(false);
@@ -226,7 +227,9 @@ export function BaseConfigWizard<T>({
 			if (result.status === 0) {
 				if (existsSync(configPath)) {
 					try {
-						const editedContent = readFileSync(configPath, 'utf-8');
+						const editedContent = stripUtf8Bom(
+							readFileSync(configPath, 'utf-8'),
+						);
 						const editedRaw = JSON.parse(editedContent) as unknown;
 						setItems(parseConfig(editedRaw));
 						setConfigCorrupted(false);

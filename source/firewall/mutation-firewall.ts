@@ -8,7 +8,7 @@ import type {
 	FirewallViolation,
 } from '@/types/firewall';
 import {FIREWALL_DEFAULTS, resolveFirewallConfig} from '@/types/firewall';
-import {notifyWarning} from '@/utils/message-queue';
+import {notifyWarning} from '@/utils/message-queue-core';
 import {
 	detectAnyTypeInjections,
 	detectDeletedTestBlocks,

@@ -57,9 +57,9 @@ const GIT_PR_ALL_ACTIONS: readonly GitPrAction[] = [
 //
 // Deliberately excludes `web_search`/`fetch_url`: every consumer of this
 // allowlist runs headless/auto-execute (no tool-approval-queue handler is
-// registered — see `signalToolApproval` in `source/utils/tool-approval-queue.ts`),
-// and the text these tools investigate (a PR diff, a CI log) is attacker-
-// controlled. An injected instruction could have either tool exfiltrate
+// registered — see `signalToolApproval` in
+// `source/tools/runtime/tool-approval-queue.ts`), and the text these tools
+// investigate (a PR diff, a CI log) is attacker-controlled. An injected instruction could have either tool exfiltrate
 // local file contents to an external URL with no confirmation step, and the
 // result can end up posted publicly (e.g. `verify --post-review`). A
 // read-only reviewer doesn't need to browse to do its job.

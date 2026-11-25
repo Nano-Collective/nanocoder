@@ -13,11 +13,11 @@ import {InteractiveApp} from '@/app/sections/interactive-app';
 import type {AppProps} from '@/app/types';
 import AssistantReasoning from '@/components/assistant-reasoning';
 import {SuccessMessage, WarningMessage} from '@/components/message-box';
+import {setGlobalMessageQueue} from '@/components/message-queue';
 import SecurityDisclaimer from '@/components/security-disclaimer';
 import StreamingMessage from '@/components/streaming-message';
 import StreamingReasoning from '@/components/streaming-reasoning';
 import {SubagentView} from '@/components/subagent-view';
-import type {TitleShape} from '@/components/ui/styled-title';
 import {
 	shouldPromptExtensionInstall,
 	VSCodeExtensionPrompt,
@@ -51,13 +51,12 @@ import {useUserMessageQueue} from '@/hooks/useUserMessageQueue';
 import {useVSCodeServer} from '@/hooks/useVSCodeServer';
 import {setAutoCommitClient} from '@/services/auto-commit';
 import {CheckpointManager} from '@/services/checkpoint-manager';
+import {setNotificationsConfig} from '@/services/notifications';
 import {getProjectRoot} from '@/services/session-cwd';
 import {getAllSubagentProgress} from '@/services/subagent-events';
-import {generateKey} from '@/session/key-generator';
-import type {ThemePreset} from '@/types/ui';
+import type {ThemePreset, TitleShape} from '@/types/ui';
+import {generateKey} from '@/utils/key-generator';
 import {createPinoLogger} from '@/utils/logging/pino-logger';
-import {setGlobalMessageQueue} from '@/utils/message-queue';
-import {setNotificationsConfig} from '@/utils/notifications';
 import {getShutdownManager} from '@/utils/shutdown';
 import {takeLegacyVscodeDeprecationNotice} from '@/vscode/deprecation';
 import {isExtensionInstalled} from '@/vscode/extension-installer';

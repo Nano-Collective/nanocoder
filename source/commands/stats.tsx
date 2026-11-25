@@ -7,8 +7,8 @@
  */
 
 import React from 'react';
+import {errorMsg, infoMsg} from '@/components/message-factory';
 import {StatsDisplay} from '@/components/stats/stats-display';
-import {generateKey} from '@/session/key-generator';
 import {
 	flushStatsLedgerSync,
 	getStatsLedgerCached,
@@ -16,7 +16,7 @@ import {
 } from '@/stats/record';
 import {STATS_RANGES, type StatsRange} from '@/stats/types';
 import type {StatefulCommand} from '@/types/index';
-import {errorMsg, infoMsg} from '@/utils/message-factory';
+import {generateKey} from '@/utils/key-generator';
 
 export const statsCommand: StatefulCommand = {
 	name: 'stats',

@@ -15,10 +15,10 @@ import type {
 	TimelineRevertResult,
 	TimelineScanResult,
 } from '@/types/timeline';
-import {atomicWriteFile} from '@/utils/atomic-write';
-import {ensureNanocoderGitignore} from '@/utils/ensure-nanocoder-gitignore';
 import {formatError} from '@/utils/error-formatter';
-import {notifyWarning} from '@/utils/message-queue';
+import {atomicWriteFile} from '@/utils/fs/atomic-write';
+import {ensureNanocoderGitignore} from '@/utils/fs/ensure-nanocoder-gitignore';
+import {notifyWarning} from '@/utils/message-queue-core';
 import {FileSnapshotService} from './file-snapshot';
 import {
 	acquireTimelineLock,

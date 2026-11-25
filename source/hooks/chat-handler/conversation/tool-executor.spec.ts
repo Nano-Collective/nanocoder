@@ -7,7 +7,7 @@ import type {ToolCall, ToolResult} from '@/types/core';
 // ============================================================================
 
 import {setToolRegistryGetter} from '@/message-handler';
-import {ToolValidationError} from '@/utils/tool-validation';
+import {ToolValidationError} from '@/tools/runtime/tool-validation';
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 

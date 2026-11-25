@@ -34,6 +34,7 @@ const CATEGORY_COMMANDS: Record<HelpCategory, readonly string[]> = {
 		'copy',
 		'expand',
 		'export',
+		'plans',
 		'rename',
 		'resume',
 		'retry',
@@ -45,6 +46,7 @@ const CATEGORY_COMMANDS: Record<HelpCategory, readonly string[]> = {
 		'init',
 		'login',
 		'model',
+		'profile',
 		'setup-config',
 		'settings',
 		'tune',
@@ -75,6 +77,7 @@ const CATEGORY_COMMANDS: Record<HelpCategory, readonly string[]> = {
 		'status',
 		'tip',
 		'usage',
+		'whoami',
 	],
 	Other: [],
 };
@@ -165,7 +168,12 @@ const COMMAND_HELP_OVERRIDES: Record<string, CommandHelpOverrides> = {
 	'context-max': {
 		usage: '/context-max [length]|--reset',
 		options: ['--reset'],
-		examples: ['/context-max', '/context-max 128k', '/context-max --reset'],
+		examples: [
+			'/context-max',
+			'/context-max 128k',
+			'/context-max 1m',
+			'/context-max --reset',
+		],
 	},
 	copy: {
 		usage: '/copy [code]',
@@ -201,6 +209,16 @@ const COMMAND_HELP_OVERRIDES: Record<string, CommandHelpOverrides> = {
 		options: ['browse'],
 		examples: ['/model', '/model browse'],
 	},
+	profile: {
+		usage: '/profile [name|--clear]',
+		options: ['--clear'],
+		examples: [
+			'/profile',
+			'/profile fast',
+			'/profile review',
+			'/profile --clear',
+		],
+	},
 	memory: {
 		usage:
 			'/memory [list|ls|add [--category <name>] <text>|delete|rm <id>|clear|propose|accept <n>]',
@@ -217,6 +235,15 @@ const COMMAND_HELP_OVERRIDES: Record<string, CommandHelpOverrides> = {
 			'/memory add --category architecture Use TypeScript',
 			'/memory delete 12ab34cd',
 			'/memory propose',
+		],
+	},
+	plans: {
+		usage: '/plans [list|show [id]|use <id|none>|delete <id>]',
+		options: ['list', 'show [id]', 'use <id|none>', 'delete|rm <id>'],
+		examples: [
+			'/plans',
+			'/plans show auth-refactor',
+			'/plans use auth-refactor',
 		],
 	},
 	privacy: {

@@ -31,12 +31,26 @@ import {
 	consultPluginPermission,
 	withTrustedProjectPlugins,
 } from '@/plugins/host';
+import {
+	formatVerificationSummary,
+	recordToolOutcome,
+	takeEvidenceRejection,
+} from '@/services/completion-ledger';
 import {runInSessionContext} from '@/services/session-context';
 import {
 	onSubagentRunEvent,
 	type SubagentRunEvent,
 } from '@/services/subagent-events';
 import {resolveToolApproval} from '@/tools/approval-policy';
+import {
+	clearReadContentScope,
+	runWithReadContentScope,
+} from '@/tools/runtime/read-tracker';
+import {
+	registerSubagentToolBridge,
+	type SubagentToolBridge,
+} from '@/tools/runtime/tool-approval-queue';
+import {createCancellationResults} from '@/tools/runtime/tool-cancellation';
 import type {ToolManager} from '@/tools/tool-manager';
 import type {
 	ApiUsage,
@@ -48,15 +62,6 @@ import type {
 } from '@/types/core';
 import {formatCompactTokenCount} from '@/usage/format';
 import {buildResponseUsage} from '@/usage/response-usage';
-import {
-	clearReadContentScope,
-	runWithReadContentScope,
-} from '@/utils/read-tracker';
-import {
-	registerSubagentToolBridge,
-	type SubagentToolBridge,
-} from '@/utils/tool-approval-queue';
-import {createCancellationResults} from '@/utils/tool-cancellation';
 import {toOptionString} from '@/utils/type-helpers';
 
 const ARTIFACT_TOOL_KINDS: Record<string, UserArtifactKind> = {
@@ -338,6 +343,7 @@ async function runTurn(
 		const priced = await buildResponseUsage(
 			turnUsage,
 			client.getCurrentModel(),
+			{baseURL: client.getProviderConfig().config.baseURL},
 		);
 		const input = turnUsage.inputTokens ?? 0;
 		const output = turnUsage.outputTokens ?? 0;
@@ -508,8 +514,18 @@ async function runTurn(
 							walkthroughLifecycle,
 							prepared.availableNames.includes('write_walkthrough'),
 						);
-				return fallback
-					? {kind: 'continue', messages: [fallback]}
+				if (fallback) {
+					return {kind: 'continue', messages: [fallback]};
+				}
+
+				// With `nanocoder.verify.required` set, a turn that edited files
+				// cannot end until the required commands have exited 0 since the
+				// last edit.
+				const evidenceRejection = finalTurn
+					? null
+					: takeEvidenceRejection(walkthroughLifecycle.ledger);
+				return evidenceRejection
+					? {kind: 'continue', messages: [evidenceRejection]}
 					: {kind: 'finish'};
 			},
 			executeTools: async validToolCalls => {
@@ -755,6 +771,7 @@ async function runTurn(
 						toolResult.content,
 					);
 					toolResults.push(toolResult);
+					recordToolOutcome(walkthroughLifecycle.ledger, toolCall, toolResult);
 					if (status === 'completed') {
 						observeSuccessfulLifecycleTool(walkthroughLifecycle, toolCall);
 						if (toolCall.function.name === 'write_plan') {
@@ -778,7 +795,21 @@ async function runTurn(
 	});
 
 	switch (result.kind) {
-		case 'completed':
+		case 'completed': {
+			const verification = formatVerificationSummary(
+				walkthroughLifecycle.ledger,
+			);
+			if (verification) {
+				conn.sessionUpdate({
+					sessionId: session.sessionId,
+					update: {
+						sessionUpdate: 'agent_message_chunk',
+						content: {type: 'text', text: `\n\n${verification}`},
+					},
+				});
+			}
+			return withTurnUsage({stopReason: 'end_turn'});
+		}
 		case 'no-system-message':
 			return withTurnUsage({stopReason: 'end_turn'});
 		// A provider that answers with no choices failed the request, as a

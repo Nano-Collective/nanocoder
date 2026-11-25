@@ -47,7 +47,7 @@ jobs:
           source/custom-tools/template.spec.ts
           source/custom-tools/handler.spec.ts
           source/lsp/windows-spawn.spec.ts
-          source/utils/path-validators.spec.ts
+          source/tools/file-ops/path-validators.spec.ts
           source/services/lifecycle-hooks.spec.ts
 
       - name: Verify execute_bash stops the whole tree
@@ -56,6 +56,16 @@ jobs:
       # The rest of this spec assumes a POSIX shell, so run only the cmd.exe cases.
       - name: Verify execute_bash cmd.exe quoting
         run: pnpm run test:ava source/services/bash-executor.spec.ts --match="cmd.exe quoting*"
+
+      - name: Verify Windows path validation and preferences case normalization
+        run: >-
+          pnpm run test:ava
+          source/utils/fs/path-validation.spec.ts
+          source/config/trust/directory-trust.spec.ts
+          --match="*case on Windows*"
+
+      - name: Verify execute_bash cwd capture on Windows
+        run: pnpm run test:ava source/services/bash-executor-cwd.spec.ts
 
   # pnpm runs package.json scripts through cmd.exe on Windows, so POSIX-only
   # commands in the build script (mkdir -p, cp, chmod) break there. The shared

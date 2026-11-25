@@ -1,5 +1,6 @@
 import React from 'react';
 import {findCommandAlias} from '@/commands/aliases';
+import {errorMsg} from '@/components/message-factory';
 import {
 	type AnyCommand,
 	type Command,
@@ -8,7 +9,6 @@ import {
 	type Message,
 } from '@/types/index';
 import {fuzzyScore} from '@/utils/fuzzy-matching';
-import {errorMsg} from '@/utils/message-factory';
 
 class CommandRegistry {
 	private commands = new Map<string, Command>();

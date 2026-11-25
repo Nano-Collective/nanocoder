@@ -13,7 +13,7 @@ import {getProjectRoot, getSafeSessionCwd} from '@/services/session-cwd';
 import type {NanocoderToolExport, ToolExecuteResult} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
-import {isValidFilePath, resolveFilePath} from '@/utils/path-validation';
+import {isValidFilePath, resolveFilePath} from '@/utils/fs/path-validation';
 import {type DiagnosticInfo, getVSCodeServer} from '@/vscode/index';
 
 /**

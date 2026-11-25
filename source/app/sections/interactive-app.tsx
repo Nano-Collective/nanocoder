@@ -12,6 +12,7 @@ import {FileExplorer} from '@/components/file-explorer';
 import {IdeSelector} from '@/components/ide-selector';
 import PlanReviewPrompt from '@/components/plan-review-prompt';
 import type {VoiceIndicatorInfo} from '@/components/status-bar';
+import {displayCompactCountsSummary} from '@/components/tool-result-display';
 import {getVoicePreference, subscribeToPreferences} from '@/config/preferences';
 import type {useChatHandler} from '@/hooks/chat-handler';
 import {lastTurnEditedFiles} from '@/hooks/chat-handler/conversation/auto-diagnostics';
@@ -24,11 +25,10 @@ import type {useUserMessageQueue} from '@/hooks/useUserMessageQueue';
 import {useVoice} from '@/hooks/useVoice';
 import type {useVSCodeServer} from '@/hooks/useVSCodeServer';
 import {hasStagedChanges} from '@/tools/git/utils';
+import type {PendingToolApproval} from '@/tools/runtime/tool-approval-queue';
+import type {PendingToolConfirmation} from '@/tools/runtime/tool-confirm-queue';
 import type {ImageAttachment} from '@/types/core';
 import type {RestoredInputDraft, SubmittedInputDraft} from '@/types/hooks';
-import type {PendingToolApproval} from '@/utils/tool-approval-queue';
-import type {PendingToolConfirmation} from '@/utils/tool-confirm-queue';
-import {displayCompactCountsSummary} from '@/utils/tool-result-display';
 
 interface InteractiveAppProps {
 	appState: ReturnType<typeof useAppState>;

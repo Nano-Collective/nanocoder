@@ -3,34 +3,34 @@ import type {ConversationStateManager} from '@/app/utils/conversation-state';
 import AgentProgress, {MultiAgentProgress} from '@/components/agent-progress';
 import BashProgress from '@/components/bash-progress';
 import {ErrorMessage} from '@/components/message-box';
-import {getShowAgentBashOutput} from '@/config/preferences';
-import type {BashExecutionState} from '@/services/bash-executor';
-import {
-	clearAllSubagentProgress,
-	getSubagentProgress,
-	resetSubagentProgressById,
-} from '@/services/subagent-events';
-import {generateKey} from '@/session/key-generator';
-import {buildSubagentFailureMessage} from '@/subagents/failure-message';
-import {MAX_CONCURRENT_AGENTS} from '@/subagents/subagent-executor';
-import type {AgentToolArgs} from '@/tools/agent-tool';
-import {startAgentExecution} from '@/tools/agent-tool';
-import type {Task} from '@/tools/tasks/types';
-import type {ToolManager} from '@/tools/tool-manager';
-import type {ToolCall, ToolExecutionContext, ToolResult} from '@/types/core';
-import {formatError} from '@/utils/error-formatter';
-import {
-	runStreamingBashTool,
-	type StreamingBashRun,
-} from '@/utils/streaming-bash-tool';
-import {parseToolArguments} from '@/utils/tool-args-parser';
 import {
 	ALWAYS_EXPANDED_TOOLS,
 	displayToolResult,
 	isToolResultError,
 	LIVE_TASK_TOOLS,
 	recordExpandableToolResult,
-} from '@/utils/tool-result-display';
+} from '@/components/tool-result-display';
+import {getShowAgentBashOutput} from '@/config/preferences';
+import {
+	runStreamingBashTool,
+	type StreamingBashRun,
+} from '@/hooks/chat-handler/conversation/streaming-bash-tool';
+import type {BashExecutionState} from '@/services/bash-executor';
+import {
+	clearAllSubagentProgress,
+	getSubagentProgress,
+	resetSubagentProgressById,
+} from '@/services/subagent-events';
+import {buildSubagentFailureMessage} from '@/subagents/failure-message';
+import {MAX_CONCURRENT_AGENTS} from '@/subagents/subagent-executor';
+import type {AgentToolArgs} from '@/tools/agent-tool';
+import {startAgentExecution} from '@/tools/agent-tool';
+import {parseToolArguments} from '@/tools/runtime/tool-args-parser';
+import type {Task} from '@/tools/tasks/types';
+import type {ToolManager} from '@/tools/tool-manager';
+import type {ToolCall, ToolExecutionContext, ToolResult} from '@/types/core';
+import {formatError} from '@/utils/error-formatter';
+import {generateKey} from '@/utils/key-generator';
 
 /**
  * Validates and executes a single tool call.
@@ -70,6 +70,7 @@ const executeBashStreaming = async (
 	toolManager: ToolManager | null,
 	setLiveComponent: (component: React.ReactNode) => void,
 	signal?: AbortSignal,
+	sessionId?: string,
 ): Promise<StreamingBashRun> => {
 	const execution = await runStreamingBashTool(
 		toolCall,
@@ -77,6 +78,7 @@ const executeBashStreaming = async (
 		setLiveComponent,
 		'direct-bash',
 		signal,
+		sessionId,
 	);
 	return {...execution, toolCall};
 };
@@ -101,6 +103,7 @@ export const executeApprovedTool = (
 	processToolUse: (toolCall: ToolCall) => Promise<ToolResult>,
 	setLiveComponent?: (component: React.ReactNode) => void,
 	signal?: AbortSignal,
+	sessionId?: string,
 ): Promise<StreamingBashRun | {toolCall: ToolCall; result: ToolResult}> => {
 	if (toolCall.function.name === 'execute_bash' && setLiveComponent) {
 		return executeBashStreaming(
@@ -108,6 +111,7 @@ export const executeApprovedTool = (
 			toolManager,
 			setLiveComponent,
 			signal,
+			sessionId,
 		);
 	}
 	return executeOne(toolCall, processToolUse);
@@ -591,6 +595,7 @@ export const executeToolsDirectly = async (
 						processToolWithContext,
 						options?.setLiveComponent,
 						options?.signal,
+						options?.executionContext?.sessionId,
 					),
 				);
 			}

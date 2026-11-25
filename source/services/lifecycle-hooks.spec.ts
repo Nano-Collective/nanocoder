@@ -18,7 +18,7 @@ import {
 import {setProjectRoot, setSessionCwd} from '@/services/session-cwd';
 import type {HooksConfig} from '@/types/config';
 import type {ToolCall} from '@/types/core';
-import {truncateToolResult} from '@/utils/truncate-tool-result';
+import {truncateToolResult} from '@/tools/runtime/truncate-tool-result';
 import {
 	addPendingHookContext,
 	beginSessionStartHooks,
@@ -386,6 +386,26 @@ test.serial('a hook that times out does not block the action', async t => {
 
 	t.false(outcome.blocked, 'a hanging script must not wedge the agent');
 	t.is(outcome.output, '');
+});
+
+test.serial('a hook that reads stdin sees EOF instead of hanging', async t => {
+	withHooks({
+		'post-tool-use': [
+			{
+				command: node(
+					"process.stdin.resume();process.stdin.on('end',()=>console.log('eof'))",
+				),
+				timeout: 5000,
+			},
+		],
+	});
+
+	const outcome = await runLifecycleHooks('post-tool-use', {
+		toolName: 'write_file',
+	});
+
+	t.deepEqual(outcome.failures, []);
+	t.is(outcome.output, 'eof');
 });
 
 test.serial('a hook naming a missing binary blocks like any non-zero exit', async t => {

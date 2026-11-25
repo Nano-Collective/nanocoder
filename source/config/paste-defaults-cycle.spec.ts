@@ -5,7 +5,7 @@ import {pathToFileURL} from 'node:url';
 import test from 'ava';
 
 /*
- * `@/utils/paste-utils` imports the config module, so the config module must
+ * `@/input/paste-utils` imports the config module, so the config module must
  * not import it back: the cycle meant whichever side loaded second read
  * DEFAULT_SINGLE_LINE_PASTE_THRESHOLD in its temporal dead zone. The constant
  * lives in `@/constants` now. Load the config module in a fresh process and
@@ -25,7 +25,7 @@ registerHooks({
 const config = await import(process.env.PROBE_TARGET);
 process.stdout.write(JSON.stringify({
 	count: loaded.size,
-	pasteUtils: [...loaded].filter(url => url.includes('/utils/paste-utils')),
+	pasteUtils: [...loaded].filter(url => url.includes('/input/paste-utils')),
 	defaults: config.getDefaultPasteConfig(),
 }));
 `;

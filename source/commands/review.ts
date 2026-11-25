@@ -3,8 +3,9 @@ import {fileURLToPath} from 'node:url';
 import React from 'react';
 import AssistantMessage from '@/components/assistant-message';
 import AssistantReasoning from '@/components/assistant-reasoning';
+import {errorMsg, infoMsg, warningMsg} from '@/components/message-factory';
 import {getShowUsageFooter} from '@/config/preferences';
-import {generateKey} from '@/session/key-generator';
+import {loadSection} from '@/conversation/prompt-builder';
 import {stripThinkTags} from '@/tool-calling/index';
 import {
 	execGh,
@@ -19,9 +20,8 @@ import type {Message} from '@/types/core';
 import {buildResponseUsageBounded} from '@/usage/response-usage';
 import {formatError} from '@/utils/error-formatter';
 import {parseGitHubRepository} from '@/utils/github-repository';
+import {generateKey} from '@/utils/key-generator';
 import {getLogger} from '@/utils/logging';
-import {errorMsg, infoMsg, warningMsg} from '@/utils/message-factory';
-import {loadSection} from '@/utils/prompt-builder';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -717,7 +717,9 @@ export function createReviewCommand(
 
 				const showUsageFooter = getShowUsageFooter();
 				const usage = showUsageFooter
-					? await buildResponseUsageBounded(response.usage, metadata.model)
+					? await buildResponseUsageBounded(response.usage, metadata.model, {
+							baseURL: client.getProviderConfig().config.baseURL,
+						})
 					: undefined;
 				// Rendered like a normal chat reply so the review's Markdown is
 				// parsed instead of being shown as raw text in a status color.

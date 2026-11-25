@@ -3,6 +3,7 @@ import {Box, Text, useFocus, useInput} from 'ink';
 import {Tab, Tabs} from 'ink-tab';
 import {useEffect, useState} from 'react';
 import {isOpenRouterProvider} from '@/ai-sdk-client/providers/openrouter';
+import {errorMsg, successMsg} from '@/components/message-factory';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {
 	COST_SCORE_CHEAP,
@@ -14,8 +15,7 @@ import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {modelMatchingEngine} from '@/model-database/model-engine';
 import {Colors, ModelEntry} from '@/types/index';
-import {errorMsg, successMsg} from '@/utils/message-factory';
-import {addToMessageQueue} from '@/utils/message-queue';
+import {addToMessageQueue} from '@/utils/message-queue-core';
 
 type TabType = 'latest' | 'open' | 'proprietary';
 

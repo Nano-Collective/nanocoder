@@ -10,9 +10,9 @@ import {
 	resetAutoCompactSession,
 	resolveAutoCompactSettings,
 	setAutoCompactThreshold,
-} from '@/utils/auto-compact';
-import {compressionBackup} from '@/utils/compression-backup';
-import {getLastBuiltPrompt, setLastBuiltPrompt} from '@/utils/prompt-builder';
+} from '@/conversation/compaction/auto-compact';
+import {compressionBackup} from '@/conversation/compaction/compression-backup';
+import {getLastBuiltPrompt, setLastBuiltPrompt} from '@/conversation/prompt-builder';
 import {
 	createSessionContext,
 	defineSessionValue,

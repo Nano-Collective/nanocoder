@@ -8,9 +8,10 @@ import {
 	renderBody,
 	shellQuote,
 } from '@/custom-tools/template';
+import {truncateToolResult} from '@/tools/runtime/truncate-tool-result';
 import type {CustomToolMetadata} from '@/types/custom-tools';
 import type {ToolHandler} from '@/types/index';
-import {isRealPathInside} from '@/utils/path-validation';
+import {isRealPathInside} from '@/utils/fs/path-validation';
 import {signalProcessTree} from '@/utils/process-tree';
 import {isWindowsCmd, shellArgs} from '@/utils/shell-args';
 import {
@@ -18,7 +19,6 @@ import {
 	STDERR_TRUNCATION_NOTICE,
 	STDOUT_TRUNCATION_NOTICE,
 } from '@/utils/stream-collector';
-import {truncateToolResult} from '@/utils/truncate-tool-result';
 
 /**
  * Build a `ToolHandler` that renders the script body and runs it under the

@@ -15,16 +15,16 @@ import {
 	inputSurfacesReducer,
 	type PlanReviewState,
 } from '@/app/utils/input-surfaces';
-import type {TitleShape} from '@/components/ui/styled-title';
 import {getAppConfig} from '@/config/index';
 import {loadPreferences} from '@/config/preferences';
 import {defaultTheme} from '@/config/themes';
 import {resolveTune} from '@/config/tune';
+import {applyTuneCompaction} from '@/conversation/compaction/auto-compact';
 import {CustomCommandExecutor} from '@/custom-commands/executor';
 import {CustomCommandLoader} from '@/custom-commands/loader';
 import {setCliSessionId} from '@/session/cli-session-context';
-import {generateKey} from '@/session/key-generator';
 import {createTokenizer} from '@/tokenization/index.js';
+import type {PendingQuestion} from '@/tools/runtime/question-queue';
 import type {Task} from '@/tools/tasks/types';
 import {ToolManager} from '@/tools/tool-manager';
 import type {CheckpointListItem} from '@/types/checkpoint';
@@ -43,10 +43,9 @@ import {
 } from '@/types/core';
 import type {UpdateInfo} from '@/types/index';
 import type {Tokenizer} from '@/types/tokenization.js';
-import type {ThemePreset} from '@/types/ui';
-import {applyTuneCompaction} from '@/utils/auto-compact';
+import type {ThemePreset, TitleShape} from '@/types/ui';
 import {BoundedMap} from '@/utils/bounded-map';
-import type {PendingQuestion} from '@/utils/question-queue';
+import {generateKey} from '@/utils/key-generator';
 
 export type {ActiveMode} from '@/app/utils/input-surfaces';
 

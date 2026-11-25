@@ -13,10 +13,17 @@ import {
 } from '@/constants';
 import {consultPluginPermission} from '@/plugins/host';
 import {CheckpointManager} from '@/services/checkpoint-manager';
+import {recordToolOutcome} from '@/services/completion-ledger';
 import {runPreToolUseGate} from '@/services/lifecycle-hooks';
 import {getProjectRoot} from '@/services/session-cwd';
-import {generateKey} from '@/session/key-generator';
 import {resolveToolApproval} from '@/tools/approval-policy';
+import {isFileMutationTool} from '@/tools/runtime/tool-approval';
+import {parseToolArguments} from '@/tools/runtime/tool-args-parser';
+import {
+	createApprovalUnavailableResults,
+	createCancellationResults,
+} from '@/tools/runtime/tool-cancellation';
+import {signalToolConfirm} from '@/tools/runtime/tool-confirm-queue';
 import {loadTasks} from '@/tools/tasks/storage';
 import type {Task} from '@/tools/tasks/types';
 import type {ToolManager} from '@/tools/tool-manager';
@@ -27,14 +34,8 @@ import type {
 	ToolResult,
 } from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
-import {notifyWarning} from '@/utils/message-queue';
-import {isFileMutationTool} from '@/utils/tool-approval';
-import {parseToolArguments} from '@/utils/tool-args-parser';
-import {
-	createApprovalUnavailableResults,
-	createCancellationResults,
-} from '@/utils/tool-cancellation';
-import {signalToolConfirm} from '@/utils/tool-confirm-queue';
+import {generateKey} from '@/utils/key-generator';
+import {notifyWarning} from '@/utils/message-queue-core';
 import {closeAllDiffsInVSCode} from '@/vscode/index';
 import {buildAutoDiagnosticsMessage} from './auto-diagnostics';
 import {
@@ -375,9 +376,12 @@ export async function runToolTurn(
 		);
 		turnResults.push(...directResults);
 		for (const [index, result] of directResults.entries()) {
+			const toolCall = autoTools[index];
+			if (toolCall) {
+				recordToolOutcome(walkthroughLifecycle.ledger, toolCall, result);
+			}
 			if (!result.isError) {
 				onToolExecuted?.(result.name);
-				const toolCall = autoTools[index];
 				if (toolCall) {
 					observeSuccessfulLifecycleTool(walkthroughLifecycle, toolCall);
 				}
@@ -478,8 +482,14 @@ export async function runToolTurn(
 				processToolWithContext,
 				setLiveComponent,
 				signal,
+				sessionId,
 			);
 			turnResults.push(execution.result);
+			recordToolOutcome(
+				walkthroughLifecycle.ledger,
+				toolCall,
+				execution.result,
+			);
 			if (!execution.result.isError) {
 				onToolExecuted?.(execution.result.name);
 				observeSuccessfulLifecycleTool(walkthroughLifecycle, toolCall);

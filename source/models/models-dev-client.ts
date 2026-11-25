@@ -9,6 +9,7 @@ import {defineSessionValue} from '@/services/session-context';
 import type {AIProviderConfig, ProviderConfig} from '@/types/config';
 import {formatError} from '@/utils/error-formatter';
 import {getLogger} from '@/utils/logging';
+import {parseContextLimit} from '@/utils/parse-context-limit';
 import {readCache, writeCache} from './models-cache.js';
 import type {
 	ModelInfo,
@@ -245,12 +246,16 @@ function createModelInfo(
  * Find a model by ID across all providers
  * Returns the model info and provider name
  */
-async function findModelById(modelId: string): Promise<ModelInfo | null> {
+async function findModelById(
+	modelId: string,
+	{ignoreCase = false}: {ignoreCase?: boolean} = {},
+): Promise<ModelInfo | null> {
 	const data = await getModelsData();
 	if (!data) {
 		return null;
 	}
 
+	const lowerId = modelId.toLowerCase();
 	let bestMatch: ModelInfo | null = null;
 
 	// Search through all providers, picking the match with highest context limit
@@ -259,7 +264,11 @@ async function findModelById(modelId: string): Promise<ModelInfo | null> {
 		if (!provider || typeof provider !== 'object' || !provider.models) {
 			continue;
 		}
-		const model = provider.models[modelId];
+		const model = ignoreCase
+			? Object.entries(provider.models).find(
+					([id]) => id.toLowerCase() === lowerId,
+				)?.[1]
+			: provider.models[modelId];
 		if (model) {
 			const contextLimit = model.limit?.context ?? null;
 			if (
@@ -345,20 +354,102 @@ async function findModelByName(modelName: string): Promise<ModelInfo | null> {
 }
 
 /**
+ * The provider and model a context limit applies to. A field left undefined
+ * matches anything.
+ */
+interface ContextLimitScope {
+	provider?: string;
+	model?: string;
+}
+
+interface SessionContextOverride extends ContextLimitScope {
+	limit: number;
+}
+
+/**
  * Session-level context limit override.
  * Allows users to manually set a context limit via /context-max command.
  * Non-positive values collapse back to null (no override).
+ *
+ * The override remembers the provider and model it was set for, so switching
+ * either (`/model`, `/retry --model`, `modeProviders`, a profile, `/resume`)
+ * stops it applying to a model with a different window. An override with no
+ * scope (the `--context-max` flag before a client exists, a one-shot
+ * `?context-max=`) applies to every model.
  */
-const contextLimitSession = defineSessionValue<number>(limit =>
-	limit !== null && limit > 0 ? limit : null,
+const contextLimitSession = defineSessionValue<SessionContextOverride>(
+	override => (override !== null && override.limit > 0 ? override : null),
 );
 
-export function setSessionContextLimit(limit: number | null): void {
-	contextLimitSession.set(limit);
+function overrideAppliesTo(
+	override: SessionContextOverride,
+	active?: ContextLimitScope,
+): boolean {
+	if (!active) return true;
+	if (
+		override.model !== undefined &&
+		active.model !== undefined &&
+		override.model !== active.model
+	) {
+		return false;
+	}
+	return !(
+		override.provider !== undefined &&
+		active.provider !== undefined &&
+		override.provider !== active.provider
+	);
 }
 
-export function getSessionContextLimit(): number | null {
+export function setSessionContextLimit(
+	limit: number | null,
+	scope: ContextLimitScope = {},
+): void {
+	contextLimitSession.set(limit === null ? null : {limit, ...scope});
+}
+
+/**
+ * The override, or null when none is set. Pass the active provider and model
+ * to get null for an override that was set for a different one; without
+ * `active` the stored limit is returned whatever it was set for.
+ */
+export function getSessionContextLimit(
+	active?: ContextLimitScope,
+): number | null {
+	const override = contextLimitSession.get();
+	return override && overrideAppliesTo(override, active)
+		? override.limit
+		: null;
+}
+
+/** The stored override with its scope, for restoring it later. */
+export function getSessionContextOverride(): SessionContextOverride | null {
 	return contextLimitSession.get();
+}
+
+export function restoreSessionContextOverride(
+	override: SessionContextOverride | null,
+): void {
+	if (override) {
+		contextLimitSession.set(override);
+	} else {
+		contextLimitSession.reset();
+	}
+}
+
+/**
+ * Tie an unscoped override (from `--context-max`) to the provider and model
+ * the session started on. Does nothing when there is no override or it
+ * already has a scope.
+ */
+export function bindSessionContextLimit(scope: ContextLimitScope): void {
+	const override = contextLimitSession.get();
+	if (
+		override &&
+		override.provider === undefined &&
+		override.model === undefined
+	) {
+		contextLimitSession.set({...override, ...scope});
+	}
 }
 
 export function resetSessionContextLimit(): void {
@@ -425,7 +516,8 @@ function getProviderConfiguredContextLimit(
 /**
  * Get context limit for a model.
  * Resolution order:
- * 1. Session override (from /context-max command)
+ * 1. Session override (from /context-max command), only for the provider
+ *    and model it was set for
  * 2. Provider model config override
  * 3. Provider default context window
  * 4. NANOCODER_CONTEXT_LIMIT env variable
@@ -437,8 +529,12 @@ export async function resolveModelContextLimit(
 	options: ModelContextLimitOptions = {},
 ): Promise<ResolvedContextLimit> {
 	try {
-		// Check session override first (highest priority)
-		const sessionLimit = contextLimitSession.get();
+		// Check session override first (highest priority), unless it was set
+		// for a different provider or model.
+		const sessionLimit = getSessionContextLimit({
+			provider: options.providerConfig?.name,
+			model: modelId,
+		});
 		if (sessionLimit !== null) {
 			return {limit: sessionLimit, source: 'session'};
 		}
@@ -454,8 +550,8 @@ export async function resolveModelContextLimit(
 		// Check environment variable fallback
 		const envLimit = process.env.NANOCODER_CONTEXT_LIMIT;
 		if (envLimit) {
-			const parsed = Number.parseInt(envLimit, 10);
-			if (!Number.isNaN(parsed) && parsed > 0) {
+			const parsed = parseContextLimit(envLimit);
+			if (parsed !== null) {
 				return {limit: parsed, source: 'env'};
 			}
 		}
@@ -534,9 +630,9 @@ export async function getModelAcceptsImages(
 }
 
 /**
- * Per-model pricing memo. Both lookups below scan the whole database (and a
- * miss scans it twice), so the result — including the negative one for local
- * models that will never be on models.dev — is cached for the process.
+ * Per-model pricing memo. The lookup below scans the whole database, so the
+ * result (including the negative one for local models that will never be on
+ * models.dev) is cached for the process.
  */
 const pricingMemo = new Map<string, ModelInfo['cost'] | null>();
 
@@ -553,12 +649,13 @@ export async function getModelPricing(
 		return memoized;
 	}
 	try {
-		let modelInfo = await findModelById(modelId);
-
-		if (!modelInfo) {
-			modelInfo = await findModelByName(modelId);
-		}
-
+		// Exact id (in any case) only: unlike context limits, a price borrowed
+		// from a similarly named model is wrong (e.g. a free local `llama3`
+		// billed as Groq's `llama3-70b-8192`). Local providers are skipped
+		// before this lookup, by base URL, in buildResponseUsage and /usage.
+		const modelInfo =
+			(await findModelById(modelId)) ??
+			(await findModelById(modelId, {ignoreCase: true}));
 		const pricing = modelInfo ? modelInfo.cost : null;
 		pricingMemo.set(modelId, pricing);
 		return pricing;

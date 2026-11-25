@@ -8,12 +8,12 @@ import {matchGlob, toPosixPath} from '@/events/event-router';
 import {runPluginHooks} from '@/plugins/host';
 import {getActiveSessionContext} from '@/services/session-context';
 import {getProjectRoot, getSafeSessionCwd} from '@/services/session-cwd';
-import {getKeyGeneratorSessionId} from '@/session/key-generator';
+import {truncateToolResult} from '@/tools/runtime/truncate-tool-result';
 import type {HookDefinition, HookEvent} from '@/types/config';
 import type {ToolCall} from '@/types/core';
-import {notifyError} from '@/utils/message-queue';
+import {getKeyGeneratorSessionId} from '@/utils/key-generator';
+import {notifyError} from '@/utils/message-queue-core';
 import {signalProcessTree} from '@/utils/process-tree';
-import {truncateToolResult} from '@/utils/truncate-tool-result';
 
 /** Ceiling on a single hook's runtime. Overridable per hook via `timeout`. */
 const DEFAULT_HOOK_TIMEOUT_MS = 30_000;
@@ -337,7 +337,7 @@ function projectRootSpellings(): string[] {
  * Every file tool names the argument `path`; `file_path` / `filePath` are
  * accepted because weaker models emit them and the formatters already
  * tolerate both. Not to be confused with `resolveFilePath` in
- * `@/utils/path-validation`, which resolves and containment-checks a path.
+ * `@/utils/fs/path-validation`, which resolves and containment-checks a path.
  */
 export function getToolFileArg(
 	args?: Record<string, unknown>,
@@ -748,6 +748,11 @@ export function runHookCommand(
 			env,
 			shell: true,
 			detached: process.platform !== 'win32',
+			// Nothing is written to a hook's stdin (see docs/features/hooks.md), so
+			// give it EOF immediately. A piped stdin that is never closed makes a
+			// command that reads input (`cat`, `jq`, a formatter run without a file
+			// argument) block until the timeout kills it.
+			stdio: ['ignore', 'pipe', 'pipe'],
 		});
 
 		const timeoutMs = hook.timeout ?? defaultTimeoutMs;

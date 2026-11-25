@@ -10,9 +10,9 @@
  * to the structured logger only, exactly as before.
  */
 import type {ReactNode} from 'react';
-import {generateKey} from '@/session/key-generator';
 import type {MessageType} from '@/types/index';
 import {createErrorInfo} from '@/utils/error-formatter';
+import {generateKey} from '@/utils/key-generator';
 // Import logging utilities with dependency injection pattern
 import {
 	generateCorrelationId,
@@ -54,6 +54,16 @@ let globalMessageQueueSink: MessageQueueSink | null = null;
 
 export function setMessageQueueSink(sink: MessageQueueSink | null): void {
 	globalMessageQueueSink = sink;
+}
+
+/**
+ * Returns true when a user-facing message sink or chat queue is attached.
+ */
+export function isMessageQueueAttached(): boolean {
+	return (
+		globalMessageQueueSink !== null ||
+		(globalAddToChatQueue !== null && globalMessageRenderer !== null)
+	);
 }
 
 // Get logger instance to avoid circular dependencies

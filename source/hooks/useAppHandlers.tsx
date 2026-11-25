@@ -16,17 +16,19 @@ import Status from '@/components/status';
 import UserMessage from '@/components/user-message';
 import {getAppConfig} from '@/config/index';
 import {loadPreferences} from '@/config/preferences';
+import {resolveAutoCompactSettings} from '@/conversation/compaction/auto-compact';
+import {getLastBuiltPrompt} from '@/conversation/prompt-builder';
 import {CustomCommandExecutor} from '@/custom-commands/executor';
 import {CustomCommandLoader} from '@/custom-commands/loader';
 import {getModelContextLimit} from '@/models/index';
 import {bashExecutor} from '@/services/bash-executor';
 import {CheckpointManager} from '@/services/checkpoint-manager';
+import {describeGapsMessage} from '@/services/checkpoint-utils';
 import {
 	runLifecycleHooks,
 	takePendingHookContext,
 } from '@/services/lifecycle-hooks';
 import {getProjectRoot} from '@/services/session-cwd';
-import {generateKey, setKeyGeneratorSessionId} from '@/session/key-generator';
 import {buildSessionHistoryComponents} from '@/session/session-history-renderer';
 import type {Session} from '@/session/session-manager';
 import {sessionManager} from '@/session/session-manager';
@@ -35,6 +37,7 @@ import {
 	type GitStatusSummary,
 	getGitStatusSummarySync,
 } from '@/tools/git/utils';
+import {bumpReadContentGeneration} from '@/tools/runtime/read-tracker';
 import {loadTasks} from '@/tools/tasks/storage';
 import type {Task} from '@/tools/tasks/types';
 import type {
@@ -52,12 +55,9 @@ import type {ApiCallRecord, ApiUsageSnapshot} from '@/types/core';
 import type {ThemePreset} from '@/types/ui';
 import type {UpdateInfo} from '@/types/utils';
 import {calculateTokenBreakdown} from '@/usage/calculator';
-import {resolveAutoCompactSettings} from '@/utils/auto-compact';
-import {describeGapsMessage} from '@/utils/checkpoint-utils';
 import {formatError} from '@/utils/error-formatter';
+import {generateKey, setKeyGeneratorSessionId} from '@/utils/key-generator';
 import {getLogger} from '@/utils/logging';
-import {getLastBuiltPrompt} from '@/utils/prompt-builder';
-import {bumpReadContentGeneration} from '@/utils/read-tracker';
 
 interface UseAppHandlersProps {
 	// State
@@ -255,6 +255,11 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 		() => async () => {
 			const baseClear = createClearMessagesHandler(updateMessages, client);
 			await baseClear();
+			// Background jobs belong to the session being cleared; stop them so
+			// they do not linger under a session id that no longer exists.
+			if (currentSessionId) {
+				await bashExecutor.stopSessionJobs(currentSessionId);
+			}
 			setChatComponents([]);
 			setCurrentSessionId(null);
 			// Reset the key-generator session ID so keys in the new conversation
@@ -267,6 +272,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 		[
 			updateMessages,
 			client,
+			currentSessionId,
 			setChatComponents,
 			setCurrentSessionId,
 			setLiveTaskList,
@@ -284,6 +290,9 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 		// regardless of execution path.
 		const activeBashIds = bashExecutor.getActiveExecutionIds();
 		for (const id of activeBashIds) {
+			// Background jobs are meant to outlive the turn that started them,
+			// so a user escape only cancels foreground operations.
+			if (bashExecutor.isBackgroundJob(id)) continue;
 			bashExecutor.cancel(id);
 		}
 
@@ -1040,6 +1049,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 					onShowStatus: handleShowStatus,
 					onHandleChatMessage: handleChatMessage,
 					onSwitchModel: handleModelSelect,
+					onSwitchMode: setDevelopmentMode,
 					onAddToChatQueue: addToChatQueue,
 					setLiveComponent: setLiveComponent,
 					setLiveComponentCapturesInput: setLiveComponentCapturesInput,
@@ -1104,6 +1114,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 			setSessionName,
 			handleModelSelect,
 			client,
+			setDevelopmentMode,
 		],
 	);
 

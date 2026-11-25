@@ -14,7 +14,7 @@
  */
 
 import {formatError} from '@/utils/error-formatter';
-import {globMatches} from '@/utils/glob-match';
+import {globMatches} from '@/utils/fs/glob-match';
 import type {Event, EventKind, Subscription} from './types';
 
 export interface SubscriptionDispatcher {
@@ -135,6 +135,12 @@ export function matchesFilter(sub: Subscription, event: Event): boolean {
 		);
 	}
 
+	if (event.kind === 'file.ai-comment' && sub.kind === 'file.ai-comment') {
+		const filter = sub.filter;
+		if (!filter?.paths || filter.paths.length === 0) return true;
+		return filter.paths.some(pattern => matchGlob(pattern, event.payload.file));
+	}
+
 	return false;
 }
 
@@ -153,7 +159,7 @@ export function toPosixPath(path: string): string {
 
 /**
  * Whether `path` matches a subscription, formatter or hook glob. Uses the
- * shared matcher in utils/glob-match (`*`, `?`, `**`, `{a,b}`; no `!`
+ * shared matcher in utils/fs/glob-match (`*`, `?`, `**`, `{a,b}`; no `!`
  * negation), after normalising both sides to `/`.
  *
  * A pattern ending in `**` + `/` keeps its long-standing meaning here of

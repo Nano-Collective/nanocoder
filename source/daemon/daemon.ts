@@ -37,6 +37,7 @@ import {
 } from '@/events/sources/github-checkrun';
 import {ScheduleEventSource} from '@/events/sources/schedule';
 import type {CiJobFailedPayload} from '@/events/types';
+import {sendNotification} from '@/services/notifications';
 import {bootSkillPipeline} from '@/skills/bootstrap';
 import {
 	type ActivityListener,
@@ -54,7 +55,6 @@ import {
 import {ToolManager} from '@/tools/tool-manager';
 import type {CiWatchConfig} from '@/types/config';
 import {formatError} from '@/utils/error-formatter';
-import {sendNotification} from '@/utils/notifications';
 import {formatCiReport} from '@/verify/format-ci-report';
 import {isTrustLevel} from '@/verify/trust-level';
 import {readCiWatchState, writeCiWatchState} from './ci-watch-state';
@@ -322,7 +322,12 @@ export async function startDaemon(opts: DaemonOptions): Promise<DaemonHandle> {
 	const buildFileWatcher =
 		opts.fileWatcherFactory ??
 		((r: EventRouter, o: FileWatcherOptions) => new FileWatcherSource(r, o));
-	const watcher = buildFileWatcher(router, {root: opts.projectRoot});
+	const watcher = buildFileWatcher(router, {
+		root: opts.projectRoot,
+		// Reading changed files for markers only pays off when a skill listens
+		// for them; the subscriptions are registered by the boot pipeline above.
+		detectAiComments: router.listByKind('file.ai-comment').length > 0,
+	});
 	const cron = new ScheduleEventSource(router);
 
 	for (const sub of router.listByKind('schedule.cron')) {
@@ -421,12 +426,27 @@ export async function startDaemon(opts: DaemonOptions): Promise<DaemonHandle> {
 			const draining = skillDispatcher.stop();
 			await watcher.stop();
 			await draining;
-			await ipcServer.stop();
-			// MCP stdio servers are child processes with open pipes; left
-			// connected they keep the event loop alive and the daemon never
-			// exits after an IPC `shutdown`.
-			await toolManager.disconnectMCP();
-			await removeLockfile(opts.projectRoot);
+			try {
+				// MCP stdio servers are child processes with open pipes; left
+				// connected they keep the event loop alive and the daemon never
+				// exits after an IPC `shutdown`. Keep the IPC server alive and the
+				// lockfile in place until MCP disconnects, so concurrent `daemon start`
+				// probes see the live daemon rather than treating a closed IPC
+				// endpoint as stale and starting a duplicate daemon.
+				await toolManager.disconnectMCP();
+			} finally {
+				try {
+					// Removing the lockfile before closing the IPC server ensures
+					// callers of readLiveLockfile never observe a closed IPC endpoint
+					// while the lockfile is still present. A concurrent start landing
+					// in the microtask gap between removeLockfile and ipcServer.stop()
+					// will find no lockfile and proceed; DaemonIpcServer.start()
+					// already unlinks any lingering socket from a prior run.
+					await removeLockfile(opts.projectRoot, process.pid);
+				} finally {
+					await ipcServer.stop();
+				}
+			}
 		})();
 		return stopPromise;
 	};

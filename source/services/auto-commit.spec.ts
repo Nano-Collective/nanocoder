@@ -12,7 +12,7 @@ import type {ReactElement, ReactNode} from 'react';
 import test from 'ava';
 import {getAppConfig} from '../config/index';
 import type {LLMClient} from '../types/core';
-import {setGlobalMessageQueue} from '../utils/message-queue';
+import {setGlobalMessageQueue} from '../components/message-queue';
 import {getProjectRoot, setProjectRoot} from './session-cwd';
 import {
 	cleanMessage,

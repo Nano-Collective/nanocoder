@@ -8,8 +8,8 @@ import {getProjectRoot, getSafeSessionCwd} from '@/services/session-cwd';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
-import {loadGitignore} from '@/utils/gitignore-loader';
-import {isValidFilePath, resolveFilePath} from '@/utils/path-validation';
+import {addNestedGitignore, loadGitignore} from '@/utils/fs/gitignore-loader';
+import {isValidFilePath, resolveFilePath} from '@/utils/fs/path-validation';
 import {estimateTokens} from '@/utils/token-calculator';
 
 interface ListDirectoryArgs {
@@ -60,6 +60,21 @@ const executeListDirectory = async (
 	// into a subdir; entries are matched root-relative below.
 	const ig = loadGitignore(root);
 
+	// A .gitignore below the root hides files too, as it does for git and for
+	// find_files. The walk below reads the one in each directory it enters;
+	// the directories between the root and the listed one are read here, top
+	// down, so their rules are in place first.
+	const listedSegments = relative(root, resolvedPath)
+		.split(/[/\\]/)
+		.filter(Boolean);
+	const isInsideRoot = listedSegments[0] !== '..';
+	if (isInsideRoot) {
+		for (let depth = 1; depth < listedSegments.length; depth++) {
+			const ancestor = listedSegments.slice(0, depth);
+			await addNestedGitignore(ig, join(root, ...ancestor), ancestor.join('/'));
+		}
+	}
+
 	try {
 		const entries: DirectoryEntry[] = [];
 
@@ -71,6 +86,13 @@ const executeListDirectory = async (
 			if (depth > maxDepth) return;
 
 			try {
+				if (isInsideRoot) {
+					await addNestedGitignore(
+						ig,
+						currentPath,
+						relative(root, currentPath).replace(/\\/g, '/'),
+					);
+				}
 				const items = await readdir(currentPath, {withFileTypes: true});
 
 				for (const item of items) {

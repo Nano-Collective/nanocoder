@@ -1,6 +1,7 @@
+import {errorMsg} from '@/components/message-factory';
 import {parseCustomCommandArgs} from '@/custom-commands/args';
 import type {Message, StatefulCommand} from '@/types/index';
-import {errorMsg} from '@/utils/message-factory';
+import {stripTurnContext} from '@/utils/turn-context';
 
 interface RetryArgs {
 	model?: string;
@@ -77,10 +78,13 @@ export const retryCommand: StatefulCommand = {
 			}
 		}
 
-		await context.submitChatMessage(
-			lastUserMessage.content,
-			lastUserMessage.content,
-		);
+		// The stored message carries last turn's context block (#1574). Re-submit
+		// only what the user typed: handleChatMessage builds a fresh block for
+		// this turn, so passing the stored text would wrap one block inside
+		// another and — worse — match skills and recall memories against a query
+		// containing the previous turn's own recalled context.
+		const retryText = stripTurnContext(lastUserMessage.content);
+		await context.submitChatMessage(retryText, retryText);
 		// The retried chat turn owns its completion signal. Signalling another
 		// one here can start the next queued prompt while that turn unwinds.
 		return 'handed-off';

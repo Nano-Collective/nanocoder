@@ -10,9 +10,9 @@ import {
 	synthesizeCloudSpeech,
 	transcribeCloudAudio,
 } from '@/services/cloud-audio';
-import {generateKey} from '@/session/key-generator';
 import type {LLMClient, Message} from '@/types/core';
 import {formatForSpeech} from '@/utils/format-for-speech';
+import {generateKey} from '@/utils/key-generator';
 import {
 	hasDeclinedVoiceInstallForSession,
 	setDeclinedVoiceInstallForSession,

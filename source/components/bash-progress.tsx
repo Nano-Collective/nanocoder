@@ -5,7 +5,7 @@ import ToolMessage, {ToolOutputContext} from '@/components/tool-message';
 import {TOOL_OUTPUT_DISPLAY_LINES, TRUNCATION_OUTPUT_LIMIT} from '@/constants';
 import {useTheme} from '@/hooks/useTheme';
 import {type BashExecutionState, bashExecutor} from '@/services/bash-executor';
-import {splitCommandForDisplay} from '@/utils/shell-command-display';
+import {splitCommandForDisplay} from '@/terminal/shell-command-display';
 import {estimateTokens} from '@/utils/token-calculator';
 
 interface BashProgressProps {

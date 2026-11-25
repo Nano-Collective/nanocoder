@@ -8,17 +8,17 @@
 import {Box, Text} from 'ink';
 import React from 'react';
 import {copyAgentToProject, createAgentFile} from '@/commands/create-scaffold';
+import {errorMsg} from '@/components/message-factory';
 import {InfoField} from '@/components/ui/info-field';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {parseMarkdown} from '@/markdown-parser/index';
-import {generateKey} from '@/session/key-generator';
 import {getSubagentLoader} from '@/subagents/subagent-loader';
 import type {SubagentConfigWithSource} from '@/subagents/types';
+import {wrapWithTrimmedContinuations} from '@/terminal/text-wrapping';
 import type {Command, StatefulCommand} from '@/types/index';
-import {errorMsg} from '@/utils/message-factory';
-import {wrapWithTrimmedContinuations} from '@/utils/text-wrapping';
+import {generateKey} from '@/utils/key-generator';
 
 interface SubagentsListProps {
 	subagents: Array<{

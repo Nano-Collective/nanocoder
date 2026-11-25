@@ -39,7 +39,7 @@ const {ThemeContext} = await import('@/hooks/useTheme');
 const {TitleShapeContext} = await import('@/hooks/useTitleShape');
 const {UIStateProvider} = await import('@/hooks/useUIState');
 const {SettingsSelector} = await import('./settings-selector');
-type TitleShape = import('@/components/ui/styled-title').TitleShape;
+type TitleShape = import('@/types/ui').TitleShape;
 
 /**
  * Renders SettingsSelector with an explicit title shape — renderWithTheme

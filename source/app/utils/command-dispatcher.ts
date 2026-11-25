@@ -2,17 +2,8 @@ import React from 'react';
 import {commandRegistry} from '@/commands';
 import {expandCommandAlias, findRetiredCommand} from '@/commands/aliases';
 import CommandProgress from '@/components/command-progress';
+import {infoMsg, warningMsg} from '@/components/message-factory';
 import {DELAY_COMMAND_COMPLETE_MS} from '@/constants';
-import {parseCustomCommandArgs} from '@/custom-commands/args';
-import {expandCustomCommandPrompt} from '@/custom-commands/executor';
-import {generateKey} from '@/session/key-generator';
-import {
-	type CommandCompletion,
-	type CommandContext,
-	type CommandHandlerMetadata,
-	isStatefulCommand,
-	type MessageSubmissionOptions,
-} from '@/types/index';
 import {
 	applyOnceOverrides,
 	expandOverrideArgs,
@@ -20,8 +11,17 @@ import {
 	getOnceThreshold,
 	isRecognizedOverrideKey,
 	parseInlineOverrides,
-} from '@/utils/inline-overrides';
-import {infoMsg, warningMsg} from '@/utils/message-factory';
+} from '@/conversation/compaction/inline-overrides';
+import {parseCustomCommandArgs} from '@/custom-commands/args';
+import {expandCustomCommandPrompt} from '@/custom-commands/executor';
+import {
+	type CommandCompletion,
+	type CommandContext,
+	type CommandHandlerMetadata,
+	isStatefulCommand,
+	type MessageSubmissionOptions,
+} from '@/types/index';
+import {generateKey} from '@/utils/key-generator';
 import {handleMCPPromptCommand} from './handlers/mcp-prompt-handler';
 import {stripVSCodeContext} from './vscode-context';
 
@@ -123,6 +123,7 @@ function createCommandContext(
 		enterSessionSelectorMode: options.onEnterSessionSelectorMode,
 		resumeSession: options.onResumeSession,
 		switchModel: options.onSwitchModel,
+		switchMode: options.onSwitchMode,
 		submitChatMessage: (message, displayValue) =>
 			options.onHandleChatMessage(message, displayValue),
 	};

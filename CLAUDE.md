@@ -49,14 +49,17 @@ Nanocoder is a React-based CLI coding agent built with Ink.js that provides loca
 - `source/hooks/` - React hooks: `useAppState` (central state), `useModeHandlers`, `useAppHandlers` (orchestrator), plus `chat-handler/useChatHandler` (LLM interaction) with the conversation loop and tool executor in `chat-handler/conversation/`
 - `source/app/` - `App.tsx` plus app-internal helpers (`utils/app-util.ts`, `utils/command-dispatcher.ts`, `utils/conversation-state.ts`, prompt sections, orchestration hooks in `app/hooks/`)
 - `source/ai-sdk-client/` - Wrapper over Vercel AI SDK: chat handler, providers, converters, tool helpers, error handling
-- `source/tools/` - Built-in tools (file ops, bash, search, web fetch). Registered in `source/tools/tool-manager.ts`; file editors are `string_replace`, `diff_edit` and `write_file` (in `source/tools/file-ops/`)
-- `source/components/` - Ink UI components
+- `source/tools/` - Built-in tools (file ops, bash, search, web fetch). Registered in `source/tools/tool-manager.ts`; file editors are `string_replace`, `diff_edit` and `write_file` (in `source/tools/file-ops/`, with their helpers: edit recovery, literal replace, line endings, path validators). `source/tools/runtime/` holds the tool-call runtime every frontend shares: per-tool approval checks, the approval / confirm / question queues, argument parsing, call ids, cancellation, schema validation, result truncation and the read tracker
+- `source/components/` - Ink UI components, plus the Ink-bound helpers other layers render through: `message-factory.ts` (`errorMsg`/`infoMsg`/...), `message-queue.tsx` (chat-queue renderer), `tool-result-display.tsx`
+- `source/utils/` - Framework-free helpers (logging, shutdown, error formatting, text). `utils/fs/` holds the filesystem helpers: atomic writes, file locks, the file cache, gitignore loading, file search (ripgrep) and file trees, glob matching, path validation. Nothing here renders Ink: UI helpers live in `components/`
 - `source/config/` - Configuration loading and preferences
 - `source/commands/` - Built-in slash commands (`/model`, `/provider`, `/clear`, etc.)
 - `source/custom-commands/` - User-defined markdown commands from `.nanocoder/commands/`
 - `source/mcp/` - Model Context Protocol server integration
 - `source/tool-calling/` - XML/text tool-call parsers for the fallback path (non-native-tool models)
-- `source/services/` - Checkpoint manager, bash executor, file snapshots, lifecycle hooks (user shell commands run at fixed points in the agent loop)
+- `source/services/` - Checkpoint manager, bash executor, file snapshots, lifecycle hooks (user shell commands run at fixed points in the agent loop), update checker, desktop notifications
+- `source/input/` - Ink-free prompt-input model behind `components/composer/`: paste and attachment placeholders, paste detection, atomic placeholder deletion, `@file` / MCP resource mentions, file autocomplete, clipboard images, and `assemblePrompt` (`prompt-processor.ts`)
+- `source/terminal/` - Terminal protocol and text rendering helpers: keypress, mouse and bracketed-paste parsing, OSC 8 file links, newline-key detection, syntax highlighting, text wrapping, ANSI-aware truncation
 - `source/usage/` - Token/cost usage: breakdown calculator, per-response usage + cost builder (provider-reported tokens priced via models.dev), compact formatters for the per-response indicator, context-window percentage from provider-reported usage. Lifetime usage history lives in `source/stats/`
 - `source/session/` - Chat session persistence (autosave / resume)
 - `source/schedule/` - Cron expression helpers (validate, next run, human-readable labels) used by `/skills schedule` and skill cron subscriptions
@@ -66,6 +69,7 @@ Nanocoder is a React-based CLI coding agent built with Ink.js that provides loca
 - `source/wizards/` - Interactive setup flows (config, MCP, providers)
 - `source/plain/` - Non-Ink CLI shell used by `--plain`
 - `source/agent-loop/` - Shared, Ink-free agent turn engine (`runTurnEngine`): one iterative loop owning the model call, text tool-call parsing, retry guards, auto-compaction and turn limits. Every frontend plugs in through an adapter: the TUI (`hooks/chat-handler/conversation/conversation-loop.tsx`), `--plain`, ACP and subagents all run on it, with TUI-only behaviours (interactive repeated-call prompt, compact-and-retry, text tool calls on native models) switched on through engine policy and hooks
+- `source/conversation/` - Framework-free conversation primitives the agent loop and every frontend share: system prompt assembly (`prompt-builder.ts`), message building, capping and visibility, run outcome. `conversation/compaction/` holds auto-compaction, `/compact` (message compression, LLM summariser, compression backup) and the `?key=value` once-overrides
 - `source/skills/` - Unified skill primitive: loaders (bundle + flat-dir adapter), manifest parser, frontmatter `subscribe:` parser, registrar that fans members into the existing command / subagent / tool registries, dispatcher for triggered runs
 - `source/events/` - Event router, file watcher source (chokidar), cron source (croner), backpressure (per-subscription concurrency cap + 500ms trailing debounce on `file.changed`)
 - `source/daemon/` - Per-project daemon process: lockfile, Unix-socket IPC server / TUI client, CLI surface (`nanocoder daemon <start|stop|status|logs|install|uninstall>`), launchd plist + systemd user unit installers, background CI watch
@@ -86,7 +90,7 @@ Nanocoder is a React-based CLI coding agent built with Ink.js that provides loca
 
 ### State Management Pattern
 
-All state lives in `source/hooks/useAppState.tsx`. Other hooks (`useChatHandler`, `useModeHandlers`) receive state and setters from it. `source/app/App.tsx` orchestrates them via `useAppHandlers`. Global `source/utils/message-queue.tsx` lets deep components push chat messages without prop-drilling. Non-UI modules import the `notify*` helpers from `source/utils/message-queue-core.ts` instead, which has no React/Ink imports, so the CLI fast paths stay Ink-free (`source/config/no-ink-fast-paths.spec.ts` enforces this).
+All state lives in `source/hooks/useAppState.tsx`. Other hooks (`useChatHandler`, `useModeHandlers`) receive state and setters from it. `source/app/App.tsx` orchestrates them via `useAppHandlers`. The global chat queue in `source/utils/message-queue-core.ts` lets any module push chat messages (`addToMessageQueue`, the `notify*` helpers) without prop-drilling. It has no React/Ink imports, so the CLI fast paths stay Ink-free (`source/config/no-ink-fast-paths.spec.ts` enforces this); `source/components/message-queue.tsx` only adds the Ink renderer that `App.tsx` installs with `setGlobalMessageQueue`.
 
 ### Tool System
 
@@ -152,6 +156,7 @@ Bundle tools default to `tools_visibility: scoped`: hidden from the global tool 
 - **TypeScript strict mode** with `@/*` path alias mapping to `source/*`
 - **Biome** for formatting (tabs, single quotes, semicolons, trailing commas)
 - **Key lint rules**: `useExhaustiveDependencies: error`, `noUnusedVariables: error`, `noUnusedImports: error`
+- **Layering**: `utils/`, `types/` and `config/` are the bottom layer. They must not value-import `components/`, `hooks/`, `tools/`, `mcp/`, `session/` or `app/components/`. Each type-only import into those needs an allowlist entry with a reason. A value import of `app/`, `ai-sdk-client/` or `services/` needs a documented exception. `source/layering.spec.ts` enforces all of this; its failure message names the file, the import and the fix
 - **React 19** with Ink.js for CLI rendering
 
 ## Testing

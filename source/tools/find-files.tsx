@@ -7,7 +7,7 @@ import {getContainedSessionCwd} from '@/services/session-cwd';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
-import {findMatchingPaths} from '@/utils/file-search';
+import {findMatchingPaths} from '@/utils/fs/file-search';
 import {estimateTokens} from '@/utils/token-calculator';
 
 /**

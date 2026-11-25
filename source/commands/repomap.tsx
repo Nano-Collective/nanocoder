@@ -1,5 +1,6 @@
 import {Box, Text} from 'ink';
 import React from 'react';
+import {errorMsg} from '@/components/message-factory';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
@@ -9,9 +10,8 @@ import {
 	type RepoMap,
 } from '@/repo-map/index';
 import {getProjectRoot} from '@/services/session-cwd';
-import {generateKey} from '@/session/key-generator';
 import type {Command} from '@/types/index';
-import {errorMsg} from '@/utils/message-factory';
+import {generateKey} from '@/utils/key-generator';
 
 const MIN_TOKENS = 64;
 const MAX_TOKENS = 32_000;

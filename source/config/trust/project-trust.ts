@@ -10,13 +10,21 @@ import {
 import path from 'node:path';
 import {HOOK_EVENTS, type HookEvent} from '@/types/config';
 import {parseYamlObject, splitFrontmatter} from '@/utils/frontmatter';
+import {stripUtf8Bom} from '@/utils/strip-utf8-bom';
 
 /**
  * Bump when `describeProjectTrust` changes what it fingerprints. A trust entry
  * from another version holds a fingerprint that can't be compared with this
  * one, so it reads as needing re-approval rather than as a changed folder.
+ *
+ * Bumped to 2 because `listPermissionSettings` now fingerprints the top-level
+ * `mode` and `firewall` settings (#2306). Every previously trusted folder is
+ * re-asked once ("needs re-approval after the upgrade") because old entries
+ * are version 1 and the version check is exact — not only folders using
+ * `mode` or `firewall`. Folders trusted after the bump record version 2 and
+ * skip the one-time re-prompt.
  */
-export const TRUST_FINGERPRINT_VERSION = 1;
+export const TRUST_FINGERPRINT_VERSION = 2;
 
 export interface ProjectTrustSurface {
 	plugins: number;
@@ -60,6 +68,7 @@ export function describeProjectTrust(directory: string): ProjectTrustSurface {
 	const formatters = listFormatters(config, lines);
 	const lspServers = listLspServers(config, lines);
 	const mcpServers = listMcpServers(root, lines);
+	const profileMcpServers = listProfileMcpServers(config, lines);
 	const customTools = listCustomTools(root, lines);
 	const subscribedSkills = listSubscribedSkills(root, lines);
 	const subscribedAgents = listSubscribedFiles(root, 'agents', false, lines);
@@ -73,6 +82,7 @@ export function describeProjectTrust(directory: string): ProjectTrustSurface {
 		countLabel(hooks.sessionStart, 'session-start hook', 'session-start hooks'),
 		countLabel(hooks.other, 'other hook', 'other hooks'),
 		countLabel(mcpServers, 'MCP server', 'MCP servers'),
+		countLabel(profileMcpServers, 'profile MCP server', 'profile MCP servers'),
 		countLabel(formatters, 'formatter', 'formatters'),
 		countLabel(lspServers, 'LSP server', 'LSP servers'),
 		countLabel(customTools, 'custom tool', 'custom tools'),
@@ -138,22 +148,41 @@ function listHooks(
 	config: ProjectConfig | undefined,
 	lines: string[],
 ): {sessionStart: number; other: number} {
-	const hooks = config?.nanocoder?.hooks;
-	if (!hooks || typeof hooks !== 'object' || Array.isArray(hooks)) {
-		return {sessionStart: 0, other: 0};
-	}
-
 	let sessionStart = 0;
 	let other = 0;
-	for (const event of HOOK_EVENTS) {
-		const entries = hookEntries(hooks[event]);
-		// The whole entry: matchTools, matchFiles, and timeout change what runs.
-		for (const entry of entries) {
-			lines.push(`hook ${event} ${JSON.stringify(entry)}`);
+
+	const countHooksObject = (hooks: unknown, prefix: string): void => {
+		if (!hooks || typeof hooks !== 'object' || Array.isArray(hooks)) {
+			return;
 		}
-		if (event === 'session-start') sessionStart += entries.length;
-		else other += entries.length;
+		const hooksRecord = hooks as Record<string, unknown>;
+		for (const event of HOOK_EVENTS) {
+			const entries = hookEntries(hooksRecord[event]);
+			// The whole entry: matchTools, matchFiles, and timeout change what runs.
+			for (const entry of entries) {
+				lines.push(`${prefix}${event} ${JSON.stringify(entry)}`);
+			}
+			if (event === 'session-start') sessionStart += entries.length;
+			else other += entries.length;
+		}
+	};
+
+	countHooksObject(config?.nanocoder?.hooks, 'hook ');
+
+	const profiles = config?.nanocoder?.profiles;
+	if (profiles && typeof profiles === 'object' && !Array.isArray(profiles)) {
+		for (const [profileName, profile] of Object.entries(profiles).sort(
+			([a], [b]) => a.localeCompare(b),
+		)) {
+			if (profile && typeof profile === 'object' && !Array.isArray(profile)) {
+				countHooksObject(
+					(profile as Record<string, unknown>).hooks,
+					`hook profile:${profileName} `,
+				);
+			}
+		}
 	}
+
 	return {sessionStart, other};
 }
 
@@ -161,26 +190,44 @@ function listFormatters(
 	config: ProjectConfig | undefined,
 	lines: string[],
 ): number {
-	const formatters = config?.nanocoder?.formatters;
-	if (!Array.isArray(formatters)) return 0;
-
 	let count = 0;
-	for (const entry of formatters) {
-		if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue;
-		const command = (entry as {command?: unknown}).command;
-		if (typeof command !== 'string' || command.trim() === '') continue;
-		const match = (entry as {match?: unknown}).match;
-		const globs = Array.isArray(match)
-			? match.filter((item): item is string => typeof item === 'string')
-			: typeof match === 'string'
-				? [match]
-				: [];
-		if (globs.length === 0) continue;
-		// The whole entry, so `prettier` + `--write *.ts` and
-		// `prettier --write` + `*.ts` can't produce the same line.
-		lines.push(`formatter ${JSON.stringify(entry)}`);
-		count++;
+
+	const countFormattersArray = (formatters: unknown, prefix: string): void => {
+		if (!Array.isArray(formatters)) return;
+		for (const entry of formatters) {
+			if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue;
+			const command = (entry as {command?: unknown}).command;
+			if (typeof command !== 'string' || command.trim() === '') continue;
+			const match = (entry as {match?: unknown}).match;
+			const globs = Array.isArray(match)
+				? match.filter((item): item is string => typeof item === 'string')
+				: typeof match === 'string'
+					? [match]
+					: [];
+			if (globs.length === 0) continue;
+			// The whole entry, so `prettier` + `--write *.ts` and
+			// `prettier --write` + `*.ts` can't produce the same line.
+			lines.push(`${prefix}${JSON.stringify(entry)}`);
+			count++;
+		}
+	};
+
+	countFormattersArray(config?.nanocoder?.formatters, 'formatter ');
+
+	const profiles = config?.nanocoder?.profiles;
+	if (profiles && typeof profiles === 'object' && !Array.isArray(profiles)) {
+		for (const [profileName, profile] of Object.entries(profiles).sort(
+			([a], [b]) => a.localeCompare(b),
+		)) {
+			if (profile && typeof profile === 'object' && !Array.isArray(profile)) {
+				countFormattersArray(
+					(profile as Record<string, unknown>).formatters,
+					`formatter profile:${profileName} `,
+				);
+			}
+		}
 	}
+
 	return count;
 }
 
@@ -194,18 +241,36 @@ function listLspServers(
 	config: ProjectConfig | undefined,
 	lines: string[],
 ): number {
-	const servers = config?.nanocoder?.lspServers;
-	if (!Array.isArray(servers)) return 0;
-
 	let count = 0;
-	for (const entry of servers) {
-		if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue;
-		const {name, command, languages} = entry as Record<string, unknown>;
-		if (typeof name !== 'string' || typeof command !== 'string') continue;
-		if (command.trim() === '' || !Array.isArray(languages)) continue;
-		lines.push(`lsp ${JSON.stringify(entry)}`);
-		count++;
+
+	const countServers = (servers: unknown, prefix: string): void => {
+		if (!Array.isArray(servers)) return;
+		for (const entry of servers) {
+			if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue;
+			const {name, command, languages} = entry as Record<string, unknown>;
+			if (typeof name !== 'string' || typeof command !== 'string') continue;
+			if (command.trim() === '' || !Array.isArray(languages)) continue;
+			lines.push(`${prefix}${JSON.stringify(entry)}`);
+			count++;
+		}
+	};
+
+	countServers(config?.nanocoder?.lspServers, 'lsp ');
+
+	const profiles = config?.nanocoder?.profiles;
+	if (profiles && typeof profiles === 'object' && !Array.isArray(profiles)) {
+		for (const [profileName, profile] of Object.entries(profiles).sort(
+			([a], [b]) => a.localeCompare(b),
+		)) {
+			if (profile && typeof profile === 'object' && !Array.isArray(profile)) {
+				countServers(
+					(profile as Record<string, unknown>).lspServers,
+					`lsp profile:${profileName} `,
+				);
+			}
+		}
 	}
+
 	return count;
 }
 
@@ -228,23 +293,55 @@ function listPermissionSettings(
 	const nanocoder = config?.nanocoder;
 	if (!nanocoder || typeof nanocoder !== 'object') return 0;
 
-	const settings: [string, unknown][] = [
-		['alwaysAllow', nanocoder.alwaysAllow],
-		['defaultMode', nanocoder.defaultMode],
-		['sandbox', nanocoder.sandbox],
-		[
-			'verify.trustLevel',
-			nanocoder.verify && typeof nanocoder.verify === 'object'
-				? (nanocoder.verify as {trustLevel?: unknown}).trustLevel
-				: undefined,
-		],
-	];
 	let count = 0;
-	for (const [name, value] of settings) {
-		if (value === undefined) continue;
-		lines.push(`setting ${name} ${JSON.stringify(value)}`);
+
+	const checkSettings = (
+		obj: Record<string, unknown>,
+		prefix: string,
+	): void => {
+		const settings: [string, unknown][] = [
+			['alwaysAllow', obj.alwaysAllow],
+			['defaultMode', obj.defaultMode],
+			['mode', obj.mode],
+			['sandbox', obj.sandbox],
+			['firewall', obj.firewall],
+			[
+				'verify.trustLevel',
+				obj.verify && typeof obj.verify === 'object'
+					? (obj.verify as {trustLevel?: unknown}).trustLevel
+					: undefined,
+			],
+		];
+		for (const [name, value] of settings) {
+			if (value === undefined) continue;
+			lines.push(`setting ${prefix}${name} ${JSON.stringify(value)}`);
+			count++;
+		}
+	};
+
+	if (nanocoder.defaultProfile !== undefined) {
+		lines.push(
+			`setting defaultProfile ${JSON.stringify(nanocoder.defaultProfile)}`,
+		);
 		count++;
 	}
+
+	checkSettings(nanocoder as Record<string, unknown>, '');
+
+	const profiles = nanocoder.profiles;
+	if (profiles && typeof profiles === 'object' && !Array.isArray(profiles)) {
+		for (const [profileName, profile] of Object.entries(profiles).sort(
+			([a], [b]) => a.localeCompare(b),
+		)) {
+			if (profile && typeof profile === 'object' && !Array.isArray(profile)) {
+				checkSettings(
+					profile as Record<string, unknown>,
+					`profile:${profileName}.`,
+				);
+			}
+		}
+	}
+
 	return count;
 }
 
@@ -257,22 +354,42 @@ function listProviderEndpoints(
 	config: ProjectConfig | undefined,
 	lines: string[],
 ): number {
-	const providers = Array.isArray(config?.nanocoder?.providers)
+	let count = 0;
+
+	const countProviders = (providers: unknown, prefix: string): void => {
+		if (!Array.isArray(providers)) return;
+		for (const entry of providers) {
+			if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue;
+			const {name, baseUrl} = entry as Record<string, unknown>;
+			if (baseUrl === undefined) continue;
+			lines.push(
+				`provider ${prefix}${JSON.stringify(name)} baseUrl ${JSON.stringify(baseUrl)}`,
+			);
+			count++;
+		}
+	};
+
+	const topProviders = Array.isArray(config?.nanocoder?.providers)
 		? config.nanocoder.providers
 		: Array.isArray(config?.providers)
 			? config.providers
 			: [];
+	countProviders(topProviders, '');
 
-	let count = 0;
-	for (const entry of providers) {
-		if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue;
-		const {name, baseUrl} = entry as Record<string, unknown>;
-		if (baseUrl === undefined) continue;
-		lines.push(
-			`provider ${JSON.stringify(name)} baseUrl ${JSON.stringify(baseUrl)}`,
-		);
-		count++;
+	const profiles = config?.nanocoder?.profiles;
+	if (profiles && typeof profiles === 'object' && !Array.isArray(profiles)) {
+		for (const [profileName, profile] of Object.entries(profiles).sort(
+			([a], [b]) => a.localeCompare(b),
+		)) {
+			if (profile && typeof profile === 'object' && !Array.isArray(profile)) {
+				countProviders(
+					(profile as Record<string, unknown>).providers,
+					`profile:${profileName} `,
+				);
+			}
+		}
 	}
+
 	return count;
 }
 
@@ -292,7 +409,7 @@ function listMcpServers(root: string, lines: string[]): number {
 
 	let parsed: unknown;
 	try {
-		parsed = JSON.parse(raw) as unknown;
+		parsed = JSON.parse(stripUtf8Bom(raw)) as unknown;
 	} catch {
 		return 0;
 	}
@@ -302,6 +419,93 @@ function listMcpServers(root: string, lines: string[]): number {
 		return 0;
 	}
 	return Object.keys(servers).length;
+}
+
+/**
+ * Profile MCP servers declared under `nanocoder.profiles.<name>.mcpServers`.
+ * Each is fingerprinted by name unconditionally plus command, args, env keys,
+ * url, transport, enabled, alwaysAllow, and header keys, so adding a server
+ * (even a URL-only one) or swapping any of these is a trust change and the
+ * folder is asked to trust again before the server starts.
+ */
+function listProfileMcpServers(
+	config: ProjectConfig | undefined,
+	lines: string[],
+): number {
+	const nanocoder = config?.nanocoder;
+	if (!nanocoder || typeof nanocoder !== 'object') return 0;
+	const profiles = nanocoder.profiles;
+	if (!profiles || typeof profiles !== 'object' || Array.isArray(profiles))
+		return 0;
+	let count = 0;
+	for (const [profileName, profile] of Object.entries(profiles).sort(
+		([a], [b]) => a.localeCompare(b),
+	)) {
+		if (!profile || typeof profile !== 'object' || Array.isArray(profile))
+			continue;
+		const servers = (profile as Record<string, unknown>).mcpServers;
+		if (!servers || typeof servers !== 'object' || Array.isArray(servers))
+			continue;
+		for (const [serverName, serverConfig] of Object.entries(
+			servers as Record<string, unknown>,
+		)) {
+			if (!serverConfig || typeof serverConfig !== 'object') continue;
+			const server = serverConfig as {
+				command?: unknown;
+				args?: unknown;
+				env?: unknown;
+				url?: unknown;
+				transport?: unknown;
+				enabled?: unknown;
+				alwaysAllow?: unknown;
+				headers?: unknown;
+			};
+			const parts: string[] = [`name ${serverName}`];
+			if (typeof server.command === 'string') {
+				parts.push(`command ${server.command}`);
+			}
+			if (Array.isArray(server.args)) {
+				parts.push(`args ${JSON.stringify(server.args)}`);
+			}
+			if (typeof server.url === 'string') {
+				parts.push(`url ${server.url}`);
+			}
+			if (typeof server.transport === 'string') {
+				parts.push(`transport ${server.transport}`);
+			}
+			if (typeof server.enabled === 'boolean') {
+				parts.push(`enabled ${server.enabled}`);
+			}
+			if (Array.isArray(server.alwaysAllow)) {
+				parts.push(`alwaysAllow ${JSON.stringify(server.alwaysAllow)}`);
+			}
+			if (
+				server.headers &&
+				typeof server.headers === 'object' &&
+				!Array.isArray(server.headers)
+			) {
+				parts.push(
+					`headers ${JSON.stringify(
+						Object.keys(server.headers as Record<string, unknown>).sort(),
+					)}`,
+				);
+			}
+			if (
+				server.env &&
+				typeof server.env === 'object' &&
+				!Array.isArray(server.env)
+			) {
+				parts.push(
+					`env ${JSON.stringify(
+						Object.keys(server.env as Record<string, unknown>).sort(),
+					)}`,
+				);
+			}
+			lines.push(`mcp profile:${profileName}.${serverName} ${parts.join(' ')}`);
+			count++;
+		}
+	}
+	return count;
 }
 
 function listCustomTools(root: string, lines: string[]): number {
@@ -448,12 +652,16 @@ function hookEntries(entries: unknown): object[] {
 
 interface ProjectConfig {
 	nanocoder?: {
+		defaultProfile?: unknown;
+		profiles?: Record<string, unknown>;
 		hooks?: Partial<Record<HookEvent, unknown>>;
 		formatters?: unknown[];
 		lspServers?: unknown[];
 		alwaysAllow?: unknown;
 		defaultMode?: unknown;
+		mode?: unknown;
 		sandbox?: unknown;
+		firewall?: unknown;
 		verify?: unknown;
 		providers?: unknown;
 	};
@@ -481,7 +689,7 @@ function readJsonFile(file: string, lines: string[]): unknown {
 		return undefined;
 	}
 	try {
-		return JSON.parse(raw) as unknown;
+		return JSON.parse(stripUtf8Bom(raw)) as unknown;
 	} catch {
 		lines.push(`invalid ${path.basename(file)} ${hashText(raw)}`);
 		return undefined;

@@ -9,15 +9,15 @@
 import {Box, Text} from 'ink';
 import React from 'react';
 import {createToolFile} from '@/commands/create-scaffold';
+import {infoMsg} from '@/components/message-factory';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {getToolManager} from '@/message-handler';
-import {generateKey} from '@/session/key-generator';
 import {findSkill} from '@/skills/skill-registry';
 import type {ToolManager} from '@/tools/tool-manager';
 import type {Command, StatefulCommand} from '@/types/index';
-import {infoMsg} from '@/utils/message-factory';
+import {generateKey} from '@/utils/key-generator';
 
 export interface GroupedTools {
 	builtin: string[];

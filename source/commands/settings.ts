@@ -2,8 +2,8 @@ import {
 	SETTINGS_TAB_IDS,
 	type SettingsTabId,
 } from '@/app/components/settings-constants';
+import {errorMsg} from '@/components/message-factory';
 import type {StatefulCommand} from '@/types/index';
-import {errorMsg} from '@/utils/message-factory';
 
 function isSettingsTabId(value: string): value is SettingsTabId {
 	return (SETTINGS_TAB_IDS as readonly string[]).includes(value);
