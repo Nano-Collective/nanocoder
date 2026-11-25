@@ -675,6 +675,29 @@ test('onlyOfferedTextToolCalls keeps quoted non-offered markup untouched while p
 	t.is(offered.history().at(-1)?.content, 'done');
 });
 
+test('onlyOfferedTextToolCalls still runs an offered call next to quoted markup', async t => {
+	const mixed =
+		'The component renders <Box><Text>row</Text></Box>.\n<probe><id>1</id></probe>';
+	const run = setup(
+		[{...text(mixed), toolsDisabled: true}, text('done')],
+		{},
+		{
+			policy: {
+				textToolCalls: 'whenever-no-native',
+				onlyOfferedTextToolCalls: true,
+				textToolHistory: 'text',
+			},
+		},
+	);
+	const result = await run.run();
+	t.is(result.kind, 'completed');
+	t.is(result.modelCalls, 2);
+	const [, assistant, toolReply] = run.history();
+	t.is(assistant.content, mixed);
+	t.is(toolReply.content, 'Result of probe:\nok');
+	t.is(run.history().at(-1)?.content, 'done');
+});
+
 test('textToolHistory text pairs raw assistant text with a user result message, leaving native calls native', async t => {
 	const textMode = setup(
 		[
