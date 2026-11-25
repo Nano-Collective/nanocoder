@@ -271,3 +271,90 @@ test('copyCommand code handles indented fences inside lists', async t => {
 	await copyCommand.handler(['code'], messages, testMetadata);
 	t.is(lastWritten, 'const x = 1;');
 });
+
+// OSC 52 route: the system write fails (no xclip over SSH, in a container) and
+// the terminal is a TTY, so the text goes to stdout as an escape sequence.
+async function withTerminalStdout<T>(
+	run: (writes: string[]) => Promise<T>,
+): Promise<T> {
+	const writes: string[] = [];
+	const originalIsTTY = process.stdout.isTTY;
+	const originalStdoutWrite = process.stdout.write;
+	process.stdout.isTTY = true;
+	process.stdout.write = ((data: string) => {
+		writes.push(String(data));
+		return true;
+	}) as typeof process.stdout.write;
+	try {
+		return await run(writes);
+	} finally {
+		process.stdout.isTTY = originalIsTTY;
+		process.stdout.write = originalStdoutWrite;
+	}
+}
+
+test.serial('copyCommand falls back to OSC 52 when the system clipboard fails', async t => {
+	writeImpl = async () => {
+		throw new Error('xclip not found');
+	};
+
+	const {result, writes} = await withTerminalStdout(async writes => ({
+		result: await copyCommand.handler([], baseMessages, testMetadata),
+		writes,
+	}));
+
+	const expected = Buffer.from('To get to the other side.').toString('base64');
+	t.is(writes.length, 1);
+	t.true(writes[0]?.includes(`]52;c;${expected}`));
+
+	const {lastFrame} = renderWithTheme(result as React.ReactElement);
+	const output = lastFrame() || '';
+	t.true(output.includes('Sent last response to the terminal clipboard via OSC 52'));
+	t.false(output.includes('Failed to copy'));
+});
+
+test.serial('copyCommand code reports the OSC 52 route for the code block', async t => {
+	writeImpl = async () => {
+		throw new Error('xclip not found');
+	};
+	const messages: Message[] = [
+		{role: 'assistant', content: '```js\nconst x = 1;\n```'},
+	];
+
+	const {result, writes} = await withTerminalStdout(async writes => ({
+		result: await copyCommand.handler(['code'], messages, testMetadata),
+		writes,
+	}));
+
+	t.true(writes[0]?.includes(`]52;c;${Buffer.from('const x = 1;').toString('base64')}`));
+	const {lastFrame} = renderWithTheme(result as React.ReactElement);
+	t.true((lastFrame() || '').includes('Sent code block to the terminal clipboard via OSC 52 (1 line'));
+});
+
+test.serial('copyCommand still reports the system error when stdout is not a terminal', async t => {
+	writeImpl = async () => {
+		throw new Error('xclip not found');
+	};
+
+	const result = await copyCommand.handler([], baseMessages, testMetadata);
+	const {lastFrame} = renderWithTheme(result as React.ReactElement);
+	t.true((lastFrame() || '').includes('Failed to copy to clipboard: xclip not found'));
+});
+
+test.serial('copyCommand says when only the remote machine clipboard was set', async t => {
+	writeImpl = async () => {};
+	const original = process.env.SSH_CLIENT;
+	process.env.SSH_CLIENT = '1.2.3.4 1 22';
+	try {
+		// stdout is not a terminal in the test run, so OSC 52 is not possible.
+		const result = await copyCommand.handler([], baseMessages, testMetadata);
+		const {lastFrame} = renderWithTheme(result as React.ReactElement);
+		t.true((lastFrame() || '').includes('clipboard of the remote machine'));
+	} finally {
+		if (original === undefined) {
+			delete process.env.SSH_CLIENT;
+		} else {
+			process.env.SSH_CLIENT = original;
+		}
+	}
+});
