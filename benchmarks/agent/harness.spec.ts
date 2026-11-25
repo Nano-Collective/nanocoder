@@ -287,6 +287,13 @@ test('command passes on exit 0 and fails otherwise', async t => {
 // runOnce, driven by a stub CLI instead of a model
 // ============================================================================
 
+function restoreEnv(previous: Record<string, string | undefined>): void {
+	for (const [key, value] of Object.entries(previous)) {
+		if (value === undefined) delete process.env[key];
+		else process.env[key] = value;
+	}
+}
+
 /** Write a stand-in for `dist/cli.js` that behaves however the test needs. */
 async function stubCli(body: string): Promise<string> {
 	const cliPath = path.join(tempRoot, 'stub-cli.js');
@@ -339,9 +346,14 @@ test('runOnce passes and records the reported steps and tokens', async t => {
 	t.true(run.durationMs >= 0);
 });
 
-test.serial('runOnce isolates user config and carries over only providers', async t => {
+test.serial('runOnce isolates user config and data, carrying over only providers', async t => {
 	const sourceConfigDir = path.join(tempRoot, 'user-config');
 	await fs.mkdir(sourceConfigDir, {recursive: true});
+	const sourceDataDir = path.join(tempRoot, 'user-data');
+	const userMemoryPath = path.join(sourceDataDir, 'memory', 'private.json');
+	await fs.mkdir(path.dirname(userMemoryPath), {recursive: true});
+	const userMemoryContents = '{"memory":"keep this private"}';
+	await fs.writeFile(userMemoryPath, userMemoryContents);
 	const providers = [
 		{
 			name: 'Ollama',
@@ -383,6 +395,7 @@ test.serial('runOnce isolates user config and carries over only providers', asyn
 		},
 	};
 	const userConfigContents = JSON.stringify(userConfig, null, 2);
+	const agentsConfigPath = path.join(sourceConfigDir, 'agents.config.json');
 	const preferencesPath = path.join(
 		sourceConfigDir,
 		'nanocoder-preferences.json',
@@ -393,7 +406,7 @@ test.serial('runOnce isolates user config and carries over only providers', asyn
 		lastModel: 'private-model',
 	});
 	await fs.writeFile(
-		path.join(sourceConfigDir, 'agents.config.json'),
+		agentsConfigPath,
 		userConfigContents,
 	);
 	await fs.writeFile(preferencesPath, preferencesContents);
@@ -411,33 +424,39 @@ test.serial('runOnce isolates user config and carries over only providers', asyn
 		tempRoot,
 		'captured-run-config-unmatched-provider.json',
 	);
-	const previousEnvironment = {
-		configDir: process.env.NANOCODER_CONFIG_DIR,
-		providers: process.env.NANOCODER_PROVIDERS,
-		providersFile: process.env.NANOCODER_PROVIDERS_FILE,
-		mcpServers: process.env.NANOCODER_MCPSERVERS,
-		mcpServersFile: process.env.NANOCODER_MCPSERVERS_FILE,
-		capturePath: process.env.AGENT_EVAL_CAPTURE_PATH,
+	const previousEnvironment: Record<string, string | undefined> = {
+		NANOCODER_CONFIG_DIR: process.env.NANOCODER_CONFIG_DIR,
+		NANOCODER_DATA_DIR: process.env.NANOCODER_DATA_DIR,
+		NANOCODER_PROVIDERS: process.env.NANOCODER_PROVIDERS,
+		NANOCODER_PROVIDERS_FILE: process.env.NANOCODER_PROVIDERS_FILE,
+		NANOCODER_MCPSERVERS: process.env.NANOCODER_MCPSERVERS,
+		NANOCODER_MCPSERVERS_FILE: process.env.NANOCODER_MCPSERVERS_FILE,
+		AGENT_EVAL_CAPTURE_PATH: process.env.AGENT_EVAL_CAPTURE_PATH,
 	};
-	process.env.NANOCODER_CONFIG_DIR = sourceConfigDir;
-	process.env.NANOCODER_PROVIDERS = JSON.stringify(environmentProviders);
-	process.env.NANOCODER_PROVIDERS_FILE = providersFilePath;
-	process.env.NANOCODER_MCPSERVERS = '[{"name":"private-env-server"}]';
-	process.env.NANOCODER_MCPSERVERS_FILE = path.join(
-		sourceConfigDir,
-		'private-mcp.json',
-	);
-	process.env.AGENT_EVAL_CAPTURE_PATH = capturePath;
-
 	try {
+		process.env.NANOCODER_CONFIG_DIR = sourceConfigDir;
+		process.env.NANOCODER_DATA_DIR = sourceDataDir;
+		process.env.NANOCODER_PROVIDERS = JSON.stringify(environmentProviders);
+		process.env.NANOCODER_PROVIDERS_FILE = providersFilePath;
+		process.env.NANOCODER_MCPSERVERS = '[{"name":"private-env-server"}]';
+		process.env.NANOCODER_MCPSERVERS_FILE = path.join(
+			sourceConfigDir,
+			'private-mcp.json',
+		);
+		process.env.AGENT_EVAL_CAPTURE_PATH = capturePath;
+
 		const cliPath = await stubCli(`
-			import {existsSync, readFileSync, writeFileSync} from 'node:fs';
+			import {existsSync, mkdirSync, readFileSync, writeFileSync} from 'node:fs';
 			import {join} from 'node:path';
 			const configDir = process.env.NANOCODER_CONFIG_DIR;
+			const dataDir = process.env.NANOCODER_DATA_DIR;
 			const configPath = join(configDir, 'agents.config.json');
 			const preferencesPath = join(configDir, 'nanocoder-preferences.json');
+			mkdirSync(join(dataDir, 'sessions'), {recursive: true});
+			writeFileSync(join(dataDir, 'sessions', 'benchmark.json'), 'temporary session');
 			const capture = {
 				configDir,
+				dataDir,
 				config: JSON.parse(readFileSync(configPath, 'utf8')),
 				preferencesExisted: existsSync(preferencesPath),
 				providersEnv: process.env.NANOCODER_PROVIDERS ?? null,
@@ -449,6 +468,18 @@ test.serial('runOnce isolates user config and carries over only providers', asyn
 			writeFileSync(preferencesPath, JSON.stringify({lastProvider: 'Ollama', lastModel: 'changed'}));
 			process.stdout.write(JSON.stringify({kind: 'success', exitCode: 0, finalText: 'done', steps: 1}));
 		`);
+		await fs.writeFile(agentsConfigPath, '{ malformed json');
+		const malformedConfigRun = await runOnce({
+			cliPath,
+			fixture: await fixture([{kind: 'files-unchanged'}]),
+			provider: 'ollama',
+			workspaceRoot: tempRoot,
+		});
+		t.false(malformedConfigRun.pass);
+		t.regex(malformedConfigRun.failure ?? '', /agents\.config\.json/);
+		await t.throwsAsync(() => fs.stat(capturePath), {code: 'ENOENT'});
+		await fs.writeFile(agentsConfigPath, userConfigContents);
+
 		const run = await runOnce({
 			cliPath,
 			fixture: await fixture([{kind: 'files-unchanged'}]),
@@ -459,6 +490,7 @@ test.serial('runOnce isolates user config and carries over only providers', asyn
 		t.true(run.pass);
 		const captured = JSON.parse(await fs.readFile(capturePath, 'utf8')) as {
 			configDir: string;
+			dataDir: string;
 			config: unknown;
 			preferencesExisted: boolean;
 			providersEnv: string | null;
@@ -467,6 +499,7 @@ test.serial('runOnce isolates user config and carries over only providers', asyn
 			mcpServersFile: string | null;
 		};
 		t.not(captured.configDir, sourceConfigDir);
+		t.not(captured.dataDir, sourceDataDir);
 		t.deepEqual(captured.config, {
 			nanocoder: {providers: [environmentProviders[0]]},
 		});
@@ -481,6 +514,8 @@ test.serial('runOnce isolates user config and carries over only providers', asyn
 		);
 		t.is(await fs.readFile(preferencesPath, 'utf8'), preferencesContents);
 		await t.throwsAsync(() => fs.stat(captured.configDir), {code: 'ENOENT'});
+		await t.throwsAsync(() => fs.stat(captured.dataDir), {code: 'ENOENT'});
+		t.is(await fs.readFile(userMemoryPath, 'utf8'), userMemoryContents);
 
 		delete process.env.NANOCODER_PROVIDERS;
 		process.env.AGENT_EVAL_CAPTURE_PATH = fileCapturePath;
@@ -494,6 +529,7 @@ test.serial('runOnce isolates user config and carries over only providers', asyn
 		const capturedFromFile = JSON.parse(
 			await fs.readFile(fileCapturePath, 'utf8'),
 		) as typeof captured;
+		t.not(capturedFromFile.dataDir, sourceDataDir);
 		t.deepEqual(capturedFromFile.config, {
 			nanocoder: {providers: [fileEnvironmentProviders[0]]},
 		});
@@ -502,6 +538,9 @@ test.serial('runOnce isolates user config and carries over only providers', asyn
 		t.is(capturedFromFile.mcpServers, null);
 		t.is(capturedFromFile.mcpServersFile, null);
 		await t.throwsAsync(() => fs.stat(capturedFromFile.configDir), {
+			code: 'ENOENT',
+		});
+		await t.throwsAsync(() => fs.stat(capturedFromFile.dataDir), {
 			code: 'ENOENT',
 		});
 
@@ -518,37 +557,7 @@ test.serial('runOnce isolates user config and carries over only providers', asyn
 			code: 'ENOENT',
 		});
 	} finally {
-		if (previousEnvironment.configDir === undefined) {
-			delete process.env.NANOCODER_CONFIG_DIR;
-		} else {
-			process.env.NANOCODER_CONFIG_DIR = previousEnvironment.configDir;
-		}
-		if (previousEnvironment.providers === undefined) {
-			delete process.env.NANOCODER_PROVIDERS;
-		} else {
-			process.env.NANOCODER_PROVIDERS = previousEnvironment.providers;
-		}
-		if (previousEnvironment.providersFile === undefined) {
-			delete process.env.NANOCODER_PROVIDERS_FILE;
-		} else {
-			process.env.NANOCODER_PROVIDERS_FILE =
-				previousEnvironment.providersFile;
-		}
-		if (previousEnvironment.mcpServers === undefined) {
-			delete process.env.NANOCODER_MCPSERVERS;
-		} else {
-			process.env.NANOCODER_MCPSERVERS = previousEnvironment.mcpServers;
-		}
-		if (previousEnvironment.mcpServersFile === undefined) {
-			delete process.env.NANOCODER_MCPSERVERS_FILE;
-		} else {
-			process.env.NANOCODER_MCPSERVERS_FILE = previousEnvironment.mcpServersFile;
-		}
-		if (previousEnvironment.capturePath === undefined) {
-			delete process.env.AGENT_EVAL_CAPTURE_PATH;
-		} else {
-			process.env.AGENT_EVAL_CAPTURE_PATH = previousEnvironment.capturePath;
-		}
+		restoreEnv(previousEnvironment);
 	}
 });
 

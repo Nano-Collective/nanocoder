@@ -172,9 +172,16 @@ async function copyProviderConfig(
 		if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
 	}
 
-	const configuredProviders = source
-		? (getProviderList(JSON.parse(source) as unknown) ?? [])
-		: [];
+	let configuredProviders: unknown[] = [];
+	if (source) {
+		try {
+			configuredProviders =
+				getProviderList(JSON.parse(source) as unknown) ?? [];
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			return `Could not parse ${path.basename(sourcePath)}: ${message}`;
+		}
+	}
 	const providersByName = new Map<string, unknown>();
 	for (const provider of configuredProviders) {
 		if (isRecord(provider) && typeof provider.name === 'string') {
@@ -452,6 +459,7 @@ export async function runOnce(options: RunOptions): Promise<TaskRun> {
 		path.join(tempRoot, `agent-eval-${fixture.name}-`),
 	);
 	let configDir: string | undefined;
+	let dataDir: string | undefined;
 
 	try {
 		configDir = await fs.mkdtemp(
@@ -464,6 +472,9 @@ export async function runOnce(options: RunOptions): Promise<TaskRun> {
 		if (providerConfigFailure) {
 			return failedRun(fixture.name, 0, providerConfigFailure);
 		}
+		dataDir = await fs.mkdtemp(
+			path.join(tempRoot, `agent-eval-data-${fixture.name}-`),
+		);
 		await copyFixture(fixture.dir, workspace);
 		const before = await hashTree(workspace);
 
@@ -486,6 +497,7 @@ export async function runOnce(options: RunOptions): Promise<TaskRun> {
 		const env = {
 			...process.env,
 			NANOCODER_CONFIG_DIR: configDir,
+			NANOCODER_DATA_DIR: dataDir,
 			NO_COLOR: '1',
 			FORCE_COLOR: '0',
 		};
@@ -562,6 +574,7 @@ export async function runOnce(options: RunOptions): Promise<TaskRun> {
 		};
 	} finally {
 		if (configDir) await fs.rm(configDir, {recursive: true, force: true});
+		if (dataDir) await fs.rm(dataDir, {recursive: true, force: true});
 		await fs.rm(workspace, {recursive: true, force: true});
 	}
 }
