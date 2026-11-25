@@ -197,6 +197,11 @@ export class PromptHistory {
 		);
 		try {
 			await fs.rename(this.historyFile, backupPath);
+			try {
+				await fs.chmod(backupPath, 0o600);
+			} catch {
+				// Best effort on filesystems/platforms without POSIX permissions.
+			}
 		} catch (renameError) {
 			notifyError(
 				`Failed to back up corrupt prompt history: ${formatError(renameError)}`,

@@ -987,6 +987,29 @@ posixOnly('saveHistory tightens permissions on an existing history file', async 
 	);
 });
 
+posixOnly(
+	'loadHistory tightens permissions when quarantining a corrupt history file',
+	async t => {
+		const tempFile = join(
+			testDir,
+			`history-corrupt-mode-${Date.now()}-${Math.random()}.json`,
+		);
+		writeFileSync(tempFile, `${JSON_FORMAT_MARKER}{not valid json`, 'utf8');
+		chmodSync(tempFile, 0o644);
+
+		const history = new PromptHistory(tempFile);
+		await history.loadHistory();
+
+		const backupFile = `${tempFile}.corrupt`;
+		t.true(existsSync(backupFile), 'corrupt history file is quarantined');
+		t.is(
+			statSync(backupFile).mode & 0o777,
+			0o600,
+			'quarantined .corrupt backup becomes 0600',
+		);
+	},
+);
+
 posixOnly('saveHistory writes through a symlinked history file', async t => {
 	const dir = join(testDir, `history-link-${Date.now()}-${Math.random()}`);
 	mkdirSync(dir, {recursive: true});
