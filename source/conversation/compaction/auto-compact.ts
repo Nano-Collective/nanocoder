@@ -201,29 +201,38 @@ export async function performAutoCompact(
 		const totalTokens = fixedTokens + conversationTokens;
 
 		// Compaction can only shrink conversation messages, never the system
-		// prompt or tool definitions. When those fixed tokens alone already sit
-		// at or above the threshold, compacting cannot bring usage back under
-		// the gate and would otherwise re-fire after every turn.
+		// prompt or tool definitions:
+		// - If fixed overhead alone meets or exceeds the context limit, compaction
+		//   can never make the request fit, so skip and warn once.
+		// - If fixed overhead sits between the threshold and the context limit,
+		//   compaction cannot bring usage back under the threshold while the total
+		//   still fits, so skip and warn once — but still compact once total usage
+		//   reaches the context limit so the next request fits in the window.
 		const fixedPercentage = (fixedTokens / contextLimit) * 100;
-		if (fixedPercentage >= threshold) {
-			const warningKey = `${contextLimit}:${threshold}`;
-			if (
-				config.notifyUser &&
-				onNotify &&
-				warnedFixedOverheadKey.get() !== warningKey
-			) {
-				warnedFixedOverheadKey.set(warningKey);
-				const fixedSubject =
-					toolDefTokens > 0
-						? 'system prompt and tool definitions use'
-						: 'system prompt uses';
-				onNotify(
-					`Auto-compaction skipped: ${fixedSubject} ${fixedTokens.toLocaleString()} of ${contextLimit.toLocaleString()} tokens (${Math.round(fixedPercentage)}%, threshold ${threshold}%). Raise the context limit or switch to a smaller tool profile.`,
-				);
+		const fixedAtOrAboveLimit = fixedTokens >= contextLimit;
+		const fixedAtOrAboveThreshold = fixedPercentage >= threshold;
+		if (fixedAtOrAboveLimit || fixedAtOrAboveThreshold) {
+			if (fixedAtOrAboveLimit || totalTokens < contextLimit) {
+				const warningKey = `${contextLimit}:${threshold}`;
+				if (
+					config.notifyUser &&
+					onNotify &&
+					warnedFixedOverheadKey.get() !== warningKey
+				) {
+					warnedFixedOverheadKey.set(warningKey);
+					const fixedSubject =
+						toolDefTokens > 0
+							? 'system prompt and tool definitions use'
+							: 'system prompt uses';
+					onNotify(
+						`Auto-compaction skipped: ${fixedSubject} ${fixedTokens.toLocaleString()} of ${contextLimit.toLocaleString()} tokens (${Math.round(fixedPercentage)}%, threshold ${threshold}%). Raise the context limit or switch to a smaller tool profile with /tune (such as nano).`,
+					);
+				}
+				return null;
 			}
-			return null;
+		} else {
+			warnedFixedOverheadKey.reset();
 		}
-		warnedFixedOverheadKey.reset();
 
 		// Check if threshold is reached
 		const usagePercentage = (totalTokens / contextLimit) * 100;

@@ -1061,6 +1061,10 @@ test('maybeAutoCompact skips compaction and warns once when fixed overhead excee
 		notifications[0].includes('8,000 tokens'),
 		'warning should include the context limit',
 	);
+	t.true(
+		notifications[0].includes('/tune') && notifications[0].includes('nano'),
+		'warning should name /tune and a smaller tool profile',
+	);
 
 	// Turn 2: more messages (enough that summariseWithLLM would otherwise run).
 	// Neither compaction nor the warning should fire again.
@@ -1118,43 +1122,128 @@ test('maybeAutoCompact re-warns once when the context limit changes and still ca
 	t.is(client.calls, 0);
 });
 
-test('performAutoCompact skips compaction when fixed overhead is at or above threshold even if under 100% limit', async t => {
+test('performAutoCompact skips while total fits and compacts once total reaches limit when fixed overhead sits between threshold and limit', async t => {
 	// Fixed overhead (~250 tokens for system prompt) sits between the 50%
-	// threshold (200 tokens) and the 400-token limit.
+	// threshold (200 tokens) and the 400-token context limit.
 	setupAutoCompactEnv(400);
 
 	const systemMessage: Message = {
 		role: 'system',
 		content: Array.from({length: 120}, (_, i) => `directive${i}`).join(' '),
 	};
-	const messages: Message[] = [
+	const config = {
+		enabled: true,
+		threshold: 50,
+		mode: 'default' as const,
+		strategy: 'llm' as const,
+		notifyUser: true,
+	};
+	const client = makeStubClient(() => '## Context\nBrief summary.');
+	const notifications: string[] = [];
+
+	// While total usage still fits under the 400-token limit, skip compaction
+	// and emit the fixed-overhead warning once.
+	const fittingTurn1: Message[] = [
 		{role: 'user', content: 'first message'},
 		{role: 'assistant', content: 'first reply'},
 		{role: 'user', content: 'second message'},
 		{role: 'assistant', content: 'second reply'},
 	];
-	const client = makeStubClient(() => '## Context\nshould not be called');
-	const notifications: string[] = [];
-
-	const result = await performAutoCompact(
-		messages,
+	const res1 = await performAutoCompact(
+		fittingTurn1,
 		systemMessage,
 		'custom',
 		'generic-model',
-		{
-			enabled: true,
-			threshold: 50,
-			mode: 'default',
-			strategy: 'llm',
-			notifyUser: true,
-		},
+		config,
 		msg => notifications.push(msg),
 		client,
 	);
-
-	t.is(result, null, 'must skip compaction when fixed overhead >= threshold');
-	t.is(client.calls, 0, 'must not call summariser LLM');
+	t.is(res1, null, 'must skip compaction while total still fits in the limit');
+	t.is(client.calls, 0, 'must not call summariser while total fits');
 	t.is(notifications.length, 1, 'must emit warning once');
+	t.true(
+		notifications[0].includes('Auto-compaction skipped') &&
+			notifications[0].includes('/tune'),
+		'warning should explain the skip and point to /tune',
+	);
+
+	// Another turn that still fits must stay skipped without repeating the warning.
+	const fittingTurn2: Message[] = [
+		...fittingTurn1,
+		{role: 'user', content: 'third message'},
+		{role: 'assistant', content: 'third reply'},
+	];
+	const res2 = await performAutoCompact(
+		fittingTurn2,
+		systemMessage,
+		'custom',
+		'generic-model',
+		config,
+		msg => notifications.push(msg),
+		client,
+	);
+	t.is(res2, null, 'second fitting turn must also skip compaction');
+	t.is(client.calls, 0, 'must still not call summariser');
+	t.is(notifications.length, 1, 'must not repeat warning on subsequent fitting turn');
+
+	// Once conversation history pushes total usage to/past the 400-token limit,
+	// compaction must run so the next request fits in the window.
+	const overflowMessages: Message[] = [
+		{
+			role: 'user',
+			content: Array.from({length: 120}, (_, i) => `history${i}`).join(' '),
+		},
+		{role: 'assistant', content: 'acknowledged'},
+		{role: 'user', content: 'latest question'},
+		{role: 'assistant', content: 'latest answer'},
+	];
+	const compacted = await performAutoCompact(
+		overflowMessages,
+		systemMessage,
+		'custom',
+		'generic-model',
+		config,
+		msg => notifications.push(msg),
+		client,
+	);
+	t.truthy(
+		compacted,
+		'must still compact once total usage reaches the context limit',
+	);
+	t.is(client.calls, 1, 'must invoke summariser LLM when total hits the limit');
+	t.true(
+		compacted!.some(m => (m.content || '').includes('<conversation-summary>')),
+		'compacted history must contain the LLM summary',
+	);
+
+	// After compaction brings total back under the limit, skipping resumes
+	// without re-emitting the fixed-overhead warning for the same limit/threshold.
+	const skipWarningsBefore = notifications.filter(n =>
+		n.includes('Auto-compaction skipped'),
+	).length;
+	const afterCompact = await performAutoCompact(
+		compacted!,
+		systemMessage,
+		'custom',
+		'generic-model',
+		config,
+		msg => notifications.push(msg),
+		client,
+	);
+	t.is(
+		afterCompact,
+		null,
+		'post-compaction history that fits under the limit must skip again',
+	);
+	t.is(client.calls, 1, 'must not re-invoke summariser after history fits again');
+	const skipWarningsAfter = notifications.filter(n =>
+		n.includes('Auto-compaction skipped'),
+	).length;
+	t.is(
+		skipWarningsAfter,
+		skipWarningsBefore,
+		'must not re-emit the fixed-overhead warning after compacting back under the limit',
+	);
 });
 
 test('maybeAutoCompact still compacts normally when fixed overhead is under threshold and messages exceed it', async t => {
