@@ -50,6 +50,7 @@ Hosted services using the OpenAI-compatible API format.
 - [PopNow](popnow.md) - Chat models from multiple vendors behind one OpenAI-compatible endpoint
 - [Runcrate](runcrate.md) - Open models behind one OpenAI-compatible endpoint
 - [CloudGPU](cloudgpu.md) - OpenAI-compatible model API
+- [TeamoRouter](teamorouter.md) - OpenAI-compatible gateway for GLM, Kimi, DeepSeek, Qwen, Claude, GPT and Gemini
 - [Z.ai](z-ai.md) - GLM models from Zhipu AI
 - [Z.ai Coding](z-ai-coding.md) - Z.ai coding subscription plan
 

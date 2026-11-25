@@ -588,6 +588,13 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 		modelDefault: 'kimi-k3',
 	}),
 	apiKeyTemplate({
+		id: 'teamorouter',
+		name: 'TeamoRouter',
+		baseUrl: 'https://api.teamorouter.com/v1',
+		apiKeyPrompt: 'API Key (from teamorouter.com/dashboard?tab=api-keys)',
+		modelDefault: 'glm-5.3',
+	}),
+	apiKeyTemplate({
 		id: 'together',
 		name: 'Together AI',
 		baseUrl: 'https://api.together.ai/v1',

@@ -609,6 +609,43 @@ test('cloudgpu template: uses default provider name and model', t => {
 	);
 });
 
+test('teamorouter template: uses fixed endpoint and parses model IDs', t => {
+	const template = PROVIDER_TEMPLATES.find(t => t.id === 'teamorouter');
+	t.truthy(template);
+
+	const config = template!.buildConfig({
+		providerName: 'TeamoRouter',
+		apiKey: 'test-key',
+		model: 'glm-5.3, kimi-k3.1-pro',
+	});
+
+	t.is(config.baseUrl, 'https://api.teamorouter.com/v1');
+	t.is(config.apiKey, 'test-key');
+	t.is(config.sdkProvider, undefined);
+	t.deepEqual(config.models, ['glm-5.3', 'kimi-k3.1-pro']);
+});
+
+test('teamorouter template: uses default provider name and model', t => {
+	const template = PROVIDER_TEMPLATES.find(t => t.id === 'teamorouter');
+	t.truthy(template);
+
+	const modelField = template!.fields.find(f => f.name === 'model');
+	t.is(modelField?.default, 'glm-5.3');
+	const apiKeyField = template!.fields.find(f => f.name === 'apiKey');
+	t.is(
+		apiKeyField?.prompt,
+		'API Key (from teamorouter.com/dashboard?tab=api-keys)',
+	);
+	t.is(
+		template!.buildConfig({
+			providerName: '',
+			apiKey: 'test-key',
+			model: 'glm-5.3',
+		}).name,
+		'TeamoRouter',
+	);
+});
+
 test('together template: sets baseUrl and parses models', t => {
 	const template = PROVIDER_TEMPLATES.find(t => t.id === 'together');
 	t.truthy(template);
