@@ -52,6 +52,8 @@ import {
 	updateAlternateScreen,
 	getAlternateScreen,
 	updateMouseReporting,
+	getKittyKeyboardMode,
+	updateKittyKeyboardMode,
 	updateShowAgentBashOutput,
 	updateShowUsageFooter,
 	getPreferencesVersion,
@@ -2123,6 +2125,7 @@ test.serial('full workflow: update and retrieve project context preferences', t 
 });
 
 // ============================================================================
+
 // Trust is global-only: a project-level nanocoder-preferences.json (which
 // ships with a cloned repo) must never be able to mark its own directory
 // trusted, and trust writes must never land in it.
@@ -2921,6 +2924,41 @@ for (const {key, get, set, unset} of booleanPreferences) {
 		}
 	});
 }
+
+// kittyKeyboardMode: the tri-state behind the kitty protocol negotiation. It
+// round-trips like the booleans, but its spec is its own: every value has to
+// survive the file untouched, an unset file means 'auto', and a hand-edited
+// invalid value falls back to 'auto' rather than reaching Ink as garbage.
+test.serial('kittyKeyboardMode: defaults to auto, round-trips, and falls back on invalid values', t => {
+	const preferencesPath = getTestPreferencesPath();
+	rmSync(preferencesPath, {force: true});
+	resetPreferencesCache();
+	try {
+		t.is(getKittyKeyboardMode(), 'auto');
+
+		for (const mode of ['enabled', 'auto', 'disabled'] as const) {
+			updateKittyKeyboardMode(mode);
+			resetPreferencesCache();
+			t.is(getKittyKeyboardMode(), mode);
+			t.is(
+				JSON.parse(readFileSync(preferencesPath, 'utf-8'))
+					.kittyKeyboardMode,
+				mode,
+			);
+		}
+
+		writeFileSync(
+			preferencesPath,
+			JSON.stringify({kittyKeyboardMode: 'sometimes'}),
+			'utf-8',
+		);
+		resetPreferencesCache();
+		t.is(getKittyKeyboardMode(), 'auto');
+	} finally {
+		rmSync(preferencesPath, {force: true});
+		resetPreferencesCache();
+	}
+});
 
 test.serial(
 	'loadPreferences reads a preferences file that starts with a UTF-8 BOM',

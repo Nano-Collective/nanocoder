@@ -12,11 +12,14 @@
 // pulled in via dynamic `await import()` only when the app actually boots.
 import {readFileSync} from 'node:fs';
 import nodeModule from 'node:module';
+import type {JsonSchemaDocument} from '@/tools/runtime/schema-validate.js';
 import {
 	composePromptWithStdin,
 	parseRunPrompt,
 	readStdinText,
 	STDIN_PROMPT_FILE,
+	wantsHelp,
+	wantsVersion,
 } from './run-prompt-args.js';
 
 // Enable V8 compile cache (Node 22.8+). After the first run, Node caches
@@ -73,7 +76,7 @@ if (args[0] === 'storage') {
 }
 
 // Handle --version/-v flag — fast path, no heavy imports
-if (args.includes('--version') || args.includes('-v')) {
+if (wantsVersion(args)) {
 	console.log(version);
 	process.exit(0);
 }
@@ -255,7 +258,7 @@ if (args[0] === 'completion') {
 }
 
 // Handle --help/-h flag — fast path, no heavy imports
-if (args.includes('--help') || args.includes('-h')) {
+if (wantsHelp(args)) {
 	console.log(`
 Usage: nanocoder [options] [command]
 
@@ -305,7 +308,7 @@ Options:
   --provider          Specify AI provider (must be configured in agents.config.json).
                       Quote names with spaces: --provider "GitHub Copilot"
   --model             Specify AI model (must be available for the provider)
-  --context-max       Set maximum context length in tokens (supports k/K suffix, e.g. 128k)
+  --context-max       Set maximum context length in tokens (supports k/K and m/M suffixes, e.g. 128k or 1m)
   --mode              Start in a specific development mode (normal, auto-accept, yolo, plan,
                       architect). Defaults to "normal" for interactive sessions and
                       "auto-accept" for run mode.
@@ -313,6 +316,9 @@ Options:
                       line. Necessary for large prompts: Linux caps a single
                       argument at 128 KiB and execve fails with E2BIG.
                       Use "-" to read the prompt from stdin.
+  --json-schema       Validate the final run answer against a JSON Schema.
+                      Takes a schema file path or inline JSON (quote it).
+                      Uses the plain runtime and retries invalid answers.
   --trust-directory   Skip the first-run directory trust prompt for this run only.
                       Valid with "run", "daemon start", "verify" and --acp. Does not
                       modify the preferences file.
@@ -530,7 +536,7 @@ async function main(): Promise<void> {
 			setSessionContextLimit(limit);
 		} else {
 			console.error(
-				`Invalid --context-max value: "${contextMaxValue}". Use a positive number, e.g. 8192 or 128k`,
+				`Invalid --context-max value: "${contextMaxValue}". Use a positive number, e.g. 8192, 128k, or 1m`,
 			);
 			process.exit(1);
 		}
@@ -619,6 +625,36 @@ async function main(): Promise<void> {
 	const runCommandIndex = args.indexOf('run');
 	const isRunCommand = runCommandIndex !== -1;
 	let nonInteractivePrompt = parseRunPrompt(args);
+
+	// --json-schema: validate the final `run` answer against a user schema.
+	// The value is a file path or inline JSON; loading it here means a typo
+	// fails before the session starts instead of after a model round-trip.
+	let jsonSchema: JsonSchemaDocument | undefined;
+	const jsonSchemaIndex = args.findIndex(
+		arg => arg === '--json-schema' || arg.startsWith('--json-schema='),
+	);
+	if (jsonSchemaIndex !== -1) {
+		const rawValue = args[jsonSchemaIndex].startsWith('--json-schema=')
+			? args[jsonSchemaIndex].slice('--json-schema='.length)
+			: args[jsonSchemaIndex + 1];
+		if (!rawValue || rawValue === 'run' || rawValue.startsWith('--')) {
+			console.error(
+				'--json-schema requires a schema file path or inline JSON.',
+			);
+			process.exit(1);
+		}
+		if (!isRunCommand) {
+			console.error('--json-schema only applies to `nanocoder run`.');
+			process.exit(1);
+		}
+		const {loadJsonSchema} = await import('./plain/structured-output.js');
+		try {
+			jsonSchema = await loadJsonSchema(rawValue);
+		} catch (error) {
+			console.error(error instanceof Error ? error.message : String(error));
+			process.exit(1);
+		}
+	}
 
 	// --prompt-file: read the prompt from a file rather than argv.
 	//
@@ -809,6 +845,11 @@ async function main(): Promise<void> {
 		process.exit(1);
 	}
 
+	if (jsonSchema && vscodeMode) {
+		console.error('Error: --json-schema cannot be combined with --vscode.');
+		process.exit(1);
+	}
+
 	if (outputFormat === 'json' && isReviewCommand) {
 		console.error(
 			'Error: --json cannot be used with `nanocoder review`. Review output is displayed in the interactive terminal.',
@@ -839,8 +880,16 @@ async function main(): Promise<void> {
 		);
 		process.exit(1);
 	}
+	if (jsonSchema && noPlainRequested) {
+		console.error(
+			'Error: --json-schema needs the plain shell and cannot be combined with --no-plain.',
+		);
+		process.exit(1);
+	}
 	const plainForJson = outputFormat === 'json' && isRunCommand;
-	const plainMode = plainRequested || plainAuto || plainForJson;
+	const plainForSchema = jsonSchema !== undefined && isRunCommand;
+	const plainMode =
+		plainRequested || plainAuto || plainForJson || plainForSchema;
 
 	// Hard-error when `review` lands in a non-interactive context (piped
 	// stdout, CI). The plain shell has no slash-command dispatch, so
@@ -857,6 +906,11 @@ async function main(): Promise<void> {
 
 	if (outputFormat === 'json' && acpMode) {
 		console.error('Error: --json cannot be combined with --acp.');
+		process.exit(1);
+	}
+
+	if (jsonSchema && acpMode) {
+		console.error('Error: --json-schema cannot be combined with --acp.');
 		process.exit(1);
 	}
 
@@ -933,6 +987,7 @@ async function main(): Promise<void> {
 			cliModel,
 			trustDirectory,
 			outputFormat,
+			jsonSchema,
 		});
 	} else {
 		// Interactive TUI — load Ink + App only now, with React's production
@@ -991,9 +1046,12 @@ async function main(): Promise<void> {
 		// Screen mode: fullscreen (alt screen + in-app scroll) by DEFAULT.
 		// Passing --no-alt-screen or setting alternateScreen:false in preferences
 		// forces inline mode (main screen + native scrollback).
-		const {getAlternateScreen, getMouseReporting, getMaxFps} = await import(
-			'@/config/preferences'
-		);
+		const {
+			getAlternateScreen,
+			getKittyKeyboardMode,
+			getMouseReporting,
+			getMaxFps,
+		} = await import('@/config/preferences');
 		const altScreenAllowed =
 			!args.includes('--no-alt-screen') &&
 			(args.includes('--alt-screen') || getAlternateScreen());
@@ -1140,6 +1198,8 @@ async function main(): Promise<void> {
 			}) as unknown as NodeJS.ReadStream;
 		}
 
+		const kittyMode = getKittyKeyboardMode();
+
 		const result = renderTui(
 			{
 				vscodeMode,
@@ -1159,6 +1219,14 @@ async function main(): Promise<void> {
 				// manager) so the exit-render handler below can paint the
 				// farewell frame before the process dies.
 				exitOnCtrlC: false,
+				// Ask kitty-protocol terminals to encode keys distinctly,
+				// which is what makes Shift+Enter distinguishable from
+				// Enter. 'auto' (the default) queries the terminal first
+				// and does nothing when it does not answer; 'enabled' is
+				// for a terminal whose reply is eaten by an ssh-style
+				// transport, and 'disabled' writes no protocol bytes at
+				// all (the kittyKeyboardMode preference).
+				kittyKeyboard: {mode: kittyMode},
 				...(inkStdin ? {stdin: inkStdin} : {}),
 				maxFps: getMaxFps(),
 			},

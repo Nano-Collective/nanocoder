@@ -19,6 +19,7 @@ const runtimeModules = {
 	'@/config/preferences': `export function loadPreferences() { return {}; }
 		export function getAlternateScreen() { return false; }
 		export function getMouseReporting() { return false; }
+		export function getKittyKeyboardMode() { return 'auto'; }
 		export function getMaxFps() { return process.env.CLI_TEST_MAX_FPS ? Number(process.env.CLI_TEST_MAX_FPS) : 30; }`,
 	'@/app/render-tui': `export function renderTui(props, options) {
 		console.log(JSON.stringify({...props, contextLimit: globalThis.cliTestContextLimit, inkOptions: options}));
@@ -38,6 +39,7 @@ const loaderUrl = `data:text/javascript,${encodeURIComponent(
 	)});`,
 )}`;
 const cliPath = fileURLToPath(new URL('./cli.tsx', import.meta.url));
+
 
 function runCli(args: string[], extraEnv: Record<string, string> = {}) {
 	return spawnSync(
@@ -106,6 +108,7 @@ for (const {flag, value, property, expected} of flags) {
 				t.is(props.nonInteractivePrompt, 'analyze code');
 			});
 		}
+
 	}
 
 	test(`${flag}: similarly prefixed unknown flag stays in prompt`, t => {
@@ -180,6 +183,19 @@ test('a negative number is not accepted as the value of --provider', t => {
 	const result = runCli(['--provider', '-5', 'run', 'hello']);
 	t.is(result.status, 1);
 	t.true(result.stderr.includes('Unknown option "-5"'), result.stderr);
+});
+
+test('--context-max: malformed value is rejected with accepted syntax', t => {
+	const result = runCli(['run', 'analyze', '--context-max', '1.5x']);
+	t.not(result.status, 0);
+	t.regex(result.stderr, /8192, 128k, or 1m/);
+});
+
+test('--context-max: m suffix is accepted', t => {
+	const result = runCli(['run', 'analyze', '--context-max', '1m']);
+	t.is(result.status, 0, result.stderr);
+	const props = JSON.parse(result.stdout);
+	t.is(props.contextLimit, 1000000);
 });
 
 test('fused values preserve additional equals signs for existing validation', t => {
@@ -270,6 +286,24 @@ test('--json cannot be combined with --no-plain', t => {
 	t.true(result.stderr.includes('cannot be combined with --no-plain'), result.stderr);
 });
 
+test('--json-schema validates its value before rejecting --no-plain', t => {
+	const missing = runCli(['--json-schema', 'run', 'hello']);
+	t.is(missing.status, 1);
+	t.true(missing.stderr.includes('--json-schema requires a schema file path'));
+
+	const badInline = runCli(['--json-schema={"type":', 'run', 'hello']);
+	t.is(badInline.status, 1);
+	t.true(badInline.stderr.includes('Could not parse --json-schema inline JSON'));
+
+	const badSchema = runCli(['--json-schema={"type":"strin"}', 'run', 'hello']);
+	t.is(badSchema.status, 1);
+	t.true(badSchema.stderr.includes('Invalid --json-schema'));
+
+	const valid = runCli(['--json-schema={"type":"object"}', 'run', 'hello']);
+	t.is(valid.status, 1);
+	t.true(valid.stderr.includes('--json-schema needs the plain shell'));
+});
+
 test('Ink render receives default maxFps of 30 when unconfigured', t => {
 	const result = runCli(['run', 'hello']);
 	t.is(result.status, 0, result.stderr);
@@ -296,4 +330,40 @@ test('--acp without --mode leaves the starting mode unset', t => {
 	const result = runCli(['--acp']);
 	t.is(result.status, 0, result.stderr);
 	t.is(JSON.parse(result.stdout).acpOptions.mode, undefined);
+});
+
+test('-v, --version, -h and --help inside the run prompt stay prompt text', t => {
+	// https://github.com/Nano-Collective/nanocoder/issues/2315 — the version and
+	// help fast paths used to scan the whole argv, so `run go test -v` printed
+	// the version and exited 0 without running the prompt.
+	for (const [args, prompt] of [
+		[['run', 'go', 'test', '-v'], 'go test -v'],
+		[['run', 'node', '--version'], 'node --version'],
+		[['run', 'grep', '-h', 'foo'], 'grep -h foo'],
+		[['run', 'explain', '--help', 'output'], 'explain --help output'],
+	] as const) {
+		const result = runCli([...args]);
+		t.is(result.status, 0, `${args.join(' ')}: ${result.stderr}`);
+		const props = JSON.parse(result.stdout);
+		t.is(props.nonInteractivePrompt, prompt);
+	}
+});
+
+test('-v and -h before run still print the version and the help', t => {
+	const version = runCli(['-v', 'run', 'hello']);
+	t.is(version.status, 0, version.stderr);
+	t.regex(version.stdout.trim(), /^[0-9]+[.][0-9]+[.][0-9]+/);
+
+	const help = runCli(['--help', 'run', 'hello']);
+	t.is(help.status, 0, help.stderr);
+	t.true(help.stdout.includes('Usage: nanocoder'), help.stdout);
+});
+
+test('run --help or run -h with nothing else still prints the help', t => {
+	// Only the lone flag: `run explain --help output` above is a prompt.
+	for (const flag of ['--help', '-h']) {
+		const result = runCli(['run', flag]);
+		t.is(result.status, 0, `run ${flag}: ${result.stderr}`);
+		t.true(result.stdout.includes('Usage: nanocoder'), result.stdout);
+	}
 });

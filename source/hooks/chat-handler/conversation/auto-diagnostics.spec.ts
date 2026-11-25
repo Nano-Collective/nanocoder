@@ -215,6 +215,7 @@ async function runAutoDiagnosticsAfterEditScenario(
 		path: editedPath,
 	});
 	const trackingClient = {
+		getProviderConfig: () => ({config: {}}),
 		chat: async (messages: Message[]): Promise<LLMChatResponse> => {
 			chatCallCount += 1;
 			if (chatCallCount === 1) {

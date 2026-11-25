@@ -1,8 +1,14 @@
 import {StdioClientTransport} from '@modelcontextprotocol/sdk/client/stdio.js';
 import {StreamableHTTPClientTransport} from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import {WebSocketClientTransport} from '@modelcontextprotocol/sdk/client/websocket.js';
+import type {Transport} from '@modelcontextprotocol/sdk/shared/transport.js';
+import {
+	type JSONRPCMessage,
+	JSONRPCMessageSchema,
+} from '@modelcontextprotocol/sdk/types.js';
 import {execFileSync} from 'child_process';
 import {accessSync, constants as fsConstants} from 'fs';
+import type {RawData, WebSocket as WsWebSocket} from 'ws';
 import type {MCPServer, MCPTransportType} from '../types/mcp.js';
 
 /**
@@ -73,11 +79,107 @@ function getInstallHint(command: string): string {
 	);
 }
 
-// Union type for all supported client transports
-type ClientTransport =
-	| StdioClientTransport
-	| WebSocketClientTransport
-	| StreamableHTTPClientTransport;
+const MCP_WEBSOCKET_SUBPROTOCOL = 'mcp';
+
+/**
+ * WebSocket MCP client transport backed by `ws` so custom HTTP headers
+ * (such as `Authorization`) are sent during the WebSocket handshake.
+ * `ws` is loaded lazily in `start()` to keep it out of the CLI startup graph.
+ */
+class HeadersWebSocketClientTransport implements Transport {
+	private socket?: WsWebSocket;
+	onclose?: () => void;
+	onerror?: (error: Error) => void;
+	onmessage?: (message: JSONRPCMessage) => void;
+
+	constructor(
+		private readonly url: URL,
+		private readonly headers: Record<string, string>,
+	) {}
+
+	async start(): Promise<void> {
+		if (this.socket) {
+			throw new Error(
+				'HeadersWebSocketClientTransport already started! If using Client class, note that connect() calls start() automatically.',
+			);
+		}
+
+		const {default: WebSocketImpl} = await import('ws');
+
+		await new Promise<void>((resolve, reject) => {
+			const socket = new WebSocketImpl(this.url, MCP_WEBSOCKET_SUBPROTOCOL, {
+				headers: this.headers,
+			});
+			this.socket = socket;
+			let settled = false;
+
+			socket.on('open', () => {
+				settled = true;
+				resolve();
+			});
+
+			socket.on('error', (err: Error) => {
+				const error = err instanceof Error ? err : new Error(String(err));
+				if (!settled) {
+					settled = true;
+					reject(error);
+				}
+				this.onerror?.(error);
+			});
+
+			socket.on('close', () => {
+				this.onclose?.();
+			});
+
+			socket.on('message', (data: RawData) => {
+				let message: JSONRPCMessage;
+				try {
+					const text = Buffer.isBuffer(data)
+						? data.toString('utf8')
+						: Array.isArray(data)
+							? Buffer.concat(data).toString('utf8')
+							: Buffer.from(data).toString('utf8');
+					message = JSONRPCMessageSchema.parse(JSON.parse(text));
+				} catch (err) {
+					const error = err instanceof Error ? err : new Error(String(err));
+					this.onerror?.(error);
+					return;
+				}
+				this.onmessage?.(message);
+			});
+		});
+	}
+
+	async close(): Promise<void> {
+		const socket = this.socket;
+		if (!socket || socket.readyState === socket.CLOSED) {
+			return;
+		}
+		await new Promise<void>(resolve => {
+			socket.once('close', () => resolve());
+			socket.close();
+		});
+	}
+
+	send(message: JSONRPCMessage): Promise<void> {
+		return new Promise((resolve, reject) => {
+			const socket = this.socket;
+			if (!socket || socket.readyState !== socket.OPEN) {
+				reject(new Error('Not connected'));
+				return;
+			}
+			socket.send(JSON.stringify(message), err => {
+				if (err) {
+					reject(err);
+					return;
+				}
+				resolve();
+			});
+		});
+	}
+}
+
+export type ClientTransport = Transport;
 
 /**
  * Factory for creating MCP client transports based on server configuration
@@ -141,9 +243,7 @@ export class TransportFactory {
 	/**
 	 * Creates a WebSocket transport for remote MCP servers
 	 */
-	private static createWebSocketTransport(
-		server: MCPServer,
-	): WebSocketClientTransport {
+	private static createWebSocketTransport(server: MCPServer): Transport {
 		if (!server.url) {
 			throw new Error(
 				`MCP server "${server.name}" missing URL for websocket transport`,
@@ -157,6 +257,10 @@ export class TransportFactory {
 			throw new Error(
 				`Invalid WebSocket URL protocol: ${url.protocol}. Expected ws:// or wss://`, // nosemgrep
 			);
+		}
+
+		if (server.headers && Object.keys(server.headers).length > 0) {
+			return new HeadersWebSocketClientTransport(url, server.headers);
 		}
 
 		return new WebSocketClientTransport(url);
@@ -288,6 +392,7 @@ export class TransportFactory {
 					'Requires a ws:// or wss:// URL', // nosemgrep
 					'Supports real-time bidirectional communication',
 					'Best for interactive remote services',
+					'Custom headers are supported for authentication',
 				];
 
 			case 'http':

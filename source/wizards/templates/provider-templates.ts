@@ -611,7 +611,7 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 			},
 			{
 				name: 'apiKey',
-				prompt: 'API Key (optional)',
+				prompt: 'API Key (optional for local servers like Ollama or LM Studio)',
 				required: false,
 				sensitive: true,
 			},

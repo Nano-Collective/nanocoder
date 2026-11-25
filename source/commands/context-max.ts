@@ -13,14 +13,14 @@ import {parseContextLimit} from '@/utils/parse-context-limit';
 /**
  * /context-max sets the maximum context length for the current session.
  *
- * /context-max <number>   - Set context limit (supports k/K suffix, e.g. 128k)
+ * /context-max <number>   - Set context limit (supports positive integer or decimal values, k/K and m/M suffixes)
  * /context-max            - Show current effective context limit
  * /context-max --reset    - Clear session override
  */
 export const contextMaxCommand: StatefulCommand = {
 	name: 'context-max',
 	description:
-		'Set maximum context length for this session (e.g. /context-max 128k, --reset to clear)',
+		'Set maximum context length for this session (e.g. /context-max 128k or /context-max 1m, --reset to clear)',
 	run: async context => {
 		const {
 			addToChatQueue: onAddToChatQueue,
@@ -47,7 +47,7 @@ export const contextMaxCommand: StatefulCommand = {
 			if (limit === null) {
 				onAddToChatQueue(
 					errorMsg(
-						'Invalid context limit. Use a positive number, e.g. /context-max 8192 or /context-max 128k',
+						'Invalid context limit. Use a positive number, e.g. /context-max 8192, /context-max 128k, or /context-max 1m',
 						'context-max-error',
 					),
 				);
@@ -89,7 +89,7 @@ export const contextMaxCommand: StatefulCommand = {
 		} else {
 			onAddToChatQueue(
 				infoMsg(
-					'Context limit: Unknown. Use /context-max <number> to set one.',
+					'Context limit: Unknown. Use /context-max <number>[k|m] to set one.',
 					'context-max-info',
 				),
 			);

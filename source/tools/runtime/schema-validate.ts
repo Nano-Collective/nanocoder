@@ -146,16 +146,18 @@ export function validateArgsAgainstSchema(
 }
 
 /**
- * Pull the raw JSON Schema out of an AI SDK tool's `inputSchema`. Tools built
- * with `jsonSchema(...)` expose it as `inputSchema.jsonSchema`. Returns
- * undefined for anything else (or a promise-like / non-object), so callers
- * simply skip schema validation rather than risk a false positive.
+ * Pull the raw JSON Schema out of an AI SDK tool's `inputSchema`.
+ * Promise-like schemas are skipped because they cannot be inspected safely
+ * without changing this synchronous tool-argument validation path.
  */
 export function getToolJsonSchema(tool: unknown): JsonSchemaNode | undefined {
 	const input = (tool as {inputSchema?: unknown} | undefined)?.inputSchema;
 	if (!input || typeof input !== 'object') return undefined;
-	const js = (input as {jsonSchema?: unknown}).jsonSchema;
-	if (!js || typeof js !== 'object') return undefined;
-	if ('then' in (js as object)) return undefined; // promise-like — skip
-	return js as JsonSchemaNode;
+	const schema = (input as {jsonSchema?: unknown}).jsonSchema;
+	if (!schema || typeof schema !== 'object') return undefined;
+	if ('then' in (schema as object)) return undefined;
+	return schema as JsonSchemaNode;
 }
+
+/** JSON Schema document supplied to `nanocoder run --json-schema`. */
+export type JsonSchemaDocument = Record<string, unknown>;

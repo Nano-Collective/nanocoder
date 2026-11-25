@@ -429,6 +429,8 @@ export interface DiskNanocoderConfig {
 	sandbox?: boolean;
 	/** Commit each successful agent file edit (only that file) with a generated Conventional Commit message. Off by default. */
 	autoCommit?: boolean;
+	/** Add a snapshot of the git repository (branch, upstream, status, recent commits) to the system prompt at session start. On by default; never added under the nano tool profile. */
+	gitContext?: boolean;
 	/** Negative-space mutation firewall. Off by default. */
 	firewall?: Partial<FirewallConfig>;
 	/**
@@ -586,6 +588,9 @@ export interface AppConfig {
 	// Commit each successful agent file edit, one commit per edited file.
 	autoCommit?: boolean;
 
+	// Git snapshot (branch, status, recent commits) in the system prompt.
+	gitContext?: boolean;
+
 	// Agent-loop retry limits (interactive conversation loop)
 	retries?: RetryLimitsConfig;
 
@@ -620,7 +625,7 @@ export interface MCPServerConfig {
 	tags?: string[];
 	enabled?: boolean;
 	// Optional source information for display purposes
-	source?: 'project' | 'global' | 'env';
+	source?: 'project' | 'global' | 'env' | 'profile';
 	// Pre-substitution credentials for validateMCPConfigSecurity. Env-var
 	// references are expanded before runtime use, so the scanner must read
 	// these raw copies or every $API_KEY looks hardcoded.
@@ -902,6 +907,18 @@ export interface UserPreferences {
 	 * Also switchable per-run with --mouse / --no-mouse flags.
 	 */
 	mouseReporting?: boolean;
+	/**
+	 * How the kitty keyboard protocol is negotiated at startup, which is what
+	 * makes Shift+Enter distinguishable from Enter in terminals that implement
+	 * it (kitty, WezTerm, Ghostty, foot, recent VS Code). 'auto' (default):
+	 * query the terminal and enable the protocol only on an affirmative reply.
+	 * 'enabled': switch the protocol on without asking — for a terminal that
+	 * supports it but whose reply is lost across a transport (ssh, a
+	 * container pty) that eats or echoes the query. 'disabled': never touch
+	 * the protocol, for terminals or transports that print the query bytes
+	 * instead of swallowing them.
+	 */
+	kittyKeyboardMode?: 'auto' | 'enabled' | 'disabled';
 	/**
 	 * "Boring" output mode. false (default): playful touches stay, e.g. the
 	 * "Worked for a plucky 12s." completion note. true: progress text is

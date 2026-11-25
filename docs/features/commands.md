@@ -29,7 +29,7 @@ Type `/` in the chat input to see available commands. All commands start with `/
 | `/agents` | List subagents. `/agents show <name>` for details, `/agents copy <name>` to customize, `/agents create <name>` to scaffold a new one (see [Subagents](subagents.md)) |
 | `/checkpoint` | Save and restore file snapshots. Subcommands: `create`/`save [name]` (name optional, auto-generated when omitted), `list`/`ls`, `load`/`restore`, `delete`/`remove`/`rm`, `help` (see [Checkpointing](checkpointing.md)) |
 | `/compact` | Compress message history to reduce context usage. Flags include `--llm`, `--mechanical`, `--default`, `--conservative`, `--aggressive`, `--preview` and `--restore`; `--strategy`, `--threshold`, `--auto-on` and `--auto-off` only change session settings (see [Context Compression](context-compression.md)) |
-| `/context-max` | Set maximum context length for the current session (e.g. `/context-max 128k`), or inspect the resolved context source. `/context-max --reset` clears the session override. Also available as `--context-max` CLI flag |
+| `/context-max` | Set maximum context length for the current session (supports positive integer or decimal values, k/K and m/M suffixes), or inspect the resolved context source. `/context-max --reset` clears the session override. Also available as `--context-max` CLI flag |
 | `/exit` | Exit the application |
 | `/export` | Export the current session to a markdown file, or to JSON with `/export --json` or a `.json` filename (see [Exporting a Session](#exporting-a-session)) |
 | `/share` | Write the current session to a single, self-contained HTML page you can open in any browser or send to someone, with secrets redacted. `/share --json` writes the same content as deterministic JSON (see [Sharing a Session](#sharing-a-session)) |
@@ -164,7 +164,7 @@ The `!` prefix runs a command in your shell and includes the output as context f
 
 Supported keys:
 
-- `?context-max=<n>` - context limit for this command (accepts `k` suffixes, e.g. `128k`)
+- `?context-max=<n>` - context limit for this command (accepts positive integer or decimal values, k/K and m/M suffixes, e.g. `128k` or `1m`)
 - `?threshold=<50-95>` - on `/compact`, skip compaction when usage is below this percentage
 - `?auto-compact=<on|off>` - auto-compact enabled state for this command
 - `?preview`, `?llm`, `?mechanical`, `?aggressive`, `?conservative` - shorthand for the matching `/compact` flag
@@ -238,6 +238,26 @@ nanocoder --plain --json run "refactor the auth module" | jq .finalText
 ```
 
 `--json` requires `run` and is incompatible with `--acp` and `--vscode` — combining them exits with an error before the session starts.
+
+#### Validated Structured Output
+
+Use `--json-schema <file|inline JSON>` with `run` to require that the final answer is a single JSON document matching a schema. The flag accepts a schema file path or inline JSON (quote inline schemas so the shell passes them as one argument). It always uses the plain runtime, and cannot be combined with `--no-plain`, `--acp`, `--vscode`, or `review`.
+
+```bash
+nanocoder run --json-schema ./review.schema.json "Review the working tree changes"
+nanocoder run --json-schema '{"type":"object","required":["verdict"],"properties":{"verdict":{"type":"string","enum":["pass","fail"]}}}' "Classify this change"
+```
+
+The schema is included in the model instructions. The final answer is parsed and validated locally; if it is invalid, the validator's errors are sent back to the model for another attempt, using the configured `nanocoder.retries.maxMalformedRetries` limit. If the answer still fails validation, the run exits non-zero and reports the validation errors to `stderr` (or in the JSON report's `message`). A single surrounding JSON markdown fence is tolerated, but prose around the document is not.
+
+Without `--output-format json`, the validated JSON value alone is written to `stdout`, so it can be piped directly to `jq`. With JSON report mode, the validated value is available at `.structured`:
+
+```bash
+nanocoder run --json-schema ./review.schema.json "Review the working tree changes" | jq .verdict
+nanocoder run --output-format json --json-schema ./review.schema.json "Review the working tree changes" | jq .structured.verdict
+```
+
+Schemas are compiled and documents are validated with Ajv. Invalid schemas fail before the run session starts. Ajv's supported JSON Schema keywords, including conditional schemas such as `if`/`then`, `propertyNames`, and `contains`, are enforced. Schemas may declare draft-07, 2019-09 or 2020-12 as their `$schema`. `format` keywords such as `date-time` and `uri` are accepted but not enforced. The schema validation uses prompt-and-validate retries; native provider structured-output modes are not currently wired and may be considered as a follow-up.
 
 #### Output Shape
 

@@ -717,7 +717,9 @@ export function createReviewCommand(
 
 				const showUsageFooter = getShowUsageFooter();
 				const usage = showUsageFooter
-					? await buildResponseUsageBounded(response.usage, metadata.model)
+					? await buildResponseUsageBounded(response.usage, metadata.model, {
+							baseURL: client.getProviderConfig().config.baseURL,
+						})
 					: undefined;
 				// Rendered like a normal chat reply so the review's Markdown is
 				// parsed instead of being shown as raw text in a status color.

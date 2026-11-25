@@ -130,8 +130,11 @@ export const filterValidToolCalls = (
 ): PartitionedToolCalls =>
 	partitionToolCalls(toolCalls, toolManager, availableNames, toolCall => {
 		// Listing the valid tool names gives small models a concrete recovery
-		// target instead of leaving them to re-guess the same wrong name.
-		const available = toolManager?.getToolNames?.() ?? [];
+		// target instead of leaving them to re-guess the same wrong name. When
+		// the caller passes the offered list, the hint uses it, so it never
+		// names a tool the next call would be refused for: one the mode, tune
+		// profile or disabled list hides, or a scoped skill tool.
+		const available = availableNames ?? toolManager?.getToolNames?.() ?? [];
 		const availableHint =
 			available.length > 0
 				? ` Available tools are: ${available.join(', ')}.`

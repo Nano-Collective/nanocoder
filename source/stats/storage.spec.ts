@@ -294,6 +294,51 @@ test('recordApiCallForStats stores cost > 0 via production pricing path', async 
 	t.is(loaded.totalCost, 2);
 });
 
+test('recordApiCallForStats records no cost for a model on a local server', async t => {
+	const {recordApiCallForStats} = await import('./record.js');
+	await recordApiCallForStats(
+		{
+			provider: 'Ollama',
+			model: 'gpt-oss:20b',
+			baseURL: 'http://localhost:11434/v1',
+			inputTokens: 1_000_000,
+			outputTokens: 500_000,
+			totalTokens: 1_500_000,
+		},
+		{
+			dateKey: '2026-08-25',
+			// What models.dev lists for the hosted model of the same id.
+			getPricing: async () => ({input: 1, output: 2}),
+		},
+	);
+	flushStatsLedgerSync();
+
+	const loaded = readStatsLedger();
+	t.is(loaded.totalTokens, 1_500_000);
+	t.is(loaded.totalCost, 0);
+});
+
+test('recordApiCallForStats still prices a model behind a hosted base URL', async t => {
+	const {recordApiCallForStats} = await import('./record.js');
+	await recordApiCallForStats(
+		{
+			provider: 'Ollama Cloud',
+			model: 'gpt-oss:20b',
+			baseURL: 'https://ollama.com/v1',
+			inputTokens: 1_000_000,
+			outputTokens: 500_000,
+			totalTokens: 1_500_000,
+		},
+		{
+			dateKey: '2026-08-25',
+			getPricing: async () => ({input: 1, output: 2}),
+		},
+	);
+	flushStatsLedgerSync();
+
+	t.is(readStatsLedger().totalCost, 2);
+});
+
 test('recordApiCallForStats prices cached input at cache rates', async t => {
 	const {recordApiCallForStats} = await import('./record.js');
 	await recordApiCallForStats(

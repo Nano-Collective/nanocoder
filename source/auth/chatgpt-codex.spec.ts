@@ -96,6 +96,78 @@ test('pollForCodexAuthorization saves tokens on success', async t => {
 	t.truthy(callCount >= 2); // poll + exchange
 });
 
+test('pollForCodexAuthorization stops when the token exchange fails', async t => {
+	let tokenRequests = 0;
+	let saved = false;
+
+	const mockFetch = async (url: string) => {
+		const urlStr = typeof url === 'string' ? url : String(url);
+		if (urlStr.includes('deviceauth/token')) {
+			return {
+				ok: true,
+				json: async () => ({
+					authorization_code: 'code-abc',
+					code_verifier: 'verifier-xyz',
+				}),
+			} as Response;
+		}
+		tokenRequests++;
+		return {
+			ok: false,
+			status: 400,
+			statusText: 'Bad Request',
+			text: async () => '{"error":"invalid_grant"}',
+		} as Response;
+	};
+
+	const error = await t.throwsAsync(
+		pollForCodexAuthorization(
+			'auth-123',
+			'ABCD-1234',
+			() => {
+				saved = true;
+			},
+			mockFetch as typeof fetch,
+		),
+	);
+
+	t.regex(error!.message, /Token exchange failed: 400/);
+	t.is(tokenRequests, 1, 'the one-time code must not be exchanged again');
+	t.false(saved);
+});
+
+test('pollForCodexAuthorization stops when saving the tokens fails', async t => {
+	const mockFetch = async (url: string) => {
+		const urlStr = typeof url === 'string' ? url : String(url);
+		if (urlStr.includes('deviceauth/token')) {
+			return {
+				ok: true,
+				json: async () => ({
+					authorization_code: 'code-abc',
+					code_verifier: 'verifier-xyz',
+				}),
+			} as Response;
+		}
+		return {
+			ok: true,
+			json: async () => ({access_token: 'access-tok'}),
+		} as Response;
+	};
+
+	const error = await t.throwsAsync(
+		pollForCodexAuthorization(
+			'auth-123',
+			'ABCD-1234',
+			() => {
+				throw new Error('disk full');
+			},
+			mockFetch as typeof fetch,
+		),
+	);
+
+	t.is(error!.message, 'disk full');
+});
+
 // ── refreshCodexAccessToken ─────────────────────────────────────────
 
 test('refreshCodexAccessToken returns new tokens on success', async t => {

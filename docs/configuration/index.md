@@ -110,7 +110,7 @@ Names are matched case-insensitively. A key that is skipped is reported in a war
 | Variable | Description |
 |----------|-------------|
 | `NANOCODER_CONFIG_DIR` | Override the user-level configuration directory. Project-level `agents.config.json` and `.mcp.json` still apply; the project-level `nanocoder-preferences.json` is skipped for top-level preferences |
-| `NANOCODER_CONTEXT_LIMIT` | Default context limit (tokens) used when no session override or provider `contextWindow`/`contextWindows` applies. It is checked before models.dev metadata (see [Context Limit Resolution Order](#context-limit-resolution-order)). Enables auto-compact and `/usage` to work correctly. The `--context-max` CLI flag takes priority |
+| `NANOCODER_CONTEXT_LIMIT` | Default context limit (tokens) used when no session override or provider `contextWindow`/`contextWindows` applies. Accepts positive integer or decimal strings, plus k/K or m/M suffixes. It is checked before models.dev metadata (see [Context Limit Resolution Order](#context-limit-resolution-order)). Enables auto-compact and `/usage` to work correctly. The `--context-max` CLI flag takes priority |
 | `NANOCODER_DATA_DIR` | Override the application data directory for internal data like usage statistics |
 | `NANOCODER_INSTALL_METHOD` | Override installation detection (`npm`, `homebrew`, `nix`, `unknown`) |
 | `NANOCODER_NO_UPDATE_CHECK` | Set to `1` to disable automatic update checks at startup. Running `/update` still performs an explicit check |
@@ -169,6 +169,8 @@ Nanocoder resolves a model's context limit in this order:
 
 This lets you persist context limits for unknown or local models without reapplying `/context-max` every session.
 
+String-valued context-limit overrides (`/context-max`, `--context-max`, `?context-max=`, and `NANOCODER_CONTEXT_LIMIT`) accept positive integers or decimal values with a `k`/`K` (1,000) or `m`/`M` (1,000,000) suffix. Bare positive decimal strings remain supported and are rounded to whole tokens for compatibility. Values must remain within JavaScript's safe integer range so token counts are not silently changed. The `contextWindows` and `contextWindow` fields in `agents.config.json` remain numeric JSON values and do not accept suffix strings.
+
 ## Application Settings
 
 Beyond providers and MCP servers, `agents.config.json` supports application-level settings under the `nanocoder` key.
@@ -221,7 +223,7 @@ Profiles are defined in the `nanocoder.profiles` object within `agents.config.js
         "provider": "anthropic",
         "model": "claude-3-7-sonnet-20250219",
         "mode": "normal",
-        "contextLimit": 128000
+        "retries": {"maxEmptyTurns": 3}
       },
       "review": {
         "provider": "openrouter",
@@ -415,6 +417,22 @@ Set `nanocoder.autoCommit` to `true` (boolean; any other value is treated as off
 - Your git hooks and commit signing run as normal. The model is told the commit hash in the tool result.
 
 This produces one commit per edit. Squash them before opening a PR if you prefer a tidier history (`git rebase -i`, or `git reset --soft <base>` and commit again).
+
+### Git Snapshot
+
+When the project folder is a git repository, the system prompt includes a short snapshot of it taken when the session starts: the current branch (or detached HEAD) and default branch, the upstream with ahead/behind counts, a `git status` summary with up to 10 changed paths, and the last 5 commit subjects. The model then knows about uncommitted work without spending a turn on `git status` and `git log`. The block is labelled as a session-start snapshot, so the model re-checks before acting on it.
+
+Only local, read-only git commands run (no fetch), each with a short timeout; a slow or failing `git status` on a very large repository is left out of the block rather than delaying the session. Outside a repository, or without git installed, nothing is added. The snapshot is taken once per session, so the prompt stays the same across turns. It is never added under the `nano` tool profile.
+
+Set `nanocoder.gitContext` to `false` to turn it off (default `true`):
+
+```json
+{
+  "nanocoder": {
+    "gitContext": false
+  }
+}
+```
 
 ### Completion Evidence
 

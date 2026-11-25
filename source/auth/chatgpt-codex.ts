@@ -80,8 +80,9 @@ export async function pollForCodexAuthorization(
 
 		await new Promise(r => setTimeout(r, POLL_INTERVAL_MS));
 
+		let res: Response;
 		try {
-			const res = await fetchFn(DEVICE_TOKEN_URL, {
+			res = await fetchFn(DEVICE_TOKEN_URL, {
 				method: 'POST',
 				headers: {'Content-Type': 'application/json'},
 				body: JSON.stringify({
@@ -89,38 +90,33 @@ export async function pollForCodexAuthorization(
 					user_code: userCode,
 				}),
 			});
-
-			if (res.ok) {
-				const data = (await res.json()) as {
-					authorization_code: string;
-					code_verifier: string;
-				};
-				const tokens = await exchangeCodeForTokens(
-					data.authorization_code,
-					data.code_verifier,
-					fetchFn,
-				);
-				saveFn(tokens);
-				return;
-			}
-
-			// 403/404 = still pending, keep polling
-			if (res.status === 403 || res.status === 404) {
-				continue;
-			}
-
-			throw new Error(`Unexpected poll response: ${res.status}`);
-		} catch (error) {
-			// Re-throw timeout and non-network errors
-			if (
-				error instanceof Error &&
-				(error.message.includes('timed out') ||
-					error.message.includes('Unexpected poll'))
-			) {
-				throw error;
-			}
-			// Network errors during polling — keep trying
+		} catch {
+			// Network errors during polling: keep trying
+			continue;
 		}
+
+		if (res.ok) {
+			// The authorization code is single use. A failed exchange or save ends
+			// the login instead of polling again with the same code.
+			const data = (await res.json()) as {
+				authorization_code: string;
+				code_verifier: string;
+			};
+			const tokens = await exchangeCodeForTokens(
+				data.authorization_code,
+				data.code_verifier,
+				fetchFn,
+			);
+			saveFn(tokens);
+			return;
+		}
+
+		// 403/404 = still pending, keep polling
+		if (res.status === 403 || res.status === 404) {
+			continue;
+		}
+
+		throw new Error(`Unexpected poll response: ${res.status}`);
 	}
 }
 

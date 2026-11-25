@@ -10,7 +10,10 @@ import {
 import {getSafeSessionCwd} from '@/services/session-cwd';
 import {EditRecoveryError} from '@/tools/file-ops/edit-recovery';
 import {fitEditToLineEndings} from '@/tools/file-ops/line-endings';
-import {replaceFirstLiteral} from '@/tools/file-ops/literal-replace';
+import {
+	countLiteralOccurrences,
+	replaceFirstLiteral,
+} from '@/tools/file-ops/literal-replace';
 import {
 	validateEditableEncoding,
 	validateEditableFormat,
@@ -121,7 +124,7 @@ const executeStringReplace = async (
 		args.new_str,
 	);
 
-	const occurrences = fileContent.split(old_str).length - 1;
+	const occurrences = countLiteralOccurrences(fileContent, old_str);
 
 	if (occurrences === 0) {
 		throw new EditRecoveryError(
@@ -242,7 +245,7 @@ const stringReplaceFormatter = async (
 			const fileContent = cached.content;
 			const fitted = fitEditToLineEndings(fileContent, old_str, new_str);
 
-			const occurrences = fileContent.split(fitted.oldStr).length - 1;
+			const occurrences = countLiteralOccurrences(fileContent, fitted.oldStr);
 			if (occurrences === 1) {
 				const newContent = replaceFirstLiteral(
 					fileContent,
@@ -333,7 +336,7 @@ const stringReplaceValidator = async (
 		if (!encodingResult.valid) return encodingResult;
 		const fileContent = cached.content;
 		const {oldStr} = fitEditToLineEndings(fileContent, old_str, args.new_str);
-		const occurrences = fileContent.split(oldStr).length - 1;
+		const occurrences = countLiteralOccurrences(fileContent, oldStr);
 
 		if (occurrences === 0) {
 			return {

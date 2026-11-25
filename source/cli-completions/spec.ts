@@ -142,7 +142,7 @@ export const COMPLETION_FLAGS: readonly CompletionFlag[] = [
 		takesValue: true,
 		valueName: 'limit',
 		description:
-			'Set maximum context length in tokens (supports k/K suffix, e.g. 128k)',
+			'Set maximum context length in tokens (supports k/K and m/M suffixes, e.g. 128k or 1m)',
 	},
 	{
 		name: 'mode',
@@ -206,6 +206,13 @@ export const COMPLETION_FLAGS: readonly CompletionFlag[] = [
 		valueName: 'format',
 		values: ['text', 'json'],
 		description: "Specify stdout format ('text' or 'json', run mode only)",
+	},
+	{
+		name: 'json-schema',
+		takesValue: true,
+		valueName: 'file|json',
+		description:
+			'Validate the run answer against a JSON Schema (file or inline JSON)',
 	},
 	{
 		name: 'acp',

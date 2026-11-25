@@ -1,4 +1,5 @@
 import {existsSync, readFileSync} from 'node:fs';
+import {readFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import ignore from 'ignore';
 
@@ -122,6 +123,81 @@ export function loadGitignore(
 	}
 
 	return ig;
+}
+
+/**
+ * Rewrite one line of a nested .gitignore so it can be added to an ignore
+ * instance that matches project-root-relative paths.
+ *
+ * Git scopes a nested .gitignore to its own directory. An unanchored `foo`
+ * matches at any depth below that directory; a pattern with a leading or
+ * inner slash stays relative to it (`dirPrefix/foo`).
+ *
+ * @param line - A line of the .gitignore
+ * @param dirPrefix - The directory holding the file, root-relative, with
+ * forward slashes; empty for the project root
+ * @returns The rewritten pattern, or undefined for a blank line or a comment
+ */
+export function prefixGitignoreLine(
+	line: string,
+	dirPrefix: string,
+): string | undefined {
+	const trimmed = line.trimEnd();
+	if (!trimmed || trimmed.startsWith('#')) {
+		return undefined;
+	}
+	if (!dirPrefix) {
+		return trimmed;
+	}
+
+	const negated = trimmed.startsWith('!');
+	const pattern = negated ? trimmed.slice(1) : trimmed;
+	const isAnchoredOrNested =
+		pattern.startsWith('/') || pattern.replace(/\/$/, '').includes('/');
+	const prefixed = isAnchoredOrNested
+		? `${dirPrefix}/${pattern.replace(/^\//, '')}`
+		: `${dirPrefix}/**/${pattern}`;
+	return negated ? `!${prefixed}` : prefixed;
+}
+
+/**
+ * Add the .gitignore of one directory below the project root to an ignore
+ * instance, scoped to that directory the way git scopes it.
+ *
+ * Walkers call this on entering a directory so that a nested .gitignore hides
+ * the same files from every tool. Patterns are added after the ones already
+ * in `ig`, so they take precedence over the project root's, as in git. A
+ * missing or unreadable file is skipped.
+ *
+ * The project root's own .gitignore is loaded by {@link loadGitignore}; pass
+ * a non-empty `dirPrefix` only, or it would be added twice.
+ *
+ * @param ig - The ignore instance to extend
+ * @param absoluteDir - Absolute path of the directory to read
+ * @param dirPrefix - The same directory, root-relative, with forward slashes
+ */
+export async function addNestedGitignore(
+	ig: ReturnType<typeof ignore>,
+	absoluteDir: string,
+	dirPrefix: string,
+): Promise<void> {
+	if (dirPrefix === '') {
+		return;
+	}
+	const content = await readFile(
+		join(absoluteDir, '.gitignore'),
+		'utf-8',
+	).catch(() => undefined);
+	if (content === undefined) {
+		return;
+	}
+	const patterns = content
+		.split('\n')
+		.map(line => prefixGitignoreLine(line, dirPrefix))
+		.filter((line): line is string => line !== undefined);
+	if (patterns.length > 0) {
+		ig.add(patterns);
+	}
 }
 
 /**

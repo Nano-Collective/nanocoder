@@ -19,6 +19,7 @@ import type {
 import type {UserPreferences} from '@/types/index';
 import type {NanocoderShape, ThemePreset, TitleShape} from '@/types/ui';
 import {atomicWriteFileSync} from '@/utils/fs/atomic-write';
+import {normalizeForCompare} from '@/utils/fs/path-validation';
 import {getLogger} from '@/utils/logging';
 import {stripUtf8Bom} from '@/utils/strip-utf8-bom';
 
@@ -74,7 +75,8 @@ function getGlobalPreferencesPath(): string {
 
 function isProjectPreferencesPath(preferencesPath: string): boolean {
 	return (
-		path.resolve(preferencesPath) !== path.resolve(getGlobalPreferencesPath())
+		normalizeForCompare(preferencesPath) !== // nosemgrep
+		normalizeForCompare(getGlobalPreferencesPath()) // nosemgrep
 	);
 }
 
@@ -484,6 +486,26 @@ export function updateAlternateScreen(value: boolean): void {
  */
 export function getMouseReporting(): boolean {
 	return getBooleanPreference('mouseReporting');
+}
+
+/**
+ * How the kitty keyboard protocol is negotiated at startup. 'auto' (default):
+ * query the terminal and enable the protocol on an affirmative reply — what
+ * makes Shift+Enter distinct from Enter in kitty-protocol terminals. 'enabled':
+ * switch the protocol on without asking, for a terminal whose reply is lost
+ * across a transport that eats the query. 'disabled': write no protocol bytes
+ * at all, for transports that print them. An invalid value falls back to
+ * 'auto'.
+ */
+export function getKittyKeyboardMode(): 'auto' | 'enabled' | 'disabled' {
+	const value = getPreference('kittyKeyboardMode');
+	return value === 'enabled' || value === 'disabled' ? value : 'auto';
+}
+
+export function updateKittyKeyboardMode(
+	mode: 'auto' | 'enabled' | 'disabled',
+): void {
+	setPreference('kittyKeyboardMode', mode);
 }
 
 export function updateMouseReporting(value: boolean): void {
