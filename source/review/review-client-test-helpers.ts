@@ -44,7 +44,7 @@ export function createScriptedReviewClient(
 		setModel: () => undefined,
 		getContextSize: () => options.contextSize ?? 0,
 		getAvailableModels: async () => ['review-test-model'],
-		getProviderConfig: () => ({}) as never,
+		getProviderConfig: () => ({config: {}}) as never,
 		clearContext: async () => undefined,
 		getTimeout: () => undefined,
 		chat: async (messages, tools, _callbacks, signal) => {

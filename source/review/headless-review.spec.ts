@@ -1,4 +1,5 @@
 import test from 'ava';
+import {TRUST_FINGERPRINT_VERSION} from '@/config/trust/project-trust';
 import type {PlainInitResult} from '@/plain/initialize';
 import type {LLMClient} from '@/types/core';
 import {
@@ -261,7 +262,11 @@ for (const {name, entry, reason} of [
 	},
 	{
 		name: 'an entry whose fingerprint no longer matches',
-		entry: {path: process.cwd(), fingerprint: 'stale-fingerprint'},
+		entry: {
+			path: process.cwd(),
+			fingerprint: 'stale-fingerprint',
+			fingerprintVersion: TRUST_FINGERPRINT_VERSION,
+		},
 		reason: 'changed since you trusted it',
 	},
 ]) {
