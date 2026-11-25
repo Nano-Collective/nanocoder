@@ -1,5 +1,10 @@
-import {validateArgsAgainstSchema} from '@/tools/runtime/schema-validate';
+import {
+	getToolJsonSchema,
+	validateArgsAgainstSchema,
+} from '@/tools/runtime/schema-validate';
+import {parseToolArguments} from '@/tools/runtime/tool-args-parser';
 import type {
+	ToolCall,
 	ToolExecutionContext,
 	ToolHandler,
 	ToolValidator,
@@ -58,15 +63,19 @@ export function toolErrorToContent(error: unknown): string {
 	return `Error: ${formatError(error)}`;
 }
 
+const SCHEMA_TYPE_ERROR =
+	'one or more arguments have the wrong type — fix the types and call the tool again';
+
 /**
  * Wrap a tool handler so type-checking and its validator run immediately
  * before execution.
  *
- * This is the single place tool validation lives: because every execution
- * path (interactive loop, plain shell, subagents) ultimately invokes the
- * registry handler, validating here means no path can bypass it. On failure
- * the wrapper throws a {@link ToolValidationError}; callers already catch
- * handler exceptions and turn them into an error tool-result.
+ * This is the execution-time gate. Every path (interactive loop, plain
+ * shell, subagents) invokes the registry handler, so validating here means
+ * no path can bypass it. {@link precheckToolCall} runs the same checks
+ * before the interactive approval prompt. On failure the wrapper throws a
+ * {@link ToolValidationError}; callers already catch handler exceptions and
+ * turn them into an error tool-result.
  *
  * When a `schema` is supplied, arguments are first type-checked against it.
  * A wrong-typed argument (e.g. an object where a string is expected) is
@@ -83,10 +92,7 @@ export function withValidation(
 		if (schema) {
 			const typeErrors = validateArgsAgainstSchema(args, schema);
 			if (typeErrors.length > 0) {
-				throw new ToolValidationError(
-					'one or more arguments have the wrong type — fix the types and call the tool again',
-					typeErrors,
-				);
+				throw new ToolValidationError(SCHEMA_TYPE_ERROR, typeErrors);
 			}
 		}
 		if (validator) {
@@ -102,4 +108,60 @@ export function withValidation(
 		// running `execute_bash` or `agent` would keep going to completion.
 		return handler(args, options);
 	};
+}
+
+/**
+ * The slice of a tool manager this check needs. Structural so this module
+ * does not import `ToolManager`: that class is built on the validated
+ * registry, which already imports this file.
+ */
+interface ToolCallPrecheckSource {
+	getToolEntry(name: string): {tool?: unknown} | undefined;
+	getToolValidator(name: string): ToolValidator | undefined;
+}
+
+/**
+ * Run the schema check and the per-tool validator before a call is offered
+ * for approval. Returns the string the model would see if the validated
+ * handler had thrown, or null when the call can run.
+ *
+ * Nothing here executes the handler. A failure needs no consent (#1228):
+ * the call is rejected and the error goes back to the model.
+ */
+export async function precheckToolCall(
+	toolManager: ToolCallPrecheckSource | null,
+	toolCall: ToolCall,
+): Promise<string | null> {
+	if (!toolManager) return null;
+
+	// Lenient, matching the dialog's old preview: unparseable arguments stay
+	// as given so the schema check or the validator can name the real problem.
+	let parsedArgs: unknown = {};
+	try {
+		parsedArgs = parseToolArguments(toolCall.function.arguments);
+	} catch {
+		parsedArgs = {};
+	}
+
+	const schema = getToolJsonSchema(
+		toolManager.getToolEntry(toolCall.function.name)?.tool,
+	);
+	if (schema) {
+		const typeErrors = validateArgsAgainstSchema(parsedArgs, schema);
+		if (typeErrors.length > 0) {
+			return formatValidationError(SCHEMA_TYPE_ERROR, typeErrors);
+		}
+	}
+
+	const validator = toolManager.getToolValidator(toolCall.function.name);
+	if (!validator) return null;
+	try {
+		const result = await validator(parsedArgs);
+		if (!result.valid) {
+			return formatValidationError(result.error, result.details);
+		}
+	} catch (error) {
+		return toolErrorToContent(error);
+	}
+	return null;
 }

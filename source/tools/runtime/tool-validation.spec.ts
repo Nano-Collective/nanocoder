@@ -1,8 +1,9 @@
 import test from 'ava';
-import type {ToolHandler, ToolValidator} from '@/types/core';
+import type {ToolCall, ToolHandler, ToolValidator} from '@/types/core';
 import {
 	ToolValidationError,
 	formatValidationError,
+	precheckToolCall,
 	toolErrorToContent,
 	withValidation,
 } from './tool-validation';
@@ -100,6 +101,96 @@ test('formatValidationError renders structured details as lines', t => {
 test('formatValidationError without details is a single line', t => {
 	const out = formatValidationError('bad args');
 	t.is(out, '⚒ Validation failed: bad args');
+});
+
+const SCHEMA_TOOL = {
+	inputSchema: {
+		jsonSchema: {
+			type: 'object',
+			properties: {path: {type: 'string'}},
+		},
+	},
+};
+
+function call(name: string, args: Record<string, unknown>): ToolCall {
+	return {id: 'call-1', function: {name, arguments: args}};
+}
+
+test('precheckToolCall returns null when the schema and validator accept the call', async t => {
+	const manager = {
+		getToolEntry: () => ({tool: SCHEMA_TOOL}),
+		getToolValidator: () => async () => ({valid: true as const}),
+	};
+	t.is(await precheckToolCall(manager, call('schema_tool', {path: 'a.txt'})), null);
+});
+
+test('precheckToolCall formats a schema mismatch and does not run the validator', async t => {
+	let validatorRan = false;
+	const manager = {
+		getToolEntry: () => ({tool: SCHEMA_TOOL}),
+		getToolValidator: () => async () => {
+			validatorRan = true;
+			return {valid: false as const, error: 'validator should not run'};
+		},
+	};
+	const error = await precheckToolCall(
+		manager,
+		call('schema_tool', {path: {nested: true}}),
+	);
+	t.false(validatorRan);
+	t.is(
+		error,
+		formatValidationError(
+			'one or more arguments have the wrong type — fix the types and call the tool again',
+			[{path: 'path', expected: 'string', received: 'object'}],
+		),
+	);
+});
+
+test('precheckToolCall formats a validator failure the way the handler would', async t => {
+	const details = [{path: 'path', message: 'not readable'}];
+	const manager = {
+		getToolEntry: () => ({tool: SCHEMA_TOOL}),
+		getToolValidator: () => async () => ({
+			valid: false as const,
+			error: 'path is not writable',
+			details,
+		}),
+	};
+	t.is(
+		await precheckToolCall(manager, call('schema_tool', {path: 'a.txt'})),
+		formatValidationError('path is not writable', details),
+	);
+});
+
+test('precheckToolCall turns a throwing validator into the model-facing error', async t => {
+	const manager = {
+		getToolEntry: () => ({tool: SCHEMA_TOOL}),
+		getToolValidator: () => async () => {
+			throw new Error('validator exploded');
+		},
+	};
+	t.is(
+		await precheckToolCall(manager, call('schema_tool', {path: 'a.txt'})),
+		toolErrorToContent(new Error('validator exploded')),
+	);
+});
+
+test('precheckToolCall returns null when there is nothing to check', async t => {
+	t.is(
+		await precheckToolCall(null, call('schema_tool', {path: 'a.txt'})),
+		null,
+	);
+	t.is(
+		await precheckToolCall(
+			{
+				getToolEntry: () => undefined,
+				getToolValidator: () => undefined,
+			},
+			call('schema_tool', {path: 'a.txt'}),
+		),
+		null,
+	);
 });
 
 test('toolErrorToContent formats validation errors with detail, others generically', t => {

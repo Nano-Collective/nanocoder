@@ -1,3 +1,4 @@
+import {Text} from 'ink';
 import React from 'react';
 import type {ToolExecutionOutcome} from '@/agent-loop/turn-engine';
 import type {ConversationStateManager} from '@/app/utils/conversation-state';
@@ -24,6 +25,7 @@ import {
 	createCancellationResults,
 } from '@/tools/runtime/tool-cancellation';
 import {signalToolConfirm} from '@/tools/runtime/tool-confirm-queue';
+import {precheckToolCall} from '@/tools/runtime/tool-validation';
 import {loadTasks} from '@/tools/tasks/storage';
 import type {Task} from '@/tools/tasks/types';
 import type {ToolManager} from '@/tools/tool-manager';
@@ -444,6 +446,25 @@ export async function runToolTurn(
 			if (notOffered) {
 				refuseToolCall(toolCall, notOffered);
 				turnResults.push(blockedResults[blockedResults.length - 1]);
+				continue;
+			}
+			// Reject a call that cannot run before asking. Checked here, after
+			// the auto batch, so a read_file earlier in this turn still counts.
+			// Subagent approvals (tool-approval-queue.ts) do not use this loop.
+			const validationError = await precheckToolCall(toolManager, toolCall);
+			if (validationError) {
+				turnResults.push({
+					tool_call_id: toolCall.id,
+					role: 'tool',
+					name: toolCall.function.name,
+					content: validationError,
+					isError: true,
+				});
+				addToChatQueue(
+					<Text key={generateKey('tool-rejected')} dimColor>
+						{`${toolCall.function.name} rejected: ${validationError.split('\n')[0]}`}
+					</Text>,
+				);
 				continue;
 			}
 			// Escape answers the prompt directly, but a turn aborted any
