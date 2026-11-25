@@ -64,6 +64,40 @@ test('/context-max shows unknown with suffix usage hint when no context is resol
 	);
 });
 
+test.serial('/context-max override stops applying after a model switch', async t => {
+	const providerConfig: AIProviderConfig = {
+		name: 'Test Provider',
+		type: 'openai',
+		models: ['small-model', 'large-model'],
+		contextWindows: {'large-model': 200_000},
+		config: {},
+	};
+	const queued: React.ReactNode[] = [];
+	const run = (argText: string, model: string) =>
+		contextMaxCommand.run({
+			argText,
+			model,
+			provider: 'Test Provider',
+			providerConfig,
+			addToChatQueue: node => queued.push(node),
+		} as unknown as CommandContext);
+
+	try {
+		await run('8k', 'small-model');
+		t.true(getMessageText(queued[0]).includes('small-model'));
+
+		await run('', 'small-model');
+		t.true(getMessageText(queued[1]).includes((8_000).toLocaleString()));
+		t.true(getMessageText(queued[1]).includes('session override'));
+
+		await run('', 'large-model');
+		t.true(getMessageText(queued[2]).includes((200_000).toLocaleString()));
+		t.true(getMessageText(queued[2]).includes('provider model config'));
+	} finally {
+		resetSessionContextLimit();
+	}
+});
+
 test('/context-max uses provider config for context resolution', async t => {
 	let queued: React.ReactNode = null;
 	const completion = await runContextMax({

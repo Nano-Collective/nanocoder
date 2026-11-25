@@ -31,6 +31,7 @@ import {
 	setToolManagerGetter,
 	setToolRegistryGetter,
 } from '@/message-handler';
+import {bindSessionContextLimit} from '@/models/index';
 import {loadPlugins} from '@/plugins/host';
 import {
 	beginSessionStartHooks,
@@ -183,6 +184,10 @@ export function useAppInitialization({
 
 		setCurrentModel(finalModel);
 		setCurrentProviderConfig(client.getProviderConfig());
+
+		// `--context-max` is applied before any client exists, so it carries no
+		// provider or model. Tie it to the ones the session starts on.
+		bindSessionContextLimit({provider: actualProvider, model: finalModel});
 
 		if (!isProgrammatic) {
 			// Save the preference - use actualProvider and the model that was actually set

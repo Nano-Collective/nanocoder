@@ -75,7 +75,7 @@ export function useModeHandlers({
 		try {
 			const used = history.reduce((sum, m) => sum + getMessageTokens(m), 0);
 			const limit =
-				getSessionContextLimit() ??
+				getSessionContextLimit({provider: providerConfig?.name, model}) ??
 				(await getModelContextLimit(model, {
 					providerConfig: providerConfig ?? undefined,
 				}));

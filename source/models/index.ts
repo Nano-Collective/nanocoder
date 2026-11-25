@@ -1,4 +1,5 @@
 export {
+	bindSessionContextLimit,
 	getModelContextLimit,
 	getModelPricing,
 	getSessionContextLimit,
