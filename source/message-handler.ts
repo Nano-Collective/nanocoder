@@ -101,6 +101,9 @@ export async function processToolUse(
 				isError: true,
 			};
 		}
+		if (options?.abortSignal?.aborted) {
+			return {...createCancellationResults([toolCall])[0], isError: true};
+		}
 
 		const result = await handler(parsedArgs, options);
 		// Image bytes stay off `content` so truncation cannot chew them up
@@ -170,6 +173,9 @@ export async function processToolUse(
 			...(failed ? {isError: true} : {}),
 		};
 	} catch (error) {
+		if (options?.abortSignal?.aborted) {
+			return {...createCancellationResults([toolCall])[0], isError: true};
+		}
 		// Convert exceptions (including an unknown tool, validation failures
 		// thrown by the validated handler, and argument-parsing failures above)
 		// into content the model can see and correct. `isError: true` lets callers

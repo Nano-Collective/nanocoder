@@ -20,6 +20,7 @@ import {ensureString} from '@/utils/type-helpers';
 
 export type MCPToolHandler = (
 	args: Record<string, unknown>,
+	options?: {abortSignal?: AbortSignal},
 ) => Promise<string | StructuredToolOutput>;
 
 export interface MCPToolEntry {
@@ -73,9 +74,11 @@ export function toNativeTool(
 		inputSchema: jsonSchema<Record<string, unknown>>(
 			mcpTool.inputSchema || {type: 'object'},
 		),
-		execute: async (input, _options) => {
+		execute: async (input, options) => {
 			// dynamicTool passes 'input' as unknown, validate at runtime
-			const output = await callTool(input as Record<string, unknown>);
+			const output = await callTool(input as Record<string, unknown>, {
+				abortSignal: options?.abortSignal,
+			});
 			return typeof output === 'string' ? output : output.llmContent;
 		},
 	});

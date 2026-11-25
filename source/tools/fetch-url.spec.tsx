@@ -735,8 +735,8 @@ const longPageHtml = (entries: number) =>
 	).join('')}</body></html>`;
 
 /**
- * Serve `html` for every URL and count what is requested. A HEAD is the
- * redirect probe; a GET is the conversion, the one that moves the body.
+ * Serve `html` for every URL and count requests. HEAD probes redirects; one
+ * GET downloads the page for conversion.
  */
 const servePages = (html: string) => {
 	const requests = {head: 0, get: 0};
@@ -761,6 +761,105 @@ const callFetchUrl = async (args: {
 	max_length?: number;
 }): Promise<string> =>
 	await fetchUrlTool.tool.execute!(args, {toolCallId: 'test', messages: []});
+
+test.serial('fetch_url aborts the page request when the turn is cancelled', async t => {
+	if (!fetchUrlTool) {
+		t.pass('Skipping test - fetch-url module not available');
+		return;
+	}
+	const originalFetch = globalThis.fetch;
+	const controller = new AbortController();
+	let requestStarted!: () => void;
+	let requestAborted = false;
+	const started = new Promise<void>(resolve => {
+		requestStarted = resolve;
+	});
+	globalThis.fetch = async (_input, init) => {
+		if (init?.method === 'HEAD') return new Response(null, {status: 200});
+		return await new Promise<Response>((_resolve, reject) => {
+			const signal = init?.signal;
+			if (!signal) throw new Error('fetch_url did not pass an abort signal');
+			signal.addEventListener(
+				'abort',
+				() => {
+					requestAborted = true;
+					reject(signal.reason);
+				},
+				{once: true},
+			);
+			requestStarted();
+		});
+	};
+
+	try {
+		const pending = fetchUrlTool.tool.execute!(
+			{url: 'https://pages.example.test/slow'},
+			{toolCallId: 'test', messages: [], abortSignal: controller.signal},
+		);
+		await started;
+		controller.abort();
+		await t.throwsAsync(pending);
+		t.true(requestAborted);
+	} finally {
+		globalThis.fetch = originalFetch;
+	}
+});
+
+test.serial('fetch_url retries a transient page response before conversion', async t => {
+	if (!fetchUrlTool) {
+		t.pass('Skipping test - fetch-url module not available');
+		return;
+	}
+	const originalFetch = globalThis.fetch;
+	let pageAttempts = 0;
+	globalThis.fetch = async (_input, init) => {
+		if (init?.method === 'HEAD') return new Response(null, {status: 200});
+		pageAttempts++;
+		if (pageAttempts === 1) {
+			return new Response(null, {
+				status: 503,
+				statusText: 'Service Unavailable',
+				headers: {'retry-after': '0'},
+			});
+		}
+		return new Response('<html><body><h1>Recovered</h1></body></html>', {
+			status: 200,
+			headers: {'content-type': 'text/html'},
+		});
+	};
+
+	try {
+		const result = await callFetchUrl({url: 'https://pages.example.test/retry'});
+		t.regex(result, /Recovered/);
+		t.is(pageAttempts, 2);
+	} finally {
+		globalThis.fetch = originalFetch;
+	}
+});
+
+test.serial('fetch_url rejects a page larger than the converter limit', async t => {
+	if (!fetchUrlTool) {
+		t.pass('Skipping test - fetch-url module not available');
+		return;
+	}
+	const originalFetch = globalThis.fetch;
+	globalThis.fetch = async (_input, init) =>
+		init?.method === 'HEAD'
+			? new Response(null, {status: 200})
+			: new Response(null, {
+					status: 200,
+					headers: {'content-length': String(10 * 1024 * 1024 + 1)},
+				});
+
+	try {
+		await t.throwsAsync(
+			callFetchUrl({url: 'https://pages.example.test/too-large'}),
+			{message: /Response too large/},
+		);
+	} finally {
+		globalThis.fetch = originalFetch;
+	}
+});
 
 test.serial(
 	'windows join back into the whole page with no gap and no overlap',

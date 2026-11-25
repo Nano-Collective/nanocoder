@@ -764,3 +764,62 @@ test('processToolUse - does not run a tool once the turn is cancelled', async t 
 	t.true(result.isError);
 	t.regex(String(result.content), /cancelled by the user/i);
 });
+
+test('processToolUse - reports cancellation when an abort-aware handler stops', async t => {
+	let handlerStarted!: () => void;
+	const started = new Promise<void>(resolve => {
+		handlerStarted = resolve;
+	});
+	setToolRegistryGetter(() => ({
+		abort_aware_tool: async (_args, options) => {
+			handlerStarted();
+			return await new Promise<never>((_resolve, reject) => {
+				options?.abortSignal?.addEventListener(
+					'abort',
+					() => reject(options.abortSignal?.reason),
+					{once: true},
+				);
+			});
+		},
+	}));
+	const controller = new AbortController();
+	const pending = processToolUse(createMockToolCall('abort_aware_tool', {}), {
+		abortSignal: controller.signal,
+	});
+
+	await started;
+	controller.abort();
+	const result = await pending;
+
+	t.true(result.isError);
+	t.regex(String(result.content), /cancelled by the user/i);
+});
+
+test('processToolUse - reports an in-flight handler result after cancellation', async t => {
+	let finishHandler!: (value: string) => void;
+	let handlerStarted!: () => void;
+	const started = new Promise<void>(resolve => {
+		handlerStarted = resolve;
+	});
+	const handlerResult = new Promise<string>(resolve => {
+		finishHandler = resolve;
+	});
+	setToolRegistryGetter(() => ({
+		slow_tool: async () => {
+			handlerStarted();
+			return await handlerResult;
+		},
+	}));
+	const controller = new AbortController();
+	const pending = processToolUse(createMockToolCall('slow_tool', {}), {
+		abortSignal: controller.signal,
+	});
+
+	await started;
+	controller.abort();
+	finishHandler('completed after cancellation');
+	const result = await pending;
+
+	t.is(result.isError, undefined);
+	t.is(result.content, 'completed after cancellation');
+});
