@@ -23,6 +23,7 @@ import {
 	matchReadContent,
 	READ_STUB_MARKER,
 	recordVisibilityReceipt,
+	rememberFileSnapshot,
 	rememberReadContent,
 } from '@/tools/runtime/read-tracker';
 import type {NanocoderToolExport, VisualToolOutput} from '@/types/core';
@@ -148,6 +149,9 @@ const executeReadFile = async (args: {
 		if (content.length === 0) {
 			// An empty file has been seen in full; allow edits/overwrites against it.
 			markFileSeen(absPath);
+			if (!cached.derived && !cached.notUtf8) {
+				rememberFileSnapshot(absPath, content, stats);
+			}
 			rememberReadContent(absPath, stats, 0, args.start_line, args.end_line);
 			recordVisibilityReceipt(absPath, stats, undefined, undefined);
 			return EMPTY_CONTENT_MARKER;
@@ -205,6 +209,17 @@ const executeReadFile = async (args: {
 		);
 		// Record visibility receipt for the actual lines returned
 		recordVisibilityReceipt(absPath, stats, startLine, endLine);
+		// Only a complete, editable text body proves the exact version needed by
+		// write_file. A preview or range read may still authorize bounded edits,
+		// but it cannot safely authorize a whole-file replacement.
+		if (
+			startLine === 1 &&
+			endLine === totalLines &&
+			!cached.derived &&
+			!cached.notUtf8
+		) {
+			rememberFileSnapshot(absPath, content, stats);
+		}
 
 		// Return content without line numbers for clean content-based editing
 		return linesToReturn.join('\n');

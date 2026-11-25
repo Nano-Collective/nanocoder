@@ -1,4 +1,5 @@
 import {AsyncLocalStorage} from 'node:async_hooks';
+import {createHash} from 'node:crypto';
 import {statSync} from 'node:fs';
 import {resolve} from 'node:path';
 
@@ -35,7 +36,14 @@ type ReadContentEntry = {
 type ReadContentScope = {
 	generation: number;
 	files: Map<string, ReadContentEntry>;
+	fileSnapshots: Map<string, FileSnapshot>;
 	visibilityReceipts: Map<string, VisibilityReceipt>;
+};
+
+type FileSnapshot = {
+	digest: string;
+	dev: number;
+	ino: number;
 };
 
 type LineRange = {
@@ -62,7 +70,12 @@ function currentReadScopeId(): string {
 function getReadContentScope(scopeId = currentReadScopeId()): ReadContentScope {
 	let scope = readContentScopes.get(scopeId);
 	if (!scope) {
-		scope = {generation: 0, files: new Map(), visibilityReceipts: new Map()};
+		scope = {
+			generation: 0,
+			files: new Map(),
+			fileSnapshots: new Map(),
+			visibilityReceipts: new Map(),
+		};
 		readContentScopes.set(scopeId, scope);
 	}
 	return scope;
@@ -190,6 +203,46 @@ export function matchReadContent(
 		return undefined;
 	}
 	return {lineCount: entry.lineCount, size: entry.size};
+}
+
+function hashFileContent(content: string | Buffer): string {
+	return createHash('sha256').update(content).digest('hex');
+}
+
+/** Store the exact full-file version exposed to the model for stale-write checks. */
+export function rememberFileSnapshot(
+	absPath: string,
+	content: string | Buffer,
+	identity: {dev: number; ino: number},
+): void {
+	getReadContentScope().fileSnapshots.set(resolve(absPath), {
+		digest: hashFileContent(content),
+		dev: identity.dev,
+		ino: identity.ino,
+	});
+}
+
+/** Whether a full-file snapshot exists in the current agent scope. */
+export function hasFileSnapshot(absPath: string): boolean {
+	return getReadContentScope().fileSnapshots.has(resolve(absPath));
+}
+
+/**
+ * Compare current bytes and target identity with the exact full-file snapshot.
+ * Undefined means the current scope never received a complete file snapshot.
+ */
+export function matchesFileSnapshot(
+	absPath: string,
+	content: string | Buffer,
+	identity: {dev: number; ino: number},
+): boolean | undefined {
+	const snapshot = getReadContentScope().fileSnapshots.get(resolve(absPath));
+	if (!snapshot) return undefined;
+	return (
+		snapshot.dev === identity.dev &&
+		snapshot.ino === identity.ino &&
+		snapshot.digest === hashFileContent(content)
+	);
 }
 
 /** Clear all tracked files. Called on /clear and exposed for tests. */

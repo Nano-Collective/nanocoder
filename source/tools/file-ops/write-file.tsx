@@ -1,5 +1,5 @@
 import {constants, existsSync} from 'node:fs';
-import {access, lstat, readFile} from 'node:fs/promises';
+import {access, lstat, open, readFile, realpath, stat} from 'node:fs/promises';
 import {dirname, resolve} from 'node:path';
 import {Box, Text} from 'ink';
 import React from 'react';
@@ -30,10 +30,13 @@ import {getLanguageFromExtension} from '@/tools/file-ops/programming-language-he
 import {
 	forgetReadContent,
 	forgetVisibilityReceipt,
+	hasFileSnapshot,
 	hasSeenFile,
 	hasVisibleLines,
 	markFileSeen,
+	matchesFileSnapshot,
 	recordVisibilityReceipt,
+	rememberFileSnapshot,
 } from '@/tools/runtime/read-tracker';
 import {createFileToolApproval} from '@/tools/runtime/tool-approval';
 import type {NanocoderToolExport} from '@/types/core';
@@ -58,6 +61,52 @@ import {
 // never runs).
 const previousContentCache = new Map<string, string | null>();
 
+/** Read a target through an open handle and verify the path still names it. */
+async function matchesCurrentFileSnapshot(
+	absPath: string,
+	expectedTargetPath?: string,
+): Promise<boolean | undefined> {
+	if (!hasFileSnapshot(absPath)) return undefined;
+	let handle: Awaited<ReturnType<typeof open>> | undefined;
+	try {
+		if (
+			expectedTargetPath !== undefined &&
+			(await realpath(absPath)) !== expectedTargetPath
+		) {
+			return false;
+		}
+
+		handle = await open(absPath, 'r');
+		const fileStats = await handle.stat();
+		const content = await handle.readFile();
+		const pathStats = await stat(absPath);
+		if (fileStats.dev !== pathStats.dev || fileStats.ino !== pathStats.ino) {
+			return false;
+		}
+		if (
+			expectedTargetPath !== undefined &&
+			(await realpath(absPath)) !== expectedTargetPath
+		) {
+			return false;
+		}
+		return matchesFileSnapshot(absPath, content, fileStats) === true;
+	} catch {
+		return false;
+	} finally {
+		await handle?.close().catch(() => {});
+	}
+}
+
+function invalidateStaleReadState(absPath: string): void {
+	forgetReadContent(absPath);
+	forgetVisibilityReceipt(absPath);
+	invalidateCache(absPath);
+}
+
+function staleSnapshotError(path: string): string {
+	return `File "${path}" has changed since it was fully read. Re-read the entire file with read_file before overwriting it.`;
+}
+
 const executeWriteFile = async (args: {
 	path: string;
 	content: unknown; // Note: change type to unknown to accept non-string
@@ -69,6 +118,10 @@ const executeWriteFile = async (args: {
 
 	const absPath = resolve(getSafeSessionCwd(), args.path);
 	const fileExists = existsSync(absPath);
+	if (!fileExists && hasFileSnapshot(absPath)) {
+		invalidateStaleReadState(absPath);
+		throw new Error(staleSnapshotError(args.path));
+	}
 
 	if (fileExists) {
 		let cached: Awaited<ReturnType<typeof getCachedFileContent>> | undefined;
@@ -126,7 +179,34 @@ const executeWriteFile = async (args: {
 	);
 	const firewallWarning = enforceFirewall(firewallResult);
 
-	await atomicWriteUserFile(absPath, content);
+	let expectedTargetPath: string | undefined;
+	if (fileExists) {
+		const snapshotMatches = await matchesCurrentFileSnapshot(absPath);
+		if (snapshotMatches !== true) {
+			if (snapshotMatches === false) invalidateStaleReadState(absPath);
+			throw new Error(staleSnapshotError(args.path));
+		}
+		expectedTargetPath = await realpath(absPath);
+	}
+
+	await atomicWriteUserFile(absPath, content, async targetPath => {
+		if (!fileExists) {
+			// Do not turn a path that appeared while the approval UI was open into
+			// an unreviewed overwrite.
+			if (existsSync(absPath)) {
+				throw new Error(staleSnapshotError(args.path));
+			}
+			return;
+		}
+
+		if (
+			targetPath !== expectedTargetPath ||
+			(await matchesCurrentFileSnapshot(absPath, targetPath)) !== true
+		) {
+			invalidateStaleReadState(absPath);
+			throw new Error(staleSnapshotError(args.path));
+		}
+	});
 
 	// Invalidate cache after write
 	invalidateCache(absPath);
@@ -147,7 +227,12 @@ const executeWriteFile = async (args: {
 	// Read back to verify the write succeeded (but don't echo the content back
 	// to the model — it just sent us that exact content as the tool call
 	// arguments, so returning it again is pure duplication).
-	const actualContent = await readFile(absPath, 'utf-8');
+	const actualBytes = await readFile(absPath);
+	const actualContent = actualBytes.toString('utf-8');
+	const writtenStats = await stat(absPath);
+	// Store the content we committed, not a later external edit that raced with
+	// the read-back. A subsequent write will compare both bytes and file identity.
+	rememberFileSnapshot(absPath, content, writtenStats);
 	const lineCount = actualContent.split('\n').length;
 	const charCount = actualContent.length;
 	const estimatedTokens = estimateTokens(actualContent);
@@ -490,6 +575,10 @@ const writeFileValidator = async (args: {
 	if (!formatResult.valid) return formatResult;
 
 	const absPath = resolve(getSafeSessionCwd(), args.path);
+	if (!existsSync(absPath) && hasFileSnapshot(absPath)) {
+		invalidateStaleReadState(absPath);
+		return {valid: false, error: staleSnapshotError(args.path)};
+	}
 
 	// Check if parent directory exists
 	const parentDir = dirname(absPath);
@@ -564,6 +653,20 @@ const writeFileValidator = async (args: {
 			if (!encodingResult.valid) return encodingResult;
 		} catch {
 			// Unreadable files surface their own error at execute time.
+		}
+	}
+
+	if (existsSync(absPath)) {
+		const snapshotMatches = await matchesCurrentFileSnapshot(absPath);
+		if (snapshotMatches !== true) {
+			if (snapshotMatches === false) invalidateStaleReadState(absPath);
+			return {
+				valid: false,
+				error:
+					snapshotMatches === undefined
+						? `Read all of "${args.path}" in one read_file call before overwriting it, so the exact version can be checked.`
+						: staleSnapshotError(args.path),
+			};
 		}
 	}
 

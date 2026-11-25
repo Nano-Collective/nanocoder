@@ -5,10 +5,13 @@ import {
 	readFile,
 	readdir,
 	rm,
+	rename,
 	stat,
 	symlink,
+	utimes,
 	writeFile,
 } from 'node:fs/promises';
+import {existsSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
@@ -19,7 +22,11 @@ import {themes} from '../../config/themes.js';
 import {resolveToolApproval} from '../approval-policy.js';
 import {ThemeContext} from '../../hooks/useTheme.js';
 import {writeFileTool} from './write-file.js';
-import {clearReadTracker, markFileSeenAndVisible} from '../runtime/read-tracker.js';
+import {
+	clearReadTracker,
+	markFileSeenAndVisible,
+} from '../runtime/read-tracker.js';
+import {readFileTool} from '../read-file.js';
 import {setRenameForTests} from '../../utils/fs/atomic-write.js';
 import {
 	resetFirewallConfig,
@@ -69,8 +76,37 @@ async function executeWriteFile(args: {
 	path: string;
 	content: string;
 }): Promise<string> {
+	// Most execution tests exercise a write after the normal model workflow has
+	// read an existing file. Tests for stale or unread files call the tool
+	// directly so they can control exactly when the edit happens.
+	if (existsSync(args.path)) {
+		try {
+			await executeReadFile({path: args.path});
+		} catch {
+			// Preserve tests that assert how write_file reports an unreadable file.
+		}
+	}
+	return executeWriteFileWithoutRead(args);
+}
+
+async function executeWriteFileWithoutRead(args: {
+	path: string;
+	content: string;
+}): Promise<string> {
 	// biome-ignore lint/suspicious/noExplicitAny: Tool internals require any
 	return await (writeFileTool.tool as any).execute(args, {
+		toolCallId: 'test',
+		messages: [],
+	});
+}
+
+async function executeReadFile(args: {
+	path: string;
+	start_line?: number;
+	end_line?: number;
+}): Promise<string> {
+	// biome-ignore lint/suspicious/noExplicitAny: Tool internals require any
+	return await (readFileTool.tool as any).execute(args, {
 		toolCallId: 'test',
 		messages: [],
 	});
@@ -297,7 +333,7 @@ test('write_file validator: allows overwriting an existing file after it is read
 	const originalCwd = process.cwd();
 	try {
 		process.chdir(testDir);
-		markFileSeenAndVisible('existing.txt');
+		await executeReadFile({path: 'existing.txt'});
 
 		const result = await writeFileTool.validator({
 			path: 'existing.txt',
@@ -305,6 +341,25 @@ test('write_file validator: allows overwriting an existing file after it is read
 		});
 
 		t.true(result.valid);
+	} finally {
+		process.chdir(originalCwd);
+	}
+});
+
+test.serial('write_file validator requires one complete read after separate ranges cover the file', async t => {
+	await writeFile(join(testDir, 'ranged.txt'), 'one\ntwo\nthree\n', 'utf-8');
+	const originalCwd = process.cwd();
+	try {
+		process.chdir(testDir);
+		await executeReadFile({path: 'ranged.txt', start_line: 1, end_line: 2});
+		await executeReadFile({path: 'ranged.txt', start_line: 3, end_line: 4});
+
+		const result = await writeFileTool.validator!({
+			path: 'ranged.txt',
+			content: 'replacement\n',
+		});
+		t.false(result.valid);
+		if (!result.valid) t.regex(result.error, /Read all of .* in one read_file call/);
 	} finally {
 		process.chdir(originalCwd);
 	}
@@ -1439,24 +1494,119 @@ test('write_file: genuinely new file write succeeds without read failure', async
 // Overwriting a file that changed on disk after it was read
 // ============================================================================
 
-test.serial('write_file validator: refuses to overwrite a file changed outside after the read', async t => {
+test.serial('write_file validator: refuses same-size content changes with a restored mtime', async t => {
 	const filePath = join(testDir, 'changed-outside.txt');
 	await writeFile(filePath, 'original\n', 'utf-8');
+	const fixedTime = new Date('2020-01-01T00:00:00.000Z');
+	await utimes(filePath, fixedTime, fixedTime);
 
 	const originalCwd = process.cwd();
 	try {
 		process.chdir(testDir);
-		markFileSeenAndVisible('changed-outside.txt');
+		await executeReadFile({path: 'changed-outside.txt'});
+		const originalStats = await stat(filePath);
 
 		// Someone saves the file in an editor while the agent is working.
-		await writeFile(filePath, 'original\nedited in an editor\n', 'utf-8');
+		await writeFile(filePath, 'external\n', 'utf-8');
+		await utimes(filePath, fixedTime, fixedTime);
+		const changedStats = await stat(filePath);
+		t.is(changedStats.size, originalStats.size);
+		t.is(changedStats.mtimeMs, originalStats.mtimeMs);
 
 		const result = await writeFileTool.validator!({
 			path: 'changed-outside.txt',
 			content: 'the agent version',
 		});
 		t.false(result.valid);
-		if (!result.valid) t.regex(result.error, /modified externally/);
+		if (!result.valid) t.regex(result.error, /changed since it was fully read/);
+		t.is(await executeReadFile({path: 'changed-outside.txt'}), 'external\n');
+	} finally {
+		process.chdir(originalCwd);
+	}
+});
+
+test.serial('write_file validator: refuses a replaced target even when its bytes and mtime match', async t => {
+	const filePath = join(testDir, 'replaced-target.txt');
+	const replacementPath = join(testDir, 'replacement.tmp');
+	const fixedTime = new Date('2020-01-01T00:00:00.000Z');
+	await writeFile(filePath, 'original\n', 'utf-8');
+	await utimes(filePath, fixedTime, fixedTime);
+
+	const originalCwd = process.cwd();
+	try {
+		process.chdir(testDir);
+		await executeReadFile({path: 'replaced-target.txt'});
+
+		await writeFile(replacementPath, 'original\n', 'utf-8');
+		await utimes(replacementPath, fixedTime, fixedTime);
+		await rename(replacementPath, filePath);
+
+		const result = await writeFileTool.validator!({
+			path: 'replaced-target.txt',
+			content: 'agent version\n',
+		});
+		t.false(result.valid);
+		if (!result.valid) t.regex(result.error, /changed since it was fully read/);
+		t.is(await readFile(filePath, 'utf-8'), 'original\n');
+	} finally {
+		process.chdir(originalCwd);
+	}
+});
+
+test.serial('write_file rechecks the file after approval before overwriting it', async t => {
+	const filePath = join(testDir, 'approval-race.txt');
+	await writeFile(filePath, 'original\n', 'utf-8');
+	const fixedTime = new Date('2020-01-01T00:00:00.000Z');
+	await utimes(filePath, fixedTime, fixedTime);
+
+	const originalCwd = process.cwd();
+	try {
+		process.chdir(testDir);
+		await executeReadFile({path: 'approval-race.txt'});
+
+		const validation = await writeFileTool.validator!({
+			path: 'approval-race.txt',
+			content: 'agent version\n',
+		});
+		t.true(validation.valid);
+
+		// Model the editor save while the approval prompt is open.
+		await writeFile(filePath, 'external\n', 'utf-8');
+		await utimes(filePath, fixedTime, fixedTime);
+
+		await t.throwsAsync(
+			executeWriteFileWithoutRead({
+				path: 'approval-race.txt',
+				content: 'agent version\n',
+			}),
+			{message: /changed since it was fully read/},
+		);
+		t.is(await readFile(filePath, 'utf-8'), 'external\n');
+	} finally {
+		process.chdir(originalCwd);
+	}
+});
+
+test.serial('write_file refuses to overwrite a path that appeared after approval', async t => {
+	const filePath = join(testDir, 'appeared-after-approval.txt');
+	const originalCwd = process.cwd();
+	try {
+		process.chdir(testDir);
+		const validation = await writeFileTool.validator!({
+			path: 'appeared-after-approval.txt',
+			content: 'agent version\n',
+		});
+		t.true(validation.valid);
+
+		await writeFile(filePath, 'user version\n', 'utf-8');
+		await t.throwsAsync(
+			executeWriteFileWithoutRead({
+				path: 'appeared-after-approval.txt',
+				content: 'agent version\n',
+			}),
+			{message: /changed since it was fully read/},
+		);
+		t.is(await readFile(filePath, 'utf-8'), 'user version\n');
 	} finally {
 		process.chdir(originalCwd);
 	}
