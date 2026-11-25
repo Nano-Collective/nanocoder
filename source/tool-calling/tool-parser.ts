@@ -41,7 +41,7 @@ export function stripThinkTags(content: string): string {
  * themselves untouched, so a `<think>` inside a tool call's argument is file
  * content, not reasoning.
  */
-export function stripThinkTagsOutsideRanges(
+function stripThinkTagsOutsideRanges(
 	content: string,
 	ranges: Array<[number, number]>,
 ): string {
