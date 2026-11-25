@@ -1931,6 +1931,61 @@ test.serial(
 	},
 );
 
+test.serial(
+	'search_file_contents rounds a fractional contextLines down',
+	async t => {
+		t.timeout(10000);
+		const testDir = join(process.cwd(), 'test-search-context-fraction-temp');
+
+		try {
+			mkdirSync(testDir, {recursive: true});
+			const lines = Array.from({length: 400}, (_, i) => `line${i + 1}`);
+			lines[1] = 'FRACTION_CONTEXT_MATCH';
+			writeFileSync(join(testDir, 'app.ts'), lines.join('\n'));
+
+			const originalCwd = process.cwd();
+
+			try {
+				process.chdir(testDir);
+				clearReadTracker();
+
+				await readFileTool.tool.execute!(
+					{path: 'app.ts', start_line: 1, end_line: 5},
+					{toolCallId: 'test', messages: []},
+				);
+
+				const editLine350 = () =>
+					stringReplaceTool.validator!({
+						path: 'app.ts',
+						old_str: 'line350',
+						new_str: 'changed',
+					});
+
+				t.false((await editLine350()).valid);
+
+				const result = await searchFileContentsTool.tool.execute!(
+					{
+						query: 'FRACTION_CONTEXT_MATCH',
+						contextLines: 2.7,
+						maxResults: 30,
+					},
+					{toolCallId: 'test', messages: []},
+				);
+
+				t.true(result.includes('FRACTION_CONTEXT_MATCH'));
+				t.true(result.includes('4: line4'), '2.7 rounds down to 2 lines');
+				t.false(result.includes('5: line5'));
+				t.false((await editLine350()).valid);
+			} finally {
+				process.chdir(originalCwd);
+				clearReadTracker();
+			}
+		} finally {
+			rmSync(testDir, {recursive: true, force: true});
+		}
+	},
+);
+
 // ============================================================================
 // Tests for Binary File Skipping (-I flag)
 // ============================================================================

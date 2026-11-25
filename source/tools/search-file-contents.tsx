@@ -74,7 +74,7 @@ const executeSearchFileContents = async (
 
 	const contextLines = Math.max(
 		0,
-		Math.min(args.contextLines ?? 0, MAX_CONTEXT_LINES),
+		Math.min(Math.floor(args.contextLines ?? 0), MAX_CONTEXT_LINES),
 	);
 
 	try {
@@ -209,7 +209,7 @@ const searchFileContentsCoreTool = tool({
 					'Match whole words only, preventing partial matches (default: false). Useful for finding exact variable/function names.',
 			},
 			contextLines: {
-				type: 'number',
+				type: 'integer',
 				minimum: 0,
 				description:
 					'Number of lines to show before and after each match (default: 0, max: 10). Useful for understanding surrounding code context.',
