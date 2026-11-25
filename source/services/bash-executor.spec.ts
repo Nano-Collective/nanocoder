@@ -1098,13 +1098,17 @@ test('peekJobOutput does not consume the output bash_output still needs', async 
 	const next = executor.readJobOutput(executionId)!;
 	t.true(next.output.includes('tick 0'), 'bash_output still receives peeked text');
 
-	const afterRead = executor.peekJobOutput(executionId)!;
-	t.is(afterRead.output, next.output, 'peeking after a read returns that chunk');
-
 	const following = executor.readJobOutput(executionId)!;
 	t.false(following.output.includes('tick 0'), 'peeking must not advance the cursor');
 
 	await executor.killJob(executionId);
+	const afterKill = executor.peekJobOutput(executionId)!;
+	t.true(afterKill.isComplete, 'peeking reports the live job status');
+	t.is(
+		executor.readJobOutput(executionId)!.output,
+		afterKill.output,
+		'peeking after a read still leaves the current unread text for bash_output',
+	);
 });
 
 test('stopSessionJobs kills only the jobs owned by that session', async t => {

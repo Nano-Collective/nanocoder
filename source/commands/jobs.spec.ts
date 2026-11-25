@@ -4,6 +4,7 @@ import {join} from 'node:path';
 import test from 'ava';
 import type React from 'react';
 import {bashExecutor} from '@/services/bash-executor';
+import {startBackgroundJob} from '@/tools/bash-jobs';
 import {renderWithTheme} from '@/test-utils/render-with-theme';
 import type {CommandContext} from '@/types/index';
 import {jobsCommand} from './jobs';
@@ -15,6 +16,15 @@ const dir = mkdtempSync(join(tmpdir(), 'nc-jobs-command-spec-'));
 const script = join(dir, 'job.js');
 writeFileSync(script, "console.log('started'); setInterval(() => {}, 1000);\n");
 const JOB_COMMAND = `node "${script}"`;
+
+// Prints once inside readBackgroundStart's wait, then once after the model's
+// first read so `/jobs <id>` can be checked against genuinely newer output.
+const lateScript = join(dir, 'late-job.js');
+writeFileSync(
+	lateScript,
+	"console.log('started'); setTimeout(() => console.log('LATE_MARKER'), 1500); setInterval(() => {}, 1000);\n",
+);
+const LATE_JOB_COMMAND = `node "${lateScript}"`;
 
 test.afterEach.always(async () => {
 	await bashExecutor.stopAll();
@@ -78,6 +88,45 @@ test('/jobs <id> shows output without consuming the bash_output cursor', async t
 		before,
 		'the model still reads the same text on its next bash_output',
 	);
+});
+
+test('/jobs <id> shows output produced after the model start read', async t => {
+	const {job} = await startBackgroundJob(LATE_JOB_COMMAND);
+	t.truthy(job, 'the job should start through the production path');
+	const id = job!.jobId;
+	t.false(
+		job!.output.includes('LATE_MARKER'),
+		'the start read should only see the banner',
+	);
+
+	const deadline = Date.now() + 4000;
+	while (
+		!bashExecutor.peekJobOutput(id)?.output.includes('LATE_MARKER') &&
+		Date.now() < deadline
+	) {
+		await new Promise(resolve => setTimeout(resolve, 50));
+	}
+	const peeked = bashExecutor.peekJobOutput(id)!;
+	t.true(peeked.output.includes('LATE_MARKER'));
+
+	const output = await runJobs([id]);
+	t.true(output.includes('LATE_MARKER'), 'the TUI must not show stale output');
+	t.is(
+		bashExecutor.readJobOutput(id)!.output,
+		peeked.output,
+		'peeking must not consume the text bash_output still needs',
+	);
+});
+
+test('/jobs <id> reports live status after the model start read', async t => {
+	const {job} = await startBackgroundJob(JOB_COMMAND);
+	t.truthy(job);
+	const id = job!.jobId;
+	t.false(job!.isComplete);
+
+	await bashExecutor.killJob(id);
+	const output = await runJobs([id]);
+	t.regex(output, /STATUS: stopped/);
 });
 
 test('/jobs accepts an unambiguous job id prefix', async t => {

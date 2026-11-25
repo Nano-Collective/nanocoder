@@ -238,8 +238,6 @@ interface BackgroundJob {
 	/** Character offsets already returned by readJobOutput(). */
 	readStdout: number;
 	readStderr: number;
-	/** Last chunk handed to bash_output, so the TUI can show it again. */
-	lastRead?: BashJobOutput;
 	sessionId?: string;
 	/** Wall-clock start, used for the `/jobs` runtime column. */
 	startedAt: number;
@@ -748,7 +746,7 @@ export class BashExecutor extends EventEmitter {
 		const stderr = state.stderr.slice(job.readStderr);
 		job.readStdout = state.fullOutput.length;
 		job.readStderr = state.stderr.length;
-		const snapshot: BashJobOutput = {
+		return {
 			jobId,
 			command: state.command,
 			output,
@@ -757,20 +755,17 @@ export class BashExecutor extends EventEmitter {
 			exitCode: state.exitCode,
 			error: state.error,
 		};
-		job.lastRead = snapshot;
-		return snapshot;
 	}
 
 	/**
-	 * The last chunk returned by readJobOutput(), or the current unread text if
-	 * nothing has been read yet. Never advances the cursor, so a user
-	 * inspecting a job with `/jobs <id>` cannot steal output from the model's
-	 * next `bash_output` call.
+	 * The current unread text and live status of a job. Never advances the
+	 * cursor, so a user inspecting a job with `/jobs <id>` cannot steal output
+	 * from the model's next `bash_output` call, and cannot see stale status
+	 * captured by an earlier model read.
 	 */
 	peekJobOutput(jobId: string): BashJobOutput | undefined {
 		const job = this.jobs.get(jobId);
 		if (!job) return undefined;
-		if (job.lastRead) return job.lastRead;
 		const {state} = job;
 		return {
 			jobId,
