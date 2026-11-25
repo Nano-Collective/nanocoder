@@ -76,7 +76,15 @@ const MAX_TOOL_RESULT_CHARS = 12_000;
 const MIN_CONTEXT_TOOL_CHARS = 400;
 // Conservative budget (~80% of context at 3 chars/token) so tool schemas,
 // message framing, and the final report turn still fit on smaller windows.
-const CONTEXT_CHARS_PER_TOKEN = 2.4;
+export const CONTEXT_CHARS_PER_TOKEN = 2.4;
+// Many local models report no context size. Assume a small window rather than
+// an unbounded one, since review runs neither compact nor cap their history.
+const UNKNOWN_CONTEXT_TOKENS = 32_768;
+
+export function reviewContextTokens(client: LLMClient): number {
+	const size = client.getContextSize();
+	return size > 0 ? size : UNKNOWN_CONTEXT_TOKENS;
+}
 
 const BUDGET_EXHAUSTED_PROMPT =
 	'Your tool budget for this review is exhausted. Do not call any more tools. Report now in the required output format, using only what you have already verified.';
@@ -171,11 +179,9 @@ export async function runReviewAgent(
 	);
 	const systemMessage: Message = {role: 'system', content: systemPrompt};
 	let history: Message[] = [{role: 'user', content: run.userPrompt}];
-	const contextTokens = run.client.getContextSize();
-	const maxContextChars =
-		contextTokens > 0
-			? Math.floor(contextTokens * CONTEXT_CHARS_PER_TOKEN)
-			: Number.POSITIVE_INFINITY;
+	const maxContextChars = Math.floor(
+		reviewContextTokens(run.client) * CONTEXT_CHARS_PER_TOKEN,
+	);
 	const inspectedPaths = new Set<string>();
 	const fullyInspectedPaths = new Set<string>();
 	const span = activity.begin({

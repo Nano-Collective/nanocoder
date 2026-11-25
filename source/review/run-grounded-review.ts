@@ -4,9 +4,11 @@ import {
 	type ReviewActivitySummary,
 } from './review-activity';
 import {
+	CONTEXT_CHARS_PER_TOKEN,
 	type ReviewAgentBudget,
 	type ReviewAgentOutcome,
 	type ReviewToolMode,
+	reviewContextTokens,
 	runReviewAgent,
 } from './review-agent';
 import {checkCitation, citedExcerpt} from './review-citations';
@@ -105,11 +107,11 @@ function promptDiffLimits(client: LLMClient): {
 	maxLines: number;
 	maxChars: number;
 } {
-	const contextTokens = client.getContextSize();
-	const maxChars =
-		contextTokens > 0
-			? Math.min(80_000, Math.max(6_000, Math.floor(contextTokens * 4 * 0.3)))
-			: 60_000;
+	const contextChars = reviewContextTokens(client) * CONTEXT_CHARS_PER_TOKEN;
+	const maxChars = Math.min(
+		80_000,
+		Math.max(6_000, Math.floor(contextChars * 0.3)),
+	);
 	return {maxLines: MAX_PROMPT_DIFF_LINES, maxChars};
 }
 
