@@ -2,6 +2,7 @@ import path from 'node:path';
 import {loadPreferences, savePreferences} from '@/config/preferences';
 import type {TrustedDirectoryRecord} from '@/types/config';
 import type {UserPreferences} from '@/types/index';
+import {normalizeForCompare} from '@/utils/fs/path-validation';
 import {describeProjectTrust, TRUST_FINGERPRINT_VERSION} from './project-trust';
 
 /**
@@ -35,14 +36,14 @@ export function isDirectoryTrusted(
 	directory: string,
 	preferences: UserPreferences,
 ): boolean {
-	const resolved = path.resolve(directory); // nosemgrep
-	const fingerprint = describeProjectTrust(resolved).fingerprint;
+	const resolved = normalizeForCompare(directory); // nosemgrep
+	const fingerprint = describeProjectTrust(path.resolve(directory)).fingerprint;
 	return (preferences.trustedDirectories ?? []).some(entry => {
 		const entryPath = trustPath(entry);
 		return (
 			typeof entry === 'object' &&
 			entryPath !== null &&
-			path.resolve(entryPath) === resolved && // nosemgrep
+			normalizeForCompare(entryPath) === resolved && // nosemgrep
 			isCurrentFingerprintVersion(entry) &&
 			entry.fingerprint === fingerprint
 		);
@@ -61,11 +62,12 @@ export function trustRecheck(
 	directory: string,
 	preferences: UserPreferences,
 ): TrustRecheck | null {
-	const resolved = path.resolve(directory); // nosemgrep
+	const resolved = normalizeForCompare(directory); // nosemgrep
 	let recheck: TrustRecheck | null = null;
 	for (const entry of preferences.trustedDirectories ?? []) {
 		const entryPath = trustPath(entry);
-		if (entryPath === null || path.resolve(entryPath) !== resolved) continue; // nosemgrep
+		if (entryPath === null || normalizeForCompare(entryPath) !== resolved)
+			continue; // nosemgrep
 		if (typeof entry !== 'string') {
 			return isCurrentFingerprintVersion(entry) ? 'changed' : 'upgrade';
 		}
@@ -110,10 +112,13 @@ export function grantDirectoryTrust(
 	fingerprint = describeProjectTrust(directory).fingerprint,
 ): UserPreferences {
 	const resolved = path.resolve(directory); // nosemgrep
+	const normalized = normalizeForCompare(directory);
 	const trustedDirectories = (preferences.trustedDirectories ?? []).filter(
 		entry => {
 			const entryPath = trustPath(entry);
-			return entryPath === null || path.resolve(entryPath) !== resolved; // nosemgrep
+			return (
+				entryPath === null || normalizeForCompare(entryPath) !== normalized
+			); // nosemgrep
 		},
 	);
 	trustedDirectories.push({

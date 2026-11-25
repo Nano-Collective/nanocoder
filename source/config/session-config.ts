@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {getConfigPath} from '@/config/paths';
 import type {AppConfig} from '@/types/config';
+import {stripUtf8Bom} from '@/utils/strip-utf8-bom';
 
 export type SessionConfig = NonNullable<AppConfig['sessions']>;
 
@@ -88,7 +89,9 @@ export function readSessionConfigReadOnly(
 		path.join(configRoot, 'nanocoder-preferences.json'),
 	]) {
 		try {
-			const parsed: unknown = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+			const parsed: unknown = JSON.parse(
+				stripUtf8Bom(fs.readFileSync(filePath, 'utf8')),
+			);
 			const nanocoder =
 				parsed && typeof parsed === 'object' && 'nanocoder' in parsed
 					? parsed.nanocoder

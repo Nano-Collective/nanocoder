@@ -19,7 +19,9 @@ import type {
 import type {UserPreferences} from '@/types/index';
 import type {NanocoderShape, ThemePreset, TitleShape} from '@/types/ui';
 import {atomicWriteFileSync} from '@/utils/fs/atomic-write';
+import {normalizeForCompare} from '@/utils/fs/path-validation';
 import {getLogger} from '@/utils/logging';
+import {stripUtf8Bom} from '@/utils/strip-utf8-bom';
 
 let PREFERENCES_PATH: string | null = null;
 let CACHED_CONFIG_DIR: string | undefined = undefined;
@@ -73,7 +75,8 @@ function getGlobalPreferencesPath(): string {
 
 function isProjectPreferencesPath(preferencesPath: string): boolean {
 	return (
-		path.resolve(preferencesPath) !== path.resolve(getGlobalPreferencesPath())
+		normalizeForCompare(preferencesPath) !== // nosemgrep
+		normalizeForCompare(getGlobalPreferencesPath()) // nosemgrep
 	);
 }
 
@@ -90,7 +93,9 @@ function readGlobalOnlyPreferences(): Partial<UserPreferences> | undefined {
 	const globalPath = getGlobalPreferencesPath();
 	if (!existsSync(globalPath)) return undefined;
 	try {
-		return JSON.parse(readFileSync(globalPath, 'utf-8')) as UserPreferences;
+		return JSON.parse(
+			stripUtf8Bom(readFileSync(globalPath, 'utf-8')),
+		) as UserPreferences;
 	} catch (error) {
 		getLogger().error(`Failed to load global preferences: ${String(error)}`);
 		return undefined;
@@ -101,10 +106,9 @@ function writeGlobalOnlyPreferences(values: Partial<UserPreferences>): void {
 	const globalPath = getGlobalPreferencesPath();
 	let data: Record<string, unknown> = {};
 	if (existsSync(globalPath)) {
-		data = JSON.parse(readFileSync(globalPath, 'utf-8')) as Record<
-			string,
-			unknown
-		>;
+		data = JSON.parse(
+			stripUtf8Bom(readFileSync(globalPath, 'utf-8')),
+		) as Record<string, unknown>;
 	}
 	mkdirSync(path.dirname(globalPath), {recursive: true});
 	atomicWriteFileSync(
@@ -186,7 +190,7 @@ export function loadPreferences(): UserPreferences {
 		}
 
 		const data = JSON.parse(
-			readFileSync(preferencesPath, 'utf-8'),
+			stripUtf8Bom(readFileSync(preferencesPath, 'utf-8')),
 		) as UserPreferences;
 
 		if (isProject) {
@@ -482,6 +486,26 @@ export function updateAlternateScreen(value: boolean): void {
  */
 export function getMouseReporting(): boolean {
 	return getBooleanPreference('mouseReporting');
+}
+
+/**
+ * How the kitty keyboard protocol is negotiated at startup. 'auto' (default):
+ * query the terminal and enable the protocol on an affirmative reply — what
+ * makes Shift+Enter distinct from Enter in kitty-protocol terminals. 'enabled':
+ * switch the protocol on without asking, for a terminal whose reply is lost
+ * across a transport that eats the query. 'disabled': write no protocol bytes
+ * at all, for transports that print them. An invalid value falls back to
+ * 'auto'.
+ */
+export function getKittyKeyboardMode(): 'auto' | 'enabled' | 'disabled' {
+	const value = getPreference('kittyKeyboardMode');
+	return value === 'enabled' || value === 'disabled' ? value : 'auto';
+}
+
+export function updateKittyKeyboardMode(
+	mode: 'auto' | 'enabled' | 'disabled',
+): void {
+	setPreference('kittyKeyboardMode', mode);
 }
 
 export function updateMouseReporting(value: boolean): void {

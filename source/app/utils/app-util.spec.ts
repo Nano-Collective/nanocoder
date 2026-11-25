@@ -120,6 +120,32 @@ test('custom command args extraction - escaped quote inside quoted argument', t 
 	]);
 });
 
+test('custom command args extraction - keeps backslashes in Windows paths', t => {
+	t.deepEqual(parseCustomCommandArgs('"C:\\src\\app.ts" D:\\x\\y'), [
+		'C:\\src\\app.ts',
+		'D:\\x\\y',
+	]);
+});
+
+test('custom command args extraction - keeps backslashes in single quoted paths', t => {
+	t.deepEqual(parseCustomCommandArgs("'C:\\src\\app.ts'"), ['C:\\src\\app.ts']);
+});
+
+test('custom command args extraction - escaped space joins one argument', t => {
+	t.deepEqual(parseCustomCommandArgs('my\\ file.txt next'), [
+		'my file.txt',
+		'next',
+	]);
+});
+
+test('custom command args extraction - escaped backslash is a single backslash', t => {
+	t.deepEqual(parseCustomCommandArgs('a\\\\b'), ['a\\b']);
+});
+
+test('custom command args extraction - trailing backslash stays literal', t => {
+	t.deepEqual(parseCustomCommandArgs('path\\'), ['path\\']);
+});
+
 test('custom command args extraction - empty quoted argument', t => {
 	t.deepEqual(parseCustomCommandArgs('arg1 "" arg3'), ['arg1', '', 'arg3']);
 });
@@ -1212,6 +1238,7 @@ test.serial(
 			onAddToChatQueue: component => queued.push(component),
 		});
 		options.client = {
+			getProviderConfig: () => ({config: {}}),
 			chat: async () => {
 				chatCalls += 1;
 				return {choices: [{message: {content: 'Mock provider review.'}}]};

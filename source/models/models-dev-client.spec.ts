@@ -362,6 +362,34 @@ test('getModelContextLimit - env variable used for unknown models', async t => {
 	}
 });
 
+test('getModelContextLimit - env variable accepts m suffix', async t => {
+	const saved = process.env.NANOCODER_CONTEXT_LIMIT;
+	process.env.NANOCODER_CONTEXT_LIMIT = '1.5m';
+	try {
+		const limit = await getModelContextLimit('unknown-model-12345');
+		t.is(limit, 1500000);
+	} finally {
+		delete process.env.NANOCODER_CONTEXT_LIMIT;
+		if (saved !== undefined) {
+			process.env.NANOCODER_CONTEXT_LIMIT = saved;
+		}
+	}
+});
+
+test('getModelContextLimit - env variable accepts k suffix', async t => {
+	const saved = process.env.NANOCODER_CONTEXT_LIMIT;
+	process.env.NANOCODER_CONTEXT_LIMIT = '128k';
+	try {
+		const limit = await getModelContextLimit('unknown-model-12345');
+		t.is(limit, 128000);
+	} finally {
+		delete process.env.NANOCODER_CONTEXT_LIMIT;
+		if (saved !== undefined) {
+			process.env.NANOCODER_CONTEXT_LIMIT = saved;
+		}
+	}
+});
+
 test('getModelContextLimit - session override takes priority over env variable', async t => {
 	process.env.NANOCODER_CONTEXT_LIMIT = '32000';
 	setSessionContextLimit(8192);
@@ -483,6 +511,19 @@ test('getModelPricing - returns null for empty string', async t => {
 test('getModelPricing - returns null for local Ollama model not on models.dev', async t => {
 	const pricing = await getModelPricing('llama3.2:3b');
 	t.is(pricing, null);
+});
+
+test('getModelPricing - does not price a local model by a partial name match', async t => {
+	// The fixture has Groq's llama3-70b-8192 but no `llama3`; a partial match
+	// would show a cost for a free local Ollama model.
+	const pricing = await getModelPricing('llama3');
+	t.is(pricing, null);
+});
+
+test('getModelPricing - matches a hosted id written in a different case', async t => {
+	const exact = await getModelPricing('gpt-4o');
+	t.truthy(exact);
+	t.deepEqual(await getModelPricing('GPT-4o'), exact);
 });
 
 test('getModelPricing - returns consistent pricing on repeated calls', async t => {

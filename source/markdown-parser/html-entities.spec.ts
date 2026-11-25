@@ -86,3 +86,21 @@ test('decodeHtmlEntities handles entities in context', t => {
 	const result = decodeHtmlEntities(text);
 	t.is(result, 'The price is £50 & the tax is €10.');
 });
+
+test('decodeHtmlEntities handles numeric entities above U+FFFF', t => {
+	const text = '&#128512; &#x1F600;';
+	const result = decodeHtmlEntities(text);
+	t.is(result, '😀 😀');
+});
+
+test('decodeHtmlEntities decodes escaped entities only once', t => {
+	const text = '&amp;lt; &amp;#169; &amp;amp;';
+	const result = decodeHtmlEntities(text);
+	t.is(result, '&lt; &#169; &amp;');
+});
+
+test('decodeHtmlEntities leaves invalid entities unchanged', t => {
+	const text = '&#1114112; &#x110000; &foo;';
+	const result = decodeHtmlEntities(text);
+	t.is(result, text);
+});

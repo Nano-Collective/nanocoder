@@ -70,6 +70,7 @@ const executeBashStreaming = async (
 	toolManager: ToolManager | null,
 	setLiveComponent: (component: React.ReactNode) => void,
 	signal?: AbortSignal,
+	sessionId?: string,
 ): Promise<StreamingBashRun> => {
 	const execution = await runStreamingBashTool(
 		toolCall,
@@ -77,6 +78,7 @@ const executeBashStreaming = async (
 		setLiveComponent,
 		'direct-bash',
 		signal,
+		sessionId,
 	);
 	return {...execution, toolCall};
 };
@@ -101,6 +103,7 @@ export const executeApprovedTool = (
 	processToolUse: (toolCall: ToolCall) => Promise<ToolResult>,
 	setLiveComponent?: (component: React.ReactNode) => void,
 	signal?: AbortSignal,
+	sessionId?: string,
 ): Promise<StreamingBashRun | {toolCall: ToolCall; result: ToolResult}> => {
 	if (toolCall.function.name === 'execute_bash' && setLiveComponent) {
 		return executeBashStreaming(
@@ -108,6 +111,7 @@ export const executeApprovedTool = (
 			toolManager,
 			setLiveComponent,
 			signal,
+			sessionId,
 		);
 	}
 	return executeOne(toolCall, processToolUse);
@@ -591,6 +595,7 @@ export const executeToolsDirectly = async (
 						processToolWithContext,
 						options?.setLiveComponent,
 						options?.signal,
+						options?.executionContext?.sessionId,
 					),
 				);
 			}

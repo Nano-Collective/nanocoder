@@ -63,7 +63,7 @@ function makeClient(replies: Reply[], observation: Observation): LLMClient {
 	let index = 0;
 	return {
 		getCurrentModel: () => 'fake-model',
-		getProviderConfig: () => ({}) as never,
+		getProviderConfig: () => ({config: {}}) as never,
 		getContextSize: () => 100_000,
 		chat: async (
 			messages: Message[],

@@ -46,6 +46,10 @@ Hosted services using the OpenAI-compatible API format.
 - [GitHub Models](github-models.md) - AI models via GitHub's marketplace
 - [Poe](poe.md) - Access multiple AI models through Poe
 - [Atlas Cloud](atlas-cloud.md) - Aggregates 300+ models behind one OpenAI-compatible endpoint
+- [GMI Cloud](gmi-cloud.md) - Hosted text models through an OpenAI-compatible endpoint
+- [PopNow](popnow.md) - Chat models from multiple vendors behind one OpenAI-compatible endpoint
+- [Runcrate](runcrate.md) - Open models behind one OpenAI-compatible endpoint
+- [CloudGPU](cloudgpu.md) - OpenAI-compatible model API
 - [Z.ai](z-ai.md) - GLM models from Zhipu AI
 - [Z.ai Coding](z-ai-coding.md) - Z.ai coding subscription plan
 
@@ -78,6 +82,7 @@ Use dedicated AI SDK packages for native API support, enabled via the `sdkProvid
 | `contextWindows` | Per-model context window overrides in tokens, keyed by model name (optional) |
 | `maxOutputTokens` | Cap on tokens the model may generate in one response, for all models on this provider (optional, see [Output Token Ceiling](#output-token-ceiling)) |
 | `sdkProvider` | AI SDK provider to use (see below, defaults to `openai-compatible`) |
+| `extraBody` | Additional JSON request fields for OpenAI-compatible chat endpoints (optional); `model`, `messages`, `tools`, and `stream` remain client-controlled |
 | `organizationId` | OpenAI organization ID, sent as the `OpenAI-Organization` header (optional) |
 | `headers` | Extra HTTP headers sent with every request to this provider, as an object of name/value pairs (optional). An explicit `OpenAI-Organization` here wins over `organizationId` |
 | `tune` | [Tune](../../features/tune.md) defaults applied while this provider is active (optional) |

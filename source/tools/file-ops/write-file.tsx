@@ -1,5 +1,5 @@
 import {constants, existsSync} from 'node:fs';
-import {access, lstat, readFile, writeFile} from 'node:fs/promises';
+import {access, lstat, readFile} from 'node:fs/promises';
 import {dirname, resolve} from 'node:path';
 import {Box, Text} from 'ink';
 import React from 'react';
@@ -20,6 +20,7 @@ import {
 	collapseUnchangedLines,
 	computeLineDiff,
 } from '@/tools/file-ops/inline-diff';
+import {fitContentToLineEndings} from '@/tools/file-ops/line-endings';
 import {
 	validateEditableEncoding,
 	validateEditableFormat,
@@ -38,6 +39,7 @@ import {createFileToolApproval} from '@/tools/runtime/tool-approval';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
+import {atomicWriteUserFile} from '@/utils/fs/atomic-write';
 import {getCachedFileContent, invalidateCache} from '@/utils/fs/file-cache';
 import {estimateTokens} from '@/utils/token-calculator';
 import {truncateText} from '@/utils/truncate-text';
@@ -111,14 +113,20 @@ const executeWriteFile = async (args: {
 		}
 	}
 
+	// Keep a CRLF file CRLF when the model sends LF content.
+	const content = fitContentToLineEndings(
+		fileExists ? originalContent : null,
+		contentStr,
+	);
+
 	const firewallResult = evaluateMutationEnvelope(
 		args.path,
 		originalContent,
-		contentStr,
+		content,
 	);
 	const firewallWarning = enforceFirewall(firewallResult);
 
-	await writeFile(absPath, contentStr, 'utf-8');
+	await atomicWriteUserFile(absPath, content);
 
 	// Invalidate cache after write
 	invalidateCache(absPath);
@@ -206,7 +214,12 @@ const WriteFileFormatter = React.memo(
 		}
 		const {colors} = themeContext;
 		const path = args.path || args.file_path || 'unknown';
-		const newContent = ensureString(args.content);
+		// Show the content as it lands on disk, so a CRLF file is not shown
+		// as every line changed.
+		const newContent = fitContentToLineEndings(
+			previousContent,
+			ensureString(args.content),
+		);
 		const lineCount = newContent.split('\n').length;
 		const charCount = newContent.length;
 		const ext = path.split('.').pop()?.toLowerCase() ?? '';
@@ -436,7 +449,10 @@ const writeFileFormatter = async (
 
 	// Send diff to VS Code during preview phase (before execution)
 	if (result === undefined && isVSCodeConnected()) {
-		const content = args.content || '';
+		const content = fitContentToLineEndings(
+			previousContent,
+			args.content || '',
+		);
 
 		const changeId = sendFileChangeToVSCode(
 			absPath,

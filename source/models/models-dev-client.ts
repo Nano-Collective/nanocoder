@@ -9,6 +9,7 @@ import {defineSessionValue} from '@/services/session-context';
 import type {AIProviderConfig, ProviderConfig} from '@/types/config';
 import {formatError} from '@/utils/error-formatter';
 import {getLogger} from '@/utils/logging';
+import {parseContextLimit} from '@/utils/parse-context-limit';
 import {readCache, writeCache} from './models-cache.js';
 import type {
 	ModelInfo,
@@ -246,12 +247,16 @@ function createModelInfo(
  * Find a model by ID across all providers
  * Returns the model info and provider name
  */
-async function findModelById(modelId: string): Promise<ModelInfo | null> {
+async function findModelById(
+	modelId: string,
+	{ignoreCase = false}: {ignoreCase?: boolean} = {},
+): Promise<ModelInfo | null> {
 	const data = await getModelsData();
 	if (!data) {
 		return null;
 	}
 
+	const lowerId = modelId.toLowerCase();
 	let bestMatch: ModelInfo | null = null;
 
 	// Search through all providers, picking the match with highest context limit
@@ -260,7 +265,11 @@ async function findModelById(modelId: string): Promise<ModelInfo | null> {
 		if (!provider || typeof provider !== 'object' || !provider.models) {
 			continue;
 		}
-		const model = provider.models[modelId];
+		const model = ignoreCase
+			? Object.entries(provider.models).find(
+					([id]) => id.toLowerCase() === lowerId,
+				)?.[1]
+			: provider.models[modelId];
 		if (model) {
 			const contextLimit = model.limit?.context ?? null;
 			if (
@@ -457,8 +466,8 @@ export async function resolveModelContextLimit(
 		// Check environment variable fallback
 		const envLimit = process.env.NANOCODER_CONTEXT_LIMIT;
 		if (envLimit) {
-			const parsed = Number.parseInt(envLimit, 10);
-			if (!Number.isNaN(parsed) && parsed > 0) {
+			const parsed = parseContextLimit(envLimit);
+			if (parsed !== null) {
 				return {limit: parsed, source: 'env'};
 			}
 		}
@@ -547,9 +556,9 @@ export async function getModelAcceptsImages(
 }
 
 /**
- * Per-model pricing memo. Both lookups below scan the whole database (and a
- * miss scans it twice), so the result — including the negative one for local
- * models that will never be on models.dev — is cached for the process.
+ * Per-model pricing memo. The lookup below scans the whole database, so the
+ * result (including the negative one for local models that will never be on
+ * models.dev) is cached for the process.
  */
 const pricingMemo = new Map<string, ModelInfo['cost'] | null>();
 
@@ -566,12 +575,13 @@ export async function getModelPricing(
 		return memoized;
 	}
 	try {
-		let modelInfo = await findModelById(modelId);
-
-		if (!modelInfo) {
-			modelInfo = await findModelByName(modelId);
-		}
-
+		// Exact id (in any case) only: unlike context limits, a price borrowed
+		// from a similarly named model is wrong (e.g. a free local `llama3`
+		// billed as Groq's `llama3-70b-8192`). Local providers are skipped
+		// before this lookup, by base URL, in buildResponseUsage and /usage.
+		const modelInfo =
+			(await findModelById(modelId)) ??
+			(await findModelById(modelId, {ignoreCase: true}));
 		const pricing = modelInfo ? modelInfo.cost : null;
 		pricingMemo.set(modelId, pricing);
 		return pricing;

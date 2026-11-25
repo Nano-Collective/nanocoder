@@ -1,4 +1,5 @@
 import {mkdir, mkdtemp, readFile, rm, writeFile} from 'node:fs/promises';
+import {createServer} from 'node:net';
 import {tmpdir} from 'node:os';
 import {join, posix} from 'node:path';
 import test from 'ava';
@@ -76,6 +77,51 @@ test.serial('removeLockfile deletes the file (no-op when missing)', async t => {
 	}
 });
 
+test.serial('removeLockfile with expectedPid removes file when pid matches', async t => {
+	const root = await tempProject();
+	try {
+		await writeLockfile({
+			pid: 1234,
+			socketPath: 's',
+			startedAt: 0,
+			projectRoot: root,
+		});
+		await removeLockfile(root, 1234);
+		t.is(await readLockfile(root), null);
+	} finally {
+		await rm(root, {recursive: true, force: true});
+	}
+});
+
+test.serial('removeLockfile with expectedPid preserves file when pid differs', async t => {
+	const root = await tempProject();
+	try {
+		await writeLockfile({
+			pid: 5678,
+			socketPath: 's',
+			startedAt: 0,
+			projectRoot: root,
+		});
+		await removeLockfile(root, 1234);
+		const lock = await readLockfile(root);
+		t.is(lock?.pid, 5678);
+	} finally {
+		await rm(root, {recursive: true, force: true});
+	}
+});
+
+test.serial('removeLockfile with expectedPid is a no-op when file is missing', async t => {
+	const root = await tempProject();
+	try {
+		await t.notThrowsAsync(async () => {
+			await removeLockfile(root, 1234);
+		});
+		t.is(await readLockfile(root), null);
+	} finally {
+		await rm(root, {recursive: true, force: true});
+	}
+});
+
 test('isProcessAlive returns true for current process', t => {
 	t.true(isProcessAlive(process.pid));
 });
@@ -110,17 +156,56 @@ test.serial('readLiveLockfile reaps stale lockfiles', async t => {
 	}
 });
 
-test.serial('readLiveLockfile returns the lock when process is alive', async t => {
+test.serial('readLiveLockfile returns the lock when process is alive and its socket is listening', async t => {
 	const root = await tempProject();
+	const socketPath = getSocketPath(root);
+	const server = createServer();
+	await new Promise<void>(resolve => server.listen(socketPath, resolve));
 	try {
 		await writeLockfile({
 			pid: process.pid,
-			socketPath: 's',
+			socketPath,
 			startedAt: 1,
 			projectRoot: root,
 		});
 		const live = await readLiveLockfile(root);
 		t.is(live?.pid, process.pid);
+	} finally {
+		await new Promise(resolve => server.close(resolve));
+		await rm(root, {recursive: true, force: true});
+	}
+});
+
+// The OS reuses pids after a crash or reboot, so a live pid alone proves
+// nothing: the daemon's IPC endpoint has to exist too.
+test.serial('readLiveLockfile reaps a lockfile whose pid is alive but whose socket is gone', async t => {
+	const root = await tempProject();
+	try {
+		await writeLockfile({
+			pid: process.pid,
+			socketPath: getSocketPath(root),
+			startedAt: 1,
+			projectRoot: root,
+		});
+		t.is(await readLiveLockfile(root), null);
+		t.is(await readLockfile(root), null);
+	} finally {
+		await rm(root, {recursive: true, force: true});
+	}
+});
+
+test.serial('readLiveLockfile with verifyIpc false only checks the pid', async t => {
+	const root = await tempProject();
+	try {
+		await writeLockfile({
+			pid: process.pid,
+			socketPath: getSocketPath(root),
+			startedAt: 1,
+			projectRoot: root,
+		});
+		const live = await readLiveLockfile(root, {verifyIpc: false});
+		t.is(live?.pid, process.pid);
+		t.truthy(await readLockfile(root));
 	} finally {
 		await rm(root, {recursive: true, force: true});
 	}

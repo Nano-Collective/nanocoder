@@ -502,6 +502,89 @@ test('string_replace validator: rejects empty old_str', async t => {
 	}
 });
 
+// ============================================================================
+// Missing / non-string new_str (malformed model calls)
+// ============================================================================
+
+// Runs the validator from inside testDir on a file the model has already read,
+// so the call reaches the argument checks rather than the read-before-edit gate.
+async function validateSeenFile(args: unknown) {
+	const validator = stringReplaceTool.validator;
+	if (!validator) throw new Error('Validator not defined');
+
+	const originalCwd = process.cwd();
+	try {
+		process.chdir(testDir);
+		markFileSeenAndVisible('test.txt');
+		// biome-ignore lint/suspicious/noExplicitAny: simulating malformed model call
+		return await validator(args as any);
+	} finally {
+		process.chdir(originalCwd);
+	}
+}
+
+test('string_replace validator: rejects missing new_str', async t => {
+	await createTestFile('test.txt', 'alpha\nbeta\n');
+
+	const result = await validateSeenFile({path: 'test.txt', old_str: 'beta'});
+
+	t.false(result.valid);
+	if (!result.valid) {
+		t.regex(result.error, /new_str/);
+	}
+});
+
+test('string_replace validator: rejects non-string new_str', async t => {
+	await createTestFile('test.txt', 'alpha\nbeta\n');
+
+	for (const new_str of [123, null, {text: 'x'}]) {
+		const result = await validateSeenFile({
+			path: 'test.txt',
+			old_str: 'beta',
+			new_str,
+		});
+		t.false(result.valid, `expected rejection for new_str=${JSON.stringify(new_str)}`);
+	}
+});
+
+test('string_replace validator: missing new_str on a CRLF file returns an error instead of throwing', async t => {
+	await createTestFile('test.txt', 'alpha\r\nbeta\r\n');
+
+	const result = await validateSeenFile({path: 'test.txt', old_str: 'beta'});
+
+	t.false(result.valid);
+	if (!result.valid) {
+		t.regex(result.error, /new_str/);
+	}
+});
+
+test('string_replace: execute rejects missing new_str and leaves the file unchanged', async t => {
+	const original = 'alpha\nbeta\n';
+	const filePath = await createTestFile('test.txt', original);
+
+	await t.throwsAsync(
+		async () => {
+			// biome-ignore lint/suspicious/noExplicitAny: simulating malformed model call
+			await executeStringReplace({path: filePath, old_str: 'beta'} as any);
+		},
+		{message: /new_str/},
+	);
+
+	t.is(await readFile(filePath, 'utf-8'), original);
+});
+
+test('string_replace validator: still accepts empty new_str (deletion)', async t => {
+	await createTestFile('test.txt', 'alpha\nbeta\n');
+
+	const result = await validateSeenFile({
+		path: 'test.txt',
+		old_str: 'beta\n',
+		new_str: '',
+	});
+
+	t.true(result.valid);
+});
+
 test('string_replace validator: rejects when content not found', async t => {
 	await createTestFile('test.txt', 'Hello World\n');
 
@@ -1670,4 +1753,79 @@ test.serial('string_replace: a file changed outside after the read is refused', 
 	} finally {
 		process.chdir(originalCwd);
 	}
+});
+
+// ============================================================================
+// Overlapping matches (#2236)
+// ============================================================================
+
+test('string_replace: overlapping matches are rejected as ambiguous', async t => {
+	// "aa" starts at index 0 and 1, but split() sees one hit, so the tool used
+	// to accept it and write "Ba".
+	const filePath = await createTestFile('a.txt', 'aaa');
+
+	await t.throwsAsync(
+		executeStringReplace({path: filePath, old_str: 'aa', new_str: 'B'}),
+		{message: /Found 2 matches/},
+	);
+
+	t.is(await readFile(filePath, 'utf-8'), 'aaa');
+});
+
+test('string_replace: overlapping repeated lines are rejected as ambiguous', async t => {
+	// "x\nx" covers lines 1-2 and 2-3.
+	const filePath = await createTestFile('b.txt', 'x\nx\nx\n');
+
+	await t.throwsAsync(
+		executeStringReplace({path: filePath, old_str: 'x\nx', new_str: 'Y'}),
+		{message: /Found 2 matches/},
+	);
+
+	t.is(await readFile(filePath, 'utf-8'), 'x\nx\nx\n');
+});
+
+test('string_replace validator: rejects overlapping matches', async t => {
+	await createTestFile('overlap.txt', 'aaa');
+
+	const validator = stringReplaceTool.validator;
+	if (!validator) {
+		t.fail('Validator not defined');
+		return;
+	}
+
+	const originalCwd = process.cwd();
+	try {
+		process.chdir(testDir);
+		markFileSeenAndVisible('overlap.txt');
+
+		const result = await validator({
+			path: 'overlap.txt',
+			old_str: 'aa',
+			new_str: 'B',
+		});
+
+		t.false(result.valid);
+		if (!result.valid) t.regex(result.error, /Found 2 matches/);
+	} finally {
+		process.chdir(originalCwd);
+	}
+});
+
+test('string_replace formatter: previews overlapping matches as ambiguous', async t => {
+	const filePath = await createTestFile('overlap-preview.txt', 'aaa');
+
+	const formatter = stringReplaceTool.formatter;
+	if (!formatter) {
+		t.fail('Formatter not defined');
+		return;
+	}
+
+	const element = await formatter({
+		path: filePath,
+		old_str: 'aa',
+		new_str: 'B',
+	});
+	const {lastFrame} = render(<TestThemeProvider>{element}</TestThemeProvider>);
+
+	t.regex(lastFrame() ?? '', /Found 2 matches/);
 });

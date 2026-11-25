@@ -199,14 +199,14 @@ test('provider contextWindows must map to numbers', t => {
 // OpenRouter / RecordStringUnknown
 // ---------------------------------------------------------------------------
 
-test('RecordStringUnknown (extraBody) accepts arbitrary keys', t => {
-	// OpenRouterParameters.extraBody is Record<string, unknown>: any key/value.
+test('provider and OpenRouter extraBody accept arbitrary keys', t => {
 	assertValid(t, 'extraBody with content', {
 		nanocoder: {
 			providers: [
 				{
 					name: 'openrouter',
 					models: ['a'],
+					extraBody: {top_k: 20, nested: {ok: true}},
 					openrouter: {extraBody: {custom_field: 'value', nested: {ok: true}}},
 				},
 			],
@@ -255,6 +255,21 @@ test('lspServers requires name, command, languages', t => {
 	});
 	assertValid(t, 'lsp complete', {
 		nanocoder: {lspServers: [{name: 'n', command: 'c', languages: ['ts']}]},
+	});
+});
+
+test('lsp auto-discovery setting is optional and boolean', t => {
+	assertValid(t, 'lsp auto-discovery enabled', {
+		nanocoder: {lsp: {autoDiscover: true}},
+	});
+	assertValid(t, 'lsp auto-discovery disabled', {
+		nanocoder: {lsp: {autoDiscover: false}},
+	});
+	assertInvalid(t, 'lsp auto-discovery must be boolean', {
+		nanocoder: {lsp: {autoDiscover: 'off'}},
+	});
+	assertInvalid(t, 'lsp rejects unknown keys', {
+		nanocoder: {lsp: {unknown: true}},
 	});
 });
 
@@ -481,6 +496,7 @@ test('DiskNanocoderConfig exposes every on-disk key', t => {
 		'autoCompact',
 		'tune',
 		'headless',
+		'lsp',
 		'lspServers',
 		'alwaysAllow',
 		'disabledTools',

@@ -573,23 +573,103 @@ test.serial(
 		// Reload config to pick up new config
 		reloadAppConfig();
 
-		// Should throw error about missing API key
-		try {
-			await createLLMClient();
-			// If it succeeds, this test configuration may be invalid
-			// (might have found a different config), so we skip it
-			t.pass();
-		} catch (error: unknown) {
-			// Should throw an error mentioning API key or the provider
-			t.truthy(error);
-			const message = error instanceof Error ? error.message : String(error);
-			// Verify the error is related to API key or provider failure
-			t.true(
-				message.includes('API key') ||
-					message.includes('HostedTest') ||
-					message.includes('failed'),
-			);
-		}
+		const error = await t.throwsAsync(
+			createLLMClient('HostedTest', undefined, undefined, {
+				strictProvider: true,
+			}),
+		);
+		t.regex(error.message, /HostedTest: .*set `apiKey`.*or authentication `headers`/);
+	},
+);
+
+/** Start the given providers and ask for one of them strictly. */
+async function createStrict(
+	name: string,
+	providers: Record<string, unknown>[],
+	dir: string,
+) {
+	globalThis.fetch = createMockFetch(true, 200);
+	const configDir = join(testDir, dir);
+	mkdirSync(configDir, {recursive: true});
+	createTestConfig({nanocoder: {providers}}, configDir);
+	process.cwd = () => configDir;
+	reloadAppConfig();
+	return createLLMClient(name, undefined, undefined, {strictProvider: true});
+}
+
+test.serial(
+	'createLLMClient: hosted provider authenticated by custom headers needs no API key',
+	async t => {
+		const result = await createStrict(
+			'HeaderAuth',
+			[
+				{
+					name: 'HeaderAuth',
+					baseUrl: 'https://gateway.example.com/v1',
+					headers: {'X-Api-Key': 'gateway-key'},
+					models: ['m'],
+				},
+			],
+			'hosted-header-auth-test',
+		);
+		t.is(result.actualProvider, 'HeaderAuth');
+	},
+);
+
+test.serial(
+	'createLLMClient: an organization id alone is not a credential',
+	async t => {
+		const error = await t.throwsAsync(
+			createStrict(
+				'OrgOnly',
+				[
+					{
+						name: 'OrgOnly',
+						baseUrl: 'https://api.example.com/v1',
+						organizationId: 'org-123',
+						models: ['m'],
+					},
+				],
+				'hosted-org-only-test',
+			),
+		);
+		t.regex(error.message, /OrgOnly: .*set `apiKey`/);
+	},
+);
+
+test.serial(
+	'loadProviderConfigs: leaves apiKey unset for a hosted provider without one',
+	t => {
+		const configDir = join(testDir, 'hosted-no-key-config-test');
+		mkdirSync(configDir, {recursive: true});
+		createTestConfig(
+			{
+				nanocoder: {
+					providers: [
+						{
+							name: 'HostedNoKey',
+							baseUrl: 'https://api.example.com/v1',
+							models: ['m'],
+						},
+						{
+							name: 'LocalNoKey',
+							baseUrl: 'http://localhost:11434/v1',
+							models: ['m'],
+						},
+					],
+				},
+			},
+			configDir,
+		);
+		process.cwd = () => configDir;
+		reloadAppConfig();
+
+		const configs = loadProviderConfigs();
+		const hosted = configs.find(p => p.name === 'HostedNoKey');
+		const local = configs.find(p => p.name === 'LocalNoKey');
+
+		t.is(hosted?.config.apiKey, undefined);
+		t.is(local?.config.apiKey, 'dummy-key');
 	},
 );
 
@@ -1597,7 +1677,7 @@ test.serial(
 // ============================================================================
 
 test.serial(
-	'loadProviderConfigs threads the openrouter block from ProviderConfig to AIProviderConfig',
+	'loadProviderConfigs threads generic extraBody and openrouter options to AIProviderConfig',
 	t => {
 		const originalProviders = process.env.NANOCODER_PROVIDERS;
 
@@ -1609,6 +1689,10 @@ test.serial(
 						baseUrl: 'https://openrouter.ai/api/v1',
 						apiKey: 'test-key',
 						models: ['anthropic/claude-3.5-sonnet'],
+						extraBody: {
+							top_k: 20,
+							chat_template_kwargs: {enable_thinking: false},
+						},
 						openrouter: {
 							provider: {sort: 'price', allow_fallbacks: true},
 							reasoning: {effort: 'high'},
@@ -1630,6 +1714,10 @@ test.serial(
 				service_tier: 'flex',
 				plugins: [{id: 'context-compression', engine: 'middle-out'}],
 				models: ['openai/gpt-4o'],
+			});
+			t.deepEqual(openrouter?.extraBody, {
+				top_k: 20,
+				chat_template_kwargs: {enable_thinking: false},
 			});
 			// Make sure the baseURL/apiKey translation still works alongside it.
 			t.is(openrouter?.config.baseURL, 'https://openrouter.ai/api/v1');

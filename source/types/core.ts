@@ -245,6 +245,8 @@ export interface ApiCallRecord {
 	totalTokens?: number;
 	cacheReadTokens?: number;
 	cacheWriteTokens?: number;
+	/** Provider base URL at call time; a local one (Ollama, LM Studio) is never priced. */
+	baseURL?: string;
 	timestamp: number;
 }
 
