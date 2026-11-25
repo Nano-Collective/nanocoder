@@ -49,12 +49,19 @@ export class BoundedMap<K, V> {
 	 * Set a key-value pair, enforcing size limit
 	 */
 	set(key: K, value: V): this {
-		// Remove oldest entry if at capacity
-		if (this.map.size >= this.maxSize && !this.map.has(key)) {
+		const exists = this.map.has(key);
+
+		// Remove oldest entry if at capacity (new keys only)
+		if (!exists && this.map.size >= this.maxSize) {
 			const firstKey = this.map.keys().next().value;
 			if (firstKey !== undefined) {
 				this.map.delete(firstKey);
 			}
+		}
+
+		// Delete+reinsert so overwrite refreshes Map insertion order
+		if (exists) {
+			this.map.delete(key);
 		}
 
 		this.map.set(key, {

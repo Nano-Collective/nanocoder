@@ -102,6 +102,24 @@ test('BoundedMap - updating existing key does not trigger eviction', t => {
 	t.is(map.get('b'), 2);
 });
 
+test('BoundedMap - overwriting a key bumps it to most-recent for eviction', t => {
+	const map = new BoundedMap<string, number>({maxSize: 2});
+
+	map.set('a', 1);
+	map.set('b', 2);
+
+	// Overwrite refreshes eviction order so 'a' is newest
+	map.set('a', 10);
+
+	// Adding 'c' should evict oldest ('b'), not the refreshed 'a'
+	map.set('c', 3);
+
+	t.false(map.has('b')); // Oldest entry evicted
+	t.true(map.has('a'));
+	t.true(map.has('c'));
+	t.is(map.get('a'), 10);
+});
+
 test('BoundedMap - TTL causes entries to expire', async t => {
 	const map = new BoundedMap<string, number>({
 		maxSize: 100,
