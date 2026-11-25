@@ -79,6 +79,59 @@ function isShellAlive(proc: ChildProcess): boolean {
 }
 
 /**
+ * The leftovers of `proc` that are still running. A pid that has exited is
+ * dropped from the list here, on every check: Windows reuses pids, so a dead
+ * one kept around could later name an unrelated process, and signalGroups
+ * would taskkill that process's tree. Every liveness check and signal goes
+ * through this, so a dead pid is gone by the next stop poll or the one-second
+ * leftover prune, as dead groups are on POSIX.
+ */
+function liveWindowsOrphans(proc: ChildProcess): number[] {
+	const pids = windowsOrphans.get(proc);
+	if (!pids) return [];
+	const live = pids.filter(pid => orphanOps.isAlive(pid));
+	if (live.length !== pids.length) windowsOrphans.set(proc, live);
+	return live;
+}
+
+/**
+ * How a leftover is probed and stopped. Production code never changes it.
+ * @internal
+ */
+type OrphanOps = {
+	isAlive: (pid: number) => boolean;
+	killTree: (pid: number) => void;
+};
+
+const defaultOrphanOps: OrphanOps = {
+	isAlive: isPidAlive,
+	killTree: pid => killWindowsTree(pid),
+};
+let orphanOps = defaultOrphanOps;
+
+/**
+ * Test seam: replace how leftovers are probed and stopped, so a test can
+ * drive pid liveness (including a reused pid) and see what is signalled.
+ * Call with no arguments to restore the defaults.
+ * @internal
+ */
+export function setOrphanOpsForTests(ops?: Partial<OrphanOps>): void {
+	orphanOps = {...defaultOrphanOps, ...ops};
+}
+
+/**
+ * Test seam: record the leftovers a finished command left behind, as the
+ * Windows lookup does. Production code never calls this.
+ * @internal
+ */
+export function setWindowsOrphansForTests(
+	proc: ChildProcess,
+	pids: number[],
+): void {
+	windowsOrphans.set(proc, pids);
+}
+
+/**
  * The applied timeout as the model was told to ask for it: in seconds. A
  * sub-second limit keeps its precision (`0.5 seconds`) rather than rounding
  * to a whole second that was never applied.
@@ -140,9 +193,7 @@ function writeWindowsCwdEpilogue(executionId: string): string {
 function isGroupAlive(proc: ChildProcess): boolean {
 	if (proc.pid === undefined) return false;
 	if (isWindows) {
-		return (
-			isShellAlive(proc) || (windowsOrphans.get(proc) ?? []).some(isPidAlive)
-		);
+		return isShellAlive(proc) || liveWindowsOrphans(proc).length > 0;
 	}
 	const command = sandboxedCommandGroup(proc);
 	return probeGroup(proc.pid) || (command !== undefined && probeGroup(command));
@@ -220,9 +271,7 @@ function signalGroups(proc: ChildProcess, signal: NodeJS.Signals): void {
 		// Never taskkill a dead cmd.exe's pid: it may belong to another
 		// process by now. Its leftovers are reached by their own pids.
 		if (isShellAlive(proc)) signalProcessTree(proc, signal);
-		for (const pid of windowsOrphans.get(proc) ?? []) {
-			if (isPidAlive(pid)) killWindowsTree(pid);
-		}
+		for (const pid of liveWindowsOrphans(proc)) orphanOps.killTree(pid);
 		return;
 	}
 	const command = sandboxedCommandGroup(proc);

@@ -1,5 +1,5 @@
 import test, {type ExecutionContext} from 'ava';
-import {execFileSync, spawn} from 'node:child_process';
+import {type ChildProcess, execFileSync, spawn} from 'node:child_process';
 import {mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
@@ -8,7 +8,11 @@ import {
 	BASH_BACKGROUND_MAX_RETAINED_JOBS,
 	BASH_JOB_PEEK_OUTPUT_LIMIT,
 } from '@/constants';
-import { BashExecutor } from './bash-executor';
+import {
+	BashExecutor,
+	setOrphanOpsForTests,
+	setWindowsOrphansForTests,
+} from './bash-executor';
 import {resetSessionCwd, setSessionCwd} from './session-cwd';
 
 console.log(`\nbash-executor.spec.ts`);
@@ -1010,7 +1014,7 @@ async function startDetachedJob(
 	return pid;
 }
 
-windowsOnly('stopAll stops a job started with start /b after cmd.exe has exited', async t => {
+windowsOnly('tree kill: stopAll stops a job started with start /b after cmd.exe has exited', async t => {
 	const executor = createExecutor();
 	const pid = await startDetachedJob(t, executor);
 	t.true(isLiveProcess(pid), 'the start /b job should still be running');
@@ -1020,7 +1024,7 @@ windowsOnly('stopAll stops a job started with start /b after cmd.exe has exited'
 	t.true(await isGoneWithin(pid, 3000), 'the start /b job must be gone');
 });
 
-windowsOnly('killAll kills a job started with start /b after cmd.exe has exited', async t => {
+windowsOnly('tree kill: killAll kills a job started with start /b after cmd.exe has exited', async t => {
 	const executor = createExecutor();
 	const pid = await startDetachedJob(t, executor);
 	t.true(isLiveProcess(pid), 'the start /b job should still be running');
@@ -1028,6 +1032,34 @@ windowsOnly('killAll kills a job started with start /b after cmd.exe has exited'
 	executor.killAll();
 
 	t.true(await isGoneWithin(pid, 3000), 'the start /b job must be gone');
+});
+
+// Windows reuses pids: once a leftover has exited, its pid may name an
+// unrelated process, so it must be dropped, not signalled at shutdown.
+windowsOnly('tree kill: a leftover that exited is never signalled, even after its pid is reused', async t => {
+	const executor = createExecutor();
+	// A finished cmd.exe that left two jobs behind. Liveness is faked so the
+	// test can reuse a pid, which a real run cannot arrange.
+	const shell = {pid: 4242, exitCode: 0, signalCode: null} as unknown as ChildProcess;
+	const running = new Set([1001, 1002]);
+	const signalled: number[] = [];
+	setOrphanOpsForTests({
+		isAlive: pid => running.has(pid),
+		killTree: pid => signalled.push(pid),
+	});
+	t.teardown(() => setOrphanOpsForTests());
+	setWindowsOrphansForTests(shell, [1001, 1002]);
+	(executor as unknown as {trackLeftovers(proc: ChildProcess): void}).trackLeftovers(
+		shell,
+	);
+
+	running.delete(1001); // the first job exits...
+	await new Promise(resolve => setTimeout(resolve, 1300)); // ...the prune runs...
+	running.add(1001); // ...and an unrelated process gets its pid.
+
+	executor.killAll();
+
+	t.deepEqual(signalled, [1002], 'only the job that is still ours may be signalled');
 });
 /* c8 ignore stop */
 
