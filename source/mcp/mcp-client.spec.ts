@@ -1429,6 +1429,20 @@ test('MCPClient.callTool: passes the server toolTimeout and resetTimeoutOnProgre
 	t.is(options[0]?.onprogress, undefined);
 });
 
+test('MCPClient.callTool: forwards cancellation without dropping server timeout options', async t => {
+	const {client, options} = clientRecordingToolOptions({
+		toolTimeout: 300_000,
+		resetTimeoutOnProgress: false,
+	});
+	const controller = new AbortController();
+
+	await client.callTool('tool', {}, {abortSignal: controller.signal});
+
+	t.is(options[0]?.signal, controller.signal);
+	t.is(options[0]?.timeout, 300_000);
+	t.false(options[0]?.resetTimeoutOnProgress);
+});
+
 test('MCPClient.callTool: toolTimeout 0 and oversized values become the longest timer Node allows', async t => {
 	for (const toolTimeout of [0, 10_000_000_000]) {
 		const {client, options} = clientRecordingToolOptions({toolTimeout});
@@ -1781,7 +1795,7 @@ test('MCP native tools forward cancellation to the MCP request', async t => {
 	t.is(receivedSignals[0], controller.signal);
 	controller.abort();
 
-	const error = await t.throwsAsync(() => pending);
+	const error = await t.throwsAsync(() => pending, {any: true});
 	t.is(error, controller.signal.reason);
 });
 
@@ -1797,7 +1811,7 @@ test('validated MCP handlers forward cancellation to the MCP request', async t =
 	t.is(receivedSignals[0], controller.signal);
 	controller.abort();
 
-	const error = await t.throwsAsync(() => pending);
+	const error = await t.throwsAsync(() => pending, {any: true});
 	t.is(error, controller.signal.reason);
 });
 
