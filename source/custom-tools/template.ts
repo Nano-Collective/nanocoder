@@ -167,7 +167,31 @@ const POSIX_REASON: Record<string, string> = {
 		'is inside an arithmetic expression or a [[ ]] test, where an array subscript like a[$(cmd)] still runs a command',
 };
 
+/**
+ * `let` evaluates its arguments as arithmetic, so a placeholder anywhere in
+ * them reaches an evaluation context. Returns the first such placeholder.
+ */
+function letArithmeticName(tokens: BodyToken[]): string | undefined {
+	for (let i = 0; i + 2 < tokens.length; i++) {
+		const word = [0, 1, 2].map(k => tokens[i + k]);
+		if (!word.every((t, k) => t?.kind === 'char' && t.c === 'let'[k])) {
+			continue;
+		}
+		const prev = tokens[i - 1];
+		if (prev && !(prev.kind === 'char' && WORD_BREAK.test(prev.c))) continue;
+		const after = tokens[i + 3];
+		if (after && (after.kind !== 'char' || !/\s/.test(after.c))) continue;
+		for (let j = i + 3; j < tokens.length; j++) {
+			const t = tokens[j] as BodyToken;
+			if (t.kind === 'value') return t.name;
+			if (t.kind === 'char' && /[;\n|&]/.test(t.c)) break;
+		}
+	}
+	return undefined;
+}
+
 function posixProblem(tokens: BodyToken[]): string | undefined {
+	const letName = letArithmeticName(tokens);
 	const stack: PosixFrame[] = [{kind: 'code', depth: 0}];
 	const sections: Array<{name: string; signature: string}> = [];
 	const pendingHeredocs: Array<{delimiter: string; stripTabs: boolean}> = [];
@@ -187,6 +211,8 @@ function posixProblem(tokens: BodyToken[]): string | undefined {
 
 	const fail = (name: string, reason: string) =>
 		`Placeholder {{ ${name} }} ${POSIX_REASON[reason]}. Values are already quoted for the shell, so don't wrap a placeholder in quotes. Use it bare, or assign it first (${name}={{ ${name} }}) and use "$${name}".`;
+
+	if (letName) return fail(letName, 'arithmetic');
 
 	// Skip the bodies of here-documents that start on the line just ended.
 	const skipHeredocs = (): string | undefined => {
