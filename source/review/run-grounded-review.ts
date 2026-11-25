@@ -4,11 +4,10 @@ import {
 	type ReviewActivitySummary,
 } from './review-activity';
 import {
-	CONTEXT_CHARS_PER_TOKEN,
 	type ReviewAgentBudget,
 	type ReviewAgentOutcome,
 	type ReviewToolMode,
-	reviewContextTokens,
+	reviewDiffCharLimit,
 	runReviewAgent,
 } from './review-agent';
 import {
@@ -91,19 +90,17 @@ export interface GroundedReviewOptions {
 
 const MAX_PROMPT_DIFF_LINES = 1500;
 
-function promptDiffLimits(client: LLMClient): {
+export function promptDiffLimits(client: LLMClient): {
 	maxLines: number;
 	maxChars: number;
 } {
-	const contextChars = reviewContextTokens(client) * CONTEXT_CHARS_PER_TOKEN;
-	const maxChars = Math.min(
-		80_000,
-		Math.max(6_000, Math.floor(contextChars * 0.3)),
-	);
-	return {maxLines: MAX_PROMPT_DIFF_LINES, maxChars};
+	return {
+		maxLines: MAX_PROMPT_DIFF_LINES,
+		maxChars: reviewDiffCharLimit(client),
+	};
 }
 
-function listPaths(paths: string[], limit = 5): string {
+export function listPaths(paths: string[], limit = 5): string {
 	const shown = paths.slice(0, limit).join(', ');
 	return paths.length > limit
 		? `${shown}, and ${paths.length - limit} more`

@@ -36,9 +36,9 @@ Models without native tool calling use the same text tool-call fallback as norma
 
 `/review deep` uses the same pinned revision, citation check, verifier, activity view, and saved summary. It runs three finders, each with its own tool budget:
 
-- **bugs** — logic errors, edge cases, races, error handling, security
-- **standards and API misuse** — wrong or deprecated APIs, type-safety, leaks, surrounding patterns
-- **intent and spec** — whether the change does what it claims, and whether callers or migrations are left unfinished
+- **bugs**: logic errors, edge cases, races, error handling, security
+- **standards and API misuse**: wrong or deprecated APIs, type-safety, leaks, surrounding patterns
+- **intent and spec**: whether the change does what it claims, and whether callers or migrations are left unfinished
 
 Findings that cite the same line and describe the same issue are merged before verification, and the report notes which perspective already covered them. A specialist that fails or runs out of budget makes the review incomplete; the other specialists' findings are still verified. The review fails only when every specialist finder fails.
 

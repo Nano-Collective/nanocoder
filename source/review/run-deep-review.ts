@@ -1,4 +1,3 @@
-import type {LLMClient} from '@/types/core';
 import {ReviewActivityStore} from './review-activity';
 import {type ReviewAgentOutcome, runReviewAgent} from './review-agent';
 import {
@@ -18,28 +17,9 @@ import {
 	type GroundedReviewOptions,
 	type GroundedReviewResult,
 	type GroundedReviewStatus,
+	listPaths,
+	promptDiffLimits,
 } from './run-grounded-review';
-
-const MAX_PROMPT_DIFF_LINES = 1500;
-
-function promptDiffLimits(client: LLMClient): {
-	maxLines: number;
-	maxChars: number;
-} {
-	const contextTokens = client.getContextSize();
-	const maxChars =
-		contextTokens > 0
-			? Math.min(80_000, Math.max(6_000, Math.floor(contextTokens * 4 * 0.3)))
-			: 60_000;
-	return {maxLines: MAX_PROMPT_DIFF_LINES, maxChars};
-}
-
-function listPaths(paths: string[], limit = 5): string {
-	const shown = paths.slice(0, limit).join(', ');
-	return paths.length > limit
-		? `${shown}, and ${paths.length - limit} more`
-		: shown;
-}
 
 /**
  * `/review deep`: the same pinned scope, citation check, verifier, and

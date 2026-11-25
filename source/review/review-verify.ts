@@ -1,7 +1,7 @@
 import type {LLMClient} from '@/types/core';
 import type {ReviewActivitySpan, ReviewActivityStore} from './review-activity';
 import type {ReviewAgentOutcome, ReviewToolMode} from './review-agent';
-import {runReviewAgent} from './review-agent';
+import {reviewDiffCharLimit, runReviewAgent} from './review-agent';
 import {checkCitation, citedExcerpt} from './review-citations';
 import {type ReviewAgentTool, renderFileDiff} from './review-context';
 import {
@@ -19,13 +19,6 @@ import type {
 } from './run-grounded-review';
 
 const MAX_VERIFIER_DIFF_LINES = 300;
-
-function verifierDiffCharLimit(client: LLMClient): number {
-	const contextTokens = client.getContextSize();
-	return contextTokens > 0
-		? Math.min(80_000, Math.max(6_000, Math.floor(contextTokens * 4 * 0.3)))
-		: 60_000;
-}
 
 function clipDiff(diff: string, maxChars: number): string {
 	const lines = diff.split('\n');
@@ -136,7 +129,7 @@ export async function verifyCitedFindings(
 		});
 	};
 
-	const diffMaxChars = verifierDiffCharLimit(input.client);
+	const diffMaxChars = reviewDiffCharLimit(input.client);
 	for (const [index, {finding, snapshotFile}] of cited.entries()) {
 		if (index >= budgets.maxVerifications) {
 			result.unverified.push({

@@ -76,14 +76,20 @@ const MAX_TOOL_RESULT_CHARS = 12_000;
 const MIN_CONTEXT_TOOL_CHARS = 400;
 // Conservative budget (~80% of context at 3 chars/token) so tool schemas,
 // message framing, and the final report turn still fit on smaller windows.
-export const CONTEXT_CHARS_PER_TOKEN = 2.4;
+const CONTEXT_CHARS_PER_TOKEN = 2.4;
 // Many local models report no context size. Assume a small window rather than
 // an unbounded one, since review runs neither compact nor cap their history.
 const UNKNOWN_CONTEXT_TOKENS = 32_768;
 
-export function reviewContextTokens(client: LLMClient): number {
+function reviewContextTokens(client: LLMClient): number {
 	const size = client.getContextSize();
 	return size > 0 ? size : UNKNOWN_CONTEXT_TOKENS;
+}
+
+/** Character cap for a diff embedded in a finder or verifier prompt. */
+export function reviewDiffCharLimit(client: LLMClient): number {
+	const contextChars = reviewContextTokens(client) * CONTEXT_CHARS_PER_TOKEN;
+	return Math.min(80_000, Math.max(6_000, Math.floor(contextChars * 0.3)));
 }
 
 const BUDGET_EXHAUSTED_PROMPT =
