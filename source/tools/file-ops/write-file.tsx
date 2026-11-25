@@ -28,6 +28,7 @@ import {
 } from '@/tools/file-ops/path-validators';
 import {getLanguageFromExtension} from '@/tools/file-ops/programming-language-helper';
 import {
+	forgetFileSnapshot,
 	forgetReadContent,
 	forgetVisibilityReceipt,
 	hasFileSnapshot,
@@ -99,6 +100,7 @@ async function matchesCurrentFileSnapshot(
 
 function invalidateStaleReadState(absPath: string): void {
 	forgetReadContent(absPath);
+	forgetFileSnapshot(absPath);
 	forgetVisibilityReceipt(absPath);
 	invalidateCache(absPath);
 }

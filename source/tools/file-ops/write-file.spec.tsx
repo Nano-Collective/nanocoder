@@ -1611,3 +1611,38 @@ test.serial('write_file refuses to overwrite a path that appeared after approval
 		process.chdir(originalCwd);
 	}
 });
+
+test.serial('write_file allows creating a file again after reporting that the read target was deleted', async t => {
+	const filePath = join(testDir, 'deleted-after-read.txt');
+	await writeFile(filePath, 'original\n', 'utf-8');
+
+	const originalCwd = process.cwd();
+	try {
+		process.chdir(testDir);
+		await executeReadFile({path: 'deleted-after-read.txt'});
+		await rm(filePath);
+
+		const staleWrite = await writeFileTool.validator!({
+			path: 'deleted-after-read.txt',
+			content: 'replacement\n',
+		});
+		t.false(staleWrite.valid);
+		if (!staleWrite.valid) {
+			t.regex(staleWrite.error, /changed since it was fully read/);
+		}
+
+		const createWrite = await writeFileTool.validator!({
+			path: 'deleted-after-read.txt',
+			content: 'new file\n',
+		});
+		t.true(createWrite.valid);
+
+		await executeWriteFileWithoutRead({
+			path: 'deleted-after-read.txt',
+			content: 'new file\n',
+		});
+		t.is(await readFile(filePath, 'utf-8'), 'new file\n');
+	} finally {
+		process.chdir(originalCwd);
+	}
+});

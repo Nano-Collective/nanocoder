@@ -227,6 +227,11 @@ export function hasFileSnapshot(absPath: string): boolean {
 	return getReadContentScope().fileSnapshots.has(resolve(absPath));
 }
 
+/** Forget a stale snapshot so a changed or deleted file can be read anew. */
+export function forgetFileSnapshot(absPath: string): void {
+	getReadContentScope().fileSnapshots.delete(resolve(absPath));
+}
+
 /**
  * Compare current bytes and target identity with the exact full-file snapshot.
  * Undefined means the current scope never received a complete file snapshot.
