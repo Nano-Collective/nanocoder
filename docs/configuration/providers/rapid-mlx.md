@@ -24,11 +24,16 @@ No API key is required for local use.
 
 ## Setup
 
+Install Rapid-MLX with Homebrew or via pip (Python 3.12+):
+
 ```bash
+brew install rapid-mlx
+# or
 pip install rapid-mlx
-rapid-mlx serve qwen3.5-4b-4bit
+
+rapid-mlx serve qwen3.5-4b-4bit --port 8000
 ```
 
 Once the server is running, Nanocoder's `/settings providers` wizard can automatically fetch available models from `GET /v1/models`.
 
-Note: Rapid-MLX defaults to port `8000`, which is also commonly used by vLLM. If both run locally, point Nanocoder at the port Rapid-MLX actually bound.
+Note: Port `8000` is also commonly used by vLLM. Passing `--port 8000` disables Rapid-MLX's automatic port fallback (`8000`–`8009`), so if port `8000` is already in use, start Rapid-MLX with a different `--port` and update `baseUrl` to match.
