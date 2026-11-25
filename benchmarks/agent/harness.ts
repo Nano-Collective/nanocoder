@@ -116,6 +116,8 @@ export interface RunOptions {
 	getPricing?: (model: string) => Promise<TokenPricing | null>;
 	/** Where the throwaway workspace is created. Defaults to the OS temp dir. */
 	workspaceRoot?: string;
+	/** Aborts the CLI subprocess and removes its workspace when cancelled. */
+	signal?: AbortSignal;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -327,7 +329,9 @@ export async function hashTree(dir: string): Promise<string> {
 export async function loadFixtures(fixturesDir: string): Promise<Fixture[]> {
 	const entries = await fs.readdir(fixturesDir, {withFileTypes: true});
 	const fixtures: Fixture[] = [];
-	for (const entry of entries.filter(e => e.isDirectory()).sort()) {
+	for (const entry of entries
+		.filter(e => e.isDirectory())
+		.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))) {
 		const dir = path.join(fixturesDir, entry.name);
 		const manifest = JSON.parse(
 			await fs.readFile(path.join(dir, 'task.json'), 'utf8'),
@@ -508,14 +512,20 @@ export async function runOnce(options: RunOptions): Promise<TaskRun> {
 		delete env.NANOCODER_PROVIDERS;
 		delete env.NANOCODER_PROVIDERS_FILE;
 		try {
-			const result = await execFileAsync('node', args, {
+			const pending = execFileAsync('node', args, {
 				cwd: workspace,
 				timeout: timeoutMs,
+				signal: options.signal,
 				maxBuffer: 64 * 1024 * 1024,
 				env,
 			});
+			// `run` reads piped stdin to EOF, and execFile always opens a pipe
+			// (it ignores a `stdio` option), so close it or the run never starts.
+			pending.child.stdin?.end();
+			const result = await pending;
 			stdout = result.stdout;
 		} catch (error) {
+			if (options.signal?.aborted) throw error;
 			processFailed = true;
 			// An error report exits non-zero but still measures the run, so only a
 			// missing report counts as a harness failure.

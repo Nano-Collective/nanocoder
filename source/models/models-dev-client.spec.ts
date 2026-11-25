@@ -26,13 +26,15 @@ test.afterEach(() => {
 /**
  * Tests for models-dev-client.ts
  *
- * Note: These tests make real API calls to models.dev.
- * The API has caching and fallback mechanisms built in.
+ * Note: "models.dev" lookups here read the fixture database that
+ * source/test-utils/isolated-models-cache.ts (an AVA `require` module) seeds
+ * into a per-worker cache, so they never touch the network or the
+ * developer's real cache.
  *
  * Priority order: models.dev (primary) → hardcoded fallback (offline)
  *
  * Tests are organized by:
- * 1. models.dev API lookups (network required, cached) — returns dynamic values
+ * 1. models.dev lookups (fixture database)
  * 2. Ollama-only fallback models (no network required) — returns exact values
  * 3. Cloud model normalization
  * 4. Edge cases
@@ -43,6 +45,18 @@ test.afterEach(() => {
 // These models exist on models.dev and return dynamic values that may change.
 // We assert typeof === 'number' rather than exact values.
 // ============================================================================
+
+test('models.dev lookups resolve from the seeded fixture, not the network', async t => {
+	// Exact fixture values: a live download or the developer's real cache would
+	// make these drift, and an offline run would time out instead.
+	t.is(await getModelContextLimit('glm-4.7:cloud'), 202_752);
+	t.deepEqual(await getModelPricing('claude-sonnet-4-5'), {
+		input: 3,
+		output: 15,
+		cache_read: 0.3,
+		cache_write: 3.75,
+	});
+});
 
 test('getModelContextLimit - returns a number for llama3.2 (models.dev)', async t => {
 	const limit = await getModelContextLimit('llama3.2');
@@ -348,6 +362,34 @@ test('getModelContextLimit - env variable used for unknown models', async t => {
 	}
 });
 
+test('getModelContextLimit - env variable accepts m suffix', async t => {
+	const saved = process.env.NANOCODER_CONTEXT_LIMIT;
+	process.env.NANOCODER_CONTEXT_LIMIT = '1.5m';
+	try {
+		const limit = await getModelContextLimit('unknown-model-12345');
+		t.is(limit, 1500000);
+	} finally {
+		delete process.env.NANOCODER_CONTEXT_LIMIT;
+		if (saved !== undefined) {
+			process.env.NANOCODER_CONTEXT_LIMIT = saved;
+		}
+	}
+});
+
+test('getModelContextLimit - env variable accepts k suffix', async t => {
+	const saved = process.env.NANOCODER_CONTEXT_LIMIT;
+	process.env.NANOCODER_CONTEXT_LIMIT = '128k';
+	try {
+		const limit = await getModelContextLimit('unknown-model-12345');
+		t.is(limit, 128000);
+	} finally {
+		delete process.env.NANOCODER_CONTEXT_LIMIT;
+		if (saved !== undefined) {
+			process.env.NANOCODER_CONTEXT_LIMIT = saved;
+		}
+	}
+});
+
 test('getModelContextLimit - session override takes priority over env variable', async t => {
 	process.env.NANOCODER_CONTEXT_LIMIT = '32000';
 	setSessionContextLimit(8192);
@@ -437,8 +479,8 @@ test('getModelPricing - returns pricing for gpt-4o (models.dev)', async t => {
 	t.true(pricing!.output >= 0);
 });
 
-test('getModelPricing - returns pricing for claude-3-opus (models.dev)', async t => {
-	const pricing = await getModelPricing('claude-3-opus');
+test('getModelPricing - returns pricing for claude-opus-4-5 (models.dev)', async t => {
+	const pricing = await getModelPricing('claude-opus-4-5');
 	t.truthy(pricing);
 	t.true(typeof pricing!.input === 'number');
 	t.true(typeof pricing!.output === 'number');
@@ -469,6 +511,19 @@ test('getModelPricing - returns null for empty string', async t => {
 test('getModelPricing - returns null for local Ollama model not on models.dev', async t => {
 	const pricing = await getModelPricing('llama3.2:3b');
 	t.is(pricing, null);
+});
+
+test('getModelPricing - does not price a local model by a partial name match', async t => {
+	// The fixture has Groq's llama3-70b-8192 but no `llama3`; a partial match
+	// would show a cost for a free local Ollama model.
+	const pricing = await getModelPricing('llama3');
+	t.is(pricing, null);
+});
+
+test('getModelPricing - matches a hosted id written in a different case', async t => {
+	const exact = await getModelPricing('gpt-4o');
+	t.truthy(exact);
+	t.deepEqual(await getModelPricing('GPT-4o'), exact);
 });
 
 test('getModelPricing - returns consistent pricing on repeated calls', async t => {

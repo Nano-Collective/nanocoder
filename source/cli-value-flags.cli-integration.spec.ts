@@ -8,16 +8,21 @@ const runtimeModules = {
 	'@/models/index': `export function setSessionContextLimit(value) {
 		globalThis.cliTestContextLimit = value;
 	}`,
-	'@/app': 'export default function App() {}',
+	'@/acp/acp-server': `export async function runAcpServer(options) {
+		console.log(JSON.stringify({acpOptions: options}));
+		process.exit(0);
+	}`,
 	'@/utils/perf-buffer': 'export function installPerfBufferGuard() {}',
 	// Every export cli.tsx pulls from this module must be stubbed here: the
 	// loader short-circuits the whole specifier, so a missing name surfaces as
 	// "<name> is not a function" at run time rather than an import error.
 	'@/config/preferences': `export function loadPreferences() { return {}; }
 		export function getAlternateScreen() { return false; }
-		export function getMouseReporting() { return false; }`,
-	ink: `export function render(element) {
-		console.log(JSON.stringify({...element.props, contextLimit: globalThis.cliTestContextLimit}));
+		export function getMouseReporting() { return false; }
+		export function getKittyKeyboardMode() { return 'auto'; }
+		export function getMaxFps() { return process.env.CLI_TEST_MAX_FPS ? Number(process.env.CLI_TEST_MAX_FPS) : 30; }`,
+	'@/app/render-tui': `export function renderTui(props, options) {
+		console.log(JSON.stringify({...props, contextLimit: globalThis.cliTestContextLimit, inkOptions: options}));
 		process.exit(0);
 	}`,
 };
@@ -35,7 +40,8 @@ const loaderUrl = `data:text/javascript,${encodeURIComponent(
 )}`;
 const cliPath = fileURLToPath(new URL('./cli.tsx', import.meta.url));
 
-function runCli(args: string[]) {
+
+function runCli(args: string[], extraEnv: Record<string, string> = {}) {
 	return spawnSync(
 		process.execPath,
 		[
@@ -54,6 +60,7 @@ function runCli(args: string[]) {
 				...process.env,
 				NODE_DISABLE_COMPILE_CACHE: '1',
 				TSX_DISABLE_CACHE: '1',
+				...extraEnv,
 			},
 		},
 	);
@@ -101,6 +108,7 @@ for (const {flag, value, property, expected} of flags) {
 				t.is(props.nonInteractivePrompt, 'analyze code');
 			});
 		}
+
 	}
 
 	test(`${flag}: similarly prefixed unknown flag stays in prompt`, t => {
@@ -110,16 +118,6 @@ for (const {flag, value, property, expected} of flags) {
 		const props = JSON.parse(result.stdout);
 		t.is(props[property], undefined);
 		t.is(props.nonInteractivePrompt, `analyze ${unknown} code`);
-	});
-
-	test(`${flag}: missing and empty values retain unset behavior`, t => {
-		for (const option of [[flag], [flag, ''], [`${flag}=`]]) {
-			const result = runCli(['run', 'analyze code', ...option]);
-			t.is(result.status, 0, result.stderr);
-			const props = JSON.parse(result.stdout);
-			t.is(props[property], undefined);
-			t.is(props.nonInteractivePrompt, 'analyze code');
-		}
 	});
 
 	test(`${flag}: first occurrence wins across both forms`, t => {
@@ -137,6 +135,69 @@ for (const {flag, value, property, expected} of flags) {
 	});
 }
 
+const nonPortFlags = flags.filter(({flag}) => flag !== '--vscode-port');
+
+test('missing and empty values of non-port flags retain unset behavior', t => {
+	for (const {flag, property} of nonPortFlags) {
+		for (const option of [[flag], [flag, ''], [`${flag}=`]]) {
+			const result = runCli(['run', 'analyze code', ...option]);
+			t.is(result.status, 0, result.stderr);
+			const props = JSON.parse(result.stdout);
+			t.is(props[property], undefined);
+			t.is(props.nonInteractivePrompt, 'analyze code');
+		}
+	}
+});
+
+test('--vscode-port rejects missing and empty values', t => {
+	for (const option of [
+		['--vscode-port'],
+		['--vscode-port', ''],
+		['--vscode-port='],
+	]) {
+		const result = runCli(['run', 'analyze code', ...option]);
+		t.is(result.status, 1, option.join(' '));
+		t.true(result.stderr.includes('--vscode-port'), result.stderr);
+	}
+
+	// The shared scan runs before `run` too: an empty argument there is this
+	// flag's value, not an unknown command.
+	const beforeRun = runCli(['--vscode-port', '', 'run', 'hello']);
+	t.is(beforeRun.status, 1, beforeRun.stderr);
+	t.true(
+		beforeRun.stderr.includes('--vscode-port requires a value'),
+		beforeRun.stderr,
+	);
+});
+
+test('--vscode-port rejects a negative value given before run', t => {
+	const result = runCli(['--vscode-port', '-1', 'run', 'hello']);
+	t.is(result.status, 1);
+	t.true(
+		result.stderr.includes('Invalid --vscode-port value: "-1"'),
+		result.stderr,
+	);
+});
+
+test('a negative number is not accepted as the value of --provider', t => {
+	const result = runCli(['--provider', '-5', 'run', 'hello']);
+	t.is(result.status, 1);
+	t.true(result.stderr.includes('Unknown option "-5"'), result.stderr);
+});
+
+test('--context-max: malformed value is rejected with accepted syntax', t => {
+	const result = runCli(['run', 'analyze', '--context-max', '1.5x']);
+	t.not(result.status, 0);
+	t.regex(result.stderr, /8192, 128k, or 1m/);
+});
+
+test('--context-max: m suffix is accepted', t => {
+	const result = runCli(['run', 'analyze', '--context-max', '1m']);
+	t.is(result.status, 0, result.stderr);
+	const props = JSON.parse(result.stdout);
+	t.is(props.contextLimit, 1000000);
+});
+
 test('fused values preserve additional equals signs for existing validation', t => {
 	for (const flag of ['--model', '--provider', '--context-max']) {
 		const result = runCli(['run', 'hello', `${flag}=123=extra`]);
@@ -146,12 +207,24 @@ test('fused values preserve additional equals signs for existing validation', t 
 			result.stderr,
 		);
 	}
-	// Port parsing intentionally continues to accept a numeric prefix.
+	// Port parsing is strict: the numeric prefix is not silently accepted.
 	const result = runCli(['run', 'hello', '--vscode-port=3000=extra', 'world']);
-	t.is(result.status, 0, result.stderr);
-	const props = JSON.parse(result.stdout);
-	t.is(props.vscodePort, 3000);
-	t.is(props.nonInteractivePrompt, 'hello world');
+	t.is(result.status, 1);
+	t.true(
+		result.stderr.includes('Invalid --vscode-port value: "3000=extra"'),
+		result.stderr,
+	);
+});
+
+test('--vscode-port rejects non-numeric and out-of-range values', t => {
+	for (const value of ['abc', '99999', '8080abc', '0', '-1']) {
+		const result = runCli(['run', 'hello', `--vscode-port=${value}`]);
+		t.is(result.status, 1, value);
+		t.true(
+			result.stderr.includes(`Invalid --vscode-port value: "${value}"`),
+			result.stderr,
+		);
+	}
 });
 
 test('all four fused flags are removed without consuming prompt words', t => {
@@ -211,4 +284,86 @@ test('--json cannot be combined with --no-plain', t => {
 	const result = runCli(['--json', 'run', 'hello']);
 	t.is(result.status, 1);
 	t.true(result.stderr.includes('cannot be combined with --no-plain'), result.stderr);
+});
+
+test('--json-schema validates its value before rejecting --no-plain', t => {
+	const missing = runCli(['--json-schema', 'run', 'hello']);
+	t.is(missing.status, 1);
+	t.true(missing.stderr.includes('--json-schema requires a schema file path'));
+
+	const badInline = runCli(['--json-schema={"type":', 'run', 'hello']);
+	t.is(badInline.status, 1);
+	t.true(badInline.stderr.includes('Could not parse --json-schema inline JSON'));
+
+	const badSchema = runCli(['--json-schema={"type":"strin"}', 'run', 'hello']);
+	t.is(badSchema.status, 1);
+	t.true(badSchema.stderr.includes('Invalid --json-schema'));
+
+	const valid = runCli(['--json-schema={"type":"object"}', 'run', 'hello']);
+	t.is(valid.status, 1);
+	t.true(valid.stderr.includes('--json-schema needs the plain shell'));
+});
+
+test('Ink render receives default maxFps of 30 when unconfigured', t => {
+	const result = runCli(['run', 'hello']);
+	t.is(result.status, 0, result.stderr);
+	const output = JSON.parse(result.stdout);
+	t.is(output.inkOptions?.maxFps, 30);
+});
+
+test('Ink render receives configured maxFps in render options', t => {
+	const result = runCli(['run', 'hello'], {CLI_TEST_MAX_FPS: '15'});
+	t.is(result.status, 0, result.stderr);
+	const output = JSON.parse(result.stdout);
+	t.is(output.inkOptions?.maxFps, 15);
+});
+
+test('--acp hands --mode to the ACP server as the starting mode', t => {
+	for (const option of [['--mode', 'normal'], ['--mode=normal']]) {
+		const result = runCli(['--acp', ...option]);
+		t.is(result.status, 0, result.stderr);
+		t.is(JSON.parse(result.stdout).acpOptions.mode, 'normal');
+	}
+});
+
+test('--acp without --mode leaves the starting mode unset', t => {
+	const result = runCli(['--acp']);
+	t.is(result.status, 0, result.stderr);
+	t.is(JSON.parse(result.stdout).acpOptions.mode, undefined);
+});
+
+test('-v, --version, -h and --help inside the run prompt stay prompt text', t => {
+	// https://github.com/Nano-Collective/nanocoder/issues/2315 — the version and
+	// help fast paths used to scan the whole argv, so `run go test -v` printed
+	// the version and exited 0 without running the prompt.
+	for (const [args, prompt] of [
+		[['run', 'go', 'test', '-v'], 'go test -v'],
+		[['run', 'node', '--version'], 'node --version'],
+		[['run', 'grep', '-h', 'foo'], 'grep -h foo'],
+		[['run', 'explain', '--help', 'output'], 'explain --help output'],
+	] as const) {
+		const result = runCli([...args]);
+		t.is(result.status, 0, `${args.join(' ')}: ${result.stderr}`);
+		const props = JSON.parse(result.stdout);
+		t.is(props.nonInteractivePrompt, prompt);
+	}
+});
+
+test('-v and -h before run still print the version and the help', t => {
+	const version = runCli(['-v', 'run', 'hello']);
+	t.is(version.status, 0, version.stderr);
+	t.regex(version.stdout.trim(), /^[0-9]+[.][0-9]+[.][0-9]+/);
+
+	const help = runCli(['--help', 'run', 'hello']);
+	t.is(help.status, 0, help.stderr);
+	t.true(help.stdout.includes('Usage: nanocoder'), help.stdout);
+});
+
+test('run --help or run -h with nothing else still prints the help', t => {
+	// Only the lone flag: `run explain --help output` above is a prompt.
+	for (const flag of ['--help', '-h']) {
+		const result = runCli(['run', flag]);
+		t.is(result.status, 0, `run ${flag}: ${result.stderr}`);
+		t.true(result.stdout.includes('Usage: nanocoder'), result.stdout);
+	}
 });

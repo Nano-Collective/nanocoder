@@ -27,12 +27,12 @@ import {readFile, unlink, writeFile} from 'node:fs/promises';
 import {homedir} from 'node:os';
 import {dirname, join, resolve} from 'node:path';
 import {promisify} from 'node:util';
+import {loadPreferences} from '@/config/preferences';
 import {
 	isDirectoryTrusted,
-	loadPreferences,
 	trustRecheck,
 	untrustedReason,
-} from '@/config/preferences';
+} from '@/config/trust/directory-trust';
 import {formatError} from '@/utils/error-formatter';
 
 const execFileAsync = promisify(execFile);
@@ -120,6 +120,7 @@ export function buildLaunchAgentPlist(
 	hash: string,
 	daemonCommand: string,
 ): string {
+	const root = xmlEscape(projectRoot);
 	return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -128,16 +129,16 @@ export function buildLaunchAgentPlist(
 \t<string>com.nanocoder.daemon.${hash}</string>
 \t<key>ProgramArguments</key>
 \t<array>
-\t\t<string>${daemonCommand}</string>
+\t\t<string>${xmlEscape(daemonCommand)}</string>
 \t\t<string>daemon</string>
 \t\t<string>start</string>
 \t</array>
 \t<key>WorkingDirectory</key>
-\t<string>${projectRoot}</string>
+\t<string>${root}</string>
 \t<key>EnvironmentVariables</key>
 \t<dict>
 \t\t<key>NANOCODER_PROJECT_ROOT</key>
-\t\t<string>${projectRoot}</string>
+\t\t<string>${root}</string>
 \t</dict>
 \t<key>RunAtLoad</key>
 \t<true/>
@@ -148,20 +149,42 @@ export function buildLaunchAgentPlist(
 `;
 }
 
+function quoteSystemdWord(value: string): string {
+	return `"${value
+		.replace(/\\/g, '\\\\')
+		.replace(/"/g, '\\"')
+		.replace(/%/g, '%%')}"`;
+}
+
 export function buildSystemdUnit(
 	projectRoot: string,
 	hash: string,
 	daemonCommand: string,
 ): string {
+	for (const [name, value] of [
+		['The project path', projectRoot],
+		['The daemon command', daemonCommand],
+	] as const) {
+		if (/\p{Cc}/u.test(value)) {
+			throw new Error(
+				`${name} cannot contain control characters in a systemd unit.`,
+			);
+		}
+	}
+
+	const root = projectRoot.replace(/%/g, '%%');
+	// These directives do not decode C-style escapes. A trailing separator
+	// preserves the directory and keeps a final backslash from joining lines.
+	const pathRoot = root.endsWith('\\') ? `${root}/` : root;
 	return `[Unit]
-Description=nanocoder daemon for ${projectRoot}
+Description=nanocoder daemon for ${pathRoot}
 After=default.target
 
 [Service]
 Type=simple
-WorkingDirectory=${projectRoot}
-Environment=NANOCODER_PROJECT_ROOT=${projectRoot}
-ExecStart=${daemonCommand} daemon start
+WorkingDirectory=${pathRoot}
+Environment=${quoteSystemdWord(`NANOCODER_PROJECT_ROOT=${projectRoot}`)}
+ExecStart=${quoteSystemdWord(daemonCommand)} daemon start
 Restart=on-failure
 RestartSec=5
 
@@ -171,7 +194,8 @@ WantedBy=default.target
 }
 
 /**
- * XML escape for the fields we inject into the Task Scheduler manifest.
+ * XML escape for the fields we inject into the Task Scheduler manifest and
+ * the LaunchAgent plist.
  * Project paths can contain `&`, `<`, `'`, etc. in extreme cases.
  */
 function xmlEscape(value: string): string {
@@ -258,9 +282,10 @@ export async function installAutoStart(
 		: ` Warning: ${resolve(opts.projectRoot)} ` +
 			untrustedReason(trustRecheck(opts.projectRoot, preferences)) +
 			`, so the ` +
-			`installed service will fail to start until you run \`nanocoder\` here ` +
-			`once to accept the trust disclaimer, or pass --trust-directory to ` +
-			`\`nanocoder daemon start\`.`;
+			`installed service will fail to start until this folder is trusted. ` +
+			`Run \`nanocoder\` here once to accept the trust disclaimer, or run ` +
+			`\`NANOCODER_TRUST_DIRECTORY=1 nanocoder daemon start\` here once to ` +
+			`save trust for the service.`;
 
 	if (platform === 'darwin') {
 		const target = launchAgentPath(home, hash);

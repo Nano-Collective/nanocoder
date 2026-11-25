@@ -1,5 +1,6 @@
 import test from 'ava';
 import type {Message} from '@/types/index';
+import {appendTurnContext} from '@/utils/turn-context';
 import {exportCommand} from './export';
 import {lazyCommands} from './lazy-registry';
 import {promises as fs} from 'fs';
@@ -549,4 +550,23 @@ test('exportCommand renders a subdirectory export relative to the project root',
 	t.true(output.includes(`Chat exported to reports${path.sep}chat.md`));
 	t.false(output.includes(`Chat exported to chat${path.sep}`));
 	t.false(output.includes('Chat exported to chat.md'));
+});
+
+// An exported transcript is for people to read, so it shows the message the
+// user typed, not the skills and memories assembled for the model (#1574).
+test('exportCommand writes the user message without its per-turn context block', async t => {
+	const messages: Message[] = [
+		{
+			role: 'user',
+			content: appendTurnContext('Hello world', [
+				'## Project Context\n\n- Auth uses Clerk.',
+			]),
+		},
+	];
+	await exportCommand.handler(['test.md'], messages, testMetadata);
+
+	const content = mockWriteFileCalls[0].content;
+	t.true(content.includes('## User\nHello world'));
+	t.false(content.includes('<turn-context>'));
+	t.false(content.includes('## Project Context'));
 });

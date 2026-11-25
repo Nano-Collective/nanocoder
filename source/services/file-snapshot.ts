@@ -5,20 +5,21 @@ import * as path from 'path';
 import {MAX_CHECKPOINT_FILES} from '@/constants';
 import type {CaptureResult} from '@/types/checkpoint';
 import {formatError} from '@/utils/error-formatter';
-import {loadGitignore} from '@/utils/gitignore-loader';
+import {loadGitignore} from '@/utils/fs/gitignore-loader';
 import {getLogger} from '@/utils/logging';
-import {logWarning} from '@/utils/message-queue';
+import {notifyWarning} from '@/utils/message-queue-core';
 
 /**
  * Nanocoder's own runtime state under `.nanocoder/`. Unless a repo gitignores
  * it, git reports all of it as untracked, so every checkpoint snapshotted the
  * earlier checkpoints (0, 2, 6, 14, 30 files...) until the file cap crowded
  * out the user's real changes, and restoring one wrote stale checkpoint and
- * timeline data back over the live store. User content under `.nanocoder/`
- * (commands, agents, tools, skills) is still captured.
+ * timeline data back over the live store. Plan graphs are runtime state too, so
+ * a checkpoint must not resurrect an old graph over the live one. User content
+ * under `.nanocoder/` (commands, agents, tools, skills) is still captured.
  */
 const NANOCODER_STATE_PATH =
-	/^\.nanocoder\/(?:checkpoints\/|timeline\/|timeline\.|daemon\.)/;
+	/^\.nanocoder\/(?:checkpoints\/|timeline\/|timeline\.|plans\/|daemon\.)/;
 
 function isNanocoderStatePath(file: string): boolean {
 	return NANOCODER_STATE_PATH.test(file.replace(/\\/g, '/'));
@@ -36,6 +37,29 @@ function isMissingFile(error: unknown): boolean {
 		typeof error === 'object' &&
 		error !== null &&
 		(error as NodeJS.ErrnoException).code === 'ENOENT'
+	);
+}
+
+/**
+ * Output cap for the `git` listings in `getModifiedFilesResult`. Node's
+ * `execFileSync` defaults to 1 MB, and `git ls-files --others` on ~30,000
+ * untracked files is ~1.28 MB, so the default throws ENOBUFS and the whole
+ * scan was misread as "git not available". 64 MB covers that listing by a
+ * wide margin; anything larger still falls back to the tracked files below
+ * instead of an empty checkpoint.
+ */
+const GIT_OUTPUT_MAX_BUFFER = 64 * 1024 * 1024;
+
+/**
+ * An `execFileSync` output that outgrew `maxBuffer` throws with code
+ * ENOBUFS. That is a listing too large to hold, not a missing git binary,
+ * so the caller must not treat it as "git not available".
+ */
+function isMaxBufferError(error: unknown): boolean {
+	return (
+		typeof error === 'object' &&
+		error !== null &&
+		(error as NodeJS.ErrnoException).code === 'ENOBUFS'
 	);
 }
 
@@ -93,9 +117,13 @@ export class FileSnapshotService {
 					path: normalizedPath,
 					reason: 'Outside the workspace',
 				});
-				logWarning('Refusing to capture a file outside the workspace', true, {
-					context: {filePath},
-				});
+				notifyWarning(
+					'Refusing to capture a file outside the workspace',
+					true,
+					{
+						context: {filePath},
+					},
+				);
 				continue;
 			}
 
@@ -120,7 +148,7 @@ export class FileSnapshotService {
 						path: normalizedPath,
 						reason,
 					});
-					logWarning('Could not capture file', true, {
+					notifyWarning('Could not capture file', true, {
 						context: {
 							filePath,
 							error: reason,
@@ -217,25 +245,49 @@ export class FileSnapshotService {
 	 * `truncatedCount` reports how many the cap dropped rather than only that it
 	 * fired, so the number reaches the checkpoint's metadata and, from there, a
 	 * later restore. `available` is false when git could not answer at all.
+	 *
+	 * The untracked listing is the unbounded one, so it gets a raised output
+	 * buffer (see `GIT_OUTPUT_MAX_BUFFER`). If even that overflows, only the
+	 * untracked list is lost: the tracked changes are still returned with
+	 * `truncated` set, rather than the whole scan failing. `truncatedCount`
+	 * is 0 in that case - the listing itself overflowed, so the untracked
+	 * count is unknown, and callers must treat `truncated`, not the count,
+	 * as the incompleteness signal.
+	 *
+	 * `options.maxBuffer` exists so tests can force the overflow path with a
+	 * lowered limit instead of a 64 MB fixture; production callers pass
+	 * nothing and get the raised default.
 	 */
-	getModifiedFilesResult(): {
+	getModifiedFilesResult(options?: {maxBuffer?: number}): {
 		files: string[];
 		truncated: boolean;
 		truncatedCount: number;
 		available: boolean;
 	} {
+		const maxBuffer = options?.maxBuffer ?? GIT_OUTPUT_MAX_BUFFER;
 		try {
 			// This scan runs on every checkpoint and twice per ACP tool call, so
 			// the common path - HEAD exists - must cost a single spawn. Rather
 			// than probing with `git rev-parse --verify HEAD` first, ask for the
 			// diff and let the unborn case fail.
+			// git C-quotes paths it considers unusual: non-ASCII bytes come back
+			// as `"caf\303\251.txt"`, and even `core.quotePath=false` keeps
+			// quoting a name containing `"` or `\`. Those strings are not paths
+			// any fs call can open, so such files were silently dropped from
+			// every checkpoint. `-z` emits raw, unquoted, NUL-separated paths -
+			// the same idiom as the other git readers in this codebase.
 			let modifiedOutput = '';
 			try {
-				modifiedOutput = execFileSync('git', ['diff', '--name-only', 'HEAD'], {
-					cwd: this.workspaceRoot,
-					encoding: 'utf-8',
-					stdio: ['pipe', 'pipe', 'pipe'],
-				}).trim();
+				modifiedOutput = execFileSync(
+					'git',
+					['diff', '--name-only', '-z', 'HEAD'],
+					{
+						cwd: this.workspaceRoot,
+						encoding: 'utf-8',
+						stdio: ['pipe', 'pipe', 'pipe'],
+						maxBuffer,
+					},
+				);
 			} catch {
 				// Unborn HEAD: nothing to diff against, but the index can still be
 				// full (`git init && git add .`, or `git checkout --orphan`, which
@@ -244,30 +296,55 @@ export class FileSnapshotService {
 				// captured rather than silently skipped.
 				modifiedOutput = execFileSync(
 					'git',
-					['diff', '--name-only', '--cached'],
+					['diff', '--name-only', '-z', '--cached'],
 					{
 						cwd: this.workspaceRoot,
 						encoding: 'utf-8',
 						stdio: ['pipe', 'pipe', 'pipe'],
+						maxBuffer,
 					},
-				).trim();
+				);
 			}
 
-			const untrackedOutput = execFileSync(
-				'git',
-				['ls-files', '--others', '--exclude-standard'],
-				{
-					cwd: this.workspaceRoot,
-					encoding: 'utf-8',
-					stdio: ['pipe', 'pipe', 'pipe'],
-				},
-			).trim();
+			// A generated-output folder can hold tens of thousands of untracked
+			// paths while the tracked diff stays tiny, so the untracked listing
+			// gets its own failure path: an overflowed listing is not "git
+			// missing", and losing it must not lose the tracked changes too.
+			let untrackedFiles: string[] = [];
+			let untrackedOverflowed = false;
+			try {
+				const untrackedOutput = execFileSync(
+					'git',
+					['ls-files', '--others', '--exclude-standard', '-z'],
+					{
+						cwd: this.workspaceRoot,
+						encoding: 'utf-8',
+						stdio: ['pipe', 'pipe', 'pipe'],
+						maxBuffer,
+					},
+				);
+				untrackedFiles = untrackedOutput
+					? untrackedOutput.split('\0').filter(Boolean)
+					: [];
+			} catch (error) {
+				if (!isMaxBufferError(error)) {
+					throw error;
+				}
+
+				untrackedOverflowed = true;
+				notifyWarning(
+					'Untracked file list too large to capture; snapshotting tracked changes only',
+					true,
+					{
+						context: {
+							workspaceRoot: this.workspaceRoot,
+						},
+					},
+				);
+			}
 
 			const modifiedFiles = modifiedOutput
-				? modifiedOutput.split('\n').filter(Boolean)
-				: [];
-			const untrackedFiles = untrackedOutput
-				? untrackedOutput.split('\n').filter(Boolean)
+				? modifiedOutput.split('\0').filter(Boolean)
 				: [];
 
 			const allFiles = [...new Set([...modifiedFiles, ...untrackedFiles])];
@@ -281,7 +358,7 @@ export class FileSnapshotService {
 			);
 
 			if (filtered.length > MAX_CHECKPOINT_FILES) {
-				logWarning(
+				notifyWarning(
 					'Too many modified files detected, limiting to maximum',
 					true,
 					{
@@ -301,12 +378,12 @@ export class FileSnapshotService {
 
 			return {
 				files: filtered,
-				truncated: false,
+				truncated: untrackedOverflowed,
 				truncatedCount: 0,
 				available: true,
 			};
 		} catch {
-			logWarning('Git not available for file tracking', true, {
+			notifyWarning('Git not available for file tracking', true, {
 				context: {
 					workspaceRoot: this.workspaceRoot,
 				},

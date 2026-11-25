@@ -14,7 +14,7 @@ import {
 	isValidSessionMetadata,
 } from '@/session/session-validation';
 import type {Message} from '@/types/core';
-import {withExclusiveLock} from '@/utils/exclusive-file-lock';
+import {withExclusiveLock} from '@/utils/fs/exclusive-file-lock';
 
 export interface Session {
 	id: string;
@@ -32,6 +32,9 @@ export interface Session {
 	/** True once the background titler has named this session, so the
 	 * heuristic title stops overwriting it and we never re-generate. */
 	titleGenerated?: boolean;
+	/** Set by a client that still references this session. Retention (age and
+	 * count limits) leaves it alone; an explicit delete still removes it. */
+	pinned?: boolean;
 }
 
 export interface SessionMetadata {
@@ -45,6 +48,78 @@ export interface SessionMetadata {
 	workingDirectory: string;
 	titleManuallySet?: boolean;
 	titleGenerated?: boolean;
+	pinned?: boolean;
+}
+
+/**
+ * Rename budget for transient sharing violations: one initial attempt plus five
+ * retries. Windows refuses to replace a file another process has open, and the
+ * holder — usually the index reader in a second Nanocoder process — normally
+ * lets go within milliseconds, so a short bounded wait beats failing the save.
+ */
+const RENAME_MAX_RETRIES = 5;
+const RENAME_BASE_DELAY_MS = 10;
+const RENAME_MAX_DELAY_MS = 160;
+const RENAME_JITTER_MS = 10;
+const RETRYABLE_RENAME_CODES: ReadonlySet<string> = new Set([
+	'EPERM',
+	'EBUSY',
+	'EACCES',
+]);
+
+type RenameFn = (from: string, to: string) => Promise<void>;
+
+const defaultRename: RenameFn = (from, to) => fs.rename(from, to);
+
+let renameImpl: RenameFn = defaultRename;
+
+/**
+ * Test seam: replace the rename primitive so the retry path can be exercised
+ * deterministically. Call with no arguments to restore the default.
+ * @internal
+ */
+export function setRenameForTests(impl?: RenameFn): void {
+	renameImpl = impl ?? defaultRename;
+}
+
+function isRetryableRenameError(error: unknown): boolean {
+	const code = (error as NodeJS.ErrnoException | null | undefined)?.code;
+	return typeof code === 'string' && RETRYABLE_RENAME_CODES.has(code);
+}
+
+/** Exponential backoff with jitter, so concurrent writers don't retry in step. */
+function renameBackoffMs(attempt: number): number {
+	const base = Math.min(
+		RENAME_BASE_DELAY_MS * 2 ** attempt,
+		RENAME_MAX_DELAY_MS,
+	);
+	return base + Math.floor(Math.random() * RENAME_JITTER_MS);
+}
+
+/**
+ * Rename `from` onto `to`, retrying a bounded number of times when the
+ * filesystem reports a transient sharing violation.
+ *
+ * POSIX never blocks a rename because a file is open, so this only fires on
+ * Windows (and on network mounts that return EBUSY). Platform is deliberately
+ * not checked: a genuine permission error costs one bounded backoff
+ * (~360 ms) before the original error is rethrown unchanged, and gating on
+ * `process.platform` would make the retry path untestable on Linux CI.
+ */
+async function renameWithRetry(from: string, to: string): Promise<void> {
+	for (let attempt = 0; ; attempt++) {
+		try {
+			await renameImpl(from, to);
+			return;
+		} catch (error) {
+			if (attempt >= RENAME_MAX_RETRIES || !isRetryableRenameError(error)) {
+				throw error;
+			}
+			await new Promise<void>(resolve => {
+				setTimeout(resolve, renameBackoffMs(attempt));
+			});
+		}
+	}
 }
 
 /** Write data to a temp file then atomically rename into place. */
@@ -56,7 +131,7 @@ async function atomicWriteFile(
 	const tmpPath = `${filePath}.${crypto.randomUUID()}.tmp`;
 	try {
 		await fs.writeFile(tmpPath, data, {mode});
-		await fs.rename(tmpPath, filePath);
+		await renameWithRetry(tmpPath, filePath);
 	} catch (error) {
 		// Clean up temp file on failure
 		try {
@@ -84,6 +159,7 @@ function toSessionMetadata(session: Session): SessionMetadata {
 		workingDirectory: session.workingDirectory,
 		titleManuallySet: session.titleManuallySet,
 		titleGenerated: session.titleGenerated,
+		pinned: session.pinned,
 	};
 }
 
@@ -148,19 +224,43 @@ export class SessionManager {
 				: crypto.randomUUID();
 		const timestamp = new Date().toISOString();
 
-		const session: Session = {
-			id: sessionId,
-			title: sessionData.title,
-			createdAt: timestamp,
-			lastAccessedAt: timestamp,
-			messageCount: sessionData.messageCount,
-			provider: sessionData.provider,
-			model: sessionData.model,
-			workingDirectory: sessionData.workingDirectory,
-			messages: sessionData.messages,
-		};
+		const session = await this.withIndexLock(async () => {
+			const sessions = await this.readIndex();
+			// Autosave recreates the live session under its own id when the file
+			// cannot be read. The index entry is then all that is left of the
+			// pin, the creation time and a title the user or the titler chose,
+			// so keep them instead of resetting them.
+			// A value the caller passes still wins.
+			const existing = sessions.find(s => s.id === sessionId);
+			const keepExistingTitle =
+				existing !== undefined &&
+				!sessionData.titleManuallySet &&
+				!sessionData.titleGenerated &&
+				(existing.titleManuallySet || existing.titleGenerated);
 
-		await this.saveSession(session);
+			const created: Session = {
+				id: sessionId,
+				title: keepExistingTitle ? existing.title : sessionData.title,
+				createdAt: existing?.createdAt ?? timestamp,
+				lastAccessedAt: timestamp,
+				messageCount: sessionData.messageCount,
+				provider: sessionData.provider,
+				model: sessionData.model,
+				workingDirectory: sessionData.workingDirectory,
+				messages: sessionData.messages,
+				titleManuallySet: keepExistingTitle
+					? existing.titleManuallySet
+					: sessionData.titleManuallySet,
+				titleGenerated: keepExistingTitle
+					? existing.titleGenerated
+					: sessionData.titleGenerated,
+				pinned: sessionData.pinned ?? existing?.pinned,
+			};
+
+			await this.writeSessionLocked(created, sessions);
+			return created;
+		});
+
 		await this.enforceSessionLimits();
 		return session;
 	}
@@ -172,45 +272,41 @@ export class SessionManager {
 
 		// File write and index update happen together under the lock
 		// to prevent orphaned files if the process dies between them.
-		await this.withIndexLock(async () => {
-			const sessionFilePath = path.join(this.sessionsDir, `${session.id}.json`);
+		await this.withIndexLock(async () =>
+			this.writeSessionLocked(session, await this.readIndex()),
+		);
+	}
 
-			// Write session file atomically
-			await atomicWriteFile(
-				sessionFilePath,
-				JSON.stringify(session, null, 2),
-				0o600,
-			);
+	/** Write the session file and its index entry. Caller holds the index lock. */
+	private async writeSessionLocked(
+		session: Session,
+		sessions: SessionMetadata[],
+	): Promise<void> {
+		const sessionFilePath = path.join(this.sessionsDir, `${session.id}.json`);
 
-			// Update index
-			const sessions = await this.readIndex();
-			const existingSessionIndex = sessions.findIndex(s => s.id === session.id);
+		// Write session file atomically
+		await atomicWriteFile(
+			sessionFilePath,
+			JSON.stringify(session, null, 2),
+			0o600,
+		);
 
-			const sessionMetadata: SessionMetadata = {
-				id: session.id,
-				title: session.title,
-				createdAt: session.createdAt,
-				lastAccessedAt: session.lastAccessedAt,
-				messageCount: session.messageCount,
-				provider: session.provider,
-				model: session.model,
-				workingDirectory: session.workingDirectory,
-				titleManuallySet: session.titleManuallySet,
-				titleGenerated: session.titleGenerated,
-			};
+		// Update index
+		const existingSessionIndex = sessions.findIndex(s => s.id === session.id);
 
-			if (existingSessionIndex >= 0) {
-				sessions[existingSessionIndex] = sessionMetadata;
-			} else {
-				sessions.push(sessionMetadata);
-			}
+		const sessionMetadata = toSessionMetadata(session);
 
-			await atomicWriteFile(
-				this.sessionsIndexPath,
-				JSON.stringify(sessions, null, 2),
-				0o600,
-			);
-		});
+		if (existingSessionIndex >= 0) {
+			sessions[existingSessionIndex] = sessionMetadata;
+		} else {
+			sessions.push(sessionMetadata);
+		}
+
+		await atomicWriteFile(
+			this.sessionsIndexPath,
+			JSON.stringify(sessions, null, 2),
+			0o600,
+		);
 	}
 
 	/** Read the index file (internal helper — not locked). */
@@ -334,23 +430,57 @@ export class SessionManager {
 	 * directories; with autosave on, every `/clear` retires a session id and
 	 * only the persisted ones are kept.
 	 *
-	 * Best-effort: a missing or unreadable session index means "keep nothing
-	 * known", and any failure is swallowed — reclaiming disk must never block
-	 * or crash startup.
+	 * The startup caller fires this before anything has initialized the
+	 * manager, and with autosave off nothing ever does. So the sessions
+	 * directory is resolved here, read-only: no directory is created, no index
+	 * is rewritten and retention does not run. A store that exists but cannot
+	 * be read keeps every artifact directory, because treating every saved
+	 * session as unknown would delete their plans, tasks and walkthroughs.
+	 *
+	 * Best-effort: any failure is swallowed, since reclaiming disk must never
+	 * block or crash startup.
 	 */
 	async cleanupOrphanedArtifacts(liveSessionId?: string): Promise<void> {
 		try {
-			let known: string[] = [];
-			try {
-				known = (await this.readIndex()).map(session => session.id);
-			} catch {
-				known = [];
-			}
-			if (liveSessionId) known.push(liveSessionId);
+			const known = await this.knownSessionIds();
+			if (!known) return;
+			if (liveSessionId) known.add(liveSessionId);
 			await this.artifacts.cleanupOrphanedSessions(known);
 		} catch {
 			// Never let artifact housekeeping break startup.
 		}
+	}
+
+	/**
+	 * Ids of every saved session: the session files on disk plus anything the
+	 * index lists, so neither a lost index entry nor a stray one decides alone.
+	 * An empty set when there is no sessions directory (nothing was ever
+	 * saved), and null when the store exists but cannot be read.
+	 */
+	private async knownSessionIds(): Promise<Set<string> | null> {
+		if (!this.sessionsIndexPath) this.resolveSessionsDir();
+
+		let known: Set<string>;
+		try {
+			known = await this.listSessionFileIds();
+		} catch (error) {
+			return isEnoent(error) ? new Set() : null;
+		}
+
+		try {
+			const parsed: unknown = JSON.parse(
+				await fs.readFile(this.sessionsIndexPath, 'utf-8'),
+			);
+			if (Array.isArray(parsed)) {
+				for (const entry of parsed.filter(isValidSessionMetadata)) {
+					known.add(entry.id);
+				}
+			}
+		} catch {
+			// No usable index: the session files on disk already name every
+			// saved session.
+		}
+		return known;
 	}
 
 	async listSessions(options?: {
@@ -424,6 +554,23 @@ export class SessionManager {
 		return updatedSession;
 	}
 
+	/** Mark or unmark a session as exempt from retention. */
+	async setPinned(sessionId: string, pinned: boolean): Promise<Session | null> {
+		const session = await this.readSession(sessionId);
+		if (!session) return null;
+
+		// Counted as access, so a session unpinned after a long time gets a
+		// fresh retention window instead of expiring at the next startup.
+		const updatedSession: Session = {
+			...session,
+			pinned: pinned || undefined,
+			lastAccessedAt: new Date().toISOString(),
+		};
+
+		await this.saveSession(updatedSession);
+		return updatedSession;
+	}
+
 	async deleteSession(sessionId: string): Promise<void> {
 		if (!isValidSessionId(sessionId)) {
 			throw new Error(`Invalid session ID: ${sessionId}`);
@@ -484,17 +631,27 @@ export class SessionManager {
 		}
 	}
 
+	/** The limits retention applies: the configured values, or the defaults. */
+	getRetention(): {retentionDays: number; maxSessions: number} {
+		const sessionConfig = getAppConfig().sessions;
+		return {
+			retentionDays: sessionConfig?.retentionDays || 30,
+			maxSessions: sessionConfig?.maxSessions || 100,
+		};
+	}
+
 	private async enforceSessionLimits(): Promise<void> {
-		const config = getAppConfig();
-		const sessionConfig = config.sessions;
-		const maxSessions = sessionConfig?.maxSessions || 100;
+		const {maxSessions} = this.getRetention();
 
 		await this.withIndexLock(async () => {
 			const sessions = await this.readIndex();
-			if (sessions.length <= maxSessions) return;
+			// Pinned sessions neither count toward the limit nor can be removed
+			// by it, so they never push an unpinned recent session out.
+			const unpinned = sessions.filter(s => !s.pinned);
+			if (unpinned.length <= maxSessions) return;
 
 			// Sort by lastAccessedAt ascending (oldest first)
-			const sortedSessions = sessions.sort(
+			const sortedSessions = unpinned.sort(
 				(a, b) =>
 					new Date(a.lastAccessedAt).getTime() -
 					new Date(b.lastAccessedAt).getTime(),
@@ -502,13 +659,13 @@ export class SessionManager {
 
 			const sessionsToDelete = sortedSessions.slice(
 				0,
-				sessions.length - maxSessions,
+				unpinned.length - maxSessions,
 			);
 			const idsToDelete = new Set(sessionsToDelete.map(s => s.id));
 
 			// Rewrite index first so sessions are deregistered even if
 			// file deletion partially fails.
-			const remaining = sortedSessions.filter(s => !idsToDelete.has(s.id));
+			const remaining = sessions.filter(s => !idsToDelete.has(s.id));
 			await atomicWriteFile(
 				this.sessionsIndexPath,
 				JSON.stringify(remaining, null, 2),
@@ -531,9 +688,7 @@ export class SessionManager {
 	}
 
 	private async cleanupOldSessions(): Promise<void> {
-		const config = getAppConfig();
-		const sessionConfig = config.sessions;
-		const retentionDays = sessionConfig?.retentionDays || 30;
+		const {retentionDays} = this.getRetention();
 
 		const cutoffDate = new Date();
 		cutoffDate.setDate(cutoffDate.getDate() - retentionDays);
@@ -541,7 +696,8 @@ export class SessionManager {
 		await this.withIndexLock(async () => {
 			const sessions = await this.readIndex();
 			const oldSessions = sessions.filter(
-				session => new Date(session.lastAccessedAt) < cutoffDate,
+				session =>
+					!session.pinned && new Date(session.lastAccessedAt) < cutoffDate,
 			);
 
 			if (oldSessions.length === 0) return;

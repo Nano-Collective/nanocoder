@@ -3,9 +3,10 @@ import * as path from 'path';
 import type {Message} from '@/types/core';
 import test from 'ava';
 import * as fs from 'fs/promises';
-import {describeCheckpointGaps} from '@/utils/checkpoint-utils';
+import {describeCheckpointGaps} from '@/services/checkpoint-utils';
+import {appendTurnContext} from '@/utils/turn-context';
 import {CheckpointManager} from './checkpoint-manager';
-
+import {execFileSync} from 'node:child_process';
 // Helper to create a temporary directory for tests
 async function createTempDir(): Promise<string> {
 	const tempDir = path.join(
@@ -1036,6 +1037,145 @@ test.serial(
 				filesChanged: ['edited.txt'],
 				filesMissing: ['created.txt'],
 			});
+		} finally {
+			await cleanupTempDir(tempDir);
+		}
+	},
+);
+
+test.serial(
+	'CheckpointManager prevents checkpoint secrets from being staged by git add -A',
+	async t => {
+		const tempDir = await createTempDir();
+
+		try {
+			const git = (args: string[]): string =>
+				execFileSync('git', args, {
+					cwd: tempDir,
+					encoding: 'utf8',
+				});
+
+			git(['init', '-q']);
+
+			// User configuration files should remain trackable.
+			const commandPath = path.join(
+				tempDir,
+				'.nanocoder',
+				'commands',
+				'review.md',
+			);
+
+			await fs.mkdir(path.dirname(commandPath), {
+				recursive: true,
+			});
+			await fs.writeFile(commandPath, '# Review command\n');
+
+			// Save a conversation containing a test secret.
+			const manager = new CheckpointManager(tempDir);
+
+			await manager.saveCheckpoint(
+				'before-refactor',
+				[
+					{
+						role: 'user',
+						content: 'my API key is sk-test-SECRET-IN-CHAT',
+					},
+				],
+				'TestProvider',
+				'test-model',
+				[],
+			);
+
+			const conversationPath = path.join(
+				tempDir,
+				'.nanocoder',
+				'checkpoints',
+				'before-refactor',
+				'conversation.json',
+			);
+
+			// Confirm the test secret was actually saved.
+			const conversation = await fs.readFile(
+				conversationPath,
+				'utf8',
+			);
+
+			t.true(conversation.includes('sk-test-SECRET-IN-CHAT'));
+
+			// Reproduce the original issue.
+			git(['add', '-A']);
+
+			// List staged files.
+			const staged = git([
+				'diff',
+				'--cached',
+				'--name-only',
+			])
+				.trim()
+				.split(/\r?\n/);
+
+			// Runtime files must not be staged.
+			t.false(
+				staged.some(file =>
+					file.startsWith('.nanocoder/checkpoints/'),
+				),
+				'Checkpoint files must not be staged',
+			);
+
+			// User configuration must remain committable.
+			t.true(
+				staged.includes('.nanocoder/commands/review.md'),
+				'Custom commands should remain trackable',
+			);
+
+			// The generated gitignore must be staged.
+			t.true(
+				staged.includes('.nanocoder/.gitignore'),
+				'Generated .gitignore should be trackable',
+			);
+
+			// Verify Git's ignore rules directly.
+			const ignored = git([
+				'check-ignore',
+				'-v',
+				'.nanocoder/checkpoints/before-refactor/conversation.json',
+			]);
+
+			t.true(ignored.includes('/checkpoints/'));
+		} finally {
+			await cleanupTempDir(tempDir);
+		}
+	},
+);
+
+// The per-turn context block (#1574) is stored in the user's message and is
+// long enough to fill the 100-char description window on its own, which would
+// leave every checkpoint in `/checkpoint list` described by recalled memories
+// rather than by what the user asked for.
+test.serial(
+	'CheckpointManager describes a checkpoint by the typed message, not its context block',
+	async t => {
+		const tempDir = await createTempDir();
+		try {
+			const manager = new CheckpointManager(tempDir);
+			const messages: Message[] = [
+				{
+					role: 'user',
+					content: appendTurnContext('Refactor the auth module', [
+						'## Project Context\n\n- Auth uses Clerk; sessions are JWTs.',
+					]),
+				},
+				{role: 'assistant', content: 'Done.'},
+			];
+
+			const metadata = await manager.saveCheckpoint(
+				'context-desc-test',
+				messages,
+				'Provider',
+				'model',
+			);
+
+			t.is(metadata.description, 'Refactor the auth module');
 		} finally {
 			await cleanupTempDir(tempDir);
 		}

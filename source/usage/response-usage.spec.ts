@@ -15,19 +15,48 @@ const failingPricing = async (): Promise<null> => {
 };
 
 test('buildResponseUsage returns undefined when the provider reported nothing', async t => {
-	t.is(await buildResponseUsage(undefined, 'model', stubPricing), undefined);
-	t.is(await buildResponseUsage({}, 'model', stubPricing), undefined);
+	t.is(await buildResponseUsage(undefined, 'model', {getPricing: stubPricing}), undefined);
+	t.is(await buildResponseUsage({}, 'model', {getPricing: stubPricing}), undefined);
 	t.is(
-		await buildResponseUsage({inputTokens: Number.NaN}, 'model', stubPricing),
+		await buildResponseUsage({inputTokens: Number.NaN}, 'model', {getPricing: stubPricing}),
 		undefined,
 	);
+});
+
+test('buildResponseUsage does not price a model served from a local base URL', async t => {
+	// gpt-oss:20b is an exact id under a hosted provider on models.dev, so only
+	// the provider's base URL can tell that this run is free.
+	const local = await buildResponseUsage(
+		{inputTokens: 100_000, outputTokens: 2_000},
+		'gpt-oss:20b',
+		{getPricing: stubPricing, baseURL: 'http://localhost:11434/v1'},
+	);
+	t.is(local?.inputTokens, 100_000);
+	t.is(local?.cost, undefined);
+
+	const hosted = await buildResponseUsage(
+		{inputTokens: 100_000, outputTokens: 2_000},
+		'gpt-oss:20b',
+		{getPricing: stubPricing, baseURL: 'https://ollama.com/v1'},
+	);
+	t.is(hosted?.cost, 0.33);
+});
+
+test('buildResponseUsageBounded passes the base URL through', async t => {
+	const result = await buildResponseUsageBounded(
+		{inputTokens: 100_000, outputTokens: 2_000},
+		'gpt-oss:20b',
+		{getPricing: stubPricing, baseURL: 'http://127.0.0.1:1234/v1'},
+	);
+	t.is(result?.outputTokens, 2_000);
+	t.is(result?.cost, undefined);
 });
 
 test('buildResponseUsage computes cost from input and output tokens', async t => {
 	const result = await buildResponseUsage(
 		{inputTokens: 1_000_000, outputTokens: 100_000},
 		'model',
-		stubPricing,
+		{getPricing: stubPricing},
 	);
 	t.truthy(result);
 	t.is(result?.inputTokens, 1_000_000);
@@ -46,12 +75,14 @@ test('buildResponseUsage prices cached input with cache-specific rates', async t
 			cacheWriteTokens: 100_000,
 		},
 		'model',
-		async () => ({
-			input: 3,
-			output: 15,
-			cache_read: 0.3,
-			cache_write: 0.6,
-		}),
+		{
+			getPricing: async () => ({
+				input: 3,
+				output: 15,
+				cache_read: 0.3,
+				cache_write: 0.6,
+			}),
+		},
 	);
 
 	t.is(result?.cacheReadTokens, 500_000);
@@ -68,7 +99,7 @@ test('buildResponseUsage falls back to input pricing when cache rates are absent
 			cacheReadTokens: 500_000,
 		},
 		'model',
-		stubPricing,
+		{getPricing: stubPricing},
 	);
 
 	// The 500k cached tokens use the normal $3 input rate when no cache rate
@@ -82,7 +113,7 @@ test('buildResponseUsage prices zero-filled input/output with a positive total a
 	const result = await buildResponseUsage(
 		{inputTokens: 0, outputTokens: 0, totalTokens: 1_000_000},
 		'model',
-		stubPricing,
+		{getPricing: stubPricing},
 	);
 	// (3 + 15) / 2 = $9 per 1M
 	t.is(result?.cost, 9);
@@ -92,7 +123,7 @@ test('buildResponseUsage still prices a genuine zero-usage report as zero', asyn
 	const result = await buildResponseUsage(
 		{inputTokens: 0, outputTokens: 0, totalTokens: 0},
 		'model',
-		stubPricing,
+		{getPricing: stubPricing},
 	);
 	t.is(result?.cost, 0);
 });
@@ -101,7 +132,7 @@ test('buildResponseUsage averages rates for lump-sum totals', async t => {
 	const result = await buildResponseUsage(
 		{totalTokens: 1_000_000},
 		'model',
-		stubPricing,
+		{getPricing: stubPricing},
 	);
 	// (3 + 15) / 2 = $9 per 1M
 	t.is(result?.cost, 9);
@@ -122,7 +153,7 @@ test('buildResponseUsage swallows pricing lookup failures', async t => {
 	const result = await buildResponseUsage(
 		{inputTokens: 100, outputTokens: 50},
 		'model',
-		failingPricing,
+		{getPricing: failingPricing},
 	);
 	t.truthy(result);
 	t.is(result?.cost, undefined);
@@ -249,12 +280,12 @@ test('buildResponseUsage prices a cache hit below the uncached equivalent', asyn
 			cacheReadTokens: 900_000,
 		},
 		'model',
-		cachePricing,
+		{getPricing: cachePricing},
 	);
 	const uncached = await buildResponseUsage(
 		{inputTokens: 1_000_000, outputTokens: 100_000},
 		'model',
-		cachePricing,
+		{getPricing: cachePricing},
 	);
 	t.true((cached?.cost as number) < (uncached?.cost as number));
 	t.is(cached?.cost, 2.07);
@@ -269,7 +300,7 @@ test('buildResponseUsage surfaces the cache token counts', async t => {
 			cacheWriteTokens: 500,
 		},
 		'model',
-		cachePricing,
+		{getPricing: cachePricing},
 	);
 	t.is(result?.cacheReadTokens, 4000);
 	t.is(result?.cacheWriteTokens, 500);
@@ -279,7 +310,7 @@ test('buildResponseUsage leaves non-caching reports byte-identical to before', a
 	const result = await buildResponseUsage(
 		{inputTokens: 1_000_000, outputTokens: 100_000},
 		'model',
-		stubPricing,
+		{getPricing: stubPricing},
 	);
 	t.is(result?.cost, 4.5);
 	t.is(result?.cacheReadTokens, undefined);

@@ -31,6 +31,8 @@ export interface CompletionSubcommand {
 	description: string;
 	/** Nested positional tokens, e.g. `daemon` → `start|stop|…`. */
 	children?: readonly string[];
+	/** Flags only this subcommand accepts, offered after it and nowhere else. */
+	flags?: readonly CompletionFlag[];
 }
 
 export const COMPLETION_SHELLS = ['bash', 'zsh', 'fish'] as const;
@@ -46,8 +48,21 @@ export const COMPLETION_SUBCOMMANDS: readonly CompletionSubcommand[] = [
 		description: 'Run in non-interactive mode',
 	},
 	{
+		name: 'review',
+		description: 'Review a branch or PR diff',
+	},
+	{
 		name: 'worktree',
 		description: 'Start in a new worktree for a GitHub PR',
+	},
+	{
+		name: 'verify',
+		description: 'Headless, read-only PR review (--pr <n>)',
+	},
+	{
+		name: 'skills',
+		description: 'Install a skill bundle from a git repository',
+		children: ['add'],
 	},
 	{
 		name: 'storage',
@@ -62,6 +77,28 @@ export const COMPLETION_SUBCOMMANDS: readonly CompletionSubcommand[] = [
 		name: 'config',
 		description: 'Inspect the resolved configuration',
 		children: ['list', 'show', 'diff'],
+	},
+	{
+		name: 'trust',
+		description: 'Check or grant trust for this folder (--status, --grant)',
+		flags: [
+			{
+				name: 'status',
+				takesValue: false,
+				description: 'Show whether this folder is trusted',
+			},
+			{
+				name: 'grant',
+				takesValue: true,
+				valueName: 'fingerprint',
+				description: 'Trust this folder if its fingerprint still matches',
+			},
+			{
+				name: 'json',
+				takesValue: false,
+				description: 'Print --status as JSON',
+			},
+		],
 	},
 	{
 		name: 'codex',
@@ -82,6 +119,12 @@ export const COMPLETION_SUBCOMMANDS: readonly CompletionSubcommand[] = [
 
 export const COMPLETION_FLAGS: readonly CompletionFlag[] = [
 	{
+		name: 'profile',
+		takesValue: true,
+		valueName: 'name',
+		description: 'Use a named configuration profile from agents.config.json',
+	},
+	{
 		name: 'provider',
 		takesValue: true,
 		valueName: 'provider',
@@ -99,7 +142,7 @@ export const COMPLETION_FLAGS: readonly CompletionFlag[] = [
 		takesValue: true,
 		valueName: 'limit',
 		description:
-			'Set maximum context length in tokens (supports k/K suffix, e.g. 128k)',
+			'Set maximum context length in tokens (supports k/K and m/M suffixes, e.g. 128k or 1m)',
 	},
 	{
 		name: 'mode',
@@ -137,6 +180,22 @@ export const COMPLETION_FLAGS: readonly CompletionFlag[] = [
 		description: 'Force inline mode (main screen + native scrollback)',
 	},
 	{
+		name: 'mouse',
+		takesValue: false,
+		description: 'Mouse wheel scrolls the chat viewport in fullscreen mode',
+	},
+	{
+		name: 'no-mouse',
+		takesValue: false,
+		description: 'Disable mouse reporting in fullscreen mode',
+	},
+	{
+		name: 'prompt-file',
+		takesValue: true,
+		valueName: 'file',
+		description: 'Read the run prompt from a file (run mode only)',
+	},
+	{
 		name: 'json',
 		takesValue: false,
 		description: 'Output execution results as JSON (run mode only)',
@@ -149,14 +208,22 @@ export const COMPLETION_FLAGS: readonly CompletionFlag[] = [
 		description: "Specify stdout format ('text' or 'json', run mode only)",
 	},
 	{
+		name: 'json-schema',
+		takesValue: true,
+		valueName: 'file|json',
+		description:
+			'Validate the run answer against a JSON Schema (file or inline JSON)',
+	},
+	{
 		name: 'acp',
 		takesValue: false,
 		description: 'Run as an ACP (Agent Client Protocol) server',
 	},
+
 	{
 		name: 'vscode',
 		takesValue: false,
-		description: 'Run in VS Code mode',
+		description: 'Start the legacy VS Code companion (deprecated)',
 	},
 	{
 		name: 'vscode-port',

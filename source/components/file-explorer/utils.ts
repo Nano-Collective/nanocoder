@@ -1,6 +1,6 @@
 import {extname} from 'node:path';
 import {FILE_EXTENSION_TO_LANGUAGE} from '@/constants';
-import type {FileNode} from '@/utils/file-tree';
+import type {FileNode} from '@/utils/fs/file-tree';
 
 /**
  * Get all file paths within a directory node recursively

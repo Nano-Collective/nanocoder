@@ -6,7 +6,8 @@
  * Atomicity: writes go to a sibling `*.tmp` file and rename in place, so a
  * partially-written lockfile is never observable.
  *
- * Stale detection: a lockfile pointing at a dead PID is reaped on first
+ * Stale detection: a lockfile pointing at a dead PID, or at an IPC endpoint
+ * nothing listens on (the PID may have been reused), is reaped on first
  * read by any caller that cares (start, status).
  *
  * See `agents/2026-05-20-skills-unification-plan.md` step 19.
@@ -15,14 +16,19 @@
 import {createHash, randomBytes} from 'node:crypto';
 import {existsSync, mkdirSync} from 'node:fs';
 import {readFile, rename, unlink, writeFile} from 'node:fs/promises';
+import {createConnection} from 'node:net';
 import {tmpdir} from 'node:os';
 import {dirname, join, posix} from 'node:path';
+import {ensureNanocoderGitignore} from '@/utils/fs/ensure-nanocoder-gitignore';
 
 export interface DaemonLock {
 	pid: number;
 	socketPath: string;
 	startedAt: number;
 	projectRoot: string;
+	/** CI investigation trust level the daemon was started with. Optional:
+	 * absent in lockfiles written by older daemons. */
+	ciTrustLevel?: string;
 }
 
 export function getLockfilePath(projectRoot: string): string {
@@ -118,16 +124,34 @@ export async function readLockfile(
 }
 
 export async function writeLockfile(lock: DaemonLock): Promise<void> {
+	await ensureNanocoderGitignore(lock.projectRoot);
+
 	const path = getLockfilePath(lock.projectRoot);
 	mkdirSync(dirname(path), {recursive: true});
+
 	const tmp = `${path}.${randomBytes(8).toString('hex')}.tmp`;
+
 	await writeFile(tmp, JSON.stringify(lock, null, 2), 'utf-8');
 	await rename(tmp, path);
 }
 
-export async function removeLockfile(projectRoot: string): Promise<void> {
+/**
+ * Remove the lockfile. When `expectedPid` is provided, the lockfile is only
+ * removed if its recorded PID matches, preventing an exiting daemon or stale
+ * lockfile reap from deleting a successor daemon's lockfile.
+ */
+export async function removeLockfile(
+	projectRoot: string,
+	expectedPid?: number,
+): Promise<void> {
 	const path = getLockfilePath(projectRoot);
 	try {
+		if (expectedPid !== undefined) {
+			const current = await readLockfile(projectRoot);
+			if (!current || current.pid !== expectedPid) {
+				return;
+			}
+		}
 		await unlink(path);
 	} catch (err) {
 		const code = (err as NodeJS.ErrnoException).code;
@@ -153,17 +177,52 @@ export function isProcessAlive(pid: number): boolean {
 }
 
 /**
+ * Is the daemon's IPC endpoint gone? A recycled PID says nothing about the
+ * daemon, but the endpoint is per project. Only a missing or refused endpoint
+ * proves the lockfile is stale; a timeout or any other error is "unknown" and
+ * must not be read as "gone".
+ */
+function isIpcEndpointGone(
+	socketPath: string,
+	timeoutMs = 1000,
+): Promise<boolean> {
+	return new Promise(resolve => {
+		const socket = createConnection(socketPath);
+		const finish = (gone: boolean) => {
+			clearTimeout(timer);
+			socket.destroy();
+			resolve(gone);
+		};
+		const timer = setTimeout(() => finish(false), timeoutMs);
+		socket.once('connect', () => finish(false));
+		socket.once('error', err => {
+			const code = (err as NodeJS.ErrnoException).code;
+			finish(code === 'ENOENT' || code === 'ECONNREFUSED');
+		});
+	});
+}
+
+/**
  * Read the lockfile and verify the daemon is actually running. Removes
  * stale lockfiles as a side effect so subsequent `daemon start` calls
  * have a clean slate.
+ *
+ * A live PID alone is not enough, because the OS reuses PIDs after a crash
+ * or reboot: the IPC endpoint must still exist too. `verifyIpc: false`
+ * checks the PID only, for callers waiting on a daemon that is shutting
+ * down (its endpoint closes before the process exits).
  */
 export async function readLiveLockfile(
 	projectRoot: string,
+	{verifyIpc = true}: {verifyIpc?: boolean} = {},
 ): Promise<DaemonLock | null> {
 	const lock = await readLockfile(projectRoot);
 	if (!lock) return null;
-	if (!isProcessAlive(lock.pid)) {
-		await removeLockfile(projectRoot);
+	if (
+		!isProcessAlive(lock.pid) ||
+		(verifyIpc && (await isIpcEndpointGone(lock.socketPath)))
+	) {
+		await removeLockfile(projectRoot, lock.pid);
 		return null;
 	}
 	return lock;

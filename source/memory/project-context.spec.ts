@@ -1,6 +1,7 @@
 import test from 'ava';
 import {
-	appendRelevantProjectContextWithCount,
+	buildProjectContextSection,
+	type ProjectContextSection,
 	type ProjectContextOptions,
 } from './project-context.js';
 import type {
@@ -26,19 +27,46 @@ const trackedMemory = (content: string, files: string[]): SemanticMemory => ({
 	},
 });
 
+/**
+ * The section is carried in the turn's user message now, not concatenated onto
+ * the system prompt (#1574). These helpers keep the old prompt-shaped result so
+ * the formatting, budget, fence and staleness assertions below still read as
+ * "what the model ends up seeing".
+ */
+async function asPrompt(
+	section: Promise<ProjectContextSection>,
+): Promise<{systemPrompt: string; memoryCount: number}> {
+	const {content, memoryCount} = await section;
+	return {
+		systemPrompt: content ? `base prompt\n\n${content}` : 'base prompt',
+		memoryCount,
+	};
+}
+
+/** Old prompt-shaped signature, for the tests that pass a finder inline. */
+async function injectIntoPrompt(
+	_systemPrompt: 'base prompt',
+	query: string,
+	memoryFinder: Parameters<typeof buildProjectContextSection>[1],
+	options: ProjectContextOptions = {},
+) {
+	return asPrompt(buildProjectContextSection(query, memoryFinder, options));
+}
+
 async function injectWithChanges(
 	memories: SemanticMemory[],
 	changes: Record<string, MemoryFileChange[]>,
 	options: ProjectContextOptions = {},
 ) {
-	return appendRelevantProjectContextWithCount(
-		'base prompt',
-		'auth',
-		{
-			findRelevantMemories: async () => memories,
-			findChangedFiles: async () => new Map(Object.entries(changes)),
-		},
-		options,
+	return asPrompt(
+		buildProjectContextSection(
+			'auth',
+			{
+				findRelevantMemories: async () => memories,
+				findChangedFiles: async () => new Map(Object.entries(changes)),
+			},
+			options,
+		),
 	);
 }
 
@@ -47,21 +75,22 @@ async function inject(
 	options: ProjectContextOptions = {},
 	query = 'auth',
 ) {
-	return appendRelevantProjectContextWithCount(
-		'base prompt',
-		query,
-		{findRelevantMemories: async () => memories},
-		options,
+	return asPrompt(
+		buildProjectContextSection(
+			query,
+			{findRelevantMemories: async () => memories},
+			options,
+		),
 	);
 }
 
-test('appendRelevantProjectContextWithCount returns original prompt for no memories', async t => {
+test('buildProjectContextSection returns original prompt for no memories', async t => {
 	const result = await inject([]);
 	t.is(result.systemPrompt, 'base prompt');
 	t.is(result.memoryCount, 0);
 });
 
-test('appendRelevantProjectContextWithCount formats memories as project context', async t => {
+test('buildProjectContextSection formats memories as project context', async t => {
 	const result = await inject([
 		memory('Auth uses Clerk.'),
 		memory('Avoid middleware.\nUse adapters.'),
@@ -73,7 +102,7 @@ test('appendRelevantProjectContextWithCount formats memories as project context'
 	t.is(result.memoryCount, 2);
 });
 
-test('appendRelevantProjectContextWithCount strips a leading list marker so bullets are not doubled', async t => {
+test('buildProjectContextSection strips a leading list marker so bullets are not doubled', async t => {
 	const result = await inject([
 		memory('- Added a regression test for the 40-column case.'),
 	]);
@@ -83,7 +112,7 @@ test('appendRelevantProjectContextWithCount strips a leading list marker so bull
 	);
 });
 
-test('appendRelevantProjectContextWithCount respects token budget', async t => {
+test('buildProjectContextSection respects token budget', async t => {
 	const result = await inject(
 		[
 			memory('Use existing hooks.'),
@@ -99,7 +128,7 @@ test('appendRelevantProjectContextWithCount respects token budget', async t => {
 	);
 });
 
-test('appendRelevantProjectContextWithCount returns original prompt when budget is too small', async t => {
+test('buildProjectContextSection returns original prompt when budget is too small', async t => {
 	const result = await inject([memory('Use existing hooks.')], {
 		tokenBudget: 1,
 	});
@@ -107,7 +136,7 @@ test('appendRelevantProjectContextWithCount returns original prompt when budget 
 	t.is(result.memoryCount, 0);
 });
 
-test('appendRelevantProjectContextWithCount skips an oversized memory and still injects later ones', async t => {
+test('buildProjectContextSection skips an oversized memory and still injects later ones', async t => {
 	const result = await inject(
 		[
 			memory('This first memory is intentionally too long for the small budget.'),
@@ -122,8 +151,8 @@ test('appendRelevantProjectContextWithCount skips an oversized memory and still 
 	t.is(result.memoryCount, 1);
 });
 
-test('appendRelevantProjectContextWithCount reports injected memory count', async t => {
-	const result = await appendRelevantProjectContextWithCount(
+test('buildProjectContextSection reports injected memory count', async t => {
+	const result = await injectIntoPrompt(
 		'base prompt',
 		'auth',
 		{
@@ -138,8 +167,8 @@ test('appendRelevantProjectContextWithCount reports injected memory count', asyn
 	t.true(result.systemPrompt.includes('## Project Context'));
 });
 
-test('appendRelevantProjectContextWithCount skips memory lookup when disabled', async t => {
-	const result = await appendRelevantProjectContextWithCount(
+test('buildProjectContextSection skips memory lookup when disabled', async t => {
+	const result = await injectIntoPrompt(
 		'base prompt',
 		'auth',
 		{
@@ -154,8 +183,8 @@ test('appendRelevantProjectContextWithCount skips memory lookup when disabled', 
 	t.is(result.systemPrompt, 'base prompt');
 });
 
-test('appendRelevantProjectContextWithCount passes configured memory limit', async t => {
-	const result = await appendRelevantProjectContextWithCount(
+test('buildProjectContextSection passes configured memory limit', async t => {
+	const result = await injectIntoPrompt(
 		'base prompt',
 		'auth',
 		{
@@ -171,8 +200,8 @@ test('appendRelevantProjectContextWithCount passes configured memory limit', asy
 	t.true(result.systemPrompt.includes('Auth uses Clerk.'));
 });
 
-test('appendRelevantProjectContextWithCount returns original prompt when lookup fails', async t => {
-	const result = await appendRelevantProjectContextWithCount(
+test('buildProjectContextSection returns original prompt when lookup fails', async t => {
+	const result = await injectIntoPrompt(
 		'base prompt',
 		'auth',
 		{
@@ -186,7 +215,7 @@ test('appendRelevantProjectContextWithCount returns original prompt when lookup 
 	t.is(result.memoryCount, 0);
 });
 
-test('appendRelevantProjectContextWithCount widens the fence so memory content cannot escape it', async t => {
+test('buildProjectContextSection widens the fence so memory content cannot escape it', async t => {
 	const result = await inject([
 		memory('Use ``` fenced blocks ``` carefully.'),
 	]);
@@ -199,7 +228,7 @@ test('appendRelevantProjectContextWithCount widens the fence so memory content c
 	t.true(body?.includes('fenced blocks') ?? false);
 });
 
-test('appendRelevantProjectContextWithCount keeps the standard fence when content has no backticks', async t => {
+test('buildProjectContextSection keeps the standard fence when content has no backticks', async t => {
 	const result = await inject([memory('Auth uses Clerk.')]);
 	t.is(
 		result.systemPrompt,
@@ -207,7 +236,7 @@ test('appendRelevantProjectContextWithCount keeps the standard fence when conten
 	);
 });
 
-test('appendRelevantProjectContextWithCount warns on a memory whose file changed since it was recorded', async t => {
+test('buildProjectContextSection warns on a memory whose file changed since it was recorded', async t => {
 	const stale = trackedMemory('auth.ts refreshes tokens.', ['src/auth.ts']);
 	const fresh = trackedMemory('db.ts owns the pool.', ['src/db.ts']);
 
@@ -222,7 +251,7 @@ test('appendRelevantProjectContextWithCount warns on a memory whose file changed
 	t.is(result.memoryCount, 2);
 });
 
-test('appendRelevantProjectContextWithCount names deleted files and caps the listed ones', async t => {
+test('buildProjectContextSection names deleted files and caps the listed ones', async t => {
 	const stale = trackedMemory('The data layer spans several modules.', [
 		'a.ts',
 		'b.ts',
@@ -247,7 +276,7 @@ test('appendRelevantProjectContextWithCount names deleted files and caps the lis
 	);
 });
 
-test('appendRelevantProjectContextWithCount counts the warning against the token budget', async t => {
+test('buildProjectContextSection counts the warning against the token budget', async t => {
 	const stale = trackedMemory('Use adapters.', ['src/auth.ts']);
 
 	const result = await injectWithChanges(
@@ -260,8 +289,8 @@ test('appendRelevantProjectContextWithCount counts the warning against the token
 	t.is(result.memoryCount, 0);
 });
 
-test('appendRelevantProjectContextWithCount still injects memories when the freshness check fails', async t => {
-	const result = await appendRelevantProjectContextWithCount(
+test('buildProjectContextSection still injects memories when the freshness check fails', async t => {
+	const result = await injectIntoPrompt(
 		'base prompt',
 		'auth',
 		{
@@ -281,8 +310,8 @@ test('appendRelevantProjectContextWithCount still injects memories when the fres
 	t.is(result.memoryCount, 1);
 });
 
-test('appendRelevantProjectContextWithCount skips the freshness check when nothing was recalled', async t => {
-	const result = await appendRelevantProjectContextWithCount(
+test('buildProjectContextSection skips the freshness check when nothing was recalled', async t => {
+	const result = await injectIntoPrompt(
 		'base prompt',
 		'auth',
 		{

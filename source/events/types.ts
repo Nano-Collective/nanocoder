@@ -12,15 +12,37 @@
 
 import type {FileChangeEventKind, SkillMemberRef} from '@/types/skills';
 
-export type EventKind = 'file.changed' | 'schedule.cron';
+export type EventKind =
+	| 'file.changed'
+	| 'file.ai-comment'
+	| 'schedule.cron'
+	| 'ci.job.failed';
 
 export interface FileChangedPayload {
 	file: string;
 	eventKind: FileChangeEventKind;
 }
 
+export interface FileAiCommentPayload {
+	file: string;
+	comment: string;
+	marker: 'AI!' | 'AI?';
+	line: number;
+	context: string;
+}
+
 export interface ScheduleCronPayload {
 	cron: string;
+}
+
+export interface CiJobFailedPayload {
+	/** GitHub Actions run database id. */
+	runId: number;
+	workflowName: string;
+	branch: string;
+	headSha: string;
+	/** HTML URL of the run, for linking from a diagnosis/notification. */
+	url: string;
 }
 
 interface EventBase {
@@ -33,12 +55,26 @@ export interface FileChangedEvent extends EventBase {
 	payload: FileChangedPayload;
 }
 
+export interface FileAiCommentEvent extends EventBase {
+	kind: 'file.ai-comment';
+	payload: FileAiCommentPayload;
+}
+
 export interface ScheduleCronEvent extends EventBase {
 	kind: 'schedule.cron';
 	payload: ScheduleCronPayload;
 }
 
-export type Event = FileChangedEvent | ScheduleCronEvent;
+export interface CiJobFailedEvent extends EventBase {
+	kind: 'ci.job.failed';
+	payload: CiJobFailedPayload;
+}
+
+export type Event =
+	| FileChangedEvent
+	| FileAiCommentEvent
+	| ScheduleCronEvent
+	| CiJobFailedEvent;
 
 /**
  * Convenience alias for code that wants to talk about a specific kind's
@@ -46,17 +82,30 @@ export type Event = FileChangedEvent | ScheduleCronEvent;
  */
 export type EventPayload<K extends EventKind> = K extends 'file.changed'
 	? FileChangedPayload
-	: K extends 'schedule.cron'
-		? ScheduleCronPayload
-		: never;
+	: K extends 'file.ai-comment'
+		? FileAiCommentPayload
+		: K extends 'schedule.cron'
+			? ScheduleCronPayload
+			: K extends 'ci.job.failed'
+				? CiJobFailedPayload
+				: never;
 
 export interface FileChangedFilter {
 	paths?: string[];
 	eventKinds?: FileChangeEventKind[];
 }
 
+export interface FileAiCommentFilter {
+	paths?: string[];
+}
+
 export interface ScheduleCronFilter {
 	cron: string;
+}
+
+export interface CiJobFailedFilter {
+	/** Glob-matched against payload.branch. Omitted = match every branch. */
+	branches?: string[];
 }
 
 export type SubscriptionSource = 'frontmatter' | 'manifest';
@@ -78,12 +127,26 @@ export interface FileChangedSubscription extends SubscriptionBase {
 	filter?: FileChangedFilter;
 }
 
+export interface FileAiCommentSubscription extends SubscriptionBase {
+	kind: 'file.ai-comment';
+	filter?: FileAiCommentFilter;
+}
+
 export interface ScheduleCronSubscription extends SubscriptionBase {
 	kind: 'schedule.cron';
 	filter?: ScheduleCronFilter;
 }
 
-export type Subscription = FileChangedSubscription | ScheduleCronSubscription;
+export interface CiJobFailedSubscription extends SubscriptionBase {
+	kind: 'ci.job.failed';
+	filter?: CiJobFailedFilter;
+}
+
+export type Subscription =
+	| FileChangedSubscription
+	| FileAiCommentSubscription
+	| ScheduleCronSubscription
+	| CiJobFailedSubscription;
 
 /**
  * Trigger context propagated into a subagent task's `context` field when

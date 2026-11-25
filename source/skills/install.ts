@@ -60,6 +60,7 @@ import {
 import type {CustomToolApprovalPolicy} from '@/types/custom-tools';
 import type {Skill, SkillToolVisibility} from '@/types/skills';
 import {formatError} from '@/utils/error-formatter';
+import {stripUtf8Bom} from '@/utils/strip-utf8-bom';
 
 const execFileAsync = promisify(execFile);
 
@@ -259,7 +260,7 @@ export async function fetchSkillIndex(
 
 	// Editors and some servers prefix UTF-8 with a BOM, which JSON.parse
 	// rejects.
-	const parsed: unknown = JSON.parse(raw.replace(/^\uFEFF/, ''));
+	const parsed: unknown = JSON.parse(stripUtf8Bom(raw));
 	const entries = Array.isArray(parsed)
 		? parsed
 		: ((parsed as {skills?: unknown})?.skills ?? null);
@@ -639,7 +640,9 @@ function describeSubscription(
 	const detail =
 		trigger.kind === 'schedule.cron'
 			? `cron "${trigger.cron}"`
-			: `paths ${(trigger.paths ?? ['**']).join(', ')}`;
+			: trigger.kind === 'ci.job.failed'
+				? `branches ${(trigger.branches ?? ['*']).join(', ')}`
+				: `paths ${(trigger.paths ?? ['**']).join(', ')}`;
 	return `${trigger.kind} → ${target} · ${detail}${trigger.confirm ? ' [confirm: plan mode]' : ''}`;
 }
 

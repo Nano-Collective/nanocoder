@@ -1,5 +1,5 @@
 import chalk from 'chalk';
-import {type Key, Text, useInput, useStdin} from 'ink';
+import {Text, useInput} from 'ink';
 import {
 	forwardRef,
 	useEffect,
@@ -7,49 +7,14 @@ import {
 	useRef,
 	useState,
 } from 'react';
-import {isNewlineKey} from '@/utils/newline-key';
+import {isNewlineKey} from '@/terminal/newline-key';
+import {pasteEvents} from '@/terminal/terminal-paste';
 import {
+	clampVisibleLines,
 	getVisualLineSegments,
 	moveCursorToVisualLine,
 	wrapWithTrimmedContinuations,
-} from '@/utils/text-wrapping';
-
-/**
- * The raw byte sequence behind the keypress a `useInput` handler is running
- * for. Read `.current` inside the handler, not during render.
- *
- * Ink maps physical Backspace (`\x7f`) and forward Delete (`\x1b[3~`) to the
- * same `key.delete`, and does not recognise xterm's modified Enter at all, so
- * telling them apart needs the sequence itself. Stock Ink never puts it on
- * `Key`. A pnpm patch used to add a `raw` field to `Key`, but pnpm patches only
- * apply inside this repo: the published package depends on plain Ink, so
- * npm installs lost the field and Backspace became forward Delete (#1505).
- *
- * The sequence comes from the stdin emitter Ink exposes through `useStdin`,
- * the stream `useInput` itself listens to. The listener is prepended so it
- * always runs before any `useInput` handler, whatever order those
- * re-subscribe in.
- */
-export function useRawInput() {
-	const {internal_eventEmitter: emitter} = useStdin();
-	const rawRef = useRef('');
-
-	useEffect(() => {
-		const onInput = (data: unknown) => {
-			rawRef.current = String(data);
-		};
-		emitter.prependListener('input', onInput);
-		return () => {
-			emitter.removeListener('input', onInput);
-		};
-	}, [emitter]);
-
-	return rawRef;
-}
-
-/** Physical Backspace (`\x7f`) or Option/Alt+Backspace (`\x1b\x7f`). */
-export const isBackspaceKey = (key: Key, raw: string) =>
-	key.backspace || (key.delete && (raw === '\x7f' || raw === '\x1b\x7f'));
+} from '@/terminal/text-wrapping';
 
 /**
  * How the value effect should treat an incoming `value`, given the values
@@ -80,6 +45,25 @@ export function classifyIncomingValue(
 	return {kind: 'unchanged', pending: [...pending]};
 }
 
+// Cursor offsets are UTF-16 code-unit indexes into the value. An astral
+// character (every emoji) is a surrogate pair, two units, so a key press has to
+// move over or delete it whole: stepping by one unit strands the caret inside
+// the pair and lets Backspace/Delete leave a lone surrogate behind.
+
+/** Pulls an offset that falls inside a surrogate pair back to the pair's start. */
+function snapToCharBoundary(value: string, offset: number): number {
+	return (value.codePointAt(offset - 1) ?? 0) > 0xffff ? offset - 1 : offset;
+}
+
+function stepBack(value: string, offset: number): number {
+	return snapToCharBoundary(value, Math.max(0, offset - 1));
+}
+
+function stepForward(value: string, offset: number): number {
+	const width = (value.codePointAt(offset) ?? 0) > 0xffff ? 2 : 1;
+	return Math.min(value.length, offset + width);
+}
+
 export type Props = {
 	readonly placeholder?: string;
 	readonly focus?: boolean;
@@ -93,6 +77,13 @@ export type Props = {
 	readonly wrapWidth?: number;
 	readonly handleEnter?: boolean;
 	readonly onEdgeArrow?: (direction: 'up' | 'down') => void;
+	/**
+	 * Caps rendered visual lines, scrolling to keep the cursor's line in
+	 * view, instead of letting the box grow past the terminal.
+	 */
+	readonly maxVisibleLines?: number;
+	/** Replaces the default paste handling (insert at the caret). */
+	readonly onPaste?: (payload: string) => void;
 };
 
 /**
@@ -126,6 +117,8 @@ const TextInput = forwardRef<TextInputHandle, Props>(function TextInput(
 		wrapWidth,
 		handleEnter = true,
 		onEdgeArrow,
+		maxVisibleLines,
+		onPaste,
 	}: Props,
 	ref,
 ) {
@@ -194,6 +187,43 @@ const TextInput = forwardRef<TextInputHandle, Props>(function TextInput(
 	// state — and only clamp it against the new value's bounds.
 	const skipNextCursorResetRef = useRef(false);
 
+	// cli.tsx lifts bracketed pastes off stdin before Ink sees them, so a field
+	// that doesn't take them from pasteEvents never receives them at all.
+	// Subscribe while focused, the same condition that gates keystrokes, so a
+	// paste lands in exactly the field that typing would. The handler is read
+	// through a ref so the subscription doesn't churn on every render.
+	const handlePasteRef = useRef<(payload: string) => void>(() => {});
+	// Reassigned on every render, deliberately outside an effect: the listener
+	// must always call the latest onPaste/onChange. Moving this into an effect
+	// would bring back the stale closure the ref is here to avoid.
+	handlePasteRef.current = (payload: string) => {
+		if (onPaste) {
+			onPaste(payload);
+			return;
+		}
+		// Terminals send line breaks in a paste as CR.
+		const text = payload.replace(/\r\n?/g, '\n');
+		const current = originalValueRef.current;
+		const offset = cursorOffsetRef.current;
+		const next = current.slice(0, offset) + text + current.slice(offset);
+		cursorOffsetRef.current = offset + text.length;
+		originalValueRef.current = next;
+		recordEmit(next);
+		setState({cursorOffset: offset + text.length, cursorWidth: 0});
+		onChange(next);
+	};
+
+	useEffect(() => {
+		if (!focus) {
+			return;
+		}
+		const handlePaste = (payload: string) => handlePasteRef.current(payload);
+		pasteEvents.on('paste', handlePaste);
+		return () => {
+			pasteEvents.off('paste', handlePaste);
+		};
+	}, [focus]);
+
 	useEffect(() => {
 		if (!focus || !showCursor) {
 			return;
@@ -254,7 +284,9 @@ const TextInput = forwardRef<TextInputHandle, Props>(function TextInput(
 		});
 	}, [originalValue, focus, showCursor]);
 
-	// Word-jump helpers (whitespace-delimited, like readline Alt+B/F)
+	// Word-jump helpers (whitespace-delimited). Ctrl+Left lands on the start of
+	// the previous word, like readline's Alt+B; Ctrl+Right lands on the start of
+	// the next word, where readline's Alt+F would stop at the end of this one.
 	// Newlines are treated as whitespace — Ctrl+Left/Right cross line boundaries.
 	function moveToPrevWord(value: string, offset: number): number {
 		let i = offset;
@@ -298,25 +330,29 @@ const TextInput = forwardRef<TextInputHandle, Props>(function TextInput(
 
 		renderedValue = value.length > 0 ? '' : chalk.inverse(' ');
 
+		// for...of yields code points but cursorOffset counts UTF-16 units, so
+		// advance by each character's unit length. A character is highlighted
+		// when any of its units falls in the caret range.
 		let i = 0;
 
 		for (const char of value) {
-			if (i >= cursorOffset - cursorActualWidth && i <= cursorOffset) {
+			if (
+				i + char.length > cursorOffset - cursorActualWidth &&
+				i <= cursorOffset
+			) {
 				renderedValue +=
 					char === '\n' ? chalk.inverse(' ') + '\n' : chalk.inverse(char);
 			} else {
 				renderedValue += char;
 			}
 
-			i++;
+			i += char.length;
 		}
 
 		if (value.length > 0 && cursorOffset === value.length) {
 			renderedValue += chalk.inverse(' ');
 		}
 	}
-
-	const rawInputRef = useRawInput();
 
 	useInput(
 		(input, key) => {
@@ -341,11 +377,13 @@ const TextInput = forwardRef<TextInputHandle, Props>(function TextInput(
 				}
 
 				const direction = key.upArrow ? 'up' : 'down';
-				const next = moveCursorToVisualLine(segments, cur, direction);
-				if (next === null) {
+				const target = moveCursorToVisualLine(segments, cur, direction);
+				if (target === null) {
 					// First/last visual line — hand off to history navigation
 					onEdgeArrow?.(direction);
 				} else {
+					// A column on the new row can fall inside an emoji's pair.
+					const next = snapToCharBoundary(val, target);
 					cursorOffsetRef.current = next;
 					setState(s => ({...s, cursorOffset: next}));
 				}
@@ -358,7 +396,7 @@ const TextInput = forwardRef<TextInputHandle, Props>(function TextInput(
 			// the wrong place when the cursor was mid-text and left the cursor
 			// stranded in front of it. Checked before `key.return` because several
 			// of these encodings (ESC+CR, kitty CSI-u) do set `key.return`.
-			if (isNewlineKey(input, key, rawInputRef.current)) {
+			if (isNewlineKey(input, key)) {
 				const currentValue = originalValueRef.current;
 				const offset = cursorOffsetRef.current;
 				const withNewline =
@@ -408,7 +446,7 @@ const TextInput = forwardRef<TextInputHandle, Props>(function TextInput(
 						);
 					}
 				} else if (key.rightArrow) {
-					// Ctrl+Right: jump to end of next word
+					// Ctrl+Right: jump to start of next word
 					if (showCursor) {
 						nextCursorOffset = moveToNextWord(
 							originalValueRef.current,
@@ -443,7 +481,7 @@ const TextInput = forwardRef<TextInputHandle, Props>(function TextInput(
 						case 'b': {
 							// Move cursor back one character
 							if (showCursor) {
-								nextCursorOffset--;
+								nextCursorOffset = stepBack(nextValue, nextCursorOffset);
 							}
 
 							break;
@@ -452,7 +490,7 @@ const TextInput = forwardRef<TextInputHandle, Props>(function TextInput(
 						case 'f': {
 							// Move cursor forward one character
 							if (showCursor) {
-								nextCursorOffset++;
+								nextCursorOffset = stepForward(nextValue, nextCursorOffset);
 							}
 
 							break;
@@ -515,42 +553,29 @@ const TextInput = forwardRef<TextInputHandle, Props>(function TextInput(
 				}
 			} else if (key.leftArrow) {
 				if (showCursor) {
-					nextCursorOffset--;
+					nextCursorOffset = stepBack(nextValue, nextCursorOffset);
 				}
 			} else if (key.rightArrow) {
 				if (showCursor) {
-					nextCursorOffset++;
+					nextCursorOffset = stepForward(nextValue, nextCursorOffset);
 				}
-			} else if (isBackspaceKey(key, rawInputRef.current)) {
-				// Backspace deletes the character before the cursor.
-				// Ink maps BOTH the physical Backspace (\x7f) and forward Delete
-				// (\x1b[3~) to `key.delete`, so we disambiguate on the raw
-				// sequence (see useRawInput): '\x7f' and the Option/Alt+Backspace
-				// variant '\x1b\x7f' (macOS/Linux terminals) are backward deletes,
-				// while '\x1b[3~' is the forward Delete key. Kitty keyboard protocol encodes
-				// Backspace as '\x1b[127u' (kittyCodepointNames[127] = 'delete');
-				// it is dormant here because nanocoder does not enable
-				// kittyKeyboard — if that changes, this guard needs the
-				// corresponding handling.
+			} else if (key.backspace) {
 				if (cursorOffsetRef.current > 0) {
+					const start = stepBack(nextValue, cursorOffsetRef.current);
 					nextValue =
-						originalValueRef.current.slice(0, cursorOffsetRef.current - 1) +
+						originalValueRef.current.slice(0, start) +
 						originalValueRef.current.slice(
 							cursorOffsetRef.current,
 							originalValueRef.current.length,
 						);
-					nextCursorOffset--;
+					nextCursorOffset = start;
 				}
 			} else if (key.delete) {
-				// Delete removes the character after the cursor (forward delete).
-				// Only reached for the forward Delete key (\x1b[3~); the
-				// physical Backspace (\x7f) and Option/Alt+Backspace (\x1b\x7f)
-				// are handled in the branch above.
 				if (cursorOffsetRef.current < originalValueRef.current.length) {
 					nextValue =
 						originalValueRef.current.slice(0, cursorOffsetRef.current) +
 						originalValueRef.current.slice(
-							cursorOffsetRef.current + 1,
+							stepForward(nextValue, cursorOffsetRef.current),
 							originalValueRef.current.length,
 						);
 					// Cursor stays in place — forward delete doesn't move it.
@@ -606,7 +631,17 @@ const TextInput = forwardRef<TextInputHandle, Props>(function TextInput(
 			? wrapWithTrimmedContinuations(finalValue, wrapWidth)
 			: finalValue;
 
-	return <Text>{displayValue}</Text>;
+	const visibleValue = maxVisibleLines
+		? clampVisibleLines(
+				(displayValue ?? '').split('\n'),
+				originalValue,
+				cursorOffset,
+				wrapWidth,
+				maxVisibleLines,
+			).join('\n')
+		: displayValue;
+
+	return <Text>{visibleValue}</Text>;
 });
 
 export default TextInput;
