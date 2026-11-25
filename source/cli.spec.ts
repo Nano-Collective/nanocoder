@@ -643,23 +643,32 @@ function resolveReviewGuards(opts: {
 	args: string[];
 	stdoutIsTTY: boolean;
 	outputFormat: string;
-}): {ttyError: boolean; jsonError: boolean; collisionError: boolean} {
+}): {
+	ttyError: boolean;
+	jsonError: boolean;
+	collisionError: boolean;
+	headless: boolean;
+} {
 	const {args, stdoutIsTTY, outputFormat} = opts;
 	const isRunCommand = args.indexOf('run') !== -1;
 	const isReviewCommand = args[0] === 'review';
-	const ttyError = isReviewCommand && !stdoutIsTTY;
-	const jsonError = isReviewCommand && outputFormat === 'json';
+	const ciDetected = false;
+	const headless =
+		isReviewCommand &&
+		(outputFormat === 'json' || !stdoutIsTTY || ciDetected);
+	const jsonError = false;
 	const collisionError = isRunCommand && isReviewCommand;
-	return {ttyError, jsonError, collisionError};
+	return {ttyError: false, jsonError, collisionError, headless};
 }
 
-test('review guard: errors when stdout is not a TTY', t => {
-	const {ttyError} = resolveReviewGuards({
+test('review guard: a non-TTY review runs headless instead of refusing', t => {
+	const {headless, ttyError} = resolveReviewGuards({
 		args: ['review', 'main'],
 		stdoutIsTTY: false,
 		outputFormat: 'text',
 	});
-	t.true(ttyError);
+	t.true(headless);
+	t.false(ttyError);
 });
 
 test('review guard: passes on a TTY', t => {
@@ -671,13 +680,14 @@ test('review guard: passes on a TTY', t => {
 	t.false(ttyError);
 });
 
-test('review guard: --json is rejected with review', t => {
-	const {jsonError} = resolveReviewGuards({
+test('review guard: --json selects the headless review', t => {
+	const {jsonError, headless} = resolveReviewGuards({
 		args: ['review', 'main'],
 		stdoutIsTTY: true,
 		outputFormat: 'json',
 	});
-	t.true(jsonError);
+	t.false(jsonError);
+	t.true(headless);
 });
 
 test('review guard: --json is not rejected with run', t => {

@@ -51,11 +51,11 @@ nanocoder -h
 | `--model` | | Specify AI model (must be available for the provider) |
 | `--plain` | | Use the lightweight, Ink-free runtime for non-interactive runs. Requires `run`; auto-enables in CI and non-TTY environments |
 | `--no-plain` | | Force the Ink runtime even in CI and non-TTY environments |
-| `--json` | | Emit a single structured JSON object to `stdout` on completion instead of streamed text. Requires `run` and always uses the plain runtime, even in a terminal; incompatible with `--no-plain`, `--acp`, `--vscode` and `review` |
+| `--json` | | Emit a single structured JSON object to `stdout` on completion instead of streamed text. Supported by `run` and `review`, even in a terminal: `run` uses the plain runtime and `review` runs headless. Incompatible with `--acp` and `--vscode`; `run --json` is also incompatible with `--no-plain` |
 | `--output-format` | | Set the `stdout` format, `text` or `json`. Synonym for `--json` |
 | `--context-max` | | Set maximum context length in tokens (supports k/K suffix, e.g. `128k`) |
 | `--mode` | | Start in a specific [development mode](../features/development-modes.md) - `normal`, `auto-accept`, `yolo`, `plan`, or `architect`. Defaults to `auto-accept` for `run` mode; interactive sessions use `defaultMode` from `agents.config.json` if set, otherwise `normal`. |
-| `--trust-directory` | | Skip the first-run directory trust prompt for this run only. Valid with `run`, `nanocoder daemon start`, `nanocoder verify` and `--acp`; ignored (with a warning) in interactive mode. The trust is ephemeral - `trustedDirectories` in your preferences file is not modified. See [Directory trust](#directory-trust) |
+| `--trust-directory` | | Skip the first-run directory trust prompt for this run only. Valid with `run`, `review`, `nanocoder daemon start`, `nanocoder verify` and `--acp`; ignored (with a warning) in interactive mode. The trust is ephemeral - `trustedDirectories` in your preferences file is not modified. See [Directory trust](#directory-trust) |
 | `--alt-screen` | | Start in fullscreen mode: a fixed-height layout on the alternate screen buffer with in-app scrolling (enabled by default). |
 | `--no-alt-screen` | | Disable fullscreen mode and force inline mode (main screen, chat history in the terminal's native scrollback). |
 | `--mouse` | | In fullscreen mode, the mouse wheel scrolls the chat viewport; select text with Shift+drag (Option+drag in iTerm2). Enabled by default. |
@@ -208,7 +208,7 @@ nanocoder review 42
 
 This runs a grounded review of the target against the default branch: an agent inspects the pinned revision with read-only tools, and only issues that cite lines on or near the change (within three lines, or at a deletion boundary) and pass an independent verifier are reported. You can also use `/review <target>` inside the interactive TUI, or `/review quick <target>` for the one-shot diff review. See [code review](../features/review.md).
 
-**Note:** `nanocoder review` requires an interactive terminal (TTY). It cannot be used with pipes or redirection (e.g. `nanocoder review main > review.md` will error) and its output cannot currently be captured to a file (also tracked in [#1287](https://github.com/Nano-Collective/nanocoder/issues/1287)).
+**Note:** On a terminal, `nanocoder review` opens the interactive session. Piped, redirected, or CI runs print the report on stdout and progress on stderr (`nanocoder review main > review.md`). Add `--output-format json` for the structured result. The exit code is `0` for a completed review, `2` for an incomplete one, and `1` when no review was produced. Headless review uses the same directory trust check as `nanocoder run`: pass `--trust-directory` or set `NANOCODER_TRUST_DIRECTORY=1` in a directory you have not trusted yet. See [code review](../features/review.md).
 
 ### Work on a pull request
 
@@ -254,13 +254,13 @@ The first time Nanocoder runs in a new directory, it shows a security disclaimer
 
 In CI/CD or scripted contexts there's no one to confirm, so non-interactive runs would hang on the prompt. There are three ways around it:
 
-- **`--trust-directory`** trusts the folder for one run only and saves nothing. It applies to `run`, `nanocoder daemon start`, `nanocoder verify` and `--acp`; in interactive mode it prints a warning and is ignored.
+- **`--trust-directory`** trusts the folder for one run only and saves nothing. It applies to `run`, `nanocoder review`, `nanocoder daemon start`, `nanocoder verify` and `--acp`; in interactive mode it prints a warning and is ignored.
 
   ```bash
   nanocoder --trust-directory run "your prompt here"
   ```
 
-- **`NANOCODER_TRUST_DIRECTORY=1`** trusts the folder and saves it to `trustedDirectories`, so later runs no longer need it. It is honoured by the interactive TUI, `run` (including `--plain`), `nanocoder daemon start`, `nanocoder verify` and `--acp`. Set it in your shell: a project `.env` cannot set it.
+- **`NANOCODER_TRUST_DIRECTORY=1`** trusts the folder and saves it to `trustedDirectories`, so later runs no longer need it. It is honoured by the interactive TUI, `run` (including `--plain`), headless `nanocoder review`, `nanocoder daemon start`, `nanocoder verify` and `--acp`. Set it in your shell: a project `.env` cannot set it.
 - **`nanocoder trust`** checks or grants trust without starting anything from the folder. `nanocoder trust --status` (add `--json` for machine output) prints the status (`trusted`, `not-trusted`, `changed` or `needs-re-approval`), what the folder will run, and its fingerprint. After reviewing that, `nanocoder trust --grant <fingerprint>` saves trust, and fails if the folder changed since the fingerprint was taken.
 
 ## Next Steps

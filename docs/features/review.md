@@ -52,6 +52,20 @@ The report renders like a normal assistant reply, headed by the review status:
 
 While a review runs, a live activity view shows its agents, tool calls, and model calls. Press `d` to show details and `Esc` to cancel. The view only captures keys while the review is running.
 
+## Non-interactive use
+
+`nanocoder review` in a pipeline, a redirect, or CI prints the same report without the terminal UI. Progress stays on stderr, so stdout is only the report:
+
+```sh
+nanocoder review > review.md
+nanocoder review deep feature/auth
+nanocoder review --output-format json 42 > review.json
+```
+
+`--output-format json` (and `--json`) is the structured result: status, scope, verified findings, dropped and unverified items, and why a review is incomplete. The exit code is `0` for a completed review (or an empty scope), `2` for an incomplete one so a CI gate cannot read partial coverage as a pass, and `1` for a failed, cancelled, or ambiguous review. Ctrl+C cancels the review and still prints what it covered. `nanocoder review quick` stays the one-shot diff review. On a terminal, without JSON, `nanocoder review` still opens the interactive session.
+
+Headless review applies the same directory trust check as `nanocoder run`. In a directory you have not trusted yet, it exits non-zero (with a `failed` JSON document when JSON was requested) unless you pass `--trust-directory` or set `NANOCODER_TRUST_DIRECTORY=1`. Setup errors, such as a missing provider, are reported the same way. Targets take the same forms as `/review`, for example `nanocoder review branch feature/auth` or `nanocoder review last 2 commits`.
+
 ## Session history
 
 The report and a bounded, sanitized activity summary are saved with the session, so they reappear when the session is resumed and `/review activity` still works. The summary holds step names, statuses, timings, and safe arguments only — never prompts, diffs, or file contents. The review is shown to you but is not sent to the model as part of later conversation turns.
@@ -72,6 +86,6 @@ Diffs longer than 1,000 lines are cut to their first and last 500 lines, and the
 
 ## Outside the TUI
 
-The same review is available as `nanocoder review <target>`, which needs an interactive terminal.
+The same review is available as `nanocoder review <target>`. On a terminal it opens the interactive session; without one it runs headless (see above).
 
 A custom command named `review` replaces the built-in (see [custom commands](custom-commands.md)).
