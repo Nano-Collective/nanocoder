@@ -29,6 +29,7 @@ Run on your machine, typically no API key required.
 - [LM Studio](lm-studio.md) - Desktop app for running local models
 - [Atomic Chat](atomic-chat.md) - Desktop app with OpenAI-compatible local API
 - [MLX Server](mlx-server.md) - Apple Silicon optimized inference
+- [Rapid-MLX](rapid-mlx.md) - High-performance Apple Silicon MLX inference server
 - [vLLM](vllm.md) - High-throughput serving engine
 - [LocalAI](localai.md) - OpenAI-compatible local API
 - [llama-swap](llama-swap.md) - Model multiplexer for llama.cpp

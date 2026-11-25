@@ -321,6 +321,12 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 		defaultBaseUrl: 'http://localhost:8080/v1',
 	}),
 	localServerTemplate({
+		id: 'rapid-mlx',
+		name: 'Rapid-MLX',
+		defaultProviderName: 'Rapid-MLX',
+		defaultBaseUrl: 'http://localhost:8000/v1',
+	}),
+	localServerTemplate({
 		id: 'lmstudio',
 		name: 'LM Studio',
 		defaultProviderName: 'LM Studio',
