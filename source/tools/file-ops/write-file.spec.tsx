@@ -1519,6 +1519,16 @@ test.serial('write_file validator: refuses same-size content changes with a rest
 		});
 		t.false(result.valid);
 		if (!result.valid) t.regex(result.error, /changed since it was fully read/);
+
+		// Invalidating the stale snapshot must not let a retry overwrite the
+		// external version without a fresh full-file read.
+		const retry = await writeFileTool.validator!({
+			path: 'changed-outside.txt',
+			content: 'the agent version',
+		});
+		t.false(retry.valid);
+		t.is(await readFile(filePath, 'utf-8'), 'external\n');
+
 		t.is(await executeReadFile({path: 'changed-outside.txt'}), 'external\n');
 	} finally {
 		process.chdir(originalCwd);
