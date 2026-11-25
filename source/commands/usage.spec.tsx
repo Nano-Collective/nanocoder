@@ -566,6 +566,38 @@ test('usage command shows placeholder for a model without pricing', async t => {
 	t.regex(output!, /Cumulative Session:.*—/);
 });
 
+test('usage command keeps Cumulative Session when one call used an unpriced model', async t => {
+	const messages = createMessages();
+	const metadata = {
+		...createMockMetadata('openai', 'gpt-4o'),
+		apiCallHistory: [
+			{
+				provider: 'openai',
+				model: 'gpt-4o',
+				inputTokens: 500,
+				outputTokens: 200,
+				timestamp: Date.now(),
+			},
+			{
+				provider: 'ollama',
+				model: 'llama3.2:3b',
+				inputTokens: 1000,
+				outputTokens: 500,
+				timestamp: Date.now(),
+			},
+		] satisfies ApiCallRecord[],
+	};
+
+	const result = await usageCommand.handler([], messages, metadata);
+	const {lastFrame} = renderWithTheme(result);
+
+	const output = lastFrame();
+	t.truthy(output);
+	t.regex(output!, /Cumulative Session:.*\$/);
+	t.notRegex(output!, /Cumulative Session:.*—/);
+	t.regex(output!, /ollama:.*—/);
+});
+
 test('usage command shows per-provider breakdown for multi-provider history', async t => {
 	const messages = createMessages();
 	const metadata = {
