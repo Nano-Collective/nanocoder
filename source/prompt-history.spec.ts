@@ -728,6 +728,38 @@ test('history file uses JSON format marker', async t => {
 	t.is(loaded[0]?.displayValue, uniqueCommand, 'Should load the saved command');
 });
 
+test('loadHistory drops or upgrades malformed JSON entries', async t => {
+	// Regression: a valid JSON array holding `null` or bare strings used to be
+	// loaded as-is, and Ctrl+R then threw calling toLowerCase() on it.
+	const tempFile = join(
+		testDir,
+		`history-malformed-${Date.now()}-${Math.random()}.json`,
+	);
+	writeFileSync(
+		tempFile,
+		`${JSON_FORMAT_MARKER}${JSON.stringify([
+			null,
+			'x',
+			'   ',
+			42,
+			{placeholderContent: {}},
+			{displayValue: 7},
+			{displayValue: 'kept', placeholderContent: null},
+			{displayValue: 'full', placeholderContent: {id: 'p'}},
+		])}`,
+		'utf8',
+	);
+
+	const history = new PromptHistory(tempFile);
+	await history.loadHistory();
+
+	t.deepEqual(history.getHistory(), [
+		{displayValue: 'x', placeholderContent: {}},
+		{displayValue: 'kept', placeholderContent: {}},
+		{displayValue: 'full', placeholderContent: {id: 'p'}},
+	]);
+});
+
 test('loadHistory resets currentIndex after loading', async t => {
 	const tempFile = join(testDir, `history-${Date.now()}-${Math.random()}.json`);
 	const history = new PromptHistory(tempFile);
@@ -919,25 +951,64 @@ test.serial('a file that cannot be read is left in place and not overwritten', a
 
 const posixOnly = process.platform === 'win32' ? test.skip : test;
 
-posixOnly('saveHistory keeps the permissions of an existing history file', async t => {
+posixOnly('saveHistory creates a history file owner-only', async t => {
 	const tempFile = join(
 		testDir,
-		`history-mode-${Date.now()}-${Math.random()}.json`,
+		`history-new-mode-${Date.now()}-${Math.random()}.json`,
+	);
+	const history = new PromptHistory(tempFile);
+	history.addPrompt('private');
+	await history.saveHistory();
+
+	t.is(statSync(tempFile).mode & 0o777, 0o600, 'a new history file is 0600');
+});
+
+posixOnly('saveHistory tightens permissions on an existing history file', async t => {
+	const tempFile = join(
+		testDir,
+		`history-existing-mode-${Date.now()}-${Math.random()}.json`,
 	);
 	writeFileSync(
 		tempFile,
 		`${JSON_FORMAT_MARKER}[{"displayValue":"private","placeholderContent":{}}]`,
 		'utf8',
 	);
-	chmodSync(tempFile, 0o600);
+	chmodSync(tempFile, 0o644);
 
 	const history = new PromptHistory(tempFile);
 	await history.loadHistory();
 	history.addPrompt('another');
 	await history.saveHistory();
 
-	t.is(statSync(tempFile).mode & 0o777, 0o600, 'a 0600 file stays 0600');
+	t.is(
+		statSync(tempFile).mode & 0o777,
+		0o600,
+		'an existing 0644 history file becomes 0600',
+	);
 });
+
+posixOnly(
+	'loadHistory tightens permissions when quarantining a corrupt history file',
+	async t => {
+		const tempFile = join(
+			testDir,
+			`history-corrupt-mode-${Date.now()}-${Math.random()}.json`,
+		);
+		writeFileSync(tempFile, `${JSON_FORMAT_MARKER}{not valid json`, 'utf8');
+		chmodSync(tempFile, 0o644);
+
+		const history = new PromptHistory(tempFile);
+		await history.loadHistory();
+
+		const backupFile = `${tempFile}.corrupt`;
+		t.true(existsSync(backupFile), 'corrupt history file is quarantined');
+		t.is(
+			statSync(backupFile).mode & 0o777,
+			0o600,
+			'quarantined .corrupt backup becomes 0600',
+		);
+	},
+);
 
 posixOnly('saveHistory writes through a symlinked history file', async t => {
 	const dir = join(testDir, `history-link-${Date.now()}-${Math.random()}`);
@@ -964,4 +1035,62 @@ posixOnly('saveHistory writes through a symlinked history file', async t => {
 		['old', 'new'],
 		'the file behind the link receives the save',
 	);
+});
+
+test('two sessions sharing the history file keep each other prompts', async t => {
+	mkdirSync(testDir, {recursive: true});
+	const file = join(testDir, `shared-${Date.now()}-${Math.random()}.json`);
+	const first = new PromptHistory(file);
+	const second = new PromptHistory(file);
+	await first.loadHistory();
+	await second.loadHistory();
+
+	first.addPrompt('alpha from first');
+	await first.saveHistory();
+	// The second session loaded before alpha existed; its save must not drop it.
+	second.addPrompt('bravo from second');
+	await second.saveHistory();
+
+	const reloaded = new PromptHistory(file);
+	await reloaded.loadHistory();
+	t.deepEqual(reloaded.getHistoryStrings(), [
+		'alpha from first',
+		'bravo from second',
+	]);
+});
+
+test('a re-sent prompt moves to the end when merged with the file', async t => {
+	mkdirSync(testDir, {recursive: true});
+	const file = join(testDir, `resend-${Date.now()}-${Math.random()}.json`);
+	writeFileSync(
+		file,
+		JSON_FORMAT_MARKER +
+			JSON.stringify([createInputState('one'), createInputState('two')]),
+	);
+	const history = new PromptHistory(file);
+	await history.loadHistory();
+	history.addPrompt('one');
+	await history.saveHistory();
+	const reloaded = new PromptHistory(file);
+	await reloaded.loadHistory();
+	t.deepEqual(reloaded.getHistoryStrings(), ['two', 'one']);
+});
+
+test('loading removes stale temp files from a save that died, keeps fresh ones', async t => {
+	const dir = join(testDir, `tmp-${Date.now()}-${Math.random()}`);
+	mkdirSync(dir, {recursive: true});
+	const file = join(dir, '.nano-coder-history');
+	const stale = `${file}.11111111-1111-1111-1111-111111111111.tmp`;
+	const fresh = `${file}.22222222-2222-2222-2222-222222222222.tmp`;
+	const unrelated = join(dir, 'other.tmp');
+	for (const p of [stale, fresh, unrelated]) writeFileSync(p, 'x');
+	const old = new Date(Date.now() - 10 * 60_000);
+	await fsPromises.utimes(stale, old, old);
+	await fsPromises.utimes(unrelated, old, old);
+
+	await new PromptHistory(file).loadHistory();
+
+	t.false(existsSync(stale));
+	t.true(existsSync(fresh));
+	t.true(existsSync(unrelated));
 });

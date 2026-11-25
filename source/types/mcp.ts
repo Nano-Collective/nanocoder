@@ -29,6 +29,15 @@ export interface MCPTool {
 	readOnly?: boolean;
 }
 
+export interface MCPToolCatalogEntry {
+	name: string;
+	serverName: string;
+	description: string;
+	readOnly: boolean;
+	isLoaded: boolean;
+	inputSchema?: MCPToolInputSchema;
+}
+
 export interface MCPResource {
 	uri: string;
 	name: string;
@@ -77,4 +86,10 @@ export interface MCPInitResult {
 	resourceCount?: number;
 	promptCount?: number;
 	error?: string;
+	/**
+	 * Tools this server offered but that were not registered, because a
+	 * built-in or custom tool already has the name. Set by
+	 * `ToolManager.initializeMCP`, not by the MCP client.
+	 */
+	skippedTools?: string[];
 }

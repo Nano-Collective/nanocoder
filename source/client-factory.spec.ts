@@ -226,6 +226,20 @@ test('ConfigurationError: cwdPath property is optional', t => {
 	t.is(error3.cwdPath, undefined);
 });
 
+test('ConfigurationError: unreadableError property is optional and captured', t => {
+	const error1 = new ConfigurationError('Test', '/path');
+	const error2 = new ConfigurationError(
+		'unreadable: /path: JSON syntax error',
+		'/path',
+		'/cwd',
+		false,
+		'unreadable: /path: JSON syntax error',
+	);
+
+	t.is(error1.unreadableError, undefined);
+	t.is(error2.unreadableError, 'unreadable: /path: JSON syntax error');
+});
+
 // ============================================================================
 // createLLMClient - No Configuration Tests
 // ============================================================================
@@ -286,6 +300,79 @@ test.serial(
 
 		t.is(error.message, 'No providers configured in agents.config.json');
 		t.true(error.isEmptyConfig);
+	},
+);
+
+test.serial(
+	'createLLMClient: attaches unreadableError with file path when agents.config.json has invalid JSON syntax',
+	async t => {
+		const invalidDir = join(testDir, 'invalid-json-test');
+		mkdirSync(invalidDir, {recursive: true});
+
+		const filePath = join(invalidDir, 'agents.config.json');
+		writeFileSync(
+			filePath,
+			'{\n  "nanocoder": {\n    "providers": [\n  }\n}',
+		);
+
+		process.cwd = () => invalidDir;
+		clearAppConfig();
+		reloadAppConfig();
+
+		const error = await t.throwsAsync(createLLMClient(), {
+			instanceOf: ConfigurationError,
+		});
+
+		t.truthy(error.unreadableError);
+		t.true(error.unreadableError?.startsWith('unreadable: '));
+		t.true(error.unreadableError?.includes(filePath));
+		t.true(error.message.includes('unreadable: '));
+		t.true(error.message.includes(filePath));
+	},
+);
+
+test.serial(
+	'createLLMClient: captures unreadableError from global config when project config has no providers but global config has invalid JSON syntax',
+	async t => {
+		const projectDir = join(testDir, 'valid-empty-project-test');
+		const globalDir = join(testDir, 'broken-global-test');
+		mkdirSync(projectDir, {recursive: true});
+		mkdirSync(globalDir, {recursive: true});
+
+		writeFileSync(
+			join(projectDir, 'agents.config.json'),
+			'{\n  "nanocoder": {\n    "providers": []\n  }\n}',
+		);
+
+		const brokenGlobalPath = join(globalDir, 'agents.config.json');
+		writeFileSync(
+			brokenGlobalPath,
+			'{\n  "nanocoder": {\n    "providers": [\n  }\n}',
+		);
+
+		const previousConfigDir = process.env.NANOCODER_CONFIG_DIR;
+		process.env.NANOCODER_CONFIG_DIR = globalDir;
+		process.cwd = () => projectDir;
+		clearAppConfig();
+		reloadAppConfig();
+
+		try {
+			const error = await t.throwsAsync(createLLMClient(), {
+				instanceOf: ConfigurationError,
+			});
+
+			t.truthy(error.unreadableError);
+			t.true(error.unreadableError?.startsWith('unreadable: '));
+			t.true(error.unreadableError?.includes(brokenGlobalPath));
+			t.true(error.message.includes('unreadable: '));
+			t.true(error.message.includes(brokenGlobalPath));
+		} finally {
+			if (previousConfigDir === undefined) {
+				delete process.env.NANOCODER_CONFIG_DIR;
+			} else {
+				process.env.NANOCODER_CONFIG_DIR = previousConfigDir;
+			}
+		}
 	},
 );
 
@@ -486,23 +573,103 @@ test.serial(
 		// Reload config to pick up new config
 		reloadAppConfig();
 
-		// Should throw error about missing API key
-		try {
-			await createLLMClient();
-			// If it succeeds, this test configuration may be invalid
-			// (might have found a different config), so we skip it
-			t.pass();
-		} catch (error: unknown) {
-			// Should throw an error mentioning API key or the provider
-			t.truthy(error);
-			const message = error instanceof Error ? error.message : String(error);
-			// Verify the error is related to API key or provider failure
-			t.true(
-				message.includes('API key') ||
-					message.includes('HostedTest') ||
-					message.includes('failed'),
-			);
-		}
+		const error = await t.throwsAsync(
+			createLLMClient('HostedTest', undefined, undefined, {
+				strictProvider: true,
+			}),
+		);
+		t.regex(error.message, /HostedTest: .*set `apiKey`.*or authentication `headers`/);
+	},
+);
+
+/** Start the given providers and ask for one of them strictly. */
+async function createStrict(
+	name: string,
+	providers: Record<string, unknown>[],
+	dir: string,
+) {
+	globalThis.fetch = createMockFetch(true, 200);
+	const configDir = join(testDir, dir);
+	mkdirSync(configDir, {recursive: true});
+	createTestConfig({nanocoder: {providers}}, configDir);
+	process.cwd = () => configDir;
+	reloadAppConfig();
+	return createLLMClient(name, undefined, undefined, {strictProvider: true});
+}
+
+test.serial(
+	'createLLMClient: hosted provider authenticated by custom headers needs no API key',
+	async t => {
+		const result = await createStrict(
+			'HeaderAuth',
+			[
+				{
+					name: 'HeaderAuth',
+					baseUrl: 'https://gateway.example.com/v1',
+					headers: {'X-Api-Key': 'gateway-key'},
+					models: ['m'],
+				},
+			],
+			'hosted-header-auth-test',
+		);
+		t.is(result.actualProvider, 'HeaderAuth');
+	},
+);
+
+test.serial(
+	'createLLMClient: an organization id alone is not a credential',
+	async t => {
+		const error = await t.throwsAsync(
+			createStrict(
+				'OrgOnly',
+				[
+					{
+						name: 'OrgOnly',
+						baseUrl: 'https://api.example.com/v1',
+						organizationId: 'org-123',
+						models: ['m'],
+					},
+				],
+				'hosted-org-only-test',
+			),
+		);
+		t.regex(error.message, /OrgOnly: .*set `apiKey`/);
+	},
+);
+
+test.serial(
+	'loadProviderConfigs: leaves apiKey unset for a hosted provider without one',
+	t => {
+		const configDir = join(testDir, 'hosted-no-key-config-test');
+		mkdirSync(configDir, {recursive: true});
+		createTestConfig(
+			{
+				nanocoder: {
+					providers: [
+						{
+							name: 'HostedNoKey',
+							baseUrl: 'https://api.example.com/v1',
+							models: ['m'],
+						},
+						{
+							name: 'LocalNoKey',
+							baseUrl: 'http://localhost:11434/v1',
+							models: ['m'],
+						},
+					],
+				},
+			},
+			configDir,
+		);
+		process.cwd = () => configDir;
+		reloadAppConfig();
+
+		const configs = loadProviderConfigs();
+		const hosted = configs.find(p => p.name === 'HostedNoKey');
+		const local = configs.find(p => p.name === 'LocalNoKey');
+
+		t.is(hosted?.config.apiKey, undefined);
+		t.is(local?.config.apiKey, 'dummy-key');
 	},
 );
 
@@ -1510,7 +1677,7 @@ test.serial(
 // ============================================================================
 
 test.serial(
-	'loadProviderConfigs threads the openrouter block from ProviderConfig to AIProviderConfig',
+	'loadProviderConfigs threads generic extraBody and openrouter options to AIProviderConfig',
 	t => {
 		const originalProviders = process.env.NANOCODER_PROVIDERS;
 
@@ -1522,6 +1689,10 @@ test.serial(
 						baseUrl: 'https://openrouter.ai/api/v1',
 						apiKey: 'test-key',
 						models: ['anthropic/claude-3.5-sonnet'],
+						extraBody: {
+							top_k: 20,
+							chat_template_kwargs: {enable_thinking: false},
+						},
 						openrouter: {
 							provider: {sort: 'price', allow_fallbacks: true},
 							reasoning: {effort: 'high'},
@@ -1543,6 +1714,10 @@ test.serial(
 				service_tier: 'flex',
 				plugins: [{id: 'context-compression', engine: 'middle-out'}],
 				models: ['openai/gpt-4o'],
+			});
+			t.deepEqual(openrouter?.extraBody, {
+				top_k: 20,
+				chat_template_kwargs: {enable_thinking: false},
 			});
 			// Make sure the baseURL/apiKey translation still works alongside it.
 			t.is(openrouter?.config.baseURL, 'https://openrouter.ai/api/v1');

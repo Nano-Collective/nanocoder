@@ -7,13 +7,16 @@ import React from 'react';
 import {appendToolDefinitionsToPrompt} from '@/ai-sdk-client/tools/system-prompt-assembler';
 import {UsageDisplay} from '@/components/usage/usage-display';
 import {getAppConfig} from '@/config/index';
+import {
+	buildSystemPrompt,
+	getLastBuiltPrompt,
+} from '@/conversation/prompt-builder';
 import {getToolManager} from '@/message-handler';
 import {
 	getModelContextLimit,
 	getModelPricing,
 	getSessionContextLimit,
 } from '@/models/index';
-import {generateKey} from '@/session/key-generator';
 import {createTokenizer} from '@/tokenization/index';
 import type {Command} from '@/types/commands';
 import type {TuneConfig} from '@/types/config';
@@ -25,7 +28,9 @@ import {
 	calculateToolDefinitionsTokensFromDefs,
 } from '@/usage/calculator';
 import {calculateUsageCost} from '@/usage/response-usage';
-import {buildSystemPrompt, getLastBuiltPrompt} from '@/utils/prompt-builder';
+import {generateKey} from '@/utils/key-generator';
+import {estimateTokens} from '@/utils/token-calculator';
+import {isLocalURL} from '@/utils/url-utils';
 
 export const usageCommand: Command = {
 	name: 'usage',
@@ -60,11 +65,9 @@ export const usageCommand: Command = {
 		} catch {
 			// Fallback to a simple tokenizer if creation fails
 			tokenizer = {
-				encode: (text: string) => Math.ceil((text || '').length / 4),
+				encode: (text: string) => estimateTokens(text || ''),
 				countTokens: (message: Message) =>
-					Math.ceil(
-						((message.content || '') + (message.role || '')).length / 4,
-					),
+					estimateTokens((message.content || '') + (message.role || '')),
 				getName: () => 'fallback',
 			};
 			tokenizerName = 'fallback (error)';
@@ -101,6 +104,8 @@ export const usageCommand: Command = {
 				nativeToolsDisabled,
 				config.systemPrompt,
 				model,
+				undefined,
+				toolManager,
 			);
 			if (nativeToolsDisabled) {
 				const fallbackToolFormat: 'xml' | 'json' =
@@ -142,9 +147,7 @@ export const usageCommand: Command = {
 						: 0;
 				} catch {
 					// Fallback to simple estimation if tokenization fails
-					return Math.ceil(
-						((message.content || '') + (message.role || '')).length / 4,
-					);
+					return estimateTokens((message.content || '') + (message.role || ''));
 				}
 			},
 		);
@@ -174,7 +177,7 @@ export const usageCommand: Command = {
 		};
 
 		// Get context limit: session override takes priority
-		const sessionLimit = getSessionContextLimit();
+		const sessionLimit = getSessionContextLimit({provider, model});
 		const contextLimit =
 			sessionLimit ??
 			(await getModelContextLimit(model, {
@@ -187,7 +190,11 @@ export const usageCommand: Command = {
 			cumulativeSession: NaN,
 		};
 		try {
-			const pricing = await getModelPricing(model);
+			// A local server (Ollama, LM Studio) is free, whatever models.dev
+			// lists under the same id.
+			const baseURL = client?.getProviderConfig()?.config.baseURL;
+			const pricing =
+				baseURL && isLocalURL(baseURL) ? null : await getModelPricing(model);
 			if (pricing) {
 				// ---- Current-context cost (same as Phase 2) ----
 				const snapshot = metadata.lastApiUsage;
@@ -206,7 +213,13 @@ export const usageCommand: Command = {
 				const perProvider: Record<string, number> = {};
 				const pricingCache = new Map<string, typeof pricing>();
 
-				const uniqueModels = [...new Set(history.map(r => r.model))];
+				// Calls made earlier on a local server stay free while a hosted
+				// provider is active.
+				const isLocalCall = (r: (typeof history)[number]) =>
+					Boolean(r.baseURL && isLocalURL(r.baseURL));
+				const uniqueModels = [
+					...new Set(history.filter(r => !isLocalCall(r)).map(r => r.model)),
+				];
 				const pricings = await Promise.all(
 					uniqueModels.map(async model => {
 						const p = await getModelPricing(model);
@@ -221,7 +234,9 @@ export const usageCommand: Command = {
 						output: NaN,
 					};
 
-					const callCost = calculateUsageCost(record, recordPricing) ?? 0;
+					const callCost = isLocalCall(record)
+						? 0
+						: (calculateUsageCost(record, recordPricing) ?? 0);
 
 					cumulativeSession += callCost;
 					perProvider[record.provider] =

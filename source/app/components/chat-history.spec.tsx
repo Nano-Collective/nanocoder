@@ -1,7 +1,7 @@
 import test from 'ava';
 import {Text} from 'ink';
 import React from 'react';
-import {wheelEvents} from '@/utils/terminal-mouse';
+import {wheelEvents} from '@/terminal/terminal-mouse';
 import {renderWithTheme} from '../../test-utils/render-with-theme';
 import {ChatHistory} from './chat-history';
 import type {ChatHistoryProps} from './chat-history';

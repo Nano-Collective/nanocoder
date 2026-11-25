@@ -1,4 +1,4 @@
-import {existsSync} from 'fs';
+import {existsSync, readFileSync} from 'fs';
 import {join} from 'path';
 import {AISDKClient} from '@/ai-sdk-client';
 import {
@@ -11,9 +11,11 @@ import {
 } from '@/config/copilot-credentials';
 import {getClosestConfigFile} from '@/config/index';
 import {loadAllProviderConfigs} from '@/config/mcp-config-loader';
+import {getConfigPath} from '@/config/paths';
 import {loadPreferences} from '@/config/preferences';
 import type {AIProviderConfig, LLMClient} from '@/types/index';
 import {formatError} from '@/utils/error-formatter';
+import {stripUtf8Bom} from '@/utils/strip-utf8-bom';
 import {isLocalURL} from '@/utils/url-utils';
 
 // Custom error class for configuration errors that need special UI handling
@@ -23,6 +25,7 @@ export class ConfigurationError extends Error {
 		public configPath: string,
 		public cwdPath?: string,
 		public isEmptyConfig: boolean = false,
+		public unreadableError?: string,
 	) {
 		super(message);
 		this.name = 'ConfigurationError';
@@ -77,11 +80,26 @@ async function createAISDKClient(
 				false,
 			);
 		} else {
+			let unreadableError: string | undefined;
+			const projectFile = join(cwd, 'agents.config.json');
+			const globalFile = join(getConfigPath(), 'agents.config.json');
+			const filesToCheck = [projectFile, globalFile, configPath].filter(
+				(file, index, self) => existsSync(file) && self.indexOf(file) === index,
+			);
+			for (const file of filesToCheck) {
+				try {
+					JSON.parse(stripUtf8Bom(readFileSync(file, 'utf-8')));
+				} catch (err) {
+					unreadableError = `unreadable: ${file}: ${err instanceof Error ? err.message : String(err)}`;
+					break;
+				}
+			}
 			throw new ConfigurationError(
-				'No providers configured in agents.config.json',
+				unreadableError || 'No providers configured in agents.config.json',
 				configPath,
 				cwdPath,
-				true,
+				!unreadableError,
+				unreadableError,
 			);
 		}
 	}
@@ -234,6 +252,7 @@ export function loadProviderConfigs(): AIProviderConfig[] {
 		disableToolModels: provider.disableToolModels,
 		// SDK provider package to use
 		sdkProvider: provider.sdkProvider,
+		extraBody: provider.extraBody,
 		// OpenRouter-specific request body fields (provider routing, plugins,
 		// reasoning, etc.). Always-on for the OpenRouter provider — never gated
 		// by tune so users get consistent routing across sessions.
@@ -243,7 +262,13 @@ export function loadProviderConfigs(): AIProviderConfig[] {
 		tune: provider.tune,
 		config: {
 			baseURL: provider.baseUrl,
-			apiKey: provider.apiKey || 'dummy-key',
+			// Only local servers get a placeholder key. A hosted provider without
+			// one keeps it unset so validateProviderCredentials can reject it.
+			apiKey:
+				provider.apiKey ||
+				(provider.baseUrl && isLocalURL(provider.baseUrl)
+					? 'dummy-key'
+					: undefined),
 			caCertPath: provider.caCertPath,
 			// organizationId is sugar for the OpenAI-Organization header; an
 			// explicit header of the same name in `headers` wins.
@@ -286,13 +311,18 @@ function validateProviderCredentials(providerConfig: AIProviderConfig): void {
 		return;
 	}
 
-	// Require API key for hosted providers (local servers get a pass)
-	if (
-		!providerConfig.config.apiKey &&
-		!(
-			providerConfig.config.baseURL && isLocalURL(providerConfig.config.baseURL)
-		)
-	) {
-		throw new Error('API key required for hosted providers');
+	// A hosted provider needs a credential: an API key or authentication headers.
+	// Local servers get a pass. OpenAI-Organization picks an organization, it doesn't
+	// authenticate, so it doesn't count (it is also what `organizationId` adds).
+	const {apiKey, baseURL, headers} = providerConfig.config;
+	const hasAuthHeaders = Object.entries(headers ?? {}).some(
+		([name, value]) =>
+			Boolean(value) && name.toLowerCase() !== 'openai-organization',
+	);
+	if (!apiKey && !hasAuthHeaders && !(baseURL && isLocalURL(baseURL))) {
+		throw new Error(
+			'No credentials for this hosted provider: set `apiKey` in agents.config.json ' +
+				"(any non-empty value if the server doesn't check one) or authentication `headers`",
+		);
 	}
 }

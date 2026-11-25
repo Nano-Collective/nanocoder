@@ -15,12 +15,13 @@
 import {validateCron} from '@/schedule/cron';
 import type {
 	CiJobFailedTrigger,
+	FileAiCommentTrigger,
 	FileChangedTrigger,
 	FileChangeEventKind,
 	ScheduleCronTrigger,
 	SkillTrigger,
 } from '@/types/skills';
-import {logError} from '@/utils/message-queue';
+import {notifyError} from '@/utils/message-queue-core';
 
 const FILE_EVENT_KINDS: ReadonlySet<FileChangeEventKind> = new Set([
 	'add',
@@ -66,7 +67,7 @@ export function parseSubscribeBlockOrWarn(
 		return parseSubscribeBlock(raw);
 	} catch (err) {
 		if (err instanceof SubscribeParseError) {
-			logError(
+			notifyError(
 				`Invalid subscribe block in ${filePath}: ${err.message}. Loaded without triggers.`,
 			);
 			return undefined;
@@ -87,10 +88,14 @@ function parseTrigger(raw: unknown, index: number): SkillTrigger {
 		throw new SubscribeParseError(`subscribe[${index}].kind must be a string`);
 	}
 
+	assertKnownKeys(obj, kind, index);
 	const base = parseCommonFields(obj, index);
 
 	if (kind === 'file.changed') {
 		return {...base, ...parseFileChanged(obj, index)};
+	}
+	if (kind === 'file.ai-comment') {
+		return {...base, ...parseFileAiComment(obj, index)};
 	}
 	if (kind === 'schedule.cron') {
 		return {...base, ...parseScheduleCron(obj, index)};
@@ -99,8 +104,74 @@ function parseTrigger(raw: unknown, index: number): SkillTrigger {
 		return {...base, ...parseCiJobFailed(obj, index)};
 	}
 	throw new SubscribeParseError(
-		`subscribe[${index}].kind "${kind}" is not a supported event kind (expected: file.changed, schedule.cron, ci.job.failed)`,
+		`subscribe[${index}].kind "${kind}" is not a supported event kind (expected: file.changed, file.ai-comment, schedule.cron, ci.job.failed)`,
 	);
+}
+
+const COMMON_KEYS = ['kind', 'target', 'confirm'];
+
+const KIND_KEYS: Record<string, readonly string[]> = {
+	'file.changed': ['paths', 'eventKinds'],
+	'file.ai-comment': ['paths'],
+	'schedule.cron': ['cron'],
+	'ci.job.failed': ['branches'],
+};
+
+/**
+ * Reject keys the trigger kind does not define. A typo such as `path:` for
+ * `paths:` would otherwise be dropped silently and the trigger would match
+ * everything.
+ */
+function assertKnownKeys(
+	obj: Record<string, unknown>,
+	kind: string,
+	index: number,
+): void {
+	const own = KIND_KEYS[kind];
+	if (!own) return; // unsupported kind: reported by the caller
+	const allowed = [...COMMON_KEYS, ...own];
+	for (const key of Object.keys(obj)) {
+		if (allowed.includes(key)) continue;
+		const hint = closestKey(key, allowed);
+		throw new SubscribeParseError(
+			`subscribe[${index}] has unknown key "${key}" for kind "${kind}"` +
+				(hint
+					? `. Did you mean "${hint}"?`
+					: ` (expected: ${allowed.join(', ')})`),
+		);
+	}
+}
+
+function closestKey(
+	key: string,
+	candidates: readonly string[],
+): string | undefined {
+	let best: string | undefined;
+	let bestDist = 3;
+	for (const c of candidates) {
+		const d = editDistance(key.toLowerCase(), c.toLowerCase());
+		if (d < bestDist) {
+			bestDist = d;
+			best = c;
+		}
+	}
+	return best;
+}
+
+function editDistance(a: string, b: string): number {
+	let prev = Array.from({length: b.length + 1}, (_, j) => j);
+	for (let i = 1; i <= a.length; i++) {
+		const cur = [i];
+		for (let j = 1; j <= b.length; j++) {
+			cur[j] = Math.min(
+				prev[j] + 1,
+				cur[j - 1] + 1,
+				prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1),
+			);
+		}
+		prev = cur;
+	}
+	return prev[b.length];
 }
 
 function parseCommonFields(
@@ -162,6 +233,27 @@ function parseFileChanged(
 			);
 		}
 		trigger.eventKinds = obj.eventKinds;
+	}
+
+	return trigger;
+}
+
+function parseFileAiComment(
+	obj: Record<string, unknown>,
+	index: number,
+): FileAiCommentTrigger {
+	const trigger: FileAiCommentTrigger = {kind: 'file.ai-comment'};
+
+	if (obj.paths !== undefined) {
+		if (
+			!Array.isArray(obj.paths) ||
+			!obj.paths.every((p): p is string => typeof p === 'string')
+		) {
+			throw new SubscribeParseError(
+				`subscribe[${index}].paths must be an array of glob strings`,
+			);
+		}
+		trigger.paths = obj.paths;
 	}
 
 	return trigger;

@@ -1,26 +1,30 @@
 /**
- * Parses a context limit value string, supporting k/K suffix.
- * e.g. "8192" -> 8192, "128k" -> 128000, "128K" -> 128000
+ * Parses a context limit value string, supporting k/K and m/M suffixes.
+ * e.g. "8192" -> 8192, "128k" -> 128000, "1.5m" -> 1500000
  *
  * Framework-free so the CLI can apply `--context-max` without loading
  * React/Ink (needed for the ACP / plain / auth fast paths).
  */
 export function parseContextLimit(value: string): number | null {
 	const trimmed = value.trim().toLowerCase();
-	const match = /^(\d+(?:\.\d+)?)(k)?$/.exec(trimmed);
+	const match = /^(\d+)(?:\.(\d+))?([km])?$/.exec(trimmed);
 
 	if (!match) {
 		return null;
 	}
 
-	// The regex only matches digits, so `parseFloat` can never return NaN here.
-	// It can still overflow to Infinity on a very long digit string, and callers
-	// store whatever we hand back without further validation.
-	const parsed = Number.parseFloat(match[1]);
-	if (!Number.isFinite(parsed) || parsed <= 0) {
+	const [, integerPart, fractionalPart, suffix] = match;
+	const parsed = Number(
+		`${integerPart}${fractionalPart ? `.${fractionalPart}` : ''}`,
+	);
+
+	const multiplier = suffix === 'k' ? 1_000 : suffix === 'm' ? 1_000_000 : 1;
+	const limit = Math.round(parsed * multiplier);
+	// Context limits are stored and propagated as JavaScript numbers. Reject
+	// values outside the safe integer range rather than silently losing tokens.
+	if (!Number.isSafeInteger(limit) || limit <= 0) {
 		return null;
 	}
 
-	const multiplier = match[2] === 'k' ? 1000 : 1;
-	return Math.round(parsed * multiplier);
+	return limit;
 }

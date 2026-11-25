@@ -6,7 +6,10 @@ import {
 	resetPreferencesCache,
 	savePreferences,
 } from '@/config/preferences';
-import {describeProjectTrust} from '@/config/project-trust';
+import {
+	describeProjectTrust,
+	TRUST_FINGERPRINT_VERSION,
+} from '@/config/trust/project-trust';
 import {
 	buildLaunchAgentPlist,
 	buildScheduledTaskXml,
@@ -73,12 +76,96 @@ test('buildLaunchAgentPlist contains required keys', t => {
 	t.regex(plist, /<key>KeepAlive<\/key>\s*<true\/>/);
 });
 
+test('buildLaunchAgentPlist escapes ampersands and angle brackets', t => {
+	const plist = buildLaunchAgentPlist('/Users/me/R&D <x>', 'abcd1234ef', 'a&b');
+	t.regex(plist, /<string>\/Users\/me\/R&amp;D &lt;x&gt;<\/string>/);
+	t.regex(plist, /<string>a&amp;b<\/string>/);
+	t.notRegex(plist, /R&D|<x>|a&b/);
+});
+
+test('buildSystemdUnit escapes % and quotes the Environment= value', t => {
+	const unit = buildSystemdUnit('/home/me/my proj/100%', 'abcd1234ef', 'nanocoder');
+	t.regex(unit, /Description=nanocoder daemon for \/home\/me\/my proj\/100%%\n/);
+	t.regex(unit, /WorkingDirectory=\/home\/me\/my proj\/100%%\n/);
+	t.regex(unit, /Environment="NANOCODER_PROJECT_ROOT=\/home\/me\/my proj\/100%%"\n/);
+});
+
+test('buildSystemdUnit escapes quotes and backslashes inside the Environment= value', t => {
+	const unit = buildSystemdUnit('/home/me/a"b\\c', 'abcd1234ef', 'nanocoder');
+	t.true(unit.includes('Environment="NANOCODER_PROJECT_ROOT=/home/me/a\\"b\\\\c"\n'));
+});
+
 test('buildSystemdUnit contains required keys', t => {
 	const unit = buildSystemdUnit('/some/project', 'abcd1234ef', 'nanocoder');
 	t.regex(unit, /Description=nanocoder daemon for \/some\/project/);
 	t.regex(unit, /WorkingDirectory=\/some\/project/);
-	t.regex(unit, /ExecStart=nanocoder daemon start/);
+	t.regex(unit, /ExecStart="nanocoder" daemon start/);
 	t.regex(unit, /Restart=on-failure/);
+});
+
+for (const field of ['projectRoot', 'daemonCommand'] as const) {
+	test(`buildSystemdUnit rejects control characters in ${field}`, t => {
+		const controls = [
+			...Array.from({length: 32}, (_, code) => String.fromCharCode(code)),
+			'\u007f',
+			'\u0085',
+			'\u009f',
+		];
+		for (const control of controls) {
+			const projectRoot =
+				field === 'projectRoot' ? `/home/me/a${control}b` : '/home/me/project';
+			const command =
+				field === 'daemonCommand' ? `/opt/a${control}b/nanocoder` : 'nanocoder';
+			t.throws(() => buildSystemdUnit(projectRoot, 'abcd1234ef', command), {
+				message: /control characters/,
+			});
+		}
+	});
+}
+
+test('buildSystemdUnit keeps a trailing path backslash off the end of raw directives', t => {
+	const root = '/home/me/trail\\';
+	const unit = buildSystemdUnit(root, 'abcd1234ef', 'nanocoder');
+
+	// Description= and WorkingDirectory= do not decode C-style escapes.
+	// A directory separator preserves the path while avoiding a continuation.
+	t.true(unit.includes(`Description=nanocoder daemon for ${root}/\nAfter=default.target\n`));
+	t.true(unit.includes(`WorkingDirectory=${root}/\nEnvironment=`));
+	t.true(unit.includes('Environment="NANOCODER_PROJECT_ROOT=/home/me/trail\\\\"\n'));
+});
+
+test('buildSystemdUnit quotes and escapes the executable as one argument', t => {
+	const unit = buildSystemdUnit(
+		'/home/me/project',
+		'abcd1234ef',
+		'/opt/工具 100%/nano coder',
+	);
+
+	t.true(
+		unit.includes(
+			String.raw`ExecStart="/opt/工具 100%%/nano coder" daemon start` + '\n',
+		),
+	);
+});
+
+test.serial('installAutoStart rejects an injected command before replacing a systemd unit', async t => {
+	await withIsolatedPreferences(async () => {
+		await withTempHome(async (home, projectRoot) => {
+			const options = {projectRoot, platform: 'linux' as const, home, loadService: false};
+			await installAutoStart(options);
+			const target = systemdUnitPath(home, projectHash(projectRoot));
+			const before = await readFile(target);
+
+			await t.throwsAsync(
+				installAutoStart({
+					...options,
+					daemonCommand: 'nanocoder\nExecStartPre=/bin/true',
+				}),
+				{message: /control characters/},
+			);
+			t.deepEqual(await readFile(target), before);
+		});
+	});
 });
 
 test.serial('installAutoStart on darwin writes plist at expected path', async t => {
@@ -128,7 +215,13 @@ test.serial(
 				// names both remedies so the service doesn't just fail forever
 				// with no explanation.
 				t.regex(result.message, /not trusted/);
-				t.regex(result.message, /--trust-directory/);
+				t.regex(result.message, /Run `nanocoder` here once/);
+				t.regex(
+					result.message,
+					/`NANOCODER_TRUST_DIRECTORY=1 nanocoder daemon start`/,
+				);
+				// A per-run flag never persists, so it can't fix the service.
+				t.notRegex(result.message, /--trust-directory/);
 				t.true(await isAutoStartInstalled({projectRoot: project, platform: 'linux', home}));
 			});
 		});
@@ -145,6 +238,7 @@ test.serial(
 						{
 							path: project,
 							fingerprint: describeProjectTrust(project).fingerprint,
+							fingerprintVersion: TRUST_FINGERPRINT_VERSION,
 						},
 					],
 				});
@@ -155,7 +249,7 @@ test.serial(
 					loadService: false,
 				});
 				t.notRegex(result.message, /not trusted/);
-				t.notRegex(result.message, /--trust-directory/);
+				t.notRegex(result.message, /NANOCODER_TRUST_DIRECTORY/);
 			});
 		});
 	},

@@ -1,4 +1,18 @@
-import {parse as parseYaml} from 'yaml';
+import {createRequire} from 'node:module';
+import {stripUtf8Bom} from '@/utils/strip-utf8-bom';
+
+type YamlParse = typeof import('yaml').parse;
+let yamlParse: YamlParse | undefined;
+
+function getYamlParse(): YamlParse {
+	if (!yamlParse) {
+		const yaml = createRequire(import.meta.url)(
+			'yaml',
+		) as typeof import('yaml');
+		yamlParse = yaml.parse;
+	}
+	return yamlParse;
+}
 
 /**
  * Result of splitting a markdown file into YAML frontmatter and body.
@@ -20,12 +34,15 @@ export interface FrontmatterSplit {
  * `hasFrontmatter` is false.
  */
 export function splitFrontmatter(fileContent: string): FrontmatterSplit {
+	// Editors and some servers prefix the file with a UTF-8 BOM, which the
+	// `^`-anchored pattern below would otherwise miss.
+	const content = stripUtf8Bom(fileContent);
 	// The frontmatter group is optional (`(?:…)?`) so an empty block —
 	// `---\n---\n` with no lines between the delimiters — is still recognised
 	// rather than leaking the literal `---` markers into the body.
 	const frontmatterRegex =
 		/^---\s*\r?\n(?:([\s\S]*?)\r?\n)?---\s*\r?\n?([\s\S]*)$/;
-	const match = fileContent.match(frontmatterRegex);
+	const match = content.match(frontmatterRegex);
 	if (match && match[2] !== undefined) {
 		return {
 			frontmatter: match[1] ?? '',
@@ -35,7 +52,7 @@ export function splitFrontmatter(fileContent: string): FrontmatterSplit {
 	}
 	return {
 		frontmatter: '',
-		body: fileContent.trim(),
+		body: content.trim(),
 		hasFrontmatter: false,
 	};
 }
@@ -51,9 +68,10 @@ export function parseYamlObject(
 	frontmatter: string,
 ): Record<string, unknown> | null {
 	if (!frontmatter.trim()) return {};
+	const parse = getYamlParse();
 	let parsed: unknown;
 	try {
-		parsed = parseYaml(frontmatter);
+		parsed = parse(frontmatter);
 	} catch {
 		return null;
 	}

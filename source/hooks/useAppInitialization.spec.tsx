@@ -1,6 +1,7 @@
-import {mkdtempSync} from 'node:fs';
+import {mkdtempSync, rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
+import {pathToFileURL} from 'node:url';
 import test from 'ava';
 import {cleanup, render} from 'ink-testing-library';
 import React from 'react';
@@ -14,6 +15,7 @@ const {resetPreferencesCache} = await import('@/config/preferences');
 resetPreferencesCache();
 
 import {CustomCommandLoader} from '@/custom-commands/loader';
+import {getLSPManager, LSPManager, resetLSPManager} from '@/lsp/lsp-manager';
 import type {AIProviderConfig} from '@/types/config';
 import type {
 	LLMClient,
@@ -215,4 +217,27 @@ test('already-trusted directory initializes on mount', t => {
 
 	t.is(props.setToolManager.calls.length, 1);
 	t.true(props.setPreferencesLoaded.calls.length > 0);
+});
+
+test.serial('initializeLSPServers encodes the workspace root URI', async t => {
+	const workspace = mkdtempSync(join(tmpdir(), 'nanocoder 中文 #%-'));
+	const originalCwd = process.cwd;
+	const originalInitialize = LSPManager.prototype.initialize;
+	await resetLSPManager();
+	LSPManager.prototype.initialize = async () => [];
+	try {
+		const {handlers} = setup({isTrusted: false});
+		process.cwd = () => workspace;
+		await handlers.initializeLSPServers();
+		const manager = await getLSPManager();
+		t.is(
+			(manager as unknown as {rootUri: string}).rootUri,
+			pathToFileURL(workspace).href,
+		);
+	} finally {
+		process.cwd = originalCwd;
+		LSPManager.prototype.initialize = originalInitialize;
+		await resetLSPManager();
+		rmSync(workspace, {recursive: true, force: true});
+	}
 });

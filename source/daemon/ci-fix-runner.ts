@@ -18,6 +18,7 @@
 import {readFileSync, writeFileSync} from 'node:fs';
 import {createLLMClient} from '@/client-factory';
 import {getAppConfig} from '@/config/index';
+import {bootstrapProjectDotenv} from '@/config/project-dotenv';
 import type {CiJobFailedPayload} from '@/events/types';
 import {SubagentExecutor} from '@/subagents/subagent-executor';
 import type {SubagentTask} from '@/subagents/types';
@@ -25,16 +26,22 @@ import {execGit} from '@/tools/git/utils';
 import {ToolManager} from '@/tools/tool-manager';
 import {formatError} from '@/utils/error-formatter';
 import {
-	getAllowedToolNames,
 	getHeadlessAutoApproveToolNames,
 	type TrustLevel,
-} from '@/verify/trust';
+} from '@/verify/trust-level';
+import {
+	buildRunnerTaskDescription,
+	getRunnerToolNames,
+} from './ci-fix-runner-task';
 
 export interface CiFixRunnerInput {
 	worktreePath: string;
 	trustLevel: Extract<TrustLevel, 'auto-fix' | 'full-commit'>;
 	payload: CiJobFailedPayload;
 	taskDescription: string;
+	/** Clone-relative path of the failed-step log the orchestrator fetched,
+	 * or undefined when it could not be fetched. */
+	failedLogPath?: string;
 }
 
 export interface CiFixRunnerResult {
@@ -56,6 +63,9 @@ function writeResultAndExit(
 }
 
 async function main(): Promise<void> {
+	// The project .env, read from the project root it was spawned in, before
+	// the chdir into the worktree, as importing config used to.
+	bootstrapProjectDotenv();
 	const inputPath = process.env.NANOCODER_CI_FIX_INPUT_PATH;
 	const resultPath = process.env.NANOCODER_CI_FIX_RESULT_PATH;
 	if (!inputPath || !resultPath) {
@@ -110,7 +120,7 @@ async function main(): Promise<void> {
 
 		const task: SubagentTask = {
 			subagent_type: 'verify-ci-investigator',
-			description: input.taskDescription,
+			description: buildRunnerTaskDescription(input),
 			context: {
 				trigger: {
 					type: 'event',
@@ -128,7 +138,7 @@ async function main(): Promise<void> {
 			undefined,
 			undefined,
 			{
-				tools: getAllowedToolNames(input.trustLevel),
+				tools: getRunnerToolNames(input.trustLevel),
 				alwaysAllow: getHeadlessAutoApproveToolNames(input.trustLevel),
 				trustLevel: input.trustLevel,
 			},

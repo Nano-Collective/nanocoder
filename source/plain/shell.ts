@@ -7,31 +7,41 @@ import {
 } from '@/artifacts/artifact-manager';
 import {getAppConfig} from '@/config/index';
 import {
-	ensureDirectoryTrust,
 	loadPreferences,
 	resolveProjectContextPreferences,
 	savePreferences,
-	untrustedDirectoryMessage,
 } from '@/config/preferences';
+import {
+	ensureDirectoryTrust,
+	untrustedDirectoryMessage,
+} from '@/config/trust/directory-trust';
 import {resolveTune} from '@/config/tune';
 import {
 	TOOL_APPROVAL_REQUIRED_KIND,
 	TOOL_APPROVAL_REQUIRED_PREFIX,
 } from '@/constants';
-import {appendRelevantProjectContextWithCount} from '@/memory/project-context';
+import {applyTuneCompaction} from '@/conversation/compaction/auto-compact';
+import {
+	buildSystemPrompt,
+	setLastBuiltPrompt,
+} from '@/conversation/prompt-builder';
+import {buildProjectContextSection} from '@/memory/project-context';
 import {SemanticMemoryManager} from '@/memory/semantic-memory-manager';
 import {
 	type PlainConversationOutcome,
 	runPlainConversation,
 } from '@/plain/conversation';
 import {initializePlain} from '@/plain/initialize';
+import {schemaInstruction} from '@/plain/structured-output';
 import {
 	color,
 	writeBoot,
 	writeError,
 	writeLine,
 	writeStatus,
+	writeWarning,
 } from '@/plain/writer';
+import {appendActivePlanContext} from '@/plans/context';
 import {loadPlugins} from '@/plugins/host';
 import {
 	beginSessionStartHooks,
@@ -39,12 +49,14 @@ import {
 	SESSION_END_HOOK_HANDLER,
 	takePendingHookContext,
 } from '@/services/lifecycle-hooks';
+import {fileMutationPaths} from '@/tools/file-ops/file-mutating-tools';
+import type {JsonSchemaDocument} from '@/tools/runtime/schema-validate';
 import {getTuneToolMode} from '@/types/config';
 import type {DevelopmentMode, Message} from '@/types/core';
-import {applyTuneCompaction} from '@/utils/auto-compact';
 import {formatError} from '@/utils/error-formatter';
-import {buildSystemPrompt, setLastBuiltPrompt} from '@/utils/prompt-builder';
+import {setMessageQueueSink} from '@/utils/message-queue-core';
 import {getShutdownManager} from '@/utils/shutdown';
+import {appendTurnContext} from '@/utils/turn-context';
 
 export interface RunPlainShellOptions {
 	prompt: string;
@@ -53,6 +65,12 @@ export interface RunPlainShellOptions {
 	cliModel?: string;
 	trustDirectory: boolean;
 	outputFormat: 'text' | 'json';
+	/**
+	 * Validate the final answer against this schema. The validated object is
+	 * printed alone on stdout in text mode, or reported under `structured` in
+	 * `--output-format json` mode.
+	 */
+	jsonSchema?: JsonSchemaDocument;
 	/**
 	 * Injectable seams for testing. Each defaults to the real implementation,
 	 * so production call sites never need to pass this. Mirrors the pattern
@@ -70,7 +88,8 @@ export interface RunPlainShellDeps {
 	getShutdownManager: typeof getShutdownManager;
 	loadPreferences: typeof loadPreferences;
 	savePreferences: typeof savePreferences;
-	appendRelevantProjectContextWithCount: typeof appendRelevantProjectContextWithCount;
+	buildProjectContextSection: typeof buildProjectContextSection;
+	appendActivePlanContext: typeof appendActivePlanContext;
 	artifacts: Pick<
 		ArtifactManager,
 		| 'cleanupStaleEphemeralSessions'
@@ -85,7 +104,8 @@ const defaultDeps: RunPlainShellDeps = {
 	getShutdownManager,
 	loadPreferences,
 	savePreferences,
-	appendRelevantProjectContextWithCount,
+	buildProjectContextSection,
+	appendActivePlanContext,
 	artifacts: artifactManager,
 };
 
@@ -110,11 +130,23 @@ export async function runPlainShell(
 		cliModel,
 		trustDirectory,
 		outputFormat,
+		jsonSchema,
 	} = options;
 
 	const deps: RunPlainShellDeps = {...defaultDeps, ...options.deps};
 
 	const isJson = outputFormat === 'json';
+	const isStructured = jsonSchema !== undefined;
+	const collectedWarnings: string[] = [];
+	setMessageQueueSink((type, message) => {
+		if (type === 'error') {
+			collectedWarnings.push(message);
+			writeError(message);
+		} else if (type === 'warning') {
+			collectedWarnings.push(message);
+			writeWarning(message);
+		}
+	});
 
 	const trust = ensureDirectoryTrust(process.cwd(), trustDirectory, {
 		loadPreferences: deps.loadPreferences,
@@ -140,17 +172,19 @@ export async function runPlainShell(
 				steps: 0,
 				filesChanged: [],
 				message,
+				warnings: collectedWarnings,
 			});
 		} else {
 			writeError(message);
 		}
+		setMessageQueueSink(null);
 		await deps.getShutdownManager().gracefulShutdown(1);
 		return;
 	}
 
 	let init;
 	try {
-		init = await deps.initializePlain({cliProvider, cliModel});
+		init = await deps.initializePlain({cliProvider, cliModel, developmentMode});
 	} catch (error) {
 		const formattedErr = formatError(error);
 		if (isJson) {
@@ -163,10 +197,12 @@ export async function runPlainShell(
 				steps: 0,
 				filesChanged: [],
 				message: formattedErr,
+				warnings: collectedWarnings,
 			});
 		} else {
 			writeError(formattedErr);
 		}
+		setMessageQueueSink(null);
 		await deps.getShutdownManager().gracefulShutdown(1);
 		return;
 	}
@@ -200,6 +236,8 @@ export async function runPlainShell(
 		toolsDisabled,
 		getAppConfig().systemPrompt,
 		model,
+		undefined,
+		toolManager,
 	);
 	const toolsForPrompt = toolsDisabled
 		? toolManager.getFilteredTools(availableNames)
@@ -211,13 +249,19 @@ export async function runPlainShell(
 		toolsForPrompt,
 	);
 
-	const projectContext = await deps.appendRelevantProjectContextWithCount(
-		toolPrompt,
+	// Recalled memories ride in the user message, not the system prompt, so
+	// the system block stays byte-stable for local KV-cache reuse (#1574).
+	const projectContext = await deps.buildProjectContextSection(
 		prompt,
 		new SemanticMemoryManager(),
 		resolveProjectContextPreferences(deps.loadPreferences()),
 	);
-	const systemContent = projectContext.systemPrompt;
+	// The plan block is still appended per turn (it is persisted state that
+	// changes between turns); the recalled memories above are not.
+	const planAwarePrompt = await deps.appendActivePlanContext(toolPrompt);
+	const systemContent = jsonSchema
+		? `${planAwarePrompt}\n\n${schemaInstruction(jsonSchema)}`
+		: planAwarePrompt;
 	if (projectContext.memoryCount > 0) {
 		writeStatus(
 			`Recalling ${projectContext.memoryCount} project memor${projectContext.memoryCount === 1 ? 'y' : 'ies'}...`,
@@ -254,10 +298,12 @@ export async function runPlainShell(
 				steps: 0,
 				filesChanged: [],
 				message,
+				warnings: collectedWarnings,
 			});
 		} else {
 			writeError(message);
 		}
+		setMessageQueueSink(null);
 		await deps.getShutdownManager().gracefulShutdown(1);
 		return;
 	}
@@ -268,9 +314,12 @@ export async function runPlainShell(
 	const initialMessages: Message[] = [
 		{
 			role: 'user',
-			content: hookContext
-				? `<hook-context>\n${hookContext}\n</hook-context>\n\n${prompt}`
-				: prompt,
+			content: appendTurnContext(
+				hookContext
+					? `<hook-context>\n${hookContext}\n</hook-context>\n\n${prompt}`
+					: prompt,
+				[projectContext.content],
+			),
 		},
 	];
 
@@ -282,6 +331,13 @@ export async function runPlainShell(
 	await deps.artifacts.markEphemeralSession(sessionId);
 
 	const shutdownManager = deps.getShutdownManager();
+	shutdownManager.register({
+		name: 'plain-shell-message-sink-cleanup',
+		priority: 100,
+		handler: async () => {
+			setMessageQueueSink(null);
+		},
+	});
 	const cleanupHandlerName = `plain-artifacts-${sessionId}`;
 	let conversationPromise:
 		| ReturnType<typeof deps.runPlainConversation>
@@ -314,14 +370,16 @@ export async function runPlainShell(
 			await cleanupArtifacts();
 		},
 	});
-	const finish = async (code: number) => {
+	const finish = async (code: number, options?: {newline?: boolean}) => {
 		markReported();
-		await shutdown(code, deps);
+		await shutdown(code, deps, options);
 	};
 
 	const nonInteractiveAlwaysAllow = getAppConfig().alwaysAllow ?? [];
 
-	if (!isJson) {
+	// A schema run owns stdout: the validated document is printed after the
+	// conversation, so the usual leading blank line would be noise in a pipe.
+	if (!isJson && !isStructured) {
 		writeLine();
 	}
 
@@ -340,6 +398,7 @@ export async function runPlainShell(
 			outputFormat,
 			sessionId,
 			workingDirectory: process.cwd(),
+			jsonSchema,
 		});
 		outcome = await conversationPromise;
 	} catch (error) {
@@ -363,22 +422,14 @@ export async function runPlainShell(
 		const exitCode =
 			outcome.kind === 'success' ? 0 : outcome.kind === 'error' ? 1 : 2;
 
-		// Must match the registered names in source/tools/file-ops/. Any name
-		// listed here that isn't a real tool silently drops its edits from
-		// `filesChanged`.
-		const mutatingTools = [
-			'write_file',
-			'string_replace',
-			'diff_edit',
-			'lsp_format_document',
-		];
 		const filesChangedSet = new Set<string>();
 
 		const formattedToolCalls = (outcome.toolCalls || []).map(tc => {
-			if (mutatingTools.includes(tc.name)) {
-				const filePath = tc.arguments?.path || tc.arguments?.file_path;
-				// Only include file paths that are strings (type-safe extraction)
-				if (typeof filePath === 'string' && isValidFilePath(filePath)) {
+			// A failed or refused call changed nothing. The paths are reported as
+			// the model gave them and the tool accepted them, `../x` included:
+			// the tool's own path checks already decided they were allowed.
+			if (tc.error === null) {
+				for (const filePath of fileMutationPaths(tc.name, tc.arguments)) {
 					filesChangedSet.add(filePath);
 				}
 			}
@@ -394,38 +445,53 @@ export async function runPlainShell(
 		const report = {
 			kind: outcome.kind,
 			exitCode,
-			finalText: sanitizeOutput(outcome.finalText || ''),
-			reasoning: outcome.reasoning ? sanitizeOutput(outcome.reasoning) : null,
+			finalText: outcome.finalText || '',
+			reasoning: outcome.reasoning || null,
 			toolCalls: formattedToolCalls,
 			steps: outcome.steps,
 			filesChanged: Array.from(filesChangedSet),
+			warnings: collectedWarnings,
+			...(outcome.kind === 'success' &&
+				outcome.structured !== undefined && {
+					structured: outcome.structured,
+				}),
 			...(outcome.usage && {
 				usage: outcome.usage,
 			}),
 			...(outcome.kind === 'error' && {
-				message: sanitizeOutput(outcome.message),
+				message: outcome.message,
 			}),
 			...(outcome.kind === TOOL_APPROVAL_REQUIRED_KIND && {
 				toolNames: outcome.toolNames,
+				autoAcceptWouldRun: outcome.autoAcceptWouldRun,
 			}),
 		};
 
 		emitJsonReport(report);
 
 		markReported();
+		setMessageQueueSink(null);
 		await deps.getShutdownManager().gracefulShutdown(exitCode);
 		return;
 	}
 
 	switch (outcome.kind) {
 		case 'success':
+			if (outcome.structured !== undefined) {
+				// The document alone on stdout, so `... | jq` works without
+				// stripping a banner or a trailing status line.
+				writeLine(JSON.stringify(outcome.structured, null, 2));
+				await finish(0, {newline: false});
+				return;
+			}
 			await finish(0);
 			return;
 		case TOOL_APPROVAL_REQUIRED_KIND:
 			writeError(
-				`${TOOL_APPROVAL_REQUIRED_PREFIX}${outcome.toolNames.join(', ')}. ` +
-					`Re-run with --mode auto-accept or --mode yolo, or add the tools to ` +
-					`agents.config.json "alwaysAllow".`,
+				formatToolApprovalRequired(
+					outcome.toolNames,
+					outcome.autoAcceptWouldRun,
+				),
 			);
 			await finish(2);
 			return;
@@ -436,54 +502,33 @@ export async function runPlainShell(
 	}
 }
 
+/**
+ * Only suggests what would change the result. Auto-accept still asks before
+ * bash and irreversible file ops, so it is offered only when it would have run
+ * every blocked call. `alwaysAllow` is read only from inside the `nanocoder`
+ * object, so the hint spells out that shape.
+ */
+function formatToolApprovalRequired(
+	toolNames: string[],
+	autoAcceptWouldRun: boolean,
+): string {
+	const uniqueNames = [...new Set(toolNames)];
+	const modes = autoAcceptWouldRun
+		? '--mode auto-accept or --mode yolo'
+		: '--mode yolo';
+	const quotedNames = uniqueNames.map(name => JSON.stringify(name)).join(', ');
+	return (
+		`${TOOL_APPROVAL_REQUIRED_PREFIX}${uniqueNames.join(', ')}. ` +
+		`Re-run with ${modes}, or allow ${uniqueNames.length === 1 ? 'it' : 'them'} ` +
+		`in agents.config.json: {"nanocoder": {"alwaysAllow": [${quotedNames}]}}`
+	);
+}
+
 function isToolCallingDisabled(provider: string, model: string): boolean {
 	const config = getAppConfig();
 	const providerConfig = config.providers?.find(p => p.name === provider);
 	if (!providerConfig) return false;
 	return providerConfig.disableToolModels?.includes(model) ?? false;
-}
-
-/**
- * Validate file paths to prevent directory traversal and injection attacks.
- * Allows absolute paths and relative paths, but rejects null bytes and
- * excessive path traversal patterns.
- */
-function isValidFilePath(filePath: string): boolean {
-	// Reject null bytes
-	if (filePath.includes('\0')) {
-		return false;
-	}
-	// Allow absolute paths and relative paths, but reject paths with
-	// excessive parent directory references (e.g., "../../../../../../etc/passwd")
-	const parts = filePath.split('/');
-	let depth = 0;
-	for (const part of parts) {
-		if (part === '..') {
-			depth--;
-			// Reject if we go above the root
-			if (depth < 0) {
-				return false;
-			}
-		} else if (part !== '.' && part !== '') {
-			depth++;
-		}
-	}
-	return true;
-}
-
-/**
- * Sanitize string output to prevent injection attacks in JSON.
- * Ensures the string doesn't contain unescaped control characters or
- * suspicious patterns that could break JSON encoding.
- */
-function sanitizeOutput(value: string): string {
-	// JSON.stringify handles escaping, but we add an extra layer to catch
-	// any unusual control characters that could be problematic
-	if (typeof value !== 'string') {
-		return '';
-	}
-	// Allow normal strings; JSON.stringify will properly escape special chars
-	return value;
 }
 
 function emitJsonReport(report: unknown): void {
@@ -502,9 +547,19 @@ function emitJsonReport(report: unknown): void {
 	}
 }
 
-async function shutdown(code: number, deps: RunPlainShellDeps): Promise<void> {
+async function shutdown(
+	code: number,
+	deps: RunPlainShellDeps,
+	options: {newline?: boolean} = {},
+): Promise<void> {
+	setMessageQueueSink(null);
 	if (code === 0) {
-		writeLine();
+		// A structured answer already ended with its own newline, so the usual
+		// blank separator would put a second one between the document and the
+		// next command's output.
+		if (options.newline !== false) {
+			writeLine();
+		}
 		writeStatus(color('green', 'done'));
 	}
 	await deps.getShutdownManager().gracefulShutdown(code);

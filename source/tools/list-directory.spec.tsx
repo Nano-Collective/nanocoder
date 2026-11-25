@@ -829,3 +829,53 @@ test.serial(
 		}
 	},
 );
+
+test.serial(
+	'list_directory applies a .gitignore found in a subdirectory',
+	async t => {
+		const root = mkdtempSync(join(tmpdir(), 'nc-lsnested-'));
+		try {
+			mkdirSync(join(root, 'pkg', 'a', 'generated'), {recursive: true});
+			writeFileSync(join(root, 'pkg', 'a', '.gitignore'), 'generated/\n');
+			writeFileSync(join(root, 'pkg', 'a', 'generated', 'big.js'), '');
+			writeFileSync(join(root, 'pkg', 'a', 'index.ts'), '');
+			setProjectRoot(root);
+			setSessionCwd(root);
+			const result = await listDirectoryTool.tool.execute!(
+				{path: '.', recursive: true, maxDepth: 5, tree: true},
+				{toolCallId: 'test', messages: []},
+			);
+			t.true(result.includes('index.ts'), 'lists non-ignored files');
+			t.false(result.includes('big.js'), 'nested .gitignore hides the file');
+			t.false(result.includes('generated'), 'and the ignored directory');
+		} finally {
+			resetSessionCwd();
+			rmSync(root, {recursive: true, force: true});
+		}
+	},
+);
+
+test.serial(
+	'list_directory applies an ancestor .gitignore when listing a deeper directory',
+	async t => {
+		const root = mkdtempSync(join(tmpdir(), 'nc-lsancestor-'));
+		try {
+			mkdirSync(join(root, 'pkg', 'a'), {recursive: true});
+			// The rule lives in pkg/, above the directory that is listed.
+			writeFileSync(join(root, 'pkg', '.gitignore'), '*.log\n');
+			writeFileSync(join(root, 'pkg', 'a', 'skip.log'), '');
+			writeFileSync(join(root, 'pkg', 'a', 'keep.txt'), '');
+			setProjectRoot(root);
+			setSessionCwd(root);
+			const result = await listDirectoryTool.tool.execute!(
+				{path: 'pkg/a'},
+				{toolCallId: 'test', messages: []},
+			);
+			t.true(result.includes('keep.txt'), 'lists non-ignored files');
+			t.false(result.includes('skip.log'), 'pkg/.gitignore still applies');
+		} finally {
+			resetSessionCwd();
+			rmSync(root, {recursive: true, force: true});
+		}
+	},
+);

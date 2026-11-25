@@ -20,14 +20,20 @@ export class CommandIntegration {
 	}
 
 	/**
-	 * Enhance the system prompt with relevant auto-injectable commands.
+	 * Build the `## Available Skills` section for a request, or `''` when no
+	 * skill is relevant to it.
+	 *
+	 * The caller carries this in the turn's user message rather than the system
+	 * prompt: the skills are matched against *this* request, so appending them
+	 * to the system prompt changed the system block on every turn and cost
+	 * local backends a full prefill (#1574). See `@/utils/turn-context`.
 	 */
-	enhanceSystemPrompt(basePrompt: string, request: string): string {
+	buildSkillsSection(request: string): string {
 		const availableTools = this.toolManager.getToolNames();
 		const relevant = this.loader.findRelevantCommands(request, availableTools);
 
 		if (relevant.length === 0) {
-			return basePrompt;
+			return '';
 		}
 
 		const commandPrompts: string[] = [];
@@ -39,20 +45,16 @@ export class CommandIntegration {
 		}
 
 		if (commandPrompts.length === 0) {
-			return basePrompt;
+			return '';
 		}
 
-		const section = `
-
-## Available Skills
+		return `## Available Skills
 
 You have access to the following Skills for this request:
 
 ${commandPrompts.join('\n\n')}
 
 When a Skill is relevant, use its instructions.`;
-
-		return basePrompt + section;
 	}
 
 	/**
