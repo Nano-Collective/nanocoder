@@ -272,14 +272,15 @@ const PROCESS_ENV_REF =
 
 /**
  * Expand `$VAR`, `${VAR}`, and `${VAR:-default}` references using values
- * from `process.env`. Unknown vars without a default expand to "".
+ * from `process.env`. Unknown vars without a default expand to "". As in the
+ * shell, the default also applies when the var is set but empty.
  */
 export function expandVars(value: string): string {
 	return value.replace(PROCESS_ENV_REF, (_match, braced, def, bare) => {
 		const name = braced ?? bare;
 		const v = process.env[name];
-		if (v !== undefined) return v;
-		return def ?? '';
+		if (def !== undefined && !v) return def;
+		return v ?? '';
 	});
 }
 

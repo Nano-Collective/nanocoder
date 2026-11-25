@@ -100,6 +100,14 @@ test('expandVars replaces $VAR and ${VAR}', t => {
 	else process.env.NCT_FOO = prev;
 });
 
+test('expandVars uses the default when the var is set but empty', t => {
+	process.env.NCT_EMPTY = '';
+	t.is(expandVars('${NCT_EMPTY:-fallback}'), 'fallback');
+	t.is(expandVars('[${NCT_EMPTY}]'), '[]');
+	t.is(expandVars('[$NCT_EMPTY]'), '[]');
+	delete process.env.NCT_EMPTY;
+});
+
 // Prove runScript forwards shellArgs, not a hardcoded -c. A POSIX script
 // named cmd.exe is enough: isWindowsCmd keys off the basename.
 const spawnArgTest = process.platform === 'win32' ? test.skip : test;
