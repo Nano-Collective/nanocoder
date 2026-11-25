@@ -258,10 +258,10 @@ export interface TurnEnginePolicy {
 	/** Stop when the same tool calls repeat `maxRepeatedToolCalls` times. */
 	repeatedToolCallGuard?: boolean;
 	/**
-	 * Only accept text-parsed tool calls when every parsed call names an
-	 * offered tool (`prepared.availableNames`). Otherwise leave the raw text
-	 * untouched so quoted markup (for example JSX in a review finding) is not
-	 * stripped as a tool call.
+	 * Drop text-parsed tool calls that do not name an offered tool
+	 * (`prepared.availableNames`), so quoted markup (for example JSX in a
+	 * review finding) is not run as a tool call. When none is offered, the
+	 * raw text is left untouched.
 	 */
 	onlyOfferedTextToolCalls?: boolean;
 	/**
@@ -479,14 +479,14 @@ export async function runTurnEngine<S>(
 			continue;
 		}
 
-		if (
-			onlyOfferedTextToolCalls &&
-			parsed.toolCalls.length > 0 &&
-			!parsed.toolCalls.every(call =>
+		if (onlyOfferedTextToolCalls && parsed.toolCalls.length > 0) {
+			const offeredCalls = parsed.toolCalls.filter(call =>
 				prepared.availableNames.includes(call.function.name),
-			)
-		) {
-			parsed = unparsed(fullContent);
+			);
+			parsed =
+				offeredCalls.length > 0
+					? {...parsed, toolCalls: offeredCalls}
+					: unparsed(fullContent);
 		}
 		const fromTextToolCalls =
 			nativeToolCalls.length === 0 && parsed.toolCalls.length > 0;
