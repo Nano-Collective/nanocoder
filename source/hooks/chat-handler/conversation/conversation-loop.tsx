@@ -833,13 +833,11 @@ export const processAssistantResponse = async (
 			return;
 		}
 		case 'aborted': {
-			// The model call raised the abort: unwind with its error.
-			if (result.error !== undefined) {
-				throw result.error;
-			}
 			// Keep what the model had already streamed. After an interrupt the
 			// user needs to read it back, and the next request needs it in
-			// history so the model knows what it had said.
+			// history so the model knows what it had said. This runs before the
+			// error unwinds: a real Esc surfaces as an abort *error* from the
+			// client, so the throw below would otherwise skip it.
 			const partial = streamedContent.trim();
 			if (partial) {
 				setHistory([...history, {role: 'assistant', content: partial}]);
@@ -850,6 +848,10 @@ export const processAssistantResponse = async (
 						model={currentModel}
 					/>,
 				);
+			}
+			// The model call raised the abort: unwind with its error.
+			if (result.error !== undefined) {
+				throw result.error;
 			}
 			// Escape while the reply was finishing or while compaction ran: don't
 			// go on to execute this turn's tool calls. Pair them with
