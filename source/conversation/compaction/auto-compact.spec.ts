@@ -749,6 +749,78 @@ test('performAutoCompact reports degraded fallback when LLM returns an empty sum
 	);
 });
 
+test('performAutoCompact does not report a failed call when the summary was not smaller', async t => {
+	setupAutoCompactEnv(100);
+
+	const messages: Message[] = [
+		{role: 'user', content: 'old '.repeat(400)},
+		{role: 'assistant', content: 'reply'},
+		{role: 'user', content: 'recent'},
+		{role: 'assistant', content: 'recent reply'},
+	];
+	const systemMessage: Message = {role: 'system', content: 'sys'};
+	const notifications: string[] = [];
+	const client = makeStubClient(() => 'x'.repeat(20_000));
+
+	const result = await performAutoCompact(
+		messages,
+		systemMessage,
+		'openai',
+		'gpt-4',
+		{
+			enabled: true,
+			threshold: 50,
+			mode: 'default',
+			strategy: 'llm',
+			notifyUser: true,
+		},
+		n => notifications.push(n),
+		client,
+	);
+
+	t.truthy(result);
+	t.is(client.calls, 1, 'the LLM call succeeded');
+	t.false(notifications.at(-1)?.includes('LLM call failed'));
+	t.true(
+		notifications
+			.at(-1)
+			?.includes('(LLM summary was not smaller, used mechanical compaction)'),
+	);
+});
+
+test('performAutoCompact says there was nothing to summarise when only recent messages remain', async t => {
+	setupAutoCompactEnv(100);
+
+	const messages: Message[] = [
+		{role: 'user', content: 'recent '.repeat(400)},
+		{role: 'assistant', content: 'recent reply'},
+	];
+	const systemMessage: Message = {role: 'system', content: 'sys'};
+	const notifications: string[] = [];
+	const client = makeStubClient(() => 'should not be called');
+
+	const result = await performAutoCompact(
+		messages,
+		systemMessage,
+		'openai',
+		'gpt-4',
+		{
+			enabled: true,
+			threshold: 50,
+			mode: 'default',
+			strategy: 'llm',
+			notifyUser: true,
+		},
+		n => notifications.push(n),
+		client,
+	);
+
+	t.truthy(result);
+	t.is(client.calls, 0, 'no LLM call when there is nothing to summarise');
+	t.false(notifications.at(-1)?.includes('LLM call failed'));
+	t.true(notifications.at(-1)?.includes('(nothing to summarise)'));
+});
+
 test('performAutoCompact uses provider-configured context limit', async t => {
 	const messages: Message[] = [
 		{role: 'user', content: 'x'.repeat(3000)},

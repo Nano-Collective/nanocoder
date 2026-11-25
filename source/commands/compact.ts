@@ -313,12 +313,14 @@ export const compactCommand: StatefulCommand = {
 				);
 				setIsToolExecuting?.(true);
 				try {
-					llmResult = await summariseWithLLM({
-						messages,
-						systemMessage,
-						client,
-						tokenizer,
-					});
+					llmResult = (
+						await summariseWithLLM({
+							messages,
+							systemMessage,
+							client,
+							tokenizer,
+						})
+					).messages;
 				} finally {
 					setIsToolExecuting?.(false);
 				}
