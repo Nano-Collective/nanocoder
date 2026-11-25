@@ -304,3 +304,26 @@ test('context budget stops before overflowing a small context window and runs a 
 	t.regex(lastPrompt?.content ?? '', /context budget for this review is nearly full/);
 });
 
+
+test('an unknown context size still bounds the run with a small default window', async t => {
+	const {client} = createScriptedReviewClient((call, index) =>
+		Object.keys(call.tools).length === 0
+			? {content: 'NO FINDINGS'}
+			: {
+					toolCalls: [
+						{name: 'review_read_file', args: {path: `file-${index}.ts`}},
+					],
+				},
+	);
+	const {run} = agentRun(() => ({}), {
+		client,
+		budget: {maxTurns: 14, maxToolCalls: 24},
+		tools: [
+			readTool(async args => `${String(args.path)}\n${'x'.repeat(12_000)}`),
+		],
+	});
+	const outcome = await runReviewAgent(run);
+	t.is(outcome.status, 'budget-exhausted');
+	t.is(outcome.budgetReason, 'context');
+	t.true(outcome.toolCalls < 24);
+});

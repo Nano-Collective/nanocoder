@@ -74,7 +74,7 @@ export const lazyCommands: LazyCommand[] = [
 	{
 		name: 'review',
 		description:
-			'Grounded, evidence-checked review of a branch, PR, commits, or working tree (`quick` for one-shot, `activity` for details)',
+			'Grounded, evidence-checked review of a branch, PR, commits, or working tree (`deep` for specialist finders, `quick` for one-shot, `activity` for details)',
 		echoInvocation: true,
 		load: () => import('@/commands/review').then(m => m.reviewCommand),
 	},

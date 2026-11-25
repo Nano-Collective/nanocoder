@@ -372,4 +372,10 @@ test.serial('/review runs the grounded review and /review quick the one-shot rev
 	t.is(calls.length, 0);
 	t.is(readPersistedReview(state.messages[0]!)?.status, 'clarification');
 	t.true(rendered.lastFrame()?.includes('Grounded review · needs a target'));
+
+	await handleMessageSubmission('/review deep please look at the thing I did', options);
+	await tick();
+	t.is(calls.length, 0);
+	t.is(readPersistedReview(state.messages.at(-1)!)?.tier, 'Deep');
+	t.true(rendered.lastFrame()?.includes('Deep review · needs a target'));
 });

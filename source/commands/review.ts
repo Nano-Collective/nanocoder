@@ -604,7 +604,7 @@ async function resolveReviewBase(
 }
 
 const REVIEW_DESCRIPTION =
-	'Grounded, evidence-checked review of a branch, PR, commits, or working tree (`quick` for one-shot, `activity` for details)';
+	'Grounded, evidence-checked review of a branch, PR, commits, or working tree (`deep` for specialist finders, `quick` for one-shot, `activity` for details)';
 
 /**
  * The read-only forms of `/review`: `quick` (the one-shot diff review) and
@@ -790,9 +790,18 @@ export function createReviewCommand(
 			const form = context.rawArgs[0]?.toLowerCase();
 			if (form === 'activity') return showView(context);
 			return runExclusiveReview(context, async () => {
+				if (form === 'deep') {
+					return runGroundedReviewCommand(
+						context,
+						'Deep',
+						context.rawArgs.slice(1).join(' '),
+						grounded,
+					);
+				}
 				if (form !== 'quick') {
 					return runGroundedReviewCommand(
 						context,
+						'Grounded',
 						context.argText.trim(),
 						grounded,
 					);

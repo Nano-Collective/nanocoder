@@ -8,6 +8,7 @@ import {renderGroundedReviewReport} from '@/review/review-report';
 import {createReviewMessage} from '@/review/review-session';
 import {resolveReviewToolMode} from '@/review/review-tool-mode';
 import type {ReviewFoundationTools} from '@/review/review-tools';
+import {runDeepReview} from '@/review/run-deep-review';
 import {runGroundedReview} from '@/review/run-grounded-review';
 import type {CommandCompletion, CommandContext} from '@/types/commands';
 import {formatError} from '@/utils/error-formatter';
@@ -44,11 +45,13 @@ export async function runExclusiveReview(
 }
 
 /**
- * The default `/review`: a grounded review with a live activity view (Escape
- * cancels) whose result is saved to the transcript for session resume.
+ * The default `/review` (Grounded) and `/review deep`: an agent review with a
+ * live activity view (Escape cancels) whose result is saved to the transcript
+ * for session resume.
  */
 export async function runGroundedReviewCommand(
 	context: CommandContext,
+	tier: 'Grounded' | 'Deep',
 	request: string,
 	dependencies: GroundedReviewDependencies = {},
 ): Promise<CommandCompletion> {
@@ -63,7 +66,6 @@ export async function runGroundedReviewCommand(
 		return {show: errorMsg('No active LLM client available.', 'review')};
 	}
 
-	const tier = 'Grounded';
 	const activity = new ReviewActivityStore();
 	const controller = new AbortController();
 	try {
@@ -78,7 +80,8 @@ export async function runGroundedReviewCommand(
 				onCancel: () => controller.abort(),
 			}),
 		);
-		const result = await runGroundedReview({
+		const runReview = tier === 'Deep' ? runDeepReview : runGroundedReview;
+		const result = await runReview({
 			request,
 			client,
 			toolMode: resolveReviewToolMode(
