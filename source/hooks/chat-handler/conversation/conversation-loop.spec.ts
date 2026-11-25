@@ -4259,3 +4259,42 @@ test.serial('processAssistantResponse - nanocoder.verify also counts tools the u
 	t.true(seen[2]?.includes('`pnpm test` (not run)'));
 	t.true(notes.includes('Verification: ✓ pnpm test (exit 0)'));
 });
+
+test.serial('an interrupt keeps the text already streamed in history', async t => {
+	const snapshots: Message[][] = [];
+	const controller = new AbortController();
+	const queued: string[] = [];
+
+	await processAssistantResponse(
+		createDefaultParams({
+			client: {
+				chat: async (
+					_messages: Message[],
+					_tools: unknown,
+					callbacks: {onToken?: (token: string) => void},
+				) => {
+					callbacks.onToken?.('Hello ');
+					callbacks.onToken?.('world');
+					controller.abort();
+					throw new Error('The operation was aborted');
+				},
+			} as never,
+			messages: [{role: 'user', content: 'Hi'}] as Message[],
+			abortController: controller,
+			setMessages: (next: Message[]) => {
+				snapshots.push(next);
+			},
+			addToChatQueue: (node: never) => {
+				queued.push(JSON.stringify(node));
+			},
+		}) as never,
+	).catch(() => {});
+
+	const last = snapshots.at(-1) ?? [];
+	t.is(last.at(-1)?.role, 'assistant', 'the partial reply is kept');
+	t.is(last.at(-1)?.content, 'Hello world');
+	t.true(
+		queued.some(entry => entry.includes('Hello world')),
+		'the partial reply is shown too',
+	);
+});
