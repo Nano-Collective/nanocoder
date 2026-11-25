@@ -37,6 +37,7 @@ console.log(`\nlifecycle-hooks.spec.ts`);
 const testDir = join(tmpdir(), `nanocoder-hooks-${Date.now()}`);
 const originalCwd = process.cwd();
 const originalConfigDir = process.env.NANOCODER_CONFIG_DIR;
+const maxHookEnvValueChars = process.platform === 'win32' ? 8_191 : 16 * 1024;
 
 /**
  * Point the config loader at an isolated project dir containing only the hooks
@@ -402,7 +403,7 @@ test.serial('a hook naming a missing binary blocks like any non-zero exit', asyn
 	t.true(outcome.blocked);
 });
 
-test.serial('a vetoing hook that cannot start blocks the action', async t => {
+test.serial('truncated context still blocks when a veto hook cannot start', async t => {
 	setProjectRoot(testDir);
 	withHooks({
 		'pre-tool-use': [{command: node("console.log('should not run')")}],
@@ -413,6 +414,7 @@ test.serial('a vetoing hook that cannot start blocks the action', async t => {
 	try {
 		outcome = await runLifecycleHooks('pre-tool-use', {
 			toolName: 'execute_bash',
+			toolArgs: {command: 'x'.repeat(20_000)},
 		});
 	} finally {
 		setProjectRoot(testDir);
@@ -422,7 +424,7 @@ test.serial('a vetoing hook that cannot start blocks the action', async t => {
 	t.regex(outcome.reason ?? '', /could not start/);
 });
 
-test.serial('oversized tool context is bounded and blocks a vetoing hook', async t => {
+test.serial('large tool args preserve keys and let the hook decide', async t => {
 	setProjectRoot(testDir);
 	withHooks({
 		'pre-tool-use': [
@@ -441,28 +443,189 @@ test.serial('oversized tool context is bounded and blocks a vetoing hook', async
 	const hookContext = JSON.parse(
 		readFileSync(join(testDir, 'hook-context.json'), 'utf8'),
 	);
+	const args = JSON.parse(hookContext.args);
 
-	t.true(outcome.blocked);
-	t.regex(outcome.reason ?? '', /context exceeded 16384 characters/);
+	t.false(outcome.blocked);
 	t.true(hookContext.commandBytes <= 64 * 1024);
 	t.true(hookContext.fileBytes <= 64 * 1024);
+	t.true(hookContext.args.length <= maxHookEnvValueChars);
+	t.deepEqual(Object.keys(args).sort(), ['command', 'path']);
+	t.true(args.command.startsWith('€'.repeat(100)));
+	t.true(args.path.startsWith('€'.repeat(100)));
+	t.true(args.command.length < 20_000);
+	t.true(args.path.length < 20_000);
 	t.deepEqual(
 		{
-			args: hookContext.args,
 			commandLength: hookContext.commandLength,
 			fileLength: hookContext.fileLength,
 			truncated: hookContext.truncated,
 		},
 		{
-		args: '{"truncated":true}',
-		commandLength: 16 * 1024,
-		fileLength: 16 * 1024,
-		truncated: 'true',
+			commandLength: maxHookEnvValueChars,
+			fileLength: maxHookEnvValueChars,
+			truncated: 'true',
 		},
 	);
 });
 
-test.serial('an oversized submitted prompt is bounded and blocks its hook', async t => {
+test.serial(
+	'oversized numeric argument arrays preserve the bounded JSON shape',
+	async t => {
+		setProjectRoot(testDir);
+		withHooks({
+			'pre-tool-use': [
+				{
+					command: node(
+						"require('node:fs').writeFileSync(process.env.NANOCODER_CWD + '/hook-context.json', JSON.stringify({args:process.env.NANOCODER_TOOL_ARGS,truncated:process.env.NANOCODER_HOOK_CONTEXT_TRUNCATED}))",
+					),
+				},
+			],
+		});
+
+		const outcome = await runLifecycleHooks('pre-tool-use', {
+			toolName: 'custom_tool',
+			toolArgs: {
+				path: 'src/data.json',
+				samples: Array.from({length: 20_000}, (_, index) => index),
+			},
+		});
+		const hookContext = JSON.parse(
+			readFileSync(join(testDir, 'hook-context.json'), 'utf8'),
+		);
+
+		t.false(outcome.blocked);
+		t.truthy(hookContext.args);
+		t.is(hookContext.truncated, 'true');
+		if (typeof hookContext.args !== 'string') return;
+
+		const args = JSON.parse(hookContext.args);
+		t.true(hookContext.args.length <= maxHookEnvValueChars);
+		t.deepEqual(Object.keys(args).sort(), ['path', 'samples']);
+		t.is(args.path, 'src/data.json');
+		t.true(Array.isArray(args.samples));
+		t.true(args.samples.length > 0 && args.samples.length < 20_000);
+		t.is(args.samples[0], 0);
+	},
+);
+
+test.serial('unshrinkable tool argument structure is omitted and flagged', async t => {
+	const originalArgs = process.env.NANOCODER_TOOL_ARGS;
+	process.env.NANOCODER_TOOL_ARGS = '{"stale":true}';
+	withHooks({
+		'pre-tool-use': [
+			{
+				command: node(
+					"require('node:fs').writeFileSync(process.env.NANOCODER_CWD + '/hook-context.json', JSON.stringify({hasArgs:process.env.NANOCODER_TOOL_ARGS !== undefined,truncated:process.env.NANOCODER_HOOK_CONTEXT_TRUNCATED}))",
+				),
+			},
+		],
+	});
+
+	try {
+		const outcome = await runLifecycleHooks('pre-tool-use', {
+			toolName: 'custom_tool',
+			toolArgs: {[`key-${'x'.repeat(maxHookEnvValueChars + 1)}`]: 1},
+		});
+		const hookContext = JSON.parse(
+			readFileSync(join(testDir, 'hook-context.json'), 'utf8'),
+		);
+
+		t.false(outcome.blocked);
+		t.false(hookContext.hasArgs);
+		t.is(hookContext.truncated, 'true');
+	} finally {
+		if (originalArgs === undefined) delete process.env.NANOCODER_TOOL_ARGS;
+		else process.env.NANOCODER_TOOL_ARGS = originalArgs;
+	}
+});
+
+test.serial('oversized tool results fit the platform environment limit', async t => {
+	withHooks({
+		'post-tool-use': [
+			{
+				command: node(
+					"require('node:fs').writeFileSync(process.env.NANOCODER_CWD + '/hook-result-context.json', JSON.stringify({length:process.env.NANOCODER_TOOL_RESULT.length,truncated:process.env.NANOCODER_HOOK_CONTEXT_TRUNCATED}))",
+				),
+			},
+		],
+	});
+
+	await runLifecycleHooks('post-tool-use', {
+		toolResult: 'x'.repeat(maxHookEnvValueChars + 1),
+	});
+	const hookContext = JSON.parse(
+		readFileSync(join(testDir, 'hook-result-context.json'), 'utf8'),
+	);
+
+	t.is(hookContext.length, maxHookEnvValueChars);
+	t.is(hookContext.truncated, 'true');
+});
+
+test.serial('oversized tool names fit the platform environment limit', async t => {
+	withHooks({
+		'pre-tool-use': [
+			{
+				command: node(
+					"require('node:fs').writeFileSync(process.env.NANOCODER_CWD + '/hook-name-context.json', JSON.stringify({length:process.env.NANOCODER_TOOL_NAME.length,truncated:process.env.NANOCODER_HOOK_CONTEXT_TRUNCATED}))",
+				),
+			},
+		],
+	});
+
+	await runLifecycleHooks('pre-tool-use', {
+		toolName: 'x'.repeat(maxHookEnvValueChars + 1),
+	});
+	const hookContext = JSON.parse(
+		readFileSync(join(testDir, 'hook-name-context.json'), 'utf8'),
+	);
+
+	t.is(hookContext.length, maxHookEnvValueChars);
+	t.is(hookContext.truncated, 'true');
+});
+
+test.serial('a hook run does not inherit stale context variables', async t => {
+	const staleContext = {
+		NANOCODER_TOOL_NAME: 'stale-tool',
+		NANOCODER_TOOL_ARGS: '{"stale":true}',
+		NANOCODER_FILE: 'stale-file',
+		NANOCODER_COMMAND: 'stale-command',
+		NANOCODER_TOOL_RESULT: 'stale-result',
+		NANOCODER_PROMPT: 'stale-prompt',
+		NANOCODER_MESSAGE_COUNT: '99',
+		NANOCODER_HOOK_CONTEXT_TRUNCATED: 'true',
+	};
+	const originalContext = Object.fromEntries(
+		Object.keys(staleContext).map(key => [key, process.env[key]]),
+	);
+	Object.assign(process.env, staleContext);
+	withHooks({
+		'session-start': [
+			{
+				command: node(
+					"const keys=['NANOCODER_TOOL_NAME','NANOCODER_TOOL_ARGS','NANOCODER_FILE','NANOCODER_COMMAND','NANOCODER_TOOL_RESULT','NANOCODER_PROMPT','NANOCODER_MESSAGE_COUNT','NANOCODER_HOOK_CONTEXT_TRUNCATED'];require('node:fs').writeFileSync(process.env.NANOCODER_CWD+'/hook-stale-context.json',JSON.stringify(Object.fromEntries(keys.map(key=>[key,process.env[key]||null]))))",
+				),
+			},
+		],
+	});
+
+	try {
+		await runLifecycleHooks('session-start', {});
+	} finally {
+		for (const [key, value] of Object.entries(originalContext)) {
+			if (value === undefined) delete process.env[key];
+			else process.env[key] = value;
+		}
+	}
+
+	const hookContext = JSON.parse(
+		readFileSync(join(testDir, 'hook-stale-context.json'), 'utf8'),
+	);
+	t.deepEqual(hookContext, Object.fromEntries(
+		Object.keys(staleContext).map(key => [key, null]),
+	));
+});
+
+test.serial('truncated prompts let veto hooks decide', async t => {
 	setProjectRoot(testDir);
 	withHooks({
 		'user-prompt-submit': [
@@ -478,12 +641,30 @@ test.serial('an oversized submitted prompt is bounded and blocks its hook', asyn
 		prompt: 'x'.repeat(20_000),
 	});
 
-	t.true(outcome.blocked);
-	t.regex(outcome.reason ?? '', /context exceeded 16384 characters/);
+	t.false(outcome.blocked);
 	t.is(
 		readFileSync(join(testDir, 'hook-prompt-context.txt'), 'utf8'),
-		'true|16384',
+		`true|${maxHookEnvValueChars}`,
 	);
+});
+
+test.serial('a vetoing hook can reject an oversized submitted prompt', async t => {
+	withHooks({
+		'user-prompt-submit': [
+			{
+				command: node(
+					"process.exit(process.env.NANOCODER_HOOK_CONTEXT_TRUNCATED === 'true' ? 7 : 0)",
+				),
+			},
+		],
+	});
+
+	const outcome = await runLifecycleHooks('user-prompt-submit', {
+		prompt: 'x'.repeat(20_000),
+	});
+
+	t.true(outcome.blocked);
+	t.regex(outcome.reason ?? '', /exit 7/);
 });
 
 test.serial('hook context reaches the command as NANOCODER_* env vars', async t => {

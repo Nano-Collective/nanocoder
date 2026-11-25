@@ -2,4 +2,4 @@
 '@nanocollective/nanocoder': patch
 ---
 
-Bound lifecycle-hook context passed through the environment. Vetoing hooks now block actions when their input is truncated or the hook process cannot start, instead of silently allowing the action. Closes #2011.
+Bound lifecycle-hook context to platform environment limits while preserving tool-argument keys and JSON shape. Vetoing hooks receive a truncation flag and decide how to handle incomplete context; an action is still blocked if a vetoing hook cannot start. Closes #2011.

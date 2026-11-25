@@ -35,8 +35,9 @@ function defaultTimeoutFor(event: HookEvent): number {
 
 /** Cap on captured stdout/stderr so a chatty hook can't blow up context. */
 const MAX_HOOK_OUTPUT_CHARS = 16 * 1024;
-/** Keep model-supplied environment values below per-string OS launch limits. */
-const MAX_HOOK_ENV_VALUE_CHARS = 16 * 1024;
+/** Keep hook context values below per-string OS launch limits. */
+const MAX_HOOK_ENV_VALUE_CHARS =
+	process.platform === 'win32' ? 8_191 : 16 * 1024;
 
 /**
  * Everything a hook can be told about the moment it fired. Each populated
@@ -348,6 +349,69 @@ export function getToolFileArg(
 	return undefined;
 }
 
+function truncateHookArgumentValues(
+	value: unknown,
+	maxValueSize: number,
+): unknown {
+	if (typeof value === 'string') {
+		return truncateHookEnvValue(value, maxValueSize);
+	}
+	if (Array.isArray(value)) {
+		return value
+			.slice(0, maxValueSize)
+			.map(item => truncateHookArgumentValues(item, maxValueSize));
+	}
+	if (value !== null && typeof value === 'object') {
+		return Object.fromEntries(
+			Object.entries(value).map(([key, item]) => [
+				key,
+				truncateHookArgumentValues(item, maxValueSize),
+			]),
+		);
+	}
+	return value;
+}
+
+function serializeHookToolArgs(args: Record<string, unknown>): {
+	serialized: string | undefined;
+	truncated: boolean;
+} {
+	let serialized: string | undefined;
+	try {
+		serialized = JSON.stringify(args);
+	} catch {
+		return {serialized: undefined, truncated: false};
+	}
+	if (
+		serialized === undefined ||
+		serialized.length <= MAX_HOOK_ENV_VALUE_CHARS
+	) {
+		return {serialized, truncated: false};
+	}
+
+	const parsed = JSON.parse(serialized) as unknown;
+	let lower = 0;
+	let upper = MAX_HOOK_ENV_VALUE_CHARS;
+	let bounded: string | undefined;
+	while (lower <= upper) {
+		const maxValueSize = Math.floor((lower + upper) / 2);
+		const candidate = JSON.stringify(
+			truncateHookArgumentValues(parsed, maxValueSize),
+		);
+		if (
+			candidate !== undefined &&
+			candidate.length <= MAX_HOOK_ENV_VALUE_CHARS
+		) {
+			bounded = candidate;
+			lower = maxValueSize + 1;
+		} else {
+			upper = maxValueSize - 1;
+		}
+	}
+	// If the keys and non-string structure alone exceed the cap, omit the args.
+	return {serialized: bounded, truncated: true};
+}
+
 function buildEnv(
 	event: HookEvent,
 	context: HookContext,
@@ -368,23 +432,29 @@ function buildEnv(
 		NANOCODER_SESSION_ID:
 			getActiveSessionContext()?.sessionId ?? getKeyGeneratorSessionId(),
 	};
+	for (const key of [
+		'NANOCODER_TOOL_NAME',
+		'NANOCODER_TOOL_ARGS',
+		'NANOCODER_FILE',
+		'NANOCODER_COMMAND',
+		'NANOCODER_TOOL_RESULT',
+		'NANOCODER_PROMPT',
+		'NANOCODER_MESSAGE_COUNT',
+		'NANOCODER_HOOK_CONTEXT_TRUNCATED',
+	] as const) {
+		delete env[key];
+	}
 
-	if (context.toolName) env.NANOCODER_TOOL_NAME = context.toolName;
+	if (context.toolName) {
+		contextTruncated ||= context.toolName.length > MAX_HOOK_ENV_VALUE_CHARS;
+		env.NANOCODER_TOOL_NAME = truncateHookEnvValue(context.toolName);
+	}
 	if (context.toolArgs) {
-		try {
-			const serializedArgs = JSON.stringify(context.toolArgs);
-			if (
-				serializedArgs !== undefined &&
-				serializedArgs.length > MAX_HOOK_ENV_VALUE_CHARS
-			) {
-				env.NANOCODER_TOOL_ARGS = '{"truncated":true}';
-				contextTruncated = true;
-			} else {
-				env.NANOCODER_TOOL_ARGS = serializedArgs;
-			}
-		} catch {
-			// Unserialisable args (cycles) just mean no NANOCODER_TOOL_ARGS.
+		const toolArgs = serializeHookToolArgs(context.toolArgs);
+		if (toolArgs.serialized !== undefined) {
+			env.NANOCODER_TOOL_ARGS = toolArgs.serialized;
 		}
+		contextTruncated = contextTruncated || toolArgs.truncated;
 		const filePath = getToolFileArg(context.toolArgs);
 		if (filePath) {
 			contextTruncated =
@@ -399,9 +469,14 @@ function buildEnv(
 		}
 	}
 	if (context.toolResult !== undefined) {
-		env.NANOCODER_TOOL_RESULT = context.toolResult.slice(
-			0,
+		const maxToolResultChars = Math.min(
 			MAX_HOOK_OUTPUT_CHARS,
+			MAX_HOOK_ENV_VALUE_CHARS,
+		);
+		contextTruncated ||= context.toolResult.length > maxToolResultChars;
+		env.NANOCODER_TOOL_RESULT = sliceWholeCharacters(
+			context.toolResult,
+			maxToolResultChars,
 		);
 	}
 	if (context.prompt !== undefined) {
@@ -417,11 +492,11 @@ function buildEnv(
 	return env;
 }
 
-function truncateHookEnvValue(value: string): string {
-	return sliceWholeCharacters(
-		truncateToolResult(value, MAX_HOOK_ENV_VALUE_CHARS),
-		MAX_HOOK_ENV_VALUE_CHARS,
-	);
+function truncateHookEnvValue(
+	value: string,
+	maxChars = MAX_HOOK_ENV_VALUE_CHARS,
+): string {
+	return sliceWholeCharacters(truncateToolResult(value, maxChars), maxChars);
 }
 
 export interface HookRun {
@@ -607,8 +682,8 @@ export function toPlatformHookCommand(
 
 /**
  * Run one hook command to completion. Never rejects: a spawn failure or a
- * timeout resolves with `failure` set and no exit code, which callers treat as
- * "did not veto" so a broken script can't wedge the session.
+ * timeout resolves with `failure` set and no exit code. Vetoing events fail
+ * closed if the process could not start; a timeout is logged and skipped.
  */
 export function runHookCommand(
 	hook: HookDefinition,
@@ -718,11 +793,10 @@ export function runHookCommand(
  * Run every hook configured for `event`, in config order.
  *
  * Hooks are deterministic and model-free: they fire every time, cost no
- * tokens, and (on `pre-tool-use` / `user-prompt-submit`) can veto the action.
- * A non-zero exit, a process that cannot start, or truncated context blocks a
- * vetoing event. A timeout after start is logged and skipped so a hung script
- * cannot wedge the agent. The first veto ends the chain; the remaining hooks
- * for that event do not run.
+ * tokens, and can veto pre-tool and user-prompt events. A non-zero exit or a
+ * process that cannot start blocks a vetoing event. A timeout after start is
+ * logged and skipped so a hung script cannot wedge the agent. The first veto
+ * ends the chain; the remaining hooks for that event do not run.
  *
  * Hook commands come from project-local `agents.config.json`, the same file
  * that already configures `mcpServers`; both are gated by the directory-trust
@@ -755,7 +829,6 @@ async function runShellHooks(
 	const cwd = getProjectRoot();
 	const env = buildEnv(event, context, cwd);
 	const canVeto = VETOING_EVENTS.has(event);
-	const contextWasTruncated = env.NANOCODER_HOOK_CONTEXT_TRUNCATED === 'true';
 	const defaultTimeoutMs = defaultTimeoutFor(event);
 	const collected: string[] = [];
 	const failures: HookFailure[] = [];
@@ -765,31 +838,15 @@ async function runShellHooks(
 		output: collected.join('\n').trim(),
 		failures,
 	});
-	const truncationReason = (label: string) =>
-		`Blocked by hook "${label}": context exceeded ${MAX_HOOK_ENV_VALUE_CHARS} characters and was truncated.`;
-
 	for (const hook of hooks) {
 		const run = await runHookCommand(hook, env, cwd, defaultTimeoutMs);
 		const label = hookLabel(hook);
 
 		if (run.failure) {
-			if (canVeto && (run.failedToStart || contextWasTruncated)) {
-				const reason = contextWasTruncated
-					? truncationReason(label) +
-						(run.failedToStart
-							? ' The hook could not start: ' + run.failure
-							: '')
-					: 'Blocked because hook "' +
-						label +
-						'" could not start: ' +
-						run.failure +
-						'.';
+			if (canVeto && run.failedToStart) {
+				const reason = `Blocked because hook "${label}" could not start: ${run.failure}.`;
 				notifyError(
-					'Hook "' +
-						label +
-						'" (' +
-						event +
-						') could not safely run — blocking action.',
+					`Hook "${label}" (${event}) could not safely run — blocking action.`,
 				);
 				return block(reason);
 			}
@@ -827,18 +884,6 @@ async function runShellHooks(
 				});
 			}
 			continue;
-		}
-
-		if (canVeto && contextWasTruncated) {
-			const reason = truncationReason(label);
-			notifyError(
-				'Hook "' +
-					label +
-					'" (' +
-					event +
-					') received truncated context — blocking action.',
-			);
-			return block(reason);
 		}
 
 		// stdout only, unlike a failure above. On a passing run stderr is mostly

@@ -144,19 +144,27 @@ Each hook is run with the relevant context in its environment. Nothing is passed
 | `NANOCODER_TOOL_ARGS` | tool events | The tool's arguments as JSON |
 | `NANOCODER_FILE` | tool events with a path argument | The file the tool acts on |
 | `NANOCODER_COMMAND` | `execute_bash` | The shell command the model wants to run |
-| `NANOCODER_TOOL_RESULT` | `post-tool-use` | The tool's result (truncated to 16k characters) |
+| `NANOCODER_TOOL_RESULT` | `post-tool-use` | The tool's result (capped to the hook environment limit) |
 | `NANOCODER_PROMPT` | `user-prompt-submit` | The submitted prompt |
 | `NANOCODER_MESSAGE_COUNT` | `pre-compact` | Messages in the conversation |
-| `NANOCODER_HOOK_CONTEXT_TRUNCATED` | oversized hook context | `true` when a model-supplied value was truncated |
+| `NANOCODER_HOOK_CONTEXT_TRUNCATED` | oversized hook context | `true` when a context value was truncated or omitted |
 
 To keep hook processes within operating-system launch limits,
-`NANOCODER_TOOL_ARGS`, `NANOCODER_COMMAND`, `NANOCODER_PROMPT`, and
-`NANOCODER_FILE` are capped at 16,384 characters. Oversized
-`NANOCODER_TOOL_ARGS` becomes the valid JSON value `{"truncated":true}`;
-`NANOCODER_COMMAND`, `NANOCODER_PROMPT`, and `NANOCODER_FILE` are truncated
-with an elision marker. If any of these values is truncated, a vetoing event
-is blocked even when its hook exits successfully, because the hook did not see
-the full input. The hook still starts with the bounded environment.
+`NANOCODER_TOOL_ARGS`, `NANOCODER_COMMAND`, `NANOCODER_PROMPT`,
+`NANOCODER_FILE`, `NANOCODER_TOOL_RESULT`, and `NANOCODER_TOOL_NAME` are capped
+at 16,384 characters on POSIX and 8,191 on Windows. Windows hooks run through
+`cmd.exe`, which
+[ignores inherited environment variables longer than 8,191 characters](https://learn.microsoft.com/en-us/troubleshoot/windows-client/shell-experience/command-line-string-limitation).
+Oversized `NANOCODER_TOOL_ARGS` remains valid JSON with its object keys
+preserved; string values are truncated and arrays are shortened to a prefix as
+needed to fit the cap. If the keys and non-string structure alone exceed the
+cap, `NANOCODER_TOOL_ARGS` is omitted. `NANOCODER_COMMAND`, `NANOCODER_PROMPT`,
+and `NANOCODER_FILE` are truncated with an elision marker.
+When any hook-context value is truncated or omitted,
+`NANOCODER_HOOK_CONTEXT_TRUNCATED=true` tells the hook that its context is
+incomplete. A vetoing hook decides whether that is acceptable: exit 0 allows
+the action and a non-zero exit vetoes it. A vetoing hook that cannot start
+still blocks the action.
 
 Hook commands are **not** env-substituted when the config is read, so `$NANOCODER_FILE` in your `command` reaches the shell intact.
 
@@ -194,12 +202,13 @@ The gate is also applied again at each execution boundary (`processToolUse`, the
 
 The first veto ends the chain — later hooks on that event don't run.
 
-On vetoing events, a non-zero exit, a hook process that cannot start, or
-truncated context blocks the action. A hook that hangs past its `timeout` is
-killed, logged, and skipped, so a broken script cannot wedge the agent. On the
-other events a non-zero exit is logged and the remaining hooks still run; on
-`post-tool-use` the failing hook's output is also handed to the model (see
-below).
+On vetoing events, a non-zero exit or a hook process that cannot start blocks
+the action. Truncated context is reported through
+`NANOCODER_HOOK_CONTEXT_TRUNCATED`; the hook decides whether to veto it. A
+hook that hangs past its `timeout` is killed, logged, and skipped, so a broken
+script cannot wedge the agent. On the other events a non-zero exit is logged
+and the remaining hooks still run; on `post-tool-use` the failing hook's
+output is also handed to the model (see below).
 
 Killing a hook kills what it started. The command runs under a shell, so signalling that shell alone would leave the grandchildren of a compound command (`a && b`, a pipeline) running after the agent has moved on. Hooks are spawned into their own process group on POSIX and reaped with `taskkill /T` on Windows, so the whole tree goes.
 
