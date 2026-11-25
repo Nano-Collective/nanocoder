@@ -30,6 +30,7 @@ import {
 import {calculateUsageCost} from '@/usage/response-usage';
 import {generateKey} from '@/utils/key-generator';
 import {estimateTokens} from '@/utils/token-calculator';
+import {isLocalURL} from '@/utils/url-utils';
 
 export const usageCommand: Command = {
 	name: 'usage',
@@ -176,7 +177,7 @@ export const usageCommand: Command = {
 		};
 
 		// Get context limit: session override takes priority
-		const sessionLimit = getSessionContextLimit();
+		const sessionLimit = getSessionContextLimit({provider, model});
 		const contextLimit =
 			sessionLimit ??
 			(await getModelContextLimit(model, {
@@ -189,7 +190,11 @@ export const usageCommand: Command = {
 			cumulativeSession: NaN,
 		};
 		try {
-			const pricing = await getModelPricing(model);
+			// A local server (Ollama, LM Studio) is free, whatever models.dev
+			// lists under the same id.
+			const baseURL = client?.getProviderConfig()?.config.baseURL;
+			const pricing =
+				baseURL && isLocalURL(baseURL) ? null : await getModelPricing(model);
 			if (pricing) {
 				// ---- Current-context cost (same as Phase 2) ----
 				const snapshot = metadata.lastApiUsage;
@@ -208,7 +213,13 @@ export const usageCommand: Command = {
 				const perProvider: Record<string, number> = {};
 				const pricingCache = new Map<string, typeof pricing>();
 
-				const uniqueModels = [...new Set(history.map(r => r.model))];
+				// Calls made earlier on a local server stay free while a hosted
+				// provider is active.
+				const isLocalCall = (r: (typeof history)[number]) =>
+					Boolean(r.baseURL && isLocalURL(r.baseURL));
+				const uniqueModels = [
+					...new Set(history.filter(r => !isLocalCall(r)).map(r => r.model)),
+				];
 				const pricings = await Promise.all(
 					uniqueModels.map(async model => {
 						const p = await getModelPricing(model);
@@ -223,7 +234,9 @@ export const usageCommand: Command = {
 						output: NaN,
 					};
 
-					const callCost = calculateUsageCost(record, recordPricing) ?? 0;
+					const callCost = isLocalCall(record)
+						? 0
+						: (calculateUsageCost(record, recordPricing) ?? 0);
 
 					cumulativeSession += callCost;
 					perProvider[record.provider] =

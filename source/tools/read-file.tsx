@@ -1,24 +1,31 @@
 import {constants} from 'node:fs';
-import {access, lstat, readFile, stat} from 'node:fs/promises';
+import {access, lstat, stat} from 'node:fs/promises';
 import {resolve} from 'node:path';
 import {Box, Text} from 'ink';
 import React from 'react';
 import ToolMessage from '@/components/tool-message';
 import {
+	BINARY_DETECTION_CHUNK_CHARS,
 	EMPTY_CONTENT_MARKER,
 	FILE_READ_PREVIEW_LINES,
 	FILE_READ_PREVIEW_THRESHOLD_LINES,
 	MAX_LINE_LENGTH_CHARS,
 } from '@/constants';
 import {ThemeContext} from '@/hooks/useTheme';
+import {
+	MAX_IMAGE_BYTES,
+	mediaTypeForPath,
+	readImageFile,
+} from '@/input/clipboard-image';
 import {getProjectRoot, getSafeSessionCwd} from '@/services/session-cwd';
 import {
 	markFileSeen,
 	matchReadContent,
 	READ_STUB_MARKER,
+	recordVisibilityReceipt,
 	rememberReadContent,
 } from '@/tools/runtime/read-tracker';
-import type {NanocoderToolExport} from '@/types/core';
+import type {NanocoderToolExport, VisualToolOutput} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
 import {getCachedFileContent} from '@/utils/fs/file-cache';
@@ -35,7 +42,7 @@ const executeReadFile = async (args: {
 	start_line?: number;
 	end_line?: number;
 	metadata_only?: boolean;
-}): Promise<string> => {
+}): Promise<string | VisualToolOutput> => {
 	const absPath = resolve(getSafeSessionCwd(), args.path);
 
 	try {
@@ -77,20 +84,15 @@ const executeReadFile = async (args: {
 					const fileType = getFileType(absPath);
 					output += `File Type: ${fileType}\n`;
 
-					// Detect likely encoding (simple heuristic)
-					let encoding = 'UTF-8';
-					try {
-						// `derived` records what the cache actually produced for this
-						// path, so the label cannot disagree with the content above.
-						if (cached.derived) {
-							encoding = 'Binary (Converted to Markdown)';
-						} else {
-							// Try to read as UTF-8
-							await readFile(absPath, 'utf-8');
-						}
-					} catch (_error: unknown) {
-						encoding = 'Binary/Unknown';
-					}
+					// `derived` and `notUtf8` record what the cache actually found for
+					// this path, so the label cannot disagree with the content above.
+					// Reading the file as UTF-8 never fails, since Node replaces bytes
+					// that don't decode with U+FFFD, so only the raw bytes can tell.
+					const encoding = cached.derived
+						? 'Binary (Converted to Markdown)'
+						: cached.notUtf8
+							? 'Not valid UTF-8 (a legacy encoding such as Latin-1, Windows-1252 or Shift-JIS, or binary data)'
+							: 'UTF-8';
 					output += `Encoding: ${encoding}\n`;
 				} catch (error: unknown) {
 					// If we can't read it, mark as not readable
@@ -112,6 +114,22 @@ const executeReadFile = async (args: {
 		// stat, not lstat: a symlink's own mtime/size never change when its
 		// target does, so the stub check must compare the target's.
 		const stats = await stat(absPath);
+
+		// Images are sent as image parts so a vision-capable model can see them.
+		// This runs before the text path below: decoding image bytes as UTF-8
+		// yields garbage, and the read-tracker/stub logic only applies to text.
+		const imageMediaType = mediaTypeForPath(absPath);
+		if (imageMediaType && stats.isFile()) {
+			const image = readImageFile(absPath);
+			if (!image) {
+				throw new Error(`Could not read image "${args.path}"`);
+			}
+			return {
+				llmContent: `[image: ${args.path} — ${imageMediaType}, ${stats.size} bytes]`,
+				images: [image],
+			};
+		}
+
 		if (stats.isFile()) {
 			const stub = matchReadContent(
 				absPath,
@@ -131,6 +149,7 @@ const executeReadFile = async (args: {
 			// An empty file has been seen in full; allow edits/overwrites against it.
 			markFileSeen(absPath);
 			rememberReadContent(absPath, stats, 0, args.start_line, args.end_line);
+			recordVisibilityReceipt(absPath, stats, undefined, undefined);
 			return EMPTY_CONTENT_MARKER;
 		}
 
@@ -159,6 +178,8 @@ const executeReadFile = async (args: {
 				args.start_line,
 				args.end_line,
 			);
+			// Record visibility receipt for the preview lines shown
+			recordVisibilityReceipt(absPath, stats, 1, previewEndLine);
 
 			return `${preview}\n\n[Truncated at line ${previewEndLine} of ${totalLines}. Use read_file with start_line: ${previewEndLine + 1} and end_line to continue.]`;
 		}
@@ -182,6 +203,8 @@ const executeReadFile = async (args: {
 			args.start_line,
 			args.end_line,
 		);
+		// Record visibility receipt for the actual lines returned
+		recordVisibilityReceipt(absPath, stats, startLine, endLine);
 
 		// Return content without line numbers for clean content-based editing
 		return linesToReturn.join('\n');
@@ -202,7 +225,7 @@ const executeReadFile = async (args: {
 
 const readFileCoreTool = tool({
 	description:
-		'Read file contents. Use this INSTEAD OF bash cat/head/tail/less commands. PROGRESSIVE DISCLOSURE: Files ≤1500 lines return content directly. Larger files return a 250-line preview with a continuation hint - use start_line/end_line to read additional sections. Use metadata_only=true for file info (size, lines, type) without reading content. Repeating the same path and line range while the file is unchanged returns a short stub; pass start_line/end_line to read the body again.',
+		'Read file contents. Use this INSTEAD OF bash cat/head/tail/less commands. PROGRESSIVE DISCLOSURE: Files ≤1500 lines return content directly. Larger files return a 250-line preview with a continuation hint - use start_line/end_line to read additional sections. Use metadata_only=true for file info (size, lines, type) without reading content. Repeating the same path and line range while the file is unchanged returns a short stub; pass start_line/end_line to read the body again. Image files (png, jpg, jpeg, gif, webp, up to 10 MB) are returned as images that a vision-capable model can see.',
 	inputSchema: jsonSchema<{
 		path: string;
 		start_line?: number;
@@ -266,6 +289,7 @@ const ReadFileFormatter = React.memo(
 			isPartialRead: boolean;
 			isMetadataOnly: boolean;
 			isTruncated: boolean;
+			isImage: boolean;
 		};
 	}) => {
 		const themeContext = React.useContext(ThemeContext);
@@ -294,7 +318,13 @@ const ReadFileFormatter = React.memo(
 					</Box>
 				)}
 
-				{fileInfo.isMetadataOnly ? (
+				{fileInfo.isImage && (
+					<Box>
+						<Text color={colors.info}>(image)</Text>
+					</Box>
+				)}
+
+				{fileInfo.isImage ? null : fileInfo.isMetadataOnly ? (
 					<>
 						<Box>
 							<Text color={colors.secondary}>Total lines: </Text>
@@ -315,7 +345,7 @@ const ReadFileFormatter = React.memo(
 					</>
 				)}
 
-				{!fileInfo.isMetadataOnly && (
+				{!fileInfo.isMetadataOnly && !fileInfo.isImage && (
 					<Box>
 						<Text color={colors.secondary}>Tokens: </Text>
 						<Text color={colors.text}>~{fileInfo.tokens.toLocaleString()}</Text>
@@ -349,6 +379,14 @@ const readFileFormatter = async (
 	// metadata layout.
 	const isMetadataOnly = Boolean(args.metadata_only);
 
+	const requestedPath = args.path || args.file_path;
+	// An image read returns pixels, not lines, so there is no line range or
+	// token count to show (and decoding the bytes as text would be wrong).
+	const isImage =
+		!isMetadataOnly &&
+		typeof requestedPath === 'string' &&
+		mediaTypeForPath(requestedPath) !== undefined;
+
 	let fileInfo = {
 		totalLines: 0,
 		readLines: 0,
@@ -357,11 +395,12 @@ const readFileFormatter = async (
 		isPartialRead: false,
 		isMetadataOnly,
 		isTruncated: false,
+		isImage,
 	};
 
 	try {
 		const path = args.path || args.file_path;
-		if (path && typeof path === 'string') {
+		if (!isImage && path && typeof path === 'string') {
 			const absPath = resolve(getSafeSessionCwd(), path);
 			const cached = await getCachedFileContent(absPath);
 			const totalLines = cached.totalLines;
@@ -386,6 +425,7 @@ const readFileFormatter = async (
 				isPartialRead,
 				isMetadataOnly,
 				isTruncated,
+				isImage,
 			};
 		}
 	} catch {
@@ -427,6 +467,21 @@ const readFileValidator = async (args: {
 	try {
 		await access(absPath, constants.F_OK);
 
+		// Images are read as bytes, not text, so the line and minified-content
+		// checks below do not apply. Only the size cap does.
+		if (mediaTypeForPath(absPath)) {
+			const imageStats = await stat(absPath);
+			if (imageStats.isFile() && imageStats.size > MAX_IMAGE_BYTES) {
+				return {
+					valid: false,
+					error: `Image "${args.path}" is ${imageStats.size} bytes, over the ${MAX_IMAGE_BYTES}-byte limit for images. Resize or compress it and try again.`,
+				};
+			}
+			if (imageStats.isFile()) {
+				return {valid: true};
+			}
+		}
+
 		// Validate line range parameters
 		if (args.start_line !== undefined && args.start_line < 1) {
 			return {
@@ -460,6 +515,20 @@ const readFileValidator = async (args: {
 		// Skip this check for metadata_only requests
 		if (!args.metadata_only) {
 			const cached = await getCachedFileContent(absPath);
+
+			// Binary files (images, archives, compiled output) decode to U+FFFD and
+			// control characters. A NUL byte in the leading chunk is the usual tell.
+			// Derived content (PDF/DOCX) is a markdown transcript, not the raw bytes.
+			if (
+				!cached.derived &&
+				cached.content.slice(0, BINARY_DETECTION_CHUNK_CHARS).includes('\0')
+			) {
+				return {
+					valid: false,
+					error: `File "${args.path}" is a binary file and cannot be read as text. Use metadata_only to inspect its size and type.`,
+				};
+			}
+
 			const allLines = cached.lines;
 			const totalLines = cached.totalLines;
 			const startLine = args.start_line ? Math.max(1, args.start_line) : 1;

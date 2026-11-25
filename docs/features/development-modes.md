@@ -40,7 +40,7 @@ Plan and architect are the two reviewing modes, and they review different things
 
 The default mode. Every tool call that can change something requires your explicit confirmation before execution.
 
-Read-only tools (`read_file`, `find_files`, `search_file_contents`, `list_directory`, `git_status`, `git_diff`, `git_log`, `lsp_get_diagnostics`, `web_search`, `fetch_url`, `check_skill`) and the conversation tools (`ask_user`, `agent`, `write_tasks`, `write_plan`, `write_walkthrough`) run without a prompt. So does anything in `nanocoder.alwaysAllow`.
+Read-only tools (`read_file`, `find_files`, `search_file_contents`, `list_directory`, `git_status`, `git_diff`, `git_log`, `lsp_get_diagnostics`, `web_search`, `fetch_url`, `check_skill`, `get_plan`) and the conversation tools (`ask_user`, `agent`, `write_tasks`, `write_plan`, `update_plan_node`, `write_walkthrough`) run without a prompt. So does anything in `nanocoder.alwaysAllow`.
 
 - See exactly what the AI wants to do before it happens
 - Approve or reject each action individually
@@ -68,7 +68,7 @@ Automatically accepts and executes **every** tool call without a confirmation pr
 
 - No tool confirmation prompts at all — everything runs immediately
 - Bash commands, commits, and pull requests are all auto-accepted
-- `execute_bash` still refuses a small set of catastrophic commands in every mode (for example `rm -rf /`, `mkfs`, `dd if=`, and fork bombs); those are blocked outright rather than prompted. This catches accidents, not a determined attempt: it matches the command text, ignores quoted arguments (so `grep "dd if=" build.log` runs), and is easy to get around, so it is not a security boundary
+- `execute_bash` still refuses a small set of catastrophic commands in every mode (for example `rm -rf /`, `mkfs`, `dd if=`, and fork bombs); those are blocked outright rather than prompted. This catches accidents, not a determined attempt: it matches the command text, ignores quoted arguments (so `grep "dd if=" build.log` runs), and is easy to get around, so it is not a security boundary. Quoted text is not ignored on a line with a backslash, a heredoc or a `#` outside quotes. For `rm`, it is ignored only when every command on the line passes it on as text (`echo`, `printf`, `grep`, `rg`, `cd`, `git add`, `git commit`), so `git commit -m "drop the rm -rf / example" && git push` is still refused
 - The status bar turns red to make it clear you're in yolo mode
 - One safeguard remains: if the model repeats the identical tool call too many times in a row, Nanocoder pauses and asks whether to continue, so a stuck loop cannot drain tokens unattended. See [Retry Limits](../configuration/index.md#retry-limits)
 
@@ -102,11 +102,11 @@ Plan mode removes mutation tools and leaves only read-only and interaction tools
 | **Diagnostics** | `lsp_get_diagnostics` |
 | **Web** | `web_search`, `fetch_url` |
 | **Interaction** | `ask_user`, `agent` |
-| **Plan artifact** | `write_plan` |
+| **Plan artifact** | `write_plan`, `get_plan` |
 
-`write_plan` is the one write plan mode allows, and it only ever writes to the session's own artifact directory — never to your project. It exists in plan mode only; the other modes do not have it.
+`write_plan` is the one write plan mode allows. It writes the Markdown plan to the session's own artifact directory. When the model also passes `nodes`, it persists the dependency graph to `.nanocoder/plans/` in the project — gitignored runtime state, so the plan survives session restarts. `write_plan` exists in plan mode only; the other modes do not have it.
 
-The following are **excluded**: the file mutation tools (`write_file`, `string_replace`, `diff_edit`, `file_op`, `lsp_format_document`), `execute_bash`, `browser`, the task and walkthrough tools (`write_tasks`, `write_walkthrough`), and the git write tools (`git_add`, `git_commit`, `git_pr`). Custom tools are available only when they declare `approval: never` and `read_only: true`.
+The following are **excluded**: the file mutation tools (`write_file`, `string_replace`, `diff_edit`, `file_op`, `lsp_format_document`), the shell tools (`execute_bash`, `bash_output`, `kill_bash`), `browser`, the task and walkthrough tools (`write_tasks`, `write_walkthrough`), the git write tools (`git_add`, `git_commit`, `git_pr`), and `update_plan_node` — planning may define the graph, but marking work as done is execution. Custom tools are available only when they declare `approval: never` and `read_only: true`.
 
 Subagents started with `agent` in plan mode get the same exclusions, so delegating work does not open a path to a mutation.
 
@@ -139,6 +139,10 @@ Plan mode writes to the session's artifact directory under the app data path, ne
 | **Walkthrough** | `walkthrough.md` | `write_walkthrough` after implementing |
 
 Artifacts are restored when you resume a session and are deleted along with it. See [Session Management](session-management.md).
+
+A plan graph is different: it is project state under `.nanocoder/plans/`, not a
+session artifact. It survives the session that created it and can be resumed by
+another one. See [Persistent Plan Graphs](persistent-plans.md).
 
 ### Plan Mode with Tune
 

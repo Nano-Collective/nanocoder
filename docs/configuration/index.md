@@ -110,10 +110,11 @@ Names are matched case-insensitively. A key that is skipped is reported in a war
 | Variable | Description |
 |----------|-------------|
 | `NANOCODER_CONFIG_DIR` | Override the user-level configuration directory. Project-level `agents.config.json` and `.mcp.json` still apply; the project-level `nanocoder-preferences.json` is skipped for top-level preferences |
-| `NANOCODER_CONTEXT_LIMIT` | Default context limit (tokens) used when no session override or provider `contextWindow`/`contextWindows` applies. It is checked before models.dev metadata (see [Context Limit Resolution Order](#context-limit-resolution-order)). Enables auto-compact and `/usage` to work correctly. The `--context-max` CLI flag takes priority |
+| `NANOCODER_CONTEXT_LIMIT` | Default context limit (tokens) used when no session override or provider `contextWindow`/`contextWindows` applies. Accepts positive integer or decimal strings, plus k/K or m/M suffixes. It is checked before models.dev metadata (see [Context Limit Resolution Order](#context-limit-resolution-order)). Enables auto-compact and `/usage` to work correctly. The `--context-max` CLI flag takes priority |
 | `NANOCODER_DATA_DIR` | Override the application data directory for internal data like usage statistics |
 | `NANOCODER_INSTALL_METHOD` | Override installation detection (`npm`, `homebrew`, `nix`, `unknown`) |
 | `NANOCODER_NO_UPDATE_CHECK` | Set to `1` to disable automatic update checks at startup. Running `/update` still performs an explicit check |
+| `NANOCODER_PROFILE` | Default profile name to activate (overridden by `--profile`; overrides `nanocoder.defaultProfile`). See [Named Configuration Profiles](#named-configuration-profiles) |
 | `NANOCODER_DEFAULT_SHUTDOWN_TIMEOUT` | Graceful shutdown timeout in milliseconds (default: 5000) |
 | `NANOCODER_MAX_TURNS` | Maximum LLM turns for headless runs (`--plain`, ACP, and subagents unless `subagentMaxTurns` is set). Overrides `nanocoder.headless.maxTurns`; default 200. See [Headless](#headless) |
 | `NANOCODER_TRUST_DIRECTORY` | Set to `1` to trust the working directory and save it to `trustedDirectories` for later runs. Honoured by the interactive TUI, `run` (Ink and `--plain`), `nanocoder daemon start`, `nanocoder verify` and `--acp`. Must come from your shell: a project `.env` cannot set it. See [Directory trust](../getting-started/index.md#directory-trust) |
@@ -168,9 +169,123 @@ Nanocoder resolves a model's context limit in this order:
 
 This lets you persist context limits for unknown or local models without reapplying `/context-max` every session.
 
+String-valued context-limit overrides (`/context-max`, `--context-max`, `?context-max=`, and `NANOCODER_CONTEXT_LIMIT`) accept positive integers or decimal values with a `k`/`K` (1,000) or `m`/`M` (1,000,000) suffix. Bare positive decimal strings remain supported and are rounded to whole tokens for compatibility. Values must remain within JavaScript's safe integer range so token counts are not silently changed. The `contextWindows` and `contextWindow` fields in `agents.config.json` remain numeric JSON values and do not accept suffix strings.
+
 ## Application Settings
 
 Beyond providers and MCP servers, `agents.config.json` supports application-level settings under the `nanocoder` key.
+
+### Language servers
+
+Nanocoder discovers installed language servers by scanning `PATH` when the LSP manager starts. Discovery is asynchronous and enabled by default. If you install a server while Nanocoder is running, restart it to discover the new server; each new discovery pass takes a fresh `PATH` snapshot. To turn auto-discovery off while still using explicitly configured servers, set `nanocoder.lsp.autoDiscover` to `false`:
+
+```json
+{
+  "nanocoder": {
+    "lsp": {
+      "autoDiscover": false
+    },
+    "lspServers": [
+      {
+        "name": "typescript-language-server",
+        "command": "typescript-language-server",
+        "args": ["--stdio"],
+        "languages": ["ts", "tsx", "js", "jsx"]
+      }
+    ]
+  }
+}
+```
+
+Project-level configuration takes precedence over the user-level setting. With auto-discovery disabled, `/lsp` reports that state; any entries in `lspServers` are still started.
+
+The `NANOCODER_LSP=off` environment variable also disables automatic discovery for that process, overriding the config value.
+
+### Named Configuration Profiles
+
+Named configuration profiles bundle complete setups — including provider, model, mode, tool configuration, hooks, formatters, and security settings — under a name in `agents.config.json`. This allows switching easily between tasks such as fast local edits, heavy refactoring, or read-only code review.
+
+#### Defining Profiles
+
+Profiles are defined in the `nanocoder.profiles` object within `agents.config.json` (at user or project level):
+
+```json
+{
+  "nanocoder": {
+    "defaultProfile": "fast",
+    "profiles": {
+      "fast": {
+        "provider": "ollama",
+        "model": "qwen2.5-coder:7b",
+        "mode": "auto-accept"
+      },
+      "deep": {
+        "provider": "anthropic",
+        "model": "claude-3-7-sonnet-20250219",
+        "mode": "normal",
+        "retries": {"maxEmptyTurns": 3}
+      },
+      "review": {
+        "provider": "openrouter",
+        "model": "deepseek/deepseek-r1",
+        "mode": "plan",
+        "disabledTools": ["write_file", "string_replace", "diff_edit", "execute_bash"]
+      }
+    }
+  }
+}
+```
+
+Each profile can specify:
+- `provider` (string): AI provider name (from configured providers)
+- `model` (string): Model ID for the provider
+- `mode` (string): Starting development mode (`normal`, `auto-accept`, `yolo`, `plan`, `architect`)
+- Any `nanocoder.*` settings: `autoCompact`, `hooks`, `formatters`, `alwaysAllow`, `disabledTools`, `sandbox`, `firewall`, `retries`, `tune`, `systemPrompt`, etc.
+- Profile-specific `providers` array, merged into the available providers when the profile is active
+
+#### Profile Selection Precedence
+
+Nanocoder resolves the active profile in this order:
+
+1. `--profile <name>` CLI flag (or `--profile=<name>`)
+2. `NANOCODER_PROFILE` environment variable
+3. `nanocoder.defaultProfile` in `agents.config.json` (project layer wins over global)
+4. No profile active (base configuration)
+
+Specifying an unknown profile name fails fast with an error listing available profiles.
+
+#### Using Profiles
+
+Run with a profile from the command line:
+
+```bash
+# Interactive session with the "fast" profile
+nanocoder --profile fast
+
+# Non-interactive run with the "review" profile
+nanocoder run --profile review "review src/auth.ts for edge cases"
+
+# Using the fused syntax
+nanocoder --profile=deep
+```
+
+Within the interactive TUI, use the `/profile` slash command:
+
+```bash
+/profile           # List configured profiles and see which one is active
+/profile fast      # Switch to the "fast" profile (applies mode, model, and reloads config)
+/profile --clear   # Clear active profile and revert to base configuration
+```
+
+#### Inspecting Effective Configuration
+
+Profile overrides layer on top of project and global configurations. You can inspect how profile settings merge using the `config` CLI command:
+
+```bash
+nanocoder config show           # Displays active profile and its origin in header
+nanocoder config diff           # Shows profile overrides in effect
+nanocoder config list           # Lists all configuration keys across layers
+```
 
 ### Auto-Compact
 
@@ -303,6 +418,48 @@ Set `nanocoder.autoCommit` to `true` (boolean; any other value is treated as off
 
 This produces one commit per edit. Squash them before opening a PR if you prefer a tidier history (`git rebase -i`, or `git reset --soft <base>` and commit again).
 
+### Git Snapshot
+
+When the project folder is a git repository, the system prompt includes a short snapshot of it taken when the session starts: the current branch (or detached HEAD) and default branch, the upstream with ahead/behind counts, a `git status` summary with up to 10 changed paths, and the last 5 commit subjects. The model then knows about uncommitted work without spending a turn on `git status` and `git log`. The block is labelled as a session-start snapshot, so the model re-checks before acting on it.
+
+Only local, read-only git commands run (no fetch), each with a short timeout; a slow or failing `git status` on a very large repository is left out of the block rather than delaying the session. Outside a repository, or without git installed, nothing is added. The snapshot is taken once per session, so the prompt stays the same across turns. It is never added under the `nano` tool profile.
+
+Set `nanocoder.gitContext` to `false` to turn it off (default `true`):
+
+```json
+{
+  "nanocoder": {
+    "gitContext": false
+  }
+}
+```
+
+### Completion Evidence
+
+Models sometimes edit code and say "fixed" without ever running the tests. Set `nanocoder.verify.required` and a turn that edited files is not accepted as finished until each required command has run through `execute_bash` and exited `0` **after the last edit**. Off by default.
+
+```json
+{
+  "nanocoder": {
+    "verify": {
+      "required": ["pnpm test", "pnpm run lint"]
+    }
+  }
+}
+```
+
+`required` is a list of commands, or `"auto"` to require the `test`, `typecheck` and `lint` scripts that exist in the project's `package.json` (the package manager is read from the lockfile; other ecosystems list their commands explicitly). Anything else is ignored with a warning, which leaves the feature off.
+
+- **How it works.** The agent loop keeps a ledger for each task (each user message) with every `execute_bash` command, its exit code and a timestamp. When the model tries to finish after editing, any required command without a fresh exit-`0` run is sent back to it ("You must run each command below and fix any failure before finishing").
+- **Stale evidence does not count.** A passing run followed by another edit has to be repeated.
+- **A command matches as whole words, at the start of a command:** `pnpm test` is satisfied by `pnpm test -- --watch=false`, `CI=1 pnpm test` or `cd app && pnpm test`, but not by `pnpm test:all` or by text that only mentions it (`echo pnpm test`).
+- **The exit code has to be real.** A run containing a pipe, `;`, a newline, `||` or a background `&` outside quotes (such as `pnpm test | tail`) does not count, because those can report `0` whatever the tests did.
+- **No endless loops.** A task is sent back at most twice, after which the model may finish and the result is marked unverified.
+- The final response ends with a line such as `Verification: ✓ pnpm test (exit 0) · ✗ pnpm run lint (last run exited 1)`. It is shown after a turn in the interactive UI, appended to the answer in `nanocoder run` (including `--json`), and sent as a final message over ACP.
+- Works the same in the interactive UI, `nanocoder run` / `--plain`, and the VS Code extension. A task that edits nothing is never held up.
+- **Not covered:** edits made by [subagents](../features/subagents.md), and runs triggered by the daemon (file watches and schedules), which go through the subagent executor.
+- `required` lives in the same `nanocoder.verify` block as the CI-watch settings (`trustLevel`, `pollIntervalMs`, `maxPollIntervalMs`), so you can set them together.
+
 ### Retry Limits
 
 Caps on how many times the conversation loop auto-retries a failing pattern without user intervention, so a stuck model cannot silently drain tokens. They apply to every agent loop: the interactive TUI, the `--plain` runtime used by `nanocoder run "..."` in CI and non-TTY environments, the ACP loop used by editor clients, and delegated [subagent](../features/subagents.md) runs. Outside the TUI they act within the [Headless](#headless) turn ceiling. These are agent-loop limits — the per-provider `maxRetries` setting is unrelated and governs network request retries (see [Providers](providers/index.md)).
@@ -396,7 +553,7 @@ Use a different provider and model per development mode, for example a fast, che
 }
 ```
 
-Keys are mode names (`normal`, `auto-accept`, `yolo`, `plan`, `architect`). Each entry needs a `provider` that matches a configured provider name (case-insensitive) and a `model`; if that provider has a non-empty `models` list, the model must be in it. Invalid entries are skipped with an error in the log. A `--provider` or `--model` CLI flag takes priority at startup.
+Keys are mode names (`normal`, `auto-accept`, `yolo`, `plan`, `architect`). Each entry needs a `provider` that matches a configured provider name (case-insensitive) and a `model`; the provider must also have a `models` list, otherwise the entry is skipped with an error (and if that list is non-empty, the model must be in it). Invalid entries are skipped with an error in the log. A `--provider` or `--model` CLI flag takes priority at startup.
 
 ### Model Tuning
 

@@ -19,20 +19,24 @@ test('isDirectoryTrusted returns false when trustedDirectories is empty', t => {
 	t.false(isDirectoryTrusted('/some/project', {}));
 });
 
-test('isDirectoryTrusted matches a record with the current fingerprint', t => {
-	const dir = process.cwd();
-	const fingerprint = describeProjectTrust(dir).fingerprint;
-	t.true(
-		isDirectoryTrusted(dir, {
-			trustedDirectories: [{path: dir, fingerprint}],
-		}),
-	);
-	t.true(
-		isDirectoryTrusted(dir, {
-			trustedDirectories: [{path: '.', fingerprint}],
-		}),
-	);
-});
+	test('isDirectoryTrusted matches a record with the current fingerprint', t => {
+		const dir = process.cwd();
+		const fingerprint = describeProjectTrust(dir).fingerprint;
+		t.true(
+			isDirectoryTrusted(dir, {
+				trustedDirectories: [
+					{path: dir, fingerprint, fingerprintVersion: TRUST_FINGERPRINT_VERSION},
+				],
+			}),
+		);
+		t.true(
+			isDirectoryTrusted(dir, {
+				trustedDirectories: [
+					{path: '.', fingerprint, fingerprintVersion: TRUST_FINGERPRINT_VERSION},
+				],
+			}),
+		);
+	});
 
 test('isDirectoryTrusted ignores a path that has no fingerprint', t => {
 	const dir = process.cwd();
@@ -59,7 +63,13 @@ test('isDirectoryTrusted is false after a plugin is added', t => {
 		);
 		t.false(
 			isDirectoryTrusted(root, {
-				trustedDirectories: [{path: root, fingerprint: before}],
+				trustedDirectories: [
+					{
+						path: root,
+						fingerprint: before,
+						fingerprintVersion: TRUST_FINGERPRINT_VERSION,
+					},
+				],
 			}),
 		);
 		t.true(
@@ -68,6 +78,68 @@ test('isDirectoryTrusted is false after a plugin is added', t => {
 					{
 						path: root,
 						fingerprint: describeProjectTrust(root).fingerprint,
+						fingerprintVersion: TRUST_FINGERPRINT_VERSION,
+					},
+				],
+			}),
+		);
+	} finally {
+		rmSync(root, {recursive: true, force: true});
+	}
+});
+
+	test('isDirectoryTrusted is false after a profile MCP server is added', t => {
+	const root = join(tmpdir(), `trust-profile-mcp-${Date.now()}`);
+	mkdirSync(root, {recursive: true});
+	writeFileSync(
+		join(root, 'agents.config.json'),
+		JSON.stringify({
+			nanocoder: {
+				profiles: {
+					dev: {},
+				},
+			},
+		}),
+	);
+	try {
+		const before = describeProjectTrust(root).fingerprint;
+		writeFileSync(
+			join(root, 'agents.config.json'),
+			JSON.stringify({
+				nanocoder: {
+					profiles: {
+						dev: {
+							mcpServers: {
+								evil: {
+									command: 'sh',
+									args: ['-c', 'echo after'],
+									env: {AFTER: '1'},
+								},
+							},
+						},
+					},
+				},
+			}),
+		);
+		t.not(describeProjectTrust(root).fingerprint, before);
+		t.false(
+			isDirectoryTrusted(root, {
+				trustedDirectories: [
+					{
+						path: root,
+						fingerprint: before,
+						fingerprintVersion: TRUST_FINGERPRINT_VERSION,
+					},
+				],
+			}),
+		);
+		t.true(
+			isDirectoryTrusted(root, {
+				trustedDirectories: [
+					{
+						path: root,
+						fingerprint: describeProjectTrust(root).fingerprint,
+						fingerprintVersion: TRUST_FINGERPRINT_VERSION,
 					},
 				],
 			}),
@@ -85,6 +157,126 @@ test('isDirectoryTrusted does not match an unrelated directory', t => {
 	);
 });
 
+if (process.platform === 'win32') {
+	test('isDirectoryTrusted matches a directory regardless of case on Windows', t => {
+		const dir = process.cwd();
+		const altCaseDir =
+			dir[0] === dir[0].toLowerCase()
+				? dir[0].toUpperCase() + dir.slice(1)
+				: dir[0].toLowerCase() + dir.slice(1);
+		const fingerprint = describeProjectTrust(dir).fingerprint;
+
+		t.true(
+			isDirectoryTrusted(altCaseDir, {
+				trustedDirectories: [
+					{path: dir, fingerprint, fingerprintVersion: TRUST_FINGERPRINT_VERSION},
+				],
+			}),
+		);
+		t.true(
+			isDirectoryTrusted(dir, {
+				trustedDirectories: [
+					{
+						path: altCaseDir,
+						fingerprint,
+						fingerprintVersion: TRUST_FINGERPRINT_VERSION,
+					},
+				],
+			}),
+		);
+	});
+
+	test('trustRecheck finds matching entry regardless of case on Windows', t => {
+		const dir = process.cwd();
+		const altCaseDir =
+			dir[0] === dir[0].toLowerCase()
+				? dir[0].toUpperCase() + dir.slice(1)
+				: dir[0].toLowerCase() + dir.slice(1);
+
+		t.is(
+			trustRecheck(altCaseDir, {
+				trustedDirectories: [
+					{
+						path: dir,
+						fingerprint: 'stale',
+						fingerprintVersion: TRUST_FINGERPRINT_VERSION,
+					},
+				],
+			}),
+			'changed',
+		);
+		t.is(
+			trustRecheck(altCaseDir, {
+				trustedDirectories: [dir],
+			}),
+			'upgrade',
+		);
+	});
+
+	test('grantDirectoryTrust deduplicates entries differing only in case on Windows', t => {
+		const dir = process.cwd();
+		const altCaseDir =
+			dir[0] === dir[0].toLowerCase()
+				? dir[0].toUpperCase() + dir.slice(1)
+				: dir[0].toLowerCase() + dir.slice(1);
+		const prefs: UserPreferences = {
+			trustedDirectories: [{path: dir, fingerprint: 'old'}],
+		};
+		const updated = grantDirectoryTrust(prefs, altCaseDir, 'new');
+		t.is(updated.trustedDirectories?.length, 1);
+		t.is(updated.trustedDirectories?.[0]?.fingerprint, 'new');
+	});
+}
+
+test('isDirectoryTrusted is false after a URL-only profile MCP server is added', t => {
+	const root = join(tmpdir(), `trust-profile-mcp-url-${Date.now()}`);
+	mkdirSync(root, {recursive: true});
+	writeFileSync(
+		join(root, 'agents.config.json'),
+		JSON.stringify({
+			nanocoder: {
+				profiles: {
+					dev: {},
+				},
+			},
+		}),
+	);
+	try {
+		const before = describeProjectTrust(root).fingerprint;
+		writeFileSync(
+			join(root, 'agents.config.json'),
+			JSON.stringify({
+				nanocoder: {
+					profiles: {
+						dev: {
+							mcpServers: {
+								remote: {
+									transport: 'http',
+									url: 'https://example.com/mcp',
+								},
+							},
+						},
+					},
+				},
+			}),
+		);
+		t.not(describeProjectTrust(root).fingerprint, before);
+		t.false(
+			isDirectoryTrusted(root, {
+				trustedDirectories: [
+					{
+						path: root,
+						fingerprint: before,
+						fingerprintVersion: TRUST_FINGERPRINT_VERSION,
+					},
+				],
+			}),
+		);
+	} finally {
+		rmSync(root, {recursive: true, force: true});
+	}
+});
+
 test('ensureDirectoryTrust trusts without persisting when bypass is true', t => {
 	let saveCalled = false;
 	const result = ensureDirectoryTrust('/untrusted/project', true, {
@@ -97,19 +289,23 @@ test('ensureDirectoryTrust trusts without persisting when bypass is true', t => 
 	t.false(saveCalled);
 });
 
-test('ensureDirectoryTrust trusts an already-recorded directory without persisting again', t => {
-	const dir = process.cwd();
-	let saveCalled = false;
-	const result = ensureDirectoryTrust(dir, false, {
-		loadPreferences: () => ({
-			trustedDirectories: [
-				{path: dir, fingerprint: describeProjectTrust(dir).fingerprint},
-			],
-		}),
-		savePreferences: () => {
-			saveCalled = true;
-		},
-	});
+	test('ensureDirectoryTrust trusts an already-recorded directory without persisting again', t => {
+		const dir = process.cwd();
+		let saveCalled = false;
+		const result = ensureDirectoryTrust(dir, false, {
+			loadPreferences: () => ({
+				trustedDirectories: [
+					{
+						path: dir,
+						fingerprint: describeProjectTrust(dir).fingerprint,
+						fingerprintVersion: TRUST_FINGERPRINT_VERSION,
+					},
+				],
+			}),
+			savePreferences: () => {
+				saveCalled = true;
+			},
+		});
 	t.deepEqual(result, {trusted: true, persisted: false});
 	t.false(saveCalled);
 });
@@ -128,22 +324,28 @@ test.serial(
 	},
 );
 
-test.serial(
-	'ensureDirectoryTrust flags a trusted directory whose fingerprint changed',
-	t => {
-		delete process.env.NANOCODER_TRUST_DIRECTORY;
-		const dir = process.cwd();
-		const result = ensureDirectoryTrust(dir, false, {
-			loadPreferences: () => ({
-				trustedDirectories: [{path: dir, fingerprint: 'old'}],
-			}),
-			savePreferences: () => {
-				t.fail('should not persist when refusing');
-			},
-		});
-		t.deepEqual(result, {trusted: false, persisted: false, recheck: 'changed'});
-	},
-);
+	test.serial(
+		'ensureDirectoryTrust flags a trusted directory whose fingerprint changed',
+		t => {
+			delete process.env.NANOCODER_TRUST_DIRECTORY;
+			const dir = process.cwd();
+			const result = ensureDirectoryTrust(dir, false, {
+				loadPreferences: () => ({
+					trustedDirectories: [
+						{
+							path: dir,
+							fingerprint: 'old',
+							fingerprintVersion: TRUST_FINGERPRINT_VERSION,
+						},
+					],
+				}),
+				savePreferences: () => {
+					t.fail('should not persist when refusing');
+				},
+			});
+			t.deepEqual(result, {trusted: false, persisted: false, recheck: 'changed'});
+		},
+	);
 
 test.serial(
 	'ensureDirectoryTrust says a path-only entry needs re-approval after the upgrade',
@@ -190,7 +392,9 @@ test.serial('directoryTrustRefusal words a changed fingerprint differently from 
 	const dir = process.cwd();
 	const message = directoryTrustRefusal(dir, false, {
 		loadPreferences: () => ({
-			trustedDirectories: [{path: dir, fingerprint: 'old'}],
+			trustedDirectories: [
+				{path: dir, fingerprint: 'old', fingerprintVersion: TRUST_FINGERPRINT_VERSION},
+			],
 		}),
 		savePreferences: () => {
 			t.fail('should not persist when refusing');
@@ -200,18 +404,23 @@ test.serial('directoryTrustRefusal words a changed fingerprint differently from 
 	t.notRegex(message ?? '', /is not trusted/);
 });
 
-test('a trust record without a version counts as version 1, and grants record one', t => {
-	const dir = process.cwd();
-	const fingerprint = describeProjectTrust(dir).fingerprint;
-	t.true(
-		isDirectoryTrusted(dir, {
-			trustedDirectories: [{path: dir, fingerprint}],
-		}),
-	);
-	t.like(grantDirectoryTrust({}, dir).trustedDirectories?.[0], {
-		fingerprintVersion: TRUST_FINGERPRINT_VERSION,
+	test('a trust record without a version counts as version 1 and is outdated', t => {
+		const dir = process.cwd();
+		const fingerprint = describeProjectTrust(dir).fingerprint;
+		// Version 1 is no longer current: the record needs re-approval.
+		t.false(
+			isDirectoryTrusted(dir, {
+				trustedDirectories: [{path: dir, fingerprint}],
+			}),
+		);
+		t.is(trustRecheck(dir, {trustedDirectories: [{path: dir, fingerprint}]}), 'upgrade');
+		// Granting records it at the current version.
+		const granted = grantDirectoryTrust({}, dir);
+		t.true(isDirectoryTrusted(dir, granted));
+		t.like(granted.trustedDirectories?.[0], {
+			fingerprintVersion: TRUST_FINGERPRINT_VERSION,
+		});
 	});
-});
 
 test('a trust record from another fingerprint version needs re-approval', t => {
 	const dir = process.cwd();
@@ -224,14 +433,15 @@ test('a trust record from another fingerprint version needs re-approval', t => {
 			},
 		],
 	};
-	t.false(isDirectoryTrusted(dir, preferences));
-	t.is(trustRecheck(dir, preferences), 'upgrade');
-	t.is(
-		trustRecheck(dir, {
-			trustedDirectories: [{path: dir, fingerprint: 'stale'}],
-		}),
-		'changed',
-	);
+		t.false(isDirectoryTrusted(dir, preferences));
+		t.is(trustRecheck(dir, preferences), 'upgrade');
+		// A version-less record counts as version 1, which is outdated too.
+		t.is(
+			trustRecheck(dir, {
+				trustedDirectories: [{path: dir, fingerprint: 'stale'}],
+			}),
+			'upgrade',
+		);
 });
 
 test('directoryTrustRefusal is null when bypassed or already trusted', t => {
@@ -249,7 +459,11 @@ test('directoryTrustRefusal is null when bypassed or already trusted', t => {
 			...deps,
 			loadPreferences: () => ({
 				trustedDirectories: [
-					{path: dir, fingerprint: describeProjectTrust(dir).fingerprint},
+					{
+						path: dir,
+						fingerprint: describeProjectTrust(dir).fingerprint,
+						fingerprintVersion: TRUST_FINGERPRINT_VERSION,
+					},
 				],
 			}),
 		}),
@@ -309,6 +523,7 @@ test.serial(
 						{
 							path: dir,
 							fingerprint: describeProjectTrust(dir).fingerprint,
+							fingerprintVersion: TRUST_FINGERPRINT_VERSION,
 						},
 					],
 				}),

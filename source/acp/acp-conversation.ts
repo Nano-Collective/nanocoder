@@ -31,6 +31,11 @@ import {
 	consultPluginPermission,
 	withTrustedProjectPlugins,
 } from '@/plugins/host';
+import {
+	formatVerificationSummary,
+	recordToolOutcome,
+	takeEvidenceRejection,
+} from '@/services/completion-ledger';
 import {runInSessionContext} from '@/services/session-context';
 import {
 	onSubagentRunEvent,
@@ -338,6 +343,7 @@ async function runTurn(
 		const priced = await buildResponseUsage(
 			turnUsage,
 			client.getCurrentModel(),
+			{baseURL: client.getProviderConfig().config.baseURL},
 		);
 		const input = turnUsage.inputTokens ?? 0;
 		const output = turnUsage.outputTokens ?? 0;
@@ -508,8 +514,18 @@ async function runTurn(
 							walkthroughLifecycle,
 							prepared.availableNames.includes('write_walkthrough'),
 						);
-				return fallback
-					? {kind: 'continue', messages: [fallback]}
+				if (fallback) {
+					return {kind: 'continue', messages: [fallback]};
+				}
+
+				// With `nanocoder.verify.required` set, a turn that edited files
+				// cannot end until the required commands have exited 0 since the
+				// last edit.
+				const evidenceRejection = finalTurn
+					? null
+					: takeEvidenceRejection(walkthroughLifecycle.ledger);
+				return evidenceRejection
+					? {kind: 'continue', messages: [evidenceRejection]}
 					: {kind: 'finish'};
 			},
 			executeTools: async validToolCalls => {
@@ -755,6 +771,7 @@ async function runTurn(
 						toolResult.content,
 					);
 					toolResults.push(toolResult);
+					recordToolOutcome(walkthroughLifecycle.ledger, toolCall, toolResult);
 					if (status === 'completed') {
 						observeSuccessfulLifecycleTool(walkthroughLifecycle, toolCall);
 						if (toolCall.function.name === 'write_plan') {
@@ -778,7 +795,21 @@ async function runTurn(
 	});
 
 	switch (result.kind) {
-		case 'completed':
+		case 'completed': {
+			const verification = formatVerificationSummary(
+				walkthroughLifecycle.ledger,
+			);
+			if (verification) {
+				conn.sessionUpdate({
+					sessionId: session.sessionId,
+					update: {
+						sessionUpdate: 'agent_message_chunk',
+						content: {type: 'text', text: `\n\n${verification}`},
+					},
+				});
+			}
+			return withTurnUsage({stopReason: 'end_turn'});
+		}
 		case 'no-system-message':
 			return withTurnUsage({stopReason: 'end_turn'});
 		// A provider that answers with no choices failed the request, as a

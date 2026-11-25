@@ -21,12 +21,15 @@ test('creates gitignore and ignores runtime files but not configuration', async 
 		);
 
 		t.true(content.includes('/checkpoints/'));
+		t.true(content.includes('/plans/'));
 		t.true(content.includes('/timeline/'));
 		t.true(content.includes('/daemon.*'));
 		t.true(content.includes('/ci-watch-state.json*'));
 
 		const ignoredPaths = [
 			'.nanocoder/checkpoints/test/conversation.json',
+			'.nanocoder/plans/auth.jsonl',
+			'.nanocoder/plans/index.json',
 			'.nanocoder/timeline/session/index.json',
 			'.nanocoder/daemon.log',
 			'.nanocoder/daemon.json',

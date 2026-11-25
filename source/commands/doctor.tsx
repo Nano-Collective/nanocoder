@@ -20,9 +20,13 @@ import type {ToolManager} from '@/tools/tool-manager';
 import {HOOK_EVENTS, type HookEvent} from '@/types/config';
 import type {AIProviderConfig, Command} from '@/types/index';
 import {formatError} from '@/utils/error-formatter';
+import {resolveRipgrepPath} from '@/utils/fs/ripgrep-path';
 import {generateKey} from '@/utils/key-generator';
-import {getPackageVersion} from '@/utils/package-version';
-import {isLocalURL} from '@/utils/url-utils';
+import {
+	getPackageNodeMajorFloor,
+	getPackageVersion,
+} from '@/utils/package-version';
+import {isLocalURL, redactUrlSecrets} from '@/utils/url-utils';
 import {
 	type ApiCompatibility,
 	type FetchModelsResult,
@@ -96,7 +100,8 @@ export interface DoctorReport {
 	hooks: Section<DoctorHook[]>;
 	formatters: Section<DoctorFormatter[]>;
 	deepChecks?: {
-		nodeSupported: boolean;
+		nodeSupported: boolean | undefined;
+		minimumNodeMajor: number | undefined;
 		tools: Array<{name: string; available: boolean}>;
 	};
 	daemon: Section<
@@ -125,17 +130,6 @@ export interface DoctorDependencies {
 
 interface DoctorOptions {
 	probe?: boolean;
-}
-
-function sanitizedUrl(value: string): string {
-	try {
-		const url = new URL(value);
-		return url.protocol === 'http:' || url.protocol === 'https:'
-			? url.origin
-			: '[configured URL]';
-	} catch {
-		return '[invalid URL]';
-	}
 }
 
 function apiCompatibility(provider: AIProviderConfig): ApiCompatibility {
@@ -216,9 +210,10 @@ async function probeProviderApi(
 	};
 }
 
-async function probeExecutable(command: string): Promise<boolean> {
+export async function probeExecutable(command: string): Promise<boolean> {
 	try {
-		await executeFile(command, ['--version'], {timeout: 1000});
+		const executable = command === 'rg' ? await resolveRipgrepPath() : command;
+		await executeFile(executable, ['--version'], {timeout: 1000});
 		return true;
 	} catch {
 		return false;
@@ -310,9 +305,6 @@ async function collectProviders(
 	return Promise.all(
 		providers.map(async provider => {
 			const configuredBaseURL = provider.config.baseURL ?? null;
-			const baseURL = configuredBaseURL
-				? sanitizedUrl(configuredBaseURL)
-				: null;
 			const local = configuredBaseURL ? isLocalURL(configuredBaseURL) : false;
 			const reachability =
 				configuredBaseURL && local
@@ -320,6 +312,9 @@ async function collectProviders(
 					: configuredBaseURL
 						? 'not-local'
 						: 'skipped';
+			const baseURL = configuredBaseURL
+				? (redactUrlSecrets(configuredBaseURL) ?? null)
+				: null;
 
 			return {
 				name: provider.name,
@@ -337,8 +332,13 @@ async function collectDeepChecks(
 	dependencies: DoctorDependencies,
 ): Promise<NonNullable<DoctorReport['deepChecks']>> {
 	const majorVersion = Number.parseInt(process.versions.node, 10);
+	const minimumNodeMajor = getPackageNodeMajorFloor();
 	return {
-		nodeSupported: Number.isFinite(majorVersion) && majorVersion >= 22,
+		minimumNodeMajor,
+		nodeSupported:
+			minimumNodeMajor === undefined || !Number.isFinite(majorVersion)
+				? undefined
+				: majorVersion >= minimumNodeMajor,
 		tools: await Promise.all(
 			['rg', 'git'].map(async name => ({
 				name,
@@ -361,7 +361,7 @@ function collectMcp(toolManager: ToolManager | null): DoctorMcpServer[] {
 			toolCount: serverTools.length,
 			resourceCount: serverInfo?.resourceCount ?? 0,
 			promptCount: serverInfo?.promptCount ?? 0,
-			url: serverInfo?.url ? sanitizedUrl(serverInfo.url) : undefined,
+			url: redactUrlSecrets(serverInfo?.url),
 		};
 	});
 }
@@ -521,9 +521,11 @@ export function Doctor({report}: {report: DoctorReport}) {
 					<SectionTitle>Deep checks</SectionTitle>
 					<Text color={colors.text}>
 						• Node {report.system.nodeVersion}:{' '}
-						{report.deepChecks.nodeSupported
-							? 'supported'
-							: 'unsupported (requires Node 22 or newer)'}
+						{report.deepChecks.nodeSupported === undefined
+							? 'support requirement unavailable'
+							: report.deepChecks.nodeSupported
+								? 'supported'
+								: `unsupported (requires Node ${report.deepChecks.minimumNodeMajor} or newer)`}
 					</Text>
 					{report.deepChecks.tools.map(tool => (
 						<Text key={tool.name} color={colors.text}>
@@ -655,17 +657,23 @@ export function Doctor({report}: {report: DoctorReport}) {
 	);
 }
 
-export const doctorCommand: Command = {
-	name: 'doctor',
-	description:
-		'Show environment health report; use --probe for provider checks',
-	handler: async args => {
-		const report = await collectDoctorReport(undefined, {
-			probe: args.includes('--probe'),
-		});
-		return React.createElement(Doctor, {
-			key: generateKey('doctor'),
-			report,
-		});
-	},
-};
+export function createDoctorCommand(
+	loadReport: typeof collectDoctorReport = collectDoctorReport,
+): Command {
+	return {
+		name: 'doctor',
+		description:
+			'Show environment health report; use --probe for provider checks',
+		handler: async args => {
+			const report = await loadReport(undefined, {
+				probe: args.includes('--probe'),
+			});
+			return React.createElement(Doctor, {
+				key: generateKey('doctor'),
+				report,
+			});
+		},
+	};
+}
+
+export const doctorCommand: Command = createDoctorCommand();

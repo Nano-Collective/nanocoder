@@ -3,6 +3,7 @@ import {isInternalWalkthroughMessage} from '@/artifacts/walkthrough-lifecycle';
 import {BASH_OUTPUT_PREFIX} from '@/constants';
 import {isAutoDiagnosticsMessage} from '@/hooks/chat-handler/conversation/auto-diagnostics';
 import type {Message} from '@/types/core';
+import {stripTurnContext} from '@/utils/turn-context';
 import {REDACTED, redactSecrets} from '@/verify/redact-secrets';
 
 /**
@@ -133,7 +134,13 @@ function toSharedMessage(
 
 	const shared: SharedMessage = {
 		role: message.role,
-		content: transform(message.content ?? ''),
+		// Per-turn context was assembled for the model, so a shared transcript
+		// shows the user's message as they typed it (#1574).
+		content: transform(
+			message.role === 'user'
+				? stripTurnContext(message.content ?? '')
+				: (message.content ?? ''),
+		),
 	};
 	if (message.reasoning?.trim()) {
 		shared.reasoning = transform(message.reasoning);

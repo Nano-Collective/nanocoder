@@ -7,6 +7,7 @@ import {TIMEOUT_COST_LOOKUP_MS} from '@/constants';
 import {getModelPricing} from '@/models/index';
 import type {ApiUsage} from '@/types/core';
 import type {ResponseUsage} from '@/types/usage';
+import {isLocalURL} from '@/utils/url-utils';
 
 export interface TokenPricing {
 	input: number;
@@ -16,6 +17,12 @@ export interface TokenPricing {
 }
 
 type PricingLookup = (model: string) => Promise<TokenPricing | null>;
+
+interface PricingOptions {
+	getPricing?: PricingLookup;
+	/** The active provider's base URL; local servers are never priced. */
+	baseURL?: string;
+}
 
 function finiteTokenCount(value: number | undefined): number | undefined {
 	return Number.isFinite(value) && (value as number) >= 0
@@ -179,11 +186,16 @@ export function calculateUsageCost(
 export async function buildResponseUsage(
 	usage: ApiUsage | undefined,
 	model: string,
-	getPricing: PricingLookup = getModelPricing,
+	{getPricing = getModelPricing, baseURL}: PricingOptions = {},
 ): Promise<ResponseUsage | undefined> {
 	const reported = toReportedUsage(usage);
 	if (!reported || !usage) {
 		return undefined;
+	}
+	// A model served from the user's own machine is free, even when a hosted
+	// provider on models.dev lists the same id (e.g. gpt-oss:20b).
+	if (baseURL && isLocalURL(baseURL)) {
+		return reported;
 	}
 
 	let cost: number | undefined;
@@ -210,18 +222,18 @@ export async function buildResponseUsage(
 export async function buildResponseUsageBounded(
 	usage: ApiUsage | undefined,
 	model: string,
-	options: {timeoutMs?: number; getPricing?: PricingLookup} = {},
+	options: PricingOptions & {timeoutMs?: number} = {},
 ): Promise<ResponseUsage | undefined> {
 	const reported = toReportedUsage(usage);
 	if (!reported) {
 		return undefined;
 	}
 
-	const {timeoutMs = TIMEOUT_COST_LOOKUP_MS, getPricing} = options;
+	const {timeoutMs = TIMEOUT_COST_LOOKUP_MS, ...pricingOptions} = options;
 	let timer: ReturnType<typeof setTimeout> | undefined;
 	try {
 		const bounded = await Promise.race([
-			buildResponseUsage(usage, model, getPricing),
+			buildResponseUsage(usage, model, pricingOptions),
 			new Promise<ResponseUsage>(resolve => {
 				timer = setTimeout(() => resolve(reported), timeoutMs);
 			}),

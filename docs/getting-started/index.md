@@ -44,6 +44,7 @@ nanocoder -h
 |--------|-------|-------------|
 | `--version` | `-v` | Display the installed version number |
 | `--help` | `-h` | Show usage information and available options |
+| `--profile <name>` | | Use a named configuration profile from agents.config.json (e.g. `--profile fast`) |
 | `--vscode` | | **Deprecated.** Start the legacy VS Code companion (WebSocket). It will be removed in a future release; the [VS Code extension](../features/vscode-extension.md) now runs the agent itself over ACP |
 | `--vscode-port` | | Ask for a specific VS Code server port. By default it binds an ephemeral port and publishes it to a discovery file the extension reads, so this is only needed when you want a known port (e.g. for port forwarding). If the requested port is busy, the next 10 ports are tried in turn and the one actually bound is written to the discovery file and the log |
 | `--acp` | | Run as an [ACP server](../features/acp.md) for editor integration (Zed, etc.) |
@@ -53,14 +54,15 @@ nanocoder -h
 | `--no-plain` | | Force the Ink runtime even in CI and non-TTY environments |
 | `--json` | | Emit a single structured JSON object to `stdout` on completion instead of streamed text. Requires `run` and always uses the plain runtime, even in a terminal; incompatible with `--no-plain`, `--acp`, `--vscode` and `review` |
 | `--output-format` | | Set the `stdout` format, `text` or `json`. Synonym for `--json` |
-| `--context-max` | | Set maximum context length in tokens (supports k/K suffix, e.g. `128k`) |
+| `--json-schema <file|JSON>` | | Validate the final answer from `run` against a JSON Schema file or inline JSON. Invalid answers are retried; always uses the plain runtime |
+| `--context-max` | | Set maximum context length in tokens (supports positive integer or decimal values, k/K, and m/M suffixes) |
 | `--mode` | | Start in a specific [development mode](../features/development-modes.md) - `normal`, `auto-accept`, `yolo`, `plan`, or `architect`. Defaults to `auto-accept` for `run` mode; interactive sessions use `defaultMode` from `agents.config.json` if set, otherwise `normal`. |
 | `--trust-directory` | | Skip the first-run directory trust prompt for this run only. Valid with `run`, `nanocoder daemon start`, `nanocoder verify` and `--acp`; ignored (with a warning) in interactive mode. The trust is ephemeral - `trustedDirectories` in your preferences file is not modified. See [Directory trust](#directory-trust) |
 | `--alt-screen` | | Start in fullscreen mode: a fixed-height layout on the alternate screen buffer with in-app scrolling (enabled by default). |
 | `--no-alt-screen` | | Disable fullscreen mode and force inline mode (main screen, chat history in the terminal's native scrollback). |
 | `--mouse` | | In fullscreen mode, the mouse wheel scrolls the chat viewport; select text with Shift+drag (Option+drag in iTerm2). Enabled by default. |
 | `--no-mouse` | | Disable mouse reporting in fullscreen mode: native text selection works directly, but the wheel no longer scrolls chat history. |
-| `--prompt-file <path>` | | Read the `run` prompt from a file instead of the command line. Takes precedence over a positional prompt. Use it for large prompts: Linux caps a single argument at 128 KiB, and anything bigger fails to launch with `E2BIG`. Only valid with `run`. |
+| `--prompt-file <path>` | | Read the `run` prompt from a file instead of the command line. Takes precedence over a positional prompt. Pass `-` to read it from stdin (`git diff \| nanocoder run --prompt-file -`). Use it for large prompts: Linux caps a single argument at 128 KiB, and anything bigger fails to launch with `E2BIG`. Only valid with `run`. |
 | `--continue` | `-c` | Resume the most recent [saved session](../features/session-management.md) for the current directory; starts a fresh session if none exists. Interactive only — errors with `run`. Mutually exclusive with `--resume`. |
 | `--resume [id]` | `-r` | Resume a [saved session](../features/session-management.md) by session ID, 1-based list index, or `last`. With no ID, opens the session picker at startup. Errors if the session is not found. Interactive only — errors with `run`. |
 | `init [--preset <type>] [-f\|--force] [--lean]` | | Initialize the current project. Bundled presets: `react`, `nextjs`, and `rust`. `--force` regenerates an existing `AGENTS.md`; `--lean` skips `CLAUDE.md` when merging existing project guidance |
@@ -188,6 +190,7 @@ nanocoder --provider openrouter --model google/gemini-3.1-flash run "analyze src
 
 # With context limit override (useful when model context isn't auto-detected)
 nanocoder --provider ollama --model llama3.1 --context-max 128k run "analyze src/app.ts"
+nanocoder --provider ollama --model llama3.1 --context-max 1m run "analyze src/app.ts"
 
 # Flags after 'run' command
 nanocoder run --provider openrouter --model anthropic/claude-sonnet-4-20250514 "refactor database module"
@@ -230,7 +233,8 @@ An existing directory or local branch causes an error; Nanocoder never overwrite
 - Tools render chronologically as they run (e.g. `⚒ Read 1 file`) and appear in stdout before the assistant's next response
 - If a tool requires approval that auto-accept won't grant (e.g. bash or a `file_op` delete in `--mode auto-accept`, or any approval-gated tool in `--mode normal`), nanocoder prints `Tool approval required for: ...` and exits with status code `1` (`2` under `--plain`, including JSON output). This means a `run` will not execute shell commands by default: pass `--mode yolo`, or pre-approve the tool in `agents.config.json` with `{"nanocoder": {"alwaysAllow": ["execute_bash"]}}`. The `alwaysAllow` key must be inside the `nanocoder` object; a top-level `alwaysAllow` is ignored
 - Exits with status code `1` when the run fails: a provider or connection error, a retry limit being hit (e.g. malformed tool calls the model cannot self-correct), or the run timing out
-- Exits with status code `1` with a usage message if `run` is given no prompt (or an empty `--prompt-file`)
+- Reads piped stdin (up to 100,000 characters) into the prompt: appended to a positional prompt, or used as the prompt when there is none. See [Piping Input](../features/commands.md#piping-input)
+- Exits with status code `1` with a usage message if `run` is given no prompt and nothing is piped (or an empty `--prompt-file`)
 - Exits automatically when the task is complete
 - Uses specified provider/model if `--provider` and `--model` flags are provided
 - Respects `--context-max` flag or `NANOCODER_CONTEXT_LIMIT` env var for context limit override

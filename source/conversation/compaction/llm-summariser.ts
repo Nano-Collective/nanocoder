@@ -1,5 +1,6 @@
 import type {LLMClient, Message} from '@/types/core';
 import type {Tokenizer} from '@/types/tokenization';
+import {stripTurnContext} from '@/utils/turn-context';
 import {isModelFacing} from '../message-visibility';
 import {COMPRESSION_CONSTANTS} from './message-compression';
 
@@ -143,7 +144,7 @@ function serialiseTranscript(messages: Message[]): string {
 	const lines: string[] = [];
 	for (const msg of messages) {
 		if (msg.role === 'user') {
-			lines.push(`## user\n${msg.content || ''}`);
+			lines.push(`## user\n${stripTurnContext(msg.content || '')}`);
 		} else if (msg.role === 'assistant') {
 			const parts: string[] = [];
 			if (msg.content) parts.push(msg.content);

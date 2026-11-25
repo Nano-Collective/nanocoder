@@ -3,8 +3,10 @@ import React from 'react';
 import {renderWithTheme} from '../test-utils/render-with-theme.js';
 import {
 	collectDoctorReport,
+	createDoctorCommand,
 	Doctor,
 	doctorCommand,
+	probeExecutable,
 	type DoctorDependencies,
 } from './doctor';
 
@@ -35,7 +37,7 @@ function createDependencies(
 				models: ['anthropic/claude-sonnet-4'],
 				config: {
 					baseURL:
-						'https://user:secret@openrouter.ai/api/v1/path-secret?token=url-secret',
+						'https://user:secret@openrouter.ai/api/v1?token=url-secret',
 					apiKey: 'secret-hosted-key',
 				},
 			},
@@ -62,7 +64,7 @@ function createDependencies(
 					transport: 'stdio',
 					connected: true,
 					description: 'Project filesystem',
-					url: 'https://user:mcp-secret@mcp.example/server/path-secret?token=mcp-token',
+					url: 'https://user:mcp-secret@mcp.example/server?token=mcp-token',
 				}),
 			}) as never,
 		getDaemonLock: async () => ({
@@ -182,11 +184,11 @@ test('Doctor reports providers without leaking api keys', async t => {
 	t.regex(output, /reachable/);
 	t.regex(output, /OpenRouter/);
 	t.regex(output, /hosted/);
-	t.regex(output, /https:\/\/openrouter\.ai/);
-	t.regex(output, /https:\/\/mcp\.example/);
+	t.regex(output, /https:\/\/openrouter\.ai\/api\/v1/);
+	t.regex(output, /https:\/\/mcp\.example\/server/);
 	t.notRegex(output, /secret-local-key/);
 	t.notRegex(output, /secret-hosted-key/);
-	t.notRegex(output, /path-secret|url-secret|mcp-secret|mcp-token/);
+	t.notRegex(output, /url-secret|mcp-secret|mcp-token/);
 	t.notRegex(output, /apiKey/);
 });
 
@@ -213,7 +215,7 @@ test('deep provider and tool checks run only on request and report safe outcomes
 			probedTools.push(command);
 			return command === 'git';
 		},
-	});
+});
 
 	const fast = await collectDoctorReport(dependencies);
 	t.is(fast.deepChecks, undefined);
@@ -244,6 +246,7 @@ test('deep provider and tool checks run only on request and report safe outcomes
 	});
 	t.is(providerCalls, 2);
 	t.deepEqual(probedTools, ['rg', 'git']);
+	t.is(report.deepChecks?.minimumNodeMajor, 22);
 	const {lastFrame} = renderWithTheme(<Doctor report={report} />);
 	const output = lastFrame()!;
 	t.regex(output, /Deep checks/);
@@ -253,6 +256,50 @@ test('deep provider and tool checks run only on request and report safe outcomes
 	t.regex(output, /llama3: available/);
 	t.regex(output, /qwen: not-listed/);
 	t.notRegex(output, /secret-hosted-key|path-secret|url-secret/);
+});
+
+test('Doctor redacts credentials and tokens embedded in provider and MCP URLs', async t => {
+	const report = await collectDoctorReport(
+		createDependencies({
+			getProviders: () => [
+				{
+					name: 'ProxyProvider',
+					type: 'openai',
+					models: ['model-1'],
+					config: {
+						baseURL:
+							'https://user:sk-test-LEAKCHECK123@proxy.example.com/v1?key=QUERYKEY-LEAKCHECK',
+					},
+				},
+			],
+			getToolManager: () =>
+				({
+					getConnectedServers: () => ['zapier-like'],
+					getServerTools: () => [],
+					getServerInfo: () => ({
+						name: 'zapier-like',
+						transport: 'http',
+						connected: true,
+						url: 'https://mcp.example.com/api/mcp/s/PATHTOKEN-LEAKCHECK/mcp?api_key=APIKEY-LEAKCHECK',
+					}),
+				}) as never,
+		}),
+	);
+
+	const {lastFrame} = renderWithTheme(<Doctor report={report} />);
+	const rawOutput = lastFrame()!;
+	const normalized = rawOutput.replace(/[│\n\r]/g, '');
+
+	t.notRegex(normalized, /sk-test-LEAKCHECK123/);
+	t.notRegex(normalized, /QUERYKEY-LEAKCHECK/);
+	t.notRegex(normalized, /PATHTOKEN-LEAKCHECK/);
+	t.notRegex(normalized, /APIKEY-LEAKCHECK/);
+
+	t.regex(normalized, /https:\/\/proxy\.example\.com\/v1/);
+	t.regex(
+		normalized,
+		/https:\/\/mcp\.example\.com\/api\/mcp\/s\/<redacted>\/mcp/,
+	);
 });
 
 test('Doctor reports LSP MCP and daemon details', async t => {
@@ -347,4 +394,29 @@ test('doctorCommand has expected shape', async t => {
 
 	const element = await doctorCommand.handler([], [], {});
 	t.true(React.isValidElement(element));
+});
+
+test('doctor command passes --probe to report collection', async t => {
+	const report = await collectDoctorReport(createDependencies());
+	let receivedOptions: unknown;
+	const command = createDoctorCommand(async (_dependencies, options) => {
+		receivedOptions = options;
+		return report;
+	});
+
+	const element = await command.handler(['--probe'], [], {});
+	t.true(React.isValidElement(element));
+	t.deepEqual(receivedOptions, {probe: true});
+});
+
+test('Doctor resolves bundled ripgrep without relying on PATH', async t => {
+	const originalPath = process.env.PATH;
+	process.env.PATH = '';
+
+	try {
+		t.true(await probeExecutable('rg'));
+	} finally {
+		if (originalPath === undefined) delete process.env.PATH;
+		else process.env.PATH = originalPath;
+	}
 });

@@ -1,6 +1,10 @@
-import {existsSync, readFileSync, realpathSync, statSync} from 'fs';
+import {existsSync, realpathSync} from 'fs';
 import {join, resolve} from 'path';
 import {type CliMode, VALID_MODES} from '@/app/types';
+import {
+	clearConfigFileCache,
+	readCachedConfigFile,
+} from '@/config/cached-reader';
 import {substituteEnvVars} from '@/config/env-substitution';
 import {
 	loadAllMCPConfigs,
@@ -12,6 +16,17 @@ import {
 	getNotificationsPreference,
 	loadPreferences,
 } from '@/config/preferences';
+import {
+	clearProfileCache,
+	getActiveProfile,
+	getActiveProfileName,
+	getCliProfile,
+	loadAvailableProfiles,
+	loadDefaultProfileName,
+	resolveActiveProfile,
+	setActiveProfile,
+	setCliProfile,
+} from '@/config/profile';
 import {
 	DEFAULT_SESSION_CONFIG,
 	normalizeSessionConfig,
@@ -29,6 +44,7 @@ import {
 	getActiveSessionContext,
 	getConfigRoot,
 } from '@/services/session-context';
+import type {DiskProfileConfig} from '@/types/config';
 import {HOOK_EVENTS} from '@/types/config';
 import type {FirewallConfig} from '@/types/firewall';
 import type {
@@ -57,37 +73,17 @@ import {isTrustLevel} from '@/verify/trust-level';
 
 export {confDirMap, getClosestConfigFile} from '@/config/paths';
 export {DEFAULT_SESSION_CONFIG} from '@/config/session-config';
-
-type ConfigFileCacheEntry = {
-	mtimeMs: number;
-	size: number;
-	data: unknown;
+export {
+	clearProfileCache,
+	getActiveProfile,
+	getActiveProfileName,
+	getCliProfile,
+	loadAvailableProfiles,
+	loadDefaultProfileName,
+	resolveActiveProfile,
+	setActiveProfile,
+	setCliProfile,
 };
-
-const configFileCache = new Map<string, ConfigFileCacheEntry>();
-
-function readCachedConfigFile(configPath: string): unknown {
-	const stats = statSync(configPath);
-	const cached = configFileCache.get(configPath);
-
-	if (
-		cached &&
-		cached.mtimeMs === stats.mtimeMs &&
-		cached.size === stats.size
-	) {
-		return structuredClone(cached.data);
-	}
-
-	const data: unknown = JSON.parse(readFileSync(configPath, 'utf-8'));
-
-	configFileCache.set(configPath, {
-		mtimeMs: stats.mtimeMs,
-		size: stats.size,
-		data: structuredClone(data),
-	});
-
-	return data;
-}
 
 /**
  * Read a JSON config file and hand the parsed contents to `extract`. Returns
@@ -106,6 +102,9 @@ function tryLoadConfig<T>(
 
 	try {
 		const config = readCachedConfigFile(configPath);
+		if (config === null) {
+			return null;
+		}
 		return extract(config);
 	} catch (error) {
 		notifyError(
@@ -128,6 +127,32 @@ function loadHierarchicalConfig<T>(
 	// biome-ignore lint/suspicious/noExplicitAny: parsed JSON is dynamically shaped
 	extract: (config: any) => T | null,
 ): T | null {
+	if (fileName === 'agents.config.json') {
+		// The active profile may have been removed (or renamed) after the
+		// session started: fall back to the files instead of throwing, the
+		// same way loadAllProviderConfigs already guards this call.
+		let activeProfile: DiskProfileConfig | undefined;
+		try {
+			activeProfile = getActiveProfile(cwd);
+		} catch {
+			activeProfile = undefined;
+		}
+		if (activeProfile) {
+			const synthetic = {
+				nanocoder: {
+					...activeProfile,
+					defaultMode:
+						activeProfile.mode ??
+						(activeProfile as Record<string, unknown>).defaultMode,
+				},
+			};
+			const profileResult = extract(synthetic);
+			if (profileResult !== null && profileResult !== undefined) {
+				return profileResult;
+			}
+		}
+	}
+
 	const projectResult = tryLoadConfig(
 		join(cwd, fileName), // nosemgrep
 		label,
@@ -455,6 +480,23 @@ function loadAutoCommitConfig(cwd: string): boolean {
 	);
 }
 
+function loadGitContextConfig(cwd: string): boolean {
+	return (
+		loadHierarchicalConfig(cwd, 'agents.config.json', 'gitContext', config => {
+			const value = config.nanocoder?.gitContext;
+			if (value === true) return true;
+			if (value === false) return false;
+			if (value !== undefined) {
+				notifyWarning(
+					`nanocoder.gitContext must be true or false (got ${JSON.stringify(value)}); treating as on`,
+				);
+				return true;
+			}
+			return null;
+		}) ?? true
+	);
+}
+
 function loadFirewallConfig(cwd: string): Partial<FirewallConfig> | undefined {
 	return (
 		loadHierarchicalConfig(cwd, 'agents.config.json', 'firewall', config => {
@@ -539,6 +581,25 @@ function loadLspServersConfig(cwd: string): AppConfig['lspServers'] {
 			return valid;
 		}) ?? undefined
 	);
+}
+
+function loadLspConfig(cwd: string): AppConfig['lsp'] {
+	const configured = loadHierarchicalConfig(
+		cwd,
+		'agents.config.json',
+		'lsp',
+		config => {
+			const autoDiscover = config.nanocoder?.lsp?.autoDiscover;
+			return typeof autoDiscover === 'boolean' ? {autoDiscover} : null;
+		},
+	);
+	const disabledByEnvironment =
+		process.env.NANOCODER_LSP?.trim().toLowerCase() === 'off';
+	return {
+		autoDiscover: disabledByEnvironment
+			? false
+			: (configured?.autoDiscover ?? true),
+	};
 }
 
 function loadSystemPromptConfig(cwd: string): SystemPromptConfig | undefined {
@@ -794,6 +855,16 @@ function loadModeProvidersConfig(
 					}
 
 					if (
+						!matchedProvider.models ||
+						!Array.isArray(matchedProvider.models)
+					) {
+						notifyError(
+							`Provider "${matchedProvider.name}" (modeProviders.${mode}) has no "models" list. Add one wherever the provider is defined.`,
+						);
+						continue;
+					}
+
+					if (
 						matchedProvider.models.length > 0 &&
 						!matchedProvider.models.includes(modelName)
 					) {
@@ -820,10 +891,11 @@ function loadNotificationsConfig(): NotificationsConfig | undefined {
 	return getNotificationsPreference();
 }
 
-// Load project-level verify policy (trust level, poll cadence overrides)
-// from agents.config.json. Unlike ciWatch.enabled (a personal, per-machine
-// opt-in kept in preferences), trust level and cadence are security/policy
-// decisions appropriate to commit and review with the rest of the project.
+// Load project-level verify policy (trust level, poll cadence overrides, and
+// `required` completion evidence) from agents.config.json. Unlike
+// ciWatch.enabled (a personal, per-machine opt-in kept in preferences), these
+// are security/policy decisions appropriate to commit and review with the rest
+// of the project.
 function loadVerifyConfig(cwd: string): VerifyConfig | undefined {
 	return (
 		loadHierarchicalConfig(cwd, 'agents.config.json', 'verify', config => {
@@ -838,6 +910,21 @@ function loadVerifyConfig(cwd: string): VerifyConfig | undefined {
 			}
 			if (typeof verify.maxPollIntervalMs === 'number') {
 				result.maxPollIntervalMs = verify.maxPollIntervalMs;
+			}
+			// `required`: commands, or "auto". Anything else is ignored with a
+			// warning, which leaves completion evidence off.
+			const required = verify.required;
+			if (required === 'auto') {
+				result.required = required;
+			} else if (
+				Array.isArray(required) &&
+				required.every(item => typeof item === 'string' && item.trim() !== '')
+			) {
+				result.required = required;
+			} else if (required !== undefined) {
+				notifyWarning(
+					`nanocoder.verify.required must be "auto" or a list of commands (got ${JSON.stringify(required)}); completion evidence is off`,
+				);
 			}
 			return Object.keys(result).length > 0 ? result : null;
 		}) ?? undefined
@@ -943,14 +1030,18 @@ function loadAppConfig(cwd: string): AppConfig {
 
 	const autoCommit = loadAutoCommitConfig(cwd);
 
+	const gitContext = loadGitContextConfig(cwd);
+
 	const firewall = loadFirewallConfig(cwd);
 
 	// Load user-defined LSP servers (auto-discovery still runs alongside)
 	const lspServers = loadLspServersConfig(cwd);
+	const lsp = loadLspConfig(cwd);
 
 	return {
 		providers,
 		mcpServers,
+		lsp,
 		lspServers,
 		autoCompact,
 		sessions,
@@ -970,6 +1061,7 @@ function loadAppConfig(cwd: string): AppConfig {
 		tune,
 		sandbox,
 		autoCommit,
+		gitContext,
 		firewall,
 	};
 }
@@ -1084,7 +1176,7 @@ export function getRetryLimits(): RetryLimitsConfig {
 
 // Function to reload the app configuration (useful after config file changes)
 export function reloadAppConfig(): void {
-	configFileCache.clear();
+	clearConfigFileCache();
 	sessionRootConfigs.clear();
 	_appConfig = null;
 	getAppConfig();
@@ -1092,7 +1184,7 @@ export function reloadAppConfig(): void {
 }
 
 export function clearAppConfig(): void {
-	configFileCache.clear();
+	clearConfigFileCache();
 	sessionRootConfigs.clear();
 	_appConfig = null;
 	_configGeneration++;

@@ -951,25 +951,64 @@ test.serial('a file that cannot be read is left in place and not overwritten', a
 
 const posixOnly = process.platform === 'win32' ? test.skip : test;
 
-posixOnly('saveHistory keeps the permissions of an existing history file', async t => {
+posixOnly('saveHistory creates a history file owner-only', async t => {
 	const tempFile = join(
 		testDir,
-		`history-mode-${Date.now()}-${Math.random()}.json`,
+		`history-new-mode-${Date.now()}-${Math.random()}.json`,
+	);
+	const history = new PromptHistory(tempFile);
+	history.addPrompt('private');
+	await history.saveHistory();
+
+	t.is(statSync(tempFile).mode & 0o777, 0o600, 'a new history file is 0600');
+});
+
+posixOnly('saveHistory tightens permissions on an existing history file', async t => {
+	const tempFile = join(
+		testDir,
+		`history-existing-mode-${Date.now()}-${Math.random()}.json`,
 	);
 	writeFileSync(
 		tempFile,
 		`${JSON_FORMAT_MARKER}[{"displayValue":"private","placeholderContent":{}}]`,
 		'utf8',
 	);
-	chmodSync(tempFile, 0o600);
+	chmodSync(tempFile, 0o644);
 
 	const history = new PromptHistory(tempFile);
 	await history.loadHistory();
 	history.addPrompt('another');
 	await history.saveHistory();
 
-	t.is(statSync(tempFile).mode & 0o777, 0o600, 'a 0600 file stays 0600');
+	t.is(
+		statSync(tempFile).mode & 0o777,
+		0o600,
+		'an existing 0644 history file becomes 0600',
+	);
 });
+
+posixOnly(
+	'loadHistory tightens permissions when quarantining a corrupt history file',
+	async t => {
+		const tempFile = join(
+			testDir,
+			`history-corrupt-mode-${Date.now()}-${Math.random()}.json`,
+		);
+		writeFileSync(tempFile, `${JSON_FORMAT_MARKER}{not valid json`, 'utf8');
+		chmodSync(tempFile, 0o644);
+
+		const history = new PromptHistory(tempFile);
+		await history.loadHistory();
+
+		const backupFile = `${tempFile}.corrupt`;
+		t.true(existsSync(backupFile), 'corrupt history file is quarantined');
+		t.is(
+			statSync(backupFile).mode & 0o777,
+			0o600,
+			'quarantined .corrupt backup becomes 0600',
+		);
+	},
+);
 
 posixOnly('saveHistory writes through a symlinked history file', async t => {
 	const dir = join(testDir, `history-link-${Date.now()}-${Math.random()}`);

@@ -3,7 +3,11 @@ import os from 'node:os';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import test from 'ava';
-import {getPackageVersion, UNKNOWN_VERSION} from './package-version.js';
+import {
+	getPackageNodeMajorFloor,
+	getPackageVersion,
+	UNKNOWN_VERSION,
+} from './package-version.js';
 
 console.log('\npackage-version.spec.ts');
 
@@ -31,6 +35,20 @@ test('reads the version from a package.json', t => {
 	const filePath = fixture('valid.json', JSON.stringify({version: '1.2.3'}));
 
 	t.is(getPackageVersion(filePath), '1.2.3');
+});
+
+test('reads the Node major floor from a package engine range', t => {
+	const filePath = fixture(
+		'node-engine.json',
+		JSON.stringify({engines: {node: '>=24.1.0 <27'}}),
+	);
+
+	t.is(getPackageNodeMajorFloor(filePath), 24);
+	const unsupportedRange = fixture(
+		'unsupported-node-engine.json',
+		JSON.stringify({engines: {node: '^22'}}),
+	);
+	t.is(getPackageNodeMajorFloor(unsupportedRange), undefined);
 });
 
 test('defaults to this package.json and returns its real version', t => {
