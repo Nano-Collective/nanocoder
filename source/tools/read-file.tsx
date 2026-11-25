@@ -30,6 +30,10 @@ function formatReadStub(path: string, lineCount: number, size: number): string {
 	return `[file: ${path} — ${READ_STUB_MARKER} (${lineCount} lines, ${size} bytes). pass start_line/end_line to read the body again.]`;
 }
 
+function getEffectiveLineCount(totalLines: number, content: string): number {
+	return content.endsWith('\n') ? totalLines - 1 : totalLines;
+}
+
 const executeReadFile = async (args: {
 	path: string;
 	start_line?: number;
@@ -69,8 +73,9 @@ const executeReadFile = async (args: {
 				try {
 					const cached = await getCachedFileContent(absPath);
 					const content = cached.content;
+					const totalLines = getEffectiveLineCount(cached.totalLines, content);
 
-					output += `Lines: ${cached.totalLines}\n`;
+					output += `Lines: ${totalLines}\n`;
 					output += `Estimated Tokens: ~${estimateTokens(content)}\n`;
 
 					// Detect file type from extension
@@ -126,7 +131,7 @@ const executeReadFile = async (args: {
 
 		const cached = await getCachedFileContent(absPath);
 		const content = cached.content;
-		const totalLines = cached.totalLines;
+		const totalLines = getEffectiveLineCount(cached.totalLines, content);
 
 		if (args.start_line !== undefined && args.start_line > totalLines) {
 			throw new Error(
@@ -177,6 +182,7 @@ const executeReadFile = async (args: {
 
 		// Extract the lines to return
 		const linesToReturn = lines.slice(startLine - 1, endLine);
+		const contentToReturn = linesToReturn.join('\n');
 
 		// Content (full file or an explicit range) has been returned to the model,
 		// so it has now "seen" this file for read-before-edit purposes.
@@ -190,7 +196,9 @@ const executeReadFile = async (args: {
 		);
 
 		// Return content without line numbers for clean content-based editing
-		return linesToReturn.join('\n');
+		return content.endsWith('\n') && endLine === totalLines
+			? `${contentToReturn}\n`
+			: contentToReturn;
 	} catch (error: unknown) {
 		// Handle file not found and other filesystem errors
 		if (
@@ -370,7 +378,10 @@ const readFileFormatter = async (
 		if (path && typeof path === 'string') {
 			const absPath = resolve(getSafeSessionCwd(), path);
 			const cached = await getCachedFileContent(absPath);
-			const totalLines = cached.totalLines;
+			const totalLines = getEffectiveLineCount(
+				cached.totalLines,
+				cached.content,
+			);
 
 			const isTruncated = result?.includes('[Truncated at line ') ?? false;
 
@@ -455,7 +466,10 @@ const readFileValidator = async (args: {
 		// Auto-clamp end_line to file length instead of erroring
 		if (args.end_line !== undefined) {
 			const cached = await getCachedFileContent(absPath);
-			const totalLines = cached.totalLines;
+			const totalLines = getEffectiveLineCount(
+				cached.totalLines,
+				cached.content,
+			);
 
 			if (args.end_line > totalLines) {
 				args.end_line = totalLines;
@@ -467,7 +481,10 @@ const readFileValidator = async (args: {
 		if (!args.metadata_only) {
 			const cached = await getCachedFileContent(absPath);
 			const allLines = cached.lines;
-			const totalLines = cached.totalLines;
+			const totalLines = getEffectiveLineCount(
+				cached.totalLines,
+				cached.content,
+			);
 			const startLine = args.start_line ? Math.max(1, args.start_line) : 1;
 			const endLine = args.end_line
 				? Math.min(totalLines, args.end_line)
