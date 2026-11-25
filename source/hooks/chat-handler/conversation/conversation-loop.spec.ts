@@ -62,6 +62,7 @@ const createMockClient = (response: {
 	reasoning?: string;
 	usage?: {inputTokens?: number; outputTokens?: number; totalTokens?: number};
 }) => ({
+	getProviderConfig: () => ({config: {}}),
 	chat: async (): Promise<LLMChatResponse> => ({
 		choices: [
 			{
@@ -149,7 +150,7 @@ for (const scenario of [
 			return scenario.approved;
 		});
 		let calls = 0;
-		const client = {chat: async () => {
+		const client = {getProviderConfig: () => ({config: {}}), chat: async () => {
 			calls++;
 			return {choices: [{message: calls === 1 ? {
 				role: 'assistant', content: '', tool_calls: ['first.txt', 'second.txt'].map((path, index) => ({
@@ -209,7 +210,7 @@ const runMidTurnSwitch = async (
 	});
 	const modeRef = {current: mode as string};
 	let calls = 0;
-	const client = {chat: async () => {
+	const client = {getProviderConfig: () => ({config: {}}), chat: async () => {
 		calls++;
 		if (calls === 1 && flipAt === 'response') modeRef.current = 'plan';
 		return {choices: [{message: calls === 1 ? {
@@ -333,6 +334,7 @@ const scriptedClient = (
 	return {
 		requests,
 		client: {
+			getProviderConfig: () => ({config: {}}),
 			chat: async (messages: Message[]): Promise<LLMChatResponse> => {
 				requests.push(messages);
 				const reply = replies[requests.length - 1] ?? {content: 'done'};
@@ -791,6 +793,7 @@ test.serial('processAssistantResponse - auto-nudges on empty response without to
 	const liveComponents: any[] = [];
 
 	const trackingClient = {
+		getProviderConfig: () => ({config: {}}),
 		chat: async (msgs: Message[]): Promise<LLMChatResponse> => {
 			chatCallCount += 1;
 			if (chatCallCount === 1) {
@@ -837,6 +840,7 @@ test.serial('processAssistantResponse - auto-nudges on empty response with recen
 	const messagesSeenByRecursiveCall: Message[][] = [];
 
 	const trackingClient = {
+		getProviderConfig: () => ({config: {}}),
 		chat: async (msgs: Message[]): Promise<LLMChatResponse> => {
 			chatCallCount += 1;
 			if (chatCallCount === 1) {
@@ -881,6 +885,7 @@ test.serial('processAssistantResponse - reasoning-only empty turn uses reasoning
 	const messagesSeenByRecursiveCall: Message[][] = [];
 
 	const trackingClient = {
+		getProviderConfig: () => ({config: {}}),
 		chat: async (msgs: Message[]): Promise<LLMChatResponse> => {
 			chatCallCount += 1;
 			if (chatCallCount === 1) {
@@ -931,6 +936,7 @@ test.serial('processAssistantResponse - strips <think> tags on the native path b
 	// Native path (toolsDisabled:false). Content has a <think> block that
 	// would leak into the UI and conversation history without the strip.
 	const thinkLeakingClient = {
+		getProviderConfig: () => ({config: {}}),
 		chat: async (): Promise<LLMChatResponse> => ({
 			choices: [
 				{
@@ -1032,6 +1038,7 @@ test.serial('processAssistantResponse - strips JSON ghost-echo on the native pat
 	// Native path with native tool calls AND the same call echoed in text content
 	// (open-weights "Ghost Echo" failure mode).
 	const ghostEchoClient = {
+		getProviderConfig: () => ({config: {}}),
 		chat: async (): Promise<LLMChatResponse> => ({
 			choices: [
 				{
@@ -1104,6 +1111,7 @@ test.serial('processAssistantResponse - extracts JSON tool call hallucination on
 	// marketed as native-tool-capable. The fallback parser should catch it
 	// and treat it as a real tool call so the agent doesn't stall.
 	const hallucinatingClient = {
+		getProviderConfig: () => ({config: {}}),
 		chat: async (): Promise<LLMChatResponse> => ({
 			choices: [
 				{
@@ -1147,6 +1155,7 @@ test.serial('processAssistantResponse - extracts XML tool call hallucination on 
 	const messagesSetCalls: Message[][] = [];
 
 	const xmlHallucinatingClient = {
+		getProviderConfig: () => ({config: {}}),
 		chat: async (): Promise<LLMChatResponse> => ({
 			choices: [
 				{
@@ -1193,6 +1202,7 @@ test.serial('processAssistantResponse - malformed JSON on native path drives sel
 	// loop should display the error and recurse with the error feedback.
 	// Verifies row 8 of the Post-Fix Reality table on the Native column.
 	const malformedJSONClient = {
+		getProviderConfig: () => ({config: {}}),
 		chat: async (): Promise<LLMChatResponse> => {
 			chatCallCount += 1;
 			return {
@@ -1243,6 +1253,7 @@ test.serial('processAssistantResponse - leaves prose without a tool-call shape a
 	// Native path with no tool calls and content that has no JSON/XML
 	// tool-call shape — should pass through as a regular assistant message.
 	const proseClient = {
+		getProviderConfig: () => ({config: {}}),
 		chat: async (): Promise<LLMChatResponse> => ({
 			choices: [
 				{
@@ -1289,6 +1300,7 @@ test.serial('processAssistantResponse - malformed-XML cap stops the loop after M
 	// Combined with toolsDisabled:true, the real parseToolCalls drives the
 	// loop into the malformed branch on every turn.
 	const alwaysMalformedClient = {
+		getProviderConfig: () => ({config: {}}),
 		chat: async (): Promise<LLMChatResponse> => {
 			chatCallCount += 1;
 			return {
@@ -1328,6 +1340,7 @@ test.serial('processAssistantResponse - empty-turn cap stops the loop after MAX_
 	const queuedComponents: any[] = [];
 
 	const alwaysEmptyClient = {
+		getProviderConfig: () => ({config: {}}),
 		chat: async (): Promise<LLMChatResponse> => {
 			chatCallCount += 1;
 			return {
@@ -1378,6 +1391,7 @@ test.serial('processAssistantResponse - attempts compact-and-retry after exhaust
 	const queuedComponents: any[] = [];
 
 	const alwaysEmptyClient = {
+		getProviderConfig: () => ({config: {}}),
 		chat: async (): Promise<LLMChatResponse> => {
 			chatCallCount += 1;
 			return {
@@ -1415,6 +1429,7 @@ test.serial('processAssistantResponse - error message includes total attempts in
 	const queuedComponents: any[] = [];
 
 	const alwaysEmptyClient = {
+		getProviderConfig: () => ({config: {}}),
 		chat: async (): Promise<LLMChatResponse> => {
 			chatCallCount += 1;
 			return {
@@ -1460,6 +1475,7 @@ test.serial('processAssistantResponse - compact-and-retry resets emptyTurnCount 
 	const queuedComponents: any[] = [];
 
 	const alwaysEmptyClient = {
+		getProviderConfig: () => ({config: {}}),
 		chat: async (): Promise<LLMChatResponse> => {
 			chatCallCount += 1;
 			return {
@@ -1495,6 +1511,7 @@ test.serial('processAssistantResponse - falls through to error when compression 
 	const queuedComponents: any[] = [];
 
 	const alwaysEmptyClient = {
+		getProviderConfig: () => ({config: {}}),
 		chat: async (): Promise<LLMChatResponse> => {
 			chatCallCount += 1;
 			return {
@@ -1533,6 +1550,7 @@ test.serial('processAssistantResponse - compact-and-retry shows info message wit
 	];
 
 	const alwaysEmptyClient = {
+		getProviderConfig: () => ({config: {}}),
 		chat: async (): Promise<LLMChatResponse> => {
 			chatCallCount += 1;
 			return {
@@ -1586,6 +1604,7 @@ test.serial('processAssistantResponse - compact-and-retry adds nudge message to 
 	];
 
 	const alwaysEmptyClient = {
+		getProviderConfig: () => ({config: {}}),
 		chat: async (): Promise<LLMChatResponse> => {
 			chatCallCount += 1;
 			return {
@@ -1635,6 +1654,7 @@ test.serial('processAssistantResponse - compact-and-retry invalidates read_file 
 	const longContent = 'Verbose conversation content that exceeds thresholds for mechanical compression. '.repeat(30);
 	const params = createDefaultParams({
 		client: {
+			getProviderConfig: () => ({config: {}}),
 			chat: async (): Promise<LLMChatResponse> => ({
 				choices: [{message: {role: 'assistant', content: '', tool_calls: undefined}}],
 				toolsDisabled: false,
@@ -1668,6 +1688,7 @@ test.serial('processAssistantResponse - MAX_COMPACT_RETRIES constant limits retr
 	const queuedComponents: any[] = [];
 
 	const alwaysEmptyClient = {
+		getProviderConfig: () => ({config: {}}),
 		chat: async (): Promise<LLMChatResponse> => {
 			chatCallCount += 1;
 			return {
@@ -1707,6 +1728,7 @@ test.serial('processAssistantResponse - compactRetryCount parameter is passed th
 	const queuedComponents: any[] = [];
 
 	const alwaysEmptyClient = {
+		getProviderConfig: () => ({config: {}}),
 		chat: async (): Promise<LLMChatResponse> => {
 			chatCallCount += 1;
 			return {
@@ -1753,6 +1775,7 @@ test.serial('processAssistantResponse - nudges once for an approved plan without
 	let nudge = '';
 	let completionCount = 0;
 	const client = {
+		getProviderConfig: () => ({config: {}}),
 		chat: async (messages: Message[]): Promise<LLMChatResponse> => {
 			chatCallCount++;
 			if (chatCallCount === 2) {
@@ -1809,6 +1832,7 @@ test.serial('processAssistantResponse - calls onConversationComplete when done',
 		},
 		setIsGenerating: (value: boolean) => generating.push(value),
 		client: {
+			getProviderConfig: () => ({config: {}}),
 			chat: async () => {
 				chatCalls++;
 				return client.chat();
@@ -1847,6 +1871,7 @@ test.serial('#2048 a declined confirmation records cancellations and signals com
 		await processAssistantResponse(
 			createDefaultParams({
 				client: {
+					getProviderConfig: () => ({config: {}}),
 					chat: async (): Promise<LLMChatResponse> => {
 						chatCalls++;
 						return {
@@ -2276,6 +2301,7 @@ test.serial('processAssistantResponse - compressed messages persist when loop re
 	const messagesSeenByRecursiveCall: Message[][] = [];
 
 	const trackingClient = {
+		getProviderConfig: () => ({config: {}}),
 		chat: async (msgs: Message[]): Promise<LLMChatResponse> => {
 			chatCallCount += 1;
 			if (chatCallCount === 1) {
@@ -2627,6 +2653,7 @@ test.serial('processAssistantResponse - maxMessages caps history sent to the mod
 
 	let messagesSentToClient: Message[] = [];
 	const mockClient = {
+		getProviderConfig: () => ({config: {}}),
 		chat: async (msgs: Message[]): Promise<LLMChatResponse> => {
 			messagesSentToClient = msgs;
 			return {
@@ -2672,6 +2699,7 @@ test.serial('processAssistantResponse - does not start request on orphaned tool 
 
 	let messagesSentToClient: Message[] = [];
 	const mockClient = {
+		getProviderConfig: () => ({config: {}}),
 		chat: async (msgs: Message[]): Promise<LLMChatResponse> => {
 			messagesSentToClient = msgs;
 			return {
@@ -2720,6 +2748,7 @@ test.serial('processAssistantResponse - a synthetic diagnostics prompt does not 
 	let chatCallCount = 0;
 	let nudge = '';
 	const client = {
+		getProviderConfig: () => ({config: {}}),
 		chat: async (messages: Message[]): Promise<LLMChatResponse> => {
 			chatCallCount++;
 			if (chatCallCount === 1) {
@@ -2804,6 +2833,7 @@ test.serial('processAssistantResponse - a synthetic diagnostics prompt does not 
 // Client that returns the identical tool call on every turn — the signature
 // the repeated-call loop detector keys on.
 const createRepeatingToolClient = (onChat?: () => void) => ({
+	getProviderConfig: () => ({config: {}}),
 	chat: async (): Promise<LLMChatResponse> => {
 		onChat?.();
 		return {
@@ -2906,6 +2936,7 @@ test.serial('a call with unparsable arguments is answered with the error and cou
 			await processAssistantResponse(
 				createDefaultParams({
 					client: {
+						getProviderConfig: () => ({config: {}}),
 						chat: async (): Promise<LLMChatResponse> => {
 							chatCallCount++;
 							return {
@@ -3023,6 +3054,7 @@ test.serial('repeated-tool-call limit does not fire one call under the limit', a
 	// Two identical tool turns (one under the default limit of 3), then a
 	// terminal text-only response.
 	const client = {
+		getProviderConfig: () => ({config: {}}),
 		chat: async (): Promise<LLMChatResponse> => {
 			chatCallCount += 1;
 			if (chatCallCount <= 2) {
@@ -3123,6 +3155,7 @@ test.serial('repeated-tool-call limit hard-stops without prompting in non-intera
 // Client that always calls a tool the tool manager does not know — this goes
 // through the unknown-tool error branch rather than tool execution.
 const createUnknownToolClient = (onChat?: () => void) => ({
+	getProviderConfig: () => ({config: {}}),
 	chat: async (): Promise<LLMChatResponse> => {
 		onChat?.();
 		return {
@@ -3243,6 +3276,7 @@ test.serial('non-interactive approval exit pairs unconfirmed tools with cancella
 
 	const params = createDefaultParams({
 		client: {
+			getProviderConfig: () => ({config: {}}),
 			chat: async (): Promise<LLMChatResponse> => ({
 				choices: [
 					{
@@ -3304,6 +3338,7 @@ test.serial('escape mid-execution pairs the tools the confirm loop never reached
 	let chatCallCount = 0;
 	const params = createDefaultParams({
 		client: {
+			getProviderConfig: () => ({config: {}}),
 			chat: async (): Promise<LLMChatResponse> => {
 				chatCallCount += 1;
 				if (chatCallCount > 1) {
@@ -3404,6 +3439,7 @@ test.serial('malformed-retry limit honors a custom configured value', async t =>
 	const queuedComponents: any[] = [];
 
 	const alwaysMalformedClient = {
+		getProviderConfig: () => ({config: {}}),
 		chat: async (): Promise<LLMChatResponse> => {
 			chatCallCount += 1;
 			return {
@@ -3444,6 +3480,7 @@ test.serial('empty-turn limit honors a custom configured value', async t => {
 	const queuedComponents: any[] = [];
 
 	const alwaysEmptyClient = {
+		getProviderConfig: () => ({config: {}}),
 		chat: async (): Promise<LLMChatResponse> => {
 			chatCallCount += 1;
 			return {
@@ -3833,6 +3870,7 @@ test.serial('escape during an auto-approved tool stops the rest of the batch', a
 	let chatCallCount = 0;
 	const params = createDefaultParams({
 		client: {
+			getProviderConfig: () => ({config: {}}),
 			chat: async (): Promise<LLMChatResponse> => {
 				chatCallCount += 1;
 				if (chatCallCount > 1) {
@@ -3901,6 +3939,7 @@ test.serial('escape while the reply finishes does not execute its tool calls', a
 		client: {
 			// The provider returns a complete reply even though the user pressed
 			// Escape before it finished.
+			getProviderConfig: () => ({config: {}}),
 			chat: async (): Promise<LLMChatResponse> => {
 				controller.abort();
 				return {
@@ -3960,6 +3999,7 @@ for (const scenario of [
 		let chatCalls = 0;
 		const params = createDefaultParams({
 			client: {
+				getProviderConfig: () => ({config: {}}),
 				chat: async (): Promise<LLMChatResponse> => {
 					chatCalls++;
 					return {
@@ -4017,6 +4057,7 @@ test.serial('compact-and-retry keeps the turn controller, a single history write
 		await processAssistantResponse(
 			createDefaultParams({
 				client: {
+					getProviderConfig: () => ({config: {}}),
 					chat: async (
 						_messages: Message[],
 						_tools: unknown,
@@ -4121,6 +4162,7 @@ test.serial('a thinking turn does not indent tool summaries for a later non-thin
 		await processAssistantResponse(
 			createDefaultParams({
 				client: {
+					getProviderConfig: () => ({config: {}}),
 					chat: async (): Promise<LLMChatResponse> => {
 						calls++;
 						return {
@@ -4199,6 +4241,7 @@ async function runVerifiedTurn(
 	let completed = 0;
 	const turns = verifyTurns(bashCommand);
 	const client = {
+		getProviderConfig: () => ({config: {}}),
 		chat: async (messages: Message[]): Promise<LLMChatResponse> => {
 			seen.push(messages.at(-1)?.content ?? '');
 			return {choices: [{message: turns[calls++]}], toolsDisabled: false} as never;

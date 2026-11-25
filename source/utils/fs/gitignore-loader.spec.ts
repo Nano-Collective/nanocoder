@@ -1,7 +1,13 @@
-import {mkdirSync, rmSync, writeFileSync} from 'node:fs';
+import {mkdirSync, mkdtempSync, rmSync, writeFileSync} from 'node:fs';
+import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
-import {DEFAULT_IGNORE_DIRS, loadGitignore} from './gitignore-loader';
+import {
+	addNestedGitignore,
+	DEFAULT_IGNORE_DIRS,
+	loadGitignore,
+	prefixGitignoreLine,
+} from './gitignore-loader';
 
 test('loadGitignore returns ignore instance', t => {
 	const ig = loadGitignore(process.cwd());
@@ -236,4 +242,49 @@ test('loadGitignore ignores all language-specific directories', t => {
 	t.true(ig.ignores('.svn/entries'));
 	t.true(ig.ignores('.hg'));
 	t.true(ig.ignores('.hg/store'));
+});
+
+test('prefixGitignoreLine scopes a nested pattern to its directory', t => {
+	t.is(prefixGitignoreLine('generated/', 'pkg/a'), 'pkg/a/**/generated/');
+	t.is(prefixGitignoreLine('/out.txt', 'pkg/a'), 'pkg/a/out.txt');
+	t.is(prefixGitignoreLine('src/tmp', 'pkg/a'), 'pkg/a/src/tmp');
+	t.is(prefixGitignoreLine('!keep.log', 'pkg/a'), '!pkg/a/**/keep.log');
+	t.is(prefixGitignoreLine('# comment', 'pkg/a'), undefined);
+	t.is(prefixGitignoreLine('   ', 'pkg/a'), undefined);
+	t.is(prefixGitignoreLine('*.log', ''), '*.log');
+});
+
+test('addNestedGitignore adds a nested .gitignore scoped to its directory', async t => {
+	const root = mkdtempSync(join(tmpdir(), 'nested-gitignore-'));
+	try {
+		mkdirSync(join(root, 'pkg', 'a'), {recursive: true});
+		writeFileSync(join(root, 'pkg', 'a', '.gitignore'), 'generated/\n');
+		const ig = loadGitignore(root);
+
+		await addNestedGitignore(ig, join(root, 'pkg', 'a'), 'pkg/a');
+
+		t.true(ig.ignores('pkg/a/generated/'));
+		t.true(ig.ignores('pkg/a/generated/big.js'));
+		t.false(ig.ignores('pkg/b/generated/'));
+	} finally {
+		rmSync(root, {recursive: true, force: true});
+	}
+});
+
+test('addNestedGitignore skips the project root and a missing file', async t => {
+	const root = mkdtempSync(join(tmpdir(), 'nested-gitignore-none-'));
+	try {
+		mkdirSync(join(root, 'pkg'));
+		writeFileSync(join(root, '.gitignore'), '*.log\n');
+		const ig = loadGitignore(root);
+
+		// The root's own file is loadGitignore's job: adding it again is a no-op.
+		await addNestedGitignore(ig, root, '');
+		await addNestedGitignore(ig, join(root, 'pkg'), 'pkg');
+
+		t.true(ig.ignores('a.log'));
+		t.false(ig.ignores('pkg/a.txt'));
+	} finally {
+		rmSync(root, {recursive: true, force: true});
+	}
 });

@@ -63,7 +63,10 @@ async function checkOnceThresholdGate(
 			for (const msg of [systemMessage, ...messages]) {
 				totalTokens += tokenizer.countTokens(msg);
 			}
-			let limit = getSessionContextLimit();
+			let limit = getSessionContextLimit({
+				provider: deps.provider,
+				model: deps.model,
+			});
 			if (limit === null) {
 				try {
 					limit =

@@ -1051,6 +1051,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 					onShowStatus: handleShowStatus,
 					onHandleChatMessage: handleChatMessage,
 					onSwitchModel: handleModelSelect,
+					onSwitchMode: setDevelopmentMode,
 					onAddToChatQueue: addToChatQueue,
 					setLiveComponent: setLiveComponent,
 					setLiveComponentCapturesInput: setLiveComponentCapturesInput,
@@ -1117,6 +1118,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 			setSessionName,
 			handleModelSelect,
 			client,
+			setDevelopmentMode,
 		],
 	);
 

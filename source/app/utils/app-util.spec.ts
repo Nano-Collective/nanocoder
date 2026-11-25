@@ -1243,6 +1243,7 @@ test.serial(
 			onAddToChatQueue: component => queued.push(component),
 		});
 		options.client = {
+			getProviderConfig: () => ({config: {}}),
 			chat: async () => {
 				chatCalls += 1;
 				return {choices: [{message: {content: 'Mock provider review.'}}]};

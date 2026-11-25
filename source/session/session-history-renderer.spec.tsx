@@ -7,6 +7,7 @@ import {ReviewActivityStore} from '../review/review-activity';
 import {createReviewMessage} from '../review/review-session';
 import type {Message} from '../types/core';
 import {resetKeyGeneratorForTests} from '../utils/key-generator';
+import {appendTurnContext} from '../utils/turn-context';
 import {buildSessionHistoryComponents} from './session-history-renderer';
 
 function TestThemeProvider({children}: {children: React.ReactNode}) {
@@ -184,4 +185,23 @@ test('replays a saved review with its activity summary line', t => {
 	t.regex(output, /Grounded review · completed · 1 agent · 1 tool call · 0 model calls/);
 	t.regex(output, /No verified issues found in the reviewed scope/);
 	t.notRegex(output, /D details/);
+});
+
+test('replays the user prompt without its per-turn context block', t => {
+	// The block is harness-authored, not something the user typed, but it stays
+	// in the stored message so a resumed session re-sends the identical bytes
+	// and keeps the cached prefix warm (#1574).
+	const output = renderHistory([
+		{
+			role: 'user',
+			content: appendTurnContext('fix the parser bug', [
+				'## Project Context\n\n```\n- Parser uses a hand-rolled lexer.\n```',
+			]),
+		},
+		{role: 'assistant', content: 'On it.'},
+	]);
+
+	t.regex(output, /fix the parser bug/);
+	t.notRegex(output, /turn-context|Project Context|hand-rolled lexer/);
+	t.regex(output, /On it/);
 });

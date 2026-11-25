@@ -7,7 +7,9 @@ import {
 	readdirSync,
 	readFileSync,
 	rmSync,
+	statSync,
 	unlinkSync,
+	writeFileSync,
 } from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
@@ -21,7 +23,7 @@ import {
 	TIMEOUT_BASH_DEFAULT_MS,
 } from '@/constants';
 import {signalProcessTree} from '@/utils/process-tree';
-import {shellArgs} from '@/utils/shell-args';
+import {isWindowsCmd, shellArgs} from '@/utils/shell-args';
 import {getShutdownManager} from '@/utils/shutdown';
 import {
 	makeStreamCollector,
@@ -43,6 +45,54 @@ import {
 } from './session-cwd.js';
 
 const isWindows = platform === 'win32';
+
+/**
+ * The applied timeout as the model was told to ask for it: in seconds. A
+ * sub-second limit keeps its precision (`0.5 seconds`) rather than rounding
+ * to a whole second that was never applied.
+ */
+function formatTimeoutSeconds(ms: number): number {
+	return Number((ms / 1000).toFixed(3));
+}
+
+/** Best-effort removal of a scratch file created for one execution. */
+function removeIfExists(file: string | undefined): void {
+	if (!file) return;
+	try {
+		if (existsSync(file)) unlinkSync(file);
+	} catch {
+		// best-effort cleanup
+	}
+}
+
+/** Only a real, existing directory is safe to pin as the session cwd. */
+function isDirectory(dir: string): boolean {
+	try {
+		return existsSync(dir) && statSync(dir).isDirectory();
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * cmd.exe stops at a newline and expands `%VAR%` once for the whole command
+ * line, so the POSIX `pwd && exit $?` epilogue cannot be appended inline. A
+ * fixed batch file invoked with `call` runs in the same shell: it sees the
+ * command's real ERRORLEVEL, records the final directory, and returns that
+ * same exit code. The user's command itself stays byte-for-byte intact.
+ *
+ * `cd` runs through `cmd /u` so the redirect is UTF-16LE. A plain `cd > file`
+ * writes in the console's OEM code page, which mangles non-ASCII directories
+ * (e.g. C:\Users\José) before Node reads the capture file.
+ */
+function writeWindowsCwdEpilogue(executionId: string): string {
+	const file = join(tmpdir(), `nanocoder-cwd-epilogue-${executionId}.cmd`);
+	writeFileSync(
+		file,
+		'@echo off\r\nset __nc_ec=%ERRORLEVEL%\r\ncmd /d /u /c cd > "%NC_CWD_FILE%"\r\nexit /b %__nc_ec%\r\n',
+	);
+	return file;
+}
 
 /**
  * On Unix, probe the process group rather than the leader. Every command runs
@@ -186,6 +236,7 @@ interface ExecutionEntry {
 	signal?: AbortSignal;
 	abortListener?: () => void;
 	cwdCaptureFile?: string;
+	windowsCwdEpilogue?: string;
 	jailTmp?: string;
 	cleanupJailTmp?: () => void;
 	releaseProtected?: () => void;
@@ -253,16 +304,39 @@ export class BashExecutor extends EventEmitter {
 		if (sandbox && !isWindows) {
 			jailTmp = resolveJailRoot(mkdtempSync(join(tmpdir(), 'nc-sbx-')));
 		}
-		const cwdCaptureFile = isWindows
-			? undefined
-			: join(jailTmp ?? tmpdir(), `nanocoder-cwd-${executionId}`);
+
+		// The Windows shell is cmd.exe unless a non-standard ComSpec is set.
+		// Only cmd can run the batch epilogue; other shells keep the old
+		// behaviour (no capture) rather than breaking their command syntax.
+		const windowsShell = isWindows
+			? process.env.ComSpec || 'cmd.exe'
+			: undefined;
+		const captureCwd = windowsShell === undefined || isWindowsCmd(windowsShell);
+		let windowsCwdEpilogue = '';
+		if (windowsShell && captureCwd) {
+			try {
+				windowsCwdEpilogue = writeWindowsCwdEpilogue(executionId);
+			} catch {
+				// Best-effort: without the wrapper the cwd stays where it was.
+			}
+		}
+		const cwdCaptureFile =
+			captureCwd && (!isWindows || windowsCwdEpilogue)
+				? join(jailTmp ?? tmpdir(), `nanocoder-cwd-${executionId}`)
+				: undefined;
+		// On Windows the epilogue is appended with `& call`, which leaves the
+		// user's command byte-for-byte intact. A command with an unbalanced
+		// quote (e.g. `echo "abc`) swallows that tail and echoes the temp path;
+		// rare and harmless, so we don't parse the command to prevent it.
 		const spawnCommand =
 			cwdCaptureFile === undefined
 				? command
-				: // Blank line before the epilogue: a command ending in a trailing
-					// backslash would otherwise line-continue into `__nc_ec=$?`.
-					// Capture path is $NC_CWD_FILE so positional args stay empty.
-					`${command}\n\n__nc_ec=$?\ncommand pwd -P > "$NC_CWD_FILE" 2>/dev/null\nexit $__nc_ec`;
+				: isWindows
+					? `${command} & call "${windowsCwdEpilogue}"`
+					: // Blank line before the epilogue: a command ending in a trailing
+						// backslash would otherwise line-continue into `__nc_ec=$?`.
+						// Capture path is $NC_CWD_FILE so positional args stay empty.
+						`${command}\n\n__nc_ec=$?\ncommand pwd -P > "$NC_CWD_FILE" 2>/dev/null\nexit $__nc_ec`;
 		const childEnv = {
 			...bashChildEnv(process.env, getAppConfig(), sandbox),
 			...(cwdCaptureFile ? {NC_CWD_FILE: cwdCaptureFile} : {}),
@@ -322,11 +396,11 @@ export class BashExecutor extends EventEmitter {
 				return {executionId, promise: Promise.resolve({...state})};
 			}
 			proc = spawnPlanned(planned, {cwd, env: childEnv});
-		} else if (cwdCaptureFile === undefined) {
+		} else if (isWindows) {
 			// cmd.exe parses the command line itself; without verbatim arguments
 			// Node escapes each inner `"` as `\"`, which cmd does not understand.
-			const shell = process.env.ComSpec || 'cmd.exe';
-			proc = spawn(shell, shellArgs(shell, command), {
+			const shell = windowsShell ?? 'cmd.exe';
+			proc = spawn(shell, shellArgs(shell, spawnCommand), {
 				cwd,
 				env: childEnv,
 				windowsVerbatimArguments: true,
@@ -351,19 +425,25 @@ export class BashExecutor extends EventEmitter {
 			if (!cwdCaptureFile) return;
 			try {
 				if (existsSync(cwdCaptureFile)) {
-					const captured = readFileSync(cwdCaptureFile, 'utf8').trim();
-					// Concurrent bash runs race here; last close wins, which is fine
-					// since the session cwd is a single shared value either way.
-					if (captured) setSessionCwd(captured);
+					const captured = readFileSync(
+						cwdCaptureFile,
+						isWindows ? 'utf16le' : 'utf8',
+					)
+						.trim()
+						.replace(/^\uFEFF/, '');
+					// A garbled or since-deleted path must never move the session
+					// cwd: file tools resolve relative paths against it as-is.
+					if (captured && isDirectory(captured)) {
+						// Concurrent bash runs race here; last close wins, which is
+						// fine since the session cwd is one shared value either way.
+						setSessionCwd(captured);
+					}
 				}
 			} catch {
 				// Non-fatal: leave the session cwd where it was.
 			} finally {
-				try {
-					if (existsSync(cwdCaptureFile)) unlinkSync(cwdCaptureFile);
-				} catch {
-					// best-effort cleanup
-				}
+				removeIfExists(cwdCaptureFile);
+				removeIfExists(windowsCwdEpilogue);
 			}
 		};
 
@@ -450,6 +530,7 @@ export class BashExecutor extends EventEmitter {
 				// so the turn's AbortSignal must not tear it down.
 				signal: background ? undefined : options?.signal,
 				cwdCaptureFile,
+				windowsCwdEpilogue,
 				jailTmp,
 				cleanupJailTmp,
 				releaseProtected,
@@ -460,7 +541,10 @@ export class BashExecutor extends EventEmitter {
 			// supposed to keep running until kill_bash or shutdown.
 			if (!background && ms > 0) {
 				entry.timeoutId = setTimeout(() => {
-					this.cancel(executionId, `Command timed out after ${ms}ms`);
+					this.cancel(
+						executionId,
+						`Command timed out after ${formatTimeoutSeconds(ms)} seconds`,
+					);
 				}, ms);
 				entry.timeoutId.unref();
 			}
@@ -603,16 +687,9 @@ export class BashExecutor extends EventEmitter {
 		// as stopped before then lets nanocoder move on, or exit, around it.
 		this.executions.delete(executionId);
 		void this.stop(execution.process).then(() => {
-			// Drop the cwd temp file; a killed command must not move the session cwd.
-			if (execution.cwdCaptureFile) {
-				try {
-					if (existsSync(execution.cwdCaptureFile)) {
-						unlinkSync(execution.cwdCaptureFile);
-					}
-				} catch {
-					// best-effort cleanup
-				}
-			}
+			// Drop the cwd temp files; a killed command must not move the session cwd.
+			removeIfExists(execution.cwdCaptureFile);
+			removeIfExists(execution.windowsCwdEpilogue);
 			execution.cleanupJailTmp?.();
 			execution.releaseProtected?.();
 			execution.state.isComplete = true;
@@ -726,7 +803,11 @@ export class BashExecutor extends EventEmitter {
 		for (const proc of procs) {
 			if (isGroupAlive(proc)) signalGroups(proc, 'SIGKILL');
 		}
-		for (const entry of this.executions.values()) entry.releaseProtected?.();
+		for (const entry of this.executions.values()) {
+			entry.releaseProtected?.();
+			removeIfExists(entry.cwdCaptureFile);
+			removeIfExists(entry.windowsCwdEpilogue);
+		}
 		for (const cleanup of this.leftoverCleanups.values()) cleanup();
 		this.leftoverCleanups.clear();
 	}

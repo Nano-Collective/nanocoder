@@ -326,13 +326,14 @@ test('whenever-no-native parses text tool calls on a native turn', async t => {
 	t.is(executedIds(history()).length, 1);
 });
 
-test('whenever-no-native strips tool-call text echoed beside native calls', async t => {
+test('whenever-no-native preserves markup beside echoed native calls', async t => {
+	const prose = 'Press <kbd>Ctrl</kbd>+<kbd>C</kbd>. Generic <T>x</T>.';
 	const echoed: Reply = {
 		choices: [
 			{
 				message: {
 					role: 'assistant',
-					content: `Reading it.\n${XML_PROBE}`,
+					content: `${prose}\n${XML_PROBE}`,
 					tool_calls: [{id: 'a', function: {name: 'probe', arguments: {}}}],
 				},
 			},
@@ -345,7 +346,7 @@ test('whenever-no-native strips tool-call text echoed beside native calls', asyn
 	);
 	await run();
 	const assistant = history().find(m => m.role === 'assistant');
-	t.is(String(assistant?.content).trim(), 'Reading it.');
+	t.is(assistant?.content, prose);
 	t.deepEqual(executedIds(history()), ['a']);
 });
 

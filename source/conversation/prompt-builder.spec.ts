@@ -1,12 +1,22 @@
 import test from 'ava';
-import {existsSync, mkdtempSync, rmSync, writeFileSync} from 'fs';
+import {
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readdirSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from 'fs';
 import {tmpdir} from 'os';
 import {join} from 'path';
+import {fileURLToPath} from 'url';
 import {resetPreferencesCache} from '@/config/preferences';
 import {
 	createSessionContext,
 	runInSessionContext,
 } from '@/services/session-context';
+import {setMessageQueueSink} from '@/utils/message-queue-core';
 import {
 	buildSystemPrompt,
 	getLastBuiltPrompt,
@@ -369,6 +379,31 @@ test('buildSystemPrompt - nano profile uses shortened task approach', t => {
 	t.false(result.includes('Complex tasks'));
 });
 
+test('buildSystemPrompt - nano architect mode renders its heading without replacement characters', t => {
+	const result = buildSystemPrompt('architect', TUNE_NANO, NANO_TOOLS);
+	t.true(result.includes('## TASK APPROACH — ARCHITECT MODE'));
+	t.false(result.includes('�'));
+});
+
+test('markdown read as UTF-8 - prompt sections and built-in subagents are valid UTF-8', t => {
+	const decoder = new TextDecoder('utf-8', {fatal: true});
+	const directories = [
+		['prompts/sections', '../app/prompts/sections/'],
+		['subagents/built-in', '../subagents/built-in/'],
+	] as const;
+	for (const [label, relativePath] of directories) {
+		const directory = fileURLToPath(new URL(relativePath, import.meta.url));
+		const files = readdirSync(directory).filter(name => name.endsWith('.md'));
+		t.true(files.length > 0, `${label} has no markdown files`);
+		for (const name of files) {
+			t.notThrows(
+				() => decoder.decode(readFileSync(join(directory, name))),
+				`${label}/${name} contains an invalid UTF-8 byte sequence`,
+			);
+		}
+	}
+});
+
 test('buildSystemPrompt - nano profile uses shortened file editing', t => {
 	const result = buildSystemPrompt('normal', TUNE_NANO, NANO_TOOLS);
 	t.true(result.includes('FILE OPERATIONS'));
@@ -475,6 +510,51 @@ test('buildSystemPrompt - appends the session project AGENTS.md inside a session
 		rmSync(dir, {recursive: true, force: true});
 	}
 });
+
+// ============================================================================
+// buildSystemPrompt — @path imports inside AGENTS.md
+// ============================================================================
+
+test('buildSystemPrompt - inlines @path imports from AGENTS.md', t => {
+	const dir = mkdtempSync(join(tmpdir(), 'nc-prompt-imports-'));
+	try {
+		mkdirSync(join(dir, 'docs'), {recursive: true});
+		writeFileSync(join(dir, 'docs', 'testing.md'), 'IMPORTED GUIDANCE');
+		writeFileSync(join(dir, 'AGENTS.md'), '# Rules\n@docs/testing.md');
+		const tune: TuneConfig = {...TUNE_NANO, includeAgentsMd: true};
+		const result = runInSessionContext(createSessionContext(dir), () =>
+			buildSystemPrompt('normal', tune, NANO_TOOLS),
+		);
+		t.true(result.includes('IMPORTED GUIDANCE'));
+		t.false(result.includes('@docs/testing.md'));
+	} finally {
+		rmSync(dir, {recursive: true, force: true});
+	}
+});
+
+test.serial(
+	'buildSystemPrompt - reports an unresolved AGENTS.md import once',
+	t => {
+		const dir = mkdtempSync(join(tmpdir(), 'nc-prompt-imports-'));
+		const warnings: string[] = [];
+		setMessageQueueSink((type, message) => {
+			if (type === 'warning') warnings.push(message);
+		});
+		try {
+			writeFileSync(join(dir, 'AGENTS.md'), '# Rules\n@docs/missing.md');
+			const tune: TuneConfig = {...TUNE_NANO, includeAgentsMd: true};
+			runInSessionContext(createSessionContext(dir), () => {
+				buildSystemPrompt('normal', tune, NANO_TOOLS);
+				buildSystemPrompt('normal', tune, NANO_TOOLS);
+			});
+			t.is(warnings.length, 1);
+			t.true(warnings[0]?.includes('@docs/missing.md') ?? false);
+		} finally {
+			setMessageQueueSink(null);
+			rmSync(dir, {recursive: true, force: true});
+		}
+	},
+);
 
 // ============================================================================
 // buildSystemPrompt — systemPrompt override (replace / append, content / file)

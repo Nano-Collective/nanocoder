@@ -19,10 +19,7 @@ import {useQueuedMessageSelection} from '@/components/composer/useQueuedMessageS
 import {useReverseSearch} from '@/components/composer/useReverseSearch';
 import {useShortcutsOverlay} from '@/components/composer/useShortcutsOverlay';
 import {StatusBar, type VoiceIndicatorInfo} from '@/components/status-bar';
-import TextInput, {
-	type TextInputHandle,
-	useRawInput,
-} from '@/components/text-input';
+import TextInput, {type TextInputHandle} from '@/components/text-input';
 import {useInputState} from '@/hooks/useInputState';
 import {useResponsiveTerminal, useTerminalRows} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
@@ -566,8 +563,6 @@ export default function UserInput({
 		}
 	}, [currentState.displayValue, updateMentionWarning]);
 
-	const rawInputRef = useRawInput();
-
 	useInput((inputChar, key) => {
 		// Ink's App resets the active focus id on every Escape, and TextInput only
 		// accepts keys while focused. Every Escape that leaves the composer on
@@ -747,7 +742,7 @@ export default function UserInput({
 		// offset, so the newline lands where the caret is. Bail out here before
 		// any of the Enter handling below, since ESC+CR and the kitty CSI-u
 		// encoding of Shift+Enter both arrive with `key.return` set.
-		if (isNewlineKey(inputChar, key, rawInputRef.current)) {
+		if (isNewlineKey(inputChar, key)) {
 			return;
 		}
 

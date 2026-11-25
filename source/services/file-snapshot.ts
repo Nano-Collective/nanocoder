@@ -270,14 +270,24 @@ export class FileSnapshotService {
 			// the common path - HEAD exists - must cost a single spawn. Rather
 			// than probing with `git rev-parse --verify HEAD` first, ask for the
 			// diff and let the unborn case fail.
+			// git C-quotes paths it considers unusual: non-ASCII bytes come back
+			// as `"caf\303\251.txt"`, and even `core.quotePath=false` keeps
+			// quoting a name containing `"` or `\`. Those strings are not paths
+			// any fs call can open, so such files were silently dropped from
+			// every checkpoint. `-z` emits raw, unquoted, NUL-separated paths -
+			// the same idiom as the other git readers in this codebase.
 			let modifiedOutput = '';
 			try {
-				modifiedOutput = execFileSync('git', ['diff', '--name-only', 'HEAD'], {
-					cwd: this.workspaceRoot,
-					encoding: 'utf-8',
-					stdio: ['pipe', 'pipe', 'pipe'],
-					maxBuffer,
-				}).trim();
+				modifiedOutput = execFileSync(
+					'git',
+					['diff', '--name-only', '-z', 'HEAD'],
+					{
+						cwd: this.workspaceRoot,
+						encoding: 'utf-8',
+						stdio: ['pipe', 'pipe', 'pipe'],
+						maxBuffer,
+					},
+				);
 			} catch {
 				// Unborn HEAD: nothing to diff against, but the index can still be
 				// full (`git init && git add .`, or `git checkout --orphan`, which
@@ -286,14 +296,14 @@ export class FileSnapshotService {
 				// captured rather than silently skipped.
 				modifiedOutput = execFileSync(
 					'git',
-					['diff', '--name-only', '--cached'],
+					['diff', '--name-only', '-z', '--cached'],
 					{
 						cwd: this.workspaceRoot,
 						encoding: 'utf-8',
 						stdio: ['pipe', 'pipe', 'pipe'],
 						maxBuffer,
 					},
-				).trim();
+				);
 			}
 
 			// A generated-output folder can hold tens of thousands of untracked
@@ -305,16 +315,16 @@ export class FileSnapshotService {
 			try {
 				const untrackedOutput = execFileSync(
 					'git',
-					['ls-files', '--others', '--exclude-standard'],
+					['ls-files', '--others', '--exclude-standard', '-z'],
 					{
 						cwd: this.workspaceRoot,
 						encoding: 'utf-8',
 						stdio: ['pipe', 'pipe', 'pipe'],
 						maxBuffer,
 					},
-				).trim();
+				);
 				untrackedFiles = untrackedOutput
-					? untrackedOutput.split('\n').filter(Boolean)
+					? untrackedOutput.split('\0').filter(Boolean)
 					: [];
 			} catch (error) {
 				if (!isMaxBufferError(error)) {
@@ -334,7 +344,7 @@ export class FileSnapshotService {
 			}
 
 			const modifiedFiles = modifiedOutput
-				? modifiedOutput.split('\n').filter(Boolean)
+				? modifiedOutput.split('\0').filter(Boolean)
 				: [];
 
 			const allFiles = [...new Set([...modifiedFiles, ...untrackedFiles])];

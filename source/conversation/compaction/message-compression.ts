@@ -1,6 +1,7 @@
 import type {CompressionMode} from '@/types/config';
 import type {Message} from '@/types/core';
 import type {Tokenizer} from '@/types/tokenization';
+import {stripTurnContext} from '@/utils/turn-context';
 import {filterModelFacing, isModelFacing} from '../message-visibility';
 
 /**
@@ -468,7 +469,24 @@ function compressUserMessage(msg: Message, mode: CompressionMode): Message {
 		return msg;
 	}
 
-	const content = msg.content || '';
+	// The per-turn context block (#1574) comes off before anything measures or
+	// truncates this message. Two reasons: it is stale by the time a turn is
+	// old enough to compact — the skills and memories were selected for that
+	// request — so summarising it wastes the budget on context the model has
+	// already acted upon; and `summarizeText` cuts at a character count, which
+	// for any turn carrying recalled memories (budgeted ~240 tokens, well over
+	// the 500-char threshold) lands inside the block and leaves an opening tag
+	// with no close. That is the one shape a later strip cannot fully reason
+	// about, so it is avoided here rather than only tolerated downstream.
+	//
+	// Compaction is also the point where re-sending these blocks stops being
+	// free: it rewrites this stretch of history, so the prefix breaks here
+	// anyway and reclaiming the tokens costs nothing extra.
+	const content = stripTurnContext(msg.content || '');
+	// Returned in place of `msg` on the paths that compress nothing, so a
+	// message under the threshold still gives its block back. Identity is kept
+	// when there was no block, leaving untouched histories untouched.
+	const stripped: Message = content === msg.content ? msg : {...msg, content};
 
 	// Conservative mode: only compress very long messages (>1000 chars)
 	if (mode === 'conservative') {
@@ -484,7 +502,7 @@ function compressUserMessage(msg: Message, mode: CompressionMode): Message {
 				content: summary,
 			};
 		}
-		return msg;
+		return stripped;
 	}
 
 	// Default/Aggressive: summarize if very long
@@ -503,7 +521,7 @@ function compressUserMessage(msg: Message, mode: CompressionMode): Message {
 		};
 	}
 
-	return msg;
+	return stripped;
 }
 
 // Compress assistant message

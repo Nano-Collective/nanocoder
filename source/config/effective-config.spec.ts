@@ -128,6 +128,99 @@ test('unset keys resolve to the built-in default layer', t => {
 	});
 });
 
+test("a profile's mode is reported as nanocoder.defaultMode from the profile layer", t => {
+	withFixture(
+		{
+			projectAgents: {
+				nanocoder: {
+					profiles: {fast: {mode: 'yolo'}},
+					defaultProfile: 'fast',
+				},
+			},
+		},
+		() => {
+			const config = resolveEffectiveConfig();
+			const mode = entry(config, 'nanocoder.defaultMode');
+			t.is(mode?.value, 'yolo');
+			t.is(mode?.layer, 'profile');
+			t.true(typeof mode?.origin === 'string' && mode.origin.includes('agents.config.json'));
+		},
+	);
+});
+
+test("a profile's mode outranks a project-level defaultMode", t => {
+	withFixture(
+		{
+			projectAgents: {
+				nanocoder: {
+					defaultMode: 'plan',
+					profiles: {fast: {mode: 'yolo'}},
+					defaultProfile: 'fast',
+				},
+			},
+		},
+		() => {
+			const config = resolveEffectiveConfig();
+			const mode = entry(config, 'nanocoder.defaultMode');
+			t.is(mode?.value, 'yolo');
+			t.is(mode?.layer, 'profile');
+		},
+	);
+});
+
+test('an invalid profile mode falls back to the project defaultMode', t => {
+	withFixture(
+		{
+			projectAgents: {
+				nanocoder: {
+					defaultMode: 'plan',
+					profiles: {fast: {mode: 'bogus'}},
+					defaultProfile: 'fast',
+				},
+			},
+		},
+		() => {
+			const config = resolveEffectiveConfig();
+			const mode = entry(config, 'nanocoder.defaultMode');
+			t.is(mode?.value, 'plan');
+			t.is(mode?.layer, 'project');
+		},
+	);
+});
+
+test('profile mcpServers are shown as the profile layer', t => {
+	withFixture(
+		{
+			projectAgents: {
+				nanocoder: {
+					defaultProfile: 'fast',
+					profiles: {
+						fast: {
+							mcpServers: {
+								'profile-server': {
+									transport: 'stdio',
+									command: 'npx',
+									args: ['-y', '@example/cli'],
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		() => {
+			const config = resolveEffectiveConfig();
+			const server = config.entries.find(
+				candidate => candidate.key === 'mcpServers.profile-server',
+			);
+			t.truthy(server, 'mcpServers.profile-server should be resolved');
+			t.is(server?.layer, 'profile');
+			t.is((server?.value as {command?: unknown})?.command, 'npx');
+			t.true(typeof server?.origin === 'string' && server.origin.includes('agents.config.json'));
+		},
+	);
+});
+
 test('a project value wins and records the global value it shadows', t => {
 	withFixture(
 		{
@@ -786,6 +879,7 @@ test('every key the loader reads is shown by config show (schema drift)', t => {
 					autoCommit: true,
 					autoCompact: {threshold: 80},
 					defaultMode: 'plan',
+					defaultProfile: 'fast',
 					disabledTools: ['web_search'],
 					firewall: {mode: 'strict'},
 					formatters: [{match: ['**/*.js'], command: 'echo formatted'}],
@@ -794,6 +888,7 @@ test('every key the loader reads is shown by config show (schema drift)', t => {
 					lspServers: [{name: 'ts', command: 'tsserver', languages: ['ts']}],
 					modeProviders: {plan: {provider: 'p', model: 'm'}},
 					nanocoderTools: {webSearch: {apiKey: 'test-key'}},
+					profiles: {fast: {provider: 'p', model: 'm'}},
 					providers: [{name: 'p', models: ['m']}],
 					retries: {maxEmptyTurns: 5},
 					sandbox: true,

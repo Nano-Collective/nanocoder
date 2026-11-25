@@ -24,6 +24,58 @@ test('parseToolCalls: successfully parses valid XML tool call', t => {
 	}
 });
 
+test('parseToolCalls: preserves markup beside an XML tool call', t => {
+	const prose = 'Press <kbd>Ctrl</kbd>+<kbd>C</kbd> to stop.';
+	const result = parseToolCalls(
+		`${prose} <read_file><path>a.ts</path></read_file>`,
+		['read_file'],
+	);
+
+	if (!result.success) return t.fail(result.error);
+	t.is(result.cleanedContent, prose);
+	t.deepEqual(
+		result.toolCalls.map(call => call.function),
+		[{name: 'read_file', arguments: {path: 'a.ts'}}],
+	);
+});
+
+test('parseToolCalls: removes a parsed unoffered tool call from prose', t => {
+	const prose = 'Checking <kbd>Ctrl</kbd>.';
+	const result = parseToolCalls(
+		`${prose} <bogus_tool><path>a.ts</path></bogus_tool>`,
+		['read_file', 'write_file'],
+	);
+
+	if (!result.success) return t.fail(result.error);
+	t.is(result.cleanedContent, prose);
+	t.deepEqual(
+		result.toolCalls.map(call => call.function),
+		[{name: 'bogus_tool', arguments: {path: 'a.ts'}}],
+	);
+});
+
+test('parseToolCalls: forwards schemas to preserve XML string arguments', t => {
+	const content =
+		'<write_file><path>f</path><content>{"version": "1.0"}\n</content></write_file>';
+	const result = parseToolCalls(content, ['write_file'], {
+		write_file: {
+			type: 'object',
+			properties: {
+				path: {type: 'string'},
+				content: {type: 'string'},
+			},
+		},
+	});
+
+	t.true(result.success);
+	if (result.success) {
+		t.is(
+			result.toolCalls[0].function.arguments.content,
+			'{"version": "1.0"}',
+		);
+	}
+});
+
 test('parseToolCalls: parses XML tool calls whose values contain =', t => {
 	const content = `<execute_bash><command>FOO=1 echo hi</command></execute_bash>
 <string_replace><path>a.ts</path><old_str>const x = 1;</old_str><new_str>const x = 2;</new_str></string_replace>`;
@@ -709,6 +761,127 @@ test('parseToolCalls: parses multiple JSON tool calls', t => {
 
 test('parseToolCalls: detects malformed JSON with string arguments', t => {
 	const content = `{"name": "read_file", "arguments": "/file.txt"}`;
+
+	const result = parseToolCalls(content);
+
+	t.false(result.success);
+	if (!result.success) {
+		t.regex(result.error, /"arguments" must be an object/i);
+		t.regex(result.examples, /native tool calling/i);
+	}
+});
+
+test('parseToolCalls: reports stringified JSON arguments instead of dropping them', t => {
+	// Escaped quotes inside the string. The malformed-pattern regex stops
+	// at the first one, so this used to come back as prose.
+	const payload = JSON.stringify({
+		name: 'write_file',
+		arguments: JSON.stringify({path: 'notes.txt', content: 'x'}),
+	});
+	t.is(
+		payload,
+		'{"name":"write_file","arguments":"{\\"path\\":\\"notes.txt\\",\\"content\\":\\"x\\"}"}',
+	);
+
+	for (const content of [
+		payload,
+		`  ${payload}`,
+		`Note:\n${payload}`,
+		`\`\`\`json\n${payload}\n\`\`\``,
+	]) {
+		const result = parseToolCalls(content);
+		t.false(result.success, content);
+		if (!result.success) {
+			t.is(
+				result.error,
+				'Invalid tool call: "arguments" must be an object, not a string',
+			);
+			t.regex(result.examples, /native tool calling/i);
+		}
+	}
+});
+
+test('parseToolCalls: reports stringified arguments nested in a wrapper object', t => {
+	// The call object does not start a line, but a real call in this position
+	// is still run. A stringified one used to come back as prose.
+	const call = {
+		name: 'write_file',
+		arguments: JSON.stringify({path: 'a'}),
+	};
+	const envelope = JSON.stringify({tool_calls: [call]});
+	t.is(
+		envelope,
+		'{"tool_calls":[{"name":"write_file","arguments":"{\\"path\\":\\"a\\"}"}]}',
+	);
+
+	for (const content of [
+		envelope,
+		JSON.stringify({tool_call: call}),
+		JSON.stringify({response: {action: call}}),
+		JSON.stringify({name: 'plan', steps: [call]}),
+		JSON.stringify({tool_calls: [{note: 'first'}, call]}),
+		`Note:\n${envelope}`,
+	]) {
+		const result = parseToolCalls(content);
+		t.false(result.success, content);
+		if (!result.success) {
+			t.is(
+				result.error,
+				'Invalid tool call: "arguments" must be an object, not a string',
+				content,
+			);
+			t.regex(result.examples, /native tool calling/i);
+		}
+	}
+});
+
+test('parseToolCalls: reports stringified arguments on the same line as a code fence', t => {
+	const payload = JSON.stringify({
+		name: 'write_file',
+		arguments: JSON.stringify({path: 'a'}),
+	});
+
+	for (const content of [
+		`\`\`\` ${payload} \`\`\``,
+		`\`\`\`json ${payload} \`\`\``,
+	]) {
+		const result = parseToolCalls(content);
+		t.false(result.success, content);
+		if (!result.success) {
+			t.is(
+				result.error,
+				'Invalid tool call: "arguments" must be an object, not a string',
+				content,
+			);
+			t.regex(result.examples, /native tool calling/i);
+		}
+	}
+});
+
+test('parseToolCalls: leaves a mid-sentence stringified arguments object as prose', t => {
+	const payload = JSON.stringify({
+		name: 'write_file',
+		arguments: JSON.stringify({path: 'notes.txt', content: 'x'}),
+	});
+
+	for (const content of [
+		`The log showed ${payload} and then continued.`,
+		`Use this shape: ${payload} when calling it.`,
+		`See the calls, ${payload} for the format.`,
+		`He said "read this": ${payload} and stopped.`,
+		`Set "tool_calls": ${payload} in the log.`,
+	]) {
+		const result = parseToolCalls(content);
+		t.true(result.success, content);
+		if (result.success) {
+			t.deepEqual(result.toolCalls, [], content);
+			t.is(result.cleanedContent, content);
+		}
+	}
+});
+
+test('parseToolCalls: reports a string argument that contains a raw newline', t => {
+	const content = '{"name": "read_file", "arguments": "hello\nworld"}';
 
 	const result = parseToolCalls(content);
 

@@ -46,6 +46,7 @@ const CATEGORY_COMMANDS: Record<HelpCategory, readonly string[]> = {
 		'init',
 		'login',
 		'model',
+		'profile',
 		'setup-config',
 		'settings',
 		'tune',
@@ -167,7 +168,12 @@ const COMMAND_HELP_OVERRIDES: Record<string, CommandHelpOverrides> = {
 	'context-max': {
 		usage: '/context-max [length]|--reset',
 		options: ['--reset'],
-		examples: ['/context-max', '/context-max 128k', '/context-max --reset'],
+		examples: [
+			'/context-max',
+			'/context-max 128k',
+			'/context-max 1m',
+			'/context-max --reset',
+		],
 	},
 	copy: {
 		usage: '/copy [code]',
@@ -202,6 +208,16 @@ const COMMAND_HELP_OVERRIDES: Record<string, CommandHelpOverrides> = {
 		usage: '/model [browse]',
 		options: ['browse'],
 		examples: ['/model', '/model browse'],
+	},
+	profile: {
+		usage: '/profile [name|--clear]',
+		options: ['--clear'],
+		examples: [
+			'/profile',
+			'/profile fast',
+			'/profile review',
+			'/profile --clear',
+		],
 	},
 	memory: {
 		usage:

@@ -3,7 +3,11 @@ import React from 'react';
 
 import BashProgress from '@/components/bash-progress';
 import {isNanocoderToolAlwaysAllowed} from '@/config/nanocoder-tools-config';
-import {TRUNCATION_OUTPUT_LIMIT} from '@/constants';
+import {
+	TIMEOUT_BASH_DEFAULT_MS,
+	TIMEOUT_EXECUTION_MAX_MS,
+	TRUNCATION_OUTPUT_LIMIT,
+} from '@/constants';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {type BashExecutionState, bashExecutor} from '@/services/bash-executor';
@@ -21,6 +25,33 @@ import {
 import {truncateToolResult} from '@/tools/runtime/truncate-tool-result';
 import type {NanocoderToolExport, StructuredToolOutput} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
+
+/**
+ * Bounds on the per-call timeout. The default is what the executor already
+ * applies when no option is passed; the ceiling is the hard limit the rest of
+ * the app uses for a single tool execution.
+ */
+const EXECUTE_BASH_MIN_TIMEOUT_SECONDS = 1;
+const EXECUTE_BASH_MAX_TIMEOUT_SECONDS = TIMEOUT_EXECUTION_MAX_MS / 1000;
+const EXECUTE_BASH_DEFAULT_TIMEOUT_SECONDS = TIMEOUT_BASH_DEFAULT_MS / 1000;
+
+/**
+ * Millisecond timeout for a call. `timeout_seconds` is clamped rather than
+ * rejected: a model asking for 10 minutes gets the 5 minute ceiling and a
+ * model asking for 0 gets one second, and the timeout message reports the
+ * limit that was actually applied.
+ */
+export function resolveBashTimeoutMs(timeoutSeconds?: number): number {
+	if (typeof timeoutSeconds !== 'number' || !Number.isFinite(timeoutSeconds)) {
+		return TIMEOUT_BASH_DEFAULT_MS;
+	}
+	return (
+		Math.min(
+			EXECUTE_BASH_MAX_TIMEOUT_SECONDS,
+			Math.max(EXECUTE_BASH_MIN_TIMEOUT_SECONDS, Math.floor(timeoutSeconds)),
+		) * 1000
+	);
+}
 
 /**
  * Execute a bash command using the bash executor service.
@@ -117,11 +148,16 @@ export async function distillBashResultForLLM(
 interface ExecuteBashArgs {
 	command: string;
 	description?: string;
+	timeout_seconds?: number;
 	run_in_background?: boolean;
 }
 
 const executeExecuteBash = async (
-	args: {command: string; run_in_background?: boolean},
+	args: {
+		command: string;
+		timeout_seconds?: number;
+		run_in_background?: boolean;
+	},
 	options?: {abortSignal?: AbortSignal; sessionId?: string},
 ): Promise<StructuredToolOutput> => {
 	if (isRunInBackground(args.run_in_background)) {
@@ -140,7 +176,9 @@ const executeExecuteBash = async (
 		};
 	}
 
+	const timeoutMs = resolveBashTimeoutMs(args.timeout_seconds);
 	const {promise} = bashExecutor.execute(args.command, {
+		timeoutMs,
 		signal: options?.abortSignal,
 	});
 	const result = await promise;
@@ -151,8 +189,10 @@ const executeExecuteBash = async (
 			rerun: command =>
 				options?.abortSignal?.aborted
 					? Promise.resolve(null)
-					: bashExecutor.execute(command, {signal: options?.abortSignal})
-							.promise,
+					: bashExecutor.execute(command, {
+							timeoutMs,
+							signal: options?.abortSignal,
+						}).promise,
 		}),
 		isError: bashRunFailed(result),
 	};
@@ -160,7 +200,7 @@ const executeExecuteBash = async (
 
 const executeBashCoreTool = tool({
 	description:
-		'Execute a bash command in the working directory. Returns stdout, stderr, and exit code. Commands time out after 2 minutes by default. Use for: running builds, tests, installing packages, git operations not covered by git tools, or any shell command. Set run_in_background for a long-running process (dev server, watcher, database); it returns a job id immediately, then use bash_output to read new output and kill_bash to stop it.',
+		'Execute a bash command in the working directory. Returns stdout, stderr, and exit code. Commands time out after 2 minutes by default. Pass timeout_seconds to change that: raise it for a long build, test suite or install, or lower it for a command that should return quickly. Use for: running builds, tests, installing packages, git operations not covered by git tools, or any shell command. Set run_in_background for a long-running process (dev server, watcher, database); it returns a job id immediately, then use bash_output to read new output and kill_bash to stop it.',
 	inputSchema: jsonSchema<ExecuteBashArgs>({
 		type: 'object',
 		properties: {
@@ -172,6 +212,13 @@ const executeBashCoreTool = tool({
 				type: 'string',
 				description:
 					'Optional brief summary of the intent or purpose of this command.',
+			},
+			timeout_seconds: {
+				type: 'integer',
+				description:
+					'Optional time limit before the command is killed, in seconds. Defaults to 120 and is clamped to the 300 second maximum; a killed command reports the limit that was applied.',
+				minimum: EXECUTE_BASH_MIN_TIMEOUT_SECONDS,
+				maximum: EXECUTE_BASH_MAX_TIMEOUT_SECONDS,
 			},
 			run_in_background: {
 				type: 'boolean',
@@ -192,14 +239,22 @@ const executeBashCoreTool = tool({
 function ExecuteBashFormatterComponent({
 	command,
 	description,
+	timeoutSeconds,
 	runInBackground,
 }: {
 	command: string;
 	description?: string;
+	timeoutSeconds?: number;
 	runInBackground?: boolean;
 }): React.ReactElement {
 	const boxWidth = useTerminalWidth();
 	const {colors} = useTheme();
+	const appliedTimeoutSeconds = resolveBashTimeoutMs(timeoutSeconds) / 1000;
+	// Only a non-default limit is worth a line: every other command would
+	// repeat the same 2 minutes the tool description already states.
+	const showTimeout =
+		!runInBackground &&
+		appliedTimeoutSeconds !== EXECUTE_BASH_DEFAULT_TIMEOUT_SECONDS;
 
 	return (
 		<Box flexDirection="column" marginBottom={1} width={boxWidth}>
@@ -214,6 +269,12 @@ function ExecuteBashFormatterComponent({
 				<Box flexDirection="column">
 					<Text color={colors.secondary}>Description:</Text>
 					<Text color={colors.text}> {description}</Text>
+				</Box>
+			)}
+			{showTimeout && (
+				<Box flexDirection="column">
+					<Text color={colors.secondary}>Timeout:</Text>
+					<Text color={colors.text}> {appliedTimeoutSeconds} seconds</Text>
 				</Box>
 			)}
 			<Box flexDirection="column">
@@ -237,6 +298,7 @@ const executeBashFormatter = (args: ExecuteBashArgs): React.ReactElement => {
 		<ExecuteBashFormatterComponent
 			command={args.command}
 			description={args.description}
+			timeoutSeconds={args.timeout_seconds}
 			runInBackground={args.run_in_background}
 		/>
 	);
@@ -264,11 +326,17 @@ const DESTRUCTIVE_RM_TARGETS = new Set(['/', '~', '$HOME', '${HOME}']);
  * Flags and targets of every `rm` in a command. Argument words stop at the
  * next command separator, so `rm -rf src && ls /` is judged on its own
  * arguments instead of folding the rest of the line into them.
+ *
+ * `rm` is looked for in `searchIn`, the same command with the text of quoted
+ * arguments masked out (see `maskQuotedText`), so an `rm` that is only
+ * mentioned in a commit message or an `echo` is not read as a command. Its
+ * arguments are still read from `command`, where `rm -rf "$HOME"` keeps the
+ * quoted target.
  */
-function rmArgumentLists(command: string): string[][] {
+function rmArgumentLists(command: string, searchIn = command): string[][] {
 	const pattern = /\brm\b/gi;
 	const lists: string[][] = [];
-	let match = pattern.exec(command);
+	let match = pattern.exec(searchIn);
 	while (match) {
 		const rest = command.slice(match.index + match[0].length);
 		const separator = rest.search(/[;&|\n]/);
@@ -281,7 +349,7 @@ function rmArgumentLists(command: string): string[][] {
 				// "$HOME"` deletes the same directory as `rm -rf $HOME`.
 				.map(word => word.replace(/['"]/g, '')),
 		);
-		match = pattern.exec(command);
+		match = pattern.exec(searchIn);
 	}
 	return lists;
 }
@@ -356,22 +424,93 @@ function isDestructiveRm(words: string[]): boolean {
 const RUNS_QUOTED_TEXT =
 	/\b(?:ba|z|k|da|fi|tc|c)?sh\s+(?:-\w+\s+)*-\w*c\b|\b(?:eval|ssh|xargs)\b/;
 
+/** A double- or single-quoted span, as the shell delimits it. */
+const QUOTED_SPAN = /"(?:[^"\\]|\\.)*"|'[^']*'/g;
+
+/**
+ * Whether `QUOTED_SPAN` may read the quotes differently from the shell, so a
+ * span could cover text the shell runs. It does not follow a backslash outside
+ * quotes (`echo \" ; mkfs /dev/sda ; echo "x"`), a heredoc body, or a comment:
+ * the shell opens no quote inside a comment, but the regex does and carries
+ * the span onto the next line (`echo # "`, then `rm -rf /`, then `echo "x"`).
+ * Up to the first of these the two read the quotes alike, so a `#` that starts
+ * a comment is still outside every span.
+ */
+function mayMisreadQuotes(command: string): boolean {
+	return (
+		/\\|<</.test(command) || command.replace(QUOTED_SPAN, '').includes('#')
+	);
+}
+
+/**
+ * Whether the text before a quoted span puts it in command position or after
+ * a redirect, where its text is what runs or what gets written.
+ */
+const ENDS_IN_COMMAND_POSITION = /(?:^|[;&|(`\n>]|\bsudo)\s*$/;
+
+/**
+ * Commands whose quoted arguments are only text: printed, searched for, stored
+ * as a message, or a path. Matched against the start of each command on the
+ * line, after its quoted spans are replaced by placeholders, so a quoted
+ * command name (`"rm"`) never matches. `rg --pre` runs a program on each file,
+ * so `rg` counts only without it.
+ */
+const PASSES_QUOTED_TEXT_ONLY =
+	/^(?:echo|printf|grep|egrep|fgrep|cd|git\s+(?:add|commit)|rg(?!.*\s--pre\b))(?:\s|$)/;
+
+/**
+ * Syntax that runs or feeds text to a command: `$(`, backticks, `<<<`, `<(`,
+ * `>(`. Backslash escapes (`\"`, `$'...\'...'`) are left to
+ * `mayMisreadQuotes`.
+ */
+const RUNS_OR_FEEDS_TEXT = /\$\(|`|<<<|[<>]\(/;
+
+/**
+ * The command with the text of its quoted arguments replaced by spaces of the
+ * same length, so offsets still line up with `command`. Only when every
+ * command on the line is one that treats quoted text as text (see
+ * `PASSES_QUOTED_TEXT_ONLY`), the line has nothing that runs or feeds the text
+ * (see `RUNS_OR_FEEDS_TEXT`), and its quotes read the same to the shell (see
+ * `mayMisreadQuotes`). Anything else - a pipe into a shell, a runner such as
+ * `bash -c` or `su -c`, a prefix such as `env` or `sudo`, an assignment, a
+ * keyword, a comment - returns the command unchanged, so it is checked as
+ * before.
+ */
+function maskQuotedText(command: string): string {
+	if (RUNS_OR_FEEDS_TEXT.test(command) || mayMisreadQuotes(command)) {
+		return command;
+	}
+	const placeholders = command.replace(QUOTED_SPAN, span =>
+		'Q'.repeat(span.length),
+	);
+	const passesTextOnly = placeholders
+		// `&` followed by a digit or `-` is a redirect (`2>&1`, `>&-`), not a
+		// separator.
+		.split(/[;|\n()]|&(?![\d-])/)
+		.map(segment => segment.trim())
+		.filter(Boolean)
+		.every(segment => PASSES_QUOTED_TEXT_ONLY.test(segment));
+	if (!passesTextOnly) return command;
+	return command.replace(QUOTED_SPAN, span => ' '.repeat(span.length));
+}
+
 /**
  * The command with its quoted arguments blanked out, so `grep "dd if=" log`
  * or `echo 'never run mkfs'` is judged on what runs rather than on the text it
  * passes around. A quoted span in command position (`"mkfs" /dev/sda`) or
  * after a redirect (`> "/dev/sda"`) is what runs or what gets written, so its
  * quotes are dropped and its text kept. A command that hands a quoted string
- * to another shell is returned unchanged.
+ * to another shell, or whose quotes the shell may read differently (see
+ * `mayMisreadQuotes`), is returned unchanged.
  */
 function withoutQuotedArguments(command: string): string {
-	if (RUNS_QUOTED_TEXT.test(command)) return command;
-	return command.replace(
-		/"(?:[^"\\]|\\.)*"|'[^']*'/g,
-		(span, offset: number) =>
-			/(?:^|[;&|(`\n>]|\bsudo)\s*$/.test(command.slice(0, offset))
-				? span.slice(1, -1)
-				: "''",
+	if (RUNS_QUOTED_TEXT.test(command) || mayMisreadQuotes(command)) {
+		return command;
+	}
+	return command.replace(QUOTED_SPAN, (span, offset: number) =>
+		ENDS_IN_COMMAND_POSITION.test(command.slice(0, offset))
+			? span.slice(1, -1)
+			: "''",
 	);
 }
 
@@ -406,12 +545,15 @@ const executeBashValidator = (args: {
 	// A recursive force delete of `/`, `~` or `$HOME` is destructive however its
 	// flags are spelled, so it is parsed rather than pattern-matched. Backslash
 	// line continuations are joined first: `rm -rf \` with `/` on the next line
-	// is one command, so the target has to stay attached to its flags.
+	// is one command, so the target has to stay attached to its flags. An `rm`
+	// that only appears inside a quoted argument of a command that treats it as
+	// text (`git commit -m "..."`, `echo '...'`) is not looked at.
 	const parseable = command.replace(/\\\r?\n/g, ' ');
 	const unquoted = withoutQuotedArguments(command);
 	const isDestructive =
-		rmArgumentLists(parseable).some(isDestructiveRm) ||
-		dangerousPatterns.some(pattern => pattern.test(unquoted));
+		rmArgumentLists(parseable, maskQuotedText(parseable)).some(
+			isDestructiveRm,
+		) || dangerousPatterns.some(pattern => pattern.test(unquoted));
 
 	if (isDestructive) {
 		return Promise.resolve({

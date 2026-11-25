@@ -672,6 +672,7 @@ test.serial(
 								{
 									path: cwd,
 									fingerprint: describeProjectTrust(cwd).fingerprint,
+									fingerprintVersion: TRUST_FINGERPRINT_VERSION,
 								},
 							],
 						}) as never,
@@ -782,6 +783,81 @@ test.serial(
 	},
 );
 
+test.serial(
+	'text schema outcome prints only the structured document to stdout',
+	async t => {
+		const shutdown: CapturedShutdown = {code: null};
+		const stdout = capturingStdout();
+		const stderr = capturingStderr();
+		try {
+			await runPlainShell({
+				prompt: 'classify this',
+				developmentMode: 'auto-accept',
+				trustDirectory: true,
+				outputFormat: 'text',
+				jsonSchema: {type: 'object'},
+				deps: baseDeps({
+					initializePlain: makeFakeInitializePlain(),
+					runPlainConversation: makeFakeRunPlainConversation({
+						kind: 'success',
+						finalText: '{\n  "label": "bug"\n}',
+						structured: {label: 'bug'},
+						reasoning: null,
+						steps: 1,
+						toolCalls: [],
+					}),
+					getShutdownManager: makeFakeShutdownManager(shutdown),
+				}),
+			});
+		} finally {
+			stdout.restore();
+			stderr.restore();
+		}
+
+		t.deepEqual(JSON.parse(stdout.get()), {label: 'bug'});
+		t.true(stdout.get().endsWith('\n'));
+		t.is(stdout.get().trim().split('\n').length, 3);
+		t.is(shutdown.code, 0);
+		t.regex(stderr.get(), /done/);
+	},
+);
+
+test.serial(
+	'--json schema outcome includes the structured key in the report',
+	async t => {
+		const shutdown: CapturedShutdown = {code: null};
+		const stdout = capturingStdout();
+		try {
+			await runPlainShell({
+				prompt: 'classify this',
+				developmentMode: 'auto-accept',
+				trustDirectory: true,
+				outputFormat: 'json',
+				jsonSchema: {type: 'object'},
+				deps: baseDeps({
+					initializePlain: makeFakeInitializePlain(),
+					runPlainConversation: makeFakeRunPlainConversation({
+						kind: 'success',
+						finalText: '{\n  "label": "bug"\n}',
+						structured: {label: 'bug'},
+						reasoning: null,
+						steps: 1,
+						toolCalls: [],
+					}),
+					getShutdownManager: makeFakeShutdownManager(shutdown),
+				}),
+			});
+		} finally {
+			stdout.restore();
+		}
+
+		const report = JSON.parse(stdout.get());
+		t.deepEqual(report.structured, {label: 'bug'});
+		t.is(report.finalText, '{\n  "label": "bug"\n}');
+		t.is(shutdown.code, 0);
+	},
+);
+
 // --- Text mode (outputFormat: 'text') ---
 //
 // Unlike --json, text mode writes status/boot/error/"done" lines to stderr
@@ -857,10 +933,6 @@ test.serial(
 						};
 					},
 					getShutdownManager: makeFakeShutdownManager(shutdown),
-					appendRelevantProjectContextWithCount: async (systemPrompt) => ({
-						systemPrompt,
-						memoryCount: 0,
-					}),
 					appendActivePlanContext: async (systemPrompt) =>
 						`${systemPrompt}\n\n## ACTIVE PLAN (persisted)\n\n- api`,
 				}),
@@ -881,7 +953,7 @@ test.serial(
 		const shutdown: CapturedShutdown = { code: null };
 		const stdout = capturingStdout();
 		const stderr = capturingStderr();
-		const calls: Array<{ systemPrompt: string; query: string }> = [];
+		const calls: Array<{ query: string }> = [];
 		try {
 			await runPlainShell({
 				prompt: "refactor the auth module",
@@ -898,10 +970,10 @@ test.serial(
 						toolCalls: [],
 					}),
 					getShutdownManager: makeFakeShutdownManager(shutdown),
-					appendRelevantProjectContextWithCount: async (systemPrompt, query) => {
-						calls.push({ systemPrompt, query });
+					buildProjectContextSection: async (query) => {
+						calls.push({ query });
 						return {
-							systemPrompt: `${systemPrompt}\n\n## Project Context\n\n- Auth uses Clerk.`,
+							content: "## Project Context\n\n- Auth uses Clerk.",
 							memoryCount: 2,
 						};
 					},
@@ -941,8 +1013,8 @@ test.serial(
 						toolCalls: [],
 					}),
 					getShutdownManager: makeFakeShutdownManager(shutdown),
-					appendRelevantProjectContextWithCount: async (systemPrompt) => ({
-						systemPrompt,
+					buildProjectContextSection: async () => ({
+						content: "",
 						memoryCount: 0,
 					}),
 				}),

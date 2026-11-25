@@ -43,6 +43,10 @@
 					"enum": ["auto-accept", "normal", "plan", "yolo"],
 					"type": "string"
 				},
+				"defaultProfile": {
+					"description": "Name of the default profile to use when none is explicitly specified.",
+					"type": "string"
+				},
 				"disabledTools": {
 					"description": "Tools unavailable to the model — filtered out of chat, subagents, and tune profiles.",
 					"items": {
@@ -60,6 +64,10 @@
 						"$ref": "#/definitions/FormatterConfig"
 					},
 					"type": "array"
+				},
+				"gitContext": {
+					"description": "Add a snapshot of the git repository (branch, upstream, status, recent commits) to the system prompt at session start. On by default; never added under the nano tool profile.",
+					"type": "boolean"
 				},
 				"headless": {
 					"description": "Maximum LLM turns for headless runs (--plain, ACP and subagent loops).",
@@ -144,6 +152,10 @@
 					"type": "object",
 					"additionalProperties": false
 				},
+				"profiles": {
+					"$ref": "#/definitions/DiskProfilesConfig",
+					"description": "Named configuration profiles that bundle provider, model, mode, and section overrides."
+				},
 				"providers": {
 					"description": "AI provider configurations (all OpenAI-compatible).",
 					"items": {
@@ -174,6 +186,184 @@
 			},
 			"type": "object",
 			"additionalProperties": false
+		},
+		"DiskProfileConfig": {
+			"description": "Configuration overrides applied by a named profile.\nCan override provider, model, mode, and any nanocoder.* section.",
+			"properties": {
+				"alwaysAllow": {
+					"description": "Tools that run automatically without confirmation in non-interactive mode.",
+					"items": {
+						"type": "string"
+					},
+					"type": "array"
+				},
+				"autoCommit": {
+					"description": "Commit each successful agent file edit (only that file) with a generated Conventional Commit message. Off by default.",
+					"type": "boolean"
+				},
+				"autoCompact": {
+					"$ref": "#/definitions/AutoCompactConfig",
+					"description": "Automatic context compression when usage exceeds threshold. All fields have defaults."
+				},
+				"defaultMode": {
+					"description": "Default conversation mode when none is specified.",
+					"enum": ["auto-accept", "normal", "plan", "yolo"],
+					"type": "string"
+				},
+				"disabledTools": {
+					"description": "Tools unavailable to the model — filtered out of chat, subagents, and tune profiles.",
+					"items": {
+						"type": "string"
+					},
+					"type": "array"
+				},
+				"firewall": {
+					"$ref": "#/definitions/FirewallConfig",
+					"description": "Negative-space mutation firewall. Off by default."
+				},
+				"formatters": {
+					"description": "Code formatters run on files the agent writes (write_file,\nstring_replace, diff_edit), before the `post-tool-use` hooks fire.",
+					"items": {
+						"$ref": "#/definitions/FormatterConfig"
+					},
+					"type": "array"
+				},
+				"gitContext": {
+					"description": "Add a snapshot of the git repository (branch, upstream, status, recent commits) to the system prompt at session start. On by default; never added under the nano tool profile.",
+					"type": "boolean"
+				},
+				"headless": {
+					"description": "Maximum LLM turns for headless runs (--plain, ACP and subagent loops).",
+					"properties": {
+						"maxTurns": {
+							"description": "Maximum LLM turns before the loop forces a final, tool-free answer.",
+							"type": "number"
+						},
+						"subagentMaxTurns": {
+							"description": "Turn ceiling for a delegated subagent run. Defaults to `maxTurns`.",
+							"type": "number"
+						}
+					},
+					"type": "object",
+					"additionalProperties": false
+				},
+				"hooks": {
+					"$ref": "#/definitions/HooksConfig",
+					"description": "Shell commands run at fixed points in the agent loop, keyed by lifecycle\nevent. A project-local file can set these, so they carry the same\ncode-execution weight as project MCP servers (`.mcp.json`) and are\ngated behind directory trust."
+				},
+				"lsp": {
+					"description": "Language server behavior. Auto-discovery is enabled by default.",
+					"properties": {
+						"autoDiscover": {
+							"description": "Disable scanning PATH for installed language servers at startup.",
+							"type": "boolean"
+						}
+					},
+					"type": "object",
+					"additionalProperties": false
+				},
+				"lspServers": {
+					"description": "LSP server configurations (optional — auto-discovery enabled by default).",
+					"items": {
+						"properties": {
+							"args": {
+								"items": {
+									"type": "string"
+								},
+								"type": "array"
+							},
+							"command": {
+								"type": "string"
+							},
+							"env": {
+								"$ref": "#/definitions/RecordStringString"
+							},
+							"languages": {
+								"description": "File extensions this server handles.",
+								"items": {
+									"type": "string"
+								},
+								"type": "array"
+							},
+							"name": {
+								"type": "string"
+							}
+						},
+						"type": "object",
+						"additionalProperties": false
+					},
+					"type": "array"
+				},
+				"mode": {
+					"description": "Mode to start in (normal, auto-accept, yolo, plan).",
+					"enum": ["auto-accept", "normal", "plan", "yolo"],
+					"type": "string"
+				},
+				"modeProviders": {
+					"$ref": "#/definitions/DiskModeProviders",
+					"description": "Per-mode provider/model overrides (e.g. use a fast model for plan mode)."
+				},
+				"model": {
+					"description": "Model name to use for this profile.",
+					"type": "string"
+				},
+				"nanocoderTools": {
+					"description": "Nanocoder-specific tool configurations.",
+					"properties": {
+						"webSearch": {
+							"properties": {
+								"apiKey": {
+									"type": "string"
+								}
+							},
+							"type": "object",
+							"additionalProperties": false
+						}
+					},
+					"type": "object",
+					"additionalProperties": false
+				},
+				"provider": {
+					"description": "Active provider to use for this profile.",
+					"type": "string"
+				},
+				"providers": {
+					"description": "AI provider configurations (all OpenAI-compatible).",
+					"items": {
+						"$ref": "#/definitions/ProviderConfig"
+					},
+					"type": "array"
+				},
+				"retries": {
+					"$ref": "#/definitions/RetryLimitsConfig",
+					"description": "Agent-loop retry limits. Each field has its own sensible default — you\ncan set any combination (e.g. just `maxRepeatedToolCalls`)."
+				},
+				"sandbox": {
+					"description": "Confine execute_bash / !cmd with an OS jail. Off by default.",
+					"type": "boolean"
+				},
+				"systemPrompt": {
+					"$ref": "#/definitions/SystemPromptConfig",
+					"description": "Custom system prompt — replaces or extends the built-in prompt."
+				},
+				"tune": {
+					"$ref": "#/definitions/TuneConfig",
+					"description": "Model mode defaults (tool profile, tool mode, model parameters)."
+				},
+				"verify": {
+					"$ref": "#/definitions/VerifyConfig",
+					"description": "Project-level verify policy: CI-watch trust level and poll cadence, and\n`required` completion evidence (commands that must exit 0 after the last\nedit, or \"auto\"). Read by `loadVerifyConfig()`."
+				}
+			},
+			"type": "object",
+			"additionalProperties": false
+		},
+		"DiskProfilesConfig": {
+			"additionalProperties": {
+				"$ref": "#/definitions/DiskProfileConfig"
+			},
+			"description": "Map of profile name to profile configuration.",
+			"type": "object"
 		},
 		"FormatterConfig": {
 			"description": "A code formatter run on every file the agent writes whose path matches\n`match`, after the edit succeeds and before the `post-tool-use` hooks.",

@@ -44,6 +44,7 @@ nanocoder -h
 |--------|-------|-------------|
 | `--version` | `-v` | Display the installed version number |
 | `--help` | `-h` | Show usage information and available options |
+| `--profile <name>` | | Use a named configuration profile from agents.config.json (e.g. `--profile fast`) |
 | `--vscode` | | **Deprecated.** Start the legacy VS Code companion (WebSocket). It will be removed in a future release; the [VS Code extension](../features/vscode-extension.md) now runs the agent itself over ACP |
 | `--vscode-port` | | Ask for a specific VS Code server port. By default it binds an ephemeral port and publishes it to a discovery file the extension reads, so this is only needed when you want a known port (e.g. for port forwarding). If the requested port is busy, the next 10 ports are tried in turn and the one actually bound is written to the discovery file and the log |
 | `--acp` | | Run as an [ACP server](../features/acp.md) for editor integration (Zed, etc.) |
@@ -53,7 +54,8 @@ nanocoder -h
 | `--no-plain` | | Force the Ink runtime even in CI and non-TTY environments |
 | `--json` | | Emit a single structured JSON object to `stdout` on completion instead of streamed text. Supported by `run` and `review`, even in a terminal: `run` uses the plain runtime and `review` runs headless. Incompatible with `--acp` and `--vscode`; `run --json` is also incompatible with `--no-plain` |
 | `--output-format` | | Set the `stdout` format, `text` or `json`. Synonym for `--json` |
-| `--context-max` | | Set maximum context length in tokens (supports k/K suffix, e.g. `128k`) |
+| `--json-schema <file|JSON>` | | Validate the final answer from `run` against a JSON Schema file or inline JSON. Invalid answers are retried; always uses the plain runtime |
+| `--context-max` | | Set maximum context length in tokens (supports positive integer or decimal values, k/K, and m/M suffixes) |
 | `--mode` | | Start in a specific [development mode](../features/development-modes.md) - `normal`, `auto-accept`, `yolo`, `plan`, or `architect`. Defaults to `auto-accept` for `run` mode; interactive sessions use `defaultMode` from `agents.config.json` if set, otherwise `normal`. |
 | `--trust-directory` | | Skip the first-run directory trust prompt for this run only. Valid with `run`, `review`, `nanocoder daemon start`, `nanocoder verify` and `--acp`; ignored (with a warning) in interactive mode. The trust is ephemeral - `trustedDirectories` in your preferences file is not modified. See [Directory trust](#directory-trust) |
 | `--alt-screen` | | Start in fullscreen mode: a fixed-height layout on the alternate screen buffer with in-app scrolling (enabled by default). |
@@ -188,6 +190,7 @@ nanocoder --provider openrouter --model google/gemini-3.1-flash run "analyze src
 
 # With context limit override (useful when model context isn't auto-detected)
 nanocoder --provider ollama --model llama3.1 --context-max 128k run "analyze src/app.ts"
+nanocoder --provider ollama --model llama3.1 --context-max 1m run "analyze src/app.ts"
 
 # Flags after 'run' command
 nanocoder run --provider openrouter --model anthropic/claude-sonnet-4-20250514 "refactor database module"

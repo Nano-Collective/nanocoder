@@ -1,6 +1,7 @@
 import {Readable} from 'node:stream';
 import test from 'ava';
 import {
+	argsBeforeRun,
 	composePromptWithStdin,
 	parseRunPrompt,
 	readStdinText,
@@ -84,6 +85,17 @@ test('--prompt-file - is not mistaken for part of the prompt', t => {
 	t.is(parseRunPrompt(['run', 'do', '--prompt-file', '-', 'this']), 'do this');
 });
 
+test('--json-schema values are stripped from the run prompt', t => {
+	t.is(
+		parseRunPrompt(['run', '--json-schema', './schema.json', 'summarize', 'this']),
+		'summarize this',
+	);
+	t.is(
+		parseRunPrompt(['run', '--json-schema={"type":"object"}', 'summarize']),
+		'summarize',
+	);
+});
+
 test('readStdinText joins chunks', async t => {
 	t.is(await readStdinText(Readable.from(['abc', 'def']), MAX), 'abcdef');
 });
@@ -111,4 +123,18 @@ test('readStdinText stops once past the cap instead of buffering everything', as
 
 test('readStdinText returns an empty string for an empty stream', async t => {
 	t.is(await readStdinText(Readable.from([]), MAX), '');
+});
+
+test('argsBeforeRun keeps only the words before `run`', t => {
+	t.deepEqual(argsBeforeRun(['--mode', 'plan', 'run', 'go', 'test', '-v']), [
+		'--mode',
+		'plan',
+	]);
+	t.deepEqual(argsBeforeRun(['run', 'node', '--version']), []);
+});
+
+test('argsBeforeRun returns every argument when there is no `run`', t => {
+	t.deepEqual(argsBeforeRun(['--version']), ['--version']);
+	t.deepEqual(argsBeforeRun(['-h']), ['-h']);
+	t.deepEqual(argsBeforeRun([]), []);
 });

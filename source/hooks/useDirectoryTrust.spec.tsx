@@ -61,7 +61,11 @@ test.serial('reports trust exactly as isDirectoryTrusted does', async t => {
 		{
 			label: 'current fingerprint',
 			stored: root => [
-				{path: root, fingerprint: describeProjectTrust(root).fingerprint},
+				{
+					path: root,
+					fingerprint: describeProjectTrust(root).fingerprint,
+					fingerprintVersion: TRUST_FINGERPRINT_VERSION,
+				},
 			],
 		},
 		{
@@ -70,6 +74,7 @@ test.serial('reports trust exactly as isDirectoryTrusted does', async t => {
 				{
 					path: unnormalized(root),
 					fingerprint: describeProjectTrust(root).fingerprint,
+					fingerprintVersion: TRUST_FINGERPRINT_VERSION,
 				},
 			],
 		},
@@ -130,6 +135,7 @@ test.serial(
 			const stored = {
 				path: unnormalized(root),
 				fingerprint: describeProjectTrust(root).fingerprint,
+				fingerprintVersion: TRUST_FINGERPRINT_VERSION,
 			};
 			savePreferences({trustedDirectories: [stored]});
 			resetPreferencesCache();

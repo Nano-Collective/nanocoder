@@ -30,6 +30,8 @@
 
 import {existsSync, readFileSync} from 'node:fs';
 import {join} from 'node:path';
+import type {CliMode} from '@/app/types';
+import {VALID_MODES} from '@/app/types';
 import {
 	DEFAULT_AUTO_COMPACT_CONFIG,
 	DEFAULT_HEADLESS_CONFIG,
@@ -42,7 +44,14 @@ import {
 import {loadAllMCPConfigs} from '@/config/mcp-config-loader';
 import {getConfigPath} from '@/config/paths';
 import {loadPreferences} from '@/config/preferences';
+import {
+	getActiveProfileName,
+	loadAvailableProfiles,
+	loadDefaultProfileName,
+	resolveActiveProfile,
+} from '@/config/profile';
 import {FIREWALL_DEFAULTS, resolveFirewallConfig} from '@/types/firewall';
+import {stripUtf8Bom} from '@/utils/strip-utf8-bom';
 import {isObject} from '@/utils/type-helpers';
 
 /**
@@ -50,13 +59,19 @@ import {isObject} from '@/utils/type-helpers';
  * constant, `global` the user-level config directory, `project` the working
  * directory, `env` a `NANOCODER_*` environment variable.
  */
-export type ConfigLayerId = 'default' | 'global' | 'project' | 'env';
+export type ConfigLayerId =
+	| 'default'
+	| 'global'
+	| 'project'
+	| 'profile'
+	| 'env';
 
 /** Ascending precedence. Index into this to compare two layers. */
 const LAYER_PRECEDENCE: readonly ConfigLayerId[] = [
 	'default',
 	'global',
 	'project',
+	'profile',
 	'env',
 ];
 
@@ -116,6 +131,7 @@ export interface ConfigLayerInfo {
 export interface EffectiveConfig {
 	cwd: string;
 	configDir: string;
+	activeProfile?: string;
 	layers: ConfigLayerInfo[];
 	entries: EffectiveConfigEntry[];
 }
@@ -280,7 +296,9 @@ interface RawLayer {
 function parseJsonFile(path: string): Record<string, unknown> | null {
 	if (!existsSync(path)) return null;
 	try {
-		const parsed: unknown = JSON.parse(readFileSync(path, 'utf-8'));
+		const parsed: unknown = JSON.parse(
+			stripUtf8Bom(readFileSync(path, 'utf-8')),
+		);
 		return isObject(parsed) ? parsed : null;
 	} catch {
 		return null;
@@ -296,7 +314,9 @@ function readRawFile(
 		return {layer, file, path, exists: false, data: null};
 	}
 	try {
-		const parsed: unknown = JSON.parse(readFileSync(path, 'utf-8'));
+		const parsed: unknown = JSON.parse(
+			stripUtf8Bom(readFileSync(path, 'utf-8')),
+		);
 		return {
 			layer,
 			file,
@@ -328,10 +348,30 @@ function readRawLayers(cwd: string, configDir: string): RawLayer[] {
 		'agents.config.json',
 		'nanocoder-preferences.json',
 	];
-	return files.flatMap(file => [
+	const layers = files.flatMap(file => [
 		readRawFile('global', file, join(configDir, file)),
 		readRawFile('project', file, join(cwd, file)),
 	]);
+
+	try {
+		const active = resolveActiveProfile(cwd);
+		if (active) {
+			const profileOrigin = active.originFile
+				? `${active.originFile} (profile ${active.name})`
+				: `profile: ${active.name}`;
+			layers.push({
+				layer: 'profile',
+				file: 'agents.config.json',
+				path: profileOrigin,
+				exists: true,
+				data: {nanocoder: active.profile},
+			});
+		}
+	} catch {
+		// Ignore if active profile resolution throws in raw reading
+	}
+
+	return layers;
 }
 
 /**
@@ -408,7 +448,7 @@ interface BlockSpec {
 	depth?: number;
 }
 
-function blockSpecs(): BlockSpec[] {
+function blockSpecs(cwd?: string): BlockSpec[] {
 	const config = getAppConfig();
 	const agents: ConfigFileName = 'agents.config.json';
 	const preferences: ConfigFileName = 'nanocoder-preferences.json';
@@ -528,6 +568,24 @@ function blockSpecs(): BlockSpec[] {
 			effective: config.autoCommit,
 			leaf: true,
 		},
+		{
+			path: ['nanocoder', 'gitContext'],
+			file: agents,
+			effective: config.gitContext,
+			leaf: true,
+		},
+		{
+			path: ['nanocoder', 'defaultProfile'],
+			file: agents,
+			effective: loadDefaultProfileName(cwd),
+			leaf: true,
+		},
+		{
+			path: ['nanocoder', 'profiles'],
+			file: agents,
+			effective: loadAvailableProfiles(cwd),
+			leaf: true,
+		},
 	];
 }
 
@@ -641,20 +699,51 @@ function resolveBlockEntries(
 		for (const loser of losers) pushRaw(loser);
 
 		const {value, redacted} = redactValue(leaf.value, keyHint);
+
+		// `nanocoder.defaultMode` is resolved from an active profile's `mode`
+		// — the loader maps `mode` onto `defaultMode`
+		// (loadHierarchicalConfig in config/index.ts) and the profile
+		// outranks every file's own `defaultMode` — so the profile, not
+		// built-in or a project file, is the source when it supplies one.
+		let profileOrigin: string | undefined;
+		if (
+			value !== undefined &&
+			spec.path.join('.') === 'nanocoder.defaultMode'
+		) {
+			const profileLayer = layers.find(l => l.layer === 'profile');
+			if (profileLayer) {
+				const profileMode = getAt(profileLayer.data, ['nanocoder', 'mode']);
+				if (
+					typeof profileMode === 'string' &&
+					VALID_MODES.includes(profileMode.toLowerCase().trim() as CliMode)
+				) {
+					profileOrigin = profileLayer.path;
+				}
+			}
+		}
+
 		return {
 			key,
 			value,
 			redacted,
-			layer: winnerSuppliesLeaf
-				? ((winner as RawLayer).layer as ConfigLayerId)
-				: ('default' as const),
-			origin: winnerSuppliesLeaf ? (winner as RawLayer).path : 'built-in',
+			layer:
+				profileOrigin !== undefined
+					? 'profile'
+					: winnerSuppliesLeaf
+						? ((winner as RawLayer).layer as ConfigLayerId)
+						: ('default' as const),
+			origin:
+				profileOrigin !== undefined
+					? profileOrigin
+					: winnerSuppliesLeaf
+						? (winner as RawLayer).path
+						: 'built-in',
 			hasDefault,
 			defaultValue,
 			shadowed,
 			block: blockKey,
-			blockOrigin: winner?.path,
-			blockLayer: winner?.layer,
+			blockOrigin: profileOrigin !== undefined ? profileOrigin : winner?.path,
+			blockLayer: profileOrigin !== undefined ? 'profile' : winner?.layer,
 			rule: 'block' as const,
 		};
 	});
@@ -794,7 +883,7 @@ function readEnvProviderNames(): Set<string> {
 	if (!rawData) return names;
 
 	try {
-		const parsed: unknown = JSON.parse(rawData);
+		const parsed: unknown = JSON.parse(stripUtf8Bom(rawData));
 		const list = Array.isArray(parsed)
 			? parsed
 			: (getAt(isObject(parsed) ? parsed : null, ['nanocoder', 'providers']) ??
@@ -849,7 +938,7 @@ function readEnvMcpServers(): {servers: Map<string, unknown>; origin: string} {
 	if (!rawData) return {servers: new Map(), origin};
 
 	try {
-		const parsed: unknown = JSON.parse(rawData);
+		const parsed: unknown = JSON.parse(stripUtf8Bom(rawData));
 		if (Array.isArray(parsed)) {
 			const byName = new Map<string, unknown>();
 			for (const server of parsed) {
@@ -873,8 +962,24 @@ function resolveMcpEntries(
 	configDir: string,
 ): EffectiveConfigEntry[] {
 	const env = readEnvMcpServers();
-	// Ascending precedence, matching `mergeMCPConfigs`: env beats project
-	// beats global, and only a server of the same name is displaced.
+	// Ascending precedence, matching `mergeMCPConfigs`: env beats profile
+	// beats project beats global, and only a server of the same name is
+	// displaced.
+	let profileOrigin = `profile: unknown`;
+	let profileServers = new Map<string, unknown>();
+	try {
+		const active = resolveActiveProfile(cwd);
+		if (active) {
+			profileOrigin = active.originFile ?? `profile: ${active.name}`;
+			profileServers = readMcpServers(
+				active.profile as Record<string, unknown>,
+			);
+		}
+	} catch {
+		// A removed or renamed active profile is silently ignored so config
+		// loading keeps falling back to the files instead of crashing mid-session.
+	}
+
 	const mcpLayers: Array<{
 		layer: ConfigLayerId;
 		origin: string;
@@ -890,10 +995,11 @@ function resolveMcpEntries(
 			origin: join(cwd, '.mcp.json'),
 			servers: readMcpServers(parseJsonFile(join(cwd, '.mcp.json'))),
 		},
+		{layer: 'profile', origin: profileOrigin, servers: profileServers},
 		{layer: 'env', origin: env.origin, servers: env.servers},
 	];
 
-	return loadAllMCPConfigs().map(({server, source}) => {
+	return loadAllMCPConfigs(cwd).map(({server, source}) => {
 		const name = server.name;
 		const winnerIndex = mcpLayers.findIndex(l => l.layer === source);
 		const winner = mcpLayers[winnerIndex];
@@ -946,7 +1052,7 @@ export function resolveEffectiveConfig(options?: {
 	const rawLayers = readRawLayers(cwd, configDir);
 
 	const entries: EffectiveConfigEntry[] = [
-		...blockSpecs().flatMap(spec => resolveBlockEntries(spec, rawLayers)),
+		...blockSpecs(cwd).flatMap(spec => resolveBlockEntries(spec, rawLayers)),
 		...resolvePreferencesEntries(rawLayers),
 		...resolveProviderEntries(rawLayers),
 		...resolveMcpEntries(cwd, configDir),
@@ -976,7 +1082,14 @@ export function resolveEffectiveConfig(options?: {
 			})),
 	];
 
-	return {cwd, configDir, layers, entries};
+	let activeProfile: string | undefined;
+	try {
+		activeProfile = getActiveProfileName(cwd);
+	} catch {
+		// Ignore
+	}
+
+	return {cwd, configDir, activeProfile, layers, entries};
 }
 
 /**

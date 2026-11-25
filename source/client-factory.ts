@@ -15,6 +15,7 @@ import {getConfigPath} from '@/config/paths';
 import {loadPreferences} from '@/config/preferences';
 import type {AIProviderConfig, LLMClient} from '@/types/index';
 import {formatError} from '@/utils/error-formatter';
+import {stripUtf8Bom} from '@/utils/strip-utf8-bom';
 import {isLocalURL} from '@/utils/url-utils';
 
 // Custom error class for configuration errors that need special UI handling
@@ -87,7 +88,7 @@ async function createAISDKClient(
 			);
 			for (const file of filesToCheck) {
 				try {
-					JSON.parse(readFileSync(file, 'utf-8'));
+					JSON.parse(stripUtf8Bom(readFileSync(file, 'utf-8')));
 				} catch (err) {
 					unreadableError = `unreadable: ${file}: ${err instanceof Error ? err.message : String(err)}`;
 					break;
@@ -261,7 +262,13 @@ export function loadProviderConfigs(): AIProviderConfig[] {
 		tune: provider.tune,
 		config: {
 			baseURL: provider.baseUrl,
-			apiKey: provider.apiKey || 'dummy-key',
+			// Only local servers get a placeholder key. A hosted provider without
+			// one keeps it unset so validateProviderCredentials can reject it.
+			apiKey:
+				provider.apiKey ||
+				(provider.baseUrl && isLocalURL(provider.baseUrl)
+					? 'dummy-key'
+					: undefined),
 			caCertPath: provider.caCertPath,
 			// organizationId is sugar for the OpenAI-Organization header; an
 			// explicit header of the same name in `headers` wins.
@@ -304,13 +311,18 @@ function validateProviderCredentials(providerConfig: AIProviderConfig): void {
 		return;
 	}
 
-	// Require API key for hosted providers (local servers get a pass)
-	if (
-		!providerConfig.config.apiKey &&
-		!(
-			providerConfig.config.baseURL && isLocalURL(providerConfig.config.baseURL)
-		)
-	) {
-		throw new Error('API key required for hosted providers');
+	// A hosted provider needs a credential: an API key or authentication headers.
+	// Local servers get a pass. OpenAI-Organization picks an organization, it doesn't
+	// authenticate, so it doesn't count (it is also what `organizationId` adds).
+	const {apiKey, baseURL, headers} = providerConfig.config;
+	const hasAuthHeaders = Object.entries(headers ?? {}).some(
+		([name, value]) =>
+			Boolean(value) && name.toLowerCase() !== 'openai-organization',
+	);
+	if (!apiKey && !hasAuthHeaders && !(baseURL && isLocalURL(baseURL))) {
+		throw new Error(
+			'No credentials for this hosted provider: set `apiKey` in agents.config.json ' +
+				"(any non-empty value if the server doesn't check one) or authentication `headers`",
+		);
 	}
 }
