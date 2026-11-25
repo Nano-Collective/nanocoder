@@ -29,28 +29,6 @@ let toolManagerGetter: (() => ToolManager | null) | null = null;
 // of spinning up a fresh instance that only knows about flat .nanocoder/commands/.
 let commandLoaderGetter: (() => CustomCommandLoader | null) | null = null;
 
-const waitForHandler = async <T>(
-	run: () => Promise<T>,
-	abortSignal?: AbortSignal,
-): Promise<T> => {
-	if (!abortSignal) return run();
-	if (abortSignal.aborted) throw abortSignal.reason;
-
-	let onAbort: (() => void) | undefined;
-	const cancelled = new Promise<never>((_, reject) => {
-		onAbort = () => reject(abortSignal.reason);
-		abortSignal.addEventListener('abort', onAbort, {once: true});
-	});
-
-	try {
-		const result = run();
-		if (abortSignal.aborted) onAbort?.();
-		return await Promise.race([result, cancelled]);
-	} finally {
-		if (onAbort) abortSignal.removeEventListener('abort', onAbort);
-	}
-};
-
 export function setToolRegistryGetter(
 	getter: () => Record<string, ToolHandler>,
 ) {
@@ -127,13 +105,7 @@ export async function processToolUse(
 			return {...createCancellationResults([toolCall])[0], isError: true};
 		}
 
-		const result = await waitForHandler(
-			() => handler(parsedArgs, options),
-			options?.abortSignal,
-		);
-		if (options?.abortSignal?.aborted) {
-			return {...createCancellationResults([toolCall])[0], isError: true};
-		}
+		const result = await handler(parsedArgs, options);
 		// Image bytes stay off `content` so truncation cannot chew them up
 		// and the model receives them as image parts, not a base64 blob.
 		const isVisual =
