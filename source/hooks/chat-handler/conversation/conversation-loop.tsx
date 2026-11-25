@@ -18,6 +18,10 @@ import {compressMessages} from '@/conversation/compaction/message-compression';
 import {buildCompletionNote} from '@/conversation/completion-note';
 import {MessageBuilder} from '@/conversation/message-builder';
 import {markRunFailed} from '@/conversation/run-outcome';
+import {
+	formatVerificationSummary,
+	takeEvidenceRejection,
+} from '@/services/completion-ledger';
 import {runLifecycleHooks} from '@/services/lifecycle-hooks';
 import {signalQuestion} from '@/tools/runtime/question-queue';
 import {bumpReadContentGeneration} from '@/tools/runtime/read-tracker';
@@ -550,7 +554,9 @@ export const processAssistantResponse = async (
 					// takes effect on the very next response.
 					const showUsageFooter = getShowUsageFooter();
 					const responseUsage = showUsageFooter
-						? await buildResponseUsageBounded(turnUsage, currentModel)
+						? await buildResponseUsageBounded(turnUsage, currentModel, {
+								baseURL: client.getProviderConfig().config.baseURL,
+							})
 						: undefined;
 					addToChatQueue(
 						<AssistantMessage
@@ -631,6 +637,7 @@ export const processAssistantResponse = async (
 							totalTokens: usage.totalTokens,
 							cacheReadTokens: usage.cacheReadTokens,
 							cacheWriteTokens: usage.cacheWriteTokens,
+							baseURL: client.getProviderConfig().config.baseURL,
 							timestamp: Date.now(),
 						});
 					}
@@ -771,6 +778,25 @@ export const processAssistantResponse = async (
 					await flushAll();
 					return {kind: 'continue', messages: [], resetRetryGuards: true};
 				}
+
+				// With `nanocoder.verify.required` set, a turn that edited files
+				// cannot end until the required commands have exited 0 since the
+				// last edit.
+				const evidenceRejection = signal.aborted
+					? null
+					: takeEvidenceRejection(walkthroughLifecycle.ledger);
+				if (evidenceRejection) {
+					setHistory([...history, evidenceRejection]);
+					addToChatQueue(
+						<InfoMessage
+							key={generateKey('verification-required')}
+							message="Edits are not verified yet - asking the model to run the required checks."
+							hideBox={true}
+						/>,
+					);
+					await flushAll();
+					return {kind: 'continue', messages: [], resetRetryGuards: true};
+				}
 				finalContent = content;
 				return {kind: 'finish'};
 			},
@@ -779,13 +805,25 @@ export const processAssistantResponse = async (
 	});
 
 	switch (result.kind) {
-		case 'completed':
+		case 'completed': {
 			// Flush any residual compact counts and task updates from turns that
 			// didn't emit reasoning so they persist in scrollback at the end.
 			params.onFinalAssistantText?.(finalContent);
 			await flushAll();
 
 			setIsGenerating(false);
+			const verification = formatVerificationSummary(
+				walkthroughLifecycle.ledger,
+			);
+			if (verification) {
+				addToChatQueue(
+					<InfoMessage
+						key={generateKey('verification-summary')}
+						message={verification}
+						hideBox={true}
+					/>,
+				);
+			}
 			addToChatQueue(
 				<InfoMessage
 					key={generateKey('completion-time')}
@@ -796,6 +834,7 @@ export const processAssistantResponse = async (
 			);
 			onConversationComplete?.();
 			return;
+		}
 		case 'aborted':
 			// The model call raised the abort: unwind with its error.
 			if (result.error !== undefined) {

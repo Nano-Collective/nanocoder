@@ -398,6 +398,38 @@ async function scrubbedPayload(
 	return {payload: JSON.stringify(captured.prompt), sessionMap};
 }
 
+// Codex sends the system prompt as the `instructions` provider option, built
+// beside the prompt that goes through the scrubber.
+test('privacy: scrubs the system prompt sent as Codex instructions', async t => {
+	const captured: {prompt?: unknown; providerOptions?: unknown} = {};
+	await handleChat({
+		model: capturingModel(captured),
+		currentModel: 'gpt-5-codex',
+		providerConfig: {
+			name: 'Codex',
+			type: 'openai',
+			sdkProvider: 'chatgpt-codex',
+			models: ['gpt-5-codex'],
+			config: {baseURL: 'https://api.test.com'},
+		},
+		messages: [
+			{role: 'system', content: 'Internal contact: bob.secret@example.com'},
+			{role: 'user', content: 'hello'},
+		],
+		tools: {},
+		callbacks: {},
+		maxRetries: 0,
+		privacyEnabled: true,
+		privacySessionMapRef: {current: {}},
+	});
+
+	const {instructions} = (
+		captured.providerOptions as {openai: {instructions: string}}
+	).openai;
+	t.false(instructions.includes('bob.secret@example.com'));
+	t.regex(instructions, /«Email_\d+»/);
+});
+
 test('privacy: scrubs tool result content', async t => {
 	const {payload, sessionMap} = await scrubbedPayload([
 		{role: 'user', content: 'who owns this?'},
@@ -868,13 +900,17 @@ test('alternating deltas with no start markers keep their own callbacks', async 
 	t.deepEqual(routed.text, ['Answer', ' continues']);
 });
 
-function capturingModel(captured: {prompt?: unknown}): LanguageModel {
+function capturingModel(captured: {
+	prompt?: unknown;
+	providerOptions?: unknown;
+}): LanguageModel {
 	return {
 		specificationVersion: 'v3',
 		provider: 'anthropic',
 		modelId: 'claude-sonnet-4-5',
-		doStream: async (options: {prompt: unknown}) => {
+		doStream: async (options: {prompt: unknown; providerOptions?: unknown}) => {
 			captured.prompt = options.prompt;
+			captured.providerOptions = options.providerOptions;
 			return {
 				stream: new ReadableStream({
 					start(controller) {

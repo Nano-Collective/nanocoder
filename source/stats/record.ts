@@ -228,6 +228,7 @@ export type ApiUsageLike = {
 	totalTokens?: number;
 	cacheReadTokens?: number;
 	cacheWriteTokens?: number;
+	baseURL?: string;
 };
 
 /**
@@ -253,7 +254,7 @@ export async function recordApiCallForStats(
 				cacheWriteTokens: record.cacheWriteTokens,
 			},
 			record.model,
-			{getPricing: options?.getPricing},
+			{getPricing: options?.getPricing, baseURL: record.baseURL},
 		);
 		// A reset may have happened while pricing was resolving. Do not let a
 		// pre-reset request repopulate the freshly cleared ledger.

@@ -326,13 +326,14 @@ test('whenever-no-native parses text tool calls on a native turn', async t => {
 	t.is(executedIds(history()).length, 1);
 });
 
-test('whenever-no-native strips tool-call text echoed beside native calls', async t => {
+test('whenever-no-native preserves markup beside echoed native calls', async t => {
+	const prose = 'Press <kbd>Ctrl</kbd>+<kbd>C</kbd>. Generic <T>x</T>.';
 	const echoed: Reply = {
 		choices: [
 			{
 				message: {
 					role: 'assistant',
-					content: `Reading it.\n${XML_PROBE}`,
+					content: `${prose}\n${XML_PROBE}`,
 					tool_calls: [{id: 'a', function: {name: 'probe', arguments: {}}}],
 				},
 			},
@@ -345,8 +346,50 @@ test('whenever-no-native strips tool-call text echoed beside native calls', asyn
 	);
 	await run();
 	const assistant = history().find(m => m.role === 'assistant');
-	t.is(String(assistant?.content).trim(), 'Reading it.');
+	t.is(assistant?.content, prose);
 	t.deepEqual(executedIds(history()), ['a']);
+});
+
+const OPEN_PROBE = '<probe>\n  <id>x</id>\n';
+
+test('a text tool call left open is retried as malformed, for offered tools only', async t => {
+	const errors: string[] = [];
+	const onMalformedRetry = ({error}: {error: string}) => {
+		errors.push(error);
+	};
+	const offered = setup(
+		[{...text(OPEN_PROBE), toolsDisabled: true}, text('done')],
+		{onMalformedRetry},
+	);
+	t.deepEqual(await offered.run(), {kind: 'completed', modelCalls: 2});
+	t.deepEqual(errors, [
+		'Incomplete tool call: <probe> is never closed with </probe>',
+	]);
+
+	// Not offered this turn, so the reply is plain text as before.
+	const notOffered = setup([{...text(OPEN_PROBE), toolsDisabled: true}], {
+		onMalformedRetry,
+		prepareTurn: () => ({tools: {}, availableNames: []}),
+	});
+	t.deepEqual(await notOffered.run(), {kind: 'completed', modelCalls: 1});
+	t.is(errors.length, 1);
+});
+
+test('whenever-no-native checks a text tool call left open on a native turn', async t => {
+	const errors: string[] = [];
+	const {run} = setup(
+		[text(OPEN_PROBE), text('done')],
+		{
+			onMalformedRetry: ({error}) => {
+				errors.push(error);
+			},
+		},
+		{policy: {textToolCalls: 'whenever-no-native'}},
+	);
+	t.deepEqual(await run(), {kind: 'completed', modelCalls: 2});
+	t.deepEqual(errors, [
+		'Incomplete tool call: <probe> is never closed with </probe>',
+	]);
 });
 
 test('stripThinkTags drops think blocks from the recorded text', async t => {

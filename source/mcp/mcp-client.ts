@@ -1,15 +1,10 @@
 import {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import {StdioClientTransport} from '@modelcontextprotocol/sdk/client/stdio.js';
-import {StreamableHTTPClientTransport} from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import {WebSocketClientTransport} from '@modelcontextprotocol/sdk/client/websocket.js';
-import {formatError} from '@/utils/error-formatter';
-
-// Union type for all supported client transports
-type ClientTransport =
-	| StdioClientTransport
-	| WebSocketClientTransport
-	| StreamableHTTPClientTransport;
-
+import {
+	DEFAULT_REQUEST_TIMEOUT_MSEC,
+	type RequestOptions,
+} from '@modelcontextprotocol/sdk/shared/protocol.js';
+import {ErrorCode, McpError} from '@modelcontextprotocol/sdk/types.js';
 import type {
 	AISDKCoreTool,
 	MCPHealthChange,
@@ -24,6 +19,7 @@ import type {
 	StructuredToolOutput,
 	Tool,
 } from '@/types/index';
+import {formatError} from '@/utils/error-formatter';
 import {
 	generateCorrelationId,
 	getLogger,
@@ -60,7 +56,10 @@ import {
 } from './tool-adapter.js';
 import {createMCPToolApproval, isToolAutoApproved} from './tool-approval.js';
 import {formatToolResultContent} from './tool-result-format.js';
-import {TransportFactory} from './transport-factory.js';
+import {type ClientTransport, TransportFactory} from './transport-factory.js';
+
+/** The longest delay Node's setTimeout accepts (about 24.8 days). */
+const MAX_TIMER_MS = 2_147_483_647;
 
 export class MCPClient {
 	private clients: Map<string, Client> = new Map();
@@ -288,9 +287,11 @@ export class MCPClient {
 				// TransportFactory) so server children can't write to the
 				// user's terminal. Drain the pipe into the logger — an
 				// unconsumed pipe would fill up and block the child.
-				if ('stderr' in transport && transport.stderr) {
+				const stderr =
+					transport instanceof StdioClientTransport ? transport.stderr : null;
+				if (stderr) {
 					const serverName = normalizedServer.name;
-					transport.stderr.on('data', (chunk: Buffer) => {
+					stderr.on('data', (chunk: Buffer) => {
 						const text = chunk.toString('utf8').trimEnd();
 						if (text) {
 							this.logger.debug(`MCP server stderr [${serverName}]`, {
@@ -705,6 +706,7 @@ export class MCPClient {
 						fallbackClient,
 						originalToolName,
 						args,
+						serverName,
 						options?.abortSignal,
 					),
 				);
@@ -724,15 +726,60 @@ export class MCPClient {
 				client,
 				mapping.originalName,
 				sanitizedArgs,
+				mapping.serverName,
 				options?.abortSignal,
 			),
 		);
+	}
+
+	/** The tool-call timeout for a server, after `toolTimeout: 0` and clamping. */
+	private toolTimeoutFor(serverName: string): number {
+		const toolTimeout = this.serverConfigs.get(serverName)?.toolTimeout;
+		if (toolTimeout === undefined) return DEFAULT_REQUEST_TIMEOUT_MSEC;
+		// The SDK hands the value to setTimeout, so 0 would fire at once and
+		// anything past Node's ceiling overflows to 1ms.
+		return toolTimeout === 0
+			? MAX_TIMER_MS
+			: Math.min(toolTimeout, MAX_TIMER_MS);
+	}
+
+	private toolCallOptions(
+		serverName: string,
+		toolName: string,
+		abortSignal?: AbortSignal,
+	): RequestOptions {
+		const resetTimeoutOnProgress =
+			this.serverConfigs.get(serverName)?.resetTimeoutOnProgress ?? true;
+		return {
+			timeout: this.toolTimeoutFor(serverName),
+			resetTimeoutOnProgress,
+			...(abortSignal && {signal: abortSignal}),
+			// The SDK only asks the server for progress when a handler is set,
+			// so without one there would be nothing to reset the timer.
+			...(resetTimeoutOnProgress && {
+				onprogress: progress =>
+					this.logger.debug('MCP tool progress', {
+						serverName,
+						toolName,
+						progress: progress.progress,
+						total: progress.total,
+					}),
+			}),
+		};
+	}
+
+	/** Which limit a timed-out call hit, and the setting that changes it. */
+	private describeToolTimeout(serverName: string): string {
+		const resets =
+			this.serverConfigs.get(serverName)?.resetTimeoutOnProgress ?? true;
+		return `Tool calls on "${serverName}" time out after ${this.toolTimeoutFor(serverName)}ms without ${resets ? 'a response or progress update' : 'a response'}; set "toolTimeout" for this server in your MCP config to change it (0 means no limit).`;
 	}
 
 	private async executeToolCall(
 		client: Client,
 		toolName: string,
 		args: Record<string, unknown>,
+		serverName?: string,
 		abortSignal?: AbortSignal,
 	): Promise<string | StructuredToolOutput> {
 		const correlationId = generateCorrelationId();
@@ -747,13 +794,16 @@ export class MCPClient {
 			});
 
 			try {
-				const params = {
-					name: toolName,
-					arguments: args,
-				};
-				const result = abortSignal
-					? await client.callTool(params, undefined, {signal: abortSignal})
-					: await client.callTool(params);
+				const requestOptions = serverName
+					? this.toolCallOptions(serverName, toolName, abortSignal)
+					: abortSignal
+						? {signal: abortSignal}
+						: undefined;
+				const result = await client.callTool(
+					{name: toolName, arguments: args},
+					undefined,
+					requestOptions,
+				);
 
 				this.logger.debug('MCP tool executed successfully', {
 					toolName,
@@ -820,7 +870,13 @@ export class MCPClient {
 					correlationId,
 				});
 
-				throw new Error(`MCP tool execution failed: ${errorMessage}`);
+				const timedOut =
+					serverName !== undefined &&
+					error instanceof McpError &&
+					error.code === ErrorCode.RequestTimeout;
+				throw new Error(
+					`MCP tool execution failed: ${errorMessage}${timedOut ? `. ${this.describeToolTimeout(serverName)}` : ''}`,
+				);
 			}
 		}, correlationId);
 	}

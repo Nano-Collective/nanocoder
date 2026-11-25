@@ -38,6 +38,10 @@ auditConfig:
     # Dev-only by construction: @vscode/vsce -> @azure/identity -> @azure/msal-node@5.2.2.
     # Absent from production runtime/shipped binary; re-check and remove when @vscode/vsce is upgraded.
     - GHSA-xcx6-jx8p-x3h5
+    # picomatch ReDoS (GHSA-fc5q-39xc-vjpf): the advisory lists >=4.0.8 as patched, but the
+    # registry's latest is 4.0.7. Reached only through dev tooling (@changesets/cli, tinyglobby).
+    # Remove once a patched picomatch is published.
+    - GHSA-fc5q-39xc-vjpf
 
 ignoredBuiltDependencies:
   - protobufjs
@@ -63,4 +67,3 @@ onlyBuiltDependencies:
 
 patchedDependencies:
   '@ai-sdk/openai@3.0.71': patches/@ai-sdk__openai@3.0.71.patch
-  ink@6.8.0: patches/ink@6.8.0.patch

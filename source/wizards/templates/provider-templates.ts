@@ -426,6 +426,13 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 		apiKeyPrompt: 'API Key (from https://app.requesty.ai/api-keys)',
 		modelDefault: 'openai/gpt-6.1-sol',
 	}),
+	apiKeyTemplate({
+		id: 'runcrate',
+		name: 'Runcrate',
+		baseUrl: 'https://api.runcrate.ai/v1',
+		apiKeyPrompt: 'API Key (from https://www.runcrate.ai/dashboard/api-keys)',
+		modelDefault: 'deepseek-ai/DeepSeek-V4.1-Flash',
+	}),
 	{
 		id: 'openai',
 		name: 'OpenAI',
@@ -561,6 +568,26 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 		modelDefault: 'openai/gpt-6.1-sol',
 	}),
 	apiKeyTemplate({
+		id: 'gmi-cloud',
+		name: 'GMI Cloud',
+		baseUrl: 'https://api.gmi-serving.com/v1',
+		apiKeyPrompt: 'GMI Cloud API Key (from console.gmicloud.ai)',
+	}),
+	apiKeyTemplate({
+		id: 'popnow',
+		name: 'PopNow',
+		baseUrl: 'https://api.popnow.ai/v1',
+		apiKeyPrompt: 'API Key (from popnow.ai/api/console/keys)',
+		modelDefault: 'deepseek/v4-flash/chat',
+	}),
+	apiKeyTemplate({
+		id: 'cloudgpu',
+		name: 'CloudGPU',
+		baseUrl: 'https://cloudgpu.app/v1',
+		apiKeyPrompt: 'API Key (from cloudgpu.app/api/console)',
+		modelDefault: 'kimi-k3',
+	}),
+	apiKeyTemplate({
 		id: 'together',
 		name: 'Together AI',
 		baseUrl: 'https://api.together.ai/v1',
@@ -584,7 +611,7 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 			},
 			{
 				name: 'apiKey',
-				prompt: 'API Key (optional)',
+				prompt: 'API Key (optional for local servers like Ollama or LM Studio)',
 				required: false,
 				sensitive: true,
 			},

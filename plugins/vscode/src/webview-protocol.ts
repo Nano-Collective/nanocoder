@@ -67,6 +67,14 @@ export interface ExtensionMessagePermissionRequested {
 	options?: any[];
 }
 
+export interface ExtensionMessagePendingChangeAdded {
+	type: 'pendingChangeAdded';
+	toolCallId: string;
+	filePath: string;
+	additions: number;
+	deletions: number;
+}
+
 /** Sent when a cancel or a new chat drops permission prompts still on screen. */
 export interface ExtensionMessagePermissionsCancelled {
 	type: 'permissionsCancelled';
@@ -238,6 +246,7 @@ export type ExtensionToWebviewMessage =
 	| ExtensionMessageToolUpdated
 	| ExtensionMessageToolCompleted
 	| ExtensionMessagePermissionRequested
+	| ExtensionMessagePendingChangeAdded
 	| ExtensionMessagePermissionsCancelled
 	| ExtensionMessageProviderResult
 	| ExtensionMessageSyncState

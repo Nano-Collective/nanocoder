@@ -6,8 +6,14 @@ import type {
 	ToolKind,
 } from '@agentclientprotocol/sdk';
 import {getSafeSessionCwd} from '@/services/session-cwd';
-import {fitEditToLineEndings} from '@/tools/file-ops/line-endings';
-import {replaceFirstLiteral} from '@/tools/file-ops/literal-replace';
+import {
+	fitContentToLineEndings,
+	fitEditToLineEndings,
+} from '@/tools/file-ops/line-endings';
+import {
+	countLiteralOccurrences,
+	replaceFirstLiteral,
+} from '@/tools/file-ops/literal-replace';
 import type {ToolCall} from '@/types/core';
 import {truncateText} from '@/utils/truncate-text';
 
@@ -38,6 +44,8 @@ const TOOL_KINDS: Record<string, ToolKind> = {
 	write_file: 'edit',
 	diff_edit: 'edit',
 	execute_bash: 'execute',
+	bash_output: 'read',
+	kill_bash: 'execute',
 	fetch_url: 'fetch',
 	web_search: 'fetch',
 	agent: 'think',
@@ -87,6 +95,16 @@ export async function buildToolCallMeta(
 				title: command
 					? `execute_bash: ${truncate(command, 80)}`
 					: 'execute_bash',
+				kind,
+				locations: [],
+				content: [],
+			};
+		}
+		case 'bash_output':
+		case 'kill_bash': {
+			const jobId = asString(args.job_id);
+			return {
+				title: jobId ? `${name}: ${truncate(jobId, 80)}` : name,
 				kind,
 				locations: [],
 				content: [],
@@ -221,7 +239,7 @@ async function buildStringReplaceDiff(
 	// Only synthesize a whole-file diff when the replacement is unambiguous,
 	// mirroring the tool's own uniqueness requirement. Otherwise fall back to
 	// the hunk so the user still sees what is changing.
-	const occurrences = current.split(fitted.oldStr).length - 1;
+	const occurrences = countLiteralOccurrences(current, fitted.oldStr);
 	if (occurrences !== 1) {
 		return {
 			type: 'diff',
@@ -256,5 +274,11 @@ async function buildWriteFileDiff(
 		oldText = null; // New file.
 	}
 
-	return {type: 'diff', path: absPath, oldText, newText};
+	// Match the file's line endings the same way the tool does.
+	return {
+		type: 'diff',
+		path: absPath,
+		oldText,
+		newText: fitContentToLineEndings(oldText, newText),
+	};
 }

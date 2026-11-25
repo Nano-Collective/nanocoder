@@ -1,3 +1,4 @@
+import {ErrorCode, McpError} from '@modelcontextprotocol/sdk/types.js';
 import test from 'ava';
 import {resolveToolApproval} from '../tools/approval-policy';
 import {ToolValidationError} from '../tools/runtime/tool-validation';
@@ -1376,6 +1377,88 @@ test('MCPClient.callTool: carries a server isError flag next to the unchanged te
 		llmContent: 'Tool executed successfully (no output)',
 		isError: true,
 	}, 'an empty failure keeps its text and is still flagged');
+});
+
+// ============================================================================
+// Tool-call timeout (toolTimeout / resetTimeoutOnProgress)
+// ============================================================================
+
+/** A client with one server whose callTool records the request options. */
+function clientRecordingToolOptions(
+	server: Record<string, unknown>,
+	callTool: () => Promise<unknown> = async () => ({content: [{type: 'text', text: 'ok'}]}),
+) {
+	const client = new MCPClient();
+	const options: Array<Record<string, any> | undefined> = [];
+	// @ts-ignore - Accessing private properties for testing
+	client.serverTools.set('srv', [
+		{name: 'tool', description: 't', serverName: 'srv', inputSchema: {type: 'object', properties: {}}},
+	]);
+	// @ts-ignore
+	client.serverConfigs.set('srv', {name: 'srv', transport: 'stdio', ...server});
+	// @ts-ignore
+	client.clients.set('srv', {
+		callTool: async (_params: unknown, _schema: unknown, requestOptions?: Record<string, any>) => {
+			options.push(requestOptions);
+			return callTool();
+		},
+	});
+	return {client, options};
+}
+
+test('MCPClient.callTool: uses the SDK default timeout and resets it on progress by default', async t => {
+	const {client, options} = clientRecordingToolOptions({});
+
+	await client.callTool('tool', {});
+
+	t.is(options[0]?.timeout, 60_000);
+	t.true(options[0]?.resetTimeoutOnProgress);
+	t.is(typeof options[0]?.onprogress, 'function', 'the SDK only requests progress when a handler is set');
+});
+
+test('MCPClient.callTool: passes the server toolTimeout and resetTimeoutOnProgress', async t => {
+	const {client, options} = clientRecordingToolOptions({
+		toolTimeout: 300_000,
+		resetTimeoutOnProgress: false,
+	});
+
+	await client.callTool('tool', {});
+
+	t.is(options[0]?.timeout, 300_000);
+	t.false(options[0]?.resetTimeoutOnProgress);
+	t.is(options[0]?.onprogress, undefined);
+});
+
+test('MCPClient.callTool: toolTimeout 0 and oversized values become the longest timer Node allows', async t => {
+	for (const toolTimeout of [0, 10_000_000_000]) {
+		const {client, options} = clientRecordingToolOptions({toolTimeout});
+
+		await client.callTool('tool', {});
+
+		t.is(options[0]?.timeout, 2_147_483_647, `toolTimeout ${toolTimeout}`);
+	}
+});
+
+test('MCPClient.callTool: a timed-out call names the limit it hit and the setting to change', async t => {
+	const {client} = clientRecordingToolOptions({toolTimeout: 5_000}, async () => {
+		throw new McpError(ErrorCode.RequestTimeout, 'Request timed out', {timeout: 5_000});
+	});
+
+	const error = await t.throwsAsync(() => client.callTool('tool', {}));
+
+	t.regex(error!.message, /Request timed out/);
+	t.regex(error!.message, /"srv" time out after 5000ms without a response or progress update/);
+	t.regex(error!.message, /"toolTimeout"/);
+});
+
+test('MCPClient.callTool: other failures keep their message without the timeout hint', async t => {
+	const {client} = clientRecordingToolOptions({}, async () => {
+		throw new Error('server exploded');
+	});
+
+	const error = await t.throwsAsync(() => client.callTool('tool', {}));
+
+	t.is(error!.message, 'MCP tool execution failed: server exploded');
 });
 
 // ============================================================================

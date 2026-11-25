@@ -1,8 +1,10 @@
 import {
 	mkdir,
 	mkdtemp,
+	open,
 	readFile,
 	readdir,
+	rename,
 	rm,
 	unlink,
 	writeFile,
@@ -12,7 +14,7 @@ import {join} from 'node:path';
 import test from 'ava';
 import {ArtifactManager} from '@/artifacts/artifact-manager';
 import {reloadAppConfig} from '@/config/index';
-import {SessionManager} from './session-manager.js';
+import {SessionManager, setRenameForTests} from './session-manager.js';
 
 let testDir: string;
 let manager: SessionManager;
@@ -26,6 +28,9 @@ test.beforeEach(async () => {
 });
 
 test.afterEach(async () => {
+	// A test that fails mid-way must not leave the injected rename primitive in
+	// place for the next one.
+	setRenameForTests();
 	if (testDir) {
 		await rm(testDir, {recursive: true, force: true});
 	}
@@ -123,6 +128,113 @@ test.serial('createSession adds metadata to the index', async t => {
 	t.is(sessions[0].id, session.id);
 	t.is(sessions[0].title, 'Index test');
 	t.is(sessions[0].messageCount, 2);
+});
+
+// Autosave recreates the live session with createSession() when its file
+// cannot be read. The index still has the entry, so what only the index knew
+// about the session must survive the recreate.
+async function recreateOverUnreadableFile(
+	id: string,
+	overrides: {title?: string; titleManuallySet?: boolean} = {},
+) {
+	await writeFile(join(sessionsDir, `${id}.json`), '{"truncated":');
+	return manager.createSession({
+		id,
+		title: overrides.title ?? 'Derived title',
+		titleManuallySet: overrides.titleManuallySet,
+		messageCount: 1,
+		provider: 'test',
+		model: 'test',
+		workingDirectory: '/tmp',
+		messages: [{role: 'user', content: 'hello'}],
+	});
+}
+
+test.serial(
+	'createSession over an indexed id keeps pinned and createdAt',
+	async t => {
+		const original = await manager.createSession(
+			newSessionData('Pinned session'),
+		);
+		await manager.setPinned(original.id, true);
+
+		const recreated = await recreateOverUnreadableFile(original.id);
+
+		t.true(recreated.pinned);
+		t.is(recreated.createdAt, original.createdAt);
+		const [entry] = await manager.listSessions();
+		t.true(entry.pinned);
+		t.is(entry.createdAt, original.createdAt);
+		t.true((await manager.readSession(original.id))?.pinned);
+	},
+);
+
+test.serial(
+	'createSession over an indexed id keeps a generated or renamed title',
+	async t => {
+		const generated = await manager.createSession(newSessionData('Derived title'));
+		await manager.saveSession({
+			...generated,
+			title: 'Generated title',
+			titleGenerated: true,
+		});
+		const renamed = await manager.createSession(newSessionData('Derived title'));
+		await manager.renameSession(renamed.id, 'Renamed title');
+
+		const regenerated = await recreateOverUnreadableFile(generated.id);
+		const rerenamed = await recreateOverUnreadableFile(renamed.id);
+
+		t.is(regenerated.title, 'Generated title');
+		t.true(regenerated.titleGenerated);
+		t.is(rerenamed.title, 'Renamed title');
+		t.true(rerenamed.titleManuallySet);
+	},
+);
+
+test.serial(
+	'createSession over an indexed id applies a rename passed by the caller',
+	async t => {
+		const original = await manager.createSession(newSessionData('Derived title'));
+		await manager.saveSession({
+			...original,
+			title: 'Generated title',
+			titleGenerated: true,
+		});
+
+		const recreated = await recreateOverUnreadableFile(original.id, {
+			title: 'Pending rename',
+			titleManuallySet: true,
+		});
+
+		t.is(recreated.title, 'Pending rename');
+		t.true(recreated.titleManuallySet);
+	},
+);
+
+test.serial(
+	'createSession over an indexed id takes the new title when the old one was only derived',
+	async t => {
+		const original = await manager.createSession(newSessionData('Old derived'));
+
+		const recreated = await recreateOverUnreadableFile(original.id, {
+			title: 'New derived',
+		});
+
+		t.is(recreated.title, 'New derived');
+		t.falsy(recreated.titleManuallySet);
+		t.falsy(recreated.titleGenerated);
+	},
+);
+
+test.serial('createSession honours a pin passed by the caller', async t => {
+	const session = await manager.createSession({
+		...newSessionData('Pinned at creation'),
+		pinned: true,
+	});
+
+	t.true(session.pinned);
+	t.true((await manager.listSessions())[0].pinned);
+	t.true((await manager.readSession(session.id))?.pinned);
 });
 
 // --- readSession ---
@@ -586,6 +698,103 @@ test.serial(
 		const parsed = JSON.parse(data);
 		t.is(parsed.id, session.id);
 		t.is(parsed.messages.length, 1);
+	},
+);
+
+function renameError(code: string): NodeJS.ErrnoException {
+	const error = new Error(
+		`${code}: injected rename failure`,
+	) as NodeJS.ErrnoException;
+	error.code = code;
+	return error;
+}
+
+const retrySessionData = {
+	title: 'Retry test',
+	messageCount: 0,
+	provider: 'test',
+	model: 'test',
+	workingDirectory: '/tmp',
+	messages: [],
+};
+
+test.serial('saveSession retries a transient EPERM rename and succeeds', async t => {
+	const indexPath = join(sessionsDir, 'sessions.json');
+	let indexFailures = 0;
+
+	setRenameForTests(async (from, to) => {
+		if (to === indexPath && indexFailures < 2) {
+			indexFailures++;
+			throw renameError('EPERM');
+		}
+		await rename(from, to);
+	});
+
+	const session = await manager.createSession(retrySessionData);
+
+	t.is(indexFailures, 2, 'the index rename should have been retried twice');
+	const index = JSON.parse(await readFile(indexPath, 'utf-8')) as Array<{
+		id: string;
+	}>;
+	t.true(index.some(entry => entry.id === session.id));
+	const tmpFiles = (await readdir(sessionsDir)).filter(e => e.endsWith('.tmp'));
+	t.is(tmpFiles.length, 0, 'no temp file should survive a successful retry');
+});
+
+test.serial('saveSession does not retry a permanent rename error', async t => {
+	let attempts = 0;
+
+	setRenameForTests(async () => {
+		attempts++;
+		throw renameError('ENOSPC');
+	});
+
+	await t.throwsAsync(manager.createSession(retrySessionData), {code: 'ENOSPC'});
+	t.is(attempts, 1, 'a non-retryable errno must surface on the first attempt');
+	const tmpFiles = (await readdir(sessionsDir)).filter(e => e.endsWith('.tmp'));
+	t.is(tmpFiles.length, 0, 'the temp file must be cleaned up on failure');
+});
+
+test.serial('saveSession gives up after the retry budget', async t => {
+	let attempts = 0;
+
+	setRenameForTests(async () => {
+		attempts++;
+		throw renameError('EPERM');
+	});
+
+	await t.throwsAsync(manager.createSession(retrySessionData), {code: 'EPERM'});
+	t.is(attempts, 6, 'one initial attempt plus five retries');
+});
+
+(process.platform === 'win32' ? test.serial : test.skip)(
+	'saveSession survives an index reader holding the file open (Windows sharing violation)',
+	async t => {
+		const indexPath = join(sessionsDir, 'sessions.json');
+		const handle = await open(indexPath, 'r');
+		let closed = false;
+
+		try {
+			const pending = manager.createSession(retrySessionData);
+			// Let the first index rename hit the sharing violation, then let go:
+			// this is the shape of the reported bug, where the reader lives in a
+			// second Nanocoder process and closes the file milliseconds later.
+			await new Promise<void>(resolve => {
+				setTimeout(resolve, 5);
+			});
+			await handle.close();
+			closed = true;
+
+			const session = await pending;
+			const index = JSON.parse(await readFile(indexPath, 'utf-8')) as Array<{
+				id: string;
+			}>;
+			t.true(index.some(entry => entry.id === session.id));
+		} finally {
+			if (!closed) {
+				await handle.close().catch(() => {});
+			}
+		}
 	},
 );
 

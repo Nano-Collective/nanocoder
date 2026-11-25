@@ -93,15 +93,17 @@ function parseEnhancedFrontmatter(frontmatter: string): CustomCommandMetadata {
 			continue;
 		}
 
-		// Check for multi-line string indicators
-		if (trimmedLine.endsWith('|') || trimmedLine.endsWith('>')) {
-			const colonIndex = line.indexOf(':');
+		{
+			const colonIndex = findColonOutsideQuotes(line);
 			if (colonIndex !== -1) {
-				currentKey = line.slice(0, colonIndex).trim();
-				isMultiline = true;
-				currentValue = [];
-				indentLevel = 0;
-				continue;
+				const value = line.slice(colonIndex + 1).trim();
+				if (isBlockScalarIndicator(value)) {
+					currentKey = line.slice(0, colonIndex).trim();
+					isMultiline = true;
+					currentValue = [];
+					indentLevel = 0;
+					continue;
+				}
 			}
 		}
 
@@ -155,6 +157,10 @@ function parseEnhancedFrontmatter(frontmatter: string): CustomCommandMetadata {
 	}
 
 	return mapRawToMetadata(raw);
+}
+
+function isBlockScalarIndicator(value: string): boolean {
+	return /^[|>](?:[+-]?\d*|\d+[+-]?)$/.test(value);
 }
 
 /**

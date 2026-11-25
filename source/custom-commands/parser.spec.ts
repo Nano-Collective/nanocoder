@@ -333,6 +333,41 @@ Content`;
 // Multi-line String Tests
 // ============================================================================
 
+test('parseEnhancedFrontmatter keeps inline values that end with > or |', t => {
+	const filePath = join(testDir, 'ends-with-gt.md');
+	const content = `---
+description: Render a <Component>
+aliases: [rc]
+parameters: [name]
+---
+Body {{name}}`;
+
+	writeFileSync(filePath, content, 'utf-8');
+
+	const result = parseCommandFile(filePath);
+
+	t.is(result.metadata.description, 'Render a <Component>');
+	t.deepEqual(result.metadata.aliases, ['rc']);
+	t.deepEqual(result.metadata.parameters, ['name']);
+	t.is(result.content, 'Body {{name}}');
+});
+
+test('parseEnhancedFrontmatter keeps inline values that contain a pipe', t => {
+	const filePath = join(testDir, 'contains-pipe.md');
+	const content = `---
+description: a | b
+aliases: [pipe]
+---
+Content`;
+
+	writeFileSync(filePath, content, 'utf-8');
+
+	const result = parseCommandFile(filePath);
+
+	t.is(result.metadata.description, 'a | b');
+	t.deepEqual(result.metadata.aliases, ['pipe']);
+});
+
 test('parseEnhancedFrontmatter parses multi-line string with pipe', t => {
 	const filePath = join(testDir, 'multiline-pipe.md');
 	const content = `---
@@ -679,9 +714,10 @@ Content`;
 
 	const result = parseCommandFile(filePath);
 
-	// BOM character prevents frontmatter parsing, so entire file is content
-	// The metadata will be empty since no frontmatter was detected
-	t.true(result.content.includes('Command'));
+	// A leading BOM is stripped before splitting, so the frontmatter block is
+	// recognised and the body no longer contains the marker lines.
+	t.is(result.metadata.description, 'Command');
+	t.is(result.content, 'Content');
 });
 
 test('parseCommandFile handles very long description', t => {
