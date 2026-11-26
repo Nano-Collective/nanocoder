@@ -67,3 +67,59 @@ test('retry reports when there is no user message yet', async t => {
 	t.is(submitted.length, 0);
 	t.is(queued.length, 1);
 });
+
+/** contextFor() with argText and a model switch that records its calls. */
+function retryWith(argText: string) {
+	const setup = contextFor([
+		{role: 'user', content: 'refactor the auth module'},
+		{role: 'assistant', content: 'Done.'},
+	]);
+	const switches: {provider: string; model: string}[] = [];
+	Object.assign(setup.context, {
+		argText,
+		switchModel: async (provider: string, model: string) => {
+			switches.push({provider, model});
+			return true;
+		},
+	});
+	return {...setup, switches};
+}
+
+test('retry switches model with --model <id> and --model=<id>', async t => {
+	for (const argText of ['--model other-model', '--model=other-model']) {
+		const {context, submitted, switches} = retryWith(argText);
+		t.is(await retryCommand.run(context), 'handed-off', argText);
+		t.deepEqual(switches, [{provider: 'test', model: 'other-model'}], argText);
+		t.is(submitted.length, 1, argText);
+	}
+});
+
+test('retry switches provider and model with --provider=<name> --model=<id>', async t => {
+	const {context, switches} = retryWith('--provider=openrouter --model=m1');
+	t.is(await retryCommand.run(context), 'handed-off');
+	t.deepEqual(switches, [{provider: 'openrouter', model: 'm1'}]);
+});
+
+test('retry keeps a quoted model name with spaces as one value', async t => {
+	const {context, switches} = retryWith('--model "my local model"');
+	t.is(await retryCommand.run(context), 'handed-off');
+	t.deepEqual(switches, [{provider: 'test', model: 'my local model'}]);
+});
+
+for (const argText of [
+	'--modle other-model',
+	'--model',
+	'--model=',
+	'--model --provider openrouter',
+	'--provider openrouter',
+	'--model other-model extra',
+	'other-model',
+]) {
+	test(`retry shows the usage and re-sends nothing for "${argText}"`, async t => {
+		const {context, submitted, queued, switches} = retryWith(argText);
+		t.is(await retryCommand.run(context), 'done');
+		t.is(submitted.length, 0);
+		t.deepEqual(switches, []);
+		t.is(queued.length, 1);
+	});
+}
