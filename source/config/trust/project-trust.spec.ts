@@ -260,6 +260,32 @@ test('LSP servers from the project config are listed and fingerprinted', t => {
 	}
 });
 
+test('permissions rules are fingerprinted so a later edit re-prompts', t => {
+	const root = tempRoot();
+	try {
+		const write = (permissions: unknown) =>
+			writeFileSync(
+				join(root, 'agents.config.json'),
+				JSON.stringify({nanocoder: {permissions}}),
+			);
+
+		const empty = describeProjectTrust(root);
+		write({allow: ['execute_bash(git status)']});
+		const first = describeProjectTrust(root);
+		t.not(first.fingerprint, empty.fingerprint);
+
+		// Widening the allow list is a different trust posture.
+		write({allow: ['execute_bash(*)']});
+		t.not(describeProjectTrust(root).fingerprint, first.fingerprint);
+
+		// Removing the block returns to the empty fingerprint.
+		writeFileSync(join(root, 'agents.config.json'), JSON.stringify({}));
+		t.is(describeProjectTrust(root).fingerprint, empty.fingerprint);
+	} finally {
+		rmSync(root, {recursive: true, force: true});
+	}
+});
+
 test('symlinked command folders and skill bundles are followed', t => {
 	const root = tempRoot();
 	const shared = tempRoot();

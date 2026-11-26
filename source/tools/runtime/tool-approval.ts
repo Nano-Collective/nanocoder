@@ -43,9 +43,9 @@ interface FileToolApprovalOptions<Args> {
  * mode is auto-accept/headless/architect; otherwise requires approval. In
  * auto-accept, a call `isIrreversible` flags still requires approval.
  * `alwaysAllow` deliberately wins over `isIrreversible`: pre-authorizing a
- * tool covers all of its calls. resolveToolApproval checks the list before it
+ * tool covers all of its calls. resolveToolPermission checks the list before it
  * reaches this policy, and the check here covers callers that skip it. (Yolo
- * is bypassed centrally by resolveToolApproval.)
+ * is bypassed centrally by resolveToolPermission.)
  *
  * Mode is supplied by the caller (the central approval resolver), never read
  * from a global.
