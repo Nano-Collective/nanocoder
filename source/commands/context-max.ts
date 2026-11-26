@@ -13,6 +13,9 @@ import {parseContextLimit} from '@/utils/parse-context-limit';
 const INVALID_LIMIT_MESSAGE =
 	'Invalid context limit. Use a positive number, e.g. /context-max 8192, /context-max 128k, or /context-max 1m';
 
+const TOO_MANY_ARGUMENTS_MESSAGE =
+	'Too many arguments. Usage: /context-max <limit> | --reset';
+
 /**
  * /context-max sets the maximum context length for the current session.
  *
@@ -20,7 +23,7 @@ const INVALID_LIMIT_MESSAGE =
  * /context-max            - Show current effective context limit
  * /context-max --reset    - Clear session override
  *
- * Extra arguments are rejected with the invalid-limit error and change nothing.
+ * Extra arguments are rejected with a usage error and change nothing.
  */
 export const contextMaxCommand: StatefulCommand = {
 	name: 'context-max',
@@ -37,7 +40,9 @@ export const contextMaxCommand: StatefulCommand = {
 		const args = trimmed ? trimmed.split(/\s+/) : [];
 
 		if (args.length > 1) {
-			onAddToChatQueue(errorMsg(INVALID_LIMIT_MESSAGE, 'context-max-error'));
+			onAddToChatQueue(
+				errorMsg(TOO_MANY_ARGUMENTS_MESSAGE, 'context-max-error'),
+			);
 			return 'done-after-render';
 		}
 

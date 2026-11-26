@@ -230,7 +230,7 @@ test.serial('/context-max rejects trailing arguments instead of dropping them', 
 		t.is(getSessionContextLimit(), null, input);
 		t.is(
 			getMessageText(queued),
-			'Invalid context limit. Use a positive number, e.g. /context-max 8192, /context-max 128k, or /context-max 1m',
+			'Too many arguments. Usage: /context-max <limit> | --reset',
 			input,
 		);
 	}
@@ -255,6 +255,6 @@ test.serial('/context-max --reset with trailing arguments keeps the session over
 	t.is(getSessionContextLimit(), 1000000);
 	t.is(
 		getMessageText(queued),
-		'Invalid context limit. Use a positive number, e.g. /context-max 8192, /context-max 128k, or /context-max 1m',
+		'Too many arguments. Usage: /context-max <limit> | --reset',
 	);
 });
