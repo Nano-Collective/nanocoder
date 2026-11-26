@@ -3,6 +3,7 @@ import {
 	resetSessionContextLimit,
 	setSessionContextLimit,
 } from '@/models/index';
+import {createTokenizer} from '@/tokenization/index';
 import type {LLMChatResponse, LLMClient, Message} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 import {
@@ -1080,6 +1081,23 @@ test('maybeAutoCompact skips compaction and warns once when fixed overhead excee
 	t.is(res2, turn2, 'turn 2 must still skip compaction');
 	t.is(client.calls, 0, 'summariser must not be called on turn 2');
 	t.is(notifications.length, 1, 'warning must not repeat on turn 2');
+
+	// A subagent call in the same session has smaller fixed overhead (under the
+	// threshold) and passes no onNotify; it must not reset the parent's warning.
+	await maybeAutoCompact(
+		[{role: 'user', content: 'subagent task'}],
+		{role: 'system', content: 'Short subagent prompt.'},
+		client,
+	);
+	const res3 = await maybeAutoCompact(turn2, systemMessage, client, nativeTools, {
+		onNotify: msg => notifications.push(msg),
+	});
+	t.is(res3, turn2, 'turn 3 must still skip compaction');
+	t.is(
+		notifications.length,
+		1,
+		'warning must not repeat after a smaller subagent call in the same session',
+	);
 });
 
 test('maybeAutoCompact re-warns once when the context limit changes and still cannot fit fixed overhead', async t => {
@@ -1243,6 +1261,80 @@ test('performAutoCompact skips while total fits and compacts once total reaches 
 		skipWarningsAfter,
 		skipWarningsBefore,
 		'must not re-emit the fixed-overhead warning after compacting back under the limit',
+	);
+});
+
+test('performAutoCompact compacts when fixed overhead sits in the threshold..limit band and total is past the halfway point but still under the limit', async t => {
+	const contextLimit = 400;
+	setupAutoCompactEnv(contextLimit);
+
+	const systemMessage: Message = {
+		role: 'system',
+		content: Array.from({length: 120}, (_, i) => `directive${i}`).join(' '),
+	};
+	const messages: Message[] = [
+		{
+			role: 'user',
+			content: Array.from({length: 35}, (_, i) => `topic${i}`).join(' '),
+		},
+		{role: 'assistant', content: 'acknowledged'},
+		{role: 'user', content: 'follow-up question'},
+		{role: 'assistant', content: 'follow-up answer'},
+	];
+
+	// Verify the fixture actually falls in the target region:
+	// threshold < fixed < halfway <= total < contextLimit.
+	const tokenizer = createTokenizer('custom', 'generic-model');
+	try {
+		const fixedTokens = tokenizer.countTokens(systemMessage);
+		const conversationTokens = messages.reduce(
+			(sum, msg) => sum + tokenizer.countTokens(msg),
+			0,
+		);
+		const totalTokens = fixedTokens + conversationTokens;
+		const halfway = fixedTokens + (contextLimit - fixedTokens) / 2;
+		t.true(
+			fixedTokens >= contextLimit * 0.5 && fixedTokens < contextLimit,
+			`expected fixedTokens (${fixedTokens}) in [200, 400)`,
+		);
+		t.true(
+			totalTokens >= halfway && totalTokens < contextLimit,
+			`expected totalTokens (${totalTokens}) in [${halfway}, ${contextLimit})`,
+		);
+	} finally {
+		tokenizer.free?.();
+	}
+
+	const client = makeStubClient(() => '## Context\nBrief summary.');
+	const notifications: string[] = [];
+	const compacted = await performAutoCompact(
+		messages,
+		systemMessage,
+		'custom',
+		'generic-model',
+		{
+			enabled: true,
+			threshold: 50,
+			mode: 'default',
+			strategy: 'llm',
+			notifyUser: true,
+		},
+		msg => notifications.push(msg),
+		client,
+	);
+
+	t.truthy(
+		compacted,
+		'must compact once total usage crosses the halfway point to the limit',
+	);
+	t.is(client.calls, 1, 'must invoke summariser LLM past the halfway point');
+	t.true(
+		compacted!.some(m => (m.content || '').includes('<conversation-summary>')),
+		'compacted history must contain the LLM summary',
+	);
+	t.false(
+		notifications.some(n => n.includes('Auto-compaction skipped')),
+		'must not emit a skip warning when compaction runs',
 	);
 });
 

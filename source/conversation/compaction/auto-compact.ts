@@ -39,9 +39,7 @@ export {
 // Per session: in ACP each session applies the tune of its own provider.
 const tuneAggressiveCompact = defineSessionValue<boolean>();
 
-// Tracks the effective limit and threshold for which the fixed-overhead
-// warning has already been shown in this session, so the notice fires once
-// per limit/threshold change rather than repeating after every turn.
+// Deduplicates the fixed-overhead warning per limit and threshold per session.
 const warnedFixedOverheadKey = defineSessionValue<string>();
 
 /** Threshold used by tune's aggressive compact (the lowest supported value). */
@@ -200,38 +198,32 @@ export async function performAutoCompact(
 		const fixedTokens = systemTokens + toolDefTokens;
 		const totalTokens = fixedTokens + conversationTokens;
 
-		// Compaction can only shrink conversation messages, never the system
-		// prompt or tool definitions:
-		// - If fixed overhead alone meets or exceeds the context limit, compaction
-		//   can never make the request fit, so skip and warn once.
-		// - If fixed overhead sits between the threshold and the context limit,
-		//   compaction cannot bring usage back under the threshold while the total
-		//   still fits, so skip and warn once — but still compact once total usage
-		//   reaches the context limit so the next request fits in the window.
+		// Fixed overhead cannot be compacted. Skip at or above the limit, or below
+		// the midpoint to the limit so compaction leaves headroom for the next turn.
 		const fixedPercentage = (fixedTokens / contextLimit) * 100;
 		const fixedAtOrAboveLimit = fixedTokens >= contextLimit;
 		const fixedAtOrAboveThreshold = fixedPercentage >= threshold;
-		if (fixedAtOrAboveLimit || fixedAtOrAboveThreshold) {
-			if (fixedAtOrAboveLimit || totalTokens < contextLimit) {
-				const warningKey = `${contextLimit}:${threshold}`;
-				if (
-					config.notifyUser &&
-					onNotify &&
-					warnedFixedOverheadKey.get() !== warningKey
-				) {
-					warnedFixedOverheadKey.set(warningKey);
-					const fixedSubject =
-						toolDefTokens > 0
-							? 'system prompt and tool definitions use'
-							: 'system prompt uses';
-					onNotify(
-						`Auto-compaction skipped: ${fixedSubject} ${fixedTokens.toLocaleString()} of ${contextLimit.toLocaleString()} tokens (${Math.round(fixedPercentage)}%, threshold ${threshold}%). Raise the context limit or switch to a smaller tool profile with /tune (such as nano).`,
-					);
-				}
-				return null;
+		const inBandSkipLimit = fixedTokens + (contextLimit - fixedTokens) / 2;
+		if (
+			fixedAtOrAboveLimit ||
+			(fixedAtOrAboveThreshold && totalTokens < inBandSkipLimit)
+		) {
+			const warningKey = `${contextLimit}:${threshold}`;
+			if (
+				config.notifyUser &&
+				onNotify &&
+				warnedFixedOverheadKey.get() !== warningKey
+			) {
+				warnedFixedOverheadKey.set(warningKey);
+				const fixedSubject =
+					toolDefTokens > 0
+						? 'system prompt and tool definitions use'
+						: 'system prompt uses';
+				onNotify(
+					`Auto-compaction skipped: ${fixedSubject} ${fixedTokens.toLocaleString()} of ${contextLimit.toLocaleString()} tokens (${Math.round(fixedPercentage)}%, threshold ${threshold}%). Raise the context limit or switch to a smaller tool profile with /tune (such as nano).`,
+				);
 			}
-		} else {
-			warnedFixedOverheadKey.reset();
+			return null;
 		}
 
 		// Check if threshold is reached
