@@ -90,7 +90,7 @@ parameters:                     # optional, default {}
     items: {type: string}       # array only — type of each element
 approval: never | always | destructive   # default: always
 read_only: true | false         # default: (approval == never)
-timeout_ms: 30000               # default 30000, max 300000
+timeout_ms: 30000               # default 30000, max 7200000 (2 hours)
 cwd: ./scripts                  # default: project root; supports ${VAR}; must stay in the project
 env:
   FOO: bar                      # extra env vars; values support ${VAR}
