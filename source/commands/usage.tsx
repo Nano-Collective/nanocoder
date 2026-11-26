@@ -210,6 +210,7 @@ export const usageCommand: Command = {
 				// ---- Cumulative session + per-provider (from history) ----
 				const history = metadata.apiCallHistory ?? [];
 				let cumulativeSession = 0;
+				let anyCallPriced = false;
 				const perProvider: Record<string, number> = {};
 				const pricingCache = new Map<string, typeof pricing>();
 
@@ -238,14 +239,23 @@ export const usageCommand: Command = {
 						? 0
 						: (calculateUsageCost(record, recordPricing) ?? 0);
 
+					// An unpriced call costs NaN. It must not turn the priced
+					// calls' totals into NaN: it only leaves its provider at
+					// NaN ("—") when none of that provider's calls is priced.
+					if (!Number.isFinite(callCost)) {
+						perProvider[record.provider] ??= NaN;
+						continue;
+					}
+					anyCallPriced = true;
 					cumulativeSession += callCost;
+					const providerSoFar = perProvider[record.provider];
 					perProvider[record.provider] =
-						(perProvider[record.provider] ?? 0) + callCost;
+						(Number.isFinite(providerSoFar) ? providerSoFar : 0) + callCost;
 				}
 
 				cost = {
 					currentContext: currentContextCost,
-					cumulativeSession: history.length === 0 ? NaN : cumulativeSession,
+					cumulativeSession: anyCallPriced ? cumulativeSession : NaN,
 					perProvider:
 						Object.keys(perProvider).length > 1 ? perProvider : undefined,
 				};

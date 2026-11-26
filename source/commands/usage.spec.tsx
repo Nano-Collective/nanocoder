@@ -598,6 +598,70 @@ test('usage command shows per-provider breakdown for multi-provider history', as
 	t.regex(output!, /ollama:.*—/);
 });
 
+// #2390: an unpriced call made every total NaN, so Cumulative Session showed "—".
+const unpricedCall = (provider: string): ApiCallRecord => ({
+	provider,
+	model: 'my-finetune-xyz-not-on-models-dev',
+	inputTokens: 1000,
+	outputTokens: 100,
+	timestamp: Date.now(),
+});
+const pricedCall: ApiCallRecord = {
+	provider: 'openai',
+	model: 'gpt-4o',
+	inputTokens: 100_000,
+	outputTokens: 20_000,
+	timestamp: Date.now(),
+};
+async function sessionCost(apiCallHistory: ApiCallRecord[]) {
+	const result = (await usageCommand.handler([], createMessages(), {
+		...createMockMetadata('openai', 'gpt-4o'),
+		apiCallHistory,
+	})) as React.ReactElement<{
+		cost: {cumulativeSession: number; perProvider?: Record<string, number>};
+	}>;
+	return result.props.cost;
+}
+
+test('an unpriced call does not hide the cost of the priced calls (#2390)', async t => {
+	const priced = await sessionCost([pricedCall]);
+	t.true(Number.isFinite(priced.cumulativeSession));
+	t.true(priced.cumulativeSession > 0);
+
+	const mixed = await sessionCost([pricedCall, unpricedCall('my-proxy')]);
+	t.is(mixed.cumulativeSession, priced.cumulativeSession);
+	t.is(mixed.perProvider?.openai, priced.cumulativeSession);
+	t.true(Number.isNaN(mixed.perProvider?.['my-proxy']));
+
+	const {lastFrame} = renderWithTheme(
+		(await usageCommand.handler([], createMessages(), {
+			...createMockMetadata('openai', 'gpt-4o'),
+			apiCallHistory: [pricedCall, unpricedCall('my-proxy')],
+		})) as React.ReactElement,
+	);
+	t.regex(lastFrame()!, /Cumulative Session:.*\$/);
+	t.regex(lastFrame()!, /my-proxy:.*—/);
+});
+
+test('a provider with priced and unpriced calls shows its priced subtotal (#2390)', async t => {
+	const priced = await sessionCost([pricedCall]);
+	const cost = await sessionCost([
+		pricedCall,
+		unpricedCall('openai'),
+		unpricedCall('my-proxy'),
+	]);
+	t.is(cost.perProvider?.openai, priced.cumulativeSession);
+	t.is(cost.cumulativeSession, priced.cumulativeSession);
+});
+
+test('a session of only unpriced hosted calls shows "—", not $0.00 (#2390)', async t => {
+	const cost = await sessionCost([
+		unpricedCall('my-proxy'),
+		unpricedCall('other-proxy'),
+	]);
+	t.true(Number.isNaN(cost.cumulativeSession));
+});
+
 test('usage command does not price earlier calls made on a local server', async t => {
 	const messages = createMessages();
 	const metadata = {
