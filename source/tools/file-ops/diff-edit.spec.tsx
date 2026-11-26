@@ -627,6 +627,56 @@ test('diff_edit: added lines in a CRLF file keep CRLF', async t => {
 	);
 });
 
+test('diff_edit: ordered blocks on a CRLF file apply block 2 to block 1 output', async t => {
+	const content = 'head\r\none\r\ntwo\r\nthree\r\n';
+	const filePath = await createTestFile('ordered.txt', content);
+	markFileSeenAndVisible(filePath);
+	// Block 1 adds lines right above block 2's target. Block 2 is matched in
+	// the content block 1 produced, so block 1's added lines must be CRLF too.
+	const args = {
+		path: projectRelativePath(filePath),
+		diff: [
+			diffBlock('head\none', 'head\nnew-1\nnew-2\none'),
+			diffBlock('one\ntwo\nthree', 'ONE\nTWO\nTHREE'),
+		].join('\n'),
+	};
+
+	t.deepEqual(await diffEditTool.validator!(args), {valid: true});
+	t.is(await readFile(filePath, 'utf-8'), content);
+	const result = await executeDiffEdit(args);
+
+	t.is(
+		await readFile(filePath, 'utf-8'),
+		'head\r\nnew-1\r\nnew-2\r\nONE\r\nTWO\r\nTHREE\r\n',
+	);
+	t.regex(result, /Successfully applied 2 diff blocks/);
+});
+
+test('diff_edit: on a CRLF file, block 1 output that repeats block 2 search is rejected', async t => {
+	const content = 'one\r\ntwo\r\nthree\r\n';
+	const filePath = await createTestFile('ordered-dup.txt', content);
+	markFileSeenAndVisible(filePath);
+	// Block 1 writes a second "two\nthree". Once fitted to CRLF it matches
+	// block 2's fitted search, so block 2 is ambiguous after block 1.
+	const args = {
+		path: projectRelativePath(filePath),
+		diff: [
+			diffBlock('one', 'two\nthree\none'),
+			diffBlock('two\nthree', 'TWO\nTHREE'),
+		].join('\n'),
+	};
+
+	const result = await diffEditTool.validator!(args);
+	t.false(result.valid);
+	if (!result.valid) {
+		t.regex(result.error, /Search block 2 .*after earlier edits/);
+	}
+	await t.throwsAsync(executeDiffEdit(args), {
+		message: /Search block 2 .*after earlier edits/,
+	});
+	t.is(await readFile(filePath, 'utf-8'), content);
+});
+
 test('diff_edit: LF block in the LF region of a mixed file is kept as sent', async t => {
 	const filePath = await createTestFile(
 		'mixed.txt',
