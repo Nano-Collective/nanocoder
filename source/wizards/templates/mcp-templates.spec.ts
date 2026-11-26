@@ -356,6 +356,21 @@ test('context7 template: builds correct HTTP config', t => {
 	t.deepEqual(config.tags, ['remote', 'context', 'information', 'http']);
 });
 
+test('deed-page template: builds correct HTTP config', t => {
+	const template = MCP_TEMPLATES.find(t => t.id === 'deed-page');
+	t.truthy(template);
+
+	const config = template!.buildConfig({});
+
+	t.is(config.name, 'deed-page');
+	t.is(config.transport, 'http');
+	t.is(config.url, 'https://deed.page/mcp');
+	t.is(config.timeout, 30000);
+	t.is(config.templateId, 'deed-page');
+	t.regex(config.description ?? '', /public on the web/i);
+	t.deepEqual(config.tags, ['remote', 'publish', 'website', 'http']);
+});
+
 test('github-remote template: builds correct HTTP config with headers', t => {
 	const template = MCP_TEMPLATES.find(t => t.id === 'github-remote');
 	t.truthy(template);
@@ -625,7 +640,7 @@ test('resolveMcpTemplateId: returns undefined for unmatched servers', t => {
 });
 
 test('remote templates: have no required fields', t => {
-	const remoteTemplates = ['deepwiki', 'context7', 'github-remote'];
+	const remoteTemplates = ['deepwiki', 'context7', 'deed-page', 'github-remote'];
 
 	for (const templateId of remoteTemplates) {
 		const template = MCP_TEMPLATES.find(t => t.id === templateId);
@@ -776,7 +791,13 @@ test('local templates: use stdio transport', t => {
 });
 
 test('remote templates: use http transport', t => {
-	const remoteTemplates = ['deepwiki', 'context7', 'github-remote', 'you'];
+	const remoteTemplates = [
+		'deepwiki',
+		'context7',
+		'deed-page',
+		'github-remote',
+		'you',
+	];
 
 	for (const templateId of remoteTemplates) {
 		const template = MCP_TEMPLATES.find(t => t.id === templateId);

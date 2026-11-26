@@ -273,6 +273,15 @@ export const MCP_TEMPLATES: McpTemplate[] = [
 		defaultUrl: 'https://mcp.context7.com/mcp',
 		tags: ['remote', 'context', 'information', 'http'],
 	}),
+	remoteHttpTemplate({
+		id: 'deed-page',
+		name: 'deed.page',
+		description:
+			'Publish HTML or a folder as a public website, then update or roll it back. Anything published is public on the web.',
+		defaultServerName: 'deed-page',
+		defaultUrl: 'https://deed.page/mcp',
+		tags: ['remote', 'publish', 'website', 'http'],
+	}),
 	{
 		id: 'github-remote',
 		name: 'GitHub (Remote)',
