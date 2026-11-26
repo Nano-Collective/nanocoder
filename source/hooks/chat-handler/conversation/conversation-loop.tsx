@@ -835,7 +835,23 @@ export const processAssistantResponse = async (
 			onConversationComplete?.();
 			return;
 		}
-		case 'aborted':
+		case 'aborted': {
+			// Keep what the model had already streamed. After an interrupt the
+			// user needs to read it back, and the next request needs it in
+			// history so the model knows what it had said. This runs before the
+			// error unwinds: a real Esc surfaces as an abort *error* from the
+			// client, so the throw below would otherwise skip it.
+			const partial = streamedContent.trim();
+			if (partial) {
+				setHistory([...history, {role: 'assistant', content: partial}]);
+				addToChatQueue(
+					<AssistantMessage
+						key={generateKey('assistant-aborted')}
+						message={partial}
+						model={currentModel}
+					/>,
+				);
+			}
 			// The model call raised the abort: unwind with its error.
 			if (result.error !== undefined) {
 				throw result.error;
@@ -852,6 +868,7 @@ export const processAssistantResponse = async (
 				]);
 			}
 			throw new Error('Operation was cancelled');
+		}
 		case 'model-error':
 			throw result.error;
 		case 'no-response':
