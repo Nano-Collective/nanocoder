@@ -9,6 +9,7 @@ import {
 	getLSPManager,
 	normalizeUri,
 	resetLSPManager,
+	uncoveredDiscoveredLanguages,
 } from './lsp-manager';
 
 console.log(`\nlsp-manager.spec.ts`);
@@ -575,4 +576,14 @@ test('normalizeUri - preserves non-file and unrepresentable URIs', t => {
 		normalizeUri('file://server/share/App.ts', {windows: true}),
 		'file://server/share/App.ts',
 	);
+});
+
+test('uncoveredDiscoveredLanguages - keeps only languages not already covered', t => {
+	const covered = new Set(['ts']);
+	t.deepEqual(
+		uncoveredDiscoveredLanguages(['ts', 'tsx', 'js', 'jsx'], covered),
+		['tsx', 'js', 'jsx'],
+	);
+	t.deepEqual(uncoveredDiscoveredLanguages(['ts'], covered), []);
+	t.deepEqual(uncoveredDiscoveredLanguages(['py'], covered), ['py']);
 });

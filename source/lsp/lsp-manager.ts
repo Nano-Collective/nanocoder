@@ -41,6 +41,17 @@ export interface LSPInitResult {
 }
 
 /**
+ * Languages a discovered server may claim when some are already covered by a
+ * configured server. Exported for tests.
+ */
+export function uncoveredDiscoveredLanguages(
+	languages: string[],
+	covered: ReadonlySet<string>,
+): string[] {
+	return languages.filter(lang => !covered.has(lang));
+}
+
+/**
  * Restarts allowed per server after a crash. One recovers from a one-off death
  * (OOM, a killed process); a server that keeps dying is left down instead of
  * being restarted in a loop.
@@ -144,17 +155,20 @@ export class LSPManager extends EventEmitter {
 			}
 
 			for (const server of discovered) {
-				const hasNewLanguages = server.languages.some(
-					lang => !coveredLanguages.has(lang),
+				const languages = uncoveredDiscoveredLanguages(
+					server.languages,
+					coveredLanguages,
 				);
-				if (hasNewLanguages) {
-					serversToStart.push({
-						...server,
-						rootUri: this.rootUri,
-					});
-					for (const lang of server.languages) {
-						coveredLanguages.add(lang);
-					}
+				if (languages.length === 0) {
+					continue;
+				}
+				serversToStart.push({
+					...server,
+					languages,
+					rootUri: this.rootUri,
+				});
+				for (const lang of languages) {
+					coveredLanguages.add(lang);
 				}
 			}
 		}
@@ -221,10 +235,14 @@ export class LSPManager extends EventEmitter {
 				);
 			}
 
-			// Store client and language mappings
+			// Store client and language mappings. Configured servers are listed
+			// first; do not let a later start steal languages they already claim
+			// (discovery can still race when starts run in parallel).
 			this.clients.set(config.name, client);
 			for (const lang of config.languages) {
-				this.languageToServer.set(lang, config.name);
+				if (!this.languageToServer.has(lang)) {
+					this.languageToServer.set(lang, config.name);
+				}
 			}
 			this.markAvailable(config.languages);
 
