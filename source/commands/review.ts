@@ -606,12 +606,17 @@ async function resolveReviewBase(
 const REVIEW_DESCRIPTION =
 	'Grounded, evidence-checked review of a branch, PR, commits, or working tree (`deep` for specialist finders, `quick` for one-shot, `activity` for details)';
 
+export type QuickReviewProblem =
+	| {status: 'failed'; reason: string}
+	| {status: 'incomplete'; reasons: string[]};
+
 /**
  * The read-only forms of `/review`: `quick` (the one-shot diff review) and
  * `activity` (the saved trace of the latest review).
  */
 export function createReviewView(
 	dependencies: ReviewDependencies = defaultDependencies,
+	onProblem?: (problem: QuickReviewProblem) => void,
 ): Command {
 	return {
 		name: 'review',
@@ -727,8 +732,21 @@ export function createReviewView(
 				if (!review) {
 					const userFacingNotices = [scopeNotice, ...baseNotices];
 					if (coverageNotice) userFacingNotices.push(coverageNotice);
-					userFacingNotices.push('Model returned an empty review.');
+					const reason = 'Model returned an empty review.';
+					userFacingNotices.push(reason);
+					onProblem?.({status: 'failed', reason});
 					return warningMsg(userFacingNotices.join('\n\n'), 'review');
+				}
+
+				const cutOffNotice =
+					response.finishReason === 'length'
+						? 'The review was cut off at the model output limit, so issues may be missing.'
+						: null;
+				const coverageNotices = [coverageNotice, cutOffNotice].filter(
+					notice => notice !== null,
+				);
+				if (coverageNotices.length > 0) {
+					onProblem?.({status: 'incomplete', reasons: coverageNotices});
 				}
 
 				const showUsageFooter = getShowUsageFooter();
@@ -744,7 +762,9 @@ export function createReviewView(
 					{key: generateKey('review')},
 					infoMsg(scopeNotice, 'review-scope'),
 					...baseNotices.map(notice => warningMsg(notice, 'review-base')),
-					coverageNotice ? warningMsg(coverageNotice, 'review-coverage') : null,
+					...coverageNotices.map(notice =>
+						warningMsg(notice, 'review-coverage'),
+					),
 					reply?.reasoning
 						? React.createElement(AssistantReasoning, {
 								key: generateKey('review-reasoning'),

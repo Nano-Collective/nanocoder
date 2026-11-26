@@ -193,6 +193,71 @@ test('a failed quick review still prints a JSON document', async t => {
 	t.regex(parsed.message ?? '', /gh CLI/);
 });
 
+function runQuickReview(
+	diff: string,
+	reply: {content: string; finishReason?: 'length'},
+	outputFormat: 'text' | 'json' = 'json',
+) {
+	const {client} = createScriptedReviewClient(() => reply);
+	return runHeadlessReview({
+		args: ['quick'],
+		client,
+		provider: 'review-test',
+		model: 'review-test-model',
+		outputFormat,
+		writeProgress: () => {},
+		quickDependencies: {
+			execGit: async args => (args[0] === 'diff' ? diff : ''),
+			getCurrentBranch: async () => 'feature',
+			getDefaultBranch: async () => 'main',
+		},
+	});
+}
+
+test('a quick review with an empty model reply exits 1', async t => {
+	const json = await runQuickReview('+a', {content: ''});
+	t.is(json.exitCode, 1);
+	const parsed = JSON.parse(json.stdout);
+	t.is(parsed.status, 'failed');
+	t.regex(parsed.message, /empty review/);
+
+	const text = await runQuickReview('+a', {content: ''}, 'text');
+	t.is(text.exitCode, 1);
+	t.is(text.stdout, '');
+});
+
+test('a quick review of a truncated diff exits 2', async t => {
+	const diff = Array(3000).fill('+a').join('\n');
+	const outcome = await runQuickReview(diff, {content: 'LGTM'});
+	t.is(outcome.exitCode, 2);
+	const parsed = JSON.parse(outcome.stdout);
+	t.is(parsed.status, 'incomplete');
+	t.is(parsed.incompleteReasons.length, 1);
+	t.regex(parsed.incompleteReasons[0], /Partial diff coverage/);
+
+	const text = await runQuickReview(diff, {content: 'LGTM'}, 'text');
+	t.is(text.exitCode, 2);
+	t.regex(text.stdout, /Partial diff coverage[\s\S]*LGTM/);
+});
+
+test('a quick review cut off at the output limit exits 2', async t => {
+	const outcome = await runQuickReview('+a', {
+		content: 'One issue so far',
+		finishReason: 'length',
+	});
+	t.is(outcome.exitCode, 2);
+	const parsed = JSON.parse(outcome.stdout);
+	t.is(parsed.status, 'incomplete');
+	t.regex(parsed.incompleteReasons[0], /cut off/);
+	t.regex(parsed.text, /cut off[\s\S]*One issue so far/);
+});
+
+test('a quick review with no changes still exits 0', async t => {
+	const outcome = await runQuickReview('', {content: 'unused'});
+	t.is(outcome.exitCode, 0);
+	t.is(JSON.parse(outcome.stdout).status, 'completed');
+});
+
 function cliDeps(
 	overrides: Partial<HeadlessReviewCliDeps> = {},
 ): Partial<HeadlessReviewCliDeps> {

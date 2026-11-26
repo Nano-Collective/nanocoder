@@ -7,7 +7,11 @@
  */
 
 import path from 'node:path';
-import {createReviewView, type ReviewDependencies} from '@/commands/review';
+import {
+	createReviewView,
+	type QuickReviewProblem,
+	type ReviewDependencies,
+} from '@/commands/review';
 import {getAppConfig} from '@/config/index';
 import {loadPreferences, savePreferences} from '@/config/preferences';
 import {
@@ -183,7 +187,10 @@ export async function runHeadlessReview(
 
 	if (tier === 'quick') {
 		writeProgress('Running the one-shot review');
-		const command = createReviewView(options.quickDependencies);
+		let problem: QuickReviewProblem | undefined;
+		const command = createReviewView(options.quickDependencies, found => {
+			problem = found;
+		});
 		const rendered = await command.handler(
 			['quick', ...request.split(/\s+/).filter(Boolean)],
 			[],
@@ -197,28 +204,32 @@ export async function runHeadlessReview(
 			},
 		);
 		const {text, failed} = componentMessage(rendered);
-		if (failed) {
+		if (failed || problem?.status === 'failed') {
 			writeProgress(text);
 			return {
 				exitCode: 1,
 				stdout: format === 'json' ? failureJson('quick', text) : '',
 			};
 		}
+		const incompleteReasons =
+			problem?.status === 'incomplete' ? problem.reasons : [];
+		const status = incompleteReasons.length > 0 ? 'incomplete' : 'completed';
+		const exitCode = exitCodeFor(status);
 		if (format === 'json') {
 			const body: HeadlessReviewJson = {
 				tier: 'quick',
-				status: 'completed',
+				status,
 				text,
 				findings: [],
 				dropped: [],
 				unverified: [],
-				incompleteReasons: [],
+				incompleteReasons,
 				notes: [],
 				stats: {reported: 0, verifierRuns: 0, modelCalls: 0, toolCalls: 0},
 			};
-			return {exitCode: 0, stdout: `${JSON.stringify(body, null, 2)}\n`};
+			return {exitCode, stdout: `${JSON.stringify(body, null, 2)}\n`};
 		}
-		return {exitCode: 0, stdout: `${text}\n`};
+		return {exitCode, stdout: `${text}\n`};
 	}
 
 	const activity = new ReviewActivityStore();
