@@ -750,7 +750,7 @@ test('UsageDisplay shows formatted USD for a priced cost breakdown', t => {
 
 	const output = lastFrame();
 	t.truthy(output);
-	t.regex(output!, /Estimated Cost/);
+	t.regex(output!, /Cost/);
 	t.regex(output!, /\$0\.0027/);
 	t.regex(output!, /\$1\.23/);
 });
@@ -777,9 +777,9 @@ test('UsageDisplay shows em dash placeholder when cost values are NaN', t => {
 
 	const output = lastFrame();
 	t.truthy(output);
-	t.regex(output!, /Estimated Cost/);
-	t.regex(output!, /Current Context:.*—/);
-	t.regex(output!, /Cumulative Session:.*—/);
+	t.regex(output!, /Cost/);
+	t.regex(output!, /Current Context \(estimated\):.*—/);
+	t.regex(output!, /Cumulative Session \(estimated\):.*—/);
 });
 
 test('UsageDisplay shows per-provider subtotals when multiple providers', t => {
@@ -808,7 +808,7 @@ test('UsageDisplay shows per-provider subtotals when multiple providers', t => {
 
 	const output = lastFrame();
 	t.truthy(output);
-	t.regex(output!, /Estimated Cost/);
+	t.regex(output!, /Cost/);
 	t.regex(output!, /Per-Provider:/);
 	t.regex(output!, /openai:.*\$0\.008/);
 	t.regex(output!, /ollama:.*\$0\.004/);
@@ -830,5 +830,5 @@ test('UsageDisplay does not render cost section when cost prop is undefined', t 
 
 	const output = lastFrame();
 	t.truthy(output);
-	t.notRegex(output!, /Estimated Cost/);
+	t.notRegex(output!, /Cost/);
 });

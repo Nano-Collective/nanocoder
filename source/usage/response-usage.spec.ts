@@ -42,6 +42,19 @@ test('buildResponseUsage does not price a model served from a local base URL', a
 	t.is(hosted?.cost, 0.33);
 });
 
+test('buildResponseUsage prices local models when a valid configured rate exists', async t => {
+	const result = await buildResponseUsage(
+		{inputTokens: 1_000_000, outputTokens: 1_000_000},
+		'local-model',
+		{
+			baseURL: 'http://127.0.0.1:11434/v1',
+			pricingOverride: {input: 0.5, output: 1},
+		},
+	);
+	t.is(result?.cost, 1.5);
+	t.is(result?.costSource, 'configured');
+});
+
 test('buildResponseUsageBounded passes the base URL through', async t => {
 	const result = await buildResponseUsageBounded(
 		{inputTokens: 100_000, outputTokens: 2_000},
@@ -63,6 +76,16 @@ test('buildResponseUsage computes cost from input and output tokens', async t =>
 	t.is(result?.outputTokens, 100_000);
 	// 1M * $3/1M + 0.1M * $15/1M = $4.50
 	t.is(result?.cost, 4.5);
+});
+
+test('buildResponseUsage marks configured pricing overrides', async t => {
+	const result = await buildResponseUsage(
+		{inputTokens: 1_000_000, outputTokens: 1_000_000},
+		'custom-model',
+		{pricingOverride: {input: 1.2, output: 4, currency: 'USD'}},
+	);
+	t.is(result?.cost, 5.2);
+	t.is(result?.costSource, 'configured');
 });
 
 test('buildResponseUsage prices cached input with cache-specific rates', async t => {

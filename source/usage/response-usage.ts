@@ -4,7 +4,8 @@
  */
 
 import {TIMEOUT_COST_LOOKUP_MS} from '@/constants';
-import {getModelPricing} from '@/models/index';
+import {getModelPricing, isValidModelPricingOverride} from '@/models/index';
+import type {ModelPricingConfig} from '@/types/config';
 import type {ApiUsage} from '@/types/core';
 import type {ResponseUsage} from '@/types/usage';
 import {isLocalURL} from '@/utils/url-utils';
@@ -16,10 +17,14 @@ export interface TokenPricing {
 	cache_write?: number;
 }
 
-type PricingLookup = (model: string) => Promise<TokenPricing | null>;
+type PricingLookup = (
+	model: string,
+	pricingOverride?: ModelPricingConfig,
+) => Promise<TokenPricing | null>;
 
 interface PricingOptions {
 	getPricing?: PricingLookup;
+	pricingOverride?: ModelPricingConfig;
 	/** The active provider's base URL; local servers are never priced. */
 	baseURL?: string;
 }
@@ -186,7 +191,7 @@ export function calculateUsageCost(
 export async function buildResponseUsage(
 	usage: ApiUsage | undefined,
 	model: string,
-	{getPricing = getModelPricing, baseURL}: PricingOptions = {},
+	{getPricing = getModelPricing, pricingOverride, baseURL}: PricingOptions = {},
 ): Promise<ResponseUsage | undefined> {
 	const reported = toReportedUsage(usage);
 	if (!reported || !usage) {
@@ -194,13 +199,17 @@ export async function buildResponseUsage(
 	}
 	// A model served from the user's own machine is free, even when a hosted
 	// provider on models.dev lists the same id (e.g. gpt-oss:20b).
-	if (baseURL && isLocalURL(baseURL)) {
+	if (
+		baseURL &&
+		isLocalURL(baseURL) &&
+		!isValidModelPricingOverride(pricingOverride)
+	) {
 		return reported;
 	}
 
 	let cost: number | undefined;
 	try {
-		const pricing = await getPricing(model);
+		const pricing = await getPricing(model, pricingOverride);
 		if (pricing) {
 			cost = calculateUsageCost(usage, pricing);
 		}
@@ -208,7 +217,17 @@ export async function buildResponseUsage(
 		// Best-effort: no cost segment when the pricing lookup fails.
 	}
 
-	return {...reported, cost};
+	return {
+		...reported,
+		cost,
+		...(cost !== undefined
+			? {
+					costSource: isValidModelPricingOverride(pricingOverride)
+						? 'configured'
+						: 'estimated',
+				}
+			: {}),
+	};
 }
 
 /**

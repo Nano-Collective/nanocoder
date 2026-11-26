@@ -276,18 +276,19 @@ export function UsageDisplay({
 				<>
 					<Box marginTop={1} marginBottom={1}>
 						<Text color={colors.primary} bold>
-							Estimated Cost
+							Cost
 						</Text>
 					</Box>
 					<Box>
 						<Text color={colors.secondary}>
-							Current Context:{' '}
+							Current Context ({cost.currentContextSource ?? 'estimated'}):{' '}
 							<Text color={colors.text}>{formatCost(cost.currentContext)}</Text>
 						</Text>
 					</Box>
 					<Box>
 						<Text color={colors.secondary}>
-							Cumulative Session:{' '}
+							Cumulative Session ({cost.cumulativeSessionSource ?? 'estimated'}
+							):{' '}
 							<Text color={colors.text}>
 								{formatCost(cost.cumulativeSession)}
 							</Text>
