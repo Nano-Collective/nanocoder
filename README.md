@@ -70,7 +70,7 @@ Nanocoder supports two rendering modes, mirroring what Claude Code and Codex shi
 - **Fullscreen (default)** — a fixed-height layout on the alternate screen buffer with in-app scrolling: PgUp/PgDn, with a scroll indicator and automatic snap-back to bottom on new output. Mouse reporting can be toggled with `--mouse` / `--no-mouse` or in preferences.
 - **Inline** (`--no-alt-screen` flag, or `"alternateScreen": false` in preferences) — renders on the main screen; finished messages print once into the terminal's native scrollback, so your terminal's scrollbar, mouse wheel, and search work as usual. The transcript stays in the terminal after you exit.
 
-In both modes, `/clear` fully resets the terminal to a fresh welcome banner, and exiting (Ctrl+C or `/exit`) erases the input UI cleanly instead of leaving a dead input box. Inline mode leaves the transcript in your scrollback; fullscreen mode restores the terminal to what it showed before Nanocoder started, so the transcript is not kept on screen (use `/resume` or `/export` to get it back).
+In both modes, `/clear` fully resets the terminal to a fresh welcome banner, and exiting (Ctrl+C twice, Ctrl+D or `/exit`) erases the input UI cleanly instead of leaving a dead input box. Inline mode leaves the transcript in your scrollback; fullscreen mode restores the terminal to what it showed before Nanocoder started, so the transcript is not kept on screen (use `/resume` or `/export` to get it back).
 
 ## Documentation
 

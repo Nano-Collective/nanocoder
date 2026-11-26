@@ -15,7 +15,7 @@ import {pasteEvents} from '../terminal/terminal-paste';
 import {KEYBOARD_SHORTCUTS} from './composer/keymap';
 import {SHORTCUTS_OVERHEAD_ROWS} from './composer/useShortcutsOverlay';
 import {findReverseMatch} from './composer/useReverseSearch';
-import UserInput from './user-input';
+import UserInput, {type ComposerHandle} from './user-input';
 import {getClosestConfigFile} from '../config/index';
 import {promptHistory} from '../prompt-history';
 
@@ -2804,6 +2804,37 @@ test.serial('UserInput cancels reverse search on Escape and restores original dr
 	t.notRegex(lastFrame()!, /\(reverse-i-search\)/);
 	t.regex(lastFrame()!, /my in-progress draft/);
 	unmount();
+});
+
+// App.tsx routes Ctrl+C to clearDraft (see InteractiveApp).
+test.serial('UserInput clearDraft leaves reverse search like Escape, then clears the draft', async t => {
+	await resetPromptHistory();
+	promptHistory.addPrompt('history command to ignore');
+	await promptHistory.saveHistory();
+
+	const composer = React.createRef<ComposerHandle>();
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput ref={composer} forceFocus={true} />
+		</TestWrapper>,
+	);
+	t.teardown(unmount);
+
+	stdin.write('my in-progress draft');
+	await waitForFrame(lastFrame, /my in-progress draft/);
+	stdin.write('\u0012'); // Ctrl+R
+	await waitForFrame(lastFrame, /\(reverse-i-search\)`/);
+
+	t.true(composer.current!.clearDraft());
+	await wait(50);
+	t.notRegex(lastFrame()!, /\(reverse-i-search\)/);
+	t.regex(lastFrame()!, /my in-progress draft/);
+
+	// The next press clears the draft itself; with nothing left it reports false.
+	t.true(composer.current!.clearDraft());
+	await wait(50);
+	t.notRegex(lastFrame()!, /my in-progress draft/);
+	t.false(composer.current!.clearDraft());
 });
 
 test.serial('UserInput shows failed reverse search and handles backspace in search mode', async t => {

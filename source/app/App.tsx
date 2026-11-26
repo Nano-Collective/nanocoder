@@ -14,6 +14,7 @@ import {
 	type InteractiveAppHandle,
 } from '@/app/sections/interactive-app';
 import type {AppProps} from '@/app/types';
+import {isExitKeyPress} from '@/app/utils/exit-keys';
 import AssistantReasoning from '@/components/assistant-reasoning';
 import {SuccessMessage, WarningMessage} from '@/components/message-box';
 import {setGlobalMessageQueue} from '@/components/message-queue';
@@ -172,27 +173,17 @@ export default function App({
 
 	// Ink's built-in exitOnCtrlC is disabled (cli.tsx) so Ctrl+C can run
 	// the same graceful path as /exit instead of abandoning the last frame.
-	// The chat UI gets the press first (cancel, clear, or the exit hint);
-	// other screens, and a press during shutdown, exit straight away.
+	// isExitKeyPress decides when Ctrl+C / Ctrl+D exit.
 	const interactiveAppRef = React.useRef<InteractiveAppHandle>(null);
 	useInput((input, key) => {
-		if (key.ctrl && input === 'c') {
-			if (isExitingRef.current) {
-				handleExit();
-			} else if (attachedAgentIdRef.current) {
-				// A watched subagent runs under the current turn: stop the turn
-				// (which stops the subagent) and go back to the chat.
-				appHandlers.handleCancel();
-				changeAttachedAgent(null);
-			} else if (!interactiveAppRef.current?.handleCtrlC()) {
-				handleExit();
-			}
-		}
-		// Ctrl+D on an empty prompt exits at once, like /exit.
 		if (
-			key.ctrl &&
-			input === 'd' &&
-			interactiveAppRef.current?.promptIsEmpty()
+			isExitKeyPress(input, key, {
+				exiting: isExitingRef.current,
+				// The rendered value, not attachedAgentIdRef: SubagentView may
+				// detach (and clear the ref) earlier in this same keypress.
+				subagentAttached: appState.attachedAgentId !== null,
+				chat: interactiveAppRef.current,
+			})
 		) {
 			handleExit();
 		}
@@ -926,6 +917,7 @@ export default function App({
 						<SubagentView
 							agentId={appState.attachedAgentId}
 							onDetach={() => changeAttachedAgent(null)}
+							onCancel={appHandlers.handleCancel}
 							reasoningExpanded={appState.reasoningExpanded}
 							altScreenActive={altScreenActive}
 						/>

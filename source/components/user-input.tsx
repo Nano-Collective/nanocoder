@@ -71,9 +71,9 @@ interface MentionWarning {
 
 /** Lets the app's Ctrl+C / Ctrl+D handler read and clear the prompt. */
 export type ComposerHandle = {
-	/** Clears what Esc Esc would, keeping the text undoable. False if empty. */
+	/** Leaves reverse search, or clears the typed text undoably. False if empty. */
 	clearDraft: () => boolean;
-	/** No text, attachment or editor pill. */
+	/** No typed text. */
 	isEmpty: () => boolean;
 };
 
@@ -507,37 +507,24 @@ export default function UserInput({
 		updateMentionWarning,
 	]);
 
-	// Clear the prompt, its attachments and the editor pill. Esc Esc drops the
-	// undo history; Ctrl+C keeps it so the text can come back.
-	const clearComposer = useCallback(
-		(undoable: boolean) => {
-			resetInput(undoable);
-			resetUIState();
-			images.clear();
-			updateMentionWarning(null);
-			onDismissActiveEditor?.();
-		},
-		[
-			resetInput,
-			resetUIState,
-			images.clear,
-			updateMentionWarning,
-			onDismissActiveEditor,
-		],
-	);
-
-	// The same "anything to clear?" test as Esc's first press.
-	const isEmpty = () =>
-		!currentStateRef.current.displayValue &&
-		attachments.length === 0 &&
-		!activeEditor;
+	// Ctrl+C clears only the typed text, as one undoable edit, so Ctrl+Z
+	// brings back exactly what it cleared. Attachments and the editor pill
+	// stay (Esc Esc clears those).
 	useImperativeHandle(ref, () => ({
 		clearDraft: () => {
-			if (isEmpty()) return false;
-			clearComposer(true);
+			// Like readline, Ctrl+C first leaves reverse search, as Esc does.
+			if (reverseSearch.isActive) {
+				const {restore} = reverseSearch.cancel();
+				if (restore) setInputState(restore);
+				setTextInputKey(prev => prev + 1);
+				return true;
+			}
+			if (!currentStateRef.current.displayValue) return false;
+			resetInput(true);
+			setShowClearMessage(false);
 			return true;
 		},
-		isEmpty,
+		isEmpty: () => !currentStateRef.current.displayValue,
 	}));
 
 	// Handle escape key logic
@@ -556,7 +543,11 @@ export default function UserInput({
 			return;
 		}
 		if (showClearMessage) {
-			clearComposer(false);
+			resetInput();
+			resetUIState();
+			images.clear();
+			updateMentionWarning(null);
+			onDismissActiveEditor?.();
 			focus('user-input');
 		} else if (input || attachments.length > 0 || activeEditor) {
 			// Nothing to clear otherwise - no-op instead of arming a hint for a
@@ -574,9 +565,13 @@ export default function UserInput({
 		suggestedCommand,
 		onDismissSuggestion,
 		showClearMessage,
-		clearComposer,
+		resetInput,
+		resetUIState,
+		onDismissActiveEditor,
 		setShowClearMessage,
 		focus,
+		images.clear,
+		updateMentionWarning,
 	]);
 
 	// Any keystroke means the user is composing, not navigating — re-enable the

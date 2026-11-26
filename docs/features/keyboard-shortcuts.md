@@ -56,7 +56,8 @@ Take care to send a bare `\n`. A sequence such as `"\\\r\n"` sends a literal bac
 | Delete previous word | Ctrl+W |
 | Delete from cursor to start of line | Ctrl+U |
 | Delete from cursor to end of line | Ctrl+K |
-| Clear input | Esc (twice), or Ctrl+C (Ctrl+Z brings the text back) |
+| Clear input | Esc (twice) |
+| Clear the typed text, keeping attachments (Ctrl+Z brings it back) | Ctrl+C |
 | Undo / redo the last input edit | Ctrl+Z / Ctrl+Y |
 
 ## Autocomplete
@@ -103,7 +104,7 @@ Note that Ctrl+V is bound to *image* paste, not text. Use your terminal's paste 
 |--------|----------|
 | Previous prompt | Up |
 | Next prompt | Down |
-| Reverse history search (Enter selects, Esc cancels, Ctrl+R again cycles older) | Ctrl+R |
+| Reverse history search (Enter selects, Esc or Ctrl+C cancels, Ctrl+R again cycles older) | Ctrl+R |
 | Select a queued message (empty input) | Down / Up |
 | Load the selected queued message back into the input | Enter |
 | Remove the selected queued message | Backspace / Delete |
@@ -130,7 +131,7 @@ Pressing Esc before the model has produced any output, and before any tool has s
 | Exit Nanocoder | Ctrl+C twice |
 | Exit straight away | Ctrl+D (empty prompt) or `/exit` |
 
-Ctrl+C never ends the session by accident. While a response is running it cancels it, and with text in the prompt it clears it. Otherwise it shows `Press Ctrl+C again to exit`, and a second press within 2 seconds exits. Any other key in between resets this.
+Ctrl+C never ends the session by accident. While a response is running it cancels it, even while a tool approval or a question is waiting (Esc there only declines), and with text in the prompt it clears it. Otherwise it shows `Press Ctrl+C again to exit`, and a second press within 2 seconds exits. Any other key in between resets this. If a cancel is already under way, the next Ctrl+C goes straight to the exit hint, so a response that won't stop can't keep you from exiting.
 
 ## Display
 

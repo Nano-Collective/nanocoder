@@ -466,8 +466,12 @@ export function InteractiveApp({
 		{isActive: cancellable},
 	);
 
-	// Ctrl+C cancels the turn like Escape, else clears the prompt, else asks
-	// for a second press, so a reflex press can't end the session.
+	// Ctrl+C cancels a running turn, else clears the prompt, else asks for a
+	// second press, so a reflex press can't end the session. Unlike Escape it
+	// cancels behind decision prompts too (Escape declines there; a cancelled
+	// turn releases them). Once a cancel is in flight it moves on to the exit
+	// hint, so a turn that ignores the abort can't trap the user.
+	const ctrlCCancels = agentBusy && !appState.isCancelling;
 	const composerRef = React.useRef<ComposerHandle>(null);
 	const [exitHintShown, setExitHintShown] = React.useState(false);
 	const exitHintTimerRef = React.useRef<NodeJS.Timeout | null>(null);
@@ -482,7 +486,7 @@ export function InteractiveApp({
 		handleCtrlC: () => {
 			const secondPress = exitHintTimerRef.current !== null;
 			hideExitHint();
-			if (cancellable) {
+			if (ctrlCCancels) {
 				cancelInFlight();
 				return true;
 			}
