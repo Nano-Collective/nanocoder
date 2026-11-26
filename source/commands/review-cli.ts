@@ -11,6 +11,7 @@
  * as an extra argument.
  */
 
+import {parseReviewRequest} from '@/review/review-request';
 import {RUN_FLAGS_STANDALONE, RUN_FLAGS_WITH_VALUES} from '@/run-prompt-args';
 
 export type ReviewCliResult = {
@@ -51,7 +52,12 @@ export function parseReviewCliArgs(args: string[]): ReviewCliResult {
 		return {isReviewCommand: true, prompt: '/review', error: undefined};
 	}
 
-	if (positionals.length > 1) {
+	const phrase = positionals.join(' ');
+	const tiered = /^(?:quick|deep)(?:\s|$)/i.test(phrase);
+	// Defer to the `/review` grammar so `branch <name>`, `pr #42`, and the
+	// other multi-word scopes stay in sync with the TUI.
+	const multiWordScope = parseReviewRequest(phrase).ok;
+	if (positionals.length > 1 && !tiered && !multiWordScope) {
 		const extra = positionals.slice(1).join(', ');
 		return {
 			isReviewCommand: true,
@@ -62,7 +68,7 @@ export function parseReviewCliArgs(args: string[]): ReviewCliResult {
 
 	return {
 		isReviewCommand: true,
-		prompt: `/review ${positionals[0]}`,
+		prompt: `/review ${phrase}`,
 		error: undefined,
 	};
 }

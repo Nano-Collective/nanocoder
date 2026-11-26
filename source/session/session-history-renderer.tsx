@@ -4,10 +4,12 @@ import {isInternalWalkthroughMessage} from '@/artifacts/walkthrough-lifecycle';
 import AssistantMessage from '@/components/assistant-message';
 import AssistantReasoning from '@/components/assistant-reasoning';
 import {InfoMessage} from '@/components/message-box';
+import {ReviewActivity} from '@/components/review-activity';
 import UserMessage from '@/components/user-message';
 import {getShowUsageFooter} from '@/config/preferences';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
+import {readPersistedReview} from '@/review/review-session';
 import {parseToolArguments} from '@/tools/runtime/tool-args-parser';
 import type {Message, ToolCall} from '@/types/core';
 import {generateKey} from '@/utils/key-generator';
@@ -196,6 +198,25 @@ export function buildSessionHistoryComponents(
 			}
 
 			case 'assistant': {
+				const review = readPersistedReview(message);
+				if (review) {
+					components.push(
+						<ReviewActivity
+							key={generateKey('resume-review-activity')}
+							summary={review.activity}
+							title={`${review.tier} review`}
+							recentCount={0}
+							outcome={review.status}
+						/>,
+						<AssistantMessage
+							key={generateKey('resume-review-report')}
+							message={message.content}
+							model={model}
+							showUsageFooter={false}
+						/>,
+					);
+					break;
+				}
 				if (message.reasoning?.trim()) {
 					components.push(
 						<AssistantReasoning

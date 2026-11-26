@@ -450,6 +450,13 @@ export function useAppState(
 		prevMessagesRef.current = newMessages;
 		setMessages(newMessages);
 	}, []);
+	// Read the latest synchronous history, not a submission-time render snapshot.
+	const appendMessages = useCallback(
+		(additions: Message[]) => {
+			updateMessages([...prevMessagesRef.current, ...additions]);
+		},
+		[updateMessages],
+	);
 
 	// Memoised so consumers that take the whole object (effects, callbacks,
 	// memo()'d children) only see a new identity when a value in it changes,
@@ -595,6 +602,7 @@ export function useAppState(
 			addToChatQueue,
 			getMessageTokens,
 			updateMessages,
+			appendMessages,
 		}),
 		[
 			client,
@@ -663,6 +671,7 @@ export function useAppState(
 			addToChatQueue,
 			getMessageTokens,
 			updateMessages,
+			appendMessages,
 			setSettingsActiveTab,
 			setIsToolConfirmationMode,
 			setPlanReviewState,
