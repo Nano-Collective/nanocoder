@@ -1,5 +1,8 @@
 import {resolve} from 'node:path';
-import {getSafeSessionCwd} from '@/services/session-cwd';
+import {
+	getContainedSessionCwd,
+	getSafeSessionCwd,
+} from '@/services/session-cwd';
 import {
 	forgetReadContentRange,
 	forgetVisibilityReceipt,
@@ -9,8 +12,18 @@ import type {Message, ToolCall} from '@/types/core';
 
 type ReadRange = {path: string; startLine?: number; endLine?: number};
 
-/** Tools whose call leaves the file content the model wrote in its context. */
-const EDIT_TOOLS = new Set(['write_file', 'string_replace', 'diff_edit']);
+/**
+ * Tools whose successful call leaves the file content the model wrote in its
+ * context, with the start of the result each one returns on success.
+ */
+const EDIT_SUCCESS = new Map<string, RegExp>([
+	['write_file', /^File (?:written|overwritten) successfully/],
+	['string_replace', /^Successfully replaced content/],
+	['diff_edit', /^Successfully applied /],
+]);
+
+/** A search_file_contents match line: `file:line:content` or `file:line-`. */
+const SEARCH_MATCH_LINE = /^(.+?):\d+[:-]/;
 
 function optionalLine(value: unknown): number | undefined {
 	return typeof value === 'number' ? value : undefined;
@@ -48,18 +61,50 @@ function readBodies(
 }
 
 /**
- * Paths the model wrote or edited in `messages`. The edit call carries the
- * content it wrote, so the receipt that edit recorded is still backed by
- * what the model sees.
+ * Paths the model wrote or edited in `messages`, counting only calls whose
+ * result reports success. The call carries the content it wrote, so the
+ * receipt that edit recorded is still backed by what the model sees. A failed
+ * or declined call wrote nothing and shows nothing of the file.
  */
-function editedPaths(messages: Message[]): Set<string> {
+function editedPaths(
+	messages: Message[],
+	calls: Map<string, ToolCall>,
+): Set<string> {
 	const paths = new Set<string>();
 	for (const message of messages) {
-		for (const call of message.tool_calls ?? []) {
-			if (!EDIT_TOOLS.has(call.function.name)) continue;
-			const path = call.function.arguments?.path;
-			if (typeof path === 'string') {
-				paths.add(resolve(getSafeSessionCwd(), path));
+		if (message.role !== 'tool' || !message.tool_call_id) continue;
+		const call = calls.get(message.tool_call_id);
+		if (!call) continue;
+		const success = EDIT_SUCCESS.get(call.function.name);
+		if (!success?.test(message.content)) continue;
+		const path = call.function.arguments?.path;
+		if (typeof path === 'string') {
+			paths.add(resolve(getSafeSessionCwd(), path));
+		}
+	}
+	return paths;
+}
+
+/**
+ * Paths that search_file_contents results in `messages` show lines of. The
+ * tool prints each match as `file:line:content` (or `file:line-` with
+ * context), with `file` relative to the directory it searched.
+ */
+function searchedPaths(
+	messages: Message[],
+	calls: Map<string, ToolCall>,
+): Set<string> {
+	const paths = new Set<string>();
+	for (const message of messages) {
+		if (message.role !== 'tool' || !message.tool_call_id) continue;
+		const call = calls.get(message.tool_call_id);
+		const name = message.name ?? call?.function.name;
+		if (name !== 'search_file_contents') continue;
+		if (!message.content.startsWith('Found ')) continue;
+		for (const line of message.content.split('\n')) {
+			const match = SEARCH_MATCH_LINE.exec(line);
+			if (match?.[1]) {
+				paths.add(resolve(getContainedSessionCwd(), match[1]));
 			}
 		}
 	}
@@ -77,9 +122,9 @@ function editedPaths(messages: Message[]): Set<string> {
  * The same holds for the read-before-edit guard: a visibility receipt says
  * the model has seen those lines, which stops being true once the body is
  * dropped. A file with nothing left in the kept window that shows its
- * content (a read body, or the model's own write or edit of it) loses its
- * receipt, so the edit tools ask for a fresh read instead of allowing a
- * blind edit.
+ * content (a read body, a search result that matched it, or the model's own
+ * successful write or edit of it) loses its receipt, so the edit tools ask
+ * for a fresh read instead of allowing a blind edit.
  */
 function forgetDroppedReadBodies(dropped: Message[], kept: Message[]): void {
 	const calls = new Map<string, ToolCall>();
@@ -89,7 +134,10 @@ function forgetDroppedReadBodies(dropped: Message[], kept: Message[]): void {
 		}
 	}
 	const keptBodies = readBodies(kept, calls);
-	const stillVisible = editedPaths(kept);
+	const stillVisible = new Set([
+		...editedPaths(kept, calls),
+		...searchedPaths(kept, calls),
+	]);
 	for (const range of keptBodies.values()) {
 		stillVisible.add(range.path);
 	}
@@ -97,9 +145,6 @@ function forgetDroppedReadBodies(dropped: Message[], kept: Message[]): void {
 		if (!keptBodies.has(key)) {
 			forgetReadContentRange(range.path, range.startLine, range.endLine);
 		}
-		// The model can no longer see this read. Unless the messages still
-		// sent show the file's content another way, its lines must stop
-		// counting as seen, or the edit tools would allow a blind edit.
 		if (!stillVisible.has(range.path)) {
 			forgetVisibilityReceipt(range.path);
 		}

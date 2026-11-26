@@ -1,3 +1,4 @@
+import {relative} from 'node:path';
 import test from 'ava';
 import type {Message} from '@/types/core';
 import {capMessagesForModel} from './message-capping.js';
@@ -247,8 +248,83 @@ test.serial('a kept write of the same file keeps the visibility receipt', t => {
 				},
 			],
 		},
-		{role: 'tool', tool_call_id: 'w1', name: 'write_file', content: 'ok'},
+		{
+			role: 'tool',
+			tool_call_id: 'w1',
+			name: 'write_file',
+			content:
+				'File overwritten successfully (1 lines, 8 characters, ~2 tokens).',
+		},
 	];
 	capMessagesForModel(messages, 3);
 	t.true(hasVisibleLines(FILE, STATS, [350]).visible);
+});
+
+function toolTurn(
+	id: string,
+	name: string,
+	args: Record<string, unknown>,
+	content: string,
+): Message[] {
+	return [
+		{
+			role: 'assistant',
+			content: '',
+			tool_calls: [{id, function: {name, arguments: args}}],
+		},
+		{role: 'tool', tool_call_id: id, name, content},
+	];
+}
+
+// search_file_contents prints paths relative to the directory it searched.
+const SEARCH_HIT = `Found 1 match:\n\n${relative(process.cwd(), FILE)}:200:const x = 1;`;
+
+// A search result still in view keeps the lines it showed seen.
+test.serial('a kept search result of the same file keeps the visibility receipt', t => {
+	clearReadTracker();
+	recordVisibilityReceipt(FILE, STATS, 340, 360);
+	recordVisibilityReceipt(FILE, STATS, 200, 200);
+	const messages = [
+		...readTurn('r1', 'file body', {path: FILE, start_line: 340, end_line: 360}),
+		...filler(2),
+		...toolTurn('s1', 'search_file_contents', {query: 'const x'}, SEARCH_HIT),
+	];
+	capMessagesForModel(messages, 3);
+	t.true(hasVisibleLines(FILE, STATS, [200]).visible);
+});
+
+// A search that only matched other files says nothing about this one.
+test.serial('a kept search of another file does not keep the visibility receipt', t => {
+	clearReadTracker();
+	recordVisibilityReceipt(FILE, STATS, 340, 360);
+	const messages = [
+		...readTurn('r1', 'file body', {path: FILE, start_line: 340, end_line: 360}),
+		...filler(2),
+		...toolTurn(
+			's1',
+			'search_file_contents',
+			{query: 'const x'},
+			'Found 1 match:\n\nsource/other.ts:200:const x = 1;',
+		),
+	];
+	capMessagesForModel(messages, 3);
+	t.false(hasVisibleLines(FILE, STATS, [350]).visible);
+});
+
+// A failed edit shows nothing of the file, so it must not keep the receipt.
+test.serial('a kept failed edit does not keep the visibility receipt', t => {
+	clearReadTracker();
+	recordVisibilityReceipt(FILE, STATS, 340, 360);
+	const messages = [
+		...readTurn('r1', 'file body', {path: FILE, start_line: 340, end_line: 360}),
+		...filler(2),
+		...toolTurn(
+			'e1',
+			'string_replace',
+			{path: FILE, old_str: 'missing', new_str: 'new'},
+			'Error: Content not found in file.',
+		),
+	];
+	capMessagesForModel(messages, 3);
+	t.false(hasVisibleLines(FILE, STATS, [350]).visible);
 });
