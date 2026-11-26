@@ -5,6 +5,7 @@ import type {Message} from '@/types/index';
 import {
 	convertToModelMessages,
 	dropOrphanedToolResults,
+	pairUnansweredToolCalls,
 	isEmptyAssistantMessage,
 	withCacheBreakpoints,
 } from './message-converter.js';
@@ -505,6 +506,43 @@ test('dropOrphanedToolResults drops a tool result lacking a tool_call_id', t => 
 	const result = dropOrphanedToolResults(messages);
 	t.is(result.length, 1);
 	t.is(result[0].role, 'user');
+});
+
+test('pairUnansweredToolCalls adds cancellation results before the next user turn', t => {
+	const messages: Message[] = [
+		{role: 'user', content: 'write a file'},
+		{
+			role: 'assistant',
+			content: '',
+			tool_calls: [
+				{id: 'call_1', function: {name: 'write_file', arguments: {}}},
+			],
+		},
+		{role: 'user', content: 'continue'},
+	];
+
+	const result = pairUnansweredToolCalls(messages);
+	t.is(result.length, 4);
+	t.is(result[2].role, 'tool');
+	t.is(result[2].tool_call_id, 'call_1');
+	t.is(result[2].name, 'write_file');
+	t.regex(String(result[2].content), /cancelled/i);
+	t.is(result[3].content, 'continue');
+});
+
+test('pairUnansweredToolCalls leaves already-paired calls alone', t => {
+	const messages: Message[] = [
+		{
+			role: 'assistant',
+			content: '',
+			tool_calls: [{id: 'call_1', function: {name: 'edit', arguments: {}}}],
+		},
+		{role: 'tool', content: 'edited', tool_call_id: 'call_1', name: 'edit'},
+		{role: 'user', content: 'ok'},
+	];
+
+	const result = pairUnansweredToolCalls(messages);
+	t.deepEqual(result, messages);
 });
 
 test('convertToModelMessages drops display-only assistant notices', t => {

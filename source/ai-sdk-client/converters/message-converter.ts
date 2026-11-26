@@ -7,8 +7,9 @@ import type {
 	UserContent,
 } from 'ai';
 import {filterModelFacing} from '@/conversation/message-visibility';
+import {createCancellationResults} from '@/tools/runtime/tool-cancellation';
 import {truncateToolResult} from '@/tools/runtime/truncate-tool-result';
-import type {ImageAttachment, Message} from '@/types/index';
+import type {ImageAttachment, Message, ToolCall} from '@/types/index';
 import {getLogger} from '@/utils/logging';
 import type {TestableMessage} from '../types.js';
 
@@ -63,6 +64,56 @@ export function dropOrphanedToolResults(messages: Message[]): Message[] {
 		}
 		result.push(msg);
 	}
+	return result;
+}
+
+/**
+ * Pair assistant `tool_calls` that have no matching tool result with a
+ * cancellation result. Sessions quit while a confirmation prompt is open can
+ * end with unanswered calls; providers reject the next request until each call
+ * has a result. Exported for testing and for resume/save repair.
+ */
+export function pairUnansweredToolCalls(messages: Message[]): Message[] {
+	const result: Message[] = [];
+	let pending: ToolCall[] = [];
+	const answered = new Set<string>();
+
+	const flushPending = () => {
+		const unanswered = pending.filter(
+			toolCall => toolCall.id && !answered.has(toolCall.id),
+		);
+		if (unanswered.length > 0) {
+			for (const toolResult of createCancellationResults(unanswered)) {
+				result.push({
+					role: 'tool',
+					content: toolResult.content,
+					tool_call_id: toolResult.tool_call_id,
+					name: toolResult.name,
+				});
+			}
+		}
+		pending = [];
+		answered.clear();
+	};
+
+	for (const message of messages) {
+		if (message.role === 'assistant' && message.tool_calls?.length) {
+			flushPending();
+			result.push(message);
+			pending = message.tool_calls;
+			continue;
+		}
+		if (message.role === 'tool' && pending.length > 0) {
+			result.push(message);
+			if (message.tool_call_id) {
+				answered.add(message.tool_call_id);
+			}
+			continue;
+		}
+		flushPending();
+		result.push(message);
+	}
+	flushPending();
 	return result;
 }
 

@@ -1,4 +1,5 @@
 import {useCallback, useEffect, useRef, useState} from 'react';
+import {pairUnansweredToolCalls} from '@/ai-sdk-client/converters/message-converter';
 import {isApprovedPlanMessage} from '@/artifacts/approved-plan';
 import {isInternalWalkthroughMessage} from '@/artifacts/walkthrough-lifecycle';
 import {getAppConfig} from '@/config/index';
@@ -207,8 +208,10 @@ export function useSessionAutosave({
 				// has already done its job by the time we persist, so keep it out of
 				// the session file: a resumed session must not replay it to the user
 				// or re-send it to the model.
-				const persistedMessages = capturedMessages.filter(
-					message => !isInternalWalkthroughMessage(message),
+				const persistedMessages = pairUnansweredToolCalls(
+					capturedMessages.filter(
+						message => !isInternalWalkthroughMessage(message),
+					),
 				);
 				if (persistedMessages.length === 0) return;
 
