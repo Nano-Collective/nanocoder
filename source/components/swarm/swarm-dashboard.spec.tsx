@@ -1,4 +1,5 @@
-import test from 'ava';
+import {stripVTControlCharacters} from 'node:util';
+import test, {type ExecutionContext} from 'ava';
 import {render} from 'ink-testing-library';
 import React from 'react';
 import {getThemeColors} from '@/config/themes';
@@ -24,7 +25,7 @@ const snapshot = (status: SwarmStatus): SwarmSnapshot => ({
 	],
 });
 
-function mount(status: SwarmStatus) {
+function mount(t: ExecutionContext, status: SwarmStatus) {
 	const answers: boolean[] = [];
 	let cancelled = 0;
 	const instance = render(
@@ -48,22 +49,22 @@ function mount(status: SwarmStatus) {
 			/>
 		</ThemeContext.Provider>,
 	);
+	t.teardown(() => instance.unmount());
+	const frame = () => stripVTControlCharacters(instance.lastFrame() ?? '');
 	const press = async (input: string) => {
 		await new Promise(resolve => setTimeout(resolve, 50));
 		instance.stdin.write(input);
 		await new Promise(resolve => setTimeout(resolve, 100));
 	};
-	return {instance, press, answers, cancelled: () => cancelled};
+	return {frame, press, answers, cancelled: () => cancelled};
 }
 
 test('shows each worker with its activity', t => {
-	const {instance} = mount('running');
-	const frame = instance.lastFrame() ?? '';
+	const frame = mount(t, 'running').frame();
 	t.regex(frame, /api\s+running\s+read_file\s+turn 2/);
 	t.regex(frame, /ui\s+success\s+src\/ui\s+90 tokens/);
 	t.regex(frame, /Ctrl\+C to cancel/);
 	t.notRegex(frame, /\(y\/n\)/);
-	instance.unmount();
 });
 
 test('asks before applying and reports the answer', async t => {
@@ -71,19 +72,17 @@ test('asks before applying and reports the answer', async t => {
 		['y', true],
 		['n', false],
 	] as const) {
-		const {instance, press, answers} = mount('awaiting-confirmation');
-		t.regex(instance.lastFrame() ?? '', /src\/api\/a\.ts[\s\S]*\(y\/n\)/);
+		const {frame, press, answers} = mount(t, 'awaiting-confirmation');
+		t.regex(frame(), /src\/api\/a\.ts[\s\S]*\(y\/n\)/);
 		await press(input);
 		t.deepEqual(answers, [answer]);
-		instance.unmount();
 	}
 });
 
 test('ignores y until asked, and cancels on Ctrl+C', async t => {
-	const {instance, press, answers, cancelled} = mount('running');
+	const {press, answers, cancelled} = mount(t, 'running');
 	await press('y');
 	await press('\u0003');
 	t.deepEqual(answers, []);
 	t.is(cancelled(), 1);
-	instance.unmount();
 });
