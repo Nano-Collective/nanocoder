@@ -207,3 +207,54 @@ test('/context-max rejects zero, negative, invalid, overflowing, and unsafe valu
 		);
 	}
 });
+
+test.serial('/context-max rejects trailing arguments instead of dropping them', async t => {
+	const invalidInputs = [
+		'128 k',
+		'1 m',
+		'200k extra',
+		'8192 junk',
+		'1m 2m',
+	];
+
+	for (const input of invalidInputs) {
+		let queued: React.ReactNode = null;
+		const completion = await runContextMax({
+			argText: input,
+			onAddToChatQueue: node => {
+				queued = node;
+			},
+		});
+
+		t.is(completion, 'done-after-render', input);
+		t.is(getSessionContextLimit(), null, input);
+		t.is(
+			getMessageText(queued),
+			'Invalid context limit. Use a positive number, e.g. /context-max 8192, /context-max 128k, or /context-max 1m',
+			input,
+		);
+	}
+});
+
+test.serial('/context-max --reset with trailing arguments keeps the session override', async t => {
+	await runContextMax({
+		argText: '1m',
+		onAddToChatQueue: () => {},
+	});
+	t.is(getSessionContextLimit(), 1000000);
+
+	let queued: React.ReactNode = null;
+	const completion = await runContextMax({
+		argText: '--reset extra',
+		onAddToChatQueue: node => {
+			queued = node;
+		},
+	});
+
+	t.is(completion, 'done-after-render');
+	t.is(getSessionContextLimit(), 1000000);
+	t.is(
+		getMessageText(queued),
+		'Invalid context limit. Use a positive number, e.g. /context-max 8192, /context-max 128k, or /context-max 1m',
+	);
+});

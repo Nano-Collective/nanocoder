@@ -10,12 +10,17 @@ import type {StatefulCommand} from '@/types/index';
 import {generateKey} from '@/utils/key-generator';
 import {parseContextLimit} from '@/utils/parse-context-limit';
 
+const INVALID_LIMIT_MESSAGE =
+	'Invalid context limit. Use a positive number, e.g. /context-max 8192, /context-max 128k, or /context-max 1m';
+
 /**
  * /context-max sets the maximum context length for the current session.
  *
  * /context-max <number>   - Set context limit (supports positive integer or decimal values, k/K and m/M suffixes)
  * /context-max            - Show current effective context limit
  * /context-max --reset    - Clear session override
+ *
+ * Extra arguments are rejected with the invalid-limit error and change nothing.
  */
 export const contextMaxCommand: StatefulCommand = {
 	name: 'context-max',
@@ -31,6 +36,11 @@ export const contextMaxCommand: StatefulCommand = {
 		const trimmed = context.argText.trim();
 		const args = trimmed ? trimmed.split(/\s+/) : [];
 
+		if (args.length > 1) {
+			onAddToChatQueue(errorMsg(INVALID_LIMIT_MESSAGE, 'context-max-error'));
+			return 'done-after-render';
+		}
+
 		if (args[0] === '--reset') {
 			resetSessionContextLimit();
 			onAddToChatQueue(
@@ -45,12 +55,7 @@ export const contextMaxCommand: StatefulCommand = {
 		if (args.length > 0) {
 			const limit = parseContextLimit(args[0]);
 			if (limit === null) {
-				onAddToChatQueue(
-					errorMsg(
-						'Invalid context limit. Use a positive number, e.g. /context-max 8192, /context-max 128k, or /context-max 1m',
-						'context-max-error',
-					),
-				);
+				onAddToChatQueue(errorMsg(INVALID_LIMIT_MESSAGE, 'context-max-error'));
 				return 'done-after-render';
 			}
 
