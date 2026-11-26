@@ -12,7 +12,15 @@
 // pulled in via dynamic `await import()` only when the app actually boots.
 import {readFileSync} from 'node:fs';
 import nodeModule from 'node:module';
-import {parseRunPrompt} from './run-prompt-args.js';
+import type {JsonSchemaDocument} from '@/tools/runtime/schema-validate.js';
+import {
+	composePromptWithStdin,
+	parseRunPrompt,
+	readStdinText,
+	STDIN_PROMPT_FILE,
+	wantsHelp,
+	wantsVersion,
+} from './run-prompt-args.js';
 
 // Enable V8 compile cache (Node 22.8+). After the first run, Node caches
 // bytecode for every module on disk so subsequent launches skip parsing
@@ -22,6 +30,15 @@ if (typeof nodeModule.enableCompileCache === 'function') {
 }
 
 const require = nodeModule.createRequire(import.meta.url);
+
+// Loads the launch directory's `.env` (minus the keys #2054 protects). Called
+// right before importing a path that reads config, as importing config used
+// to do as a side effect; the fast paths that never did (`trust`, `storage`,
+// `init`, ...) still never read it.
+async function loadProjectEnv(): Promise<void> {
+	const {bootstrapProjectDotenv} = await import('@/config/project-dotenv');
+	bootstrapProjectDotenv();
+}
 
 // Resolved inline rather than through `@/utils/package-version` to keep the
 // fast path import-free (see the note above). A missing or malformed
@@ -59,7 +76,7 @@ if (args[0] === 'storage') {
 }
 
 // Handle --version/-v flag — fast path, no heavy imports
-if (args.includes('--version') || args.includes('-v')) {
+if (wantsVersion(args)) {
 	console.log(version);
 	process.exit(0);
 }
@@ -78,11 +95,14 @@ if (args[0] === 'daemon') {
 	] as const;
 	type DaemonSub = (typeof valid)[number];
 	if (!sub || !(valid as readonly string[]).includes(sub)) {
-		console.error(
-			'Usage: nanocoder daemon <start|stop|status|logs|install|uninstall>',
-		);
-		process.exit(sub ? 1 : 0);
+		const help = !sub || sub === '--help' || sub === '-h';
+		const usage =
+			'Usage: nanocoder daemon <start|stop|status|logs|install|uninstall>';
+		if (help) console.log(usage);
+		else console.error(usage);
+		process.exit(help ? 0 : 1);
 	}
+	await loadProjectEnv();
 	const {runDaemonCli} = await import('@/daemon/cli');
 	const result = await runDaemonCli(sub as DaemonSub, {
 		projectRoot: process.cwd(),
@@ -97,6 +117,7 @@ if (args[0] === 'daemon') {
 // PR review; pulls in the full LLM/tool/subagent stack (unlike `daemon`
 // above) but never Ink.
 if (args[0] === 'verify') {
+	await loadProjectEnv();
 	const {runVerifyCli} = await import('@/verify/cli');
 	const result = await runVerifyCli(args.slice(1), {
 		projectRoot: process.cwd(),
@@ -108,10 +129,13 @@ if (args[0] === 'verify') {
 // Handle `nanocoder skills <sub>` — fast path, only loads the skill
 // installer (no Ink, no providers, no tool registry).
 if (args[0] === 'skills') {
+	await loadProjectEnv();
 	const {runSkillsCli, SKILLS_CLI_USAGE} = await import('@/skills/install');
-	if (args[1] !== 'add') {
-		console.error(SKILLS_CLI_USAGE);
-		process.exit(args[1] ? 1 : 0);
+	if (args[1] !== 'add' || args.includes('--help') || args.includes('-h')) {
+		const help = !args[1] || args.includes('--help') || args.includes('-h');
+		if (help) console.log(SKILLS_CLI_USAGE);
+		else console.error(SKILLS_CLI_USAGE);
+		process.exit(help ? 0 : 1);
 	}
 	const result = await runSkillsCli({
 		projectRoot: process.cwd(),
@@ -127,8 +151,25 @@ if (args[0] === 'skills') {
 // Handle `nanocoder config <sub>` — fast path. Resolving the effective
 // config only needs the config module graph, not Ink or the tool registry.
 if (args[0] === 'config') {
+	await loadProjectEnv();
 	const {runConfigCli} = await import('@/config/config-cli');
 	const result = runConfigCli(args[1], args.slice(2));
+	if (result.exitCode === 0) {
+		console.log(result.output);
+	} else {
+		console.error(result.output);
+	}
+	process.exit(result.exitCode);
+}
+
+// Handle `nanocoder trust` — fast path. Reads and writes only the trust list in
+// the global preferences file, so it never loads the folder's project config or
+// starts anything it defines. Its import graph also stays free of React and Ink
+// (trust-cli.spec.ts checks this), which is why preferences.ts logs through
+// @/utils/logging and not the Ink message queue.
+if (args[0] === 'trust') {
+	const {runTrustCli} = await import('@/config/trust/trust-cli');
+	const result = runTrustCli(args.slice(1));
 	if (result.exitCode === 0) {
 		console.log(result.output);
 	} else {
@@ -160,10 +201,19 @@ Examples:
 		process.exit(0);
 	}
 
-	const [{parseInitArguments}, initializer] = await Promise.all([
-		import('@/init/init-args'),
-		import('@/init/initializer'),
-	]);
+	const [{validateInitArgs}, {parseInitArguments}, initializer] =
+		await Promise.all([
+			import('./cli-args.js'),
+			import('@/init/init-args'),
+			import('@/init/initializer'),
+		]);
+	// This fast path runs before the shared top-level scan in this file, so
+	// `nanocoder init --bogus` must be rejected here instead of being ignored.
+	const initArgsError = validateInitArgs(args);
+	if (initArgsError) {
+		console.error(initArgsError);
+		process.exit(1);
+	}
 	try {
 		const options = parseInitArguments(args.slice(1));
 		const result = initializer.initializeProject({
@@ -208,7 +258,7 @@ if (args[0] === 'completion') {
 }
 
 // Handle --help/-h flag — fast path, no heavy imports
-if (args.includes('--help') || args.includes('-h')) {
+if (wantsHelp(args)) {
 	console.log(`
 Usage: nanocoder [options] [command]
 
@@ -217,8 +267,21 @@ Commands:
                                   Use --preset <react|nextjs|rust> for bundled defaults.
   copilot login [provider-name]   Log in to GitHub Copilot (device flow). Saves credentials for the "GitHub Copilot" provider.
   codex login [provider-name]     Log in to ChatGPT/Codex (device flow). Saves credentials for the "ChatGPT" provider.
-  review <branch|pr-number>       Review a branch or PR diff for bugs, security issues, and style violations.
-  worktree <PR-number>            Start an interactive session in a new worktree for a GitHub PR.
+  review [quick|deep] [target]    Review a branch, PR, commits, or the working tree.
+                                  Non-TTY and --output-format json print the report
+                                  on stdout and progress on stderr.
+  worktree <PR-number> [options]  Start an interactive session in a new worktree for a GitHub PR.
+                                  Accepts the global options below, e.g. --provider, --mode.
+  swarm "<goal>" [options]        Split a goal into tasks and run one agent per task in
+                                  separate Git worktrees. Needs a terminal, a trusted
+                                  folder and a clean tree.
+                                  --workers <1-10>     Maximum parallel agents (default 4).
+                                  --swarm-mode <mode>  review (default) saves patches only;
+                                  apply asks before applying them; yolo runs workers in
+                                  yolo mode and applies without asking.
+                                  --timeout <minutes>  Limit for planning and workers (default 30).
+                                  Also takes --provider, --model, --profile, --context-max
+                                  and --trust-directory.
   daemon <subcommand>             Manage the per-project skill daemon.
                                   Subcommands: start, stop, status, logs, install, uninstall.
                                   start [--trust <comment-only|auto-fix|full-commit>]
@@ -227,16 +290,22 @@ Commands:
                                   comment-only. full-commit prompts a one-time confirmation.
                                   start refuses to run in an untrusted directory; pass
                                   --trust-directory to bypass the check for this run only.
-  verify --pr <n> [--post-review] [--provider <name>] [--model <name>]
+  verify --pr <n> [--post-review] [--trust-directory] [--provider <name>] [--model <name>]
                                   Headless, read-only PR review: runs the verify-pr-review
                                   subagent plus a semgrep pass. Prints the review to stdout
                                   by default; posts it as a PR comment with --post-review.
+                                  Refuses an untrusted directory; pass --trust-directory
+                                  to bypass the check for this run only.
                                   --provider/--model select the LLM (see Options below).
   skills add <target>             Install a skill bundle from a git repository.
                                   <target> is an index name, owner/repo, a git URL, or a local path.
                                   Flags: --ref, --subdir, --global, --force, --yes, --index.
   config <subcommand>             Inspect the resolved configuration and where each value came from.
                                   Subcommands: list, show [key], diff. Add --json for machine output.
+  trust --status [--json]         Show whether this folder is trusted, what it will run, and its
+                                  fingerprint. Runs nothing from the folder. Status is trusted,
+                                  not-trusted, changed or needs-re-approval.
+  trust --grant <fingerprint>     Trust this folder only if its fingerprint still matches.
   storage [--format json]         Inspect session and artifact storage (read-only).
                                   Interactive by default; JSON works without a TTY.
   completion <shell>              Generate a shell completion script (bash, zsh, or fish).
@@ -245,21 +314,31 @@ Commands:
 Options:
   -v, --version       Show version number
   -h, --help          Show help
-  --vscode            Run in VS Code mode
+  --profile           Use a named configuration profile from agents.config.json
+  --vscode            Start the legacy VS Code companion (deprecated)
   --vscode-port       Specify VS Code port
   --provider          Specify AI provider (must be configured in agents.config.json).
                       Quote names with spaces: --provider "GitHub Copilot"
   --model             Specify AI model (must be available for the provider)
-  --context-max       Set maximum context length in tokens (supports k/K suffix, e.g. 128k)
+  --context-max       Set maximum context length in tokens (supports k/K and m/M suffixes, e.g. 128k or 1m)
   --mode              Start in a specific development mode (normal, auto-accept, yolo, plan,
                       architect). Defaults to "normal" for interactive sessions and
                       "auto-accept" for run mode.
   --prompt-file       Read the run prompt from a file instead of the command
                       line. Necessary for large prompts: Linux caps a single
                       argument at 128 KiB and execve fails with E2BIG.
+                      Use "-" to read the prompt from stdin.
+  --json-schema       Validate the final run answer against a JSON Schema.
+                      Takes a schema file path or inline JSON (quote it).
+                      Uses the plain runtime and retries invalid answers.
+  --restricted-scope  Comma-separated paths the file editing tools may change.
+                      Shell commands are not covered. Valid with "run"; calls
+                      that need approval are refused instead of ending the run.
+  --telemetry         Print one JSON line to stderr per model turn and tool call.
+                      Valid with plain "run" sessions.
   --trust-directory   Skip the first-run directory trust prompt for this run only.
-                      Valid with the "run" command and "daemon start". Does not modify
-                      the preferences file.
+                      Valid with "run", "review", "swarm", "daemon start", "verify" and --acp.
+                      Does not modify the preferences file.
   --plain             Use a lightweight, Ink-free runtime for non-interactive runs.
                       Only valid with the "run" command. Auto-enables in CI / non-TTY.
   --no-plain          Force the Ink runtime even in CI / non-TTY environments.
@@ -272,19 +351,18 @@ Options:
   --no-mouse          Disable mouse reporting in fullscreen mode: native text selection
                       works directly, but the wheel no longer scrolls chat history.
   --json              Output execution results as a single well-formed JSON object to stdout.
-                      Only valid with the "run" command. Always uses the plain runtime.
+                      Valid with "run" (always uses the plain runtime) and "review"
+                      (runs headless).
   --output-format     Specify stdout format ('text' or 'json'). Synonym for --json.
   --acp               Run as an ACP (Agent Client Protocol) server for editor integration.
-                      Communicates via JSON-RPC over stdin/stdout.
+                      Communicates via JSON-RPC over stdin/stdout. Refuses an untrusted
+                      directory unless --trust-directory is passed.
   -c, --continue      Resume the most recent session for the current directory, silently.
                       Starts a fresh session if none exists. Interactive mode only.
   -r, --resume [id]   Resume a session by id or 1-based list index (e.g. "last", "2",
                       or a session uuid). With no id, opens the session picker at
                       startup. Mutually exclusive with --continue. Interactive mode only.
   run                 Run in non-interactive mode
-  swarm               Run a goal using a swarm of parallel agents
-                      Options: --workers <1-10>, --swarm-mode <review|apply|yolo>,
-                      --restricted-scope <path>
 
 Examples:
   nanocoder init --preset nextjs
@@ -294,14 +372,16 @@ Examples:
   nanocoder --provider ollama --model llama3.1 --context-max 128k
   nanocoder --mode yolo run "refactor database module"
   nanocoder --mode plan
-  nanocoder swarm --workers 4 --swarm-mode review "refactor auth"
   nanocoder --trust-directory run "analyze src/app.ts"
   nanocoder --plain run "summarize README.md"
+  git diff | nanocoder run "write a commit message"
   nanocoder --plain --json run "summarize README.md" | jq .finalText
   nanocoder review main
   nanocoder review feature/auth
   nanocoder review 42
   nanocoder worktree 42
+  nanocoder worktree 42 --mode plan
+  nanocoder swarm "add unit tests for the utils folder" --workers 3
   nanocoder --continue
   nanocoder --resume last
   nanocoder --resume
@@ -330,10 +410,18 @@ async function main(): Promise<void> {
 	// Those packages pull ~thousand+ modules; --acp / --plain / auth must stay
 	// on the lightweight path. Ink + App load only in the final TUI branch.
 	if (args[0] === 'worktree') {
-		const {createPrWorktree, parseWorktreePrNumber} = await import(
-			'./commands/gh-pr-worktree'
+		const [{createPrWorktree, parseWorktreePrNumber}, {parseWorktreeArgs}] =
+			await Promise.all([
+				import('./commands/gh-pr-worktree'),
+				import('./cli-args.js'),
+			]);
+		// Global options after the PR number (`--provider`, `--mode`, ...) are
+		// validated by validateCliArgs above and read by the normal startup
+		// path below, so the worktree session honours them.
+		const worktreeArgs = parseWorktreeArgs(args);
+		const prNumber = parseWorktreePrNumber(
+			'error' in worktreeArgs ? args.slice(1) : worktreeArgs.positionals,
 		);
-		const prNumber = parseWorktreePrNumber(args.slice(1));
 		if (!process.stdin.isTTY || !process.stdout.isTTY) {
 			throw new Error(
 				'`nanocoder worktree` requires an interactive terminal (TTY).',
@@ -350,17 +438,49 @@ async function main(): Promise<void> {
 	const portArgIndex = args.findIndex(
 		arg => arg === '--vscode-port' || arg.startsWith('--vscode-port='),
 	);
-	const portValue =
-		portArgIndex === -1
-			? undefined
-			: args[portArgIndex].startsWith('--vscode-port=')
-				? args[portArgIndex].slice('--vscode-port='.length)
-				: args[portArgIndex + 1];
-	if (portValue) {
-		const port = parseInt(portValue, 10);
-		if (!isNaN(port) && port > 0 && port < 65536) {
-			vscodePort = port;
+	if (portArgIndex !== -1) {
+		const value = args[portArgIndex].startsWith('--vscode-port=')
+			? args[portArgIndex].slice('--vscode-port='.length)
+			: args[portArgIndex + 1];
+		// The flag is present, so a value is required. An explicitly empty or
+		// missing value must fail instead of quietly asking for a random port.
+		if (value === undefined || value === '') {
+			console.error(
+				'--vscode-port requires a value. Use an integer between 1 and 65535.',
+			);
+			process.exit(1);
 		}
+		// Strict integer: a numeric prefix like `8080abc` or an out-of-range
+		// value must be reported, not silently rounded down.
+		const port = /^\d+$/.test(value) ? Number(value) : Number.NaN;
+		if (!Number.isInteger(port) || port < 1 || port > 65535) {
+			console.error(
+				`Invalid --vscode-port value: "${value}". Use an integer between 1 and 65535.`,
+			);
+			process.exit(1);
+		}
+		vscodePort = port;
+	}
+
+	// Extract --profile if specified
+	let cliProfile: string | undefined;
+	const profileArgIndex = args.findIndex(
+		arg => arg === '--profile' || arg.startsWith('--profile='),
+	);
+	const profileValue =
+		profileArgIndex === -1
+			? undefined
+			: args[profileArgIndex].startsWith('--profile=')
+				? args[profileArgIndex].slice('--profile='.length)
+				: args[profileArgIndex + 1];
+	if (profileArgIndex !== -1) {
+		if (!profileValue || profileValue.startsWith('-')) {
+			console.error('--profile requires a profile name.');
+			process.exit(1);
+		}
+		cliProfile = profileValue.trim();
+		const {setCliProfile} = await import('@/config/profile');
+		setCliProfile(cliProfile);
 	}
 
 	// Extract --provider if specified — validate against allowlist pattern
@@ -435,7 +555,7 @@ async function main(): Promise<void> {
 			setSessionContextLimit(limit);
 		} else {
 			console.error(
-				`Invalid --context-max value: "${contextMaxValue}". Use a positive number, e.g. 8192 or 128k`,
+				`Invalid --context-max value: "${contextMaxValue}". Use a positive number, e.g. 8192, 128k, or 1m`,
 			);
 			process.exit(1);
 		}
@@ -470,6 +590,46 @@ async function main(): Promise<void> {
 			process.exit(1);
 		}
 		break;
+	}
+
+	// Handled before the `run` options below: a goal containing the word "run"
+	// must not be read as that command.
+	if (args[0] === 'swarm') {
+		const {parseSwarmArgs} = await import('./cli-args.js');
+		const swarm = parseSwarmArgs(args);
+		if ('error' in swarm) {
+			console.error(swarm.error);
+			process.exit(1);
+		}
+		await loadProjectEnv();
+		const {runSwarmCommand} = await import('@/swarm/run-swarm');
+		await runSwarmCommand({
+			config: swarm.config,
+			trustDirectory: swarm.trustDirectory,
+			cliProvider,
+			cliModel,
+			workerOptions: [
+				...(cliProfile ? ['--profile', cliProfile] : []),
+				...(contextMaxValue ? ['--context-max', contextMaxValue] : []),
+			],
+		});
+		return;
+	}
+
+	// Resolve and validate active profile (fail fast on unknown profile)
+	let profileMode: CliMode | undefined;
+	const {resolveActiveProfile} = await import('@/config/profile');
+	try {
+		const active = resolveActiveProfile();
+		if (
+			active?.profile.mode &&
+			(VALID_MODES as readonly string[]).includes(active.profile.mode)
+		) {
+			profileMode = active.profile.mode as CliMode;
+		}
+	} catch (error) {
+		console.error((error as Error).message);
+		process.exit(1);
 	}
 
 	// Extract --json or --output-format json. Accept spaced and fused formats.
@@ -509,6 +669,57 @@ async function main(): Promise<void> {
 	const isRunCommand = runCommandIndex !== -1;
 	let nonInteractivePrompt = parseRunPrompt(args);
 
+	// --restricted-scope: the only paths the file editing tools may change.
+	const scopeIndex = args.findIndex(
+		arg =>
+			arg === '--restricted-scope' || arg.startsWith('--restricted-scope='),
+	);
+	if (scopeIndex !== -1) {
+		const value = args[scopeIndex].startsWith('--restricted-scope=')
+			? args[scopeIndex].slice('--restricted-scope='.length)
+			: args[scopeIndex + 1];
+		const scope = (value ?? '').split(',').filter(entry => entry.trim());
+		if (!isRunCommand || value?.startsWith('-') || scope.length === 0) {
+			console.error(
+				'--restricted-scope takes a comma-separated list of paths and is only valid with "run".',
+			);
+			process.exit(1);
+		}
+		const {setRestrictedScope} = await import('@/utils/restricted-scope');
+		setRestrictedScope(scope);
+	}
+	const telemetry = args.includes('--telemetry');
+
+	// --json-schema: validate the final `run` answer against a user schema.
+	// The value is a file path or inline JSON; loading it here means a typo
+	// fails before the session starts instead of after a model round-trip.
+	let jsonSchema: JsonSchemaDocument | undefined;
+	const jsonSchemaIndex = args.findIndex(
+		arg => arg === '--json-schema' || arg.startsWith('--json-schema='),
+	);
+	if (jsonSchemaIndex !== -1) {
+		const rawValue = args[jsonSchemaIndex].startsWith('--json-schema=')
+			? args[jsonSchemaIndex].slice('--json-schema='.length)
+			: args[jsonSchemaIndex + 1];
+		if (!rawValue || rawValue === 'run' || rawValue.startsWith('--')) {
+			console.error(
+				'--json-schema requires a schema file path or inline JSON.',
+			);
+			process.exit(1);
+		}
+		if (!isRunCommand) {
+			console.error('--json-schema only applies to `nanocoder run`.');
+			process.exit(1);
+		}
+		const {loadJsonSchema} = await import('./plain/structured-output.js');
+		try {
+			jsonSchema = await loadJsonSchema(rawValue);
+		} catch (error) {
+			console.error(error instanceof Error ? error.message : String(error));
+			process.exit(1);
+		}
+	}
+
 	// --prompt-file: read the prompt from a file rather than argv.
 	//
 	// Linux caps a *single* argv entry at MAX_ARG_STRLEN (32 pages = 131072
@@ -534,148 +745,56 @@ async function main(): Promise<void> {
 			console.error('--prompt-file only applies to `nanocoder run`.');
 			process.exit(1);
 		}
+		if (promptFile !== STDIN_PROMPT_FILE) {
+			try {
+				nonInteractivePrompt = readFileSync(promptFile, 'utf8');
+			} catch (error) {
+				console.error(
+					`Could not read --prompt-file "${promptFile}": ${
+						error instanceof Error ? error.message : String(error)
+					}`,
+				);
+				process.exit(1);
+			}
+		}
+	}
+
+	// Piped stdin: `git diff | nanocoder run "write a commit message"`.
+	//
+	// Without this the pipe was never read and the model answered without
+	// ever seeing it, with no error to say so. Resolved here, with the rest
+	// of the prompt and before the runtime is chosen, so the plain shell and
+	// the Ink path both get the finished prompt.
+	//
+	// `--prompt-file -` names stdin as the prompt itself, so it replaces a
+	// positional prompt just as a real file does. Any other pipe is appended
+	// to the prompt, or is the prompt when there is none.
+	const promptFromStdin = promptFile === STDIN_PROMPT_FILE;
+	let stdinPiped = false;
+	if (isRunCommand && promptFromStdin && process.stdin.isTTY) {
+		console.error(
+			'`--prompt-file -` reads the prompt from stdin, but stdin is a terminal. Pipe something in, e.g. `git diff | nanocoder run --prompt-file -`.',
+		);
+		process.exit(1);
+	}
+	if (isRunCommand && !process.stdin.isTTY) {
+		const {MAX_STDIN_PROMPT_CHARS} = await import('./constants.js');
 		try {
-			nonInteractivePrompt = readFileSync(promptFile, 'utf8');
+			const piped = await readStdinText(process.stdin, MAX_STDIN_PROMPT_CHARS);
+			stdinPiped = piped.trim().length > 0;
+			nonInteractivePrompt = composePromptWithStdin(
+				promptFromStdin ? undefined : nonInteractivePrompt,
+				piped,
+				MAX_STDIN_PROMPT_CHARS,
+			);
 		} catch (error) {
 			console.error(
-				`Could not read --prompt-file "${promptFile}": ${
+				`Could not read stdin: ${
 					error instanceof Error ? error.message : String(error)
 				}`,
 			);
 			process.exit(1);
 		}
-	}
-
-	// --restricted-scope <paths> after `run`: comma-separated path allowlist.
-	// The flag (and its value) is stripped from the prompt by parseRunPrompt.
-	let runRestrictedScope: string[] | undefined;
-	if (isRunCommand) {
-		const afterRun = args.slice(runCommandIndex + 1);
-		for (let i = 0; i < afterRun.length; i++) {
-			const arg = afterRun[i];
-			let raw: string | undefined;
-			if (arg === '--restricted-scope') raw = afterRun[i + 1];
-			else if (arg.startsWith('--restricted-scope='))
-				raw = arg.slice('--restricted-scope='.length);
-			if (raw === undefined) continue;
-			runRestrictedScope = raw
-				.split(',')
-				.map(v => v.trim())
-				.filter(Boolean);
-			break;
-		}
-	}
-
-	// Check for swarm command
-	let swarmConfig: import('@/app/types').SwarmConfig | undefined;
-	const swarmCommandIndex = args[0] === 'swarm' ? 0 : -1;
-	if (swarmCommandIndex !== -1) {
-		const afterSwarmArgs = args.slice(swarmCommandIndex + 1);
-		const promptArgs: string[] = [];
-		let workers = 4;
-		let swarmMode: 'review' | 'apply' | 'yolo' = 'review';
-		let restrictedScope: string | undefined;
-
-		for (let i = 0; i < afterSwarmArgs.length; i++) {
-			const arg = afterSwarmArgs[i];
-			// Skip known global flags so they don't end up in the prompt
-			if (
-				arg === '--vscode' ||
-				arg === '--json' ||
-				arg === '--trust-directory' ||
-				arg === '--plain' ||
-				arg === '--no-plain' ||
-				arg === '--telemetry' ||
-				arg === '--no-alt-screen' ||
-				arg === '--alt-screen' ||
-				arg === '--mouse' ||
-				arg === '--no-mouse' ||
-				arg.startsWith('--mode=') ||
-				arg.startsWith('--output-format=')
-			) {
-				continue;
-			}
-			if (
-				arg === '--vscode-port' ||
-				arg === '--provider' ||
-				arg === '--model' ||
-				arg === '--context-max' ||
-				arg === '--mode' ||
-				arg === '--output-format'
-			) {
-				i++; // skip flag and value
-				continue;
-			}
-
-			// Parse swarm specific flags
-			if (arg === '--workers' && afterSwarmArgs[i + 1]) {
-				const parsed = parseInt(afterSwarmArgs[i + 1], 10);
-				if (isNaN(parsed) || parsed < 1 || parsed > 10) {
-					console.error(
-						`Invalid --workers value: "${afterSwarmArgs[i + 1]}". Must be an integer between 1 and 10.`,
-					);
-					process.exit(1);
-				}
-				workers = parsed;
-				i++;
-				continue;
-			} else if (arg.startsWith('--workers=')) {
-				const val = arg.slice('--workers='.length);
-				const parsed = parseInt(val, 10);
-				if (isNaN(parsed) || parsed < 1 || parsed > 10) {
-					console.error(
-						`Invalid --workers value: "${val}". Must be an integer between 1 and 10.`,
-					);
-					process.exit(1);
-				}
-				workers = parsed;
-				continue;
-			}
-
-			if (arg === '--swarm-mode' && afterSwarmArgs[i + 1]) {
-				const val = afterSwarmArgs[i + 1];
-				if (val !== 'review' && val !== 'apply' && val !== 'yolo') {
-					console.error(
-						`Invalid --swarm-mode value: "${val}". Must be 'review', 'apply', or 'yolo'.`,
-					);
-					process.exit(1);
-				}
-				swarmMode = val as 'review' | 'apply' | 'yolo';
-				i++;
-				continue;
-			} else if (arg.startsWith('--swarm-mode=')) {
-				const val = arg.slice('--swarm-mode='.length);
-				if (val !== 'review' && val !== 'apply' && val !== 'yolo') {
-					console.error(
-						`Invalid --swarm-mode value: "${val}". Must be 'review', 'apply', or 'yolo'.`,
-					);
-					process.exit(1);
-				}
-				swarmMode = val as 'review' | 'apply' | 'yolo';
-				continue;
-			}
-
-			if (arg === '--restricted-scope' && afterSwarmArgs[i + 1]) {
-				restrictedScope = afterSwarmArgs[i + 1];
-				i++;
-				continue;
-			} else if (arg.startsWith('--restricted-scope=')) {
-				restrictedScope = arg.slice('--restricted-scope='.length);
-				continue;
-			}
-
-			// If it's not a known flag, it's part of the prompt
-			promptArgs.push(arg);
-		}
-
-		swarmConfig = {
-			prompt: promptArgs.join(' '),
-			workers,
-			swarmMode,
-			restrictedScope,
-			provider: cliProvider,
-			model: cliModel,
-		};
 	}
 
 	let nonInteractiveMode = isRunCommand;
@@ -712,7 +831,7 @@ async function main(): Promise<void> {
 	// --plain or a non-TTY crashed on raw-mode stdin instead of explaining.
 	if (isRunCommand && !nonInteractivePrompt?.trim()) {
 		console.error(
-			'`nanocoder run` needs a prompt. Try: nanocoder run "your task" or nanocoder run --prompt-file <path>',
+			'`nanocoder run` needs a prompt. Try: nanocoder run "your task", nanocoder run --prompt-file <path>, or pipe one in: echo "your task" | nanocoder run',
 		);
 		process.exit(1);
 	}
@@ -749,27 +868,33 @@ async function main(): Promise<void> {
 
 	// Validate execution constraints for --json rules
 	if (outputFormat === 'json' && !nonInteractiveMode) {
-		console.error("Error: --json can only be used with the 'run' command.");
+		console.error(
+			"Error: --json can only be used with the 'run' or 'review' command.",
+		);
 		process.exit(1);
 	}
 
-	// --trust-directory is only respected with `run`. Surface a warning
-	// (rather than silently dropping) if the user passes it interactively
-	// or with `review` (review is TTY-only but sets nonInteractiveMode).
+	// --trust-directory is only respected with `run`, `review` and --acp.
+	// Surface a warning (rather than silently dropping) if the user passes it
+	// to the interactive session.
 	const trustDirectoryRequested = args.includes('--trust-directory');
-	if (trustDirectoryRequested && !isRunCommand) {
+	const trustDirectoryApplies = isRunCommand || isReviewCommand;
+	if (
+		trustDirectoryRequested &&
+		!trustDirectoryApplies &&
+		!args.includes('--acp')
+	) {
 		console.error(
-			'--trust-directory only applies to non-interactive commands (`nanocoder run ...`, `nanocoder daemon start`); ignoring.',
+			'--trust-directory only applies to non-interactive commands (`nanocoder run ...`, `nanocoder review ...`, `nanocoder daemon start`, `nanocoder verify`, `nanocoder --acp`); ignoring.',
 		);
 	}
-	const trustDirectory = trustDirectoryRequested && isRunCommand;
+	const trustDirectory = trustDirectoryRequested && trustDirectoryApplies;
 
 	// --plain: lightweight, Ink-free runtime. Only valid with `run` in v1.
 	// Auto-detect: enable when stdout isn't a TTY or the env looks like CI,
 	// unless --no-plain forces the Ink path.
 	const plainRequested = args.includes('--plain');
 	const noPlainRequested = args.includes('--no-plain');
-	const telemetryRequested = args.includes('--telemetry');
 	if (plainRequested && noPlainRequested) {
 		console.error('Cannot pass both --plain and --no-plain.');
 		process.exit(1);
@@ -791,10 +916,8 @@ async function main(): Promise<void> {
 		process.exit(1);
 	}
 
-	if (outputFormat === 'json' && isReviewCommand) {
-		console.error(
-			'Error: --json cannot be used with `nanocoder review`. Review output is displayed in the interactive terminal.',
-		);
+	if (jsonSchema && vscodeMode) {
+		console.error('Error: --json-schema cannot be combined with --vscode.');
 		process.exit(1);
 	}
 
@@ -811,7 +934,8 @@ async function main(): Promise<void> {
 		isRunCommand &&
 		!noPlainRequested &&
 		!vscodeMode &&
-		(!process.stdout.isTTY || ciDetected);
+		// Piped input has consumed stdin, which the Ink runtime needs for keys.
+		(!process.stdout.isTTY || ciDetected || stdinPiped);
 	// --json is a plain-shell protocol: the Ink runtime has no JSON output, so
 	// honouring the flag means taking the plain path even in a real terminal.
 	if (outputFormat === 'json' && isRunCommand && noPlainRequested) {
@@ -820,24 +944,39 @@ async function main(): Promise<void> {
 		);
 		process.exit(1);
 	}
-	const plainForJson = outputFormat === 'json' && isRunCommand;
-	const plainMode = plainRequested || plainAuto || plainForJson;
-
-	// Hard-error when `review` lands in a non-interactive context (piped
-	// stdout, CI). The plain shell has no slash-command dispatch, so
-	// `/review <target>` would be sent verbatim to the model as chat.
-	if (isReviewCommand && !process.stdout.isTTY) {
+	if (jsonSchema && noPlainRequested) {
 		console.error(
-			'Error: `nanocoder review` requires an interactive terminal (TTY).',
+			'Error: --json-schema needs the plain shell and cannot be combined with --no-plain.',
 		);
 		process.exit(1);
 	}
+	const plainForJson = outputFormat === 'json' && isRunCommand;
+	const plainForSchema = jsonSchema !== undefined && isRunCommand;
+	const plainMode =
+		plainRequested || plainAuto || plainForJson || plainForSchema;
+
+	if (telemetry && !plainMode) {
+		console.error('--telemetry is only available for plain `run` sessions.');
+		process.exit(1);
+	}
+
+	// Non-TTY, CI, and --output-format json run the review without Ink.
+	// A TTY without JSON still opens the interactive review.
+	const reviewHeadless =
+		isReviewCommand &&
+		Boolean(reviewPrompt) &&
+		(outputFormat === 'json' || !process.stdout.isTTY || ciDetected);
 
 	// --acp: Agent Client Protocol server mode for editor integration
 	const acpMode = args.includes('--acp');
 
 	if (outputFormat === 'json' && acpMode) {
 		console.error('Error: --json cannot be combined with --acp.');
+		process.exit(1);
+	}
+
+	if (jsonSchema && acpMode) {
+		console.error('Error: --json-schema cannot be combined with --acp.');
 		process.exit(1);
 	}
 
@@ -893,28 +1032,51 @@ async function main(): Promise<void> {
 			process.exit(1);
 		}
 	} else if (acpMode) {
+		await loadProjectEnv();
 		const {runAcpServer} = await import('@/acp/acp-server');
-		await runAcpServer({cliProvider, cliModel, appVersion: version});
-	} else if (plainMode && nonInteractivePrompt) {
-		// Headless, Ink-free path. Note: --plain is currently only valid with
-		// `run`, so we must have a non-empty prompt here.
-		const {runPlainShell} = await import('@/plain/shell');
-		await runPlainShell({
-			prompt: nonInteractivePrompt,
-			developmentMode: cliMode ?? 'auto-accept',
+		await runAcpServer({
+			cliProvider,
+			cliModel,
+			appVersion: version,
+			trustDirectory: trustDirectoryRequested,
+			mode: cliMode ?? profileMode,
+		});
+	} else if (reviewHeadless && reviewPrompt) {
+		await loadProjectEnv();
+		const {runHeadlessReviewCli} = await import('@/review/headless-review');
+		const reviewArgs = reviewPrompt.startsWith('/review')
+			? reviewPrompt.slice('/review'.length).trim().split(/\s+/).filter(Boolean)
+			: [];
+		const outcome = await runHeadlessReviewCli({
+			args: reviewArgs,
 			cliProvider,
 			cliModel,
 			trustDirectory,
 			outputFormat,
-			restrictedScope: runRestrictedScope,
-			telemetry: telemetryRequested,
+		});
+		const {getShutdownManager} = await import('@/utils/shutdown');
+		await getShutdownManager().gracefulShutdown(outcome.exitCode);
+	} else if (plainMode && nonInteractivePrompt) {
+		// Headless, Ink-free path. Note: --plain is currently only valid with
+		// `run`, so we must have a non-empty prompt here.
+		await loadProjectEnv();
+		const {runPlainShell} = await import('@/plain/shell');
+		await runPlainShell({
+			prompt: nonInteractivePrompt,
+			developmentMode: cliMode ?? profileMode ?? 'auto-accept',
+			cliProvider,
+			cliModel,
+			trustDirectory,
+			outputFormat,
+			jsonSchema,
+			telemetry,
 		});
 	} else {
-		// Interactive TUI — load Ink + App only now.
-		const [{render}, {default: App}] = await Promise.all([
-			import('ink'),
-			import('@/app'),
-		]);
+		// Interactive TUI — load Ink + App only now, with React's production
+		// build (see load-tui-renderer.ts).
+		await loadProjectEnv();
+		const {loadTuiRenderer} = await import('@/app/load-tui-renderer');
+		const renderTui = await loadTuiRenderer();
 
 		// Prevent Node's global performance entry buffer from growing without
 		// bound during long Ink sessions. See issue #521.
@@ -966,9 +1128,12 @@ async function main(): Promise<void> {
 		// Screen mode: fullscreen (alt screen + in-app scroll) by DEFAULT.
 		// Passing --no-alt-screen or setting alternateScreen:false in preferences
 		// forces inline mode (main screen + native scrollback).
-		const {getAlternateScreen, getMouseReporting} = await import(
-			'@/config/preferences'
-		);
+		const {
+			getAlternateScreen,
+			getKittyKeyboardMode,
+			getMouseReporting,
+			getMaxFps,
+		} = await import('@/config/preferences');
 		const altScreenAllowed =
 			!args.includes('--no-alt-screen') &&
 			(args.includes('--alt-screen') || getAlternateScreen());
@@ -1006,15 +1171,15 @@ async function main(): Promise<void> {
 				MOUSE_REPORTING_ON,
 				stripMouseSequences,
 				wheelEvents,
-			} = await import('@/utils/terminal-mouse');
+			} = await import('@/terminal/terminal-mouse');
 			const {
 				createPasteExtractor,
 				DISABLE_BRACKETED_PASTE,
 				ENABLE_BRACKETED_PASTE,
 				pasteEvents,
-			} = await import('@/utils/terminal-paste');
+			} = await import('@/terminal/terminal-paste');
 			const {splitControlKeypresses} = await import(
-				'@/utils/terminal-keypress'
+				'@/terminal/terminal-keypress'
 			);
 
 			// Bracketed paste in both screen modes. Without it the terminal
@@ -1115,28 +1280,37 @@ async function main(): Promise<void> {
 			}) as unknown as NodeJS.ReadStream;
 		}
 
-		const result = render(
-			<App
-				vscodeMode={vscodeMode}
-				vscodePort={vscodePort}
-				nonInteractivePrompt={nonInteractivePrompt}
-				nonInteractiveMode={nonInteractiveMode}
-				cliProvider={cliProvider}
-				cliModel={cliModel}
-				cliMode={cliMode}
-				trustDirectory={trustDirectory}
-				altScreenActive={useAltScreen}
-				initialSession={initialSession}
-				openSessionSelectorOnStart={openSessionSelectorOnStart}
-				swarmConfig={swarmConfig}
-				restrictedScope={runRestrictedScope}
-			/>,
+		const kittyMode = getKittyKeyboardMode();
+
+		const result = renderTui(
+			{
+				vscodeMode,
+				vscodePort,
+				nonInteractivePrompt,
+				nonInteractiveMode,
+				cliProvider,
+				cliModel,
+				cliMode: cliMode ?? profileMode,
+				trustDirectory,
+				altScreenActive: useAltScreen,
+				initialSession,
+				openSessionSelectorOnStart,
+			},
 			{
 				// Ctrl+C is handled inside App (routed through the shutdown
 				// manager) so the exit-render handler below can paint the
 				// farewell frame before the process dies.
 				exitOnCtrlC: false,
+				// Ask kitty-protocol terminals to encode keys distinctly,
+				// which is what makes Shift+Enter distinguishable from
+				// Enter. 'auto' (the default) queries the terminal first
+				// and does nothing when it does not answer; 'enabled' is
+				// for a terminal whose reply is eaten by an ssh-style
+				// transport, and 'disabled' writes no protocol bytes at
+				// all (the kittyKeyboardMode preference).
+				kittyKeyboard: {mode: kittyMode},
 				...(inkStdin ? {stdin: inkStdin} : {}),
+				maxFps: getMaxFps(),
 			},
 		);
 
@@ -1185,7 +1359,15 @@ async function main(): Promise<void> {
 	}
 }
 
-main().catch(err => {
+main().catch(async (err: unknown) => {
 	console.error(err instanceof Error ? err.message : err);
-	process.exit(1);
+	// Exit through the shutdown manager so registered handlers still run, such
+	// as the session-end hook of `run` / --plain. It exits the process itself,
+	// or returns early when a shutdown is already under way and that one will.
+	try {
+		const {getShutdownManager} = await import('@/utils/shutdown');
+		await getShutdownManager().gracefulShutdown(1);
+	} catch {
+		process.exit(1);
+	}
 });

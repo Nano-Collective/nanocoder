@@ -2,12 +2,16 @@ import {constants, existsSync, lstatSync} from 'node:fs';
 import {access, copyFile, mkdir, rename, rm, stat} from 'node:fs/promises';
 import {dirname, resolve} from 'node:path';
 import {makeSimpleToolFormatter} from '@/components/simple-tool-formatter';
+import {
+	enforceFirewall,
+	evaluatePathMutation,
+} from '@/firewall/mutation-firewall';
 import {getSafeSessionCwd} from '@/services/session-cwd';
+import {validatePath, validatePathPair} from '@/tools/file-ops/path-validators';
+import {createFileToolApproval} from '@/tools/runtime/tool-approval';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
-import {invalidateCache} from '@/utils/file-cache';
-import {validatePath, validatePathPair} from '@/utils/path-validators';
-import {createFileToolApproval} from '@/utils/tool-approval';
+import {invalidateCache} from '@/utils/fs/file-cache';
 
 type FileOperation = 'delete' | 'move' | 'copy' | 'mkdir';
 
@@ -38,24 +42,33 @@ const executeFileOp = async (args: FileOpArgs): Promise<string> => {
 		if (fileStat.isDirectory()) {
 			return `Error: "${args.path}" is a directory. Use execute_bash with rm -r for directory removal.`;
 		}
+		const firewallWarning = enforceFirewall(
+			evaluatePathMutation('delete', {source: args.path as string}),
+		);
 		await rm(absPath);
 		invalidateCache(absPath);
-		return `File deleted: ${args.path}`;
+		return `File deleted: ${args.path}${firewallWarning}`;
 	}
 
 	// move | copy
 	const srcAbsPath = resolve(getSafeSessionCwd(), args.path as string);
 	const destAbsPath = resolve(getSafeSessionCwd(), args.destination as string);
+	const firewallWarning = enforceFirewall(
+		evaluatePathMutation(operation === 'move' ? 'move' : 'copy', {
+			source: args.path as string,
+			destination: args.destination,
+		}),
+	);
 
 	if (operation === 'move') {
 		await rename(srcAbsPath, destAbsPath);
 		invalidateCache(srcAbsPath);
-		return `File moved: ${args.path} → ${args.destination}`;
+		return `File moved: ${args.path} → ${args.destination}${firewallWarning}`;
 	}
 
 	await copyFile(srcAbsPath, destAbsPath);
 	invalidateCache(destAbsPath);
-	return `File copied: ${args.path} → ${args.destination}`;
+	return `File copied: ${args.path} → ${args.destination}${firewallWarning}`;
 };
 
 const fileOpCoreTool = tool({
@@ -116,7 +129,6 @@ const fileOpFormatter = makeSimpleToolFormatter<FileOpArgs>(
 
 const fileOpValidator = async (
 	args: FileOpArgs,
-	context?: import('@/types/core').ToolContext,
 ): Promise<{valid: true} | {valid: false; error: string}> => {
 	if (!args.operation) {
 		return {valid: false, error: '⚒ operation is required'};
@@ -127,14 +139,12 @@ const fileOpValidator = async (
 
 	// Directory creation: only path validation, parents are created.
 	if (args.operation === 'mkdir') {
-		return validatePath(args.path, {restrictedScope: context?.restrictedScope});
+		return validatePath(args.path);
 	}
 
 	// delete: path must exist and be a file.
 	if (args.operation === 'delete') {
-		const pathResult = validatePath(args.path, {
-			restrictedScope: context?.restrictedScope,
-		});
+		const pathResult = validatePath(args.path);
 		if (!pathResult.valid) return pathResult;
 
 		const absPath = resolve(getSafeSessionCwd(), args.path);
@@ -155,9 +165,11 @@ const fileOpValidator = async (
 		};
 	}
 
-	const pairResult = validatePathPair(args.path, args.destination, {
-		restrictedScope: context?.restrictedScope,
-	});
+	const pairResult = validatePathPair(
+		args.path,
+		args.destination,
+		args.operation === 'move',
+	);
 	if (!pairResult.valid) return pairResult;
 
 	const srcAbsPath = resolve(getSafeSessionCwd(), args.path);

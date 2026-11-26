@@ -34,7 +34,7 @@ export interface MessageSubmissionOptions {
 		currentMessageCount: number,
 	) => void;
 	onEnterSessionSelectorMode?: (showAll?: boolean) => void;
-	onResumeSession?: (session: Session) => void;
+	onResumeSession?: (session: Session) => void | Promise<void>;
 	onShowStatus: () => void;
 	onHandleChatMessage: (
 		message: string,
@@ -43,12 +43,14 @@ export interface MessageSubmissionOptions {
 		historyMessages?: Message[],
 	) => Promise<void>;
 	onSwitchModel?: (provider: string, model: string) => Promise<boolean>;
+	onSwitchMode?: (mode: DevelopmentMode) => void;
 	onAddToChatQueue: (component: React.ReactNode) => void;
 	setLiveComponent: (component: React.ReactNode) => void;
 	setLiveComponentCapturesInput: (value: boolean) => void;
 	setIsToolExecuting: (value: boolean) => void;
 	onCommandComplete?: () => void;
 	setMessages: (messages: Message[]) => void;
+	appendMessages?: (messages: Message[]) => void;
 	messages: Message[];
 	provider: string;
 	providerConfig: AIProviderConfig | null;

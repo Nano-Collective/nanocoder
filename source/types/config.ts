@@ -1,7 +1,7 @@
-import type {TitleShape} from '@/components/ui/styled-title';
 import type {DevelopmentMode} from '@/types/core';
-import type {NanocoderShape, ThemePreset} from '@/types/ui';
-import type {TrustLevel} from '@/verify/trust';
+import type {FirewallConfig} from '@/types/firewall';
+import type {NanocoderShape, ThemePreset, TitleShape} from '@/types/ui';
+import type {TrustLevel} from '@/verify/trust-level';
 
 // Supported AI SDK provider packages
 export type SdkProvider =
@@ -34,6 +34,8 @@ export interface AIProviderConfig {
 	disableToolModels?: string[]; // List of model names to disable tools for
 	// SDK provider package to use (default: 'openai-compatible')
 	sdkProvider?: SdkProvider;
+	// Arbitrary request body fields for OpenAI-compatible chat endpoints.
+	extraBody?: Record<string, unknown>;
 	// Opt out of Anthropic prompt caching (enabled by default on that SDK).
 	// Read only when sdkProvider is 'anthropic'; setting it on any other SDK
 	// provider has no effect, since those either prefix-cache automatically
@@ -95,6 +97,8 @@ export interface ProviderConfig {
 	includeUsage?: boolean;
 	// SDK provider package to use (default: 'openai-compatible')
 	sdkProvider?: SdkProvider;
+	// Arbitrary request body fields for OpenAI-compatible chat endpoints.
+	extraBody?: Record<string, unknown>;
 	// OpenRouter-specific request body fields. Only applied when the provider
 	// is OpenRouter (name match, case-insensitive).
 	openrouter?: OpenRouterParameters;
@@ -133,19 +137,18 @@ export interface PasteConfig {
 export interface RetryLimitsConfig {
 	// Consecutive turns emitting the identical tool call(s) before the loop
 	// pauses and asks the user whether to continue (interactive) or stops
-	// (--plain, headless, subagent runs). The check fires before the Nth
+	// (--plain, ACP, headless, subagent runs). The check fires before the Nth
 	// repeat runs, so the default of 3 executes it twice. Unknown-tool calls
 	// count toward the streak too.
 	maxRepeatedToolCalls: number;
 	// Consecutive empty assistant turns auto-nudged before the loop gives up.
 	// The interactive loop additionally compacts the context and retries once;
-	// --plain stops straight after the nudges. Not used by subagent runs,
-	// whose loop ends on its own when a turn has no tool calls.
+	// --plain, ACP and subagent runs stop straight after the nudges.
 	maxEmptyTurns: number;
 	// Malformed self-correction retries allowed for text-parsed tool calls
 	// before the loop gives up. Covers the XML fallback path in both runtimes,
 	// plus (interactive only) native responses that emit tool-call text
-	// instead of native tool calls. Not used by subagent runs.
+	// instead of native tool calls. Subagent runs apply it too.
 	maxMalformedRetries: number;
 	// Consecutive content-only turns that the provider cut off at its
 	// output-token limit (finishReason `length`) before the loop stops asking
@@ -153,7 +156,7 @@ export interface RetryLimitsConfig {
 	// carries no tool calls — so without this cap the --plain loop treats it as
 	// a finished turn and returns the fragment as a successful result.
 	// 0 restores that behaviour (accept the first truncated turn as final).
-	// Applies to the --plain/headless runtime.
+	// Applies to the --plain, ACP and subagent loops.
 	maxTruncatedTurns: number;
 }
 
@@ -213,13 +216,13 @@ export interface CiWatchConfig {
 }
 
 /**
- * Project-level (`agents.config.json`) verify/CI-watch policy — trust level
- * and poll cadence. Unlike `CiWatchConfig.enabled` (a personal, per-machine
- * opt-in to background GitHub polling, kept in preferences), trust level
- * and cadence are security/policy decisions appropriate to commit and
- * review with the rest of the project, so they live here instead. When
- * set, `pollIntervalMs`/`maxPollIntervalMs` here override the
- * preferences-backed `CiWatchConfig` values of the same name — see
+ * Project-level (`agents.config.json`) verify policy: CI-watch trust level
+ * and poll cadence, plus completion evidence. Unlike `CiWatchConfig.enabled`
+ * (a personal, per-machine opt-in to background GitHub polling, kept in
+ * preferences), trust level and cadence are security/policy decisions
+ * appropriate to commit and review with the rest of the project, so they live
+ * here instead. When set, `pollIntervalMs`/`maxPollIntervalMs` here override
+ * the preferences-backed `CiWatchConfig` values of the same name — see
  * `loadCiWatchConfig` in `source/config/index.ts`.
  */
 export interface VerifyConfig {
@@ -228,6 +231,12 @@ export interface VerifyConfig {
 	trustLevel?: TrustLevel;
 	pollIntervalMs?: number;
 	maxPollIntervalMs?: number;
+	/**
+	 * Completion evidence: commands that must have exited 0 after the agent's
+	 * last file edit before a turn can end, or "auto" to detect the `test`,
+	 * `typecheck` and `lint` scripts in package.json. Off unless set.
+	 */
+	required?: string[] | 'auto';
 }
 
 /**
@@ -364,10 +373,17 @@ export interface DiskNanocoderConfig {
 	autoCompact?: Partial<AutoCompactConfig>;
 	/** Model mode defaults (tool profile, tool mode, model parameters). */
 	tune?: Partial<TuneConfig>;
-	/** Maximum LLM turns for headless runs (--plain and ACP loops). */
+	/** Maximum LLM turns for headless runs (--plain, ACP and subagent loops). */
 	headless?: {
 		/** Maximum LLM turns before the loop forces a final, tool-free answer. */
 		maxTurns?: number;
+		/** Turn ceiling for a delegated subagent run. Defaults to `maxTurns`. */
+		subagentMaxTurns?: number;
+	};
+	/** Language server behavior. Auto-discovery is enabled by default. */
+	lsp?: {
+		/** Disable scanning PATH for installed language servers at startup. */
+		autoDiscover?: boolean;
 	};
 	/** LSP server configurations (optional — auto-discovery enabled by default). */
 	lspServers?: {
@@ -386,8 +402,9 @@ export interface DiskNanocoderConfig {
 	systemPrompt?: SystemPromptConfig;
 	/**
 	 * Shell commands run at fixed points in the agent loop, keyed by lifecycle
-	 * event. Project-local, so this carries the same code-execution weight as
-	 * `mcpServers` above.
+	 * event. A project-local file can set these, so they carry the same
+	 * code-execution weight as project MCP servers (`.mcp.json`) and are
+	 * gated behind directory trust.
 	 */
 	hooks?: HooksConfig;
 	/**
@@ -412,6 +429,41 @@ export interface DiskNanocoderConfig {
 	sandbox?: boolean;
 	/** Commit each successful agent file edit (only that file) with a generated Conventional Commit message. Off by default. */
 	autoCommit?: boolean;
+	/** Add a snapshot of the git repository (branch, upstream, status, recent commits) to the system prompt at session start. On by default; never added under the nano tool profile. */
+	gitContext?: boolean;
+	/** Negative-space mutation firewall. Off by default. */
+	firewall?: Partial<FirewallConfig>;
+	/**
+	 * Project-level verify policy: CI-watch trust level and poll cadence, and
+	 * `required` completion evidence (commands that must exit 0 after the last
+	 * edit, or "auto"). Read by `loadVerifyConfig()`.
+	 */
+	verify?: VerifyConfig;
+	/** Name of the default profile to use when none is explicitly specified. */
+	defaultProfile?: string;
+	/** Named configuration profiles that bundle provider, model, mode, and section overrides. */
+	profiles?: DiskProfilesConfig;
+}
+
+/**
+ * Map of profile name to profile configuration.
+ */
+export interface DiskProfilesConfig {
+	[profileName: string]: DiskProfileConfig;
+}
+
+/**
+ * Configuration overrides applied by a named profile.
+ * Can override provider, model, mode, and any nanocoder.* section.
+ */
+export interface DiskProfileConfig
+	extends Partial<Omit<DiskNanocoderConfig, 'profiles' | 'defaultProfile'>> {
+	/** Active provider to use for this profile. */
+	provider?: string;
+	/** Model name to use for this profile. */
+	model?: string;
+	/** Mode to start in (normal, auto-accept, yolo, plan). */
+	mode?: DiskDefaultMode;
 }
 
 /**
@@ -440,6 +492,11 @@ export interface AppConfig {
 	modeProviders?: Partial<Record<DevelopmentMode, ModeProviderConfig>>;
 
 	mcpServers?: MCPServerConfig[];
+
+	// Language server behavior (auto-discovery is enabled by default).
+	lsp?: {
+		autoDiscover?: boolean;
+	};
 
 	// LSP server configurations (optional - auto-discovery enabled by default)
 	lspServers?: {
@@ -516,10 +573,13 @@ export interface AppConfig {
 		titleProvider?: string;
 	};
 
-	// Headless / non-interactive conversation limits (--plain and ACP loops)
+	// Headless / non-interactive conversation limits (--plain, ACP and
+	// subagent loops)
 	headless?: {
 		// Maximum LLM turns before the loop forces a final, tool-free answer.
 		maxTurns?: number;
+		// Turn ceiling for a delegated subagent run. Unset means `maxTurns`.
+		subagentMaxTurns?: number;
 	};
 
 	// Confine execute_bash / !cmd with an OS jail (macOS sandbox-exec, Linux bwrap).
@@ -528,8 +588,14 @@ export interface AppConfig {
 	// Commit each successful agent file edit, one commit per edited file.
 	autoCommit?: boolean;
 
+	// Git snapshot (branch, status, recent commits) in the system prompt.
+	gitContext?: boolean;
+
 	// Agent-loop retry limits (interactive conversation loop)
 	retries?: RetryLimitsConfig;
+
+	// Negative-space mutation firewall
+	firewall?: Partial<FirewallConfig>;
 }
 
 // MCP Server configuration with source tracking
@@ -542,6 +608,16 @@ export interface MCPServerConfig {
 	url?: string;
 	headers?: Record<string, string>;
 	timeout?: number;
+	/**
+	 * How long a tool call may wait for the server, in milliseconds. Defaults
+	 * to the MCP SDK's 60 seconds; 0 means no limit.
+	 */
+	toolTimeout?: number;
+	/**
+	 * Restart the tool-call timer whenever the server reports progress, so a
+	 * long call that keeps reporting is not cut off. Defaults to true.
+	 */
+	resetTimeoutOnProgress?: boolean;
 	/** Period between MCP ping health checks, in milliseconds. */
 	healthCheckInterval?: number;
 	alwaysAllow?: string[];
@@ -549,7 +625,7 @@ export interface MCPServerConfig {
 	tags?: string[];
 	enabled?: boolean;
 	// Optional source information for display purposes
-	source?: 'project' | 'global' | 'env';
+	source?: 'project' | 'global' | 'env' | 'profile';
 	// Pre-substitution credentials for validateMCPConfigSecurity. Env-var
 	// references are expanded before runtime use, so the scanner must read
 	// these raw copies or every $API_KEY looks hardcoded.
@@ -692,6 +768,8 @@ export interface TuneConfig {
 	// when undefined to preserve historical behaviour.
 	includeAgentsMd?: boolean;
 	modelParameters?: ModelParameters;
+	// On-demand MCP tool discovery to preserve context windows ('auto' | 'always' | 'disabled')
+	mcpDiscovery?: 'auto' | 'always' | 'disabled';
 }
 
 /**
@@ -725,6 +803,16 @@ export interface VoiceConfig {
 export interface TrustedDirectoryRecord {
 	path: string;
 	fingerprint: string;
+	/** `TRUST_FINGERPRINT_VERSION` when saved. Records without one are version 1. */
+	fingerprintVersion?: number;
+}
+
+export interface UiPreferences {
+	/**
+	 * Maximum frames per second for Ink TUI rendering.
+	 * Accepted integer values from 1 through 60. Defaults to 30.
+	 */
+	maxFps?: number;
 }
 
 export interface UserPreferences {
@@ -734,6 +822,11 @@ export interface UserPreferences {
 		[key in string]?: string;
 	};
 	lastUpdateCheck?: number;
+	/**
+	 * Latest published version seen by the last successful update check, so
+	 * the update banner keeps showing during the 24h throttle window.
+	 */
+	lastUpdateCheckLatestVersion?: string;
 	selectedTheme?: ThemePreset;
 	/**
 	 * Theme whose palette colours syntax highlighting in code blocks, diffs, and
@@ -753,7 +846,7 @@ export interface UserPreferences {
 	notifications?: NotificationsConfig;
 	ciWatch?: CiWatchConfig;
 	/**
-	 * Namespaced settings (sessions, paste) read from nanocoder-preferences.json
+	 * Namespaced settings (sessions, paste, ui) read from nanocoder-preferences.json
 	 * by the loaders. Kept under `nanocoder` to match the on-disk shape the
 	 * `loadSessionConfig` / `loadPasteConfig` loaders read.
 	 */
@@ -770,6 +863,7 @@ export interface UserPreferences {
 			titleProvider?: string;
 		};
 		paste?: PasteConfig;
+		ui?: UiPreferences;
 	};
 	reasoningExpanded?: boolean;
 	compactToolDisplay?: boolean;
@@ -813,6 +907,18 @@ export interface UserPreferences {
 	 * Also switchable per-run with --mouse / --no-mouse flags.
 	 */
 	mouseReporting?: boolean;
+	/**
+	 * How the kitty keyboard protocol is negotiated at startup, which is what
+	 * makes Shift+Enter distinguishable from Enter in terminals that implement
+	 * it (kitty, WezTerm, Ghostty, foot, recent VS Code). 'auto' (default):
+	 * query the terminal and enable the protocol only on an affirmative reply.
+	 * 'enabled': switch the protocol on without asking — for a terminal that
+	 * supports it but whose reply is lost across a transport (ssh, a
+	 * container pty) that eats or echoes the query. 'disabled': never touch
+	 * the protocol, for terminals or transports that print the query bytes
+	 * instead of swallowing them.
+	 */
+	kittyKeyboardMode?: 'auto' | 'enabled' | 'disabled';
 	/**
 	 * "Boring" output mode. false (default): playful touches stay, e.g. the
 	 * "Worked for a plucky 12s." completion note. true: progress text is

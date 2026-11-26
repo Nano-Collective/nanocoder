@@ -3,10 +3,10 @@
  * Copies the last assistant response to the system clipboard.
  * `/copy code` copies just the last fenced code block from that response.
  */
-import clipboard from 'clipboardy';
+import {errorMsg, successMsg, warningMsg} from '@/components/message-factory';
 import type {Command} from '@/types/commands';
 import type {Message} from '@/types/core';
-import {errorMsg, successMsg, warningMsg} from '@/utils/message-factory';
+import {type ClipboardRoute, copyTextToClipboard} from '@/utils/clipboard';
 
 function findLastAssistantContent(messages: Message[]): string | undefined {
 	for (let i = messages.length - 1; i >= 0; i--) {
@@ -53,6 +53,20 @@ function extractCodeBlocks(markdown: string): string[] {
 	return blocks;
 }
 
+function copiedMessage(
+	route: ClipboardRoute,
+	subject: string,
+	detail: string,
+): string {
+	if (route === 'osc52') {
+		return `Sent ${subject} to the terminal clipboard via OSC 52 (${detail}; the terminal does not confirm receipt)`;
+	}
+	if (route === 'system-remote') {
+		return `Copied ${subject} to the clipboard of the remote machine (${detail}); it was not sent to the terminal clipboard`;
+	}
+	return `Copied ${subject} to clipboard (${detail})`;
+}
+
 export const copyCommand: Command = {
 	name: 'copy',
 	description:
@@ -87,8 +101,9 @@ export const copyCommand: Command = {
 			// `/copy code` (last `pre code` of the last turn).
 			const code = blocks[blocks.length - 1] ?? '';
 
+			let route: ClipboardRoute;
 			try {
-				await clipboard.write(code);
+				route = await copyTextToClipboard(code);
 			} catch (error) {
 				const detail = error instanceof Error ? error.message : String(error);
 				return errorMsg(`Failed to copy to clipboard: ${detail}`, 'copy');
@@ -96,7 +111,11 @@ export const copyCommand: Command = {
 
 			const lineCount = code === '' ? 0 : code.split('\n').length;
 			return successMsg(
-				`Copied code block to clipboard (${lineCount} ${lineCount === 1 ? 'line' : 'lines'})`,
+				copiedMessage(
+					route,
+					'code block',
+					`${lineCount} ${lineCount === 1 ? 'line' : 'lines'}`,
+				),
 				'copy',
 			);
 		}
@@ -107,15 +126,20 @@ export const copyCommand: Command = {
 			return warningMsg('No assistant response to copy yet.', 'copy');
 		}
 
+		let route: ClipboardRoute;
 		try {
-			await clipboard.write(content);
+			route = await copyTextToClipboard(content);
 		} catch (error) {
 			const detail = error instanceof Error ? error.message : String(error);
 			return errorMsg(`Failed to copy to clipboard: ${detail}`, 'copy');
 		}
 
 		return successMsg(
-			`Copied last response to clipboard (${content.length.toLocaleString()} characters)`,
+			copiedMessage(
+				route,
+				'last response',
+				`${content.length.toLocaleString()} characters`,
+			),
 			'copy',
 		);
 	},

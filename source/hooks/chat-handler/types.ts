@@ -70,7 +70,6 @@ export interface UseChatHandlerProps {
 	projectContextOptions?: ProjectContextOptions;
 	/** Ensure tool calls in this turn share the persisted conversation ID. */
 	ensureCurrentSessionId?: () => string;
-	restrictedScope?: string | string[];
 }
 
 export interface ChatHandlerReturn {

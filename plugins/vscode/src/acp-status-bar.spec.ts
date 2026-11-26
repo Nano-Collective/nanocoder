@@ -56,6 +56,12 @@ test('describeAcpStatus - cli missing points at restart for the retry', (t) => {
 	t.is(view.command, 'nanocoder.restartAcp');
 });
 
+test('describeAcpStatus - untrusted says so and restarts into the trust prompt', (t) => {
+	const view = describeAcpStatus(ACPStatus.Untrusted, {reason: 'not trusted'}, undefined);
+	t.regex(view.text, /Folder not trusted/);
+	t.is(view.command, 'nanocoder.restartAcp');
+});
+
 // -- AcpStatusBarController (rendering via the stub item) --------------------
 
 function makeItem(): vscode.StatusBarItem & {updates: number} {

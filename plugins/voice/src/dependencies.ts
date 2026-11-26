@@ -1,4 +1,3 @@
-import cp from 'node:child_process';
 import crypto from 'node:crypto';
 import {
 	chmodSync,
@@ -8,9 +7,10 @@ import {
 	unlinkSync,
 } from 'node:fs';
 import https from 'node:https';
-import {homedir} from 'node:os';
-import {join} from 'node:path';
+import {cpus, homedir} from 'node:os';
+import {delimiter, join} from 'node:path';
 import {platform} from 'node:process';
+import crossSpawn from 'cross-spawn';
 
 export interface DependencyCheckResult {
 	installed: boolean;
@@ -34,6 +34,89 @@ export interface InstallDependenciesOptions {
 	onProgress?: (step: string, percent: number) => void;
 	execRunner?: ExecFunction;
 	downloadFn?: DownloadFunction;
+	/** Decides which tools are already installed. Defaults to running them. */
+	commandChecker?: CommandChecker;
+	/** Homebrew details for the macOS branch. Detected when omitted. */
+	brewEnvironment?: BrewEnvironment;
+}
+
+export interface BrewEnvironment {
+	/** The `brew` executable to run. */
+	brewPath: string;
+	/** Whether this is an Apple silicon Mac. */
+	appleSilicon: boolean;
+}
+
+const NATIVE_BREW = '/opt/homebrew/bin/brew';
+const INTEL_BREW_PREFIX = '/usr/local';
+
+/**
+ * Which Homebrew to use. On Apple silicon a native install in /opt/homebrew
+ * wins over an Intel one in /usr/local even when that comes first on PATH:
+ * the Intel build runs under Rosetta and has no prebuilt packages there.
+ */
+export function detectBrewEnvironment(): BrewEnvironment {
+	const appleSilicon = /^Apple/i.test(cpus()[0]?.model ?? '');
+	if (appleSilicon && existsSync(NATIVE_BREW)) {
+		return {brewPath: NATIVE_BREW, appleSilicon};
+	}
+	for (const dir of (process.env.PATH ?? '').split(delimiter)) {
+		if (dir && existsSync(join(dir, 'brew'))) {
+			return {brewPath: join(dir, 'brew'), appleSilicon};
+		}
+	}
+	return {brewPath: 'brew', appleSilicon};
+}
+
+/**
+ * A short, actionable reason for a failed `brew install`, instead of
+ * Homebrew's full output, which is mostly unrelated warnings. Ends with the
+ * command to rerun for the full output.
+ */
+export function explainBrewFailure(
+	output: string,
+	formulae: string[],
+	env: BrewEnvironment,
+): string {
+	const rerun = `To see Homebrew's full output, run: brew install ${formulae.join(' ')}`;
+	const intelBrewOnAppleSilicon =
+		env.appleSilicon && env.brewPath.startsWith(`${INTEL_BREW_PREFIX}/`);
+	if (intelBrewOnAppleSilicon || /Tier 3/i.test(output)) {
+		const why = intelBrewOnAppleSilicon
+			? 'Homebrew in /usr/local is the Intel build, running under Rosetta on this Apple silicon Mac.'
+			: 'Homebrew reports an unsupported (Tier 3) setup.';
+		return [
+			`Homebrew could not install ${formulae.join(' and ')}. ${why} It has no prebuilt packages for that setup, so it tried to compile them and failed.`,
+			'Install native Homebrew in /opt/homebrew (https://brew.sh), or update Xcode and the Command Line Tools, then run /voice again.',
+			rerun,
+		].join('\n');
+	}
+	if (
+		/Xcode .*is (outdated|too old)/i.test(output) ||
+		/Command Line Tools .*(outdated|release is available|too old)/i.test(output)
+	) {
+		return [
+			`Homebrew needs a newer Xcode or Command Line Tools to compile ${formulae.join(' and ')}.`,
+			'Update them in Software Update (Xcode from the App Store), then run /voice again.',
+			rerun,
+		].join('\n');
+	}
+	const errors = output
+		.split(/\r?\n/)
+		.map(line => line.trim())
+		.filter(line => line.startsWith('Error:'))
+		.slice(0, 3);
+	const reason =
+		errors.length > 0
+			? errors.join('\n')
+			: output.split(/\r?\n/).filter(Boolean).slice(-3).join('\n');
+	return [
+		`Homebrew could not install ${formulae.join(' and ')}.`,
+		reason,
+		rerun,
+	]
+		.filter(Boolean)
+		.join('\n');
 }
 
 export type CommandChecker = (cmd: string, args?: string[]) => Promise<boolean>;
@@ -67,7 +150,7 @@ async function defaultCheckCommand(
 ): Promise<boolean> {
 	return new Promise(resolve => {
 		try {
-			const proc = cp.spawn(cmd, args, {stdio: 'ignore'});
+			const proc = crossSpawn.spawn(cmd, args, {stdio: 'ignore'});
 			proc.on('close', code => resolve(code === 0));
 			proc.on('error', () => resolve(false));
 		} catch {
@@ -100,6 +183,66 @@ export function getVoiceBinDir(): string {
 	return join(getConfigDir(), 'voice-bin');
 }
 
+export const WHISPER_MODEL_FILE = 'ggml-base.en.bin';
+const WHISPER_MODEL_URL = `https://huggingface.co/ggerganov/whisper.cpp/resolve/main/${WHISPER_MODEL_FILE}`;
+
+/**
+ * Path of the Whisper ggml model the STT step will load: `WHISPER_MODEL` when
+ * set, otherwise the model the installer downloads into voice-bin.
+ */
+export function getWhisperModelPath(): string {
+	return (
+		process.env.WHISPER_MODEL || join(getVoiceBinDir(), WHISPER_MODEL_FILE)
+	);
+}
+
+/**
+ * Downloads the checksummed Whisper model into voice-bin unless it is
+ * already there. Shared by every platform branch of the installer.
+ */
+async function ensureWhisperModel(
+	binDir: string,
+	downloadFn: DownloadFunction,
+): Promise<void> {
+	const modelPath = join(binDir, WHISPER_MODEL_FILE);
+	if (existsSync(modelPath)) return;
+	await downloadFn(
+		WHISPER_MODEL_URL,
+		modelPath,
+		ASSET_CHECKSUMS[WHISPER_MODEL_FILE],
+	);
+}
+
+/**
+ * Whether a tool runs, from PATH or from voice-bin (where the installer puts
+ * its own copies). For whisper, older install names count too.
+ */
+async function isCommandAvailable(
+	cmd: string,
+	defaultArgs: string[],
+	check: CommandChecker,
+): Promise<boolean> {
+	const binDir = getVoiceBinDir();
+	const winExt = platform === 'win32' ? '.exe' : '';
+	if (await check(cmd, defaultArgs)) return true;
+
+	const localBin = join(binDir, `${cmd}${winExt}`);
+	if (existsSync(localBin)) {
+		return check(localBin, defaultArgs);
+	}
+
+	if (cmd === 'whisper-cli') {
+		const fallback1 = join(binDir, `whisper-cpp${winExt}`);
+		const fallback2 = join(binDir, `whisper${winExt}`);
+		if (existsSync(fallback1) && (await check(fallback1, defaultArgs)))
+			return true;
+		if (existsSync(fallback2) && (await check(fallback2, defaultArgs)))
+			return true;
+	}
+
+	return false;
+}
+
 /**
  * Checks whether sox, whisper-cli/whisper.cpp, and piper are available on the system or in voice-bin.
  */
@@ -107,43 +250,24 @@ export async function checkDependenciesInstalled(
 	customCheck?: CommandChecker,
 ): Promise<DependencyCheckResult> {
 	const check = customCheck || defaultCheckCommand;
-	const binDir = getVoiceBinDir();
 
 	const recCmd = process.env.REC_CMD || (platform === 'win32' ? 'sox' : 'rec');
 	const whisperCmd = process.env.WHISPER_CMD || 'whisper-cli';
 	const piperCmd = process.env.PIPER_CMD || 'piper';
 
-	const winExt = platform === 'win32' ? '.exe' : '';
-
-	const checkBinary = async (
-		cmd: string,
-		defaultArgs: string[],
-	): Promise<boolean> => {
-		const okSystem = await check(cmd, defaultArgs);
-		if (okSystem) return true;
-
-		const localBin = join(binDir, `${cmd}${winExt}`);
-		if (existsSync(localBin)) {
-			return check(localBin, defaultArgs);
-		}
-
-		if (cmd === 'whisper-cli') {
-			const fallback1 = join(binDir, `whisper-cpp${winExt}`);
-			const fallback2 = join(binDir, `whisper${winExt}`);
-			if (existsSync(fallback1) && (await check(fallback1, defaultArgs)))
-				return true;
-			if (existsSync(fallback2) && (await check(fallback2, defaultArgs)))
-				return true;
-		}
-
-		return false;
-	};
-
-	const [soxOk, whisperOk, piperOk] = await Promise.all([
-		checkBinary(recCmd, platform === 'win32' ? ['--version'] : ['--help']),
-		checkBinary(whisperCmd, ['--help']),
-		checkBinary(piperCmd, ['--help']),
+	const [soxOk, whisperBinOk, piperOk] = await Promise.all([
+		isCommandAvailable(
+			recCmd,
+			platform === 'win32' ? ['--version'] : ['--help'],
+			check,
+		),
+		isCommandAvailable(whisperCmd, ['--help'], check),
+		isCommandAvailable(piperCmd, ['--help'], check),
 	]);
+
+	// whisper-cli is useless without its model: Homebrew's whisper.cpp ships
+	// no model, so a present binary alone must not count as installed.
+	const whisperOk = whisperBinOk && existsSync(getWhisperModelPath());
 
 	const missing: ('sox' | 'whisper' | 'piper')[] = [];
 	if (!soxOk) missing.push('sox');
@@ -161,17 +285,57 @@ export async function checkDependenciesInstalled(
 	};
 }
 
-async function defaultExec(command: string, args: string[]): Promise<void> {
+const OUTPUT_TAIL_BYTES = 4096;
+const OUTPUT_TAIL_LINES = 15;
+
+/**
+ * Keeps the last `OUTPUT_TAIL_BYTES` of a child's combined output and returns
+ * its final non-empty lines, so a failure can say why without the child ever
+ * writing to the terminal the TUI owns.
+ */
+export function tailOutput(chunks: string, maxLines = OUTPUT_TAIL_LINES) {
+	return chunks
+		.split(/\r?\n|\r/)
+		.map(line => line.trimEnd())
+		.filter(line => line.length > 0)
+		.slice(-maxLines)
+		.join('\n');
+}
+
+/**
+ * Runs an installer step with its output piped, not inherited: an inherited
+ * stdout lets brew/make/cmake draw over the Ink UI. On failure the error
+ * carries a short tail of the output.
+ */
+export async function defaultExec(
+	command: string,
+	args: string[],
+): Promise<void> {
 	return new Promise((resolve, reject) => {
-		const proc = cp.spawn(command, args, {stdio: 'inherit'});
+		let tail = '';
+		const append = (data: Buffer) => {
+			tail += data.toString();
+			if (tail.length > OUTPUT_TAIL_BYTES) {
+				tail = tail.slice(-OUTPUT_TAIL_BYTES);
+			}
+		};
+		const proc = crossSpawn.spawn(command, args, {
+			stdio: ['ignore', 'pipe', 'pipe'],
+		});
+		proc.stdout?.on('data', append);
+		proc.stderr?.on('data', append);
 		proc.on('close', code => {
-			if (code === 0) resolve();
-			else
-				reject(
-					new Error(
-						`Command ${command} ${args.join(' ')} failed with exit code ${code}`,
-					),
-				);
+			if (code === 0) {
+				resolve();
+				return;
+			}
+			const output = tailOutput(tail);
+			reject(
+				new Error(
+					`Command ${command} ${args.join(' ')} failed with exit code ${code}` +
+						(output ? `:\n${output}` : ''),
+				),
+			);
 		});
 		proc.on('error', err => {
 			reject(new Error(`Failed to execute ${command}: ${err.message}`));
@@ -303,14 +467,44 @@ export async function installDependencies(
 	}
 
 	if (platform === 'darwin') {
-		onProgress?.('Installing sox and whisper-cpp via Homebrew...', 30);
+		// Only ask Homebrew for what is missing: a working sox or whisper-cli
+		// already on the system needs no install (and no compile).
+		const check = options.commandChecker ?? defaultCheckCommand;
+		const recCmd = process.env.REC_CMD || 'rec';
+		const whisperCmd = process.env.WHISPER_CMD || 'whisper-cli';
+		const [haveSox, haveWhisper] = await Promise.all([
+			isCommandAvailable(recCmd, ['--help'], check),
+			isCommandAvailable(whisperCmd, ['--help'], check),
+		]);
+		const formulae = [
+			...(haveSox ? [] : ['sox']),
+			...(haveWhisper ? [] : ['whisper.cpp']),
+		];
+		if (formulae.length > 0) {
+			const brew = options.brewEnvironment ?? detectBrewEnvironment();
+			onProgress?.(`Installing ${formulae.join(' and ')} via Homebrew...`, 30);
+			try {
+				await run(brew.brewPath, ['install', ...formulae]);
+				onProgress?.('Homebrew packages installed successfully.', 50);
+			} catch (err) {
+				throw new Error(
+					explainBrewFailure(
+						err instanceof Error ? err.message : String(err),
+						formulae,
+						brew,
+					),
+				);
+			}
+		}
+
+		// The Whisper model is what speech-to-text needs, so fetch it on its own
+		// first: a failed Piper (text-to-speech) download must not skip it.
+		onProgress?.('Fetching Whisper ggml model...', 60);
 		try {
-			await run('brew', ['install', 'sox', 'whisper-cpp']);
-			onProgress?.('Homebrew packages installed successfully.', 50);
+			await ensureWhisperModel(binDir, downloadFn);
 		} catch (err) {
 			throw new Error(
-				'macOS installation failed: ' +
-					(err instanceof Error ? err.message : String(err)),
+				`macOS Whisper model download failed: ${err instanceof Error ? err.message : String(err)}`,
 			);
 		}
 
@@ -398,18 +592,9 @@ export async function installDependencies(
 
 		onProgress?.('Fetching whisper.cpp binary & ggml model...', 65);
 		const whisperBin = join(binDir, 'whisper-cli');
-		const whisperModel = join(binDir, 'ggml-base.en.bin');
 
 		try {
-			const modelUrl =
-				'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin';
-			if (!existsSync(whisperModel)) {
-				await downloadFn(
-					modelUrl,
-					whisperModel,
-					ASSET_CHECKSUMS['ggml-base.en.bin'],
-				);
-			}
+			await ensureWhisperModel(binDir, downloadFn);
 
 			if (!existsSync(whisperBin)) {
 				// Build whisper.cpp from verified release source tarball
@@ -553,26 +738,17 @@ export async function installDependencies(
 
 		onProgress?.('Fetching whisper.cpp & piper Windows binaries...', 70);
 		const whisperBin = join(binDir, 'whisper-cli.exe');
-		const whisperModel = join(binDir, 'ggml-base.en.bin');
 		const piperBin = join(binDir, 'piper.exe');
 		const piperModel = join(binDir, 'en_US-lessac-medium.onnx');
 		const piperConfig = join(binDir, 'en_US-lessac-medium.onnx.json');
 
 		try {
-			const modelUrl =
-				'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin';
 			const piperModelUrl =
 				'https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/lessac/medium/en_US-lessac-medium.onnx';
 			const piperConfigUrl =
 				'https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/lessac/medium/en_US-lessac-medium.onnx.json';
 
-			if (!existsSync(whisperModel)) {
-				await downloadFn(
-					modelUrl,
-					whisperModel,
-					ASSET_CHECKSUMS['ggml-base.en.bin'],
-				);
-			}
+			await ensureWhisperModel(binDir, downloadFn);
 			if (!existsSync(piperModel)) {
 				await downloadFn(
 					piperModelUrl,

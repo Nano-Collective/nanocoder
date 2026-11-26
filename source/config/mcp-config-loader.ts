@@ -1,12 +1,22 @@
 import {existsSync, readFileSync} from 'fs';
 import {join} from 'path';
+import {readCachedConfigFile} from '@/config/cached-reader';
 import {substituteEnvVars} from '@/config/env-substitution';
 import {getConfigPath} from '@/config/paths';
+import {getActiveProfile} from '@/config/profile';
+import {getConfigRoot} from '@/services/session-context';
 import type {MCPServerConfig, ProviderConfig} from '@/types/config';
-import {logError} from '@/utils/message-queue';
+import {notifyError} from '@/utils/message-queue-core';
+import {stripUtf8Bom} from '@/utils/strip-utf8-bom';
+
+/** Read and parse a JSON config file, tolerating a leading UTF-8 BOM. */
+// biome-ignore lint/suspicious/noExplicitAny: parsed JSON is dynamically shaped
+function readJsonFile(filePath: string): any {
+	return JSON.parse(stripUtf8Bom(readFileSync(filePath, 'utf-8')));
+}
 
 // Simplified configuration source types
-export type ConfigSource = 'project' | 'global' | 'env';
+export type ConfigSource = 'project' | 'global' | 'env' | 'profile';
 
 export interface MCPServerWithSource {
 	server: MCPServerConfig;
@@ -55,6 +65,8 @@ function mapServerConfig(server: unknown): MCPServerConfig {
 		url: typedServer.url,
 		headers: typedServer.headers,
 		timeout: typedServer.timeout,
+		toolTimeout: typedServer.toolTimeout,
+		resetTimeoutOnProgress: typedServer.resetTimeoutOnProgress,
 		healthCheckInterval: typedServer.healthCheckInterval,
 		alwaysAllow: typedServer.alwaysAllow,
 		description: typedServer.description,
@@ -87,16 +99,17 @@ function mapAndSubstituteServer(
 /**
  * Load project-level MCP configuration from .mcp.json
  */
-export function loadProjectMCPConfig(): MCPServerWithSource[] {
-	const configPath = join(process.cwd(), '.mcp.json');
+export function loadProjectMCPConfig(
+	cwd: string = getConfigRoot(),
+): MCPServerWithSource[] {
+	const configPath = join(cwd, '.mcp.json'); // nosemgrep
 
 	if (!existsSync(configPath)) {
 		return [];
 	}
 
 	try {
-		const rawData = readFileSync(configPath, 'utf-8');
-		const config = JSON.parse(rawData);
+		const config = readJsonFile(configPath);
 
 		const mcpServers = parseMCPServers(config);
 
@@ -106,7 +119,9 @@ export function loadProjectMCPConfig(): MCPServerWithSource[] {
 			);
 		}
 	} catch (error) {
-		logError(`Failed to load MCP config from ${configPath}: ${String(error)}`);
+		notifyError(
+			`Failed to load MCP config from ${configPath}: ${String(error)}`,
+		);
 	}
 
 	return [];
@@ -124,8 +139,7 @@ export function loadGlobalMCPConfig(): MCPServerWithSource[] {
 	}
 
 	try {
-		const rawData = readFileSync(configPath, 'utf-8');
-		const config = JSON.parse(rawData);
+		const config = readJsonFile(configPath);
 
 		const mcpServers = parseMCPServers(config);
 
@@ -133,27 +147,38 @@ export function loadGlobalMCPConfig(): MCPServerWithSource[] {
 			return mcpServers.map(server => mapAndSubstituteServer(server, 'global'));
 		}
 	} catch (error) {
-		logError(`Failed to load MCP config from ${configPath}: ${String(error)}`);
+		notifyError(
+			`Failed to load MCP config from ${configPath}: ${String(error)}`,
+		);
 	}
 
 	return [];
 }
 
 /**
- * Merge project-level and global MCP configurations
- * ALL servers from both locations are loaded (project servers shown first)
- * No overriding - each unique server is preserved
+ * Merge project-level and global MCP configurations, plus profile and env
+ * overrides. ALL servers from all locations are loaded; each unique server
+ * name is preserved once. Precedence: env beats profile beats project beats
+ * global, mirroring how profile providers are merged.
  */
 export function mergeMCPConfigs(
 	projectServers: MCPServerWithSource[],
 	globalServers: MCPServerWithSource[],
 	envServers: MCPServerWithSource[] = [],
+	profileServers: MCPServerWithSource[] = [],
 ): MCPServerWithSource[] {
 	const serverMap = new Map<string, MCPServerWithSource>();
 
 	// Add env servers first (highest priority, displayed first in UI)
 	for (const envServer of envServers) {
 		serverMap.set(envServer.server.name, envServer);
+	}
+
+	// Add profile servers next (higher priority than project, lower than env)
+	for (const profileServer of profileServers) {
+		if (!serverMap.has(profileServer.server.name)) {
+			serverMap.set(profileServer.server.name, profileServer);
+		}
 	}
 
 	// Add project servers next
@@ -176,14 +201,46 @@ export function mergeMCPConfigs(
 /**
  * Load all MCP configurations with proper hierarchy and merging
  */
-export function loadAllMCPConfigs(): MCPServerWithSource[] {
-	const projectServers = loadProjectMCPConfig();
+export function loadAllMCPConfigs(
+	cwd: string = getConfigRoot(),
+): MCPServerWithSource[] {
+	const projectServers = loadProjectMCPConfig(cwd);
 	// Skip loading global servers in test environment to allow test isolation
 	const globalServers =
 		process.env.NODE_ENV === 'test' ? [] : loadGlobalMCPConfig();
 	const envServers = loadEnvMCPConfigs();
 
-	return mergeMCPConfigs(projectServers, globalServers, envServers);
+	// Profile MCP servers are merged like profile providers: higher priority
+	// than project, lower than env. A missing active profile is harmless.
+	// Profile `mcpServers` is an object keyed by server name (like .mcp.json),
+	// not an array.
+	let profileServers: MCPServerWithSource[] = [];
+	try {
+		const activeProfile = getActiveProfile(cwd);
+		const rawProfileServers = (activeProfile as Record<string, unknown>)
+			?.mcpServers;
+		if (
+			rawProfileServers &&
+			typeof rawProfileServers === 'object' &&
+			!Array.isArray(rawProfileServers)
+		) {
+			profileServers = Object.entries(
+				rawProfileServers as Record<string, unknown>,
+			).map(([name, serverConfig]) =>
+				mapAndSubstituteServer({name, ...(serverConfig as object)}, 'profile'),
+			);
+		}
+	} catch {
+		// A removed or renamed active profile is silently ignored so MCP
+		// config loading keeps falling back to the files instead of crashing.
+	}
+
+	return mergeMCPConfigs(
+		projectServers,
+		globalServers,
+		envServers,
+		profileServers,
+	);
 }
 
 /**
@@ -197,7 +254,7 @@ function loadEnvMCPConfigs(): MCPServerWithSource[] {
 			try {
 				rawData = readFileSync(process.env.NANOCODER_MCPSERVERS_FILE, 'utf-8');
 			} catch (error) {
-				logError(
+				notifyError(
 					`Failed to read NANOCODER_MCPSERVERS_FILE at ${process.env.NANOCODER_MCPSERVERS_FILE}: ${String(error)}`,
 				);
 			}
@@ -209,7 +266,7 @@ function loadEnvMCPConfigs(): MCPServerWithSource[] {
 	}
 
 	try {
-		const config = JSON.parse(rawData);
+		const config = JSON.parse(stripUtf8Bom(rawData));
 
 		// Accept direct array format (env vars) or standard .mcp.json wrapper format
 		let servers: unknown[] | null = null;
@@ -224,7 +281,9 @@ function loadEnvMCPConfigs(): MCPServerWithSource[] {
 			return servers.map(server => mapAndSubstituteServer(server, 'env'));
 		}
 	} catch (error) {
-		logError(`Failed to parse MCP configs from environment: ${String(error)}`);
+		notifyError(
+			`Failed to parse MCP configs from environment: ${String(error)}`,
+		);
 	}
 
 	return [];
@@ -234,8 +293,10 @@ function loadEnvMCPConfigs(): MCPServerWithSource[] {
  * Load provider configurations from all available levels (project and global)
  * This mirrors the approach used for MCP servers to support hierarchical loading
  */
-export function loadAllProviderConfigs(): ProviderConfig[] {
-	const projectProviders = loadProjectProviderConfigs();
+export function loadAllProviderConfigs(
+	cwd: string = getConfigRoot(),
+): ProviderConfig[] {
+	const projectProviders = loadProjectProviderConfigs(cwd);
 	// Skip loading global providers in test environment to allow test isolation
 	const globalProviders =
 		process.env.NODE_ENV === 'test' ? [] : loadGlobalProviderConfigs();
@@ -254,6 +315,19 @@ export function loadAllProviderConfigs(): ProviderConfig[] {
 		providerMap.set(provider.name, provider);
 	}
 
+	// Add profile providers (higher priority than project, lower than env)
+	try {
+		const activeProfile = getActiveProfile(cwd);
+		if (activeProfile?.providers && Array.isArray(activeProfile.providers)) {
+			const processed = substituteEnvVars(activeProfile.providers);
+			for (const provider of processed) {
+				providerMap.set(provider.name, provider);
+			}
+		}
+	} catch {
+		// Ignore if active profile resolution throws here
+	}
+
 	// Add env providers last (highest priority) - overrides all
 	for (const provider of envProviders) {
 		providerMap.set(provider.name, provider);
@@ -262,34 +336,29 @@ export function loadAllProviderConfigs(): ProviderConfig[] {
 	return Array.from(providerMap.values());
 }
 
+function extractProvidersFromConfig(config: unknown): ProviderConfig[] {
+	if (config && typeof config === 'object') {
+		const typed = config as Record<string, unknown>;
+		const nanocoder = typed.nanocoder as Record<string, unknown> | undefined;
+		if (nanocoder && Array.isArray(nanocoder.providers)) {
+			return substituteEnvVars(nanocoder.providers as ProviderConfig[]);
+		}
+		if (Array.isArray(typed.providers)) {
+			return substituteEnvVars(typed.providers as ProviderConfig[]);
+		}
+	}
+	return [];
+}
+
 /**
  * Load provider configurations from project-level files
  */
-function loadProjectProviderConfigs(): ProviderConfig[] {
+function loadProjectProviderConfigs(cwd: string): ProviderConfig[] {
 	// Try to find provider configs in project-level config files
-	const configPath = join(process.cwd(), 'agents.config.json');
+	const configPath = join(cwd, 'agents.config.json'); // nosemgrep
 
 	if (existsSync(configPath)) {
-		try {
-			const rawData = readFileSync(configPath, 'utf-8');
-			const config = JSON.parse(rawData);
-
-			if (config.nanocoder && Array.isArray(config.nanocoder.providers)) {
-				// Apply environment variable substitution
-				const processedProviders = substituteEnvVars(
-					config.nanocoder.providers,
-				);
-				return processedProviders;
-			} else if (Array.isArray(config.providers)) {
-				// Apply environment variable substitution
-				const processedProviders = substituteEnvVars(config.providers);
-				return processedProviders;
-			}
-		} catch (error) {
-			logError(
-				`Failed to load project provider config from ${configPath}: ${String(error)}`,
-			);
-		}
+		return extractProvidersFromConfig(readCachedConfigFile(configPath));
 	}
 
 	return [];
@@ -314,23 +383,8 @@ function loadGlobalProviderConfigs(): ProviderConfig[] {
 
 // Helper function to load provider config from a specific file
 function loadProviderConfigFromFile(filePath: string): ProviderConfig[] {
-	try {
-		const rawData = readFileSync(filePath, 'utf-8');
-		const config = JSON.parse(rawData);
-
-		if (config.nanocoder && Array.isArray(config.nanocoder.providers)) {
-			// Apply environment variable substitution
-			const processedProviders = substituteEnvVars(config.nanocoder.providers);
-			return processedProviders;
-		} else if (Array.isArray(config.providers)) {
-			// Apply environment variable substitution
-			const processedProviders = substituteEnvVars(config.providers);
-			return processedProviders;
-		}
-	} catch (error) {
-		logError(
-			`Failed to load provider config from ${filePath}: ${String(error)}`,
-		);
+	if (existsSync(filePath)) {
+		return extractProvidersFromConfig(readCachedConfigFile(filePath));
 	}
 
 	return [];
@@ -347,7 +401,7 @@ function loadEnvProviderConfigs(): ProviderConfig[] {
 			try {
 				rawData = readFileSync(process.env.NANOCODER_PROVIDERS_FILE, 'utf-8');
 			} catch (error) {
-				logError(
+				notifyError(
 					`Failed to read NANOCODER_PROVIDERS_FILE at ${process.env.NANOCODER_PROVIDERS_FILE}: ${String(error)}`,
 				);
 			}
@@ -359,7 +413,7 @@ function loadEnvProviderConfigs(): ProviderConfig[] {
 	}
 
 	try {
-		const config = JSON.parse(rawData);
+		const config = JSON.parse(stripUtf8Bom(rawData));
 
 		// Accept direct array format or standard agents.config.json wrapper format
 		if (Array.isArray(config)) {
@@ -370,7 +424,7 @@ function loadEnvProviderConfigs(): ProviderConfig[] {
 			return substituteEnvVars(config.providers);
 		}
 	} catch (error) {
-		logError(
+		notifyError(
 			`Failed to parse provider configs from environment: ${String(error)}`,
 		);
 	}

@@ -11,8 +11,9 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {getConfigPath} from '@/config/paths';
+import {getActiveSessionContext} from '@/services/session-context';
 import {formatError} from '@/utils/error-formatter';
-import {logError, logWarning} from '@/utils/message-queue';
+import {notifyError, notifyWarning} from '@/utils/message-queue-core';
 import type {SubagentConfigWithSource, SubagentLoadPriority} from './types.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -49,9 +50,16 @@ export class SubagentLoader {
 	private initialized = false;
 
 	/**
+	 * Built-in definitions only, loaded independently of `cache` so no
+	 * user/project file or external registration can shadow them. See
+	 * {@link getBuiltInSubagent}.
+	 */
+	private builtInCache: Map<string, SubagentConfigWithSource> | null = null;
+
+	/**
 	 * Per-file parse / load errors collected during initialize(). Drained by
 	 * bootstrap so the daemon can surface them in its log (the message-queue
-	 * `logError` path only reaches the TUI's chat queue).
+	 * `notifyError` path only reaches the TUI's chat queue).
 	 */
 	private loadErrors: SubagentLoadError[] = [];
 
@@ -91,7 +99,7 @@ export class SubagentLoader {
 		for (const config of userAgents) {
 			const existing = this.cache.get(config.name);
 			if (existing?.source.isBuiltIn) {
-				logWarning(`User agent '${config.name}' overrides built-in agent`);
+				notifyWarning(`User agent '${config.name}' overrides built-in agent`);
 			}
 			this.cache.set(config.name, config);
 		}
@@ -106,7 +114,9 @@ export class SubagentLoader {
 			const existing = this.cache.get(config.name);
 			if (existing) {
 				const source = existing.source.isBuiltIn ? 'built-in' : 'user';
-				logWarning(`Project agent '${config.name}' overrides ${source} agent`);
+				notifyWarning(
+					`Project agent '${config.name}' overrides ${source} agent`,
+				);
 			}
 			this.cache.set(config.name, config);
 		}
@@ -147,6 +157,31 @@ export class SubagentLoader {
 	}
 
 	/**
+	 * Get a built-in subagent by name, ignoring any user-level, project-level
+	 * or externally registered definition with the same name. Trust-gated
+	 * runs (`verify-pr-review`, `verify-ci-investigator`) resolve through
+	 * here: they read attacker-controlled input from the very checkout that
+	 * would otherwise supply the override, so a PR adding
+	 * `.nanocoder/agents/verify-pr-review.md` could replace its own reviewer.
+	 * @param name - The subagent name
+	 * @returns The built-in config or null if there is no such built-in
+	 */
+	async getBuiltInSubagent(
+		name: string,
+	): Promise<SubagentConfigWithSource | null> {
+		if (!this.builtInCache) {
+			const builtIns = await this.loadFromDirectory(getBuiltInAgentsDir(), 0);
+			const cache = new Map<string, SubagentConfigWithSource>();
+			for (const config of builtIns) {
+				config.source.isBuiltIn = true;
+				cache.set(config.name, config);
+			}
+			this.builtInCache = cache;
+		}
+		return this.builtInCache.get(name) || null;
+	}
+
+	/**
 	 * List all available subagents.
 	 * @returns Array of all available subagent configs
 	 */
@@ -177,6 +212,7 @@ export class SubagentLoader {
 	 */
 	async reload(): Promise<void> {
 		this.cache.clear();
+		this.builtInCache = null;
 		this.initialized = false;
 		this.loadErrors = [];
 		await this.initialize();
@@ -260,7 +296,7 @@ export class SubagentLoader {
 			} catch (error) {
 				const message = formatError(error);
 				this.loadErrors.push({filePath, message});
-				logError(`Failed to load agent from ${filePath}: ${message}`);
+				notifyError(`Failed to load agent from ${filePath}: ${message}`);
 			}
 		}
 
@@ -275,17 +311,30 @@ export class SubagentLoader {
 let globalLoader: SubagentLoader | null = null;
 
 /**
- * Get the global SubagentLoader instance.
- * @param projectRoot - Optional project root (uses cwd if not provided)
- * @returns The singleton SubagentLoader instance
+ * Loaders of every project root asked for, so one process serving sessions in
+ * several folders (ACP) keeps each folder's loader, with the skill-bundle
+ * subagents registered into it, instead of replacing it on every switch.
+ */
+const loadersByRoot = new Map<string, SubagentLoader>();
+
+/**
+ * Get the SubagentLoader of a project root.
+ * @param projectRoot - Optional project root. Without one: the active
+ *   session's folder inside a session context, else the loader last asked for
+ *   (created on the cwd if there is none yet).
+ * @returns The loader for that root, the same instance on every call
  */
 export function getSubagentLoader(projectRoot?: string): SubagentLoader {
-	if (
-		!globalLoader ||
-		(projectRoot && globalLoader.getProjectRoot() !== projectRoot)
-	) {
-		globalLoader = new SubagentLoader(projectRoot);
+	const root = projectRoot ?? getActiveSessionContext()?.projectRoot;
+	if (!root) {
+		globalLoader ??= remember(new SubagentLoader());
+		return globalLoader;
 	}
-
+	globalLoader = loadersByRoot.get(root) ?? remember(new SubagentLoader(root));
 	return globalLoader;
+}
+
+function remember(loader: SubagentLoader): SubagentLoader {
+	loadersByRoot.set(loader.getProjectRoot(), loader);
+	return loader;
 }

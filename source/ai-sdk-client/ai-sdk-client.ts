@@ -1,5 +1,5 @@
 import type {LanguageModel} from 'ai';
-import {Agent} from 'undici';
+import type {Dispatcher} from 'undici';
 import {getPrivacyPreference} from '@/config/preferences';
 import {
 	TIMEOUT_SOCKET_DEFAULT_MS,
@@ -16,8 +16,10 @@ import type {
 	StreamCallbacks,
 } from '@/types/index';
 import {getLogger} from '@/utils/logging';
+import {createDispatcher} from '@/utils/proxy-dispatcher';
 import {isLocalURL} from '@/utils/url-utils';
 import {handleChat} from './chat/chat-handler.js';
+import {PrefixTracker} from './chat/prefix-tracker.js';
 import {normalizeModelIdForRequest} from './model-id.js';
 import {
 	createProvider,
@@ -32,7 +34,7 @@ export class AISDKClient implements LLMClient {
 	private currentModel: string;
 	private availableModels: string[];
 	private providerConfig: AIProviderConfig;
-	private undiciAgent: Agent;
+	private undiciAgent: Dispatcher;
 	private cachedContextSize: number;
 	private maxRetries: number;
 	// Placeholder map for callers that do not supply their own. The TUI hands
@@ -43,6 +45,10 @@ export class AISDKClient implements LLMClient {
 	private readonly privacySessionMapRef: {current: Record<string, string>} = {
 		current: {},
 	};
+
+	// Per client, matching what a single-slot local server caches: see
+	// PrefixTracker for why helper calls on this client are tracked too.
+	private readonly prefixTracker = new PrefixTracker();
 
 	constructor(providerConfig: AIProviderConfig) {
 		const logger = getLogger();
@@ -76,7 +82,7 @@ export class AISDKClient implements LLMClient {
 				? 0
 				: (effectiveSocketTimeout ?? defaultTimeout);
 
-		this.undiciAgent = new Agent({
+		this.undiciAgent = createDispatcher({
 			connect: {
 				timeout: resolvedSocketTimeout,
 				...getTlsConnectOptions(this.providerConfig),
@@ -208,93 +214,8 @@ export class AISDKClient implements LLMClient {
 				modeOverrides?.privacySessionMapRef ?? this.privacySessionMapRef,
 			privacyEnabled: modeOverrides?.privacyEnabled ?? getPrivacyPreference(),
 			onPrivacyEvent: callbacks.onPrivacyEvent,
+			prefixTracker: this.prefixTracker,
 		});
-	}
-
-	/**
-	 * Generate a structured object conforming to a Zod schema
-	 */
-	async generateStructuredObject<T>(
-		prompt: string,
-		// biome-ignore lint/suspicious/noExplicitAny: Zod schema typing varies
-		schema: any, // zod schema
-		system?: string,
-		signal?: AbortSignal,
-	): Promise<T> {
-		const {generateObject} = await import('ai');
-
-		const model: LanguageModel = (() => {
-			switch (this.provider.kind) {
-				case 'chatgpt-codex':
-					return this.provider.provider.responses(this.currentModel);
-				case 'github-copilot':
-					return this.currentModel.includes('gpt-5')
-						? this.provider.provider.responses(this.currentModel)
-						: this.provider.provider.chat(this.currentModel);
-				case 'openai-compatible':
-					return this.provider.provider(
-						normalizeModelIdForRequest(
-							this.providerConfig.config.baseURL,
-							this.currentModel,
-						),
-					) as LanguageModel;
-				case 'anthropic':
-				case 'google':
-					return this.provider.provider(this.currentModel) as LanguageModel;
-			}
-		})();
-
-		try {
-			const result = await generateObject({
-				model,
-				schema,
-				prompt,
-				system,
-				abortSignal: signal,
-				maxRetries: this.maxRetries,
-			});
-
-			return result.object as T;
-		} catch (error: unknown) {
-			const isAbort =
-				(error as Error)?.name === 'AbortError' ||
-				(error as Error)?.message?.toLowerCase().includes('abort');
-			const isAuthOrNetwork =
-				(error as {statusCode?: number})?.statusCode === 401 ||
-				(error as {statusCode?: number})?.statusCode === 403 ||
-				((error as {statusCode?: number})?.statusCode ?? 0) >= 500;
-			if (isAbort || isAuthOrNetwork) {
-				throw error; // Bubble up abort and auth errors immediately
-			}
-
-			// Fallback: If the provider gateway strips JSON schema parameters and fails generateObject,
-			// try regular text generation and manually extract JSON from markdown blocks.
-			const {generateText} = await import('ai');
-
-			const fallbackPrompt = `${prompt}\n\nYou MUST respond ONLY with valid JSON. Do not include markdown formatting, backticks, or any conversational text.`;
-
-			const textResult = await generateText({
-				model,
-				prompt: fallbackPrompt,
-				system,
-				abortSignal: signal,
-				maxRetries: this.maxRetries,
-			});
-
-			const text = textResult.text;
-			// Extract JSON from markdown blocks if present (in case it ignores our instruction)
-			const jsonMatch = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
-			const jsonString = jsonMatch ? (jsonMatch[1] as string) : text;
-
-			try {
-				const parsed = JSON.parse(jsonString);
-				return schema.parse(parsed) as T;
-			} catch (_parseError) {
-				throw new Error(
-					`Failed to parse response: ${error instanceof Error ? error.message : String(error)}. Fallback extraction also failed: ${text.substring(0, 100)}...`,
-				);
-			}
-		}
 	}
 
 	clearContext(): Promise<void> {

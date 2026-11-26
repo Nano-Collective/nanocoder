@@ -1,4 +1,5 @@
 import * as fs from 'node:fs';
+import {createRequire, syncBuiltinESMExports} from 'node:module';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import test from 'ava';
@@ -293,6 +294,51 @@ test('recordApiCallForStats stores cost > 0 via production pricing path', async 
 	t.is(loaded.totalCost, 2);
 });
 
+test('recordApiCallForStats records no cost for a model on a local server', async t => {
+	const {recordApiCallForStats} = await import('./record.js');
+	await recordApiCallForStats(
+		{
+			provider: 'Ollama',
+			model: 'gpt-oss:20b',
+			baseURL: 'http://localhost:11434/v1',
+			inputTokens: 1_000_000,
+			outputTokens: 500_000,
+			totalTokens: 1_500_000,
+		},
+		{
+			dateKey: '2026-08-25',
+			// What models.dev lists for the hosted model of the same id.
+			getPricing: async () => ({input: 1, output: 2}),
+		},
+	);
+	flushStatsLedgerSync();
+
+	const loaded = readStatsLedger();
+	t.is(loaded.totalTokens, 1_500_000);
+	t.is(loaded.totalCost, 0);
+});
+
+test('recordApiCallForStats still prices a model behind a hosted base URL', async t => {
+	const {recordApiCallForStats} = await import('./record.js');
+	await recordApiCallForStats(
+		{
+			provider: 'Ollama Cloud',
+			model: 'gpt-oss:20b',
+			baseURL: 'https://ollama.com/v1',
+			inputTokens: 1_000_000,
+			outputTokens: 500_000,
+			totalTokens: 1_500_000,
+		},
+		{
+			dateKey: '2026-08-25',
+			getPricing: async () => ({input: 1, output: 2}),
+		},
+	);
+	flushStatsLedgerSync();
+
+	t.is(readStatsLedger().totalCost, 2);
+});
+
 test('recordApiCallForStats prices cached input at cache rates', async t => {
 	const {recordApiCallForStats} = await import('./record.js');
 	await recordApiCallForStats(
@@ -484,4 +530,53 @@ test('flush merges changes written by another session', t => {
 		100,
 	);
 	t.is(loaded.daily[0]?.byPair[makePairKey('Ollama', 'qwen')]?.tokens, 200);
+});
+
+test('readStatsLedger returns an empty ledger when the stats path cannot be read as a file', t => {
+	const statsPath = getStatsFilePath();
+
+	fs.mkdirSync(statsPath, {recursive: true});
+	try {
+		const ledger = readStatsLedger();
+		t.is(ledger.totalTokens, 0);
+		t.deepEqual(ledger.daily, []);
+	} finally {
+		fs.rmdirSync(statsPath);
+	}
+});
+
+test('readStatsLedger reads without probing existsSync on the stats files', t => {
+	const canonicalPath = getStatsFilePath();
+	const legacyPath = path.join(
+		path.dirname(canonicalPath),
+		LEGACY_STATS_FILE_NAME,
+	);
+	const cjsFs = createRequire(import.meta.url)('node:fs') as typeof fs;
+	const originalExistsSync = cjsFs.existsSync;
+	let probes = 0;
+	cjsFs.existsSync = ((p: fs.PathLike) => {
+		const name = path.basename(String(p));
+		if (name === STATS_FILE_NAME || name === LEGACY_STATS_FILE_NAME) {
+			probes++;
+		}
+		return originalExistsSync(p);
+	}) as typeof fs.existsSync;
+	syncBuiltinESMExports();
+
+	try {
+
+		readStatsLedger();
+		fs.mkdirSync(path.dirname(legacyPath), {recursive: true});
+		const legacy = createEmptyLedger(1_700_000_000_000);
+		fs.writeFileSync(legacyPath, JSON.stringify(legacy), 'utf8');
+		readStatsLedger();
+
+		t.true(writeStatsLedger(createEmptyLedger(1_700_000_000_000)));
+		readStatsLedger();
+	} finally {
+		cjsFs.existsSync = originalExistsSync;
+		syncBuiltinESMExports();
+	}
+
+	t.is(probes, 0);
 });

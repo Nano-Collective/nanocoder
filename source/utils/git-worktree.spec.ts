@@ -1,148 +1,102 @@
-import {execSync} from 'node:child_process';
-import {mkdirSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
+import {execFileSync} from 'node:child_process';
+import {
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	realpathSync,
+	rmSync,
+	writeFileSync,
+} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import test from 'ava';
+import test, {type ExecutionContext} from 'ava';
 import {
 	createWorktree,
 	ensureCleanTree,
 	ensureSwarmExcludes,
-	isGitRepo,
 	removeWorktree,
 } from './git-worktree';
 
-// Helper to create a temporary test repo
-function createTestRepo(name: string): string {
-	const testDir = join(process.cwd(), '.test-temp', name);
-	rmSync(testDir, {recursive: true, force: true});
-	mkdirSync(testDir, {recursive: true});
-
-	// Initialize git repo
-	execSync('git init', {cwd: testDir});
-	execSync('git config user.name "Test User"', {cwd: testDir});
-	execSync('git config user.email "test@example.com"', {cwd: testDir});
-	
-	// Create initial commit
-	writeFileSync(join(testDir, 'README.md'), '# Test Repo');
-	execSync('git add README.md', {cwd: testDir});
-	execSync('git commit -m "Initial commit"', {cwd: testDir});
-
-	return testDir;
+function git(cwd: string, ...args: string[]): string {
+	return execFileSync('git', args, {cwd, encoding: 'utf-8', stdio: 'pipe'});
 }
 
-test('isGitRepo returns true for valid repo', t => {
-	const dir = createTestRepo('is-git-repo-test');
-	t.true(isGitRepo(dir));
+function createTestRepo(t: ExecutionContext): string {
+	const dir = realpathSync(mkdtempSync(join(tmpdir(), 'nanocoder-worktree-')));
+	t.teardown(() => rmSync(dir, {recursive: true, force: true}));
+	git(dir, 'init', '-q');
+	git(dir, 'config', 'user.name', 'Test User');
+	git(dir, 'config', 'user.email', 'test@example.com');
+	writeFileSync(join(dir, 'README.md'), '# Test Repo');
+	git(dir, 'add', 'README.md');
+	git(dir, 'commit', '-qm', 'initial');
+	return dir;
+}
+
+test('ensureCleanTree accepts a clean tree', async t => {
+	await t.notThrowsAsync(ensureCleanTree(createTestRepo(t)));
 });
 
-test('isGitRepo returns false for non-repo', t => {
-	const dir = join(tmpdir(), 'nanocoder-non-repo-test');
-	rmSync(dir, {recursive: true, force: true});
-	mkdirSync(dir, {recursive: true});
-	t.false(isGitRepo(dir));
-});
-
-test('ensureCleanTree passes on clean repo', t => {
-	const dir = createTestRepo('clean-tree-test');
-	t.notThrows(() => ensureCleanTree(dir));
-});
-
-test('ensureCleanTree throws on untracked files', t => {
-	const dir = createTestRepo('untracked-file-test');
-	writeFileSync(join(dir, 'new-file.txt'), 'hello');
-	t.throws(() => ensureCleanTree(dir), {
-		message: /Git working tree is not clean/,
-	});
-});
-
-test('ensureCleanTree throws on staged files', t => {
-	const dir = createTestRepo('staged-file-test');
-	writeFileSync(join(dir, 'new-file.txt'), 'hello');
-	execSync('git add new-file.txt', {cwd: dir});
-	t.throws(() => ensureCleanTree(dir), {
-		message: /Git working tree is not clean/,
-	});
-});
-
-test('ensureCleanTree throws on modified files', t => {
-	const dir = createTestRepo('modified-file-test');
-	writeFileSync(join(dir, 'README.md'), 'modified');
-	t.throws(() => ensureCleanTree(dir), {
-		message: /Git working tree is not clean/,
-	});
-});
-
-test('createWorktree creates a new worktree and branch', t => {
-	const dir = createTestRepo('create-worktree-test');
-	const branchName = 'nanocoder-swarm-worker-1';
-	const wtPath = join(dir, 'worker-1');
-	
-	t.notThrows(() => createWorktree(branchName, 'worker-1', dir));
-	
-	// Check if worktree exists
-	const worktrees = execSync('git worktree list', {cwd: dir, encoding: 'utf-8'});
-	t.true(worktrees.includes(branchName));
-	t.true(worktrees.includes(wtPath));
-});
-
-test('createWorktree throws on unsafe branch name', t => {
-	const dir = createTestRepo('unsafe-branch-test');
-	t.throws(() => createWorktree('unsafe-branch', 'worker-1', dir), {
-		message: /Swarm temporary branch names must start with "nanocoder-swarm-"/,
-	});
-});
-
-test('createWorktree throws if branch already exists', t => {
-	const dir = createTestRepo('branch-exists-test');
-	const branchName = 'nanocoder-swarm-worker-2';
-	execSync(`git branch ${branchName}`, {cwd: dir});
-	
-	t.throws(() => createWorktree(branchName, 'worker-2', dir), {
-		message: new RegExp(`Branch ${branchName} already exists`),
-	});
-});
-
-test('removeWorktree successfully removes worktree and branch', t => {
-	const dir = createTestRepo('remove-worktree-test');
-	const branchName = 'nanocoder-swarm-worker-3';
-	
-	createWorktree(branchName, 'worker-3', dir);
-	t.notThrows(() => removeWorktree('worker-3', branchName, dir));
-	
-	// Check if worktree is removed
-	const worktrees = execSync('git worktree list', {cwd: dir, encoding: 'utf-8'});
-	t.false(worktrees.includes('worker-3'));
-	
-	// Check if branch is removed
-	const branches = execSync('git branch --list', {cwd: dir, encoding: 'utf-8'});
-	t.false(branches.includes(branchName));
-});
-
-test('removeWorktree throws on unsafe branch name', t => {
-	const dir = createTestRepo('remove-unsafe-branch-test');
-	t.throws(() => removeWorktree('worker-1', 'unsafe-branch', dir), {
-		message: /Name must start with "nanocoder-swarm-" for safety/,
-	});
-});
-
-test('ensureSwarmExcludes keeps swarm artifacts out of git status and is idempotent', t => {
-	const dir = createTestRepo('swarm-excludes');
-	try {
-		ensureSwarmExcludes(dir);
-		ensureSwarmExcludes(dir);
-		mkdirSync(join(dir, '.nanocoder', 'worktrees', '1'), {recursive: true});
-		writeFileSync(join(dir, '.nanocoder', 'worktrees', '1', 'a.txt'), 'x');
-		writeFileSync(join(dir, '.nanocoder', 'worker-1.patch'), 'x');
-		writeFileSync(join(dir, '.nanocoder', 'worker-1-error.log'), 'x');
-		writeFileSync(join(dir, '.nanocoder', 'swarm-error.log'), 'x');
-		t.notThrows(() => ensureCleanTree(dir));
-		const exclude = execSync('git rev-parse --git-path info/exclude', {
-			cwd: dir,
-			encoding: 'utf-8',
-		}).trim();
-		const content = readFileSync(join(dir, exclude), 'utf-8');
-		t.is(content.split('.nanocoder/worktrees/').length - 1, 1);
-	} finally {
-		rmSync(dir, {recursive: true, force: true});
+test('ensureCleanTree rejects untracked, staged and modified files', async t => {
+	for (const [file, stage] of [
+		['new.txt', false],
+		['new.txt', true],
+		['README.md', false],
+	] as const) {
+		const dir = createTestRepo(t);
+		writeFileSync(join(dir, file), 'changed');
+		if (stage) git(dir, 'add', file);
+		await t.throwsAsync(ensureCleanTree(dir), {
+			message: /Git working tree is not clean/,
+		});
 	}
+});
+
+test('createWorktree and removeWorktree manage a branch and a directory', async t => {
+	const dir = createTestRepo(t);
+	const branch = 'nanocoder-swarm-1';
+
+	await createWorktree(branch, 'worker-1', 'HEAD', dir);
+	t.true(existsSync(join(dir, 'worker-1', 'README.md')));
+
+	await removeWorktree('worker-1', branch, dir);
+	t.false(existsSync(join(dir, 'worker-1')));
+	t.is(git(dir, 'branch', '--list', branch), '');
+});
+
+test('createWorktree never replaces an existing path or branch', async t => {
+	const dir = createTestRepo(t);
+	mkdirSync(join(dir, 'taken'));
+	writeFileSync(join(dir, 'taken', 'keep.txt'), 'keep');
+	await t.throwsAsync(
+		createWorktree('nanocoder-swarm-2', 'taken', 'HEAD', dir),
+		{message: /Path already exists/},
+	);
+	t.true(existsSync(join(dir, 'taken', 'keep.txt')));
+
+	git(dir, 'branch', 'nanocoder-swarm-3');
+	await t.throwsAsync(
+		createWorktree('nanocoder-swarm-3', 'worker-3', 'HEAD', dir),
+		{message: /already exists/},
+	);
+});
+
+test('worktree helpers refuse branches outside the swarm prefix', async t => {
+	const dir = createTestRepo(t);
+	const message = /must start with "nanocoder-swarm-"/;
+	await t.throwsAsync(createWorktree('main', 'worker', 'HEAD', dir), {message});
+	await t.throwsAsync(removeWorktree('worker', 'main', dir), {message});
+});
+
+test('ensureSwarmExcludes hides run files once, without touching tracked files', async t => {
+	const dir = createTestRepo(t);
+	await ensureSwarmExcludes(dir);
+	await ensureSwarmExcludes(dir);
+
+	mkdirSync(join(dir, '.nanocoder', 'swarm', 'run'), {recursive: true});
+	writeFileSync(join(dir, '.nanocoder', 'swarm', 'run', 'a.patch'), 'x');
+	await t.notThrowsAsync(ensureCleanTree(dir));
+	const content = readFileSync(join(dir, '.git', 'info', 'exclude'), 'utf-8');
+	t.is(content.split('.nanocoder/swarm/').length - 1, 1);
 });

@@ -23,10 +23,17 @@ import {dirname, join, resolve} from 'node:path';
 import {createInterface} from 'node:readline/promises';
 import {fileURLToPath} from 'node:url';
 import {getAppConfig} from '@/config/index';
-import {ensureDirectoryTrust, untrustedReason} from '@/config/preferences';
-import {ensureNanocoderGitignore} from '@/utils/ensure-nanocoder-gitignore';
+import {
+	ensureDirectoryTrust,
+	untrustedReason,
+} from '@/config/trust/directory-trust';
 import {formatError} from '@/utils/error-formatter';
-import {isTrustLevel, resolveTrustLevel, type TrustLevel} from '@/verify/trust';
+import {ensureNanocoderGitignore} from '@/utils/fs/ensure-nanocoder-gitignore';
+import {
+	isTrustLevel,
+	resolveTrustLevel,
+	type TrustLevel,
+} from '@/verify/trust-level';
 import {
 	isFullCommitTrustConfirmed,
 	recordFullCommitTrustConfirmed,
@@ -37,31 +44,54 @@ function getLogPath(projectRoot: string): string {
 	return join(projectRoot, '.nanocoder', 'daemon.log');
 }
 
+const TRUST_LEVEL_LIST = 'comment-only, auto-fix, full-commit';
+
 const START_USAGE =
-	'Usage: nanocoder daemon start [--trust <comment-only|auto-fix|full-commit>]';
+	'Usage: nanocoder daemon start [--trust <comment-only|auto-fix|full-commit>] [--trust-directory]';
 
 interface ParsedStartArgs {
 	trustLevel?: TrustLevel;
 }
 
+function parseTrustValue(
+	value: string | undefined,
+): TrustLevel | {error: string} {
+	// `--trust --trust-directory` / a trailing `--trust`: the level is
+	// missing, not invalid - say that rather than `Invalid --trust value: ""`.
+	if (value === undefined || value === '' || value.startsWith('-')) {
+		return {error: `--trust requires a level: one of ${TRUST_LEVEL_LIST}.`};
+	}
+	if (!isTrustLevel(value)) {
+		return {
+			error: `Invalid --trust value: "${value}". Must be one of ${TRUST_LEVEL_LIST}.`,
+		};
+	}
+	return value;
+}
+
 /**
  * Parse `daemon start`'s flags. Mirrors `verify/cli.ts`'s `parseArgs`:
  * hand-rolled loop, unknown-flag rejection, discriminated-union return.
+ * `--trust` is the CI investigation trust level; it is unrelated to
+ * `--trust-directory` (the directory trust gate).
  */
 function parseStartArgs(args: string[]): ParsedStartArgs | {error: string} {
 	let trustLevel: TrustLevel | undefined;
 
 	for (let i = 0; i < args.length; i++) {
-		const arg = args[i];
-		if (arg === '--trust') {
-			const value = args[i + 1];
-			i++;
-			if (!isTrustLevel(value)) {
-				return {
-					error: `Invalid --trust value: "${value ?? ''}". Must be one of comment-only, auto-fix, full-commit.`,
-				};
+		const arg = args[i] ?? '';
+		if (arg === '--trust' || arg.startsWith('--trust=')) {
+			let raw: string | undefined;
+			if (arg === '--trust') {
+				raw = args[i + 1];
+				// Don't swallow the next flag as the value.
+				if (raw !== undefined && !raw.startsWith('-')) i++;
+			} else {
+				raw = arg.slice('--trust='.length);
 			}
-			trustLevel = value;
+			const parsed = parseTrustValue(raw);
+			if (typeof parsed === 'object') return parsed;
+			trustLevel = parsed;
 		} else if (arg === '--trust-directory') {
 			// Handled by cli.tsx (passed as `trustDirectory`); not a start-arg here.
 		} else {
@@ -115,6 +145,39 @@ async function defaultConfirmFullCommitTrust(
 	}
 }
 
+export const CONFIG_AUTO_FIX_WARNING = (projectRoot: string) => `
+Warning: agents.config.json sets verify.trustLevel to auto-fix for:
+  ${projectRoot}
+
+At this trust level, when CI watch detects a failure, the daemon runs an
+agent that edits files and commits them with no confirmation, steered by
+the failed CI log, then opens a draft PR with its fix. The agent has no
+shell; the CI run on the draft PR verifies the fix.
+
+The level came from a config file, not from --trust on this command, so it
+needs your confirmation. Pass --trust auto-fix to skip this prompt.
+`;
+
+/**
+ * Default confirmation for an elevated trust level that came from
+ * agents.config.json rather than the --trust flag. A config file can be
+ * committed by someone else (or changed by the PR the daemon is watching),
+ * so it must not raise the level on its own.
+ */
+async function defaultConfirmConfigAutoFixTrust(
+	projectRoot: string,
+): Promise<boolean> {
+	if (!process.stdin.isTTY) return false;
+	process.stdout.write(CONFIG_AUTO_FIX_WARNING(projectRoot));
+	const rl = createInterface({input: process.stdin, output: process.stdout});
+	try {
+		const answer = (await rl.question('Proceed? [y/N] ')).trim().toLowerCase();
+		return answer === 'y' || answer === 'yes';
+	} finally {
+		rl.close();
+	}
+}
+
 export interface DaemonCliResult {
 	exitCode: 0 | 1;
 	output: string;
@@ -143,6 +206,11 @@ export interface DaemonCliOptions {
 	args?: string[];
 	/** Test seam: override the one-time full-commit confirmation prompt. */
 	confirmFullCommitTrust?: (projectRoot: string) => Promise<boolean>;
+	/** Test seam: override the confirmation for `auto-fix` set by
+	 * agents.config.json rather than the --trust flag. */
+	confirmConfigAutoFixTrust?: (projectRoot: string) => Promise<boolean>;
+	/** Test seam: whether an interactive terminal can answer a prompt. */
+	isInteractive?: () => boolean;
 	/** Test seam: override the persisted confirmation check. */
 	isFullCommitTrustConfirmedFn?: typeof isFullCommitTrustConfirmed;
 	/** Test seam: override persisting the confirmation. */
@@ -193,6 +261,18 @@ export async function runDaemonCli(
 	command: DaemonCliCommand,
 	opts: DaemonCliOptions,
 ): Promise<DaemonCliResult> {
+	// `--help` must never fall through to the action: `daemon install --help`
+	// would otherwise install the auto-start unit.
+	const args = opts.args ?? [];
+	if (args.includes('--help') || args.includes('-h')) {
+		return {
+			exitCode: 0,
+			output:
+				command === 'start'
+					? START_USAGE
+					: `Usage: nanocoder daemon ${command}`,
+		};
+	}
 	switch (command) {
 		case 'start':
 			return start(opts);
@@ -213,11 +293,15 @@ async function installCommand(
 	opts: DaemonCliOptions,
 ): Promise<DaemonCliResult> {
 	const {installAutoStart} = await import('./install');
-	const result = await installAutoStart({projectRoot: opts.projectRoot});
-	return {
-		exitCode: result.platform === 'unsupported' ? 1 : 0,
-		output: result.message,
-	};
+	try {
+		const result = await installAutoStart({projectRoot: opts.projectRoot});
+		return {
+			exitCode: result.platform === 'unsupported' ? 1 : 0,
+			output: result.message,
+		};
+	} catch (err) {
+		return {exitCode: 1, output: formatError(err)};
+	}
 }
 
 async function uninstallCommand(
@@ -229,11 +313,22 @@ async function uninstallCommand(
 }
 
 async function start(opts: DaemonCliOptions): Promise<DaemonCliResult> {
+	const parsed = parseStartArgs(opts.args ?? []);
+	if ('error' in parsed) {
+		return {exitCode: 1, output: `${parsed.error}\n${START_USAGE}`};
+	}
+
 	const live = await readLiveLockfile(opts.projectRoot);
 	if (live) {
+		const current = isTrustLevel(live.ciTrustLevel)
+			? ` CI trust level: ${live.ciTrustLevel}.`
+			: '';
+		const notApplied = parsed.trustLevel
+			? ` --trust ${parsed.trustLevel} was not applied; run \`nanocoder daemon stop\` and start it again to change the level.`
+			: '';
 		return {
 			exitCode: 0,
-			output: `Daemon already running (pid ${live.pid}).`,
+			output: `Daemon already running (pid ${live.pid}).${current}${notApplied}`,
 		};
 	}
 
@@ -248,6 +343,17 @@ async function start(opts: DaemonCliOptions): Promise<DaemonCliResult> {
 	if (trust.persisted) {
 		console.log(
 			`Marked ${resolve(opts.projectRoot)} as trusted (NANOCODER_TRUST_DIRECTORY=1).`,
+		);
+	}
+	if (trust.persistFailed) {
+		// The run proceeds (the env var does grant trust), but the write that
+		// was supposed to make it stick did not land: the next boot will refuse
+		// this directory again. Say so here — `savePreferences` only reaches a
+		// log file, and silence would make the next refusal look arbitrary.
+		console.warn(
+			`Could not save trust for ${resolve(opts.projectRoot)} (NANOCODER_TRUST_DIRECTORY=1): ` +
+				`the next \`nanocoder daemon start\` will refuse this directory again. ` +
+				`Check that the preferences directory is writable.`,
 		);
 	}
 	if (!trust.trusted) {
@@ -265,24 +371,46 @@ async function start(opts: DaemonCliOptions): Promise<DaemonCliResult> {
 		};
 	}
 
-	const parsed = parseStartArgs(opts.args ?? []);
-	if ('error' in parsed) {
-		return {exitCode: 1, output: `${parsed.error}\n${START_USAGE}`};
-	}
-
 	const loadVerifyConfig =
 		opts.loadVerifyConfigFn ?? (() => getAppConfig().verify);
 	const configTrustLevel = loadVerifyConfig()?.trustLevel;
-	const trustLevel = resolveTrustLevel(parsed.trustLevel, configTrustLevel);
-	const trustSource = parsed.trustLevel
+	let trustLevel = resolveTrustLevel(parsed.trustLevel, configTrustLevel);
+	let trustSource = parsed.trustLevel
 		? '--trust flag'
 		: configTrustLevel
 			? 'agents.config.json'
 			: 'default';
 
+	const isConfirmed =
+		opts.isFullCommitTrustConfirmedFn ?? isFullCommitTrustConfirmed;
+	const isInteractive = opts.isInteractive ?? (() => !!process.stdin.isTTY);
+
+	// An elevated level from agents.config.json (which may be the project's
+	// own committed file) must be confirmed by the user. Unattended starts
+	// (`daemon install`'s service, scripts) cannot answer, so they fall back
+	// to comment-only instead of failing to start at all. A project already
+	// confirmed for full-commit has accepted a superset of auto-fix's risk.
+	if (!parsed.trustLevel && trustLevel !== 'comment-only') {
+		const alreadyConfirmed = isConfirmed(opts.projectRoot);
+		if (!alreadyConfirmed && !isInteractive()) {
+			const requested = trustLevel;
+			trustLevel = 'comment-only';
+			trustSource = `agents.config.json asked for ${requested}, which needs a one-time interactive confirmation (or --trust ${requested}) - using comment-only`;
+		} else if (!alreadyConfirmed && trustLevel === 'auto-fix') {
+			const confirm =
+				opts.confirmConfigAutoFixTrust ?? defaultConfirmConfigAutoFixTrust;
+			if (!(await confirm(opts.projectRoot))) {
+				return {
+					exitCode: 1,
+					output:
+						'Aborted: auto-fix trust from agents.config.json was not confirmed. ' +
+						'Pass --trust comment-only to start without it, or --trust auto-fix to opt in explicitly.',
+				};
+			}
+		}
+	}
+
 	if (trustLevel === 'full-commit') {
-		const isConfirmed =
-			opts.isFullCommitTrustConfirmedFn ?? isFullCommitTrustConfirmed;
 		if (!isConfirmed(opts.projectRoot)) {
 			const confirm =
 				opts.confirmFullCommitTrust ?? defaultConfirmFullCommitTrust;
@@ -337,16 +465,26 @@ async function stop(opts: DaemonCliOptions): Promise<DaemonCliResult> {
 
 	// Prefer IPC: works on Windows (where SIGTERM is force-kill) and gives
 	// the daemon a chance to drain its event loop cleanly. Falls back to
-	// SIGTERM if IPC can't be reached (older daemon, socket missing, etc).
-	const ipcAccepted = await tryIpcShutdown(live.socketPath);
+	// SIGTERM only once IPC has answered (an older daemon without `shutdown`,
+	// a hung request). If IPC can't be reached the PID is unverified: it may
+	// belong to an unrelated process, so it is never signalled.
+	const shutdown = await tryIpcShutdown(live.socketPath);
 
+	if (shutdown === 'unreachable') {
+		return {
+			exitCode: 1,
+			output: `Daemon (pid ${live.pid}) is not answering on ${live.socketPath}, so the pid cannot be confirmed as the daemon and was not signalled. Lockfile preserved; check the daemon log.`,
+		};
+	}
+
+	const ipcAccepted = shutdown === 'accepted';
 	if (!ipcAccepted) {
 		try {
 			process.kill(live.pid, 'SIGTERM');
 		} catch (err) {
 			return {
 				exitCode: 1,
-				output: `Failed to stop daemon (pid ${live.pid}): IPC unreachable and SIGTERM failed: ${formatError(
+				output: `Failed to stop daemon (pid ${live.pid}): IPC shutdown failed and SIGTERM failed: ${formatError(
 					err,
 				)}`,
 			};
@@ -368,11 +506,14 @@ async function stop(opts: DaemonCliOptions): Promise<DaemonCliResult> {
 
 /**
  * Best-effort attempt to ask the daemon to shut itself down over IPC.
- * Returns true if the daemon accepted the request. Any failure (no socket,
- * timeout, older daemon without the method) returns false so the caller
- * can fall back to SIGTERM.
+ * 'accepted': the daemon took the request. 'failed': it answered the
+ * connection but not the request (timeout, older daemon without the
+ * method), so the caller can fall back to SIGTERM. 'unreachable': no
+ * connection, so nothing confirms the lockfile's pid is the daemon.
  */
-async function tryIpcShutdown(socketPath: string): Promise<boolean> {
+async function tryIpcShutdown(
+	socketPath: string,
+): Promise<'accepted' | 'failed' | 'unreachable'> {
 	const {DaemonIpcClient} = await import('./ipc');
 	const client = new DaemonIpcClient(socketPath);
 	try {
@@ -383,7 +524,7 @@ async function tryIpcShutdown(socketPath: string): Promise<boolean> {
 			),
 		]);
 	} catch {
-		return false;
+		return 'unreachable';
 	}
 	try {
 		await Promise.race([
@@ -392,9 +533,9 @@ async function tryIpcShutdown(socketPath: string): Promise<boolean> {
 				setTimeout(() => reject(new Error('IPC shutdown timeout')), 2000),
 			),
 		]);
-		return true;
+		return 'accepted';
 	} catch {
-		return false;
+		return 'failed';
 	} finally {
 		await client.disconnect().catch(() => {});
 	}
@@ -413,9 +554,12 @@ async function status(opts: DaemonCliOptions): Promise<DaemonCliResult> {
 		};
 	}
 	const uptime = formatUptime(Date.now() - live.startedAt);
+	const trust = isTrustLevel(live.ciTrustLevel)
+		? `, CI trust level ${live.ciTrustLevel}`
+		: '';
 	return {
 		exitCode: 0,
-		output: `Running. pid ${live.pid}, socket ${live.socketPath}, uptime ${uptime}.`,
+		output: `Running. pid ${live.pid}, socket ${live.socketPath}, uptime ${uptime}${trust}.`,
 	};
 }
 
@@ -510,8 +654,11 @@ async function waitForLockfileGone(
 ): Promise<boolean> {
 	const deadline = Date.now() + timeoutMs;
 	while (Date.now() < deadline) {
-		// Reap a stale lockfile only when its process has actually exited.
-		if (!(await readLiveLockfile(projectRoot))) return true;
+		// Reap a stale lockfile only when its process has actually exited: a
+		// shutting-down daemon closes its IPC endpoint well before it exits.
+		if (!(await readLiveLockfile(projectRoot, {verifyIpc: false}))) {
+			return true;
+		}
 		await new Promise(r => setTimeout(r, 50));
 	}
 	return false;

@@ -1,6 +1,7 @@
 import React from 'react';
 import {appendToolDefinitionsToPrompt} from '@/ai-sdk-client/tools/system-prompt-assembler';
 import {ConversationStateManager} from '@/app/utils/conversation-state';
+import {infoMsg} from '@/components/message-factory';
 import UserMessage from '@/components/user-message';
 import {getAppConfig} from '@/config/index';
 import {
@@ -9,16 +10,21 @@ import {
 	getProjectContextPreferences,
 	subscribeToPreferences,
 } from '@/config/preferences';
+import {MessageBuilder} from '@/conversation/message-builder';
+import {
+	buildSystemPrompt,
+	setLastBuiltPrompt,
+} from '@/conversation/prompt-builder';
 import {CommandIntegration} from '@/custom-commands/command-integration';
-import {appendRelevantProjectContextWithCount} from '@/memory/project-context';
+import {buildProjectContextSection} from '@/memory/project-context';
 import {SemanticMemoryManager} from '@/memory/semantic-memory-manager';
 import {processToolUse} from '@/message-handler';
-import {generateKey} from '@/session/key-generator';
+import {appendActivePlanContext} from '@/plans/context';
 import {getTuneToolMode} from '@/types/config';
 import type {ImageAttachment, Message} from '@/types/core';
-import {MessageBuilder} from '@/utils/message-builder';
-import {infoMsg} from '@/utils/message-factory';
-import {buildSystemPrompt, setLastBuiltPrompt} from '@/utils/prompt-builder';
+import {generateKey} from '@/utils/key-generator';
+import {getLogger} from '@/utils/logging';
+import {appendTurnContext} from '@/utils/turn-context';
 import {processAssistantResponse} from './conversation/conversation-loop';
 import {createResetStreamingState} from './state/streaming-state';
 import type {ChatHandlerReturn, UseChatHandlerProps} from './types';
@@ -81,7 +87,6 @@ export function useChatHandler({
 	currentModel,
 	setIsCancelling,
 	addToChatQueue,
-	abortController,
 	setAbortController,
 	developmentMode = 'normal',
 	developmentModeRef,
@@ -104,7 +109,6 @@ export function useChatHandler({
 	memoryFinder,
 	projectContextOptions,
 	ensureCurrentSessionId,
-	restrictedScope,
 }: UseChatHandlerProps): ChatHandlerReturn {
 	// Conversation state manager for enhanced context
 	const conversationStateManager = React.useRef(new ConversationStateManager());
@@ -169,6 +173,7 @@ export function useChatHandler({
 			getAppConfig().systemPrompt,
 			currentModel,
 			getProfessionalTone(),
+			toolManager,
 		);
 
 		const tools = toolsDisabled
@@ -255,6 +260,13 @@ export function useChatHandler({
 				created: boolean;
 				name?: string;
 			},
+			// The turn's controller, passed by the caller that created it. Reading
+			// the `abortController` prop here instead would see the value from the
+			// render this callback was memoised in - usually null, since the
+			// caller's setAbortController has not re-rendered yet - and the loop
+			// would mint a second controller that the caller's abort checks never
+			// see.
+			turnController?: AbortController,
 		) => {
 			if (!client) return;
 
@@ -264,7 +276,7 @@ export function useChatHandler({
 					messages: msgs,
 					client,
 					toolManager,
-					abortController,
+					abortController: turnController ?? null,
 					setAbortController,
 					setIsGenerating,
 					setStreamingReasoning,
@@ -296,7 +308,6 @@ export function useChatHandler({
 					workingDirectory: process.cwd(),
 					onToolExecuted,
 					onFinalAssistantText,
-					restrictedScope,
 					onPrivacyEvent: (count: number) => {
 						// `count` is the number of NEW identifiers scrubbed on this turn
 						// (the per-turn delta), not a session running total.
@@ -319,7 +330,6 @@ export function useChatHandler({
 		[
 			client,
 			toolManager,
-			abortController,
 			setAbortController,
 			setMessages,
 			addToChatQueue,
@@ -342,7 +352,6 @@ export function useChatHandler({
 			onApiCallComplete,
 			privacySessionMapRef,
 			privacyEnabled,
-			restrictedScope,
 		],
 	);
 
@@ -382,7 +391,12 @@ export function useChatHandler({
 		const displayMessage = displayValue ?? message;
 
 		// Add user message to chat using display version (with placeholders)
-		// Pass the full assembled message for accurate token counting
+		// Pass the full assembled message for accurate token counting.
+		//
+		// Queued before the per-turn context below, which awaits a semantic
+		// memory search: the bubble must echo immediately, not after a disk
+		// round-trip. The block it omits is counted in the status-line context
+		// %, which measures the message array rather than this bubble.
 		addToChatQueue(
 			<UserMessage
 				key={generateKey('user')}
@@ -391,6 +405,51 @@ export function useChatHandler({
 				imageCount={images?.length ?? 0}
 			/>,
 		);
+
+		// Create abort controller for cancellation. This is the turn's only
+		// controller: it is handed to the conversation loop explicitly, so the
+		// one Escape aborts (app state) is the one the checks below read.
+		//
+		// Created before the per-turn context below, which awaits a semantic
+		// memory search: Escape pressed during that search has to land on this
+		// turn's controller, or the turn would go on to call the model with a
+		// signal nobody can abort.
+		const controller = new AbortController();
+		setAbortController(controller);
+
+		// Per-turn context (skills matched for this request, memories recalled
+		// for it) rides at the end of the user message rather than being
+		// appended to the system prompt, so the system block stays byte-stable
+		// for the session and history remains append-only (#1574).
+		//
+		// Best-effort, matching the recall below: context is an optimization, so
+		// a broken skills loader degrades this turn instead of failing it.
+		let skillsSection = '';
+		try {
+			skillsSection = commandIntegration?.buildSkillsSection(message) ?? '';
+		} catch (error) {
+			getLogger().warn({error}, 'Failed to build the skills section');
+		}
+		const projectContext = await buildProjectContextSection(
+			message,
+			projectMemoryFinder,
+			// Preferences supply the defaults; an explicit prop still wins so
+			// callers (and tests) can override per session.
+			{...getProjectContextPreferences(), ...projectContextOptions},
+		);
+		const messageWithContext = appendTurnContext(message, [
+			skillsSection,
+			projectContext.content,
+		]);
+
+		if (projectContext.memoryCount > 0) {
+			addToChatQueue(
+				infoMsg(
+					`Recalling ${projectContext.memoryCount} project memor${projectContext.memoryCount === 1 ? 'y' : 'ies'}...`,
+					'memory-recall',
+				),
+			);
+		}
 
 		// Add user message to conversation history (single addition). Any
 		// caller-supplied historyMessages (e.g. the preceding turns of a
@@ -401,7 +460,7 @@ export function useChatHandler({
 		for (const historyMessage of historyMessages ?? []) {
 			builder.addMessage(historyMessage);
 		}
-		builder.addUserMessage(message, images);
+		builder.addUserMessage(messageWithContext, images);
 		const updatedMessages = builder.build();
 		setMessages(updatedMessages);
 
@@ -409,10 +468,6 @@ export function useChatHandler({
 		if (messages.length === 0) {
 			conversationStateManager.current.initializeState(message);
 		}
-
-		// Create abort controller for cancellation
-		const controller = new AbortController();
-		setAbortController(controller);
 
 		// Keep Architect checkpoint state for the entire user turn.
 		const architectCheckpointState: {
@@ -423,6 +478,10 @@ export function useChatHandler({
 		};
 
 		try {
+			// Skills and recalled memories are no longer appended here: they
+			// travel in the user message (see above), which is what makes the
+			// memo's "stable across turns" claim actually hold. The persisted
+			// plan block below is the one remaining per-turn addition.
 			let systemPrompt = getBaseSystemPrompt(
 				developmentMode,
 				cachedBasePrompt,
@@ -432,32 +491,18 @@ export function useChatHandler({
 				currentModel,
 			);
 
-			// Enhance with relevant commands (progressive disclosure)
-			if (commandIntegration) {
-				systemPrompt = commandIntegration.enhanceSystemPrompt(
-					systemPrompt,
-					message,
-				);
-			}
-
-			const projectContext = await appendRelevantProjectContextWithCount(
-				systemPrompt,
-				message,
-				projectMemoryFinder,
-				// Preferences supply the defaults; an explicit prop still wins so
-				// callers (and tests) can override per session.
-				{...getProjectContextPreferences(), ...projectContextOptions},
-			);
-			systemPrompt = projectContext.systemPrompt;
+			// Persisted plan state changes between turns and must be visible after
+			// a restart, so it is appended here rather than baked into the cached
+			// base prompt. It costs the prefix on every turn of a session with an
+			// active plan — the same cost #1574 removes for skills and memories —
+			// but moving it is out of scope here, so it keeps main's behaviour.
+			//
+			// Published after the append, not before: the memo publishes the base
+			// prompt, and the context % has to measure what is actually sent. The
+			// moved skills/memory block is not double-counted, since it now lives
+			// in the message array the indicator already sums.
+			systemPrompt = await appendActivePlanContext(systemPrompt);
 			setLastBuiltPrompt(systemPrompt);
-			if (projectContext.memoryCount > 0) {
-				addToChatQueue(
-					infoMsg(
-						`Recalling ${projectContext.memoryCount} project memor${projectContext.memoryCount === 1 ? 'y' : 'ies'}...`,
-						'memory-recall',
-					),
-				);
-			}
 
 			// Create stream request
 			const systemMessage: Message = {
@@ -477,6 +522,7 @@ export function useChatHandler({
 					finalAssistantText = content;
 				},
 				architectCheckpointState,
+				controller,
 			);
 
 			if (

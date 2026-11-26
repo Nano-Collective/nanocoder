@@ -6,8 +6,7 @@ import {diffEditTool} from './file-ops/diff-edit.js';
 import {writeFileTool} from './file-ops/write-file.js';
 import {stringReplaceTool} from './file-ops/string-replace.js';
 import {readFileTool} from './read-file.js';
-import {markFileSeen} from '../utils/read-tracker.js';
-import {setProjectRoot, resetSessionCwd} from '../services/session-cwd.js';
+import {markFileSeenAndVisible} from './runtime/read-tracker.js';
 
 // ============================================================================
 // Test Setup
@@ -288,7 +287,7 @@ test('string_replace validator: accepts valid relative paths', async (t) => {
 
 		// The validator enforces read-before-edit: mark the file as seen using
 		// the same resolved path it computes internally (resolve(path) from cwd).
-		markFileSeen(resolve('test.txt'));
+		markFileSeenAndVisible(resolve('test.txt'));
 
 		const result = await validator({
 			path: 'test.txt',
@@ -409,7 +408,7 @@ test('diff_edit validator: accepts valid relative paths', async (t) => {
 
 		const testFile = join(testDir, 'test.txt');
 		await fsWriteFile(testFile, 'old content', 'utf-8');
-		markFileSeen(resolve('test.txt'));
+		markFileSeenAndVisible(resolve('test.txt'));
 
 		const result = await validator({
 			path: 'test.txt',
@@ -602,53 +601,5 @@ test('all tools: consistently reject common attack vectors', async (t) => {
 		}
 	} finally {
 		process.chdir(originalCwd);
-	}
-});
-
-// ============================================================================
-// Restricted Scope Tests
-// ============================================================================
-
-test('writeFile validator: restricts writes to explicit scope via context', async (t) => {
-	const validator = writeFileTool.validator;
-	if (!validator) {
-		t.fail('write_file validator not defined');
-		return;
-	}
-
-	const originalCwd = process.cwd();
-
-	try {
-		process.chdir(testDir);
-		setProjectRoot(testDir);
-		const scopeDir = join(testDir, 'src');
-		await mkdir(scopeDir, {recursive: true});
-		
-		const context = {restrictedScope: scopeDir};
-
-		// 1. Path exactly equal to scope
-		// (wait, path must be a file, so it can't be exactly the scope dir if it writes to it, but it's nested)
-
-		// valid inside scope
-		const validResult = await validator({path: 'src/app.tsx', content: 'test'}, context);
-		t.true(validResult.valid);
-
-		// 2. sibling prefix attack
-		await mkdir(join(testDir, 'src2'), {recursive: true});
-		const siblingResult = await validator({path: 'src2/file.ts', content: 'test'}, context);
-		t.false(siblingResult.valid);
-		if (!siblingResult.valid) {
-			t.regex(siblingResult.error, /escapes restricted scope/);
-		}
-
-		// 3. absolute path outside scope
-		const absResult = await validator({path: resolve(testDir, 'package.json'), content: 'test'}, context);
-		t.false(absResult.valid);
-		if (!absResult.valid) {
-			t.regex(absResult.error, /escapes restricted scope/);
-		}
-	} finally {
-		process.chdir(originalCwd);
-		resetSessionCwd();
 	}
 });

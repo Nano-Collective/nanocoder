@@ -33,6 +33,12 @@ export interface ExtensionMessageSessionLoaded {
 	type: 'sessionLoaded';
 }
 
+export interface ExtensionMessageSessionResuming {
+	type: 'sessionResuming';
+	isResuming: boolean;
+	sessionId?: string;
+}
+
 export interface ExtensionMessageAcpUpdate {
 	type: 'acpUpdate';
 	update: any; // schema.SessionNotification or custom internal payload
@@ -59,6 +65,14 @@ export interface ExtensionMessagePermissionRequested {
 	toolCallId: string;
 	toolCall: any;
 	options?: any[];
+}
+
+export interface ExtensionMessagePendingChangeAdded {
+	type: 'pendingChangeAdded';
+	toolCallId: string;
+	filePath: string;
+	additions: number;
+	deletions: number;
 }
 
 /** Sent when a cancel or a new chat drops permission prompts still on screen. */
@@ -232,12 +246,14 @@ export type ExtensionToWebviewMessage =
 	| ExtensionMessageToolUpdated
 	| ExtensionMessageToolCompleted
 	| ExtensionMessagePermissionRequested
+	| ExtensionMessagePendingChangeAdded
 	| ExtensionMessagePermissionsCancelled
 	| ExtensionMessageProviderResult
 	| ExtensionMessageSyncState
 	| ExtensionMessageConnectionStatus
 	| ExtensionMessageUpdateSessions
 	| ExtensionMessageSessionLoaded
+	| ExtensionMessageSessionResuming
 	| ExtensionMessageSettingsData
 	| ExtensionMessageSettingsUpdated
 	| ExtensionMessageTokenUsageVisibility
@@ -305,6 +321,7 @@ export interface WebviewMessageResolveTool {
 export interface WebviewMessageShowDiff {
 	type: 'showDiff';
 	toolCallId: string;
+	filePath?: string;
 }
 
 

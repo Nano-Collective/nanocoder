@@ -1,72 +1,89 @@
 import test from 'ava';
-import React from 'react';
 import {render} from 'ink-testing-library';
+import React from 'react';
+import {getThemeColors} from '@/config/themes';
+import {ThemeContext} from '@/hooks/useTheme';
+import type {SwarmSnapshot, SwarmStatus} from '@/swarm/types';
+import {SwarmDashboard} from './swarm-dashboard';
 
-import {SwarmDashboardUI} from './swarm-dashboard';
-import type {SwarmConfig} from '@/app/types';
-
-test('SwarmDashboardUI renders correct number of workers', t => {
-	const config: SwarmConfig = {
-		prompt: 'refactor auth',
-		workers: 3,
-		swarmMode: 'review',
-	};
-
-	const workers = [
-		{ id: '1', status: 'running', tokens: 100 },
-		{ id: '2', status: 'running', tokens: 200 },
-		{ id: '3', status: 'running', tokens: 300 },
-	];
-
-	const {lastFrame, unmount} = render(
-		<SwarmDashboardUI
-			config={config}
-			swarmStatus="running"
-			workers={workers}
-		/>
-	);
-	const frame = lastFrame();
-
-	t.truthy(frame?.includes('Worker 1'));
-	t.truthy(frame?.includes('Worker 2'));
-	t.truthy(frame?.includes('Worker 3'));
-	t.falsy(frame?.includes('Worker 4'));
-	// The prompt is not rendered, so we don't assert it.
-	t.truthy(frame?.includes('review'));
-	t.truthy(frame?.includes('running'));
-	unmount();
+const snapshot = (status: SwarmStatus): SwarmSnapshot => ({
+	status,
+	applied: false,
+	runDir: '.nanocoder/swarm/x',
+	patches: [{id: 'api', files: ['src/api/a.ts'], patchPath: 'api.patch'}],
+	workers: [
+		{
+			id: 'api',
+			status: 'running',
+			fileScope: ['src/api'],
+			currentTool: 'read_file',
+			turns: 2,
+			tokens: 0,
+		},
+		{id: 'ui', status: 'success', fileScope: ['src/ui'], turns: 3, tokens: 90},
+	],
 });
 
-test('SwarmDashboardUI renders different states correctly', t => {
-	const config: SwarmConfig = {
-		prompt: 'test transitions',
-		workers: 1,
-		swarmMode: 'yolo',
-		restrictedScope: 'src/',
+function mount(status: SwarmStatus) {
+	const answers: boolean[] = [];
+	let cancelled = 0;
+	const instance = render(
+		<ThemeContext.Provider
+			value={{
+				currentTheme: 'tokyo-night',
+				colors: getThemeColors('tokyo-night'),
+				setCurrentTheme: () => undefined,
+			}}
+		>
+			<SwarmDashboard
+				config={{
+					prompt: 'goal',
+					workers: 2,
+					swarmMode: 'apply',
+					timeoutMs: 1000,
+				}}
+				snapshot={snapshot(status)}
+				onCancel={() => cancelled++}
+				onConfirm={apply => answers.push(apply)}
+			/>
+		</ThemeContext.Provider>,
+	);
+	const press = async (input: string) => {
+		await new Promise(resolve => setTimeout(resolve, 50));
+		instance.stdin.write(input);
+		await new Promise(resolve => setTimeout(resolve, 100));
 	};
+	return {instance, press, answers, cancelled: () => cancelled};
+}
 
-	const {lastFrame, unmount, rerender} = render(
-		<SwarmDashboardUI
-			config={config}
-			swarmStatus="starting"
-			workers={[{ id: '1', status: 'starting', tokens: 0 }]}
-		/>
-	);
-	
-	// Initial state
-	t.truthy(lastFrame()?.includes('starting'));
-	t.truthy(lastFrame()?.includes('src/'));
-	
-	rerender(
-		<SwarmDashboardUI
-			config={config}
-			swarmStatus="running"
-			workers={[{ id: '1', status: 'running', tokens: 0 }]}
-		/>
-	);
-	
-	t.truthy(lastFrame()?.includes('running'));
-	
-	unmount();
-	t.pass();
+test('shows each worker with its activity', t => {
+	const {instance} = mount('running');
+	const frame = instance.lastFrame() ?? '';
+	t.regex(frame, /api\s+running\s+read_file\s+turn 2/);
+	t.regex(frame, /ui\s+success\s+src\/ui\s+90 tokens/);
+	t.regex(frame, /Ctrl\+C to cancel/);
+	t.notRegex(frame, /\(y\/n\)/);
+	instance.unmount();
+});
+
+test('asks before applying and reports the answer', async t => {
+	for (const [input, answer] of [
+		['y', true],
+		['n', false],
+	] as const) {
+		const {instance, press, answers} = mount('awaiting-confirmation');
+		t.regex(instance.lastFrame() ?? '', /src\/api\/a\.ts[\s\S]*\(y\/n\)/);
+		await press(input);
+		t.deepEqual(answers, [answer]);
+		instance.unmount();
+	}
+});
+
+test('ignores y until asked, and cancels on Ctrl+C', async t => {
+	const {instance, press, answers, cancelled} = mount('running');
+	await press('y');
+	await press('\u0003');
+	t.deepEqual(answers, []);
+	t.is(cancelled(), 1);
+	instance.unmount();
 });

@@ -1,9 +1,7 @@
+import {statSync} from 'node:fs';
 import path from 'node:path';
 import {existsSync, mkdirSync, readFileSync} from 'fs';
-import type {TitleShape} from '@/components/ui/styled-title';
-import {getClosestConfigFile} from '@/config/index';
-import {getConfigPath} from '@/config/paths';
-import {describeProjectTrust} from '@/config/project-trust';
+import {getClosestConfigFile, getConfigPath} from '@/config/paths';
 import {
 	DEFAULT_MEMORY_LIMIT,
 	DEFAULT_TOKEN_BUDGET,
@@ -19,14 +17,35 @@ import type {
 	TuneConfig,
 } from '@/types/config';
 import type {UserPreferences} from '@/types/index';
-import type {NanocoderShape, ThemePreset} from '@/types/ui';
-import {atomicWriteFileSync} from '@/utils/atomic-write';
-import {logError} from '@/utils/message-queue';
+import type {NanocoderShape, ThemePreset, TitleShape} from '@/types/ui';
+import {atomicWriteFileSync} from '@/utils/fs/atomic-write';
+import {normalizeForCompare} from '@/utils/fs/path-validation';
+import {getLogger} from '@/utils/logging';
+import {stripUtf8Bom} from '@/utils/strip-utf8-bom';
 
 let PREFERENCES_PATH: string | null = null;
 let CACHED_CONFIG_DIR: string | undefined = undefined;
 let cachedVoicePreference: import('@/types/config').VoiceConfig | undefined;
+const PREFERENCES_STAT_INTERVAL_MS = 1000;
 
+type PreferencesCache = {
+	path: string;
+	version: number;
+	mtimeMs: number | null;
+	globalMtimeMs: number | null;
+	lastCheckedAt: number;
+	data: UserPreferences;
+};
+
+let preferencesCache: PreferencesCache | null = null;
+
+function getFileMtime(filePath: string): number | null {
+	try {
+		return statSync(filePath).mtimeMs;
+	} catch {
+		return null;
+	}
+}
 function getPreferencesPath(): string {
 	// Re-compute path if NANOCODER_CONFIG_DIR has changed (important for tests)
 	const currentConfigDir = process.env.NANOCODER_CONFIG_DIR;
@@ -43,6 +62,7 @@ export function resetPreferencesCache(): void {
 	PREFERENCES_PATH = null;
 	CACHED_CONFIG_DIR = undefined;
 	cachedVoicePreference = undefined;
+	preferencesCache = null;
 }
 
 // Trust is only ever read from, and written to, the global preferences file.
@@ -55,7 +75,8 @@ function getGlobalPreferencesPath(): string {
 
 function isProjectPreferencesPath(preferencesPath: string): boolean {
 	return (
-		path.resolve(preferencesPath) !== path.resolve(getGlobalPreferencesPath())
+		normalizeForCompare(preferencesPath) !== // nosemgrep
+		normalizeForCompare(getGlobalPreferencesPath()) // nosemgrep
 	);
 }
 
@@ -72,9 +93,11 @@ function readGlobalOnlyPreferences(): Partial<UserPreferences> | undefined {
 	const globalPath = getGlobalPreferencesPath();
 	if (!existsSync(globalPath)) return undefined;
 	try {
-		return JSON.parse(readFileSync(globalPath, 'utf-8')) as UserPreferences;
+		return JSON.parse(
+			stripUtf8Bom(readFileSync(globalPath, 'utf-8')),
+		) as UserPreferences;
 	} catch (error) {
-		logError(`Failed to load global preferences: ${String(error)}`);
+		getLogger().error(`Failed to load global preferences: ${String(error)}`);
 		return undefined;
 	}
 }
@@ -83,10 +106,9 @@ function writeGlobalOnlyPreferences(values: Partial<UserPreferences>): void {
 	const globalPath = getGlobalPreferencesPath();
 	let data: Record<string, unknown> = {};
 	if (existsSync(globalPath)) {
-		data = JSON.parse(readFileSync(globalPath, 'utf-8')) as Record<
-			string,
-			unknown
-		>;
+		data = JSON.parse(
+			stripUtf8Bom(readFileSync(globalPath, 'utf-8')),
+		) as Record<string, unknown>;
 	}
 	mkdirSync(path.dirname(globalPath), {recursive: true});
 	atomicWriteFileSync(
@@ -95,25 +117,108 @@ function writeGlobalOnlyPreferences(values: Partial<UserPreferences>): void {
 	);
 }
 
+/**
+ * The preferences kept only in the global file, read without opening a project
+ * preferences file in the current folder. For a caller that must not depend on
+ * what the folder contains, such as `nanocoder trust`: a project file that is
+ * unreadable or malformed cannot hide the trust list.
+ */
+export function loadGlobalOnlyPreferences(): UserPreferences {
+	const globalPrefs = readGlobalOnlyPreferences();
+	const values: Record<string, unknown> = {};
+	for (const key of GLOBAL_ONLY_KEYS) {
+		if (globalPrefs?.[key] !== undefined) values[key] = globalPrefs[key];
+	}
+	return values as UserPreferences;
+}
+
+/**
+ * Writes global-only keys to the global file and nothing else: a project
+ * preferences file in the current folder is neither read nor rewritten, so
+ * saving does not depend on the folder being writable. Returns `false` when
+ * the write failed.
+ */
+export function saveGlobalOnlyPreferences(
+	values: Partial<Pick<UserPreferences, (typeof GLOBAL_ONLY_KEYS)[number]>>,
+): boolean {
+	try {
+		writeGlobalOnlyPreferences(values);
+	} catch (error) {
+		getLogger().error(`Failed to save global preferences: ${String(error)}`);
+		return false;
+	}
+
+	notifyPreferencesChanged();
+	return true;
+}
+
 export function loadPreferences(): UserPreferences {
 	try {
 		const preferencesPath = getPreferencesPath();
+		const version = getPreferencesVersion();
+		const now = Date.now();
+		const cache = preferencesCache;
+
+		// Internal writes invalidate immediately. Unchanged preferences
+		// avoid filesystem I/O until the next scheduled metadata check.
+		if (
+			cache &&
+			cache.path === preferencesPath &&
+			cache.version === version &&
+			now - cache.lastCheckedAt >= 0 &&
+			now - cache.lastCheckedAt < PREFERENCES_STAT_INTERVAL_MS
+		) {
+			return structuredClone(cache.data);
+		}
+
+		const mtimeMs = getFileMtime(preferencesPath);
+		const isProject = isProjectPreferencesPath(preferencesPath);
+		const globalMtimeMs = isProject
+			? getFileMtime(getGlobalPreferencesPath())
+			: null;
+
+		if (
+			cache &&
+			cache.path === preferencesPath &&
+			cache.version === version &&
+			mtimeMs !== null &&
+			cache.mtimeMs === mtimeMs &&
+			cache.globalMtimeMs === globalMtimeMs
+		) {
+			cache.lastCheckedAt = now;
+			return structuredClone(cache.data);
+		}
+
 		const data = JSON.parse(
-			readFileSync(preferencesPath, 'utf-8'),
+			stripUtf8Bom(readFileSync(preferencesPath, 'utf-8')),
 		) as UserPreferences;
-		if (isProjectPreferencesPath(preferencesPath)) {
+
+		if (isProject) {
 			const globalPrefs = readGlobalOnlyPreferences();
 			const mutable = data as Record<string, unknown>;
+
 			for (const key of GLOBAL_ONLY_KEYS) {
 				const value = globalPrefs?.[key];
+
 				if (value === undefined) delete mutable[key];
 				else mutable[key] = value;
 			}
 		}
+
+		preferencesCache = {
+			path: preferencesPath,
+			version,
+			mtimeMs,
+			globalMtimeMs,
+			lastCheckedAt: now,
+			data: structuredClone(data),
+		};
+
 		return data;
 	} catch (error) {
-		logError(`Failed to load preferences: ${String(error)}`);
+		getLogger().error(`Failed to load preferences: ${String(error)}`);
 	}
+
 	return {};
 }
 
@@ -143,6 +248,18 @@ export function getPreferencesVersion(): number {
 	return preferencesVersion;
 }
 
+/**
+ * Invalidate cached preference data after a successful write and notify
+ * subscribers that the preference snapshot changed.
+ */
+export function notifyPreferencesChanged(): void {
+	preferencesCache = null;
+	preferencesVersion++;
+	for (const listener of preferencesListeners) {
+		listener();
+	}
+}
+
 // Caches a derived preference, keyed on NANOCODER_CONFIG_DIR and getPreferencesVersion()
 // (bumped on every write), so the value never goes stale after a settings change.
 function cachedPreference<T>(read: (prefs: UserPreferences) => T): () => T {
@@ -157,7 +274,13 @@ function cachedPreference<T>(read: (prefs: UserPreferences) => T): () => T {
 	};
 }
 
-export function savePreferences(preferences: UserPreferences): void {
+/**
+ * Writes the preferences file. Returns `false` when the write failed — the
+ * error is logged here rather than thrown, so callers that must know whether
+ * the value actually reached disk (the trust gate, whose message claims a
+ * persisted entry) have a signal to branch on.
+ */
+export function savePreferences(preferences: UserPreferences): boolean {
 	try {
 		const preferencesPath = getPreferencesPath();
 		if (isProjectPreferencesPath(preferencesPath)) {
@@ -179,147 +302,55 @@ export function savePreferences(preferences: UserPreferences): void {
 			);
 		}
 	} catch (error) {
-		logError(`Failed to save preferences: ${String(error)}`);
-		return;
+		getLogger().error(`Failed to save preferences: ${String(error)}`);
+		return false;
 	}
 
-	preferencesVersion++;
 	cachedVoicePreference = preferences.voice;
-	for (const listener of preferencesListeners) {
-		listener();
-	}
+	notifyPreferencesChanged();
+	return true;
 }
 
-/** The path a trust entry names, or null for a hand-edited entry with none. */
-function trustPath(entry: unknown): string | null {
-	if (typeof entry === 'string') return entry;
-	if (entry && typeof entry === 'object') {
-		const entryPath = (entry as {path?: unknown}).path;
-		if (typeof entryPath === 'string') return entryPath;
-	}
-	return null;
+// ============================================================================
+// Preference accessors
+// ----------------------------------------------------------------------------
+// Most preferences are a single top-level key: read it (falling back to a
+// default when unset), or write it and save. `getPreference` and
+// `setPreference` do that for any key, typed by UserPreferences; boolean
+// defaults live in one table instead of being repeated in each getter.
+// Accessors with their own logic (clamping, nesting, caching) follow below.
+// ============================================================================
+
+function getPreference<K extends keyof UserPreferences>(
+	key: K,
+): UserPreferences[K] {
+	return loadPreferences()[key];
 }
 
-/**
- * True if `directory` is recorded with a fingerprint that still matches
- * what the folder will run. Shared by every trust-gated entry point —
- * the interactive TUI's `useDirectoryTrust`, `--plain`'s `runPlainShell`,
- * and the daemon boot path — so the resolution rule can't drift between them.
- */
-export function isDirectoryTrusted(
-	directory: string,
-	preferences: UserPreferences,
-): boolean {
-	const resolved = path.resolve(directory); // nosemgrep
-	const fingerprint = describeProjectTrust(resolved).fingerprint;
-	return (preferences.trustedDirectories ?? []).some(entry => {
-		const entryPath = trustPath(entry);
-		return (
-			typeof entry === 'object' &&
-			entryPath !== null &&
-			path.resolve(entryPath) === resolved && // nosemgrep
-			entry.fingerprint === fingerprint
-		);
-	});
+function setPreference<K extends keyof UserPreferences>(
+	key: K,
+	value: UserPreferences[K],
+): void {
+	const preferences = loadPreferences();
+	preferences[key] = value;
+	savePreferences(preferences);
 }
 
-/**
- * Why a folder with a trust entry is asked again: its fingerprint changed,
- * or the entry is a bare path saved before fingerprints existed.
- */
-export type TrustRecheck = 'changed' | 'upgrade';
+/** Boolean preferences and the value each takes when unset. */
+const BOOLEAN_PREFERENCE_DEFAULTS = {
+	reasoningExpanded: false,
+	compactToolDisplay: true,
+	showUsageFooter: true,
+	enablePromptScrubbing: false,
+	alternateScreen: true,
+	mouseReporting: true,
+	professionalTone: false,
+} as const satisfies Partial<Record<keyof UserPreferences, boolean>>;
 
-/** Null when `directory` has no trust entry at all. */
-export function trustRecheck(
-	directory: string,
-	preferences: UserPreferences,
-): TrustRecheck | null {
-	const resolved = path.resolve(directory); // nosemgrep
-	let recheck: TrustRecheck | null = null;
-	for (const entry of preferences.trustedDirectories ?? []) {
-		const entryPath = trustPath(entry);
-		if (entryPath === null || path.resolve(entryPath) !== resolved) continue; // nosemgrep
-		if (typeof entry !== 'string') return 'changed';
-		recheck = 'upgrade';
-	}
-	return recheck;
-}
+type BooleanPreference = keyof typeof BOOLEAN_PREFERENCE_DEFAULTS;
 
-/** Shared wording for "Directory X ..." and "This folder ...". */
-export function untrustedReason(recheck: TrustRecheck | null | undefined) {
-	if (recheck === 'changed') return 'changed since you trusted it';
-	if (recheck === 'upgrade') return 'needs re-approval after the upgrade';
-	return 'is not trusted';
-}
-
-/**
- * Record this folder, including a fingerprint of what it will run. The
- * prompt passes the fingerprint it showed, so a file that lands while it
- * is open is asked about on the next start instead of trusted unseen.
- */
-export function grantDirectoryTrust(
-	preferences: UserPreferences,
-	directory: string,
-	fingerprint = describeProjectTrust(directory).fingerprint,
-): UserPreferences {
-	const resolved = path.resolve(directory); // nosemgrep
-	const trustedDirectories = (preferences.trustedDirectories ?? []).filter(
-		entry => {
-			const entryPath = trustPath(entry);
-			return entryPath === null || path.resolve(entryPath) !== resolved; // nosemgrep
-		},
-	);
-	trustedDirectories.push({path: resolved, fingerprint});
-	return {...preferences, trustedDirectories};
-}
-
-export interface DirectoryTrustResult {
-	trusted: boolean;
-	/** True if this call persisted a new trust entry (env-var bypass only). */
-	persisted: boolean;
-	/** Set when refusing a folder that has a trust entry. */
-	recheck?: TrustRecheck | null;
-}
-
-export interface DirectoryTrustDeps {
-	loadPreferences: typeof loadPreferences;
-	savePreferences: typeof savePreferences;
-}
-
-/**
- * Resolves directory trust for a non-interactive entry point (`--plain`,
- * `nanocoder daemon start`) — anywhere that has no disclaimer UI to show.
- *
- * `bypass` is the caller's own one-shot override (each entry point's own
- * `--trust-directory` flag); it never persists, matching the interactive
- * disclaimer's per-run nature. A directory is trusted only when its saved
- * fingerprint still matches what the folder will run (see
- * `describeProjectTrust`). A path with no fingerprint, or an old
- * fingerprint, is not trusted, and `recheck` says which so the caller can
- * word it. `NANOCODER_TRUST_DIRECTORY=1` records the current fingerprint.
- */
-export function ensureDirectoryTrust(
-	directory: string,
-	bypass: boolean,
-	deps: DirectoryTrustDeps = {loadPreferences, savePreferences},
-): DirectoryTrustResult {
-	if (bypass) return {trusted: true, persisted: false};
-
-	const preferences = deps.loadPreferences();
-	if (isDirectoryTrusted(directory, preferences)) {
-		return {trusted: true, persisted: false};
-	}
-
-	if (process.env.NANOCODER_TRUST_DIRECTORY === '1') {
-		deps.savePreferences(grantDirectoryTrust(preferences, directory));
-		return {trusted: true, persisted: true};
-	}
-
-	return {
-		trusted: false,
-		persisted: false,
-		recheck: trustRecheck(directory, preferences),
-	};
+function getBooleanPreference(key: BooleanPreference): boolean {
+	return getPreference(key) ?? BOOLEAN_PREFERENCE_DEFAULTS[key];
 }
 
 export function updateLastUsed(provider: string, model: string): void {
@@ -336,51 +367,39 @@ export function updateLastUsed(provider: string, model: string): void {
 	savePreferences(preferences);
 }
 
+export function getLastUsedModel(provider: string): string | undefined {
+	return getPreference('providerModels')?.[provider];
+}
+
 export function updateTitleShape(shape: string): void {
-	const preferences = loadPreferences();
-	preferences.titleShape = shape as TitleShape;
-	savePreferences(preferences);
+	setPreference('titleShape', shape as TitleShape);
 }
 
 export function getTitleShape(): TitleShape | undefined {
-	const preferences = loadPreferences();
-	return preferences.titleShape;
+	return getPreference('titleShape');
 }
 
 export function updateSelectedTheme(theme: string): void {
-	const preferences = loadPreferences();
-	preferences.selectedTheme = theme as ThemePreset;
-	savePreferences(preferences);
-}
-
-export function getLastUsedModel(provider: string): string | undefined {
-	const preferences = loadPreferences();
-	return preferences.providerModels?.[provider];
+	setPreference('selectedTheme', theme as ThemePreset);
 }
 
 export function updateNanocoderShape(shape: NanocoderShape): void {
-	const preferences = loadPreferences();
-	preferences.nanocoderShape = shape;
-	savePreferences(preferences);
+	setPreference('nanocoderShape', shape);
 }
 
 export function getNanocoderShape(): NanocoderShape | undefined {
-	const preferences = loadPreferences();
-	return preferences.nanocoderShape;
+	return getPreference('nanocoderShape');
 }
 
 export function saveTune(config: TuneConfig): void {
-	const preferences = loadPreferences();
-	preferences.tune = config;
-	savePreferences(preferences);
+	setPreference('tune', config);
 }
 
 /**
  * Get the notifications config from the preferences file.
  */
 export function getNotificationsPreference(): NotificationsConfig | undefined {
-	const preferences = loadPreferences();
-	return preferences.notifications;
+	return getPreference('notifications');
 }
 
 /**
@@ -389,9 +408,7 @@ export function getNotificationsPreference(): NotificationsConfig | undefined {
 export function updateNotificationsPreference(
 	config: NotificationsConfig,
 ): void {
-	const preferences = loadPreferences();
-	preferences.notifications = config;
-	savePreferences(preferences);
+	setPreference('notifications', config);
 }
 
 /**
@@ -400,8 +417,128 @@ export function updateNotificationsPreference(
  * natural follow-up once the feature has seen real-world use).
  */
 export function getCiWatchPreference(): CiWatchConfig | undefined {
-	const preferences = loadPreferences();
-	return preferences.ciWatch;
+	return getPreference('ciWatch');
+}
+
+/**
+ * Get the reasoning expanded preference. Default false.
+ */
+export function getReasoningExpanded(): boolean {
+	return getBooleanPreference('reasoningExpanded');
+}
+
+export function updateReasoningExpanded(value: boolean): void {
+	setPreference('reasoningExpanded', value);
+}
+
+/**
+ * Get the compact tool display preference. Default true.
+ */
+export function getCompactToolDisplay(): boolean {
+	return getBooleanPreference('compactToolDisplay');
+}
+
+export function updateCompactToolDisplay(value: boolean): void {
+	setPreference('compactToolDisplay', value);
+}
+
+/**
+ * Get the per-response usage footer preference. Default true.
+ */
+export function getShowUsageFooter(): boolean {
+	return getBooleanPreference('showUsageFooter');
+}
+
+export function updateShowUsageFooter(value: boolean): void {
+	setPreference('showUsageFooter', value);
+}
+
+/**
+ * Get the privacy scrubbing preference. Default false.
+ */
+export function getPrivacyPreference(): boolean {
+	return getBooleanPreference('enablePromptScrubbing');
+}
+
+export function updatePrivacyPreference(value: boolean): void {
+	setPreference('enablePromptScrubbing', value);
+}
+
+/**
+ * Get the alternate-screen (fullscreen) preference. Default true. Also
+ * settable via --alt-screen/--no-alt-screen at launch; this is the persisted
+ * default.
+ */
+export function getAlternateScreen(): boolean {
+	return getBooleanPreference('alternateScreen');
+}
+
+export function updateAlternateScreen(value: boolean): void {
+	setPreference('alternateScreen', value);
+}
+
+/**
+ * Get the mouse reporting preference. When true (default), the terminal reports
+ * wheel ticks to the app so the mouse wheel scrolls the chat viewport; text
+ * selection then needs Shift+drag (Option+drag in iTerm2). When false, the
+ * terminal does not capture the mouse at all, so native text selection
+ * (double-click, drag) works directly and the wheel does nothing.
+ */
+export function getMouseReporting(): boolean {
+	return getBooleanPreference('mouseReporting');
+}
+
+/**
+ * How the kitty keyboard protocol is negotiated at startup. 'auto' (default):
+ * query the terminal and enable the protocol on an affirmative reply — what
+ * makes Shift+Enter distinct from Enter in kitty-protocol terminals. 'enabled':
+ * switch the protocol on without asking, for a terminal whose reply is lost
+ * across a transport that eats the query. 'disabled': write no protocol bytes
+ * at all, for transports that print them. An invalid value falls back to
+ * 'auto'.
+ */
+export function getKittyKeyboardMode(): 'auto' | 'enabled' | 'disabled' {
+	const value = getPreference('kittyKeyboardMode');
+	return value === 'enabled' || value === 'disabled' ? value : 'auto';
+}
+
+export function updateKittyKeyboardMode(
+	mode: 'auto' | 'enabled' | 'disabled',
+): void {
+	setPreference('kittyKeyboardMode', mode);
+}
+
+export function updateMouseReporting(value: boolean): void {
+	setPreference('mouseReporting', value);
+}
+
+/**
+ * Get the professional ("boring") tone preference. Default false. When on,
+ * progress text is strictly functional and the model is instructed to keep
+ * responses terse.
+ */
+export function getProfessionalTone(): boolean {
+	return getBooleanPreference('professionalTone');
+}
+
+export function updateProfessionalTone(value: boolean): void {
+	setPreference('professionalTone', value);
+}
+
+// Cached: re-reads only when NANOCODER_CONFIG_DIR changes or a write bumps the version.
+const cachedShowAgentBashOutput = cachedPreference(
+	prefs => prefs.showAgentBashOutput === true,
+);
+
+/**
+ * Get the agent bash output preference. Default false.
+ */
+export function getShowAgentBashOutput(): boolean {
+	return cachedShowAgentBashOutput();
+}
+
+export function updateShowAgentBashOutput(value: boolean): void {
+	setPreference('showAgentBashOutput', value);
 }
 
 /**
@@ -432,93 +569,47 @@ export function updatePasteThreshold(threshold: number): void {
 	savePreferences(preferences);
 }
 
+/** Ink's default rendering frame rate when maxFps is not configured. */
+export const DEFAULT_MAX_FPS = 30;
+/** Minimum allowable frame rate limit for Ink's maxFps (1 frame per second). */
+export const MIN_MAX_FPS = 1;
+/** Maximum allowable frame rate limit for Ink's maxFps (60 frames per second). */
+export const MAX_MAX_FPS = 60;
+
 /**
- * Get the reasoning expanded preference from preferences or environment
+ * Validate Ink's maxFps preference.
+ * Must be an integer between MIN_MAX_FPS (1) and MAX_MAX_FPS (60) inclusive.
  */
-export function getReasoningExpanded(): boolean {
-	const preferences = loadPreferences();
-	return preferences.reasoningExpanded ?? false;
+export function isValidMaxFps(value: unknown): value is number {
+	return (
+		typeof value === 'number' &&
+		Number.isInteger(value) &&
+		value >= MIN_MAX_FPS &&
+		value <= MAX_MAX_FPS
+	);
 }
 
 /**
- * Save the reasoning expanded preference
+ * Get the configured maxFps preference if valid, or undefined if unset or invalid.
+ * Reads the namespaced `nanocoder.ui.maxFps` preference.
  */
-export function updateReasoningExpanded(value: boolean): void {
-	const preferences = loadPreferences();
-	preferences.reasoningExpanded = value;
-	savePreferences(preferences);
+export function getUiMaxFps(
+	preferences = loadPreferences(),
+): number | undefined {
+	const value = preferences.nanocoder?.ui?.maxFps;
+	if (isValidMaxFps(value)) {
+		return value;
+	}
+	return undefined;
 }
 
 /**
- * Get the compact tool display preference from preferences or environment
+ * Get the effective maximum TUI frame rate for Ink rendering.
+ * Returns the validated integer from preferences (1-60), or preserves
+ * the default of 30 FPS when not configured or when an invalid value is rejected.
  */
-export function getCompactToolDisplay(): boolean {
-	const preferences = loadPreferences();
-	return preferences.compactToolDisplay ?? true;
-}
-
-/**
- * Save the compact tool display preference
- */
-export function updateCompactToolDisplay(value: boolean): void {
-	const preferences = loadPreferences();
-	preferences.compactToolDisplay = value;
-	savePreferences(preferences);
-}
-
-// Cached: re-reads only when NANOCODER_CONFIG_DIR changes or a write bumps the version.
-const cachedShowAgentBashOutput = cachedPreference(
-	prefs => prefs.showAgentBashOutput === true,
-);
-
-/**
- * Get the agent bash output preference. Default false.
- */
-export function getShowAgentBashOutput(): boolean {
-	return cachedShowAgentBashOutput();
-}
-
-/**
- * Save the agent bash output preference
- */
-export function updateShowAgentBashOutput(value: boolean): void {
-	const preferences = loadPreferences();
-	preferences.showAgentBashOutput = value;
-	savePreferences(preferences);
-}
-
-/**
- * Get the per-response usage footer preference. On by default.
- */
-export function getShowUsageFooter(): boolean {
-	const preferences = loadPreferences();
-	return preferences.showUsageFooter ?? true;
-}
-
-/**
- * Save the per-response usage footer preference
- */
-export function updateShowUsageFooter(value: boolean): void {
-	const preferences = loadPreferences();
-	preferences.showUsageFooter = value;
-	savePreferences(preferences);
-}
-
-/**
- * Get the privacy scrubbing preference from preferences
- */
-export function getPrivacyPreference(): boolean {
-	const preferences = loadPreferences();
-	return preferences.enablePromptScrubbing ?? false;
-}
-
-/**
- * Save the privacy scrubbing preference
- */
-export function updatePrivacyPreference(value: boolean): void {
-	const preferences = loadPreferences();
-	preferences.enablePromptScrubbing = value;
-	savePreferences(preferences);
+export function getMaxFps(preferences = loadPreferences()): number {
+	return getUiMaxFps(preferences) ?? DEFAULT_MAX_FPS;
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -573,9 +664,7 @@ export function getSemanticMemoryEnabled(): boolean {
  * Save the semantic memory preference
  */
 export function updateSemanticMemoryEnabled(value: boolean): void {
-	const preferences = loadPreferences();
-	preferences.semanticMemoryEnabled = value;
-	savePreferences(preferences);
+	setPreference('semanticMemoryEnabled', value);
 }
 
 /**
@@ -605,63 +694,6 @@ export function updateSemanticMemoryTokenBudget(value: number): void {
 }
 
 /**
- * Get the alternate-screen (fullscreen) preference. Also settable via
- * --alt-screen/--no-alt-screen at launch; this is the persisted default.
- */
-export function getAlternateScreen(): boolean {
-	const preferences = loadPreferences();
-	return preferences.alternateScreen ?? true;
-}
-
-/**
- * Save the alternate-screen preference
- */
-export function updateAlternateScreen(value: boolean): void {
-	const preferences = loadPreferences();
-	preferences.alternateScreen = value;
-	savePreferences(preferences);
-}
-
-/**
- * Get the mouse reporting preference. When true (default), the terminal reports
- * wheel ticks to the app so the mouse wheel scrolls the chat viewport; text
- * selection then needs Shift+drag (Option+drag in iTerm2). When false, the
- * terminal does not capture the mouse at all, so native text selection
- * (double-click, drag) works directly and the wheel does nothing.
- */
-export function getMouseReporting(): boolean {
-	const preferences = loadPreferences();
-	return preferences.mouseReporting ?? true;
-}
-
-/**
- * Save the mouse reporting preference
- */
-export function updateMouseReporting(value: boolean): void {
-	const preferences = loadPreferences();
-	preferences.mouseReporting = value;
-	savePreferences(preferences);
-}
-
-/**
- * Get the professional ("boring") tone preference. When on, progress text is
- * strictly functional and the model is instructed to keep responses terse.
- */
-export function getProfessionalTone(): boolean {
-	const preferences = loadPreferences();
-	return preferences.professionalTone ?? false;
-}
-
-/**
- * Save the professional tone preference
- */
-export function updateProfessionalTone(value: boolean): void {
-	const preferences = loadPreferences();
-	preferences.professionalTone = value;
-	savePreferences(preferences);
-}
-
-/**
  * Get the voice configuration from preferences
  */
 export function getVoicePreference(): import('@/types/config').VoiceConfig {
@@ -682,7 +714,5 @@ export function getVoicePreference(): import('@/types/config').VoiceConfig {
 export function updateVoicePreference(
 	config: import('@/types/config').VoiceConfig,
 ): void {
-	const preferences = loadPreferences();
-	preferences.voice = config;
-	savePreferences(preferences);
+	setPreference('voice', config);
 }

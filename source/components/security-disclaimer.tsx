@@ -2,13 +2,10 @@ import {Box, Text} from 'ink';
 import {useMemo} from 'react';
 import {StyledSelectInput} from '@/components/ui/styled-select-input';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
-import {
-	loadPreferences,
-	trustRecheck,
-	untrustedReason,
-} from '@/config/preferences';
-import {describeProjectTrust} from '@/config/project-trust';
+import {loadPreferences} from '@/config/preferences';
 import {defaultTheme, getThemeColors} from '@/config/themes';
+import {trustRecheck, untrustedReason} from '@/config/trust/directory-trust';
+import {describeProjectTrust} from '@/config/trust/project-trust';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 
 interface SecurityDisclaimerProps {

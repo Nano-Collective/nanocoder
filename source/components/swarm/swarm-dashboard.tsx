@@ -1,156 +1,140 @@
-import {Box, Text, useApp, useInput} from 'ink';
+import {Box, Text, useInput} from 'ink';
 import Spinner from 'ink-spinner';
-import {useEffect} from 'react';
-import type {SwarmConfig} from '@/app/types';
-import type {LLMClient} from '@/types/core';
-import {useSwarmCoordinator} from './use-swarm-coordinator';
+import {useTheme} from '@/hooks/useTheme';
+import type {SwarmConfig, SwarmSnapshot, WorkerState} from '@/swarm/types';
+
+const MAX_LISTED_FILES = 8;
 
 export function SwarmDashboard({
 	config,
-	client,
+	snapshot,
+	onCancel,
+	onConfirm,
 }: {
 	config: SwarmConfig;
-	client: LLMClient | null;
+	snapshot: SwarmSnapshot;
+	onCancel: () => void;
+	onConfirm: (apply: boolean) => void;
 }) {
-	const {exit} = useApp();
+	const {colors} = useTheme();
+	const awaiting = snapshot.status === 'awaiting-confirmation';
 
-	const {
-		status: swarmStatus,
-		workers,
-		error,
-		cancelSwarm,
-	} = useSwarmCoordinator(config, client ?? undefined);
-
-	// Handle graceful exit via Ctrl+C
 	useInput((input, key) => {
 		if (key.ctrl && input === 'c') {
-			// Cancel and let the coordinator roll back worktrees/branches; the
-			// effect below exits once the swarm reaches 'failed'.
-			cancelSwarm();
+			onCancel();
+		} else if (awaiting && input.toLowerCase() === 'y') {
+			onConfirm(true);
+		} else if (awaiting && (input.toLowerCase() === 'n' || key.escape)) {
+			onConfirm(false);
 		}
 	});
 
-	const allComplete = swarmStatus === 'complete' || swarmStatus === 'failed';
+	const files = snapshot.patches.flatMap(patch => patch.files);
 
-	useEffect(() => {
-		if (allComplete) {
-			const timer = setTimeout(() => {
-				exit();
-				process.exit(swarmStatus === 'failed' ? 1 : 0);
-			}, 3000); // 3 seconds to review final state
-			return () => clearTimeout(timer);
-		}
-	}, [allComplete, exit, swarmStatus]);
-
-	return (
-		<SwarmDashboardUI
-			config={config}
-			swarmStatus={swarmStatus}
-			workers={workers}
-			error={error}
-		/>
-	);
-}
-
-export function SwarmDashboardUI({
-	config,
-	swarmStatus,
-	workers,
-	error,
-}: {
-	config: SwarmConfig;
-	swarmStatus: string;
-	workers: Array<{
-		id: string;
-		status: string;
-		tokens: number;
-		currentTool?: string;
-		error?: string;
-	}>;
-	error?: string;
-}) {
-	const _allComplete = swarmStatus === 'complete' || swarmStatus === 'failed';
 	return (
 		<Box
 			flexDirection="column"
-			padding={1}
+			paddingX={1}
 			borderStyle="round"
-			borderColor="blue"
+			borderColor={colors.primary}
 		>
-			<Box marginBottom={1} flexDirection="column">
-				<Text bold color="cyan">
-					🐝 Nanocoder Swarm (Orchestrator)
+			<Text bold color={colors.primary}>
+				Nanocoder Swarm
+			</Text>
+			<Text color={colors.secondary}>
+				Mode: <Text color={colors.text}>{config.swarmMode}</Text>
+				{'  '}Status:{' '}
+				<Text
+					color={
+						snapshot.status === 'complete'
+							? colors.success
+							: snapshot.status === 'failed'
+								? colors.error
+								: colors.info
+					}
+				>
+					{snapshot.status}
 				</Text>
-				<Text color="gray">
-					Mode: <Text color="white">{config.swarmMode}</Text>
-				</Text>
-				<Text color="gray">
-					Status:{' '}
-					<Text
-						color={
-							swarmStatus === 'complete'
-								? 'green'
-								: swarmStatus === 'failed'
-									? 'red'
-									: 'cyan'
-						}
-					>
-						{swarmStatus}
-					</Text>
-				</Text>
-				{error && (
-					<Text color="red">
-						Error: <Text color="white">{error}</Text>
-					</Text>
-				)}
-				{config.restrictedScope && (
-					<Text color="gray">
-						Scope: <Text color="yellow">{config.restrictedScope}</Text>
-					</Text>
-				)}
-			</Box>
+			</Text>
 
-			<Box flexDirection="column" marginBottom={1}>
-				{workers.map(worker => (
-					<Box key={worker.id} flexDirection="row" gap={2}>
-						<Box width={20}>
-							{worker.status === 'complete' && <Text color="green">✓ </Text>}
-							{worker.status === 'failed' && <Text color="red">✗ </Text>}
-							{(worker.status === 'starting' ||
-								worker.status === 'running') && (
-								<Text color="cyan">
-									<Spinner type="dots" />{' '}
-								</Text>
-							)}
-							<Text bold color={worker.status === 'failed' ? 'red' : 'white'}>
-								Worker{' '}
-								{String(worker.id).length > 7
-									? String(worker.id).substring(0, 7)
-									: worker.id}
-							</Text>
-						</Box>
-						<Box width={15}>
-							<Text color={worker.status === 'failed' ? 'red' : 'gray'}>
-								{worker.status}
-							</Text>
-						</Box>
-						<Box width={25}>
-							<Text color="yellow">{worker.currentTool || ''}</Text>
-						</Box>
-						<Box flexGrow={1} justifyContent="flex-end">
-							<Text color="gray">{worker.tokens} tokens</Text>
-						</Box>
-					</Box>
+			<Box flexDirection="column" marginTop={1}>
+				{snapshot.workers.map(worker => (
+					<WorkerRow key={worker.id} worker={worker} />
 				))}
 			</Box>
 
-			{swarmStatus === 'complete' && (
-				<Box marginTop={1}>
-					<Text color="green" bold>
-						All workers completed successfully. Unified diff ready.
+			{awaiting && (
+				<Box flexDirection="column" marginTop={1}>
+					{files.slice(0, MAX_LISTED_FILES).map(file => (
+						<Text key={file} color={colors.text}>
+							{'  '}
+							{file}
+						</Text>
+					))}
+					{files.length > MAX_LISTED_FILES && (
+						<Text color={colors.secondary}>
+							{'  '}and {files.length - MAX_LISTED_FILES} more
+						</Text>
+					)}
+					<Text color={colors.warning}>
+						Review the patches in {snapshot.runDir}, then apply these changes?
+						(y/n)
 					</Text>
 				</Box>
 			)}
+			{snapshot.status !== 'complete' && snapshot.status !== 'failed' && (
+				<Text color={colors.secondary}>Press Ctrl+C to cancel.</Text>
+			)}
+		</Box>
+	);
+}
+
+function WorkerRow({worker}: {worker: WorkerState}) {
+	const {colors} = useTheme();
+	const color =
+		worker.status === 'success'
+			? colors.success
+			: worker.status === 'failed'
+				? colors.error
+				: colors.text;
+
+	return (
+		<Box gap={1}>
+			<Box width={2} flexShrink={0}>
+				{worker.status === 'running' ? (
+					<Text color={colors.info}>
+						<Spinner type="dots" />
+					</Text>
+				) : (
+					<Text color={color}>
+						{worker.status === 'success'
+							? '✓'
+							: worker.status === 'failed'
+								? '✗'
+								: '-'}
+					</Text>
+				)}
+			</Box>
+			<Box width={22} flexShrink={0}>
+				<Text bold color={color} wrap="truncate">
+					{worker.id}
+				</Text>
+			</Box>
+			<Box width={10} flexShrink={0}>
+				<Text color={color}>{worker.status}</Text>
+			</Box>
+			<Box flexGrow={1}>
+				<Text color={colors.secondary} wrap="truncate">
+					{worker.currentTool ?? worker.fileScope.join(', ')}
+				</Text>
+			</Box>
+			<Box flexShrink={0}>
+				<Text color={colors.secondary}>
+					{worker.status === 'success'
+						? `${worker.tokens} tokens`
+						: `turn ${worker.turns}`}
+				</Text>
+			</Box>
 		</Box>
 	);
 }

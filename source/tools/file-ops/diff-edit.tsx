@@ -1,24 +1,39 @@
 import {constants} from 'node:fs';
-import {access, writeFile} from 'node:fs/promises';
+import {access, lstat} from 'node:fs/promises';
 import {resolve} from 'node:path';
 import {Box, Text} from 'ink';
 import React from 'react';
 import ToolMessage, {CappedLines} from '@/components/tool-message';
+import {
+	enforceFirewall,
+	evaluateMutationEnvelope,
+} from '@/firewall/mutation-firewall';
 import {ThemeContext} from '@/hooks/useTheme';
 import {getSafeSessionCwd} from '@/services/session-cwd';
-import type {NanocoderToolExport} from '@/types/core';
-import {jsonSchema, tool} from '@/types/core';
-import {EditRecoveryError} from '@/utils/edit-recovery';
-import {formatError} from '@/utils/error-formatter';
-import {getCachedFileContent, invalidateCache} from '@/utils/file-cache';
-import {replaceFirstLiteral} from '@/utils/literal-replace';
-import {validateEditableFormat, validatePath} from '@/utils/path-validators';
+import {EditRecoveryError} from '@/tools/file-ops/edit-recovery';
+import {
+	countLiteralOccurrences,
+	replaceFirstLiteral,
+} from '@/tools/file-ops/literal-replace';
+import {
+	validateEditableEncoding,
+	validateEditableFormat,
+	validatePath,
+} from '@/tools/file-ops/path-validators';
 import {
 	forgetReadContent,
+	getLineNumbersForText,
 	hasSeenFile,
+	hasVisibleLines,
 	markFileSeen,
-} from '@/utils/read-tracker';
-import {createFileToolApproval} from '@/utils/tool-approval';
+	recordEditVisibility,
+} from '@/tools/runtime/read-tracker';
+import {createFileToolApproval} from '@/tools/runtime/tool-approval';
+import type {NanocoderToolExport} from '@/types/core';
+import {jsonSchema, tool} from '@/types/core';
+import {formatError} from '@/utils/error-formatter';
+import {atomicWriteUserFile} from '@/utils/fs/atomic-write';
+import {getCachedFileContent, invalidateCache} from '@/utils/fs/file-cache';
 import {
 	closeDiffInVSCode,
 	isVSCodeConnected,
@@ -126,15 +141,11 @@ export function parseDiffEditBlocks(diff: string): DiffEditBlock[] {
 	return blocks;
 }
 
-function countOccurrences(content: string, search: string): number {
-	return content.split(search).length - 1;
-}
-
 function validateBlocks(
 	fileContent: string,
 	blocks: DiffEditBlock[],
 	path: string,
-): void {
+): string {
 	const seenSearchBlocks = new Set<string>();
 
 	blocks.forEach((block, index) => {
@@ -146,7 +157,7 @@ function validateBlocks(
 		}
 		seenSearchBlocks.add(block.search);
 
-		const occurrences = countOccurrences(fileContent, block.search);
+		const occurrences = countLiteralOccurrences(fileContent, block.search);
 
 		if (occurrences === 0) {
 			throw new EditRecoveryError(
@@ -164,13 +175,17 @@ function validateBlocks(
 			);
 		}
 	});
+
+	// A unique original match may disappear or become ambiguous after an edit.
+	// Dry-run execution too, before approval or any file writes.
+	return applyBlocks(fileContent, blocks);
 }
 
 function applyBlocks(fileContent: string, blocks: DiffEditBlock[]): string {
 	let newContent = fileContent;
 
 	blocks.forEach((block, index) => {
-		const occurrences = countOccurrences(newContent, block.search);
+		const occurrences = countLiteralOccurrences(newContent, block.search);
 		if (occurrences !== 1) {
 			throw new Error(
 				`Search block ${index + 1} could not be applied cleanly after earlier edits.`,
@@ -272,19 +287,52 @@ const executeDiffEdit = async (args: DiffEditArgs): Promise<string> => {
 	const absPath = resolve(getSafeSessionCwd(), path);
 	const blocks = parseDiffEditBlocks(diff);
 	const cached = await getCachedFileContent(absPath);
+	const encodingResult = validateEditableEncoding(path, cached);
+	if (!encodingResult.valid) {
+		throw new Error(encodingResult.error);
+	}
 	const fileContent = cached.content;
 
-	validateBlocks(fileContent, blocks, path);
-	const newContent = applyBlocks(fileContent, blocks);
+	const newContent = validateBlocks(fileContent, blocks, path);
 
-	await writeFile(absPath, newContent, 'utf-8');
+	const firewallResult = evaluateMutationEnvelope(
+		path,
+		fileContent,
+		newContent,
+	);
+	const firewallWarning = enforceFirewall(firewallResult);
+
+	await atomicWriteUserFile(absPath, newContent);
 	invalidateCache(absPath);
 	markFileSeen(absPath);
 	forgetReadContent(absPath);
+	// Carry what the agent had read forward through the edit: each block
+	// moves the lines below it and the written region counts as seen. Blocks
+	// are applied in order, so positions follow the evolving content.
+	try {
+		const stats = await lstat(absPath);
+		let working = fileContent;
+		for (const block of blocks) {
+			const blockLines = getLineNumbersForText(working, block.search);
+			if (blockLines.length === 0) continue;
+			recordEditVisibility(
+				absPath,
+				stats,
+				blockLines[0],
+				blockLines.length,
+				block.replace.replace(/\r\n/g, '\n').split('\n').length,
+			);
+			working = replaceFirstLiteral(working, block.search, block.replace);
+		}
+	} catch {
+		// If stat fails, fall back to file-level tracking only
+	}
 
 	const blockLabel = blocks.length === 1 ? 'block' : 'blocks';
-	return capDiffEditResult(
-		`Successfully applied ${blocks.length} diff ${blockLabel}.${formatUpdatedFileContext(fileContent, newContent, blocks)}`,
+	return (
+		capDiffEditResult(
+			`Successfully applied ${blocks.length} diff ${blockLabel}.${formatUpdatedFileContext(fileContent, newContent, blocks)}`,
+		) + firewallWarning
 	);
 };
 
@@ -405,8 +453,7 @@ const diffEditFormatter = async (
 			const blocks = parseDiffEditBlocks(args.diff);
 			const cached = await getCachedFileContent(absPath);
 			const fileContent = cached.content;
-			validateBlocks(fileContent, blocks, args.path);
-			const newContent = applyBlocks(fileContent, blocks);
+			const newContent = validateBlocks(fileContent, blocks, args.path);
 			const changeId = sendFileChangeToVSCode(
 				absPath,
 				fileContent,
@@ -438,11 +485,8 @@ const diffEditFormatter = async (
 
 const diffEditValidator = async (
 	args: DiffEditArgs,
-	context?: import('@/types/core').ToolContext,
 ): Promise<{valid: true} | {valid: false; error: string}> => {
-	const pathResult = validatePath(args.path, {
-		restrictedScope: context?.restrictedScope,
-	});
+	const pathResult = validatePath(args.path);
 	if (!pathResult.valid) return pathResult;
 
 	const formatResult = validateEditableFormat(args.path);
@@ -482,7 +526,34 @@ const diffEditValidator = async (
 
 	try {
 		const cached = await getCachedFileContent(absPath);
+		const encodingResult = validateEditableEncoding(args.path, cached);
+		if (!encodingResult.valid) return encodingResult;
 		validateBlocks(cached.content, blocks, args.path);
+
+		// Line-level visibility check: ensure the agent has actually read the lines
+		// in each SEARCH block. This prevents blind edits where the model hallucinates
+		// SEARCH content it never saw.
+		const allTargetLines: number[] = [];
+		for (const block of blocks) {
+			const blockLines = getLineNumbersForText(cached.content, block.search);
+			allTargetLines.push(...blockLines);
+		}
+
+		if (allTargetLines.length > 0) {
+			try {
+				const stats = await lstat(absPath);
+				const visibilityCheck = hasVisibleLines(absPath, stats, allTargetLines);
+				if (!visibilityCheck.visible) {
+					return {
+						valid: false,
+						error:
+							visibilityCheck.error ?? 'Lines in SEARCH blocks not visible',
+					};
+				}
+			} catch {
+				// If we can't stat the file, fall back to file-level check (already passed)
+			}
+		}
 	} catch (error) {
 		return {
 			valid: false,

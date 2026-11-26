@@ -1,8 +1,22 @@
+import {createRequire} from 'node:module';
 import chalk from 'chalk';
-import Table from 'cli-table3';
 import {DEFAULT_TERMINAL_WIDTH, TABLE_COLUMN_MIN_WIDTH} from '@/constants';
 import type {Colors} from '../types/markdown-parser';
 import {stripMarkdown} from './utils';
+
+type TableConstructor = typeof import('cli-table3');
+
+let tableConstructor: TableConstructor | undefined;
+
+function getTableConstructor(): TableConstructor {
+	if (!tableConstructor) {
+		tableConstructor = createRequire(import.meta.url)(
+			'cli-table3',
+		) as TableConstructor;
+	}
+
+	return tableConstructor;
+}
 
 // Parse markdown tables using cli-table3
 export function parseMarkdownTable(
@@ -13,12 +27,14 @@ export function parseMarkdownTable(
 	const lines = tableText.trim().split('\n');
 	if (lines.length < 2) return tableText;
 
-	// Extract rows
+	// Extract rows (strip only optional outer pipes so empty inner cells are preserved)
 	const rows = lines.map(line =>
 		line
+			.trim()
+			.replace(/^\|/, '')
+			.replace(/\|$/, '')
 			.split('|')
-			.map(cell => cell.trim())
-			.filter(cell => cell.length > 0),
+			.map(cell => cell.trim()),
 	);
 
 	// Check if second row is separator (e.g., |---|---|)
@@ -69,6 +85,8 @@ export function parseMarkdownTable(
 
 	// Distribute width proportionally
 	const totalContentWidth = contentWidths.reduce((a, b) => a + b, 0);
+	if (totalContentWidth === 0) return tableText;
+
 	const colWidths = contentWidths.map(width =>
 		Math.max(
 			TABLE_COLUMN_MIN_WIDTH,
@@ -89,6 +107,7 @@ export function parseMarkdownTable(
 	}
 
 	// Create table with cli-table3 - full borders, proper alignment
+	const Table = getTableConstructor();
 	const table = new Table({
 		head: header.map(cell => chalk.hex(themeColors.primary).bold(cell)),
 		colWidths: colWidths,

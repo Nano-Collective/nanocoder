@@ -1,10 +1,10 @@
-import cp from 'node:child_process';
 import {randomUUID} from 'node:crypto';
 import {writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {platform} from 'node:process';
 import {parentPort, workerData} from 'node:worker_threads';
+import crossSpawn from 'cross-spawn';
 import {SpeechDetector} from './vad-detector.js';
 
 /**
@@ -60,7 +60,9 @@ const recArgs =
 				'-',
 			];
 
-const proc = cp.spawn(recCmd, recArgs, {stdio: ['ignore', 'pipe', 'ignore']});
+const proc = crossSpawn.spawn(recCmd, recArgs, {
+	stdio: ['ignore', 'pipe', 'ignore'],
+});
 let stopping = false;
 
 let remainder: Buffer = Buffer.alloc(0);

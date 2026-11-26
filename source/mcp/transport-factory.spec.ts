@@ -1,4 +1,5 @@
 import test from 'ava';
+import {WebSocketServer} from 'ws';
 import type {MCPServer, MCPTransportType} from '../types/mcp';
 import {TransportFactory} from './transport-factory';
 
@@ -200,6 +201,30 @@ test('TransportFactory.validateServerConfig: rejects an invalid health interval'
 	t.true(result.errors.some(error => error.includes('healthCheckInterval')));
 });
 
+test('TransportFactory.validateServerConfig: checks the tool-call timeout settings', t => {
+	const server = {name: 'tools', transport: 'http' as const, url: 'http://localhost:3000/mcp'};
+
+	t.true(TransportFactory.validateServerConfig({...server, toolTimeout: 0}).valid);
+	t.true(
+		TransportFactory.validateServerConfig({
+			...server,
+			toolTimeout: 300_000,
+			resetTimeoutOnProgress: false,
+		}).valid,
+	);
+
+	const negative = TransportFactory.validateServerConfig({...server, toolTimeout: -1});
+	t.false(negative.valid);
+	t.true(negative.errors.some(error => error.includes('toolTimeout')));
+
+	const notBoolean = TransportFactory.validateServerConfig({
+		...server,
+		resetTimeoutOnProgress: 'yes' as unknown as boolean,
+	});
+	t.false(notBoolean.valid);
+	t.true(notBoolean.errors.some(error => error.includes('resetTimeoutOnProgress')));
+});
+
 test('TransportFactory.validateServerConfig: detects invalid stdio config', t => {
 	const server: MCPServer = {
 		name: 'test-stdio-invalid',
@@ -300,6 +325,131 @@ test('TransportFactory.createTransport: creates http transport with headers', t 
 	const transport = TransportFactory.createTransport(server);
 
 	t.truthy(transport);
+});
+
+test('TransportFactory.createTransport: sends configured headers over websocket transport', async t => {
+	const wss = new WebSocketServer({port: 0});
+	t.teardown(() => new Promise<void>(resolve => wss.close(() => resolve())));
+	await new Promise<void>(resolve => wss.once('listening', () => resolve()));
+
+	const address = wss.address();
+	if (!address || typeof address === 'string') {
+		t.fail('Expected numeric WebSocket server port');
+		return;
+	}
+
+	const receivedHeaders: Array<Record<string, string | string[] | undefined>> =
+		[];
+	const receivedMessages: unknown[] = [];
+
+	wss.on('connection', (socket, req) => {
+		receivedHeaders.push(req.headers);
+		socket.on('message', raw => {
+			const parsed = JSON.parse(raw.toString()) as {id?: number};
+			receivedMessages.push(parsed);
+			socket.send(
+				JSON.stringify({
+					jsonrpc: '2.0',
+					id: parsed.id ?? 1,
+					result: {ok: true},
+				}),
+			);
+		});
+	});
+
+	const transport = TransportFactory.createTransport({
+		name: 'test-ws-with-headers',
+		transport: 'websocket',
+		url: `ws://127.0.0.1:${address.port}/mcp`,
+		headers: {
+			Authorization: 'Bearer secret-token',
+			'X-Custom-Header': 'custom-value',
+		},
+	});
+
+	const replies: unknown[] = [];
+	transport.onmessage = msg => {
+		replies.push(msg);
+	};
+
+	await transport.start();
+	await transport.send({
+		jsonrpc: '2.0',
+		id: 1,
+		method: 'ping',
+	});
+
+	await new Promise<void>(resolve => setTimeout(resolve, 30));
+	await transport.close();
+
+	t.is(receivedHeaders.length, 1);
+	t.is(receivedHeaders[0]?.authorization, 'Bearer secret-token');
+	t.is(receivedHeaders[0]?.['x-custom-header'], 'custom-value');
+	t.is(receivedHeaders[0]?.['sec-websocket-protocol'], 'mcp');
+	t.is(receivedMessages.length, 1);
+	t.is(replies.length, 1);
+});
+
+test('TransportFactory.createTransport: websocket transport with headers handles error states', async t => {
+	const wss = new WebSocketServer({port: 0});
+	await new Promise<void>(resolve => wss.once('listening', () => resolve()));
+
+	const address = wss.address();
+	if (!address || typeof address === 'string') {
+		t.fail('Expected numeric WebSocket server port');
+		return;
+	}
+
+	wss.on('connection', socket => {
+		socket.send('not-valid-json');
+	});
+
+	const transport = TransportFactory.createTransport({
+		name: 'test-ws-errors',
+		transport: 'websocket',
+		url: `ws://127.0.0.1:${address.port}/mcp`,
+		headers: {Authorization: 'Bearer token'},
+	});
+
+	// Sending before start() must reject
+	await t.throwsAsync(
+		async () => {
+			await transport.send({jsonrpc: '2.0', id: 1, method: 'ping'});
+		},
+		{message: /Not connected/},
+	);
+
+	const errors: Error[] = [];
+	transport.onerror = err => {
+		errors.push(err);
+	};
+
+	await transport.start();
+
+	// Starting twice must reject
+	await t.throwsAsync(
+		async () => {
+			await transport.start();
+		},
+		{message: /^HeadersWebSocketClientTransport already started!/},
+	);
+
+	await new Promise<void>(resolve => setTimeout(resolve, 30));
+	t.true(errors.length >= 1);
+
+	await transport.close();
+	await new Promise<void>(resolve => wss.close(() => resolve()));
+
+	// Connecting to a closed port must reject start()
+	const unreachable = TransportFactory.createTransport({
+		name: 'test-ws-closed',
+		transport: 'websocket',
+		url: `ws://127.0.0.1:${address.port}/mcp`,
+		headers: {Authorization: 'Bearer token'},
+	});
+	await t.throwsAsync(async () => {
+		await unreachable.start();
+	});
 });
 
 test('TransportFactory.validateServerConfig: validates http config with headers', t => {

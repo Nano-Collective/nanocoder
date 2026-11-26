@@ -2,6 +2,7 @@ import test from 'ava';
 import React from 'react';
 import {renderWithTheme} from '@/test-utils/render-with-theme';
 import type {Message} from '@/types/core';
+import type {ClipboardRoute} from '@/utils/clipboard';
 import {createCommitCommand} from './commit';
 
 const baseMessages: Message[] = [
@@ -183,7 +184,7 @@ test('commit returns an error when the LLM request fails', async t => {
 // --- --copy flag ---
 
 function createCopyTestCommand(
-	writeClipboard: (text: string) => Promise<void>,
+	writeClipboard: (text: string) => Promise<ClipboardRoute | void>,
 ) {
 	return createCommitCommand({
 		hasStagedChanges: async () => true,
@@ -214,6 +215,37 @@ test('commit --copy writes the message to the clipboard', async t => {
 
 	t.true(output.includes('feat: add value constant'));
 	t.true(output.includes('Copied to clipboard'));
+});
+
+test('commit --copy says when the message went through OSC 52', async t => {
+	const command = createCopyTestCommand(async () => 'osc52');
+
+	const result = await command.handler(['--copy'], baseMessages, {
+		...testMetadata,
+		client: createClient('feat: remote copy'),
+	});
+
+	const {lastFrame} = renderWithTheme(result as React.ReactElement);
+	const output = lastFrame() || '';
+
+	t.true(output.includes('feat: remote copy'));
+	t.true(output.includes('terminal clipboard via OSC 52'));
+	t.false(output.includes('Copied to clipboard'));
+});
+
+test('commit --copy says when only the remote machine clipboard was set', async t => {
+	const command = createCopyTestCommand(async () => 'system-remote');
+
+	const result = await command.handler(['--copy'], baseMessages, {
+		...testMetadata,
+		client: createClient('feat: remote only'),
+	});
+
+	const {lastFrame} = renderWithTheme(result as React.ReactElement);
+	const output = lastFrame() || '';
+
+	t.true(output.includes('clipboard of the remote machine'));
+	t.false(output.includes('Copied to clipboard.'));
 });
 
 test('commit -c is accepted as a short form', async t => {

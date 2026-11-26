@@ -6,6 +6,7 @@ import {
 	tool,
 } from 'ai';
 import React from 'react';
+import type {ToolManager} from '@/tools/tool-manager';
 import type {AIProviderConfig} from '@/types/config';
 import type {ResponseUsage} from '@/types/usage';
 
@@ -64,6 +65,13 @@ export interface ToolCall {
 		name: string;
 		arguments: Record<string, unknown>;
 	};
+	/**
+	 * Set when the model's arguments were not a JSON object, such as text cut
+	 * off at the output-token limit. `arguments` is then `{}`, so the broken
+	 * text is never run or replayed. The call must not be run: it is answered
+	 * with this error so the model can retry.
+	 */
+	argumentsError?: string;
 }
 
 export interface ToolResult {
@@ -123,7 +131,22 @@ export interface ToolExecutionContext {
 	abortSignal?: AbortSignal;
 	sessionId?: string;
 	workingDirectory?: string;
-	context?: ToolContext;
+	/**
+	 * The tools this call runs against, when they are not the process-wide set:
+	 * an ACP session with MCP servers of its own. A subagent it starts uses the
+	 * same ones.
+	 */
+	toolManager?: ToolManager;
+	/** The call being executed, so a subagent it starts can name its parent call. */
+	toolCallId?: string;
+	/** Set for a subagent's own tool calls: the run executing them. */
+	subagentRunId?: string;
+	/**
+	 * The client the call's turn runs on, when it is not the process-wide one:
+	 * an ACP session that picked its own model. Auto-commit writes its message
+	 * with it.
+	 */
+	client?: LLMClient;
 }
 
 export type ToolHandler = (
@@ -153,14 +176,9 @@ export type ToolValidationResult =
 	| {valid: true}
 	| {valid: false; error: string; details?: ValidationErrorDetail[]};
 
-export interface ToolContext {
-	restrictedScope?: string | string[];
-}
-
 export type ToolValidator = (
 	// biome-ignore lint/suspicious/noExplicitAny: Dynamic typing required -- Tool arguments are dynamically typed
 	args: any,
-	context?: ToolContext,
 ) => Promise<ToolValidationResult>;
 
 export type StreamingFormatter = (
@@ -227,6 +245,8 @@ export interface ApiCallRecord {
 	totalTokens?: number;
 	cacheReadTokens?: number;
 	cacheWriteTokens?: number;
+	/** Provider base URL at call time; a local one (Ollama, LM Studio) is never priced. */
+	baseURL?: string;
 	timestamp: number;
 }
 
@@ -285,6 +305,11 @@ export interface ModeOverrides {
 		Record<string, string>
 	>;
 	privacyEnabled?: boolean;
+	/**
+	 * Tune's tool mode is XML or JSON: the caller's system prompt carries the
+	 * tool definitions as text, so native tools must not be sent as well.
+	 */
+	nativeToolsDisabled?: boolean;
 }
 
 export interface LLMClient {
@@ -300,13 +325,6 @@ export interface LLMClient {
 		signal?: AbortSignal,
 		modeOverrides?: ModeOverrides,
 	): Promise<LLMChatResponse>;
-	generateStructuredObject?<T>(
-		prompt: string,
-		// biome-ignore lint/suspicious/noExplicitAny: zod schema
-		schema: any,
-		system?: string,
-		signal?: AbortSignal,
-	): Promise<T>;
 	clearContext(): Promise<void>;
 	getTimeout(): number | undefined;
 }
