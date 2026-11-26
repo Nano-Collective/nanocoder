@@ -16,6 +16,7 @@ import {
 	getModelContextLimit,
 	getModelPricing,
 	getSessionContextLimit,
+	isValidModelPricingOverride,
 } from '@/models/index';
 import {createTokenizer} from '@/tokenization/index';
 import type {Command} from '@/types/commands';
@@ -193,8 +194,15 @@ export const usageCommand: Command = {
 			// A local server (Ollama, LM Studio) is free, whatever models.dev
 			// lists under the same id.
 			const baseURL = client?.getProviderConfig()?.config.baseURL;
+			const activePricingOverride =
+				client?.getProviderConfig()?.pricing?.[model] ??
+				providerConfig?.pricing?.[model];
 			const pricing =
-				baseURL && isLocalURL(baseURL) ? null : await getModelPricing(model);
+				baseURL &&
+				isLocalURL(baseURL) &&
+				!isValidModelPricingOverride(activePricingOverride)
+					? null
+					: await getModelPricing(model, activePricingOverride);
 			if (pricing) {
 				// ---- Current-context cost (same as Phase 2) ----
 				const snapshot = metadata.lastApiUsage;
@@ -206,33 +214,69 @@ export const usageCommand: Command = {
 					: undefined;
 				const currentContextCost =
 					reportedContextCost ?? (pricing.input * breakdown.total) / 1_000_000;
+				const currentContextSource = isValidModelPricingOverride(
+					activePricingOverride,
+				)
+					? 'configured'
+					: 'estimated';
 
 				// ---- Cumulative session + per-provider (from history) ----
 				const history = metadata.apiCallHistory ?? [];
 				let cumulativeSession = 0;
 				const perProvider: Record<string, number> = {};
 				const pricingCache = new Map<string, typeof pricing>();
+				const sessionPricingSources = new Set<'configured' | 'estimated'>();
 
 				// Calls made earlier on a local server stay free while a hosted
 				// provider is active.
 				const isLocalCall = (r: (typeof history)[number]) =>
-					Boolean(r.baseURL && isLocalURL(r.baseURL));
-				const uniqueModels = [
-					...new Set(history.filter(r => !isLocalCall(r)).map(r => r.model)),
+					Boolean(
+						r.baseURL &&
+							isLocalURL(r.baseURL) &&
+							!isValidModelPricingOverride(
+								r.pricingOverride ??
+									config.providers?.find(p => p.name === r.provider)?.pricing?.[
+										r.model
+									],
+							),
+					);
+				const uniqueCalls = [
+					...new Map(
+						history
+							.filter(r => !isLocalCall(r))
+							.map(record => [`${record.provider}\0${record.model}`, record]),
+					).values(),
 				];
 				const pricings = await Promise.all(
-					uniqueModels.map(async model => {
-						const p = await getModelPricing(model);
-						return [model, p ?? {input: NaN, output: NaN}] as const;
+					uniqueCalls.map(async record => {
+						const override =
+							record.pricingOverride ??
+							config.providers?.find(p => p.name === record.provider)
+								?.pricing?.[record.model];
+						const p = await getModelPricing(record.model, override);
+						return [
+							`${record.provider}\0${record.model}`,
+							p ?? {input: NaN, output: NaN},
+							isValidModelPricingOverride(override)
+								? 'configured'
+								: 'estimated',
+						] as const;
 					}),
 				);
-				for (const [model, p] of pricings) pricingCache.set(model, p);
+				const sourceByCall = new Map<string, 'configured' | 'estimated'>();
+				for (const [key, p, source] of pricings) {
+					pricingCache.set(key, p);
+					sourceByCall.set(key, source);
+				}
 
 				for (const record of history) {
-					const recordPricing = pricingCache.get(record.model) ?? {
+					const callKey = `${record.provider}\0${record.model}`;
+					const recordPricing = pricingCache.get(callKey) ?? {
 						input: NaN,
 						output: NaN,
 					};
+					const pricingSource = sourceByCall.get(callKey);
+					if (pricingSource) sessionPricingSources.add(pricingSource);
 
 					const callCost = isLocalCall(record)
 						? 0
@@ -246,6 +290,11 @@ export const usageCommand: Command = {
 				cost = {
 					currentContext: currentContextCost,
 					cumulativeSession: history.length === 0 ? NaN : cumulativeSession,
+					currentContextSource,
+					cumulativeSessionSource:
+						sessionPricingSources.size > 1
+							? 'mixed'
+							: (sessionPricingSources.values().next().value ?? 'estimated'),
 					perProvider:
 						Object.keys(perProvider).length > 1 ? perProvider : undefined,
 				};

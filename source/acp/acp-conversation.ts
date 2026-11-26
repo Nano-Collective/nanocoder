@@ -343,7 +343,11 @@ async function runTurn(
 		const priced = await buildResponseUsage(
 			turnUsage,
 			client.getCurrentModel(),
-			{baseURL: client.getProviderConfig().config.baseURL},
+			{
+				baseURL: client.getProviderConfig().config.baseURL,
+				pricingOverride:
+					client.getProviderConfig().pricing?.[client.getCurrentModel()],
+			},
 		);
 		const input = turnUsage.inputTokens ?? 0;
 		const output = turnUsage.outputTokens ?? 0;

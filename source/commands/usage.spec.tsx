@@ -548,7 +548,7 @@ test('usage command shows Estimated Cost for a priced model', async t => {
 
 	const output = lastFrame();
 	t.truthy(output);
-	t.regex(output!, /Estimated Cost/);
+	 t.regex(output!, /Cost/);
 	t.regex(output!, /\$/);
 });
 
@@ -561,9 +561,9 @@ test('usage command shows placeholder for a model without pricing', async t => {
 
 	const output = lastFrame();
 	t.truthy(output);
-	t.regex(output!, /Estimated Cost/);
-	t.regex(output!, /Current Context:.*—/);
-	t.regex(output!, /Cumulative Session:.*—/);
+	t.regex(output!, /Cost/);
+	t.regex(output!, /Current Context \(estimated\):.*—/);
+	t.regex(output!, /Cumulative Session \(estimated\):.*—/);
 });
 
 test('usage command shows per-provider breakdown for multi-provider history', async t => {
@@ -669,7 +669,7 @@ test('usage command keeps token display unchanged when pricing is missing', asyn
 
 	const output = lastFrame();
 	t.truthy(output);
-	t.regex(output!, /Estimated Cost/);
+	t.regex(output!, /Cost/);
 	t.regex(output!, /—/);
 	t.regex(output!, /Context Usage/);
 	t.regex(output!, /Overall Usage/);
@@ -697,8 +697,8 @@ test('usage command computes cost from totalTokens-only history entries', async 
 
 	const output = lastFrame();
 	t.truthy(output);
-	t.regex(output!, /Cumulative Session:.*\$/);
-	t.notRegex(output!, /Cumulative Session:.*—/);
+	t.regex(output!, /Cumulative Session \(estimated\):.*\$/);
+	t.notRegex(output!, /Cumulative Session \(estimated\):.*—/);
 });
 
 test('usage command computes cost from partial inputTokens-only history entries', async t => {
@@ -720,6 +720,6 @@ test('usage command computes cost from partial inputTokens-only history entries'
 
 	const output = lastFrame();
 	t.truthy(output);
-	t.regex(output!, /Cumulative Session:.*\$/);
-	t.notRegex(output!, /Cumulative Session:.*—/);
+	t.regex(output!, /Cumulative Session \(estimated\):.*\$/);
+	t.notRegex(output!, /Cumulative Session \(estimated\):.*—/);
 });

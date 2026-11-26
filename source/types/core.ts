@@ -7,7 +7,7 @@ import {
 } from 'ai';
 import React from 'react';
 import type {ToolManager} from '@/tools/tool-manager';
-import type {AIProviderConfig} from '@/types/config';
+import type {AIProviderConfig, ModelPricingConfig} from '@/types/config';
 import type {ResponseUsage} from '@/types/usage';
 
 export {asSchema, jsonSchema, tool};
@@ -247,6 +247,8 @@ export interface ApiCallRecord {
 	cacheWriteTokens?: number;
 	/** Provider base URL at call time; a local one (Ollama, LM Studio) is never priced. */
 	baseURL?: string;
+	/** Configured per-model rates captured at call time for accurate session totals. */
+	pricingOverride?: ModelPricingConfig;
 	timestamp: number;
 }
 
