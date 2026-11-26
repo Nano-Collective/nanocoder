@@ -45,7 +45,7 @@ import path from 'node:path';
  */
 export function isValidFilePath(
 	filePath: string,
-	containmentRoot?: string,
+	containmentRoot?: string | readonly string[],
 ): boolean {
 	// Reject empty paths
 	if (!filePath || filePath.trim().length === 0) {
@@ -86,16 +86,20 @@ export function isValidFilePath(
 		if (!containmentRoot) {
 			return false;
 		}
-		const root = path.resolve(containmentRoot);
-		const abs = path.resolve(filePath);
-		if (isPathInside(abs, root)) {
-			return true;
-		}
-		try {
-			return isPathInside(realResolvedPrefix(abs), realResolvedPrefix(root));
-		} catch {
-			return false; // symlink loop
-		}
+		const roots =
+			typeof containmentRoot === 'string' ? [containmentRoot] : containmentRoot;
+		return roots.some(containmentRoot => {
+			const root = path.resolve(containmentRoot);
+			const abs = path.resolve(filePath);
+			if (isPathInside(abs, root)) {
+				return true;
+			}
+			try {
+				return isPathInside(realResolvedPrefix(abs), realResolvedPrefix(root));
+			} catch {
+				return false; // symlink loop
+			}
+		});
 	}
 
 	// A relative path must not start with a separator
@@ -139,7 +143,7 @@ export function isValidFilePath(
 export function resolveFilePath(
 	filePath: string,
 	cwd: string,
-	containmentRoot: string = cwd,
+	containmentRoot: string | readonly string[] = cwd,
 ): string {
 	// Relative paths resolve against `cwd` (the session cwd, which follows `cd`);
 	// containment is checked against `containmentRoot` (the project root, which
@@ -150,7 +154,9 @@ export function resolveFilePath(
 	}
 
 	const normalizedCwd = path.resolve(cwd);
-	const normalizedRoot = path.resolve(containmentRoot);
+	const roots = (
+		typeof containmentRoot === 'string' ? [containmentRoot] : containmentRoot
+	).map(root => path.resolve(root));
 	const absolutePath = path.resolve(normalizedCwd, filePath);
 
 	// Symlink-aware containment. `path.resolve` is purely lexical and never
@@ -160,21 +166,21 @@ export function resolveFilePath(
 	// /tmp -> /private/tmp on macOS). The real-path check is authoritative:
 	// the other spelling of the root is the same directory and must pass.
 	// A symlink loop throws here, which rejects the path.
-	const realRoot = realResolvedPrefix(normalizedRoot);
+	const realRoots = roots.map(root => realResolvedPrefix(root));
 	const realTarget = realResolvedPrefix(absolutePath);
 
 	// Lexical containment only picks the clearer message. The trailing
 	// separator stops a sibling with a shared prefix (`/proj-evil` for `/proj`).
 	if (
-		!isPathInside(absolutePath, normalizedRoot) &&
-		!isPathInside(realTarget, realRoot)
+		!roots.some(root => isPathInside(absolutePath, root)) &&
+		!realRoots.some(root => isPathInside(realTarget, root))
 	) {
 		throw new Error(
 			`File path escapes project directory: ${filePath} -> ${absolutePath}`,
 		);
 	}
 
-	if (!isPathInside(realTarget, realRoot)) {
+	if (!realRoots.some(root => isPathInside(realTarget, root))) {
 		throw new Error(
 			`File path escapes project directory via symlink: ${filePath} -> ${realTarget}`,
 		);
@@ -300,7 +306,7 @@ export function isRealPathInside(target: string, root: string): boolean {
  * rest is appended lexically. Throws on a symlink loop: there is no real path,
  * and falling back to the lexical one would let containment pass.
  */
-function realResolvedPrefix(target: string): string {
+export function realResolvedPrefix(target: string): string {
 	const absolute = path.resolve(target);
 	const {root} = path.parse(absolute);
 	const pending = splitSegments(absolute.slice(root.length));

@@ -1,9 +1,15 @@
+import path from 'node:path';
 import {Box, Text} from 'ink';
 import React from 'react';
 import ToolMessage from '@/components/tool-message';
 import {DEFAULT_FIND_FILES_RESULTS, MAX_FIND_FILES_RESULTS} from '@/constants';
 import {ThemeContext} from '@/hooks/useTheme';
 import {getContainedSessionCwd} from '@/services/session-cwd';
+import {
+	createWorkingDirectoryFilter,
+	getNestedWorkingRoots,
+	getWorkingDirectories,
+} from '@/services/working-directories';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
@@ -18,7 +24,12 @@ async function findFilesByPattern(
 	cwd: string,
 	maxResults: number,
 ): Promise<{files: string[]; truncated: boolean}> {
-	return findMatchingPaths(pattern, cwd, maxResults);
+	return findMatchingPaths(
+		pattern,
+		cwd,
+		maxResults,
+		getNestedWorkingRoots(cwd),
+	);
 }
 
 interface FindFilesArgs {
@@ -36,11 +47,34 @@ const executeFindFiles = async (args: FindFilesArgs): Promise<string> => {
 	);
 
 	try {
-		const {files, truncated} = await findFilesByPattern(
-			args.pattern,
+		const files: string[] = [];
+		const seen = new Set<string>();
+		let truncated = false;
+		for (const root of [
 			cwd,
-			maxResults,
-		);
+			...getWorkingDirectories()
+				.slice(1)
+				.map(directory => directory.path),
+		]) {
+			const ownsPath = createWorkingDirectoryFilter(root);
+			const result = await findFilesByPattern(
+				args.pattern,
+				root,
+				maxResults + 1,
+			);
+			truncated ||= result.truncated;
+			for (const file of result.files) {
+				const absolute = path.resolve(root, file);
+				if (!ownsPath(absolute)) continue;
+				if (seen.has(absolute)) continue;
+				seen.add(absolute);
+				if (files.length === maxResults) {
+					truncated = true;
+					break;
+				}
+				files.push(root === cwd ? file : absolute);
+			}
+		}
 
 		if (files.length === 0) {
 			return `No files or directories found matching pattern "${args.pattern}"`;

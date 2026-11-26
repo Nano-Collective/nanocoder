@@ -34,6 +34,7 @@ import {getThemeColors} from '@/config/themes';
 import {PrivacyContext} from '@/context/privacy-context';
 import {useChatHandler} from '@/hooks/chat-handler';
 import {loadBannerModules} from '@/hooks/use-banner-modules';
+import {useAdditionalDirectories} from '@/hooks/useAdditionalDirectories';
 import {useAppHandlers} from '@/hooks/useAppHandlers';
 import {useAppInitialization} from '@/hooks/useAppInitialization';
 import {useAppState} from '@/hooks/useAppState';
@@ -113,8 +114,12 @@ export default function App({
 
 	// Ephemeral trust override for non-interactive `--trust-directory` runs.
 	// Bypasses the disclaimer without touching the preferences file.
-	const isEffectivelyTrusted =
-		isTrusted || (nonInteractiveMode && trustDirectory);
+	const primaryTrusted = isTrusted || (nonInteractiveMode && trustDirectory);
+	const additionalTrust = useAdditionalDirectories(
+		primaryTrusted,
+		nonInteractiveMode && trustDirectory,
+	);
+	const isEffectivelyTrusted = primaryTrusted && additionalTrust.ready;
 
 	// VS Code extension installation prompt state
 	const [showExtensionPrompt, setShowExtensionPrompt] = React.useState(
@@ -772,7 +777,7 @@ export default function App({
 	}
 
 	// Handle error state for directory trust
-	if (isTrustedError) {
+	if (isTrustedError || additionalTrust.error) {
 		logger.error('Directory trust check failed', {
 			error: isTrustedError,
 			suggestion: 'restart_application_or_check_permissions',
@@ -782,7 +787,8 @@ export default function App({
 			<ThemeContext.Provider value={themeContextValue}>
 				<Box flexDirection="column" padding={1}>
 					<Text color={themeContextValue.colors.error}>
-						⚠️ Error checking directory trust: {isTrustedError}
+						⚠️ Error checking directory trust:{' '}
+						{isTrustedError ?? additionalTrust.error}
 					</Text>
 					<Text color={themeContextValue.colors.secondary}>
 						Please restart the application or check your permissions.
@@ -793,20 +799,27 @@ export default function App({
 	}
 
 	// Show security disclaimer if directory is not trusted
-	if (!isEffectivelyTrusted) {
+	if (!isEffectivelyTrusted && (!primaryTrusted || additionalTrust.pending)) {
 		logger.info('Directory not trusted, showing security disclaimer');
 
 		return (
 			<ThemeContext.Provider value={themeContextValue}>
 				<TitleShapeContext.Provider value={titleShapeContextValue}>
 					<SecurityDisclaimer
-						onConfirm={handleConfirmTrust}
+						directory={additionalTrust.pending?.path}
+						onConfirm={
+							additionalTrust.pending
+								? additionalTrust.confirm
+								: handleConfirmTrust
+						}
 						onExit={handleExit}
 					/>
 				</TitleShapeContext.Provider>
 			</ThemeContext.Provider>
 		);
 	}
+
+	if (!isEffectivelyTrusted) return null;
 
 	// Directory is trusted - application can proceed
 	logger.debug('Directory trusted, proceeding with application initialization');

@@ -232,6 +232,7 @@ function main(): void {
 	setRequired(definitions, 'ModeProviderConfig', ['provider', 'model']);
 	setRequired(definitions, 'HookDefinition', ['command']);
 	setRequired(definitions, 'FormatterConfig', ['match', 'command']);
+	setRequired(definitions, 'WorkingDirectory', ['path']);
 
 	// lspServers is an inline array with an anonymous item schema (not a
 	// named definition).  The type requires name, command, languages.

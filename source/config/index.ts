@@ -523,6 +523,41 @@ function loadAlwaysAllowConfig(cwd: string): string[] | undefined {
 	);
 }
 
+export function loadAdditionalDirectoriesConfig(
+	cwd = getConfigRoot(),
+): NonNullable<AppConfig['additionalDirectories']> {
+	return (
+		loadHierarchicalConfig(
+			cwd,
+			'agents.config.json',
+			'additionalDirectories',
+			config => {
+				const directories = config.nanocoder?.additionalDirectories;
+				if (directories === undefined) return null;
+				if (!Array.isArray(directories))
+					throw new Error('additionalDirectories must be a list');
+				return directories.map((entry: unknown) => {
+					if (typeof entry === 'string' && entry.trim()) return {path: entry};
+					if (
+						entry &&
+						typeof entry === 'object' &&
+						'path' in entry &&
+						typeof entry.path === 'string' &&
+						entry.path.trim()
+					) {
+						const mode = 'mode' in entry ? entry.mode : 'read-write';
+						if (mode === 'read-only' || mode === 'read-write')
+							return {path: entry.path, mode};
+					}
+					throw new Error(
+						'Invalid additionalDirectories entry: expected a path or {path, mode: "read-only" | "read-write"}',
+					);
+				});
+			},
+		) ?? []
+	);
+}
+
 function loadDisabledToolsConfig(cwd: string): string[] | undefined {
 	return (
 		loadHierarchicalConfig(
@@ -1051,6 +1086,7 @@ function loadAppConfig(cwd: string): AppConfig {
 		nanocoderTools,
 		alwaysAllow,
 		disabledTools,
+		additionalDirectories: loadAdditionalDirectoriesConfig(cwd),
 		systemPrompt,
 		hooks,
 		formatters,

@@ -512,6 +512,12 @@ function blockSpecs(cwd?: string): BlockSpec[] {
 			leaf: true,
 		},
 		{
+			path: ['nanocoder', 'additionalDirectories'],
+			file: agents,
+			effective: config.additionalDirectories,
+			leaf: true,
+		},
+		{
 			path: ['nanocoder', 'disabledTools'],
 			file: agents,
 			effective: config.disabledTools,

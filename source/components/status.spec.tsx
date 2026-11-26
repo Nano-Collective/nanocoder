@@ -868,3 +868,23 @@ test('Status shows Git line in narrow layout', t => {
 
 	process.stdout.columns = originalColumns;
 });
+
+test.serial('Status lists active roots and access modes in both terminal layouts', async t => {
+ const {mkdtempSync, rmSync} = await import('node:fs');
+ const {tmpdir} = await import('node:os');
+ const {join} = await import('node:path');
+ const {addWorkingDirectory} = await import('@/services/working-directories');
+ const {resetSessionCwd} = await import('@/services/session-cwd');
+ const extra = mkdtempSync(join(tmpdir(), 'nano-status-root-'));
+ const columns = process.stdout.columns;
+ t.teardown(() => {process.stdout.columns = columns; resetSessionCwd(); rmSync(extra, {recursive: true, force: true});});
+ addWorkingDirectory({path: extra, mode: 'read-only'}, true);
+ for (const width of [50, 120]) {
+  process.stdout.columns = width;
+  const {lastFrame, unmount} = renderWithTheme(<Status {...defaultProps} />);
+  t.true(lastFrame()?.includes('Primary directory'));
+  t.is(lastFrame()?.match(/Additional directory/g)?.length, 1);
+  t.true(lastFrame()?.includes('read-only'));
+  unmount();
+ }
+});

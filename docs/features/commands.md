@@ -301,3 +301,7 @@ The emitted object looks like:
 A few more fields appear conditionally: `message` (the error text, when `kind` is `"error"`), and, when `kind` is `"tool-approval-required"`, `toolNames` (the tools awaiting approval) and `autoAcceptWouldRun` (whether `--mode auto-accept` would have run every blocked call; when false, only `--mode yolo` or `alwaysAllow` unblocks it).
 
 On error (e.g. an untrusted workspace directory, a provider request that fails with an HTTP error or a dropped connection, the turn limit being hit without a final answer, or an agent-loop [retry limit](../configuration/index.md#retry-limits) being hit), `kind` is `"error"` and the object still includes whatever `toolCalls` were captured before the failure, so partial progress isn't silently dropped.
+
+### `/add-dir [--read-only] <path>`
+
+Add another working directory for this session, after its directory trust check. Use `--read-only` for reference material and quote paths containing spaces. `/status` lists active roots and their access modes. See [Additional working directories](additional-directories.md).

@@ -7,6 +7,10 @@ import {
 } from '@/commands/export-path';
 import {ErrorMessage, SuccessMessage} from '@/components/message-box';
 import {getProjectRoot, getSafeSessionCwd} from '@/services/session-cwd';
+import {
+	assertWritablePath,
+	getWorkingRoots,
+} from '@/services/working-directories';
 import {Command, Message} from '@/types/index';
 import {formatError} from '@/utils/error-formatter';
 import {atomicWriteFile} from '@/utils/fs/atomic-write';
@@ -109,7 +113,12 @@ export const exportCommand: Command = {
 		const sessionCwd = getSafeSessionCwd();
 		let filepath: string;
 		try {
-			filepath = resolveFilePath(requestedFilename, sessionCwd, projectRoot);
+			filepath = resolveFilePath(
+				requestedFilename,
+				sessionCwd,
+				getWorkingRoots(),
+			);
+			assertWritablePath(filepath);
 		} catch {
 			return React.createElement(ExportError, {
 				key: generateKey('export'),

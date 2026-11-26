@@ -631,3 +631,9 @@ test('RecordStringString maps to additionalProperties of type string', t => {
 	const def = schema.definitions.RecordStringString;
 	t.deepEqual(def.additionalProperties, {type: 'string'});
 });
+
+test('additional directories accept paths and read-only modes and reject malformed entries', t => {
+ assertValid(t, 'additional directories', {nanocoder: {additionalDirectories: ['../lib', {path: '../docs', mode: 'read-only'}]}});
+ assertInvalid(t, 'unknown directory mode', {nanocoder: {additionalDirectories: [{path: '../docs', mode: 'write'}]}});
+ assertInvalid(t, 'missing directory path', {nanocoder: {additionalDirectories: [{mode: 'read-only'}]}});
+});

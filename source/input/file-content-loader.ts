@@ -1,7 +1,10 @@
 import {readFile, stat} from 'node:fs/promises';
 import {extname, resolve} from 'node:path';
 import {BINARY_FILE_EXTENSIONS, MAX_FILE_TAG_SIZE_BYTES} from '@/constants.js';
+import {getProjectRoot} from '@/services/session-cwd';
+import {getWorkingRoots} from '@/services/working-directories';
 import {formatError} from '@/utils/error-formatter';
+import {resolveFilePath} from '@/utils/fs/path-validation';
 import {estimateTokens} from '@/utils/token-calculator';
 
 interface FileContentResult {
@@ -27,7 +30,11 @@ export async function loadFileContent(
 	lineRange?: {start: number; end?: number},
 ): Promise<FileContentResult> {
 	try {
-		const absPath = resolve(filePath);
+		const absPath = resolveFilePath(
+			filePath,
+			getProjectRoot(),
+			getWorkingRoots(),
+		);
 
 		// Check if file exists and get stats
 		const fileStats = await stat(absPath);
@@ -167,8 +174,8 @@ export async function loadFileContent(
 			},
 		};
 	} catch (error) {
-		// File doesn't exist or other error
-		const absPath = resolve(filePath);
+		// Metadata must remain available even when containment rejected the path.
+		const absPath = resolve(getProjectRoot(), filePath);
 		return {
 			success: false,
 			error: formatError(error),

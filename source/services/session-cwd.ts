@@ -1,6 +1,7 @@
 import {existsSync, statSync} from 'node:fs';
 import {resolve} from 'node:path';
 import {getActiveSessionContext} from '@/services/session-context';
+import {resetWorkingDirectories} from '@/services/working-directories';
 import {isPathInside, isRealPathInside} from '@/utils/fs/path-validation';
 
 // Shared "where am I" for bash and every file tool. Without it, a `cd` in one
@@ -95,6 +96,7 @@ function isDirectory(dir: string): boolean {
 
 // Test helper.
 export function resetSessionCwd(): void {
+	resetWorkingDirectories();
 	sessionCwd = null;
 	projectRoot = null;
 }

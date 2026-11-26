@@ -314,3 +314,7 @@ Extend Nanocoder's capabilities by connecting [MCP (Model Context Protocol) serv
 | [Edit Recovery](edit-recovery.md) | The evidence an edit tool returns when its search text does not match the file |
 | [Browser Tool](browser.md) | Headless Chromium the model can navigate, click, type into and screenshot |
 | [Voice Mode](voice-mode.md) | Push-to-talk or hands-free speech input and spoken replies |
+
+## Additional working directories
+
+Use trusted sibling repositories and read-only reference directories with `--add-dir`, `--add-dir-ro`, or `/add-dir`. See [Additional working directories](additional-directories.md).

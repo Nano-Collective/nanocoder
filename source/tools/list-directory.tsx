@@ -1,15 +1,23 @@
-import {lstat, readdir} from 'node:fs/promises';
+import {lstat, readdir, realpath} from 'node:fs/promises';
 import {join, relative} from 'node:path';
 import {Box, Text} from 'ink';
 import React from 'react';
 import ToolMessage from '@/components/tool-message';
 import {ThemeContext} from '@/hooks/useTheme';
-import {getProjectRoot, getSafeSessionCwd} from '@/services/session-cwd';
+import {getSafeSessionCwd} from '@/services/session-cwd';
+import {
+	getContainingWorkingRoot,
+	getWorkingRoots,
+} from '@/services/working-directories';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
 import {addNestedGitignore, loadGitignore} from '@/utils/fs/gitignore-loader';
-import {isValidFilePath, resolveFilePath} from '@/utils/fs/path-validation';
+import {
+	isValidFilePath,
+	realResolvedPrefix,
+	resolveFilePath,
+} from '@/utils/fs/path-validation';
 import {estimateTokens} from '@/utils/token-calculator';
 
 interface ListDirectoryArgs {
@@ -40,14 +48,15 @@ const executeListDirectory = async (
 
 	// Validate path
 	const cwd = getSafeSessionCwd();
-	const root = getProjectRoot();
-	if (!isValidFilePath(dirPath, root)) {
+	const roots = getWorkingRoots();
+	if (!isValidFilePath(dirPath, roots)) {
 		throw new Error(
 			`⚒ Invalid path. Path must be within the project directory.`,
 		);
 	}
 
-	const resolvedPath = resolveFilePath(dirPath, cwd, root);
+	const resolvedPath = realResolvedPrefix(resolveFilePath(dirPath, cwd, roots));
+	const root = realResolvedPrefix(getContainingWorkingRoot(resolvedPath));
 	// Dotfiles stay hidden unless the caller explicitly asked for a hidden
 	// directory (`.github`, `./.config`). Match the project-relative path, not
 	// the raw argument: `'.'.startsWith('.')` is true and used to leak every
@@ -77,13 +86,24 @@ const executeListDirectory = async (
 
 	try {
 		const entries: DirectoryEntry[] = [];
+		const listingRoot = root;
+		const listingIgnore = ig;
 
 		const walkDirectory = async (
 			currentPath: string,
 			relativeTo: string,
 			depth: number,
+			root = listingRoot,
+			ig = listingIgnore,
 		): Promise<void> => {
 			if (depth > maxDepth) return;
+			const containingRoot = await realpath(
+				getContainingWorkingRoot(currentPath),
+			);
+			if (containingRoot !== root) {
+				root = containingRoot;
+				ig = loadGitignore(root);
+			}
 
 			try {
 				if (isInsideRoot) {
@@ -153,7 +173,7 @@ const executeListDirectory = async (
 
 					// Recurse into directories if enabled
 					if (recursive && item.isDirectory() && depth < maxDepth) {
-						await walkDirectory(fullPath, relativePath, depth + 1);
+						await walkDirectory(fullPath, relativePath, depth + 1, root, ig);
 					}
 				}
 			} catch (error: unknown) {

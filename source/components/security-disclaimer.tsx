@@ -13,6 +13,7 @@ interface SecurityDisclaimerProps {
 	onConfirm: (fingerprint: string) => void;
 	onExit: () => void;
 	directory?: string;
+	cancelLabel?: string;
 }
 
 enum SecurityDisclaimerOption {
@@ -24,6 +25,7 @@ export default function SecurityDisclaimer({
 	onConfirm,
 	onExit,
 	directory = process.cwd(),
+	cancelLabel = 'No, exit',
 }: SecurityDisclaimerProps) {
 	const boxWidth = useTerminalWidth();
 	const colors = getThemeColors(defaultTheme);
@@ -42,7 +44,7 @@ export default function SecurityDisclaimer({
 			value: SecurityDisclaimerOption.Yes,
 		},
 		{
-			label: 'No, exit',
+			label: cancelLabel,
 			value: SecurityDisclaimerOption.No,
 		},
 	];

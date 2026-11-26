@@ -1,3 +1,4 @@
+import type {WorkingDirectory} from '@/services/working-directories';
 import type {DevelopmentMode} from '@/types/core';
 import type {FirewallConfig} from '@/types/firewall';
 import type {NanocoderShape, ThemePreset, TitleShape} from '@/types/ui';
@@ -365,6 +366,8 @@ export type DiskModeProviders = Partial<
  * @internal
  */
 export interface DiskNanocoderConfig {
+	/** Additional file-access roots. Relative paths resolve against the primary project. */
+	additionalDirectories?: (string | WorkingDirectory)[];
 	/** AI provider configurations (all OpenAI-compatible). */
 	providers?: ProviderConfig[];
 	/** Default conversation mode when none is specified. */
@@ -486,6 +489,7 @@ export interface DiskConfig {
 }
 
 export interface AppConfig {
+	additionalDirectories?: WorkingDirectory[];
 	// Providers array structure - all OpenAI compatible
 	providers?: ProviderConfig[];
 

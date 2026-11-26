@@ -23,6 +23,20 @@
 		"DiskNanocoderConfig": {
 			"description": "On-disk representation of the `nanocoder` namespace in agents.config.json.\n\nEvery field is optional — the loader applies sensible defaults for each one.\nFields that live in nanocoder-preferences.json (notifications, sessions,\npaste) are intentionally absent: the schema should not advertise keys the\nloader silently ignores.",
 			"properties": {
+				"additionalDirectories": {
+					"description": "Additional file-access roots. Relative paths resolve against the primary project.",
+					"items": {
+						"anyOf": [
+							{
+								"$ref": "#/definitions/WorkingDirectory"
+							},
+							{
+								"type": "string"
+							}
+						]
+					},
+					"type": "array"
+				},
 				"alwaysAllow": {
 					"description": "Tools that run automatically without confirmation in non-interactive mode.",
 					"items": {
@@ -190,6 +204,20 @@
 		"DiskProfileConfig": {
 			"description": "Configuration overrides applied by a named profile.\nCan override provider, model, mode, and any nanocoder.* section.",
 			"properties": {
+				"additionalDirectories": {
+					"description": "Additional file-access roots. Relative paths resolve against the primary project.",
+					"items": {
+						"anyOf": [
+							{
+								"$ref": "#/definitions/WorkingDirectory"
+							},
+							{
+								"type": "string"
+							}
+						]
+					},
+					"type": "array"
+				},
 				"alwaysAllow": {
 					"description": "Tools that run automatically without confirmation in non-interactive mode.",
 					"items": {
@@ -999,6 +1027,20 @@
 			},
 			"type": "object",
 			"additionalProperties": false
+		},
+		"WorkingDirectory": {
+			"properties": {
+				"mode": {
+					"enum": ["read-only", "read-write"],
+					"type": "string"
+				},
+				"path": {
+					"type": "string"
+				}
+			},
+			"type": "object",
+			"additionalProperties": false,
+			"required": ["path"]
 		}
 	},
 	"additionalProperties": false

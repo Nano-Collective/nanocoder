@@ -1,3 +1,6 @@
+import {mkdtempSync, rmSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import test from 'ava';
@@ -17,11 +20,14 @@ const runtimeModules = {
 	// loader short-circuits the whole specifier, so a missing name surfaces as
 	// "<name> is not a function" at run time rather than an import error.
 	'@/config/preferences': `export function loadPreferences() { return {}; }
+		export function savePreferences() { return true; }
 		export function getAlternateScreen() { return false; }
 		export function getMouseReporting() { return false; }
 		export function getKittyKeyboardMode() { return 'auto'; }
 		export function getMaxFps() { return process.env.CLI_TEST_MAX_FPS ? Number(process.env.CLI_TEST_MAX_FPS) : 30; }`,
-	'@/app/render-tui': `export function renderTui(props, options) {
+	'@/app/render-tui': `import {getCliDirectories} from '@/services/working-directories';
+	export function renderTui(props, options) {
+		props.additionalDirectories = getCliDirectories();
 		console.log(JSON.stringify({...props, contextLimit: globalThis.cliTestContextLimit, inkOptions: options}));
 		process.exit(0);
 	}`,
@@ -367,3 +373,16 @@ test('run --help or run -h with nothing else still prints the help', t => {
 		t.true(result.stdout.includes('Usage: nanocoder'), result.stdout);
 	}
 });
+
+for (const beforeRun of [true, false]) {
+	test(`additional directory flags reach startup ${beforeRun ? 'before' : 'after'} run`, t => {
+		const root = mkdtempSync(join(tmpdir(), 'nano-cli-directories-'));
+		t.teardown(() => rmSync(root, {recursive: true, force: true}));
+		const options = ['--add-dir', root, `--add-dir-ro=${root}`];
+		const result = runCli(beforeRun ? [...options, 'run', 'inspect files'] : ['run', 'inspect files', ...options]);
+		t.is(result.status, 0, result.stderr);
+		const props = JSON.parse(result.stdout);
+		t.is(props.nonInteractivePrompt, 'inspect files');
+		t.deepEqual(props.additionalDirectories, [{path: root, mode: 'read-write'}, {path: root, mode: 'read-only'}]);
+	});
+}

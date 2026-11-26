@@ -1,3 +1,4 @@
+import {setProjectRoot, resetSessionCwd} from '@/services/session-cwd';
 import {mkdir, rm, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
@@ -17,6 +18,7 @@ test.before(async () => {
 	// Create a unique temp directory for our tests
 	testDir = join(tmpdir(), `nanocoder-handler-test-${Date.now()}`);
 	await mkdir(testDir, {recursive: true});
+	setProjectRoot(testDir);
 
 	// Create test files
 	await writeFile(
@@ -33,6 +35,7 @@ test.before(async () => {
 });
 
 test.after.always(async () => {
+	resetSessionCwd();
 	// Clean up temp directory
 	try {
 		await rm(testDir, {recursive: true, force: true});

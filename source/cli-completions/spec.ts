@@ -119,6 +119,18 @@ export const COMPLETION_SUBCOMMANDS: readonly CompletionSubcommand[] = [
 
 export const COMPLETION_FLAGS: readonly CompletionFlag[] = [
 	{
+		name: 'add-dir',
+		takesValue: true,
+		valueName: 'path',
+		description: 'Add a trusted working directory (repeatable)',
+	},
+	{
+		name: 'add-dir-ro',
+		takesValue: true,
+		valueName: 'path',
+		description: 'Add a trusted read-only directory (repeatable)',
+	},
+	{
 		name: 'profile',
 		takesValue: true,
 		valueName: 'name',
