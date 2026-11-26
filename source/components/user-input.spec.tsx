@@ -362,10 +362,12 @@ const shortcutsWindow = (rows: number, start: number) => {
 };
 const escapeRegExp = (value: string) =>
 	value.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&');
+// Matches the start of the row: a long row is cut with "…" to fit the box,
+// and 40 characters always fit and still tell every row apart.
 const shortcutRow = (index: number) => {
 	const entry = KEYBOARD_SHORTCUTS.at(index);
 	if (!entry) throw new Error(`No shortcut at index ${index}`);
-	return new RegExp(escapeRegExp(`${entry[0]} — ${entry[1]}`));
+	return new RegExp(escapeRegExp(`${entry[0]} — ${entry[1]}`.slice(0, 40)));
 };
 
 test.serial('UserInput fits the shortcuts overlay and its close hint on a short terminal', async t => {

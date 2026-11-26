@@ -56,7 +56,7 @@ Take care to send a bare `\n`. A sequence such as `"\\\r\n"` sends a literal bac
 | Delete previous word | Ctrl+W |
 | Delete from cursor to start of line | Ctrl+U |
 | Delete from cursor to end of line | Ctrl+K |
-| Clear input | Esc (twice) |
+| Clear input | Esc (twice), or Ctrl+C (Ctrl+Z brings the text back) |
 | Undo / redo the last input edit | Ctrl+Z / Ctrl+Y |
 
 ## Autocomplete
@@ -118,8 +118,8 @@ Long prompts (more than 40 words or 300 characters) are shown collapsed in the t
 
 | Action | Shortcut |
 |--------|----------|
-| Cancel response | Esc |
-| Take back the prompt you just sent (before any output arrives) | Esc |
+| Cancel response | Esc or Ctrl+C |
+| Take back the prompt you just sent (before any output arrives) | Esc or Ctrl+C |
 
 Pressing Esc before the model has produced any output, and before any tool has started, cancels the turn and puts your prompt back in the input so you can edit it.
 
@@ -127,7 +127,10 @@ Pressing Esc before the model has produced any output, and before any tool has s
 
 | Action | Shortcut |
 |--------|----------|
-| Exit Nanocoder | Ctrl+C (or `/exit`) |
+| Exit Nanocoder | Ctrl+C twice |
+| Exit straight away | Ctrl+D (empty prompt) or `/exit` |
+
+Ctrl+C never ends the session by accident. While a response is running it cancels it, and with text in the prompt it clears it. Otherwise it shows `Press Ctrl+C again to exit`, and a second press within 2 seconds exits. Any other key in between resets this.
 
 ## Display
 
@@ -139,7 +142,7 @@ Pressing Esc before the model has produced any output, and before any tool has s
 | Collapse / expand the live task list | Ctrl+T |
 | Attach to a running subagent, or cycle to the next one | Ctrl+S |
 
-Ctrl+T works even while the agent is responding, which is when the task list is on screen. Ctrl+S switches the view to a running subagent's transcript; each further press moves to the next running subagent, and pressing it when none are running returns to the main conversation.
+Ctrl+T works even while the agent is responding, which is when the task list is on screen. Ctrl+S switches the view to a running subagent's transcript; each further press moves to the next running subagent, and pressing it when none are running returns to the main conversation. In that view, Esc returns to the main conversation, and Ctrl+C cancels the running turn (which stops the subagent) and returns there as well.
 
 ## Voice Mode
 

@@ -32,6 +32,7 @@ const KEY = {
 	escape: '\u001b',
 	ctrlA: '\u0001',
 	ctrlC: '\u0003',
+	ctrlD: '\u0004',
 	ctrlE: '\u0005',
 	ctrlK: '\u000b',
 	ctrlO: '\u000f',
@@ -495,12 +496,13 @@ coveredBy(
 	'UserInput leaves Ctrl+G alone so voice push-to-talk keeps working',
 );
 
-// Ctrl+S and Ctrl+C are handled by App.tsx's global useInput, which the
-// composer split does not touch. What the composer owes them is to let the
+// Ctrl+S, Ctrl+C and Ctrl+D are handled by App.tsx's global useInput, which
+// the composer split does not touch. What the composer owes them is to let the
 // key through untouched: no text, no submit.
 for (const [keybind, key] of [
 	['Ctrl+S', KEY.ctrlS],
 	['Ctrl+C', KEY.ctrlC],
+	['Ctrl+D', KEY.ctrlD],
 ] as const) {
 	binding(keybind, 'the composer neither types nor submits it', async t => {
 		const composer = renderComposer();

@@ -1,4 +1,4 @@
-import {Box, useInput} from 'ink';
+import {Box, Text, useInput} from 'ink';
 import React from 'react';
 import {ChatHistory} from '@/app/components/chat-history';
 import {ChatInput} from '@/app/components/chat-input';
@@ -13,6 +13,7 @@ import {IdeSelector} from '@/components/ide-selector';
 import PlanReviewPrompt from '@/components/plan-review-prompt';
 import type {VoiceIndicatorInfo} from '@/components/status-bar';
 import {displayCompactCountsSummary} from '@/components/tool-result-display';
+import type {ComposerHandle} from '@/components/user-input';
 import {getVoicePreference, subscribeToPreferences} from '@/config/preferences';
 import type {useChatHandler} from '@/hooks/chat-handler';
 import {lastTurnEditedFiles} from '@/hooks/chat-handler/conversation/auto-diagnostics';
@@ -20,6 +21,7 @@ import type {AppHandlers} from '@/hooks/useAppHandlers';
 import type {useAppState} from '@/hooks/useAppState';
 import type {useModeHandlers} from '@/hooks/useModeHandlers';
 import {useTerminalRows} from '@/hooks/useTerminalWidth';
+import {useTheme} from '@/hooks/useTheme';
 import {UIStateProvider} from '@/hooks/useUIState';
 import type {useUserMessageQueue} from '@/hooks/useUserMessageQueue';
 import {useVoice} from '@/hooks/useVoice';
@@ -30,7 +32,19 @@ import type {PendingToolConfirmation} from '@/tools/runtime/tool-confirm-queue';
 import type {ImageAttachment} from '@/types/core';
 import type {RestoredInputDraft, SubmittedInputDraft} from '@/types/hooks';
 
+// How long "Press Ctrl+C again to exit" waits for the second press.
+const EXIT_HINT_MS = 2000;
+
+/** App's Ctrl+C / Ctrl+D handler asks the chat UI first. */
+export type InteractiveAppHandle = {
+	/** Returns false when the press should exit the app. */
+	handleCtrlC: () => boolean;
+	/** The prompt is on screen with nothing in it, so Ctrl+D exits. */
+	promptIsEmpty: () => boolean;
+};
+
 interface InteractiveAppProps {
+	ref?: React.Ref<InteractiveAppHandle>;
 	appState: ReturnType<typeof useAppState>;
 	chatHandler: ReturnType<typeof useChatHandler>;
 	modeHandlers: ReturnType<typeof useModeHandlers>;
@@ -73,6 +87,7 @@ interface InteractiveAppProps {
  * the user can see during a normal session lives here.
  */
 export function InteractiveApp({
+	ref,
 	appState,
 	chatHandler,
 	modeHandlers,
@@ -96,6 +111,7 @@ export function InteractiveApp({
 	altScreenActive = false,
 	isSaving,
 }: InteractiveAppProps): React.ReactElement {
+	const {colors} = useTheme();
 	const nextRestoredDraftIdRef = React.useRef(1);
 	// Tune / IDE are launched by closing settings first, so their exit has no way
 	// to know it should land back in settings rather than in chat.
@@ -433,19 +449,59 @@ export function InteractiveApp({
 	// regular tool behind ToolExecutionIndicator, a bash command, or a subagent.
 	// `isActive` keeps it dormant when there's nothing to cancel, so idle Escape
 	// still drives the clear-input behaviour in UserInput.
+	const cancelInFlight = () => {
+		if (recallableSubmittedDraft) {
+			handleRecallSubmittedDraft();
+			return;
+		}
+
+		appHandlers.handleCancel();
+	};
 	useInput(
 		(_input, key) => {
 			if (key.escape) {
-				if (recallableSubmittedDraft) {
-					handleRecallSubmittedDraft();
-					return;
-				}
-
-				appHandlers.handleCancel();
+				cancelInFlight();
 			}
 		},
 		{isActive: cancellable},
 	);
+
+	// Ctrl+C cancels the turn like Escape, else clears the prompt, else asks
+	// for a second press, so a reflex press can't end the session.
+	const composerRef = React.useRef<ComposerHandle>(null);
+	const [exitHintShown, setExitHintShown] = React.useState(false);
+	const exitHintTimerRef = React.useRef<NodeJS.Timeout | null>(null);
+	const hideExitHint = React.useCallback(() => {
+		if (exitHintTimerRef.current) clearTimeout(exitHintTimerRef.current);
+		exitHintTimerRef.current = null;
+		setExitHintShown(false);
+	}, []);
+	// Stop a pending timer on unmount.
+	React.useEffect(() => hideExitHint, [hideExitHint]);
+	React.useImperativeHandle(ref, () => ({
+		handleCtrlC: () => {
+			const secondPress = exitHintTimerRef.current !== null;
+			hideExitHint();
+			if (cancellable) {
+				cancelInFlight();
+				return true;
+			}
+			if (composerRef.current?.clearDraft()) return true;
+			if (secondPress) return false;
+			setExitHintShown(true);
+			exitHintTimerRef.current = setTimeout(hideExitHint, EXIT_HINT_MS);
+			return true;
+		},
+		promptIsEmpty: () => composerRef.current?.isEmpty() ?? false,
+	}));
+	// Any other key ends the window: a later Ctrl+C is a first press again.
+	// Always subscribed and gated on the timer, so the key right after the
+	// first press is seen even before an isActive change would take effect.
+	useInput((input, key) => {
+		if (exitHintTimerRef.current && !(key.ctrl && input === 'c')) {
+			hideExitHint();
+		}
+	});
 
 	const isVoiceInputAppropriate =
 		Boolean(voicePref.enabled) && voiceInputAllowed;
@@ -656,6 +712,7 @@ export function InteractiveApp({
 							inputDisabled={false}
 							onSubmittedDraft={handleSubmittedDraft}
 							restoreSubmittedDraft={restoredDraft}
+							composerRef={composerRef}
 							queuedMessages={userMessageQueue.queuedMessages}
 							onQueueMessage={userMessageQueue.enqueueMessage}
 							onRemoveQueuedMessage={userMessageQueue.removeMessage}
@@ -692,6 +749,13 @@ export function InteractiveApp({
 							shortcutsOverlayOpen={shortcutsOverlayOpen}
 							onShortcutsOverlayChange={setShortcutsOverlayOpen}
 						/>
+					)}
+
+					{/* Outside ChatInput so it shows over modals and prompts too. */}
+					{exitHintShown && (
+						<Box marginLeft={fullscreen ? 2 : 1}>
+							<Text color={colors.secondary}>Press Ctrl+C again to exit</Text>
+						</Box>
 					)}
 
 					{/* Artifact shortcuts sit below the input alongside the mode

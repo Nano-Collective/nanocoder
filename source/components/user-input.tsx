@@ -1,6 +1,13 @@
 import {Box, Text, useFocus, useInput} from 'ink';
 import Spinner from 'ink-spinner';
-import {useCallback, useEffect, useRef, useState} from 'react';
+import {
+	type Ref,
+	useCallback,
+	useEffect,
+	useImperativeHandle,
+	useRef,
+	useState,
+} from 'react';
 import {AttachmentPills} from '@/components/composer/attachment-pills';
 import {CommandCompletionList} from '@/components/composer/command-completion-list';
 import {FileMentionList} from '@/components/composer/file-mention-list';
@@ -62,7 +69,16 @@ interface MentionWarning {
 	text: string;
 }
 
+/** Lets the app's Ctrl+C / Ctrl+D handler read and clear the prompt. */
+export type ComposerHandle = {
+	/** Clears what Esc Esc would, keeping the text undoable. False if empty. */
+	clearDraft: () => boolean;
+	/** No text, attachment or editor pill. */
+	isEmpty: () => boolean;
+};
+
 interface ChatProps {
+	ref?: Ref<ComposerHandle>;
 	onSubmit?: (
 		message: string,
 		displayValue: string,
@@ -117,6 +133,7 @@ interface ChatProps {
 }
 
 export default function UserInput({
+	ref,
 	onSubmit,
 	onQueueMessage,
 	queuedMessages = [],
@@ -490,6 +507,39 @@ export default function UserInput({
 		updateMentionWarning,
 	]);
 
+	// Clear the prompt, its attachments and the editor pill. Esc Esc drops the
+	// undo history; Ctrl+C keeps it so the text can come back.
+	const clearComposer = useCallback(
+		(undoable: boolean) => {
+			resetInput(undoable);
+			resetUIState();
+			images.clear();
+			updateMentionWarning(null);
+			onDismissActiveEditor?.();
+		},
+		[
+			resetInput,
+			resetUIState,
+			images.clear,
+			updateMentionWarning,
+			onDismissActiveEditor,
+		],
+	);
+
+	// The same "anything to clear?" test as Esc's first press.
+	const isEmpty = () =>
+		!currentStateRef.current.displayValue &&
+		attachments.length === 0 &&
+		!activeEditor;
+	useImperativeHandle(ref, () => ({
+		clearDraft: () => {
+			if (isEmpty()) return false;
+			clearComposer(true);
+			return true;
+		},
+		isEmpty,
+	}));
+
 	// Handle escape key logic
 	const handleEscape = useCallback(() => {
 		if (commands.isOpen) {
@@ -506,11 +556,7 @@ export default function UserInput({
 			return;
 		}
 		if (showClearMessage) {
-			resetInput();
-			resetUIState();
-			images.clear();
-			updateMentionWarning(null);
-			onDismissActiveEditor?.();
+			clearComposer(false);
 			focus('user-input');
 		} else if (input || attachments.length > 0 || activeEditor) {
 			// Nothing to clear otherwise - no-op instead of arming a hint for a
@@ -528,13 +574,9 @@ export default function UserInput({
 		suggestedCommand,
 		onDismissSuggestion,
 		showClearMessage,
-		resetInput,
-		resetUIState,
-		onDismissActiveEditor,
+		clearComposer,
 		setShowClearMessage,
 		focus,
-		images.clear,
-		updateMentionWarning,
 	]);
 
 	// Any keystroke means the user is composing, not navigating — re-enable the

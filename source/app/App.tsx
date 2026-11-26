@@ -9,7 +9,10 @@ import {
 	useUserSubmit,
 	useVSCodePromptDispatcher,
 } from '@/app/hooks/useVSCodePromptHandling';
-import {InteractiveApp} from '@/app/sections/interactive-app';
+import {
+	InteractiveApp,
+	type InteractiveAppHandle,
+} from '@/app/sections/interactive-app';
 import type {AppProps} from '@/app/types';
 import AssistantReasoning from '@/components/assistant-reasoning';
 import {SuccessMessage, WarningMessage} from '@/components/message-box';
@@ -169,8 +172,28 @@ export default function App({
 
 	// Ink's built-in exitOnCtrlC is disabled (cli.tsx) so Ctrl+C can run
 	// the same graceful path as /exit instead of abandoning the last frame.
+	// The chat UI gets the press first (cancel, clear, or the exit hint);
+	// other screens, and a press during shutdown, exit straight away.
+	const interactiveAppRef = React.useRef<InteractiveAppHandle>(null);
 	useInput((input, key) => {
 		if (key.ctrl && input === 'c') {
+			if (isExitingRef.current) {
+				handleExit();
+			} else if (attachedAgentIdRef.current) {
+				// A watched subagent runs under the current turn: stop the turn
+				// (which stops the subagent) and go back to the chat.
+				appHandlers.handleCancel();
+				changeAttachedAgent(null);
+			} else if (!interactiveAppRef.current?.handleCtrlC()) {
+				handleExit();
+			}
+		}
+		// Ctrl+D on an empty prompt exits at once, like /exit.
+		if (
+			key.ctrl &&
+			input === 'd' &&
+			interactiveAppRef.current?.promptIsEmpty()
+		) {
 			handleExit();
 		}
 		if (key.ctrl && input === 's') {
@@ -908,6 +931,7 @@ export default function App({
 						/>
 					) : (
 						<InteractiveApp
+							ref={interactiveAppRef}
 							altScreenActive={altScreenActive}
 							appState={appState}
 							chatHandler={chatHandler}

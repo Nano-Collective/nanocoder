@@ -8,7 +8,7 @@ import {TaskListDisplay} from '@/components/task-list-display';
 import ToolConfirmation from '@/components/tool-confirmation';
 import ToolExecutionIndicator from '@/components/tool-execution-indicator';
 import {LiveCompactCounts} from '@/components/tool-result-display';
-import UserInput from '@/components/user-input';
+import UserInput, {type ComposerHandle} from '@/components/user-input';
 import {VoiceInstallPrompt} from '@/components/voice-install-prompt';
 import {useTheme} from '@/hooks/useTheme';
 import type {
@@ -64,6 +64,8 @@ export interface ChatInputProps {
 	inputDisabled: boolean;
 	onSubmittedDraft?: (draft: SubmittedInputDraft) => void;
 	restoreSubmittedDraft?: RestoredInputDraft | null;
+	// Set while UserInput is mounted, so Ctrl+C can clear the prompt.
+	composerRef?: React.Ref<ComposerHandle>;
 	queuedMessages?: QueuedUserMessage[];
 	onQueueMessage?: (message: UserMessageQueueDraft) => void;
 	onRemoveQueuedMessage?: (id: string) => void;
@@ -150,6 +152,7 @@ export function ChatInput({
 	inputDisabled,
 	onSubmittedDraft,
 	restoreSubmittedDraft,
+	composerRef,
 	queuedMessages = [],
 	onQueueMessage,
 	onRemoveQueuedMessage,
@@ -288,6 +291,7 @@ export function ChatInput({
 			) : /* User Input */
 			mcpInitialized && client ? (
 				<UserInput
+					ref={composerRef}
 					// Inline puts the transcript at column 0 (Ink's <Static>), so the
 					// prompt box drops its centring to share that left edge.
 					centered={fullscreen}

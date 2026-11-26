@@ -102,7 +102,8 @@ const LEGACY_LEGEND: Array<[string, string]> = [
 	['Ctrl+G', 'Voice push-to-talk (when /voice is on)'],
 	['Esc', 'Cancel response (before it starts: back to your prompt)'],
 	['PgUp / PgDn / wheel', 'Scroll the transcript (fullscreen)'],
-	['Ctrl+C', 'Exit'],
+	['Ctrl+C', 'Cancel response or clear the prompt; twice to exit'],
+	['Ctrl+D', 'Exit (in an empty prompt)'],
 	['?', 'Toggle this overlay (in an empty prompt)'],
 ];
 

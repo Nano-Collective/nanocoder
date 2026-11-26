@@ -171,7 +171,16 @@ export const KEYMAP_LEGEND: readonly LegendRow[] = [
 		label: 'Scroll the transcript (fullscreen)',
 		handledBy: {component: 'ChatHistory'},
 	},
-	{keys: 'Ctrl+C', label: 'Exit', handledBy: {component: 'App'}},
+	{
+		keys: 'Ctrl+C',
+		label: 'Cancel response or clear the prompt; twice to exit',
+		handledBy: {component: 'App'},
+	},
+	{
+		keys: 'Ctrl+D',
+		label: 'Exit (in an empty prompt)',
+		handledBy: {component: 'App'},
+	},
 	{
 		keys: '?',
 		label: 'Toggle this overlay (in an empty prompt)',

@@ -9,7 +9,7 @@ import {SHORTCUTS_OVERHEAD_ROWS} from '@/components/composer/useShortcutsOverlay
 import type {Task} from '@/tools/tasks/types';
 import type {Message} from '@/types';
 import {renderWithTheme} from '../../test-utils/render-with-theme.js';
-import {InteractiveApp} from './interactive-app.js';
+import {InteractiveApp, type InteractiveAppHandle} from './interactive-app.js';
 
 console.log(`\ninteractive-app.spec.tsx – ${React.version}`);
 
@@ -1019,6 +1019,145 @@ test('Escape does NOT hijack tool confirmation (decline owns it)', async t => {
 
 	await pressEscape(stdin);
 	t.is(cancelled, 0);
+});
+
+// ============================================================================
+// Ctrl+C: cancel, then clear the prompt, then a second press exits
+// ============================================================================
+
+// App.tsx forwards every Ctrl+C to this handle and exits when it returns false.
+const renderForCtrlC = async (
+	t: {teardown: (fn: () => void) => void},
+	overrides: Overrides,
+) => {
+	const ref = React.createRef<InteractiveAppHandle>();
+	const rendered = renderWithTheme(
+		<InteractiveApp ref={ref} {...makeProps(overrides)} />,
+	);
+	t.teardown(rendered.unmount);
+	await waitForCondition(() => ref.current !== null);
+	const pressCtrlC = async () => {
+		const handled = ref.current!.handleCtrlC();
+		await tickInteractive();
+		return handled;
+	};
+	const frameHas = (pattern: RegExp) => pattern.test(rendered.lastFrame() ?? '');
+	return {...rendered, pressCtrlC, frameHas};
+};
+
+const EXIT_HINT = /Press Ctrl\+C again to exit/;
+
+test('Ctrl+C cancels in-flight generation like Escape and does not exit', async t => {
+	let cancelled = 0;
+	const {pressCtrlC, frameHas} = await renderForCtrlC(t, {
+		startChat: true,
+		isGenerating: true,
+		handleCancel: () => {
+			cancelled++;
+		},
+	});
+
+	t.true(await pressCtrlC());
+	t.is(cancelled, 1);
+	t.false(frameHas(EXIT_HINT));
+});
+
+test('Ctrl+C clears a typed prompt, Ctrl+Z brings it back, and nothing exits', async t => {
+	const {pressCtrlC, stdin, frameHas} = await renderForCtrlC(t, {
+		startChat: true,
+		client: {},
+	});
+	stdin.write('half-written prompt');
+	await waitForCondition(() => frameHas(/half-written prompt/));
+
+	t.true(await pressCtrlC());
+	await waitForCondition(() => !frameHas(/half-written prompt/));
+	t.false(frameHas(EXIT_HINT));
+
+	stdin.write('\u001A'); // Ctrl+Z
+	await waitForCondition(() => frameHas(/half-written prompt/));
+	t.pass();
+});
+
+test('Ctrl+C on an empty idle prompt shows the hint, and only a second press exits', async t => {
+	const {pressCtrlC, frameHas} = await renderForCtrlC(t, {
+		startChat: true,
+		client: {},
+	});
+
+	t.true(await pressCtrlC());
+	await waitForCondition(() => frameHas(EXIT_HINT));
+	t.false(await pressCtrlC());
+});
+
+test('Ctrl+C does not cancel behind a tool confirmation; it asks for a second press', async t => {
+	let cancelled = 0;
+	const {pressCtrlC, frameHas} = await renderForCtrlC(t, {
+		startChat: true,
+		isToolConfirmationMode: true,
+		abortController: new AbortController(),
+		pendingToolCalls: [{id: 't1', function: {name: 'write_file', arguments: {}}}],
+		handleCancel: () => {
+			cancelled++;
+		},
+	});
+
+	t.true(await pressCtrlC());
+	t.is(cancelled, 0);
+	await waitForCondition(() => frameHas(EXIT_HINT));
+	t.false(await pressCtrlC());
+});
+
+test('another key between Ctrl+C presses resets the exit window', async t => {
+	const {pressCtrlC, stdin, frameHas} = await renderForCtrlC(t, {
+		startChat: true,
+		client: {},
+	});
+
+	t.true(await pressCtrlC());
+	await waitForCondition(() => frameHas(EXIT_HINT));
+	stdin.write('\u000F'); // Ctrl+O: not text, so the prompt stays empty
+	await waitForCondition(() => !frameHas(EXIT_HINT));
+
+	t.true(await pressCtrlC());
+});
+
+test('the exit hint expires, so a late second Ctrl+C is a first press again', async t => {
+	const {pressCtrlC, frameHas} = await renderForCtrlC(t, {
+		startChat: true,
+		client: {},
+	});
+
+	t.true(await pressCtrlC());
+	await waitForCondition(() => frameHas(EXIT_HINT));
+	await waitForCondition(() => !frameHas(EXIT_HINT), 3000);
+	t.true(await pressCtrlC());
+});
+
+// App.tsx exits on Ctrl+D only when this says the prompt is empty.
+test('promptIsEmpty lets Ctrl+D exit only from an empty prompt', async t => {
+	const ref = React.createRef<InteractiveAppHandle>();
+	const {stdin, lastFrame, unmount} = renderWithTheme(
+		<InteractiveApp ref={ref} {...makeProps({startChat: true, client: {}})} />,
+	);
+	t.teardown(unmount);
+	await waitForCondition(() => ref.current !== null);
+	t.true(ref.current!.promptIsEmpty());
+
+	stdin.write('not done yet');
+	await waitForCondition(() => /not done yet/.test(lastFrame() ?? ''));
+	t.false(ref.current!.promptIsEmpty());
+});
+
+test('promptIsEmpty is false while no prompt is on screen', async t => {
+	const ref = React.createRef<InteractiveAppHandle>();
+	// startChat false hides the composer (see 'does not render ChatInput...').
+	const {unmount} = renderWithTheme(
+		<InteractiveApp ref={ref} {...makeProps({startChat: false, client: {}})} />,
+	);
+	t.teardown(unmount);
+	await waitForCondition(() => ref.current !== null);
+	t.false(ref.current!.promptIsEmpty());
 });
 
 // ============================================================================

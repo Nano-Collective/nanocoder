@@ -533,24 +533,32 @@ export function useInputState() {
 		[currentState, pushToUndoStack],
 	);
 
-	// Reset all state
-	const resetInput = useCallback(() => {
-		if (debounceTimerRef.current) {
-			clearTimeout(debounceTimerRef.current);
-			debounceTimerRef.current = null;
-		}
+	// Reset all state. `undoable` records the clear as an edit instead of
+	// dropping the history, so Ctrl+Z brings the text back.
+	const resetInput = useCallback(
+		(undoable = false) => {
+			if (debounceTimerRef.current) {
+				clearTimeout(debounceTimerRef.current);
+				debounceTimerRef.current = null;
+			}
 
-		// Through the store, so a key typed before the next render builds on
-		// the empty input rather than on what was just submitted.
-		commit(emptyEditorState());
-		setHasLargeContent(false);
-		setOriginalInput('');
-		setHistoryIndex(-1);
-		setCachedLineCount(1);
-		pasteDetectorRef.current.reset();
-		lastPasteTimeRef.current = 0;
-		lastPasteIdRef.current = null;
-	}, [commit]);
+			// Through the store, so a key typed before the next render builds on
+			// the empty input rather than on what was just submitted.
+			commit(
+				undoable
+					? applyEdit(storeRef.current, createEmptyInputState())
+					: emptyEditorState(),
+			);
+			setHasLargeContent(false);
+			setOriginalInput('');
+			setHistoryIndex(-1);
+			setCachedLineCount(1);
+			pasteDetectorRef.current.reset();
+			lastPasteTimeRef.current = 0;
+			lastPasteIdRef.current = null;
+		},
+		[commit],
+	);
 
 	// Cleanup on unmount
 	useEffect(() => {

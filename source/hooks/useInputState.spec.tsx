@@ -655,6 +655,21 @@ test('resetInput clears undo and redo stacks', t => {
 	t.is(currentHook!.redoStack.length, 0);
 });
 
+test('an undoable resetInput clears the input and undo brings it back', t => {
+	const {hook, instance} = setupTest();
+
+	hook.updateInput('keep me');
+	instance.rerender(<TestComponent />);
+
+	currentHook!.resetInput(true);
+	instance.rerender(<TestComponent />);
+	t.is(currentHook!.input, '');
+
+	currentHook!.undo();
+	instance.rerender(<TestComponent />);
+	t.is(currentHook!.input, 'keep me');
+});
+
 // Test multiple undos
 test('multiple undos work correctly', t => {
 	const {hook, instance} = setupTest();
