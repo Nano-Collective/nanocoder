@@ -370,6 +370,9 @@ export function useChatHandler({
 			return;
 		}
 		const sessionId = ensureCurrentSessionId?.();
+		// Where this prompt starts in the message array: the index a `/rewind`
+		// slices back to, and the key its two timeline entries share.
+		const rewindIndex = messages.length + (historyMessages?.length ?? 0);
 		let wrotePlan = false;
 		let finalAssistantText = '';
 
@@ -449,6 +452,29 @@ export function useChatHandler({
 					'memory-recall',
 				),
 			);
+		}
+
+		// Record this prompt as a `/rewind` point before any of its tools can
+		// touch the workspace, so the snapshot describes what the user was
+		// looking at. Best-effort: a prompt whose snapshot failed simply has no
+		// rewind point, which must never stop the prompt itself.
+		if (sessionId) {
+			try {
+				const {getSessionTimeline, recordPromptStart} = await import(
+					'@/services/rewind'
+				);
+				const timeline = getSessionTimeline(sessionId);
+				if (timeline) {
+					await recordPromptStart({
+						timeline,
+						promptText: message,
+						messageIndex: rewindIndex,
+						turnId: `prompt-${rewindIndex}`,
+					});
+				}
+			} catch (error) {
+				getLogger().warn({error}, 'Failed to record the rewind point');
+			}
 		}
 
 		// Add user message to conversation history (single addition). Any
@@ -578,6 +604,27 @@ export function useChatHandler({
 			displayError(error, 'chat-error');
 			onConversationComplete?.();
 		} finally {
+			// Close the rewind point with the files this turn created, so a later
+			// rewind removes them instead of leaving them behind. Best-effort,
+			// like the start capture.
+			if (sessionId) {
+				try {
+					const {getSessionTimeline, recordPromptEnd} = await import(
+						'@/services/rewind'
+					);
+					const timeline = getSessionTimeline(sessionId);
+					if (timeline) {
+						await recordPromptEnd({
+							timeline,
+							promptText: message,
+							messageIndex: rewindIndex,
+							turnId: `prompt-${rewindIndex}`,
+						});
+					}
+				} catch (error) {
+					getLogger().warn({error}, 'Failed to close the rewind point');
+				}
+			}
 			resetStreamingState();
 		}
 	};

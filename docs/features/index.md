@@ -142,6 +142,16 @@ Before trying a risky approach, save a [checkpoint](checkpointing.md):
 
 Checkpoints save your conversation history, modified files, and model configuration.
 
+### Rewinding a Prompt
+
+When a turn goes the wrong way, `/rewind` takes you back to just before the prompt that started it. It lists this session's prompts, newest first, with how many files each one changed, and asks what to restore:
+
+- **Code and conversation**: put the files back and drop the prompt from the context.
+- **Conversation only**: forget the prompt and everything after it, leaving the files as they are.
+- **Code only**: put the files back and keep the conversation.
+
+After a restore the chosen prompt is loaded into the input, so you can edit it and send it again. Prompts are recorded as they are sent, so nothing needs to be set up beforehand. Undoing a turn cannot undo what its bash commands did outside the workspace, so the picker reminds you of that.
+
 ### Session Management
 
 Nanocoder [automatically saves your sessions](session-management.md) so you can pick up where you left off:

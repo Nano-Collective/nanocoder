@@ -315,7 +315,10 @@ export class TimelineManager {
 	async capture(
 		input: TimelineCaptureInput,
 	): Promise<TimelineEntryMeta | null> {
-		if (input.files.size === 0) {
+		// A `/rewind` point exists even when the prompt changed nothing: the
+		// conversation still needs restoring. Tool checkpoints keep requiring a
+		// file, so an ACP capture with no paths stays a no-op.
+		if (input.files.size === 0 && !input.promptText) {
 			return null;
 		}
 
@@ -337,7 +340,7 @@ export class TimelineManager {
 			}
 		}
 
-		if (createdFiles.length === 0 && existing.size === 0) {
+		if (createdFiles.length === 0 && existing.size === 0 && !input.promptText) {
 			return null;
 		}
 
@@ -353,6 +356,7 @@ export class TimelineManager {
 			filesChanged: [...existing.keys(), ...createdFiles],
 			createdFiles,
 			...(input.turnId ? {turnId: input.turnId} : {}),
+			...(input.promptText ? {promptText: input.promptText} : {}),
 		};
 
 		if (existing.size > 0) {
@@ -560,6 +564,7 @@ export class TimelineManager {
 			filesChanged: entry.filesChanged,
 			createdFiles: entry.createdFiles,
 			...(entry.turnId ? {turnId: entry.turnId} : {}),
+			...(entry.promptText ? {promptText: entry.promptText} : {}),
 		};
 	}
 

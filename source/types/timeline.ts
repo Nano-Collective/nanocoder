@@ -21,6 +21,13 @@ export interface TimelineEntryMeta {
 	 * them). Absent on checkpoints recorded before this field existed.
 	 */
 	turnId?: string;
+	/**
+	 * The prompt this entry is a rewind point for. Only prompt-level entries
+	 * carry it: they are recorded once per user turn instead of once per tool
+	 * call, so `/rewind` can list prompts without having to merge a turn's
+	 * many tool checkpoints together. Absent on tool-level entries.
+	 */
+	promptText?: string;
 }
 
 export interface TimelineCaptureInput {
@@ -29,6 +36,8 @@ export interface TimelineCaptureInput {
 	title: string;
 	truncateToMessageIndex: number;
 	turnId?: string;
+	/** Makes this a `/rewind` point, and allows it to hold no files at all. */
+	promptText?: string;
 	/** Relative paths → UTF-8 before-image, or `null` if the file did not exist (revert deletes it). */
 	files: Map<string, string | null>;
 }

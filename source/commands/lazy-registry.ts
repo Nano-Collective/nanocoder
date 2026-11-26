@@ -203,6 +203,12 @@ export const lazyCommands: LazyCommand[] = [
 		load: () => import('@/commands/retry').then(m => m.retryCommand),
 	},
 	{
+		name: 'rewind',
+		description:
+			'Restore files and conversation to before an earlier prompt, with the prompt back in the input',
+		load: () => import('@/commands/rewind').then(m => m.rewindCommand),
+	},
+	{
 		name: 'memory',
 		description: 'Manage project memories',
 		load: () => import('@/commands/memory').then(m => m.memoryCommand),
