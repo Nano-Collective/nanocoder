@@ -60,9 +60,12 @@ function messageIndicatesToolSupport(message: string): boolean {
 	// without treating every HTTP 400, invalid function, or invalid parameter
 	// message as evidence that the model lacks tool support.
 	const ambiguousToolParameterPatterns = [
-		/^invalid parameter:\s*(?:tools|tool definitions?|function[s]?|native tools)\b/i,
+		/^invalid parameter:\s*(?:tools|tool definitions?|functions?|native tools)\s*$/i,
 		/^invalid request:\s*unknown (?:field|property)\s*["'`]?tools["'`]?\b/i,
 		/^invalid tool definition$/i,
+		/^unknown parameter:\s*tools\s*$/i,
+		/^unrecognized request argument supplied:\s*tools\s*$/i,
+		/^unexpected field:\s*tools\s*$/i,
 	];
 
 	if (ambiguousToolParameterPatterns.some(pattern => pattern.test(message))) {

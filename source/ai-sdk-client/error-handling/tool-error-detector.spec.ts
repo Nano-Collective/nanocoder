@@ -73,6 +73,11 @@ test('isToolSupportError ignores invalid tool-related validation errors', t => {
 	]) {
 		t.false(isToolSupportError(new Error(message)), message);
 	}
+	t.false(
+		isToolSupportError(
+			new Error('Invalid parameter: tools[0].function.parameters'),
+		),
+	);
 });
 
 test('isToolSupportError returns false for 400 without tool-related patterns', t => {
@@ -125,6 +130,13 @@ test('isToolSupportError detects invalid tool definition server rejections', t =
 			new Error('invalid request: unknown field "tools"'),
 		),
 	);
+	t.true(isToolSupportError(new Error('unknown parameter: tools')));
+	t.true(
+		isToolSupportError(
+			new Error('Unrecognized request argument supplied: tools'),
+		),
+	);
+	t.true(isToolSupportError(new Error('unexpected field: tools')));
 });
 
 test('isToolSupportError ignores invalid function messages', t => {
@@ -184,7 +196,7 @@ test('isToolSupportError requires both invalid character and top-level value pat
 	);
 });
 
-test('isToolSupportError detects mixed provider error messages', t => {
+test('isToolSupportError rejects invalid provider tool messages', t => {
 	// OpenAI-style
 	t.false(
 		isToolSupportError(
