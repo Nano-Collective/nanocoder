@@ -654,6 +654,17 @@ test('a provider with priced and unpriced calls shows its priced subtotal (#2390
 	t.is(cost.cumulativeSession, priced.cumulativeSession);
 });
 
+test('an unpriced call before a priced one on the same provider keeps its priced subtotal (#2390)', async t => {
+	const priced = await sessionCost([pricedCall]);
+	const cost = await sessionCost([
+		unpricedCall('openai'),
+		pricedCall,
+		unpricedCall('my-proxy'),
+	]);
+	t.is(cost.perProvider?.openai, priced.cumulativeSession);
+	t.is(cost.cumulativeSession, priced.cumulativeSession);
+});
+
 test('a session of only unpriced hosted calls shows "—", not $0.00 (#2390)', async t => {
 	const cost = await sessionCost([
 		unpricedCall('my-proxy'),
