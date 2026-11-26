@@ -8,8 +8,74 @@ import type {
 	ToolExecutionContext,
 	ToolFormatter,
 	ToolHandler,
+	ToolSource,
 	ToolValidator,
 } from '@/types/index';
+
+/**
+ * Group order for the tools a request offers. Built-ins come first and keep
+ * the order they were authored in, so the prompt and the schema array look the
+ * way they always have; the groups that load unpredictably follow, each sorted
+ * by name. See `ToolSource`.
+ */
+const SOURCE_RANK: Record<ToolSource, number> = {
+	builtin: 0,
+	custom: 1,
+	skill: 2,
+	mcp: 3,
+};
+
+/**
+ * Code-unit comparison, not `localeCompare`: the order has to be the same on
+ * every machine that runs this, and `localeCompare` is locale-dependent — the
+ * one thing a deterministic order cannot afford.
+ */
+function compare(a: string, b: string): number {
+	if (a === b) return 0;
+	return a < b ? -1 : 1;
+}
+
+/**
+ * The visible entries in a stable order: groups by `SOURCE_RANK`, built-ins
+ * left in the order they registered, and everything else sorted — skill tools
+ * grouped by the skill that owns them, the rest by name.
+ *
+ * Returns the map unchanged when nothing but built-ins is registered, which is
+ * the common case and already in its final order.
+ */
+function orderBySource(
+	entries: Map<string, ToolEntry>,
+): Map<string, ToolEntry> {
+	let needsOrdering = false;
+	for (const entry of entries.values()) {
+		if (entry.source && entry.source !== 'builtin') {
+			needsOrdering = true;
+			break;
+		}
+	}
+	if (!needsOrdering) return entries;
+
+	const indexed = [...entries].map(([name, entry], index) => ({
+		name,
+		entry,
+		index,
+		rank: SOURCE_RANK[entry.source ?? 'builtin'],
+	}));
+
+	// `sort` is stable, so built-ins — which compare equal below — keep their
+	// registration order without needing the index as a tiebreak.
+	indexed.sort((a, b) => {
+		if (a.rank !== b.rank) return a.rank - b.rank;
+		if (a.rank === SOURCE_RANK.builtin) return a.index - b.index;
+		if (a.rank === SOURCE_RANK.skill) {
+			const owner = compare(a.entry.ownerSkill ?? '', b.entry.ownerSkill ?? '');
+			if (owner !== 0) return owner;
+		}
+		return compare(a.name, b.name);
+	});
+
+	return new Map(indexed.map(item => [item.name, item.entry]));
+}
 
 /**
  * Helper class to encapsulate tool registry management
@@ -37,11 +103,21 @@ export class ToolRegistry {
 		return this.tools.get(name) ?? this.parent?.lookup(name);
 	}
 
-	/** Every entry visible here: the parent's, then this layer's on top. */
+	/**
+	 * Every entry visible here: the parent's, then this layer's on top, in the
+	 * stable order described on `ToolSource`.
+	 *
+	 * Ordering lives here because every accessor that hands tools to a model
+	 * reads it: `getNativeTools` (the schema array), `getToolNames` (the names
+	 * the system prompt lists) and `getAllEntries`. Sorting at those call sites
+	 * instead would leave whichever one was missed free to reorder the request
+	 * and cost the whole prefill.
+	 */
 	private visible(): Map<string, ToolEntry> {
-		return this.parent
+		const merged = this.parent
 			? new Map([...this.parent.visible(), ...this.tools])
 			: this.tools;
+		return orderBySource(merged);
 	}
 
 	/**

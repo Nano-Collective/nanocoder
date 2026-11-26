@@ -37,6 +37,13 @@ export const executeLoadToolSchema = async (
 		return `Tool "${toolName}" was not found in the MCP catalog. Available on-demand tools: ${available || 'none'}.`;
 	}
 
+	// Checked before loading so the reason is specific: the tool is still in
+	// the catalog during its server's outage (#1574), and `loadMcpTool` refuses
+	// it rather than adding a dead schema to the request.
+	if (manager.isUnavailableMcpTool(toolName)) {
+		return `Tool "${toolName}" belongs to MCP server "${entry.serverName}", which is currently unreachable. It is reconnecting; its schema cannot be loaded yet. Use another tool or tell the user that server is unavailable.`;
+	}
+
 	const loadSuccess = manager.loadMcpTool(toolName);
 	if (!loadSuccess) {
 		return `Failed to hydrate schema for tool "${toolName}".`;

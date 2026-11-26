@@ -35,20 +35,6 @@ test('MCPToolCatalog registers tools and tracks loaded status', (t) => {
 	t.is(catalog.getLoaded()[0]?.name, 'execute_sql');
 });
 
-test('MCPToolCatalog removes tools by server', (t) => {
-	const catalog = new MCPToolCatalog();
-
-	catalog.add('serverA', {name: 'tool1', serverName: 'serverA'});
-	catalog.add('serverA', {name: 'tool2', serverName: 'serverA'});
-	catalog.add('serverB', {name: 'tool3', serverName: 'serverB'});
-
-	const removed = catalog.removeServerTools('serverA');
-	t.deepEqual(removed, ['tool1', 'tool2']);
-	t.is(catalog.size, 1);
-	t.false(catalog.has('tool1'));
-	t.true(catalog.has('tool3'));
-});
-
 test('MCPToolCatalog formats compact prompt section for unloaded tools', (t) => {
 	const catalog = new MCPToolCatalog();
 

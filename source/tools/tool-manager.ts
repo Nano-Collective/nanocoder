@@ -187,8 +187,12 @@ export class ToolManager {
 	private mcpCatalog: MCPToolCatalog = new MCPToolCatalog();
 	/** Whether initializeMCP chose on-demand discovery for this client. */
 	private mcpDiscovery = false;
-	/** Per unhealthy server, the tool names that were registered before it failed. */
-	private mcpLoadedBeforeOutage = new Map<string, Set<string>>();
+	/**
+	 * Servers currently unhealthy. Their tools stay registered and keep their
+	 * place in the request; this set is what makes a call to one fail fast with
+	 * a reason instead of being attempted against a dead transport.
+	 */
+	private mcpUnavailableServers = new Set<string>();
 	// Names the MCP client currently holds in the registry. The registry is a
 	// plain name-keyed map, so an MCP tool named like a built-in would replace
 	// it, and removing MCP tools by name would then delete the built-in. Only
@@ -245,6 +249,13 @@ export class ToolManager {
 			return true;
 		}
 
+		// An outage keeps the server's catalog entries (#1574), so the model can
+		// still see this tool and ask for its schema. Hydrating it would add a
+		// schema to the request mid-session — the prefix change keeping the
+		// tools registered just avoided — for a tool that cannot answer anyway.
+		// It stays in the catalog and loads once the server is back.
+		if (this.isUnavailableMcpTool(toolName)) return false;
+
 		const mcpClient = this.mcpClient ?? this.parent?.mcpClient;
 		if (!mcpClient) return false;
 
@@ -252,7 +263,7 @@ export class ToolManager {
 		const entry = mcpToolEntries.find(e => e.name === toolName);
 		if (!entry) return false;
 
-		this.registry.register(entry);
+		this.registry.register({...entry, source: 'mcp'});
 		this.mcpToolNames.add(toolName);
 		this.mcpCatalog.markLoaded(toolName);
 		return true;
@@ -284,19 +295,16 @@ export class ToolManager {
 				onHealthChange && this.mcpClient.onHealthChange(onHealthChange),
 				this.mcpClient.onHealthChange(change => {
 					if (change.status === 'unhealthy') {
-						const toolNames = [...this.mcpToolNames].filter(
-							name =>
-								this.mcpClient?.getToolMapping().get(name)?.serverName ===
-								change.serverName,
-						);
-						// Remember which schemas the model had loaded, so recovery
-						// restores exactly those rather than every tool the server has.
-						this.mcpLoadedBeforeOutage.set(
-							change.serverName,
-							new Set(toolNames),
-						);
-						this.unregisterMCPTools(toolNames);
-						this.mcpCatalog.removeServerTools(change.serverName);
+						// The server's tools stay registered and stay in the
+						// catalog; only this mark changes (#1574). Unregistering
+						// them rewrote the schema array and the prompt's catalog
+						// section mid-session, which invalidates the cached
+						// prefix for every later turn — a far larger cost than
+						// offering a tool that answers with an error until its
+						// server is back. A call to one is refused up front by
+						// `isUnavailableMcpTool`, and the transport would fail it
+						// anyway.
+						this.mcpUnavailableServers.add(change.serverName);
 					} else if (change.status === 'connected') {
 						this.restoreServerTools(change.serverName);
 					}
@@ -404,13 +412,26 @@ export class ToolManager {
 	}
 
 	/**
-	 * Bring a recovered server's tools back the way initializeMCP set them up.
-	 * Without discovery every tool is registered. With discovery the tools
-	 * return to the catalog, and only the schemas the model had loaded before
-	 * the outage are registered again, so the request doesn't suddenly carry
-	 * every schema the server has.
+	 * Take the mark off a recovered server and pick up anything it has gained.
+	 *
+	 * An outage no longer unregisters anything (#1574), so almost always there
+	 * is nothing to do here beyond clearing the mark, and the request the next
+	 * turn sends is byte-identical to the one before the outage. What is left
+	 * is a server that came back offering tools it did not have before: those
+	 * are registered when every schema is registered, or listed in the catalog
+	 * as unloaded under discovery, the same as at startup.
+	 *
+	 * A tool already registered is deliberately left alone rather than
+	 * re-registered: a fresh entry would mean a fresh schema object, and the
+	 * prefix tracker caches each tool's digest on schema identity.
+	 *
+	 * A tool the server has *dropped* keeps its registration. Removing it would
+	 * cost the prefix exactly what keeping the server's tools through the
+	 * outage just saved, and a call to it fails at the transport with the
+	 * server's own "unknown tool" error.
 	 */
 	private restoreServerTools(serverName: string): void {
+		this.mcpUnavailableServers.delete(serverName);
 		const client = this.mcpClient;
 		if (!client) return;
 		// A name skipped at startup is skipped again here; it was already
@@ -418,23 +439,23 @@ export class ToolManager {
 		const entries = client
 			.getToolEntries(serverName)
 			.filter(entry => !this.isTakenByNonMCPTool(entry.name));
-		const wasLoaded = this.mcpLoadedBeforeOutage.get(serverName);
-		this.mcpLoadedBeforeOutage.delete(serverName);
-		const toLoad = this.mcpDiscovery
-			? entries.filter(entry => wasLoaded?.has(entry.name))
-			: entries;
-		const loadedNames = new Set(toLoad.map(entry => entry.name));
+		const gained = entries.filter(entry => !this.holdsMCPTool(entry.name));
+		const toRegister = this.mcpDiscovery ? [] : gained;
+		const registering = new Set(toRegister.map(entry => entry.name));
 
 		const tools: MCPTool[] =
 			typeof client.getServerTools === 'function'
 				? client.getServerTools(serverName)
 				: catalogToolsFromEntries(entries, client.getToolMapping());
-		const kept = new Set(entries.map(entry => entry.name));
+		const offered = new Set(entries.map(entry => entry.name));
 		for (const tool of tools) {
-			if (!kept.has(tool.name)) continue;
-			this.mcpCatalog.add(serverName, tool, loadedNames.has(tool.name));
+			if (!offered.has(tool.name)) continue;
+			// Already listed: leave the entry as it is, loaded flag included,
+			// so the prompt's catalog section does not change either.
+			if (this.mcpCatalog.has(tool.name)) continue;
+			this.mcpCatalog.add(serverName, tool, registering.has(tool.name));
 		}
-		this.registerMCPEntries(toLoad);
+		this.registerMCPEntries(toRegister);
 	}
 
 	/**
@@ -455,7 +476,10 @@ export class ToolManager {
 				skipped.push(entry.name);
 				continue;
 			}
-			this.registry.register(entry);
+			// MCP servers connect in parallel, so entries arrive in whatever
+			// order the servers answered in. The tag lets the registry sort
+			// them into the same order every session (#1574).
+			this.registry.register({...entry, source: 'mcp'});
 			this.mcpToolNames.add(entry.name);
 		}
 		return skipped;
@@ -532,7 +556,9 @@ export class ToolManager {
 				continue;
 			}
 			const entry = buildToolEntry(t, loader.getProjectRoot());
-			this.registry.register(entry);
+			// Tagged so the registry can order them: they arrive in readdir
+			// order, which is not stable between machines (#1574).
+			this.registry.register({...entry, source: 'custom'});
 			this.customTools.set(t.metadata.name, {
 				approval: t.metadata.approval,
 				readOnly: t.metadata.readOnly,
@@ -753,12 +779,29 @@ export class ToolManager {
 	}
 
 	/**
+	 * Whether this tool belongs to an MCP server that is currently unhealthy.
+	 *
+	 * Its schema is still offered — that is the point, the request stays
+	 * byte-identical through the outage (#1574) — so the call has to be refused
+	 * here instead, with a reason the model can act on. Reads the parent too,
+	 * so a session's manager sees an outage on a shared server.
+	 */
+	isUnavailableMcpTool(toolName: string): boolean {
+		const serverName = this.getMCPToolInfo(toolName).serverName;
+		if (!serverName) return false;
+		return (
+			this.mcpUnavailableServers.has(serverName) ||
+			(this.parent?.isUnavailableMcpTool(toolName) ?? false)
+		);
+	}
+
+	/**
 	 * Register a skill-provided tool. Wraps the registry call so the
 	 * registrar doesn't have to reach through `ToolManager` into
 	 * `ToolRegistry`. The entry's `ownerSkill` tag is preserved.
 	 */
 	registerSkillTool(entry: ToolEntry): void {
-		this.registry.register(entry);
+		this.registry.register({...entry, source: 'skill'});
 	}
 
 	/**
@@ -818,7 +861,7 @@ export class ToolManager {
 		this.mcpHealthUnsubscribe = null;
 		this.mcpCatalog.clear();
 		this.mcpDiscovery = false;
-		this.mcpLoadedBeforeOutage.clear();
+		this.mcpUnavailableServers.clear();
 		this.registry.unregister('load_tool_schema');
 		if (this.mcpClient) {
 			this.unregisterMCPTools([...this.mcpToolNames]);

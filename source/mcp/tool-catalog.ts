@@ -123,20 +123,6 @@ export class MCPToolCatalog {
 	}
 
 	/**
-	 * Removes all tools belonging to a specific server in this catalog layer.
-	 */
-	removeServerTools(serverName: string): string[] {
-		const removed: string[] = [];
-		for (const [name, entry] of this.entries.entries()) {
-			if (entry.serverName === serverName) {
-				this.entries.delete(name);
-				removed.push(name);
-			}
-		}
-		return removed;
-	}
-
-	/**
 	 * Clears this layer's catalog entries without modifying the parent catalog.
 	 */
 	clear(): void {

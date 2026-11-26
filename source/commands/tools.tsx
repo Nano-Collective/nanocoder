@@ -21,7 +21,7 @@ import {generateKey} from '@/utils/key-generator';
 
 export interface GroupedTools {
 	builtin: string[];
-	mcp: Array<{name: string; server?: string}>;
+	mcp: Array<{name: string; server?: string; unavailable?: boolean}>;
 	custom: Array<{
 		name: string;
 		source: 'personal' | 'project' | 'built-in';
@@ -32,7 +32,7 @@ export interface GroupedTools {
 export function groupTools(toolManager: ToolManager): GroupedTools {
 	const all = toolManager.getToolNames().sort();
 	const builtin: string[] = [];
-	const mcp: Array<{name: string; server?: string}> = [];
+	const mcp: GroupedTools['mcp'] = [];
 	const custom: GroupedTools['custom'] = [];
 
 	for (const name of all) {
@@ -56,7 +56,14 @@ export function groupTools(toolManager: ToolManager): GroupedTools {
 		}
 		const mcpInfo = toolManager.getMCPToolInfo(name);
 		if (mcpInfo.isMCPTool) {
-			mcp.push({name, server: mcpInfo.serverName});
+			// A tool stays registered while its server is unhealthy, so that an
+			// outage does not rewrite the request's tool schemas (#1574) — which
+			// would otherwise list it here as though it were usable.
+			mcp.push({
+				name,
+				server: mcpInfo.serverName,
+				unavailable: toolManager.isUnavailableMcpTool(name),
+			});
 			continue;
 		}
 		builtin.push(name);
@@ -121,6 +128,9 @@ function ToolsView({toolManager}: {toolManager: ToolManager | null}) {
 						› {t.name}
 						{t.server ? (
 							<Text color={colors.secondary}> ({t.server})</Text>
+						) : null}
+						{t.unavailable ? (
+							<Text color={colors.warning}> • server unreachable</Text>
 						) : null}
 					</Text>
 				))

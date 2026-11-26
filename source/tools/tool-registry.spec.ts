@@ -535,3 +535,147 @@ test('ToolRegistry - a layer\'s own tool wins over the parent\'s of the same nam
 	t.false(parent.getEntry('same')?.readOnly);
 	t.is(layer.getToolCount(), 1);
 });
+
+// ---------------------------------------------------------------------------
+// Stable ordering (#1574). The tools a request offers sit in the prefix, right
+// after the system prompt, so their order has to be the same on every request
+// and in every session — not whatever order registration happened in.
+// ---------------------------------------------------------------------------
+
+test('ToolRegistry - built-ins keep the order they were registered in', t => {
+	const registry = new ToolRegistry();
+	for (const name of ['read_file', 'write_file', 'execute_bash']) {
+		registry.register(createMockToolEntry({name, source: 'builtin'}));
+	}
+
+	t.deepEqual(registry.getToolNames(), [
+		'read_file',
+		'write_file',
+		'execute_bash',
+	]);
+});
+
+test('ToolRegistry - MCP tools are offered in name order, not connection order', t => {
+	const registry = new ToolRegistry();
+	registry.register(createMockToolEntry({name: 'read_file', source: 'builtin'}));
+	// MCP servers connect in parallel, so this is the order of whoever
+	// answered first — here, deliberately not alphabetical.
+	for (const name of ['zebra_list', 'alpha_get', 'mango_put']) {
+		registry.register(createMockToolEntry({name, source: 'mcp'}));
+	}
+
+	t.deepEqual(registry.getToolNames(), [
+		'read_file',
+		'alpha_get',
+		'mango_put',
+		'zebra_list',
+	]);
+});
+
+test('ToolRegistry - groups are ordered built-in, custom, skill, MCP', t => {
+	const registry = new ToolRegistry();
+	// Registered in the reverse of the order they should come out in.
+	registry.register(createMockToolEntry({name: 'mcp_tool', source: 'mcp'}));
+	registry.register(
+		createMockToolEntry({name: 'skill_tool', source: 'skill', ownerSkill: 's'}),
+	);
+	registry.register(createMockToolEntry({name: 'custom_tool', source: 'custom'}));
+	registry.register(createMockToolEntry({name: 'read_file', source: 'builtin'}));
+
+	t.deepEqual(registry.getToolNames(), [
+		'read_file',
+		'custom_tool',
+		'skill_tool',
+		'mcp_tool',
+	]);
+});
+
+test('ToolRegistry - skill tools are grouped by the skill that owns them', t => {
+	const registry = new ToolRegistry();
+	registry.register(
+		createMockToolEntry({name: 'zzz', source: 'skill', ownerSkill: 'alpha'}),
+	);
+	registry.register(
+		createMockToolEntry({name: 'aaa', source: 'skill', ownerSkill: 'beta'}),
+	);
+	registry.register(
+		createMockToolEntry({name: 'mmm', source: 'skill', ownerSkill: 'alpha'}),
+	);
+
+	// Owner first, then name — so one skill's tools stay adjacent rather than
+	// being interleaved with another's.
+	t.deepEqual(registry.getToolNames(), ['mmm', 'zzz', 'aaa']);
+});
+
+test('ToolRegistry - registration order does not change what is offered', t => {
+	const names = ['delta', 'alpha', 'charlie', 'bravo'];
+	const build = (order: string[]) => {
+		const registry = new ToolRegistry();
+		registry.register(createMockToolEntry({name: 'read_file', source: 'builtin'}));
+		for (const name of order) {
+			registry.register(createMockToolEntry({name, source: 'mcp'}));
+		}
+		return registry;
+	};
+
+	// The property the cache actually depends on: two sessions that connected
+	// the same servers in different orders send the same bytes.
+	const forwards = build(names);
+	const backwards = build([...names].reverse());
+
+	t.deepEqual(forwards.getToolNames(), backwards.getToolNames());
+	t.deepEqual(
+		Object.keys(forwards.getNativeTools()),
+		Object.keys(backwards.getNativeTools()),
+	);
+});
+
+test('ToolRegistry - the schema array follows the same order as the names', t => {
+	const registry = new ToolRegistry();
+	registry.register(createMockToolEntry({name: 'read_file', source: 'builtin'}));
+	registry.register(createMockToolEntry({name: 'zebra', source: 'mcp'}));
+	registry.register(createMockToolEntry({name: 'alpha', source: 'mcp'}));
+
+	// getNativeTools builds the record the model is sent; if it disagreed with
+	// getToolNames, the prompt would list the tools in one order and the
+	// schemas would arrive in another.
+	t.deepEqual(Object.keys(registry.getNativeTools()), registry.getToolNames());
+	t.deepEqual(
+		registry.getAllEntries().map(entry => entry.name),
+		registry.getToolNames(),
+	);
+});
+
+test('ToolRegistry - an untagged entry is treated as a built-in', t => {
+	const registry = new ToolRegistry();
+	registry.register(createMockToolEntry({name: 'legacy_second'}));
+	registry.register(createMockToolEntry({name: 'legacy_first'}));
+	registry.register(createMockToolEntry({name: 'mcp_tool', source: 'mcp'}));
+
+	// Nothing sets `source` on the built-ins, so an entry without one has to
+	// keep working the way it always did: registration order, before the
+	// groups that get sorted.
+	t.deepEqual(registry.getToolNames(), [
+		'legacy_second',
+		'legacy_first',
+		'mcp_tool',
+	]);
+});
+
+test('ToolRegistry - a layered registry orders the parent and the layer together', t => {
+	const parent = new ToolRegistry();
+	parent.register(createMockToolEntry({name: 'read_file', source: 'builtin'}));
+	parent.register(createMockToolEntry({name: 'shared_mcp', source: 'mcp'}));
+
+	const session = new ToolRegistry(parent);
+	session.register(createMockToolEntry({name: 'alpha_mcp', source: 'mcp'}));
+
+	// A session's own MCP tools sort in with the parent's rather than being
+	// appended after them, so the order does not depend on which layer a tool
+	// happens to live in.
+	t.deepEqual(session.getToolNames(), [
+		'read_file',
+		'alpha_mcp',
+		'shared_mcp',
+	]);
+});

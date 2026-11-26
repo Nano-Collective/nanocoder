@@ -197,6 +197,16 @@ export interface NanocoderToolExport {
 	approval?: ToolApprovalPolicy;
 }
 
+/**
+ * Where a registered tool came from. The registry orders the tools it offers
+ * by this, so the schema array a request carries does not depend on the order
+ * things happened to register in (#1574): MCP servers connect in parallel and
+ * custom tools arrive in readdir order, neither of which is stable between
+ * sessions. Built-ins keep their authored order; every other group is sorted
+ * by name. An entry without a source counts as a built-in.
+ */
+export type ToolSource = 'builtin' | 'custom' | 'skill' | 'mcp';
+
 export interface ToolEntry {
 	name: string;
 	tool: AISDKCoreTool;
@@ -208,6 +218,7 @@ export interface ToolEntry {
 	approval?: ToolApprovalPolicy;
 	ownerSkill?: string;
 	scoped?: boolean;
+	source?: ToolSource;
 }
 
 interface LLMMessage {
