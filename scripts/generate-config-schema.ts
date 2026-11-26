@@ -84,6 +84,7 @@ const definitionRenames: Record<string, string> = {
 	'Partial<FirewallConfig>': 'FirewallConfig',
 	'Partial<Record<DiskDefaultMode,ModeProviderConfig>>': 'DiskModeProviders',
 	'Record<string,number>': 'RecordStringNumber',
+	'Record<string,ModelPricingConfig>': 'RecordStringModelPricingConfig',
 	'Record<string,string>': 'RecordStringString',
 	'Record<string,unknown>': 'RecordStringUnknown',
 };
@@ -164,6 +165,7 @@ function expandRecords(definitions: Record<string, unknown>): void {
 	const records: Record<string, string> = {
 		RecordStringString: 'string',
 		RecordStringNumber: 'number',
+		RecordStringModelPricingConfig: 'ModelPricingConfig',
 	};
 
 	// ModeProviderConfig is now emitted as a genuine definition via the
@@ -174,7 +176,21 @@ function expandRecords(definitions: Record<string, unknown>): void {
 		if (!definitions[name]) continue;
 		definitions[name] = {
 			type: 'object',
-			additionalProperties: {type: valueType},
+			additionalProperties:
+				valueType === 'ModelPricingConfig'
+					? {
+							properties: {
+								input: {type: 'number', minimum: 0},
+								output: {type: 'number', minimum: 0},
+								cacheRead: {type: 'number', minimum: 0},
+								cacheWrite: {type: 'number', minimum: 0},
+								currency: {type: 'string', enum: ['USD']},
+							},
+							type: 'object',
+							required: ['input', 'output'],
+							additionalProperties: false,
+						}
+					: {type: valueType},
 		};
 	}
 }

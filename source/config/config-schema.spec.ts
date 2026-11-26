@@ -187,6 +187,40 @@ test('provider accepts headers/timeout/orgId used by the loader', t => {
 	});
 });
 
+test('provider accepts per-model pricing overrides and validates their shape', t => {
+	assertValid(t, 'provider pricing', {
+		nanocoder: {
+			providers: [{
+				name: 'gateway',
+				models: ['team-model'],
+				pricing: {
+					'team-model': {
+						input: 1.2,
+						output: 4,
+						cacheRead: 0.12,
+						cacheWrite: 1.5,
+						currency: 'USD',
+					},
+				},
+			}],
+		},
+	});
+	assertInvalid(t, 'provider pricing missing output', {
+		nanocoder: {
+			providers: [{name: 'gateway', models: ['team-model'], pricing: {
+				'team-model': {input: 1},
+			}}],
+		},
+	});
+	assertInvalid(t, 'provider pricing unsupported currency', {
+		nanocoder: {
+			providers: [{name: 'gateway', models: ['team-model'], pricing: {
+				'team-model': {input: 1, output: 2, currency: 'EUR'},
+			}}],
+		},
+	});
+});
+
 test('provider contextWindows must map to numbers', t => {
 	assertInvalid(t, 'contextWindows bad value', {
 		nanocoder: {

@@ -909,6 +909,10 @@
 				"organizationId": {
 					"type": "string"
 				},
+				"pricing": {
+					"$ref": "#/definitions/RecordStringModelPricingConfig",
+					"description": "Optional per-model USD price overrides, in USD per million tokens."
+				},
 				"requestTimeout": {
 					"type": "number"
 				},
@@ -934,6 +938,36 @@
 			},
 			"type": "object",
 			"required": ["name", "models"]
+		},
+		"RecordStringModelPricingConfig": {
+			"type": "object",
+			"additionalProperties": {
+				"properties": {
+					"input": {
+						"type": "number",
+						"minimum": 0
+					},
+					"output": {
+						"type": "number",
+						"minimum": 0
+					},
+					"cacheRead": {
+						"type": "number",
+						"minimum": 0
+					},
+					"cacheWrite": {
+						"type": "number",
+						"minimum": 0
+					},
+					"currency": {
+						"type": "string",
+						"enum": ["USD"]
+					}
+				},
+				"type": "object",
+				"required": ["input", "output"],
+				"additionalProperties": false
+			}
 		},
 		"RecordStringNumber": {
 			"type": "object",

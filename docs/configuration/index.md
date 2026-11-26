@@ -30,6 +30,33 @@ You can also wire it up without the `$schema` key:
 
 ## Configuration File Locations
 
+### Per-model pricing overrides
+
+Custom providers may define `pricing` rates for individual model IDs. Rates are USD per million tokens; `input` and `output` are required, while cache rates are optional. Overrides take precedence over models.dev and also enable cost estimates for local endpoints. Prices without an override are labelled estimated; overrides are labelled configured.
+
+```json
+{
+  "nanocoder": {
+    "providers": [{
+      "name": "gateway",
+      "baseUrl": "https://gateway.example/v1",
+      "models": ["team-model"],
+      "pricing": {
+        "team-model": {
+          "input": 1.2,
+          "output": 4.0,
+          "cacheRead": 0.12,
+          "cacheWrite": 1.5,
+          "currency": "USD"
+        }
+      }
+    }]
+  }
+}
+```
+
+`currency` is optional and currently only `USD` is supported. Missing prices remain unpriced.
+
 Nanocoder reads `agents.config.json` from two layers:
 
 1. **Project-level** (highest priority): `agents.config.json` in your current working directory

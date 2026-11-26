@@ -237,6 +237,7 @@ export function loadProviderConfigs(): AIProviderConfig[] {
 		name: provider.name,
 		type: 'openai' as const,
 		models: provider.models || [],
+		pricing: provider.pricing,
 		contextWindow: provider.contextWindow,
 		contextWindows: provider.contextWindows,
 		maxOutputTokens: provider.maxOutputTokens,

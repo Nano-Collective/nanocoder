@@ -11,11 +11,21 @@ export type SdkProvider =
 	| 'chatgpt-codex'
 	| 'github-copilot';
 
+/** Prices per million tokens, in USD. */
+export interface ModelPricingConfig {
+	input: number;
+	output: number;
+	cacheRead?: number;
+	cacheWrite?: number;
+	currency?: 'USD';
+}
+
 // AI provider configurations (OpenAI-compatible)
 export interface AIProviderConfig {
 	name: string;
 	type: string;
 	models: string[];
+	pricing?: Record<string, ModelPricingConfig>;
 	contextWindow?: number;
 	contextWindows?: Record<string, number>;
 	// Cap on tokens the model may generate in one response. Applies to every
@@ -65,6 +75,8 @@ export interface ProviderConfig {
 	apiKey?: string;
 	caCertPath?: string;
 	models: string[];
+	/** Optional per-model USD price overrides, in USD per million tokens. */
+	pricing?: Record<string, ModelPricingConfig>;
 	contextWindow?: number;
 	contextWindows?: Record<string, number>;
 	// Cap on tokens the model may generate in one response, applied to every
