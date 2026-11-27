@@ -94,6 +94,37 @@ test('headless JSON keeps the status and findings and stays off the progress str
 	t.true(outcome.stdout.endsWith('\n'));
 });
 
+test('an explicit tier takes precedence over a branch named after a tier', async t => {
+	const fixture = createReviewGitFixture();
+	t.teardown(fixture.cleanup);
+	fixture.runGit(['checkout', '-b', 'deep']);
+	fixture.write('src/file.ts', 'export const value = 2;\n');
+	fixture.runGit(['add', '--all']);
+	fixture.runGit(['commit', '-m', 'change on deep branch']);
+	const {client, calls} = createScriptedReviewClient(() => ({
+		content: 'NO FINDINGS',
+	}));
+	const outcome = await runHeadlessReview({
+		args: ['deep'],
+		tier: 'grounded',
+		client,
+		provider: 'review-test',
+		model: 'review-test-model',
+		outputFormat: 'json',
+		tools: createReviewFixtureTools(fixture),
+		writeProgress: () => {},
+	});
+
+	const report = JSON.parse(outcome.stdout) as ReturnType<
+		typeof buildHeadlessReviewJson
+	>;
+	t.is(outcome.exitCode, 0);
+	t.is(report.tier, 'grounded');
+	t.is(report.status, 'completed');
+	t.true(report.scope?.includes('deep'));
+	t.true(calls.some(call => call.role === 'finder'));
+});
+
 test('a failed headless review exits non-zero and still prints the report', async t => {
 	const fixture = createReviewGitFixture();
 	t.teardown(fixture.cleanup);
@@ -166,6 +197,51 @@ test('the quick tier prints the one-shot text and does not start a finder', asyn
 	t.is(calls.length, 1);
 	t.deepEqual(calls[0]?.tools, {});
 	t.true(progress.some(line => line.includes('one-shot')));
+});
+
+test('a cancelled quick review forwards its signal to the model and exits 130', async t => {
+	const controller = new AbortController();
+	let modelCallStarted!: () => void;
+	const started = new Promise<void>(resolve => {
+		modelCallStarted = resolve;
+	});
+	let finishModelCall!: (reply: {content: string}) => void;
+	const modelReply = new Promise<{content: string}>(resolve => {
+		finishModelCall = resolve;
+	});
+	const {client, calls} = createScriptedReviewClient(() => {
+		modelCallStarted();
+		return modelReply;
+	});
+	const run = runHeadlessReview({
+		args: ['quick'],
+		tier: 'quick',
+		client,
+		provider: 'review-test',
+		model: 'review-test-model',
+		outputFormat: 'json',
+		signal: controller.signal,
+		writeProgress: () => {},
+		quickDependencies: {
+			execGit: async args =>
+				args[0] === 'diff' ? 'diff --git a/file.ts b/file.ts\n+const x = 1;\n' : '',
+			getCurrentBranch: async () => 'feature',
+			getDefaultBranch: async () => 'main',
+		},
+	});
+
+	await started;
+	t.is(calls[0]?.signal, controller.signal);
+	controller.abort();
+	finishModelCall({content: 'The response completed after cancellation.'});
+
+	const outcome = await run;
+	const report = JSON.parse(outcome.stdout) as ReturnType<
+		typeof buildHeadlessReviewJson
+	>;
+	t.is(outcome.exitCode, 130);
+	t.is(report.tier, 'quick');
+	t.is(report.status, 'cancelled');
 });
 
 test('a failed quick review still prints a JSON document', async t => {

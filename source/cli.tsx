@@ -257,6 +257,17 @@ if (args[0] === 'completion') {
 	process.exit(result.exitCode);
 }
 
+// Keep subcommand help on a fast path so an MCP client never needs to load
+// the server runtime just to inspect its options.
+if (
+	args[0] === 'mcp' &&
+	(!args[1] || args.some(arg => arg === '--help' || arg === '-h'))
+) {
+	const {MCP_SERVER_CLI_USAGE} = await import('./cli-args.js');
+	console.log(MCP_SERVER_CLI_USAGE);
+	process.exit(0);
+}
+
 // Handle --help/-h flag — fast path, no heavy imports
 if (wantsHelp(args)) {
 	console.log(`
@@ -292,6 +303,9 @@ Commands:
                                   Flags: --ref, --subdir, --global, --force, --yes, --index.
   config <subcommand>             Inspect the resolved configuration and where each value came from.
                                   Subcommands: list, show [key], diff. Add --json for machine output.
+  mcp serve [options]             Run Nanocoder as an MCP server over stdio.
+                                  Defaults to plan mode; accepts --provider, --model, --mode and
+                                  --trust-directory. Use mcp serve --help for details.
   trust --status [--json]         Show whether this folder is trusted, what it will run, and its
                                   fingerprint. Runs nothing from the folder. Status is trusted,
                                   not-trusted, changed or needs-re-approval.
@@ -313,7 +327,7 @@ Options:
   --context-max       Set maximum context length in tokens (supports k/K and m/M suffixes, e.g. 128k or 1m)
   --mode              Start in a specific development mode (normal, auto-accept, yolo, plan,
                       architect). Defaults to "normal" for interactive sessions and
-                      "auto-accept" for run mode.
+                      "auto-accept" for run mode, and "plan" for mcp serve.
   --prompt-file       Read the run prompt from a file instead of the command
                       line. Necessary for large prompts: Linux caps a single
                       argument at 128 KiB and execve fails with E2BIG.
@@ -322,7 +336,7 @@ Options:
                       Takes a schema file path or inline JSON (quote it).
                       Uses the plain runtime and retries invalid answers.
   --trust-directory   Skip the first-run directory trust prompt for this run only.
-                      Valid with "run", "review", "daemon start", "verify" and --acp.
+                      Valid with "run", "review", "daemon start", "verify", --acp and mcp serve.
                       Does not modify the preferences file.
   --plain             Use a lightweight, Ink-free runtime for non-interactive runs.
                       Only valid with the "run" command. Auto-enables in CI / non-TTY.
@@ -371,17 +385,45 @@ Examples:
   nanocoder --resume
   nanocoder verify --pr 861
   nanocoder verify --pr 861 --post-review
+  nanocoder mcp serve
   nanocoder storage
   nanocoder storage --format json | jq .sections
   `);
 	process.exit(0);
 }
 
-const {validateCliArgs} = await import('./cli-args.js');
-const cliArgsError = validateCliArgs(args);
+const {parseMcpServeArgs, validateCliArgs} = await import('./cli-args.js');
+const mcpServerMode = args[0] === 'mcp' && args[1] === 'serve';
+const parsedMcpArgs = mcpServerMode
+	? parseMcpServeArgs(args.slice(2))
+	: undefined;
+const cliArgsError = mcpServerMode
+	? parsedMcpArgs && 'error' in parsedMcpArgs
+		? parsedMcpArgs.error
+		: undefined
+	: validateCliArgs(args);
 if (cliArgsError) {
 	console.error(cliArgsError);
 	process.exit(1);
+}
+
+// MCP serves as a dedicated stdio process. Keep it out of main() so profile
+// resolution and other project configuration work only after the server has
+// checked directory trust.
+if (mcpServerMode && parsedMcpArgs && 'options' in parsedMcpArgs) {
+	try {
+		const {runMcpServer} = await import('@/mcp-server/server');
+		await runMcpServer({
+			cwd: process.cwd(),
+			developmentMode: parsedMcpArgs.options.mode ?? 'plan',
+			cliProvider: parsedMcpArgs.options.provider,
+			cliModel: parsedMcpArgs.options.model,
+			trustDirectory: parsedMcpArgs.options.trustDirectory,
+		});
+	} catch (err) {
+		console.error(err instanceof Error ? err.message : err);
+		process.exitCode = 1;
+	}
 }
 
 // Validate output format value to prevent injection
@@ -1292,15 +1334,17 @@ async function main(): Promise<void> {
 	}
 }
 
-main().catch(async (err: unknown) => {
-	console.error(err instanceof Error ? err.message : err);
-	// Exit through the shutdown manager so registered handlers still run, such
-	// as the session-end hook of `run` / --plain. It exits the process itself,
-	// or returns early when a shutdown is already under way and that one will.
-	try {
-		const {getShutdownManager} = await import('@/utils/shutdown');
-		await getShutdownManager().gracefulShutdown(1);
-	} catch {
-		process.exit(1);
-	}
-});
+if (!mcpServerMode) {
+	main().catch(async (err: unknown) => {
+		console.error(err instanceof Error ? err.message : err);
+		// Exit through the shutdown manager so registered handlers still run, such
+		// as the session-end hook of `run` / --plain. It exits the process itself,
+		// or returns early when a shutdown is already under way and that one will.
+		try {
+			const {getShutdownManager} = await import('@/utils/shutdown');
+			await getShutdownManager().gracefulShutdown(1);
+		} catch {
+			process.exit(1);
+		}
+	});
+}

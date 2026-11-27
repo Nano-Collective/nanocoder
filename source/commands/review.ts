@@ -617,6 +617,7 @@ export type QuickReviewProblem =
 export function createReviewView(
 	dependencies: ReviewDependencies = defaultDependencies,
 	onProblem?: (problem: QuickReviewProblem) => void,
+	signal?: AbortSignal,
 ): Command {
 	return {
 		name: 'review',
@@ -725,7 +726,7 @@ export function createReviewView(
 					{role: 'user', content: parts.join('\n')},
 				];
 
-				const response = await client.chat(messages, {}, {});
+				const response = await client.chat(messages, {}, {}, signal);
 				const reply = response?.choices?.[0]?.message;
 				const review = stripThinkTags(reply?.content ?? '').trim();
 

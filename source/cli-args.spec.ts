@@ -1,5 +1,7 @@
 import test from 'ava';
 import {
+	MCP_SERVER_CLI_USAGE,
+	parseMcpServeArgs,
 	parseWorktreeArgs,
 	validateCliArgs,
 	validateInitArgs,
@@ -198,5 +200,60 @@ test('suggests verify for a misspelled verify command', t => {
 	t.is(
 		validateCliArgs(['verfy', '--pr', '1']),
 		'Unknown command "verfy". Did you mean "verify"?',
+	);
+});
+
+test('mcp serve accepts provider, model, mode and trust options', t => {
+	t.deepEqual(
+		parseMcpServeArgs([
+			'--provider',
+			'GitHub Copilot',
+			'--model=qwen2.5:7b',
+			'--mode',
+			'plan',
+			'--trust-directory',
+		]),
+		{
+			options: {
+				provider: 'GitHub Copilot',
+				model: 'qwen2.5:7b',
+				mode: 'plan',
+				trustDirectory: true,
+			},
+		},
+	);
+	t.deepEqual(parseMcpServeArgs([]), {
+		options: {trustDirectory: false},
+	});
+	t.deepEqual(parseMcpServeArgs(['--provider', 'run']), {
+		options: {provider: 'run', trustDirectory: false},
+	});
+	t.is(validateCliArgs(['mcp', 'serve', '--mode', 'plan']), undefined);
+	t.is(
+		validateCliArgs(['mcp', 'serve', '--provider', 'ollama', '--model', 'qwen3']),
+		undefined,
+	);
+});
+
+test('mcp serve rejects unsupported arguments and invalid modes', t => {
+	t.is(
+		validateCliArgs(['mcp', 'serve', '--mod', 'plan']),
+		'Unknown option "--mod". Did you mean "--mode"?',
+	);
+	t.is(
+		validateCliArgs(['mcp', 'serve', '--mode', 'fast']),
+		'Invalid --mode value: "fast". Must be one of: normal, auto-accept, yolo, plan, architect',
+	);
+	t.is(
+		validateCliArgs(['mcp', 'serve', '--provider']),
+		'--provider requires a value.',
+	);
+	t.is(
+		validateCliArgs(['mcp', 'serve', 'extra']),
+		MCP_SERVER_CLI_USAGE,
+	);
+	t.is(
+		validateCliArgs(['mcp', 'serbe']),
+		'Unknown mcp subcommand "serbe". Did you mean "serve"?',
 	);
 });

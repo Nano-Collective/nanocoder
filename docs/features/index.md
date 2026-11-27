@@ -278,6 +278,8 @@ Run `/voice` to talk to Nanocoder instead of typing. [Voice mode](voice-mode.md)
 
 Extend Nanocoder's capabilities by connecting [MCP (Model Context Protocol) servers](../configuration/mcp-configuration.md). MCP servers add new tools the AI can use — from database queries to API calls to custom integrations.
 
+You can also run Nanocoder itself as an MCP server with [`nanocoder mcp serve`](mcp-server.md), so Codex and other stdio-capable MCP clients can call its task and review tools.
+
 ```bash
 /settings mcp   # interactive setup wizard
 /mcp            # see connected servers and tools
@@ -305,6 +307,7 @@ Extend Nanocoder's capabilities by connecting [MCP (Model Context Protocol) serv
 | [Image Attachments](image-attachments.md) | Send screenshots and images to vision-capable models |
 | [VS Code Extension](vscode-extension.md) | Editor integration with live diff previews |
 | [ACP](acp.md) | Run as an Agent Client Protocol server for editors like Zed |
+| [MCP Server](mcp-server.md) | Expose Nanocoder's task and review tools over MCP stdio |
 | [Tune](tune.md) | Runtime model tuning for tool profiles, parameters, and compaction |
 | [Desktop Notifications](notifications.md) | Get notified when Nanocoder needs your attention |
 | [Keyboard Shortcuts](keyboard-shortcuts.md) | Complete keyboard shortcut reference |

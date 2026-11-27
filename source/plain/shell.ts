@@ -1,6 +1,5 @@
 import {randomUUID} from 'node:crypto';
 import path from 'node:path';
-import {appendToolDefinitionsToPrompt} from '@/ai-sdk-client/tools/system-prompt-assembler';
 import {
 	type ArtifactManager,
 	artifactManager,
@@ -21,10 +20,7 @@ import {
 	TOOL_APPROVAL_REQUIRED_PREFIX,
 } from '@/constants';
 import {applyTuneCompaction} from '@/conversation/compaction/auto-compact';
-import {
-	buildSystemPrompt,
-	setLastBuiltPrompt,
-} from '@/conversation/prompt-builder';
+import {setLastBuiltPrompt} from '@/conversation/prompt-builder';
 import {buildProjectContextSection} from '@/memory/project-context';
 import {SemanticMemoryManager} from '@/memory/semantic-memory-manager';
 import {
@@ -32,6 +28,11 @@ import {
 	runPlainConversation,
 } from '@/plain/conversation';
 import {initializePlain} from '@/plain/initialize';
+import {
+	composePlainSystemPrompt,
+	isToolCallingDisabled,
+	summarizeFileMutations,
+} from '@/plain/runtime-helpers';
 import {schemaInstruction} from '@/plain/structured-output';
 import {
 	color,
@@ -49,7 +50,6 @@ import {
 	SESSION_END_HOOK_HANDLER,
 	takePendingHookContext,
 } from '@/services/lifecycle-hooks';
-import {fileMutationPaths} from '@/tools/file-ops/file-mutating-tools';
 import type {JsonSchemaDocument} from '@/tools/runtime/schema-validate';
 import {getTuneToolMode} from '@/types/config';
 import type {DevelopmentMode, Message} from '@/types/core';
@@ -229,25 +229,16 @@ export async function runPlainShell(
 		undefined,
 		model,
 	);
-	const basePrompt = buildSystemPrompt(
+	const toolPrompt = composePlainSystemPrompt({
 		developmentMode,
 		tune,
-		availableNames,
-		toolsDisabled,
-		getAppConfig().systemPrompt,
-		model,
-		undefined,
-		toolManager,
-	);
-	const toolsForPrompt = toolsDisabled
-		? toolManager.getFilteredTools(availableNames)
-		: {};
-	const toolPrompt = appendToolDefinitionsToPrompt(
-		basePrompt,
+		availableToolNames: availableNames,
 		toolsDisabled,
 		fallbackToolFormat,
-		toolsForPrompt,
-	);
+		systemPromptOverride: getAppConfig().systemPrompt,
+		model,
+		toolManager,
+	});
 
 	// Recalled memories ride in the user message, not the system prompt, so
 	// the system block stays byte-stable for local KV-cache reuse (#1574).
@@ -422,17 +413,9 @@ export async function runPlainShell(
 		const exitCode =
 			outcome.kind === 'success' ? 0 : outcome.kind === 'error' ? 1 : 2;
 
-		const filesChangedSet = new Set<string>();
+		const filesChanged = summarizeFileMutations(outcome.toolCalls || []);
 
 		const formattedToolCalls = (outcome.toolCalls || []).map(tc => {
-			// A failed or refused call changed nothing. The paths are reported as
-			// the model gave them and the tool accepted them, `../x` included:
-			// the tool's own path checks already decided they were allowed.
-			if (tc.error === null) {
-				for (const filePath of fileMutationPaths(tc.name, tc.arguments)) {
-					filesChangedSet.add(filePath);
-				}
-			}
 			return {
 				name: tc.name,
 				arguments: tc.arguments || {},
@@ -449,7 +432,7 @@ export async function runPlainShell(
 			reasoning: outcome.reasoning || null,
 			toolCalls: formattedToolCalls,
 			steps: outcome.steps,
-			filesChanged: Array.from(filesChangedSet),
+			filesChanged,
 			warnings: collectedWarnings,
 			...(outcome.kind === 'success' &&
 				outcome.structured !== undefined && {
@@ -522,13 +505,6 @@ function formatToolApprovalRequired(
 		`Re-run with ${modes}, or allow ${uniqueNames.length === 1 ? 'it' : 'them'} ` +
 		`in agents.config.json: {"nanocoder": {"alwaysAllow": [${quotedNames}]}}`
 	);
-}
-
-function isToolCallingDisabled(provider: string, model: string): boolean {
-	const config = getAppConfig();
-	const providerConfig = config.providers?.find(p => p.name === provider);
-	if (!providerConfig) return false;
-	return providerConfig.disableToolModels?.includes(model) ?? false;
 }
 
 function emitJsonReport(report: unknown): void {

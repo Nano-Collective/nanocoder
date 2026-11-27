@@ -65,3 +65,37 @@ test('worktree accepts global options after the PR number', t => {
 	t.false(result.stderr.includes('Usage: nanocoder worktree'), result.stderr);
 	t.true(result.stderr.includes('requires an interactive terminal'), result.stderr);
 });
+
+test('mcp serve help prints its stdio usage without starting the server', t => {
+	const result = runCli(['mcp', 'serve', '--help']);
+	t.is(result.status, 0, result.stderr);
+	t.true(result.stdout.includes('Usage: nanocoder mcp serve [options]'));
+	t.true(result.stdout.includes('Start Nanocoder as an MCP server over stdio.'));
+	t.is(result.stderr, '');
+});
+
+test('mcp without a subcommand prints usage instead of starting the TUI', t => {
+	const result = runCli(['mcp']);
+	t.is(result.status, 0, result.stderr);
+	t.true(result.stdout.includes('Usage: nanocoder mcp serve [options]'));
+	t.is(result.stderr, '');
+});
+
+test('mcp rejects an unknown subcommand or flag before starting the server', t => {
+	const cases = [
+		{
+			args: ['mcp', 'serbe'],
+			error: 'Did you mean "serve"?',
+		},
+		{
+			args: ['mcp', 'serve', '--bogus'],
+			error: 'Unknown option "--bogus".',
+		},
+	];
+	for (const {args, error} of cases) {
+		const result = runCli(args);
+		t.is(result.status, 1, result.stderr);
+		t.is(result.stdout, '');
+		t.true(result.stderr.includes(error), result.stderr);
+	}
+});
