@@ -181,6 +181,10 @@ export const BASH_BACKGROUND_START_DELAY_MS = 1000;
 // Completed background jobs are kept so their last output can still be read.
 // Past this many, the oldest completed jobs are dropped.
 export const BASH_BACKGROUND_MAX_RETAINED_JOBS = 20;
+// How much of a job's retained stdout/stderr `/jobs <id>` shows. The tail is
+// bounded independently of the model's `bash_output` cursor so inspection
+// cannot flood the TUI or consume output the model still needs.
+export const BASH_JOB_PEEK_OUTPUT_LIMIT = 2000;
 
 // === FILE SCANNER ===
 export const MAX_FILES_TO_SCAN = 1000;

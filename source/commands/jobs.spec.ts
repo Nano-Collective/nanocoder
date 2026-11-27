@@ -90,7 +90,30 @@ test('/jobs <id> shows output without consuming the bash_output cursor', async t
 	);
 });
 
-test('/jobs <id> shows output produced after the model start read', async t => {
+test('/jobs <id> shows startup output already read by the model', async t => {
+	const {job} = await startBackgroundJob(JOB_COMMAND);
+	t.truthy(job, 'the job should start through the production path');
+	const id = job!.jobId;
+	t.true(job!.output.includes('started'), 'the start read sees the banner');
+
+	const afterStart = bashExecutor.readJobOutput(id)!;
+	t.false(
+		afterStart.output.includes('started'),
+		'startBackgroundJob consumed the banner',
+	);
+
+	const output = await runJobs([id]);
+	t.true(
+		output.includes('started'),
+		'the TUI still shows output the model already read',
+	);
+	t.false(
+		bashExecutor.readJobOutput(id)!.output.includes('started'),
+		'inspecting output must not put consumed text back in the cursor',
+	);
+});
+
+test('/jobs <id> shows output read by a later bash_output call', async t => {
 	const {job} = await startBackgroundJob(LATE_JOB_COMMAND);
 	t.truthy(job, 'the job should start through the production path');
 	const id = job!.jobId;
@@ -106,15 +129,15 @@ test('/jobs <id> shows output produced after the model start read', async t => {
 	) {
 		await new Promise(resolve => setTimeout(resolve, 50));
 	}
-	const peeked = bashExecutor.peekJobOutput(id)!;
-	t.true(peeked.output.includes('LATE_MARKER'));
+	const consumed = bashExecutor.readJobOutput(id)!;
+	t.true(consumed.output.includes('LATE_MARKER'), 'bash_output reads the marker');
 
 	const output = await runJobs([id]);
-	t.true(output.includes('LATE_MARKER'), 'the TUI must not show stale output');
-	t.is(
-		bashExecutor.readJobOutput(id)!.output,
-		peeked.output,
-		'peeking must not consume the text bash_output still needs',
+	t.true(output.includes('LATE_MARKER'), 'the TUI must show retained output');
+	t.true(output.includes('started'), 'the startup banner remains visible too');
+	t.false(
+		bashExecutor.readJobOutput(id)!.output.includes('LATE_MARKER'),
+		'peeking must not consume or replay the text bash_output already read',
 	);
 });
 

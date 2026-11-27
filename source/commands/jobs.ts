@@ -5,10 +5,16 @@
  */
 import cliTruncate from 'cli-truncate';
 import {infoMsg, successMsg, warningMsg} from '@/components/message-factory';
-import {DEFAULT_TERMINAL_COLUMNS} from '@/constants';
+import {
+	BASH_JOB_PEEK_OUTPUT_LIMIT,
+	DEFAULT_TERMINAL_COLUMNS,
+} from '@/constants';
 import {calculateBoxWidth} from '@/hooks/useTerminalWidth';
-import {type BashJobInfo, bashExecutor} from '@/services/bash-executor';
-import {formatBackgroundOutput} from '@/tools/bash-jobs';
+import {
+	type BashJobInfo,
+	type BashJobRecentOutput,
+	bashExecutor,
+} from '@/services/bash-executor';
 import type {StatefulCommand} from '@/types/index';
 
 const USAGE =
@@ -41,7 +47,9 @@ function formatRuntime(ms: number): string {
 		: `${minutes}:${pad(seconds)}`;
 }
 
-function statusText(job: BashJobInfo): string {
+type JobStatus = Pick<BashJobInfo, 'isComplete' | 'exitCode' | 'error'>;
+
+function statusText(job: JobStatus): string {
 	if (!job.isComplete) return 'running';
 	if (job.error) return `stopped: ${job.error}`;
 	return `exited (${job.exitCode ?? '?'})`;
@@ -102,6 +110,29 @@ function lookupFailure(input: string, matches: BashJobInfo[]): string {
 	return `No background job matching "${input}". Run /jobs to list jobs.`;
 }
 
+function formatRecentOutput(job: BashJobRecentOutput): string {
+	const lines = [`JOB_ID: ${job.jobId}`, `STATUS: ${statusText(job)}`];
+	if (!job.output && !job.stderr) {
+		lines.push('No output yet.');
+		return lines.join('\n');
+	}
+
+	// A long-running server can produce far more than one message's worth of
+	// output. The executor already bounds each tail; say so when it did.
+	const tailNote = ` (last ${BASH_JOB_PEEK_OUTPUT_LIMIT} characters)`;
+	if (job.output) {
+		lines.push(
+			`STDOUT${job.outputTruncated ? tailNote : ''}:\n${job.output.trimEnd()}`,
+		);
+	}
+	if (job.stderr) {
+		lines.push(
+			`STDERR${job.stderrTruncated ? tailNote : ''}:\n${job.stderr.trimEnd()}`,
+		);
+	}
+	return lines.join('\n');
+}
+
 function outputText(job: BashJobInfo): string {
 	const output = bashExecutor.peekJobOutput(job.jobId);
 	if (!output) {
@@ -109,7 +140,7 @@ function outputText(job: BashJobInfo): string {
 	}
 	return (
 		`Recent output for ${shortId(job.jobId)} (${job.command}):\n` +
-		formatBackgroundOutput(output)
+		formatRecentOutput(output)
 	);
 }
 

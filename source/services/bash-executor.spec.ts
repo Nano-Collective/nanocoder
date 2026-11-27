@@ -4,7 +4,10 @@ import {mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync} from 'nod
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {BASH_BACKGROUND_MAX_RETAINED_JOBS} from '@/constants';
+import {
+	BASH_BACKGROUND_MAX_RETAINED_JOBS,
+	BASH_JOB_PEEK_OUTPUT_LIMIT,
+} from '@/constants';
 import { BashExecutor } from './bash-executor';
 import {resetSessionCwd, setSessionCwd} from './session-cwd';
 
@@ -1077,7 +1080,7 @@ test('listJobs reports running and stopped jobs with their timing', async t => {
 	t.true(stopped[0].endedAt! >= running[0].startedAt);
 });
 
-test('peekJobOutput does not consume the output bash_output still needs', async t => {
+test('peekJobOutput shows retained output without moving the bash_output cursor', async t => {
 	const executor = createExecutor();
 	const {executionId} = executor.execute(CHATTY_NODE, {background: true});
 
@@ -1093,10 +1096,10 @@ test('peekJobOutput does not consume the output bash_output still needs', async 
 	t.true(executor.getState(executionId)?.fullOutput.includes('tick 0'));
 
 	const peeked = executor.peekJobOutput(executionId)!;
-	t.true(peeked.output.includes('tick 0'), 'peeking shows the unread text');
+	t.true(peeked.output.includes('tick 0'), 'peeking shows retained output');
 
 	const next = executor.readJobOutput(executionId)!;
-	t.true(next.output.includes('tick 0'), 'bash_output still receives peeked text');
+	t.true(next.output.includes('tick 0'), 'bash_output still receives that text');
 
 	const following = executor.readJobOutput(executionId)!;
 	t.false(following.output.includes('tick 0'), 'peeking must not advance the cursor');
@@ -1104,11 +1107,43 @@ test('peekJobOutput does not consume the output bash_output still needs', async 
 	await executor.killJob(executionId);
 	const afterKill = executor.peekJobOutput(executionId)!;
 	t.true(afterKill.isComplete, 'peeking reports the live job status');
-	t.is(
-		executor.readJobOutput(executionId)!.output,
-		afterKill.output,
-		'peeking after a read still leaves the current unread text for bash_output',
+	t.true(
+		afterKill.output.includes('tick 0'),
+		'output already read by bash_output remains available to /jobs',
 	);
+	t.false(
+		executor.readJobOutput(executionId)!.output.includes('tick 0'),
+		'peeking must not put consumed text back into the bash_output cursor',
+	);
+});
+
+test('peekJobOutput bounds the retained tail without consuming bash_output', async t => {
+	const executor = createExecutor();
+	const dir = mkdtempSync(join(tmpdir(), 'nc-bg-peek-'));
+	const script = join(dir, 'flood.js');
+	writeFileSync(
+		script,
+		"console.log('OLD'.repeat(1000)); console.log('NEW_MARKER');\n",
+	);
+	const {executionId, promise} = executor.execute(`node ${script}`, {
+		background: true,
+	});
+	await promise;
+
+	const peeked = executor.peekJobOutput(executionId)!;
+	t.is(peeked.output.length, BASH_JOB_PEEK_OUTPUT_LIMIT);
+	t.true(peeked.outputTruncated, 'the tail must say the log was longer');
+	t.true(
+		peeked.output.trimEnd().endsWith('NEW_MARKER'),
+		'the tail must be the latest text',
+	);
+	t.false(peeked.output.includes('OLD'.repeat(1000)));
+
+	const read = executor.readJobOutput(executionId)!;
+	t.true(read.output.includes('OLD'.repeat(1000)), 'bash_output still sees it all');
+	t.true(read.output.includes('NEW_MARKER'));
+
+	rmSync(dir, {recursive: true, force: true});
 });
 
 test('stopSessionJobs kills only the jobs owned by that session', async t => {
