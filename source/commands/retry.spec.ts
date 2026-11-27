@@ -51,6 +51,30 @@ test('retry resubmits the last user message', async t => {
 	]);
 });
 
+for (const [kind, approval] of [
+	[
+		'with an artifact',
+		'The implementation plan below is approved. Proceed with implementing it now.\n\n<approved_plan>\nUpdate the parser.\n</approved_plan>',
+	],
+	[
+		'without an artifact',
+		'The plan above is approved. Proceed with implementing it now.',
+	],
+] as const) {
+	test(`retry reruns the approved implementation ${kind}`, async t => {
+		const {context, submitted, replacements} = contextFor([
+			{role: 'user', content: 'Plan a parser update'},
+			{role: 'assistant', content: 'Update the parser.'},
+			{role: 'user', content: appendTurnContext(approval, ['Prior context'])},
+			{role: 'assistant', content: 'Previous implementation attempt'},
+		]);
+
+		t.is(await retryCommand.run(context), 'handed-off');
+		t.deepEqual(submitted, [{message: approval, display: approval}]);
+		t.is(replacements[0]?.replaceFrom, 2);
+	});
+}
+
 // The stored message carries the block that was built for it (#1574).
 // Resubmitting it raw would wrap one block inside another and, worse, hand
 // `findRelevantCommands` and the memory search a query containing the previous

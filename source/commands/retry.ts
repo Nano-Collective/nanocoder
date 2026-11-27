@@ -1,4 +1,3 @@
-import {isApprovedPlanMessage} from '@/artifacts/approved-plan';
 import {isInternalWalkthroughMessage} from '@/artifacts/walkthrough-lifecycle';
 import {errorMsg} from '@/components/message-factory';
 import {
@@ -25,12 +24,13 @@ function findRetryTarget(messages: Message[]) {
 			message?.role !== 'user' ||
 			message.displayOnly ||
 			message.synthetic ||
+			// Legacy shell output is formatted in source/app/utils/app-util.ts.
 			message.content.startsWith(BASH_OUTPUT_PREFIX + '\n```\n$ ') ||
 			message.content.startsWith(ARCHITECT_REVERT_NOTICE_PREFIX) ||
 			message.content === COMPACTION_RETRY_NOTICE ||
+			// Summaries are formatted in source/conversation/compaction/llm-summariser.ts.
 			message.content.startsWith('<conversation-summary>\n') ||
 			isTurnRecoveryNotice(message.content) ||
-			isApprovedPlanMessage(message) ||
 			isInternalWalkthroughMessage(message) ||
 			isAutoDiagnosticsMessage(message) ||
 			isEvidenceRejectionMessage(message)

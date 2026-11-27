@@ -442,6 +442,9 @@ export function useChatHandler({
 		const messageWithContext = appendTurnContext(message, [
 			skillsSection,
 			projectContext.content,
+			replaceFrom === undefined
+				? undefined
+				: '[Retry: Any file edits from the previous attempt are still on disk. Reread files before editing and check which changes have already been applied.]',
 		]);
 
 		if (projectContext.memoryCount > 0) {

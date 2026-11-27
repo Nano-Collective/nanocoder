@@ -60,6 +60,8 @@ Type `/` in the chat input to see available commands. All commands start with `/
 
 `/tip`, `/privacy` and `/credits` work as listed but are left out of the `/help` overview; `/help <command>` still shows their details.
 
+After you approve a plan, `/retry` reruns the implementation. Any `!cmd` output after the retried prompt is dropped from conversation history. File edits from the previous attempt remain on disk.
+
 ### Renamed Commands
 
 These older names were folded into other commands. They still work exactly as before, but are no longer listed in `/help` or offered as completions. `/help <old name>` opens the help for the command it now runs.

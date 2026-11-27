@@ -10,6 +10,7 @@ import {
 } from '@/config/preferences';
 import {setToolRegistryGetter} from '@/message-handler';
 import {getLastBuiltPrompt} from '@/conversation/prompt-builder';
+import {appendTurnContext, stripTurnContext} from '@/utils/turn-context';
 import {getBaseSystemPrompt, useChatHandler} from './useChatHandler';
 import type {UseChatHandlerProps, ChatHandlerReturn} from './types';
 import type {LLMClient, Message} from '../../types/core';
@@ -838,7 +839,7 @@ test('useChatHandler - handleChatMessage splices historyMessages ahead of the ne
 	);
 });
 
-test('useChatHandler - sends and stores the replacement turn without the discarded history', async t => {
+test('useChatHandler - replaces the old turn and sends the retry notice to the model', async t => {
 	const earlier: Message[] = [
 		{role: 'user', content: 'Earlier request'},
 		{role: 'assistant', content: 'Earlier response'},
@@ -882,9 +883,22 @@ test('useChatHandler - sends and stores the replacement turn without the discard
 	);
 	try {
 		await waitForCondition(() => hookResult !== null);
-		await hookResult!.handleChatMessage('Check the build', undefined, undefined, undefined, 2);
-		const retried: Message[] = [...earlier, {role: 'user', content: 'Check the build'}];
+		await hookResult!.handleChatMessage(
+			'Check the build',
+			undefined,
+			undefined,
+			undefined,
+			2,
+		);
+		const expectedPrompt = appendTurnContext('Check the build', [
+			'[Retry: Any file edits from the previous attempt are still on disk. Reread files before editing and check which changes have already been applied.]',
+		]);
+		const retried: Message[] = [
+			...earlier,
+			{role: 'user', content: expectedPrompt},
+		];
 		t.deepEqual(providerMessages, retried);
+		t.is(stripTurnContext(providerMessages.at(-1)?.content ?? ''), 'Check the build');
 		t.deepEqual(
 			savedMessages.map(({role, content}) => ({role, content})),
 			[...retried, {role: 'assistant', content: 'ok'}],

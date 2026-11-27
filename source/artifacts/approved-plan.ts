@@ -1,4 +1,5 @@
 import type {Message} from '@/types/core';
+import {stripTurnContext} from '@/utils/turn-context';
 import {type ArtifactManager, artifactManager} from './artifact-manager';
 
 const APPROVED_PLAN_TAG = '<approved_plan>';
@@ -51,6 +52,6 @@ export function isApprovedPlanMessage(message: Message): boolean {
 	if (message.role !== 'user') return false;
 	return (
 		message.content.includes(APPROVED_PLAN_TAG) ||
-		message.content.trim() === APPROVAL_WITHOUT_ARTIFACT
+		stripTurnContext(message.content).trim() === APPROVAL_WITHOUT_ARTIFACT
 	);
 }
