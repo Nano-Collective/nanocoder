@@ -7,6 +7,7 @@ import test from 'ava';
 import {
 	findMatchingPaths,
 	matchesGlob,
+	normalizeMaxResults,
 	searchProjectContents,
 	SearchTimeoutError,
 	walkProjectEntries,
@@ -1292,3 +1293,19 @@ test.serial(
 		}
 	},
 );
+
+test('normalizeMaxResults clamps and normalizes numeric, string, and invalid limits', t => {
+	t.is(normalizeMaxResults(undefined, 30, 100), 30);
+	t.is(normalizeMaxResults(null, 30, 100), 30);
+	t.is(normalizeMaxResults(0, 30, 100), 30);
+	t.is(normalizeMaxResults(-1, 30, 100), 30);
+	t.is(normalizeMaxResults(Number.NaN, 30, 100), 30);
+	t.is(normalizeMaxResults(Number.POSITIVE_INFINITY, 30, 100), 30);
+	t.is(normalizeMaxResults(0.5, 30, 100), 1);
+	t.is(normalizeMaxResults(2.5, 30, 100), 2);
+	t.is(normalizeMaxResults(1000, 30, 100), 100);
+	t.is(normalizeMaxResults('5', 30, 100), 5);
+	t.is(normalizeMaxResults('2.9', 30, 100), 2);
+	t.is(normalizeMaxResults('  ', 30, 100), 30);
+	t.is(normalizeMaxResults('abc', 30, 100), 30);
+});
