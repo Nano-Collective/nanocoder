@@ -21,6 +21,114 @@ import {
 import {basename, dirname, join} from 'node:path';
 
 /**
+ * Retry budget for renaming a temp file over its target. Windows refuses a
+ * rename onto a file that another rename or an open handle is using (EPERM,
+ * EBUSY, sometimes EACCES); these sharing violations clear within
+ * milliseconds. POSIX never blocks a rename this way, so on Linux and macOS
+ * the retry only runs for a genuine permission error, which costs one bounded
+ * backoff (~800 ms) before the original error is rethrown unchanged. Platform
+ * is deliberately not checked so the retry path stays testable on Linux CI.
+ */
+const RENAME_MAX_RETRIES = 8;
+const RENAME_BASE_DELAY_MS = 10;
+const RENAME_MAX_DELAY_MS = 160;
+const RENAME_JITTER_MS = 10;
+const RETRYABLE_RENAME_CODES: ReadonlySet<string> = new Set([
+	'EPERM',
+	'EBUSY',
+	'EACCES',
+]);
+
+function isRetryableRenameError(error: unknown): boolean {
+	const code = (error as NodeJS.ErrnoException | null | undefined)?.code;
+	return typeof code === 'string' && RETRYABLE_RENAME_CODES.has(code);
+}
+
+/** Exponential backoff with jitter, so concurrent writers don't retry in step. */
+function renameBackoffMs(attempt: number): number {
+	const base = Math.min(
+		RENAME_BASE_DELAY_MS * 2 ** attempt,
+		RENAME_MAX_DELAY_MS,
+	);
+	return base + Math.floor(Math.random() * RENAME_JITTER_MS);
+}
+
+/**
+ * Rename primitives used by {@link atomicWriteFile}, {@link atomicWriteFileSync}
+ * and {@link atomicWriteUserFile}, replaceable for tests (e.g. to simulate a
+ * sharing violation, a bind-mounted file or a cross-device move).
+ * Production code never touches these.
+ * @internal
+ */
+type RenameFn = (oldPath: string, newPath: string) => Promise<void>;
+type RenameSyncFn = (oldPath: string, newPath: string) => void;
+
+const defaultRename: RenameFn = (oldPath, newPath) => rename(oldPath, newPath);
+const defaultRenameSync: RenameSyncFn = (oldPath, newPath) =>
+	renameSync(oldPath, newPath);
+
+let renameImpl: RenameFn = defaultRename;
+let renameSyncImpl: RenameSyncFn = defaultRenameSync;
+
+/**
+ * Test seam: replace the async rename primitive. Call with no arguments to
+ * restore the default.
+ * @internal
+ */
+export function setRenameForTests(impl?: RenameFn): void {
+	renameImpl = impl ?? defaultRename;
+}
+
+/**
+ * Test seam: replace the sync rename primitive. Call with no arguments to
+ * restore the default.
+ * @internal
+ */
+export function setRenameSyncForTests(impl?: RenameSyncFn): void {
+	renameSyncImpl = impl ?? defaultRenameSync;
+}
+
+/**
+ * Rename `from` onto `to`, retrying a bounded number of times when the
+ * filesystem reports a transient sharing violation.
+ */
+async function renameWithRetry(from: string, to: string): Promise<void> {
+	for (let attempt = 0; ; attempt++) {
+		try {
+			await renameImpl(from, to);
+			return;
+		} catch (error) {
+			if (attempt >= RENAME_MAX_RETRIES || !isRetryableRenameError(error)) {
+				throw error;
+			}
+			await new Promise<void>(resolve => {
+				setTimeout(resolve, renameBackoffMs(attempt));
+			});
+		}
+	}
+}
+
+/** Blocks the thread for `ms` without spinning. */
+function sleepSync(ms: number): void {
+	Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+/** Sync variant of {@link renameWithRetry}. */
+function renameSyncWithRetry(from: string, to: string): void {
+	for (let attempt = 0; ; attempt++) {
+		try {
+			renameSyncImpl(from, to);
+			return;
+		} catch (error) {
+			if (attempt >= RENAME_MAX_RETRIES || !isRetryableRenameError(error)) {
+				throw error;
+			}
+			sleepSync(renameBackoffMs(attempt));
+		}
+	}
+}
+
+/**
  * Write data to disk via a temp file + atomic rename, so a crash mid-write can
  * never leave a truncated file at the target path. Callers are responsible for
  * ensuring the parent directory exists.
@@ -40,7 +148,7 @@ export function atomicWriteFileSync(
 				mode: options.mode,
 			});
 		}
-		renameSync(tmpPath, filePath);
+		renameSyncWithRetry(tmpPath, filePath);
 	} catch (error) {
 		try {
 			unlinkSync(tmpPath);
@@ -65,32 +173,13 @@ export async function atomicWriteFile(
 		} else {
 			await writeFile(tmpPath, data, {encoding: 'utf-8', mode: options.mode});
 		}
-		await rename(tmpPath, filePath);
+		await renameWithRetry(tmpPath, filePath);
 	} catch (error) {
 		try {
 			await unlink(tmpPath);
 		} catch {}
 		throw error;
 	}
-}
-
-/**
- * Rename primitive used by {@link atomicWriteUserFile}, replaceable for tests
- * (e.g. to simulate a bind-mounted file or a cross-device move).
- * Production code never touches this.
- * @internal
- */
-type RenameFn = (oldPath: string, newPath: string) => Promise<void>;
-
-let renameImpl: RenameFn = (oldPath, newPath) => rename(oldPath, newPath);
-
-/**
- * Test seam: replace the rename primitive used by {@link atomicWriteUserFile}.
- * Call with no arguments to restore the default.
- * @internal
- */
-export function setRenameForTests(impl?: RenameFn): void {
-	renameImpl = impl ?? ((oldPath, newPath) => rename(oldPath, newPath));
 }
 
 /**

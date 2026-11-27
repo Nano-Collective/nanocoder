@@ -14,7 +14,8 @@ import {join} from 'node:path';
 import test from 'ava';
 import {ArtifactManager} from '@/artifacts/artifact-manager';
 import {reloadAppConfig} from '@/config/index';
-import {SessionManager, setRenameForTests} from './session-manager.js';
+import {setRenameForTests} from '@/utils/fs/atomic-write';
+import {SessionManager} from './session-manager.js';
 
 let testDir: string;
 let manager: SessionManager;
@@ -764,7 +765,7 @@ test.serial('saveSession gives up after the retry budget', async t => {
 	});
 
 	await t.throwsAsync(manager.createSession(retrySessionData), {code: 'EPERM'});
-	t.is(attempts, 6, 'one initial attempt plus five retries');
+	t.is(attempts, 9, 'one initial attempt plus eight retries');
 });
 
 (process.platform === 'win32' ? test.serial : test.skip)(

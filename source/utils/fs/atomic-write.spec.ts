@@ -1,12 +1,15 @@
 import * as path from 'path';
+import {renameSync} from 'node:fs';
 import test from 'ava';
 import * as fs from 'fs/promises';
 import {
 	atomicWriteFile,
+	atomicWriteFileSync,
 	atomicWriteUserFile,
 	publishFileNoClobber,
 	setLinkSyncForTests,
 	setRenameForTests,
+	setRenameSyncForTests,
 } from './atomic-write';
 
 async function createTempDir(): Promise<string> {
@@ -399,6 +402,152 @@ test.serial('atomicWriteUserFile edits files whose names are near the 255-byte l
 			await atomicWriteUserFile(filePath, 'new');
 			t.is(await fs.readFile(filePath, 'utf-8'), 'new', name);
 		}
+		t.deepEqual(await listTempFiles(tempDir), []);
+	} finally {
+		await cleanupTempDir(tempDir);
+	}
+});
+
+test.serial('atomicWriteFile retries a transient rename error and succeeds', async t => {
+	const tempDir = await createTempDir();
+	try {
+		for (const code of ['EPERM', 'EBUSY', 'EACCES']) {
+			const filePath = path.join(tempDir, `${code}.json`);
+			let failures = 0;
+			setRenameForTests(async (from, to) => {
+				if (failures < 2) {
+					failures++;
+					throw errnoError(code);
+				}
+				await fs.rename(from, to);
+			});
+			try {
+				await atomicWriteFile(filePath, code);
+			} finally {
+				setRenameForTests();
+			}
+			t.is(failures, 2, `${code} should have been retried twice`);
+			t.is(await fs.readFile(filePath, 'utf-8'), code);
+		}
+		t.deepEqual(await listTempFiles(tempDir), []);
+	} finally {
+		await cleanupTempDir(tempDir);
+	}
+});
+
+test.serial('atomicWriteFile does not retry a permanent rename error', async t => {
+	const tempDir = await createTempDir();
+	try {
+		let attempts = 0;
+		setRenameForTests(async () => {
+			attempts++;
+			throw errnoError('ENOSPC');
+		});
+		try {
+			await t.throwsAsync(atomicWriteFile(path.join(tempDir, 'a.json'), 'x'), {
+				code: 'ENOSPC',
+			});
+		} finally {
+			setRenameForTests();
+		}
+		t.is(attempts, 1);
+		t.deepEqual(await listTempFiles(tempDir), []);
+	} finally {
+		await cleanupTempDir(tempDir);
+	}
+});
+
+test.serial('atomicWriteFile gives up after the retry budget', async t => {
+	const tempDir = await createTempDir();
+	try {
+		let attempts = 0;
+		setRenameForTests(async () => {
+			attempts++;
+			throw errnoError('EPERM');
+		});
+		try {
+			await t.throwsAsync(atomicWriteFile(path.join(tempDir, 'a.json'), 'x'), {
+				code: 'EPERM',
+			});
+		} finally {
+			setRenameForTests();
+		}
+		t.is(attempts, 9, 'one initial attempt plus eight retries');
+		t.deepEqual(await listTempFiles(tempDir), []);
+	} finally {
+		await cleanupTempDir(tempDir);
+	}
+});
+
+test.serial('atomicWriteFileSync retries a transient rename error and succeeds', async t => {
+	const tempDir = await createTempDir();
+	try {
+		const filePath = path.join(tempDir, 'prefs.json');
+		let failures = 0;
+		setRenameSyncForTests((from, to) => {
+			if (failures < 2) {
+				failures++;
+				throw errnoError('EPERM');
+			}
+			renameSync(from, to);
+		});
+		try {
+			atomicWriteFileSync(filePath, 'ok');
+		} finally {
+			setRenameSyncForTests();
+		}
+		t.is(failures, 2);
+		t.is(await fs.readFile(filePath, 'utf-8'), 'ok');
+		t.deepEqual(await listTempFiles(tempDir), []);
+	} finally {
+		await cleanupTempDir(tempDir);
+	}
+});
+
+test.serial('atomicWriteFileSync does not retry a permanent rename error', async t => {
+	const tempDir = await createTempDir();
+	try {
+		let attempts = 0;
+		setRenameSyncForTests(() => {
+			attempts++;
+			throw errnoError('ENOSPC');
+		});
+		try {
+			t.throws(() => atomicWriteFileSync(path.join(tempDir, 'a.json'), 'x'), {
+				code: 'ENOSPC',
+			});
+		} finally {
+			setRenameSyncForTests();
+		}
+		t.is(attempts, 1);
+		t.deepEqual(await listTempFiles(tempDir), []);
+	} finally {
+		await cleanupTempDir(tempDir);
+	}
+});
+
+// The reported bug: on Windows, renames onto the same file from concurrent
+// writers fail with EPERM. POSIX renames never collide this way, so this also
+// passes there.
+test.serial('atomicWriteFile survives concurrent writers to the same file', async t => {
+	const tempDir = await createTempDir();
+	try {
+		const filePath = path.join(tempDir, 'shared.json');
+		const failures: string[] = [];
+		for (let round = 0; round < 10; round++) {
+			const results = await Promise.allSettled(
+				Array.from({length: 16}, (_, i) =>
+					atomicWriteFile(filePath, `round ${round} writer ${i}`),
+				),
+			);
+			for (const result of results) {
+				if (result.status === 'rejected') {
+					failures.push((result.reason as NodeJS.ErrnoException).code ?? '?');
+				}
+			}
+		}
+		t.deepEqual(failures, []);
+		t.regex(await fs.readFile(filePath, 'utf-8'), /^round 9 writer \d+$/);
 		t.deepEqual(await listTempFiles(tempDir), []);
 	} finally {
 		await cleanupTempDir(tempDir);
