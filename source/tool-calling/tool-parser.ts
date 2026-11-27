@@ -7,17 +7,76 @@ import type {ToolCall} from '@/types/index';
 import {ensureString} from '@/utils/type-helpers';
 
 /**
- * Strip  tags from content (some models output thinking that shouldn't be shown)
+ * Strip `<think>` tags from content (some models output thinking that
+ * shouldn't be shown).
+ *
+ * An unclosed block is only treated as reasoning when the tag starts a line,
+ * so a reply that merely mentions the tag in prose keeps its text instead of
+ * being cut off at the mention.
  */
 export function stripThinkTags(content: string): string {
-	return (
-		content
-			// Strip complete  blocks
-			.replace(/<think>[\s\S]*?<\/think>/gi, '')
-			// Strip orphaned/incomplete think tags
-			.replace(/<think>[\s\S]*$/gi, '')
-			.replace(/<\/think>/gi, '')
+	// A pair that opens a line is reasoning; one that sits inside a sentence is
+	// prose that mentions the tag. Stash the inline pairs so the later passes
+	// cannot eat their closing tag.
+	const stash: string[] = [];
+	let text = content.replace(/<think>[\s\S]*?<\/think>/gi, (match, offset) => {
+		const lineStart = content.lastIndexOf('\n', offset) + 1;
+		const before = content.slice(lineStart, offset);
+		if (/^[ \t]*$/.test(before)) return '';
+		stash.push(match);
+		return `\u0000${stash.length - 1}\u0000`;
+	});
+	// An unclosed block only counts as reasoning when the tag starts a line.
+	text = text.replace(/^[ \t]*<think>[\s\S]*$/im, '');
+	// Orphaned closing tags.
+	text = text.replace(/<\/think>/gi, '');
+	return text.replace(
+		/\u0000(\d+)\u0000/g,
+		(_, i) => stash[Number(i)] as string,
 	);
+}
+
+/**
+ * Runs `stripThinkTags` on the text outside `ranges` and leaves the ranges
+ * themselves untouched, so a `<think>` inside a tool call's argument is file
+ * content, not reasoning.
+ */
+function stripThinkTagsOutsideRanges(
+	content: string,
+	ranges: Array<[number, number]>,
+): string {
+	if (ranges.length === 0) return stripThinkTags(content);
+	const sorted = [...ranges].sort((a, b) => a[0] - b[0]);
+	let result = '';
+	let cursor = 0;
+	for (const [start, end] of sorted) {
+		if (end <= cursor) continue;
+		if (start > cursor) {
+			result += stripThinkTags(content.slice(cursor, start));
+		}
+		result += content.slice(Math.max(start, cursor), end);
+		cursor = end;
+	}
+	result += stripThinkTags(content.slice(cursor));
+	return result;
+}
+
+/**
+ * Strips think tags from a reply without touching anything inside a tool call.
+ * Every call format the parser understands is masked: XML, `<function=name>`
+ * and JSON, so a `<think>` in a `write_file` argument survives whichever shape
+ * the model used.
+ */
+export function stripThinkTagsOutsideToolCalls(content: string): string {
+	// Nothing to strip: skip the call-range scan, which parses the reply three
+	// times (XML, function tags, JSON) and is measurable on a large body.
+	if (!/<\/?think/i.test(content)) return content;
+	const ranges = [
+		...XMLToolCallParser.findToolCallRanges(content),
+		...parseFunctionTagToolCalls(content).ranges,
+		...parseJSONToolCalls(content).ranges,
+	];
+	return stripThinkTagsOutsideRanges(content, ranges);
 }
 
 /**
@@ -453,8 +512,10 @@ export function parseToolCalls(
 	// 1. Safety Coercion
 	const contentStr = ensureString(content);
 
-	// Strip tags first - some models (like GLM-4) emit these for chain-of-thought
-	const strippedContent = stripThinkTags(contentStr);
+	// Strip think tags first - some models (like GLM-4) emit these for
+	// chain-of-thought. Tool-call spans are left alone: a `<think>` inside a
+	// `write_file` argument is file content, not reasoning.
+	const strippedContent = stripThinkTagsOutsideToolCalls(contentStr);
 
 	const fnTagResult = parseFunctionTagToolCalls(strippedContent);
 	let jsonResult = parseJSONToolCalls(strippedContent);
