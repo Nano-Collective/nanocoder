@@ -3,21 +3,15 @@ import type {Stats} from 'node:fs';
 import {
 	constants,
 	linkSync,
+	lstatSync,
 	mkdirSync,
+	realpathSync,
 	renameSync,
+	statSync,
 	unlinkSync,
 	writeFileSync,
 } from 'node:fs';
-import {
-	access,
-	lstat,
-	open,
-	realpath,
-	rename,
-	stat,
-	unlink,
-	writeFile,
-} from 'node:fs/promises';
+import {access, open, rename, stat, unlink, writeFile} from 'node:fs/promises';
 import {basename, dirname, join} from 'node:path';
 
 /**
@@ -120,17 +114,19 @@ function errorCode(error: unknown): string | undefined {
  * regular file. Returns undefined when only an in-place write keeps the old
  * behaviour (a dangling symlink, which `writeFile` follows to create the
  * target).
+ *
+ * Synchronous so the synchronous config writers (`atomicWritePrivateJson`)
+ * and {@link atomicWriteUserFile} share one resolver and cannot disagree about
+ * where a symlinked file lives.
  */
-async function resolveUserFileTarget(
-	filePath: string,
-): Promise<string | undefined> {
+function resolveUserFileTarget(filePath: string): string | undefined {
 	try {
-		return await realpath(filePath);
+		return realpathSync(filePath);
 	} catch (error) {
 		if (errorCode(error) !== 'ENOENT') return undefined;
 	}
 	try {
-		await lstat(filePath);
+		lstatSync(filePath);
 		// The path exists but cannot be resolved: a dangling symlink.
 		return undefined;
 	} catch {
@@ -182,7 +178,9 @@ export async function atomicWriteUserFile(
 	filePath: string,
 	data: string,
 ): Promise<void> {
-	const target = await resolveUserFileTarget(filePath);
+	// The sync resolver is deliberate: it is shared with the sync config
+	// writers, so both paths agree on the target of a symlinked file.
+	const target = resolveUserFileTarget(filePath);
 	if (target === undefined) {
 		await writeFile(filePath, data, 'utf-8');
 		return;
@@ -240,12 +238,63 @@ export async function atomicWriteUserFile(
 
 /**
  * Ensure a file's parent directory exists, then atomically write pretty-printed
- * JSON. Convenience wrapper for config files that may not exist yet.
+ * JSON. An existing file keeps its mode, so a save cannot silently widen
+ * permissions set by another writer; new files use the process umask. Symlinks
+ * are followed, including dangling links, matching {@link atomicWriteUserFile}.
  */
 export function atomicWriteJson(filePath: string, data: unknown): void {
-	const dir = dirname(filePath);
-	mkdirSync(dir, {recursive: true});
-	atomicWriteFileSync(filePath, `${JSON.stringify(data, null, 2)}\n`);
+	writeJsonAtomic(filePath, data);
+}
+
+/** Owner-only permissions for files that may hold credentials. */
+const PRIVATE_FILE_MODE = 0o600;
+
+/**
+ * Atomically write a JSON file that may contain credentials (`agents.config.json`,
+ * `.mcp.json`). New files are created owner-only (`0600`); an existing file
+ * keeps its current mode. Symlinks are followed, including a dangling link
+ * whose target is created, matching {@link atomicWriteUserFile}. Kept separate
+ * from {@link atomicWriteJson} so non-secret JSON keeps the process umask.
+ */
+export function atomicWritePrivateJson(filePath: string, data: unknown): void {
+	writeJsonAtomic(filePath, data, PRIVATE_FILE_MODE);
+}
+
+/**
+ * Shared implementation for both JSON writers. `newFileMode` applies only when
+ * the target does not exist yet; an existing file's mode always wins so the
+ * temp-file rename cannot drop owner-only permissions.
+ */
+function writeJsonAtomic(
+	filePath: string,
+	data: unknown,
+	newFileMode?: number,
+): void {
+	const json = `${JSON.stringify(data, null, 2)}\n`;
+	const target = resolveUserFileTarget(filePath);
+	if (target === undefined) {
+		// Dangling symlink: `writeFile` follows it and creates the target, which
+		// is the only path that keeps the link instead of replacing it.
+		mkdirSync(dirname(filePath), {recursive: true});
+		writeFileSync(
+			filePath,
+			json,
+			newFileMode === undefined
+				? 'utf-8'
+				: {encoding: 'utf-8', mode: newFileMode},
+		);
+		return;
+	}
+
+	let mode = newFileMode;
+	try {
+		mode = statSync(target).mode & 0o777;
+	} catch {
+		// Target does not exist yet: use the caller's default (or the umask).
+	}
+
+	mkdirSync(dirname(target), {recursive: true});
+	atomicWriteFileSync(target, json, {mode});
 }
 
 /**
