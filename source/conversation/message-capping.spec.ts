@@ -1,10 +1,13 @@
+import {relative} from 'node:path';
 import test from 'ava';
 import type {Message} from '@/types/core';
 import {capMessagesForModel} from './message-capping.js';
 import {
 	clearReadTracker,
+	hasVisibleLines,
 	isReadStub,
 	matchReadContent,
+	recordVisibilityReceipt,
 	rememberReadContent,
 } from '../tools/runtime/read-tracker.js';
 
@@ -179,4 +182,149 @@ test.serial('capping within the limit leaves stub entries alone', t => {
 	rememberReadContent(FILE, STATS, 3);
 	capMessagesForModel(readTurn('r1', 'body'), 10);
 	t.truthy(matchReadContent(FILE, STATS));
+});
+
+// When trimming drops a read, the lines it showed must stop counting as
+// seen, or the edit tools would allow a blind edit.
+test.serial('dropping a read_file body forgets its visibility receipt', t => {
+	clearReadTracker();
+	recordVisibilityReceipt(FILE, STATS, 340, 360);
+	const messages = [
+		...readTurn('r1', 'file body', {path: FILE, start_line: 340, end_line: 360}),
+		...filler(4),
+	];
+	capMessagesForModel(messages, 4);
+	t.false(hasVisibleLines(FILE, STATS, [350]).visible);
+});
+
+// A fresh read of the same file is still in view, so its lines stay seen.
+test.serial('a read still in the kept window keeps its visibility receipt', t => {
+	clearReadTracker();
+	recordVisibilityReceipt(FILE, STATS, 340, 360);
+	const messages = [
+		...readTurn('r1', 'old body', {path: FILE, start_line: 340, end_line: 360}),
+		...filler(2),
+		...readTurn('r2', 'fresh body', {path: FILE, start_line: 340, end_line: 360}),
+	];
+	capMessagesForModel(messages, 3);
+	t.true(hasVisibleLines(FILE, STATS, [350]).visible);
+});
+
+// A metadata_only read shows size and line count, not content, so it must not
+// keep a dropped read's receipt alive.
+test.serial('a kept metadata_only read does not keep the visibility receipt', t => {
+	clearReadTracker();
+	recordVisibilityReceipt(FILE, STATS, 340, 360);
+	const messages = [
+		...readTurn('r1', 'file body', {path: FILE, start_line: 340, end_line: 360}),
+		...filler(2),
+		...readTurn('m1', 'File Information for app.ts\nLines: 400', {
+			path: FILE,
+			metadata_only: true,
+		}),
+	];
+	capMessagesForModel(messages, 3);
+	t.false(hasVisibleLines(FILE, STATS, [350]).visible);
+});
+
+// The model's own write of the file is still in view, so the receipt that
+// write recorded stays.
+test.serial('a kept write of the same file keeps the visibility receipt', t => {
+	clearReadTracker();
+	recordVisibilityReceipt(FILE, STATS);
+	const messages: Message[] = [
+		...readTurn('r1', 'file body'),
+		...filler(2),
+		{
+			role: 'assistant',
+			content: '',
+			tool_calls: [
+				{
+					id: 'w1',
+					function: {
+						name: 'write_file',
+						arguments: {path: FILE, content: 'new body'},
+					},
+				},
+			],
+		},
+		{
+			role: 'tool',
+			tool_call_id: 'w1',
+			name: 'write_file',
+			content:
+				'File overwritten successfully (1 lines, 8 characters, ~2 tokens).',
+		},
+	];
+	capMessagesForModel(messages, 3);
+	t.true(hasVisibleLines(FILE, STATS, [350]).visible);
+});
+
+function toolTurn(
+	id: string,
+	name: string,
+	args: Record<string, unknown>,
+	content: string,
+): Message[] {
+	return [
+		{
+			role: 'assistant',
+			content: '',
+			tool_calls: [{id, function: {name, arguments: args}}],
+		},
+		{role: 'tool', tool_call_id: id, name, content},
+	];
+}
+
+// search_file_contents prints paths relative to the directory it searched.
+const SEARCH_HIT = `Found 1 match:\n\n${relative(process.cwd(), FILE)}:200:const x = 1;`;
+
+// A search result still in view keeps the lines it showed seen.
+test.serial('a kept search result of the same file keeps the visibility receipt', t => {
+	clearReadTracker();
+	recordVisibilityReceipt(FILE, STATS, 340, 360);
+	recordVisibilityReceipt(FILE, STATS, 200, 200);
+	const messages = [
+		...readTurn('r1', 'file body', {path: FILE, start_line: 340, end_line: 360}),
+		...filler(2),
+		...toolTurn('s1', 'search_file_contents', {query: 'const x'}, SEARCH_HIT),
+	];
+	capMessagesForModel(messages, 3);
+	t.true(hasVisibleLines(FILE, STATS, [200]).visible);
+});
+
+// A search that only matched other files says nothing about this one.
+test.serial('a kept search of another file does not keep the visibility receipt', t => {
+	clearReadTracker();
+	recordVisibilityReceipt(FILE, STATS, 340, 360);
+	const messages = [
+		...readTurn('r1', 'file body', {path: FILE, start_line: 340, end_line: 360}),
+		...filler(2),
+		...toolTurn(
+			's1',
+			'search_file_contents',
+			{query: 'const x'},
+			'Found 1 match:\n\nsource/other.ts:200:const x = 1;',
+		),
+	];
+	capMessagesForModel(messages, 3);
+	t.false(hasVisibleLines(FILE, STATS, [350]).visible);
+});
+
+// A failed edit shows nothing of the file, so it must not keep the receipt.
+test.serial('a kept failed edit does not keep the visibility receipt', t => {
+	clearReadTracker();
+	recordVisibilityReceipt(FILE, STATS, 340, 360);
+	const messages = [
+		...readTurn('r1', 'file body', {path: FILE, start_line: 340, end_line: 360}),
+		...filler(2),
+		...toolTurn(
+			'e1',
+			'string_replace',
+			{path: FILE, old_str: 'missing', new_str: 'new'},
+			'Error: Content not found in file.',
+		),
+	];
+	capMessagesForModel(messages, 3);
+	t.false(hasVisibleLines(FILE, STATS, [350]).visible);
 });
