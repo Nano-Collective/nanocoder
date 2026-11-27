@@ -277,6 +277,10 @@ test('lsp auto-discovery setting is optional and boolean', t => {
 // mcpServers: profile-only within agents.config.json
 // ---------------------------------------------------------------------------
 
+const withProfileServers = (mcpServers: unknown) => ({
+	nanocoder: {profiles: {review: {mcpServers}}},
+});
+
 test('mcpServers is rejected outside a profile in agents.config.json', t => {
 	assertInvalid(t, 'mcpServers at nanocoder level', {
 		nanocoder: {mcpServers: {local: {command: 'node'}}},
@@ -293,11 +297,13 @@ test('profile mcpServers accepts .mcp.json-style server definitions keyed by nam
 					retries: {maxEmptyTurns: 3},
 					mcpServers: {
 						local: {command: 'node', args: ['server.js']},
+						worker: {transport: 'stdio', command: 'node'},
 						docs: {
 							transport: 'http',
 							url: 'https://example.com/mcp',
 							headers: {Authorization: '$DOCS_TOKEN'},
 						},
+						stream: {transport: 'websocket', url: 'wss://example.com/mcp'},
 					},
 				},
 			},
@@ -305,10 +311,23 @@ test('profile mcpServers accepts .mcp.json-style server definitions keyed by nam
 	});
 });
 
-test('profile mcpServers rejects arrays and runtime-only server fields', t => {
-	const withProfileServers = (mcpServers: unknown) => ({
-		nanocoder: {profiles: {review: {mcpServers}}},
+for (const [label, server] of Object.entries({
+	'default stdio without command': {},
+	'default stdio with only a URL': {url: 'https://example.com/mcp'},
+	'explicit stdio without command': {transport: 'stdio'},
+	'http with a command but no URL': {transport: 'http', command: 'node'},
+	'websocket without URL': {transport: 'websocket'},
+	'default stdio with empty command': {command: ''},
+	'explicit stdio with empty command': {transport: 'stdio', command: ''},
+	'http with empty URL': {transport: 'http', url: ''},
+	'websocket with empty URL': {transport: 'websocket', url: ''},
+})) {
+	test(`profile mcpServers rejects ${label}`, t => {
+		assertInvalid(t, label, withProfileServers({example: server}));
 	});
+}
+
+test('profile mcpServers rejects arrays and runtime-only server fields', t => {
 	assertInvalid(
 		t,
 		'array',
@@ -317,7 +336,7 @@ test('profile mcpServers rejects arrays and runtime-only server fields', t => {
 	assertInvalid(
 		t,
 		'invalid transport',
-		withProfileServers({local: {transport: 'sse'}}),
+		withProfileServers({local: {transport: 'sse', command: 'node'}}),
 	);
 	for (const [key, value] of Object.entries({
 		name: 'local',

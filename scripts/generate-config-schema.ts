@@ -234,6 +234,25 @@ function main(): void {
 	setRequired(definitions, 'HookDefinition', ['command']);
 	setRequired(definitions, 'FormatterConfig', ['match', 'command']);
 
+	const diskMCPServer = definitions.DiskMCPServerConfig as JsonNode | undefined;
+	if (diskMCPServer) {
+		// Only explicit remote transports require a URL. Omitted transport
+		// defaults to stdio in the MCP client. Runtime validation still checks
+		// the executable or URL after environment variable substitution.
+		diskMCPServer.if = {
+			required: ['transport'],
+			properties: {transport: {enum: ['http', 'websocket']}},
+		};
+		diskMCPServer.then = {
+			required: ['url'],
+			properties: {url: {type: 'string', minLength: 1}},
+		};
+		diskMCPServer.else = {
+			required: ['command'],
+			properties: {command: {type: 'string', minLength: 1}},
+		};
+	}
+
 	// lspServers is an inline array with an anonymous item schema (not a
 	// named definition).  The type requires name, command, languages.
 	const diskConfig = definitions['DiskNanocoderConfig'] as JsonNode | undefined;

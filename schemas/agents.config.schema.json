@@ -80,7 +80,33 @@
 				}
 			},
 			"type": "object",
-			"additionalProperties": false
+			"additionalProperties": false,
+			"if": {
+				"required": ["transport"],
+				"properties": {
+					"transport": {
+						"enum": ["http", "websocket"]
+					}
+				}
+			},
+			"then": {
+				"required": ["url"],
+				"properties": {
+					"url": {
+						"type": "string",
+						"minLength": 1
+					}
+				}
+			},
+			"else": {
+				"required": ["command"],
+				"properties": {
+					"command": {
+						"type": "string",
+						"minLength": 1
+					}
+				}
+			}
 		},
 		"DiskMCPServersConfig": {
 			"additionalProperties": {
