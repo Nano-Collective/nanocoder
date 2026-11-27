@@ -10,8 +10,13 @@ const CMD_SCRIPT_ENV = 'NC_CMD_SCRIPT';
  * cmd.exe has parsed its own line, so the outer one never interprets the
  * command's quotes or operators. Spawn with `windowsHide: true` so the code
  * page change stays in the child's own console instead of the user's.
+ *
+ * `chcp` and the inner cmd.exe are external programs, and cmd.exe looks for
+ * them in the current directory (the project) before `PATH`, so they are run
+ * by absolute path. `%SystemRoot%` and `%ComSpec%` expand in the outer
+ * cmd.exe's own parse of this fixed text, which never contains the command.
  */
-const CMD_UTF8_WRAPPER = `"chcp 65001 >nul 2>&1 & cmd /d /v:off /s /c !${CMD_SCRIPT_ENV}!"`;
+const CMD_UTF8_WRAPPER = `""%SystemRoot%\\System32\\chcp.com" 65001 >nul 2>&1 & "%ComSpec%" /d /v:off /s /c !${CMD_SCRIPT_ENV}!"`;
 
 /**
  * cmd.exe: disable AutoRun, switch the console to UTF-8, then run one wrapped

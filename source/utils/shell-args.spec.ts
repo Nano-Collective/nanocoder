@@ -7,21 +7,21 @@ test('shellArgs wraps one verbatim cmd.exe command and uses -c for posix shells'
 		'/v:on',
 		'/s',
 		'/c',
-		'"chcp 65001 >nul 2>&1 & cmd /d /v:off /s /c !NC_CMD_SCRIPT!"',
+		'""%SystemRoot%\\System32\\chcp.com" 65001 >nul 2>&1 & "%ComSpec%" /d /v:off /s /c !NC_CMD_SCRIPT!"',
 	]);
 	t.deepEqual(shellArgs('cmd', 'echo hi'), [
 		'/d',
 		'/v:on',
 		'/s',
 		'/c',
-		'"chcp 65001 >nul 2>&1 & cmd /d /v:off /s /c !NC_CMD_SCRIPT!"',
+		'""%SystemRoot%\\System32\\chcp.com" 65001 >nul 2>&1 & "%ComSpec%" /d /v:off /s /c !NC_CMD_SCRIPT!"',
 	]);
 	t.deepEqual(shellArgs('C:\\Windows\\System32\\cmd.exe', 'echo hi'), [
 		'/d',
 		'/v:on',
 		'/s',
 		'/c',
-		'"chcp 65001 >nul 2>&1 & cmd /d /v:off /s /c !NC_CMD_SCRIPT!"',
+		'""%SystemRoot%\\System32\\chcp.com" 65001 >nul 2>&1 & "%ComSpec%" /d /v:off /s /c !NC_CMD_SCRIPT!"',
 	]);
 	t.deepEqual(shellArgs('/bin/sh', 'echo hi'), ['-c', 'echo hi']);
 	t.deepEqual(shellArgs('/bin/bash', 'echo hi'), ['-c', 'echo hi']);
