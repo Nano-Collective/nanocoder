@@ -16,6 +16,8 @@
 
 /** A flag taking a value: `--flag value` or `--flag=value`. */
 const VALUED_FLAGS = [
+	'--add-dir',
+	'--add-dir-ro',
 	'--vscode-port',
 	'--provider',
 	'--model',

@@ -80,6 +80,22 @@ export function matchesGlob(
 	);
 }
 
+/** Prune separately searched roots before they consume result or traversal budgets. */
+function excludeDirectories(
+	cwd: string,
+	directories: readonly string[],
+	projectIgnore: ReturnType<typeof loadGitignore>,
+): string[] {
+	const args: string[] = [];
+	for (const directory of directories) {
+		const relative = normalizePathForMatch(path.relative(cwd, directory));
+		const escaped = relative.replace(/[\\*?{}[\]]/g, '\\$&');
+		projectIgnore.add(`/${escaped}/`);
+		args.push('-g', `!/${escaped}`);
+	}
+	return args;
+}
+
 function defaultIgnoreGlobs(
 	projectIgnore: ReturnType<typeof loadGitignore>,
 ): string[] {
@@ -388,6 +404,7 @@ async function walkEmptyDirectories(
 }
 
 export interface WalkProjectEntriesOptions {
+	excludedDirectories?: readonly string[];
 	/** Emit directory entries alongside files. Defaults to true. */
 	includeDirectories?: boolean;
 	signal?: AbortSignal;
@@ -549,10 +566,16 @@ export async function walkProjectEntries(
 		signal,
 		maxRawFilesScanned = MAX_RAW_FILES_SCANNED,
 		sorted = true,
+		excludedDirectories = [],
 	} = options;
 	const rootPath = startPath ?? cwd;
 	await assertPathExists(rootPath);
 	const projectIgnore = loadGitignore(cwd);
+	const exclusions = excludeDirectories(
+		cwd,
+		excludedDirectories,
+		projectIgnore,
+	);
 	const args = [
 		'--files',
 		'--hidden',
@@ -563,6 +586,7 @@ export async function walkProjectEntries(
 		...(sorted ? ['--sort', 'path'] : []),
 		...nanocoderIgnoreFileArgs(cwd),
 		...defaultIgnoreGlobs(projectIgnore),
+		...exclusions,
 		'--',
 		rootPath,
 	];
@@ -655,6 +679,7 @@ export async function findMatchingPaths(
 	pattern: string,
 	cwd: string,
 	maxResults: number,
+	excludedDirectories: readonly string[] = [],
 ): Promise<{files: string[]; truncated: boolean}> {
 	if (maxResults <= 0) {
 		// The push-then-check loop below always lets one entry through first.
@@ -683,7 +708,7 @@ export async function findMatchingPaths(
 
 			return false;
 		},
-		{sorted: false},
+		{sorted: false, excludedDirectories},
 	);
 	truncated = truncated || walkResult.truncated;
 
@@ -867,6 +892,7 @@ export async function searchProjectContents(
 	contextLines?: number,
 	timeoutMs: number = DEFAULT_SEARCH_TIMEOUT_MS,
 	signal?: AbortSignal,
+	excludedDirectories: readonly string[] = [],
 ): Promise<{matches: SearchMatch[]; truncated: boolean}> {
 	if (maxResults <= 0) {
 		return {matches: [], truncated: false};
@@ -877,6 +903,11 @@ export async function searchProjectContents(
 	await assertPathExists(searchPath ?? cwd);
 
 	const projectIgnore = loadGitignore(cwd);
+	const exclusions = excludeDirectories(
+		cwd,
+		excludedDirectories,
+		projectIgnore,
+	);
 
 	const args = [
 		'--json',
@@ -903,6 +934,7 @@ export async function searchProjectContents(
 		...nanocoderIgnoreFileArgs(cwd),
 		...defaultIgnoreGlobs(projectIgnore),
 		...binaryExcludeGlobs(),
+		...exclusions,
 	);
 	const normalizedContextLines = Math.max(0, contextLines ?? 0);
 	if (normalizedContextLines > 0) {

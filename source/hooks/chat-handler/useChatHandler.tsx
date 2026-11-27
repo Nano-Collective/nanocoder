@@ -20,6 +20,7 @@ import {buildProjectContextSection} from '@/memory/project-context';
 import {SemanticMemoryManager} from '@/memory/semantic-memory-manager';
 import {processToolUse} from '@/message-handler';
 import {appendActivePlanContext} from '@/plans/context';
+import {formatWorkingDirectoriesContext} from '@/services/working-directories';
 import {getTuneToolMode} from '@/types/config';
 import type {ImageAttachment, Message} from '@/types/core';
 import {generateKey} from '@/utils/key-generator';
@@ -438,6 +439,7 @@ export function useChatHandler({
 			{...getProjectContextPreferences(), ...projectContextOptions},
 		);
 		const messageWithContext = appendTurnContext(message, [
+			formatWorkingDirectoriesContext(),
 			skillsSection,
 			projectContext.content,
 		]);

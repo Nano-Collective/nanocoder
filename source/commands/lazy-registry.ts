@@ -20,6 +20,12 @@ import type {LazyCommand} from '@/types/commands';
 
 export const lazyCommands: LazyCommand[] = [
 	{
+		name: 'add-dir',
+		description:
+			'Add a trusted working directory (/add-dir [--read-only] <path>)',
+		load: () => import('@/commands/add-dir').then(m => m.addDirCommand),
+	},
+	{
 		name: 'help',
 		description: 'Show available commands',
 		load: () => import('@/commands/help').then(m => m.helpCommand),

@@ -1,3 +1,4 @@
+import {formatWorkingDirectoriesContext} from '@/services/working-directories';
 /**
  * Subagent Executor
  *
@@ -387,7 +388,10 @@ export class SubagentExecutor {
 					index === 0
 						? {
 								...message,
-								content: appendTurnContext(message.content, [recalled.content]),
+								content: appendTurnContext(message.content, [
+									recalled.content,
+									formatWorkingDirectoriesContext(),
+								]),
 							}
 						: message,
 				),

@@ -69,7 +69,7 @@ import {appendToolDefinitionsToPrompt} from '@/ai-sdk-client/tools/system-prompt
 import {artifactManager} from '@/artifacts/artifact-manager';
 import {isInternalWalkthroughMessage} from '@/artifacts/walkthrough-lifecycle';
 import {createLLMClient} from '@/client-factory';
-import {getAppConfig} from '@/config/index';
+import {getAppConfig, loadAdditionalDirectoriesConfig} from '@/config/index';
 import {
 	getLastUsedModel,
 	getProjectContextPreferences,
@@ -99,6 +99,12 @@ import {
 } from '@/services/session-context';
 import {cancelSubagentRun} from '@/services/subagent-events';
 import {TimelineManager} from '@/services/timeline-manager';
+import {
+	addWorkingDirectory,
+	formatWorkingDirectoriesContext,
+	getCliDirectories,
+	setCliDirectories,
+} from '@/services/working-directories';
 import {maybeGenerateTitle} from '@/session/maybe-generate-title';
 import {sessionManager} from '@/session/session-manager';
 import {
@@ -198,6 +204,7 @@ export class AcpAgent implements Agent {
 	async newSession(params: NewSessionRequest): Promise<NewSessionResponse> {
 		this.assertDirectoryTrusted(params.cwd);
 		const context = createSessionContext(params.cwd);
+		this.initializeWorkingDirectories(context);
 		return runInSessionContext(context, () =>
 			this.openNewSession(params, context),
 		);
@@ -252,6 +259,10 @@ export class AcpAgent implements Agent {
 	async loadSession(params: LoadSessionRequest): Promise<LoadSessionResponse> {
 		const existing = this.sessions.get(params.sessionId);
 		const context = existing?.context ?? createSessionContext(params.cwd);
+		if (!existing) {
+			this.assertDirectoryTrusted(params.cwd);
+			this.initializeWorkingDirectories(context);
+		}
 		return runInSessionContext(context, () =>
 			this.openLoadedSession(params, existing, context),
 		);
@@ -510,6 +521,7 @@ export class AcpAgent implements Agent {
 				);
 			}
 			contextualUserText = appendTurnContext(contextualUserText, [
+				formatWorkingDirectoriesContext(),
 				projectContext.content,
 			]);
 
@@ -1033,6 +1045,7 @@ export class AcpAgent implements Agent {
 		// Refused before anything is retired: a live copy keeps running.
 		this.assertDirectoryTrusted(workingDirectory);
 		const context = createSessionContext(workingDirectory);
+		this.initializeWorkingDirectories(context);
 		return runInSessionContext(context, () =>
 			this.reopenSession(params, context, live),
 		);
@@ -1318,6 +1331,19 @@ export class AcpAgent implements Agent {
 		_params: AuthenticateRequest,
 	): Promise<AuthenticateResponse> {
 		return {};
+	}
+
+	private initializeWorkingDirectories(context: SessionContext): void {
+		const cliDirectories = getCliDirectories();
+		runInSessionContext(context, () => {
+			setCliDirectories(cliDirectories);
+			for (const directory of [
+				...loadAdditionalDirectoriesConfig(),
+				...cliDirectories,
+			]) {
+				addWorkingDirectory(directory);
+			}
+		});
 	}
 
 	/**

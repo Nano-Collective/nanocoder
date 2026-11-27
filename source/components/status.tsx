@@ -1,7 +1,6 @@
 import {existsSync} from 'fs';
 import {Box, Text} from 'ink';
 import {memo} from 'react';
-
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {confDirMap} from '@/config/index';
 import {getThemeColors, themes} from '@/config/themes';
@@ -10,6 +9,7 @@ import {
 	PATH_LENGTH_NORMAL_TERMINAL,
 } from '@/constants';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
+import {getWorkingDirectories} from '@/services/working-directories';
 import {formatGitStatusSummary, type GitStatusSummary} from '@/tools/git/utils';
 import type {LSPConnectionStatus, MCPConnectionStatus} from '@/types/core';
 import type {ThemePreset} from '@/types/ui';
@@ -106,6 +106,16 @@ export default memo(function Status({
 		? PATH_LENGTH_NARROW_TERMINAL
 		: PATH_LENGTH_NORMAL_TERMINAL;
 
+	const directoryRows = getWorkingDirectories().map((directory, index) => (
+		<Text
+			key={`${directory.path}-${index}`}
+			color={colors.secondary}
+			wrap="wrap"
+		>
+			{index === 0 ? 'Primary directory' : 'Additional directory'}:{' '}
+			{directory.path} ({directory.mode})
+		</Text>
+	));
 	return (
 		<>
 			{/* Narrow terminal: simple text without box */}
@@ -130,6 +140,7 @@ export default memo(function Status({
 						<Text bold={true}>Theme: </Text>
 						{themes[theme].displayName}
 					</Text>
+					{directoryRows}
 					{gitStatus && (
 						<Text color={colors.primary}>
 							<Text bold={true}>Git: </Text>
@@ -228,6 +239,7 @@ export default memo(function Status({
 						<Text bold={true}>CWD: </Text>
 						{truncatePath(cwd, maxPathLength)}
 					</Text>
+					{directoryRows}
 					<Text color={colors.info}>
 						<Text bold={true}>Config: </Text>
 						{truncatePath(confDirMap['agents.config.json'], maxPathLength)}
@@ -241,6 +253,7 @@ export default memo(function Status({
 						<Text bold={true}>Theme: </Text>
 						{themes[theme].displayName}
 					</Text>
+
 					{gitStatus && (
 						<Text color={colors.primary}>
 							<Text bold={true}>Git: </Text>

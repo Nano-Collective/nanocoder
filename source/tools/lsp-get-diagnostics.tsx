@@ -9,7 +9,8 @@ import ToolMessage from '@/components/tool-message';
 import {TIMEOUT_LSP_DIAGNOSTICS_MS} from '@/constants';
 import {ThemeContext} from '@/hooks/useTheme';
 import {DiagnosticSeverity, getLSPManager} from '@/lsp/index';
-import {getProjectRoot, getSafeSessionCwd} from '@/services/session-cwd';
+import {getSafeSessionCwd} from '@/services/session-cwd';
+import {getWorkingRoots} from '@/services/working-directories';
 import type {NanocoderToolExport, ToolExecuteResult} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
@@ -397,7 +398,7 @@ const getDiagnosticsValidator = async (
 	// Same project boundary as read_file: the language server is handed the
 	// file's contents, so a path outside the project must not reach it.
 	const cwd = getSafeSessionCwd();
-	const root = getProjectRoot();
+	const root = getWorkingRoots();
 	if (!isValidFilePath(args.path, root)) {
 		return {
 			valid: false,

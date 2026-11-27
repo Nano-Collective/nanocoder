@@ -321,6 +321,8 @@ Options:
   --json-schema       Validate the final run answer against a JSON Schema.
                       Takes a schema file path or inline JSON (quote it).
                       Uses the plain runtime and retries invalid answers.
+  --add-dir <path>    Add a trusted working directory (repeatable).
+  --add-dir-ro <path> Add a trusted read-only reference directory (repeatable).
   --trust-directory   Skip the first-run directory trust prompt for this run only.
                       Valid with "run", "review", "daemon start", "verify" and --acp.
                       Does not modify the preferences file.
@@ -628,6 +630,21 @@ async function main(): Promise<void> {
 	const runCommandIndex = args.indexOf('run');
 	const isRunCommand = runCommandIndex !== -1;
 	let nonInteractivePrompt = parseRunPrompt(args);
+	try {
+		const {parseAdditionalDirectoryArgs} = await import(
+			'./add-directory-args.js'
+		);
+		const directories = parseAdditionalDirectoryArgs(args);
+		if (directories.length > 0) {
+			const {setCliDirectories, prepareWorkingDirectory} = await import(
+				'./services/working-directories.js'
+			);
+			setCliDirectories(directories.map(prepareWorkingDirectory));
+		}
+	} catch (error) {
+		console.error(error instanceof Error ? error.message : String(error));
+		process.exit(1);
+	}
 
 	// --json-schema: validate the final `run` answer against a user schema.
 	// The value is a file path or inline JSON; loading it here means a typo

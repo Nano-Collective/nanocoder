@@ -1,4 +1,10 @@
+import path from 'node:path';
 import {CACHE_FILE_LIST_TTL_MS} from '@/constants';
+import {
+	createWorkingDirectoryFilter,
+	getNestedWorkingRoots,
+	getWorkingDirectories,
+} from '@/services/working-directories';
 import {formatError} from '../utils/error-formatter';
 import {walkProjectEntries} from '../utils/fs/file-search';
 import {fuzzyScoreFilePath} from '../utils/fuzzy-matching';
@@ -14,6 +20,7 @@ interface FileCompletion {
 // Simple cache for file list
 interface FileListCache {
 	files: string[];
+	key: string;
 	timestamp: number;
 }
 
@@ -25,24 +32,47 @@ let fileListCache: FileListCache | null = null;
 export async function getAllFiles(cwd: string): Promise<string[]> {
 	// Check cache
 	const now = Date.now();
-	if (fileListCache && now - fileListCache.timestamp < CACHE_FILE_LIST_TTL_MS) {
+	const roots = [
+		cwd,
+		...getWorkingDirectories()
+			.slice(1)
+			.map(directory => directory.path),
+	];
+	const key = JSON.stringify(roots);
+	if (
+		fileListCache &&
+		fileListCache.key === key &&
+		now - fileListCache.timestamp < CACHE_FILE_LIST_TTL_MS
+	) {
 		return fileListCache.files;
 	}
 
 	try {
 		const allFiles: string[] = [];
-		await walkProjectEntries(
-			cwd,
-			undefined,
-			entry => {
-				allFiles.push(entry.relativePath.replace(/\\/g, '/'));
-				return false;
-			},
-			{includeDirectories: false},
-		);
+		for (const root of roots) {
+			const ownsPath = createWorkingDirectoryFilter(root);
+			await walkProjectEntries(
+				root,
+				undefined,
+				entry => {
+					if (!ownsPath(entry.absolutePath)) return false;
+					allFiles.push(
+						root === cwd
+							? entry.relativePath.replace(/\\/g, '/')
+							: path.resolve(root, entry.relativePath),
+					);
+					return false;
+				},
+				{
+					includeDirectories: false,
+					excludedDirectories: getNestedWorkingRoots(root),
+				},
+			);
+		}
 
 		fileListCache = {
-			files: allFiles,
+			files: [...new Set(allFiles)],
+			key,
 			timestamp: now,
 		};
 

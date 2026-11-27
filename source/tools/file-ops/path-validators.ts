@@ -1,5 +1,9 @@
 import path, {extname} from 'node:path';
-import {getProjectRoot, getSessionCwd} from '@/services/session-cwd';
+import {getSessionCwd} from '@/services/session-cwd';
+import {
+	assertWritablePath,
+	getWorkingRoots,
+} from '@/services/working-directories';
 import {formatError} from '@/utils/error-formatter';
 import {isDerivedContentPath} from '@/utils/fs/derived-content';
 import type {CachedFile} from '@/utils/fs/file-cache';
@@ -42,7 +46,7 @@ function isInSystemDirectory(absPath: string): boolean {
  */
 export function validatePath(path: string): ValidationResult {
 	const cwd = getSessionCwd();
-	const root = getProjectRoot();
+	const root = getWorkingRoots();
 	if (!isValidFilePath(path, root)) {
 		return {
 			valid: false,
@@ -53,6 +57,7 @@ export function validatePath(path: string): ValidationResult {
 	let resolved: string;
 	try {
 		resolved = resolveFilePath(path, cwd, root);
+		assertWritablePath(path);
 	} catch (error) {
 		const errorMessage = formatError(error);
 		return {
@@ -123,7 +128,7 @@ export function validatePathPair(
 	isMove: boolean = false,
 ): ValidationResult {
 	const cwd = getSessionCwd();
-	const root = getProjectRoot();
+	const root = getWorkingRoots();
 	if (!isValidFilePath(source, root)) {
 		return {
 			valid: false,
@@ -142,6 +147,8 @@ export function validatePathPair(
 	try {
 		resolveFilePath(source, cwd, root);
 		resolvedDestination = resolveFilePath(destination, cwd, root);
+		assertWritablePath(destination);
+		if (isMove) assertWritablePath(source);
 	} catch (error) {
 		const errorMessage = formatError(error);
 		return {

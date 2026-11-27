@@ -5,7 +5,7 @@ import {
 	type ArtifactManager,
 	artifactManager,
 } from '@/artifacts/artifact-manager';
-import {getAppConfig} from '@/config/index';
+import {getAppConfig, loadAdditionalDirectoriesConfig} from '@/config/index';
 import {
 	loadPreferences,
 	resolveProjectContextPreferences,
@@ -49,6 +49,11 @@ import {
 	SESSION_END_HOOK_HANDLER,
 	takePendingHookContext,
 } from '@/services/lifecycle-hooks';
+import {
+	addWorkingDirectory,
+	formatWorkingDirectoriesContext,
+	getCliDirectories,
+} from '@/services/working-directories';
 import {fileMutationPaths} from '@/tools/file-ops/file-mutating-tools';
 import type {JsonSchemaDocument} from '@/tools/runtime/schema-validate';
 import {getTuneToolMode} from '@/types/config';
@@ -184,6 +189,17 @@ export async function runPlainShell(
 
 	let init;
 	try {
+		for (const directory of [
+			...loadAdditionalDirectoriesConfig(),
+			...getCliDirectories(),
+		]) {
+			addWorkingDirectory(directory, trustDirectory, (directory, bypass) =>
+				ensureDirectoryTrust(directory, bypass, {
+					loadPreferences: deps.loadPreferences,
+					savePreferences: deps.savePreferences,
+				}),
+			);
+		}
 		init = await deps.initializePlain({cliProvider, cliModel, developmentMode});
 	} catch (error) {
 		const formattedErr = formatError(error);
@@ -318,7 +334,7 @@ export async function runPlainShell(
 				hookContext
 					? `<hook-context>\n${hookContext}\n</hook-context>\n\n${prompt}`
 					: prompt,
-				[projectContext.content],
+				[projectContext.content, formatWorkingDirectoriesContext()],
 			),
 		},
 	];

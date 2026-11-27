@@ -54,6 +54,7 @@ const CATEGORY_COMMANDS: Record<HelpCategory, readonly string[]> = {
 		'voice',
 	],
 	'Coding & Agent Tools': [
+		'add-dir',
 		'agents',
 		'commit',
 		'explorer',
@@ -83,6 +84,11 @@ const CATEGORY_COMMANDS: Record<HelpCategory, readonly string[]> = {
 };
 
 const COMMAND_HELP_OVERRIDES: Record<string, CommandHelpOverrides> = {
+	'add-dir': {
+		usage: '/add-dir [--read-only] <path>',
+		options: ['--read-only'],
+		examples: ['/add-dir ../shared', '/add-dir --read-only ../docs'],
+	},
 	agents: {
 		usage: '/agents [show <name>|copy <name>|create <name>]',
 		options: ['show <name>', 'copy <name>', 'create <name>'],

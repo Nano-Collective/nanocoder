@@ -17,7 +17,8 @@ import {
 	mediaTypeForPath,
 	readImageFile,
 } from '@/input/clipboard-image';
-import {getProjectRoot, getSafeSessionCwd} from '@/services/session-cwd';
+import {getSafeSessionCwd} from '@/services/session-cwd';
+import {getWorkingRoots} from '@/services/working-directories';
 import {
 	markFileSeen,
 	matchReadContent,
@@ -443,7 +444,7 @@ const readFileValidator = async (args: {
 }): Promise<{valid: true} | {valid: false; error: string}> => {
 	// Validate path boundary first to prevent directory traversal
 	const cwd = getSafeSessionCwd();
-	const root = getProjectRoot();
+	const root = getWorkingRoots();
 	if (!isValidFilePath(args.path, root)) {
 		return {
 			valid: false,

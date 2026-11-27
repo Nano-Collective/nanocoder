@@ -12,6 +12,10 @@ import {
 import {errorMsg, successMsg, warningMsg} from '@/components/message-factory';
 import {getAppConfig} from '@/config/index';
 import {getProjectRoot, getSafeSessionCwd} from '@/services/session-cwd';
+import {
+	assertWritablePath,
+	getWorkingRoots,
+} from '@/services/working-directories';
 import type {Command} from '@/types/index';
 import {formatError} from '@/utils/error-formatter';
 import {atomicWriteFile} from '@/utils/fs/atomic-write';
@@ -113,8 +117,9 @@ export const shareCommand: Command = {
 			filepath = resolveFilePath(
 				requestedFilename,
 				getSafeSessionCwd(),
-				projectRoot,
+				getWorkingRoots(),
 			);
+			assertWritablePath(filepath);
 		} catch {
 			return errorMsg(
 				`Invalid share path: ${explainInvalidExportPath(

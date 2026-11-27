@@ -1,4 +1,4 @@
-import {lstat} from 'node:fs/promises';
+import {lstat, realpath} from 'node:fs/promises';
 import path from 'node:path';
 import {Box, Text} from 'ink';
 import React from 'react';
@@ -9,17 +9,24 @@ import {
 	TOOL_OUTPUT_DISPLAY_LINES,
 } from '@/constants';
 import {ThemeContext} from '@/hooks/useTheme';
+import {getContainedSessionCwd, getSessionCwd} from '@/services/session-cwd';
 import {
-	getContainedSessionCwd,
-	getProjectRoot,
-	getSessionCwd,
-} from '@/services/session-cwd';
+	createWorkingDirectoryFilter,
+	getContainingWorkingRoot,
+	getNestedWorkingRoots,
+	getWorkingDirectories,
+	getWorkingRoots,
+} from '@/services/working-directories';
 import {recordVisibilityReceipt} from '@/tools/runtime/read-tracker';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
 import {searchProjectContents} from '@/utils/fs/file-search';
-import {isValidFilePath, resolveFilePath} from '@/utils/fs/path-validation';
+import {
+	isRealPathInside,
+	isValidFilePath,
+	resolveFilePath,
+} from '@/utils/fs/path-validation';
 import {estimateTokens} from '@/utils/token-calculator';
 
 const MAX_CONTEXT_LINES = 10;
@@ -55,14 +62,14 @@ const executeSearchFileContents = async (
 	// has `cd`-ed into a subdir. Containment must be symlink-aware: ripgrep
 	// follows a symlink named on its command line even without --follow, so a
 	// lexically in-project `link -> ~` would grep the home directory.
-	const root = getProjectRoot();
+	const root = getWorkingRoots();
 	let searchPath: string | undefined;
 	if (args.path) {
 		if (!isValidFilePath(args.path, root)) {
 			return `Error: Invalid path "${args.path}"`;
 		}
 		try {
-			searchPath = resolveFilePath(args.path, cwd, root);
+			searchPath = await realpath(resolveFilePath(args.path, cwd, root));
 		} catch {
 			return `Error: Path escapes project directory: ${args.path}`;
 		}
@@ -75,16 +82,52 @@ const executeSearchFileContents = async (
 	const contextLines = Math.min(args.contextLines ?? 0, MAX_CONTEXT_LINES);
 
 	try {
-		const {matches, truncated} = await searchProjectContents(
-			args.query,
-			searchRoot,
-			maxResults,
-			caseSensitive,
-			args.include,
-			searchPath,
-			args.wholeWord,
-			contextLines,
-		);
+		const matches: {file: string; line: number; content: string}[] = [];
+		let truncated = false;
+		const seen = new Set<string>();
+		const roots = searchPath
+			? [
+					getContainingWorkingRoot(searchPath),
+					...getNestedWorkingRoots(searchPath),
+				]
+			: [
+					searchRoot,
+					...getWorkingDirectories()
+						.slice(1)
+						.map(directory => directory.path),
+				];
+		for (const root of roots) {
+			const ownsPath = createWorkingDirectoryFilter(root);
+			const result = await searchProjectContents(
+				args.query,
+				root,
+				maxResults + 1,
+				caseSensitive,
+				args.include,
+				searchPath && isRealPathInside(root, searchPath) ? root : searchPath,
+				args.wholeWord,
+				contextLines,
+				undefined,
+				undefined,
+				getNestedWorkingRoots(root),
+			);
+			truncated ||= result.truncated;
+			for (const match of result.matches) {
+				const absolute = path.resolve(root, match.file);
+				if (!ownsPath(absolute)) continue;
+				const key = `${absolute}:${match.line}`;
+				if (seen.has(key)) continue;
+				seen.add(key);
+				if (matches.length === maxResults) {
+					truncated = true;
+					break;
+				}
+				matches.push({
+					...match,
+					file: root === searchRoot ? match.file : absolute,
+				});
+			}
+		}
 
 		if (matches.length === 0) {
 			return `No matches found for "${args.query}"`;
