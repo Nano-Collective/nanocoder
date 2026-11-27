@@ -1379,9 +1379,9 @@ test.serial(
 // group was signalled once and never escalated, leaving the runaway process
 // tree the detached spawn exists to prevent. POSIX only - on Windows the
 // reap is `taskkill /F`, which is already unconditional.
-const posixTest = process.platform === 'win32' ? test.skip : test;
+const posixTest = process.platform === 'win32' ? test.serial.skip : test.serial;
 
-posixTest.serial(
+posixTest(
 	'a hook that ignores SIGTERM is escalated to SIGKILL',
 	async t => {
 		const pidFile = join(testDir, `sigterm-trap-${Date.now()}.pid`);
